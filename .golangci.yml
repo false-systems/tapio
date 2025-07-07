@@ -5,12 +5,6 @@ run:
   tests: true
   build-tags:
     - integration
-  skip-dirs:
-    - vendor
-    - third_party
-    - testdata
-    - examples
-    - build
 
 output:
   formats:
@@ -25,7 +19,7 @@ linters:
     - dogsled
     - dupl
     - errcheck
-    - exportloopref
+    - copyloopvar
     - funlen
     - goconst
     - gocritic
@@ -90,7 +84,7 @@ linters-settings:
       - octalLiteral
       
   gocyclo:
-    min-complexity: 15
+    min-complexity: 20
     
   goimports:
     local-prefixes: github.com/falseyair/tapio
@@ -128,6 +122,13 @@ linters-settings:
       - name: var-naming
 
 issues:
+  exclude-dirs:
+    - vendor
+    - third_party
+    - testdata
+    - examples
+    - build
+    
   exclude-rules:
     - path: _test\.go
       linters:

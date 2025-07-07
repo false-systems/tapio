@@ -5,10 +5,10 @@ import "time"
 type Status string
 
 const (
-	StatusHealthy   Status = "Healthy"
-	StatusWarning   Status = "Warning"
-	StatusCritical  Status = "Critical"
-	StatusUnknown   Status = "Unknown"
+	StatusHealthy  Status = "Healthy"
+	StatusWarning  Status = "Warning"
+	StatusCritical Status = "Critical"
+	StatusUnknown  Status = "Unknown"
 )
 
 type Severity string

@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/falseyair/tapio/pkg/k8s"
 )
 
 type Checker struct {
@@ -37,8 +38,9 @@ func (c *Checker) Check(ctx context.Context, namespace string) (*Report, error) 
 
 	// Analyze pods by namespace
 	namespaceMap := make(map[string]*NamespaceHealth)
-	
-	for _, pod := range pods.Items {
+
+	for i := range pods.Items {
+		pod := &pods.Items[i]
 		// Get or create namespace health entry
 		nsHealth, exists := namespaceMap[pod.Namespace]
 		if !exists {
@@ -50,14 +52,14 @@ func (c *Checker) Check(ctx context.Context, namespace string) (*Report, error) 
 			}
 			namespaceMap[pod.Namespace] = nsHealth
 		}
-		
+
 		nsHealth.TotalPods++
 		report.TotalPods++
-		
+
 		// Analyze pod health
-		podHealth := c.analyzePod(&pod)
+		podHealth := c.analyzePod(pod)
 		report.Pods = append(report.Pods, podHealth)
-		
+
 		if podHealth.Ready && podHealth.Status == "Running" {
 			nsHealth.HealthyPods++
 			report.HealthyPods++
@@ -80,7 +82,7 @@ func (c *Checker) Check(ctx context.Context, namespace string) (*Report, error) 
 					nsHealth.Status = StatusWarning
 				}
 			}
-			
+
 			// Check restart count
 			if podHealth.RestartCount > 5 {
 				report.Issues = append(report.Issues, Issue{
@@ -91,11 +93,11 @@ func (c *Checker) Check(ctx context.Context, namespace string) (*Report, error) 
 			}
 		}
 	}
-	
+
 	// Convert namespace map to slice and determine overall status
 	hasWarning := false
 	hasCritical := false
-	
+
 	for _, nsHealth := range namespaceMap {
 		report.Namespaces = append(report.Namespaces, *nsHealth)
 		if nsHealth.Status == StatusCritical {
@@ -104,7 +106,7 @@ func (c *Checker) Check(ctx context.Context, namespace string) (*Report, error) 
 			hasWarning = true
 		}
 	}
-	
+
 	// Set overall status
 	if hasCritical {
 		report.OverallStatus = StatusCritical
@@ -118,18 +120,18 @@ func (c *Checker) Check(ctx context.Context, namespace string) (*Report, error) 
 			Resource: "",
 		})
 	}
-	
+
 	return report, nil
 }
 
 func (c *Checker) getPods(ctx context.Context, namespace string) (*corev1.PodList, error) {
 	listOptions := metav1.ListOptions{}
-	
+
 	if namespace == "" {
 		// All namespaces
 		return c.client.Clientset.CoreV1().Pods("").List(ctx, listOptions)
 	}
-	
+
 	return c.client.Clientset.CoreV1().Pods(namespace).List(ctx, listOptions)
 }
 
@@ -143,28 +145,29 @@ func (c *Checker) analyzePod(pod *corev1.Pod) PodHealth {
 		Ready:        false,
 		Issues:       []string{},
 	}
-	
+
 	// Check container statuses
-	for _, cs := range pod.Status.ContainerStatuses {
+	for i := range pod.Status.ContainerStatuses {
+		cs := &pod.Status.ContainerStatuses[i]
 		health.RestartCount += cs.RestartCount
-		
+
 		if cs.State.Waiting != nil {
 			health.Status = cs.State.Waiting.Reason
 		} else if cs.State.Terminated != nil {
 			health.Status = cs.State.Terminated.Reason
 		}
-		
+
 		if cs.Ready {
 			health.Ready = true
 		}
 	}
-	
+
 	// Check pod conditions
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
 			health.Ready = true
 		}
 	}
-	
+
 	return health
 }
