@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/falseyair/tapio/pkg/health"
 	"github.com/falseyair/tapio/pkg/k8s"
 	"github.com/falseyair/tapio/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 var (
-	namespace string
-	kubeconfig string
+	namespace     string
+	kubeconfig    string
 	allNamespaces bool
 )
 
@@ -56,7 +57,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	out.StartSpinner("Analyzing cluster health...")
-	
+
 	checker := health.NewChecker(client)
 	report, err := checker.Check(ctx, targetNamespace)
 	if err != nil {

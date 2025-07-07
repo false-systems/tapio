@@ -3,8 +3,9 @@ package root
 import (
 	"fmt"
 
-	"github.com/falseyair/tapio/cmd/tapio/check"
 	"github.com/spf13/cobra"
+
+	"github.com/falseyair/tapio/cmd/tapio/check"
 )
 
 var rootCmd = &cobra.Command{

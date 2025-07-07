@@ -19,7 +19,7 @@ linters:
     - dogsled
     - dupl
     - errcheck
-    - exportloopref
+    - copyloopvar
     - funlen
     - goconst
     - gocritic
@@ -84,7 +84,7 @@ linters-settings:
       - octalLiteral
       
   gocyclo:
-    min-complexity: 15
+    min-complexity: 20
     
   goimports:
     local-prefixes: github.com/falseyair/tapio

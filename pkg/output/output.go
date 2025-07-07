@@ -7,6 +7,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/fatih/color"
+
 	"github.com/falseyair/tapio/pkg/health"
 )
 
@@ -21,7 +22,7 @@ func New() *Output {
 func (o *Output) StartSpinner(message string) {
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " " + message
-	s.Color("cyan")
+	s.Color("cyan") //nolint:errcheck // Color setting failure is not critical
 	s.Start()
 	o.spinner = s
 }
@@ -70,10 +71,10 @@ func (o *Output) Header(title string) {
 
 func (o *Output) RenderHealthReport(report *health.Report) {
 	o.EmptyLine()
-	
+
 	// Overall health status
 	o.renderOverallHealth(report)
-	
+
 	// Namespace summary
 	if len(report.Namespaces) > 0 {
 		o.Header("Namespace Health")
@@ -81,13 +82,13 @@ func (o *Output) RenderHealthReport(report *health.Report) {
 			o.renderNamespaceHealth(ns)
 		}
 	}
-	
+
 	// Pod details
 	if len(report.Pods) > 0 {
 		o.Header("Pod Status")
 		o.renderPodTable(report.Pods)
 	}
-	
+
 	// Issues summary
 	if len(report.Issues) > 0 {
 		o.Header("Issues Found")
@@ -95,7 +96,7 @@ func (o *Output) RenderHealthReport(report *health.Report) {
 			o.renderIssue(issue)
 		}
 	}
-	
+
 	o.EmptyLine()
 }
 
@@ -103,10 +104,10 @@ func (o *Output) renderOverallHealth(report *health.Report) {
 	title := color.New(color.Bold, color.FgWhite).Sprint("Cluster Health Summary")
 	fmt.Println(title)
 	fmt.Println(strings.Repeat("═", 50))
-	
+
 	var statusColor *color.Color
 	var statusIcon string
-	
+
 	switch report.OverallStatus {
 	case health.StatusHealthy:
 		statusColor = color.New(color.FgGreen, color.Bold)
@@ -121,17 +122,17 @@ func (o *Output) renderOverallHealth(report *health.Report) {
 		statusColor = color.New(color.FgWhite)
 		statusIcon = "?"
 	}
-	
+
 	fmt.Printf("Status: %s %s\n", statusIcon, statusColor.Sprint(report.OverallStatus))
 	fmt.Printf("Checked at: %s\n", report.Timestamp.Format("15:04:05 MST"))
 	fmt.Printf("Total Pods: %d\n", report.TotalPods)
 	fmt.Printf("Healthy Pods: %d\n", report.HealthyPods)
-	
+
 	if report.TotalPods > 0 {
 		healthPercentage := float64(report.HealthyPods) / float64(report.TotalPods) * 100
 		fmt.Printf("Health Score: %.1f%%\n", healthPercentage)
 	}
-	
+
 	fmt.Println(strings.Repeat("═", 50))
 }
 
@@ -147,7 +148,7 @@ func (o *Output) renderNamespaceHealth(ns health.NamespaceHealth) {
 	default:
 		statusColor = color.New(color.FgWhite)
 	}
-	
+
 	nameColor := color.New(color.Bold)
 	fmt.Printf("  %s %s (%d/%d pods healthy)\n",
 		statusColor.Sprint("●"),
@@ -162,7 +163,7 @@ func (o *Output) renderPodTable(pods []health.PodHealth) {
 	fmt.Println()
 	fmt.Printf("%-40s %-15s %-10s %-20s\n", "Pod", "Status", "Restarts", "Age")
 	fmt.Println(strings.Repeat("─", 90))
-	
+
 	for _, pod := range pods {
 		var statusColor *color.Color
 		switch pod.Status {
@@ -175,12 +176,12 @@ func (o *Output) renderPodTable(pods []health.PodHealth) {
 		default:
 			statusColor = color.New(color.FgWhite)
 		}
-		
+
 		podName := pod.Name
 		if len(podName) > 38 {
 			podName = podName[:35] + "..."
 		}
-		
+
 		fmt.Printf("%-40s %-15s %-10d %-20s\n",
 			podName,
 			statusColor.Sprint(pod.Status),
@@ -193,7 +194,7 @@ func (o *Output) renderPodTable(pods []health.PodHealth) {
 func (o *Output) renderIssue(issue health.Issue) {
 	var icon string
 	var iconColor *color.Color
-	
+
 	switch issue.Severity {
 	case health.SeverityCritical:
 		icon = "✗"
@@ -205,7 +206,7 @@ func (o *Output) renderIssue(issue health.Issue) {
 		icon = "ℹ"
 		iconColor = color.New(color.FgBlue)
 	}
-	
+
 	fmt.Printf("%s %s\n", iconColor.Sprint(icon), issue.Message)
 	if issue.Resource != "" {
 		gray := color.New(color.FgHiBlack)
