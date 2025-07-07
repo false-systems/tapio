@@ -1,57 +1,72 @@
-.PHONY: build install clean test fmt vet
-
-# Binary name
-BINARY_NAME=tapio
-INSTALL_PATH=/usr/local/bin
+.PHONY: build test lint clean install dev-setup
 
 # Build variables
-BUILD_DIR=./build
-MAIN_PATH=./cmd/tapio/main.go
-GO=go
-GOFLAGS=-ldflags="-s -w"
+VERSION ?= dev
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Default target
-all: build
+LDFLAGS = -X github.com/falseyair/tapio/internal/cli.version=$(VERSION) \
+          -X github.com/falseyair/tapio/internal/cli.gitCommit=$(GIT_COMMIT) \
+          -X github.com/falseyair/tapio/internal/cli.buildDate=$(BUILD_DATE)
 
-# Build the binary
+# Build
 build:
-	@echo "Building $(BINARY_NAME)..."
-	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo "🔨 Building Tapio..."
+	go build -ldflags "$(LDFLAGS)" -o bin/tapio ./cmd/tapio
 
-# Install the binary to system path
-install: build
-	@echo "Installing $(BINARY_NAME) to $(INSTALL_PATH)..."
-	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_PATH)/$(BINARY_NAME)
-	@sudo chmod +x $(INSTALL_PATH)/$(BINARY_NAME)
-	@echo "Installation complete!"
-	@echo "Run '$(BINARY_NAME) --help' to get started"
+build-all:
+	@echo "🔨 Building for all platforms..."
+	@mkdir -p dist
+	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/tapio-linux-amd64 ./cmd/tapio
+	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/tapio-darwin-amd64 ./cmd/tapio
+	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/tapio-darwin-arm64 ./cmd/tapio
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/tapio-windows-amd64.exe ./cmd/tapio
 
-# Clean build artifacts
-clean:
-	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR)
-	@echo "Clean complete"
-
-# Format code
-fmt:
-	@echo "Formatting code..."
-	$(GO) fmt ./...
-
-# Run go vet
-vet:
-	@echo "Running go vet..."
-	$(GO) vet ./...
-
-# Run tests
+# Testing
 test:
-	@echo "Running tests..."
-	$(GO) test -v ./...
+	@echo "🧪 Running tests..."
+	go test ./...
 
-# Development build (with debug symbols)
-dev:
-	@echo "Building $(BINARY_NAME) (development mode)..."
-	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
-	@echo "Development build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+test-unit:
+	@echo "🧪 Running unit tests..."
+	go test -short ./test/unit/...
+
+test-coverage:
+	@echo "📊 Running tests with coverage..."
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
+# Code quality
+lint:
+	@echo "🔍 Running linter..."
+	golangci-lint run
+
+lint-fix:
+	@echo "🔧 Fixing linting issues..."
+	golangci-lint run --fix
+
+# Development
+dev-setup:
+	@echo "🛠️  Setting up development environment..."
+	go mod download
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+clean:
+	@echo "🧹 Cleaning up..."
+	rm -rf bin/ dist/ coverage.out coverage.html
+
+install: build
+	@echo "📦 Installing Tapio..."
+	cp bin/tapio /usr/local/bin/
+
+# Quick development cycle
+dev: clean build
+	@echo "✅ Development build complete!"
+	@echo "Try: ./bin/tapio check"
+
+# CI targets
+ci: lint test build
+	@echo "✅ CI pipeline complete!"
+
+# Remove old build artifacts and rebuild completely
+rebuild: clean build
