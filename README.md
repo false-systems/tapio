@@ -1,43 +1,90 @@
-# 🌲 Tapio
+# 🌲 Tapio - The Forest Guardian for Kubernetes
 
-**Dual-Input Intelligence for Kubernetes**
+**Making Kubernetes and eBPF accessible to everyone**
 
-Tapio correlates what Kubernetes *thinks* is happening with what's *actually* happening at the kernel level, predicting failures before they occur.
+---
+
+## What is Tapio?
+
+**Tapio makes Kubernetes debugging simple.**
+
+Instead of this:
+```bash
+kubectl describe pod my-app
+kubectl logs my-app --previous  
+kubectl top pod my-app
+# ... 10 more commands to understand what's wrong
+```
+
+You get this:
+```bash
+tapio check my-app
+⚠️  my-app will crash in 8 minutes - memory leak detected
+🔧 Fix it: tapio fix my-app --memory
+```
+
+**One command. Instant understanding. Immediate action.**
+
+---
+
+## Why "Tapio"?
+
+In Finnish mythology, **Tapio** is the god of forests who protects trees and maintains balance.
+
+**Your Kubernetes cluster is a digital forest:**
+- **Pods** are trees that need protection
+- **Tapio** watches over them and keeps your cluster healthy
+
+**"A healthy forest needs a wise guardian."** 🌲⚡
+
+---
+
+## Core Commands
+
+```bash
+tapio check                    # "Is my cluster healthy?"
+tapio fix                      # "Fix problems automatically"  
+tapio why my-app              # "Why is this broken?"
+tapio watch                   # "Alert me when issues appear"
+```
+
+---
 
 ## Quick Start
 
 ```bash
-# Install
-go install github.com/yourusername/tapio/cmd/tapio@latest
+# Install (coming soon)
+curl -sfL https://get.tapio.sh | sh
 
-# Analyze a problematic pod
-tapio analyze pod/my-broken-app
+# Use immediately
+tapio check
+✅ 5 pods healthy
+⚠️  1 pod will OOM in 3 minutes
+🔧 Fix: tapio fix api-service --memory
+```
 
-# Start continuous monitoring
-tapio guard --namespace production
-What Makes Tapio Special
+**No configuration. No setup. Just works.**
 
-Dual Intelligence: Combines K8s API data with kernel-level eBPF insights
-Predictive: Warns about OOM kills, network failures, and resource issues before they happen
-Developer-Focused: CLI-first tool that fits your debugging workflow
-Zero Instrumentation: No application changes required
+---
 
-Example Output
-❌ Pod will OOM in 8 minutes (95% confidence)
-📊 Memory growing 15Mi/min, limit is 256Mi
-🔧 Fix: kubectl patch deployment api -p '{"spec":{"template":{"spec":{"containers":[{"name":"api","resources":{"limits":{"memory":"1Gi"}}}]}}}}'
-⚡ Auto-apply? [y/N]
-Architecture
-Tapio consists of three loosely-coupled components:
+## The Magic
 
-CLI Tool - Local analysis using your kubeconfig
-eBPF Collectors - Kernel-level data collection (optional)
-API Watchers - Historical trend analysis (optional)
+- **Kubernetes API**: What your cluster thinks is happening
+- **eBPF Kernel Data**: What's actually happening  
+- **AI Correlation**: Predicts problems before they happen
 
-Installation
-See docs/installation.md for detailed instructions.
-Contributing
-See docs/development.md for development setup.
-License
-Apache 2.0 - see LICENSE
+**Result**: Fix issues before your users notice them.
 
+---
+
+## Status
+
+🚧 **Under Active Development**
+
+We're building the future of Kubernetes debugging. Simple, powerful, accessible to everyone.
+
+**Coming Soon**: Alpha release with basic health checking
+
+---
+
+*"Every tree in the digital forest deserves protection."* 🌲
