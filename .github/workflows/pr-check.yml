@@ -93,9 +93,19 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    # This job requires the dependency graph to be enabled in the repository settings
+    # Enable it at: https://github.com/yairfalse/tapio/settings/security_analysis
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
+        continue-on-error: true
+        
+      - name: Info about dependency graph
+        if: failure()
+        run: |
+          echo "::notice::Dependency review requires the dependency graph to be enabled."
+          echo "::notice::Please enable it at: https://github.com/${{ github.repository }}/settings/security_analysis"
