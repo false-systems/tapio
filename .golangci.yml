@@ -1,0 +1,149 @@
+run:
+  timeout: 5m
+  go: "1.24"
+  issues-exit-code: 1
+  tests: true
+  build-tags:
+    - integration
+  skip-dirs:
+    - vendor
+    - third_party
+    - testdata
+    - examples
+    - build
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters:
+  enable:
+    - bodyclose
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - exportloopref
+    - funlen
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - staticcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+    - revive
+
+linters-settings:
+  depguard:
+    rules:
+      main:
+        allow:
+          - $gostd
+          - github.com/falseyair/tapio
+          - github.com/spf13/cobra
+          - github.com/fatih/color
+          - github.com/briandowns/spinner
+          - k8s.io/api
+          - k8s.io/apimachinery
+          - k8s.io/client-go
+  
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    
+  funlen:
+    lines: 100
+    statements: 50
+    
+  goconst:
+    min-len: 2
+    min-occurrences: 3
+    
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      
+  gocyclo:
+    min-complexity: 15
+    
+  goimports:
+    local-prefixes: github.com/falseyair/tapio
+    
+  lll:
+    line-length: 120
+    
+  misspell:
+    locale: US
+    
+  nolintlint:
+    allow-unused: false
+    require-explanation: true
+    require-specific: true
+    
+  revive:
+    ignore-generated-header: true
+    severity: error
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: increment-decrement
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: var-declaration
+      - name: var-naming
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - dupl
+        - funlen
+        - gocyclo
+        - goconst
+        
+    - path: cmd/
+      linters:
+        - gocyclo
+        - funlen
+        
+    - text: "weak cryptographic primitive"
+      linters:
+        - gosec
+        
+  max-issues-per-linter: 0
+  max-same-issues: 0

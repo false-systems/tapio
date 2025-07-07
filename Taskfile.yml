@@ -1,0 +1,279 @@
+version: '3'
+
+vars:
+  BINARY_NAME: tapio
+  BUILD_DIR: ./build
+  MAIN_PATH: ./cmd/tapio/main.go
+  GO_VERSION: 1.24
+  GOLANGCI_VERSION: latest
+
+env:
+  CGO_ENABLED: 0
+  GO111MODULE: on
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # Build tasks
+  build:
+    desc: Build the binary for current OS/arch
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -ldflags="-s -w" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN_PATH}}
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/{{.BINARY_NAME}}"
+
+  build:all:
+    desc: Build binaries for all supported platforms
+    deps:
+      - build:linux
+      - build:darwin
+      - build:windows
+
+  build:linux:
+    desc: Build for Linux (amd64 and arm64)
+    cmds:
+      - task: build:os:arch
+        vars:
+          OS: linux
+          ARCH: amd64
+      - task: build:os:arch
+        vars:
+          OS: linux
+          ARCH: arm64
+
+  build:darwin:
+    desc: Build for macOS (amd64 and arm64)
+    cmds:
+      - task: build:os:arch
+        vars:
+          OS: darwin
+          ARCH: amd64
+      - task: build:os:arch
+        vars:
+          OS: darwin
+          ARCH: arm64
+
+  build:windows:
+    desc: Build for Windows (amd64)
+    cmds:
+      - task: build:os:arch
+        vars:
+          OS: windows
+          ARCH: amd64
+
+  build:os:arch:
+    internal: true
+    vars:
+      OUTPUT_NAME: "{{.BINARY_NAME}}-{{.OS}}-{{.ARCH}}{{if eq .OS \"windows\"}}.exe{{end}}"
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - GOOS={{.OS}} GOARCH={{.ARCH}} go build -ldflags="-s -w" -o {{.BUILD_DIR}}/{{.OUTPUT_NAME}} {{.MAIN_PATH}}
+
+  # Development tasks
+  dev:
+    desc: Run the application in development mode
+    cmds:
+      - go run {{.MAIN_PATH}} {{.CLI_ARGS}}
+
+  watch:
+    desc: Run the application with hot reload
+    cmds:
+      - air -c .air.toml
+
+  # Testing tasks
+  test:
+    desc: Run all tests
+    cmds:
+      - go test -v -race ./...
+
+  test:coverage:
+    desc: Run tests with coverage
+    cmds:
+      - go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "Coverage report generated at coverage.html"
+
+  test:integration:
+    desc: Run integration tests
+    cmds:
+      - go test -v -tags=integration ./...
+
+  bench:
+    desc: Run benchmarks
+    cmds:
+      - go test -bench=. -benchmem ./...
+
+  # Code quality tasks
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run --timeout=5m
+
+  lint:fix:
+    desc: Run golangci-lint with auto-fix
+    cmds:
+      - golangci-lint run --fix
+
+  fmt:
+    desc: Format Go code
+    cmds:
+      - go fmt ./...
+      - goimports -w -local github.com/falseyair/tapio .
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  security:
+    desc: Run security checks
+    cmds:
+      - gosec -fmt sarif -out gosec-results.sarif ./...
+      - trivy fs --security-checks vuln .
+
+  # Dependency tasks
+  deps:
+    desc: Download dependencies
+    cmds:
+      - go mod download
+
+  deps:update:
+    desc: Update dependencies
+    cmds:
+      - go get -u ./...
+      - go mod tidy
+
+  deps:verify:
+    desc: Verify dependencies
+    cmds:
+      - go mod verify
+
+  # Installation tasks
+  install:
+    desc: Install the binary to $GOPATH/bin
+    deps:
+      - build
+    cmds:
+      - go install {{.MAIN_PATH}}
+
+  install:local:
+    desc: Install the binary to /usr/local/bin (requires sudo)
+    deps:
+      - build
+    cmds:
+      - sudo cp {{.BUILD_DIR}}/{{.BINARY_NAME}} /usr/local/bin/
+      - sudo chmod +x /usr/local/bin/{{.BINARY_NAME}}
+
+  uninstall:
+    desc: Uninstall the binary from /usr/local/bin
+    cmds:
+      - sudo rm -f /usr/local/bin/{{.BINARY_NAME}}
+
+  # Clean tasks
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+      - rm -f coverage.out coverage.html
+      - rm -f gosec-results.sarif
+
+  clean:all:
+    desc: Clean all generated files
+    deps:
+      - clean
+    cmds:
+      - go clean -cache -modcache -testcache
+
+  # Docker tasks
+  docker:build:
+    desc: Build Docker image
+    cmds:
+      - docker build -t {{.BINARY_NAME}}:latest .
+
+  docker:run:
+    desc: Run Docker container
+    cmds:
+      - docker run --rm -it {{.BINARY_NAME}}:latest
+
+  # Release tasks
+  release:
+    desc: Create a new release
+    preconditions:
+      - sh: git diff --quiet
+        msg: "Git working directory must be clean"
+    cmds:
+      - goreleaser release --rm-dist
+
+  release:snapshot:
+    desc: Create a snapshot release
+    cmds:
+      - goreleaser release --snapshot --rm-dist
+
+  # Documentation tasks
+  docs:
+    desc: Generate documentation
+    cmds:
+      - go doc -all ./... > docs/api.txt
+      - echo "API documentation generated at docs/api.txt"
+
+  # CI/CD tasks
+  ci:
+    desc: Run all CI checks
+    cmds:
+      - task: deps
+      - task: lint
+      - task: test:coverage
+      - task: build
+      - task: security
+
+  pre-commit:
+    desc: Run pre-commit checks
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
+
+  # Monorepo specific tasks
+  monorepo:check:
+    desc: Check all services in monorepo
+    cmds:
+      - echo "Checking Tapio service..."
+      - task: ci
+
+  monorepo:build:all:
+    desc: Build all services in monorepo
+    cmds:
+      - echo "Building Tapio..."
+      - task: build:all
+
+  monorepo:test:all:
+    desc: Test all services in monorepo
+    cmds:
+      - echo "Testing Tapio..."
+      - task: test:coverage
+
+  # Setup tasks
+  setup:
+    desc: Set up development environment
+    cmds:
+      - task: setup:tools
+      - task: deps
+      - echo "Development environment ready!"
+
+  setup:tools:
+    desc: Install required development tools
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@{{.GOLANGCI_VERSION}}
+      - go install golang.org/x/tools/cmd/goimports@latest
+      - go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - go install github.com/goreleaser/goreleaser/v2@latest
+      - go install github.com/air-verse/air@latest
+      - echo "Development tools installed!"
