@@ -40,8 +40,7 @@ func (f *Formatter) PrintExplanation(explanation *types.Explanation) error {
 	case "yaml":
 		return f.printExplanationYAML(explanation)
 	default:
-		humanFormatter := NewHumanFormatter()
-		return humanFormatter.PrintExplanation(explanation)
+		return fmt.Errorf("explanation output not supported in this version")
 	}
 }
 
