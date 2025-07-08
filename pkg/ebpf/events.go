@@ -1,3 +1,6 @@
+//go:build linux && ebpf
+// +build linux,ebpf
+
 package ebpf
 
 import (
