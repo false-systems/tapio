@@ -79,11 +79,11 @@ func (f *HumanFormatter) printProblem(problem *types.Problem) {
 	}
 
 	if problem.Prediction != nil {
-		f.printPrediction(problem.Prediction)
+		f.printProblemPrediction(problem.Prediction)
 	}
 }
 
-func (f *HumanFormatter) printPrediction(pred *types.Prediction) {
+func (f *HumanFormatter) printProblemPrediction(pred *types.Prediction) {
 	duration := pred.TimeToFailure.Round(time.Minute)
 	confidence := int(pred.Confidence * 100)
 
