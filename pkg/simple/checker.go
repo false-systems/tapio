@@ -90,10 +90,42 @@ func (c *Checker) analyzePod(pod *corev1.Pod) types.Problem {
 		Severity: types.SeverityHealthy,
 	}
 
-	// Check if pod is running
-	if pod.Status.Phase != corev1.PodRunning {
+	// Handle different pod phases intelligently
+	switch pod.Status.Phase {
+	case corev1.PodRunning:
+		// Pod is running - continue with other checks
+		break
+		
+	case corev1.PodSucceeded:
+		// Check if this is a job that completed successfully
+		if c.isJob(pod) {
+			problem.Severity = types.SeverityHealthy
+			problem.Title = "Job completed successfully"
+			problem.Description = "This job finished its work and terminated normally"
+			return problem
+		} else {
+			// Regular pod shouldn't be in Succeeded state
+			problem.Severity = types.SeverityWarning
+			problem.Title = "Pod completed unexpectedly"
+			problem.Description = "Regular pods should stay running, not complete"
+			return problem
+		}
+		
+	case corev1.PodFailed:
 		problem.Severity = types.SeverityCritical
-		problem.Title = fmt.Sprintf("Pod not running (phase: %s)", pod.Status.Phase)
+		problem.Title = "Pod failed"
+		problem.Description = c.getPodStatusDescription(pod)
+		return problem
+		
+	case corev1.PodPending:
+		problem.Severity = types.SeverityWarning
+		problem.Title = "Pod stuck pending"
+		problem.Description = c.getPodStatusDescription(pod)
+		return problem
+		
+	default:
+		problem.Severity = types.SeverityCritical
+		problem.Title = fmt.Sprintf("Pod in unexpected phase: %s", pod.Status.Phase)
 		problem.Description = c.getPodStatusDescription(pod)
 		return problem
 	}
@@ -127,6 +159,16 @@ func (c *Checker) analyzePod(pod *corev1.Pod) types.Problem {
 	}
 
 	return problem
+}
+
+// isJob checks if a pod belongs to a Job or CronJob
+func (c *Checker) isJob(pod *corev1.Pod) bool {
+	for _, owner := range pod.OwnerReferences {
+		if owner.Kind == "Job" || owner.Kind == "CronJob" {
+			return true
+		}
+	}
+	return false
 }
 
 // Helper functions
@@ -189,9 +231,27 @@ func (c *Checker) filterPods(pods []corev1.Pod, resource string) []corev1.Pod {
 func (c *Checker) getPodStatusDescription(pod *corev1.Pod) string {
 	switch pod.Status.Phase {
 	case corev1.PodPending:
+		// Check if it's an unschedulable pod
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
+				return fmt.Sprintf("Pod cannot be scheduled: %s", condition.Message)
+			}
+		}
 		return "Pod is waiting to be scheduled or containers are being created"
+		
 	case corev1.PodFailed:
+		// Try to get specific failure reason
+		if pod.Status.Message != "" {
+			return fmt.Sprintf("Pod failed: %s", pod.Status.Message)
+		}
 		return "Pod has terminated with failure"
+		
+	case corev1.PodSucceeded:
+		if c.isJob(pod) {
+			return "Job completed its work successfully"
+		}
+		return "Pod completed and terminated (unusual for regular pods)"
+		
 	default:
 		return fmt.Sprintf("Pod is in %s phase", pod.Status.Phase)
 	}

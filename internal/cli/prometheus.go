@@ -30,7 +30,6 @@ and provides metrics that can be scraped by Prometheus for alerting and dashboar
 Features:
   • OOM prediction metrics with precise timing
   • Pod health status and cluster health scores
-  • Memory leak detection and growth rate tracking
   • Zero-configuration auto-discovery`,
 	Example: `  # Start metrics server on default port
   tapio prometheus

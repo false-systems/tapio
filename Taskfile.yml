@@ -256,6 +256,102 @@ tasks:
       - task: lint
       - task: test
 
+  # Component-specific tasks
+  component:test:cli:
+    desc: Test CLI components only
+    cmds:
+      - go test -v -race ./internal/cli/... ./cmd/tapio/...
+
+  component:test:ebpf:
+    desc: Test eBPF components only
+    cmds:
+      - go test -v -race ./pkg/ebpf/...
+
+  component:test:simple:
+    desc: Test Simple Checker components only
+    cmds:
+      - go test -v -race ./pkg/simple/... ./pkg/health/...
+
+  component:test:k8s:
+    desc: Test K8s integration components only
+    cmds:
+      - go test -v -race ./pkg/k8s/...
+
+  component:test:metrics:
+    desc: Test Metrics components only
+    cmds:
+      - go test -v -race ./pkg/metrics/...
+
+  component:test:output:
+    desc: Test Output components only
+    cmds:
+      - go test -v -race ./internal/output/... ./pkg/output/...
+
+  component:lint:cli:
+    desc: Lint CLI components only
+    cmds:
+      - golangci-lint run --timeout=5m ./internal/cli/... ./cmd/tapio/...
+
+  component:lint:ebpf:
+    desc: Lint eBPF components only
+    cmds:
+      - golangci-lint run --timeout=5m ./pkg/ebpf/...
+
+  component:lint:simple:
+    desc: Lint Simple Checker components only
+    cmds:
+      - golangci-lint run --timeout=5m ./pkg/simple/... ./pkg/health/...
+
+  component:lint:k8s:
+    desc: Lint K8s integration components only
+    cmds:
+      - golangci-lint run --timeout=5m ./pkg/k8s/...
+
+  component:lint:metrics:
+    desc: Lint Metrics components only
+    cmds:
+      - golangci-lint run --timeout=5m ./pkg/metrics/...
+
+  component:lint:output:
+    desc: Lint Output components only
+    cmds:
+      - golangci-lint run --timeout=5m ./internal/output/... ./pkg/output/...
+
+  # Smart CI tasks
+  ci:changed:
+    desc: Run CI for changed components only
+    cmds:
+      - |
+        if git diff --name-only HEAD~1 | grep -E "^(internal/cli|cmd/tapio)/"; then
+          echo "CLI changes detected, running CLI tests..."
+          task component:test:cli
+        fi
+      - |
+        if git diff --name-only HEAD~1 | grep -E "^(pkg/ebpf|ebpf)/"; then
+          echo "eBPF changes detected, running eBPF tests..."
+          task component:test:ebpf
+        fi
+      - |
+        if git diff --name-only HEAD~1 | grep -E "^pkg/simple/"; then
+          echo "Simple Checker changes detected, running Simple tests..."
+          task component:test:simple
+        fi
+      - |
+        if git diff --name-only HEAD~1 | grep -E "^pkg/k8s/"; then
+          echo "K8s changes detected, running K8s tests..."
+          task component:test:k8s
+        fi
+      - |
+        if git diff --name-only HEAD~1 | grep -E "^pkg/metrics/"; then
+          echo "Metrics changes detected, running Metrics tests..."
+          task component:test:metrics
+        fi
+      - |
+        if git diff --name-only HEAD~1 | grep -E "^(internal/output|pkg/output)/"; then
+          echo "Output changes detected, running Output tests..."
+          task component:test:output
+        fi
+
   # Monorepo specific tasks
   monorepo:check:
     desc: Check all services in monorepo
