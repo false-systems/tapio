@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	
+
 	"github.com/falseyair/tapio/pkg/metrics"
 	"github.com/falseyair/tapio/pkg/simple"
 )
 
 var (
-	metricsAddr     string
-	updateInterval  time.Duration
+	metricsAddr    string
+	updateInterval time.Duration
 )
 
 var prometheusCmd = &cobra.Command{
@@ -43,9 +43,9 @@ Features:
 }
 
 func init() {
-	prometheusCmd.Flags().StringVar(&metricsAddr, "addr", ":8080", 
+	prometheusCmd.Flags().StringVar(&metricsAddr, "addr", ":8080",
 		"Address to listen on for metrics HTTP server")
-	prometheusCmd.Flags().DurationVar(&updateInterval, "interval", 30*time.Second, 
+	prometheusCmd.Flags().DurationVar(&updateInterval, "interval", 30*time.Second,
 		"How often to update metrics by scanning the cluster")
 }
 
@@ -61,7 +61,7 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create checker: %w", err)
 	}
 	fmt.Println("ℹ️  Using Kubernetes API metrics")
-	
+
 	// Create Prometheus exporter
 	exporter := metrics.NewPrometheusExporter(checker, nil)
 
@@ -88,10 +88,11 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 	case sig := <-sigChan:
 		fmt.Printf("\n📡 Received signal %v, shutting down gracefully...\n", sig)
 		cancel()
-		
+
 		// Give server a moment to finish current requests
 		time.Sleep(1 * time.Second)
 		fmt.Println("✅ Tapio Prometheus exporter stopped")
 		return nil
 	}
 }
+

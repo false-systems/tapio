@@ -8,28 +8,28 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	
+
 	"github.com/falseyair/tapio/pkg/types"
 )
 
 // PrometheusExporter exports Tapio metrics to Prometheus
 type PrometheusExporter struct {
-	checker    CheckerInterface
-	collector  interface{}
-	registry   *prometheus.Registry
-	
+	checker   CheckerInterface
+	collector interface{}
+	registry  *prometheus.Registry
+
 	// Health metrics
-	podHealthStatus      *prometheus.GaugeVec
-	clusterHealthScore   *prometheus.GaugeVec
-	problemsTotal        *prometheus.CounterVec
-	
+	podHealthStatus    *prometheus.GaugeVec
+	clusterHealthScore *prometheus.GaugeVec
+	problemsTotal      *prometheus.CounterVec
+
 	// Prediction metrics
 	oomPredictionSeconds *prometheus.GaugeVec
 	confidenceScore      *prometheus.GaugeVec
-	
+
 	// Performance metrics
-	analysisLatency      *prometheus.HistogramVec
-	lastUpdateTime       *prometheus.GaugeVec
+	analysisLatency *prometheus.HistogramVec
+	lastUpdateTime  *prometheus.GaugeVec
 }
 
 // CheckerInterface defines the interface for checkers
@@ -40,12 +40,12 @@ type CheckerInterface interface {
 // NewPrometheusExporter creates a new Prometheus metrics exporter
 func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *PrometheusExporter {
 	registry := prometheus.NewRegistry()
-	
+
 	exporter := &PrometheusExporter{
 		checker:   checker,
 		collector: collector,
 		registry:  registry,
-		
+
 		// Health metrics
 		podHealthStatus: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -54,7 +54,7 @@ func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *Pro
 			},
 			[]string{"pod", "namespace", "status"},
 		),
-		
+
 		clusterHealthScore: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_cluster_health_score",
@@ -62,7 +62,7 @@ func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *Pro
 			},
 			[]string{"namespace"},
 		),
-		
+
 		problemsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_problems_total",
@@ -70,7 +70,7 @@ func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *Pro
 			},
 			[]string{"namespace", "severity", "type"},
 		),
-		
+
 		// Prediction metrics
 		oomPredictionSeconds: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -79,7 +79,7 @@ func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *Pro
 			},
 			[]string{"pod", "namespace", "container"},
 		),
-		
+
 		confidenceScore: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_confidence_score",
@@ -87,7 +87,7 @@ func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *Pro
 			},
 			[]string{"pod", "namespace", "prediction_type"},
 		),
-		
+
 		// Performance metrics
 		analysisLatency: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -97,7 +97,7 @@ func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *Pro
 			},
 			[]string{"operation", "namespace"},
 		),
-		
+
 		lastUpdateTime: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_last_update_timestamp",
@@ -106,10 +106,10 @@ func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *Pro
 			[]string{"component"},
 		),
 	}
-	
+
 	// Register all metrics
 	exporter.registerMetrics()
-	
+
 	return exporter
 }
 
@@ -124,11 +124,11 @@ func (e *PrometheusExporter) registerMetrics() {
 		e.analysisLatency,
 		e.lastUpdateTime,
 	}
-	
+
 	for _, metric := range metrics {
 		e.registry.MustRegister(metric)
 	}
-	
+
 	fmt.Println("✅ Registered 7 Tapio metrics with Prometheus")
 }
 
@@ -139,18 +139,18 @@ func (e *PrometheusExporter) UpdateMetrics(ctx context.Context) error {
 		e.analysisLatency.WithLabelValues("full_update", "all").Observe(time.Since(startTime).Seconds())
 		e.lastUpdateTime.WithLabelValues("metrics_update").SetToCurrentTime()
 	}()
-	
+
 	// Get current health check results
 	checkReq := &types.CheckRequest{All: true}
 	result, err := e.checker.Check(ctx, checkReq)
 	if err != nil {
 		return fmt.Errorf("failed to get health check results: %w", err)
 	}
-	
+
 	// Update metrics
 	e.updateHealthMetrics(result)
 	e.updatePredictionMetrics(result)
-	
+
 	return nil
 }
 
@@ -159,24 +159,24 @@ func (e *PrometheusExporter) updateHealthMetrics(result *types.CheckResult) {
 	// Clear existing health metrics
 	e.podHealthStatus.Reset()
 	e.clusterHealthScore.Reset()
-	
+
 	// Track problems by namespace for cluster health scores
 	namespaceStats := make(map[string]*types.Summary)
-	
+
 	// Update pod health status from problems
 	for _, problem := range result.Problems {
 		namespace := problem.Resource.Namespace
 		pod := problem.Resource.Name
-		
+
 		// Set pod health status
 		statusValue := getSeverityValue(problem.Severity)
 		e.podHealthStatus.WithLabelValues(pod, namespace, string(problem.Severity)).Set(statusValue)
-		
+
 		// Track namespace statistics
 		if _, exists := namespaceStats[namespace]; !exists {
 			namespaceStats[namespace] = &types.Summary{}
 		}
-		
+
 		switch problem.Severity {
 		case types.SeverityCritical:
 			namespaceStats[namespace].CriticalPods++
@@ -189,7 +189,7 @@ func (e *PrometheusExporter) updateHealthMetrics(result *types.CheckResult) {
 		}
 		namespaceStats[namespace].TotalPods++
 	}
-	
+
 	// Calculate and update cluster health scores by namespace
 	for namespace, stats := range namespaceStats {
 		if stats.TotalPods > 0 {
@@ -205,16 +205,16 @@ func (e *PrometheusExporter) updatePredictionMetrics(result *types.CheckResult) 
 	// Clear prediction metrics
 	e.oomPredictionSeconds.Reset()
 	e.confidenceScore.Reset()
-	
+
 	for _, problem := range result.Problems {
 		if problem.Prediction != nil {
 			namespace := problem.Resource.Namespace
 			pod := problem.Resource.Name
-			
+
 			// Update OOM prediction timing
 			secondsToFailure := problem.Prediction.TimeToFailure.Seconds()
 			e.oomPredictionSeconds.WithLabelValues(pod, namespace, "main").Set(secondsToFailure)
-			
+
 			// Update confidence score
 			e.confidenceScore.WithLabelValues(pod, namespace, "oom").Set(problem.Prediction.Confidence)
 		}
@@ -238,19 +238,19 @@ func getSeverityValue(severity types.Severity) float64 {
 func (e *PrometheusExporter) StartMetricsServer(addr string) error {
 	// Create HTTP mux for multiple endpoints
 	mux := http.NewServeMux()
-	
+
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.HandlerFor(e.registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
 	}))
-	
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"healthy","service":"tapio-prometheus-exporter"}`))
 	})
-	
+
 	// Info endpoint
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -262,11 +262,11 @@ func (e *PrometheusExporter) StartMetricsServer(addr string) error {
 			"description": "Tapio Kubernetes intelligence metrics for Prometheus"
 		}`))
 	})
-	
+
 	fmt.Printf("🚀 Prometheus metrics server starting on %s\n", addr)
 	fmt.Printf("📊 Metrics endpoint: http://%s/metrics\n", addr)
 	fmt.Printf("💚 Health endpoint: http://%s/health\n", addr)
-	
+
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -274,16 +274,16 @@ func (e *PrometheusExporter) StartMetricsServer(addr string) error {
 func (e *PrometheusExporter) StartPeriodicUpdates(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	
+
 	fmt.Printf("🔄 Starting periodic metric updates every %v\n", interval)
-	
+
 	// Initial update
 	if err := e.UpdateMetrics(ctx); err != nil {
 		fmt.Printf("Warning: Initial metrics update failed: %v\n", err)
 	} else {
 		fmt.Println("✅ Initial metrics update completed")
 	}
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -296,3 +296,4 @@ func (e *PrometheusExporter) StartPeriodicUpdates(ctx context.Context, interval 
 		}
 	}
 }
+
