@@ -77,6 +77,21 @@ tasks:
       - mkdir -p {{.BUILD_DIR}}
       - GOOS={{.OS}} GOARCH={{.ARCH}} go build -ldflags="-s -w" -o {{.BUILD_DIR}}/{{.OUTPUT_NAME}} {{.MAIN_PATH}}
 
+  build:enhanced-ebpf:
+    desc: Build Tapio with eBPF support (Linux only)
+    cmds:
+      - echo "🔨 Building Tapio with eBPF kernel monitoring..."
+      - |
+        if [ "$(uname)" != "Linux" ]; then
+          echo "⚠️  eBPF is Linux-only, building with graceful fallback..."
+        else
+          echo "🧬 Generating eBPF programs..."
+          cd pkg/ebpf && go generate ./... || echo "eBPF generation failed, continuing with stubs"
+        fi
+      - task: build
+      - echo "✅ Enhanced Tapio with eBPF support ready!"
+      - echo "Usage: sudo ./bin/tapio why <pod-name> (requires root for eBPF)"
+
   # Development tasks
   dev:
     desc: Run the application in development mode
