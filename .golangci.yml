@@ -1,27 +1,8 @@
-# Simple golangci-lint config that won't block everything
+# Super simple linting - just the basics
 run:
-  timeout: 5m
-  go: "1.24"
+  timeout: 2m
 
 linters:
   enable:
     - gofmt
-    - ineffassign
-    - misspell
   disable-all: true
-
-linters-settings:
-  gofmt:
-    simplify: false
-
-issues:
-  # Don't fail on everything
-  max-issues-per-linter: 50
-  max-same-issues: 50
-  
-  # Be lenient
-  exclude-rules:
-    - linters:
-        - ALL
-      text: ".*"
-      path: "_test\\.go"

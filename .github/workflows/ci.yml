@@ -6,53 +6,14 @@ on:
   pull_request:
     branches: [ main ]
 
-permissions:
-  contents: read
-
 jobs:
-  # Single job that does everything needed - fast and simple
-  check:
-    name: Check
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
           cache: true
-          
-      - name: Build
-        run: |
-          echo "🔨 Building Tapio..."
-          go build ./cmd/tapio
-          echo "✅ Build successful"
-          
-      - name: Test
-        run: |
-          echo "🧪 Running tests..."
-          # Only run tests that exist and are fast
-          go test -short -timeout 30s ./pkg/simple ./pkg/types ./internal/cli 2>/dev/null || echo "✅ Tests completed"
-          
-      - name: Format Check
-        run: |
-          echo "📝 Checking code format..."
-          # Just check, don't fail the build
-          if [ -n "$(gofmt -l . | grep -v vendor)" ]; then
-            echo "⚠️  Some files need formatting (not blocking):"
-            gofmt -l . | grep -v vendor
-          else
-            echo "✅ Code is formatted"
-          fi
-          
-  # Always mark success so PRs can be merged
-  done:
-    name: CI Done
-    needs: check
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Success
-        run: echo "✅ CI Complete - PR can be merged"
+      - run: go build ./cmd/tapio
+      - run: go test ./...
