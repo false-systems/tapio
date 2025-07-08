@@ -1,0 +1,8 @@
+{{- if .Values.global.namespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.global.namespace }}
+  labels:
+    {{- include "tapio.labels" . | nindent 4 }}
+{{- end }}

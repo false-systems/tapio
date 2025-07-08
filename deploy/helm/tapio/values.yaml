@@ -1,0 +1,178 @@
+# Default values for tapio.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings
+global:
+  # Namespace to install Tapio into
+  namespace: tapio-system
+  # Image pull secrets
+  imagePullSecrets: []
+
+# Node agent configuration (eBPF collector on each node)
+nodeAgent:
+  enabled: true
+  image:
+    repository: tapio/node-agent
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resources for node agent pods
+  resources:
+    limits:
+      memory: 128Mi
+      cpu: 100m
+    requests:
+      memory: 64Mi
+      cpu: 50m
+  
+  # Security context for eBPF access
+  securityContext:
+    privileged: true
+    capabilities:
+      add:
+        - SYS_ADMIN
+        - SYS_RESOURCE
+        - NET_ADMIN
+        - NET_RAW
+  
+  # Node selector for agent pods
+  nodeSelector: {}
+  
+  # Tolerations for agent pods
+  tolerations: []
+  
+  # Priority class name
+  priorityClassName: ""
+
+# Server configuration (API, aggregator, metrics)
+server:
+  # Number of server replicas
+  replicas: 1
+  
+  image:
+    repository: tapio/server
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resources for server pods
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 500m
+    requests:
+      memory: 256Mi
+      cpu: 250m
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+    annotations: {}
+  
+  # Prometheus metrics configuration
+  metrics:
+    enabled: true
+    port: 9090
+    path: /metrics
+    # ServiceMonitor for Prometheus Operator
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      scrapeTimeout: 10s
+      labels: {}
+  
+  # Node selector for server pods
+  nodeSelector: {}
+  
+  # Affinity rules
+  affinity: {}
+  
+  # Tolerations
+  tolerations: []
+  
+  # Priority class name
+  priorityClassName: ""
+
+# Configuration settings
+config:
+  # Update interval for metrics collection
+  updateInterval: 30s
+  
+  # Memory threshold percentages
+  memoryThresholds:
+    warning: 80
+    critical: 90
+  
+  # OOM prediction settings
+  prediction:
+    enabled: true
+    # Minimum confidence level for predictions
+    minConfidence: 0.8
+    # Time window for prediction (minutes)
+    timeWindow: 10
+  
+  # Logging configuration
+  logging:
+    level: info # debug, info, warn, error
+    format: json # json, text
+  
+  # Namespace filtering
+  namespaces:
+    # Include only these namespaces (empty = all)
+    include: []
+    # Exclude these namespaces
+    exclude:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+
+# RBAC configuration
+rbac:
+  # Create RBAC resources
+  create: true
+  # Service account name (auto-generated if empty)
+  serviceAccountName: ""
+
+# CLI configuration (for external access)
+cli:
+  # Create a LoadBalancer service for CLI access from outside cluster
+  externalAccess:
+    enabled: false
+    type: LoadBalancer
+    port: 8080
+    annotations: {}
+
+# Enterprise features
+enterprise:
+  # High availability mode
+  highAvailability:
+    enabled: false
+    # Minimum replicas for HA
+    minReplicas: 3
+  
+  # Federation support for multi-cluster
+  federation:
+    enabled: false
+    # Cluster identifier
+    clusterId: ""
+  
+  # Advanced monitoring
+  monitoring:
+    # Trace collection
+    tracing:
+      enabled: false
+      endpoint: ""
+    # Custom metrics
+    customMetrics:
+      enabled: false
+
+# Development settings
+development:
+  # Enable debug logging
+  debug: false
+  # Enable profiling endpoints
+  profiling: false
+  # Disable eBPF (use K8s metrics only)
+  disableEBPF: false
