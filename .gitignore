@@ -20,6 +20,7 @@ go.work.sum
 vendor/
 
 # Build output
+bin/
 build/
 dist/
 
