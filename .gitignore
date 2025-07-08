@@ -5,12 +5,17 @@
 *.so
 *.dylib
 
+# Go binary name
+tapio
+
 # Test binary, built with `go test -c`
 *.test
 
 # Output of the go coverage tool
 *.out
 coverage.html
+coverage.txt
+fmt-issues.txt
 
 # Go workspace file
 go.work
