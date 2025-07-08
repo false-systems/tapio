@@ -9,43 +9,74 @@ import (
 	"github.com/falseyair/tapio/pkg/types"
 )
 
-// Formatter interface for different output formats
-type Formatter interface {
-	Print(result *types.CheckResult) error
+// Formatter handles different output formats
+type Formatter struct {
+	format string
 }
 
-// NewFormatter creates a formatter based on the specified format
-func NewFormatter(format string) Formatter {
-	switch format {
+// NewFormatter creates a new formatter for the specified format
+func NewFormatter(format string) *Formatter {
+	return &Formatter{format: format}
+}
+
+// Print prints a check result in the specified format
+func (f *Formatter) Print(result *types.CheckResult) error {
+	switch f.format {
 	case "json":
-		return &JSONFormatter{}
+		return f.printJSON(result)
 	case "yaml":
-		return &YAMLFormatter{}
+		return f.printYAML(result)
 	default:
-		return NewHumanFormatter()
+		humanFormatter := NewHumanFormatter()
+		return humanFormatter.Print(result)
 	}
 }
 
-// JSONFormatter outputs results as JSON
-type JSONFormatter struct{}
-
-func (f *JSONFormatter) Print(result *types.CheckResult) error {
-	output, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result to JSON: %w", err)
+// PrintExplanation prints an explanation in the specified format
+func (f *Formatter) PrintExplanation(explanation *types.Explanation) error {
+	switch f.format {
+	case "json":
+		return f.printExplanationJSON(explanation)
+	case "yaml":
+		return f.printExplanationYAML(explanation)
+	default:
+		humanFormatter := NewHumanFormatter()
+		return humanFormatter.PrintExplanation(explanation)
 	}
-	fmt.Println(string(output))
+}
+
+func (f *Formatter) printJSON(result *types.CheckResult) error {
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
 	return nil
 }
 
-// YAMLFormatter outputs results as YAML
-type YAMLFormatter struct{}
-
-func (f *YAMLFormatter) Print(result *types.CheckResult) error {
-	output, err := yaml.Marshal(result)
+func (f *Formatter) printYAML(result *types.CheckResult) error {
+	data, err := yaml.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("failed to marshal result to YAML: %w", err)
+		return err
 	}
-	fmt.Println(string(output))
+	fmt.Println(string(data))
+	return nil
+}
+
+func (f *Formatter) printExplanationJSON(explanation *types.Explanation) error {
+	data, err := json.MarshalIndent(explanation, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+func (f *Formatter) printExplanationYAML(explanation *types.Explanation) error {
+	data, err := yaml.Marshal(explanation)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
 	return nil
 }
