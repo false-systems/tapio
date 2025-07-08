@@ -3,7 +3,6 @@ package simple
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 
 	"github.com/falseyair/tapio/pkg/types"
 )
@@ -138,9 +136,12 @@ func getKubeConfig() (*rest.Config, error) {
 		return config, nil
 	}
 
-	// Fall back to kubeconfig file
-	kubeconfig := filepath.Join(homedir.HomeDir(), ".kube", "config")
-	return clientcmd.BuildConfigFromFlags("", kubeconfig)
+	// Use the same kubeconfig resolution as kubectl
+	// This respects KUBECONFIG env var and uses ~/.kube/config as fallback
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+	return kubeConfig.ClientConfig()
 }
 
 func (c *Checker) getPods(ctx context.Context, namespace string, all bool) ([]corev1.Pod, error) {
@@ -163,9 +164,9 @@ func (c *Checker) filterPods(pods []corev1.Pod, resource string) []corev1.Pod {
 	if strings.HasPrefix(resource, "pod/") {
 		podName := strings.TrimPrefix(resource, "pod/")
 		var filtered []corev1.Pod
-		for _, pod := range pods {
-			if pod.Name == podName {
-				filtered = append(filtered, pod)
+		for i := range pods {
+			if pods[i].Name == podName {
+				filtered = append(filtered, pods[i])
 				break
 			}
 		}
@@ -174,11 +175,12 @@ func (c *Checker) filterPods(pods []corev1.Pod, resource string) []corev1.Pod {
 
 	// Simple filtering by name or labels
 	var filtered []corev1.Pod
-	for _, pod := range pods {
+	for i := range pods {
+		pod := &pods[i]
 		if pod.Name == resource ||
 			pod.Labels["app"] == resource ||
 			pod.Labels["app.kubernetes.io/name"] == resource {
-			filtered = append(filtered, pod)
+			filtered = append(filtered, *pod)
 		}
 	}
 	return filtered

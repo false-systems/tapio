@@ -2,8 +2,6 @@ package k8s
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -39,22 +37,19 @@ func getConfig(kubeconfigPath string) (*rest.Config, error) {
 		return config, nil
 	}
 
-	// Fall back to kubeconfig
-	if kubeconfigPath == "" {
-		kubeconfigPath = getDefaultKubeconfig()
+	// If a specific kubeconfig path is provided, use it
+	if kubeconfigPath != "" {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build config from kubeconfig: %w", err)
+		}
+		return config, nil
 	}
 
-	config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build config from kubeconfig: %w", err)
-	}
-
-	return config, nil
-}
-
-func getDefaultKubeconfig() string {
-	if home := os.Getenv("HOME"); home != "" {
-		return filepath.Join(home, ".kube", "config")
-	}
-	return ""
+	// Use the same kubeconfig resolution as kubectl
+	// This respects KUBECONFIG env var and uses ~/.kube/config as fallback
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+	return kubeConfig.ClientConfig()
 }

@@ -50,12 +50,12 @@ func (f *HumanFormatter) printProblems(problems []types.Problem) {
 	}
 
 	fmt.Println()
-	for _, problem := range problems {
-		f.printProblem(problem)
+	for i := range problems {
+		f.printProblem(&problems[i])
 	}
 }
 
-func (f *HumanFormatter) printProblem(problem types.Problem) {
+func (f *HumanFormatter) printProblem(problem *types.Problem) {
 	var label string
 	var colorFunc func(...interface{}) string
 

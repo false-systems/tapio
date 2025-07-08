@@ -30,7 +30,7 @@ a beautiful, human-readable health report.`,
 
 func init() {
 	Cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Namespace to check (default: current namespace)")
-	Cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: $HOME/.kube/config)")
+	Cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (optional: auto-detects like kubectl)")
 	Cmd.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "Check all namespaces")
 }
 
