@@ -4,6 +4,7 @@ go 1.24.3
 
 require (
 	github.com/briandowns/spinner v1.23.2
+	github.com/cilium/ebpf v0.19.0
 	github.com/fatih/color v1.18.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1

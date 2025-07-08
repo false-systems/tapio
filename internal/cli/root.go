@@ -30,5 +30,6 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(checkCmd)
+	rootCmd.AddCommand(whyCmd)
 	rootCmd.AddCommand(versionCmd)
 }
