@@ -24,7 +24,18 @@ func (f *HumanFormatter) PrintExplanation(explanation *types.Explanation) error 
 
 func (f *HumanFormatter) printExplanationHeader(explanation *types.Explanation) {
 	blue := color.New(color.FgBlue, color.Bold).SprintFunc()
-	fmt.Printf("%s %s\n\n", blue("ANALYSIS:"), explanation.Summary)
+	
+	// Add some spacing for better readability
+	fmt.Println()
+	
+	// Use friendly emoji and language based on the summary
+	if strings.Contains(explanation.Summary, "healthy") {
+		fmt.Printf("%s %s\n\n", blue("GOOD NEWS:"), explanation.Summary)
+	} else if strings.Contains(explanation.Summary, "killed") || strings.Contains(explanation.Summary, "crash") {
+		fmt.Printf("%s %s\n\n", blue("OH NO:"), explanation.Summary)
+	} else {
+		fmt.Printf("%s %s\n\n", blue("HEADS UP:"), explanation.Summary)
+	}
 }
 
 func (f *HumanFormatter) printAnalysis(analysis *types.Analysis) {
@@ -33,7 +44,7 @@ func (f *HumanFormatter) printAnalysis(analysis *types.Analysis) {
 	}
 
 	cyan := color.New(color.FgCyan, color.Bold).SprintFunc()
-	fmt.Printf("%s\n", cyan("WHAT I SEE:"))
+	fmt.Printf("%s\n", cyan("HERE'S WHAT'S HAPPENING:"))
 
 	if analysis.KubernetesView != nil {
 		fmt.Printf("  • Kubernetes says: Pod %s", analysis.KubernetesView.Status)
@@ -80,11 +91,12 @@ func (f *HumanFormatter) printRootCauses(causes []types.RootCause) {
 	}
 
 	yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
-	fmt.Printf("%s\n", yellow("WHY THIS HAPPENS:"))
+	fmt.Printf("%s\n", yellow("HERE'S WHY:"))
 
 	for _, cause := range causes {
 		confidence := int(cause.Confidence * 100)
-		fmt.Printf("  %s (%d%% confidence)\n", cause.Title, confidence)
+		confidenceText := f.getConfidenceText(confidence)
+		fmt.Printf("  %s %s\n", cause.Title, confidenceText)
 		if cause.Description != "" {
 			// Wrap long descriptions
 			wrapped := f.wrapText(cause.Description, 70)
@@ -103,11 +115,12 @@ func (f *HumanFormatter) printSolutions(solutions []types.Solution) {
 	}
 
 	green := color.New(color.FgGreen, color.Bold).SprintFunc()
-	fmt.Printf("%s\n", green("HOW TO FIX:"))
+	fmt.Printf("%s\n", green("LET'S FIX IT:"))
 
 	for _, solution := range solutions {
 		urgencyColor := f.getSolutionColor(solution.Urgency)
-		fmt.Printf("  %s %s\n", urgencyColor(fmt.Sprintf("[%s]", strings.ToUpper(string(solution.Urgency)))), solution.Title)
+		urgencyLabel := f.getFriendlyUrgencyLabel(solution.Urgency)
+		fmt.Printf("  %s %s\n", urgencyColor(urgencyLabel), solution.Title)
 		
 		if solution.Description != "" {
 			wrapped := f.wrapText(solution.Description, 70)
@@ -115,17 +128,25 @@ func (f *HumanFormatter) printSolutions(solutions []types.Solution) {
 		}
 		
 		if len(solution.Commands) > 0 {
-			fmt.Println("    Commands:")
+			fmt.Println("    Try this:")
 			for _, cmd := range solution.Commands {
 				if strings.HasPrefix(cmd, "#") {
-					fmt.Printf("      %s\n", color.New(color.FgBlue).Sprint(cmd))
+					// Comments in a softer color
+					fmt.Printf("      %s\n", color.New(color.FgHiBlack).Sprint(cmd))
+				} else if cmd == "" {
+					// Empty lines for spacing
+					fmt.Println()
 				} else {
-					fmt.Printf("      %s\n", color.New(color.FgWhite, color.Bold).Sprint(cmd))
+					// Commands in a box-like format for clarity
+					fmt.Printf("      $ %s\n", color.New(color.FgWhite, color.Bold).Sprint(cmd))
 				}
 			}
 		}
 		
-		fmt.Printf("    Difficulty: %s, Risk: %s\n\n", solution.Difficulty, solution.Risk)
+		difficultyText := f.getFriendlyDifficulty(solution.Difficulty)
+		riskText := f.getFriendlyRisk(solution.Risk)
+		gray := color.New(color.FgHiBlack).SprintFunc()
+		fmt.Printf("    %s\n\n", gray(fmt.Sprintf("%s • %s", difficultyText, riskText)))
 	}
 }
 
@@ -135,7 +156,7 @@ func (f *HumanFormatter) printLearning(learning *types.Learning) {
 	}
 
 	magenta := color.New(color.FgMagenta, color.Bold).SprintFunc()
-	fmt.Printf("%s\n", magenta("LEARN MORE:"))
+	fmt.Printf("%s\n", magenta("WANT TO UNDERSTAND BETTER?"))
 
 	if learning.ConceptExplanation != "" {
 		wrapped := f.wrapText(learning.ConceptExplanation, 70)
@@ -174,6 +195,54 @@ func (f *HumanFormatter) getSolutionColor(urgency types.Severity) func(...interf
 		return color.New(color.FgYellow, color.Bold).SprintFunc()
 	default:
 		return color.New(color.FgBlue, color.Bold).SprintFunc()
+	}
+}
+
+func (f *HumanFormatter) getFriendlyUrgencyLabel(urgency types.Severity) string {
+	switch urgency {
+	case types.SeverityCritical:
+		return "[DO THIS FIRST]"
+	case types.SeverityWarning:
+		return "[WHEN YOU CAN]"
+	default:
+		return "[FOR MORE INFO]"
+	}
+}
+
+func (f *HumanFormatter) getConfidenceText(confidence int) string {
+	gray := color.New(color.FgHiBlack).SprintFunc()
+	if confidence >= 90 {
+		return gray("(I'm pretty sure)")
+	} else if confidence >= 70 {
+		return gray("(probably)")
+	} else {
+		return gray("(maybe)")
+	}
+}
+
+func (f *HumanFormatter) getFriendlyDifficulty(difficulty string) string {
+	switch difficulty {
+	case "easy":
+		return "Takes 2 minutes"
+	case "medium":
+		return "Takes 5-10 minutes"
+	case "hard":
+		return "Might take a while"
+	default:
+		return "Difficulty unknown"
+	}
+}
+
+func (f *HumanFormatter) getFriendlyRisk(risk string) string {
+	switch risk {
+	case "low":
+		return "Safe to try"
+	case "medium":
+		return "Test first if possible"
+	case "high":
+		return "Be careful with this one"
+	default:
+		return "Risk unknown"
 	}
 }
 
