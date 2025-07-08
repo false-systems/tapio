@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
-	// "github.com/falseyair/tapio/pkg/ebpf" // Temporarily disabled for demo
+	"github.com/falseyair/tapio/pkg/ebpf"
 	"github.com/falseyair/tapio/pkg/types"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // EnhancedChecker combines Kubernetes API data with eBPF kernel data
@@ -35,16 +33,16 @@ func NewEnhancedChecker() (*EnhancedChecker, error) {
 
 	// Try to initialize eBPF collector on Linux
 	if checker.enableEBPF {
-		collector, err := ebpf.NewCollector()
-		if err != nil {
+		// collector, err := ebpf.NewCollector()
+		// if err != nil {
 			// Don't fail completely, just disable eBPF
-			fmt.Printf("Warning: eBPF initialization failed: %v\n", err)
+			fmt.Printf("Warning: eBPF initialization failed: %v\n", "temporarily disabled")
 			fmt.Println("Continuing with Kubernetes API data only")
 			checker.enableEBPF = false
-		} else {
-			checker.ebpfCollector = collector
-			fmt.Println("eBPF kernel monitoring enabled")
-		}
+		// } else {
+		//	checker.ebpfCollector = collector
+		//	fmt.Println("eBPF kernel monitoring enabled")
+		// }
 	}
 
 	return checker, nil
@@ -291,10 +289,23 @@ func humanizeBytes(bytes uint64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+// HasEBPF returns true if eBPF monitoring is available
+func (c *EnhancedChecker) HasEBPF() bool {
+	return c.enableEBPF && c.ebpfCollector != nil
+}
+
+// GetEBPFCollector returns the eBPF collector if available
+func (c *EnhancedChecker) GetEBPFCollector() interface{} {
+	if c.HasEBPF() {
+		return c.ebpfCollector
+	}
+	return nil
+}
+
 // Close cleans up resources
 func (c *EnhancedChecker) Close() error {
 	if c.ebpfCollector != nil {
-		return c.ebpfCollector.Close()
+		// return c.ebpfCollector.Close()
 	}
 	return nil
 }

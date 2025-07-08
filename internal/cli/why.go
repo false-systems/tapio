@@ -56,11 +56,12 @@ func runWhy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid resource reference: %w", err)
 	}
 
-	// Create explainer
-	explainer, err := simple.NewExplainer()
+	// Create enhanced explainer (with eBPF support if available)
+	explainer, err := simple.NewEnhancedExplainer()
 	if err != nil {
 		return fmt.Errorf("failed to initialize explainer: %w", err)
 	}
+	defer explainer.Close()
 
 	// Build explanation request
 	request := &types.ExplainRequest{
