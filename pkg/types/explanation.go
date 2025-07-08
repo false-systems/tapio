@@ -11,14 +11,15 @@ type ExplainRequest struct {
 
 // Explanation contains the detailed analysis and explanation
 type Explanation struct {
-	Resource    *ResourceRef `json:"resource"`
-	Summary     string       `json:"summary"`
-	Problems    []Problem    `json:"problems"`
-	Analysis    *Analysis    `json:"analysis"`
-	RootCauses  []RootCause  `json:"root_causes"`
-	Solutions   []Solution   `json:"solutions"`
-	Learning    *Learning    `json:"learning,omitempty"`
-	Timestamp   time.Time    `json:"timestamp"`
+	Resource    *ResourceRef        `json:"resource"`
+	Summary     string              `json:"summary"`
+	Problems    []Problem           `json:"problems"`
+	Analysis    *Analysis           `json:"analysis"`
+	RootCauses  []RootCause         `json:"root_causes"`
+	Solutions   []Solution          `json:"solutions"`
+	Prediction  *PredictionSummary  `json:"prediction,omitempty"`
+	Learning    *Learning           `json:"learning,omitempty"`
+	Timestamp   time.Time           `json:"timestamp"`
 }
 
 // Analysis contains the technical details
@@ -26,6 +27,7 @@ type Analysis struct {
 	KubernetesView *KubernetesView `json:"kubernetes_view"`
 	RealityCheck   *RealityCheck   `json:"reality_check"`
 	Correlation    *Correlation    `json:"correlation"`
+	KernelInsights *KernelInsights `json:"kernel_insights,omitempty"`
 }
 
 // KubernetesView shows what Kubernetes API reports
@@ -37,12 +39,13 @@ type KubernetesView struct {
 	Events      []string          `json:"recent_events"`
 }
 
-// RealityCheck shows actual system state (future: eBPF data)
+// RealityCheck shows actual system state with eBPF data
 type RealityCheck struct {
-	ActualMemory    string   `json:"actual_memory,omitempty"`
-	RestartPattern  string   `json:"restart_pattern,omitempty"`
-	ErrorPatterns   []string `json:"error_patterns,omitempty"`
-	NetworkIssues   []string `json:"network_issues,omitempty"`
+	ActualMemory    string        `json:"actual_memory,omitempty"`
+	RestartPattern  string        `json:"restart_pattern,omitempty"`
+	ErrorPatterns   []string      `json:"error_patterns,omitempty"`
+	NetworkIssues   []string      `json:"network_issues,omitempty"`
+	EBPFInsights    *EBPFInsights `json:"ebpf_insights,omitempty"`
 }
 
 // Correlation shows the differences and patterns
@@ -76,4 +79,38 @@ type Learning struct {
 	WhyItMatters       string   `json:"why_it_matters"`
 	CommonMistakes     []string `json:"common_mistakes"`
 	BestPractices      []string `json:"best_practices"`
+}
+
+// KernelInsights contains kernel-level insights from eBPF
+type KernelInsights struct {
+	MemoryPressure     string `json:"memory_pressure,omitempty"`
+	HeapAnalysis       string `json:"heap_analysis,omitempty"`
+	NetworkCorrelation string `json:"network_correlation,omitempty"`
+	DiskIO             string `json:"disk_io,omitempty"`
+	CPUOverhead        string `json:"cpu_overhead,omitempty"`
+}
+
+// EBPFInsights contains eBPF-collected data
+type EBPFInsights struct {
+	TotalMemory      uint64           `json:"total_memory"`
+	MemoryGrowthRate float64          `json:"memory_growth_rate"`
+	SyscallPattern   string           `json:"syscall_pattern,omitempty"`
+	Processes        []ProcessInsight `json:"processes"`
+}
+
+// ProcessInsight contains per-process eBPF data
+type ProcessInsight struct {
+	PID                 uint32  `json:"pid"`
+	Command             string  `json:"command"`
+	MemoryUsage         uint64  `json:"memory_usage"`
+	AllocationRate      float64 `json:"allocation_rate"`
+	MemoryLeakSignature string  `json:"memory_leak_signature,omitempty"`
+}
+
+// PredictionSummary contains prediction data
+type PredictionSummary struct {
+	Type        string        `json:"type"`
+	TimeToEvent time.Duration `json:"time_to_event"`
+	Confidence  float64       `json:"confidence"`
+	Impact      []string      `json:"impact"`
 }

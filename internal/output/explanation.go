@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/falseyair/tapio/pkg/types"
@@ -13,6 +14,11 @@ func (f *HumanFormatter) PrintExplanation(explanation *types.Explanation) error 
 	f.printExplanationHeader(explanation)
 	f.printAnalysis(explanation.Analysis)
 	f.printRootCauses(explanation.RootCauses)
+	
+	if explanation.Prediction != nil {
+		f.printPrediction(explanation.Prediction)
+	}
+	
 	f.printSolutions(explanation.Solutions)
 	
 	if explanation.Learning != nil {
@@ -24,12 +30,24 @@ func (f *HumanFormatter) PrintExplanation(explanation *types.Explanation) error 
 
 func (f *HumanFormatter) printExplanationHeader(explanation *types.Explanation) {
 	blue := color.New(color.FgBlue, color.Bold).SprintFunc()
+	red := color.New(color.FgRed, color.Bold).SprintFunc()
 	
 	// Add some spacing for better readability
 	fmt.Println()
 	
-	// Use friendly emoji and language based on the summary
-	if strings.Contains(explanation.Summary, "healthy") {
+	// Check if we have eBPF-detected issues
+	hasEBPFInsights := false
+	for _, cause := range explanation.RootCauses {
+		if strings.Contains(cause.Title, "eBPF") || strings.Contains(cause.Title, "Memory leak detected") {
+			hasEBPFInsights = true
+			break
+		}
+	}
+	
+	// Use appropriate header based on content
+	if hasEBPFInsights {
+		fmt.Printf("%s %s\n\n", red("ANALYSIS:"), explanation.Summary)
+	} else if strings.Contains(explanation.Summary, "healthy") {
 		fmt.Printf("%s %s\n\n", blue("GOOD NEWS:"), explanation.Summary)
 	} else if strings.Contains(explanation.Summary, "killed") || strings.Contains(explanation.Summary, "crash") {
 		fmt.Printf("%s %s\n\n", blue("OH NO:"), explanation.Summary)
@@ -44,7 +62,7 @@ func (f *HumanFormatter) printAnalysis(analysis *types.Analysis) {
 	}
 
 	cyan := color.New(color.FgCyan, color.Bold).SprintFunc()
-	fmt.Printf("%s\n", cyan("HERE'S WHAT'S HAPPENING:"))
+	fmt.Printf("%s\n", cyan("WHAT I SEE:"))
 
 	if analysis.KubernetesView != nil {
 		fmt.Printf("  • Kubernetes says: Pod %s", analysis.KubernetesView.Status)
@@ -71,6 +89,11 @@ func (f *HumanFormatter) printAnalysis(analysis *types.Analysis) {
 		for _, pattern := range analysis.RealityCheck.ErrorPatterns {
 			fmt.Printf("  • Error pattern: %s\n", pattern)
 		}
+		
+		// Print eBPF insights if available
+		if analysis.RealityCheck.EBPFInsights != nil {
+			f.printEBPFInsights(analysis.RealityCheck.EBPFInsights)
+		}
 	}
 
 	if analysis.Correlation != nil {
@@ -82,6 +105,11 @@ func (f *HumanFormatter) printAnalysis(analysis *types.Analysis) {
 		}
 	}
 
+	// Print kernel insights if available
+	if analysis.KernelInsights != nil {
+		f.printKernelInsights(analysis.KernelInsights)
+	}
+
 	fmt.Println()
 }
 
@@ -91,7 +119,7 @@ func (f *HumanFormatter) printRootCauses(causes []types.RootCause) {
 	}
 
 	yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
-	fmt.Printf("%s\n", yellow("HERE'S WHY:"))
+	fmt.Printf("%s\n", yellow("WHY THIS HAPPENS:"))
 
 	for _, cause := range causes {
 		confidence := int(cause.Confidence * 100)
@@ -115,7 +143,7 @@ func (f *HumanFormatter) printSolutions(solutions []types.Solution) {
 	}
 
 	green := color.New(color.FgGreen, color.Bold).SprintFunc()
-	fmt.Printf("%s\n", green("LET'S FIX IT:"))
+	fmt.Printf("%s\n", green("HOW TO FIX:"))
 
 	for _, solution := range solutions {
 		urgencyColor := f.getSolutionColor(solution.Urgency)
@@ -279,4 +307,120 @@ func (f *HumanFormatter) wrapText(text string, width int) string {
 	}
 	
 	return strings.Join(lines, "\n  ")
+}
+
+// printEBPFInsights prints eBPF data in a friendly format
+func (f *HumanFormatter) printEBPFInsights(insights *types.EBPFInsights) {
+	magenta := color.New(color.FgMagenta, color.Bold).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+	
+	// Memory overview
+	if insights.TotalMemory > 0 {
+		fmt.Printf("  • %s Memory: %s", magenta("eBPF Reality:"), f.humanizeBytes(insights.TotalMemory))
+		if insights.MemoryGrowthRate > 0 {
+			growthPerMin := insights.MemoryGrowthRate * 60
+			fmt.Printf(" (growing at %s/min, currently %s)", 
+				red(f.humanizeBytes(uint64(growthPerMin))),
+				f.humanizeBytes(insights.TotalMemory))
+		}
+		fmt.Println()
+	}
+	
+	// Process details
+	for _, proc := range insights.Processes {
+		fmt.Printf("  • Process %s %s: %s %s",
+			yellow("PID"),
+			yellow(fmt.Sprintf("%d", proc.PID)),
+			proc.Command,
+			f.humanizeBytes(proc.MemoryUsage))
+		
+		if proc.AllocationRate > 0 {
+			fmt.Printf(" [+%s/sec]", f.humanizeBytes(uint64(proc.AllocationRate)))
+		}
+		fmt.Println()
+		
+		if proc.MemoryLeakSignature != "" {
+			fmt.Printf("    %s", proc.MemoryLeakSignature)
+			fmt.Println()
+		}
+	}
+	
+	// Syscall patterns
+	if insights.SyscallPattern != "" {
+		fmt.Printf("  • %s %s\n", magenta("Syscall Pattern:"), insights.SyscallPattern)
+	}
+}
+
+// printKernelInsights prints kernel-level analysis
+func (f *HumanFormatter) printKernelInsights(insights *types.KernelInsights) {
+	magenta := color.New(color.FgMagenta, color.Bold).SprintFunc()
+	
+	fmt.Printf("\n  %s\n", magenta("[KERNEL ANALYSIS]"))
+	
+	if insights.MemoryPressure != "" {
+		fmt.Printf("  • Memory: %s\n", insights.MemoryPressure)
+	}
+	if insights.HeapAnalysis != "" {
+		fmt.Printf("  • Heap: %s\n", insights.HeapAnalysis)
+	}
+	if insights.NetworkCorrelation != "" {
+		fmt.Printf("  • Network: %s\n", insights.NetworkCorrelation)
+	}
+	if insights.DiskIO != "" {
+		fmt.Printf("  • Disk I/O: %s\n", insights.DiskIO)
+	}
+	if insights.CPUOverhead != "" {
+		fmt.Printf("  • CPU: %s\n", insights.CPUOverhead)
+	}
+}
+
+// printPrediction prints future failure predictions
+func (f *HumanFormatter) printPrediction(pred *types.PredictionSummary) {
+	red := color.New(color.FgRed, color.Bold).SprintFunc()
+	yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
+	
+	fmt.Printf("\n%s\n", red("[PREDICTION]"))
+	
+	// Time to event
+	timeStr := f.formatDuration(pred.TimeToEvent)
+	fmt.Printf("  %s %s in %s (%.0f%% confidence)\n",
+		yellow("WARNING:"),
+		pred.Type,
+		red(timeStr),
+		pred.Confidence*100)
+	
+	// Impact
+	if len(pred.Impact) > 0 {
+		fmt.Println("  Expected impact:")
+		for _, impact := range pred.Impact {
+			fmt.Printf("    • %s\n", impact)
+		}
+	}
+	fmt.Println()
+}
+
+// Helper to format duration in a friendly way
+func (f *HumanFormatter) formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.0f seconds", d.Seconds())
+	} else if d < time.Hour {
+		return fmt.Sprintf("%.0f minutes", d.Minutes())
+	} else {
+		return fmt.Sprintf("%.1f hours", d.Hours())
+	}
+}
+
+// Helper to humanize byte sizes
+func (f *HumanFormatter) humanizeBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

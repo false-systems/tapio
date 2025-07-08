@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 )
@@ -75,44 +74,28 @@ func (c *Collector) attachPrograms() error {
 	var err error
 
 	// Attach memory allocation tracker
-	l1, err := link.Tracepoint(link.TracepointOptions{
-		Program: c.objs.TrackMemoryAlloc,
-		Group:   "kmem",
-		Name:    "mm_page_alloc",
-	})
+	l1, err := link.Tracepoint("kmem", "mm_page_alloc", c.objs.TrackMemoryAlloc, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach memory alloc tracer: %w", err)
 	}
 	c.links = append(c.links, l1)
 
 	// Attach memory free tracker
-	l2, err := link.Tracepoint(link.TracepointOptions{
-		Program: c.objs.TrackMemoryFree,
-		Group:   "kmem",
-		Name:    "mm_page_free",
-	})
+	l2, err := link.Tracepoint("kmem", "mm_page_free", c.objs.TrackMemoryFree, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach memory free tracer: %w", err)
 	}
 	c.links = append(c.links, l2)
 
 	// Attach OOM kill tracker
-	l3, err := link.Tracepoint(link.TracepointOptions{
-		Program: c.objs.TrackOomKill,
-		Group:   "oom",
-		Name:    "oom_score_adj_update",
-	})
+	l3, err := link.Tracepoint("oom", "oom_score_adj_update", c.objs.TrackOomKill, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach OOM tracer: %w", err)
 	}
 	c.links = append(c.links, l3)
 
 	// Attach process exit tracker
-	l4, err := link.Tracepoint(link.TracepointOptions{
-		Program: c.objs.TrackProcessExit,
-		Group:   "sched",
-		Name:    "sched_process_exit",
-	})
+	l4, err := link.Tracepoint("sched", "sched_process_exit", c.objs.TrackProcessExit, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach process exit tracer: %w", err)
 	}
