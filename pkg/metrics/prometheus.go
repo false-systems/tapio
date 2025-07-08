@@ -296,4 +296,3 @@ func (e *PrometheusExporter) StartPeriodicUpdates(ctx context.Context, interval 
 		}
 	}
 }
-
