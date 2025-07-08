@@ -1,4 +1,5 @@
-// +build !linux
+//go:build linux && ebpf
+// +build linux,ebpf
 
 package ebpf
 

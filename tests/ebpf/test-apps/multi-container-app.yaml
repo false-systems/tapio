@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-container-test
+  namespace: tapio-ebpf-tests
+  labels:
+    test-type: process-correlation
+    app: tapio-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multi-container-test
+  template:
+    metadata:
+      labels:
+        app: multi-container-test
+        test-type: process-correlation
+    spec:
+      containers:
+      - name: main-app
+        image: python:3.9-slim
+        command: ["python", "-c"]
+        args:
+          - |
+            import time
+            import os
+            
+            print("🔧 Main container starting...")
+            print(f"📋 PID: {os.getpid()}")
+            print("💾 Will allocate 5MB every 10 seconds")
+            
+            allocated_data = []
+            iteration = 0
+            
+            while True:
+                iteration += 1
+                
+                # Allocate 5MB
+                chunk = bytearray(5 * 1024 * 1024)
+                for i in range(0, len(chunk), 1024):
+                    chunk[i] = iteration % 256
+                
+                allocated_data.append(chunk)
+                
+                print(f"🔧 Main[{os.getpid()}]: Allocated {len(allocated_data) * 5}MB total")
+                time.sleep(10)
+        resources:
+          requests:
+            memory: "20Mi"
+            cpu: "50m"
+          limits:
+            memory: "200Mi"
+            cpu: "100m"
+      
+      - name: sidecar-monitor
+        image: python:3.9-slim
+        command: ["python", "-c"]
+        args:
+          - |
+            import time
+            import os
+            
+            print("📊 Sidecar monitor starting...")
+            print(f"📋 PID: {os.getpid()}")
+            print("🔍 Will slowly leak 2MB every 15 seconds")
+            
+            monitoring_data = []
+            iteration = 0
+            
+            while True:
+                iteration += 1
+                
+                # Smaller leak pattern
+                chunk = bytearray(2 * 1024 * 1024)  # 2MB
+                for i in range(0, len(chunk), 2048):
+                    chunk[i] = (iteration * 2) % 256
+                
+                monitoring_data.append(chunk)
+                
+                print(f"📊 Sidecar[{os.getpid()}]: Monitoring data {len(monitoring_data) * 2}MB")
+                time.sleep(15)
+        resources:
+          requests:
+            memory: "10Mi"
+            cpu: "25m"
+          limits:
+            memory: "100Mi"
+            cpu: "50m"
+      
+      - name: background-worker
+        image: python:3.9-slim
+        command: ["python", "-c"]
+        args:
+          - |
+            import time
+            import os
+            
+            print("⚙️  Background worker starting...")
+            print(f"📋 PID: {os.getpid()}")
+            print("🔄 Will cycle memory (allocate then free)")
+            
+            while True:
+                # Allocate and then free memory (healthy pattern)
+                temp_data = []
+                
+                # Allocate 10MB in chunks
+                for i in range(10):
+                    chunk = bytearray(1024 * 1024)  # 1MB
+                    temp_data.append(chunk)
+                    print(f"⚙️  Worker[{os.getpid()}]: Allocated {(i+1)}MB")
+                    time.sleep(1)
+                
+                print(f"⚙️  Worker[{os.getpid()}]: Freeing all memory...")
+                temp_data.clear()  # Free memory
+                
+                time.sleep(10)  # Wait before next cycle
+        resources:
+          requests:
+            memory: "15Mi"
+            cpu: "25m"
+          limits:
+            memory: "50Mi"
+            cpu: "50m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multi-container-test-svc
+  namespace: tapio-ebpf-tests
+spec:
+  selector:
+    app: multi-container-test
+  ports:
+  - port: 8080
