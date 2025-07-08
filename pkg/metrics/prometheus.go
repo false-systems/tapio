@@ -1,3 +1,4 @@
+// Package metrics provides Prometheus metrics exporting for Tapio health checks
 package metrics
 
 import (
@@ -12,7 +13,7 @@ import (
 	"github.com/falseyair/tapio/pkg/types"
 )
 
-// PrometheusExporter exports Tapio metrics to Prometheus
+// PrometheusExporter exports Tapio metrics to Prometheus format
 type PrometheusExporter struct {
 	checker   CheckerInterface
 	collector interface{}
@@ -267,6 +268,7 @@ func (e *PrometheusExporter) StartMetricsServer(addr string) error {
 	fmt.Printf("📊 Metrics endpoint: http://%s/metrics\n", addr)
 	fmt.Printf("💚 Health endpoint: http://%s/health\n", addr)
 
+	// nolint:gosec // Prometheus exporters typically don't need timeouts
 	return http.ListenAndServe(addr, mux)
 }
 

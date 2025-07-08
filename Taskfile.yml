@@ -116,10 +116,47 @@ tasks:
       - go tool cover -html=coverage.out -o coverage.html
       - echo "Coverage report generated at coverage.html"
 
+  test:unit:
+    desc: Run unit tests only
+    cmds:
+      - go test -v -race -short ./...
+
+  test:pkg:
+    desc: Run tests for a specific package
+    cmds:
+      - go test -v -race ./pkg/{{.PKG}}/...
+    vars:
+      PKG: '{{default "*" .PKG}}'
+
+  test:health:
+    desc: Run health package tests
+    cmds:
+      - go test -v -race ./pkg/health/...
+
+  test:simple:
+    desc: Run simple checker tests
+    cmds:
+      - go test -v -race ./pkg/simple/...
+
+  test:k8s:
+    desc: Run k8s client tests
+    cmds:
+      - go test -v -race ./pkg/k8s/...
+
+  test:metrics:
+    desc: Run metrics package tests
+    cmds:
+      - go test -v -race ./pkg/metrics/...
+
   test:integration:
     desc: Run integration tests
     cmds:
       - go test -v -tags=integration ./...
+
+  test:e2e:
+    desc: Run end-to-end tests
+    cmds:
+      - go test -v -tags=e2e ./test/e2e/...
 
   bench:
     desc: Run benchmarks
