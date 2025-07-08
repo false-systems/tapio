@@ -223,7 +223,7 @@ func (c *Checker) getPods(ctx context.Context, namespace string, all bool) ([]co
 
 	podList, err := c.client.CoreV1().Pods(namespace).List(ctx, listOptions)
 	if err != nil {
-		return nil, err
+		return nil, enhanceK8sError(err)
 	}
 
 	return podList.Items, nil
