@@ -15,7 +15,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "tapio",
-	Short: "🌲 The Forest Guardian for Kubernetes",
+	Short: "The Forest Guardian for Kubernetes",
 	Long: `Tapio makes Kubernetes and eBPF accessible to everyone.
 
 Named after the Finnish god of forests, Tapio protects your digital forest

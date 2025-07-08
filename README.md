@@ -46,18 +46,18 @@ tapio check --output json
 
 ```bash
 $ tapio check
-✅ 3 pods healthy
-⚠️  1 pod has warnings
+HEALTHY: 3 pods healthy
+WARNING: 1 pod has warnings
 
-⚠️  pod/api-service-xyz: High restart count
+WARNING: pod/api-service-xyz: High restart count
    Container api has restarted 5 times
-   🔮 Will fail in 15m (80% confidence)
-   📋 Reason: Frequent restarts indicate unstable container
+   PREDICTION: Will fail in 15m (80% confidence)
+   REASON: Frequent restarts indicate unstable container
 
-🔧 Quick fixes available:
-  ⚡ kubectl logs api-service-xyz --previous
+Quick fixes available:
+  [FIX] kubectl logs api-service-xyz --previous
      Check logs for error patterns
-  🚨 kubectl describe pod api-service-xyz
+  [URGENT] kubectl describe pod api-service-xyz
      Get detailed pod information
 ```
 
@@ -113,4 +113,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**🌲 Keep your Kubernetes forest healthy with Tapio!**
+**Keep your Kubernetes forest healthy with Tapio!**

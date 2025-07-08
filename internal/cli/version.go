@@ -10,7 +10,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show Tapio version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("🌲 Tapio v%s\n", getVersion())
+		fmt.Printf("Tapio v%s\n", getVersion())
 		fmt.Printf("Git Commit: %s\n", getGitCommit())
 		fmt.Printf("Build Date: %s\n", getBuildDate())
 	},
