@@ -22,15 +22,15 @@ const (
 
 // MemoryEvent represents a memory-related event from eBPF
 type MemoryEvent struct {
-	Timestamp     time.Time
-	PID           uint32
-	TID           uint32
-	Size          uint64
-	TotalMemory   uint64
-	EventType     EventType
-	Command       string
-	InContainer   bool
-	ContainerPID  uint32
+	Timestamp    time.Time
+	PID          uint32
+	TID          uint32
+	Size         uint64
+	TotalMemory  uint64
+	EventType    EventType
+	Command      string
+	InContainer  bool
+	ContainerPID uint32
 }
 
 // rawMemoryEvent matches the C struct exactly
@@ -86,16 +86,16 @@ func clen(b []byte) int {
 
 // ProcessMemoryStats tracks memory usage for a process
 type ProcessMemoryStats struct {
-	PID             uint32
-	Command         string
-	TotalAllocated  uint64
-	TotalFreed      uint64
-	CurrentUsage    uint64
-	AllocationRate  float64 // bytes per second
-	LastUpdate      time.Time
-	InContainer     bool
-	ContainerPID    uint32
-	GrowthPattern   []MemoryDataPoint
+	PID            uint32
+	Command        string
+	TotalAllocated uint64
+	TotalFreed     uint64
+	CurrentUsage   uint64
+	AllocationRate float64 // bytes per second
+	LastUpdate     time.Time
+	InContainer    bool
+	ContainerPID   uint32
+	GrowthPattern  []MemoryDataPoint
 }
 
 // MemoryDataPoint represents a point in time memory measurement

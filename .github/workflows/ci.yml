@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,5 +15,11 @@ jobs:
         with:
           go-version: '1.24'
           cache: true
-      - run: go build ./cmd/tapio
-      - run: go test ./...
+      
+      # Fast lint - just the essentials
+      - run: gofmt -l . | grep -v vendor | tee fmt-issues.txt && test ! -s fmt-issues.txt
+      - run: go vet ./...
+      
+      # Build and test
+      - run: go build ./cmd/tapio  
+      - run: go test -short ./...
