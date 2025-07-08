@@ -9,9 +9,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/falseyair/tapio/pkg/k8s"
 	"github.com/falseyair/tapio/pkg/types"
 )
 
@@ -22,17 +21,32 @@ type Checker struct {
 
 // NewChecker creates a new checker with auto-detected Kubernetes config
 func NewChecker() (*Checker, error) {
-	config, err := getKubeConfig()
+	k8sClient, err := k8s.NewClient("")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get kubeconfig: %w", err)
+		return nil, enhanceK8sError(err)
 	}
 
-	client, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
-	}
+	return &Checker{client: k8sClient.Clientset}, nil
+}
 
-	return &Checker{client: client}, nil
+// enhanceK8sError provides user-friendly error messages for common K8s issues
+func enhanceK8sError(err error) error {
+	errStr := err.Error()
+	
+	switch {
+	case strings.Contains(errStr, "connection refused"):
+		return fmt.Errorf("❌ Kubernetes cluster not running\n🔧 Try: minikube start, kind create cluster, or check your cluster status")
+	case strings.Contains(errStr, "no such host"):
+		return fmt.Errorf("❌ Cannot reach Kubernetes API server\n🔧 Check your kubeconfig and network connectivity")
+	case strings.Contains(errStr, "couldn't get current server API group list"):
+		return fmt.Errorf("❌ Kubernetes API server unreachable\n🔧 Try: kubectl cluster-info or restart your cluster")
+	case strings.Contains(errStr, "The connection to the server"):
+		return fmt.Errorf("❌ Kubernetes cluster connection failed\n🔧 Check if your cluster is running: kubectl get nodes")
+	case strings.Contains(errStr, "kubeconfig"):
+		return fmt.Errorf("❌ No valid kubeconfig found\n🔧 Try: kubectl config view or set KUBECONFIG environment variable")
+	default:
+		return fmt.Errorf("❌ Kubernetes connection failed: %w\n🔧 Run 'kubectl cluster-info' to check cluster status", err)
+	}
 }
 
 // Check performs a health check based on the request
@@ -54,6 +68,16 @@ func (c *Checker) Check(ctx context.Context, req *types.CheckRequest) (*types.Ch
 
 	result := &types.CheckResult{
 		Timestamp: time.Now(),
+	}
+
+	// Handle empty pod list with helpful message
+	if len(pods) == 0 {
+		result.Problems = append(result.Problems, types.Problem{
+			Title:       "No pods found",
+			Description: c.getEmptyPodsMessage(namespace, req.All, req.Resource),
+			Severity:    types.SeverityWarning,
+		})
+		return result, nil
 	}
 
 	// Analyze each pod
@@ -171,20 +195,24 @@ func (c *Checker) isJob(pod *corev1.Pod) bool {
 	return false
 }
 
-// Helper functions
-func getKubeConfig() (*rest.Config, error) {
-	// Try in-cluster config first
-	if config, err := rest.InClusterConfig(); err == nil {
-		return config, nil
+// getEmptyPodsMessage provides helpful context when no pods are found
+func (c *Checker) getEmptyPodsMessage(namespace string, all bool, resource string) string {
+	if resource != "" {
+		return fmt.Sprintf("No pods match resource '%s'. Try 'kubectl get pods --all-namespaces | grep %s'", resource, resource)
 	}
-
-	// Use the same kubeconfig resolution as kubectl
-	// This respects KUBECONFIG env var and uses ~/.kube/config as fallback
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	configOverrides := &clientcmd.ConfigOverrides{}
-	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-	return kubeConfig.ClientConfig()
+	
+	if all {
+		return "No pods found in entire cluster. Try deploying some workloads or check if cluster is empty."
+	}
+	
+	if namespace == "" {
+		namespace = "default"
+	}
+	
+	return fmt.Sprintf("No pods found in namespace '%s'. Try:\n🔧 kubectl get pods -n %s\n🔧 kubectl get pods --all-namespaces\n🔧 Deploy some workloads to test", namespace, namespace)
 }
+
+// Helper functions
 
 func (c *Checker) getPods(ctx context.Context, namespace string, all bool) ([]corev1.Pod, error) {
 	listOptions := metav1.ListOptions{}
@@ -195,7 +223,7 @@ func (c *Checker) getPods(ctx context.Context, namespace string, all bool) ([]co
 
 	podList, err := c.client.CoreV1().Pods(namespace).List(ctx, listOptions)
 	if err != nil {
-		return nil, err
+		return nil, enhanceK8sError(err)
 	}
 
 	return podList.Items, nil

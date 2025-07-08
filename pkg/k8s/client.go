@@ -24,10 +24,28 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
-	return &Client{
+	client := &Client{
 		Clientset: clientset,
 		Config:    config,
-	}, nil
+	}
+
+	// Test connectivity immediately
+	if err := client.TestConnection(); err != nil {
+		return nil, fmt.Errorf("kubernetes cluster not accessible: %w", err)
+	}
+
+	return client, nil
+}
+
+// TestConnection verifies the Kubernetes cluster is reachable
+func (c *Client) TestConnection() error {
+	// Try to get server version as a connectivity test
+	_, err := c.Clientset.Discovery().ServerVersion()
+	if err != nil {
+		return fmt.Errorf("cannot reach Kubernetes API server: %w", err)
+	}
+
+	return nil
 }
 
 func getConfig(kubeconfigPath string) (*rest.Config, error) {
