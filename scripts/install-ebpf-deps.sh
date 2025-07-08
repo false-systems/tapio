@@ -42,8 +42,16 @@ case $OS in
             libbpf-dev \
             linux-headers-$(uname -r) \
             build-essential \
-            pkg-config \
-            bpftool || sudo apt-get install -y linux-tools-common linux-tools-$(uname -r)
+            pkg-config
+        
+        # Install bpftool - handle Ubuntu 24.04+ differently
+        if sudo apt-get install -y linux-tools-$(uname -r) 2>/dev/null; then
+            echo "✅ Installed linux-tools for current kernel"
+        elif sudo apt-get install -y linux-tools-common linux-tools-generic 2>/dev/null; then
+            echo "✅ Installed generic linux-tools"
+        else
+            echo "⚠️  Could not install bpftool, eBPF will work with limited features"
+        fi
         ;;
     
     fedora)

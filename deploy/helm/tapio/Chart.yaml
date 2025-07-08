@@ -1,0 +1,23 @@
+apiVersion: v2
+name: tapio
+description: Kubernetes intelligence that speaks human - predict failures, understand problems, get answers
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - monitoring
+  - intelligence
+  - oom-killer
+  - ebpf
+  - observability
+home: https://github.com/falseyair/tapio
+sources:
+  - https://github.com/falseyair/tapio
+maintainers:
+  - name: Tapio Team
+    email: tapio@example.com
+icon: https://raw.githubusercontent.com/falseyair/tapio/main/logo.png
+annotations:
+  category: Monitoring
+  license: Apache-2.0

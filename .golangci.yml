@@ -1,8 +1,0 @@
-# Super simple linting - just the basics
-run:
-  timeout: 2m
-
-linters:
-  enable:
-    - gofmt
-  disable-all: true

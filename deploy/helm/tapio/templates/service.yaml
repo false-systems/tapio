@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tapio.fullname" . }}-server
+  namespace: {{ .Values.global.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "tapio.server.labels" . | nindent 4 }}
+  {{- with .Values.server.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.server.service.type }}
+  ports:
+    - port: {{ .Values.server.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- if .Values.server.metrics.enabled }}
+    - port: {{ .Values.server.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
+  selector:
+    {{- include "tapio.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+
+{{- if .Values.cli.externalAccess.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tapio.fullname" . }}-external
+  namespace: {{ .Values.global.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "tapio.server.labels" . | nindent 4 }}
+  {{- with .Values.cli.externalAccess.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.cli.externalAccess.type }}
+  ports:
+    - port: {{ .Values.cli.externalAccess.port }}
+      targetPort: http
+      protocol: TCP
+      name: cli
+  selector:
+    {{- include "tapio.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+{{- end }}

@@ -75,15 +75,15 @@ type ExplainRequest struct {
 
 // Explanation contains the detailed analysis and explanation
 type Explanation struct {
-	Resource    *ResourceRef        `json:"resource"`
-	Summary     string              `json:"summary"`
-	Problems    []Problem           `json:"problems"`
-	Analysis    *Analysis           `json:"analysis"`
-	RootCauses  []RootCause         `json:"root_causes"`
-	Solutions   []Solution          `json:"solutions"`
-	Prediction  *PredictionSummary  `json:"prediction,omitempty"`
-	Learning    *Learning           `json:"learning,omitempty"`
-	Timestamp   time.Time           `json:"timestamp"`
+	Resource   *ResourceRef       `json:"resource"`
+	Summary    string             `json:"summary"`
+	Problems   []Problem          `json:"problems"`
+	Analysis   *Analysis          `json:"analysis"`
+	RootCauses []RootCause        `json:"root_causes"`
+	Solutions  []Solution         `json:"solutions"`
+	Prediction *PredictionSummary `json:"prediction,omitempty"`
+	Learning   *Learning          `json:"learning,omitempty"`
+	Timestamp  time.Time          `json:"timestamp"`
 }
 
 // Analysis contains the technical details
@@ -96,20 +96,20 @@ type Analysis struct {
 
 // KubernetesView shows what Kubernetes API reports
 type KubernetesView struct {
-	Status      string            `json:"status"`
-	Phase       string            `json:"phase"`
-	Conditions  []string          `json:"conditions"`
-	Resources   map[string]string `json:"resources"`
-	Events      []string          `json:"recent_events"`
+	Status     string            `json:"status"`
+	Phase      string            `json:"phase"`
+	Conditions []string          `json:"conditions"`
+	Resources  map[string]string `json:"resources"`
+	Events     []string          `json:"recent_events"`
 }
 
 // RealityCheck shows actual system state with eBPF data
 type RealityCheck struct {
-	ActualMemory    string        `json:"actual_memory,omitempty"`
-	RestartPattern  string        `json:"restart_pattern,omitempty"`
-	ErrorPatterns   []string      `json:"error_patterns,omitempty"`
-	NetworkIssues   []string      `json:"network_issues,omitempty"`
-	EBPFInsights    *EBPFInsights `json:"ebpf_insights,omitempty"`
+	ActualMemory   string        `json:"actual_memory,omitempty"`
+	RestartPattern string        `json:"restart_pattern,omitempty"`
+	ErrorPatterns  []string      `json:"error_patterns,omitempty"`
+	NetworkIssues  []string      `json:"network_issues,omitempty"`
+	EBPFInsights   *EBPFInsights `json:"ebpf_insights,omitempty"`
 }
 
 // Correlation shows the differences and patterns

@@ -95,7 +95,7 @@ func (c *Checker) analyzePod(pod *corev1.Pod) types.Problem {
 	case corev1.PodRunning:
 		// Pod is running - continue with other checks
 		break
-		
+
 	case corev1.PodSucceeded:
 		// Check if this is a job that completed successfully
 		if c.isJob(pod) {
@@ -110,19 +110,19 @@ func (c *Checker) analyzePod(pod *corev1.Pod) types.Problem {
 			problem.Description = "Regular pods should stay running, not complete"
 			return problem
 		}
-		
+
 	case corev1.PodFailed:
 		problem.Severity = types.SeverityCritical
 		problem.Title = "Pod failed"
 		problem.Description = c.getPodStatusDescription(pod)
 		return problem
-		
+
 	case corev1.PodPending:
 		problem.Severity = types.SeverityWarning
 		problem.Title = "Pod stuck pending"
 		problem.Description = c.getPodStatusDescription(pod)
 		return problem
-		
+
 	default:
 		problem.Severity = types.SeverityCritical
 		problem.Title = fmt.Sprintf("Pod in unexpected phase: %s", pod.Status.Phase)
@@ -238,20 +238,20 @@ func (c *Checker) getPodStatusDescription(pod *corev1.Pod) string {
 			}
 		}
 		return "Pod is waiting to be scheduled or containers are being created"
-		
+
 	case corev1.PodFailed:
 		// Try to get specific failure reason
 		if pod.Status.Message != "" {
 			return fmt.Sprintf("Pod failed: %s", pod.Status.Message)
 		}
 		return "Pod has terminated with failure"
-		
+
 	case corev1.PodSucceeded:
 		if c.isJob(pod) {
 			return "Job completed its work successfully"
 		}
 		return "Pod completed and terminated (unusual for regular pods)"
-		
+
 	default:
 		return fmt.Sprintf("Pod is in %s phase", pod.Status.Phase)
 	}

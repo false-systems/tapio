@@ -22,9 +22,9 @@ func (o *oomdetectorObjects) Close() error {
 }
 
 type oomdetectorSpecs struct {
-	OomDetector      *ebpf.ProgramSpec
-	ProcessMemory    *ebpf.MapSpec
-	Events           *ebpf.MapSpec
+	OomDetector   *ebpf.ProgramSpec
+	ProcessMemory *ebpf.MapSpec
+	Events        *ebpf.MapSpec
 }
 
 func loadOomdetector() (*ebpf.CollectionSpec, error) {
@@ -34,7 +34,7 @@ func loadOomdetector() (*ebpf.CollectionSpec, error) {
 		},
 		Maps: map[string]*ebpf.MapSpec{
 			"process_memory": nil,
-			"events": nil,
+			"events":         nil,
 		},
 	}, nil
 }
