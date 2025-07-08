@@ -248,14 +248,14 @@ func (e *PrometheusExporter) StartMetricsServer(addr string) error {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"healthy","service":"tapio-prometheus-exporter"}`))
+		_, _ = w.Write([]byte(`{"status":"healthy","service":"tapio-prometheus-exporter"}`))
 	})
 
 	// Info endpoint
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"service": "tapio-prometheus-exporter",
 			"version": "1.0.0",
 			"endpoints": ["/metrics", "/health", "/info"],
