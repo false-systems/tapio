@@ -88,7 +88,7 @@ func (c *Checker) StopEBPFMonitoring() error {
 // enhanceK8sError provides user-friendly error messages for common K8s issues
 func enhanceK8sError(err error) error {
 	errStr := err.Error()
-	
+
 	switch {
 	case strings.Contains(errStr, "connection refused"):
 		return fmt.Errorf("❌ Kubernetes cluster not running\n🔧 Try: minikube start, kind create cluster, or check your cluster status")
@@ -256,15 +256,15 @@ func (c *Checker) getEmptyPodsMessage(namespace string, all bool, resource strin
 	if resource != "" {
 		return fmt.Sprintf("No pods match resource '%s'. Try 'kubectl get pods --all-namespaces | grep %s'", resource, resource)
 	}
-	
+
 	if all {
 		return "No pods found in entire cluster. Try deploying some workloads or check if cluster is empty."
 	}
-	
+
 	if namespace == "" {
 		namespace = "default"
 	}
-	
+
 	return fmt.Sprintf("No pods found in namespace '%s'. Try:\n🔧 kubectl get pods -n %s\n🔧 kubectl get pods --all-namespaces\n🔧 Deploy some workloads to test", namespace, namespace)
 }
 
