@@ -45,6 +45,8 @@ type EBPFData struct {
 	ProcessStats  map[uint32]*ProcessMemoryStats `json:"process_stats"`
 	SystemMetrics SystemMetrics                  `json:"system_metrics"`
 	MemoryEvents  []MemoryEvent                  `json:"memory_events"`
+	CPUEvents     []CPUEvent                     `json:"cpu_events"`
+	IOEvents      []IOEvent                      `json:"io_events"`
 	Timestamp     time.Time                      `json:"timestamp"`
 }
 
@@ -60,6 +62,8 @@ type ProcessMemoryStats struct {
 	InContainer    bool              `json:"in_container"`
 	ContainerPID   uint32            `json:"container_pid"`
 	GrowthPattern  []MemoryDataPoint `json:"growth_pattern"`
+	IOBytesWritten uint64            `json:"io_bytes_written"`
+	IOBytesRead    uint64            `json:"io_bytes_read"`
 }
 
 // MemoryDataPoint represents a point in time memory measurement
@@ -77,12 +81,34 @@ type MemoryEvent struct {
 	TotalMemory uint64    `json:"total_memory"`
 }
 
+// CPUEvent represents a CPU-related event
+type CPUEvent struct {
+	Timestamp time.Time `json:"timestamp"`
+	PID       uint32    `json:"pid"`
+	EventType string    `json:"event_type"` // "throttle", "schedule", etc.
+	Duration  uint64    `json:"duration"`   // Duration in nanoseconds
+	CPUCore   int       `json:"cpu_core"`
+}
+
+// IOEvent represents an IO-related event
+type IOEvent struct {
+	Timestamp time.Time `json:"timestamp"`
+	PID       uint32    `json:"pid"`
+	EventType string    `json:"event_type"` // "read", "write", "sync", etc.
+	Latency   uint64    `json:"latency"`    // Latency in nanoseconds
+	Size      uint64    `json:"size"`       // IO size in bytes
+	Device    string    `json:"device"`
+	Path      string    `json:"path"`
+}
+
 // SystemMetrics represents system-wide metrics
 type SystemMetrics struct {
 	TotalMemory     uint64    `json:"total_memory"`
 	AvailableMemory uint64    `json:"available_memory"`
 	MemoryPressure  float64   `json:"memory_pressure"`
 	CPUUsage        float64   `json:"cpu_usage"`
+	CPUPressure     float64   `json:"cpu_pressure"`
+	IOWait          float64   `json:"iowait"`
 	Timestamp       time.Time `json:"timestamp"`
 }
 
@@ -105,11 +131,16 @@ type PodMetrics struct {
 
 // ContainerMetrics represents container-level metrics
 type ContainerMetrics struct {
-	PodName      string          `json:"pod_name"`
-	Container    string          `json:"container"`
-	CPU          ResourceMetrics `json:"cpu"`
-	Memory       ResourceMetrics `json:"memory"`
-	RestartCount int32           `json:"restart_count"`
+	PodName      string             `json:"pod_name"`
+	Container    string             `json:"container"`
+	Namespace    string             `json:"namespace"`
+	CPU          CPUResourceMetrics `json:"cpu"`
+	Memory       ResourceMetrics    `json:"memory"`
+	RestartCount int32              `json:"restart_count"`
+	VolumeUsage  float64            `json:"volume_usage"` // Volume usage percentage
+	VolumePath   string             `json:"volume_path"`
+	WriteIOPS    float64            `json:"write_iops"`
+	ReadIOPS     float64            `json:"read_iops"`
 }
 
 // NodeMetrics represents node-level metrics
@@ -131,6 +162,13 @@ type ResourceMetrics struct {
 	Trend   float64 `json:"trend"` // Growth rate
 }
 
+// CPUResourceMetrics represents CPU-specific metrics
+type CPUResourceMetrics struct {
+	ResourceMetrics
+	ThrottledTime uint64 `json:"throttled_time"` // Time throttled in nanoseconds
+	TotalTime     uint64 `json:"total_time"`     // Total CPU time in nanoseconds
+}
+
 // LogsData represents log data from various sources
 type LogsData struct {
 	Entries   []LogEntry `json:"entries"`
@@ -141,8 +179,11 @@ type LogsData struct {
 type LogEntry struct {
 	Timestamp time.Time              `json:"timestamp"`
 	Level     string                 `json:"level"`
+	Severity  string                 `json:"severity"` // ERROR, FATAL, PANIC, etc.
 	Message   string                 `json:"message"`
 	Source    string                 `json:"source"`
+	PodName   string                 `json:"pod_name"`
+	Namespace string                 `json:"namespace"`
 	Labels    map[string]string      `json:"labels"`
 	Fields    map[string]interface{} `json:"fields"`
 }
@@ -285,22 +326,33 @@ func (dc *DataCollection) GetMetricsData(ctx context.Context) (*MetricsData, err
 }
 
 // GetLogsData retrieves logs data
-func (dc *DataCollection) GetLogsData(ctx context.Context, timeRange time.Duration) (*LogsData, error) {
+func (dc *DataCollection) GetLogsData(ctx context.Context) (*LogsData, error) {
+	cacheKey := "logs_data"
+
+	// Check cache first
+	if cached, exists := dc.cache[cacheKey]; exists && time.Now().Before(cached.ExpiresAt) {
+		return cached.Data.(*LogsData), nil
+	}
+
 	source, exists := dc.sources[SourceLogs]
 	if !exists {
 		return nil, NewSourceNotAvailableError(SourceLogs)
 	}
 
-	params := map[string]interface{}{
-		"time_range": timeRange,
-	}
-
-	data, err := source.GetData(ctx, "recent", params)
+	data, err := source.GetData(ctx, "recent", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return data.(*LogsData), nil
+	logsData := data.(*LogsData)
+
+	// Cache the data
+	dc.cache[cacheKey] = &CachedData{
+		Data:      logsData,
+		ExpiresAt: time.Now().Add(dc.cacheTTL),
+	}
+
+	return logsData, nil
 }
 
 // ClearCache clears all cached data
