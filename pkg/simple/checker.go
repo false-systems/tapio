@@ -19,6 +19,7 @@ import (
 type Checker struct {
 	client      kubernetes.Interface
 	ebpfMonitor ebpf.Monitor
+	enhancedExplainer *SimpleEnhancedExplainer
 }
 
 // NewChecker creates a new checker with auto-detected Kubernetes config
@@ -31,10 +32,17 @@ func NewChecker() (*Checker, error) {
 	// Create eBPF monitor with default config (disabled by default)
 	ebpfMonitor := ebpf.NewMonitor(nil)
 
-	return &Checker{
+	checker := &Checker{
 		client:      k8sClient.Clientset,
 		ebpfMonitor: ebpfMonitor,
-	}, nil
+	}
+	
+	// Initialize enhanced explainer if eBPF is available
+	if ebpfMonitor != nil {
+		checker.enhancedExplainer = NewSimpleEnhancedExplainer(ebpfMonitor)
+	}
+	
+	return checker, nil
 }
 
 // NewCheckerWithConfig creates a new checker with custom eBPF configuration
@@ -47,10 +55,15 @@ func NewCheckerWithConfig(ebpfConfig *ebpf.Config) (*Checker, error) {
 	// Create eBPF monitor with provided config
 	ebpfMonitor := ebpf.NewMonitor(ebpfConfig)
 
-	return &Checker{
+	checker := &Checker{
 		client:      k8sClient.Clientset,
 		ebpfMonitor: ebpfMonitor,
-	}, nil
+	}
+	
+	// Initialize enhanced explainer
+	checker.enhancedExplainer = NewSimpleEnhancedExplainer(ebpfMonitor)
+	
+	return checker, nil
 }
 
 // GetClient returns the Kubernetes client for direct access
@@ -363,4 +376,22 @@ func (c *Checker) generateQuickFixes(problems []types.Problem) []types.QuickFix 
 	}
 
 	return fixes
+}
+
+// NewCheckerWithEBPF creates a new checker with eBPF support enabled
+func NewCheckerWithEBPF() (*Checker, error) {
+	config := &ebpf.Config{
+		Enabled:         true,
+		EventBufferSize: 1000,
+		RetentionPeriod: "5m",
+	}
+	return NewCheckerWithConfig(config)
+}
+
+// GetEnhancedExplainer returns the enhanced explainer if available
+func (c *Checker) GetEnhancedExplainer() (*SimpleEnhancedExplainer, bool) {
+	if c.enhancedExplainer != nil {
+		return c.enhancedExplainer, true
+	}
+	return nil, false
 }

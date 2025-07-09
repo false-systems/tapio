@@ -16,9 +16,9 @@ import (
 )
 
 var (
-	metricsAddr    string
-	updateInterval time.Duration
-	enableEBPF     bool
+	metricsAddr          string
+	updateInterval       time.Duration
+	prometheusEnableEBPF bool
 )
 
 var prometheusCmd = &cobra.Command{
@@ -49,7 +49,7 @@ func init() {
 		"Address to listen on for metrics HTTP server")
 	prometheusCmd.Flags().DurationVar(&updateInterval, "interval", 30*time.Second,
 		"How often to update metrics by scanning the cluster")
-	prometheusCmd.Flags().BoolVar(&enableEBPF, "enable-ebpf", false,
+	prometheusCmd.Flags().BoolVar(&prometheusEnableEBPF, "enable-ebpf", false,
 		"Enable eBPF monitoring for enhanced metrics (requires root)")
 }
 
@@ -61,7 +61,7 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 
 	// Create eBPF config if enabled
 	var ebpfConfig *ebpf.Config
-	if enableEBPF {
+	if prometheusEnableEBPF {
 		ebpfConfig = &ebpf.Config{
 			Enabled:         true,
 			EventBufferSize: 1000,
@@ -76,7 +76,7 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try to start eBPF monitoring if enabled
-	if enableEBPF {
+	if prometheusEnableEBPF {
 		err = checker.StartEBPFMonitoring(ctx)
 		if err != nil {
 			fmt.Printf("[WARN] eBPF monitoring not available: %v\n", err)

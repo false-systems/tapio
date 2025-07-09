@@ -51,16 +51,16 @@ func DefaultConfig() *Config {
 
 // ProcessMemoryStats represents memory statistics for a process
 type ProcessMemoryStats struct {
-	PID            uint32                 `json:"pid"`
-	Command        string                 `json:"command"`
-	TotalAllocated uint64                 `json:"total_allocated"`
-	TotalFreed     uint64                 `json:"total_freed"`
-	CurrentUsage   uint64                 `json:"current_usage"`
-	AllocationRate float64                `json:"allocation_rate"` // bytes per second
-	LastUpdate     time.Time              `json:"last_update"`
-	InContainer    bool                   `json:"in_container"`
-	ContainerPID   uint32                 `json:"container_pid"`
-	GrowthPattern  []MemoryDataPoint      `json:"growth_pattern"`
+	PID            uint32            `json:"pid"`
+	Command        string            `json:"command"`
+	TotalAllocated uint64            `json:"total_allocated"`
+	TotalFreed     uint64            `json:"total_freed"`
+	CurrentUsage   uint64            `json:"current_usage"`
+	AllocationRate float64           `json:"allocation_rate"` // bytes per second
+	LastUpdate     time.Time         `json:"last_update"`
+	InContainer    bool              `json:"in_container"`
+	ContainerPID   uint32            `json:"container_pid"`
+	GrowthPattern  []MemoryDataPoint `json:"growth_pattern"`
 }
 
 // MemoryDataPoint represents a single memory measurement
@@ -71,12 +71,12 @@ type MemoryDataPoint struct {
 
 // OOMPrediction represents an out-of-memory prediction
 type OOMPrediction struct {
-	PID              uint32        `json:"pid"`
-	TimeToOOM        time.Duration `json:"time_to_oom"`
-	Confidence       float64       `json:"confidence"`
-	CurrentUsage     uint64        `json:"current_usage"`
-	MemoryLimit      uint64        `json:"memory_limit"`
-	PredictedPeakUsage uint64      `json:"predicted_peak_usage"`
+	PID                uint32        `json:"pid"`
+	TimeToOOM          time.Duration `json:"time_to_oom"`
+	Confidence         float64       `json:"confidence"`
+	CurrentUsage       uint64        `json:"current_usage"`
+	MemoryLimit        uint64        `json:"memory_limit"`
+	PredictedPeakUsage uint64        `json:"predicted_peak_usage"`
 }
 
 // NewMonitor creates a new eBPF monitor
