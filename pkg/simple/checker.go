@@ -10,13 +10,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/falseyair/tapio/pkg/ebpf"
 	"github.com/falseyair/tapio/pkg/k8s"
 	"github.com/falseyair/tapio/pkg/types"
 )
 
 // Checker performs health checks on Kubernetes resources
 type Checker struct {
-	client kubernetes.Interface
+	client      kubernetes.Interface
+	ebpfMonitor ebpf.Monitor
 }
 
 // NewChecker creates a new checker with auto-detected Kubernetes config
@@ -26,7 +28,61 @@ func NewChecker() (*Checker, error) {
 		return nil, enhanceK8sError(err)
 	}
 
-	return &Checker{client: k8sClient.Clientset}, nil
+	// Create eBPF monitor with default config (disabled by default)
+	ebpfMonitor := ebpf.NewMonitor(nil)
+
+	return &Checker{
+		client:      k8sClient.Clientset,
+		ebpfMonitor: ebpfMonitor,
+	}, nil
+}
+
+// NewCheckerWithConfig creates a new checker with custom eBPF configuration
+func NewCheckerWithConfig(ebpfConfig *ebpf.Config) (*Checker, error) {
+	k8sClient, err := k8s.NewClient("")
+	if err != nil {
+		return nil, enhanceK8sError(err)
+	}
+
+	// Create eBPF monitor with provided config
+	ebpfMonitor := ebpf.NewMonitor(ebpfConfig)
+
+	return &Checker{
+		client:      k8sClient.Clientset,
+		ebpfMonitor: ebpfMonitor,
+	}, nil
+}
+
+// GetClient returns the Kubernetes client for direct access
+func (c *Checker) GetClient() kubernetes.Interface {
+	return c.client
+}
+
+// GetEBPFMonitor returns the eBPF monitor for direct access
+func (c *Checker) GetEBPFMonitor() ebpf.Monitor {
+	return c.ebpfMonitor
+}
+
+// StartEBPFMonitoring starts eBPF monitoring if available and configured
+func (c *Checker) StartEBPFMonitoring(ctx context.Context) error {
+	if c.ebpfMonitor == nil {
+		return fmt.Errorf("eBPF monitor not initialized")
+	}
+
+	if !c.ebpfMonitor.IsAvailable() {
+		return fmt.Errorf("eBPF monitoring not available on this system")
+	}
+
+	return c.ebpfMonitor.Start(ctx)
+}
+
+// StopEBPFMonitoring stops eBPF monitoring
+func (c *Checker) StopEBPFMonitoring() error {
+	if c.ebpfMonitor == nil {
+		return nil
+	}
+
+	return c.ebpfMonitor.Stop()
 }
 
 // enhanceK8sError provides user-friendly error messages for common K8s issues

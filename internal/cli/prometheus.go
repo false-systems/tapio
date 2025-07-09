@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/falseyair/tapio/pkg/ebpf"
 	"github.com/falseyair/tapio/pkg/metrics"
 	"github.com/falseyair/tapio/pkg/simple"
 )
@@ -17,6 +18,7 @@ import (
 var (
 	metricsAddr    string
 	updateInterval time.Duration
+	enableEBPF     bool
 )
 
 var prometheusCmd = &cobra.Command{
@@ -47,6 +49,8 @@ func init() {
 		"Address to listen on for metrics HTTP server")
 	prometheusCmd.Flags().DurationVar(&updateInterval, "interval", 30*time.Second,
 		"How often to update metrics by scanning the cluster")
+	prometheusCmd.Flags().BoolVar(&enableEBPF, "enable-ebpf", false,
+		"Enable eBPF monitoring for enhanced metrics (requires root)")
 }
 
 func runPrometheus(cmd *cobra.Command, args []string) error {
@@ -55,15 +59,42 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("🌲 Starting Tapio Prometheus Exporter...")
 
-	// Create simple checker
-	checker, err := simple.NewChecker()
+	// Create eBPF config if enabled
+	var ebpfConfig *ebpf.Config
+	if enableEBPF {
+		ebpfConfig = &ebpf.Config{
+			Enabled:         true,
+			EventBufferSize: 1000,
+			RetentionPeriod: "5m",
+		}
+	}
+
+	// Create checker with eBPF config
+	checker, err := simple.NewCheckerWithConfig(ebpfConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create checker: %w", err)
 	}
-	fmt.Println("ℹ️  Using Kubernetes API metrics")
+
+	// Try to start eBPF monitoring if enabled
+	if enableEBPF {
+		err = checker.StartEBPFMonitoring(ctx)
+		if err != nil {
+			fmt.Printf("[WARN] eBPF monitoring not available: %v\n", err)
+			fmt.Println("[INFO] Continuing with Kubernetes API metrics only")
+		} else {
+			fmt.Println("[OK] eBPF monitoring enabled for enhanced metrics")
+			defer func() {
+				if err := checker.StopEBPFMonitoring(); err != nil {
+					fmt.Printf("[ERROR] Failed to stop eBPF monitoring: %v\n", err)
+				}
+			}()
+		}
+	} else {
+		fmt.Println("[INFO] Using Kubernetes API metrics only")
+	}
 
 	// Create Prometheus exporter
-	exporter := metrics.NewPrometheusExporter(checker, nil)
+	exporter := metrics.NewPrometheusExporter(checker, checker.GetEBPFMonitor())
 
 	// Start periodic metrics updates in background
 	go exporter.StartPeriodicUpdates(ctx, updateInterval)

@@ -95,6 +95,13 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+          
+      - name: golangci-lint with eBPF
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: --timeout=5m --build-tags=ebpf
+        continue-on-error: true
 
   test-cli:
     name: Test CLI
@@ -140,8 +147,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libbpf-dev clang llvm
           
-      - name: Test eBPF components
+      - name: Test eBPF components (without eBPF)
         run: go test -v -race -coverprofile=ebpf-coverage.txt ./pkg/ebpf/...
+        
+      - name: Test eBPF components (with eBPF)
+        run: |
+          sudo -E go test -v -race -tags ebpf -coverprofile=ebpf-coverage-full.txt ./pkg/ebpf/...
+        continue-on-error: true
 
   test-simple:
     name: Test Simple Checker
@@ -276,6 +288,11 @@ jobs:
           fi
           mkdir -p build
           go build -ldflags="-s -w" -o ./build/${output_name} ./cmd/tapio/main.go
+          
+          # Build with eBPF support for Linux only
+          if [ "${{ matrix.os }}" = "linux" ]; then
+            go build -tags ebpf -ldflags="-s -w" -o ./build/${output_name}-ebpf ./cmd/tapio/main.go
+          fi
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
