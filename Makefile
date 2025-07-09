@@ -136,6 +136,34 @@ clean:
 vet:
 	@go vet ./...
 
+##@ Branch Management
+
+# Start agent work with proper branch
+agent-start:
+	@read -p "Agent ID: " agent; \
+	read -p "Component: " component; \
+	read -p "Action: " action; \
+	./scripts/agent-branch.sh "$$agent" "$$component" "$$action"
+
+# Agent status overview
+agent-status:
+	@echo "👥 Active agent work:"
+	@find .agent-work -name "*.md" 2>/dev/null | head -5 || echo "No active work"
+	@echo "🌿 Agent branches:"
+	@git branch | grep "feature/agent-" || echo "No agent branches"
+
+# Prepare for PR
+pr-ready: fmt ci-check
+	@echo "✅ PR ready checklist:"
+	@echo "- Code formatted and linted"
+	@echo "- Tests passing"
+	@echo "- Changes < 200 lines"
+	@echo "🚀 Ready to create PR!"
+
+# Alias for ci-check
+agent-check: ci-check
+	@echo "✅ Agent quality checks complete!"
+
 ##@ Help
 
 # Show help
