@@ -26,9 +26,9 @@ COVERAGE_THRESHOLD=50
 ci-check:
 	@echo "🔍 Running quality checks..."
 	@echo "Checking Go formatting..."
-	@if [ "$$($(GOFMT) -s -l . | grep -v vendor | wc -l)" -gt 0 ]; then \
+	@if [ "$$($(GOFMT) -s -l . | grep -v vendor | grep -v pkg/mod | wc -l)" -gt 0 ]; then \
 		echo "❌ Code not formatted. Run: make fmt"; \
-		$(GOFMT) -s -l . | grep -v vendor; \
+		$(GOFMT) -s -l . | grep -v vendor | grep -v pkg/mod; \
 		exit 1; \
 	fi
 	@echo "✅ Formatting OK"
@@ -38,7 +38,7 @@ ci-check:
 	@echo "✅ Modules OK"
 	
 	@echo "Running basic linter..."
-	@go vet ./...
+	@go list ./... | grep -v pkg/mod | xargs go vet
 	@echo "✅ Basic linting OK"
 	
 	@echo "🎉 Quality checks passed!"
@@ -69,22 +69,22 @@ ci: ci-check ci-test ci-build
 # Format code
 fmt:
 	@echo "🎨 Formatting..."
-	@$(GOFMT) -s -w .
+	@find . -name "*.go" -not -path "./vendor/*" -not -path "./pkg/mod/*" -exec $(GOFMT) -s -w {} \;
 
 # Run linter
 lint:
-	@gofmt -l . | grep -v vendor | tee fmt-issues.txt && test ! -s fmt-issues.txt
-	@go vet ./...
+	@gofmt -l . | grep -v vendor | grep -v pkg/mod | tee fmt-issues.txt && test ! -s fmt-issues.txt
+	@go list ./... | grep -v pkg/mod | xargs go vet
 
 # Auto-fix linting issues
 lint-fix:
 	@echo "🔧 Auto-fixing linting issues..."
-	@$(GOFMT) -s -w .
+	@find . -name "*.go" -not -path "./vendor/*" -not -path "./pkg/mod/*" -exec $(GOFMT) -s -w {} \;
 
 # Lint with eBPF build tags
 lint-ebpf:
-	@gofmt -l . | grep -v vendor | tee fmt-issues.txt && test ! -s fmt-issues.txt
-	@go vet -tags ebpf ./...
+	@gofmt -l . | grep -v vendor | grep -v pkg/mod | tee fmt-issues.txt && test ! -s fmt-issues.txt
+	@go list ./... | grep -v pkg/mod | xargs go vet -tags ebpf
 
 # Quick development cycle
 dev: fmt lint-fix ci-check test-unit build

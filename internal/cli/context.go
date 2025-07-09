@@ -314,7 +314,5 @@ func PromptForNamespaceSwitch(suggestedNamespace, resourceName string) bool {
 }
 
 func init() {
-	// Add context and use commands to root
-	rootCmd.AddCommand(contextCmd)
-	rootCmd.AddCommand(useCmd)
+	// Commands are added in root.go
 }

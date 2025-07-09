@@ -17,8 +17,8 @@ import (
 
 // Checker performs health checks on Kubernetes resources
 type Checker struct {
-	client      kubernetes.Interface
-	ebpfMonitor ebpf.Monitor
+	client            kubernetes.Interface
+	ebpfMonitor       ebpf.Monitor
 	enhancedExplainer *SimpleEnhancedExplainer
 }
 
@@ -36,12 +36,12 @@ func NewChecker() (*Checker, error) {
 		client:      k8sClient.Clientset,
 		ebpfMonitor: ebpfMonitor,
 	}
-	
+
 	// Initialize enhanced explainer if eBPF is available
 	if ebpfMonitor != nil {
 		checker.enhancedExplainer = NewSimpleEnhancedExplainer(ebpfMonitor)
 	}
-	
+
 	return checker, nil
 }
 
@@ -59,10 +59,10 @@ func NewCheckerWithConfig(ebpfConfig *ebpf.Config) (*Checker, error) {
 		client:      k8sClient.Clientset,
 		ebpfMonitor: ebpfMonitor,
 	}
-	
+
 	// Initialize enhanced explainer
 	checker.enhancedExplainer = NewSimpleEnhancedExplainer(ebpfMonitor)
-	
+
 	return checker, nil
 }
 
