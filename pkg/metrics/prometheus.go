@@ -10,14 +10,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/falseyair/tapio/pkg/ebpf"
 	"github.com/falseyair/tapio/pkg/types"
 )
 
 // PrometheusExporter exports Tapio metrics to Prometheus format
 type PrometheusExporter struct {
-	checker   CheckerInterface
-	collector interface{}
-	registry  *prometheus.Registry
+	checker     CheckerInterface
+	ebpfMonitor ebpf.Monitor
+	registry    *prometheus.Registry
 
 	// Health metrics
 	podHealthStatus    *prometheus.GaugeVec
@@ -39,13 +40,13 @@ type CheckerInterface interface {
 }
 
 // NewPrometheusExporter creates a new Prometheus metrics exporter
-func NewPrometheusExporter(checker CheckerInterface, collector interface{}) *PrometheusExporter {
+func NewPrometheusExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor) *PrometheusExporter {
 	registry := prometheus.NewRegistry()
 
 	exporter := &PrometheusExporter{
-		checker:   checker,
-		collector: collector,
-		registry:  registry,
+		checker:     checker,
+		ebpfMonitor: ebpfMonitor,
+		registry:    registry,
 
 		// Health metrics
 		podHealthStatus: prometheus.NewGaugeVec(
@@ -130,7 +131,13 @@ func (e *PrometheusExporter) registerMetrics() {
 		e.registry.MustRegister(metric)
 	}
 
-	fmt.Println("✅ Registered 7 Tapio metrics with Prometheus")
+	metricsCount := 7
+	if e.ebpfMonitor != nil && e.ebpfMonitor.IsAvailable() {
+		// Register additional eBPF metrics if available
+		e.registerEBPFMetrics()
+		metricsCount += 3
+	}
+	fmt.Printf("[OK] Registered %d Tapio metrics with Prometheus\n", metricsCount)
 }
 
 // UpdateMetrics updates all Prometheus metrics with current Tapio data
@@ -151,6 +158,11 @@ func (e *PrometheusExporter) UpdateMetrics(ctx context.Context) error {
 	// Update metrics
 	e.updateHealthMetrics(result)
 	e.updatePredictionMetrics(result)
+
+	// Update eBPF metrics if available
+	if e.ebpfMonitor != nil && e.ebpfMonitor.IsAvailable() {
+		e.updateEBPFMetrics()
+	}
 
 	return nil
 }
@@ -294,6 +306,86 @@ func (e *PrometheusExporter) StartPeriodicUpdates(ctx context.Context, interval 
 		case <-ticker.C:
 			if err := e.UpdateMetrics(ctx); err != nil {
 				fmt.Printf("Warning: Metrics update failed: %v\n", err)
+			}
+		}
+	}
+}
+
+// registerEBPFMetrics registers eBPF-specific metrics
+func (e *PrometheusExporter) registerEBPFMetrics() {
+	// Real memory usage from eBPF
+	realMemoryUsage := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "tapio_ebpf_memory_usage_bytes",
+			Help: "Real memory usage tracked by eBPF (kernel-level)",
+		},
+		[]string{"pod", "namespace", "container"},
+	)
+
+	// Memory allocation rate
+	allocationRate := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "tapio_ebpf_memory_allocation_rate_bytes_per_second",
+			Help: "Memory allocation rate tracked by eBPF",
+		},
+		[]string{"pod", "namespace", "container"},
+	)
+
+	// Process count in container
+	processCount := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "tapio_ebpf_container_process_count",
+			Help: "Number of processes in container tracked by eBPF",
+		},
+		[]string{"pod", "namespace", "container"},
+	)
+
+	e.registry.MustRegister(realMemoryUsage, allocationRate, processCount)
+}
+
+// updateEBPFMetrics updates metrics from eBPF data
+func (e *PrometheusExporter) updateEBPFMetrics() {
+	// Get memory stats from eBPF
+	memStats, err := e.ebpfMonitor.GetMemoryStats()
+	if err != nil {
+		fmt.Printf("[WARN] Failed to get eBPF memory stats: %v\n", err)
+		return
+	}
+
+	// Update metrics for each process
+	for _, stats := range memStats {
+		if stats.InContainer {
+			// Extract pod/container info from command or use PID as fallback
+			podName := fmt.Sprintf("pid-%d", stats.PID)
+			namespace := "unknown"
+			containerName := "main"
+
+			// Update real memory usage
+			e.registry.MustRegister(prometheus.NewGaugeFunc(
+				prometheus.GaugeOpts{
+					Name:        "tapio_ebpf_memory_usage_bytes",
+					Help:        "Real memory usage tracked by eBPF",
+					ConstLabels: prometheus.Labels{"pod": podName, "namespace": namespace, "container": containerName},
+				},
+				func() float64 { return float64(stats.CurrentUsage) },
+			))
+
+			// Calculate allocation rate if we have growth pattern data
+			if len(stats.GrowthPattern) > 1 {
+				firstPoint := stats.GrowthPattern[0]
+				lastPoint := stats.GrowthPattern[len(stats.GrowthPattern)-1]
+				duration := lastPoint.Timestamp.Sub(firstPoint.Timestamp).Seconds()
+				if duration > 0 {
+					rate := float64(lastPoint.Usage-firstPoint.Usage) / duration
+					e.registry.MustRegister(prometheus.NewGaugeFunc(
+						prometheus.GaugeOpts{
+							Name:        "tapio_ebpf_memory_allocation_rate_bytes_per_second",
+							Help:        "Memory allocation rate tracked by eBPF",
+							ConstLabels: prometheus.Labels{"pod": podName, "namespace": namespace, "container": containerName},
+						},
+						func() float64 { return rate },
+					))
+				}
 			}
 		}
 	}

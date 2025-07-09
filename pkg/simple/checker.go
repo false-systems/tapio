@@ -10,13 +10,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/falseyair/tapio/pkg/ebpf"
 	"github.com/falseyair/tapio/pkg/k8s"
 	"github.com/falseyair/tapio/pkg/types"
 )
 
 // Checker performs health checks on Kubernetes resources
 type Checker struct {
-	client kubernetes.Interface
+	client      kubernetes.Interface
+	ebpfMonitor ebpf.Monitor
 }
 
 // NewChecker creates a new checker with auto-detected Kubernetes config
@@ -26,13 +28,67 @@ func NewChecker() (*Checker, error) {
 		return nil, enhanceK8sError(err)
 	}
 
-	return &Checker{client: k8sClient.Clientset}, nil
+	// Create eBPF monitor with default config (disabled by default)
+	ebpfMonitor := ebpf.NewMonitor(nil)
+
+	return &Checker{
+		client:      k8sClient.Clientset,
+		ebpfMonitor: ebpfMonitor,
+	}, nil
+}
+
+// NewCheckerWithConfig creates a new checker with custom eBPF configuration
+func NewCheckerWithConfig(ebpfConfig *ebpf.Config) (*Checker, error) {
+	k8sClient, err := k8s.NewClient("")
+	if err != nil {
+		return nil, enhanceK8sError(err)
+	}
+
+	// Create eBPF monitor with provided config
+	ebpfMonitor := ebpf.NewMonitor(ebpfConfig)
+
+	return &Checker{
+		client:      k8sClient.Clientset,
+		ebpfMonitor: ebpfMonitor,
+	}, nil
+}
+
+// GetClient returns the Kubernetes client for direct access
+func (c *Checker) GetClient() kubernetes.Interface {
+	return c.client
+}
+
+// GetEBPFMonitor returns the eBPF monitor for direct access
+func (c *Checker) GetEBPFMonitor() ebpf.Monitor {
+	return c.ebpfMonitor
+}
+
+// StartEBPFMonitoring starts eBPF monitoring if available and configured
+func (c *Checker) StartEBPFMonitoring(ctx context.Context) error {
+	if c.ebpfMonitor == nil {
+		return fmt.Errorf("eBPF monitor not initialized")
+	}
+
+	if !c.ebpfMonitor.IsAvailable() {
+		return fmt.Errorf("eBPF monitoring not available on this system")
+	}
+
+	return c.ebpfMonitor.Start(ctx)
+}
+
+// StopEBPFMonitoring stops eBPF monitoring
+func (c *Checker) StopEBPFMonitoring() error {
+	if c.ebpfMonitor == nil {
+		return nil
+	}
+
+	return c.ebpfMonitor.Stop()
 }
 
 // enhanceK8sError provides user-friendly error messages for common K8s issues
 func enhanceK8sError(err error) error {
 	errStr := err.Error()
-	
+
 	switch {
 	case strings.Contains(errStr, "connection refused"):
 		return fmt.Errorf("❌ Kubernetes cluster not running\n🔧 Try: minikube start, kind create cluster, or check your cluster status")
@@ -200,15 +256,15 @@ func (c *Checker) getEmptyPodsMessage(namespace string, all bool, resource strin
 	if resource != "" {
 		return fmt.Sprintf("No pods match resource '%s'. Try 'kubectl get pods --all-namespaces | grep %s'", resource, resource)
 	}
-	
+
 	if all {
 		return "No pods found in entire cluster. Try deploying some workloads or check if cluster is empty."
 	}
-	
+
 	if namespace == "" {
 		namespace = "default"
 	}
-	
+
 	return fmt.Sprintf("No pods found in namespace '%s'. Try:\n🔧 kubectl get pods -n %s\n🔧 kubectl get pods --all-namespaces\n🔧 Deploy some workloads to test", namespace, namespace)
 }
 
