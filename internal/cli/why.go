@@ -1,19 +1,23 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/falseyair/tapio/internal/output"
+	"github.com/falseyair/tapio/pkg/simple"
 	"github.com/falseyair/tapio/pkg/types"
 )
 
 var (
-	whyVerbose   bool
-	whyOutput    string
-	whyNamespace string
+	whyVerbose    bool
+	whyOutput     string
+	whyNamespace  string
+	whyEnableEBPF bool
 )
 
 var whyCmd = &cobra.Command{
@@ -42,9 +46,12 @@ func init() {
 	whyCmd.Flags().BoolVarP(&whyVerbose, "verbose", "v", false, "Include detailed technical information")
 	whyCmd.Flags().StringVarP(&whyOutput, "output", "o", "human", "Output format: human, json, yaml")
 	whyCmd.Flags().StringVarP(&whyNamespace, "namespace", "n", "", "Kubernetes namespace")
+	whyCmd.Flags().BoolVar(&whyEnableEBPF, "enable-ebpf", false, "Enable eBPF monitoring for enhanced insights")
 }
 
 func runWhy(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	startTime := time.Now()
 	resource := args[0]
 
 	// Parse resource reference
@@ -66,11 +73,77 @@ func runWhy(cmd *cobra.Command, args []string) error {
 	// Show which namespace we're analyzing
 	fmt.Printf("Analyzing %s in namespace: %s\n\n", resourceRef.Kind, namespace)
 
-	// For now, create a simple explanation
-	// Enhanced explainer with eBPF can be added later
+	// Create enhanced checker with eBPF if requested
+	var checker *simple.Checker
+	if whyEnableEBPF {
+		checker, err = simple.NewCheckerWithEBPF()
+		if err != nil {
+			fmt.Printf("[WARN] eBPF not available, using standard analysis: %v\n", err)
+			checker, err = simple.NewChecker()
+			if err != nil {
+				return fmt.Errorf("failed to initialize checker: %w", err)
+			}
+		} else {
+			fmt.Println("[OK] Enhanced analysis with eBPF enabled")
+		}
+	} else {
+		checker, err = simple.NewChecker()
+		if err != nil {
+			return fmt.Errorf("failed to initialize checker: %w", err)
+		}
+	}
+
+	// Get related problems first to provide context
+	checkReq := &types.CheckRequest{
+		Resource:  resourceRef.Name,
+		Namespace: namespace,
+		Verbose:   whyVerbose,
+	}
+
+	checkResult, err := checker.Check(ctx, checkReq)
+	if err != nil {
+		fmt.Printf("[WARN] Unable to get full context: %v\n", err)
+		checkResult = &types.CheckResult{Problems: []types.Problem{}}
+	}
+
+	// Filter problems for this specific resource
+	var resourceProblems []types.Problem
+	for _, problem := range checkResult.Problems {
+		if problem.Resource.Name == resourceRef.Name && problem.Resource.Namespace == resourceRef.Namespace {
+			resourceProblems = append(resourceProblems, problem)
+		}
+	}
+
+	// Get enhanced explanation
+	var explanation *types.Explanation
+	if enhancedExplainer, ok := checker.GetEnhancedExplainer(); ok {
+		explanation, err = enhancedExplainer.ExplainResource(ctx, resourceRef, resourceProblems)
+		if err != nil {
+			fmt.Printf("[WARN] Enhanced analysis failed: %v\n", err)
+			explanation = createFallbackExplanation(resourceRef, resourceProblems)
+		} else {
+			fmt.Printf("[OK] Enhanced analysis completed in %v\n", time.Since(startTime))
+		}
+	} else {
+		explanation = createFallbackExplanation(resourceRef, resourceProblems)
+	}
+
+	// Output explanation
+	formatter := output.NewFormatter(whyOutput)
+	err = formatter.PrintExplanation(explanation)
+	if err != nil {
+		return fmt.Errorf("failed to print explanation: %w", err)
+	}
+
+	return nil
+}
+
+// createFallbackExplanation creates a fallback explanation when enhanced analysis fails
+func createFallbackExplanation(resourceRef *types.ResourceRef, problems []types.Problem) *types.Explanation {
 	explanation := &types.Explanation{
 		Resource: resourceRef,
-		Summary:  fmt.Sprintf("Analysis of %s/%s", resourceRef.Kind, resourceRef.Name),
+		Summary:  fmt.Sprintf("Basic analysis of %s/%s", resourceRef.Kind, resourceRef.Name),
+		Problems: problems,
 		Analysis: &types.Analysis{
 			RealityCheck: &types.RealityCheck{
 				ActualMemory:   "Checking...",
@@ -90,24 +163,28 @@ func runWhy(cmd *cobra.Command, args []string) error {
 				Title:       "Check Resource Details",
 				Description: "Review the current status and configuration",
 				Commands: []string{
-					fmt.Sprintf("kubectl describe %s %s -n %s", resourceRef.Kind, resourceRef.Name, namespace),
-					fmt.Sprintf("kubectl logs %s -n %s", resourceRef.Name, namespace),
+					fmt.Sprintf("kubectl describe %s %s -n %s", resourceRef.Kind, resourceRef.Name, resourceRef.Namespace),
+					fmt.Sprintf("kubectl logs %s -n %s", resourceRef.Name, resourceRef.Namespace),
 				},
 				Urgency:    types.SeverityWarning,
 				Difficulty: "easy",
 				Risk:       "low",
 			},
 		},
+		Timestamp: time.Now(),
 	}
 
-	// Output explanation
-	formatter := output.NewFormatter(whyOutput)
-	err = formatter.PrintExplanation(explanation)
-	if err != nil {
-		return fmt.Errorf("failed to print explanation: %w", err)
+	// Add insights based on problems
+	if len(problems) > 0 {
+		explanation.RootCauses = append(explanation.RootCauses, types.RootCause{
+			Title:       "Issues Detected",
+			Description: fmt.Sprintf("Found %d issues with this resource", len(problems)),
+			Evidence:    []string{fmt.Sprintf("%d problems identified", len(problems))},
+			Confidence:  0.8,
+		})
 	}
 
-	return nil
+	return explanation
 }
 
 // parseResourceReference parses "pod/name" or "name" format

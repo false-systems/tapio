@@ -1,0 +1,408 @@
+package simple
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/falseyair/tapio/pkg/ebpf"
+	"github.com/falseyair/tapio/pkg/types"
+)
+
+// EnhancedExplainer provides intelligent explanations using correlation analysis and eBPF insights
+type EnhancedExplainer struct {
+	engine      *correlation.Engine
+	ebpfMonitor ebpf.Monitor
+	registry    *correlation.RuleRegistry
+	dataSource  *correlation.DataCollection
+}
+
+// NewEnhancedExplainer creates a new enhanced explainer
+func NewEnhancedExplainer(ebpfMonitor ebpf.Monitor) *EnhancedExplainer {
+	// Create correlation engine components
+	registry := correlation.NewRuleRegistry()
+	dataSource := correlation.NewDataCollection()
+
+	// Configure engine for fast analysis
+	config := correlation.DefaultEngineConfig()
+	config.Timeout = 3 * time.Second // Meet performance requirement
+	config.MaxWorkers = 3
+	config.ExecutionMode = correlation.ExecutionModeAdaptive
+
+	engine := correlation.NewEngine(config, registry, dataSource)
+
+	explainer := &EnhancedExplainer{
+		engine:      engine,
+		ebpfMonitor: ebpfMonitor,
+		registry:    registry,
+		dataSource:  dataSource,
+	}
+
+	// Register built-in rules
+	explainer.registerBuiltInRules()
+
+	return explainer
+}
+
+// ExplainResource provides detailed explanation for a specific resource
+func (e *EnhancedExplainer) ExplainResource(ctx context.Context, resource *types.ResourceRef, problems []types.Problem) (*types.Explanation, error) {
+	startTime := time.Now()
+
+	// Update data collection with current problems
+	e.updateDataCollection(resource, problems)
+
+	// Run correlation analysis
+	findings, err := e.engine.Execute(ctx)
+	if err != nil {
+		// Graceful degradation - return basic explanation if correlation fails
+		return e.createBasicExplanation(resource, problems), nil
+	}
+
+	// Convert correlation findings to explanation
+	explanation := e.convertFindingsToExplanation(resource, problems, findings)
+
+	// Add eBPF insights if available
+	if e.ebpfMonitor != nil && e.ebpfMonitor.IsAvailable() {
+		e.addEBPFInsights(ctx, resource, explanation)
+	}
+
+	// Ensure analysis completes quickly
+	if time.Since(startTime) > 3*time.Second {
+		fmt.Printf("[WARN] Analysis took %v, which exceeds target of 3s\n", time.Since(startTime))
+	}
+
+	return explanation, nil
+}
+
+// AnalyzeProblems provides correlation analysis for multiple problems
+func (e *EnhancedExplainer) AnalyzeProblems(ctx context.Context, problems []types.Problem) (*types.CorrelationResult, error) {
+	if len(problems) == 0 {
+		return &types.CorrelationResult{}, nil
+	}
+
+	// Update data collection
+	e.updateDataCollectionFromProblems(problems)
+
+	// Run correlation analysis
+	findings, err := e.engine.Execute(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("correlation analysis failed: %w", err)
+	}
+
+	// Convert to correlation result
+	return e.convertToCorrelationResult(findings), nil
+}
+
+// updateDataCollection updates the data collection with current state
+func (e *EnhancedExplainer) updateDataCollection(resource *types.ResourceRef, problems []types.Problem) {
+	// Add resource context
+	e.dataSource.AddResource(resource.Kind, resource.Name, resource.Namespace)
+
+	// Add problems as data points
+	for _, problem := range problems {
+		e.dataSource.AddProblem(problem.Resource.Kind, problem.Resource.Name,
+			problem.Resource.Namespace, problem.Title, problem.Description, string(problem.Severity))
+	}
+}
+
+// updateDataCollectionFromProblems updates data collection from problems list
+func (e *EnhancedExplainer) updateDataCollectionFromProblems(problems []types.Problem) {
+	for _, problem := range problems {
+		e.dataSource.AddProblem(problem.Resource.Kind, problem.Resource.Name,
+			problem.Resource.Namespace, problem.Title, problem.Description, string(problem.Severity))
+	}
+}
+
+// convertFindingsToExplanation converts correlation findings to explanation format
+func (e *EnhancedExplainer) convertFindingsToExplanation(resource *types.ResourceRef, problems []types.Problem, findings []correlation.Finding) *types.Explanation {
+	explanation := &types.Explanation{
+		Resource:   resource,
+		Summary:    e.generateSummary(resource, findings),
+		Problems:   problems,
+		RootCauses: e.convertToRootCauses(findings),
+		Solutions:  e.generateSolutions(findings),
+		Analysis: &types.Analysis{
+			KubernetesView: e.generateKubernetesView(resource),
+			RealityCheck:   e.generateRealityCheck(resource, findings),
+		},
+		Timestamp: time.Now(),
+	}
+
+	// Add prediction if patterns suggest future issues
+	if prediction := e.generatePrediction(findings); prediction != nil {
+		explanation.Prediction = prediction
+	}
+
+	// Add learning information
+	explanation.Learning = e.generateLearning(findings)
+
+	return explanation
+}
+
+// createBasicExplanation creates a basic explanation when correlation analysis fails
+func (e *EnhancedExplainer) createBasicExplanation(resource *types.ResourceRef, problems []types.Problem) *types.Explanation {
+	return &types.Explanation{
+		Resource: resource,
+		Summary:  fmt.Sprintf("Basic analysis of %s/%s", resource.Kind, resource.Name),
+		Problems: problems,
+		Analysis: &types.Analysis{
+			KubernetesView: e.generateKubernetesView(resource),
+			RealityCheck: &types.RealityCheck{
+				ActualMemory:   "Unable to determine",
+				RestartPattern: "Analysis in progress",
+				ErrorPatterns:  []string{"Correlation analysis unavailable"},
+			},
+		},
+		Solutions: []types.Solution{
+			{
+				Title:       "Manual Investigation",
+				Description: "Investigate using standard Kubernetes tools",
+				Commands: []string{
+					fmt.Sprintf("kubectl describe %s %s -n %s", resource.Kind, resource.Name, resource.Namespace),
+					fmt.Sprintf("kubectl logs %s -n %s", resource.Name, resource.Namespace),
+				},
+				Urgency:    types.SeverityWarning,
+				Difficulty: "easy",
+				Risk:       "low",
+			},
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// generateSummary creates a summary based on correlation findings
+func (e *EnhancedExplainer) generateSummary(resource *types.ResourceRef, findings []correlation.Finding) string {
+	if len(findings) == 0 {
+		return fmt.Sprintf("No significant patterns detected for %s/%s", resource.Kind, resource.Name)
+	}
+
+	// Find highest confidence finding
+	var primaryFinding correlation.Finding
+	maxConfidence := 0.0
+	for _, finding := range findings {
+		if finding.Confidence > maxConfidence {
+			maxConfidence = finding.Confidence
+			primaryFinding = finding
+		}
+	}
+
+	return fmt.Sprintf("Primary issue: %s (%.0f%% confidence)", primaryFinding.Title, primaryFinding.Confidence*100)
+}
+
+// convertToRootCauses converts correlation findings to root causes
+func (e *EnhancedExplainer) convertToRootCauses(findings []correlation.Finding) []types.RootCause {
+	var rootCauses []types.RootCause
+
+	for _, finding := range findings {
+		if finding.Confidence > 0.7 { // High confidence findings become root causes
+			rootCause := types.RootCause{
+				Title:       finding.Title,
+				Description: finding.Description,
+				Evidence:    finding.Evidence,
+				Confidence:  finding.Confidence,
+			}
+			rootCauses = append(rootCauses, rootCause)
+		}
+	}
+
+	return rootCauses
+}
+
+// generateSolutions creates solutions based on correlation findings
+func (e *EnhancedExplainer) generateSolutions(findings []correlation.Finding) []types.Solution {
+	var solutions []types.Solution
+
+	// Create solutions based on finding types
+	for _, finding := range findings {
+		if finding.Confidence > 0.6 {
+			solution := types.Solution{
+				Title:       fmt.Sprintf("Address %s", finding.Title),
+				Description: e.generateSolutionDescription(finding),
+				Commands:    e.generateSolutionCommands(finding),
+				Urgency:     e.convertSeverity(finding.Severity),
+				Difficulty:  "medium",
+				Risk:        "low",
+			}
+			solutions = append(solutions, solution)
+		}
+	}
+
+	// Add default solution if no specific ones found
+	if len(solutions) == 0 {
+		solutions = append(solutions, types.Solution{
+			Title:       "General Investigation",
+			Description: "Perform standard troubleshooting steps",
+			Commands:    []string{"kubectl get events", "kubectl describe pods"},
+			Urgency:     types.SeverityWarning,
+			Difficulty:  "easy",
+			Risk:        "low",
+		})
+	}
+
+	return solutions
+}
+
+// generateSolutionDescription creates solution description from finding
+func (e *EnhancedExplainer) generateSolutionDescription(finding correlation.Finding) string {
+	if strings.Contains(strings.ToLower(finding.Title), "memory") {
+		return "Review memory allocation and usage patterns to resolve memory-related issues"
+	}
+	if strings.Contains(strings.ToLower(finding.Title), "restart") {
+		return "Investigate restart causes including resource limits and application stability"
+	}
+	if strings.Contains(strings.ToLower(finding.Title), "network") {
+		return "Check network connectivity and service configurations"
+	}
+	return "Address the identified issue based on the specific problem pattern"
+}
+
+// generateSolutionCommands creates solution commands from finding
+func (e *EnhancedExplainer) generateSolutionCommands(finding correlation.Finding) []string {
+	var commands []string
+
+	if strings.Contains(strings.ToLower(finding.Title), "memory") {
+		commands = append(commands, "kubectl top pods", "kubectl describe pod")
+	}
+	if strings.Contains(strings.ToLower(finding.Title), "restart") {
+		commands = append(commands, "kubectl logs --previous", "kubectl describe pod")
+	}
+	if strings.Contains(strings.ToLower(finding.Title), "network") {
+		commands = append(commands, "kubectl get services", "kubectl describe endpoints")
+	}
+
+	if len(commands) == 0 {
+		commands = []string{"kubectl describe", "kubectl logs"}
+	}
+
+	return commands
+}
+
+// convertSeverity converts correlation severity to types severity
+func (e *EnhancedExplainer) convertSeverity(severity correlation.Severity) types.Severity {
+	switch severity {
+	case correlation.SeverityCritical:
+		return types.SeverityCritical
+	case correlation.SeverityError:
+		return types.SeverityCritical
+	case correlation.SeverityWarning:
+		return types.SeverityWarning
+	case correlation.SeverityInfo:
+		return types.SeverityHealthy
+	default:
+		return types.SeverityWarning
+	}
+}
+
+// generateKubernetesView creates Kubernetes view from resource
+func (e *EnhancedExplainer) generateKubernetesView(resource *types.ResourceRef) *types.KubernetesView {
+	return &types.KubernetesView{
+		Status:     "Analyzing",
+		Phase:      "Investigation",
+		Conditions: []string{"Correlation analysis complete"},
+		Resources:  map[string]string{"cpu": "analyzing", "memory": "analyzing"},
+		Events:     []string{"Recent events being analyzed"},
+	}
+}
+
+// generateRealityCheck creates reality check from findings
+func (e *EnhancedExplainer) generateRealityCheck(resource *types.ResourceRef, findings []correlation.Finding) *types.RealityCheck {
+	realityCheck := &types.RealityCheck{
+		ActualMemory:   "Gathering data...",
+		RestartPattern: "No unusual patterns detected",
+		ErrorPatterns:  []string{},
+		NetworkIssues:  []string{},
+	}
+
+	// Analyze findings for reality check data
+	for _, finding := range findings {
+		if strings.Contains(strings.ToLower(finding.Title), "memory") {
+			realityCheck.ActualMemory = "Memory pressure detected"
+		}
+		if strings.Contains(strings.ToLower(finding.Title), "restart") {
+			realityCheck.RestartPattern = "Frequent restarts detected"
+		}
+		if strings.Contains(strings.ToLower(finding.Title), "error") {
+			realityCheck.ErrorPatterns = append(realityCheck.ErrorPatterns, finding.Title)
+		}
+		if strings.Contains(strings.ToLower(finding.Title), "network") {
+			realityCheck.NetworkIssues = append(realityCheck.NetworkIssues, finding.Title)
+		}
+	}
+
+	return realityCheck
+}
+
+// generatePrediction creates prediction based on patterns
+func (e *EnhancedExplainer) generatePrediction(findings []correlation.Finding) *types.PredictionSummary {
+	// Look for predictive patterns
+	for _, finding := range findings {
+		if finding.Confidence > 0.8 && strings.Contains(strings.ToLower(finding.Description), "pattern") {
+			return &types.PredictionSummary{
+				Type:        "Pattern-based prediction",
+				TimeToEvent: 15 * time.Minute, // Conservative estimate
+				Confidence:  finding.Confidence,
+				Impact:      []string{"Potential service disruption", "Performance degradation"},
+			}
+		}
+	}
+	return nil
+}
+
+// generateLearning creates learning information
+func (e *EnhancedExplainer) generateLearning(findings []correlation.Finding) *types.Learning {
+	return &types.Learning{
+		ConceptExplanation: "Correlation analysis helps identify patterns across multiple problems to find root causes",
+		WhyItMatters:       "Understanding patterns prevents future incidents and improves system reliability",
+		CommonMistakes:     []string{"Ignoring warning signs", "Treating symptoms instead of root causes"},
+		BestPractices:      []string{"Monitor system patterns", "Implement proactive alerting", "Regular health checks"},
+	}
+}
+
+// convertToCorrelationResult converts findings to correlation result
+func (e *EnhancedExplainer) convertToCorrelationResult(findings []correlation.Finding) *types.CorrelationResult {
+	// This would need to be implemented based on types.CorrelationResult structure
+	// For now, return a placeholder
+	return &types.CorrelationResult{}
+}
+
+// addEBPFInsights adds eBPF-based insights to explanation
+func (e *EnhancedExplainer) addEBPFInsights(ctx context.Context, resource *types.ResourceRef, explanation *types.Explanation) {
+	if explanation.Analysis == nil {
+		explanation.Analysis = &types.Analysis{}
+	}
+
+	if explanation.Analysis.RealityCheck == nil {
+		explanation.Analysis.RealityCheck = &types.RealityCheck{}
+	}
+
+	// Try to get memory stats from eBPF
+	if memStats, err := e.ebpfMonitor.GetMemoryStats(); err == nil && len(memStats) > 0 {
+		// Find relevant stats for this resource
+		for _, stats := range memStats {
+			if stats.InContainer {
+				explanation.Analysis.RealityCheck.ActualMemory = fmt.Sprintf("Real usage: %d bytes", stats.CurrentUsage)
+				break
+			}
+		}
+	}
+}
+
+// registerBuiltInRules registers built-in correlation rules
+func (e *EnhancedExplainer) registerBuiltInRules() {
+	// Register memory pressure rule
+	memoryRule := correlation.NewMemoryPressureRule()
+	e.registry.RegisterRule(memoryRule)
+	e.registry.EnableRule(memoryRule.GetMetadata().ID)
+
+	// Register restart pattern rule
+	restartRule := correlation.NewRestartPatternRule()
+	e.registry.RegisterRule(restartRule)
+	e.registry.EnableRule(restartRule.GetMetadata().ID)
+
+	// Register network issue rule
+	networkRule := correlation.NewNetworkIssueRule()
+	e.registry.RegisterRule(networkRule)
+	e.registry.EnableRule(networkRule.GetMetadata().ID)
+}

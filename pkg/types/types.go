@@ -12,10 +12,11 @@ type CheckRequest struct {
 
 // CheckResult represents the result of a health check
 type CheckResult struct {
-	Summary    Summary    `json:"summary"`
-	Problems   []Problem  `json:"problems"`
-	QuickFixes []QuickFix `json:"quick_fixes"`
-	Timestamp  time.Time  `json:"timestamp"`
+	Summary             Summary     `json:"summary"`
+	Problems            []Problem   `json:"problems"`
+	QuickFixes          []QuickFix  `json:"quick_fixes"`
+	CorrelationAnalysis interface{} `json:"correlation_analysis,omitempty"`
+	Timestamp           time.Time   `json:"timestamp"`
 }
 
 // Summary provides overall health statistics

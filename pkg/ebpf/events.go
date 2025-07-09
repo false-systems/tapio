@@ -113,11 +113,11 @@ func (stats *ProcessMemoryStats) PredictOOM(memoryLimit uint64) *OOMPrediction {
 
 	if currentUsage >= memoryLimit {
 		return &OOMPrediction{
-			PID:              stats.PID,
-			TimeToOOM:        0,
-			Confidence:       0.95,
-			CurrentUsage:     currentUsage,
-			MemoryLimit:      memoryLimit,
+			PID:                stats.PID,
+			TimeToOOM:          0,
+			Confidence:         0.95,
+			CurrentUsage:       currentUsage,
+			MemoryLimit:        memoryLimit,
 			PredictedPeakUsage: currentUsage,
 		}
 	}
@@ -129,11 +129,11 @@ func (stats *ProcessMemoryStats) PredictOOM(memoryLimit uint64) *OOMPrediction {
 	confidence := calculateGrowthConfidence(recent)
 
 	return &OOMPrediction{
-		PID:              stats.PID,
-		TimeToOOM:        timeToOOM,
-		Confidence:       confidence,
-		CurrentUsage:     currentUsage,
-		MemoryLimit:      memoryLimit,
+		PID:                stats.PID,
+		TimeToOOM:          timeToOOM,
+		Confidence:         confidence,
+		CurrentUsage:       currentUsage,
+		MemoryLimit:        memoryLimit,
 		PredictedPeakUsage: currentUsage + uint64(growthRate*timeToOOM.Seconds()),
 	}
 }

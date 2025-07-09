@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,9 +17,11 @@ import (
 )
 
 var (
-	checkNamespace string
-	checkAll       bool
-	outputFormat   string
+	checkNamespace    string
+	checkAll          bool
+	outputFormat      string
+	enableCorrelation bool
+	enableEBPF        bool
 )
 
 var checkCmd = &cobra.Command{
@@ -49,6 +53,8 @@ func init() {
 	checkCmd.Flags().StringVarP(&checkNamespace, "namespace", "n", "", "Kubernetes namespace")
 	checkCmd.Flags().BoolVar(&checkAll, "all", false, "Check all namespaces")
 	checkCmd.Flags().StringVarP(&outputFormat, "output", "o", "human", "Output format: human, json, yaml")
+	checkCmd.Flags().BoolVar(&enableCorrelation, "correlation", true, "Enable intelligent correlation analysis")
+	checkCmd.Flags().BoolVar(&enableEBPF, "enable-ebpf", false, "Enable eBPF monitoring for enhanced insights")
 }
 
 func showCurrentContext(request *types.CheckRequest) {
@@ -187,11 +193,30 @@ func getCurrentNamespace() string {
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	startTime := time.Now()
 
-	// Create checker
-	checker, err := simple.NewChecker()
-	if err != nil {
-		return fmt.Errorf("failed to initialize checker: %w", err)
+	// Create checker with eBPF support if requested
+	var checker *simple.Checker
+	var err error
+
+	if enableEBPF {
+		// Try to create enhanced checker with eBPF
+		checker, err = simple.NewCheckerWithEBPF()
+		if err != nil {
+			// Fall back to standard checker if eBPF fails
+			fmt.Printf("[WARN] eBPF not available, using standard checking: %v\n", err)
+			checker, err = simple.NewChecker()
+			if err != nil {
+				return fmt.Errorf("failed to initialize checker: %w", err)
+			}
+		} else {
+			fmt.Println("[OK] Enhanced checking with eBPF enabled")
+		}
+	} else {
+		checker, err = simple.NewChecker()
+		if err != nil {
+			return fmt.Errorf("failed to initialize checker: %w", err)
+		}
 	}
 
 	// Build check request
@@ -214,6 +239,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("health check failed: %w", err)
 	}
 
+	// Add intelligent correlation analysis if enabled and we have multiple problems
+	if enableCorrelation && len(result.Problems) > 1 {
+		if correlationResult, corrErr := addCorrelationAnalysis(ctx, checker, result.Problems); corrErr == nil {
+			result.CorrelationAnalysis = correlationResult
+			fmt.Printf("[OK] Correlation analysis completed in %v\n", time.Since(startTime))
+		} else {
+			fmt.Printf("[WARN] Correlation analysis failed: %v\n", corrErr)
+		}
+	}
+
 	// Check if the only problem is "No pods found" - this means we should offer alternatives
 	noPods := len(result.Problems) == 1 && result.Problems[0].Title == "No pods found"
 
@@ -234,4 +269,60 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Output results
 	formatter := output.NewFormatter(outputFormat)
 	return formatter.Print(result)
+}
+
+// addCorrelationAnalysis runs correlation analysis on problems
+func addCorrelationAnalysis(ctx context.Context, checker *simple.Checker, problems []types.Problem) (interface{}, error) {
+	// Create enhanced explainer if available
+	if enhancedChecker, ok := checker.GetEnhancedExplainer(); ok {
+		return enhancedChecker.AnalyzeProblems(ctx, problems)
+	}
+
+	// Fallback to simple correlation analysis
+	return analyzeProblemsSimple(problems), nil
+}
+
+// analyzeProblemsSimple provides basic correlation analysis
+func analyzeProblemsSimple(problems []types.Problem) map[string]interface{} {
+	// Basic pattern detection
+	patterns := make(map[string]int)
+	namespaces := make(map[string]int)
+
+	for _, problem := range problems {
+		// Count problem patterns
+		if strings.Contains(strings.ToLower(problem.Title), "memory") {
+			patterns["memory"]++
+		}
+		if strings.Contains(strings.ToLower(problem.Title), "restart") {
+			patterns["restart"]++
+		}
+		if strings.Contains(strings.ToLower(problem.Title), "network") {
+			patterns["network"]++
+		}
+
+		// Count namespace distribution
+		namespaces[problem.Resource.Namespace]++
+	}
+
+	result := map[string]interface{}{
+		"patterns":               patterns,
+		"namespace_distribution": namespaces,
+		"total_problems":         len(problems),
+		"analysis_type":          "simple",
+	}
+
+	// Add insights
+	insights := []string{}
+	if patterns["memory"] >= 2 {
+		insights = append(insights, "Memory pressure detected across multiple resources")
+	}
+	if patterns["restart"] >= 2 {
+		insights = append(insights, "Restart pattern suggests instability")
+	}
+	if len(namespaces) == 1 && len(problems) >= 3 {
+		insights = append(insights, "Issues concentrated in single namespace")
+	}
+
+	result["insights"] = insights
+	return result
 }

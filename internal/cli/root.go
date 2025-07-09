@@ -32,5 +32,7 @@ func init() {
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(whyCmd)
 	rootCmd.AddCommand(prometheusCmd)
+	rootCmd.AddCommand(contextCmd)
+	rootCmd.AddCommand(useCmd)
 	rootCmd.AddCommand(versionCmd)
 }
