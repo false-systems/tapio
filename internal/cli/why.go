@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	
+
 	"github.com/falseyair/tapio/internal/output"
 	"github.com/falseyair/tapio/pkg/types"
 )
@@ -52,7 +52,7 @@ func runWhy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid resource reference: %w", err)
 	}
-	
+
 	// Determine namespace to use
 	namespace := whyNamespace
 	if namespace == "" {
@@ -62,7 +62,7 @@ func runWhy(cmd *cobra.Command, args []string) error {
 		}
 	}
 	resourceRef.Namespace = namespace
-	
+
 	// Show which namespace we're analyzing
 	fmt.Printf("Analyzing %s in namespace: %s\n\n", resourceRef.Kind, namespace)
 
@@ -70,7 +70,7 @@ func runWhy(cmd *cobra.Command, args []string) error {
 	// Enhanced explainer with eBPF can be added later
 	explanation := &types.Explanation{
 		Resource: resourceRef,
-		Summary: fmt.Sprintf("Analysis of %s/%s", resourceRef.Kind, resourceRef.Name),
+		Summary:  fmt.Sprintf("Analysis of %s/%s", resourceRef.Kind, resourceRef.Name),
 		Analysis: &types.Analysis{
 			RealityCheck: &types.RealityCheck{
 				ActualMemory:   "Checking...",
@@ -106,14 +106,14 @@ func runWhy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to print explanation: %w", err)
 	}
-	
+
 	return nil
 }
 
 // parseResourceReference parses "pod/name" or "name" format
 func parseResourceReference(resource string) (*types.ResourceRef, error) {
 	parts := strings.Split(resource, "/")
-	
+
 	switch len(parts) {
 	case 1:
 		// Just name - assume it's a pod
