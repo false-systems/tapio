@@ -81,6 +81,11 @@ lint-fix:
 	@echo "🔧 Auto-fixing linting issues..."
 	@$(GOFMT) -s -w .
 
+# Lint with eBPF build tags
+lint-ebpf:
+	@gofmt -l . | grep -v vendor | tee fmt-issues.txt && test ! -s fmt-issues.txt
+	@go vet -tags ebpf ./...
+
 # Quick development cycle
 dev: fmt lint-fix ci-check test-unit build
 	@echo "🚀 Dev cycle complete!"
@@ -90,6 +95,14 @@ dev: fmt lint-fix ci-check test-unit build
 # Unit tests only
 test-unit:
 	@$(GOTEST) -short ./...
+
+# Default tests without eBPF
+test:
+	@$(GOTEST) -short ./...
+
+# Tests with eBPF support
+test-ebpf:
+	@$(GOTEST) -short -tags ebpf ./...
 
 # Generate coverage report
 coverage:
@@ -109,15 +122,6 @@ build-ebpf:
 	@mkdir -p bin
 	@$(GOBUILD) -tags ebpf -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-ebpf ./cmd/tapio
 
-# Tests with eBPF support
-test-ebpf:
-	@$(GOTEST) -short -tags ebpf ./...
-
-# Lint with eBPF build tags
-lint-ebpf:
-	@gofmt -l . | grep -v vendor | tee fmt-issues.txt && test ! -s fmt-issues.txt
-	@go vet -tags ebpf ./...
-
 # CI checks with eBPF
 ci-ebpf: lint-ebpf build-ebpf test-ebpf
 	@echo "[OK] CI checks with eBPF passed!"
@@ -127,10 +131,6 @@ clean:
 	@rm -rf bin/ dist/ *.out *.html fmt-issues.txt
 
 ##@ Legacy Support
-
-# Default tests without eBPF
-test:
-	@$(GOTEST) -short ./...
 
 # Run go vet
 vet:

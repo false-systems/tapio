@@ -84,26 +84,6 @@ func clen(b []byte) int {
 	return len(b)
 }
 
-// ProcessMemoryStats tracks memory usage for a process
-type ProcessMemoryStats struct {
-	PID            uint32
-	Command        string
-	TotalAllocated uint64
-	TotalFreed     uint64
-	CurrentUsage   uint64
-	AllocationRate float64 // bytes per second
-	LastUpdate     time.Time
-	InContainer    bool
-	ContainerPID   uint32
-	GrowthPattern  []MemoryDataPoint
-}
-
-// MemoryDataPoint represents a point in time memory measurement
-type MemoryDataPoint struct {
-	Timestamp time.Time
-	Usage     uint64
-}
-
 // PredictOOM calculates if and when a process will hit OOM
 func (stats *ProcessMemoryStats) PredictOOM(memoryLimit uint64) *OOMPrediction {
 	if len(stats.GrowthPattern) < 2 {
@@ -133,12 +113,12 @@ func (stats *ProcessMemoryStats) PredictOOM(memoryLimit uint64) *OOMPrediction {
 
 	if currentUsage >= memoryLimit {
 		return &OOMPrediction{
-			WillOOM:      true,
-			TimeToOOM:    0,
-			Confidence:   0.95,
-			CurrentUsage: currentUsage,
-			GrowthRate:   growthRate,
-			MemoryLimit:  memoryLimit,
+			PID:              stats.PID,
+			TimeToOOM:        0,
+			Confidence:       0.95,
+			CurrentUsage:     currentUsage,
+			MemoryLimit:      memoryLimit,
+			PredictedPeakUsage: currentUsage,
 		}
 	}
 
@@ -149,23 +129,13 @@ func (stats *ProcessMemoryStats) PredictOOM(memoryLimit uint64) *OOMPrediction {
 	confidence := calculateGrowthConfidence(recent)
 
 	return &OOMPrediction{
-		WillOOM:      true,
-		TimeToOOM:    timeToOOM,
-		Confidence:   confidence,
-		CurrentUsage: currentUsage,
-		GrowthRate:   growthRate,
-		MemoryLimit:  memoryLimit,
+		PID:              stats.PID,
+		TimeToOOM:        timeToOOM,
+		Confidence:       confidence,
+		CurrentUsage:     currentUsage,
+		MemoryLimit:      memoryLimit,
+		PredictedPeakUsage: currentUsage + uint64(growthRate*timeToOOM.Seconds()),
 	}
-}
-
-// OOMPrediction represents a prediction of OOM kill
-type OOMPrediction struct {
-	WillOOM      bool
-	TimeToOOM    time.Duration
-	Confidence   float64 // 0.0 to 1.0
-	CurrentUsage uint64
-	GrowthRate   float64 // bytes per second
-	MemoryLimit  uint64
 }
 
 // calculateGrowthConfidence determines how confident we are in the growth pattern

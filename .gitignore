@@ -55,4 +55,4 @@ tmp/
 
 # Goreleaser
 .goreleaser.yml
-.goreleaser.yaml
+.goreleaser.yamlpkg/mod/

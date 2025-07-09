@@ -182,30 +182,42 @@ install_from_release() {
 }
 
 install_from_source() {
-    if ! command_exists go; then
-        error "Go not found. Please install Go 1.21+ or use a release version"
+    # Check if we're in the tapio directory and have a pre-built binary
+    if [[ -f "$(dirname "$0")/tapio" ]]; then
+        log "Using pre-built binary..."
+        local binary_path="$(dirname "$0")/tapio"
+    else
+        if ! command_exists go; then
+            error "Go not found. Please install Go 1.21+ or use a release version"
+        fi
+        
+        local temp_dir=$(mktemp -d)
+        cd "$temp_dir"
+        
+        log "Cloning repository..."
+        git clone "$REPO_URL" .
+        
+        log "Building from source..."
+        go build -ldflags="-s -w" -o "$BINARY_NAME" ./cmd/tapio
+        local binary_path="$BINARY_NAME"
     fi
     
-    local temp_dir=$(mktemp -d)
-    cd "$temp_dir"
-    
-    log "Cloning repository..."
-    git clone "$REPO_URL" .
-    
-    log "Building from source..."
-    go build -ldflags="-s -w" -o "$BINARY_NAME" ./cmd/tapio
-    
     # Install binary
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || true
     if [[ -w "$INSTALL_DIR" ]]; then
-        mv "$BINARY_NAME" "$INSTALL_DIR/"
+        cp "$binary_path" "$INSTALL_DIR/$BINARY_NAME"
     else
         log "Installing to $INSTALL_DIR (requires sudo)"
-        sudo mv "$BINARY_NAME" "$INSTALL_DIR/"
+        sudo cp "$binary_path" "$INSTALL_DIR/$BINARY_NAME"
     fi
     
     chmod +x "$INSTALL_DIR/$BINARY_NAME"
-    cd - >/dev/null
-    rm -rf "$temp_dir"
+    
+    # Clean up if we used temp directory
+    if [[ -n "${temp_dir:-}" ]]; then
+        cd - >/dev/null
+        rm -rf "$temp_dir"
+    fi
     
     log "Tapio built and installed to $INSTALL_DIR/$BINARY_NAME"
 }
@@ -245,8 +257,8 @@ verify_installation() {
     fi
     
     # Test basic functionality
-    if "$BINARY_NAME" --version >/dev/null 2>&1; then
-        local version=$("$BINARY_NAME" --version 2>/dev/null | head -1)
+    if "$BINARY_NAME" version >/dev/null 2>&1; then
+        local version=$("$BINARY_NAME" version 2>/dev/null | head -1)
         log "Installation successful: $version"
     else
         error "Installation failed: $BINARY_NAME not working properly"
