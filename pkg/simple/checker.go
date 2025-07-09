@@ -112,7 +112,7 @@ func (c *Checker) Check(ctx context.Context, req *types.CheckRequest) (*types.Ch
 		namespace = "default" // TODO: Get from current context
 	}
 
-	pods, err := c.getPods(ctx, namespace, req.All)
+	pods, err := c.GetPods(ctx, namespace, req.All)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods: %w", err)
 	}
@@ -268,9 +268,8 @@ func (c *Checker) getEmptyPodsMessage(namespace string, all bool, resource strin
 	return fmt.Sprintf("No pods found in namespace '%s'. Try:\n🔧 kubectl get pods -n %s\n🔧 kubectl get pods --all-namespaces\n🔧 Deploy some workloads to test", namespace, namespace)
 }
 
-// Helper functions
-
-func (c *Checker) getPods(ctx context.Context, namespace string, all bool) ([]corev1.Pod, error) {
+// GetPods retrieves pods from the specified namespace
+func (c *Checker) GetPods(ctx context.Context, namespace string, all bool) ([]corev1.Pod, error) {
 	listOptions := metav1.ListOptions{}
 
 	if all {

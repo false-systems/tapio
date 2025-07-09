@@ -8,41 +8,39 @@ import (
 	"runtime"
 )
 
-// StubMonitor is a no-op implementation for platforms without eBPF
-type StubMonitor struct {
+// stubMonitor provides a no-op implementation for non-Linux systems
+type stubMonitor struct {
 	lastError error
 }
 
-// NewMonitor creates a new eBPF monitor (stub on non-Linux)
-func NewMonitor(config *Config) Monitor {
-	return &StubMonitor{
-		lastError: ErrNotSupported,
-	}
+// CollectEvents is a no-op for stub monitor
+func (s *stubMonitor) CollectEvents() {
+	// No-op
 }
 
-func (m *StubMonitor) Start(ctx context.Context) error {
+func (s *stubMonitor) Start(ctx context.Context) error {
 	return ErrNotSupported
 }
 
-func (m *StubMonitor) Stop() error {
+func (s *stubMonitor) Stop() error {
 	return nil
 }
 
-func (m *StubMonitor) GetMemoryStats() (map[uint32]*ProcessMemoryStats, error) {
+func (s *stubMonitor) GetMemoryStats() ([]ProcessMemoryStats, error) {
 	return nil, ErrNotSupported
 }
 
-func (m *StubMonitor) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*OOMPrediction, error) {
+func (s *stubMonitor) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*OOMPrediction, error) {
 	return nil, ErrNotSupported
 }
 
-func (m *StubMonitor) IsAvailable() bool {
+func (s *stubMonitor) IsAvailable() bool {
 	return false
 }
 
-func (m *StubMonitor) GetLastError() error {
+func (s *stubMonitor) GetLastError() error {
 	if runtime.GOOS != "linux" {
 		return ErrNotSupported
 	}
-	return m.lastError
+	return s.lastError
 }
