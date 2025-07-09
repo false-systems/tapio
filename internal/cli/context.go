@@ -170,10 +170,10 @@ func selectNamespaceInteractively() (string, error) {
 	fmt.Printf("\nSelect namespace [1-%d] or press Enter to cancel: ", len(nsList.Items))
 
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 
 	if input == "" {
-		return "", fmt.Errorf("cancelled")
+		return "", fmt.Errorf("canceled")
 	}
 
 	choice, err := strconv.Atoi(input)
@@ -290,7 +290,7 @@ func SuggestNamespaceForResource(resourceName string) (string, error) {
 
 	fmt.Printf("Select namespace [1-%d]: ", len(foundNamespaces))
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 
 	choice, err := strconv.Atoi(input)
 	if err != nil || choice < 1 || choice > len(foundNamespaces) {
@@ -307,7 +307,7 @@ func PromptForNamespaceSwitch(suggestedNamespace, resourceName string) bool {
 	fmt.Printf("Switch to %s? [Y/n]: ", suggestedNamespace)
 
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 
 	input = strings.ToLower(strings.TrimSpace(input))
 	return input == "" || input == "y" || input == "yes"

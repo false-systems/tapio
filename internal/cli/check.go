@@ -137,7 +137,7 @@ func offerNamespaceSelection() bool {
 	fmt.Printf("\nSwitch to namespace [1-%d], 'a' for all, or Enter to cancel: ", len(namespacesWithPods))
 
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 
 	if input == "" {
 		return true

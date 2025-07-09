@@ -10,17 +10,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/ebpf"
 	"github.com/falseyair/tapio/pkg/k8s"
 	"github.com/falseyair/tapio/pkg/types"
 )
 
 // Checker performs health checks on Kubernetes resources
 type Checker struct {
-	client            kubernetes.Interface
-	correlationEngine *correlation.Engine
-	ebpfMonitor       ebpf.Monitor
+	client kubernetes.Interface
 }
 
 // NewChecker creates a new checker with auto-detected Kubernetes config
@@ -30,30 +26,8 @@ func NewChecker() (*Checker, error) {
 		return nil, enhanceK8sError(err)
 	}
 
-	// Create eBPF monitor with default config (disabled by default)
-	ebpfMonitor := ebpf.NewMonitor(nil)
-
 	return &Checker{
-		client:            k8sClient.Clientset,
-		correlationEngine: correlation.NewEngine(),
-		ebpfMonitor:       ebpfMonitor,
-	}, nil
-}
-
-// NewCheckerWithConfig creates a new checker with custom eBPF configuration
-func NewCheckerWithConfig(ebpfConfig *ebpf.Config) (*Checker, error) {
-	k8sClient, err := k8s.NewClient("")
-	if err != nil {
-		return nil, enhanceK8sError(err)
-	}
-
-	// Create eBPF monitor with provided config
-	ebpfMonitor := ebpf.NewMonitor(ebpfConfig)
-
-	return &Checker{
-		client:            k8sClient.Clientset,
-		correlationEngine: correlation.NewEngine(),
-		ebpfMonitor:       ebpfMonitor,
+		client: k8sClient.Clientset,
 	}, nil
 }
 
@@ -62,40 +36,14 @@ func (c *Checker) GetClient() kubernetes.Interface {
 	return c.client
 }
 
-// GetEBPFMonitor returns the eBPF monitor for direct access
-func (c *Checker) GetEBPFMonitor() ebpf.Monitor {
-	return c.ebpfMonitor
-}
-
-// StartEBPFMonitoring starts eBPF monitoring if available and configured
-func (c *Checker) StartEBPFMonitoring(ctx context.Context) error {
-	if c.ebpfMonitor == nil {
-		return fmt.Errorf("eBPF monitor not initialized")
-	}
-
-	if !c.ebpfMonitor.IsAvailable() {
-		return fmt.Errorf("eBPF monitoring not available on this system")
-	}
-
-	return c.ebpfMonitor.Start(ctx)
-}
-
-// StopEBPFMonitoring stops eBPF monitoring
-func (c *Checker) StopEBPFMonitoring() error {
-	if c.ebpfMonitor == nil {
-		return nil
-	}
-
-	return c.ebpfMonitor.Stop()
-}
-
 // enhanceK8sError provides user-friendly error messages for common K8s issues
 func enhanceK8sError(err error) error {
 	errStr := err.Error()
 
 	switch {
 	case strings.Contains(errStr, "connection refused"):
-		return fmt.Errorf("❌ Kubernetes cluster not running\n🔧 Try: minikube start, kind create cluster, or check your cluster status")
+		return fmt.Errorf("❌ Kubernetes cluster not running\n" +
+			"🔧 Try: minikube start, kind create cluster, or check your cluster status")
 	case strings.Contains(errStr, "no such host"):
 		return fmt.Errorf("❌ Cannot reach Kubernetes API server\n🔧 Check your kubeconfig and network connectivity")
 	case strings.Contains(errStr, "couldn't get current server API group list"):
@@ -160,12 +108,6 @@ func (c *Checker) Check(ctx context.Context, req *types.CheckRequest) (*types.Ch
 	// Generate quick fixes
 	result.QuickFixes = c.generateQuickFixes(result.Problems)
 
-	// Run correlation analysis if we have problems
-	if len(result.Problems) > 1 {
-		correlationResult := c.correlationEngine.AnalyzeProblems(ctx, result.Problems)
-		result.CorrelationAnalysis = correlationResult
-	}
-
 	return result, nil
 }
 
@@ -177,8 +119,7 @@ func (c *Checker) analyzePod(pod *corev1.Pod) types.Problem {
 			Name:      pod.Name,
 			Namespace: pod.Namespace,
 		},
-		Severity:  types.SeverityHealthy,
-		Timestamp: time.Now(),
+		Severity: types.SeverityHealthy,
 	}
 
 	// Handle different pod phases intelligently
@@ -265,7 +206,8 @@ func (c *Checker) isJob(pod *corev1.Pod) bool {
 // getEmptyPodsMessage provides helpful context when no pods are found
 func (c *Checker) getEmptyPodsMessage(namespace string, all bool, resource string) string {
 	if resource != "" {
-		return fmt.Sprintf("No pods match resource '%s'. Try 'kubectl get pods --all-namespaces | grep %s'", resource, resource)
+		return fmt.Sprintf("No pods match resource '%s'. "+
+			"Try 'kubectl get pods --all-namespaces | grep %s'", resource, resource)
 	}
 
 	if all {
@@ -276,7 +218,10 @@ func (c *Checker) getEmptyPodsMessage(namespace string, all bool, resource strin
 		namespace = "default"
 	}
 
-	return fmt.Sprintf("No pods found in namespace '%s'. Try:\n🔧 kubectl get pods -n %s\n🔧 kubectl get pods --all-namespaces\n🔧 Deploy some workloads to test", namespace, namespace)
+	return fmt.Sprintf("No pods found in namespace '%s'. Try:\n"+
+		"🔧 kubectl get pods -n %s\n"+
+		"🔧 kubectl get pods --all-namespaces\n"+
+		"🔧 Deploy some workloads to test", namespace, namespace)
 }
 
 // GetPods retrieves pods from the specified namespace
