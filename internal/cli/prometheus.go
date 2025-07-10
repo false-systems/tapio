@@ -19,6 +19,7 @@ var (
 	metricsAddr          string
 	updateInterval       time.Duration
 	prometheusEnableEBPF bool
+	useUniversalFormat   bool
 )
 
 var prometheusCmd = &cobra.Command{
@@ -32,7 +33,10 @@ and provides metrics that can be scraped by Prometheus for alerting and dashboar
 Features:
   • OOM prediction metrics with precise timing
   • Pod health status and cluster health scores
-  • Zero-configuration auto-discovery`,
+  • Zero-configuration auto-discovery
+  • Universal data format for enhanced metrics (--universal)
+  • eBPF kernel-level monitoring (--enable-ebpf)
+  • Correlation engine findings`,
 	Example: `  # Start metrics server on default port
   tapio prometheus
 
@@ -51,6 +55,8 @@ func init() {
 		"How often to update metrics by scanning the cluster")
 	prometheusCmd.Flags().BoolVar(&prometheusEnableEBPF, "enable-ebpf", false,
 		"Enable eBPF monitoring for enhanced metrics (requires root)")
+	prometheusCmd.Flags().BoolVar(&useUniversalFormat, "universal", true,
+		"Use universal data format for enhanced metrics")
 }
 
 func runPrometheus(cmd *cobra.Command, args []string) error {
@@ -58,6 +64,9 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	fmt.Println("🌲 Starting Tapio Prometheus Exporter...")
+	if useUniversalFormat {
+		fmt.Println("✨ Using universal data format for enhanced metrics")
+	}
 
 	// Create eBPF config if enabled
 	var ebpfConfig *ebpf.Config
@@ -97,7 +106,32 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 	exporter := metrics.NewPrometheusExporter(checker, checker.GetEBPFMonitor())
 
 	// Start periodic metrics updates in background
-	go exporter.StartPeriodicUpdates(ctx, updateInterval)
+	if useUniversalFormat {
+		go func() {
+			ticker := time.NewTicker(updateInterval)
+			defer ticker.Stop()
+
+			// Initial update
+			if err := exporter.UpdateMetricsWithUniversal(ctx); err != nil {
+				fmt.Printf("Warning: Initial universal metrics update failed: %v\n", err)
+			} else {
+				fmt.Println("[OK] Universal metrics initialized")
+			}
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := exporter.UpdateMetricsWithUniversal(ctx); err != nil {
+						fmt.Printf("Warning: Universal metrics update failed: %v\n", err)
+					}
+				}
+			}
+		}()
+	} else {
+		go exporter.StartPeriodicUpdates(ctx, updateInterval)
+	}
 
 	// Start metrics server in a goroutine
 	serverErr := make(chan error, 1)

@@ -2,10 +2,12 @@ package formatters
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/falseyair/tapio/pkg/universal"
 )
 
@@ -87,7 +89,7 @@ func (f *PrometheusFormatter) FormatEvent(event *universal.UniversalEvent) error
 	eventMetric.Target = event.Target
 	eventMetric.Labels = map[string]string{
 		"level":    string(event.Level),
-		"category": event.Category,
+		"type":     string(event.Type),
 	}
 
 	return f.FormatMetric(eventMetric)
@@ -102,21 +104,21 @@ func (f *PrometheusFormatter) FormatPrediction(prediction *universal.UniversalPr
 	// Create prediction gauge metrics
 	metrics := []*universal.UniversalMetric{
 		{
-			Name:   fmt.Sprintf("prediction_%s_confidence", strings.ToLower(prediction.Type)),
+			Name:   fmt.Sprintf("prediction_%s_probability", strings.ToLower(string(prediction.Type))),
 			Type:   universal.MetricTypeGauge,
-			Value:  prediction.Confidence,
+			Value:  prediction.Probability,
 			Target: prediction.Target,
 			Labels: map[string]string{
-				"severity": string(prediction.Severity),
+				"impact": string(prediction.Impact),
 			},
 		},
 		{
-			Name:   fmt.Sprintf("prediction_%s_time_to_event_seconds", strings.ToLower(prediction.Type)),
+			Name:   fmt.Sprintf("prediction_%s_time_to_event_seconds", strings.ToLower(string(prediction.Type))),
 			Type:   universal.MetricTypeGauge,
 			Value:  prediction.TimeToEvent.Seconds(),
 			Target: prediction.Target,
 			Labels: map[string]string{
-				"severity": string(prediction.Severity),
+				"impact": string(prediction.Impact),
 			},
 		},
 	}
@@ -194,9 +196,9 @@ func (f *PrometheusFormatter) buildLabels(metric *universal.UniversalMetric) map
 		}
 	}
 	
-	// Add quality labels if not good
-	if metric.Quality.Level != universal.QualityGood {
-		labels["quality"] = string(metric.Quality.Level)
+	// Add quality labels if low confidence
+	if metric.Quality.Confidence < 0.8 {
+		labels["quality"] = "degraded"
 	}
 	
 	// Add custom labels
@@ -288,7 +290,7 @@ func (f *PrometheusFormatter) getOrCreateHistogram(name, help string, labelNames
 
 // MetricsHandler creates an HTTP handler for Prometheus metrics
 func (f *PrometheusFormatter) MetricsHandler() http.Handler {
-	return prometheus.HandlerFor(f.registry, prometheus.HandlerOpts{
+	return promhttp.HandlerFor(f.registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
 		Timeout:          10 * time.Second,
 	})

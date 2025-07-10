@@ -9,15 +9,20 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/falseyair/tapio/internal/output"
+	"github.com/falseyair/tapio/pkg/correlation"
 	"github.com/falseyair/tapio/pkg/simple"
 	"github.com/falseyair/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/falseyair/tapio/pkg/universal/converters"
+	"github.com/falseyair/tapio/pkg/universal/formatters"
 )
 
 var (
-	whyVerbose    bool
-	whyOutput     string
-	whyNamespace  string
-	whyEnableEBPF bool
+	whyVerbose         bool
+	whyOutput          string
+	whyNamespace       string
+	whyEnableEBPF      bool
+	whyUseUniversal    bool
 )
 
 var whyCmd = &cobra.Command{
@@ -47,6 +52,7 @@ func init() {
 	whyCmd.Flags().StringVarP(&whyOutput, "output", "o", "human", "Output format: human, json, yaml")
 	whyCmd.Flags().StringVarP(&whyNamespace, "namespace", "n", "", "Kubernetes namespace")
 	whyCmd.Flags().BoolVar(&whyEnableEBPF, "enable-ebpf", false, "Enable eBPF monitoring for enhanced insights")
+	whyCmd.Flags().BoolVar(&whyUseUniversal, "universal", true, "Use universal data format for enhanced output")
 }
 
 func runWhy(cmd *cobra.Command, args []string) error {
@@ -129,6 +135,12 @@ func runWhy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output explanation
+	if whyUseUniversal && whyOutput == "human" {
+		// Convert to universal format and use CLI formatter
+		return outputUniversalExplanation(ctx, explanation, resourceProblems, checker)
+	}
+
+	// Use traditional formatter
 	formatter := output.NewFormatter(whyOutput)
 	err = formatter.PrintExplanation(explanation)
 	if err != nil {
@@ -136,6 +148,136 @@ func runWhy(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// outputUniversalExplanation outputs the explanation using universal data format
+func outputUniversalExplanation(ctx context.Context, explanation *types.Explanation, problems []types.Problem, checker *simple.Checker) error {
+	// Create converters
+	correlationConverter := converters.NewCorrelationConverter()
+	
+	// Create CLI formatter
+	cliFormatter := formatters.NewCLIFormatter(&formatters.CLIConfig{
+		UseColor:   true,
+		Verbosity:  1,
+		TimeFormat: "15:04:05",
+	})
+	
+	if whyVerbose {
+		cliFormatter = formatters.NewCLIFormatter(&formatters.CLIConfig{
+			UseColor:   true,
+			Verbosity:  2,
+			TimeFormat: "15:04:05",
+		})
+	}
+	
+	// Create universal dataset
+	dataset := &universal.UniversalDataset{
+		Source:    "tapio-why",
+		Version:   "1.0",
+		Timestamp: time.Now(),
+	}
+	
+	// Convert problems to universal predictions
+	for _, problem := range problems {
+		if problem.Prediction != nil {
+			// Create a simple finding from the problem
+			finding := &correlation.Finding{
+				Title:       problem.Title,
+				Description: problem.Description,
+				Severity:    convertSeverity(problem.Severity),
+				Confidence:  problem.Prediction.Confidence,
+				Resource: &correlation.ResourceReference{
+					Kind:      explanation.Resource.Kind,
+					Name:      explanation.Resource.Name,
+					Namespace: explanation.Resource.Namespace,
+				},
+				Prediction: &correlation.Prediction{
+					Event:       "OOM",
+					TimeToEvent: problem.Prediction.TimeToFailure,
+					Confidence:  problem.Prediction.Confidence,
+				},
+			}
+			
+			// Convert to universal prediction
+			pred, err := correlationConverter.ConvertFinding(finding)
+			if err == nil {
+				dataset.Predictions = append(dataset.Predictions, pred)
+			}
+		}
+	}
+	
+	// Output header
+	fmt.Printf("\n🔍 Analysis Results for %s/%s\n", explanation.Resource.Kind, explanation.Resource.Name)
+	fmt.Println(strings.Repeat("=", 60))
+	
+	// Output predictions using CLI formatter
+	if len(dataset.Predictions) > 0 {
+		fmt.Println("\n📊 Predictions:")
+		explanationStr := cliFormatter.FormatExplanation(dataset)
+		fmt.Println(explanationStr)
+	} else {
+		fmt.Println("\n✅ No critical issues detected")
+	}
+	
+	// Output root causes
+	if len(explanation.RootCauses) > 0 {
+		fmt.Printf("\n🔍 Root Causes (%d found):\n", len(explanation.RootCauses))
+		for i, cause := range explanation.RootCauses {
+			fmt.Printf("\n%d. %s (%.0f%% confidence)\n", i+1, cause.Title, cause.Confidence*100)
+			fmt.Printf("   %s\n", cause.Description)
+			if len(cause.Evidence) > 0 {
+				fmt.Println("   Evidence:")
+				for _, evidence := range cause.Evidence {
+					fmt.Printf("   • %s\n", evidence)
+				}
+			}
+		}
+	}
+	
+	// Output solutions
+	if len(explanation.Solutions) > 0 {
+		fmt.Printf("\n💡 Recommended Solutions:\n")
+		for i, solution := range explanation.Solutions {
+			fmt.Printf("\n%d. %s [%s difficulty, %s risk]\n", i+1, solution.Title, solution.Difficulty, solution.Risk)
+			fmt.Printf("   %s\n", solution.Description)
+			if len(solution.Commands) > 0 {
+				fmt.Println("   Commands:")
+				for _, cmd := range solution.Commands {
+					fmt.Printf("   $ %s\n", cmd)
+				}
+			}
+		}
+	}
+	
+	// Output reality check if available
+	if explanation.Analysis != nil && explanation.Analysis.RealityCheck != nil {
+		fmt.Println("\n📈 Reality Check:")
+		rc := explanation.Analysis.RealityCheck
+		if rc.ActualMemory != "" {
+			fmt.Printf("   Actual Memory: %s\n", rc.ActualMemory)
+		}
+		if rc.RestartPattern != "" {
+			fmt.Printf("   Restart Pattern: %s\n", rc.RestartPattern)
+		}
+		if rc.ContainerRuntime != "" {
+			fmt.Printf("   Container Runtime: %s\n", rc.ContainerRuntime)
+		}
+	}
+	
+	fmt.Println()
+	return nil
+}
+
+// convertSeverity converts types.Severity to correlation.Severity
+func convertSeverity(sev types.Severity) correlation.Severity {
+	switch sev {
+	case types.SeverityCritical:
+		return correlation.SeverityCritical
+	case types.SeverityWarning:
+		return correlation.SeverityWarning
+	default:
+		return correlation.SeverityInfo
+	}
 }
 
 // createFallbackExplanation creates a fallback explanation when enhanced analysis fails
