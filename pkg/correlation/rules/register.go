@@ -36,5 +36,31 @@ func RegisterDefaultRules(registry *correlation.RuleRegistry) error {
 		return err
 	}
 
+	// Register advanced correlation rules
+	
+	// Register ETCD cascade rule
+	etcdRule := NewETCDCascadeRule(DefaultETCDCascadeConfig())
+	if err := registry.RegisterRule(etcdRule); err != nil {
+		return err
+	}
+
+	// Register certificate cascade rule
+	certRule := NewCertificateCascadeRule(DefaultCertificateCascadeConfig())
+	if err := registry.RegisterRule(certRule); err != nil {
+		return err
+	}
+
+	// Register admission lockdown rule
+	admissionRule := NewAdmissionLockdownRule(DefaultAdmissionLockdownConfig())
+	if err := registry.RegisterRule(admissionRule); err != nil {
+		return err
+	}
+
+	// Register control plane dependency rule
+	controlPlaneRule := NewControlPlaneDepsRule(DefaultControlPlaneDepsConfig())
+	if err := registry.RegisterRule(controlPlaneRule); err != nil {
+		return err
+	}
+
 	return nil
 }
