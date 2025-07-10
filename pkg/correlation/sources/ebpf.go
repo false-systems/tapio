@@ -61,7 +61,7 @@ func (e *EBPFDataSource) getEBPFData(ctx context.Context, params map[string]inte
 	if err != nil {
 		return nil, fmt.Errorf("failed to get memory stats: %w", err)
 	}
-	
+
 	// Convert to correlation format
 	processStats := make(map[uint32]*correlation.ProcessMemoryStats)
 	for _, stat := range stats {
@@ -79,13 +79,13 @@ func (e *EBPFDataSource) getEBPFData(ctx context.Context, params map[string]inte
 			// IOBytesWritten and IOBytesRead not available in ebpf.ProcessMemoryStats
 		}
 	}
-	
+
 	// Note: The current eBPF interface doesn't provide events or system metrics
 	// We'll create empty/default values for now
 	memoryEvents := []correlation.MemoryEvent{}
 	cpuEvents := []correlation.CPUEvent{}
 	ioEvents := []correlation.IOEvent{}
-	
+
 	return &correlation.EBPFData{
 		ProcessStats: processStats,
 		SystemMetrics: correlation.SystemMetrics{
@@ -105,19 +105,19 @@ func (e *EBPFDataSource) getMemoryStats(ctx context.Context, params map[string]i
 	if err != nil {
 		return nil, fmt.Errorf("failed to get memory stats: %w", err)
 	}
-	
+
 	processStats := make(map[uint32]*correlation.ProcessMemoryStats)
 	for _, stat := range stats {
 		// Filter by PID if specified
 		if targetPID, ok := params["pid"].(uint32); ok && stat.PID != targetPID {
 			continue
 		}
-		
+
 		// Filter by container if specified
 		if inContainer, ok := params["in_container"].(bool); ok && stat.InContainer != inContainer {
 			continue
 		}
-		
+
 		processStats[stat.PID] = &correlation.ProcessMemoryStats{
 			PID:            stat.PID,
 			Command:        stat.Command,
@@ -132,7 +132,7 @@ func (e *EBPFDataSource) getMemoryStats(ctx context.Context, params map[string]i
 			// IOBytesWritten and IOBytesRead not available in ebpf.ProcessMemoryStats
 		}
 	}
-	
+
 	return processStats, nil
 }
 
@@ -148,7 +148,7 @@ func (e *EBPFDataSource) getMemoryEvents(ctx context.Context, params map[string]
 	if l, ok := params["limit"].(int); ok {
 		limit = l
 	}
-	
+
 	return e.getRecentMemoryEvents(limit), nil
 }
 
@@ -158,7 +158,7 @@ func (e *EBPFDataSource) getCPUEvents(ctx context.Context, params map[string]int
 	if l, ok := params["limit"].(int); ok {
 		limit = l
 	}
-	
+
 	return e.getRecentCPUEvents(limit), nil
 }
 
@@ -168,7 +168,7 @@ func (e *EBPFDataSource) getIOEvents(ctx context.Context, params map[string]inte
 	if l, ok := params["limit"].(int); ok {
 		limit = l
 	}
-	
+
 	return e.getRecentIOEvents(limit), nil
 }
 

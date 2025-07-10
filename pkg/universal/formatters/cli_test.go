@@ -14,7 +14,7 @@ func TestCLIFormatter_FormatMetric(t *testing.T) {
 		Verbosity:  2,
 		TimeFormat: "15:04:05",
 	})
-	
+
 	tests := []struct {
 		name     string
 		metric   *universal.UniversalMetric
@@ -54,7 +54,7 @@ func TestCLIFormatter_FormatMetric(t *testing.T) {
 					Namespace: "production",
 				},
 				Labels: map[string]string{
-					"cpu": "0",
+					"cpu":  "0",
 					"mode": "user",
 				},
 			},
@@ -86,11 +86,11 @@ func TestCLIFormatter_FormatMetric(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output := formatter.FormatMetric(tt.metric)
-			
+
 			for _, expected := range tt.contains {
 				if !strings.Contains(output, expected) {
 					t.Errorf("Expected output to contain %q, got:\n%s", expected, output)
@@ -105,7 +105,7 @@ func TestCLIFormatter_FormatEvent(t *testing.T) {
 		UseColor:  false,
 		Verbosity: 3,
 	})
-	
+
 	event := &universal.UniversalEvent{
 		Type:      universal.EventTypeOOMKill,
 		Level:     universal.EventLevelCritical,
@@ -123,9 +123,9 @@ func TestCLIFormatter_FormatEvent(t *testing.T) {
 			"memory_limit": "500MB",
 		},
 	}
-	
+
 	output := formatter.FormatEvent(event)
-	
+
 	expectedStrings := []string{
 		"[CRITICAL]",
 		"process/nginx[1234]",
@@ -137,7 +137,7 @@ func TestCLIFormatter_FormatEvent(t *testing.T) {
 		"Category: memory",
 		"Source: kernel",
 	}
-	
+
 	for _, expected := range expectedStrings {
 		if !strings.Contains(output, expected) {
 			t.Errorf("Expected output to contain %q, got:\n%s", expected, output)
@@ -150,7 +150,7 @@ func TestCLIFormatter_FormatPrediction(t *testing.T) {
 		UseColor:  false,
 		Verbosity: 1,
 	})
-	
+
 	prediction := &universal.UniversalPrediction{
 		Type:        "oom",
 		Severity:    universal.SeverityHigh,
@@ -173,9 +173,9 @@ func TestCLIFormatter_FormatPrediction(t *testing.T) {
 			"Enable horizontal pod autoscaling",
 		},
 	}
-	
+
 	output := formatter.FormatPrediction(prediction)
-	
+
 	expectedStrings := []string{
 		"[HIGH]",
 		"pod/webapp",
@@ -188,7 +188,7 @@ func TestCLIFormatter_FormatPrediction(t *testing.T) {
 		"→ Set memory limits for the pod",
 		"→ Investigate memory leak",
 	}
-	
+
 	for _, expected := range expectedStrings {
 		if !strings.Contains(output, expected) {
 			t.Errorf("Expected output to contain %q, got:\n%s", expected, output)
@@ -201,7 +201,7 @@ func TestCLIFormatter_FormatExplanation(t *testing.T) {
 		UseColor:  false,
 		Verbosity: 1,
 	})
-	
+
 	dataset := &universal.UniversalDataset{
 		Predictions: []*universal.UniversalPrediction{
 			{
@@ -239,16 +239,16 @@ func TestCLIFormatter_FormatExplanation(t *testing.T) {
 			},
 		},
 	}
-	
+
 	output := formatter.FormatExplanation(dataset)
-	
+
 	expectedStrings := []string{
 		"=== pod/api-server ===",
 		"=== node/worker-1 ===",
 		"Summary: 3 predictions across 2 targets",
 		"(1 critical, 1 high, 1 medium)",
 	}
-	
+
 	for _, expected := range expectedStrings {
 		if !strings.Contains(output, expected) {
 			t.Errorf("Expected output to contain %q, got:\n%s", expected, output)
@@ -261,7 +261,7 @@ func TestCLIFormatter_ColorOutput(t *testing.T) {
 		UseColor:  true,
 		Verbosity: 0,
 	})
-	
+
 	tests := []struct {
 		name     string
 		format   func() string
@@ -298,7 +298,7 @@ func TestCLIFormatter_ColorOutput(t *testing.T) {
 			contains: "\033[33m[WARNING]\033[0m", // Yellow
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output := tt.format()
@@ -313,7 +313,7 @@ func TestTableFormatter_FormatMetricsTable(t *testing.T) {
 	formatter := NewTableFormatter(&CLIConfig{
 		UseColor: false,
 	})
-	
+
 	metrics := []*universal.UniversalMetric{
 		{
 			Name:  "memory_usage",
@@ -341,25 +341,25 @@ func TestTableFormatter_FormatMetricsTable(t *testing.T) {
 			},
 		},
 	}
-	
+
 	output := formatter.FormatMetricsTable(metrics)
-	
+
 	// Check table structure
 	lines := strings.Split(output, "\n")
 	if len(lines) < 4 {
 		t.Fatalf("Expected at least 4 lines, got %d", len(lines))
 	}
-	
+
 	// Check header
 	if !strings.Contains(lines[0], "Target") || !strings.Contains(lines[0], "Metric") {
 		t.Error("Table header missing expected columns")
 	}
-	
+
 	// Check separator
 	if !strings.Contains(lines[1], "---") {
 		t.Error("Table separator missing")
 	}
-	
+
 	// Check data rows
 	if !strings.Contains(output, "1024.50") {
 		t.Error("Expected metric value not found")
@@ -371,7 +371,7 @@ func TestTableFormatter_FormatMetricsTable(t *testing.T) {
 
 func TestCLIFormatter_FormatDuration(t *testing.T) {
 	formatter := NewCLIFormatter(nil)
-	
+
 	tests := []struct {
 		duration time.Duration
 		expected string
@@ -381,7 +381,7 @@ func TestCLIFormatter_FormatDuration(t *testing.T) {
 		{2 * time.Hour, "2.0 hours"},
 		{36 * time.Hour, "1.5 days"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			result := formatter.formatDuration(tt.duration)

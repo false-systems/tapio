@@ -36,14 +36,14 @@ func (k *KubernetesDataSource) IsAvailable() bool {
 	if client == nil {
 		return false
 	}
-	
+
 	// Try a simple API call
 	ctx := context.Background()
 	req := &types.CheckRequest{
 		Namespace: "default",
 		All:       false,
 	}
-	
+
 	_, err := k.checker.Check(ctx, req)
 	return err == nil
 }
@@ -68,30 +68,30 @@ func (k *KubernetesDataSource) GetData(ctx context.Context, dataType string, par
 func (k *KubernetesDataSource) getKubernetesData(ctx context.Context, params map[string]interface{}) (*correlation.KubernetesData, error) {
 	namespace := ""
 	all := true
-	
+
 	if ns, ok := params["namespace"].(string); ok {
 		namespace = ns
 		all = false
 	}
-	
+
 	// Get health check data
 	req := &types.CheckRequest{
 		Namespace: namespace,
 		All:       all,
 		Verbose:   true,
 	}
-	
+
 	result, err := k.checker.Check(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check health: %w", err)
 	}
-	
+
 	// Get pods
 	pods, err := k.checker.GetPods(ctx, namespace, all)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods: %w", err)
 	}
-	
+
 	// Get events from pods
 	var events []corev1.Event
 	for _, pod := range pods {
@@ -100,7 +100,7 @@ func (k *KubernetesDataSource) getKubernetesData(ctx context.Context, params map
 			events = append(events, podEvents...)
 		}
 	}
-	
+
 	return &correlation.KubernetesData{
 		Pods:      pods,
 		Events:    events,
@@ -114,12 +114,12 @@ func (k *KubernetesDataSource) getKubernetesData(ctx context.Context, params map
 func (k *KubernetesDataSource) getPods(ctx context.Context, params map[string]interface{}) ([]corev1.Pod, error) {
 	namespace := ""
 	all := true
-	
+
 	if ns, ok := params["namespace"].(string); ok {
 		namespace = ns
 		all = false
 	}
-	
+
 	return k.checker.GetPods(ctx, namespace, all)
 }
 
@@ -129,13 +129,13 @@ func (k *KubernetesDataSource) getEvents(ctx context.Context, params map[string]
 	if ns, ok := params["namespace"].(string); ok {
 		namespace = ns
 	}
-	
+
 	// Get all pods first
 	pods, err := k.checker.GetPods(ctx, namespace, namespace == "")
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Collect events for all pods
 	var allEvents []corev1.Event
 	for _, pod := range pods {
@@ -144,7 +144,7 @@ func (k *KubernetesDataSource) getEvents(ctx context.Context, params map[string]
 			allEvents = append(allEvents, events...)
 		}
 	}
-	
+
 	return allEvents, nil
 }
 
@@ -155,7 +155,7 @@ func (k *KubernetesDataSource) getEventsForPod(ctx context.Context, pod *corev1.
 	if client == nil {
 		return nil, fmt.Errorf("kubernetes client not available")
 	}
-	
+
 	fieldSelector := fmt.Sprintf("involvedObject.name=%s,involvedObject.namespace=%s", pod.Name, pod.Namespace)
 	eventList, err := client.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{
 		FieldSelector: fieldSelector,
@@ -163,7 +163,7 @@ func (k *KubernetesDataSource) getEventsForPod(ctx context.Context, pod *corev1.
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return eventList.Items, nil
 }
 
@@ -171,22 +171,22 @@ func (k *KubernetesDataSource) getEventsForPod(ctx context.Context, pod *corev1.
 func (k *KubernetesDataSource) getProblems(ctx context.Context, params map[string]interface{}) ([]types.Problem, error) {
 	namespace := ""
 	all := true
-	
+
 	if ns, ok := params["namespace"].(string); ok {
 		namespace = ns
 		all = false
 	}
-	
+
 	req := &types.CheckRequest{
 		Namespace: namespace,
 		All:       all,
 		Verbose:   true,
 	}
-	
+
 	result, err := k.checker.Check(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return result.Problems, nil
 }

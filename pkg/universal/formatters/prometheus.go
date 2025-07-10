@@ -6,18 +6,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/falseyair/tapio/pkg/universal"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/falseyair/tapio/pkg/universal"
 )
 
 // PrometheusFormatter converts universal metrics to Prometheus format
 type PrometheusFormatter struct {
-	namespace string
-	subsystem string
-	registry  *prometheus.Registry
-	gauges    map[string]*prometheus.GaugeVec
-	counters  map[string]*prometheus.CounterVec
+	namespace  string
+	subsystem  string
+	registry   *prometheus.Registry
+	gauges     map[string]*prometheus.GaugeVec
+	counters   map[string]*prometheus.CounterVec
 	histograms map[string]*prometheus.HistogramVec
 }
 
@@ -26,7 +26,7 @@ func NewPrometheusFormatter(namespace, subsystem string, registry *prometheus.Re
 	if registry == nil {
 		registry = prometheus.NewRegistry()
 	}
-	
+
 	return &PrometheusFormatter{
 		namespace:  namespace,
 		subsystem:  subsystem,
@@ -45,7 +45,7 @@ func (f *PrometheusFormatter) FormatMetric(metric *universal.UniversalMetric) er
 
 	// Build metric name
 	metricName := f.buildMetricName(metric.Name)
-	
+
 	// Build labels
 	labels := f.buildLabels(metric)
 	labelNames := f.getLabelNames(labels)
@@ -55,15 +55,15 @@ func (f *PrometheusFormatter) FormatMetric(metric *universal.UniversalMetric) er
 	case universal.MetricTypeGauge:
 		gauge := f.getOrCreateGauge(metricName, metric.Unit, labelNames)
 		gauge.WithLabelValues(labelValues...).Set(metric.Value)
-		
+
 	case universal.MetricTypeCounter:
 		counter := f.getOrCreateCounter(metricName, metric.Unit, labelNames)
 		counter.WithLabelValues(labelValues...).Add(metric.Value)
-		
+
 	case universal.MetricTypeHistogram:
 		histogram := f.getOrCreateHistogram(metricName, metric.Unit, labelNames)
 		histogram.WithLabelValues(labelValues...).Observe(metric.Value)
-		
+
 	default:
 		// Default to gauge for unknown types
 		gauge := f.getOrCreateGauge(metricName, metric.Unit, labelNames)
@@ -88,8 +88,8 @@ func (f *PrometheusFormatter) FormatEvent(event *universal.UniversalEvent) error
 	eventMetric.Value = 1
 	eventMetric.Target = event.Target
 	eventMetric.Labels = map[string]string{
-		"level":    string(event.Level),
-		"type":     string(event.Type),
+		"level": string(event.Level),
+		"type":  string(event.Type),
 	}
 
 	return f.FormatMetric(eventMetric)
@@ -170,14 +170,14 @@ func (f *PrometheusFormatter) buildMetricName(name string) string {
 		parts = append(parts, f.subsystem)
 	}
 	parts = append(parts, name)
-	
+
 	return strings.Join(parts, "_")
 }
 
 // buildLabels constructs labels from metric and target
 func (f *PrometheusFormatter) buildLabels(metric *universal.UniversalMetric) map[string]string {
 	labels := make(map[string]string)
-	
+
 	// Add target labels
 	switch metric.Target.Type {
 	case universal.TargetTypePod:
@@ -195,17 +195,17 @@ func (f *PrometheusFormatter) buildLabels(metric *universal.UniversalMetric) map
 			labels["pid"] = fmt.Sprintf("%d", metric.Target.PID)
 		}
 	}
-	
+
 	// Add quality labels if low confidence
 	if metric.Quality.Confidence < 0.8 {
 		labels["quality"] = "degraded"
 	}
-	
+
 	// Add custom labels
 	for k, v := range metric.Labels {
 		labels[k] = v
 	}
-	
+
 	return labels
 }
 
@@ -233,7 +233,7 @@ func (f *PrometheusFormatter) getOrCreateGauge(name, help string, labelNames []s
 	if gauge, exists := f.gauges[key]; exists {
 		return gauge
 	}
-	
+
 	gauge := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: name,
@@ -241,7 +241,7 @@ func (f *PrometheusFormatter) getOrCreateGauge(name, help string, labelNames []s
 		},
 		labelNames,
 	)
-	
+
 	f.registry.MustRegister(gauge)
 	f.gauges[key] = gauge
 	return gauge
@@ -253,7 +253,7 @@ func (f *PrometheusFormatter) getOrCreateCounter(name, help string, labelNames [
 	if counter, exists := f.counters[key]; exists {
 		return counter
 	}
-	
+
 	counter := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: name,
@@ -261,7 +261,7 @@ func (f *PrometheusFormatter) getOrCreateCounter(name, help string, labelNames [
 		},
 		labelNames,
 	)
-	
+
 	f.registry.MustRegister(counter)
 	f.counters[key] = counter
 	return counter
@@ -273,7 +273,7 @@ func (f *PrometheusFormatter) getOrCreateHistogram(name, help string, labelNames
 	if histogram, exists := f.histograms[key]; exists {
 		return histogram
 	}
-	
+
 	histogram := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    name,
@@ -282,7 +282,7 @@ func (f *PrometheusFormatter) getOrCreateHistogram(name, help string, labelNames
 		},
 		labelNames,
 	)
-	
+
 	f.registry.MustRegister(histogram)
 	f.histograms[key] = histogram
 	return histogram
@@ -292,6 +292,6 @@ func (f *PrometheusFormatter) getOrCreateHistogram(name, help string, labelNames
 func (f *PrometheusFormatter) MetricsHandler() http.Handler {
 	return promhttp.HandlerFor(f.registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
-		Timeout:          10 * time.Second,
+		Timeout:           10 * time.Second,
 	})
 }

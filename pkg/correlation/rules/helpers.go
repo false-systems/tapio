@@ -3,9 +3,9 @@ package rules
 import (
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
 	"github.com/falseyair/tapio/pkg/correlation"
 	"github.com/falseyair/tapio/pkg/types"
+	v1 "k8s.io/api/core/v1"
 )
 
 // isETCDPod checks if a pod is an etcd instance
@@ -14,19 +14,19 @@ func isETCDPod(pod types.PodInfo) bool {
 	if component, ok := pod.Labels["component"]; ok && component == "etcd" {
 		return true
 	}
-	
+
 	// Check by name pattern
 	if strings.Contains(pod.Name, "etcd") && pod.Namespace == "kube-system" {
 		return true
 	}
-	
+
 	// Check by container name
 	for _, container := range pod.Spec.Containers {
 		if container.Name == "etcd" {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -36,19 +36,19 @@ func isAPIServerPod(pod types.PodInfo) bool {
 	if component, ok := pod.Labels["component"]; ok && component == "kube-apiserver" {
 		return true
 	}
-	
+
 	// Check by name pattern
 	if strings.Contains(pod.Name, "kube-apiserver") && pod.Namespace == "kube-system" {
 		return true
 	}
-	
+
 	// Check by container name
 	for _, container := range pod.Spec.Containers {
 		if container.Name == "kube-apiserver" {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -58,12 +58,12 @@ func isCoreDNSPod(pod types.PodInfo) bool {
 	if appName, ok := pod.Labels["k8s-app"]; ok && appName == "kube-dns" {
 		return true
 	}
-	
+
 	// Check by name pattern
 	if strings.Contains(pod.Name, "coredns") && pod.Namespace == "kube-system" {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -71,7 +71,7 @@ func isCoreDNSPod(pod types.PodInfo) bool {
 func getContainerMemoryUsage(pod types.PodInfo, containerName string, data *correlation.AnalysisData) uint64 {
 	// In a real implementation, this would fetch metrics from the metrics API
 	// For now, we'll check if there's metric data in the analysis data
-	
+
 	// Check if we have metrics data
 	if data.KubernetesData.Metrics != nil {
 		key := pod.Namespace + "/" + pod.Name + "/" + containerName
@@ -81,7 +81,7 @@ func getContainerMemoryUsage(pod types.PodInfo, containerName string, data *corr
 			}
 		}
 	}
-	
+
 	// Fallback: estimate from status if available
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name == containerName {
@@ -89,7 +89,7 @@ func getContainerMemoryUsage(pod types.PodInfo, containerName string, data *corr
 			return 0
 		}
 	}
-	
+
 	return 0
 }
 
@@ -111,7 +111,7 @@ func getContainerMemoryLimit(pod types.PodInfo, containerName string) uint64 {
 func findPodByPID(data *correlation.AnalysisData, pid uint32) *types.PodInfo {
 	// In a real implementation, this would map PIDs to pods
 	// This requires integration with container runtime or eBPF data
-	
+
 	// For now, check if eBPF data has container info
 	if data.EBPFData != nil {
 		for _, memStat := range data.EBPFData.MemoryStats {
@@ -127,7 +127,7 @@ func findPodByPID(data *correlation.AnalysisData, pid uint32) *types.PodInfo {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -137,12 +137,12 @@ func isControllerManagerPod(pod types.PodInfo) bool {
 	if component, ok := pod.Labels["component"]; ok && component == "kube-controller-manager" {
 		return true
 	}
-	
+
 	// Check by name pattern
 	if strings.Contains(pod.Name, "kube-controller-manager") && pod.Namespace == "kube-system" {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -152,12 +152,12 @@ func isSchedulerPod(pod types.PodInfo) bool {
 	if component, ok := pod.Labels["component"]; ok && component == "kube-scheduler" {
 		return true
 	}
-	
+
 	// Check by name pattern
 	if strings.Contains(pod.Name, "kube-scheduler") && pod.Namespace == "kube-system" {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -167,14 +167,14 @@ func isAdmissionWebhook(pod types.PodInfo) bool {
 	if _, ok := pod.Labels["webhook"]; ok {
 		return true
 	}
-	
+
 	// Check for admission webhook annotations
 	for key := range pod.Annotations {
 		if strings.Contains(key, "admission") || strings.Contains(key, "webhook") {
 			return true
 		}
 	}
-	
+
 	// Check service names
 	for _, container := range pod.Spec.Containers {
 		for _, port := range container.Ports {
@@ -183,7 +183,7 @@ func isAdmissionWebhook(pod types.PodInfo) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -192,16 +192,16 @@ func getPodCertificateExpiry(pod types.PodInfo, data *correlation.AnalysisData) 
 	// Check if pod has certificate volume mounts
 	for _, container := range pod.Spec.Containers {
 		for _, mount := range container.VolumeMounts {
-			if strings.Contains(mount.MountPath, "certs") || 
-			   strings.Contains(mount.MountPath, "tls") ||
-			   strings.Contains(mount.MountPath, "pki") {
+			if strings.Contains(mount.MountPath, "certs") ||
+				strings.Contains(mount.MountPath, "tls") ||
+				strings.Contains(mount.MountPath, "pki") {
 				// In real implementation, would check certificate expiry
 				// For now, check if we have this info in logs
 				if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
 					for _, line := range logs {
 						if strings.Contains(strings.ToLower(line), "certificate") &&
-						   (strings.Contains(strings.ToLower(line), "expir") ||
-						    strings.Contains(strings.ToLower(line), "invalid")) {
+							(strings.Contains(strings.ToLower(line), "expir") ||
+								strings.Contains(strings.ToLower(line), "invalid")) {
 							return line, true
 						}
 					}
@@ -209,6 +209,6 @@ func getPodCertificateExpiry(pod types.PodInfo, data *correlation.AnalysisData) 
 			}
 		}
 	}
-	
+
 	return "", false
 }

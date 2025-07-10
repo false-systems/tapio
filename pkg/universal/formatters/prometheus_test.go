@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/falseyair/tapio/pkg/universal"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/falseyair/tapio/pkg/universal"
 )
 
 func TestPrometheusFormatter_FormatMetric(t *testing.T) {
 	formatter := NewPrometheusFormatter("tapio", "test", nil)
-	
+
 	tests := []struct {
 		name   string
 		metric *universal.UniversalMetric
@@ -41,7 +41,7 @@ func TestPrometheusFormatter_FormatMetric(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to gather metrics: %v", err)
 				}
-				
+
 				found := false
 				for _, mf := range metricFamilies {
 					if *mf.Name == "tapio_test_memory_usage_bytes" {
@@ -69,8 +69,8 @@ func TestPrometheusFormatter_FormatMetric(t *testing.T) {
 				Type:  universal.MetricTypeCounter,
 				Value: 42.0,
 				Target: universal.Target{
-					Type: universal.TargetTypeContainer,
-					Name: "test-pod",
+					Type:      universal.TargetTypeContainer,
+					Name:      "test-pod",
 					Container: "app",
 				},
 			},
@@ -79,7 +79,7 @@ func TestPrometheusFormatter_FormatMetric(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to gather metrics: %v", err)
 				}
-				
+
 				found := false
 				for _, mf := range metricFamilies {
 					if *mf.Name == "tapio_test_requests_total" {
@@ -95,14 +95,14 @@ func TestPrometheusFormatter_FormatMetric(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := formatter.FormatMetric(tt.metric)
 			if err != nil {
 				t.Fatalf("FormatMetric failed: %v", err)
 			}
-			
+
 			tt.check(t, formatter.GetRegistry())
 		})
 	}
@@ -110,7 +110,7 @@ func TestPrometheusFormatter_FormatMetric(t *testing.T) {
 
 func TestPrometheusFormatter_FormatEvent(t *testing.T) {
 	formatter := NewPrometheusFormatter("tapio", "test", nil)
-	
+
 	event := &universal.UniversalEvent{
 		ID:        "test-event",
 		Type:      universal.EventTypeOOMKill,
@@ -122,18 +122,18 @@ func TestPrometheusFormatter_FormatEvent(t *testing.T) {
 			Name: "test-pod",
 		},
 	}
-	
+
 	err := formatter.FormatEvent(event)
 	if err != nil {
 		t.Fatalf("FormatEvent failed: %v", err)
 	}
-	
+
 	// Check that event counter was created
 	metricFamilies, err := formatter.GetRegistry().Gather()
 	if err != nil {
 		t.Fatalf("Failed to gather metrics: %v", err)
 	}
-	
+
 	found := false
 	for _, mf := range metricFamilies {
 		if strings.Contains(*mf.Name, "events_oomkill_total") {
@@ -143,7 +143,7 @@ func TestPrometheusFormatter_FormatEvent(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !found {
 		t.Error("Event counter not found")
 	}
@@ -151,7 +151,7 @@ func TestPrometheusFormatter_FormatEvent(t *testing.T) {
 
 func TestPrometheusFormatter_FormatPrediction(t *testing.T) {
 	formatter := NewPrometheusFormatter("tapio", "", nil)
-	
+
 	prediction := &universal.UniversalPrediction{
 		ID:          "test-pred",
 		Type:        "oom",
@@ -164,21 +164,21 @@ func TestPrometheusFormatter_FormatPrediction(t *testing.T) {
 			PID:  1234,
 		},
 	}
-	
+
 	err := formatter.FormatPrediction(prediction)
 	if err != nil {
 		t.Fatalf("FormatPrediction failed: %v", err)
 	}
-	
+
 	// Check that prediction metrics were created
 	metricFamilies, err := formatter.GetRegistry().Gather()
 	if err != nil {
 		t.Fatalf("Failed to gather metrics: %v", err)
 	}
-	
+
 	foundConfidence := false
 	foundTimeToEvent := false
-	
+
 	for _, mf := range metricFamilies {
 		if strings.Contains(*mf.Name, "prediction_oom_confidence") {
 			foundConfidence = true
@@ -193,7 +193,7 @@ func TestPrometheusFormatter_FormatPrediction(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !foundConfidence {
 		t.Error("Prediction confidence metric not found")
 	}
@@ -204,7 +204,7 @@ func TestPrometheusFormatter_FormatPrediction(t *testing.T) {
 
 func TestPrometheusFormatter_Labels(t *testing.T) {
 	formatter := NewPrometheusFormatter("", "", nil)
-	
+
 	metric := &universal.UniversalMetric{
 		Name:  "test_metric",
 		Type:  universal.MetricTypeGauge,
@@ -222,18 +222,18 @@ func TestPrometheusFormatter_Labels(t *testing.T) {
 			Level: universal.QualityDegraded,
 		},
 	}
-	
+
 	err := formatter.FormatMetric(metric)
 	if err != nil {
 		t.Fatalf("FormatMetric failed: %v", err)
 	}
-	
+
 	// Check labels
 	metricFamilies, err := formatter.GetRegistry().Gather()
 	if err != nil {
 		t.Fatalf("Failed to gather metrics: %v", err)
 	}
-	
+
 	for _, mf := range metricFamilies {
 		if *mf.Name == "test_metric" {
 			metric := mf.Metric[0]
@@ -241,7 +241,7 @@ func TestPrometheusFormatter_Labels(t *testing.T) {
 			for _, label := range metric.Label {
 				labelMap[*label.Name] = *label.Value
 			}
-			
+
 			// Check expected labels
 			expectedLabels := map[string]string{
 				"pod":          "my-pod",
@@ -250,7 +250,7 @@ func TestPrometheusFormatter_Labels(t *testing.T) {
 				"environment":  "prod",
 				"quality":      "degraded",
 			}
-			
+
 			for k, v := range expectedLabels {
 				if labelMap[k] != v {
 					t.Errorf("Expected label %s=%s, got %s", k, v, labelMap[k])
@@ -262,7 +262,7 @@ func TestPrometheusFormatter_Labels(t *testing.T) {
 
 func TestPrometheusFormatter_BatchFormat(t *testing.T) {
 	formatter := NewPrometheusFormatter("tapio", "batch", nil)
-	
+
 	items := []interface{}{
 		&universal.UniversalMetric{
 			Name:  "metric1",
@@ -292,18 +292,18 @@ func TestPrometheusFormatter_BatchFormat(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err := formatter.BatchFormat(items)
 	if err != nil {
 		t.Fatalf("BatchFormat failed: %v", err)
 	}
-	
+
 	// Check that all metrics were created
 	metricFamilies, err := formatter.GetRegistry().Gather()
 	if err != nil {
 		t.Fatalf("Failed to gather metrics: %v", err)
 	}
-	
+
 	if len(metricFamilies) < 3 {
 		t.Errorf("Expected at least 3 metric families, got %d", len(metricFamilies))
 	}

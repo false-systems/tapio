@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	
+
 	"github.com/falseyair/tapio/pkg/correlation"
 	"github.com/falseyair/tapio/pkg/types"
 	v1 "k8s.io/api/core/v1"
@@ -15,13 +15,13 @@ import (
 
 func TestETCDCascadeRule(t *testing.T) {
 	rule := NewETCDCascadeRule(DefaultETCDCascadeConfig())
-	
+
 	t.Run("Basic Properties", func(t *testing.T) {
 		assert.Equal(t, "etcd_cascade_failure", rule.ID())
 		assert.Equal(t, "ETCD Cascading Failure Detection", rule.Name())
 		assert.NotEmpty(t, rule.Description())
 	})
-	
+
 	t.Run("No Issues Without ETCD Problems", func(t *testing.T) {
 		data := &correlation.AnalysisData{
 			KubernetesData: correlation.KubernetesData{
@@ -35,12 +35,12 @@ func TestETCDCascadeRule(t *testing.T) {
 				},
 			},
 		}
-		
+
 		findings, err := rule.Execute(context.Background(), data)
 		require.NoError(t, err)
 		assert.Empty(t, findings)
 	})
-	
+
 	t.Run("Detects ETCD Memory Pressure", func(t *testing.T) {
 		// Create test data with etcd pod having memory issues
 		data := &correlation.AnalysisData{
@@ -102,10 +102,10 @@ func TestETCDCascadeRule(t *testing.T) {
 				},
 			},
 		}
-		
+
 		findings, err := rule.Execute(context.Background(), data)
 		require.NoError(t, err)
-		
+
 		// Should detect the cascade pattern
 		if len(findings) > 0 {
 			assert.Equal(t, "ETCD Cascading Failure Detected", findings[0].Title)
@@ -117,13 +117,13 @@ func TestETCDCascadeRule(t *testing.T) {
 
 func TestCertificateCascadeRule(t *testing.T) {
 	rule := NewCertificateCascadeRule(DefaultCertificateCascadeConfig())
-	
+
 	t.Run("Basic Properties", func(t *testing.T) {
 		assert.Equal(t, "certificate_chain_failure", rule.ID())
 		assert.Equal(t, "Certificate Chain Failure Detection", rule.Name())
 		assert.NotEmpty(t, rule.Description())
 	})
-	
+
 	t.Run("Detects Certificate Issues", func(t *testing.T) {
 		data := &correlation.AnalysisData{
 			KubernetesData: correlation.KubernetesData{
@@ -173,10 +173,10 @@ func TestCertificateCascadeRule(t *testing.T) {
 				},
 			},
 		}
-		
+
 		findings, err := rule.Execute(context.Background(), data)
 		require.NoError(t, err)
-		
+
 		// May detect certificate cascade
 		if len(findings) > 0 {
 			assert.Contains(t, findings[0].Title, "Certificate")
@@ -187,13 +187,13 @@ func TestCertificateCascadeRule(t *testing.T) {
 
 func TestAdmissionLockdownRule(t *testing.T) {
 	rule := NewAdmissionLockdownRule(DefaultAdmissionLockdownConfig())
-	
+
 	t.Run("Basic Properties", func(t *testing.T) {
 		assert.Equal(t, "admission_controller_lockdown", rule.ID())
 		assert.Equal(t, "Admission Controller Lockdown Detection", rule.Name())
 		assert.NotEmpty(t, rule.Description())
 	})
-	
+
 	t.Run("Detects Admission Denials", func(t *testing.T) {
 		// Create events showing many admission denials
 		events := []types.EventInfo{}
@@ -211,16 +211,16 @@ func TestAdmissionLockdownRule(t *testing.T) {
 				},
 			})
 		}
-		
+
 		data := &correlation.AnalysisData{
 			KubernetesData: correlation.KubernetesData{
 				Events: events,
 			},
 		}
-		
+
 		findings, err := rule.Execute(context.Background(), data)
 		require.NoError(t, err)
-		
+
 		// Should detect lockdown pattern
 		if len(findings) > 0 {
 			assert.Contains(t, findings[0].Title, "Lockdown")
@@ -231,13 +231,13 @@ func TestAdmissionLockdownRule(t *testing.T) {
 
 func TestControlPlaneDepsRule(t *testing.T) {
 	rule := NewControlPlaneDepsRule(DefaultControlPlaneDepsConfig())
-	
+
 	t.Run("Basic Properties", func(t *testing.T) {
 		assert.Equal(t, "control_plane_dependency_failure", rule.ID())
 		assert.Equal(t, "Control Plane Dependency Failure Detection", rule.Name())
 		assert.NotEmpty(t, rule.Description())
 	})
-	
+
 	t.Run("Detects Cloud Provider Issues", func(t *testing.T) {
 		data := &correlation.AnalysisData{
 			KubernetesData: correlation.KubernetesData{
@@ -267,10 +267,10 @@ func TestControlPlaneDepsRule(t *testing.T) {
 				},
 			},
 		}
-		
+
 		findings, err := rule.Execute(context.Background(), data)
 		require.NoError(t, err)
-		
+
 		// May detect dependency failure
 		if len(findings) > 0 {
 			assert.Contains(t, findings[0].Title, "Dependency")
@@ -281,27 +281,27 @@ func TestControlPlaneDepsRule(t *testing.T) {
 
 func TestRuleRegistration(t *testing.T) {
 	registry := correlation.NewRuleRegistry()
-	
+
 	// Test that all rules can be registered
 	err := RegisterDefaultRules(registry)
 	require.NoError(t, err)
-	
+
 	// Verify all advanced rules are registered
 	rules := registry.GetAllRules()
-	
+
 	// Check for advanced rule IDs
 	advancedRuleIDs := []string{
 		"etcd_cascade_failure",
-		"certificate_chain_failure", 
+		"certificate_chain_failure",
 		"admission_controller_lockdown",
 		"control_plane_dependency_failure",
 	}
-	
+
 	registeredIDs := make(map[string]bool)
 	for _, rule := range rules {
 		registeredIDs[rule.ID()] = true
 	}
-	
+
 	for _, id := range advancedRuleIDs {
 		assert.True(t, registeredIDs[id], "Rule %s should be registered", id)
 	}

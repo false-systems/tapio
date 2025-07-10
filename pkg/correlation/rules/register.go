@@ -37,7 +37,7 @@ func RegisterDefaultRules(registry *correlation.RuleRegistry) error {
 	}
 
 	// Register advanced correlation rules
-	
+
 	// Register ETCD cascade rule
 	etcdRule := NewETCDCascadeRule(DefaultETCDCascadeConfig())
 	if err := registry.RegisterRule(etcdRule); err != nil {

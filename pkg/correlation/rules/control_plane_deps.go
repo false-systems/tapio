@@ -82,10 +82,10 @@ func (r *ControlPlaneDepsRule) Execute(ctx context.Context, data *correlation.An
 
 	// Check control plane component health
 	componentFailures := r.checkComponentHealth(data, windowStart)
-	
+
 	// Check for cascading failures
 	cascadeEffects := r.checkCascadeEffects(data, windowStart, componentFailures)
-	
+
 	// Check workload impact
 	workloadImpact := r.checkWorkloadImpact(data, windowStart)
 
@@ -95,7 +95,7 @@ func (r *ControlPlaneDepsRule) Execute(ctx context.Context, data *correlation.An
 	// Determine if this is a dependency cascade
 	if len(componentFailures) >= r.config.MinComponentFailures && len(depChains) > 0 {
 		confidence := r.calculateConfidence(depIssues, componentFailures, cascadeEffects, workloadImpact)
-		
+
 		if confidence >= r.config.MinConfidence {
 			finding := correlation.Finding{
 				RuleID:      r.ID(),
@@ -158,65 +158,65 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 			if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
 				for _, line := range logs {
 					lineLower := strings.ToLower(line)
-					
+
 					// Check for timeout/connection issues
 					if strings.Contains(lineLower, "timeout") ||
-					   strings.Contains(lineLower, "connection refused") ||
-					   strings.Contains(lineLower, "connection reset") ||
-					   strings.Contains(lineLower, "deadline exceeded") {
-						
+						strings.Contains(lineLower, "connection refused") ||
+						strings.Contains(lineLower, "connection reset") ||
+						strings.Contains(lineLower, "deadline exceeded") {
+
 						// Check if it's related to external dependency
 						for _, dep := range externalDeps {
 							if strings.Contains(lineLower, dep) {
 								issues = append(issues, dependencyIssue{
-									Component:       pod.Name,
-									Namespace:       pod.Namespace,
-									DependencyType:  identifyDependencyType(line),
-									DependencyName:  dep,
-									IssueType:       "timeout",
-									Message:         line,
-									Timestamp:       time.Now(),
+									Component:      pod.Name,
+									Namespace:      pod.Namespace,
+									DependencyType: identifyDependencyType(line),
+									DependencyName: dep,
+									IssueType:      "timeout",
+									Message:        line,
+									Timestamp:      time.Now(),
 								})
 								break
 							}
 						}
 					}
-					
+
 					// Check for authentication/permission issues
 					if strings.Contains(lineLower, "unauthorized") ||
-					   strings.Contains(lineLower, "forbidden") ||
-					   strings.Contains(lineLower, "access denied") ||
-					   strings.Contains(lineLower, "permission") {
-						
+						strings.Contains(lineLower, "forbidden") ||
+						strings.Contains(lineLower, "access denied") ||
+						strings.Contains(lineLower, "permission") {
+
 						for _, dep := range externalDeps {
 							if strings.Contains(lineLower, dep) {
 								issues = append(issues, dependencyIssue{
-									Component:       pod.Name,
-									Namespace:       pod.Namespace,
-									DependencyType:  identifyDependencyType(line),
-									DependencyName:  dep,
-									IssueType:       "auth",
-									Message:         line,
-									Timestamp:       time.Now(),
+									Component:      pod.Name,
+									Namespace:      pod.Namespace,
+									DependencyType: identifyDependencyType(line),
+									DependencyName: dep,
+									IssueType:      "auth",
+									Message:        line,
+									Timestamp:      time.Now(),
 								})
 								break
 							}
 						}
 					}
-					
+
 					// Check for API rate limiting
 					if strings.Contains(lineLower, "rate limit") ||
-					   strings.Contains(lineLower, "throttl") ||
-					   strings.Contains(lineLower, "too many requests") {
-						
+						strings.Contains(lineLower, "throttl") ||
+						strings.Contains(lineLower, "too many requests") {
+
 						issues = append(issues, dependencyIssue{
-							Component:       pod.Name,
-							Namespace:       pod.Namespace,
-							DependencyType:  "api",
-							DependencyName:  extractAPIFromMessage(line),
-							IssueType:       "rate-limit",
-							Message:         line,
-							Timestamp:       time.Now(),
+							Component:      pod.Name,
+							Namespace:      pod.Namespace,
+							DependencyType: "api",
+							DependencyName: extractAPIFromMessage(line),
+							IssueType:      "rate-limit",
+							Message:        line,
+							Timestamp:      time.Now(),
 						})
 					}
 				}
@@ -228,21 +228,21 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 	for _, event := range data.KubernetesData.Events {
 		if event.CreatedAt.After(windowStart) {
 			eventLower := strings.ToLower(event.Message)
-			
+
 			for _, dep := range externalDeps {
 				if strings.Contains(eventLower, dep) &&
-				   (strings.Contains(eventLower, "failed") ||
-				    strings.Contains(eventLower, "error") ||
-				    strings.Contains(eventLower, "timeout")) {
-					
+					(strings.Contains(eventLower, "failed") ||
+						strings.Contains(eventLower, "error") ||
+						strings.Contains(eventLower, "timeout")) {
+
 					issues = append(issues, dependencyIssue{
-						Component:       event.InvolvedObject.Name,
-						Namespace:       event.InvolvedObject.Namespace,
-						DependencyType:  identifyDependencyType(event.Message),
-						DependencyName:  dep,
-						IssueType:       "error",
-						Message:         event.Message,
-						Timestamp:       event.CreatedAt,
+						Component:      event.InvolvedObject.Name,
+						Namespace:      event.InvolvedObject.Namespace,
+						DependencyType: identifyDependencyType(event.Message),
+						DependencyName: dep,
+						IssueType:      "error",
+						Message:        event.Message,
+						Timestamp:      event.CreatedAt,
 					})
 				}
 			}
@@ -285,7 +285,7 @@ func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisDa
 			if !status.Ready {
 				failure.Ready = false
 				failure.RestartCount = int(status.RestartCount)
-				
+
 				if status.State.Waiting != nil {
 					failure.State = "waiting"
 					failure.Reason = status.State.Waiting.Reason
@@ -294,7 +294,7 @@ func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisDa
 					failure.Reason = status.State.Terminated.Reason
 				}
 			}
-			
+
 			// High restart count indicates issues
 			if status.RestartCount > 3 {
 				failure.HighRestarts = true
@@ -305,18 +305,18 @@ func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisDa
 		if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
 			for _, line := range logs {
 				lineLower := strings.ToLower(line)
-				
+
 				// Connection/timeout errors
 				if strings.Contains(lineLower, "connection") ||
-				   strings.Contains(lineLower, "timeout") ||
-				   strings.Contains(lineLower, "deadline") {
+					strings.Contains(lineLower, "timeout") ||
+					strings.Contains(lineLower, "deadline") {
 					failure.HasDependencyErrors = true
 					failure.ErrorMessages = append(failure.ErrorMessages, line)
 				}
-				
+
 				// Leader election issues
 				if strings.Contains(lineLower, "leader election") &&
-				   strings.Contains(lineLower, "failed") {
+					strings.Contains(lineLower, "failed") {
 					failure.LeaderElectionIssue = true
 				}
 			}
@@ -361,14 +361,14 @@ func (r *ControlPlaneDepsRule) checkCascadeEffects(data *correlation.AnalysisDat
 		for _, event := range data.KubernetesData.Events {
 			if event.CreatedAt.After(windowStart) {
 				eventLower := strings.ToLower(event.Message)
-				
+
 				// Check if event relates to expected effects
 				for _, expected := range expectedEffects {
 					if strings.Contains(eventLower, expected) &&
-					   (strings.Contains(eventLower, "failed") ||
-					    strings.Contains(eventLower, "error") ||
-					    strings.Contains(eventLower, "timeout")) {
-						
+						(strings.Contains(eventLower, "failed") ||
+							strings.Contains(eventLower, "error") ||
+							strings.Contains(eventLower, "timeout")) {
+
 						effect.AffectedObjects[event.InvolvedObject.Kind]++
 						effect.DownstreamFailures = append(effect.DownstreamFailures, downstreamFailure{
 							ObjectKind: event.InvolvedObject.Kind,
@@ -421,7 +421,7 @@ func (r *ControlPlaneDepsRule) checkWorkloadImpact(data *correlation.AnalysisDat
 			impact.AffectedNamespaces[deployment.Namespace]++
 			impact.UnhealthyDeployments++
 		}
-		
+
 		// Check for update issues
 		if deployment.Status.UpdatedReplicas < deployment.Status.Replicas {
 			impact.StuckUpdates++
@@ -519,7 +519,7 @@ func (r *ControlPlaneDepsRule) analyzeDependencyChains(depIssues []dependencyIss
 			// Check if effect source is in affected components
 			for _, comp := range chain.AffectedComponents {
 				if strings.Contains(effect.ComponentType, comp) {
-					chain.DownstreamImpacts = append(chain.DownstreamImpacts, 
+					chain.DownstreamImpacts = append(chain.DownstreamImpacts,
 						fmt.Sprintf("%s affecting %d resources", effect.ComponentType, len(effect.DownstreamFailures)))
 					break
 				}
@@ -538,7 +538,7 @@ func (r *ControlPlaneDepsRule) analyzeDependencyChains(depIssues []dependencyIss
 
 func (r *ControlPlaneDepsRule) calculateConfidence(depIssues []dependencyIssue, componentFailures []componentFailure, cascadeEffects []cascadeEffect, impact workloadImpact) float64 {
 	confidence := 0.0
-	
+
 	// Dependency issues are the trigger
 	if len(depIssues) > 0 {
 		confidence = 0.3
@@ -551,7 +551,7 @@ func (r *ControlPlaneDepsRule) calculateConfidence(depIssues []dependencyIssue, 
 			confidence += 0.1
 		}
 	}
-	
+
 	// Component failures confirm the pattern
 	if len(componentFailures) > 0 {
 		confidence += 0.2
@@ -566,7 +566,7 @@ func (r *ControlPlaneDepsRule) calculateConfidence(depIssues []dependencyIssue, 
 			confidence += 0.1
 		}
 	}
-	
+
 	// Cascade effects show propagation
 	if len(cascadeEffects) > 0 {
 		confidence += 0.2
@@ -579,17 +579,17 @@ func (r *ControlPlaneDepsRule) calculateConfidence(depIssues []dependencyIssue, 
 			confidence += 0.1
 		}
 	}
-	
+
 	// Workload impact confirms severity
 	if impact.UnhealthyDeployments > 5 || impact.PendingPods > 20 {
 		confidence += 0.1
 	}
-	
+
 	// Cap at 1.0
 	if confidence > 1.0 {
 		confidence = 1.0
 	}
-	
+
 	return confidence
 }
 
@@ -597,20 +597,20 @@ func (r *ControlPlaneDepsRule) buildDescription(depIssues []dependencyIssue, com
 	parts := []string{
 		"External dependency failures are cascading through control plane components.",
 	}
-	
+
 	// Dependency issues summary
 	if len(depIssues) > 0 {
 		depTypes := make(map[string]int)
 		for _, issue := range depIssues {
 			depTypes[issue.DependencyType]++
 		}
-		
+
 		parts = append(parts, fmt.Sprintf("\n\n🔗 Dependency Issues (%d detected):", len(depIssues)))
 		for depType, count := range depTypes {
 			parts = append(parts, fmt.Sprintf("  - %s: %d failures", depType, count))
 		}
 	}
-	
+
 	// Component failures
 	if len(componentFailures) > 0 {
 		parts = append(parts, fmt.Sprintf("\n\n⚠️  Component Failures (%d affected):", len(componentFailures)))
@@ -624,31 +624,31 @@ func (r *ControlPlaneDepsRule) buildDescription(depIssues []dependencyIssue, com
 			parts = append(parts, fmt.Sprintf("  - %s: %s", failure.ComponentType, status))
 		}
 	}
-	
+
 	// Cascade effects
 	if len(cascadeEffects) > 0 {
 		parts = append(parts, "\n\n🌊 Cascade Effects:")
 		for _, effect := range cascadeEffects {
 			if len(effect.DownstreamFailures) > 0 {
-				parts = append(parts, fmt.Sprintf("  - %s: %d downstream failures", 
+				parts = append(parts, fmt.Sprintf("  - %s: %d downstream failures",
 					effect.ComponentType, len(effect.DownstreamFailures)))
 			}
 			if effect.StuckResources > 0 {
-				parts = append(parts, fmt.Sprintf("  - %s: %d resources stuck", 
+				parts = append(parts, fmt.Sprintf("  - %s: %d resources stuck",
 					effect.ComponentType, effect.StuckResources))
 			}
 		}
 	}
-	
+
 	// Dependency chains
 	if len(chains) > 0 {
 		parts = append(parts, "\n\n⛓️  Dependency Chains:")
 		for _, chain := range chains {
-			parts = append(parts, fmt.Sprintf("  - %s → %s → workload impacts", 
+			parts = append(parts, fmt.Sprintf("  - %s → %s → workload impacts",
 				chain.RootDependency, strings.Join(chain.AffectedComponents, ", ")))
 		}
 	}
-	
+
 	// Workload impact
 	if impact.UnhealthyDeployments > 0 || impact.PendingPods > 0 {
 		parts = append(parts, "\n\n📊 Workload Impact:")
@@ -665,9 +665,9 @@ func (r *ControlPlaneDepsRule) buildDescription(depIssues []dependencyIssue, com
 			parts = append(parts, fmt.Sprintf("  - %d load balancers pending", impact.PendingLoadBalancers))
 		}
 	}
-	
+
 	parts = append(parts, "\n\n⚡ Pattern: External API failure → Control plane timeout → Component failure → Workload disruption")
-	
+
 	return strings.Join(parts, "\n")
 }
 
@@ -679,23 +679,23 @@ func (r *ControlPlaneDepsRule) determineSeverity(componentFailures []componentFa
 			criticalDown++
 		}
 	}
-	
+
 	if criticalDown > 1 {
 		return correlation.SeverityCritical
 	}
-	
+
 	// Significant workload impact
 	if impact.UnhealthyDeployments > 10 || impact.PendingPods > 50 {
 		return correlation.SeverityCritical
 	}
-	
+
 	// Leader election issues are critical
 	for _, failure := range componentFailures {
 		if failure.LeaderElectionIssue {
 			return correlation.SeverityCritical
 		}
 	}
-	
+
 	return correlation.SeverityHigh
 }
 
@@ -707,7 +707,7 @@ func (r *ControlPlaneDepsRule) assessImpact(componentFailures []componentFailure
 			criticalDown++
 		}
 	}
-	
+
 	if criticalDown >= len(r.config.CriticalComponents) {
 		return "Critical: Complete control plane failure, cluster operations halted"
 	} else if impact.UnhealthyDeployments > 20 && impact.PendingPods > 50 {
@@ -715,7 +715,7 @@ func (r *ControlPlaneDepsRule) assessImpact(componentFailures []componentFailure
 	} else if criticalDown > 0 {
 		return "High: Critical control plane components failing, cluster stability at risk"
 	}
-	
+
 	return "Moderate: Control plane degraded, some operations impaired"
 }
 
@@ -725,7 +725,7 @@ func (r *ControlPlaneDepsRule) identifyRootCause(depIssues []dependencyIssue, ch
 	for _, issue := range depIssues {
 		issueTypes[issue.IssueType]++
 	}
-	
+
 	// Identify primary issue type
 	maxCount := 0
 	primaryType := ""
@@ -735,11 +735,11 @@ func (r *ControlPlaneDepsRule) identifyRootCause(depIssues []dependencyIssue, ch
 			primaryType = issueType
 		}
 	}
-	
+
 	// Build root cause based on primary issue and dependency
 	if len(chains) > 0 {
 		primaryDep := chains[0].RootDependency
-		
+
 		switch primaryType {
 		case "timeout":
 			return fmt.Sprintf("%s API timeouts preventing control plane operations", primaryDep)
@@ -751,13 +751,13 @@ func (r *ControlPlaneDepsRule) identifyRootCause(depIssues []dependencyIssue, ch
 			return fmt.Sprintf("%s dependency failures cascading through control plane", primaryDep)
 		}
 	}
-	
+
 	return "External dependency failures affecting control plane components"
 }
 
 func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, componentFailures []componentFailure, cascadeEffects []cascadeEffect, impact workloadImpact) []string {
 	evidence := []string{}
-	
+
 	// Dependency evidence
 	depTypes := make(map[string]int)
 	for _, issue := range depIssues {
@@ -766,7 +766,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 	for depType, count := range depTypes {
 		evidence = append(evidence, fmt.Sprintf("%d %s dependency failures", count, depType))
 	}
-	
+
 	// Component evidence
 	if len(componentFailures) > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d control plane components affected", len(componentFailures)))
@@ -776,7 +776,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 			}
 		}
 	}
-	
+
 	// Cascade evidence
 	totalDownstream := 0
 	for _, effect := range cascadeEffects {
@@ -785,7 +785,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 	if totalDownstream > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d downstream resource failures", totalDownstream))
 	}
-	
+
 	// Impact evidence
 	if impact.UnhealthyDeployments > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d deployments unhealthy", impact.UnhealthyDeployments))
@@ -793,7 +793,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 	if impact.UnscheduledPods > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d pods cannot be scheduled", impact.UnscheduledPods))
 	}
-	
+
 	return evidence
 }
 
@@ -805,11 +805,11 @@ func (r *ControlPlaneDepsRule) predictTimeToFailure(componentFailures []componen
 			criticalDown++
 		}
 	}
-	
+
 	if criticalDown >= len(r.config.CriticalComponents) {
 		return 0 // Already failed
 	}
-	
+
 	// Based on cascade progression
 	if len(cascadeEffects) > 3 {
 		return 5 * time.Minute
@@ -818,7 +818,7 @@ func (r *ControlPlaneDepsRule) predictTimeToFailure(componentFailures []componen
 	} else if len(componentFailures) > 1 {
 		return 30 * time.Minute
 	}
-	
+
 	return 1 * time.Hour
 }
 
@@ -826,19 +826,19 @@ func (r *ControlPlaneDepsRule) predictTimeToFailure(componentFailures []componen
 
 func isCloudControllerPod(pod types.PodInfo) bool {
 	return strings.Contains(pod.Name, "cloud-controller-manager") ||
-		   (pod.Labels["component"] == "cloud-controller-manager")
+		(pod.Labels["component"] == "cloud-controller-manager")
 }
 
 func identifyControlPlaneComponent(pod types.PodInfo) string {
 	// Check by pod name
 	components := []string{
 		"kube-controller-manager",
-		"kube-scheduler", 
+		"kube-scheduler",
 		"cloud-controller-manager",
 		"kube-apiserver",
 		"etcd",
 	}
-	
+
 	for _, comp := range components {
 		if strings.Contains(pod.Name, comp) {
 			// Normalize component name
@@ -852,7 +852,7 @@ func identifyControlPlaneComponent(pod types.PodInfo) string {
 			return comp
 		}
 	}
-	
+
 	// Check by label
 	if component, ok := pod.Labels["component"]; ok {
 		for _, comp := range components {
@@ -861,15 +861,15 @@ func identifyControlPlaneComponent(pod types.PodInfo) string {
 			}
 		}
 	}
-	
+
 	return ""
 }
 
 func identifyDependencyType(message string) string {
 	msg := strings.ToLower(message)
-	
-	if strings.Contains(msg, "cloud") || strings.Contains(msg, "aws") || 
-	   strings.Contains(msg, "gcp") || strings.Contains(msg, "azure") {
+
+	if strings.Contains(msg, "cloud") || strings.Contains(msg, "aws") ||
+		strings.Contains(msg, "gcp") || strings.Contains(msg, "azure") {
 		return "cloud-provider"
 	} else if strings.Contains(msg, "storage") || strings.Contains(msg, "volume") {
 		return "storage"
@@ -880,7 +880,7 @@ func identifyDependencyType(message string) string {
 	} else if strings.Contains(msg, "dns") {
 		return "dns"
 	}
-	
+
 	return "external-api"
 }
 
@@ -889,7 +889,7 @@ func extractAPIFromMessage(message string) string {
 	patterns := []string{
 		"api ", "service ", "endpoint ",
 	}
-	
+
 	msg := strings.ToLower(message)
 	for _, pattern := range patterns {
 		if idx := strings.Index(msg, pattern); idx >= 0 {
@@ -900,7 +900,7 @@ func extractAPIFromMessage(message string) string {
 			}
 		}
 	}
-	
+
 	return "unknown"
 }
 

@@ -30,7 +30,7 @@ type CertificateCascadeConfig struct {
 // DefaultCertificateCascadeConfig returns the default configuration
 func DefaultCertificateCascadeConfig() CertificateCascadeConfig {
 	return CertificateCascadeConfig{
-		ExpiryWarningHours: 72,  // 3 days
+		ExpiryWarningHours: 72, // 3 days
 		MinConfidence:      0.70,
 		TimeWindow:         30 * time.Minute,
 		MinWebhookFailures: 3,
@@ -75,17 +75,17 @@ func (r *CertificateCascadeRule) Execute(ctx context.Context, data *correlation.
 
 	// Check for webhook failures
 	webhookFailures := r.checkWebhookFailures(data, windowStart)
-	
+
 	// Check for admission controller errors
 	admissionErrors := r.checkAdmissionErrors(data, windowStart)
-	
+
 	// Check for deployment failures
 	deploymentFailures := r.checkDeploymentFailures(data, windowStart)
 
 	// Correlate findings
 	if len(certIssues) > 0 && len(webhookFailures) >= r.config.MinWebhookFailures {
 		confidence := r.calculateConfidence(certIssues, webhookFailures, admissionErrors, deploymentFailures)
-		
+
 		if confidence >= r.config.MinConfidence {
 			finding := correlation.Finding{
 				RuleID:      r.ID(),
@@ -119,7 +119,7 @@ func (r *CertificateCascadeRule) Execute(ctx context.Context, data *correlation.
 					Namespace: issue.Namespace,
 				})
 			}
-			
+
 			for _, failure := range webhookFailures {
 				finding.AffectedResources = append(finding.AffectedResources, correlation.ResourceReference{
 					Kind:      "Pod",
@@ -141,7 +141,7 @@ func (r *CertificateCascadeRule) checkCertificateIssues(data *correlation.Analys
 
 	// Check control plane components
 	controlPlaneComponents := []string{"kube-apiserver", "kube-controller-manager", "kube-scheduler"}
-	
+
 	for _, pod := range data.KubernetesData.Pods {
 		// Check control plane pods
 		isControlPlane := false
@@ -157,13 +157,13 @@ func (r *CertificateCascadeRule) checkCertificateIssues(data *correlation.Analys
 		// Check for certificate-related events or logs
 		if certInfo, found := getPodCertificateExpiry(pod, data); found {
 			issues = append(issues, certIssue{
-				ResourceKind:  "Pod",
-				ResourceName:  pod.Name,
-				Namespace:     pod.Namespace,
-				Component:     componentName,
+				ResourceKind:   "Pod",
+				ResourceName:   pod.Name,
+				Namespace:      pod.Namespace,
+				Component:      componentName,
 				IsControlPlane: isControlPlane,
-				Message:       certInfo,
-				Timestamp:     time.Now(),
+				Message:        certInfo,
+				Timestamp:      time.Now(),
 			})
 		}
 
@@ -172,17 +172,17 @@ func (r *CertificateCascadeRule) checkCertificateIssues(data *correlation.Analys
 			if event.InvolvedObject.Name == pod.Name &&
 				event.CreatedAt.After(windowStart) &&
 				(strings.Contains(strings.ToLower(event.Message), "certificate") ||
-				 strings.Contains(strings.ToLower(event.Message), "x509") ||
-				 strings.Contains(strings.ToLower(event.Message), "tls")) {
-				
+					strings.Contains(strings.ToLower(event.Message), "x509") ||
+					strings.Contains(strings.ToLower(event.Message), "tls")) {
+
 				issues = append(issues, certIssue{
-					ResourceKind:  "Pod",
-					ResourceName:  pod.Name,
-					Namespace:     pod.Namespace,
-					Component:     componentName,
+					ResourceKind:   "Pod",
+					ResourceName:   pod.Name,
+					Namespace:      pod.Namespace,
+					Component:      componentName,
 					IsControlPlane: isControlPlane,
-					Message:       event.Message,
-					Timestamp:     event.CreatedAt,
+					Message:        event.Message,
+					Timestamp:      event.CreatedAt,
 				})
 			}
 		}
@@ -197,7 +197,7 @@ func (r *CertificateCascadeRule) checkCertificateIssues(data *correlation.Analys
 					event.InvolvedObject.Name == secret.Name &&
 					event.CreatedAt.After(windowStart) &&
 					strings.Contains(strings.ToLower(event.Message), "invalid") {
-					
+
 					issues = append(issues, certIssue{
 						ResourceKind: "Secret",
 						ResourceName: secret.Name,
@@ -230,8 +230,8 @@ func (r *CertificateCascadeRule) checkWebhookFailures(data *correlation.Analysis
 				if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
 					for _, line := range logs {
 						if strings.Contains(strings.ToLower(line), "certificate") ||
-						   strings.Contains(strings.ToLower(line), "x509") ||
-						   strings.Contains(strings.ToLower(line), "tls handshake") {
+							strings.Contains(strings.ToLower(line), "x509") ||
+							strings.Contains(strings.ToLower(line), "tls handshake") {
 							failures = append(failures, webhookFailure{
 								PodName:      pod.Name,
 								Namespace:    pod.Namespace,
@@ -253,8 +253,8 @@ func (r *CertificateCascadeRule) checkWebhookFailures(data *correlation.Analysis
 			if event.InvolvedObject.Name == pod.Name &&
 				event.CreatedAt.After(windowStart) &&
 				(strings.Contains(strings.ToLower(event.Message), "failed") ||
-				 strings.Contains(strings.ToLower(event.Message), "error")) {
-				
+					strings.Contains(strings.ToLower(event.Message), "error")) {
+
 				failures = append(failures, webhookFailure{
 					PodName:     pod.Name,
 					Namespace:   pod.Namespace,
@@ -277,13 +277,13 @@ func (r *CertificateCascadeRule) checkAdmissionErrors(data *correlation.Analysis
 	for _, event := range data.KubernetesData.Events {
 		if event.CreatedAt.After(windowStart) &&
 			(strings.Contains(strings.ToLower(event.Message), "admission webhook") ||
-			 strings.Contains(strings.ToLower(event.Message), "admission controller") ||
-			 strings.Contains(strings.ToLower(event.Message), "validating webhook") ||
-			 strings.Contains(strings.ToLower(event.Message), "mutating webhook")) &&
+				strings.Contains(strings.ToLower(event.Message), "admission controller") ||
+				strings.Contains(strings.ToLower(event.Message), "validating webhook") ||
+				strings.Contains(strings.ToLower(event.Message), "mutating webhook")) &&
 			(strings.Contains(strings.ToLower(event.Message), "failed") ||
-			 strings.Contains(strings.ToLower(event.Message), "error") ||
-			 strings.Contains(strings.ToLower(event.Message), "denied")) {
-			
+				strings.Contains(strings.ToLower(event.Message), "error") ||
+				strings.Contains(strings.ToLower(event.Message), "denied")) {
+
 			errors = append(errors, admissionError{
 				ResourceKind: event.InvolvedObject.Kind,
 				ResourceName: event.InvolvedObject.Name,
@@ -307,7 +307,7 @@ func (r *CertificateCascadeRule) checkDeploymentFailures(data *correlation.Analy
 		// Check if deployment is progressing
 		progressing := false
 		failed := false
-		
+
 		for _, condition := range deployment.Status.Conditions {
 			if condition.Type == "Progressing" && condition.Status == "False" {
 				failed = true
@@ -324,15 +324,15 @@ func (r *CertificateCascadeRule) checkDeploymentFailures(data *correlation.Analy
 					event.InvolvedObject.Name == deployment.Name &&
 					event.CreatedAt.After(windowStart) &&
 					(strings.Contains(strings.ToLower(event.Message), "admission") ||
-					 strings.Contains(strings.ToLower(event.Message), "webhook")) {
-					
+						strings.Contains(strings.ToLower(event.Message), "webhook")) {
+
 					failures = append(failures, deploymentFailure{
-						DeploymentName: deployment.Name,
-						Namespace:      deployment.Namespace,
+						DeploymentName:  deployment.Name,
+						Namespace:       deployment.Namespace,
 						DesiredReplicas: deployment.Spec.Replicas,
-						ActualReplicas: deployment.Status.Replicas,
-						Reason:         event.Message,
-						Timestamp:      event.CreatedAt,
+						ActualReplicas:  deployment.Status.Replicas,
+						Reason:          event.Message,
+						Timestamp:       event.CreatedAt,
 					})
 				}
 			}
@@ -347,7 +347,7 @@ func (r *CertificateCascadeRule) checkDeploymentFailures(data *correlation.Analy
 					event.InvolvedObject.Name == rs.Name &&
 					event.CreatedAt.After(windowStart) &&
 					strings.Contains(strings.ToLower(event.Message), "admission") {
-					
+
 					// Find parent deployment
 					for _, owner := range rs.OwnerReferences {
 						if owner.Kind == "Deployment" {
@@ -371,11 +371,11 @@ func (r *CertificateCascadeRule) checkDeploymentFailures(data *correlation.Analy
 
 func (r *CertificateCascadeRule) calculateConfidence(certs []certIssue, webhooks []webhookFailure, admission []admissionError, deployments []deploymentFailure) float64 {
 	confidence := 0.0
-	
+
 	// Certificate issues are the root cause
 	if len(certs) > 0 {
 		confidence = 0.3
-		
+
 		// Higher confidence for control plane certificates
 		for _, cert := range certs {
 			if cert.IsControlPlane {
@@ -384,7 +384,7 @@ func (r *CertificateCascadeRule) calculateConfidence(certs []certIssue, webhooks
 			}
 		}
 	}
-	
+
 	// Webhook failures strongly indicate certificate cascade
 	if len(webhooks) > 0 {
 		confidence += 0.3
@@ -392,22 +392,22 @@ func (r *CertificateCascadeRule) calculateConfidence(certs []certIssue, webhooks
 			confidence += 0.1
 		}
 	}
-	
+
 	// Admission errors confirm the cascade
 	if len(admission) > 0 {
 		confidence += 0.2
 	}
-	
+
 	// Deployment failures show full impact
 	if len(deployments) > 0 {
 		confidence += 0.2
 	}
-	
+
 	// Cap at 1.0
 	if confidence > 1.0 {
 		confidence = 1.0
 	}
-	
+
 	return confidence
 }
 
@@ -415,7 +415,7 @@ func (r *CertificateCascadeRule) buildDescription(certs []certIssue, webhooks []
 	parts := []string{
 		"Certificate chain failure detected causing cascading webhook and admission control failures.",
 	}
-	
+
 	if len(certs) > 0 {
 		parts = append(parts, fmt.Sprintf("\n\n🔐 Certificate Issues (%d found):", len(certs)))
 		for i, cert := range certs {
@@ -426,7 +426,7 @@ func (r *CertificateCascadeRule) buildDescription(certs []certIssue, webhooks []
 			parts = append(parts, fmt.Sprintf("  - %s/%s: %s", cert.ResourceKind, cert.ResourceName, truncateMessage(cert.Message, 60)))
 		}
 	}
-	
+
 	if len(webhooks) > 0 {
 		parts = append(parts, fmt.Sprintf("\n\n🔌 Webhook Failures (%d webhooks):", len(webhooks)))
 		uniqueWebhooks := make(map[string]bool)
@@ -443,13 +443,13 @@ func (r *CertificateCascadeRule) buildDescription(certs []certIssue, webhooks []
 			count++
 		}
 	}
-	
+
 	if len(admission) > 0 {
 		parts = append(parts, fmt.Sprintf("\n\n⚠️  Admission Controller Impact (%d errors):", len(admission)))
 		parts = append(parts, "  - Resources being rejected by admission webhooks")
 		parts = append(parts, "  - New deployments and updates blocked")
 	}
-	
+
 	if len(deployments) > 0 {
 		parts = append(parts, fmt.Sprintf("\n\n📦 Deployment Failures (%d affected):", len(deployments)))
 		for i, dep := range deployments {
@@ -460,9 +460,9 @@ func (r *CertificateCascadeRule) buildDescription(certs []certIssue, webhooks []
 			parts = append(parts, fmt.Sprintf("  - %s: unable to create pods", dep.DeploymentName))
 		}
 	}
-	
+
 	parts = append(parts, "\n\n⚡ Cascade: Certificate expiry → Webhook TLS failures → Admission denials → Deployment blocks")
-	
+
 	return strings.Join(parts, "\n")
 }
 
@@ -473,12 +473,12 @@ func (r *CertificateCascadeRule) determineSeverity(certs []certIssue, webhooks [
 			return correlation.SeverityCritical
 		}
 	}
-	
+
 	// Many webhook failures indicate critical issue
 	if len(webhooks) > 5 {
 		return correlation.SeverityCritical
 	}
-	
+
 	// Otherwise high severity
 	return correlation.SeverityHigh
 }
@@ -497,7 +497,7 @@ func (r *CertificateCascadeRule) assessImpact(webhooks []webhookFailure, admissi
 func (r *CertificateCascadeRule) identifyRootCause(certs []certIssue) string {
 	controlPlaneCerts := 0
 	webhookCerts := 0
-	
+
 	for _, cert := range certs {
 		if cert.IsControlPlane {
 			controlPlaneCerts++
@@ -505,19 +505,19 @@ func (r *CertificateCascadeRule) identifyRootCause(certs []certIssue) string {
 			webhookCerts++
 		}
 	}
-	
+
 	if controlPlaneCerts > 0 {
 		return "Control plane certificate expiry or misconfiguration"
 	} else if webhookCerts > 0 {
 		return "Webhook certificate mismatch or expiry"
 	}
-	
+
 	return "Certificate chain validation failure"
 }
 
 func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []webhookFailure, admission []admissionError, deployments []deploymentFailure) []string {
 	evidence := []string{}
-	
+
 	// Certificate evidence
 	for i, cert := range certs {
 		if i >= 3 {
@@ -526,22 +526,22 @@ func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []w
 		}
 		evidence = append(evidence, fmt.Sprintf("Certificate issue in %s/%s", cert.ResourceKind, cert.ResourceName))
 	}
-	
+
 	// Webhook evidence
 	if len(webhooks) > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d webhooks experiencing TLS/certificate failures", len(webhooks)))
 	}
-	
+
 	// Admission evidence
 	if len(admission) > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d admission control errors recorded", len(admission)))
 	}
-	
+
 	// Deployment evidence
 	if len(deployments) > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d deployments blocked by admission failures", len(deployments)))
 	}
-	
+
 	return evidence
 }
 
@@ -560,7 +560,7 @@ func (r *CertificateCascadeRule) predictTimeToFailure(certs []certIssue) time.Du
 			}
 		}
 	}
-	
+
 	// Default prediction based on typical cert renewal patterns
 	return time.Duration(r.config.ExpiryWarningHours) * time.Hour
 }
@@ -613,7 +613,7 @@ func extractWebhookName(pod types.PodInfo) string {
 	if name, ok := pod.Labels["app"]; ok {
 		return name
 	}
-	
+
 	// Fallback to pod name
 	parts := strings.Split(pod.Name, "-")
 	if len(parts) > 2 {

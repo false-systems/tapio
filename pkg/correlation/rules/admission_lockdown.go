@@ -78,20 +78,20 @@ func (r *AdmissionLockdownRule) Execute(ctx context.Context, data *correlation.A
 
 	// Check service account denials
 	sadenials := r.checkServiceAccountDenials(denials)
-	
+
 	// Check controller failures
 	controllerFailures := r.checkControllerFailures(data, windowStart, denials)
-	
+
 	// Check operational impact
 	operationalImpact := r.checkOperationalImpact(data, windowStart, denials)
 
 	// Calculate denial patterns
 	denialStats := r.calculateDenialStatistics(denials)
-	
+
 	// Determine if this is a lockdown scenario
 	if denialStats.denialRate > r.config.CriticalDenialPercent || len(sadenials) > 5 {
 		confidence := r.calculateConfidence(denialStats, sadenials, controllerFailures, operationalImpact)
-		
+
 		if confidence >= r.config.MinConfidence {
 			finding := correlation.Finding{
 				RuleID:      r.ID(),
@@ -140,19 +140,19 @@ func (r *AdmissionLockdownRule) analyzeAdmissionDenials(data *correlation.Analys
 		if event.CreatedAt.After(windowStart) &&
 			event.Type == "Warning" &&
 			(strings.Contains(strings.ToLower(event.Message), "denied") ||
-			 strings.Contains(strings.ToLower(event.Message), "forbidden") ||
-			 strings.Contains(strings.ToLower(event.Message), "rejected") ||
-			 strings.Contains(strings.ToLower(event.Message), "admission")) {
-			
+				strings.Contains(strings.ToLower(event.Message), "forbidden") ||
+				strings.Contains(strings.ToLower(event.Message), "rejected") ||
+				strings.Contains(strings.ToLower(event.Message), "admission")) {
+
 			// Extract details from the message
 			denial := admissionDenial{
-				ResourceKind:  event.InvolvedObject.Kind,
-				ResourceName:  event.InvolvedObject.Name,
-				Namespace:     event.InvolvedObject.Namespace,
-				Message:       event.Message,
-				Timestamp:     event.CreatedAt,
-				Reason:        event.Reason,
-				IsSystemNS:    r.isSystemNamespace(event.InvolvedObject.Namespace),
+				ResourceKind: event.InvolvedObject.Kind,
+				ResourceName: event.InvolvedObject.Name,
+				Namespace:    event.InvolvedObject.Namespace,
+				Message:      event.Message,
+				Timestamp:    event.CreatedAt,
+				Reason:       event.Reason,
+				IsSystemNS:   r.isSystemNamespace(event.InvolvedObject.Namespace),
 			}
 
 			// Try to extract policy/webhook name
@@ -171,16 +171,16 @@ func (r *AdmissionLockdownRule) analyzeAdmissionDenials(data *correlation.Analys
 				for _, line := range logs {
 					if strings.Contains(strings.ToLower(line), "admission") &&
 						(strings.Contains(strings.ToLower(line), "denied") ||
-						 strings.Contains(strings.ToLower(line), "forbidden")) {
-						
+							strings.Contains(strings.ToLower(line), "forbidden")) {
+
 						denials = append(denials, admissionDenial{
-							ResourceKind:   "Pod",
-							ResourceName:   pod.Name,
-							Namespace:      pod.Namespace,
-							Message:        line,
-							Timestamp:      time.Now(),
-							IsSystemNS:     r.isSystemNamespace(pod.Namespace),
-							IsController:   true,
+							ResourceKind: "Pod",
+							ResourceName: pod.Name,
+							Namespace:    pod.Namespace,
+							Message:      line,
+							Timestamp:    time.Now(),
+							IsSystemNS:   r.isSystemNamespace(pod.Namespace),
+							IsController: true,
 						})
 					}
 				}
@@ -198,7 +198,7 @@ func (r *AdmissionLockdownRule) checkServiceAccountDenials(denials []admissionDe
 	for _, denial := range denials {
 		if denial.ServiceAccount != "" {
 			key := denial.Namespace + "/" + denial.ServiceAccount
-			
+
 			if existing, ok := saMap[key]; ok {
 				existing.DenialCount++
 				existing.LastDenial = denial.Timestamp
@@ -277,7 +277,7 @@ func (r *AdmissionLockdownRule) checkControllerFailures(data *correlation.Analys
 					if strings.Contains(strings.ToLower(line), "forbidden") ||
 						strings.Contains(strings.ToLower(line), "unauthorized") ||
 						strings.Contains(strings.ToLower(line), "permission denied") {
-						
+
 						failures = append(failures, controllerFailure{
 							ControllerName: pod.Name,
 							Namespace:      pod.Namespace,
@@ -320,7 +320,7 @@ func (r *AdmissionLockdownRule) checkOperationalImpact(data *correlation.Analysi
 	for _, denial := range denials {
 		impact.AffectedNamespaces[denial.Namespace]++
 		impact.AffectedResources[denial.ResourceKind]++
-		
+
 		// Try to categorize operation
 		operation := categorizeOperation(denial.Message)
 		impact.BlockedOperations[operation]++
@@ -370,10 +370,10 @@ func (r *AdmissionLockdownRule) checkOperationalImpact(data *correlation.Analysi
 // calculateDenialStatistics calculates statistics about denials
 func (r *AdmissionLockdownRule) calculateDenialStatistics(denials []admissionDenial) denialStatistics {
 	stats := denialStatistics{
-		TotalDenials:     len(denials),
-		PolicyBreakdown:  make(map[string]int),
+		TotalDenials:      len(denials),
+		PolicyBreakdown:   make(map[string]int),
 		ResourceBreakdown: make(map[string]int),
-		TimeDistribution: make(map[time.Duration]int),
+		TimeDistribution:  make(map[time.Duration]int),
 	}
 
 	if len(denials) == 0 {
@@ -383,16 +383,16 @@ func (r *AdmissionLockdownRule) calculateDenialStatistics(denials []admissionDen
 	// Find time range
 	earliest := denials[0].Timestamp
 	latest := denials[0].Timestamp
-	
+
 	for _, denial := range denials {
 		// Policy breakdown
 		if denial.PolicyName != "" {
 			stats.PolicyBreakdown[denial.PolicyName]++
 		}
-		
+
 		// Resource breakdown
 		stats.ResourceBreakdown[denial.ResourceKind]++
-		
+
 		// Track time range
 		if denial.Timestamp.Before(earliest) {
 			earliest = denial.Timestamp
@@ -400,7 +400,7 @@ func (r *AdmissionLockdownRule) calculateDenialStatistics(denials []admissionDen
 		if denial.Timestamp.After(latest) {
 			latest = denial.Timestamp
 		}
-		
+
 		// Count system namespace denials
 		if denial.IsSystemNS {
 			stats.SystemDenials++
@@ -426,14 +426,14 @@ func (r *AdmissionLockdownRule) calculateDenialStatistics(denials []admissionDen
 
 func (r *AdmissionLockdownRule) calculateConfidence(stats denialStatistics, sadenials []serviceAccountDenial, controllers []controllerFailure, impact operationalImpact) float64 {
 	confidence := 0.0
-	
+
 	// High denial rate indicates lockdown
 	if stats.denialRate > r.config.CriticalDenialPercent {
 		confidence = 0.4
 	} else if stats.denialRate > r.config.CriticalDenialPercent/2 {
 		confidence = 0.2
 	}
-	
+
 	// Service account denials are strong indicator
 	if len(sadenials) > 0 {
 		confidence += 0.2
@@ -445,7 +445,7 @@ func (r *AdmissionLockdownRule) calculateConfidence(stats denialStatistics, sade
 			}
 		}
 	}
-	
+
 	// Controller failures confirm impact
 	if len(controllers) > 0 {
 		confidence += 0.2
@@ -453,22 +453,22 @@ func (r *AdmissionLockdownRule) calculateConfidence(stats denialStatistics, sade
 			confidence += 0.1
 		}
 	}
-	
+
 	// Operational impact shows severity
 	if impact.StuckDeployments > 0 || impact.FailedJobs > 0 {
 		confidence += 0.1
 	}
-	
+
 	// System namespace denials are critical
 	if stats.SystemDenials > 5 {
 		confidence += 0.1
 	}
-	
+
 	// Cap at 1.0
 	if confidence > 1.0 {
 		confidence = 1.0
 	}
-	
+
 	return confidence
 }
 
@@ -476,12 +476,12 @@ func (r *AdmissionLockdownRule) buildDescription(stats denialStatistics, sadenia
 	parts := []string{
 		fmt.Sprintf("Admission policies are blocking cluster operations with %.1f denials/minute.", stats.denialRate/100),
 	}
-	
+
 	// Denial summary
 	parts = append(parts, fmt.Sprintf("\n\n🚫 Denial Statistics:"))
 	parts = append(parts, fmt.Sprintf("  - Total denials: %d", stats.TotalDenials))
 	parts = append(parts, fmt.Sprintf("  - System namespace denials: %d", stats.SystemDenials))
-	
+
 	// Top policies causing denials
 	if len(stats.PolicyBreakdown) > 0 {
 		parts = append(parts, "\n📋 Top Blocking Policies:")
@@ -494,7 +494,7 @@ func (r *AdmissionLockdownRule) buildDescription(stats denialStatistics, sadenia
 			count++
 		}
 	}
-	
+
 	// Service account impact
 	if len(sadenials) > 0 {
 		parts = append(parts, fmt.Sprintf("\n\n🔐 Service Account Denials (%d affected):", len(sadenials)))
@@ -509,7 +509,7 @@ func (r *AdmissionLockdownRule) buildDescription(stats denialStatistics, sadenia
 		}
 		parts = append(parts, fmt.Sprintf("  - Controllers unable to manage resources"))
 	}
-	
+
 	// Controller failures
 	if len(controllers) > 0 {
 		parts = append(parts, fmt.Sprintf("\n\n⚠️  Controller Impact (%d affected):", len(controllers)))
@@ -520,7 +520,7 @@ func (r *AdmissionLockdownRule) buildDescription(stats denialStatistics, sadenia
 			parts = append(parts, fmt.Sprintf("  - %s: %s", failure.ControllerName, failure.Message))
 		}
 	}
-	
+
 	// Operational impact
 	if impact.StuckDeployments > 0 || impact.FailedJobs > 0 || impact.PendingPods > 0 {
 		parts = append(parts, "\n\n📊 Operational Impact:")
@@ -534,9 +534,9 @@ func (r *AdmissionLockdownRule) buildDescription(stats denialStatistics, sadenia
 			parts = append(parts, fmt.Sprintf("  - %d pods pending", impact.PendingPods))
 		}
 	}
-	
+
 	parts = append(parts, "\n\n⚡ Pattern: Policy enforcement → Service account denials → Controller failures → Operational paralysis")
-	
+
 	return strings.Join(parts, "\n")
 }
 
@@ -547,17 +547,17 @@ func (r *AdmissionLockdownRule) determineSeverity(stats denialStatistics, sadeni
 			return correlation.SeverityCritical
 		}
 	}
-	
+
 	// High denial rate with controller failures
 	if stats.denialRate > r.config.CriticalDenialPercent && len(controllers) > 0 {
 		return correlation.SeverityCritical
 	}
-	
+
 	// Many system namespace denials
 	if stats.SystemDenials > 10 {
 		return correlation.SeverityCritical
 	}
-	
+
 	return correlation.SeverityHigh
 }
 
@@ -586,7 +586,7 @@ func (r *AdmissionLockdownRule) identifyRootCause(denials []admissionDenial, sad
 			}
 		}
 	}
-	
+
 	if len(policyTypes) > 1 {
 		return "Multiple admission policies enforcing conflicting or overly restrictive rules"
 	} else if policyTypes["pod-security"] {
@@ -594,7 +594,7 @@ func (r *AdmissionLockdownRule) identifyRootCause(denials []admissionDenial, sad
 	} else if policyTypes["opa"] {
 		return "OPA/Gatekeeper policies too restrictive for normal operations"
 	}
-	
+
 	// Check for RBAC issues
 	systemSABlocked := false
 	for _, sad := range sadenials {
@@ -603,11 +603,11 @@ func (r *AdmissionLockdownRule) identifyRootCause(denials []admissionDenial, sad
 			break
 		}
 	}
-	
+
 	if systemSABlocked {
 		return "System service accounts lacking required permissions after policy changes"
 	}
-	
+
 	return "Admission control policies preventing legitimate cluster operations"
 }
 
@@ -616,23 +616,23 @@ func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenial
 		fmt.Sprintf("%.0f denials per minute detected", stats.denialRate/100),
 		fmt.Sprintf("%d total denials in analysis window", stats.TotalDenials),
 	}
-	
+
 	if stats.SystemDenials > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d denials in system namespaces", stats.SystemDenials))
 	}
-	
+
 	if len(sadenials) > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d service accounts experiencing denials", len(sadenials)))
 	}
-	
+
 	if len(controllers) > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d controllers affected by admission denials", len(controllers)))
 	}
-	
+
 	if impact.StuckDeployments > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d deployments unable to progress", impact.StuckDeployments))
 	}
-	
+
 	// Top denied resources
 	topResource := ""
 	maxDenials := 0
@@ -645,7 +645,7 @@ func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenial
 	if topResource != "" {
 		evidence = append(evidence, fmt.Sprintf("Most denied resource type: %s (%d denials)", topResource, maxDenials))
 	}
-	
+
 	return evidence
 }
 
@@ -654,20 +654,20 @@ func (r *AdmissionLockdownRule) predictTimeToParalysis(stats denialStatistics, c
 	if len(controllers) > 5 {
 		return 0
 	}
-	
+
 	// Based on denial rate acceleration
 	if stats.denialRate > r.config.CriticalDenialPercent*2 {
 		return 5 * time.Minute
 	} else if stats.denialRate > r.config.CriticalDenialPercent {
 		return 15 * time.Minute
 	}
-	
+
 	return 30 * time.Minute
 }
 
 func (r *AdmissionLockdownRule) identifyPolicyResources(denials []admissionDenial) []correlation.ResourceReference {
 	policyMap := make(map[string]correlation.ResourceReference)
-	
+
 	for _, denial := range denials {
 		if denial.PolicyName != "" {
 			// Try to identify the policy resource
@@ -687,12 +687,12 @@ func (r *AdmissionLockdownRule) identifyPolicyResources(denials []admissionDenia
 			}
 		}
 	}
-	
+
 	var resources []correlation.ResourceReference
 	for _, ref := range policyMap {
 		resources = append(resources, ref)
 	}
-	
+
 	return resources
 }
 
@@ -718,30 +718,30 @@ func isControllerPod(pod types.PodInfo) bool {
 		"statefulset-controller",
 		"daemonset-controller",
 	}
-	
+
 	for _, name := range controllerNames {
 		if strings.Contains(pod.Name, name) {
 			return true
 		}
 	}
-	
+
 	// Check labels
 	if component, ok := pod.Labels["component"]; ok {
 		return strings.Contains(component, "controller")
 	}
-	
+
 	return false
 }
 
 func extractPolicyName(message string) string {
 	// Try to extract webhook/policy name from message
 	patterns := []string{
-		"admission webhook \"", 
+		"admission webhook \"",
 		"denied by ",
 		"policy ",
 		"webhook ",
 	}
-	
+
 	msg := strings.ToLower(message)
 	for _, pattern := range patterns {
 		if idx := strings.Index(msg, pattern); idx >= 0 {
@@ -752,7 +752,7 @@ func extractPolicyName(message string) string {
 			}
 		}
 	}
-	
+
 	return ""
 }
 
@@ -768,7 +768,7 @@ func extractServiceAccount(message string) string {
 			return sa
 		}
 	}
-	
+
 	// Alternative format
 	if idx := strings.Index(message, "service account"); idx >= 0 {
 		parts := strings.Fields(message[idx:])
@@ -776,13 +776,13 @@ func extractServiceAccount(message string) string {
 			return strings.Trim(parts[2], "\"'")
 		}
 	}
-	
+
 	return ""
 }
 
 func categorizeOperation(message string) string {
 	msg := strings.ToLower(message)
-	
+
 	operations := map[string][]string{
 		"create": {"create", "creating", "creation"},
 		"update": {"update", "updating", "patch", "patching"},
@@ -790,7 +790,7 @@ func categorizeOperation(message string) string {
 		"scale":  {"scale", "scaling", "replica"},
 		"exec":   {"exec", "attach", "portforward"},
 	}
-	
+
 	for op, keywords := range operations {
 		for _, keyword := range keywords {
 			if strings.Contains(msg, keyword) {
@@ -798,7 +798,7 @@ func categorizeOperation(message string) string {
 			}
 		}
 	}
-	
+
 	return "unknown"
 }
 

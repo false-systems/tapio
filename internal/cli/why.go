@@ -18,11 +18,11 @@ import (
 )
 
 var (
-	whyVerbose         bool
-	whyOutput          string
-	whyNamespace       string
-	whyEnableEBPF      bool
-	whyUseUniversal    bool
+	whyVerbose      bool
+	whyOutput       string
+	whyNamespace    string
+	whyEnableEBPF   bool
+	whyUseUniversal bool
 )
 
 var whyCmd = &cobra.Command{
@@ -154,14 +154,14 @@ func runWhy(cmd *cobra.Command, args []string) error {
 func outputUniversalExplanation(ctx context.Context, explanation *types.Explanation, problems []types.Problem, checker *simple.Checker) error {
 	// Create converters
 	correlationConverter := converters.NewCorrelationConverter()
-	
+
 	// Create CLI formatter
 	cliFormatter := formatters.NewCLIFormatter(&formatters.CLIConfig{
 		UseColor:   true,
 		Verbosity:  1,
 		TimeFormat: "15:04:05",
 	})
-	
+
 	if whyVerbose {
 		cliFormatter = formatters.NewCLIFormatter(&formatters.CLIConfig{
 			UseColor:   true,
@@ -169,14 +169,14 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 			TimeFormat: "15:04:05",
 		})
 	}
-	
+
 	// Create universal dataset
 	dataset := &universal.UniversalDataset{
 		Source:    "tapio-why",
 		Version:   "1.0",
 		Timestamp: time.Now(),
 	}
-	
+
 	// Convert problems to universal predictions
 	for _, problem := range problems {
 		if problem.Prediction != nil {
@@ -197,7 +197,7 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 					Confidence:  problem.Prediction.Confidence,
 				},
 			}
-			
+
 			// Convert to universal prediction
 			pred, err := correlationConverter.ConvertFinding(finding)
 			if err == nil {
@@ -205,11 +205,11 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 			}
 		}
 	}
-	
+
 	// Output header
 	fmt.Printf("\n🔍 Analysis Results for %s/%s\n", explanation.Resource.Kind, explanation.Resource.Name)
 	fmt.Println(strings.Repeat("=", 60))
-	
+
 	// Output predictions using CLI formatter
 	if len(dataset.Predictions) > 0 {
 		fmt.Println("\n📊 Predictions:")
@@ -218,7 +218,7 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 	} else {
 		fmt.Println("\n✅ No critical issues detected")
 	}
-	
+
 	// Output root causes
 	if len(explanation.RootCauses) > 0 {
 		fmt.Printf("\n🔍 Root Causes (%d found):\n", len(explanation.RootCauses))
@@ -233,7 +233,7 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 			}
 		}
 	}
-	
+
 	// Output solutions
 	if len(explanation.Solutions) > 0 {
 		fmt.Printf("\n💡 Recommended Solutions:\n")
@@ -248,7 +248,7 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 			}
 		}
 	}
-	
+
 	// Output reality check if available
 	if explanation.Analysis != nil && explanation.Analysis.RealityCheck != nil {
 		fmt.Println("\n📈 Reality Check:")
@@ -263,7 +263,7 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 			fmt.Printf("   Container Runtime: %s\n", rc.ContainerRuntime)
 		}
 	}
-	
+
 	fmt.Println()
 	return nil
 }
