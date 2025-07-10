@@ -35,4 +35,5 @@ func init() {
 	rootCmd.AddCommand(contextCmd)
 	rootCmd.AddCommand(useCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(sniffCmd)
 }
