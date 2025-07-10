@@ -23,14 +23,14 @@ import (
 
 // PrometheusExporter exports Tapio metrics to Prometheus format
 type PrometheusExporter struct {
-	checker     CheckerInterface
-	ebpfMonitor ebpf.Monitor
-	registry    *prometheus.Registry
+	checker           CheckerInterface
+	ebpfMonitor       ebpf.Monitor
+	registry          *prometheus.Registry
 	correlationEngine *correlation.Engine
 
 	// Universal format components
-	formatter      *formatters.PrometheusFormatter
-	ebpfConverter  *converters.EBPFConverter
+	formatter            *formatters.PrometheusFormatter
+	ebpfConverter        *converters.EBPFConverter
 	correlationConverter *converters.CorrelationConverter
 
 	// Health metrics
@@ -66,39 +66,39 @@ func NewPrometheusExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor) *
 	if simpleChecker, ok := checker.(*simple.Checker); ok {
 		// Create data sources
 		dataSources := make(map[correlation.SourceType]correlation.DataSource)
-		
+
 		// Add Kubernetes data source
 		k8sSource := sources.NewKubernetesDataSource(simpleChecker)
 		dataSources[correlation.SourceKubernetes] = k8sSource
-		
+
 		// Add eBPF data source if available
 		if ebpfMonitor != nil {
 			ebpfSource := sources.NewEBPFDataSource(ebpfMonitor)
 			dataSources[correlation.SourceEBPF] = ebpfSource
 		}
-		
+
 		// Create data collection
 		dataCollection := correlation.NewDataCollection(dataSources)
-		
+
 		// Create correlation engine
 		config := correlation.DefaultEngineConfig()
 		ruleRegistry := correlation.NewRuleRegistry()
-		
+
 		// Register default rules
 		if err := rules.RegisterDefaultRules(ruleRegistry); err != nil {
 			fmt.Printf("[WARN] Failed to register default rules: %v\n", err)
 		}
-		
+
 		correlationEngine = correlation.NewEngine(config, ruleRegistry, dataCollection)
 	}
 
 	exporter := &PrometheusExporter{
-		checker:     checker,
-		ebpfMonitor: ebpfMonitor,
-		registry:    registry,
-		correlationEngine: correlationEngine,
-		formatter:   formatter,
-		ebpfConverter: ebpfConverter,
+		checker:              checker,
+		ebpfMonitor:          ebpfMonitor,
+		registry:             registry,
+		correlationEngine:    correlationEngine,
+		formatter:            formatter,
+		ebpfConverter:        ebpfConverter,
 		correlationConverter: correlationConverter,
 
 		// Health metrics
@@ -488,7 +488,7 @@ func (e *PrometheusExporter) UpdateMetricsWithUniversal(ctx context.Context) err
 			fmt.Printf("[WARN] Correlation analysis failed: %v\n", err)
 		} else {
 			fmt.Printf("[OK] Correlation analysis found %d findings\n", len(findings))
-			
+
 			// Convert findings to universal format predictions
 			for _, finding := range findings {
 				// Convert finding to universal format
