@@ -139,14 +139,24 @@ vet:
 ##@ Branch Management
 
 # Start agent work with proper branch
-agent-start:
+agent-start: ## Start new agent task (prompts for agent, component, action)
+	@echo "🤖 Starting new agent task..."
 	@read -p "Agent ID: " agent; \
 	read -p "Component: " component; \
 	read -p "Action: " action; \
+	if [ -z "$$agent" ] || [ -z "$$component" ] || [ -z "$$action" ]; then \
+		echo "❌ All fields are required!"; \
+		echo "Example: agent-1, ebpf-sources, decoupling"; \
+		exit 1; \
+	fi; \
 	./scripts/agent-branch.sh "$$agent" "$$component" "$$action"
 
+# Start agent work with interactive menu
+agent-menu: ## Start new agent task with interactive menu
+	@./scripts/agent-menu.sh
+
 # Agent status overview
-agent-status:
+agent-status: ## Show active agent work and branches
 	@echo "👥 Active agent work:"
 	@find .agent-work -name "*.md" 2>/dev/null | head -5 || echo "No active work"
 	@echo "🌿 Agent branches:"
@@ -161,7 +171,7 @@ pr-ready: fmt ci-check
 	@echo "🚀 Ready to create PR!"
 
 # Alias for ci-check
-agent-check: ci-check
+agent-check: ci-check ## Run quality checks for agent work
 	@echo "✅ Agent quality checks complete!"
 
 ##@ Help
