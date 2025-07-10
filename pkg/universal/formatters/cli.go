@@ -179,7 +179,8 @@ func (f *CLIFormatter) FormatExplanation(data *universal.UniversalDataset) strin
 	
 	// Group predictions by target
 	targetPredictions := make(map[string][]*universal.UniversalPrediction)
-	for _, pred := range data.Predictions {
+	for i := range data.Predictions {
+		pred := &data.Predictions[i]
 		key := f.formatTarget(pred.Target)
 		targetPredictions[key] = append(targetPredictions[key], pred)
 	}

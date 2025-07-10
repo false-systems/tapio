@@ -10,8 +10,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/falseyair/tapio/pkg/correlation/rules"
+	"github.com/falseyair/tapio/pkg/correlation/sources"
 	"github.com/falseyair/tapio/pkg/ebpf"
+	"github.com/falseyair/tapio/pkg/simple"
 	"github.com/falseyair/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/falseyair/tapio/pkg/universal/converters"
+	"github.com/falseyair/tapio/pkg/universal/formatters"
 )
 
 // PrometheusExporter exports Tapio metrics to Prometheus format
@@ -19,6 +26,12 @@ type PrometheusExporter struct {
 	checker     CheckerInterface
 	ebpfMonitor ebpf.Monitor
 	registry    *prometheus.Registry
+	correlationEngine *correlation.Engine
+
+	// Universal format components
+	formatter      *formatters.PrometheusFormatter
+	ebpfConverter  *converters.EBPFConverter
+	correlationConverter *converters.CorrelationConverter
 
 	// Health metrics
 	podHealthStatus    *prometheus.GaugeVec
@@ -43,10 +56,50 @@ type CheckerInterface interface {
 func NewPrometheusExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor) *PrometheusExporter {
 	registry := prometheus.NewRegistry()
 
+	// Create universal format components
+	formatter := formatters.NewPrometheusFormatter("tapio", "", registry)
+	ebpfConverter := converters.NewEBPFConverter("prometheus", "1.0")
+	correlationConverter := converters.NewCorrelationConverter()
+
+	// Create correlation engine with real data sources if checker is simple.Checker
+	var correlationEngine *correlation.Engine
+	if simpleChecker, ok := checker.(*simple.Checker); ok {
+		// Create data sources
+		dataSources := make(map[correlation.SourceType]correlation.DataSource)
+		
+		// Add Kubernetes data source
+		k8sSource := sources.NewKubernetesDataSource(simpleChecker)
+		dataSources[correlation.SourceKubernetes] = k8sSource
+		
+		// Add eBPF data source if available
+		if ebpfMonitor != nil {
+			ebpfSource := sources.NewEBPFDataSource(ebpfMonitor)
+			dataSources[correlation.SourceEBPF] = ebpfSource
+		}
+		
+		// Create data collection
+		dataCollection := correlation.NewDataCollection(dataSources)
+		
+		// Create correlation engine
+		config := correlation.DefaultEngineConfig()
+		ruleRegistry := correlation.NewRuleRegistry()
+		
+		// Register default rules
+		if err := rules.RegisterDefaultRules(ruleRegistry); err != nil {
+			fmt.Printf("[WARN] Failed to register default rules: %v\n", err)
+		}
+		
+		correlationEngine = correlation.NewEngine(config, ruleRegistry, dataCollection)
+	}
+
 	exporter := &PrometheusExporter{
 		checker:     checker,
 		ebpfMonitor: ebpfMonitor,
 		registry:    registry,
+		correlationEngine: correlationEngine,
+		formatter:   formatter,
+		ebpfConverter: ebpfConverter,
+		correlationConverter: correlationConverter,
 
 		// Health metrics
 		podHealthStatus: prometheus.NewGaugeVec(
@@ -352,41 +405,117 @@ func (e *PrometheusExporter) updateEBPFMetrics() {
 		return
 	}
 
-	// Update metrics for each process
+	// Convert to universal format and export
 	for _, stats := range memStats {
-		if stats.InContainer {
-			// Extract pod/container info from command or use PID as fallback
-			podName := fmt.Sprintf("pid-%d", stats.PID)
-			namespace := "unknown"
-			containerName := "main"
+		// Convert eBPF stats to universal metric
+		metric, err := e.ebpfConverter.ConvertProcessMemoryStats(&stats)
+		if err != nil {
+			fmt.Printf("[WARN] Failed to convert eBPF stats: %v\n", err)
+			continue
+		}
 
-			// Update real memory usage
-			e.registry.MustRegister(prometheus.NewGaugeFunc(
-				prometheus.GaugeOpts{
-					Name:        "tapio_ebpf_memory_usage_bytes",
-					Help:        "Real memory usage tracked by eBPF",
-					ConstLabels: prometheus.Labels{"pod": podName, "namespace": namespace, "container": containerName},
-				},
-				func() float64 { return float64(stats.CurrentUsage) },
-			))
+		// Format and export via Prometheus formatter
+		if err := e.formatter.FormatMetric(metric); err != nil {
+			fmt.Printf("[WARN] Failed to format metric: %v\n", err)
+		}
 
-			// Calculate allocation rate if we have growth pattern data
-			if len(stats.GrowthPattern) > 1 {
-				firstPoint := stats.GrowthPattern[0]
-				lastPoint := stats.GrowthPattern[len(stats.GrowthPattern)-1]
-				duration := lastPoint.Timestamp.Sub(firstPoint.Timestamp).Seconds()
-				if duration > 0 {
-					rate := float64(lastPoint.Usage-firstPoint.Usage) / duration
-					e.registry.MustRegister(prometheus.NewGaugeFunc(
-						prometheus.GaugeOpts{
-							Name:        "tapio_ebpf_memory_allocation_rate_bytes_per_second",
-							Help:        "Memory allocation rate tracked by eBPF",
-							ConstLabels: prometheus.Labels{"pod": podName, "namespace": namespace, "container": containerName},
-						},
-						func() float64 { return rate },
-					))
+		// Return metric to pool
+		universal.PutMetric(metric)
+
+		// Convert growth pattern if available
+		if len(stats.GrowthPattern) > 0 {
+			growthMetrics, err := e.ebpfConverter.ConvertMemoryGrowthToMetrics(&stats)
+			if err == nil {
+				for _, gm := range growthMetrics {
+					e.formatter.FormatMetric(gm)
+					universal.PutMetric(gm)
 				}
 			}
 		}
 	}
+
+	// Get OOM predictions if available
+	limits := make(map[uint32]uint64)
+	// TODO: Get actual memory limits from Kubernetes
+	predictions, err := e.ebpfMonitor.GetMemoryPredictions(limits)
+	if err == nil {
+		e.updateUniversalPredictions(predictions)
+	}
+}
+
+// updateUniversalPredictions updates predictions using universal format
+func (e *PrometheusExporter) updateUniversalPredictions(predictions map[uint32]*ebpf.OOMPrediction) {
+	for pid, pred := range predictions {
+		// Convert to universal format
+		target := universal.Target{
+			Type: universal.TargetTypeProcess,
+			PID:  int32(pid),
+			Name: fmt.Sprintf("pid-%d", pid),
+		}
+
+		universalPred := e.correlationConverter.ConvertOOMPrediction(
+			&target,
+			pred.TimeToOOM,
+			pred.Confidence,
+			pred.CurrentUsage,
+			pred.MemoryLimit,
+			0, // growth rate not provided in ebpf.OOMPrediction
+		)
+
+		// Format and export
+		if err := e.formatter.FormatPrediction(universalPred); err != nil {
+			fmt.Printf("[WARN] Failed to format prediction: %v\n", err)
+		}
+
+		// Return to pool
+		universal.PutPrediction(universalPred)
+	}
+}
+
+// UpdateMetricsWithUniversal updates metrics using the universal data format
+func (e *PrometheusExporter) UpdateMetricsWithUniversal(ctx context.Context) error {
+	startTime := time.Now()
+	defer func() {
+		e.analysisLatency.WithLabelValues("universal_update", "all").Observe(time.Since(startTime).Seconds())
+		e.lastUpdateTime.WithLabelValues("universal_metrics").SetToCurrentTime()
+	}()
+
+	// Use correlation engine if available
+	if e.correlationEngine != nil {
+		// Run correlation analysis
+		findings, err := e.correlationEngine.Execute(ctx)
+		if err != nil {
+			fmt.Printf("[WARN] Correlation analysis failed: %v\n", err)
+		} else {
+			fmt.Printf("[OK] Correlation analysis found %d findings\n", len(findings))
+			
+			// Convert findings to universal format predictions
+			for _, finding := range findings {
+				// Convert finding to universal format
+				pred, err := e.correlationConverter.ConvertFinding(&finding)
+				if err != nil {
+					fmt.Printf("[WARN] Failed to convert finding: %v\n", err)
+					continue
+				}
+
+				// Export via formatter
+				if err := e.formatter.FormatPrediction(pred); err != nil {
+					fmt.Printf("[WARN] Failed to format prediction: %v\n", err)
+				}
+				universal.PutPrediction(pred)
+			}
+		}
+	}
+
+	// Update eBPF metrics using universal format
+	if e.ebpfMonitor != nil && e.ebpfMonitor.IsAvailable() {
+		e.updateEBPFMetrics()
+	}
+
+	// Update regular metrics from checker
+	if err := e.UpdateMetrics(ctx); err != nil {
+		return fmt.Errorf("failed to update standard metrics: %w", err)
+	}
+
+	return nil
 }
