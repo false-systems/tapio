@@ -15,8 +15,21 @@ BRANCH_NAME="feature/${AGENT_ID}/${COMPONENT}-${ACTION}"
 
 echo "🌿 Creating branch: $BRANCH_NAME"
 
-# Switch to develop and update
-git checkout develop || git checkout main
+# Check for uncommitted changes
+if ! git diff-index --quiet HEAD --; then
+    echo "⚠️  You have uncommitted changes. Please commit or stash them first."
+    exit 1
+fi
+
+# Switch to develop/main and update
+if git show-ref --verify --quiet refs/heads/develop; then
+    git checkout develop
+elif git show-ref --verify --quiet refs/heads/main; then
+    git checkout main
+else
+    echo "❌ Neither 'develop' nor 'main' branch found!"
+    exit 1
+fi
 git pull origin $(git branch --show-current)
 
 # Create or switch to branch
@@ -30,6 +43,7 @@ else
 fi
 
 # Create task tracking
+mkdir -p .agent-work
 TASK_FILE=".agent-work/task-${AGENT_ID}-${COMPONENT}-${ACTION}.md"
 cat > "$TASK_FILE" << TASKEOF
 # Task: ${COMPONENT} ${ACTION}
