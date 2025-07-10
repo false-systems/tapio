@@ -201,12 +201,6 @@ func TestEnhancedK8sClient_ListPods_Caching(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
 	
 	config := &EnhancedConfig{
-		CircuitBreakerConfig: &resilience.CircuitBreakerConfig{
-			MaxRequests:      10,
-			Interval:         10 * time.Second,
-			Timeout:          30 * time.Second,
-			FailureThreshold: 5,
-		},
 		CacheConfig: &CacheConfig{
 			L1Size:          10,
 			L1TTL:           1 * time.Second,
@@ -215,7 +209,9 @@ func TestEnhancedK8sClient_ListPods_Caching(t *testing.T) {
 			WarmupEnabled:   false,
 			CleanupInterval: 100 * time.Millisecond,
 		},
-		DefaultTimeout: 30 * time.Second,
+		DefaultTimeout:          30 * time.Second,
+		CircuitBreakerThreshold: 5,
+		CircuitBreakerTimeout:   30 * time.Second,
 	}
 
 	enhancedClient := &EnhancedK8sClient{
@@ -265,11 +261,11 @@ func TestEnhancedK8sClient_GetCacheStats(t *testing.T) {
 	config.EnableCacheWarmup = false // Disable for test
 
 	enhancedClient := &EnhancedK8sClient{
-		baseClient:     fakeClient,
-		circuitBreaker: resilience.NewCircuitBreaker(config.CircuitBreakerConfig),
-		smartCache:     NewCacheManager(config.CacheConfig),
-		watchManager:   NewWatchManager(fakeClient, config.WatchConfig),
-		config:         config,
+		baseClient:        fakeClient,
+		resilienceManager: universal.NewResilienceManager(),
+		smartCache:        NewCacheManager(config.CacheConfig),
+		watchManager:      NewWatchManager(fakeClient, config.WatchConfig),
+		config:            config,
 	}
 	defer enhancedClient.Close()
 

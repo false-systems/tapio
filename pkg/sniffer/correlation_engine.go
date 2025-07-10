@@ -702,7 +702,7 @@ func (cb *LegacyCircuitBreaker) RecordFailure() {
 }
 
 // State returns the current state
-func (cb *CircuitBreaker) State() string {
+func (cb *LegacyCircuitBreaker) State() string {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	return cb.state
