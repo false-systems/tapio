@@ -31,7 +31,7 @@ type CorrelationEngine struct {
 	stateMutex     sync.RWMutex
 
 	// Circuit breaker
-	breaker        *CircuitBreaker
+	breaker        *LegacyCircuitBreaker
 
 	// Metrics
 	eventsProcessed uint64
@@ -97,8 +97,8 @@ type Prediction struct {
 	Confidence  float64   // 0.0-1.0
 }
 
-// CircuitBreaker prevents overwhelming the system
-type CircuitBreaker struct {
+// LegacyCircuitBreaker prevents overwhelming the system (legacy implementation)
+type LegacyCircuitBreaker struct {
 	mu              sync.Mutex
 	failureCount    int
 	lastFailureTime time.Time
@@ -117,7 +117,7 @@ func NewCorrelationEngine(batchSize int, batchTimeout time.Duration) *Correlatio
 		batchSize:      batchSize,
 		batchTimeout:   batchTimeout,
 		correlationMap: make(map[string]*CorrelationState),
-		breaker:        NewCircuitBreaker(5, 30*time.Second),
+		breaker:        NewLegacyCircuitBreaker(5, 30*time.Second),
 	}
 }
 
@@ -646,9 +646,9 @@ func getDeploymentFromPod(podName string) string {
 
 // Circuit breaker implementation
 
-// NewCircuitBreaker creates a new circuit breaker
-func NewCircuitBreaker(threshold int, timeout time.Duration) *CircuitBreaker {
-	return &CircuitBreaker{
+// NewLegacyCircuitBreaker creates a new legacy circuit breaker
+func NewLegacyCircuitBreaker(threshold int, timeout time.Duration) *LegacyCircuitBreaker {
+	return &LegacyCircuitBreaker{
 		state:     "closed",
 		threshold: threshold,
 		timeout:   timeout,
@@ -656,7 +656,7 @@ func NewCircuitBreaker(threshold int, timeout time.Duration) *CircuitBreaker {
 }
 
 // Allow checks if a request should be allowed
-func (cb *CircuitBreaker) Allow() bool {
+func (cb *LegacyCircuitBreaker) Allow() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -678,7 +678,7 @@ func (cb *CircuitBreaker) Allow() bool {
 }
 
 // RecordSuccess records a successful operation
-func (cb *CircuitBreaker) RecordSuccess() {
+func (cb *LegacyCircuitBreaker) RecordSuccess() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -689,7 +689,7 @@ func (cb *CircuitBreaker) RecordSuccess() {
 }
 
 // RecordFailure records a failed operation
-func (cb *CircuitBreaker) RecordFailure() {
+func (cb *LegacyCircuitBreaker) RecordFailure() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -702,7 +702,7 @@ func (cb *CircuitBreaker) RecordFailure() {
 }
 
 // State returns the current state
-func (cb *CircuitBreaker) State() string {
+func (cb *LegacyCircuitBreaker) State() string {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	return cb.state

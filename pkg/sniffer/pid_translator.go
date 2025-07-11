@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +13,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
@@ -157,7 +158,14 @@ func (t *SimplePIDTranslator) GetPodInfo(pid uint32) (*EventContext, error) {
 func (t *SimplePIDTranslator) initializeInformers() error {
 	// Pod informer - watches all pods
 	t.podInformer = cache.NewSharedIndexInformer(
-		cache.NewListWatchFromClient(t.client.CoreV1().RESTClient(), "pods", "", metav1.ListOptions{}),
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return t.client.CoreV1().Pods("").List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return t.client.CoreV1().Pods("").Watch(context.TODO(), options)
+			},
+		},
 		&corev1.Pod{},
 		time.Minute,
 		cache.Indexers{},
