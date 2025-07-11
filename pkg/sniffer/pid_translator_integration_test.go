@@ -1,7 +1,6 @@
 package sniffer
 
 import (
-	"context"
 	"testing"
 	"time"
 
