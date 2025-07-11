@@ -10,8 +10,8 @@ type SystemEvent struct {
 	Data      interface{}
 }
 
-// NetworkEvent represents network-related events
-type NetworkEvent struct {
+// SimpleNetworkEvent represents network-related events (simplified version)
+type SimpleNetworkEvent struct {
 	Timestamp    uint64
 	PID          uint32
 	SrcIP        uint32
@@ -30,8 +30,8 @@ type NetworkEvent struct {
 	ContainerID  string
 }
 
-// PacketEvent represents packet-level events
-type PacketEvent struct {
+// SimplePacketEvent represents packet-level events
+type SimplePacketEvent struct {
 	Timestamp   uint64
 	SrcIP       uint32
 	DstIP       uint32
@@ -45,8 +45,8 @@ type PacketEvent struct {
 	ContainerID string
 }
 
-// DNSEvent represents DNS resolution events
-type DNSEvent struct {
+// SimpleDNSEvent represents DNS resolution events
+type SimpleDNSEvent struct {
 	Timestamp    uint64
 	PID          uint32
 	QueryType    uint16
@@ -58,8 +58,8 @@ type DNSEvent struct {
 	Domain       string
 }
 
-// ProtocolEvent represents application protocol events
-type ProtocolEvent struct {
+// SimpleProtocolEvent represents application protocol events
+type SimpleProtocolEvent struct {
 	Timestamp    uint64
 	PID          uint32
 	Protocol     uint8
