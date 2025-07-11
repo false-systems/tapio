@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -25,7 +26,7 @@ type EnhancedCollector struct {
 	memoryReader *ringbuf.Reader
 	memoryEvents chan *MemoryEvent
 
-	// Network monitoring
+	// Network monitoring  
 	networkObjs   networkmonitorObjects
 	networkReader *ringbuf.Reader
 	networkEvents chan *NetworkEvent
@@ -48,6 +49,12 @@ type EnhancedCollector struct {
 	// Unified event stream
 	unifiedEvents chan SystemEvent
 
+	// Ring buffer manager
+	ringBufferManager *RingBufferManager
+
+	// Error handler
+	errorHandler *ErrorHandler
+
 	// State tracking
 	processStats map[uint32]*ProcessMemoryStats
 	networkStats map[string]*NetworkConnectionStats
@@ -59,11 +66,13 @@ type EnhancedCollector struct {
 	links  []link.Link
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	started atomic.Bool
 
 	// Performance monitoring
-	eventCount    uint64
-	droppedEvents uint64
-	perfMutex     sync.RWMutex
+	eventCount    atomic.Uint64
+	droppedEvents atomic.Uint64
+	parseErrors   atomic.Uint64
 }
 
 // NetworkEvent represents a network-related event
@@ -285,7 +294,7 @@ func (c *EnhancedCollector) initNetworkMonitoring() error {
 		return fmt.Errorf("failed to load network monitoring objects: %w", err)
 	}
 
-	reader, err := ringbuf.NewReader(c.networkObjs.NetworkEvents)
+	reader, err := ringbuf.NewReader(c.networkObjs.Events)
 	if err != nil {
 		c.networkObjs.Close()
 		return fmt.Errorf("failed to create network ring buffer reader: %w", err)
@@ -306,7 +315,7 @@ func (c *EnhancedCollector) initPacketAnalysis() error {
 		return fmt.Errorf("failed to load packet analyzer objects: %w", err)
 	}
 
-	reader, err := ringbuf.NewReader(c.packetObjs.PacketEvents)
+	reader, err := ringbuf.NewReader(c.packetObjs.Events)
 	if err != nil {
 		c.packetObjs.Close()
 		return fmt.Errorf("failed to create packet ring buffer reader: %w", err)
@@ -327,7 +336,7 @@ func (c *EnhancedCollector) initDNSMonitoring() error {
 		return fmt.Errorf("failed to load DNS monitoring objects: %w", err)
 	}
 
-	reader, err := ringbuf.NewReader(c.dnsObjs.DnsEvents)
+	reader, err := ringbuf.NewReader(c.dnsObjs.Events)
 	if err != nil {
 		c.dnsObjs.Close()
 		return fmt.Errorf("failed to create DNS ring buffer reader: %w", err)
@@ -348,7 +357,7 @@ func (c *EnhancedCollector) initProtocolAnalysis() error {
 		return fmt.Errorf("failed to load protocol analyzer objects: %w", err)
 	}
 
-	reader, err := ringbuf.NewReader(c.protocolObjs.ProtocolEvents)
+	reader, err := ringbuf.NewReader(c.protocolObjs.Events)
 	if err != nil {
 		c.protocolObjs.Close()
 		return fmt.Errorf("failed to create protocol ring buffer reader: %w", err)
@@ -390,31 +399,31 @@ func (c *EnhancedCollector) attachMemoryPrograms() error {
 
 func (c *EnhancedCollector) attachNetworkPrograms() error {
 	// Attach network monitoring kprobes
-	l1, err := link.Kprobe("tcp_v4_connect", c.networkObjs.TcpV4ConnectEntry, nil)
+	l1, err := link.Kprobe("tcp_v4_connect", c.networkObjs.TraceConnect, nil)
 	if err != nil {
 		return err
 	}
 	c.links = append(c.links, l1)
 
-	l2, err := link.Kretprobe("tcp_v4_connect", c.networkObjs.TcpV4ConnectExit, nil)
+	l2, err := link.Kretprobe("tcp_v4_connect", c.networkObjs.TraceConnect, nil)
 	if err != nil {
 		return err
 	}
 	c.links = append(c.links, l2)
 
-	l3, err := link.Kprobe("tcp_close", c.networkObjs.TcpClose, nil)
+	l3, err := link.Kprobe("tcp_close", c.networkObjs.TraceClose, nil)
 	if err != nil {
 		return err
 	}
 	c.links = append(c.links, l3)
 
-	l4, err := link.Kprobe("tcp_retransmit_skb", c.networkObjs.TcpRetransmitSkb, nil)
+	l4, err := link.Kprobe("tcp_retransmit_skb", c.networkObjs.TraceRetransmit, nil)
 	if err != nil {
 		return err
 	}
 	c.links = append(c.links, l4)
 
-	l5, err := link.Tracepoint("skb", "kfree_skb", c.networkObjs.TraceKfreeSkb, nil)
+	l5, err := link.Tracepoint("skb", "kfree_skb", c.networkObjs.TracePacketDrop, nil)
 	if err != nil {
 		return err
 	}
@@ -700,25 +709,21 @@ func (c *EnhancedCollector) cleanupOldStats() {
 
 // Performance monitoring
 func (c *EnhancedCollector) incrementEventCount() {
-	c.perfMutex.Lock()
-	c.eventCount++
-	c.perfMutex.Unlock()
+	c.eventCount.Add(1)
 }
 
 func (c *EnhancedCollector) incrementDroppedEvents() {
-	c.perfMutex.Lock()
-	c.droppedEvents++
-	c.perfMutex.Unlock()
+	c.droppedEvents.Add(1)
 }
 
 // GetStats returns performance statistics
 func (c *EnhancedCollector) GetStats() map[string]interface{} {
-	c.perfMutex.RLock()
-	defer c.perfMutex.RUnlock()
+	c.statsMutex.RLock()
+	defer c.statsMutex.RUnlock()
 
 	return map[string]interface{}{
-		"event_count":     c.eventCount,
-		"dropped_events":  c.droppedEvents,
+		"event_count":     c.eventCount.Load(),
+		"dropped_events":  c.droppedEvents.Load(),
 		"process_count":   len(c.processStats),
 		"network_flows":   len(c.networkStats),
 		"dns_queries":     len(c.dnsStats),
@@ -765,4 +770,42 @@ func (c *EnhancedCollector) Close() error {
 	c.protocolObjs.Close()
 
 	return nil
+}
+
+// parseRawMemoryEvent is already defined in events.go, no need to redefine
+
+func parseRawNetworkEvent(data []byte) (*NetworkEvent, error) {
+	parser := NewNetworkEventParser()
+	result, err := parser.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*NetworkEvent), nil
+}
+
+func parseRawPacketEvent(data []byte) (*PacketEvent, error) {
+	parser := NewPacketEventParser()
+	result, err := parser.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*PacketEvent), nil
+}
+
+func parseRawDNSEvent(data []byte) (*DNSEvent, error) {
+	parser := NewDNSEventParser()
+	result, err := parser.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*DNSEvent), nil
+}
+
+func parseRawProtocolEvent(data []byte) (*ProtocolEvent, error) {
+	parser := NewProtocolEventParser()
+	result, err := parser.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*ProtocolEvent), nil
 }
