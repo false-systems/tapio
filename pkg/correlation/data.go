@@ -17,6 +17,9 @@ const (
 	SourceEBPF       SourceType = "ebpf"
 	SourceMetrics    SourceType = "metrics"
 	SourceLogs       SourceType = "logs"
+	SourceSystemd    SourceType = "systemd"
+	SourceJournald   SourceType = "journald"
+	SourceNetwork    SourceType = "network"
 )
 
 // DataSource defines the interface for retrieving data from different sources
@@ -188,6 +191,25 @@ type LogEntry struct {
 	Fields    map[string]interface{} `json:"fields"`
 }
 
+// SystemdData represents systemd service monitoring data
+type SystemdData struct {
+	Timestamp     time.Time                      `json:"timestamp"`
+	ServiceStates map[string]interface{}        `json:"service_states"`
+	UnitInfo      map[string]interface{}        `json:"unit_info"`
+	Patterns      interface{}                   `json:"patterns"`
+	Events        interface{}                   `json:"events"`
+	Statistics    map[string]interface{}        `json:"statistics"`
+}
+
+// JournaldData represents journald log monitoring data  
+type JournaldData struct {
+	Timestamp       time.Time              `json:"timestamp"`
+	Events          interface{}           `json:"events"`
+	PatternMatches  map[string]interface{} `json:"pattern_matches"`
+	Classifications map[string]interface{} `json:"classifications"`
+	Statistics      map[string]interface{} `json:"statistics"`
+}
+
 // DataCollection provides unified access to multiple data sources
 type DataCollection struct {
 	sources  map[SourceType]DataSource
@@ -353,6 +375,66 @@ func (dc *DataCollection) GetLogsData(ctx context.Context) (*LogsData, error) {
 	}
 
 	return logsData, nil
+}
+
+// GetSystemdData retrieves systemd data with caching
+func (dc *DataCollection) GetSystemdData(ctx context.Context) (*SystemdData, error) {
+	cacheKey := "systemd_data"
+
+	// Check cache first
+	if cached, exists := dc.cache[cacheKey]; exists && time.Now().Before(cached.ExpiresAt) {
+		return cached.Data.(*SystemdData), nil
+	}
+
+	source, exists := dc.sources[SourceSystemd]
+	if !exists {
+		return nil, NewSourceNotAvailableError(SourceSystemd)
+	}
+
+	data, err := source.GetData(ctx, "service_states", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	systemdData := data.(*SystemdData)
+
+	// Cache the data
+	dc.cache[cacheKey] = &CachedData{
+		Data:      systemdData,
+		ExpiresAt: time.Now().Add(dc.cacheTTL),
+	}
+
+	return systemdData, nil
+}
+
+// GetJournaldData retrieves journald data with caching
+func (dc *DataCollection) GetJournaldData(ctx context.Context) (*JournaldData, error) {
+	cacheKey := "journald_data"
+
+	// Check cache first
+	if cached, exists := dc.cache[cacheKey]; exists && time.Now().Before(cached.ExpiresAt) {
+		return cached.Data.(*JournaldData), nil
+	}
+
+	source, exists := dc.sources[SourceJournald]
+	if !exists {
+		return nil, NewSourceNotAvailableError(SourceJournald)
+	}
+
+	data, err := source.GetData(ctx, "events", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	journaldData := data.(*JournaldData)
+
+	// Cache the data
+	dc.cache[cacheKey] = &CachedData{
+		Data:      journaldData,
+		ExpiresAt: time.Now().Add(dc.cacheTTL),
+	}
+
+	return journaldData, nil
 }
 
 // ClearCache clears all cached data
