@@ -56,6 +56,7 @@ func TestEnhancedK8sClient_GetPod_WithCache(t *testing.T) {
 		baseClient:        fakeClient,
 		resilienceManager: universal.NewResilienceManager(),
 		smartCache:        NewCacheManager(config.CacheConfig),
+		stateTracker:      NewStateTracker(DefaultStateConfig()),
 		config:            config,
 	}
 	defer enhancedClient.Close()
@@ -111,6 +112,7 @@ func TestEnhancedK8sClient_CircuitBreaker_Integration(t *testing.T) {
 		baseClient:        fakeClient,
 		resilienceManager: universal.NewResilienceManager(),
 		smartCache:        NewCacheManager(config.CacheConfig),
+		stateTracker:      NewStateTracker(DefaultStateConfig()),
 		config:            config,
 	}
 	defer enhancedClient.Close()
@@ -163,6 +165,7 @@ func TestEnhancedK8sClient_CacheInvalidation(t *testing.T) {
 		baseClient:        fakeClient,
 		resilienceManager: universal.NewResilienceManager(),
 		smartCache:        NewCacheManager(config.CacheConfig),
+		stateTracker:      NewStateTracker(DefaultStateConfig()),
 		config:            config,
 	}
 	defer enhancedClient.Close()
@@ -218,6 +221,7 @@ func TestEnhancedK8sClient_ListPods_Caching(t *testing.T) {
 		baseClient:        fakeClient,
 		resilienceManager: universal.NewResilienceManager(),
 		smartCache:        NewCacheManager(config.CacheConfig),
+		stateTracker:      NewStateTracker(DefaultStateConfig()),
 		config:            config,
 	}
 	defer enhancedClient.Close()
@@ -296,6 +300,7 @@ func BenchmarkEnhancedK8sClient_GetPod(b *testing.B) {
 		baseClient:        fakeClient,
 		resilienceManager: universal.NewResilienceManager(),
 		smartCache:        NewCacheManager(config.CacheConfig),
+		stateTracker:      NewStateTracker(DefaultStateConfig()),
 		config:            config,
 	}
 	defer enhancedClient.Close()
@@ -330,6 +335,7 @@ func BenchmarkEnhancedK8sClient_ListPods(b *testing.B) {
 		baseClient:        fakeClient,
 		resilienceManager: universal.NewResilienceManager(),
 		smartCache:        NewCacheManager(config.CacheConfig),
+		stateTracker:      NewStateTracker(DefaultStateConfig()),
 		config:            config,
 	}
 	defer enhancedClient.Close()

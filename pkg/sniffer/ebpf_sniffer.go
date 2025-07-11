@@ -349,7 +349,7 @@ func (s *EBPFSniffer) emitOOMPrediction(pid uint32, pred *ebpf.OOMPrediction, pr
 		}
 	}
 
-	s.emitEvent(&event)
+	s.emitEvent(event)
 }
 
 // emitEvent sends an event to the channel
