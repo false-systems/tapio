@@ -6,7 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // ControlPlaneDepsRule detects control plane dependency failures that cascade through components
@@ -154,10 +159,15 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 
 	// Check controller manager logs for cloud provider issues
 	for _, pod := range data.KubernetesData.Pods {
-		if isControllerManagerPod(pod) || isCloudControllerPod(pod) {
+		podInfo := types.PodInfo{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+			Labels:    pod.Labels,
+		}
+		if isControllerManagerPod(podInfo) || isCloudControllerPod(podInfo) {
 			if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
-				for _, line := range logs {
-					lineLower := strings.ToLower(line)
+				for _, logEntry := range logs {
+					lineLower := strings.ToLower(logEntry.Message)
 
 					// Check for timeout/connection issues
 					if strings.Contains(lineLower, "timeout") ||
@@ -171,11 +181,11 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 								issues = append(issues, dependencyIssue{
 									Component:      pod.Name,
 									Namespace:      pod.Namespace,
-									DependencyType: identifyDependencyType(line),
+									DependencyType: identifyDependencyType(logEntry.Message),
 									DependencyName: dep,
 									IssueType:      "timeout",
-									Message:        line,
-									Timestamp:      time.Now(),
+									Message:        logEntry.Message,
+									Timestamp:      logEntry.Timestamp,
 								})
 								break
 							}
@@ -193,11 +203,11 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 								issues = append(issues, dependencyIssue{
 									Component:      pod.Name,
 									Namespace:      pod.Namespace,
-									DependencyType: identifyDependencyType(line),
+									DependencyType: identifyDependencyType(logEntry.Message),
 									DependencyName: dep,
 									IssueType:      "auth",
-									Message:        line,
-									Timestamp:      time.Now(),
+									Message:        logEntry.Message,
+									Timestamp:      logEntry.Timestamp,
 								})
 								break
 							}
@@ -213,10 +223,10 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 							Component:      pod.Name,
 							Namespace:      pod.Namespace,
 							DependencyType: "api",
-							DependencyName: extractAPIFromMessage(line),
+							DependencyName: extractAPIFromMessage(logEntry.Message),
 							IssueType:      "rate-limit",
-							Message:        line,
-							Timestamp:      time.Now(),
+							Message:        logEntry.Message,
+							Timestamp:      logEntry.Timestamp,
 						})
 					}
 				}
@@ -226,7 +236,7 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 
 	// Check events for dependency-related issues
 	for _, event := range data.KubernetesData.Events {
-		if event.CreatedAt.After(windowStart) {
+		if event.CreationTimestamp.Time.After(windowStart) {
 			eventLower := strings.ToLower(event.Message)
 
 			for _, dep := range externalDeps {
@@ -242,7 +252,7 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 						DependencyName: dep,
 						IssueType:      "error",
 						Message:        event.Message,
-						Timestamp:      event.CreatedAt,
+						Timestamp:      event.CreationTimestamp.Time,
 					})
 				}
 			}
@@ -258,7 +268,12 @@ func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisDa
 
 	// Check each critical component
 	for _, pod := range data.KubernetesData.Pods {
-		componentType := identifyControlPlaneComponent(pod)
+		podInfo := types.PodInfo{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+			Labels:    pod.Labels,
+		}
+		componentType := identifyControlPlaneComponent(podInfo)
 		if componentType == "" {
 			continue
 		}
@@ -303,15 +318,15 @@ func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisDa
 
 		// Check for error logs indicating dependency issues
 		if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
-			for _, line := range logs {
-				lineLower := strings.ToLower(line)
+			for _, logEntry := range logs {
+				lineLower := strings.ToLower(logEntry.Message)
 
 				// Connection/timeout errors
 				if strings.Contains(lineLower, "connection") ||
 					strings.Contains(lineLower, "timeout") ||
 					strings.Contains(lineLower, "deadline") {
 					failure.HasDependencyErrors = true
-					failure.ErrorMessages = append(failure.ErrorMessages, line)
+					failure.ErrorMessages = append(failure.ErrorMessages, logEntry.Message)
 				}
 
 				// Leader election issues
@@ -359,7 +374,7 @@ func (r *ControlPlaneDepsRule) checkCascadeEffects(data *correlation.AnalysisDat
 
 		// Look for related failures in events
 		for _, event := range data.KubernetesData.Events {
-			if event.CreatedAt.After(windowStart) {
+			if event.CreationTimestamp.Time.After(windowStart) {
 				eventLower := strings.ToLower(event.Message)
 
 				// Check if event relates to expected effects
@@ -375,7 +390,7 @@ func (r *ControlPlaneDepsRule) checkCascadeEffects(data *correlation.AnalysisDat
 							ObjectName: event.InvolvedObject.Name,
 							Namespace:  event.InvolvedObject.Namespace,
 							Error:      event.Message,
-							Timestamp:  event.CreatedAt,
+							Timestamp:  event.CreationTimestamp.Time,
 						})
 					}
 				}
@@ -755,8 +770,9 @@ func (r *ControlPlaneDepsRule) identifyRootCause(depIssues []dependencyIssue, ch
 	return "External dependency failures affecting control plane components"
 }
 
-func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, componentFailures []componentFailure, cascadeEffects []cascadeEffect, impact workloadImpact) []string {
-	evidence := []string{}
+func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, componentFailures []componentFailure, cascadeEffects []cascadeEffect, impact workloadImpact) []correlation.Evidence {
+	evidence := []correlation.Evidence{}
+	now := time.Now()
 
 	// Dependency evidence
 	depTypes := make(map[string]int)
@@ -764,15 +780,45 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 		depTypes[issue.DependencyType]++
 	}
 	for depType, count := range depTypes {
-		evidence = append(evidence, fmt.Sprintf("%d %s dependency failures", count, depType))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "dependency_failure",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d %s dependency failures", count, depType),
+			Data: map[string]interface{}{
+				"dependency_type": depType,
+				"failure_count":   count,
+			},
+			Timestamp:  now,
+			Confidence: 0.9,
+		})
 	}
 
 	// Component evidence
 	if len(componentFailures) > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d control plane components affected", len(componentFailures)))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "component_failure",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d control plane components affected", len(componentFailures)),
+			Data: map[string]interface{}{
+				"affected_components": len(componentFailures),
+			},
+			Timestamp:  now,
+			Confidence: 0.95,
+		})
+		
 		for _, failure := range componentFailures {
 			if failure.LeaderElectionIssue {
-				evidence = append(evidence, fmt.Sprintf("%s: leader election failures", failure.ComponentType))
+				evidence = append(evidence, correlation.Evidence{
+					Type:        "leader_election_failure",
+					Source:      correlation.SourceKubernetes,
+					Description: fmt.Sprintf("%s: leader election failures", failure.ComponentType),
+					Data: map[string]interface{}{
+						"component_type": failure.ComponentType,
+						"component_name": failure.ComponentName,
+					},
+					Timestamp:  now,
+					Confidence: 1.0,
+				})
 			}
 		}
 	}
@@ -783,15 +829,42 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 		totalDownstream += len(effect.DownstreamFailures)
 	}
 	if totalDownstream > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d downstream resource failures", totalDownstream))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "cascade_effect",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d downstream resource failures", totalDownstream),
+			Data: map[string]interface{}{
+				"downstream_failures": totalDownstream,
+			},
+			Timestamp:  now,
+			Confidence: 0.85,
+		})
 	}
 
 	// Impact evidence
 	if impact.UnhealthyDeployments > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d deployments unhealthy", impact.UnhealthyDeployments))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "workload_impact",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d deployments unhealthy", impact.UnhealthyDeployments),
+			Data: map[string]interface{}{
+				"unhealthy_deployments": impact.UnhealthyDeployments,
+			},
+			Timestamp:  now,
+			Confidence: 0.9,
+		})
 	}
 	if impact.UnscheduledPods > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d pods cannot be scheduled", impact.UnscheduledPods))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "scheduling_failure",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d pods cannot be scheduled", impact.UnscheduledPods),
+			Data: map[string]interface{}{
+				"unscheduled_pods": impact.UnscheduledPods,
+			},
+			Timestamp:  now,
+			Confidence: 0.95,
+		})
 	}
 
 	return evidence
