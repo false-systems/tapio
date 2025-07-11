@@ -12,6 +12,153 @@ import (
 	"time"
 )
 
+// EventBatch represents a batch of events for processing
+type EventBatch struct {
+	Events    []*MemoryEvent
+	Size      int
+	CreatedAt time.Time
+	BatchID   uint64
+}
+
+// BatchProcessor processes events in batches for efficiency  
+type BatchProcessor struct {
+	config     BatchConfig
+	batchChan  chan *EventBatch
+	eventQueue []*MemoryEvent
+	mu         sync.Mutex
+	batchID    uint64
+	ctx        context.Context
+	cancel     context.CancelFunc
+	isRunning  int32
+}
+
+// BatchConfig configures batch processing
+type BatchConfig struct {
+	MaxBatchSize int
+	BatchTimeout time.Duration
+	MaxMemoryMB  int
+}
+
+// DefaultBatchConfig returns optimized batch configuration
+func DefaultBatchConfig() BatchConfig {
+	return BatchConfig{
+		MaxBatchSize: 100,
+		BatchTimeout: 50 * time.Millisecond,
+		MaxMemoryMB:  10,
+	}
+}
+
+// NewBatchProcessor creates a new batch processor
+func NewBatchProcessor(config BatchConfig) *BatchProcessor {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &BatchProcessor{
+		config:     config,
+		batchChan:  make(chan *EventBatch, 10),
+		eventQueue: make([]*MemoryEvent, 0, config.MaxBatchSize),
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+}
+
+// Start begins batch processing
+func (bp *BatchProcessor) Start() error {
+	if !atomic.CompareAndSwapInt32(&bp.isRunning, 0, 1) {
+		return fmt.Errorf("batch processor already running")
+	}
+	
+	go bp.processBatches()
+	return nil
+}
+
+// Stop stops batch processing
+func (bp *BatchProcessor) Stop() {
+	if atomic.CompareAndSwapInt32(&bp.isRunning, 1, 0) {
+		bp.cancel()
+		close(bp.batchChan)
+	}
+}
+
+// AddEvent adds an event to the current batch
+func (bp *BatchProcessor) AddEvent(event *MemoryEvent) bool {
+	if atomic.LoadInt32(&bp.isRunning) == 0 {
+		return false
+	}
+	
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+	
+	bp.eventQueue = append(bp.eventQueue, event)
+	
+	if len(bp.eventQueue) >= bp.config.MaxBatchSize {
+		bp.flushBatch()
+	}
+	
+	return true
+}
+
+// GetBatches returns the batch channel
+func (bp *BatchProcessor) GetBatches() <-chan *EventBatch {
+	return bp.batchChan
+}
+
+// GetMetrics returns batch processor metrics
+func (bp *BatchProcessor) GetMetrics() map[string]interface{} {
+	return map[string]interface{}{
+		"batch_id":     atomic.LoadUint64(&bp.batchID),
+		"queue_length": len(bp.eventQueue),
+		"is_running":   atomic.LoadInt32(&bp.isRunning) == 1,
+	}
+}
+
+func (bp *BatchProcessor) processBatches() {
+	ticker := time.NewTicker(bp.config.BatchTimeout)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-bp.ctx.Done():
+			return
+		case <-ticker.C:
+			bp.mu.Lock()
+			if len(bp.eventQueue) > 0 {
+				bp.flushBatch()
+			}
+			bp.mu.Unlock()
+		}
+	}
+}
+
+func (bp *BatchProcessor) flushBatch() {
+	if len(bp.eventQueue) == 0 {
+		return
+	}
+	
+	batchID := atomic.AddUint64(&bp.batchID, 1)
+	batch := &EventBatch{
+		Events:    make([]*MemoryEvent, len(bp.eventQueue)),
+		Size:      len(bp.eventQueue),
+		CreatedAt: time.Now(),
+		BatchID:   batchID,
+	}
+	
+	copy(batch.Events, bp.eventQueue)
+	bp.eventQueue = bp.eventQueue[:0] // Reset slice
+	
+	select {
+	case bp.batchChan <- batch:
+	default:
+		// Drop batch if channel is full
+	}
+}
+
+// RingBufferStats represents ring buffer statistics  
+type RingBufferStats struct {
+	EventsReceived uint64 `json:"events_received"`
+	EventsDropped  uint64 `json:"events_dropped"`
+	ParseErrors    uint64 `json:"parse_errors"`
+	BufferSize     int    `json:"buffer_size"`
+}
+
 // EventPipeline manages high-throughput event processing with worker pools
 type EventPipeline struct {
 	// Configuration
@@ -137,8 +284,8 @@ func (ep *EventPipeline) SetTargets(batchProcessor *BatchProcessor, ringBufferMg
 	ep.batchProcessor = batchProcessor
 
 	if ep.ringBufferMgr != nil && ep.ringBufferMgr != ringBufferMgr {
-		// Close existing ring buffer manager if different
-		ep.ringBufferMgr.Close()
+		// Stop existing ring buffer manager if different
+		ep.ringBufferMgr.Stop()
 	}
 	ep.ringBufferMgr = ringBufferMgr
 
@@ -185,7 +332,7 @@ func (ep *EventPipeline) Stop() error {
 
 	// Stop components
 	ep.batchProcessor.Stop()
-	ep.ringBufferMgr.Close()
+	ep.ringBufferMgr.Stop()
 
 	// Close queues
 	close(ep.ingestionQueue)
@@ -245,7 +392,13 @@ func (ep *EventPipeline) GetMetrics() *PipelineMetrics {
 	}
 
 	if ep.ringBufferMgr != nil {
-		metrics.RingBuffer = ep.ringBufferMgr.GetStats()
+		rbMetrics := ep.ringBufferMgr.GetMetrics()
+		metrics.RingBuffer = &RingBufferStats{
+			EventsReceived: rbMetrics.EventsReceived,
+			EventsDropped:  rbMetrics.EventsDropped,
+			ParseErrors:    rbMetrics.ParseErrors,
+			BufferSize:     len(rbMetrics.BufferMetrics),
+		}
 	}
 
 	if ep.circuitBreaker != nil {

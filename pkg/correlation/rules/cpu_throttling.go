@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // CPUThrottlingRule detects CPU throttling affecting performance
@@ -388,8 +388,8 @@ func (r *CPUThrottlingRule) createCPUThrottlingFinding(podName, podNamespace str
 	)
 
 	// Add resource reference
-	finding.Resource = &correlation.ResourceReference{
-		Kind:      "Pod",
+	finding.Resource = correlation.ResourceInfo{
+		Type:      "pod",
 		Name:      podName,
 		Namespace: podNamespace,
 	}
