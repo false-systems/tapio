@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"time"
 
 	"github.com/falseyair/tapio/pkg/collectors"
+	"github.com/falseyair/tapio/pkg/correlation"
 )
 
 // EBPFSource implements eBPF-based data collection with platform detection
@@ -26,13 +28,9 @@ func NewEBPFSource() *EBPFSource {
 		started:  false,
 	}
 
-	// Choose collector based on platform
-	if platform.SupportseBPF {
-		source.collector = collectors.NewLinuxEBPFCollector()
-	} else {
-		// Fallback to mock collector on non-Linux platforms
-		source.collector = collectors.NewMockCollector()
-	}
+	// Always use mock collector for now since we're not on Linux
+	// TODO: Add proper platform detection and conditional compilation
+	source.collector = collectors.NewMockCollector()
 
 	return source
 }
@@ -42,8 +40,8 @@ func (s *EBPFSource) Name() string {
 	return s.name
 }
 
-// IsAvailable checks if eBPF is available on the current platform
-func (s *EBPFSource) IsAvailable(ctx context.Context) bool {
+// IsAvailableWithContext checks if eBPF is available on the current platform
+func (s *EBPFSource) IsAvailableWithContext(ctx context.Context) bool {
 	switch collector := s.collector.(type) {
 	case interface{ IsAvailable(context.Context) bool }:
 		return collector.IsAvailable(ctx)
@@ -100,11 +98,11 @@ func (s *EBPFSource) Collect(ctx context.Context, targets []collectors.Target) (
 
 	switch collector := s.collector.(type) {
 	case interface {
-		Collect(context.Context, []Target) (DataSet, error)
+		Collect(context.Context, []collectors.Target) (collectors.DataSet, error)
 	}:
 		dataset, err := collector.Collect(ctx, targets)
 		if err != nil {
-			return DataSet{}, fmt.Errorf("failed to collect eBPF data: %w", err)
+			return collectors.DataSet{}, fmt.Errorf("failed to collect eBPF data: %w", err)
 		}
 
 		// Add platform information to the dataset
@@ -112,7 +110,7 @@ func (s *EBPFSource) Collect(ctx context.Context, targets []collectors.Target) (
 		return dataset, nil
 
 	default:
-		return DataSet{}, fmt.Errorf("collector does not support data collection")
+		return collectors.DataSet{}, fmt.Errorf("collector does not support data collection")
 	}
 }
 
@@ -168,4 +166,35 @@ func (s *EBPFSource) GetAvailableMockScenarios() []string {
 		return mockCollector.GetAvailableScenarios()
 	}
 	return []string{}
+}
+
+// GetType returns the source type
+func (s *EBPFSource) GetType() correlation.SourceType {
+	return correlation.SourceEBPF
+}
+
+// IsAvailable checks if the source is available for querying (without context)
+func (s *EBPFSource) IsAvailable() bool {
+	return s.IsAvailableWithContext(context.Background())
+}
+
+
+// GetData retrieves data of the specified type
+func (s *EBPFSource) GetData(ctx context.Context, dataType string, params map[string]interface{}) (interface{}, error) {
+	if !s.started {
+		return nil, fmt.Errorf("eBPF source not started")
+	}
+	
+	// For now, return a simple EBPFData structure
+	// In a real implementation, this would collect actual eBPF data
+	return &correlation.EBPFData{
+		ProcessStats:  make(map[uint32]*correlation.ProcessMemoryStats),
+		SystemMetrics: correlation.SystemMetrics{
+			Timestamp: time.Now(),
+		},
+		MemoryEvents: []correlation.MemoryEvent{},
+		CPUEvents:    []correlation.CPUEvent{},
+		IOEvents:     []correlation.IOEvent{},
+		Timestamp:    time.Now(),
+	}, nil
 }

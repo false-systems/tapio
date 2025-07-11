@@ -80,14 +80,14 @@ func (s *K8sSource) Stop(ctx context.Context) error {
 // Collect gathers data from Kubernetes API
 func (s *K8sSource) Collect(ctx context.Context, targets []collectors.Target) (collectors.DataSet, error) {
 	if !s.started {
-		return DataSet{}, fmt.Errorf("Kubernetes source not started")
+		return collectors.DataSet{}, fmt.Errorf("Kubernetes source not started")
 	}
 
-	dataset := DataSet{
+	dataset := collectors.DataSet{
 		Timestamp: time.Now(),
 		Source:    s.name,
-		Metrics:   []Metric{},
-		Events:    []Event{},
+		Metrics:   []collectors.Metric{},
+		Events:    []collectors.Event{},
 		Errors:    []error{},
 	}
 
@@ -192,7 +192,7 @@ func (s *K8sSource) collectPodData(ctx context.Context, target collectors.Target
 }
 
 // collectServiceData collects data for a service
-func (s *K8sSource) collectServiceData(ctx context.Context, target Target) ([]Metric, []Event, error) {
+func (s *K8sSource) collectServiceData(ctx context.Context, target collectors.Target) ([]collectors.Metric, []collectors.Event, error) {
 	namespace := target.Namespace
 	if namespace == "" {
 		namespace = "default"
@@ -200,32 +200,32 @@ func (s *K8sSource) collectServiceData(ctx context.Context, target Target) ([]Me
 
 	service, err := s.client.CoreV1().Services(namespace).Get(ctx, target.Name, metav1.GetOptions{})
 	if err != nil {
-		return []Metric{}, []Event{}, err
+		return []collectors.Metric{}, []collectors.Event{}, err
 	}
 
 	metrics := s.extractServiceMetrics(service, target)
-	events := []Event{} // Services don't have many events
+	events := []collectors.Event{} // Services don't have many events
 
 	return metrics, events, nil
 }
 
 // collectNamespaceData collects data for a namespace
-func (s *K8sSource) collectNamespaceData(ctx context.Context, target Target) ([]Metric, []Event, error) {
+func (s *K8sSource) collectNamespaceData(ctx context.Context, target collectors.Target) ([]collectors.Metric, []collectors.Event, error) {
 	namespace, err := s.client.CoreV1().Namespaces().Get(ctx, target.Name, metav1.GetOptions{})
 	if err != nil {
-		return []Metric{}, []Event{}, err
+		return []collectors.Metric{}, []collectors.Event{}, err
 	}
 
 	metrics := s.extractNamespaceMetrics(ctx, namespace, target)
-	events := []Event{} // Namespace events are rare
+	events := []collectors.Event{} // Namespace events are rare
 
 	return metrics, events, nil
 }
 
 // extractPodMetrics extracts metrics from a pod
-func (s *K8sSource) extractPodMetrics(pod *corev1.Pod, target Target) []Metric {
+func (s *K8sSource) extractPodMetrics(pod *corev1.Pod, target collectors.Target) []collectors.Metric {
 	now := time.Now()
-	metrics := []Metric{}
+	metrics := []collectors.Metric{}
 
 	// Pod phase as a metric
 	phaseValue := 0.0
@@ -238,7 +238,7 @@ func (s *K8sSource) extractPodMetrics(pod *corev1.Pod, target Target) []Metric {
 		phaseValue = -1.0
 	}
 
-	metrics = append(metrics, Metric{
+	metrics = append(metrics, collectors.Metric{
 		Name:      "pod_phase",
 		Value:     phaseValue,
 		Unit:      "state",
@@ -252,14 +252,14 @@ func (s *K8sSource) extractPodMetrics(pod *corev1.Pod, target Target) []Metric {
 
 	// Container metrics
 	for _, container := range pod.Status.ContainerStatuses {
-		containerTarget := Target{
+		containerTarget := collectors.Target{
 			Type:      "container",
 			Name:      container.Name,
 			Namespace: target.Namespace,
 			Labels:    target.Labels,
 		}
 
-		metrics = append(metrics, Metric{
+		metrics = append(metrics, collectors.Metric{
 			Name:      "container_restart_count",
 			Value:     float64(container.RestartCount),
 			Unit:      "count",
@@ -277,7 +277,7 @@ func (s *K8sSource) extractPodMetrics(pod *corev1.Pod, target Target) []Metric {
 			readyValue = 1.0
 		}
 
-		metrics = append(metrics, Metric{
+		metrics = append(metrics, collectors.Metric{
 			Name:      "container_ready",
 			Value:     readyValue,
 			Unit:      "state",
@@ -293,12 +293,12 @@ func (s *K8sSource) extractPodMetrics(pod *corev1.Pod, target Target) []Metric {
 }
 
 // extractServiceMetrics extracts metrics from a service
-func (s *K8sSource) extractServiceMetrics(service *corev1.Service, target Target) []Metric {
+func (s *K8sSource) extractServiceMetrics(service *corev1.Service, target collectors.Target) []collectors.Metric {
 	now := time.Now()
-	metrics := []Metric{}
+	metrics := []collectors.Metric{}
 
 	// Service type as a metric
-	metrics = append(metrics, Metric{
+	metrics = append(metrics, collectors.Metric{
 		Name:      "service_type",
 		Value:     1.0,
 		Unit:      "state",
@@ -311,7 +311,7 @@ func (s *K8sSource) extractServiceMetrics(service *corev1.Service, target Target
 	})
 
 	// Port count
-	metrics = append(metrics, Metric{
+	metrics = append(metrics, collectors.Metric{
 		Name:      "service_port_count",
 		Value:     float64(len(service.Spec.Ports)),
 		Unit:      "count",
@@ -326,9 +326,9 @@ func (s *K8sSource) extractServiceMetrics(service *corev1.Service, target Target
 }
 
 // extractNamespaceMetrics extracts metrics from a namespace
-func (s *K8sSource) extractNamespaceMetrics(ctx context.Context, namespace *corev1.Namespace, target Target) []Metric {
+func (s *K8sSource) extractNamespaceMetrics(ctx context.Context, namespace *corev1.Namespace, target collectors.Target) []collectors.Metric {
 	now := time.Now()
-	metrics := []Metric{}
+	metrics := []collectors.Metric{}
 
 	// Namespace phase
 	phaseValue := 1.0
@@ -336,7 +336,7 @@ func (s *K8sSource) extractNamespaceMetrics(ctx context.Context, namespace *core
 		phaseValue = 0.0
 	}
 
-	metrics = append(metrics, Metric{
+	metrics = append(metrics, collectors.Metric{
 		Name:      "namespace_phase",
 		Value:     phaseValue,
 		Unit:      "state",
@@ -350,7 +350,7 @@ func (s *K8sSource) extractNamespaceMetrics(ctx context.Context, namespace *core
 	// Count pods in namespace
 	pods, err := s.client.CoreV1().Pods(namespace.Name).List(ctx, metav1.ListOptions{})
 	if err == nil {
-		metrics = append(metrics, Metric{
+		metrics = append(metrics, collectors.Metric{
 			Name:      "namespace_pod_count",
 			Value:     float64(len(pods.Items)),
 			Unit:      "count",
@@ -363,8 +363,8 @@ func (s *K8sSource) extractNamespaceMetrics(ctx context.Context, namespace *core
 }
 
 // extractPodEvents extracts events related to a pod
-func (s *K8sSource) extractPodEvents(ctx context.Context, pod *corev1.Pod, target Target) []Event {
-	events := []Event{}
+func (s *K8sSource) extractPodEvents(ctx context.Context, pod *corev1.Pod, target collectors.Target) []collectors.Event {
+	events := []collectors.Event{}
 
 	// Get events for this pod
 	fieldSelector := fmt.Sprintf("involvedObject.name=%s,involvedObject.namespace=%s", pod.Name, pod.Namespace)
@@ -382,7 +382,7 @@ func (s *K8sSource) extractPodEvents(ctx context.Context, pod *corev1.Pod, targe
 			severity = "warning"
 		}
 
-		events = append(events, Event{
+		events = append(events, collectors.Event{
 			Type:      strings.ToLower(k8sEvent.Reason),
 			Message:   k8sEvent.Message,
 			Target:    target,

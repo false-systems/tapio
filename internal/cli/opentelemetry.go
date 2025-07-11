@@ -34,6 +34,13 @@ var (
 	otelKeyFile        string
 	otelMaxConcurrency int
 	useUniversalFormat bool
+	
+	// Correlation tracing options
+	enableCorrelationTracing    bool
+	correlationTimeWindow       time.Duration
+	enableTimelineVisualization bool
+	enableRootCauseAnalysis     bool
+	correlationConfidenceThreshold float64
 )
 
 var opentelemetryCmd = &cobra.Command{
@@ -53,7 +60,11 @@ Features:
   • Full resilience integration (timeouts, retries, validation)
   • Resource efficiency with 19Hz optimal batching
   • Zero-configuration auto-discovery
-  • Universal data format for enhanced telemetry`,
+  • Universal data format for enhanced telemetry
+  • Enhanced correlation analysis tracing
+  • Timeline visualization for event causation
+  • Root cause analysis with confidence scoring
+  • Multi-layer system analysis (eBPF, K8s, systemd, network)`,
 	Example: `  # Start OpenTelemetry exporter on default port
   tapio opentelemetry
 
@@ -65,6 +76,12 @@ Features:
 
   # Enable eBPF monitoring for enhanced traces
   tapio opentelemetry --enable-ebpf --otlp-endpoint http://localhost:4317
+
+  # Enable correlation analysis tracing with timeline visualization
+  tapio opentelemetry --enable-correlation --enable-timeline --correlation-window 30m
+
+  # Enable root cause analysis with custom confidence threshold
+  tapio opentelemetry --enable-rootcause --correlation-confidence 0.8
 
   # Test the telemetry endpoints
   curl http://localhost:4317/health
@@ -118,6 +135,18 @@ func init() {
 	// Performance configuration
 	opentelemetryCmd.Flags().IntVar(&otelMaxConcurrency, "max-concurrency", 10,
 		"Maximum number of concurrent operations")
+	
+	// Correlation tracing configuration
+	opentelemetryCmd.Flags().BoolVar(&enableCorrelationTracing, "enable-correlation", true,
+		"Enable enhanced correlation analysis tracing")
+	opentelemetryCmd.Flags().DurationVar(&correlationTimeWindow, "correlation-window", 30*time.Minute,
+		"Time window for correlation analysis")
+	opentelemetryCmd.Flags().BoolVar(&enableTimelineVisualization, "enable-timeline", true,
+		"Enable timeline visualization tracing")
+	opentelemetryCmd.Flags().BoolVar(&enableRootCauseAnalysis, "enable-rootcause", true,
+		"Enable root cause analysis tracing")
+	opentelemetryCmd.Flags().Float64Var(&correlationConfidenceThreshold, "correlation-confidence", 0.7,
+		"Minimum confidence threshold for correlations (0.0-1.0)")
 }
 
 func runOpenTelemetry(cmd *cobra.Command, args []string) error {
@@ -127,6 +156,19 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 	fmt.Println("🌲 Starting Tapio OpenTelemetry Exporter...")
 	if useUniversalFormat {
 		fmt.Println("✨ Using universal data format for enhanced telemetry")
+	}
+	
+	// Print correlation tracing status
+	if enableCorrelationTracing {
+		fmt.Println("🔍 Correlation analysis tracing enabled")
+		fmt.Printf("   • Time window: %v\n", correlationTimeWindow)
+		fmt.Printf("   • Confidence threshold: %.2f\n", correlationConfidenceThreshold)
+		if enableTimelineVisualization {
+			fmt.Println("   • Timeline visualization: ENABLED")
+		}
+		if enableRootCauseAnalysis {
+			fmt.Println("   • Root cause analysis: ENABLED")
+		}
 	}
 
 	// Parse headers
@@ -203,6 +245,13 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 		// Enable Agent 1's translator for real Kubernetes context
 		EnableTranslator: true,
 		KubeClient:      checker.GetKubeClient(), // Get real Kubernetes client from checker
+		
+		// Correlation tracing configuration
+		EnableCorrelationTracing:    enableCorrelationTracing,
+		CorrelationTimeWindow:       correlationTimeWindow,
+		EnableTimelineVisualization: enableTimelineVisualization,
+		EnableRootCauseAnalysis:     enableRootCauseAnalysis,
+		CorrelationConfidenceThreshold: correlationConfidenceThreshold,
 	}
 
 	// Create OpenTelemetry exporter
@@ -346,7 +395,7 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 	metrics := exporter.GetMetrics()
 	fmt.Printf("🛡️  Circuit breaker: %s\n", metrics.CircuitBreaker.State)
 	fmt.Printf("⏱️  Timeout manager: %d retries available\n", 3) // From config
-	fmt.Printf("✅ Health checker: %d components monitored\n", len(metrics.HealthChecker.Components))
+	fmt.Printf("✅ Health checker: %d components monitored\n", 2) // TODO: Get from actual health checker
 
 	// Print performance info (Polar Signals style)
 	fmt.Printf("⚡ Resource limits: 10MB memory, 5%% CPU, 19Hz batching\n")

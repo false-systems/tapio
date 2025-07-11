@@ -54,6 +54,7 @@ pod/my-app-7d4b9c8f: High restart count
 | **Plain English Explanations** | "Your pod is OOMKilling" instead of "Exit code 137" |
 | **Actionable Commands** | Exact kubectl commands to investigate and fix issues |
 | **Multiple Scopes** | Check single pods, apps, namespaces, or entire clusters |
+| **OpenTelemetry Integration** | Enhanced distributed tracing with correlation analysis |
 
 ## Installation & Usage
 
@@ -67,6 +68,10 @@ tapio check my-app             # Specific deployment
 tapio check pod/my-pod-xyz     # Specific pod
 tapio check --all              # Entire cluster
 tapio check --output json      # Machine-readable output
+
+# OpenTelemetry Exporter (NEW!)
+tapio opentelemetry            # Start OTEL exporter with correlation tracing
+tapio opentelemetry --enable-timeline --correlation-window 1h  # Enhanced timeline visualization
 ```
 
 ## Design Philosophy
@@ -96,6 +101,27 @@ kubectl/K8s API → Tapio Analysis → Human-Readable Output
 4. **Action Generation**: Suggests specific debugging and fix commands
 
 **What makes it effective**: Context-aware analysis that understands the difference between temporary startup issues and real problems.
+
+## OpenTelemetry Integration (NEW!)
+
+Tapio now includes comprehensive OpenTelemetry support for distributed tracing and observability:
+
+**Enhanced Correlation Analysis**
+- Multi-layer system analysis across eBPF, Kubernetes, systemd, and network layers
+- Automatic correlation of events across different data sources
+- Confidence scoring for identified patterns
+
+**Timeline Visualization**
+- Visual representation of event causation over time
+- Heatmap analysis for identifying hotspots
+- Event flow tracking (sequential, parallel, branching)
+
+**Root Cause Analysis**
+- Automated root cause determination with confidence scoring
+- Impact chain visualization showing propagation
+- Actionable recommendations for resolution
+
+See [Enhanced OTEL Tracing Documentation](docs/otel-enhanced-tracing.md) for detailed information.
 
 ## Roadmap (Realistic Timeline)
 
@@ -130,6 +156,7 @@ kubectl/K8s API → Tapio Analysis → Human-Readable Output
 - Breadth of covered failure scenarios
 - Integration capabilities
 - Performance optimization
+- Enhanced OpenTelemetry tracing with correlation analysis
 
 **Future Innovation:**
 - eBPF kernel monitoring

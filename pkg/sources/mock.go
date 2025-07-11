@@ -62,14 +62,14 @@ func (s *MockSource) Stop(ctx context.Context) error {
 }
 
 // Collect gathers mock data
-func (s *MockSource) Collect(ctx context.Context, targets []Target) (DataSet, error) {
+func (s *MockSource) Collect(ctx context.Context, targets []collectors.Target) (collectors.DataSet, error) {
 	if !s.started {
-		return DataSet{}, fmt.Errorf("mock source not started")
+		return collectors.DataSet{}, fmt.Errorf("mock source not started")
 	}
 
 	dataset, err := s.collector.Collect(ctx, targets)
 	if err != nil {
-		return DataSet{}, fmt.Errorf("failed to collect mock data: %w", err)
+		return collectors.DataSet{}, fmt.Errorf("failed to collect mock data: %w", err)
 	}
 
 	dataset.Source = s.name
@@ -77,7 +77,7 @@ func (s *MockSource) Collect(ctx context.Context, targets []Target) (DataSet, er
 }
 
 // SupportsTarget checks if mock source can monitor the given target
-func (s *MockSource) SupportsTarget(target Target) bool {
+func (s *MockSource) SupportsTarget(target collectors.Target) bool {
 	// Mock source supports all target types
 	return true
 }
@@ -93,8 +93,8 @@ func (s *MockSource) GetAvailableScenarios() []string {
 }
 
 // CreateTestTarget creates a test target for the given type
-func (s *MockSource) CreateTestTarget(targetType, name string) Target {
-	target := Target{
+func (s *MockSource) CreateTestTarget(targetType, name string) collectors.Target {
+	target := collectors.Target{
 		Type:   targetType,
 		Name:   name,
 		Labels: make(map[string]string),
@@ -132,8 +132,8 @@ func (s *MockSource) CreateTestTarget(targetType, name string) Target {
 }
 
 // CreateTestTargets creates multiple test targets
-func (s *MockSource) CreateTestTargets(count int) []Target {
-	targets := make([]Target, 0, count)
+func (s *MockSource) CreateTestTargets(count int) []collectors.Target {
+	targets := make([]collectors.Target, 0, count)
 
 	targetTypes := []string{"pod", "container", "process", "service"}
 
@@ -148,27 +148,27 @@ func (s *MockSource) CreateTestTargets(count int) []Target {
 }
 
 // SimulateStressScenario simulates a high-load scenario
-func (s *MockSource) SimulateStressScenario(ctx context.Context, targets []Target) (DataSet, error) {
+func (s *MockSource) SimulateStressScenario(ctx context.Context, targets []collectors.Target) (collectors.DataSet, error) {
 	if err := s.SetScenario("high_memory"); err != nil {
-		return DataSet{}, err
+		return collectors.DataSet{}, err
 	}
 
 	return s.Collect(ctx, targets)
 }
 
 // SimulateHealthyScenario simulates a healthy system scenario
-func (s *MockSource) SimulateHealthyScenario(ctx context.Context, targets []Target) (DataSet, error) {
+func (s *MockSource) SimulateHealthyScenario(ctx context.Context, targets []collectors.Target) (collectors.DataSet, error) {
 	if err := s.SetScenario("healthy"); err != nil {
-		return DataSet{}, err
+		return collectors.DataSet{}, err
 	}
 
 	return s.Collect(ctx, targets)
 }
 
 // SimulateFailureScenario simulates a system failure scenario
-func (s *MockSource) SimulateFailureScenario(ctx context.Context, targets []Target) (DataSet, error) {
+func (s *MockSource) SimulateFailureScenario(ctx context.Context, targets []collectors.Target) (collectors.DataSet, error) {
 	if err := s.SetScenario("oom_killer"); err != nil {
-		return DataSet{}, err
+		return collectors.DataSet{}, err
 	}
 
 	return s.Collect(ctx, targets)
