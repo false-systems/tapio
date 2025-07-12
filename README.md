@@ -1,211 +1,173 @@
 # Tapio 🌲
-**Making Kubernetes debugging actually make sense**
 
-Named after Tapio, the Finnish forest god, because debugging Kubernetes clusters shouldn't require divine intervention.
+> **Work in Progress** - A simple Kubernetes debugging tool
 
----
+Tapio is being developed to make Kubernetes debugging more accessible. Currently in early development with basic functionality working.
 
-## Why This Exists
+## What Works Today
 
-We got tired of running `kubectl describe pod` and staring at 50 lines of YAML, wondering "What does this actually mean?"
-
-Tapio bridges that gap—turning Kubernetes complexity into something humans can actually understand and act on.
-
-## What It Does (Right Now)
-
-**Simple premise**: Run one command, get clear answers about your cluster health.
-
+### Basic Commands
 ```bash
+# Check the health of your Kubernetes resources
 tapio check
+
+# Export metrics for Prometheus
+tapio prometheus --port 8080
+
+# Show version information
+tapio version
 ```
 
-**What you get:**
-- Plain English explanations of pod problems
-- Actionable fix suggestions with exact commands
-- Pattern recognition for common issues (restart loops, resource pressure)
-- Zero configuration—works with your existing kubectl setup
+### Current Features
+- ✅ **Simple Health Checks** - Basic analysis of pods and deployments
+- ✅ **Kubernetes Integration** - Works with your existing kubeconfig
+- ✅ **Prometheus Metrics** - Exports health metrics for monitoring
+- ✅ **Clean CLI** - Human-readable output, no configuration required
 
-**Example:**
+## Installation
+
+### Prerequisites
+- Kubernetes cluster access (if `kubectl get pods` works, Tapio will work)
+- Go 1.21+ (for building from source)
+
+### Build from Source
 ```bash
-$ tapio check my-app
-
-ANALYSIS: my-app has issues that need attention
-
-pod/my-app-7d4b9c8f: High restart count
-  Container 'api' restarted 8 times in last hour
-  Pattern: Consistent OOMKilled events
-  
-  Likely cause: Memory limit (256Mi) too low for workload
-  
-  Next steps:
-  [1] kubectl logs my-app-7d4b9c8f --previous  # Check what caused the crash
-  [2] kubectl top pod my-app-7d4b9c8f          # See current memory usage
-  
-  Suggested fix:
-  kubectl patch deployment my-app -p '{"spec":{"template":{"spec":{"containers":[{"name":"api","resources":{"limits":{"memory":"512Mi"}}}]}}}}'
+git clone https://github.com/your-org/tapio
+cd tapio
+make build
+./bin/tapio check
 ```
 
-## Current Capabilities
-
-| What it does | How it helps |
-|-------------|-------------|
-| **Health Analysis** | Quickly spot problematic pods across your cluster |
-| **Pattern Recognition** | Identify restart loops, resource pressure, stuck pods |
-| **Plain English Explanations** | "Your pod is OOMKilling" instead of "Exit code 137" |
-| **Actionable Commands** | Exact kubectl commands to investigate and fix issues |
-| **Multiple Scopes** | Check single pods, apps, namespaces, or entire clusters |
-| **OpenTelemetry Integration** | Enhanced distributed tracing with correlation analysis |
-
-## Installation & Usage
+## Example Output
 
 ```bash
-# Install
-go install github.com/yairfalse/tapio/cmd/tapio@latest
+$ tapio check
+HEALTHY: 3 pods running normally
+WARNING: 1 pod has resource issues
+  - api-service: Memory usage at 85% of limit
 
-# Use
-tapio check                    # Current namespace
-tapio check my-app             # Specific deployment  
-tapio check pod/my-pod-xyz     # Specific pod
-tapio check --all              # Entire cluster
-tapio check --output json      # Machine-readable output
-
-# OpenTelemetry Exporter (NEW!)
-tapio opentelemetry            # Start OTEL exporter with correlation tracing
-tapio opentelemetry --enable-timeline --correlation-window 1h  # Enhanced timeline visualization
+READY: 2/3 deployments fully available
 ```
 
-## Design Philosophy
+## Planned Features (Work in Progress)
 
-**1. Clear Goals**
-We're building the debugging tool we wish we had during those 3 AM incidents.
+We're working on adding more advanced capabilities:
 
-**2. Human First**
-If you need a manual to understand the output, we failed. Clear beats clever.
+- 🚧 **eBPF Integration** - Kernel-level insights for deeper debugging
+- 🚧 **Advanced Correlation** - Connect Kubernetes events with system behavior  
+- 🚧 **Predictive Analysis** - Early warning for potential issues
+- 🚧 **Multi-layer Monitoring** - System, network, and application insights
 
-**3. Action Oriented**
-Don't just tell someone their pod is broken—tell them exactly how to fix it.
+## Architecture
 
-**4. Real Solutions First**
-We focus on building something genuinely useful today while working toward bigger goals.
+Tapio is built with a modular architecture:
 
-## How It Works
-
-**Current Architecture (v0.x):**
 ```
-kubectl/K8s API → Tapio Analysis → Human-Readable Output
+tapio/
+├── cmd/tapio/          # CLI entry point
+├── pkg/
+│   ├── k8s/           # Kubernetes client integration
+│   ├── simple/        # Basic health checking
+│   ├── metrics/       # Prometheus metrics
+│   └── ebpf/          # eBPF framework (in development)
+└── deploy/helm/       # Kubernetes deployment
 ```
-
-1. **Data Collection**: Uses your existing kubeconfig to fetch pod, deployment, and event data
-2. **Pattern Analysis**: Applies intelligent heuristics to identify common failure patterns
-3. **Human Translation**: Converts technical states into clear explanations
-4. **Action Generation**: Suggests specific debugging and fix commands
-
-**What makes it effective**: Context-aware analysis that understands the difference between temporary startup issues and real problems.
-
-## OpenTelemetry Integration (NEW!)
-
-Tapio now includes comprehensive OpenTelemetry support for distributed tracing and observability:
-
-**Enhanced Correlation Analysis**
-- Multi-layer system analysis across eBPF, Kubernetes, systemd, and network layers
-- Automatic correlation of events across different data sources
-- Confidence scoring for identified patterns
-
-**Timeline Visualization**
-- Visual representation of event causation over time
-- Heatmap analysis for identifying hotspots
-- Event flow tracking (sequential, parallel, branching)
-
-**Root Cause Analysis**
-- Automated root cause determination with confidence scoring
-- Impact chain visualization showing propagation
-- Actionable recommendations for resolution
-
-See [Enhanced OTEL Tracing Documentation](docs/otel-enhanced-tracing.md) for detailed information.
-
-## Roadmap (Realistic Timeline)
-
-**Near Term (Next 3-6 months):**
-- [ ] Enhanced pattern recognition for complex scenarios
-- [ ] Improved resource usage analysis and trending
-- [ ] Advanced troubleshooting workflows
-- [ ] Performance optimizations for large clusters
-
-**Medium Term (6-12 months):**
-- [ ] eBPF integration for kernel-level insights
-- [ ] Predictive analysis based on resource trends
-- [ ] Network connectivity debugging
-- [ ] Integration with monitoring ecosystems
-
-**Long Term (Vision):**
-- [ ] Intelligent failure prediction with confidence scoring
-- [ ] Automated remediation suggestions
-- [ ] Multi-cluster support and federation
-- [ ] Advanced correlation analysis across systems
 
 ## Development Status
 
-**Production Ready:**
-- Core Kubernetes analysis engine
-- CLI interface and output formatting  
-- Pattern recognition for common issues
-- Zero-config setup and operation
+### Completed Components
+- [x] CLI framework with Cobra
+- [x] Kubernetes API integration
+- [x] Basic health analysis
+- [x] Prometheus metrics export
+- [x] Helm deployment charts
+- [x] Cross-platform builds
 
-**Actively Developing:**
-- Sophistication of analysis algorithms
-- Breadth of covered failure scenarios
-- Integration capabilities
-- Performance optimization
-- Enhanced OpenTelemetry tracing with correlation analysis
-
-**Future Innovation:**
-- eBPF kernel monitoring
-- Machine learning predictions
-- Auto-healing capabilities
+### In Development
+- [ ] eBPF-based system monitoring
+- [ ] Advanced correlation engine
+- [ ] systemd integration
+- [ ] Network monitoring
+- [ ] Performance optimization
 
 ## Contributing
 
-We welcome contributions that help achieve our mission:
+This is an early-stage project and we welcome contributions! Areas where help is especially appreciated:
 
-- **Enhanced Analysis**: Help us identify and handle more failure patterns
-- **Better Communication**: Improve how we translate technical states to human language  
-- **Robustness**: Make the tool work reliably across different cluster configurations
-- **Documentation**: Help others understand and effectively use the tool
+- Testing on different Kubernetes distributions
+- eBPF program development
+- Documentation improvements
+- Feature suggestions and bug reports
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+### Development Setup
+```bash
+# Install development tools
+make setup
 
-## Positioning
+# Run tests
+make test
 
-**Is this production-ready?** For Kubernetes health analysis and debugging, absolutely. For advanced features like eBPF monitoring, we're building toward that.
+# Build and test locally
+make build
+./bin/tapio check
+```
 
-**Does this replace monitoring tools?** No. This complements your monitoring stack by focusing on debugging workflows and incident response.
+## Configuration
 
-**Why another Kubernetes tool?** Because `kubectl describe` output is still cryptic to most people, and we believe debugging should be accessible to everyone.
+Tapio works with zero configuration by default. It uses your existing Kubernetes configuration from:
+- `~/.kube/config`
+- `KUBECONFIG` environment variable  
+- In-cluster service account (when running as a pod)
 
-**What's the Finnish forest connection?** Kubernetes clusters are complex ecosystems that need understanding and protection. Plus, memorable names help projects succeed (see: Kubernetes, Grafana, Apache Kafka).
+## Deployment
 
-## Similar Tools & Ecosystem
+### Kubernetes Deployment
+```bash
+# Deploy as a DaemonSet for cluster-wide monitoring
+helm install tapio ./deploy/helm/tapio
 
-We build on the shoulders of giants and respect excellent work in this space:
-- [kubectl describe](https://kubernetes.io/docs/reference/kubectl/kubectl-commands/#describe) - The foundation we're making more accessible
-- [kubectx/kubens](https://github.com/ahmetb/kubectx) - Essential cluster navigation
-- [k9s](https://github.com/derailed/k9s) - Powerful terminal UI for cluster management
-- [kubectl-debug](https://github.com/aylei/kubectl-debug) - Advanced debugging capabilities
+# Or run locally
+./bin/tapio check --all-namespaces
+```
 
-Tapio occupies the space between "basic kubectl commands" and "comprehensive monitoring platforms"—making debugging accessible without complex infrastructure.
+## Roadmap
+
+### Short Term (Current Focus)
+- Improve health analysis accuracy
+- Add more Kubernetes resource types
+- Enhanced error messages and debugging
+
+### Medium Term
+- eBPF integration for system-level insights
+- Advanced correlation between K8s and system events
+- Performance monitoring and predictions
+
+### Long Term
+- Machine learning for anomaly detection
+- Integration with popular monitoring stacks
+- Multi-cluster support
+
+## Why Tapio?
+
+Kubernetes debugging often requires deep expertise and multiple tools. Tapio aims to:
+
+- **Simplify** - One command to understand what's wrong
+- **Explain** - Clear, human-readable explanations
+- **Predict** - Catch issues before they become problems
+- **Integrate** - Work with existing tools and workflows
+
+Named after the Finnish forest god, representing the deep roots needed to understand complex systems.
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/your-org/tapio/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/tapio/discussions)
+- **Documentation**: [Wiki](https://github.com/your-org/tapio/wiki)
+
 ---
 
-**Current Reality**: Genuinely useful for everyday Kubernetes debugging and incident response.
-
-**Development Philosophy**: Ship useful software today while building toward transformative capabilities.
-
-**Project Approach**: Focused team solving real problems with clear technical vision and practical execution.
-
-Give it a try. If it saves you time during your next debugging session, we've delivered value.
-
-[⭐ Star if useful](https://github.com/yairfalse/tapio) | [🐛 Report issues](https://github.com/yairfalse/tapio/issues) | [💬 Discuss ideas](https://github.com/yairfalse/tapio/discussions)
+**Note**: This project is in active development. APIs and commands may change as we iterate toward v1.0. We appreciate your patience and feedback!
