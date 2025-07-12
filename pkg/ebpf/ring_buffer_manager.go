@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf/ringbuf"
-	"github.com/falseyair/tapio/pkg/performance"
+	"github.com/yairfalse/tapio/pkg/performance"
 )
 
 // RingBufferManager manages multiple eBPF ring buffers for event collection
