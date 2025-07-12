@@ -76,8 +76,10 @@ func getContainerMemoryUsage(pod v1.Pod, containerName string, k8sData *correlat
 	if k8sData.Metrics != nil {
 		key := pod.Namespace + "/" + pod.Name + "/" + containerName
 		if metric, ok := k8sData.Metrics[key]; ok {
-			if memBytes, ok := metric["memory_usage_bytes"].(float64); ok {
-				return uint64(memBytes)
+			if metricMap, ok := metric.(map[string]interface{}); ok {
+				if memBytes, ok := metricMap["memory_usage_bytes"].(float64); ok {
+					return uint64(memBytes)
+				}
 			}
 		}
 	}
@@ -112,21 +114,22 @@ func findPodByPID(k8sData *correlation.KubernetesData, pid uint32) *v1.Pod {
 	// In a real implementation, this would map PIDs to pods
 	// This requires integration with container runtime or eBPF data
 
-	// For now, check if eBPF data has container info
-	if k8sData.EBPFData != nil {
-		for _, memStat := range k8sData.EBPFData.MemoryStats {
-			if memStat.PID == pid && memStat.ContainerID != "" {
-				// Find pod by container ID
-				for i, pod := range k8sData.Pods {
-					for _, status := range pod.Status.ContainerStatuses {
-						if strings.Contains(status.ContainerID, memStat.ContainerID) {
-							return &k8sData.Pods[i]
-						}
-					}
-				}
-			}
-		}
-	}
+	// For now, return nil - real implementation would use container runtime integration
+	// This would require eBPF data integration or container runtime queries
+	// if ebpfData := getEBPFData(); ebpfData != nil {
+	//	for _, memStat := range ebpfData.MemoryStats {
+	//		if memStat.PID == pid && memStat.ContainerID != "" {
+	//			// Find pod by container ID
+	//			for i, pod := range k8sData.Pods {
+	//				for _, status := range pod.Status.ContainerStatuses {
+	//					if strings.Contains(status.ContainerID, memStat.ContainerID) {
+	//						return &k8sData.Pods[i]
+	//					}
+	//				}
+	//			}
+	//		}
+	//	}
+	// }
 
 	return nil
 }
@@ -169,11 +172,12 @@ func isAdmissionWebhook(pod types.PodInfo) bool {
 	}
 
 	// Check for admission webhook annotations
-	for key := range pod.Annotations {
-		if strings.Contains(key, "admission") || strings.Contains(key, "webhook") {
-			return true
-		}
-	}
+	// TODO: Add support for pod annotations when types.PodInfo is extended
+	// for key := range pod.Annotations {
+	//	if strings.Contains(key, "admission") || strings.Contains(key, "webhook") {
+	//		return true
+	//	}
+	// }
 
 	// Check service names
 	for _, container := range pod.Spec.Containers {
@@ -213,8 +217,8 @@ func getPodCertificateExpiry(pod types.PodInfo, k8sData *correlation.KubernetesD
 	return "", false
 }
 
-// isCloudControllerPod checks if a pod is a cloud-controller-manager instance
-func isCloudControllerPod(pod types.PodInfo) bool {
+// isCloudControllerPodHelper checks if a pod is a cloud-controller-manager instance (helper version)
+func isCloudControllerPodHelper(pod types.PodInfo) bool {
 	// Check by label
 	if component, ok := pod.Labels["component"]; ok && component == "cloud-controller-manager" {
 		return true

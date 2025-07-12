@@ -6,12 +6,7 @@ import (
 	"strings"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
-
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // ETCDCascadeRule detects etcd cascading failures that affect the entire control plane
@@ -242,33 +237,9 @@ func (r *ETCDCascadeRule) checkETCDMemory(k8sData *correlation.KubernetesData, w
 		}
 	}
 
-	// Check eBPF data for more accurate memory stats
-	if k8sData.EBPFData != nil {
-		for _, memStat := range k8sData.EBPFData.MemoryStats {
-			// Match process to etcd
-			if strings.Contains(memStat.Command, "etcd") {
-				// Convert to percentage if we have container info
-				pod := findPodByPID(k8sData, memStat.PID)
-				if pod != nil && isETCDPod(pod) {
-					limit := getContainerMemoryLimit(pod, "etcd")
-					if limit > 0 {
-						usagePercent := (float64(memStat.CurrentUsage) / float64(limit)) * 100
-						if usagePercent >= r.config.MemoryThreshold {
-							issues = append(issues, etcdMemoryIssue{
-								PodName:      pod.Name,
-								Namespace:    pod.Namespace,
-								MemoryUsage:  memStat.CurrentUsage,
-								MemoryLimit:  limit,
-								UsagePercent: usagePercent,
-								Timestamp:    time.Now(),
-								HasEBPFData:  true,
-							})
-						}
-					}
-				}
-			}
-		}
-	}
+	// TODO: Check eBPF data for more accurate memory stats
+	// This would require integration with eBPF monitoring system
+	// Future enhancement: Add real-time memory monitoring via eBPF
 
 	return issues
 }

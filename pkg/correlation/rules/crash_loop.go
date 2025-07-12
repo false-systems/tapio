@@ -447,8 +447,8 @@ func (r *CrashLoopRule) createCrashLoopFinding(podName, podNamespace string, ana
 	)
 
 	// Add resource reference
-	finding.Resource = &correlation.ResourceReference{
-		Kind:      "Pod",
+	finding.Resource = correlation.ResourceInfo{
+		Type:      "Pod",
 		Name:      podName,
 		Namespace: podNamespace,
 	}
