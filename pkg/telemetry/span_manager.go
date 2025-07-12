@@ -8,10 +8,18 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/yairfalse/tapio/pkg/resilience"
 )
+
+// SpanEvent represents an event that occurred during a span
+type SpanEvent struct {
+	Name       string
+	Attributes []attribute.KeyValue
+	Time       time.Time
+}
 
 // SpanManager handles span creation, lifecycle, and export with full resilience
 type SpanManager struct {
@@ -61,7 +69,7 @@ type ManagedSpan struct {
 	id          string
 	startTime   time.Time
 	attributes  []attribute.KeyValue
-	events      []trace.Event
+	events      []SpanEvent
 	mu          sync.RWMutex
 	exported    bool
 	failed      bool
@@ -160,7 +168,7 @@ func NewSpanManager(exporter *OpenTelemetryExporter, config SpanManagerConfig) (
 		New: func() interface{} {
 			return &ManagedSpan{
 				attributes: make([]attribute.KeyValue, 0, 10),
-				events:     make([]trace.Event, 0, 5),
+				events:     make([]SpanEvent, 0, 5),
 			}
 		},
 	}
@@ -223,7 +231,7 @@ func (sm *SpanManager) CreateSpan(ctx context.Context, name string, opts ...trac
 		managedSpan.failed = false
 
 		// Create the actual OpenTelemetry span
-		ctx, span := sm.exporter.tracer.Start(ctx, name, opts...)
+		_, span := sm.exporter.tracer.Start(ctx, name, opts...)
 		managedSpan.Span = span
 
 		// Store in active spans
@@ -341,22 +349,22 @@ func (ms *ManagedSpan) AddEvent(name string, attrs ...attribute.KeyValue) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
-	event := trace.Event{
+	event := SpanEvent{
 		Name:       name,
 		Attributes: attrs,
 		Time:       time.Now(),
 	}
 
 	ms.events = append(ms.events, event)
-	ms.AddEvent(name, trace.WithAttributes(attrs...))
+	ms.Span.AddEvent(name, trace.WithAttributes(attrs...))
 }
 
 // SetStatus sets the status of the managed span
-func (ms *ManagedSpan) SetStatus(code trace.Status, description string) {
+func (ms *ManagedSpan) SetStatus(code codes.Code, description string) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
-	ms.SetStatus(code, description)
+	ms.Span.SetStatus(code, description)
 }
 
 // ExportBatch exports a batch of spans with circuit breaker protection

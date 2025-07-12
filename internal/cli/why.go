@@ -153,7 +153,7 @@ func runWhy(cmd *cobra.Command, args []string) error {
 // outputUniversalExplanation outputs the explanation using universal data format
 func outputUniversalExplanation(ctx context.Context, explanation *types.Explanation, problems []types.Problem, checker *simple.Checker) error {
 	// Create converters
-	correlationConverter := converters.NewCorrelationConverter()
+	correlationConverter := converters.NewCorrelationConverter("cli", "1.0")
 
 	// Create CLI formatter
 	cliFormatter := formatters.NewCLIFormatter(&formatters.CLIConfig{
@@ -186,8 +186,8 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 				Description: problem.Description,
 				Severity:    convertSeverity(problem.Severity),
 				Confidence:  problem.Prediction.Confidence,
-				Resource: &correlation.ResourceReference{
-					Kind:      explanation.Resource.Kind,
+				Resource: correlation.ResourceInfo{
+					Type:      explanation.Resource.Kind,
 					Name:      explanation.Resource.Name,
 					Namespace: explanation.Resource.Namespace,
 				},
@@ -201,7 +201,7 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 			// Convert to universal prediction
 			pred, err := correlationConverter.ConvertFinding(finding)
 			if err == nil {
-				dataset.Predictions = append(dataset.Predictions, pred)
+				dataset.Predictions = append(dataset.Predictions, *pred)
 			}
 		}
 	}
@@ -259,8 +259,8 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 		if rc.RestartPattern != "" {
 			fmt.Printf("   Restart Pattern: %s\n", rc.RestartPattern)
 		}
-		if rc.ContainerRuntime != "" {
-			fmt.Printf("   Container Runtime: %s\n", rc.ContainerRuntime)
+		if len(rc.ErrorPatterns) > 0 {
+			fmt.Printf("   Error Patterns: %v\n", rc.ErrorPatterns)
 		}
 	}
 
