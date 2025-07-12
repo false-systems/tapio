@@ -379,8 +379,8 @@ func (r *OOMPredictionRule) createOOMFinding(podName, podNamespace string, analy
 	)
 
 	// Add resource reference
-	finding.Resource = &correlation.ResourceReference{
-		Kind:      "Pod",
+	finding.Resource = correlation.ResourceInfo{
+		Type:      "Pod",
 		Name:      podName,
 		Namespace: podNamespace,
 	}

@@ -468,8 +468,8 @@ func (r *DiskPressureRule) createDiskPressureFinding(resourceName, resourceNames
 	)
 
 	// Add resource reference
-	finding.Resource = &correlation.ResourceReference{
-		Kind:      resourceKind,
+	finding.Resource = correlation.ResourceInfo{
+		Type:      resourceKind,
 		Name:      resourceName,
 		Namespace: resourceNamespace,
 	}
