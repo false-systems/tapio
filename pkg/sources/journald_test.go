@@ -13,7 +13,7 @@ import (
 
 func TestDefaultJournaldConfig(t *testing.T) {
 	config := DefaultJournaldConfig()
-	
+
 	assert.NotNil(t, config)
 	assert.NotEmpty(t, config.MonitoredServices)
 	assert.NotEmpty(t, config.LogLevels)
@@ -39,13 +39,13 @@ func TestNewJournaldSource(t *testing.T) {
 
 	// Test with custom config
 	customConfig := &JournaldConfig{
-		MonitoredServices:   []string{"test-service"},
-		LogLevels:          []string{"error"},
+		MonitoredServices:    []string{"test-service"},
+		LogLevels:            []string{"error"},
 		EnableClassification: false,
-		EventBufferSize:    1000,
-		ReadBatchSize:      100,
-		ReadTimeout:        500 * time.Millisecond,
-		MaxEventsPerSecond: 5000,
+		EventBufferSize:      1000,
+		ReadBatchSize:        100,
+		ReadTimeout:          500 * time.Millisecond,
+		MaxEventsPerSecond:   5000,
 	}
 
 	source2, err := NewJournaldSource(customConfig)
@@ -58,14 +58,14 @@ func TestNewJournaldSource(t *testing.T) {
 func TestJournaldSource_GetType(t *testing.T) {
 	source, err := NewJournaldSource(nil)
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, correlation.SourceJournald, source.GetType())
 }
 
 func TestJournaldSource_IsAvailable(t *testing.T) {
 	source, err := NewJournaldSource(nil)
 	require.NoError(t, err)
-	
+
 	// Should not be available when not started
 	assert.False(t, source.IsAvailable())
 }
@@ -73,16 +73,16 @@ func TestJournaldSource_IsAvailable(t *testing.T) {
 func TestJournaldSource_StartStop(t *testing.T) {
 	config := &JournaldConfig{
 		MonitoredServices:    []string{"test"},
-		LogLevels:           []string{"info"},
+		LogLevels:            []string{"info"},
 		EnableClassification: false,
-		EventBufferSize:     100,
-		ReadBatchSize:       10,
-		ReadTimeout:         100 * time.Millisecond,
-		MaxEventsPerSecond:  1000,
-		JournalPath:         "/tmp/test-journal",
-		SeekToEnd:           true,
-		FollowMode:          false,
-		ReconnectInterval:   time.Second,
+		EventBufferSize:      100,
+		ReadBatchSize:        10,
+		ReadTimeout:          100 * time.Millisecond,
+		MaxEventsPerSecond:   1000,
+		JournalPath:          "/tmp/test-journal",
+		SeekToEnd:            true,
+		FollowMode:           false,
+		ReconnectInterval:    time.Second,
 	}
 
 	source, err := NewJournaldSource(config)
@@ -115,15 +115,15 @@ func TestJournaldSource_StartStop(t *testing.T) {
 func TestJournaldSource_Collect(t *testing.T) {
 	config := &JournaldConfig{
 		MonitoredServices:    []string{"test"},
-		LogLevels:           []string{"info"},
+		LogLevels:            []string{"info"},
 		EnableClassification: false,
-		EventBufferSize:     100,
-		ReadBatchSize:       10,
-		ReadTimeout:         50 * time.Millisecond,
-		MaxEventsPerSecond:  1000,
-		JournalPath:         "/tmp/test-journal",
-		SeekToEnd:           true,
-		FollowMode:          false,
+		EventBufferSize:      100,
+		ReadBatchSize:        10,
+		ReadTimeout:          50 * time.Millisecond,
+		MaxEventsPerSecond:   1000,
+		JournalPath:          "/tmp/test-journal",
+		SeekToEnd:            true,
+		FollowMode:           false,
 	}
 
 	source, err := NewJournaldSource(config)
@@ -144,7 +144,7 @@ func TestJournaldSource_Collect(t *testing.T) {
 	data, err := source.Collect()
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
-	
+
 	// Should be JournaldData type
 	journaldData, ok := data.(*correlation.JournaldData)
 	assert.True(t, ok)
@@ -157,13 +157,13 @@ func TestJournaldSource_Collect(t *testing.T) {
 func TestJournaldSource_GetData(t *testing.T) {
 	config := &JournaldConfig{
 		MonitoredServices:    []string{"docker", "kubelet"},
-		LogLevels:           []string{"error", "warning"},
+		LogLevels:            []string{"error", "warning"},
 		EnableClassification: true,
-		EventBufferSize:     100,
-		ReadBatchSize:       10,
-		ReadTimeout:         50 * time.Millisecond,
-		MaxEventsPerSecond:  1000,
-		JournalPath:         "/tmp/test-journal",
+		EventBufferSize:      100,
+		ReadBatchSize:        10,
+		ReadTimeout:          50 * time.Millisecond,
+		MaxEventsPerSecond:   1000,
+		JournalPath:          "/tmp/test-journal",
 	}
 
 	source, err := NewJournaldSource(config)
@@ -204,11 +204,11 @@ func TestJournaldSource_GetData(t *testing.T) {
 func TestJournaldSource_ServiceManagement(t *testing.T) {
 	config := &JournaldConfig{
 		MonitoredServices:  []string{"docker"},
-		EventBufferSize:   100,
-		ReadBatchSize:     10,
-		ReadTimeout:       50 * time.Millisecond,
+		EventBufferSize:    100,
+		ReadBatchSize:      10,
+		ReadTimeout:        50 * time.Millisecond,
 		MaxEventsPerSecond: 1000,
-		JournalPath:       "/tmp/test-journal",
+		JournalPath:        "/tmp/test-journal",
 	}
 
 	source, err := NewJournaldSource(config)
@@ -222,7 +222,7 @@ func TestJournaldSource_ServiceManagement(t *testing.T) {
 	// Add service
 	err = source.AddMonitoredService("kubelet")
 	assert.NoError(t, err)
-	
+
 	services = source.GetMonitoredServices()
 	assert.Contains(t, services, "docker")
 	assert.Contains(t, services, "kubelet")
@@ -231,14 +231,14 @@ func TestJournaldSource_ServiceManagement(t *testing.T) {
 	// Add duplicate service (should be safe)
 	err = source.AddMonitoredService("docker")
 	assert.NoError(t, err)
-	
+
 	services = source.GetMonitoredServices()
 	assert.Len(t, services, 2) // Should still be 2
 
 	// Remove service
 	err = source.RemoveMonitoredService("docker")
 	assert.NoError(t, err)
-	
+
 	services = source.GetMonitoredServices()
 	assert.NotContains(t, services, "docker")
 	assert.Contains(t, services, "kubelet")
@@ -252,11 +252,11 @@ func TestJournaldSource_ServiceManagement(t *testing.T) {
 func TestJournaldSource_EventChannel(t *testing.T) {
 	config := &JournaldConfig{
 		MonitoredServices:  []string{"test"},
-		EventBufferSize:   10,
-		ReadBatchSize:     5,
-		ReadTimeout:       50 * time.Millisecond,
+		EventBufferSize:    10,
+		ReadBatchSize:      5,
+		ReadTimeout:        50 * time.Millisecond,
 		MaxEventsPerSecond: 1000,
-		JournalPath:       "/tmp/test-journal",
+		JournalPath:        "/tmp/test-journal",
 	}
 
 	source, err := NewJournaldSource(config)
@@ -284,11 +284,11 @@ func TestJournaldSource_EventChannel(t *testing.T) {
 func TestJournaldSource_ConcurrentAccess(t *testing.T) {
 	config := &JournaldConfig{
 		MonitoredServices:  []string{"test"},
-		EventBufferSize:   100,
-		ReadBatchSize:     10,
-		ReadTimeout:       50 * time.Millisecond,
+		EventBufferSize:    100,
+		ReadBatchSize:      10,
+		ReadTimeout:        50 * time.Millisecond,
 		MaxEventsPerSecond: 1000,
-		JournalPath:       "/tmp/test-journal",
+		JournalPath:        "/tmp/test-journal",
 	}
 
 	source, err := NewJournaldSource(config)
@@ -301,7 +301,7 @@ func TestJournaldSource_ConcurrentAccess(t *testing.T) {
 
 	// Test concurrent service management
 	results := make(chan error, 10)
-	
+
 	for i := 0; i < 5; i++ {
 		go func(id int) {
 			serviceName := "service-" + string(rune(id))
@@ -309,7 +309,7 @@ func TestJournaldSource_ConcurrentAccess(t *testing.T) {
 			results <- err
 		}(i)
 	}
-	
+
 	for i := 0; i < 5; i++ {
 		go func() {
 			_, err := source.Collect()
@@ -339,12 +339,12 @@ func TestJournaldSource_Configuration(t *testing.T) {
 			name: "minimal valid config",
 			config: &JournaldConfig{
 				MonitoredServices:  []string{"test"},
-				LogLevels:         []string{"info"},
-				EventBufferSize:   100,
-				ReadBatchSize:     10,
-				ReadTimeout:       time.Second,
+				LogLevels:          []string{"info"},
+				EventBufferSize:    100,
+				ReadBatchSize:      10,
+				ReadTimeout:        time.Second,
 				MaxEventsPerSecond: 1000,
-				JournalPath:       "/tmp/test",
+				JournalPath:        "/tmp/test",
 			},
 			valid: true,
 		},
@@ -353,17 +353,17 @@ func TestJournaldSource_Configuration(t *testing.T) {
 			config: &JournaldConfig{
 				MonitoredServices:    []string{"docker", "kubelet"},
 				IgnoredServices:      []string{"cron"},
-				LogLevels:           []string{"error", "warning"},
-				ErrorPatterns:       []string{"error", "failed"},
-				WarningPatterns:     []string{"warning"},
+				LogLevels:            []string{"error", "warning"},
+				ErrorPatterns:        []string{"error", "failed"},
+				WarningPatterns:      []string{"warning"},
 				EnableClassification: true,
-				EventBufferSize:     1000,
-				ReadBatchSize:       100,
-				ReadTimeout:         2 * time.Second,
-				MaxEventsPerSecond:  5000,
-				JournalPath:         "/var/log/journal",
-				SeekToEnd:           true,
-				FollowMode:          true,
+				EventBufferSize:      1000,
+				ReadBatchSize:        100,
+				ReadTimeout:          2 * time.Second,
+				MaxEventsPerSecond:   5000,
+				JournalPath:          "/var/log/journal",
+				SeekToEnd:            true,
+				FollowMode:           true,
 			},
 			valid: true,
 		},
@@ -386,11 +386,11 @@ func TestJournaldSource_Configuration(t *testing.T) {
 func BenchmarkJournaldSource_Collect(b *testing.B) {
 	config := &JournaldConfig{
 		MonitoredServices:  []string{"test"},
-		EventBufferSize:   1000,
-		ReadBatchSize:     100,
-		ReadTimeout:       10 * time.Millisecond,
+		EventBufferSize:    1000,
+		ReadBatchSize:      100,
+		ReadTimeout:        10 * time.Millisecond,
 		MaxEventsPerSecond: 10000,
-		JournalPath:       "/tmp/bench-journal",
+		JournalPath:        "/tmp/bench-journal",
 	}
 
 	source, err := NewJournaldSource(config)
@@ -418,11 +418,11 @@ func BenchmarkJournaldSource_Collect(b *testing.B) {
 func BenchmarkJournaldSource_GetData(b *testing.B) {
 	config := &JournaldConfig{
 		MonitoredServices:  []string{"test"},
-		EventBufferSize:   1000,
-		ReadBatchSize:     100,
-		ReadTimeout:       10 * time.Millisecond,
+		EventBufferSize:    1000,
+		ReadBatchSize:      100,
+		ReadTimeout:        10 * time.Millisecond,
 		MaxEventsPerSecond: 10000,
-		JournalPath:       "/tmp/bench-journal",
+		JournalPath:        "/tmp/bench-journal",
 	}
 
 	source, err := NewJournaldSource(config)
@@ -450,11 +450,11 @@ func BenchmarkJournaldSource_GetData(b *testing.B) {
 func BenchmarkJournaldSource_ServiceManagement(b *testing.B) {
 	config := &JournaldConfig{
 		MonitoredServices:  []string{},
-		EventBufferSize:   100,
-		ReadBatchSize:     10,
-		ReadTimeout:       10 * time.Millisecond,
+		EventBufferSize:    100,
+		ReadBatchSize:      10,
+		ReadTimeout:        10 * time.Millisecond,
 		MaxEventsPerSecond: 1000,
-		JournalPath:       "/tmp/bench-journal",
+		JournalPath:        "/tmp/bench-journal",
 	}
 
 	source, err := NewJournaldSource(config)

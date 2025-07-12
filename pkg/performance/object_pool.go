@@ -11,22 +11,22 @@ import (
 type ObjectPool struct {
 	// Per-CPU pools for better cache locality
 	localPools []localPool
-	
+
 	// Global pool for overflow
 	globalPool *RingBuffer
-	
+
 	// Object factory
 	factory func() interface{}
 	reset   func(interface{})
-	
+
 	// Metrics
 	allocations atomic.Uint64
 	recycled    atomic.Uint64
 	inUse       atomic.Int64
-	
+
 	// Configuration
-	maxPerCPU   int
-	maxGlobal   int
+	maxPerCPU int
+	maxGlobal int
 }
 
 // localPool is a per-CPU pool
@@ -41,17 +41,17 @@ type localPool struct {
 
 // poolObject wraps an object with metadata
 type poolObject struct {
-	value     interface{}
-	lastUsed  int64
-	useCount  uint32
+	value    interface{}
+	lastUsed int64
+	useCount uint32
 }
 
 // ObjectPoolConfig configures the object pool
 type ObjectPoolConfig struct {
-	Factory    func() interface{}
-	Reset      func(interface{})
-	MaxPerCPU  int
-	MaxGlobal  int
+	Factory   func() interface{}
+	Reset     func(interface{})
+	MaxPerCPU int
+	MaxGlobal int
 }
 
 // NewObjectPool creates a new object pool
@@ -68,7 +68,7 @@ func NewObjectPool(config ObjectPoolConfig) (*ObjectPool, error) {
 
 	numCPU := runtime.GOMAXPROCS(0)
 	localPools := make([]localPool, numCPU)
-	
+
 	for i := range localPools {
 		localPools[i].objects = make([]*poolObject, config.MaxPerCPU)
 	}
@@ -76,7 +76,7 @@ func NewObjectPool(config ObjectPoolConfig) (*ObjectPool, error) {
 	globalCapacity := uint64(config.MaxGlobal)
 	// Ensure power of 2
 	globalCapacity = nextPowerOf2(globalCapacity)
-	
+
 	globalPool, err := NewRingBuffer(globalCapacity)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func (p *ObjectPool) Get() interface{} {
 	// Try local pool first
 	pid := runtime_procPin()
 	local := &p.localPools[pid]
-	
+
 	if local.size > 0 {
 		// Get from local pool
 		obj := local.objects[local.head]
@@ -105,19 +105,19 @@ func (p *ObjectPool) Get() interface{} {
 		local.head = (local.head + 1) % p.maxPerCPU
 		local.size--
 		runtime_procUnpin()
-		
+
 		p.inUse.Add(1)
 		return obj.value
 	}
 	runtime_procUnpin()
-	
+
 	// Try global pool
 	if ptr, err := p.globalPool.Get(); err == nil {
 		obj := (*poolObject)(ptr)
 		p.inUse.Add(1)
 		return obj.value
 	}
-	
+
 	// Create new object
 	p.allocations.Add(1)
 	p.inUse.Add(1)
@@ -129,43 +129,43 @@ func (p *ObjectPool) Put(obj interface{}) {
 	if obj == nil {
 		return
 	}
-	
+
 	// Reset object if reset function is provided
 	if p.reset != nil {
 		p.reset(obj)
 	}
-	
+
 	p.inUse.Add(-1)
-	
+
 	// Wrap in pool object
 	poolObj := &poolObject{
 		value:    obj,
 		lastUsed: nanotime(),
 		useCount: 1,
 	}
-	
+
 	// Try local pool first
 	pid := runtime_procPin()
 	local := &p.localPools[pid]
-	
+
 	if local.size < p.maxPerCPU {
 		// Add to local pool
 		local.objects[local.tail] = poolObj
 		local.tail = (local.tail + 1) % p.maxPerCPU
 		local.size++
 		runtime_procUnpin()
-		
+
 		p.recycled.Add(1)
 		return
 	}
 	runtime_procUnpin()
-	
+
 	// Try global pool
 	if p.globalPool.TryPut(unsafe.Pointer(poolObj)) {
 		p.recycled.Add(1)
 		return
 	}
-	
+
 	// Pool is full, let GC handle it
 }
 
@@ -175,25 +175,25 @@ func (p *ObjectPool) GetMetrics() ObjectPoolMetrics {
 	for i := range p.localPools {
 		localSize += p.localPools[i].size
 	}
-	
+
 	return ObjectPoolMetrics{
-		Allocations:  p.allocations.Load(),
-		Recycled:     p.recycled.Load(),
-		InUse:        p.inUse.Load(),
-		LocalSize:    localSize,
-		GlobalSize:   int(p.globalPool.Size()),
-		TotalSize:    localSize + int(p.globalPool.Size()),
+		Allocations: p.allocations.Load(),
+		Recycled:    p.recycled.Load(),
+		InUse:       p.inUse.Load(),
+		LocalSize:   localSize,
+		GlobalSize:  int(p.globalPool.Size()),
+		TotalSize:   localSize + int(p.globalPool.Size()),
 	}
 }
 
 // ObjectPoolMetrics contains pool metrics
 type ObjectPoolMetrics struct {
-	Allocations  uint64
-	Recycled     uint64
-	InUse        int64
-	LocalSize    int
-	GlobalSize   int
-	TotalSize    int
+	Allocations uint64
+	Recycled    uint64
+	InUse       int64
+	LocalSize   int
+	GlobalSize  int
+	TotalSize   int
 }
 
 // TypedPool is a type-safe wrapper around ObjectPool
@@ -217,11 +217,11 @@ func NewTypedPool[T any](factory func() *T, reset func(*T), maxPerCPU, maxGlobal
 		MaxPerCPU: maxPerCPU,
 		MaxGlobal: maxGlobal,
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &TypedPool[T]{
 		pool:    pool,
 		factory: factory,
@@ -263,7 +263,7 @@ func NewSlicePool(sizes ...int) *SlicePool {
 		pools: make(map[int]*sync.Pool),
 		sizes: sizes,
 	}
-	
+
 	for _, size := range sizes {
 		size := size // capture
 		sp.pools[size] = &sync.Pool{
@@ -272,7 +272,7 @@ func NewSlicePool(sizes ...int) *SlicePool {
 			},
 		}
 	}
-	
+
 	return sp
 }
 
@@ -280,7 +280,7 @@ func NewSlicePool(sizes ...int) *SlicePool {
 func (sp *SlicePool) Get(size int) []byte {
 	sp.mutex.RLock()
 	defer sp.mutex.RUnlock()
-	
+
 	// Find the smallest suitable size
 	bestSize := -1
 	for _, s := range sp.sizes {
@@ -288,14 +288,14 @@ func (sp *SlicePool) Get(size int) []byte {
 			bestSize = s
 		}
 	}
-	
+
 	if bestSize != -1 {
 		if pool, ok := sp.pools[bestSize]; ok {
 			slice := pool.Get().([]byte)
 			return slice[:size]
 		}
 	}
-	
+
 	// No suitable size, allocate new
 	return make([]byte, size)
 }
@@ -305,10 +305,10 @@ func (sp *SlicePool) Put(slice []byte) {
 	if slice == nil {
 		return
 	}
-	
+
 	sp.mutex.RLock()
 	defer sp.mutex.RUnlock()
-	
+
 	// Find matching pool by capacity
 	cap := cap(slice)
 	if pool, ok := sp.pools[cap]; ok {

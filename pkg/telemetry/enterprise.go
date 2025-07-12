@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-
 	"github.com/yairfalse/tapio/pkg/resilience"
 )
 
@@ -17,35 +16,35 @@ type EnterpriseServer struct {
 	exporter      *OpenTelemetryExporter
 	spanManager   *SpanManager
 	healthChecker *resilience.HealthChecker
-	
+
 	// HTTP server components
 	mux    *http.ServeMux
 	server *http.Server
-	
+
 	// Enterprise features
 	authenticator  Authenticator
 	rateLimiter    RateLimiter
 	accessLogger   AccessLogger
 	metricsHandler *MetricsHandler
-	
+
 	// Configuration
 	config EnterpriseConfig
 }
 
 // EnterpriseConfig configures the enterprise server
 type EnterpriseConfig struct {
-	ListenAddr      string
-	TLSEnabled      bool
-	CertFile        string
-	KeyFile         string
-	AuthEnabled     bool
-	RateLimitRPS    int
-	EnableMetrics   bool
-	EnableTraces    bool
-	CORS            CORSConfig
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
+	ListenAddr    string
+	TLSEnabled    bool
+	CertFile      string
+	KeyFile       string
+	AuthEnabled   bool
+	RateLimitRPS  int
+	EnableMetrics bool
+	EnableTraces  bool
+	CORS          CORSConfig
+	ReadTimeout   time.Duration
+	WriteTimeout  time.Duration
+	IdleTimeout   time.Duration
 }
 
 // CORSConfig configures CORS settings
@@ -105,7 +104,7 @@ func NewEnterpriseServer(exporter *OpenTelemetryExporter, spanManager *SpanManag
 	}
 
 	mux := http.NewServeMux()
-	
+
 	server := &http.Server{
 		Addr:         config.ListenAddr,
 		Handler:      mux,
@@ -128,7 +127,7 @@ func NewEnterpriseServer(exporter *OpenTelemetryExporter, spanManager *SpanManag
 
 	// Setup health checker for server endpoints
 	es.setupHealthChecker()
-	
+
 	// Register all endpoints
 	es.registerEndpoints()
 
@@ -161,7 +160,7 @@ func (es *EnterpriseServer) setupHealthChecker() {
 		HealthCheck: func(ctx context.Context) error {
 			metrics := es.spanManager.GetMetrics()
 			if metrics.SpansFailed > 0 && metrics.SpansFailed > metrics.SpansExported/10 {
-				return fmt.Errorf("high span failure rate: %d failed vs %d exported", 
+				return fmt.Errorf("high span failure rate: %d failed vs %d exported",
 					metrics.SpansFailed, metrics.SpansExported)
 			}
 			return nil
@@ -204,12 +203,12 @@ func (es *EnterpriseServer) registerEndpoints() {
 	es.mux.Handle("/health", http.HandlerFunc(es.handleHealth))
 	es.mux.Handle("/health/live", http.HandlerFunc(es.handleLiveness))
 	es.mux.Handle("/health/ready", http.HandlerFunc(es.handleReadiness))
-	
+
 	// Info and discovery endpoints
 	es.mux.Handle("/info", http.HandlerFunc(es.handleInfo))
 	es.mux.Handle("/status", http.HandlerFunc(es.handleStatus))
 	es.mux.Handle("/metrics/internal", http.HandlerFunc(es.handleInternalMetrics))
-	
+
 	// Configuration endpoints
 	es.mux.Handle("/config", es.applyMiddlewares(http.HandlerFunc(es.handleConfig), middlewares...))
 	es.mux.Handle("/endpoints", http.HandlerFunc(es.handleEndpoints))
@@ -235,7 +234,7 @@ func (es *EnterpriseServer) corsMiddleware(next http.Handler) http.Handler {
 		}
 
 		cors := es.config.CORS
-		
+
 		// Set CORS headers
 		if len(cors.AllowedOrigins) > 0 {
 			w.Header().Set("Access-Control-Allow-Origin", cors.AllowedOrigins[0])
@@ -315,9 +314,9 @@ func (es *EnterpriseServer) loggingMiddleware(next http.Handler) http.Handler {
 
 		start := time.Now()
 		wrapper := &responseWrapper{ResponseWriter: w, statusCode: 200}
-		
+
 		next.ServeHTTP(wrapper, r)
-		
+
 		es.accessLogger.Log(r, wrapper.statusCode, time.Since(start))
 	})
 }
@@ -329,7 +328,7 @@ func (es *EnterpriseServer) circuitBreakerMiddleware(next http.Handler) http.Han
 			http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		
+
 		// Execute the handler
 		next.ServeHTTP(w, r)
 		es.exporter.circuitBreaker.RecordSuccess()
@@ -344,11 +343,11 @@ func (es *EnterpriseServer) handleTraces(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/x-protobuf")
-	
+
 	// For now, acknowledge receipt
 	// In a full implementation, this would parse OTLP format and create spans
 	w.WriteHeader(http.StatusOK)
-	
+
 	// Create a span for the trace ingestion
 	span, err := es.spanManager.CreateSpan(r.Context(), "tapio.traces.ingest")
 	if err != nil {
@@ -356,7 +355,7 @@ func (es *EnterpriseServer) handleTraces(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer es.spanManager.FinishSpan(span)
-	
+
 	span.SetAttribute("http.method", r.Method)
 	span.SetAttribute("http.path", r.URL.Path)
 	span.SetAttribute("content.length", r.ContentLength)
@@ -371,7 +370,7 @@ func (es *EnterpriseServer) handleMetrics(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	w.WriteHeader(http.StatusOK)
-	
+
 	// Create a span for the metric ingestion
 	span, err := es.spanManager.CreateSpan(r.Context(), "tapio.metrics.ingest")
 	if err != nil {
@@ -379,7 +378,7 @@ func (es *EnterpriseServer) handleMetrics(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer es.spanManager.FinishSpan(span)
-	
+
 	span.SetAttribute("http.method", r.Method)
 	span.SetAttribute("http.path", r.URL.Path)
 }
@@ -388,7 +387,7 @@ func (es *EnterpriseServer) handleMetrics(w http.ResponseWriter, r *http.Request
 func (es *EnterpriseServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	results := es.healthChecker.CheckAll(r.Context())
 	overallStatus := es.healthChecker.GetStatus(r.Context())
-	
+
 	response := HealthResponse{
 		Status:    string(overallStatus),
 		Timestamp: time.Now(),
@@ -396,7 +395,7 @@ func (es *EnterpriseServer) handleHealth(w http.ResponseWriter, r *http.Request)
 		Version:   "1.0.0",
 		Checks:    make(map[string]CheckResult),
 	}
-	
+
 	for _, result := range results {
 		response.Checks[result.Name] = CheckResult{
 			Status:   string(result.Status),
@@ -405,15 +404,15 @@ func (es *EnterpriseServer) handleHealth(w http.ResponseWriter, r *http.Request)
 			Duration: result.Duration,
 		}
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	statusCode := http.StatusOK
 	if overallStatus != resilience.HealthStatusHealthy {
 		statusCode = http.StatusServiceUnavailable
 	}
 	w.WriteHeader(statusCode)
-	
+
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -422,7 +421,7 @@ func (es *EnterpriseServer) handleLiveness(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "alive",
+		"status":    "alive",
 		"timestamp": time.Now(),
 	})
 }
@@ -430,21 +429,21 @@ func (es *EnterpriseServer) handleLiveness(w http.ResponseWriter, r *http.Reques
 // handleReadiness handles Kubernetes readiness probe
 func (es *EnterpriseServer) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	status := es.healthChecker.GetStatus(r.Context())
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if status == resilience.HealthStatusHealthy {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "ready",
+			"status":    "ready",
 			"timestamp": time.Now(),
 		})
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "not ready",
+			"status":    "not ready",
 			"timestamp": time.Now(),
-			"reason": string(status),
+			"reason":    string(status),
 		})
 	}
 }
@@ -457,7 +456,7 @@ func (es *EnterpriseServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 		Description: "Tapio Kubernetes intelligence OpenTelemetry exporter",
 		Endpoints: []string{
 			"/v1/traces",
-			"/v1/metrics", 
+			"/v1/metrics",
 			"/health",
 			"/health/live",
 			"/health/ready",
@@ -471,11 +470,11 @@ func (es *EnterpriseServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 			CircuitBreaker: true,
 			RateLimiting:   es.rateLimiter != nil,
 			Authentication: es.config.AuthEnabled,
-			CORS:          es.config.CORS.Enabled,
-			TLS:           es.config.TLSEnabled,
+			CORS:           es.config.CORS.Enabled,
+			TLS:            es.config.TLSEnabled,
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(info)
@@ -485,18 +484,18 @@ func (es *EnterpriseServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 func (es *EnterpriseServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	exporterMetrics := es.exporter.GetMetrics()
 	spanMetrics := es.spanManager.GetMetrics()
-	
+
 	status := StatusResponse{
-		Timestamp: time.Now(),
-		Uptime:    time.Since(exporterMetrics.LastUpdateTime),
-		Exporter:  exporterMetrics,
+		Timestamp:   time.Now(),
+		Uptime:      time.Since(exporterMetrics.LastUpdateTime),
+		Exporter:    exporterMetrics,
 		SpanManager: spanMetrics,
 		CircuitBreaker: CircuitBreakerStatus{
-			State:       "closed", // simplified for now
+			State: "closed", // simplified for now
 			// Metrics:     nil, // simplified for now
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(status)
@@ -518,7 +517,7 @@ func (es *EnterpriseServer) handleConfig(w http.ResponseWriter, r *http.Request)
 		BatchSize:      es.exporter.config.BatchSize,
 		BatchTimeout:   es.exporter.config.BatchTimeout,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(config)
@@ -532,13 +531,13 @@ func (es *EnterpriseServer) handleEndpoints(w http.ResponseWriter, r *http.Reque
 			Metrics: fmt.Sprintf("http://%s/v1/metrics", es.config.ListenAddr),
 		},
 		Management: ManagementEndpoints{
-			Health:    fmt.Sprintf("http://%s/health", es.config.ListenAddr),
-			Info:      fmt.Sprintf("http://%s/info", es.config.ListenAddr),
-			Status:    fmt.Sprintf("http://%s/status", es.config.ListenAddr),
-			Metrics:   fmt.Sprintf("http://%s/metrics/internal", es.config.ListenAddr),
+			Health:  fmt.Sprintf("http://%s/health", es.config.ListenAddr),
+			Info:    fmt.Sprintf("http://%s/info", es.config.ListenAddr),
+			Status:  fmt.Sprintf("http://%s/status", es.config.ListenAddr),
+			Metrics: fmt.Sprintf("http://%s/metrics/internal", es.config.ListenAddr),
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(endpoints)
@@ -595,16 +594,16 @@ type Features struct {
 	CircuitBreaker bool `json:"circuit_breaker"`
 	RateLimiting   bool `json:"rate_limiting"`
 	Authentication bool `json:"authentication"`
-	CORS          bool `json:"cors"`
-	TLS           bool `json:"tls"`
+	CORS           bool `json:"cors"`
+	TLS            bool `json:"tls"`
 }
 
 type StatusResponse struct {
-	Timestamp      time.Time                      `json:"timestamp"`
-	Uptime         time.Duration                  `json:"uptime"`
-	Exporter       ExporterMetrics                `json:"exporter"`
-	SpanManager    SpanManagerMetrics             `json:"span_manager"`
-	CircuitBreaker CircuitBreakerStatus           `json:"circuit_breaker"`
+	Timestamp      time.Time            `json:"timestamp"`
+	Uptime         time.Duration        `json:"uptime"`
+	Exporter       ExporterMetrics      `json:"exporter"`
+	SpanManager    SpanManagerMetrics   `json:"span_manager"`
+	CircuitBreaker CircuitBreakerStatus `json:"circuit_breaker"`
 }
 
 type CircuitBreakerStatus struct {
@@ -683,27 +682,27 @@ func min(a, b int) int {
 func (mh *MetricsHandler) ServeMetrics(w http.ResponseWriter, r *http.Request) {
 	_ = mh.exporter.GetMetrics()
 	spanMetrics := mh.spanManager.GetMetrics()
-	
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	
+
 	// Export metrics in Prometheus format
 	fmt.Fprintf(w, "# HELP tapio_otel_spans_created_total Total number of spans created\n")
 	fmt.Fprintf(w, "# TYPE tapio_otel_spans_created_total counter\n")
 	fmt.Fprintf(w, "tapio_otel_spans_created_total %d\n", spanMetrics.SpansCreated)
-	
+
 	fmt.Fprintf(w, "# HELP tapio_otel_spans_exported_total Total number of spans exported\n")
 	fmt.Fprintf(w, "# TYPE tapio_otel_spans_exported_total counter\n")
 	fmt.Fprintf(w, "tapio_otel_spans_exported_total %d\n", spanMetrics.SpansExported)
-	
+
 	fmt.Fprintf(w, "# HELP tapio_otel_spans_failed_total Total number of spans failed\n")
 	fmt.Fprintf(w, "# TYPE tapio_otel_spans_failed_total counter\n")
 	fmt.Fprintf(w, "tapio_otel_spans_failed_total %d\n", spanMetrics.SpansFailed)
-	
+
 	fmt.Fprintf(w, "# HELP tapio_otel_active_spans Current number of active spans\n")
 	fmt.Fprintf(w, "# TYPE tapio_otel_active_spans gauge\n")
 	fmt.Fprintf(w, "tapio_otel_active_spans %d\n", spanMetrics.ActiveSpans)
-	
+
 	fmt.Fprintf(w, "# HELP tapio_otel_circuit_breaker_state Circuit breaker state (0=closed, 1=open, 2=half-open)\n")
 	fmt.Fprintf(w, "# TYPE tapio_otel_circuit_breaker_state gauge\n")
 	cbState := 0 // simplified for now (always closed)

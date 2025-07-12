@@ -24,7 +24,6 @@ const (
 	SourceNetwork    SourceType = "network"
 )
 
-
 // AnalysisData contains all the data needed for correlation analysis
 type AnalysisData struct {
 	KubernetesData *KubernetesData `json:"kubernetes_data,omitempty"`
@@ -51,19 +50,19 @@ type DataSource interface {
 
 // KubernetesData represents Kubernetes-specific data
 type KubernetesData struct {
-	Pods         []corev1.Pod                `json:"pods"`
-	Events       []corev1.Event              `json:"events"`
-	Deployments  []appsv1.Deployment         `json:"deployments"`
-	Jobs         []batchv1.Job               `json:"jobs"`
-	StatefulSets []appsv1.StatefulSet        `json:"statefulsets"`
-	DaemonSets   []appsv1.DaemonSet          `json:"daemonsets"`
-	ReplicaSets  []appsv1.ReplicaSet         `json:"replicasets"`
-	Services     []corev1.Service            `json:"services"`
-	Secrets      []corev1.Secret             `json:"secrets"`
-	Logs         map[string][]LogEntry       `json:"logs"`
-	Metrics      map[string]interface{}      `json:"metrics"`
-	Problems     []types.Problem             `json:"problems"`
-	Timestamp    time.Time                   `json:"timestamp"`
+	Pods         []corev1.Pod           `json:"pods"`
+	Events       []corev1.Event         `json:"events"`
+	Deployments  []appsv1.Deployment    `json:"deployments"`
+	Jobs         []batchv1.Job          `json:"jobs"`
+	StatefulSets []appsv1.StatefulSet   `json:"statefulsets"`
+	DaemonSets   []appsv1.DaemonSet     `json:"daemonsets"`
+	ReplicaSets  []appsv1.ReplicaSet    `json:"replicasets"`
+	Services     []corev1.Service       `json:"services"`
+	Secrets      []corev1.Secret        `json:"secrets"`
+	Logs         map[string][]LogEntry  `json:"logs"`
+	Metrics      map[string]interface{} `json:"metrics"`
+	Problems     []types.Problem        `json:"problems"`
+	Timestamp    time.Time              `json:"timestamp"`
 }
 
 // EBPFData represents eBPF monitoring data
@@ -216,18 +215,18 @@ type LogEntry struct {
 
 // SystemdData represents systemd service monitoring data
 type SystemdData struct {
-	Timestamp     time.Time                      `json:"timestamp"`
-	ServiceStates map[string]interface{}        `json:"service_states"`
-	UnitInfo      map[string]interface{}        `json:"unit_info"`
-	Patterns      interface{}                   `json:"patterns"`
-	Events        interface{}                   `json:"events"`
-	Statistics    map[string]interface{}        `json:"statistics"`
+	Timestamp     time.Time              `json:"timestamp"`
+	ServiceStates map[string]interface{} `json:"service_states"`
+	UnitInfo      map[string]interface{} `json:"unit_info"`
+	Patterns      interface{}            `json:"patterns"`
+	Events        interface{}            `json:"events"`
+	Statistics    map[string]interface{} `json:"statistics"`
 }
 
-// JournaldData represents journald log monitoring data  
+// JournaldData represents journald log monitoring data
 type JournaldData struct {
 	Timestamp       time.Time              `json:"timestamp"`
-	Events          interface{}           `json:"events"`
+	Events          interface{}            `json:"events"`
 	PatternMatches  map[string]interface{} `json:"pattern_matches"`
 	Classifications map[string]interface{} `json:"classifications"`
 	Statistics      map[string]interface{} `json:"statistics"`
@@ -484,13 +483,12 @@ func NewSourceNotAvailableError(sourceType SourceType) *SourceNotAvailableError 
 	return &SourceNotAvailableError{SourceType: sourceType}
 }
 
-
 // NetworkData represents network-related monitoring data
 type NetworkData struct {
-	Connections []NetworkConnection       `json:"connections"`
-	Traffic     []NetworkTrafficSample    `json:"traffic"`
-	DNS         []DNSQuery                `json:"dns"`
-	Timestamp   time.Time                 `json:"timestamp"`
+	Connections []NetworkConnection    `json:"connections"`
+	Traffic     []NetworkTrafficSample `json:"traffic"`
+	DNS         []DNSQuery             `json:"dns"`
+	Timestamp   time.Time              `json:"timestamp"`
 }
 
 // NetworkConnection represents a network connection
@@ -505,14 +503,14 @@ type NetworkConnection struct {
 
 // NetworkTrafficSample represents network traffic data
 type NetworkTrafficSample struct {
-	Interface    string    `json:"interface"`
-	BytesIn      uint64    `json:"bytes_in"`
-	BytesOut     uint64    `json:"bytes_out"`
-	PacketsIn    uint64    `json:"packets_in"`
-	PacketsOut   uint64    `json:"packets_out"`
-	DroppedIn    uint64    `json:"dropped_in"`
-	DroppedOut   uint64    `json:"dropped_out"`
-	Timestamp    time.Time `json:"timestamp"`
+	Interface  string    `json:"interface"`
+	BytesIn    uint64    `json:"bytes_in"`
+	BytesOut   uint64    `json:"bytes_out"`
+	PacketsIn  uint64    `json:"packets_in"`
+	PacketsOut uint64    `json:"packets_out"`
+	DroppedIn  uint64    `json:"dropped_in"`
+	DroppedOut uint64    `json:"dropped_out"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
 // DNSQuery represents a DNS query

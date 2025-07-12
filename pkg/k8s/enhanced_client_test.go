@@ -18,7 +18,7 @@ import (
 func TestEnhancedK8sClient_GetPod_WithCache(t *testing.T) {
 	// Create fake client
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	// Create test pod
 	testPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -31,7 +31,7 @@ func TestEnhancedK8sClient_GetPod_WithCache(t *testing.T) {
 			},
 		},
 	}
-	
+
 	// Add pod to fake client
 	fakeClient.CoreV1().Pods("default").Create(context.Background(), testPod, metav1.CreateOptions{})
 
@@ -83,7 +83,7 @@ func TestEnhancedK8sClient_GetPod_WithCache(t *testing.T) {
 func TestEnhancedK8sClient_CircuitBreaker_Integration(t *testing.T) {
 	// Create fake client that will fail
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	// Make the client fail after first call
 	callCount := 0
 	fakeClient.PrependReactor("get", "pods", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
@@ -146,7 +146,7 @@ func TestEnhancedK8sClient_CircuitBreaker_Integration(t *testing.T) {
 
 func TestEnhancedK8sClient_CacheInvalidation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	config := &EnhancedConfig{
 		CacheConfig: &CacheConfig{
 			L1Size:          10,
@@ -202,7 +202,7 @@ func TestEnhancedK8sClient_CacheInvalidation(t *testing.T) {
 
 func TestEnhancedK8sClient_ListPods_Caching(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	config := &EnhancedConfig{
 		CacheConfig: &CacheConfig{
 			L1Size:          10,
@@ -260,7 +260,7 @@ func TestEnhancedK8sClient_ListPods_Caching(t *testing.T) {
 
 func TestEnhancedK8sClient_GetCacheStats(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	config := DefaultEnhancedConfig()
 	config.EnableCacheWarmup = false // Disable for test
 
@@ -274,11 +274,11 @@ func TestEnhancedK8sClient_GetCacheStats(t *testing.T) {
 	defer enhancedClient.Close()
 
 	stats := enhancedClient.GetCacheStats()
-	
+
 	if stats["cache_enabled"] != true {
 		t.Error("Cache should be enabled")
 	}
-	
+
 	if stats["circuit_breaker_state"] == nil {
 		t.Error("Circuit breaker state should be reported")
 	}
@@ -286,7 +286,7 @@ func TestEnhancedK8sClient_GetCacheStats(t *testing.T) {
 
 func BenchmarkEnhancedK8sClient_GetPod(b *testing.B) {
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	// Add test pod
 	testPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
@@ -315,7 +315,7 @@ func BenchmarkEnhancedK8sClient_GetPod(b *testing.B) {
 
 func BenchmarkEnhancedK8sClient_ListPods(b *testing.B) {
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	// Add test pods
 	for i := 0; i < 100; i++ {
 		pod := &corev1.Pod{

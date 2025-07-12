@@ -26,15 +26,15 @@ const (
 
 // CircuitBreaker protects data sources from repeated failures
 type CircuitBreaker struct {
-	name           string
-	state          CircuitBreakerState
-	failureCount   int
-	successCount   int
-	lastFailure    time.Time
-	lastSuccess    time.Time
+	name             string
+	state            CircuitBreakerState
+	failureCount     int
+	successCount     int
+	lastFailure      time.Time
+	lastSuccess      time.Time
 	failureThreshold int
-	timeout        time.Duration
-	mutex          sync.RWMutex
+	timeout          time.Duration
+	mutex            sync.RWMutex
 }
 
 // NewCircuitBreaker creates a new circuit breaker
@@ -102,12 +102,12 @@ func (cb *CircuitBreaker) OnFailure() {
 func (cb *CircuitBreaker) GetState() CircuitBreakerState {
 	cb.mutex.RLock()
 	defer cb.mutex.RUnlock()
-	
+
 	// Transition from open to half-open if timeout has passed
 	if cb.state == CircuitBreakerOpen && time.Since(cb.lastFailure) > cb.timeout {
 		cb.state = CircuitBreakerHalfOpen
 	}
-	
+
 	return cb.state
 }
 
@@ -128,54 +128,54 @@ func (cb *CircuitBreaker) GetStats() map[string]interface{} {
 
 // EnhancedEngine provides advanced multi-source correlation capabilities
 type EnhancedEngine struct {
-	sources        map[SourceType]DataSource
-	timeline       *Timeline
-	correlators    []Correlator
-	analyzers      []Analyzer
-	
+	sources     map[SourceType]DataSource
+	timeline    *Timeline
+	correlators []Correlator
+	analyzers   []Analyzer
+
 	// Processing state
 	isRunning      bool
 	processingRate float64
 	errorCount     uint64
-	
+
 	// Configuration
-	config         *EnhancedEngineConfig
-	
+	config *EnhancedEngineConfig
+
 	// Circuit breakers for data sources
 	circuitBreakers map[SourceType]*CircuitBreaker
-	
+
 	// Channels
-	eventChan      chan TimelineEvent
-	resultChan     chan CorrelationResult
-	
+	eventChan  chan TimelineEvent
+	resultChan chan CorrelationResult
+
 	// Lifecycle
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	mutex          sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	mutex  sync.RWMutex
 }
 
 // EnhancedEngineConfig configures the enhanced correlation engine
 type EnhancedEngineConfig struct {
 	// Timeline settings
-	MaxTimelineEvents    int
-	CorrelationWindow    time.Duration
-	
+	MaxTimelineEvents int
+	CorrelationWindow time.Duration
+
 	// Processing settings
-	EventBufferSize      int
-	ProcessingWorkers    int
-	BatchSize            int
-	ProcessingTimeout    time.Duration
-	
+	EventBufferSize   int
+	ProcessingWorkers int
+	BatchSize         int
+	ProcessingTimeout time.Duration
+
 	// Analysis settings
-	EnablePatternAnalysis bool
+	EnablePatternAnalysis  bool
 	EnableAnomalyDetection bool
-	EnablePrediction      bool
-	
+	EnablePrediction       bool
+
 	// Performance settings
-	MaxEventsPerSecond   int
-	EnableThrottling     bool
-	
+	MaxEventsPerSecond int
+	EnableThrottling   bool
+
 	// Circuit breaker settings
 	EnableCircuitBreaker bool
 	FailureThreshold     int
@@ -226,11 +226,11 @@ type RemediationStep struct {
 
 // AnalysisResult represents the result of timeline analysis
 type AnalysisResult struct {
-	Type        string
-	Summary     string
-	Details     map[string]interface{}
-	Insights    []string
-	Timestamp   time.Time
+	Type      string
+	Summary   string
+	Details   map[string]interface{}
+	Insights  []string
+	Timestamp time.Time
 }
 
 // NewEnhancedEngine creates a new enhanced correlation engine
@@ -238,9 +238,9 @@ func NewEnhancedEngine(config *EnhancedEngineConfig) *EnhancedEngine {
 	if config == nil {
 		config = DefaultEnhancedEngineConfig()
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	engine := &EnhancedEngine{
 		sources:         make(map[SourceType]DataSource),
 		timeline:        NewTimeline(config.MaxTimelineEvents),
@@ -253,33 +253,33 @@ func NewEnhancedEngine(config *EnhancedEngineConfig) *EnhancedEngine {
 		ctx:             ctx,
 		cancel:          cancel,
 	}
-	
+
 	// Initialize default correlators
 	engine.initializeDefaultCorrelators()
-	
+
 	// Initialize default analyzers
 	engine.initializeDefaultAnalyzers()
-	
+
 	return engine
 }
 
 // DefaultEnhancedEngineConfig returns the default configuration
 func DefaultEnhancedEngineConfig() *EnhancedEngineConfig {
 	return &EnhancedEngineConfig{
-		MaxTimelineEvents:     100000,
-		CorrelationWindow:     5 * time.Minute,
-		EventBufferSize:       50000,
-		ProcessingWorkers:     4,
-		BatchSize:             100,
-		ProcessingTimeout:     1 * time.Second,
-		EnablePatternAnalysis: true,
+		MaxTimelineEvents:      100000,
+		CorrelationWindow:      5 * time.Minute,
+		EventBufferSize:        50000,
+		ProcessingWorkers:      4,
+		BatchSize:              100,
+		ProcessingTimeout:      1 * time.Second,
+		EnablePatternAnalysis:  true,
 		EnableAnomalyDetection: true,
-		EnablePrediction:      false,
-		MaxEventsPerSecond:    10000,
-		EnableThrottling:      true,
-		EnableCircuitBreaker:  true,
-		FailureThreshold:      5,
-		RecoveryTimeout:       30 * time.Second,
+		EnablePrediction:       false,
+		MaxEventsPerSecond:     10000,
+		EnableThrottling:       true,
+		EnableCircuitBreaker:   true,
+		FailureThreshold:       5,
+		RecoveryTimeout:        30 * time.Second,
 	}
 }
 
@@ -287,9 +287,9 @@ func DefaultEnhancedEngineConfig() *EnhancedEngineConfig {
 func (e *EnhancedEngine) AddSource(sourceType SourceType, source DataSource) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	e.sources[sourceType] = source
-	
+
 	// Initialize circuit breaker for this source if enabled
 	if e.config.EnableCircuitBreaker {
 		e.circuitBreakers[sourceType] = NewCircuitBreaker(
@@ -304,7 +304,7 @@ func (e *EnhancedEngine) AddSource(sourceType SourceType, source DataSource) {
 func (e *EnhancedEngine) AddCorrelator(correlator Correlator) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	e.correlators = append(e.correlators, correlator)
 }
 
@@ -312,7 +312,7 @@ func (e *EnhancedEngine) AddCorrelator(correlator Correlator) {
 func (e *EnhancedEngine) AddAnalyzer(analyzer Analyzer) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	e.analyzers = append(e.analyzers, analyzer)
 }
 
@@ -320,31 +320,31 @@ func (e *EnhancedEngine) AddAnalyzer(analyzer Analyzer) {
 func (e *EnhancedEngine) Start(ctx context.Context) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	if e.isRunning {
 		return fmt.Errorf("engine already running")
 	}
-	
+
 	// Start processing workers
 	for i := 0; i < e.config.ProcessingWorkers; i++ {
 		e.wg.Add(1)
 		go e.processEvents()
 	}
-	
+
 	// Start source collectors
 	e.wg.Add(1)
 	go e.collectFromSources()
-	
+
 	// Start correlation processor
 	e.wg.Add(1)
 	go e.processCorrelations()
-	
+
 	// Start analysis processor
 	if e.config.EnablePatternAnalysis {
 		e.wg.Add(1)
 		go e.processAnalysis()
 	}
-	
+
 	e.isRunning = true
 	return nil
 }
@@ -353,17 +353,17 @@ func (e *EnhancedEngine) Start(ctx context.Context) error {
 func (e *EnhancedEngine) Stop() error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	if !e.isRunning {
 		return nil
 	}
-	
+
 	e.cancel()
 	e.wg.Wait()
-	
+
 	close(e.eventChan)
 	close(e.resultChan)
-	
+
 	e.isRunning = false
 	return nil
 }
@@ -371,10 +371,10 @@ func (e *EnhancedEngine) Stop() error {
 // collectFromSources collects events from all data sources
 func (e *EnhancedEngine) collectFromSources() {
 	defer e.wg.Done()
-	
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-e.ctx.Done():
@@ -391,17 +391,17 @@ func (e *EnhancedEngine) collectSourceData() {
 	if source, exists := e.sources[SourceEBPF]; exists && source.IsAvailable() {
 		e.collectFromSource(SourceEBPF, source, "events", e.processEBPFEvents)
 	}
-	
+
 	// Collect from systemd source
 	if source, exists := e.sources[SourceSystemd]; exists && source.IsAvailable() {
 		e.collectFromSource(SourceSystemd, source, "events", e.processSystemdEvents)
 	}
-	
+
 	// Collect from journald source
 	if source, exists := e.sources[SourceJournald]; exists && source.IsAvailable() {
 		e.collectFromSource(SourceJournald, source, "events", e.processJournaldEvents)
 	}
-	
+
 	// Collect from Kubernetes source
 	if source, exists := e.sources[SourceKubernetes]; exists && source.IsAvailable() {
 		e.collectFromSource(SourceKubernetes, source, "events", e.processKubernetesEvents)
@@ -419,10 +419,10 @@ func (e *EnhancedEngine) collectFromSource(sourceType SourceType, source DataSou
 			}
 		}
 	}
-	
+
 	// Attempt to get data
 	data, err := source.GetData(e.ctx, dataType, nil)
-	
+
 	// Record success/failure with circuit breaker
 	if e.config.EnableCircuitBreaker {
 		if cb, exists := e.circuitBreakers[sourceType]; exists {
@@ -451,7 +451,7 @@ func (e *EnhancedEngine) processEBPFEvents(data interface{}) {
 	if !ok {
 		return
 	}
-	
+
 	for _, event := range events {
 		timelineEvent := TimelineEvent{
 			Timestamp: event.Timestamp,
@@ -469,7 +469,7 @@ func (e *EnhancedEngine) processEBPFEvents(data interface{}) {
 				"event_data": event.Data,
 			},
 		}
-		
+
 		select {
 		case e.eventChan <- timelineEvent:
 		case <-e.ctx.Done():
@@ -484,7 +484,7 @@ func (e *EnhancedEngine) processSystemdEvents(data interface{}) {
 	if !ok {
 		return
 	}
-	
+
 	for _, event := range events {
 		severity := "info"
 		if event.EventType == systemd.ServiceEventFailure {
@@ -492,7 +492,7 @@ func (e *EnhancedEngine) processSystemdEvents(data interface{}) {
 		} else if event.EventType == systemd.ServiceEventRestart {
 			severity = "warning"
 		}
-		
+
 		timelineEvent := TimelineEvent{
 			Timestamp: event.Timestamp,
 			Source:    SourceSystemd,
@@ -510,7 +510,7 @@ func (e *EnhancedEngine) processSystemdEvents(data interface{}) {
 				"properties": event.Properties,
 			},
 		}
-		
+
 		select {
 		case e.eventChan <- timelineEvent:
 		case <-e.ctx.Done():
@@ -525,10 +525,10 @@ func (e *EnhancedEngine) processJournaldEvents(data interface{}) {
 	if !ok {
 		return
 	}
-	
+
 	for _, event := range events {
 		severity := e.mapJournaldSeverity(event.Priority)
-		
+
 		timelineEvent := TimelineEvent{
 			Timestamp: event.Timestamp,
 			Source:    SourceJournald,
@@ -540,13 +540,13 @@ func (e *EnhancedEngine) processJournaldEvents(data interface{}) {
 				Name: event.Service,
 			},
 			Metadata: map[string]interface{}{
-				"priority":          event.Priority,
-				"matched_patterns":  event.MatchedPatterns,
-				"classification":    event.Classification,
+				"priority":         event.Priority,
+				"matched_patterns": event.MatchedPatterns,
+				"classification":   event.Classification,
 				"fields":           event.Fields,
 			},
 		}
-		
+
 		select {
 		case e.eventChan <- timelineEvent:
 		case <-e.ctx.Done():
@@ -564,11 +564,11 @@ func (e *EnhancedEngine) processKubernetesEvents(data interface{}) {
 // processEvents processes events from the event channel
 func (e *EnhancedEngine) processEvents() {
 	defer e.wg.Done()
-	
+
 	batch := make([]TimelineEvent, 0, e.config.BatchSize)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-e.ctx.Done():
@@ -577,14 +577,14 @@ func (e *EnhancedEngine) processEvents() {
 				e.processBatch(batch)
 			}
 			return
-			
+
 		case event := <-e.eventChan:
 			batch = append(batch, event)
 			if len(batch) >= e.config.BatchSize {
 				e.processBatch(batch)
 				batch = batch[:0]
 			}
-			
+
 		case <-ticker.C:
 			if len(batch) > 0 {
 				e.processBatch(batch)
@@ -600,7 +600,7 @@ func (e *EnhancedEngine) processBatch(events []TimelineEvent) {
 	for _, event := range events {
 		e.timeline.AddEvent(event)
 	}
-	
+
 	// Run correlations on the batch
 	for _, correlator := range e.correlators {
 		results := correlator.Correlate(events)
@@ -617,7 +617,7 @@ func (e *EnhancedEngine) processBatch(events []TimelineEvent) {
 // processCorrelations processes correlation results
 func (e *EnhancedEngine) processCorrelations() {
 	defer e.wg.Done()
-	
+
 	for {
 		select {
 		case <-e.ctx.Done():
@@ -639,7 +639,7 @@ func (e *EnhancedEngine) handleCorrelationResult(result CorrelationResult) {
 			}
 		}
 	}
-	
+
 	// Generate alerts for high-severity correlations
 	if result.Severity == "critical" || result.Severity == "high" {
 		// In a real implementation, this would trigger alerts
@@ -655,10 +655,10 @@ func (e *EnhancedEngine) addEventCorrelation(eventID1, eventID2 string) {
 // processAnalysis runs periodic analysis on the timeline
 func (e *EnhancedEngine) processAnalysis() {
 	defer e.wg.Done()
-	
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-e.ctx.Done():
@@ -695,19 +695,19 @@ func (e *EnhancedEngine) GetCorrelationResults(limit int) []CorrelationResult {
 func (e *EnhancedEngine) GetStatistics() map[string]interface{} {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
+
 	timelineStats := e.timeline.GetStatistics()
-	
+
 	stats := map[string]interface{}{
-		"is_running":       e.isRunning,
-		"processing_rate":  e.processingRate,
-		"error_count":      e.errorCount,
-		"timeline_events":  timelineStats.TotalEvents,
-		"sources":          len(e.sources),
-		"correlators":      len(e.correlators),
-		"analyzers":        len(e.analyzers),
+		"is_running":      e.isRunning,
+		"processing_rate": e.processingRate,
+		"error_count":     e.errorCount,
+		"timeline_events": timelineStats.TotalEvents,
+		"sources":         len(e.sources),
+		"correlators":     len(e.correlators),
+		"analyzers":       len(e.analyzers),
 	}
-	
+
 	// Add circuit breaker statistics if enabled
 	if e.config.EnableCircuitBreaker {
 		circuitBreakerStats := make(map[string]interface{})
@@ -716,7 +716,7 @@ func (e *EnhancedEngine) GetStatistics() map[string]interface{} {
 		}
 		stats["circuit_breakers"] = circuitBreakerStats
 	}
-	
+
 	return stats
 }
 

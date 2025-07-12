@@ -508,7 +508,7 @@ func convertPodToPodInfo(pod corev1.Pod) types.PodInfo {
 	for k, v := range pod.Labels {
 		labels[k] = v
 	}
-	
+
 	return types.PodInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,

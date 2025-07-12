@@ -13,13 +13,13 @@ import (
 type Collector struct {
 	conn   *dbus.Conn
 	config *CollectorConfig
-	
+
 	// Connection management
-	mutex           sync.RWMutex
-	isConnected     bool
+	mutex             sync.RWMutex
+	isConnected       bool
 	reconnectAttempts int
-	lastReconnect   time.Time
-	
+	lastReconnect     time.Time
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -46,21 +46,21 @@ func NewCollector(config *CollectorConfig) (*Collector, error) {
 	if config == nil {
 		config = DefaultCollectorConfig()
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	collector := &Collector{
 		config: config,
 		ctx:    ctx,
 		cancel: cancel,
 	}
-	
+
 	// Initial connection
 	if err := collector.connect(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to connect to systemd: %w", err)
 	}
-	
+
 	return collector, nil
 }
 
@@ -81,16 +81,16 @@ func (c *Collector) Start(ctx context.Context) error {
 // Stop stops systemd monitoring
 func (c *Collector) Stop() error {
 	c.cancel()
-	
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
 		c.isConnected = false
 	}
-	
+
 	return nil
 }
 
@@ -98,7 +98,7 @@ func (c *Collector) Stop() error {
 func (c *Collector) GetConnection() *dbus.Conn {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	if c.isConnected {
 		return c.conn
 	}
@@ -111,28 +111,28 @@ func (c *Collector) connect() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to system bus: %w", err)
 	}
-	
+
 	// Test the connection by calling a simple method
 	var version string
 	obj := conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
-	err = obj.Call("org.freedesktop.DBus.Properties.Get", 0, 
+	err = obj.Call("org.freedesktop.DBus.Properties.Get", 0,
 		"org.freedesktop.systemd1.Manager", "Version").Store(&version)
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("failed to test systemd connection: %w", err)
 	}
-	
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	
+
 	c.conn = conn
 	c.isConnected = true
 	c.reconnectAttempts = 0
-	
+
 	return nil
 }
 
@@ -140,7 +140,7 @@ func (c *Collector) connect() error {
 func (c *Collector) monitorConnection() {
 	ticker := time.NewTicker(c.config.ReconnectInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -159,19 +159,19 @@ func (c *Collector) isConnectionHealthy() bool {
 	conn := c.conn
 	connected := c.isConnected
 	c.mutex.RUnlock()
-	
+
 	if !connected || conn == nil {
 		return false
 	}
-	
+
 	// Test the connection with a quick call
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	
+
 	obj := conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
 	call := obj.CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0,
 		"org.freedesktop.systemd1.Manager", "Version")
-	
+
 	return call.Err == nil
 }
 
@@ -179,17 +179,17 @@ func (c *Collector) isConnectionHealthy() bool {
 func (c *Collector) handleConnectionLoss() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	if !c.isConnected {
 		return // Already handling
 	}
-	
+
 	c.isConnected = false
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
 	}
-	
+
 	// Attempt reconnection
 	go c.attemptReconnection()
 }
@@ -202,14 +202,14 @@ func (c *Collector) attemptReconnection() {
 			return
 		case <-time.After(c.config.ReconnectInterval):
 			c.reconnectAttempts++
-			
+
 			if err := c.connect(); err == nil {
 				c.lastReconnect = time.Now()
 				return // Successfully reconnected
 			}
 		}
 	}
-	
+
 	// Max attempts reached, give up
 	c.mutex.Lock()
 	c.isConnected = false
@@ -222,18 +222,18 @@ func (c *Collector) GetUnitProperty(unitName, property string) (interface{}, err
 	if conn == nil {
 		return nil, fmt.Errorf("not connected to systemd")
 	}
-	
+
 	unitPath, err := c.getUnitPath(unitName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get unit path: %w", err)
 	}
-	
+
 	obj := conn.Object("org.freedesktop.systemd1", unitPath)
 	variant, err := obj.GetProperty("org.freedesktop.systemd1.Unit." + property)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get property %s: %w", property, err)
 	}
-	
+
 	return variant.Value(), nil
 }
 
@@ -243,18 +243,18 @@ func (c *Collector) GetServiceProperty(serviceName, property string) (interface{
 	if conn == nil {
 		return nil, fmt.Errorf("not connected to systemd")
 	}
-	
+
 	unitPath, err := c.getUnitPath(serviceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get unit path: %w", err)
 	}
-	
+
 	obj := conn.Object("org.freedesktop.systemd1", unitPath)
 	variant, err := obj.GetProperty("org.freedesktop.systemd1.Service." + property)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get property %s: %w", property, err)
 	}
-	
+
 	return variant.Value(), nil
 }
 
@@ -264,18 +264,18 @@ func (c *Collector) ListUnits() ([]UnitStatus, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("not connected to systemd")
 	}
-	
+
 	obj := conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
 	call := obj.Call("org.freedesktop.systemd1.Manager.ListUnits", 0)
 	if call.Err != nil {
 		return nil, fmt.Errorf("failed to list units: %w", call.Err)
 	}
-	
+
 	var unitStatusList [][]interface{}
 	if err := call.Store(&unitStatusList); err != nil {
 		return nil, fmt.Errorf("failed to parse unit list: %w", err)
 	}
-	
+
 	var units []UnitStatus
 	for _, unitData := range unitStatusList {
 		if len(unitData) >= 10 {
@@ -293,7 +293,7 @@ func (c *Collector) ListUnits() ([]UnitStatus, error) {
 			})
 		}
 	}
-	
+
 	return units, nil
 }
 
@@ -303,13 +303,13 @@ func (c *Collector) GetUnitStatus(unitName string) (*UnitStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for _, unit := range units {
 		if unit.Name == unitName {
 			return &unit, nil
 		}
 	}
-	
+
 	return nil, fmt.Errorf("unit %s not found", unitName)
 }
 
@@ -319,18 +319,18 @@ func (c *Collector) getUnitPath(unitName string) (dbus.ObjectPath, error) {
 	if conn == nil {
 		return "", fmt.Errorf("not connected to systemd")
 	}
-	
+
 	obj := conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
 	call := obj.Call("org.freedesktop.systemd1.Manager.GetUnit", 0, unitName)
 	if call.Err != nil {
 		return "", fmt.Errorf("failed to get unit path: %w", call.Err)
 	}
-	
+
 	var unitPath dbus.ObjectPath
 	if err := call.Store(&unitPath); err != nil {
 		return "", fmt.Errorf("failed to parse unit path: %w", err)
 	}
-	
+
 	return unitPath, nil
 }
 
@@ -340,13 +340,13 @@ func (c *Collector) GetManagerProperty(property string) (interface{}, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("not connected to systemd")
 	}
-	
+
 	obj := conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1")
 	variant, err := obj.GetProperty("org.freedesktop.systemd1.Manager." + property)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get manager property %s: %w", property, err)
 	}
-	
+
 	return variant.Value(), nil
 }
 
@@ -356,23 +356,23 @@ func (c *Collector) SubscribeToSignals() (<-chan *dbus.Signal, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("not connected to systemd")
 	}
-	
+
 	// Subscribe to unit state changes
 	rules := []string{
 		"type='signal',interface='org.freedesktop.systemd1.Manager',member='UnitNew'",
 		"type='signal',interface='org.freedesktop.systemd1.Manager',member='UnitRemoved'",
 		"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
 	}
-	
+
 	for _, rule := range rules {
 		if err := conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule).Err; err != nil {
 			return nil, fmt.Errorf("failed to add match rule: %w", err)
 		}
 	}
-	
+
 	signalChan := make(chan *dbus.Signal, 100)
 	conn.Signal(signalChan)
-	
+
 	return signalChan, nil
 }
 
@@ -394,7 +394,7 @@ type UnitStatus struct {
 func (c *Collector) GetStatistics() map[string]interface{} {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	return map[string]interface{}{
 		"is_connected":       c.isConnected,
 		"reconnect_attempts": c.reconnectAttempts,

@@ -10,8 +10,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/types"
 )
 
@@ -37,7 +37,7 @@ func (ct *CorrelationTracer) TraceCorrelationAnalysis(
 	correlationID string,
 	events []correlation.Event,
 ) (context.Context, trace.Span) {
-	
+
 	// Create root span for the entire correlation analysis
 	ctx, span := ct.tracer.Start(ctx, "tapio.correlation.analysis",
 		trace.WithAttributes(
@@ -78,7 +78,7 @@ func (ct *CorrelationTracer) TraceLayerAnalysis(
 	targetResource string,
 	analysisType string,
 ) (context.Context, trace.Span) {
-	
+
 	spanName := fmt.Sprintf("tapio.analysis.%s", layer)
 	ctx, span := ct.tracer.Start(ctx, spanName,
 		trace.WithAttributes(
@@ -125,7 +125,7 @@ func (ct *CorrelationTracer) TraceRootCauseAnalysis(
 	confidence float64,
 	findings []correlation.Finding,
 ) (context.Context, trace.Span) {
-	
+
 	ctx, span := ct.tracer.Start(ctx, "tapio.analysis.root_cause",
 		trace.WithAttributes(
 			attribute.String("rootcause.pattern", pattern),
@@ -169,7 +169,7 @@ func (ct *CorrelationTracer) TraceEventCausalChain(
 	events []correlation.Event,
 	causalRelationships []CausalLink,
 ) (context.Context, trace.Span) {
-	
+
 	// Root span for the entire causal chain
 	ctx, rootSpan := ct.tracer.Start(ctx, "tapio.timeline.causal_chain",
 		trace.WithAttributes(
@@ -181,7 +181,7 @@ func (ct *CorrelationTracer) TraceEventCausalChain(
 
 	// Create child spans for each event in chronological order
 	for i, event := range events {
-		eventCtx, eventSpan := ct.tracer.Start(ctx, 
+		eventCtx, eventSpan := ct.tracer.Start(ctx,
 			fmt.Sprintf("tapio.timeline.event_%d", i+1),
 			trace.WithAttributes(
 				attribute.String("event.source", string(event.Source)),
@@ -234,7 +234,7 @@ func (ct *CorrelationTracer) TraceMultiLayerCorrelation(
 	correlationID string,
 	layers []LayerAnalysis,
 ) (context.Context, trace.Span) {
-	
+
 	ctx, rootSpan := ct.tracer.Start(ctx, "tapio.correlation.multi_layer",
 		trace.WithAttributes(
 			attribute.String("correlation.id", correlationID),
@@ -245,7 +245,7 @@ func (ct *CorrelationTracer) TraceMultiLayerCorrelation(
 
 	// Create child spans for each layer analysis
 	for _, layer := range layers {
-		_, layerSpan := ct.TraceLayerAnalysis(ctx, 
+		_, layerSpan := ct.TraceLayerAnalysis(ctx,
 			layer.Name, layer.Target, layer.AnalysisType)
 
 		// Add layer-specific findings
@@ -276,7 +276,7 @@ func (ct *CorrelationTracer) TracePredictiveAnalysis(
 	prediction types.Prediction,
 	historicalData []HistoricalEvent,
 ) (context.Context, trace.Span) {
-	
+
 	ctx, span := ct.tracer.Start(ctx, "tapio.analysis.predictive",
 		trace.WithAttributes(
 			attribute.String("prediction.reason", prediction.Reason),
@@ -337,7 +337,7 @@ func (ct *CorrelationTracer) TracePerformanceMetrics(
 		attribute.Float64("performance.confidence_score", confidence),
 		attribute.Int("performance.data_points_analyzed", dataPoints),
 		attribute.Float64("performance.memory_usage_mb", memoryUsageMB),
-		attribute.Float64("performance.throughput_events_per_second", 
+		attribute.Float64("performance.throughput_events_per_second",
 			float64(dataPoints)/analysisLatency.Seconds()),
 	)
 
@@ -357,7 +357,7 @@ func (ct *CorrelationTracer) TracePerformanceMetrics(
 type CausalLink struct {
 	FromEventIndex int
 	ToEventIndex   int
-	RelationType   string  // "causes", "triggers", "precedes", "correlates"
+	RelationType   string // "causes", "triggers", "precedes", "correlates"
 	Confidence     float64
 	Description    string
 }
@@ -387,12 +387,12 @@ func (ct *CorrelationTracer) getEventSources(events []correlation.Event) string 
 	for _, event := range events {
 		sources[string(event.Source)] = true
 	}
-	
+
 	sourceList := make([]string, 0, len(sources))
 	for source := range sources {
 		sourceList = append(sourceList, source)
 	}
-	
+
 	if len(sourceList) == 0 {
 		return "none"
 	}
@@ -412,10 +412,10 @@ func (ct *CorrelationTracer) getTimespan(events []correlation.Event) string {
 	if len(events) == 1 {
 		return "instant"
 	}
-	
+
 	earliest := events[0].Timestamp
 	latest := events[0].Timestamp
-	
+
 	for _, event := range events {
 		if event.Timestamp.Before(earliest) {
 			earliest = event.Timestamp
@@ -424,7 +424,7 @@ func (ct *CorrelationTracer) getTimespan(events []correlation.Event) string {
 			latest = event.Timestamp
 		}
 	}
-	
+
 	duration := latest.Sub(earliest)
 	if duration < time.Second {
 		return fmt.Sprintf("%.0fms", duration.Seconds()*1000)
@@ -465,7 +465,7 @@ func (ct *CorrelationTracer) TraceTimelineVisualization(
 	events []correlation.Event,
 	timeWindow time.Duration,
 ) (context.Context, trace.Span) {
-	
+
 	ctx, span := ct.tracer.Start(ctx, "tapio.timeline.visualization",
 		trace.WithAttributes(
 			attribute.String("timeline.correlation_id", correlationID),
@@ -514,7 +514,7 @@ func (ct *CorrelationTracer) TraceTimelineHeatmap(
 	events []correlation.Event,
 	bucketSize time.Duration,
 ) (context.Context, trace.Span) {
-	
+
 	ctx, span := ct.tracer.Start(ctx, "tapio.timeline.heatmap",
 		trace.WithAttributes(
 			attribute.Float64("heatmap.bucket_size_seconds", bucketSize.Seconds()),
@@ -524,7 +524,7 @@ func (ct *CorrelationTracer) TraceTimelineHeatmap(
 
 	// Create time buckets for heatmap
 	buckets := ct.createTimeBuckets(events, bucketSize)
-	
+
 	// Find hotspots (high activity periods)
 	hotspots := ct.identifyHotspots(buckets)
 	span.SetAttributes(
@@ -552,7 +552,7 @@ func (ct *CorrelationTracer) TraceEventFlow(
 	events []correlation.Event,
 	flowType string, // "sequential", "parallel", "branching"
 ) (context.Context, trace.Span) {
-	
+
 	ctx, span := ct.tracer.Start(ctx, "tapio.timeline.event_flow",
 		trace.WithAttributes(
 			attribute.String("flow.type", flowType),
@@ -570,7 +570,7 @@ func (ct *CorrelationTracer) TraceEventFlow(
 
 	// Trace flow paths
 	for i, path := range flowAnalysis.Paths {
-		_, pathSpan := ct.tracer.Start(ctx, 
+		_, pathSpan := ct.tracer.Start(ctx,
 			fmt.Sprintf("tapio.timeline.flow_path_%d", i+1),
 			trace.WithAttributes(
 				attribute.Int("path.index", i),
@@ -669,7 +669,7 @@ func (ct *CorrelationTracer) createTimelineSegments(events []correlation.Event, 
 
 	earliest, latest := ct.getTimelineBounds(events)
 	segmentDuration := latest.Sub(earliest) / time.Duration(segmentCount)
-	
+
 	segments := make([]TimelineSegment, segmentCount)
 	for i := 0; i < segmentCount; i++ {
 		segments[i] = TimelineSegment{
@@ -698,7 +698,7 @@ func (ct *CorrelationTracer) createTimeBuckets(events []correlation.Event, bucke
 
 	earliest, latest := ct.getTimelineBounds(events)
 	bucketCount := int(latest.Sub(earliest)/bucketSize) + 1
-	
+
 	buckets := make([]TimeBucket, bucketCount)
 	for i := 0; i < bucketCount; i++ {
 		buckets[i] = TimeBucket{
@@ -732,14 +732,14 @@ func (ct *CorrelationTracer) createTimeBuckets(events []correlation.Event, bucke
 
 func (ct *CorrelationTracer) identifyHotspots(buckets []TimeBucket) []TimeBucket {
 	hotspots := make([]TimeBucket, 0)
-	
+
 	// Calculate average intensity
 	totalIntensity := 0.0
 	for _, bucket := range buckets {
 		totalIntensity += bucket.Intensity
 	}
 	avgIntensity := totalIntensity / float64(len(buckets))
-	
+
 	// Identify hotspots (2x average intensity)
 	for i := range buckets {
 		if buckets[i].Intensity > avgIntensity*2 {
@@ -747,7 +747,7 @@ func (ct *CorrelationTracer) identifyHotspots(buckets []TimeBucket) []TimeBucket
 			hotspots = append(hotspots, buckets[i])
 		}
 	}
-	
+
 	return hotspots
 }
 
@@ -774,14 +774,14 @@ func (ct *CorrelationTracer) analyzeEventFlow(events []correlation.Event, flowTy
 			Type:       "critical",
 			Confidence: 1.0,
 		})
-		
+
 	case "parallel":
 		// Group events by source as parallel branches
 		sourceGroups := make(map[correlation.SourceType][]correlation.Event)
 		for _, event := range sortedEvents {
 			sourceGroups[event.Source] = append(sourceGroups[event.Source], event)
 		}
-		
+
 		analysis.ParallelBranches = len(sourceGroups)
 		for source, events := range sourceGroups {
 			analysis.Paths = append(analysis.Paths, FlowPath{
@@ -794,7 +794,7 @@ func (ct *CorrelationTracer) analyzeEventFlow(events []correlation.Event, flowTy
 			}
 		}
 		analysis.ComplexityScore = float64(analysis.ParallelBranches) / 10.0
-		
+
 	case "branching":
 		// Identify branching based on event relationships
 		// This is a simplified version - real implementation would use graph analysis
@@ -814,7 +814,7 @@ func (ct *CorrelationTracer) TraceRootCauseChain(
 	findings []correlation.Finding,
 	events []correlation.Event,
 ) (context.Context, trace.Span) {
-	
+
 	ctx, span := ct.tracer.Start(ctx, "tapio.rootcause.chain_analysis",
 		trace.WithAttributes(
 			attribute.Int("rootcause.finding_count", len(findings)),
@@ -877,7 +877,7 @@ func (ct *CorrelationTracer) TraceRootCausePropagation(
 	rootCause RootCauseCandidate,
 	systemState map[string]interface{},
 ) (context.Context, trace.Span) {
-	
+
 	ctx, span := ct.tracer.Start(ctx, "tapio.rootcause.propagation",
 		trace.WithAttributes(
 			attribute.String("propagation.root_type", rootCause.Type),
@@ -1012,7 +1012,7 @@ func (ct *CorrelationTracer) calculateSeverity(confidence float64, impactCount i
 
 func (ct *CorrelationTracer) buildImpactChain(rootType string, findings []correlation.Finding) []ImpactEvent {
 	chain := make([]ImpactEvent, 0)
-	
+
 	// Simplified impact chain based on known patterns
 	impactPatterns := map[string][]ImpactEvent{
 		"memory_pressure": {
@@ -1043,12 +1043,12 @@ func (ct *CorrelationTracer) buildImpactChain(rootType string, findings []correl
 
 func (ct *CorrelationTracer) generateRecommendation(candidate RootCauseCandidate) string {
 	recommendations := map[string]string{
-		"memory_pressure":      "Increase memory limits or optimize application memory usage",
-		"cpu_throttling":       "Increase CPU limits or optimize CPU-intensive operations",
-		"network_error":        "Check network connectivity and service endpoints",
-		"disk_pressure":        "Free up disk space or increase volume size",
-		"pod_crash_loop":       "Check application logs and fix startup issues",
-		"service_unavailable":  "Verify service health and dependencies",
+		"memory_pressure":     "Increase memory limits or optimize application memory usage",
+		"cpu_throttling":      "Increase CPU limits or optimize CPU-intensive operations",
+		"network_error":       "Check network connectivity and service endpoints",
+		"disk_pressure":       "Free up disk space or increase volume size",
+		"pod_crash_loop":      "Check application logs and fix startup issues",
+		"service_unavailable": "Verify service health and dependencies",
 	}
 
 	if rec, exists := recommendations[candidate.Type]; exists {

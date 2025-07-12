@@ -104,10 +104,10 @@ type ActionableItem struct {
 type Config struct {
 	// Common configuration
 	Enabled         bool                   `json:"enabled"`
-	SamplingRate    float64                `json:"sampling_rate"`    // 0.0-1.0, where 1.0 = 100%
-	EventBufferSize int                    `json:"event_buffer_size"` // Size of the event channel buffer
+	SamplingRate    float64                `json:"sampling_rate"`      // 0.0-1.0, where 1.0 = 100%
+	EventBufferSize int                    `json:"event_buffer_size"`  // Size of the event channel buffer
 	MaxEventsPerSec int                    `json:"max_events_per_sec"` // Rate limiting
-	Extra           map[string]interface{} `json:"extra"`             // Collector-specific config
+	Extra           map[string]interface{} `json:"extra"`              // Collector-specific config
 
 	// Resource limits
 	MaxMemoryMB int `json:"max_memory_mb"`

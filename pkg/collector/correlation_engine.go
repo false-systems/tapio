@@ -14,24 +14,24 @@ import (
 // CorrelationEngine processes events from multiple collectors and generates insights
 type CorrelationEngine struct {
 	// Core components
-	collectors       map[string]Collector
-	eventChan      chan Event
-	insightChan    chan Insight
-	ctx            context.Context
-	cancel         context.CancelFunc
+	collectors  map[string]Collector
+	eventChan   chan Event
+	insightChan chan Insight
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	// Event processing
-	eventBuffer    []Event
-	bufferMutex    sync.Mutex
-	batchSize      int
-	batchTimeout   time.Duration
+	eventBuffer  []Event
+	bufferMutex  sync.Mutex
+	batchSize    int
+	batchTimeout time.Duration
 
 	// State tracking
 	correlationMap map[string]*CorrelationState // pod -> state
 	stateMutex     sync.RWMutex
 
 	// Circuit breaker
-	breaker        *LegacyCircuitBreaker
+	breaker *LegacyCircuitBreaker
 
 	// Metrics
 	eventsProcessed uint64
@@ -41,22 +41,22 @@ type CorrelationEngine struct {
 
 // CorrelationState tracks events and patterns for a specific entity
 type CorrelationState struct {
-	PodName          string
-	Namespace        string
-	Events           []Event
-	LastUpdated      time.Time
-	
+	PodName     string
+	Namespace   string
+	Events      []Event
+	LastUpdated time.Time
+
 	// Pattern detection
 	MemoryTrend      []float64
 	RestartCount     int
 	LastRestartTime  time.Time
 	NetworkErrors    int
 	LastNetworkError time.Time
-	
+
 	// Predictions
-	OOMRisk          float64
-	TimeToOOM        time.Duration
-	CrashLoopRisk    float64
+	OOMRisk       float64
+	TimeToOOM     time.Duration
+	CrashLoopRisk float64
 }
 
 // Insight represents a correlated finding with actionable recommendations
@@ -67,16 +67,16 @@ type Insight struct {
 	Severity    Severity
 	Title       string
 	Description string
-	
+
 	// Related events that led to this insight
 	RelatedEvents []string
-	
+
 	// Affected resources
 	Resources []AffectedResource
-	
+
 	// Actionable recommendations
 	Actions []ActionableItem
-	
+
 	// Prediction details
 	Prediction *Prediction
 }
@@ -91,10 +91,10 @@ type AffectedResource struct {
 
 // Prediction contains prediction details
 type Prediction struct {
-	Type        string    // "oom", "crash_loop", "disk_full"
-	Probability float64   // 0.0-1.0
+	Type        string  // "oom", "crash_loop", "disk_full"
+	Probability float64 // 0.0-1.0
 	TimeToEvent time.Duration
-	Confidence  float64   // 0.0-1.0
+	Confidence  float64 // 0.0-1.0
 }
 
 // LegacyCircuitBreaker prevents overwhelming the system (legacy implementation)
@@ -110,7 +110,7 @@ type LegacyCircuitBreaker struct {
 // NewCorrelationEngine creates a new correlation engine
 func NewCorrelationEngine(batchSize int, batchTimeout time.Duration) *CorrelationEngine {
 	return &CorrelationEngine{
-		collectors:       make(map[string]Collector),
+		collectors:     make(map[string]Collector),
 		eventChan:      make(chan Event, 10000),
 		insightChan:    make(chan Insight, 1000),
 		eventBuffer:    make([]Event, 0, batchSize),
@@ -137,7 +137,7 @@ func (e *CorrelationEngine) Start(ctx context.Context) error {
 		if err := c.Start(e.ctx, config); err != nil {
 			return fmt.Errorf("failed to start collector %s: %w", name, err)
 		}
-		
+
 		// Forward events to correlation engine
 		go e.forwardEvents(c)
 	}
@@ -152,7 +152,7 @@ func (e *CorrelationEngine) Start(ctx context.Context) error {
 // forwardEvents forwards events from a sniffer to the correlation engine
 func (e *CorrelationEngine) forwardEvents(c Collector) {
 	events := c.Events()
-	
+
 	for {
 		select {
 		case <-e.ctx.Done():
@@ -161,12 +161,12 @@ func (e *CorrelationEngine) forwardEvents(c Collector) {
 			if !ok {
 				return
 			}
-			
+
 			// Check circuit breaker
 			if !e.breaker.Allow() {
 				continue
 			}
-			
+
 			select {
 			case e.eventChan <- event:
 			default:
@@ -185,22 +185,22 @@ func (e *CorrelationEngine) processEvents() {
 		select {
 		case <-e.ctx.Done():
 			return
-			
+
 		case event := <-e.eventChan:
 			e.bufferMutex.Lock()
 			e.eventBuffer = append(e.eventBuffer, event)
-			
+
 			if len(e.eventBuffer) >= e.batchSize {
 				batch := make([]Event, len(e.eventBuffer))
 				copy(batch, e.eventBuffer)
 				e.eventBuffer = e.eventBuffer[:0]
 				e.bufferMutex.Unlock()
-				
+
 				e.processBatch(batch)
 			} else {
 				e.bufferMutex.Unlock()
 			}
-			
+
 		case <-ticker.C:
 			e.bufferMutex.Lock()
 			if len(e.eventBuffer) > 0 {
@@ -208,7 +208,7 @@ func (e *CorrelationEngine) processEvents() {
 				copy(batch, e.eventBuffer)
 				e.eventBuffer = e.eventBuffer[:0]
 				e.bufferMutex.Unlock()
-				
+
 				e.processBatch(batch)
 			} else {
 				e.bufferMutex.Unlock()
@@ -224,13 +224,13 @@ func (e *CorrelationEngine) processBatch(batch []Event) {
 
 	for _, event := range batch {
 		atomic.AddUint64(&e.eventsProcessed, 1)
-		
+
 		// Get or create correlation state
 		key := e.getCorrelationKey(&event)
 		if key == "" {
 			continue
 		}
-		
+
 		state, exists := e.correlationMap[key]
 		if !exists {
 			state = &CorrelationState{
@@ -240,11 +240,11 @@ func (e *CorrelationEngine) processBatch(batch []Event) {
 			}
 			e.correlationMap[key] = state
 		}
-		
+
 		// Update state
 		state.Events = append(state.Events, event)
 		state.LastUpdated = time.Now()
-		
+
 		// Keep only recent events (last 5 minutes)
 		cutoff := time.Now().Add(-5 * time.Minute)
 		newEvents := make([]Event, 0, len(state.Events))
@@ -254,10 +254,10 @@ func (e *CorrelationEngine) processBatch(batch []Event) {
 			}
 		}
 		state.Events = newEvents
-		
+
 		// Update specific patterns
 		e.updatePatterns(state, &event)
-		
+
 		// Check for correlations
 		if insight := e.checkCorrelations(state); insight != nil {
 			atomic.AddUint64(&e.correlationHits, 1)
@@ -277,7 +277,7 @@ func (e *CorrelationEngine) updatePatterns(state *CorrelationState, event *Event
 	case "container_restart":
 		state.RestartCount++
 		state.LastRestartTime = event.Timestamp
-		
+
 	case "high_memory", "memory_leak":
 		if usage, ok := event.Data["current_usage"].(uint64); ok {
 			state.MemoryTrend = append(state.MemoryTrend, float64(usage))
@@ -285,11 +285,11 @@ func (e *CorrelationEngine) updatePatterns(state *CorrelationState, event *Event
 				state.MemoryTrend = state.MemoryTrend[1:]
 			}
 		}
-		
+
 	case "network_error", "network_timeout":
 		state.NetworkErrors++
 		state.LastNetworkError = event.Timestamp
-		
+
 	case "oom_prediction":
 		if prob, ok := event.Data["confidence"].(float64); ok {
 			state.OOMRisk = prob
@@ -306,27 +306,27 @@ func (e *CorrelationEngine) checkCorrelations(state *CorrelationState) *Insight 
 	if state.RestartCount > 2 && len(state.MemoryTrend) > 5 {
 		avgMemory := average(state.MemoryTrend)
 		recentMemory := average(state.MemoryTrend[len(state.MemoryTrend)-3:])
-		
+
 		if recentMemory > avgMemory*1.5 {
 			return e.createOOMInsight(state)
 		}
 	}
-	
+
 	// Rapid restarts = crash loop
 	if state.RestartCount > 5 && time.Since(state.LastRestartTime) < 5*time.Minute {
 		return e.createCrashLoopInsight(state)
 	}
-	
+
 	// Network errors + restarts = connectivity issue
 	if state.NetworkErrors > 10 && state.RestartCount > 1 {
 		return e.createNetworkInsight(state)
 	}
-	
+
 	// High OOM risk from eBPF predictions
 	if state.OOMRisk > 0.8 && state.TimeToOOM < 10*time.Minute {
 		return e.createOOMPredictionInsight(state)
 	}
-	
+
 	return nil
 }
 
@@ -338,17 +338,17 @@ func (e *CorrelationEngine) createOOMInsight(state *CorrelationState) *Insight {
 			eventIDs = append(eventIDs, event.ID)
 		}
 	}
-	
+
 	// Calculate memory increase rate
 	memoryGrowth := calculateGrowthRate(state.MemoryTrend)
-	
+
 	return &Insight{
-		ID:          uuid.New().String(),
-		Timestamp:   time.Now(),
-		Type:        "oom_correlation",
-		Severity:    SeverityHigh,
-		Title:       "Memory Pressure Leading to OOM Kills",
-		Description: fmt.Sprintf("Pod %s is experiencing memory pressure with %d restarts. Memory growing at %.2f MB/min", 
+		ID:        uuid.New().String(),
+		Timestamp: time.Now(),
+		Type:      "oom_correlation",
+		Severity:  SeverityHigh,
+		Title:     "Memory Pressure Leading to OOM Kills",
+		Description: fmt.Sprintf("Pod %s is experiencing memory pressure with %d restarts. Memory growing at %.2f MB/min",
 			state.PodName, state.RestartCount, memoryGrowth/(1024*1024)),
 		RelatedEvents: eventIDs,
 		Resources: []AffectedResource{{
@@ -360,7 +360,7 @@ func (e *CorrelationEngine) createOOMInsight(state *CorrelationState) *Insight {
 			Title:       "Increase Memory Limit",
 			Description: "The pod is being OOM killed due to insufficient memory",
 			Commands: []string{
-				fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"main\",\"resources\":{\"limits\":{\"memory\":\"2Gi\"}}}]}}}}'", 
+				fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"main\",\"resources\":{\"limits\":{\"memory\":\"2Gi\"}}}]}}}}'",
 					getDeploymentFromPod(state.PodName), state.Namespace),
 			},
 			Risk:            "low",
@@ -392,14 +392,14 @@ func (e *CorrelationEngine) createCrashLoopInsight(state *CorrelationState) *Ins
 			eventIDs = append(eventIDs, event.ID)
 		}
 	}
-	
+
 	return &Insight{
-		ID:          uuid.New().String(),
-		Timestamp:   time.Now(),
-		Type:        "crash_loop_correlation",
-		Severity:    SeverityCritical,
-		Title:       "Application Crash Loop Detected",
-		Description: fmt.Sprintf("Pod %s has restarted %d times in the last 5 minutes", state.PodName, state.RestartCount),
+		ID:            uuid.New().String(),
+		Timestamp:     time.Now(),
+		Type:          "crash_loop_correlation",
+		Severity:      SeverityCritical,
+		Title:         "Application Crash Loop Detected",
+		Description:   fmt.Sprintf("Pod %s has restarted %d times in the last 5 minutes", state.PodName, state.RestartCount),
 		RelatedEvents: eventIDs,
 		Resources: []AffectedResource{{
 			Type:      "pod",
@@ -419,7 +419,7 @@ func (e *CorrelationEngine) createCrashLoopInsight(state *CorrelationState) *Ins
 			Title:       "Rollback Deployment",
 			Description: "Revert to the previous working version",
 			Commands: []string{
-				fmt.Sprintf("kubectl rollout undo deployment/%s -n %s", 
+				fmt.Sprintf("kubectl rollout undo deployment/%s -n %s",
 					getDeploymentFromPod(state.PodName), state.Namespace),
 			},
 			Risk:            "medium",
@@ -437,12 +437,12 @@ func (e *CorrelationEngine) createCrashLoopInsight(state *CorrelationState) *Ins
 // createNetworkInsight creates a network-related insight
 func (e *CorrelationEngine) createNetworkInsight(state *CorrelationState) *Insight {
 	return &Insight{
-		ID:          uuid.New().String(),
-		Timestamp:   time.Now(),
-		Type:        "network_correlation",
-		Severity:    SeverityMedium,
-		Title:       "Network Connectivity Issues",
-		Description: fmt.Sprintf("Pod %s experiencing %d network errors with %d restarts", 
+		ID:        uuid.New().String(),
+		Timestamp: time.Now(),
+		Type:      "network_correlation",
+		Severity:  SeverityMedium,
+		Title:     "Network Connectivity Issues",
+		Description: fmt.Sprintf("Pod %s experiencing %d network errors with %d restarts",
 			state.PodName, state.NetworkErrors, state.RestartCount),
 		Resources: []AffectedResource{{
 			Type:      "pod",
@@ -480,7 +480,7 @@ func (e *CorrelationEngine) createOOMPredictionInsight(state *CorrelationState) 
 			Title:       "Preemptive Memory Increase",
 			Description: "Increase memory limit before OOM occurs",
 			Commands: []string{
-				fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"main\",\"resources\":{\"limits\":{\"memory\":\"4Gi\"}}}]}}}}'", 
+				fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"main\",\"resources\":{\"limits\":{\"memory\":\"4Gi\"}}}]}}}}'",
 					getDeploymentFromPod(state.PodName), state.Namespace),
 			},
 			Risk:            "low",
@@ -518,13 +518,13 @@ func (e *CorrelationEngine) generateProactiveInsights() {
 	// Look for cluster-wide patterns
 	totalPods := len(e.correlationMap)
 	problematicPods := 0
-	
+
 	for _, state := range e.correlationMap {
 		if state.RestartCount > 0 || state.OOMRisk > 0.5 {
 			problematicPods++
 		}
 	}
-	
+
 	// Generate cluster health insight if needed
 	if float64(problematicPods)/float64(totalPods) > 0.2 && totalPods > 10 {
 		insight := &Insight{
@@ -545,7 +545,7 @@ func (e *CorrelationEngine) generateProactiveInsights() {
 				EstimatedImpact: "Diagnostic only",
 			}},
 		}
-		
+
 		select {
 		case e.insightChan <- *insight:
 			atomic.AddUint64(&e.insightsCreated, 1)
@@ -565,11 +565,11 @@ func (e *CorrelationEngine) GetStats() map[string]interface{} {
 	defer e.stateMutex.RUnlock()
 
 	return map[string]interface{}{
-		"events_processed":  atomic.LoadUint64(&e.eventsProcessed),
-		"insights_created":  atomic.LoadUint64(&e.insightsCreated),
-		"correlation_hits":  atomic.LoadUint64(&e.correlationHits),
-		"tracked_pods":      len(e.correlationMap),
-		"breaker_state":     e.breaker.State(),
+		"events_processed": atomic.LoadUint64(&e.eventsProcessed),
+		"insights_created": atomic.LoadUint64(&e.insightsCreated),
+		"correlation_hits": atomic.LoadUint64(&e.correlationHits),
+		"tracked_pods":     len(e.correlationMap),
+		"breaker_state":    e.breaker.State(),
 	}
 }
 
@@ -587,11 +587,11 @@ func (e *CorrelationEngine) getCorrelationKey(event *Event) string {
 	if event.Context == nil {
 		return ""
 	}
-	
+
 	if event.Context.Pod != "" {
 		return fmt.Sprintf("%s/%s", event.Context.Namespace, event.Context.Pod)
 	}
-	
+
 	return ""
 }
 
@@ -600,7 +600,7 @@ func average(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
-	
+
 	sum := 0.0
 	for _, v := range values {
 		sum += v
@@ -613,23 +613,23 @@ func calculateGrowthRate(trend []float64) float64 {
 	if len(trend) < 2 {
 		return 0
 	}
-	
+
 	// Simple linear regression
 	n := float64(len(trend))
 	sumX := n * (n - 1) / 2
 	sumY := 0.0
 	sumXY := 0.0
 	sumX2 := n * (n - 1) * (2*n - 1) / 6
-	
+
 	for i, y := range trend {
 		x := float64(i)
 		sumY += y
 		sumXY += x * y
 	}
-	
+
 	// Calculate slope
 	slope := (n*sumXY - sumX*sumY) / (n*sumX2 - sumX*sumX)
-	
+
 	// Return growth per minute (assuming 1 sample per second)
 	return slope * 60
 }
@@ -668,10 +668,10 @@ func (cb *LegacyCircuitBreaker) Allow() bool {
 			return true
 		}
 		return false
-		
+
 	case "half-open":
 		return true
-		
+
 	default: // closed
 		return true
 	}

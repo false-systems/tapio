@@ -13,15 +13,14 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/metrics"
-	"github.com/yairfalse/tapio/pkg/shutdown"
 	"github.com/yairfalse/tapio/pkg/simple"
 )
 
 var (
-	metricsAddr          string
-	updateInterval       time.Duration
-	prometheusEnableEBPF bool
-	prometheusUniversalFormat   bool
+	metricsAddr               string
+	updateInterval            time.Duration
+	prometheusEnableEBPF      bool
+	prometheusUniversalFormat bool
 )
 
 var prometheusCmd = &cobra.Command{

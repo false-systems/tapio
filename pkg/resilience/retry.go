@@ -23,34 +23,34 @@ type Retryer struct {
 // RetryConfig configures retry behavior
 type RetryConfig struct {
 	// Basic settings
-	MaxAttempts     int
-	InitialDelay    time.Duration
-	MaxDelay        time.Duration
-	
+	MaxAttempts  int
+	InitialDelay time.Duration
+	MaxDelay     time.Duration
+
 	// Backoff settings
 	BackoffStrategy BackoffStrategy
 	Multiplier      float64
 	Jitter          float64
-	
+
 	// Circuit breaker integration
 	UseCircuitBreaker bool
 	CircuitBreaker    *CircuitBreaker
-	
+
 	// Retry conditions
-	RetryableErrors   []error
-	RetryableChecker  func(error) bool
-	OnRetry           func(attempt int, err error)
+	RetryableErrors  []error
+	RetryableChecker func(error) bool
+	OnRetry          func(attempt int, err error)
 }
 
 // BackoffStrategy defines the backoff strategy
 type BackoffStrategy string
 
 const (
-	BackoffConstant     BackoffStrategy = "constant"
-	BackoffLinear       BackoffStrategy = "linear"
-	BackoffExponential  BackoffStrategy = "exponential"
-	BackoffFibonacci    BackoffStrategy = "fibonacci"
-	BackoffRandom       BackoffStrategy = "random"
+	BackoffConstant    BackoffStrategy = "constant"
+	BackoffLinear      BackoffStrategy = "linear"
+	BackoffExponential BackoffStrategy = "exponential"
+	BackoffFibonacci   BackoffStrategy = "fibonacci"
+	BackoffRandom      BackoffStrategy = "random"
 )
 
 // DefaultRetryConfig returns default retry configuration
@@ -83,7 +83,7 @@ func NewRetryer(config RetryConfig) *Retryer {
 	if config.RetryableChecker == nil {
 		config.RetryableChecker = defaultRetryableChecker
 	}
-	
+
 	return &Retryer{
 		config: config,
 	}
@@ -103,22 +103,22 @@ func (r *Retryer) ExecuteWithResult(ctx context.Context, fn func() (interface{},
 	defer func() {
 		r.totalDuration.Add(int64(time.Since(startTime)))
 	}()
-	
+
 	var lastErr error
 	fibPrev, fibCurr := 0, 1
-	
+
 	for attempt := 1; attempt <= r.config.MaxAttempts; attempt++ {
 		r.attemptCount.Add(1)
-		
+
 		// Check context
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("context cancelled: %w", err)
 		}
-		
+
 		// Execute with circuit breaker if configured
 		var result interface{}
 		var err error
-		
+
 		if r.config.UseCircuitBreaker && r.config.CircuitBreaker != nil {
 			cbErr := r.config.CircuitBreaker.Execute(ctx, func() error {
 				result, err = fn()
@@ -130,20 +130,20 @@ func (r *Retryer) ExecuteWithResult(ctx context.Context, fn func() (interface{},
 		} else {
 			result, err = fn()
 		}
-		
+
 		if err == nil {
 			r.successCount.Add(1)
 			return result, nil
 		}
-		
+
 		lastErr = err
-		
+
 		// Check if error is retryable
 		if !r.isRetryable(err) {
 			r.failureCount.Add(1)
 			return nil, err
 		}
-		
+
 		// Don't delay on last attempt
 		if attempt < r.config.MaxAttempts {
 			// Calculate delay
@@ -151,22 +151,22 @@ func (r *Retryer) ExecuteWithResult(ctx context.Context, fn func() (interface{},
 			if r.config.BackoffStrategy == BackoffFibonacci {
 				fibPrev, fibCurr = fibCurr, fibPrev+fibCurr
 			}
-			
+
 			// Apply jitter
 			if r.config.Jitter > 0 {
 				delay = r.applyJitter(delay)
 			}
-			
+
 			// Ensure delay doesn't exceed max
 			if delay > r.config.MaxDelay {
 				delay = r.config.MaxDelay
 			}
-			
+
 			// Call retry callback
 			if r.config.OnRetry != nil {
 				r.config.OnRetry(attempt, err)
 			}
-			
+
 			// Wait before next attempt
 			select {
 			case <-ctx.Done():
@@ -175,7 +175,7 @@ func (r *Retryer) ExecuteWithResult(ctx context.Context, fn func() (interface{},
 			}
 		}
 	}
-	
+
 	r.failureCount.Add(1)
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
@@ -185,21 +185,21 @@ func (r *Retryer) calculateDelay(attempt int, fibPrev, fibCurr int) time.Duratio
 	switch r.config.BackoffStrategy {
 	case BackoffConstant:
 		return r.config.InitialDelay
-		
+
 	case BackoffLinear:
 		return time.Duration(attempt) * r.config.InitialDelay
-		
+
 	case BackoffExponential:
 		delay := float64(r.config.InitialDelay) * math.Pow(r.config.Multiplier, float64(attempt-1))
 		return time.Duration(delay)
-		
+
 	case BackoffFibonacci:
 		return time.Duration(fibCurr) * r.config.InitialDelay
-		
+
 	case BackoffRandom:
 		max := float64(r.config.MaxDelay)
 		return time.Duration(rand.Float64() * max)
-		
+
 	default:
 		return r.config.InitialDelay
 	}
@@ -211,16 +211,16 @@ func (r *Retryer) applyJitter(delay time.Duration) time.Duration {
 	if jitter > 1 {
 		jitter = 1
 	}
-	
+
 	// Calculate jitter range
 	maxJitter := float64(delay) * jitter
 	jitterValue := (rand.Float64() * 2 * maxJitter) - maxJitter
-	
+
 	newDelay := float64(delay) + jitterValue
 	if newDelay < 0 {
 		newDelay = 0
 	}
-	
+
 	return time.Duration(newDelay)
 }
 
@@ -232,7 +232,7 @@ func (r *Retryer) isRetryable(err error) bool {
 			return true
 		}
 	}
-	
+
 	// Use custom checker
 	return r.config.RetryableChecker(err)
 }
@@ -243,17 +243,17 @@ func (r *Retryer) GetMetrics() RetryMetrics {
 	successes := r.successCount.Load()
 	failures := r.failureCount.Load()
 	totalDuration := time.Duration(r.totalDuration.Load())
-	
+
 	var avgDuration time.Duration
 	if attempts > 0 {
 		avgDuration = totalDuration / time.Duration(attempts)
 	}
-	
+
 	var successRate float64
 	if attempts > 0 {
 		successRate = float64(successes) / float64(attempts)
 	}
-	
+
 	return RetryMetrics{
 		TotalAttempts:   attempts,
 		SuccessCount:    successes,
@@ -291,7 +291,7 @@ func defaultRetryableChecker(err error) bool {
 	if temp, ok := err.(temporary); ok && temp.Temporary() {
 		return true
 	}
-	
+
 	// Retry on timeout errors
 	type timeout interface {
 		Timeout() bool
@@ -299,12 +299,12 @@ func defaultRetryableChecker(err error) bool {
 	if to, ok := err.(timeout); ok && to.Timeout() {
 		return true
 	}
-	
+
 	// Don't retry on context errors
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	
+
 	return false
 }
 
@@ -340,11 +340,11 @@ func (g *RetryGroup) Get(name string) (*Retryer, bool) {
 func (g *RetryGroup) GetOrCreate(name string, config RetryConfig) *Retryer {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
-	
+
 	if retryer, exists := g.retryers[name]; exists {
 		return retryer
 	}
-	
+
 	retryer := NewRetryer(config)
 	g.retryers[name] = retryer
 	return retryer
@@ -354,7 +354,7 @@ func (g *RetryGroup) GetOrCreate(name string, config RetryConfig) *Retryer {
 func (g *RetryGroup) GetMetrics() map[string]RetryMetrics {
 	g.mutex.RLock()
 	defer g.mutex.RUnlock()
-	
+
 	metrics := make(map[string]RetryMetrics)
 	for name, retryer := range g.retryers {
 		metrics[name] = retryer.GetMetrics()
@@ -366,7 +366,7 @@ func (g *RetryGroup) GetMetrics() map[string]RetryMetrics {
 func (g *RetryGroup) ResetAll() {
 	g.mutex.RLock()
 	defer g.mutex.RUnlock()
-	
+
 	for _, retryer := range g.retryers {
 		retryer.Reset()
 	}
@@ -378,7 +378,7 @@ func WithRetry(ctx context.Context, fn func() error, opts ...RetryOption) error 
 	for _, opt := range opts {
 		opt(&config)
 	}
-	
+
 	retryer := NewRetryer(config)
 	return retryer.Execute(ctx, fn)
 }

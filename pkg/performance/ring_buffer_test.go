@@ -4,7 +4,6 @@ import (
 	"runtime"
 	"sync"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
@@ -72,10 +71,10 @@ func TestRingBuffer_TryOperations(t *testing.T) {
 	// Test TryPut
 	data1 := "test1"
 	assert.True(t, buffer.TryPut(unsafe.Pointer(&data1)))
-	
+
 	data2 := "test2"
 	assert.True(t, buffer.TryPut(unsafe.Pointer(&data2)))
-	
+
 	// Buffer full
 	data3 := "test3"
 	assert.False(t, buffer.TryPut(unsafe.Pointer(&data3)))
@@ -113,7 +112,7 @@ func TestRingBuffer_ConcurrentAccess(t *testing.T) {
 	const itemsPerGoroutine = 100
 
 	var wg sync.WaitGroup
-	
+
 	// Producers
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)

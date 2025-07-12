@@ -157,7 +157,7 @@ func (r *OOMPredictionRule) analyzePodOOMRisk(pod interface{}, k8sData *correlat
 
 	// Extract pod information (simplified for this example)
 	podName := fmt.Sprintf("pod-%s", uuid.New().String()) // Placeholder
-	podNamespace := "default"                              // Placeholder
+	podNamespace := "default"                             // Placeholder
 
 	// Analyze memory usage from different sources
 	memoryAnalysis := r.analyzeMemoryUsage(podName, podNamespace, k8sData, ebpfData, metricsData)

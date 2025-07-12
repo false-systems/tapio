@@ -9,24 +9,24 @@ import (
 
 // Timeline represents a unified timeline of events from multiple sources
 type Timeline struct {
-	events      []TimelineEvent
-	eventIndex  map[string][]int // source -> event indices
-	timeRange   TimeRange
-	sources     map[string]SourceInfo
-	mutex       sync.RWMutex
-	maxEvents   int
+	events     []TimelineEvent
+	eventIndex map[string][]int // source -> event indices
+	timeRange  TimeRange
+	sources    map[string]SourceInfo
+	mutex      sync.RWMutex
+	maxEvents  int
 }
 
 // TimelineEvent represents a single event in the correlation timeline
 type TimelineEvent struct {
-	ID          string
-	Timestamp   time.Time
-	Source      SourceType
-	EventType   string
-	Severity    string
-	Message     string
-	Entity      EntityReference
-	Metadata    map[string]interface{}
+	ID           string
+	Timestamp    time.Time
+	Source       SourceType
+	EventType    string
+	Severity     string
+	Message      string
+	Entity       EntityReference
+	Metadata     map[string]interface{}
 	Correlations []string // IDs of correlated events
 }
 
@@ -47,11 +47,11 @@ type TimeRange struct {
 
 // SourceInfo tracks information about an event source
 type SourceInfo struct {
-	Type        SourceType
-	EventCount  int
-	FirstEvent  time.Time
-	LastEvent   time.Time
-	EventTypes  map[string]int
+	Type       SourceType
+	EventCount int
+	FirstEvent time.Time
+	LastEvent  time.Time
+	EventTypes map[string]int
 }
 
 // NewTimeline creates a new timeline
@@ -123,7 +123,7 @@ func (t *Timeline) GetEvents(timeRange *TimeRange, filters ...EventFilter) []Tim
 	defer t.mutex.RUnlock()
 
 	var result []TimelineEvent
-	
+
 	for _, event := range t.events {
 		// Apply time range filter
 		if timeRange != nil {
@@ -206,7 +206,7 @@ func (t *Timeline) GetCorrelatedEvents(eventID string) []TimelineEvent {
 	}
 
 	var result []TimelineEvent
-	
+
 	// Get directly correlated events
 	for _, correlatedID := range targetEvent.Correlations {
 		for _, event := range t.events {
@@ -244,7 +244,7 @@ func (t *Timeline) GetTimeRange() TimeRange {
 func (t *Timeline) GetSourceInfo() map[string]SourceInfo {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	
+
 	// Return a copy
 	result := make(map[string]SourceInfo)
 	for k, v := range t.sources {
@@ -259,8 +259,8 @@ func (t *Timeline) GetStatistics() TimelineStatistics {
 	defer t.mutex.RUnlock()
 
 	stats := TimelineStatistics{
-		TotalEvents:   len(t.events),
-		TimeRange:     t.timeRange,
+		TotalEvents:      len(t.events),
+		TimeRange:        t.timeRange,
 		EventsBySeverity: make(map[string]int),
 		EventsByType:     make(map[string]int),
 		EventsBySource:   make(map[string]int),
@@ -397,28 +397,28 @@ type EventPattern struct {
 // findBurstPatterns finds burst patterns in events
 func (t *Timeline) findBurstPatterns() []EventPattern {
 	var patterns []EventPattern
-	
+
 	// Group events by entity and time windows
 	entityBursts := make(map[string][]TimelineEvent)
-	
+
 	for _, event := range t.events {
 		key := fmt.Sprintf("%s:%s", event.Entity.Type, event.Entity.Name)
 		entityBursts[key] = append(entityBursts[key], event)
 	}
-	
+
 	// Check for bursts
 	for entity, events := range entityBursts {
 		if len(events) < 3 {
 			continue
 		}
-		
+
 		// Check for events within 1 minute windows
 		for i := 0; i < len(events)-2; i++ {
 			window := 1 * time.Minute
 			count := 1
 			var eventIDs []string
 			eventIDs = append(eventIDs, events[i].ID)
-			
+
 			for j := i + 1; j < len(events); j++ {
 				if events[j].Timestamp.Sub(events[i].Timestamp) <= window {
 					count++
@@ -427,7 +427,7 @@ func (t *Timeline) findBurstPatterns() []EventPattern {
 					break
 				}
 			}
-			
+
 			if count >= 3 {
 				patterns = append(patterns, EventPattern{
 					Type:        "burst",
@@ -447,34 +447,34 @@ func (t *Timeline) findBurstPatterns() []EventPattern {
 			}
 		}
 	}
-	
+
 	return patterns
 }
 
 // findRepeatingPatterns finds repeating event patterns
 func (t *Timeline) findRepeatingPatterns() []EventPattern {
 	var patterns []EventPattern
-	
+
 	// Group events by type and entity
 	eventGroups := make(map[string][]TimelineEvent)
-	
+
 	for _, event := range t.events {
 		key := fmt.Sprintf("%s:%s:%s", event.Source, event.EventType, event.Entity.Name)
 		eventGroups[key] = append(eventGroups[key], event)
 	}
-	
+
 	// Look for regular intervals
 	for key, events := range eventGroups {
 		if len(events) < 3 {
 			continue
 		}
-		
+
 		// Calculate intervals
 		var intervals []time.Duration
 		for i := 1; i < len(events); i++ {
 			intervals = append(intervals, events[i].Timestamp.Sub(events[i-1].Timestamp))
 		}
-		
+
 		// Check if intervals are similar (within 20% variance)
 		if isRegularInterval(intervals) {
 			avgInterval := averageDuration(intervals)
@@ -495,37 +495,37 @@ func (t *Timeline) findRepeatingPatterns() []EventPattern {
 			})
 		}
 	}
-	
+
 	return patterns
 }
 
 // findCascadePatterns finds cascade patterns (events triggering other events)
 func (t *Timeline) findCascadePatterns() []EventPattern {
 	var patterns []EventPattern
-	
+
 	// Look for events that frequently occur together within a short time window
 	cascadeWindow := 30 * time.Second
-	
+
 	for i, event := range t.events {
 		if event.Severity != "error" && event.Severity != "critical" {
 			continue
 		}
-		
+
 		// Find events that follow within cascade window
 		var cascadeEvents []TimelineEvent
 		cascadeEvents = append(cascadeEvents, event)
-		
+
 		for j := i + 1; j < len(t.events); j++ {
 			if t.events[j].Timestamp.Sub(event.Timestamp) > cascadeWindow {
 				break
 			}
-			
+
 			// Check if related entity or correlated
 			if isRelatedEvent(event, t.events[j]) {
 				cascadeEvents = append(cascadeEvents, t.events[j])
 			}
 		}
-		
+
 		if len(cascadeEvents) >= 3 {
 			patterns = append(patterns, EventPattern{
 				Type:        "cascade",
@@ -544,7 +544,7 @@ func (t *Timeline) findCascadePatterns() []EventPattern {
 			})
 		}
 	}
-	
+
 	return patterns
 }
 
@@ -554,10 +554,10 @@ func isRegularInterval(intervals []time.Duration) bool {
 	if len(intervals) < 2 {
 		return false
 	}
-	
+
 	avg := averageDuration(intervals)
 	variance := 0.2 // 20% variance allowed
-	
+
 	for _, interval := range intervals {
 		diff := float64(interval - avg)
 		if diff < 0 {
@@ -567,7 +567,7 @@ func isRegularInterval(intervals []time.Duration) bool {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -575,12 +575,12 @@ func averageDuration(durations []time.Duration) time.Duration {
 	if len(durations) == 0 {
 		return 0
 	}
-	
+
 	var total time.Duration
 	for _, d := range durations {
 		total += d
 	}
-	
+
 	return total / time.Duration(len(durations))
 }
 
@@ -597,18 +597,18 @@ func isRelatedEvent(event1, event2 TimelineEvent) bool {
 	if event1.Entity.Type == event2.Entity.Type && event1.Entity.Name == event2.Entity.Name {
 		return true
 	}
-	
+
 	// Check correlations
 	for _, id := range event1.Correlations {
 		if id == event2.ID {
 			return true
 		}
 	}
-	
+
 	// Check namespace for Kubernetes resources
 	if event1.Entity.Namespace != "" && event1.Entity.Namespace == event2.Entity.Namespace {
 		return true
 	}
-	
+
 	return false
 }

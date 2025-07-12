@@ -15,11 +15,11 @@ import (
 // EBPFCollector implements the Collector interface for eBPF-based monitoring
 type EBPFCollector struct {
 	// Core components
-	monitor      ebpf.Monitor
-	eventChan    chan Event
-	ctx          context.Context
-	cancel       context.CancelFunc
-	config       Config
+	monitor   ebpf.Monitor
+	eventChan chan Event
+	ctx       context.Context
+	cancel    context.CancelFunc
+	config    Config
 
 	// Health tracking
 	mu              sync.RWMutex
@@ -29,9 +29,9 @@ type EBPFCollector struct {
 	isRunning       bool
 
 	// Event processing
-	eventBuffer     chan *ebpf.ProcessMemoryStats
-	processCache    *ProcessCache
-	pidTranslator   PIDTranslator
+	eventBuffer   chan *ebpf.ProcessMemoryStats
+	processCache  *ProcessCache
+	pidTranslator PIDTranslator
 }
 
 // PIDTranslator converts PIDs to Kubernetes context
@@ -70,7 +70,7 @@ func (s *EBPFCollector) Start(ctx context.Context, config Config) error {
 	s.config = config
 	s.eventChan = make(chan Event, config.EventBufferSize)
 	s.eventBuffer = make(chan *ebpf.ProcessMemoryStats, 1000)
-	
+
 	// Create cancellable context
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
@@ -97,7 +97,7 @@ func (s *EBPFCollector) Health() Health {
 
 	status := HealthStatusHealthy
 	message := "eBPF monitoring active"
-	
+
 	if !s.isRunning {
 		status = HealthStatusUnhealthy
 		message = "eBPF sniffer not running"
@@ -168,16 +168,16 @@ func (s *EBPFCollector) processEvents() {
 		select {
 		case <-s.ctx.Done():
 			return
-		
+
 		case stat := <-s.eventBuffer:
 			batch = append(batch, stat)
-			
+
 			// Process batch if full
 			if len(batch) >= 100 {
 				s.processBatch(batch)
 				batch = batch[:0]
 			}
-			
+
 		case <-batchTimer.C:
 			// Process partial batch on timeout
 			if len(batch) > 0 {
@@ -236,7 +236,7 @@ func (s *EBPFCollector) createMemoryLeakEvent(stat *ebpf.ProcessMemoryStats) *Ev
 	// Get Kubernetes context
 	if ctx, err := s.pidTranslator.GetPodInfo(stat.PID); err == nil {
 		event.Context = ctx
-		
+
 		// Add actionable fix
 		event.Actionable = &ActionableItem{
 			Title:       "Potential Memory Leak Detected",
@@ -296,11 +296,11 @@ func (s *EBPFCollector) performPredictions() {
 // predictOOMs predicts out-of-memory conditions
 func (s *EBPFCollector) predictOOMs() {
 	processes := s.processCache.GetAll()
-	
+
 	// Get memory limits (would come from Kubernetes)
 	limits := make(map[uint32]uint64)
 	// TODO: Get actual limits from K8s
-	
+
 	predictions, err := s.monitor.GetMemoryPredictions(limits)
 	if err != nil {
 		return
@@ -333,12 +333,12 @@ func (s *EBPFCollector) emitOOMPrediction(pid uint32, pred *ebpf.OOMPrediction, 
 	// Get Kubernetes context
 	if ctx, err := s.pidTranslator.GetPodInfo(pid); err == nil {
 		event.Context = ctx
-		
+
 		// Add actionable fix
 		newLimit := uint64(float64(pred.MemoryLimit) * 1.5)
 		event.Actionable = &ActionableItem{
-			Title:       fmt.Sprintf("OOM Kill Predicted in %.0f minutes", pred.TimeToOOM.Minutes()),
-			Description: fmt.Sprintf("Pod %s will likely be OOM killed. Current usage: %.0f MB, Limit: %.0f MB", 
+			Title: fmt.Sprintf("OOM Kill Predicted in %.0f minutes", pred.TimeToOOM.Minutes()),
+			Description: fmt.Sprintf("Pod %s will likely be OOM killed. Current usage: %.0f MB, Limit: %.0f MB",
 				ctx.Pod, float64(pred.CurrentUsage)/(1024*1024), float64(pred.MemoryLimit)/(1024*1024)),
 			Commands: []string{
 				fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"%s\",\"resources\":{\"limits\":{\"memory\":\"%dMi\"}}}]}}}}'",
@@ -419,7 +419,7 @@ type ProcessCache struct {
 func NewProcessCache(maxSizeBytes int) *ProcessCache {
 	// Assume ~200 bytes per entry
 	maxEntries := maxSizeBytes / 200
-	
+
 	return &ProcessCache{
 		data:     make(map[uint32]*ProcessInfo),
 		maxSize:  maxEntries,
@@ -445,7 +445,7 @@ func (c *ProcessCache) Update(stat *ebpf.ProcessMemoryStats) {
 			// Evict oldest
 			c.evictOldest()
 		}
-		
+
 		c.data[stat.PID] = &ProcessInfo{
 			PID:         stat.PID,
 			Command:     stat.Command,
@@ -459,7 +459,7 @@ func (c *ProcessCache) Update(stat *ebpf.ProcessMemoryStats) {
 func (c *ProcessCache) GetAll() map[uint32]*ProcessInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	// Return copy to avoid race conditions
 	result := make(map[uint32]*ProcessInfo, len(c.data))
 	for k, v := range c.data {
@@ -479,14 +479,14 @@ func (c *ProcessCache) Size() int {
 func (c *ProcessCache) evictOldest() {
 	var oldestPID uint32
 	var oldestTime time.Time
-	
+
 	for pid, proc := range c.data {
 		if oldestTime.IsZero() || proc.LastSeen.Before(oldestTime) {
 			oldestPID = pid
 			oldestTime = proc.LastSeen
 		}
 	}
-	
+
 	if oldestPID > 0 {
 		delete(c.data, oldestPID)
 	}

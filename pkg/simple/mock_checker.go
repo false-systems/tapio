@@ -12,9 +12,9 @@ import (
 
 // MockChecker implements CheckerInterface for testing
 type MockChecker struct {
-	CheckFunc      func(ctx context.Context, req *types.CheckRequest) (*types.CheckResult, error)
-	EBPFMonitor    interface{}
-	KubeClient     kubernetes.Interface
+	CheckFunc   func(ctx context.Context, req *types.CheckRequest) (*types.CheckResult, error)
+	EBPFMonitor interface{}
+	KubeClient  kubernetes.Interface
 }
 
 // Check implements CheckerInterface

@@ -217,7 +217,7 @@ func TestEventDeduplicator_Cleanup(t *testing.T) {
 	// Add some events
 	now := time.Now()
 	deduplicator.recentEvents["old-key"] = now.Add(-5 * deduplicator.window)
-	deduplicator.recentEvents["recent-key"] = now.Add(-deduplicator.window/2)
+	deduplicator.recentEvents["recent-key"] = now.Add(-deduplicator.window / 2)
 
 	// Run cleanup
 	deduplicator.cleanup()

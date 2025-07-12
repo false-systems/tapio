@@ -26,7 +26,7 @@ type EnhancedCollector struct {
 	memoryReader *ringbuf.Reader
 	memoryEvents chan *MemoryEvent
 
-	// Network monitoring  
+	// Network monitoring
 	networkObjs   networkmonitorObjects
 	networkReader *ringbuf.Reader
 	networkEvents chan *NetworkEvent
@@ -56,17 +56,17 @@ type EnhancedCollector struct {
 	errorHandler *ErrorHandler
 
 	// State tracking
-	processStats map[uint32]*ProcessMemoryStats
-	networkStats map[string]*NetworkConnectionStats
-	dnsStats     map[string]*DNSQueryStats
+	processStats  map[uint32]*ProcessMemoryStats
+	networkStats  map[string]*NetworkConnectionStats
+	dnsStats      map[string]*DNSQueryStats
 	protocolStats map[string]*ProtocolStats
-	statsMutex   sync.RWMutex
+	statsMutex    sync.RWMutex
 
 	// Lifecycle management
-	links  []link.Link
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	links   []link.Link
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 	started atomic.Bool
 
 	// Performance monitoring
@@ -682,12 +682,12 @@ func (c *EnhancedCollector) GetStats() map[string]interface{} {
 	defer c.statsMutex.RUnlock()
 
 	return map[string]interface{}{
-		"event_count":     c.eventCount.Load(),
-		"dropped_events":  c.droppedEvents.Load(),
-		"process_count":   len(c.processStats),
-		"network_flows":   len(c.networkStats),
-		"dns_queries":     len(c.dnsStats),
-		"protocol_flows":  len(c.protocolStats),
+		"event_count":    c.eventCount.Load(),
+		"dropped_events": c.droppedEvents.Load(),
+		"process_count":  len(c.processStats),
+		"network_flows":  len(c.networkStats),
+		"dns_queries":    len(c.dnsStats),
+		"protocol_flows": len(c.protocolStats),
 	}
 }
 

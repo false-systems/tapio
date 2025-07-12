@@ -11,53 +11,53 @@ import (
 
 // LoadShedder implements intelligent load shedding
 type LoadShedder struct {
-	name          string
-	config        *LoadSheddingConfig
-	
+	name   string
+	config *LoadSheddingConfig
+
 	// Metrics
-	totalRequests atomic.Uint64
-	shedRequests  atomic.Uint64
+	totalRequests    atomic.Uint64
+	shedRequests     atomic.Uint64
 	acceptedRequests atomic.Uint64
-	
+
 	// State
-	currentLoad   atomic.Uint64
-	cpuUsage      atomic.Uint64
-	memoryUsage   atomic.Uint64
-	latencyP99    atomic.Uint64
-	errorRate     atomic.Uint64
-	
+	currentLoad atomic.Uint64
+	cpuUsage    atomic.Uint64
+	memoryUsage atomic.Uint64
+	latencyP99  atomic.Uint64
+	errorRate   atomic.Uint64
+
 	// Adaptive thresholds
 	adaptiveThreshold float64
 	lastAdaptTime     time.Time
-	
+
 	// Priority handling
 	priorityQueues map[Priority]*PriorityQueue
-	
+
 	mutex sync.RWMutex
 }
 
 // LoadSheddingConfig configures load shedding
 type LoadSheddingConfig struct {
 	// Basic thresholds
-	MaxLoad           uint64
-	CPUThreshold      float64  // 0-100
-	MemoryThreshold   float64  // 0-100
-	LatencyThreshold  time.Duration
+	MaxLoad            uint64
+	CPUThreshold       float64 // 0-100
+	MemoryThreshold    float64 // 0-100
+	LatencyThreshold   time.Duration
 	ErrorRateThreshold float64 // 0-1
-	
+
 	// Adaptive settings
-	EnableAdaptive    bool
-	AdaptiveWindow    time.Duration
-	AdaptiveAlpha     float64 // Learning rate
-	
+	EnableAdaptive bool
+	AdaptiveWindow time.Duration
+	AdaptiveAlpha  float64 // Learning rate
+
 	// Priority settings
-	EnablePriority    bool
-	PriorityLevels    []Priority
-	
+	EnablePriority bool
+	PriorityLevels []Priority
+
 	// Shedding strategies
-	Strategy          SheddingStrategy
-	GradualSteps      int
-	RandomSeedTime    bool
+	Strategy       SheddingStrategy
+	GradualSteps   int
+	RandomSeedTime bool
 }
 
 // Priority represents request priority
@@ -75,20 +75,20 @@ const (
 type SheddingStrategy string
 
 const (
-	StrategyRandom     SheddingStrategy = "random"
-	StrategyPriority   SheddingStrategy = "priority"
-	StrategyAdaptive   SheddingStrategy = "adaptive"
-	StrategyGradual    SheddingStrategy = "gradual"
+	StrategyRandom         SheddingStrategy = "random"
+	StrategyPriority       SheddingStrategy = "priority"
+	StrategyAdaptive       SheddingStrategy = "adaptive"
+	StrategyGradual        SheddingStrategy = "gradual"
 	StrategyCircuitBreaker SheddingStrategy = "circuit_breaker"
 )
 
 // PriorityQueue manages requests by priority
 type PriorityQueue struct {
-	priority    Priority
-	capacity    int
-	current     int
-	shedRate    float64
-	mutex       sync.Mutex
+	priority Priority
+	capacity int
+	current  int
+	shedRate float64
+	mutex    sync.Mutex
 }
 
 // Request represents a request to be processed
@@ -123,7 +123,7 @@ func NewLoadShedder(name string, config *LoadSheddingConfig) *LoadShedder {
 	if config == nil {
 		config = DefaultLoadSheddingConfig()
 	}
-	
+
 	ls := &LoadShedder{
 		name:              name,
 		config:            config,
@@ -131,7 +131,7 @@ func NewLoadShedder(name string, config *LoadSheddingConfig) *LoadShedder {
 		lastAdaptTime:     time.Now(),
 		priorityQueues:    make(map[Priority]*PriorityQueue),
 	}
-	
+
 	// Initialize priority queues
 	if config.EnablePriority {
 		for _, priority := range config.PriorityLevels {
@@ -141,27 +141,27 @@ func NewLoadShedder(name string, config *LoadSheddingConfig) *LoadShedder {
 			}
 		}
 	}
-	
+
 	// Seed random if needed
 	if config.RandomSeedTime {
 		rand.Seed(time.Now().UnixNano())
 	}
-	
+
 	return ls
 }
 
 // ShouldAccept determines if a request should be accepted
 func (ls *LoadShedder) ShouldAccept(ctx context.Context, request *Request) bool {
 	ls.totalRequests.Add(1)
-	
+
 	// Check if we should shed based on strategy
 	shouldShed := ls.shouldShed(request)
-	
+
 	if shouldShed {
 		ls.shedRequests.Add(1)
 		return false
 	}
-	
+
 	ls.acceptedRequests.Add(1)
 	return true
 }
@@ -190,7 +190,7 @@ func (ls *LoadShedder) randomShedding() bool {
 	if load < 0.8 {
 		return false
 	}
-	
+
 	// Shed probability increases with load
 	shedProbability := (load - 0.8) / 0.2
 	return rand.Float64() < shedProbability
@@ -201,14 +201,14 @@ func (ls *LoadShedder) priorityShedding(request *Request) bool {
 	if !ls.config.EnablePriority {
 		return ls.randomShedding()
 	}
-	
+
 	load := ls.getCurrentLoadFactor()
-	
+
 	// Never shed critical requests unless extreme load
 	if request.Priority == PriorityCritical && load < 0.95 {
 		return false
 	}
-	
+
 	// Shed based on priority thresholds
 	thresholds := map[Priority]float64{
 		PriorityCritical: 0.95,
@@ -217,12 +217,12 @@ func (ls *LoadShedder) priorityShedding(request *Request) bool {
 		PriorityLow:      0.65,
 		PriorityBulk:     0.55,
 	}
-	
+
 	threshold, exists := thresholds[request.Priority]
 	if !exists {
 		threshold = 0.75
 	}
-	
+
 	return load > threshold
 }
 
@@ -232,35 +232,35 @@ func (ls *LoadShedder) adaptiveShedding(request *Request) bool {
 	if ls.config.EnableAdaptive && time.Since(ls.lastAdaptTime) > ls.config.AdaptiveWindow {
 		ls.updateAdaptiveThreshold()
 	}
-	
+
 	load := ls.getCurrentLoadFactor()
 	adaptedLoad := load * ls.adaptiveThreshold
-	
+
 	// Combine with priority if enabled
 	if ls.config.EnablePriority {
 		priorityFactor := ls.getPriorityFactor(request.Priority)
 		adaptedLoad *= priorityFactor
 	}
-	
+
 	// Use sigmoid function for smooth shedding
 	shedProbability := 1 / (1 + math.Exp(-10*(adaptedLoad-0.8)))
-	
+
 	return rand.Float64() < shedProbability
 }
 
 // gradualShedding implements gradual load shedding
 func (ls *LoadShedder) gradualShedding() bool {
 	load := ls.getCurrentLoadFactor()
-	
+
 	// Determine shedding step
 	step := int(load * float64(ls.config.GradualSteps))
 	if step >= ls.config.GradualSteps {
 		step = ls.config.GradualSteps - 1
 	}
-	
+
 	// Calculate shed rate for this step
 	shedRate := float64(step) / float64(ls.config.GradualSteps)
-	
+
 	return rand.Float64() < shedRate
 }
 
@@ -271,12 +271,12 @@ func (ls *LoadShedder) circuitBreakerShedding() bool {
 	memoryOverloaded := float64(ls.memoryUsage.Load()) > ls.config.MemoryThreshold
 	latencyHigh := time.Duration(ls.latencyP99.Load()) > ls.config.LatencyThreshold
 	errorRateHigh := float64(ls.errorRate.Load())/100 > ls.config.ErrorRateThreshold
-	
+
 	// If any signal is critical, shed all non-critical traffic
 	if cpuOverloaded || memoryOverloaded || latencyHigh || errorRateHigh {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -286,10 +286,10 @@ func (ls *LoadShedder) getCurrentLoadFactor() float64 {
 	currentRequests := float64(ls.currentLoad.Load())
 	maxLoad := float64(ls.config.MaxLoad)
 	loadFactor := currentRequests / maxLoad
-	
+
 	cpuFactor := float64(ls.cpuUsage.Load()) / 100.0
 	memoryFactor := float64(ls.memoryUsage.Load()) / 100.0
-	
+
 	// Weighted average
 	return 0.4*loadFactor + 0.3*cpuFactor + 0.3*memoryFactor
 }
@@ -297,13 +297,13 @@ func (ls *LoadShedder) getCurrentLoadFactor() float64 {
 // getPriorityFactor returns priority adjustment factor
 func (ls *LoadShedder) getPriorityFactor(priority Priority) float64 {
 	factors := map[Priority]float64{
-		PriorityCritical: 0.5,  // Reduce load factor by 50%
+		PriorityCritical: 0.5, // Reduce load factor by 50%
 		PriorityHigh:     0.7,
 		PriorityNormal:   1.0,
 		PriorityLow:      1.3,
 		PriorityBulk:     1.5,
 	}
-	
+
 	factor, exists := factors[priority]
 	if !exists {
 		return 1.0
@@ -315,18 +315,18 @@ func (ls *LoadShedder) getPriorityFactor(priority Priority) float64 {
 func (ls *LoadShedder) updateAdaptiveThreshold() {
 	ls.mutex.Lock()
 	defer ls.mutex.Unlock()
-	
+
 	// Calculate performance metrics
 	totalReqs := ls.totalRequests.Load()
 	shedReqs := ls.shedRequests.Load()
-	
+
 	if totalReqs == 0 {
 		return
 	}
-	
+
 	shedRate := float64(shedReqs) / float64(totalReqs)
 	errorRate := float64(ls.errorRate.Load()) / 100.0
-	
+
 	// Adjust threshold based on performance
 	var adjustment float64
 	if errorRate > ls.config.ErrorRateThreshold {
@@ -336,18 +336,18 @@ func (ls *LoadShedder) updateAdaptiveThreshold() {
 		// Decrease shedding
 		adjustment = ls.config.AdaptiveAlpha
 	}
-	
+
 	ls.adaptiveThreshold += adjustment
-	
+
 	// Clamp between 0.5 and 1.5
 	if ls.adaptiveThreshold < 0.5 {
 		ls.adaptiveThreshold = 0.5
 	} else if ls.adaptiveThreshold > 1.5 {
 		ls.adaptiveThreshold = 1.5
 	}
-	
+
 	ls.lastAdaptTime = time.Now()
-	
+
 	// Reset counters
 	ls.totalRequests.Store(0)
 	ls.shedRequests.Store(0)
@@ -367,12 +367,12 @@ func (ls *LoadShedder) GetMetrics() LoadShedderMetrics {
 	total := ls.totalRequests.Load()
 	shed := ls.shedRequests.Load()
 	accepted := ls.acceptedRequests.Load()
-	
+
 	var shedRate float64
 	if total > 0 {
 		shedRate = float64(shed) / float64(total)
 	}
-	
+
 	return LoadShedderMetrics{
 		Name:              ls.name,
 		TotalRequests:     total,
@@ -410,38 +410,38 @@ type LoadShedderMetrics struct {
 
 // SystemMetrics represents system metrics for load shedding decisions
 type SystemMetrics struct {
-	CurrentLoad  uint64
-	CPUUsage     float64
-	MemoryUsage  float64
-	LatencyP99   time.Duration
-	ErrorRate    float64
+	CurrentLoad uint64
+	CPUUsage    float64
+	MemoryUsage float64
+	LatencyP99  time.Duration
+	ErrorRate   float64
 }
 
 // RateLimiter implements token bucket rate limiting
 type RateLimiter struct {
-	name         string
-	rate         int
-	burst        int
-	tokens       float64
-	maxTokens    float64
-	lastRefill   time.Time
-	
+	name       string
+	rate       int
+	burst      int
+	tokens     float64
+	maxTokens  float64
+	lastRefill time.Time
+
 	// Metrics
-	totalRequests atomic.Uint64
+	totalRequests   atomic.Uint64
 	allowedRequests atomic.Uint64
-	deniedRequests atomic.Uint64
-	
+	deniedRequests  atomic.Uint64
+
 	mutex sync.Mutex
 }
 
 // NewRateLimiter creates a new rate limiter
 func NewRateLimiter(name string, rate int, burst int) *RateLimiter {
 	return &RateLimiter{
-		name:      name,
-		rate:      rate,
-		burst:     burst,
-		tokens:    float64(burst),
-		maxTokens: float64(burst),
+		name:       name,
+		rate:       rate,
+		burst:      burst,
+		tokens:     float64(burst),
+		maxTokens:  float64(burst),
 		lastRefill: time.Now(),
 	}
 }
@@ -455,9 +455,9 @@ func (rl *RateLimiter) Allow() bool {
 func (rl *RateLimiter) AllowN(n int) bool {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	rl.totalRequests.Add(1)
-	
+
 	// Refill tokens
 	now := time.Now()
 	elapsed := now.Sub(rl.lastRefill).Seconds()
@@ -466,14 +466,14 @@ func (rl *RateLimiter) AllowN(n int) bool {
 		rl.tokens = rl.maxTokens
 	}
 	rl.lastRefill = now
-	
+
 	// Check if we have enough tokens
 	if rl.tokens >= float64(n) {
 		rl.tokens -= float64(n)
 		rl.allowedRequests.Add(1)
 		return true
 	}
-	
+
 	rl.deniedRequests.Add(1)
 	return false
 }

@@ -12,8 +12,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/ebpf"
 )
 
 var sniffCmd = &cobra.Command{
@@ -47,88 +47,88 @@ func init() {
 func runSniff(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	// Create Kubernetes client
 	client, err := createK8sClient()
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
-	
+
 	// Create manager
 	config := collector.DefaultManagerConfig()
 	config.CorrelationBatchSize = sniffBatchSize
 	manager := collector.NewSimpleManager(config)
-	
+
 	// Register collectors based on flags
 	if !sniffK8sOnly {
 		// Create eBPF monitor
 		ebpfConfig := &ebpf.Config{
-			Enabled:                true,
-			EnableMemoryMonitoring: true,
+			Enabled:                 true,
+			EnableMemoryMonitoring:  true,
 			EnableNetworkMonitoring: true,
-			SamplingRate:          0.1,
-			BufferSize:            1024,
+			SamplingRate:            0.1,
+			BufferSize:              1024,
 		}
 		ebpfMonitor := ebpf.NewMonitor(ebpfConfig)
-		
+
 		// Create PID translator
 		translator := collector.NewSimplePIDTranslator(client)
 		if err := translator.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start PID translator: %w", err)
 		}
-		
+
 		// Create and register eBPF collector
 		ebpfCollector := collector.NewEBPFCollector(ebpfMonitor, translator)
 		if err := manager.Register(ebpfCollector); err != nil {
 			return fmt.Errorf("failed to register eBPF collector: %w", err)
 		}
-		
+
 		fmt.Println("✓ eBPF collector registered")
 	}
-	
+
 	if !sniffEBPFOnly {
 		// Create and register K8s collector
 		k8sCollector := collector.NewK8sCollector(client)
 		if err := manager.Register(k8sCollector); err != nil {
 			return fmt.Errorf("failed to register K8s collector: %w", err)
 		}
-		
+
 		fmt.Println("✓ K8s API collector registered")
 	}
-	
+
 	// Start manager
 	if err := manager.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start manager: %w", err)
 	}
-	
+
 	fmt.Println("✓ Correlation engine started")
 	fmt.Println("\nMonitoring cluster... Press Ctrl+C to stop\n")
-	
+
 	// Start output handler
 	go handleOutput(ctx, manager)
-	
+
 	// Start health reporter
 	go reportHealth(ctx, manager)
-	
+
 	// Wait for signal
 	<-sigChan
 	fmt.Println("\n\nShutting down...")
-	
+
 	// Stop manager
 	if err := manager.Stop(); err != nil {
 		return fmt.Errorf("failed to stop manager: %w", err)
 	}
-	
+
 	return nil
 }
 
 func handleOutput(ctx context.Context, manager *collector.SimpleManager) {
 	insights := manager.Insights()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -137,10 +137,10 @@ func handleOutput(ctx context.Context, manager *collector.SimpleManager) {
 			if !ok {
 				return
 			}
-			
+
 			switch sniffOutput {
 			case "json":
-				outputJSON(insight)
+				outputInsightJSON(insight)
 			case "prometheus":
 				outputPrometheus(insight)
 			default:
@@ -159,16 +159,16 @@ func outputText(insight collector.Insight) {
 		collector.SeverityLow:      "\033[32m", // Green
 	}
 	reset := "\033[0m"
-	
-	fmt.Printf("\n%s━━━ %s %s━━━%s\n", 
-		severityColor[insight.Severity], 
-		insight.Severity, 
+
+	fmt.Printf("\n%s━━━ %s %s━━━%s\n",
+		severityColor[insight.Severity],
+		insight.Severity,
 		severityColor[insight.Severity],
 		reset)
-	
+
 	fmt.Printf("🔍 %s%s%s\n", severityColor[insight.Severity], insight.Title, reset)
 	fmt.Printf("   %s\n\n", insight.Description)
-	
+
 	// Show affected resources
 	if len(insight.Resources) > 0 {
 		fmt.Println("📦 Affected Resources:")
@@ -181,7 +181,7 @@ func outputText(insight collector.Insight) {
 		}
 		fmt.Println()
 	}
-	
+
 	// Show prediction if available
 	if insight.Prediction != nil {
 		fmt.Printf("🔮 Prediction: %s\n", insight.Prediction.Type)
@@ -190,7 +190,7 @@ func outputText(insight collector.Insight) {
 		fmt.Printf("   • Confidence: %.0f%%\n", insight.Prediction.Confidence*100)
 		fmt.Println()
 	}
-	
+
 	// Show actionable items
 	if len(insight.Actions) > 0 {
 		fmt.Println("🛠️  Recommended Actions:")
@@ -198,7 +198,7 @@ func outputText(insight collector.Insight) {
 			fmt.Printf("\n   %d. %s\n", i+1, action.Title)
 			fmt.Printf("      %s\n", action.Description)
 			fmt.Printf("      Risk: %s | Impact: %s\n", action.Risk, action.EstimatedImpact)
-			
+
 			if len(action.Commands) > 0 {
 				fmt.Println("\n      Commands to run:")
 				for _, cmd := range action.Commands {
@@ -207,11 +207,11 @@ func outputText(insight collector.Insight) {
 			}
 		}
 	}
-	
+
 	fmt.Println()
 }
 
-func outputJSON(insight collector.Insight) {
+func outputInsightJSON(insight collector.Insight) {
 	// In production, would use proper JSON encoder
 	fmt.Printf(`{
   "id": "%s",
@@ -221,8 +221,8 @@ func outputJSON(insight collector.Insight) {
   "title": "%s",
   "description": "%s"
 }
-`, insight.ID, insight.Timestamp.Format(time.RFC3339), insight.Type, 
-   insight.Severity, insight.Title, insight.Description)
+`, insight.ID, insight.Timestamp.Format(time.RFC3339), insight.Type,
+		insight.Severity, insight.Title, insight.Description)
 }
 
 func outputPrometheus(insight collector.Insight) {
@@ -233,21 +233,21 @@ func outputPrometheus(insight collector.Insight) {
 		collector.SeverityMedium:   1,
 		collector.SeverityLow:      0,
 	}
-	
+
 	timestamp := insight.Timestamp.UnixMilli()
-	
+
 	// Insight metric
 	fmt.Printf("tapio_insight_severity{type=\"%s\",title=\"%s\"} %f %d\n",
 		insight.Type, insight.Title, severityValue[insight.Severity], timestamp)
-	
+
 	// Prediction metrics if available
 	if insight.Prediction != nil {
 		fmt.Printf("tapio_prediction_probability{type=\"%s\"} %f %d\n",
 			insight.Prediction.Type, insight.Prediction.Probability, timestamp)
-		
+
 		fmt.Printf("tapio_prediction_time_to_event_seconds{type=\"%s\"} %f %d\n",
 			insight.Prediction.Type, insight.Prediction.TimeToEvent.Seconds(), timestamp)
-		
+
 		fmt.Printf("tapio_prediction_confidence{type=\"%s\"} %f %d\n",
 			insight.Prediction.Type, insight.Prediction.Confidence, timestamp)
 	}
@@ -256,20 +256,20 @@ func outputPrometheus(insight collector.Insight) {
 func reportHealth(ctx context.Context, manager *collector.SimpleManager) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			stats := manager.GetStats()
-			
+
 			fmt.Printf("\n📊 Stats: Events: %d | Insights: %d | Correlations: %d | Pods: %d\n",
 				stats["correlation_events_processed"],
 				stats["correlation_insights_created"],
 				stats["correlation_correlation_hits"],
 				stats["correlation_tracked_pods"])
-			
+
 			// Check health
 			health := manager.Health()
 			unhealthy := 0
@@ -279,7 +279,7 @@ func reportHealth(ctx context.Context, manager *collector.SimpleManager) {
 					fmt.Printf("⚠️  %s: %s - %s\n", name, h.Status, h.Message)
 				}
 			}
-			
+
 			if unhealthy == 0 {
 				fmt.Println("✅ All systems healthy")
 			}
@@ -293,6 +293,6 @@ func createK8sClient() (kubernetes.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return kubernetes.NewForConfig(config)
 }

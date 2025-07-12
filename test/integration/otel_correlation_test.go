@@ -230,7 +230,7 @@ func TestCorrelationTracingIntegration(t *testing.T) {
 			Severity:     "high",
 		}
 		systemState := map[string]interface{}{
-			"pod_count": 10,
+			"pod_count":   10,
 			"node_memory": "80%",
 		}
 
@@ -305,7 +305,7 @@ func TestOTELExporterHelperMethods(t *testing.T) {
 
 		relationships := exporter.IdentifyCausalRelationships(events)
 		assert.Greater(t, len(relationships), 0)
-		
+
 		// Verify causal chain
 		if len(relationships) > 0 {
 			assert.Equal(t, "triggers", relationships[0].RelationType)

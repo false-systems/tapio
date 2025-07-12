@@ -16,29 +16,29 @@ import (
 type RingBufferManager struct {
 	// Ring buffer readers
 	readers map[string]*ringbuf.Reader
-	
+
 	// Event processors
 	processors map[string]*performance.BatchProcessor[[]byte]
-	
+
 	// Event channels
 	eventChans map[string]chan interface{}
-	
+
 	// Parsers for different event types
 	parsers map[string]EventParser
-	
+
 	// Configuration
 	config RingBufferConfig
-	
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	
+
 	// Metrics
 	eventsReceived atomic.Uint64
 	eventsDropped  atomic.Uint64
 	parseErrors    atomic.Uint64
-	
+
 	// State
 	mu      sync.RWMutex
 	started bool
@@ -47,31 +47,31 @@ type RingBufferManager struct {
 // RingBufferConfig configures the ring buffer manager
 type RingBufferConfig struct {
 	// Processing configuration
-	BatchSize        int
-	BatchTimeout     time.Duration
-	MaxQueueSize     int
-	WorkerCount      int
-	
+	BatchSize    int
+	BatchTimeout time.Duration
+	MaxQueueSize int
+	WorkerCount  int
+
 	// Error handling
-	MaxParseErrors   int
-	ErrorBackoff     time.Duration
-	
+	MaxParseErrors int
+	ErrorBackoff   time.Duration
+
 	// Metrics
-	EnableMetrics    bool
-	MetricsInterval  time.Duration
+	EnableMetrics   bool
+	MetricsInterval time.Duration
 }
 
 // DefaultRingBufferConfig returns default configuration
 func DefaultRingBufferConfig() RingBufferConfig {
 	return RingBufferConfig{
-		BatchSize:        100,
-		BatchTimeout:     50 * time.Millisecond,
-		MaxQueueSize:     10000,
-		WorkerCount:      4,
-		MaxParseErrors:   1000,
-		ErrorBackoff:     100 * time.Millisecond,
-		EnableMetrics:    true,
-		MetricsInterval:  10 * time.Second,
+		BatchSize:       100,
+		BatchTimeout:    50 * time.Millisecond,
+		MaxQueueSize:    10000,
+		WorkerCount:     4,
+		MaxParseErrors:  1000,
+		ErrorBackoff:    100 * time.Millisecond,
+		EnableMetrics:   true,
+		MetricsInterval: 10 * time.Second,
 	}
 }
 
@@ -84,7 +84,7 @@ type EventParser interface {
 // NewRingBufferManager creates a new ring buffer manager
 func NewRingBufferManager(config RingBufferConfig) (*RingBufferManager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &RingBufferManager{
 		readers:    make(map[string]*ringbuf.Reader),
 		processors: make(map[string]*performance.BatchProcessor[[]byte]),
@@ -100,20 +100,20 @@ func NewRingBufferManager(config RingBufferConfig) (*RingBufferManager, error) {
 func (m *RingBufferManager) AddRingBuffer(name string, reader *ringbuf.Reader, parser EventParser, eventChan chan interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.started {
 		return errors.New("cannot add ring buffer after manager is started")
 	}
-	
+
 	if _, exists := m.readers[name]; exists {
 		return fmt.Errorf("ring buffer %s already exists", name)
 	}
-	
+
 	// Store components
 	m.readers[name] = reader
 	m.parsers[name] = parser
 	m.eventChans[name] = eventChan
-	
+
 	// Create batch processor for this ring buffer
 	processFn := m.createProcessFunc(name, parser, eventChan)
 	processor := performance.NewBatchProcessor(
@@ -123,7 +123,7 @@ func (m *RingBufferManager) AddRingBuffer(name string, reader *ringbuf.Reader, p
 		processFn,
 	)
 	m.processors[name] = processor
-	
+
 	return nil
 }
 
@@ -131,30 +131,30 @@ func (m *RingBufferManager) AddRingBuffer(name string, reader *ringbuf.Reader, p
 func (m *RingBufferManager) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.started {
 		return errors.New("ring buffer manager already started")
 	}
-	
+
 	// Start all batch processors
 	for name, processor := range m.processors {
 		if err := processor.Start(); err != nil {
 			return fmt.Errorf("failed to start processor for %s: %w", name, err)
 		}
 	}
-	
+
 	// Start reader goroutines for each ring buffer
 	for name, reader := range m.readers {
 		m.wg.Add(1)
 		go m.readLoop(name, reader)
 	}
-	
+
 	// Start metrics collector if enabled
 	if m.config.EnableMetrics {
 		m.wg.Add(1)
 		go m.metricsLoop()
 	}
-	
+
 	m.started = true
 	return nil
 }
@@ -167,20 +167,20 @@ func (m *RingBufferManager) Stop() error {
 		return nil
 	}
 	m.mu.Unlock()
-	
+
 	// Cancel context to stop all goroutines
 	m.cancel()
-	
+
 	// Close all readers
 	m.mu.RLock()
 	for _, reader := range m.readers {
 		reader.Close()
 	}
 	m.mu.RUnlock()
-	
+
 	// Wait for goroutines to finish
 	m.wg.Wait()
-	
+
 	// Stop all processors
 	m.mu.RLock()
 	var firstErr error
@@ -190,7 +190,7 @@ func (m *RingBufferManager) Stop() error {
 		}
 	}
 	m.mu.RUnlock()
-	
+
 	// Close event channels
 	m.mu.Lock()
 	for _, ch := range m.eventChans {
@@ -198,30 +198,30 @@ func (m *RingBufferManager) Stop() error {
 	}
 	m.started = false
 	m.mu.Unlock()
-	
+
 	return firstErr
 }
 
 // readLoop reads events from a ring buffer
 func (m *RingBufferManager) readLoop(name string, reader *ringbuf.Reader) {
 	defer m.wg.Done()
-	
+
 	processor := m.processors[name]
 	consecutiveErrors := 0
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
 		default:
 		}
-		
+
 		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				return
 			}
-			
+
 			consecutiveErrors++
 			if consecutiveErrors > m.config.MaxParseErrors {
 				// Too many errors, backing off
@@ -234,14 +234,14 @@ func (m *RingBufferManager) readLoop(name string, reader *ringbuf.Reader) {
 			}
 			continue
 		}
-		
+
 		consecutiveErrors = 0
 		m.eventsReceived.Add(1)
-		
+
 		// Copy the data as the ringbuf record will be reused
 		data := make([]byte, len(record.RawSample))
 		copy(data, record.RawSample)
-		
+
 		// Submit to batch processor
 		if err := processor.Submit(data); err != nil {
 			m.eventsDropped.Add(1)
@@ -259,7 +259,7 @@ func (m *RingBufferManager) createProcessFunc(name string, parser EventParser, e
 				m.parseErrors.Add(1)
 				continue
 			}
-			
+
 			// Send to event channel
 			select {
 			case eventChan <- event:
@@ -277,12 +277,12 @@ func (m *RingBufferManager) createProcessFunc(name string, parser EventParser, e
 // metricsLoop periodically logs metrics
 func (m *RingBufferManager) metricsLoop() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(m.config.MetricsInterval)
 	defer ticker.Stop()
-	
+
 	var lastReceived, lastDropped, lastErrors uint64
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -291,11 +291,11 @@ func (m *RingBufferManager) metricsLoop() {
 			received := m.eventsReceived.Load()
 			dropped := m.eventsDropped.Load()
 			errors := m.parseErrors.Load()
-			
+
 			receivedDelta := received - lastReceived
 			droppedDelta := dropped - lastDropped
 			errorsDelta := errors - lastErrors
-			
+
 			if receivedDelta > 0 || droppedDelta > 0 || errorsDelta > 0 {
 				fmt.Printf("RingBufferManager: received=%d/s, dropped=%d/s, errors=%d/s\n",
 					receivedDelta*uint64(time.Second)/uint64(m.config.MetricsInterval),
@@ -303,7 +303,7 @@ func (m *RingBufferManager) metricsLoop() {
 					errorsDelta*uint64(time.Second)/uint64(m.config.MetricsInterval),
 				)
 			}
-			
+
 			lastReceived = received
 			lastDropped = dropped
 			lastErrors = errors
@@ -315,14 +315,14 @@ func (m *RingBufferManager) metricsLoop() {
 func (m *RingBufferManager) GetMetrics() RingBufferMetrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	metrics := RingBufferMetrics{
 		EventsReceived: m.eventsReceived.Load(),
 		EventsDropped:  m.eventsDropped.Load(),
 		ParseErrors:    m.parseErrors.Load(),
 		BufferMetrics:  make(map[string]BufferMetrics),
 	}
-	
+
 	// Collect per-buffer metrics
 	for name, processor := range m.processors {
 		procMetrics := processor.GetMetrics()
@@ -335,7 +335,7 @@ func (m *RingBufferManager) GetMetrics() RingBufferMetrics {
 			AvgBatchSize: procMetrics.AvgBatchSize,
 		}
 	}
-	
+
 	return metrics
 }
 

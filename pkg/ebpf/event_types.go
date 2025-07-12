@@ -33,11 +33,11 @@ type DNSEventType uint8
 
 const (
 	// DNS event subtypes
-	DNSEventQuery     DNSEventType = 1
-	DNSEventResponse  DNSEventType = 2
-	DNSEventTimeout   DNSEventType = 3
-	DNSEventError     DNSEventType = 4
-	DNSEventNXDomain  DNSEventType = 5
+	DNSEventQuery    DNSEventType = 1
+	DNSEventResponse DNSEventType = 2
+	DNSEventTimeout  DNSEventType = 3
+	DNSEventError    DNSEventType = 4
+	DNSEventNXDomain DNSEventType = 5
 )
 
 // PacketEventType represents specific packet event types
@@ -45,11 +45,11 @@ type PacketEventType uint8
 
 const (
 	// Packet event subtypes
-	PacketEventLoss       PacketEventType = 1
+	PacketEventLoss        PacketEventType = 1
 	PacketEventHighLatency PacketEventType = 2
-	PacketEventReorder    PacketEventType = 3
-	PacketEventDuplicate  PacketEventType = 4
-	PacketEventCorruption PacketEventType = 5
+	PacketEventReorder     PacketEventType = 3
+	PacketEventDuplicate   PacketEventType = 4
+	PacketEventCorruption  PacketEventType = 5
 )
 
 // ProtocolEventType represents specific protocol event types
@@ -80,11 +80,11 @@ type CPUEventType uint8
 
 const (
 	// CPU event subtypes
-	CPUEventThrottle    CPUEventType = 1
-	CPUEventSchedule    CPUEventType = 2
-	CPUEventMigration   CPUEventType = 3
-	CPUEventStall       CPUEventType = 4
-	CPUEventPressure    CPUEventType = 5
+	CPUEventThrottle  CPUEventType = 1
+	CPUEventSchedule  CPUEventType = 2
+	CPUEventMigration CPUEventType = 3
+	CPUEventStall     CPUEventType = 4
+	CPUEventPressure  CPUEventType = 5
 )
 
 // IOEventType represents specific I/O event types
@@ -92,11 +92,11 @@ type IOEventType uint8
 
 const (
 	// I/O event subtypes
-	IOEventRead     IOEventType = 1
-	IOEventWrite    IOEventType = 2
-	IOEventSync     IOEventType = 3
-	IOEventLatency  IOEventType = 4
-	IOEventError    IOEventType = 5
+	IOEventRead    IOEventType = 1
+	IOEventWrite   IOEventType = 2
+	IOEventSync    IOEventType = 3
+	IOEventLatency IOEventType = 4
+	IOEventError   IOEventType = 5
 )
 
 // String representations for better logging

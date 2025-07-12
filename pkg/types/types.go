@@ -1,8 +1,8 @@
 package types
 
 import (
-	"time"
 	corev1 "k8s.io/api/core/v1"
+	"time"
 )
 
 // CheckRequest represents a health check request

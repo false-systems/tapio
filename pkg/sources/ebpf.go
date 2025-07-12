@@ -178,17 +178,16 @@ func (s *EBPFSource) IsAvailable() bool {
 	return s.IsAvailableWithContext(context.Background())
 }
 
-
 // GetData retrieves data of the specified type
 func (s *EBPFSource) GetData(ctx context.Context, dataType string, params map[string]interface{}) (interface{}, error) {
 	if !s.started {
 		return nil, fmt.Errorf("eBPF source not started")
 	}
-	
+
 	// For now, return a simple EBPFData structure
 	// In a real implementation, this would collect actual eBPF data
 	return &correlation.EBPFData{
-		ProcessStats:  make(map[uint32]*correlation.ProcessMemoryStats),
+		ProcessStats: make(map[uint32]*correlation.ProcessMemoryStats),
 		SystemMetrics: correlation.SystemMetrics{
 			Timestamp: time.Now(),
 		},

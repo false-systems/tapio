@@ -22,17 +22,17 @@ import (
 // SimplePIDTranslator provides fast PID to Pod translation with caching
 type SimplePIDTranslator struct {
 	// Core components
-	client          kubernetes.Interface
-	nodeInformer    cache.SharedIndexInformer
-	podInformer     cache.SharedIndexInformer
-	ctx             context.Context
-	cancel          context.CancelFunc
+	client       kubernetes.Interface
+	nodeInformer cache.SharedIndexInformer
+	podInformer  cache.SharedIndexInformer
+	ctx          context.Context
+	cancel       context.CancelFunc
 
 	// Caching layers
-	pidCache        *PIDCache        // PID -> container info (hot cache)
-	containerCache  *ContainerCache  // container ID -> pod info
-	podCache        map[string]*corev1.Pod // pod key -> pod object
-	cacheMutex      sync.RWMutex
+	pidCache       *PIDCache              // PID -> container info (hot cache)
+	containerCache *ContainerCache        // container ID -> pod info
+	podCache       map[string]*corev1.Pod // pod key -> pod object
+	cacheMutex     sync.RWMutex
 
 	// Performance metrics
 	cacheHits       uint64
@@ -43,10 +43,10 @@ type SimplePIDTranslator struct {
 
 // PIDCache is a fixed-size LRU cache for PID lookups
 type PIDCache struct {
-	mu       sync.RWMutex
-	entries  map[uint32]*PIDEntry
-	lru      []uint32
-	maxSize  int
+	mu      sync.RWMutex
+	entries map[uint32]*PIDEntry
+	lru     []uint32
+	maxSize int
 }
 
 // PIDEntry holds cached PID information
@@ -242,7 +242,7 @@ func (t *SimplePIDTranslator) updatePodCache(pod *corev1.Pod) {
 
 		// Extract container ID (remove docker://, containerd://, etc.)
 		containerID := extractContainerID(container.ContainerID)
-		
+
 		t.containerCache.Put(containerID, &ContainerEntry{
 			ContainerID: containerID,
 			PodName:     pod.Name,
@@ -274,7 +274,7 @@ func (t *SimplePIDTranslator) removePodFromCache(pod *corev1.Pod) {
 // getContainerIDFromPID reads container ID from /proc/PID/cgroup
 func (t *SimplePIDTranslator) getContainerIDFromPID(pid uint32) (string, error) {
 	cgroupPath := fmt.Sprintf("/proc/%d/cgroup", pid)
-	
+
 	file, err := os.Open(cgroupPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open cgroup file: %w", err)
@@ -284,7 +284,7 @@ func (t *SimplePIDTranslator) getContainerIDFromPID(pid uint32) (string, error) 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// Look for container ID in cgroup path
 		// Format: 0::/kubepods/besteffort/pod<pod-uid>/<container-id>
 		if strings.Contains(line, "kubepods") {
@@ -385,13 +385,13 @@ func (t *SimplePIDTranslator) scanProc() {
 // GetStats returns translator statistics
 func (t *SimplePIDTranslator) GetStats() map[string]interface{} {
 	return map[string]interface{}{
-		"cache_hits":          atomic.LoadUint64(&t.cacheHits),
-		"cache_misses":        atomic.LoadUint64(&t.cacheMisses),
-		"hit_rate":            t.getHitRate(),
-		"avg_lookup_ns":       t.getAvgLookupLatency(),
-		"pid_cache_size":      t.pidCache.Size(),
+		"cache_hits":           atomic.LoadUint64(&t.cacheHits),
+		"cache_misses":         atomic.LoadUint64(&t.cacheMisses),
+		"hit_rate":             t.getHitRate(),
+		"avg_lookup_ns":        t.getAvgLookupLatency(),
+		"pid_cache_size":       t.pidCache.Size(),
 		"container_cache_size": t.containerCache.Size(),
-		"last_cache_update":   t.lastCacheUpdate,
+		"last_cache_update":    t.lastCacheUpdate,
 	}
 }
 
@@ -468,7 +468,7 @@ func (c *PIDCache) evictOldest() {
 	// Find oldest entry
 	oldestPID := c.lru[0]
 	delete(c.entries, oldestPID)
-	
+
 	// Remove from LRU list
 	c.lru = c.lru[1:]
 }
@@ -486,7 +486,7 @@ func (c *PIDCache) Cleanup() {
 	defer c.mu.Unlock()
 
 	cutoff := time.Now().Add(-5 * time.Minute)
-	
+
 	// Remove old entries
 	for pid, entry := range c.entries {
 		if entry.LastAccessed.Before(cutoff) {
@@ -543,7 +543,7 @@ func extractContainerID(fullID string) string {
 	for _, prefix := range []string{"docker://", "containerd://", "cri-o://"} {
 		fullID = strings.TrimPrefix(fullID, prefix)
 	}
-	
+
 	// Take first 12 characters for consistency
 	if len(fullID) > 12 {
 		return fullID[:12]

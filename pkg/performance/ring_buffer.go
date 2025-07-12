@@ -9,14 +9,14 @@ import (
 
 // RingBuffer is a lock-free multi-producer multi-consumer ring buffer
 type RingBuffer struct {
-	buffer         []unsafe.Pointer
-	capacity       uint64
-	capacityMask   uint64
-	_              [128]byte // padding to prevent false sharing
-	writeIndex     atomic.Uint64
-	_              [128]byte // padding
-	readIndex      atomic.Uint64
-	_              [128]byte // padding
+	buffer       []unsafe.Pointer
+	capacity     uint64
+	capacityMask uint64
+	_            [128]byte // padding to prevent false sharing
+	writeIndex   atomic.Uint64
+	_            [128]byte // padding
+	readIndex    atomic.Uint64
+	_            [128]byte // padding
 }
 
 // NewRingBuffer creates a new ring buffer with the given capacity
@@ -72,7 +72,7 @@ func (r *RingBuffer) Get() (unsafe.Pointer, error) {
 		if r.readIndex.CompareAndSwap(readIdx, readIdx+1) {
 			// Successfully claimed the slot
 			idx := readIdx & r.capacityMask
-			
+
 			// Spin wait for the item to be written
 			for {
 				item := atomic.LoadPointer(&r.buffer[idx])
@@ -123,7 +123,7 @@ func (r *RingBuffer) TryGet() (unsafe.Pointer, bool) {
 	// Try to claim the slot
 	if r.readIndex.CompareAndSwap(readIdx, readIdx+1) {
 		idx := readIdx & r.capacityMask
-		
+
 		// Wait for the item to be written
 		for i := 0; i < 1000; i++ {
 			item := atomic.LoadPointer(&r.buffer[idx])
@@ -142,7 +142,7 @@ func (r *RingBuffer) TryGet() (unsafe.Pointer, bool) {
 func (r *RingBuffer) Size() uint64 {
 	writeIdx := r.writeIndex.Load()
 	readIdx := r.readIndex.Load()
-	
+
 	if writeIdx >= readIdx {
 		return writeIdx - readIdx
 	}
@@ -201,7 +201,7 @@ func (r *SPSCRingBuffer) Put(item unsafe.Pointer) error {
 
 	idx := writeIdx & r.capacityMask
 	r.buffer[idx] = item
-	
+
 	// Ensure write is visible before updating index
 	atomic.StoreUint64(&r.writeIndex, writeIdx+1)
 	return nil
@@ -219,7 +219,7 @@ func (r *SPSCRingBuffer) Get() (unsafe.Pointer, error) {
 	idx := readIdx & r.capacityMask
 	item := r.buffer[idx]
 	r.buffer[idx] = nil
-	
+
 	// Ensure read is complete before updating index
 	atomic.StoreUint64(&r.readIndex, readIdx+1)
 	return item, nil
@@ -302,7 +302,7 @@ func (r *BatchRingBuffer) GetBatch(items []unsafe.Pointer) int {
 			retrieved := 0
 			for i := uint64(0); i < available; i++ {
 				idx := (readIdx + i) & r.capacityMask
-				
+
 				// Spin wait for item
 				for j := 0; j < 1000; j++ {
 					item := atomic.LoadPointer(&r.buffer[idx])

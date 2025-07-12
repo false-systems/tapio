@@ -101,7 +101,7 @@ func (p *SystemEventParser) Parse(data []byte) (interface{}, error) {
 	if len(data) < 12 {
 		return nil, NewParserError("SystemEventParser", string(CategorySystem), len(data), 12)
 	}
-	
+
 	// Return a minimal SystemEvent
 	return &SystemEvent{
 		Type:      string(CategorySystem),
@@ -128,10 +128,10 @@ func (p *CPUEventParser) Parse(data []byte) (interface{}, error) {
 	if len(data) < 36 {
 		return nil, NewParserError("CPUEventParser", string(CategoryCPU), len(data), 36)
 	}
-	
+
 	// Parse timestamp from binary data
 	timestamp := binary.LittleEndian.Uint64(data[0:8])
-	
+
 	event := &CPUEvent{
 		Timestamp:      time.Unix(0, int64(timestamp)),
 		CPU:            binary.LittleEndian.Uint32(data[8:12]),
@@ -141,7 +141,7 @@ func (p *CPUEventParser) Parse(data []byte) (interface{}, error) {
 		RunQueueLength: binary.LittleEndian.Uint32(data[24:28]),
 		LatencyNS:      binary.LittleEndian.Uint64(data[28:36]),
 	}
-	
+
 	return event, nil
 }
 
@@ -162,10 +162,10 @@ func (p *IOEventParser) Parse(data []byte) (interface{}, error) {
 	if len(data) < 48 {
 		return nil, NewParserError("IOEventParser", string(CategoryIO), len(data), 48)
 	}
-	
+
 	// Parse timestamp from binary data
 	timestamp := binary.LittleEndian.Uint64(data[0:8])
-	
+
 	event := &IOEvent{
 		Timestamp:   time.Unix(0, int64(timestamp)),
 		PID:         binary.LittleEndian.Uint32(data[8:12]),
@@ -177,7 +177,7 @@ func (p *IOEventParser) Parse(data []byte) (interface{}, error) {
 		BytesCount:  binary.LittleEndian.Uint32(data[36:40]),
 		LatencyNS:   binary.LittleEndian.Uint64(data[40:48]),
 	}
-	
+
 	return event, nil
 }
 

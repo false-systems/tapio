@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 func TestPrometheusFormatter_FormatMetric(t *testing.T) {

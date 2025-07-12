@@ -18,9 +18,9 @@ type JournaldSource struct {
 	filters         *journald.Filters
 
 	// Configuration
-	config      *JournaldConfig
-	services    []string
-	logLevels   []string
+	config    *JournaldConfig
+	services  []string
+	logLevels []string
 
 	// State management
 	mutex       sync.RWMutex
@@ -28,9 +28,9 @@ type JournaldSource struct {
 	lastCollect time.Time
 
 	// Event streams
-	logEvents   chan *journald.LogEvent
-	ctx         context.Context
-	cancel      context.CancelFunc
+	logEvents chan *journald.LogEvent
+	ctx       context.Context
+	cancel    context.CancelFunc
 
 	// Performance tracking
 	eventCount    uint64
@@ -45,35 +45,35 @@ type JournaldConfig struct {
 	IgnoredServices   []string `yaml:"ignored_services"`
 
 	// Log level filtering
-	LogLevels         []string `yaml:"log_levels"`
-	MinLogLevel       string   `yaml:"min_log_level"`
+	LogLevels   []string `yaml:"log_levels"`
+	MinLogLevel string   `yaml:"min_log_level"`
 
 	// Pattern matching
-	ErrorPatterns     []string `yaml:"error_patterns"`
-	WarningPatterns   []string `yaml:"warning_patterns"`
-	SecurityPatterns  []string `yaml:"security_patterns"`
+	ErrorPatterns       []string `yaml:"error_patterns"`
+	WarningPatterns     []string `yaml:"warning_patterns"`
+	SecurityPatterns    []string `yaml:"security_patterns"`
 	PerformancePatterns []string `yaml:"performance_patterns"`
 
 	// Event classification
-	EnableClassification bool `yaml:"enable_classification"`
+	EnableClassification bool                          `yaml:"enable_classification"`
 	ClassificationRules  []journald.ClassificationRule `yaml:"classification_rules"`
 
 	// Performance settings
-	EventBufferSize     int           `yaml:"event_buffer_size"`
-	ReadBatchSize       int           `yaml:"read_batch_size"`
-	ReadTimeout         time.Duration `yaml:"read_timeout"`
-	ProcessingTimeout   time.Duration `yaml:"processing_timeout"`
+	EventBufferSize   int           `yaml:"event_buffer_size"`
+	ReadBatchSize     int           `yaml:"read_batch_size"`
+	ReadTimeout       time.Duration `yaml:"read_timeout"`
+	ProcessingTimeout time.Duration `yaml:"processing_timeout"`
 
 	// Resource limits
-	MaxMemoryUsage      uint64        `yaml:"max_memory_usage"`
-	MaxEventsPerSecond  int           `yaml:"max_events_per_second"`
-	HistoryRetention    time.Duration `yaml:"history_retention"`
+	MaxMemoryUsage     uint64        `yaml:"max_memory_usage"`
+	MaxEventsPerSecond int           `yaml:"max_events_per_second"`
+	HistoryRetention   time.Duration `yaml:"history_retention"`
 
 	// Journald settings
-	JournalPath         string        `yaml:"journal_path"`
-	SeekToEnd           bool          `yaml:"seek_to_end"`
-	FollowMode          bool          `yaml:"follow_mode"`
-	ReconnectInterval   time.Duration `yaml:"reconnect_interval"`
+	JournalPath       string        `yaml:"journal_path"`
+	SeekToEnd         bool          `yaml:"seek_to_end"`
+	FollowMode        bool          `yaml:"follow_mode"`
+	ReconnectInterval time.Duration `yaml:"reconnect_interval"`
 }
 
 // DefaultJournaldConfig returns the default configuration
@@ -93,7 +93,7 @@ func DefaultJournaldConfig() *JournaldConfig {
 			"systemd-udevd",
 			"cron",
 		},
-		LogLevels: []string{"error", "warning", "notice", "info"},
+		LogLevels:   []string{"error", "warning", "notice", "info"},
 		MinLogLevel: "warning",
 		ErrorPatterns: []string{
 			"error",
@@ -137,9 +137,9 @@ func DefaultJournaldConfig() *JournaldConfig {
 		MaxEventsPerSecond:   10000,
 		HistoryRetention:     24 * time.Hour,
 		JournalPath:          "/var/log/journal",
-		SeekToEnd:           true,
-		FollowMode:          true,
-		ReconnectInterval:   5 * time.Second,
+		SeekToEnd:            true,
+		FollowMode:           true,
+		ReconnectInterval:    5 * time.Second,
 	}
 }
 
@@ -286,7 +286,7 @@ func (s *JournaldSource) Collect() (interface{}, error) {
 
 	// Get pattern matches
 	patternMatchesRaw := s.patternMatcher.GetMatches()
-	
+
 	// Convert to interface{} map
 	patternMatches := make(map[string]interface{})
 	for k, v := range patternMatchesRaw {

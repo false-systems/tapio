@@ -13,32 +13,32 @@ import (
 // EventPipeline is a high-performance event processing pipeline
 type EventPipeline struct {
 	// Pipeline stages
-	stages      []Stage
-	stageCount  int
-	
+	stages     []Stage
+	stageCount int
+
 	// Ring buffers between stages
-	buffers     []*RingBuffer
-	
+	buffers []*RingBuffer
+
 	// Worker pools
 	workers     [][]worker
 	workerCount []int
-	
+
 	// Event pools
-	eventPool   *TypedPool[Event]
-	
+	eventPool *TypedPool[Event]
+
 	// Metrics
-	processed   atomic.Uint64
-	dropped     atomic.Uint64
-	latencyNs   atomic.Uint64
-	throughput  atomic.Uint64
-	
+	processed  atomic.Uint64
+	dropped    atomic.Uint64
+	latencyNs  atomic.Uint64
+	throughput atomic.Uint64
+
 	// Control
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	// Configuration
-	config      PipelineConfig
+	config PipelineConfig
 }
 
 // Event represents a pipeline event
@@ -62,31 +62,31 @@ type Stage interface {
 
 // worker represents a stage worker
 type worker struct {
-	id          int
-	stage       Stage
-	input       *RingBuffer
-	output      *RingBuffer
-	eventPool   *TypedPool[Event]
-	processed   atomic.Uint64
-	errors      atomic.Uint64
+	id        int
+	stage     Stage
+	input     *RingBuffer
+	output    *RingBuffer
+	eventPool *TypedPool[Event]
+	processed atomic.Uint64
+	errors    atomic.Uint64
 }
 
 // PipelineConfig configures the event pipeline
 type PipelineConfig struct {
 	// Buffer sizes (must be power of 2)
-	BufferSize      uint64
-	
+	BufferSize uint64
+
 	// Worker configuration
 	WorkersPerStage int
 	UseAffinity     bool
-	
+
 	// Performance settings
-	BatchSize       int
-	MaxLatency      time.Duration
-	
+	BatchSize  int
+	MaxLatency time.Duration
+
 	// Memory settings
-	EventPoolSize   int
-	EnableZeroCopy  bool
+	EventPoolSize  int
+	EnableZeroCopy bool
 }
 
 // DefaultPipelineConfig returns default configuration
@@ -107,9 +107,9 @@ func NewEventPipeline(stages []Stage, config PipelineConfig) (*EventPipeline, er
 	if len(stages) == 0 {
 		return nil, fmt.Errorf("at least one stage required")
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Create event pool
 	eventPool, err := NewTypedPool[Event](
 		func() *Event { return &Event{} },
@@ -121,7 +121,7 @@ func NewEventPipeline(stages []Stage, config PipelineConfig) (*EventPipeline, er
 		cancel()
 		return nil, err
 	}
-	
+
 	// Create ring buffers between stages
 	buffers := make([]*RingBuffer, len(stages)+1)
 	for i := range buffers {
@@ -131,15 +131,15 @@ func NewEventPipeline(stages []Stage, config PipelineConfig) (*EventPipeline, er
 			return nil, err
 		}
 	}
-	
+
 	// Create workers
 	workers := make([][]worker, len(stages))
 	workerCount := make([]int, len(stages))
-	
+
 	for i, stage := range stages {
 		workerCount[i] = config.WorkersPerStage
 		workers[i] = make([]worker, workerCount[i])
-		
+
 		for j := range workers[i] {
 			workers[i][j] = worker{
 				id:        j,
@@ -150,7 +150,7 @@ func NewEventPipeline(stages []Stage, config PipelineConfig) (*EventPipeline, er
 			}
 		}
 	}
-	
+
 	return &EventPipeline{
 		stages:      stages,
 		stageCount:  len(stages),
@@ -170,29 +170,29 @@ func (p *EventPipeline) Start() error {
 	for stageIdx, stageWorkers := range p.workers {
 		for workerIdx, worker := range stageWorkers {
 			p.wg.Add(1)
-			
+
 			// Copy values for closure
 			w := worker
 			stage := stageIdx
 			wid := workerIdx
-			
+
 			go func() {
 				defer p.wg.Done()
-				
+
 				// Set CPU affinity if enabled
 				if p.config.UseAffinity {
 					setCPUAffinity(stage*p.config.WorkersPerStage + wid)
 				}
-				
+
 				p.runWorker(&w)
 			}()
 		}
 	}
-	
+
 	// Start metrics collector
 	p.wg.Add(1)
 	go p.collectMetrics()
-	
+
 	return nil
 }
 
@@ -207,14 +207,14 @@ func (p *EventPipeline) Stop() error {
 func (p *EventPipeline) Submit(event *Event) error {
 	// Record start time
 	event.Timestamp = time.Now().UnixNano()
-	
+
 	// Submit to first buffer
 	ptr := unsafe.Pointer(event)
 	if err := p.buffers[0].Put(ptr); err != nil {
 		p.dropped.Add(1)
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -222,15 +222,15 @@ func (p *EventPipeline) Submit(event *Event) error {
 func (p *EventPipeline) SubmitBatch(events []*Event) error {
 	timestamp := time.Now().UnixNano()
 	ptrs := make([]unsafe.Pointer, len(events))
-	
+
 	for i, event := range events {
 		event.Timestamp = timestamp
 		ptrs[i] = unsafe.Pointer(event)
 	}
-	
+
 	// For now, fall back to individual puts
 	// TODO: Implement BatchRingBuffer for better performance
-	
+
 	// Fall back to individual puts
 	errors := 0
 	for _, ptr := range ptrs {
@@ -239,11 +239,11 @@ func (p *EventPipeline) SubmitBatch(events []*Event) error {
 			p.dropped.Add(1)
 		}
 	}
-	
+
 	if errors > 0 {
 		return fmt.Errorf("failed to submit %d events", errors)
 	}
-	
+
 	return nil
 }
 
@@ -263,7 +263,7 @@ func (p *EventPipeline) GetOutput() (*Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return (*Event)(ptr), nil
 }
 
@@ -271,7 +271,7 @@ func (p *EventPipeline) GetOutput() (*Event, error) {
 func (p *EventPipeline) GetOutputBatch(events []*Event) int {
 	// For now, fall back to individual gets
 	// TODO: Implement BatchRingBuffer for better performance
-	
+
 	// Fall back to individual gets
 	count := 0
 	for i := range events {
@@ -282,21 +282,21 @@ func (p *EventPipeline) GetOutputBatch(events []*Event) int {
 		events[i] = (*Event)(ptr)
 		count++
 	}
-	
+
 	return count
 }
 
 // runWorker runs a single worker
 func (p *EventPipeline) runWorker(w *worker) {
 	batch := make([]unsafe.Pointer, p.config.BatchSize)
-	
+
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
 		default:
 		}
-		
+
 		// Try to get a batch
 		count := 0
 		for i := 0; i < p.config.BatchSize; i++ {
@@ -307,7 +307,7 @@ func (p *EventPipeline) runWorker(w *worker) {
 				break
 			}
 		}
-		
+
 		// Process batch if we have events
 		if count > 0 {
 			p.processBatch(w, batch[:count])
@@ -322,7 +322,7 @@ func (p *EventPipeline) runWorker(w *worker) {
 func (p *EventPipeline) processBatch(w *worker, batch []unsafe.Pointer) {
 	for _, ptr := range batch {
 		event := (*Event)(ptr)
-		
+
 		// Check if stage can process this event
 		if !w.stage.CanProcess(event) {
 			// Skip this stage
@@ -332,28 +332,28 @@ func (p *EventPipeline) processBatch(w *worker, batch []unsafe.Pointer) {
 			}
 			continue
 		}
-		
+
 		// Process event
 		start := time.Now().UnixNano()
 		processed, err := w.stage.Process(p.ctx, event)
 		elapsed := time.Now().UnixNano() - start
-		
+
 		if err != nil {
 			w.errors.Add(1)
 			w.eventPool.Put(event)
 			continue
 		}
-		
+
 		if processed == nil {
 			// Event filtered out
 			w.eventPool.Put(event)
 			continue
 		}
-		
+
 		// Update metrics
 		w.processed.Add(1)
 		p.latencyNs.Add(uint64(elapsed))
-		
+
 		// Pass to next stage
 		if err := w.output.Put(unsafe.Pointer(processed)); err != nil {
 			p.dropped.Add(1)
@@ -365,12 +365,12 @@ func (p *EventPipeline) processBatch(w *worker, batch []unsafe.Pointer) {
 // collectMetrics collects pipeline metrics
 func (p *EventPipeline) collectMetrics() {
 	defer p.wg.Done()
-	
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-	
+
 	var lastProcessed uint64
-	
+
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -387,28 +387,28 @@ func (p *EventPipeline) collectMetrics() {
 // GetMetrics returns pipeline metrics
 func (p *EventPipeline) GetMetrics() PipelineMetrics {
 	metrics := PipelineMetrics{
-		Processed:   p.processed.Load(),
-		Dropped:     p.dropped.Load(),
-		Throughput:  p.throughput.Load(),
-		AvgLatency:  time.Duration(0),
+		Processed:    p.processed.Load(),
+		Dropped:      p.dropped.Load(),
+		Throughput:   p.throughput.Load(),
+		AvgLatency:   time.Duration(0),
 		StageMetrics: make([]StageMetrics, len(p.stages)),
 	}
-	
+
 	// Calculate average latency
 	if metrics.Processed > 0 {
 		avgNs := p.latencyNs.Load() / metrics.Processed
 		metrics.AvgLatency = time.Duration(avgNs)
 	}
-	
+
 	// Collect stage metrics
 	for i, stageWorkers := range p.workers {
 		var stageProcessed, stageErrors uint64
-		
+
 		for _, worker := range stageWorkers {
 			stageProcessed += worker.processed.Load()
 			stageErrors += worker.errors.Load()
 		}
-		
+
 		metrics.StageMetrics[i] = StageMetrics{
 			Name:       p.stages[i].Name(),
 			Processed:  stageProcessed,
@@ -416,10 +416,10 @@ func (p *EventPipeline) GetMetrics() PipelineMetrics {
 			BufferSize: p.buffers[i].Size(),
 		}
 	}
-	
+
 	// Add final buffer size
 	metrics.OutputBuffer = p.buffers[len(p.buffers)-1].Size()
-	
+
 	return metrics
 }
 

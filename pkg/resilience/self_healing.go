@@ -14,20 +14,20 @@ type SelfHealingManager struct {
 	circuitBreakers *CircuitBreakerGroup
 	healthCheckers  map[string]ComponentHealthChecker
 	healers         map[string]Healer
-	
+
 	// Configuration
-	config          *SelfHealingConfig
-	
+	config *SelfHealingConfig
+
 	// State
 	isRunning       atomic.Bool
 	healingAttempts uint64
 	healingSuccess  uint64
-	
+
 	// Lifecycle
-	ctx             context.Context
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
-	mutex           sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	mutex  sync.RWMutex
 }
 
 // MonitoredComponent represents a monitored component
@@ -89,10 +89,10 @@ type Healer interface {
 
 // HealingAction represents a healing action
 type HealingAction struct {
-	Name        string
-	Description string
-	Risk        RiskLevel
-	Duration    time.Duration
+	Name          string
+	Description   string
+	Risk          RiskLevel
+	Duration      time.Duration
 	Prerequisites []string
 }
 
@@ -108,43 +108,43 @@ const (
 // SelfHealingConfig configures the self-healing manager
 type SelfHealingConfig struct {
 	// Health check settings
-	HealthCheckInterval    time.Duration
-	HealthCheckTimeout     time.Duration
-	UnhealthyThreshold     int
-	DegradedThreshold      int
-	
+	HealthCheckInterval time.Duration
+	HealthCheckTimeout  time.Duration
+	UnhealthyThreshold  int
+	DegradedThreshold   int
+
 	// Healing settings
-	HealingEnabled         bool
-	HealingDelay           time.Duration
-	MaxHealingAttempts     int
-	HealingCooldown        time.Duration
-	
+	HealingEnabled     bool
+	HealingDelay       time.Duration
+	MaxHealingAttempts int
+	HealingCooldown    time.Duration
+
 	// Circuit breaker settings
-	EnableCircuitBreaker   bool
-	MaxFailures            uint32
-	ResetTimeout           time.Duration
-	
+	EnableCircuitBreaker bool
+	MaxFailures          uint32
+	ResetTimeout         time.Duration
+
 	// History settings
-	MaxHealthHistory       int
-	HistoryRetention       time.Duration
+	MaxHealthHistory int
+	HistoryRetention time.Duration
 }
 
 // DefaultSelfHealingConfig returns default configuration
 func DefaultSelfHealingConfig() *SelfHealingConfig {
 	return &SelfHealingConfig{
-		HealthCheckInterval:    30 * time.Second,
-		HealthCheckTimeout:     10 * time.Second,
-		UnhealthyThreshold:     3,
-		DegradedThreshold:      2,
-		HealingEnabled:         true,
-		HealingDelay:           10 * time.Second,
-		MaxHealingAttempts:     3,
-		HealingCooldown:        5 * time.Minute,
-		EnableCircuitBreaker:   true,
-		MaxFailures:            5,
-		ResetTimeout:           60 * time.Second,
-		MaxHealthHistory:       100,
-		HistoryRetention:       24 * time.Hour,
+		HealthCheckInterval:  30 * time.Second,
+		HealthCheckTimeout:   10 * time.Second,
+		UnhealthyThreshold:   3,
+		DegradedThreshold:    2,
+		HealingEnabled:       true,
+		HealingDelay:         10 * time.Second,
+		MaxHealingAttempts:   3,
+		HealingCooldown:      5 * time.Minute,
+		EnableCircuitBreaker: true,
+		MaxFailures:          5,
+		ResetTimeout:         60 * time.Second,
+		MaxHealthHistory:     100,
+		HistoryRetention:     24 * time.Hour,
 	}
 }
 
@@ -153,9 +153,9 @@ func NewSelfHealingManager(config *SelfHealingConfig) *SelfHealingManager {
 	if config == nil {
 		config = DefaultSelfHealingConfig()
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &SelfHealingManager{
 		components:      make(map[string]*MonitoredComponent),
 		circuitBreakers: NewCircuitBreakerGroup(),
@@ -171,31 +171,31 @@ func NewSelfHealingManager(config *SelfHealingConfig) *SelfHealingManager {
 func (m *SelfHealingManager) RegisterComponent(component *MonitoredComponent) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	if _, exists := m.components[component.Name]; exists {
 		return fmt.Errorf("component %s already registered", component.Name)
 	}
-	
+
 	if component.HealthHistory == nil {
 		component.HealthHistory = make([]HealthRecord, 0, m.config.MaxHealthHistory)
 	}
-	
+
 	m.components[component.Name] = component
-	
+
 	// Create circuit breaker if enabled
 	if m.config.EnableCircuitBreaker {
 		componentName := component.Name
 		breaker := m.circuitBreakers.GetOrCreate(CircuitBreakerConfig{
-			Name:          fmt.Sprintf("healing_%s", componentName),
-			MaxFailures:   m.config.MaxFailures,
-			ResetTimeout:  m.config.ResetTimeout,
+			Name:         fmt.Sprintf("healing_%s", componentName),
+			MaxFailures:  m.config.MaxFailures,
+			ResetTimeout: m.config.ResetTimeout,
 			OnStateChange: func(oldState, newState State) {
 				m.onCircuitBreakerStateChange(componentName, oldState, newState)
 			},
 		})
 		m.circuitBreakers.Add(breaker)
 	}
-	
+
 	return nil
 }
 
@@ -218,21 +218,21 @@ func (m *SelfHealingManager) Start() error {
 	if !m.isRunning.CompareAndSwap(false, true) {
 		return fmt.Errorf("self-healing manager already running")
 	}
-	
+
 	// Start health check goroutine
 	m.wg.Add(1)
 	go m.runHealthChecks()
-	
+
 	// Start healing goroutine if enabled
 	if m.config.HealingEnabled {
 		m.wg.Add(1)
 		go m.runHealing()
 	}
-	
+
 	// Start cleanup goroutine
 	m.wg.Add(1)
 	go m.runCleanup()
-	
+
 	return nil
 }
 
@@ -241,23 +241,23 @@ func (m *SelfHealingManager) Stop() error {
 	if !m.isRunning.CompareAndSwap(true, false) {
 		return nil
 	}
-	
+
 	m.cancel()
 	m.wg.Wait()
-	
+
 	return nil
 }
 
 // runHealthChecks runs periodic health checks
 func (m *SelfHealingManager) runHealthChecks() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(m.config.HealthCheckInterval)
 	defer ticker.Stop()
-	
+
 	// Initial health check
 	m.checkAllComponents()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -276,7 +276,7 @@ func (m *SelfHealingManager) checkAllComponents() {
 		components = append(components, comp)
 	}
 	m.mutex.RUnlock()
-	
+
 	var wg sync.WaitGroup
 	for _, component := range components {
 		wg.Add(1)
@@ -292,37 +292,37 @@ func (m *SelfHealingManager) checkAllComponents() {
 func (m *SelfHealingManager) checkComponentHealth(component *MonitoredComponent) {
 	ctx, cancel := context.WithTimeout(m.ctx, m.config.HealthCheckTimeout)
 	defer cancel()
-	
+
 	// Run all applicable health checkers
 	var overallStatus ComponentStatus = StatusHealthy
 	details := make(map[string]interface{})
 	var lastError error
-	
+
 	m.mutex.RLock()
 	checkers := make([]ComponentHealthChecker, 0, len(m.healthCheckers))
 	for _, checker := range m.healthCheckers {
 		checkers = append(checkers, checker)
 	}
 	m.mutex.RUnlock()
-	
+
 	for _, checker := range checkers {
 		status, err := checker.Check(ctx, component)
 		if err != nil {
 			lastError = err
 			status = StatusUnhealthy
 		}
-		
+
 		// Update overall status (worst wins)
 		if isWorse(status, overallStatus) {
 			overallStatus = status
 		}
-		
+
 		// Collect details
 		for k, v := range checker.GetDetails() {
 			details[checker.Name()+"_"+k] = v
 		}
 	}
-	
+
 	// Update component status
 	m.updateComponentHealth(component, overallStatus, details, lastError)
 }
@@ -331,10 +331,10 @@ func (m *SelfHealingManager) checkComponentHealth(component *MonitoredComponent)
 func (m *SelfHealingManager) updateComponentHealth(component *MonitoredComponent, status ComponentStatus, details map[string]interface{}, err error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	component.Status = status
 	component.LastHealthCheck = time.Now()
-	
+
 	// Add to health history
 	record := HealthRecord{
 		Timestamp: time.Now(),
@@ -342,9 +342,9 @@ func (m *SelfHealingManager) updateComponentHealth(component *MonitoredComponent
 		Details:   details,
 		Error:     err,
 	}
-	
+
 	component.HealthHistory = append(component.HealthHistory, record)
-	
+
 	// Trim history if needed
 	if len(component.HealthHistory) > m.config.MaxHealthHistory {
 		component.HealthHistory = component.HealthHistory[1:]
@@ -354,10 +354,10 @@ func (m *SelfHealingManager) updateComponentHealth(component *MonitoredComponent
 // runHealing runs the healing process
 func (m *SelfHealingManager) runHealing() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(m.config.HealingDelay)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -378,7 +378,7 @@ func (m *SelfHealingManager) healUnhealthyComponents() {
 		}
 	}
 	m.mutex.RUnlock()
-	
+
 	for _, component := range unhealthyComponents {
 		if m.canHealComponent(component) {
 			go m.healComponent(component)
@@ -395,28 +395,28 @@ func (m *SelfHealingManager) canHealComponent(component *MonitoredComponent) boo
 			return false
 		}
 	}
-	
+
 	// Check cooldown
-	if !component.LastHealAttempt.IsZero() && 
-	   time.Since(component.LastHealAttempt) < m.config.HealingCooldown {
+	if !component.LastHealAttempt.IsZero() &&
+		time.Since(component.LastHealAttempt) < m.config.HealingCooldown {
 		return false
 	}
-	
+
 	return true
 }
 
 // healComponent attempts to heal a component
 func (m *SelfHealingManager) healComponent(component *MonitoredComponent) {
 	atomic.AddUint64(&m.healingAttempts, 1)
-	
+
 	m.mutex.Lock()
 	component.Status = StatusHealing
 	component.LastHealAttempt = time.Now()
 	m.mutex.Unlock()
-	
+
 	ctx, cancel := context.WithTimeout(m.ctx, 5*time.Minute)
 	defer cancel()
-	
+
 	// Execute healing with circuit breaker
 	var healErr error
 	if m.config.EnableCircuitBreaker {
@@ -427,7 +427,7 @@ func (m *SelfHealingManager) healComponent(component *MonitoredComponent) {
 	} else {
 		healErr = m.executeHealing(ctx, component)
 	}
-	
+
 	if healErr == nil {
 		atomic.AddUint64(&m.healingSuccess, 1)
 		m.mutex.Lock()
@@ -450,11 +450,11 @@ func (m *SelfHealingManager) executeHealing(ctx context.Context, component *Moni
 		}
 	}
 	m.mutex.RUnlock()
-	
+
 	if len(healers) == 0 {
 		return fmt.Errorf("no healers available for component %s", component.Name)
 	}
-	
+
 	// Try each healer
 	var lastErr error
 	for _, healer := range healers {
@@ -464,17 +464,17 @@ func (m *SelfHealingManager) executeHealing(ctx context.Context, component *Moni
 			lastErr = err
 		}
 	}
-	
+
 	return fmt.Errorf("all healers failed: %v", lastErr)
 }
 
 // runCleanup runs periodic cleanup
 func (m *SelfHealingManager) runCleanup() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -489,9 +489,9 @@ func (m *SelfHealingManager) runCleanup() {
 func (m *SelfHealingManager) cleanupHealthHistory() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	cutoff := time.Now().Add(-m.config.HistoryRetention)
-	
+
 	for _, component := range m.components {
 		var newHistory []HealthRecord
 		for _, record := range component.HealthHistory {
@@ -507,17 +507,17 @@ func (m *SelfHealingManager) cleanupHealthHistory() {
 func (m *SelfHealingManager) GetComponentStatus(name string) (*MonitoredComponent, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	component, exists := m.components[name]
 	if !exists {
 		return nil, fmt.Errorf("component %s not found", name)
 	}
-	
+
 	// Return a copy
 	compCopy := *component
 	compCopy.HealthHistory = make([]HealthRecord, len(component.HealthHistory))
 	copy(compCopy.HealthHistory, component.HealthHistory)
-	
+
 	return &compCopy, nil
 }
 
@@ -525,7 +525,7 @@ func (m *SelfHealingManager) GetComponentStatus(name string) (*MonitoredComponen
 func (m *SelfHealingManager) GetAllComponentStatus() map[string]*MonitoredComponent {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	result := make(map[string]*MonitoredComponent)
 	for name, component := range m.components {
 		compCopy := *component
@@ -533,7 +533,7 @@ func (m *SelfHealingManager) GetAllComponentStatus() map[string]*MonitoredCompon
 		copy(compCopy.HealthHistory, component.HealthHistory)
 		result[name] = &compCopy
 	}
-	
+
 	return result
 }
 
@@ -541,7 +541,7 @@ func (m *SelfHealingManager) GetAllComponentStatus() map[string]*MonitoredCompon
 func (m *SelfHealingManager) GetMetrics() SelfHealingMetrics {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	var healthy, degraded, unhealthy, healing int
 	for _, comp := range m.components {
 		switch comp.Status {
@@ -555,16 +555,16 @@ func (m *SelfHealingManager) GetMetrics() SelfHealingMetrics {
 			healing++
 		}
 	}
-	
+
 	return SelfHealingMetrics{
-		TotalComponents:   len(m.components),
-		HealthyComponents: healthy,
-		DegradedComponents: degraded,
+		TotalComponents:     len(m.components),
+		HealthyComponents:   healthy,
+		DegradedComponents:  degraded,
 		UnhealthyComponents: unhealthy,
-		HealingComponents: healing,
-		HealingAttempts:   atomic.LoadUint64(&m.healingAttempts),
-		HealingSuccess:    atomic.LoadUint64(&m.healingSuccess),
-		CircuitBreakers:   m.circuitBreakers.GetMetrics(),
+		HealingComponents:   healing,
+		HealingAttempts:     atomic.LoadUint64(&m.healingAttempts),
+		HealingSuccess:      atomic.LoadUint64(&m.healingSuccess),
+		CircuitBreakers:     m.circuitBreakers.GetMetrics(),
 	}
 }
 
@@ -595,7 +595,7 @@ func isWorse(status1, status2 ComponentStatus) bool {
 		StatusUnknown:   3,
 		StatusHealing:   1,
 	}
-	
+
 	return priority[status1] > priority[status2]
 }
 
@@ -603,7 +603,7 @@ func shouldHeal(component *MonitoredComponent, config *SelfHealingConfig) bool {
 	if component.Status != StatusUnhealthy && component.Status != StatusDegraded {
 		return false
 	}
-	
+
 	// Count consecutive unhealthy checks
 	unhealthyCount := 0
 	for i := len(component.HealthHistory) - 1; i >= 0; i-- {
@@ -613,7 +613,7 @@ func shouldHeal(component *MonitoredComponent, config *SelfHealingConfig) bool {
 			break
 		}
 	}
-	
+
 	return unhealthyCount >= config.UnhealthyThreshold
 }
 
@@ -649,11 +649,11 @@ func (g *CircuitBreakerGroup) Get(name string) (*CircuitBreaker, bool) {
 func (g *CircuitBreakerGroup) GetOrCreate(config CircuitBreakerConfig) *CircuitBreaker {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
-	
+
 	if breaker, exists := g.breakers[config.Name]; exists {
 		return breaker
 	}
-	
+
 	breaker := NewCircuitBreaker(config)
 	g.breakers[config.Name] = breaker
 	return breaker
@@ -663,7 +663,7 @@ func (g *CircuitBreakerGroup) GetOrCreate(config CircuitBreakerConfig) *CircuitB
 func (g *CircuitBreakerGroup) GetMetrics() []CircuitBreakerMetrics {
 	g.mutex.RLock()
 	defer g.mutex.RUnlock()
-	
+
 	var metrics []CircuitBreakerMetrics
 	for _, breaker := range g.breakers {
 		metrics = append(metrics, CircuitBreakerMetrics{

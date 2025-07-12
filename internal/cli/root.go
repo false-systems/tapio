@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -113,16 +112,6 @@ func init() {
 			"Check the command usage with --help",
 		).WithHelp()
 	})
-}
-
-// getVersion returns the current version
-func getVersion() string {
-	// This will be set by build process
-	version := os.Getenv("TAPIO_VERSION")
-	if version == "" {
-		version = "dev"
-	}
-	return version
 }
 
 // getCustomHelpTemplate returns a custom help template
