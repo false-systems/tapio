@@ -46,12 +46,12 @@ func (d *detector) detectPackageManager() string {
 	if _, err := exec.LookPath("brew"); err == nil {
 		return "homebrew"
 	}
-	
+
 	// Check for MacPorts
 	if _, err := exec.LookPath("port"); err == nil {
 		return "macports"
 	}
-	
+
 	return "none"
 }
 
@@ -89,7 +89,7 @@ func InstallService(name, execPath, workingDir string) error {
     <string>/usr/local/var/log/tapio-%s.error.log</string>
 </dict>
 </plist>`, name, execPath, workingDir, name, name)
-	
+
 	// Determine plist location
 	var plistPath string
 	if os.Getuid() == 0 {
@@ -102,23 +102,23 @@ func InstallService(name, execPath, workingDir string) error {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
 		plistPath = filepath.Join(home, "Library", "LaunchAgents", fmt.Sprintf("com.tapio.%s.plist", name))
-		
+
 		// Create LaunchAgents directory if it doesn't exist
 		if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
 			return fmt.Errorf("failed to create LaunchAgents directory: %w", err)
 		}
 	}
-	
+
 	// Write plist file
 	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
 		return fmt.Errorf("failed to write plist file: %w", err)
 	}
-	
+
 	// Load the service
 	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
 		return fmt.Errorf("failed to load service: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -134,15 +134,15 @@ func UninstallService(name string) error {
 		}
 		plistPath = filepath.Join(home, "Library", "LaunchAgents", fmt.Sprintf("com.tapio.%s.plist", name))
 	}
-	
+
 	// Unload the service
 	exec.Command("launchctl", "unload", plistPath).Run()
-	
+
 	// Remove the plist file
 	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove plist file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -160,7 +160,7 @@ func GetLogsDir() (string, error) {
 	if os.Getuid() == 0 {
 		return "/var/log/tapio", nil
 	}
-	
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

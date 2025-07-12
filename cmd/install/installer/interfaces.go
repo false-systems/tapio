@@ -19,13 +19,13 @@ const (
 type Step[T any] interface {
 	// Name returns the step name for logging
 	Name() string
-	
+
 	// Execute performs the step operation
 	Execute(ctx context.Context, data T) (T, error)
-	
+
 	// Rollback reverses the step operation
 	Rollback(ctx context.Context, data T) error
-	
+
 	// Validate checks if the step completed successfully
 	Validate(ctx context.Context, data T) error
 }
@@ -34,13 +34,13 @@ type Step[T any] interface {
 type Pipeline[T any] interface {
 	// AddStep adds a step to the pipeline
 	AddStep(step Step[T]) Pipeline[T]
-	
+
 	// Execute runs all steps in order
 	Execute(ctx context.Context, initial T) (T, error)
-	
+
 	// WithRollback enables automatic rollback on failure
 	WithRollback(enabled bool) Pipeline[T]
-	
+
 	// WithMetrics enables metrics collection
 	WithMetrics(collector MetricsCollector) Pipeline[T]
 }
@@ -49,34 +49,34 @@ type Pipeline[T any] interface {
 type Installer interface {
 	// Name returns the installer name
 	Name() string
-	
+
 	// Install performs the installation
 	Install(ctx context.Context, opts InstallOptions) error
-	
+
 	// Uninstall removes the installation
 	Uninstall(ctx context.Context, opts UninstallOptions) error
-	
+
 	// Upgrade performs an upgrade
 	Upgrade(ctx context.Context, opts UpgradeOptions) error
-	
+
 	// Validate checks the installation
 	Validate(ctx context.Context) error
-	
+
 	// GetCapabilities returns supported features
 	GetCapabilities() Capabilities
 }
 
 // InstallOptions contains installation configuration
 type InstallOptions struct {
-	Version       string
-	InstallPath   string
-	ConfigPath    string
-	DataPath      string
-	Force         bool
+	Version        string
+	InstallPath    string
+	ConfigPath     string
+	DataPath       string
+	Force          bool
 	SkipValidation bool
-	DryRun        bool
-	Progress      ProgressReporter
-	DownloadOpts  DownloadOptions
+	DryRun         bool
+	Progress       ProgressReporter
+	DownloadOpts   DownloadOptions
 }
 
 // UninstallOptions contains uninstallation configuration
@@ -89,12 +89,12 @@ type UninstallOptions struct {
 
 // UpgradeOptions contains upgrade configuration
 type UpgradeOptions struct {
-	FromVersion   string
-	ToVersion     string
-	BackupPath    string
-	SkipBackup    bool
-	Force         bool
-	DryRun        bool
+	FromVersion string
+	ToVersion   string
+	BackupPath  string
+	SkipBackup  bool
+	Force       bool
+	DryRun      bool
 }
 
 // DownloadOptions configures download behavior
@@ -122,16 +122,16 @@ type Capabilities struct {
 type ProgressReporter interface {
 	// Start begins a new phase
 	Start(phase string, total int64)
-	
+
 	// Update reports progress
 	Update(current int64)
-	
+
 	// Complete marks phase as complete
 	Complete(phase string)
-	
+
 	// Error reports an error
 	Error(phase string, err error)
-	
+
 	// Log writes a log message
 	Log(level string, message string, fields ...interface{})
 }
@@ -140,13 +140,13 @@ type ProgressReporter interface {
 type MetricsCollector interface {
 	// RecordDuration records step duration
 	RecordDuration(step string, duration time.Duration)
-	
+
 	// RecordError records an error
 	RecordError(step string, err error)
-	
+
 	// RecordSuccess records a successful step
 	RecordSuccess(step string)
-	
+
 	// GetReport returns metrics report
 	GetReport() MetricsReport
 }
@@ -164,10 +164,10 @@ type MetricsReport struct {
 type CircuitBreaker interface {
 	// Execute runs the function with circuit breaker protection
 	Execute(fn func() error) error
-	
+
 	// IsOpen returns if the circuit is open
 	IsOpen() bool
-	
+
 	// Reset resets the circuit breaker
 	Reset()
 }
@@ -176,7 +176,7 @@ type CircuitBreaker interface {
 type Factory interface {
 	// Create creates an installer for the given strategy
 	Create(strategy InstallStrategy) (Installer, error)
-	
+
 	// GetAvailableStrategies returns supported strategies
 	GetAvailableStrategies() []InstallStrategy
 }
@@ -185,7 +185,7 @@ type Factory interface {
 type Downloader interface {
 	// Download downloads a file
 	Download(ctx context.Context, opts DownloadOptions, dst io.Writer) error
-	
+
 	// DownloadWithProgress downloads with progress reporting
 	DownloadWithProgress(ctx context.Context, opts DownloadOptions, dst io.Writer, progress func(current, total int64)) error
 }
@@ -194,13 +194,13 @@ type Downloader interface {
 type Validator interface {
 	// ValidateInstallation checks if installation is valid
 	ValidateInstallation(ctx context.Context, installPath string) error
-	
+
 	// ValidateBinary checks binary integrity
 	ValidateBinary(ctx context.Context, binaryPath string, checksum string) error
-	
+
 	// ValidateConnectivity checks network connectivity
 	ValidateConnectivity(ctx context.Context, endpoints []string) error
-	
+
 	// ValidatePermissions checks file permissions
 	ValidatePermissions(ctx context.Context, paths []string) error
 }
@@ -209,10 +209,10 @@ type Validator interface {
 type Command interface {
 	// Execute performs the command
 	Execute(ctx context.Context) error
-	
+
 	// Undo reverses the command
 	Undo(ctx context.Context) error
-	
+
 	// CanUndo returns if the command can be undone
 	CanUndo() bool
 }
@@ -221,13 +221,13 @@ type Command interface {
 type CommandHistory interface {
 	// Push adds a command to history
 	Push(cmd Command)
-	
+
 	// Pop removes and returns the last command
 	Pop() (Command, bool)
-	
+
 	// Clear removes all commands
 	Clear()
-	
+
 	// Rollback undoes all commands in reverse order
 	Rollback(ctx context.Context) error
 }

@@ -3,7 +3,7 @@ package installer
 import (
 	"context"
 	"fmt"
-	
+
 	"tapio/cmd/install/platform"
 )
 
@@ -29,7 +29,7 @@ func (k *KubernetesInstaller) Install(ctx context.Context, opts InstallOptions) 
 	if opts.DryRun {
 		return k.dryRun(ctx, opts)
 	}
-	
+
 	// TODO: Implement Kubernetes installation
 	// 1. Check kubectl is available
 	// 2. Check cluster connectivity
@@ -39,7 +39,7 @@ func (k *KubernetesInstaller) Install(ctx context.Context, opts InstallOptions) 
 	// 6. Apply Deployment
 	// 7. Apply Service
 	// 8. Wait for deployment to be ready
-	
+
 	return fmt.Errorf("Kubernetes installation not yet implemented")
 }
 
@@ -48,14 +48,14 @@ func (k *KubernetesInstaller) Uninstall(ctx context.Context, opts UninstallOptio
 	if opts.DryRun {
 		return k.dryRunUninstall(ctx, opts)
 	}
-	
+
 	// TODO: Implement Kubernetes uninstallation
 	// 1. Delete Service
 	// 2. Delete Deployment
 	// 3. Optionally delete PVC
 	// 4. Optionally delete ConfigMap
 	// 5. Optionally delete namespace
-	
+
 	return fmt.Errorf("Kubernetes uninstallation not yet implemented")
 }
 
@@ -64,13 +64,13 @@ func (k *KubernetesInstaller) Upgrade(ctx context.Context, opts UpgradeOptions) 
 	if opts.DryRun {
 		return k.dryRunUpgrade(ctx, opts)
 	}
-	
+
 	// TODO: Implement Kubernetes upgrade
 	// 1. Update Deployment image
 	// 2. Wait for rollout to complete
 	// 3. Verify new pods are running
 	// 4. Check deployment status
-	
+
 	return fmt.Errorf("Kubernetes upgrade not yet implemented")
 }
 
@@ -82,7 +82,7 @@ func (k *KubernetesInstaller) Validate(ctx context.Context) error {
 	// 3. Check service exists
 	// 4. Check pods are running
 	// 5. Check pod health
-	
+
 	return fmt.Errorf("Kubernetes validation not yet implemented")
 }
 

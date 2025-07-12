@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"time"
-	
+
 	"tapio/cmd/install/installer"
 	"tapio/cmd/install/platform"
 	"tapio/cmd/install/progress"
@@ -14,11 +14,11 @@ import (
 func main() {
 	// Example usage of the installation system
 	ctx := context.Background()
-	
+
 	// Detect platform
 	detector := platform.NewDetector()
 	platformInfo := detector.Detect()
-	
+
 	fmt.Printf("Detected Platform:\n")
 	fmt.Printf("  OS: %s\n", platformInfo.OS)
 	fmt.Printf("  Arch: %s\n", platformInfo.Arch)
@@ -26,10 +26,10 @@ func main() {
 	fmt.Printf("  Is Container: %v\n", platformInfo.IsContainer)
 	fmt.Printf("  Is WSL: %v\n", platformInfo.IsWSL)
 	fmt.Println()
-	
+
 	// Create factory
 	factory := platform.NewFactory(platformInfo)
-	
+
 	// List available strategies
 	strategies := factory.GetAvailableStrategies()
 	fmt.Printf("Available Installation Strategies:\n")
@@ -37,13 +37,13 @@ func main() {
 		fmt.Printf("  - %s\n", s)
 	}
 	fmt.Println()
-	
+
 	// Create binary installer
 	inst, err := factory.Create(installer.StrategyBinary)
 	if err != nil {
 		log.Fatalf("Failed to create installer: %v", err)
 	}
-	
+
 	// Get capabilities
 	caps := inst.GetCapabilities()
 	fmt.Printf("Installer Capabilities:\n")
@@ -52,10 +52,10 @@ func main() {
 	fmt.Printf("  Supports Validation: %v\n", caps.SupportsValidation)
 	fmt.Printf("  Requires Root: %v\n", caps.RequiresRoot)
 	fmt.Println()
-	
+
 	// Create progress reporter
 	progressReporter := progress.NewSimpleTerminalReporter()
-	
+
 	// Build installation options
 	opts := installer.InstallOptions{
 		Version:        "v1.0.0",
@@ -74,17 +74,17 @@ func main() {
 			CircuitBreaker: installer.NewCircuitBreaker(5, 1*time.Minute),
 		},
 	}
-	
+
 	// Perform installation (dry run)
 	fmt.Println("Performing dry run installation...")
 	if err := inst.Install(ctx, opts); err != nil {
 		log.Printf("Installation failed: %v", err)
 	}
-	
+
 	// Example of pipeline usage
 	fmt.Println("\nExample Pipeline:")
 	demostreatePipeline()
-	
+
 	// Example of metrics collection
 	fmt.Println("\nExample Metrics:")
 	demostrateMetrics()
@@ -95,24 +95,24 @@ func demostreatePipeline() {
 	type Data struct {
 		Value int
 	}
-	
+
 	// Create steps
 	step1 := &simpleStep{name: "double", fn: func(d Data) (Data, error) {
 		d.Value *= 2
 		return d, nil
 	}}
-	
+
 	step2 := &simpleStep{name: "add10", fn: func(d Data) (Data, error) {
 		d.Value += 10
 		return d, nil
 	}}
-	
+
 	// Build pipeline
 	pipeline := installer.NewPipeline[Data]().
 		AddStep(step1).
 		AddStep(step2).
 		WithRollback(true)
-	
+
 	// Execute
 	initial := Data{Value: 5}
 	result, err := pipeline.Execute(context.Background(), initial)
@@ -125,7 +125,7 @@ func demostreatePipeline() {
 
 func demostrateMetrics() {
 	collector := progress.NewMetricsCollector()
-	
+
 	// Record some metrics
 	collector.RecordDuration("download", 5*time.Second)
 	collector.RecordDuration("extract", 2*time.Second)
@@ -133,7 +133,7 @@ func demostrateMetrics() {
 	collector.RecordSuccess("extract")
 	collector.RecordDuration("install", 3*time.Second)
 	collector.RecordError("install", fmt.Errorf("permission denied"))
-	
+
 	// Get report
 	report := collector.GetReport()
 	fmt.Printf("Total Duration: %v\n", report.TotalDuration)

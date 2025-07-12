@@ -9,11 +9,11 @@ import (
 
 // pipeline implements the Pipeline interface with generics
 type pipeline[T any] struct {
-	steps         []Step[T]
+	steps           []Step[T]
 	rollbackEnabled bool
-	metrics       MetricsCollector
-	executedSteps []Step[T]
-	mu            sync.Mutex
+	metrics         MetricsCollector
+	executedSteps   []Step[T]
+	mu              sync.Mutex
 }
 
 // NewPipeline creates a new pipeline
@@ -28,7 +28,7 @@ func NewPipeline[T any]() Pipeline[T] {
 func (p *pipeline[T]) AddStep(step Step[T]) Pipeline[T] {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	p.steps = append(p.steps, step)
 	return p
 }
@@ -40,9 +40,9 @@ func (p *pipeline[T]) Execute(ctx context.Context, initial T) (T, error) {
 	copy(steps, p.steps)
 	p.executedSteps = make([]Step[T], 0, len(steps))
 	p.mu.Unlock()
-	
+
 	current := initial
-	
+
 	for i, step := range steps {
 		select {
 		case <-ctx.Done():
@@ -53,35 +53,35 @@ func (p *pipeline[T]) Execute(ctx context.Context, initial T) (T, error) {
 			return current, fmt.Errorf("pipeline cancelled at step %d (%s): %w", i+1, step.Name(), err)
 		default:
 		}
-		
+
 		startTime := time.Now()
-		
+
 		// Execute step
 		result, err := step.Execute(ctx, current)
-		
+
 		// Record metrics
 		if p.metrics != nil {
 			duration := time.Since(startTime)
 			p.metrics.RecordDuration(step.Name(), duration)
-			
+
 			if err != nil {
 				p.metrics.RecordError(step.Name(), err)
 			} else {
 				p.metrics.RecordSuccess(step.Name())
 			}
 		}
-		
+
 		if err != nil {
 			// Rollback if enabled
 			if p.rollbackEnabled {
 				if rollbackErr := p.rollback(ctx, current); rollbackErr != nil {
-					return current, fmt.Errorf("step %s failed: %w (rollback also failed: %v)", 
+					return current, fmt.Errorf("step %s failed: %w (rollback also failed: %v)",
 						step.Name(), err, rollbackErr)
 				}
 			}
 			return current, fmt.Errorf("step %s failed: %w", step.Name(), err)
 		}
-		
+
 		// Validate step if possible
 		if err := step.Validate(ctx, result); err != nil {
 			if p.rollbackEnabled {
@@ -89,15 +89,15 @@ func (p *pipeline[T]) Execute(ctx context.Context, initial T) (T, error) {
 			}
 			return current, fmt.Errorf("step %s validation failed: %w", step.Name(), err)
 		}
-		
+
 		// Record executed step for potential rollback
 		p.mu.Lock()
 		p.executedSteps = append(p.executedSteps, step)
 		p.mu.Unlock()
-		
+
 		current = result
 	}
-	
+
 	return current, nil
 }
 
@@ -105,7 +105,7 @@ func (p *pipeline[T]) Execute(ctx context.Context, initial T) (T, error) {
 func (p *pipeline[T]) WithRollback(enabled bool) Pipeline[T] {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	p.rollbackEnabled = enabled
 	return p
 }
@@ -114,7 +114,7 @@ func (p *pipeline[T]) WithRollback(enabled bool) Pipeline[T] {
 func (p *pipeline[T]) WithMetrics(collector MetricsCollector) Pipeline[T] {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	p.metrics = collector
 	return p
 }
@@ -125,21 +125,21 @@ func (p *pipeline[T]) rollback(ctx context.Context, data T) error {
 	steps := make([]Step[T], len(p.executedSteps))
 	copy(steps, p.executedSteps)
 	p.mu.Unlock()
-	
+
 	// Rollback in reverse order
 	for i := len(steps) - 1; i >= 0; i-- {
 		step := steps[i]
-		
+
 		// Create a context with timeout for rollback
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		
+
 		if err := step.Rollback(rollbackCtx, data); err != nil {
 			// Log error but continue with other rollbacks
 			fmt.Printf("Warning: rollback failed for step %s: %v\n", step.Name(), err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -180,32 +180,32 @@ func (pp *ParallelPipeline[T]) Execute(ctx context.Context, initial T) ([]T, err
 	if len(pp.pipelines) == 0 {
 		return nil, fmt.Errorf("no pipelines to execute")
 	}
-	
+
 	results := make([]T, len(pp.pipelines))
 	errors := make([]error, len(pp.pipelines))
-	
+
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	
+
 	for i, pipeline := range pp.pipelines {
 		wg.Add(1)
 		go func(idx int, p Pipeline[T]) {
 			defer wg.Done()
-			
+
 			result, err := p.Execute(ctx, initial)
 			results[idx] = result
 			errors[idx] = err
-			
+
 			// Handle different strategies
 			if pp.strategy == FirstToSucceed && err == nil {
 				cancel() // Cancel other pipelines
 			}
 		}(i, pipeline)
 	}
-	
+
 	wg.Wait()
-	
+
 	// Evaluate results based on strategy
 	switch pp.strategy {
 	case AllMustSucceed:
@@ -215,7 +215,7 @@ func (pp *ParallelPipeline[T]) Execute(ctx context.Context, initial T) ([]T, err
 			}
 		}
 		return results, nil
-		
+
 	case AnyCanSucceed:
 		successCount := 0
 		for _, err := range errors {
@@ -227,7 +227,7 @@ func (pp *ParallelPipeline[T]) Execute(ctx context.Context, initial T) ([]T, err
 			return results, fmt.Errorf("all pipelines failed")
 		}
 		return results, nil
-		
+
 	case FirstToSucceed:
 		for i, err := range errors {
 			if err == nil {
@@ -235,7 +235,7 @@ func (pp *ParallelPipeline[T]) Execute(ctx context.Context, initial T) ([]T, err
 			}
 		}
 		return results, fmt.Errorf("no pipeline succeeded")
-		
+
 	default:
 		return results, fmt.Errorf("unknown parallel strategy")
 	}
@@ -318,15 +318,15 @@ func (r *RetryStep[T]) Name() string {
 
 func (r *RetryStep[T]) Execute(ctx context.Context, data T) (T, error) {
 	var lastErr error
-	
+
 	for attempt := 1; attempt <= r.maxRetries; attempt++ {
 		result, err := r.step.Execute(ctx, data)
 		if err == nil {
 			return result, nil
 		}
-		
+
 		lastErr = err
-		
+
 		if attempt < r.maxRetries {
 			waitTime := r.backoff(attempt, r.delay)
 			select {
@@ -337,7 +337,7 @@ func (r *RetryStep[T]) Execute(ctx context.Context, data T) (T, error) {
 			}
 		}
 	}
-	
+
 	return data, fmt.Errorf("failed after %d attempts: %w", r.maxRetries, lastErr)
 }
 

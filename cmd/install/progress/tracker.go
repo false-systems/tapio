@@ -42,9 +42,9 @@ type Tracker struct {
 	phases     map[string]*PhaseInfo
 	startTime  time.Time
 	totalBytes atomic.Int64
-	
+
 	// Metrics
-	metrics    *Metrics
+	metrics *Metrics
 }
 
 // PhaseInfo tracks information about a phase
@@ -76,12 +76,12 @@ type Handler interface {
 
 // Metrics tracks progress metrics
 type Metrics struct {
-	mu                sync.RWMutex
-	phaseDurations    map[string]time.Duration
-	bytesTransferred  int64
-	errors            []error
-	eventsProcessed   int64
-	avgEventRate      float64
+	mu               sync.RWMutex
+	phaseDurations   map[string]time.Duration
+	bytesTransferred int64
+	errors           []error
+	eventsProcessed  int64
+	avgEventRate     float64
 }
 
 // NewTracker creates a new progress tracker
@@ -91,7 +91,7 @@ func NewTracker(bufferSize int) *Tracker {
 		done:      make(chan struct{}),
 		phases:    make(map[string]*PhaseInfo),
 		startTime: time.Now(),
-		metrics:   &Metrics{
+		metrics: &Metrics{
 			phaseDurations: make(map[string]time.Duration),
 		},
 	}
@@ -107,7 +107,7 @@ func (t *Tracker) Start(ctx context.Context) {
 func (t *Tracker) Stop() {
 	close(t.done)
 	t.wg.Wait()
-	
+
 	// Close all handlers
 	for _, h := range t.handlers {
 		h.Close()
@@ -132,7 +132,7 @@ func (t *Tracker) StartPhase(phase string, total int64) {
 		Status:    PhaseStatusRunning,
 	}
 	t.mu.Unlock()
-	
+
 	t.sendEvent(Event{
 		Type:      EventStart,
 		Phase:     phase,
@@ -149,7 +149,7 @@ func (t *Tracker) UpdatePhase(phase string, current int64) {
 		t.totalBytes.Add(current - info.Current)
 	}
 	t.mu.Unlock()
-	
+
 	t.sendEvent(Event{
 		Type:      EventUpdate,
 		Phase:     phase,
@@ -168,7 +168,7 @@ func (t *Tracker) CompletePhase(phase string) {
 		t.metrics.phaseDurations[phase] = duration
 	}
 	t.mu.Unlock()
-	
+
 	t.sendEvent(Event{
 		Type:      EventComplete,
 		Phase:     phase,
@@ -186,7 +186,7 @@ func (t *Tracker) ErrorPhase(phase string, err error) {
 	}
 	t.metrics.errors = append(t.metrics.errors, err)
 	t.mu.Unlock()
-	
+
 	t.sendEvent(Event{
 		Type:      EventError,
 		Phase:     phase,
@@ -203,7 +203,7 @@ func (t *Tracker) Log(level, message string, fields ...interface{}) {
 			fieldMap[key] = fields[i+1]
 		}
 	}
-	
+
 	t.sendEvent(Event{
 		Type:      EventLog,
 		Message:   message,
@@ -216,7 +216,7 @@ func (t *Tracker) Log(level, message string, fields ...interface{}) {
 func (t *Tracker) GetMetrics() Metrics {
 	t.metrics.mu.RLock()
 	defer t.metrics.mu.RUnlock()
-	
+
 	return Metrics{
 		phaseDurations:   t.metrics.phaseDurations,
 		bytesTransferred: t.totalBytes.Load(),
@@ -259,14 +259,14 @@ func (t *Tracker) NewWriter(w io.Writer, phase string, total int64) io.Writer {
 // run processes events
 func (t *Tracker) run(ctx context.Context) {
 	defer t.wg.Done()
-	
+
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	eventCount := int64(0)
 	lastEventCount := int64(0)
 	lastCheck := time.Now()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -276,7 +276,7 @@ func (t *Tracker) run(ctx context.Context) {
 		case event := <-t.events:
 			eventCount++
 			t.metrics.eventsProcessed = eventCount
-			
+
 			// Dispatch to handlers
 			for _, h := range t.handlers {
 				h.HandleEvent(event)
@@ -290,7 +290,7 @@ func (t *Tracker) run(ctx context.Context) {
 				t.metrics.mu.Lock()
 				t.metrics.avgEventRate = rate
 				t.metrics.mu.Unlock()
-				
+
 				lastEventCount = eventCount
 				lastCheck = now
 			}
@@ -326,16 +326,16 @@ func (r *trackingReader) Read(p []byte) (n int, err error) {
 		r.read += int64(n)
 		current := r.read
 		r.mu.Unlock()
-		
+
 		r.tracker.UpdatePhase(r.phase, current)
 	}
-	
+
 	if err == io.EOF {
 		r.tracker.CompletePhase(r.phase)
 	} else if err != nil {
 		r.tracker.ErrorPhase(r.phase, err)
 	}
-	
+
 	return n, err
 }
 
@@ -356,16 +356,16 @@ func (w *trackingWriter) Write(p []byte) (n int, err error) {
 		w.written += int64(n)
 		current := w.written
 		w.mu.Unlock()
-		
+
 		w.tracker.UpdatePhase(w.phase, current)
 	}
-	
+
 	if err != nil {
 		w.tracker.ErrorPhase(w.phase, err)
 	} else if w.written >= w.total && w.total > 0 {
 		w.tracker.CompletePhase(w.phase)
 	}
-	
+
 	return n, err
 }
 

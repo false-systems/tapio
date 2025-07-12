@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	
+
 	"unsafe"
-	
+
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -33,12 +33,12 @@ func (d *detector) detectWindowsVersion() string {
 		return "unknown"
 	}
 	defer k.Close()
-	
+
 	productName, _, err := k.GetStringValue("ProductName")
 	if err != nil {
 		return "unknown"
 	}
-	
+
 	return productName
 }
 
@@ -49,17 +49,17 @@ func (d *detector) detectWindowsBuild() string {
 		return "unknown"
 	}
 	defer k.Close()
-	
+
 	build, _, err := k.GetStringValue("CurrentBuild")
 	if err != nil {
 		return "unknown"
 	}
-	
+
 	ubr, _, err := k.GetIntegerValue("UBR")
 	if err == nil && ubr > 0 {
 		return fmt.Sprintf("%s.%d", build, ubr)
 	}
-	
+
 	return build
 }
 
@@ -69,17 +69,17 @@ func (d *detector) detectPackageManager() string {
 	if _, err := exec.LookPath("choco"); err == nil {
 		return "chocolatey"
 	}
-	
+
 	// Check for Scoop
 	if os.Getenv("SCOOP") != "" {
 		return "scoop"
 	}
-	
+
 	// Check for winget
 	if _, err := exec.LookPath("winget"); err == nil {
 		return "winget"
 	}
-	
+
 	return "none"
 }
 
@@ -93,27 +93,27 @@ func InstallService(name, execPath, workingDir string) error {
 	// Create service using sc.exe
 	displayName := fmt.Sprintf("Tapio %s", name)
 	description := fmt.Sprintf("Tapio %s service", name)
-	
+
 	// Create the service
 	cmd := exec.Command("sc.exe", "create", name,
 		fmt.Sprintf("binPath=%s", execPath),
 		fmt.Sprintf("DisplayName=%s", displayName),
 		"start=auto")
-	
+
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create service: %w\nOutput: %s", err, string(output))
 	}
-	
+
 	// Set service description
 	cmd = exec.Command("sc.exe", "description", name, description)
 	cmd.Run() // Ignore errors as this is optional
-	
+
 	// Configure service recovery
 	cmd = exec.Command("sc.exe", "failure", name,
 		"reset=86400",
 		"actions=restart/60000/restart/60000/restart/60000")
 	cmd.Run() // Ignore errors as this is optional
-	
+
 	return nil
 }
 
@@ -121,13 +121,13 @@ func InstallService(name, execPath, workingDir string) error {
 func UninstallService(name string) error {
 	// Stop the service first
 	exec.Command("sc.exe", "stop", name).Run()
-	
+
 	// Delete the service
 	cmd := exec.Command("sc.exe", "delete", name)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to delete service: %w\nOutput: %s", err, string(output))
 	}
-	
+
 	return nil
 }
 
@@ -170,7 +170,7 @@ func GetAppDataDir() (string, error) {
 // IsAdmin checks if running with administrator privileges
 func IsAdmin() bool {
 	var sid *windows.SID
-	
+
 	// Well-known SID for the Administrators group
 	err := windows.AllocateAndInitializeSid(
 		&windows.SECURITY_NT_AUTHORITY,
@@ -183,14 +183,14 @@ func IsAdmin() bool {
 		return false
 	}
 	defer windows.FreeSid(sid)
-	
+
 	// Check if the current process token contains the SID
 	token := windows.Token(0)
 	member, err := token.IsMember(sid)
 	if err != nil {
 		return false
 	}
-	
+
 	return member
 }
 
@@ -199,30 +199,30 @@ func ElevateIfNeeded() error {
 	if IsAdmin() {
 		return nil
 	}
-	
+
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	
+
 	// Prepare the command line
 	args := strings.Join(os.Args[1:], " ")
-	
+
 	// Use ShellExecute to run with elevation
 	verb := "runas"
 	cwd, _ := os.Getwd()
-	
-	err = windows.ShellExecute(0, 
+
+	err = windows.ShellExecute(0,
 		syscall.StringToUTF16Ptr(verb),
 		syscall.StringToUTF16Ptr(exe),
 		syscall.StringToUTF16Ptr(args),
 		syscall.StringToUTF16Ptr(cwd),
 		windows.SW_NORMAL)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to elevate privileges: %w", err)
 	}
-	
+
 	// Exit the current process
 	os.Exit(0)
 	return nil
@@ -237,13 +237,13 @@ func AddToPath(dir string) error {
 		return fmt.Errorf("failed to open registry key: %w", err)
 	}
 	defer k.Close()
-	
+
 	// Get current PATH
 	path, _, err := k.GetStringValue("Path")
 	if err != nil {
 		return fmt.Errorf("failed to read PATH: %w", err)
 	}
-	
+
 	// Check if already in PATH
 	paths := strings.Split(path, ";")
 	for _, p := range paths {
@@ -251,16 +251,16 @@ func AddToPath(dir string) error {
 			return nil // Already in PATH
 		}
 	}
-	
+
 	// Add to PATH
 	newPath := path + ";" + dir
 	if err := k.SetStringValue("Path", newPath); err != nil {
 		return fmt.Errorf("failed to update PATH: %w", err)
 	}
-	
+
 	// Notify system of environment change
-	windows.SendMessage(windows.HWND_BROADCAST, windows.WM_SETTINGCHANGE, 0, 
+	windows.SendMessage(windows.HWND_BROADCAST, windows.WM_SETTINGCHANGE, 0,
 		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Environment"))))
-	
+
 	return nil
 }

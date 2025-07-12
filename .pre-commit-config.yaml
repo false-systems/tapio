@@ -1,53 +1,97 @@
-# See https://pre-commit.com for more information
+# ==========================================
+# Tapio Pre-commit Configuration
+# ==========================================
+
 repos:
+  # Go formatting and imports
   - repo: local
     hooks:
       - id: go-fmt
-        name: go fmt
-        entry: gofmt
-        args: [-w, -s]
-        language: system
-        files: \.go$
-        
-      - id: go-vet
-        name: go vet
-        entry: bash
-        args: [-c, 'go list ./... | grep -v pkg/mod | xargs go vet']
+        name: Format Go code
+        entry: make fmt
         language: system
         files: \.go$
         pass_filenames: false
-        
+
       - id: go-mod-tidy
-        name: go mod tidy
-        entry: go
-        args: [mod, tidy]
+        name: Tidy Go modules
+        entry: go mod tidy
         language: system
         files: go\.(mod|sum)$
         pass_filenames: false
-        
-      - id: agent-check
-        name: agent quality check
-        entry: bash
-        args: [-c, 'make agent-check']
+
+      - id: go-vet
+        name: Go vet
+        entry: go vet
         language: system
         files: \.go$
+        args: [./...]
         pass_filenames: false
-        
+
+      - id: golangci-lint
+        name: Run golangci-lint
+        entry: golangci-lint run
+        language: system
+        files: \.go$
+        args: [--timeout=5m, --fix]
+        pass_filenames: false
+
+  # Security checks
+  - repo: local
+    hooks:
+      - id: gosec
+        name: Security scan with gosec
+        entry: gosec
+        language: system
+        files: \.go$
+        args: [-nosec-tag=notsafe, ./...]
+        pass_filenames: false
+
+  # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace
+        exclude: \.md$
       - id: end-of-file-fixer
+        exclude: \.md$
       - id: check-yaml
-      - id: check-added-large-files
-        args: ['--maxkb=1000']
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: check-toml
       - id: check-merge-conflict
-        
-  - repo: https://github.com/dnephin/pre-commit-golang
-    rev: v0.5.1
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-case-conflict
+      - id: mixed-line-ending
+
+  # Markdown and documentation
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.37.0
     hooks:
-      - id: go-mod-tidy
-      - id: go-fmt
-      - id: go-vet-mod
-      - id: go-unit-tests-mod
-        args: [-short]
+      - id: markdownlint
+        args: [--disable, MD013, MD033, MD041, --]
+
+  # Secrets detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: \.lock$
+
+# Global settings
+default_stages: [commit]
+minimum_pre_commit_version: "3.0.0"
+
+# Skip specific files
+exclude: |
+  (?x)^(
+    vendor/|
+    \.git/|
+    bin/|
+    dist/|
+    build/|
+    .*\.pb\.go$|
+    .*_generated\.go$
+  )$

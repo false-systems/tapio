@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 	"time"
-	
+
 	"tapio/cmd/install/installer"
 )
 
@@ -35,7 +35,7 @@ func NewMetricsCollector() installer.MetricsCollector {
 func (m *metricsCollector) RecordDuration(step string, duration time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.stepDurations[step] == nil {
 		m.stepDurations[step] = make([]time.Duration, 0)
 	}
@@ -46,12 +46,12 @@ func (m *metricsCollector) RecordDuration(step string, duration time.Duration) {
 func (m *metricsCollector) RecordError(step string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.errors[step] == nil {
 		m.errors[step] = make([]error, 0)
 	}
 	m.errors[step] = append(m.errors[step], err)
-	
+
 	// Add to failed steps if not already there
 	found := false
 	for _, s := range m.failedSteps {
@@ -69,7 +69,7 @@ func (m *metricsCollector) RecordError(step string, err error) {
 func (m *metricsCollector) RecordSuccess(step string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Add to successful steps if not already there
 	found := false
 	for _, s := range m.successfulSteps {
@@ -87,7 +87,7 @@ func (m *metricsCollector) RecordSuccess(step string) {
 func (m *metricsCollector) GetReport() installer.MetricsReport {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	report := installer.MetricsReport{
 		TotalDuration:   time.Since(m.startTime),
 		StepDurations:   make(map[string]time.Duration),
@@ -95,7 +95,7 @@ func (m *metricsCollector) GetReport() installer.MetricsReport {
 		SuccessfulSteps: make([]string, len(m.successfulSteps)),
 		FailedSteps:     make([]string, len(m.failedSteps)),
 	}
-	
+
 	// Calculate average durations
 	for step, durations := range m.stepDurations {
 		if len(durations) > 0 {
@@ -106,17 +106,17 @@ func (m *metricsCollector) GetReport() installer.MetricsReport {
 			report.StepDurations[step] = total / time.Duration(len(durations))
 		}
 	}
-	
+
 	// Copy errors
 	for step, errs := range m.errors {
 		report.Errors[step] = make([]error, len(errs))
 		copy(report.Errors[step], errs)
 	}
-	
+
 	// Copy step lists
 	copy(report.SuccessfulSteps, m.successfulSteps)
 	copy(report.FailedSteps, m.failedSteps)
-	
+
 	return report
 }
 
@@ -138,7 +138,7 @@ func (m *metricsCollector) GetMetadata(key string) (interface{}, bool) {
 // ExportJSON exports metrics as JSON
 func (m *metricsCollector) ExportJSON() ([]byte, error) {
 	report := m.GetReport()
-	
+
 	export := map[string]interface{}{
 		"timestamp":        m.startTime,
 		"total_duration":   report.TotalDuration.String(),
@@ -149,12 +149,12 @@ func (m *metricsCollector) ExportJSON() ([]byte, error) {
 		"metadata":         m.metadata,
 		"summary":          m.generateSummary(report),
 	}
-	
+
 	// Convert durations to strings
 	for step, duration := range report.StepDurations {
 		export["step_durations"].(map[string]string)[step] = duration.String()
 	}
-	
+
 	// Convert errors to strings
 	for step, errs := range report.Errors {
 		errStrs := make([]string, len(errs))
@@ -163,30 +163,30 @@ func (m *metricsCollector) ExportJSON() ([]byte, error) {
 		}
 		export["errors"].(map[string][]string)[step] = errStrs
 	}
-	
+
 	return json.MarshalIndent(export, "", "  ")
 }
 
 // generateSummary creates a summary of the metrics
 func (m *metricsCollector) generateSummary(report installer.MetricsReport) map[string]interface{} {
-	successRate := float64(len(report.SuccessfulSteps)) / 
+	successRate := float64(len(report.SuccessfulSteps)) /
 		float64(len(report.SuccessfulSteps)+len(report.FailedSteps)) * 100
-	
+
 	// Find slowest steps
 	type stepDuration struct {
 		name     string
 		duration time.Duration
 	}
-	
+
 	var steps []stepDuration
 	for name, duration := range report.StepDurations {
 		steps = append(steps, stepDuration{name, duration})
 	}
-	
+
 	sort.Slice(steps, func(i, j int) bool {
 		return steps[i].duration > steps[j].duration
 	})
-	
+
 	slowestSteps := make([]map[string]string, 0)
 	for i := 0; i < len(steps) && i < 3; i++ {
 		slowestSteps = append(slowestSteps, map[string]string{
@@ -194,7 +194,7 @@ func (m *metricsCollector) generateSummary(report installer.MetricsReport) map[s
 			"duration": steps[i].duration.String(),
 		})
 	}
-	
+
 	return map[string]interface{}{
 		"success_rate":   fmt.Sprintf("%.1f%%", successRate),
 		"total_steps":    len(report.SuccessfulSteps) + len(report.FailedSteps),
@@ -206,30 +206,30 @@ func (m *metricsCollector) generateSummary(report installer.MetricsReport) map[s
 
 // TelemetryCollector collects and sends telemetry data
 type TelemetryCollector struct {
-	endpoint   string
-	apiKey     string
-	collector  installer.MetricsCollector
-	enabled    bool
-	mu         sync.Mutex
-	buffer     []TelemetryEvent
-	bufferSize int
+	endpoint      string
+	apiKey        string
+	collector     installer.MetricsCollector
+	enabled       bool
+	mu            sync.Mutex
+	buffer        []TelemetryEvent
+	bufferSize    int
 	flushInterval time.Duration
-	done       chan struct{}
-	wg         sync.WaitGroup
+	done          chan struct{}
+	wg            sync.WaitGroup
 }
 
 // TelemetryEvent represents a telemetry event
 type TelemetryEvent struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	Type        string                 `json:"type"`
-	Step        string                 `json:"step,omitempty"`
-	Duration    *time.Duration         `json:"duration,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	SessionID   string                 `json:"session_id"`
-	InstallID   string                 `json:"install_id"`
-	Platform    string                 `json:"platform"`
-	Version     string                 `json:"version"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      string                 `json:"type"`
+	Step      string                 `json:"step,omitempty"`
+	Duration  *time.Duration         `json:"duration,omitempty"`
+	Error     string                 `json:"error,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	SessionID string                 `json:"session_id"`
+	InstallID string                 `json:"install_id"`
+	Platform  string                 `json:"platform"`
+	Version   string                 `json:"version"`
 }
 
 // NewTelemetryCollector creates a new telemetry collector
@@ -244,12 +244,12 @@ func NewTelemetryCollector(endpoint, apiKey string) *TelemetryCollector {
 		flushInterval: 30 * time.Second,
 		done:          make(chan struct{}),
 	}
-	
+
 	if tc.enabled {
 		tc.wg.Add(1)
 		go tc.flushLoop()
 	}
-	
+
 	return tc
 }
 
@@ -258,12 +258,12 @@ func (tc *TelemetryCollector) RecordEvent(event TelemetryEvent) {
 	if !tc.enabled {
 		return
 	}
-	
+
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	
+
 	tc.buffer = append(tc.buffer, event)
-	
+
 	// Flush if buffer is full
 	if len(tc.buffer) >= tc.bufferSize {
 		go tc.flush()
@@ -273,10 +273,10 @@ func (tc *TelemetryCollector) RecordEvent(event TelemetryEvent) {
 // flushLoop periodically flushes telemetry data
 func (tc *TelemetryCollector) flushLoop() {
 	defer tc.wg.Done()
-	
+
 	ticker := time.NewTicker(tc.flushInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-tc.done:
@@ -295,12 +295,12 @@ func (tc *TelemetryCollector) flush() {
 		tc.mu.Unlock()
 		return
 	}
-	
+
 	events := make([]TelemetryEvent, len(tc.buffer))
 	copy(events, tc.buffer)
 	tc.buffer = tc.buffer[:0]
 	tc.mu.Unlock()
-	
+
 	// Send events (simplified - real implementation would batch and retry)
 	// This is where you would send to your telemetry endpoint
 	// For now, just log that we would send
@@ -312,22 +312,22 @@ func (tc *TelemetryCollector) Close() {
 	if !tc.enabled {
 		return
 	}
-	
+
 	close(tc.done)
 	tc.wg.Wait()
 }
 
 // InstallationMetrics tracks detailed installation metrics
 type InstallationMetrics struct {
-	StartTime        time.Time                      `json:"start_time"`
-	EndTime          time.Time                      `json:"end_time"`
-	Duration         time.Duration                  `json:"duration"`
-	Platform         PlatformMetrics                `json:"platform"`
-	Network          NetworkMetrics                 `json:"network"`
-	Performance      PerformanceMetrics             `json:"performance"`
-	Steps            []StepMetrics                  `json:"steps"`
-	Errors           []ErrorMetrics                 `json:"errors"`
-	Success          bool                           `json:"success"`
+	StartTime   time.Time          `json:"start_time"`
+	EndTime     time.Time          `json:"end_time"`
+	Duration    time.Duration      `json:"duration"`
+	Platform    PlatformMetrics    `json:"platform"`
+	Network     NetworkMetrics     `json:"network"`
+	Performance PerformanceMetrics `json:"performance"`
+	Steps       []StepMetrics      `json:"steps"`
+	Errors      []ErrorMetrics     `json:"errors"`
+	Success     bool               `json:"success"`
 }
 
 // PlatformMetrics contains platform information

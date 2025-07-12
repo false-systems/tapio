@@ -1,4 +1,4 @@
-package correlation
+package events_correlation
 
 import (
 	"fmt"
