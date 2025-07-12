@@ -251,6 +251,35 @@ const (
 	circuitHalfOpen
 )
 
+// NewCircuitBreaker creates a new circuit breaker
+func NewCircuitBreaker(threshold int, timeout time.Duration) *CircuitBreaker {
+	return &CircuitBreaker{
+		threshold: threshold,
+		timeout:   timeout,
+	}
+}
+
+// Allow checks if operations should be allowed
+func (cb *CircuitBreaker) Allow() bool {
+	state := cb.state.Load()
+	switch state {
+	case circuitClosed:
+		return true
+	case circuitOpen:
+		// Check if we should transition to half-open
+		lastFail := time.Unix(0, cb.lastFail.Load())
+		if time.Since(lastFail) > cb.timeout {
+			cb.state.Store(circuitHalfOpen)
+			return true
+		}
+		return false
+	case circuitHalfOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // ShouldTrip checks if the circuit breaker should trip
 func (cb *CircuitBreaker) ShouldTrip() bool {
 	failures := cb.failures.Load()

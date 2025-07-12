@@ -274,6 +274,13 @@ func (c *Collector) Close() error {
 }
 
 // GetMemoryPredictions returns OOM predictions for all tracked processes
+func (c *Collector) CollectEvents() {
+	// Trigger event collection - this is called periodically by the monitor
+	// The actual event reading is handled by readEvents() goroutine
+	// This method can be used for any periodic collection tasks
+	c.cleanupOldStats()
+}
+
 func (c *Collector) GetMemoryPredictions(memoryLimits map[uint32]uint64) map[uint32]*OOMPrediction {
 	stats := c.GetProcessStats()
 	predictions := make(map[uint32]*OOMPrediction)

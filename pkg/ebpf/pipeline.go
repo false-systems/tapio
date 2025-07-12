@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// EventBatch represents a batch of events for processing
-type EventBatch struct {
+// MemoryEventBatch represents a batch of memory events for processing
+type MemoryEventBatch struct {
 	Events    []*MemoryEvent
 	Size      int
 	CreatedAt time.Time
@@ -23,7 +23,7 @@ type EventBatch struct {
 // BatchProcessor processes events in batches for efficiency  
 type BatchProcessor struct {
 	config     BatchConfig
-	batchChan  chan *EventBatch
+	batchChan  chan *MemoryEventBatch
 	eventQueue []*MemoryEvent
 	mu         sync.Mutex
 	batchID    uint64
@@ -53,7 +53,7 @@ func NewBatchProcessor(config BatchConfig) *BatchProcessor {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &BatchProcessor{
 		config:     config,
-		batchChan:  make(chan *EventBatch, 10),
+		batchChan:  make(chan *MemoryEventBatch, 10),
 		eventQueue: make([]*MemoryEvent, 0, config.MaxBatchSize),
 		ctx:        ctx,
 		cancel:     cancel,
@@ -97,7 +97,7 @@ func (bp *BatchProcessor) AddEvent(event *MemoryEvent) bool {
 }
 
 // GetBatches returns the batch channel
-func (bp *BatchProcessor) GetBatches() <-chan *EventBatch {
+func (bp *BatchProcessor) GetBatches() <-chan *MemoryEventBatch {
 	return bp.batchChan
 }
 
@@ -134,7 +134,7 @@ func (bp *BatchProcessor) flushBatch() {
 	}
 	
 	batchID := atomic.AddUint64(&bp.batchID, 1)
-	batch := &EventBatch{
+	batch := &MemoryEventBatch{
 		Events:    make([]*MemoryEvent, len(bp.eventQueue)),
 		Size:      len(bp.eventQueue),
 		CreatedAt: time.Now(),
@@ -178,7 +178,7 @@ type EventPipeline struct {
 
 	// Queues
 	ingestionQueue  chan *MemoryEvent
-	processingQueue chan *EventBatch
+	processingQueue chan *MemoryEventBatch
 	outputQueue     chan *ProcessedBatch
 
 	// Circuit breaker
@@ -263,7 +263,7 @@ func NewEventPipeline(config *PipelineConfig) (*EventPipeline, error) {
 		ctx:             ctx,
 		cancel:          cancel,
 		ingestionQueue:  make(chan *MemoryEvent, config.QueueSize),
-		processingQueue: make(chan *EventBatch, config.QueueSize/10),
+		processingQueue: make(chan *MemoryEventBatch, config.QueueSize/10),
 		outputQueue:     make(chan *ProcessedBatch, config.QueueSize/20),
 		loadBalancer:    loadBalancer,
 		memoryPool:      memoryPool,
@@ -587,7 +587,7 @@ func (pw *ProcessingWorker) Run() {
 	}
 }
 
-func (pw *ProcessingWorker) processBatch(batch *EventBatch) *ProcessedBatch {
+func (pw *ProcessingWorker) processBatch(batch *MemoryEventBatch) *ProcessedBatch {
 	// Process the batch of events
 	results := make([]*ProcessedEvent, 0, batch.Size)
 
@@ -672,7 +672,7 @@ func (ow *OutputWorker) outputEvent(event *ProcessedEvent) {
 
 // ProcessedBatch represents a batch of processed events
 type ProcessedBatch struct {
-	OriginalBatch *EventBatch
+	OriginalBatch *MemoryEventBatch
 	Results       []*ProcessedEvent
 	ProcessedAt   time.Time
 	WorkerID      int
@@ -785,69 +785,4 @@ func (mp *MemoryPool) Put(slice []*MemoryEvent) {
 	}
 }
 
-// CircuitBreaker prevents cascade failures
-type CircuitBreaker struct {
-	failureCount    int32
-	successCount    int32
-	lastFailureTime time.Time
-	state           string // "closed", "open", "half-open"
-	threshold       int
-	timeout         time.Duration
-	mutex           sync.RWMutex
-}
-
-func NewCircuitBreaker(threshold int, timeout time.Duration) *CircuitBreaker {
-	return &CircuitBreaker{
-		state:     "closed",
-		threshold: threshold,
-		timeout:   timeout,
-	}
-}
-
-func (cb *CircuitBreaker) Allow() bool {
-	cb.mutex.RLock()
-	defer cb.mutex.RUnlock()
-
-	switch cb.state {
-	case "open":
-		if time.Since(cb.lastFailureTime) > cb.timeout {
-			cb.state = "half-open"
-			return true
-		}
-		return false
-	case "half-open":
-		return true
-	default: // closed
-		return true
-	}
-}
-
-func (cb *CircuitBreaker) RecordSuccess() {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
-
-	atomic.AddInt32(&cb.successCount, 1)
-
-	if cb.state == "half-open" {
-		cb.state = "closed"
-		atomic.StoreInt32(&cb.failureCount, 0)
-	}
-}
-
-func (cb *CircuitBreaker) RecordFailure() {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
-
-	atomic.AddInt32(&cb.failureCount, 1)
-	cb.lastFailureTime = time.Now()
-
-	if int(atomic.LoadInt32(&cb.failureCount)) >= cb.threshold {
-		cb.state = "open"
-	}
-}
-
-func (cb *CircuitBreaker) State() string {
-	cb.mutex.RLock()
-	defer cb.mutex.RUnlock()
-	return cb.state
-}
+// CircuitBreaker is defined in error_handler.go

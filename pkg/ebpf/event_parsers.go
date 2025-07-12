@@ -259,7 +259,7 @@ type bytesReader struct {
 	pos  int
 }
 
-func (r *bytesReader) Read(p []byte) (n int, error) {
+func (r *bytesReader) Read(p []byte) (n int, err error) {
 	if r.pos >= len(r.data) {
 		return 0, fmt.Errorf("EOF")
 	}

@@ -1,6 +1,16 @@
 package ebpf
 
-import "time"
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+// Common errors
+var (
+	ErrNotSupported = errors.New("eBPF is not supported on this platform")
+	ErrNotEnabled   = errors.New("eBPF monitoring is disabled")
+)
 
 // SystemEvent is a unified event structure
 type SystemEvent struct {
@@ -113,4 +123,89 @@ type ProtocolStats struct {
 	ErrorCount    uint64
 	AvgLatency    time.Duration
 	TotalBytes    uint64
+}
+
+// ProcessMemoryStats represents memory statistics for a process
+type ProcessMemoryStats struct {
+	PID            uint32            `json:"pid"`
+	Command        string            `json:"command"`
+	TotalAllocated uint64            `json:"total_allocated"`
+	TotalFreed     uint64            `json:"total_freed"`
+	CurrentUsage   uint64            `json:"current_usage"`
+	AllocationRate float64           `json:"allocation_rate"` // bytes per second
+	LastUpdate     time.Time         `json:"last_update"`
+	InContainer    bool              `json:"in_container"`
+	ContainerPID   uint32            `json:"container_pid"`
+	GrowthPattern  []MemoryDataPoint `json:"growth_pattern"`
+}
+
+// MemoryDataPoint represents a single memory measurement
+type MemoryDataPoint struct {
+	Timestamp time.Time `json:"timestamp"`
+	Usage     uint64    `json:"usage"`
+}
+
+// OOMPrediction represents an out-of-memory prediction
+type OOMPrediction struct {
+	PID                uint32        `json:"pid"`
+	TimeToOOM          time.Duration `json:"time_to_oom"`
+	Confidence         float64       `json:"confidence"`
+	CurrentUsage       uint64        `json:"current_usage"`
+	MemoryLimit        uint64        `json:"memory_limit"`
+	PredictedPeakUsage uint64        `json:"predicted_peak_usage"`
+}
+
+// Monitor defines the interface for eBPF monitoring
+type Monitor interface {
+	// Start begins eBPF monitoring
+	Start(ctx context.Context) error
+
+	// Stop gracefully stops monitoring
+	Stop() error
+
+	// GetMemoryStats returns current memory statistics
+	GetMemoryStats() ([]ProcessMemoryStats, error)
+
+	// GetMemoryPredictions returns OOM predictions
+	GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*OOMPrediction, error)
+
+	// IsAvailable checks if eBPF is available on this system
+	IsAvailable() bool
+
+	// GetLastError returns the last error encountered
+	GetLastError() error
+}
+
+// Config represents eBPF monitor configuration
+type Config struct {
+	Enabled                 bool          `json:"enabled"`
+	EnableMemoryMonitoring  bool          `json:"enable_memory_monitoring"`
+	EnableNetworkMonitoring bool          `json:"enable_network_monitoring"`
+	EnablePacketAnalysis    bool          `json:"enable_packet_analysis"`
+	EnableDNSMonitoring     bool          `json:"enable_dns_monitoring"`
+	EnableProtocolAnalysis  bool          `json:"enable_protocol_analysis"`
+	SamplingRate           float64       `json:"sampling_rate"`
+	BufferSize             int           `json:"buffer_size"`
+	ProcessTimeout         time.Duration `json:"process_timeout"`
+	Debug                  bool          `json:"debug"`
+	EventBufferSize        int           `json:"event_buffer_size"`
+	RetentionPeriod        string        `json:"retention_period"`
+}
+
+// DefaultConfig returns default eBPF configuration
+func DefaultConfig() *Config {
+	return &Config{
+		Enabled:                 false, // Disabled by default
+		EnableMemoryMonitoring:  true,
+		EnableNetworkMonitoring: true,
+		EnablePacketAnalysis:    true,
+		EnableDNSMonitoring:     true,
+		EnableProtocolAnalysis:  true,
+		SamplingRate:           1.0,
+		BufferSize:             65536,
+		EventBufferSize:        1000,
+		RetentionPeriod:        "5m",
+		ProcessTimeout:         5 * time.Minute,
+		Debug:                  false,
+	}
 }

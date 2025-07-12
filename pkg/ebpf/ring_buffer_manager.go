@@ -82,7 +82,7 @@ type EventParser interface {
 }
 
 // NewRingBufferManager creates a new ring buffer manager
-func NewRingBufferManager(config RingBufferConfig) *RingBufferManager {
+func NewRingBufferManager(config RingBufferConfig) (*RingBufferManager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	
 	return &RingBufferManager{
@@ -93,7 +93,7 @@ func NewRingBufferManager(config RingBufferConfig) *RingBufferManager {
 		config:     config,
 		ctx:        ctx,
 		cancel:     cancel,
-	}
+	}, nil
 }
 
 // AddRingBuffer adds a ring buffer with its parser
