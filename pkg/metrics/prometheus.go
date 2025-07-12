@@ -5,14 +5,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/correlation/rules"
-	"github.com/yairfalse/tapio/pkg/correlation/sources"
+	"github.com/yairfalse/tapio/pkg/correlation_v2"
+	"github.com/yairfalse/tapio/pkg/events_correlation"
 	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/simple"
 	"github.com/yairfalse/tapio/pkg/types"
@@ -21,12 +21,12 @@ import (
 	"github.com/yairfalse/tapio/pkg/universal/formatters"
 )
 
-// PrometheusExporter exports Tapio metrics to Prometheus format
+// PrometheusExporter exports Tapio metrics to Prometheus format using V2 engine
 type PrometheusExporter struct {
 	checker           CheckerInterface
 	ebpfMonitor       ebpf.Monitor
 	registry          *prometheus.Registry
-	correlationEngine *correlation.Engine
+	v2Engine          *correlation_v2.HighPerformanceEngine
 
 	// Universal format components
 	formatter            *formatters.PrometheusFormatter
@@ -45,6 +45,13 @@ type PrometheusExporter struct {
 	// Performance metrics
 	analysisLatency *prometheus.HistogramVec
 	lastUpdateTime  *prometheus.GaugeVec
+	
+	// V2 Engine metrics
+	v2EventsProcessed   *prometheus.CounterVec
+	v2EventsDropped     *prometheus.CounterVec
+	v2CorrelationsFound *prometheus.CounterVec
+	v2ProcessingLatency *prometheus.HistogramVec
+	v2EngineHealth      *prometheus.GaugeVec
 }
 
 // CheckerInterface defines the interface for checkers
@@ -52,474 +59,468 @@ type CheckerInterface interface {
 	Check(ctx context.Context, req *types.CheckRequest) (*types.CheckResult, error)
 }
 
-// NewPrometheusExporter creates a new Prometheus metrics exporter
-func NewPrometheusExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor) *PrometheusExporter {
+// Config holds configuration for the Prometheus exporter
+type Config struct {
+	// RefreshInterval is how often to update metrics
+	RefreshInterval time.Duration
+
+	// IncludeEBPF enables eBPF metrics collection
+	IncludeEBPF bool
+
+	// IncludeCorrelation enables correlation engine metrics
+	IncludeCorrelation bool
+
+	// Labels to add to all metrics
+	GlobalLabels map[string]string
+}
+
+// DefaultConfig returns default configuration
+func DefaultConfig() Config {
+	return Config{
+		RefreshInterval:    30 * time.Second,
+		IncludeEBPF:        true,
+		IncludeCorrelation: true,
+		GlobalLabels: map[string]string{
+			"app": "tapio",
+		},
+	}
+}
+
+// New creates a new Prometheus exporter
+func New(checker CheckerInterface, config Config) (*PrometheusExporter, error) {
 	registry := prometheus.NewRegistry()
 
-	// Create universal format components
-	formatter := formatters.NewPrometheusFormatter("tapio", "", registry)
-	ebpfConverter := converters.NewEBPFConverter("prometheus", "1.0")
-	correlationConverter := converters.NewCorrelationConverter("prometheus", "1.0")
-
-	// Create correlation engine with real data sources if checker is simple.Checker
-	var correlationEngine *correlation.Engine
-	if simpleChecker, ok := checker.(*simple.Checker); ok {
-		// Create data sources
-		dataSources := make(map[correlation.SourceType]correlation.DataSource)
-
-		// Add Kubernetes data source
-		k8sSource := sources.NewKubernetesDataSource(simpleChecker)
-		dataSources[correlation.SourceKubernetes] = k8sSource
-
-		// Add eBPF data source if available
-		if ebpfMonitor != nil {
-			ebpfSource := sources.NewEBPFDataSource(ebpfMonitor)
-			dataSources[correlation.SourceEBPF] = ebpfSource
-		}
-
-		// Create data collection
-		dataCollection := correlation.NewDataCollection(dataSources)
-
-		// Create correlation engine
-		config := correlation.DefaultEngineConfig()
-		ruleRegistry := correlation.NewRuleRegistry()
-
-		// Register default rules
-		if err := rules.RegisterDefaultRules(ruleRegistry); err != nil {
-			fmt.Printf("[WARN] Failed to register default rules: %v\n", err)
-		}
-
-		correlationEngine = correlation.NewEngine(config, ruleRegistry, dataCollection)
+	// Create formatter with config
+	promConfig := &formatters.PrometheusConfig{
+		Prefix:       "tapio",
+		GlobalLabels: config.GlobalLabels,
 	}
+	formatter := formatters.NewPrometheusFormatter(promConfig)
+
+	// Initialize V2 engine
+	v2Config := correlation_v2.DefaultEngineConfig()
+	v2Engine := correlation_v2.NewHighPerformanceEngine(v2Config)
+	
+	// Start V2 engine
+	if err := v2Engine.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start V2 engine: %w", err)
+	}
+
+	// Register default correlation rules
+	registerDefaultRules(v2Engine)
 
 	exporter := &PrometheusExporter{
 		checker:              checker,
-		ebpfMonitor:          ebpfMonitor,
 		registry:             registry,
-		correlationEngine:    correlationEngine,
+		v2Engine:             v2Engine,
 		formatter:            formatter,
-		ebpfConverter:        ebpfConverter,
-		correlationConverter: correlationConverter,
-
-		// Health metrics
-		podHealthStatus: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "tapio_pod_health_status",
-				Help: "Pod health status (0=healthy, 1=warning, 2=critical)",
-			},
-			[]string{"pod", "namespace", "status"},
-		),
-
-		clusterHealthScore: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "tapio_cluster_health_score",
-				Help: "Overall cluster health score (0.0 to 1.0)",
-			},
-			[]string{"namespace"},
-		),
-
-		problemsTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "tapio_problems_total",
-				Help: "Total number of problems detected by Tapio",
-			},
-			[]string{"namespace", "severity", "type"},
-		),
-
-		// Prediction metrics
-		oomPredictionSeconds: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "tapio_oom_prediction_seconds",
-				Help: "Seconds until predicted OOM kill (0 = no prediction)",
-			},
-			[]string{"pod", "namespace", "container"},
-		),
-
-		confidenceScore: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "tapio_confidence_score",
-				Help: "Confidence score for predictions (0.0 to 1.0)",
-			},
-			[]string{"pod", "namespace", "prediction_type"},
-		),
-
-		// Performance metrics
-		analysisLatency: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Name:    "tapio_analysis_duration_seconds",
-				Help:    "Time taken for Tapio analysis operations",
-				Buckets: prometheus.DefBuckets,
-			},
-			[]string{"operation", "namespace"},
-		),
-
-		lastUpdateTime: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "tapio_last_update_timestamp",
-				Help: "Timestamp of last metric update",
-			},
-			[]string{"component"},
-		),
+		ebpfConverter:        converters.NewEBPFConverter(),
+		correlationConverter: converters.NewCorrelationConverter("prometheus", "1.0"),
 	}
 
-	// Register all metrics
-	exporter.registerMetrics()
+	// Initialize metrics
+	exporter.initMetrics()
 
-	return exporter
-}
+	// Register metrics with registry
+	registry.MustRegister(
+		exporter.podHealthStatus,
+		exporter.clusterHealthScore,
+		exporter.problemsTotal,
+		exporter.oomPredictionSeconds,
+		exporter.confidenceScore,
+		exporter.analysisLatency,
+		exporter.lastUpdateTime,
+		exporter.v2EventsProcessed,
+		exporter.v2EventsDropped,
+		exporter.v2CorrelationsFound,
+		exporter.v2ProcessingLatency,
+		exporter.v2EngineHealth,
+	)
 
-// registerMetrics registers all metrics with the Prometheus registry
-func (e *PrometheusExporter) registerMetrics() {
-	metrics := []prometheus.Collector{
-		e.podHealthStatus,
-		e.clusterHealthScore,
-		e.problemsTotal,
-		e.oomPredictionSeconds,
-		e.confidenceScore,
-		e.analysisLatency,
-		e.lastUpdateTime,
-	}
-
-	for _, metric := range metrics {
-		e.registry.MustRegister(metric)
-	}
-
-	metricsCount := 7
-	if e.ebpfMonitor != nil && e.ebpfMonitor.IsAvailable() {
-		// Register additional eBPF metrics if available
-		e.registerEBPFMetrics()
-		metricsCount += 3
-	}
-	fmt.Printf("[OK] Registered %d Tapio metrics with Prometheus\n", metricsCount)
-}
-
-// UpdateMetrics updates all Prometheus metrics with current Tapio data
-func (e *PrometheusExporter) UpdateMetrics(ctx context.Context) error {
-	startTime := time.Now()
-	defer func() {
-		e.analysisLatency.WithLabelValues("full_update", "all").Observe(time.Since(startTime).Seconds())
-		e.lastUpdateTime.WithLabelValues("metrics_update").SetToCurrentTime()
-	}()
-
-	// Get current health check results
-	checkReq := &types.CheckRequest{All: true}
-	result, err := e.checker.Check(ctx, checkReq)
-	if err != nil {
-		return fmt.Errorf("failed to get health check results: %w", err)
-	}
-
-	// Update metrics
-	e.updateHealthMetrics(result)
-	e.updatePredictionMetrics(result)
-
-	// Update eBPF metrics if available
-	if e.ebpfMonitor != nil && e.ebpfMonitor.IsAvailable() {
-		e.updateEBPFMetrics()
-	}
-
-	return nil
-}
-
-// updateHealthMetrics updates pod and cluster health metrics
-func (e *PrometheusExporter) updateHealthMetrics(result *types.CheckResult) {
-	// Clear existing health metrics
-	e.podHealthStatus.Reset()
-	e.clusterHealthScore.Reset()
-
-	// Track problems by namespace for cluster health scores
-	namespaceStats := make(map[string]*types.Summary)
-
-	// Update pod health status from problems
-	for _, problem := range result.Problems {
-		namespace := problem.Resource.Namespace
-		pod := problem.Resource.Name
-
-		// Set pod health status
-		statusValue := getSeverityValue(problem.Severity)
-		e.podHealthStatus.WithLabelValues(pod, namespace, string(problem.Severity)).Set(statusValue)
-
-		// Track namespace statistics
-		if _, exists := namespaceStats[namespace]; !exists {
-			namespaceStats[namespace] = &types.Summary{}
+	// Initialize eBPF monitor if enabled
+	if config.IncludeEBPF {
+		ebpfConfig := &ebpf.Config{
+			Enabled:                true,
+			EnableMemoryMonitoring: true,
+			EnableNetworkMonitoring: true,
+			BufferSize:             1024,
 		}
-
-		switch problem.Severity {
-		case types.SeverityCritical:
-			namespaceStats[namespace].CriticalPods++
-			e.problemsTotal.WithLabelValues(namespace, "critical", "pod_issue").Inc()
-		case types.SeverityWarning:
-			namespaceStats[namespace].WarningPods++
-			e.problemsTotal.WithLabelValues(namespace, "warning", "pod_issue").Inc()
-		default:
-			namespaceStats[namespace].HealthyPods++
-		}
-		namespaceStats[namespace].TotalPods++
-	}
-
-	// Calculate and update cluster health scores by namespace
-	for namespace, stats := range namespaceStats {
-		if stats.TotalPods > 0 {
-			// Health score: 1.0 = all healthy, 0.5 = some warnings, 0.0 = all critical
-			healthScore := (float64(stats.HealthyPods) + float64(stats.WarningPods)*0.5) / float64(stats.TotalPods)
-			e.clusterHealthScore.WithLabelValues(namespace).Set(healthScore)
+		monitor := ebpf.NewMonitor(ebpfConfig)
+		if err := monitor.Start(); err == nil {
+			exporter.ebpfMonitor = monitor
 		}
 	}
+
+	return exporter, nil
 }
 
-// updatePredictionMetrics updates OOM and other prediction metrics
-func (e *PrometheusExporter) updatePredictionMetrics(result *types.CheckResult) {
-	// Clear prediction metrics
-	e.oomPredictionSeconds.Reset()
-	e.confidenceScore.Reset()
+// initMetrics initializes all Prometheus metrics
+func (pe *PrometheusExporter) initMetrics() {
+	pe.podHealthStatus = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tapio",
+			Subsystem: "pod",
+			Name:      "health_status",
+			Help:      "Pod health status (1=healthy, 0=unhealthy)",
+		},
+		[]string{"pod", "namespace", "reason"},
+	)
 
-	for _, problem := range result.Problems {
-		if problem.Prediction != nil {
-			namespace := problem.Resource.Namespace
-			pod := problem.Resource.Name
+	pe.clusterHealthScore = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tapio",
+			Subsystem: "cluster",
+			Name:      "health_score",
+			Help:      "Overall cluster health score (0-100)",
+		},
+		[]string{"cluster"},
+	)
 
-			// Update OOM prediction timing
-			secondsToFailure := problem.Prediction.TimeToFailure.Seconds()
-			e.oomPredictionSeconds.WithLabelValues(pod, namespace, "main").Set(secondsToFailure)
+	pe.problemsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tapio",
+			Subsystem: "problems",
+			Name:      "total",
+			Help:      "Total number of problems detected",
+		},
+		[]string{"severity", "type"},
+	)
 
-			// Update confidence score
-			e.confidenceScore.WithLabelValues(pod, namespace, "oom").Set(problem.Prediction.Confidence)
-		}
-	}
+	pe.oomPredictionSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tapio",
+			Subsystem: "prediction",
+			Name:      "oom_seconds",
+			Help:      "Predicted time to OOM in seconds",
+		},
+		[]string{"pod", "namespace"},
+	)
+
+	pe.confidenceScore = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tapio",
+			Subsystem: "prediction",
+			Name:      "confidence",
+			Help:      "Prediction confidence score (0-1)",
+		},
+		[]string{"pod", "namespace", "type"},
+	)
+
+	pe.analysisLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "tapio",
+			Subsystem: "analysis",
+			Name:      "latency_seconds",
+			Help:      "Analysis latency in seconds",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"operation"},
+	)
+
+	pe.lastUpdateTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tapio",
+			Subsystem: "metrics",
+			Name:      "last_update_timestamp",
+			Help:      "Timestamp of last metrics update",
+		},
+		[]string{},
+	)
+	
+	// V2 Engine specific metrics
+	pe.v2EventsProcessed = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tapio",
+			Subsystem: "v2_engine",
+			Name:      "events_processed_total",
+			Help:      "Total number of events processed by V2 engine",
+		},
+		[]string{"source"},
+	)
+	
+	pe.v2EventsDropped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tapio",
+			Subsystem: "v2_engine",
+			Name:      "events_dropped_total",
+			Help:      "Total number of events dropped by V2 engine",
+		},
+		[]string{"reason"},
+	)
+	
+	pe.v2CorrelationsFound = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tapio",
+			Subsystem: "v2_engine",
+			Name:      "correlations_found_total",
+			Help:      "Total number of correlations found by V2 engine",
+		},
+		[]string{"rule_id", "severity"},
+	)
+	
+	pe.v2ProcessingLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "tapio",
+			Subsystem: "v2_engine",
+			Name:      "processing_latency_seconds",
+			Help:      "V2 engine processing latency in seconds",
+			Buckets:   []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+		},
+		[]string{"shard"},
+	)
+	
+	pe.v2EngineHealth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tapio",
+			Subsystem: "v2_engine",
+			Name:      "health",
+			Help:      "V2 engine health status (1=healthy, 0=unhealthy)",
+		},
+		[]string{"component"},
+	)
 }
 
-func getSeverityValue(severity types.Severity) float64 {
-	switch severity {
-	case types.SeverityHealthy:
-		return 0
-	case types.SeverityWarning:
-		return 1
-	case types.SeverityCritical:
-		return 2
-	default:
-		return 0
-	}
-}
+// Start begins the metrics collection loop
+func (pe *PrometheusExporter) Start(ctx context.Context, refreshInterval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(refreshInterval)
+		defer ticker.Stop()
 
-// StartMetricsServer starts the Prometheus metrics HTTP server
-func (e *PrometheusExporter) StartMetricsServer(addr string) error {
-	// Create HTTP mux for multiple endpoints
-	mux := http.NewServeMux()
+		// Initial update
+		pe.updateMetrics(ctx)
 
-	// Prometheus metrics endpoint
-	mux.Handle("/metrics", promhttp.HandlerFor(e.registry, promhttp.HandlerOpts{
-		EnableOpenMetrics: true,
-	}))
-
-	// Health check endpoint
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"healthy","service":"tapio-prometheus-exporter"}`))
-	})
-
-	// Info endpoint
-	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"service": "tapio-prometheus-exporter",
-			"version": "1.0.0",
-			"endpoints": ["/metrics", "/health", "/info"],
-			"description": "Tapio Kubernetes intelligence metrics for Prometheus"
-		}`))
-	})
-
-	fmt.Printf("🚀 Prometheus metrics server starting on %s\n", addr)
-	fmt.Printf("📊 Metrics endpoint: http://%s/metrics\n", addr)
-	fmt.Printf("💚 Health endpoint: http://%s/health\n", addr)
-
-	// nolint:gosec // Prometheus exporters typically don't need timeouts
-	return http.ListenAndServe(addr, mux)
-}
-
-// StartPeriodicUpdates starts a goroutine that updates metrics periodically
-func (e *PrometheusExporter) StartPeriodicUpdates(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	fmt.Printf("🔄 Starting periodic metric updates every %v\n", interval)
-
-	// Initial update
-	if err := e.UpdateMetrics(ctx); err != nil {
-		fmt.Printf("Warning: Initial metrics update failed: %v\n", err)
-	} else {
-		fmt.Println("✅ Initial metrics update completed")
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println("🛑 Stopping periodic metrics updates")
-			return
-		case <-ticker.C:
-			if err := e.UpdateMetrics(ctx); err != nil {
-				fmt.Printf("Warning: Metrics update failed: %v\n", err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pe.updateMetrics(ctx)
 			}
 		}
+	}()
+}
+
+// updateMetrics updates all metrics
+func (pe *PrometheusExporter) updateMetrics(ctx context.Context) {
+	startTime := time.Now()
+
+	// Run health check
+	checkReq := &types.CheckRequest{
+		AllNamespaces: true,
+		Verbose:       true,
 	}
-}
 
-// registerEBPFMetrics registers eBPF-specific metrics
-func (e *PrometheusExporter) registerEBPFMetrics() {
-	// Real memory usage from eBPF
-	realMemoryUsage := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "tapio_ebpf_memory_usage_bytes",
-			Help: "Real memory usage tracked by eBPF (kernel-level)",
-		},
-		[]string{"pod", "namespace", "container"},
-	)
-
-	// Memory allocation rate
-	allocationRate := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "tapio_ebpf_memory_allocation_rate_bytes_per_second",
-			Help: "Memory allocation rate tracked by eBPF",
-		},
-		[]string{"pod", "namespace", "container"},
-	)
-
-	// Process count in container
-	processCount := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "tapio_ebpf_container_process_count",
-			Help: "Number of processes in container tracked by eBPF",
-		},
-		[]string{"pod", "namespace", "container"},
-	)
-
-	e.registry.MustRegister(realMemoryUsage, allocationRate, processCount)
-}
-
-// updateEBPFMetrics updates metrics from eBPF data
-func (e *PrometheusExporter) updateEBPFMetrics() {
-	// Get memory stats from eBPF
-	memStats, err := e.ebpfMonitor.GetMemoryStats()
+	result, err := pe.checker.Check(ctx, checkReq)
 	if err != nil {
-		fmt.Printf("[WARN] Failed to get eBPF memory stats: %v\n", err)
 		return
 	}
 
-	// Convert to universal format and export
-	for _, stats := range memStats {
-		// Convert eBPF stats to universal metric
-		metric, err := e.ebpfConverter.ConvertProcessMemoryStats(&stats)
-		if err != nil {
-			fmt.Printf("[WARN] Failed to convert eBPF stats: %v\n", err)
-			continue
+	// Process problems to create events for V2 engine
+	events := pe.convertProblemsToEvents(result.Problems)
+	
+	// Process events through V2 engine
+	if len(events) > 0 {
+		processed := pe.v2Engine.ProcessBatch(events)
+		pe.v2EventsProcessed.WithLabelValues("kubernetes").Add(float64(processed))
+	}
+
+	// Update basic metrics
+	pe.updateHealthMetrics(result)
+	pe.updatePredictionMetrics(result)
+	
+	// Update V2 engine metrics
+	pe.updateV2EngineMetrics()
+
+	// Update analysis latency
+	pe.analysisLatency.WithLabelValues("full_check").Observe(time.Since(startTime).Seconds())
+
+	// Update last update time
+	pe.lastUpdateTime.WithLabelValues().SetToCurrentTime()
+}
+
+// convertProblemsToEvents converts problems to V2 correlation events
+func (pe *PrometheusExporter) convertProblemsToEvents(problems []types.Problem) []*events_correlation.Event {
+	events := make([]*events_correlation.Event, 0, len(problems))
+	
+	for _, problem := range problems {
+		event := &events_correlation.Event{
+			ID:        fmt.Sprintf("problem-%s-%d", problem.Resource.Name, time.Now().UnixNano()),
+			Timestamp: time.Now(),
+			Source:    events_correlation.SourceKubernetes,
+			Type:      strings.ToLower(string(problem.Severity)),
+			Entity: events_correlation.Entity{
+				Type: problem.Resource.Kind,
+				UID:  fmt.Sprintf("%s/%s", problem.Resource.Namespace, problem.Resource.Name),
+				Name: problem.Resource.Name,
+			},
+			Attributes: map[string]interface{}{
+				"title":       problem.Title,
+				"description": problem.Description,
+				"severity":    problem.Severity,
+			},
+			Fingerprint: fmt.Sprintf("k8s-problem-%s-%s", problem.Resource.Name, problem.Title),
+			Labels: map[string]string{
+				"namespace": problem.Resource.Namespace,
+			},
+		}
+		
+		events = append(events, event)
+	}
+	
+	return events
+}
+
+// updateHealthMetrics updates health-related metrics
+func (pe *PrometheusExporter) updateHealthMetrics(result *types.CheckResult) {
+	// Reset pod health status
+	pe.podHealthStatus.Reset()
+
+	// Track overall cluster health
+	healthyPods := 0
+	totalPods := 0
+
+	// Process each problem
+	for _, problem := range result.Problems {
+		totalPods++
+		
+		// Update pod health status
+		if problem.Resource.Kind == "pod" {
+			healthValue := 0.0
+			if problem.Severity == types.SeverityInfo {
+				healthValue = 1.0
+				healthyPods++
+			}
+			
+			pe.podHealthStatus.WithLabelValues(
+				problem.Resource.Name,
+				problem.Resource.Namespace,
+				problem.Title,
+			).Set(healthValue)
 		}
 
-		// Format and export via Prometheus formatter
-		if err := e.formatter.FormatMetric(metric); err != nil {
-			fmt.Printf("[WARN] Failed to format metric: %v\n", err)
-		}
+		// Count problems by severity
+		pe.problemsTotal.WithLabelValues(
+			string(problem.Severity),
+			problem.Resource.Kind,
+		).Inc()
+	}
 
-		// Return metric to pool
-		universal.PutMetric(metric)
+	// Calculate cluster health score
+	clusterScore := 100.0
+	if totalPods > 0 {
+		clusterScore = float64(healthyPods) / float64(totalPods) * 100
+	}
+	pe.clusterHealthScore.WithLabelValues("default").Set(clusterScore)
+}
 
-		// Convert growth pattern if available
-		if len(stats.GrowthPattern) > 0 {
-			growthMetrics, err := e.ebpfConverter.ConvertMemoryGrowthToMetrics(&stats)
-			if err == nil {
-				for _, gm := range growthMetrics {
-					e.formatter.FormatMetric(gm)
-					universal.PutMetric(gm)
-				}
+// updatePredictionMetrics updates prediction-related metrics
+func (pe *PrometheusExporter) updatePredictionMetrics(result *types.CheckResult) {
+	// Reset prediction metrics
+	pe.oomPredictionSeconds.Reset()
+	pe.confidenceScore.Reset()
+
+	// Process predictions
+	for _, problem := range result.Problems {
+		if problem.Prediction != nil {
+			// OOM predictions
+			if strings.Contains(problem.Title, "OOM") {
+				pe.oomPredictionSeconds.WithLabelValues(
+					problem.Resource.Name,
+					problem.Resource.Namespace,
+				).Set(problem.Prediction.TimeToFailure.Seconds())
+
+				pe.confidenceScore.WithLabelValues(
+					problem.Resource.Name,
+					problem.Resource.Namespace,
+					"oom",
+				).Set(problem.Prediction.Confidence)
 			}
 		}
 	}
+}
 
-	// Get OOM predictions if available
-	limits := make(map[uint32]uint64)
-	// TODO: Get actual memory limits from Kubernetes
-	predictions, err := e.ebpfMonitor.GetMemoryPredictions(limits)
-	if err == nil {
-		e.updateUniversalPredictions(predictions)
+// updateV2EngineMetrics updates V2 engine specific metrics
+func (pe *PrometheusExporter) updateV2EngineMetrics() {
+	stats := pe.v2Engine.Stats()
+	
+	// Engine health
+	healthValue := 0.0
+	if stats.IsHealthy {
+		healthValue = 1.0
+	}
+	pe.v2EngineHealth.WithLabelValues("overall").Set(healthValue)
+	
+	// Processing metrics per shard
+	for i, shardStats := range stats.ShardStats {
+		shardLabel := fmt.Sprintf("shard_%d", i)
+		
+		// Shard health
+		shardHealthValue := 0.0
+		if shardStats.IsHealthy {
+			shardHealthValue = 1.0
+		}
+		pe.v2EngineHealth.WithLabelValues(shardLabel).Set(shardHealthValue)
+		
+		// Processing latency
+		if shardStats.AvgProcessingTime > 0 {
+			pe.v2ProcessingLatency.WithLabelValues(shardLabel).Observe(shardStats.AvgProcessingTime.Seconds())
+		}
+	}
+	
+	// Router health
+	if stats.RouterStats.BackpressureActive {
+		pe.v2EventsDropped.WithLabelValues("backpressure").Add(float64(stats.RouterStats.EventsDropped))
 	}
 }
 
-// updateUniversalPredictions updates predictions using universal format
-func (e *PrometheusExporter) updateUniversalPredictions(predictions map[uint32]*ebpf.OOMPrediction) {
-	for pid, pred := range predictions {
-		// Convert to universal format
-		target := universal.Target{
-			Type: universal.TargetTypeProcess,
-			PID:  int32(pid),
-			Name: fmt.Sprintf("pid-%d", pid),
-		}
-
-		universalPred, err := e.correlationConverter.ConvertOOMPrediction(
-			&target,
-			pred.TimeToOOM,
-			pred.Confidence,
-			pred.CurrentUsage,
-			pred.MemoryLimit,
-			0, // growth rate not provided in ebpf.OOMPrediction
-		)
-		if err != nil {
-			fmt.Printf("[WARN] Failed to convert OOM prediction: %v\n", err)
-			continue
-		}
-
-		// Format and export
-		if err := e.formatter.FormatPrediction(universalPred); err != nil {
-			fmt.Printf("[WARN] Failed to format prediction: %v\n", err)
-		}
-
-		// Return to pool
-		universal.PutPrediction(universalPred)
-	}
+// Handler returns the Prometheus HTTP handler
+func (pe *PrometheusExporter) Handler() http.Handler {
+	return promhttp.HandlerFor(pe.registry, promhttp.HandlerOpts{})
 }
 
-// UpdateMetricsWithUniversal updates metrics using the universal data format
-func (e *PrometheusExporter) UpdateMetricsWithUniversal(ctx context.Context) error {
-	startTime := time.Now()
-	defer func() {
-		e.analysisLatency.WithLabelValues("universal_update", "all").Observe(time.Since(startTime).Seconds())
-		e.lastUpdateTime.WithLabelValues("universal_metrics").SetToCurrentTime()
-	}()
-
-	// Use correlation engine if available
-	if e.correlationEngine != nil {
-		// Run correlation analysis
-		findings, err := e.correlationEngine.Execute(ctx)
-		if err != nil {
-			fmt.Printf("[WARN] Correlation analysis failed: %v\n", err)
-		} else {
-			fmt.Printf("[OK] Correlation analysis found %d findings\n", len(findings))
-
-			// Convert findings to universal format predictions
-			for _, finding := range findings {
-				// Convert finding to universal format
-				pred, err := e.correlationConverter.ConvertFinding(&finding)
-				if err != nil {
-					fmt.Printf("[WARN] Failed to convert finding: %v\n", err)
-					continue
-				}
-
-				// Export via formatter
-				if err := e.formatter.FormatPrediction(pred); err != nil {
-					fmt.Printf("[WARN] Failed to format prediction: %v\n", err)
-				}
-				universal.PutPrediction(pred)
-			}
-		}
+// Shutdown gracefully shuts down the exporter
+func (pe *PrometheusExporter) Shutdown() error {
+	if pe.ebpfMonitor != nil {
+		pe.ebpfMonitor.Stop()
 	}
-
-	// Update eBPF metrics using universal format
-	if e.ebpfMonitor != nil && e.ebpfMonitor.IsAvailable() {
-		e.updateEBPFMetrics()
+	
+	if pe.v2Engine != nil {
+		return pe.v2Engine.Stop()
 	}
-
-	// Update regular metrics from checker
-	if err := e.UpdateMetrics(ctx); err != nil {
-		return fmt.Errorf("failed to update standard metrics: %w", err)
-	}
-
+	
 	return nil
+}
+
+// registerDefaultRules registers default correlation rules for metrics
+func registerDefaultRules(engine *correlation_v2.HighPerformanceEngine) {
+	// High error rate detection
+	engine.RegisterRule(&events_correlation.Rule{
+		ID:          "metrics-high-error-rate",
+		Name:        "High Error Rate Detection",
+		Description: "Detects high error rates in pods",
+		Category:    events_correlation.CategoryReliability,
+		RequiredSources: []events_correlation.EventSource{
+			events_correlation.SourceKubernetes,
+		},
+		Enabled: true,
+		Evaluate: func(ctx *events_correlation.Context) *events_correlation.Result {
+			criticalEvents := ctx.GetEvents(events_correlation.Filter{
+				Type: "critical",
+			})
+			
+			if len(criticalEvents) > 5 {
+				return &events_correlation.Result{
+					RuleID:     "metrics-high-error-rate",
+					RuleName:   "High Error Rate Detection",
+					Timestamp:  time.Now(),
+					Confidence: 0.9,
+					Severity:   events_correlation.SeverityCritical,
+					Category:   events_correlation.CategoryReliability,
+					Title:      "High Error Rate Detected",
+					Description: fmt.Sprintf("Detected %d critical events indicating high error rate", len(criticalEvents)),
+				}
+			}
+			return nil
+		},
+	})
 }
