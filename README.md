@@ -60,7 +60,8 @@ We're working on adding more advanced capabilities:
 
 ## Architecture
 
-Tapio is built with a modular architecture:
+### Current Architecture
+Tapio is built with a modular, extensible foundation:
 
 ```
 tapio/
@@ -69,9 +70,98 @@ tapio/
 │   ├── k8s/           # Kubernetes client integration
 │   ├── simple/        # Basic health checking
 │   ├── metrics/       # Prometheus metrics
-│   └── ebpf/          # eBPF framework (in development)
+│   └── ebpf/          # eBPF framework (foundation ready)
 └── deploy/helm/       # Kubernetes deployment
 ```
+
+### Future Vision: Complete System Intelligence
+
+We're designing Tapio to eventually provide unprecedented visibility into Kubernetes systems. Here's the architecture we're working toward:
+
+```
+┌─ User Experience ────────────────────────────────────────┐
+│ tapio check → "Pod will OOM in 7 minutes"               │
+│ tapio why   → "Memory leak in /api/users endpoint"       │
+│ tapio fix   → "Applied memory limit increase"           │
+└──────────────────────────────────────────────────────────┘
+                             │
+┌─ Correlation Engine ─────────────────────────────────────┐
+│ • Timeline analysis across all data sources             │
+│ • Pattern recognition for known failure modes           │
+│ • Confidence scoring for predictions                    │
+│ • Human-readable root cause explanations                │
+└──────────────────────────────────────────────────────────┘
+                             │
+┌─ Multi-Layer Data Collection ───────────────────────────┐
+│                                                          │
+│ eBPF Layer (In Development)                             │
+│ ├─ Memory: allocation tracking, leak detection          │
+│ ├─ Network: packet analysis, connection mapping         │
+│ ├─ Process: syscall patterns, resource usage            │
+│ └─ Performance: CPU scheduling, I/O bottlenecks         │
+│                                                          │
+│ System Layer (Planned)                                  │
+│ ├─ systemd: service health, restart patterns           │
+│ ├─ journald: log analysis, error correlation            │
+│ └─ container runtime: lifecycle events                  │
+│                                                          │
+│ Kubernetes Layer (Working Today) ✅                     │
+│ ├─ API resources: pods, deployments, services           │
+│ ├─ Events: scheduling, failures, scaling                │
+│ └─ Metrics: resource usage, health status               │
+└──────────────────────────────────────────────────────────┘
+```
+
+#### The Big Idea: Predictive Kubernetes Debugging
+
+Instead of reactive debugging ("why did it crash?"), we want to enable predictive insights:
+
+**Today's Debugging:**
+```bash
+# Something breaks first, then you investigate
+kubectl get pods  → CrashLoopBackOff
+kubectl logs pod  → "OutOfMemoryError"
+kubectl describe  → "Container was OOMKilled"
+```
+
+**Tapio's Vision:**
+```bash
+# Catch problems before they happen
+tapio check → "WARNING: api-service will OOM in 7m23s"
+tapio why   → "Memory leak: 18MB/min growth in user session cache"
+tapio fix   → "Recommendation: Increase memory limit to 512Mi"
+```
+
+#### Technical Approach: Correlation Across Layers
+
+The key insight is that Kubernetes problems usually have signatures across multiple system layers:
+
+```
+Problem: Memory Leak → OOM → Pod Restart
+├─ eBPF sees: Growing heap allocations, no corresponding frees
+├─ systemd sees: containerd memory pressure warnings  
+├─ journald sees: "Memory cgroup out of memory" messages
+└─ Kubernetes sees: OOMKilled event, pod restart
+
+Tapio correlates these signals to predict the OOM before it happens
+```
+
+#### Why This Approach Could Work
+
+1. **Layer Correlation**: Most K8s issues leave traces across multiple system layers
+2. **Early Signals**: Kernel/system events often precede K8s-visible failures  
+3. **Pattern Recognition**: Similar failure modes create recognizable signatures
+4. **Explainable AI**: Rule-based correlation provides clear explanations
+
+#### Development Philosophy
+
+We're building this incrementally:
+- ✅ **Foundation First**: Solid CLI, K8s integration, metrics (working today)
+- 🚧 **Add Layers Gradually**: eBPF, then systemd, then advanced correlation
+- 🔮 **Keep It Simple**: Complex backend, simple frontend ("just run `tapio check`")
+- 📚 **Learn and Iterate**: Real-world testing drives feature priorities
+
+The goal isn't to replace existing tools, but to provide the "first command" you run when something seems wrong - the one that gives you the clearest picture of what's actually happening in your cluster.
 
 ## Development Status
 
