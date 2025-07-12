@@ -159,47 +159,7 @@ type ProtocolEvent struct {
 	ContainerID  string
 }
 
-// SystemEvent is a unified event structure
-type SystemEvent struct {
-	Type      string
-	Timestamp time.Time
-	PID       uint32
-	Data      interface{}
-}
-
-// Statistics structures
-type NetworkConnectionStats struct {
-	StartTime       time.Time
-	LastSeen        time.Time
-	BytesSent       uint64
-	BytesReceived   uint64
-	PacketsSent     uint64
-	PacketsReceived uint64
-	Retransmits     uint64
-	RTTMin          uint32
-	RTTMax          uint32
-	RTTAvg          uint32
-	State           uint8
-	Failed          bool
-}
-
-type DNSQueryStats struct {
-	QueryCount    uint64
-	ResponseCount uint64
-	TimeoutCount  uint64
-	ErrorCount    uint64
-	NXDomainCount uint64
-	AvgLatencyMS  uint32
-}
-
-type ProtocolStats struct {
-	RequestCount  uint64
-	ResponseCount uint64
-	ErrorCount    uint64
-	SlowCount     uint64
-	AvgLatencyUS  uint32
-	StatusCodes   map[uint16]uint64
-}
+// Type definitions are in types.go
 
 // NewEnhancedCollector creates a new enhanced eBPF collector
 func NewEnhancedCollector() (*EnhancedCollector, error) {
@@ -772,40 +732,4 @@ func (c *EnhancedCollector) Close() error {
 	return nil
 }
 
-// parseRawMemoryEvent is already defined in events.go, no need to redefine
-
-func parseRawNetworkEvent(data []byte) (*NetworkEvent, error) {
-	parser := NewNetworkEventParser()
-	result, err := parser.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return result.(*NetworkEvent), nil
-}
-
-func parseRawPacketEvent(data []byte) (*PacketEvent, error) {
-	parser := NewPacketEventParser()
-	result, err := parser.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return result.(*PacketEvent), nil
-}
-
-func parseRawDNSEvent(data []byte) (*DNSEvent, error) {
-	parser := NewDNSEventParser()
-	result, err := parser.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return result.(*DNSEvent), nil
-}
-
-func parseRawProtocolEvent(data []byte) (*ProtocolEvent, error) {
-	parser := NewProtocolEventParser()
-	result, err := parser.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return result.(*ProtocolEvent), nil
-}
+// parseRaw* functions are defined in event_parsers.go
