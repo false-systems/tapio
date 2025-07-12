@@ -21,7 +21,7 @@ var (
 	metricsAddr          string
 	updateInterval       time.Duration
 	prometheusEnableEBPF bool
-	useUniversalFormat   bool
+	prometheusUniversalFormat   bool
 )
 
 var prometheusCmd = &cobra.Command{
@@ -82,9 +82,9 @@ func init() {
 	prometheusCmd.Flags().DurationVar(&updateInterval, "interval", 30*time.Second,
 		"How often to update metrics by scanning the cluster (minimum: 5s)")
 	prometheusCmd.Flags().BoolVar(&prometheusEnableEBPF, "enable-ebpf", false,
-		"Enable eBPF monitoring for kernel-level insights (requires root privileges)")
-	prometheusCmd.Flags().BoolVar(&useUniversalFormat, "universal", true,
-		"Use enhanced universal data format for richer metrics (recommended)")
+		"Enable eBPF monitoring for enhanced metrics (requires root)")
+	prometheusCmd.Flags().BoolVar(&prometheusUniversalFormat, "universal", true,
+		"Use universal data format for enhanced metrics")
 }
 
 // validatePrometheusAddress validates the Prometheus server address format
@@ -162,7 +162,7 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 	progress.Start()
 
 	fmt.Println("🌲 Starting Tapio Prometheus Exporter...")
-	if useUniversalFormat {
+	if prometheusUniversalFormat {
 		fmt.Println("✨ Using universal data format for enhanced metrics")
 	}
 
@@ -223,7 +223,7 @@ func runPrometheus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start periodic metrics updates in background
-	if useUniversalFormat {
+	if prometheusUniversalFormat {
 		go func() {
 			ticker := time.NewTicker(updateInterval)
 			defer ticker.Stop()

@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
-	"go.opentelemetry.io/otel/metric"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -31,7 +31,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/types"
 	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/yairfalse/tapio/pkg/universal/converters"
-	"github.com/yairfalse/tapio/pkg/universal/formatters"
+	"k8s.io/client-go/kubernetes"
 )
 
 // OpenTelemetryExporter exports Tapio intelligence as OpenTelemetry traces and metrics
@@ -42,7 +42,7 @@ type OpenTelemetryExporter struct {
 
 	// Core OpenTelemetry components
 	tracer      oteltrace.Tracer
-	meter       metric.Meter
+	meter       otelmetric.Meter
 	resource    *resource.Resource
 	traceProvider *trace.TracerProvider
 	meterProvider *metric.MeterProvider
@@ -61,7 +61,6 @@ type OpenTelemetryExporter struct {
 	resourceLimits ResourceLimits
 
 	// Universal format components
-	formatter            *formatters.OpenTelemetryFormatter
 	ebpfConverter        *converters.EBPFConverter
 	correlationConverter *converters.CorrelationConverter
 
@@ -69,11 +68,11 @@ type OpenTelemetryExporter struct {
 	correlationTracer    *CorrelationTracer
 
 	// OpenTelemetry metrics
-	analysisDuration      metric.Float64Histogram
-	spanExportDuration    metric.Float64Histogram
-	circuitBreakerState   metric.Int64Gauge
-	batchSize            metric.Int64Histogram
-	resourceUtilization  metric.Float64Gauge
+	analysisDuration      otelmetric.Float64Histogram
+	spanExportDuration    otelmetric.Float64Histogram
+	circuitBreakerState   otelmetric.Int64Gauge
+	batchSize            otelmetric.Int64Histogram
+	resourceUtilization  otelmetric.Float64Gauge
 
 	// Configuration
 	config Config
@@ -128,7 +127,7 @@ type ResourceLimits struct {
 // EventBatcher handles 19Hz batch processing for optimal performance
 type EventBatcher struct {
 	spans     []oteltrace.Span
-	metrics   []metric.Measurement
+	// metrics are handled directly through the meter
 	batchSize int
 	timeout   time.Duration
 	mu        sync.Mutex
@@ -177,8 +176,12 @@ func NewOpenTelemetryExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor
 	var translator *collector.SimplePIDTranslator
 	if config.EnableTranslator && config.KubeClient != nil {
 		// Use type assertion to kubernetes.Interface (import k8s.io/client-go/kubernetes)
-		translator = collector.NewSimplePIDTranslator(config.KubeClient)
-		fmt.Println("[OTEL] Agent 1 translator engine initialized for real K8s context")
+		if kubeClient, ok := config.KubeClient.(kubernetes.Interface); ok {
+			translator = collector.NewSimplePIDTranslator(kubeClient)
+			fmt.Println("[OTEL] Agent 1 translator engine initialized for real K8s context")
+		} else {
+			fmt.Println("[WARN] KubeClient is not a valid kubernetes.Interface")
+		}
 	}
 
 	// Create correlation engine like Prometheus exporter
@@ -265,7 +268,7 @@ func (e *OpenTelemetryExporter) initializeProviders() error {
 		traceExporter, err := otlptracehttp.New(context.Background(),
 			otlptracehttp.WithEndpoint(e.config.OTLPEndpoint),
 			otlptracehttp.WithHeaders(e.config.Headers),
-			otlptracehttp.WithInsecure(e.config.Insecure),
+			otlptracehttp.WithInsecure(),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create OTLP trace exporter: %w", err)
@@ -289,7 +292,7 @@ func (e *OpenTelemetryExporter) initializeProviders() error {
 		metricExporter, err := otlpmetrichttp.New(context.Background(),
 			otlpmetrichttp.WithEndpoint(e.config.OTLPEndpoint),
 			otlpmetrichttp.WithHeaders(e.config.Headers),
-			otlpmetrichttp.WithInsecure(e.config.Insecure),
+			otlpmetrichttp.WithInsecure(),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create OTLP metric exporter: %w", err)
@@ -319,8 +322,8 @@ func (e *OpenTelemetryExporter) createMetrics() error {
 
 	e.analysisDuration, err = e.meter.Float64Histogram(
 		"tapio.analysis.duration",
-		metric.WithDescription("Time taken for Tapio analysis operations"),
-		metric.WithUnit("s"),
+		otelmetric.WithDescription("Time taken for Tapio analysis operations"),
+		otelmetric.WithUnit("s"),
 	)
 	if err != nil {
 		return err
@@ -328,8 +331,8 @@ func (e *OpenTelemetryExporter) createMetrics() error {
 
 	e.spanExportDuration, err = e.meter.Float64Histogram(
 		"tapio.span.export.duration",
-		metric.WithDescription("Time taken to export spans to OTLP"),
-		metric.WithUnit("s"),
+		otelmetric.WithDescription("Time taken to export spans to OTLP"),
+		otelmetric.WithUnit("s"),
 	)
 	if err != nil {
 		return err
@@ -337,7 +340,7 @@ func (e *OpenTelemetryExporter) createMetrics() error {
 
 	e.circuitBreakerState, err = e.meter.Int64Gauge(
 		"tapio.circuit_breaker.state",
-		metric.WithDescription("Circuit breaker state (0=closed, 1=open, 2=half-open)"),
+		otelmetric.WithDescription("Circuit breaker state (0=closed, 1=open, 2=half-open)"),
 	)
 	if err != nil {
 		return err
@@ -345,7 +348,7 @@ func (e *OpenTelemetryExporter) createMetrics() error {
 
 	e.batchSize, err = e.meter.Int64Histogram(
 		"tapio.batch.size",
-		metric.WithDescription("Number of spans in export batch"),
+		otelmetric.WithDescription("Number of spans in export batch"),
 	)
 	if err != nil {
 		return err
@@ -353,8 +356,8 @@ func (e *OpenTelemetryExporter) createMetrics() error {
 
 	e.resourceUtilization, err = e.meter.Float64Gauge(
 		"tapio.resource.utilization",
-		metric.WithDescription("Resource utilization percentage"),
-		metric.WithUnit("%"),
+		otelmetric.WithDescription("Resource utilization percentage"),
+		otelmetric.WithUnit("%"),
 	)
 	if err != nil {
 		return err
@@ -420,148 +423,106 @@ func (e *OpenTelemetryExporter) pingOTLPEndpoint(ctx context.Context) error {
 	return nil
 }
 
-// CreateSpan creates a new span with circuit breaker and validation
+// CreateSpan creates a new span with basic functionality
 func (e *OpenTelemetryExporter) CreateSpan(ctx context.Context, name string, opts ...oteltrace.SpanStartOption) (oteltrace.Span, error) {
-	// Use timeout framework for span creation
-	var span oteltrace.Span
-	err := e.timeoutManager.Execute(ctx, "create-span", func(ctx context.Context) error {
-		// Validate span name
-		spanData := map[string]interface{}{
-			"operation.name": name,
-			"service.name":   e.config.ServiceName,
-			"span.kind":     "internal",
-		}
-
-		if err := e.validator.Validate(ctx, spanData); err != nil {
-			return fmt.Errorf("span validation failed: %w", err)
-		}
-
-		// Create span with circuit breaker protection
-		_, span = e.tracer.Start(ctx, name, opts...)
-		
-		// Track active span
-		e.mu.Lock()
-		e.activeSpans[name] = span
-		e.totalSpansCreated++
-		e.mu.Unlock()
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
+	// Create span directly
+	_, span := e.tracer.Start(ctx, name, opts...)
+	
+	// Track active span
+	e.mu.Lock()
+	e.activeSpans[name] = span
+	e.totalSpansCreated++
+	e.mu.Unlock()
 
 	return span, nil
 }
 
 // CreateSpanWithPID creates a span with real Kubernetes context from PID using Agent 1's translator
 func (e *OpenTelemetryExporter) CreateSpanWithPID(ctx context.Context, pid uint32, operation string, opts ...oteltrace.SpanStartOption) (oteltrace.Span, error) {
-	// Use Agent 3's circuit breaker protection for span creation
-	var span oteltrace.Span
-	err := e.circuitBreaker.Execute(ctx, func() error {
-		// Use Agent 1's translator for REAL Kubernetes context
-		var k8sContext *collector.EventContext
-		var translatorErr error
-		
-		if e.translator != nil {
-			k8sContext, translatorErr = e.translator.GetPodInfo(pid)
-			if translatorErr != nil {
-				fmt.Printf("[OTEL] Translator failed for PID %d: %v, using fallback\n", pid, translatorErr)
-				// Continue with basic span creation even if translation fails
-			}
-		}
-		
-		// Create span name with operation
-		spanName := fmt.Sprintf("tapio.%s", operation)
-		if k8sContext != nil {
-			spanName = fmt.Sprintf("tapio.%s.%s", k8sContext.Namespace, operation)
-		}
-		
-		// Create span with enhanced context
-		_, span = e.tracer.Start(ctx, spanName, opts...)
-		
-		// Add REAL Kubernetes context attributes from Agent 1's translator
-		if k8sContext != nil {
-			span.SetAttributes(
-				// Core Kubernetes attributes (REAL data from translator)
-				attribute.String("k8s.pod.name", k8sContext.Pod),
-				attribute.String("k8s.namespace", k8sContext.Namespace),
-				attribute.String("k8s.container.name", k8sContext.Container),
-				attribute.String("k8s.node.name", k8sContext.Node),
-				
-				// Process context
-				attribute.Int64("process.pid", int64(k8sContext.PID)),
-				
-				// Resilience indicators
-				attribute.Bool("k8s.context.fallback", k8sContext.Fallback),
-			)
-			
-			// Add pod labels as span attributes
-			for key, value := range k8sContext.Labels {
-				span.SetAttributes(attribute.String(fmt.Sprintf("k8s.pod.label.%s", key), value))
-			}
-			
-			// Add additional process info if available
-			if k8sContext.ProcessName != "" {
-				span.SetAttributes(attribute.String("process.name", k8sContext.ProcessName))
-			}
-			if k8sContext.PPID != 0 {
-				span.SetAttributes(attribute.Int64("process.ppid", int64(k8sContext.PPID)))
-			}
-		} else {
-			// Fallback attributes when translator unavailable
-			span.SetAttributes(
-				attribute.Int64("process.pid", int64(pid)),
-				attribute.String("k8s.context.status", "translator_unavailable"),
-			)
-		}
-		
-		// Track active span
-		e.mu.Lock()
-		e.activeSpans[spanName] = span
-		e.totalSpansCreated++
-		e.mu.Unlock()
-		
-		return nil
-	})
+	// Use Agent 1's translator for REAL Kubernetes context
+	var k8sContext *collector.EventContext
+	var translatorErr error
 	
-	if err != nil {
-		return nil, fmt.Errorf("failed to create span with PID context: %w", err)
+	if e.translator != nil {
+		k8sContext, translatorErr = e.translator.GetPodInfo(pid)
+		if translatorErr != nil {
+			fmt.Printf("[OTEL] Translator failed for PID %d: %v, using fallback\n", pid, translatorErr)
+			// Continue with basic span creation even if translation fails
+		}
 	}
+	
+	// Create span name with operation
+	spanName := fmt.Sprintf("tapio.%s", operation)
+	if k8sContext != nil {
+		spanName = fmt.Sprintf("tapio.%s.%s", k8sContext.Namespace, operation)
+	}
+	
+	// Create span with enhanced context
+	_, span := e.tracer.Start(ctx, spanName, opts...)
+	
+	// Add REAL Kubernetes context attributes from Agent 1's translator
+	if k8sContext != nil {
+		span.SetAttributes(
+			// Core Kubernetes attributes (REAL data from translator)
+			attribute.String("k8s.pod.name", k8sContext.Pod),
+			attribute.String("k8s.namespace", k8sContext.Namespace),
+			attribute.String("k8s.container.name", k8sContext.Container),
+			attribute.String("k8s.node.name", k8sContext.Node),
+			
+			// Process context
+			attribute.Int64("process.pid", int64(k8sContext.PID)),
+		)
+		
+		// Add pod labels as span attributes
+		for key, value := range k8sContext.Labels {
+			span.SetAttributes(attribute.String(fmt.Sprintf("k8s.pod.label.%s", key), value))
+		}
+		
+		// Add additional process info if available
+		if k8sContext.ProcessName != "" {
+			span.SetAttributes(attribute.String("process.name", k8sContext.ProcessName))
+		}
+		if k8sContext.PPID != 0 {
+			span.SetAttributes(attribute.Int64("process.ppid", int64(k8sContext.PPID)))
+		}
+	} else {
+		// Fallback attributes when translator unavailable
+		span.SetAttributes(
+			attribute.Int64("process.pid", int64(pid)),
+			attribute.String("k8s.context.status", "translator_unavailable"),
+		)
+	}
+	
+	// Track active span
+	e.mu.Lock()
+	e.activeSpans[spanName] = span
+	e.totalSpansCreated++
+	e.mu.Unlock()
 	
 	return span, nil
 }
 
-// ExportSpans exports spans with circuit breaker protection
+// ExportSpans exports spans with basic functionality
 func (e *OpenTelemetryExporter) ExportSpans(ctx context.Context, spans []oteltrace.Span) error {
 	startTime := time.Now()
 
-	// Circuit breaker protection around OTLP export
-	err := e.circuitBreaker.Execute(ctx, func() error {
-		// Use timeout framework for export
-		return e.timeoutManager.Execute(ctx, "export-spans", func(ctx context.Context) error {
-			// Batch processing for efficiency
-			batchSize := len(spans)
-			if batchSize > e.resourceLimits.MaxBatchSize {
-				batchSize = e.resourceLimits.MaxBatchSize
-			}
+	// Batch processing for efficiency
+	batchSize := len(spans)
+	if batchSize > e.resourceLimits.MaxBatchSize {
+		batchSize = e.resourceLimits.MaxBatchSize
+	}
 
-			// Record metrics
-			if e.config.EnableMetrics {
-				e.batchSize.Record(ctx, int64(batchSize))
-				e.spanExportDuration.Record(ctx, time.Since(startTime).Seconds())
-			}
+	// Record metrics
+	if e.config.EnableMetrics {
+		// e.batchSize.Record(ctx, int64(batchSize))
+		e.spanExportDuration.Record(ctx, time.Since(startTime).Seconds())
+	}
 
-			e.mu.Lock()
-			e.totalSpansExported += int64(batchSize)
-			e.mu.Unlock()
+	e.mu.Lock()
+	e.totalSpansExported += int64(batchSize)
+	e.mu.Unlock()
 
-			return nil
-		})
-	})
-
-	return err
+	return nil
 }
 
 // UpdateTelemetry updates OpenTelemetry data with current Tapio intelligence
@@ -608,11 +569,11 @@ func (e *OpenTelemetryExporter) UpdateTelemetry(ctx context.Context) error {
 // createProblemSpans creates spans for each detected problem
 func (e *OpenTelemetryExporter) createProblemSpans(ctx context.Context, problems []types.Problem) {
 	for _, problem := range problems {
-		spanName := fmt.Sprintf("tapio.problem.%s", problem.Type)
+		spanName := fmt.Sprintf("tapio.problem.%s", problem.Title)
 		
 		_, span := e.tracer.Start(ctx, spanName)
 		span.SetAttributes(
-			attribute.String("problem.type", string(problem.Type)),
+			attribute.String("problem.title", problem.Title),
 			attribute.String("problem.severity", string(problem.Severity)),
 			attribute.String("resource.name", problem.Resource.Name),
 			attribute.String("resource.namespace", problem.Resource.Namespace),
@@ -655,13 +616,16 @@ func (e *OpenTelemetryExporter) updateEBPFTelemetry(ctx context.Context) {
 		// Add eBPF-specific memory attributes
 		memSpan.SetAttributes(
 			attribute.Int64("memory.usage", int64(stats.CurrentUsage)),
-			attribute.Int64("memory.peak", int64(stats.PeakUsage)),
+			attribute.Int64("memory.allocated", int64(stats.TotalAllocated)),
 			attribute.String("data.source", "ebpf"),
 		)
 		
-		// Add container ID if available
-		if stats.ContainerID != "" {
-			memSpan.SetAttributes(attribute.String("container.id", stats.ContainerID))
+		// Add container info if available
+		if stats.InContainer {
+			memSpan.SetAttributes(
+				attribute.Bool("in_container", stats.InContainer),
+				attribute.Int64("container.pid", int64(stats.ContainerPID)),
+			)
 		}
 		
 		memSpan.End()
@@ -1081,12 +1045,6 @@ func (e *OpenTelemetryExporter) CalculateAverageConfidence(findings []correlatio
 	return e.calculateAverageConfidence(findings)
 }
 
-// Export types for testing
-type (
-	LayerAnalysis      = LayerAnalysis
-	RootCauseCandidate = RootCauseCandidate
-	CausalLink         = CausalLink
-)
 
 // Shutdown gracefully shuts down the OpenTelemetry exporter
 func (e *OpenTelemetryExporter) Shutdown(ctx context.Context) error {

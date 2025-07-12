@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/yairfalse/tapio/pkg/ebpf"
-	"github.com/yairfalse/tapio/pkg/simple"
 	"github.com/yairfalse/tapio/pkg/collector"
 )
 
@@ -66,7 +66,14 @@ func runSniff(cmd *cobra.Command, args []string) error {
 	// Register collectors based on flags
 	if !sniffK8sOnly {
 		// Create eBPF monitor
-		ebpfMonitor := ebpf.NewMonitor()
+		ebpfConfig := &ebpf.Config{
+			Enabled:                true,
+			EnableMemoryMonitoring: true,
+			EnableNetworkMonitoring: true,
+			SamplingRate:          0.1,
+			BufferSize:            1024,
+		}
+		ebpfMonitor := ebpf.NewMonitor(ebpfConfig)
 		
 		// Create PID translator
 		translator := collector.NewSimplePIDTranslator(client)
@@ -281,8 +288,8 @@ func reportHealth(ctx context.Context, manager *collector.SimpleManager) {
 }
 
 func createK8sClient() (kubernetes.Interface, error) {
-	// Try to get kubeconfig
-	config, err := simple.GetKubeConfig()
+	// Try to get kubeconfig using standard approach
+	config, err := clientcmd.BuildConfigFromFlags("", "")
 	if err != nil {
 		return nil, err
 	}

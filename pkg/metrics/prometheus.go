@@ -59,7 +59,7 @@ func NewPrometheusExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor) *
 	// Create universal format components
 	formatter := formatters.NewPrometheusFormatter("tapio", "", registry)
 	ebpfConverter := converters.NewEBPFConverter("prometheus", "1.0")
-	correlationConverter := converters.NewCorrelationConverter()
+	correlationConverter := converters.NewCorrelationConverter("prometheus", "1.0")
 
 	// Create correlation engine with real data sources if checker is simple.Checker
 	var correlationEngine *correlation.Engine
@@ -453,7 +453,7 @@ func (e *PrometheusExporter) updateUniversalPredictions(predictions map[uint32]*
 			Name: fmt.Sprintf("pid-%d", pid),
 		}
 
-		universalPred := e.correlationConverter.ConvertOOMPrediction(
+		universalPred, err := e.correlationConverter.ConvertOOMPrediction(
 			&target,
 			pred.TimeToOOM,
 			pred.Confidence,
@@ -461,6 +461,10 @@ func (e *PrometheusExporter) updateUniversalPredictions(predictions map[uint32]*
 			pred.MemoryLimit,
 			0, // growth rate not provided in ebpf.OOMPrediction
 		)
+		if err != nil {
+			fmt.Printf("[WARN] Failed to convert OOM prediction: %v\n", err)
+			continue
+		}
 
 		// Format and export
 		if err := e.formatter.FormatPrediction(universalPred); err != nil {
