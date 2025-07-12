@@ -487,13 +487,13 @@ func (e *Engine) cleanupExecutionHistory() {
 	if e.config.HistoryRetentionTTL > 0 {
 		cutoffTime := time.Now().Add(-e.config.HistoryRetentionTTL)
 		validEntries := make([]ExecutionResult, 0, len(e.executionHistory))
-		
+
 		for _, result := range e.executionHistory {
 			if result.Timestamp.After(cutoffTime) {
 				validEntries = append(validEntries, result)
 			}
 		}
-		
+
 		e.executionHistory = validEntries
 	}
 

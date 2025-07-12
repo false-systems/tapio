@@ -32,19 +32,19 @@ func (s CircuitBreakerState) String() string {
 // CircuitBreaker provides circuit breaker pattern for fault tolerance
 type CircuitBreaker struct {
 	// Configuration
-	failureThreshold   int
-	recoveryTimeout    time.Duration
-	onStateChange      func(string)
-	
+	failureThreshold int
+	recoveryTimeout  time.Duration
+	onStateChange    func(string)
+
 	// State
-	state              CircuitBreakerState
-	failureCount       int32
-	successCount       int32
-	lastFailureTime    time.Time
-	nextAttemptTime    time.Time
-	
+	state           CircuitBreakerState
+	failureCount    int32
+	successCount    int32
+	lastFailureTime time.Time
+	nextAttemptTime time.Time
+
 	// Synchronization
-	mu                 sync.RWMutex
+	mu sync.RWMutex
 }
 
 // CircuitBreakerConfig configures the circuit breaker
@@ -62,12 +62,12 @@ func NewCircuitBreaker(config CircuitBreakerConfig) *CircuitBreaker {
 	if config.RecoveryTimeout == 0 {
 		config.RecoveryTimeout = 30 * time.Second
 	}
-	
+
 	return &CircuitBreaker{
 		failureThreshold: config.FailureThreshold,
 		recoveryTimeout:  config.RecoveryTimeout,
 		onStateChange:    config.OnStateChange,
-		state:           StateClosed,
+		state:            StateClosed,
 	}
 }
 
@@ -76,14 +76,14 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 	if !cb.canExecute() {
 		return fmt.Errorf("circuit breaker is open")
 	}
-	
+
 	err := fn()
-	
+
 	if err != nil {
 		cb.recordFailure()
 		return err
 	}
-	
+
 	cb.recordSuccess()
 	return nil
 }
@@ -92,9 +92,9 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 func (cb *CircuitBreaker) canExecute() bool {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
-	
+
 	now := time.Now()
-	
+
 	switch cb.state {
 	case StateClosed:
 		return true
@@ -125,10 +125,10 @@ func (cb *CircuitBreaker) canExecute() bool {
 func (cb *CircuitBreaker) recordFailure() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	cb.lastFailureTime = time.Now()
 	atomic.AddInt32(&cb.failureCount, 1)
-	
+
 	if cb.state == StateHalfOpen {
 		// Go back to open on any failure in half-open state
 		cb.state = StateOpen
@@ -150,9 +150,9 @@ func (cb *CircuitBreaker) recordFailure() {
 func (cb *CircuitBreaker) recordSuccess() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	atomic.AddInt32(&cb.successCount, 1)
-	
+
 	if cb.state == StateHalfOpen {
 		// Transition back to closed state
 		cb.state = StateClosed
@@ -174,13 +174,13 @@ func (cb *CircuitBreaker) GetState() string {
 func (cb *CircuitBreaker) GetStats() map[string]interface{} {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
-	
+
 	return map[string]interface{}{
-		"state":           cb.state.String(),
-		"failure_count":   atomic.LoadInt32(&cb.failureCount),
-		"success_count":   atomic.LoadInt32(&cb.successCount),
-		"last_failure":    cb.lastFailureTime,
-		"next_attempt":    cb.nextAttemptTime,
+		"state":         cb.state.String(),
+		"failure_count": atomic.LoadInt32(&cb.failureCount),
+		"success_count": atomic.LoadInt32(&cb.successCount),
+		"last_failure":  cb.lastFailureTime,
+		"next_attempt":  cb.nextAttemptTime,
 	}
 }
 
@@ -188,7 +188,7 @@ func (cb *CircuitBreaker) GetStats() map[string]interface{} {
 func (cb *CircuitBreaker) Reset() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	cb.state = StateClosed
 	atomic.StoreInt32(&cb.failureCount, 0)
 	atomic.StoreInt32(&cb.successCount, 0)

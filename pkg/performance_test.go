@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/unified"
-	"github.com/yairfalse/tapio/pkg/sources"
 	"github.com/yairfalse/tapio/pkg/performance"
+	"github.com/yairfalse/tapio/pkg/sources"
+	"github.com/yairfalse/tapio/pkg/unified"
 )
 
 // TestPerformanceTargets validates the 165k+ events/sec performance target
@@ -104,8 +104,8 @@ func TestSystemPerformance(t *testing.T) {
 		EnableCircuitBreaker:    false,
 		EnableSelfHealing:       false,
 		EnableLoadShedding:      false,
-		MaxMemoryMB:            200,
-		MaxCPUPercent:          80,
+		MaxMemoryMB:             200,
+		MaxCPUPercent:           80,
 	}
 
 	system, err := unified.NewUnifiedSystem(config)
@@ -182,8 +182,8 @@ func TestMemoryUsage(t *testing.T) {
 		EnableCircuitBreaker:    true,
 		EnableSelfHealing:       true,
 		EnableLoadShedding:      true,
-		MaxMemoryMB:            100, // Strict memory limit
-		MaxCPUPercent:          50,
+		MaxMemoryMB:             100, // Strict memory limit
+		MaxCPUPercent:           50,
 	}
 
 	system, err := unified.NewUnifiedSystem(config)

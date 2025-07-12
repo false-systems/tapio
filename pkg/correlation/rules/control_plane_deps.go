@@ -873,7 +873,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 			Timestamp:  now,
 			Confidence: 0.95,
 		})
-		
+
 		for _, failure := range componentFailures {
 			if failure.LeaderElectionIssue {
 				evidence = append(evidence, correlation.Evidence{

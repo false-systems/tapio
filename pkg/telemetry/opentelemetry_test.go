@@ -77,10 +77,10 @@ func (m *mockChecker) getCheckCallCount() int {
 
 // Mock eBPF monitor for testing
 type mockEBPFMonitor struct {
-	available     bool
-	memStats      []ebpf.ProcessMemoryStats
-	returnError   bool
-	predictions   map[uint32]*ebpf.OOMPrediction
+	available   bool
+	memStats    []ebpf.ProcessMemoryStats
+	returnError bool
+	predictions map[uint32]*ebpf.OOMPrediction
 }
 
 func (m *mockEBPFMonitor) IsAvailable() bool {
@@ -483,7 +483,7 @@ func TestUpdateTelemetryWithProblems(t *testing.T) {
 
 func TestEBPFIntegration(t *testing.T) {
 	checker := &mockChecker{}
-	
+
 	// Create mock eBPF monitor with sample data
 	monitor := &mockEBPFMonitor{
 		available: true,
@@ -567,11 +567,11 @@ func TestConcurrentSpanCreation(t *testing.T) {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < spansPerGoroutine; j++ {
 				spanName := fmt.Sprintf("tapio.concurrent.worker_%d_span_%d", workerID, j)
 				_, err := exporter.CreateSpan(ctx, spanName)
-				
+
 				mu.Lock()
 				if err != nil {
 					errorCount++
@@ -599,7 +599,7 @@ func TestConcurrentSpanCreation(t *testing.T) {
 		t.Error("Expected some spans to be created successfully")
 	}
 
-	t.Logf("Concurrent test results: %d success, %d errors out of %d total", 
+	t.Logf("Concurrent test results: %d success, %d errors out of %d total",
 		successCount, errorCount, totalExpected)
 }
 
@@ -643,7 +643,7 @@ func TestResourceLimits(t *testing.T) {
 
 	// Export should respect batch size limits
 	err = exporter.ExportSpans(ctx, largeSpanSet)
-	
+
 	// Should not error, but should respect limits internally
 	if err != nil {
 		t.Errorf("Export should handle large batches gracefully: %v", err)

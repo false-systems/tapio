@@ -83,17 +83,16 @@ type SimpleProtocolEvent struct {
 
 // OOMEvent represents an OOM event
 type OOMEvent struct {
-	PID          uint32    `json:"pid"`
-	TGID         uint32    `json:"tgid"`
-	Comm         [16]byte  `json:"comm"`
-	Timestamp    uint64    `json:"timestamp"`
-	MemoryLimit  uint64    `json:"memory_limit"`
-	MemoryUsage  uint64    `json:"memory_usage"`
-	MemoryMaxUsage uint64  `json:"memory_max_usage"`
-	OOMKillCount uint32    `json:"oom_kill_count"`
-	ContainerID  string    `json:"container_id,omitempty"`
+	PID            uint32   `json:"pid"`
+	TGID           uint32   `json:"tgid"`
+	Comm           [16]byte `json:"comm"`
+	Timestamp      uint64   `json:"timestamp"`
+	MemoryLimit    uint64   `json:"memory_limit"`
+	MemoryUsage    uint64   `json:"memory_usage"`
+	MemoryMaxUsage uint64   `json:"memory_max_usage"`
+	OOMKillCount   uint32   `json:"oom_kill_count"`
+	ContainerID    string   `json:"container_id,omitempty"`
 }
-
 
 // Statistics structures
 type NetworkConnectionStats struct {
@@ -117,12 +116,12 @@ type DNSQueryStats struct {
 }
 
 type ProtocolStats struct {
-	Protocol      string
-	RequestCount  uint64
-	SuccessCount  uint64
-	ErrorCount    uint64
-	AvgLatency    time.Duration
-	TotalBytes    uint64
+	Protocol     string
+	RequestCount uint64
+	SuccessCount uint64
+	ErrorCount   uint64
+	AvgLatency   time.Duration
+	TotalBytes   uint64
 }
 
 // ProcessMemoryStats represents memory statistics for a process
@@ -184,12 +183,12 @@ type Config struct {
 	EnablePacketAnalysis    bool          `json:"enable_packet_analysis"`
 	EnableDNSMonitoring     bool          `json:"enable_dns_monitoring"`
 	EnableProtocolAnalysis  bool          `json:"enable_protocol_analysis"`
-	SamplingRate           float64       `json:"sampling_rate"`
-	BufferSize             int           `json:"buffer_size"`
-	ProcessTimeout         time.Duration `json:"process_timeout"`
-	Debug                  bool          `json:"debug"`
-	EventBufferSize        int           `json:"event_buffer_size"`
-	RetentionPeriod        string        `json:"retention_period"`
+	SamplingRate            float64       `json:"sampling_rate"`
+	BufferSize              int           `json:"buffer_size"`
+	ProcessTimeout          time.Duration `json:"process_timeout"`
+	Debug                   bool          `json:"debug"`
+	EventBufferSize         int           `json:"event_buffer_size"`
+	RetentionPeriod         string        `json:"retention_period"`
 }
 
 // DefaultConfig returns default eBPF configuration
@@ -201,11 +200,11 @@ func DefaultConfig() *Config {
 		EnablePacketAnalysis:    true,
 		EnableDNSMonitoring:     true,
 		EnableProtocolAnalysis:  true,
-		SamplingRate:           1.0,
-		BufferSize:             65536,
-		EventBufferSize:        1000,
-		RetentionPeriod:        "5m",
-		ProcessTimeout:         5 * time.Minute,
-		Debug:                  false,
+		SamplingRate:            1.0,
+		BufferSize:              65536,
+		EventBufferSize:         1000,
+		RetentionPeriod:         "5m",
+		ProcessTimeout:          5 * time.Minute,
+		Debug:                   false,
 	}
 }

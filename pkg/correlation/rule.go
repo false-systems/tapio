@@ -43,7 +43,7 @@ const (
 	ConfidenceVeryHigh
 )
 
-// Category represents finding categories  
+// Category represents finding categories
 type Category string
 
 const (
@@ -90,7 +90,7 @@ type ResourceReference struct {
 
 // ResourceInfo represents resource information with Type field for compatibility
 type ResourceInfo struct {
-	Type      string `json:"type"`      // Resource type (e.g., "pod", "service")
+	Type      string `json:"type"` // Resource type (e.g., "pod", "service")
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
 }
@@ -107,24 +107,24 @@ type Prediction struct {
 
 // Finding represents a correlation finding
 type Finding struct {
-	ID                string                 `json:"id"`
-	RuleID            string                 `json:"rule_id"`
-	Title             string                 `json:"title"`
-	Description       string                 `json:"description"`
-	Severity          Severity               `json:"severity"`
-	Confidence        float64                `json:"confidence"` // 0.0 to 1.0
-	Resource          ResourceInfo           `json:"resource,omitempty"`
-	Evidence          []Evidence             `json:"evidence"`
-	Prediction        *Prediction            `json:"prediction,omitempty"`
-	Tags              []string               `json:"tags"`
-	CreatedAt         time.Time              `json:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
-	Metadata          map[string]interface{} `json:"metadata"`
+	ID          string                 `json:"id"`
+	RuleID      string                 `json:"rule_id"`
+	Title       string                 `json:"title"`
+	Description string                 `json:"description"`
+	Severity    Severity               `json:"severity"`
+	Confidence  float64                `json:"confidence"` // 0.0 to 1.0
+	Resource    ResourceInfo           `json:"resource,omitempty"`
+	Evidence    []Evidence             `json:"evidence"`
+	Prediction  *Prediction            `json:"prediction,omitempty"`
+	Tags        []string               `json:"tags"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
+	Metadata    map[string]interface{} `json:"metadata"`
 	// Additional fields needed by correlation rules
-	Impact            string                 `json:"impact,omitempty"`
-	RootCause         string                 `json:"root_cause,omitempty"`
-	Recommendations   []string               `json:"recommendations,omitempty"`
-	AffectedResources []ResourceReference    `json:"affected_resources,omitempty"`
+	Impact            string              `json:"impact,omitempty"`
+	RootCause         string              `json:"root_cause,omitempty"`
+	Recommendations   []string            `json:"recommendations,omitempty"`
+	AffectedResources []ResourceReference `json:"affected_resources,omitempty"`
 }
 
 // GetConfidenceLevel returns the confidence level based on the numeric confidence
@@ -174,12 +174,12 @@ func (f *Finding) GetType() string {
 			return typeVal
 		}
 	}
-	
+
 	// Fall back to first tag if available
 	if len(f.Tags) > 0 {
 		return f.Tags[0]
 	}
-	
+
 	// Default based on severity
 	return f.Severity.String()
 }
@@ -189,14 +189,14 @@ func (f *Finding) GetImpact() string {
 	if f.Impact != "" {
 		return f.Impact
 	}
-	
+
 	// Check metadata for impact
 	if f.Metadata != nil {
 		if impactVal, ok := f.Metadata["impact"].(string); ok {
 			return impactVal
 		}
 	}
-	
+
 	// Default based on severity
 	switch f.Severity {
 	case SeverityCritical:

@@ -449,7 +449,7 @@ func (c *CLI) showEvents(cmd *cobra.Command, args []string) error {
 func (c *CLI) printEvent(event correlation.TimelineEvent) {
 	timestamp := event.Timestamp.Format("15:04:05.000")
 	severity := strings.ToUpper(event.Severity)
-	
+
 	// Color coding based on severity
 	severityColor := ""
 	switch event.Severity {
@@ -462,7 +462,7 @@ func (c *CLI) printEvent(event correlation.TimelineEvent) {
 	case "info":
 		severityColor = "\033[36m" // Cyan
 	default:
-		severityColor = "\033[0m"  // Default
+		severityColor = "\033[0m" // Default
 	}
 
 	fmt.Printf("%s %s%-8s\033[0m [%s] %s: %s\n",

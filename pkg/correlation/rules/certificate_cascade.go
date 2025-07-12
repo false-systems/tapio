@@ -210,7 +210,7 @@ func (r *CertificateCascadeRule) checkCertificateIssues(k8sData *correlation.Kub
 	for _, pod := range k8sData.Pods {
 		// Convert Pod to PodInfo
 		podInfo := convertPodToPodInfo(pod)
-		
+
 		// Check control plane pods
 		isControlPlane := false
 		componentName := ""
@@ -657,7 +657,6 @@ func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []w
 
 	return evidence
 }
-
 
 func (r *CertificateCascadeRule) predictTimeToFailure(certs []certIssue) time.Duration {
 	// Look for expiry messages

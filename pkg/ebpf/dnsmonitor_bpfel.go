@@ -12,7 +12,7 @@ type dnsmonitorObjects struct {
 	TrackDnsQuery    *ebpf.Program
 	TrackDnsResponse *ebpf.Program
 	DnsCache         *ebpf.Map
-	Events        *ebpf.Map
+	Events           *ebpf.Map
 }
 
 func (o *dnsmonitorObjects) Close() error {
@@ -35,7 +35,7 @@ type dnsmonitorSpecs struct {
 	TrackDnsQuery    *ebpf.ProgramSpec
 	TrackDnsResponse *ebpf.ProgramSpec
 	DnsCache         *ebpf.MapSpec
-	Events        *ebpf.MapSpec
+	Events           *ebpf.MapSpec
 }
 
 func loadDnsmonitor() (*ebpf.CollectionSpec, error) {
@@ -45,8 +45,8 @@ func loadDnsmonitor() (*ebpf.CollectionSpec, error) {
 			"track_dns_response": nil,
 		},
 		Maps: map[string]*ebpf.MapSpec{
-			"dns_cache":  nil,
-			"events": nil,
+			"dns_cache": nil,
+			"events":    nil,
 		},
 	}, nil
 }

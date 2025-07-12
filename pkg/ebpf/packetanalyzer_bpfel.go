@@ -9,11 +9,11 @@ import (
 
 // PacketAnalyzer eBPF programs and maps
 type packetanalyzerObjects struct {
-	TrackPacketLoss       *ebpf.Program
-	TrackPacketLatency    *ebpf.Program
-	TrackPacketReorder    *ebpf.Program
-	PacketStats           *ebpf.Map
-	Events          *ebpf.Map
+	TrackPacketLoss    *ebpf.Program
+	TrackPacketLatency *ebpf.Program
+	TrackPacketReorder *ebpf.Program
+	PacketStats        *ebpf.Map
+	Events             *ebpf.Map
 }
 
 func (o *packetanalyzerObjects) Close() error {
@@ -36,11 +36,11 @@ func (o *packetanalyzerObjects) Close() error {
 }
 
 type packetanalyzerSpecs struct {
-	TrackPacketLoss       *ebpf.ProgramSpec
-	TrackPacketLatency    *ebpf.ProgramSpec
-	TrackPacketReorder    *ebpf.ProgramSpec
-	PacketStats           *ebpf.MapSpec
-	Events          *ebpf.MapSpec
+	TrackPacketLoss    *ebpf.ProgramSpec
+	TrackPacketLatency *ebpf.ProgramSpec
+	TrackPacketReorder *ebpf.ProgramSpec
+	PacketStats        *ebpf.MapSpec
+	Events             *ebpf.MapSpec
 }
 
 func loadPacketanalyzer() (*ebpf.CollectionSpec, error) {
@@ -51,8 +51,8 @@ func loadPacketanalyzer() (*ebpf.CollectionSpec, error) {
 			"track_packet_reorder": nil,
 		},
 		Maps: map[string]*ebpf.MapSpec{
-			"packet_stats":  nil,
-			"events": nil,
+			"packet_stats": nil,
+			"events":       nil,
 		},
 	}, nil
 }

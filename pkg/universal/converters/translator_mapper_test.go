@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collector"
-	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 // MockSimplePIDTranslator is a mock implementation of collector.SimplePIDTranslator

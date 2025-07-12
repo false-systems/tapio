@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 // PrometheusFormatter converts universal metrics to Prometheus format

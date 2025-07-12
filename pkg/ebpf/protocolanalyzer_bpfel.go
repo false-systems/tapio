@@ -9,11 +9,11 @@ import (
 
 // ProtocolAnalyzer eBPF programs and maps
 type protocolanalyzerObjects struct {
-	TrackHttpRequest     *ebpf.Program
-	TrackHttpResponse    *ebpf.Program
-	TrackGrpcCall        *ebpf.Program
-	ProtocolStats        *ebpf.Map
-	Events       *ebpf.Map
+	TrackHttpRequest  *ebpf.Program
+	TrackHttpResponse *ebpf.Program
+	TrackGrpcCall     *ebpf.Program
+	ProtocolStats     *ebpf.Map
+	Events            *ebpf.Map
 }
 
 func (o *protocolanalyzerObjects) Close() error {
@@ -36,11 +36,11 @@ func (o *protocolanalyzerObjects) Close() error {
 }
 
 type protocolanalyzerSpecs struct {
-	TrackHttpRequest     *ebpf.ProgramSpec
-	TrackHttpResponse    *ebpf.ProgramSpec
-	TrackGrpcCall        *ebpf.ProgramSpec
-	ProtocolStats        *ebpf.MapSpec
-	Events       *ebpf.MapSpec
+	TrackHttpRequest  *ebpf.ProgramSpec
+	TrackHttpResponse *ebpf.ProgramSpec
+	TrackGrpcCall     *ebpf.ProgramSpec
+	ProtocolStats     *ebpf.MapSpec
+	Events            *ebpf.MapSpec
 }
 
 func loadProtocolanalyzer() (*ebpf.CollectionSpec, error) {
@@ -51,8 +51,8 @@ func loadProtocolanalyzer() (*ebpf.CollectionSpec, error) {
 			"track_grpc_call":     nil,
 		},
 		Maps: map[string]*ebpf.MapSpec{
-			"protocol_stats":  nil,
-			"events": nil,
+			"protocol_stats": nil,
+			"events":         nil,
 		},
 	}, nil
 }

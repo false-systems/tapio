@@ -14,35 +14,35 @@ import (
 )
 
 type EnhancedK8sClient struct {
-	baseClient       kubernetes.Interface
-	resilientClient  *ResilientClient
+	baseClient        kubernetes.Interface
+	resilientClient   *ResilientClient
 	resilienceManager *universal.ResilienceManager
-	smartCache       *CacheManager
-	watchManager     *WatchManager
-	stateTracker     *StateTracker
-	config           *EnhancedConfig
+	smartCache        *CacheManager
+	watchManager      *WatchManager
+	stateTracker      *StateTracker
+	config            *EnhancedConfig
 }
 
 type EnhancedConfig struct {
 	// Cache settings for CI stability
 	CacheConfig *CacheConfig
-	
+
 	// Watch management
 	WatchConfig *WatchConfig
-	
+
 	// State tracking
 	StateConfig *StateConfig
-	
+
 	// Resilient client settings
 	ResilientConfig *ResilientConfig
-	
+
 	// Request timeouts
 	DefaultTimeout time.Duration
-	
+
 	// Cache warmup settings
 	EnableCacheWarmup bool
 	WarmupNamespaces  []string
-	
+
 	// Circuit breaker settings
 	CircuitBreakerThreshold int
 	CircuitBreakerTimeout   time.Duration
@@ -129,7 +129,7 @@ func (c *EnhancedK8sClient) GetPod(namespace, name string) (*corev1.Pod, error) 
 	defer cancel()
 
 	cacheKey := fmt.Sprintf("pod/%s/%s", namespace, name)
-	
+
 	// Try cache first for faster CI
 	if cached, found := c.smartCache.Get(ctx, cacheKey); found {
 		if pod, ok := cached.(*corev1.Pod); ok {
@@ -175,7 +175,7 @@ func (c *EnhancedK8sClient) GetService(namespace, name string) (*corev1.Service,
 	defer cancel()
 
 	cacheKey := fmt.Sprintf("service/%s/%s", namespace, name)
-	
+
 	if cached, found := c.smartCache.Get(ctx, cacheKey); found {
 		if svc, ok := cached.(*corev1.Service); ok {
 			return svc, nil
@@ -218,7 +218,7 @@ func (c *EnhancedK8sClient) GetDeployment(namespace, name string) (*appsv1.Deplo
 	defer cancel()
 
 	cacheKey := fmt.Sprintf("deployment/%s/%s", namespace, name)
-	
+
 	if cached, found := c.smartCache.Get(ctx, cacheKey); found {
 		if dep, ok := cached.(*appsv1.Deployment); ok {
 			return dep, nil
@@ -261,7 +261,7 @@ func (c *EnhancedK8sClient) ListPods(namespace string, opts metav1.ListOptions) 
 	defer cancel()
 
 	cacheKey := fmt.Sprintf("pods-list/%s/%s", namespace, opts.LabelSelector)
-	
+
 	// For list operations, use shorter cache TTL
 	if cached, found := c.smartCache.Get(ctx, cacheKey); found {
 		if podList, ok := cached.(*corev1.PodList); ok {

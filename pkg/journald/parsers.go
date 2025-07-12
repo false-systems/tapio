@@ -18,8 +18,8 @@ type Parsers struct {
 // ParsersConfig configures the message parsers
 type ParsersConfig struct {
 	EnableStructuredParsing bool
-	CustomParsers          map[string]ParserDefinition
-	CommonPatterns         map[string]string
+	CustomParsers           map[string]ParserDefinition
+	CommonPatterns          map[string]string
 }
 
 // ParserDefinition defines a custom parser
@@ -70,13 +70,13 @@ func NewParsers(config *ParsersConfig) *Parsers {
 	if config == nil {
 		config = DefaultParsersConfig()
 	}
-	
+
 	parsers := &Parsers{
 		config:   config,
 		parsers:  make(map[string]MessageParser),
 		patterns: make(map[string]*regexp.Regexp),
 	}
-	
+
 	// Initialize default parsers
 	parsers.parsers["systemd"] = &SystemdParser{}
 	parsers.parsers["docker"] = &DockerParser{}
@@ -84,10 +84,10 @@ func NewParsers(config *ParsersConfig) *Parsers {
 	parsers.parsers["generic"] = &GenericParser{
 		patterns: parsers.patterns,
 	}
-	
+
 	// Compile common patterns
 	parsers.compilePatterns()
-	
+
 	return parsers
 }
 
@@ -96,17 +96,17 @@ func DefaultParsersConfig() *ParsersConfig {
 	return &ParsersConfig{
 		EnableStructuredParsing: true,
 		CommonPatterns: map[string]string{
-			"timestamp":    `\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{3,9})?(?:Z|[+-]\d{2}:?\d{2})?`,
-			"ipv4":         `(?:\d{1,3}\.){3}\d{1,3}`,
-			"ipv6":         `(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}`,
-			"mac_address":  `(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}`,
-			"uuid":         `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
-			"pid":          `\[(\d+)\]`,
-			"severity":     `(?i)(emergency|alert|critical|error|warning|notice|info|debug)`,
-			"duration":     `(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)`,
-			"memory_size":  `(\d+(?:\.\d+)?)(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)`,
-			"percentage":   `(\d+(?:\.\d+)?)%`,
-			"http_status":  `\b([1-5]\d{2})\b`,
+			"timestamp":   `\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{3,9})?(?:Z|[+-]\d{2}:?\d{2})?`,
+			"ipv4":        `(?:\d{1,3}\.){3}\d{1,3}`,
+			"ipv6":        `(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}`,
+			"mac_address": `(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}`,
+			"uuid":        `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+			"pid":         `\[(\d+)\]`,
+			"severity":    `(?i)(emergency|alert|critical|error|warning|notice|info|debug)`,
+			"duration":    `(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)`,
+			"memory_size": `(\d+(?:\.\d+)?)(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)`,
+			"percentage":  `(\d+(?:\.\d+)?)%`,
+			"http_status": `\b([1-5]\d{2})\b`,
 		},
 	}
 }
@@ -121,7 +121,7 @@ func (p *Parsers) ParseMessage(entry *LogEntry) (*ParsedMessage, error) {
 			Metrics:         make(map[string]float64),
 		}, nil
 	}
-	
+
 	// Try service-specific parsers first
 	var parser MessageParser
 	switch {
@@ -134,11 +134,11 @@ func (p *Parsers) ParseMessage(entry *LogEntry) (*ParsedMessage, error) {
 	default:
 		parser = p.parsers["generic"]
 	}
-	
+
 	if parser != nil && parser.CanParse(entry.Message) {
 		return parser.Parse(entry.Message)
 	}
-	
+
 	// Fallback to generic parser
 	return p.parsers["generic"].Parse(entry.Message)
 }
@@ -174,7 +174,7 @@ func (sp *SystemdParser) Parse(message string) (*ParsedMessage, error) {
 		Metrics:         make(map[string]float64),
 		MessageType:     "systemd",
 	}
-	
+
 	// Parse systemd state changes
 	if strings.Contains(message, "Starting") {
 		parsed.Action = "starting"
@@ -207,14 +207,14 @@ func (sp *SystemdParser) Parse(message string) (*ParsedMessage, error) {
 			parsed.Details["failure_reason"] = match[1]
 		}
 	}
-	
+
 	// Extract process ID if present
 	if match := regexp.MustCompile(`\[(\d+)\]`).FindStringSubmatch(message); len(match) > 1 {
 		if pid, err := strconv.Atoi(match[1]); err == nil {
 			parsed.ParsedFields["pid"] = pid
 		}
 	}
-	
+
 	return parsed, nil
 }
 
@@ -238,7 +238,7 @@ func (dp *DockerParser) Parse(message string) (*ParsedMessage, error) {
 		Metrics:         make(map[string]float64),
 		MessageType:     "docker",
 	}
-	
+
 	// Parse container actions
 	if strings.Contains(message, "container start") {
 		parsed.Action = "container_start"
@@ -266,18 +266,18 @@ func (dp *DockerParser) Parse(message string) (*ParsedMessage, error) {
 			}
 		}
 	}
-	
+
 	// Extract container name
 	if match := regexp.MustCompile(`name=([^,\s]+)`).FindStringSubmatch(message); len(match) > 1 {
 		parsed.ParsedFields["container_name"] = match[1]
 		parsed.Component = match[1]
 	}
-	
+
 	// Extract image
 	if match := regexp.MustCompile(`image=([^,\s]+)`).FindStringSubmatch(message); len(match) > 1 {
 		parsed.ParsedFields["image"] = match[1]
 	}
-	
+
 	return parsed, nil
 }
 
@@ -301,7 +301,7 @@ func (kp *KubernetesParser) Parse(message string) (*ParsedMessage, error) {
 		Metrics:         make(map[string]float64),
 		MessageType:     "kubernetes",
 	}
-	
+
 	// Parse pod events
 	if strings.Contains(message, "Created pod") {
 		parsed.Action = "pod_created"
@@ -317,12 +317,12 @@ func (kp *KubernetesParser) Parse(message string) (*ParsedMessage, error) {
 			parsed.Component = match[1]
 		}
 	}
-	
+
 	// Extract namespace
 	if match := regexp.MustCompile(`namespace[:/]?"?([^"\s,]+)"?`).FindStringSubmatch(message); len(match) > 1 {
 		parsed.ParsedFields["namespace"] = match[1]
 	}
-	
+
 	// Parse resource usage
 	if strings.Contains(message, "memory") && strings.Contains(message, "usage") {
 		if match := regexp.MustCompile(`(\d+(?:\.\d+)?)(Mi|Gi|Ki|M|G|K)?B?`).FindStringSubmatch(message); len(match) > 1 {
@@ -340,7 +340,7 @@ func (kp *KubernetesParser) Parse(message string) (*ParsedMessage, error) {
 			}
 		}
 	}
-	
+
 	return parsed, nil
 }
 
@@ -361,7 +361,7 @@ func (gp *GenericParser) Parse(message string) (*ParsedMessage, error) {
 		Metrics:         make(map[string]float64),
 		MessageType:     "generic",
 	}
-	
+
 	// Extract common patterns
 	for name, pattern := range gp.patterns {
 		if matches := pattern.FindAllString(message, -1); len(matches) > 0 {
@@ -372,7 +372,7 @@ func (gp *GenericParser) Parse(message string) (*ParsedMessage, error) {
 			}
 		}
 	}
-	
+
 	// Determine severity from message content
 	messageLower := strings.ToLower(message)
 	switch {
@@ -393,7 +393,7 @@ func (gp *GenericParser) Parse(message string) (*ParsedMessage, error) {
 	case strings.Contains(messageLower, "debug"):
 		parsed.Severity = "debug"
 	}
-	
+
 	// Extract numeric values for metrics
 	if numPattern := regexp.MustCompile(`(\d+(?:\.\d+)?)`); numPattern.MatchString(message) {
 		matches := numPattern.FindAllStringSubmatch(message, -1)
@@ -405,7 +405,7 @@ func (gp *GenericParser) Parse(message string) (*ParsedMessage, error) {
 			}
 		}
 	}
-	
+
 	// Extract quoted strings
 	if quotedPattern := regexp.MustCompile(`"([^"]+)"`); quotedPattern.MatchString(message) {
 		matches := quotedPattern.FindAllStringSubmatch(message, -1)
@@ -419,19 +419,19 @@ func (gp *GenericParser) Parse(message string) (*ParsedMessage, error) {
 			parsed.ParsedFields["quoted_strings"] = quotedStrings
 		}
 	}
-	
+
 	return parsed, nil
 }
 
 // ExtractMetrics extracts performance metrics from parsed messages
 func (p *Parsers) ExtractMetrics(parsed *ParsedMessage) map[string]float64 {
 	metrics := make(map[string]float64)
-	
+
 	// Copy existing metrics
 	for k, v := range parsed.Metrics {
 		metrics[k] = v
 	}
-	
+
 	// Extract duration metrics
 	if durationPattern := p.patterns["duration"]; durationPattern != nil {
 		if matches := durationPattern.FindAllStringSubmatch(parsed.OriginalMessage, -1); len(matches) > 0 {
@@ -460,7 +460,7 @@ func (p *Parsers) ExtractMetrics(parsed *ParsedMessage) map[string]float64 {
 			}
 		}
 	}
-	
+
 	// Extract memory size metrics
 	if memoryPattern := p.patterns["memory_size"]; memoryPattern != nil {
 		if matches := memoryPattern.FindAllStringSubmatch(parsed.OriginalMessage, -1); len(matches) > 0 {
@@ -495,15 +495,15 @@ func (p *Parsers) ExtractMetrics(parsed *ParsedMessage) map[string]float64 {
 			}
 		}
 	}
-	
+
 	return metrics
 }
 
 // GetStatistics returns parser statistics
 func (p *Parsers) GetStatistics() map[string]interface{} {
 	return map[string]interface{}{
-		"available_parsers":      len(p.parsers),
-		"compiled_patterns":      len(p.patterns),
-		"structured_parsing":     p.config.EnableStructuredParsing,
+		"available_parsers":  len(p.parsers),
+		"compiled_patterns":  len(p.patterns),
+		"structured_parsing": p.config.EnableStructuredParsing,
 	}
 }

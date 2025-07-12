@@ -15,20 +15,20 @@ type BatchProcessor[T any] struct {
 	batchSize    int
 	maxWaitTime  time.Duration
 	maxQueueSize int
-	
+
 	// Processing function
-	processFn    BatchProcessFunc[T]
-	
+	processFn BatchProcessFunc[T]
+
 	// Buffering
-	queue        chan T
-	batch        []T
-	batchMutex   sync.Mutex
-	
+	queue      chan T
+	batch      []T
+	batchMutex sync.Mutex
+
 	// Control
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	// Metrics
 	processed    atomic.Uint64
 	batches      atomic.Uint64
@@ -64,9 +64,9 @@ func NewBatchProcessor[T any](
 	if maxQueueSize <= 0 {
 		maxQueueSize = 10000
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &BatchProcessor[T]{
 		batchSize:    batchSize,
 		maxWaitTime:  maxWaitTime,
@@ -90,13 +90,13 @@ func (bp *BatchProcessor[T]) Start() error {
 func (bp *BatchProcessor[T]) Stop() error {
 	// Signal shutdown
 	bp.cancel()
-	
+
 	// Close queue
 	close(bp.queue)
-	
+
 	// Wait for processing to complete
 	bp.wg.Wait()
-	
+
 	// Process any remaining items
 	bp.batchMutex.Lock()
 	if len(bp.batch) > 0 {
@@ -104,7 +104,7 @@ func (bp *BatchProcessor[T]) Stop() error {
 		bp.batch = bp.batch[:0]
 	}
 	bp.batchMutex.Unlock()
-	
+
 	return nil
 }
 
@@ -129,44 +129,44 @@ func (bp *BatchProcessor[T]) SubmitBatch(items []T) error {
 			dropped++
 		}
 	}
-	
+
 	if dropped > 0 {
 		bp.dropped.Add(uint64(dropped))
 		return errors.New("some items dropped")
 	}
-	
+
 	return nil
 }
 
 // processingLoop is the main processing loop
 func (bp *BatchProcessor[T]) processingLoop() {
 	defer bp.wg.Done()
-	
+
 	timer := time.NewTimer(bp.maxWaitTime)
 	defer timer.Stop()
-	
+
 	for {
 		select {
 		case <-bp.ctx.Done():
 			return
-			
+
 		case item, ok := <-bp.queue:
 			if !ok {
 				// Queue closed
 				return
 			}
-			
+
 			bp.batchMutex.Lock()
 			bp.batch = append(bp.batch, item)
-			
+
 			if len(bp.batch) >= bp.batchSize {
 				// Batch full, process immediately
 				batch := bp.batch
 				bp.batch = make([]T, 0, bp.batchSize)
 				bp.batchMutex.Unlock()
-				
+
 				bp.processBatch(batch)
-				
+
 				// Reset timer
 				if !timer.Stop() {
 					<-timer.C
@@ -175,7 +175,7 @@ func (bp *BatchProcessor[T]) processingLoop() {
 			} else {
 				bp.batchMutex.Unlock()
 			}
-			
+
 		case <-timer.C:
 			// Timeout reached, process current batch
 			bp.batchMutex.Lock()
@@ -183,12 +183,12 @@ func (bp *BatchProcessor[T]) processingLoop() {
 				batch := bp.batch
 				bp.batch = make([]T, 0, bp.batchSize)
 				bp.batchMutex.Unlock()
-				
+
 				bp.processBatch(batch)
 			} else {
 				bp.batchMutex.Unlock()
 			}
-			
+
 			timer.Reset(bp.maxWaitTime)
 		}
 	}
@@ -199,14 +199,14 @@ func (bp *BatchProcessor[T]) processBatch(batch []T) {
 	if len(batch) == 0 {
 		return
 	}
-	
+
 	bp.batches.Add(1)
-	
+
 	// Update average batch size (exponential moving average)
 	oldAvg := bp.avgBatchSize.Load()
 	newAvg := (oldAvg*9 + uint64(len(batch))) / 10
 	bp.avgBatchSize.Store(newAvg)
-	
+
 	// Process the batch
 	if err := bp.processFn(bp.ctx, batch); err != nil {
 		bp.errors.Add(1)
@@ -240,16 +240,16 @@ type BatchProcessorMetrics struct {
 // AdaptiveBatchProcessor adjusts batch size based on load
 type AdaptiveBatchProcessor[T any] struct {
 	*BatchProcessor[T]
-	
+
 	// Adaptive settings
-	minBatchSize      int
-	maxBatchSize      int
-	targetLatency     time.Duration
-	adaptInterval     time.Duration
-	
+	minBatchSize  int
+	maxBatchSize  int
+	targetLatency time.Duration
+	adaptInterval time.Duration
+
 	// Metrics for adaptation
-	lastAdapt         time.Time
-	totalLatency      atomic.Uint64
+	lastAdapt           time.Time
+	totalLatency        atomic.Uint64
 	processedSinceAdapt atomic.Uint64
 }
 
@@ -268,37 +268,37 @@ func NewAdaptiveBatchProcessor[T any](
 	if targetLatency <= 0 {
 		targetLatency = 50 * time.Millisecond
 	}
-	
+
 	// Start with middle batch size
 	initialBatchSize := (minBatchSize + maxBatchSize) / 2
-	
+
 	// Create AdaptiveBatchProcessor first
 	abp := &AdaptiveBatchProcessor[T]{
-		minBatchSize:     minBatchSize,
-		maxBatchSize:     maxBatchSize,
-		targetLatency:    targetLatency,
-		adaptInterval:    10 * time.Second,
-		lastAdapt:        time.Now(),
+		minBatchSize:  minBatchSize,
+		maxBatchSize:  maxBatchSize,
+		targetLatency: targetLatency,
+		adaptInterval: 10 * time.Second,
+		lastAdapt:     time.Now(),
 	}
-	
+
 	// Wrap process function to measure latency
 	wrappedFn := func(ctx context.Context, batch []T) error {
 		start := time.Now()
 		err := processFn(ctx, batch)
 		elapsed := time.Since(start)
-		
+
 		// Update latency metrics
 		abp.totalLatency.Add(uint64(elapsed))
 		abp.processedSinceAdapt.Add(uint64(len(batch)))
-		
+
 		return err
 	}
-	
+
 	bp := NewBatchProcessor(initialBatchSize, targetLatency/2, maxBatchSize*10, wrappedFn)
-	
+
 	// Set the BatchProcessor field
 	abp.BatchProcessor = bp
-	
+
 	return abp
 }
 
@@ -307,7 +307,7 @@ func (abp *AdaptiveBatchProcessor[T]) Start() error {
 	// Start adaptation loop
 	abp.wg.Add(1)
 	go abp.adaptationLoop()
-	
+
 	// Start base processor
 	return abp.BatchProcessor.Start()
 }
@@ -315,10 +315,10 @@ func (abp *AdaptiveBatchProcessor[T]) Start() error {
 // adaptationLoop adjusts batch size based on performance
 func (abp *AdaptiveBatchProcessor[T]) adaptationLoop() {
 	defer abp.wg.Done()
-	
+
 	ticker := time.NewTicker(abp.adaptInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-abp.ctx.Done():
@@ -333,18 +333,18 @@ func (abp *AdaptiveBatchProcessor[T]) adaptationLoop() {
 func (abp *AdaptiveBatchProcessor[T]) adapt() {
 	processed := abp.processedSinceAdapt.Swap(0)
 	totalLatencyNs := abp.totalLatency.Swap(0)
-	
+
 	if processed == 0 {
 		return
 	}
-	
+
 	// Calculate average latency per item
 	avgLatency := time.Duration(totalLatencyNs / processed)
-	
+
 	// Adjust batch size
 	currentBatchSize := abp.batchSize
 	newBatchSize := currentBatchSize
-	
+
 	if avgLatency > abp.targetLatency {
 		// Latency too high, reduce batch size
 		newBatchSize = currentBatchSize * 9 / 10
@@ -352,21 +352,21 @@ func (abp *AdaptiveBatchProcessor[T]) adapt() {
 		// Latency low, increase batch size
 		newBatchSize = currentBatchSize * 11 / 10
 	}
-	
+
 	// Apply limits
 	if newBatchSize < abp.minBatchSize {
 		newBatchSize = abp.minBatchSize
 	} else if newBatchSize > abp.maxBatchSize {
 		newBatchSize = abp.maxBatchSize
 	}
-	
+
 	// Update batch size if changed
 	if newBatchSize != currentBatchSize {
 		abp.batchMutex.Lock()
 		abp.batchSize = newBatchSize
 		abp.batchMutex.Unlock()
 	}
-	
+
 	abp.lastAdapt = time.Now()
 }
 
@@ -375,7 +375,7 @@ type ParallelBatchProcessor[T any] struct {
 	processors []*BatchProcessor[T]
 	numWorkers int
 	router     func(T) int // Route items to specific processors
-	
+
 	// Metrics
 	totalProcessed atomic.Uint64
 	totalDropped   atomic.Uint64
@@ -392,12 +392,12 @@ func NewParallelBatchProcessor[T any](
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
 	}
-	
+
 	processors := make([]*BatchProcessor[T], numWorkers)
 	for i := range processors {
 		processors[i] = NewBatchProcessor(batchSize, maxWaitTime, batchSize*100, processFn)
 	}
-	
+
 	if router == nil {
 		// Default round-robin routing
 		var counter atomic.Uint64
@@ -405,7 +405,7 @@ func NewParallelBatchProcessor[T any](
 			return int(counter.Add(1) % uint64(numWorkers))
 		}
 	}
-	
+
 	return &ParallelBatchProcessor[T]{
 		processors: processors,
 		numWorkers: numWorkers,
@@ -459,11 +459,11 @@ func (pbp *ParallelBatchProcessor[T]) GetMetrics() ParallelBatchProcessorMetrics
 		TotalDropped:   pbp.totalDropped.Load(),
 		WorkerMetrics:  make([]BatchProcessorMetrics, pbp.numWorkers),
 	}
-	
+
 	for i, p := range pbp.processors {
 		metrics.WorkerMetrics[i] = p.GetMetrics()
 	}
-	
+
 	return metrics
 }
 

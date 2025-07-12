@@ -36,7 +36,7 @@ type UnitEvent struct {
 // NewUnitWatcher creates a new unit watcher
 func NewUnitWatcher(config *UnitWatcherConfig) (*UnitWatcher, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &UnitWatcher{
 		config: config,
 		events: make(chan *UnitEvent, config.EventBufferSize),

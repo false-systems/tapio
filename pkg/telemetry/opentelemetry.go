@@ -12,8 +12,8 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -22,12 +22,12 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
+	"github.com/yairfalse/tapio/pkg/collector"
 	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/correlation/rules"
 	"github.com/yairfalse/tapio/pkg/correlation/sources"
 	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/simple"
-	"github.com/yairfalse/tapio/pkg/collector"
 	"github.com/yairfalse/tapio/pkg/types"
 	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/yairfalse/tapio/pkg/universal/converters"
@@ -41,9 +41,9 @@ type OpenTelemetryExporter struct {
 	correlationEngine *correlation.Engine
 
 	// Core OpenTelemetry components
-	tracer      oteltrace.Tracer
-	meter       otelmetric.Meter
-	resource    *resource.Resource
+	tracer        oteltrace.Tracer
+	meter         otelmetric.Meter
+	resource      *resource.Resource
 	traceProvider *trace.TracerProvider
 	meterProvider *metric.MeterProvider
 
@@ -51,7 +51,7 @@ type OpenTelemetryExporter struct {
 	translator *collector.SimplePIDTranslator
 
 	// FULL Agent 3 resilience framework integration
-	circuitBreaker   *universal.CircuitBreaker
+	circuitBreaker    *universal.CircuitBreaker
 	resilienceManager *universal.ResilienceManager
 	// TODO: Add timeout and validation components
 
@@ -65,23 +65,23 @@ type OpenTelemetryExporter struct {
 	correlationConverter *converters.CorrelationConverter
 
 	// Enhanced correlation tracing
-	correlationTracer    *CorrelationTracer
+	correlationTracer *CorrelationTracer
 
 	// OpenTelemetry metrics
-	analysisDuration      otelmetric.Float64Histogram
-	spanExportDuration    otelmetric.Float64Histogram
-	circuitBreakerState   otelmetric.Int64Gauge
-	batchSize            otelmetric.Int64Histogram
-	resourceUtilization  otelmetric.Float64Gauge
+	analysisDuration    otelmetric.Float64Histogram
+	spanExportDuration  otelmetric.Float64Histogram
+	circuitBreakerState otelmetric.Int64Gauge
+	batchSize           otelmetric.Int64Histogram
+	resourceUtilization otelmetric.Float64Gauge
 
 	// Configuration
 	config Config
 
 	// State
-	mu                sync.RWMutex
-	activeSpans       map[string]oteltrace.Span
-	lastUpdateTime    time.Time
-	totalSpansCreated int64
+	mu                 sync.RWMutex
+	activeSpans        map[string]oteltrace.Span
+	lastUpdateTime     time.Time
+	totalSpansCreated  int64
 	totalSpansExported int64
 }
 
@@ -92,41 +92,41 @@ type CheckerInterface interface {
 
 // Config holds OpenTelemetry exporter configuration
 type Config struct {
-	ServiceName     string
-	ServiceVersion  string
-	OTLPEndpoint    string
-	Headers         map[string]string
-	Insecure        bool
-	BatchTimeout    time.Duration
-	BatchSize       int
-	MaxConcurrency  int
-	EnableMetrics   bool
-	EnableTraces    bool
-	ResourceAttrs   map[string]string
-	
+	ServiceName    string
+	ServiceVersion string
+	OTLPEndpoint   string
+	Headers        map[string]string
+	Insecure       bool
+	BatchTimeout   time.Duration
+	BatchSize      int
+	MaxConcurrency int
+	EnableMetrics  bool
+	EnableTraces   bool
+	ResourceAttrs  map[string]string
+
 	// Agent 1 translator integration
 	EnableTranslator bool
-	KubeClient      interface{} // kubernetes.Interface - can be nil for testing
-	
+	KubeClient       interface{} // kubernetes.Interface - can be nil for testing
+
 	// Correlation tracing configuration
-	EnableCorrelationTracing    bool
-	CorrelationTimeWindow       time.Duration
-	EnableTimelineVisualization bool
-	EnableRootCauseAnalysis     bool
+	EnableCorrelationTracing       bool
+	CorrelationTimeWindow          time.Duration
+	EnableTimelineVisualization    bool
+	EnableRootCauseAnalysis        bool
 	CorrelationConfidenceThreshold float64
 }
 
 // ResourceLimits enforces Polar Signals style resource bounds
 type ResourceLimits struct {
-	MaxMemoryMB     int     // 10Mi memory limit
-	MaxCPUPercent   float64 // 5% CPU limit
+	MaxMemoryMB      int     // 10Mi memory limit
+	MaxCPUPercent    float64 // 5% CPU limit
 	MaxSpansInFlight int     // Concurrent span limit
-	MaxBatchSize    int     // 19Hz optimal batch size
+	MaxBatchSize     int     // 19Hz optimal batch size
 }
 
 // EventBatcher handles 19Hz batch processing for optimal performance
 type EventBatcher struct {
-	spans     []oteltrace.Span
+	spans []oteltrace.Span
 	// metrics are handled directly through the meter
 	batchSize int
 	timeout   time.Duration
@@ -169,7 +169,7 @@ func NewOpenTelemetryExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor
 	// Create resilience components (FULL Agent 3 integration)
 	circuitBreaker := universal.NewCircuitBreaker("otlp-exporter", 5, 30*time.Second)
 	resilienceManager := universal.NewResilienceManager()
-	
+
 	// TODO: Add more sophisticated timeout and validation when universal package is extended
 
 	// Initialize Agent 1's translator engine for REAL Kubernetes context
@@ -209,10 +209,10 @@ func NewOpenTelemetryExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor
 
 	// Resource limits (Polar Signals style)
 	resourceLimits := ResourceLimits{
-		MaxMemoryMB:      10,    // 10Mi memory limit
-		MaxCPUPercent:    5.0,   // 5% CPU limit
-		MaxSpansInFlight: 1000,  // Prevent memory explosion
-		MaxBatchSize:     19,    // 19Hz optimal batch size
+		MaxMemoryMB:      10,   // 10Mi memory limit
+		MaxCPUPercent:    5.0,  // 5% CPU limit
+		MaxSpansInFlight: 1000, // Prevent memory explosion
+		MaxBatchSize:     19,   // 19Hz optimal batch size
 	}
 
 	// Span pool for zero-allocation hot path
@@ -427,7 +427,7 @@ func (e *OpenTelemetryExporter) pingOTLPEndpoint(ctx context.Context) error {
 func (e *OpenTelemetryExporter) CreateSpan(ctx context.Context, name string, opts ...oteltrace.SpanStartOption) (oteltrace.Span, error) {
 	// Create span directly
 	_, span := e.tracer.Start(ctx, name, opts...)
-	
+
 	// Track active span
 	e.mu.Lock()
 	e.activeSpans[name] = span
@@ -442,7 +442,7 @@ func (e *OpenTelemetryExporter) CreateSpanWithPID(ctx context.Context, pid uint3
 	// Use Agent 1's translator for REAL Kubernetes context
 	var k8sContext *collector.EventContext
 	var translatorErr error
-	
+
 	if e.translator != nil {
 		k8sContext, translatorErr = e.translator.GetPodInfo(pid)
 		if translatorErr != nil {
@@ -450,16 +450,16 @@ func (e *OpenTelemetryExporter) CreateSpanWithPID(ctx context.Context, pid uint3
 			// Continue with basic span creation even if translation fails
 		}
 	}
-	
+
 	// Create span name with operation
 	spanName := fmt.Sprintf("tapio.%s", operation)
 	if k8sContext != nil {
 		spanName = fmt.Sprintf("tapio.%s.%s", k8sContext.Namespace, operation)
 	}
-	
+
 	// Create span with enhanced context
 	_, span := e.tracer.Start(ctx, spanName, opts...)
-	
+
 	// Add REAL Kubernetes context attributes from Agent 1's translator
 	if k8sContext != nil {
 		span.SetAttributes(
@@ -468,16 +468,16 @@ func (e *OpenTelemetryExporter) CreateSpanWithPID(ctx context.Context, pid uint3
 			attribute.String("k8s.namespace", k8sContext.Namespace),
 			attribute.String("k8s.container.name", k8sContext.Container),
 			attribute.String("k8s.node.name", k8sContext.Node),
-			
+
 			// Process context
 			attribute.Int64("process.pid", int64(k8sContext.PID)),
 		)
-		
+
 		// Add pod labels as span attributes
 		for key, value := range k8sContext.Labels {
 			span.SetAttributes(attribute.String(fmt.Sprintf("k8s.pod.label.%s", key), value))
 		}
-		
+
 		// Add additional process info if available
 		if k8sContext.ProcessName != "" {
 			span.SetAttributes(attribute.String("process.name", k8sContext.ProcessName))
@@ -492,13 +492,13 @@ func (e *OpenTelemetryExporter) CreateSpanWithPID(ctx context.Context, pid uint3
 			attribute.String("k8s.context.status", "translator_unavailable"),
 		)
 	}
-	
+
 	// Track active span
 	e.mu.Lock()
 	e.activeSpans[spanName] = span
 	e.totalSpansCreated++
 	e.mu.Unlock()
-	
+
 	return span, nil
 }
 
@@ -570,7 +570,7 @@ func (e *OpenTelemetryExporter) UpdateTelemetry(ctx context.Context) error {
 func (e *OpenTelemetryExporter) createProblemSpans(ctx context.Context, problems []types.Problem) {
 	for _, problem := range problems {
 		spanName := fmt.Sprintf("tapio.problem.%s", problem.Title)
-		
+
 		_, span := e.tracer.Start(ctx, spanName)
 		span.SetAttributes(
 			attribute.String("problem.title", problem.Title),
@@ -612,14 +612,14 @@ func (e *OpenTelemetryExporter) updateEBPFTelemetry(ctx context.Context) {
 			_, memSpan = e.tracer.Start(ctx, "tapio.ebpf.memory")
 			memSpan.SetAttributes(attribute.Int("process.pid", int(stats.PID)))
 		}
-		
+
 		// Add eBPF-specific memory attributes
 		memSpan.SetAttributes(
 			attribute.Int64("memory.usage", int64(stats.CurrentUsage)),
 			attribute.Int64("memory.allocated", int64(stats.TotalAllocated)),
 			attribute.String("data.source", "ebpf"),
 		)
-		
+
 		// Add container info if available
 		if stats.InContainer {
 			memSpan.SetAttributes(
@@ -627,7 +627,7 @@ func (e *OpenTelemetryExporter) updateEBPFTelemetry(ctx context.Context) {
 				attribute.Int64("container.pid", int64(stats.ContainerPID)),
 			)
 		}
-		
+
 		memSpan.End()
 	}
 }
@@ -635,10 +635,10 @@ func (e *OpenTelemetryExporter) updateEBPFTelemetry(ctx context.Context) {
 // updateCorrelationTelemetry creates enhanced telemetry from correlation findings with distributed tracing
 func (e *OpenTelemetryExporter) updateCorrelationTelemetry(ctx context.Context) {
 	startTime := time.Now()
-	
+
 	// Use enhanced correlation tracer for distributed analysis
 	correlationID := fmt.Sprintf("corr-%d", time.Now().UnixNano())
-	
+
 	findings, err := e.correlationEngine.Execute(ctx)
 	if err != nil {
 		// Create error span
@@ -654,7 +654,7 @@ func (e *OpenTelemetryExporter) updateCorrelationTelemetry(ctx context.Context) 
 
 	// Convert findings to correlation events for enhanced tracing
 	events := e.convertFindingsToEvents(findings)
-	
+
 	if len(events) == 0 {
 		return // No events to trace
 	}
@@ -668,16 +668,16 @@ func (e *OpenTelemetryExporter) updateCorrelationTelemetry(ctx context.Context) 
 	if len(layers) > 0 {
 		layerCtx, layerSpan := e.correlationTracer.TraceMultiLayerCorrelation(ctx, correlationID, layers)
 		defer layerSpan.End()
-		
+
 		// Trace each layer individually for detailed analysis
 		for _, layer := range layers {
-			_, layerAnalysisSpan := e.correlationTracer.TraceLayerAnalysis(layerCtx, 
+			_, layerAnalysisSpan := e.correlationTracer.TraceLayerAnalysis(layerCtx,
 				layer.Name, layer.Target, layer.AnalysisType)
-			
+
 			// Add performance metrics
-			e.correlationTracer.TracePerformanceMetrics(layerCtx, 
+			e.correlationTracer.TracePerformanceMetrics(layerCtx,
 				layer.Duration, layer.Accuracy, layer.DataPoints, 0.5) // Estimate memory usage
-			
+
 			layerAnalysisSpan.End()
 		}
 	}
@@ -687,8 +687,8 @@ func (e *OpenTelemetryExporter) updateCorrelationTelemetry(ctx context.Context) 
 	if len(highConfidenceFindings) > 0 {
 		pattern := e.identifyPattern(highConfidenceFindings)
 		confidence := e.calculateAverageConfidence(highConfidenceFindings)
-		
-		_, rootCauseSpan := e.correlationTracer.TraceRootCauseAnalysis(ctx, 
+
+		_, rootCauseSpan := e.correlationTracer.TraceRootCauseAnalysis(ctx,
 			pattern, confidence, highConfidenceFindings)
 		defer rootCauseSpan.End()
 	}
@@ -702,7 +702,7 @@ func (e *OpenTelemetryExporter) updateCorrelationTelemetry(ctx context.Context) 
 
 	// Record overall correlation analysis performance
 	analysisLatency := time.Since(startTime)
-	e.correlationTracer.TracePerformanceMetrics(ctx, analysisLatency, 
+	e.correlationTracer.TracePerformanceMetrics(ctx, analysisLatency,
 		e.calculateAverageConfidence(findings), len(events), 1.0)
 
 	// Create individual finding spans for detailed analysis
@@ -723,7 +723,7 @@ func (e *OpenTelemetryExporter) updateCorrelationTelemetry(ctx context.Context) 
 // convertFindingsToEvents converts correlation findings to events for enhanced tracing
 func (e *OpenTelemetryExporter) convertFindingsToEvents(findings []correlation.Finding) []correlation.Event {
 	events := make([]correlation.Event, 0, len(findings))
-	
+
 	for _, finding := range findings {
 		event := correlation.Event{
 			Source:      correlation.SourceKubernetes, // Default source
@@ -733,7 +733,7 @@ func (e *OpenTelemetryExporter) convertFindingsToEvents(findings []correlation.F
 			Description: finding.Description,
 			PID:         0, // Will be populated from actual process data
 		}
-		
+
 		// Determine source based on finding type
 		findingType := finding.GetType()
 		switch {
@@ -746,20 +746,20 @@ func (e *OpenTelemetryExporter) convertFindingsToEvents(findings []correlation.F
 		default:
 			event.Source = correlation.SourceKubernetes
 		}
-		
+
 		events = append(events, event)
 	}
-	
+
 	return events
 }
 
 // buildLayerAnalysis builds layer analysis from correlation findings
 func (e *OpenTelemetryExporter) buildLayerAnalysis(findings []correlation.Finding) []LayerAnalysis {
 	layerMap := make(map[string]*LayerAnalysis)
-	
+
 	for _, finding := range findings {
 		layerName := e.getLayerFromFinding(finding)
-		
+
 		if layer, exists := layerMap[layerName]; exists {
 			layer.Findings = append(layer.Findings, finding)
 			layer.DataPoints++
@@ -775,7 +775,7 @@ func (e *OpenTelemetryExporter) buildLayerAnalysis(findings []correlation.Findin
 			}
 		}
 	}
-	
+
 	layers := make([]LayerAnalysis, 0, len(layerMap))
 	for _, layer := range layerMap {
 		// Calculate average accuracy for the layer
@@ -786,14 +786,14 @@ func (e *OpenTelemetryExporter) buildLayerAnalysis(findings []correlation.Findin
 		layer.Accuracy = totalConfidence / float64(len(layer.Findings))
 		layers = append(layers, *layer)
 	}
-	
+
 	return layers
 }
 
 // getLayerFromFinding determines the system layer from a finding
 func (e *OpenTelemetryExporter) getLayerFromFinding(finding correlation.Finding) string {
 	findingType := strings.ToLower(finding.GetType())
-	
+
 	switch {
 	case strings.Contains(findingType, "ebpf") || strings.Contains(findingType, "kernel"):
 		return "ebpf"
@@ -812,13 +812,13 @@ func (e *OpenTelemetryExporter) getLayerFromFinding(finding correlation.Finding)
 func (e *OpenTelemetryExporter) filterHighConfidenceFindings(findings []correlation.Finding) []correlation.Finding {
 	highConfidenceThreshold := 0.7
 	highConfidenceFindings := make([]correlation.Finding, 0)
-	
+
 	for _, finding := range findings {
 		if finding.Confidence >= highConfidenceThreshold {
 			highConfidenceFindings = append(highConfidenceFindings, finding)
 		}
 	}
-	
+
 	return highConfidenceFindings
 }
 
@@ -827,13 +827,13 @@ func (e *OpenTelemetryExporter) identifyPattern(findings []correlation.Finding) 
 	if len(findings) == 0 {
 		return "no_pattern"
 	}
-	
+
 	// Group findings by type to identify patterns
 	typeCount := make(map[string]int)
 	for _, finding := range findings {
 		typeCount[finding.GetType()]++
 	}
-	
+
 	// Find the most common pattern
 	maxCount := 0
 	mostCommonType := "unknown"
@@ -843,7 +843,7 @@ func (e *OpenTelemetryExporter) identifyPattern(findings []correlation.Finding) 
 			mostCommonType = findingType
 		}
 	}
-	
+
 	// Determine pattern based on most common type and count
 	if maxCount >= 3 {
 		return fmt.Sprintf("recurring_%s", mostCommonType)
@@ -859,44 +859,44 @@ func (e *OpenTelemetryExporter) calculateAverageConfidence(findings []correlatio
 	if len(findings) == 0 {
 		return 0.0
 	}
-	
+
 	totalConfidence := 0.0
 	for _, finding := range findings {
 		totalConfidence += finding.Confidence
 	}
-	
+
 	return totalConfidence / float64(len(findings))
 }
 
 // identifyCausalRelationships identifies causal relationships between events
 func (e *OpenTelemetryExporter) identifyCausalRelationships(events []correlation.Event) []CausalLink {
 	links := make([]CausalLink, 0)
-	
+
 	// Sort events by timestamp for chronological analysis
 	sortedEvents := make([]correlation.Event, len(events))
 	copy(sortedEvents, events)
 	sort.Slice(sortedEvents, func(i, j int) bool {
 		return sortedEvents[i].Timestamp.Before(sortedEvents[j].Timestamp)
 	})
-	
+
 	// Look for temporal correlations (events within 5 minutes of each other)
 	for i := 0; i < len(sortedEvents)-1; i++ {
 		for j := i + 1; j < len(sortedEvents); j++ {
 			timeDiff := sortedEvents[j].Timestamp.Sub(sortedEvents[i].Timestamp)
-			
+
 			// If events are within 5 minutes, consider them potentially causal
 			if timeDiff <= 5*time.Minute {
 				confidence := e.calculateCausalConfidence(sortedEvents[i], sortedEvents[j], timeDiff)
-				
+
 				if confidence > 0.5 {
 					link := CausalLink{
 						FromEventIndex: i,
 						ToEventIndex:   j,
 						RelationType:   e.determineCausalRelationType(sortedEvents[i], sortedEvents[j]),
 						Confidence:     confidence,
-						Description:    fmt.Sprintf("%s may %s %s", 
-							sortedEvents[i].Type, 
-							e.determineCausalRelationType(sortedEvents[i], sortedEvents[j]), 
+						Description: fmt.Sprintf("%s may %s %s",
+							sortedEvents[i].Type,
+							e.determineCausalRelationType(sortedEvents[i], sortedEvents[j]),
 							sortedEvents[j].Type),
 					}
 					links = append(links, link)
@@ -906,26 +906,26 @@ func (e *OpenTelemetryExporter) identifyCausalRelationships(events []correlation
 			}
 		}
 	}
-	
+
 	return links
 }
 
 // calculateCausalConfidence calculates confidence in causal relationship
 func (e *OpenTelemetryExporter) calculateCausalConfidence(event1, event2 correlation.Event, timeDiff time.Duration) float64 {
 	baseConfidence := (event1.Confidence + event2.Confidence) / 2
-	
+
 	// Temporal proximity factor (closer in time = higher confidence)
 	temporalFactor := 1.0 - (timeDiff.Seconds() / (5 * 60)) // 5 minutes max
-	
+
 	// Source relationship factor (same source = higher confidence)
 	sourceFactor := 0.5
 	if event1.Source == event2.Source {
 		sourceFactor = 0.8
 	}
-	
+
 	// Type relationship factor
 	typeFactor := e.getTypeRelationshipFactor(event1.Type, event2.Type)
-	
+
 	return baseConfidence * temporalFactor * sourceFactor * typeFactor
 }
 
@@ -934,7 +934,7 @@ func (e *OpenTelemetryExporter) determineCausalRelationType(event1, event2 corre
 	// Simple heuristics for determining relationship type
 	type1 := strings.ToLower(event1.Type)
 	type2 := strings.ToLower(event2.Type)
-	
+
 	if strings.Contains(type1, "error") && strings.Contains(type2, "failure") {
 		return "causes"
 	}
@@ -952,10 +952,10 @@ func (e *OpenTelemetryExporter) getTypeRelationshipFactor(type1, type2 string) f
 	// Known strong relationships
 	strongRelationships := map[string][]string{
 		"memory_pressure": {"oom_kill", "eviction"},
-		"cpu_throttling": {"performance_degradation", "timeout"},
+		"cpu_throttling":  {"performance_degradation", "timeout"},
 		"network_error":   {"connection_failure", "service_unavailable"},
 	}
-	
+
 	for primaryType, relatedTypes := range strongRelationships {
 		if strings.Contains(strings.ToLower(type1), primaryType) {
 			for _, relatedType := range relatedTypes {
@@ -965,7 +965,7 @@ func (e *OpenTelemetryExporter) getTypeRelationshipFactor(type1, type2 string) f
 			}
 		}
 	}
-	
+
 	return 0.6 // Default moderate relationship
 }
 
@@ -979,10 +979,10 @@ func (e *OpenTelemetryExporter) GetMetrics() ExporterMetrics {
 	if e.circuitBreaker != nil {
 		// Use a simple approximation for now
 		cbMetrics = CircuitBreakerMetrics{
-			State:           "closed", // Default state
-			TotalCalls:      e.totalSpansCreated,
-			TotalSuccesses:  e.totalSpansExported,
-			TotalFailures:   e.totalSpansCreated - e.totalSpansExported,
+			State:            "closed", // Default state
+			TotalCalls:       e.totalSpansCreated,
+			TotalSuccesses:   e.totalSpansExported,
+			TotalFailures:    e.totalSpansCreated - e.totalSpansExported,
 			ConsecutiveFails: 0,
 		}
 	}
@@ -1004,17 +1004,17 @@ type ExporterMetrics struct {
 	TotalSpansExported int64
 	ActiveSpansCount   int64
 	LastUpdateTime     time.Time
-	CircuitBreaker     CircuitBreakerMetrics  // TODO: Add proper metrics types
+	CircuitBreaker     CircuitBreakerMetrics // TODO: Add proper metrics types
 	// TimeoutManager     universal.TimeoutMetrics
 	// HealthChecker      universal.HealthCheckerMetrics
 }
 
 // CircuitBreakerMetrics represents circuit breaker metrics
 type CircuitBreakerMetrics struct {
-	State           string
-	TotalCalls      int64
-	TotalSuccesses  int64
-	TotalFailures   int64
+	State            string
+	TotalCalls       int64
+	TotalSuccesses   int64
+	TotalFailures    int64
 	ConsecutiveFails int
 }
 
@@ -1044,7 +1044,6 @@ func (e *OpenTelemetryExporter) IdentifyCausalRelationships(events []correlation
 func (e *OpenTelemetryExporter) CalculateAverageConfidence(findings []correlation.Finding) float64 {
 	return e.calculateAverageConfidence(findings)
 }
-
 
 // Shutdown gracefully shuts down the OpenTelemetry exporter
 func (e *OpenTelemetryExporter) Shutdown(ctx context.Context) error {

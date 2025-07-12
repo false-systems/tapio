@@ -23,18 +23,18 @@ type SpanEvent struct {
 
 // SpanManager handles span creation, lifecycle, and export with full resilience
 type SpanManager struct {
-	exporter       *OpenTelemetryExporter
-	circuitBreaker *resilience.CircuitBreaker
-	timeoutManager *resilience.TimeoutManager
-	validator      *resilience.SchemaValidator
+	exporter        *OpenTelemetryExporter
+	circuitBreaker  *resilience.CircuitBreaker
+	timeoutManager  *resilience.TimeoutManager
+	validator       *resilience.SchemaValidator
 	boundedExecutor *resilience.BoundedExecutor
 
 	// Resource efficiency and pooling
-	spanPool        *sync.Pool
-	attributePool   *sync.Pool
-	activeSpans     sync.Map // map[string]*ManagedSpan
-	spanQueue       chan *SpanRequest
-	batchProcessor  *BatchProcessor
+	spanPool       *sync.Pool
+	attributePool  *sync.Pool
+	activeSpans    sync.Map // map[string]*ManagedSpan
+	spanQueue      chan *SpanRequest
+	batchProcessor *BatchProcessor
 
 	// Metrics and monitoring
 	spansCreated    atomic.Int64
@@ -66,13 +66,13 @@ type SpanManagerConfig struct {
 // ManagedSpan wraps OpenTelemetry spans with resilience features
 type ManagedSpan struct {
 	trace.Span
-	id          string
-	startTime   time.Time
-	attributes  []attribute.KeyValue
-	events      []SpanEvent
-	mu          sync.RWMutex
-	exported    bool
-	failed      bool
+	id         string
+	startTime  time.Time
+	attributes []attribute.KeyValue
+	events     []SpanEvent
+	mu         sync.RWMutex
+	exported   bool
+	failed     bool
 }
 
 // SpanRequest represents a span creation request
@@ -92,12 +92,12 @@ type SpanResult struct {
 
 // BatchProcessor handles efficient span batching and export
 type BatchProcessor struct {
-	spans       []*ManagedSpan
-	batchSize   int
-	timeout     time.Duration
-	lastFlush   time.Time
-	mu          sync.Mutex
-	flushTimer  *time.Timer
+	spans      []*ManagedSpan
+	batchSize  int
+	timeout    time.Duration
+	lastFlush  time.Time
+	mu         sync.Mutex
+	flushTimer *time.Timer
 }
 
 // NewSpanManager creates a new resilient span manager
@@ -259,7 +259,7 @@ func (sm *SpanManager) FinishSpan(span *ManagedSpan) {
 
 	// End the OpenTelemetry span
 	span.End()
-	
+
 	// Remove from active spans
 	sm.activeSpans.Delete(span.id)
 	sm.spansCompleted.Add(1)

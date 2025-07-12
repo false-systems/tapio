@@ -10,17 +10,17 @@ import (
 
 // PatternMatcher provides log pattern recognition capabilities
 type PatternMatcher struct {
-	config       *PatternMatcherConfig
-	patterns     map[string]*PatternRule
+	config           *PatternMatcherConfig
+	patterns         map[string]*PatternRule
 	compiledPatterns map[string]*regexp.Regexp
-	
+
 	// Pattern matches tracking
-	matches      map[string]*PatternMatch
+	matches       map[string]*PatternMatch
 	recentMatches []PatternMatch
-	matchHistory map[string][]time.Time
-	
+	matchHistory  map[string][]time.Time
+
 	// State management
-	mutex        sync.RWMutex
+	mutex sync.RWMutex
 }
 
 // PatternMatcherConfig configures the pattern matcher
@@ -29,14 +29,14 @@ type PatternMatcherConfig struct {
 	WarningPatterns     []string
 	SecurityPatterns    []string
 	PerformancePatterns []string
-	
+
 	// Custom patterns
-	CustomPatterns      map[string]PatternRule
-	
+	CustomPatterns map[string]PatternRule
+
 	// Matching behavior
-	CaseSensitive       bool
-	EnableRegex         bool
-	MaxMatches          int
+	CaseSensitive         bool
+	EnableRegex           bool
+	MaxMatches            int
 	MatchHistoryRetention time.Duration
 }
 
@@ -68,20 +68,20 @@ const (
 
 // PatternMatch represents a pattern match result
 type PatternMatch struct {
-	ID           string
-	PatternID    string
-	Timestamp    time.Time
-	Service      string
-	Message      string
-	MatchedText  string
-	PatternType  PatternType
-	Severity     string
-	Category     string
-	Confidence   float64
-	Context      map[string]interface{}
-	Frequency    int
-	FirstSeen    time.Time
-	LastSeen     time.Time
+	ID          string
+	PatternID   string
+	Timestamp   time.Time
+	Service     string
+	Message     string
+	MatchedText string
+	PatternType PatternType
+	Severity    string
+	Category    string
+	Confidence  float64
+	Context     map[string]interface{}
+	Frequency   int
+	FirstSeen   time.Time
+	LastSeen    time.Time
 }
 
 // NewPatternMatcher creates a new pattern matcher
@@ -89,7 +89,7 @@ func NewPatternMatcher(config *PatternMatcherConfig) *PatternMatcher {
 	if config == nil {
 		config = DefaultPatternMatcherConfig()
 	}
-	
+
 	matcher := &PatternMatcher{
 		config:           config,
 		patterns:         make(map[string]*PatternRule),
@@ -98,16 +98,16 @@ func NewPatternMatcher(config *PatternMatcherConfig) *PatternMatcher {
 		recentMatches:    make([]PatternMatch, 0),
 		matchHistory:     make(map[string][]time.Time),
 	}
-	
+
 	// Initialize default patterns
 	matcher.initializeDefaultPatterns()
-	
+
 	// Add custom patterns
 	for id, rule := range config.CustomPatterns {
 		rule.ID = id
 		matcher.AddPattern(rule)
 	}
-	
+
 	return matcher
 }
 
@@ -188,10 +188,10 @@ func DefaultPatternMatcherConfig() *PatternMatcherConfig {
 			"queue full",
 			"backlog",
 		},
-		CaseSensitive:           false,
-		EnableRegex:             true,
-		MaxMatches:              10000,
-		MatchHistoryRetention:   24 * time.Hour,
+		CaseSensitive:         false,
+		EnableRegex:           true,
+		MaxMatches:            10000,
+		MatchHistoryRetention: 24 * time.Hour,
 	}
 }
 
@@ -208,7 +208,7 @@ func (pm *PatternMatcher) initializeDefaultPatterns() {
 			Description: fmt.Sprintf("Error pattern: %s", pattern),
 		})
 	}
-	
+
 	// Warning patterns
 	for i, pattern := range pm.config.WarningPatterns {
 		pm.AddPattern(PatternRule{
@@ -220,7 +220,7 @@ func (pm *PatternMatcher) initializeDefaultPatterns() {
 			Description: fmt.Sprintf("Warning pattern: %s", pattern),
 		})
 	}
-	
+
 	// Security patterns
 	for i, pattern := range pm.config.SecurityPatterns {
 		pm.AddPattern(PatternRule{
@@ -232,7 +232,7 @@ func (pm *PatternMatcher) initializeDefaultPatterns() {
 			Description: fmt.Sprintf("Security pattern: %s", pattern),
 		})
 	}
-	
+
 	// Performance patterns
 	for i, pattern := range pm.config.PerformancePatterns {
 		pm.AddPattern(PatternRule{
@@ -250,7 +250,7 @@ func (pm *PatternMatcher) initializeDefaultPatterns() {
 func (pm *PatternMatcher) AddPattern(rule PatternRule) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
-	
+
 	// Compile regex if enabled
 	if pm.config.EnableRegex {
 		if compiled, err := regexp.Compile("(?i)" + rule.Pattern); err == nil {
@@ -260,7 +260,7 @@ func (pm *PatternMatcher) AddPattern(rule PatternRule) error {
 			return fmt.Errorf("failed to compile regex for pattern %s: %w", rule.ID, err)
 		}
 	}
-	
+
 	pm.patterns[rule.ID] = &rule
 	return nil
 }
@@ -269,10 +269,10 @@ func (pm *PatternMatcher) AddPattern(rule PatternRule) error {
 func (pm *PatternMatcher) RemovePattern(patternID string) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
-	
+
 	delete(pm.patterns, patternID)
 	delete(pm.compiledPatterns, patternID)
-	
+
 	return nil
 }
 
@@ -280,18 +280,18 @@ func (pm *PatternMatcher) RemovePattern(patternID string) error {
 func (pm *PatternMatcher) MatchEntry(entry *LogEntry) []string {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	var matchedPatterns []string
 	message := entry.Message
-	
+
 	if !pm.config.CaseSensitive {
 		message = strings.ToLower(message)
 	}
-	
+
 	for patternID, rule := range pm.patterns {
 		var matched bool
 		var matchedText string
-		
+
 		if pm.config.EnableRegex && rule.Regex != nil {
 			if match := rule.Regex.FindString(entry.Message); match != "" {
 				matched = true
@@ -307,13 +307,13 @@ func (pm *PatternMatcher) MatchEntry(entry *LogEntry) []string {
 				matchedText = pattern
 			}
 		}
-		
+
 		if matched {
 			matchedPatterns = append(matchedPatterns, patternID)
 			pm.recordMatch(patternID, entry, matchedText)
 		}
 	}
-	
+
 	return matchedPatterns
 }
 
@@ -321,12 +321,12 @@ func (pm *PatternMatcher) MatchEntry(entry *LogEntry) []string {
 func (pm *PatternMatcher) recordMatch(patternID string, entry *LogEntry, matchedText string) {
 	now := time.Now()
 	matchID := fmt.Sprintf("%s_%s_%d", patternID, entry.Service, now.Unix())
-	
+
 	rule := pm.patterns[patternID]
 	if rule == nil {
 		return
 	}
-	
+
 	// Check if this is a repeated match
 	existingMatch, exists := pm.matches[patternID+"_"+entry.Service]
 	if exists {
@@ -355,23 +355,23 @@ func (pm *PatternMatcher) recordMatch(patternID string, entry *LogEntry, matched
 			FirstSeen: now,
 			LastSeen:  now,
 		}
-		
+
 		pm.matches[patternID+"_"+entry.Service] = match
-		
+
 		// Add to recent matches (limited size)
 		pm.recentMatches = append(pm.recentMatches, *match)
 		if len(pm.recentMatches) > pm.config.MaxMatches {
 			pm.recentMatches = pm.recentMatches[1:]
 		}
 	}
-	
+
 	// Track match history
 	if history, exists := pm.matchHistory[patternID]; exists {
 		pm.matchHistory[patternID] = append(history, now)
 	} else {
 		pm.matchHistory[patternID] = []time.Time{now}
 	}
-	
+
 	// Clean up old history
 	pm.cleanupHistory(patternID)
 }
@@ -379,34 +379,34 @@ func (pm *PatternMatcher) recordMatch(patternID string, entry *LogEntry, matched
 // calculateConfidence calculates the confidence score for a pattern match
 func (pm *PatternMatcher) calculateConfidence(rule *PatternRule, entry *LogEntry) float64 {
 	confidence := 0.8 // Base confidence
-	
+
 	// Increase confidence for exact matches
 	if strings.Contains(entry.Message, rule.Pattern) {
 		confidence += 0.1
 	}
-	
+
 	// Increase confidence for high priority messages
 	if entry.Priority <= 3 { // error level and above
 		confidence += 0.1
 	}
-	
+
 	// Increase confidence for security patterns
 	if rule.Type == PatternTypeSecurity {
 		confidence += 0.1
 	}
-	
+
 	// Cap at 1.0
 	if confidence > 1.0 {
 		confidence = 1.0
 	}
-	
+
 	return confidence
 }
 
 // cleanupHistory removes old entries from match history
 func (pm *PatternMatcher) cleanupHistory(patternID string) {
 	cutoff := time.Now().Add(-pm.config.MatchHistoryRetention)
-	
+
 	if history, exists := pm.matchHistory[patternID]; exists {
 		var recentHistory []time.Time
 		for _, timestamp := range history {
@@ -422,14 +422,14 @@ func (pm *PatternMatcher) cleanupHistory(patternID string) {
 func (pm *PatternMatcher) GetMatches() map[string]*PatternMatch {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	matches := make(map[string]*PatternMatch)
 	for k, v := range pm.matches {
 		matchCopy := *v
 		matches[k] = &matchCopy
 	}
-	
+
 	return matches
 }
 
@@ -437,15 +437,15 @@ func (pm *PatternMatcher) GetMatches() map[string]*PatternMatch {
 func (pm *PatternMatcher) GetRecentMatches(limit int) []PatternMatch {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	if limit <= 0 || limit > len(pm.recentMatches) {
 		limit = len(pm.recentMatches)
 	}
-	
+
 	matches := make([]PatternMatch, limit)
 	start := len(pm.recentMatches) - limit
 	copy(matches, pm.recentMatches[start:])
-	
+
 	return matches
 }
 
@@ -453,7 +453,7 @@ func (pm *PatternMatcher) GetRecentMatches(limit int) []PatternMatch {
 func (pm *PatternMatcher) GetMatchesByType(patternType PatternType) []*PatternMatch {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	var matches []*PatternMatch
 	for _, match := range pm.matches {
 		if match.PatternType == patternType {
@@ -461,7 +461,7 @@ func (pm *PatternMatcher) GetMatchesByType(patternType PatternType) []*PatternMa
 			matches = append(matches, &matchCopy)
 		}
 	}
-	
+
 	return matches
 }
 
@@ -469,7 +469,7 @@ func (pm *PatternMatcher) GetMatchesByType(patternType PatternType) []*PatternMa
 func (pm *PatternMatcher) GetMatchesByService(serviceName string) []*PatternMatch {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	var matches []*PatternMatch
 	for _, match := range pm.matches {
 		if match.Service == serviceName {
@@ -477,7 +477,7 @@ func (pm *PatternMatcher) GetMatchesByService(serviceName string) []*PatternMatc
 			matches = append(matches, &matchCopy)
 		}
 	}
-	
+
 	return matches
 }
 
@@ -485,7 +485,7 @@ func (pm *PatternMatcher) GetMatchesByService(serviceName string) []*PatternMatc
 func (pm *PatternMatcher) GetMatchesBySeverity(severity string) []*PatternMatch {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	var matches []*PatternMatch
 	for _, match := range pm.matches {
 		if match.Severity == severity {
@@ -493,7 +493,7 @@ func (pm *PatternMatcher) GetMatchesBySeverity(severity string) []*PatternMatch 
 			matches = append(matches, &matchCopy)
 		}
 	}
-	
+
 	return matches
 }
 
@@ -501,13 +501,13 @@ func (pm *PatternMatcher) GetMatchesBySeverity(severity string) []*PatternMatch 
 func (pm *PatternMatcher) GetTopPatterns(limit int) []PatternSummary {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	// Count pattern frequencies
 	patternCounts := make(map[string]int)
 	for _, match := range pm.matches {
 		patternCounts[match.PatternID] += match.Frequency
 	}
-	
+
 	// Convert to summary and sort
 	var summaries []PatternSummary
 	for patternID, count := range patternCounts {
@@ -523,7 +523,7 @@ func (pm *PatternMatcher) GetTopPatterns(limit int) []PatternSummary {
 			})
 		}
 	}
-	
+
 	// Simple sorting by match count (in a real implementation, use sort package)
 	for i := 0; i < len(summaries)-1; i++ {
 		for j := i + 1; j < len(summaries); j++ {
@@ -532,11 +532,11 @@ func (pm *PatternMatcher) GetTopPatterns(limit int) []PatternSummary {
 			}
 		}
 	}
-	
+
 	if limit > 0 && limit < len(summaries) {
 		summaries = summaries[:limit]
 	}
-	
+
 	return summaries
 }
 
@@ -555,7 +555,7 @@ type PatternSummary struct {
 func (pm *PatternMatcher) ClearMatches() {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
-	
+
 	pm.matches = make(map[string]*PatternMatch)
 	pm.recentMatches = make([]PatternMatch, 0)
 	pm.matchHistory = make(map[string][]time.Time)
@@ -565,7 +565,7 @@ func (pm *PatternMatcher) ClearMatches() {
 func (pm *PatternMatcher) GetStatistics() map[string]interface{} {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	stats := map[string]interface{}{
 		"total_patterns":    len(pm.patterns),
 		"compiled_patterns": len(pm.compiledPatterns),
@@ -574,7 +574,7 @@ func (pm *PatternMatcher) GetStatistics() map[string]interface{} {
 		"case_sensitive":    pm.config.CaseSensitive,
 		"regex_enabled":     pm.config.EnableRegex,
 	}
-	
+
 	// Count matches by type
 	typeCounts := make(map[string]int)
 	for _, match := range pm.matches {
@@ -594,6 +594,6 @@ func (pm *PatternMatcher) GetStatistics() map[string]interface{} {
 		}
 	}
 	stats["matches_by_type"] = typeCounts
-	
+
 	return stats
 }

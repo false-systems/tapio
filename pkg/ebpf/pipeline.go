@@ -20,7 +20,7 @@ type MemoryEventBatch struct {
 	BatchID   uint64
 }
 
-// BatchProcessor processes events in batches for efficiency  
+// BatchProcessor processes events in batches for efficiency
 type BatchProcessor struct {
 	config     BatchConfig
 	batchChan  chan *MemoryEventBatch
@@ -65,7 +65,7 @@ func (bp *BatchProcessor) Start() error {
 	if !atomic.CompareAndSwapInt32(&bp.isRunning, 0, 1) {
 		return fmt.Errorf("batch processor already running")
 	}
-	
+
 	go bp.processBatches()
 	return nil
 }
@@ -83,16 +83,16 @@ func (bp *BatchProcessor) AddEvent(event *MemoryEvent) bool {
 	if atomic.LoadInt32(&bp.isRunning) == 0 {
 		return false
 	}
-	
+
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
-	
+
 	bp.eventQueue = append(bp.eventQueue, event)
-	
+
 	if len(bp.eventQueue) >= bp.config.MaxBatchSize {
 		bp.flushBatch()
 	}
-	
+
 	return true
 }
 
@@ -113,7 +113,7 @@ func (bp *BatchProcessor) GetMetrics() map[string]interface{} {
 func (bp *BatchProcessor) processBatches() {
 	ticker := time.NewTicker(bp.config.BatchTimeout)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-bp.ctx.Done():
@@ -132,7 +132,7 @@ func (bp *BatchProcessor) flushBatch() {
 	if len(bp.eventQueue) == 0 {
 		return
 	}
-	
+
 	batchID := atomic.AddUint64(&bp.batchID, 1)
 	batch := &MemoryEventBatch{
 		Events:    make([]*MemoryEvent, len(bp.eventQueue)),
@@ -140,10 +140,10 @@ func (bp *BatchProcessor) flushBatch() {
 		CreatedAt: time.Now(),
 		BatchID:   batchID,
 	}
-	
+
 	copy(batch.Events, bp.eventQueue)
 	bp.eventQueue = bp.eventQueue[:0] // Reset slice
-	
+
 	select {
 	case bp.batchChan <- batch:
 	default:
@@ -151,7 +151,7 @@ func (bp *BatchProcessor) flushBatch() {
 	}
 }
 
-// RingBufferStats represents ring buffer statistics  
+// RingBufferStats represents ring buffer statistics
 type RingBufferStats struct {
 	EventsReceived uint64 `json:"events_received"`
 	EventsDropped  uint64 `json:"events_dropped"`

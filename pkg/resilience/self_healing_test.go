@@ -325,16 +325,16 @@ func TestSelfHealingManager_Configuration(t *testing.T) {
 		{
 			name: "custom valid config",
 			config: &SelfHealingConfig{
-				EnableAutoHealing:     true,
-				HealthCheckInterval:   time.Second,
-				HealingTimeout:        5 * time.Second,
-				MaxHealingAttempts:    5,
-				HealingCooldown:       30 * time.Second,
-				ComponentTimeout:      10 * time.Second,
-				EnableResourceLimits:  true,
-				MaxConcurrentHealing:  3,
-				EnableMetrics:         true,
-				MetricsRetentionTime:  time.Hour,
+				EnableAutoHealing:    true,
+				HealthCheckInterval:  time.Second,
+				HealingTimeout:       5 * time.Second,
+				MaxHealingAttempts:   5,
+				HealingCooldown:      30 * time.Second,
+				ComponentTimeout:     10 * time.Second,
+				EnableResourceLimits: true,
+				MaxConcurrentHealing: 3,
+				EnableMetrics:        true,
+				MetricsRetentionTime: time.Hour,
 			},
 			valid: true,
 		},
@@ -401,12 +401,12 @@ func (m *MockComponent) GetStatus() ComponentStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return ComponentStatus{
-		ID:             m.id,
-		Healthy:        m.healthy,
-		Running:        m.running,
+		ID:              m.id,
+		Healthy:         m.healthy,
+		Running:         m.running,
 		LastHealthCheck: time.Now(),
 		HealingAttempts: uint64(m.healCount),
-		Metadata:       make(map[string]interface{}),
+		Metadata:        make(map[string]interface{}),
 	}
 }
 

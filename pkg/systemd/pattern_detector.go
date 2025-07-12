@@ -8,12 +8,12 @@ import (
 
 // PatternDetector detects patterns in systemd service behavior
 type PatternDetector struct {
-	config        *PatternDetectorConfig
-	patterns      *DetectedPatterns
-	eventHistory  []*ServiceEvent
-	mutex         sync.RWMutex
-	ctx           context.Context
-	cancel        context.CancelFunc
+	config       *PatternDetectorConfig
+	patterns     *DetectedPatterns
+	eventHistory []*ServiceEvent
+	mutex        sync.RWMutex
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 // PatternDetectorConfig configures the pattern detector
@@ -32,19 +32,19 @@ type DetectedPatterns struct {
 
 // RestartLoop represents a detected restart loop
 type RestartLoop struct {
-	ServiceName   string
-	StartTime     time.Time
-	RestartCount  int
-	LastRestart   time.Time
-	Severity      string
+	ServiceName  string
+	StartTime    time.Time
+	RestartCount int
+	LastRestart  time.Time
+	Severity     string
 }
 
 // DependencyFailure represents a dependency failure
 type DependencyFailure struct {
-	ServiceName       string
-	DependentService  string
-	FailureTime       time.Time
-	FailureReason     string
+	ServiceName      string
+	DependentService string
+	FailureTime      time.Time
+	FailureReason    string
 }
 
 // MemoryPressureEvent represents a memory pressure event
@@ -58,7 +58,7 @@ type MemoryPressureEvent struct {
 // NewPatternDetector creates a new pattern detector
 func NewPatternDetector(config *PatternDetectorConfig) *PatternDetector {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &PatternDetector{
 		config: config,
 		patterns: &DetectedPatterns{
@@ -88,9 +88,9 @@ func (pd *PatternDetector) Stop() error {
 func (pd *PatternDetector) ProcessEvent(event *ServiceEvent) {
 	pd.mutex.Lock()
 	defer pd.mutex.Unlock()
-	
+
 	pd.eventHistory = append(pd.eventHistory, event)
-	
+
 	// Analyze for immediate patterns
 	pd.analyzeEvent(event)
 }
@@ -99,7 +99,7 @@ func (pd *PatternDetector) ProcessEvent(event *ServiceEvent) {
 func (pd *PatternDetector) GetDetectedPatterns() *DetectedPatterns {
 	pd.mutex.RLock()
 	defer pd.mutex.RUnlock()
-	
+
 	// Return a copy
 	return &DetectedPatterns{
 		RestartLoops:       append([]RestartLoop(nil), pd.patterns.RestartLoops...),
@@ -112,9 +112,9 @@ func (pd *PatternDetector) GetDetectedPatterns() *DetectedPatterns {
 func (pd *PatternDetector) Cleanup() {
 	pd.mutex.Lock()
 	defer pd.mutex.Unlock()
-	
+
 	cutoff := time.Now().Add(-pd.config.HistoryRetention)
-	
+
 	// Clean up event history
 	var recentEvents []*ServiceEvent
 	for _, event := range pd.eventHistory {
@@ -123,7 +123,7 @@ func (pd *PatternDetector) Cleanup() {
 		}
 	}
 	pd.eventHistory = recentEvents
-	
+
 	// Clean up patterns
 	var recentRestartLoops []RestartLoop
 	for _, loop := range pd.patterns.RestartLoops {
@@ -138,7 +138,7 @@ func (pd *PatternDetector) Cleanup() {
 func (pd *PatternDetector) analyzePatterns() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-pd.ctx.Done():
@@ -170,7 +170,7 @@ func (pd *PatternDetector) trackRestart(event *ServiceEvent) {
 			return
 		}
 	}
-	
+
 	// Create new restart loop
 	pd.patterns.RestartLoops = append(pd.patterns.RestartLoops, RestartLoop{
 		ServiceName:  event.ServiceName,

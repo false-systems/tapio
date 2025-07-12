@@ -4,21 +4,21 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/kubernetes/fake"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestSimplePIDTranslator_BasicFunctionality(t *testing.T) {
 	// Create fake K8s client
 	client := fake.NewSimpleClientset()
-	
+
 	// Create translator
 	translator := NewSimplePIDTranslator(client)
 
 	// Skip informer start since we're using fake client
 	// Just test the cache functionality
-	
+
 	// Test cache operations
 	translator.pidCache.Put(1234, &PIDEntry{
 		PID:          1234,
@@ -44,7 +44,7 @@ func TestSimplePIDTranslator_CacheEviction(t *testing.T) {
 
 	// Fill cache beyond capacity (assuming small cache for test)
 	cache := translator.pidCache
-	
+
 	// Put more entries than cache size
 	for i := uint32(1); i <= 5; i++ {
 		cache.Put(i, &PIDEntry{
@@ -77,7 +77,7 @@ func TestSimplePIDTranslator_ContainerCache(t *testing.T) {
 	}
 
 	containerCache.Put("test-container-id", containerEntry)
-	
+
 	retrieved := containerCache.Get("test-container-id")
 	if retrieved == nil {
 		t.Error("Expected to find container entry")
@@ -129,12 +129,12 @@ func TestSimplePIDTranslator_GetStats(t *testing.T) {
 	translator := NewSimplePIDTranslator(client)
 
 	stats := translator.GetStats()
-	
+
 	// Check that stats are returned
 	if stats == nil {
 		t.Error("Expected stats to be returned")
 	}
-	
+
 	// Check for expected keys
 	expectedKeys := []string{"cache_hits", "cache_misses", "hit_rate", "avg_lookup_ns", "pid_cache_size", "container_cache_size", "last_cache_update"}
 	for _, key := range expectedKeys {

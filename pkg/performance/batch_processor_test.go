@@ -44,7 +44,7 @@ func TestBatchProcessor_BasicOperation(t *testing.T) {
 
 	// Should have processed at least 2 batches (3+2 items)
 	assert.GreaterOrEqual(t, len(processed), 1)
-	
+
 	// Count total processed items
 	totalProcessed := 0
 	for _, batch := range processed {
@@ -183,14 +183,14 @@ func TestAdaptiveBatchProcessor_Adaptation(t *testing.T) {
 	processFn := func(ctx context.Context, batch []string) error {
 		mu.Lock()
 		defer mu.Unlock()
-		
+
 		// Simulate variable processing time
 		if len(batch) > 5 {
 			time.Sleep(100 * time.Millisecond) // Slow for large batches
 		} else {
 			time.Sleep(10 * time.Millisecond) // Fast for small batches
 		}
-		
+
 		batchCopy := make([]string, len(batch))
 		copy(batchCopy, batch)
 		processedBatches = append(processedBatches, batchCopy)

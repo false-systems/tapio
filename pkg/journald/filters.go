@@ -13,10 +13,10 @@ type Filters struct {
 	ignoredServices map[string]bool
 	logLevels       map[string]bool
 	minLogLevel     int
-	
+
 	// Dynamic filters
-	dynamicFilters  []FilterRule
-	mutex           sync.RWMutex
+	dynamicFilters []FilterRule
+	mutex          sync.RWMutex
 }
 
 // FiltersConfig configures the log filters
@@ -25,25 +25,25 @@ type FiltersConfig struct {
 	IgnoredServices   []string
 	LogLevels         []string
 	MinLogLevel       string
-	
+
 	// Content filters
-	IncludePatterns   []string
-	ExcludePatterns   []string
-	
+	IncludePatterns []string
+	ExcludePatterns []string
+
 	// Rate limiting
-	EnableRateLimit   bool
+	EnableRateLimit    bool
 	MaxEventsPerSecond map[string]int // per service
-	BurstLimit        int
+	BurstLimit         int
 }
 
 // FilterRule represents a dynamic filter rule
 type FilterRule struct {
-	ID          string
-	Type        FilterType
-	Pattern     string
-	Action      FilterAction
-	Condition   FilterCondition
-	Metadata    map[string]interface{}
+	ID        string
+	Type      FilterType
+	Pattern   string
+	Action    FilterAction
+	Condition FilterCondition
+	Metadata  map[string]interface{}
 }
 
 // FilterType defines the type of filter
@@ -83,23 +83,23 @@ func NewFilters(config *FiltersConfig) *Filters {
 		logLevels:       make(map[string]bool),
 		dynamicFilters:  make([]FilterRule, 0),
 	}
-	
+
 	// Initialize service filters
 	for _, service := range config.MonitoredServices {
 		filters.serviceFilters[service] = true
 	}
-	
+
 	for _, service := range config.IgnoredServices {
 		filters.ignoredServices[service] = true
 	}
-	
+
 	// Initialize log level filters
 	for _, level := range config.LogLevels {
 		filters.logLevels[level] = true
 	}
-	
+
 	filters.minLogLevel = priorityNameToLevel(config.MinLogLevel)
-	
+
 	return filters
 }
 
@@ -107,26 +107,26 @@ func NewFilters(config *FiltersConfig) *Filters {
 func (f *Filters) ShouldProcess(entry *LogEntry) bool {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
-	
+
 	// Check ignored services first
 	if f.ignoredServices[entry.Service] {
 		return false
 	}
-	
+
 	// Check monitored services
 	if len(f.serviceFilters) > 0 && !f.serviceFilters[entry.Service] {
 		return false
 	}
-	
+
 	// Check log level
 	if entry.Priority > f.minLogLevel {
 		return false
 	}
-	
+
 	if len(f.logLevels) > 0 && !f.logLevels[entry.PriorityName] {
 		return false
 	}
-	
+
 	// Apply dynamic filters
 	for _, rule := range f.dynamicFilters {
 		if f.matchesRule(entry, rule) {
@@ -138,12 +138,12 @@ func (f *Filters) ShouldProcess(entry *LogEntry) bool {
 			}
 		}
 	}
-	
+
 	// Apply content filters
 	if !f.passesContentFilters(entry) {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -151,10 +151,10 @@ func (f *Filters) ShouldProcess(entry *LogEntry) bool {
 func (f *Filters) AddService(serviceName string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	f.serviceFilters[serviceName] = true
 	delete(f.ignoredServices, serviceName)
-	
+
 	return nil
 }
 
@@ -162,9 +162,9 @@ func (f *Filters) AddService(serviceName string) error {
 func (f *Filters) RemoveService(serviceName string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	delete(f.serviceFilters, serviceName)
-	
+
 	return nil
 }
 
@@ -172,10 +172,10 @@ func (f *Filters) RemoveService(serviceName string) error {
 func (f *Filters) IgnoreService(serviceName string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	f.ignoredServices[serviceName] = true
 	delete(f.serviceFilters, serviceName)
-	
+
 	return nil
 }
 
@@ -183,7 +183,7 @@ func (f *Filters) IgnoreService(serviceName string) error {
 func (f *Filters) AddDynamicFilter(rule FilterRule) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	// Remove existing rule with same ID
 	for i, existing := range f.dynamicFilters {
 		if existing.ID == rule.ID {
@@ -191,7 +191,7 @@ func (f *Filters) AddDynamicFilter(rule FilterRule) error {
 			break
 		}
 	}
-	
+
 	f.dynamicFilters = append(f.dynamicFilters, rule)
 	return nil
 }
@@ -200,14 +200,14 @@ func (f *Filters) AddDynamicFilter(rule FilterRule) error {
 func (f *Filters) RemoveDynamicFilter(ruleID string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	for i, rule := range f.dynamicFilters {
 		if rule.ID == ruleID {
 			f.dynamicFilters = append(f.dynamicFilters[:i], f.dynamicFilters[i+1:]...)
 			return nil
 		}
 	}
-	
+
 	return nil
 }
 
@@ -215,7 +215,7 @@ func (f *Filters) RemoveDynamicFilter(ruleID string) error {
 func (f *Filters) SetMinLogLevel(level string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	f.minLogLevel = priorityNameToLevel(level)
 	return nil
 }
@@ -224,7 +224,7 @@ func (f *Filters) SetMinLogLevel(level string) error {
 func (f *Filters) AddLogLevel(level string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	f.logLevels[level] = true
 	return nil
 }
@@ -233,7 +233,7 @@ func (f *Filters) AddLogLevel(level string) error {
 func (f *Filters) RemoveLogLevel(level string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	delete(f.logLevels, level)
 	return nil
 }
@@ -293,7 +293,7 @@ func (f *Filters) evaluateCondition(value interface{}, condition FilterCondition
 // passesContentFilters checks if entry passes content filters
 func (f *Filters) passesContentFilters(entry *LogEntry) bool {
 	message := strings.ToLower(entry.Message)
-	
+
 	// Check include patterns
 	if len(f.config.IncludePatterns) > 0 {
 		found := false
@@ -307,14 +307,14 @@ func (f *Filters) passesContentFilters(entry *LogEntry) bool {
 			return false
 		}
 	}
-	
+
 	// Check exclude patterns
 	for _, pattern := range f.config.ExcludePatterns {
 		if strings.Contains(message, strings.ToLower(pattern)) {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -346,7 +346,7 @@ func priorityNameToLevel(name string) int {
 func (f *Filters) GetStatistics() map[string]interface{} {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
-	
+
 	return map[string]interface{}{
 		"monitored_services": len(f.serviceFilters),
 		"ignored_services":   len(f.ignoredServices),
@@ -360,12 +360,12 @@ func (f *Filters) GetStatistics() map[string]interface{} {
 func (f *Filters) GetMonitoredServices() []string {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
-	
+
 	services := make([]string, 0, len(f.serviceFilters))
 	for service := range f.serviceFilters {
 		services = append(services, service)
 	}
-	
+
 	return services
 }
 
@@ -373,12 +373,12 @@ func (f *Filters) GetMonitoredServices() []string {
 func (f *Filters) GetIgnoredServices() []string {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
-	
+
 	services := make([]string, 0, len(f.ignoredServices))
 	for service := range f.ignoredServices {
 		services = append(services, service)
 	}
-	
+
 	return services
 }
 
@@ -386,10 +386,10 @@ func (f *Filters) GetIgnoredServices() []string {
 func (f *Filters) GetDynamicFilters() []FilterRule {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
-	
+
 	filters := make([]FilterRule, len(f.dynamicFilters))
 	copy(filters, f.dynamicFilters)
-	
+
 	return filters
 }
 
@@ -397,7 +397,7 @@ func (f *Filters) GetDynamicFilters() []FilterRule {
 func (f *Filters) ApplyPreset(presetName string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	switch presetName {
 	case "errors_only":
 		f.minLogLevel = 3 // error level
@@ -434,7 +434,7 @@ func (f *Filters) ApplyPreset(presetName string) error {
 	default:
 		return fmt.Errorf("unknown preset: %s", presetName)
 	}
-	
+
 	return nil
 }
 
@@ -442,7 +442,7 @@ func (f *Filters) ApplyPreset(presetName string) error {
 func (f *Filters) ClearFilters() {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	f.serviceFilters = make(map[string]bool)
 	f.ignoredServices = make(map[string]bool)
 	f.logLevels = make(map[string]bool)

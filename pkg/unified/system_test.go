@@ -131,7 +131,7 @@ func TestUnifiedSystem_ProcessEvents(t *testing.T) {
 
 func TestDefaultSystemConfig(t *testing.T) {
 	config := DefaultSystemConfig()
-	
+
 	assert.True(t, config.EnableNetworkMonitoring)
 	assert.True(t, config.EnableDNSMonitoring)
 	assert.True(t, config.EnableProtocolAnalysis)
@@ -141,7 +141,7 @@ func TestDefaultSystemConfig(t *testing.T) {
 	assert.True(t, config.EnableSelfHealing)
 	assert.True(t, config.EnableLoadShedding)
 	assert.True(t, config.EnablePatternAnalysis)
-	
+
 	assert.Equal(t, 100000, config.EventBufferSize)
 	assert.Equal(t, 165000, config.MaxEventsPerSecond)
 	assert.Equal(t, 1000, config.BatchSize)

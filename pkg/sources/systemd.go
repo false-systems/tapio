@@ -12,43 +12,43 @@ import (
 
 // SystemdSource implements the DataSource interface for systemd service monitoring
 type SystemdSource struct {
-	collector     *systemd.Collector
-	serviceMonitor *systemd.ServiceMonitor
-	unitWatcher   *systemd.UnitWatcher
+	collector       *systemd.Collector
+	serviceMonitor  *systemd.ServiceMonitor
+	unitWatcher     *systemd.UnitWatcher
 	patternDetector *systemd.PatternDetector
-	
+
 	// Configuration
-	config        *SystemdConfig
+	config          *SystemdConfig
 	watchedServices []string
-	
+
 	// State management
-	mutex         sync.RWMutex
-	isStarted     bool
-	lastCollect   time.Time
-	
+	mutex       sync.RWMutex
+	isStarted   bool
+	lastCollect time.Time
+
 	// Event streams
-	events        chan *systemd.ServiceEvent
-	ctx           context.Context
-	cancel        context.CancelFunc
+	events chan *systemd.ServiceEvent
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // SystemdConfig configures the systemd monitoring source
 type SystemdConfig struct {
 	// Services to monitor
 	WatchedServices []string `yaml:"watched_services"`
-	
+
 	// Pattern detection settings
-	RestartThreshold     int           `yaml:"restart_threshold"`
-	RestartWindow        time.Duration `yaml:"restart_window"`
-	FailureThreshold     int           `yaml:"failure_threshold"`
-	DependencyTracking   bool          `yaml:"dependency_tracking"`
-	
+	RestartThreshold   int           `yaml:"restart_threshold"`
+	RestartWindow      time.Duration `yaml:"restart_window"`
+	FailureThreshold   int           `yaml:"failure_threshold"`
+	DependencyTracking bool          `yaml:"dependency_tracking"`
+
 	// Performance settings
-	EventBufferSize      int           `yaml:"event_buffer_size"`
-	CollectionInterval   time.Duration `yaml:"collection_interval"`
-	CleanupInterval      time.Duration `yaml:"cleanup_interval"`
-	HistoryRetention     time.Duration `yaml:"history_retention"`
-	
+	EventBufferSize    int           `yaml:"event_buffer_size"`
+	CollectionInterval time.Duration `yaml:"collection_interval"`
+	CleanupInterval    time.Duration `yaml:"cleanup_interval"`
+	HistoryRetention   time.Duration `yaml:"history_retention"`
+
 	// D-Bus settings
 	SystemBusTimeout     time.Duration `yaml:"system_bus_timeout"`
 	ReconnectInterval    time.Duration `yaml:"reconnect_interval"`
@@ -86,9 +86,9 @@ func NewSystemdSource(config *SystemdConfig) (*SystemdSource, error) {
 	if config == nil {
 		config = DefaultSystemdConfig()
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	source := &SystemdSource{
 		config:          config,
 		watchedServices: config.WatchedServices,
@@ -96,7 +96,7 @@ func NewSystemdSource(config *SystemdConfig) (*SystemdSource, error) {
 		ctx:             ctx,
 		cancel:          cancel,
 	}
-	
+
 	// Initialize systemd components
 	collector, err := systemd.NewCollector(&systemd.CollectorConfig{
 		SystemBusTimeout:     config.SystemBusTimeout,
@@ -108,7 +108,7 @@ func NewSystemdSource(config *SystemdConfig) (*SystemdSource, error) {
 		return nil, fmt.Errorf("failed to create systemd collector: %w", err)
 	}
 	source.collector = collector
-	
+
 	serviceMonitor, err := systemd.NewServiceMonitor(&systemd.ServiceMonitorConfig{
 		WatchedServices:    config.WatchedServices,
 		RestartThreshold:   config.RestartThreshold,
@@ -121,7 +121,7 @@ func NewSystemdSource(config *SystemdConfig) (*SystemdSource, error) {
 		return nil, fmt.Errorf("failed to create service monitor: %w", err)
 	}
 	source.serviceMonitor = serviceMonitor
-	
+
 	unitWatcher, err := systemd.NewUnitWatcher(&systemd.UnitWatcherConfig{
 		WatchedServices: config.WatchedServices,
 		EventBufferSize: config.EventBufferSize,
@@ -131,14 +131,14 @@ func NewSystemdSource(config *SystemdConfig) (*SystemdSource, error) {
 		return nil, fmt.Errorf("failed to create unit watcher: %w", err)
 	}
 	source.unitWatcher = unitWatcher
-	
+
 	patternDetector := systemd.NewPatternDetector(&systemd.PatternDetectorConfig{
-		RestartThreshold:  config.RestartThreshold,
-		RestartWindow:     config.RestartWindow,
-		HistoryRetention:  config.HistoryRetention,
+		RestartThreshold: config.RestartThreshold,
+		RestartWindow:    config.RestartWindow,
+		HistoryRetention: config.HistoryRetention,
 	})
 	source.patternDetector = patternDetector
-	
+
 	return source, nil
 }
 
@@ -156,39 +156,39 @@ func (s *SystemdSource) IsAvailable() bool {
 func (s *SystemdSource) Start(ctx context.Context) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	if s.isStarted {
 		return fmt.Errorf("systemd source already started")
 	}
-	
+
 	// Start systemd collector
 	if err := s.collector.Start(s.ctx); err != nil {
 		return fmt.Errorf("failed to start systemd collector: %w", err)
 	}
-	
+
 	// Start service monitoring
 	if err := s.serviceMonitor.Start(s.ctx); err != nil {
 		return fmt.Errorf("failed to start service monitor: %w", err)
 	}
-	
+
 	// Start unit watching
 	if err := s.unitWatcher.Start(s.ctx); err != nil {
 		return fmt.Errorf("failed to start unit watcher: %w", err)
 	}
-	
+
 	// Start pattern detection
 	if err := s.patternDetector.Start(s.ctx); err != nil {
 		return fmt.Errorf("failed to start pattern detector: %w", err)
 	}
-	
+
 	// Start event processing goroutines
 	go s.processServiceEvents()
 	go s.processUnitEvents()
 	go s.runCleanup()
-	
+
 	s.isStarted = true
 	s.lastCollect = time.Now()
-	
+
 	return nil
 }
 
@@ -196,13 +196,13 @@ func (s *SystemdSource) Start(ctx context.Context) error {
 func (s *SystemdSource) Stop() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	if !s.isStarted {
 		return nil
 	}
-	
+
 	s.cancel()
-	
+
 	// Stop all components
 	if s.collector != nil {
 		s.collector.Stop()
@@ -216,10 +216,10 @@ func (s *SystemdSource) Stop() error {
 	if s.patternDetector != nil {
 		s.patternDetector.Stop()
 	}
-	
+
 	close(s.events)
 	s.isStarted = false
-	
+
 	return nil
 }
 
@@ -227,35 +227,35 @@ func (s *SystemdSource) Stop() error {
 func (s *SystemdSource) Collect() (interface{}, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	if !s.isStarted {
 		return nil, fmt.Errorf("systemd source not started")
 	}
-	
+
 	// Collect service states
 	serviceStatesRaw, err := s.serviceMonitor.GetServiceStates()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service states: %w", err)
 	}
-	
+
 	// Convert to interface{} map
 	serviceStates := make(map[string]interface{})
 	for k, v := range serviceStatesRaw {
 		serviceStates[k] = v
 	}
-	
+
 	// Collect unit information
 	unitInfo, err := s.unitWatcher.GetUnitInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get unit info: %w", err)
 	}
-	
+
 	// Collect detected patterns
 	patterns := s.patternDetector.GetDetectedPatterns()
-	
+
 	// Get recent events
 	events := s.drainRecentEvents()
-	
+
 	data := &correlation.SystemdData{
 		Timestamp:     time.Now(),
 		ServiceStates: serviceStates,
@@ -263,14 +263,14 @@ func (s *SystemdSource) Collect() (interface{}, error) {
 		Patterns:      patterns,
 		Events:        events,
 		Statistics: map[string]interface{}{
-			"monitored_services": len(s.watchedServices),
-			"active_services":    s.countActiveServices(serviceStatesRaw),
-			"failed_services":    s.countFailedServices(serviceStatesRaw),
-			"restart_patterns":   len(patterns.RestartLoops),
+			"monitored_services":  len(s.watchedServices),
+			"active_services":     s.countActiveServices(serviceStatesRaw),
+			"failed_services":     s.countFailedServices(serviceStatesRaw),
+			"restart_patterns":    len(patterns.RestartLoops),
 			"dependency_failures": len(patterns.DependencyFailures),
 		},
 	}
-	
+
 	s.lastCollect = time.Now()
 	return data, nil
 }
@@ -301,7 +301,7 @@ func (s *SystemdSource) GetData(ctx context.Context, dataType string, params map
 // processServiceEvents processes events from the service monitor
 func (s *SystemdSource) processServiceEvents() {
 	serviceEvents := s.serviceMonitor.GetEventChannel()
-	
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -310,7 +310,7 @@ func (s *SystemdSource) processServiceEvents() {
 			if event != nil {
 				// Feed event to pattern detector
 				s.patternDetector.ProcessEvent(event)
-				
+
 				// Buffer event for collection
 				select {
 				case s.events <- event:
@@ -325,7 +325,7 @@ func (s *SystemdSource) processServiceEvents() {
 // processUnitEvents processes events from the unit watcher
 func (s *SystemdSource) processUnitEvents() {
 	unitEvents := s.unitWatcher.GetEventChannel()
-	
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -337,7 +337,7 @@ func (s *SystemdSource) processUnitEvents() {
 				if serviceEvent != nil {
 					// Feed event to pattern detector
 					s.patternDetector.ProcessEvent(serviceEvent)
-					
+
 					// Buffer event for collection
 					select {
 					case s.events <- serviceEvent:
@@ -354,7 +354,7 @@ func (s *SystemdSource) processUnitEvents() {
 func (s *SystemdSource) runCleanup() {
 	ticker := time.NewTicker(s.config.CleanupInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -369,7 +369,7 @@ func (s *SystemdSource) runCleanup() {
 // drainRecentEvents drains recent events from the buffer
 func (s *SystemdSource) drainRecentEvents() []*systemd.ServiceEvent {
 	var events []*systemd.ServiceEvent
-	
+
 	for {
 		select {
 		case event := <-s.events:
@@ -420,7 +420,7 @@ func (s *SystemdSource) convertUnitEventToServiceEvent(unitEvent *systemd.UnitEv
 func (s *SystemdSource) getStatistics() map[string]interface{} {
 	serviceStates, _ := s.serviceMonitor.GetServiceStates()
 	patterns := s.patternDetector.GetDetectedPatterns()
-	
+
 	return map[string]interface{}{
 		"monitored_services":     len(s.watchedServices),
 		"active_services":        s.countActiveServices(serviceStates),
@@ -442,15 +442,15 @@ func (s *SystemdSource) GetEventChannel() <-chan *systemd.ServiceEvent {
 func (s *SystemdSource) AddWatchedService(serviceName string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	for _, existing := range s.watchedServices {
 		if existing == serviceName {
 			return nil // Already watching
 		}
 	}
-	
+
 	s.watchedServices = append(s.watchedServices, serviceName)
-	
+
 	// Update monitors if already started
 	if s.isStarted {
 		if err := s.serviceMonitor.AddService(serviceName); err != nil {
@@ -460,7 +460,7 @@ func (s *SystemdSource) AddWatchedService(serviceName string) error {
 			return fmt.Errorf("failed to add unit to watcher: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -468,14 +468,14 @@ func (s *SystemdSource) AddWatchedService(serviceName string) error {
 func (s *SystemdSource) RemoveWatchedService(serviceName string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	for i, existing := range s.watchedServices {
 		if existing == serviceName {
 			s.watchedServices = append(s.watchedServices[:i], s.watchedServices[i+1:]...)
 			break
 		}
 	}
-	
+
 	// Update monitors if already started
 	if s.isStarted {
 		if err := s.serviceMonitor.RemoveService(serviceName); err != nil {
@@ -485,7 +485,7 @@ func (s *SystemdSource) RemoveWatchedService(serviceName string) error {
 			return fmt.Errorf("failed to remove unit from watcher: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -493,7 +493,7 @@ func (s *SystemdSource) RemoveWatchedService(serviceName string) error {
 func (s *SystemdSource) GetWatchedServices() []string {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	
+
 	result := make([]string, len(s.watchedServices))
 	copy(result, s.watchedServices)
 	return result

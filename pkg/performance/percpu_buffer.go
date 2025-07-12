@@ -12,17 +12,17 @@ type PerCPUBuffer struct {
 	buffers    []cpuBuffer
 	numCPU     int
 	bufferSize int
-	
+
 	// Global overflow buffer
-	overflow   *RingBuffer
-	
+	overflow *RingBuffer
+
 	// Aggregation
 	aggregator BufferAggregator
-	
+
 	// Metrics
-	writes     atomic.Uint64
-	reads      atomic.Uint64
-	overflows  atomic.Uint64
+	writes    atomic.Uint64
+	reads     atomic.Uint64
+	overflows atomic.Uint64
 }
 
 // cpuBuffer is a single CPU's buffer
@@ -42,9 +42,9 @@ type BufferAggregator interface {
 
 // PerCPUBufferConfig configures per-CPU buffers
 type PerCPUBufferConfig struct {
-	BufferSize     int
-	OverflowSize   uint64
-	Aggregator     BufferAggregator
+	BufferSize   int
+	OverflowSize uint64
+	Aggregator   BufferAggregator
 }
 
 // NewPerCPUBuffer creates a new per-CPU buffer system
@@ -55,22 +55,22 @@ func NewPerCPUBuffer(config PerCPUBufferConfig) (*PerCPUBuffer, error) {
 	if config.OverflowSize == 0 {
 		config.OverflowSize = 1024 * 1024 // 1MB overflow
 	}
-	
+
 	numCPU := runtime.GOMAXPROCS(0)
 	buffers := make([]cpuBuffer, numCPU)
-	
+
 	for i := range buffers {
 		buffers[i].buffer = make([]byte, config.BufferSize)
 		buffers[i].size = uint32(config.BufferSize)
 	}
-	
+
 	// Ensure overflow size is power of 2
 	overflowSize := nextPowerOf2(config.OverflowSize)
 	overflow, err := NewRingBuffer(overflowSize)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &PerCPUBuffer{
 		buffers:    buffers,
 		numCPU:     numCPU,
@@ -85,41 +85,41 @@ func (b *PerCPUBuffer) Write(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	
+
 	b.writes.Add(1)
-	
+
 	// Get current CPU buffer
 	// Note: In real implementation, we'd use runtime.Pinner or similar
 	// For now, we'll use a simple CPU ID based on goroutine
-	cpu := int(uintptr(unsafe.Pointer(&data)) >> 12) % b.numCPU
-	
+	cpu := int(uintptr(unsafe.Pointer(&data))>>12) % b.numCPU
+
 	buffer := &b.buffers[cpu]
-	
+
 	// Try to write to CPU buffer
 	if !b.writeToBuffer(buffer, data) {
 		// Buffer full, try overflow
 		b.overflows.Add(1)
-		
+
 		// Allocate in overflow buffer
 		overflow := make([]byte, len(data))
 		copy(overflow, data)
-		
+
 		if err := b.overflow.Put(unsafe.Pointer(&overflow)); err != nil {
 			return errors.New("per-CPU buffer overflow")
 		}
 	}
-	
+
 	return nil
 }
 
 // writeToBuffer attempts to write to a specific buffer
 func (b *PerCPUBuffer) writeToBuffer(buffer *cpuBuffer, data []byte) bool {
 	dataLen := uint32(len(data))
-	
+
 	for {
 		head := atomic.LoadUint32(&buffer.head)
 		tail := atomic.LoadUint32(&buffer.tail)
-		
+
 		// Calculate available space
 		var available uint32
 		if head >= tail {
@@ -127,23 +127,23 @@ func (b *PerCPUBuffer) writeToBuffer(buffer *cpuBuffer, data []byte) bool {
 		} else {
 			available = tail - head
 		}
-		
+
 		// Need space for length header + data
 		needed := 4 + dataLen
 		if available < needed {
 			return false
 		}
-		
+
 		// Try to claim space
 		newHead := (head + needed) % buffer.size
 		if !atomic.CompareAndSwapUint32(&buffer.head, head, newHead) {
 			continue
 		}
-		
+
 		// Write length header
 		b.writeUint32(buffer, head, dataLen)
 		head = (head + 4) % buffer.size
-		
+
 		// Write data (may wrap around)
 		if head+dataLen <= buffer.size {
 			// No wrap
@@ -154,7 +154,7 @@ func (b *PerCPUBuffer) writeToBuffer(buffer *cpuBuffer, data []byte) bool {
 			copy(buffer.buffer[head:], data[:firstPart])
 			copy(buffer.buffer[0:], data[firstPart:])
 		}
-		
+
 		return true
 	}
 }
@@ -180,42 +180,42 @@ func (b *PerCPUBuffer) readUint32(buffer *cpuBuffer, offset uint32) uint32 {
 // Read reads all data from all CPU buffers
 func (b *PerCPUBuffer) Read() ([][]byte, error) {
 	b.reads.Add(1)
-	
+
 	results := make([][]byte, 0, b.numCPU+int(b.overflow.Size()))
-	
+
 	// Read from each CPU buffer
 	for i := range b.buffers {
 		data := b.readFromBuffer(&b.buffers[i])
 		results = append(results, data...)
 	}
-	
+
 	// Read from overflow
 	for {
 		ptr, err := b.overflow.Get()
 		if err != nil {
 			break
 		}
-		
+
 		data := *(*[]byte)(ptr)
 		results = append(results, data)
 	}
-	
+
 	return results, nil
 }
 
 // readFromBuffer reads all data from a specific buffer
 func (b *PerCPUBuffer) readFromBuffer(buffer *cpuBuffer) [][]byte {
 	var results [][]byte
-	
+
 	for {
 		tail := atomic.LoadUint32(&buffer.tail)
 		head := atomic.LoadUint32(&buffer.head)
-		
+
 		if tail == head {
 			// Buffer empty
 			break
 		}
-		
+
 		// Read length header
 		length := b.readUint32(buffer, tail)
 		if length == 0 || length > buffer.size {
@@ -223,10 +223,10 @@ func (b *PerCPUBuffer) readFromBuffer(buffer *cpuBuffer) [][]byte {
 			atomic.StoreUint32(&buffer.tail, head)
 			break
 		}
-		
+
 		// Allocate result
 		data := make([]byte, length)
-		
+
 		// Read data
 		dataStart := (tail + 4) % buffer.size
 		if dataStart+length <= buffer.size {
@@ -238,14 +238,14 @@ func (b *PerCPUBuffer) readFromBuffer(buffer *cpuBuffer) [][]byte {
 			copy(data[:firstPart], buffer.buffer[dataStart:])
 			copy(data[firstPart:], buffer.buffer[:length-firstPart])
 		}
-		
+
 		// Update tail
 		newTail := (tail + 4 + length) % buffer.size
 		atomic.StoreUint32(&buffer.tail, newTail)
-		
+
 		results = append(results, data)
 	}
-	
+
 	return results
 }
 
@@ -254,12 +254,12 @@ func (b *PerCPUBuffer) Aggregate() ([]byte, error) {
 	if b.aggregator == nil {
 		return nil, errors.New("no aggregator configured")
 	}
-	
+
 	data, err := b.Read()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return b.aggregator.Aggregate(data)
 }
 
@@ -269,7 +269,7 @@ func (b *PerCPUBuffer) Reset() {
 		atomic.StoreUint32(&b.buffers[i].head, 0)
 		atomic.StoreUint32(&b.buffers[i].tail, 0)
 	}
-	
+
 	// Clear overflow
 	for {
 		if _, err := b.overflow.Get(); err != nil {
@@ -281,34 +281,34 @@ func (b *PerCPUBuffer) Reset() {
 // GetMetrics returns buffer metrics
 func (b *PerCPUBuffer) GetMetrics() PerCPUBufferMetrics {
 	metrics := PerCPUBufferMetrics{
-		Writes:    b.writes.Load(),
-		Reads:     b.reads.Load(),
-		Overflows: b.overflows.Load(),
+		Writes:     b.writes.Load(),
+		Reads:      b.reads.Load(),
+		Overflows:  b.overflows.Load(),
 		CPUMetrics: make([]CPUBufferMetrics, b.numCPU),
 	}
-	
+
 	for i := range b.buffers {
 		buffer := &b.buffers[i]
 		head := atomic.LoadUint32(&buffer.head)
 		tail := atomic.LoadUint32(&buffer.tail)
-		
+
 		var used uint32
 		if head >= tail {
 			used = head - tail
 		} else {
 			used = buffer.size - tail + head
 		}
-		
+
 		metrics.CPUMetrics[i] = CPUBufferMetrics{
-			CPU:       i,
-			Used:      used,
-			Capacity:  buffer.size,
+			CPU:         i,
+			Used:        used,
+			Capacity:    buffer.size,
 			Utilization: float64(used) / float64(buffer.size),
 		}
 	}
-	
+
 	metrics.OverflowSize = b.overflow.Size()
-	
+
 	return metrics
 }
 
@@ -337,12 +337,12 @@ func (a *SimpleAggregator) Aggregate(buffers [][]byte) ([]byte, error) {
 	for _, buf := range buffers {
 		totalSize += len(buf)
 	}
-	
+
 	result := make([]byte, 0, totalSize)
 	for _, buf := range buffers {
 		result = append(result, buf...)
 	}
-	
+
 	return result, nil
 }
 
@@ -362,7 +362,7 @@ func NewLockFreeQueue(capacity uint64) (*LockFreeQueue, error) {
 	if capacity == 0 || capacity&(capacity-1) != 0 {
 		return nil, errors.New("capacity must be a power of 2")
 	}
-	
+
 	return &LockFreeQueue{
 		nodes: make([]unsafe.Pointer, capacity),
 		mask:  capacity - 1,
@@ -374,17 +374,17 @@ func (q *LockFreeQueue) Enqueue(item unsafe.Pointer) bool {
 	for {
 		tail := q.tail.Load()
 		head := q.head.Load()
-		
+
 		if tail-head >= uint64(len(q.nodes)) {
 			return false // Queue full
 		}
-		
+
 		if q.tail.CompareAndSwap(tail, tail+1) {
 			idx := tail & q.mask
 			atomic.StorePointer(&q.nodes[idx], item)
 			return true
 		}
-		
+
 		runtime.Gosched()
 	}
 }
@@ -393,14 +393,14 @@ func (q *LockFreeQueue) Enqueue(item unsafe.Pointer) bool {
 func (q *LockFreeQueue) Dequeue() (unsafe.Pointer, bool) {
 	head := q.head.Load()
 	tail := q.tail.Load()
-	
+
 	if head >= tail {
 		return nil, false // Queue empty
 	}
-	
+
 	idx := head & q.mask
 	item := atomic.LoadPointer(&q.nodes[idx])
-	
+
 	if item == nil {
 		// Item not yet written, spin wait
 		for i := 0; i < 1000; i++ {
@@ -410,15 +410,15 @@ func (q *LockFreeQueue) Dequeue() (unsafe.Pointer, bool) {
 			}
 			runtime.Gosched()
 		}
-		
+
 		if item == nil {
 			return nil, false
 		}
 	}
-	
+
 	atomic.StorePointer(&q.nodes[idx], nil)
 	q.head.Store(head + 1)
-	
+
 	return item, true
 }
 
@@ -426,7 +426,7 @@ func (q *LockFreeQueue) Dequeue() (unsafe.Pointer, bool) {
 func (q *LockFreeQueue) Size() uint64 {
 	tail := q.tail.Load()
 	head := q.head.Load()
-	
+
 	if tail >= head {
 		return tail - head
 	}

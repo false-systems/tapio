@@ -11,28 +11,28 @@ import (
 
 // ServiceMonitor monitors systemd service state changes
 type ServiceMonitor struct {
-	collector           *Collector
-	config              *ServiceMonitorConfig
-	
+	collector *Collector
+	config    *ServiceMonitorConfig
+
 	// Service tracking
 	watchedServices     []string
 	serviceStates       map[string]*ServiceState
 	serviceDependencies map[string][]string
 	statesMutex         sync.RWMutex
-	
+
 	// Event processing
-	events              chan *ServiceEvent
-	signalChan          <-chan *dbus.Signal
-	
+	events     chan *ServiceEvent
+	signalChan <-chan *dbus.Signal
+
 	// Pattern tracking
-	restartCounts       map[string]*RestartTracker
-	failureHistory      map[string][]time.Time
-	
+	restartCounts  map[string]*RestartTracker
+	failureHistory map[string][]time.Time
+
 	// Lifecycle
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	isStarted           bool
-	mutex               sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	isStarted bool
+	mutex     sync.RWMutex
 }
 
 // ServiceMonitorConfig configures the service monitor
@@ -58,23 +58,23 @@ type ServiceState struct {
 	StatusText     string
 	MemoryCurrent  uint64
 	CPUUsageNSec   uint64
-	
+
 	// State tracking
 	LastStateChange time.Time
 	RestartCount    int
 	FailureCount    int
 	StartTime       time.Time
-	
+
 	// Dependencies
-	Requires       []string
-	Wants          []string
-	After          []string
-	Before         []string
-	
+	Requires []string
+	Wants    []string
+	After    []string
+	Before   []string
+
 	// Runtime information
-	FragmentPath   string
-	SourcePath     string
-	DropInPaths    []string
+	FragmentPath string
+	SourcePath   string
+	DropInPaths  []string
 }
 
 // ServiceEvent represents a service state change event
@@ -139,9 +139,9 @@ func NewServiceMonitor(config *ServiceMonitorConfig) (*ServiceMonitor, error) {
 			EventBufferSize:    1000,
 		}
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	monitor := &ServiceMonitor{
 		config:              config,
 		watchedServices:     config.WatchedServices,
@@ -153,7 +153,7 @@ func NewServiceMonitor(config *ServiceMonitorConfig) (*ServiceMonitor, error) {
 		ctx:                 ctx,
 		cancel:              cancel,
 	}
-	
+
 	return monitor, nil
 }
 
@@ -161,11 +161,11 @@ func NewServiceMonitor(config *ServiceMonitorConfig) (*ServiceMonitor, error) {
 func (sm *ServiceMonitor) Start(ctx context.Context) error {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	
+
 	if sm.isStarted {
 		return fmt.Errorf("service monitor already started")
 	}
-	
+
 	// Create collector if not provided
 	if sm.collector == nil {
 		collector, err := NewCollector(DefaultCollectorConfig())
@@ -174,23 +174,23 @@ func (sm *ServiceMonitor) Start(ctx context.Context) error {
 		}
 		sm.collector = collector
 	}
-	
+
 	// Subscribe to systemd signals
 	signalChan, err := sm.collector.SubscribeToSignals()
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to systemd signals: %w", err)
 	}
 	sm.signalChan = signalChan
-	
+
 	// Initial state collection
 	if err := sm.collectInitialStates(); err != nil {
 		return fmt.Errorf("failed to collect initial states: %w", err)
 	}
-	
+
 	// Start signal processing
 	go sm.processSignals()
 	go sm.monitorServices()
-	
+
 	sm.isStarted = true
 	return nil
 }
@@ -199,15 +199,15 @@ func (sm *ServiceMonitor) Start(ctx context.Context) error {
 func (sm *ServiceMonitor) Stop() error {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	
+
 	if !sm.isStarted {
 		return nil
 	}
-	
+
 	sm.cancel()
 	close(sm.events)
 	sm.isStarted = false
-	
+
 	return nil
 }
 
@@ -215,14 +215,14 @@ func (sm *ServiceMonitor) Stop() error {
 func (sm *ServiceMonitor) GetServiceStates() (map[string]*ServiceState, error) {
 	sm.statesMutex.RLock()
 	defer sm.statesMutex.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	states := make(map[string]*ServiceState)
 	for name, state := range sm.serviceStates {
 		stateCopy := *state
 		states[name] = &stateCopy
 	}
-	
+
 	return states, nil
 }
 
@@ -230,12 +230,12 @@ func (sm *ServiceMonitor) GetServiceStates() (map[string]*ServiceState, error) {
 func (sm *ServiceMonitor) GetServiceState(serviceName string) (*ServiceState, error) {
 	sm.statesMutex.RLock()
 	defer sm.statesMutex.RUnlock()
-	
+
 	state, exists := sm.serviceStates[serviceName]
 	if !exists {
 		return nil, fmt.Errorf("service %s not found", serviceName)
 	}
-	
+
 	// Return a copy
 	stateCopy := *state
 	return &stateCopy, nil
@@ -245,12 +245,12 @@ func (sm *ServiceMonitor) GetServiceState(serviceName string) (*ServiceState, er
 func (sm *ServiceMonitor) GetServiceDependencies(serviceName string) ([]string, error) {
 	sm.statesMutex.RLock()
 	defer sm.statesMutex.RUnlock()
-	
+
 	deps, exists := sm.serviceDependencies[serviceName]
 	if !exists {
 		return nil, fmt.Errorf("dependencies for service %s not found", serviceName)
 	}
-	
+
 	return deps, nil
 }
 
@@ -263,22 +263,22 @@ func (sm *ServiceMonitor) GetEventChannel() <-chan *ServiceEvent {
 func (sm *ServiceMonitor) AddService(serviceName string) error {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	
+
 	for _, existing := range sm.watchedServices {
 		if existing == serviceName {
 			return nil // Already watching
 		}
 	}
-	
+
 	sm.watchedServices = append(sm.watchedServices, serviceName)
-	
+
 	// If started, collect initial state for the new service
 	if sm.isStarted {
 		if err := sm.collectServiceState(serviceName); err != nil {
 			return fmt.Errorf("failed to collect state for service %s: %w", serviceName, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -286,14 +286,14 @@ func (sm *ServiceMonitor) AddService(serviceName string) error {
 func (sm *ServiceMonitor) RemoveService(serviceName string) error {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	
+
 	for i, existing := range sm.watchedServices {
 		if existing == serviceName {
 			sm.watchedServices = append(sm.watchedServices[:i], sm.watchedServices[i+1:]...)
 			break
 		}
 	}
-	
+
 	// Clean up state
 	sm.statesMutex.Lock()
 	delete(sm.serviceStates, serviceName)
@@ -301,7 +301,7 @@ func (sm *ServiceMonitor) RemoveService(serviceName string) error {
 	delete(sm.restartCounts, serviceName)
 	delete(sm.failureHistory, serviceName)
 	sm.statesMutex.Unlock()
-	
+
 	return nil
 }
 
@@ -323,55 +323,55 @@ func (sm *ServiceMonitor) collectServiceState(serviceName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get ActiveState: %w", err)
 	}
-	
+
 	subState, err := sm.collector.GetUnitProperty(serviceName, "SubState")
 	if err != nil {
 		return fmt.Errorf("failed to get SubState: %w", err)
 	}
-	
+
 	loadState, err := sm.collector.GetUnitProperty(serviceName, "LoadState")
 	if err != nil {
 		return fmt.Errorf("failed to get LoadState: %w", err)
 	}
-	
+
 	description, err := sm.collector.GetUnitProperty(serviceName, "Description")
 	if err != nil {
 		description = ""
 	}
-	
+
 	fragmentPath, err := sm.collector.GetUnitProperty(serviceName, "FragmentPath")
 	if err != nil {
 		fragmentPath = ""
 	}
-	
+
 	// Get service-specific properties
 	mainPID, err := sm.collector.GetServiceProperty(serviceName, "MainPID")
 	if err != nil {
 		mainPID = uint32(0)
 	}
-	
+
 	execMainStatus, err := sm.collector.GetServiceProperty(serviceName, "ExecMainStatus")
 	if err != nil {
 		execMainStatus = int32(0)
 	}
-	
+
 	statusText, err := sm.collector.GetServiceProperty(serviceName, "StatusText")
 	if err != nil {
 		statusText = ""
 	}
-	
+
 	// Get memory usage
 	memoryCurrent, err := sm.collector.GetServiceProperty(serviceName, "MemoryCurrent")
 	if err != nil {
 		memoryCurrent = uint64(0)
 	}
-	
+
 	// Get CPU usage
 	cpuUsageNSec, err := sm.collector.GetServiceProperty(serviceName, "CPUUsageNSec")
 	if err != nil {
 		cpuUsageNSec = uint64(0)
 	}
-	
+
 	// Get dependencies if enabled
 	var requires, wants, after, before []string
 	if sm.config.DependencyTracking {
@@ -380,40 +380,40 @@ func (sm *ServiceMonitor) collectServiceState(serviceName string) error {
 		after = sm.getServiceDependencies(serviceName, "After")
 		before = sm.getServiceDependencies(serviceName, "Before")
 	}
-	
+
 	state := &ServiceState{
-		Name:           serviceName,
-		ActiveState:    activeState.(string),
-		SubState:       subState.(string),
-		LoadState:      loadState.(string),
-		Description:    description.(string),
-		MainPID:        mainPID.(uint32),
-		ExecMainStatus: execMainStatus.(int32),
-		StatusText:     statusText.(string),
-		MemoryCurrent:  memoryCurrent.(uint64),
-		CPUUsageNSec:   cpuUsageNSec.(uint64),
-		FragmentPath:   fragmentPath.(string),
-		Requires:       requires,
-		Wants:          wants,
-		After:          after,
-		Before:         before,
+		Name:            serviceName,
+		ActiveState:     activeState.(string),
+		SubState:        subState.(string),
+		LoadState:       loadState.(string),
+		Description:     description.(string),
+		MainPID:         mainPID.(uint32),
+		ExecMainStatus:  execMainStatus.(int32),
+		StatusText:      statusText.(string),
+		MemoryCurrent:   memoryCurrent.(uint64),
+		CPUUsageNSec:    cpuUsageNSec.(uint64),
+		FragmentPath:    fragmentPath.(string),
+		Requires:        requires,
+		Wants:           wants,
+		After:           after,
+		Before:          before,
 		LastStateChange: time.Now(),
 	}
-	
+
 	// Get restart count from tracker
 	if tracker, exists := sm.restartCounts[serviceName]; exists {
 		state.RestartCount = tracker.TotalCount
 	}
-	
+
 	// Get failure count from history
 	if history, exists := sm.failureHistory[serviceName]; exists {
 		state.FailureCount = len(history)
 	}
-	
+
 	sm.statesMutex.Lock()
 	sm.serviceStates[serviceName] = state
 	sm.statesMutex.Unlock()
-	
+
 	return nil
 }
 
@@ -423,11 +423,11 @@ func (sm *ServiceMonitor) getServiceDependencies(serviceName, depType string) []
 	if err != nil {
 		return []string{}
 	}
-	
+
 	if depArray, ok := deps.([]string); ok {
 		return depArray
 	}
-	
+
 	return []string{}
 }
 
@@ -477,7 +477,7 @@ func (sm *ServiceMonitor) handleUnitNew(unitName string) {
 func (sm *ServiceMonitor) handleUnitRemoved(unitName string) {
 	sm.statesMutex.Lock()
 	defer sm.statesMutex.Unlock()
-	
+
 	if state, exists := sm.serviceStates[unitName]; exists {
 		// Emit removal event
 		event := &ServiceEvent{
@@ -488,13 +488,13 @@ func (sm *ServiceMonitor) handleUnitRemoved(unitName string) {
 			NewState:    "removed",
 			Reason:      "unit_removed",
 		}
-		
+
 		select {
 		case sm.events <- event:
 		default:
 			// Drop event if buffer is full
 		}
-		
+
 		delete(sm.serviceStates, unitName)
 	}
 }
@@ -511,7 +511,7 @@ func (sm *ServiceMonitor) handlePropertiesChanged(signal *dbus.Signal) {
 func (sm *ServiceMonitor) monitorServices() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-sm.ctx.Done():
@@ -521,7 +521,7 @@ func (sm *ServiceMonitor) monitorServices() {
 				oldState := sm.getServiceStateCopy(serviceName)
 				sm.collectServiceState(serviceName)
 				newState := sm.getServiceStateCopy(serviceName)
-				
+
 				if oldState != nil && newState != nil {
 					sm.detectStateChanges(oldState, newState)
 				}
@@ -534,7 +534,7 @@ func (sm *ServiceMonitor) monitorServices() {
 func (sm *ServiceMonitor) getServiceStateCopy(serviceName string) *ServiceState {
 	sm.statesMutex.RLock()
 	defer sm.statesMutex.RUnlock()
-	
+
 	if state, exists := sm.serviceStates[serviceName]; exists {
 		stateCopy := *state
 		return &stateCopy
@@ -546,7 +546,7 @@ func (sm *ServiceMonitor) getServiceStateCopy(serviceName string) *ServiceState 
 func (sm *ServiceMonitor) detectStateChanges(oldState, newState *ServiceState) {
 	if oldState.ActiveState != newState.ActiveState {
 		eventType := ServiceEventStateChange
-		
+
 		// Detect specific event types
 		if newState.ActiveState == "active" && oldState.ActiveState != "active" {
 			eventType = ServiceEventStart
@@ -556,13 +556,13 @@ func (sm *ServiceMonitor) detectStateChanges(oldState, newState *ServiceState) {
 			eventType = ServiceEventFailure
 			sm.recordFailure(newState.Name)
 		}
-		
+
 		// Check for restart pattern
 		if eventType == ServiceEventStart && oldState.ActiveState == "failed" {
 			eventType = ServiceEventRestart
 			sm.recordRestart(newState.Name)
 		}
-		
+
 		event := &ServiceEvent{
 			Timestamp:   time.Now(),
 			ServiceName: newState.Name,
@@ -571,7 +571,7 @@ func (sm *ServiceMonitor) detectStateChanges(oldState, newState *ServiceState) {
 			NewState:    newState.ActiveState,
 			Reason:      "state_change",
 		}
-		
+
 		select {
 		case sm.events <- event:
 		default:
@@ -584,7 +584,7 @@ func (sm *ServiceMonitor) detectStateChanges(oldState, newState *ServiceState) {
 func (sm *ServiceMonitor) recordRestart(serviceName string) {
 	sm.statesMutex.Lock()
 	defer sm.statesMutex.Unlock()
-	
+
 	tracker, exists := sm.restartCounts[serviceName]
 	if !exists {
 		tracker = &RestartTracker{
@@ -592,12 +592,12 @@ func (sm *ServiceMonitor) recordRestart(serviceName string) {
 		}
 		sm.restartCounts[serviceName] = tracker
 	}
-	
+
 	now := time.Now()
 	tracker.RestartTimes = append(tracker.RestartTimes, now)
 	tracker.LastRestart = now
 	tracker.TotalCount++
-	
+
 	// Keep only recent restarts within the window
 	cutoff := now.Add(-sm.config.RestartWindow)
 	var recentRestarts []time.Time
@@ -613,15 +613,15 @@ func (sm *ServiceMonitor) recordRestart(serviceName string) {
 func (sm *ServiceMonitor) recordFailure(serviceName string) {
 	sm.statesMutex.Lock()
 	defer sm.statesMutex.Unlock()
-	
+
 	history, exists := sm.failureHistory[serviceName]
 	if !exists {
 		history = make([]time.Time, 0)
 	}
-	
+
 	now := time.Now()
 	history = append(history, now)
-	
+
 	// Keep only recent failures within the window
 	cutoff := now.Add(-sm.config.RestartWindow)
 	var recentFailures []time.Time
@@ -630,7 +630,7 @@ func (sm *ServiceMonitor) recordFailure(serviceName string) {
 			recentFailures = append(recentFailures, failureTime)
 		}
 	}
-	
+
 	sm.failureHistory[serviceName] = recentFailures
 }
 
@@ -638,9 +638,9 @@ func (sm *ServiceMonitor) recordFailure(serviceName string) {
 func (sm *ServiceMonitor) Cleanup() {
 	sm.statesMutex.Lock()
 	defer sm.statesMutex.Unlock()
-	
+
 	cutoff := time.Now().Add(-sm.config.RestartWindow)
-	
+
 	// Clean up restart trackers
 	for _, tracker := range sm.restartCounts {
 		var recentRestarts []time.Time
@@ -651,7 +651,7 @@ func (sm *ServiceMonitor) Cleanup() {
 		}
 		tracker.RestartTimes = recentRestarts
 	}
-	
+
 	// Clean up failure history
 	for serviceName, history := range sm.failureHistory {
 		var recentFailures []time.Time

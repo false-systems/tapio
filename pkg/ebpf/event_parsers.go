@@ -100,7 +100,7 @@ type rawProtocolEvent struct {
 // parseRawNetworkEvent parses a raw network event from the eBPF ring buffer
 func parseRawNetworkEvent(data []byte) (*NetworkEvent, error) {
 	if len(data) < int(unsafe.Sizeof(rawNetworkEvent{})) {
-		return nil, fmt.Errorf("insufficient data for network event: got %d bytes, need %d", 
+		return nil, fmt.Errorf("insufficient data for network event: got %d bytes, need %d",
 			len(data), unsafe.Sizeof(rawNetworkEvent{}))
 	}
 
@@ -133,7 +133,7 @@ func parseRawNetworkEvent(data []byte) (*NetworkEvent, error) {
 // parseRawPacketEvent parses a raw packet event from the eBPF ring buffer
 func parseRawPacketEvent(data []byte) (*PacketEvent, error) {
 	if len(data) < int(unsafe.Sizeof(rawPacketEvent{})) {
-		return nil, fmt.Errorf("insufficient data for packet event: got %d bytes, need %d", 
+		return nil, fmt.Errorf("insufficient data for packet event: got %d bytes, need %d",
 			len(data), unsafe.Sizeof(rawPacketEvent{}))
 	}
 
@@ -168,7 +168,7 @@ func parseRawPacketEvent(data []byte) (*PacketEvent, error) {
 // parseRawDNSEvent parses a raw DNS event from the eBPF ring buffer
 func parseRawDNSEvent(data []byte) (*DNSEvent, error) {
 	if len(data) < int(unsafe.Sizeof(rawDNSEvent{})) {
-		return nil, fmt.Errorf("insufficient data for DNS event: got %d bytes, need %d", 
+		return nil, fmt.Errorf("insufficient data for DNS event: got %d bytes, need %d",
 			len(data), unsafe.Sizeof(rawDNSEvent{}))
 	}
 
@@ -202,7 +202,7 @@ func parseRawDNSEvent(data []byte) (*DNSEvent, error) {
 // parseRawProtocolEvent parses a raw protocol event from the eBPF ring buffer
 func parseRawProtocolEvent(data []byte) (*ProtocolEvent, error) {
 	if len(data) < int(unsafe.Sizeof(rawProtocolEvent{})) {
-		return nil, fmt.Errorf("insufficient data for protocol event: got %d bytes, need %d", 
+		return nil, fmt.Errorf("insufficient data for protocol event: got %d bytes, need %d",
 			len(data), unsafe.Sizeof(rawProtocolEvent{}))
 	}
 
@@ -263,7 +263,7 @@ func (r *bytesReader) Read(p []byte) (n int, err error) {
 	if r.pos >= len(r.data) {
 		return 0, fmt.Errorf("EOF")
 	}
-	
+
 	n = copy(p, r.data[r.pos:])
 	r.pos += n
 	return n, nil
@@ -281,20 +281,20 @@ const (
 
 // Event type constants for packet events
 const (
-	PktLoss       = 1
+	PktLoss        = 1
 	PktHighLatency = 2
-	PktReorder    = 3
-	PktDuplicate  = 4
-	PktCorruption = 5
+	PktReorder     = 3
+	PktDuplicate   = 4
+	PktCorruption  = 5
 )
 
 // Event type constants for DNS events
 const (
-	DNSQuery     = 1
-	DNSResponse  = 2
-	DNSTimeout   = 3
-	DNSError     = 4
-	DNSNXDomain  = 5
+	DNSQuery    = 1
+	DNSResponse = 2
+	DNSTimeout  = 3
+	DNSError    = 4
+	DNSNXDomain = 5
 )
 
 // Event type constants for protocol events
@@ -308,13 +308,13 @@ const (
 
 // Protocol type constants
 const (
-	ProtoHTTP      = 1
-	ProtoHTTPS     = 2
-	ProtoGRPC      = 3
-	ProtoMySQL     = 4
-	ProtoPostgres  = 5
-	ProtoRedis     = 6
-	ProtoUnknown   = 7
+	ProtoHTTP     = 1
+	ProtoHTTPS    = 2
+	ProtoGRPC     = 3
+	ProtoMySQL    = 4
+	ProtoPostgres = 5
+	ProtoRedis    = 6
+	ProtoUnknown  = 7
 )
 
 // Network protocol constants

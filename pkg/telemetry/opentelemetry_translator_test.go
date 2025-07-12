@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/types"
 )
 
@@ -61,10 +61,10 @@ func TestCreateSpanWithPID(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name        string
-		pid         uint32
-		operation   string
-		expectError bool
+		name         string
+		pid          uint32
+		operation    string
+		expectError  bool
 		validateSpan func(*testing.T, uint32)
 	}{
 		{
@@ -189,7 +189,7 @@ func TestEBPFTelemetryWithRealContext(t *testing.T) {
 		t.Error("Expected spans to be created for eBPF data with K8s context")
 	}
 
-	t.Logf("Successfully created %d spans with real Kubernetes context from eBPF data", 
+	t.Logf("Successfully created %d spans with real Kubernetes context from eBPF data",
 		metrics.TotalSpansCreated)
 }
 

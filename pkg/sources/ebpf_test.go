@@ -13,7 +13,7 @@ import (
 
 func TestNewEBPFSource(t *testing.T) {
 	source := NewEBPFSource()
-	
+
 	assert.NotNil(t, source)
 	assert.Equal(t, "ebpf", source.name)
 	assert.NotNil(t, source.platform)
@@ -33,7 +33,7 @@ func TestEBPFSource_GetType(t *testing.T) {
 
 func TestEBPFSource_IsAvailable(t *testing.T) {
 	source := NewEBPFSource()
-	
+
 	// Since we're using mock collector, it should be available
 	available := source.IsAvailable()
 	assert.True(t, available)
@@ -42,7 +42,7 @@ func TestEBPFSource_IsAvailable(t *testing.T) {
 func TestEBPFSource_IsAvailableWithContext(t *testing.T) {
 	source := NewEBPFSource()
 	ctx := context.Background()
-	
+
 	available := source.IsAvailableWithContext(ctx)
 	assert.True(t, available)
 }
@@ -144,7 +144,7 @@ func TestEBPFSource_SupportsTarget(t *testing.T) {
 
 func TestEBPFSource_GetPlatformInfo(t *testing.T) {
 	source := NewEBPFSource()
-	
+
 	platform := source.GetPlatformInfo()
 	assert.NotNil(t, platform)
 	assert.NotEmpty(t, platform.OS)
@@ -154,25 +154,25 @@ func TestEBPFSource_GetPlatformInfo(t *testing.T) {
 func TestEBPFSource_GetCapabilities(t *testing.T) {
 	source := NewEBPFSource()
 	ctx := context.Background()
-	
+
 	capabilities := source.GetCapabilities(ctx)
 	assert.NotNil(t, capabilities)
 }
 
 func TestEBPFSource_IsUsingMock(t *testing.T) {
 	source := NewEBPFSource()
-	
+
 	// Should be using mock collector on non-Linux platforms
 	assert.True(t, source.IsUsingMock())
 }
 
 func TestEBPFSource_MockScenarios(t *testing.T) {
 	source := NewEBPFSource()
-	
+
 	// Should be able to get available scenarios
 	scenarios := source.GetAvailableMockScenarios()
 	assert.NotEmpty(t, scenarios)
-	
+
 	// Should be able to set scenario
 	err := source.SetMockScenario("high_memory_usage")
 	assert.NoError(t, err)
@@ -196,7 +196,7 @@ func TestEBPFSource_GetData(t *testing.T) {
 	data, err := source.GetData(ctx, "process_stats", nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
-	
+
 	// Should be eBPFData type
 	ebpfData, ok := data.(*correlation.EBPFData)
 	assert.True(t, ok)

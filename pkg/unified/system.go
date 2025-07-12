@@ -16,38 +16,38 @@ import (
 // UnifiedSystem represents the complete eBPF System Sniffer
 type UnifiedSystem struct {
 	// Core components
-	ebpfCollector    *ebpf.EnhancedCollector
+	ebpfCollector     *ebpf.EnhancedCollector
 	correlationEngine *correlation.EnhancedEngine
-	
+
 	// Data sources
-	ebpfSource       *sources.EBPFSource
-	systemdSource    *sources.SystemdSource
-	journaldSource   *sources.JournaldSource
-	
+	ebpfSource     *sources.EBPFSource
+	systemdSource  *sources.SystemdSource
+	journaldSource *sources.JournaldSource
+
 	// Performance components
-	eventPipeline    *performance.EventPipeline
-	objectPool       *performance.TypedPool[SystemEvent]
-	perCPUBuffers    *performance.PerCPUBuffer
-	batchProcessor   *performance.AdaptiveBatchProcessor[SystemEvent]
-	
+	eventPipeline  *performance.EventPipeline
+	objectPool     *performance.TypedPool[SystemEvent]
+	perCPUBuffers  *performance.PerCPUBuffer
+	batchProcessor *performance.AdaptiveBatchProcessor[SystemEvent]
+
 	// Resilience components
-	circuitBreaker   *resilience.CircuitBreaker
-	selfHealing      *resilience.SelfHealingManager
-	loadShedder      *resilience.LoadShedder
-	rateLimiter      *resilience.RateLimiter
-	
+	circuitBreaker *resilience.CircuitBreaker
+	selfHealing    *resilience.SelfHealingManager
+	loadShedder    *resilience.LoadShedder
+	rateLimiter    *resilience.RateLimiter
+
 	// Configuration
-	config           *SystemConfig
-	
+	config *SystemConfig
+
 	// State management
-	isRunning        bool
-	startTime        time.Time
-	
+	isRunning bool
+	startTime time.Time
+
 	// Lifecycle
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	mutex            sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	mutex  sync.RWMutex
 }
 
 // SystemEvent represents a unified system event
@@ -62,55 +62,55 @@ type SystemEvent struct {
 // SystemConfig configures the unified system
 type SystemConfig struct {
 	// eBPF settings
-	EnableNetworkMonitoring  bool
-	EnableDNSMonitoring      bool
-	EnableProtocolAnalysis   bool
-	
+	EnableNetworkMonitoring bool
+	EnableDNSMonitoring     bool
+	EnableProtocolAnalysis  bool
+
 	// Source settings
-	EnableSystemd            bool
-	EnableJournald           bool
-	
+	EnableSystemd  bool
+	EnableJournald bool
+
 	// Performance settings
-	EventBufferSize          int
-	MaxEventsPerSecond       int
-	BatchSize                int
-	PerCPUBufferSize         int
-	
+	EventBufferSize    int
+	MaxEventsPerSecond int
+	BatchSize          int
+	PerCPUBufferSize   int
+
 	// Resilience settings
-	EnableCircuitBreaker     bool
-	EnableSelfHealing        bool
-	EnableLoadShedding       bool
-	MaxFailures              uint32
-	
+	EnableCircuitBreaker bool
+	EnableSelfHealing    bool
+	EnableLoadShedding   bool
+	MaxFailures          uint32
+
 	// Correlation settings
-	CorrelationWindow        time.Duration
-	EnablePatternAnalysis    bool
-	
+	CorrelationWindow     time.Duration
+	EnablePatternAnalysis bool
+
 	// Resource limits
-	MaxMemoryMB              int
-	MaxCPUPercent            int
+	MaxMemoryMB   int
+	MaxCPUPercent int
 }
 
 // DefaultSystemConfig returns the default configuration
 func DefaultSystemConfig() *SystemConfig {
 	return &SystemConfig{
-		EnableNetworkMonitoring:  true,
-		EnableDNSMonitoring:      true,
-		EnableProtocolAnalysis:   true,
-		EnableSystemd:            true,
-		EnableJournald:           true,
-		EventBufferSize:          100000,
-		MaxEventsPerSecond:       165000,
-		BatchSize:                1000,
-		PerCPUBufferSize:         64 * 1024,
-		EnableCircuitBreaker:     true,
-		EnableSelfHealing:        true,
-		EnableLoadShedding:       true,
-		MaxFailures:              5,
-		CorrelationWindow:        5 * time.Minute,
-		EnablePatternAnalysis:    true,
-		MaxMemoryMB:              100,
-		MaxCPUPercent:            50,
+		EnableNetworkMonitoring: true,
+		EnableDNSMonitoring:     true,
+		EnableProtocolAnalysis:  true,
+		EnableSystemd:           true,
+		EnableJournald:          true,
+		EventBufferSize:         100000,
+		MaxEventsPerSecond:      165000,
+		BatchSize:               1000,
+		PerCPUBufferSize:        64 * 1024,
+		EnableCircuitBreaker:    true,
+		EnableSelfHealing:       true,
+		EnableLoadShedding:      true,
+		MaxFailures:             5,
+		CorrelationWindow:       5 * time.Minute,
+		EnablePatternAnalysis:   true,
+		MaxMemoryMB:             100,
+		MaxCPUPercent:           50,
 	}
 }
 
@@ -119,22 +119,22 @@ func NewUnifiedSystem(config *SystemConfig) (*UnifiedSystem, error) {
 	if config == nil {
 		config = DefaultSystemConfig()
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	system := &UnifiedSystem{
 		config:    config,
 		ctx:       ctx,
 		cancel:    cancel,
 		startTime: time.Now(),
 	}
-	
+
 	// Initialize components
 	if err := system.initializeComponents(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to initialize components: %w", err)
 	}
-	
+
 	return system, nil
 }
 
@@ -144,27 +144,27 @@ func (s *UnifiedSystem) initializeComponents() error {
 	if err := s.initializeEBPF(); err != nil {
 		return fmt.Errorf("failed to initialize eBPF: %w", err)
 	}
-	
+
 	// Initialize data sources
 	if err := s.initializeSources(); err != nil {
 		return fmt.Errorf("failed to initialize sources: %w", err)
 	}
-	
+
 	// Initialize performance components
 	if err := s.initializePerformance(); err != nil {
 		return fmt.Errorf("failed to initialize performance: %w", err)
 	}
-	
+
 	// Initialize resilience components
 	if err := s.initializeResilience(); err != nil {
 		return fmt.Errorf("failed to initialize resilience: %w", err)
 	}
-	
+
 	// Initialize correlation engine
 	if err := s.initializeCorrelation(); err != nil {
 		return fmt.Errorf("failed to initialize correlation: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -175,36 +175,36 @@ func (s *UnifiedSystem) initializeEBPF() error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Configure which eBPF programs to load
 	if s.config.EnableNetworkMonitoring {
 		if err := s.ebpfCollector.EnableNetworkMonitoring(); err != nil {
 			return fmt.Errorf("failed to enable network monitoring: %w", err)
 		}
 	}
-	
+
 	if s.config.EnableDNSMonitoring {
 		if err := s.ebpfCollector.EnableDNSMonitoring(); err != nil {
 			return fmt.Errorf("failed to enable DNS monitoring: %w", err)
 		}
 	}
-	
+
 	if s.config.EnableProtocolAnalysis {
 		if err := s.ebpfCollector.EnableProtocolAnalysis(); err != nil {
 			return fmt.Errorf("failed to enable protocol analysis: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
 // initializeSources initializes data sources
 func (s *UnifiedSystem) initializeSources() error {
 	var err error
-	
+
 	// eBPF source
 	s.ebpfSource = sources.NewEBPFSource()
-	
+
 	// Systemd source
 	if s.config.EnableSystemd {
 		s.systemdSource, err = sources.NewSystemdSource(nil)
@@ -212,7 +212,7 @@ func (s *UnifiedSystem) initializeSources() error {
 			return fmt.Errorf("failed to create systemd source: %w", err)
 		}
 	}
-	
+
 	// Journald source
 	if s.config.EnableJournald {
 		s.journaldSource, err = sources.NewJournaldSource(nil)
@@ -220,14 +220,14 @@ func (s *UnifiedSystem) initializeSources() error {
 			return fmt.Errorf("failed to create journald source: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
 // initializePerformance initializes performance components
 func (s *UnifiedSystem) initializePerformance() error {
 	var err error
-	
+
 	// Create object pool
 	s.objectPool, err = performance.NewTypedPool[SystemEvent](
 		func() *SystemEvent { return &SystemEvent{} },
@@ -238,7 +238,7 @@ func (s *UnifiedSystem) initializePerformance() error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Create per-CPU buffers
 	s.perCPUBuffers, err = performance.NewPerCPUBuffer(performance.PerCPUBufferConfig{
 		BufferSize:   s.config.PerCPUBufferSize,
@@ -247,7 +247,7 @@ func (s *UnifiedSystem) initializePerformance() error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Create event pipeline
 	stages := []performance.Stage{
 		performance.NewFilterStage("priority_filter", func(e *performance.Event) bool {
@@ -259,12 +259,12 @@ func (s *UnifiedSystem) initializePerformance() error {
 			return nil
 		}),
 	}
-	
+
 	s.eventPipeline, err = performance.NewEventPipeline(stages, performance.DefaultPipelineConfig())
 	if err != nil {
 		return err
 	}
-	
+
 	// Create batch processor
 	s.batchProcessor = performance.NewAdaptiveBatchProcessor[SystemEvent](
 		100,
@@ -279,7 +279,7 @@ func (s *UnifiedSystem) initializePerformance() error {
 			return s.processBatch(ctx, ptrBatch)
 		},
 	)
-	
+
 	return nil
 }
 
@@ -293,18 +293,18 @@ func (s *UnifiedSystem) initializeResilience() error {
 			ResetTimeout: 60 * time.Second,
 		})
 	}
-	
+
 	// Self-healing manager
 	if s.config.EnableSelfHealing {
 		s.selfHealing = resilience.NewSelfHealingManager(nil)
-		
+
 		// Register components
 		s.selfHealing.RegisterComponent(&resilience.MonitoredComponent{
 			Name:   "ebpf_collector",
 			Type:   resilience.ComponentTypeProcess,
 			Status: resilience.StatusHealthy,
 		})
-		
+
 		if s.config.EnableSystemd {
 			s.selfHealing.RegisterComponent(&resilience.MonitoredComponent{
 				Name:   "systemd_source",
@@ -312,7 +312,7 @@ func (s *UnifiedSystem) initializeResilience() error {
 				Status: resilience.StatusHealthy,
 			})
 		}
-		
+
 		if s.config.EnableJournald {
 			s.selfHealing.RegisterComponent(&resilience.MonitoredComponent{
 				Name:   "journald_source",
@@ -320,26 +320,26 @@ func (s *UnifiedSystem) initializeResilience() error {
 				Status: resilience.StatusHealthy,
 			})
 		}
-		
+
 		// Register health checker
 		s.selfHealing.RegisterHealthChecker(&systemHealthChecker{system: s})
-		
+
 		// Register healer
 		s.selfHealing.RegisterHealer(&systemHealer{system: s})
 	}
-	
+
 	// Load shedder
 	if s.config.EnableLoadShedding {
 		s.loadShedder = resilience.NewLoadShedder("system_load_shedder", nil)
 	}
-	
+
 	// Rate limiter
 	s.rateLimiter = resilience.NewRateLimiter(
 		"system_rate_limiter",
 		s.config.MaxEventsPerSecond,
 		s.config.MaxEventsPerSecond/10, // 10% burst
 	)
-	
+
 	return nil
 }
 
@@ -348,20 +348,20 @@ func (s *UnifiedSystem) initializeCorrelation() error {
 	engineConfig := correlation.DefaultEnhancedEngineConfig()
 	engineConfig.CorrelationWindow = s.config.CorrelationWindow
 	engineConfig.EnablePatternAnalysis = s.config.EnablePatternAnalysis
-	
+
 	s.correlationEngine = correlation.NewEnhancedEngine(engineConfig)
-	
+
 	// Add sources
 	s.correlationEngine.AddSource(correlation.SourceEBPF, s.ebpfSource)
-	
+
 	if s.config.EnableSystemd {
 		s.correlationEngine.AddSource(correlation.SourceSystemd, s.systemdSource)
 	}
-	
+
 	if s.config.EnableJournald {
 		s.correlationEngine.AddSource(correlation.SourceJournald, s.journaldSource)
 	}
-	
+
 	return nil
 }
 
@@ -369,58 +369,58 @@ func (s *UnifiedSystem) initializeCorrelation() error {
 func (s *UnifiedSystem) Start() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	if s.isRunning {
 		return fmt.Errorf("system already running")
 	}
-	
+
 	// Start eBPF collector
 	if err := s.ebpfCollector.Start(); err != nil {
 		return fmt.Errorf("failed to start eBPF collector: %w", err)
 	}
-	
+
 	// Start sources
 	if s.config.EnableSystemd {
 		if err := s.systemdSource.Start(s.ctx); err != nil {
 			return fmt.Errorf("failed to start systemd source: %w", err)
 		}
 	}
-	
+
 	if s.config.EnableJournald {
 		if err := s.journaldSource.Start(s.ctx); err != nil {
 			return fmt.Errorf("failed to start journald source: %w", err)
 		}
 	}
-	
+
 	// Start performance components
 	if err := s.eventPipeline.Start(); err != nil {
 		return fmt.Errorf("failed to start event pipeline: %w", err)
 	}
-	
+
 	if err := s.batchProcessor.Start(); err != nil {
 		return fmt.Errorf("failed to start batch processor: %w", err)
 	}
-	
+
 	// Start resilience components
 	if s.config.EnableSelfHealing {
 		if err := s.selfHealing.Start(); err != nil {
 			return fmt.Errorf("failed to start self-healing: %w", err)
 		}
 	}
-	
+
 	// Start correlation engine
 	if err := s.correlationEngine.Start(s.ctx); err != nil {
 		return fmt.Errorf("failed to start correlation engine: %w", err)
 	}
-	
+
 	// Start main processing loop
 	s.wg.Add(1)
 	go s.processEvents()
-	
+
 	// Start metrics collection
 	s.wg.Add(1)
 	go s.collectMetrics()
-	
+
 	s.isRunning = true
 	return nil
 }
@@ -429,37 +429,37 @@ func (s *UnifiedSystem) Start() error {
 func (s *UnifiedSystem) Stop() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	if !s.isRunning {
 		return nil
 	}
-	
+
 	// Signal shutdown
 	s.cancel()
-	
+
 	// Wait for goroutines
 	s.wg.Wait()
-	
+
 	// Stop components in reverse order
 	s.correlationEngine.Stop()
-	
+
 	if s.config.EnableSelfHealing {
 		s.selfHealing.Stop()
 	}
-	
+
 	s.batchProcessor.Stop()
 	s.eventPipeline.Stop()
-	
+
 	if s.config.EnableJournald {
 		s.journaldSource.Stop()
 	}
-	
+
 	if s.config.EnableSystemd {
 		s.systemdSource.Stop()
 	}
-	
+
 	s.ebpfCollector.Stop()
-	
+
 	s.isRunning = false
 	return nil
 }
@@ -467,21 +467,21 @@ func (s *UnifiedSystem) Stop() error {
 // processEvents is the main event processing loop
 func (s *UnifiedSystem) processEvents() {
 	defer s.wg.Done()
-	
+
 	// Create unified event channel
 	eventChan := s.ebpfCollector.GetEventChannel()
-	
+
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-			
+
 		case event := <-eventChan:
 			// Check rate limit
 			if !s.rateLimiter.Allow() {
 				continue
 			}
-			
+
 			// Check load shedding
 			if s.config.EnableLoadShedding {
 				req := &resilience.Request{
@@ -491,7 +491,7 @@ func (s *UnifiedSystem) processEvents() {
 					continue
 				}
 			}
-			
+
 			// Get event from pool
 			sysEvent := s.objectPool.Get()
 			sysEvent.Source = "ebpf"
@@ -499,7 +499,7 @@ func (s *UnifiedSystem) processEvents() {
 			sysEvent.Timestamp = event.Timestamp
 			sysEvent.Data = event
 			sysEvent.Priority = s.mapEventPriority(event)
-			
+
 			// Submit to batch processor
 			if err := s.batchProcessor.Submit(*sysEvent); err != nil {
 				s.objectPool.Put(sysEvent)
@@ -519,17 +519,17 @@ func (s *UnifiedSystem) processBatch(ctx context.Context, batch []*SystemEvent) 
 		pEvent.Priority = uint8(sysEvent.Priority)
 		pipelineEvents[i] = pEvent
 	}
-	
+
 	// Submit to pipeline
 	if err := s.eventPipeline.SubmitBatch(pipelineEvents); err != nil {
 		return err
 	}
-	
+
 	// Return events to pool
 	for _, sysEvent := range batch {
 		s.objectPool.Put(sysEvent)
 	}
-	
+
 	return nil
 }
 
@@ -548,10 +548,10 @@ func (s *UnifiedSystem) mapEventPriority(event ebpf.SystemEvent) int {
 // collectMetrics collects system metrics
 func (s *UnifiedSystem) collectMetrics() {
 	defer s.wg.Done()
-	
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -561,10 +561,10 @@ func (s *UnifiedSystem) collectMetrics() {
 			if s.config.EnableLoadShedding {
 				metrics := s.GetMetrics()
 				s.loadShedder.UpdateMetrics(resilience.SystemMetrics{
-					CurrentLoad:  uint64(metrics.EventsProcessed),
-					CPUUsage:     metrics.CPUUsage,
-					MemoryUsage:  metrics.MemoryUsage,
-					ErrorRate:    metrics.ErrorRate,
+					CurrentLoad: uint64(metrics.EventsProcessed),
+					CPUUsage:    metrics.CPUUsage,
+					MemoryUsage: metrics.MemoryUsage,
+					ErrorRate:   metrics.ErrorRate,
 				})
 			}
 		}
@@ -575,75 +575,75 @@ func (s *UnifiedSystem) collectMetrics() {
 func (s *UnifiedSystem) GetMetrics() SystemMetrics {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	
+
 	metrics := SystemMetrics{
-		Uptime:        time.Since(s.startTime),
-		IsRunning:     s.isRunning,
+		Uptime:          time.Since(s.startTime),
+		IsRunning:       s.isRunning,
 		EventsProcessed: s.correlationEngine.GetStatistics()["timeline_events"].(int),
 	}
-	
+
 	// eBPF metrics
 	if s.ebpfCollector != nil {
 		ebpfStats := s.ebpfCollector.GetStatistics()
 		metrics.EBPFEvents = ebpfStats["total_events"].(uint64)
 	}
-	
+
 	// Performance metrics
 	if s.eventPipeline != nil {
 		pipelineMetrics := s.eventPipeline.GetMetrics()
 		metrics.PipelineThroughput = pipelineMetrics.Throughput
 		metrics.PipelineLatency = pipelineMetrics.AvgLatency
 	}
-	
+
 	if s.objectPool != nil {
 		poolMetrics := s.objectPool.GetMetrics()
 		metrics.MemoryAllocations = poolMetrics.Allocations
 		metrics.MemoryRecycled = poolMetrics.Recycled
 	}
-	
+
 	// Resilience metrics
 	if s.circuitBreaker != nil {
 		cbMetrics := s.circuitBreaker.GetMetrics()
 		metrics.CircuitBreakerState = cbMetrics.State
 	}
-	
+
 	if s.rateLimiter != nil {
 		rlMetrics := s.rateLimiter.GetMetrics()
 		metrics.RateLimitedEvents = rlMetrics.DeniedRequests
 	}
-	
+
 	// Calculate resource usage (simplified)
-	metrics.CPUUsage = 25.0  // Would use actual CPU metrics
+	metrics.CPUUsage = 25.0    // Would use actual CPU metrics
 	metrics.MemoryUsage = 45.0 // Would use actual memory metrics
 	metrics.ErrorRate = 0.001  // Would calculate from actual errors
-	
+
 	return metrics
 }
 
 // SystemMetrics contains system-wide metrics
 type SystemMetrics struct {
 	// General
-	Uptime            time.Duration
-	IsRunning         bool
-	EventsProcessed   int
-	
+	Uptime          time.Duration
+	IsRunning       bool
+	EventsProcessed int
+
 	// eBPF
-	EBPFEvents        uint64
-	
+	EBPFEvents uint64
+
 	// Performance
 	PipelineThroughput uint64
 	PipelineLatency    time.Duration
 	MemoryAllocations  uint64
 	MemoryRecycled     uint64
-	
+
 	// Resilience
 	CircuitBreakerState string
 	RateLimitedEvents   uint64
-	
+
 	// Resources
-	CPUUsage          float64
-	MemoryUsage       float64
-	ErrorRate         float64
+	CPUUsage    float64
+	MemoryUsage float64
+	ErrorRate   float64
 }
 
 // systemHealthChecker checks system health
@@ -666,19 +666,19 @@ func (c *systemHealthChecker) Check(ctx context.Context, component *resilience.M
 			return resilience.StatusDegraded, nil
 		}
 		return resilience.StatusHealthy, nil
-		
+
 	case "systemd_source":
 		if c.system.systemdSource == nil || !c.system.systemdSource.IsAvailable() {
 			return resilience.StatusUnhealthy, fmt.Errorf("systemd source not available")
 		}
 		return resilience.StatusHealthy, nil
-		
+
 	case "journald_source":
 		if c.system.journaldSource == nil || !c.system.journaldSource.IsAvailable() {
 			return resilience.StatusUnhealthy, fmt.Errorf("journald source not available")
 		}
 		return resilience.StatusHealthy, nil
-		
+
 	default:
 		return resilience.StatusUnknown, nil
 	}
@@ -712,7 +712,7 @@ func (h *systemHealer) Heal(ctx context.Context, component *resilience.Monitored
 			time.Sleep(1 * time.Second)
 			return h.system.systemdSource.Start(ctx)
 		}
-		
+
 	case "journald_source":
 		// Restart journald source
 		if h.system.journaldSource != nil {
@@ -721,7 +721,7 @@ func (h *systemHealer) Heal(ctx context.Context, component *resilience.Monitored
 			return h.system.journaldSource.Start(ctx)
 		}
 	}
-	
+
 	return nil
 }
 

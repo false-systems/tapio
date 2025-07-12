@@ -27,22 +27,22 @@ type ErrorHandler struct {
 	// Error tracking
 	errorCounts map[string]*atomic.Uint64
 	mu          sync.RWMutex
-	
+
 	// Error callbacks
-	onError      func(err error, context string)
-	onCritical   func(err error, context string)
-	
+	onError    func(err error, context string)
+	onCritical func(err error, context string)
+
 	// Circuit breaker
 	circuitBreaker *CircuitBreaker
-	
+
 	// Recovery strategies
 	recoveryStrategies map[string]RecoveryStrategy
-	
+
 	// Metrics
 	totalErrors    atomic.Uint64
 	recoveries     atomic.Uint64
 	criticalErrors atomic.Uint64
-	
+
 	// Configuration
 	config ErrorHandlerConfig
 }
@@ -52,16 +52,16 @@ type ErrorHandlerConfig struct {
 	// Error thresholds
 	MaxErrorsPerMinute   int
 	MaxConsecutiveErrors int
-	
+
 	// Circuit breaker settings
 	CircuitBreakerThreshold int
 	CircuitBreakerTimeout   time.Duration
-	
+
 	// Recovery settings
-	EnableAutoRecovery   bool
-	RecoveryBackoff      time.Duration
-	MaxRecoveryAttempts  int
-	
+	EnableAutoRecovery  bool
+	RecoveryBackoff     time.Duration
+	MaxRecoveryAttempts int
+
 	// Logging
 	LogErrors     bool
 	LogRecoveries bool
@@ -107,11 +107,11 @@ func (h *ErrorHandler) HandleError(err error, context string) error {
 	if err == nil {
 		return nil
 	}
-	
+
 	// Track error
 	h.incrementErrorCount(context)
 	h.totalErrors.Add(1)
-	
+
 	// Check if circuit breaker should trip
 	if h.circuitBreaker.ShouldTrip() {
 		h.criticalErrors.Add(1)
@@ -120,34 +120,34 @@ func (h *ErrorHandler) HandleError(err error, context string) error {
 		}
 		return fmt.Errorf("circuit breaker tripped: %w", err)
 	}
-	
+
 	// Log error if enabled
 	if h.config.LogErrors && h.onError != nil {
 		h.onError(err, context)
 	}
-	
+
 	// Try recovery if enabled
 	if h.config.EnableAutoRecovery {
 		if recovered := h.tryRecover(err, context); recovered != nil {
 			return recovered
 		}
 	}
-	
+
 	return err
 }
 
 // HandleCriticalError handles a critical error that may require system shutdown
 func (h *ErrorHandler) HandleCriticalError(err error, context string) error {
 	h.criticalErrors.Add(1)
-	
+
 	// Always log critical errors
 	if h.onCritical != nil {
 		h.onCritical(err, context)
 	}
-	
+
 	// Trip circuit breaker immediately for critical errors
 	h.circuitBreaker.Trip()
-	
+
 	return fmt.Errorf("critical error in %s: %w", context, err)
 }
 
@@ -176,10 +176,10 @@ func (h *ErrorHandler) tryRecover(err error, errorContext string) error {
 		strategies = append(strategies, strategy)
 	}
 	h.mu.RUnlock()
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	for _, strategy := range strategies {
 		if strategy.CanRecover(err) {
 			if recoveryErr := strategy.Recover(ctx, err); recoveryErr == nil {
@@ -191,7 +191,7 @@ func (h *ErrorHandler) tryRecover(err error, errorContext string) error {
 			}
 		}
 	}
-	
+
 	return err
 }
 
@@ -204,7 +204,7 @@ func (h *ErrorHandler) incrementErrorCount(context string) {
 		h.errorCounts[context] = counter
 	}
 	h.mu.Unlock()
-	
+
 	counter.Add(1)
 }
 
@@ -216,12 +216,12 @@ func (h *ErrorHandler) GetMetrics() ErrorMetrics {
 		errorsByContext[ctx] = counter.Load()
 	}
 	h.mu.RUnlock()
-	
+
 	return ErrorMetrics{
-		TotalErrors:     h.totalErrors.Load(),
-		CriticalErrors:  h.criticalErrors.Load(),
-		Recoveries:      h.recoveries.Load(),
-		ErrorsByContext: errorsByContext,
+		TotalErrors:         h.totalErrors.Load(),
+		CriticalErrors:      h.criticalErrors.Load(),
+		Recoveries:          h.recoveries.Load(),
+		ErrorsByContext:     errorsByContext,
 		CircuitBreakerState: h.circuitBreaker.State(),
 	}
 }
@@ -287,7 +287,7 @@ func (cb *CircuitBreaker) ShouldTrip() bool {
 		cb.Trip()
 		return true
 	}
-	
+
 	// Check if we should reset based on timeout
 	state := cb.state.Load()
 	if state == circuitOpen {
@@ -296,7 +296,7 @@ func (cb *CircuitBreaker) ShouldTrip() bool {
 			cb.state.Store(circuitHalfOpen)
 		}
 	}
-	
+
 	return state == circuitOpen
 }
 
@@ -360,8 +360,8 @@ func (r *RetryRecovery) Name() string {
 
 func (r *RetryRecovery) CanRecover(err error) bool {
 	// Can retry transient errors
-	return !errors.Is(err, ErrPermissionDenied) && 
-		   !errors.Is(err, ErrKernelNotSupported)
+	return !errors.Is(err, ErrPermissionDenied) &&
+		!errors.Is(err, ErrKernelNotSupported)
 }
 
 func (r *RetryRecovery) Recover(ctx context.Context, err error) error {
@@ -388,7 +388,7 @@ func (r *RestartRecovery) Name() string {
 func (r *RestartRecovery) CanRecover(err error) bool {
 	// Can restart on program errors
 	return errors.Is(err, ErrProgramNotLoaded) ||
-		   errors.Is(err, ErrCollectorStopped)
+		errors.Is(err, ErrCollectorStopped)
 }
 
 func (r *RestartRecovery) Recover(ctx context.Context, err error) error {
@@ -405,12 +405,12 @@ func ValidateKernelSupport() error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("eBPF requires Linux, running on %s", runtime.GOOS)
 	}
-	
+
 	// In production, would check:
 	// - Kernel version >= 4.18 for full eBPF support
 	// - Required kernel config options
 	// - BPF syscall availability
-	
+
 	return nil
 }
 
@@ -420,7 +420,7 @@ func CheckPermissions() error {
 	// - CAP_BPF capability
 	// - CAP_NET_ADMIN for network programs
 	// - Root access as fallback
-	
+
 	// For now, return nil to allow testing
 	return nil
 }

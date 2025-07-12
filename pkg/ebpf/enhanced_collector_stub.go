@@ -26,7 +26,7 @@ func (ec *EnhancedCollector) Start() error {
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			ec.unifiedEvents <- SystemEvent{
 				Type:      "stub_event",
@@ -36,7 +36,7 @@ func (ec *EnhancedCollector) Start() error {
 			}
 		}
 	}()
-	
+
 	return nil
 }
 

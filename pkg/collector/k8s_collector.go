@@ -38,9 +38,9 @@ type K8sCollector struct {
 	nodeInformer  cache.SharedIndexInformer
 
 	// State tracking
-	podStates    map[string]*PodState
-	nodeStates   map[string]*NodeState
-	stateMutex   sync.RWMutex
+	podStates  map[string]*PodState
+	nodeStates map[string]*NodeState
+	stateMutex sync.RWMutex
 }
 
 // PodState tracks pod state for change detection
@@ -181,7 +181,7 @@ func (s *K8sCollector) startInformers() error {
 	go s.nodeInformer.Run(s.ctx.Done())
 
 	// Wait for sync
-	if !cache.WaitForCacheSync(s.ctx.Done(), 
+	if !cache.WaitForCacheSync(s.ctx.Done(),
 		s.podInformer.HasSynced,
 		s.eventInformer.HasSynced,
 		s.nodeInformer.HasSynced) {
@@ -288,12 +288,12 @@ func (s *K8sCollector) detectPodChanges(oldState, newState *PodState, pod *corev
 		oldRestarts := oldState.LastRestarts[container]
 		if newRestarts > oldRestarts {
 			s.emitContainerRestartEvent(pod, container, newRestarts)
-			
+
 			// Check for crash loop
 			if newRestarts > 3 {
 				newState.CrashLoopCount++
 				newState.LastCrashTime = time.Now()
-				
+
 				if newState.CrashLoopCount > 5 {
 					s.emitCrashLoopEvent(pod, container, newRestarts)
 				}
@@ -305,7 +305,7 @@ func (s *K8sCollector) detectPodChanges(oldState, newState *PodState, pod *corev
 	if oldState.LastPhase != newState.LastPhase {
 		if newState.LastPhase == corev1.PodFailed {
 			s.emitPodFailedEvent(pod)
-		} else if newState.LastPhase == corev1.PodPending && 
+		} else if newState.LastPhase == corev1.PodPending &&
 			time.Since(pod.CreationTimestamp.Time) > 5*time.Minute {
 			s.emitPodStuckEvent(pod)
 		}
@@ -452,10 +452,10 @@ func (s *K8sCollector) emitPodStuckEvent(pod *corev1.Pod) {
 		Type:      "pod_stuck_pending",
 		Severity:  SeverityHigh,
 		Data: map[string]interface{}{
-			"phase":         pod.Status.Phase,
-			"reason":        pod.Status.Reason,
-			"pending_time":  time.Since(pod.CreationTimestamp.Time).Minutes(),
-			"scheduled":     pod.Spec.NodeName != "",
+			"phase":        pod.Status.Phase,
+			"reason":       pod.Status.Reason,
+			"pending_time": time.Since(pod.CreationTimestamp.Time).Minutes(),
+			"scheduled":    pod.Spec.NodeName != "",
 		},
 		Context: &EventContext{
 			Pod:       pod.Name,
@@ -579,7 +579,7 @@ func (s *K8sCollector) getDeploymentName(pod *corev1.Pod) string {
 func (s *K8sCollector) getPodStuckActionable(pod *corev1.Pod) *ActionableItem {
 	// Determine why pod is stuck
 	conditions := pod.Status.Conditions
-	
+
 	for _, cond := range conditions {
 		if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse {
 			return &ActionableItem{
@@ -725,7 +725,7 @@ func (s *K8sCollector) performPeriodicChecks() {
 func (s *K8sCollector) checkForStuckPods() {
 	// Get all pods from informer cache
 	items := s.podInformer.GetStore().List()
-	
+
 	for _, item := range items {
 		pod, ok := item.(*corev1.Pod)
 		if !ok {
@@ -733,7 +733,7 @@ func (s *K8sCollector) checkForStuckPods() {
 		}
 
 		// Check for pods pending too long
-		if pod.Status.Phase == corev1.PodPending && 
+		if pod.Status.Phase == corev1.PodPending &&
 			time.Since(pod.CreationTimestamp.Time) > 10*time.Minute {
 			s.emitPodStuckEvent(pod)
 		}
@@ -743,7 +743,7 @@ func (s *K8sCollector) checkForStuckPods() {
 func (s *K8sCollector) checkForNodeIssues() {
 	// Get all nodes from informer cache
 	items := s.nodeInformer.GetStore().List()
-	
+
 	for _, item := range items {
 		node, ok := item.(*corev1.Node)
 		if !ok {
