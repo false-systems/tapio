@@ -17,29 +17,29 @@ import (
 
 var (
 	// OpenTelemetry flags (mirroring Prometheus patterns)
-	otelAddr           string
-	otelUpdateInterval time.Duration
-	otelEnableEBPF     bool
-	otelEnableTraces   bool
-	otelEnableMetrics  bool
-	otelOTLPEndpoint   string
-	otelServiceName    string
-	otelServiceVersion string
-	otelInsecure       bool
-	otelBatchSize      int
-	otelBatchTimeout   time.Duration
-	otelHeaders        []string
-	otelEnableTLS      bool
-	otelCertFile       string
-	otelKeyFile        string
-	otelMaxConcurrency int
+	otelAddr            string
+	otelUpdateInterval  time.Duration
+	otelEnableEBPF      bool
+	otelEnableTraces    bool
+	otelEnableMetrics   bool
+	otelOTLPEndpoint    string
+	otelServiceName     string
+	otelServiceVersion  string
+	otelInsecure        bool
+	otelBatchSize       int
+	otelBatchTimeout    time.Duration
+	otelHeaders         []string
+	otelEnableTLS       bool
+	otelCertFile        string
+	otelKeyFile         string
+	otelMaxConcurrency  int
 	otelUniversalFormat bool
-	
+
 	// Correlation tracing options
-	enableCorrelationTracing    bool
-	correlationTimeWindow       time.Duration
-	enableTimelineVisualization bool
-	enableRootCauseAnalysis     bool
+	enableCorrelationTracing       bool
+	correlationTimeWindow          time.Duration
+	enableTimelineVisualization    bool
+	enableRootCauseAnalysis        bool
 	correlationConfidenceThreshold float64
 )
 
@@ -95,7 +95,7 @@ func init() {
 		"Address to listen on for OpenTelemetry HTTP server")
 	opentelemetryCmd.Flags().DurationVar(&otelUpdateInterval, "interval", 30*time.Second,
 		"How often to update telemetry by scanning the cluster")
-	
+
 	// OpenTelemetry specific configuration
 	opentelemetryCmd.Flags().StringVar(&otelOTLPEndpoint, "otlp-endpoint", "http://localhost:4317",
 		"OTLP collector endpoint URL")
@@ -103,7 +103,7 @@ func init() {
 		"Service name for OpenTelemetry resource")
 	opentelemetryCmd.Flags().StringVar(&otelServiceVersion, "service-version", "1.0.0",
 		"Service version for OpenTelemetry resource")
-	
+
 	// Feature toggles
 	opentelemetryCmd.Flags().BoolVar(&otelEnableEBPF, "enable-ebpf", false,
 		"Enable eBPF monitoring for enhanced telemetry (requires root)")
@@ -113,7 +113,7 @@ func init() {
 		"Enable OpenTelemetry metrics export")
 	opentelemetryCmd.Flags().BoolVar(&otelUniversalFormat, "universal", true,
 		"Use universal data format for enhanced telemetry")
-	
+
 	// Export configuration
 	opentelemetryCmd.Flags().BoolVar(&otelInsecure, "insecure", true,
 		"Use insecure connection to OTLP collector")
@@ -123,7 +123,7 @@ func init() {
 		"Timeout for batch export")
 	opentelemetryCmd.Flags().StringSliceVar(&otelHeaders, "headers", []string{},
 		"Additional headers for OTLP requests (key=value format)")
-	
+
 	// TLS configuration
 	opentelemetryCmd.Flags().BoolVar(&otelEnableTLS, "tls", false,
 		"Enable TLS for the HTTP server")
@@ -131,11 +131,11 @@ func init() {
 		"TLS certificate file (required if --tls is enabled)")
 	opentelemetryCmd.Flags().StringVar(&otelKeyFile, "key-file", "",
 		"TLS private key file (required if --tls is enabled)")
-	
+
 	// Performance configuration
 	opentelemetryCmd.Flags().IntVar(&otelMaxConcurrency, "max-concurrency", 10,
 		"Maximum number of concurrent operations")
-	
+
 	// Correlation tracing configuration
 	opentelemetryCmd.Flags().BoolVar(&enableCorrelationTracing, "enable-correlation", true,
 		"Enable enhanced correlation analysis tracing")
@@ -157,7 +157,7 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 	if otelUniversalFormat {
 		fmt.Println("✨ Using universal data format for enhanced telemetry")
 	}
-	
+
 	// Print correlation tracing status
 	if enableCorrelationTracing {
 		fmt.Println("🔍 Correlation analysis tracing enabled")
@@ -231,26 +231,26 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 
 	// Create OpenTelemetry exporter configuration with Agent 1 translator integration
 	otelConfig := telemetry.Config{
-		ServiceName:     otelServiceName,
-		ServiceVersion:  otelServiceVersion,
-		OTLPEndpoint:    otelOTLPEndpoint,
-		Headers:         headers,
-		Insecure:        otelInsecure,
-		BatchTimeout:    otelBatchTimeout,
-		BatchSize:       otelBatchSize,
-		MaxConcurrency:  otelMaxConcurrency,
-		EnableMetrics:   otelEnableMetrics,
-		EnableTraces:    otelEnableTraces,
-		
+		ServiceName:    otelServiceName,
+		ServiceVersion: otelServiceVersion,
+		OTLPEndpoint:   otelOTLPEndpoint,
+		Headers:        headers,
+		Insecure:       otelInsecure,
+		BatchTimeout:   otelBatchTimeout,
+		BatchSize:      otelBatchSize,
+		MaxConcurrency: otelMaxConcurrency,
+		EnableMetrics:  otelEnableMetrics,
+		EnableTraces:   otelEnableTraces,
+
 		// Enable Agent 1's translator for real Kubernetes context
 		EnableTranslator: true,
-		KubeClient:      checker.GetClient(), // Get real Kubernetes client from checker
-		
+		KubeClient:       checker.GetClient(), // Get real Kubernetes client from checker
+
 		// Correlation tracing configuration
-		EnableCorrelationTracing:    enableCorrelationTracing,
-		CorrelationTimeWindow:       correlationTimeWindow,
-		EnableTimelineVisualization: enableTimelineVisualization,
-		EnableRootCauseAnalysis:     enableRootCauseAnalysis,
+		EnableCorrelationTracing:       enableCorrelationTracing,
+		CorrelationTimeWindow:          correlationTimeWindow,
+		EnableTimelineVisualization:    enableTimelineVisualization,
+		EnableRootCauseAnalysis:        enableRootCauseAnalysis,
 		CorrelationConfidenceThreshold: correlationConfidenceThreshold,
 	}
 
@@ -469,11 +469,11 @@ func printCapabilities() {
 
 func printResilienceStatus(exporter *telemetry.OpenTelemetryExporter) {
 	metrics := exporter.GetMetrics()
-	
+
 	fmt.Println("🛡️  Resilience Framework Status:")
 	fmt.Printf("  Circuit Breaker: %s\n", metrics.CircuitBreaker.State)
 	fmt.Printf("  Total Calls: %d\n", metrics.CircuitBreaker.TotalCalls)
-	fmt.Printf("  Success Rate: %.2f%%\n", 
+	fmt.Printf("  Success Rate: %.2f%%\n",
 		float64(metrics.CircuitBreaker.TotalSuccesses)/float64(metrics.CircuitBreaker.TotalCalls)*100)
 	// fmt.Printf("  Health Checks: %d components\n", len(metrics.HealthChecker.Components))
 	// fmt.Printf("  Timeout Retries: %d\n", metrics.TimeoutManager.TotalRetries)
@@ -488,11 +488,11 @@ func createAdvancedOTelConfig() telemetry.Config {
 		ServiceName:    otelServiceName,
 		ServiceVersion: otelServiceVersion,
 		OTLPEndpoint:   otelOTLPEndpoint,
-		Insecure:      otelInsecure,
-		BatchTimeout:  otelBatchTimeout,
-		BatchSize:     otelBatchSize,
-		EnableMetrics: otelEnableMetrics,
-		EnableTraces:  otelEnableTraces,
+		Insecure:       otelInsecure,
+		BatchTimeout:   otelBatchTimeout,
+		BatchSize:      otelBatchSize,
+		EnableMetrics:  otelEnableMetrics,
+		EnableTraces:   otelEnableTraces,
 		ResourceAttrs: map[string]string{
 			"deployment.environment": "production", // Could be configurable
 			"service.namespace":      "tapio",
@@ -505,18 +505,18 @@ func validateConfiguration() error {
 	if err := validateOTLPEndpoint(otelOTLPEndpoint); err != nil {
 		return err
 	}
-	
+
 	if otelBatchSize <= 0 {
 		return fmt.Errorf("batch size must be positive, got %d", otelBatchSize)
 	}
-	
+
 	if otelBatchTimeout <= 0 {
 		return fmt.Errorf("batch timeout must be positive, got %v", otelBatchTimeout)
 	}
-	
+
 	if otelMaxConcurrency <= 0 {
 		return fmt.Errorf("max concurrency must be positive, got %d", otelMaxConcurrency)
 	}
-	
+
 	return nil
 }
