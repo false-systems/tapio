@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // SourceType represents the type of data source
@@ -22,6 +24,19 @@ const (
 	SourceNetwork    SourceType = "network"
 )
 
+
+// AnalysisData contains all the data needed for correlation analysis
+type AnalysisData struct {
+	KubernetesData *KubernetesData `json:"kubernetes_data,omitempty"`
+	EBPFData       *EBPFData       `json:"ebpf_data,omitempty"`
+	SystemdData    *SystemdData    `json:"systemd_data,omitempty"`
+	JournaldData   *JournaldData   `json:"journald_data,omitempty"`
+	MetricsData    *MetricsData    `json:"metrics_data,omitempty"`
+	NetworkData    *NetworkData    `json:"network_data,omitempty"`
+	Timestamp      time.Time       `json:"timestamp"`
+	TimeWindow     time.Duration   `json:"time_window"`
+}
+
 // DataSource defines the interface for retrieving data from different sources
 type DataSource interface {
 	// GetType returns the source type
@@ -36,11 +51,19 @@ type DataSource interface {
 
 // KubernetesData represents Kubernetes-specific data
 type KubernetesData struct {
-	Pods      []corev1.Pod           `json:"pods"`
-	Events    []corev1.Event         `json:"events"`
-	Metrics   map[string]interface{} `json:"metrics"`
-	Problems  []types.Problem        `json:"problems"`
-	Timestamp time.Time              `json:"timestamp"`
+	Pods         []corev1.Pod                `json:"pods"`
+	Events       []corev1.Event              `json:"events"`
+	Deployments  []appsv1.Deployment         `json:"deployments"`
+	Jobs         []batchv1.Job               `json:"jobs"`
+	StatefulSets []appsv1.StatefulSet        `json:"statefulsets"`
+	DaemonSets   []appsv1.DaemonSet          `json:"daemonsets"`
+	ReplicaSets  []appsv1.ReplicaSet         `json:"replicasets"`
+	Services     []corev1.Service            `json:"services"`
+	Secrets      []corev1.Secret             `json:"secrets"`
+	Logs         map[string][]LogEntry       `json:"logs"`
+	Metrics      map[string]interface{}      `json:"metrics"`
+	Problems     []types.Problem             `json:"problems"`
+	Timestamp    time.Time                   `json:"timestamp"`
 }
 
 // EBPFData represents eBPF monitoring data
@@ -459,4 +482,44 @@ func (e *SourceNotAvailableError) Error() string {
 // NewSourceNotAvailableError creates a new source not available error
 func NewSourceNotAvailableError(sourceType SourceType) *SourceNotAvailableError {
 	return &SourceNotAvailableError{SourceType: sourceType}
+}
+
+
+// NetworkData represents network-related monitoring data
+type NetworkData struct {
+	Connections []NetworkConnection       `json:"connections"`
+	Traffic     []NetworkTrafficSample    `json:"traffic"`
+	DNS         []DNSQuery                `json:"dns"`
+	Timestamp   time.Time                 `json:"timestamp"`
+}
+
+// NetworkConnection represents a network connection
+type NetworkConnection struct {
+	LocalAddr  string    `json:"local_addr"`
+	RemoteAddr string    `json:"remote_addr"`
+	Protocol   string    `json:"protocol"`
+	State      string    `json:"state"`
+	PID        uint32    `json:"pid,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+// NetworkTrafficSample represents network traffic data
+type NetworkTrafficSample struct {
+	Interface    string    `json:"interface"`
+	BytesIn      uint64    `json:"bytes_in"`
+	BytesOut     uint64    `json:"bytes_out"`
+	PacketsIn    uint64    `json:"packets_in"`
+	PacketsOut   uint64    `json:"packets_out"`
+	DroppedIn    uint64    `json:"dropped_in"`
+	DroppedOut   uint64    `json:"dropped_out"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// DNSQuery represents a DNS query
+type DNSQuery struct {
+	Query     string    `json:"query"`
+	Response  string    `json:"response,omitempty"`
+	QueryType string    `json:"query_type"`
+	PID       uint32    `json:"pid,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
 }

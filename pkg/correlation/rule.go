@@ -3,6 +3,8 @@ package correlation
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Severity represents the severity level of a finding
@@ -41,6 +43,17 @@ const (
 	ConfidenceVeryHigh
 )
 
+// Category represents finding categories  
+type Category string
+
+const (
+	CategoryPerformance Category = "performance"
+	CategorySecurity    Category = "security"
+	CategoryReliability Category = "reliability"
+	CategoryCost        Category = "cost"
+	CategoryCapacity    Category = "capacity"
+)
+
 // String returns the string representation of confidence level
 func (c ConfidenceLevel) String() string {
 	switch c {
@@ -75,6 +88,13 @@ type ResourceReference struct {
 	UID       string `json:"uid,omitempty"`
 }
 
+// ResourceInfo represents resource information with Type field for compatibility
+type ResourceInfo struct {
+	Type      string `json:"type"`      // Resource type (e.g., "pod", "service")
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // Prediction represents a time-based prediction
 type Prediction struct {
 	Event       string        `json:"event"`
@@ -87,19 +107,24 @@ type Prediction struct {
 
 // Finding represents a correlation finding
 type Finding struct {
-	ID          string                 `json:"id"`
-	RuleID      string                 `json:"rule_id"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	Severity    Severity               `json:"severity"`
-	Confidence  float64                `json:"confidence"` // 0.0 to 1.0
-	Resource    *ResourceReference     `json:"resource,omitempty"`
-	Evidence    []Evidence             `json:"evidence"`
-	Prediction  *Prediction            `json:"prediction,omitempty"`
-	Tags        []string               `json:"tags"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	ID                string                 `json:"id"`
+	RuleID            string                 `json:"rule_id"`
+	Title             string                 `json:"title"`
+	Description       string                 `json:"description"`
+	Severity          Severity               `json:"severity"`
+	Confidence        float64                `json:"confidence"` // 0.0 to 1.0
+	Resource          ResourceInfo           `json:"resource,omitempty"`
+	Evidence          []Evidence             `json:"evidence"`
+	Prediction        *Prediction            `json:"prediction,omitempty"`
+	Tags              []string               `json:"tags"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+	Metadata          map[string]interface{} `json:"metadata"`
+	// Additional fields needed by correlation rules
+	Impact            string                 `json:"impact,omitempty"`
+	RootCause         string                 `json:"root_cause,omitempty"`
+	Recommendations   []string               `json:"recommendations,omitempty"`
+	AffectedResources []ResourceReference    `json:"affected_resources,omitempty"`
 }
 
 // GetConfidenceLevel returns the confidence level based on the numeric confidence
@@ -139,6 +164,56 @@ func (f *Finding) SetMetadata(key string, value interface{}) {
 	}
 	f.Metadata[key] = value
 	f.UpdatedAt = time.Now()
+}
+
+// GetType returns the type/category of finding from metadata or tags
+func (f *Finding) GetType() string {
+	// Check metadata first
+	if f.Metadata != nil {
+		if typeVal, ok := f.Metadata["type"].(string); ok {
+			return typeVal
+		}
+	}
+	
+	// Fall back to first tag if available
+	if len(f.Tags) > 0 {
+		return f.Tags[0]
+	}
+	
+	// Default based on severity
+	return f.Severity.String()
+}
+
+// GetImpact returns the impact of the finding
+func (f *Finding) GetImpact() string {
+	if f.Impact != "" {
+		return f.Impact
+	}
+	
+	// Check metadata for impact
+	if f.Metadata != nil {
+		if impactVal, ok := f.Metadata["impact"].(string); ok {
+			return impactVal
+		}
+	}
+	
+	// Default based on severity
+	switch f.Severity {
+	case SeverityCritical:
+		return "high"
+	case SeverityError:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// GetResourceName returns the name of the affected resource
+func (f *Finding) GetResourceName() string {
+	if f.Resource.Name != "" {
+		return f.Resource.Name
+	}
+	return "unknown"
 }
 
 // RuleRequirement represents a requirement for a rule
@@ -387,15 +462,5 @@ func NewRequirementNotMetError(ruleID string, requirement RuleRequirement) *Requ
 
 // generateFindingID generates a unique finding ID
 func generateFindingID() string {
-	return "finding_" + time.Now().Format("20060102_150405") + "_" + generateRandomString(8)
-}
-
-// generateRandomString generates a random string of specified length
-func generateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-	}
-	return string(b)
+	return "finding_" + uuid.New().String()
 }

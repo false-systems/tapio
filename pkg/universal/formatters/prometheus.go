@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )

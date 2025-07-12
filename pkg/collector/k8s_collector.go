@@ -1,4 +1,4 @@
-package sniffer
+package collector
 
 import (
 	"context"
@@ -16,8 +16,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// K8sSniffer implements the Sniffer interface for Kubernetes API monitoring
-type K8sSniffer struct {
+// K8sCollector implements the Collector interface for Kubernetes API monitoring
+type K8sCollector struct {
 	// Core components
 	client    kubernetes.Interface
 	eventChan chan Event
@@ -59,9 +59,9 @@ type NodeState struct {
 	LastConditions map[corev1.NodeConditionType]corev1.ConditionStatus
 }
 
-// NewK8sSniffer creates a new Kubernetes API sniffer
-func NewK8sSniffer(client kubernetes.Interface) *K8sSniffer {
-	return &K8sSniffer{
+// NewK8sCollector creates a new Kubernetes API sniffer
+func NewK8sCollector(client kubernetes.Interface) *K8sCollector {
+	return &K8sCollector{
 		client:     client,
 		podStates:  make(map[string]*PodState),
 		nodeStates: make(map[string]*NodeState),
@@ -69,17 +69,17 @@ func NewK8sSniffer(client kubernetes.Interface) *K8sSniffer {
 }
 
 // Name returns the unique name of this sniffer
-func (s *K8sSniffer) Name() string {
+func (s *K8sCollector) Name() string {
 	return "k8s-api"
 }
 
 // Events returns the event channel
-func (s *K8sSniffer) Events() <-chan Event {
+func (s *K8sCollector) Events() <-chan Event {
 	return s.eventChan
 }
 
 // Start begins Kubernetes API monitoring
-func (s *K8sSniffer) Start(ctx context.Context, config Config) error {
+func (s *K8sCollector) Start(ctx context.Context, config Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -105,7 +105,7 @@ func (s *K8sSniffer) Start(ctx context.Context, config Config) error {
 }
 
 // Health returns the current health status
-func (s *K8sSniffer) Health() Health {
+func (s *K8sCollector) Health() Health {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -136,7 +136,7 @@ func (s *K8sSniffer) Health() Health {
 }
 
 // startInformers sets up Kubernetes watchers
-func (s *K8sSniffer) startInformers() error {
+func (s *K8sCollector) startInformers() error {
 	// Pod informer
 	s.podInformer = cache.NewSharedIndexInformer(
 		cache.NewListWatchFromClient(s.client.CoreV1().RESTClient(), "pods", "", fields.Everything()),
@@ -192,7 +192,7 @@ func (s *K8sSniffer) startInformers() error {
 }
 
 // onPodAdd handles new pod events
-func (s *K8sSniffer) onPodAdd(obj interface{}) {
+func (s *K8sCollector) onPodAdd(obj interface{}) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return
@@ -210,7 +210,7 @@ func (s *K8sSniffer) onPodAdd(obj interface{}) {
 }
 
 // onPodUpdate handles pod updates
-func (s *K8sSniffer) onPodUpdate(oldObj, newObj interface{}) {
+func (s *K8sCollector) onPodUpdate(oldObj, newObj interface{}) {
 	oldPod, ok1 := oldObj.(*corev1.Pod)
 	newPod, ok2 := newObj.(*corev1.Pod)
 	if !ok1 || !ok2 {
@@ -232,7 +232,7 @@ func (s *K8sSniffer) onPodUpdate(oldObj, newObj interface{}) {
 }
 
 // onPodDelete handles pod deletion
-func (s *K8sSniffer) onPodDelete(obj interface{}) {
+func (s *K8sCollector) onPodDelete(obj interface{}) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		// Handle deleted final state unknown
@@ -258,7 +258,7 @@ func (s *K8sSniffer) onPodDelete(obj interface{}) {
 }
 
 // onEventAdd handles new Kubernetes events
-func (s *K8sSniffer) onEventAdd(obj interface{}) {
+func (s *K8sCollector) onEventAdd(obj interface{}) {
 	event, ok := obj.(*corev1.Event)
 	if !ok {
 		return
@@ -271,7 +271,7 @@ func (s *K8sSniffer) onEventAdd(obj interface{}) {
 }
 
 // onNodeUpdate handles node updates
-func (s *K8sSniffer) onNodeUpdate(oldObj, newObj interface{}) {
+func (s *K8sCollector) onNodeUpdate(oldObj, newObj interface{}) {
 	oldNode, ok1 := oldObj.(*corev1.Node)
 	newNode, ok2 := newObj.(*corev1.Node)
 	if !ok1 || !ok2 {
@@ -282,7 +282,7 @@ func (s *K8sSniffer) onNodeUpdate(oldObj, newObj interface{}) {
 }
 
 // detectPodChanges detects significant pod changes
-func (s *K8sSniffer) detectPodChanges(oldState, newState *PodState, pod *corev1.Pod) {
+func (s *K8sCollector) detectPodChanges(oldState, newState *PodState, pod *corev1.Pod) {
 	// Detect container restarts
 	for container, newRestarts := range newState.LastRestarts {
 		oldRestarts := oldState.LastRestarts[container]
@@ -322,7 +322,7 @@ func (s *K8sSniffer) detectPodChanges(oldState, newState *PodState, pod *corev1.
 }
 
 // detectNodeChanges detects significant node changes
-func (s *K8sSniffer) detectNodeChanges(oldNode, newNode *corev1.Node) {
+func (s *K8sCollector) detectNodeChanges(oldNode, newNode *corev1.Node) {
 	// Check for node pressure conditions
 	for _, condition := range newNode.Status.Conditions {
 		switch condition.Type {
@@ -344,7 +344,7 @@ func (s *K8sSniffer) detectNodeChanges(oldNode, newNode *corev1.Node) {
 
 // Event emission methods
 
-func (s *K8sSniffer) emitContainerRestartEvent(pod *corev1.Pod, container string, restarts int32) {
+func (s *K8sCollector) emitContainerRestartEvent(pod *corev1.Pod, container string, restarts int32) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -377,7 +377,7 @@ func (s *K8sSniffer) emitContainerRestartEvent(pod *corev1.Pod, container string
 	s.emitEvent(&event)
 }
 
-func (s *K8sSniffer) emitCrashLoopEvent(pod *corev1.Pod, container string, restarts int32) {
+func (s *K8sCollector) emitCrashLoopEvent(pod *corev1.Pod, container string, restarts int32) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -411,7 +411,7 @@ func (s *K8sSniffer) emitCrashLoopEvent(pod *corev1.Pod, container string, resta
 	s.emitEvent(&event)
 }
 
-func (s *K8sSniffer) emitPodFailedEvent(pod *corev1.Pod) {
+func (s *K8sCollector) emitPodFailedEvent(pod *corev1.Pod) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -444,7 +444,7 @@ func (s *K8sSniffer) emitPodFailedEvent(pod *corev1.Pod) {
 	s.emitEvent(&event)
 }
 
-func (s *K8sSniffer) emitPodStuckEvent(pod *corev1.Pod) {
+func (s *K8sCollector) emitPodStuckEvent(pod *corev1.Pod) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -468,7 +468,7 @@ func (s *K8sSniffer) emitPodStuckEvent(pod *corev1.Pod) {
 	s.emitEvent(&event)
 }
 
-func (s *K8sSniffer) emitNodePressureEvent(node *corev1.Node, pressureType string) {
+func (s *K8sCollector) emitNodePressureEvent(node *corev1.Node, pressureType string) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -499,7 +499,7 @@ func (s *K8sSniffer) emitNodePressureEvent(node *corev1.Node, pressureType strin
 	s.emitEvent(&event)
 }
 
-func (s *K8sSniffer) emitK8sEvent(k8sEvent *corev1.Event) {
+func (s *K8sCollector) emitK8sEvent(k8sEvent *corev1.Event) {
 	severity := SeverityLow
 	if k8sEvent.Type == "Warning" {
 		severity = SeverityMedium
@@ -532,7 +532,7 @@ func (s *K8sSniffer) emitK8sEvent(k8sEvent *corev1.Event) {
 
 // Helper methods
 
-func (s *K8sSniffer) createPodState(pod *corev1.Pod) *PodState {
+func (s *K8sCollector) createPodState(pod *corev1.Pod) *PodState {
 	state := &PodState{
 		Pod:            pod,
 		LastPhase:      pod.Status.Phase,
@@ -553,7 +553,7 @@ func (s *K8sSniffer) createPodState(pod *corev1.Pod) *PodState {
 	return state
 }
 
-func (s *K8sSniffer) getContainerTerminationReason(pod *corev1.Pod, container string) string {
+func (s *K8sCollector) getContainerTerminationReason(pod *corev1.Pod, container string) string {
 	for _, cs := range pod.Status.ContainerStatuses {
 		if cs.Name == container && cs.LastTerminationState.Terminated != nil {
 			return cs.LastTerminationState.Terminated.Reason
@@ -562,7 +562,7 @@ func (s *K8sSniffer) getContainerTerminationReason(pod *corev1.Pod, container st
 	return "Unknown"
 }
 
-func (s *K8sSniffer) getDeploymentName(pod *corev1.Pod) string {
+func (s *K8sCollector) getDeploymentName(pod *corev1.Pod) string {
 	// Extract deployment name from pod
 	if owner := metav1.GetControllerOf(pod); owner != nil {
 		if owner.Kind == "ReplicaSet" {
@@ -576,7 +576,7 @@ func (s *K8sSniffer) getDeploymentName(pod *corev1.Pod) string {
 	return pod.Name
 }
 
-func (s *K8sSniffer) getPodStuckActionable(pod *corev1.Pod) *ActionableItem {
+func (s *K8sCollector) getPodStuckActionable(pod *corev1.Pod) *ActionableItem {
 	// Determine why pod is stuck
 	conditions := pod.Status.Conditions
 	
@@ -624,7 +624,7 @@ func (s *K8sSniffer) getPodStuckActionable(pod *corev1.Pod) *ActionableItem {
 	}
 }
 
-func (s *K8sSniffer) isInterestingEvent(event *corev1.Event) bool {
+func (s *K8sCollector) isInterestingEvent(event *corev1.Event) bool {
 	// Filter for interesting event types
 	interestingReasons := []string{
 		"Failed", "FailedScheduling", "FailedMount", "FailedAttachVolume",
@@ -642,7 +642,7 @@ func (s *K8sSniffer) isInterestingEvent(event *corev1.Event) bool {
 	return event.Type == "Warning" && event.Count > 3
 }
 
-func (s *K8sSniffer) emitEvent(event *Event) {
+func (s *K8sCollector) emitEvent(event *Event) {
 	select {
 	case s.eventChan <- *event:
 		atomic.AddUint64(&s.eventsProcessed, 1)
@@ -654,7 +654,7 @@ func (s *K8sSniffer) emitEvent(event *Event) {
 	}
 }
 
-func (s *K8sSniffer) emitPodNotReadyEvent(pod *corev1.Pod, condType corev1.PodConditionType) {
+func (s *K8sCollector) emitPodNotReadyEvent(pod *corev1.Pod, condType corev1.PodConditionType) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -686,7 +686,7 @@ func (s *K8sSniffer) emitPodNotReadyEvent(pod *corev1.Pod, condType corev1.PodCo
 	s.emitEvent(&event)
 }
 
-func (s *K8sSniffer) emitPodTerminatedEvent(pod *corev1.Pod, reason string) {
+func (s *K8sCollector) emitPodTerminatedEvent(pod *corev1.Pod, reason string) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -707,7 +707,7 @@ func (s *K8sSniffer) emitPodTerminatedEvent(pod *corev1.Pod, reason string) {
 }
 
 // performPeriodicChecks runs periodic health checks
-func (s *K8sSniffer) performPeriodicChecks() {
+func (s *K8sCollector) performPeriodicChecks() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -722,7 +722,7 @@ func (s *K8sSniffer) performPeriodicChecks() {
 	}
 }
 
-func (s *K8sSniffer) checkForStuckPods() {
+func (s *K8sCollector) checkForStuckPods() {
 	// Get all pods from informer cache
 	items := s.podInformer.GetStore().List()
 	
@@ -740,7 +740,7 @@ func (s *K8sSniffer) checkForStuckPods() {
 	}
 }
 
-func (s *K8sSniffer) checkForNodeIssues() {
+func (s *K8sCollector) checkForNodeIssues() {
 	// Get all nodes from informer cache
 	items := s.nodeInformer.GetStore().List()
 	
@@ -759,7 +759,7 @@ func (s *K8sSniffer) checkForNodeIssues() {
 	}
 }
 
-func (s *K8sSniffer) emitNodeNotReadyEvent(node *corev1.Node) {
+func (s *K8sCollector) emitNodeNotReadyEvent(node *corev1.Node) {
 	event := Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -788,7 +788,7 @@ func (s *K8sSniffer) emitNodeNotReadyEvent(node *corev1.Node) {
 }
 
 // Stop stops the K8s sniffer
-func (s *K8sSniffer) Stop() error {
+func (s *K8sCollector) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

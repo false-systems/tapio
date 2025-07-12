@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 
-	"github.com/falseyair/tapio/pkg/resilience"
+	"github.com/yairfalse/tapio/pkg/resilience"
 )
 
 // EnterpriseServer provides enterprise-grade OpenTelemetry HTTP endpoints

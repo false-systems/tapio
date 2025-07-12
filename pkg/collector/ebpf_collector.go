@@ -1,4 +1,4 @@
-package sniffer
+package collector
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/ebpf"
 )
 
-// EBPFSniffer implements the Sniffer interface for eBPF-based monitoring
-type EBPFSniffer struct {
+// EBPFCollector implements the Collector interface for eBPF-based monitoring
+type EBPFCollector struct {
 	// Core components
 	monitor      ebpf.Monitor
 	eventChan    chan Event
@@ -39,9 +39,9 @@ type PIDTranslator interface {
 	GetPodInfo(pid uint32) (*EventContext, error)
 }
 
-// NewEBPFSniffer creates a new eBPF-based sniffer
-func NewEBPFSniffer(monitor ebpf.Monitor, translator PIDTranslator) *EBPFSniffer {
-	return &EBPFSniffer{
+// NewEBPFCollector creates a new eBPF-based sniffer
+func NewEBPFCollector(monitor ebpf.Monitor, translator PIDTranslator) *EBPFCollector {
+	return &EBPFCollector{
 		monitor:       monitor,
 		pidTranslator: translator,
 		processCache:  NewProcessCache(64 * 1024 * 1024), // 64MB cache
@@ -49,17 +49,17 @@ func NewEBPFSniffer(monitor ebpf.Monitor, translator PIDTranslator) *EBPFSniffer
 }
 
 // Name returns the unique name of this sniffer
-func (s *EBPFSniffer) Name() string {
+func (s *EBPFCollector) Name() string {
 	return "ebpf"
 }
 
 // Events returns the event channel
-func (s *EBPFSniffer) Events() <-chan Event {
+func (s *EBPFCollector) Events() <-chan Event {
 	return s.eventChan
 }
 
 // Start begins eBPF monitoring
-func (s *EBPFSniffer) Start(ctx context.Context, config Config) error {
+func (s *EBPFCollector) Start(ctx context.Context, config Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -91,7 +91,7 @@ func (s *EBPFSniffer) Start(ctx context.Context, config Config) error {
 }
 
 // Health returns the current health status
-func (s *EBPFSniffer) Health() Health {
+func (s *EBPFCollector) Health() Health {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -126,7 +126,7 @@ func (s *EBPFSniffer) Health() Health {
 }
 
 // collectEvents collects raw events from eBPF
-func (s *EBPFSniffer) collectEvents() {
+func (s *EBPFCollector) collectEvents() {
 	ticker := time.NewTicker(50 * time.Millisecond) // 20Hz sampling
 	defer ticker.Stop()
 
@@ -159,7 +159,7 @@ func (s *EBPFSniffer) collectEvents() {
 }
 
 // processEvents processes raw eBPF data into events
-func (s *EBPFSniffer) processEvents() {
+func (s *EBPFCollector) processEvents() {
 	batch := make([]*ebpf.ProcessMemoryStats, 0, 100)
 	batchTimer := time.NewTicker(10 * time.Millisecond) // 10ms batch timeout
 	defer batchTimer.Stop()
@@ -189,7 +189,7 @@ func (s *EBPFSniffer) processEvents() {
 }
 
 // processBatch processes a batch of memory stats
-func (s *EBPFSniffer) processBatch(batch []*ebpf.ProcessMemoryStats) {
+func (s *EBPFCollector) processBatch(batch []*ebpf.ProcessMemoryStats) {
 	for _, stat := range batch {
 		// Update process cache
 		s.processCache.Update(stat)
@@ -202,7 +202,7 @@ func (s *EBPFSniffer) processBatch(batch []*ebpf.ProcessMemoryStats) {
 }
 
 // checkForAnomalies detects issues in process stats
-func (s *EBPFSniffer) checkForAnomalies(stat *ebpf.ProcessMemoryStats) *Event {
+func (s *EBPFCollector) checkForAnomalies(stat *ebpf.ProcessMemoryStats) *Event {
 	// Memory leak detection
 	if stat.AllocationRate > 10*1024*1024 { // 10MB/s
 		return s.createMemoryLeakEvent(stat)
@@ -217,7 +217,7 @@ func (s *EBPFSniffer) checkForAnomalies(stat *ebpf.ProcessMemoryStats) *Event {
 }
 
 // createMemoryLeakEvent creates a memory leak detection event
-func (s *EBPFSniffer) createMemoryLeakEvent(stat *ebpf.ProcessMemoryStats) *Event {
+func (s *EBPFCollector) createMemoryLeakEvent(stat *ebpf.ProcessMemoryStats) *Event {
 	event := &Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -255,7 +255,7 @@ func (s *EBPFSniffer) createMemoryLeakEvent(stat *ebpf.ProcessMemoryStats) *Even
 }
 
 // createHighMemoryEvent creates a high memory usage event
-func (s *EBPFSniffer) createHighMemoryEvent(stat *ebpf.ProcessMemoryStats) *Event {
+func (s *EBPFCollector) createHighMemoryEvent(stat *ebpf.ProcessMemoryStats) *Event {
 	event := &Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -279,7 +279,7 @@ func (s *EBPFSniffer) createHighMemoryEvent(stat *ebpf.ProcessMemoryStats) *Even
 }
 
 // performPredictions runs OOM predictions periodically
-func (s *EBPFSniffer) performPredictions() {
+func (s *EBPFCollector) performPredictions() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -294,7 +294,7 @@ func (s *EBPFSniffer) performPredictions() {
 }
 
 // predictOOMs predicts out-of-memory conditions
-func (s *EBPFSniffer) predictOOMs() {
+func (s *EBPFCollector) predictOOMs() {
 	processes := s.processCache.GetAll()
 	
 	// Get memory limits (would come from Kubernetes)
@@ -314,7 +314,7 @@ func (s *EBPFSniffer) predictOOMs() {
 }
 
 // emitOOMPrediction emits an OOM prediction event
-func (s *EBPFSniffer) emitOOMPrediction(pid uint32, pred *ebpf.OOMPrediction, proc *ProcessInfo) {
+func (s *EBPFCollector) emitOOMPrediction(pid uint32, pred *ebpf.OOMPrediction, proc *ProcessInfo) {
 	event := &Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -353,7 +353,7 @@ func (s *EBPFSniffer) emitOOMPrediction(pid uint32, pred *ebpf.OOMPrediction, pr
 }
 
 // emitEvent sends an event to the channel
-func (s *EBPFSniffer) emitEvent(event *Event) {
+func (s *EBPFCollector) emitEvent(event *Event) {
 	select {
 	case s.eventChan <- *event:
 		atomic.AddUint64(&s.eventsProcessed, 1)
@@ -366,14 +366,14 @@ func (s *EBPFSniffer) emitEvent(event *Event) {
 }
 
 // shouldSample determines if an event should be sampled
-func (s *EBPFSniffer) shouldSample() bool {
+func (s *EBPFCollector) shouldSample() bool {
 	// For now, use configured sampling rate
 	// In production, would use more sophisticated sampling
 	return true // Always sample for MVP
 }
 
 // Stop stops the eBPF sniffer
-func (s *EBPFSniffer) Stop() error {
+func (s *EBPFCollector) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

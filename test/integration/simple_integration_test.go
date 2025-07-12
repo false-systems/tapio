@@ -15,8 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/falseyair/tapio/pkg/simple"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/simple"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 func TestSimpleCheckerIntegration(t *testing.T) {

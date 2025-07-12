@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // DiskPressureRule detects disk pressure affecting performance and stability

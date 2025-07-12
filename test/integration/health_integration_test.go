@@ -14,8 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/falseyair/tapio/pkg/health"
-	"github.com/falseyair/tapio/pkg/k8s"
+	"github.com/yairfalse/tapio/pkg/health"
+	"github.com/yairfalse/tapio/pkg/k8s"
 )
 
 // MockK8sClient wraps the fake clientset for testing

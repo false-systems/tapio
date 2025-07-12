@@ -4,10 +4,58 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
+// CorrelatorConfig configures threshold values for correlators
+type CorrelatorConfig struct {
+	// Memory pressure thresholds
+	MinMemoryEvents       int `json:"min_memory_events"`
+	
+	// Service failure thresholds
+	MinRestartEvents      int `json:"min_restart_events"`      // For crash loop detection
+	MinErrorEvents        int `json:"min_error_events"`        // For service degradation
+	
+	// Network issue thresholds
+	MinDNSEvents          int `json:"min_dns_events"`          // For DNS resolution failures
+	MinConnectionEvents   int `json:"min_connection_events"`   // For connection issues
+	
+	// Security threat thresholds
+	MinAuthFailures       int `json:"min_auth_failures"`       // For brute force detection
+	MinFailuresPerSource  int `json:"min_failures_per_source"` // For brute force per source
+	
+	// Analysis thresholds
+	EventRateThreshold    float64 `json:"event_rate_threshold"`    // Events per minute
+	CriticalEventThreshold int     `json:"critical_event_threshold"` // Critical events count
+	TrendAnalysisWindow   int     `json:"trend_analysis_window"`   // Minutes for trend analysis
+}
+
+// DefaultCorrelatorConfig returns default configuration values
+func DefaultCorrelatorConfig() CorrelatorConfig {
+	return CorrelatorConfig{
+		MinMemoryEvents:        2,
+		MinRestartEvents:       3,
+		MinErrorEvents:         5,
+		MinDNSEvents:          3,
+		MinConnectionEvents:   5,
+		MinAuthFailures:       5,
+		MinFailuresPerSource:  3,
+		EventRateThreshold:    1000.0,
+		CriticalEventThreshold: 10,
+		TrendAnalysisWindow:   5,
+	}
+}
+
 // MemoryPressureCorrelator correlates memory-related events
-type MemoryPressureCorrelator struct{}
+type MemoryPressureCorrelator struct{
+	config CorrelatorConfig
+}
+
+// NewMemoryPressureCorrelator creates a new memory pressure correlator
+func NewMemoryPressureCorrelator(config CorrelatorConfig) *MemoryPressureCorrelator {
+	return &MemoryPressureCorrelator{config: config}
+}
 
 func (m *MemoryPressureCorrelator) Name() string {
 	return "memory_pressure"
@@ -46,7 +94,7 @@ func (m *MemoryPressureCorrelator) Correlate(events []TimelineEvent) []Correlati
 		}
 		
 		// Check for memory pressure correlation
-		if len(memoryEvents) >= 2 || len(oomEvents) > 0 {
+		if len(memoryEvents) >= m.config.MinMemoryEvents || len(oomEvents) > 0 {
 			severity := "warning"
 			confidence := 0.7
 			description := fmt.Sprintf("Memory pressure detected for %s", entity)
@@ -63,7 +111,7 @@ func (m *MemoryPressureCorrelator) Correlate(events []TimelineEvent) []Correlati
 			}
 			
 			result := CorrelationResult{
-				ID:          fmt.Sprintf("mem_pressure_%s_%d", entity, time.Now().Unix()),
+				ID:          fmt.Sprintf("mem_pressure_%s_%s", entity, uuid.New().String()),
 				Type:        "memory_pressure",
 				Confidence:  confidence,
 				Events:      allEvents,
@@ -107,7 +155,14 @@ func (m *MemoryPressureCorrelator) Correlate(events []TimelineEvent) []Correlati
 }
 
 // ServiceFailureCorrelator correlates service failure events
-type ServiceFailureCorrelator struct{}
+type ServiceFailureCorrelator struct{
+	config CorrelatorConfig
+}
+
+// NewServiceFailureCorrelator creates a new service failure correlator
+func NewServiceFailureCorrelator(config CorrelatorConfig) *ServiceFailureCorrelator {
+	return &ServiceFailureCorrelator{config: config}
+}
 
 func (s *ServiceFailureCorrelator) Name() string {
 	return "service_failure"
@@ -147,14 +202,14 @@ func (s *ServiceFailureCorrelator) Correlate(events []TimelineEvent) []Correlati
 		}
 		
 		// Check for crash loop pattern
-		if len(restartEvents) >= 3 {
+		if len(restartEvents) >= s.config.MinRestartEvents {
 			var eventIDs []string
 			for _, e := range restartEvents {
 				eventIDs = append(eventIDs, e.ID)
 			}
 			
 			result := CorrelationResult{
-				ID:          fmt.Sprintf("crash_loop_%s_%d", service, time.Now().Unix()),
+				ID:          fmt.Sprintf("crash_loop_%s_%s", service, uuid.New().String()),
 				Type:        "crash_loop",
 				Confidence:  0.9,
 				Events:      eventIDs,
@@ -194,14 +249,14 @@ func (s *ServiceFailureCorrelator) Correlate(events []TimelineEvent) []Correlati
 		}
 		
 		// Check for service degradation
-		if len(errorEvents) >= 5 && len(failureEvents) == 0 {
+		if len(errorEvents) >= s.config.MinErrorEvents && len(failureEvents) == 0 {
 			var eventIDs []string
 			for _, e := range errorEvents {
 				eventIDs = append(eventIDs, e.ID)
 			}
 			
 			result := CorrelationResult{
-				ID:          fmt.Sprintf("service_degraded_%s_%d", service, time.Now().Unix()),
+				ID:          fmt.Sprintf("service_degraded_%s_%s", service, uuid.New().String()),
 				Type:        "service_degradation",
 				Confidence:  0.7,
 				Events:      eventIDs,
@@ -236,7 +291,14 @@ func (s *ServiceFailureCorrelator) Correlate(events []TimelineEvent) []Correlati
 }
 
 // NetworkIssueCorrelator correlates network-related events
-type NetworkIssueCorrelator struct{}
+type NetworkIssueCorrelator struct{
+	config CorrelatorConfig
+}
+
+// NewNetworkIssueCorrelator creates a new network issue correlator
+func NewNetworkIssueCorrelator(config CorrelatorConfig) *NetworkIssueCorrelator {
+	return &NetworkIssueCorrelator{config: config}
+}
 
 func (n *NetworkIssueCorrelator) Name() string {
 	return "network_issue"
@@ -277,14 +339,14 @@ func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []Correlation
 	}
 	
 	// Check for DNS issues
-	if len(dnsEvents) >= 3 {
+	if len(dnsEvents) >= n.config.MinDNSEvents {
 		var eventIDs []string
 		for _, e := range dnsEvents {
 			eventIDs = append(eventIDs, e.ID)
 		}
 		
 		result := CorrelationResult{
-			ID:          fmt.Sprintf("dns_issue_%d", time.Now().Unix()),
+			ID:          fmt.Sprintf("dns_issue_%s", uuid.New().String()),
 			Type:        "dns_resolution_failure",
 			Confidence:  0.85,
 			Events:      eventIDs,
@@ -321,7 +383,7 @@ func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []Correlation
 	}
 	
 	// Check for connection issues
-	if len(connectionEvents) >= 5 {
+	if len(connectionEvents) >= n.config.MinConnectionEvents {
 		var eventIDs []string
 		affectedServices := make(map[string]bool)
 		
@@ -336,7 +398,7 @@ func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []Correlation
 		}
 		
 		result := CorrelationResult{
-			ID:          fmt.Sprintf("connection_issue_%d", time.Now().Unix()),
+			ID:          fmt.Sprintf("connection_issue_%s", uuid.New().String()),
 			Type:        "network_connectivity",
 			Confidence:  0.8,
 			Events:      eventIDs,
@@ -378,7 +440,14 @@ func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []Correlation
 }
 
 // SecurityThreatCorrelator correlates security-related events
-type SecurityThreatCorrelator struct{}
+type SecurityThreatCorrelator struct{
+	config CorrelatorConfig
+}
+
+// NewSecurityThreatCorrelator creates a new security threat correlator
+func NewSecurityThreatCorrelator(config CorrelatorConfig) *SecurityThreatCorrelator {
+	return &SecurityThreatCorrelator{config: config}
+}
 
 func (s *SecurityThreatCorrelator) Name() string {
 	return "security_threat"
@@ -421,7 +490,7 @@ func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []Correlati
 	}
 	
 	// Check for brute force attempts
-	if len(authFailures) >= 5 {
+	if len(authFailures) >= s.config.MinAuthFailures {
 		// Group by source
 		sourceFailures := make(map[string][]TimelineEvent)
 		for _, event := range authFailures {
@@ -433,14 +502,14 @@ func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []Correlati
 		}
 		
 		for source, failures := range sourceFailures {
-			if len(failures) >= 3 {
+			if len(failures) >= s.config.MinFailuresPerSource {
 				var eventIDs []string
 				for _, e := range failures {
 					eventIDs = append(eventIDs, e.ID)
 				}
 				
 				result := CorrelationResult{
-					ID:          fmt.Sprintf("brute_force_%s_%d", source, time.Now().Unix()),
+					ID:          fmt.Sprintf("brute_force_%s_%s", source, uuid.New().String()),
 					Type:        "brute_force_attempt",
 					Confidence:  0.9,
 					Events:      eventIDs,
@@ -488,7 +557,7 @@ func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []Correlati
 		}
 		
 		result := CorrelationResult{
-			ID:          fmt.Sprintf("priv_escalation_%d", time.Now().Unix()),
+			ID:          fmt.Sprintf("priv_escalation_%s", uuid.New().String()),
 			Type:        "privilege_escalation",
 			Confidence:  0.85,
 			Events:      eventIDs,
@@ -528,7 +597,14 @@ func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []Correlati
 }
 
 // PatternAnalyzer analyzes the timeline for patterns
-type PatternAnalyzer struct{}
+type PatternAnalyzer struct{
+	config CorrelatorConfig
+}
+
+// NewPatternAnalyzer creates a new pattern analyzer
+func NewPatternAnalyzer(config CorrelatorConfig) *PatternAnalyzer {
+	return &PatternAnalyzer{config: config}
+}
 
 func (p *PatternAnalyzer) Name() string {
 	return "pattern_analyzer"
@@ -573,7 +649,14 @@ func (p *PatternAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 }
 
 // AnomalyAnalyzer detects anomalies in the timeline
-type AnomalyAnalyzer struct{}
+type AnomalyAnalyzer struct{
+	config CorrelatorConfig
+}
+
+// NewAnomalyAnalyzer creates a new anomaly analyzer
+func NewAnomalyAnalyzer(config CorrelatorConfig) *AnomalyAnalyzer {
+	return &AnomalyAnalyzer{config: config}
+}
 
 func (a *AnomalyAnalyzer) Name() string {
 	return "anomaly_analyzer"
@@ -590,7 +673,7 @@ func (a *AnomalyAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 		if duration > 0 {
 			eventsPerMinute := float64(stats.TotalEvents) / duration.Minutes()
 			
-			if eventsPerMinute > 1000 {
+			if eventsPerMinute > a.config.EventRateThreshold {
 				result := AnalysisResult{
 					Type:    "anomaly_detection",
 					Summary: fmt.Sprintf("Unusually high event rate: %.2f events/minute", eventsPerMinute),
@@ -612,7 +695,7 @@ func (a *AnomalyAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 	}
 	
 	// Check for severity distribution anomalies
-	if critical, exists := stats.EventsBySeverity["critical"]; exists && critical > 10 {
+	if critical, exists := stats.EventsBySeverity["critical"]; exists && critical > a.config.CriticalEventThreshold {
 		result := AnalysisResult{
 			Type:    "anomaly_detection",
 			Summary: fmt.Sprintf("High number of critical events: %d", critical),
@@ -634,7 +717,14 @@ func (a *AnomalyAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 }
 
 // TrendAnalyzer analyzes trends in the timeline
-type TrendAnalyzer struct{}
+type TrendAnalyzer struct{
+	config CorrelatorConfig
+}
+
+// NewTrendAnalyzer creates a new trend analyzer
+func NewTrendAnalyzer(config CorrelatorConfig) *TrendAnalyzer {
+	return &TrendAnalyzer{config: config}
+}
 
 func (t *TrendAnalyzer) Name() string {
 	return "trend_analyzer"
@@ -645,19 +735,20 @@ func (t *TrendAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 	
 	// Get events in time windows
 	now := time.Now()
+	windowDuration := time.Duration(t.config.TrendAnalysisWindow) * time.Minute
 	last5Min := timeline.GetEvents(&TimeRange{
-		Start: now.Add(-5 * time.Minute),
+		Start: now.Add(-windowDuration),
 		End:   now,
 	})
 	
 	last15Min := timeline.GetEvents(&TimeRange{
-		Start: now.Add(-15 * time.Minute),
-		End:   now.Add(-5 * time.Minute),
+		Start: now.Add(-3 * windowDuration),
+		End:   now.Add(-windowDuration),
 	})
 	
 	if len(last5Min) > 0 && len(last15Min) > 0 {
-		recentRate := float64(len(last5Min)) / 5.0
-		previousRate := float64(len(last15Min)) / 10.0
+		recentRate := float64(len(last5Min)) / float64(t.config.TrendAnalysisWindow)
+		previousRate := float64(len(last15Min)) / float64(2 * t.config.TrendAnalysisWindow)
 		
 		if recentRate > previousRate*2 {
 			result := AnalysisResult{

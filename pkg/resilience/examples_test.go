@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/resilience"
+	"github.com/yairfalse/tapio/pkg/resilience"
 )
 
 // Example_circuitBreaker demonstrates how to use the circuit breaker pattern

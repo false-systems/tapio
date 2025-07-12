@@ -6,65 +6,54 @@ import (
 	"testing"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/translator"
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// MockTranslatorEngine is a mock implementation of translator.Engine
-type MockTranslatorEngine struct {
+// MockSimplePIDTranslator is a mock implementation of collector.SimplePIDTranslator
+type MockSimplePIDTranslator struct {
 	mock.Mock
 }
 
-func (m *MockTranslatorEngine) Translate(pid int32) (*translator.TranslationResult, error) {
+func (m *MockSimplePIDTranslator) GetPodInfo(pid uint32) (*collector.EventContext, error) {
 	args := m.Called(pid)
 	result := args.Get(0)
 	if result == nil {
 		return nil, args.Error(1)
 	}
-	return result.(*translator.TranslationResult), args.Error(1)
+	return result.(*collector.EventContext), args.Error(1)
 }
 
-func (m *MockTranslatorEngine) GetMetrics() (cacheHitRate float64, avgLatency float64) {
+func (m *MockSimplePIDTranslator) GetStats() map[string]interface{} {
 	args := m.Called()
-	return args.Get(0).(float64), args.Get(1).(float64)
-}
-
-func (m *MockTranslatorEngine) Start(ctx interface{}) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *MockTranslatorEngine) Stop() error {
-	args := m.Called()
-	return args.Error(0)
+	return args.Get(0).(map[string]interface{})
 }
 
 func TestNewTranslatorPIDMapper(t *testing.T) {
-	engine := &MockTranslatorEngine{}
-	mapper := NewTranslatorPIDMapper(engine)
+	translator := &MockSimplePIDTranslator{}
+	mapper := NewTranslatorPIDMapper(translator)
 
 	assert.NotNil(t, mapper)
-	assert.Equal(t, engine, mapper.engine)
+	assert.Equal(t, translator, mapper.translator)
 	assert.NotNil(t, mapper.fallbackData)
 }
 
 func TestMapPIDToTarget(t *testing.T) {
 	t.Run("successful_translation", func(t *testing.T) {
-		engine := &MockTranslatorEngine{}
-		mapper := NewTranslatorPIDMapper(engine)
+		translator := &MockSimplePIDTranslator{}
+		mapper := NewTranslatorPIDMapper(translator)
 
-		expectedResult := &translator.TranslationResult{
-			PodName:       "test-pod",
-			Namespace:     "default",
-			ContainerID:   "abc123",
-			ContainerName: "app",
-			NodeName:      "node1",
-			Timestamp:     time.Now(),
+		expectedResult := &collector.EventContext{
+			Pod:       "test-pod",
+			Namespace: "default",
+			Container: "app",
+			Node:      "node1",
+			PID:       1234,
 		}
 
-		engine.On("Translate", int32(1234)).Return(expectedResult, nil)
+		translator.On("GetPodInfo", uint32(1234)).Return(expectedResult, nil)
 
 		target, err := mapper.MapPIDToTarget(1234)
 
@@ -76,9 +65,8 @@ func TestMapPIDToTarget(t *testing.T) {
 		assert.Equal(t, int32(1234), target.PID)
 		assert.Equal(t, "app", target.Container)
 		assert.Equal(t, "node1", target.Node)
-		// Container ID is not stored in Target.Labels, but in the result metadata
 
-		engine.AssertExpectations(t)
+		translator.AssertExpectations(t)
 
 		// Verify fallback was updated
 		mapper.mu.RLock()
@@ -89,8 +77,8 @@ func TestMapPIDToTarget(t *testing.T) {
 	})
 
 	t.Run("translation_error_with_fallback", func(t *testing.T) {
-		engine := &MockTranslatorEngine{}
-		mapper := NewTranslatorPIDMapper(engine)
+		translator := &MockSimplePIDTranslator{}
+		mapper := NewTranslatorPIDMapper(translator)
 
 		// Pre-populate fallback
 		fallbackTarget := &universal.Target{
@@ -101,21 +89,21 @@ func TestMapPIDToTarget(t *testing.T) {
 		}
 		mapper.fallbackData[5678] = fallbackTarget
 
-		engine.On("Translate", int32(5678)).Return(nil, errors.New("translation failed"))
+		translator.On("GetPodInfo", uint32(5678)).Return(nil, errors.New("translation failed"))
 
 		target, err := mapper.MapPIDToTarget(5678)
 
 		assert.NoError(t, err)
 		assert.Equal(t, fallbackTarget, target)
 
-		engine.AssertExpectations(t)
+		translator.AssertExpectations(t)
 	})
 
 	t.Run("translation_error_no_fallback", func(t *testing.T) {
-		engine := &MockTranslatorEngine{}
-		mapper := NewTranslatorPIDMapper(engine)
+		translator := &MockSimplePIDTranslator{}
+		mapper := NewTranslatorPIDMapper(translator)
 
-		engine.On("Translate", int32(9999)).Return(nil, errors.New("translation failed"))
+		translator.On("GetPodInfo", uint32(9999)).Return(nil, errors.New("translation failed"))
 
 		target, err := mapper.MapPIDToTarget(9999)
 
@@ -123,7 +111,7 @@ func TestMapPIDToTarget(t *testing.T) {
 		assert.Contains(t, err.Error(), "translation failed")
 		assert.Nil(t, target)
 
-		engine.AssertExpectations(t)
+		translator.AssertExpectations(t)
 	})
 
 	t.Run("no_translator_engine", func(t *testing.T) {
@@ -183,11 +171,11 @@ func TestCleanupOldEntries(t *testing.T) {
 }
 
 func TestConcurrentMapperAccess(t *testing.T) {
-	engine := &MockTranslatorEngine{}
-	mapper := NewTranslatorPIDMapper(engine)
+	translator := &MockSimplePIDTranslator{}
+	mapper := NewTranslatorPIDMapper(translator)
 
 	// Setup mock to handle concurrent calls
-	engine.On("Translate", mock.Anything).Return(nil, errors.New("test error"))
+	translator.On("GetPodInfo", mock.Anything).Return(nil, errors.New("test error"))
 
 	// Run concurrent operations
 	done := make(chan bool)

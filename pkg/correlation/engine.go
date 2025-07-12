@@ -22,25 +22,29 @@ const (
 
 // EngineConfig configures the correlation engine
 type EngineConfig struct {
-	ExecutionMode ExecutionMode `json:"execution_mode"`
-	MaxWorkers    int           `json:"max_workers"`
-	Timeout       time.Duration `json:"timeout"`
-	CacheTTL      time.Duration `json:"cache_ttl"`
-	EnableMetrics bool          `json:"enable_metrics"`
-	RetryAttempts int           `json:"retry_attempts"`
-	RetryDelay    time.Duration `json:"retry_delay"`
+	ExecutionMode       ExecutionMode `json:"execution_mode"`
+	MaxWorkers          int           `json:"max_workers"`
+	Timeout             time.Duration `json:"timeout"`
+	CacheTTL            time.Duration `json:"cache_ttl"`
+	EnableMetrics       bool          `json:"enable_metrics"`
+	RetryAttempts       int           `json:"retry_attempts"`
+	RetryDelay          time.Duration `json:"retry_delay"`
+	MaxHistoryEntries   int           `json:"max_history_entries"`
+	HistoryRetentionTTL time.Duration `json:"history_retention_ttl"`
 }
 
 // DefaultEngineConfig returns a default engine configuration
 func DefaultEngineConfig() EngineConfig {
 	return EngineConfig{
-		ExecutionMode: ExecutionModeAdaptive,
-		MaxWorkers:    10,
-		Timeout:       30 * time.Second,
-		CacheTTL:      5 * time.Minute,
-		EnableMetrics: true,
-		RetryAttempts: 3,
-		RetryDelay:    time.Second,
+		ExecutionMode:       ExecutionModeAdaptive,
+		MaxWorkers:          10,
+		Timeout:             30 * time.Second,
+		CacheTTL:            5 * time.Minute,
+		EnableMetrics:       true,
+		RetryAttempts:       3,
+		RetryDelay:          time.Second,
+		MaxHistoryEntries:   100,
+		HistoryRetentionTTL: 24 * time.Hour,
 	}
 }
 
@@ -147,10 +151,7 @@ func (e *Engine) Execute(ctx context.Context) ([]Finding, error) {
 	// Store execution history
 	e.historyMutex.Lock()
 	e.executionHistory = append(e.executionHistory, results...)
-	// Keep only last 100 executions
-	if len(e.executionHistory) > 100 {
-		e.executionHistory = e.executionHistory[len(e.executionHistory)-100:]
-	}
+	e.cleanupExecutionHistory()
 	e.historyMutex.Unlock()
 
 	return findings, nil
@@ -472,5 +473,33 @@ func (e *Engine) updateRuleMetricsLocked(result ExecutionResult) {
 		totalTime := int64(ruleMetrics.AverageExecutionTime) * (ruleMetrics.ExecutionCount - 1)
 		totalTime += int64(result.Duration)
 		ruleMetrics.AverageExecutionTime = time.Duration(totalTime / ruleMetrics.ExecutionCount)
+	}
+}
+
+// cleanupExecutionHistory removes old execution history entries based on size and time limits
+// This method assumes the historyMutex is already held
+func (e *Engine) cleanupExecutionHistory() {
+	if len(e.executionHistory) == 0 {
+		return
+	}
+
+	// Remove entries older than TTL
+	if e.config.HistoryRetentionTTL > 0 {
+		cutoffTime := time.Now().Add(-e.config.HistoryRetentionTTL)
+		validEntries := make([]ExecutionResult, 0, len(e.executionHistory))
+		
+		for _, result := range e.executionHistory {
+			if result.Timestamp.After(cutoffTime) {
+				validEntries = append(validEntries, result)
+			}
+		}
+		
+		e.executionHistory = validEntries
+	}
+
+	// Limit by maximum number of entries
+	if e.config.MaxHistoryEntries > 0 && len(e.executionHistory) > e.config.MaxHistoryEntries {
+		startIndex := len(e.executionHistory) - e.config.MaxHistoryEntries
+		e.executionHistory = e.executionHistory[startIndex:]
 	}
 }

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/journald"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/journald"
 )
 
 // JournaldSource implements the DataSource interface for journald log monitoring

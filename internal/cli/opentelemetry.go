@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/simple"
-	"github.com/falseyair/tapio/pkg/telemetry"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/simple"
+	"github.com/yairfalse/tapio/pkg/telemetry"
 )
 
 var (

@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/performance"
-	"github.com/falseyair/tapio/pkg/resilience"
-	"github.com/falseyair/tapio/pkg/sources"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/performance"
+	"github.com/yairfalse/tapio/pkg/resilience"
+	"github.com/yairfalse/tapio/pkg/sources"
 )
 
 // UnifiedSystem represents the complete eBPF System Sniffer

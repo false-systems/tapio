@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/ebpf"
 )
 
 // EBPFDataSource implements DataSource interface for eBPF monitoring data

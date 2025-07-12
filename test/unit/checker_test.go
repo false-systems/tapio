@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 func TestCheckRequest_Validation(t *testing.T) {

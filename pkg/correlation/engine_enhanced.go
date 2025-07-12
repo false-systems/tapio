@@ -7,10 +7,124 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/journald"
-	"github.com/falseyair/tapio/pkg/systemd"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/journald"
+	"github.com/yairfalse/tapio/pkg/systemd"
 )
+
+// CircuitBreakerState represents the state of a circuit breaker
+type CircuitBreakerState int
+
+const (
+	// CircuitBreakerClosed allows requests through
+	CircuitBreakerClosed CircuitBreakerState = iota
+	// CircuitBreakerOpen blocks requests
+	CircuitBreakerOpen
+	// CircuitBreakerHalfOpen allows limited requests for testing
+	CircuitBreakerHalfOpen
+)
+
+// CircuitBreaker protects data sources from repeated failures
+type CircuitBreaker struct {
+	name           string
+	state          CircuitBreakerState
+	failureCount   int
+	successCount   int
+	lastFailure    time.Time
+	lastSuccess    time.Time
+	failureThreshold int
+	timeout        time.Duration
+	mutex          sync.RWMutex
+}
+
+// NewCircuitBreaker creates a new circuit breaker
+func NewCircuitBreaker(name string, failureThreshold int, timeout time.Duration) *CircuitBreaker {
+	return &CircuitBreaker{
+		name:             name,
+		state:            CircuitBreakerClosed,
+		failureThreshold: failureThreshold,
+		timeout:          timeout,
+	}
+}
+
+// CanExecute checks if a request can be executed
+func (cb *CircuitBreaker) CanExecute() bool {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+
+	switch cb.state {
+	case CircuitBreakerClosed:
+		return true
+	case CircuitBreakerOpen:
+		// Check if timeout has passed to transition to half-open
+		if time.Since(cb.lastFailure) > cb.timeout {
+			return true
+		}
+		return false
+	case CircuitBreakerHalfOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// OnSuccess records a successful execution
+func (cb *CircuitBreaker) OnSuccess() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	cb.successCount++
+	cb.lastSuccess = time.Now()
+
+	if cb.state == CircuitBreakerHalfOpen {
+		// Reset to closed after successful execution in half-open state
+		cb.state = CircuitBreakerClosed
+		cb.failureCount = 0
+	}
+}
+
+// OnFailure records a failed execution
+func (cb *CircuitBreaker) OnFailure() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	cb.failureCount++
+	cb.lastFailure = time.Now()
+
+	if cb.state == CircuitBreakerClosed && cb.failureCount >= cb.failureThreshold {
+		cb.state = CircuitBreakerOpen
+	} else if cb.state == CircuitBreakerHalfOpen {
+		cb.state = CircuitBreakerOpen
+	}
+}
+
+// GetState returns the current state
+func (cb *CircuitBreaker) GetState() CircuitBreakerState {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+	
+	// Transition from open to half-open if timeout has passed
+	if cb.state == CircuitBreakerOpen && time.Since(cb.lastFailure) > cb.timeout {
+		cb.state = CircuitBreakerHalfOpen
+	}
+	
+	return cb.state
+}
+
+// GetStats returns circuit breaker statistics
+func (cb *CircuitBreaker) GetStats() map[string]interface{} {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+
+	return map[string]interface{}{
+		"name":          cb.name,
+		"state":         cb.state,
+		"failure_count": cb.failureCount,
+		"success_count": cb.successCount,
+		"last_failure":  cb.lastFailure,
+		"last_success":  cb.lastSuccess,
+	}
+}
 
 // EnhancedEngine provides advanced multi-source correlation capabilities
 type EnhancedEngine struct {
@@ -26,6 +140,9 @@ type EnhancedEngine struct {
 	
 	// Configuration
 	config         *EnhancedEngineConfig
+	
+	// Circuit breakers for data sources
+	circuitBreakers map[SourceType]*CircuitBreaker
 	
 	// Channels
 	eventChan      chan TimelineEvent
@@ -58,6 +175,11 @@ type EnhancedEngineConfig struct {
 	// Performance settings
 	MaxEventsPerSecond   int
 	EnableThrottling     bool
+	
+	// Circuit breaker settings
+	EnableCircuitBreaker bool
+	FailureThreshold     int
+	RecoveryTimeout      time.Duration
 }
 
 // Correlator defines the interface for event correlation
@@ -120,15 +242,16 @@ func NewEnhancedEngine(config *EnhancedEngineConfig) *EnhancedEngine {
 	ctx, cancel := context.WithCancel(context.Background())
 	
 	engine := &EnhancedEngine{
-		sources:     make(map[SourceType]DataSource),
-		timeline:    NewTimeline(config.MaxTimelineEvents),
-		correlators: make([]Correlator, 0),
-		analyzers:   make([]Analyzer, 0),
-		config:      config,
-		eventChan:   make(chan TimelineEvent, config.EventBufferSize),
-		resultChan:  make(chan CorrelationResult, 1000),
-		ctx:         ctx,
-		cancel:      cancel,
+		sources:         make(map[SourceType]DataSource),
+		timeline:        NewTimeline(config.MaxTimelineEvents),
+		correlators:     make([]Correlator, 0),
+		analyzers:       make([]Analyzer, 0),
+		config:          config,
+		circuitBreakers: make(map[SourceType]*CircuitBreaker),
+		eventChan:       make(chan TimelineEvent, config.EventBufferSize),
+		resultChan:      make(chan CorrelationResult, 1000),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 	
 	// Initialize default correlators
@@ -154,6 +277,9 @@ func DefaultEnhancedEngineConfig() *EnhancedEngineConfig {
 		EnablePrediction:      false,
 		MaxEventsPerSecond:    10000,
 		EnableThrottling:      true,
+		EnableCircuitBreaker:  true,
+		FailureThreshold:      5,
+		RecoveryTimeout:       30 * time.Second,
 	}
 }
 
@@ -163,6 +289,15 @@ func (e *EnhancedEngine) AddSource(sourceType SourceType, source DataSource) {
 	defer e.mutex.Unlock()
 	
 	e.sources[sourceType] = source
+	
+	// Initialize circuit breaker for this source if enabled
+	if e.config.EnableCircuitBreaker {
+		e.circuitBreakers[sourceType] = NewCircuitBreaker(
+			string(sourceType),
+			e.config.FailureThreshold,
+			e.config.RecoveryTimeout,
+		)
+	}
 }
 
 // AddCorrelator adds a custom correlator
@@ -254,29 +389,58 @@ func (e *EnhancedEngine) collectFromSources() {
 func (e *EnhancedEngine) collectSourceData() {
 	// Collect from eBPF source
 	if source, exists := e.sources[SourceEBPF]; exists && source.IsAvailable() {
-		if data, err := source.GetData(e.ctx, "events", nil); err == nil {
-			e.processEBPFEvents(data)
-		}
+		e.collectFromSource(SourceEBPF, source, "events", e.processEBPFEvents)
 	}
 	
 	// Collect from systemd source
 	if source, exists := e.sources[SourceSystemd]; exists && source.IsAvailable() {
-		if data, err := source.GetData(e.ctx, "events", nil); err == nil {
-			e.processSystemdEvents(data)
-		}
+		e.collectFromSource(SourceSystemd, source, "events", e.processSystemdEvents)
 	}
 	
 	// Collect from journald source
 	if source, exists := e.sources[SourceJournald]; exists && source.IsAvailable() {
-		if data, err := source.GetData(e.ctx, "events", nil); err == nil {
-			e.processJournaldEvents(data)
-		}
+		e.collectFromSource(SourceJournald, source, "events", e.processJournaldEvents)
 	}
 	
 	// Collect from Kubernetes source
 	if source, exists := e.sources[SourceKubernetes]; exists && source.IsAvailable() {
-		if data, err := source.GetData(e.ctx, "events", nil); err == nil {
-			e.processKubernetesEvents(data)
+		e.collectFromSource(SourceKubernetes, source, "events", e.processKubernetesEvents)
+	}
+}
+
+// collectFromSource collects data from a specific source with circuit breaker protection
+func (e *EnhancedEngine) collectFromSource(sourceType SourceType, source DataSource, dataType string, processFunc func(interface{})) {
+	// Check circuit breaker if enabled
+	if e.config.EnableCircuitBreaker {
+		if cb, exists := e.circuitBreakers[sourceType]; exists {
+			if !cb.CanExecute() {
+				// Circuit breaker is open, skip this source
+				return
+			}
+		}
+	}
+	
+	// Attempt to get data
+	data, err := source.GetData(e.ctx, dataType, nil)
+	
+	// Record success/failure with circuit breaker
+	if e.config.EnableCircuitBreaker {
+		if cb, exists := e.circuitBreakers[sourceType]; exists {
+			if err != nil {
+				cb.OnFailure()
+				e.errorCount++
+			} else {
+				cb.OnSuccess()
+				// Process data if successful
+				processFunc(data)
+			}
+		}
+	} else {
+		// No circuit breaker, process data if successful
+		if err == nil {
+			processFunc(data)
+		} else {
+			e.errorCount++
 		}
 	}
 }
@@ -534,7 +698,7 @@ func (e *EnhancedEngine) GetStatistics() map[string]interface{} {
 	
 	timelineStats := e.timeline.GetStatistics()
 	
-	return map[string]interface{}{
+	stats := map[string]interface{}{
 		"is_running":       e.isRunning,
 		"processing_rate":  e.processingRate,
 		"error_count":      e.errorCount,
@@ -543,6 +707,17 @@ func (e *EnhancedEngine) GetStatistics() map[string]interface{} {
 		"correlators":      len(e.correlators),
 		"analyzers":        len(e.analyzers),
 	}
+	
+	// Add circuit breaker statistics if enabled
+	if e.config.EnableCircuitBreaker {
+		circuitBreakerStats := make(map[string]interface{})
+		for sourceType, cb := range e.circuitBreakers {
+			circuitBreakerStats[string(sourceType)] = cb.GetStats()
+		}
+		stats["circuit_breakers"] = circuitBreakerStats
+	}
+	
+	return stats
 }
 
 // Helper methods
@@ -574,15 +749,17 @@ func (e *EnhancedEngine) mapJournaldSeverity(priority int) string {
 
 // initializeDefaultCorrelators initializes default correlators
 func (e *EnhancedEngine) initializeDefaultCorrelators() {
-	e.correlators = append(e.correlators, &MemoryPressureCorrelator{})
-	e.correlators = append(e.correlators, &ServiceFailureCorrelator{})
-	e.correlators = append(e.correlators, &NetworkIssueCorrelator{})
-	e.correlators = append(e.correlators, &SecurityThreatCorrelator{})
+	config := DefaultCorrelatorConfig()
+	e.correlators = append(e.correlators, NewMemoryPressureCorrelator(config))
+	e.correlators = append(e.correlators, NewServiceFailureCorrelator(config))
+	e.correlators = append(e.correlators, NewNetworkIssueCorrelator(config))
+	e.correlators = append(e.correlators, NewSecurityThreatCorrelator(config))
 }
 
 // initializeDefaultAnalyzers initializes default analyzers
 func (e *EnhancedEngine) initializeDefaultAnalyzers() {
-	e.analyzers = append(e.analyzers, &PatternAnalyzer{})
-	e.analyzers = append(e.analyzers, &AnomalyAnalyzer{})
-	e.analyzers = append(e.analyzers, &TrendAnalyzer{})
+	config := DefaultCorrelatorConfig()
+	e.analyzers = append(e.analyzers, NewPatternAnalyzer(config))
+	e.analyzers = append(e.analyzers, NewAnomalyAnalyzer(config))
+	e.analyzers = append(e.analyzers, NewTrendAnalyzer(config))
 }

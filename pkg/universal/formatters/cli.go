@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 // CLIFormatter formats universal data for command-line output

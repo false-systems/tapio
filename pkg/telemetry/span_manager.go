@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/falseyair/tapio/pkg/resilience"
+	"github.com/yairfalse/tapio/pkg/resilience"
 )
 
 // SpanManager handles span creation, lifecycle, and export with full resilience

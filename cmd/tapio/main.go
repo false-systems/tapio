@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/falseyair/tapio/internal/cli"
+	"github.com/yairfalse/tapio/internal/cli"
 )
 
 func main() {

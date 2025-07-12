@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 // CorrelationConverter converts correlation engine output to universal format
@@ -36,8 +36,13 @@ func (c *CorrelationConverter) ConvertFinding(finding *correlation.Finding) (*un
 	prediction.Timestamp = finding.CreatedAt
 
 	// Convert resource reference to target
-	if finding.Resource != nil {
-		prediction.Target = c.convertResourceToTarget(finding.Resource)
+	if finding.Resource.Name != "" {
+		resourceRef := &correlation.ResourceReference{
+			Kind:      finding.Resource.Type,
+			Name:      finding.Resource.Name,
+			Namespace: finding.Resource.Namespace,
+		}
+		prediction.Target = c.convertResourceToTarget(resourceRef)
 	}
 
 	// Convert finding type to prediction type

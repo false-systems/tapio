@@ -12,9 +12,9 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/resilience"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/resilience"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // Mock checker implementation for testing

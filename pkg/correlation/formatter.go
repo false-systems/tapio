@@ -275,8 +275,8 @@ func (f *Formatter) formatFinding(finding Finding) string {
 	}
 
 	// Resource information
-	if finding.Resource != nil {
-		sb.WriteString(fmt.Sprintf("  Resource: %s/%s", finding.Resource.Kind, finding.Resource.Name))
+	if finding.Resource.Name != "" {
+		sb.WriteString(fmt.Sprintf("  Resource: %s/%s", finding.Resource.Type, finding.Resource.Name))
 		if finding.Resource.Namespace != "" {
 			sb.WriteString(fmt.Sprintf(" (namespace: %s)", finding.Resource.Namespace))
 		}
@@ -349,8 +349,8 @@ func (f *Formatter) formatTableHeader() string {
 // formatTableRow formats a single finding as a table row
 func (f *Formatter) formatTableRow(finding Finding) string {
 	resource := "N/A"
-	if finding.Resource != nil {
-		resource = fmt.Sprintf("%s/%s", finding.Resource.Kind, finding.Resource.Name)
+	if finding.Resource.Name != "" {
+		resource = fmt.Sprintf("%s/%s", finding.Resource.Type, finding.Resource.Name)
 	}
 
 	title := finding.Title

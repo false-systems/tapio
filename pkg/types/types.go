@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"time"
+	corev1 "k8s.io/api/core/v1"
+)
 
 // CheckRequest represents a health check request
 type CheckRequest struct {
@@ -142,4 +145,13 @@ type PredictionSummary struct {
 	TimeToEvent time.Duration `json:"time_to_event"`
 	Confidence  float64       `json:"confidence"`
 	Impact      []string      `json:"impact"`
+}
+
+// PodInfo represents essential pod information for analysis
+type PodInfo struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Labels    map[string]string `json:"labels"`
+	Spec      corev1.PodSpec    `json:"spec"`
+	Status    corev1.PodStatus  `json:"status"`
 }

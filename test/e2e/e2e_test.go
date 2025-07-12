@@ -21,9 +21,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/falseyair/tapio/pkg/k8s"
-	"github.com/falseyair/tapio/pkg/simple"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/k8s"
+	"github.com/yairfalse/tapio/pkg/simple"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // TestEnvironment manages the test cluster

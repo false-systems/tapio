@@ -7,7 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/google/uuid"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // OOMPredictionRule predicts Out-of-Memory events using multiple data sources
@@ -155,8 +156,8 @@ func (r *OOMPredictionRule) analyzePodOOMRisk(pod interface{}, k8sData *correlat
 	var findings []correlation.Finding
 
 	// Extract pod information (simplified for this example)
-	podName := fmt.Sprintf("pod-%d", time.Now().UnixNano()) // Placeholder
-	podNamespace := "default"                               // Placeholder
+	podName := fmt.Sprintf("pod-%s", uuid.New().String()) // Placeholder
+	podNamespace := "default"                              // Placeholder
 
 	// Analyze memory usage from different sources
 	memoryAnalysis := r.analyzeMemoryUsage(podName, podNamespace, k8sData, ebpfData, metricsData)

@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/sniffer"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // TestCreateSpanWithPID tests the integration with Agent 1's translator
 func TestCreateSpanWithPID(t *testing.T) {
 	// Create mock translator with real Kubernetes data
 	mockTranslator := &MockPIDTranslator{
-		pidToContext: map[uint32]*sniffer.EventContext{
+		pidToContext: map[uint32]*collector.EventContext{
 			1234: {
 				Pod:       "test-pod",
 				Namespace: "test-namespace",
@@ -133,7 +133,7 @@ func TestCreateSpanWithPID(t *testing.T) {
 func TestEBPFTelemetryWithRealContext(t *testing.T) {
 	// Create mock translator
 	mockTranslator := &MockPIDTranslator{
-		pidToContext: map[uint32]*sniffer.EventContext{
+		pidToContext: map[uint32]*collector.EventContext{
 			1001: {
 				Pod:       "memory-intensive-pod",
 				Namespace: "production",
@@ -238,11 +238,11 @@ func TestCircuitBreakerIntegrationWithTranslator(t *testing.T) {
 
 // MockPIDTranslator implements a mock translator for testing
 type MockPIDTranslator struct {
-	pidToContext map[uint32]*sniffer.EventContext
+	pidToContext map[uint32]*collector.EventContext
 	failNext     int
 }
 
-func (m *MockPIDTranslator) GetPodInfo(pid uint32) (*sniffer.EventContext, error) {
+func (m *MockPIDTranslator) GetPodInfo(pid uint32) (*collector.EventContext, error) {
 	if m.failNext > 0 {
 		m.failNext--
 		return nil, fmt.Errorf("mock translator failure")

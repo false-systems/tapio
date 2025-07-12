@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // MemoryLeakRule detects memory leaks using pattern analysis

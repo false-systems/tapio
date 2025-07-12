@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 func TestEBPFConverter_ConvertProcessMemoryStats(t *testing.T) {

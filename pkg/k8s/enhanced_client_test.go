@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 func TestEnhancedK8sClient_GetPod_WithCache(t *testing.T) {

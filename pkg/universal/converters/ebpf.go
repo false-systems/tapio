@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 // EBPFConverter converts eBPF data types to universal format

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // SimpleEnhancedExplainer provides basic enhanced explanations

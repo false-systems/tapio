@@ -6,7 +6,7 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 type HumanFormatter struct{}

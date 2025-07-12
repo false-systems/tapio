@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // CrashLoopRule detects pods in crash loop states

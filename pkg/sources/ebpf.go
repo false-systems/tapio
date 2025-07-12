@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/collectors"
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // EBPFSource implements eBPF-based data collection with platform detection

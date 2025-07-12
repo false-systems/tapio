@@ -1,7 +1,7 @@
 package rules
 
 import (
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // RegisterDefaultRules registers all default correlation rules to the registry

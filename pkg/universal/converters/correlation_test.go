@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 func TestCorrelationConverter_ConvertFinding(t *testing.T) {

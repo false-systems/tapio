@@ -8,7 +8,7 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/fatih/color"
 
-	"github.com/falseyair/tapio/pkg/health"
+	"github.com/yairfalse/tapio/pkg/health"
 )
 
 type Output struct {

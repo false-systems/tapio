@@ -1,4 +1,4 @@
-module github.com/falseyair/tapio
+module github.com/yairfalse/tapio
 
 go 1.24.3
 
@@ -6,6 +6,7 @@ require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/cilium/ebpf v0.19.0
 	github.com/fatih/color v1.18.0
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.2
@@ -37,7 +38,6 @@ require (
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect

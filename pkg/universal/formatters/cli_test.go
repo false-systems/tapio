@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 func TestCLIFormatter_FormatMetric(t *testing.T) {

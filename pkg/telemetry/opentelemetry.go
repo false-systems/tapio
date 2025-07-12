@@ -22,16 +22,16 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/correlation/rules"
-	"github.com/falseyair/tapio/pkg/correlation/sources"
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/simple"
-	"github.com/falseyair/tapio/pkg/sniffer"
-	"github.com/falseyair/tapio/pkg/types"
-	"github.com/falseyair/tapio/pkg/universal"
-	"github.com/falseyair/tapio/pkg/universal/converters"
-	"github.com/falseyair/tapio/pkg/universal/formatters"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation/rules"
+	"github.com/yairfalse/tapio/pkg/correlation/sources"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/simple"
+	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/universal/converters"
+	"github.com/yairfalse/tapio/pkg/universal/formatters"
 )
 
 // OpenTelemetryExporter exports Tapio intelligence as OpenTelemetry traces and metrics
@@ -48,7 +48,7 @@ type OpenTelemetryExporter struct {
 	meterProvider *metric.MeterProvider
 
 	// Agent 1's translator engine integration (REAL Kubernetes context)
-	translator *sniffer.SimplePIDTranslator
+	translator *collector.SimplePIDTranslator
 
 	// FULL Agent 3 resilience framework integration
 	circuitBreaker   *universal.CircuitBreaker
@@ -174,10 +174,10 @@ func NewOpenTelemetryExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor
 	// TODO: Add more sophisticated timeout and validation when universal package is extended
 
 	// Initialize Agent 1's translator engine for REAL Kubernetes context
-	var translator *sniffer.SimplePIDTranslator
+	var translator *collector.SimplePIDTranslator
 	if config.EnableTranslator && config.KubeClient != nil {
 		// Use type assertion to kubernetes.Interface (import k8s.io/client-go/kubernetes)
-		translator = sniffer.NewSimplePIDTranslator(config.KubeClient)
+		translator = collector.NewSimplePIDTranslator(config.KubeClient)
 		fmt.Println("[OTEL] Agent 1 translator engine initialized for real K8s context")
 	}
 
@@ -461,7 +461,7 @@ func (e *OpenTelemetryExporter) CreateSpanWithPID(ctx context.Context, pid uint3
 	var span oteltrace.Span
 	err := e.circuitBreaker.Execute(ctx, func() error {
 		// Use Agent 1's translator for REAL Kubernetes context
-		var k8sContext *sniffer.EventContext
+		var k8sContext *collector.EventContext
 		var translatorErr error
 		
 		if e.translator != nil {

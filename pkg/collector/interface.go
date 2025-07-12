@@ -1,27 +1,27 @@
-// Package sniffer provides a unified interface for data collection from various sources
-package sniffer
+// Package collector provides a unified interface for data collection from various sources
+package collector
 
 import (
 	"context"
 	"time"
 )
 
-// Sniffer defines the standard interface for all data collection sources
-type Sniffer interface {
-	// Name returns the unique name of this sniffer
+// Collector defines the standard interface for all data collection sources
+type Collector interface {
+	// Name returns the unique name of this collector
 	Name() string
 
-	// Events returns a channel that emits events from this sniffer
+	// Events returns a channel that emits events from this collector
 	Events() <-chan Event
 
 	// Start begins data collection with the given configuration
 	Start(ctx context.Context, config Config) error
 
-	// Health returns the current health status of the sniffer
+	// Health returns the current health status of the collector
 	Health() Health
 }
 
-// Event represents a single data point collected by a sniffer
+// Event represents a single data point collected by a collector
 type Event struct {
 	// ID is a unique identifier for this event
 	ID string `json:"id"`
@@ -29,7 +29,7 @@ type Event struct {
 	// Timestamp when the event occurred
 	Timestamp time.Time `json:"timestamp"`
 
-	// Source identifies which sniffer generated this event (e.g., "ebpf", "k8s-api")
+	// Source identifies which collector generated this event (e.g., "ebpf", "k8s-api")
 	Source string `json:"source"`
 
 	// Type categorizes the event (e.g., "memory_oom", "network_timeout", "pod_crash")
@@ -100,14 +100,14 @@ type ActionableItem struct {
 	EstimatedImpact string `json:"estimated_impact"`
 }
 
-// Config provides configuration for a sniffer
+// Config provides configuration for a collector
 type Config struct {
 	// Common configuration
 	Enabled         bool                   `json:"enabled"`
 	SamplingRate    float64                `json:"sampling_rate"`    // 0.0-1.0, where 1.0 = 100%
 	EventBufferSize int                    `json:"event_buffer_size"` // Size of the event channel buffer
 	MaxEventsPerSec int                    `json:"max_events_per_sec"` // Rate limiting
-	Extra           map[string]interface{} `json:"extra"`             // Sniffer-specific config
+	Extra           map[string]interface{} `json:"extra"`             // Collector-specific config
 
 	// Resource limits
 	MaxMemoryMB int `json:"max_memory_mb"`
@@ -127,9 +127,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// Health represents the health status of a sniffer
+// Health represents the health status of a collector
 type Health struct {
-	// Status indicates if the sniffer is working properly
+	// Status indicates if the collector is working properly
 	Status HealthStatus `json:"status"`
 
 	// Message provides additional context about the status
@@ -144,7 +144,7 @@ type Health struct {
 	// EventsDropped is the number of events dropped due to buffer overflow
 	EventsDropped uint64 `json:"events_dropped"`
 
-	// Metrics provides sniffer-specific health metrics
+	// Metrics provides collector-specific health metrics
 	Metrics map[string]interface{} `json:"metrics"`
 }
 
@@ -157,20 +157,20 @@ const (
 	HealthStatusUnhealthy HealthStatus = "unhealthy"
 )
 
-// Manager coordinates multiple sniffers
+// Manager coordinates multiple collectors
 type Manager interface {
-	// Register adds a new sniffer to the manager
-	Register(sniffer Sniffer) error
+	// Register adds a new collector to the manager
+	Register(collector Collector) error
 
-	// Start begins all registered sniffers
+	// Start begins all registered collectors
 	Start(ctx context.Context) error
 
-	// Events returns a merged stream of events from all sniffers
+	// Events returns a merged stream of events from all collectors
 	Events() <-chan Event
 
-	// Health returns the health status of all sniffers
+	// Health returns the health status of all collectors
 	Health() map[string]Health
 
-	// GetSniffer returns a specific sniffer by name
-	GetSniffer(name string) (Sniffer, bool)
+	// GetCollector returns a specific collector by name
+	GetCollector(name string) (Collector, bool)
 }

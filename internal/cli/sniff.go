@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/simple"
-	"github.com/falseyair/tapio/pkg/sniffer"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/simple"
+	"github.com/yairfalse/tapio/pkg/collector"
 )
 
 var sniffCmd = &cobra.Command{
@@ -40,8 +40,8 @@ func init() {
 	sniffCmd.Flags().StringVarP(&sniffOutput, "output", "o", "text", "Output format: text, json, prometheus")
 	sniffCmd.Flags().Float64Var(&sniffSamplingRate, "sampling-rate", 1.0, "Sampling rate (0.0-1.0)")
 	sniffCmd.Flags().IntVar(&sniffBatchSize, "batch-size", 100, "Event batch size for correlation")
-	sniffCmd.Flags().BoolVar(&sniffK8sOnly, "k8s-only", false, "Only run K8s API sniffer")
-	sniffCmd.Flags().BoolVar(&sniffEBPFOnly, "ebpf-only", false, "Only run eBPF sniffer")
+	sniffCmd.Flags().BoolVar(&sniffK8sOnly, "k8s-only", false, "Only run K8s API collector")
+	sniffCmd.Flags().BoolVar(&sniffEBPFOnly, "ebpf-only", false, "Only run eBPF collector")
 }
 
 func runSniff(cmd *cobra.Command, args []string) error {
@@ -59,38 +59,38 @@ func runSniff(cmd *cobra.Command, args []string) error {
 	}
 	
 	// Create manager
-	config := sniffer.DefaultManagerConfig()
+	config := collector.DefaultManagerConfig()
 	config.CorrelationBatchSize = sniffBatchSize
-	manager := sniffer.NewSimpleManager(config)
+	manager := collector.NewSimpleManager(config)
 	
-	// Register sniffers based on flags
+	// Register collectors based on flags
 	if !sniffK8sOnly {
 		// Create eBPF monitor
 		ebpfMonitor := ebpf.NewMonitor()
 		
 		// Create PID translator
-		translator := sniffer.NewSimplePIDTranslator(client)
+		translator := collector.NewSimplePIDTranslator(client)
 		if err := translator.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start PID translator: %w", err)
 		}
 		
-		// Create and register eBPF sniffer
-		ebpfSniffer := sniffer.NewEBPFSniffer(ebpfMonitor, translator)
-		if err := manager.Register(ebpfSniffer); err != nil {
-			return fmt.Errorf("failed to register eBPF sniffer: %w", err)
+		// Create and register eBPF collector
+		ebpfCollector := collector.NewEBPFCollector(ebpfMonitor, translator)
+		if err := manager.Register(ebpfCollector); err != nil {
+			return fmt.Errorf("failed to register eBPF collector: %w", err)
 		}
 		
-		fmt.Println("✓ eBPF sniffer registered")
+		fmt.Println("✓ eBPF collector registered")
 	}
 	
 	if !sniffEBPFOnly {
-		// Create and register K8s sniffer
-		k8sSniffer := sniffer.NewK8sSniffer(client)
-		if err := manager.Register(k8sSniffer); err != nil {
-			return fmt.Errorf("failed to register K8s sniffer: %w", err)
+		// Create and register K8s collector
+		k8sCollector := collector.NewK8sCollector(client)
+		if err := manager.Register(k8sCollector); err != nil {
+			return fmt.Errorf("failed to register K8s collector: %w", err)
 		}
 		
-		fmt.Println("✓ K8s API sniffer registered")
+		fmt.Println("✓ K8s API collector registered")
 	}
 	
 	// Start manager
@@ -119,7 +119,7 @@ func runSniff(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func handleOutput(ctx context.Context, manager *sniffer.SimpleManager) {
+func handleOutput(ctx context.Context, manager *collector.SimpleManager) {
 	insights := manager.Insights()
 	
 	for {
@@ -143,13 +143,13 @@ func handleOutput(ctx context.Context, manager *sniffer.SimpleManager) {
 	}
 }
 
-func outputText(insight sniffer.Insight) {
+func outputText(insight collector.Insight) {
 	// Color codes for severity
-	severityColor := map[sniffer.Severity]string{
-		sniffer.SeverityCritical: "\033[31m", // Red
-		sniffer.SeverityHigh:     "\033[33m", // Yellow
-		sniffer.SeverityMedium:   "\033[36m", // Cyan
-		sniffer.SeverityLow:      "\033[32m", // Green
+	severityColor := map[collector.Severity]string{
+		collector.SeverityCritical: "\033[31m", // Red
+		collector.SeverityHigh:     "\033[33m", // Yellow
+		collector.SeverityMedium:   "\033[36m", // Cyan
+		collector.SeverityLow:      "\033[32m", // Green
 	}
 	reset := "\033[0m"
 	
@@ -204,7 +204,7 @@ func outputText(insight sniffer.Insight) {
 	fmt.Println()
 }
 
-func outputJSON(insight sniffer.Insight) {
+func outputJSON(insight collector.Insight) {
 	// In production, would use proper JSON encoder
 	fmt.Printf(`{
   "id": "%s",
@@ -218,13 +218,13 @@ func outputJSON(insight sniffer.Insight) {
    insight.Severity, insight.Title, insight.Description)
 }
 
-func outputPrometheus(insight sniffer.Insight) {
+func outputPrometheus(insight collector.Insight) {
 	// Output as Prometheus metrics
-	severityValue := map[sniffer.Severity]float64{
-		sniffer.SeverityCritical: 3,
-		sniffer.SeverityHigh:     2,
-		sniffer.SeverityMedium:   1,
-		sniffer.SeverityLow:      0,
+	severityValue := map[collector.Severity]float64{
+		collector.SeverityCritical: 3,
+		collector.SeverityHigh:     2,
+		collector.SeverityMedium:   1,
+		collector.SeverityLow:      0,
 	}
 	
 	timestamp := insight.Timestamp.UnixMilli()
@@ -246,7 +246,7 @@ func outputPrometheus(insight sniffer.Insight) {
 	}
 }
 
-func reportHealth(ctx context.Context, manager *sniffer.SimpleManager) {
+func reportHealth(ctx context.Context, manager *collector.SimpleManager) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	
@@ -267,7 +267,7 @@ func reportHealth(ctx context.Context, manager *sniffer.SimpleManager) {
 			health := manager.Health()
 			unhealthy := 0
 			for name, h := range health {
-				if h.Status != sniffer.HealthStatusHealthy {
+				if h.Status != collector.HealthStatusHealthy {
 					unhealthy++
 					fmt.Printf("⚠️  %s: %s - %s\n", name, h.Status, h.Message)
 				}

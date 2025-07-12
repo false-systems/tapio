@@ -6,7 +6,7 @@ package simple
 import (
 	"context"
 
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 

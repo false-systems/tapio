@@ -6,7 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // AdmissionLockdownRule detects when strict policies lock down the cluster preventing operations
@@ -62,16 +67,80 @@ func (r *AdmissionLockdownRule) Description() string {
 	return "Detects when overly restrictive admission policies prevent legitimate operations, locking down cluster functionality"
 }
 
+// GetMetadata returns metadata about the rule
+func (r *AdmissionLockdownRule) GetMetadata() correlation.RuleMetadata {
+	return correlation.RuleMetadata{
+		ID:          r.ID(),
+		Name:        r.Name(),
+		Description: r.Description(),
+		Version:     "1.0.0",
+		Author:      "Tapio Correlation Engine",
+		Tags:        []string{"admission", "security", "policy", "lockdown"},
+		Requirements: []correlation.RuleRequirement{
+			{
+				SourceType: correlation.SourceKubernetes,
+				DataType:   "full",
+				Required:   true,
+			},
+		},
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}
+
+// CheckRequirements verifies that required data sources are available
+func (r *AdmissionLockdownRule) CheckRequirements(ctx context.Context, data *correlation.DataCollection) error {
+	if !data.IsSourceAvailable(correlation.SourceKubernetes) {
+		return correlation.NewRequirementNotMetError(r.ID(), r.GetMetadata().Requirements[0])
+	}
+	return nil
+}
+
+// GetConfidenceFactors returns factors that affect confidence scoring
+func (r *AdmissionLockdownRule) GetConfidenceFactors() []string {
+	return []string{
+		"denial_rate",
+		"service_account_patterns",
+		"controller_failures",
+		"operational_impact",
+		"time_correlation",
+	}
+}
+
+// Validate validates the rule configuration
+func (r *AdmissionLockdownRule) Validate() error {
+	if r.config.MinDenials <= 0 {
+		return correlation.NewRuleValidationError("min_denials must be positive")
+	}
+	if r.config.CriticalDenialPercent <= 0 || r.config.CriticalDenialPercent > 1 {
+		return correlation.NewRuleValidationError("critical_denial_percent must be between 0 and 1")
+	}
+	if r.config.TimeWindow <= 0 {
+		return correlation.NewRuleValidationError("time_window must be positive")
+	}
+	if r.config.MinConfidence <= 0 || r.config.MinConfidence > 1 {
+		return correlation.NewRuleValidationError("min_confidence must be between 0 and 1")
+	}
+	return nil
+}
+
 // Execute runs the admission lockdown detection logic
-func (r *AdmissionLockdownRule) Execute(ctx context.Context, data *correlation.AnalysisData) ([]correlation.Finding, error) {
+func (r *AdmissionLockdownRule) Execute(ctx context.Context, ruleCtx *correlation.RuleContext) ([]correlation.Finding, error) {
 	var findings []correlation.Finding
+
+	// Get Kubernetes data from rule context
+	k8sData, err := ruleCtx.DataCollection.GetKubernetesData(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Kubernetes data: %w", err)
+	}
 
 	// Get current time for analysis
 	now := time.Now()
 	windowStart := now.Add(-r.config.TimeWindow)
 
 	// Analyze admission denials
-	denials := r.analyzeAdmissionDenials(data, windowStart)
+	denials := r.analyzeAdmissionDenials(k8sData, windowStart)
 	if len(denials) < r.config.MinDenials {
 		return findings, nil // Not enough denials to indicate lockdown
 	}
@@ -80,10 +149,10 @@ func (r *AdmissionLockdownRule) Execute(ctx context.Context, data *correlation.A
 	sadenials := r.checkServiceAccountDenials(denials)
 
 	// Check controller failures
-	controllerFailures := r.checkControllerFailures(data, windowStart, denials)
+	controllerFailures := r.checkControllerFailures(k8sData, windowStart, denials)
 
 	// Check operational impact
-	operationalImpact := r.checkOperationalImpact(data, windowStart, denials)
+	operationalImpact := r.checkOperationalImpact(k8sData, windowStart, denials)
 
 	// Calculate denial patterns
 	denialStats := r.calculateDenialStatistics(denials)
@@ -94,14 +163,19 @@ func (r *AdmissionLockdownRule) Execute(ctx context.Context, data *correlation.A
 
 		if confidence >= r.config.MinConfidence {
 			finding := correlation.Finding{
+				ID:          "", // Will be auto-generated
 				RuleID:      r.ID(),
 				Title:       "Admission Controller Lockdown Detected",
 				Description: r.buildDescription(denialStats, sadenials, controllerFailures, operationalImpact),
 				Severity:    r.determineSeverity(denialStats, sadenials, controllerFailures),
 				Confidence:  confidence,
+				Evidence:    r.collectEvidence(denialStats, sadenials, controllerFailures, operationalImpact),
+				Tags:        []string{"admission", "security", "lockdown"},
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+				Metadata:    make(map[string]interface{}),
 				Impact:      r.assessImpact(denialStats, controllerFailures, operationalImpact),
 				RootCause:   r.identifyRootCause(denials, sadenials),
-				Evidence:    r.collectEvidence(denialStats, sadenials, controllerFailures, operationalImpact),
 				Recommendations: []string{
 					"Review recent admission policy changes",
 					"Identify overly restrictive rules affecting service accounts",
@@ -115,6 +189,9 @@ func (r *AdmissionLockdownRule) Execute(ctx context.Context, data *correlation.A
 					Event:       "Complete operational paralysis",
 					TimeToEvent: r.predictTimeToParalysis(denialStats, controllerFailures),
 					Confidence:  confidence,
+					Factors:     []string{"denial_rate", "controller_failures", "service_account_blocks"},
+					Mitigation:  []string{"Review and relax policies", "Add exemptions", "Enable dry-run mode"},
+					UpdatedAt:   time.Now(),
 				},
 			}
 
@@ -132,12 +209,12 @@ func (r *AdmissionLockdownRule) Execute(ctx context.Context, data *correlation.A
 }
 
 // analyzeAdmissionDenials collects and analyzes admission denial events
-func (r *AdmissionLockdownRule) analyzeAdmissionDenials(data *correlation.AnalysisData, windowStart time.Time) []admissionDenial {
+func (r *AdmissionLockdownRule) analyzeAdmissionDenials(k8sData *correlation.KubernetesData, windowStart time.Time) []admissionDenial {
 	var denials []admissionDenial
 
 	// Look for admission denial events
-	for _, event := range data.KubernetesData.Events {
-		if event.CreatedAt.After(windowStart) &&
+	for _, event := range k8sData.Events {
+		if event.CreationTimestamp.Time.After(windowStart) &&
 			event.Type == "Warning" &&
 			(strings.Contains(strings.ToLower(event.Message), "denied") ||
 				strings.Contains(strings.ToLower(event.Message), "forbidden") ||
@@ -150,7 +227,7 @@ func (r *AdmissionLockdownRule) analyzeAdmissionDenials(data *correlation.Analys
 				ResourceName: event.InvolvedObject.Name,
 				Namespace:    event.InvolvedObject.Namespace,
 				Message:      event.Message,
-				Timestamp:    event.CreatedAt,
+				Timestamp:    event.CreationTimestamp.Time,
 				Reason:       event.Reason,
 				IsSystemNS:   r.isSystemNamespace(event.InvolvedObject.Namespace),
 			}
@@ -164,21 +241,23 @@ func (r *AdmissionLockdownRule) analyzeAdmissionDenials(data *correlation.Analys
 	}
 
 	// Check pod logs for admission denials
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		// Check controller pods
-		if isControllerPod(pod) {
-			if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
-				for _, line := range logs {
-					if strings.Contains(strings.ToLower(line), "admission") &&
-						(strings.Contains(strings.ToLower(line), "denied") ||
-							strings.Contains(strings.ToLower(line), "forbidden")) {
+		podInfo := convertPodToPodInfo(pod)
+		if isControllerPod(podInfo) {
+			// Check pod logs for admission denials
+			if logs, ok := k8sData.Logs[pod.Name]; ok {
+				for _, logEntry := range logs {
+					if strings.Contains(strings.ToLower(logEntry.Message), "admission") &&
+						(strings.Contains(strings.ToLower(logEntry.Message), "denied") ||
+							strings.Contains(strings.ToLower(logEntry.Message), "forbidden")) {
 
 						denials = append(denials, admissionDenial{
 							ResourceKind: "Pod",
 							ResourceName: pod.Name,
 							Namespace:    pod.Namespace,
-							Message:      line,
-							Timestamp:    time.Now(),
+							Message:      logEntry.Message,
+							Timestamp:    logEntry.Timestamp,
 							IsSystemNS:   r.isSystemNamespace(pod.Namespace),
 							IsController: true,
 						})
@@ -227,7 +306,7 @@ func (r *AdmissionLockdownRule) checkServiceAccountDenials(denials []admissionDe
 }
 
 // checkControllerFailures identifies controller operation failures
-func (r *AdmissionLockdownRule) checkControllerFailures(data *correlation.AnalysisData, windowStart time.Time, denials []admissionDenial) []controllerFailure {
+func (r *AdmissionLockdownRule) checkControllerFailures(k8sData *correlation.KubernetesData, windowStart time.Time, denials []admissionDenial) []controllerFailure {
 	var failures []controllerFailure
 
 	// Map of controller types to check
@@ -254,8 +333,9 @@ func (r *AdmissionLockdownRule) checkControllerFailures(data *correlation.Analys
 	}
 
 	// Check controller pods
-	for _, pod := range data.KubernetesData.Pods {
-		if isControllerManagerPod(pod) || isSchedulerPod(pod) {
+	for _, pod := range k8sData.Pods {
+		podInfo := convertPodToPodInfo(pod)
+		if isControllerManagerPod(podInfo) || isSchedulerPod(podInfo) {
 			// Check if controller is having issues
 			for _, status := range pod.Status.ContainerStatuses {
 				if status.RestartCount > 0 {
@@ -272,18 +352,18 @@ func (r *AdmissionLockdownRule) checkControllerFailures(data *correlation.Analys
 			}
 
 			// Check logs for permission errors
-			if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
-				for _, line := range logs {
-					if strings.Contains(strings.ToLower(line), "forbidden") ||
-						strings.Contains(strings.ToLower(line), "unauthorized") ||
-						strings.Contains(strings.ToLower(line), "permission denied") {
+			if logs, ok := k8sData.Logs[pod.Name]; ok {
+				for _, logEntry := range logs {
+					if strings.Contains(strings.ToLower(logEntry.Message), "forbidden") ||
+						strings.Contains(strings.ToLower(logEntry.Message), "unauthorized") ||
+						strings.Contains(strings.ToLower(logEntry.Message), "permission denied") {
 
 						failures = append(failures, controllerFailure{
 							ControllerName: pod.Name,
 							Namespace:      pod.Namespace,
 							FailureType:    "permission",
-							Message:        line,
-							Timestamp:      time.Now(),
+							Message:        logEntry.Message,
+							Timestamp:      logEntry.Timestamp,
 						})
 						break
 					}
@@ -309,7 +389,7 @@ func (r *AdmissionLockdownRule) checkControllerFailures(data *correlation.Analys
 }
 
 // checkOperationalImpact assesses the operational impact of denials
-func (r *AdmissionLockdownRule) checkOperationalImpact(data *correlation.AnalysisData, windowStart time.Time, denials []admissionDenial) operationalImpact {
+func (r *AdmissionLockdownRule) checkOperationalImpact(k8sData *correlation.KubernetesData, windowStart time.Time, denials []admissionDenial) operationalImpact {
 	impact := operationalImpact{
 		AffectedNamespaces: make(map[string]int),
 		AffectedResources:  make(map[string]int),
@@ -327,17 +407,17 @@ func (r *AdmissionLockdownRule) checkOperationalImpact(data *correlation.Analysi
 	}
 
 	// Check for stuck deployments
-	for _, deployment := range data.KubernetesData.Deployments {
-		if deployment.Status.Replicas < deployment.Status.UpdatedReplicas {
+	for _, deployment := range k8sData.Deployments {
+		if deployment.Status.ReadyReplicas < deployment.Status.UpdatedReplicas {
 			impact.StuckDeployments++
 		}
 	}
 
 	// Check for failed jobs
-	for _, job := range data.KubernetesData.Jobs {
+	for _, job := range k8sData.Jobs {
 		if job.Status.Failed > 0 {
 			// Check if failure is related to admission
-			for _, event := range data.KubernetesData.Events {
+			for _, event := range k8sData.Events {
 				if event.InvolvedObject.Kind == "Job" &&
 					event.InvolvedObject.Name == job.Name &&
 					strings.Contains(strings.ToLower(event.Message), "admission") {
@@ -349,13 +429,13 @@ func (r *AdmissionLockdownRule) checkOperationalImpact(data *correlation.Analysi
 	}
 
 	// Check for pending resources
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		if pod.Status.Phase == "Pending" {
 			// Check if pending due to admission
-			for _, event := range data.KubernetesData.Events {
+			for _, event := range k8sData.Events {
 				if event.InvolvedObject.Kind == "Pod" &&
 					event.InvolvedObject.Name == pod.Name &&
-					event.CreatedAt.After(windowStart) &&
+					event.CreationTimestamp.Time.After(windowStart) &&
 					strings.Contains(strings.ToLower(event.Message), "admission") {
 					impact.PendingPods++
 					break
@@ -423,6 +503,22 @@ func (r *AdmissionLockdownRule) calculateDenialStatistics(denials []admissionDen
 }
 
 // Helper methods
+
+// convertPodToPodInfo converts a Kubernetes Pod to PodInfo type
+func convertPodToPodInfo(pod corev1.Pod) types.PodInfo {
+	labels := make(map[string]string)
+	for k, v := range pod.Labels {
+		labels[k] = v
+	}
+	
+	return types.PodInfo{
+		Name:      pod.Name,
+		Namespace: pod.Namespace,
+		Labels:    labels,
+		Spec:      pod.Spec,
+		Status:    pod.Status,
+	}
+}
 
 func (r *AdmissionLockdownRule) calculateConfidence(stats denialStatistics, sadenials []serviceAccountDenial, controllers []controllerFailure, impact operationalImpact) float64 {
 	confidence := 0.0
@@ -611,26 +707,62 @@ func (r *AdmissionLockdownRule) identifyRootCause(denials []admissionDenial, sad
 	return "Admission control policies preventing legitimate cluster operations"
 }
 
-func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenials []serviceAccountDenial, controllers []controllerFailure, impact operationalImpact) []string {
-	evidence := []string{
-		fmt.Sprintf("%.0f denials per minute detected", stats.denialRate/100),
-		fmt.Sprintf("%d total denials in analysis window", stats.TotalDenials),
+func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenials []serviceAccountDenial, controllers []controllerFailure, impact operationalImpact) []correlation.Evidence {
+	evidence := []correlation.Evidence{
+		{
+			Type:        "denial_rate",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%.0f denials per minute detected", stats.denialRate/100),
+			Timestamp:   time.Now(),
+			Confidence:  0.9,
+		},
+		{
+			Type:        "total_denials",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d total denials in analysis window", stats.TotalDenials),
+			Timestamp:   time.Now(),
+			Confidence:  0.95,
+		},
 	}
 
 	if stats.SystemDenials > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d denials in system namespaces", stats.SystemDenials))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "system_denials",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d denials in system namespaces", stats.SystemDenials),
+			Timestamp:   time.Now(),
+			Confidence:  0.9,
+		})
 	}
 
 	if len(sadenials) > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d service accounts experiencing denials", len(sadenials)))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "sa_denials",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d service accounts experiencing denials", len(sadenials)),
+			Timestamp:   time.Now(),
+			Confidence:  0.85,
+		})
 	}
 
 	if len(controllers) > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d controllers affected by admission denials", len(controllers)))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "controller_failures",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d controllers affected by admission denials", len(controllers)),
+			Timestamp:   time.Now(),
+			Confidence:  0.9,
+		})
 	}
 
 	if impact.StuckDeployments > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d deployments unable to progress", impact.StuckDeployments))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "deployment_impact",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d deployments unable to progress", impact.StuckDeployments),
+			Timestamp:   time.Now(),
+			Confidence:  0.8,
+		})
 	}
 
 	// Top denied resources
@@ -643,7 +775,13 @@ func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenial
 		}
 	}
 	if topResource != "" {
-		evidence = append(evidence, fmt.Sprintf("Most denied resource type: %s (%d denials)", topResource, maxDenials))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "resource_pattern",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("Most denied resource type: %s (%d denials)", topResource, maxDenials),
+			Timestamp:   time.Now(),
+			Confidence:  0.7,
+		})
 	}
 
 	return evidence

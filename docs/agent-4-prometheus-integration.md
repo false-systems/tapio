@@ -60,7 +60,7 @@ curl http://localhost:8080/metrics | grep tapio_prediction
 
 ## Next Steps
 
-Ready for the lightweight eBPF + K8s sniffer implementation!
+Ready for the lightweight eBPF + K8s collector implementation!
 
 ## Technical Note
 

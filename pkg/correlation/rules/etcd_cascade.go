@@ -6,8 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/types"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // ETCDCascadeRule detects etcd cascading failures that affect the entire control plane
@@ -60,28 +64,92 @@ func (r *ETCDCascadeRule) Description() string {
 	return "Detects when etcd memory pressure leads to API server timeouts and DNS initialization failures, causing cluster-wide disruption"
 }
 
+// GetMetadata returns metadata about the rule
+func (r *ETCDCascadeRule) GetMetadata() correlation.RuleMetadata {
+	return correlation.RuleMetadata{
+		ID:          r.ID(),
+		Name:        r.Name(),
+		Description: r.Description(),
+		Version:     "1.0.0",
+		Author:      "Tapio Correlation Engine",
+		Tags:        []string{"etcd", "cascade", "control-plane", "memory"},
+		Requirements: []correlation.RuleRequirement{
+			{
+				SourceType: correlation.SourceKubernetes,
+				DataType:   "full",
+				Required:   true,
+			},
+		},
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}
+
+// CheckRequirements verifies that required data sources are available
+func (r *ETCDCascadeRule) CheckRequirements(ctx context.Context, data *correlation.DataCollection) error {
+	if !data.IsSourceAvailable(correlation.SourceKubernetes) {
+		return correlation.NewRequirementNotMetError(r.ID(), r.GetMetadata().Requirements[0])
+	}
+	return nil
+}
+
+// GetConfidenceFactors returns factors that affect confidence scoring
+func (r *ETCDCascadeRule) GetConfidenceFactors() []string {
+	return []string{
+		"etcd_memory_pressure",
+		"api_server_timeout_correlation",
+		"dns_failure_patterns",
+		"control_plane_component_health",
+		"cascade_timing_analysis",
+	}
+}
+
+// Validate validates the rule configuration
+func (r *ETCDCascadeRule) Validate() error {
+	if r.config.MemoryThreshold <= 0 || r.config.MemoryThreshold > 100 {
+		return correlation.NewRuleValidationError("memory_threshold must be between 0 and 100")
+	}
+	if r.config.APITimeoutThreshold <= 0 {
+		return correlation.NewRuleValidationError("api_timeout_threshold must be positive")
+	}
+	if r.config.TimeWindow <= 0 {
+		return correlation.NewRuleValidationError("time_window must be positive")
+	}
+	if r.config.MinConfidence <= 0 || r.config.MinConfidence > 1 {
+		return correlation.NewRuleValidationError("min_confidence must be between 0 and 1")
+	}
+	return nil
+}
+
 // Execute runs the etcd cascade detection logic
-func (r *ETCDCascadeRule) Execute(ctx context.Context, data *correlation.AnalysisData) ([]correlation.Finding, error) {
+func (r *ETCDCascadeRule) Execute(ctx context.Context, ruleCtx *correlation.RuleContext) ([]correlation.Finding, error) {
 	var findings []correlation.Finding
+
+	// Get Kubernetes data from rule context
+	k8sData, err := ruleCtx.DataCollection.GetKubernetesData(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Kubernetes data: %w", err)
+	}
 
 	// Get current time for time window analysis
 	now := time.Now()
 	windowStart := now.Add(-r.config.TimeWindow)
 
 	// Check for etcd memory pressure
-	etcdMemoryIssues := r.checkETCDMemory(data, windowStart)
+	etcdMemoryIssues := r.checkETCDMemory(k8sData, windowStart)
 	if len(etcdMemoryIssues) == 0 {
 		return findings, nil // No etcd memory issues, no cascade
 	}
 
 	// Check for API server timeouts
-	apiTimeouts := r.checkAPIServerTimeouts(data, windowStart)
+	apiTimeouts := r.checkAPIServerTimeouts(k8sData, windowStart)
 
 	// Check for DNS initialization failures
-	dnsFailures := r.checkDNSFailures(data, windowStart)
+	dnsFailures := r.checkDNSFailures(k8sData, windowStart)
 
 	// Check for workload failures
-	workloadFailures := r.checkWorkloadFailures(data, windowStart)
+	workloadFailures := r.checkWorkloadFailures(k8sData, windowStart)
 
 	// Correlate findings
 	if len(etcdMemoryIssues) > 0 && (len(apiTimeouts) > 0 || len(dnsFailures) > 0) {
@@ -90,14 +158,19 @@ func (r *ETCDCascadeRule) Execute(ctx context.Context, data *correlation.Analysi
 		if confidence >= r.config.MinConfidence {
 			// Create comprehensive finding
 			finding := correlation.Finding{
+				ID:          "", // Will be auto-generated
 				RuleID:      r.ID(),
 				Title:       "ETCD Cascading Failure Detected",
 				Description: r.buildDescription(etcdMemoryIssues, apiTimeouts, dnsFailures, workloadFailures),
 				Severity:    correlation.SeverityCritical,
 				Confidence:  confidence,
+				Evidence:    r.collectEvidence(etcdMemoryIssues, apiTimeouts, dnsFailures, workloadFailures),
+				Tags:        []string{"etcd", "cascade", "memory", "critical"},
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+				Metadata:    make(map[string]interface{}),
 				Impact:      r.assessImpact(apiTimeouts, dnsFailures, workloadFailures),
 				RootCause:   r.identifyRootCause(etcdMemoryIssues),
-				Evidence:    r.collectEvidence(etcdMemoryIssues, apiTimeouts, dnsFailures, workloadFailures),
 				Recommendations: []string{
 					"Immediately increase etcd memory limits",
 					"Restart etcd pods in a rolling fashion",
@@ -109,6 +182,9 @@ func (r *ETCDCascadeRule) Execute(ctx context.Context, data *correlation.Analysi
 					Event:       "Complete cluster control plane failure",
 					TimeToEvent: r.predictTimeToFailure(etcdMemoryIssues, apiTimeouts),
 					Confidence:  confidence,
+					Factors:     []string{"etcd_memory_pressure", "api_timeouts", "dns_failures"},
+					Mitigation:  []string{"Increase etcd memory", "Restart components", "Scale etcd cluster"},
+					UpdatedAt:   time.Now(),
 				},
 			}
 
@@ -129,11 +205,11 @@ func (r *ETCDCascadeRule) Execute(ctx context.Context, data *correlation.Analysi
 }
 
 // checkETCDMemory checks for etcd memory pressure
-func (r *ETCDCascadeRule) checkETCDMemory(data *correlation.AnalysisData, windowStart time.Time) []etcdMemoryIssue {
+func (r *ETCDCascadeRule) checkETCDMemory(k8sData *correlation.KubernetesData, windowStart time.Time) []etcdMemoryIssue {
 	var issues []etcdMemoryIssue
 
 	// Check Kubernetes data for etcd pods
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		// Identify etcd pods by label or name
 		if !isETCDPod(pod) {
 			continue
@@ -146,7 +222,7 @@ func (r *ETCDCascadeRule) checkETCDMemory(data *correlation.AnalysisData, window
 			}
 
 			// Get memory metrics from container
-			memoryUsage := getContainerMemoryUsage(pod, container.Name, data)
+			memoryUsage := getContainerMemoryUsage(pod, container.Name, k8sData)
 			memoryLimit := getContainerMemoryLimit(pod, container.Name)
 
 			if memoryLimit > 0 && memoryUsage > 0 {
@@ -167,12 +243,12 @@ func (r *ETCDCascadeRule) checkETCDMemory(data *correlation.AnalysisData, window
 	}
 
 	// Check eBPF data for more accurate memory stats
-	if data.EBPFData != nil {
-		for _, memStat := range data.EBPFData.MemoryStats {
+	if k8sData.EBPFData != nil {
+		for _, memStat := range k8sData.EBPFData.MemoryStats {
 			// Match process to etcd
 			if strings.Contains(memStat.Command, "etcd") {
 				// Convert to percentage if we have container info
-				pod := findPodByPID(data, memStat.PID)
+				pod := findPodByPID(k8sData, memStat.PID)
 				if pod != nil && isETCDPod(pod) {
 					limit := getContainerMemoryLimit(pod, "etcd")
 					if limit > 0 {
@@ -198,19 +274,19 @@ func (r *ETCDCascadeRule) checkETCDMemory(data *correlation.AnalysisData, window
 }
 
 // checkAPIServerTimeouts checks for API server timeout issues
-func (r *ETCDCascadeRule) checkAPIServerTimeouts(data *correlation.AnalysisData, windowStart time.Time) []apiTimeoutIssue {
+func (r *ETCDCascadeRule) checkAPIServerTimeouts(k8sData *correlation.KubernetesData, windowStart time.Time) []apiTimeoutIssue {
 	var timeouts []apiTimeoutIssue
 
 	// Check for API server pods with high latency or timeouts
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		if !isAPIServerPod(pod) {
 			continue
 		}
 
 		// Check pod events for timeout-related messages
-		for _, event := range data.KubernetesData.Events {
+		for _, event := range k8sData.Events {
 			if event.InvolvedObject.Name == pod.Name &&
-				event.CreatedAt.After(windowStart) &&
+				event.CreationTimestamp.Time.After(windowStart) &&
 				(strings.Contains(strings.ToLower(event.Message), "timeout") ||
 					strings.Contains(strings.ToLower(event.Message), "etcd")) {
 
@@ -218,21 +294,21 @@ func (r *ETCDCascadeRule) checkAPIServerTimeouts(data *correlation.AnalysisData,
 					PodName:   pod.Name,
 					Namespace: pod.Namespace,
 					Message:   event.Message,
-					Timestamp: event.CreatedAt,
+					Timestamp: event.CreationTimestamp.Time,
 				})
 			}
 		}
 
 		// Check container logs if available
-		if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
-			for _, line := range logs {
-				if strings.Contains(strings.ToLower(line), "etcd timeout") ||
-					strings.Contains(strings.ToLower(line), "context deadline exceeded") {
+		if logs, ok := k8sData.Logs[pod.Name]; ok {
+			for _, logEntry := range logs {
+				if strings.Contains(strings.ToLower(logEntry.Message), "etcd timeout") ||
+					strings.Contains(strings.ToLower(logEntry.Message), "context deadline exceeded") {
 					timeouts = append(timeouts, apiTimeoutIssue{
 						PodName:   pod.Name,
 						Namespace: pod.Namespace,
-						Message:   line,
-						Timestamp: time.Now(),
+						Message:   logEntry.Message,
+						Timestamp: logEntry.Timestamp,
 					})
 				}
 			}
@@ -243,11 +319,11 @@ func (r *ETCDCascadeRule) checkAPIServerTimeouts(data *correlation.AnalysisData,
 }
 
 // checkDNSFailures checks for DNS initialization failures
-func (r *ETCDCascadeRule) checkDNSFailures(data *correlation.AnalysisData, windowStart time.Time) []dnsFailure {
+func (r *ETCDCascadeRule) checkDNSFailures(k8sData *correlation.KubernetesData, windowStart time.Time) []dnsFailure {
 	var failures []dnsFailure
 
 	// Check CoreDNS pods
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		if !isCoreDNSPod(pod) {
 			continue
 		}
@@ -266,9 +342,9 @@ func (r *ETCDCascadeRule) checkDNSFailures(data *correlation.AnalysisData, windo
 		}
 
 		// Check events
-		for _, event := range data.KubernetesData.Events {
+		for _, event := range k8sData.Events {
 			if event.InvolvedObject.Name == pod.Name &&
-				event.CreatedAt.After(windowStart) &&
+				event.CreationTimestamp.Time.After(windowStart) &&
 				(strings.Contains(strings.ToLower(event.Message), "failed") ||
 					strings.Contains(strings.ToLower(event.Message), "error")) {
 
@@ -276,7 +352,7 @@ func (r *ETCDCascadeRule) checkDNSFailures(data *correlation.AnalysisData, windo
 					PodName:   pod.Name,
 					Namespace: pod.Namespace,
 					Message:   event.Message,
-					Timestamp: event.CreatedAt,
+					Timestamp: event.CreationTimestamp.Time,
 				})
 			}
 		}
@@ -286,11 +362,11 @@ func (r *ETCDCascadeRule) checkDNSFailures(data *correlation.AnalysisData, windo
 }
 
 // checkWorkloadFailures checks for workload initialization failures
-func (r *ETCDCascadeRule) checkWorkloadFailures(data *correlation.AnalysisData, windowStart time.Time) []workloadFailure {
+func (r *ETCDCascadeRule) checkWorkloadFailures(k8sData *correlation.KubernetesData, windowStart time.Time) []workloadFailure {
 	var failures []workloadFailure
 
 	// Check for pods stuck in init or crashing
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		// Skip system pods
 		if pod.Namespace == "kube-system" || pod.Namespace == "kube-public" {
 			continue
@@ -444,26 +520,73 @@ func (r *ETCDCascadeRule) identifyRootCause(etcd []etcdMemoryIssue) string {
 	return fmt.Sprintf("ETCD memory pressure (%.1f%%), trending toward exhaustion", maxUsage)
 }
 
-func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeoutIssue, dns []dnsFailure, workload []workloadFailure) []string {
-	evidence := []string{}
+func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeoutIssue, dns []dnsFailure, workload []workloadFailure) []correlation.Evidence {
+	evidence := []correlation.Evidence{}
 
 	for _, issue := range etcd {
-		evidence = append(evidence, fmt.Sprintf("ETCD pod %s at %.1f%% memory usage", issue.PodName, issue.UsagePercent))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "etcd_memory_pressure",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("ETCD pod %s at %.1f%% memory usage", issue.PodName, issue.UsagePercent),
+			Data: map[string]interface{}{
+				"pod_name":      issue.PodName,
+				"usage_percent": issue.UsagePercent,
+				"namespace":     issue.Namespace,
+			},
+			Timestamp:  issue.Timestamp,
+			Confidence: 0.95,
+		})
 		if issue.HasEBPFData {
-			evidence = append(evidence, "Kernel-level memory tracking confirms high usage")
+			evidence = append(evidence, correlation.Evidence{
+				Type:        "kernel_memory_tracking",
+				Source:      correlation.SourceEBPF,
+				Description: "Kernel-level memory tracking confirms high usage",
+				Data: map[string]interface{}{
+					"pod_name": issue.PodName,
+				},
+				Timestamp:  issue.Timestamp,
+				Confidence: 1.0,
+			})
 		}
 	}
 
 	if len(api) > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d API server timeout errors detected", len(api)))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "api_timeout_errors",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d API server timeout errors detected", len(api)),
+			Data: map[string]interface{}{
+				"timeout_count": len(api),
+			},
+			Timestamp:  time.Now(),
+			Confidence: 0.9,
+		})
 	}
 
 	if len(dns) > 0 {
-		evidence = append(evidence, "CoreDNS pods failing or restarting")
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "dns_failures",
+			Source:      correlation.SourceKubernetes,
+			Description: "CoreDNS pods failing or restarting",
+			Data: map[string]interface{}{
+				"failure_count": len(dns),
+			},
+			Timestamp:  time.Now(),
+			Confidence: 0.85,
+		})
 	}
 
 	if len(workload) > 0 {
-		evidence = append(evidence, fmt.Sprintf("%d workload pods affected by DNS resolution failures", len(workload)))
+		evidence = append(evidence, correlation.Evidence{
+			Type:        "workload_dns_impact",
+			Source:      correlation.SourceKubernetes,
+			Description: fmt.Sprintf("%d workload pods affected by DNS resolution failures", len(workload)),
+			Data: map[string]interface{}{
+				"affected_workloads": len(workload),
+			},
+			Timestamp:  time.Now(),
+			Confidence: 0.8,
+		})
 	}
 
 	return evidence

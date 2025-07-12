@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/simple"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/simple"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // TestBasicHealthCheck tests basic health check functionality

@@ -10,15 +10,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/correlation/rules"
-	"github.com/falseyair/tapio/pkg/correlation/sources"
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/simple"
-	"github.com/falseyair/tapio/pkg/types"
-	"github.com/falseyair/tapio/pkg/universal"
-	"github.com/falseyair/tapio/pkg/universal/converters"
-	"github.com/falseyair/tapio/pkg/universal/formatters"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation/rules"
+	"github.com/yairfalse/tapio/pkg/correlation/sources"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/simple"
+	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/universal/converters"
+	"github.com/yairfalse/tapio/pkg/universal/formatters"
 )
 
 // PrometheusExporter exports Tapio metrics to Prometheus format

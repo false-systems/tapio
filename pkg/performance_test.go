@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/falseyair/tapio/pkg/unified"
-	"github.com/falseyair/tapio/pkg/sources"
-	"github.com/falseyair/tapio/pkg/performance"
+	"github.com/yairfalse/tapio/pkg/unified"
+	"github.com/yairfalse/tapio/pkg/sources"
+	"github.com/yairfalse/tapio/pkg/performance"
 )
 
 // TestPerformanceTargets validates the 165k+ events/sec performance target

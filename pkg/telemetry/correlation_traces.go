@@ -10,16 +10,16 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/sniffer"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // CorrelationTracer provides distributed tracing for correlation analysis
 type CorrelationTracer struct {
 	tracer     trace.Tracer
 	exporter   *OpenTelemetryExporter
-	translator *sniffer.SimplePIDTranslator
+	translator *collector.SimplePIDTranslator
 }
 
 // NewCorrelationTracer creates a new correlation tracer

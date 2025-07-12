@@ -5,21 +5,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/translator"
-	"github.com/falseyair/tapio/pkg/universal"
+	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/universal"
 )
 
 // TranslatorPIDMapper uses the translator engine for PID to pod mapping
 type TranslatorPIDMapper struct {
-	engine       *translator.Engine
+	translator   *collector.SimplePIDTranslator
 	fallbackData map[int32]*universal.Target
 	mu           sync.RWMutex
 }
 
-// NewTranslatorPIDMapper creates a new PID mapper using the translator engine
-func NewTranslatorPIDMapper(engine *translator.Engine) *TranslatorPIDMapper {
+// NewTranslatorPIDMapper creates a new PID mapper using the translator
+func NewTranslatorPIDMapper(translator *collector.SimplePIDTranslator) *TranslatorPIDMapper {
 	return &TranslatorPIDMapper{
-		engine:       engine,
+		translator:   translator,
 		fallbackData: make(map[int32]*universal.Target),
 	}
 }
@@ -27,17 +27,17 @@ func NewTranslatorPIDMapper(engine *translator.Engine) *TranslatorPIDMapper {
 // MapPIDToTarget maps a PID to a universal target using the translator
 func (m *TranslatorPIDMapper) MapPIDToTarget(pid int32) (*universal.Target, error) {
 	// Use translator if available
-	if m.engine != nil {
-		result, err := m.engine.Translate(pid)
+	if m.translator != nil {
+		result, err := m.translator.GetPodInfo(uint32(pid))
 		if err == nil && result != nil {
 			target := &universal.Target{
 				Type:      universal.TargetTypePod,
-				Name:      result.PodName,
+				Name:      result.Pod,
 				Namespace: result.Namespace,
 				PID:       pid,
-				Container: result.ContainerName,
-				Pod:       result.PodName,
-				Node:      result.NodeName,
+				Container: result.Container,
+				Pod:       result.Pod,
+				Node:      result.Node,
 			}
 
 			// Update fallback data

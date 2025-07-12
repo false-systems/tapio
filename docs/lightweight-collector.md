@@ -2,7 +2,7 @@
 
 ## Overview
 
-The lightweight sniffer is a Polar Signals-style monitoring system that provides MEGA FAST, MEGA SLIM, and MEGA SMART correlation of eBPF kernel data with Kubernetes API information. It uses minimal resources while providing actionable insights.
+The lightweight collector is a Polar Signals-style monitoring system that provides MEGA FAST, MEGA SLIM, and MEGA SMART correlation of eBPF kernel data with Kubernetes API information. It uses minimal resources while providing actionable insights.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ The lightweight sniffer is a Polar Signals-style monitoring system that provides
 ┌─────────────────────────────────────────────────────────────┐
 │                        Manager                               │
 │  ┌───────────────┐  ┌───────────────┐  ┌─────────────────┐ │
-│  │ eBPF Sniffer  │  │ K8s Sniffer   │  │ PID Translator  │ │
+│  │ eBPF Collector  │  │ K8s Collector   │  │ PID Translator  │ │
 │  │               │  │               │  │                 │ │
 │  │ • 19Hz Sample │  │ • Informers   │  │ • 64MB Cache    │ │
 │  │ • Memory      │  │ • Pod Events  │  │ • /proc scan    │ │
@@ -40,12 +40,12 @@ The lightweight sniffer is a Polar Signals-style monitoring system that provides
 
 ## Features
 
-### 1. Standard Sniffer Interface
+### 1. Standard Collector Interface
 - Unified interface for all data sources
 - Health monitoring and metrics
 - Configurable sampling and resource limits
 
-### 2. eBPF Sniffer
+### 2. eBPF Collector
 - **Sampling Rate**: 19Hz (configurable)
 - **Memory Usage**: ~50MB
 - **Features**:
@@ -55,7 +55,7 @@ The lightweight sniffer is a Polar Signals-style monitoring system that provides
   - Network monitoring (future)
   - File system operations (future)
 
-### 3. K8s API Sniffer
+### 3. K8s API Collector
 - **Resource Usage**: Minimal (uses informers)
 - **Features**:
   - Pod lifecycle monitoring
@@ -87,14 +87,14 @@ The lightweight sniffer is a Polar Signals-style monitoring system that provides
 ### Basic Usage
 
 ```bash
-# Run the lightweight sniffer
+# Run the lightweight collector
 tapio sniff
 
 # Output formats
 tapio sniff -o json        # JSON output
 tapio sniff -o prometheus  # Prometheus metrics format
 
-# Run specific sniffers
+# Run specific collectors
 tapio sniff --k8s-only    # Only K8s API monitoring
 tapio sniff --ebpf-only   # Only eBPF monitoring
 
@@ -105,8 +105,8 @@ tapio sniff --batch-size 200
 ### Example Output
 
 ```
-✓ eBPF sniffer registered
-✓ K8s API sniffer registered
+✓ eBPF collector registered
+✓ K8s API collector registered
 ✓ Correlation engine started
 
 Monitoring cluster... Press Ctrl+C to stop
@@ -186,9 +186,9 @@ Monitoring cluster... Press Ctrl+C to stop
 
 ## Implementation Details
 
-### Sniffer Interface
+### Collector Interface
 ```go
-type Sniffer interface {
+type Collector interface {
     Name() string
     Events() <-chan Event
     Start(ctx context.Context, config Config) error
@@ -244,7 +244,7 @@ type Event struct {
 
 ## Comparison with Other Tools
 
-| Feature | Tapio Sniffer | Polar Signals | Pixie | Datadog |
+| Feature | Tapio Collector | Polar Signals | Pixie | Datadog |
 |---------|---------------|---------------|-------|----------|
 | CPU Usage | 10-50m | 50-100m | 200-500m | 500m+ |
 | Memory | 100-256Mi | 200-500Mi | 1-2Gi | 2Gi+ |

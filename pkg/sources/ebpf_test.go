@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/falseyair/tapio/pkg/collectors"
-	"github.com/falseyair/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 func TestNewEBPFSource(t *testing.T) {

@@ -1,4 +1,4 @@
-package sniffer
+package collector
 
 import (
 	"context"
@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// SimpleManager coordinates multiple sniffers and correlation
+// SimpleManager coordinates multiple collectors and correlation
 type SimpleManager struct {
 	// Core components
-	sniffers    map[string]Sniffer
+	collectors    map[string]Collector
 	correlation *CorrelationEngine
 	eventChan   chan Event
 	ctx         context.Context
@@ -30,7 +30,7 @@ type ManagerConfig struct {
 	CorrelationBatchSize    int
 	CorrelationBatchTimeout time.Duration
 	
-	// Resource limits (for all sniffers combined)
+	// Resource limits (for all collectors combined)
 	MaxMemoryMB int
 	MaxCPUMilli int
 	
@@ -43,8 +43,8 @@ func DefaultManagerConfig() ManagerConfig {
 	return ManagerConfig{
 		CorrelationBatchSize:    100,
 		CorrelationBatchTimeout: 100 * time.Millisecond,
-		MaxMemoryMB:             256,  // Total for all sniffers
-		MaxCPUMilli:             100,  // Total for all sniffers
+		MaxMemoryMB:             256,  // Total for all collectors
+		MaxCPUMilli:             100,  // Total for all collectors
 		EventBufferSize:         50000,
 	}
 }
@@ -54,7 +54,7 @@ func NewSimpleManager(config ManagerConfig) *SimpleManager {
 	correlation := NewCorrelationEngine(config.CorrelationBatchSize, config.CorrelationBatchTimeout)
 	
 	return &SimpleManager{
-		sniffers:    make(map[string]Sniffer),
+		collectors:    make(map[string]Collector),
 		correlation: correlation,
 		eventChan:   make(chan Event, config.EventBufferSize),
 		config:      config,
@@ -62,26 +62,26 @@ func NewSimpleManager(config ManagerConfig) *SimpleManager {
 }
 
 // Register adds a new sniffer to the manager
-func (m *SimpleManager) Register(sniffer Sniffer) error {
+func (m *SimpleManager) Register(c Collector) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	
 	if m.isRunning {
-		return fmt.Errorf("cannot register sniffer while running")
+		return fmt.Errorf("cannot register collector while running")
 	}
 	
-	name := sniffer.Name()
-	if _, exists := m.sniffers[name]; exists {
-		return fmt.Errorf("sniffer %s already registered", name)
+	name := c.Name()
+	if _, exists := m.collectors[name]; exists {
+		return fmt.Errorf("collector %s already registered", name)
 	}
 	
-	m.sniffers[name] = sniffer
+	m.collectors[name] = c
 	
 	// Also register with correlation engine
-	return m.correlation.RegisterSniffer(sniffer)
+	return m.correlation.RegisterCollector(c)
 }
 
-// Start begins all registered sniffers
+// Start begins all registered collectors
 func (m *SimpleManager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -90,27 +90,27 @@ func (m *SimpleManager) Start(ctx context.Context) error {
 		return fmt.Errorf("manager already running")
 	}
 	
-	if len(m.sniffers) == 0 {
-		return fmt.Errorf("no sniffers registered")
+	if len(m.collectors) == 0 {
+		return fmt.Errorf("no collectors registered")
 	}
 	
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	
 	// Calculate resource limits per sniffer
-	snifferConfig := m.calculateSnifferConfig()
+	snifferConfig := m.calculateCollectorConfig()
 	
-	// Start all sniffers
-	for name, sniffer := range m.sniffers {
-		if err := sniffer.Start(m.ctx, snifferConfig); err != nil {
-			// Stop any started sniffers
-			m.stopSniffers()
+	// Start all collectors
+	for name, c := range m.collectors {
+		if err := c.Start(m.ctx, snifferConfig); err != nil {
+			// Stop any started collectors
+			m.stopCollectors()
 			return fmt.Errorf("failed to start sniffer %s: %w", name, err)
 		}
 	}
 	
 	// Start correlation engine
 	if err := m.correlation.Start(m.ctx); err != nil {
-		m.stopSniffers()
+		m.stopCollectors()
 		return fmt.Errorf("failed to start correlation engine: %w", err)
 	}
 	
@@ -124,34 +124,34 @@ func (m *SimpleManager) Start(ctx context.Context) error {
 	return nil
 }
 
-// calculateSnifferConfig calculates per-sniffer resource limits
-func (m *SimpleManager) calculateSnifferConfig() Config {
-	numSniffers := len(m.sniffers)
-	if numSniffers == 0 {
-		numSniffers = 1
+// calculateCollectorConfig calculates per-sniffer resource limits
+func (m *SimpleManager) calculateCollectorConfig() Config {
+	numCollectors := len(m.collectors)
+	if numCollectors == 0 {
+		numCollectors = 1
 	}
 	
 	return Config{
 		Enabled:         true,
 		SamplingRate:    1.0,
-		EventBufferSize: m.config.EventBufferSize / numSniffers,
+		EventBufferSize: m.config.EventBufferSize / numCollectors,
 		MaxEventsPerSec: 100000,
-		MaxMemoryMB:     m.config.MaxMemoryMB / numSniffers,
-		MaxCPUMilli:     m.config.MaxCPUMilli / numSniffers,
+		MaxMemoryMB:     m.config.MaxMemoryMB / numCollectors,
+		MaxCPUMilli:     m.config.MaxCPUMilli / numCollectors,
 		Extra:           make(map[string]interface{}),
 	}
 }
 
-// forwardEvents merges events from all sniffers
+// forwardEvents merges events from all collectors
 func (m *SimpleManager) forwardEvents() {
 	// Create a goroutine for each sniffer
 	var wg sync.WaitGroup
 	
-	for name, sniffer := range m.sniffers {
+	for name, c := range m.collectors {
 		wg.Add(1)
-		go func(name string, sniffer Sniffer) {
+		go func(name string, c Collector) {
 			defer wg.Done()
-			events := sniffer.Events()
+			events := c.Events()
 			
 			for {
 				select {
@@ -170,7 +170,7 @@ func (m *SimpleManager) forwardEvents() {
 					}
 				}
 			}
-		}(name, sniffer)
+		}(name, c)
 	}
 	
 	// Wait for all forwarders to finish
@@ -193,22 +193,22 @@ func (m *SimpleManager) monitorHealth() {
 	}
 }
 
-// checkHealth checks the health of all sniffers
+// checkHealth checks the health of all collectors
 func (m *SimpleManager) checkHealth() {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	
-	for name, sniffer := range m.sniffers {
-		health := sniffer.Health()
+	for name, c := range m.collectors {
+		health := c.Health()
 		
-		// Log unhealthy sniffers (in production, would alert)
+		// Log unhealthy collectors (in production, would alert)
 		if health.Status == HealthStatusUnhealthy {
-			fmt.Printf("Sniffer %s is unhealthy: %s\n", name, health.Message)
+			fmt.Printf("Collector %s is unhealthy: %s\n", name, health.Message)
 		}
 	}
 }
 
-// Events returns a merged stream of events from all sniffers
+// Events returns a merged stream of events from all collectors
 func (m *SimpleManager) Events() <-chan Event {
 	return m.eventChan
 }
@@ -218,15 +218,15 @@ func (m *SimpleManager) Insights() <-chan Insight {
 	return m.correlation.Insights()
 }
 
-// Health returns the health status of all sniffers
+// Health returns the health status of all collectors
 func (m *SimpleManager) Health() map[string]Health {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	
 	health := make(map[string]Health)
 	
-	for name, sniffer := range m.sniffers {
-		health[name] = sniffer.Health()
+	for name, c := range m.collectors {
+		health[name] = c.Health()
 	}
 	
 	// Add correlation engine health
@@ -240,12 +240,12 @@ func (m *SimpleManager) Health() map[string]Health {
 	return health
 }
 
-// GetSniffer returns a specific sniffer by name
-func (m *SimpleManager) GetSniffer(name string) (Sniffer, bool) {
+// GetCollector returns a specific sniffer by name
+func (m *SimpleManager) GetCollector(name string) (Collector, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	
-	sniffer, exists := m.sniffers[name]
+	sniffer, exists := m.collectors[name]
 	return sniffer, exists
 }
 
@@ -255,7 +255,7 @@ func (m *SimpleManager) GetStats() map[string]interface{} {
 	defer m.mu.RUnlock()
 	
 	stats := map[string]interface{}{
-		"sniffers_count":    len(m.sniffers),
+		"collectors_count":    len(m.collectors),
 		"is_running":        m.isRunning,
 		"event_buffer_size": len(m.eventChan),
 	}
@@ -267,20 +267,20 @@ func (m *SimpleManager) GetStats() map[string]interface{} {
 	
 	// Add per-sniffer stats
 	snifferStats := make(map[string]interface{})
-	for name, sniffer := range m.sniffers {
-		health := sniffer.Health()
+	for name, c := range m.collectors {
+		health := c.Health()
 		snifferStats[name] = map[string]interface{}{
 			"status":           health.Status,
 			"events_processed": health.EventsProcessed,
 			"events_dropped":   health.EventsDropped,
 		}
 	}
-	stats["sniffers"] = snifferStats
+	stats["collectors"] = snifferStats
 	
 	return stats
 }
 
-// Stop stops all sniffers and the manager
+// Stop stops all collectors and the manager
 func (m *SimpleManager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -292,8 +292,8 @@ func (m *SimpleManager) Stop() error {
 	// Stop correlation engine
 	m.correlation.Stop()
 	
-	// Stop all sniffers
-	m.stopSniffers()
+	// Stop all collectors
+	m.stopCollectors()
 	
 	// Cancel context
 	if m.cancel != nil {
@@ -304,10 +304,10 @@ func (m *SimpleManager) Stop() error {
 	return nil
 }
 
-// stopSniffers stops all registered sniffers
-func (m *SimpleManager) stopSniffers() {
-	for name, sniffer := range m.sniffers {
-		if stopper, ok := sniffer.(interface{ Stop() error }); ok {
+// stopCollectors stops all registered collectors
+func (m *SimpleManager) stopCollectors() {
+	for name, c := range m.collectors {
+		if stopper, ok := c.(interface{ Stop() error }); ok {
 			if err := stopper.Stop(); err != nil {
 				fmt.Printf("Error stopping sniffer %s: %v\n", name, err)
 			}
@@ -321,16 +321,16 @@ func ExampleUsage() {
 	config := DefaultManagerConfig()
 	manager := NewSimpleManager(config)
 	
-	// Create and register sniffers
+	// Create and register collectors
 	// ebpfMonitor := ebpf.NewMonitor(...)
 	// k8sClient := kubernetes.NewForConfig(...)
 	// translator := NewSimplePIDTranslator(k8sClient)
 	
-	// ebpfSniffer := NewEBPFSniffer(ebpfMonitor, translator)
-	// k8sSniffer := NewK8sSniffer(k8sClient)
+	// ebpfCollector := NewEBPFCollector(ebpfMonitor, translator)
+	// k8sCollector := NewK8sCollector(k8sClient)
 	
-	// manager.Register(ebpfSniffer)
-	// manager.Register(k8sSniffer)
+	// manager.Register(ebpfCollector)
+	// manager.Register(k8sCollector)
 	
 	// Start everything
 	ctx := context.Background()

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/systemd"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/systemd"
 )
 
 // SystemdSource implements the DataSource interface for systemd service monitoring

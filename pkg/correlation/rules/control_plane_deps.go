@@ -71,28 +71,92 @@ func (r *ControlPlaneDepsRule) Description() string {
 	return "Detects when external dependency failures cascade through control plane components causing cluster-wide disruption"
 }
 
+// GetMetadata returns metadata about the rule
+func (r *ControlPlaneDepsRule) GetMetadata() correlation.RuleMetadata {
+	return correlation.RuleMetadata{
+		ID:          r.ID(),
+		Name:        r.Name(),
+		Description: r.Description(),
+		Version:     "1.0.0",
+		Author:      "Tapio Correlation Engine",
+		Tags:        []string{"control-plane", "dependencies", "cascade", "infrastructure"},
+		Requirements: []correlation.RuleRequirement{
+			{
+				SourceType: correlation.SourceKubernetes,
+				DataType:   "full",
+				Required:   true,
+			},
+		},
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}
+
+// CheckRequirements verifies that required data sources are available
+func (r *ControlPlaneDepsRule) CheckRequirements(ctx context.Context, data *correlation.DataCollection) error {
+	if !data.IsSourceAvailable(correlation.SourceKubernetes) {
+		return correlation.NewRequirementNotMetError(r.ID(), r.GetMetadata().Requirements[0])
+	}
+	return nil
+}
+
+// GetConfidenceFactors returns factors that affect confidence scoring
+func (r *ControlPlaneDepsRule) GetConfidenceFactors() []string {
+	return []string{
+		"dependency_timeout_correlation",
+		"component_failure_count",
+		"time_correlation",
+		"cascade_pattern_match",
+		"workload_impact_severity",
+	}
+}
+
+// Validate validates the rule configuration
+func (r *ControlPlaneDepsRule) Validate() error {
+	if r.config.TimeoutThreshold <= 0 {
+		return correlation.NewRuleValidationError("timeout_threshold must be positive")
+	}
+	if r.config.MinComponentFailures <= 0 {
+		return correlation.NewRuleValidationError("min_component_failures must be positive")
+	}
+	if r.config.TimeWindow <= 0 {
+		return correlation.NewRuleValidationError("time_window must be positive")
+	}
+	if r.config.MinConfidence <= 0 || r.config.MinConfidence > 1 {
+		return correlation.NewRuleValidationError("min_confidence must be between 0 and 1")
+	}
+	return nil
+}
+
 // Execute runs the control plane dependency detection logic
-func (r *ControlPlaneDepsRule) Execute(ctx context.Context, data *correlation.AnalysisData) ([]correlation.Finding, error) {
+func (r *ControlPlaneDepsRule) Execute(ctx context.Context, ruleCtx *correlation.RuleContext) ([]correlation.Finding, error) {
 	var findings []correlation.Finding
+
+	// Get Kubernetes data from rule context
+	k8sData, err := ruleCtx.DataCollection.GetKubernetesData(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Kubernetes data: %w", err)
+	}
 
 	// Get current time for analysis
 	now := time.Now()
 	windowStart := now.Add(-r.config.TimeWindow)
 
 	// Check for external dependency issues
-	depIssues := r.checkExternalDependencies(data, windowStart)
+	depIssues := r.checkExternalDependencies(k8sData, windowStart)
 	if len(depIssues) == 0 {
 		return findings, nil // No dependency issues detected
 	}
 
 	// Check control plane component health
-	componentFailures := r.checkComponentHealth(data, windowStart)
+	componentFailures := r.checkComponentHealth(k8sData, windowStart)
 
 	// Check for cascading failures
-	cascadeEffects := r.checkCascadeEffects(data, windowStart, componentFailures)
+	cascadeEffects := r.checkCascadeEffects(k8sData, windowStart, componentFailures)
 
 	// Check workload impact
-	workloadImpact := r.checkWorkloadImpact(data, windowStart)
+	workloadImpact := r.checkWorkloadImpact(k8sData, windowStart)
 
 	// Analyze dependency chains
 	depChains := r.analyzeDependencyChains(depIssues, componentFailures, cascadeEffects)
@@ -103,14 +167,19 @@ func (r *ControlPlaneDepsRule) Execute(ctx context.Context, data *correlation.An
 
 		if confidence >= r.config.MinConfidence {
 			finding := correlation.Finding{
+				ID:          "", // Will be auto-generated
 				RuleID:      r.ID(),
 				Title:       "Control Plane Dependency Cascade Detected",
 				Description: r.buildDescription(depIssues, componentFailures, cascadeEffects, workloadImpact, depChains),
 				Severity:    r.determineSeverity(componentFailures, workloadImpact),
 				Confidence:  confidence,
+				Evidence:    r.collectEvidence(depIssues, componentFailures, cascadeEffects, workloadImpact),
+				Tags:        []string{"control-plane", "dependencies", "cascade"},
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+				Metadata:    make(map[string]interface{}),
 				Impact:      r.assessImpact(componentFailures, workloadImpact),
 				RootCause:   r.identifyRootCause(depIssues, depChains),
-				Evidence:    r.collectEvidence(depIssues, componentFailures, cascadeEffects, workloadImpact),
 				Recommendations: []string{
 					"Check cloud provider API connectivity and quotas",
 					"Verify control plane component configurations",
@@ -124,6 +193,9 @@ func (r *ControlPlaneDepsRule) Execute(ctx context.Context, data *correlation.An
 					Event:       "Complete control plane failure",
 					TimeToEvent: r.predictTimeToFailure(componentFailures, cascadeEffects),
 					Confidence:  confidence,
+					Factors:     []string{"dependency_timeouts", "component_failures", "cascade_effects"},
+					Mitigation:  []string{"Fix external dependencies", "Restart components", "Implement circuit breakers"},
+					UpdatedAt:   time.Now(),
 				},
 			}
 
@@ -144,7 +216,7 @@ func (r *ControlPlaneDepsRule) Execute(ctx context.Context, data *correlation.An
 }
 
 // checkExternalDependencies identifies external dependency issues
-func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.AnalysisData, windowStart time.Time) []dependencyIssue {
+func (r *ControlPlaneDepsRule) checkExternalDependencies(k8sData *correlation.KubernetesData, windowStart time.Time) []dependencyIssue {
 	var issues []dependencyIssue
 
 	// Common external dependencies to check
@@ -158,14 +230,14 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 	}
 
 	// Check controller manager logs for cloud provider issues
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		podInfo := types.PodInfo{
 			Name:      pod.Name,
 			Namespace: pod.Namespace,
 			Labels:    pod.Labels,
 		}
 		if isControllerManagerPod(podInfo) || isCloudControllerPod(podInfo) {
-			if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
+			if logs, ok := k8sData.Logs[pod.Name]; ok {
 				for _, logEntry := range logs {
 					lineLower := strings.ToLower(logEntry.Message)
 
@@ -235,7 +307,7 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 	}
 
 	// Check events for dependency-related issues
-	for _, event := range data.KubernetesData.Events {
+	for _, event := range k8sData.Events {
 		if event.CreationTimestamp.Time.After(windowStart) {
 			eventLower := strings.ToLower(event.Message)
 
@@ -263,11 +335,11 @@ func (r *ControlPlaneDepsRule) checkExternalDependencies(data *correlation.Analy
 }
 
 // checkComponentHealth checks control plane component health
-func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisData, windowStart time.Time) []componentFailure {
+func (r *ControlPlaneDepsRule) checkComponentHealth(k8sData *correlation.KubernetesData, windowStart time.Time) []componentFailure {
 	var failures []componentFailure
 
 	// Check each critical component
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		podInfo := types.PodInfo{
 			Name:      pod.Name,
 			Namespace: pod.Namespace,
@@ -317,7 +389,7 @@ func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisDa
 		}
 
 		// Check for error logs indicating dependency issues
-		if logs, ok := data.KubernetesData.Logs[pod.Name]; ok {
+		if logs, ok := k8sData.Logs[pod.Name]; ok {
 			for _, logEntry := range logs {
 				lineLower := strings.ToLower(logEntry.Message)
 
@@ -347,7 +419,7 @@ func (r *ControlPlaneDepsRule) checkComponentHealth(data *correlation.AnalysisDa
 }
 
 // checkCascadeEffects identifies cascading effects through the system
-func (r *ControlPlaneDepsRule) checkCascadeEffects(data *correlation.AnalysisData, windowStart time.Time, componentFailures []componentFailure) []cascadeEffect {
+func (r *ControlPlaneDepsRule) checkCascadeEffects(k8sData *correlation.KubernetesData, windowStart time.Time, componentFailures []componentFailure) []cascadeEffect {
 	var effects []cascadeEffect
 
 	// Map component types to their downstream effects
@@ -373,7 +445,7 @@ func (r *ControlPlaneDepsRule) checkCascadeEffects(data *correlation.AnalysisDat
 		}
 
 		// Look for related failures in events
-		for _, event := range data.KubernetesData.Events {
+		for _, event := range k8sData.Events {
 			if event.CreationTimestamp.Time.After(windowStart) {
 				eventLower := strings.ToLower(event.Message)
 
@@ -400,14 +472,14 @@ func (r *ControlPlaneDepsRule) checkCascadeEffects(data *correlation.AnalysisDat
 		// Check for stuck resources
 		if failure.ComponentType == "controller-manager" {
 			// Check deployments
-			for _, deployment := range data.KubernetesData.Deployments {
+			for _, deployment := range k8sData.Deployments {
 				if deployment.Status.Replicas != deployment.Status.ReadyReplicas {
 					effect.StuckResources++
 				}
 			}
 		} else if failure.ComponentType == "scheduler" {
 			// Check pending pods
-			for _, pod := range data.KubernetesData.Pods {
+			for _, pod := range k8sData.Pods {
 				if pod.Status.Phase == "Pending" && pod.Spec.NodeName == "" {
 					effect.StuckResources++
 				}
@@ -423,14 +495,14 @@ func (r *ControlPlaneDepsRule) checkCascadeEffects(data *correlation.AnalysisDat
 }
 
 // checkWorkloadImpact assesses impact on workloads
-func (r *ControlPlaneDepsRule) checkWorkloadImpact(data *correlation.AnalysisData, windowStart time.Time) workloadImpact {
+func (r *ControlPlaneDepsRule) checkWorkloadImpact(k8sData *correlation.KubernetesData, windowStart time.Time) workloadImpact {
 	impact := workloadImpact{
 		AffectedNamespaces: make(map[string]int),
 		AffectedWorkloads:  make(map[string]int),
 	}
 
 	// Check deployments
-	for _, deployment := range data.KubernetesData.Deployments {
+	for _, deployment := range k8sData.Deployments {
 		if deployment.Status.Replicas != deployment.Status.ReadyReplicas {
 			impact.AffectedWorkloads["Deployment"]++
 			impact.AffectedNamespaces[deployment.Namespace]++
@@ -444,7 +516,7 @@ func (r *ControlPlaneDepsRule) checkWorkloadImpact(data *correlation.AnalysisDat
 	}
 
 	// Check statefulsets
-	for _, sts := range data.KubernetesData.StatefulSets {
+	for _, sts := range k8sData.StatefulSets {
 		if sts.Status.Replicas != sts.Status.ReadyReplicas {
 			impact.AffectedWorkloads["StatefulSet"]++
 			impact.AffectedNamespaces[sts.Namespace]++
@@ -453,7 +525,7 @@ func (r *ControlPlaneDepsRule) checkWorkloadImpact(data *correlation.AnalysisDat
 	}
 
 	// Check daemonsets
-	for _, ds := range data.KubernetesData.DaemonSets {
+	for _, ds := range k8sData.DaemonSets {
 		if ds.Status.DesiredNumberScheduled != ds.Status.NumberReady {
 			impact.AffectedWorkloads["DaemonSet"]++
 			impact.AffectedNamespaces[ds.Namespace]++
@@ -462,7 +534,7 @@ func (r *ControlPlaneDepsRule) checkWorkloadImpact(data *correlation.AnalysisDat
 	}
 
 	// Check pods
-	for _, pod := range data.KubernetesData.Pods {
+	for _, pod := range k8sData.Pods {
 		switch pod.Status.Phase {
 		case "Pending":
 			impact.PendingPods++
@@ -481,12 +553,12 @@ func (r *ControlPlaneDepsRule) checkWorkloadImpact(data *correlation.AnalysisDat
 	}
 
 	// Check services
-	for _, service := range data.KubernetesData.Services {
+	for _, service := range k8sData.Services {
 		if service.Spec.Type == "LoadBalancer" {
 			// Check if LoadBalancer has ingress
 			if len(service.Status.LoadBalancer.Ingress) == 0 {
 				// Check how long it's been waiting
-				for _, event := range data.KubernetesData.Events {
+				for _, event := range k8sData.Events {
 					if event.InvolvedObject.Kind == "Service" &&
 						event.InvolvedObject.Name == service.Name &&
 						strings.Contains(event.Message, "LoadBalancer") {

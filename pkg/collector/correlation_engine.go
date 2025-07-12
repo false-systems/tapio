@@ -1,4 +1,4 @@
-package sniffer
+package collector
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// CorrelationEngine processes events from multiple sniffers and generates insights
+// CorrelationEngine processes events from multiple collectors and generates insights
 type CorrelationEngine struct {
 	// Core components
-	sniffers       map[string]Sniffer
+	collectors       map[string]Collector
 	eventChan      chan Event
 	insightChan    chan Insight
 	ctx            context.Context
@@ -110,7 +110,7 @@ type LegacyCircuitBreaker struct {
 // NewCorrelationEngine creates a new correlation engine
 func NewCorrelationEngine(batchSize int, batchTimeout time.Duration) *CorrelationEngine {
 	return &CorrelationEngine{
-		sniffers:       make(map[string]Sniffer),
+		collectors:       make(map[string]Collector),
 		eventChan:      make(chan Event, 10000),
 		insightChan:    make(chan Insight, 1000),
 		eventBuffer:    make([]Event, 0, batchSize),
@@ -121,9 +121,9 @@ func NewCorrelationEngine(batchSize int, batchTimeout time.Duration) *Correlatio
 	}
 }
 
-// RegisterSniffer adds a sniffer to the engine
-func (e *CorrelationEngine) RegisterSniffer(sniffer Sniffer) error {
-	e.sniffers[sniffer.Name()] = sniffer
+// RegisterCollector adds a sniffer to the engine
+func (e *CorrelationEngine) RegisterCollector(c Collector) error {
+	e.collectors[c.Name()] = c
 	return nil
 }
 
@@ -131,15 +131,15 @@ func (e *CorrelationEngine) RegisterSniffer(sniffer Sniffer) error {
 func (e *CorrelationEngine) Start(ctx context.Context) error {
 	e.ctx, e.cancel = context.WithCancel(ctx)
 
-	// Start all sniffers
+	// Start all collectors
 	config := DefaultConfig()
-	for name, sniffer := range e.sniffers {
-		if err := sniffer.Start(e.ctx, config); err != nil {
-			return fmt.Errorf("failed to start sniffer %s: %w", name, err)
+	for name, c := range e.collectors {
+		if err := c.Start(e.ctx, config); err != nil {
+			return fmt.Errorf("failed to start collector %s: %w", name, err)
 		}
 		
 		// Forward events to correlation engine
-		go e.forwardEvents(sniffer)
+		go e.forwardEvents(c)
 	}
 
 	// Start processing
@@ -150,8 +150,8 @@ func (e *CorrelationEngine) Start(ctx context.Context) error {
 }
 
 // forwardEvents forwards events from a sniffer to the correlation engine
-func (e *CorrelationEngine) forwardEvents(sniffer Sniffer) {
-	events := sniffer.Events()
+func (e *CorrelationEngine) forwardEvents(c Collector) {
+	events := c.Events()
 	
 	for {
 		select {
