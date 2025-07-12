@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -27,34 +28,92 @@ var (
 var checkCmd = &cobra.Command{
 	Use:   "check [resource]",
 	Short: "Check if your Kubernetes resources are healthy",
-	Long: `Check analyzes your pods, deployments, and services for potential problems.
-    
-It correlates Kubernetes API data with kernel-level insights to predict
-failures before they happen and suggest immediate fixes.`,
+	Long: `🔍 Check analyzes your pods, deployments, and services for potential problems.
+
+Check uses intelligent analysis to:
+  • Detect failing pods, containers, and services
+  • Predict failures before they happen (OOM, crashes, etc.)
+  • Correlate issues across multiple resources
+  • Provide actionable recommendations
+  • Show real-time cluster health status
+
+The analysis combines Kubernetes API data with optional eBPF kernel insights
+for deep visibility into your applications.`,
+
 	Example: `  # Check current namespace
   tapio check
 
-  # Check specific app
+  # Check specific app (searches all resource types)
   tapio check my-app
 
-  # Check specific pod
+  # Check specific pod with full name
   tapio check pod/my-app-7d4b9c8f-h2x9m
 
-  # Check entire cluster
+  # Check entire cluster (all namespaces)
   tapio check --all
 
-  # Check with JSON output
-  tapio check --output json`,
+  # Check with detailed output
+  tapio check --verbose
+
+  # Check with JSON output for automation
+  tapio check --output json
+
+  # Check with enhanced eBPF monitoring
+  tapio check --enable-ebpf
+
+  # Check specific namespace
+  tapio check --namespace production`,
+
 	Args: cobra.MaximumNArgs(1),
+
+	// Validate arguments before running
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Validate output format
+		if err := ValidateOutputFormat(outputFormat); err != nil {
+			return err
+		}
+
+		// Validate namespace
+		if err := ValidateNamespace(checkNamespace); err != nil {
+			return err
+		}
+
+		// Validate resource format if provided
+		if len(args) > 0 {
+			if err := validateResourceFormat(args[0]); err != nil {
+				return err
+			}
+		}
+
+		// Check for conflicting flags
+		if checkAll && checkNamespace != "" {
+			return NewCLIError(
+				"flag validation",
+				"Cannot use --all and --namespace together",
+				"Use either --all for all namespaces or --namespace for a specific one",
+			).WithExamples(
+				"tapio check --all",
+				"tapio check --namespace production",
+			)
+		}
+
+		return nil
+	},
+
 	RunE: runCheck,
 }
 
 func init() {
-	checkCmd.Flags().StringVarP(&checkNamespace, "namespace", "n", "", "Kubernetes namespace")
-	checkCmd.Flags().BoolVar(&checkAll, "all", false, "Check all namespaces")
-	checkCmd.Flags().StringVarP(&outputFormat, "output", "o", "human", "Output format: human, json, yaml")
-	checkCmd.Flags().BoolVar(&enableCorrelation, "correlation", true, "Enable intelligent correlation analysis")
-	checkCmd.Flags().BoolVar(&enableEBPF, "enable-ebpf", false, "Enable eBPF monitoring for enhanced insights")
+	checkCmd.Flags().StringVarP(&checkNamespace, "namespace", "n", "",
+		"Target namespace (default: current namespace from kubeconfig)")
+	checkCmd.Flags().BoolVar(&checkAll, "all", false,
+		"Check all namespaces (requires cluster-wide permissions)")
+	checkCmd.Flags().StringVarP(&outputFormat, "output", "o", "human",
+		"Output format: human (default), json, yaml")
+	checkCmd.Flags().BoolVar(&enableCorrelation, "correlation", true,
+		"Enable intelligent correlation analysis to find related issues")
+	checkCmd.Flags().BoolVar(&enableEBPF, "enable-ebpf", false,
+		"Enable eBPF monitoring for kernel-level insights (requires root)")
 }
 
 func showCurrentContext(request *types.CheckRequest) {
@@ -83,8 +142,8 @@ func handleNoResourceFound(resourceName, currentNamespace string) bool {
 	// Try to find the resource in other namespaces
 	suggestedNamespace, err := SuggestNamespaceForResource(resourceName)
 	if err != nil {
-		fmt.Printf("Resource '%s' not found in any namespace\n", resourceName)
-		fmt.Printf("Try: tapio check --all\n")
+		cliErr := ErrResourceNotFound(resourceName, currentNamespace)
+		fmt.Fprintf(os.Stderr, "%s\n", cliErr.Error())
 		return true
 	}
 
@@ -92,12 +151,20 @@ func handleNoResourceFound(resourceName, currentNamespace string) bool {
 	if PromptForNamespaceSwitch(suggestedNamespace, resourceName) {
 		err := switchNamespace(suggestedNamespace)
 		if err != nil {
-			fmt.Printf("Failed to switch namespace: %v\n", err)
+			cliErr := NewCLIError(
+				"namespace switch",
+				fmt.Sprintf("Failed to switch to namespace '%s'", suggestedNamespace),
+				"Check your kubectl configuration and permissions",
+			).WithExamples(
+				"kubectl config set-context --current --namespace="+suggestedNamespace,
+				"tapio use "+suggestedNamespace,
+			)
+			fmt.Fprintf(os.Stderr, "%s\n", cliErr.Error())
 			return true
 		}
 
-		fmt.Printf("Switched to namespace: %s\n", suggestedNamespace)
-		fmt.Printf("Re-run your command to check the resource\n")
+		fmt.Printf("✅ Switched to namespace: %s\n", suggestedNamespace)
+		fmt.Printf("💡 Re-run your command to check the resource\n")
 		return true
 	}
 
@@ -105,21 +172,25 @@ func handleNoResourceFound(resourceName, currentNamespace string) bool {
 }
 
 func offerNamespaceSelection() bool {
-	fmt.Printf("No pods found in current namespace\n\n")
+	fmt.Printf("💡 No pods found in current namespace\n\n")
 
 	checker, err := simple.NewChecker()
 	if err != nil {
-		return false
+		cliErr := ErrKubernetesConnection(err)
+		fmt.Fprintf(os.Stderr, "%s\n", cliErr.Error())
+		return true
 	}
 
 	ctx := context.Background()
 	client := checker.GetClient()
 	nsList, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return false
+		cliErr := ErrNoNamespaceAccess()
+		fmt.Fprintf(os.Stderr, "%s\n", cliErr.Error())
+		return true
 	}
 
-	fmt.Println("Available namespaces:")
+	fmt.Println("📋 Available namespaces:")
 	namespacesWithPods := []string{}
 
 	for _, ns := range nsList.Items {
@@ -136,39 +207,65 @@ func offerNamespaceSelection() bool {
 	}
 
 	if len(namespacesWithPods) == 0 {
-		fmt.Printf("No namespaces with pods found\n")
+		cliErr := NewCLIError(
+			"namespace discovery",
+			"No namespaces with pods found",
+			"Check if you have access to namespaces with running pods",
+		).WithExamples(
+			"kubectl auth can-i list pods --all-namespaces",
+			"kubectl get namespaces",
+			"tapio check --all  # Check all accessible namespaces",
+		)
+		fmt.Fprintf(os.Stderr, "%s\n", cliErr.Error())
 		return true
 	}
 
-	fmt.Printf("\nSwitch to namespace [1-%d], 'a' for all, or Enter to cancel: ", len(namespacesWithPods))
+	fmt.Printf("\n🔀 Switch to namespace [1-%d], 'a' for all, or Enter to cancel: ", len(namespacesWithPods))
 
 	var input string
 	_, _ = fmt.Scanln(&input)
 
 	if input == "" {
+		fmt.Println("Cancelled.")
 		return true
 	}
 
 	if input == "a" || input == "all" {
-		fmt.Printf("Run: tapio check --all\n")
+		fmt.Printf("💡 Run: tapio check --all\n")
 		return true
 	}
 
 	choice, err := strconv.Atoi(input)
 	if err != nil || choice < 1 || choice > len(namespacesWithPods) {
-		fmt.Printf("Invalid selection\n")
+		cliErr := NewCLIError(
+			"namespace selection",
+			"Invalid selection",
+			fmt.Sprintf("Choose a number between 1 and %d", len(namespacesWithPods)),
+		).WithExamples(
+			"1  # Select first namespace",
+			"a  # Check all namespaces",
+		)
+		fmt.Fprintf(os.Stderr, "%s\n", cliErr.Error())
 		return true
 	}
 
 	selectedNamespace := namespacesWithPods[choice-1]
 	err = switchNamespace(selectedNamespace)
 	if err != nil {
-		fmt.Printf("Failed to switch namespace: %v\n", err)
+		cliErr := NewCLIError(
+			"namespace switch",
+			fmt.Sprintf("Failed to switch to namespace '%s'", selectedNamespace),
+			"Check your kubectl configuration and permissions",
+		).WithExamples(
+			"kubectl config set-context --current --namespace="+selectedNamespace,
+			"tapio use "+selectedNamespace,
+		)
+		fmt.Fprintf(os.Stderr, "%s\n", cliErr.Error())
 		return true
 	}
 
-	fmt.Printf("Switched to namespace: %s\n", selectedNamespace)
-	fmt.Printf("Re-run: tapio check\n")
+	fmt.Printf("✅ Switched to namespace: %s\n", selectedNamespace)
+	fmt.Printf("💡 Re-run: tapio check\n")
 	return true
 }
 
@@ -191,9 +288,73 @@ func getCurrentNamespace() string {
 	return context.Namespace
 }
 
+// validateResourceFormat validates the resource format
+func validateResourceFormat(resource string) error {
+	if resource == "" {
+		return NewCLIError(
+			"resource validation",
+			"Resource name cannot be empty",
+			"Provide a resource name or use 'kind/name' format",
+		).WithExamples(
+			"tapio check my-pod",
+			"tapio check deployment/api-service",
+		)
+	}
+
+	// Check for invalid characters
+	if strings.Contains(resource, " ") {
+		return ErrInvalidResource(resource)
+	}
+
+	// If it contains a slash, validate the kind
+	if strings.Contains(resource, "/") {
+		parts := strings.Split(resource, "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return ErrInvalidResource(resource)
+		}
+
+		// Validate kind
+		validKinds := []string{"pod", "deployment", "service", "configmap", "secret", "daemonset", "statefulset", "job", "cronjob"}
+		kind := strings.ToLower(parts[0])
+		isValid := false
+		for _, validKind := range validKinds {
+			if kind == validKind {
+				isValid = true
+				break
+			}
+		}
+
+		if !isValid {
+			return NewCLIError(
+				"resource validation",
+				fmt.Sprintf("Unknown resource kind: '%s'", parts[0]),
+				fmt.Sprintf("Use one of: %s", strings.Join(validKinds, ", ")),
+			).WithExamples(
+				"tapio check pod/my-pod",
+				"tapio check deployment/api-service",
+			)
+		}
+	}
+
+	return nil
+}
+
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	startTime := time.Now()
+
+	// Setup progress tracking
+	steps := []string{
+		"Initializing checker",
+		"Connecting to Kubernetes",
+		"Analyzing resources",
+	}
+
+	if enableCorrelation {
+		steps = append(steps, "Running correlation analysis")
+	}
+
+	progress := NewStepProgress(steps).WithVerbose(verbose)
+	progress.Start()
 
 	// Create checker with eBPF support if requested
 	var checker *simple.Checker
@@ -203,21 +364,26 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		// Try to create enhanced checker with eBPF
 		checker, err = simple.NewCheckerWithEBPF()
 		if err != nil {
-			// Fall back to standard checker if eBPF fails
-			fmt.Printf("[WARN] eBPF not available, using standard checking: %v\n", err)
+			progress.Warning(fmt.Sprintf("eBPF not available: %v", err))
 			checker, err = simple.NewChecker()
 			if err != nil {
-				return fmt.Errorf("failed to initialize checker: %w", err)
+				progress.Error(err)
+				return ErrKubernetesConnection(err)
 			}
 		} else {
-			fmt.Println("[OK] Enhanced checking with eBPF enabled")
+			if verbose {
+				fmt.Println("✨ Enhanced checking with eBPF enabled")
+			}
 		}
 	} else {
 		checker, err = simple.NewChecker()
 		if err != nil {
-			return fmt.Errorf("failed to initialize checker: %w", err)
+			progress.Error(err)
+			return ErrKubernetesConnection(err)
 		}
 	}
+
+	progress.NextStep() // Move to "Connecting to Kubernetes"
 
 	// Build check request
 	request := &types.CheckRequest{
@@ -233,21 +399,40 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Show current context before check
 	showCurrentContext(request)
 
+	progress.NextStep() // Move to "Analyzing resources"
+
 	// Run the check
 	result, err := checker.Check(ctx, request)
 	if err != nil {
-		return fmt.Errorf("health check failed: %w", err)
+		progress.Error(err)
+		return NewCLIError(
+			"health check",
+			"Failed to analyze Kubernetes resources",
+			"Check if your cluster is accessible and try again",
+		).WithExamples(
+			"kubectl get pods  # Test basic connectivity",
+			"tapio check --verbose  # Get detailed output",
+			"tapio context  # Check current context",
+		)
 	}
 
 	// Add intelligent correlation analysis if enabled and we have multiple problems
 	if enableCorrelation && len(result.Problems) > 1 {
-		if correlationResult, corrErr := addCorrelationAnalysis(ctx, checker, result.Problems); corrErr == nil {
+		progress.NextStep() // Move to "Running correlation analysis"
+
+		correlationResult, corrErr := addCorrelationAnalysis(ctx, checker, result.Problems)
+		if corrErr == nil {
 			result.CorrelationAnalysis = correlationResult
-			fmt.Printf("[OK] Correlation analysis completed in %v\n", time.Since(startTime))
+			if verbose {
+				fmt.Printf("✅ Correlation analysis completed\n")
+			}
 		} else {
-			fmt.Printf("[WARN] Correlation analysis failed: %v\n", corrErr)
+			progress.Warning(fmt.Sprintf("Correlation analysis failed: %v", corrErr))
 		}
 	}
+
+	// Complete progress tracking
+	progress.Finish("Health check completed")
 
 	// Check if the only problem is "No pods found" - this means we should offer alternatives
 	noPods := len(result.Problems) == 1 && result.Problems[0].Title == "No pods found"
@@ -268,7 +453,18 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Output results
 	formatter := output.NewFormatter(outputFormat)
-	return formatter.Print(result)
+	if err := formatter.Print(result); err != nil {
+		return NewCLIError(
+			"output formatting",
+			"Failed to display results",
+			"Try using a different output format",
+		).WithExamples(
+			"tapio check --output json",
+			"tapio check --output yaml",
+		)
+	}
+
+	return nil
 }
 
 // addCorrelationAnalysis runs correlation analysis on problems
