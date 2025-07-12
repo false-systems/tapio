@@ -3,503 +3,685 @@ package correlation
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
 )
 
-// ExecutionMode defines how the engine executes rules
-type ExecutionMode int
+// CorrelationEngine implements the Engine interface
+type CorrelationEngine struct {
+	// Configuration
+	windowSize         time.Duration
+	processingInterval time.Duration
+	maxConcurrentRules int
+	enableMetrics      bool
 
-const (
-	// ExecutionModeSequential executes rules one by one
-	ExecutionModeSequential ExecutionMode = iota
-	// ExecutionModeParallel executes rules in parallel
-	ExecutionModeParallel
-	// ExecutionModeAdaptive chooses execution mode based on rule characteristics
-	ExecutionModeAdaptive
-)
+	// Rules management
+	rules   map[string]*Rule
+	rulesMu sync.RWMutex
 
-// EngineConfig configures the correlation engine
-type EngineConfig struct {
-	ExecutionMode       ExecutionMode `json:"execution_mode"`
-	MaxWorkers          int           `json:"max_workers"`
-	Timeout             time.Duration `json:"timeout"`
-	CacheTTL            time.Duration `json:"cache_ttl"`
-	EnableMetrics       bool          `json:"enable_metrics"`
-	RetryAttempts       int           `json:"retry_attempts"`
-	RetryDelay          time.Duration `json:"retry_delay"`
-	MaxHistoryEntries   int           `json:"max_history_entries"`
-	HistoryRetentionTTL time.Duration `json:"history_retention_ttl"`
-}
+	// Event store
+	eventStore EventStore
 
-// DefaultEngineConfig returns a default engine configuration
-func DefaultEngineConfig() EngineConfig {
-	return EngineConfig{
-		ExecutionMode:       ExecutionModeAdaptive,
-		MaxWorkers:          10,
-		Timeout:             30 * time.Second,
-		CacheTTL:            5 * time.Minute,
-		EnableMetrics:       true,
-		RetryAttempts:       3,
-		RetryDelay:          time.Second,
-		MaxHistoryEntries:   100,
-		HistoryRetentionTTL: 24 * time.Hour,
-	}
-}
+	// Metrics and monitoring
+	stats            Stats
+	statsMu          sync.RWMutex
+	metricsCollector MetricsCollector
 
-// ExecutionResult represents the result of rule execution
-type ExecutionResult struct {
-	Rule      Rule          `json:"rule"`
-	Findings  []Finding     `json:"findings"`
-	Error     error         `json:"error,omitempty"`
-	Duration  time.Duration `json:"duration"`
-	Timestamp time.Time     `json:"timestamp"`
-}
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
-// EngineMetrics tracks engine performance metrics
-type EngineMetrics struct {
-	TotalExecutions      int64                   `json:"total_executions"`
-	SuccessfulExecutions int64                   `json:"successful_executions"`
-	FailedExecutions     int64                   `json:"failed_executions"`
-	TotalFindings        int64                   `json:"total_findings"`
-	AverageExecutionTime time.Duration           `json:"average_execution_time"`
-	LastExecutionTime    time.Time               `json:"last_execution_time"`
-	RuleMetrics          map[string]*RuleMetrics `json:"rule_metrics"`
-}
+	// Performance optimization
+	ruleExecutionPool *sync.Pool
+	contextPool       *sync.Pool
 
-// RuleMetrics tracks metrics for individual rules
-type RuleMetrics struct {
-	ExecutionCount       int64         `json:"execution_count"`
-	SuccessCount         int64         `json:"success_count"`
-	FailureCount         int64         `json:"failure_count"`
-	TotalFindings        int64         `json:"total_findings"`
-	AverageExecutionTime time.Duration `json:"average_execution_time"`
-	LastExecutionTime    time.Time     `json:"last_execution_time"`
-	AverageConfidence    float64       `json:"average_confidence"`
-}
+	// Rate limiting and cooldowns
+	ruleCooldowns map[string]time.Time
+	cooldownMu    sync.RWMutex
 
-// Engine is the main correlation engine
-type Engine struct {
-	config           EngineConfig
-	registry         *RuleRegistry
-	dataCollection   *DataCollection
-	metrics          *EngineMetrics
-	findings         []Finding
-	findingsMutex    sync.RWMutex
-	metricsMutex     sync.RWMutex
-	executionHistory []ExecutionResult
-	historyMutex     sync.RWMutex
+	// Result handlers
+	resultHandlers []ResultHandler
+	resultChan     chan *Result
 }
 
 // NewEngine creates a new correlation engine
-func NewEngine(config EngineConfig, registry *RuleRegistry, dataCollection *DataCollection) *Engine {
-	return &Engine{
-		config:         config,
-		registry:       registry,
-		dataCollection: dataCollection,
-		metrics: &EngineMetrics{
-			RuleMetrics: make(map[string]*RuleMetrics),
+func NewEngine(eventStore EventStore, opts ...EngineOption) *CorrelationEngine {
+	engine := &CorrelationEngine{
+		windowSize:         5 * time.Minute,
+		processingInterval: 30 * time.Second,
+		maxConcurrentRules: runtime.NumCPU() * 2,
+		enableMetrics:      true,
+		rules:              make(map[string]*Rule),
+		eventStore:         eventStore,
+		stats: Stats{
+			RuleExecutionTime: make(map[string]time.Duration),
 		},
-		findings:         make([]Finding, 0),
-		executionHistory: make([]ExecutionResult, 0),
+		ruleCooldowns:  make(map[string]time.Time),
+		resultHandlers: make([]ResultHandler, 0),
+		resultChan:     make(chan *Result, 1000), // Buffered channel
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(engine)
+	}
+
+	// Initialize object pools for performance
+	engine.ruleExecutionPool = &sync.Pool{
+		New: func() interface{} {
+			return &ruleExecution{}
+		},
+	}
+
+	engine.contextPool = &sync.Pool{
+		New: func() interface{} {
+			return &Context{
+				metrics:        make(map[string]MetricSeries),
+				eventsBySource: make(map[EventSource][]Event),
+				eventsByType:   make(map[string][]Event),
+				eventsByEntity: make(map[string][]Event),
+				Metadata:       make(map[string]string),
+			}
+		},
+	}
+
+	return engine
+}
+
+// EngineOption configures the correlation engine
+type EngineOption func(*CorrelationEngine)
+
+// WithWindowSize sets the correlation window size
+func WithWindowSize(duration time.Duration) EngineOption {
+	return func(e *CorrelationEngine) {
+		e.windowSize = duration
 	}
 }
 
-// Execute runs all enabled rules and returns findings
-func (e *Engine) Execute(ctx context.Context) ([]Finding, error) {
-	startTime := time.Now()
+// WithProcessingInterval sets how often to run correlations
+func WithProcessingInterval(interval time.Duration) EngineOption {
+	return func(e *CorrelationEngine) {
+		e.processingInterval = interval
+	}
+}
 
-	// Create execution context with timeout
-	execCtx, cancel := context.WithTimeout(ctx, e.config.Timeout)
-	defer cancel()
+// WithMaxConcurrentRules sets the maximum number of rules to run concurrently
+func WithMaxConcurrentRules(limit int) EngineOption {
+	return func(e *CorrelationEngine) {
+		e.maxConcurrentRules = limit
+	}
+}
+
+// WithMetricsCollector sets the metrics collector
+func WithMetricsCollector(collector MetricsCollector) EngineOption {
+	return func(e *CorrelationEngine) {
+		e.metricsCollector = collector
+	}
+}
+
+// WithResultHandler adds a result handler
+func WithResultHandler(handler ResultHandler) EngineOption {
+	return func(e *CorrelationEngine) {
+		e.resultHandlers = append(e.resultHandlers, handler)
+	}
+}
+
+// ruleExecution represents a single rule execution
+type ruleExecution struct {
+	rule      *Rule
+	context   *Context
+	startTime time.Time
+	result    *Result
+	err       error
+	duration  time.Duration
+}
+
+// RegisterRule registers a new correlation rule
+func (e *CorrelationEngine) RegisterRule(rule *Rule) error {
+	if rule == nil {
+		return fmt.Errorf("rule cannot be nil")
+	}
+
+	if rule.ID == "" {
+		return fmt.Errorf("rule ID cannot be empty")
+	}
+
+	if rule.Evaluate == nil {
+		return fmt.Errorf("rule must have an Evaluate function")
+	}
+
+	// Set defaults
+	if rule.MinConfidence <= 0 {
+		rule.MinConfidence = 0.5
+	}
+
+	if rule.Cooldown == 0 {
+		rule.Cooldown = 5 * time.Minute
+	}
+
+	if rule.TTL == 0 {
+		rule.TTL = 24 * time.Hour
+	}
+
+	if rule.Category == "" {
+		rule.Category = CategoryReliability
+	}
+
+	rule.Enabled = true // Enable by default
+
+	e.rulesMu.Lock()
+	defer e.rulesMu.Unlock()
+
+	// Check if rule already exists
+	if _, exists := e.rules[rule.ID]; exists {
+		return fmt.Errorf("rule with ID '%s' already exists", rule.ID)
+	}
+
+	e.rules[rule.ID] = rule
+
+	// Update stats
+	e.statsMu.Lock()
+	e.stats.RulesRegistered++
+	e.statsMu.Unlock()
+
+	return nil
+}
+
+// UnregisterRule removes a correlation rule
+func (e *CorrelationEngine) UnregisterRule(ruleID string) error {
+	e.rulesMu.Lock()
+	defer e.rulesMu.Unlock()
+
+	if _, exists := e.rules[ruleID]; !exists {
+		return fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+
+	delete(e.rules, ruleID)
+
+	// Update stats
+	e.statsMu.Lock()
+	e.stats.RulesRegistered--
+	delete(e.stats.RuleExecutionTime, ruleID)
+	e.statsMu.Unlock()
+
+	// Remove cooldown
+	e.cooldownMu.Lock()
+	delete(e.ruleCooldowns, ruleID)
+	e.cooldownMu.Unlock()
+
+	return nil
+}
+
+// GetRule retrieves a rule by ID
+func (e *CorrelationEngine) GetRule(ruleID string) (*Rule, bool) {
+	e.rulesMu.RLock()
+	defer e.rulesMu.RUnlock()
+
+	rule, exists := e.rules[ruleID]
+	return rule, exists
+}
+
+// ListRules returns all registered rules
+func (e *CorrelationEngine) ListRules() []*Rule {
+	e.rulesMu.RLock()
+	defer e.rulesMu.RUnlock()
+
+	rules := make([]*Rule, 0, len(e.rules))
+	for _, rule := range e.rules {
+		rules = append(rules, rule)
+	}
+
+	// Sort by name for consistent ordering
+	sort.Slice(rules, func(i, j int) bool {
+		return rules[i].Name < rules[j].Name
+	})
+
+	return rules
+}
+
+// EnableRule enables a rule
+func (e *CorrelationEngine) EnableRule(ruleID string) error {
+	e.rulesMu.Lock()
+	defer e.rulesMu.Unlock()
+
+	rule, exists := e.rules[ruleID]
+	if !exists {
+		return fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+
+	rule.Enabled = true
+	return nil
+}
+
+// DisableRule disables a rule
+func (e *CorrelationEngine) DisableRule(ruleID string) error {
+	e.rulesMu.Lock()
+	defer e.rulesMu.Unlock()
+
+	rule, exists := e.rules[ruleID]
+	if !exists {
+		return fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+
+	rule.Enabled = false
+	return nil
+}
+
+// ProcessEvents processes a batch of events through all rules
+func (e *CorrelationEngine) ProcessEvents(ctx context.Context, events []Event) ([]*Result, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+
+	// Calculate time window from events
+	start := events[0].Timestamp
+	end := events[0].Timestamp
+
+	for _, event := range events {
+		if event.Timestamp.Before(start) {
+			start = event.Timestamp
+		}
+		if event.Timestamp.After(end) {
+			end = event.Timestamp
+		}
+	}
+
+	// Extend window to ensure we don't miss correlations
+	window := TimeWindow{
+		Start: start.Add(-e.windowSize / 2),
+		End:   end.Add(e.windowSize / 2),
+	}
+
+	return e.ProcessWindow(ctx, window, events)
+}
+
+// ProcessWindow processes events within a specific time window
+func (e *CorrelationEngine) ProcessWindow(ctx context.Context, window TimeWindow, events []Event) ([]*Result, error) {
+	start := time.Now()
+	defer func() {
+		e.statsMu.Lock()
+		e.stats.ProcessingLatency = time.Since(start)
+		e.stats.LastProcessedAt = time.Now()
+		e.stats.EventsProcessed += uint64(len(events))
+		e.statsMu.Unlock()
+	}()
 
 	// Get enabled rules
-	rules := e.registry.GetEnabledRules()
-	if len(rules) == 0 {
-		return []Finding{}, nil
+	enabledRules := e.getEnabledRules()
+	if len(enabledRules) == 0 {
+		return nil, nil
 	}
 
-	// Filter rules based on available data sources
-	availableRules, err := e.filterRulesByRequirements(execCtx, rules)
-	if err != nil {
-		return nil, fmt.Errorf("failed to filter rules: %w", err)
-	}
+	// Create correlation context
+	corrCtx := e.createContext(window, events)
+	defer e.releaseContext(corrCtx)
 
-	// Execute rules based on execution mode
-	var results []ExecutionResult
-	switch e.config.ExecutionMode {
-	case ExecutionModeSequential:
-		results = e.executeSequential(execCtx, availableRules)
-	case ExecutionModeParallel:
-		results = e.executeParallel(execCtx, availableRules)
-	case ExecutionModeAdaptive:
-		results = e.executeAdaptive(execCtx, availableRules)
-	}
+	// Execute rules concurrently
+	results := e.executeRules(ctx, enabledRules, corrCtx)
 
 	// Process results
-	findings := e.processResults(results)
-
-	// Update metrics
-	e.updateMetrics(results, time.Since(startTime))
-
-	// Store findings
-	e.findingsMutex.Lock()
-	e.findings = findings
-	e.findingsMutex.Unlock()
-
-	// Store execution history
-	e.historyMutex.Lock()
-	e.executionHistory = append(e.executionHistory, results...)
-	e.cleanupExecutionHistory()
-	e.historyMutex.Unlock()
-
-	return findings, nil
-}
-
-// ExecuteRule executes a specific rule by ID
-func (e *Engine) ExecuteRule(ctx context.Context, ruleID string) ([]Finding, error) {
-	rule, exists := e.registry.GetRule(ruleID)
-	if !exists {
-		return nil, NewRuleNotFoundError(ruleID)
-	}
-
-	if !e.registry.IsEnabled(ruleID) {
-		return nil, fmt.Errorf("rule %s is disabled", ruleID)
-	}
-
-	// Check requirements
-	if err := rule.CheckRequirements(ctx, e.dataCollection); err != nil {
-		return nil, err
-	}
-
-	// Execute rule
-	result := e.executeRule(ctx, rule)
-
-	// Update metrics
-	e.updateRuleMetrics(result)
-
-	return result.Findings, result.Error
-}
-
-// GetFindings returns current findings
-func (e *Engine) GetFindings() []Finding {
-	e.findingsMutex.RLock()
-	defer e.findingsMutex.RUnlock()
-
-	// Return a copy to prevent modifications
-	findings := make([]Finding, len(e.findings))
-	copy(findings, e.findings)
-	return findings
-}
-
-// GetFindingsByRule returns findings for a specific rule
-func (e *Engine) GetFindingsByRule(ruleID string) []Finding {
-	e.findingsMutex.RLock()
-	defer e.findingsMutex.RUnlock()
-
-	var ruleFindings []Finding
-	for _, finding := range e.findings {
-		if finding.RuleID == ruleID {
-			ruleFindings = append(ruleFindings, finding)
+	for _, result := range results {
+		if result != nil {
+			e.handleResult(ctx, result)
 		}
 	}
-	return ruleFindings
+
+	return results, nil
 }
 
-// GetFindingsBySeverity returns findings of a specific severity
-func (e *Engine) GetFindingsBySeverity(severity Severity) []Finding {
-	e.findingsMutex.RLock()
-	defer e.findingsMutex.RUnlock()
+// getEnabledRules returns all enabled rules that are not in cooldown
+func (e *CorrelationEngine) getEnabledRules() []*Rule {
+	e.rulesMu.RLock()
+	defer e.rulesMu.RUnlock()
 
-	var severityFindings []Finding
-	for _, finding := range e.findings {
-		if finding.Severity == severity {
-			severityFindings = append(severityFindings, finding)
-		}
-	}
-	return severityFindings
-}
+	e.cooldownMu.RLock()
+	defer e.cooldownMu.RUnlock()
 
-// GetMetrics returns current engine metrics
-func (e *Engine) GetMetrics() EngineMetrics {
-	e.metricsMutex.RLock()
-	defer e.metricsMutex.RUnlock()
+	now := time.Now()
+	var enabledRules []*Rule
 
-	// Return a copy to prevent modifications
-	metrics := *e.metrics
-	ruleMetrics := make(map[string]*RuleMetrics)
-	for k, v := range e.metrics.RuleMetrics {
-		ruleMetrics[k] = &(*v) // Create a copy
-	}
-	metrics.RuleMetrics = ruleMetrics
-
-	return metrics
-}
-
-// GetExecutionHistory returns recent execution history
-func (e *Engine) GetExecutionHistory() []ExecutionResult {
-	e.historyMutex.RLock()
-	defer e.historyMutex.RUnlock()
-
-	// Return a copy to prevent modifications
-	history := make([]ExecutionResult, len(e.executionHistory))
-	copy(history, e.executionHistory)
-	return history
-}
-
-// ClearFindings clears all current findings
-func (e *Engine) ClearFindings() {
-	e.findingsMutex.Lock()
-	defer e.findingsMutex.Unlock()
-	e.findings = make([]Finding, 0)
-}
-
-// filterRulesByRequirements filters rules based on available data sources
-func (e *Engine) filterRulesByRequirements(ctx context.Context, rules []Rule) ([]Rule, error) {
-	var availableRules []Rule
-
-	for _, rule := range rules {
-		if err := rule.CheckRequirements(ctx, e.dataCollection); err != nil {
-			// Skip rules with unmet requirements
+	for _, rule := range e.rules {
+		if !rule.Enabled {
 			continue
 		}
-		availableRules = append(availableRules, rule)
-	}
 
-	return availableRules, nil
-}
-
-// executeSequential executes rules sequentially
-func (e *Engine) executeSequential(ctx context.Context, rules []Rule) []ExecutionResult {
-	results := make([]ExecutionResult, 0, len(rules))
-
-	for _, rule := range rules {
-		result := e.executeRule(ctx, rule)
-		results = append(results, result)
-
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			break
+		// Check cooldown
+		if lastExecution, inCooldown := e.ruleCooldowns[rule.ID]; inCooldown {
+			if now.Sub(lastExecution) < rule.Cooldown {
+				continue
+			}
 		}
+
+		enabledRules = append(enabledRules, rule)
 	}
 
-	return results
+	return enabledRules
 }
 
-// executeParallel executes rules in parallel
-func (e *Engine) executeParallel(ctx context.Context, rules []Rule) []ExecutionResult {
-	results := make([]ExecutionResult, len(rules))
+// createContext creates a correlation context from the pool
+func (e *CorrelationEngine) createContext(window TimeWindow, events []Event) *Context {
+	ctx := e.contextPool.Get().(*Context)
+
+	// Reset and initialize
+	ctx.Window = window
+	ctx.events = events
+	ctx.CorrelationID = fmt.Sprintf("corr-%d", time.Now().UnixNano())
+
+	// Clear maps
+	for k := range ctx.metrics {
+		delete(ctx.metrics, k)
+	}
+	for k := range ctx.eventsBySource {
+		delete(ctx.eventsBySource, k)
+	}
+	for k := range ctx.eventsByType {
+		delete(ctx.eventsByType, k)
+	}
+	for k := range ctx.eventsByEntity {
+		delete(ctx.eventsByEntity, k)
+	}
+	for k := range ctx.Metadata {
+		delete(ctx.Metadata, k)
+	}
+
+	// Rebuild indices
+	ctx.buildIndices()
+
+	return ctx
+}
+
+// releaseContext returns a context to the pool
+func (e *CorrelationEngine) releaseContext(ctx *Context) {
+	e.contextPool.Put(ctx)
+}
+
+// executeRules executes rules concurrently with rate limiting
+func (e *CorrelationEngine) executeRules(ctx context.Context, rules []*Rule, corrCtx *Context) []*Result {
+	// Create semaphore for concurrency control
+	semaphore := make(chan struct{}, e.maxConcurrentRules)
+
+	// Results channel
+	resultsChan := make(chan *Result, len(rules))
+
+	// Execute rules
 	var wg sync.WaitGroup
-
-	// Create semaphore for limiting concurrent executions
-	semaphore := make(chan struct{}, e.config.MaxWorkers)
-
-	for i, rule := range rules {
+	for _, rule := range rules {
 		wg.Add(1)
-		go func(index int, r Rule) {
+		go func(r *Rule) {
 			defer wg.Done()
 
 			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				return
+			}
 
-			results[index] = e.executeRule(ctx, r)
-		}(i, rule)
+			// Execute rule
+			result := e.executeRule(ctx, r, corrCtx)
+			if result != nil {
+				resultsChan <- result
+			}
+		}(rule)
 	}
 
-	wg.Wait()
+	// Wait for completion
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect results
+	var results []*Result
+	for result := range resultsChan {
+		results = append(results, result)
+	}
+
 	return results
 }
 
-// executeAdaptive chooses execution mode based on rule characteristics
-func (e *Engine) executeAdaptive(ctx context.Context, rules []Rule) []ExecutionResult {
-	// Simple heuristic: use parallel for multiple rules, sequential for few
-	if len(rules) > 3 {
-		return e.executeParallel(ctx, rules)
-	}
-	return e.executeSequential(ctx, rules)
-}
-
 // executeRule executes a single rule
-func (e *Engine) executeRule(ctx context.Context, rule Rule) ExecutionResult {
-	startTime := time.Now()
+func (e *CorrelationEngine) executeRule(ctx context.Context, rule *Rule, corrCtx *Context) *Result {
+	execution := e.ruleExecutionPool.Get().(*ruleExecution)
+	defer e.ruleExecutionPool.Put(execution)
 
-	// Create rule context
-	ruleCtx := &RuleContext{
-		DataCollection:   e.dataCollection,
-		PreviousFindings: e.GetFindings(),
-		ExecutionTime:    startTime,
-		Metadata:         make(map[string]interface{}),
+	execution.rule = rule
+	execution.context = corrCtx
+	execution.startTime = time.Now()
+	execution.result = nil
+	execution.err = nil
+
+	// Set rule context
+	corrCtx.RuleID = rule.ID
+
+	// Execute with timeout and panic recovery
+	done := make(chan struct{})
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				execution.err = fmt.Errorf("rule %s panicked: %v", rule.ID, r)
+			}
+			close(done)
+		}()
+
+		execution.result = rule.Evaluate(corrCtx)
+	}()
+
+	// Wait for completion with timeout
+	select {
+	case <-done:
+		// Rule completed
+	case <-ctx.Done():
+		execution.err = ctx.Err()
+	case <-time.After(30 * time.Second): // Rule timeout
+		execution.err = fmt.Errorf("rule %s timed out", rule.ID)
 	}
 
-	// Execute rule with retries
-	var findings []Finding
-	var err error
+	execution.duration = time.Since(execution.startTime)
 
-	for attempt := 0; attempt <= e.config.RetryAttempts; attempt++ {
-		findings, err = rule.Execute(ctx, ruleCtx)
-		if err == nil {
-			break
+	// Update rule performance metrics
+	e.updateRulePerformance(rule, execution)
+
+	// Update cooldown
+	if execution.result != nil {
+		e.cooldownMu.Lock()
+		e.ruleCooldowns[rule.ID] = time.Now()
+		e.cooldownMu.Unlock()
+	}
+
+	// Validate result
+	if execution.result != nil && execution.err == nil {
+		if execution.result.Confidence < rule.MinConfidence {
+			return nil // Result doesn't meet confidence threshold
 		}
 
-		if attempt < e.config.RetryAttempts {
-			select {
-			case <-ctx.Done():
-				return ExecutionResult{
-					Rule:      rule,
-					Findings:  nil,
-					Error:     ctx.Err(),
-					Duration:  time.Since(startTime),
-					Timestamp: startTime,
+		// Set metadata
+		execution.result.RuleID = rule.ID
+		execution.result.RuleName = rule.Name
+		execution.result.Category = rule.Category
+		execution.result.Timestamp = time.Now()
+		execution.result.TTL = rule.TTL
+
+		return execution.result
+	}
+
+	return nil
+}
+
+// updateRulePerformance updates performance metrics for a rule
+func (e *CorrelationEngine) updateRulePerformance(rule *Rule, execution *ruleExecution) {
+	e.rulesMu.Lock()
+	defer e.rulesMu.Unlock()
+
+	// Update rule performance
+	rule.LastExecuted = execution.startTime
+	rule.ExecutionCount++
+
+	// Update performance metrics
+	perf := &rule.Performance
+
+	if perf.MinExecutionTime == 0 || execution.duration < perf.MinExecutionTime {
+		perf.MinExecutionTime = execution.duration
+	}
+
+	if execution.duration > perf.MaxExecutionTime {
+		perf.MaxExecutionTime = execution.duration
+	}
+
+	perf.TotalExecutionTime += execution.duration
+	perf.AverageExecutionTime = perf.TotalExecutionTime / time.Duration(rule.ExecutionCount)
+
+	if execution.err == nil && execution.result != nil {
+		successCount := float64(rule.ExecutionCount) * perf.SuccessRate
+		successCount++ // This execution was successful
+		perf.SuccessRate = successCount / float64(rule.ExecutionCount)
+	} else {
+		successCount := float64(rule.ExecutionCount) * perf.SuccessRate
+		perf.SuccessRate = successCount / float64(rule.ExecutionCount)
+	}
+
+	// Update global stats
+	e.statsMu.Lock()
+	e.stats.RuleExecutionTime[rule.ID] = perf.AverageExecutionTime
+	if execution.result != nil {
+		e.stats.CorrelationsFound++
+	}
+	e.statsMu.Unlock()
+
+	// Record metrics
+	if e.metricsCollector != nil {
+		e.metricsCollector.RecordRuleExecution(rule.ID, execution.duration, execution.err == nil)
+		if execution.result != nil {
+			e.metricsCollector.RecordRuleResult(rule.ID, execution.result)
+			e.metricsCollector.RecordCorrelationFound(execution.result.Category, execution.result.Severity)
+		}
+	}
+}
+
+// handleResult processes a correlation result
+func (e *CorrelationEngine) handleResult(ctx context.Context, result *Result) {
+	// Send to result channel for async processing
+	select {
+	case e.resultChan <- result:
+	default:
+		// Channel is full, log warning but don't block
+		// In production, you'd want proper logging here
+	}
+}
+
+// SetWindowSize sets the correlation window size
+func (e *CorrelationEngine) SetWindowSize(duration time.Duration) {
+	e.windowSize = duration
+}
+
+// SetProcessingInterval sets the processing interval
+func (e *CorrelationEngine) SetProcessingInterval(interval time.Duration) {
+	e.processingInterval = interval
+}
+
+// SetMaxConcurrentRules sets the maximum concurrent rules
+func (e *CorrelationEngine) SetMaxConcurrentRules(limit int) {
+	e.maxConcurrentRules = limit
+}
+
+// GetStats returns engine statistics
+func (e *CorrelationEngine) GetStats() Stats {
+	e.statsMu.RLock()
+	defer e.statsMu.RUnlock()
+
+	stats := e.stats
+	stats.MemoryUsage = e.getMemoryUsage()
+
+	return stats
+}
+
+// GetRuleStats returns performance statistics for a specific rule
+func (e *CorrelationEngine) GetRuleStats(ruleID string) (RulePerformance, error) {
+	e.rulesMu.RLock()
+	defer e.rulesMu.RUnlock()
+
+	rule, exists := e.rules[ruleID]
+	if !exists {
+		return RulePerformance{}, fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+
+	return rule.Performance, nil
+}
+
+// getMemoryUsage returns current memory usage
+func (e *CorrelationEngine) getMemoryUsage() uint64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.Alloc
+}
+
+// Start starts the correlation engine
+func (e *CorrelationEngine) Start(ctx context.Context) error {
+	e.ctx, e.cancel = context.WithCancel(ctx)
+
+	// Start result processor
+	e.wg.Add(1)
+	go e.processResults()
+
+	return nil
+}
+
+// Stop stops the correlation engine
+func (e *CorrelationEngine) Stop() error {
+	if e.cancel != nil {
+		e.cancel()
+	}
+
+	// Close result channel
+	close(e.resultChan)
+
+	// Wait for goroutines to finish
+	e.wg.Wait()
+
+	return nil
+}
+
+// Health checks the health of the correlation engine
+func (e *CorrelationEngine) Health() error {
+	// Check if context is cancelled
+	if e.ctx != nil && e.ctx.Err() != nil {
+		return fmt.Errorf("engine is stopped: %w", e.ctx.Err())
+	}
+
+	// Check event store health
+	if e.eventStore != nil {
+		// You'd implement a health check on the event store
+		// For now, we'll just return nil
+	}
+
+	return nil
+}
+
+// processResults processes correlation results asynchronously
+func (e *CorrelationEngine) processResults() {
+	defer e.wg.Done()
+
+	for {
+		select {
+		case result, ok := <-e.resultChan:
+			if !ok {
+				return // Channel closed
+			}
+
+			// Process result through handlers
+			for _, handler := range e.resultHandlers {
+				if err := handler.HandleResult(e.ctx, result); err != nil {
+					// Log error but continue processing
+					// In production, you'd want proper logging here
 				}
-			case <-time.After(e.config.RetryDelay):
-				// Continue to next attempt
 			}
+
+		case <-e.ctx.Done():
+			return
 		}
-	}
-
-	return ExecutionResult{
-		Rule:      rule,
-		Findings:  findings,
-		Error:     err,
-		Duration:  time.Since(startTime),
-		Timestamp: startTime,
-	}
-}
-
-// processResults processes execution results and consolidates findings
-func (e *Engine) processResults(results []ExecutionResult) []Finding {
-	var allFindings []Finding
-
-	for _, result := range results {
-		if result.Error == nil {
-			allFindings = append(allFindings, result.Findings...)
-		}
-	}
-
-	// Sort findings by severity and confidence
-	sort.Slice(allFindings, func(i, j int) bool {
-		if allFindings[i].Severity != allFindings[j].Severity {
-			return allFindings[i].Severity > allFindings[j].Severity
-		}
-		return allFindings[i].Confidence > allFindings[j].Confidence
-	})
-
-	return allFindings
-}
-
-// updateMetrics updates engine metrics
-func (e *Engine) updateMetrics(results []ExecutionResult, totalDuration time.Duration) {
-	e.metricsMutex.Lock()
-	defer e.metricsMutex.Unlock()
-
-	var totalFindings int64
-	var successfulExecutions int64
-	var failedExecutions int64
-
-	for _, result := range results {
-		if result.Error == nil {
-			successfulExecutions++
-			totalFindings += int64(len(result.Findings))
-		} else {
-			failedExecutions++
-		}
-
-		// Update rule-specific metrics
-		e.updateRuleMetricsLocked(result)
-	}
-
-	// Update overall metrics
-	e.metrics.TotalExecutions += int64(len(results))
-	e.metrics.SuccessfulExecutions += successfulExecutions
-	e.metrics.FailedExecutions += failedExecutions
-	e.metrics.TotalFindings += totalFindings
-	e.metrics.LastExecutionTime = time.Now()
-
-	// Update average execution time
-	if e.metrics.TotalExecutions > 0 {
-		totalTime := int64(e.metrics.AverageExecutionTime) * (e.metrics.TotalExecutions - int64(len(results)))
-		totalTime += int64(totalDuration)
-		e.metrics.AverageExecutionTime = time.Duration(totalTime / e.metrics.TotalExecutions)
-	}
-}
-
-// updateRuleMetrics updates metrics for a single rule
-func (e *Engine) updateRuleMetrics(result ExecutionResult) {
-	e.metricsMutex.Lock()
-	defer e.metricsMutex.Unlock()
-	e.updateRuleMetricsLocked(result)
-}
-
-// updateRuleMetricsLocked updates rule metrics (assumes lock is held)
-func (e *Engine) updateRuleMetricsLocked(result ExecutionResult) {
-	ruleID := result.Rule.GetMetadata().ID
-
-	if _, exists := e.metrics.RuleMetrics[ruleID]; !exists {
-		e.metrics.RuleMetrics[ruleID] = &RuleMetrics{}
-	}
-
-	ruleMetrics := e.metrics.RuleMetrics[ruleID]
-	ruleMetrics.ExecutionCount++
-	ruleMetrics.LastExecutionTime = result.Timestamp
-
-	if result.Error == nil {
-		ruleMetrics.SuccessCount++
-		ruleMetrics.TotalFindings += int64(len(result.Findings))
-
-		// Update average confidence
-		if len(result.Findings) > 0 {
-			var totalConfidence float64
-			for _, finding := range result.Findings {
-				totalConfidence += finding.Confidence
-			}
-			avgConfidence := totalConfidence / float64(len(result.Findings))
-
-			if ruleMetrics.SuccessCount == 1 {
-				ruleMetrics.AverageConfidence = avgConfidence
-			} else {
-				ruleMetrics.AverageConfidence = (ruleMetrics.AverageConfidence*float64(ruleMetrics.SuccessCount-1) + avgConfidence) / float64(ruleMetrics.SuccessCount)
-			}
-		}
-	} else {
-		ruleMetrics.FailureCount++
-	}
-
-	// Update average execution time
-	if ruleMetrics.ExecutionCount == 1 {
-		ruleMetrics.AverageExecutionTime = result.Duration
-	} else {
-		totalTime := int64(ruleMetrics.AverageExecutionTime) * (ruleMetrics.ExecutionCount - 1)
-		totalTime += int64(result.Duration)
-		ruleMetrics.AverageExecutionTime = time.Duration(totalTime / ruleMetrics.ExecutionCount)
-	}
-}
-
-// cleanupExecutionHistory removes old execution history entries based on size and time limits
-// This method assumes the historyMutex is already held
-func (e *Engine) cleanupExecutionHistory() {
-	if len(e.executionHistory) == 0 {
-		return
-	}
-
-	// Remove entries older than TTL
-	if e.config.HistoryRetentionTTL > 0 {
-		cutoffTime := time.Now().Add(-e.config.HistoryRetentionTTL)
-		validEntries := make([]ExecutionResult, 0, len(e.executionHistory))
-
-		for _, result := range e.executionHistory {
-			if result.Timestamp.After(cutoffTime) {
-				validEntries = append(validEntries, result)
-			}
-		}
-
-		e.executionHistory = validEntries
-	}
-
-	// Limit by maximum number of entries
-	if e.config.MaxHistoryEntries > 0 && len(e.executionHistory) > e.config.MaxHistoryEntries {
-		startIndex := len(e.executionHistory) - e.config.MaxHistoryEntries
-		e.executionHistory = e.executionHistory[startIndex:]
 	}
 }

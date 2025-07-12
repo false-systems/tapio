@@ -2,7 +2,7 @@ package platform
 
 import (
 	"fmt"
-	
+
 	"tapio/cmd/install/installer"
 )
 
@@ -28,17 +28,17 @@ func (f *factory) Create(strategy installer.InstallStrategy) (installer.Installe
 			Arch: f.platform.Arch,
 		}
 	}
-	
+
 	switch strategy {
 	case installer.StrategyBinary:
 		return installer.NewBinaryInstaller(f.platform), nil
-		
+
 	case installer.StrategyDocker:
 		return installer.NewDockerInstaller(f.platform), nil
-		
+
 	case installer.StrategyKubernetes:
 		return installer.NewKubernetesInstaller(f.platform), nil
-		
+
 	default:
 		return nil, fmt.Errorf("unknown installation strategy: %s", strategy)
 	}
@@ -49,14 +49,14 @@ func (f *factory) GetAvailableStrategies() []installer.InstallStrategy {
 	strategies := []installer.InstallStrategy{
 		installer.StrategyBinary,
 	}
-	
+
 	// Docker is available on all platforms
 	strategies = append(strategies, installer.StrategyDocker)
-	
+
 	// Kubernetes is typically available on Linux and with Docker Desktop
 	if f.platform.OS == "linux" || f.platform.OS == "darwin" || f.platform.OS == "windows" {
 		strategies = append(strategies, installer.StrategyKubernetes)
 	}
-	
+
 	return strategies
 }

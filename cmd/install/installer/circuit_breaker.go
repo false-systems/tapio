@@ -40,7 +40,7 @@ func NewCircuitBreaker(maxFailures int, resetTimeout time.Duration) CircuitBreak
 // Execute runs the function with circuit breaker protection
 func (cb *circuitBreaker) Execute(fn func() error) error {
 	cb.mu.Lock()
-	
+
 	// Check if circuit should transition from open to half-open
 	if cb.state == stateOpen {
 		if time.Since(cb.lastFailureTime) > cb.resetTimeout {
@@ -48,13 +48,13 @@ func (cb *circuitBreaker) Execute(fn func() error) error {
 			cb.successCount = 0
 		}
 	}
-	
+
 	// Check current state
 	switch cb.state {
 	case stateOpen:
 		cb.mu.Unlock()
 		return fmt.Errorf("circuit breaker is open")
-		
+
 	case stateHalfOpen:
 		// Allow limited requests in half-open state
 		if cb.successCount >= cb.halfOpenLimit {
@@ -62,21 +62,21 @@ func (cb *circuitBreaker) Execute(fn func() error) error {
 			return fmt.Errorf("circuit breaker is half-open, limit reached")
 		}
 	}
-	
+
 	cb.mu.Unlock()
-	
+
 	// Execute the function
 	err := fn()
-	
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	if err != nil {
 		cb.onFailure()
 	} else {
 		cb.onSuccess()
 	}
-	
+
 	return err
 }
 
@@ -84,7 +84,7 @@ func (cb *circuitBreaker) Execute(fn func() error) error {
 func (cb *circuitBreaker) IsOpen() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	return cb.state == stateOpen
 }
 
@@ -92,7 +92,7 @@ func (cb *circuitBreaker) IsOpen() bool {
 func (cb *circuitBreaker) Reset() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	cb.failures = 0
 	cb.successCount = 0
 	cb.state = stateClosed
@@ -118,7 +118,7 @@ func (cb *circuitBreaker) onSuccess() {
 func (cb *circuitBreaker) onFailure() {
 	cb.failures++
 	cb.lastFailureTime = time.Now()
-	
+
 	switch cb.state {
 	case stateHalfOpen:
 		// Immediately open on failure in half-open state
@@ -133,20 +133,20 @@ func (cb *circuitBreaker) onFailure() {
 // AdaptiveCircuitBreaker adjusts its parameters based on performance
 type AdaptiveCircuitBreaker struct {
 	*circuitBreaker
-	metrics          *circuitMetrics
-	adaptInterval    time.Duration
-	lastAdaptTime    time.Time
+	metrics       *circuitMetrics
+	adaptInterval time.Duration
+	lastAdaptTime time.Time
 }
 
 // circuitMetrics tracks circuit breaker performance
 type circuitMetrics struct {
-	mu               sync.RWMutex
-	totalRequests    int64
-	failedRequests   int64
-	successRequests  int64
-	avgResponseTime  time.Duration
+	mu                sync.RWMutex
+	totalRequests     int64
+	failedRequests    int64
+	successRequests   int64
+	avgResponseTime   time.Duration
 	lastResponseTimes []time.Duration
-	maxHistory       int
+	maxHistory        int
 }
 
 // NewAdaptiveCircuitBreaker creates a circuit breaker that adapts to conditions
@@ -170,19 +170,19 @@ func NewAdaptiveCircuitBreaker(initialMaxFailures int, initialTimeout time.Durat
 // Execute runs the function with adaptive circuit breaker protection
 func (acb *AdaptiveCircuitBreaker) Execute(fn func() error) error {
 	start := time.Now()
-	
+
 	// Execute with base circuit breaker
 	err := acb.circuitBreaker.Execute(fn)
-	
+
 	// Record metrics
 	duration := time.Since(start)
 	acb.recordMetric(duration, err)
-	
+
 	// Adapt parameters if needed
 	if time.Since(acb.lastAdaptTime) > acb.adaptInterval {
 		acb.adapt()
 	}
-	
+
 	return err
 }
 
@@ -190,20 +190,20 @@ func (acb *AdaptiveCircuitBreaker) Execute(fn func() error) error {
 func (acb *AdaptiveCircuitBreaker) recordMetric(duration time.Duration, err error) {
 	acb.metrics.mu.Lock()
 	defer acb.metrics.mu.Unlock()
-	
+
 	acb.metrics.totalRequests++
 	if err != nil {
 		acb.metrics.failedRequests++
 	} else {
 		acb.metrics.successRequests++
 	}
-	
+
 	// Update response times
 	acb.metrics.lastResponseTimes = append(acb.metrics.lastResponseTimes, duration)
 	if len(acb.metrics.lastResponseTimes) > acb.metrics.maxHistory {
 		acb.metrics.lastResponseTimes = acb.metrics.lastResponseTimes[1:]
 	}
-	
+
 	// Calculate average response time
 	var total time.Duration
 	for _, d := range acb.metrics.lastResponseTimes {
@@ -220,10 +220,10 @@ func (acb *AdaptiveCircuitBreaker) adapt() {
 	failureRate := float64(acb.metrics.failedRequests) / float64(acb.metrics.totalRequests)
 	avgResponse := acb.metrics.avgResponseTime
 	acb.metrics.mu.RUnlock()
-	
+
 	acb.mu.Lock()
 	defer acb.mu.Unlock()
-	
+
 	// Adjust max failures based on failure rate
 	if failureRate > 0.5 {
 		// High failure rate - be more aggressive
@@ -232,7 +232,7 @@ func (acb *AdaptiveCircuitBreaker) adapt() {
 		// Low failure rate - be more lenient
 		acb.maxFailures = min(10, acb.maxFailures+1)
 	}
-	
+
 	// Adjust reset timeout based on response times
 	if avgResponse > 10*time.Second {
 		// Slow responses - increase timeout
@@ -241,7 +241,7 @@ func (acb *AdaptiveCircuitBreaker) adapt() {
 		// Fast responses - decrease timeout
 		acb.resetTimeout = max(30*time.Second, acb.resetTimeout-30*time.Second)
 	}
-	
+
 	acb.lastAdaptTime = time.Now()
 }
 

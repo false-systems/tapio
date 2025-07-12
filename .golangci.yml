@@ -1,77 +1,329 @@
+# ==========================================
+# Tapio golangci-lint Configuration
+# ==========================================
+
 run:
-  timeout: 10m
+  timeout: 5m
+  issues-exit-code: 1
   tests: true
+  build-tags:
+    - ebpf
   skip-dirs:
     - vendor
     - bin
     - dist
+    - build
+    - .git
+    - pkg/mod
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*_generated\\.go$"
+  modules-download-mode: readonly
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
 
 linters-settings:
+  # Go vet configuration
   govet:
     check-shadowing: true
     fieldalignment: true
+    enable-all: true
+    disable:
+      - shadow # Too noisy for some codebases
+
+  # Cyclomatic complexity
   gocyclo:
     min-complexity: 15
+
+  # Duplicate code detection
   dupl:
     threshold: 100
+
+  # Constants detection
   goconst:
     min-len: 2
-    min-occurrences: 2
+    min-occurrences: 3
+    ignore-tests: true
+
+  # Misspelling
   misspell:
     locale: US
+    ignore-words:
+      - tapio
+      - ebpf
+      - kubernetes
+
+  # Line length
   lll:
     line-length: 120
+    tab-width: 4
+
+  # Imports formatting
   goimports:
-    local-prefixes: github.com/falseyair/tapio
+    local-prefixes: github.com/yairfalse/tapio
+
+  # Security linting
+  gosec:
+    excludes:
+      - G114  # Use of net/http serve function that has no support for setting timeouts
+      - G204  # Subprocess launched with variable (for testing)
+    confidence: medium
+    severity: medium
+
+  # Code critic
   gocritic:
     enabled-tags:
       - diagnostic
-      - experimental
-      - opinionated
-      - performance
       - style
+      - performance
+      - experimental
     disabled-checks:
       - dupImport
       - ifElseChain
+      - hugeParam
+      - rangeValCopy
+
+  # Error handling
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - io/ioutil.ReadFile
+      - io.Copy(*bytes.Buffer)
+      - io.Copy(os.Stdout)
+
+  # Function complexity
+  funlen:
+    lines: 100
+    statements: 50
+
+  # Cognitive complexity
+  gocognit:
+    min-complexity: 30
+
+  # Maintainability index
   revive:
     confidence: 0.8
+    rules:
+      - name: exported
+        disabled: false
+        arguments:
+          - checkPrivateReceivers
+          - sayRepetitiveInsteadOfStutter
+      - name: unreachable-code
+      - name: unused-parameter
+      - name: var-naming
+      - name: package-comments
+        disabled: true # Too noisy for some packages
+      - name: indent-error-flow
+      - name: if-return
+      - name: empty-block
+      - name: superfluous-else
+      - name: confusing-naming
+      - name: get-return
+      - name: modifies-parameter
+      - name: confusing-results
+      - name: deep-exit
+      - name: flag-parameter
+      - name: unnecessary-stmt
+      - name: struct-tag
+      - name: modifies-value-receiver
+      - name: constant-logical-expr
+      - name: bool-literal-in-expr
+      - name: redefines-builtin-id
+      - name: imports-blacklist
+      - name: range-val-in-closure
+      - name: range-val-address
+      - name: waitgroup-by-value
+      - name: atomic
+      - name: empty-lines
+      - name: call-to-gc
+      - name: duplicated-imports
+      - name: import-shadowing
+      - name: bare-return
+      - name: unused-receiver
+      - name: unhandled-error
+      - name: cognitive-complexity
+        arguments: [25]
+
+  # Static analysis
   staticcheck:
     checks: ["all"]
 
-linters:
-  enable:
-    - bodyclose
-    - errcheck
-    - gochecknoinits
-    - goconst
-    - gocritic
-    - gocyclo
-    - gofmt
-    - goimports
-    - gosec
-    - gosimple
-    - govet
-    - ineffassign
-    - lll
-    - misspell
-    - nakedret
-    - staticcheck
-    - typecheck
-    - unconvert
-    - unused
-    - whitespace
-    - revive
-    - exportloopref
-    - nilerr
+  # Unused variables
+  unused:
+    check-exported: false
 
+  # Nil analysis
+  nilnil:
+    checked-types:
+      - ptr
+      - func
+      - iface
+      - map
+      - chan
+
+  # Performance linters
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+
+  # Code style
+  nolintlint:
+    allow-leading-space: true
+    allow-unused: false
+    require-explanation: true
+    require-specific: true
+
+  # Test naming
+  testpackage:
+    skip-regexp: '(export|internal)_test\.go'
+
+  # Variable naming
+  varnamelen:
+    min-name-length: 1
+    ignore-names:
+      - err
+      - id
+      - ip
+      - ok
+      - wg
+      - mu
+      - db
+      - fs
+      - ts
+    ignore-decls:
+      - c echo.Context
+      - t testing.T
+      - f *foo.Bar
+      - e error
+      - i int
+
+# ==========================================
+# Enabled Linters
+# ==========================================
+linters:
+  disable-all: true
+  enable:
+    # Essential linters
+    - errcheck          # Check for unchecked errors
+    - gosimple          # Simplify code
+    - govet             # Go vet examination
+    - ineffassign       # Detect ineffectual assignments
+    - staticcheck       # Go static analysis
+    - typecheck         # Type checking
+    - unused            # Check for unused constants, variables, functions and types
+
+    # Code quality
+    - gofmt             # Check whether code was gofmt-ed
+    - goimports         # Check import formatting
+    - revive            # Fast, configurable, extensible, flexible, and beautiful linter for Go
+    - misspell          # Finds commonly misspelled English words in comments
+    - unconvert         # Remove unnecessary type conversions
+    - whitespace        # Tool for detection of leading and trailing whitespace
+
+    # Performance
+    - prealloc          # Find slice declarations that could potentially be preallocated
+    
+    # Security
+    - gosec             # Inspects source code for security problems
+
+    # Style
+    - gocyclo           # Computes and checks the cyclomatic complexity of functions
+    - funlen            # Tool for detection of long functions
+    - gocognit          # Computes and checks the cognitive complexity of functions
+    - lll               # Reports long lines
+    - nakedret          # Finds naked returns in functions greater than a specified function length
+
+    # Bugs
+    - bodyclose         # Checks whether HTTP response body is closed successfully
+    - nilerr            # Finds the code that returns nil even if it checks that the error is not nil
+    - noctx             # Find sending http request without context.Context
+    - sqlclosecheck     # Checks that sql.Rows and sql.Stmt are closed
+
+    # Advanced
+    - gocritic          # Provides diagnostics that check for bugs, performance and style issues
+    - nilnil            # Checks that there is no simultaneous return of nil error and an invalid value
+
+    # Test quality
+    - testpackage       # Makes you use a separate _test package
+
+# ==========================================
+# Issues Configuration
+# ==========================================
 issues:
   exclude-rules:
+    # Exclude some linters from running on tests files
     - path: _test\.go
       linters:
         - gocyclo
+        - errcheck
+        - dupl
+        - gosec
         - funlen
+        - gocognit
+        - lll
+
+    # Exclude some linters from running on main/cmd files
     - path: cmd/
       linters:
         - gocyclo
-  max-issues-per-linter: 0
-  max-same-issues: 0
+        - funlen
+        - gocognit
+
+    # Exclude some linters from running on generated files
+    - path: ".*\\.pb\\.go"
+      linters:
+        - all
+
+    # Exclude some linters for eBPF-related files (can be noisy)
+    - path: pkg/ebpf/
+      linters:
+        - gosec  # eBPF code often needs unsafe operations
+
+    # Exclude from legacy files during migration
+    - path: ".*\\.go\\.disabled"
+      linters:
+        - all
+
+    # Exclude specific issues
+    - text: "should have a package comment"
+      linters:
+        - revive
+
+    - text: "don't use ALL_CAPS in Go names"
+      linters:
+        - revive
+
+    # Exclude issues for test helper functions
+    - source: "func Test.*"
+      linters:
+        - funlen
+        - gocognit
+
+  # Set to 0 to disable limit
+  max-issues-per-linter: 50
+  max-same-issues: 3
+
+  # Show only new issues if `revive` is enabled
+  new: false
+
+  # Fix found issues (if it's supported by the linter)
+  fix: false
+
+severity:
+  default-severity: error
+  case-sensitive: false
+  rules:
+    - linters:
+        - revive
+      severity: warning
+    - linters:
+        - misspell
+      severity: info

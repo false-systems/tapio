@@ -51,12 +51,12 @@ func (h *HealthChecker) checkLinuxService(ctx context.Context, serviceName strin
 		if err != nil {
 			return fmt.Errorf("service %s is not active: %w", serviceName, err)
 		}
-		
+
 		status := strings.TrimSpace(string(output))
 		if status != "active" {
 			return fmt.Errorf("service %s is %s", serviceName, status)
 		}
-		
+
 		// Check if service is enabled
 		cmd = exec.CommandContext(ctx, "systemctl", "is-enabled", serviceName)
 		output, err = cmd.Output()
@@ -64,16 +64,16 @@ func (h *HealthChecker) checkLinuxService(ctx context.Context, serviceName strin
 			// Not critical if service is running
 			return nil
 		}
-		
+
 		enabled := strings.TrimSpace(string(output))
 		if enabled != "enabled" {
 			// Warning, but not an error
 			fmt.Printf("Warning: service %s is not enabled (status: %s)\n", serviceName, enabled)
 		}
-		
+
 		return nil
 	}
-	
+
 	// Try other init systems
 	// For now, just check if process is running
 	return h.checkProcessRunning(ctx, serviceName)
@@ -82,13 +82,13 @@ func (h *HealthChecker) checkLinuxService(ctx context.Context, serviceName strin
 // checkDarwinService checks a macOS service
 func (h *HealthChecker) checkDarwinService(ctx context.Context, serviceName string) error {
 	label := fmt.Sprintf("com.tapio.%s", serviceName)
-	
+
 	cmd := exec.CommandContext(ctx, "launchctl", "list", label)
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("service %s is not loaded: %w", serviceName, err)
 	}
-	
+
 	// Parse output to check PID
 	lines := strings.Split(string(output), "\n")
 	if len(lines) > 0 {
@@ -100,7 +100,7 @@ func (h *HealthChecker) checkDarwinService(ctx context.Context, serviceName stri
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -111,7 +111,7 @@ func (h *HealthChecker) checkWindowsService(ctx context.Context, serviceName str
 	if err != nil {
 		return fmt.Errorf("service %s not found: %w", serviceName, err)
 	}
-	
+
 	outputStr := string(output)
 	if !strings.Contains(outputStr, "RUNNING") {
 		if strings.Contains(outputStr, "STOPPED") {
@@ -119,7 +119,7 @@ func (h *HealthChecker) checkWindowsService(ctx context.Context, serviceName str
 		}
 		return fmt.Errorf("service %s is not running", serviceName)
 	}
-	
+
 	return nil
 }
 
@@ -132,7 +132,7 @@ func (h *HealthChecker) hasSystemd() bool {
 // checkProcessRunning checks if a process is running
 func (h *HealthChecker) checkProcessRunning(ctx context.Context, processName string) error {
 	var cmd *exec.Cmd
-	
+
 	switch runtime.GOOS {
 	case "linux", "darwin":
 		cmd = exec.CommandContext(ctx, "pgrep", "-x", processName)
@@ -141,16 +141,16 @@ func (h *HealthChecker) checkProcessRunning(ctx context.Context, processName str
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("process %s not found", processName)
 	}
-	
+
 	if runtime.GOOS == "windows" && !strings.Contains(string(output), processName) {
 		return fmt.Errorf("process %s not found", processName)
 	}
-	
+
 	return nil
 }
 
@@ -160,17 +160,17 @@ func (h *HealthChecker) CheckEndpoint(ctx context.Context, endpoint string) (*He
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unhealthy status: %s", resp.Status)
 	}
-	
+
 	// Try to parse health response
 	var status HealthStatus
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
@@ -180,7 +180,7 @@ func (h *HealthChecker) CheckEndpoint(ctx context.Context, endpoint string) (*He
 			Timestamp: time.Now(),
 		}
 	}
-	
+
 	return &status, nil
 }
 
@@ -195,37 +195,37 @@ type HealthStatus struct {
 
 // CheckStatus represents a health check status
 type CheckStatus struct {
-	Status  string        `json:"status"`
-	Message string        `json:"message,omitempty"`
-	Details interface{}   `json:"details,omitempty"`
+	Status  string      `json:"status"`
+	Message string      `json:"message,omitempty"`
+	Details interface{} `json:"details,omitempty"`
 }
 
 // SystemHealth represents overall system health
 type SystemHealth struct {
-	CPU        CPUHealth        `json:"cpu"`
-	Memory     MemoryHealth     `json:"memory"`
-	Disk       DiskHealth       `json:"disk"`
-	Network    NetworkHealth    `json:"network"`
-	Services   []ServiceHealth  `json:"services"`
-	Timestamp  time.Time        `json:"timestamp"`
+	CPU       CPUHealth       `json:"cpu"`
+	Memory    MemoryHealth    `json:"memory"`
+	Disk      DiskHealth      `json:"disk"`
+	Network   NetworkHealth   `json:"network"`
+	Services  []ServiceHealth `json:"services"`
+	Timestamp time.Time       `json:"timestamp"`
 }
 
 // CPUHealth represents CPU health metrics
 type CPUHealth struct {
-	Usage       float64 `json:"usage"`
+	Usage       float64   `json:"usage"`
 	LoadAverage []float64 `json:"load_average,omitempty"`
-	Cores       int     `json:"cores"`
-	Temperature float64 `json:"temperature,omitempty"`
+	Cores       int       `json:"cores"`
+	Temperature float64   `json:"temperature,omitempty"`
 }
 
 // MemoryHealth represents memory health metrics
 type MemoryHealth struct {
-	Total       uint64  `json:"total"`
-	Used        uint64  `json:"used"`
-	Free        uint64  `json:"free"`
+	Total        uint64  `json:"total"`
+	Used         uint64  `json:"used"`
+	Free         uint64  `json:"free"`
 	UsagePercent float64 `json:"usage_percent"`
-	SwapTotal   uint64  `json:"swap_total,omitempty"`
-	SwapUsed    uint64  `json:"swap_used,omitempty"`
+	SwapTotal    uint64  `json:"swap_total,omitempty"`
+	SwapUsed     uint64  `json:"swap_used,omitempty"`
 }
 
 // DiskHealth represents disk health metrics
@@ -245,7 +245,7 @@ type DiskMount struct {
 
 // NetworkHealth represents network health metrics
 type NetworkHealth struct {
-	Interfaces []NetworkInterface `json:"interfaces"`
+	Interfaces   []NetworkInterface `json:"interfaces"`
 	Connectivity ConnectivityStatus `json:"connectivity"`
 }
 
@@ -260,20 +260,20 @@ type NetworkInterface struct {
 
 // ConnectivityStatus represents network connectivity status
 type ConnectivityStatus struct {
-	Internet bool              `json:"internet"`
-	DNS      bool              `json:"dns"`
-	Latency  map[string]int64  `json:"latency,omitempty"`
+	Internet bool             `json:"internet"`
+	DNS      bool             `json:"dns"`
+	Latency  map[string]int64 `json:"latency,omitempty"`
 }
 
 // ServiceHealth represents a service's health
 type ServiceHealth struct {
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	PID       int       `json:"pid,omitempty"`
-	Uptime    string    `json:"uptime,omitempty"`
-	Memory    uint64    `json:"memory,omitempty"`
-	CPU       float64   `json:"cpu,omitempty"`
-	Endpoints []string  `json:"endpoints,omitempty"`
+	Name      string   `json:"name"`
+	Status    string   `json:"status"`
+	PID       int      `json:"pid,omitempty"`
+	Uptime    string   `json:"uptime,omitempty"`
+	Memory    uint64   `json:"memory,omitempty"`
+	CPU       float64  `json:"cpu,omitempty"`
+	Endpoints []string `json:"endpoints,omitempty"`
 }
 
 // CheckSystemHealth performs a comprehensive system health check
@@ -281,7 +281,7 @@ func (h *HealthChecker) CheckSystemHealth(ctx context.Context) (*SystemHealth, e
 	health := &SystemHealth{
 		Timestamp: time.Now(),
 	}
-	
+
 	// Check CPU
 	// This is a simplified implementation - real implementation would use
 	// system-specific APIs or libraries like gopsutil
@@ -289,7 +289,7 @@ func (h *HealthChecker) CheckSystemHealth(ctx context.Context) (*SystemHealth, e
 		Usage: 0.0, // Would calculate actual usage
 		Cores: runtime.NumCPU(),
 	}
-	
+
 	// Check Memory
 	health.Memory = MemoryHealth{
 		Total:        16 * 1024 * 1024 * 1024, // 16GB placeholder
@@ -297,7 +297,7 @@ func (h *HealthChecker) CheckSystemHealth(ctx context.Context) (*SystemHealth, e
 		Free:         8 * 1024 * 1024 * 1024,  // 8GB placeholder
 		UsagePercent: 50.0,
 	}
-	
+
 	// Check Disk
 	health.Disk = DiskHealth{
 		Mounts: []DiskMount{
@@ -311,7 +311,7 @@ func (h *HealthChecker) CheckSystemHealth(ctx context.Context) (*SystemHealth, e
 			},
 		},
 	}
-	
+
 	// Check Network
 	health.Network = NetworkHealth{
 		Connectivity: ConnectivityStatus{
@@ -319,22 +319,22 @@ func (h *HealthChecker) CheckSystemHealth(ctx context.Context) (*SystemHealth, e
 			DNS:      true,
 		},
 	}
-	
+
 	// Check Services
 	services := []string{"tapio"}
 	for _, service := range services {
 		serviceHealth := ServiceHealth{
 			Name: service,
 		}
-		
+
 		if err := h.CheckService(ctx, service); err != nil {
 			serviceHealth.Status = "unhealthy"
 		} else {
 			serviceHealth.Status = "healthy"
 		}
-		
+
 		health.Services = append(health.Services, serviceHealth)
 	}
-	
+
 	return health, nil
 }

@@ -9,14 +9,14 @@ import (
 
 // Info contains platform information
 type Info struct {
-	OS           string
-	Arch         string
-	Distribution string
-	Version      string
-	Kernel       string
-	IsContainer  bool
-	IsWSL        bool
-	HasSystemd   bool
+	OS             string
+	Arch           string
+	Distribution   string
+	Version        string
+	Kernel         string
+	IsContainer    bool
+	IsWSL          bool
+	HasSystemd     bool
 	PackageManager string
 }
 
@@ -50,16 +50,16 @@ func (d *detector) Detect() Info {
 		OS:   runtime.GOOS,
 		Arch: runtime.GOARCH,
 	}
-	
+
 	// Check if running in container
 	info.IsContainer = d.isContainer()
-	
+
 	// Check if running in WSL
 	info.IsWSL = d.isWSL()
-	
+
 	// Platform-specific detection
 	d.detectPlatformSpecific(&info)
-	
+
 	return info
 }
 
@@ -70,18 +70,18 @@ func (d *detector) IsSupported(os, arch string) bool {
 		"darwin":  {"amd64", "arm64"},
 		"windows": {"amd64"},
 	}
-	
+
 	arches, ok := supportedPlatforms[os]
 	if !ok {
 		return false
 	}
-	
+
 	for _, a := range arches {
 		if a == arch {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -91,7 +91,7 @@ func (d *detector) GetRequirements() Requirements {
 		MinKernelVersion: "3.10",
 		RequiredLibs:     []string{},
 		RequiredCommands: []string{"tar", "gzip"},
-		MinDiskSpace:     1 << 30, // 1GB
+		MinDiskSpace:     1 << 30,   // 1GB
 		MinMemory:        512 << 20, // 512MB
 	}
 }
@@ -102,21 +102,21 @@ func (d *detector) isContainer() bool {
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
 	}
-	
+
 	// Check cgroup
 	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
-		if strings.Contains(string(data), "docker") || 
-		   strings.Contains(string(data), "containerd") ||
-		   strings.Contains(string(data), "kubepods") {
+		if strings.Contains(string(data), "docker") ||
+			strings.Contains(string(data), "containerd") ||
+			strings.Contains(string(data), "kubepods") {
 			return true
 		}
 	}
-	
+
 	// Check for Kubernetes environment variables
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -125,19 +125,19 @@ func (d *detector) isWSL() bool {
 	if runtime.GOOS != "linux" {
 		return false
 	}
-	
+
 	// Check for WSL-specific files
 	if _, err := os.Stat("/proc/sys/fs/binfmt_misc/WSLInterop"); err == nil {
 		return true
 	}
-	
+
 	// Check kernel version
 	if data, err := os.ReadFile("/proc/version"); err == nil {
 		if strings.Contains(strings.ToLower(string(data)), "microsoft") {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

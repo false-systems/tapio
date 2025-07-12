@@ -17,10 +17,10 @@ func (d *detector) detectPlatformSpecific(info *Info) {
 	info.Distribution = d.detectLinuxDistro()
 	info.Version = d.detectLinuxVersion()
 	info.Kernel = d.detectKernelVersion()
-	
+
 	// Check for systemd
 	info.HasSystemd = d.hasSystemd()
-	
+
 	// Detect package manager
 	info.PackageManager = d.detectPackageManager()
 }
@@ -31,12 +31,12 @@ func (d *detector) detectLinuxDistro() string {
 	if distro := d.parseOSRelease(); distro != "" {
 		return distro
 	}
-	
+
 	// Try lsb_release
 	if distro := d.parseLSBRelease(); distro != "" {
 		return distro
 	}
-	
+
 	// Check for specific distro files
 	distroFiles := map[string]string{
 		"/etc/debian_version": "debian",
@@ -47,13 +47,13 @@ func (d *detector) detectLinuxDistro() string {
 		"/etc/alpine-release": "alpine",
 		"/etc/gentoo-release": "gentoo",
 	}
-	
+
 	for file, distro := range distroFiles {
 		if _, err := os.Stat(file); err == nil {
 			return distro
 		}
 	}
-	
+
 	return "unknown"
 }
 
@@ -65,7 +65,7 @@ func (d *detector) detectLinuxVersion() string {
 		return "unknown"
 	}
 	defer file.Close()
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -74,7 +74,7 @@ func (d *detector) detectLinuxVersion() string {
 			return strings.Trim(version, `"`)
 		}
 	}
-	
+
 	return "unknown"
 }
 
@@ -95,7 +95,7 @@ func (d *detector) parseOSRelease() string {
 		return ""
 	}
 	defer file.Close()
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -104,7 +104,7 @@ func (d *detector) parseOSRelease() string {
 			return strings.Trim(id, `"`)
 		}
 	}
-	
+
 	return ""
 }
 
@@ -126,12 +126,12 @@ func (d *detector) hasSystemd() bool {
 			return true
 		}
 	}
-	
+
 	// Check if systemctl exists
 	if _, err := exec.LookPath("systemctl"); err == nil {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -151,13 +151,13 @@ func (d *detector) detectPackageManager() string {
 		{"snap", "snap"},
 		{"flatpak", "flatpak"},
 	}
-	
+
 	for _, pm := range packageManagers {
 		if _, err := exec.LookPath(pm.cmd); err == nil {
 			return pm.name
 		}
 	}
-	
+
 	return "unknown"
 }
 
@@ -167,29 +167,29 @@ func GetServiceManager() string {
 	if _, err := exec.LookPath("systemctl"); err == nil {
 		return "systemd"
 	}
-	
+
 	// Check for openrc
 	if _, err := exec.LookPath("rc-service"); err == nil {
 		return "openrc"
 	}
-	
+
 	// Check for upstart
 	if _, err := exec.LookPath("initctl"); err == nil {
 		return "upstart"
 	}
-	
+
 	// Check for sysvinit
 	if _, err := os.Stat("/etc/init.d"); err == nil {
 		return "sysvinit"
 	}
-	
+
 	return "unknown"
 }
 
 // InstallService installs a system service
 func InstallService(name, execPath, workingDir string) error {
 	serviceManager := GetServiceManager()
-	
+
 	switch serviceManager {
 	case "systemd":
 		return installSystemdService(name, execPath, workingDir)
@@ -219,24 +219,24 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 `, name, execPath, workingDir)
-	
+
 	servicePath := fmt.Sprintf("/etc/systemd/system/%s.service", name)
-	
+
 	// Write service file
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
 		return fmt.Errorf("failed to write service file: %w", err)
 	}
-	
+
 	// Reload systemd
 	if err := exec.Command("systemctl", "daemon-reload").Run(); err != nil {
 		return fmt.Errorf("failed to reload systemd: %w", err)
 	}
-	
+
 	// Enable service
 	if err := exec.Command("systemctl", "enable", name).Run(); err != nil {
 		return fmt.Errorf("failed to enable service: %w", err)
 	}
-	
+
 	return nil
 }
 

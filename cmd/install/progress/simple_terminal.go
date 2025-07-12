@@ -7,27 +7,27 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
+
 	"tapio/cmd/install/installer"
 )
 
 // SimpleTerminalReporter provides basic terminal UI for progress reporting
 type SimpleTerminalReporter struct {
-	mu          sync.Mutex
-	phases      map[string]*terminalPhase
+	mu           sync.Mutex
+	phases       map[string]*terminalPhase
 	currentPhase string
-	isTerminal  bool
-	logger      io.Writer
+	isTerminal   bool
+	logger       io.Writer
 }
 
 // simpleTerminalPhase tracks phase information
 type simpleTerminalPhase struct {
-	name       string
-	total      int64
-	current    int64
-	startTime  time.Time
-	status     string
-	err        error
+	name      string
+	total     int64
+	current   int64
+	startTime time.Time
+	status    string
+	err       error
 }
 
 // NewSimpleTerminalReporter creates a new terminal reporter without external dependencies
@@ -43,7 +43,7 @@ func NewSimpleTerminalReporter() installer.ProgressReporter {
 func (r *SimpleTerminalReporter) Start(phase string, total int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	r.phases[phase] = &terminalPhase{
 		name:      phase,
 		total:     total,
@@ -52,7 +52,7 @@ func (r *SimpleTerminalReporter) Start(phase string, total int64) {
 		status:    "running",
 	}
 	r.currentPhase = phase
-	
+
 	fmt.Fprintf(r.logger, "▶ Starting: %s\n", phase)
 }
 
@@ -60,20 +60,20 @@ func (r *SimpleTerminalReporter) Start(phase string, total int64) {
 func (r *SimpleTerminalReporter) Update(current int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if phase, ok := r.phases[r.currentPhase]; ok {
 		phase.current = current
-		
+
 		if phase.total > 0 {
 			percentage := int(float64(current) / float64(phase.total) * 100)
-			
+
 			// Simple progress bar
 			barWidth := 40
 			filled := barWidth * percentage / 100
 			empty := barWidth - filled
-			
+
 			bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
-			
+
 			// Update in place if terminal
 			if r.isTerminal {
 				fmt.Fprintf(r.logger, "\r  [%s] %3d%% %s", bar, percentage, formatBytes(current))
@@ -88,11 +88,11 @@ func (r *SimpleTerminalReporter) Update(current int64) {
 func (r *SimpleTerminalReporter) Complete(phase string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if p, ok := r.phases[phase]; ok {
 		p.status = "complete"
 		duration := time.Since(p.startTime)
-		
+
 		if r.isTerminal {
 			fmt.Fprintf(r.logger, "\r✓ Completed: %s (%.2fs)\n", phase, duration.Seconds())
 		} else {
@@ -105,12 +105,12 @@ func (r *SimpleTerminalReporter) Complete(phase string) {
 func (r *SimpleTerminalReporter) Error(phase string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if p, ok := r.phases[phase]; ok {
 		p.status = "error"
 		p.err = err
 	}
-	
+
 	fmt.Fprintf(r.logger, "✗ Error in %s: %v\n", phase, err)
 }
 
@@ -118,7 +118,7 @@ func (r *SimpleTerminalReporter) Error(phase string, err error) {
 func (r *SimpleTerminalReporter) Log(level string, message string, fields ...interface{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	// Format fields
 	var fieldStr string
 	if len(fields) > 0 {
@@ -132,7 +132,7 @@ func (r *SimpleTerminalReporter) Log(level string, message string, fields ...int
 			fieldStr = " " + strings.Join(parts, " ")
 		}
 	}
-	
+
 	prefix := "ℹ"
 	switch level {
 	case "error":
@@ -142,7 +142,7 @@ func (r *SimpleTerminalReporter) Log(level string, message string, fields ...int
 	case "debug":
 		prefix = "▪"
 	}
-	
+
 	fmt.Fprintf(r.logger, "%s %s%s\n", prefix, message, fieldStr)
 }
 
@@ -161,12 +161,12 @@ func formatBytes(bytes int64) string {
 	if bytes < unit {
 		return fmt.Sprintf("%dB", bytes)
 	}
-	
+
 	div, exp := int64(unit), 0
 	for n := bytes / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
-	
+
 	return fmt.Sprintf("%.1f%cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

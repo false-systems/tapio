@@ -3,7 +3,7 @@ package installer
 import (
 	"context"
 	"fmt"
-	
+
 	"tapio/cmd/install/platform"
 )
 
@@ -29,14 +29,14 @@ func (d *DockerInstaller) Install(ctx context.Context, opts InstallOptions) erro
 	if opts.DryRun {
 		return d.dryRun(ctx, opts)
 	}
-	
+
 	// TODO: Implement Docker installation
 	// 1. Check if Docker is installed
 	// 2. Pull Tapio image
 	// 3. Create volume for data persistence
 	// 4. Run container with appropriate configuration
 	// 5. Verify container is running
-	
+
 	return fmt.Errorf("Docker installation not yet implemented")
 }
 
@@ -45,13 +45,13 @@ func (d *DockerInstaller) Uninstall(ctx context.Context, opts UninstallOptions) 
 	if opts.DryRun {
 		return d.dryRunUninstall(ctx, opts)
 	}
-	
+
 	// TODO: Implement Docker uninstallation
 	// 1. Stop container
 	// 2. Remove container
 	// 3. Optionally remove volumes
 	// 4. Optionally remove image
-	
+
 	return fmt.Errorf("Docker uninstallation not yet implemented")
 }
 
@@ -60,7 +60,7 @@ func (d *DockerInstaller) Upgrade(ctx context.Context, opts UpgradeOptions) erro
 	if opts.DryRun {
 		return d.dryRunUpgrade(ctx, opts)
 	}
-	
+
 	// TODO: Implement Docker upgrade
 	// 1. Pull new image version
 	// 2. Stop existing container
@@ -68,7 +68,7 @@ func (d *DockerInstaller) Upgrade(ctx context.Context, opts UpgradeOptions) erro
 	// 4. Start new container
 	// 5. Verify new container is running
 	// 6. Remove old container
-	
+
 	return fmt.Errorf("Docker upgrade not yet implemented")
 }
 
@@ -79,7 +79,7 @@ func (d *DockerInstaller) Validate(ctx context.Context) error {
 	// 2. Check Tapio container exists
 	// 3. Check container is running
 	// 4. Check container health
-	
+
 	return fmt.Errorf("Docker validation not yet implemented")
 }
 

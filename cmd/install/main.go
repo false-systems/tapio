@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	
+
 	"tapio/cmd/install/installer"
 	"tapio/cmd/install/platform"
 	"tapio/cmd/install/progress"
@@ -50,19 +50,19 @@ func main() {
 
 func Execute() error {
 	rootCmd := &cobra.Command{
-		Use:   "tapio-install",
-		Short: "Tapio installation manager",
-		Long:  `A sophisticated installer for Tapio with support for multiple deployment strategies`,
+		Use:     "tapio-install",
+		Short:   "Tapio installation manager",
+		Long:    `A sophisticated installer for Tapio with support for multiple deployment strategies`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", Version, GitCommit, BuildTime),
 	}
 
 	var cfg Config
-	
+
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfg.LogLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().DurationVar(&cfg.Timeout, "timeout", 30*time.Minute, "Installation timeout")
 	rootCmd.PersistentFlags().BoolVar(&cfg.NoProgress, "no-progress", false, "Disable progress reporting")
-	
+
 	// Install command
 	installCmd := &cobra.Command{
 		Use:   "install",
@@ -72,7 +72,7 @@ func Execute() error {
 			return runInstall(cmd.Context(), cfg)
 		},
 	}
-	
+
 	installCmd.Flags().StringVarP(&cfg.Strategy, "strategy", "s", "binary", "Installation strategy (binary, docker, kubernetes)")
 	installCmd.Flags().StringVarP(&cfg.Version, "version", "v", "latest", "Version to install")
 	installCmd.Flags().StringVar(&cfg.InstallPath, "install-path", defaultInstallPath(), "Installation path")
@@ -81,7 +81,7 @@ func Execute() error {
 	installCmd.Flags().BoolVarP(&cfg.Force, "force", "f", false, "Force installation")
 	installCmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "Perform a dry run")
 	installCmd.Flags().BoolVar(&cfg.SkipValidation, "skip-validation", false, "Skip post-install validation")
-	
+
 	// Uninstall command
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall",
@@ -90,11 +90,11 @@ func Execute() error {
 			return runUninstall(cmd.Context(), cfg)
 		},
 	}
-	
+
 	uninstallCmd.Flags().StringVarP(&cfg.Strategy, "strategy", "s", "binary", "Installation strategy")
 	uninstallCmd.Flags().BoolVar(&cfg.Force, "force", false, "Force uninstallation")
 	uninstallCmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "Perform a dry run")
-	
+
 	// Upgrade command
 	upgradeCmd := &cobra.Command{
 		Use:   "upgrade",
@@ -103,12 +103,12 @@ func Execute() error {
 			return runUpgrade(cmd.Context(), cfg)
 		},
 	}
-	
+
 	upgradeCmd.Flags().StringVarP(&cfg.Strategy, "strategy", "s", "binary", "Installation strategy")
 	upgradeCmd.Flags().StringVarP(&cfg.Version, "version", "v", "latest", "Version to upgrade to")
 	upgradeCmd.Flags().BoolVar(&cfg.Force, "force", false, "Force upgrade")
 	upgradeCmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "Perform a dry run")
-	
+
 	// Validate command
 	validateCmd := &cobra.Command{
 		Use:   "validate",
@@ -117,9 +117,9 @@ func Execute() error {
 			return runValidate(cmd.Context(), cfg)
 		},
 	}
-	
+
 	validateCmd.Flags().StringVarP(&cfg.Strategy, "strategy", "s", "binary", "Installation strategy")
-	
+
 	// Status command
 	statusCmd := &cobra.Command{
 		Use:   "status",
@@ -128,14 +128,14 @@ func Execute() error {
 			return runStatus(cmd.Context(), cfg)
 		},
 	}
-	
+
 	// Add commands
 	rootCmd.AddCommand(installCmd, uninstallCmd, upgradeCmd, validateCmd, statusCmd)
-	
+
 	// Setup context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -144,7 +144,7 @@ func Execute() error {
 		fmt.Println("\nReceived interrupt signal, cancelling...")
 		cancel()
 	}()
-	
+
 	// Execute with context
 	return rootCmd.ExecuteContext(ctx)
 }
@@ -157,30 +157,30 @@ func runInstall(ctx context.Context, cfg Config) error {
 	} else {
 		progressReporter = progress.NewSilentReporter()
 	}
-	
+
 	progressReporter.Start("Initializing", 0)
-	
+
 	// Detect platform
 	detector := platform.NewDetector()
 	platformInfo := detector.Detect()
-	
-	progressReporter.Log("info", "Detected platform", 
+
+	progressReporter.Log("info", "Detected platform",
 		"os", platformInfo.OS,
 		"arch", platformInfo.Arch,
 		"distro", platformInfo.Distribution)
-	
+
 	// Create installer factory
 	factory := platform.NewFactory(platformInfo)
-	
+
 	// Create installer
 	inst, err := factory.Create(cfg.Strategy)
 	if err != nil {
 		progressReporter.Error("Initialization", err)
 		return fmt.Errorf("failed to create installer: %w", err)
 	}
-	
+
 	progressReporter.Complete("Initializing")
-	
+
 	// Build install options
 	opts := installer.InstallOptions{
 		Version:        cfg.Version,
@@ -198,20 +198,20 @@ func runInstall(ctx context.Context, cfg Config) error {
 			CircuitBreaker: installer.NewCircuitBreaker(5, 1*time.Minute),
 		},
 	}
-	
+
 	// Apply timeout
 	if cfg.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
 	}
-	
+
 	// Run installation
 	if err := inst.Install(ctx, opts); err != nil {
 		progressReporter.Error("Installation", err)
 		return fmt.Errorf("installation failed: %w", err)
 	}
-	
+
 	progressReporter.Log("info", "Installation completed successfully")
 	return nil
 }
@@ -224,20 +224,20 @@ func runUninstall(ctx context.Context, cfg Config) error {
 	} else {
 		progressReporter = progress.NewSilentReporter()
 	}
-	
+
 	// Detect platform
 	detector := platform.NewDetector()
 	platformInfo := detector.Detect()
-	
+
 	// Create installer factory
 	factory := platform.NewFactory(platformInfo)
-	
+
 	// Create installer
 	inst, err := factory.Create(cfg.Strategy)
 	if err != nil {
 		return fmt.Errorf("failed to create installer: %w", err)
 	}
-	
+
 	// Build uninstall options
 	opts := installer.UninstallOptions{
 		RemoveConfig: true,
@@ -245,12 +245,12 @@ func runUninstall(ctx context.Context, cfg Config) error {
 		Force:        cfg.Force,
 		DryRun:       cfg.DryRun,
 	}
-	
+
 	// Run uninstallation
 	if err := inst.Uninstall(ctx, opts); err != nil {
 		return fmt.Errorf("uninstallation failed: %w", err)
 	}
-	
+
 	fmt.Println("Uninstallation completed successfully")
 	return nil
 }
@@ -263,26 +263,26 @@ func runUpgrade(ctx context.Context, cfg Config) error {
 	} else {
 		progressReporter = progress.NewSilentReporter()
 	}
-	
+
 	// Detect platform
 	detector := platform.NewDetector()
 	platformInfo := detector.Detect()
-	
+
 	// Create installer factory
 	factory := platform.NewFactory(platformInfo)
-	
+
 	// Create installer
 	inst, err := factory.Create(cfg.Strategy)
 	if err != nil {
 		return fmt.Errorf("failed to create installer: %w", err)
 	}
-	
+
 	// Check capabilities
 	caps := inst.GetCapabilities()
 	if !caps.SupportsUpgrade {
 		return fmt.Errorf("installer %s does not support upgrades", inst.Name())
 	}
-	
+
 	// Build upgrade options
 	opts := installer.UpgradeOptions{
 		ToVersion:  cfg.Version,
@@ -291,12 +291,12 @@ func runUpgrade(ctx context.Context, cfg Config) error {
 		Force:      cfg.Force,
 		DryRun:     cfg.DryRun,
 	}
-	
+
 	// Run upgrade
 	if err := inst.Upgrade(ctx, opts); err != nil {
 		return fmt.Errorf("upgrade failed: %w", err)
 	}
-	
+
 	fmt.Println("Upgrade completed successfully")
 	return nil
 }
@@ -305,21 +305,21 @@ func runValidate(ctx context.Context, cfg Config) error {
 	// Detect platform
 	detector := platform.NewDetector()
 	platformInfo := detector.Detect()
-	
+
 	// Create installer factory
 	factory := platform.NewFactory(platformInfo)
-	
+
 	// Create installer
 	inst, err := factory.Create(cfg.Strategy)
 	if err != nil {
 		return fmt.Errorf("failed to create installer: %w", err)
 	}
-	
+
 	// Run validation
 	if err := inst.Validate(ctx); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
-	
+
 	fmt.Println("Validation passed")
 	return nil
 }

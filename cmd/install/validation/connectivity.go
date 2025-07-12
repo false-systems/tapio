@@ -55,15 +55,15 @@ func (c *ConnectivityChecker) CheckEndpoints(ctx context.Context, endpoints []st
 	if len(endpoints) == 0 {
 		return nil
 	}
-	
+
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	
+
 	// Check endpoints concurrently
 	results := make(chan error, len(endpoints))
 	var wg sync.WaitGroup
-	
+
 	for _, endpoint := range endpoints {
 		wg.Add(1)
 		go func(ep string) {
@@ -75,17 +75,17 @@ func (c *ConnectivityChecker) CheckEndpoints(ctx context.Context, endpoints []st
 			}
 		}(endpoint)
 	}
-	
+
 	// Wait for all checks to complete
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
-	
+
 	// Collect results
 	var errors []string
 	successCount := 0
-	
+
 	for err := range results {
 		if err != nil {
 			errors = append(errors, err.Error())
@@ -93,13 +93,13 @@ func (c *ConnectivityChecker) CheckEndpoints(ctx context.Context, endpoints []st
 			successCount++
 		}
 	}
-	
+
 	// Return error if any endpoint failed
 	if len(errors) > 0 {
 		return fmt.Errorf("connectivity check failed (%d/%d succeeded): %s",
 			successCount, len(endpoints), strings.Join(errors, "; "))
 	}
-	
+
 	return nil
 }
 
@@ -110,24 +110,24 @@ func (c *ConnectivityChecker) checkEndpoint(ctx context.Context, endpoint string
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
-	
+
 	// Check DNS resolution
 	if err := c.checkDNS(ctx, u.Hostname()); err != nil {
 		return fmt.Errorf("DNS resolution failed: %w", err)
 	}
-	
+
 	// Check TCP connectivity
 	if err := c.checkTCP(ctx, u.Host); err != nil {
 		return fmt.Errorf("TCP connection failed: %w", err)
 	}
-	
+
 	// Check HTTP/HTTPS connectivity
 	if u.Scheme == "http" || u.Scheme == "https" {
 		if err := c.checkHTTP(ctx, endpoint); err != nil {
 			return fmt.Errorf("HTTP check failed: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -137,22 +137,22 @@ func (c *ConnectivityChecker) checkDNS(ctx context.Context, hostname string) err
 	if net.ParseIP(hostname) != nil {
 		return nil
 	}
-	
+
 	// Skip DNS check for localhost
 	if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1" {
 		return nil
 	}
-	
+
 	// Resolve hostname
 	addrs, err := c.resolver.LookupHost(ctx, hostname)
 	if err != nil {
 		return err
 	}
-	
+
 	if len(addrs) == 0 {
 		return fmt.Errorf("no addresses found for %s", hostname)
 	}
-	
+
 	return nil
 }
 
@@ -162,18 +162,18 @@ func (c *ConnectivityChecker) checkTCP(ctx context.Context, address string) erro
 	if !strings.Contains(address, ":") {
 		address += ":80"
 	}
-	
+
 	// Try to establish TCP connection
 	d := net.Dialer{
 		Timeout: 5 * time.Second,
 	}
-	
+
 	conn, err := d.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return err
 	}
 	conn.Close()
-	
+
 	return nil
 }
 
@@ -183,20 +183,20 @@ func (c *ConnectivityChecker) checkHTTP(ctx context.Context, endpoint string) er
 	if err != nil {
 		return err
 	}
-	
+
 	req.Header.Set("User-Agent", c.userAgent)
-	
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	// Accept any 2xx or 3xx status code
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
-	
+
 	return nil
 }
 
@@ -208,14 +208,14 @@ func (c *ConnectivityChecker) CheckInternetConnectivity(ctx context.Context) err
 		"https://www.cloudflare.com",
 		"https://www.github.com",
 	}
-	
+
 	// Try each endpoint
 	for _, endpoint := range endpoints {
 		if err := c.checkEndpoint(ctx, endpoint); err == nil {
 			return nil // At least one succeeded
 		}
 	}
-	
+
 	return fmt.Errorf("no internet connectivity detected")
 }
 
@@ -226,7 +226,7 @@ func (c *ConnectivityChecker) CheckProxy(ctx context.Context, proxyURL string) e
 	if err != nil {
 		return fmt.Errorf("invalid proxy URL: %w", err)
 	}
-	
+
 	// Create client with proxy
 	proxyClient := &http.Client{
 		Timeout: c.timeout,
@@ -234,24 +234,24 @@ func (c *ConnectivityChecker) CheckProxy(ctx context.Context, proxyURL string) e
 			Proxy: http.ProxyURL(u),
 		},
 	}
-	
+
 	// Test proxy connectivity
 	testURL := "http://www.google.com"
 	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 	if err != nil {
 		return err
 	}
-	
+
 	resp, err := proxyClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("proxy test failed: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("proxy returned error: %s", resp.Status)
 	}
-	
+
 	return nil
 }
 
@@ -261,7 +261,7 @@ func (c *ConnectivityChecker) MeasureLatency(ctx context.Context, endpoint strin
 	if err != nil {
 		return 0, fmt.Errorf("invalid URL: %w", err)
 	}
-	
+
 	host := u.Host
 	if !strings.Contains(host, ":") {
 		if u.Scheme == "https" {
@@ -270,19 +270,19 @@ func (c *ConnectivityChecker) MeasureLatency(ctx context.Context, endpoint strin
 			host += ":80"
 		}
 	}
-	
+
 	start := time.Now()
-	
+
 	d := net.Dialer{
 		Timeout: 5 * time.Second,
 	}
-	
+
 	conn, err := d.DialContext(ctx, "tcp", host)
 	if err != nil {
 		return 0, err
 	}
 	conn.Close()
-	
+
 	return time.Since(start), nil
 }
 
@@ -314,22 +314,22 @@ func (c *ConnectivityChecker) RunConnectivityDiagnostics(ctx context.Context, en
 		Timestamp: startTime,
 		Results:   make([]EndpointResult, 0, len(endpoints)),
 	}
-	
+
 	// Check for proxy configuration
 	if proxyURL := getProxyURL(); proxyURL != "" {
 		report.ProxyEnabled = true
 		report.ProxyURL = proxyURL
 	}
-	
+
 	// Get DNS servers
 	report.DNSServers = c.getDNSServers()
-	
+
 	// Test each endpoint
 	for _, endpoint := range endpoints {
 		result := EndpointResult{
 			Endpoint: endpoint,
 		}
-		
+
 		// Parse URL
 		u, err := url.Parse(endpoint)
 		if err != nil {
@@ -337,22 +337,22 @@ func (c *ConnectivityChecker) RunConnectivityDiagnostics(ctx context.Context, en
 			report.Results = append(report.Results, result)
 			continue
 		}
-		
+
 		// DNS check
 		if err := c.checkDNS(ctx, u.Hostname()); err == nil {
 			result.DNSResolved = true
 		}
-		
+
 		// TCP check
 		if err := c.checkTCP(ctx, u.Host); err == nil {
 			result.TCPConnected = true
 		}
-		
+
 		// Measure latency
 		if latency, err := c.MeasureLatency(ctx, endpoint); err == nil {
 			result.Latency = latency
 		}
-		
+
 		// Full connectivity check
 		if err := c.checkEndpoint(ctx, endpoint); err != nil {
 			result.Error = err
@@ -360,10 +360,10 @@ func (c *ConnectivityChecker) RunConnectivityDiagnostics(ctx context.Context, en
 		} else {
 			result.Reachable = true
 		}
-		
+
 		report.Results = append(report.Results, result)
 	}
-	
+
 	report.Duration = time.Since(startTime)
 	return report, nil
 }

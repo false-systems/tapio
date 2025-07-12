@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
-	
+
 	"tapio/cmd/install/installer"
 )
 
@@ -39,13 +39,13 @@ func (v *Validator) ValidateInstallation(ctx context.Context, installPath string
 		{"permissions", func() error { return v.checkPermissions(installPath) }},
 		{"dependencies", func() error { return v.checkDependencies() }},
 	}
-	
+
 	for _, check := range checks {
 		if err := check.fn(); err != nil {
 			return fmt.Errorf("%s check failed: %w", check.name, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -56,19 +56,19 @@ func (v *Validator) ValidateBinary(ctx context.Context, binaryPath string, expec
 	if err != nil {
 		return fmt.Errorf("binary not found: %w", err)
 	}
-	
+
 	// Check file is not empty
 	if info.Size() == 0 {
 		return fmt.Errorf("binary file is empty")
 	}
-	
+
 	// Check executable permissions on Unix
 	if runtime.GOOS != "windows" {
 		if info.Mode()&0111 == 0 {
 			return fmt.Errorf("binary is not executable")
 		}
 	}
-	
+
 	// Verify checksum if provided
 	if expectedChecksum != "" {
 		file, err := os.Open(binaryPath)
@@ -76,28 +76,28 @@ func (v *Validator) ValidateBinary(ctx context.Context, binaryPath string, expec
 			return fmt.Errorf("failed to open binary: %w", err)
 		}
 		defer file.Close()
-		
+
 		hash := sha256.New()
 		if _, err := io.Copy(hash, file); err != nil {
 			return fmt.Errorf("failed to calculate checksum: %w", err)
 		}
-		
+
 		calculated := hex.EncodeToString(hash.Sum(nil))
 		if calculated != expectedChecksum {
 			return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, calculated)
 		}
 	}
-	
+
 	// Test binary execution
 	ctx, cancel := context.WithTimeout(ctx, v.timeout)
 	defer cancel()
-	
+
 	cmd := exec.CommandContext(ctx, binaryPath, "version")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("binary execution failed: %w\nOutput: %s", err, string(output))
 	}
-	
+
 	return nil
 }
 
@@ -125,7 +125,7 @@ func (v *Validator) checkDirectoryStructure(installPath string) error {
 		filepath.Join(installPath, "config"),
 		filepath.Join(installPath, "data"),
 	}
-	
+
 	for _, dir := range requiredDirs {
 		info, err := os.Stat(dir)
 		if err != nil {
@@ -134,12 +134,12 @@ func (v *Validator) checkDirectoryStructure(installPath string) error {
 			}
 			return fmt.Errorf("failed to check directory %s: %w", dir, err)
 		}
-		
+
 		if !info.IsDir() {
 			return fmt.Errorf("%s is not a directory", dir)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -149,18 +149,18 @@ func (v *Validator) checkBinaryPresence(installPath string) error {
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}
-	
+
 	binaryPath := filepath.Join(installPath, "bin", binaryName)
-	
+
 	info, err := os.Stat(binaryPath)
 	if err != nil {
 		return fmt.Errorf("binary not found at %s: %w", binaryPath, err)
 	}
-	
+
 	if info.IsDir() {
 		return fmt.Errorf("expected file but found directory at %s", binaryPath)
 	}
-	
+
 	return nil
 }
 
@@ -170,14 +170,14 @@ func (v *Validator) checkPathPermissions(path string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Check read permissions
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("no read permission: %w", err)
 	}
 	file.Close()
-	
+
 	// Check write permissions for directories
 	if info.IsDir() {
 		testFile := filepath.Join(path, ".permission_test")
@@ -186,7 +186,7 @@ func (v *Validator) checkPathPermissions(path string) error {
 		}
 		os.Remove(testFile)
 	}
-	
+
 	return nil
 }
 
@@ -212,7 +212,7 @@ func (v *Validator) checkLinuxDependencies() error {
 		"libc.so.6",
 		"libpthread.so.0",
 	}
-	
+
 	for _, lib := range requiredLibs {
 		cmd := exec.Command("ldconfig", "-p")
 		output, err := cmd.Output()
@@ -223,7 +223,7 @@ func (v *Validator) checkLinuxDependencies() error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -293,9 +293,9 @@ func RunFullValidation(ctx context.Context, installPath string) (*ValidationRepo
 			"version": runtime.Version(),
 		},
 	}
-	
+
 	validator := NewValidator()
-	
+
 	// Define all validation checks
 	checks := []struct {
 		name string
@@ -346,17 +346,17 @@ func RunFullValidation(ctx context.Context, installPath string) (*ValidationRepo
 			},
 		},
 	}
-	
+
 	// Run all checks
 	allPassed := true
 	for _, check := range checks {
 		checkStart := time.Now()
-		
+
 		// Run check with timeout
 		checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		err := check.fn(checkCtx)
 		cancel()
-		
+
 		result := CheckResult{
 			Name:     check.name,
 			Passed:   err == nil,
@@ -364,16 +364,16 @@ func RunFullValidation(ctx context.Context, installPath string) (*ValidationRepo
 			Error:    err,
 			Details:  make(map[string]interface{}),
 		}
-		
+
 		if !result.Passed {
 			allPassed = false
 		}
-		
+
 		report.Checks = append(report.Checks, result)
 	}
-	
+
 	report.Passed = allPassed
 	report.Duration = time.Since(startTime)
-	
+
 	return report, nil
 }

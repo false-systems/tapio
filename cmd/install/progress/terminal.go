@@ -6,35 +6,35 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 	"tapio/cmd/install/installer"
+	"time"
 )
 
 // TerminalReporter provides rich terminal UI for progress reporting
 type TerminalReporter struct {
-	mu          sync.Mutex
-	phases      map[string]*terminalPhase
+	mu           sync.Mutex
+	phases       map[string]*terminalPhase
 	currentPhase string
-	isTerminal  bool
-	width       int
-	height      int
-	lastRender  time.Time
-	renderRate  time.Duration
-	logger      io.Writer
-	colors      *colorScheme
-	spinner     *spinner
-	done        chan struct{}
-	wg          sync.WaitGroup
+	isTerminal   bool
+	width        int
+	height       int
+	lastRender   time.Time
+	renderRate   time.Duration
+	logger       io.Writer
+	colors       *colorScheme
+	spinner      *spinner
+	done         chan struct{}
+	wg           sync.WaitGroup
 }
 
 // terminalPhase tracks phase information for display
 type terminalPhase struct {
-	name       string
-	total      int64
-	current    int64
-	startTime  time.Time
-	status     string
-	err        error
+	name        string
+	total       int64
+	current     int64
+	startTime   time.Time
+	status      string
+	err         error
 	progressBar *progressBar
 }
 
@@ -68,14 +68,14 @@ type spinner struct {
 func NewTerminalReporter() installer.ProgressReporter {
 	isTerminal := isTerminal()
 	width, height := getTerminalSize()
-	
+
 	if width == 0 {
 		width = 80
 	}
 	if height == 0 {
 		height = 24
 	}
-	
+
 	tr := &TerminalReporter{
 		phases:     make(map[string]*terminalPhase),
 		isTerminal: isTerminal,
@@ -97,12 +97,12 @@ func NewTerminalReporter() installer.ProgressReporter {
 			frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		},
 	}
-	
+
 	if isTerminal {
 		tr.wg.Add(1)
 		go tr.renderLoop()
 	}
-	
+
 	return tr
 }
 
@@ -110,7 +110,7 @@ func NewTerminalReporter() installer.ProgressReporter {
 func (tr *TerminalReporter) Start(phase string, total int64) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	
+
 	tr.phases[phase] = &terminalPhase{
 		name:      phase,
 		total:     total,
@@ -125,7 +125,7 @@ func (tr *TerminalReporter) Start(phase string, total int64) {
 		},
 	}
 	tr.currentPhase = phase
-	
+
 	if !tr.isTerminal {
 		fmt.Fprintf(tr.logger, "▶ Starting: %s\n", phase)
 	}
@@ -135,10 +135,10 @@ func (tr *TerminalReporter) Start(phase string, total int64) {
 func (tr *TerminalReporter) Update(current int64) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	
+
 	if phase, ok := tr.phases[tr.currentPhase]; ok {
 		phase.current = current
-		
+
 		if !tr.isTerminal && phase.total > 0 {
 			percentage := int(float64(current) / float64(phase.total) * 100)
 			if percentage%10 == 0 && percentage != int(float64(phase.current-current)/float64(phase.total)*100) {
@@ -152,11 +152,11 @@ func (tr *TerminalReporter) Update(current int64) {
 func (tr *TerminalReporter) Complete(phase string) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	
+
 	if p, ok := tr.phases[phase]; ok {
 		p.status = "complete"
 		duration := time.Since(p.startTime)
-		
+
 		if !tr.isTerminal {
 			fmt.Fprintf(tr.logger, "✓ Completed: %s (%.2fs)\n", phase, duration.Seconds())
 		}
@@ -167,12 +167,12 @@ func (tr *TerminalReporter) Complete(phase string) {
 func (tr *TerminalReporter) Error(phase string, err error) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	
+
 	if p, ok := tr.phases[phase]; ok {
 		p.status = "error"
 		p.err = err
 	}
-	
+
 	if !tr.isTerminal {
 		fmt.Fprintf(tr.logger, "✗ Error in %s: %v\n", phase, err)
 	}
@@ -182,7 +182,7 @@ func (tr *TerminalReporter) Error(phase string, err error) {
 func (tr *TerminalReporter) Log(level string, message string, fields ...interface{}) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	
+
 	if !tr.isTerminal {
 		// Format fields
 		var fieldStr string
@@ -197,7 +197,7 @@ func (tr *TerminalReporter) Log(level string, message string, fields ...interfac
 				fieldStr = " " + strings.Join(parts, " ")
 			}
 		}
-		
+
 		prefix := "ℹ"
 		switch level {
 		case "error":
@@ -207,7 +207,7 @@ func (tr *TerminalReporter) Log(level string, message string, fields ...interfac
 		case "debug":
 			prefix = "▪"
 		}
-		
+
 		fmt.Fprintf(tr.logger, "%s %s%s\n", prefix, message, fieldStr)
 	}
 }
@@ -215,13 +215,13 @@ func (tr *TerminalReporter) Log(level string, message string, fields ...interfac
 // renderLoop continuously renders the terminal UI
 func (tr *TerminalReporter) renderLoop() {
 	defer tr.wg.Done()
-	
+
 	ticker := time.NewTicker(tr.renderRate)
 	defer ticker.Stop()
-	
+
 	// Clear screen
 	fmt.Print("\033[2J\033[H")
-	
+
 	for {
 		select {
 		case <-tr.done:
@@ -238,38 +238,38 @@ func (tr *TerminalReporter) renderLoop() {
 func (tr *TerminalReporter) render() {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	
+
 	if !tr.isTerminal || time.Since(tr.lastRender) < tr.renderRate {
 		return
 	}
-	
+
 	// Move cursor to top
 	fmt.Print("\033[H")
-	
+
 	// Title
 	title := "Tapio Installation Progress"
 	padding := (tr.width - len(title)) / 2
-	fmt.Printf("%s%s%s\n", strings.Repeat(" ", padding), 
+	fmt.Printf("%s%s%s\n", strings.Repeat(" ", padding),
 		tr.colors.phase.Sprint(title),
 		strings.Repeat(" ", padding))
 	fmt.Println(strings.Repeat("─", tr.width))
-	
+
 	// Render phases
 	row := 3
 	for _, phase := range tr.getOrderedPhases() {
 		if row >= tr.height-2 {
 			break
 		}
-		
+
 		tr.renderPhase(phase, row)
 		row += 3
 	}
-	
+
 	// Clear remaining lines
 	for i := row; i < tr.height; i++ {
 		fmt.Printf("\033[%d;0H\033[K", i)
 	}
-	
+
 	tr.lastRender = time.Now()
 }
 
@@ -277,11 +277,11 @@ func (tr *TerminalReporter) render() {
 func (tr *TerminalReporter) renderPhase(phase *terminalPhase, row int) {
 	// Move to row
 	fmt.Printf("\033[%d;0H", row)
-	
+
 	// Phase name and status
 	statusIcon := tr.spinner.next()
 	statusColor := tr.colors.info
-	
+
 	switch phase.status {
 	case "complete":
 		statusIcon = "✓"
@@ -290,18 +290,18 @@ func (tr *TerminalReporter) renderPhase(phase *terminalPhase, row int) {
 		statusIcon = "✗"
 		statusColor = tr.colors.error
 	}
-	
+
 	duration := time.Since(phase.startTime)
-	fmt.Printf("%s %s %s\n", 
+	fmt.Printf("%s %s %s\n",
 		statusColor.Sprint(statusIcon),
 		tr.colors.phase.Sprint(phase.name),
 		tr.colors.dim.Sprintf("(%.1fs)", duration.Seconds()))
-	
+
 	// Progress bar
 	if phase.total > 0 && phase.status == "running" {
 		percentage := float64(phase.current) / float64(phase.total)
-		phase.progressBar.render(percentage, fmt.Sprintf("%s/%s", 
-			formatBytes(phase.current), 
+		phase.progressBar.render(percentage, fmt.Sprintf("%s/%s",
+			formatBytes(phase.current),
 			formatBytes(phase.total)))
 	} else if phase.err != nil {
 		tr.colors.error.Printf("  Error: %v\n", phase.err)
@@ -332,12 +332,12 @@ func (pb *progressBar) render(percentage float64, label string) {
 	if percentage < 0 {
 		percentage = 0
 	}
-	
+
 	filled := int(float64(pb.width) * percentage)
 	empty := pb.width - filled
-	
+
 	bar := strings.Repeat(pb.fillChar, filled) + strings.Repeat(pb.emptyChar, empty)
-	
+
 	fmt.Printf(pb.format, bar[:filled], bar[filled:], int(percentage*100), label)
 	fmt.Println()
 }
@@ -346,7 +346,7 @@ func (pb *progressBar) render(percentage float64, label string) {
 func (s *spinner) next() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	frame := s.frames[s.index]
 	s.index = (s.index + 1) % len(s.frames)
 	return frame
@@ -358,13 +358,13 @@ func formatBytes(bytes int64) string {
 	if bytes < unit {
 		return fmt.Sprintf("%dB", bytes)
 	}
-	
+
 	div, exp := int64(unit), 0
 	for n := bytes / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
-	
+
 	return fmt.Sprintf("%.1f%cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
@@ -376,8 +376,8 @@ func NewSilentReporter() installer.ProgressReporter {
 	return &SilentReporter{}
 }
 
-func (s *SilentReporter) Start(phase string, total int64) {}
-func (s *SilentReporter) Update(current int64) {}
-func (s *SilentReporter) Complete(phase string) {}
-func (s *SilentReporter) Error(phase string, err error) {}
+func (s *SilentReporter) Start(phase string, total int64)                         {}
+func (s *SilentReporter) Update(current int64)                                    {}
+func (s *SilentReporter) Complete(phase string)                                   {}
+func (s *SilentReporter) Error(phase string, err error)                           {}
 func (s *SilentReporter) Log(level string, message string, fields ...interface{}) {}
