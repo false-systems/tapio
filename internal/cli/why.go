@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -28,10 +29,18 @@ var (
 var whyCmd = &cobra.Command{
 	Use:   "why <resource>",
 	Short: "Explain why a Kubernetes resource has problems",
-	Long: `Why provides detailed explanations of problems in plain English.
+	Long: `🔍 Why analyzes problems and explains them in plain English.
 
-It analyzes the resource state, correlates multiple data sources, and explains
-both the symptoms and root causes in terms anyone can understand.`,
+Why provides intelligent root cause analysis by:
+  • Examining resource state and configuration
+  • Correlating events across multiple sources
+  • Using eBPF kernel insights (optional)
+  • Explaining symptoms and root causes clearly
+  • Providing actionable solutions with commands
+
+The analysis goes beyond basic status checks to understand the "why" 
+behind your Kubernetes resource problems.`,
+
 	Example: `  # Explain why a pod is having issues
   tapio why my-broken-pod
 
@@ -41,29 +50,136 @@ both the symptoms and root causes in terms anyone can understand.`,
   # Get detailed technical explanation
   tapio why my-pod --verbose
 
-  # Get explanation in JSON format
-  tapio why my-pod --output json`,
+  # Get explanation in JSON format for automation
+  tapio why my-pod --output json
+
+  # Enhanced analysis with eBPF kernel insights
+  tapio why my-pod --enable-ebpf
+
+  # Analyze in specific namespace
+  tapio why api-pod --namespace production`,
+
 	Args: cobra.ExactArgs(1),
+
+	// Validate arguments before running
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Validate output format
+		if err := ValidateOutputFormat(whyOutput); err != nil {
+			return err
+		}
+
+		// Validate namespace
+		if err := ValidateNamespace(whyNamespace); err != nil {
+			return err
+		}
+
+		// Validate resource format
+		if err := validateResourceReference(args[0]); err != nil {
+			return err
+		}
+
+		return nil
+	},
+
 	RunE: runWhy,
 }
 
 func init() {
-	whyCmd.Flags().BoolVarP(&whyVerbose, "verbose", "v", false, "Include detailed technical information")
-	whyCmd.Flags().StringVarP(&whyOutput, "output", "o", "human", "Output format: human, json, yaml")
-	whyCmd.Flags().StringVarP(&whyNamespace, "namespace", "n", "", "Kubernetes namespace")
-	whyCmd.Flags().BoolVar(&whyEnableEBPF, "enable-ebpf", false, "Enable eBPF monitoring for enhanced insights")
-	whyCmd.Flags().BoolVar(&whyUseUniversal, "universal", true, "Use universal data format for enhanced output")
+	whyCmd.Flags().BoolVarP(&whyVerbose, "verbose", "v", false,
+		"Include detailed technical information and analysis steps")
+	whyCmd.Flags().StringVarP(&whyOutput, "output", "o", "human",
+		"Output format: human (default), json, yaml")
+	whyCmd.Flags().StringVarP(&whyNamespace, "namespace", "n", "",
+		"Target namespace (default: current namespace from kubeconfig)")
+	whyCmd.Flags().BoolVar(&whyEnableEBPF, "enable-ebpf", false,
+		"Enable eBPF monitoring for kernel-level insights (requires root)")
+	whyCmd.Flags().BoolVar(&whyUseUniversal, "universal", true,
+		"Use enhanced universal data format for richer analysis output")
+}
+
+// validateResourceReference validates the resource reference format
+func validateResourceReference(resource string) error {
+	if resource == "" {
+		return NewCLIError(
+			"resource validation",
+			"Resource name cannot be empty",
+			"Provide a resource name or use 'kind/name' format",
+		).WithExamples(
+			"tapio why my-pod",
+			"tapio why deployment/api-service",
+		)
+	}
+
+	// Check for invalid characters
+	if strings.Contains(resource, " ") {
+		return ErrInvalidResource(resource)
+	}
+
+	// If it contains a slash, validate the kind
+	if strings.Contains(resource, "/") {
+		parts := strings.Split(resource, "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return ErrInvalidResource(resource)
+		}
+
+		// Validate kind
+		validKinds := []string{"pod", "deployment", "service", "configmap", "secret", "daemonset", "statefulset", "job", "cronjob", "replicaset"}
+		kind := strings.ToLower(parts[0])
+		isValid := false
+		for _, validKind := range validKinds {
+			if kind == validKind {
+				isValid = true
+				break
+			}
+		}
+
+		if !isValid {
+			return NewCLIError(
+				"resource validation",
+				fmt.Sprintf("Unknown resource kind: '%s'", parts[0]),
+				fmt.Sprintf("Use one of: %s", strings.Join(validKinds, ", ")),
+			).WithExamples(
+				"tapio why pod/my-pod",
+				"tapio why deployment/api-service",
+			)
+		}
+	}
+
+	return nil
 }
 
 func runWhy(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	startTime := time.Now()
 	resource := args[0]
+
+	// Setup progress tracking
+	steps := []string{
+		"Parsing resource reference",
+		"Initializing analyzer",
+		"Connecting to Kubernetes",
+		"Gathering resource context",
+		"Analyzing problems",
+	}
+
+	if whyEnableEBPF {
+		steps = append(steps, "Enhanced eBPF analysis")
+	}
+
+	progress := NewStepProgress(steps).WithVerbose(whyVerbose)
+	progress.Start()
 
 	// Parse resource reference
 	resourceRef, err := parseResourceReference(resource)
 	if err != nil {
-		return fmt.Errorf("invalid resource reference: %w", err)
+		progress.Error(err)
+		return NewCLIError(
+			"resource parsing",
+			"Invalid resource reference format",
+			"Use format 'name' or 'kind/name'",
+		).WithExamples(
+			"tapio why my-pod",
+			"tapio why deployment/api-service",
+		)
 	}
 
 	// Determine namespace to use
@@ -76,28 +192,40 @@ func runWhy(cmd *cobra.Command, args []string) error {
 	}
 	resourceRef.Namespace = namespace
 
-	// Show which namespace we're analyzing
-	fmt.Printf("Analyzing %s in namespace: %s\n\n", resourceRef.Kind, namespace)
+	progress.NextStep() // Move to "Initializing analyzer"
 
 	// Create enhanced checker with eBPF if requested
 	var checker *simple.Checker
 	if whyEnableEBPF {
 		checker, err = simple.NewCheckerWithEBPF()
 		if err != nil {
-			fmt.Printf("[WARN] eBPF not available, using standard analysis: %v\n", err)
+			progress.Warning(fmt.Sprintf("eBPF not available: %v", err))
 			checker, err = simple.NewChecker()
 			if err != nil {
-				return fmt.Errorf("failed to initialize checker: %w", err)
+				progress.Error(err)
+				return ErrKubernetesConnection(err)
 			}
 		} else {
-			fmt.Println("[OK] Enhanced analysis with eBPF enabled")
+			if whyVerbose {
+				fmt.Println("✨ Enhanced analysis with eBPF enabled")
+			}
 		}
 	} else {
 		checker, err = simple.NewChecker()
 		if err != nil {
-			return fmt.Errorf("failed to initialize checker: %w", err)
+			progress.Error(err)
+			return ErrKubernetesConnection(err)
 		}
 	}
+
+	progress.NextStep() // Move to "Connecting to Kubernetes"
+
+	// Show which namespace we're analyzing
+	if whyVerbose {
+		fmt.Printf("🔍 Analyzing %s/%s in namespace: %s\n", resourceRef.Kind, resourceRef.Name, namespace)
+	}
+
+	progress.NextStep() // Move to "Gathering resource context"
 
 	// Get related problems first to provide context
 	checkReq := &types.CheckRequest{
@@ -108,7 +236,7 @@ func runWhy(cmd *cobra.Command, args []string) error {
 
 	checkResult, err := checker.Check(ctx, checkReq)
 	if err != nil {
-		fmt.Printf("[WARN] Unable to get full context: %v\n", err)
+		progress.Warning(fmt.Sprintf("Unable to get full context: %v", err))
 		checkResult = &types.CheckResult{Problems: []types.Problem{}}
 	}
 
@@ -120,31 +248,74 @@ func runWhy(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	progress.NextStep() // Move to "Analyzing problems"
+
 	// Get enhanced explanation
 	var explanation *types.Explanation
 	if enhancedExplainer, ok := checker.GetEnhancedExplainer(); ok {
+		if whyEnableEBPF {
+			progress.NextStep() // Move to "Enhanced eBPF analysis"
+		}
+
 		explanation, err = enhancedExplainer.ExplainResource(ctx, resourceRef, resourceProblems)
 		if err != nil {
-			fmt.Printf("[WARN] Enhanced analysis failed: %v\n", err)
+			progress.Warning(fmt.Sprintf("Enhanced analysis failed: %v", err))
 			explanation = createFallbackExplanation(resourceRef, resourceProblems)
 		} else {
-			fmt.Printf("[OK] Enhanced analysis completed in %v\n", time.Since(startTime))
+			if whyVerbose {
+				fmt.Printf("✅ Enhanced analysis completed\n")
+			}
 		}
 	} else {
 		explanation = createFallbackExplanation(resourceRef, resourceProblems)
 	}
 
+	// Complete progress tracking
+	progress.Finish("Analysis completed")
+
+	// Check if resource was found
+	if len(resourceProblems) == 0 && explanation != nil {
+		// Check if this might be a resource not found case
+		if explanation.Summary == "" || strings.Contains(explanation.Summary, "not found") {
+			return NewCLIError(
+				"resource analysis",
+				fmt.Sprintf("Resource '%s' not found in namespace '%s'", resourceRef.Name, namespace),
+				"Check if the resource exists and verify the namespace",
+			).WithExamples(
+				fmt.Sprintf("kubectl get %s %s -n %s", resourceRef.Kind, resourceRef.Name, namespace),
+				"tapio why --namespace [other-namespace] "+resourceRef.Name,
+				"tapio check --all  # Find the resource in other namespaces",
+			)
+		}
+	}
+
 	// Output explanation
 	if whyUseUniversal && whyOutput == "human" {
 		// Convert to universal format and use CLI formatter
-		return outputUniversalExplanation(ctx, explanation, resourceProblems, checker)
+		if err := outputUniversalExplanation(ctx, explanation, resourceProblems, checker); err != nil {
+			return NewCLIError(
+				"output formatting",
+				"Failed to display analysis results",
+				"Try using a different output format",
+			).WithExamples(
+				"tapio why "+resource+" --output json",
+				"tapio why "+resource+" --output yaml",
+			)
+		}
+		return nil
 	}
 
 	// Use traditional formatter
 	formatter := output.NewFormatter(whyOutput)
-	err = formatter.PrintExplanation(explanation)
-	if err != nil {
-		return fmt.Errorf("failed to print explanation: %w", err)
+	if err := formatter.PrintExplanation(explanation); err != nil {
+		return NewCLIError(
+			"output formatting",
+			"Failed to display explanation",
+			"Try using a different output format",
+		).WithExamples(
+			"tapio why "+resource+" --output json",
+			"tapio why "+resource+" --output yaml",
+		)
 	}
 
 	return nil
@@ -214,7 +385,11 @@ func outputUniversalExplanation(ctx context.Context, explanation *types.Explanat
 	if len(dataset.Predictions) > 0 {
 		fmt.Println("\n📊 Predictions:")
 		explanationStr := cliFormatter.FormatExplanation(dataset)
-		fmt.Println(explanationStr)
+		if explanationStr == "" {
+			fmt.Println("   Analysis in progress...")
+		} else {
+			fmt.Println(explanationStr)
+		}
 	} else {
 		fmt.Println("\n✅ No critical issues detected")
 	}
