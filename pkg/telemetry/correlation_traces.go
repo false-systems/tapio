@@ -61,7 +61,7 @@ func (ct *CorrelationTracer) TraceCorrelationAnalysis(
 		span.AddEvent("correlation.event_detected", trace.WithAttributes(
 			attribute.String("event.source", string(event.Source)),
 			attribute.String("event.type", event.Type),
-			attribute.Time("event.timestamp", event.Timestamp),
+			attribute.Int64("event.timestamp", event.Timestamp.Unix()),
 			attribute.Float64("event.confidence", event.Confidence),
 			attribute.Int("event.sequence", i+1),
 			attribute.String("event.description", event.Description),
@@ -186,7 +186,7 @@ func (ct *CorrelationTracer) TraceEventCausalChain(
 			trace.WithAttributes(
 				attribute.String("event.source", string(event.Source)),
 				attribute.String("event.type", event.Type),
-				attribute.Time("event.timestamp", event.Timestamp),
+				attribute.Int64("event.timestamp", event.Timestamp.Unix()),
 				attribute.String("event.description", event.Description),
 				attribute.Float64("event.confidence", event.Confidence),
 				attribute.Int("event.position", i+1),
@@ -245,7 +245,7 @@ func (ct *CorrelationTracer) TraceMultiLayerCorrelation(
 
 	// Create child spans for each layer analysis
 	for _, layer := range layers {
-		layerCtx, layerSpan := ct.TraceLayerAnalysis(ctx, 
+		_, layerSpan := ct.TraceLayerAnalysis(ctx, 
 			layer.Name, layer.Target, layer.AnalysisType)
 
 		// Add layer-specific findings
@@ -279,7 +279,7 @@ func (ct *CorrelationTracer) TracePredictiveAnalysis(
 	
 	ctx, span := ct.tracer.Start(ctx, "tapio.analysis.predictive",
 		trace.WithAttributes(
-			attribute.String("prediction.type", prediction.Type),
+			attribute.String("prediction.reason", prediction.Reason),
 			attribute.Float64("prediction.confidence", prediction.Confidence),
 			attribute.Float64("prediction.time_to_failure", prediction.TimeToFailure.Seconds()),
 			attribute.Int("prediction.historical_data_points", len(historicalData)),
@@ -308,7 +308,7 @@ func (ct *CorrelationTracer) TracePredictiveAnalysis(
 	// Add historical data points as events
 	for i, historicalEvent := range historicalData {
 		span.AddEvent("prediction.historical_data", trace.WithAttributes(
-			attribute.Time("historical.timestamp", historicalEvent.Timestamp),
+			attribute.Int64("historical.timestamp", historicalEvent.Timestamp.Unix()),
 			attribute.String("historical.event_type", historicalEvent.EventType),
 			attribute.Float64("historical.value", historicalEvent.Value),
 			attribute.Int("historical.sequence", i+1),
@@ -479,8 +479,8 @@ func (ct *CorrelationTracer) TraceTimelineVisualization(
 	if len(events) > 0 {
 		earliest, latest := ct.getTimelineBounds(events)
 		span.SetAttributes(
-			attribute.Time("timeline.start", earliest),
-			attribute.Time("timeline.end", latest),
+			attribute.Int64("timeline.start", earliest.Unix()),
+			attribute.Int64("timeline.end", latest.Unix()),
 			attribute.Float64("timeline.span_seconds", latest.Sub(earliest).Seconds()),
 		)
 
@@ -497,8 +497,8 @@ func (ct *CorrelationTracer) TraceTimelineVisualization(
 	for i, segment := range segments {
 		span.AddEvent("timeline.segment", trace.WithAttributes(
 			attribute.Int("segment.index", i),
-			attribute.Time("segment.start", segment.Start),
-			attribute.Time("segment.end", segment.End),
+			attribute.Int64("segment.start", segment.Start.Unix()),
+			attribute.Int64("segment.end", segment.End.Unix()),
 			attribute.Int("segment.event_count", segment.EventCount),
 			attribute.String("segment.dominant_source", segment.DominantSource),
 			attribute.Float64("segment.severity_score", segment.SeverityScore),
@@ -535,7 +535,7 @@ func (ct *CorrelationTracer) TraceTimelineHeatmap(
 	// Add bucket data as events
 	for _, bucket := range buckets {
 		span.AddEvent("heatmap.bucket", trace.WithAttributes(
-			attribute.Time("bucket.time", bucket.Time),
+			attribute.Int64("bucket.time", bucket.Time.Unix()),
 			attribute.Int("bucket.event_count", bucket.Count),
 			attribute.Float64("bucket.intensity", bucket.Intensity),
 			attribute.StringSlice("bucket.event_types", bucket.EventTypes),
@@ -585,7 +585,7 @@ func (ct *CorrelationTracer) TraceEventFlow(
 			pathSpan.AddEvent("path.event", trace.WithAttributes(
 				attribute.Int("event.sequence", j+1),
 				attribute.String("event.type", event.Type),
-				attribute.Time("event.timestamp", event.Timestamp),
+				attribute.Int64("event.timestamp", event.Timestamp.Unix()),
 			))
 		}
 

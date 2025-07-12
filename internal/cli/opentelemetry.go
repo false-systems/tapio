@@ -33,7 +33,7 @@ var (
 	otelCertFile       string
 	otelKeyFile        string
 	otelMaxConcurrency int
-	useUniversalFormat bool
+	otelUniversalFormat bool
 	
 	// Correlation tracing options
 	enableCorrelationTracing    bool
@@ -111,7 +111,7 @@ func init() {
 		"Enable OpenTelemetry trace export")
 	opentelemetryCmd.Flags().BoolVar(&otelEnableMetrics, "enable-metrics", true,
 		"Enable OpenTelemetry metrics export")
-	opentelemetryCmd.Flags().BoolVar(&useUniversalFormat, "universal", true,
+	opentelemetryCmd.Flags().BoolVar(&otelUniversalFormat, "universal", true,
 		"Use universal data format for enhanced telemetry")
 	
 	// Export configuration
@@ -154,7 +154,7 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	fmt.Println("🌲 Starting Tapio OpenTelemetry Exporter...")
-	if useUniversalFormat {
+	if otelUniversalFormat {
 		fmt.Println("✨ Using universal data format for enhanced telemetry")
 	}
 	
@@ -244,7 +244,7 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 		
 		// Enable Agent 1's translator for real Kubernetes context
 		EnableTranslator: true,
-		KubeClient:      checker.GetKubeClient(), // Get real Kubernetes client from checker
+		KubeClient:      checker.GetClient(), // Get real Kubernetes client from checker
 		
 		// Correlation tracing configuration
 		EnableCorrelationTracing:    enableCorrelationTracing,
@@ -324,7 +324,7 @@ func runOpenTelemetry(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start periodic telemetry updates in background
-	if useUniversalFormat {
+	if otelUniversalFormat {
 		go func() {
 			ticker := time.NewTicker(otelUpdateInterval)
 			defer ticker.Stop()
@@ -475,8 +475,10 @@ func printResilienceStatus(exporter *telemetry.OpenTelemetryExporter) {
 	fmt.Printf("  Total Calls: %d\n", metrics.CircuitBreaker.TotalCalls)
 	fmt.Printf("  Success Rate: %.2f%%\n", 
 		float64(metrics.CircuitBreaker.TotalSuccesses)/float64(metrics.CircuitBreaker.TotalCalls)*100)
-	fmt.Printf("  Health Checks: %d components\n", len(metrics.HealthChecker.Components))
-	fmt.Printf("  Timeout Retries: %d\n", metrics.TimeoutManager.TotalRetries)
+	// fmt.Printf("  Health Checks: %d components\n", len(metrics.HealthChecker.Components))
+	// fmt.Printf("  Timeout Retries: %d\n", metrics.TimeoutManager.TotalRetries)
+	fmt.Printf("  Health Checks: Not available\n")
+	fmt.Printf("  Timeout Retries: Not available\n")
 	fmt.Println()
 }
 
