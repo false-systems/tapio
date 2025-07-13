@@ -111,12 +111,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	})
 	shutdownHandler.RegisterCleanup("resource-monitor", monitor.Shutdown)
 
-	// Initialize correlation engine
-	correlationEngine, err := initializeCorrelationEngine(cfg)
+	// Initialize perfect correlation engine optimized for opinionated data
+	correlationEngine, err := initializePerfectCorrelationEngine(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to initialize correlation engine: %w", err)
+		return fmt.Errorf("failed to initialize perfect correlation engine: %w", err)
 	}
-	shutdownHandler.RegisterCleanup("correlation-engine", correlationEngine.Stop)
+	shutdownHandler.RegisterCleanup("perfect-correlation-engine", correlationEngine.Stop)
 
 	// Initialize metrics collector
 	metricsCollector, err := initializeMetricsCollector(cfg)
@@ -254,23 +254,55 @@ func loadConfiguration() (*ServerConfig, error) {
 	return cfg, nil
 }
 
-func initializeCorrelationEngine(cfg *ServerConfig) (*correlation.Engine, error) {
-	correlationConfig := correlation.Config{
-		Enabled:              cfg.Correlation.Enabled,
-		BufferSize:          cfg.Correlation.BufferSize,
-		AnalysisWindow:      cfg.Correlation.AnalysisWindow,
-		MaxCorrelationDepth: cfg.Correlation.MaxCorrelationDepth,
-		WorkerCount:         4, // Parallel analysis workers
+func initializePerfectCorrelationEngine(cfg *ServerConfig) (*correlation.PerfectEngine, error) {
+	// Create perfect configuration optimized for opinionated data
+	perfectConfig := &correlation.PerfectConfig{
+		// Semantic correlation optimized for our format
+		SemanticSimilarityThreshold: 0.85,  // High precision for quality data
+		SemanticEmbeddingDimension:  512,   // Standard embedding size
+		OntologyTagWeight:          0.7,    // Strong weight for curated ontology
+		IntentCorrelationEnabled:   true,   // Leverage intent classification
+		
+		// Behavioral correlation for entity intelligence
+		BehavioralAnomalyThreshold:  0.7,   // Early anomaly detection
+		EntityTrustThreshold:       0.6,    // Moderate trust threshold
+		BehaviorVectorDimension:    256,    // Optimized behavior vector size
+		BehaviorChangeDetection:    true,   // Enable change detection
+		
+		// Temporal correlation for real-time processing
+		TemporalWindow:             cfg.Correlation.AnalysisWindow,
+		PatternDetectionWindow:     time.Hour,
+		PeriodicityDetectionWindow: 24 * time.Hour,
+		
+		// Causality analysis for root cause detection
+		CausalityDepth:             cfg.Correlation.MaxCorrelationDepth,
+		CausalityConfidenceMin:     0.6,
+		RootCauseAnalysisEnabled:   true,
+		
+		// AI processing for future enhancement
+		AIEnabled:                  true,
+		AIFeatureProcessing:        true,
+		DenseFeatureDimension:      256,
+		GraphFeatureProcessing:     true,
+		
+		// Performance optimization for 500k+ events/sec
+		MaxEventsInMemory:          cfg.Correlation.BufferSize,
+		CorrelationWorkers:         8,      // Parallel workers
+		PatternCacheSize:           10000,  // Pattern cache
+		EntityCacheSize:            50000,  // Entity behavior cache
 	}
 
-	engine := correlation.NewEngine(correlationConfig)
+	engine, err := correlation.NewPerfectEngine(perfectConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create perfect correlation engine: %w", err)
+	}
 	
-	// Register built-in correlation rules
-	if err := engine.RegisterBuiltinRules(); err != nil {
-		return nil, fmt.Errorf("failed to register builtin correlation rules: %w", err)
-	}
-
-	fmt.Printf("✅ Initialized correlation engine with %d rules\n", engine.RuleCount())
+	fmt.Printf("✅ Initialized perfect correlation engine optimized for opinionated data\n")
+	fmt.Printf("   - Semantic similarity threshold: %.2f\n", perfectConfig.SemanticSimilarityThreshold)
+	fmt.Printf("   - Behavioral anomaly threshold: %.2f\n", perfectConfig.BehavioralAnomalyThreshold)
+	fmt.Printf("   - AI features enabled: %v\n", perfectConfig.AIEnabled)
+	fmt.Printf("   - Causality chain depth: %d\n", perfectConfig.CausalityDepth)
+	fmt.Printf("   - Correlation workers: %d\n", perfectConfig.CorrelationWorkers)
 	
 	return engine, nil
 }
