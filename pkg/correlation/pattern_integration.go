@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/patterns"
+	// "github.com/yairfalse/tapio/pkg/correlation/patterns" // TODO: Fix import cycle
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
@@ -16,13 +16,13 @@ type PatternIntegratedEngine struct {
 	*PerfectEngine
 	
 	// Pattern detection components
-	patternRegistry    *patterns.PatternRegistry
-	patternValidator   *patterns.PatternValidator
-	patternConfig      patterns.PatternConfig
+	patternRegistry    *PatternRegistry    // TODO: Use patterns.PatternRegistry after fixing cycle
+	patternValidator   *PatternValidator   // TODO: Use patterns.PatternValidator after fixing cycle
+	patternConfig      PatternConfig      // TODO: Use patterns.PatternConfig after fixing cycle
 	
 	// Integration state
 	enablePatterns     bool
-	patternResults     chan *patterns.PatternResult
+	patternResults     chan *PatternResult // TODO: Use patterns.PatternResult after fixing cycle
 	integrationStats   *PatternIntegrationStats
 	
 	// Pattern-specific caches
@@ -53,11 +53,11 @@ type PatternIntegrationConfig struct {
 	PatternProcessingTimeout  time.Duration           `json:"pattern_processing_timeout"`
 	
 	// Pattern-specific configurations
-	MemoryLeakConfig          patterns.PatternConfig `json:"memory_leak_config"`
-	NetworkFailureConfig      patterns.PatternConfig `json:"network_failure_config"`
-	StorageBottleneckConfig   patterns.PatternConfig `json:"storage_bottleneck_config"`
-	RuntimeFailureConfig      patterns.PatternConfig `json:"runtime_failure_config"`
-	DependencyFailureConfig   patterns.PatternConfig `json:"dependency_failure_config"`
+	MemoryLeakConfig          PatternConfig `json:"memory_leak_config"`     // TODO: Use patterns.PatternConfig
+	NetworkFailureConfig      PatternConfig `json:"network_failure_config"`  // TODO: Use patterns.PatternConfig
+	StorageBottleneckConfig   PatternConfig `json:"storage_bottleneck_config"` // TODO: Use patterns.PatternConfig
+	RuntimeFailureConfig      PatternConfig `json:"runtime_failure_config"`  // TODO: Use patterns.PatternConfig
+	DependencyFailureConfig   PatternConfig `json:"dependency_failure_config"` // TODO: Use patterns.PatternConfig
 }
 
 // PatternIntegrationStats tracks pattern integration performance
@@ -97,7 +97,7 @@ type PatternResultCache struct {
 
 // CachedPatternResult represents a cached pattern detection result
 type CachedPatternResult struct {
-	Result      *patterns.PatternResult
+	Result      *PatternResult // TODO: Use patterns.PatternResult
 	CachedAt    time.Time
 	AccessCount int64
 	LastAccess  time.Time

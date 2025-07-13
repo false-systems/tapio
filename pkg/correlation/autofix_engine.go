@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/patterns"
+	// "github.com/yairfalse/tapio/pkg/correlation/patterns" // TODO: Fix import cycle
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
 // AutoFixEngine provides automated remediation capabilities for detected patterns
 type AutoFixEngine struct {
 	// Core components
-	patternRegistry   *patterns.PatternRegistry
+	// patternRegistry   *patterns.PatternRegistry // TODO: Fix import cycle
 	actionExecutor    ActionExecutor
 	safetyValidator   SafetyValidator
 	rollbackManager   *RollbackManager
