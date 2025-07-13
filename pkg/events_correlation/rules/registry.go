@@ -18,6 +18,12 @@ func RegisterAll(engine events_correlation.Engine) error {
 		CPUThrottleDetection(),
 		CPUContentionDetection(),
 		HighCPUUtilizationPattern(),
+
+		// Storage-related rules
+		StorageVolumeCorrelation(),
+		PVCIssueDetection(),
+		DiskPressureDetection(),
+		StorageQuotaViolation(),
 	}
 
 	registeredCount := 0
@@ -41,6 +47,10 @@ func GetRuleByID(id string) *events_correlation.Rule {
 		"cpu-throttle-detection":       CPUThrottleDetection,
 		"cpu-contention-detection":     CPUContentionDetection,
 		"high-cpu-utilization-pattern": HighCPUUtilizationPattern,
+		"storage-volume-correlation":   StorageVolumeCorrelation,
+		"pvc-issue-detection":          PVCIssueDetection,
+		"disk-pressure-detection":      DiskPressureDetection,
+		"storage-quota-violation":      StorageQuotaViolation,
 	}
 
 	if ruleFn, exists := rules[id]; exists {
@@ -59,6 +69,10 @@ func GetRulesByCategory(category events_correlation.Category) []*events_correlat
 		CPUThrottleDetection(),
 		CPUContentionDetection(),
 		HighCPUUtilizationPattern(),
+		StorageVolumeCorrelation(),
+		PVCIssueDetection(),
+		DiskPressureDetection(),
+		StorageQuotaViolation(),
 	}
 
 	var filtered []*events_correlation.Rule
@@ -80,6 +94,10 @@ func GetRulesByTag(tag string) []*events_correlation.Rule {
 		CPUThrottleDetection(),
 		CPUContentionDetection(),
 		HighCPUUtilizationPattern(),
+		StorageVolumeCorrelation(),
+		PVCIssueDetection(),
+		DiskPressureDetection(),
+		StorageQuotaViolation(),
 	}
 
 	var filtered []*events_correlation.Rule
@@ -104,6 +122,10 @@ func ListAllRules() []*events_correlation.Rule {
 		CPUThrottleDetection(),
 		CPUContentionDetection(),
 		HighCPUUtilizationPattern(),
+		StorageVolumeCorrelation(),
+		PVCIssueDetection(),
+		DiskPressureDetection(),
+		StorageQuotaViolation(),
 	}
 }
 
