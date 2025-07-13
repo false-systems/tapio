@@ -24,6 +24,7 @@ const (
 	CategoryPerformance Category = "performance"
 	CategorySecurity    Category = "security"
 	CategoryReliability Category = "reliability"
+	CategoryStorage     Category = "storage"
 )
 
 // EventSource identifies the source of an event
