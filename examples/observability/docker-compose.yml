@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # jaeger.thrift over HTTP
+      - "14250:14250"  # gRPC
+      - "6831:6831/udp"  # jaeger.thrift over UDP (agent)
+      - "6832:6832/udp"  # jaeger.thrift over UDP (agent)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_HTTP_PORT=4318
+      - COLLECTOR_OTLP_GRPC_PORT=4317
+    networks:
+      - tapio-observability
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - tapio-observability
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - tapio-observability
+
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.105.0
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./otel-collector-config.yml:/etc/otel-collector-config.yml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus metrics
+      - "13133:13133" # Health check
+    depends_on:
+      - jaeger
+      - prometheus
+    networks:
+      - tapio-observability
+
+  # Tempo for trace storage (alternative to Jaeger)
+  tempo:
+    image: grafana/tempo:2.5.0
+    command: [ "-config.file=/etc/tempo.yml" ]
+    volumes:
+      - ./tempo.yml:/etc/tempo.yml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"   # tempo
+      - "4317:4317"   # otlp grpc
+      - "4318:4318"   # otlp http
+    networks:
+      - tapio-observability
+
+  # Loki for log aggregation
+  loki:
+    image: grafana/loki:3.1.0
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks:
+      - tapio-observability
+
+  # Tapio correlation engine (demo instance)
+  tapio-demo:
+    build:
+      context: ../../
+      dockerfile: examples/observability/Dockerfile.demo
+    ports:
+      - "8080:8080"   # HTTP API
+      - "9091:9091"   # Prometheus metrics
+    environment:
+      - TAPIO_OTEL_ENDPOINT=http://otel-collector:4318/v1/traces
+      - TAPIO_PROMETHEUS_ENABLED=true
+      - TAPIO_PROMETHEUS_PORT=9091
+      - TAPIO_LOG_LEVEL=info
+    depends_on:
+      - otel-collector
+      - prometheus
+    networks:
+      - tapio-observability
+
+  # Load generator for demo purposes
+  load-generator:
+    build:
+      context: ../../
+      dockerfile: examples/observability/Dockerfile.loadgen
+    environment:
+      - TAPIO_DEMO_URL=http://tapio-demo:8080
+      - REQUESTS_PER_SECOND=10
+      - CORRELATION_TYPES=memory_leak,network_failure,storage_bottleneck
+    depends_on:
+      - tapio-demo
+    networks:
+      - tapio-observability
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  tempo-data:
+  loki-data:
+
+networks:
+  tapio-observability:
+    driver: bridge
