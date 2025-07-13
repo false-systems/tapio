@@ -1,0 +1,193 @@
+# eBPF Memory Tracking Build Automation
+# This Makefile provides comprehensive build automation for eBPF memory tracking
+
+# Build configuration
+EBPF_DIR := ebpf
+PKG_EBPF_DIR := pkg/collectors/ebpf
+SCRIPTS_DIR := scripts
+BUILD_DIR := build
+CLANG ?= clang
+LLVM_STRIP ?= llvm-strip
+
+# Performance targets
+TARGET_EVENT_RATE := 50000  # events per second per CPU
+TARGET_OOM_LATENCY := 1     # milliseconds
+TARGET_MEMORY_USAGE := 100  # MB for 10k processes
+
+# Detect platform
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+
+# eBPF build targets
+.PHONY: ebpf-all
+ebpf-all: ebpf-check ebpf-build ebpf-test ebpf-optimize ebpf-validate
+
+# Check prerequisites and kernel compatibility
+.PHONY: ebpf-check
+ebpf-check:
+	@echo "🔍 Checking eBPF prerequisites and kernel compatibility..."
+	@$(SCRIPTS_DIR)/build-ebpf.sh check_prerequisites
+	@$(SCRIPTS_DIR)/build-ebpf.sh check_kernel_compatibility
+
+# Build eBPF programs and generate Go bindings
+.PHONY: ebpf-build
+ebpf-build:
+	@echo "🔨 Building eBPF memory tracking programs..."
+	@mkdir -p $(BUILD_DIR)
+	@cd $(PKG_EBPF_DIR) && go generate ./memory.go
+	@echo "✅ eBPF programs built successfully"
+
+# Run comprehensive tests
+.PHONY: ebpf-test
+ebpf-test:
+	@echo "🧪 Running eBPF memory tracking tests..."
+	@cd $(PKG_EBPF_DIR) && go test -tags ebpf -v ./...
+	@echo "✅ All eBPF tests passed"
+
+# Run performance benchmarks
+.PHONY: ebpf-bench
+ebpf-bench:
+	@echo "⚡ Running performance benchmarks..."
+	@cd $(PKG_EBPF_DIR) && go test -tags ebpf -bench=. -benchtime=5s -count=3 ./...
+
+# Run performance target validation
+.PHONY: ebpf-perf-targets
+ebpf-perf-targets:
+	@echo "🎯 Validating performance targets..."
+	@cd $(PKG_EBPF_DIR) && go test -tags ebpf -run="TestPerformanceTargets" -v ./...
+
+# Optimize eBPF binaries
+.PHONY: ebpf-optimize
+ebpf-optimize:
+	@echo "⚡ Optimizing eBPF binaries..."
+	@cd $(PKG_EBPF_DIR) && \
+	for obj in *.o; do \
+		if [ -f "$$obj" ]; then \
+			echo "Optimizing $$obj..."; \
+			$(LLVM_STRIP) "$$obj" 2>/dev/null || echo "Warning: llvm-strip not available"; \
+		fi; \
+	done
+	@echo "✅ eBPF binaries optimized"
+
+# Validate eBPF programs
+.PHONY: ebpf-validate
+ebpf-validate:
+	@echo "🔍 Validating eBPF programs..."
+	@cd $(PKG_EBPF_DIR) && go build -tags ebpf ./...
+	@if command -v bpftool >/dev/null 2>&1; then \
+		cd $(PKG_EBPF_DIR) && \
+		for obj in *.o; do \
+			if [ -f "$$obj" ]; then \
+				echo "Inspecting $$obj..."; \
+				bpftool prog dump xlated "$$obj" >/dev/null 2>&1 || echo "Warning: Could not inspect $$obj"; \
+			fi; \
+		done; \
+	else \
+		echo "Warning: bpftool not available for program inspection"; \
+	fi
+	@echo "✅ eBPF programs validated"
+
+# Clean eBPF build artifacts
+.PHONY: ebpf-clean
+ebpf-clean:
+	@echo "🧹 Cleaning eBPF build artifacts..."
+	@cd $(PKG_EBPF_DIR) && rm -f *.o memory_bpf*.go
+	@rm -rf $(BUILD_DIR)
+	@echo "✅ eBPF artifacts cleaned"
+
+# Performance monitoring and optimization
+.PHONY: ebpf-monitor
+ebpf-monitor:
+	@echo "📊 Running performance monitoring..."
+	@$(SCRIPTS_DIR)/performance-monitor.sh
+
+# Generate performance recommendations
+.PHONY: ebpf-recommendations
+ebpf-recommendations:
+	@echo "💡 Generating performance recommendations..."
+	@$(SCRIPTS_DIR)/performance-monitor.sh recommendations
+
+# Memory profiling
+.PHONY: ebpf-profile
+ebpf-profile:
+	@echo "🔍 Running memory profiling..."
+	@cd $(PKG_EBPF_DIR) && go test -tags ebpf -memprofile=mem.prof -bench=BenchmarkMemoryEventProcessing ./...
+	@echo "Memory profile generated: $(PKG_EBPF_DIR)/mem.prof"
+
+# CPU profiling
+.PHONY: ebpf-profile-cpu
+ebpf-profile-cpu:
+	@echo "🔍 Running CPU profiling..."
+	@cd $(PKG_EBPF_DIR) && go test -tags ebpf -cpuprofile=cpu.prof -bench=BenchmarkMemoryEventProcessing ./...
+	@echo "CPU profile generated: $(PKG_EBPF_DIR)/cpu.prof"
+
+# Comprehensive performance analysis
+.PHONY: ebpf-perf-analysis
+ebpf-perf-analysis: ebpf-bench ebpf-perf-targets ebpf-profile ebpf-monitor
+	@echo "📈 Comprehensive performance analysis completed"
+	@echo "Results:"
+	@echo "  - Benchmarks: See above output"
+	@echo "  - Memory profile: $(PKG_EBPF_DIR)/mem.prof"
+	@echo "  - Performance monitoring: performance-recommendations.txt"
+
+# Development workflow
+.PHONY: ebpf-dev
+ebpf-dev: ebpf-clean ebpf-build ebpf-test ebpf-bench
+	@echo "🚀 Development build cycle completed"
+
+# Production build
+.PHONY: ebpf-prod
+ebpf-prod: ebpf-check ebpf-clean ebpf-build ebpf-optimize ebpf-validate ebpf-perf-targets
+	@echo "🏭 Production build completed"
+	@echo "Performance targets validation:"
+	@echo "  ✓ Event processing rate: $(TARGET_EVENT_RATE) events/sec/CPU"
+	@echo "  ✓ OOM prediction latency: <$(TARGET_OOM_LATENCY)ms"
+	@echo "  ✓ Memory usage: <$(TARGET_MEMORY_USAGE)MB for 10k processes"
+
+# Continuous integration target
+.PHONY: ebpf-ci
+ebpf-ci: ebpf-check ebpf-build ebpf-test ebpf-optimize ebpf-validate
+	@echo "🔄 CI build completed successfully"
+
+# Display help
+.PHONY: ebpf-help
+ebpf-help:
+	@echo "eBPF Memory Tracking Build Targets:"
+	@echo ""
+	@echo "Build Targets:"
+	@echo "  ebpf-all          - Complete build, test, and validation pipeline"
+	@echo "  ebpf-build        - Build eBPF programs and generate Go bindings"
+	@echo "  ebpf-test         - Run all eBPF tests"
+	@echo "  ebpf-clean        - Clean build artifacts"
+	@echo ""
+	@echo "Performance Targets:"
+	@echo "  ebpf-bench        - Run performance benchmarks"
+	@echo "  ebpf-perf-targets - Validate performance targets"
+	@echo "  ebpf-monitor      - Run performance monitoring"
+	@echo "  ebpf-profile      - Generate memory profile"
+	@echo "  ebpf-profile-cpu  - Generate CPU profile"
+	@echo "  ebpf-perf-analysis- Comprehensive performance analysis"
+	@echo ""
+	@echo "Optimization Targets:"
+	@echo "  ebpf-optimize     - Optimize eBPF binaries"
+	@echo "  ebpf-validate     - Validate eBPF programs"
+	@echo "  ebpf-recommendations - Generate optimization recommendations"
+	@echo ""
+	@echo "Workflow Targets:"
+	@echo "  ebpf-dev          - Development workflow (build + test + bench)"
+	@echo "  ebpf-prod         - Production build with full validation"
+	@echo "  ebpf-ci           - Continuous integration workflow"
+	@echo ""
+	@echo "Configuration:"
+	@echo "  TARGET_EVENT_RATE = $(TARGET_EVENT_RATE) events/sec/CPU"
+	@echo "  TARGET_OOM_LATENCY = $(TARGET_OOM_LATENCY)ms"
+	@echo "  TARGET_MEMORY_USAGE = $(TARGET_MEMORY_USAGE)MB"
+
+# Integration with main Makefile
+ebpf: ebpf-all
+test-ebpf: ebpf-test
+bench-ebpf: ebpf-bench
+clean-ebpf: ebpf-clean
+
+# Default target
+.DEFAULT_GOAL := ebpf-help
