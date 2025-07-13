@@ -11,7 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/yairfalse/tapio/pkg/correlation_v2"
+	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/events_correlation"
 	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/simple"
@@ -26,7 +26,7 @@ type PrometheusExporter struct {
 	checker           CheckerInterface
 	ebpfMonitor       ebpf.Monitor
 	registry          *prometheus.Registry
-	v2Engine          *correlation_v2.HighPerformanceEngine
+	v2Engine          *correlation.Engine
 
 	// Universal format components
 	formatter            *formatters.PrometheusFormatter
@@ -98,8 +98,8 @@ func New(checker CheckerInterface, config Config) (*PrometheusExporter, error) {
 	formatter := formatters.NewPrometheusFormatter(promConfig)
 
 	// Initialize V2 engine
-	v2Config := correlation_v2.DefaultEngineConfig()
-	v2Engine := correlation_v2.NewHighPerformanceEngine(v2Config)
+	v2Config := correlation.DefaultConfig()
+	v2Engine := correlation.NewEngine(v2Config)
 	
 	// Start V2 engine
 	if err := v2Engine.Start(); err != nil {
@@ -492,7 +492,7 @@ func (pe *PrometheusExporter) Shutdown() error {
 }
 
 // registerDefaultRules registers default correlation rules for metrics
-func registerDefaultRules(engine *correlation_v2.HighPerformanceEngine) {
+func registerDefaultRules(engine *correlation.Engine) {
 	// High error rate detection
 	engine.RegisterRule(&events_correlation.Rule{
 		ID:          "metrics-high-error-rate",

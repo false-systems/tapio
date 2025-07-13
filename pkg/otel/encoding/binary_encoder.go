@@ -10,7 +10,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/yair/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
 )
 
 // BinaryEncoder provides high-performance binary encoding for trace data

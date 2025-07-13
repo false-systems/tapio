@@ -7,12 +7,12 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/yair/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
 )
 
 // ArenaManager provides zero-allocation span creation using memory arenas
 // Implements cutting-edge memory management for high-performance OTEL tracing
-type ArenaManager struct {
+type ArenaManager[T domain.TraceData] struct {
 	// Arena pools for different allocation sizes
 	smallArenas  sync.Pool // < 1KB allocations
 	mediumArenas sync.Pool // 1KB - 64KB allocations  
@@ -166,10 +166,10 @@ const (
 )
 
 // NewArenaManager creates a new arena manager with performance optimization
-func NewArenaManager(config ArenaConfig) *ArenaManager {
+func NewArenaManager[T domain.TraceData](config ArenaConfig) *ArenaManager[T] {
 	applyArenaDefaults(&config)
 	
-	manager := &ArenaManager{
+	manager := &ArenaManager[T]{
 		config: config,
 	}
 	
@@ -190,7 +190,7 @@ func NewArenaManager(config ArenaConfig) *ArenaManager {
 }
 
 // CreateSpan creates a new span with zero-allocation optimization
-func (am *ArenaManager) CreateSpan[T domain.TraceData](
+func (am *ArenaManager[T]) CreateSpan(
 	name string,
 	traceID domain.TraceID,
 	spanID domain.SpanID,
@@ -222,7 +222,7 @@ func (am *ArenaManager) CreateSpan[T domain.TraceData](
 }
 
 // CreateSpanBatch creates multiple spans efficiently in a single arena
-func (am *ArenaManager) CreateSpanBatch[T domain.TraceData](
+func (am *ArenaManager[T]) CreateSpanBatch(
 	requests []SpanBatchRequest[T],
 ) ([]*ArenaSpan[T], error) {
 	
@@ -266,7 +266,7 @@ func (am *ArenaManager) CreateSpanBatch[T domain.TraceData](
 }
 
 // GetStats returns arena manager performance statistics
-func (am *ArenaManager) GetStats() ArenaStats {
+func (am *ArenaManager[T]) GetStats() ArenaStats {
 	var activeCount int64
 	am.activeArenas.Range(func(key, value any) bool {
 		activeCount++
@@ -286,7 +286,7 @@ func (am *ArenaManager) GetStats() ArenaStats {
 
 // Private methods
 
-func (am *ArenaManager) initializePools() {
+func (am *ArenaManager[T]) initializePools() {
 	// Small arenas pool
 	am.smallArenas.New = func() any {
 		return am.createArena(am.config.SmallArenaSize, 16)
@@ -319,7 +319,7 @@ func (am *ArenaManager) initializePools() {
 	}
 }
 
-func (am *ArenaManager) createArena(size int64, alignment int) *Arena {
+func (am *ArenaManager[T]) createArena(size int64, alignment int) *Arena {
 	// Allocate aligned memory block
 	data := make([]byte, size)
 	
@@ -335,7 +335,7 @@ func (am *ArenaManager) createArena(size int64, alignment int) *Arena {
 		data:        data,
 		size:        int64(len(data)),
 		id:          am.generateArenaID(),
-		created:     runtime.nanotime(),
+		created:     time.Now().UnixNano(),
 		simdAligned: false,
 		alignment:   alignment,
 		generation:  am.getCurrentGeneration(),
@@ -347,7 +347,7 @@ func (am *ArenaManager) createArena(size int64, alignment int) *Arena {
 	return arena
 }
 
-func (am *ArenaManager) createSIMDArena(size int64, alignment int) *Arena {
+func (am *ArenaManager[T]) createSIMDArena(size int64, alignment int) *Arena {
 	// Create SIMD-aligned arena for vectorized operations
 	arena := am.createArena(size, alignment)
 	arena.simdAligned = true
@@ -356,7 +356,7 @@ func (am *ArenaManager) createSIMDArena(size int64, alignment int) *Arena {
 	return arena
 }
 
-func (am *ArenaManager) getArena(requiredSize int64) *Arena {
+func (am *ArenaManager[T]) getArena(requiredSize int64) *Arena {
 	var pool *sync.Pool
 	
 	// Select appropriate pool based on size
@@ -378,7 +378,7 @@ func (am *ArenaManager) getArena(requiredSize int64) *Arena {
 	return arena
 }
 
-func (am *ArenaManager) returnArena(arena *Arena) {
+func (am *ArenaManager[T]) returnArena(arena *Arena) {
 	if arena == nil {
 		return
 	}
@@ -404,7 +404,7 @@ func (am *ArenaManager) returnArena(arena *Arena) {
 	atomic.AddInt64(&am.reuseRate, 1)
 }
 
-func (am *ArenaManager) createSpanInArena[T domain.TraceData](
+func (am *ArenaManager[T]) createSpanInArena(
 	arena *Arena,
 	name string,
 	traceID domain.TraceID,
@@ -426,7 +426,7 @@ func (am *ArenaManager) createSpanInArena[T domain.TraceData](
 	span.spanID = spanID
 	span.parentID = parentID
 	span.arena = arena
-	span.startTime = runtime.nanotime()
+	span.startTime = time.Now().UnixNano()
 	span.flags = SpanFlagRecording
 	
 	// Store name in arena
@@ -456,7 +456,7 @@ func (am *ArenaManager) createSpanInArena[T domain.TraceData](
 	return span, nil
 }
 
-func (am *ArenaManager) estimateSpanSize(name string, opts []SpanCreationOption) int64 {
+func (am *ArenaManager[T]) estimateSpanSize(name string, opts []SpanCreationOption) int64 {
 	// Base span structure size
 	size := int64(unsafe.Sizeof(ArenaSpan[any]{}))
 	
@@ -473,26 +473,26 @@ func (am *ArenaManager) estimateSpanSize(name string, opts []SpanCreationOption)
 	return size + 64
 }
 
-func (am *ArenaManager) resetArena(arena *Arena) {
+func (am *ArenaManager[T]) resetArena(arena *Arena) {
 	// Reset position atomically
 	atomic.StoreInt64(&arena.pos, 0)
 	atomic.StoreInt32(&arena.refs, 0)
-	atomic.StoreInt64(&arena.lastUsed, runtime.nanotime())
+	atomic.StoreInt64(&arena.lastUsed, time.Now().UnixNano())
 	
 	// Reset free list
 	arena.freeList = nil
 }
 
-func (am *ArenaManager) generateArenaID() uint64 {
-	return uint64(runtime.nanotime())
+func (am *ArenaManager[T]) generateArenaID() uint64 {
+	return uint64(time.Now().UnixNano())
 }
 
-func (am *ArenaManager) getCurrentGeneration() uint32 {
+func (am *ArenaManager[T]) getCurrentGeneration() uint32 {
 	// Simple generation counter for PGO
 	return uint32(atomic.LoadInt64(&am.gcCycles)) % 1000
 }
 
-func (am *ArenaManager) preallocateArenas() {
+func (am *ArenaManager[T]) preallocateArenas() {
 	for i := 0; i < am.config.PreallocateCount; i++ {
 		// Preallocate arenas of different sizes
 		am.smallArenas.Put(am.createArena(am.config.SmallArenaSize, 16))
@@ -501,12 +501,12 @@ func (am *ArenaManager) preallocateArenas() {
 	}
 }
 
-func (am *ArenaManager) cleanupLoop() {
+func (am *ArenaManager[T]) cleanupLoop() {
 	for {
 		runtime.Gosched()
 		
 		// Cleanup old arenas
-		now := runtime.nanotime()
+		now := time.Now().UnixNano()
 		am.activeArenas.Range(func(key, value any) bool {
 			arena := key.(*Arena)
 			if now-atomic.LoadInt64(&arena.lastUsed) > am.config.IdleTimeout {
@@ -522,7 +522,7 @@ func (am *ArenaManager) cleanupLoop() {
 	}
 }
 
-func (am *ArenaManager) monitorMemoryPressure() {
+func (am *ArenaManager[T]) monitorMemoryPressure() {
 	var lastGC uint32
 	
 	for {
@@ -705,7 +705,7 @@ func (s *ArenaSpan[T]) SetStatus(code domain.StatusCode, description string) dom
 
 func (s *ArenaSpan[T]) End() domain.SpanSnapshot[T] {
 	// Set end time atomically
-	atomic.StoreInt64(&s.endTime, runtime.nanotime())
+	atomic.StoreInt64(&s.endTime, time.Now().UnixNano())
 	
 	// Create snapshot (implementation would be more comprehensive)
 	return &ArenaSpanSnapshot[T]{span: s}

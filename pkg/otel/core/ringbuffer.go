@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/yair/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
 )
 
 // LockFreeRingBuffer implements a high-performance lock-free ring buffer
@@ -58,7 +58,7 @@ type atomicSlot[T any] struct {
 // SlotAllocator manages memory allocation for ring buffer slots
 type SlotAllocator[T any] struct {
 	// Free slot stack (lock-free)
-	freeStack  unsafe.Pointer // *slotStack
+	freeStack  unsafe.Pointer // *slotStack[T]
 	
 	// Pool of pre-allocated slots
 	slotPool   []T
@@ -77,7 +77,7 @@ type SlotAllocator[T any] struct {
 }
 
 // slotStack represents a lock-free stack node
-type slotStack struct {
+type slotStack[T any] struct {
 	next unsafe.Pointer
 	slot *T
 }
@@ -782,7 +782,7 @@ func (sa *SlotAllocator[T]) popFreeStack() unsafe.Pointer {
 			return nil
 		}
 		
-		stack := (*slotStack)(top)
+		stack := (*slotStack[T])(top)
 		next := atomic.LoadPointer(&stack.next)
 		
 		if atomic.CompareAndSwapPointer(&sa.freeStack, top, next) {
@@ -793,7 +793,7 @@ func (sa *SlotAllocator[T]) popFreeStack() unsafe.Pointer {
 
 func (sa *SlotAllocator[T]) pushFreeStack(ptr unsafe.Pointer) {
 	// Create new stack node
-	node := &slotStack{
+	node := &slotStack[T]{
 		slot: (*T)(ptr),
 	}
 	

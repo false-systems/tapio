@@ -13,7 +13,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/yair/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
 )
 
 // OTELHandler implements slog.Handler with zero-allocation optimizations
