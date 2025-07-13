@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yair/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
 )
 
 // EventBus orchestrates event processing in the CQRS/Event Sourcing pattern

@@ -4,6 +4,7 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"time"
 	"unsafe"
 )
@@ -291,22 +292,6 @@ type TraceSamplingService[T TraceData] interface {
 
 // DOMAIN EVENTS
 
-// TraceEvent represents an event in the trace lifecycle
-type TraceEvent interface {
-	// Event identity
-	GetEventID() EventID
-	GetTraceID() TraceID
-	GetTimestamp() time.Time
-	
-	// Event data
-	GetEventType() TraceEventType
-	GetPayload() map[string]any
-	
-	// Serialization
-	MarshalBinary() ([]byte, error)
-	UnmarshalBinary(data []byte) error
-}
-
 // TraceEventHandler processes trace events
 type TraceEventHandler interface {
 	// Event processing
@@ -324,13 +309,11 @@ type (
 	// Identity types with strong typing
 	TraceID     [16]byte
 	SpanID      [8]byte
-	EventID     [16]byte
 	
 	// Configuration types
 	AttributeType    uint8
 	StatusCode       uint8
 	SpanKind         uint8
-	TraceEventType   uint8
 	ExportFormat     uint8
 	CompressionType  uint8
 	TraceFormat      uint8
@@ -518,6 +501,138 @@ type (
 		Reason     string
 	}
 	
+	// Additional types for ports compatibility
+	TraceAggregateView[T TraceData] struct {
+		TraceID   TraceID
+		Spans     []SpanSnapshot[T]
+		Duration  time.Duration
+		Status    string
+	}
+	
+	TraceMetrics struct {
+		TotalSpans    int64
+		TotalTraces   int64
+		AverageLatency time.Duration
+		ErrorRate     float64
+	}
+	
+	ServiceHealth struct {
+		ServiceName   string
+		HealthStatus  string
+		LastChecked   time.Time
+		Issues        []string
+	}
+	
+	PerformanceMetrics struct {
+		Throughput    int64
+		Latency       time.Duration
+		ErrorRate     float64
+		MemoryUsage   int64
+	}
+	
+	SagaStartRequest struct {
+		SagaID        string
+		SagaType      string
+		InitialData   map[string]any
+	}
+	
+	ServiceHealthStatus struct {
+		ServiceID     string
+		Status        string
+		LastUpdate    time.Time
+		Metrics       PerformanceMetrics
+	}
+	
+	HealthUpdate struct {
+		ServiceID     string
+		Status        string
+		Timestamp     time.Time
+		Details       map[string]any
+	}
+	
+	SortCriteria struct {
+		Field     string
+		Direction string
+	}
+	
+	// Additional missing types for ports compatibility
+	SagaUpdate[T TraceData] struct {
+		SagaID      string
+		UpdateType  string
+		Data        map[string]T
+		Timestamp   time.Time
+	}
+	
+	SagaCompletionResult[T TraceData] struct {
+		SagaID      string
+		Success     bool
+		Results     map[string]T
+		Duration    time.Duration
+		CompletedAt time.Time
+	}
+	
+	TraceStatistics struct {
+		TotalTraces      int64
+		TotalSpans       int64
+		AverageLatency   time.Duration
+		ErrorRate        float64
+		ServicesCount    int64
+	}
+	
+	AnalyticsQuery struct {
+		ServiceNames  []string
+		Operations    []string
+		TimeRange     TimeRange
+		Filters       map[string]any
+		GroupBy       []string
+		Metrics       []string
+	}
+	
+	SpanAnalytics struct {
+		TotalSpans      int64
+		AverageLatency  time.Duration
+		P50Latency      time.Duration
+		P95Latency      time.Duration
+		P99Latency      time.Duration
+		ErrorRate       float64
+		ByService       map[string]SpanServiceMetrics
+	}
+	
+	SpanServiceMetrics struct {
+		ServiceName     string
+		SpanCount       int64
+		AverageLatency  time.Duration
+		ErrorCount      int64
+	}
+	
+	TraceStreamEvent[T TraceData] struct {
+		EventType   string
+		TraceID     TraceID
+		SpanID      *SpanID
+		Data        T
+		Timestamp   time.Time
+	}
+	
+	ProcessingError struct {
+		ErrorType   string
+		Message     string
+		SpanID      *SpanID
+		TraceID     *TraceID
+		Timestamp   time.Time
+		RetryCount  int
+	}
+	
+	TraceInfo struct {
+		TraceID       TraceID
+		ServiceName   string
+		RootOperation string
+		Duration      time.Duration
+		SpanCount     int64
+		ErrorCount    int64
+		StartTime     time.Time
+		EndTime       time.Time
+	}
+	
 	SamplingRule struct {
 		Service    string
 		Operation  string
@@ -578,14 +693,6 @@ const (
 	SpanKindConsumer
 )
 
-const (
-	// Trace event types
-	TraceEventTypeSpanStarted TraceEventType = iota
-	TraceEventTypeSpanEnded
-	TraceEventTypeSpanExported
-	TraceEventTypeTraceCompleted
-	TraceEventTypeError
-)
 
 const (
 	// Export formats
@@ -618,3 +725,12 @@ const (
 	MaxArenaSize     = 1024 * 1024    // 1MB
 	MinArenaSize     = 4 * 1024       // 4KB
 )
+
+// String methods for ID types
+func (t TraceID) String() string {
+	return fmt.Sprintf("%x", t[:])
+}
+
+func (s SpanID) String() string {
+	return fmt.Sprintf("%x", s[:])
+}

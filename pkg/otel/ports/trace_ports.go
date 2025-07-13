@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/yair/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
 )
 
 // PRIMARY PORTS - Driving side (inbound)
@@ -30,13 +30,13 @@ type TraceApplicationService[T domain.TraceData] interface {
 	ProcessSpanBatch(ctx context.Context, spans []domain.SpanSnapshot[T]) (*BatchProcessingResult, error)
 	
 	// Query operations (CQRS read side)
-	GetTrace(ctx context.Context, traceID domain.TraceID) (*TraceAggregateView[T], error)
+	GetTrace(ctx context.Context, traceID domain.TraceID) (*domain.TraceAggregateView[T], error)
 	QuerySpans(ctx context.Context, query SpanQuery) (*SpanQueryResult[T], error)
-	GetTraceMetrics(ctx context.Context, filter MetricsFilter) (*TraceMetrics, error)
+	GetTraceMetrics(ctx context.Context, filter MetricsFilter) (*domain.TraceMetrics, error)
 	
 	// Health and monitoring
-	GetServiceHealth(ctx context.Context) (*ServiceHealth, error)
-	GetPerformanceMetrics(ctx context.Context) (*PerformanceMetrics, error)
+	GetServiceHealth(ctx context.Context) (*domain.ServiceHealth, error)
+	GetPerformanceMetrics(ctx context.Context) (*domain.PerformanceMetrics, error)
 }
 
 // TraceCommandService handles command operations (CQRS write side)
@@ -50,24 +50,24 @@ type TraceCommandService[T domain.TraceData] interface {
 	HandleEventBatch(ctx context.Context, events []domain.TraceEvent) error
 	
 	// Saga management for distributed traces
-	StartTraceSaga(ctx context.Context, sagaID string, request SagaStartRequest[T]) error
-	UpdateTraceSaga(ctx context.Context, sagaID string, update SagaUpdate[T]) error
-	CompleteTraceSaga(ctx context.Context, sagaID string) (*SagaCompletionResult[T], error)
+	StartTraceSaga(ctx context.Context, sagaID string, request domain.SagaStartRequest) error
+	UpdateTraceSaga(ctx context.Context, sagaID string, update domain.SagaUpdate[T]) error
+	CompleteTraceSaga(ctx context.Context, sagaID string) (*domain.SagaCompletionResult[T], error)
 }
 
 // TraceQueryService handles query operations (CQRS read side)
 type TraceQueryService[T domain.TraceData] interface {
 	// Read operations
 	FindTracesByFilter(ctx context.Context, filter TraceFilter) (*TraceSearchResult[T], error)
-	GetTraceStatistics(ctx context.Context, timeRange TimeRange) (*TraceStatistics, error)
-	GetSpanAnalytics(ctx context.Context, analyticsQuery AnalyticsQuery) (*SpanAnalytics, error)
+	GetTraceStatistics(ctx context.Context, timeRange domain.TimeRange) (*domain.TraceStatistics, error)
+	GetSpanAnalytics(ctx context.Context, analyticsQuery domain.AnalyticsQuery) (*domain.SpanAnalytics, error)
 	
 	// Real-time queries
-	StreamTraces(ctx context.Context, filter TraceFilter) (<-chan TraceStreamEvent[T], error)
+	StreamTraces(ctx context.Context, filter TraceFilter) (<-chan domain.TraceStreamEvent[T], error)
 	StreamSpanUpdates(ctx context.Context, traceID domain.TraceID) (<-chan SpanUpdateEvent[T], error)
 	
 	// Materialized views
-	GetTraceAggregateView(ctx context.Context, traceID domain.TraceID) (*TraceAggregateView[T], error)
+	GetTraceAggregateView(ctx context.Context, traceID domain.TraceID) (*domain.TraceAggregateView[T], error)
 	RefreshMaterializedViews(ctx context.Context, viewTypes []ViewType) error
 }
 
@@ -84,7 +84,7 @@ type TraceRepositoryPort[T domain.TraceData] interface {
 	
 	// Advanced queries
 	FindSpans(ctx context.Context, query SpanQuery) ([]domain.SpanSnapshot[T], error)
-	FindTraces(ctx context.Context, filter TraceFilter) ([]TraceInfo, error)
+	FindTraces(ctx context.Context, filter TraceFilter) ([]domain.TraceInfo, error)
 	CountSpans(ctx context.Context, filter SpanFilter) (int64, error)
 	
 	// Event sourcing support
@@ -129,8 +129,8 @@ type TraceCachePort[T domain.TraceData] interface {
 	DeleteSpan(ctx context.Context, key SpanCacheKey) error
 	
 	// Trace caching
-	GetTrace(ctx context.Context, traceID domain.TraceID) (*TraceAggregateView[T], error)
-	SetTrace(ctx context.Context, traceID domain.TraceID, trace *TraceAggregateView[T], ttl time.Duration) error
+	GetTrace(ctx context.Context, traceID domain.TraceID) (*domain.TraceAggregateView[T], error)
+	SetTrace(ctx context.Context, traceID domain.TraceID, trace *domain.TraceAggregateView[T], ttl time.Duration) error
 	InvalidateTrace(ctx context.Context, traceID domain.TraceID) error
 	
 	// Bulk operations
@@ -182,7 +182,7 @@ type MetricsCollectorPort interface {
 	RecordErrorOccurred(ctx context.Context, error ErrorInfo)
 	
 	// Aggregated metrics
-	GetMetricsSummary(ctx context.Context, timeRange TimeRange) (*MetricsSummary, error)
+	GetMetricsSummary(ctx context.Context, timeRange domain.TimeRange) (*MetricsSummary, error)
 	ExportMetrics(ctx context.Context, format MetricsFormat) ([]byte, error)
 }
 
@@ -232,8 +232,8 @@ type ExternalServicePort interface {
 	DeregisterService(ctx context.Context, serviceID string) error
 	
 	// Health checks
-	CheckServiceHealth(ctx context.Context, serviceID string) (*ServiceHealthStatus, error)
-	MonitorServiceHealth(ctx context.Context, serviceID string) (<-chan HealthUpdate, error)
+	CheckServiceHealth(ctx context.Context, serviceID string) (*domain.ServiceHealthStatus, error)
+	MonitorServiceHealth(ctx context.Context, serviceID string) (<-chan domain.HealthUpdate, error)
 	
 	// Load balancing
 	SelectService(ctx context.Context, serviceName string, strategy LoadBalancingStrategy) (*ServiceEndpoint, error)
@@ -253,7 +253,7 @@ type StartTraceRequest[T domain.TraceData] struct {
 	SpanKind     domain.SpanKind
 	Attributes   map[string]T
 	ParentContext context.Context
-	SamplingDecision *SamplingDecision
+	SamplingDecision *domain.SamplingDecision
 	Deadline     *time.Time
 }
 
@@ -320,20 +320,20 @@ type SpanQuery struct {
 	TraceIDs     []domain.TraceID
 	ServiceNames []string
 	Operations   []string
-	TimeRange    *TimeRange
+	TimeRange    *domain.TimeRange
 	Attributes   map[string]any
 	MinDuration  *time.Duration
 	MaxDuration  *time.Duration
 	HasErrors    *bool
 	Limit        int
 	Offset       int
-	SortBy       []SortCriteria
+	SortBy       []domain.SortCriteria
 }
 
 type TraceFilter struct {
 	ServiceNames []string
 	Operations   []string
-	TimeRange    TimeRange
+	TimeRange    domain.TimeRange
 	MinDuration  time.Duration
 	MaxDuration  time.Duration
 	HasErrors    bool
@@ -342,7 +342,7 @@ type TraceFilter struct {
 
 type MetricsFilter struct {
 	ServiceNames []string
-	TimeRange    TimeRange
+	TimeRange    domain.TimeRange
 	MetricTypes  []MetricType
 	Granularity  time.Duration
 }
@@ -351,7 +351,7 @@ type MetricsFilter struct {
 type BatchProcessingResult struct {
 	ProcessedCount int
 	FailedCount    int
-	Errors         []ProcessingError
+	Errors         []domain.ProcessingError
 	Duration       time.Duration
 	ThroughputOps  float64
 }
@@ -381,7 +381,7 @@ type SpanQueryResult[T domain.TraceData] struct {
 }
 
 type TraceSearchResult[T domain.TraceData] struct {
-	Traces     []TraceInfo
+	Traces     []domain.TraceInfo
 	TotalCount int64
 	HasMore    bool
 	Facets     map[string][]FacetValue

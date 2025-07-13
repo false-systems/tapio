@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yair/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
 )
 
 // Benchmark data generators

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yair/tapio/pkg/otel/domain"
-	"github.com/yair/tapio/pkg/otel/ports"
+	"github.com/yairfalse/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/otel/ports"
 )
 
 // TraceApplicationServiceImpl implements the primary ports of hexagonal architecture
