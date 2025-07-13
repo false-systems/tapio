@@ -110,6 +110,16 @@ coverage:
 	@go tool cover -html=$(COVERAGE_FILE) -o coverage.html
 	@echo "📊 Coverage: coverage.html"
 
+##@ Code Generation
+
+# Generate protobuf code
+proto:
+	@echo "🔧 Generating protobuf code..."
+	@protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		proto/events.proto proto/opinionated_events.proto
+	@echo "✅ Protobuf generation complete"
+
 ##@ Build
 
 # Build binary

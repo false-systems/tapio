@@ -1,0 +1,677 @@
+syntax = "proto3";
+
+package tapio.opinionated.v1;
+
+option go_package = "github.com/yairfalse/tapio/pkg/events/opinionated;opinionated";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+
+// OpinionatedEvent is the PERFECT event format designed specifically for AI-powered
+// correlation and analysis. Every field is carefully chosen to maximize intelligence
+// extraction while minimizing overhead.
+//
+// PHILOSOPHY: We capture ONLY what matters for correlation and prediction.
+// Everything else is noise that dilutes our AI's effectiveness.
+message OpinionatedEvent {
+  // === CORE IDENTITY ===
+  // Unique, globally sortable ID (time-ordered UUID)
+  string id = 1;
+  
+  // High-precision timestamp for perfect temporal ordering
+  google.protobuf.Timestamp timestamp = 2;
+  
+  // === SEMANTIC CONTEXT ===
+  // What happened, semantically enriched at collection time
+  SemanticContext semantic = 3;
+  
+  // === BEHAVIORAL FINGERPRINT ===
+  // Who did it and how they typically behave
+  BehavioralContext behavioral = 4;
+  
+  // === TEMPORAL INTELLIGENCE ===
+  // When it happened in relation to other events
+  TemporalContext temporal = 5;
+  
+  // === ANOMALY SIGNALS ===
+  // How unusual is this event?
+  AnomalyContext anomaly = 6;
+  
+  // === STATE TRANSITIONS ===
+  // What state change did this cause?
+  StateContext state = 7;
+  
+  // === CORRELATION VECTORS ===
+  // How does this relate to other events?
+  CorrelationContext correlation = 8;
+  
+  // === AI FEATURES ===
+  // Pre-computed features for ML models
+  AIFeatures ai_features = 9;
+  
+  // === CAUSALITY CHAIN ===
+  // What caused this and what will it cause?
+  CausalityContext causality = 10;
+  
+  // === IMPACT ASSESSMENT ===
+  // Why should we care about this event?
+  ImpactContext impact = 11;
+}
+
+// SemanticContext captures WHAT happened in a way that's perfect for AI understanding
+message SemanticContext {
+  // Event type using our opinionated taxonomy (e.g., "resource.exhaustion.memory")
+  string event_type = 1;
+  
+  // Semantic embedding vector for similarity searches
+  repeated float embedding = 2;
+  
+  // Domain-specific tags from our ontology
+  repeated string ontology_tags = 3;
+  
+  // Natural language description for LLM processing
+  string description = 4;
+  
+  // Key semantic features extracted at collection time
+  map<string, float> semantic_features = 5;
+  
+  // Intent classification (e.g., "normal_operation", "debugging", "attack")
+  string intent = 6;
+  float intent_confidence = 7;
+}
+
+// BehavioralContext captures WHO did it and HOW they typically behave
+message BehavioralContext {
+  // Entity performing the action
+  EntityFingerprint entity = 1;
+  
+  // Behavioral embedding vector
+  repeated float behavior_vector = 2;
+  
+  // Deviation from normal behavior (0-1, where 1 is completely abnormal)
+  float behavior_deviation = 3;
+  
+  // Behavior cluster assignment
+  string behavior_cluster = 4;
+  
+  // Recent behavior trend (increasing, stable, decreasing, erratic)
+  string behavior_trend = 5;
+  
+  // Behavior change indicators
+  BehaviorChange change_indicators = 6;
+}
+
+// EntityFingerprint uniquely identifies an entity with rich context
+message EntityFingerprint {
+  // Type-specific ID (e.g., "pod:frontend-7d9c5b6f4-xvz2n")
+  string id = 1;
+  
+  // Entity type from our opinionated taxonomy
+  string type = 2;
+  
+  // Hierarchical path (e.g., ["cluster:prod", "namespace:default", "deployment:frontend"])
+  repeated string hierarchy = 3;
+  
+  // Key attributes that define this entity's identity
+  map<string, string> identity_attributes = 4;
+  
+  // Entity lifecycle stage (spawning, healthy, degrading, dying)
+  string lifecycle_stage = 5;
+  
+  // Trust score (0-1, based on past behavior)
+  float trust_score = 6;
+}
+
+// BehaviorChange tracks how an entity's behavior is evolving
+message BehaviorChange {
+  // Rate of change (events per minute)
+  float velocity = 1;
+  
+  // Acceleration of change (change in velocity)
+  float acceleration = 2;
+  
+  // Jitter in behavior (standard deviation)
+  float jitter = 3;
+  
+  // Predictability score (0-1, where 1 is perfectly predictable)
+  float predictability = 4;
+}
+
+// TemporalContext captures WHEN this happened in relation to everything else
+message TemporalContext {
+  // Event duration (if applicable)
+  google.protobuf.Duration duration = 1;
+  
+  // Temporal patterns this event matches
+  repeated TemporalPattern patterns = 2;
+  
+  // Time-based anomaly indicators
+  TimeAnomaly time_anomaly = 3;
+  
+  // Temporal clustering assignment
+  string temporal_cluster = 4;
+  
+  // Periodicity detection
+  Periodicity periodicity = 5;
+}
+
+// TemporalPattern represents a detected time pattern
+message TemporalPattern {
+  // Pattern name (e.g., "daily_backup", "peak_hours", "maintenance_window")
+  string name = 1;
+  
+  // Confidence in pattern match (0-1)
+  float confidence = 2;
+  
+  // Phase within pattern (0-1, where 0 is start and 1 is end)
+  float phase = 3;
+}
+
+// TimeAnomaly indicates unusual timing
+message TimeAnomaly {
+  // Is this an unusual time for this event? (0-1)
+  float unusual_time_score = 1;
+  
+  // Is this an unusual frequency? (0-1)
+  float unusual_frequency_score = 2;
+  
+  // Is this an unusual duration? (0-1)
+  float unusual_duration_score = 3;
+  
+  // Expected vs actual timing
+  google.protobuf.Timestamp expected_time = 4;
+  google.protobuf.Duration expected_duration = 5;
+}
+
+// Periodicity tracks recurring patterns
+message Periodicity {
+  // Detected period (e.g., 86400s for daily)
+  google.protobuf.Duration period = 1;
+  
+  // Confidence in periodicity (0-1)
+  float confidence = 2;
+  
+  // Next expected occurrence
+  google.protobuf.Timestamp next_expected = 3;
+}
+
+// AnomalyContext captures HOW UNUSUAL this event is
+message AnomalyContext {
+  // Overall anomaly score (0-1, where 1 is extremely anomalous)
+  float anomaly_score = 1;
+  
+  // Multi-dimensional anomaly breakdown
+  AnomalyDimensions dimensions = 2;
+  
+  // Anomaly explanation
+  repeated AnomalyExplanation explanations = 3;
+  
+  // Context that might explain the anomaly
+  repeated string mitigating_factors = 4;
+  
+  // Comparison to baseline
+  BaselineComparison baseline_comparison = 5;
+}
+
+// AnomalyDimensions breaks down anomaly by different aspects
+message AnomalyDimensions {
+  // Statistical anomaly (z-score based)
+  float statistical = 1;
+  
+  // Behavioral anomaly (deviation from profile)
+  float behavioral = 2;
+  
+  // Temporal anomaly (unusual timing)
+  float temporal = 3;
+  
+  // Contextual anomaly (unusual for current context)
+  float contextual = 4;
+  
+  // Collective anomaly (unusual as part of a group)
+  float collective = 5;
+}
+
+// AnomalyExplanation provides human and AI-readable explanations
+message AnomalyExplanation {
+  // Type of anomaly (statistical, behavioral, temporal, etc.)
+  string type = 1;
+  
+  // Human-readable explanation
+  string human_explanation = 2;
+  
+  // Machine-readable features that caused the anomaly
+  map<string, float> contributing_features = 3;
+  
+  // Confidence in this explanation (0-1)
+  float confidence = 4;
+}
+
+// BaselineComparison shows how this event compares to normal
+message BaselineComparison {
+  // Number of standard deviations from mean
+  float z_score = 1;
+  
+  // Percentile ranking (0-100)
+  float percentile = 2;
+  
+  // How many similar events in the baseline window
+  int32 baseline_count = 3;
+  
+  // Baseline window used for comparison
+  google.protobuf.Duration baseline_window = 4;
+}
+
+// StateContext captures WHAT STATE CHANGE this event represents
+message StateContext {
+  // Entity state before this event
+  string previous_state = 1;
+  
+  // Entity state after this event
+  string current_state = 2;
+  
+  // State transition details
+  StateTransition transition = 3;
+  
+  // State machine context
+  StateMachine state_machine = 4;
+  
+  // Predicted future states
+  repeated StatePrediction predictions = 5;
+}
+
+// StateTransition details
+message StateTransition {
+  // Transition name (e.g., "healthy->degraded")
+  string name = 1;
+  
+  // Is this a valid transition?
+  bool valid = 2;
+  
+  // Transition probability (0-1)
+  float probability = 3;
+  
+  // Typical duration in this state
+  google.protobuf.Duration typical_duration = 4;
+  
+  // Trigger that caused the transition
+  string trigger = 5;
+}
+
+// StateMachine context
+message StateMachine {
+  // State machine name
+  string name = 1;
+  
+  // Current phase in the state machine
+  string phase = 2;
+  
+  // Health of the state machine (0-1)
+  float health = 3;
+  
+  // Cycles completed
+  int32 cycles = 4;
+}
+
+// StatePrediction for future states
+message StatePrediction {
+  // Predicted state
+  string state = 1;
+  
+  // Probability of this state (0-1)
+  float probability = 2;
+  
+  // Expected time to reach this state
+  google.protobuf.Duration time_to_state = 3;
+  
+  // Conditions required for this state
+  repeated string required_conditions = 4;
+}
+
+// CorrelationContext captures HOW this event relates to others
+message CorrelationContext {
+  // Correlation vectors for different dimensions
+  CorrelationVectors vectors = 1;
+  
+  // Direct causal relationships
+  repeated CausalLink causal_links = 2;
+  
+  // Correlation groups this event belongs to
+  repeated CorrelationGroup groups = 3;
+  
+  // Correlation strength with recent events
+  map<string, float> correlation_scores = 4;
+}
+
+// CorrelationVectors for multi-dimensional correlation
+message CorrelationVectors {
+  // Temporal correlation vector
+  repeated float temporal = 1;
+  
+  // Spatial correlation vector (same host, pod, namespace)
+  repeated float spatial = 2;
+  
+  // Causal correlation vector
+  repeated float causal = 3;
+  
+  // Semantic correlation vector
+  repeated float semantic = 4;
+}
+
+// CausalLink represents a causal relationship
+message CausalLink {
+  // Event ID of the cause/effect
+  string event_id = 1;
+  
+  // Relationship type (causes, caused_by, correlates_with)
+  string relationship = 2;
+  
+  // Confidence in this relationship (0-1)
+  float confidence = 3;
+  
+  // Time lag between events
+  google.protobuf.Duration lag = 4;
+}
+
+// CorrelationGroup represents a group of correlated events
+message CorrelationGroup {
+  // Group ID
+  string id = 1;
+  
+  // Group type (e.g., "deployment", "incident", "cascade")
+  string type = 2;
+  
+  // Role of this event in the group
+  string role = 3;
+  
+  // Group health/status
+  string status = 4;
+}
+
+// AIFeatures are pre-computed features for ML models
+message AIFeatures {
+  // Dense feature vector for neural networks
+  repeated float dense_features = 1;
+  
+  // Categorical features
+  map<string, string> categorical_features = 2;
+  
+  // Sparse features (for wide models)
+  map<string, float> sparse_features = 3;
+  
+  // Time series features
+  TimeSeriesFeatures time_series = 4;
+  
+  // Graph features (for GNN models)
+  GraphFeatures graph = 5;
+  
+  // Feature metadata
+  FeatureMetadata metadata = 6;
+}
+
+// TimeSeriesFeatures for temporal models
+message TimeSeriesFeatures {
+  // Rolling statistics
+  RollingStats rolling_1m = 1;
+  RollingStats rolling_5m = 2;
+  RollingStats rolling_1h = 3;
+  
+  // Trend indicators
+  float trend_1h = 4;
+  float trend_24h = 5;
+  
+  // Seasonality components
+  map<string, float> seasonality = 6;
+}
+
+// RollingStats over a time window
+message RollingStats {
+  float mean = 1;
+  float std_dev = 2;
+  float min = 3;
+  float max = 4;
+  float percentile_50 = 5;
+  float percentile_95 = 6;
+  float percentile_99 = 7;
+  int32 count = 8;
+}
+
+// GraphFeatures for graph neural networks
+message GraphFeatures {
+  // Node embedding
+  repeated float node_embedding = 1;
+  
+  // Edge features to related nodes
+  repeated EdgeFeatures edges = 2;
+  
+  // Graph-level statistics
+  GraphStats stats = 3;
+}
+
+// EdgeFeatures to a related node
+message EdgeFeatures {
+  // Target node ID
+  string target_id = 1;
+  
+  // Edge type
+  string edge_type = 2;
+  
+  // Edge weight
+  float weight = 3;
+  
+  // Edge features
+  repeated float features = 4;
+}
+
+// GraphStats for the local graph
+message GraphStats {
+  // Node degree
+  int32 degree = 1;
+  
+  // Clustering coefficient
+  float clustering_coefficient = 2;
+  
+  // Centrality scores
+  float betweenness_centrality = 3;
+  float closeness_centrality = 4;
+  float eigenvector_centrality = 5;
+}
+
+// FeatureMetadata tracks feature quality
+message FeatureMetadata {
+  // Feature version
+  string version = 1;
+  
+  // Feature computation timestamp
+  google.protobuf.Timestamp computed_at = 2;
+  
+  // Feature quality scores
+  map<string, float> quality_scores = 3;
+  
+  // Missing features
+  repeated string missing_features = 4;
+}
+
+// CausalityContext tracks cause and effect chains
+message CausalityContext {
+  // Root cause analysis
+  RootCause root_cause = 1;
+  
+  // Predicted effects
+  repeated PredictedEffect effects = 2;
+  
+  // Causality confidence
+  float confidence = 3;
+  
+  // Causality chain depth
+  int32 chain_depth = 4;
+}
+
+// RootCause analysis
+message RootCause {
+  // Root cause event ID (if known)
+  string event_id = 1;
+  
+  // Root cause type
+  string type = 2;
+  
+  // Confidence in root cause (0-1)
+  float confidence = 3;
+  
+  // Supporting evidence
+  repeated string evidence = 4;
+}
+
+// PredictedEffect of this event
+message PredictedEffect {
+  // Effect type
+  string type = 1;
+  
+  // Probability of effect (0-1)
+  float probability = 2;
+  
+  // Expected time to effect
+  google.protobuf.Duration time_to_effect = 3;
+  
+  // Severity of effect (0-1)
+  float severity = 4;
+  
+  // Possible mitigations
+  repeated string mitigations = 5;
+}
+
+// ImpactContext assesses WHY we should care about this event
+message ImpactContext {
+  // Business impact score (0-1)
+  float business_impact = 1;
+  
+  // Technical impact score (0-1)
+  float technical_impact = 2;
+  
+  // User impact score (0-1)
+  float user_impact = 3;
+  
+  // Security impact score (0-1)
+  float security_impact = 4;
+  
+  // Blast radius estimation
+  BlastRadius blast_radius = 5;
+  
+  // Urgency classification
+  string urgency = 6;
+  
+  // Recommended actions
+  repeated RecommendedAction actions = 7;
+}
+
+// BlastRadius estimates the scope of impact
+message BlastRadius {
+  // Number of affected entities
+  int32 affected_entities = 1;
+  
+  // Types of affected entities
+  repeated string affected_types = 2;
+  
+  // Propagation probability (0-1)
+  float propagation_probability = 3;
+  
+  // Containment status
+  string containment_status = 4;
+}
+
+// RecommendedAction for response
+message RecommendedAction {
+  // Action type (investigate, mitigate, escalate, ignore)
+  string type = 1;
+  
+  // Specific action to take
+  string action = 2;
+  
+  // Urgency of action (immediate, soon, eventual)
+  string urgency = 3;
+  
+  // Expected outcome
+  string expected_outcome = 4;
+  
+  // Confidence in recommendation (0-1)
+  float confidence = 5;
+}
+
+// OpinionatedBatch for efficient batch processing
+message OpinionatedBatch {
+  // Batch metadata
+  BatchMetadata metadata = 1;
+  
+  // Events in the batch
+  repeated OpinionatedEvent events = 2;
+  
+  // Batch-level patterns detected
+  repeated BatchPattern patterns = 3;
+  
+  // Batch-level anomalies
+  repeated BatchAnomaly anomalies = 4;
+}
+
+// BatchMetadata for the batch
+message BatchMetadata {
+  // Batch ID
+  string id = 1;
+  
+  // Source collector
+  string collector_id = 2;
+  
+  // Batch timestamp range
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+  
+  // Batch statistics
+  BatchStats stats = 5;
+}
+
+// BatchStats for monitoring
+message BatchStats {
+  // Number of events
+  int32 event_count = 1;
+  
+  // Unique entities
+  int32 unique_entities = 2;
+  
+  // Anomaly rate
+  float anomaly_rate = 3;
+  
+  // Compression ratio achieved
+  float compression_ratio = 4;
+  
+  // Processing time
+  google.protobuf.Duration processing_time = 5;
+}
+
+// BatchPattern detected across events
+message BatchPattern {
+  // Pattern type
+  string type = 1;
+  
+  // Events involved
+  repeated string event_ids = 2;
+  
+  // Pattern confidence (0-1)
+  float confidence = 3;
+  
+  // Pattern description
+  string description = 4;
+}
+
+// BatchAnomaly detected in the batch
+message BatchAnomaly {
+  // Anomaly type
+  string type = 1;
+  
+  // Affected events
+  repeated string event_ids = 2;
+  
+  // Anomaly score (0-1)
+  float score = 3;
+  
+  // Explanation
+  string explanation = 4;
+}
