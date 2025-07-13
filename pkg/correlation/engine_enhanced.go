@@ -12,40 +12,41 @@ import (
 	"github.com/yairfalse/tapio/pkg/systemd"
 )
 
+// TODO: Fix duplicate with autofix_engine.go - Using CircuitBreaker from autofix_engine.go
 // CircuitBreakerState represents the state of a circuit breaker
-type CircuitBreakerState int
-
-const (
-	// CircuitBreakerClosed allows requests through
-	CircuitBreakerClosed CircuitBreakerState = iota
-	// CircuitBreakerOpen blocks requests
-	CircuitBreakerOpen
-	// CircuitBreakerHalfOpen allows limited requests for testing
-	CircuitBreakerHalfOpen
-)
-
-// CircuitBreaker protects data sources from repeated failures
-type CircuitBreaker struct {
-	name             string
-	state            CircuitBreakerState
-	failureCount     int
-	successCount     int
-	lastFailure      time.Time
-	lastSuccess      time.Time
-	failureThreshold int
-	timeout          time.Duration
-	mutex            sync.RWMutex
-}
-
-// NewCircuitBreaker creates a new circuit breaker
-func NewCircuitBreaker(name string, failureThreshold int, timeout time.Duration) *CircuitBreaker {
-	return &CircuitBreaker{
-		name:             name,
-		state:            CircuitBreakerClosed,
-		failureThreshold: failureThreshold,
-		timeout:          timeout,
-	}
-}
+// type CircuitBreakerState int
+//
+// const (
+// 	// CircuitBreakerClosed allows requests through
+// 	CircuitBreakerClosed CircuitBreakerState = iota
+// 	// CircuitBreakerOpen blocks requests
+// 	CircuitBreakerOpen
+// 	// CircuitBreakerHalfOpen allows limited requests for testing
+// 	CircuitBreakerHalfOpen
+// )
+//
+// // CircuitBreaker protects data sources from repeated failures
+// type CircuitBreaker struct {
+// 	name             string
+// 	state            CircuitBreakerState
+// 	failureCount     int
+// 	successCount     int
+// 	lastFailure      time.Time
+// 	lastSuccess      time.Time
+// 	failureThreshold int
+// 	timeout          time.Duration
+// 	mutex            sync.RWMutex
+// }
+//
+// // NewCircuitBreaker creates a new circuit breaker
+// func NewCircuitBreaker(name string, failureThreshold int, timeout time.Duration) *CircuitBreaker {
+// 	return &CircuitBreaker{
+// 		name:             name,
+// 		state:            CircuitBreakerClosed,
+// 		failureThreshold: failureThreshold,
+// 		timeout:          timeout,
+// 	}
+// }
 
 // CanExecute checks if a request can be executed
 func (cb *CircuitBreaker) CanExecute() bool {
