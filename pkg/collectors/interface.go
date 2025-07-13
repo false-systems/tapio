@@ -43,14 +43,12 @@ type Event struct {
 	Timestamp time.Time `json:"timestamp"`
 	
 	// Source information
-	Source      string `json:"source"`       // Collector name (e.g., "ebpf-collector")
-	SourceType  string `json:"source_type"`  // Collector type (e.g., "ebpf")
-	CollectorID string `json:"collector_id"` // Instance identifier
+	Source EventSource `json:"source"`
 	
 	// Event classification
-	Type        string   `json:"type"`        // Event type (e.g., "network_connection", "memory_oom")
-	Category    Category `json:"category"`    // High-level category
-	Severity    Severity `json:"severity"`    // Event severity level
+	Type     EventType `json:"type"`     // Event type
+	Category Category  `json:"category"`  // High-level category
+	Severity Severity  `json:"severity"`  // Event severity level
 	
 	// Event data
 	Data       map[string]interface{} `json:"data"`        // Raw event data
@@ -60,8 +58,36 @@ type Event struct {
 	// Context for correlation
 	Context *EventContext `json:"context,omitempty"`
 	
+	// Metadata for processing
+	Metadata EventMetadata `json:"metadata"`
+	
 	// Optional actionable recommendations
 	Actionable *ActionableItem `json:"actionable,omitempty"`
+}
+
+// EventSource identifies the source of an event
+type EventSource struct {
+	Collector string `json:"collector"` // Collector name (e.g., "ebpf")
+	Component string `json:"component"` // Component within collector (e.g., "memory")
+	Node      string `json:"node"`      // Node where event originated
+}
+
+// EventType represents the type of event
+type EventType string
+
+const (
+	EventTypeMetric  EventType = "metric"
+	EventTypeLog     EventType = "log"
+	EventTypeTrace   EventType = "trace"
+	EventTypeAlert   EventType = "alert"
+	EventTypeAnomaly EventType = "anomaly"
+)
+
+// EventMetadata provides processing metadata
+type EventMetadata struct {
+	Importance  float32  `json:"importance"`  // 0.0-1.0 importance score
+	Reliability float32  `json:"reliability"` // 0.0-1.0 reliability score
+	Correlation []string `json:"correlation"` // Correlation IDs
 }
 
 // EventContext provides correlation information for events
@@ -141,7 +167,7 @@ type Health struct {
 	EventsProcessed  uint64                 `json:"events_processed"`
 	EventsDropped    uint64                 `json:"events_dropped"`
 	ErrorCount       uint64                 `json:"error_count"`
-	LastError        string                 `json:"last_error,omitempty"`
+	LastError        error                  `json:"-"`
 	LastErrorTime    time.Time              `json:"last_error_time,omitempty"`
 	Metrics          map[string]interface{} `json:"metrics"`
 }
@@ -159,28 +185,14 @@ const (
 // Stats provides detailed collector statistics
 type Stats struct {
 	// Basic counters
-	EventsCollected   uint64        `json:"events_collected"`
+	EventsTotal       uint64        `json:"events_total"`
 	EventsDropped     uint64        `json:"events_dropped"`
-	EventsFiltered    uint64        `json:"events_filtered"`
-	BytesProcessed    uint64        `json:"bytes_processed"`
-	ErrorCount        uint64        `json:"error_count"`
-	
-	// Performance metrics
 	EventsPerSecond   float64       `json:"events_per_second"`
-	AvgProcessingTime time.Duration `json:"avg_processing_time"`
-	MaxProcessingTime time.Duration `json:"max_processing_time"`
-	
-	// Resource usage
-	MemoryUsageMB     float64       `json:"memory_usage_mb"`
-	CPUUsagePercent   float64       `json:"cpu_usage_percent"`
-	
-	// Timing information
-	StartTime         time.Time     `json:"start_time"`
+	ErrorCount        uint64        `json:"error_count"`
 	LastEventTime     time.Time     `json:"last_event_time"`
-	Uptime            time.Duration `json:"uptime"`
 	
 	// Collector-specific metrics
-	CollectorMetrics  map[string]interface{} `json:"collector_metrics"`
+	CollectorSpecific map[string]interface{} `json:"collector_specific"`
 }
 
 // CollectorConfig provides configuration for a specific collector
@@ -205,7 +217,7 @@ type CollectorConfig struct {
 	ExcludeCategories []Category            `json:"exclude_categories"` // Exclude these categories
 	
 	// Collector-specific configuration
-	CollectorSpecific map[string]interface{} `json:"collector_specific"`
+	Extra map[string]interface{} `json:"extra"`
 	
 	// Environment context
 	Environment      string                 `json:"environment"`        // "prod", "staging", etc.
@@ -227,7 +239,7 @@ func DefaultCollectorConfig(name, collectorType string) CollectorConfig {
 		MinSeverity:       SeverityLow,
 		IncludeCategories: nil,  // Include all by default
 		ExcludeCategories: nil,  // Exclude none by default
-		CollectorSpecific: make(map[string]interface{}),
+		Extra: make(map[string]interface{}),
 		Labels:            make(map[string]string),
 	}
 }
@@ -237,11 +249,25 @@ type Factory interface {
 	// CreateCollector creates a new collector instance
 	CreateCollector(config CollectorConfig) (Collector, error)
 	
-	// SupportedTypes returns the collector types this factory can create
-	SupportedTypes() []string
-	
 	// ValidateConfig validates a configuration for this collector type
 	ValidateConfig(config CollectorConfig) error
+	
+	// GetRequirements returns the requirements for running this collector
+	GetRequirements() CollectorRequirements
+}
+
+// CollectorRequirements describes what a collector needs to run
+type CollectorRequirements struct {
+	Capabilities []string             `json:"capabilities"` // Linux capabilities required
+	KernelVersion string              `json:"kernel_version"` // Minimum kernel version
+	Features     []string             `json:"features"` // Required kernel features
+	Resources    ResourceRequirements `json:"resources"` // Resource requirements
+}
+
+// ResourceRequirements describes resource needs
+type ResourceRequirements struct {
+	MinMemoryMB int `json:"min_memory_mb"`
+	MinCPUMilli int `json:"min_cpu_milli"`
 }
 
 // Manager coordinates multiple collectors with lifecycle management
