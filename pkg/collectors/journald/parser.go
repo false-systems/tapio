@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // Parser implements OPINIONATED log parsing focused on critical events
@@ -20,12 +20,12 @@ type Parser struct {
 
 type compiledPattern struct {
 	regex    *regexp.Regexp
-	severity collectors.Severity
-	category collectors.Category
+	severity types.Severity
+	category types.Category
 	extract  func(matches []string) map[string]interface{}
 }
 
-type eventCategorizer func(entry *JournalEntry) (collectors.Category, collectors.Severity)
+type eventCategorizer func(entry *JournalEntry) (types.Category, types.Severity)
 
 // NewParser creates a new OPINIONATED parser
 func NewParser() *Parser {
@@ -41,7 +41,7 @@ func NewParser() *Parser {
 }
 
 // ParseCritical parses only critical events that matter for debugging
-func (p *Parser) ParseCritical(entry *JournalEntry) *collectors.Event {
+func (p *Parser) ParseCritical(entry *JournalEntry) *types.Event {
 	// Skip noise early
 	if p.isNoise(entry) {
 		return nil
@@ -56,13 +56,13 @@ func (p *Parser) ParseCritical(entry *JournalEntry) *collectors.Event {
 
 	// Check if it's a critical system event by other indicators
 	category, severity := p.categorizeEntry(entry)
-	if severity < collectors.SeverityWarning {
+	if severity < types.SeverityWarning {
 		return nil // Not critical enough
 	}
 
 	// Create generic critical event
-	return &collectors.Event{
-		Type:     collectors.EventTypeLog,
+	return &types.Event{
+		Type:     types.EventTypeLog,
 		Category: category,
 		Severity: severity,
 		Data: map[string]interface{}{
@@ -83,12 +83,12 @@ func (p *Parser) ParseCritical(entry *JournalEntry) *collectors.Event {
 			"hostname": entry.Hostname,
 			"unit":     entry.SystemdUnit,
 		},
-		Context: &collectors.EventContext{
+		Context: &types.EventContext{
 			Node:        entry.Hostname,
 			PID:         uint32(entry.PID),
 			ProcessName: entry.SyslogIdentifier,
 		},
-		Metadata: collectors.EventMetadata{
+		Metadata: types.EventMetadata{
 			Importance:  0.8, // High importance for critical events
 			Reliability: 0.9,
 		},
@@ -100,8 +100,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Service crash patterns
 	p.patterns["service_crash"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(service|unit) .* (failed|crashed|stopped unexpectedly|terminated abnormally)`),
-		severity: collectors.SeverityCritical,
-		category: collectors.CategoryReliability,
+		severity: types.SeverityCritical,
+		category: types.CategoryReliability,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"failure_type": "service_crash",
@@ -113,8 +113,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Process failure patterns
 	p.patterns["process_failure"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(main process exited|process .* failed|failed with result|exit-code|signal)`),
-		severity: collectors.SeverityError,
-		category: collectors.CategoryReliability,
+		severity: types.SeverityError,
+		category: types.CategoryReliability,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"failure_type": "process_failure",
@@ -125,8 +125,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Resource exhaustion patterns (non-OOM)
 	p.patterns["resource_exhaustion"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(no space left|cannot allocate|resource temporarily unavailable|too many open files)`),
-		severity: collectors.SeverityCritical,
-		category: collectors.CategoryCapacity,
+		severity: types.SeverityCritical,
+		category: types.CategoryCapacity,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"resource_type": extractResourceType(matches[0]),
@@ -137,8 +137,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Network failure patterns
 	p.patterns["network_failure"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(connection refused|connection reset|no route to host|network is unreachable|name resolution failed)`),
-		severity: collectors.SeverityError,
-		category: collectors.CategoryNetwork,
+		severity: types.SeverityError,
+		category: types.CategoryNetwork,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"network_error": extractNetworkError(matches[0]),
@@ -149,8 +149,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Timeout patterns
 	p.patterns["timeout"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(timeout|timed out|deadline exceeded|context canceled)`),
-		severity: collectors.SeverityWarning,
-		category: collectors.CategoryPerformance,
+		severity: types.SeverityWarning,
+		category: types.CategoryPerformance,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"timeout_type": extractTimeoutType(matches[0]),
@@ -161,8 +161,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Security/Permission failures
 	p.patterns["permission_denied"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(permission denied|access denied|unauthorized|forbidden|authentication failed)`),
-		severity: collectors.SeverityError,
-		category: collectors.CategorySecurity,
+		severity: types.SeverityError,
+		category: types.CategorySecurity,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"security_issue": "permission_denied",
@@ -173,8 +173,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Kernel panics and critical errors
 	p.patterns["kernel_panic"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(kernel panic|bug:|oops:|general protection fault|segfault|segmentation fault)`),
-		severity: collectors.SeverityCritical,
-		category: collectors.CategoryReliability,
+		severity: types.SeverityCritical,
+		category: types.CategoryReliability,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"kernel_error": matches[0],
@@ -185,8 +185,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Application panics
 	p.patterns["app_panic"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(panic:|fatal error:|runtime error:|stack trace:|goroutine \d+)`),
-		severity: collectors.SeverityCritical,
-		category: collectors.CategoryReliability,
+		severity: types.SeverityCritical,
+		category: types.CategoryReliability,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"panic_type": "application_panic",
@@ -197,8 +197,8 @@ func (p *Parser) initializeCriticalPatterns() {
 	// Watchdog timeouts
 	p.patterns["watchdog"] = &compiledPattern{
 		regex:    regexp.MustCompile(`(?i)(watchdog:|watchdog timeout|service hold-off time over|start request repeated too quickly)`),
-		severity: collectors.SeverityError,
-		category: collectors.CategoryReliability,
+		severity: types.SeverityError,
+		category: types.CategoryReliability,
 		extract: func(matches []string) map[string]interface{} {
 			return map[string]interface{}{
 				"watchdog_event": matches[0],
@@ -211,32 +211,32 @@ func (p *Parser) initializeCriticalPatterns() {
 func (p *Parser) initializeCategorizers() {
 	p.categorizers = []eventCategorizer{
 		// Categorize by systemd unit
-		func(entry *JournalEntry) (collectors.Category, collectors.Severity) {
+		func(entry *JournalEntry) (types.Category, types.Severity) {
 			unit := entry.SystemdUnit
 			switch {
 			case strings.Contains(unit, "kubelet"):
-				return collectors.CategoryReliability, collectors.SeverityError
+				return types.CategoryReliability, types.SeverityError
 			case strings.Contains(unit, "docker") || strings.Contains(unit, "containerd"):
-				return collectors.CategoryReliability, collectors.SeverityError
+				return types.CategoryReliability, types.SeverityError
 			case strings.Contains(unit, "etcd"):
-				return collectors.CategoryReliability, collectors.SeverityCritical
+				return types.CategoryReliability, types.SeverityCritical
 			case strings.Contains(unit, "kernel"):
-				return collectors.CategoryReliability, collectors.SeverityCritical
+				return types.CategoryReliability, types.SeverityCritical
 			default:
-				return collectors.CategoryReliability, collectors.SeverityWarning
+				return types.CategoryReliability, types.SeverityWarning
 			}
 		},
 		// Categorize by priority
-		func(entry *JournalEntry) (collectors.Category, collectors.Severity) {
+		func(entry *JournalEntry) (types.Category, types.Severity) {
 			switch entry.Priority {
 			case 0, 1, 2: // Emergency, Alert, Critical
-				return collectors.CategoryReliability, collectors.SeverityCritical
+				return types.CategoryReliability, types.SeverityCritical
 			case 3: // Error
-				return collectors.CategoryReliability, collectors.SeverityError
+				return types.CategoryReliability, types.SeverityError
 			case 4: // Warning
-				return collectors.CategoryReliability, collectors.SeverityWarning
+				return types.CategoryReliability, types.SeverityWarning
 			default:
-				return collectors.CategoryReliability, collectors.SeverityInfo
+				return types.CategoryReliability, types.SeverityInfo
 			}
 		},
 	}
@@ -277,9 +277,9 @@ func (p *Parser) isNoise(entry *JournalEntry) bool {
 }
 
 // categorizeEntry determines category and severity for an entry
-func (p *Parser) categorizeEntry(entry *JournalEntry) (collectors.Category, collectors.Severity) {
-	var category collectors.Category
-	var severity collectors.Severity
+func (p *Parser) categorizeEntry(entry *JournalEntry) (types.Category, types.Severity) {
+	var category types.Category
+	var severity types.Severity
 
 	// Run through all categorizers and take the highest severity
 	for _, categorizer := range p.categorizers {
@@ -294,9 +294,9 @@ func (p *Parser) categorizeEntry(entry *JournalEntry) (collectors.Category, coll
 }
 
 // createEvent creates a structured event from a pattern match
-func (p *Parser) createEvent(entry *JournalEntry, patternName string, pattern *compiledPattern, matches []string) *collectors.Event {
-	event := &collectors.Event{
-		Type:     collectors.EventTypeLog,
+func (p *Parser) createEvent(entry *JournalEntry, patternName string, pattern *compiledPattern, matches []string) *types.Event {
+	event := &types.Event{
+		Type:     types.EventTypeLog,
 		Category: pattern.category,
 		Severity: pattern.severity,
 		Data: map[string]interface{}{
@@ -317,12 +317,12 @@ func (p *Parser) createEvent(entry *JournalEntry, patternName string, pattern *c
 			"unit":     entry.SystemdUnit,
 			"pattern":  patternName,
 		},
-		Context: &collectors.EventContext{
+		Context: &types.EventContext{
 			Node:        entry.Hostname,
 			PID:         uint32(entry.PID),
 			ProcessName: entry.SyslogIdentifier,
 		},
-		Metadata: collectors.EventMetadata{
+		Metadata: types.EventMetadata{
 			Importance:  p.calculateImportance(pattern.severity),
 			Reliability: 0.95, // High reliability for pattern matches
 		},
@@ -337,7 +337,7 @@ func (p *Parser) createEvent(entry *JournalEntry, patternName string, pattern *c
 	}
 
 	// Add actionable item for critical events
-	if pattern.severity >= collectors.SeverityError {
+	if pattern.severity >= types.SeverityError {
 		event.Actionable = &collectors.ActionableItem{
 			Type:        "investigate",
 			Description: p.getActionableDescription(patternName, entry),
@@ -351,24 +351,24 @@ func (p *Parser) createEvent(entry *JournalEntry, patternName string, pattern *c
 
 // Helper functions
 
-func (p *Parser) calculateImportance(severity collectors.Severity) float64 {
+func (p *Parser) calculateImportance(severity types.Severity) float64 {
 	switch severity {
-	case collectors.SeverityCritical:
+	case types.SeverityCritical:
 		return 1.0
-	case collectors.SeverityError:
+	case types.SeverityError:
 		return 0.8
-	case collectors.SeverityWarning:
+	case types.SeverityWarning:
 		return 0.6
 	default:
 		return 0.4
 	}
 }
 
-func (p *Parser) getUrgency(severity collectors.Severity) string {
+func (p *Parser) getUrgency(severity types.Severity) string {
 	switch severity {
-	case collectors.SeverityCritical:
+	case types.SeverityCritical:
 		return "immediate"
-	case collectors.SeverityError:
+	case types.SeverityError:
 		return "high"
 	default:
 		return "medium"

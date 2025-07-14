@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // SemanticEnricher adds semantic context to events at collection time
@@ -61,7 +61,7 @@ func NewSemanticEnricher() *SemanticEnricher {
 }
 
 // Enrich adds semantic context to an event
-func (e *SemanticEnricher) Enrich(event *collectors.Event, entry *JournalEntry) {
+func (e *SemanticEnricher) Enrich(event *types.Event, entry *JournalEntry) {
 	// Add base enrichment
 	e.addBaseEnrichment(event, entry)
 	
@@ -79,7 +79,7 @@ func (e *SemanticEnricher) Enrich(event *collectors.Event, entry *JournalEntry) 
 	e.kubernetesEnricher.enrich(event, entry)
 	
 	// Error context enrichment
-	if event.Severity >= collectors.SeverityWarning {
+	if event.Severity >= types.SeverityWarning {
 		e.errorEnricher.enrich(event, entry)
 	}
 	
@@ -140,7 +140,7 @@ func (e *SemanticEnricher) initializePatterns() {
 }
 
 // addBaseEnrichment adds basic enrichment to all events
-func (e *SemanticEnricher) addBaseEnrichment(event *collectors.Event, entry *JournalEntry) {
+func (e *SemanticEnricher) addBaseEnrichment(event *types.Event, entry *JournalEntry) {
 	// Add systemd context
 	if entry.SystemdUnit != "" {
 		event.Attributes["systemd_unit"] = entry.SystemdUnit
@@ -194,7 +194,7 @@ func (e *SemanticEnricher) detectContainerID(entry *JournalEntry) string {
 }
 
 // applyPatternEnrichment applies pattern-based context extraction
-func (e *SemanticEnricher) applyPatternEnrichment(event *collectors.Event, entry *JournalEntry) {
+func (e *SemanticEnricher) applyPatternEnrichment(event *types.Event, entry *JournalEntry) {
 	message := entry.Message
 	
 	for name, pattern := range e.patterns {
@@ -208,7 +208,7 @@ func (e *SemanticEnricher) applyPatternEnrichment(event *collectors.Event, entry
 }
 
 // addFingerprint creates a unique fingerprint for deduplication
-func (e *SemanticEnricher) addFingerprint(event *collectors.Event) {
+func (e *SemanticEnricher) addFingerprint(event *types.Event) {
 	// Create fingerprint from key fields
 	parts := []string{
 		event.Source.Component,
@@ -234,17 +234,17 @@ func (e *SemanticEnricher) addFingerprint(event *collectors.Event) {
 }
 
 // addCorrelationHints adds hints for the correlation engine
-func (e *SemanticEnricher) addCorrelationHints(event *collectors.Event) {
+func (e *SemanticEnricher) addCorrelationHints(event *types.Event) {
 	hints := make([]string, 0)
 	
 	// Add hints based on event type
 	switch event.Type {
-	case collectors.EventTypeOOM:
+	case types.EventTypeOOM:
 		hints = append(hints, "memory_pressure", "resource_exhaustion")
-	case collectors.EventTypeContainerFailure:
+	case types.EventTypeContainerFailure:
 		hints = append(hints, "service_disruption", "deployment_failure")
-	case collectors.EventTypeLog:
-		if event.Severity >= collectors.SeverityError {
+	case types.EventTypeLog:
+		if event.Severity >= types.SeverityError {
 			hints = append(hints, "system_instability")
 		}
 	}
@@ -303,7 +303,7 @@ func newProcessEnricher() *processEnricher {
 	}
 }
 
-func (pe *processEnricher) enrich(event *collectors.Event, entry *JournalEntry, cache *enrichmentCache) {
+func (pe *processEnricher) enrich(event *types.Event, entry *JournalEntry, cache *enrichmentCache) {
 	// Add process hierarchy info
 	event.Attributes["process_tree"] = fmt.Sprintf("pid:%d", entry.PID)
 	
@@ -342,7 +342,7 @@ func newContainerEnricher() *containerEnricher {
 	}
 }
 
-func (ce *containerEnricher) enrich(event *collectors.Event, containerID string, cache *enrichmentCache) {
+func (ce *containerEnricher) enrich(event *types.Event, containerID string, cache *enrichmentCache) {
 	// Check cache first
 	if cached := cache.get(containerID); cached != nil {
 		for k, v := range cached {
@@ -382,7 +382,7 @@ func newKubernetesEnricher() *kubernetesEnricher {
 	}
 }
 
-func (ke *kubernetesEnricher) enrich(event *collectors.Event, entry *JournalEntry) {
+func (ke *kubernetesEnricher) enrich(event *types.Event, entry *JournalEntry) {
 	message := entry.Message
 	
 	// Extract namespace
@@ -416,7 +416,7 @@ func newErrorEnricher() *errorEnricher {
 	}
 }
 
-func (ee *errorEnricher) enrich(event *collectors.Event, entry *JournalEntry) {
+func (ee *errorEnricher) enrich(event *types.Event, entry *JournalEntry) {
 	message := entry.Message
 	
 	// Check for stack trace

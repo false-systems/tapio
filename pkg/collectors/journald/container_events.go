@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // ContainerEventParser specializes in parsing container runtime failures
@@ -58,7 +58,7 @@ func NewContainerEventParser() *ContainerEventParser {
 }
 
 // Parse checks if the entry is a container failure and extracts details
-func (p *ContainerEventParser) Parse(entry *JournalEntry) *collectors.Event {
+func (p *ContainerEventParser) Parse(entry *JournalEntry) *types.Event {
 	// Quick check if this is container-related
 	if !p.isContainerRelated(entry) {
 		return nil
@@ -242,12 +242,12 @@ func (p *ContainerEventParser) extractAdditionalContext(message string, details 
 }
 
 // createContainerEvent creates a structured event for container failure
-func (p *ContainerEventParser) createContainerEvent(entry *JournalEntry, failureType string, details map[string]interface{}) *collectors.Event {
+func (p *ContainerEventParser) createContainerEvent(entry *JournalEntry, failureType string, details map[string]interface{}) *types.Event {
 	severity := p.determineSeverity(failureType, details)
 	
-	event := &collectors.Event{
-		Type:     collectors.EventTypeContainerFailure,
-		Category: collectors.CategoryReliability,
+	event := &types.Event{
+		Type:     types.EventTypeContainerFailure,
+		Category: types.CategoryReliability,
 		Severity: severity,
 		Data: map[string]interface{}{
 			"failure_type": failureType,
@@ -262,7 +262,7 @@ func (p *ContainerEventParser) createContainerEvent(entry *JournalEntry, failure
 		},
 		Labels: p.buildLabels(entry, failureType, details),
 		Context: p.buildContext(entry, details),
-		Metadata: collectors.EventMetadata{
+		Metadata: types.EventMetadata{
 			Importance:  p.calculateImportance(failureType, severity),
 			Reliability: 0.95,
 		},
@@ -278,7 +278,7 @@ func (p *ContainerEventParser) createContainerEvent(entry *JournalEntry, failure
 }
 
 // determineSeverity determines event severity based on failure type
-func (p *ContainerEventParser) determineSeverity(failureType string, details map[string]interface{}) collectors.Severity {
+func (p *ContainerEventParser) determineSeverity(failureType string, details map[string]interface{}) types.Severity {
 	// Critical failures
 	criticalTypes := []string{
 		"docker_runtime_failure",
@@ -287,7 +287,7 @@ func (p *ContainerEventParser) determineSeverity(failureType string, details map
 	}
 	for _, ct := range criticalTypes {
 		if failureType == ct {
-			return collectors.SeverityCritical
+			return types.SeverityCritical
 		}
 	}
 	
@@ -299,7 +299,7 @@ func (p *ContainerEventParser) determineSeverity(failureType string, details map
 	}
 	for _, et := range errorTypes {
 		if failureType == et {
-			return collectors.SeverityError
+			return types.SeverityError
 		}
 	}
 	
@@ -307,19 +307,19 @@ func (p *ContainerEventParser) determineSeverity(failureType string, details map
 	if condition, ok := details["error_condition"].(string); ok {
 		switch condition {
 		case "disk_full", "resource_error":
-			return collectors.SeverityCritical
+			return types.SeverityCritical
 		case "image_not_found", "permission_error", "auth_error":
-			return collectors.SeverityError
+			return types.SeverityError
 		case "rate_limit", "timeout_error":
-			return collectors.SeverityWarning
+			return types.SeverityWarning
 		}
 	}
 	
-	return collectors.SeverityWarning
+	return types.SeverityWarning
 }
 
 // calculateImportance calculates event importance
-func (p *ContainerEventParser) calculateImportance(failureType string, severity collectors.Severity) float64 {
+func (p *ContainerEventParser) calculateImportance(failureType string, severity types.Severity) float64 {
 	base := 0.7 // Container failures are generally important
 	
 	// Adjust based on failure type
@@ -333,7 +333,7 @@ func (p *ContainerEventParser) calculateImportance(failureType string, severity 
 	}
 	
 	// Adjust based on severity
-	if severity == collectors.SeverityCritical {
+	if severity == types.SeverityCritical {
 		base = max(base, 0.9)
 	}
 	
@@ -361,8 +361,8 @@ func (p *ContainerEventParser) buildLabels(entry *JournalEntry, failureType stri
 }
 
 // buildContext builds event context
-func (p *ContainerEventParser) buildContext(entry *JournalEntry, details map[string]interface{}) *collectors.EventContext {
-	ctx := &collectors.EventContext{
+func (p *ContainerEventParser) buildContext(entry *JournalEntry, details map[string]interface{}) *types.EventContext {
+	ctx := &types.EventContext{
 		Node:        entry.Hostname,
 		PID:         uint32(entry.PID),
 		ProcessName: entry.SyslogIdentifier,

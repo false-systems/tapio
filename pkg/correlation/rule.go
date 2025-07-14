@@ -7,26 +7,26 @@ import (
 	"github.com/google/uuid"
 )
 
-// Severity represents the severity level of a finding
-type Severity int
+// SeverityLevel represents the severity level of a finding
+type SeverityLevel int
 
 const (
-	SeverityInfo Severity = iota
-	SeverityWarning
-	SeverityError
-	SeverityCritical
+	SeverityLevelInfo SeverityLevel = iota
+	SeverityLevelWarning
+	SeverityLevelError
+	SeverityLevelCritical
 )
 
 // String returns the string representation of severity
-func (s Severity) String() string {
+func (s SeverityLevel) String() string {
 	switch s {
-	case SeverityInfo:
+	case SeverityLevelInfo:
 		return "info"
-	case SeverityWarning:
+	case SeverityLevelWarning:
 		return "warning"
-	case SeverityError:
+	case SeverityLevelError:
 		return "error"
-	case SeverityCritical:
+	case SeverityLevelCritical:
 		return "critical"
 	default:
 		return "unknown"
@@ -70,8 +70,8 @@ func (c ConfidenceLevel) String() string {
 	}
 }
 
-// Evidence represents supporting evidence for a finding
-type Evidence struct {
+// RuleEvidence represents supporting evidence for a finding
+type RuleEvidence struct {
 	Type        string                 `json:"type"`
 	Source      SourceType             `json:"source"`
 	Description string                 `json:"description"`
@@ -95,8 +95,8 @@ type ResourceInfo struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// Prediction represents a time-based prediction
-type Prediction struct {
+// RulePrediction represents a time-based prediction
+type RulePrediction struct {
 	Event       string        `json:"event"`
 	TimeToEvent time.Duration `json:"time_to_event"`
 	Confidence  float64       `json:"confidence"`
@@ -111,11 +111,11 @@ type Finding struct {
 	RuleID      string                 `json:"rule_id"`
 	Title       string                 `json:"title"`
 	Description string                 `json:"description"`
-	Severity    Severity               `json:"severity"`
+	Severity    SeverityLevel          `json:"severity"`
 	Confidence  float64                `json:"confidence"` // 0.0 to 1.0
 	Resource    ResourceInfo           `json:"resource,omitempty"`
-	Evidence    []Evidence             `json:"evidence"`
-	Prediction  *Prediction            `json:"prediction,omitempty"`
+	Evidence    []RuleEvidence         `json:"evidence"`
+	Prediction  *RulePrediction        `json:"prediction,omitempty"`
 	Tags        []string               `json:"tags"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at"`
@@ -397,7 +397,7 @@ func (r *BaseRule) Validate() error {
 }
 
 // CreateFinding creates a new finding with common fields populated
-func (r *BaseRule) CreateFinding(title, description string, severity Severity, confidence float64) *Finding {
+func (r *BaseRule) CreateFinding(title, description string, severity SeverityLevel, confidence float64) *Finding {
 	now := time.Now()
 	return &Finding{
 		ID:          generateFindingID(),

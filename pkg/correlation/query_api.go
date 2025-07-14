@@ -97,46 +97,40 @@ func (q *QueryAPI) StoreInsight(insight *Insight) {
 	q.store.Store(insight)
 }
 
-// InsightStore interface for persisting insights
-type InsightStore interface {
-	Store(insight *Insight)
-	GetInsights(resourceName, namespace string) []*Insight
-	GetByID(id string) (*Insight, bool)
-	DeleteOlderThan(age time.Duration)
-}
+// InsightStore and InMemoryInsightStore are defined in interfaces.go
+// These methods extend the basic implementation with byResource indexing
 
-// InMemoryInsightStore is a simple in-memory store
-type InMemoryInsightStore struct {
-	insights map[string]*Insight
+// IndexedInsightStore extends InMemoryInsightStore with resource indexing
+type IndexedInsightStore struct {
+	InMemoryInsightStore
 	byResource map[string][]*Insight // key: namespace/name
 }
 
-func NewInMemoryInsightStore() *InMemoryInsightStore {
-	return &InMemoryInsightStore{
-		insights:   make(map[string]*Insight),
+func NewIndexedInsightStore() *IndexedInsightStore {
+	return &IndexedInsightStore{
+		InMemoryInsightStore: InMemoryInsightStore{
+			insights: make(map[string]*Insight),
+		},
 		byResource: make(map[string][]*Insight),
 	}
 }
 
-func (s *InMemoryInsightStore) Store(insight *Insight) {
+func (s *IndexedInsightStore) Store(insight *Insight) error {
 	s.insights[insight.ID] = insight
 	
 	key := fmt.Sprintf("%s/%s", insight.Namespace, insight.ResourceName)
 	s.byResource[key] = append(s.byResource[key], insight)
+	
+	// Call parent Store method
+	return s.InMemoryInsightStore.Store(insight)
 }
 
-func (s *InMemoryInsightStore) GetInsights(resourceName, namespace string) []*Insight {
+func (s *IndexedInsightStore) GetInsights(resourceName, namespace string) []*Insight {
 	key := fmt.Sprintf("%s/%s", namespace, resourceName)
 	return s.byResource[key]
 }
 
-func (s *InMemoryInsightStore) GetByID(id string) (*Insight, bool) {
-	insight, exists := s.insights[id]
-	return insight, exists
-}
-
-func (s *InMemoryInsightStore) DeleteOlderThan(age time.Duration) {
-	cutoff := time.Now().Add(-age)
+func (s *IndexedInsightStore) DeleteOlderThan(cutoff time.Time) error {
 	for id, insight := range s.insights {
 		if insight.Timestamp.Before(cutoff) {
 			delete(s.insights, id)
@@ -151,6 +145,9 @@ func (s *InMemoryInsightStore) DeleteOlderThan(age time.Duration) {
 			s.byResource[key] = updated
 		}
 	}
+	
+	// Also call parent DeleteOlderThan
+	return s.InMemoryInsightStore.DeleteOlderThan(cutoff)
 }
 
 // Proto definitions (these would normally be in a .proto file)
@@ -201,10 +198,7 @@ type InsightResponse struct {
 	ActionableItems []*ActionableItem
 }
 
-type TimeRange struct {
-	Start time.Time
-	End   time.Time
-}
+// TimeRange is defined in timeline.go
 
 // Stub for unimplemented server
 type UnimplementedCorrelationQueryServer struct{}

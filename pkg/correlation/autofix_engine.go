@@ -118,7 +118,7 @@ type AutoFixAction struct {
 // AutoFixRequest represents a request to execute an auto-fix action
 type AutoFixRequest struct {
 	ID               string                    `json:"id"`
-	PatternResult    *patterns.PatternResult   `json:"pattern_result"`
+	PatternResult    *PatternResult   `json:"pattern_result"`
 	ActionID         string                    `json:"action_id"`
 	Parameters       map[string]string         `json:"parameters"`
 	

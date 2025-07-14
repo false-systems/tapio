@@ -223,7 +223,7 @@ func NewPerfectEngine(config *PerfectConfig) (*PerfectEngine, error) {
 	// Initialize object pools for zero-allocation processing
 	engine.correlationPool = sync.Pool{
 		New: func() interface{} {
-			return &CorrelationResult{
+			return &PerfectCorrelationResult{
 				Correlations: make([]*Correlation, 0, 10),
 				Insights:     make([]*Insight, 0, 5),
 			}
@@ -257,7 +257,7 @@ func (e *PerfectEngine) ProcessOpinionatedEvent(ctx context.Context, event *opin
 	}
 	
 	// Get correlation result from pool
-	result := e.correlationPool.Get().(*CorrelationResult)
+	result := e.correlationPool.Get().(*PerfectCorrelationResult)
 	defer func() {
 		result.Reset()
 		e.correlationPool.Put(result)
@@ -458,13 +458,13 @@ func (e *PerfectEngine) GetStats() *PerfectEngineStats {
 
 // Supporting types
 
-// CorrelationResult aggregates correlations from all correlators
-type CorrelationResult struct {
+// PerfectCorrelationResult aggregates correlations from all correlators
+type PerfectCorrelationResult struct {
 	Correlations []*Correlation
 	Insights     []*Insight
 }
 
-func (cr *CorrelationResult) Reset() {
+func (cr *PerfectCorrelationResult) Reset() {
 	cr.Correlations = cr.Correlations[:0]
 	cr.Insights = cr.Insights[:0]
 }

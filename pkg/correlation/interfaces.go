@@ -1,102 +1,218 @@
 package correlation
 
-// Re-export foundation interfaces for backward compatibility
-// This maintains the existing API while using the clean foundation interfaces
-
 import (
-	"github.com/yairfalse/tapio/pkg/correlation/foundation"
+	"context"
+	"fmt"
+	"sync"
+	"time"
 )
 
-// ============================================================================
-// INTERFACE ALIASES FOR BACKWARD COMPATIBILITY
-// ============================================================================
+// CorrelationEngine defines the interface for correlation processing
+type CorrelationEngine interface {
+	// ProcessEvents processes a batch of events through the correlation engine
+	ProcessEvents(ctx context.Context, events []*Event) error
+	
+	// Start starts the correlation engine
+	Start(ctx context.Context) error
+	
+	// Stop stops the correlation engine
+	Stop() error
+	
+	// GetStats returns engine statistics
+	GetStats() *EngineStats
+}
 
-// Core engine interfaces
-type Engine = foundation.Engine
-type Rule = foundation.Rule
+// Event represents a generic event for correlation
+type Event struct {
+	ID        string
+	Timestamp time.Time
+	Source    string
+	Type      string
+	Severity  Severity
+	Data      map[string]interface{}
+}
 
-// Data source interfaces
-type EventStore = foundation.EventStore
-type DataSource = foundation.DataSource
-type DataHandler = foundation.DataHandler
-
-// Pattern detection interfaces
-type PatternDetector = foundation.PatternDetector
-type PatternRegistry = foundation.PatternRegistry
-
-// AutoFix interfaces
-type AutoFixEngine = foundation.AutoFixEngine
-
-// Result processing interfaces
-type ResultHandler = foundation.ResultHandler
-type AlertManager = foundation.AlertManager
-
-// Monitoring interfaces
-type MetricsCollector = foundation.MetricsCollector
-type HealthChecker = foundation.HealthChecker
-
-// Builder interfaces
-type RuleBuilder = foundation.RuleBuilder
-type EngineFactory = foundation.EngineFactory
-
-// Configuration interfaces
-type ConfigurationManager = foundation.ConfigurationManager
-type ConfigChangeHandler = foundation.ConfigChangeHandler
-
-// Validation interfaces
-type RuleValidator = foundation.RuleValidator
-type PatternValidator = foundation.PatternValidator
-
-// Utility interfaces
-type Serializer = foundation.Serializer
-type Cache = foundation.Cache
-
-// ============================================================================
-// FUNCTION TYPE ALIASES
-// ============================================================================
-
-// RuleFunction defines the signature for correlation rule evaluation functions
-type RuleFunction = foundation.RuleFunction
-
-// ============================================================================
-// ENUM ALIASES
-// ============================================================================
-
-// Engine types
-type EngineType = foundation.EngineType
+// Severity levels for events
+type Severity string
 
 const (
-	EngineTypeBasic             = foundation.EngineTypeBasic
-	EngineTypeEnhanced          = foundation.EngineTypeEnhanced
-	EngineTypePerfect           = foundation.EngineTypePerfect
-	EngineTypePatternIntegrated = foundation.EngineTypePatternIntegrated
+	SeverityCritical Severity = "critical"
+	SeverityHigh     Severity = "high"
+	SeverityMedium   Severity = "medium"
+	SeverityLow      Severity = "low"
 )
 
-// Export formats
-type ExportFormat = foundation.ExportFormat
+// EngineStats provides statistics about the correlation engine
+type EngineStats struct {
+	EventsProcessed     uint64
+	CorrelationsFound   uint64
+	InsightsGenerated   uint64
+	ActiveRules         int
+	ActiveCorrelations  int
+	ProcessingRate      float64
+}
 
-const (
-	ExportFormatPrometheus = foundation.ExportFormatPrometheus
-	ExportFormatOTEL       = foundation.ExportFormatOTEL
-	ExportFormatJSON       = foundation.ExportFormatJSON
-	ExportFormatCSV        = foundation.ExportFormatCSV
-)
+// Correlation represents a correlation between events
+type Correlation struct {
+	ID          string
+	Type        string
+	Events      []string
+	Confidence  float64
+	Description string
+	Timestamp   time.Time
+}
 
-// Serialization formats
-type SerializationFormat = foundation.SerializationFormat
+// Evidence represents evidence supporting an insight
+type Evidence struct {
+	EventID     string
+	Description string
+	Timestamp   time.Time
+	Source      string
+}
 
-const (
-	SerializationFormatJSON     = foundation.SerializationFormatJSON
-	SerializationFormatProtobuf = foundation.SerializationFormatProtobuf
-	SerializationFormatMsgPack  = foundation.SerializationFormatMsgPack
-)
+// RootCause represents identified root cause
+type RootCause struct {
+	EventID     string
+	Description string
+	Confidence  float64
+}
 
-// Safety levels
-type SafetyLevel = foundation.SafetyLevel
+// ActionableItem represents a recommended action
+type ActionableItem struct {
+	Description string
+	Command     string
+	Impact      string
+	Risk        string
+}
 
-const (
-	SafetyLevelSafe      = foundation.SafetyLevelSafe
-	SafetyLevelModerate  = foundation.SafetyLevelModerate
-	SafetyLevelRisky     = foundation.SafetyLevelRisky
-	SafetyLevelDangerous = foundation.SafetyLevelDangerous
-)
+// Prediction represents a future event prediction
+type Prediction struct {
+	Type        string
+	Probability float64
+	Confidence  float64
+	TimeToEvent time.Duration
+	Description string
+}
+
+// Insight represents a correlated insight from multiple events
+type Insight struct {
+	ID              string
+	Title           string
+	Description     string
+	Severity        string
+	Category        string
+	ResourceName    string
+	Namespace       string
+	Timestamp       time.Time
+	Evidence        []*Evidence
+	RootCause       *RootCause
+	Prediction      *Prediction
+	ActionableItems []*ActionableItem
+}
+
+// InsightStore defines the interface for storing and retrieving insights
+type InsightStore interface {
+	// Store stores an insight
+	Store(insight *Insight) error
+	
+	// Get retrieves an insight by ID
+	Get(id string) (*Insight, error)
+	
+	// GetInsights retrieves insights for a specific resource
+	GetInsights(resourceName, namespace string) []*Insight
+	
+	// GetAllInsights retrieves all insights
+	GetAllInsights() []*Insight
+	
+	// Delete removes an insight by ID
+	Delete(id string) error
+	
+	// DeleteOlderThan removes insights older than the specified time
+	DeleteOlderThan(cutoff time.Time) error
+}
+
+// InMemoryInsightStore implements InsightStore using memory storage
+type InMemoryInsightStore struct {
+	insights map[string]*Insight
+	mu       sync.RWMutex
+}
+
+// NewInMemoryInsightStore creates a new in-memory insight store
+func NewInMemoryInsightStore() *InMemoryInsightStore {
+	return &InMemoryInsightStore{
+		insights: make(map[string]*Insight),
+	}
+}
+
+// Store stores an insight
+func (s *InMemoryInsightStore) Store(insight *Insight) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	s.insights[insight.ID] = insight
+	return nil
+}
+
+// Get retrieves an insight by ID
+func (s *InMemoryInsightStore) Get(id string) (*Insight, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	insight, exists := s.insights[id]
+	if !exists {
+		return nil, fmt.Errorf("insight not found: %s", id)
+	}
+	
+	return insight, nil
+}
+
+// GetInsights retrieves insights for a specific resource
+func (s *InMemoryInsightStore) GetInsights(resourceName, namespace string) []*Insight {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	var results []*Insight
+	for _, insight := range s.insights {
+		if insight.ResourceName == resourceName && insight.Namespace == namespace {
+			results = append(results, insight)
+		}
+	}
+	
+	return results
+}
+
+// GetAllInsights retrieves all insights
+func (s *InMemoryInsightStore) GetAllInsights() []*Insight {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	results := make([]*Insight, 0, len(s.insights))
+	for _, insight := range s.insights {
+		results = append(results, insight)
+	}
+	
+	return results
+}
+
+// Delete removes an insight by ID
+func (s *InMemoryInsightStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	delete(s.insights, id)
+	return nil
+}
+
+// DeleteOlderThan removes insights older than the specified time
+func (s *InMemoryInsightStore) DeleteOlderThan(cutoff time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	for id, insight := range s.insights {
+		if insight.Timestamp.Before(cutoff) {
+			delete(s.insights, id)
+		}
+	}
+	
+	return nil
+}

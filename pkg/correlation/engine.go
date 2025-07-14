@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// CorrelationEngine implements the Engine interface
-type CorrelationEngine struct {
+// BaseCorrelationEngine implements the Engine interface
+type BaseCorrelationEngine struct {
 	// Configuration
 	windowSize         time.Duration
 	processingInterval time.Duration
@@ -48,8 +48,8 @@ type CorrelationEngine struct {
 }
 
 // NewEngine creates a new correlation engine
-func NewEngine(eventStore EventStore, opts ...EngineOption) *CorrelationEngine {
-	engine := &CorrelationEngine{
+func NewEngine(eventStore EventStore, opts ...EngineOption) *BaseCorrelationEngine {
+	engine := &BaseCorrelationEngine{
 		windowSize:         5 * time.Minute,
 		processingInterval: 30 * time.Second,
 		maxConcurrentRules: runtime.NumCPU() * 2,
@@ -92,39 +92,39 @@ func NewEngine(eventStore EventStore, opts ...EngineOption) *CorrelationEngine {
 }
 
 // EngineOption configures the correlation engine
-type EngineOption func(*CorrelationEngine)
+type EngineOption func(*BaseCorrelationEngine)
 
 // WithWindowSize sets the correlation window size
 func WithWindowSize(duration time.Duration) EngineOption {
-	return func(e *CorrelationEngine) {
+	return func(e *BaseCorrelationEngine) {
 		e.windowSize = duration
 	}
 }
 
 // WithProcessingInterval sets how often to run correlations
 func WithProcessingInterval(interval time.Duration) EngineOption {
-	return func(e *CorrelationEngine) {
+	return func(e *BaseCorrelationEngine) {
 		e.processingInterval = interval
 	}
 }
 
 // WithMaxConcurrentRules sets the maximum number of rules to run concurrently
 func WithMaxConcurrentRules(limit int) EngineOption {
-	return func(e *CorrelationEngine) {
+	return func(e *BaseCorrelationEngine) {
 		e.maxConcurrentRules = limit
 	}
 }
 
 // WithMetricsCollector sets the metrics collector
 func WithMetricsCollector(collector MetricsCollector) EngineOption {
-	return func(e *CorrelationEngine) {
+	return func(e *BaseCorrelationEngine) {
 		e.metricsCollector = collector
 	}
 }
 
 // WithResultHandler adds a result handler
 func WithResultHandler(handler ResultHandler) EngineOption {
-	return func(e *CorrelationEngine) {
+	return func(e *BaseCorrelationEngine) {
 		e.resultHandlers = append(e.resultHandlers, handler)
 	}
 }
@@ -140,7 +140,7 @@ type ruleExecution struct {
 }
 
 // RegisterRule registers a new correlation rule
-func (e *CorrelationEngine) RegisterRule(rule *Rule) error {
+func (e *BaseCorrelationEngine) RegisterRule(rule *Rule) error {
 	if rule == nil {
 		return fmt.Errorf("rule cannot be nil")
 	}
@@ -191,7 +191,7 @@ func (e *CorrelationEngine) RegisterRule(rule *Rule) error {
 }
 
 // UnregisterRule removes a correlation rule
-func (e *CorrelationEngine) UnregisterRule(ruleID string) error {
+func (e *BaseCorrelationEngine) UnregisterRule(ruleID string) error {
 	e.rulesMu.Lock()
 	defer e.rulesMu.Unlock()
 
@@ -216,7 +216,7 @@ func (e *CorrelationEngine) UnregisterRule(ruleID string) error {
 }
 
 // GetRule retrieves a rule by ID
-func (e *CorrelationEngine) GetRule(ruleID string) (*Rule, bool) {
+func (e *BaseCorrelationEngine) GetRule(ruleID string) (*Rule, bool) {
 	e.rulesMu.RLock()
 	defer e.rulesMu.RUnlock()
 
@@ -225,7 +225,7 @@ func (e *CorrelationEngine) GetRule(ruleID string) (*Rule, bool) {
 }
 
 // ListRules returns all registered rules
-func (e *CorrelationEngine) ListRules() []*Rule {
+func (e *BaseCorrelationEngine) ListRules() []*Rule {
 	e.rulesMu.RLock()
 	defer e.rulesMu.RUnlock()
 
@@ -243,7 +243,7 @@ func (e *CorrelationEngine) ListRules() []*Rule {
 }
 
 // EnableRule enables a rule
-func (e *CorrelationEngine) EnableRule(ruleID string) error {
+func (e *BaseCorrelationEngine) EnableRule(ruleID string) error {
 	e.rulesMu.Lock()
 	defer e.rulesMu.Unlock()
 
@@ -257,7 +257,7 @@ func (e *CorrelationEngine) EnableRule(ruleID string) error {
 }
 
 // DisableRule disables a rule
-func (e *CorrelationEngine) DisableRule(ruleID string) error {
+func (e *BaseCorrelationEngine) DisableRule(ruleID string) error {
 	e.rulesMu.Lock()
 	defer e.rulesMu.Unlock()
 
@@ -271,7 +271,7 @@ func (e *CorrelationEngine) DisableRule(ruleID string) error {
 }
 
 // ProcessEvents processes a batch of events through all rules
-func (e *CorrelationEngine) ProcessEvents(ctx context.Context, events []Event) ([]*Result, error) {
+func (e *BaseCorrelationEngine) ProcessEvents(ctx context.Context, events []Event) ([]*Result, error) {
 	if len(events) == 0 {
 		return nil, nil
 	}
@@ -299,7 +299,7 @@ func (e *CorrelationEngine) ProcessEvents(ctx context.Context, events []Event) (
 }
 
 // ProcessWindow processes events within a specific time window
-func (e *CorrelationEngine) ProcessWindow(ctx context.Context, window TimeWindow, events []Event) ([]*Result, error) {
+func (e *BaseCorrelationEngine) ProcessWindow(ctx context.Context, window TimeWindow, events []Event) ([]*Result, error) {
 	start := time.Now()
 	defer func() {
 		e.statsMu.Lock()
@@ -333,7 +333,7 @@ func (e *CorrelationEngine) ProcessWindow(ctx context.Context, window TimeWindow
 }
 
 // getEnabledRules returns all enabled rules that are not in cooldown
-func (e *CorrelationEngine) getEnabledRules() []*Rule {
+func (e *BaseCorrelationEngine) getEnabledRules() []*Rule {
 	e.rulesMu.RLock()
 	defer e.rulesMu.RUnlock()
 
@@ -362,7 +362,7 @@ func (e *CorrelationEngine) getEnabledRules() []*Rule {
 }
 
 // createContext creates a correlation context from the pool
-func (e *CorrelationEngine) createContext(window TimeWindow, events []Event) *Context {
+func (e *BaseCorrelationEngine) createContext(window TimeWindow, events []Event) *Context {
 	ctx := e.contextPool.Get().(*Context)
 
 	// Reset and initialize
@@ -394,12 +394,12 @@ func (e *CorrelationEngine) createContext(window TimeWindow, events []Event) *Co
 }
 
 // releaseContext returns a context to the pool
-func (e *CorrelationEngine) releaseContext(ctx *Context) {
+func (e *BaseCorrelationEngine) releaseContext(ctx *Context) {
 	e.contextPool.Put(ctx)
 }
 
 // executeRules executes rules concurrently with rate limiting
-func (e *CorrelationEngine) executeRules(ctx context.Context, rules []*Rule, corrCtx *Context) []*Result {
+func (e *BaseCorrelationEngine) executeRules(ctx context.Context, rules []*Rule, corrCtx *Context) []*Result {
 	// Create semaphore for concurrency control
 	semaphore := make(chan struct{}, e.maxConcurrentRules)
 
@@ -445,7 +445,7 @@ func (e *CorrelationEngine) executeRules(ctx context.Context, rules []*Rule, cor
 }
 
 // executeRule executes a single rule
-func (e *CorrelationEngine) executeRule(ctx context.Context, rule *Rule, corrCtx *Context) *Result {
+func (e *BaseCorrelationEngine) executeRule(ctx context.Context, rule *Rule, corrCtx *Context) *Result {
 	execution := e.ruleExecutionPool.Get().(*ruleExecution)
 	defer e.ruleExecutionPool.Put(execution)
 
@@ -513,7 +513,7 @@ func (e *CorrelationEngine) executeRule(ctx context.Context, rule *Rule, corrCtx
 }
 
 // updateRulePerformance updates performance metrics for a rule
-func (e *CorrelationEngine) updateRulePerformance(rule *Rule, execution *ruleExecution) {
+func (e *BaseCorrelationEngine) updateRulePerformance(rule *Rule, execution *ruleExecution) {
 	e.rulesMu.Lock()
 	defer e.rulesMu.Unlock()
 
@@ -563,7 +563,7 @@ func (e *CorrelationEngine) updateRulePerformance(rule *Rule, execution *ruleExe
 }
 
 // handleResult processes a correlation result
-func (e *CorrelationEngine) handleResult(ctx context.Context, result *Result) {
+func (e *BaseCorrelationEngine) handleResult(ctx context.Context, result *Result) {
 	// Send to result channel for async processing
 	select {
 	case e.resultChan <- result:
@@ -574,22 +574,22 @@ func (e *CorrelationEngine) handleResult(ctx context.Context, result *Result) {
 }
 
 // SetWindowSize sets the correlation window size
-func (e *CorrelationEngine) SetWindowSize(duration time.Duration) {
+func (e *BaseCorrelationEngine) SetWindowSize(duration time.Duration) {
 	e.windowSize = duration
 }
 
 // SetProcessingInterval sets the processing interval
-func (e *CorrelationEngine) SetProcessingInterval(interval time.Duration) {
+func (e *BaseCorrelationEngine) SetProcessingInterval(interval time.Duration) {
 	e.processingInterval = interval
 }
 
 // SetMaxConcurrentRules sets the maximum concurrent rules
-func (e *CorrelationEngine) SetMaxConcurrentRules(limit int) {
+func (e *BaseCorrelationEngine) SetMaxConcurrentRules(limit int) {
 	e.maxConcurrentRules = limit
 }
 
 // GetStats returns engine statistics
-func (e *CorrelationEngine) GetStats() Stats {
+func (e *BaseCorrelationEngine) GetStats() Stats {
 	e.statsMu.RLock()
 	defer e.statsMu.RUnlock()
 
@@ -600,7 +600,7 @@ func (e *CorrelationEngine) GetStats() Stats {
 }
 
 // GetRuleStats returns performance statistics for a specific rule
-func (e *CorrelationEngine) GetRuleStats(ruleID string) (RulePerformance, error) {
+func (e *BaseCorrelationEngine) GetRuleStats(ruleID string) (RulePerformance, error) {
 	e.rulesMu.RLock()
 	defer e.rulesMu.RUnlock()
 
@@ -613,14 +613,14 @@ func (e *CorrelationEngine) GetRuleStats(ruleID string) (RulePerformance, error)
 }
 
 // getMemoryUsage returns current memory usage
-func (e *CorrelationEngine) getMemoryUsage() uint64 {
+func (e *BaseCorrelationEngine) getMemoryUsage() uint64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return m.Alloc
 }
 
 // Start starts the correlation engine
-func (e *CorrelationEngine) Start(ctx context.Context) error {
+func (e *BaseCorrelationEngine) Start(ctx context.Context) error {
 	e.ctx, e.cancel = context.WithCancel(ctx)
 
 	// Start result processor
@@ -631,7 +631,7 @@ func (e *CorrelationEngine) Start(ctx context.Context) error {
 }
 
 // Stop stops the correlation engine
-func (e *CorrelationEngine) Stop() error {
+func (e *BaseCorrelationEngine) Stop() error {
 	if e.cancel != nil {
 		e.cancel()
 	}
@@ -646,7 +646,7 @@ func (e *CorrelationEngine) Stop() error {
 }
 
 // Health checks the health of the correlation engine
-func (e *CorrelationEngine) Health() error {
+func (e *BaseCorrelationEngine) Health() error {
 	// Check if context is cancelled
 	if e.ctx != nil && e.ctx.Err() != nil {
 		return fmt.Errorf("engine is stopped: %w", e.ctx.Err())
@@ -662,7 +662,7 @@ func (e *CorrelationEngine) Health() error {
 }
 
 // processResults processes correlation results asynchronously
-func (e *CorrelationEngine) processResults() {
+func (e *BaseCorrelationEngine) processResults() {
 	defer e.wg.Done()
 
 	for {

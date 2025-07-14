@@ -633,7 +633,7 @@ type MonitorConfig struct {
 type RealTimeMetrics struct {
 	CurrentMetrics    *PerformanceSnapshot   `json:"current_metrics"`
 	MetricHistory     []*PerformanceMetric   `json:"metric_history"`
-	TrendAnalysis     *TrendAnalysis         `json:"trend_analysis"`
+	TrendAnalysis     *PerformanceTrendAnalysis         `json:"trend_analysis"`
 	
 	// Aggregated metrics
 	AverageMetrics    *AggregatedMetrics     `json:"average_metrics"`
@@ -652,8 +652,8 @@ type PerformanceMetric struct {
 	Tags              map[string]string `json:"tags"`
 }
 
-// TrendAnalysis provides performance trend analysis
-type TrendAnalysis struct {
+// PerformanceTrendAnalysis provides performance trend analysis
+type PerformanceTrendAnalysis struct {
 	LatencyTrend      *Trend            `json:"latency_trend"`
 	ThroughputTrend   *Trend            `json:"throughput_trend"`
 	CPUTrend          *Trend            `json:"cpu_trend"`

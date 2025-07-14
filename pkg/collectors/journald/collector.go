@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 	"github.com/yairfalse/tapio/pkg/logging"
 )
 
@@ -15,7 +15,7 @@ import (
 // focused on critical system events that matter for Kubernetes debugging
 type Collector struct {
 	// Configuration
-	config collectors.CollectorConfig
+	config types.CollectorConfig
 	logger *logging.Logger
 
 	// Core components
@@ -27,7 +27,7 @@ type Collector struct {
 	enricher       *SemanticEnricher
 
 	// Event channel
-	eventChan chan *collectors.Event
+	eventChan chan *types.Event
 
 	// State management
 	started atomic.Bool
@@ -56,7 +56,7 @@ type Collector struct {
 }
 
 // NewCollector creates a new journald collector with OPINIONATED parsing
-func NewCollector(config collectors.CollectorConfig) (*Collector, error) {
+func NewCollector(config types.CollectorConfig) (*Collector, error) {
 	logger := logging.WithComponent("journald-collector")
 
 	// Extract journald-specific config
@@ -68,7 +68,7 @@ func NewCollector(config collectors.CollectorConfig) (*Collector, error) {
 	c := &Collector{
 		config:    config,
 		logger:    logger,
-		eventChan: make(chan *collectors.Event, config.EventBufferSize),
+		eventChan: make(chan *types.Event, config.EventBufferSize),
 		enabled:   atomic.Bool{},
 	}
 
@@ -178,36 +178,36 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan *collectors.Event {
+func (c *Collector) Events() <-chan *types.Event {
 	return c.eventChan
 }
 
 // Health returns the collector health status
-func (c *Collector) Health() *collectors.Health {
-	status := collectors.HealthStatusHealthy
+func (c *Collector) Health() *types.Health {
+	status := types.HealthStatusHealthy
 	message := "Journald collector is healthy"
 	
 	if !c.started.Load() {
-		status = collectors.HealthStatusUnknown
+		status = types.HealthStatusUnknown
 		message = "Collector not started"
 	} else if c.stopped.Load() {
-		status = collectors.HealthStatusUnhealthy
+		status = types.HealthStatusUnhealthy
 		message = "Collector stopped"
 	} else if !c.reader.IsHealthy() {
-		status = collectors.HealthStatusUnhealthy
+		status = types.HealthStatusUnhealthy
 		message = "Journald reader unhealthy"
 	} else if c.stats.errorCount.Load() > 100 {
-		status = collectors.HealthStatusDegraded
+		status = types.HealthStatusDegraded
 		message = fmt.Sprintf("High error count: %d", c.stats.errorCount.Load())
 	}
 
 	lastEvent := c.lastEventTime.Load().(time.Time)
 	if time.Since(lastEvent) > 5*time.Minute && c.started.Load() {
-		status = collectors.HealthStatusDegraded
+		status = types.HealthStatusDegraded
 		message = "No events received in 5 minutes"
 	}
 
-	return &collectors.Health{
+	return &types.Health{
 		Status:          status,
 		Message:         message,
 		LastEventTime:   lastEvent,
@@ -226,12 +226,12 @@ func (c *Collector) Health() *collectors.Health {
 }
 
 // GetStats returns collector statistics
-func (c *Collector) GetStats() *collectors.Stats {
+func (c *Collector) GetStats() *types.Stats {
 	eventsCollected := c.stats.eventsCollected.Load()
 	eventsFiltered := c.stats.eventsFiltered.Load()
 	totalProcessed := eventsCollected + eventsFiltered
 
-	return &collectors.Stats{
+	return &types.Stats{
 		EventsCollected: eventsCollected,
 		EventsDropped:   c.stats.eventsDropped.Load(),
 		EventsFiltered:  eventsFiltered,
@@ -250,7 +250,7 @@ func (c *Collector) GetStats() *collectors.Stats {
 }
 
 // Configure updates the collector configuration
-func (c *Collector) Configure(config collectors.CollectorConfig) error {
+func (c *Collector) Configure(config types.CollectorConfig) error {
 	c.config = config
 	c.enabled.Store(config.Enabled)
 
@@ -332,7 +332,7 @@ func (c *Collector) processEvents() {
 }
 
 // parseEntry performs OPINIONATED parsing focused on critical events
-func (c *Collector) parseEntry(entry *JournalEntry) *collectors.Event {
+func (c *Collector) parseEntry(entry *JournalEntry) *types.Event {
 	// Check for OOM kill
 	if oomEvent := c.oomDetector.Detect(entry); oomEvent != nil {
 		c.stats.oomKillsDetected.Add(1)
@@ -354,7 +354,7 @@ func (c *Collector) parseEntry(entry *JournalEntry) *collectors.Event {
 	// Set base event properties
 	event.ID = fmt.Sprintf("journald_%s_%d", entry.SystemdUnit, entry.RealtimeTimestamp)
 	event.Timestamp = time.Unix(0, entry.RealtimeTimestamp*1000)
-	event.Source = collectors.EventSource{
+	event.Source = types.EventSource{
 		Collector: c.Name(),
 		Component: "journald",
 		Node:      entry.Hostname,
