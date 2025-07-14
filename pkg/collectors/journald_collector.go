@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/yairfalse/tapio/pkg/collectors/journald"
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // JournaldFactory creates journald collectors
@@ -15,7 +16,7 @@ func NewJournaldFactory() CollectorFactory {
 }
 
 // CreateCollector creates a new journald collector instance
-func (f *JournaldFactory) CreateCollector(config CollectorConfig) (Collector, error) {
+func (f *JournaldFactory) CreateCollector(config types.CollectorConfig) (Collector, error) {
 	if config.Type != "journald" {
 		return nil, fmt.Errorf("invalid collector type: %s (expected: journald)", config.Type)
 	}

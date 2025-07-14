@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // TestJournaldCollector tests the complete journald collector
@@ -106,7 +106,7 @@ func TestOOMDetection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			detector.Reset()
 			
-			var event *collectors.Event
+			var event *types.Event
 			for _, entry := range tt.entries {
 				e := entry // Create copy
 				event = detector.Detect(&e)
@@ -114,8 +114,8 @@ func TestOOMDetection(t *testing.T) {
 
 			if tt.expectOOM {
 				require.NotNil(t, event, "Expected OOM event")
-				assert.Equal(t, collectors.EventTypeOOM, event.Type)
-				assert.Equal(t, collectors.SeverityCritical, event.Severity)
+				assert.Equal(t, types.EventTypeOOM, event.Type)
+				assert.Equal(t, types.SeverityCritical, event.Severity)
 				assert.Equal(t, tt.victim, event.Data["victim_name"])
 				assert.Equal(t, tt.pid, event.Data["victim_pid"])
 			} else {
@@ -175,7 +175,7 @@ func TestContainerEventParsing(t *testing.T) {
 
 			if tt.expectEvent {
 				require.NotNil(t, event, "Expected container event")
-				assert.Equal(t, collectors.EventTypeContainerFailure, event.Type)
+				assert.Equal(t, types.EventTypeContainerFailure, event.Type)
 				assert.Equal(t, tt.failureType, event.Data["failure_type"])
 			} else {
 				assert.Nil(t, event, "Expected no container event")
@@ -264,16 +264,16 @@ func TestSemanticEnrichment(t *testing.T) {
 		BootID:           "boot456",
 	}
 
-	event := &collectors.Event{
-		Type:     collectors.EventTypeContainerFailure,
-		Category: collectors.CategoryReliability,
-		Severity: collectors.SeverityError,
+	event := &types.Event{
+		Type:     types.EventTypeContainerFailure,
+		Category: types.CategoryReliability,
+		Severity: types.SeverityError,
 		Data: map[string]interface{}{
 			"message": entry.Message,
 		},
 		Attributes: make(map[string]interface{}),
 		Labels:     make(map[string]string),
-		Context:    &collectors.EventContext{},
+		Context:    &types.EventContext{},
 	}
 
 	enricher.Enrich(event, entry)
@@ -294,29 +294,29 @@ func TestParserPatterns(t *testing.T) {
 		name     string
 		message  string
 		expectParse bool
-		severity collectors.Severity
-		category collectors.Category
+		severity types.Severity
+		category types.Category
 	}{
 		{
 			name:        "service_crash",
 			message:     "Main process exited, code=killed, status=9/KILL",
 			expectParse: true,
-			severity:    collectors.SeverityError,
-			category:    collectors.CategoryReliability,
+			severity:    types.SeverityError,
+			category:    types.CategoryReliability,
 		},
 		{
 			name:        "disk_full",
 			message:     "No space left on device",
 			expectParse: true,
-			severity:    collectors.SeverityCritical,
-			category:    collectors.CategoryCapacity,
+			severity:    types.SeverityCritical,
+			category:    types.CategoryCapacity,
 		},
 		{
 			name:        "network_timeout",
 			message:     "Connection timeout after 30s: context deadline exceeded",
 			expectParse: true,
-			severity:    collectors.SeverityWarning,
-			category:    collectors.CategoryPerformance,
+			severity:    types.SeverityWarning,
+			category:    types.CategoryPerformance,
 		},
 		{
 			name:        "normal_info",

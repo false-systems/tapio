@@ -3,6 +3,8 @@ package collectors
 import (
 	"fmt"
 	"sync"
+	
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // CollectorFactory manages the creation of different collector types
@@ -37,7 +39,7 @@ func (cf *CollectorFactory) RegisterFactory(collectorType string, factory Factor
 }
 
 // CreateCollector creates a collector of the specified type
-func (cf *CollectorFactory) CreateCollector(collectorType string, config CollectorConfig) (Collector, error) {
+func (cf *CollectorFactory) CreateCollector(collectorType string, config types.CollectorConfig) (Collector, error) {
 	cf.mu.RLock()
 	factory, exists := cf.factories[collectorType]
 	cf.mu.RUnlock()

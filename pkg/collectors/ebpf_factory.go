@@ -2,24 +2,21 @@ package collectors
 
 import (
 	"fmt"
+
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // EBPFCollectorFactory creates eBPF collectors
 type EBPFCollectorFactory struct{}
 
 // NewEBPFCollectorFactory creates a new eBPF collector factory
-func NewEBPFCollectorFactory() Factory {
+func NewEBPFCollectorFactory() CollectorFactory {
 	return &EBPFCollectorFactory{}
 }
 
 // CreateCollector creates a new eBPF collector instance
-func (f *EBPFCollectorFactory) CreateCollector(config CollectorConfig) (Collector, error) {
-	// Check if eBPF is supported on this system
-	if !isEBPFSupported() {
-		return nil, fmt.Errorf("eBPF is not supported on this system")
-	}
-	
-	// Create the eBPF adapter
+func (f *EBPFCollectorFactory) CreateCollector(config types.CollectorConfig) (Collector, error) {
+	// Create the eBPF adapter (it handles platform detection internally)
 	adapter, err := NewEBPFAdapter()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create eBPF adapter: %w", err)
@@ -34,7 +31,7 @@ func (f *EBPFCollectorFactory) CreateCollector(config CollectorConfig) (Collecto
 }
 
 // ValidateConfig validates the eBPF collector configuration
-func (f *EBPFCollectorFactory) ValidateConfig(config CollectorConfig) error {
+func (f *EBPFCollectorFactory) ValidateConfig(config types.CollectorConfig) error {
 	// Validate basic configuration
 	if config.Type != "ebpf" {
 		return fmt.Errorf("invalid collector type: %s", config.Type)
@@ -80,8 +77,23 @@ func (f *EBPFCollectorFactory) ValidateConfig(config CollectorConfig) error {
 }
 
 // GetRequirements returns the requirements for running eBPF collectors
-func (f *EBPFCollectorFactory) GetRequirements() CollectorRequirements {
-	return CollectorRequirements{
+func (f *EBPFCollectorFactory) GetRequirements() types.CollectorRequirements {
+	platform := GetCurrentPlatform()
+	
+	if !platform.HasEBPF {
+		// Minimal requirements for stub mode
+		return types.CollectorRequirements{
+			Capabilities:  []string{},
+			KernelVersion: "",
+			Features:      []string{},
+			Resources: types.ResourceRequirements{
+				MinMemoryMB: 1,
+				MinCPUMilli: 1,
+			},
+		}
+	}
+	
+	return types.CollectorRequirements{
 		Capabilities: []string{
 			"CAP_SYS_ADMIN",
 			"CAP_SYS_RESOURCE",
@@ -93,7 +105,7 @@ func (f *EBPFCollectorFactory) GetRequirements() CollectorRequirements {
 			"BPF_PROG_TYPE_TRACEPOINT",
 			"BPF_MAP_TYPE_RINGBUF",
 		},
-		Resources: ResourceRequirements{
+		Resources: types.ResourceRequirements{
 			MinMemoryMB: 50,
 			MinCPUMilli: 5,
 		},
@@ -102,7 +114,6 @@ func (f *EBPFCollectorFactory) GetRequirements() CollectorRequirements {
 
 // isEBPFSupported checks if eBPF is supported on this system
 func isEBPFSupported() bool {
-	// TODO: Implement actual eBPF support detection
-	// For now, return true to allow development
-	return true
+	platform := GetCurrentPlatform()
+	return platform.HasEBPF
 }

@@ -1,0 +1,151 @@
+# Cross-platform build support for Tapio
+# This Makefile provides platform-specific build targets
+
+# Detect current platform
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
+
+# Platform-specific build tags
+ifeq ($(GOOS),linux)
+	BUILD_TAGS := linux,unix
+	# Check for eBPF support
+	ifeq ($(shell which bpftool 2>/dev/null),)
+		$(warning eBPF tools not found, eBPF collectors will be disabled)
+	else
+		BUILD_TAGS := $(BUILD_TAGS),ebpf
+	endif
+	# Check for journald support
+	ifeq ($(shell which journalctl 2>/dev/null),)
+		$(warning journalctl not found, journald collector will be disabled)
+	else
+		BUILD_TAGS := $(BUILD_TAGS),journald,systemd
+	endif
+endif
+
+ifeq ($(GOOS),darwin)
+	BUILD_TAGS := darwin,unix
+endif
+
+ifeq ($(GOOS),windows)
+	BUILD_TAGS := windows
+endif
+
+# Default build tags if none specified
+BUILD_TAGS ?= $(GOOS)
+
+# Cross-platform build targets
+.PHONY: build-linux build-darwin build-windows build-all
+
+build-linux:
+	@echo "Building for Linux with eBPF and journald support..."
+	GOOS=linux GOARCH=amd64 go build -tags "linux,unix,ebpf,journald,systemd" -o bin/tapio-linux-amd64 ./cmd/tapio
+
+build-darwin:
+	@echo "Building for macOS with stub implementations..."
+	GOOS=darwin GOARCH=amd64 go build -tags "darwin,unix" -o bin/tapio-darwin-amd64 ./cmd/tapio
+
+build-windows:
+	@echo "Building for Windows with stub implementations..."
+	GOOS=windows GOARCH=amd64 go build -tags "windows" -o bin/tapio-windows-amd64.exe ./cmd/tapio
+
+build-all: build-linux build-darwin build-windows
+
+# Development builds (with current platform detection)
+.PHONY: dev-build dev-test dev-run
+
+dev-build:
+	@echo "Building for current platform ($(GOOS)) with tags: $(BUILD_TAGS)"
+	go build -tags "$(BUILD_TAGS)" -o bin/tapio-dev ./cmd/tapio
+
+dev-test:
+	@echo "Testing with platform tags: $(BUILD_TAGS)"
+	go test -tags "$(BUILD_TAGS)" ./...
+
+dev-run: dev-build
+	@echo "Running Tapio with platform-specific features..."
+	./bin/tapio-dev check --verbose
+
+# Platform-specific testing
+.PHONY: test-linux test-darwin test-windows test-stubs
+
+test-linux:
+	@echo "Testing Linux-specific features..."
+	go test -tags "linux,unix,ebpf,journald,systemd" ./pkg/ebpf/... ./pkg/collectors/journald/...
+
+test-darwin:
+	@echo "Testing macOS stub implementations..."
+	go test -tags "darwin,unix" ./pkg/collectors/... ./pkg/ebpf/...
+
+test-windows:
+	@echo "Testing Windows stub implementations..."
+	go test -tags "windows" ./pkg/collectors/... ./pkg/ebpf/...
+
+test-stubs:
+	@echo "Testing stub implementations on all platforms..."
+	go test -tags "stub" ./pkg/collectors/... ./pkg/ebpf/...
+
+# Platform info
+.PHONY: platform-info
+
+platform-info:
+	@echo "Platform Information:"
+	@echo "  OS: $(GOOS)"
+	@echo "  Architecture: $(GOARCH)"
+	@echo "  Build Tags: $(BUILD_TAGS)"
+	@echo "  Go Version: $(shell go version)"
+	@echo ""
+	@echo "Feature Support:"
+	@if [ "$(GOOS)" = "linux" ]; then \
+		echo "  eBPF: $(shell if which bpftool >/dev/null 2>&1; then echo 'Available'; else echo 'Not Available'; fi)"; \
+		echo "  Journald: $(shell if which journalctl >/dev/null 2>&1; then echo 'Available'; else echo 'Not Available'; fi)"; \
+		echo "  Systemd: $(shell if which systemctl >/dev/null 2>&1; then echo 'Available'; else echo 'Not Available'; fi)"; \
+	else \
+		echo "  eBPF: Stub Implementation"; \
+		echo "  Journald: Stub Implementation"; \
+		echo "  Systemd: Not Available"; \
+	fi
+
+# Clean platform-specific builds
+.PHONY: clean-builds
+
+clean-builds:
+	@echo "Cleaning platform-specific builds..."
+	rm -f bin/tapio-linux-* bin/tapio-darwin-* bin/tapio-windows-* bin/tapio-dev
+
+# Docker builds for testing on different platforms
+.PHONY: docker-linux docker-test
+
+docker-linux:
+	@echo "Building Linux version in Docker..."
+	docker build -t tapio:linux-latest -f build/docker/Dockerfile.linux .
+
+docker-test:
+	@echo "Testing in Docker container..."
+	docker run --rm --privileged -v /sys/fs/bpf:/sys/fs/bpf tapio:linux-latest tapio check --verbose
+
+# Help target
+.PHONY: help-platform
+
+help-platform:
+	@echo "Cross-Platform Build Targets:"
+	@echo "  build-linux      - Build for Linux with full eBPF support"
+	@echo "  build-darwin     - Build for macOS with stub implementations"
+	@echo "  build-windows    - Build for Windows with stub implementations"
+	@echo "  build-all        - Build for all platforms"
+	@echo ""
+	@echo "Development Targets:"
+	@echo "  dev-build        - Build for current platform"
+	@echo "  dev-test         - Test with current platform features"
+	@echo "  dev-run          - Build and run for current platform"
+	@echo ""
+	@echo "Testing Targets:"
+	@echo "  test-linux       - Test Linux-specific features"
+	@echo "  test-darwin      - Test macOS stub implementations"
+	@echo "  test-windows     - Test Windows stub implementations"
+	@echo "  test-stubs       - Test stub implementations"
+	@echo ""
+	@echo "Utility Targets:"
+	@echo "  platform-info    - Show platform and feature information"
+	@echo "  clean-builds     - Clean all platform builds"
+	@echo "  docker-linux     - Build Linux version in Docker"
+	@echo "  docker-test      - Test in Docker container"

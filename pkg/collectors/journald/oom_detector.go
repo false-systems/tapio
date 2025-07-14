@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // OOMDetector specializes in detecting and parsing OOM kill events
@@ -61,7 +61,7 @@ func NewOOMDetector() *OOMDetector {
 }
 
 // Detect checks if a journal entry is an OOM event and extracts details
-func (d *OOMDetector) Detect(entry *JournalEntry) *collectors.Event {
+func (d *OOMDetector) Detect(entry *JournalEntry) *types.Event {
 	// Check if this is an OOM-related message
 	if !d.isOOMRelated(entry) {
 		// Check if we have an active OOM state and this might be a continuation
@@ -211,7 +211,7 @@ func (d *OOMDetector) updateOOMState(entry *JournalEntry) {
 }
 
 // finalizeOOMEvent creates the final OOM event
-func (d *OOMDetector) finalizeOOMEvent(timestamp int64) *collectors.Event {
+func (d *OOMDetector) finalizeOOMEvent(timestamp int64) *types.Event {
 	if d.activeOOM == nil {
 		return nil
 	}
@@ -222,10 +222,10 @@ func (d *OOMDetector) finalizeOOMEvent(timestamp int64) *collectors.Event {
 	// Build comprehensive OOM message
 	fullMessage := strings.Join(oom.messages, "\n")
 	
-	event := &collectors.Event{
-		Type:     collectors.EventTypeOOM,
-		Category: collectors.CategoryCapacity,
-		Severity: collectors.SeverityCritical,
+	event := &types.Event{
+		Type:     types.EventTypeOOM,
+		Category: types.CategoryCapacity,
+		Severity: types.SeverityCritical,
 		Data: map[string]interface{}{
 			"oom_type":      d.determineOOMType(oom),
 			"victim_pid":    oom.victimPID,
@@ -245,14 +245,14 @@ func (d *OOMDetector) finalizeOOMEvent(timestamp int64) *collectors.Event {
 			"parser":       "oom_detector",
 		},
 		Labels: d.buildLabels(oom),
-		Context: &collectors.EventContext{
+		Context: &types.EventContext{
 			PID:         uint32(oom.victimPID),
 			ProcessName: oom.victimName,
 			ContainerID: oom.containerID,
 			PodName:     oom.podName,
 			Namespace:   oom.namespace,
 		},
-		Metadata: collectors.EventMetadata{
+		Metadata: types.EventMetadata{
 			Importance:  1.0, // OOM is always critical
 			Reliability: 0.99, // Very high confidence
 		},

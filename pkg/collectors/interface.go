@@ -4,6 +4,8 @@ package collectors
 import (
 	"context"
 	"time"
+	
+	"github.com/yairfalse/tapio/pkg/collectors/types"
 )
 
 // Collector defines the standard interface for all data collection sources
@@ -21,16 +23,16 @@ type Collector interface {
 	Stop() error
 
 	// Events returns a channel that emits events from this collector
-	Events() <-chan *Event
+	Events() <-chan *types.Event
 
 	// Health returns the current health status of the collector
-	Health() *Health
+	Health() *types.Health
 
 	// GetStats returns collector-specific statistics
 	GetStats() *Stats
 
 	// Configure updates the collector configuration
-	Configure(config CollectorConfig) error
+	Configure(config types.CollectorConfig) error
 
 	// IsEnabled returns whether the collector is currently enabled
 	IsEnabled() bool
@@ -247,10 +249,10 @@ func DefaultCollectorConfig(name, collectorType string) CollectorConfig {
 // Factory defines the interface for creating collectors
 type Factory interface {
 	// CreateCollector creates a new collector instance
-	CreateCollector(config CollectorConfig) (Collector, error)
+	CreateCollector(config types.CollectorConfig) (Collector, error)
 	
 	// ValidateConfig validates a configuration for this collector type
-	ValidateConfig(config CollectorConfig) error
+	ValidateConfig(config types.CollectorConfig) error
 	
 	// GetRequirements returns the requirements for running this collector
 	GetRequirements() CollectorRequirements
