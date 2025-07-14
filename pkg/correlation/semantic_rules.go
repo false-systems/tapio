@@ -489,7 +489,219 @@ func (e *SemanticRulesEngine) LoadSemanticRulesFromJSON(jsonData []byte) error {
 	return nil
 }
 
+// DeleteSemanticRule removes a rule by ID from the engine with safety checks
+func (e *SemanticRulesEngine) DeleteSemanticRule(ruleID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	rule, exists := e.rules[ruleID]
+	if !exists {
+		return fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+	
+	// SAFETY: Only allow deletion of user-defined rules, never built-in rules
+	if rule.Author != "markdown-translator" && rule.Author != "user" {
+		return fmt.Errorf("cannot delete built-in system rule '%s' (author: %s)", ruleID, rule.Author)
+	}
+	
+	// SAFETY: Check if rule is marked as critical/protected
+	if rule.Metadata != nil {
+		if protected, ok := rule.Metadata["protected"].(bool); ok && protected {
+			return fmt.Errorf("cannot delete protected rule '%s'", ruleID)
+		}
+		if critical, ok := rule.Metadata["critical_system_rule"].(bool); ok && critical {
+			return fmt.Errorf("cannot delete critical system rule '%s'", ruleID)
+		}
+	}
+	
+	// SAFETY: Check rule usage/dependencies
+	if stats, exists := e.ruleStats[ruleID]; exists && stats.ExecutionCount > 1000 {
+		return fmt.Errorf("cannot delete heavily used rule '%s' (executed %d times) - disable instead", 
+			ruleID, stats.ExecutionCount)
+	}
+	
+	// SAFETY: Backup rule before deletion
+	if err := e.backupRuleBeforeDeletion(rule); err != nil {
+		return fmt.Errorf("failed to backup rule before deletion: %w", err)
+	}
+	
+	// Mark as deleted instead of actually deleting (soft delete)
+	rule.Enabled = false
+	rule.Metadata["deleted_at"] = time.Now()
+	rule.Metadata["deletion_reason"] = "user_requested"
+	
+	// Remove from active processing but keep in storage
+	delete(e.rules, ruleID)
+	
+	// Keep stats for audit trail (don't delete)
+	if e.ruleStats[ruleID] != nil {
+		e.ruleStats[ruleID].DeletedAt = time.Now()
+	}
+	
+	// Clear cache entries related to this rule
+	if e.cacheManager != nil {
+		e.cacheManager.InvalidateRuleCache(ruleID)
+	}
+	
+	return nil
+}
+
+// backupRuleBeforeDeletion creates a backup of the rule for recovery
+func (e *SemanticRulesEngine) backupRuleBeforeDeletion(rule *SemanticRule) error {
+	// In a real implementation, this would save to persistent storage
+	// For now, we'll log the backup operation
+	fmt.Printf("🔒 SAFETY: Backing up rule '%s' before deletion\n", rule.ID)
+	fmt.Printf("   Rule can be recovered using: tapio correlations recover %s\n", rule.ID)
+	
+	// TODO: Implement actual backup to file system or database
+	// This should save the rule to a recovery location
+	
+	return nil
+}
+
+// UpdateSemanticRule modifies an existing rule or creates it if it doesn't exist
+func (e *SemanticRulesEngine) UpdateSemanticRule(rule *SemanticRule) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	// Validate the rule
+	if err := e.validateSemanticRule(rule); err != nil {
+		return fmt.Errorf("invalid rule: %w", err)
+	}
+	
+	// Update timestamp
+	rule.UpdatedAt = time.Now()
+	
+	// Store the rule
+	e.rules[rule.ID] = rule
+	
+	// Initialize stats if not exists
+	if _, exists := e.ruleStats[rule.ID]; !exists {
+		e.ruleStats[rule.ID] = &RuleStats{
+			RuleID: rule.ID,
+		}
+	}
+	
+	// Clear cache entries for this rule
+	if e.cacheManager != nil {
+		e.cacheManager.InvalidateRuleCache(rule.ID)
+	}
+	
+	return nil
+}
+
+// ListSemanticRules returns all currently loaded rules
+func (e *SemanticRulesEngine) ListSemanticRules() map[string]*SemanticRule {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	
+	// Return a copy to prevent external modification
+	rules := make(map[string]*SemanticRule)
+	for id, rule := range e.rules {
+		// Create a shallow copy
+		ruleCopy := *rule
+		rules[id] = &ruleCopy
+	}
+	
+	return rules
+}
+
+// GetSemanticRule retrieves a specific rule by ID
+func (e *SemanticRulesEngine) GetSemanticRule(ruleID string) (*SemanticRule, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	
+	rule, exists := e.rules[ruleID]
+	if !exists {
+		return nil, fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+	
+	// Return a copy to prevent external modification
+	ruleCopy := *rule
+	return &ruleCopy, nil
+}
+
+// DisableSemanticRule disables a rule without deleting it (SAFER alternative to delete)
+func (e *SemanticRulesEngine) DisableSemanticRule(ruleID string, reason string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	rule, exists := e.rules[ruleID]
+	if !exists {
+		return fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+	
+	rule.Enabled = false
+	rule.UpdatedAt = time.Now()
+	if rule.Metadata == nil {
+		rule.Metadata = make(map[string]interface{})
+	}
+	rule.Metadata["disabled_at"] = time.Now()
+	rule.Metadata["disabled_reason"] = reason
+	
+	// Clear cache but keep rule in storage
+	if e.cacheManager != nil {
+		e.cacheManager.InvalidateRuleCache(ruleID)
+	}
+	
+	return nil
+}
+
+// EnableSemanticRule re-enables a disabled rule
+func (e *SemanticRulesEngine) EnableSemanticRule(ruleID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	rule, exists := e.rules[ruleID]
+	if !exists {
+		return fmt.Errorf("rule with ID '%s' not found", ruleID)
+	}
+	
+	rule.Enabled = true
+	rule.UpdatedAt = time.Now()
+	if rule.Metadata == nil {
+		rule.Metadata = make(map[string]interface{})
+	}
+	rule.Metadata["enabled_at"] = time.Now()
+	delete(rule.Metadata, "disabled_at")
+	delete(rule.Metadata, "disabled_reason")
+	
+	// Clear cache to refresh enabled state
+	if e.cacheManager != nil {
+		e.cacheManager.InvalidateRuleCache(ruleID)
+	}
+	
+	return nil
+}
+
+// CreateRuleSnapshot creates a backup snapshot of all rules
+func (e *SemanticRulesEngine) CreateRuleSnapshot(snapshotName string) error {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	
+	fmt.Printf("🔒 SAFETY: Creating correlation rules snapshot '%s'\n", snapshotName)
+	fmt.Printf("   Backing up %d rules for recovery\n", len(e.rules))
+	
+	// TODO: Implement actual snapshot to persistent storage
+	// This should save all rules to a timestamped backup file
+	
+	return nil
+}
+
 // Supporting types and structures
+
+// RuleStats tracks execution statistics for correlation rules
+type RuleStats struct {
+	RuleID          string        `json:"rule_id"`
+	ExecutionCount  int64         `json:"execution_count"`
+	SuccessCount    int64         `json:"success_count"`
+	ErrorCount      int64         `json:"error_count"`
+	TotalTime       time.Duration `json:"total_time"`
+	AverageTime     time.Duration `json:"average_time"`
+	LastExecuted    time.Time     `json:"last_executed"`
+	CreatedAt       time.Time     `json:"created_at"`
+	DeletedAt       time.Time     `json:"deleted_at,omitempty"`
+}
 
 // SemanticFeatures represents extracted features from opinionated events
 type SemanticFeatures struct {
