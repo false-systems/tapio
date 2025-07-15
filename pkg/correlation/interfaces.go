@@ -72,14 +72,8 @@ type ActionableItem struct {
 	Risk        string
 }
 
-// Prediction represents a future event prediction
-type Prediction struct {
-	Type        string
-	Probability float64
-	Confidence  float64
-	TimeToEvent time.Duration
-	Description string
-}
+// Prediction type is now defined in types_consolidated.go
+// This prevents redeclaration conflicts while maintaining interface compatibility
 
 // Insight represents a correlated insight from multiple events
 type Insight struct {

@@ -11,8 +11,11 @@ import (
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
-// PerformanceOptimizer provides comprehensive performance optimization for correlation engine
-type PerformanceOptimizer struct {
+// PerformanceOptimizer type is now defined in types_consolidated.go
+// This eliminates the redeclaration conflict
+
+// LegacyPerformanceOptimizer provides the original implementation for backward compatibility
+type LegacyPerformanceOptimizer struct {
 	// Core components
 	engine    *PatternIntegratedEngine
 	profiler  *PerformanceProfiler
@@ -30,8 +33,9 @@ type PerformanceOptimizer struct {
 	mutex            sync.RWMutex
 }
 
-// OptimizationConfig configures performance optimization behavior
-type OptimizationConfig struct {
+// OptimizationConfig is now defined in types_consolidated.go
+// LegacyOptimizationConfig provides backward compatibility
+type LegacyOptimizationConfig struct {
 	// Monitoring settings
 	ProfilingEnabled      bool                   `json:"profiling_enabled"`
 	MonitoringInterval    time.Duration          `json:"monitoring_interval"`
