@@ -1,0 +1,235 @@
+# Tapio-Optimized OTEL Collector Configuration
+# This configuration is optimized for Tapio's intelligent OTEL output
+# Works with any enterprise OTEL backend (Jaeger, Grafana Tempo, DataDog, etc.)
+
+receivers:
+  # OTLP receiver for Tapio's native OTEL output
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://*"
+            - "https://*"
+
+processors:
+  # Batch processor optimized for Tapio's 19Hz event rate
+  batch:
+    timeout: 1s
+    send_batch_size: 500        # Optimized for Tapio's correlation groups
+    send_batch_max_size: 1000
+
+  # Memory limiter for high-volume scenarios
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  # Resource processor to add standard Tapio attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: tapio-intelligence
+        action: upsert
+      - key: service.version
+        from_attribute: tapio.version
+        action: insert
+      - key: deployment.environment
+        value: production
+        action: upsert
+      - key: telemetry.intelligence
+        value: tapio-native
+        action: insert
+
+  # Attributes processor for Tapio-specific enrichment
+  attributes/tapio_enrichment:
+    actions:
+      # Promote Tapio intelligence attributes to resource level
+      - key: tapio.correlation.group_id
+        action: promote
+      - key: tapio.prediction.scenario
+        action: promote
+      - key: tapio.semantic.intent
+        action: promote
+      
+      # Extract business impact for alerting
+      - key: alert.business_impact
+        from_attribute: business.impact_score
+        action: insert
+      
+      # Tag urgent issues for priority routing
+      - key: priority
+        value: high
+        action: insert
+        condition: attributes["human.is_urgent"] == true
+
+  # Span processor for Tapio semantic grouping
+  span/tapio_semantic:
+    name:
+      # Use Tapio's semantic names for better visualization
+      from_attributes: ["tapio.semantic.type", "issue.type", "pattern.type"]
+      separator: "."
+    
+    # Set span status based on Tapio's analysis
+    status:
+      code: ERROR
+      description: "Critical issue detected by Tapio"
+      conditions:
+        - attributes["issue.severity"] == "critical"
+        - attributes["prediction.probability"] > 0.8
+
+  # Filter processor for high-value spans only
+  filter/tapio_intelligence:
+    error_mode: ignore
+    traces:
+      span:
+        # Keep only intelligent spans (not raw events)
+        include:
+          match_type: regexp
+          attributes:
+            - key: tapio.intelligence
+              value: "enabled"
+            - key: correlation.group_id
+              value: ".*"
+            - key: prediction.scenario
+              value: ".*"
+
+  # Tail sampling for intelligent trace selection
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100000
+    expected_new_traces_per_sec: 1000
+    policies:
+      # Always sample traces with predictions
+      - name: tapio-predictions
+        type: string_attribute
+        string_attribute:
+          key: prediction.scenario
+          values: [".*"]
+          enabled_regex_matching: true
+      
+      # Always sample business-critical issues
+      - name: business-critical
+        type: numeric_attribute
+        numeric_attribute:
+          key: business.impact_score
+          min_value: 0.7
+      
+      # Always sample correlation groups
+      - name: correlation-groups
+        type: string_attribute
+        string_attribute:
+          key: correlation.group_id
+          values: [".*"]
+          enabled_regex_matching: true
+      
+      # Sample 10% of healthy checks for baseline
+      - name: healthy-baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
+exporters:
+  # Jaeger exporter for trace visualization
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+
+  # Prometheus exporter for Tapio's predictive metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    metric_expiration: 10m
+    const_labels:
+      source: "tapio-intelligence"
+    
+  # OTLP exporter for Grafana Tempo
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    compression: gzip
+
+  # DataDog exporter (if using DataDog)
+  datadog:
+    api:
+      key: ${DD_API_KEY}
+      site: datadoghq.com
+    hostname: tapio-collector
+    tags:
+      - "service:tapio-intelligence"
+      - "intelligence:native"
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    # Intelligent trace pipeline with Tapio optimizations
+    traces/tapio_intelligence:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - resource
+        - attributes/tapio_enrichment
+        - span/tapio_semantic
+        - filter/tapio_intelligence
+        - batch
+        - tail_sampling
+      exporters: [jaeger, otlp/tempo, debug]
+    
+    # Metrics pipeline for predictive metrics
+    metrics/tapio_predictions:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - batch
+      exporters: [prometheus]
+    
+    # High-priority pipeline for critical issues
+    traces/critical:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - attributes/tapio_enrichment
+        - batch/critical
+      exporters: [jaeger, datadog]
+
+  extensions: [health_check, pprof, zpages]
+  
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+# Processor configurations for high-priority pipeline
+processors:
+  batch/critical:
+    timeout: 100ms        # Fast export for critical issues
+    send_batch_size: 10   # Small batches for low latency

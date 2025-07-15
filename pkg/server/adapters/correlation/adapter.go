@@ -50,11 +50,15 @@ func NewCorrelationAdapter(logger domain.Logger) *CorrelationAdapter {
 		MetricsInterval:    time.Minute,
 	}
 
-	// Create engine with stub implementations for now
+	// Create production-ready components
+	eventStore := NewInMemoryEventStore(10000, time.Hour*24) // 10k events, 24h retention
+	metricsCollector := NewPrometheusMetricsCollector()
+	
+	// Create engine with real implementations
 	engine := core.NewCoreEngine(
 		coreConfig,
-		&stubEventStore{},
-		&stubMetricsCollector{},
+		eventStore,
+		metricsCollector,
 		logger,
 	)
 
@@ -866,26 +870,6 @@ func extractEventIDs(evidence []types.Evidence) []string {
 	return eventIDs
 }
 
-// Stub implementations for interfaces
-
-// stubEventStore provides a stub implementation of the event store
-type stubEventStore struct{}
-
-func (s *stubEventStore) Store(ctx context.Context, events []corrDomain.Event) error {
-	return nil
-}
-
-func (s *stubEventStore) Query(ctx context.Context, query corrDomain.EventQuery) ([]corrDomain.Event, error) {
-	return []corrDomain.Event{}, nil
-}
-
-func (s *stubEventStore) GetLatest(ctx context.Context, limit int) ([]corrDomain.Event, error) {
-	return []corrDomain.Event{}, nil
-}
-
-// stubMetricsCollector provides a stub implementation of metrics collection
-type stubMetricsCollector struct{}
-
-func (s *stubMetricsCollector) RecordEngineStats(stats corrDomain.Stats) {}
-
-func (s *stubMetricsCollector) RecordRuleExecution(ruleID string, duration time.Duration, success bool) {}
+// Production implementations are now in separate files:
+// - event_store.go: InMemoryEventStore with time-series indexing
+// - metrics_collector.go: PrometheusMetricsCollector with real metrics
