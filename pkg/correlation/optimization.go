@@ -23,7 +23,7 @@ type LegacyPerformanceOptimizer struct {
 	monitor   *PerformanceMonitor
 
 	// Optimization state
-	config         *OptimizationConfig
+	config         *LegacyOptimizationConfig
 	optimizations  map[string]*OptimizationStrategy
 	activeProfiles map[string]*PerformanceProfile
 
@@ -61,6 +61,35 @@ type LegacyOptimizationConfig struct {
 	EnableCPUOptimization         bool `json:"enable_cpu_optimization"`
 	EnableCacheOptimization       bool `json:"enable_cache_optimization"`
 	EnableConcurrencyOptimization bool `json:"enable_concurrency_optimization"`
+}
+
+// DefaultLegacyOptimizationConfig returns default optimization configuration
+func DefaultLegacyOptimizationConfig() *LegacyOptimizationConfig {
+	return &LegacyOptimizationConfig{
+		ProfilingEnabled:      true,
+		MonitoringInterval:    30 * time.Second,
+		PerformanceThresholds: &PerformanceThresholds{
+			MaxLatency:     10 * time.Second,
+			MinThroughput:  100.0,
+			MaxMemoryUsage: 100 * 1024 * 1024, // 100MB
+			MaxCPUUsage:    80.0,
+			MinAccuracy:    0.95,
+			MaxErrorRate:   0.05,
+		},
+		AutoOptimization:              true,
+		OptimizationInterval:          5 * time.Minute,
+		AdaptiveOptimization:          true,
+		MaxMemoryUsage:               100 * 1024 * 1024, // 100MB
+		MaxCPUUsage:                  80.0,
+		MaxGoroutines:                100,
+		TargetLatency:                time.Second,
+		TargetThroughput:             1000.0,
+		TargetAccuracy:               0.95,
+		EnableMemoryOptimization:     true,
+		EnableCPUOptimization:        true,
+		EnableCacheOptimization:      true,
+		EnableConcurrencyOptimization: true,
+	}
 }
 
 // PerformanceThresholds defines when optimization should trigger
@@ -862,7 +891,7 @@ type BenchmarkMetric struct {
 
 // NewPerformanceOptimizer creates a comprehensive performance optimizer
 func NewPerformanceOptimizer(engine *PatternIntegratedEngine) *PerformanceOptimizer {
-	config := DefaultOptimizationConfig()
+	config := DefaultLegacyOptimizationConfig()
 
 	return &PerformanceOptimizer{
 		engine:           engine,
@@ -877,8 +906,8 @@ func NewPerformanceOptimizer(engine *PatternIntegratedEngine) *PerformanceOptimi
 }
 
 // DefaultOptimizationConfig returns default optimization configuration
-func DefaultOptimizationConfig() *OptimizationConfig {
-	return &OptimizationConfig{
+func DefaultOptimizationConfig() *LegacyOptimizationConfig {
+	return &LegacyOptimizationConfig{
 		ProfilingEnabled:              true,
 		MonitoringInterval:            30 * time.Second,
 		AutoOptimization:              true,

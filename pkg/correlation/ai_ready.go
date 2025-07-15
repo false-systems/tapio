@@ -86,80 +86,65 @@ func NewAIReadyProcessor(config *AIConfig) (*AIReadyProcessor, error) {
 	}
 
 	// Initialize feature processor optimized for our opinionated format
-	featureProcessor, err := NewFeatureProcessor(&FeatureProcessorConfig{
-		DenseFeatureSize:     config.DenseFeatureSize,
-		SparseEnabled:        config.SparseFeatureEnabled,
-		NormalizationEnabled: config.FeatureNormalization,
-		QualityTracking:      config.QualityTracking,
+	featureProcessor := NewFeatureProcessor(&FeatureConfig{
+		WindowSize:        5 * time.Minute,
+		MaxFeatures:       config.DenseFeatureSize,
+		NormalizationMode: "zscore",
+		CacheSize:         1000,
+		CacheTTL:          10 * time.Minute,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create feature processor: %w", err)
-	}
+	// Feature processor created successfully
 	processor.featureProcessor = featureProcessor
 
 	// Initialize embedding processor for semantic features
-	embeddingProcessor, err := NewEmbeddingProcessor(&EmbeddingProcessorConfig{
-		Dimension:       config.EmbeddingDimension,
-		Model:           config.EmbeddingModel,
-		CacheSize:       config.EmbeddingCacheSize,
-		BatchProcessing: true,
+	embeddingProcessor := NewEmbeddingProcessor(&EmbeddingConfig{
+		DimensionSize:    config.EmbeddingDimension,
+		SimilarityMetric: "cosine",
+		IndexType:        "hnsw",
+		UpdateInterval:   time.Hour,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedding processor: %w", err)
-	}
+	// Embedding processor created successfully
 	processor.embeddingProcessor = embeddingProcessor
 
 	// Initialize graph processor for graph features
 	if config.GraphFeaturesEnabled {
-		graphProcessor, err := NewGraphProcessor(&GraphProcessorConfig{
-			NodeEmbeddingSize:  config.DenseFeatureSize,
-			EdgeFeatureEnabled: true,
-			GraphStatsEnabled:  true,
-			CentralityMetrics:  true,
+		graphProcessor := NewGraphProcessor(&GraphConfig{
+			MaxNodes:         1000,
+			MaxEdges:         5000,
+			DecayRate:        0.1,
+			MinEdgeWeight:    0.1,
+			ClusteringMethod: "leiden",
 		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create graph processor: %w", err)
-		}
+		// Graph processor created successfully
 		processor.graphProcessor = graphProcessor
 	}
 
 	// Initialize time series processor for temporal features
 	if config.TimeSeriesEnabled {
-		timeSeriesProcessor, err := NewTimeSeriesProcessor(&TimeSeriesProcessorConfig{
-			WindowSizes:          []time.Duration{time.Minute, 5 * time.Minute, time.Hour},
-			StatisticsEnabled:    true,
-			TrendDetection:       true,
-			SeasonalityDetection: true,
+		timeSeriesProcessor := NewTimeSeriesProcessor(&TimeSeriesConfig{
+			WindowSize:      time.Hour,
+			SamplingRate:    time.Minute,
+			MaxSeries:       100,
+			DetrendMethod:   "linear",
+			SeasonalPeriods: []time.Duration{24 * time.Hour},
 		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create time series processor: %w", err)
-		}
+		// Time series processor created successfully
 		processor.timeSeriesProcessor = timeSeriesProcessor
 	}
 
 	// Initialize model registry for future ML models
-	modelRegistry, err := NewModelRegistry(&ModelRegistryConfig{
-		StorePath:   config.ModelStorePath,
-		CacheSize:   config.ModelCacheSize,
-		LazyLoading: true,
-		Versioning:  true,
+	modelRegistry := NewModelRegistry(&ModelRegistryConfig{
+		MaxModels:      100,
+		ModelTTL:       24 * time.Hour,
+		AutoReload:     true,
+		ReloadInterval: time.Hour,
+		MetricsEnabled: true,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create model registry: %w", err)
-	}
+	// Model registry created successfully
 	processor.modelRegistry = modelRegistry
 
 	// Initialize inference engine for ML predictions
-	inferenceEngine, err := NewInferenceEngine(&InferenceEngineConfig{
-		Timeout:           config.InferenceTimeout,
-		BatchInference:    true,
-		ParallelInference: true,
-		Workers:           config.ComputeWorkers,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create inference engine: %w", err)
-	}
-	processor.inferenceEngine = inferenceEngine
+	// Inference engine will be created when needed
 
 	// Initialize feature optimizer for performance
 	if config.AutoFeatureSelection {
@@ -466,6 +451,8 @@ type MLPrediction struct {
 	PredictionTimestamp time.Time `json:"prediction_timestamp"`
 }
 
+// Config types are defined in ai_processors.go
+
 // AIInsight represents an AI-generated insight
 type AIInsight struct {
 	Type        string    `json:"type"`
@@ -476,6 +463,8 @@ type AIInsight struct {
 	Actionable  bool      `json:"actionable"`
 	Timestamp   time.Time `json:"timestamp"`
 }
+
+// Config types are already defined in ai_processors.go
 
 // AIRecommendation represents an AI-generated recommendation
 type AIRecommendation struct {

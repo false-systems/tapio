@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+	
+	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
 // BatchProcessor processes events in batches for improved performance
@@ -281,10 +283,127 @@ type EventStore struct {
 
 // EventStoreConfig configures event storage
 type EventStoreConfig struct {
-	StorageType    string        `json:"storage_type"` // "memory", "disk", "database"
-	MaxEvents      int           `json:"max_events"`
-	RetentionTime  time.Duration `json:"retention_time"`
-	IndexingEnabled bool         `json:"indexing_enabled"`
+	StorageType        string        `json:"storage_type"` // "memory", "disk", "database"
+	MaxEvents          int           `json:"max_events"`
+	RetentionTime      time.Duration `json:"retention_time"`
+	RetentionWindow    time.Duration `json:"retention_window"`
+	IndexingEnabled    bool          `json:"indexing_enabled"`
+	CompressionEnabled bool          `json:"compression_enabled"`
+}
+
+// OpinionatedEventStore stores opinionated events for correlation
+type OpinionatedEventStore struct {
+	events []opinionated.OpinionatedEvent
+	mutex  sync.RWMutex
+	config *EventStoreConfig
+}
+
+// NewOpinionatedEventStore creates a new event store
+func NewOpinionatedEventStore(config *EventStoreConfig) (*OpinionatedEventStore, error) {
+	return &OpinionatedEventStore{
+		events: make([]opinionated.OpinionatedEvent, 0, config.MaxEvents),
+		config: config,
+	}, nil
+}
+
+// Store stores an event
+func (es *OpinionatedEventStore) Store(event *opinionated.OpinionatedEvent) error {
+	es.mutex.Lock()
+	defer es.mutex.Unlock()
+	
+	es.events = append(es.events, *event)
+	
+	// Cleanup old events if needed
+	if len(es.events) > es.config.MaxEvents {
+		es.events = es.events[1:]
+	}
+	
+	return nil
+}
+
+// GetStats returns event store statistics
+func (es *OpinionatedEventStore) GetStats() interface{} {
+	es.mutex.RLock()
+	defer es.mutex.RUnlock()
+	
+	return map[string]interface{}{
+		"total_events": len(es.events),
+		"max_events":   es.config.MaxEvents,
+	}
+}
+
+// SemanticPatternCache caches semantic patterns
+type SemanticPatternCache struct {
+	patterns map[string]*CachedSemanticPattern
+	mutex    sync.RWMutex
+	size     int
+}
+
+// CachedSemanticPattern represents a cached semantic pattern
+type CachedSemanticPattern struct {
+	Pattern   *SemanticPattern
+	Timestamp time.Time
+	Hits      int64
+}
+
+// NewSemanticPatternCache creates a new semantic pattern cache
+func NewSemanticPatternCache(size int) *SemanticPatternCache {
+	return &SemanticPatternCache{
+		patterns: make(map[string]*CachedSemanticPattern),
+		size:     size,
+	}
+}
+
+// GetStats returns cache statistics
+func (spc *SemanticPatternCache) GetStats() interface{} {
+	spc.mutex.RLock()
+	defer spc.mutex.RUnlock()
+	
+	return map[string]interface{}{
+		"cached_patterns": len(spc.patterns),
+		"max_size":        spc.size,
+	}
+}
+
+// BehavioralEntityCache caches behavioral entities
+type BehavioralEntityCache struct {
+	entities map[string]*CachedBehavioralEntity
+	mutex    sync.RWMutex
+	size     int
+}
+
+// CachedBehavioralEntity represents a cached behavioral entity
+type CachedBehavioralEntity struct {
+	Entity    *BehavioralEntity
+	Timestamp time.Time
+	Hits      int64
+}
+
+// NewBehavioralEntityCache creates a new behavioral entity cache
+func NewBehavioralEntityCache(size int) *BehavioralEntityCache {
+	return &BehavioralEntityCache{
+		entities: make(map[string]*CachedBehavioralEntity),
+		size:     size,
+	}
+}
+
+// GetStats returns cache statistics
+func (bec *BehavioralEntityCache) GetStats() interface{} {
+	bec.mutex.RLock()
+	defer bec.mutex.RUnlock()
+	
+	return map[string]interface{}{
+		"cached_entities": len(bec.entities),
+		"max_size":        bec.size,
+	}
+}
+
+// BehavioralEntity represents a behavioral entity
+type BehavioralEntity struct {
+	ID         string                 `json:"id"`
+	Type       string                 `json:"type"`
+	TrustScore float64                `json:"trust_score"`
+	Attributes map[string]interface{} `json:"attributes"`
 }
 
 // Stats represents correlation engine statistics

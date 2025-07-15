@@ -558,7 +558,7 @@ type PatternMatchResult struct {
 }
 
 // PatternMatch represents a matched pattern
-type PatternMatch struct {
+type LocalPatternMatch struct {
 	PatternID       string    `json:"pattern_id"`
 	PatternType     string    `json:"pattern_type"`
 	SimilarityScore float32   `json:"similarity_score"`
@@ -609,7 +609,7 @@ type BehavioralPattern struct {
 	Behavior    []float32 `json:"behavior"`
 }
 
-type TemporalPattern struct {
+type LocalTemporalPattern struct {
 	ID          string        `json:"id"`
 	Type        string        `json:"type"`
 	Confidence  float32       `json:"confidence"`

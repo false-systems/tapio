@@ -277,7 +277,7 @@ func (e *CausalityPatternEngine) buildCausalityGraph(event *opinionated.Opiniona
 func (e *CausalityPatternEngine) isRelated(event *opinionated.OpinionatedEvent, causeID string) bool {
 	// Check if events are related by resource or namespace
 	for _, chain := range e.causalChains {
-		if chain.Effect == event.ID || contains(chain.Causes, causeID) {
+		if chain.Effect == event.ID || containsString(chain.Causes, causeID) {
 			return true
 		}
 	}
@@ -425,7 +425,7 @@ func (e *AnomalyPatternEngine) calculateSeverity(profile *AnomalyProfile, value 
 
 // Utility functions
 
-func contains(slice []string, item string) bool {
+func containsString(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
 			return true

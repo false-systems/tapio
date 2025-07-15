@@ -68,7 +68,7 @@ type SimpleOptimizerConfig struct {
 }
 
 // NewPerformanceOptimizer creates a simple performance optimizer
-func NewPerformanceOptimizer(config interface{}) *PerformanceOptimizer {
+func NewMissingPerformanceOptimizer(config interface{}) *PerformanceOptimizer {
 	return &PerformanceOptimizer{
 		config: &SimpleOptimizerConfig{
 			Enabled:        true,
