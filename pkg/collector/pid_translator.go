@@ -160,10 +160,16 @@ func (t *SimplePIDTranslator) initializeInformers() error {
 	t.podInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return t.client.CoreV1().Pods("").List(context.TODO(), options)
+				// Use context with timeout for K8s API calls
+				ctx, cancel := context.WithTimeout(t.ctx, 30*time.Second)
+				defer cancel()
+				return t.client.CoreV1().Pods("").List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return t.client.CoreV1().Pods("").Watch(context.TODO(), options)
+				// Use context with timeout for K8s watch operations
+				ctx, cancel := context.WithTimeout(t.ctx, 5*time.Minute)
+				defer cancel()
+				return t.client.CoreV1().Pods("").Watch(ctx, options)
 			},
 		},
 		&corev1.Pod{},

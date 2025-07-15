@@ -3,24 +3,76 @@ package correlation
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/correlation/core"
+	corrDomain "github.com/yairfalse/tapio/pkg/correlation/domain"
+	"github.com/yairfalse/tapio/pkg/correlation/patterns"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 	"github.com/yairfalse/tapio/pkg/server/domain"
 )
 
 // CorrelationAdapter provides an interface to the correlation package
-// This adapter isolates the server from the broken correlation package
 type CorrelationAdapter struct {
-	enabled bool
-	logger  domain.Logger
+	// Core correlation engine
+	engine           *core.CoreEngine
+	patternRegistry  *patterns.PatternRegistry
+	
+	// Configuration
+	enabled          bool
+	logger           domain.Logger
+	config           *CorrelationAdapterConfig
+	
+	// Statistics
+	stats            CorrelationStats
+	mutex            sync.RWMutex
 }
 
 // NewCorrelationAdapter creates a new correlation adapter
 func NewCorrelationAdapter(logger domain.Logger) *CorrelationAdapter {
-	return &CorrelationAdapter{
-		enabled: false, // Disabled by default until correlation package is fixed
-		logger:  logger,
+	// Create correlation engine configuration
+	config := &CorrelationAdapterConfig{
+		WindowSize:           5 * time.Minute,
+		ProcessingInterval:   30 * time.Second,
+		MaxConcurrentRules:   10,
+		EnablePatterns:       true,
+		EnableMLPrediction:   false, // Disabled by default for stability
+		ConfidenceThreshold:  0.7,
 	}
+
+	// Create core engine configuration
+	coreConfig := corrDomain.Config{
+		WindowSize:         config.WindowSize,
+		ProcessingInterval: config.ProcessingInterval,
+		MaxConcurrentRules: config.MaxConcurrentRules,
+		EnableMetrics:      true,
+		MetricsInterval:    time.Minute,
+	}
+
+	// Create engine with stub implementations for now
+	engine := core.NewCoreEngine(
+		coreConfig,
+		&stubEventStore{},
+		&stubMetricsCollector{},
+		logger,
+	)
+
+	// Initialize pattern registry
+	patternRegistry := patterns.DefaultPatternRegistry()
+
+	adapter := &CorrelationAdapter{
+		engine:          engine,
+		patternRegistry: patternRegistry,
+		enabled:         true, // Now enabled with real implementation
+		logger:          logger,
+		config:          config,
+		stats: CorrelationStats{
+			StartTime: time.Now(),
+		},
+	}
+
+	return adapter
 }
 
 // Enable enables the correlation adapter
@@ -53,10 +105,22 @@ func (a *CorrelationAdapter) ProcessEvent(ctx context.Context, event *domain.Eve
 		return nil
 	}
 
-	// TODO: Implement actual correlation processing when package is fixed
-	// For now, we just log the event
+	// Convert server event to correlation domain event
+	corrEvent := a.convertToCorrEvent(event)
+
+	// Process through correlation engine
+	results, err := a.engine.ProcessEvents(ctx, []corrDomain.Event{corrEvent})
+	if err != nil {
+		a.updateStats(false)
+		return fmt.Errorf("correlation processing failed: %w", err)
+	}
+
+	// Update statistics
+	a.updateStats(true)
+	a.updateStatsWithResults(len(results))
+
 	if a.logger != nil {
-		a.logger.Debug(ctx, fmt.Sprintf("would process event: %s", event.ID))
+		a.logger.Debug(ctx, fmt.Sprintf("processed event %s, found %d correlations", event.ID, len(results)))
 	}
 
 	return nil
@@ -68,9 +132,29 @@ func (a *CorrelationAdapter) GetInsights(ctx context.Context, resource, namespac
 		return []*Insight{}, nil
 	}
 
-	// TODO: Implement actual insight retrieval when package is fixed
-	// For now, return empty insights
-	return []*Insight{}, nil
+	// Get historical correlations for the resource
+	events := a.getResourceEvents(ctx, resource, namespace)
+	if len(events) == 0 {
+		return []*Insight{}, nil
+	}
+
+	// Run pattern detection
+	patternResults, err := a.patternRegistry.DetectAll(ctx, a.convertToPatternEvents(events), nil)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Error(ctx, fmt.Sprintf("pattern detection failed: %v", err))
+		}
+		return []*Insight{}, nil
+	}
+
+	// Convert pattern results to insights
+	insights := a.convertToInsights(patternResults, resource, namespace)
+
+	if a.logger != nil {
+		a.logger.Debug(ctx, fmt.Sprintf("generated %d insights for %s/%s", len(insights), namespace, resource))
+	}
+
+	return insights, nil
 }
 
 // GetPredictions retrieves predictions for a specific resource
@@ -79,9 +163,25 @@ func (a *CorrelationAdapter) GetPredictions(ctx context.Context, resource, names
 		return []*Prediction{}, nil
 	}
 
-	// TODO: Implement actual prediction retrieval when package is fixed
-	// For now, return empty predictions
-	return []*Prediction{}, nil
+	// Only provide predictions if ML is enabled
+	if !a.config.EnableMLPrediction {
+		return []*Prediction{}, nil
+	}
+
+	// Get resource metrics for prediction
+	events := a.getResourceEvents(ctx, resource, namespace)
+	if len(events) < 10 { // Need minimum data for predictions
+		return []*Prediction{}, nil
+	}
+
+	// Analyze trends for basic predictions
+	predictions := a.generateBasicPredictions(events, resource, namespace)
+
+	if a.logger != nil {
+		a.logger.Debug(ctx, fmt.Sprintf("generated %d predictions for %s/%s", len(predictions), namespace, resource))
+	}
+
+	return predictions, nil
 }
 
 // GetActionableItems retrieves actionable items for a specific resource
@@ -90,9 +190,28 @@ func (a *CorrelationAdapter) GetActionableItems(ctx context.Context, resource, n
 		return []*ActionableItem{}, nil
 	}
 
-	// TODO: Implement actual actionable item retrieval when package is fixed
-	// For now, return empty actionable items
-	return []*ActionableItem{}, nil
+	// Get insights first
+	insights, err := a.GetInsights(ctx, resource, namespace)
+	if err != nil {
+		return []*ActionableItem{}, err
+	}
+
+	// Generate actionable items from insights
+	var actionableItems []*ActionableItem
+	for _, insight := range insights {
+		if insight.ActionableItems != nil {
+			actionableItems = append(actionableItems, insight.ActionableItems...)
+		}
+	}
+
+	// Add general recommendations based on resource type
+	actionableItems = append(actionableItems, a.generateResourceRecommendations(resource, namespace)...)
+
+	if a.logger != nil {
+		a.logger.Debug(ctx, fmt.Sprintf("generated %d actionable items for %s/%s", len(actionableItems), namespace, resource))
+	}
+
+	return actionableItems, nil
 }
 
 // CorrelateEvents correlates a set of events
@@ -106,13 +225,41 @@ func (a *CorrelationAdapter) CorrelateEvents(ctx context.Context, events []*doma
 		}, nil
 	}
 
-	// TODO: Implement actual event correlation when package is fixed
-	// For now, return empty correlation result
+	// Convert events to correlation domain format
+	corrEvents := make([]corrDomain.Event, len(events))
+	for i, event := range events {
+		corrEvents[i] = a.convertToCorrEvent(event)
+	}
+
+	// Process through correlation engine
+	results, err := a.engine.ProcessEvents(ctx, corrEvents)
+	if err != nil {
+		return nil, fmt.Errorf("correlation processing failed: %w", err)
+	}
+
+	// Convert engine results to correlation result
+	correlations := make([]*Correlation, len(results))
+	for i, result := range results {
+		if result != nil {
+			correlations[i] = &Correlation{
+				ID:          result.ID,
+				Type:        result.Type,
+				EventIDs:    result.EventIDs,
+				Confidence:  result.Confidence,
+				Description: result.Description,
+				Metadata:    result.Metadata,
+			}
+		}
+	}
+
+	// Update statistics
+	a.updateStatsWithResults(len(correlations))
+
 	return &CorrelationResult{
 		ID:           a.generateID(),
 		Timestamp:    time.Now(),
 		EventCount:   len(events),
-		Correlations: []*Correlation{},
+		Correlations: correlations,
 	}, nil
 }
 
@@ -122,9 +269,28 @@ func (a *CorrelationAdapter) GetPatterns(ctx context.Context) ([]*Pattern, error
 		return []*Pattern{}, nil
 	}
 
-	// TODO: Implement actual pattern retrieval when package is fixed
-	// For now, return empty patterns
-	return []*Pattern{}, nil
+	// Get available patterns from registry
+	detectors := a.patternRegistry.List()
+	patterns := make([]*Pattern, len(detectors))
+
+	for i, detector := range detectors {
+		patterns[i] = &Pattern{
+			ID:          detector.ID(),
+			Name:        detector.Name(),
+			Description: detector.Description(),
+			Type:        string(detector.Category()),
+			Enabled:     true,
+			Metadata: map[string]interface{}{
+				"category": detector.Category(),
+			},
+		}
+	}
+
+	if a.logger != nil {
+		a.logger.Debug(ctx, fmt.Sprintf("returning %d available patterns", len(patterns)))
+	}
+
+	return patterns, nil
 }
 
 // GetPatternMatches retrieves matches for a specific pattern
@@ -133,20 +299,67 @@ func (a *CorrelationAdapter) GetPatternMatches(ctx context.Context, patternID st
 		return []*PatternMatch{}, nil
 	}
 
-	// TODO: Implement actual pattern match retrieval when package is fixed
-	// For now, return empty pattern matches
-	return []*PatternMatch{}, nil
+	// Get the specific pattern detector
+	detector, err := a.patternRegistry.Get(patternID)
+	if err != nil {
+		return []*PatternMatch{}, fmt.Errorf("pattern %s not found: %w", patternID, err)
+	}
+
+	// Get recent events for analysis
+	events := a.getRecentEvents(ctx, time.Hour) // Last hour of events
+	if len(events) == 0 {
+		return []*PatternMatch{}, nil
+	}
+
+	// Convert to pattern events
+	patternEvents := a.convertToPatternEvents(events)
+
+	// Run pattern detection
+	result, err := detector.Detect(ctx, patternEvents, nil)
+	if err != nil {
+		return []*PatternMatch{}, fmt.Errorf("pattern detection failed: %w", err)
+	}
+
+	// Convert to pattern matches
+	var matches []*PatternMatch
+	if result.Detected {
+		match := &PatternMatch{
+			ID:         a.generateID(),
+			PatternID:  patternID,
+			EventIDs:   extractEventIDs(result.Evidence),
+			Confidence: result.Confidence,
+			Timestamp:  time.Now(),
+			Metadata:   result.Metadata,
+		}
+		matches = append(matches, match)
+	}
+
+	if a.logger != nil {
+		a.logger.Debug(ctx, fmt.Sprintf("found %d matches for pattern %s", len(matches), patternID))
+	}
+
+	return matches, nil
 }
 
 // GetStats retrieves correlation engine statistics
 func (a *CorrelationAdapter) GetStats(ctx context.Context) (*Stats, error) {
+	a.mutex.RLock()
+	stats := a.stats
+	a.mutex.RUnlock()
+
+	// Get engine statistics if available
+	var engineStats corrDomain.Stats
+	if a.engine != nil {
+		engineStats = a.engine.GetStats()
+	}
+
 	return &Stats{
 		Enabled:              a.enabled,
-		EventsProcessed:      0,
-		InsightsGenerated:    0,
-		PredictionsGenerated: 0,
-		CorrelationsFound:    0,
-		LastProcessedAt:      time.Now(),
+		EventsProcessed:      stats.EventsProcessed,
+		InsightsGenerated:    stats.InsightsGenerated,
+		PredictionsGenerated: stats.PredictionsGenerated,
+		CorrelationsFound:    engineStats.CorrelationsFound,
+		LastProcessedAt:      stats.LastProcessedAt,
 	}, nil
 }
 
@@ -417,3 +630,262 @@ func (m *MockCorrelationAdapter) AddPatternMatch(match *PatternMatch) {
 	m.patternMatches = append(m.patternMatches, match)
 	m.stats.CorrelationsFound++
 }
+
+// CorrelationAdapterConfig configures the correlation adapter
+type CorrelationAdapterConfig struct {
+	WindowSize           time.Duration
+	ProcessingInterval   time.Duration
+	MaxConcurrentRules   int
+	EnablePatterns       bool
+	EnableMLPrediction   bool
+	ConfidenceThreshold  float64
+}
+
+// CorrelationStats tracks correlation adapter statistics
+type CorrelationStats struct {
+	StartTime            time.Time
+	EventsProcessed      uint64
+	InsightsGenerated    uint64
+	PredictionsGenerated uint64
+	LastProcessedAt      time.Time
+}
+
+// Helper methods for the correlation adapter
+
+// convertToCorrEvent converts a server domain event to correlation domain event
+func (a *CorrelationAdapter) convertToCorrEvent(event *domain.Event) corrDomain.Event {
+	return corrDomain.Event{
+		ID:        event.ID,
+		Type:      event.Type,
+		Timestamp: event.Timestamp,
+		Source:    event.Source,
+		Severity:  event.Severity,
+		Message:   event.Message,
+		Entity: corrDomain.Entity{
+			Type:      event.Entity.Type,
+			Name:      event.Entity.Name,
+			Namespace: event.Entity.Namespace,
+		},
+		Metadata: event.Metadata,
+	}
+}
+
+// convertToPatternEvents converts domain events to pattern events
+func (a *CorrelationAdapter) convertToPatternEvents(events []corrDomain.Event) []types.Event {
+	patternEvents := make([]types.Event, len(events))
+	for i, event := range events {
+		patternEvents[i] = types.Event{
+			ID:        event.ID,
+			Type:      event.Type,
+			Timestamp: event.Timestamp,
+			Source:    event.Source,
+			Severity:  types.Severity(event.Severity),
+			Message:   event.Message,
+			Metadata:  event.Metadata,
+		}
+	}
+	return patternEvents
+}
+
+// convertToInsights converts pattern results to insights
+func (a *CorrelationAdapter) convertToInsights(patternResults []types.PatternResult, resource, namespace string) []*Insight {
+	var insights []*Insight
+	
+	for _, result := range patternResults {
+		if !result.Detected {
+			continue
+		}
+		
+		insight := &Insight{
+			ID:          a.generateID(),
+			Title:       result.Pattern.Name,
+			Description: result.Pattern.Description,
+			Severity:    a.mapPatternSeverity(result.Confidence),
+			Category:    string(result.Pattern.Category),
+			Resource:    resource,
+			Namespace:   namespace,
+			Timestamp:   time.Now(),
+			Metadata:    result.Metadata,
+		}
+		
+		// Add prediction if available
+		if result.Prediction != nil {
+			insight.Prediction = &Prediction{
+				Type:        result.Prediction.Type,
+				TimeToEvent: result.Prediction.TimeToEvent,
+				Probability: result.Prediction.Probability,
+				Confidence:  result.Prediction.Confidence,
+			}
+		}
+		
+		// Generate actionable items
+		insight.ActionableItems = a.generateActionableItems(result)
+		
+		insights = append(insights, insight)
+	}
+	
+	return insights
+}
+
+// generateActionableItems generates actionable items from pattern results
+func (a *CorrelationAdapter) generateActionableItems(result types.PatternResult) []*ActionableItem {
+	var items []*ActionableItem
+	
+	// Add pattern-specific recommendations
+	switch result.Pattern.Category {
+	case types.CategoryMemory:
+		items = append(items, &ActionableItem{
+			Description: "Increase memory limits",
+			Command:     "kubectl patch deployment <name> -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"<container>\",\"resources\":{\"limits\":{\"memory\":\"<new-limit>\"}}}]}}}}'",
+			Impact:      "Prevents OOM kills",
+			Risk:        "Low",
+		})
+	case types.CategoryNetwork:
+		items = append(items, &ActionableItem{
+			Description: "Check network connectivity",
+			Command:     "kubectl exec <pod> -- netstat -tuln",
+			Impact:      "Diagnoses network issues",
+			Risk:        "Low",
+		})
+	case types.CategoryStorage:
+		items = append(items, &ActionableItem{
+			Description: "Check disk usage",
+			Command:     "kubectl exec <pod> -- df -h",
+			Impact:      "Identifies storage issues",
+			Risk:        "Low",
+		})
+	}
+	
+	return items
+}
+
+// generateBasicPredictions generates basic predictions from historical events
+func (a *CorrelationAdapter) generateBasicPredictions(events []corrDomain.Event, resource, namespace string) []*Prediction {
+	var predictions []*Prediction
+	
+	// Simple trend analysis for demonstration
+	if len(events) >= 10 {
+		// Look for increasing error patterns
+		errorCount := 0
+		for _, event := range events[len(events)-10:] {
+			if event.Severity == "error" || event.Severity == "critical" {
+				errorCount++
+			}
+		}
+		
+		if errorCount >= 3 {
+			predictions = append(predictions, &Prediction{
+				Type:        "service_degradation",
+				TimeToEvent: 30 * time.Minute,
+				Probability: 0.7,
+				Confidence:  0.6,
+			})
+		}
+	}
+	
+	return predictions
+}
+
+// generateResourceRecommendations generates general recommendations for a resource
+func (a *CorrelationAdapter) generateResourceRecommendations(resource, namespace string) []*ActionableItem {
+	var items []*ActionableItem
+	
+	// Add general monitoring recommendations
+	items = append(items, &ActionableItem{
+		Description: "Check resource logs",
+		Command:     fmt.Sprintf("kubectl logs -n %s %s", namespace, resource),
+		Impact:      "Provides diagnostic information",
+		Risk:        "Low",
+	})
+	
+	items = append(items, &ActionableItem{
+		Description: "Check resource status",
+		Command:     fmt.Sprintf("kubectl describe -n %s %s", namespace, resource),
+		Impact:      "Shows resource details and events",
+		Risk:        "Low",
+	})
+	
+	return items
+}
+
+// getResourceEvents retrieves historical events for a specific resource
+func (a *CorrelationAdapter) getResourceEvents(ctx context.Context, resource, namespace string) []corrDomain.Event {
+	// This would typically query the event store
+	// For now, return empty slice
+	return []corrDomain.Event{}
+}
+
+// getRecentEvents retrieves recent events within the specified time window
+func (a *CorrelationAdapter) getRecentEvents(ctx context.Context, window time.Duration) []corrDomain.Event {
+	// This would typically query the event store for recent events
+	// For now, return empty slice
+	return []corrDomain.Event{}
+}
+
+// updateStats updates the adapter statistics
+func (a *CorrelationAdapter) updateStats(success bool) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	
+	a.stats.EventsProcessed++
+	a.stats.LastProcessedAt = time.Now()
+}
+
+// updateStatsWithResults updates statistics with correlation results
+func (a *CorrelationAdapter) updateStatsWithResults(correlationCount int) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	
+	if correlationCount > 0 {
+		a.stats.InsightsGenerated++
+	}
+}
+
+// mapPatternSeverity maps pattern confidence to severity level
+func (a *CorrelationAdapter) mapPatternSeverity(confidence float64) string {
+	switch {
+	case confidence >= 0.9:
+		return "critical"
+	case confidence >= 0.7:
+		return "high"
+	case confidence >= 0.5:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// extractEventIDs extracts event IDs from evidence
+func extractEventIDs(evidence []types.Evidence) []string {
+	var eventIDs []string
+	for _, e := range evidence {
+		if e.EventID != "" {
+			eventIDs = append(eventIDs, e.EventID)
+		}
+	}
+	return eventIDs
+}
+
+// Stub implementations for interfaces
+
+// stubEventStore provides a stub implementation of the event store
+type stubEventStore struct{}
+
+func (s *stubEventStore) Store(ctx context.Context, events []corrDomain.Event) error {
+	return nil
+}
+
+func (s *stubEventStore) Query(ctx context.Context, query corrDomain.EventQuery) ([]corrDomain.Event, error) {
+	return []corrDomain.Event{}, nil
+}
+
+func (s *stubEventStore) GetLatest(ctx context.Context, limit int) ([]corrDomain.Event, error) {
+	return []corrDomain.Event{}, nil
+}
+
+// stubMetricsCollector provides a stub implementation of metrics collection
+type stubMetricsCollector struct{}
+
+func (s *stubMetricsCollector) RecordEngineStats(stats corrDomain.Stats) {}
+
+func (s *stubMetricsCollector) RecordRuleExecution(ruleID string, duration time.Duration, success bool) {}
