@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/yairfalse/tapio/internal/output"
+	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/simple"
 	"github.com/yairfalse/tapio/pkg/types"
 )
@@ -363,7 +365,17 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		// Try to create enhanced checker with eBPF
 		checker, err = simple.NewCheckerWithEBPF()
 		if err != nil {
-			progress.Warning(fmt.Sprintf("eBPF not available: %v", err))
+			// Provide platform-specific guidance
+			if runtime.GOOS != "linux" {
+				progress.Warning(fmt.Sprintf("eBPF is only supported on Linux (current platform: %s)", runtime.GOOS))
+			} else {
+				progress.Warning("eBPF not available. Possible reasons:")
+				progress.Warning("  • Not running as root or with CAP_BPF capability")
+				progress.Warning("  • Kernel version too old (requires 4.18+)")
+				progress.Warning("  • eBPF support not compiled in (use 'make build-ebpf')")
+			}
+			progress.Info("Falling back to standard Kubernetes API checks")
+			
 			checker, err = simple.NewChecker()
 			if err != nil {
 				progress.Error(err)
@@ -372,6 +384,9 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		} else {
 			if verbose {
 				fmt.Println("✨ Enhanced checking with eBPF enabled")
+				fmt.Println("   • Kernel-level memory tracking active")
+				fmt.Println("   • OOM prediction available")
+				fmt.Println("   • Process-level insights enabled")
 			}
 		}
 	} else {
@@ -419,7 +434,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	if enableCorrelation && len(result.Problems) > 1 {
 		progress.NextStep() // Move to "Running correlation analysis"
 
-		correlationResult, corrErr := addCorrelationAnalysis(ctx, checker, result.Problems)
+		correlationResult, corrErr := addCorrelationAnalysis(ctx, checker, result)
 		if corrErr == nil {
 			result.CorrelationAnalysis = correlationResult
 			if verbose {
@@ -467,14 +482,47 @@ func runCheck(cmd *cobra.Command, args []string) error {
 }
 
 // addCorrelationAnalysis runs correlation analysis on problems
-func addCorrelationAnalysis(ctx context.Context, checker *simple.Checker, problems []types.Problem) (interface{}, error) {
-	// Create enhanced explainer if available
-	if enhancedChecker, ok := checker.GetEnhancedExplainer(); ok {
-		return enhancedChecker.AnalyzeProblems(ctx, problems)
+func addCorrelationAnalysis(ctx context.Context, checker *simple.Checker, result *types.CheckResult) (interface{}, error) {
+	// Create correlation service
+	correlationService, err := correlation.NewService()
+	if err != nil {
+		// Fallback to simple analysis if correlation service fails
+		return analyzeProblemsSimple(result.Problems), nil
 	}
 
-	// Fallback to simple correlation analysis
-	return analyzeProblemsSimple(problems), nil
+	// Start the service
+	if err := correlationService.Start(ctx); err != nil {
+		return analyzeProblemsSimple(result.Problems), nil
+	}
+	defer correlationService.Stop()
+
+	// Analyze the check result
+	correlationResult, err := correlationService.AnalyzeCheckResult(ctx, result)
+	if err != nil {
+		return analyzeProblemsSimple(result.Problems), nil
+	}
+
+	// Build enhanced correlation analysis
+	analysis := map[string]interface{}{
+		"analysis_type": "intelligent",
+		"insights":      correlationResult.GetMostCriticalInsights(5),
+		"patterns":      correlationResult.Patterns,
+		"timeline":      correlationResult.Timeline,
+		"statistics":    correlationResult.Statistics,
+	}
+
+	// Add actionable recommendations
+	recommendations := correlationResult.GetActionableRecommendations()
+	if len(recommendations) > 0 {
+		analysis["recommendations"] = recommendations
+	}
+
+	// Add critical pattern warnings
+	if correlationResult.HasCriticalPatterns() {
+		analysis["critical_patterns_detected"] = true
+	}
+
+	return analysis, nil
 }
 
 // analyzeProblemsSimple provides basic correlation analysis

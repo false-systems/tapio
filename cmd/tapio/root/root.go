@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yairfalse/tapio/cmd/tapio/check"
+	"github.com/yairfalse/tapio/cmd/tapio/watch"
 )
 
 var rootCmd = &cobra.Command{
@@ -25,6 +26,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.AddCommand(check.Cmd)
+	rootCmd.AddCommand(watch.Cmd)
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.SetVersionTemplate(fmt.Sprintf("Tapio version %s\n", rootCmd.Version))
 }

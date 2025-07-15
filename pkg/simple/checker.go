@@ -297,6 +297,21 @@ func (c *Checker) GetPods(ctx context.Context, namespace string, all bool) ([]co
 	return podList.Items, nil
 }
 
+// GetNamespaces retrieves all namespaces in the cluster
+func (c *Checker) GetNamespaces(ctx context.Context) ([]string, error) {
+	nsList, err := c.client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, enhanceK8sError(err)
+	}
+
+	namespaces := make([]string, 0, len(nsList.Items))
+	for _, ns := range nsList.Items {
+		namespaces = append(namespaces, ns.Name)
+	}
+
+	return namespaces, nil
+}
+
 func (c *Checker) filterPods(pods []corev1.Pod, resource string) []corev1.Pod {
 	// Handle pod/name format
 	if strings.HasPrefix(resource, "pod/") {
