@@ -69,22 +69,6 @@ services:
       - tapio
     restart: unless-stopped
 
-  # OTEL Plugin - OpenTelemetry export
-  tapio-otel-plugin:
-    build:
-      context: ..
-      dockerfile: deployments/plugins/otel/Dockerfile
-    container_name: tapio-otel-plugin
-    environment:
-      - TAPIO_OTEL_ENDPOINT=jaeger:14250
-      - TAPIO_OTEL_SERVICE_NAME=tapio-otel-plugin
-      - TAPIO_OTEL_DEBUG=false
-    depends_on:
-      - jaeger
-    networks:
-      - tapio
-    restart: unless-stopped
-
   # Prometheus Plugin - Metrics export
   tapio-prometheus-plugin:
     build:

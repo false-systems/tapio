@@ -159,7 +159,7 @@ func NewOpenTelemetryExporter(checker CheckerInterface, ebpfMonitor ebpf.Monitor
 			semconv.ServiceName(config.ServiceName),
 			semconv.ServiceVersion(config.ServiceVersion),
 			attribute.String("component", "tapio-intelligence"),
-			attribute.String("telemetry.sdk.name", "tapio-otel-exporter"),
+			attribute.String("telemetry.sdk.name", "tapio-native-otel"),
 		),
 	)
 	if err != nil {
