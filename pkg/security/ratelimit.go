@@ -13,15 +13,15 @@ import (
 
 // RateLimiter provides comprehensive rate limiting functionality
 type RateLimiter struct {
-	config      RateLimitConfig
-	logger      *logging.Logger
-	globalLimit *rate.Limiter
-	ipLimiters  map[string]*rate.Limiter
-	userLimiters map[string]*rate.Limiter
+	config           RateLimitConfig
+	logger           *logging.Logger
+	globalLimit      *rate.Limiter
+	ipLimiters       map[string]*rate.Limiter
+	userLimiters     map[string]*rate.Limiter
 	endpointLimiters map[string]*rate.Limiter
-	mutex       sync.RWMutex
-	whitelist   map[string]bool
-	blacklist   map[string]bool
+	mutex            sync.RWMutex
+	whitelist        map[string]bool
+	blacklist        map[string]bool
 }
 
 // NewRateLimiter creates a new rate limiter
@@ -77,7 +77,7 @@ func (rl *RateLimiter) Allow(r *http.Request) bool {
 	}
 
 	clientIP := rl.getClientIP(r)
-	
+
 	// Check blacklist first
 	if rl.blacklist[clientIP] {
 		rl.logger.Security("request_blocked", "high",
@@ -209,12 +209,12 @@ func (rl *RateLimiter) matchEndpoint(endpoint, pattern string) bool {
 	if pattern == "*" {
 		return true
 	}
-	
+
 	if strings.HasSuffix(pattern, "*") {
 		prefix := strings.TrimSuffix(pattern, "*")
 		return strings.HasPrefix(endpoint, prefix)
 	}
-	
+
 	return endpoint == pattern
 }
 
@@ -286,7 +286,7 @@ func (rl *RateLimiter) cleanupLimiters() {
 					break
 				}
 			}
-			
+
 			if limiter.Tokens() == float64(burstSize) {
 				delete(rl.endpointLimiters, endpoint)
 			}
@@ -300,7 +300,7 @@ func (rl *RateLimiter) cleanupLimiters() {
 func (rl *RateLimiter) AddToWhitelist(ip string) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	rl.whitelist[ip] = true
 	rl.logger.Info("IP added to whitelist", "ip", ip)
 }
@@ -309,7 +309,7 @@ func (rl *RateLimiter) AddToWhitelist(ip string) {
 func (rl *RateLimiter) RemoveFromWhitelist(ip string) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	delete(rl.whitelist, ip)
 	rl.logger.Info("IP removed from whitelist", "ip", ip)
 }
@@ -318,7 +318,7 @@ func (rl *RateLimiter) RemoveFromWhitelist(ip string) {
 func (rl *RateLimiter) AddToBlacklist(ip string) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	rl.blacklist[ip] = true
 	rl.logger.Security("ip_blacklisted", "high", "ip", ip)
 }
@@ -327,7 +327,7 @@ func (rl *RateLimiter) AddToBlacklist(ip string) {
 func (rl *RateLimiter) RemoveFromBlacklist(ip string) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	delete(rl.blacklist, ip)
 	rl.logger.Info("IP removed from blacklist", "ip", ip)
 }
@@ -361,7 +361,7 @@ type RateLimiterStats struct {
 func (rl *RateLimiter) ResetIPLimiter(ip string) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	delete(rl.ipLimiters, ip)
 	rl.logger.Info("IP rate limiter reset", "ip", ip)
 }
@@ -370,7 +370,7 @@ func (rl *RateLimiter) ResetIPLimiter(ip string) {
 func (rl *RateLimiter) ResetUserLimiter(userID string) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	delete(rl.userLimiters, userID)
 	rl.logger.Info("User rate limiter reset", "user_id", userID)
 }
@@ -434,33 +434,33 @@ func (rl *RateLimiter) GetIPLimiterInfo(ip string) *LimiterInfo {
 	limiter, exists := rl.ipLimiters[ip]
 	if !exists {
 		return &LimiterInfo{
-			Exists:         false,
-			Limit:          float64(rl.config.PerIP.RequestsPerSecond),
-			Burst:          rl.config.PerIP.Burst,
-			Tokens:         float64(rl.config.PerIP.Burst),
-			IsWhitelisted:  rl.whitelist[ip],
-			IsBlacklisted:  rl.blacklist[ip],
+			Exists:        false,
+			Limit:         float64(rl.config.PerIP.RequestsPerSecond),
+			Burst:         rl.config.PerIP.Burst,
+			Tokens:        float64(rl.config.PerIP.Burst),
+			IsWhitelisted: rl.whitelist[ip],
+			IsBlacklisted: rl.blacklist[ip],
 		}
 	}
 
 	return &LimiterInfo{
-		Exists:         true,
-		Limit:          float64(limiter.Limit()),
-		Burst:          limiter.Burst(),
-		Tokens:         limiter.Tokens(),
-		IsWhitelisted:  rl.whitelist[ip],
-		IsBlacklisted:  rl.blacklist[ip],
+		Exists:        true,
+		Limit:         float64(limiter.Limit()),
+		Burst:         limiter.Burst(),
+		Tokens:        limiter.Tokens(),
+		IsWhitelisted: rl.whitelist[ip],
+		IsBlacklisted: rl.blacklist[ip],
 	}
 }
 
 // LimiterInfo contains information about a specific rate limiter
 type LimiterInfo struct {
-	Exists         bool    `json:"exists"`
-	Limit          float64 `json:"limit"`
-	Burst          int     `json:"burst"`
-	Tokens         float64 `json:"tokens"`
-	IsWhitelisted  bool    `json:"is_whitelisted"`
-	IsBlacklisted  bool    `json:"is_blacklisted"`
+	Exists        bool    `json:"exists"`
+	Limit         float64 `json:"limit"`
+	Burst         int     `json:"burst"`
+	Tokens        float64 `json:"tokens"`
+	IsWhitelisted bool    `json:"is_whitelisted"`
+	IsBlacklisted bool    `json:"is_blacklisted"`
 }
 
 // TLSManager provides TLS configuration management
@@ -554,21 +554,21 @@ func (tm *TLSManager) getClientAuthType(authType string) tls.ClientAuthType {
 // getCipherSuites converts string names to cipher suite constants
 func (tm *TLSManager) getCipherSuites(suites []string) []uint16 {
 	var cipherSuites []uint16
-	
+
 	cipherMap := map[string]uint16{
 		"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":   tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-		"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305":   tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+		"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305":    tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 		"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":   tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 		"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384": tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 		"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305":  tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 		"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 	}
-	
+
 	for _, suite := range suites {
 		if cipherSuite, exists := cipherMap[suite]; exists {
 			cipherSuites = append(cipherSuites, cipherSuite)
 		}
 	}
-	
+
 	return cipherSuites
 }

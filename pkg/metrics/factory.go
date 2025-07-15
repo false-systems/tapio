@@ -31,13 +31,13 @@ type PrometheusMetricFactory struct {
 
 // registeredClient tracks registered clients internally
 type registeredClient struct {
-	id       string
-	client   interface{} // MetricClient[T] where T varies
-	config   interface{}
-	created  time.Time
+	id         string
+	client     interface{} // MetricClient[T] where T varies
+	config     interface{}
+	created    time.Time
 	clientType ClientType
-	health   ClientHealth
-	stats    ClientStats
+	health     ClientHealth
+	stats      ClientStats
 }
 
 // FactoryConfig configures the metric factory
@@ -51,25 +51,25 @@ type FactoryConfig struct {
 	DefaultRetryBackoff  time.Duration
 
 	// Default rate limiting
-	DefaultRateLimit     float64
-	DefaultBurstSize     int
+	DefaultRateLimit float64
+	DefaultBurstSize int
 
 	// Health check configuration
-	HealthCheckInterval  time.Duration
-	HealthCheckTimeout   time.Duration
+	HealthCheckInterval time.Duration
+	HealthCheckTimeout  time.Duration
 
 	// Memory management
-	MaxClients          int
+	MaxClients            int
 	ClientCleanupInterval time.Duration
 
 	// Security defaults
-	DefaultTLSConfig     *TLSConfig
-	DefaultAuthConfig    *AuthConfig
+	DefaultTLSConfig  *TLSConfig
+	DefaultAuthConfig *AuthConfig
 
 	// Performance tuning
-	EnableMetrics       bool
-	EnableTracing       bool
-	EnableProfiling     bool
+	EnableMetrics   bool
+	EnableTracing   bool
+	EnableProfiling bool
 }
 
 // FactoryStats tracks factory performance metrics

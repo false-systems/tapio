@@ -9,105 +9,105 @@ import (
 // ServerMetrics tracks server performance and health metrics
 type ServerMetrics struct {
 	// Request metrics
-	requestsReceived    uint64
-	responsesSent       uint64
-	responseSendFailed  uint64
-	
+	requestsReceived   uint64
+	responsesSent      uint64
+	responseSendFailed uint64
+
 	// Event processing metrics
-	eventsProcessed     uint64
-	eventsFailed        uint64
-	eventsThrottled     uint64
-	batchesProcessed    uint64
-	
+	eventsProcessed  uint64
+	eventsFailed     uint64
+	eventsThrottled  uint64
+	batchesProcessed uint64
+
 	// Timing metrics
 	totalProcessingTime int64 // nanoseconds
 	minProcessingTime   int64 // nanoseconds
 	maxProcessingTime   int64 // nanoseconds
-	
+
 	// Connection metrics
 	connectionsEstablished uint64
 	connectionsClosed      uint64
 	connectionErrors       uint64
 	activeConnections      int64
-	
+
 	// Collector metrics
-	collectorsRegistered   map[string]uint64
-	collectorsMu          sync.RWMutex
-	
+	collectorsRegistered map[string]uint64
+	collectorsMu         sync.RWMutex
+
 	// Memory metrics
-	memoryUsage           uint64
-	maxMemoryUsage        uint64
-	
+	memoryUsage    uint64
+	maxMemoryUsage uint64
+
 	// Server lifecycle
-	serverStarted  bool
-	serverStopped  bool
-	startTime      time.Time
-	
+	serverStarted bool
+	serverStopped bool
+	startTime     time.Time
+
 	// Rate metrics (calculated)
-	lastMetricsUpdate    time.Time
-	eventsPerSecond      float64
-	requestsPerSecond    float64
-	
+	lastMetricsUpdate time.Time
+	eventsPerSecond   float64
+	requestsPerSecond float64
+
 	// Load metrics
-	load                 float64
-	availableCapacity    uint32
-	
+	load              float64
+	availableCapacity uint32
+
 	// Error tracking
-	errorCounts          map[string]uint64
-	errorMu             sync.RWMutex
-	
+	errorCounts map[string]uint64
+	errorMu     sync.RWMutex
+
 	// Performance tracking
-	latencyHistogram     *LatencyHistogram
-	throughputHistory    []ThroughputSample
-	throughputMu        sync.RWMutex
+	latencyHistogram  *LatencyHistogram
+	throughputHistory []ThroughputSample
+	throughputMu      sync.RWMutex
 }
 
 // MetricsStats provides a snapshot of server metrics
 type MetricsStats struct {
 	// Request metrics
-	RequestsReceived    uint64
-	ResponsesSent       uint64
-	ResponseSendFailed  uint64
-	
+	RequestsReceived   uint64
+	ResponsesSent      uint64
+	ResponseSendFailed uint64
+
 	// Event processing metrics
-	EventsProcessed     uint64
-	EventsFailed        uint64
-	EventsThrottled     uint64
-	BatchesProcessed    uint64
-	
+	EventsProcessed  uint64
+	EventsFailed     uint64
+	EventsThrottled  uint64
+	BatchesProcessed uint64
+
 	// Rate metrics
-	EventsPerSecond     float64
-	RequestsPerSecond   float64
-	
+	EventsPerSecond   float64
+	RequestsPerSecond float64
+
 	// Timing metrics
-	AvgProcessingTime   time.Duration
-	MinProcessingTime   time.Duration
-	MaxProcessingTime   time.Duration
-	
+	AvgProcessingTime time.Duration
+	MinProcessingTime time.Duration
+	MaxProcessingTime time.Duration
+
 	// Connection metrics
 	ConnectionsEstablished uint64
 	ConnectionsClosed      uint64
 	ConnectionErrors       uint64
 	ActiveConnections      int64
-	
+
 	// Collector metrics
-	CollectorsByType       map[string]uint64
-	
+	CollectorsByType map[string]uint64
+
 	// Memory metrics
-	MemoryUsage           uint64
-	MaxMemoryUsage        uint64
-	
+	MemoryUsage    uint64
+	MaxMemoryUsage uint64
+
 	// Server metrics
-	Uptime               time.Duration
-	Load                 float64
-	AvailableCapacity    uint32
-	
+	Uptime            time.Duration
+	Load              float64
+	AvailableCapacity uint32
+
 	// Error metrics
-	ErrorCounts          map[string]uint64
-	
+	ErrorCounts map[string]uint64
+
 	// Quality metrics
-	SuccessRate          float64
-	ThrottleRate         float64
+	SuccessRate  float64
+	ThrottleRate float64
 }
 
 // LatencyHistogram tracks latency distribution
@@ -133,11 +133,11 @@ type ThroughputSample struct {
 func NewServerMetrics() *ServerMetrics {
 	return &ServerMetrics{
 		collectorsRegistered: make(map[string]uint64),
-		errorCounts:         make(map[string]uint64),
-		latencyHistogram:    NewLatencyHistogram(),
-		throughputHistory:   make([]ThroughputSample, 0, 300), // 5 minutes at 1-second intervals
-		lastMetricsUpdate:   time.Now(),
-		minProcessingTime:   int64(time.Hour), // Initialize to high value
+		errorCounts:          make(map[string]uint64),
+		latencyHistogram:     NewLatencyHistogram(),
+		throughputHistory:    make([]ThroughputSample, 0, 300), // 5 minutes at 1-second intervals
+		lastMetricsUpdate:    time.Now(),
+		minProcessingTime:    int64(time.Hour), // Initialize to high value
 	}
 }
 
@@ -153,7 +153,7 @@ func NewLatencyHistogram() *LatencyHistogram {
 		{UpperBound: 1 * time.Second},
 		{UpperBound: 10 * time.Second},
 	}
-	
+
 	return &LatencyHistogram{
 		buckets: buckets,
 	}
@@ -196,11 +196,11 @@ func (sm *ServerMetrics) ResponseSendFailed() {
 func (sm *ServerMetrics) EventsProcessed(count uint64, processingTime time.Duration) {
 	atomic.AddUint64(&sm.eventsProcessed, count)
 	atomic.AddUint64(&sm.batchesProcessed, 1)
-	
+
 	// Update processing time metrics
 	nanos := processingTime.Nanoseconds()
 	atomic.AddInt64(&sm.totalProcessingTime, nanos)
-	
+
 	// Update min processing time
 	for {
 		current := atomic.LoadInt64(&sm.minProcessingTime)
@@ -211,7 +211,7 @@ func (sm *ServerMetrics) EventsProcessed(count uint64, processingTime time.Durat
 			break
 		}
 	}
-	
+
 	// Update max processing time
 	for {
 		current := atomic.LoadInt64(&sm.maxProcessingTime)
@@ -222,7 +222,7 @@ func (sm *ServerMetrics) EventsProcessed(count uint64, processingTime time.Durat
 			break
 		}
 	}
-	
+
 	// Record in latency histogram
 	sm.latencyHistogram.Record(processingTime)
 }
@@ -277,7 +277,7 @@ func (sm *ServerMetrics) CollectorRegistered(collectorType string) {
 // UpdateMemoryUsage updates memory usage
 func (sm *ServerMetrics) UpdateMemoryUsage(usage uint64) {
 	atomic.StoreUint64(&sm.memoryUsage, usage)
-	
+
 	// Update max memory usage
 	for {
 		current := atomic.LoadUint64(&sm.maxMemoryUsage)
@@ -296,42 +296,42 @@ func (sm *ServerMetrics) UpdateMemoryUsage(usage uint64) {
 func (sm *ServerMetrics) UpdateRates() {
 	now := time.Now()
 	elapsed := now.Sub(sm.lastMetricsUpdate).Seconds()
-	
+
 	if elapsed < 1.0 {
 		return // Update at most once per second
 	}
-	
+
 	// Calculate events per second
 	currentEvents := atomic.LoadUint64(&sm.eventsProcessed)
 	eventsInPeriod := float64(currentEvents) / elapsed
 	sm.eventsPerSecond = eventsInPeriod
-	
+
 	// Calculate requests per second
 	currentRequests := atomic.LoadUint64(&sm.requestsReceived)
 	requestsInPeriod := float64(currentRequests) / elapsed
 	sm.requestsPerSecond = requestsInPeriod
-	
+
 	// Calculate load (0.0 to 1.0)
 	maxEventsPerSec := 165000.0 // Target capacity
 	sm.load = eventsInPeriod / maxEventsPerSec
 	if sm.load > 1.0 {
 		sm.load = 1.0
 	}
-	
+
 	// Calculate available capacity
 	availableEvents := maxEventsPerSec - eventsInPeriod
 	if availableEvents < 0 {
 		availableEvents = 0
 	}
 	sm.availableCapacity = uint32(availableEvents)
-	
+
 	// Add throughput sample
 	sample := ThroughputSample{
 		Timestamp:    now,
 		EventsPerSec: eventsInPeriod,
 		Load:         sm.load,
 	}
-	
+
 	sm.throughputMu.Lock()
 	sm.throughputHistory = append(sm.throughputHistory, sample)
 	// Keep only last 300 samples (5 minutes)
@@ -339,7 +339,7 @@ func (sm *ServerMetrics) UpdateRates() {
 		sm.throughputHistory = sm.throughputHistory[1:]
 	}
 	sm.throughputMu.Unlock()
-	
+
 	sm.lastMetricsUpdate = now
 }
 
@@ -355,7 +355,7 @@ func (sm *ServerMetrics) recordError(errorType string) {
 // GetStats returns a snapshot of all metrics
 func (sm *ServerMetrics) GetStats() MetricsStats {
 	sm.UpdateRates()
-	
+
 	// Get atomic values
 	eventsProcessed := atomic.LoadUint64(&sm.eventsProcessed)
 	eventsFailed := atomic.LoadUint64(&sm.eventsFailed)
@@ -364,33 +364,33 @@ func (sm *ServerMetrics) GetStats() MetricsStats {
 	totalProcessingTime := atomic.LoadInt64(&sm.totalProcessingTime)
 	minProcessingTime := atomic.LoadInt64(&sm.minProcessingTime)
 	maxProcessingTime := atomic.LoadInt64(&sm.maxProcessingTime)
-	
+
 	// Calculate average processing time
 	var avgProcessingTime time.Duration
 	if batchesProcessed > 0 {
 		avgProcessingTime = time.Duration(totalProcessingTime / int64(batchesProcessed))
 	}
-	
+
 	// Calculate success rate
 	totalEvents := eventsProcessed + eventsFailed
 	var successRate float64
 	if totalEvents > 0 {
 		successRate = float64(eventsProcessed) / float64(totalEvents)
 	}
-	
+
 	// Calculate throttle rate
 	totalProcessingAttempts := eventsProcessed + eventsFailed + eventsThrottled
 	var throttleRate float64
 	if totalProcessingAttempts > 0 {
 		throttleRate = float64(eventsThrottled) / float64(totalProcessingAttempts)
 	}
-	
+
 	// Get uptime
 	var uptime time.Duration
 	if sm.serverStarted && !sm.startTime.IsZero() {
 		uptime = time.Since(sm.startTime)
 	}
-	
+
 	// Copy collector stats
 	sm.collectorsMu.RLock()
 	collectorsByType := make(map[string]uint64)
@@ -398,7 +398,7 @@ func (sm *ServerMetrics) GetStats() MetricsStats {
 		collectorsByType[k] = v
 	}
 	sm.collectorsMu.RUnlock()
-	
+
 	// Copy error counts
 	sm.errorMu.RLock()
 	errorCounts := make(map[string]uint64)
@@ -406,33 +406,33 @@ func (sm *ServerMetrics) GetStats() MetricsStats {
 		errorCounts[k] = v
 	}
 	sm.errorMu.RUnlock()
-	
+
 	return MetricsStats{
 		RequestsReceived:       atomic.LoadUint64(&sm.requestsReceived),
 		ResponsesSent:          atomic.LoadUint64(&sm.responsesSent),
 		ResponseSendFailed:     atomic.LoadUint64(&sm.responseSendFailed),
 		EventsProcessed:        eventsProcessed,
-		EventsFailed:          eventsFailed,
-		EventsThrottled:       eventsThrottled,
-		BatchesProcessed:      batchesProcessed,
-		EventsPerSecond:       sm.eventsPerSecond,
-		RequestsPerSecond:     sm.requestsPerSecond,
-		AvgProcessingTime:     avgProcessingTime,
-		MinProcessingTime:     time.Duration(minProcessingTime),
-		MaxProcessingTime:     time.Duration(maxProcessingTime),
+		EventsFailed:           eventsFailed,
+		EventsThrottled:        eventsThrottled,
+		BatchesProcessed:       batchesProcessed,
+		EventsPerSecond:        sm.eventsPerSecond,
+		RequestsPerSecond:      sm.requestsPerSecond,
+		AvgProcessingTime:      avgProcessingTime,
+		MinProcessingTime:      time.Duration(minProcessingTime),
+		MaxProcessingTime:      time.Duration(maxProcessingTime),
 		ConnectionsEstablished: atomic.LoadUint64(&sm.connectionsEstablished),
-		ConnectionsClosed:     atomic.LoadUint64(&sm.connectionsClosed),
-		ConnectionErrors:      atomic.LoadUint64(&sm.connectionErrors),
-		ActiveConnections:     atomic.LoadInt64(&sm.activeConnections),
-		CollectorsByType:      collectorsByType,
-		MemoryUsage:          atomic.LoadUint64(&sm.memoryUsage),
-		MaxMemoryUsage:       atomic.LoadUint64(&sm.maxMemoryUsage),
-		Uptime:               uptime,
-		Load:                 sm.load,
-		AvailableCapacity:    sm.availableCapacity,
-		ErrorCounts:          errorCounts,
-		SuccessRate:          successRate,
-		ThrottleRate:         throttleRate,
+		ConnectionsClosed:      atomic.LoadUint64(&sm.connectionsClosed),
+		ConnectionErrors:       atomic.LoadUint64(&sm.connectionErrors),
+		ActiveConnections:      atomic.LoadInt64(&sm.activeConnections),
+		CollectorsByType:       collectorsByType,
+		MemoryUsage:            atomic.LoadUint64(&sm.memoryUsage),
+		MaxMemoryUsage:         atomic.LoadUint64(&sm.maxMemoryUsage),
+		Uptime:                 uptime,
+		Load:                   sm.load,
+		AvailableCapacity:      sm.availableCapacity,
+		ErrorCounts:            errorCounts,
+		SuccessRate:            successRate,
+		ThrottleRate:           throttleRate,
 	}
 }
 
@@ -440,7 +440,7 @@ func (sm *ServerMetrics) GetStats() MetricsStats {
 func (sm *ServerMetrics) GetThroughputHistory() []ThroughputSample {
 	sm.throughputMu.RLock()
 	defer sm.throughputMu.RUnlock()
-	
+
 	// Return a copy
 	history := make([]ThroughputSample, len(sm.throughputHistory))
 	copy(history, sm.throughputHistory)
@@ -453,14 +453,14 @@ func (sm *ServerMetrics) GetThroughputHistory() []ThroughputSample {
 func (lh *LatencyHistogram) Record(latency time.Duration) {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
-	
+
 	for i := range lh.buckets {
 		if latency <= lh.buckets[i].UpperBound {
 			lh.buckets[i].Count++
 			return
 		}
 	}
-	
+
 	// If latency exceeds all buckets, add to the last bucket
 	if len(lh.buckets) > 0 {
 		lh.buckets[len(lh.buckets)-1].Count++
@@ -471,33 +471,33 @@ func (lh *LatencyHistogram) Record(latency time.Duration) {
 func (lh *LatencyHistogram) GetPercentile(percentile float64) time.Duration {
 	lh.mu.RLock()
 	defer lh.mu.RUnlock()
-	
+
 	// Calculate total count
 	var totalCount uint64
 	for _, bucket := range lh.buckets {
 		totalCount += bucket.Count
 	}
-	
+
 	if totalCount == 0 {
 		return 0
 	}
-	
+
 	// Find the bucket containing the percentile
 	targetCount := uint64(float64(totalCount) * percentile / 100.0)
 	var cumulativeCount uint64
-	
+
 	for _, bucket := range lh.buckets {
 		cumulativeCount += bucket.Count
 		if cumulativeCount >= targetCount {
 			return bucket.UpperBound
 		}
 	}
-	
+
 	// Return the last bucket's upper bound if not found
 	if len(lh.buckets) > 0 {
 		return lh.buckets[len(lh.buckets)-1].UpperBound
 	}
-	
+
 	return 0
 }
 
@@ -505,7 +505,7 @@ func (lh *LatencyHistogram) GetPercentile(percentile float64) time.Duration {
 func (lh *LatencyHistogram) Reset() {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
-	
+
 	for i := range lh.buckets {
 		lh.buckets[i].Count = 0
 	}

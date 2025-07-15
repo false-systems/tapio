@@ -71,66 +71,12 @@ func (mt MetricType) String() string {
 	}
 }
 
-// Alert represents a performance alert
-type Alert struct {
-	ID         string                 `json:"id"`
-	Timestamp  time.Time              `json:"timestamp"`
-	Level      AlertLevel             `json:"level"`
-	Type       AlertType              `json:"type"`
-	Metric     string                 `json:"metric"`
-	Value      float64                `json:"value"`
-	Threshold  float64                `json:"threshold"`
-	Message    string                 `json:"message"`
-	Context    map[string]interface{} `json:"context,omitempty"`
-	Resolved   bool                   `json:"resolved"`
-	ResolvedAt *time.Time             `json:"resolved_at,omitempty"`
-}
+// Alert and AlertLevel types are now defined in types.go
 
-// AlertLevel defines alert severity levels
-type AlertLevel int
-
-const (
-	AlertLevelInfo AlertLevel = iota
-	AlertLevelWarning
-	AlertLevelCritical
-)
-
-func (al AlertLevel) String() string {
-	switch al {
-	case AlertLevelInfo:
-		return "info"
-	case AlertLevelWarning:
-		return "warning"
-	case AlertLevelCritical:
-		return "critical"
-	default:
-		return "unknown"
-	}
-}
-
-// AlertType defines types of alerts
-type AlertType int
-
-const (
-	AlertTypeThreshold AlertType = iota
-	AlertTypeAnomaly
-	AlertTypeTrend
-	AlertTypeResourceLeak
-)
+// Alert types are now defined in types.go
 
 func (at AlertType) String() string {
-	switch at {
-	case AlertTypeThreshold:
-		return "threshold"
-	case AlertTypeAnomaly:
-		return "anomaly"
-	case AlertTypeTrend:
-		return "trend"
-	case AlertTypeResourceLeak:
-		return "resource_leak"
-	default:
-		return "unknown"
-	}
+	return string(at)
 }
 
 // MonitorConfig configures the performance monitor

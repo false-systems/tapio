@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"tapio/cmd/install/installer"
+	"github.com/yairfalse/tapio/cmd/install/common"
 )
 
 // Validator implements the installer.Validator interface
@@ -22,7 +22,7 @@ type Validator struct {
 }
 
 // NewValidator creates a new validator
-func NewValidator() installer.Validator {
+func NewValidator() common.Validator {
 	return &Validator{
 		timeout: 30 * time.Second,
 	}
@@ -36,7 +36,7 @@ func (v *Validator) ValidateInstallation(ctx context.Context, installPath string
 	}{
 		{"directory structure", func() error { return v.checkDirectoryStructure(installPath) }},
 		{"binary presence", func() error { return v.checkBinaryPresence(installPath) }},
-		{"permissions", func() error { return v.checkPermissions(installPath) }},
+		{"permissions", func() error { return v.checkPathPermissions(installPath) }},
 		{"dependencies", func() error { return v.checkDependencies() }},
 	}
 

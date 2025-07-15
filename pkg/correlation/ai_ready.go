@@ -14,29 +14,29 @@ import (
 // It processes our pre-computed AI features and creates an optimal environment for ML models
 type AIReadyProcessor struct {
 	// Core AI processing components
-	featureProcessor     *FeatureProcessor
-	embeddingProcessor   *EmbeddingProcessor
-	graphProcessor       *GraphProcessor
-	timeSeriesProcessor  *TimeSeriesProcessor
-	
+	featureProcessor    *FeatureProcessor
+	embeddingProcessor  *EmbeddingProcessor
+	graphProcessor      *GraphProcessor
+	timeSeriesProcessor *TimeSeriesProcessor
+
 	// ML model interfaces (ready for future models)
-	modelRegistry       *ModelRegistry
-	inferenceEngine     *InferenceEngine
-	predictionTracker   *PredictionTracker
-	
+	modelRegistry     *ModelRegistry
+	inferenceEngine   *InferenceEngine
+	predictionTracker *PredictionTracker
+
 	// Feature optimization
-	featureOptimizer    *FeatureOptimizer
-	dimensionReducer    *DimensionReducer
-	featureSelector     *FeatureSelector
-	
+	featureOptimizer *FeatureOptimizer
+	dimensionReducer *DimensionReducer
+	featureSelector  *FeatureSelector
+
 	// Performance and scaling
-	batchProcessor      *BatchProcessor
-	featureCache        *FeatureCache
-	computePool         *ComputePool
-	
+	batchProcessor *BatchProcessor
+	featureCache   *FeatureCache
+	computePool    *ComputePool
+
 	// Configuration
-	config              *AIConfig
-	
+	config *AIConfig
+
 	// State management
 	mu                  sync.RWMutex
 	processedEvents     uint64
@@ -48,35 +48,35 @@ type AIReadyProcessor struct {
 // AIConfig configures the AI-ready processor for optimal performance
 type AIConfig struct {
 	// Feature processing configuration
-	DenseFeatureSize      int           `json:"dense_feature_size"`      // 256 for optimal performance
-	SparseFeatureEnabled  bool          `json:"sparse_feature_enabled"`  // true for our sparse features
-	GraphFeaturesEnabled  bool          `json:"graph_features_enabled"`  // true for GNN features
-	TimeSeriesEnabled     bool          `json:"time_series_enabled"`     // true for temporal features
-	
+	DenseFeatureSize     int  `json:"dense_feature_size"`     // 256 for optimal performance
+	SparseFeatureEnabled bool `json:"sparse_feature_enabled"` // true for our sparse features
+	GraphFeaturesEnabled bool `json:"graph_features_enabled"` // true for GNN features
+	TimeSeriesEnabled    bool `json:"time_series_enabled"`    // true for temporal features
+
 	// Embedding configuration
-	EmbeddingDimension    int           `json:"embedding_dimension"`     // 512 for semantic embeddings
-	EmbeddingModel        string        `json:"embedding_model"`         // Model for computing embeddings
-	
+	EmbeddingDimension int    `json:"embedding_dimension"` // 512 for semantic embeddings
+	EmbeddingModel     string `json:"embedding_model"`     // Model for computing embeddings
+
 	// Performance optimization
-	BatchSize             int           `json:"batch_size"`              // 1000 for optimal throughput
-	FeatureCacheSize      int           `json:"feature_cache_size"`      // 1M features
-	EmbeddingCacheSize    int           `json:"embedding_cache_size"`    // 500k embeddings
-	ComputeWorkers        int           `json:"compute_workers"`         // CPU cores * 2
-	
+	BatchSize          int `json:"batch_size"`           // 1000 for optimal throughput
+	FeatureCacheSize   int `json:"feature_cache_size"`   // 1M features
+	EmbeddingCacheSize int `json:"embedding_cache_size"` // 500k embeddings
+	ComputeWorkers     int `json:"compute_workers"`      // CPU cores * 2
+
 	// ML model configuration
-	ModelStorePath        string        `json:"model_store_path"`        // Path for model storage
-	InferenceTimeout      time.Duration `json:"inference_timeout"`       // 100ms for real-time
-	ModelCacheSize        int           `json:"model_cache_size"`        // Number of cached models
-	
+	ModelStorePath   string        `json:"model_store_path"`  // Path for model storage
+	InferenceTimeout time.Duration `json:"inference_timeout"` // 100ms for real-time
+	ModelCacheSize   int           `json:"model_cache_size"`  // Number of cached models
+
 	// Feature optimization
-	AutoFeatureSelection  bool          `json:"auto_feature_selection"`  // true for automatic optimization
-	DimensionReduction    bool          `json:"dimension_reduction"`     // true for performance
-	FeatureNormalization  bool          `json:"feature_normalization"`   // true for ML compatibility
-	
+	AutoFeatureSelection bool `json:"auto_feature_selection"` // true for automatic optimization
+	DimensionReduction   bool `json:"dimension_reduction"`    // true for performance
+	FeatureNormalization bool `json:"feature_normalization"`  // true for ML compatibility
+
 	// Quality monitoring
-	QualityTracking       bool          `json:"quality_tracking"`        // true for feature quality
-	DriftDetection        bool          `json:"drift_detection"`         // true for data drift detection
-	ModelMonitoring       bool          `json:"model_monitoring"`        // true for model performance
+	QualityTracking bool `json:"quality_tracking"` // true for feature quality
+	DriftDetection  bool `json:"drift_detection"`  // true for data drift detection
+	ModelMonitoring bool `json:"model_monitoring"` // true for model performance
 }
 
 // NewAIReadyProcessor creates the perfect AI foundation
@@ -84,7 +84,7 @@ func NewAIReadyProcessor(config *AIConfig) (*AIReadyProcessor, error) {
 	processor := &AIReadyProcessor{
 		config: config,
 	}
-	
+
 	// Initialize feature processor optimized for our opinionated format
 	featureProcessor, err := NewFeatureProcessor(&FeatureProcessorConfig{
 		DenseFeatureSize:     config.DenseFeatureSize,
@@ -96,37 +96,37 @@ func NewAIReadyProcessor(config *AIConfig) (*AIReadyProcessor, error) {
 		return nil, fmt.Errorf("failed to create feature processor: %w", err)
 	}
 	processor.featureProcessor = featureProcessor
-	
+
 	// Initialize embedding processor for semantic features
 	embeddingProcessor, err := NewEmbeddingProcessor(&EmbeddingProcessorConfig{
 		Dimension:       config.EmbeddingDimension,
-		Model:          config.EmbeddingModel,
-		CacheSize:      config.EmbeddingCacheSize,
+		Model:           config.EmbeddingModel,
+		CacheSize:       config.EmbeddingCacheSize,
 		BatchProcessing: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding processor: %w", err)
 	}
 	processor.embeddingProcessor = embeddingProcessor
-	
+
 	// Initialize graph processor for graph features
 	if config.GraphFeaturesEnabled {
 		graphProcessor, err := NewGraphProcessor(&GraphProcessorConfig{
-			NodeEmbeddingSize:    config.DenseFeatureSize,
-			EdgeFeatureEnabled:   true,
-			GraphStatsEnabled:    true,
-			CentralityMetrics:    true,
+			NodeEmbeddingSize:  config.DenseFeatureSize,
+			EdgeFeatureEnabled: true,
+			GraphStatsEnabled:  true,
+			CentralityMetrics:  true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create graph processor: %w", err)
 		}
 		processor.graphProcessor = graphProcessor
 	}
-	
+
 	// Initialize time series processor for temporal features
 	if config.TimeSeriesEnabled {
 		timeSeriesProcessor, err := NewTimeSeriesProcessor(&TimeSeriesProcessorConfig{
-			WindowSizes:          []time.Duration{time.Minute, 5*time.Minute, time.Hour},
+			WindowSizes:          []time.Duration{time.Minute, 5 * time.Minute, time.Hour},
 			StatisticsEnabled:    true,
 			TrendDetection:       true,
 			SeasonalityDetection: true,
@@ -136,31 +136,31 @@ func NewAIReadyProcessor(config *AIConfig) (*AIReadyProcessor, error) {
 		}
 		processor.timeSeriesProcessor = timeSeriesProcessor
 	}
-	
+
 	// Initialize model registry for future ML models
 	modelRegistry, err := NewModelRegistry(&ModelRegistryConfig{
-		StorePath:     config.ModelStorePath,
-		CacheSize:     config.ModelCacheSize,
-		LazyLoading:   true,
-		Versioning:    true,
+		StorePath:   config.ModelStorePath,
+		CacheSize:   config.ModelCacheSize,
+		LazyLoading: true,
+		Versioning:  true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model registry: %w", err)
 	}
 	processor.modelRegistry = modelRegistry
-	
+
 	// Initialize inference engine for ML predictions
 	inferenceEngine, err := NewInferenceEngine(&InferenceEngineConfig{
-		Timeout:            config.InferenceTimeout,
-		BatchInference:     true,
-		ParallelInference:  true,
+		Timeout:           config.InferenceTimeout,
+		BatchInference:    true,
+		ParallelInference: true,
 		Workers:           config.ComputeWorkers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create inference engine: %w", err)
 	}
 	processor.inferenceEngine = inferenceEngine
-	
+
 	// Initialize feature optimizer for performance
 	if config.AutoFeatureSelection {
 		featureOptimizer, err := NewFeatureOptimizer(&FeatureOptimizerConfig{
@@ -174,55 +174,55 @@ func NewAIReadyProcessor(config *AIConfig) (*AIReadyProcessor, error) {
 		}
 		processor.featureOptimizer = featureOptimizer
 	}
-	
+
 	// Initialize batch processor for high throughput
 	batchProcessor, err := NewBatchProcessor(&BatchProcessorConfig{
-		BatchSize:        config.BatchSize,
-		Workers:         config.ComputeWorkers,
-		QueueSize:       config.BatchSize * 10,
+		BatchSize:               config.BatchSize,
+		Workers:                 config.ComputeWorkers,
+		QueueSize:               config.BatchSize * 10,
 		OptimizedForOpinionated: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create batch processor: %w", err)
 	}
 	processor.batchProcessor = batchProcessor
-	
+
 	// Initialize feature cache for performance
 	featureCache, err := NewFeatureCache(&FeatureCacheConfig{
-		MaxSize:        config.FeatureCacheSize,
-		TTL:           time.Hour,
-		EvictionPolicy: "lru",
+		MaxSize:            config.FeatureCacheSize,
+		TTL:                time.Hour,
+		EvictionPolicy:     "lru",
 		CompressionEnabled: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create feature cache: %w", err)
 	}
 	processor.featureCache = featureCache
-	
+
 	// Initialize compute pool for parallel processing
 	computePool, err := NewComputePool(&ComputePoolConfig{
-		Workers:        config.ComputeWorkers,
-		QueueSize:      config.ComputeWorkers * 100,
-		TaskTimeout:    config.InferenceTimeout,
-		LoadBalancing:  true,
+		Workers:       config.ComputeWorkers,
+		QueueSize:     config.ComputeWorkers * 100,
+		TaskTimeout:   config.InferenceTimeout,
+		LoadBalancing: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create compute pool: %w", err)
 	}
 	processor.computePool = computePool
-	
+
 	// Initialize prediction tracker for quality monitoring
 	predictionTracker, err := NewPredictionTracker(&PredictionTrackerConfig{
-		TrackingEnabled:    config.ModelMonitoring,
-		AccuracyTracking:   true,
-		DriftDetection:     config.DriftDetection,
-		HistorySize:       10000,
+		TrackingEnabled:  config.ModelMonitoring,
+		AccuracyTracking: true,
+		DriftDetection:   config.DriftDetection,
+		HistorySize:      10000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create prediction tracker: %w", err)
 	}
 	processor.predictionTracker = predictionTracker
-	
+
 	return processor, nil
 }
 
@@ -231,16 +231,16 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 	if event.AiFeatures == nil {
 		return nil, fmt.Errorf("no AI features in event")
 	}
-	
+
 	startTime := time.Now()
-	
+
 	// Check feature cache first
 	cacheKey := generateFeatureCacheKey(event.Id, event.Timestamp.AsTime())
 	if cached, found := p.featureCache.Get(cacheKey); found {
 		p.cacheHits++
 		return cached.(*AIProcessingResult), nil
 	}
-	
+
 	result := &AIProcessingResult{
 		EventID:         event.Id,
 		ProcessingTime:  time.Duration(0),
@@ -249,7 +249,7 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 		Insights:        make([]*AIInsight, 0),
 		Recommendations: make([]*AIRecommendation, 0),
 	}
-	
+
 	// Process dense features
 	if len(event.AiFeatures.DenseFeatures) > 0 {
 		processedDense, err := p.featureProcessor.ProcessDenseFeatures(event.AiFeatures.DenseFeatures)
@@ -258,7 +258,7 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 		}
 		result.Features["dense"] = processedDense
 	}
-	
+
 	// Process sparse features
 	if len(event.AiFeatures.SparseFeatures) > 0 {
 		processedSparse, err := p.featureProcessor.ProcessSparseFeatures(event.AiFeatures.SparseFeatures)
@@ -267,7 +267,7 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 		}
 		result.Features["sparse"] = processedSparse
 	}
-	
+
 	// Process categorical features
 	if len(event.AiFeatures.CategoricalFeatures) > 0 {
 		processedCategorical, err := p.featureProcessor.ProcessCategoricalFeatures(event.AiFeatures.CategoricalFeatures)
@@ -276,7 +276,7 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 		}
 		result.Features["categorical"] = processedCategorical
 	}
-	
+
 	// Process time series features
 	if p.timeSeriesProcessor != nil && event.AiFeatures.TimeSeries != nil {
 		processedTimeSeries, err := p.timeSeriesProcessor.ProcessTimeSeriesFeatures(event.AiFeatures.TimeSeries)
@@ -285,7 +285,7 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 		}
 		result.Features["time_series"] = processedTimeSeries
 	}
-	
+
 	// Process graph features
 	if p.graphProcessor != nil && event.AiFeatures.Graph != nil {
 		processedGraph, err := p.graphProcessor.ProcessGraphFeatures(event.AiFeatures.Graph)
@@ -294,7 +294,7 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 		}
 		result.Features["graph"] = processedGraph
 	}
-	
+
 	// Apply feature optimization if enabled
 	if p.featureOptimizer != nil {
 		optimized, err := p.featureOptimizer.OptimizeFeatures(result.Features)
@@ -303,7 +303,7 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 		}
 		result.Features = optimized
 	}
-	
+
 	// Run inference with available models
 	predictions, err := p.runInference(ctx, result.Features, event)
 	if err != nil {
@@ -311,35 +311,35 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 	} else {
 		result.Predictions = predictions
 	}
-	
+
 	// Generate AI insights
 	insights := p.generateAIInsights(result.Features, result.Predictions, event)
 	result.Insights = insights
-	
+
 	// Generate AI recommendations
 	recommendations := p.generateAIRecommendations(result.Features, result.Predictions, event)
 	result.Recommendations = recommendations
-	
+
 	// Update processing time
 	result.ProcessingTime = time.Since(startTime)
-	
+
 	// Cache the result
 	p.featureCache.Set(cacheKey, result)
-	
+
 	// Update statistics
 	p.processedEvents++
 	p.featureComputations++
-	
+
 	return result, nil
 }
 
 // runInference executes ML models on the processed features
 func (p *AIReadyProcessor) runInference(ctx context.Context, features map[string]interface{}, event *opinionated.OpinionatedEvent) (map[string]*MLPrediction, error) {
 	predictions := make(map[string]*MLPrediction)
-	
+
 	// Get available models for this event type
 	models := p.modelRegistry.GetModelsForEventType(event.Semantic.EventType)
-	
+
 	// Run inference for each model
 	for _, model := range models {
 		prediction, err := p.inferenceEngine.RunInference(ctx, model, features)
@@ -347,21 +347,21 @@ func (p *AIReadyProcessor) runInference(ctx context.Context, features map[string
 			// Log error and continue with other models
 			continue
 		}
-		
+
 		predictions[model.Name] = prediction
 		p.modelPredictions++
-		
+
 		// Track prediction for quality monitoring
 		p.predictionTracker.TrackPrediction(model.Name, prediction)
 	}
-	
+
 	return predictions, nil
 }
 
 // generateAIInsights creates AI-powered insights
 func (p *AIReadyProcessor) generateAIInsights(features map[string]interface{}, predictions map[string]*MLPrediction, event *opinionated.OpinionatedEvent) []*AIInsight {
 	insights := make([]*AIInsight, 0, 3)
-	
+
 	// Feature importance insights
 	if denseFeatures, ok := features["dense"].([]float32); ok {
 		insight := p.generateFeatureImportanceInsight(denseFeatures, event)
@@ -369,7 +369,7 @@ func (p *AIReadyProcessor) generateAIInsights(features map[string]interface{}, p
 			insights = append(insights, insight)
 		}
 	}
-	
+
 	// Prediction confidence insights
 	for modelName, prediction := range predictions {
 		insight := p.generatePredictionInsight(modelName, prediction, event)
@@ -377,7 +377,7 @@ func (p *AIReadyProcessor) generateAIInsights(features map[string]interface{}, p
 			insights = append(insights, insight)
 		}
 	}
-	
+
 	// Anomaly detection insights
 	if anomalyScore := p.calculateAnomalyScore(features); anomalyScore > 0.8 {
 		insight := &AIInsight{
@@ -390,14 +390,14 @@ func (p *AIReadyProcessor) generateAIInsights(features map[string]interface{}, p
 		}
 		insights = append(insights, insight)
 	}
-	
+
 	return insights
 }
 
 // generateAIRecommendations creates AI-powered recommendations
 func (p *AIReadyProcessor) generateAIRecommendations(features map[string]interface{}, predictions map[string]*MLPrediction, event *opinionated.OpinionatedEvent) []*AIRecommendation {
 	recommendations := make([]*AIRecommendation, 0, 2)
-	
+
 	// Performance optimization recommendations
 	if p.shouldRecommendOptimization(features, predictions) {
 		recommendation := &AIRecommendation{
@@ -410,7 +410,7 @@ func (p *AIReadyProcessor) generateAIRecommendations(features map[string]interfa
 		}
 		recommendations = append(recommendations, recommendation)
 	}
-	
+
 	// Prediction-based recommendations
 	for modelName, prediction := range predictions {
 		if prediction.Confidence > 0.8 && prediction.Probability > 0.7 {
@@ -425,7 +425,7 @@ func (p *AIReadyProcessor) generateAIRecommendations(features map[string]interfa
 			recommendations = append(recommendations, recommendation)
 		}
 	}
-	
+
 	return recommendations
 }
 
@@ -444,21 +444,21 @@ func (p *AIReadyProcessor) RegisterMLModel(model *MLModel) error {
 func (p *AIReadyProcessor) GetAIStats() *AIStats {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	
+
 	return &AIStats{
 		ProcessedEvents:     p.processedEvents,
 		ModelPredictions:    p.modelPredictions,
 		FeatureComputations: p.featureComputations,
-		CacheHits:          p.cacheHits,
-		CacheHitRate:       float64(p.cacheHits) / float64(p.featureComputations),
-		
-		ModelStats:          p.modelRegistry.GetStats(),
-		InferenceStats:      p.inferenceEngine.GetStats(),
-		FeatureStats:        p.featureProcessor.GetStats(),
-		PredictionStats:     p.predictionTracker.GetStats(),
-		
-		MemoryUsage:         p.getMemoryUsage(),
-		ProcessingLatency:   p.getAverageLatency(),
+		CacheHits:           p.cacheHits,
+		CacheHitRate:        float64(p.cacheHits) / float64(p.featureComputations),
+
+		ModelStats:      p.modelRegistry.GetStats(),
+		InferenceStats:  p.inferenceEngine.GetStats(),
+		FeatureStats:    p.featureProcessor.GetStats(),
+		PredictionStats: p.predictionTracker.GetStats(),
+
+		MemoryUsage:       p.getMemoryUsage(),
+		ProcessingLatency: p.getAverageLatency(),
 	}
 }
 
@@ -466,12 +466,12 @@ func (p *AIReadyProcessor) GetAIStats() *AIStats {
 
 // AIProcessingResult contains the complete AI processing output
 type AIProcessingResult struct {
-	EventID         string                      `json:"event_id"`
-	ProcessingTime  time.Duration              `json:"processing_time"`
-	Features        map[string]interface{}     `json:"features"`
-	Predictions     map[string]*MLPrediction   `json:"predictions"`
-	Insights        []*AIInsight               `json:"insights"`
-	Recommendations []*AIRecommendation        `json:"recommendations"`
+	EventID         string                   `json:"event_id"`
+	ProcessingTime  time.Duration            `json:"processing_time"`
+	Features        map[string]interface{}   `json:"features"`
+	Predictions     map[string]*MLPrediction `json:"predictions"`
+	Insights        []*AIInsight             `json:"insights"`
+	Recommendations []*AIRecommendation      `json:"recommendations"`
 }
 
 // MLPrediction represents a prediction from an ML model
@@ -509,19 +509,19 @@ type AIRecommendation struct {
 
 // AIStats provides comprehensive AI processing metrics
 type AIStats struct {
-	ProcessedEvents     uint64      `json:"processed_events"`
-	ModelPredictions    uint64      `json:"model_predictions"`
-	FeatureComputations uint64      `json:"feature_computations"`
-	CacheHits          uint64      `json:"cache_hits"`
-	CacheHitRate       float64     `json:"cache_hit_rate"`
-	
-	ModelStats         interface{} `json:"model_stats"`
-	InferenceStats     interface{} `json:"inference_stats"`
-	FeatureStats       interface{} `json:"feature_stats"`
-	PredictionStats    interface{} `json:"prediction_stats"`
-	
-	MemoryUsage        int64       `json:"memory_usage"`
-	ProcessingLatency  time.Duration `json:"processing_latency"`
+	ProcessedEvents     uint64  `json:"processed_events"`
+	ModelPredictions    uint64  `json:"model_predictions"`
+	FeatureComputations uint64  `json:"feature_computations"`
+	CacheHits           uint64  `json:"cache_hits"`
+	CacheHitRate        float64 `json:"cache_hit_rate"`
+
+	ModelStats      interface{} `json:"model_stats"`
+	InferenceStats  interface{} `json:"inference_stats"`
+	FeatureStats    interface{} `json:"feature_stats"`
+	PredictionStats interface{} `json:"prediction_stats"`
+
+	MemoryUsage       int64         `json:"memory_usage"`
+	ProcessingLatency time.Duration `json:"processing_latency"`
 }
 
 // Helper methods

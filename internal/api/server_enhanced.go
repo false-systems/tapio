@@ -25,7 +25,7 @@ func NewServerWithStore(engine *correlation.PerfectEngine, store correlation.Ins
 	s := &Server{
 		router:            gin.New(),
 		correlationEngine: engine,
-		insightStore:      store, // Use the provided store instead of creating new
+		insightStore:      store,        // Use the provided store instead of creating new
 		logger:            zap.NewNop(), // Should inject real logger
 		config:            config,
 	}
@@ -41,11 +41,11 @@ func NewServerWithStore(engine *correlation.PerfectEngine, store correlation.Ins
 func (s *Server) getPodFlows(c *gin.Context) {
 	namespace := c.Param("namespace")
 	pod := c.Param("pod")
-	
+
 	// Query parameters
-	direction := c.Query("direction")     // ingress, egress, both
-	timeRange := c.Query("time_range")   // 5m, 1h, 24h
-	
+	direction := c.Query("direction")  // ingress, egress, both
+	timeRange := c.Query("time_range") // 5m, 1h, 24h
+
 	// In production, this would query the flow collector
 	flows := []gin.H{
 		{
@@ -79,7 +79,7 @@ func (s *Server) getPodFlows(c *gin.Context) {
 			"timestamp":   time.Now().Add(-3 * time.Minute),
 		},
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"pod":       pod,
 		"namespace": namespace,
@@ -100,12 +100,12 @@ func (s *Server) correlateEvents(c *gin.Context) {
 		TimeWindow  time.Duration `json:"time_window"`
 		MaxDistance int           `json:"max_distance"`
 	}
-	
+
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	
+
 	// Query correlation engine for related events
 	correlations := []gin.H{
 		{
@@ -118,7 +118,7 @@ func (s *Server) correlateEvents(c *gin.Context) {
 			"timestamp":      time.Now(),
 		},
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"request":      request,
 		"correlations": correlations,
@@ -130,7 +130,7 @@ func (s *Server) listPatterns(c *gin.Context) {
 	// Query parameters
 	active := c.Query("active") == "true"
 	category := c.Query("category")
-	
+
 	// In production, query pattern store
 	patterns := []gin.H{
 		{
@@ -154,7 +154,7 @@ func (s *Server) listPatterns(c *gin.Context) {
 			"last_seen":   time.Now().Add(-30 * time.Minute),
 		},
 	}
-	
+
 	// Filter patterns
 	var filtered []gin.H
 	for _, pattern := range patterns {
@@ -166,7 +166,7 @@ func (s *Server) listPatterns(c *gin.Context) {
 		}
 		filtered = append(filtered, pattern)
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"patterns": filtered,
 		"count":    len(filtered),
@@ -180,7 +180,7 @@ func (s *Server) listPatterns(c *gin.Context) {
 func (s *Server) getPatternMatches(c *gin.Context) {
 	patternID := c.Param("patternId")
 	limit := c.DefaultQuery("limit", "50")
-	
+
 	// In production, query pattern match history
 	matches := []gin.H{
 		{
@@ -194,7 +194,7 @@ func (s *Server) getPatternMatches(c *gin.Context) {
 			"insights":    []string{"insight-123", "insight-456"},
 		},
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"pattern_id": patternID,
 		"matches":    matches,
@@ -209,10 +209,10 @@ func (s *Server) listAllInsights(c *gin.Context) {
 	limit := c.DefaultQuery("limit", "50")
 	severity := c.Query("severity")
 	category := c.Query("category")
-	
+
 	// Get all insights from store
 	allInsights := s.insightStore.GetAllInsights()
-	
+
 	// Filter insights
 	var filtered []*correlation.Insight
 	for _, insight := range allInsights {
@@ -224,7 +224,7 @@ func (s *Server) listAllInsights(c *gin.Context) {
 		}
 		filtered = append(filtered, insight)
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"insights": filtered,
 		"count":    len(filtered),
@@ -241,10 +241,10 @@ func (s *Server) listAllInsights(c *gin.Context) {
 func (s *Server) listActivePredictions(c *gin.Context) {
 	timeHorizon := c.DefaultQuery("horizon", "1h")
 	minProbability := c.DefaultQuery("min_probability", "0.5")
-	
+
 	// Get all insights with predictions
 	allInsights := s.insightStore.GetAllInsights()
-	
+
 	var predictions []*PredictionResponse
 	for _, insight := range allInsights {
 		if insight.Prediction != nil && insight.Prediction.Probability >= 0.5 {
@@ -260,7 +260,7 @@ func (s *Server) listActivePredictions(c *gin.Context) {
 			})
 		}
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"predictions": predictions,
 		"count":       len(predictions),
@@ -275,16 +275,16 @@ func (s *Server) applyFix(c *gin.Context) {
 	namespace := c.Param("namespace")
 	resource := c.Param("resource")
 	fixID := c.Param("fixId")
-	
+
 	var request struct {
 		DryRun bool `json:"dry_run"`
 		Force  bool `json:"force"`
 	}
-	
+
 	if err := c.ShouldBindJSON(&request); err != nil {
 		request.DryRun = true // Default to dry run for safety
 	}
-	
+
 	// In production, this would execute the fix
 	result := gin.H{
 		"fix_id":    fixID,
@@ -295,39 +295,39 @@ func (s *Server) applyFix(c *gin.Context) {
 		"message":   "Fix would be applied successfully",
 		"changes": []gin.H{
 			{
-				"type":        "deployment",
-				"resource":    resource,
-				"field":       "spec.template.spec.containers[0].resources.limits.memory",
-				"old_value":   "1Gi",
-				"new_value":   "2Gi",
+				"type":      "deployment",
+				"resource":  resource,
+				"field":     "spec.template.spec.containers[0].resources.limits.memory",
+				"old_value": "1Gi",
+				"new_value": "2Gi",
 			},
 		},
 		"timestamp": time.Now(),
 	}
-	
+
 	if !request.DryRun {
 		result["status"] = "applied"
 		result["message"] = "Fix applied successfully"
 	}
-	
+
 	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) getClusterHealth(c *gin.Context) {
 	// Aggregate health across all components
 	health := resilience.GetGlobalHealth()
-	
+
 	// Count insights by severity
 	allInsights := s.insightStore.GetAllInsights()
 	severityCounts := make(map[string]int)
 	for _, insight := range allInsights {
 		severityCounts[insight.Severity]++
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
-		"status":       health.OverallStatus.String(),
-		"score":        health.OverallScore,
-		"components":   health.ComponentStatuses,
+		"status":     health.OverallStatus.String(),
+		"score":      health.OverallScore,
+		"components": health.ComponentStatuses,
 		"insights": gin.H{
 			"total":    len(allInsights),
 			"critical": severityCounts["critical"],
@@ -348,25 +348,25 @@ func (s *Server) getClusterHealth(c *gin.Context) {
 func (s *Server) getMetrics(c *gin.Context) {
 	// Get correlation engine stats
 	engineStats := s.correlationEngine.GetStats()
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"engine": gin.H{
-			"events_processed":    engineStats.EventsProcessed,
-			"correlations_found":  engineStats.CorrelationsFound,
-			"insights_generated":  engineStats.InsightsGenerated,
-			"ai_predictions":      engineStats.AIPredictions,
-			"running":             engineStats.Running,
+			"events_processed":   engineStats.EventsProcessed,
+			"correlations_found": engineStats.CorrelationsFound,
+			"insights_generated": engineStats.InsightsGenerated,
+			"ai_predictions":     engineStats.AIPredictions,
+			"running":            engineStats.Running,
 		},
 		"api": gin.H{
-			"requests_total":     1523,
-			"requests_per_min":   25.4,
-			"avg_response_time":  "45ms",
-			"error_rate":         0.02,
+			"requests_total":    1523,
+			"requests_per_min":  25.4,
+			"avg_response_time": "45ms",
+			"error_rate":        0.02,
 		},
 		"insights": gin.H{
-			"total_stored":       len(s.insightStore.GetAllInsights()),
-			"store_capacity":     10000,
-			"retention_period":   "24h",
+			"total_stored":     len(s.insightStore.GetAllInsights()),
+			"store_capacity":   10000,
+			"retention_period": "24h",
 		},
 		"timestamp": time.Now(),
 	})
@@ -374,19 +374,19 @@ func (s *Server) getMetrics(c *gin.Context) {
 
 func (s *Server) retrainModels(c *gin.Context) {
 	var request struct {
-		Models   []string `json:"models"`
-		Dataset  string   `json:"dataset"`
-		Async    bool     `json:"async"`
+		Models  []string `json:"models"`
+		Dataset string   `json:"dataset"`
+		Async   bool     `json:"async"`
 	}
-	
+
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	
+
 	// In production, this would trigger model retraining
 	jobID := "retrain-job-" + time.Now().Format("20060102-150405")
-	
+
 	result := gin.H{
 		"job_id":     jobID,
 		"status":     "initiated",
@@ -395,29 +395,29 @@ func (s *Server) retrainModels(c *gin.Context) {
 		"async":      request.Async,
 		"started_at": time.Now(),
 	}
-	
+
 	if !request.Async {
 		result["status"] = "completed"
 		result["completed_at"] = time.Now().Add(5 * time.Second)
 		result["metrics"] = gin.H{
-			"accuracy":     0.94,
-			"precision":    0.92,
-			"recall":       0.96,
-			"f1_score":     0.94,
+			"accuracy":  0.94,
+			"precision": 0.92,
+			"recall":    0.96,
+			"f1_score":  0.94,
 		}
 	}
-	
+
 	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) clearCache(c *gin.Context) {
 	cacheType := c.Query("type") // all, insights, patterns, correlations
-	
+
 	result := gin.H{
 		"cleared": []string{},
 		"errors":  []string{},
 	}
-	
+
 	switch cacheType {
 	case "insights", "":
 		// Clear insight cache
@@ -434,9 +434,9 @@ func (s *Server) clearCache(c *gin.Context) {
 	default:
 		result["errors"] = append(result["errors"].([]string), "unknown cache type: "+cacheType)
 	}
-	
+
 	result["timestamp"] = time.Now()
-	
+
 	c.JSON(http.StatusOK, result)
 }
 

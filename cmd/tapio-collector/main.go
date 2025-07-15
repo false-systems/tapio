@@ -21,11 +21,11 @@ import (
 const (
 	// Version information
 	version = "1.0.0"
-	
+
 	// Default configuration
-	defaultConfigPath = "/etc/tapio/collector.yaml"
+	defaultConfigPath     = "/etc/tapio/collector.yaml"
 	defaultServerEndpoint = "tapio-server:9090"
-	
+
 	// Resource limits (DaemonSet pattern)
 	defaultMaxMemoryMB = 100
 	defaultMaxCPUMilli = 10 // 1% CPU
@@ -40,8 +40,8 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:     "tapio-collector",
-		Short:   "Lightweight data collector for Tapio observability platform",
+		Use:   "tapio-collector",
+		Short: "Lightweight data collector for Tapio observability platform",
 		Long: `Tapio Collector is a lightweight, resource-efficient data collection agent that runs as a DaemonSet on every Kubernetes node.
 
 It collects system events, eBPF data, and Kubernetes metrics, then streams them to the central tapio-server for correlation and analysis.
@@ -170,7 +170,7 @@ func loadConfiguration() (*collectors.Config, error) {
 	viper.SetDefault("collector.sampling_rate", 1.0)
 	viper.SetDefault("collector.max_events_per_sec", 10000)
 	viper.SetDefault("collector.buffer_size", 10000)
-	
+
 	viper.SetDefault("grpc.server_endpoints", []string{serverEndpoint})
 	viper.SetDefault("grpc.tls_enabled", false)
 	viper.SetDefault("grpc.max_batch_size", 100)
@@ -195,19 +195,19 @@ func loadConfiguration() (*collectors.Config, error) {
 	// Create configuration struct
 	cfg := &collectors.Config{
 		EnabledCollectors: viper.GetStringSlice("collector.enabled_collectors"),
-		SamplingRate:     viper.GetFloat64("collector.sampling_rate"),
-		MaxEventsPerSec:  viper.GetInt("collector.max_events_per_sec"),
-		BufferSize:       viper.GetInt("collector.buffer_size"),
-		
+		SamplingRate:      viper.GetFloat64("collector.sampling_rate"),
+		MaxEventsPerSec:   viper.GetInt("collector.max_events_per_sec"),
+		BufferSize:        viper.GetInt("collector.buffer_size"),
+
 		GRPC: collectors.GRPCConfig{
-			ServerEndpoints:     viper.GetStringSlice("grpc.server_endpoints"),
-			TLSEnabled:         viper.GetBool("grpc.tls_enabled"),
-			MaxBatchSize:       viper.GetInt("grpc.max_batch_size"),
-			BatchTimeout:       viper.GetDuration("grpc.batch_timeout"),
-			ReconnectEnabled:   viper.GetBool("grpc.reconnect_enabled"),
+			ServerEndpoints:      viper.GetStringSlice("grpc.server_endpoints"),
+			TLSEnabled:           viper.GetBool("grpc.tls_enabled"),
+			MaxBatchSize:         viper.GetInt("grpc.max_batch_size"),
+			BatchTimeout:         viper.GetDuration("grpc.batch_timeout"),
+			ReconnectEnabled:     viper.GetBool("grpc.reconnect_enabled"),
 			MaxReconnectAttempts: viper.GetInt("grpc.max_reconnect_attempts"),
 		},
-		
+
 		Resources: collectors.ResourceConfig{
 			MaxMemoryMB: viper.GetInt("resources.max_memory_mb"),
 			MaxCPUMilli: viper.GetInt("resources.max_cpu_milli"),
@@ -244,7 +244,7 @@ func initializeGRPCClient(cfg *collectors.Config) (*collectors.GRPCStreamingClie
 
 	// Create and configure gRPC client
 	grpcClient := grpc.NewClient(grpcConfig, nodeInfo)
-	
+
 	return collectors.NewGRPCStreamingClient(grpcClient), nil
 }
 
@@ -274,10 +274,10 @@ func initializeCollectorManager(cfg *collectors.Config, grpcClient *collectors.G
 func printStatus(monitor *monitoring.ResourceMonitor, grpcClient *collectors.GRPCStreamingClient, manager *collectors.Manager) {
 	// Get resource usage
 	usage := monitor.GetUsage()
-	
+
 	// Get gRPC client status
 	clientStats := grpcClient.GetStats()
-	
+
 	// Get collector health
 	health := manager.GetHealth()
 
@@ -317,7 +317,7 @@ func getOS() string {
 }
 
 func getArchitecture() string {
-	// This would be detected from runtime.GOARCH  
+	// This would be detected from runtime.GOARCH
 	return "amd64"
 }
 
@@ -328,7 +328,7 @@ func getRegion() string {
 
 func getNodeLabels() map[string]string {
 	labels := make(map[string]string)
-	
+
 	// Standard Kubernetes labels
 	if podName := os.Getenv("POD_NAME"); podName != "" {
 		labels["tapio.pod"] = podName
@@ -339,9 +339,9 @@ func getNodeLabels() map[string]string {
 	if nodeName := os.Getenv("NODE_NAME"); nodeName != "" {
 		labels["tapio.node"] = nodeName
 	}
-	
+
 	labels["tapio.component"] = "collector"
 	labels["tapio.version"] = version
-	
+
 	return labels
 }

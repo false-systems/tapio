@@ -15,66 +15,66 @@ import (
 // It leverages all 11 contexts to detect patterns with exceptional precision
 type SemanticPatternMatcher struct {
 	// Core pattern detection engines
-	semanticEngine    *SemanticPatternEngine
-	behavioralEngine  *BehavioralPatternEngine
-	temporalEngine    *TemporalPatternEngine
-	causalityEngine   *CausalityPatternEngine
-	anomalyEngine     *AnomalyPatternEngine
-	
+	semanticEngine   *SemanticPatternEngine
+	behavioralEngine *BehavioralPatternEngine
+	temporalEngine   *TemporalPatternEngine
+	causalityEngine  *CausalityPatternEngine
+	anomalyEngine    *AnomalyPatternEngine
+
 	// Pattern storage optimized for our format
-	patternStore      *OpinionatedPatternStore
-	embeddingIndex    *EmbeddingIndex
-	ontologyIndex     *OntologyIndex
-	
+	patternStore   *OpinionatedPatternStore
+	embeddingIndex *EmbeddingIndex
+	ontologyIndex  *OntologyIndex
+
 	// Performance optimization
-	patternCache      *PatternCache
-	matchingPool      *MatchingPool
-	indexManager      *IndexManager
-	
+	patternCache *PatternCache
+	matchingPool *MatchingPool
+	indexManager *IndexManager
+
 	// Configuration
-	config            *SemanticConfig
-	
+	config *SemanticConfig
+
 	// Statistics
-	patternsDetected  uint64
-	patternsMatched   uint64
-	embeddingMatches  uint64
-	ontologyMatches   uint64
-	
+	patternsDetected uint64
+	patternsMatched  uint64
+	embeddingMatches uint64
+	ontologyMatches  uint64
+
 	// State management
-	mu                sync.RWMutex
-	running           bool
+	mu      sync.RWMutex
+	running bool
 }
 
 // SemanticConfig configures the pattern matcher for optimal performance
 type SemanticConfig struct {
 	// Embedding configuration
-	EmbeddingDimension    int           `json:"embedding_dimension"`     // 512 for our semantic embeddings
-	SimilarityThreshold   float32       `json:"similarity_threshold"`    // 0.85 for high precision
-	EmbeddingModel        string        `json:"embedding_model"`         // Model for computing embeddings
-	
+	EmbeddingDimension  int     `json:"embedding_dimension"`  // 512 for our semantic embeddings
+	SimilarityThreshold float32 `json:"similarity_threshold"` // 0.85 for high precision
+	EmbeddingModel      string  `json:"embedding_model"`      // Model for computing embeddings
+
 	// Pattern detection thresholds
-	PatternCacheSize      int           `json:"pattern_cache_size"`      // 10k patterns cached
-	MinPatternSupport     float32       `json:"min_pattern_support"`     // 0.1 minimum support
-	MinPatternConfidence  float32       `json:"min_pattern_confidence"`  // 0.8 minimum confidence
-	
+	PatternCacheSize     int     `json:"pattern_cache_size"`     // 10k patterns cached
+	MinPatternSupport    float32 `json:"min_pattern_support"`    // 0.1 minimum support
+	MinPatternConfidence float32 `json:"min_pattern_confidence"` // 0.8 minimum confidence
+
 	// Ontology configuration
-	OntogyTagsEnabled     bool          `json:"ontology_tags_enabled"`   // true for our ontology tags
-	HierarchicalMatching  bool          `json:"hierarchical_matching"`   // true for hierarchy
-	TagWeightingEnabled   bool          `json:"tag_weighting_enabled"`   // true for weighted matching
-	
+	OntogyTagsEnabled    bool `json:"ontology_tags_enabled"` // true for our ontology tags
+	HierarchicalMatching bool `json:"hierarchical_matching"` // true for hierarchy
+	TagWeightingEnabled  bool `json:"tag_weighting_enabled"` // true for weighted matching
+
 	// Intent classification
-	IntentClassification  bool          `json:"intent_classification"`   // true for intent matching
-	IntentConfidenceMin   float32       `json:"intent_confidence_min"`   // 0.7 minimum intent confidence
-	
+	IntentClassification bool    `json:"intent_classification"` // true for intent matching
+	IntentConfidenceMin  float32 `json:"intent_confidence_min"` // 0.7 minimum intent confidence
+
 	// Performance tuning
-	MaxPatternsPerType    int           `json:"max_patterns_per_type"`   // 1000 patterns per type
-	IndexUpdateInterval   time.Duration `json:"index_update_interval"`   // 5min for index updates
-	CacheEvictionPolicy   string        `json:"cache_eviction_policy"`   // "lru" for cache eviction
-	
+	MaxPatternsPerType  int           `json:"max_patterns_per_type"` // 1000 patterns per type
+	IndexUpdateInterval time.Duration `json:"index_update_interval"` // 5min for index updates
+	CacheEvictionPolicy string        `json:"cache_eviction_policy"` // "lru" for cache eviction
+
 	// AI enhancement
-	MLPatternDetection    bool          `json:"ml_pattern_detection"`    // true for ML patterns
-	NeuralSimilarity      bool          `json:"neural_similarity"`       // true for neural similarity
-	AutoPatternDiscovery  bool          `json:"auto_pattern_discovery"`  // true for automatic discovery
+	MLPatternDetection   bool `json:"ml_pattern_detection"`   // true for ML patterns
+	NeuralSimilarity     bool `json:"neural_similarity"`      // true for neural similarity
+	AutoPatternDiscovery bool `json:"auto_pattern_discovery"` // true for automatic discovery
 }
 
 // NewSemanticPatternMatcher creates the perfect pattern matcher for opinionated data
@@ -82,129 +82,129 @@ func NewSemanticPatternMatcher(config *SemanticConfig) (*SemanticPatternMatcher,
 	matcher := &SemanticPatternMatcher{
 		config: config,
 	}
-	
+
 	// Initialize semantic pattern engine
 	semanticEngine, err := NewSemanticPatternEngine(&SemanticEngineConfig{
 		EmbeddingDimension:  config.EmbeddingDimension,
 		SimilarityThreshold: config.SimilarityThreshold,
-		EmbeddingModel:     config.EmbeddingModel,
-		CacheSize:          config.PatternCacheSize,
+		EmbeddingModel:      config.EmbeddingModel,
+		CacheSize:           config.PatternCacheSize,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create semantic engine: %w", err)
 	}
 	matcher.semanticEngine = semanticEngine
-	
+
 	// Initialize behavioral pattern engine
 	behavioralEngine, err := NewBehavioralPatternEngine(&BehavioralEngineConfig{
-		EntityTrackingEnabled:   true,
-		BehaviorVectorMatching:  true,
-		TrustScoreWeighting:     true,
+		EntityTrackingEnabled:  true,
+		BehaviorVectorMatching: true,
+		TrustScoreWeighting:    true,
 		DeviationThreshold:     0.7,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create behavioral engine: %w", err)
 	}
 	matcher.behavioralEngine = behavioralEngine
-	
+
 	// Initialize temporal pattern engine
 	temporalEngine, err := NewTemporalPatternEngine(&TemporalEngineConfig{
-		PatternDetectionWindow:   time.Hour,
-		PeriodicityDetection:     true,
-		SeasonalityDetection:     true,
-		TrendAnalysis:           true,
+		PatternDetectionWindow: time.Hour,
+		PeriodicityDetection:   true,
+		SeasonalityDetection:   true,
+		TrendAnalysis:          true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temporal engine: %w", err)
 	}
 	matcher.temporalEngine = temporalEngine
-	
+
 	// Initialize causality pattern engine
 	causalityEngine, err := NewCausalityPatternEngine(&CausalityEngineConfig{
-		CausalChainMaxDepth:     10,
-		CausalityConfidenceMin:  0.6,
-		RootCauseAnalysis:       true,
-		EffectPrediction:        true,
+		CausalChainMaxDepth:    10,
+		CausalityConfidenceMin: 0.6,
+		RootCauseAnalysis:      true,
+		EffectPrediction:       true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create causality engine: %w", err)
 	}
 	matcher.causalityEngine = causalityEngine
-	
+
 	// Initialize anomaly pattern engine
 	anomalyEngine, err := NewAnomalyPatternEngine(&AnomalyEngineConfig{
 		MultiDimensionalAnalysis: true,
-		AnomalyThreshold:        0.7,
-		ContextualAnomalies:     true,
-		CollectiveAnomalies:     true,
+		AnomalyThreshold:         0.7,
+		ContextualAnomalies:      true,
+		CollectiveAnomalies:      true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create anomaly engine: %w", err)
 	}
 	matcher.anomalyEngine = anomalyEngine
-	
+
 	// Initialize pattern store optimized for opinionated data
 	patternStore, err := NewOpinionatedPatternStore(&PatternStoreConfig{
-		MaxPatterns:            config.MaxPatternsPerType * 10, // 10 types
-		IndexingEnabled:        true,
-		CompressionEnabled:     true,
-		SemanticIndexing:       true,
+		MaxPatterns:        config.MaxPatternsPerType * 10, // 10 types
+		IndexingEnabled:    true,
+		CompressionEnabled: true,
+		SemanticIndexing:   true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pattern store: %w", err)
 	}
 	matcher.patternStore = patternStore
-	
+
 	// Initialize embedding index for fast similarity search
 	embeddingIndex, err := NewEmbeddingIndex(&EmbeddingIndexConfig{
-		Dimension:              config.EmbeddingDimension,
-		IndexType:             "hnsw", // Hierarchical Navigable Small World
-		MaxElements:           100000,
-		SearchAccuracy:        0.95,
+		Dimension:      config.EmbeddingDimension,
+		IndexType:      "hnsw", // Hierarchical Navigable Small World
+		MaxElements:    100000,
+		SearchAccuracy: 0.95,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding index: %w", err)
 	}
 	matcher.embeddingIndex = embeddingIndex
-	
+
 	// Initialize ontology index for tag-based matching
 	if config.OntogyTagsEnabled {
 		ontologyIndex, err := NewOntologyIndex(&OntologyIndexConfig{
-			HierarchicalEnabled:    config.HierarchicalMatching,
-			WeightingEnabled:      config.TagWeightingEnabled,
-			CacheSize:            10000,
-			InferenceEnabled:     true,
+			HierarchicalEnabled: config.HierarchicalMatching,
+			WeightingEnabled:    config.TagWeightingEnabled,
+			CacheSize:           10000,
+			InferenceEnabled:    true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create ontology index: %w", err)
 		}
 		matcher.ontologyIndex = ontologyIndex
 	}
-	
+
 	// Initialize pattern cache
 	patternCache, err := NewPatternCache(&PatternCacheConfig{
-		MaxSize:               config.PatternCacheSize,
-		TTL:                  time.Hour,
-		EvictionPolicy:       config.CacheEvictionPolicy,
-		SemanticAware:        true,
+		MaxSize:        config.PatternCacheSize,
+		TTL:            time.Hour,
+		EvictionPolicy: config.CacheEvictionPolicy,
+		SemanticAware:  true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pattern cache: %w", err)
 	}
 	matcher.patternCache = patternCache
-	
+
 	// Initialize matching pool for parallel processing
 	matchingPool, err := NewMatchingPool(&MatchingPoolConfig{
-		Workers:               8,
-		QueueSize:            1000,
-		TaskTimeout:          time.Millisecond * 100,
+		Workers:                 8,
+		QueueSize:               1000,
+		TaskTimeout:             time.Millisecond * 100,
 		OptimizedForOpinionated: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create matching pool: %w", err)
 	}
 	matcher.matchingPool = matchingPool
-	
+
 	return matcher, nil
 }
 
@@ -213,89 +213,89 @@ func (m *SemanticPatternMatcher) DetectPatterns(ctx context.Context, events []*o
 	if len(events) == 0 {
 		return &PatternDetectionResult{}, nil
 	}
-	
+
 	startTime := time.Now()
-	
+
 	result := &PatternDetectionResult{
-		ProcessingTime:      time.Duration(0),
-		SemanticPatterns:    make([]*SemanticPattern, 0),
-		BehavioralPatterns:  make([]*BehavioralPattern, 0),
-		TemporalPatterns:    make([]*TemporalPattern, 0),
-		CausalityPatterns:  make([]*CausalityPattern, 0),
-		AnomalyPatterns:    make([]*AnomalyPattern, 0),
+		ProcessingTime:       time.Duration(0),
+		SemanticPatterns:     make([]*SemanticPattern, 0),
+		BehavioralPatterns:   make([]*BehavioralPattern, 0),
+		TemporalPatterns:     make([]*TemporalPattern, 0),
+		CausalityPatterns:    make([]*CausalityPattern, 0),
+		AnomalyPatterns:      make([]*AnomalyPattern, 0),
 		CrossContextPatterns: make([]*CrossContextPattern, 0),
 	}
-	
+
 	// Detect semantic patterns using our semantic context
 	semanticPatterns, err := m.semanticEngine.DetectPatterns(ctx, events)
 	if err != nil {
 		return nil, fmt.Errorf("semantic pattern detection failed: %w", err)
 	}
 	result.SemanticPatterns = semanticPatterns
-	
+
 	// Detect behavioral patterns using our behavioral context
 	behavioralPatterns, err := m.behavioralEngine.DetectPatterns(ctx, events)
 	if err != nil {
 		return nil, fmt.Errorf("behavioral pattern detection failed: %w", err)
 	}
 	result.BehavioralPatterns = behavioralPatterns
-	
+
 	// Detect temporal patterns using our temporal context
 	temporalPatterns, err := m.temporalEngine.DetectPatterns(ctx, events)
 	if err != nil {
 		return nil, fmt.Errorf("temporal pattern detection failed: %w", err)
 	}
 	result.TemporalPatterns = temporalPatterns
-	
+
 	// Detect causality patterns using our causality context
 	causalityPatterns, err := m.causalityEngine.DetectPatterns(ctx, events)
 	if err != nil {
 		return nil, fmt.Errorf("causality pattern detection failed: %w", err)
 	}
 	result.CausalityPatterns = causalityPatterns
-	
+
 	// Detect anomaly patterns using our anomaly context
 	anomalyPatterns, err := m.anomalyEngine.DetectPatterns(ctx, events)
 	if err != nil {
 		return nil, fmt.Errorf("anomaly pattern detection failed: %w", err)
 	}
 	result.AnomalyPatterns = anomalyPatterns
-	
+
 	// Detect cross-context patterns (the real power of our opinionated format)
 	crossContextPatterns := m.detectCrossContextPatterns(ctx, result)
 	result.CrossContextPatterns = crossContextPatterns
-	
+
 	// Store discovered patterns for future matching
 	m.storeDiscoveredPatterns(result)
-	
+
 	// Update statistics
-	m.patternsDetected += uint64(len(semanticPatterns) + len(behavioralPatterns) + 
-		len(temporalPatterns) + len(causalityPatterns) + len(anomalyPatterns) + 
+	m.patternsDetected += uint64(len(semanticPatterns) + len(behavioralPatterns) +
+		len(temporalPatterns) + len(causalityPatterns) + len(anomalyPatterns) +
 		len(crossContextPatterns))
-	
+
 	result.ProcessingTime = time.Since(startTime)
-	
+
 	return result, nil
 }
 
 // MatchPatterns finds existing patterns that match the given event
 func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) (*PatternMatchResult, error) {
 	startTime := time.Now()
-	
+
 	result := &PatternMatchResult{
-		EventID:            event.Id,
-		ProcessingTime:     time.Duration(0),
-		MatchedPatterns:    make([]*PatternMatch, 0),
-		SimilarityScores:   make(map[string]float32),
-		MatchingReasons:    make(map[string][]string),
+		EventID:          event.Id,
+		ProcessingTime:   time.Duration(0),
+		MatchedPatterns:  make([]*PatternMatch, 0),
+		SimilarityScores: make(map[string]float32),
+		MatchingReasons:  make(map[string][]string),
 	}
-	
+
 	// Check pattern cache first
 	cacheKey := m.generatePatternCacheKey(event)
 	if cached, found := m.patternCache.Get(cacheKey); found {
 		return cached.(*PatternMatchResult), nil
 	}
-	
+
 	// Match semantic patterns using embeddings
 	if event.Semantic != nil && len(event.Semantic.Embedding) > 0 {
 		semanticMatches, err := m.matchSemanticPatterns(ctx, event)
@@ -304,7 +304,7 @@ func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opini
 			m.embeddingMatches += uint64(len(semanticMatches))
 		}
 	}
-	
+
 	// Match behavioral patterns using behavior vectors
 	if event.Behavioral != nil {
 		behavioralMatches, err := m.matchBehavioralPatterns(ctx, event)
@@ -312,7 +312,7 @@ func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opini
 			result.MatchedPatterns = append(result.MatchedPatterns, behavioralMatches...)
 		}
 	}
-	
+
 	// Match temporal patterns using time context
 	if event.Temporal != nil {
 		temporalMatches, err := m.matchTemporalPatterns(ctx, event)
@@ -320,7 +320,7 @@ func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opini
 			result.MatchedPatterns = append(result.MatchedPatterns, temporalMatches...)
 		}
 	}
-	
+
 	// Match causality patterns using causality context
 	if event.Causality != nil {
 		causalityMatches, err := m.matchCausalityPatterns(ctx, event)
@@ -328,7 +328,7 @@ func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opini
 			result.MatchedPatterns = append(result.MatchedPatterns, causalityMatches...)
 		}
 	}
-	
+
 	// Match anomaly patterns using anomaly context
 	if event.Anomaly != nil {
 		anomalyMatches, err := m.matchAnomalyPatterns(ctx, event)
@@ -336,7 +336,7 @@ func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opini
 			result.MatchedPatterns = append(result.MatchedPatterns, anomalyMatches...)
 		}
 	}
-	
+
 	// Match ontology patterns using ontology tags
 	if m.ontologyIndex != nil && event.Semantic != nil && len(event.Semantic.OntologyTags) > 0 {
 		ontologyMatches, err := m.matchOntologyPatterns(ctx, event)
@@ -345,20 +345,20 @@ func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opini
 			m.ontologyMatches += uint64(len(ontologyMatches))
 		}
 	}
-	
+
 	// Sort matches by similarity score
 	sort.Slice(result.MatchedPatterns, func(i, j int) bool {
 		return result.MatchedPatterns[i].SimilarityScore > result.MatchedPatterns[j].SimilarityScore
 	})
-	
+
 	// Cache the result
 	m.patternCache.Set(cacheKey, result)
-	
+
 	// Update statistics
 	m.patternsMatched += uint64(len(result.MatchedPatterns))
-	
+
 	result.ProcessingTime = time.Since(startTime)
-	
+
 	return result, nil
 }
 
@@ -373,7 +373,7 @@ func (m *SemanticPatternMatcher) ProcessOntologyTags(eventID string, tags []stri
 	if m.ontologyIndex == nil {
 		return nil
 	}
-	
+
 	// Index the tags for hierarchical matching
 	return m.ontologyIndex.AddTags(eventID, tags)
 }
@@ -381,7 +381,7 @@ func (m *SemanticPatternMatcher) ProcessOntologyTags(eventID string, tags []stri
 // detectCrossContextPatterns finds patterns across multiple contexts
 func (m *SemanticPatternMatcher) detectCrossContextPatterns(ctx context.Context, result *PatternDetectionResult) []*CrossContextPattern {
 	crossPatterns := make([]*CrossContextPattern, 0)
-	
+
 	// Semantic + Behavioral patterns
 	for _, semanticPattern := range result.SemanticPatterns {
 		for _, behavioralPattern := range result.BehavioralPatterns {
@@ -398,7 +398,7 @@ func (m *SemanticPatternMatcher) detectCrossContextPatterns(ctx context.Context,
 			}
 		}
 	}
-	
+
 	// Temporal + Causality patterns
 	for _, temporalPattern := range result.TemporalPatterns {
 		for _, causalityPattern := range result.CausalityPatterns {
@@ -415,9 +415,9 @@ func (m *SemanticPatternMatcher) detectCrossContextPatterns(ctx context.Context,
 			}
 		}
 	}
-	
+
 	// Additional cross-context pattern detection would continue here...
-	
+
 	return crossPatterns
 }
 
@@ -427,13 +427,13 @@ func (m *SemanticPatternMatcher) matchSemanticPatterns(ctx context.Context, even
 	if len(event.Semantic.Embedding) == 0 {
 		return []*PatternMatch{}, nil
 	}
-	
+
 	// Find similar embeddings in the index
 	similarEmbeddings, scores, err := m.embeddingIndex.SearchSimilar(event.Semantic.Embedding, 10, m.config.SimilarityThreshold)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	matches := make([]*PatternMatch, 0, len(similarEmbeddings))
 	for i, embeddingID := range similarEmbeddings {
 		match := &PatternMatch{
@@ -445,7 +445,7 @@ func (m *SemanticPatternMatcher) matchSemanticPatterns(ctx context.Context, even
 		}
 		matches = append(matches, match)
 	}
-	
+
 	return matches, nil
 }
 
@@ -475,7 +475,7 @@ func (m *SemanticPatternMatcher) matchOntologyPatterns(ctx context.Context, even
 	if err != nil {
 		return nil, err
 	}
-	
+
 	matches := make([]*PatternMatch, 0, len(similarPatterns))
 	for i, patternID := range similarPatterns {
 		match := &PatternMatch{
@@ -487,7 +487,7 @@ func (m *SemanticPatternMatcher) matchOntologyPatterns(ctx context.Context, even
 		}
 		matches = append(matches, match)
 	}
-	
+
 	return matches, nil
 }
 
@@ -518,13 +518,13 @@ func generateCrossPatternID(pattern1ID, pattern2ID string) string {
 // GetStats returns comprehensive pattern matching statistics
 func (m *SemanticPatternMatcher) GetStats() *PatternMatcherStats {
 	return &PatternMatcherStats{
-		PatternsDetected:  m.patternsDetected,
-		PatternsMatched:   m.patternsMatched,
-		EmbeddingMatches:  m.embeddingMatches,
-		OntologyMatches:   m.ontologyMatches,
-		
-		CacheStats:        m.patternCache.GetStats(),
-		IndexStats:        m.embeddingIndex.GetStats(),
+		PatternsDetected: m.patternsDetected,
+		PatternsMatched:  m.patternsMatched,
+		EmbeddingMatches: m.embeddingMatches,
+		OntologyMatches:  m.ontologyMatches,
+
+		CacheStats: m.patternCache.GetStats(),
+		IndexStats: m.embeddingIndex.GetStats(),
 		EngineStats: map[string]interface{}{
 			"semantic":   m.semanticEngine.GetStats(),
 			"behavioral": m.behavioralEngine.GetStats(),
@@ -539,7 +539,7 @@ func (m *SemanticPatternMatcher) GetStats() *PatternMatcherStats {
 
 // PatternDetectionResult contains all detected patterns
 type PatternDetectionResult struct {
-	ProcessingTime       time.Duration           `json:"processing_time"`
+	ProcessingTime       time.Duration          `json:"processing_time"`
 	SemanticPatterns     []*SemanticPattern     `json:"semantic_patterns"`
 	BehavioralPatterns   []*BehavioralPattern   `json:"behavioral_patterns"`
 	TemporalPatterns     []*TemporalPattern     `json:"temporal_patterns"`
@@ -550,11 +550,11 @@ type PatternDetectionResult struct {
 
 // PatternMatchResult contains pattern matching results
 type PatternMatchResult struct {
-	EventID           string                  `json:"event_id"`
-	ProcessingTime    time.Duration          `json:"processing_time"`
-	MatchedPatterns   []*PatternMatch        `json:"matched_patterns"`
-	SimilarityScores  map[string]float32     `json:"similarity_scores"`
-	MatchingReasons   map[string][]string    `json:"matching_reasons"`
+	EventID          string              `json:"event_id"`
+	ProcessingTime   time.Duration       `json:"processing_time"`
+	MatchedPatterns  []*PatternMatch     `json:"matched_patterns"`
+	SimilarityScores map[string]float32  `json:"similarity_scores"`
+	MatchingReasons  map[string][]string `json:"matching_reasons"`
 }
 
 // PatternMatch represents a matched pattern
@@ -580,18 +580,18 @@ type CrossContextPattern struct {
 
 // PatternMatcherStats provides comprehensive statistics
 type PatternMatcherStats struct {
-	PatternsDetected uint64                 `json:"patterns_detected"`
-	PatternsMatched  uint64                 `json:"patterns_matched"`
-	EmbeddingMatches uint64                 `json:"embedding_matches"`
-	OntologyMatches  uint64                 `json:"ontology_matches"`
-	
-	CacheStats       interface{}            `json:"cache_stats"`
-	IndexStats       interface{}            `json:"index_stats"`
-	EngineStats      map[string]interface{} `json:"engine_stats"`
+	PatternsDetected uint64 `json:"patterns_detected"`
+	PatternsMatched  uint64 `json:"patterns_matched"`
+	EmbeddingMatches uint64 `json:"embedding_matches"`
+	OntologyMatches  uint64 `json:"ontology_matches"`
+
+	CacheStats  interface{}            `json:"cache_stats"`
+	IndexStats  interface{}            `json:"index_stats"`
+	EngineStats map[string]interface{} `json:"engine_stats"`
 }
 
 // Pattern type definitions (to be implemented)
-type SemanticPattern struct {
+type SemanticPatternMatch struct {
 	ID          string    `json:"id"`
 	Type        string    `json:"type"`
 	Confidence  float32   `json:"confidence"`

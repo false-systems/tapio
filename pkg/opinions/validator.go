@@ -28,14 +28,14 @@ func NewStrictValidator() *OpinionValidator {
 // Validate checks if an OpinionConfig is valid
 func (v *OpinionValidator) Validate(config *OpinionConfig) error {
 	result := v.ValidateWithDetails(config)
-	
+
 	if !result.Valid {
 		// Return first error
 		if len(result.Errors) > 0 {
 			return fmt.Errorf("%s: %v", result.Errors[0].Field, result.Errors[0].Message)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -330,7 +330,7 @@ func (v *OpinionValidator) validateServiceLimits(config *OpinionConfig, result *
 					Value:   limit.MemoryLimit,
 				})
 			}
-			
+
 			// Check against general threshold
 			if generalThreshold, exists := config.AnomalyThresholds["memory_usage"]; exists {
 				if limit.MemoryLimit < generalThreshold {
@@ -521,7 +521,7 @@ func isValidTimeRange(timeRange string) bool {
 	if len(parts) != 2 {
 		return false
 	}
-	
+
 	for _, part := range parts {
 		timeParts := strings.Split(part, ":")
 		if len(timeParts) != 2 {
@@ -532,14 +532,14 @@ func isValidTimeRange(timeRange string) bool {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
 func isValidWeekday(day string) bool {
 	validDays := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
 		"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
-	
+
 	for _, valid := range validDays {
 		if strings.EqualFold(day, valid) {
 			return true
@@ -554,19 +554,19 @@ func findDependencyCycles(deps []ServiceDependency) [][]string {
 	for _, dep := range deps {
 		graph[dep.Source] = append(graph[dep.Source], dep.Target)
 	}
-	
+
 	// Find cycles using DFS
 	var cycles [][]string
 	visited := make(map[string]bool)
 	recStack := make(map[string]bool)
 	path := []string{}
-	
+
 	var dfs func(node string) bool
 	dfs = func(node string) bool {
 		visited[node] = true
 		recStack[node] = true
 		path = append(path, node)
-		
+
 		for _, neighbor := range graph[node] {
 			if !visited[neighbor] {
 				if dfs(neighbor) {
@@ -587,18 +587,18 @@ func findDependencyCycles(deps []ServiceDependency) [][]string {
 				return true
 			}
 		}
-		
+
 		path = path[:len(path)-1]
 		recStack[node] = false
 		return false
 	}
-	
+
 	// Check all nodes
 	for node := range graph {
 		if !visited[node] {
 			dfs(node)
 		}
 	}
-	
+
 	return cycles
 }

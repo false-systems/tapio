@@ -7,28 +7,28 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // Exporter provides a high-level interface for exporting Tapio data to Prometheus
 type Exporter struct {
-	metricsExporter   *MetricsExporter
-	customCollector   *CustomCollector
-	factoryCollector  *FactoryCollector
-	config            *ExporterConfig
-	
+	metricsExporter  *MetricsExporter
+	customCollector  *CustomCollector
+	factoryCollector *FactoryCollector
+	config           *ExporterConfig
+
 	// HTTP server for metrics endpoint
 	httpServer *http.Server
-	
+
 	// Registry and handler
-	registry    *prometheus.Registry
-	handler     http.Handler
-	
+	registry *prometheus.Registry
+	handler  http.Handler
+
 	// State management
-	running     bool
-	mutex       sync.RWMutex
+	running bool
+	mutex   sync.RWMutex
 }
 
 // ExporterConfig configures the complete Prometheus exporter
@@ -37,33 +37,33 @@ type ExporterConfig struct {
 	ListenAddress string
 	MetricsPath   string
 	EnablePprof   bool
-	
+
 	// Metrics configuration
-	MetricsConfig    *MetricsConfig
-	CollectorConfig  *CollectorConfig
-	
+	MetricsConfig   *MetricsConfig
+	CollectorConfig *CollectorConfig
+
 	// Performance settings
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	MaxRequestSize    int64
 	EnableCompression bool
-	
+
 	// Security settings
 	EnableTLS       bool
 	CertFile        string
 	KeyFile         string
 	EnableBasicAuth bool
 	BasicAuthUsers  map[string]string
-	
+
 	// Feature flags
-	EnableCustomCollector bool
+	EnableCustomCollector  bool
 	EnableFactoryCollector bool
 	EnableBuiltinMetrics   bool
-	
+
 	// Data providers
-	CorrelationProvider   CorrelationProvider
-	SystemHealthProvider  SystemHealthProvider
-	
+	CorrelationProvider  CorrelationProvider
+	SystemHealthProvider SystemHealthProvider
+
 	// Graceful shutdown
 	ShutdownTimeout time.Duration
 }
@@ -73,16 +73,16 @@ func NewExporter(config *ExporterConfig) (*Exporter, error) {
 	if config == nil {
 		config = DefaultExporterConfig()
 	}
-	
+
 	// Create registry
 	registry := prometheus.NewRegistry()
-	
+
 	// Create metrics exporter
 	metricsExporter := NewMetricsExporter(config.MetricsConfig)
 	if err := registry.Register(metricsExporter); err != nil {
 		return nil, fmt.Errorf("failed to register metrics exporter: %w", err)
 	}
-	
+
 	// Create custom collector if enabled
 	var customCollector *CustomCollector
 	if config.EnableCustomCollector && config.CorrelationProvider != nil && config.SystemHealthProvider != nil {
@@ -95,58 +95,58 @@ func NewExporter(config *ExporterConfig) (*Exporter, error) {
 			return nil, fmt.Errorf("failed to register custom collector: %w", err)
 		}
 	}
-	
+
 	// Create factory collector if enabled
 	var factoryCollector *FactoryCollector
 	if config.EnableFactoryCollector {
 		factoryCollector = NewFactoryCollector()
 	}
-	
+
 	// Create HTTP handler
 	handler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{
 		EnableOpenMetrics:   true,
 		MaxRequestsInFlight: 10,
-		Timeout:            config.WriteTimeout,
+		Timeout:             config.WriteTimeout,
 	})
-	
+
 	// Add middleware if needed
 	if config.EnableCompression {
 		handler = enableGzipCompression(handler)
 	}
-	
+
 	if config.EnableBasicAuth {
 		handler = enableBasicAuth(handler, config.BasicAuthUsers)
 	}
-	
+
 	return &Exporter{
 		metricsExporter:  metricsExporter,
 		customCollector:  customCollector,
 		factoryCollector: factoryCollector,
-		config:          config,
-		registry:        registry,
-		handler:         handler,
+		config:           config,
+		registry:         registry,
+		handler:          handler,
 	}, nil
 }
 
 // DefaultExporterConfig returns sensible defaults for the exporter
 func DefaultExporterConfig() *ExporterConfig {
 	return &ExporterConfig{
-		ListenAddress:         ":9090",
-		MetricsPath:           "/metrics",
-		EnablePprof:           false,
-		MetricsConfig:         DefaultMetricsConfig(),
-		CollectorConfig:       DefaultCollectorConfig(),
-		ReadTimeout:           30 * time.Second,
-		WriteTimeout:          30 * time.Second,
-		MaxRequestSize:        1024 * 1024, // 1MB
-		EnableCompression:     true,
-		EnableTLS:             false,
-		EnableBasicAuth:       false,
-		BasicAuthUsers:        make(map[string]string),
-		EnableCustomCollector: true,
+		ListenAddress:          ":9090",
+		MetricsPath:            "/metrics",
+		EnablePprof:            false,
+		MetricsConfig:          DefaultMetricsConfig(),
+		CollectorConfig:        DefaultCollectorConfig(),
+		ReadTimeout:            30 * time.Second,
+		WriteTimeout:           30 * time.Second,
+		MaxRequestSize:         1024 * 1024, // 1MB
+		EnableCompression:      true,
+		EnableTLS:              false,
+		EnableBasicAuth:        false,
+		BasicAuthUsers:         make(map[string]string),
+		EnableCustomCollector:  true,
 		EnableFactoryCollector: true,
-		EnableBuiltinMetrics:  true,
-		ShutdownTimeout:       30 * time.Second,
+		EnableBuiltinMetrics:   true,
+		ShutdownTimeout:        30 * time.Second,
 	}
 }
 
@@ -154,32 +154,32 @@ func DefaultExporterConfig() *ExporterConfig {
 func (e *Exporter) Start(ctx context.Context) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	if e.running {
 		return fmt.Errorf("exporter already running")
 	}
-	
+
 	// Create HTTP server
 	mux := http.NewServeMux()
 	mux.Handle(e.config.MetricsPath, e.handler)
-	
+
 	// Add health check endpoint
 	mux.HandleFunc("/health", e.healthHandler)
 	mux.HandleFunc("/ready", e.readinessHandler)
-	
+
 	// Add pprof endpoints if enabled
 	if e.config.EnablePprof {
 		e.addPprofHandlers(mux)
 	}
-	
+
 	e.httpServer = &http.Server{
-		Addr:         e.config.ListenAddress,
-		Handler:      mux,
-		ReadTimeout:  e.config.ReadTimeout,
-		WriteTimeout: e.config.WriteTimeout,
+		Addr:           e.config.ListenAddress,
+		Handler:        mux,
+		ReadTimeout:    e.config.ReadTimeout,
+		WriteTimeout:   e.config.WriteTimeout,
 		MaxHeaderBytes: int(e.config.MaxRequestSize),
 	}
-	
+
 	// Start server in goroutine
 	go func() {
 		var err error
@@ -188,13 +188,13 @@ func (e *Exporter) Start(ctx context.Context) error {
 		} else {
 			err = e.httpServer.ListenAndServe()
 		}
-		
+
 		if err != nil && err != http.ErrServerClosed {
 			// Log error - in a real implementation, you'd use proper logging
 			fmt.Printf("HTTP server error: %v\n", err)
 		}
 	}()
-	
+
 	e.running = true
 	return nil
 }
@@ -203,23 +203,23 @@ func (e *Exporter) Start(ctx context.Context) error {
 func (e *Exporter) Stop(ctx context.Context) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	if !e.running {
 		return nil
 	}
-	
+
 	e.running = false
-	
+
 	// Shutdown HTTP server
 	if e.httpServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(ctx, e.config.ShutdownTimeout)
 		defer cancel()
-		
+
 		if err := e.httpServer.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("failed to shutdown HTTP server: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -228,7 +228,7 @@ func (e *Exporter) ExportCorrelationResult(ctx context.Context, result *correlat
 	if !e.isRunning() {
 		return fmt.Errorf("exporter not running")
 	}
-	
+
 	return e.metricsExporter.ExportCorrelationResult(ctx, result)
 }
 
@@ -237,14 +237,14 @@ func (e *Exporter) ExportCorrelationBatch(ctx context.Context, results []*correl
 	if !e.isRunning() {
 		return fmt.Errorf("exporter not running")
 	}
-	
+
 	for _, result := range results {
 		if err := e.metricsExporter.ExportCorrelationResult(ctx, result); err != nil {
 			// Continue with other results, but record the error
 			e.metricsExporter.RecordError()
 		}
 	}
-	
+
 	return nil
 }
 
@@ -253,7 +253,7 @@ func (e *Exporter) ExportSystemHealth(ctx context.Context, namespace, cluster st
 	if !e.isRunning() {
 		return nil
 	}
-	
+
 	return e.metricsExporter.ExportSystemHealth(ctx, namespace, cluster, healthScore)
 }
 
@@ -262,7 +262,7 @@ func (e *Exporter) ExportResourceUsage(ctx context.Context, resourceType, namesp
 	if !e.isRunning() {
 		return nil
 	}
-	
+
 	return e.metricsExporter.ExportResourceUsage(ctx, resourceType, namespace, node, usage)
 }
 
@@ -271,7 +271,7 @@ func (e *Exporter) ExportProcessingRate(ctx context.Context, source string, rate
 	if !e.isRunning() {
 		return nil
 	}
-	
+
 	return e.metricsExporter.ExportProcessingRate(ctx, source, rate)
 }
 
@@ -280,7 +280,7 @@ func (e *Exporter) ExportPatternMetrics(ctx context.Context, patternType string,
 	if !e.isRunning() {
 		return nil
 	}
-	
+
 	return e.metricsExporter.ExportPatternMetrics(ctx, patternType, detected, confidence, accuracy)
 }
 
@@ -289,7 +289,7 @@ func (e *Exporter) ExportAutoFixResult(ctx context.Context, fixType string, succ
 	if !e.isRunning() {
 		return nil
 	}
-	
+
 	return e.metricsExporter.ExportAutoFixResult(ctx, fixType, success)
 }
 
@@ -298,7 +298,7 @@ func (e *Exporter) RecordProcessingTime(ruleID string, duration time.Duration) {
 	if !e.isRunning() {
 		return
 	}
-	
+
 	e.metricsExporter.RecordProcessingTime(ruleID, duration)
 }
 
@@ -307,10 +307,10 @@ func (e *Exporter) RegisterCustomCollector(component string, collector *CustomCo
 	if e.factoryCollector == nil {
 		return fmt.Errorf("factory collector not enabled")
 	}
-	
+
 	// Register with factory
 	e.factoryCollector.RegisterCollector(component, collector)
-	
+
 	// Register with Prometheus registry
 	return e.registry.Register(collector)
 }
@@ -320,12 +320,12 @@ func (e *Exporter) UnregisterCustomCollector(component string) error {
 	if e.factoryCollector == nil {
 		return fmt.Errorf("factory collector not enabled")
 	}
-	
+
 	collector, exists := e.factoryCollector.GetCollector(component)
 	if !exists {
 		return fmt.Errorf("collector for component %s not found", component)
 	}
-	
+
 	return e.registry.Unregister(collector)
 }
 
@@ -333,26 +333,26 @@ func (e *Exporter) UnregisterCustomCollector(component string) error {
 func (e *Exporter) GetMetrics() ExportMetrics {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
+
 	metrics := ExportMetrics{
 		Running:        e.running,
 		LastScrapeTime: time.Now(), // Would track actual last scrape time
 	}
-	
+
 	if e.customCollector != nil {
 		metrics.LastScrapeTime = e.customCollector.GetLastScrapeTime()
 	}
-	
+
 	return metrics
 }
 
 // ExportMetrics provides metrics about export operations
 type ExportMetrics struct {
-	Running         bool
-	ExportsTotal    int64
-	ExportErrors    int64
-	LastScrapeTime  time.Time
-	AvgScrapeTime   time.Duration
+	Running          bool
+	ExportsTotal     int64
+	ExportErrors     int64
+	LastScrapeTime   time.Time
+	AvgScrapeTime    time.Duration
 	ActiveCollectors int
 }
 
@@ -405,7 +405,7 @@ func enableBasicAuth(handler http.Handler, users map[string]string) http.Handler
 			w.Write([]byte("Unauthorized"))
 			return
 		}
-		
+
 		expectedPassword, exists := users[username]
 		if !exists || expectedPassword != password {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
@@ -413,7 +413,7 @@ func enableBasicAuth(handler http.Handler, users map[string]string) http.Handler
 			w.Write([]byte("Unauthorized"))
 			return
 		}
-		
+
 		handler.ServeHTTP(w, r)
 	})
 }
@@ -440,7 +440,7 @@ func (e *Exporter) GetHandler() http.Handler {
 func (e *Exporter) GetConfig() *ExporterConfig {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
+
 	// Return a copy to prevent external modification
 	configCopy := *e.config
 	return &configCopy
@@ -451,7 +451,7 @@ func (e *Exporter) InvalidateCache() {
 	if e.customCollector != nil {
 		e.customCollector.InvalidateCache()
 	}
-	
+
 	if e.factoryCollector != nil {
 		for _, collector := range e.factoryCollector.GetAllCollectors() {
 			collector.InvalidateCache()

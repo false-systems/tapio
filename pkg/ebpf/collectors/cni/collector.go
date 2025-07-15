@@ -14,38 +14,38 @@ import (
 
 // CNICollector collects network events from CNI plugins using eBPF
 type CNICollector struct {
-	name       string
-	config     *CNICollectorConfig
-	metrics    *CNIMetrics
-	flowCache  *FlowCache
-	
+	name      string
+	config    *CNICollectorConfig
+	metrics   *CNIMetrics
+	flowCache *FlowCache
+
 	// eBPF programs
 	networkFlowProgram     *ebpf.Program
 	podTrafficProgram      *ebpf.Program
 	dnsMonitorProgram      *ebpf.Program
 	policyViolationProgram *ebpf.Program
-	
+
 	// eBPF maps
-	flowMap           *ebpf.Map
-	podTrafficMap     *ebpf.Map
-	dnsQueriesMap     *ebpf.Map
+	flowMap            *ebpf.Map
+	podTrafficMap      *ebpf.Map
+	dnsQueriesMap      *ebpf.Map
 	policyViolationMap *ebpf.Map
-	
+
 	// CNI plugins
 	cniPlugins map[string]CNIPlugin
-	
+
 	// Pod tracking
 	podIndex map[string]*PodInfo
-	
+
 	// Service mesh
-	detectedMesh    ServiceMeshType
-	meshAnalyzer    *MeshTrafficAnalyzer
-	
+	detectedMesh ServiceMeshType
+	meshAnalyzer *MeshTrafficAnalyzer
+
 	// Control
 	wg          sync.WaitGroup
 	stopChannel chan struct{}
 	eventChan   chan interface{}
-	
+
 	// Thread safety
 	mutex sync.RWMutex
 }
@@ -53,54 +53,54 @@ type CNICollector struct {
 // CNICollectorConfig configures the CNI collector
 type CNICollectorConfig struct {
 	CollectionInterval     time.Duration `json:"collection_interval"`
-	CNIConfigPath         string        `json:"cni_config_path"`
-	CNIBinPath            string        `json:"cni_bin_path"`
-	SupportedCNIPlugins   []string      `json:"supported_cni_plugins"`
-	EnableNetworkFlows    bool          `json:"enable_network_flows"`
-	EnableDNSMonitoring   bool          `json:"enable_dns_monitoring"`
-	EnablePolicyMonitoring bool         `json:"enable_policy_monitoring"`
-	FlowCacheSize         int           `json:"flow_cache_size"`
-	DNSCacheSize          int           `json:"dns_cache_size"`
-	MaxConcurrentFlows    int           `json:"max_concurrent_flows"`
+	CNIConfigPath          string        `json:"cni_config_path"`
+	CNIBinPath             string        `json:"cni_bin_path"`
+	SupportedCNIPlugins    []string      `json:"supported_cni_plugins"`
+	EnableNetworkFlows     bool          `json:"enable_network_flows"`
+	EnableDNSMonitoring    bool          `json:"enable_dns_monitoring"`
+	EnablePolicyMonitoring bool          `json:"enable_policy_monitoring"`
+	FlowCacheSize          int           `json:"flow_cache_size"`
+	DNSCacheSize           int           `json:"dns_cache_size"`
+	MaxConcurrentFlows     int           `json:"max_concurrent_flows"`
 }
 
 // CNIMetrics tracks CNI collector metrics
 type CNIMetrics struct {
-	EventsCollected      uint64             `json:"events_collected"`
-	FlowsTracked         uint64             `json:"flows_tracked"`
-	DNSQueries           uint64             `json:"dns_queries"`
-	DNSFailures          uint64             `json:"dns_failures"`
-	PolicyViolations     uint64             `json:"policy_violations"`
-	ActiveFlows          uint64             `json:"active_flows"`
-	BlockedConnections   uint64             `json:"blocked_connections"`
-	AllowedConnections   uint64             `json:"allowed_connections"`
-	CollectionErrors     uint64             `json:"collection_errors"`
-	
+	EventsCollected    uint64 `json:"events_collected"`
+	FlowsTracked       uint64 `json:"flows_tracked"`
+	DNSQueries         uint64 `json:"dns_queries"`
+	DNSFailures        uint64 `json:"dns_failures"`
+	PolicyViolations   uint64 `json:"policy_violations"`
+	ActiveFlows        uint64 `json:"active_flows"`
+	BlockedConnections uint64 `json:"blocked_connections"`
+	AllowedConnections uint64 `json:"allowed_connections"`
+	CollectionErrors   uint64 `json:"collection_errors"`
+
 	// Performance metrics
-	FlowsPerSecond       float64            `json:"flows_per_second"`
-	DNSFailureRate       float64            `json:"dns_failure_rate"`
-	DNSLatencyP95        time.Duration      `json:"dns_latency_p95"`
-	CPUUsagePercent      float64            `json:"cpu_usage_percent"`
-	MemoryUsageMB        float64            `json:"memory_usage_mb"`
-	
+	FlowsPerSecond  float64       `json:"flows_per_second"`
+	DNSFailureRate  float64       `json:"dns_failure_rate"`
+	DNSLatencyP95   time.Duration `json:"dns_latency_p95"`
+	CPUUsagePercent float64       `json:"cpu_usage_percent"`
+	MemoryUsageMB   float64       `json:"memory_usage_mb"`
+
 	// eBPF metrics
-	eBPFMapUtilization   map[string]float64 `json:"ebpf_map_utilization"`
-	
-	LastUpdate           time.Time          `json:"last_update"`
-	Uptime               time.Duration      `json:"uptime"`
-	
-	mutex                sync.RWMutex
+	eBPFMapUtilization map[string]float64 `json:"ebpf_map_utilization"`
+
+	LastUpdate time.Time     `json:"last_update"`
+	Uptime     time.Duration `json:"uptime"`
+
+	mutex sync.RWMutex
 }
 
 // PodInfo represents information about a pod
 type PodInfo struct {
-	Name            string             `json:"name"`
-	Namespace       string             `json:"namespace"`
-	IP              net.IP             `json:"ip"`
-	Labels          map[string]string  `json:"labels"`
-	Annotations     map[string]string  `json:"annotations"`
-	ServiceMeshInfo *ServiceMeshInfo   `json:"service_mesh_info,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
+	Name            string            `json:"name"`
+	Namespace       string            `json:"namespace"`
+	IP              net.IP            `json:"ip"`
+	Labels          map[string]string `json:"labels"`
+	Annotations     map[string]string `json:"annotations"`
+	ServiceMeshInfo *ServiceMeshInfo  `json:"service_mesh_info,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
 }
 
 // ServiceMeshInfo contains service mesh related information
@@ -149,11 +149,11 @@ func NewCNICollector(config *CNICollectorConfig) (*CNICollector, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
-	
+
 	if config.CollectionInterval <= 0 {
 		return nil, fmt.Errorf("collection interval must be positive")
 	}
-	
+
 	collector := &CNICollector{
 		name:        "cni-collector",
 		config:      config,
@@ -163,15 +163,15 @@ func NewCNICollector(config *CNICollectorConfig) (*CNICollector, error) {
 		stopChannel: make(chan struct{}),
 		eventChan:   make(chan interface{}, 100),
 	}
-	
+
 	// Initialize flow cache
 	if config.FlowCacheSize > 0 {
 		collector.flowCache = NewFlowCache(config.FlowCacheSize, 5*time.Minute)
 	}
-	
+
 	// Initialize mesh analyzer
 	collector.meshAnalyzer = NewMeshTrafficAnalyzer([]string{"istio", "linkerd", "consul", "cilium"})
-	
+
 	return collector, nil
 }
 
@@ -181,38 +181,38 @@ func (c *CNICollector) Start(ctx context.Context) error {
 	if err := c.discoverCNIPlugins(); err != nil {
 		return fmt.Errorf("failed to discover CNI plugins: %w", err)
 	}
-	
+
 	// Detect service mesh
 	if meshType, err := c.detectServiceMesh(); err == nil {
 		c.detectedMesh = meshType
 	}
-	
+
 	// Start collection goroutines
 	if c.config.EnableNetworkFlows {
 		c.wg.Add(1)
 		go c.collectNetworkFlows(ctx)
 	}
-	
+
 	if c.config.EnableDNSMonitoring {
 		c.wg.Add(1)
 		go c.collectDNSQueries(ctx)
 	}
-	
+
 	if c.config.EnablePolicyMonitoring {
 		c.wg.Add(1)
 		go c.collectPolicyViolations(ctx)
 	}
-	
+
 	// Start metrics update
 	c.wg.Add(1)
 	go c.updateMetrics(ctx)
-	
+
 	// Start CNI plugin monitoring
 	for _, plugin := range c.cniPlugins {
 		c.wg.Add(1)
 		go c.monitorCNIPlugin(ctx, plugin)
 	}
-	
+
 	return nil
 }
 
@@ -227,26 +227,26 @@ func (c *CNICollector) Stop() error {
 func (c *CNICollector) GetMetrics() map[string]interface{} {
 	c.metrics.mutex.RLock()
 	defer c.metrics.mutex.RUnlock()
-	
+
 	uptime := time.Since(time.Now().Add(-c.metrics.Uptime))
-	
+
 	return map[string]interface{}{
-		"events_collected":     c.metrics.EventsCollected,
-		"flows_tracked":        c.metrics.FlowsTracked,
-		"dns_queries":          c.metrics.DNSQueries,
-		"dns_failures":         c.metrics.DNSFailures,
-		"policy_violations":    c.metrics.PolicyViolations,
-		"active_flows":         c.metrics.ActiveFlows,
-		"blocked_connections":  c.metrics.BlockedConnections,
-		"allowed_connections":  c.metrics.AllowedConnections,
-		"collection_errors":    c.metrics.CollectionErrors,
-		"flows_per_second":     c.metrics.FlowsPerSecond,
-		"dns_failure_rate":     c.metrics.DNSFailureRate,
-		"dns_latency_p95_ms":   c.metrics.DNSLatencyP95.Milliseconds(),
-		"cpu_usage_percent":    c.metrics.CPUUsagePercent,
-		"memory_usage_mb":      c.metrics.MemoryUsageMB,
-		"uptime_seconds":       uptime.Seconds(),
-		"last_update":          c.metrics.LastUpdate,
+		"events_collected":    c.metrics.EventsCollected,
+		"flows_tracked":       c.metrics.FlowsTracked,
+		"dns_queries":         c.metrics.DNSQueries,
+		"dns_failures":        c.metrics.DNSFailures,
+		"policy_violations":   c.metrics.PolicyViolations,
+		"active_flows":        c.metrics.ActiveFlows,
+		"blocked_connections": c.metrics.BlockedConnections,
+		"allowed_connections": c.metrics.AllowedConnections,
+		"collection_errors":   c.metrics.CollectionErrors,
+		"flows_per_second":    c.metrics.FlowsPerSecond,
+		"dns_failure_rate":    c.metrics.DNSFailureRate,
+		"dns_latency_p95_ms":  c.metrics.DNSLatencyP95.Milliseconds(),
+		"cpu_usage_percent":   c.metrics.CPUUsagePercent,
+		"memory_usage_mb":     c.metrics.MemoryUsageMB,
+		"uptime_seconds":      uptime.Seconds(),
+		"last_update":         c.metrics.LastUpdate,
 	}
 }
 
@@ -266,12 +266,12 @@ func (c *CNICollector) sendEvent(event *opinionated.OpinionatedEvent) {
 func (c *CNICollector) findPodByIP(ip net.IP) *PodInfo {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	ipStr := ip.String()
 	if pod, exists := c.podIndex[ipStr]; exists {
 		return pod
 	}
-	
+
 	return nil
 }
 
@@ -310,12 +310,12 @@ func (c *CNICollector) simulateNetworkFlows() {
 			PolicyDecision:     PolicyAllow,
 		},
 	}
-	
+
 	for _, flow := range flows {
 		if c.flowCache != nil {
 			c.flowCache.AddFlow(flow)
 		}
-		
+
 		// Update metrics
 		c.metrics.mutex.Lock()
 		c.metrics.FlowsTracked++
@@ -356,26 +356,26 @@ func (c *CNICollector) detectServiceMesh() (ServiceMeshType, error) {
 
 // MeshTrafficAnalyzer analyzes service mesh traffic patterns
 type MeshTrafficAnalyzer struct {
-	supportedMeshes   []string
-	detectedMesh      ServiceMeshType
-	trafficPatterns   map[string]*MeshTrafficPattern
-	mutex             sync.RWMutex
+	supportedMeshes []string
+	detectedMesh    ServiceMeshType
+	trafficPatterns map[string]*MeshTrafficPattern
+	mutex           sync.RWMutex
 }
 
 // MeshTrafficPattern represents traffic patterns in service mesh
 type MeshTrafficPattern struct {
-	SourceService      string            `json:"source_service"`
-	DestinationService string            `json:"destination_service"`
-	Protocol           string            `json:"protocol"`
-	RequestRate        float64           `json:"request_rate"`
-	SuccessRate        float64           `json:"success_rate"`
-	P50Latency         time.Duration     `json:"p50_latency"`
-	P95Latency         time.Duration     `json:"p95_latency"`
-	P99Latency         time.Duration     `json:"p99_latency"`
-	ErrorRate          float64           `json:"error_rate"`
-	TLSEnabled         bool              `json:"tls_enabled"`
-	PolicyViolations   uint64            `json:"policy_violations"`
-	LastUpdate         time.Time         `json:"last_update"`
+	SourceService      string        `json:"source_service"`
+	DestinationService string        `json:"destination_service"`
+	Protocol           string        `json:"protocol"`
+	RequestRate        float64       `json:"request_rate"`
+	SuccessRate        float64       `json:"success_rate"`
+	P50Latency         time.Duration `json:"p50_latency"`
+	P95Latency         time.Duration `json:"p95_latency"`
+	P99Latency         time.Duration `json:"p99_latency"`
+	ErrorRate          float64       `json:"error_rate"`
+	TLSEnabled         bool          `json:"tls_enabled"`
+	PolicyViolations   uint64        `json:"policy_violations"`
+	LastUpdate         time.Time     `json:"last_update"`
 }
 
 // NewMeshTrafficAnalyzer creates a new mesh traffic analyzer
@@ -395,13 +395,13 @@ func (c *CNICollector) processCNIEvent(plugin CNIPlugin, cniEvent *CNIEvent) {
 	} else if cniEvent.Duration > 100*time.Millisecond {
 		severity = opinionated.SeverityMedium
 	}
-	
+
 	event := &opinionated.OpinionatedEvent{
-		ID:          fmt.Sprintf("cni-%s-%s-%d", plugin.Name(), cniEvent.Type, time.Now().UnixNano()),
-		Timestamp:   cniEvent.Timestamp,
-		Category:    opinionated.CategoryNetworkHealth,
-		Severity:    severity,
-		Confidence:  0.95,
+		ID:         fmt.Sprintf("cni-%s-%s-%d", plugin.Name(), cniEvent.Type, time.Now().UnixNano()),
+		Timestamp:  cniEvent.Timestamp,
+		Category:   opinionated.CategoryNetworkHealth,
+		Severity:   severity,
+		Confidence: 0.95,
 		Source: opinionated.EventSource{
 			Collector: "cni-collector",
 			Component: plugin.Name(),
@@ -412,7 +412,7 @@ func (c *CNICollector) processCNIEvent(plugin CNIPlugin, cniEvent *CNIEvent) {
 			Pod:       cniEvent.PodName,
 		},
 		Data: map[string]interface{}{
-			"message": fmt.Sprintf("CNI %s operation for pod %s/%s", cniEvent.Type, cniEvent.Namespace, cniEvent.PodName),
+			"message":   fmt.Sprintf("CNI %s operation for pod %s/%s", cniEvent.Type, cniEvent.Namespace, cniEvent.PodName),
 			"operation": cniEvent.Type,
 		},
 		Attributes: map[string]interface{}{
@@ -429,18 +429,18 @@ func (c *CNICollector) processCNIEvent(plugin CNIPlugin, cniEvent *CNIEvent) {
 			fmt.Sprintf("cni:%s", plugin.Name()),
 		},
 	}
-	
+
 	// Add error information if present
 	if cniEvent.Error != "" {
 		event.Attributes["cni.error"] = cniEvent.Error
 		event.Data["error"] = cniEvent.Error
 	}
-	
+
 	// Add plugin-specific metadata
 	for k, v := range cniEvent.Metadata {
 		event.Attributes[fmt.Sprintf("cni.%s", k)] = v
 	}
-	
+
 	// Add CNI result information if available
 	if cniEvent.Result != nil {
 		event.Attributes["cni.result.cni_version"] = cniEvent.Result.CNIVersion
@@ -448,9 +448,9 @@ func (c *CNICollector) processCNIEvent(plugin CNIPlugin, cniEvent *CNIEvent) {
 		event.Attributes["cni.result.ip_count"] = len(cniEvent.Result.IPs)
 		event.Attributes["cni.result.route_count"] = len(cniEvent.Result.Routes)
 	}
-	
+
 	c.sendEvent(event)
-	
+
 	// Update metrics
 	c.metrics.mutex.Lock()
 	c.metrics.EventsCollected++
@@ -464,12 +464,12 @@ func (c *CNICollector) isValidInterfaceName(ifaceName string) bool {
 	validPatterns := []string{
 		"eth", "veth", "cali", "flannel", "cilium", "weave", "cbr", "docker", "cni",
 	}
-	
+
 	for _, pattern := range validPatterns {
 		if strings.HasPrefix(ifaceName, pattern) {
 			return true
 		}
 	}
-	
+
 	return false
 }

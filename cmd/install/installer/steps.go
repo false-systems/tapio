@@ -10,8 +10,8 @@ import (
 	"runtime"
 	"time"
 
-	"tapio/cmd/install/platform"
-	"tapio/cmd/install/validation"
+	"github.com/yairfalse/tapio/cmd/install/platform"
+	"github.com/yairfalse/tapio/cmd/install/validation"
 )
 
 // installBinaryStep installs the binary to the target location

@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/exports/otel"
 	"github.com/yairfalse/tapio/pkg/exports/prometheus"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -277,7 +277,7 @@ func TestBatchVsSingleExport(t *testing.T) {
 	t.Logf("Batch export duration: %v", batchExportDuration)
 
 	// Batch should be faster or similar (not significantly slower)
-	assert.LessOrEqual(t, batchExportDuration, singleExportDuration*2, 
+	assert.LessOrEqual(t, batchExportDuration, singleExportDuration*2,
 		"Batch export should not be significantly slower than individual exports")
 }
 
@@ -352,7 +352,7 @@ func TestExportLatency(t *testing.T) {
 	t.Logf("Average export duration: %v", avgDuration)
 
 	// Verify latency requirement
-	assert.Less(t, avgDuration, 20*time.Millisecond, 
+	assert.Less(t, avgDuration, 20*time.Millisecond,
 		"Average export latency should be less than 20ms")
 }
 

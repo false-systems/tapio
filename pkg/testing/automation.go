@@ -28,55 +28,55 @@ type AutomationConfig struct {
 	DefaultTimeout time.Duration `yaml:"default_timeout"`
 	RetryAttempts  int           `yaml:"retry_attempts"`
 	RetryDelay     time.Duration `yaml:"retry_delay"`
-	
+
 	// Scheduling
 	Scheduling SchedulingConfig `yaml:"scheduling"`
-	
+
 	// Pipeline configuration
 	Pipeline PipelineConfig `yaml:"pipeline"`
-	
+
 	// Notifications
 	Notifications NotificationConfig `yaml:"notifications"`
-	
+
 	// Quality gates
 	QualityGates QualityGatesConfig `yaml:"quality_gates"`
-	
+
 	// Environments
 	Environments map[string]EnvironmentConfig `yaml:"environments"`
 }
 
 // SchedulingConfig defines test scheduling
 type SchedulingConfig struct {
-	Enabled           bool                    `yaml:"enabled"`
-	CronExpressions   map[string]string       `yaml:"cron_expressions"`
-	TriggerOnDeploy   bool                    `yaml:"trigger_on_deploy"`
-	TriggerOnCommit   bool                    `yaml:"trigger_on_commit"`
-	MinInterval       time.Duration           `yaml:"min_interval"`
-	MaxConcurrent     int                     `yaml:"max_concurrent"`
-	Priorities        map[string]int          `yaml:"priorities"`
-	Dependencies      map[string][]string     `yaml:"dependencies"`
+	Enabled         bool                `yaml:"enabled"`
+	CronExpressions map[string]string   `yaml:"cron_expressions"`
+	TriggerOnDeploy bool                `yaml:"trigger_on_deploy"`
+	TriggerOnCommit bool                `yaml:"trigger_on_commit"`
+	MinInterval     time.Duration       `yaml:"min_interval"`
+	MaxConcurrent   int                 `yaml:"max_concurrent"`
+	Priorities      map[string]int      `yaml:"priorities"`
+	Dependencies    map[string][]string `yaml:"dependencies"`
 }
 
 // PipelineConfig defines test pipeline configuration
 type PipelineConfig struct {
-	Stages           []PipelineStage    `yaml:"stages"`
-	ParallelExecution bool              `yaml:"parallel_execution"`
-	FailFast         bool              `yaml:"fail_fast"`
-	Rollback         RollbackConfig    `yaml:"rollback"`
-	Artifacts        ArtifactConfig    `yaml:"artifacts"`
+	Stages            []PipelineStage `yaml:"stages"`
+	ParallelExecution bool            `yaml:"parallel_execution"`
+	FailFast          bool            `yaml:"fail_fast"`
+	Rollback          RollbackConfig  `yaml:"rollback"`
+	Artifacts         ArtifactConfig  `yaml:"artifacts"`
 }
 
 // PipelineStage defines a pipeline stage
 type PipelineStage struct {
-	Name         string            `yaml:"name"`
-	TestSuites   []string          `yaml:"test_suites"`
-	Environment  string            `yaml:"environment"`
-	Parallel     bool              `yaml:"parallel"`
-	Timeout      time.Duration     `yaml:"timeout"`
-	Prerequisites []string         `yaml:"prerequisites"`
-	OnSuccess    []string          `yaml:"on_success"`
-	OnFailure    []string          `yaml:"on_failure"`
-	Gates        []QualityGate     `yaml:"gates"`
+	Name          string        `yaml:"name"`
+	TestSuites    []string      `yaml:"test_suites"`
+	Environment   string        `yaml:"environment"`
+	Parallel      bool          `yaml:"parallel"`
+	Timeout       time.Duration `yaml:"timeout"`
+	Prerequisites []string      `yaml:"prerequisites"`
+	OnSuccess     []string      `yaml:"on_success"`
+	OnFailure     []string      `yaml:"on_failure"`
+	Gates         []QualityGate `yaml:"gates"`
 }
 
 // NotificationConfig defines notification settings
@@ -89,10 +89,10 @@ type NotificationConfig struct {
 
 // NotificationChannel defines a notification channel
 type NotificationChannel struct {
-	Type     string            `yaml:"type"` // slack, email, webhook
-	Enabled  bool              `yaml:"enabled"`
-	Config   map[string]string `yaml:"config"`
-	Events   []string          `yaml:"events"` // test_started, test_completed, test_failed
+	Type    string            `yaml:"type"` // slack, email, webhook
+	Enabled bool              `yaml:"enabled"`
+	Config  map[string]string `yaml:"config"`
+	Events  []string          `yaml:"events"` // test_started, test_completed, test_failed
 }
 
 // NotificationFilters defines notification filtering
@@ -105,11 +105,11 @@ type NotificationFilters struct {
 
 // QualityGatesConfig defines quality gates
 type QualityGatesConfig struct {
-	Enabled            bool                    `yaml:"enabled"`
-	Gates              map[string]QualityGate  `yaml:"gates"`
-	FailureThresholds  map[string]float64      `yaml:"failure_thresholds"`
-	BlockDeployment    bool                    `yaml:"block_deployment"`
-	RequireApproval    bool                    `yaml:"require_approval"`
+	Enabled           bool                   `yaml:"enabled"`
+	Gates             map[string]QualityGate `yaml:"gates"`
+	FailureThresholds map[string]float64     `yaml:"failure_thresholds"`
+	BlockDeployment   bool                   `yaml:"block_deployment"`
+	RequireApproval   bool                   `yaml:"require_approval"`
 }
 
 // QualityGate defines a quality gate
@@ -126,41 +126,41 @@ type QualityGate struct {
 
 // EnvironmentConfig defines test environment configuration
 type EnvironmentConfig struct {
-	Name         string            `yaml:"name"`
-	Type         string            `yaml:"type"` // dev, staging, production
-	Endpoint     string            `yaml:"endpoint"`
-	Credentials  string            `yaml:"credentials"`
-	Setup        []string          `yaml:"setup"`
-	Teardown     []string          `yaml:"teardown"`
-	Resources    ResourceConfig    `yaml:"resources"`
-	Isolation    bool              `yaml:"isolation"`
+	Name        string         `yaml:"name"`
+	Type        string         `yaml:"type"` // dev, staging, production
+	Endpoint    string         `yaml:"endpoint"`
+	Credentials string         `yaml:"credentials"`
+	Setup       []string       `yaml:"setup"`
+	Teardown    []string       `yaml:"teardown"`
+	Resources   ResourceConfig `yaml:"resources"`
+	Isolation   bool           `yaml:"isolation"`
 }
 
 // ResourceConfig defines environment resources
 type ResourceConfig struct {
-	CPU    string `yaml:"cpu"`
-	Memory string `yaml:"memory"`
+	CPU     string `yaml:"cpu"`
+	Memory  string `yaml:"memory"`
 	Storage string `yaml:"storage"`
 	Network string `yaml:"network"`
 }
 
 // RollbackConfig defines rollback configuration
 type RollbackConfig struct {
-	Enabled      bool          `yaml:"enabled"`
-	Automatic    bool          `yaml:"automatic"`
-	Timeout      time.Duration `yaml:"timeout"`
-	Triggers     []string      `yaml:"triggers"`
-	Strategy     string        `yaml:"strategy"` // immediate, graceful
+	Enabled   bool          `yaml:"enabled"`
+	Automatic bool          `yaml:"automatic"`
+	Timeout   time.Duration `yaml:"timeout"`
+	Triggers  []string      `yaml:"triggers"`
+	Strategy  string        `yaml:"strategy"` // immediate, graceful
 }
 
 // ArtifactConfig defines artifact management
 type ArtifactConfig struct {
-	Enabled    bool              `yaml:"enabled"`
-	Types      []string          `yaml:"types"` // logs, reports, screenshots
-	Retention  time.Duration     `yaml:"retention"`
-	Storage    string            `yaml:"storage"` // local, s3, gcs
-	Compression bool             `yaml:"compression"`
-	Encryption bool             `yaml:"encryption"`
+	Enabled     bool          `yaml:"enabled"`
+	Types       []string      `yaml:"types"` // logs, reports, screenshots
+	Retention   time.Duration `yaml:"retention"`
+	Storage     string        `yaml:"storage"` // local, s3, gcs
+	Compression bool          `yaml:"compression"`
+	Encryption  bool          `yaml:"encryption"`
 }
 
 // NewTestAutomation creates a new test automation instance
@@ -191,24 +191,24 @@ func DefaultAutomationConfig() *AutomationConfig {
 		DefaultTimeout: 60 * time.Minute,
 		RetryAttempts:  3,
 		RetryDelay:     30 * time.Second,
-		
+
 		Scheduling: SchedulingConfig{
 			Enabled: true,
 			CronExpressions: map[string]string{
-				"nightly":       "0 2 * * *",
-				"smoke":         "*/30 * * * *",
-				"performance":   "0 4 * * 1,3,5",
-				"security":      "0 6 * * 1",
+				"nightly":     "0 2 * * *",
+				"smoke":       "*/30 * * * *",
+				"performance": "0 4 * * 1,3,5",
+				"security":    "0 6 * * 1",
 			},
 			TriggerOnDeploy: true,
 			TriggerOnCommit: false,
 			MinInterval:     5 * time.Minute,
 			MaxConcurrent:   3,
 		},
-		
+
 		Pipeline: PipelineConfig{
 			ParallelExecution: true,
-			FailFast:         false,
+			FailFast:          false,
 			Stages: []PipelineStage{
 				{
 					Name:        "smoke",
@@ -218,32 +218,32 @@ func DefaultAutomationConfig() *AutomationConfig {
 					Timeout:     10 * time.Minute,
 				},
 				{
-					Name:        "integration",
-					TestSuites:  []string{"integration", "security"},
-					Environment: "staging",
-					Parallel:    true,
-					Timeout:     20 * time.Minute,
+					Name:          "integration",
+					TestSuites:    []string{"integration", "security"},
+					Environment:   "staging",
+					Parallel:      true,
+					Timeout:       20 * time.Minute,
 					Prerequisites: []string{"smoke"},
 				},
 				{
-					Name:        "performance",
-					TestSuites:  []string{"performance"},
-					Environment: "staging",
-					Parallel:    false,
-					Timeout:     30 * time.Minute,
+					Name:          "performance",
+					TestSuites:    []string{"performance"},
+					Environment:   "staging",
+					Parallel:      false,
+					Timeout:       30 * time.Minute,
 					Prerequisites: []string{"integration"},
 				},
 				{
-					Name:        "e2e",
-					TestSuites:  []string{"e2e"},
-					Environment: "production",
-					Parallel:    false,
-					Timeout:     45 * time.Minute,
+					Name:          "e2e",
+					TestSuites:    []string{"e2e"},
+					Environment:   "production",
+					Parallel:      false,
+					Timeout:       45 * time.Minute,
 					Prerequisites: []string{"performance"},
 				},
 			},
 		},
-		
+
 		QualityGates: QualityGatesConfig{
 			Enabled: true,
 			Gates: map[string]QualityGate{
@@ -266,7 +266,7 @@ func DefaultAutomationConfig() *AutomationConfig {
 			},
 			BlockDeployment: true,
 		},
-		
+
 		Notifications: NotificationConfig{
 			Enabled: true,
 			Channels: map[string]NotificationChannel{
@@ -315,15 +315,15 @@ func (ta *TestAutomation) RunAutomatedTests(ctx context.Context, trigger TestTri
 		result.ErrorMessage = err.Error()
 		result.EndTime = time.Now()
 		result.Duration = result.EndTime.Sub(result.StartTime)
-		
+
 		ta.logger.Error("Automated test pipeline failed", "error", err)
 		ta.sendNotification("test_failed", result)
-		
+
 		// Trigger rollback if configured
 		if ta.config.Pipeline.Rollback.Enabled && ta.config.Pipeline.Rollback.Automatic {
 			ta.triggerRollback(ctx, result)
 		}
-		
+
 		return result, err
 	}
 
@@ -334,10 +334,10 @@ func (ta *TestAutomation) RunAutomatedTests(ctx context.Context, trigger TestTri
 			result.ErrorMessage = fmt.Sprintf("Quality gates failed: %v", err)
 			result.EndTime = time.Now()
 			result.Duration = result.EndTime.Sub(result.StartTime)
-			
+
 			ta.logger.Error("Quality gates validation failed", "error", err)
 			ta.sendNotification("quality_gate_failed", result)
-			
+
 			return result, err
 		}
 	}
@@ -369,16 +369,16 @@ type TestTrigger struct {
 
 // AutomationResult represents automation execution results
 type AutomationResult struct {
-	StartTime    time.Time                `json:"start_time"`
-	EndTime      time.Time                `json:"end_time"`
-	Duration     time.Duration            `json:"duration"`
-	Status       AutomationStatus         `json:"status"`
-	ErrorMessage string                   `json:"error_message,omitempty"`
-	Trigger      TestTrigger              `json:"trigger"`
-	Stages       map[string]*StageResult  `json:"stages"`
-	QualityGates map[string]*GateResult   `json:"quality_gates"`
-	Artifacts    []string                 `json:"artifacts"`
-	Metadata     map[string]interface{}   `json:"metadata"`
+	StartTime    time.Time               `json:"start_time"`
+	EndTime      time.Time               `json:"end_time"`
+	Duration     time.Duration           `json:"duration"`
+	Status       AutomationStatus        `json:"status"`
+	ErrorMessage string                  `json:"error_message,omitempty"`
+	Trigger      TestTrigger             `json:"trigger"`
+	Stages       map[string]*StageResult `json:"stages"`
+	QualityGates map[string]*GateResult  `json:"quality_gates"`
+	Artifacts    []string                `json:"artifacts"`
+	Metadata     map[string]interface{}  `json:"metadata"`
 }
 
 // AutomationStatus represents automation status
@@ -394,15 +394,15 @@ const (
 
 // StageResult represents pipeline stage results
 type StageResult struct {
-	Name         string                   `json:"name"`
-	StartTime    time.Time                `json:"start_time"`
-	EndTime      time.Time                `json:"end_time"`
-	Duration     time.Duration            `json:"duration"`
-	Status       AutomationStatus         `json:"status"`
-	ErrorMessage string                   `json:"error_message,omitempty"`
-	TestSuites   map[string]*TestResult   `json:"test_suites"`
-	Environment  string                   `json:"environment"`
-	Artifacts    []string                 `json:"artifacts"`
+	Name         string                 `json:"name"`
+	StartTime    time.Time              `json:"start_time"`
+	EndTime      time.Time              `json:"end_time"`
+	Duration     time.Duration          `json:"duration"`
+	Status       AutomationStatus       `json:"status"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	TestSuites   map[string]*TestResult `json:"test_suites"`
+	Environment  string                 `json:"environment"`
+	Artifacts    []string               `json:"artifacts"`
 }
 
 // GateResult represents quality gate results
@@ -427,23 +427,23 @@ func (ar *AutomationResult) countPassedStages() int {
 
 // TestScheduler handles test scheduling
 type TestScheduler struct {
-	config    SchedulingConfig
-	logger    *logging.Logger
-	running   map[string]*ScheduledTest
-	mutex     sync.RWMutex
+	config  SchedulingConfig
+	logger  *logging.Logger
+	running map[string]*ScheduledTest
+	mutex   sync.RWMutex
 }
 
 // ScheduledTest represents a scheduled test
 type ScheduledTest struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Cron        string            `json:"cron"`
-	NextRun     time.Time         `json:"next_run"`
-	LastRun     time.Time         `json:"last_run"`
-	IsRunning   bool              `json:"is_running"`
-	TestSuites  []string          `json:"test_suites"`
-	Environment string            `json:"environment"`
-	Priority    int               `json:"priority"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Cron        string    `json:"cron"`
+	NextRun     time.Time `json:"next_run"`
+	LastRun     time.Time `json:"last_run"`
+	IsRunning   bool      `json:"is_running"`
+	TestSuites  []string  `json:"test_suites"`
+	Environment string    `json:"environment"`
+	Priority    int       `json:"priority"`
 }
 
 // NewTestScheduler creates a new test scheduler
@@ -462,7 +462,7 @@ func (ts *TestScheduler) Schedule(test *ScheduledTest) error {
 
 	ts.running[test.ID] = test
 	ts.logger.Info("Test scheduled", "test", test.Name, "next_run", test.NextRun)
-	
+
 	return nil
 }
 
@@ -489,7 +489,7 @@ func (tp *TestPipeline) Execute(ctx context.Context, result *AutomationResult) e
 	if tp.config.ParallelExecution {
 		return tp.executeParallel(ctx, result)
 	}
-	
+
 	return tp.executeSequential(ctx, result)
 }
 
@@ -503,7 +503,7 @@ func (tp *TestPipeline) executeSequential(ctx context.Context, result *Automatio
 			tp.logger.Error("Stage failed, continuing", "stage", stageConfig.Name, "error", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -535,7 +535,7 @@ func (tp *TestPipeline) executeStage(ctx context.Context, stageConfig PipelineSt
 	// Execute test suites in the stage
 	for _, suiteName := range stageConfig.TestSuites {
 		tp.logger.Info("Running test suite in stage", "stage", stageConfig.Name, "suite", suiteName)
-		
+
 		// Mock test suite execution
 		testResult := &TestResult{
 			SuiteName:    suiteName,
@@ -548,7 +548,7 @@ func (tp *TestPipeline) executeStage(ctx context.Context, stageConfig PipelineSt
 		}
 		testResult.EndTime = time.Now()
 		testResult.Duration = testResult.EndTime.Sub(testResult.StartTime)
-		
+
 		stageResult.TestSuites[suiteName] = testResult
 	}
 
@@ -557,7 +557,7 @@ func (tp *TestPipeline) executeStage(ctx context.Context, stageConfig PipelineSt
 	stageResult.Duration = stageResult.EndTime.Sub(stageResult.StartTime)
 
 	tp.logger.Info("Pipeline stage completed", "stage", stageConfig.Name, "duration", stageResult.Duration)
-	
+
 	return nil
 }
 
@@ -583,7 +583,7 @@ func (rm *ResultsManager) Store(result *AutomationResult) error {
 
 	rm.results = append(rm.results, result)
 	rm.logger.Info("Test results stored", "trigger", result.Trigger.Type, "status", result.Status)
-	
+
 	return nil
 }
 
@@ -600,7 +600,7 @@ func (rm *ResultsManager) GetResults(limit int) []*AutomationResult {
 	results := make([]*AutomationResult, limit)
 	start := len(rm.results) - limit
 	copy(results, rm.results[start:])
-	
+
 	return results
 }
 
@@ -628,7 +628,7 @@ func (ta *TestAutomation) validateQualityGates(result *AutomationResult) error {
 		// Evaluate gate
 		gateResult.Passed = ta.evaluateGate(gate, gateResult.Value)
 		if !gateResult.Passed {
-			gateResult.Message = fmt.Sprintf("Value %f does not meet threshold %f %s", 
+			gateResult.Message = fmt.Sprintf("Value %f does not meet threshold %f %s",
 				gateResult.Value, gate.Threshold, gate.Operator)
 		} else {
 			gateResult.Message = "Gate passed"
@@ -686,8 +686,8 @@ func (ta *TestAutomation) sendNotification(event string, result *AutomationResul
 			continue
 		}
 
-		ta.logger.Info("Sending notification", 
-			"channel", channelName, 
+		ta.logger.Info("Sending notification",
+			"channel", channelName,
 			"event", event,
 			"status", result.Status)
 
@@ -702,7 +702,7 @@ func (ta *TestAutomation) triggerRollback(ctx context.Context, result *Automatio
 
 	// Mock rollback implementation
 	// In real implementation, this would trigger deployment rollback
-	
+
 	result.Metadata = map[string]interface{}{
 		"rollback_triggered": true,
 		"rollback_strategy":  ta.config.Pipeline.Rollback.Strategy,
@@ -731,10 +731,10 @@ func (ta *TestAutomation) GetScheduledTests() map[string]*ScheduledTest {
 // GetPipelineStatus returns current pipeline status
 func (ta *TestAutomation) GetPipelineStatus() map[string]interface{} {
 	return map[string]interface{}{
-		"automation_enabled":  ta.config.Enabled,
-		"stages_configured":   len(ta.config.Pipeline.Stages),
-		"quality_gates":       len(ta.config.QualityGates.Gates),
+		"automation_enabled":    ta.config.Enabled,
+		"stages_configured":     len(ta.config.Pipeline.Stages),
+		"quality_gates":         len(ta.config.QualityGates.Gates),
 		"notification_channels": len(ta.config.Notifications.Channels),
-		"scheduled_tests":     len(ta.scheduler.running),
+		"scheduled_tests":       len(ta.scheduler.running),
 	}
 }

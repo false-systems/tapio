@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	"tapio/cmd/install/platform"
+	"github.com/yairfalse/tapio/cmd/install/common"
 )
 
 // DockerInstaller installs Tapio as a Docker container
 type DockerInstaller struct {
-	platform platform.Info
+	platform common.PlatformInfo
 }
 
 // NewDockerInstaller creates a new Docker installer
-func NewDockerInstaller(p platform.Info) Installer {
+func NewDockerInstaller(p common.PlatformInfo) Installer {
 	return &DockerInstaller{
 		platform: p,
 	}

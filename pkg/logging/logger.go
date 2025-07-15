@@ -27,29 +27,29 @@ type Config struct {
 	Format     string     `yaml:"format"` // json, logfmt, console
 	Output     string     `yaml:"output"` // stdout, stderr, file
 	Filename   string     `yaml:"filename"`
-	MaxSize    int        `yaml:"max_size"`    // MB
+	MaxSize    int        `yaml:"max_size"` // MB
 	MaxBackups int        `yaml:"max_backups"`
-	MaxAge     int        `yaml:"max_age"`     // days
-	
+	MaxAge     int        `yaml:"max_age"` // days
+
 	// Performance settings
 	Async         bool          `yaml:"async"`
 	BufferSize    int           `yaml:"buffer_size"`
 	FlushInterval time.Duration `yaml:"flush_interval"`
-	
+
 	// Production features
-	Sampling       bool           `yaml:"sampling"`
-	SampleRate     float64        `yaml:"sample_rate"`
-	SampleBurst    int            `yaml:"sample_burst"`
-	RedactSecrets  bool           `yaml:"redact_secrets"`
-	IncludeSource  bool           `yaml:"include_source"`
-	IncludeCaller  bool           `yaml:"include_caller"`
-	
+	Sampling      bool    `yaml:"sampling"`
+	SampleRate    float64 `yaml:"sample_rate"`
+	SampleBurst   int     `yaml:"sample_burst"`
+	RedactSecrets bool    `yaml:"redact_secrets"`
+	IncludeSource bool    `yaml:"include_source"`
+	IncludeCaller bool    `yaml:"include_caller"`
+
 	// Context settings
-	TraceIDField   string   `yaml:"trace_id_field"`
-	SpanIDField    string   `yaml:"span_id_field"`
-	ServiceName    string   `yaml:"service_name"`
-	Environment    string   `yaml:"environment"`
-	DefaultFields  map[string]interface{} `yaml:"default_fields"`
+	TraceIDField  string                 `yaml:"trace_id_field"`
+	SpanIDField   string                 `yaml:"span_id_field"`
+	ServiceName   string                 `yaml:"service_name"`
+	Environment   string                 `yaml:"environment"`
+	DefaultFields map[string]interface{} `yaml:"default_fields"`
 }
 
 // NewLogger creates a new production-ready logger
@@ -115,12 +115,12 @@ func NewLogger(cfg *Config) *Logger {
 		slog.String("service", cfg.ServiceName),
 		slog.String("environment", cfg.Environment),
 	}
-	
+
 	for k, v := range cfg.DefaultFields {
 		attrs = append(attrs, slog.Any(k, v))
 	}
 
-	logger = logger.With(attrs...)
+	logger = logger.With(slogAttrToAny(attrs)...)
 
 	return &Logger{
 		Logger: logger,
@@ -132,22 +132,22 @@ func NewLogger(cfg *Config) *Logger {
 // DefaultConfig returns default logger configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Level:          slog.LevelInfo,
-		Format:         "json",
-		Output:         "stdout",
-		Async:          true,
-		BufferSize:     1024,
-		FlushInterval:  time.Second,
-		Sampling:       false,
-		SampleRate:     1.0,
-		RedactSecrets:  true,
-		IncludeSource:  false,
-		IncludeCaller:  true,
-		TraceIDField:   "trace_id",
-		SpanIDField:    "span_id",
-		ServiceName:    "tapio",
-		Environment:    "production",
-		DefaultFields:  make(map[string]interface{}),
+		Level:         slog.LevelInfo,
+		Format:        "json",
+		Output:        "stdout",
+		Async:         true,
+		BufferSize:    1024,
+		FlushInterval: time.Second,
+		Sampling:      false,
+		SampleRate:    1.0,
+		RedactSecrets: true,
+		IncludeSource: false,
+		IncludeCaller: true,
+		TraceIDField:  "trace_id",
+		SpanIDField:   "span_id",
+		ServiceName:   "tapio",
+		Environment:   "production",
+		DefaultFields: make(map[string]interface{}),
 	}
 }
 
@@ -173,7 +173,7 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 		attrs = append(attrs, slog.String("user_id", fmt.Sprint(userID)))
 	}
 
-	return l.With(attrs...)
+	return l.With(slogAttrToAny(attrs)...)
 }
 
 // With creates a child logger with additional attributes
@@ -192,7 +192,7 @@ func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
 	for k, v := range fields {
 		attrs = append(attrs, slog.Any(k, v))
 	}
-	return l.With(attrs...)
+	return l.With(slogAttrToAny(attrs)...)
 }
 
 // Error logs an error with additional context
@@ -218,6 +218,15 @@ func (l *Logger) Audit(event string, user string, args ...interface{}) {
 	l.Info("AUDIT", auditArgs...)
 }
 
+// slogAttrToAny converts []slog.Attr to []any for slog.Logger.With
+func slogAttrToAny(attrs []slog.Attr) []any {
+	result := make([]any, len(attrs))
+	for i, attr := range attrs {
+		result[i] = attr
+	}
+	return result
+}
+
 // Performance logs performance metrics
 func (l *Logger) Performance(operation string, duration time.Duration, args ...interface{}) {
 	perfArgs := []interface{}{
@@ -237,7 +246,7 @@ func (l *Logger) Security(event string, severity string, args ...interface{}) {
 		slog.Time("timestamp", time.Now()),
 	}
 	secArgs = append(secArgs, args...)
-	
+
 	switch strings.ToLower(severity) {
 	case "critical", "high":
 		l.Error("SECURITY", secArgs...)
@@ -286,48 +295,48 @@ var (
 
 	// Production provides a production-optimized logger
 	Production = NewLogger(&Config{
-		Level:          slog.LevelInfo,
-		Format:         "json",
-		Output:         "stdout",
-		Async:          true,
-		BufferSize:     4096,
-		Sampling:       true,
-		SampleRate:     0.1,
-		SampleBurst:    100,
-		RedactSecrets:  true,
-		IncludeCaller:  false,
-		Environment:    "production",
+		Level:         slog.LevelInfo,
+		Format:        "json",
+		Output:        "stdout",
+		Async:         true,
+		BufferSize:    4096,
+		Sampling:      true,
+		SampleRate:    0.1,
+		SampleBurst:   100,
+		RedactSecrets: true,
+		IncludeCaller: false,
+		Environment:   "production",
 	})
 
 	// HighPerformance provides maximum performance logging
 	HighPerformance = NewLogger(&Config{
-		Level:          slog.LevelWarn,
-		Format:         "json",
-		Output:         "stdout",
-		Async:          true,
-		BufferSize:     8192,
-		Sampling:       true,
-		SampleRate:     0.01,
-		SampleBurst:    10,
-		RedactSecrets:  true,
-		IncludeCaller:  false,
-		IncludeSource:  false,
-		Environment:    "production",
+		Level:         slog.LevelWarn,
+		Format:        "json",
+		Output:        "stdout",
+		Async:         true,
+		BufferSize:    8192,
+		Sampling:      true,
+		SampleRate:    0.01,
+		SampleBurst:   10,
+		RedactSecrets: true,
+		IncludeCaller: false,
+		IncludeSource: false,
+		Environment:   "production",
 	})
 
 	// Compliance provides compliance-focused logging
 	Compliance = NewLogger(&Config{
-		Level:          slog.LevelInfo,
-		Format:         "json",
-		Output:         "file",
-		Filename:       "/var/log/tapio/audit.log",
-		MaxSize:        100,
-		MaxBackups:     10,
-		MaxAge:         90,
-		Async:          false,
-		RedactSecrets:  true,
-		IncludeCaller:  true,
-		IncludeSource:  true,
-		Environment:    "production",
+		Level:         slog.LevelInfo,
+		Format:        "json",
+		Output:        "file",
+		Filename:      "/var/log/tapio/audit.log",
+		MaxSize:       100,
+		MaxBackups:    10,
+		MaxAge:        90,
+		Async:         false,
+		RedactSecrets: true,
+		IncludeCaller: true,
+		IncludeSource: true,
+		Environment:   "production",
 	})
 )

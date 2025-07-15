@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	"tapio/cmd/install/platform"
+	"github.com/yairfalse/tapio/cmd/install/common"
 )
 
 // KubernetesInstaller installs Tapio in Kubernetes
 type KubernetesInstaller struct {
-	platform platform.Info
+	platform common.PlatformInfo
 }
 
 // NewKubernetesInstaller creates a new Kubernetes installer
-func NewKubernetesInstaller(p platform.Info) Installer {
+func NewKubernetesInstaller(p common.PlatformInfo) Installer {
 	return &KubernetesInstaller{
 		platform: p,
 	}

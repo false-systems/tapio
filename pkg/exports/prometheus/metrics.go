@@ -7,48 +7,48 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // MetricsExporter exports Tapio correlation findings as Prometheus metrics
 type MetricsExporter struct {
 	registry *prometheus.Registry
 	config   *MetricsConfig
-	
+
 	// Core correlation metrics
-	correlationsTotal          *prometheus.CounterVec
-	correlationsByType         *prometheus.CounterVec
-	correlationsBySeverity     *prometheus.CounterVec
-	correlationConfidence      *prometheus.HistogramVec
-	correlationProcessingTime  *prometheus.HistogramVec
-	
+	correlationsTotal         *prometheus.CounterVec
+	correlationsByType        *prometheus.CounterVec
+	correlationsBySeverity    *prometheus.CounterVec
+	correlationConfidence     *prometheus.HistogramVec
+	correlationProcessingTime *prometheus.HistogramVec
+
 	// Pattern detection metrics
-	patternsDetected          *prometheus.CounterVec
-	patternAccuracy           *prometheus.HistogramVec
-	patternConfidence         *prometheus.HistogramVec
-	falsePositives            *prometheus.CounterVec
-	truePositives             *prometheus.CounterVec
-	
+	patternsDetected  *prometheus.CounterVec
+	patternAccuracy   *prometheus.HistogramVec
+	patternConfidence *prometheus.HistogramVec
+	falsePositives    *prometheus.CounterVec
+	truePositives     *prometheus.CounterVec
+
 	// System health metrics
-	systemHealthScore         *prometheus.GaugeVec
-	resourceUsage             *prometheus.GaugeVec
-	eventProcessingRate       *prometheus.GaugeVec
-	
+	systemHealthScore   *prometheus.GaugeVec
+	resourceUsage       *prometheus.GaugeVec
+	eventProcessingRate *prometheus.GaugeVec
+
 	// Alert/recommendation metrics
-	recommendationsGenerated  *prometheus.CounterVec
-	actionsTriggered          *prometheus.CounterVec
-	autoFixesApplied          *prometheus.CounterVec
-	
+	recommendationsGenerated *prometheus.CounterVec
+	actionsTriggered         *prometheus.CounterVec
+	autoFixesApplied         *prometheus.CounterVec
+
 	// Performance metrics
-	exportLatency             prometheus.Histogram
-	exportErrors              prometheus.Counter
-	
+	exportLatency prometheus.Histogram
+	exportErrors  prometheus.Counter
+
 	// Entity tracking
-	entitiesTracked           *prometheus.GaugeVec
-	entitiesWithIssues        *prometheus.GaugeVec
-	
+	entitiesTracked    *prometheus.GaugeVec
+	entitiesWithIssues *prometheus.GaugeVec
+
 	mutex sync.RWMutex
 }
 
@@ -57,24 +57,24 @@ type MetricsConfig struct {
 	// Namespace and subsystem
 	Namespace string
 	Subsystem string
-	
+
 	// Labels
 	ConstLabels map[string]string
-	
+
 	// Performance settings
 	BucketConfiguration map[string][]float64
 	MaxMetricAge        time.Duration
-	
+
 	// Feature flags
 	EnablePatternMetrics     bool
 	EnableSystemMetrics      bool
 	EnableEntityMetrics      bool
 	EnablePerformanceMetrics bool
-	
+
 	// Alert thresholds
-	HighSeverityThreshold    float64
+	HighSeverityThreshold     float64
 	CriticalSeverityThreshold float64
-	
+
 	// Rate limiting
 	MaxMetricsPerSecond int
 	BurstSize           int
@@ -85,14 +85,14 @@ func NewMetricsExporter(config *MetricsConfig) *MetricsExporter {
 	if config == nil {
 		config = DefaultMetricsConfig()
 	}
-	
+
 	registry := prometheus.NewRegistry()
-	
+
 	me := &MetricsExporter{
 		registry: registry,
 		config:   config,
 	}
-	
+
 	me.initializeMetrics()
 	return me
 }
@@ -124,7 +124,7 @@ func DefaultMetricsConfig() *MetricsConfig {
 // initializeMetrics creates all Prometheus metric instruments
 func (me *MetricsExporter) initializeMetrics() {
 	factory := promauto.With(me.registry)
-	
+
 	// Core correlation metrics
 	me.correlationsTotal = factory.NewCounterVec(
 		prometheus.CounterOpts{
@@ -136,7 +136,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"rule_id", "rule_name", "severity", "category"},
 	)
-	
+
 	me.correlationsByType = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   me.config.Namespace,
@@ -147,7 +147,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"category", "severity"},
 	)
-	
+
 	me.correlationsBySeverity = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   me.config.Namespace,
@@ -158,7 +158,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"severity"},
 	)
-	
+
 	me.correlationConfidence = factory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace:   me.config.Namespace,
@@ -170,7 +170,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"rule_id", "severity"},
 	)
-	
+
 	me.correlationProcessingTime = factory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace:   me.config.Namespace,
@@ -182,7 +182,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"rule_id"},
 	)
-	
+
 	// Pattern detection metrics (if enabled)
 	if me.config.EnablePatternMetrics {
 		me.patternsDetected = factory.NewCounterVec(
@@ -195,7 +195,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			},
 			[]string{"pattern_type", "severity"},
 		)
-		
+
 		me.patternAccuracy = factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace:   me.config.Namespace,
@@ -207,7 +207,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			},
 			[]string{"pattern_type"},
 		)
-		
+
 		me.patternConfidence = factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace:   me.config.Namespace,
@@ -219,7 +219,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			},
 			[]string{"pattern_type"},
 		)
-		
+
 		me.falsePositives = factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace:   me.config.Namespace,
@@ -230,7 +230,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			},
 			[]string{"pattern_type"},
 		)
-		
+
 		me.truePositives = factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace:   me.config.Namespace,
@@ -242,7 +242,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			[]string{"pattern_type"},
 		)
 	}
-	
+
 	// System health metrics (if enabled)
 	if me.config.EnableSystemMetrics {
 		me.systemHealthScore = factory.NewGaugeVec(
@@ -255,7 +255,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			},
 			[]string{"namespace", "cluster"},
 		)
-		
+
 		me.resourceUsage = factory.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace:   me.config.Namespace,
@@ -266,7 +266,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			},
 			[]string{"resource_type", "namespace", "node"},
 		)
-		
+
 		me.eventProcessingRate = factory.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace:   me.config.Namespace,
@@ -278,7 +278,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			[]string{"source"},
 		)
 	}
-	
+
 	// Alert/recommendation metrics
 	me.recommendationsGenerated = factory.NewCounterVec(
 		prometheus.CounterOpts{
@@ -290,7 +290,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"severity", "category"},
 	)
-	
+
 	me.actionsTriggered = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   me.config.Namespace,
@@ -301,7 +301,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"action_type", "priority"},
 	)
-	
+
 	me.autoFixesApplied = factory.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   me.config.Namespace,
@@ -312,7 +312,7 @@ func (me *MetricsExporter) initializeMetrics() {
 		},
 		[]string{"fix_type", "success"},
 	)
-	
+
 	// Entity tracking metrics (if enabled)
 	if me.config.EnableEntityMetrics {
 		me.entitiesTracked = factory.NewGaugeVec(
@@ -325,7 +325,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			},
 			[]string{"entity_type", "namespace"},
 		)
-		
+
 		me.entitiesWithIssues = factory.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace:   me.config.Namespace,
@@ -337,7 +337,7 @@ func (me *MetricsExporter) initializeMetrics() {
 			[]string{"entity_type", "severity", "namespace"},
 		)
 	}
-	
+
 	// Performance metrics (if enabled)
 	if me.config.EnablePerformanceMetrics {
 		me.exportLatency = factory.NewHistogram(
@@ -350,7 +350,7 @@ func (me *MetricsExporter) initializeMetrics() {
 				Buckets:     me.config.BucketConfiguration["processing_time"],
 			},
 		)
-		
+
 		me.exportErrors = factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace:   me.config.Namespace,
@@ -371,10 +371,10 @@ func (me *MetricsExporter) ExportCorrelationResult(ctx context.Context, result *
 			me.exportLatency.Observe(time.Since(start).Seconds())
 		}
 	}()
-	
+
 	me.mutex.Lock()
 	defer me.mutex.Unlock()
-	
+
 	// Core correlation metrics
 	ruleLabels := prometheus.Labels{
 		"rule_id":   me.sanitizeLabel(result.RuleID),
@@ -383,26 +383,26 @@ func (me *MetricsExporter) ExportCorrelationResult(ctx context.Context, result *
 		"category":  string(result.Category),
 	}
 	me.correlationsTotal.With(ruleLabels).Inc()
-	
+
 	// Type and severity breakdown
 	typeLabels := prometheus.Labels{
 		"category": string(result.Category),
 		"severity": string(result.Severity),
 	}
 	me.correlationsByType.With(typeLabels).Inc()
-	
+
 	severityLabels := prometheus.Labels{
 		"severity": string(result.Severity),
 	}
 	me.correlationsBySeverity.With(severityLabels).Inc()
-	
+
 	// Confidence metrics
 	confidenceLabels := prometheus.Labels{
 		"rule_id":  me.sanitizeLabel(result.RuleID),
 		"severity": string(result.Severity),
 	}
 	me.correlationConfidence.With(confidenceLabels).Observe(result.Confidence)
-	
+
 	// Export recommendations
 	if len(result.Recommendations) > 0 {
 		recLabels := prometheus.Labels{
@@ -411,7 +411,7 @@ func (me *MetricsExporter) ExportCorrelationResult(ctx context.Context, result *
 		}
 		me.recommendationsGenerated.With(recLabels).Add(float64(len(result.Recommendations)))
 	}
-	
+
 	// Export actions
 	for _, action := range result.Actions {
 		actionLabels := prometheus.Labels{
@@ -420,12 +420,12 @@ func (me *MetricsExporter) ExportCorrelationResult(ctx context.Context, result *
 		}
 		me.actionsTriggered.With(actionLabels).Inc()
 	}
-	
+
 	// Export entity metrics if enabled
 	if me.config.EnableEntityMetrics {
 		me.updateEntityMetrics(result)
 	}
-	
+
 	return nil
 }
 
@@ -434,16 +434,16 @@ func (me *MetricsExporter) ExportSystemHealth(ctx context.Context, namespace, cl
 	if !me.config.EnableSystemMetrics {
 		return nil
 	}
-	
+
 	me.mutex.Lock()
 	defer me.mutex.Unlock()
-	
+
 	labels := prometheus.Labels{
 		"namespace": me.sanitizeLabel(namespace),
 		"cluster":   me.sanitizeLabel(cluster),
 	}
 	me.systemHealthScore.With(labels).Set(healthScore)
-	
+
 	return nil
 }
 
@@ -452,17 +452,17 @@ func (me *MetricsExporter) ExportResourceUsage(ctx context.Context, resourceType
 	if !me.config.EnableSystemMetrics {
 		return nil
 	}
-	
+
 	me.mutex.Lock()
 	defer me.mutex.Unlock()
-	
+
 	labels := prometheus.Labels{
 		"resource_type": me.sanitizeLabel(resourceType),
 		"namespace":     me.sanitizeLabel(namespace),
 		"node":          me.sanitizeLabel(node),
 	}
 	me.resourceUsage.With(labels).Set(usage)
-	
+
 	return nil
 }
 
@@ -471,15 +471,15 @@ func (me *MetricsExporter) ExportProcessingRate(ctx context.Context, source stri
 	if !me.config.EnableSystemMetrics {
 		return nil
 	}
-	
+
 	me.mutex.Lock()
 	defer me.mutex.Unlock()
-	
+
 	labels := prometheus.Labels{
 		"source": me.sanitizeLabel(source),
 	}
 	me.eventProcessingRate.With(labels).Set(rate)
-	
+
 	return nil
 }
 
@@ -488,14 +488,14 @@ func (me *MetricsExporter) ExportPatternMetrics(ctx context.Context, patternType
 	if !me.config.EnablePatternMetrics {
 		return nil
 	}
-	
+
 	me.mutex.Lock()
 	defer me.mutex.Unlock()
-	
+
 	typeLabels := prometheus.Labels{
 		"pattern_type": me.sanitizeLabel(patternType),
 	}
-	
+
 	if detected {
 		severityLabels := prometheus.Labels{
 			"pattern_type": me.sanitizeLabel(patternType),
@@ -506,10 +506,10 @@ func (me *MetricsExporter) ExportPatternMetrics(ctx context.Context, patternType
 	} else {
 		me.falsePositives.With(typeLabels).Inc()
 	}
-	
+
 	me.patternConfidence.With(typeLabels).Observe(confidence)
 	me.patternAccuracy.With(typeLabels).Observe(accuracy)
-	
+
 	return nil
 }
 
@@ -517,13 +517,13 @@ func (me *MetricsExporter) ExportPatternMetrics(ctx context.Context, patternType
 func (me *MetricsExporter) ExportAutoFixResult(ctx context.Context, fixType string, success bool) error {
 	me.mutex.Lock()
 	defer me.mutex.Unlock()
-	
+
 	labels := prometheus.Labels{
 		"fix_type": me.sanitizeLabel(fixType),
 		"success":  fmt.Sprintf("%t", success),
 	}
 	me.autoFixesApplied.With(labels).Inc()
-	
+
 	return nil
 }
 
@@ -531,7 +531,7 @@ func (me *MetricsExporter) ExportAutoFixResult(ctx context.Context, fixType stri
 func (me *MetricsExporter) RecordProcessingTime(ruleID string, duration time.Duration) {
 	me.mutex.Lock()
 	defer me.mutex.Unlock()
-	
+
 	labels := prometheus.Labels{
 		"rule_id": me.sanitizeLabel(ruleID),
 	}
@@ -554,7 +554,7 @@ func (me *MetricsExporter) updateEntityMetrics(result *correlation.Result) {
 			"namespace":   me.sanitizeLabel(entity.Namespace),
 		}
 		me.entitiesTracked.With(entityLabels).Set(1) // This would need proper counting logic
-		
+
 		// Track entity with issues
 		issueLabels := prometheus.Labels{
 			"entity_type": me.sanitizeLabel(entity.Type),
@@ -586,12 +586,12 @@ func (me *MetricsExporter) sanitizeLabel(value string) string {
 		}
 		return '_'
 	}, value)
-	
+
 	// Ensure it doesn't start with a number
 	if len(result) > 0 && result[0] >= '0' && result[0] <= '9' {
 		result = "_" + result
 	}
-	
+
 	return result
 }
 

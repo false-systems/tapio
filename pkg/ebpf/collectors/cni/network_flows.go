@@ -20,12 +20,12 @@ type NetworkConfig struct {
 	DNS          *DNSConfig             `json:"dns,omitempty"`
 	Capabilities map[string]bool        `json:"capabilities,omitempty"`
 	Args         map[string]interface{} `json:"args,omitempty"`
-	
+
 	// Plugin-specific configurations
-	Calico       *CalicoConfig          `json:"calico,omitempty"`
-	Flannel      *FlannelConfig         `json:"flannel,omitempty"`
-	Cilium       *CiliumConfig          `json:"cilium,omitempty"`
-	Weave        *WeaveConfig           `json:"weave,omitempty"`
+	Calico  *CalicoConfig  `json:"calico,omitempty"`
+	Flannel *FlannelConfig `json:"flannel,omitempty"`
+	Cilium  *CiliumConfig  `json:"cilium,omitempty"`
+	Weave   *WeaveConfig   `json:"weave,omitempty"`
 }
 
 // IPAMConfig represents IPAM configuration
@@ -53,7 +53,7 @@ type DNSConfig struct {
 
 // CNIEvent represents a CNI plugin event
 type CNIEvent struct {
-	Type      string                 `json:"type"`      // ADD, DEL, CHECK, VERSION
+	Type      string                 `json:"type"` // ADD, DEL, CHECK, VERSION
 	Timestamp time.Time              `json:"timestamp"`
 	PodName   string                 `json:"pod_name"`
 	Namespace string                 `json:"namespace"`
@@ -114,8 +114,8 @@ type CalicoConfig struct {
 
 // FlannelConfig represents Flannel-specific configuration
 type FlannelConfig struct {
-	Network       string `json:"Network,omitempty"`
-	Backend       *struct {
+	Network string `json:"Network,omitempty"`
+	Backend *struct {
 		Type string `json:"Type,omitempty"`
 		VNI  int    `json:"VNI,omitempty"`
 		Port int    `json:"Port,omitempty"`
@@ -129,7 +129,7 @@ type FlannelConfig struct {
 
 // CiliumConfig represents Cilium-specific configuration
 type CiliumConfig struct {
-	EtcdConfig      *struct {
+	EtcdConfig *struct {
 		EtcdConfigPath string   `json:"etcd-config-path,omitempty"`
 		EtcdEndpoints  []string `json:"etcd-endpoints,omitempty"`
 	} `json:"etcd-config,omitempty"`
@@ -155,99 +155,99 @@ type WeaveConfig struct {
 // DNSQuery represents a DNS query event
 type DNSQuery struct {
 	// Query identification
-	QueryID       uint16            `json:"query_id"`
-	TransactionID string            `json:"transaction_id"`
-	
+	QueryID       uint16 `json:"query_id"`
+	TransactionID string `json:"transaction_id"`
+
 	// Query details
-	QueryName     string            `json:"query_name"`
-	QueryType     string            `json:"query_type"`
-	QueryClass    string            `json:"query_class"`
-	
+	QueryName  string `json:"query_name"`
+	QueryType  string `json:"query_type"`
+	QueryClass string `json:"query_class"`
+
 	// Source information
-	SourceIP      net.IP            `json:"source_ip"`
-	SourcePort    uint16            `json:"source_port"`
-	SourcePod     *PodInfo          `json:"source_pod,omitempty"`
-	
+	SourceIP   net.IP   `json:"source_ip"`
+	SourcePort uint16   `json:"source_port"`
+	SourcePod  *PodInfo `json:"source_pod,omitempty"`
+
 	// DNS server information
-	ServerIP      net.IP            `json:"server_ip"`
-	ServerPort    uint16            `json:"server_port"`
-	ServerName    string            `json:"server_name,omitempty"`
-	
+	ServerIP   net.IP `json:"server_ip"`
+	ServerPort uint16 `json:"server_port"`
+	ServerName string `json:"server_name,omitempty"`
+
 	// Response details
-	ResponseCode  int               `json:"response_code"`
-	ResponseIPs   []net.IP          `json:"response_ips,omitempty"`
-	ResponseCNAME []string          `json:"response_cname,omitempty"`
-	TTL           uint32            `json:"ttl"`
-	
+	ResponseCode  int      `json:"response_code"`
+	ResponseIPs   []net.IP `json:"response_ips,omitempty"`
+	ResponseCNAME []string `json:"response_cname,omitempty"`
+	TTL           uint32   `json:"ttl"`
+
 	// Timing
-	QueryTime     time.Time         `json:"query_time"`
-	ResponseTime  time.Time         `json:"response_time,omitempty"`
-	Latency       time.Duration     `json:"latency"`
-	
+	QueryTime    time.Time     `json:"query_time"`
+	ResponseTime time.Time     `json:"response_time,omitempty"`
+	Latency      time.Duration `json:"latency"`
+
 	// Status
-	Success       bool              `json:"success"`
-	Error         string            `json:"error,omitempty"`
-	
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+
 	// Security and policy
-	Blocked       bool              `json:"blocked"`
-	PolicyName    string            `json:"policy_name,omitempty"`
-	
+	Blocked    bool   `json:"blocked"`
+	PolicyName string `json:"policy_name,omitempty"`
+
 	// Metadata
-	Labels        map[string]string `json:"labels"`
+	Labels map[string]string `json:"labels"`
 }
 
 // Policy violation types
 
 // PolicyViolation represents a network policy violation
 type PolicyViolation struct {
-	ID            string                 `json:"id"`
-	Timestamp     time.Time              `json:"timestamp"`
-	PolicyName    string                 `json:"policy_name"`
-	PolicyNamespace string               `json:"policy_namespace"`
-	ViolationType string                 `json:"violation_type"` // "ingress", "egress", "protocol", "port"
-	
+	ID              string    `json:"id"`
+	Timestamp       time.Time `json:"timestamp"`
+	PolicyName      string    `json:"policy_name"`
+	PolicyNamespace string    `json:"policy_namespace"`
+	ViolationType   string    `json:"violation_type"` // "ingress", "egress", "protocol", "port"
+
 	// Source information
-	SourceIP      net.IP                 `json:"source_ip"`
-	SourcePort    uint16                 `json:"source_port"`
-	SourcePod     *PodInfo               `json:"source_pod,omitempty"`
-	
+	SourceIP   net.IP   `json:"source_ip"`
+	SourcePort uint16   `json:"source_port"`
+	SourcePod  *PodInfo `json:"source_pod,omitempty"`
+
 	// Destination information
-	DestinationIP net.IP                 `json:"destination_ip"`
-	DestinationPort uint16               `json:"destination_port"`
-	DestinationPod *PodInfo              `json:"destination_pod,omitempty"`
-	
+	DestinationIP   net.IP   `json:"destination_ip"`
+	DestinationPort uint16   `json:"destination_port"`
+	DestinationPod  *PodInfo `json:"destination_pod,omitempty"`
+
 	// Traffic details
-	Protocol      uint8                  `json:"protocol"`
-	Action        string                 `json:"action"` // "allow", "deny", "log"
-	
+	Protocol uint8  `json:"protocol"`
+	Action   string `json:"action"` // "allow", "deny", "log"
+
 	// Context
-	FlowID        string                 `json:"flow_id,omitempty"`
-	BytesBlocked  uint64                 `json:"bytes_blocked"`
-	PacketsBlocked uint64                `json:"packets_blocked"`
-	
+	FlowID         string `json:"flow_id,omitempty"`
+	BytesBlocked   uint64 `json:"bytes_blocked"`
+	PacketsBlocked uint64 `json:"packets_blocked"`
+
 	// Severity and impact
-	Severity      string                 `json:"severity"`
-	RiskScore     float64                `json:"risk_score"`
-	
+	Severity  string  `json:"severity"`
+	RiskScore float64 `json:"risk_score"`
+
 	// Metadata
-	Labels        map[string]string      `json:"labels"`
-	Annotations   map[string]string      `json:"annotations"`
+	Labels      map[string]string `json:"labels"`
+	Annotations map[string]string `json:"annotations"`
 }
 
 // NetworkFlow represents a network flow between two endpoints
 type NetworkFlow struct {
-	FlowID             string        `json:"flow_id"`
-	SourceIP           net.IP        `json:"source_ip"`
-	DestinationIP      net.IP        `json:"destination_ip"`
-	SourcePort         uint16        `json:"source_port"`
-	DestinationPort    uint16        `json:"destination_port"`
-	Protocol           uint8         `json:"protocol"`
-	BytesTransmitted   uint64        `json:"bytes_transmitted"`
-	PacketsTransmitted uint64        `json:"packets_transmitted"`
-	StartTime          time.Time     `json:"start_time"`
-	LastSeen           time.Time     `json:"last_seen"`
-	RTT                time.Duration `json:"rtt"`
-	State              FlowState     `json:"state"`
+	FlowID             string         `json:"flow_id"`
+	SourceIP           net.IP         `json:"source_ip"`
+	DestinationIP      net.IP         `json:"destination_ip"`
+	SourcePort         uint16         `json:"source_port"`
+	DestinationPort    uint16         `json:"destination_port"`
+	Protocol           uint8          `json:"protocol"`
+	BytesTransmitted   uint64         `json:"bytes_transmitted"`
+	PacketsTransmitted uint64         `json:"packets_transmitted"`
+	StartTime          time.Time      `json:"start_time"`
+	LastSeen           time.Time      `json:"last_seen"`
+	RTT                time.Duration  `json:"rtt"`
+	State              FlowState      `json:"state"`
 	PolicyDecision     PolicyDecision `json:"policy_decision"`
 }
 
@@ -328,14 +328,14 @@ func NewFlowCache(maxSize int, ttl time.Duration) *FlowCache {
 func (fc *FlowCache) AddFlow(flow *NetworkFlow) {
 	fc.mutex.Lock()
 	defer fc.mutex.Unlock()
-	
+
 	key := flow.GenerateKey()
-	
+
 	// Evict old flows if cache is full
 	if len(fc.flows) >= fc.maxSize {
 		fc.evictOldest()
 	}
-	
+
 	fc.flows[key] = flow
 	fc.lastAccess[key] = time.Now()
 }
@@ -344,12 +344,12 @@ func (fc *FlowCache) AddFlow(flow *NetworkFlow) {
 func (fc *FlowCache) GetFlow(flowID string) *NetworkFlow {
 	fc.mutex.RLock()
 	defer fc.mutex.RUnlock()
-	
+
 	if flow, exists := fc.flows[flowID]; exists {
 		fc.lastAccess[flowID] = time.Now()
 		return flow
 	}
-	
+
 	return nil
 }
 
@@ -357,7 +357,7 @@ func (fc *FlowCache) GetFlow(flowID string) *NetworkFlow {
 func (fc *FlowCache) RemoveFlow(flowID string) {
 	fc.mutex.Lock()
 	defer fc.mutex.Unlock()
-	
+
 	delete(fc.flows, flowID)
 	delete(fc.lastAccess, flowID)
 }
@@ -366,14 +366,14 @@ func (fc *FlowCache) RemoveFlow(flowID string) {
 func (fc *FlowCache) GetActiveFlows() []*NetworkFlow {
 	fc.mutex.RLock()
 	defer fc.mutex.RUnlock()
-	
+
 	var activeFlows []*NetworkFlow
 	for _, flow := range fc.flows {
 		if flow.State == FlowStateActive {
 			activeFlows = append(activeFlows, flow)
 		}
 	}
-	
+
 	return activeFlows
 }
 
@@ -381,14 +381,14 @@ func (fc *FlowCache) GetActiveFlows() []*NetworkFlow {
 func (fc *FlowCache) evictOldest() {
 	var oldestKey string
 	var oldestTime time.Time
-	
+
 	for key, accessTime := range fc.lastAccess {
 		if oldestKey == "" || accessTime.Before(oldestTime) {
 			oldestKey = key
 			oldestTime = accessTime
 		}
 	}
-	
+
 	if oldestKey != "" {
 		delete(fc.flows, oldestKey)
 		delete(fc.lastAccess, oldestKey)
@@ -399,7 +399,7 @@ func (fc *FlowCache) evictOldest() {
 func (fc *FlowCache) cleanupExpiredFlows() {
 	fc.mutex.Lock()
 	defer fc.mutex.Unlock()
-	
+
 	for flowID, flow := range fc.flows {
 		if flow.IsExpired(fc.ttl) {
 			delete(fc.flows, flowID)
@@ -412,16 +412,16 @@ func (fc *FlowCache) cleanupExpiredFlows() {
 func (fc *FlowCache) GetStats() *FlowCacheStats {
 	fc.mutex.RLock()
 	defer fc.mutex.RUnlock()
-	
+
 	activeCount := 0
 	for _, flow := range fc.flows {
 		if flow.State == FlowStateActive {
 			activeCount++
 		}
 	}
-	
+
 	utilizationPercent := float64(len(fc.flows)) / float64(fc.maxSize) * 100
-	
+
 	return &FlowCacheStats{
 		TotalFlows:         len(fc.flows),
 		ActiveFlows:        activeCount,
@@ -465,7 +465,7 @@ func (nf *NetworkFlow) CalculateBandwidth() float64 {
 	if duration <= 0 {
 		return 0
 	}
-	
+
 	return float64(nf.BytesTransmitted) / duration.Seconds()
 }
 
@@ -483,7 +483,7 @@ func (nf *NetworkFlow) isPrivateIP(ip net.IP) bool {
 		"192.168.0.0/16",
 		"127.0.0.0/8",
 	}
-	
+
 	for _, cidr := range privateRanges {
 		if _, network, err := net.ParseCIDR(cidr); err == nil {
 			if network.Contains(ip) {
@@ -491,17 +491,17 @@ func (nf *NetworkFlow) isPrivateIP(ip net.IP) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
 // collectNetworkFlows collects network flow events
 func (c *CNICollector) collectNetworkFlows(ctx context.Context) {
 	defer c.wg.Done()
-	
+
 	ticker := time.NewTicker(c.config.CollectionInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -519,11 +519,11 @@ func (c *CNICollector) processNetworkFlows() {
 	if c.flowMap == nil {
 		return
 	}
-	
+
 	// In a real implementation, this would read from the eBPF map
 	// For demo purposes, simulate some flows
 	c.simulateNetworkFlows()
-	
+
 	// Cleanup expired flows
 	if c.flowCache != nil {
 		c.flowCache.cleanupExpiredFlows()
@@ -580,14 +580,14 @@ func NewCalicoPlugin(configPath, binPath string) (*CalicoPlugin, error) {
 		binPath:    binPath,
 		version:    "v3.20.0", // Default version
 	}
-	
+
 	// Load configuration would go here
 	// For tests, we'll set a basic config
 	plugin.networkConfig = &NetworkConfig{
 		Name: "calico-network",
 		Type: "calico",
 	}
-	
+
 	return plugin, nil
 }
 
@@ -599,12 +599,12 @@ func NewFlannelPlugin(configPath, binPath string) (*FlannelPlugin, error) {
 		binPath:    binPath,
 		version:    "v0.15.1", // Default version
 	}
-	
+
 	plugin.networkConfig = &NetworkConfig{
 		Name: "cbr0",
 		Type: "flannel",
 	}
-	
+
 	return plugin, nil
 }
 
@@ -616,12 +616,12 @@ func NewCiliumPlugin(configPath, binPath string) (*CiliumPlugin, error) {
 		binPath:    binPath,
 		version:    "v1.12.0", // Default version
 	}
-	
+
 	plugin.networkConfig = &NetworkConfig{
 		Name: "cilium",
 		Type: "cilium-cni",
 	}
-	
+
 	return plugin, nil
 }
 
@@ -633,12 +633,12 @@ func NewWeavePlugin(configPath, binPath string) (*WeavePlugin, error) {
 		binPath:    binPath,
 		version:    "v2.8.1", // Default version
 	}
-	
+
 	plugin.networkConfig = &NetworkConfig{
 		Name: "weave",
 		Type: "weave-net",
 	}
-	
+
 	return plugin, nil
 }
 
@@ -662,7 +662,7 @@ func (cp *CalicoPlugin) GetPodNetworks() (map[string]*PodNetworkInfo, error) {
 func (cp *CalicoPlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEvent) error {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -681,7 +681,7 @@ func (cp *CalicoPlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEv
 					"node":   "worker-1",
 				},
 			}
-			
+
 			select {
 			case eventCh <- event:
 			default:
@@ -693,10 +693,10 @@ func (cp *CalicoPlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEv
 
 func (cp *CalicoPlugin) GetMetrics() map[string]interface{} {
 	return map[string]interface{}{
-		"plugin":       cp.name,
-		"version":      cp.version,
-		"config_path":  cp.configPath,
-		"bin_path":     cp.binPath,
+		"plugin":      cp.name,
+		"version":     cp.version,
+		"config_path": cp.configPath,
+		"bin_path":    cp.binPath,
 		"policy_enabled": func() bool {
 			if cp.config != nil {
 				return cp.config.Policy
@@ -707,11 +707,15 @@ func (cp *CalicoPlugin) GetMetrics() map[string]interface{} {
 }
 
 // Similar implementations for other plugins (simplified for brevity)
-func (fp *FlannelPlugin) Name() string { return fp.name }
-func (fp *FlannelPlugin) Version() string { return fp.version }
+func (fp *FlannelPlugin) Name() string                              { return fp.name }
+func (fp *FlannelPlugin) Version() string                           { return fp.version }
 func (fp *FlannelPlugin) GetNetworkConfig() (*NetworkConfig, error) { return fp.networkConfig, nil }
-func (fp *FlannelPlugin) GetPodNetworks() (map[string]*PodNetworkInfo, error) { return make(map[string]*PodNetworkInfo), nil }
-func (fp *FlannelPlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEvent) error { return nil }
+func (fp *FlannelPlugin) GetPodNetworks() (map[string]*PodNetworkInfo, error) {
+	return make(map[string]*PodNetworkInfo), nil
+}
+func (fp *FlannelPlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEvent) error {
+	return nil
+}
 func (fp *FlannelPlugin) GetMetrics() map[string]interface{} {
 	return map[string]interface{}{
 		"plugin":      fp.name,
@@ -721,24 +725,30 @@ func (fp *FlannelPlugin) GetMetrics() map[string]interface{} {
 	}
 }
 
-func (cilp *CiliumPlugin) Name() string { return cilp.name }
-func (cilp *CiliumPlugin) Version() string { return cilp.version }
+func (cilp *CiliumPlugin) Name() string                              { return cilp.name }
+func (cilp *CiliumPlugin) Version() string                           { return cilp.version }
 func (cilp *CiliumPlugin) GetNetworkConfig() (*NetworkConfig, error) { return cilp.networkConfig, nil }
-func (cilp *CiliumPlugin) GetPodNetworks() (map[string]*PodNetworkInfo, error) { return make(map[string]*PodNetworkInfo), nil }
-func (cilp *CiliumPlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEvent) error { return nil }
+func (cilp *CiliumPlugin) GetPodNetworks() (map[string]*PodNetworkInfo, error) {
+	return make(map[string]*PodNetworkInfo), nil
+}
+func (cilp *CiliumPlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEvent) error {
+	return nil
+}
 func (cilp *CiliumPlugin) GetMetrics() map[string]interface{} {
 	return map[string]interface{}{
-		"plugin":       cilp.name,
-		"version":      cilp.version,
-		"config_path":  cilp.configPath,
-		"bin_path":     cilp.binPath,
+		"plugin":      cilp.name,
+		"version":     cilp.version,
+		"config_path": cilp.configPath,
+		"bin_path":    cilp.binPath,
 	}
 }
 
-func (wp *WeavePlugin) Name() string { return wp.name }
-func (wp *WeavePlugin) Version() string { return wp.version }
+func (wp *WeavePlugin) Name() string                              { return wp.name }
+func (wp *WeavePlugin) Version() string                           { return wp.version }
 func (wp *WeavePlugin) GetNetworkConfig() (*NetworkConfig, error) { return wp.networkConfig, nil }
-func (wp *WeavePlugin) GetPodNetworks() (map[string]*PodNetworkInfo, error) { return make(map[string]*PodNetworkInfo), nil }
+func (wp *WeavePlugin) GetPodNetworks() (map[string]*PodNetworkInfo, error) {
+	return make(map[string]*PodNetworkInfo), nil
+}
 func (wp *WeavePlugin) MonitorEvents(ctx context.Context, eventCh chan<- *CNIEvent) error { return nil }
 func (wp *WeavePlugin) GetMetrics() map[string]interface{} {
 	return map[string]interface{}{
@@ -776,11 +786,11 @@ func loadNetworkConfig(configPath, pluginType string) (*NetworkConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var config NetworkConfig
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
-	
+
 	return &config, nil
 }

@@ -1,0 +1,53 @@
+# Tapio Engine Configuration
+log_level: info
+
+# Kubernetes settings
+kubernetes:
+  kubeconfig: ""  # Use in-cluster config
+  namespace: ""   # Monitor all namespaces
+
+# Event collector settings
+event_collector:
+  buffer_size: 10000
+  timeout: 5s
+  
+# Pattern detector settings
+pattern_detector:
+  patterns_dir: "/var/lib/tapio/patterns"
+  enabled: true
+  
+# Plugin settings
+plugins:
+  plugin_dirs:
+    - "/var/lib/tapio/plugins"
+  enabled: true
+  
+# gRPC server settings
+grpc:
+  address: "0.0.0.0"
+  port: 9090
+  tls: false
+  
+# REST API settings
+rest:
+  address: "0.0.0.0"
+  port: 8080
+  tls: false
+  
+# Metrics settings
+metrics:
+  enabled: true
+  port: 9091
+  path: "/metrics"
+  
+# Storage settings
+storage:
+  data_dir: "/var/lib/tapio/data"
+  retention: "7d"
+  
+# Performance settings
+performance:
+  max_memory_mb: 500
+  max_cpu_milli: 500
+  max_events_per_sec: 165000
+  correlation_workers: 8

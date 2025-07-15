@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/exports/otel"
 	"github.com/yairfalse/tapio/pkg/exports/prometheus"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -38,11 +38,11 @@ func TestExportLatencyRequirement(t *testing.T) {
 	require.NotNil(t, otelExporter)
 
 	promConfig := &prometheus.MetricsConfig{
-		Namespace:               "test",
-		Subsystem:               "latency",
-		EnablePatternMetrics:    false, // Disable to reduce overhead
-		EnableSystemMetrics:     false,
-		EnableEntityMetrics:     false,
+		Namespace:                "test",
+		Subsystem:                "latency",
+		EnablePatternMetrics:     false, // Disable to reduce overhead
+		EnableSystemMetrics:      false,
+		EnableEntityMetrics:      false,
 		EnablePerformanceMetrics: true,
 	}
 
@@ -119,9 +119,9 @@ func TestExportLatencyRequirement(t *testing.T) {
 	t.Logf("  Total iterations: %d", numIterations)
 
 	// Validate latency requirements
-	assert.Less(t, avgDuration, 20*time.Millisecond, 
+	assert.Less(t, avgDuration, 20*time.Millisecond,
 		"Average export latency must be less than 20ms (got %v)", avgDuration)
-	
+
 	// Also check that 95% of requests are under 20ms
 	fastRequests := 0
 	for i := 0; i < numIterations; i++ {
@@ -135,8 +135,8 @@ func TestExportLatencyRequirement(t *testing.T) {
 
 	percentageFast := float64(fastRequests) / float64(numIterations) * 100
 	t.Logf("Requests under 20ms: %.1f%%", percentageFast)
-	
-	assert.Greater(t, percentageFast, 90.0, 
+
+	assert.Greater(t, percentageFast, 90.0,
 		"At least 90%% of requests should be under 20ms (got %.1f%%)", percentageFast)
 }
 
@@ -147,17 +147,17 @@ func TestBatchExportLatency(t *testing.T) {
 	otel.SetTracerProvider(tracerProvider)
 
 	otelConfig := &otel.TraceConfig{
-		ServiceName:      "batch-latency-test",
-		MaxSpansPerTrace: 50,
+		ServiceName:       "batch-latency-test",
+		MaxSpansPerTrace:  50,
 		IncludeFullEvents: false,
-		IncludeMetadata:  false,
-		SampleRate:       1.0,
+		IncludeMetadata:   false,
+		SampleRate:        1.0,
 	}
 
 	otelExporter := otel.NewTraceExporter(otelConfig)
 	promExporter := prometheus.NewMetricsExporter(&prometheus.MetricsConfig{
-		Namespace:               "test",
-		Subsystem:               "batch",
+		Namespace:                "test",
+		Subsystem:                "batch",
 		EnablePerformanceMetrics: true,
 	})
 

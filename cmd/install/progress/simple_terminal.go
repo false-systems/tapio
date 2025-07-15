@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"tapio/cmd/install/installer"
+	"github.com/yairfalse/tapio/cmd/install/installer"
 )
 
 // SimpleTerminalReporter provides basic terminal UI for progress reporting

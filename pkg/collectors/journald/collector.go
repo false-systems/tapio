@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package journald
 
 import (
@@ -7,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors/types"
+	"github.com/yairfalse/tapio/pkg/collectors/unified"
 	"github.com/yairfalse/tapio/pkg/logging"
 )
 
@@ -15,19 +18,19 @@ import (
 // focused on critical system events that matter for Kubernetes debugging
 type Collector struct {
 	// Configuration
-	config types.CollectorConfig
+	config unified.CollectorConfig
 	logger *logging.Logger
 
 	// Core components
-	reader         *Reader
-	parser         *Parser
-	oomDetector    *OOMDetector
+	reader          *Reader
+	parser          *Parser
+	oomDetector     *OOMDetector
 	containerParser *ContainerEventParser
-	filter         *SmartFilter
-	enricher       *SemanticEnricher
+	filter          *SmartFilter
+	enricher        *SemanticEnricher
 
 	// Event channel
-	eventChan chan *types.Event
+	eventChan chan *unified.Event
 
 	// State management
 	started atomic.Bool
@@ -41,23 +44,23 @@ type Collector struct {
 
 	// Statistics
 	stats struct {
-		eventsCollected  atomic.Uint64
-		eventsDropped    atomic.Uint64
-		eventsFiltered   atomic.Uint64
-		oomKillsDetected atomic.Uint64
+		eventsCollected    atomic.Uint64
+		eventsDropped      atomic.Uint64
+		eventsFiltered     atomic.Uint64
+		oomKillsDetected   atomic.Uint64
 		containersFailures atomic.Uint64
-		errorCount       atomic.Uint64
-		bytesProcessed   atomic.Uint64
+		errorCount         atomic.Uint64
+		bytesProcessed     atomic.Uint64
 	}
 
 	// Performance tracking
-	lastEventTime   atomic.Value // time.Time
-	processingTime  atomic.Int64
+	lastEventTime  atomic.Value // time.Time
+	processingTime atomic.Int64
 }
 
 // NewCollector creates a new journald collector with OPINIONATED parsing
-func NewCollector(config types.CollectorConfig) (*Collector, error) {
-	logger := logging.WithComponent("journald-collector")
+func NewCollector(config unified.CollectorConfig) (*Collector, error) {
+	logger := logging.NewLogger(logging.DefaultConfig()).WithComponent("journald-collector")
 
 	// Extract journald-specific config
 	journaldConfig, err := extractJournaldConfig(config.Extra)
@@ -68,7 +71,7 @@ func NewCollector(config types.CollectorConfig) (*Collector, error) {
 	c := &Collector{
 		config:    config,
 		logger:    logger,
-		eventChan: make(chan *types.Event, config.EventBufferSize),
+		eventChan: make(chan *unified.Event, config.EventBufferSize),
 		enabled:   atomic.Bool{},
 	}
 
@@ -178,36 +181,36 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan *types.Event {
+func (c *Collector) Events() <-chan *unified.Event {
 	return c.eventChan
 }
 
 // Health returns the collector health status
-func (c *Collector) Health() *types.Health {
-	status := types.HealthStatusHealthy
+func (c *Collector) Health() *unified.Health {
+	status := unified.HealthStatusHealthy
 	message := "Journald collector is healthy"
-	
+
 	if !c.started.Load() {
-		status = types.HealthStatusUnknown
+		status = unified.HealthStatusUnknown
 		message = "Collector not started"
 	} else if c.stopped.Load() {
-		status = types.HealthStatusUnhealthy
+		status = unified.HealthStatusUnhealthy
 		message = "Collector stopped"
 	} else if !c.reader.IsHealthy() {
-		status = types.HealthStatusUnhealthy
+		status = unified.HealthStatusUnhealthy
 		message = "Journald reader unhealthy"
 	} else if c.stats.errorCount.Load() > 100 {
-		status = types.HealthStatusDegraded
+		status = unified.HealthStatusDegraded
 		message = fmt.Sprintf("High error count: %d", c.stats.errorCount.Load())
 	}
 
 	lastEvent := c.lastEventTime.Load().(time.Time)
 	if time.Since(lastEvent) > 5*time.Minute && c.started.Load() {
-		status = types.HealthStatusDegraded
+		status = unified.HealthStatusDegraded
 		message = "No events received in 5 minutes"
 	}
 
-	return &types.Health{
+	return &unified.Health{
 		Status:          status,
 		Message:         message,
 		LastEventTime:   lastEvent,
@@ -226,12 +229,11 @@ func (c *Collector) Health() *types.Health {
 }
 
 // GetStats returns collector statistics
-func (c *Collector) GetStats() *types.Stats {
+func (c *Collector) GetStats() *unified.Stats {
 	eventsCollected := c.stats.eventsCollected.Load()
 	eventsFiltered := c.stats.eventsFiltered.Load()
-	totalProcessed := eventsCollected + eventsFiltered
 
-	return &types.Stats{
+	return &unified.Stats{
 		EventsCollected: eventsCollected,
 		EventsDropped:   c.stats.eventsDropped.Load(),
 		EventsFiltered:  eventsFiltered,
@@ -250,7 +252,7 @@ func (c *Collector) GetStats() *types.Stats {
 }
 
 // Configure updates the collector configuration
-func (c *Collector) Configure(config types.CollectorConfig) error {
+func (c *Collector) Configure(config unified.CollectorConfig) error {
 	c.config = config
 	c.enabled.Store(config.Enabled)
 
@@ -293,7 +295,7 @@ func (c *Collector) processEvents() {
 			}
 
 			start := time.Now()
-			
+
 			// Update statistics
 			c.stats.bytesProcessed.Add(uint64(len(entry.Message)))
 
@@ -317,11 +319,11 @@ func (c *Collector) processEvents() {
 			case c.eventChan <- event:
 				c.stats.eventsCollected.Add(1)
 				c.lastEventTime.Store(time.Now())
-				
+
 				// Update processing time
 				processingNanos := time.Since(start).Nanoseconds()
 				c.processingTime.Add(processingNanos)
-				
+
 			case <-c.ctx.Done():
 				return
 			default:
@@ -332,7 +334,7 @@ func (c *Collector) processEvents() {
 }
 
 // parseEntry performs OPINIONATED parsing focused on critical events
-func (c *Collector) parseEntry(entry *JournalEntry) *types.Event {
+func (c *Collector) parseEntry(entry *JournalEntry) *unified.Event {
 	// Check for OOM kill
 	if oomEvent := c.oomDetector.Detect(entry); oomEvent != nil {
 		c.stats.oomKillsDetected.Add(1)
@@ -354,7 +356,7 @@ func (c *Collector) parseEntry(entry *JournalEntry) *types.Event {
 	// Set base event properties
 	event.ID = fmt.Sprintf("journald_%s_%d", entry.SystemdUnit, entry.RealtimeTimestamp)
 	event.Timestamp = time.Unix(0, entry.RealtimeTimestamp*1000)
-	event.Source = types.EventSource{
+	event.Source = unified.EventSource{
 		Collector: c.Name(),
 		Component: "journald",
 		Node:      entry.Hostname,
@@ -427,13 +429,13 @@ func (c *Collector) getEventsPerSecond() float64 {
 func extractJournaldConfig(extra map[string]interface{}) (*JournaldConfig, error) {
 	config := &JournaldConfig{
 		// Defaults for OPINIONATED collection
-		FollowCursor:    true,
-		MaxAge:          24 * time.Hour,
-		Units:           []string{}, // Monitor all units by default
-		Priorities:      []string{"0", "1", "2", "3", "4"}, // Emergency to Warning
-		MatchPatterns:   getDefaultPatterns(),
+		FollowCursor:     true,
+		MaxAge:           24 * time.Hour,
+		Units:            []string{},                        // Monitor all units by default
+		Priorities:       []string{"0", "1", "2", "3", "4"}, // Emergency to Warning
+		MatchPatterns:    getDefaultPatterns(),
 		FilterNoisyUnits: true,
-		StreamBatchSize: 1000,
+		StreamBatchSize:  1000,
 	}
 
 	// Override with provided config

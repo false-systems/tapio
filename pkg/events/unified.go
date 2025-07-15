@@ -49,11 +49,11 @@ var (
 func NewEvent() *UnifiedEvent {
 	event := EventPool.Get().(*UnifiedEvent)
 	event.Reset()
-	
+
 	// Set defaults
 	event.Id = generateEventID()
 	event.Timestamp = timestamppb.Now()
-	
+
 	// Initialize maps
 	if event.Attributes == nil {
 		event.Attributes = make(map[string]*AttributeValue)
@@ -61,7 +61,7 @@ func NewEvent() *UnifiedEvent {
 	if event.Labels == nil {
 		event.Labels = make(map[string]string)
 	}
-	
+
 	// Initialize nested structures if nil
 	if event.Metadata == nil {
 		event.Metadata = &EventMetadata{}
@@ -80,10 +80,10 @@ func NewEvent() *UnifiedEvent {
 			Confidence: 1.0,
 		}
 	}
-	
+
 	atomic.AddUint64(&eventsCreated, 1)
 	atomic.AddUint64(&eventsInFlight, 1)
-	
+
 	return event
 }
 
@@ -92,10 +92,10 @@ func ReleaseEvent(event *UnifiedEvent) {
 	if event == nil {
 		return
 	}
-	
+
 	// Clear sensitive data but keep allocated maps
 	event.Reset()
-	
+
 	// Preserve map allocations
 	if event.Attributes == nil {
 		event.Attributes = make(map[string]*AttributeValue)
@@ -104,7 +104,7 @@ func ReleaseEvent(event *UnifiedEvent) {
 			delete(event.Attributes, k)
 		}
 	}
-	
+
 	if event.Labels == nil {
 		event.Labels = make(map[string]string)
 	} else {
@@ -112,7 +112,7 @@ func ReleaseEvent(event *UnifiedEvent) {
 			delete(event.Labels, k)
 		}
 	}
-	
+
 	EventPool.Put(event)
 	atomic.AddUint64(&eventsReleased, 1)
 	atomic.AddUint64(&eventsInFlight, ^uint64(0))
@@ -201,7 +201,7 @@ func (b *Builder) WithCorrelation(correlationID, traceID string) *Builder {
 // WithAttribute adds a typed attribute
 func (b *Builder) WithAttribute(key string, value interface{}) *Builder {
 	attr := AttributeValuePool.Get().(*AttributeValue)
-	
+
 	switch v := value.(type) {
 	case string:
 		attr.Value = &AttributeValue_StringValue{StringValue: v}
@@ -225,7 +225,7 @@ func (b *Builder) WithAttribute(key string, value interface{}) *Builder {
 			}
 		}
 	}
-	
+
 	b.event.Attributes[key] = attr
 	return b
 }
@@ -262,13 +262,13 @@ func (b *Builder) Build() *UnifiedEvent {
 	if b.event.Timestamp == nil {
 		b.event.Timestamp = timestamppb.Now()
 	}
-	
+
 	// Calculate processing latency
 	if b.event.Quality != nil && b.event.Quality.ProcessingLatencyUs == 0 {
 		created := b.event.Timestamp.AsTime()
 		b.event.Quality.ProcessingLatencyUs = time.Since(created).Microseconds()
 	}
-	
+
 	return b.event
 }
 
@@ -282,7 +282,7 @@ func (e *UnifiedEvent) SerializeFast() ([]byte, error) {
 		atomic.AddUint64(&serializeErrors, 1)
 		return nil, fmt.Errorf("failed to serialize event: %w", err)
 	}
-	
+
 	atomic.AddUint64(&totalEventSize, uint64(len(data)))
 	return data, nil
 }
@@ -323,11 +323,11 @@ func (e *UnifiedEvent) GetIntAttribute(key string) (int64, bool) {
 
 // EventStats returns current event pool statistics
 type EventStats struct {
-	Created    uint64
-	Released   uint64
-	InFlight   uint64
-	TotalSize  uint64
-	SerErrors  uint64
+	Created   uint64
+	Released  uint64
+	InFlight  uint64
+	TotalSize uint64
+	SerErrors uint64
 }
 
 // GetEventStats returns current statistics
@@ -373,7 +373,7 @@ func toFloat64(v interface{}) float64 {
 
 // IsHighPriority returns true if the event should be processed with priority
 func (e *UnifiedEvent) IsHighPriority() bool {
-	return e.Metadata.Priority > 5 || 
+	return e.Metadata.Priority > 5 ||
 		e.Metadata.Severity >= EventSeverity_SEVERITY_ERROR ||
 		e.Metadata.Category == EventCategory_CATEGORY_SECURITY
 }
@@ -383,25 +383,25 @@ func (e *UnifiedEvent) Size() int {
 	// This is an approximation for performance
 	size := int(unsafe.Sizeof(*e))
 	size += len(e.Id)
-	
+
 	if e.Metadata != nil {
 		size += len(e.Metadata.Type) + len(e.Metadata.SchemaVersion)
 	}
-	
+
 	if e.Source != nil {
 		size += len(e.Source.Type) + len(e.Source.Collector) + len(e.Source.Node)
 	}
-	
+
 	// Add attribute sizes
 	for k, v := range e.Attributes {
 		size += len(k) + v.Size()
 	}
-	
+
 	// Add label sizes
 	for k, v := range e.Labels {
 		size += len(k) + len(v)
 	}
-	
+
 	return size
 }
 
@@ -422,19 +422,19 @@ func (e *UnifiedEvent) Validate() error {
 	if e.Id == "" {
 		return fmt.Errorf("event ID is required")
 	}
-	
+
 	if e.Timestamp == nil {
 		return fmt.Errorf("event timestamp is required")
 	}
-	
+
 	if e.Metadata == nil || e.Metadata.Type == "" {
 		return fmt.Errorf("event type is required")
 	}
-	
+
 	if e.Source == nil || e.Source.Type == "" {
 		return fmt.Errorf("event source type is required")
 	}
-	
+
 	return nil
 }
 
@@ -444,13 +444,13 @@ func (e *UnifiedEvent) Clone() *UnifiedEvent {
 	if err != nil {
 		return nil
 	}
-	
+
 	clone := NewEvent()
 	if err := proto.Unmarshal(data, clone); err != nil {
 		ReleaseEvent(clone)
 		return nil
 	}
-	
+
 	return clone
 }
 
@@ -494,7 +494,7 @@ func (bb *BatchBuilder) Add(event *UnifiedEvent) error {
 	if len(bb.batch.Events) >= bb.maxEvents {
 		return fmt.Errorf("batch is full")
 	}
-	
+
 	bb.batch.Events = append(bb.batch.Events, event)
 	return nil
 }

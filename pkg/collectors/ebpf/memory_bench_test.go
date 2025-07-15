@@ -54,7 +54,7 @@ func BenchmarkMemoryEventProcessing(b *testing.B) {
 			if endIdx > len(sampleEvents) {
 				endIdx = len(sampleEvents)
 			}
-			
+
 			batch := sampleEvents[startIdx:endIdx]
 			_ = memCollector.processBatchedEvents(batch)
 		}
@@ -94,7 +94,7 @@ func BenchmarkOOMPrediction(b *testing.B) {
 		tracker.GrowthHistory[i] = MemoryDataPoint{
 			Timestamp: baseTime.Add(time.Duration(i) * 10 * time.Second),
 			Usage:     uint64(1024*1024 + i*1024*100), // 100KB growth per point
-			Rate:      10240, // 10KB/s
+			Rate:      10240,                          // 10KB/s
 		}
 	}
 
@@ -113,7 +113,7 @@ func BenchmarkOOMPrediction(b *testing.B) {
 		for i := 1; i < len(tracker.GrowthHistory); i++ {
 			tracker.GrowthHistory[i].Usage = tracker.GrowthHistory[i-1].Usage * 110 / 100
 		}
-		
+
 		for i := 0; i < b.N; i++ {
 			_ = predictor.predictExponentialGrowth(tracker)
 		}
@@ -197,7 +197,7 @@ func BenchmarkKernelCompatibility(b *testing.B) {
 	b.Run("ParseKernelVersion", func(b *testing.B) {
 		compat := &KernelCompatibility{}
 		version := "5.4.0-74-generic"
-		
+
 		for i := 0; i < b.N; i++ {
 			_ = collector.parseKernelVersion(version, compat)
 		}
@@ -270,7 +270,7 @@ func BenchmarkMemoryOptimization(b *testing.B) {
 			GrowthHistory: make([]MemoryDataPoint, 100),
 			LastUpdate:    time.Now(),
 		}
-		
+
 		// Fill with sample data
 		for j := 0; j < 100; j++ {
 			tracker.GrowthHistory[j] = MemoryDataPoint{
@@ -278,7 +278,7 @@ func BenchmarkMemoryOptimization(b *testing.B) {
 				Usage:     uint64(1024*1024 + j*1024),
 			}
 		}
-		
+
 		collector.processes[pid] = tracker
 	}
 

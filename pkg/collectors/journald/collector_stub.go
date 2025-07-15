@@ -9,33 +9,33 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors/types"
+	"github.com/yairfalse/tapio/pkg/collectors/unified"
 	"github.com/yairfalse/tapio/pkg/logging"
 )
 
 // StubCollector provides a no-op implementation of the journald collector for non-Linux platforms
 type StubCollector struct {
-	config    types.CollectorConfig
+	config    unified.CollectorConfig
 	logger    *logging.Logger
-	eventChan chan *types.Event
+	eventChan chan *unified.Event
 	platform  string
 }
 
 // NewCollector creates a new stub journald collector for non-Linux platforms
-func NewCollector(config types.CollectorConfig) (*StubCollector, error) {
-	logger := logging.WithComponent("journald-collector-stub")
-	
+func NewCollector(config unified.CollectorConfig) (*StubCollector, error) {
+	logger := logging.Development.WithComponent("journald-collector-stub")
+
 	collector := &StubCollector{
 		config:    config,
 		logger:    logger,
-		eventChan: make(chan *types.Event, config.EventBufferSize),
+		eventChan: make(chan *unified.Event, config.EventBufferSize),
 		platform:  runtime.GOOS,
 	}
-	
-	logger.Info("Journald collector initialized in stub mode", 
+
+	logger.Info("Journald collector initialized in stub mode",
 		"platform", collector.platform,
 		"reason", "journald is only available on Linux")
-	
+
 	return collector, nil
 }
 
@@ -52,10 +52,10 @@ func (c *StubCollector) Type() string {
 // Start starts the stub collector (no-op)
 func (c *StubCollector) Start(ctx context.Context) error {
 	c.logger.Info("Starting journald collector in stub mode")
-	
+
 	// Generate mock events for development
 	go c.generateMockEvents(ctx)
-	
+
 	return nil
 }
 
@@ -67,27 +67,27 @@ func (c *StubCollector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *StubCollector) Events() <-chan *types.Event {
+func (c *StubCollector) Events() <-chan *unified.Event {
 	return c.eventChan
 }
 
 // Health returns the collector health status
-func (c *StubCollector) Health() *types.Health {
-	return &types.Health{
-		Status:  types.HealthStatusHealthy,
+func (c *StubCollector) Health() *unified.Health {
+	return &unified.Health{
+		Status:  unified.HealthStatusHealthy,
 		Message: fmt.Sprintf("Journald collector running in stub mode on %s", c.platform),
 		Metrics: map[string]interface{}{
-			"platform":   c.platform,
-			"mode":       "stub",
-			"supported":  false,
+			"platform":    c.platform,
+			"mode":        "stub",
+			"supported":   false,
 			"mock_events": true,
 		},
 	}
 }
 
 // GetStats returns stub statistics
-func (c *StubCollector) GetStats() *types.Stats {
-	return &types.Stats{
+func (c *StubCollector) GetStats() *unified.Stats {
+	return &unified.Stats{
 		EventsCollected: 0,
 		EventsDropped:   0,
 		EventsFiltered:  0,
@@ -95,78 +95,91 @@ func (c *StubCollector) GetStats() *types.Stats {
 		StartTime:       time.Now(),
 		LastEventTime:   time.Now(),
 		Custom: map[string]interface{}{
-			"platform":      c.platform,
-			"mode":          "stub",
+			"platform":           c.platform,
+			"mode":               "stub",
 			"journald_available": false,
 		},
 	}
 }
 
 // Configure updates the collector configuration
-func (c *StubCollector) Configure(config types.CollectorConfig) error {
+func (c *StubCollector) Configure(config unified.CollectorConfig) error {
 	c.config = config
 	c.logger.Info("Journald collector configuration updated (stub mode)")
 	return nil
+}
+
+// IsEnabled returns whether the collector is enabled
+func (c *StubCollector) IsEnabled() bool {
+	return c.config.Enabled
 }
 
 // generateMockEvents generates mock events for development purposes
 func (c *StubCollector) generateMockEvents(ctx context.Context) {
 	ticker := time.NewTicker(45 * time.Second)
 	defer ticker.Stop()
-	
+
 	eventCount := 0
-	
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			eventCount++
-			
+
 			// Generate a mock journald event
-			event := &types.Event{
+			event := &unified.Event{
 				ID:        fmt.Sprintf("mock-journald-%d", eventCount),
-				Type:      types.EventTypeLog,
-				Category:  types.CategorySystem,
-				Severity:  types.SeverityInfo,
+				Type:      "log",
+				Category:  unified.CategorySystem,
+				Severity:  unified.SeverityInfo,
 				Timestamp: time.Now(),
-				Source: types.EventSource{
+				Source: unified.EventSource{
 					Collector: c.Name(),
 					Component: "mock",
 					Node:      "localhost",
+					Version:   "1.0.0",
 				},
+				Message: fmt.Sprintf("Mock journald event #%d generated on %s", eventCount, c.platform),
 				Data: map[string]interface{}{
-					"message": fmt.Sprintf("Mock journald event #%d generated on %s", eventCount, c.platform),
-					"unit":    "mock.service",
+					"message":  fmt.Sprintf("Mock journald event #%d generated on %s", eventCount, c.platform),
+					"unit":     "mock.service",
 					"priority": 6,
-					"mock":    true,
+					"mock":     true,
 				},
 				Attributes: map[string]interface{}{
-					"platform":    c.platform,
+					"platform":     c.platform,
 					"systemd_unit": "mock.service",
-					"mock_event":  true,
+					"mock_event":   true,
 				},
 				Labels: map[string]string{
 					"source":   "journald-stub",
 					"platform": c.platform,
 					"mode":     "development",
 				},
-				Context: &types.EventContext{
-					Hostname: "localhost",
+				Context: &unified.EventContext{
+					Node: "localhost",
+				},
+				Metadata: unified.EventMetadata{
+					CollectedAt:  time.Now(),
+					ProcessedAt:  time.Now(),
+					ProcessingMS: 0,
+					Tags:         c.config.Tags,
 				},
 			}
-			
+
 			// Occasionally generate a mock OOM event
 			if eventCount%10 == 0 {
-				event.Type = types.EventTypeOOM
-				event.Category = types.CategoryCapacity
-				event.Severity = types.SeverityCritical
+				event.Type = "oom"
+				event.Category = unified.CategoryMemory
+				event.Severity = unified.SeverityCritical
 				event.Data["message"] = "Mock OOM kill event for development"
 				event.Data["victim_name"] = "mock-process"
 				event.Data["victim_pid"] = 12345
 				event.Data["memory_usage"] = 1024 * 1024 * 100 // 100MB
 			}
-			
+
 			select {
 			case c.eventChan <- event:
 			default:
@@ -205,10 +218,10 @@ type SmartFilter struct{}
 type SemanticEnricher struct{}
 
 // No-op methods for compatibility
-func (p *Parser) ParseCritical(entry *JournalEntry) *types.Event { return nil }
-func (o *OOMDetector) Detect(entry *JournalEntry) *types.Event { return nil }
-func (o *OOMDetector) Reset() {}
-func (c *ContainerEventParser) Parse(entry *JournalEntry) *types.Event { return nil }
-func (s *SmartFilter) ShouldProcess(entry *JournalEntry) bool { return false }
-func (s *SmartFilter) GetStatistics() map[string]interface{} { return map[string]interface{}{} }
-func (e *SemanticEnricher) Enrich(event *types.Event, entry *JournalEntry) {}
+func (p *Parser) ParseCritical(entry *JournalEntry) *unified.Event           { return nil }
+func (o *OOMDetector) Detect(entry *JournalEntry) *unified.Event             { return nil }
+func (o *OOMDetector) Reset()                                                {}
+func (c *ContainerEventParser) Parse(entry *JournalEntry) *unified.Event     { return nil }
+func (s *SmartFilter) ShouldProcess(entry *JournalEntry) bool                { return false }
+func (s *SmartFilter) GetStatistics() map[string]interface{}                 { return map[string]interface{}{} }
+func (e *SemanticEnricher) Enrich(event *unified.Event, entry *JournalEntry) {}

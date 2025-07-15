@@ -19,7 +19,7 @@ type Engine interface {
 	// Event processing
 	ProcessEvents(ctx context.Context, events []Event) ([]Result, error)
 	ProcessWindow(ctx context.Context, window TimeWindow, events []Event) ([]Result, error)
-	
+
 	// Rule management
 	RegisterRule(rule Rule) error
 	UnregisterRule(ruleID string) error
@@ -27,17 +27,17 @@ type Engine interface {
 	DisableRule(ruleID string) error
 	GetRule(ruleID string) (Rule, bool)
 	ListRules() []Rule
-	
+
 	// Configuration
 	SetWindowSize(duration time.Duration)
 	SetProcessingInterval(interval time.Duration)
 	SetMaxConcurrentRules(limit int)
-	
+
 	// Lifecycle management
 	Start(ctx context.Context) error
 	Stop() error
 	Health() error
-	
+
 	// Statistics and monitoring
 	GetStats() Stats
 }
@@ -56,21 +56,21 @@ type Rule interface {
 	GetVersion() string
 	GetAuthor() string
 	GetTags() []string
-	
+
 	// Configuration
 	IsEnabled() bool
 	GetMinConfidence() float64
 	GetCooldown() time.Duration
 	GetTTL() time.Duration
-	
+
 	// Requirements
 	GetRequiredSources() []SourceType
 	GetOptionalSources() []SourceType
-	
+
 	// Execution
 	CheckRequirements(ctx context.Context, data *DataCollection) error
 	Execute(ctx context.Context, ruleCtx *RuleContext) ([]Finding, error)
-	
+
 	// Performance tracking
 	GetPerformance() RulePerformance
 	UpdatePerformance(execution RuleExecution)
@@ -85,19 +85,19 @@ type EventStore interface {
 	// Event storage
 	Store(ctx context.Context, events []Event) error
 	StoreBatch(ctx context.Context, events []Event) error
-	
+
 	// Event querying
 	GetEvents(ctx context.Context, filter Filter) ([]Event, error)
 	GetEventsInWindow(ctx context.Context, window TimeWindow, filter Filter) ([]Event, error)
-	
+
 	// Metrics integration
 	GetMetrics(ctx context.Context, name string, window TimeWindow) (MetricSeries, error)
 	StoreMetrics(ctx context.Context, metrics []MetricSeries) error
-	
+
 	// Maintenance
 	Cleanup(ctx context.Context, before time.Time) error
 	GetStats(ctx context.Context) (EventStoreStats, error)
-	
+
 	// Health
 	Health() error
 }
@@ -107,12 +107,12 @@ type DataSource interface {
 	// Identification
 	Name() string
 	Type() SourceType
-	
+
 	// Data retrieval
 	GetData(ctx context.Context, dataType string, config map[string]interface{}) (interface{}, error)
 	Subscribe(ctx context.Context, dataType string, handler DataHandler) error
 	Unsubscribe(ctx context.Context, dataType string) error
-	
+
 	// Health and status
 	Health() error
 	GetStatus() DataSourceStatus
@@ -131,18 +131,18 @@ type PatternDetector interface {
 	Name() string
 	PatternType() string
 	Version() string
-	
+
 	// Configuration
 	Configure(config interface{}) error
 	GetConfig() interface{}
-	
+
 	// Pattern detection
 	Detect(ctx context.Context, data *PatternDetectionInput) ([]PatternResult, error)
-	
+
 	// Validation and metrics
 	Validate(ctx context.Context, results []PatternResult) (ValidationResult, error)
 	GetMetrics() PatternDetectorMetrics
-	
+
 	// Lifecycle
 	Start(ctx context.Context) error
 	Stop() error
@@ -154,12 +154,12 @@ type PatternRegistry interface {
 	// Registration
 	Register(detector PatternDetector) error
 	Unregister(name string) error
-	
+
 	// Discovery
 	Get(name string) (PatternDetector, bool)
 	List() []PatternDetector
 	ListByType(patternType string) []PatternDetector
-	
+
 	// Bulk operations
 	DetectAll(ctx context.Context, data *PatternDetectionInput) ([]PatternResult, error)
 	ValidateAll(ctx context.Context, results []PatternResult) (map[string]ValidationResult, error)
@@ -176,16 +176,16 @@ type AutoFixEngine interface {
 	UnregisterAction(actionID string) error
 	GetAction(actionID string) (AutoFixAction, bool)
 	ListActions() []AutoFixAction
-	
+
 	// Execution
 	ExecuteAutoFix(ctx context.Context, request AutoFixRequest) (AutoFixResult, error)
 	CanAutoFix(ctx context.Context, finding Finding) bool
 	GetRecommendedActions(ctx context.Context, finding Finding) ([]AutoFixAction, error)
-	
+
 	// Monitoring
 	GetExecutionHistory(ctx context.Context, filter AutoFixFilter) ([]AutoFixExecution, error)
 	GetStats() AutoFixStats
-	
+
 	// Configuration
 	SetSafetyLevel(level SafetyLevel)
 	EnableDryRunMode(enabled bool)
@@ -207,15 +207,15 @@ type ResultHandler interface {
 type AlertManager interface {
 	// Alerting
 	SendAlert(ctx context.Context, result Result) error
-	
+
 	// Alert management
 	SuppressAlert(ruleID string, duration time.Duration) error
 	UnsuppressAlert(ruleID string) error
 	IsAlertSuppressed(ruleID string) bool
-	
+
 	// Alert history
 	GetAlertHistory(ctx context.Context, ruleID string, window TimeWindow) ([]Result, error)
-	
+
 	// Configuration
 	ConfigureChannel(channel AlertChannel) error
 	ListChannels() []AlertChannel
@@ -230,20 +230,20 @@ type MetricsCollector interface {
 	// Rule metrics
 	RecordRuleExecution(ruleID string, duration time.Duration, success bool)
 	RecordRuleResult(ruleID string, result Result)
-	
+
 	// Engine metrics
 	RecordEventProcessed(source SourceType)
 	RecordCorrelationFound(category Category, severity Severity)
 	RecordProcessingLatency(duration time.Duration)
-	
+
 	// Resource metrics
 	RecordMemoryUsage(bytes uint64)
 	RecordCPUUsage(percent float64)
-	
+
 	// Pattern metrics
 	RecordPatternDetection(patternType string, confidence float64)
 	RecordPatternValidation(patternType string, accuracy float64)
-	
+
 	// Export
 	Export(ctx context.Context, format ExportFormat) ([]byte, error)
 }
@@ -256,11 +256,11 @@ type HealthChecker interface {
 	CheckPatternDetectors(ctx context.Context) error
 	CheckAutoFixEngine(ctx context.Context) error
 	CheckAlertManager(ctx context.Context) error
-	
+
 	// Overall health
 	Health(ctx context.Context) error
 	Status(ctx context.Context) HealthStatus
-	
+
 	// Deep health checks
 	DeepHealthCheck(ctx context.Context) (HealthReport, error)
 }
@@ -279,19 +279,19 @@ type RuleBuilder interface {
 	Version(version string) RuleBuilder
 	Author(author string) RuleBuilder
 	Tags(tags ...string) RuleBuilder
-	
+
 	// Configuration
 	MinConfidence(conf float64) RuleBuilder
 	Cooldown(duration time.Duration) RuleBuilder
 	TTL(duration time.Duration) RuleBuilder
-	
+
 	// Sources
 	RequireSources(sources ...SourceType) RuleBuilder
 	OptionalSources(sources ...SourceType) RuleBuilder
-	
+
 	// Evaluation function
 	Evaluate(fn RuleFunction) RuleBuilder
-	
+
 	// Build the rule
 	Build() Rule
 	Validate() error
@@ -304,7 +304,7 @@ type EngineFactory interface {
 	CreateEnhancedEngine(config EnhancedEngineConfig) (Engine, error)
 	CreatePerfectEngine(config PerfectEngineConfig) (Engine, error)
 	CreatePatternIntegratedEngine(config PatternIntegratedEngineConfig) (Engine, error)
-	
+
 	// Configuration validation
 	ValidateConfig(config interface{}) error
 	GetDefaultConfig(engineType EngineType) interface{}
@@ -319,11 +319,11 @@ type ConfigurationManager interface {
 	// Configuration loading
 	LoadConfig(source string) (Configuration, error)
 	SaveConfig(config Configuration, destination string) error
-	
+
 	// Configuration validation
 	ValidateConfiguration(config Configuration) error
 	GetSchema() ConfigurationSchema
-	
+
 	// Dynamic configuration
 	UpdateConfiguration(updates map[string]interface{}) error
 	GetConfiguration() Configuration
@@ -416,8 +416,8 @@ const (
 type SafetyLevel string
 
 const (
-	SafetyLevelSafe     SafetyLevel = "safe"
-	SafetyLevelModerate SafetyLevel = "moderate"
-	SafetyLevelRisky    SafetyLevel = "risky"
+	SafetyLevelSafe      SafetyLevel = "safe"
+	SafetyLevelModerate  SafetyLevel = "moderate"
+	SafetyLevelRisky     SafetyLevel = "risky"
 	SafetyLevelDangerous SafetyLevel = "dangerous"
 )

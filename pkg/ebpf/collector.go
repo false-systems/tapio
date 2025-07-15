@@ -29,6 +29,12 @@ type Collector struct {
 
 // NewCollector creates a new eBPF event collector
 func NewCollector() (*Collector, error) {
+	// First try direct collector, if it fails, the enhanced collector in the adapter will handle it
+	return NewCollectorDirect()
+}
+
+// NewCollectorDirect creates a direct eBPF collector (used by fallback collector)
+func NewCollectorDirect() (*Collector, error) {
 	// Load pre-compiled eBPF program
 	spec, err := loadOomdetector()
 	if err != nil {
@@ -41,11 +47,14 @@ func NewCollector() (*Collector, error) {
 		return nil, fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
 
-	// Create ring buffer reader
-	reader, err := ringbuf.NewReader(objs.Events)
-	if err != nil {
-		objs.Close()
-		return nil, fmt.Errorf("failed to create ring buffer reader: %w", err)
+	// Create ring buffer reader - handle nil maps gracefully
+	var reader *ringbuf.Reader
+	if objs.Events != nil {
+		reader, err = ringbuf.NewReader(objs.Events)
+		if err != nil {
+			objs.Close()
+			return nil, fmt.Errorf("failed to create ring buffer reader: %w", err)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

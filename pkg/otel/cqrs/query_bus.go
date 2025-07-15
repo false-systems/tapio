@@ -16,33 +16,33 @@ type QueryBus[T domain.TraceData] struct {
 	// Query handlers registry
 	handlers    map[QueryType]QueryHandler[T]
 	handlersMux sync.RWMutex
-	
+
 	// Middleware pipeline for queries
 	middleware []QueryMiddleware[T]
-	
+
 	// Read model management
-	readModelManager *ReadModelManager[T]
+	readModelManager  *ReadModelManager[T]
 	projectionManager *ProjectionManager[T]
-	
+
 	// Caching layer
 	cacheManager *QueryCacheManager[T]
-	
+
 	// Real-time query support
 	streamManager *QueryStreamManager[T]
-	
+
 	// Performance optimization
 	queryOptimizer *QueryOptimizer[T]
 	metrics        *QueryMetrics
-	
+
 	// Configuration
 	config QueryBusConfig
-	
+
 	// Circuit breaker for resilience
 	circuitBreaker *CircuitBreaker
-	
+
 	// Query validation
 	validator *QueryValidator[T]
-	
+
 	// Materialized views
 	viewManager *MaterializedViewManager[T]
 }
@@ -72,15 +72,15 @@ type Query[T domain.TraceData] interface {
 
 // QueryResult represents the result of query execution
 type QueryResult[T domain.TraceData] struct {
-	QueryID      string
-	Data         any
-	TotalCount   int64
-	HasMore      bool
-	NextCursor   string
+	QueryID       string
+	Data          any
+	TotalCount    int64
+	HasMore       bool
+	NextCursor    string
 	ExecutionTime time.Duration
-	CacheHit     bool
-	Source       QuerySource
-	Metadata     map[string]any
+	CacheHit      bool
+	Source        QuerySource
+	Metadata      map[string]any
 }
 
 // QueryMiddleware defines middleware for query processing pipeline
@@ -93,38 +93,38 @@ type QueryMiddleware[T domain.TraceData] interface {
 // QueryBusConfig configures the query bus behavior
 type QueryBusConfig struct {
 	// Caching configuration
-	EnableCaching        bool
-	DefaultCacheTTL      time.Duration
-	MaxCacheSize         int64
+	EnableCaching           bool
+	DefaultCacheTTL         time.Duration
+	MaxCacheSize            int64
 	CacheCompressionEnabled bool
-	
+
 	// Performance configuration
-	QueryTimeout         time.Duration
-	SlowQueryThreshold   time.Duration
-	MaxConcurrentQueries int
+	QueryTimeout            time.Duration
+	SlowQueryThreshold      time.Duration
+	MaxConcurrentQueries    int
 	EnableQueryOptimization bool
-	
+
 	// Real-time configuration
-	EnableStreaming      bool
-	StreamBufferSize     int
-	StreamTimeout        time.Duration
-	
+	EnableStreaming  bool
+	StreamBufferSize int
+	StreamTimeout    time.Duration
+
 	// Read model configuration
-	EnableReadModels     bool
+	EnableReadModels         bool
 	ReadModelRefreshInterval time.Duration
-	
+
 	// Materialized views
 	EnableMaterializedViews bool
 	ViewRefreshInterval     time.Duration
-	
+
 	// Circuit breaker configuration
-	EnableCircuitBreaker    bool
-	FailureThreshold        int
-	RecoveryTimeout         time.Duration
-	
+	EnableCircuitBreaker bool
+	FailureThreshold     int
+	RecoveryTimeout      time.Duration
+
 	// Monitoring configuration
-	EnableMetrics           bool
-	EnableQueryLogging      bool
+	EnableMetrics      bool
+	EnableQueryLogging bool
 }
 
 // NewQueryBus creates a new query bus with configuration
@@ -133,27 +133,27 @@ func NewQueryBus[T domain.TraceData](
 	cacheManager *QueryCacheManager[T],
 	readModelManager *ReadModelManager[T],
 ) *QueryBus[T] {
-	
+
 	applyQueryBusDefaults(&config)
-	
+
 	bus := &QueryBus[T]{
-		handlers:          make(map[QueryType]QueryHandler[T]),
-		middleware:        make([]QueryMiddleware[T], 0),
-		readModelManager:  readModelManager,
-		cacheManager:      cacheManager,
-		config:            config,
-		metrics:           NewQueryMetrics(),
-		validator:         NewQueryValidator[T](),
-		queryOptimizer:    NewQueryOptimizer[T](),
+		handlers:         make(map[QueryType]QueryHandler[T]),
+		middleware:       make([]QueryMiddleware[T], 0),
+		readModelManager: readModelManager,
+		cacheManager:     cacheManager,
+		config:           config,
+		metrics:          NewQueryMetrics(),
+		validator:        NewQueryValidator[T](),
+		queryOptimizer:   NewQueryOptimizer[T](),
 	}
-	
+
 	// Initialize projection manager if read models enabled
 	if config.EnableReadModels {
 		bus.projectionManager = NewProjectionManager[T](ProjectionConfig{
 			RefreshInterval: config.ReadModelRefreshInterval,
 		})
 	}
-	
+
 	// Initialize stream manager if streaming enabled
 	if config.EnableStreaming {
 		bus.streamManager = NewQueryStreamManager[T](StreamConfig{
@@ -161,14 +161,14 @@ func NewQueryBus[T domain.TraceData](
 			Timeout:    config.StreamTimeout,
 		})
 	}
-	
+
 	// Initialize materialized view manager if enabled
 	if config.EnableMaterializedViews {
 		bus.viewManager = NewMaterializedViewManager[T](ViewConfig{
 			RefreshInterval: config.ViewRefreshInterval,
 		})
 	}
-	
+
 	// Initialize circuit breaker if enabled
 	if config.EnableCircuitBreaker {
 		bus.circuitBreaker = NewCircuitBreaker(CircuitBreakerConfig{
@@ -176,10 +176,10 @@ func NewQueryBus[T domain.TraceData](
 			RecoveryTimeout:  config.RecoveryTimeout,
 		})
 	}
-	
+
 	// Register default middleware
 	bus.registerDefaultMiddleware()
-	
+
 	return bus
 }
 
@@ -187,13 +187,13 @@ func NewQueryBus[T domain.TraceData](
 func (bus *QueryBus[T]) RegisterHandler(queryType QueryType, handler QueryHandler[T]) error {
 	bus.handlersMux.Lock()
 	defer bus.handlersMux.Unlock()
-	
+
 	if _, exists := bus.handlers[queryType]; exists {
 		return fmt.Errorf("handler already registered for query type: %s", queryType)
 	}
-	
+
 	bus.handlers[queryType] = handler
-	
+
 	return nil
 }
 
@@ -202,19 +202,19 @@ func (bus *QueryBus[T]) Execute(ctx context.Context, query Query[T]) (*QueryResu
 	startTime := time.Now()
 	queryID := query.GetQueryID()
 	queryType := query.GetQueryType()
-	
+
 	// Record query execution attempt
 	bus.metrics.RecordQueryAttempt(queryType)
-	
+
 	// Validate query
 	if err := bus.validator.Validate(query); err != nil {
 		bus.metrics.RecordQueryFailure(queryType, "validation_error")
 		return &QueryResult[T]{
-			QueryID: queryID,
+			QueryID:  queryID,
 			Metadata: map[string]any{"error": err.Error()},
 		}, fmt.Errorf("query validation failed: %w", err)
 	}
-	
+
 	// Optimize query if enabled
 	optimizedQuery := query
 	if bus.config.EnableQueryOptimization {
@@ -225,12 +225,12 @@ func (bus *QueryBus[T]) Execute(ctx context.Context, query Query[T]) (*QueryResu
 			optimizedQuery = query
 		}
 	}
-	
+
 	// Use circuit breaker if enabled
 	if bus.config.EnableCircuitBreaker {
 		return bus.executeWithCircuitBreaker(ctx, optimizedQuery, startTime)
 	}
-	
+
 	// Execute query through middleware pipeline
 	return bus.executeWithMiddleware(ctx, optimizedQuery, startTime)
 }
@@ -240,27 +240,27 @@ func (bus *QueryBus[T]) ExecuteStream(
 	ctx context.Context,
 	query StreamQuery[T],
 ) (<-chan *QueryResult[T], error) {
-	
+
 	if !bus.config.EnableStreaming {
 		return nil, fmt.Errorf("streaming not enabled")
 	}
-	
+
 	if bus.streamManager == nil {
 		return nil, fmt.Errorf("stream manager not initialized")
 	}
-	
+
 	// Validate streaming query
 	if err := bus.validator.ValidateStreamQuery(query); err != nil {
 		return nil, fmt.Errorf("stream query validation failed: %w", err)
 	}
-	
+
 	// Start streaming query
 	resultChan, err := bus.streamManager.StartStream(ctx, query)
 	if err != nil {
 		bus.metrics.RecordStreamFailure(query.GetQueryType(), "start_failed")
 		return nil, fmt.Errorf("failed to start stream: %w", err)
 	}
-	
+
 	bus.metrics.RecordStreamStarted(query.GetQueryType())
 	return resultChan, nil
 }
@@ -270,30 +270,30 @@ func (bus *QueryBus[T]) ExecuteBatch(
 	ctx context.Context,
 	queries []Query[T],
 ) (*BatchQueryResult[T], error) {
-	
+
 	if len(queries) == 0 {
 		return &BatchQueryResult[T]{}, nil
 	}
-	
+
 	startTime := time.Now()
 	batchID := generateQueryBatchID()
-	
+
 	bus.metrics.RecordBatchQueryAttempt(len(queries))
-	
+
 	result := &BatchQueryResult[T]{
 		BatchID:   batchID,
 		Queries:   len(queries),
 		Results:   make([]*QueryResult[T], 0, len(queries)),
 		StartTime: startTime,
 	}
-	
+
 	// Group queries by type for optimization
 	queryGroups := bus.groupQueriesByType(queries)
-	
+
 	// Execute query groups concurrently
 	resultsChan := make(chan *QueryResult[T], len(queries))
 	errorsChan := make(chan error, len(queries))
-	
+
 	var wg sync.WaitGroup
 	for queryType, typeQueries := range queryGroups {
 		wg.Add(1)
@@ -302,30 +302,30 @@ func (bus *QueryBus[T]) ExecuteBatch(
 			bus.executeBatchGroup(ctx, qt, qs, resultsChan, errorsChan)
 		}(queryType, typeQueries)
 	}
-	
+
 	// Wait for all groups to complete
 	go func() {
 		wg.Wait()
 		close(resultsChan)
 		close(errorsChan)
 	}()
-	
+
 	// Collect results
 	for queryResult := range resultsChan {
 		result.Results = append(result.Results, queryResult)
 		result.SuccessCount++
 	}
-	
+
 	// Collect errors
 	for err := range errorsChan {
 		if err != nil {
 			result.FailureCount++
 		}
 	}
-	
+
 	result.Duration = time.Since(startTime)
 	bus.metrics.RecordBatchQueryComplete(result.SuccessCount, result.FailureCount, result.Duration)
-	
+
 	return result, nil
 }
 
@@ -335,15 +335,15 @@ func (bus *QueryBus[T]) GetReadModel(
 	modelName string,
 	version *int64,
 ) (*ReadModel[T], error) {
-	
+
 	if !bus.config.EnableReadModels {
 		return nil, fmt.Errorf("read models not enabled")
 	}
-	
+
 	if bus.readModelManager == nil {
 		return nil, fmt.Errorf("read model manager not initialized")
 	}
-	
+
 	return bus.readModelManager.GetModel(ctx, modelName, version)
 }
 
@@ -352,15 +352,15 @@ func (bus *QueryBus[T]) RefreshMaterializedView(
 	ctx context.Context,
 	viewName string,
 ) error {
-	
+
 	if !bus.config.EnableMaterializedViews {
 		return fmt.Errorf("materialized views not enabled")
 	}
-	
+
 	if bus.viewManager == nil {
 		return fmt.Errorf("view manager not initialized")
 	}
-	
+
 	return bus.viewManager.RefreshView(ctx, viewName)
 }
 
@@ -369,12 +369,12 @@ func (bus *QueryBus[T]) RefreshMaterializedView(
 func (bus *QueryBus[T]) getHandler(queryType QueryType) (QueryHandler[T], error) {
 	bus.handlersMux.RLock()
 	defer bus.handlersMux.RUnlock()
-	
+
 	handler, exists := bus.handlers[queryType]
 	if !exists {
 		return nil, fmt.Errorf("no handler registered for query type: %s", queryType)
 	}
-	
+
 	return handler, nil
 }
 
@@ -383,23 +383,23 @@ func (bus *QueryBus[T]) executeWithCircuitBreaker(
 	query Query[T],
 	startTime time.Time,
 ) (*QueryResult[T], error) {
-	
+
 	var result *QueryResult[T]
 	var err error
-	
+
 	cbErr := bus.circuitBreaker.Execute(func() error {
 		result, err = bus.executeWithMiddleware(ctx, query, startTime)
 		return err
 	})
-	
+
 	if cbErr != nil {
 		bus.metrics.RecordQueryFailure(query.GetQueryType(), "circuit_breaker_open")
 		return &QueryResult[T]{
-			QueryID: query.GetQueryID(),
+			QueryID:  query.GetQueryID(),
 			Metadata: map[string]any{"error": cbErr.Error()},
 		}, cbErr
 	}
-	
+
 	return result, err
 }
 
@@ -408,24 +408,24 @@ func (bus *QueryBus[T]) executeWithMiddleware(
 	query Query[T],
 	startTime time.Time,
 ) (*QueryResult[T], error) {
-	
+
 	// Get handler
 	handler, err := bus.getHandler(query.GetQueryType())
 	if err != nil {
 		bus.metrics.RecordQueryFailure(query.GetQueryType(), "no_handler")
 		return &QueryResult[T]{
-			QueryID: query.GetQueryID(),
+			QueryID:  query.GetQueryID(),
 			Metadata: map[string]any{"error": err.Error()},
 		}, err
 	}
-	
+
 	// Build middleware chain
 	var finalHandler QueryHandler[T] = &finalQueryHandler[T]{
 		handler:   handler,
 		bus:       bus,
 		startTime: startTime,
 	}
-	
+
 	// Apply middleware in reverse order
 	for i := len(bus.middleware) - 1; i >= 0; i-- {
 		finalHandler = &queryMiddlewareHandler[T]{
@@ -433,23 +433,23 @@ func (bus *QueryBus[T]) executeWithMiddleware(
 			next:       finalHandler,
 		}
 	}
-	
+
 	// Execute query through middleware chain
 	result, err := finalHandler.Handle(ctx, query)
-	
+
 	// Record execution metrics
 	executionTime := time.Since(startTime)
 	bus.metrics.RecordQueryExecution(query.GetQueryType(), executionTime, err == nil)
-	
+
 	// Log slow queries
 	if executionTime > bus.config.SlowQueryThreshold {
 		bus.logSlowQuery(query, executionTime)
 	}
-	
+
 	if result != nil {
 		result.ExecutionTime = executionTime
 	}
-	
+
 	return result, err
 }
 
@@ -460,7 +460,7 @@ func (bus *QueryBus[T]) executeBatchGroup(
 	resultsChan chan<- *QueryResult[T],
 	errorsChan chan<- error,
 ) {
-	
+
 	// Get handler for this query type
 	handler, err := bus.getHandler(queryType)
 	if err != nil {
@@ -469,7 +469,7 @@ func (bus *QueryBus[T]) executeBatchGroup(
 		}
 		return
 	}
-	
+
 	// Execute queries of same type together for optimization
 	for _, query := range queries {
 		result, err := bus.executeWithMiddleware(ctx, query, time.Now())
@@ -483,12 +483,12 @@ func (bus *QueryBus[T]) executeBatchGroup(
 
 func (bus *QueryBus[T]) groupQueriesByType(queries []Query[T]) map[QueryType][]Query[T] {
 	groups := make(map[QueryType][]Query[T])
-	
+
 	for _, query := range queries {
 		queryType := query.GetQueryType()
 		groups[queryType] = append(groups[queryType], query)
 	}
-	
+
 	return groups
 }
 
@@ -515,7 +515,7 @@ func (bus *QueryBus[T]) logSlowQuery(query Query[T], executionTime time.Duration
 // AddMiddleware adds middleware to the query processing pipeline
 func (bus *QueryBus[T]) AddMiddleware(middleware QueryMiddleware[T]) {
 	bus.middleware = append(bus.middleware, middleware)
-	
+
 	// Sort middleware by order
 	bus.sortMiddleware()
 }
@@ -593,11 +593,11 @@ type QueryComplexity int
 type QuerySource string
 
 const (
-	QueryTypeGetSpan        QueryType = "get_span"
-	QueryTypeGetTrace       QueryType = "get_trace"
-	QueryTypeFindSpans      QueryType = "find_spans"
-	QueryTypeGetMetrics     QueryType = "get_metrics"
-	QueryTypeGetAggregates  QueryType = "get_aggregates"
+	QueryTypeGetSpan       QueryType = "get_span"
+	QueryTypeGetTrace      QueryType = "get_trace"
+	QueryTypeFindSpans     QueryType = "find_spans"
+	QueryTypeGetMetrics    QueryType = "get_metrics"
+	QueryTypeGetAggregates QueryType = "get_aggregates"
 )
 
 const (
@@ -607,10 +607,10 @@ const (
 )
 
 const (
-	QuerySourceCache      QuerySource = "cache"
-	QuerySourceDatabase   QuerySource = "database"
-	QuerySourceReadModel  QuerySource = "read_model"
-	QuerySourceView       QuerySource = "materialized_view"
+	QuerySourceCache     QuerySource = "cache"
+	QuerySourceDatabase  QuerySource = "database"
+	QuerySourceReadModel QuerySource = "read_model"
+	QuerySourceView      QuerySource = "materialized_view"
 )
 
 type QueryHandlerInfo struct {
@@ -661,11 +661,11 @@ type BatchQueryResult[T domain.TraceData] struct {
 }
 
 type ReadModel[T domain.TraceData] struct {
-	Name         string
-	Version      int64
-	Data         any
-	LastUpdated  time.Time
-	Metadata     map[string]any
+	Name        string
+	Version     int64
+	Data        any
+	LastUpdated time.Time
+	Metadata    map[string]any
 }
 
 // Helper functions

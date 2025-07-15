@@ -20,7 +20,7 @@ type Exporter struct {
 	traceExporter *TraceExporter
 	spanGenerator *SpanGenerator
 	config        *ExporterConfig
-	
+
 	// OTEL SDK components
 	tracerProvider *trace.TracerProvider
 	shutdown       chan struct{}
@@ -34,26 +34,26 @@ type ExporterConfig struct {
 	ServiceName     string
 	ServiceVersion  string
 	ServiceInstance string
-	
+
 	// OTEL endpoint
 	OTLPEndpoint string
 	Headers      map[string]string
 	Insecure     bool
-	
+
 	// Export behavior
-	BatchTimeout    time.Duration
-	BatchSize       int
-	ExportTimeout   time.Duration
-	
+	BatchTimeout  time.Duration
+	BatchSize     int
+	ExportTimeout time.Duration
+
 	// Trace configuration
 	TraceConfig *TraceConfig
 	SpanConfig  *SpanConfig
-	
+
 	// Performance and reliability
 	MaxConcurrentExports int
 	RetryConfig          *RetryConfig
 	SamplingRate         float64
-	
+
 	// Resource attributes
 	ResourceAttributes map[string]string
 }
@@ -71,22 +71,22 @@ func NewExporter(config *ExporterConfig) (*Exporter, error) {
 	if config == nil {
 		config = DefaultExporterConfig()
 	}
-	
+
 	// Initialize OTEL SDK
 	tracerProvider, err := initializeTracerProvider(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize tracer provider: %w", err)
 	}
-	
+
 	// Set global tracer provider
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
-	
+
 	// Create trace exporter and span generator
 	tracer := tracerProvider.Tracer("tapio-exports")
 	traceExporter := NewTraceExporter(config.TraceConfig)
 	spanGenerator := NewSpanGenerator(tracer, config.SpanConfig)
-	
+
 	return &Exporter{
 		traceExporter:  traceExporter,
 		spanGenerator:  spanGenerator,
@@ -99,16 +99,16 @@ func NewExporter(config *ExporterConfig) (*Exporter, error) {
 // DefaultExporterConfig returns sensible defaults for the exporter
 func DefaultExporterConfig() *ExporterConfig {
 	return &ExporterConfig{
-		ServiceName:     "tapio-correlation-engine",
-		ServiceVersion:  "1.0.0",
-		ServiceInstance: fmt.Sprintf("instance-%d", time.Now().Unix()),
-		OTLPEndpoint:    "http://localhost:4318/v1/traces",
-		Insecure:        true,
-		BatchTimeout:    5 * time.Second,
-		BatchSize:       100,
-		ExportTimeout:   10 * time.Second,
-		TraceConfig:     DefaultTraceConfig(),
-		SpanConfig:      DefaultSpanConfig(),
+		ServiceName:          "tapio-correlation-engine",
+		ServiceVersion:       "1.0.0",
+		ServiceInstance:      fmt.Sprintf("instance-%d", time.Now().Unix()),
+		OTLPEndpoint:         "http://localhost:4318/v1/traces",
+		Insecure:             true,
+		BatchTimeout:         5 * time.Second,
+		BatchSize:            100,
+		ExportTimeout:        10 * time.Second,
+		TraceConfig:          DefaultTraceConfig(),
+		SpanConfig:           DefaultSpanConfig(),
 		MaxConcurrentExports: 10,
 		RetryConfig: &RetryConfig{
 			MaxRetries:      3,
@@ -135,7 +135,7 @@ func initializeTracerProvider(config *ExporterConfig) (*trace.TracerProvider, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
-	
+
 	// Create resource with service information
 	resourceAttrs := []resource.Option{
 		resource.WithAttributes(
@@ -144,7 +144,7 @@ func initializeTracerProvider(config *ExporterConfig) (*trace.TracerProvider, er
 			semconv.ServiceInstanceIDKey.String(config.ServiceInstance),
 		),
 	}
-	
+
 	// Add custom resource attributes
 	if len(config.ResourceAttributes) > 0 {
 		attrs := make([]resource.Option, 0, len(config.ResourceAttributes))
@@ -155,12 +155,12 @@ func initializeTracerProvider(config *ExporterConfig) (*trace.TracerProvider, er
 		}
 		resourceAttrs = append(resourceAttrs, attrs...)
 	}
-	
+
 	res, err := resource.New(context.Background(), resourceAttrs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
-	
+
 	// Create tracer provider
 	tp := trace.NewTracerProvider(
 		trace.WithBatcher(exporter,
@@ -170,7 +170,7 @@ func initializeTracerProvider(config *ExporterConfig) (*trace.TracerProvider, er
 		trace.WithResource(res),
 		trace.WithSampler(trace.TraceIDRatioBased(config.SamplingRate)),
 	)
-	
+
 	return tp, nil
 }
 
@@ -178,11 +178,11 @@ func initializeTracerProvider(config *ExporterConfig) (*trace.TracerProvider, er
 func (e *Exporter) Start(ctx context.Context) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	if e.running {
 		return fmt.Errorf("exporter already running")
 	}
-	
+
 	e.running = true
 	return nil
 }
@@ -191,19 +191,19 @@ func (e *Exporter) Start(ctx context.Context) error {
 func (e *Exporter) Stop(ctx context.Context) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	if !e.running {
 		return nil
 	}
-	
+
 	e.running = false
 	close(e.shutdown)
-	
+
 	// Shutdown tracer provider to flush remaining spans
 	if err := e.tracerProvider.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown tracer provider: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -212,17 +212,17 @@ func (e *Exporter) ExportCorrelationResult(ctx context.Context, result *correlat
 	if !e.isRunning() {
 		return fmt.Errorf("exporter not running")
 	}
-	
+
 	// Create root span for the correlation
 	ctx, rootSpan := e.spanGenerator.GenerateCorrelationSpan(ctx, result)
 	defer rootSpan.End()
-	
+
 	// Export using trace exporter for detailed analysis
 	if err := e.traceExporter.ExportCorrelationResult(ctx, result); err != nil {
 		rootSpan.RecordError(err)
 		return fmt.Errorf("failed to export correlation result: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -231,11 +231,11 @@ func (e *Exporter) ExportCorrelationBatch(ctx context.Context, results []*correl
 	if !e.isRunning() {
 		return fmt.Errorf("exporter not running")
 	}
-	
+
 	if len(results) == 0 {
 		return nil
 	}
-	
+
 	// Use batch export for efficiency
 	return e.traceExporter.ExportBatch(ctx, results)
 }
@@ -245,14 +245,14 @@ func (e *Exporter) ExportRuleExecution(ctx context.Context, ruleID, ruleName str
 	if !e.isRunning() {
 		return nil // Silently skip if not running
 	}
-	
+
 	// Create span for rule execution
 	startTime := time.Now().Add(-duration)
 	ctx, span := e.spanGenerator.GenerateRuleExecutionSpan(ctx, ruleID, ruleName, startTime)
-	
+
 	// Finish the span with results
 	e.spanGenerator.FinishRuleExecutionSpan(span, duration, matched, err)
-	
+
 	return nil
 }
 
@@ -261,23 +261,23 @@ func (e *Exporter) ExportEventProcessing(ctx context.Context, event *correlation
 	if !e.isRunning() {
 		return nil
 	}
-	
+
 	// Create span for event processing
 	ctx, eventSpan := e.spanGenerator.GenerateEventSpan(ctx, event, nil)
 	defer eventSpan.End()
-	
+
 	// Record processing time
 	eventSpan.SetAttributes(
 		resource.NewAttribute("processing.duration_ms", processingTime.Milliseconds()),
 		resource.NewAttribute("processing.correlations_found", len(correlations)),
 	)
-	
+
 	// Create child spans for each correlation found
 	for _, correlation := range correlations {
 		_, correlationSpan := e.spanGenerator.GenerateCorrelationSpan(ctx, correlation)
 		correlationSpan.End()
 	}
-	
+
 	return nil
 }
 
@@ -286,13 +286,13 @@ func (e *Exporter) ExportTimeline(ctx context.Context, timeline []correlation.Ti
 	if !e.isRunning() {
 		return nil
 	}
-	
+
 	// Create spans for each timeline entry
 	for _, entry := range timeline {
 		ctx, span := e.spanGenerator.GenerateTimelineSpan(ctx, &entry, correlationID)
 		span.End()
 	}
-	
+
 	return nil
 }
 
@@ -300,7 +300,7 @@ func (e *Exporter) ExportTimeline(ctx context.Context, timeline []correlation.Ti
 func (e *Exporter) GetMetrics() ExportMetrics {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
+
 	// This would typically aggregate metrics from internal components
 	return ExportMetrics{
 		Running:        e.running,
@@ -310,11 +310,11 @@ func (e *Exporter) GetMetrics() ExportMetrics {
 
 // ExportMetrics provides metrics about export operations
 type ExportMetrics struct {
-	Running           bool
-	ExportsTotal      int64
-	ExportErrors      int64
-	LastExportTime    time.Time
-	AvgExportLatency  time.Duration
+	Running          bool
+	ExportsTotal     int64
+	ExportErrors     int64
+	LastExportTime   time.Time
+	AvgExportLatency time.Duration
 }
 
 // isRunning safely checks if the exporter is running
@@ -329,14 +329,14 @@ func (e *Exporter) SetSamplingRate(rate float64) error {
 	if rate < 0 || rate > 1 {
 		return fmt.Errorf("sampling rate must be between 0 and 1")
 	}
-	
+
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	e.config.SamplingRate = rate
 	// Note: In a real implementation, you'd need to recreate the tracer provider
 	// with the new sampling rate or use a dynamic sampler
-	
+
 	return nil
 }
 
@@ -344,7 +344,7 @@ func (e *Exporter) SetSamplingRate(rate float64) error {
 func (e *Exporter) GetConfig() *ExporterConfig {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
-	
+
 	// Return a copy to prevent external modification
 	configCopy := *e.config
 	return &configCopy
@@ -355,6 +355,6 @@ func (e *Exporter) ForceFlush(ctx context.Context) error {
 	if !e.isRunning() {
 		return fmt.Errorf("exporter not running")
 	}
-	
+
 	return e.tracerProvider.ForceFlush(ctx)
 }

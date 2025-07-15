@@ -13,9 +13,9 @@ import (
 
 // EnhancedChecker combines local health checking with correlation insights
 type EnhancedChecker struct {
-	k8sClient    kubernetes.Interface
+	k8sClient     kubernetes.Interface
 	healthChecker *health.Checker
-	corrClient   *CorrelationClient
+	corrClient    *CorrelationClient
 }
 
 // NewEnhancedChecker creates a new enhanced checker
@@ -44,10 +44,10 @@ func (ec *EnhancedChecker) CheckResource(ctx context.Context, resourceType, reso
 	}
 
 	report := &EnhancedHealthReport{
-		BasicHealth:  basicHealth,
-		Predictions:  []*correlation.Prediction{},
-		Insights:     []*correlation.InsightResponse{},
-		TimeChecked:  time.Now(),
+		BasicHealth: basicHealth,
+		Predictions: []*correlation.Prediction{},
+		Insights:    []*correlation.InsightResponse{},
+		TimeChecked: time.Now(),
 	}
 
 	// Try to get insights from correlation server
@@ -55,7 +55,7 @@ func (ec *EnhancedChecker) CheckResource(ctx context.Context, resourceType, reso
 		insights, err := ec.corrClient.GetInsights(ctx, resourceName, namespace)
 		if err == nil && len(insights) > 0 {
 			report.Insights = insights
-			
+
 			// Extract predictions
 			for _, insight := range insights {
 				if insight.Prediction != nil {
@@ -77,13 +77,13 @@ func (ec *EnhancedChecker) CheckResource(ctx context.Context, resourceType, reso
 // performLocalAnalysis does basic trend analysis locally
 func (ec *EnhancedChecker) performLocalAnalysis(health *health.Report) *LocalAnalysis {
 	analysis := &LocalAnalysis{
-		Warnings: []string{},
+		Warnings:    []string{},
 		Suggestions: []string{},
 	}
 
 	// Check for high restart count
 	if health.RestartCount > 5 {
-		analysis.Warnings = append(analysis.Warnings, 
+		analysis.Warnings = append(analysis.Warnings,
 			fmt.Sprintf("High restart count: %d restarts in last hour", health.RestartCount))
 		analysis.Suggestions = append(analysis.Suggestions,
 			"Check pod logs for crash reasons: kubectl logs <pod> --previous")
@@ -93,7 +93,7 @@ func (ec *EnhancedChecker) performLocalAnalysis(health *health.Report) *LocalAna
 	if health.MemoryUsagePercent > 80 {
 		analysis.Warnings = append(analysis.Warnings,
 			fmt.Sprintf("High memory usage: %.1f%%", health.MemoryUsagePercent))
-		
+
 		// Simple OOM prediction based on current usage
 		if health.MemoryUsagePercent > 90 {
 			minutesToOOM := (100 - health.MemoryUsagePercent) * 10 // Simple linear prediction

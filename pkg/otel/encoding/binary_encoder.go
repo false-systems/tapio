@@ -18,83 +18,83 @@ import (
 type BinaryEncoder[T domain.TraceData] struct {
 	// Configuration
 	config EncoderConfig
-	
+
 	// Buffer pools for zero-allocation paths
-	bufferPool     sync.Pool
-	writerPool     sync.Pool
-	
+	bufferPool sync.Pool
+	writerPool sync.Pool
+
 	// Performance counters
 	encodedBytes   int64
 	encodedSpans   int64
 	encodingErrors int64
 	poolHits       int64
 	poolMisses     int64
-	
+
 	// Format version for backward compatibility
-	formatVersion  uint32
-	
+	formatVersion uint32
+
 	// Compression support
 	compressor     Compressor
 	compressionBuf []byte
-	
+
 	// SIMD optimization support
-	simdEnabled    bool
-	simdThreshold  int
-	
+	simdEnabled   bool
+	simdThreshold int
+
 	// Custom type handlers for domain-specific encoding
-	typeHandlers   map[TypeID]TypeHandler[T]
-	handlerMutex   sync.RWMutex
+	typeHandlers map[TypeID]TypeHandler[T]
+	handlerMutex sync.RWMutex
 }
 
 // EncoderConfig configures binary encoding behavior and performance characteristics
 type EncoderConfig struct {
 	// Buffer configuration
-	InitialBufferSize  int           // Initial buffer size (default: 4KB)
-	MaxBufferSize      int           // Maximum buffer size (default: 1MB)
-	BufferPoolSize     int           // Buffer pool size (default: 100)
-	
+	InitialBufferSize int // Initial buffer size (default: 4KB)
+	MaxBufferSize     int // Maximum buffer size (default: 1MB)
+	BufferPoolSize    int // Buffer pool size (default: 100)
+
 	// Compression settings
-	EnableCompression  bool          // Enable compression for large payloads
-	CompressionThreshold int         // Compress if larger than threshold
-	CompressionLevel   int           // Compression level (1-9)
-	CompressionType    CompressionType
-	
+	EnableCompression    bool // Enable compression for large payloads
+	CompressionThreshold int  // Compress if larger than threshold
+	CompressionLevel     int  // Compression level (1-9)
+	CompressionType      CompressionType
+
 	// Performance tuning
-	EnableSIMD         bool          // Enable SIMD optimizations
-	SIMDThreshold      int           // Use SIMD for data larger than threshold
-	EnableZeroCopy     bool          // Enable zero-copy optimizations
-	
+	EnableSIMD     bool // Enable SIMD optimizations
+	SIMDThreshold  int  // Use SIMD for data larger than threshold
+	EnableZeroCopy bool // Enable zero-copy optimizations
+
 	// Format options
-	FormatVersion      uint32        // Binary format version
-	EnableChecksums    bool          // Enable data integrity checksums
-	EnableTimestamps   bool          // Include encoding timestamps
-	
+	FormatVersion    uint32 // Binary format version
+	EnableChecksums  bool   // Enable data integrity checksums
+	EnableTimestamps bool   // Include encoding timestamps
+
 	// Custom encoding
-	EnableCustomTypes  bool          // Support custom type encoding
-	TypeRegistry       TypeRegistry  // Custom type registry
-	
+	EnableCustomTypes bool         // Support custom type encoding
+	TypeRegistry      TypeRegistry // Custom type registry
+
 	// Memory management
-	EnableArenaAlloc   bool          // Use arena allocation
-	ArenaSize          int64         // Arena size for allocations
-	
+	EnableArenaAlloc bool  // Use arena allocation
+	ArenaSize        int64 // Arena size for allocations
+
 	// Error handling
-	ErrorMode          ErrorMode     // How to handle encoding errors
-	MaxErrors          int           // Maximum errors before failing
-	ErrorCallback      func(error)   // Error callback function
+	ErrorMode     ErrorMode   // How to handle encoding errors
+	MaxErrors     int         // Maximum errors before failing
+	ErrorCallback func(error) // Error callback function
 }
 
 // BinaryWriter provides high-performance binary writing with zero-allocation design
 type BinaryWriter struct {
-	buf      []byte    // Current buffer
-	pos      int       // Current position
-	capacity int       // Buffer capacity
-	scratch  [16]byte  // Scratch space for small writes
-	
+	buf      []byte   // Current buffer
+	pos      int      // Current position
+	capacity int      // Buffer capacity
+	scratch  [16]byte // Scratch space for small writes
+
 	// Performance optimization
-	enableBatching bool  // Enable write batching
-	batchSize      int   // Batch size for writes
-	batchCount     int   // Current batch count
-	
+	enableBatching bool // Enable write batching
+	batchSize      int  // Batch size for writes
+	batchCount     int  // Current batch count
+
 	// Checksum support
 	checksum       uint32 // Running checksum
 	enableChecksum bool   // Whether to calculate checksum
@@ -102,18 +102,18 @@ type BinaryWriter struct {
 
 // BinaryReader provides high-performance binary reading with SIMD optimization
 type BinaryReader struct {
-	data     []byte    // Source data
-	pos      int       // Current position
-	limit    int       // Data limit
-	scratch  [16]byte  // Scratch space for reads
-	
+	data    []byte   // Source data
+	pos     int      // Current position
+	limit   int      // Data limit
+	scratch [16]byte // Scratch space for reads
+
 	// Validation
 	checksum       uint32 // Expected checksum
 	enableChecksum bool   // Whether to validate checksum
-	
+
 	// Performance tracking
-	bytesRead      int64  // Total bytes read
-	readOperations int64  // Number of read operations
+	bytesRead      int64 // Total bytes read
+	readOperations int64 // Number of read operations
 }
 
 // TypeHandler defines custom encoding/decoding for specific types
@@ -121,10 +121,10 @@ type TypeHandler[T domain.TraceData] interface {
 	// Encoding
 	EncodeTo(writer *BinaryWriter, value T) error
 	EstimateSize(value T) int
-	
+
 	// Decoding
 	DecodeFrom(reader *BinaryReader) (T, error)
-	
+
 	// Metadata
 	GetTypeID() TypeID
 	GetVersion() uint32
@@ -155,33 +155,33 @@ const (
 const (
 	FormatMagic   = 0x544F544C // "TOTL" - Tapio OTEL
 	FormatVersion = 1
-	
+
 	// Type markers
 	TypeMarkerSpan      = 0x01
 	TypeMarkerAttribute = 0x02
 	TypeMarkerEvent     = 0x03
 	TypeMarkerLink      = 0x04
 	TypeMarkerResource  = 0x05
-	
+
 	// Value type markers
-	ValueTypeString   = 0x10
-	ValueTypeInt64    = 0x11
-	ValueTypeFloat64  = 0x12
-	ValueTypeBool     = 0x13
-	ValueTypeBytes    = 0x14
-	ValueTypeArray    = 0x15
-	ValueTypeMap      = 0x16
-	
+	ValueTypeString  = 0x10
+	ValueTypeInt64   = 0x11
+	ValueTypeFloat64 = 0x12
+	ValueTypeBool    = 0x13
+	ValueTypeBytes   = 0x14
+	ValueTypeArray   = 0x15
+	ValueTypeMap     = 0x16
+
 	// Special markers
-	MarkerCompressed  = 0x80
-	MarkerChecksum    = 0x81
-	MarkerTimestamp   = 0x82
+	MarkerCompressed = 0x80
+	MarkerChecksum   = 0x81
+	MarkerTimestamp  = 0x82
 )
 
 // NewBinaryEncoder creates a new high-performance binary encoder
 func NewBinaryEncoder[T domain.TraceData](config EncoderConfig) *BinaryEncoder[T] {
 	applyEncoderDefaults(&config)
-	
+
 	encoder := &BinaryEncoder[T]{
 		config:         config,
 		formatVersion:  config.FormatVersion,
@@ -190,18 +190,18 @@ func NewBinaryEncoder[T domain.TraceData](config EncoderConfig) *BinaryEncoder[T
 		typeHandlers:   make(map[TypeID]TypeHandler[T]),
 		compressionBuf: make([]byte, config.MaxBufferSize),
 	}
-	
+
 	// Initialize buffer pools
 	encoder.initializePools()
-	
+
 	// Initialize compressor if enabled
 	if config.EnableCompression {
 		encoder.compressor = NewCompressor(config.CompressionType, config.CompressionLevel)
 	}
-	
+
 	// Register default type handlers
 	encoder.registerDefaultHandlers()
-	
+
 	return encoder
 }
 
@@ -210,7 +210,7 @@ func (e *BinaryEncoder[T]) EncodeSpan(span domain.SpanSnapshot[T]) ([]byte, erro
 	// Get buffer from pool
 	writer := e.getWriter()
 	defer e.putWriter(writer)
-	
+
 	// Write magic number and version
 	if err := writer.WriteU32(FormatMagic); err != nil {
 		return nil, fmt.Errorf("failed to write magic: %w", err)
@@ -218,18 +218,18 @@ func (e *BinaryEncoder[T]) EncodeSpan(span domain.SpanSnapshot[T]) ([]byte, erro
 	if err := writer.WriteU32(e.formatVersion); err != nil {
 		return nil, fmt.Errorf("failed to write version: %w", err)
 	}
-	
+
 	// Write span marker
 	if err := writer.WriteU8(TypeMarkerSpan); err != nil {
 		return nil, fmt.Errorf("failed to write span marker: %w", err)
 	}
-	
+
 	// Encode span data
 	if err := e.encodeSpanData(writer, span); err != nil {
 		atomic.AddInt64(&e.encodingErrors, 1)
 		return nil, fmt.Errorf("failed to encode span data: %w", err)
 	}
-	
+
 	// Add checksum if enabled
 	if e.config.EnableChecksums {
 		checksum := writer.GetChecksum()
@@ -237,10 +237,10 @@ func (e *BinaryEncoder[T]) EncodeSpan(span domain.SpanSnapshot[T]) ([]byte, erro
 			return nil, fmt.Errorf("failed to write checksum: %w", err)
 		}
 	}
-	
+
 	// Get result
 	result := writer.Bytes()
-	
+
 	// Apply compression if needed
 	if e.config.EnableCompression && len(result) > e.config.CompressionThreshold {
 		compressed, err := e.compressor.Compress(result, e.compressionBuf[:0])
@@ -248,25 +248,25 @@ func (e *BinaryEncoder[T]) EncodeSpan(span domain.SpanSnapshot[T]) ([]byte, erro
 			atomic.AddInt64(&e.encodingErrors, 1)
 			return nil, fmt.Errorf("failed to compress data: %w", err)
 		}
-		
+
 		// Create compressed envelope
 		compressedWriter := e.getWriter()
 		defer e.putWriter(compressedWriter)
-		
+
 		compressedWriter.WriteU32(FormatMagic)
 		compressedWriter.WriteU32(e.formatVersion)
 		compressedWriter.WriteU8(MarkerCompressed)
 		compressedWriter.WriteU8(uint8(e.config.CompressionType))
 		compressedWriter.WriteU32(uint32(len(result))) // Original size
 		compressedWriter.WriteBytes(compressed)
-		
+
 		result = compressedWriter.Bytes()
 	}
-	
+
 	// Update statistics
 	atomic.AddInt64(&e.encodedBytes, int64(len(result)))
 	atomic.AddInt64(&e.encodedSpans, 1)
-	
+
 	return result, nil
 }
 
@@ -275,16 +275,16 @@ func (e *BinaryEncoder[T]) EncodeSpanBatch(spans []domain.SpanSnapshot[T]) ([]by
 	if len(spans) == 0 {
 		return nil, nil
 	}
-	
+
 	writer := e.getWriter()
 	defer e.putWriter(writer)
-	
+
 	// Write batch header
 	writer.WriteU32(FormatMagic)
 	writer.WriteU32(e.formatVersion)
 	writer.WriteU8(TypeMarkerSpan | 0x40) // Batch marker
 	writer.WriteU32(uint32(len(spans)))
-	
+
 	// Encode spans with SIMD optimization if enabled
 	if e.simdEnabled && len(spans) >= e.simdThreshold {
 		if err := e.encodeSpanBatchSIMD(writer, spans); err != nil {
@@ -297,11 +297,11 @@ func (e *BinaryEncoder[T]) EncodeSpanBatch(spans []domain.SpanSnapshot[T]) ([]by
 			}
 		}
 	}
-	
+
 	result := writer.Bytes()
 	atomic.AddInt64(&e.encodedBytes, int64(len(result)))
 	atomic.AddInt64(&e.encodedSpans, int64(len(spans)))
-	
+
 	return result, nil
 }
 
@@ -311,19 +311,19 @@ func (e *BinaryEncoder[T]) EncodeToWriter(writer io.Writer, span domain.SpanSnap
 	if err != nil {
 		return fmt.Errorf("failed to encode span: %w", err)
 	}
-	
+
 	_, err = writer.Write(data)
 	if err != nil {
 		return fmt.Errorf("failed to write encoded data: %w", err)
 	}
-	
+
 	return nil
 }
 
 // DecodeSpan decodes a span from binary data with validation
 func (e *BinaryEncoder[T]) DecodeSpan(data []byte) (domain.SpanSnapshot[T], error) {
 	reader := NewBinaryReader(data)
-	
+
 	// Validate magic and version
 	magic, err := reader.ReadU32()
 	if err != nil {
@@ -332,7 +332,7 @@ func (e *BinaryEncoder[T]) DecodeSpan(data []byte) (domain.SpanSnapshot[T], erro
 	if magic != FormatMagic {
 		return nil, fmt.Errorf("invalid magic number: %x", magic)
 	}
-	
+
 	version, err := reader.ReadU32()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read version: %w", err)
@@ -340,39 +340,39 @@ func (e *BinaryEncoder[T]) DecodeSpan(data []byte) (domain.SpanSnapshot[T], erro
 	if version != e.formatVersion {
 		return nil, fmt.Errorf("unsupported version: %d", version)
 	}
-	
+
 	// Check for compression
 	marker, err := reader.ReadU8()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read marker: %w", err)
 	}
-	
+
 	if marker == MarkerCompressed {
 		return e.decodeCompressedSpan(reader)
 	}
-	
+
 	if marker != TypeMarkerSpan {
 		return nil, fmt.Errorf("invalid span marker: %x", marker)
 	}
-	
+
 	// Decode span data
 	span, err := e.decodeSpanData(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode span data: %w", err)
 	}
-	
+
 	// Validate checksum if present
 	if e.config.EnableChecksums {
 		expectedChecksum, err := reader.ReadU32()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read checksum: %w", err)
 		}
-		
+
 		if reader.GetChecksum() != expectedChecksum {
 			return nil, fmt.Errorf("checksum validation failed")
 		}
 	}
-	
+
 	return span, nil
 }
 
@@ -382,33 +382,33 @@ func (e *BinaryEncoder[T]) encodeSpanData(writer *BinaryWriter, span domain.Span
 	// Write trace ID (16 bytes)
 	traceID := span.GetTraceID()
 	writer.WriteBytes(traceID[:])
-	
+
 	// Write span ID (8 bytes)
 	spanID := span.GetSpanID()
 	writer.WriteBytes(spanID[:])
-	
+
 	// Write parent span ID (8 bytes)
 	parentID := span.GetParentSpanID()
 	writer.WriteBytes(parentID[:])
-	
+
 	// Write timing information
 	startTime := span.GetStartTime()
 	endTime := span.GetEndTime()
 	writer.WriteU64(uint64(startTime.UnixNano()))
 	writer.WriteU64(uint64(endTime.UnixNano()))
-	
+
 	// Write span name
 	name := span.GetName()
 	writer.WriteString(name)
-	
+
 	// Write span kind
 	writer.WriteU8(uint8(span.GetKind()))
-	
+
 	// Write status
 	status := span.GetStatus()
 	writer.WriteU8(uint8(status.Code))
 	writer.WriteString(status.Description)
-	
+
 	// Write attributes
 	attrs := span.GetAttributes()
 	writer.WriteU32(uint32(len(attrs)))
@@ -417,7 +417,7 @@ func (e *BinaryEncoder[T]) encodeSpanData(writer *BinaryWriter, span domain.Span
 			return fmt.Errorf("failed to encode attribute: %w", err)
 		}
 	}
-	
+
 	// Write events
 	events := span.GetEvents()
 	writer.WriteU32(uint32(len(events)))
@@ -426,7 +426,7 @@ func (e *BinaryEncoder[T]) encodeSpanData(writer *BinaryWriter, span domain.Span
 			return fmt.Errorf("failed to encode event: %w", err)
 		}
 	}
-	
+
 	// Write links
 	links := span.GetLinks()
 	writer.WriteU32(uint32(len(links)))
@@ -435,25 +435,25 @@ func (e *BinaryEncoder[T]) encodeSpanData(writer *BinaryWriter, span domain.Span
 			return fmt.Errorf("failed to encode link: %w", err)
 		}
 	}
-	
+
 	// Write resource
 	resource := span.GetResource()
 	if err := e.encodeResource(writer, resource); err != nil {
 		return fmt.Errorf("failed to encode resource: %w", err)
 	}
-	
+
 	return nil
 }
 
 func (e *BinaryEncoder[T]) encodeAttribute(writer *BinaryWriter, attr domain.SpanAttribute[T]) error {
 	// Write attribute marker
 	writer.WriteU8(TypeMarkerAttribute)
-	
+
 	// Write key (stored as unsafe.Pointer in attribute)
 	// For now, we'll extract the key through the unsafe pointer
 	keyPtr := (*string)(unsafe.Pointer(&attr))
 	writer.WriteString(*keyPtr)
-	
+
 	// Write value with type information
 	return e.encodeValue(writer, attr)
 }
@@ -498,7 +498,7 @@ func (e *BinaryEncoder[T]) encodeValue(writer *BinaryWriter, value any) error {
 			return fmt.Errorf("unsupported value type: %T", value)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -506,7 +506,7 @@ func (e *BinaryEncoder[T]) encodeEvent(writer *BinaryWriter, event domain.SpanEv
 	writer.WriteU8(TypeMarkerEvent)
 	writer.WriteString(event.Name)
 	writer.WriteU64(uint64(event.Timestamp.UnixNano()))
-	
+
 	// Encode event attributes
 	writer.WriteU32(uint32(len(event.Attributes)))
 	for _, attr := range event.Attributes {
@@ -514,7 +514,7 @@ func (e *BinaryEncoder[T]) encodeEvent(writer *BinaryWriter, event domain.SpanEv
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -522,7 +522,7 @@ func (e *BinaryEncoder[T]) encodeLink(writer *BinaryWriter, link domain.SpanLink
 	writer.WriteU8(TypeMarkerLink)
 	writer.WriteBytes(link.TraceID[:])
 	writer.WriteBytes(link.SpanID[:])
-	
+
 	// Encode link attributes
 	writer.WriteU32(uint32(len(link.Attributes)))
 	for _, attr := range link.Attributes {
@@ -530,14 +530,14 @@ func (e *BinaryEncoder[T]) encodeLink(writer *BinaryWriter, link domain.SpanLink
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
 func (e *BinaryEncoder[T]) encodeResource(writer *BinaryWriter, resource domain.Resource) error {
 	writer.WriteU8(TypeMarkerResource)
 	writer.WriteString(resource.SchemaURL)
-	
+
 	// Encode resource attributes
 	writer.WriteU32(uint32(len(resource.Attributes)))
 	for key, value := range resource.Attributes {
@@ -546,7 +546,7 @@ func (e *BinaryEncoder[T]) encodeResource(writer *BinaryWriter, resource domain.
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -554,7 +554,7 @@ func (e *BinaryEncoder[T]) encodeCustomValue(writer *BinaryWriter, value any) er
 	// Check if we have a custom handler for this value type
 	e.handlerMutex.RLock()
 	defer e.handlerMutex.RUnlock()
-	
+
 	for typeID, handler := range e.typeHandlers {
 		// This is a simplified type check - in practice, you'd use reflection
 		// or a more sophisticated type system
@@ -565,7 +565,7 @@ func (e *BinaryEncoder[T]) encodeCustomValue(writer *BinaryWriter, value any) er
 			}
 		}
 	}
-	
+
 	return fmt.Errorf("no custom handler found for type")
 }
 
@@ -573,16 +573,16 @@ func (e *BinaryEncoder[T]) encodeSpanBatchSIMD(writer *BinaryWriter, spans []dom
 	// SIMD-optimized batch encoding
 	// This would use SIMD instructions for vectorized operations
 	// For now, we implement an optimized loop
-	
+
 	// Process spans in chunks for better cache locality
 	chunkSize := 8 // Process 8 spans at once for SIMD alignment
-	
+
 	for i := 0; i < len(spans); i += chunkSize {
 		end := i + chunkSize
 		if end > len(spans) {
 			end = len(spans)
 		}
-		
+
 		// Process chunk
 		for j := i; j < end; j++ {
 			if err := e.encodeSpanData(writer, spans[j]); err != nil {
@@ -590,7 +590,7 @@ func (e *BinaryEncoder[T]) encodeSpanBatchSIMD(writer *BinaryWriter, spans []dom
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -600,23 +600,23 @@ func (e *BinaryEncoder[T]) decodeCompressedSpan(reader *BinaryReader) (domain.Sp
 	if err != nil {
 		return nil, fmt.Errorf("failed to read compression type: %w", err)
 	}
-	
+
 	// Read original size
 	originalSize, err := reader.ReadU32()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read original size: %w", err)
 	}
-	
+
 	// Read compressed data
 	compressedData := reader.ReadRemaining()
-	
+
 	// Decompress
 	compressor := NewCompressor(CompressionType(compressionType), 0)
 	decompressed, err := compressor.Decompress(compressedData, int(originalSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decompress data: %w", err)
 	}
-	
+
 	// Decode decompressed data
 	return e.DecodeSpan(decompressed)
 }
@@ -634,7 +634,7 @@ func (e *BinaryEncoder[T]) getWriter() *BinaryWriter {
 		atomic.AddInt64(&e.poolHits, 1)
 		return w
 	}
-	
+
 	atomic.AddInt64(&e.poolMisses, 1)
 	return NewBinaryWriter(e.config.InitialBufferSize)
 }
@@ -649,7 +649,7 @@ func (e *BinaryEncoder[T]) initializePools() {
 	e.bufferPool.New = func() any {
 		return make([]byte, e.config.InitialBufferSize)
 	}
-	
+
 	e.writerPool.New = func() any {
 		return NewBinaryWriter(e.config.InitialBufferSize)
 	}
@@ -663,11 +663,11 @@ func (e *BinaryEncoder[T]) registerDefaultHandlers() {
 // GetStats returns encoder performance statistics
 func (e *BinaryEncoder[T]) GetStats() EncoderStats {
 	return EncoderStats{
-		EncodedBytes:   atomic.LoadInt64(&e.encodedBytes),
-		EncodedSpans:   atomic.LoadInt64(&e.encodedSpans),
-		EncodingErrors: atomic.LoadInt64(&e.encodingErrors),
-		PoolHits:       atomic.LoadInt64(&e.poolHits),
-		PoolMisses:     atomic.LoadInt64(&e.poolMisses),
+		EncodedBytes:     atomic.LoadInt64(&e.encodedBytes),
+		EncodedSpans:     atomic.LoadInt64(&e.encodedSpans),
+		EncodingErrors:   atomic.LoadInt64(&e.encodingErrors),
+		PoolHits:         atomic.LoadInt64(&e.poolHits),
+		PoolMisses:       atomic.LoadInt64(&e.poolMisses),
 		CompressionRatio: e.getCompressionRatio(),
 	}
 }

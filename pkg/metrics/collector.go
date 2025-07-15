@@ -29,19 +29,19 @@ type PrometheusMetricCollector[T MetricType] struct {
 	// Rate limiting and backpressure
 	backpressureHandler *BackpressureHandler[T]
 	circuitBreaker      *CircuitBreaker
-	
+
 	// Performance tracking
 	stats CollectorStats
-	
+
 	// Worker pool for concurrent collection
 	workerPool    *WorkerPool
 	resultChannel chan CollectionResult[T]
 	batchChannel  chan BatchResult[T]
-	
+
 	// Memory management
-	itemPool     sync.Pool
-	resultPool   sync.Pool
-	batchPool    sync.Pool
+	itemPool   sync.Pool
+	resultPool sync.Pool
+	batchPool  sync.Pool
 }
 
 // CollectorConfig configures the metric collector with advanced features
@@ -49,76 +49,76 @@ type CollectorConfig[T MetricType] struct {
 	// Core collection settings
 	CollectorName      string
 	CollectionInterval time.Duration
-	Timeout           time.Duration
-	
+	Timeout            time.Duration
+
 	// Rate limiting
-	RateLimit         RateLimitSettings
-	
+	RateLimit RateLimitSettings
+
 	// Backpressure management
-	Backpressure      BackpressureSettings
-	
+	Backpressure BackpressureSettings
+
 	// Circuit breaker
-	CircuitBreaker    CircuitBreakerSettings
-	
+	CircuitBreaker CircuitBreakerSettings
+
 	// Worker pool
-	WorkerPool        WorkerPoolSettings
-	
+	WorkerPool WorkerPoolSettings
+
 	// Memory management
-	MemoryLimit       int64
-	MaxConcurrency    int
-	BufferSize        int
-	BatchSize         int
-	
+	MemoryLimit    int64
+	MaxConcurrency int
+	BufferSize     int
+	BatchSize      int
+
 	// Error handling
-	ErrorStrategy     ErrorHandlingStrategy
-	RetryPolicy       RetryPolicySettings
-	
+	ErrorStrategy ErrorHandlingStrategy
+	RetryPolicy   RetryPolicySettings
+
 	// Monitoring
-	EnableMetrics     bool
-	MetricsInterval   time.Duration
-	
+	EnableMetrics   bool
+	MetricsInterval time.Duration
+
 	// Custom collection function
-	CollectionFunc    func(context.Context, CollectionOptions) ([]T, error)
-	
+	CollectionFunc func(context.Context, CollectionOptions) ([]T, error)
+
 	// Filtering and transformation
-	FilterFunc        func(T) bool
-	TransformFunc     func(T) T
-	ValidationFunc    func(T) error
+	FilterFunc     func(T) bool
+	TransformFunc  func(T) T
+	ValidationFunc func(T) error
 }
 
 // activeCollector tracks an active collection instance
 type activeCollector[T MetricType] struct {
-	id           string
-	config       CollectorConfig[T]
-	lastRun      time.Time
-	runCount     int64
-	errorCount   int64
+	id             string
+	config         CollectorConfig[T]
+	lastRun        time.Time
+	runCount       int64
+	errorCount     int64
 	itemsCollected int64
-	enabled      bool
-	ticker       *time.Ticker
-	context      context.Context
-	cancelFunc   context.CancelFunc
+	enabled        bool
+	ticker         *time.Ticker
+	context        context.Context
+	cancelFunc     context.CancelFunc
 }
 
 // BackpressureHandler manages backpressure scenarios
 type BackpressureHandler[T MetricType] struct {
-	strategy    BackpressureStrategy
-	options     BackpressureOptions
-	buffer      *RingBuffer[T]
-	stats       BackpressureStats
-	mu          sync.RWMutex
-	alertFunc   func(BackpressureStats)
+	strategy  BackpressureStrategy
+	options   BackpressureOptions
+	buffer    *RingBuffer[T]
+	stats     BackpressureStats
+	mu        sync.RWMutex
+	alertFunc func(BackpressureStats)
 }
 
 // CircuitBreaker provides circuit breaker functionality for resilient collection
 type CircuitBreaker struct {
-	mu                sync.RWMutex
-	state             CircuitState
-	failureCount      int64
-	successCount      int64
-	lastFailureTime   time.Time
-	failureThreshold  int64
-	successThreshold  int64
+	mu               sync.RWMutex
+	state            CircuitState
+	failureCount     int64
+	successCount     int64
+	lastFailureTime  time.Time
+	failureThreshold int64
+	successThreshold int64
 	timeout          time.Duration
 }
 
@@ -151,57 +151,57 @@ type (
 	}
 
 	BackpressureSettings struct {
-		Strategy         BackpressureStrategy
-		BufferSize       int
-		DropThreshold    float64
-		AlertThreshold   float64
-		RecoveryTimeout  time.Duration
-		EnableAlerts     bool
+		Strategy        BackpressureStrategy
+		BufferSize      int
+		DropThreshold   float64
+		AlertThreshold  float64
+		RecoveryTimeout time.Duration
+		EnableAlerts    bool
 	}
 
 	CircuitBreakerSettings struct {
 		FailureThreshold int64
 		SuccessThreshold int64
-		Timeout         time.Duration
-		Enabled         bool
+		Timeout          time.Duration
+		Enabled          bool
 	}
 
 	WorkerPoolSettings struct {
-		Size            int
-		QueueSize       int
-		WorkerTimeout   time.Duration
-		IdleTimeout     time.Duration
+		Size          int
+		QueueSize     int
+		WorkerTimeout time.Duration
+		IdleTimeout   time.Duration
 	}
 
 	ErrorHandlingStrategy struct {
-		OnError        string // "retry", "skip", "abort"
-		MaxRetries     int
-		RetryBackoff   time.Duration
+		OnError         string // "retry", "skip", "abort"
+		MaxRetries      int
+		RetryBackoff    time.Duration
 		DeadLetterQueue bool
 	}
 
 	RetryPolicySettings struct {
-		MaxAttempts    int
-		InitialDelay   time.Duration
-		MaxDelay       time.Duration
-		BackoffFactor  float64
-		JitterEnabled  bool
+		MaxAttempts   int
+		InitialDelay  time.Duration
+		MaxDelay      time.Duration
+		BackoffFactor float64
+		JitterEnabled bool
 	}
 
 	WorkerTask struct {
-		ID          string
-		Collector   func(context.Context) ([]MetricType, error)
-		Context     context.Context
-		Timeout     time.Duration
-		Metadata    map[string]interface{}
+		ID        string
+		Collector func(context.Context) ([]MetricType, error)
+		Context   context.Context
+		Timeout   time.Duration
+		Metadata  map[string]interface{}
 	}
 
 	WorkerResult struct {
-		ID        string
-		Items     []MetricType
-		Error     error
-		Duration  time.Duration
-		Metadata  map[string]interface{}
+		ID       string
+		Items    []MetricType
+		Error    error
+		Duration time.Duration
+		Metadata map[string]interface{}
 	}
 )
 
@@ -247,7 +247,7 @@ func NewPrometheusMetricCollector[T MetricType](config CollectorConfig[T], logge
 			state:            CircuitClosed,
 			failureThreshold: config.CircuitBreaker.FailureThreshold,
 			successThreshold: config.CircuitBreaker.SuccessThreshold,
-			timeout:         config.CircuitBreaker.Timeout,
+			timeout:          config.CircuitBreaker.Timeout,
 		}
 	}
 
@@ -262,14 +262,14 @@ func NewPrometheusMetricCollector[T MetricType](config CollectorConfig[T], logge
 	collector := &PrometheusMetricCollector[T]{
 		logger:              logger,
 		rateLimiter:         rateLimiter,
-		config:             config,
-		shutdown:           make(chan struct{}),
-		collectors:         make(map[string]activeCollector[T]),
+		config:              config,
+		shutdown:            make(chan struct{}),
+		collectors:          make(map[string]activeCollector[T]),
 		backpressureHandler: backpressureHandler,
-		circuitBreaker:     circuitBreaker,
-		workerPool:         workerPool,
-		resultChannel:      make(chan CollectionResult[T], config.BufferSize),
-		batchChannel:       make(chan BatchResult[T], config.BufferSize/config.BatchSize),
+		circuitBreaker:      circuitBreaker,
+		workerPool:          workerPool,
+		resultChannel:       make(chan CollectionResult[T], config.BufferSize),
+		batchChannel:        make(chan BatchResult[T], config.BufferSize/config.BatchSize),
 		stats: CollectorStats{
 			LastCollection: time.Now(),
 		},
@@ -459,7 +459,7 @@ func (c *PrometheusMetricCollector[T]) Close(ctx context.Context) error {
 
 func (c *PrometheusMetricCollector[T]) performCollection(ctx context.Context, opts CollectionOptions) {
 	start := time.Now()
-	
+
 	// Create timeout context
 	timeoutCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
@@ -504,7 +504,7 @@ func (c *PrometheusMetricCollector[T]) performCollection(ctx context.Context, op
 		Source:    c.config.CollectorName,
 		Metadata: map[string]interface{}{
 			"collection_count": atomic.LoadInt64(&c.stats.CollectionCount),
-			"error_count":     atomic.LoadInt64(&c.stats.ErrorCount),
+			"error_count":      atomic.LoadInt64(&c.stats.ErrorCount),
 		},
 	}
 
@@ -670,7 +670,7 @@ func (c *PrometheusMetricCollector[T]) startWorkerPool() {
 
 func (c *PrometheusMetricCollector[T]) stopWorkerPool(ctx context.Context) {
 	close(c.workerPool.shutdown)
-	
+
 	// Wait for workers to finish with timeout
 	done := make(chan struct{})
 	go func() {
@@ -688,7 +688,7 @@ func (c *PrometheusMetricCollector[T]) stopWorkerPool(ctx context.Context) {
 
 func (c *PrometheusMetricCollector[T]) workerPoolWorker(id int) {
 	defer c.workerPool.wg.Done()
-	
+
 	logger := c.logger.With("worker_id", id)
 	logger.Debug("Worker started")
 
@@ -705,7 +705,7 @@ func (c *PrometheusMetricCollector[T]) workerPoolWorker(id int) {
 
 func (c *PrometheusMetricCollector[T]) executeWorkerTask(task WorkerTask) {
 	start := time.Now()
-	
+
 	// Execute task with timeout
 	timeoutCtx, cancel := context.WithTimeout(task.Context, task.Timeout)
 	defer cancel()
@@ -771,7 +771,7 @@ func (c *PrometheusMetricCollector[T]) runMonitoring() {
 
 func (c *PrometheusMetricCollector[T]) reportMetrics() {
 	stats := c.GetStats()
-	
+
 	c.logger.Info("Collector metrics",
 		"collection_count", stats.CollectionCount,
 		"metrics_collected", stats.MetricsCollected,
@@ -907,7 +907,7 @@ func (rb *RingBuffer[T]) reset() {
 	rb.head = 0
 	rb.tail = 0
 	rb.size = 0
-	
+
 	// Clear buffer
 	var zero T
 	for i := range rb.buffer {

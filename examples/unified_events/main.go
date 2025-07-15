@@ -19,14 +19,14 @@ func main() {
 		WithEntity(events.EntityType_ENTITY_PROCESS, "1234", "nginx").
 		WithProcess(1234, "nginx").
 		WithNetworkData(&events.NetworkEvent{
-			Protocol:        "tcp",
-			SrcIp:          "192.168.1.1",
-			SrcPort:        8080,
-			DstIp:          "192.168.1.2", 
-			DstPort:        80,
-			BytesSent:      1024,
-			BytesReceived:  2048,
-			State:          "ESTABLISHED",
+			Protocol:      "tcp",
+			SrcIp:         "192.168.1.1",
+			SrcPort:       8080,
+			DstIp:         "192.168.1.2",
+			DstPort:       80,
+			BytesSent:     1024,
+			BytesReceived: 2048,
+			State:         "ESTABLISHED",
 		}).
 		WithAttribute("connection_id", "conn-123").
 		WithLabel("environment", "production").
@@ -44,13 +44,13 @@ func main() {
 		WithEntity(events.EntityType_ENTITY_PROCESS, "5678", "app").
 		WithProcess(5678, "myapp").
 		WithMemoryData(&events.MemoryEvent{
-			Operation:   "alloc",
-			SizeBytes:   4096,
-			Address:     0x7fff12345678,
-			RssBytes:    1024 * 1024,
-			VmsBytes:    2048 * 1024,
-			Allocator:   "malloc",
-			StackTrace:  []string{"main", "allocate", "malloc"},
+			Operation:  "alloc",
+			SizeBytes:  4096,
+			Address:    0x7fff12345678,
+			RssBytes:   1024 * 1024,
+			VmsBytes:   2048 * 1024,
+			Allocator:  "malloc",
+			StackTrace: []string{"main", "allocate", "malloc"},
 		}).
 		WithAttribute("memory_pressure", "high").
 		WithLabel("app", "myapp").
@@ -62,7 +62,7 @@ func main() {
 
 	// Example 3: Validation
 	validator := events.NewValidator()
-	
+
 	if err := validator.Validate(networkEvent); err != nil {
 		log.Printf("❌ Network event validation failed: %v", err)
 	} else {
@@ -96,7 +96,7 @@ func main() {
 	batchBuilder := events.NewBatchBuilder()
 	batchBuilder.Add(networkEvent)
 	batchBuilder.Add(memoryEvent)
-	
+
 	batch := batchBuilder.Build()
 	fmt.Printf("✅ Created batch with %d events (ID: %s)\n", len(batch.Events), batch.BatchId)
 

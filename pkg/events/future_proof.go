@@ -3,13 +3,10 @@ package events
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // FutureProofEngine prepares events for AI processing with configurable opinions
@@ -71,46 +68,46 @@ type OpinionConfig struct {
 
 // BehavioralOpinions for behavior analysis
 type BehavioralOpinions struct {
-	LearningWindow      time.Duration `yaml:"learning_window"`
-	MinSamplesRequired  int          `yaml:"min_samples_required"`
-	DeviationSensitivity float32     `yaml:"deviation_sensitivity"`
-	TrendWindow         time.Duration `yaml:"trend_window"`
+	LearningWindow       time.Duration `yaml:"learning_window"`
+	MinSamplesRequired   int           `yaml:"min_samples_required"`
+	DeviationSensitivity float32       `yaml:"deviation_sensitivity"`
+	TrendWindow          time.Duration `yaml:"trend_window"`
 }
 
 // PredictionOpinions for predictive capabilities
 type PredictionOpinions struct {
-	EnableOOMPrediction      bool          `yaml:"enable_oom_prediction"`
-	EnableCascadePrediction  bool          `yaml:"enable_cascade_prediction"`
-	EnableAnomalyPrediction  bool          `yaml:"enable_anomaly_prediction"`
-	PredictionHorizon        time.Duration `yaml:"prediction_horizon"`
-	MinConfidenceThreshold   float32       `yaml:"min_confidence_threshold"`
+	EnableOOMPrediction     bool          `yaml:"enable_oom_prediction"`
+	EnableCascadePrediction bool          `yaml:"enable_cascade_prediction"`
+	EnableAnomalyPrediction bool          `yaml:"enable_anomaly_prediction"`
+	PredictionHorizon       time.Duration `yaml:"prediction_horizon"`
+	MinConfidenceThreshold  float32       `yaml:"min_confidence_threshold"`
 }
 
 // FeatureConfig for AI feature generation
 type FeatureConfig struct {
-	EnabledFeatures   []string               `yaml:"enabled_features"`
-	FeatureParams     map[string]interface{} `yaml:"feature_params"`
-	CacheFeatures     bool                   `yaml:"cache_features"`
-	FeatureVersion    string                 `yaml:"feature_version"`
+	EnabledFeatures []string               `yaml:"enabled_features"`
+	FeatureParams   map[string]interface{} `yaml:"feature_params"`
+	CacheFeatures   bool                   `yaml:"cache_features"`
+	FeatureVersion  string                 `yaml:"feature_version"`
 }
 
 // ModelConfig for AI models
 type ModelConfig struct {
-	EnabledModels     []string               `yaml:"enabled_models"`
-	ModelParams       map[string]interface{} `yaml:"model_params"`
-	UpdateFrequency   time.Duration          `yaml:"update_frequency"`
-	OnlineLearnining  bool                   `yaml:"online_learning"`
+	EnabledModels    []string               `yaml:"enabled_models"`
+	ModelParams      map[string]interface{} `yaml:"model_params"`
+	UpdateFrequency  time.Duration          `yaml:"update_frequency"`
+	OnlineLearnining bool                   `yaml:"online_learning"`
 }
 
 // OptimizationConfig for performance tuning
 type OptimizationConfig struct {
-	EnableCompression    bool    `yaml:"enable_compression"`
-	CompressionRatio     float32 `yaml:"compression_ratio"`
-	EnableBatching       bool    `yaml:"enable_batching"`
-	BatchSize            int     `yaml:"batch_size"`
-	BatchTimeout         time.Duration `yaml:"batch_timeout"`
-	EnableParallelism    bool    `yaml:"enable_parallelism"`
-	MaxWorkers           int     `yaml:"max_workers"`
+	EnableCompression bool          `yaml:"enable_compression"`
+	CompressionRatio  float32       `yaml:"compression_ratio"`
+	EnableBatching    bool          `yaml:"enable_batching"`
+	BatchSize         int           `yaml:"batch_size"`
+	BatchTimeout      time.Duration `yaml:"batch_timeout"`
+	EnableParallelism bool          `yaml:"enable_parallelism"`
+	MaxWorkers        int           `yaml:"max_workers"`
 }
 
 // AITransformer transforms events for AI consumption
@@ -158,13 +155,22 @@ type AIFeatures struct {
 	Metadata *FeatureMetadata
 }
 
+// FeatureMetadata contains metadata about feature extraction
+type FeatureMetadata struct {
+	Version      string            `json:"version"`
+	ExtractedAt  time.Time         `json:"extracted_at"`
+	FeatureCount int               `json:"feature_count"`
+	Quality      float64           `json:"quality"`
+	Tags         map[string]string `json:"tags"`
+}
+
 // TimeSeriesFeatures for temporal models
 type TimeSeriesFeatures struct {
 	// Historical values
 	History []float32
 
 	// Trend components
-	Trend float32
+	Trend       float32
 	Seasonality map[string]float32
 
 	// Statistical features
@@ -186,7 +192,7 @@ type GraphFeatures struct {
 	NodeType      string
 
 	// Edge features
-	EdgeTypes  []string
+	EdgeTypes   []string
 	EdgeWeights []float32
 
 	// Neighborhood features
@@ -241,7 +247,7 @@ type Compressor interface {
 // Batcher for batch processing
 type Batcher struct {
 	mu sync.Mutex
-	
+
 	batch     []*AIReadyEvent
 	batchSize int
 	timeout   time.Duration
@@ -259,12 +265,12 @@ type FeatureCache struct {
 type FutureProofMetrics struct {
 	mu sync.RWMutex
 
-	EventsProcessed      uint64
-	FeaturesGenerated    uint64
-	PredictionsMade      uint64
-	CompressionRatio     float32
-	ProcessingLatency    time.Duration
-	CacheHitRate         float32
+	EventsProcessed   uint64
+	FeaturesGenerated uint64
+	PredictionsMade   uint64
+	CompressionRatio  float32
+	ProcessingLatency time.Duration
+	CacheHitRate      float32
 }
 
 // OpinionProfiles provides pre-configured opinion sets
@@ -276,14 +282,14 @@ var OpinionProfiles = map[string]OpinionConfig{
 			"development":     0.5,
 		},
 		CorrelationWindows: map[string]time.Duration{
-			"oom_restart":      30 * time.Second,
-			"cascade_failure":  5 * time.Minute,
-			"network_timeout":  10 * time.Second,
+			"oom_restart":     30 * time.Second,
+			"cascade_failure": 5 * time.Minute,
+			"network_timeout": 10 * time.Second,
 		},
 		AnomalyThresholds: map[string]float32{
-			"memory_usage":    0.9,
-			"cpu_usage":       0.8,
-			"error_rate":      0.1,
+			"memory_usage": 0.9,
+			"cpu_usage":    0.8,
+			"error_rate":   0.1,
 		},
 		BehavioralConfig: BehavioralOpinions{
 			LearningWindow:       7 * 24 * time.Hour,
@@ -400,9 +406,9 @@ func (fp *FutureProofEngine) UpdateOpinion(path string, value interface{}) error
 			fp.config.Opinions.CorrelationWindows["oom_restart"] = v
 			return nil
 		}
-	// Add more paths as needed
+		// Add more paths as needed
 	}
-	
+
 	return fmt.Errorf("unknown opinion path: %s", path)
 }
 
@@ -417,7 +423,7 @@ func (fp *FutureProofEngine) LoadConfig(path string) error {
 func (fp *FutureProofEngine) generateFeatures(ctx context.Context, event *opinionated.OpinionatedEvent, aiReady *AIReadyEvent) error {
 	// Check cache first if enabled
 	if fp.config.Features.CacheFeatures {
-		if cached := fp.optimizer.cache.Get(event.Id); cached != nil {
+		if cached := fp.optimizer.cache.Get(event.ID); cached != nil {
 			aiReady.Features = cached.(*AIFeatures)
 			return nil
 		}
@@ -435,7 +441,7 @@ func (fp *FutureProofEngine) generateFeatures(ctx context.Context, event *opinio
 			if err != nil {
 				return fmt.Errorf("%s generator failed: %w", genName, err)
 			}
-			
+
 			// Merge features
 			fp.mergeFeatures(aiReady.Features, features)
 		}
@@ -443,7 +449,7 @@ func (fp *FutureProofEngine) generateFeatures(ctx context.Context, event *opinio
 
 	// Cache if enabled
 	if fp.config.Features.CacheFeatures {
-		fp.optimizer.cache.Set(event.Id, aiReady.Features, fp.config.Optimization.BatchTimeout)
+		fp.optimizer.cache.Set(event.ID, aiReady.Features, fp.config.Optimization.BatchTimeout)
 	}
 
 	fp.metrics.mu.Lock()
@@ -464,7 +470,7 @@ func (fp *FutureProofEngine) generateFeaturesParallel(ctx context.Context, event
 			wg.Add(1)
 			go func(g FeatureGenerator, name string) {
 				defer wg.Done()
-				
+
 				features, err := g.Generate(ctx, event, fp.config.Features)
 				if err != nil {
 					errors <- fmt.Errorf("%s: %w", name, err)
@@ -655,9 +661,9 @@ func buildFeatureGenerators() map[string]FeatureGenerator {
 
 func buildPredictors() map[string]Predictor {
 	return map[string]Predictor{
-		"oom_predictor":      &OOMPredictor{},
-		"cascade_predictor":  &CascadePredictor{},
-		"anomaly_predictor":  &AnomalyPredictor{},
+		"oom_predictor":     &OOMPredictor{},
+		"cascade_predictor": &CascadePredictor{},
+		"anomaly_predictor": &AnomalyPredictor{},
 	}
 }
 
@@ -710,22 +716,21 @@ func (g *TemporalFeatureGenerator) Generate(ctx context.Context, event *opiniona
 	if event.Temporal != nil {
 		// Time-based features
 		now := time.Now()
-		eventTime := event.Timestamp.AsTime()
-		
+		eventTime := event.Timestamp
+
 		features["age_seconds"] = float32(now.Sub(eventTime).Seconds())
 		features["hour_of_day"] = float32(eventTime.Hour())
 		features["day_of_week"] = float32(eventTime.Weekday())
-		
+
 		// Duration features
-		if event.Temporal.Duration != nil {
-			features["duration_ms"] = float32(event.Temporal.Duration.AsDuration().Milliseconds())
+		if event.Temporal.Duration > 0 {
+			features["duration_ms"] = float32(event.Temporal.Duration.Milliseconds())
 		}
-		
+
 		// Periodicity features
-		if event.Temporal.Periodicity != nil {
+		if event.Temporal.Periodicity > 0 {
 			features["has_periodicity"] = float32(1.0)
-			features["period_seconds"] = float32(event.Temporal.Periodicity.Period.AsDuration().Seconds())
-			features["periodicity_confidence"] = event.Temporal.Periodicity.Confidence
+			features["periodicity_score"] = float32(event.Temporal.Periodicity)
 		}
 	}
 
@@ -742,15 +747,15 @@ func (g *BehavioralFeatureGenerator) Generate(ctx context.Context, event *opinio
 	if event.Behavioral != nil {
 		// Behavioral features
 		features["behavior_deviation"] = event.Behavioral.BehaviorDeviation
-		features["behavior_trend_" + event.Behavioral.BehaviorTrend] = float32(1.0)
-		
+		features["behavior_trend_"+event.Behavioral.BehaviorTrend] = float32(1.0)
+
 		// Entity features
 		if event.Behavioral.Entity != nil {
-			features["entity_type_" + event.Behavioral.Entity.Type] = float32(1.0)
+			features["entity_type_"+event.Behavioral.Entity.Type] = float32(1.0)
 			features["entity_trust"] = event.Behavioral.Entity.TrustScore
-			features["entity_lifecycle_" + event.Behavioral.Entity.LifecycleStage] = float32(1.0)
+			features["entity_lifecycle_"+event.Behavioral.Entity.LifecycleStage] = float32(1.0)
 		}
-		
+
 		// Change indicators
 		if event.Behavioral.ChangeIndicators != nil {
 			features["behavior_velocity"] = event.Behavioral.ChangeIndicators.Velocity
@@ -773,19 +778,19 @@ func (g *SemanticFeatureGenerator) Generate(ctx context.Context, event *opiniona
 	if event.Semantic != nil {
 		// Event type features
 		features["event_type"] = event.Semantic.EventType
-		
+
 		// Embedding as feature
 		if len(event.Semantic.Embedding) > 0 {
 			features["semantic_embedding"] = event.Semantic.Embedding
 		}
-		
+
 		// Intent features
-		features["intent_" + event.Semantic.Intent] = float32(1.0)
+		features["intent_"+event.Semantic.Intent] = float32(1.0)
 		features["intent_confidence"] = event.Semantic.IntentConfidence
-		
+
 		// Semantic features
 		for k, v := range event.Semantic.SemanticFeatures {
-			features["semantic_" + k] = v
+			features["semantic_"+k] = v
 		}
 	}
 
@@ -799,31 +804,27 @@ func (g *StatisticalFeatureGenerator) Name() string { return "statistical" }
 func (g *StatisticalFeatureGenerator) Generate(ctx context.Context, event *opinionated.OpinionatedEvent, config FeatureConfig) (map[string]interface{}, error) {
 	features := make(map[string]interface{})
 
-	if event.AiFeatures != nil && event.AiFeatures.TimeSeries != nil {
-		ts := event.AiFeatures.TimeSeries
-		
-		// Rolling statistics
-		if ts.Rolling_1M != nil {
-			features["rolling_1m_mean"] = ts.Rolling_1M.Mean
-			features["rolling_1m_std"] = ts.Rolling_1M.StdDev
-			features["rolling_1m_max"] = ts.Rolling_1M.Max
+	if event.State != nil && event.State.TimeSeries != nil {
+		ts := event.State.TimeSeries
+
+		// Basic time series features
+		if len(ts.Values) > 0 {
+			features["ts_count"] = len(ts.Values)
+			features["ts_trend"] = ts.Trend
+			features["ts_window_seconds"] = ts.Window.Seconds()
 		}
-		
-		// Trends
-		features["trend_1h"] = ts.Trend_1H
-		features["trend_24h"] = ts.Trend_24H
 	}
 
 	// Anomaly statistics
 	if event.Anomaly != nil {
 		features["anomaly_score"] = event.Anomaly.AnomalyScore
-		
+
 		if event.Anomaly.Dimensions != nil {
 			features["anomaly_statistical"] = event.Anomaly.Dimensions.Statistical
 			features["anomaly_behavioral"] = event.Anomaly.Dimensions.Behavioral
 			features["anomaly_temporal"] = event.Anomaly.Dimensions.Temporal
 		}
-		
+
 		if event.Anomaly.BaselineComparison != nil {
 			features["z_score"] = event.Anomaly.BaselineComparison.ZScore
 			features["percentile"] = event.Anomaly.BaselineComparison.Percentile
@@ -842,15 +843,16 @@ func (g *ContextualFeatureGenerator) Generate(ctx context.Context, event *opinio
 
 	// State context features
 	if event.State != nil {
-		features["state_" + event.State.PreviousState] = float32(1.0)
-		features["state_" + event.State.CurrentState] = float32(1.0)
-		
-		if event.State.Transition != nil {
-			features["state_transition_valid"] = float32(0.0)
-			if event.State.Transition.Valid {
-				features["state_transition_valid"] = float32(1.0)
-			}
-			features["state_transition_probability"] = event.State.Transition.Probability
+		if event.State.Previous != "" {
+			features["state_"+event.State.Previous] = float32(1.0)
+		}
+		if event.State.Current != "" {
+			features["state_"+event.State.Current] = float32(1.0)
+		}
+
+		if event.State.Transition != "" {
+			features["has_transition"] = float32(1.0)
+			features["transition_duration_seconds"] = float32(event.State.Duration.Seconds())
 		}
 	}
 
@@ -860,14 +862,14 @@ func (g *ContextualFeatureGenerator) Generate(ctx context.Context, event *opinio
 		features["technical_impact"] = event.Impact.TechnicalImpact
 		features["user_impact"] = event.Impact.UserImpact
 		features["security_impact"] = event.Impact.SecurityImpact
-		features["urgency_" + event.Impact.Urgency] = float32(1.0)
+		features["urgency"] = event.Impact.Urgency
 	}
 
 	// Correlation context
 	if event.Correlation != nil && len(event.Correlation.Groups) > 0 {
 		features["correlation_group_count"] = float32(len(event.Correlation.Groups))
 		for _, group := range event.Correlation.Groups {
-			features["in_group_" + group.Type] = float32(1.0)
+			features["in_group_"+group.Type] = float32(1.0)
 		}
 	}
 
@@ -888,7 +890,7 @@ func (p *OOMPredictor) Predict(ctx context.Context, features *AIFeatures, config
 	}
 
 	trend1h, _ := features.Sparse["trend_1h"]
-	
+
 	// Simple rule-based prediction (would be ML model in production)
 	var probability float32
 	if memoryUsage > 0.9 && trend1h > 0.05 {
@@ -919,7 +921,7 @@ func (p *CascadePredictor) Predict(ctx context.Context, features *AIFeatures, co
 	// Predict cascading failures
 	errorRate, _ := features.Sparse["error_rate"]
 	correlationCount, _ := features.Sparse["correlation_group_count"]
-	
+
 	if errorRate > 0.3 && correlationCount > 3 {
 		return &Prediction{
 			Model:       p.Name(),
@@ -930,7 +932,7 @@ func (p *CascadePredictor) Predict(ctx context.Context, features *AIFeatures, co
 			Explanation: "High error rate with multiple correlated services",
 		}, nil
 	}
-	
+
 	return nil, nil
 }
 
@@ -942,7 +944,7 @@ func (p *AnomalyPredictor) Predict(ctx context.Context, features *AIFeatures, co
 	// Predict future anomalies
 	anomalyScore, _ := features.Sparse["anomaly_score"]
 	behaviorAcceleration, _ := features.Sparse["behavior_acceleration"]
-	
+
 	if anomalyScore > 0.7 && behaviorAcceleration > 0.1 {
 		return &Prediction{
 			Model:       p.Name(),
@@ -953,7 +955,7 @@ func (p *AnomalyPredictor) Predict(ctx context.Context, features *AIFeatures, co
 			Explanation: "Anomaly score increasing rapidly",
 		}, nil
 	}
-	
+
 	return nil, nil
 }
 
@@ -964,10 +966,10 @@ func (oe *OptimizationEngine) Optimize(event *AIReadyEvent) error {
 	event.OptimizationMeta = &OptimizationMetadata{
 		ProcessingTime: time.Since(time.Now()),
 	}
-	
+
 	// Compression would be implemented here
 	// Batching would be handled by the batcher
-	
+
 	return nil
 }
 
@@ -986,13 +988,13 @@ func (b *Batcher) Add(event *AIReadyEvent, callback func([]*AIReadyEvent)) {
 	defer b.mu.Unlock()
 
 	b.batch = append(b.batch, event)
-	
+
 	if len(b.batch) == 1 {
 		// First event, start timer
 		b.callback = callback
 		b.timer = time.AfterFunc(b.timeout, b.flush)
 	}
-	
+
 	if len(b.batch) >= b.batchSize {
 		// Batch full, flush immediately
 		b.flush()
@@ -1007,7 +1009,7 @@ func (b *Batcher) flush() {
 		b.callback(b.batch)
 		b.batch = make([]*AIReadyEvent, 0, b.batchSize)
 	}
-	
+
 	if b.timer != nil {
 		b.timer.Stop()
 		b.timer = nil
@@ -1063,24 +1065,24 @@ func ValidateOpinionConfig(config OpinionConfig) error {
 			return fmt.Errorf("importance weight %s must be between 0 and 1", key)
 		}
 	}
-	
+
 	// Validate anomaly thresholds
 	for key, threshold := range config.AnomalyThresholds {
 		if threshold < 0 || threshold > 1 {
 			return fmt.Errorf("anomaly threshold %s must be between 0 and 1", key)
 		}
 	}
-	
+
 	// Validate behavioral config
 	if config.BehavioralConfig.DeviationSensitivity < 0 || config.BehavioralConfig.DeviationSensitivity > 1 {
 		return fmt.Errorf("deviation sensitivity must be between 0 and 1")
 	}
-	
+
 	// Validate prediction config
 	if config.PredictionConfig.MinConfidenceThreshold < 0 || config.PredictionConfig.MinConfidenceThreshold > 1 {
 		return fmt.Errorf("min confidence threshold must be between 0 and 1")
 	}
-	
+
 	return nil
 }
 

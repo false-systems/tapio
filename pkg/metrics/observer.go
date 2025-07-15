@@ -21,11 +21,11 @@ type MetricEventPublisher[T MetricType] struct {
 	sequence  int64
 
 	// Event buffering for performance
-	eventBuffer     chan bufferedEvent[T]
-	bufferSize      int
-	flushInterval   time.Duration
-	flushThreshold  int
-	batchProcessor  *batchProcessor[T]
+	eventBuffer    chan bufferedEvent[T]
+	bufferSize     int
+	flushInterval  time.Duration
+	flushThreshold int
+	batchProcessor *batchProcessor[T]
 
 	// State management
 	running      int32
@@ -61,51 +61,51 @@ type bufferedEvent[T MetricType] struct {
 
 // batchProcessor handles efficient batch processing of events
 type batchProcessor[T MetricType] struct {
-	publisher    *MetricEventPublisher[T]
-	batchBuffer  []MetricEvent[T]
-	batchMutex   sync.Mutex
-	lastFlush    time.Time
-	flushTicker  *time.Ticker
+	publisher   *MetricEventPublisher[T]
+	batchBuffer []MetricEvent[T]
+	batchMutex  sync.Mutex
+	lastFlush   time.Time
+	flushTicker *time.Ticker
 }
 
 // PublisherConfig configures the event publisher
 type PublisherConfig struct {
 	// Buffer configuration
-	DefaultBufferSize      int
-	DefaultFlushInterval   time.Duration
-	DefaultFlushThreshold  int
-	MaxBufferSize          int
+	DefaultBufferSize     int
+	DefaultFlushInterval  time.Duration
+	DefaultFlushThreshold int
+	MaxBufferSize         int
 
 	// Observer management
-	MaxObservers           int
-	ObserverTimeout        time.Duration
-	ErrorThreshold         int
-	RetryAttempts          int
-	RetryBackoff           time.Duration
+	MaxObservers    int
+	ObserverTimeout time.Duration
+	ErrorThreshold  int
+	RetryAttempts   int
+	RetryBackoff    time.Duration
 
 	// Performance tuning
-	EnableBatching         bool
-	EnableAsync            bool
-	EnableMetrics          bool
-	WorkerPoolSize         int
+	EnableBatching bool
+	EnableAsync    bool
+	EnableMetrics  bool
+	WorkerPoolSize int
 
 	// Error handling
-	ErrorStrategy          string
-	DeadLetterQueue        bool
-	MaxRetries             int
+	ErrorStrategy   string
+	DeadLetterQueue bool
+	MaxRetries      int
 }
 
 // PublisherStats tracks publisher performance metrics
 type PublisherStats struct {
-	ObserverCount      int64
-	EventsPublished    int64
-	EventsBuffered     int64
-	EventsDropped      int64
-	BatchesProcessed   int64
-	ErrorCount         int64
-	AverageLatency     time.Duration
-	LastEvent          time.Time
-	BufferUtilization  float64
+	ObserverCount     int64
+	EventsPublished   int64
+	EventsBuffered    int64
+	EventsDropped     int64
+	BatchesProcessed  int64
+	ErrorCount        int64
+	AverageLatency    time.Duration
+	LastEvent         time.Time
+	BufferUtilization float64
 }
 
 // NewMetricEventPublisher creates a new event publisher with observer pattern

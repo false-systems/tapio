@@ -24,13 +24,13 @@ func NewTapioEventBridge(manager *collector.SimpleManager) *TapioEventBridge {
 // StreamEvents creates a stream of events_correlation.Event from Tapio collectors
 func (b *TapioEventBridge) StreamEvents() <-chan events_correlation.Event {
 	output := make(chan events_correlation.Event, 1000)
-	
+
 	go func() {
 		defer close(output)
-		
+
 		// Get events from the manager's unified stream
 		tapioEvents := b.manager.Events()
-		
+
 		for tapioEvent := range tapioEvents {
 			// Convert each Tapio event to events_correlation format
 			if correlationEvent := b.convertEvent(tapioEvent); correlationEvent != nil {
@@ -42,7 +42,7 @@ func (b *TapioEventBridge) StreamEvents() <-chan events_correlation.Event {
 			}
 		}
 	}()
-	
+
 	return output
 }
 
@@ -78,7 +78,7 @@ func (b *TapioEventBridge) convertEvent(tapioEvent collector.Event) *events_corr
 		entity.Node = tapioEvent.Context.Node
 		entity.Pod = tapioEvent.Context.Pod
 		entity.Container = tapioEvent.Context.Container
-		
+
 		// Use pod name as entity name if available, otherwise use process
 		if entity.Pod != "" {
 			entity.Name = entity.Pod
@@ -88,7 +88,7 @@ func (b *TapioEventBridge) convertEvent(tapioEvent collector.Event) *events_corr
 			entity.Process = tapioEvent.Context.ProcessName
 			entity.Type = "process"
 		}
-		
+
 		// Create metadata from context
 		entity.Metadata = make(map[string]string)
 		if tapioEvent.Context.ProcessName != "" {
@@ -177,14 +177,14 @@ func determineEntityType(event collector.Event) string {
 func generateFingerprint(event collector.Event) string {
 	// Create fingerprint from type + entity + key attributes
 	base := fmt.Sprintf("%s:%s", event.Type, event.Source)
-	
+
 	if event.Context != nil {
 		if event.Context.Pod != "" {
 			base += ":" + event.Context.Pod
 		} else if event.Context.ProcessName != "" {
 			base += ":" + event.Context.ProcessName
 		}
-		
+
 		if event.Context.Namespace != "" {
 			base += ":" + event.Context.Namespace
 		}
@@ -207,13 +207,13 @@ func generateFingerprint(event collector.Event) string {
 // GetInsights streams insights from the Tapio correlation engine
 func (b *TapioEventBridge) GetInsights() <-chan events_correlation.Result {
 	output := make(chan events_correlation.Result, 100)
-	
+
 	go func() {
 		defer close(output)
-		
+
 		// Get insights from the manager's correlation engine
 		tapioInsights := b.manager.Insights()
-		
+
 		for insight := range tapioInsights {
 			// Convert each Tapio insight to events_correlation format
 			if result := b.convertInsight(insight); result != nil {
@@ -225,7 +225,7 @@ func (b *TapioEventBridge) GetInsights() <-chan events_correlation.Result {
 			}
 		}
 	}()
-	
+
 	return output
 }
 
@@ -282,13 +282,13 @@ func (b *TapioEventBridge) convertInsight(insight collector.Insight) *events_cor
 	var actions []events_correlation.Action
 	for _, action := range insight.Actions {
 		recommendations = append(recommendations, action.Description)
-		
+
 		// Convert to correlation action format
 		correlationAction := events_correlation.Action{
 			Type:   "manual", // Most Tapio actions are manual
 			Target: action.Title,
 		}
-		
+
 		// Convert commands to parameters
 		if len(action.Commands) > 0 {
 			correlationAction.Parameters = make(map[string]string)
@@ -296,7 +296,7 @@ func (b *TapioEventBridge) convertInsight(insight collector.Insight) *events_cor
 				correlationAction.Parameters[fmt.Sprintf("command_%d", i)] = cmd
 			}
 		}
-		
+
 		// Set priority based on risk
 		switch action.Risk {
 		case "low":
@@ -308,7 +308,7 @@ func (b *TapioEventBridge) convertInsight(insight collector.Insight) *events_cor
 		default:
 			correlationAction.Priority = "medium"
 		}
-		
+
 		actions = append(actions, correlationAction)
 	}
 
@@ -356,11 +356,11 @@ func (b *TapioEventBridge) convertInsight(insight collector.Insight) *events_cor
 // GetHealthStatus returns the health status of the bridge
 func (b *TapioEventBridge) GetHealthStatus() map[string]interface{} {
 	managerHealth := b.manager.Health()
-	
+
 	bridgeHealth := make(map[string]interface{})
 	bridgeHealth["manager_health"] = managerHealth
 	bridgeHealth["bridge_status"] = "healthy"
 	bridgeHealth["conversion_active"] = true
-	
+
 	return bridgeHealth
 }

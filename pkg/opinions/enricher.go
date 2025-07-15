@@ -133,7 +133,7 @@ func (e *OpinionEnricher) applyClusterDefaults(config *OpinionConfig, clusterTyp
 		if config.BehavioralConfig.DeviationSensitivity == 0 {
 			config.BehavioralConfig.DeviationSensitivity = 0.9
 		}
-		
+
 		// Enable all predictions in production
 		config.PredictionConfig.EnableOOMPrediction = true
 		config.PredictionConfig.EnableCascadePrediction = true
@@ -155,7 +155,7 @@ func (e *OpinionEnricher) applyClusterDefaults(config *OpinionConfig, clusterTyp
 		if config.BehavioralConfig.DeviationSensitivity == 0 {
 			config.BehavioralConfig.DeviationSensitivity = 0.5
 		}
-		
+
 		// Relax thresholds in dev
 		for key := range config.AnomalyThresholds {
 			config.AnomalyThresholds[key] *= 1.1 // 10% more relaxed
@@ -335,15 +335,15 @@ func (e *OpinionEnricher) mergeConfig(target, source *OpinionConfig) {
 // copyConfig creates a deep copy of the config
 func (e *OpinionEnricher) copyConfig(source *OpinionConfig) *OpinionConfig {
 	config := &OpinionConfig{
-		Metadata:            make(map[string]string),
-		ImportanceWeights:   make(map[string]float32),
-		CorrelationWindows:  make(map[string]time.Duration),
-		AnomalyThresholds:   make(map[string]float32),
-		ServiceLimits:       make(map[string]ServiceLimit),
-		BehavioralConfig:    source.BehavioralConfig,
-		PredictionConfig:    source.PredictionConfig,
-		Profile:             source.Profile,
-		BaseProfile:         source.BaseProfile,
+		Metadata:           make(map[string]string),
+		ImportanceWeights:  make(map[string]float32),
+		CorrelationWindows: make(map[string]time.Duration),
+		AnomalyThresholds:  make(map[string]float32),
+		ServiceLimits:      make(map[string]ServiceLimit),
+		BehavioralConfig:   source.BehavioralConfig,
+		PredictionConfig:   source.PredictionConfig,
+		Profile:            source.Profile,
+		BaseProfile:        source.BaseProfile,
 	}
 
 	// Copy maps
@@ -379,15 +379,15 @@ func loadDefaultTemplates() map[string]*OpinionTemplate {
 			Tags:        []string{"api", "stateless", "high-traffic"},
 			Config: OpinionConfig{
 				AnomalyThresholds: map[string]float32{
-					"memory_usage":   0.85,
-					"cpu_usage":      0.80,
-					"response_time":  0.95,
-					"error_rate":     0.02,
+					"memory_usage":  0.85,
+					"cpu_usage":     0.80,
+					"response_time": 0.95,
+					"error_rate":    0.02,
 				},
 				CorrelationWindows: map[string]time.Duration{
-					"oom_restart":      30 * time.Second,
-					"cascade_failure":  2 * time.Minute,
-					"network_timeout":  10 * time.Second,
+					"oom_restart":     30 * time.Second,
+					"cascade_failure": 2 * time.Minute,
+					"network_timeout": 10 * time.Second,
 				},
 				BehavioralConfig: BehavioralOpinions{
 					DeviationSensitivity: 0.8,
@@ -407,9 +407,9 @@ func loadDefaultTemplates() map[string]*OpinionTemplate {
 					"connection_pool": 0.90,
 				},
 				CorrelationWindows: map[string]time.Duration{
-					"oom_restart":         60 * time.Second,
-					"replication_lag":     30 * time.Second,
-					"backup_correlation":  5 * time.Minute,
+					"oom_restart":        60 * time.Second,
+					"replication_lag":    30 * time.Second,
+					"backup_correlation": 5 * time.Minute,
 				},
 				BehavioralConfig: BehavioralOpinions{
 					DeviationSensitivity: 0.9,
@@ -445,8 +445,8 @@ func getDefaultOpinions() *OpinionConfig {
 			"error_rate":   0.05,
 		},
 		CorrelationWindows: map[string]time.Duration{
-			"oom_restart":      30 * time.Second,
-			"cascade_failure":  5 * time.Minute,
+			"oom_restart":     30 * time.Second,
+			"cascade_failure": 5 * time.Minute,
 		},
 		BehavioralConfig: BehavioralOpinions{
 			LearningWindow:       7 * 24 * time.Hour,

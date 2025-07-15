@@ -58,7 +58,7 @@ func NewRuleExtractor() *RuleExtractor {
 			},
 			{
 				Name:    "service_memory_limit",
-				Pattern: regexp.MustCompile("`([^`]+)`.*?(?:can use up to|maximum|limit).*?(\d+)%.*?memory"),
+				Pattern: regexp.MustCompile("`([^`]+)`.*?(?:can use up to|maximum|limit).*?(\\d+)%.*?memory"),
 				Section: "memory",
 				Extract: func(matches []string, context string) ExtractedRule {
 					service := matches[1]

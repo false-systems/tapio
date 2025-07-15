@@ -1,0 +1,111 @@
+# Tapio OTEL Plugin Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tapio-otel-plugin
+  namespace: tapio-system
+  labels:
+    app: tapio-otel-plugin
+    component: plugin
+    plugin-type: export
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tapio-otel-plugin
+  template:
+    metadata:
+      labels:
+        app: tapio-otel-plugin
+        component: plugin
+        plugin-type: export
+    spec:
+      containers:
+      - name: tapio-otel-plugin
+        image: tapio/plugin-otel:latest
+        env:
+        - name: TAPIO_OTEL_ENDPOINT
+          value: "otel-collector:4317"
+        - name: TAPIO_OTEL_SERVICE_NAME
+          value: "tapio-otel-plugin"
+        - name: TAPIO_OTEL_DEBUG
+          value: "false"
+        - name: TAPIO_OTEL_CONFIG
+          value: "/etc/tapio/otel-config.yaml"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/tapio
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "ps aux | grep tapio-otel || exit 1"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: tapio-otel-plugin-config
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tapio-otel-plugin-config
+  namespace: tapio-system
+data:
+  otel-config.yaml: |
+    endpoint: "otel-collector:4317"
+    protocol: "grpc"
+    service_name: "tapio-otel-plugin"
+    service_version: "1.0.0"
+    environment: "production"
+    batch_size: 100
+    batch_timeout: "5s"
+    max_queue_size: 1000
+    enable_traces: true
+    enable_metrics: true
+    enable_logs: true
+    resource_attributes:
+      deployment.environment: "kubernetes"
+      service.namespace: "tapio-system"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tapio-otel-plugin
+  namespace: tapio-system
+  labels:
+    app: tapio-otel-plugin
+    component: plugin
+spec:
+  selector:
+    app: tapio-otel-plugin
+  ports:
+  - name: plugin
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP

@@ -10,23 +10,23 @@ import (
 
 // BinaryWriter provides high-performance binary writing with zero-allocation design
 type BinaryWriter struct {
-	buf      []byte    // Current buffer
-	pos      int       // Current position
-	capacity int       // Buffer capacity
-	scratch  [16]byte  // Scratch space for small writes
-	
+	buf      []byte   // Current buffer
+	pos      int      // Current position
+	capacity int      // Buffer capacity
+	scratch  [16]byte // Scratch space for small writes
+
 	// Performance optimization
-	enableBatching bool  // Enable write batching
-	batchSize      int   // Batch size for writes
-	batchCount     int   // Current batch count
-	
+	enableBatching bool // Enable write batching
+	batchSize      int  // Batch size for writes
+	batchCount     int  // Current batch count
+
 	// Checksum support
 	checksum       uint32 // Running checksum
 	enableChecksum bool   // Whether to calculate checksum
-	
+
 	// Statistics
-	writeOps       int64  // Number of write operations
-	bytesWritten   int64  // Total bytes written
+	writeOps     int64 // Number of write operations
+	bytesWritten int64 // Total bytes written
 }
 
 // NewBinaryWriter creates a new binary writer with specified initial capacity
@@ -73,13 +73,13 @@ func (w *BinaryWriter) WriteU8(value uint8) error {
 	if err := w.ensureSpace(1); err != nil {
 		return err
 	}
-	
+
 	w.buf = append(w.buf, value)
-	
+
 	if w.enableChecksum {
 		w.updateChecksum([]byte{value})
 	}
-	
+
 	w.writeOps++
 	w.bytesWritten++
 	return nil
@@ -90,14 +90,14 @@ func (w *BinaryWriter) WriteU16(value uint16) error {
 	if err := w.ensureSpace(2); err != nil {
 		return err
 	}
-	
+
 	binary.LittleEndian.PutUint16(w.scratch[:2], value)
 	w.buf = append(w.buf, w.scratch[:2]...)
-	
+
 	if w.enableChecksum {
 		w.updateChecksum(w.scratch[:2])
 	}
-	
+
 	w.writeOps++
 	w.bytesWritten += 2
 	return nil
@@ -108,14 +108,14 @@ func (w *BinaryWriter) WriteU32(value uint32) error {
 	if err := w.ensureSpace(4); err != nil {
 		return err
 	}
-	
+
 	binary.LittleEndian.PutUint32(w.scratch[:4], value)
 	w.buf = append(w.buf, w.scratch[:4]...)
-	
+
 	if w.enableChecksum {
 		w.updateChecksum(w.scratch[:4])
 	}
-	
+
 	w.writeOps++
 	w.bytesWritten += 4
 	return nil
@@ -126,14 +126,14 @@ func (w *BinaryWriter) WriteU64(value uint64) error {
 	if err := w.ensureSpace(8); err != nil {
 		return err
 	}
-	
+
 	binary.LittleEndian.PutUint64(w.scratch[:8], value)
 	w.buf = append(w.buf, w.scratch[:8]...)
-	
+
 	if w.enableChecksum {
 		w.updateChecksum(w.scratch[:8])
 	}
-	
+
 	w.writeOps++
 	w.bytesWritten += 8
 	return nil
@@ -185,7 +185,7 @@ func (w *BinaryWriter) WriteBytes(data []byte) error {
 	if err := w.WriteU32(uint32(len(data))); err != nil {
 		return fmt.Errorf("failed to write bytes length: %w", err)
 	}
-	
+
 	// Write data
 	return w.WriteBytesRaw(data)
 }
@@ -195,17 +195,17 @@ func (w *BinaryWriter) WriteBytesRaw(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	
+
 	if err := w.ensureSpace(len(data)); err != nil {
 		return err
 	}
-	
+
 	w.buf = append(w.buf, data...)
-	
+
 	if w.enableChecksum {
 		w.updateChecksum(data)
 	}
-	
+
 	w.writeOps++
 	w.bytesWritten += int64(len(data))
 	return nil
@@ -217,7 +217,7 @@ func (w *BinaryWriter) WriteString(s string) error {
 	if err := w.WriteU32(uint32(len(s))); err != nil {
 		return fmt.Errorf("failed to write string length: %w", err)
 	}
-	
+
 	// Write string data
 	return w.WriteStringRaw(s)
 }
@@ -227,7 +227,7 @@ func (w *BinaryWriter) WriteStringRaw(s string) error {
 	if len(s) == 0 {
 		return nil
 	}
-	
+
 	// Use unsafe to convert string to []byte without allocation
 	data := (*[1 << 30]byte)(unsafe.Pointer(unsafe.StringData(s)))[:len(s):len(s)]
 	return w.WriteBytesRaw(data)
@@ -264,7 +264,7 @@ func (w *BinaryWriter) WriteAligned(data []byte, alignment int) error {
 	// Calculate padding needed
 	currentPos := len(w.buf)
 	padding := (alignment - (currentPos % alignment)) % alignment
-	
+
 	// Write padding bytes
 	if padding > 0 {
 		paddingBytes := make([]byte, padding)
@@ -272,7 +272,7 @@ func (w *BinaryWriter) WriteAligned(data []byte, alignment int) error {
 			return fmt.Errorf("failed to write padding: %w", err)
 		}
 	}
-	
+
 	// Write aligned data
 	return w.WriteBytesRaw(data)
 }
@@ -282,12 +282,12 @@ func (w *BinaryWriter) WriteBatch(batchSize int, writeFunc func(*BinaryWriter) e
 	w.enableBatching = true
 	w.batchSize = batchSize
 	w.batchCount = 0
-	
+
 	defer func() {
 		w.enableBatching = false
 		w.batchCount = 0
 	}()
-	
+
 	return writeFunc(w)
 }
 
@@ -297,19 +297,19 @@ func (w *BinaryWriter) WriteRepeated(data []byte, count int) error {
 	if err := w.ensureSpace(totalSize); err != nil {
 		return err
 	}
-	
+
 	// Use optimized repetition for small data
 	if len(data) <= 8 && count > 8 {
 		return w.writeRepeatedSIMD(data, count)
 	}
-	
+
 	// Standard repetition
 	for i := 0; i < count; i++ {
 		if err := w.WriteBytesRaw(data); err != nil {
 			return fmt.Errorf("failed to write repeated data at index %d: %w", i, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -317,9 +317,9 @@ func (w *BinaryWriter) WriteRepeated(data []byte, count int) error {
 func (w *BinaryWriter) writeRepeatedSIMD(data []byte, count int) error {
 	// This would use actual SIMD instructions in a real implementation
 	// For now, we use an optimized loop with unrolling
-	
+
 	remaining := count
-	
+
 	// Unroll loop for better performance
 	for remaining >= 8 {
 		for i := 0; i < 8; i++ {
@@ -327,19 +327,19 @@ func (w *BinaryWriter) writeRepeatedSIMD(data []byte, count int) error {
 		}
 		remaining -= 8
 	}
-	
+
 	// Handle remaining iterations
 	for i := 0; i < remaining; i++ {
 		w.buf = append(w.buf, data...)
 	}
-	
+
 	if w.enableChecksum {
 		// Calculate checksum for all repeated data
 		totalSize := len(data) * count
 		checksumData := w.buf[len(w.buf)-totalSize:]
 		w.updateChecksum(checksumData)
 	}
-	
+
 	w.writeOps++
 	w.bytesWritten += int64(len(data) * count)
 	return nil
@@ -352,13 +352,13 @@ func (w *BinaryWriter) ensureSpace(needed int) error {
 	if required <= cap(w.buf) {
 		return nil
 	}
-	
+
 	// Calculate new capacity with growth factor
 	newCap := cap(w.buf) * 2
 	if newCap < required {
 		newCap = required
 	}
-	
+
 	// Limit maximum size
 	maxSize := 16 * 1024 * 1024 // 16MB max buffer
 	if newCap > maxSize {
@@ -367,13 +367,13 @@ func (w *BinaryWriter) ensureSpace(needed int) error {
 		}
 		newCap = maxSize
 	}
-	
+
 	// Allocate new buffer and copy data
 	newBuf := make([]byte, len(w.buf), newCap)
 	copy(newBuf, w.buf)
 	w.buf = newBuf
 	w.capacity = newCap
-	
+
 	return nil
 }
 
@@ -388,16 +388,16 @@ func (w *BinaryWriter) WriteCompact(value uint64, bitWidth int) error {
 	if bitWidth <= 0 || bitWidth > 64 {
 		return fmt.Errorf("invalid bit width: %d", bitWidth)
 	}
-	
+
 	// Pack value into minimum required bytes
 	bytes := (bitWidth + 7) / 8
-	
+
 	for i := 0; i < bytes; i++ {
 		if err := w.WriteU8(uint8(value >> (i * 8))); err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -412,14 +412,14 @@ func (w *BinaryWriter) WriteRLE(data []byte) error {
 	if len(data) == 0 {
 		return w.WriteVarInt(0)
 	}
-	
+
 	runs := w.calculateRuns(data)
-	
+
 	// Write number of runs
 	if err := w.WriteVarInt(uint64(len(runs))); err != nil {
 		return err
 	}
-	
+
 	// Write each run
 	for _, run := range runs {
 		if err := w.WriteU8(run.value); err != nil {
@@ -429,7 +429,7 @@ func (w *BinaryWriter) WriteRLE(data []byte) error {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -442,11 +442,11 @@ func (w *BinaryWriter) calculateRuns(data []byte) []rleRun {
 	if len(data) == 0 {
 		return nil
 	}
-	
+
 	var runs []rleRun
 	currentValue := data[0]
 	currentLength := 1
-	
+
 	for i := 1; i < len(data); i++ {
 		if data[i] == currentValue {
 			currentLength++
@@ -456,10 +456,10 @@ func (w *BinaryWriter) calculateRuns(data []byte) []rleRun {
 			currentLength = 1
 		}
 	}
-	
+
 	// Add final run
 	runs = append(runs, rleRun{value: currentValue, length: currentLength})
-	
+
 	return runs
 }
 
@@ -518,9 +518,9 @@ func (w *BinaryWriter) Clone() *BinaryWriter {
 		writeOps:       w.writeOps,
 		bytesWritten:   w.bytesWritten,
 	}
-	
+
 	copy(clone.buf, w.buf)
 	copy(clone.scratch[:], w.scratch[:])
-	
+
 	return clone
 }

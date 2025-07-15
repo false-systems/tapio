@@ -16,31 +16,31 @@ type CommandBus[T domain.TraceData] struct {
 	// Command handlers registry
 	handlers    map[CommandType]CommandHandler[T]
 	handlersMux sync.RWMutex
-	
+
 	// Middleware pipeline
 	middleware []CommandMiddleware[T]
-	
+
 	// Transaction management
 	transactionManager TransactionManager
-	
+
 	// Event publishing
 	eventBus *EventBus
-	
+
 	// Performance monitoring
 	metrics *CommandMetrics
-	
+
 	// Configuration
 	config CommandBusConfig
-	
+
 	// Async processing
 	asyncProcessor *AsyncCommandProcessor[T]
-	
+
 	// Circuit breaker for resilience
 	circuitBreaker *CircuitBreaker
-	
+
 	// Command validation
 	validator *CommandValidator[T]
-	
+
 	// Audit logging
 	auditLogger *AuditLogger
 }
@@ -91,28 +91,28 @@ type CommandBusConfig struct {
 	AsyncBufferSize       int
 	MaxConcurrentCommands int
 	CommandTimeout        time.Duration
-	
+
 	// Transaction configuration
-	EnableTransactions    bool
-	TransactionTimeout    time.Duration
-	IsolationLevel        TransactionIsolation
-	
+	EnableTransactions bool
+	TransactionTimeout time.Duration
+	IsolationLevel     TransactionIsolation
+
 	// Retry configuration
-	EnableRetry           bool
-	MaxRetryAttempts      int
-	RetryBackoff          time.Duration
-	RetryableErrors       []string
-	
+	EnableRetry      bool
+	MaxRetryAttempts int
+	RetryBackoff     time.Duration
+	RetryableErrors  []string
+
 	// Circuit breaker configuration
-	EnableCircuitBreaker  bool
-	FailureThreshold      int
-	RecoveryTimeout       time.Duration
-	
+	EnableCircuitBreaker bool
+	FailureThreshold     int
+	RecoveryTimeout      time.Duration
+
 	// Monitoring configuration
-	EnableMetrics         bool
-	EnableAuditLogging    bool
-	SlowCommandThreshold  time.Duration
-	
+	EnableMetrics        bool
+	EnableAuditLogging   bool
+	SlowCommandThreshold time.Duration
+
 	// Event publishing
 	EnableEventPublishing bool
 	EventPublishTimeout   time.Duration
@@ -124,29 +124,29 @@ func NewCommandBus[T domain.TraceData](
 	transactionManager TransactionManager,
 	eventBus *EventBus,
 ) *CommandBus[T] {
-	
+
 	applyCommandBusDefaults(&config)
-	
+
 	bus := &CommandBus[T]{
 		handlers:           make(map[CommandType]CommandHandler[T]),
 		middleware:         make([]CommandMiddleware[T], 0),
 		transactionManager: transactionManager,
-		eventBus:          eventBus,
-		config:            config,
-		metrics:           NewCommandMetrics(),
-		validator:         NewCommandValidator[T](),
-		auditLogger:       NewAuditLogger(),
+		eventBus:           eventBus,
+		config:             config,
+		metrics:            NewCommandMetrics(),
+		validator:          NewCommandValidator[T](),
+		auditLogger:        NewAuditLogger(),
 	}
-	
+
 	// Initialize async processor if enabled
 	if config.EnableAsyncProcessing {
 		bus.asyncProcessor = NewAsyncCommandProcessor[T](AsyncProcessorConfig{
-			BufferSize:      config.AsyncBufferSize,
-			MaxConcurrency:  config.MaxConcurrentCommands,
+			BufferSize:        config.AsyncBufferSize,
+			MaxConcurrency:    config.MaxConcurrentCommands,
 			ProcessingTimeout: config.CommandTimeout,
 		})
 	}
-	
+
 	// Initialize circuit breaker if enabled
 	if config.EnableCircuitBreaker {
 		bus.circuitBreaker = NewCircuitBreaker(CircuitBreakerConfig{
@@ -154,10 +154,10 @@ func NewCommandBus[T domain.TraceData](
 			RecoveryTimeout:  config.RecoveryTimeout,
 		})
 	}
-	
+
 	// Register default middleware
 	bus.registerDefaultMiddleware()
-	
+
 	return bus
 }
 
@@ -165,20 +165,20 @@ func NewCommandBus[T domain.TraceData](
 func (bus *CommandBus[T]) RegisterHandler(cmdType CommandType, handler CommandHandler[T]) error {
 	bus.handlersMux.Lock()
 	defer bus.handlersMux.Unlock()
-	
+
 	if _, exists := bus.handlers[cmdType]; exists {
 		return fmt.Errorf("handler already registered for command type: %s", cmdType)
 	}
-	
+
 	bus.handlers[cmdType] = handler
-	
+
 	bus.auditLogger.LogHandlerRegistration(AuditEvent{
 		Type:        "handler_registered",
 		CommandType: cmdType,
 		HandlerInfo: handler.GetHandlerInfo(),
 		Timestamp:   time.Now(),
 	})
-	
+
 	return nil
 }
 
@@ -187,10 +187,10 @@ func (bus *CommandBus[T]) Execute(ctx context.Context, cmd Command[T]) (*Command
 	startTime := time.Now()
 	commandID := cmd.GetCommandID()
 	commandType := cmd.GetCommandType()
-	
+
 	// Record command execution attempt
 	bus.metrics.RecordCommandAttempt(commandType)
-	
+
 	// Validate command
 	if err := bus.validator.Validate(cmd); err != nil {
 		bus.metrics.RecordCommandFailure(commandType, "validation_error")
@@ -200,7 +200,7 @@ func (bus *CommandBus[T]) Execute(ctx context.Context, cmd Command[T]) (*Command
 			Error:     fmt.Errorf("command validation failed: %w", err),
 		}, err
 	}
-	
+
 	// Get handler
 	handler, err := bus.getHandler(commandType)
 	if err != nil {
@@ -211,12 +211,12 @@ func (bus *CommandBus[T]) Execute(ctx context.Context, cmd Command[T]) (*Command
 			Error:     err,
 		}, err
 	}
-	
+
 	// Use circuit breaker if enabled
 	if bus.config.EnableCircuitBreaker {
 		return bus.executeWithCircuitBreaker(ctx, cmd, handler, startTime)
 	}
-	
+
 	// Execute with transaction support
 	return bus.executeWithTransaction(ctx, cmd, handler, startTime)
 }
@@ -226,20 +226,20 @@ func (bus *CommandBus[T]) ExecuteAsync(ctx context.Context, cmd Command[T]) (*As
 	if !bus.config.EnableAsyncProcessing {
 		return nil, fmt.Errorf("async processing not enabled")
 	}
-	
+
 	if bus.asyncProcessor == nil {
 		return nil, fmt.Errorf("async processor not initialized")
 	}
-	
+
 	// Submit command for async processing
 	asyncResult, err := bus.asyncProcessor.SubmitCommand(ctx, cmd)
 	if err != nil {
 		bus.metrics.RecordCommandFailure(cmd.GetCommandType(), "async_submission_failed")
 		return nil, fmt.Errorf("failed to submit async command: %w", err)
 	}
-	
+
 	bus.metrics.RecordAsyncCommandSubmitted(cmd.GetCommandType())
-	
+
 	return asyncResult, nil
 }
 
@@ -248,28 +248,28 @@ func (bus *CommandBus[T]) ExecuteBatch(
 	ctx context.Context,
 	commands []Command[T],
 ) (*BatchCommandResult[T], error) {
-	
+
 	if len(commands) == 0 {
 		return &BatchCommandResult[T]{}, nil
 	}
-	
+
 	startTime := time.Now()
 	batchID := generateBatchID()
-	
+
 	bus.metrics.RecordBatchCommandAttempt(len(commands))
-	
+
 	result := &BatchCommandResult[T]{
-		BatchID:    batchID,
-		Commands:   len(commands),
-		Results:    make([]*CommandResult[T], 0, len(commands)),
-		StartTime:  startTime,
+		BatchID:   batchID,
+		Commands:  len(commands),
+		Results:   make([]*CommandResult[T], 0, len(commands)),
+		StartTime: startTime,
 	}
-	
+
 	// Execute batch within transaction if enabled
 	if bus.config.EnableTransactions {
 		return bus.executeBatchWithTransaction(ctx, commands, result)
 	}
-	
+
 	// Execute commands sequentially without transaction
 	for _, cmd := range commands {
 		cmdResult, err := bus.Execute(ctx, cmd)
@@ -280,29 +280,29 @@ func (bus *CommandBus[T]) ExecuteBatch(
 				Error:     err,
 			}
 		}
-		
+
 		result.Results = append(result.Results, cmdResult)
-		
+
 		if cmdResult.Success {
 			result.SuccessCount++
 		} else {
 			result.FailureCount++
 		}
 	}
-	
+
 	result.Duration = time.Since(startTime)
 	bus.metrics.RecordBatchCommandComplete(result.SuccessCount, result.FailureCount, result.Duration)
-	
+
 	return result, nil
 }
 
 // AddMiddleware adds middleware to the processing pipeline
 func (bus *CommandBus[T]) AddMiddleware(middleware CommandMiddleware[T]) {
 	bus.middleware = append(bus.middleware, middleware)
-	
+
 	// Sort middleware by order
 	bus.sortMiddleware()
-	
+
 	bus.auditLogger.LogMiddlewareAdded(AuditEvent{
 		Type:           "middleware_added",
 		MiddlewareName: middleware.GetMiddlewareName(),
@@ -316,12 +316,12 @@ func (bus *CommandBus[T]) AddMiddleware(middleware CommandMiddleware[T]) {
 func (bus *CommandBus[T]) getHandler(cmdType CommandType) (CommandHandler[T], error) {
 	bus.handlersMux.RLock()
 	defer bus.handlersMux.RUnlock()
-	
+
 	handler, exists := bus.handlers[cmdType]
 	if !exists {
 		return nil, fmt.Errorf("no handler registered for command type: %s", cmdType)
 	}
-	
+
 	return handler, nil
 }
 
@@ -331,15 +331,15 @@ func (bus *CommandBus[T]) executeWithCircuitBreaker(
 	handler CommandHandler[T],
 	startTime time.Time,
 ) (*CommandResult[T], error) {
-	
+
 	var result *CommandResult[T]
 	var err error
-	
+
 	cbErr := bus.circuitBreaker.Execute(func() error {
 		result, err = bus.executeWithTransaction(ctx, cmd, handler, startTime)
 		return err
 	})
-	
+
 	if cbErr != nil {
 		bus.metrics.RecordCommandFailure(cmd.GetCommandType(), "circuit_breaker_open")
 		return &CommandResult[T]{
@@ -348,7 +348,7 @@ func (bus *CommandBus[T]) executeWithCircuitBreaker(
 			Error:     cbErr,
 		}, cbErr
 	}
-	
+
 	return result, err
 }
 
@@ -358,15 +358,15 @@ func (bus *CommandBus[T]) executeWithTransaction(
 	handler CommandHandler[T],
 	startTime time.Time,
 ) (*CommandResult[T], error) {
-	
+
 	if !bus.config.EnableTransactions {
 		return bus.executeWithMiddleware(ctx, cmd, handler, startTime)
 	}
-	
+
 	// Begin transaction
 	tx, err := bus.transactionManager.Begin(ctx, TransactionOptions{
 		IsolationLevel: bus.config.IsolationLevel,
-		Timeout:       bus.config.TransactionTimeout,
+		Timeout:        bus.config.TransactionTimeout,
 	})
 	if err != nil {
 		bus.metrics.RecordCommandFailure(cmd.GetCommandType(), "transaction_begin_failed")
@@ -376,13 +376,13 @@ func (bus *CommandBus[T]) executeWithTransaction(
 			Error:     fmt.Errorf("failed to begin transaction: %w", err),
 		}, err
 	}
-	
+
 	// Create transaction context
 	txCtx := bus.transactionManager.WithTransaction(ctx, tx)
-	
+
 	// Execute command within transaction
 	result, err := bus.executeWithMiddleware(txCtx, cmd, handler, startTime)
-	
+
 	if err != nil || !result.Success {
 		// Rollback transaction on error
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
@@ -394,11 +394,11 @@ func (bus *CommandBus[T]) executeWithTransaction(
 				Timestamp:   time.Now(),
 			})
 		}
-		
+
 		bus.metrics.RecordTransactionRollback(cmd.GetCommandType())
 		return result, err
 	}
-	
+
 	// Commit transaction on success
 	if commitErr := tx.Commit(); commitErr != nil {
 		bus.metrics.RecordCommandFailure(cmd.GetCommandType(), "transaction_commit_failed")
@@ -408,7 +408,7 @@ func (bus *CommandBus[T]) executeWithTransaction(
 			Error:     fmt.Errorf("failed to commit transaction: %w", commitErr),
 		}, commitErr
 	}
-	
+
 	bus.metrics.RecordTransactionCommit(cmd.GetCommandType())
 	return result, nil
 }
@@ -419,14 +419,14 @@ func (bus *CommandBus[T]) executeWithMiddleware(
 	handler CommandHandler[T],
 	startTime time.Time,
 ) (*CommandResult[T], error) {
-	
+
 	// Build middleware chain
 	var finalHandler CommandHandler[T] = &finalCommandHandler[T]{
-		handler:     handler,
-		bus:         bus,
-		startTime:   startTime,
+		handler:   handler,
+		bus:       bus,
+		startTime: startTime,
 	}
-	
+
 	// Apply middleware in reverse order (last middleware first)
 	for i := len(bus.middleware) - 1; i >= 0; i-- {
 		finalHandler = &middlewareHandler[T]{
@@ -434,14 +434,14 @@ func (bus *CommandBus[T]) executeWithMiddleware(
 			next:       finalHandler,
 		}
 	}
-	
+
 	// Execute command through middleware chain
 	result, err := finalHandler.Handle(ctx, cmd)
-	
+
 	// Record execution metrics
 	executionTime := time.Since(startTime)
 	bus.metrics.RecordCommandExecution(cmd.GetCommandType(), executionTime, err == nil)
-	
+
 	// Log slow commands
 	if executionTime > bus.config.SlowCommandThreshold {
 		bus.auditLogger.LogSlowCommand(AuditEvent{
@@ -452,12 +452,12 @@ func (bus *CommandBus[T]) executeWithMiddleware(
 			Timestamp:     time.Now(),
 		})
 	}
-	
+
 	// Publish events if successful
 	if result != nil && result.Success && len(result.Events) > 0 && bus.config.EnableEventPublishing {
 		go bus.publishEvents(ctx, result.Events)
 	}
-	
+
 	return result, err
 }
 
@@ -466,19 +466,19 @@ func (bus *CommandBus[T]) executeBatchWithTransaction(
 	commands []Command[T],
 	result *BatchCommandResult[T],
 ) (*BatchCommandResult[T], error) {
-	
+
 	// Begin transaction
 	tx, err := bus.transactionManager.Begin(ctx, TransactionOptions{
 		IsolationLevel: bus.config.IsolationLevel,
-		Timeout:       bus.config.TransactionTimeout,
+		Timeout:        bus.config.TransactionTimeout,
 	})
 	if err != nil {
 		return result, fmt.Errorf("failed to begin batch transaction: %w", err)
 	}
-	
+
 	// Create transaction context
 	txCtx := bus.transactionManager.WithTransaction(ctx, tx)
-	
+
 	// Execute all commands within transaction
 	allSuccessful := true
 	for _, cmd := range commands {
@@ -490,9 +490,9 @@ func (bus *CommandBus[T]) executeBatchWithTransaction(
 				Error:     err,
 			}
 		}
-		
+
 		result.Results = append(result.Results, cmdResult)
-		
+
 		if cmdResult.Success {
 			result.SuccessCount++
 		} else {
@@ -500,7 +500,7 @@ func (bus *CommandBus[T]) executeBatchWithTransaction(
 			allSuccessful = false
 		}
 	}
-	
+
 	if allSuccessful {
 		// Commit transaction if all commands successful
 		if commitErr := tx.Commit(); commitErr != nil {
@@ -519,7 +519,7 @@ func (bus *CommandBus[T]) executeBatchWithTransaction(
 		}
 		bus.metrics.RecordBatchTransactionRollback(len(commands))
 	}
-	
+
 	result.Duration = time.Since(result.StartTime)
 	return result, nil
 }
@@ -530,7 +530,7 @@ func (bus *CommandBus[T]) registerDefaultMiddleware() {
 	bus.AddMiddleware(NewValidationMiddleware[T]())
 	bus.AddMiddleware(NewRetryMiddleware[T](bus.config))
 	bus.AddMiddleware(NewMetricsMiddleware[T](bus.metrics))
-	
+
 	if bus.config.EnableAuditLogging {
 		bus.AddMiddleware(NewAuditMiddleware[T](bus.auditLogger))
 	}
@@ -551,7 +551,7 @@ func (bus *CommandBus[T]) publishEvents(ctx context.Context, events []domain.Tra
 	if bus.eventBus == nil {
 		return
 	}
-	
+
 	// Publish events asynchronously
 	for _, event := range events {
 		if err := bus.eventBus.Publish(ctx, event); err != nil {
@@ -617,9 +617,9 @@ const (
 )
 
 type HandlerInfo struct {
-	Name        string
-	Version     string
-	Description string
+	Name              string
+	Version           string
+	Description       string
 	SupportedCommands []CommandType
 }
 

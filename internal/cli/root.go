@@ -29,6 +29,9 @@ Features:
 	Example: `  # Check your cluster health
   tapio check
 
+  # Launch the native GUI interface  
+  tapio gui
+
   # Understand why a pod is failing
   tapio why my-broken-pod
 
@@ -51,7 +54,7 @@ Features:
 		}
 
 		unknownCmd := args[0]
-		validCommands := []string{"check", "why", "prometheus", "context", "use", "version", "diagnose"}
+		validCommands := []string{"check", "gui", "why", "prometheus", "context", "use", "version", "diagnose"}
 		suggestion := DidYouMeanSuggestion(unknownCmd, validCommands)
 
 		err := NewCLIError(
@@ -94,6 +97,7 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(checkCmd)
+	rootCmd.AddCommand(guiCmd)
 	rootCmd.AddCommand(whyCmd)
 	rootCmd.AddCommand(prometheusCmd)
 	rootCmd.AddCommand(contextCmd)

@@ -51,7 +51,7 @@ func GetSupportedCollectors() []string {
 	if platform.HasEBPF {
 		supported = append(supported, "ebpf", "memory", "network")
 	}
-	
+
 	if platform.HasJournald {
 		supported = append(supported, "journald", "systemd")
 	}
@@ -76,7 +76,7 @@ func IsCollectorSupported(collectorType string) bool {
 // GetPlatformMessage returns a descriptive message about platform support
 func GetPlatformMessage(collectorType string) string {
 	platform := GetCurrentPlatform()
-	
+
 	switch collectorType {
 	case "ebpf":
 		if platform.HasEBPF {

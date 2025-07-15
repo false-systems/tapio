@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	
+
 	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
@@ -23,7 +23,7 @@ func NewCorrelationClient(serverAddr string) (*CorrelationClient, error) {
 		serverAddr = "localhost:9090" // Default correlation server address
 	}
 
-	conn, err := grpc.Dial(serverAddr, 
+	conn, err := grpc.Dial(serverAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithTimeout(5*time.Second),
 	)
@@ -116,7 +116,7 @@ func FormatPrediction(pred *correlation.Prediction) string {
 // FormatInsight formats an insight for CLI output
 func FormatInsight(insight *correlation.InsightResponse) string {
 	output := fmt.Sprintf("[%s] %s\n", insight.Severity, insight.Title)
-	
+
 	if insight.Description != "" {
 		output += fmt.Sprintf("  %s\n", insight.Description)
 	}

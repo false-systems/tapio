@@ -20,16 +20,16 @@ type IntegratedManager struct {
 	correlationEngine events_correlation.Engine
 	eventStore        events_correlation.EventStore
 	eventBridge       *bridge.TapioEventBridge
-	
+
 	// Channels
 	resultsChan chan events_correlation.Result
 	ctx         context.Context
 	cancel      context.CancelFunc
-	
+
 	// State
 	mu        sync.RWMutex
 	isRunning bool
-	
+
 	// Configuration
 	config IntegrationConfig
 }
@@ -37,19 +37,19 @@ type IntegratedManager struct {
 // IntegrationConfig configures the integrated system
 type IntegrationConfig struct {
 	// Event processing
-	EventBufferSize    int
-	CorrelationWindow  time.Duration
-	ResultBufferSize   int
-	
+	EventBufferSize   int
+	CorrelationWindow time.Duration
+	ResultBufferSize  int
+
 	// Performance tuning
-	MaxConcurrency     int
-	ProcessingTimeout  time.Duration
-	
+	MaxConcurrency    int
+	ProcessingTimeout time.Duration
+
 	// Rule configuration
 	EnableMemoryRules  bool
 	EnableCPURules     bool
 	EnableNetworkRules bool
-	
+
 	// Tapio manager config
 	TapioConfig collector.ManagerConfig
 }
@@ -73,26 +73,26 @@ func DefaultIntegrationConfig() IntegrationConfig {
 func NewIntegratedManager(config IntegrationConfig) *IntegratedManager {
 	// Create Tapio manager
 	tapioManager := collector.NewSimpleManager(config.TapioConfig)
-	
+
 	// Create event store
 	eventStore := store.NewMemoryEventStore(10000, 24*time.Hour)
-	
+
 	// Create correlation engine
 	correlationEngine := events_correlation.NewEngine(eventStore,
 		events_correlation.WithWindowSize(config.CorrelationWindow),
 		events_correlation.WithMaxConcurrentRules(config.MaxConcurrency),
 	)
-	
+
 	// Create event bridge
 	eventBridge := bridge.NewTapioEventBridge(tapioManager)
-	
+
 	return &IntegratedManager{
 		tapioManager:      tapioManager,
 		correlationEngine: correlationEngine,
 		eventStore:        eventStore,
 		eventBridge:       eventBridge,
 		resultsChan:       make(chan events_correlation.Result, config.ResultBufferSize),
-		config:           config,
+		config:            config,
 	}
 }
 
@@ -100,17 +100,17 @@ func NewIntegratedManager(config IntegrationConfig) *IntegratedManager {
 func (m *IntegratedManager) RegisterCollectors(collectors ...collector.Collector) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.isRunning {
 		return fmt.Errorf("cannot register collectors while running")
 	}
-	
+
 	for _, c := range collectors {
 		if err := m.tapioManager.Register(c); err != nil {
 			return fmt.Errorf("failed to register collector %s: %w", c.Name(), err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -118,40 +118,40 @@ func (m *IntegratedManager) RegisterCollectors(collectors ...collector.Collector
 func (m *IntegratedManager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.isRunning {
 		return fmt.Errorf("manager already running")
 	}
-	
+
 	m.ctx, m.cancel = context.WithCancel(ctx)
-	
+
 	// Start Tapio manager first
 	if err := m.tapioManager.Start(m.ctx); err != nil {
 		return fmt.Errorf("failed to start Tapio manager: %w", err)
 	}
-	
+
 	// Start correlation engine
 	if err := m.correlationEngine.Start(m.ctx); err != nil {
 		m.tapioManager.Stop()
 		return fmt.Errorf("failed to start correlation engine: %w", err)
 	}
-	
+
 	// Register correlation rules
 	if err := m.registerRules(); err != nil {
 		m.correlationEngine.Stop()
 		m.tapioManager.Stop()
 		return fmt.Errorf("failed to register correlation rules: %w", err)
 	}
-	
+
 	// Start event processing
 	go m.processEvents()
-	
+
 	// Start result forwarding
 	go m.forwardResults()
-	
+
 	// Start cleanup routine
 	go m.startCleanupRoutine()
-	
+
 	m.isRunning = true
 	return nil
 }
@@ -170,7 +170,7 @@ func (m *IntegratedManager) registerRules() error {
 			return fmt.Errorf("failed to register OOM prediction rule: %w", err)
 		}
 	}
-	
+
 	if m.config.EnableCPURules {
 		// CPU rules
 		if err := m.correlationEngine.RegisterRule(rules.CPUThrottleDetection()); err != nil {
@@ -183,7 +183,7 @@ func (m *IntegratedManager) registerRules() error {
 			return fmt.Errorf("failed to register high CPU rule: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -191,12 +191,12 @@ func (m *IntegratedManager) registerRules() error {
 func (m *IntegratedManager) processEvents() {
 	// Get event stream from bridge
 	events := m.eventBridge.StreamEvents()
-	
+
 	// Collect events in batches for processing
 	eventBatch := make([]events_correlation.Event, 0, 100)
 	batchTimer := time.NewTicker(time.Second)
 	defer batchTimer.Stop()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -205,22 +205,22 @@ func (m *IntegratedManager) processEvents() {
 			if !ok {
 				return
 			}
-			
+
 			// Store event in the event store
 			if err := m.eventStore.StoreEvent(m.ctx, event); err != nil {
 				// Log error but continue processing
 				fmt.Printf("Failed to store event: %v\n", err)
 			}
-			
+
 			// Add to batch
 			eventBatch = append(eventBatch, event)
-			
+
 			// Process batch if it's full
 			if len(eventBatch) >= 100 {
 				m.processBatch(eventBatch)
 				eventBatch = eventBatch[:0]
 			}
-			
+
 		case <-batchTimer.C:
 			// Process any remaining events in batch
 			if len(eventBatch) > 0 {
@@ -238,7 +238,7 @@ func (m *IntegratedManager) processBatch(events []events_correlation.Event) {
 		fmt.Printf("Failed to process events: %v\n", err)
 		return
 	}
-	
+
 	// Forward results
 	for _, result := range results {
 		select {
@@ -261,7 +261,7 @@ func (m *IntegratedManager) cleanOldEvents() {
 func (m *IntegratedManager) startCleanupRoutine() {
 	ticker := time.NewTicker(m.config.CorrelationWindow)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -276,7 +276,7 @@ func (m *IntegratedManager) startCleanupRoutine() {
 func (m *IntegratedManager) forwardResults() {
 	// Also forward Tapio insights through the bridge
 	tapioInsights := m.eventBridge.GetInsights()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -285,7 +285,7 @@ func (m *IntegratedManager) forwardResults() {
 			if !ok {
 				continue
 			}
-			
+
 			// Forward Tapio insights as correlation results
 			select {
 			case m.resultsChan <- insight:
@@ -305,18 +305,18 @@ func (m *IntegratedManager) Results() <-chan events_correlation.Result {
 func (m *IntegratedManager) GetStats() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	stats := make(map[string]interface{})
-	
+
 	// Tapio manager stats
 	stats["tapio"] = m.tapioManager.GetStats()
-	
+
 	// Correlation engine stats
 	stats["correlation"] = m.correlationEngine.GetStats()
-	
+
 	// Bridge health
 	stats["bridge"] = m.eventBridge.GetHealthStatus()
-	
+
 	// Integration stats
 	stats["integration"] = map[string]interface{}{
 		"is_running":         m.isRunning,
@@ -328,7 +328,7 @@ func (m *IntegratedManager) GetStats() map[string]interface{} {
 			"network": m.config.EnableNetworkRules,
 		},
 	}
-	
+
 	return stats
 }
 
@@ -336,30 +336,30 @@ func (m *IntegratedManager) GetStats() map[string]interface{} {
 func (m *IntegratedManager) Health() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	health := make(map[string]interface{})
-	
+
 	// Tapio manager health
 	health["tapio_collectors"] = m.tapioManager.Health()
-	
+
 	// Bridge health
 	health["event_bridge"] = m.eventBridge.GetHealthStatus()
-	
+
 	// Integration health
 	integrationHealth := map[string]interface{}{
-		"status":         "healthy",
-		"is_running":     m.isRunning,
-		"context":        "correlation_engine_integrated",
+		"status":     "healthy",
+		"is_running": m.isRunning,
+		"context":    "correlation_engine_integrated",
 	}
-	
+
 	// Check if system is overloaded
 	if len(m.resultsChan) > int(float64(m.config.ResultBufferSize)*0.8) {
 		integrationHealth["status"] = "warning"
 		integrationHealth["message"] = "Results buffer nearly full"
 	}
-	
+
 	health["integration"] = integrationHealth
-	
+
 	return health
 }
 
@@ -367,30 +367,30 @@ func (m *IntegratedManager) Health() map[string]interface{} {
 func (m *IntegratedManager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if !m.isRunning {
 		return nil
 	}
-	
+
 	// Stop correlation engine
 	if err := m.correlationEngine.Stop(); err != nil {
 		fmt.Printf("Error stopping correlation engine: %v\n", err)
 	}
-	
+
 	// Stop Tapio manager
 	if err := m.tapioManager.Stop(); err != nil {
 		// Log error but continue cleanup
 		fmt.Printf("Error stopping Tapio manager: %v\n", err)
 	}
-	
+
 	// Cancel context
 	if m.cancel != nil {
 		m.cancel()
 	}
-	
+
 	// Close results channel
 	close(m.resultsChan)
-	
+
 	m.isRunning = false
 	return nil
 }
@@ -399,7 +399,7 @@ func (m *IntegratedManager) Stop() error {
 func CreateExampleSetup() (*IntegratedManager, error) {
 	config := DefaultIntegrationConfig()
 	manager := NewIntegratedManager(config)
-	
+
 	// Note: In a real setup, you would create and register actual collectors:
 	//
 	// // Create eBPF collector
@@ -415,19 +415,19 @@ func CreateExampleSetup() (*IntegratedManager, error) {
 	// if err := manager.RegisterCollectors(ebpfCollector, k8sCollector); err != nil {
 	//     return nil, err
 	// }
-	
+
 	return manager, nil
 }
 
 // ProcessResults shows an example of how to process correlation results
 func ProcessResults(manager *IntegratedManager) {
 	results := manager.Results()
-	
+
 	for result := range results {
 		fmt.Printf("CORRELATION RESULT: %s\n", result.Title)
 		fmt.Printf("  Severity: %s | Confidence: %.2f\n", result.Severity, result.Confidence)
 		fmt.Printf("  Category: %s | Description: %s\n", result.Category, result.Description)
-		
+
 		// Print evidence
 		if len(result.Evidence.Events) > 0 {
 			fmt.Printf("  Evidence: %d events\n", len(result.Evidence.Events))
@@ -438,7 +438,7 @@ func ProcessResults(manager *IntegratedManager) {
 				fmt.Printf("    - %s: %s\n", entity.Type, entity.String())
 			}
 		}
-		
+
 		// Print recommendations
 		if len(result.Recommendations) > 0 {
 			fmt.Printf("  Recommendations:\n")
@@ -446,7 +446,7 @@ func ProcessResults(manager *IntegratedManager) {
 				fmt.Printf("    - %s\n", rec)
 			}
 		}
-		
+
 		// Print actions
 		if len(result.Actions) > 0 {
 			fmt.Printf("  Actions:\n")
@@ -459,7 +459,7 @@ func ProcessResults(manager *IntegratedManager) {
 				}
 			}
 		}
-		
+
 		fmt.Println("---")
 	}
 }

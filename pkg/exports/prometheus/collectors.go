@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 // CustomCollector implements prometheus.Collector for Tapio-specific metrics
@@ -18,19 +18,19 @@ type CustomCollector struct {
 	systemHealthDesc      *prometheus.Desc
 	entityHealthDesc      *prometheus.Desc
 	processingLatencyDesc *prometheus.Desc
-	
+
 	// Data sources
-	correlationProvider   CorrelationProvider
-	systemHealthProvider  SystemHealthProvider
-	
+	correlationProvider  CorrelationProvider
+	systemHealthProvider SystemHealthProvider
+
 	// Configuration
 	config *CollectorConfig
-	
+
 	// State management
 	mutex        sync.RWMutex
 	lastScrape   time.Time
 	cacheTimeout time.Duration
-	
+
 	// Cached metrics
 	cachedMetrics []prometheus.Metric
 	cacheValid    bool
@@ -43,25 +43,25 @@ type CollectorConfig struct {
 	Subsystem           string
 	IncludeTimestamp    bool
 	IncludeInstanceInfo bool
-	
+
 	// Performance settings
 	CacheTimeout        time.Duration
 	MaxMetricsPerScrape int
 	CollectionTimeout   time.Duration
-	
+
 	// Data source settings
-	EnableRealTimeData    bool
-	EnableHistoricalData  bool
-	HistoricalLookback    time.Duration
-	
+	EnableRealTimeData   bool
+	EnableHistoricalData bool
+	HistoricalLookback   time.Duration
+
 	// Feature flags
-	EnablePatternMetrics  bool
-	EnableSystemMetrics   bool
-	EnableEntityMetrics   bool
-	
+	EnablePatternMetrics bool
+	EnableSystemMetrics  bool
+	EnableEntityMetrics  bool
+
 	// Labels
-	ConstLabels    map[string]string
-	DynamicLabels  []string
+	ConstLabels   map[string]string
+	DynamicLabels []string
 }
 
 // CorrelationProvider interface for retrieving correlation data
@@ -83,46 +83,46 @@ type CorrelationStats struct {
 	TotalCorrelations    int64
 	ActiveCorrelations   int64
 	ResolvedCorrelations int64
-	ByCategory          map[string]int64
-	BySeverity          map[string]int64
-	AvgConfidence       float64
-	AvgProcessingTime   time.Duration
+	ByCategory           map[string]int64
+	BySeverity           map[string]int64
+	AvgConfidence        float64
+	AvgProcessingTime    time.Duration
 }
 
 // PatternStats represents pattern detection statistics
 type PatternStats struct {
-	PatternsDetected    int64
-	TruePositives       int64
-	FalsePositives      int64
-	DetectionAccuracy   float64
-	AvgConfidence       float64
-	ByPatternType       map[string]int64
+	PatternsDetected  int64
+	TruePositives     int64
+	FalsePositives    int64
+	DetectionAccuracy float64
+	AvgConfidence     float64
+	ByPatternType     map[string]int64
 }
 
 // SystemHealth represents overall system health
 type SystemHealth struct {
-	OverallScore       float64
-	ComponentScores    map[string]float64
-	ActiveIssues       int64
-	CriticalIssues     int64
-	LastUpdate         time.Time
+	OverallScore    float64
+	ComponentScores map[string]float64
+	ActiveIssues    int64
+	CriticalIssues  int64
+	LastUpdate      time.Time
 }
 
 // ResourceUsage represents resource utilization
 type ResourceUsage struct {
-	CPUUsage           map[string]float64 // node -> usage
-	MemoryUsage        map[string]float64 // node -> usage
-	StorageUsage       map[string]float64 // node -> usage
-	NetworkUsage       map[string]float64 // node -> usage
-	PodCount           map[string]int64   // namespace -> count
+	CPUUsage     map[string]float64 // node -> usage
+	MemoryUsage  map[string]float64 // node -> usage
+	StorageUsage map[string]float64 // node -> usage
+	NetworkUsage map[string]float64 // node -> usage
+	PodCount     map[string]int64   // namespace -> count
 }
 
 // EntityHealth represents health of individual entities
 type EntityHealth struct {
-	Entity     correlation.Entity
+	Entity      correlation.Entity
 	HealthScore float64
-	Issues     []string
-	LastSeen   time.Time
+	Issues      []string
+	LastSeen    time.Time
 }
 
 // NewCustomCollector creates a new custom Prometheus collector
@@ -130,15 +130,15 @@ func NewCustomCollector(correlationProvider CorrelationProvider, systemHealthPro
 	if config == nil {
 		config = DefaultCollectorConfig()
 	}
-	
+
 	cc := &CustomCollector{
 		correlationProvider:  correlationProvider,
 		systemHealthProvider: systemHealthProvider,
-		config:              config,
-		cacheTimeout:        config.CacheTimeout,
-		cachedMetrics:       make([]prometheus.Metric, 0),
+		config:               config,
+		cacheTimeout:         config.CacheTimeout,
+		cachedMetrics:        make([]prometheus.Metric, 0),
 	}
-	
+
 	cc.initializeDescriptors()
 	return cc
 }
@@ -146,21 +146,21 @@ func NewCustomCollector(correlationProvider CorrelationProvider, systemHealthPro
 // DefaultCollectorConfig returns default collector configuration
 func DefaultCollectorConfig() *CollectorConfig {
 	return &CollectorConfig{
-		Namespace:             "tapio",
-		Subsystem:             "collector",
-		IncludeTimestamp:      true,
-		IncludeInstanceInfo:   true,
-		CacheTimeout:          30 * time.Second,
-		MaxMetricsPerScrape:   1000,
-		CollectionTimeout:     10 * time.Second,
-		EnableRealTimeData:    true,
-		EnableHistoricalData:  false,
-		HistoricalLookback:    1 * time.Hour,
-		EnablePatternMetrics:  true,
-		EnableSystemMetrics:   true,
-		EnableEntityMetrics:   true,
-		ConstLabels:           make(map[string]string),
-		DynamicLabels:         []string{"namespace", "node", "cluster"},
+		Namespace:            "tapio",
+		Subsystem:            "collector",
+		IncludeTimestamp:     true,
+		IncludeInstanceInfo:  true,
+		CacheTimeout:         30 * time.Second,
+		MaxMetricsPerScrape:  1000,
+		CollectionTimeout:    10 * time.Second,
+		EnableRealTimeData:   true,
+		EnableHistoricalData: false,
+		HistoricalLookback:   1 * time.Hour,
+		EnablePatternMetrics: true,
+		EnableSystemMetrics:  true,
+		EnableEntityMetrics:  true,
+		ConstLabels:          make(map[string]string),
+		DynamicLabels:        []string{"namespace", "node", "cluster"},
 	}
 }
 
@@ -173,7 +173,7 @@ func (cc *CustomCollector) initializeDescriptors() {
 		[]string{"rule_id", "rule_name", "severity", "category", "confidence_range"},
 		cc.config.ConstLabels,
 	)
-	
+
 	// Pattern metrics
 	if cc.config.EnablePatternMetrics {
 		cc.patternDesc = prometheus.NewDesc(
@@ -183,7 +183,7 @@ func (cc *CustomCollector) initializeDescriptors() {
 			cc.config.ConstLabels,
 		)
 	}
-	
+
 	// System health metrics
 	if cc.config.EnableSystemMetrics {
 		cc.systemHealthDesc = prometheus.NewDesc(
@@ -193,7 +193,7 @@ func (cc *CustomCollector) initializeDescriptors() {
 			cc.config.ConstLabels,
 		)
 	}
-	
+
 	// Entity health metrics
 	if cc.config.EnableEntityMetrics {
 		cc.entityHealthDesc = prometheus.NewDesc(
@@ -203,7 +203,7 @@ func (cc *CustomCollector) initializeDescriptors() {
 			cc.config.ConstLabels,
 		)
 	}
-	
+
 	// Processing latency
 	cc.processingLatencyDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(cc.config.Namespace, cc.config.Subsystem, "processing_latency_seconds"),
@@ -216,19 +216,19 @@ func (cc *CustomCollector) initializeDescriptors() {
 // Describe implements prometheus.Collector interface
 func (cc *CustomCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- cc.correlationDesc
-	
+
 	if cc.config.EnablePatternMetrics && cc.patternDesc != nil {
 		ch <- cc.patternDesc
 	}
-	
+
 	if cc.config.EnableSystemMetrics && cc.systemHealthDesc != nil {
 		ch <- cc.systemHealthDesc
 	}
-	
+
 	if cc.config.EnableEntityMetrics && cc.entityHealthDesc != nil {
 		ch <- cc.entityHealthDesc
 	}
-	
+
 	ch <- cc.processingLatencyDesc
 }
 
@@ -245,10 +245,10 @@ func (cc *CustomCollector) Collect(ch chan<- prometheus.Metric) {
 			"collection", "true",
 		)
 	}()
-	
+
 	cc.mutex.Lock()
 	defer cc.mutex.Unlock()
-	
+
 	// Use cache if still valid
 	if cc.cacheValid && time.Since(cc.lastScrape) < cc.cacheTimeout {
 		for _, metric := range cc.cachedMetrics {
@@ -256,44 +256,44 @@ func (cc *CustomCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 		return
 	}
-	
+
 	// Collect fresh metrics
 	ctx, cancel := context.WithTimeout(context.Background(), cc.config.CollectionTimeout)
 	defer cancel()
-	
+
 	metrics := make([]prometheus.Metric, 0, cc.config.MaxMetricsPerScrape)
-	
+
 	// Collect correlation metrics
 	if correlationMetrics := cc.collectCorrelationMetrics(ctx); correlationMetrics != nil {
 		metrics = append(metrics, correlationMetrics...)
 	}
-	
+
 	// Collect pattern metrics
 	if cc.config.EnablePatternMetrics {
 		if patternMetrics := cc.collectPatternMetrics(ctx); patternMetrics != nil {
 			metrics = append(metrics, patternMetrics...)
 		}
 	}
-	
+
 	// Collect system health metrics
 	if cc.config.EnableSystemMetrics {
 		if systemMetrics := cc.collectSystemMetrics(ctx); systemMetrics != nil {
 			metrics = append(metrics, systemMetrics...)
 		}
 	}
-	
+
 	// Collect entity health metrics
 	if cc.config.EnableEntityMetrics {
 		if entityMetrics := cc.collectEntityMetrics(ctx); entityMetrics != nil {
 			metrics = append(metrics, entityMetrics...)
 		}
 	}
-	
+
 	// Update cache
 	cc.cachedMetrics = metrics
 	cc.cacheValid = true
 	cc.lastScrape = time.Now()
-	
+
 	// Send metrics
 	for _, metric := range metrics {
 		if len(metrics) >= cc.config.MaxMetricsPerScrape {
@@ -317,14 +317,14 @@ func (cc *CustomCollector) collectCorrelationMetrics(ctx context.Context) []prom
 			),
 		}
 	}
-	
+
 	var metrics []prometheus.Metric
-	
+
 	// Create metrics for each category
 	for category, count := range stats.ByCategory {
 		for severity, sevCount := range stats.BySeverity {
 			confidenceRange := cc.getConfidenceRange(stats.AvgConfidence)
-			
+
 			metric := prometheus.MustNewConstMetric(
 				cc.correlationDesc,
 				prometheus.GaugeValue,
@@ -338,7 +338,7 @@ func (cc *CustomCollector) collectCorrelationMetrics(ctx context.Context) []prom
 			metrics = append(metrics, metric)
 		}
 	}
-	
+
 	return metrics
 }
 
@@ -347,19 +347,19 @@ func (cc *CustomCollector) collectPatternMetrics(ctx context.Context) []promethe
 	if cc.patternDesc == nil {
 		return nil
 	}
-	
+
 	stats, err := cc.correlationProvider.GetPatternStats(ctx)
 	if err != nil {
 		return nil
 	}
-	
+
 	var metrics []prometheus.Metric
-	
+
 	// Create metrics for each pattern type
 	for patternType, count := range stats.ByPatternType {
 		accuracyRange := cc.getAccuracyRange(stats.DetectionAccuracy)
 		detectionRate := cc.calculateDetectionRate(stats.TruePositives, stats.FalsePositives)
-		
+
 		metric := prometheus.MustNewConstMetric(
 			cc.patternDesc,
 			prometheus.GaugeValue,
@@ -370,7 +370,7 @@ func (cc *CustomCollector) collectPatternMetrics(ctx context.Context) []promethe
 		)
 		metrics = append(metrics, metric)
 	}
-	
+
 	return metrics
 }
 
@@ -379,14 +379,14 @@ func (cc *CustomCollector) collectSystemMetrics(ctx context.Context) []prometheu
 	if cc.systemHealthDesc == nil {
 		return nil
 	}
-	
+
 	health, err := cc.systemHealthProvider.GetSystemHealth(ctx)
 	if err != nil {
 		return nil
 	}
-	
+
 	var metrics []prometheus.Metric
-	
+
 	// Overall health score
 	overallMetric := prometheus.MustNewConstMetric(
 		cc.systemHealthDesc,
@@ -397,7 +397,7 @@ func (cc *CustomCollector) collectSystemMetrics(ctx context.Context) []prometheu
 		"", // cluster
 	)
 	metrics = append(metrics, overallMetric)
-	
+
 	// Component health scores
 	for component, score := range health.ComponentScores {
 		metric := prometheus.MustNewConstMetric(
@@ -410,7 +410,7 @@ func (cc *CustomCollector) collectSystemMetrics(ctx context.Context) []prometheu
 		)
 		metrics = append(metrics, metric)
 	}
-	
+
 	return metrics
 }
 
@@ -419,21 +419,21 @@ func (cc *CustomCollector) collectEntityMetrics(ctx context.Context) []prometheu
 	if cc.entityHealthDesc == nil {
 		return nil
 	}
-	
+
 	entities, err := cc.systemHealthProvider.GetEntityHealth(ctx)
 	if err != nil {
 		return nil
 	}
-	
+
 	var metrics []prometheus.Metric
-	
+
 	// Limit number of entity metrics to prevent explosion
 	maxEntities := cc.config.MaxMetricsPerScrape / 4 // Reserve space for other metrics
 	for i, entity := range entities {
 		if i >= maxEntities {
 			break
 		}
-		
+
 		metric := prometheus.MustNewConstMetric(
 			cc.entityHealthDesc,
 			prometheus.GaugeValue,
@@ -445,7 +445,7 @@ func (cc *CustomCollector) collectEntityMetrics(ctx context.Context) []prometheu
 		)
 		metrics = append(metrics, metric)
 	}
-	
+
 	return metrics
 }
 
@@ -482,7 +482,7 @@ func (cc *CustomCollector) calculateDetectionRate(truePositives, falsePositives 
 	if total == 0 {
 		return "no_data"
 	}
-	
+
 	rate := float64(truePositives) / float64(total)
 	switch {
 	case rate >= 0.9:
@@ -547,7 +547,7 @@ func (fc *FactoryCollector) GetCollector(component string) (*CustomCollector, bo
 func (fc *FactoryCollector) GetAllCollectors() map[string]*CustomCollector {
 	fc.mutex.RLock()
 	defer fc.mutex.RUnlock()
-	
+
 	result := make(map[string]*CustomCollector)
 	for k, v := range fc.collectors {
 		result[k] = v

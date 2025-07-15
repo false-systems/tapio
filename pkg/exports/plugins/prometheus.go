@@ -20,46 +20,46 @@ import (
 
 // PrometheusExportPlugin implements Prometheus metrics export
 type PrometheusExportPlugin struct {
-	name           string
-	config         *PrometheusExportConfig
-	pusher         *push.Pusher
-	registry       *prometheus.Registry
-	metrics        *PrometheusMetrics
-	customMetrics  map[string]prometheus.Collector
-	metricsMutex   sync.RWMutex
-	httpClient     *http.Client
+	name          string
+	config        *PrometheusExportConfig
+	pusher        *push.Pusher
+	registry      *prometheus.Registry
+	metrics       *PrometheusMetrics
+	customMetrics map[string]prometheus.Collector
+	metricsMutex  sync.RWMutex
+	httpClient    *http.Client
 }
 
 // PrometheusExportConfig configures the Prometheus export plugin
 type PrometheusExportConfig struct {
 	// Push Gateway settings
-	PushGatewayURL    string                `json:"push_gateway_url"`
-	Job               string                `json:"job"`
-	Instance          string                `json:"instance"`
-	PushInterval      time.Duration         `json:"push_interval"`
-	
+	PushGatewayURL string        `json:"push_gateway_url"`
+	Job            string        `json:"job"`
+	Instance       string        `json:"instance"`
+	PushInterval   time.Duration `json:"push_interval"`
+
 	// Authentication
-	BasicAuth         *BasicAuth            `json:"basic_auth,omitempty"`
-	BearerToken       string                `json:"bearer_token,omitempty"`
-	
+	BasicAuth   *BasicAuth `json:"basic_auth,omitempty"`
+	BearerToken string     `json:"bearer_token,omitempty"`
+
 	// TLS settings
-	TLSConfig         *TLSConfig            `json:"tls_config,omitempty"`
-	
+	TLSConfig *TLSConfig `json:"tls_config,omitempty"`
+
 	// Metric settings
-	MetricPrefix      string                `json:"metric_prefix"`
-	IncludeTimestamp  bool                  `json:"include_timestamp"`
-	Labels            map[string]string     `json:"labels"`
-	
+	MetricPrefix     string            `json:"metric_prefix"`
+	IncludeTimestamp bool              `json:"include_timestamp"`
+	Labels           map[string]string `json:"labels"`
+
 	// Batching settings
-	BatchSize         int                   `json:"batch_size"`
-	FlushInterval     time.Duration         `json:"flush_interval"`
-	
+	BatchSize     int           `json:"batch_size"`
+	FlushInterval time.Duration `json:"flush_interval"`
+
 	// Timeout settings
-	RequestTimeout    time.Duration         `json:"request_timeout"`
-	
+	RequestTimeout time.Duration `json:"request_timeout"`
+
 	// Grouping settings
-	GroupingKey       map[string]string     `json:"grouping_key"`
-	DeleteOnShutdown  bool                  `json:"delete_on_shutdown"`
+	GroupingKey      map[string]string `json:"grouping_key"`
+	DeleteOnShutdown bool              `json:"delete_on_shutdown"`
 }
 
 // BasicAuth holds basic authentication credentials
@@ -78,18 +78,18 @@ type TLSConfig struct {
 
 // PrometheusMetrics tracks plugin metrics
 type PrometheusMetrics struct {
-	ExportsTotal      prometheus.Counter
-	ExportsSuccess    prometheus.Counter
-	ExportsFailed     prometheus.Counter
-	MetricsPushed     prometheus.Counter
-	PushDuration      prometheus.Histogram
-	LastPushTime      time.Time
+	ExportsTotal   prometheus.Counter
+	ExportsSuccess prometheus.Counter
+	ExportsFailed  prometheus.Counter
+	MetricsPushed  prometheus.Counter
+	PushDuration   prometheus.Histogram
+	LastPushTime   time.Time
 }
 
 // NewPrometheusExportPlugin creates a new Prometheus export plugin
 func NewPrometheusExportPlugin() *PrometheusExportPlugin {
 	registry := prometheus.NewRegistry()
-	
+
 	// Create metrics
 	metrics := &PrometheusMetrics{
 		ExportsTotal: prometheus.NewCounter(prometheus.CounterOpts{
@@ -114,7 +114,7 @@ func NewPrometheusExportPlugin() *PrometheusExportPlugin {
 			Buckets: prometheus.DefBuckets,
 		}),
 	}
-	
+
 	// Register metrics
 	registry.MustRegister(
 		metrics.ExportsTotal,
@@ -123,7 +123,7 @@ func NewPrometheusExportPlugin() *PrometheusExportPlugin {
 		metrics.MetricsPushed,
 		metrics.PushDuration,
 	)
-	
+
 	return &PrometheusExportPlugin{
 		name: "prometheus-export",
 		config: &PrometheusExportConfig{
@@ -152,44 +152,44 @@ func (p *PrometheusExportPlugin) Name() string {
 func (p *PrometheusExportPlugin) Start(ctx context.Context) error {
 	p.metricsMutex.Lock()
 	defer p.metricsMutex.Unlock()
-	
+
 	// Validate configuration
 	if err := p.ValidateConfig(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
-	
+
 	// Create pusher
 	pusher := push.New(p.config.PushGatewayURL, p.config.Job).
 		Gatherer(p.registry)
-	
+
 	// Add instance if configured
 	if p.config.Instance != "" {
 		pusher = pusher.Grouping("instance", p.config.Instance)
 	}
-	
+
 	// Add grouping keys
 	for k, v := range p.config.GroupingKey {
 		pusher = pusher.Grouping(k, v)
 	}
-	
+
 	// Configure authentication
 	if p.config.BasicAuth != nil {
 		pusher = pusher.BasicAuth(p.config.BasicAuth.Username, p.config.BasicAuth.Password)
 	}
-	
+
 	// Configure HTTP client
 	if p.config.BearerToken != "" || p.config.TLSConfig != nil {
 		client := p.createHTTPClient()
 		pusher = pusher.Client(client)
 	}
-	
+
 	p.pusher = pusher
-	
+
 	// Start periodic push if configured
 	if p.config.PushInterval > 0 {
 		go p.runPeriodicPush(ctx)
 	}
-	
+
 	return nil
 }
 
@@ -197,17 +197,17 @@ func (p *PrometheusExportPlugin) Start(ctx context.Context) error {
 func (p *PrometheusExportPlugin) Stop(ctx context.Context) error {
 	p.metricsMutex.Lock()
 	defer p.metricsMutex.Unlock()
-	
+
 	// Delete metrics from push gateway if configured
 	if p.config.DeleteOnShutdown && p.pusher != nil {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		
+
 		if err := p.pusher.Delete(); err != nil {
 			return fmt.Errorf("failed to delete metrics: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -215,18 +215,18 @@ func (p *PrometheusExportPlugin) Stop(ctx context.Context) error {
 func (p *PrometheusExportPlugin) Configure(config map[string]interface{}) error {
 	p.metricsMutex.Lock()
 	defer p.metricsMutex.Unlock()
-	
+
 	// Convert map to config struct
 	data, err := json.Marshal(config)
 	if err != nil {
 		return err
 	}
-	
+
 	newConfig := &PrometheusExportConfig{}
 	if err := json.Unmarshal(data, newConfig); err != nil {
 		return err
 	}
-	
+
 	// Set defaults
 	if newConfig.Job == "" {
 		newConfig.Job = "tapio"
@@ -240,7 +240,7 @@ func (p *PrometheusExportPlugin) Configure(config map[string]interface{}) error 
 	if newConfig.RequestTimeout <= 0 {
 		newConfig.RequestTimeout = 30 * time.Second
 	}
-	
+
 	p.config = newConfig
 	return nil
 }
@@ -250,16 +250,16 @@ func (p *PrometheusExportPlugin) ValidateConfig() error {
 	if p.config.PushGatewayURL == "" {
 		return fmt.Errorf("push_gateway_url is required")
 	}
-	
+
 	// Validate URL
 	if _, err := url.Parse(p.config.PushGatewayURL); err != nil {
 		return fmt.Errorf("invalid push_gateway_url: %w", err)
 	}
-	
+
 	if p.config.Job == "" {
 		return fmt.Errorf("job is required")
 	}
-	
+
 	return nil
 }
 
@@ -304,9 +304,9 @@ func (p *PrometheusExportPlugin) GetConfigSchema() map[string]interface{} {
 // Export exports data to Prometheus
 func (p *PrometheusExportPlugin) Export(ctx context.Context, data exports.ExportData) error {
 	p.metrics.ExportsTotal.Inc()
-	
+
 	start := time.Now()
-	
+
 	// Export based on data type
 	var err error
 	switch data.Type {
@@ -319,14 +319,14 @@ func (p *PrometheusExportPlugin) Export(ctx context.Context, data exports.Export
 	default:
 		err = fmt.Errorf("unsupported data type: %s", data.Type)
 	}
-	
+
 	if err != nil {
 		p.metrics.ExportsFailed.Inc()
 		return err
 	}
-	
+
 	p.metrics.ExportsSuccess.Inc()
-	
+
 	// Call callback if provided
 	if data.Callback != nil {
 		data.Callback(&exports.ExportResult{
@@ -338,7 +338,7 @@ func (p *PrometheusExportPlugin) Export(ctx context.Context, data exports.Export
 			},
 		})
 	}
-	
+
 	return nil
 }
 
@@ -366,11 +366,11 @@ func (p *PrometheusExportPlugin) SupportedDataTypes() []exports.DataType {
 func (p *PrometheusExportPlugin) HealthCheck(ctx context.Context) (*exports.HealthStatus, error) {
 	p.metricsMutex.RLock()
 	defer p.metricsMutex.RUnlock()
-	
+
 	// Check push gateway connectivity
 	healthy := true
 	message := "Prometheus export plugin is healthy"
-	
+
 	// Try to reach push gateway
 	if p.config.PushGatewayURL != "" {
 		healthURL := strings.TrimSuffix(p.config.PushGatewayURL, "/") + "/-/healthy"
@@ -389,7 +389,7 @@ func (p *PrometheusExportPlugin) HealthCheck(ctx context.Context) (*exports.Heal
 			}
 		}
 	}
-	
+
 	return &exports.HealthStatus{
 		Healthy:   healthy,
 		LastCheck: time.Now(),
@@ -417,7 +417,7 @@ func (p *PrometheusExportPlugin) GetMetrics() map[string]interface{} {
 			"error": err.Error(),
 		}
 	}
-	
+
 	metrics := make(map[string]interface{})
 	for _, mf := range mfs {
 		name := mf.GetName()
@@ -434,9 +434,9 @@ func (p *PrometheusExportPlugin) GetMetrics() map[string]interface{} {
 			}
 		}
 	}
-	
+
 	metrics["last_push_time"] = p.metrics.LastPushTime
-	
+
 	return metrics
 }
 
@@ -446,11 +446,11 @@ func (p *PrometheusExportPlugin) exportMetrics(ctx context.Context, data exports
 	if !ok {
 		return fmt.Errorf("invalid metrics format")
 	}
-	
+
 	// Create gauges for each metric
 	for name, value := range metrics {
 		metricName := p.config.MetricPrefix + name
-		
+
 		// Check if metric already exists
 		if _, exists := p.customMetrics[metricName]; !exists {
 			gauge := prometheus.NewGaugeVec(
@@ -460,15 +460,15 @@ func (p *PrometheusExportPlugin) exportMetrics(ctx context.Context, data exports
 				},
 				p.getLabelNames(),
 			)
-			
+
 			if err := p.registry.Register(gauge); err != nil {
 				// Metric might already be registered
 				continue
 			}
-			
+
 			p.customMetrics[metricName] = gauge
 		}
-		
+
 		// Set metric value
 		if gauge, ok := p.customMetrics[metricName].(*prometheus.GaugeVec); ok {
 			labels := p.getLabels(data.Tags)
@@ -481,7 +481,7 @@ func (p *PrometheusExportPlugin) exportMetrics(ctx context.Context, data exports
 			}
 		}
 	}
-	
+
 	// Push metrics
 	return p.push(ctx)
 }
@@ -492,7 +492,7 @@ func (p *PrometheusExportPlugin) exportEvents(ctx context.Context, data exports.
 	if !ok {
 		return fmt.Errorf("invalid events format")
 	}
-	
+
 	// Create event counter
 	eventCounter, exists := p.customMetrics["tapio_events_total"]
 	if !exists {
@@ -503,13 +503,13 @@ func (p *PrometheusExportPlugin) exportEvents(ctx context.Context, data exports.
 			},
 			append(p.getLabelNames(), "event_type", "severity"),
 		)
-		
+
 		if err := p.registry.Register(counter); err == nil {
 			p.customMetrics["tapio_events_total"] = counter
 			eventCounter = counter
 		}
 	}
-	
+
 	// Count events by type
 	if counter, ok := eventCounter.(*prometheus.CounterVec); ok {
 		for _, event := range events {
@@ -525,9 +525,9 @@ func (p *PrometheusExportPlugin) exportEvents(ctx context.Context, data exports.
 			}
 		}
 	}
-	
+
 	p.metrics.MetricsPushed.Add(float64(len(events)))
-	
+
 	// Push metrics
 	return p.push(ctx)
 }
@@ -536,7 +536,7 @@ func (p *PrometheusExportPlugin) exportEvents(ctx context.Context, data exports.
 func (p *PrometheusExportPlugin) exportAsMetrics(ctx context.Context, data exports.ExportData) error {
 	// Convert data to metrics based on type
 	metricName := fmt.Sprintf("%s%s_total", p.config.MetricPrefix, strings.ToLower(string(data.Type)))
-	
+
 	counter, exists := p.customMetrics[metricName]
 	if !exists {
 		c := prometheus.NewCounterVec(
@@ -546,20 +546,20 @@ func (p *PrometheusExportPlugin) exportAsMetrics(ctx context.Context, data expor
 			},
 			p.getLabelNames(),
 		)
-		
+
 		if err := p.registry.Register(c); err == nil {
 			p.customMetrics[metricName] = c
 			counter = c
 		}
 	}
-	
+
 	if c, ok := counter.(*prometheus.CounterVec); ok {
 		labels := p.getLabels(data.Tags)
 		c.With(labels).Inc()
 	}
-	
+
 	p.metrics.MetricsPushed.Inc()
-	
+
 	// Push metrics
 	return p.push(ctx)
 }
@@ -569,22 +569,22 @@ func (p *PrometheusExportPlugin) push(ctx context.Context) error {
 	if p.pusher == nil {
 		return fmt.Errorf("pusher not initialized")
 	}
-	
+
 	timer := prometheus.NewTimer(p.metrics.PushDuration)
 	defer timer.ObserveDuration()
-	
+
 	// Push with context
 	pushCtx, cancel := context.WithTimeout(ctx, p.config.RequestTimeout)
 	defer cancel()
-	
+
 	// Create a custom pusher that respects context
 	err := p.pushWithContext(pushCtx)
 	if err != nil {
 		return fmt.Errorf("failed to push metrics: %w", err)
 	}
-	
+
 	p.metrics.LastPushTime = time.Now()
-	
+
 	return nil
 }
 
@@ -593,11 +593,11 @@ func (p *PrometheusExportPlugin) pushWithContext(ctx context.Context) error {
 	// Since the prometheus push client doesn't support context directly,
 	// we need to implement a workaround
 	done := make(chan error, 1)
-	
+
 	go func() {
 		done <- p.pusher.Push()
 	}()
-	
+
 	select {
 	case err := <-done:
 		return err
@@ -610,7 +610,7 @@ func (p *PrometheusExportPlugin) pushWithContext(ctx context.Context) error {
 func (p *PrometheusExportPlugin) runPeriodicPush(ctx context.Context) {
 	ticker := time.NewTicker(p.config.PushInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -627,13 +627,13 @@ func (p *PrometheusExportPlugin) runPeriodicPush(ctx context.Context) {
 // createHTTPClient creates a custom HTTP client
 func (p *PrometheusExportPlugin) createHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	
+
 	// Configure TLS if needed
 	if p.config.TLSConfig != nil {
 		// TLS configuration would be set here
 		// This is a simplified implementation
 	}
-	
+
 	// Add bearer token if configured
 	if p.config.BearerToken != "" {
 		transport = &bearerAuthTransport{
@@ -641,7 +641,7 @@ func (p *PrometheusExportPlugin) createHTTPClient() *http.Client {
 			Token:     p.config.BearerToken,
 		}
 	}
-	
+
 	return &http.Client{
 		Transport: transport,
 		Timeout:   p.config.RequestTimeout,
@@ -660,12 +660,12 @@ func (p *PrometheusExportPlugin) getLabelNames() []string {
 // getLabels returns labels for a metric
 func (p *PrometheusExportPlugin) getLabels(tags map[string]string) prometheus.Labels {
 	labels := make(prometheus.Labels)
-	
+
 	// Add configured labels
 	for k, v := range p.config.Labels {
 		labels[k] = v
 	}
-	
+
 	// Add tags as labels
 	for k, v := range tags {
 		// Sanitize label name
@@ -674,7 +674,7 @@ func (p *PrometheusExportPlugin) getLabels(tags map[string]string) prometheus.La
 			labels[labelName] = v
 		}
 	}
-	
+
 	return labels
 }
 
@@ -703,7 +703,7 @@ type PrometheusTextFormatter struct {
 // Format formats data as Prometheus text format
 func (f *PrometheusTextFormatter) Format(data exports.ExportData) ([]byte, error) {
 	var buf bytes.Buffer
-	
+
 	switch data.Type {
 	case exports.DataTypeMetrics:
 		if metrics, ok := data.Content.(map[string]interface{}); ok {
@@ -711,22 +711,22 @@ func (f *PrometheusTextFormatter) Format(data exports.ExportData) ([]byte, error
 				metricName := f.config.MetricPrefix + name
 				fmt.Fprintf(&buf, "# HELP %s Tapio metric: %s\n", metricName, name)
 				fmt.Fprintf(&buf, "# TYPE %s gauge\n", metricName)
-				
+
 				// Format labels
 				var labelPairs []string
 				for k, v := range data.Tags {
 					labelPairs = append(labelPairs, fmt.Sprintf(`%s="%s"`, k, v))
 				}
-				
+
 				labelStr := ""
 				if len(labelPairs) > 0 {
 					labelStr = "{" + strings.Join(labelPairs, ",") + "}"
 				}
-				
+
 				fmt.Fprintf(&buf, "%s%s %v\n", metricName, labelStr, value)
 			}
 		}
 	}
-	
+
 	return buf.Bytes(), nil
 }

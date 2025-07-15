@@ -6,30 +6,30 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors/types"
+	"github.com/yairfalse/tapio/pkg/collectors/unified"
 	"github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/logging"
 )
 
 // EBPFAdapter provides a cross-platform interface to eBPF functionality
 type EBPFAdapter struct {
-	config   types.CollectorConfig
+	config   unified.CollectorConfig
 	logger   *logging.Logger
 	monitor  ebpf.Monitor
 	platform Platform
 	enabled  bool
-	eventCh  chan *types.Event
+	eventCh  chan *unified.Event
 }
 
 // NewEBPFAdapter creates a new eBPF adapter that works on all platforms
 func NewEBPFAdapter() (*EBPFAdapter, error) {
-	logger := logging.WithComponent("ebpf-adapter")
+	logger := logging.Development.WithComponent("ebpf-adapter")
 	platform := GetCurrentPlatform()
-	
+
 	adapter := &EBPFAdapter{
 		logger:   logger,
 		platform: platform,
-		eventCh:  make(chan *types.Event, 1000),
+		eventCh:  make(chan *unified.Event, 1000),
 	}
 
 	// Create monitor based on platform
@@ -40,7 +40,7 @@ func NewEBPFAdapter() (*EBPFAdapter, error) {
 	} else {
 		adapter.monitor = ebpf.NewMonitor(ebpf.DefaultConfig()) // This will be a stub
 		adapter.enabled = false
-		logger.Info("eBPF adapter initialized with stub implementation", 
+		logger.Info("eBPF adapter initialized with stub implementation",
 			"platform", platform.OS,
 			"message", GetPlatformMessage("ebpf"))
 	}
@@ -59,9 +59,9 @@ func (a *EBPFAdapter) Type() string {
 }
 
 // Configure configures the eBPF adapter
-func (a *EBPFAdapter) Configure(config types.CollectorConfig) error {
+func (a *EBPFAdapter) Configure(config unified.CollectorConfig) error {
 	a.config = config
-	
+
 	// On non-Linux platforms, we accept the configuration but disable functionality
 	if !a.platform.HasEBPF {
 		a.logger.Warn("eBPF configuration accepted but functionality is disabled on this platform",
@@ -117,15 +117,15 @@ func (a *EBPFAdapter) Stop() error {
 }
 
 // Events returns the event channel
-func (a *EBPFAdapter) Events() <-chan *types.Event {
+func (a *EBPFAdapter) Events() <-chan *unified.Event {
 	return a.eventCh
 }
 
 // Health returns the adapter health status
-func (a *EBPFAdapter) Health() *types.Health {
+func (a *EBPFAdapter) Health() *unified.Health {
 	if !a.platform.HasEBPF {
-		return &types.Health{
-			Status:  types.HealthStatusHealthy,
+		return &unified.Health{
+			Status:  unified.HealthStatusHealthy,
 			Message: fmt.Sprintf("eBPF adapter running in stub mode on %s", a.platform.OS),
 			Metrics: map[string]interface{}{
 				"platform": a.platform.OS,
@@ -137,8 +137,8 @@ func (a *EBPFAdapter) Health() *types.Health {
 
 	// Check actual eBPF monitor health
 	if !a.monitor.IsAvailable() {
-		return &types.Health{
-			Status:  types.HealthStatusUnhealthy,
+		return &unified.Health{
+			Status:  unified.HealthStatusUnhealthy,
 			Message: "eBPF monitor is not available",
 			Metrics: map[string]interface{}{
 				"platform": a.platform.OS,
@@ -149,8 +149,8 @@ func (a *EBPFAdapter) Health() *types.Health {
 		}
 	}
 
-	return &types.Health{
-		Status:  types.HealthStatusHealthy,
+	return &unified.Health{
+		Status:  unified.HealthStatusHealthy,
 		Message: "eBPF adapter is healthy",
 		Metrics: map[string]interface{}{
 			"platform": a.platform.OS,
@@ -161,8 +161,8 @@ func (a *EBPFAdapter) Health() *types.Health {
 }
 
 // GetStats returns adapter statistics
-func (a *EBPFAdapter) GetStats() *types.Stats {
-	return &types.Stats{
+func (a *EBPFAdapter) GetStats() *unified.Stats {
+	return &unified.Stats{
 		EventsCollected: 0, // TODO: Implement proper statistics
 		EventsDropped:   0,
 		EventsFiltered:  0,
@@ -188,19 +188,21 @@ func (a *EBPFAdapter) generateMockEvents(ctx context.Context) {
 			return
 		case <-ticker.C:
 			// Generate a mock event to show the adapter is working
-			event := &types.Event{
+			event := &unified.Event{
 				ID:        fmt.Sprintf("mock-ebpf-%d", time.Now().Unix()),
-				Type:      types.EventTypeLog,
-				Category:  types.CategorySystem,
-				Severity:  types.SeverityInfo,
+				Type:      "mock_log",
+				Category:  unified.CategorySystem,
+				Severity:  unified.SeverityInfo,
 				Timestamp: time.Now(),
-				Source: types.EventSource{
+				Source: unified.EventSource{
 					Collector: "ebpf-adapter",
 					Component: "mock",
 					Node:      "localhost",
+					Version:   "1.0.0",
 				},
+				Message: fmt.Sprintf("Mock eBPF event generated on %s", runtime.GOOS),
 				Data: map[string]interface{}{
-					"message": fmt.Sprintf("Mock eBPF event generated on %s", runtime.GOOS),
+					"message":  fmt.Sprintf("Mock eBPF event generated on %s", runtime.GOOS),
 					"platform": runtime.GOOS,
 					"mode":     "development",
 				},
@@ -212,8 +214,13 @@ func (a *EBPFAdapter) generateMockEvents(ctx context.Context) {
 					"source": "ebpf-mock",
 					"mode":   "development",
 				},
-				Context: &types.EventContext{
-					Hostname: "localhost",
+				Context: &unified.EventContext{
+					Node: "localhost",
+				},
+				Metadata: unified.EventMetadata{
+					CollectedAt:  time.Now(),
+					ProcessedAt:  time.Now(),
+					ProcessingMS: 0,
 				},
 			}
 

@@ -346,10 +346,10 @@ func TestCNICollector_DiscoverPlugins(t *testing.T) {
 	require.NoError(t, err)
 
 	config := &CNICollectorConfig{
-		CollectionInterval:    5 * time.Second,
-		CNIConfigPath:        configDir,
-		CNIBinPath:           binDir,
-		SupportedCNIPlugins:  []string{"calico", "flannel", "cilium", "weave"},
+		CollectionInterval:  5 * time.Second,
+		CNIConfigPath:       configDir,
+		CNIBinPath:          binDir,
+		SupportedCNIPlugins: []string{"calico", "flannel", "cilium", "weave"},
 	}
 
 	collector, err := NewCNICollector(config)
@@ -365,7 +365,7 @@ func TestCNICollector_DiscoverPlugins(t *testing.T) {
 	// Test plugin interfaces
 	calicoPlugin := collector.cniPlugins["calico"]
 	assert.Equal(t, "calico", calicoPlugin.Name())
-	
+
 	flannelPlugin := collector.cniPlugins["flannel"]
 	assert.Equal(t, "flannel", flannelPlugin.Name())
 }
@@ -416,13 +416,13 @@ func TestCNICollector_ProcessCNIEvent(t *testing.T) {
 	case event := <-eventCh:
 		opinionatedEvent, ok := event.(*opinionated.OpinionatedEvent)
 		require.True(t, ok)
-		
+
 		assert.Contains(t, opinionatedEvent.ID, "cni-calico-ADD-")
 		assert.Equal(t, opinionated.CategoryNetworkHealth, opinionatedEvent.Category)
 		assert.Equal(t, "default", opinionatedEvent.Context.Namespace)
 		assert.Equal(t, "test-pod", opinionatedEvent.Context.Pod)
 		assert.Equal(t, opinionated.SeverityInfo, opinionatedEvent.Severity)
-		
+
 		// Check CNI-specific attributes
 		assert.Equal(t, "calico", opinionatedEvent.Attributes["cni.plugin"])
 		assert.Equal(t, "v3.20.0", opinionatedEvent.Attributes["cni.plugin_version"])
@@ -430,16 +430,16 @@ func TestCNICollector_ProcessCNIEvent(t *testing.T) {
 		assert.Equal(t, "10.244.1.10", opinionatedEvent.Attributes["cni.pod_ip"])
 		assert.Equal(t, "cali123456789", opinionatedEvent.Attributes["cni.interface"])
 		assert.Equal(t, int64(50), opinionatedEvent.Attributes["cni.duration_ms"])
-		
+
 		// Check CNI result information
 		assert.Equal(t, "0.4.0", opinionatedEvent.Attributes["cni.result.cni_version"])
 		assert.Equal(t, 1, opinionatedEvent.Attributes["cni.result.interface_count"])
 		assert.Equal(t, 1, opinionatedEvent.Attributes["cni.result.ip_count"])
-		
+
 		// Check metadata
 		assert.Equal(t, "calico", opinionatedEvent.Attributes["cni.plugin"])
 		assert.Equal(t, "worker-1", opinionatedEvent.Attributes["cni.node"])
-		
+
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Expected CNI event but none was generated")
 	}
@@ -464,9 +464,9 @@ func TestCNICollector_AnomalyDetection(t *testing.T) {
 	plugin := &CalicoPlugin{name: "calico", version: "v3.20.0"}
 
 	tests := []struct {
-		name          string
-		cniEvent      *CNIEvent
-		expectedTags  []string
+		name             string
+		cniEvent         *CNIEvent
+		expectedTags     []string
 		expectedSeverity opinionated.EventSeverity
 	}{
 		{
@@ -531,23 +531,23 @@ func TestCNICollector_AnomalyDetection(t *testing.T) {
 			case event := <-eventCh:
 				opinionatedEvent, ok := event.(*opinionated.OpinionatedEvent)
 				require.True(t, ok)
-				
+
 				// Check severity
 				assert.Equal(t, tt.expectedSeverity, opinionatedEvent.Severity)
-				
+
 				// Check tags in data message
 				if msg, exists := opinionatedEvent.Data["message"]; exists {
 					for _, tag := range tt.expectedTags {
 						assert.Contains(t, msg, fmt.Sprintf("[%s]", tag))
 					}
 				}
-				
+
 				// Check anomaly attributes
 				for _, tag := range tt.expectedTags {
 					anomalyKey := fmt.Sprintf("anomaly.%s", strings.ToLower(tag))
 					assert.Equal(t, true, opinionatedEvent.Attributes[anomalyKey])
 				}
-				
+
 			case <-time.After(100 * time.Millisecond):
 				t.Fatalf("Expected CNI anomaly event for %s but none was generated", tt.name)
 			}

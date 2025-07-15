@@ -13,21 +13,21 @@ import (
 
 // Server provides REST API for CLI and external tools
 type Server struct {
-	router           *gin.Engine
+	router            *gin.Engine
 	correlationEngine *correlation.PerfectEngine
-	insightStore     correlation.InsightStore
-	logger           *zap.Logger
-	config           *Config
+	insightStore      correlation.InsightStore
+	logger            *zap.Logger
+	config            *Config
 }
 
 // Config for API server
 type Config struct {
-	Port              string        `yaml:"port"`
-	EnableCORS        bool          `yaml:"enable_cors"`
-	RateLimitPerMin   int           `yaml:"rate_limit_per_min"`
-	AuthEnabled       bool          `yaml:"auth_enabled"`
-	MetricsEnabled    bool          `yaml:"metrics_enabled"`
-	CacheTimeout      time.Duration `yaml:"cache_timeout"`
+	Port            string        `yaml:"port"`
+	EnableCORS      bool          `yaml:"enable_cors"`
+	RateLimitPerMin int           `yaml:"rate_limit_per_min"`
+	AuthEnabled     bool          `yaml:"auth_enabled"`
+	MetricsEnabled  bool          `yaml:"metrics_enabled"`
+	CacheTimeout    time.Duration `yaml:"cache_timeout"`
 }
 
 // NewServer creates a new API server
@@ -62,7 +62,7 @@ func (s *Server) setupMiddleware() {
 
 	// Logging middleware
 	s.router.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		return ""  // Use structured logging instead
+		return "" // Use structured logging instead
 	}))
 
 	// CORS if enabled
@@ -140,8 +140,8 @@ func (s *Server) getResourceInsights(c *gin.Context) {
 	resource := c.Param("resource")
 
 	// Query parameters
-	severity := c.Query("severity")     // filter by severity
-	category := c.Query("category")     // filter by category
+	severity := c.Query("severity") // filter by severity
+	category := c.Query("category") // filter by category
 	limit := c.DefaultQuery("limit", "50")
 
 	insights := s.insightStore.GetInsights(resource, namespace)
@@ -172,7 +172,7 @@ func (s *Server) getResourcePredictions(c *gin.Context) {
 	resource := c.Param("resource")
 
 	insights := s.insightStore.GetInsights(resource, namespace)
-	
+
 	var predictions []*PredictionResponse
 	for _, insight := range insights {
 		if insight.Prediction != nil {
@@ -203,14 +203,14 @@ func (s *Server) getResourceFixes(c *gin.Context) {
 	autoFixOnly := c.Query("auto_fix_only") == "true"
 
 	insights := s.insightStore.GetInsights(resource, namespace)
-	
+
 	var fixes []*FixResponse
 	for _, insight := range insights {
 		for _, item := range insight.ActionableItems {
 			if autoFixOnly && item.Risk != "low" {
 				continue
 			}
-			
+
 			fixes = append(fixes, &FixResponse{
 				ID:          generateFixID(insight.ID, item),
 				InsightID:   insight.ID,
@@ -237,10 +237,10 @@ func (s *Server) getResourceHealth(c *gin.Context) {
 
 	// Get health from resilience health checker
 	health := resilience.GetGlobalHealth()
-	
+
 	// Combine with insights
 	insights := s.insightStore.GetInsights(resource, namespace)
-	
+
 	criticalCount := 0
 	warningCount := 0
 	for _, insight := range insights {
@@ -253,45 +253,45 @@ func (s *Server) getResourceHealth(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"resource":        resource,
-		"namespace":       namespace,
-		"status":          health.OverallStatus.String(),
-		"score":           health.OverallScore,
-		"criticalIssues":  criticalCount,
-		"warnings":        warningCount,
-		"lastChecked":     health.ComputedAt,
-		"components":      health.ComponentStatuses,
+		"resource":       resource,
+		"namespace":      namespace,
+		"status":         health.OverallStatus.String(),
+		"score":          health.OverallScore,
+		"criticalIssues": criticalCount,
+		"warnings":       warningCount,
+		"lastChecked":    health.ComputedAt,
+		"components":     health.ComponentStatuses,
 	})
 }
 
 func (s *Server) listNetworkFlows(c *gin.Context) {
 	// Query parameters
 	limit := c.DefaultQuery("limit", "100")
-	protocol := c.Query("protocol")        // tcp, udp, http, grpc
-	direction := c.Query("direction")      // ingress, egress
+	protocol := c.Query("protocol")   // tcp, udp, http, grpc
+	direction := c.Query("direction") // ingress, egress
 	namespace := c.Query("namespace")
-	
+
 	// TODO: Query flow collector
 	flows := []gin.H{
 		{
-			"id":           "flow-1",
-			"source":       "frontend-7d5c4-xyz",
-			"destination":  "api-service-8f9d2-abc", 
-			"protocol":     "http",
-			"method":       "POST",
-			"path":         "/api/users",
-			"status":       200,
-			"latency":      "45ms",
-			"bytesIn":      1024,
-			"bytesOut":     2048,
-			"timestamp":    time.Now(),
+			"id":          "flow-1",
+			"source":      "frontend-7d5c4-xyz",
+			"destination": "api-service-8f9d2-abc",
+			"protocol":    "http",
+			"method":      "POST",
+			"path":        "/api/users",
+			"status":      200,
+			"latency":     "45ms",
+			"bytesIn":     1024,
+			"bytesOut":    2048,
+			"timestamp":   time.Now(),
 		},
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"flows":     flows,
-		"count":     len(flows),
-		"filters":   gin.H{
+		"flows": flows,
+		"count": len(flows),
+		"filters": gin.H{
 			"protocol":  protocol,
 			"direction": direction,
 			"namespace": namespace,
@@ -301,21 +301,21 @@ func (s *Server) listNetworkFlows(c *gin.Context) {
 
 func (s *Server) getL7Flows(c *gin.Context) {
 	protocol := c.Param("protocol") // http, grpc, kafka
-	
+
 	switch protocol {
 	case "http":
 		c.JSON(http.StatusOK, gin.H{
 			"protocol": "http",
 			"flows": []gin.H{
 				{
-					"method":      "GET",
-					"path":        "/api/health",
-					"status":      200,
-					"latency":     "2ms",
-					"userAgent":   "kube-probe/1.28",
-					"requests":    1523,
-					"errors":      0,
-					"p95Latency":  "5ms",
+					"method":     "GET",
+					"path":       "/api/health",
+					"status":     200,
+					"latency":    "2ms",
+					"userAgent":  "kube-probe/1.28",
+					"requests":   1523,
+					"errors":     0,
+					"p95Latency": "5ms",
 				},
 			},
 		})
@@ -324,13 +324,13 @@ func (s *Server) getL7Flows(c *gin.Context) {
 			"protocol": "grpc",
 			"flows": []gin.H{
 				{
-					"service":     "correlation.EventCollector",
-					"method":      "StreamEvents",
-					"status":      "OK",
-					"streams":     42,
-					"messages":    165000,
-					"errors":      0,
-					"p95Latency":  "500µs",
+					"service":    "correlation.EventCollector",
+					"method":     "StreamEvents",
+					"status":     "OK",
+					"streams":    42,
+					"messages":   165000,
+					"errors":     0,
+					"p95Latency": "500µs",
 				},
 			},
 		})
@@ -339,13 +339,13 @@ func (s *Server) getL7Flows(c *gin.Context) {
 			"protocol": "kafka",
 			"flows": []gin.H{
 				{
-					"topic":       "events",
-					"partition":   0,
-					"producer":    "collector-abc",
-					"consumer":    "processor-xyz",
-					"messages":    85000,
-					"lag":         120,
-					"throughput":  "10MB/s",
+					"topic":      "events",
+					"partition":  0,
+					"producer":   "collector-abc",
+					"consumer":   "processor-xyz",
+					"messages":   85000,
+					"lag":        120,
+					"throughput": "10MB/s",
 				},
 			},
 		})
@@ -410,12 +410,12 @@ func corsMiddleware() gin.HandlerFunc {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
+
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
 		}
-		
+
 		c.Next()
 	}
 }
@@ -432,7 +432,7 @@ func metricsMiddleware() gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 		duration := time.Since(start)
-		
+
 		// Record metrics
 		_ = duration // Record to prometheus
 	}

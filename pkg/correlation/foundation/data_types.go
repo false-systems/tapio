@@ -22,9 +22,9 @@ type Result struct {
 	Severity    Severity               `json:"severity"`
 	Category    Category               `json:"category"`
 	Confidence  float64                `json:"confidence"`
-	Events      []string               `json:"events"`      // Event IDs
-	Entities    []Entity               `json:"entities"`    // Affected entities
-	Evidence    []Evidence             `json:"evidence"`    // Supporting evidence
+	Events      []string               `json:"events"`   // Event IDs
+	Entities    []Entity               `json:"entities"` // Affected entities
+	Evidence    []Evidence             `json:"evidence"` // Supporting evidence
 	Impact      string                 `json:"impact,omitempty"`
 	TTL         time.Duration          `json:"ttl,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
@@ -74,11 +74,11 @@ type PatternResult struct {
 
 // PatternDetectionInput contains input data for pattern detection
 type PatternDetectionInput struct {
-	Events      []Event                `json:"events"`
+	Events      []Event                 `json:"events"`
 	Metrics     map[string]MetricSeries `json:"metrics"`
-	Window      TimeWindow             `json:"window"`
-	Context     map[string]interface{} `json:"context"`
-	Constraints map[string]interface{} `json:"constraints"`
+	Window      TimeWindow              `json:"window"`
+	Context     map[string]interface{}  `json:"context"`
+	Constraints map[string]interface{}  `json:"constraints"`
 }
 
 // RootCause represents the identified root cause of a pattern
@@ -93,18 +93,18 @@ type RootCause struct {
 
 // RemediationAction represents an automated remediation action
 type RemediationAction struct {
-	ID               string            `json:"id"`
-	Type             string            `json:"type"`
-	Priority         int               `json:"priority"`
-	Description      string            `json:"description"`
-	Command          string            `json:"command"`
-	Parameters       map[string]string `json:"parameters"`
-	ExpectedEffect   string            `json:"expected_effect"`
-	RiskLevel        SafetyLevel       `json:"risk_level"`
-	EstimatedDuration time.Duration    `json:"estimated_duration"`
-	RequiresApproval bool              `json:"requires_approval"`
-	RollbackSupported bool             `json:"rollback_supported"`
-	DryRunSupported  bool              `json:"dry_run_supported"`
+	ID                string            `json:"id"`
+	Type              string            `json:"type"`
+	Priority          int               `json:"priority"`
+	Description       string            `json:"description"`
+	Command           string            `json:"command"`
+	Parameters        map[string]string `json:"parameters"`
+	ExpectedEffect    string            `json:"expected_effect"`
+	RiskLevel         SafetyLevel       `json:"risk_level"`
+	EstimatedDuration time.Duration     `json:"estimated_duration"`
+	RequiresApproval  bool              `json:"requires_approval"`
+	RollbackSupported bool              `json:"rollback_supported"`
+	DryRunSupported   bool              `json:"dry_run_supported"`
 }
 
 // ============================================================================
@@ -125,20 +125,20 @@ type ValidationResult struct {
 
 // ValidationSummary summarizes validation results across multiple patterns
 type ValidationSummary struct {
-	TotalPatterns     int                          `json:"total_patterns"`
-	ValidPatterns     int                          `json:"valid_patterns"`
-	InvalidPatterns   int                          `json:"invalid_patterns"`
-	OverallAccuracy   float64                      `json:"overall_accuracy"`
-	Results           map[string]ValidationResult  `json:"results"`
-	GeneratedAt       time.Time                    `json:"generated_at"`
+	TotalPatterns   int                         `json:"total_patterns"`
+	ValidPatterns   int                         `json:"valid_patterns"`
+	InvalidPatterns int                         `json:"invalid_patterns"`
+	OverallAccuracy float64                     `json:"overall_accuracy"`
+	Results         map[string]ValidationResult `json:"results"`
+	GeneratedAt     time.Time                   `json:"generated_at"`
 }
 
 // ValidationRule defines a validation rule for configuration or patterns
 type ValidationRule struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
 	Validator   func(interface{}) error `json:"-"`
-	Severity    Severity               `json:"severity"`
+	Severity    Severity                `json:"severity"`
 }
 
 // ============================================================================
@@ -147,17 +147,17 @@ type ValidationRule struct {
 
 // AutoFixAction represents an automated fix action
 type AutoFixAction struct {
-	ID                string            `json:"id"`
-	Name              string            `json:"name"`
-	Description       string            `json:"description"`
-	PatternTypes      []string          `json:"pattern_types"`
-	SafetyLevel       SafetyLevel       `json:"safety_level"`
-	RequiresApproval  bool              `json:"requires_approval"`
-	RollbackSupported bool              `json:"rollback_supported"`
-	DryRunSupported   bool              `json:"dry_run_supported"`
-	EstimatedDuration time.Duration     `json:"estimated_duration"`
-	Parameters        []ActionParameter `json:"parameters"`
-	Prerequisites     []string          `json:"prerequisites"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Description       string                 `json:"description"`
+	PatternTypes      []string               `json:"pattern_types"`
+	SafetyLevel       SafetyLevel            `json:"safety_level"`
+	RequiresApproval  bool                   `json:"requires_approval"`
+	RollbackSupported bool                   `json:"rollback_supported"`
+	DryRunSupported   bool                   `json:"dry_run_supported"`
+	EstimatedDuration time.Duration          `json:"estimated_duration"`
+	Parameters        []ActionParameter      `json:"parameters"`
+	Prerequisites     []string               `json:"prerequisites"`
 	Metadata          map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -173,45 +173,45 @@ type ActionParameter struct {
 
 // AutoFixRequest represents a request to execute an auto-fix action
 type AutoFixRequest struct {
-	ID               string            `json:"id"`
-	ActionID         string            `json:"action_id"`
-	PatternResult    *PatternResult    `json:"pattern_result"`
-	Parameters       map[string]string `json:"parameters"`
-	RequestedBy      string            `json:"requested_by"`
-	Priority         string            `json:"priority"`
-	DryRun           bool              `json:"dry_run"`
-	RequiresApproval bool              `json:"requires_approval"`
-	Timeout          time.Duration     `json:"timeout"`
+	ID               string                 `json:"id"`
+	ActionID         string                 `json:"action_id"`
+	PatternResult    *PatternResult         `json:"pattern_result"`
+	Parameters       map[string]string      `json:"parameters"`
+	RequestedBy      string                 `json:"requested_by"`
+	Priority         string                 `json:"priority"`
+	DryRun           bool                   `json:"dry_run"`
+	RequiresApproval bool                   `json:"requires_approval"`
+	Timeout          time.Duration          `json:"timeout"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // AutoFixResult represents the result of an auto-fix execution
 type AutoFixResult struct {
-	RequestID       string                 `json:"request_id"`
-	ActionID        string                 `json:"action_id"`
-	Status          AutoFixStatus          `json:"status"`
-	Success         bool                   `json:"success"`
-	Message         string                 `json:"message"`
-	Output          string                 `json:"output,omitempty"`
-	Error           string                 `json:"error,omitempty"`
-	StartTime       time.Time              `json:"start_time"`
-	EndTime         time.Time              `json:"end_time"`
-	Duration        time.Duration          `json:"duration"`
-	SafetyScore     float64                `json:"safety_score"`
-	RollbackInfo    *RollbackInfo          `json:"rollback_info,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	RequestID    string                 `json:"request_id"`
+	ActionID     string                 `json:"action_id"`
+	Status       AutoFixStatus          `json:"status"`
+	Success      bool                   `json:"success"`
+	Message      string                 `json:"message"`
+	Output       string                 `json:"output,omitempty"`
+	Error        string                 `json:"error,omitempty"`
+	StartTime    time.Time              `json:"start_time"`
+	EndTime      time.Time              `json:"end_time"`
+	Duration     time.Duration          `json:"duration"`
+	SafetyScore  float64                `json:"safety_score"`
+	RollbackInfo *RollbackInfo          `json:"rollback_info,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // AutoFixStatus represents the status of an autofix execution
 type AutoFixStatus string
 
 const (
-	AutoFixStatusPending   AutoFixStatus = "pending"
-	AutoFixStatusRunning   AutoFixStatus = "running"
-	AutoFixStatusCompleted AutoFixStatus = "completed"
-	AutoFixStatusFailed    AutoFixStatus = "failed"
+	AutoFixStatusPending    AutoFixStatus = "pending"
+	AutoFixStatusRunning    AutoFixStatus = "running"
+	AutoFixStatusCompleted  AutoFixStatus = "completed"
+	AutoFixStatusFailed     AutoFixStatus = "failed"
 	AutoFixStatusRolledBack AutoFixStatus = "rolled_back"
-	AutoFixStatusCancelled AutoFixStatus = "cancelled"
+	AutoFixStatusCancelled  AutoFixStatus = "cancelled"
 )
 
 // RollbackInfo contains information needed for rollback operations
@@ -225,12 +225,12 @@ type RollbackInfo struct {
 
 // AutoFixExecution represents a complete autofix execution record
 type AutoFixExecution struct {
-	ID        string        `json:"id"`
+	ID        string         `json:"id"`
 	Request   AutoFixRequest `json:"request"`
 	Result    AutoFixResult  `json:"result"`
 	Events    []AutoFixEvent `json:"events"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // AutoFixEvent represents an event during autofix execution
@@ -258,11 +258,11 @@ type AutoFixFilter struct {
 
 // DataCollection contains the data available for rule execution
 type DataCollection struct {
-	Events  []Event                `json:"events"`
+	Events  []Event                 `json:"events"`
 	Metrics map[string]MetricSeries `json:"metrics"`
-	Window  TimeWindow             `json:"window"`
-	Sources []SourceType           `json:"sources"`
-	Context map[string]interface{} `json:"context,omitempty"`
+	Window  TimeWindow              `json:"window"`
+	Sources []SourceType            `json:"sources"`
+	Context map[string]interface{}  `json:"context,omitempty"`
 }
 
 // RuleContext provides execution context for correlation rules
@@ -311,34 +311,34 @@ type RulePerformance struct {
 // Stats contains runtime statistics for correlation engines
 type Stats struct {
 	// Basic counters
-	RulesRegistered     int                       `json:"rules_registered"`
-	EventsProcessed     uint64                    `json:"events_processed"`
-	CorrelationsFound   uint64                    `json:"correlations_found"`
-	
+	RulesRegistered   int    `json:"rules_registered"`
+	EventsProcessed   uint64 `json:"events_processed"`
+	CorrelationsFound uint64 `json:"correlations_found"`
+
 	// Performance metrics
-	ProcessingLatency   time.Duration             `json:"processing_latency"`
-	RuleExecutionTime   map[string]time.Duration  `json:"rule_execution_time"`
-	LastProcessedAt     time.Time                 `json:"last_processed_at"`
-	
+	ProcessingLatency time.Duration            `json:"processing_latency"`
+	RuleExecutionTime map[string]time.Duration `json:"rule_execution_time"`
+	LastProcessedAt   time.Time                `json:"last_processed_at"`
+
 	// Resource usage
-	MemoryUsage         uint64                    `json:"memory_usage"`
-	CPUUsage            float64                   `json:"cpu_usage"`
-	
+	MemoryUsage uint64  `json:"memory_usage"`
+	CPUUsage    float64 `json:"cpu_usage"`
+
 	// Engine status
-	Running             bool                      `json:"running"`
-	StartTime           time.Time                 `json:"start_time"`
-	Uptime              time.Duration             `json:"uptime"`
+	Running   bool          `json:"running"`
+	StartTime time.Time     `json:"start_time"`
+	Uptime    time.Duration `json:"uptime"`
 }
 
 // EventStoreStats contains statistics about the event store
 type EventStoreStats struct {
-	TotalEvents     uint64                  `json:"total_events"`
-	EventsPerSource map[SourceType]uint64   `json:"events_per_source"`
-	StorageSize     uint64                  `json:"storage_size"`
-	OldestEvent     time.Time               `json:"oldest_event"`
-	NewestEvent     time.Time               `json:"newest_event"`
-	RetentionPeriod time.Duration           `json:"retention_period"`
-	QueryLatency    time.Duration           `json:"query_latency"`
+	TotalEvents     uint64                `json:"total_events"`
+	EventsPerSource map[SourceType]uint64 `json:"events_per_source"`
+	StorageSize     uint64                `json:"storage_size"`
+	OldestEvent     time.Time             `json:"oldest_event"`
+	NewestEvent     time.Time             `json:"newest_event"`
+	RetentionPeriod time.Duration         `json:"retention_period"`
+	QueryLatency    time.Duration         `json:"query_latency"`
 }
 
 // PatternDetectorMetrics contains metrics for pattern detectors
@@ -361,21 +361,21 @@ type ValidationMetrics struct {
 
 // AutoFixStats contains autofix engine statistics
 type AutoFixStats struct {
-	TotalExecutions     uint64                    `json:"total_executions"`
-	SuccessfulExecutions uint64                   `json:"successful_executions"`
-	FailedExecutions    uint64                    `json:"failed_executions"`
-	AverageExecutionTime time.Duration           `json:"average_execution_time"`
-	ExecutionsByAction  map[string]uint64        `json:"executions_by_action"`
-	SafetyScoreAverage  float64                  `json:"safety_score_average"`
-	LastExecutionAt     time.Time                `json:"last_execution_at"`
+	TotalExecutions      uint64            `json:"total_executions"`
+	SuccessfulExecutions uint64            `json:"successful_executions"`
+	FailedExecutions     uint64            `json:"failed_executions"`
+	AverageExecutionTime time.Duration     `json:"average_execution_time"`
+	ExecutionsByAction   map[string]uint64 `json:"executions_by_action"`
+	SafetyScoreAverage   float64           `json:"safety_score_average"`
+	LastExecutionAt      time.Time         `json:"last_execution_at"`
 }
 
 // ResultHandlerStats contains result handler statistics
 type ResultHandlerStats struct {
-	ResultsProcessed    uint64        `json:"results_processed"`
+	ResultsProcessed      uint64        `json:"results_processed"`
 	AverageProcessingTime time.Duration `json:"average_processing_time"`
-	ErrorCount          uint64        `json:"error_count"`
-	LastProcessedAt     time.Time     `json:"last_processed_at"`
+	ErrorCount            uint64        `json:"error_count"`
+	LastProcessedAt       time.Time     `json:"last_processed_at"`
 }
 
 // CacheStats contains cache performance statistics
@@ -415,32 +415,32 @@ type ComponentStatus struct {
 
 // HealthReport provides detailed health information
 type HealthReport struct {
-	Status          HealthStatus              `json:"status"`
-	Dependencies    map[string]ComponentStatus `json:"dependencies"`
-	Performance     Stats                     `json:"performance"`
-	ResourceUsage   ResourceUsage             `json:"resource_usage"`
-	RecommendedActions []string               `json:"recommended_actions,omitempty"`
-	GeneratedAt     time.Time                 `json:"generated_at"`
+	Status             HealthStatus               `json:"status"`
+	Dependencies       map[string]ComponentStatus `json:"dependencies"`
+	Performance        Stats                      `json:"performance"`
+	ResourceUsage      ResourceUsage              `json:"resource_usage"`
+	RecommendedActions []string                   `json:"recommended_actions,omitempty"`
+	GeneratedAt        time.Time                  `json:"generated_at"`
 }
 
 // ResourceUsage contains resource utilization information
 type ResourceUsage struct {
-	MemoryUsed   uint64  `json:"memory_used"`
-	MemoryLimit  uint64  `json:"memory_limit,omitempty"`
-	CPUUsage     float64 `json:"cpu_usage"`
-	DiskUsage    uint64  `json:"disk_usage,omitempty"`
-	NetworkIn    uint64  `json:"network_in,omitempty"`
-	NetworkOut   uint64  `json:"network_out,omitempty"`
+	MemoryUsed  uint64  `json:"memory_used"`
+	MemoryLimit uint64  `json:"memory_limit,omitempty"`
+	CPUUsage    float64 `json:"cpu_usage"`
+	DiskUsage   uint64  `json:"disk_usage,omitempty"`
+	NetworkIn   uint64  `json:"network_in,omitempty"`
+	NetworkOut  uint64  `json:"network_out,omitempty"`
 }
 
 // DataSourceStatus represents the status of a data source
 type DataSourceStatus struct {
-	Connected       bool          `json:"connected"`
-	LastHeartbeat   time.Time     `json:"last_heartbeat"`
-	ResponseTime    time.Duration `json:"response_time"`
-	EventsReceived  uint64        `json:"events_received"`
-	ErrorCount      uint64        `json:"error_count"`
-	LastError       string        `json:"last_error,omitempty"`
+	Connected      bool          `json:"connected"`
+	LastHeartbeat  time.Time     `json:"last_heartbeat"`
+	ResponseTime   time.Duration `json:"response_time"`
+	EventsReceived uint64        `json:"events_received"`
+	ErrorCount     uint64        `json:"error_count"`
+	LastError      string        `json:"last_error,omitempty"`
 }
 
 // ============================================================================
@@ -449,25 +449,25 @@ type DataSourceStatus struct {
 
 // Configuration represents the complete correlation engine configuration
 type Configuration struct {
-	Engine       EngineConfig              `json:"engine"`
-	Rules        RulesConfig               `json:"rules"`
-	Patterns     PatternsConfig            `json:"patterns"`
-	AutoFix      AutoFixConfig             `json:"autofix"`
-	EventStore   EventStoreConfig          `json:"event_store"`
-	DataSources  map[string]DataSourceConfig `json:"data_sources"`
-	Monitoring   MonitoringConfig          `json:"monitoring"`
-	Alerting     AlertingConfig            `json:"alerting"`
+	Engine      EngineConfig                `json:"engine"`
+	Rules       RulesConfig                 `json:"rules"`
+	Patterns    PatternsConfig              `json:"patterns"`
+	AutoFix     AutoFixConfig               `json:"autofix"`
+	EventStore  EventStoreConfig            `json:"event_store"`
+	DataSources map[string]DataSourceConfig `json:"data_sources"`
+	Monitoring  MonitoringConfig            `json:"monitoring"`
+	Alerting    AlertingConfig              `json:"alerting"`
 }
 
 // EngineConfig contains engine-specific configuration
 type EngineConfig struct {
-	Type                  EngineType    `json:"type"`
-	WindowSize            time.Duration `json:"window_size"`
-	ProcessingInterval    time.Duration `json:"processing_interval"`
-	MaxConcurrentRules    int           `json:"max_concurrent_rules"`
-	EnableMetrics         bool          `json:"enable_metrics"`
-	EnableCircuitBreaker  bool          `json:"enable_circuit_breaker"`
-	CircuitBreakerConfig  map[string]interface{} `json:"circuit_breaker_config,omitempty"`
+	Type                 EngineType             `json:"type"`
+	WindowSize           time.Duration          `json:"window_size"`
+	ProcessingInterval   time.Duration          `json:"processing_interval"`
+	MaxConcurrentRules   int                    `json:"max_concurrent_rules"`
+	EnableMetrics        bool                   `json:"enable_metrics"`
+	EnableCircuitBreaker bool                   `json:"enable_circuit_breaker"`
+	CircuitBreakerConfig map[string]interface{} `json:"circuit_breaker_config,omitempty"`
 }
 
 // BasicEngineConfig contains configuration for basic correlation engine
@@ -479,20 +479,20 @@ type BasicEngineConfig struct {
 // EnhancedEngineConfig contains configuration for enhanced correlation engine
 type EnhancedEngineConfig struct {
 	EngineConfig
-	BufferSize           int           `json:"buffer_size"`
-	FailureThreshold     int           `json:"failure_threshold"`
-	RecoveryTimeout      time.Duration `json:"recovery_timeout"`
-	MaxTimelineEvents    int           `json:"max_timeline_events"`
+	BufferSize        int           `json:"buffer_size"`
+	FailureThreshold  int           `json:"failure_threshold"`
+	RecoveryTimeout   time.Duration `json:"recovery_timeout"`
+	MaxTimelineEvents int           `json:"max_timeline_events"`
 }
 
 // PerfectEngineConfig contains configuration for perfect correlation engine
 type PerfectEngineConfig struct {
 	EngineConfig
-	PatternCacheSize     int           `json:"pattern_cache_size"`
-	EntityCacheSize      int           `json:"entity_cache_size"`
-	SemanticAnalysis     bool          `json:"semantic_analysis"`
-	BehavioralAnalysis   bool          `json:"behavioral_analysis"`
-	TemporalAnalysis     bool          `json:"temporal_analysis"`
+	PatternCacheSize   int  `json:"pattern_cache_size"`
+	EntityCacheSize    int  `json:"entity_cache_size"`
+	SemanticAnalysis   bool `json:"semantic_analysis"`
+	BehavioralAnalysis bool `json:"behavioral_analysis"`
+	TemporalAnalysis   bool `json:"temporal_analysis"`
 }
 
 // PatternIntegratedEngineConfig contains configuration for pattern-integrated engine
@@ -508,43 +508,43 @@ type PatternIntegratedEngineConfig struct {
 
 // RulesConfig contains rules configuration
 type RulesConfig struct {
-	AutoLoad        bool              `json:"auto_load"`
-	RulesDirectory  string            `json:"rules_directory"`
-	EnabledRules    []string          `json:"enabled_rules,omitempty"`
-	DisabledRules   []string          `json:"disabled_rules,omitempty"`
-	DefaultCooldown time.Duration     `json:"default_cooldown"`
-	DefaultTTL      time.Duration     `json:"default_ttl"`
-	RuleTimeout     time.Duration     `json:"rule_timeout"`
+	AutoLoad        bool          `json:"auto_load"`
+	RulesDirectory  string        `json:"rules_directory"`
+	EnabledRules    []string      `json:"enabled_rules,omitempty"`
+	DisabledRules   []string      `json:"disabled_rules,omitempty"`
+	DefaultCooldown time.Duration `json:"default_cooldown"`
+	DefaultTTL      time.Duration `json:"default_ttl"`
+	RuleTimeout     time.Duration `json:"rule_timeout"`
 }
 
 // PatternsConfig contains pattern detection configuration
 type PatternsConfig struct {
-	EnablePatternDetection bool              `json:"enable_pattern_detection"`
-	PatternsDirectory      string            `json:"patterns_directory"`
-	EnabledPatterns        []string          `json:"enabled_patterns,omitempty"`
-	PatternTimeout         time.Duration     `json:"pattern_timeout"`
-	ValidationEnabled      bool              `json:"validation_enabled"`
-	MinConfidence          float64           `json:"min_confidence"`
+	EnablePatternDetection bool          `json:"enable_pattern_detection"`
+	PatternsDirectory      string        `json:"patterns_directory"`
+	EnabledPatterns        []string      `json:"enabled_patterns,omitempty"`
+	PatternTimeout         time.Duration `json:"pattern_timeout"`
+	ValidationEnabled      bool          `json:"validation_enabled"`
+	MinConfidence          float64       `json:"min_confidence"`
 }
 
 // AutoFixConfig contains autofix engine configuration
 type AutoFixConfig struct {
-	EnableAutoFix         bool          `json:"enable_autofix"`
-	SafetyLevel           SafetyLevel   `json:"safety_level"`
-	RequireApproval       bool          `json:"require_approval"`
-	DryRunMode            bool          `json:"dry_run_mode"`
-	ExecutionTimeout      time.Duration `json:"execution_timeout"`
-	MaxConcurrentActions  int           `json:"max_concurrent_actions"`
-	MinPatternConfidence  float64       `json:"min_pattern_confidence"`
+	EnableAutoFix        bool          `json:"enable_autofix"`
+	SafetyLevel          SafetyLevel   `json:"safety_level"`
+	RequireApproval      bool          `json:"require_approval"`
+	DryRunMode           bool          `json:"dry_run_mode"`
+	ExecutionTimeout     time.Duration `json:"execution_timeout"`
+	MaxConcurrentActions int           `json:"max_concurrent_actions"`
+	MinPatternConfidence float64       `json:"min_pattern_confidence"`
 }
 
 // EventStoreConfig contains event store configuration
 type EventStoreConfig struct {
-	Type            string        `json:"type"`
-	ConnectionURL   string        `json:"connection_url"`
-	RetentionPeriod time.Duration `json:"retention_period"`
-	BatchSize       int           `json:"batch_size"`
-	FlushInterval   time.Duration `json:"flush_interval"`
+	Type            string            `json:"type"`
+	ConnectionURL   string            `json:"connection_url"`
+	RetentionPeriod time.Duration     `json:"retention_period"`
+	BatchSize       int               `json:"batch_size"`
+	FlushInterval   time.Duration     `json:"flush_interval"`
 	Credentials     map[string]string `json:"credentials,omitempty"`
 }
 
@@ -559,44 +559,44 @@ type DataSourceConfig struct {
 
 // MonitoringConfig contains monitoring configuration
 type MonitoringConfig struct {
-	EnableMetrics        bool          `json:"enable_metrics"`
-	MetricsPort          int           `json:"metrics_port"`
-	MetricsPath          string        `json:"metrics_path"`
-	HealthCheckInterval  time.Duration `json:"health_check_interval"`
-	EnableTracing        bool          `json:"enable_tracing"`
-	TracingEndpoint      string        `json:"tracing_endpoint,omitempty"`
+	EnableMetrics       bool          `json:"enable_metrics"`
+	MetricsPort         int           `json:"metrics_port"`
+	MetricsPath         string        `json:"metrics_path"`
+	HealthCheckInterval time.Duration `json:"health_check_interval"`
+	EnableTracing       bool          `json:"enable_tracing"`
+	TracingEndpoint     string        `json:"tracing_endpoint,omitempty"`
 }
 
 // AlertingConfig contains alerting configuration
 type AlertingConfig struct {
-	EnableAlerting bool                      `json:"enable_alerting"`
-	Channels       []AlertChannelConfig      `json:"channels"`
-	Rules          []AlertRuleConfig         `json:"rules"`
-	Suppression    AlertSuppressionConfig    `json:"suppression"`
+	EnableAlerting bool                   `json:"enable_alerting"`
+	Channels       []AlertChannelConfig   `json:"channels"`
+	Rules          []AlertRuleConfig      `json:"rules"`
+	Suppression    AlertSuppressionConfig `json:"suppression"`
 }
 
 // AlertChannelConfig contains alert channel configuration
 type AlertChannelConfig struct {
-	Name     string                 `json:"name"`
-	Type     string                 `json:"type"`
-	Config   map[string]interface{} `json:"config"`
-	Enabled  bool                   `json:"enabled"`
+	Name    string                 `json:"name"`
+	Type    string                 `json:"type"`
+	Config  map[string]interface{} `json:"config"`
+	Enabled bool                   `json:"enabled"`
 }
 
 // AlertRuleConfig contains alert rule configuration
 type AlertRuleConfig struct {
-	Name        string   `json:"name"`
-	Conditions  []string `json:"conditions"`
-	Channels    []string `json:"channels"`
-	Severity    Severity `json:"severity"`
-	Enabled     bool     `json:"enabled"`
+	Name       string   `json:"name"`
+	Conditions []string `json:"conditions"`
+	Channels   []string `json:"channels"`
+	Severity   Severity `json:"severity"`
+	Enabled    bool     `json:"enabled"`
 }
 
 // AlertSuppressionConfig contains alert suppression configuration
 type AlertSuppressionConfig struct {
-	DefaultDuration time.Duration         `json:"default_duration"`
-	MaxDuration     time.Duration         `json:"max_duration"`
-	Rules           []SuppressionRule     `json:"rules"`
+	DefaultDuration time.Duration     `json:"default_duration"`
+	MaxDuration     time.Duration     `json:"max_duration"`
+	Rules           []SuppressionRule `json:"rules"`
 }
 
 // SuppressionRule defines when alerts should be suppressed
@@ -637,13 +637,13 @@ type AlertChannel struct {
 
 // Alert represents an alert message
 type Alert struct {
-	ID          string                 `json:"id"`
-	RuleID      string                 `json:"rule_id"`
-	Title       string                 `json:"title"`
-	Message     string                 `json:"message"`
-	Severity    Severity               `json:"severity"`
-	Result      Result                 `json:"result"`
-	Channels    []string               `json:"channels"`
-	SentAt      time.Time              `json:"sent_at"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID       string                 `json:"id"`
+	RuleID   string                 `json:"rule_id"`
+	Title    string                 `json:"title"`
+	Message  string                 `json:"message"`
+	Severity Severity               `json:"severity"`
+	Result   Result                 `json:"result"`
+	Channels []string               `json:"channels"`
+	SentAt   time.Time              `json:"sent_at"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }

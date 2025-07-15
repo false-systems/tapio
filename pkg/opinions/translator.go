@@ -110,10 +110,10 @@ type Table struct {
 
 // ExtractedRule represents a rule extracted from markdown
 type ExtractedRule struct {
-	Section  string
-	Key      string
-	Value    interface{}
-	Context  string // surrounding text for context
+	Section    string
+	Key        string
+	Value      interface{}
+	Context    string // surrounding text for context
 	Confidence float32
 }
 
@@ -171,7 +171,7 @@ func (t *Translator) writeMemorySection(builder *strings.Builder, config *Opinio
 		builder.WriteString("### Service-Specific Limits\n")
 		for service, limit := range config.ServiceLimits {
 			if limit.MemoryLimit > 0 {
-				builder.WriteString(fmt.Sprintf("- `%s` pods can use up to **%.0f%% memory**\n", 
+				builder.WriteString(fmt.Sprintf("- `%s` pods can use up to **%.0f%% memory**\n",
 					service, limit.MemoryLimit*100))
 			}
 		}
@@ -192,7 +192,7 @@ func (t *Translator) writeCorrelationSection(builder *strings.Builder, config *O
 	if len(config.ServiceDependencies) > 0 {
 		builder.WriteString("### Service Dependencies\n")
 		builder.WriteString("When issues occur, expect cascading effects:\n\n")
-		
+
 		for _, dep := range config.ServiceDependencies {
 			builder.WriteString(fmt.Sprintf("- **%s** → **%s** within **%s**\n",
 				dep.Source, dep.Target, dep.ExpectedDelay))
@@ -209,7 +209,7 @@ func (t *Translator) writeAnomalySection(builder *strings.Builder, config *Opini
 		builder.WriteString("### Time-based Sensitivity\n\n")
 		builder.WriteString("| Time Period | Sensitivity | Description |\n")
 		builder.WriteString("|-------------|-------------|-------------|\n")
-		
+
 		for _, rule := range config.TimeBasedRules {
 			builder.WriteString(fmt.Sprintf("| %s | %.1f | %s |\n",
 				rule.Period, rule.Sensitivity, rule.Description))
@@ -242,7 +242,7 @@ func (t *Translator) writeServiceWeightsSection(builder *strings.Builder, config
 	builder.WriteString("## ⚖️ Service Importance\n\n")
 	builder.WriteString("```yaml\n")
 	builder.WriteString("service_weights:\n")
-	
+
 	// Sort by weight for readability
 	type weightPair struct {
 		service string
@@ -252,7 +252,7 @@ func (t *Translator) writeServiceWeightsSection(builder *strings.Builder, config
 	for svc, weight := range config.ImportanceWeights {
 		pairs = append(pairs, weightPair{svc, weight})
 	}
-	
+
 	// Sort by weight descending
 	for i := range pairs {
 		for j := i + 1; j < len(pairs); j++ {
@@ -261,7 +261,7 @@ func (t *Translator) writeServiceWeightsSection(builder *strings.Builder, config
 			}
 		}
 	}
-	
+
 	for _, pair := range pairs {
 		comment := ""
 		if pair.weight == 1.0 {
@@ -271,7 +271,7 @@ func (t *Translator) writeServiceWeightsSection(builder *strings.Builder, config
 		}
 		builder.WriteString(fmt.Sprintf("  %s: %.1f%s\n", pair.service, pair.weight, comment))
 	}
-	
+
 	builder.WriteString("```\n\n")
 }
 

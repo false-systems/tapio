@@ -117,7 +117,7 @@ func (p *MarkdownParser) Parse(markdown string) (*MarkdownDocument, error) {
 		// Handle list items
 		if matches := p.patterns["list_item"].FindStringSubmatch(line); len(matches) > 0 {
 			item := strings.TrimSpace(matches[1])
-			
+
 			// Check if this list item continues a previous list
 			if currentSection != nil && len(currentSection.Content) > 0 {
 				lastBlock := &currentSection.Content[len(currentSection.Content)-1]
@@ -162,7 +162,7 @@ func (p *MarkdownParser) parseTableRow(line string, section *Section, currentTab
 	// Remove leading and trailing pipes
 	line = strings.Trim(line, "|")
 	cells := strings.Split(line, "|")
-	
+
 	// Clean cells
 	for i := range cells {
 		cells[i] = strings.TrimSpace(cells[i])
@@ -187,7 +187,7 @@ func (p *MarkdownParser) parseTableRow(line string, section *Section, currentTab
 			Headers: cells,
 			Rows:    make([][]string, 0),
 		}
-		
+
 		// Find last content block
 		if len(section.Content) > 0 {
 			lastIdx := len(section.Content) - 1
@@ -197,7 +197,7 @@ func (p *MarkdownParser) parseTableRow(line string, section *Section, currentTab
 				return
 			}
 		}
-		
+
 		// Add new table block
 		section.Content = append(section.Content, ContentBlock{
 			Type:  "table",
@@ -208,7 +208,7 @@ func (p *MarkdownParser) parseTableRow(line string, section *Section, currentTab
 
 	// Add row to existing table
 	(*currentTable).Rows = append((*currentTable).Rows, cells)
-	
+
 	// Update the table in the content block
 	for i := len(section.Content) - 1; i >= 0; i-- {
 		if section.Content[i].Type == "table" {
@@ -222,17 +222,17 @@ func (p *MarkdownParser) parseTableRow(line string, section *Section, currentTab
 func (p *MarkdownParser) ExtractValue(text string) interface{} {
 	// Clean the text
 	text = strings.TrimSpace(text)
-	
+
 	// Extract from bold text
 	if matches := p.patterns["bold"].FindStringSubmatch(text); len(matches) > 0 {
 		text = matches[1]
 	}
-	
+
 	// Extract from inline code
 	if matches := p.patterns["code_inline"].FindStringSubmatch(text); len(matches) > 0 {
 		text = matches[1]
 	}
-	
+
 	return text
 }
 
@@ -254,7 +254,7 @@ func (d *MarkdownDocument) GetSectionByTitle(title string) *Section {
 // GetContentText extracts all text from content blocks
 func (s *Section) GetContentText() string {
 	var text strings.Builder
-	
+
 	for _, block := range s.Content {
 		switch block.Type {
 		case "paragraph":
@@ -268,7 +268,7 @@ func (s *Section) GetContentText() string {
 		}
 		text.WriteString("\n")
 	}
-	
+
 	return text.String()
 }
 
@@ -295,7 +295,7 @@ func (s *Section) FindTable() *Table {
 // ParseEmphasis extracts emphasized values (bold, code) from text
 func ParseEmphasis(text string) []string {
 	var values []string
-	
+
 	// Find bold text
 	boldPattern := regexp.MustCompile(`\*\*([^*]+)\*\*`)
 	for _, match := range boldPattern.FindAllStringSubmatch(text, -1) {
@@ -303,7 +303,7 @@ func ParseEmphasis(text string) []string {
 			values = append(values, match[1])
 		}
 	}
-	
+
 	// Find inline code
 	codePattern := regexp.MustCompile("`([^`]+)`")
 	for _, match := range codePattern.FindAllStringSubmatch(text, -1) {
@@ -311,6 +311,6 @@ func ParseEmphasis(text string) []string {
 			values = append(values, match[1])
 		}
 	}
-	
+
 	return values
 }

@@ -71,10 +71,10 @@ type Concept struct {
 
 // Relation between concepts
 type Relation struct {
-	From       string
-	To         string
-	Type       string
-	Strength   float32
+	From          string
+	To            string
+	Type          string
+	Strength      float32
 	Bidirectional bool
 }
 
@@ -140,8 +140,8 @@ type SemanticCache struct {
 type EnrichmentMetrics struct {
 	mu sync.RWMutex
 
-	EventsEnriched      uint64
-	EnrichmentDuration  time.Duration
+	EventsEnriched     uint64
+	EnrichmentDuration time.Duration
 	CacheHits          uint64
 	CacheMisses        uint64
 	EmbeddingTime      time.Duration
@@ -151,22 +151,22 @@ type EnrichmentMetrics struct {
 
 // RawEvent represents an unenriched event
 type RawEvent struct {
-	Type       string
-	Source     string
-	Entity     string
-	Data       map[string]interface{}
-	Timestamp  time.Time
+	Type      string
+	Source    string
+	Entity    string
+	Data      map[string]interface{}
+	Timestamp time.Time
 }
 
 // NewSemanticEnricher creates an OPINIONATED semantic enricher
 func NewSemanticEnricher() *SemanticEnricher {
 	return &SemanticEnricher{
 		ontology:         buildOpinionatedOntology(),
-		embedder:        newSemanticEmbedder(),
+		embedder:         newSemanticEmbedder(),
 		intentClassifier: newIntentClassifier(),
-		extractors:      buildFeatureExtractors(),
-		cache:           newSemanticCache(),
-		metrics:         &EnrichmentMetrics{},
+		extractors:       buildFeatureExtractors(),
+		cache:            newSemanticCache(),
+		metrics:          &EnrichmentMetrics{},
 	}
 }
 
@@ -432,7 +432,7 @@ func (se *SemanticEnricher) extractSemanticFeatures(ctx context.Context, raw Raw
 		wg.Add(1)
 		go func(n string, e FeatureExtractor) {
 			defer wg.Done()
-			
+
 			extracted, err := e.Extract(ctx, raw)
 			if err != nil {
 				errors <- fmt.Errorf("%s extractor: %w", n, err)
@@ -503,7 +503,7 @@ func buildOpinionatedOntology() *EventOntology {
 
 	// Build taxonomy tree
 	root := &TaxonomyNode{Name: "root", Level: 0}
-	
+
 	// Resource events
 	resource := &TaxonomyNode{Name: "resource", Parent: root, Level: 1}
 	exhaustion := &TaxonomyNode{Name: "exhaustion", Parent: resource, Level: 2}
@@ -567,12 +567,12 @@ func (m *SimpleEmbeddingModel) Embed(ctx context.Context, text string) ([]float3
 	for _, r := range text {
 		hash = hash*31 + int(r)
 	}
-	
+
 	for i := 0; i < m.dimension; i++ {
 		// Generate deterministic values based on hash
-		embedding[i] = float32(math.Sin(float64(hash+i))) * 0.5 + 0.5
+		embedding[i] = float32(math.Sin(float64(hash+i)))*0.5 + 0.5
 	}
-	
+
 	return embedding, nil
 }
 
@@ -638,7 +638,7 @@ type TemporalFeatureExtractor struct{}
 
 func (e *TemporalFeatureExtractor) Extract(ctx context.Context, event RawEvent) (map[string]float32, error) {
 	features := make(map[string]float32)
-	
+
 	// Time of day features
 	hour := float32(event.Timestamp.Hour())
 	features["hour_of_day"] = hour
@@ -646,7 +646,7 @@ func (e *TemporalFeatureExtractor) Extract(ctx context.Context, event RawEvent) 
 	if hour >= 9 && hour <= 17 {
 		features["is_business_hours"] = 1
 	}
-	
+
 	// Day of week features
 	dow := float32(event.Timestamp.Weekday())
 	features["day_of_week"] = dow
@@ -654,7 +654,7 @@ func (e *TemporalFeatureExtractor) Extract(ctx context.Context, event RawEvent) 
 	if dow == 0 || dow == 6 {
 		features["is_weekend"] = 1
 	}
-	
+
 	return features, nil
 }
 
@@ -666,7 +666,7 @@ type EntityFeatureExtractor struct{}
 
 func (e *EntityFeatureExtractor) Extract(ctx context.Context, event RawEvent) (map[string]float32, error) {
 	features := make(map[string]float32)
-	
+
 	// Entity type features
 	if strings.Contains(event.Entity, "pod") {
 		features["is_pod"] = 1
@@ -677,11 +677,11 @@ func (e *EntityFeatureExtractor) Extract(ctx context.Context, event RawEvent) (m
 	if strings.Contains(event.Entity, "service") {
 		features["is_service"] = 1
 	}
-	
+
 	// Entity hierarchy depth
 	parts := strings.Split(event.Entity, "/")
 	features["hierarchy_depth"] = float32(len(parts))
-	
+
 	return features, nil
 }
 
@@ -693,7 +693,7 @@ type BehavioralFeatureExtractor struct{}
 
 func (e *BehavioralFeatureExtractor) Extract(ctx context.Context, event RawEvent) (map[string]float32, error) {
 	features := make(map[string]float32)
-	
+
 	// Extract behavioral indicators
 	if val, ok := event.Data["retry_count"].(float64); ok {
 		features["retry_behavior"] = float32(val)
@@ -704,7 +704,7 @@ func (e *BehavioralFeatureExtractor) Extract(ctx context.Context, event RawEvent
 	if val, ok := event.Data["request_rate"].(float64); ok {
 		features["activity_level"] = float32(val)
 	}
-	
+
 	return features, nil
 }
 
@@ -716,7 +716,7 @@ type ContextualFeatureExtractor struct{}
 
 func (e *ContextualFeatureExtractor) Extract(ctx context.Context, event RawEvent) (map[string]float32, error) {
 	features := make(map[string]float32)
-	
+
 	// Extract contextual features
 	if val, ok := event.Data["namespace"].(string); ok {
 		if val == "kube-system" {
@@ -735,7 +735,7 @@ func (e *ContextualFeatureExtractor) Extract(ctx context.Context, event RawEvent
 			features["priority_level"] = 0.25
 		}
 	}
-	
+
 	return features, nil
 }
 

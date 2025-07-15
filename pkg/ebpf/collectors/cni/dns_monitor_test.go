@@ -12,18 +12,18 @@ import (
 
 func TestDNSQuery_Validation(t *testing.T) {
 	query := &DNSQuery{
-		QueryID:      12345,
+		QueryID:       12345,
 		TransactionID: "dns-001",
-		QueryName:    "kubernetes.default.svc.cluster.local",
-		QueryType:    "A",
-		QueryClass:   "IN",
-		SourceIP:     net.ParseIP("10.244.1.10"),
-		ServerIP:     net.ParseIP("10.96.0.10"),
-		ResponseCode: 0,
-		Success:      true,
-		Latency:      50 * time.Millisecond,
-		QueryTime:    time.Now().Add(-50 * time.Millisecond),
-		ResponseTime: time.Now(),
+		QueryName:     "kubernetes.default.svc.cluster.local",
+		QueryType:     "A",
+		QueryClass:    "IN",
+		SourceIP:      net.ParseIP("10.244.1.10"),
+		ServerIP:      net.ParseIP("10.96.0.10"),
+		ResponseCode:  0,
+		Success:       true,
+		Latency:       50 * time.Millisecond,
+		QueryTime:     time.Now().Add(-50 * time.Millisecond),
+		ResponseTime:  time.Now(),
 	}
 
 	assert.Equal(t, uint16(12345), query.QueryID)
@@ -349,7 +349,7 @@ func TestDNSCollector_Base64Detection(t *testing.T) {
 
 func TestDNSCollector_ProcessDNSQuery(t *testing.T) {
 	config := &CNICollectorConfig{
-		CollectionInterval:   5 * time.Second,
+		CollectionInterval:  5 * time.Second,
 		EnableDNSMonitoring: true,
 	}
 
@@ -370,21 +370,21 @@ func TestDNSCollector_ProcessDNSQuery(t *testing.T) {
 	}
 
 	query := &DNSQuery{
-		QueryID:      12345,
+		QueryID:       12345,
 		TransactionID: "dns-test",
-		QueryName:    "kubernetes.default.svc.cluster.local",
-		QueryType:    "A",
-		QueryClass:   "IN",
-		SourceIP:     net.ParseIP("10.244.1.10"),
-		ServerIP:     net.ParseIP("10.96.0.10"),
-		ResponseCode: 0,
-		ResponseIPs:  []net.IP{net.ParseIP("10.96.0.1")},
-		TTL:          30,
-		Success:      true,
-		Latency:      50 * time.Millisecond,
-		QueryTime:    time.Now().Add(-50 * time.Millisecond),
-		ResponseTime: time.Now(),
-		Labels:       map[string]string{"service": "coredns"},
+		QueryName:     "kubernetes.default.svc.cluster.local",
+		QueryType:     "A",
+		QueryClass:    "IN",
+		SourceIP:      net.ParseIP("10.244.1.10"),
+		ServerIP:      net.ParseIP("10.96.0.10"),
+		ResponseCode:  0,
+		ResponseIPs:   []net.IP{net.ParseIP("10.96.0.1")},
+		TTL:           30,
+		Success:       true,
+		Latency:       50 * time.Millisecond,
+		QueryTime:     time.Now().Add(-50 * time.Millisecond),
+		ResponseTime:  time.Now(),
+		Labels:        map[string]string{"service": "coredns"},
 	}
 
 	collector.processDNSQuery(query)
@@ -394,19 +394,19 @@ func TestDNSCollector_ProcessDNSQuery(t *testing.T) {
 	case event := <-eventCh:
 		opinionatedEvent, ok := event.(*opinionated.OpinionatedEvent)
 		require.True(t, ok)
-		
+
 		assert.Contains(t, opinionatedEvent.Id, "dns-")
 		assert.Equal(t, "dns.query", opinionatedEvent.EventType)
 		assert.Equal(t, "default", opinionatedEvent.Namespace)
 		assert.Equal(t, "test-pod", opinionatedEvent.PodName)
-		
+
 		// Check DNS-specific attributes
 		assert.Equal(t, "kubernetes.default.svc.cluster.local", opinionatedEvent.Attributes["dns.query_name"])
 		assert.Equal(t, "A", opinionatedEvent.Attributes["dns.query_type"])
 		assert.Equal(t, 0, opinionatedEvent.Attributes["dns.response_code"])
 		assert.Equal(t, true, opinionatedEvent.Attributes["dns.success"])
 		assert.Equal(t, int64(50), opinionatedEvent.Attributes["dns.latency_ms"])
-		
+
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Expected DNS event but none was generated")
 	}
@@ -419,7 +419,7 @@ func TestDNSCollector_ProcessDNSQuery(t *testing.T) {
 
 func TestDNSCollector_ProcessBlockedQuery(t *testing.T) {
 	config := &CNICollectorConfig{
-		CollectionInterval:   5 * time.Second,
+		CollectionInterval:  5 * time.Second,
 		EnableDNSMonitoring: true,
 	}
 
@@ -430,20 +430,20 @@ func TestDNSCollector_ProcessBlockedQuery(t *testing.T) {
 	collector.eventChan = eventCh
 
 	query := &DNSQuery{
-		QueryID:      12346,
+		QueryID:       12346,
 		TransactionID: "dns-blocked",
-		QueryName:    "malware-site.com",
-		QueryType:    "A",
-		SourceIP:     net.ParseIP("10.244.1.10"),
-		ServerIP:     net.ParseIP("10.96.0.10"),
-		ResponseCode: 2, // SERVFAIL
-		Success:      false,
-		Blocked:      true,
-		PolicyName:   "security-policy",
-		Error:        "blocked by security policy",
-		Latency:      10 * time.Millisecond,
-		QueryTime:    time.Now(),
-		Labels:       map[string]string{"blocked": "true", "reason": "malware"},
+		QueryName:     "malware-site.com",
+		QueryType:     "A",
+		SourceIP:      net.ParseIP("10.244.1.10"),
+		ServerIP:      net.ParseIP("10.96.0.10"),
+		ResponseCode:  2, // SERVFAIL
+		Success:       false,
+		Blocked:       true,
+		PolicyName:    "security-policy",
+		Error:         "blocked by security policy",
+		Latency:       10 * time.Millisecond,
+		QueryTime:     time.Now(),
+		Labels:        map[string]string{"blocked": "true", "reason": "malware"},
 	}
 
 	collector.processDNSQuery(query)
@@ -453,13 +453,13 @@ func TestDNSCollector_ProcessBlockedQuery(t *testing.T) {
 	case event := <-eventCh:
 		opinionatedEvent, ok := event.(*opinionated.OpinionatedEvent)
 		require.True(t, ok)
-		
+
 		assert.Equal(t, opinionated.SeverityError, opinionatedEvent.Severity)
 		assert.Contains(t, opinionatedEvent.Message, "[BLOCKED]")
 		assert.Equal(t, true, opinionatedEvent.Attributes["dns.blocked"])
 		assert.Equal(t, "security-policy", opinionatedEvent.Attributes["dns.policy_name"])
 		assert.Equal(t, "blocked by security policy", opinionatedEvent.Attributes["dns.error"])
-		
+
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Expected blocked DNS event but none was generated")
 	}
@@ -477,9 +477,9 @@ func TestDNSCollector_AnomalyDetection(t *testing.T) {
 	collector.eventChan = eventCh
 
 	tests := []struct {
-		name          string
-		query         *DNSQuery
-		expectedTags  []string
+		name         string
+		query        *DNSQuery
+		expectedTags []string
 	}{
 		{
 			name: "high latency query",
@@ -549,11 +549,11 @@ func TestDNSCollector_AnomalyDetection(t *testing.T) {
 			case event := <-eventCh:
 				opinionatedEvent, ok := event.(*opinionated.OpinionatedEvent)
 				require.True(t, ok)
-				
+
 				for _, tag := range tt.expectedTags {
 					assert.Contains(t, opinionatedEvent.Message, fmt.Sprintf("[%s]", tag))
 				}
-				
+
 			case <-time.After(100 * time.Millisecond):
 				t.Fatalf("Expected DNS anomaly event for %s but none was generated", tt.name)
 			}
@@ -594,7 +594,7 @@ func TestDNSStats_UpdateMetrics(t *testing.T) {
 // Benchmark tests for DNS processing performance
 func BenchmarkDNSCollector_ProcessDNSQuery(b *testing.B) {
 	config := &CNICollectorConfig{
-		CollectionInterval:   5 * time.Second,
+		CollectionInterval:  5 * time.Second,
 		EnableDNSMonitoring: true,
 	}
 
@@ -605,16 +605,16 @@ func BenchmarkDNSCollector_ProcessDNSQuery(b *testing.B) {
 	collector.eventChan = eventCh
 
 	query := &DNSQuery{
-		QueryID:      12345,
+		QueryID:       12345,
 		TransactionID: "benchmark-test",
-		QueryName:    "test.example.com",
-		QueryType:    "A",
-		SourceIP:     net.ParseIP("10.244.1.10"),
-		ServerIP:     net.ParseIP("10.96.0.10"),
-		Success:      true,
-		Latency:      50 * time.Millisecond,
-		QueryTime:    time.Now(),
-		ResponseTime: time.Now(),
+		QueryName:     "test.example.com",
+		QueryType:     "A",
+		SourceIP:      net.ParseIP("10.244.1.10"),
+		ServerIP:      net.ParseIP("10.96.0.10"),
+		Success:       true,
+		Latency:       50 * time.Millisecond,
+		QueryTime:     time.Now(),
+		ResponseTime:  time.Now(),
 	}
 
 	b.ResetTimer()
