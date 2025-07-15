@@ -68,15 +68,15 @@ type GraphProcessor struct{}
 
 // GraphProcessorConfig configures the graph processor
 type GraphProcessorConfig struct {
-	MaxNodes            int
-	MaxEdges            int
-	CacheEnabled        bool
-	NodeEmbeddingSize   int
-	EdgeFeatureEnabled  bool
-	GraphAlgorithmType  string
-	CommunityDetection  bool
-	GraphStatsEnabled   bool
-	CentralityMetrics   bool
+	MaxNodes           int
+	MaxEdges           int
+	CacheEnabled       bool
+	NodeEmbeddingSize  int
+	EdgeFeatureEnabled bool
+	GraphAlgorithmType string
+	CommunityDetection bool
+	GraphStatsEnabled  bool
+	CentralityMetrics  bool
 }
 
 // NewGraphProcessor creates a new graph processor
@@ -129,13 +129,13 @@ func (mr *ModelRegistry) GetStats() interface{} {
 
 // ModelRegistryConfig configures the model registry
 type ModelRegistryConfig struct {
-	StoragePath      string
-	CacheEnabled     bool
+	StoragePath       string
+	CacheEnabled      bool
 	VersioningEnabled bool
-	StorePath        string
-	CacheSize        int
-	LazyLoading      bool
-	Versioning       bool
+	StorePath         string
+	CacheSize         int
+	LazyLoading       bool
+	Versioning        bool
 }
 
 // NewModelRegistry creates a new model registry
@@ -160,14 +160,14 @@ func (ie *InferenceEngine) GetStats() interface{} {
 
 // InferenceEngineConfig configures the inference engine
 type InferenceEngineConfig struct {
-	ModelPath         string
-	BatchSize         int
-	MaxLatency        time.Duration
+	ModelPath           string
+	BatchSize           int
+	MaxLatency          time.Duration
 	ConcurrentInference int
-	Timeout           time.Duration
-	BatchInference    bool
-	ParallelInference bool
-	Workers           int
+	Timeout             time.Duration
+	BatchInference      bool
+	ParallelInference   bool
+	Workers             int
 }
 
 // NewInferenceEngine creates a new inference engine
@@ -557,9 +557,9 @@ type TemporalCorrelator struct{}
 
 // TemporalCorrelatorConfig configures the temporal correlator
 type TemporalCorrelatorConfig struct {
-	CorrelationWindow  time.Duration
-	PatternWindow      time.Duration
-	PeriodicityWindow  time.Duration
+	CorrelationWindow time.Duration
+	PatternWindow     time.Duration
+	PeriodicityWindow time.Duration
 }
 
 // NewTemporalCorrelator creates a new temporal correlator
@@ -591,8 +591,8 @@ type AnomalyCorrelator struct{}
 
 // AnomalyCorrelatorConfig configures the anomaly correlator
 type AnomalyCorrelatorConfig struct {
-	AnomalyThreshold    float32
-	BaselineWindow      time.Duration
+	AnomalyThreshold     float32
+	BaselineWindow       time.Duration
 	DetectionSensitivity float32
 }
 
@@ -606,9 +606,9 @@ type AICorrelator struct{}
 
 // AICorrelatorConfig configures the AI correlator
 type AICorrelatorConfig struct {
-	ModelEnabled    bool
+	ModelEnabled     bool
 	InferenceLatency time.Duration
-	CacheResults    bool
+	CacheResults     bool
 }
 
 // NewAICorrelator creates a new AI correlator

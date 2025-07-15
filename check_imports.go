@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 package main
@@ -25,7 +26,7 @@ func main() {
 			log.Printf("Error importing %s: %v", pkg, err)
 			continue
 		}
-		
+
 		fmt.Println("  Imports:")
 		for _, imp := range p.Imports {
 			if strings.Contains(imp, "tapio") {

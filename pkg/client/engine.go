@@ -11,10 +11,10 @@ import (
 
 // EngineClient provides a clean interface for CLI to communicate with tapio-engine
 type EngineClient struct {
-	endpoint   string
-	conn       *grpc.ClientConn
-	timeout    time.Duration
-	connected  bool
+	endpoint  string
+	conn      *grpc.ClientConn
+	timeout   time.Duration
+	connected bool
 }
 
 // Config holds client configuration
@@ -41,11 +41,11 @@ type CheckRequest struct {
 
 // CheckResponse represents a health check response
 type CheckResponse struct {
-	Status      string                   `json:"status"`
-	Issues      []Issue                  `json:"issues"`
-	Suggestions []Suggestion             `json:"suggestions"`
-	Summary     string                   `json:"summary"`
-	Metadata    map[string]interface{}   `json:"metadata"`
+	Status      string                 `json:"status"`
+	Issues      []Issue                `json:"issues"`
+	Suggestions []Suggestion           `json:"suggestions"`
+	Summary     string                 `json:"summary"`
+	Metadata    map[string]interface{} `json:"metadata"`
 }
 
 // Issue represents a detected problem
@@ -60,8 +60,8 @@ type Issue struct {
 
 // Suggestion represents a suggested action
 type Suggestion struct {
-	Title   string `json:"title"`
-	Command string `json:"command"`
+	Title   string   `json:"title"`
+	Command string   `json:"command"`
 	Steps   []string `json:"steps"`
 }
 
@@ -83,7 +83,7 @@ func NewEngineClient(config Config) *EngineClient {
 // Connect establishes connection to the engine
 func (c *EngineClient) Connect(ctx context.Context) error {
 	var opts []grpc.DialOption
-	
+
 	// For now, use insecure connection (TLS support can be added later)
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	opts = append(opts, grpc.WithTimeout(c.timeout))
@@ -139,12 +139,12 @@ func (c *EngineClient) Check(ctx context.Context, req *CheckRequest) (*CheckResp
 	// For now, return a mock response
 	// In a real implementation, this would make a gRPC call to the engine
 	return &CheckResponse{
-		Status: "healthy",
-		Issues: []Issue{},
+		Status:      "healthy",
+		Issues:      []Issue{},
 		Suggestions: []Suggestion{},
-		Summary: "All systems operational",
+		Summary:     "All systems operational",
 		Metadata: map[string]interface{}{
-			"target": req.Target,
+			"target":    req.Target,
 			"namespace": req.Namespace,
 			"timestamp": time.Now().Unix(),
 		},

@@ -122,9 +122,9 @@ type RuntimeAnomaly struct {
 	FailureRate  float64 `json:"failure_rate"` // failures per minute
 
 	// Evidence
-	SupportingEvents []types.Event `json:"supporting_events"`
-	MetricValues     map[string]float64  `json:"metric_values"`
-	ErrorMessages    []string            `json:"error_messages"`
+	SupportingEvents []types.Event      `json:"supporting_events"`
+	MetricValues     map[string]float64 `json:"metric_values"`
+	ErrorMessages    []string           `json:"error_messages"`
 
 	// Resource impact
 	ResourceImpact float64 `json:"resource_impact"` // 0.0 to 1.0

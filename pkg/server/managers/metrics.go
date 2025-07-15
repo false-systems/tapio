@@ -18,40 +18,40 @@ type MetricsCollector struct {
 	requestDuration   *prometheus.HistogramVec
 	activeConnections prometheus.Gauge
 	errorRate         prometheus.Gauge
-	
+
 	// Endpoint metrics
-	endpointRequests  *prometheus.CounterVec
-	endpointDuration  *prometheus.HistogramVec
-	endpointErrors    *prometheus.CounterVec
-	
+	endpointRequests *prometheus.CounterVec
+	endpointDuration *prometheus.HistogramVec
+	endpointErrors   *prometheus.CounterVec
+
 	// Connection metrics
 	connectionTotal    prometheus.Counter
 	connectionDuration *prometheus.HistogramVec
 	bytesReceived      prometheus.Counter
 	bytesSent          prometheus.Counter
-	
+
 	// Custom metrics registry
 	registry *prometheus.Registry
-	
+
 	// Internal state
-	mu               sync.RWMutex
-	serverMetrics    domain.ServerMetrics
-	endpointMetrics  map[string]*domain.EndpointMetrics
+	mu                sync.RWMutex
+	serverMetrics     domain.ServerMetrics
+	endpointMetrics   map[string]*domain.EndpointMetrics
 	connectionMetrics map[string]*domain.ConnectionMetrics
-	
+
 	logger domain.Logger
 }
 
 // NewMetricsCollector creates a new metrics collector
 func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 	registry := prometheus.NewRegistry()
-	
+
 	collector := &MetricsCollector{
 		registry:          registry,
 		endpointMetrics:   make(map[string]*domain.EndpointMetrics),
 		connectionMetrics: make(map[string]*domain.ConnectionMetrics),
-		logger:           logger,
-		
+		logger:            logger,
+
 		// Server metrics
 		requestsTotal: promauto.With(registry).NewCounterVec(
 			prometheus.CounterOpts{
@@ -60,7 +60,7 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 			},
 			[]string{"type", "status"},
 		),
-		
+
 		requestDuration: promauto.With(registry).NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "tapio_server_request_duration_seconds",
@@ -69,21 +69,21 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 			},
 			[]string{"type"},
 		),
-		
+
 		activeConnections: promauto.With(registry).NewGauge(
 			prometheus.GaugeOpts{
 				Name: "tapio_server_active_connections",
 				Help: "Number of active connections",
 			},
 		),
-		
+
 		errorRate: promauto.With(registry).NewGauge(
 			prometheus.GaugeOpts{
 				Name: "tapio_server_error_rate",
 				Help: "Current error rate",
 			},
 		),
-		
+
 		// Endpoint metrics
 		endpointRequests: promauto.With(registry).NewCounterVec(
 			prometheus.CounterOpts{
@@ -92,7 +92,7 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 			},
 			[]string{"endpoint", "method", "status"},
 		),
-		
+
 		endpointDuration: promauto.With(registry).NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "tapio_endpoint_duration_seconds",
@@ -101,7 +101,7 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 			},
 			[]string{"endpoint", "method"},
 		),
-		
+
 		endpointErrors: promauto.With(registry).NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_endpoint_errors_total",
@@ -109,7 +109,7 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 			},
 			[]string{"endpoint", "error_type"},
 		),
-		
+
 		// Connection metrics
 		connectionTotal: promauto.With(registry).NewCounter(
 			prometheus.CounterOpts{
@@ -117,7 +117,7 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 				Help: "Total number of connections",
 			},
 		),
-		
+
 		connectionDuration: promauto.With(registry).NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "tapio_connection_duration_seconds",
@@ -126,14 +126,14 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 			},
 			[]string{"protocol"},
 		),
-		
+
 		bytesReceived: promauto.With(registry).NewCounter(
 			prometheus.CounterOpts{
 				Name: "tapio_bytes_received_total",
 				Help: "Total bytes received",
 			},
 		),
-		
+
 		bytesSent: promauto.With(registry).NewCounter(
 			prometheus.CounterOpts{
 				Name: "tapio_bytes_sent_total",
@@ -141,10 +141,10 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 			},
 		),
 	}
-	
+
 	// Start metrics update goroutine
 	go collector.updateMetricsLoop()
-	
+
 	return collector
 }
 
@@ -152,7 +152,7 @@ func NewMetricsCollector(logger domain.Logger) *MetricsCollector {
 func (m *MetricsCollector) CollectMetrics(ctx context.Context) (*domain.Metrics, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Copy endpoint metrics
 	endpoints := make(map[string]domain.EndpointMetrics)
 	for name, metrics := range m.endpointMetrics {
@@ -160,7 +160,7 @@ func (m *MetricsCollector) CollectMetrics(ctx context.Context) (*domain.Metrics,
 			endpoints[name] = *metrics
 		}
 	}
-	
+
 	// Copy connection metrics
 	connections := make(map[string]domain.ConnectionMetrics)
 	for id, metrics := range m.connectionMetrics {
@@ -168,7 +168,7 @@ func (m *MetricsCollector) CollectMetrics(ctx context.Context) (*domain.Metrics,
 			connections[id] = *metrics
 		}
 	}
-	
+
 	return &domain.Metrics{
 		Server:      m.serverMetrics,
 		Endpoints:   endpoints,
@@ -181,10 +181,10 @@ func (m *MetricsCollector) CollectMetrics(ctx context.Context) (*domain.Metrics,
 func (m *MetricsCollector) CollectServerMetrics(ctx context.Context) (*domain.ServerMetrics, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	metrics := m.serverMetrics
 	metrics.LastUpdated = time.Now()
-	
+
 	return &metrics, nil
 }
 
@@ -192,12 +192,12 @@ func (m *MetricsCollector) CollectServerMetrics(ctx context.Context) (*domain.Se
 func (m *MetricsCollector) CollectEndpointMetrics(ctx context.Context, endpointName string) (*domain.EndpointMetrics, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	metrics, exists := m.endpointMetrics[endpointName]
 	if !exists {
 		return nil, domain.ErrResourceNotFound(fmt.Sprintf("endpoint metrics not found: %s", endpointName))
 	}
-	
+
 	metricsCopy := *metrics
 	return &metricsCopy, nil
 }
@@ -206,12 +206,12 @@ func (m *MetricsCollector) CollectEndpointMetrics(ctx context.Context, endpointN
 func (m *MetricsCollector) CollectConnectionMetrics(ctx context.Context, connectionID string) (*domain.ConnectionMetrics, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	metrics, exists := m.connectionMetrics[connectionID]
 	if !exists {
 		return nil, domain.ErrResourceNotFound(fmt.Sprintf("connection metrics not found: %s", connectionID))
 	}
-	
+
 	metricsCopy := *metrics
 	return &metricsCopy, nil
 }
@@ -221,16 +221,16 @@ func (m *MetricsCollector) RecordRequest(ctx context.Context, request *domain.Re
 	if request == nil {
 		return domain.ErrInvalidRequest("request cannot be nil")
 	}
-	
+
 	// Update Prometheus metrics
 	m.requestsTotal.WithLabelValues(string(request.Type), "success").Inc()
-	
+
 	// Update internal metrics
 	m.mu.Lock()
 	m.serverMetrics.RequestsTotal++
 	m.serverMetrics.LastUpdated = time.Now()
 	m.mu.Unlock()
-	
+
 	return nil
 }
 
@@ -239,15 +239,15 @@ func (m *MetricsCollector) RecordResponse(ctx context.Context, response *domain.
 	if response == nil {
 		return domain.ErrInvalidRequest("response cannot be nil")
 	}
-	
+
 	// Update based on response status
 	status := "success"
 	if response.Status != domain.ResponseStatusOK {
 		status = "error"
 	}
-	
+
 	m.requestsTotal.WithLabelValues(string(response.Type), status).Inc()
-	
+
 	return nil
 }
 
@@ -258,17 +258,17 @@ func (m *MetricsCollector) RecordError(ctx context.Context, err error) error {
 	m.serverMetrics.ErrorRate = float64(m.serverMetrics.ErrorsTotal) / float64(m.serverMetrics.RequestsTotal)
 	m.serverMetrics.LastUpdated = time.Now()
 	m.mu.Unlock()
-	
+
 	// Update Prometheus gauge
 	m.errorRate.Set(m.serverMetrics.ErrorRate)
-	
+
 	return nil
 }
 
 // RecordRequestDuration records request duration
 func (m *MetricsCollector) RecordRequestDuration(requestType string, duration time.Duration) {
 	m.requestDuration.WithLabelValues(requestType).Observe(duration.Seconds())
-	
+
 	m.mu.Lock()
 	// Update rolling average
 	currentAvg := m.serverMetrics.AverageResponseTime
@@ -281,19 +281,19 @@ func (m *MetricsCollector) RecordRequestDuration(requestType string, duration ti
 func (m *MetricsCollector) RecordEndpointRequest(endpoint, method, status string, duration time.Duration) {
 	m.endpointRequests.WithLabelValues(endpoint, method, status).Inc()
 	m.endpointDuration.WithLabelValues(endpoint, method).Observe(duration.Seconds())
-	
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Initialize endpoint metrics if needed
 	if _, exists := m.endpointMetrics[endpoint]; !exists {
 		m.endpointMetrics[endpoint] = &domain.EndpointMetrics{}
 	}
-	
+
 	metrics := m.endpointMetrics[endpoint]
 	metrics.RequestsTotal++
 	metrics.LastRequest = time.Now()
-	
+
 	// Update response times
 	if duration > metrics.P99ResponseTime {
 		metrics.P99ResponseTime = duration
@@ -301,14 +301,14 @@ func (m *MetricsCollector) RecordEndpointRequest(endpoint, method, status string
 	if duration > metrics.P95ResponseTime && duration < metrics.P99ResponseTime {
 		metrics.P95ResponseTime = duration
 	}
-	
+
 	// Update average (simplified)
 	metrics.AverageResponseTime = (metrics.AverageResponseTime*time.Duration(metrics.RequestsTotal-1) + duration) / time.Duration(metrics.RequestsTotal)
-	
+
 	if status != "200" && status != "success" {
 		metrics.ErrorsTotal++
 	}
-	
+
 	// Calculate rates
 	if elapsed := time.Since(m.serverMetrics.LastUpdated); elapsed > 0 {
 		metrics.RequestsPerSecond = float64(metrics.RequestsTotal) / elapsed.Seconds()
@@ -320,14 +320,14 @@ func (m *MetricsCollector) RecordEndpointRequest(endpoint, method, status string
 func (m *MetricsCollector) UpdateConnectionMetrics(connectionID string, received, sent uint64) {
 	m.bytesReceived.Add(float64(received))
 	m.bytesSent.Add(float64(sent))
-	
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if _, exists := m.connectionMetrics[connectionID]; !exists {
 		m.connectionMetrics[connectionID] = &domain.ConnectionMetrics{}
 	}
-	
+
 	metrics := m.connectionMetrics[connectionID]
 	metrics.BytesReceived += received
 	metrics.BytesSent += sent
@@ -337,7 +337,7 @@ func (m *MetricsCollector) UpdateConnectionMetrics(connectionID string, received
 // SetActiveConnections sets the number of active connections
 func (m *MetricsCollector) SetActiveConnections(count int) {
 	m.activeConnections.Set(float64(count))
-	
+
 	m.mu.Lock()
 	m.serverMetrics.ActiveConnections = uint64(count)
 	m.mu.Unlock()
@@ -352,31 +352,31 @@ func (m *MetricsCollector) GetRegistry() *prometheus.Registry {
 func (m *MetricsCollector) updateMetricsLoop() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	startTime := time.Now()
-	
+
 	for range ticker.C {
 		m.mu.Lock()
-		
+
 		// Calculate requests per second
 		elapsed := time.Since(m.serverMetrics.LastUpdated)
 		if elapsed > 0 && m.serverMetrics.RequestsTotal > 0 {
 			m.serverMetrics.RequestsPerSecond = float64(m.serverMetrics.RequestsTotal) / time.Since(startTime).Seconds()
 		}
-		
+
 		// Update error rate
 		if m.serverMetrics.RequestsTotal > 0 {
 			m.serverMetrics.ErrorRate = float64(m.serverMetrics.ErrorsTotal) / float64(m.serverMetrics.RequestsTotal)
 		}
-		
+
 		// Placeholder for memory and CPU usage
 		m.serverMetrics.MemoryUsage = 64 * 1024 * 1024 // 64MB
 		m.serverMetrics.CPUUsage = 0.15                // 15%
-		
+
 		m.serverMetrics.LastUpdated = time.Now()
-		
+
 		m.mu.Unlock()
-		
+
 		// Update Prometheus gauges
 		m.errorRate.Set(m.serverMetrics.ErrorRate)
 	}

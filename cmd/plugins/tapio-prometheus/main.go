@@ -60,7 +60,7 @@ func runPlugin(cmd *cobra.Command, args []string) error {
 
 	// Initialize plugin (assuming we have a prometheus plugin implementation)
 	// This would use the existing prometheus plugin from pkg/exports/plugins
-	
+
 	fmt.Printf("✅ Prometheus Plugin started successfully\n")
 	fmt.Printf("   Endpoint: %s\n", endpoint)
 	fmt.Printf("   Config: %s\n", configPath)

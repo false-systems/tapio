@@ -12,8 +12,8 @@ type FeatureCondition struct {
 
 // DescriptionMatcher matches descriptions using semantic analysis
 type DescriptionMatcher struct {
-	Pattern     string
-	MinScore    float64
+	Pattern      string
+	MinScore     float64
 	UseEmbedding bool
 }
 
@@ -26,15 +26,15 @@ type MultiEmbeddingPattern struct {
 
 // HierarchicalTagLogic implements hierarchical tag-based logic
 type HierarchicalTagLogic struct {
-	RootTags     []string
-	TagHierarchy map[string][]string
+	RootTags      []string
+	TagHierarchy  map[string][]string
 	RequiredDepth int
 }
 
 // ContextualIntentLogic implements intent-based logic
 type ContextualIntentLogic struct {
-	Intents      []string
-	Contexts     []string
+	Intents       []string
+	Contexts      []string
 	MinConfidence float64
 }
 
@@ -78,26 +78,26 @@ func NewContextualIntentLogic(intents, contexts []string) *ContextualIntentLogic
 
 // PerformanceHints provides performance optimization hints
 type PerformanceHints struct {
-	CacheKey      string
-	CacheDuration int
+	CacheKey       string
+	CacheDuration  int
 	Parallelizable bool
-	Priority      int
+	Priority       int
 }
 
 // SemanticAction represents an action based on semantic analysis
 type SemanticAction struct {
-	Type        string
-	Target      string
-	Parameters  map[string]interface{}
-	Confidence  float64
+	Type       string
+	Target     string
+	Parameters map[string]interface{}
+	Confidence float64
 }
 
 // InsightTemplate represents a template for generating insights
 type InsightTemplate struct {
-	ID       string
-	Pattern  string
+	ID        string
+	Pattern   string
 	Variables map[string]string
-	Language string
+	Language  string
 }
 
 // SemanticReasoningStep represents a step in semantic reasoning
@@ -110,31 +110,31 @@ type SemanticReasoningStep struct {
 
 // SemanticGraphTraversal represents graph traversal configuration
 type SemanticGraphTraversal struct {
-	StartNode   string
-	MaxDepth    int
-	Direction   string
-	Filters     []string
+	StartNode string
+	MaxDepth  int
+	Direction string
+	Filters   []string
 }
 
 // ConfidenceComputation represents confidence calculation configuration
 type ConfidenceComputation struct {
-	Method     string
-	Weights    map[string]float64
+	Method      string
+	Weights     map[string]float64
 	Aggregation string
 }
 
 // MLInferenceConfig represents ML inference configuration
 type MLInferenceConfig struct {
-	ModelName    string
-	ModelVersion string
+	ModelName     string
+	ModelVersion  string
 	InputFeatures []string
-	OutputFormat string
+	OutputFormat  string
 }
 
 // MLPreprocessing represents ML preprocessing steps
 type MLPreprocessing struct {
-	Steps      []string
-	Normalizer string
+	Steps              []string
+	Normalizer         string
 	FeatureEngineering map[string]string
 }
 
@@ -147,10 +147,10 @@ type MLOutputMapping struct {
 
 // ConflictResolution represents conflict resolution strategy
 type ConflictResolution struct {
-	Strategy   string
-	Priority   []string
-	Merge      bool
-	Override   map[string]bool
+	Strategy string
+	Priority []string
+	Merge    bool
+	Override map[string]bool
 }
 
 // RuleExecutor executes semantic rules
@@ -177,8 +177,8 @@ type OntologyEngine struct {
 
 // IntentClassifier classifies intents
 type IntentClassifier struct {
-	model    string
-	intents  []string
+	model   string
+	intents []string
 }
 
 // AdvancedRuleMatcher matches advanced rules
@@ -209,9 +209,9 @@ type ScalabilityHints struct {
 
 // InterpretabilityHints provides interpretability hints
 type InterpretabilityHints struct {
-	ExplainMethod string
+	ExplainMethod     string
 	FeatureImportance map[string]float64
-	DecisionPath []string
+	DecisionPath      []string
 }
 
 // SemanticCacheManager manages semantic caching
@@ -248,17 +248,17 @@ type SemanticInsight struct {
 
 // SemanticCorrelation represents semantic correlation
 type SemanticCorrelation struct {
-	Source      string
-	Target      string
+	Source       string
+	Target       string
 	Relationship string
-	Strength    float64
+	Strength     float64
 }
 
 // MLModel represents an ML model configuration
 type MLModel struct {
-	Name      string
-	Type      string
-	Version   string
-	Features  []string
-	Outputs   []string
+	Name     string
+	Type     string
+	Version  string
+	Features []string
+	Outputs  []string
 }

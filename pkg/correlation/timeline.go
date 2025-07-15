@@ -349,7 +349,6 @@ func (t *Timeline) Clear() {
 	t.timeRange = TimeRange{}
 }
 
-
 // GetEventsInWindow returns events within a time window around a reference time
 func (t *Timeline) GetEventsInWindow(referenceTime time.Time, windowSize time.Duration) []TimelineEvent {
 	window := &TimeRange{

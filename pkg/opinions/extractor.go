@@ -96,10 +96,10 @@ func NewRuleExtractor() *RuleExtractor {
 				Extract: func(matches []string, context string) ExtractedRule {
 					target := matches[1]
 					delay := parseDuration(matches[2], matches[3])
-					
+
 					// Try to find source from context
 					source := extractSourceFromContext(context)
-					
+
 					return ExtractedRule{
 						Section: "correlation",
 						Key:     "service_dependency",
@@ -272,7 +272,7 @@ func (e *RuleExtractor) extractFromTables(doc *MarkdownDocument) []ExtractedRule
 			if e.isTimeSensitivityTable(table) {
 				rules = append(rules, e.extractTimeSensitivityRules(table)...)
 			}
-			
+
 			// Handle other table types
 			// Add more table handlers as needed
 		}
@@ -302,7 +302,7 @@ func (e *RuleExtractor) isTimeSensitivityTable(table *Table) bool {
 	if len(table.Headers) < 2 {
 		return false
 	}
-	
+
 	// Check headers
 	for _, header := range table.Headers {
 		lower := strings.ToLower(header)
@@ -310,7 +310,7 @@ func (e *RuleExtractor) isTimeSensitivityTable(table *Table) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -343,10 +343,10 @@ func (e *RuleExtractor) extractTimeSensitivityRules(table *Table) []ExtractedRul
 		if timeCol < len(row) && sensitivityCol < len(row) {
 			period := row[timeCol]
 			sensitivityStr := row[sensitivityCol]
-			
+
 			// Parse sensitivity (could be "High (0.7)" or just "0.7")
 			sensitivity := parseSensitivity(sensitivityStr)
-			
+
 			desc := ""
 			if descCol >= 0 && descCol < len(row) {
 				desc = row[descCol]
@@ -373,30 +373,30 @@ func (e *RuleExtractor) extractTimeSensitivityRules(table *Table) []ExtractedRul
 // parseServiceWeights parses service weights from YAML
 func (e *RuleExtractor) parseServiceWeights(code string) []ExtractedRule {
 	var rules []ExtractedRule
-	
+
 	lines := strings.Split(code, "\n")
 	inServiceWeights := false
-	
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		if strings.Contains(trimmed, "service_weights:") {
 			inServiceWeights = true
 			continue
 		}
-		
+
 		if inServiceWeights && strings.HasPrefix(line, "  ") {
 			// Parse service: weight
 			parts := strings.Split(trimmed, ":")
 			if len(parts) >= 2 {
 				service := strings.TrimSpace(parts[0])
 				weightStr := strings.TrimSpace(parts[1])
-				
+
 				// Remove comments
 				if idx := strings.Index(weightStr, "#"); idx >= 0 {
 					weightStr = strings.TrimSpace(weightStr[:idx])
 				}
-				
+
 				if weight, err := strconv.ParseFloat(weightStr, 32); err == nil {
 					rule := ExtractedRule{
 						Section:    "weights",
@@ -413,7 +413,7 @@ func (e *RuleExtractor) parseServiceWeights(code string) []ExtractedRule {
 			inServiceWeights = false
 		}
 	}
-	
+
 	return rules
 }
 
@@ -427,7 +427,7 @@ func (e *RuleExtractor) sectionMatches(sectionTitle, targetSection string) bool 
 
 func (e *RuleExtractor) normalizeSection(title string) string {
 	lower := strings.ToLower(title)
-	
+
 	if strings.Contains(lower, "memory") {
 		return "memory"
 	}
@@ -443,7 +443,7 @@ func (e *RuleExtractor) normalizeSection(title string) string {
 	if strings.Contains(lower, "behav") || strings.Contains(lower, "learn") {
 		return "behavioral"
 	}
-	
+
 	return "general"
 }
 
@@ -488,7 +488,7 @@ func parseSensitivity(s string) float32 {
 			return float32(val)
 		}
 	}
-	
+
 	// Parse descriptive values
 	lower := strings.ToLower(s)
 	switch {
@@ -510,7 +510,7 @@ func extractSourceFromContext(context string) string {
 	if matches := re.FindStringSubmatch(context); len(matches) > 1 {
 		return matches[1]
 	}
-	
+
 	// Default
 	return "unknown"
 }
@@ -528,14 +528,14 @@ func parseKeyValue(text string) *KeyValue {
 	if matches := re.FindStringSubmatch(text); len(matches) > 2 {
 		key := strings.TrimSpace(matches[1])
 		value := strings.TrimSpace(matches[2])
-		
+
 		// Try to parse value type
 		if floatVal, err := strconv.ParseFloat(value, 32); err == nil {
 			return &KeyValue{Key: key, Value: float32(floatVal)}
 		}
-		
+
 		return &KeyValue{Key: key, Value: value}
 	}
-	
+
 	return nil
 }

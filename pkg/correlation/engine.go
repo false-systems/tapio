@@ -60,10 +60,10 @@ func NewEngine(eventStore EventStore, opts ...EngineOption) *BaseCorrelationEngi
 		enableMetrics:      true,
 		rules:              make(map[string]Rule),
 		eventStore:         eventStore,
-		stats: Stats{},
-		ruleCooldowns:  make(map[string]time.Time),
-		resultHandlers: make([]ResultHandler, 0),
-		resultChan:     make(chan *Result, 1000), // Buffered channel
+		stats:              Stats{},
+		ruleCooldowns:      make(map[string]time.Time),
+		resultHandlers:     make([]ResultHandler, 0),
+		resultChan:         make(chan *Result, 1000), // Buffered channel
 	}
 
 	// Apply options

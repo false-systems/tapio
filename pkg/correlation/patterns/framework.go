@@ -12,11 +12,11 @@ import (
 
 // CausalityNode represents a node in the causality chain
 type CausalityNode struct {
-	EventID    string         `json:"event_id"`
-	EventType  string         `json:"event_type"`
-	Entity     types.Entity   `json:"entity"`
-	Timestamp  time.Time      `json:"timestamp"`
-	Confidence float64        `json:"confidence"`
+	EventID    string       `json:"event_id"`
+	EventType  string       `json:"event_type"`
+	Entity     types.Entity `json:"entity"`
+	Timestamp  time.Time    `json:"timestamp"`
+	Confidence float64      `json:"confidence"`
 
 	// Causality relationships
 	CausedBy []string `json:"caused_by,omitempty"`

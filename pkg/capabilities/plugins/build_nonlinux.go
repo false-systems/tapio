@@ -3,14 +3,12 @@
 
 package plugins
 
-import "github.com/yairfalse/tapio/pkg/capabilities"
-
 // NewEBPFMemoryPlugin creates a not-available plugin on non-Linux platforms
 // This provides build optimization - no eBPF code compiled for non-Linux
-func NewEBPFMemoryPlugin(config interface{}) capabilities.MemoryCapability {
+func NewEBPFMemoryPlugin(config interface{}) MemoryCapability {
 	return &NotAvailableMemoryPlugin{
 		NotAvailablePlugin: NewNotAvailablePlugin(
-			"ebpf-memory", 
+			"ebpf-memory",
 			"eBPF memory monitoring only available on Linux",
 		),
 	}
@@ -22,19 +20,19 @@ type NotAvailableMemoryPlugin struct {
 }
 
 // GetMemoryStats returns capability error
-func (p *NotAvailableMemoryPlugin) GetMemoryStats() ([]capabilities.ProcessMemoryStats, error) {
-	return nil, capabilities.NewCapabilityError(
-		p.name, 
-		p.reason, 
+func (p *NotAvailableMemoryPlugin) GetMemoryStats() ([]ProcessMemoryStats, error) {
+	return nil, NewCapabilityError(
+		p.name,
+		p.reason,
 		p.platform,
 	)
 }
 
 // GetMemoryPredictions returns capability error
-func (p *NotAvailableMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*capabilities.OOMPrediction, error) {
-	return nil, capabilities.NewCapabilityError(
-		p.name, 
-		p.reason, 
+func (p *NotAvailableMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*OOMPrediction, error) {
+	return nil, NewCapabilityError(
+		p.name,
+		p.reason,
 		p.platform,
 	)
 }

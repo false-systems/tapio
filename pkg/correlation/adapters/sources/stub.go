@@ -28,19 +28,19 @@ func (s *StubEventSource) GetEvents(ctx context.Context, filter domain.Filter) (
 	if !s.available {
 		return nil, fmt.Errorf("source %s is not available", s.sourceType)
 	}
-	
+
 	var result []domain.Event
 	for _, event := range s.events {
 		if filter.Matches(event) {
 			result = append(result, event)
 		}
 	}
-	
+
 	// Apply limit if specified
 	if filter.Limit > 0 && len(result) > filter.Limit {
 		result = result[:filter.Limit]
 	}
-	
+
 	return result, nil
 }
 
@@ -49,12 +49,12 @@ func (s *StubEventSource) Stream(ctx context.Context, filter domain.Filter) (<-c
 	if !s.available {
 		return nil, fmt.Errorf("source %s is not available", s.sourceType)
 	}
-	
+
 	eventChan := make(chan domain.Event, 100)
-	
+
 	go func() {
 		defer close(eventChan)
-		
+
 		for _, event := range s.events {
 			if filter.Matches(event) {
 				select {
@@ -65,7 +65,7 @@ func (s *StubEventSource) Stream(ctx context.Context, filter domain.Filter) (<-c
 			}
 		}
 	}()
-	
+
 	return eventChan, nil
 }
 

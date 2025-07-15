@@ -27,10 +27,10 @@ type EBPFMemoryPlugin struct {
 
 // EBPFConfig contains configuration for eBPF monitoring
 type EBPFConfig struct {
-	SamplingRate    float64       `json:"sampling_rate"`
-	BufferSize      int           `json:"buffer_size"`
-	ProcessTimeout  time.Duration `json:"process_timeout"`
-	Debug           bool          `json:"debug"`
+	SamplingRate   float64       `json:"sampling_rate"`
+	BufferSize     int           `json:"buffer_size"`
+	ProcessTimeout time.Duration `json:"process_timeout"`
+	Debug          bool          `json:"debug"`
 }
 
 // NewEBPFMemoryPlugin creates a new eBPF memory monitoring plugin
@@ -70,7 +70,7 @@ func (p *EBPFMemoryPlugin) Info() *capabilities.CapabilityInfo {
 		info.Status = capabilities.CapabilityNotAvailable
 		info.Requirements = []string{
 			"Linux kernel 4.14+",
-			"Root privileges or CAP_BPF capability", 
+			"Root privileges or CAP_BPF capability",
 			"eBPF support in kernel",
 		}
 		if p.lastError != nil {
@@ -251,7 +251,7 @@ func (p *EBPFMemoryPlugin) initializeEBPFPrograms() error {
 	// 2. Attaching to kernel tracepoints/kprobes
 	// 3. Setting up ring buffer for events
 	// 4. Starting event processing
-	
+
 	// For now, return success to demonstrate the architecture
 	return nil
 }
@@ -262,7 +262,7 @@ func (p *EBPFMemoryPlugin) cleanupEBPFPrograms() error {
 	// 1. Detaching eBPF programs from kernel
 	// 2. Closing ring buffers
 	// 3. Freeing resources
-	
+
 	return nil
 }
 
@@ -283,11 +283,11 @@ func (p *EBPFMemoryPlugin) monitoringLoop() {
 func (p *EBPFMemoryPlugin) collectMemoryStats() {
 	// TODO: Implement actual eBPF event collection
 	// This would read from the eBPF ring buffer and process memory events
-	
+
 	// For demonstration, we'll update the timestamp to show the plugin is working
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	// Process any new memory events from eBPF
 	// Update p.statistics with real data
 }

@@ -18,7 +18,7 @@ type APIClient struct {
 func NewAPIClient(engineEndpoint string) *APIClient {
 	config := client.DefaultConfig()
 	config.Endpoint = engineEndpoint
-	
+
 	return &APIClient{
 		engineClient: client.NewEngineClient(config),
 	}
@@ -42,7 +42,7 @@ func (c *APIClient) GetHealthStatus(ctx context.Context) (*api.RESTHealthRespons
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &api.RESTHealthResponse{
 		Status:    health.Status,
 		Message:   health.Message,
@@ -57,12 +57,12 @@ func (c *APIClient) GetClusterStatus(ctx context.Context, options map[string]str
 		All:     true,
 		Options: options,
 	}
-	
+
 	response, err := c.engineClient.Check(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert client response to REST API format
 	restIssues := make([]*api.RESTIssue, len(response.Issues))
 	for i, issue := range response.Issues {
@@ -77,7 +77,7 @@ func (c *APIClient) GetClusterStatus(ctx context.Context, options map[string]str
 			Timestamp:   time.Now(),
 		}
 	}
-	
+
 	restSuggestions := make([]*api.RESTSuggestion, len(response.Suggestions))
 	for i, suggestion := range response.Suggestions {
 		restSuggestions[i] = &api.RESTSuggestion{
@@ -89,7 +89,7 @@ func (c *APIClient) GetClusterStatus(ctx context.Context, options map[string]str
 			Priority:    "medium",
 		}
 	}
-	
+
 	return &api.RESTClusterAnalysisResponse{
 		Status:      response.Status,
 		Summary:     response.Summary,
@@ -97,7 +97,7 @@ func (c *APIClient) GetClusterStatus(ctx context.Context, options map[string]str
 		Suggestions: restSuggestions,
 		Namespaces:  []*api.RESTNamespaceStatus{}, // TODO: Implement namespace status
 		Metrics: &api.RESTClusterMetrics{
-			NodeCount:      5,  // Mock data
+			NodeCount:      5, // Mock data
 			PodCount:       50,
 			NamespaceCount: 10,
 			ResourceUsage:  65.5,
@@ -113,12 +113,12 @@ func (c *APIClient) GetNamespaceStatus(ctx context.Context, namespace string, op
 		Namespace: namespace,
 		Options:   options,
 	}
-	
+
 	response, err := c.engineClient.Check(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert client response to REST API format
 	restIssues := make([]*api.RESTIssue, len(response.Issues))
 	for i, issue := range response.Issues {
@@ -133,7 +133,7 @@ func (c *APIClient) GetNamespaceStatus(ctx context.Context, namespace string, op
 			Timestamp:   time.Now(),
 		}
 	}
-	
+
 	restSuggestions := make([]*api.RESTSuggestion, len(response.Suggestions))
 	for i, suggestion := range response.Suggestions {
 		restSuggestions[i] = &api.RESTSuggestion{
@@ -145,7 +145,7 @@ func (c *APIClient) GetNamespaceStatus(ctx context.Context, namespace string, op
 			Priority:    "medium",
 		}
 	}
-	
+
 	return &api.RESTNamespaceAnalysisResponse{
 		Namespace:   namespace,
 		Status:      response.Status,
@@ -164,12 +164,12 @@ func (c *APIClient) GetResourceStatus(ctx context.Context, resource, namespace s
 		Namespace: namespace,
 		Options:   options,
 	}
-	
+
 	response, err := c.engineClient.Check(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert client response to REST API format
 	restIssues := make([]*api.RESTIssue, len(response.Issues))
 	for i, issue := range response.Issues {
@@ -184,7 +184,7 @@ func (c *APIClient) GetResourceStatus(ctx context.Context, resource, namespace s
 			Timestamp:   time.Now(),
 		}
 	}
-	
+
 	restSuggestions := make([]*api.RESTSuggestion, len(response.Suggestions))
 	for i, suggestion := range response.Suggestions {
 		restSuggestions[i] = &api.RESTSuggestion{
@@ -196,7 +196,7 @@ func (c *APIClient) GetResourceStatus(ctx context.Context, resource, namespace s
 			Priority:    "medium",
 		}
 	}
-	
+
 	return &api.RESTResourceAnalysisResponse{
 		Resource:    resource,
 		Namespace:   namespace,
@@ -238,7 +238,7 @@ func (c *APIClient) GetPatterns(ctx context.Context, category string, enabled bo
 			Enabled:     false,
 		},
 	}
-	
+
 	// Filter by category if specified
 	if category != "" {
 		filteredPatterns := []*api.RESTPatternInfo{}
@@ -249,7 +249,7 @@ func (c *APIClient) GetPatterns(ctx context.Context, category string, enabled bo
 		}
 		patterns = filteredPatterns
 	}
-	
+
 	// Filter by enabled status
 	filteredPatterns := []*api.RESTPatternInfo{}
 	for _, pattern := range patterns {
@@ -257,7 +257,7 @@ func (c *APIClient) GetPatterns(ctx context.Context, category string, enabled bo
 			filteredPatterns = append(filteredPatterns, pattern)
 		}
 	}
-	
+
 	return &api.RESTGetPatternsResponse{
 		Patterns: filteredPatterns,
 	}, nil
@@ -289,7 +289,7 @@ func (c *APIClient) GetMetrics(ctx context.Context, metricNames []string, timeRa
 			Timestamp: time.Now(),
 		},
 	}
-	
+
 	// Filter by metric names if specified
 	if len(metricNames) > 0 {
 		filteredMetrics := []*api.RESTMetricData{}
@@ -303,7 +303,7 @@ func (c *APIClient) GetMetrics(ctx context.Context, metricNames []string, timeRa
 		}
 		metrics = filteredMetrics
 	}
-	
+
 	return &api.RESTMetricsResponse{
 		Metrics:   metrics,
 		Timestamp: time.Now(),
@@ -313,12 +313,12 @@ func (c *APIClient) GetMetrics(ctx context.Context, metricNames []string, timeRa
 // GetRealtimeEvents returns real-time event stream (mock implementation)
 func (c *APIClient) GetRealtimeEvents(ctx context.Context) (<-chan *api.RESTEvent, error) {
 	events := make(chan *api.RESTEvent, 100)
-	
+
 	go func() {
 		defer close(events)
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
-		
+
 		eventCount := 0
 		for {
 			select {
@@ -341,7 +341,7 @@ func (c *APIClient) GetRealtimeEvents(ctx context.Context) (<-chan *api.RESTEven
 					},
 					Severity: "info",
 				}
-				
+
 				select {
 				case events <- event:
 				case <-ctx.Done():
@@ -350,7 +350,7 @@ func (c *APIClient) GetRealtimeEvents(ctx context.Context) (<-chan *api.RESTEven
 			}
 		}
 	}()
-	
+
 	return events, nil
 }
 
@@ -359,91 +359,91 @@ func (c *APIClient) GetDashboardData(ctx context.Context) (*DashboardData, error
 	// Fetch various data in parallel
 	healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer healthCancel()
-	
+
 	clusterCtx, clusterCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer clusterCancel()
-	
+
 	metricsCtx, metricsCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer metricsCancel()
-	
+
 	patternsCtx, patternsCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer patternsCancel()
-	
+
 	// Fetch data concurrently
 	healthChan := make(chan *api.RESTHealthResponse, 1)
 	clusterChan := make(chan *api.RESTClusterAnalysisResponse, 1)
 	metricsChan := make(chan *api.RESTMetricsResponse, 1)
 	patternsChan := make(chan *api.RESTGetPatternsResponse, 1)
-	
+
 	go func() {
 		if health, err := c.GetHealthStatus(healthCtx); err == nil {
 			healthChan <- health
 		}
 		close(healthChan)
 	}()
-	
+
 	go func() {
 		if cluster, err := c.GetClusterStatus(clusterCtx, nil); err == nil {
 			clusterChan <- cluster
 		}
 		close(clusterChan)
 	}()
-	
+
 	go func() {
 		if metrics, err := c.GetMetrics(metricsCtx, nil, nil); err == nil {
 			metricsChan <- metrics
 		}
 		close(metricsChan)
 	}()
-	
+
 	go func() {
 		if patterns, err := c.GetPatterns(patternsCtx, "", true); err == nil {
 			patternsChan <- patterns
 		}
 		close(patternsChan)
 	}()
-	
+
 	// Collect results
 	dashboard := &DashboardData{
 		Timestamp: time.Now(),
 	}
-	
+
 	select {
 	case health := <-healthChan:
 		dashboard.Health = health
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	
+
 	select {
 	case cluster := <-clusterChan:
 		dashboard.Cluster = cluster
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	
+
 	select {
 	case metrics := <-metricsChan:
 		dashboard.Metrics = metrics
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	
+
 	select {
 	case patterns := <-patternsChan:
 		dashboard.Patterns = patterns
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	
+
 	return dashboard, nil
 }
 
 // DashboardData represents the main dashboard data
 type DashboardData struct {
-	Health    *api.RESTHealthResponse         `json:"health"`
+	Health    *api.RESTHealthResponse          `json:"health"`
 	Cluster   *api.RESTClusterAnalysisResponse `json:"cluster"`
-	Metrics   *api.RESTMetricsResponse        `json:"metrics"`
-	Patterns  *api.RESTGetPatternsResponse    `json:"patterns"`
-	Timestamp time.Time                       `json:"timestamp"`
+	Metrics   *api.RESTMetricsResponse         `json:"metrics"`
+	Patterns  *api.RESTGetPatternsResponse     `json:"patterns"`
+	Timestamp time.Time                        `json:"timestamp"`
 }

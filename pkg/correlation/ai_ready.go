@@ -261,13 +261,13 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 
 	// Skip categorical features processing for now as AiFeatures is a simple map
 	/*
-	if len(event.AiFeatures.CategoricalFeatures) > 0 {
-		processedCategorical, err := p.featureProcessor.ProcessCategoricalFeatures(event.AiFeatures.CategoricalFeatures)
-		if err != nil {
-			return nil, fmt.Errorf("failed to process categorical features: %w", err)
+		if len(event.AiFeatures.CategoricalFeatures) > 0 {
+			processedCategorical, err := p.featureProcessor.ProcessCategoricalFeatures(event.AiFeatures.CategoricalFeatures)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process categorical features: %w", err)
+			}
+			result.Features["categorical"] = processedCategorical
 		}
-		result.Features["categorical"] = processedCategorical
-	}
 	*/
 
 	// Apply feature optimization if enabled

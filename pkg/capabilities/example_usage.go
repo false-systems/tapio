@@ -13,19 +13,19 @@ func ExampleMemoryMonitoring() {
 	// OLD WAY (with stubs):
 	// monitor := ebpf.NewMonitor(config) // Would return stub on non-Linux
 	// stats, _ := monitor.GetMemoryStats() // Would return fake data
-	
+
 	// NEW WAY (capability-aware):
 	memCap, err := RequestMemoryMonitoring()
 	if err != nil {
 		// Handle capability not available - no fake data!
 		if IsCapabilityError(err) {
 			capErr := err.(*CapabilityError)
-			log.Printf("Memory monitoring not available: %s (platform: %s)", 
+			log.Printf("Memory monitoring not available: %s (platform: %s)",
 				capErr.Reason, capErr.Platform)
-			
+
 			// Show user what's available instead
 			report := GetCapabilityReport()
-			fmt.Printf("Available capabilities: %v\n", 
+			fmt.Printf("Available capabilities: %v\n",
 				getAvailableCapabilityNames(report))
 			return
 		}
@@ -52,15 +52,15 @@ func ExampleSystemStartup() {
 	// Initialize all capabilities with graceful degradation
 	ctx := context.Background()
 	report := StartWithGracefulDegradation(ctx)
-	
+
 	fmt.Printf("Platform: %s\n", report.Platform)
 	fmt.Printf("Started: %v\n", report.Started)
-	
+
 	// Show what failed with reasons (no silent failures!)
 	for name, reason := range report.Failed {
 		fmt.Printf("Failed to start %s: %s\n", name, reason)
 	}
-	
+
 	// Show what was skipped with reasons (no fake implementations!)
 	for name, reason := range report.Skipped {
 		fmt.Printf("Skipped %s: %s\n", name, reason)
@@ -70,7 +70,7 @@ func ExampleSystemStartup() {
 func ExampleCapabilityDiscovery() {
 	// Discover what's available on this platform
 	report := GetCapabilityReport()
-	
+
 	fmt.Printf("Platform Capability Report\n")
 	fmt.Printf("==========================\n")
 	fmt.Printf("Platform: %s\n", report.Platform)
@@ -78,17 +78,17 @@ func ExampleCapabilityDiscovery() {
 	fmt.Printf("Available: %d\n", report.Summary.Available)
 	fmt.Printf("Enabled: %d\n", report.Summary.Enabled)
 	fmt.Printf("Not available: %d\n", report.Summary.NotAvailable)
-	
+
 	// Show detailed status
 	for name, status := range report.Capabilities {
 		fmt.Printf("\n%s:\n", name)
 		fmt.Printf("  Status: %s\n", status.Info.Status)
 		fmt.Printf("  Health: %s\n", status.Health.Status)
-		
+
 		if status.Info.Error != "" {
 			fmt.Printf("  Error: %s\n", status.Info.Error)
 		}
-		
+
 		if len(status.Info.Requirements) > 0 {
 			fmt.Printf("  Requirements: %v\n", status.Info.Requirements)
 		}
@@ -98,16 +98,16 @@ func ExampleCapabilityDiscovery() {
 func ExamplePlatformDetection() {
 	// Runtime platform capability detection
 	info := GetDetailedPlatformInfo()
-	
+
 	fmt.Printf("Platform Detection Results\n")
 	fmt.Printf("==========================\n")
 	fmt.Printf("OS: %s\n", info.OS)
 	fmt.Printf("Architecture: %s\n", info.Architecture)
-	
+
 	if info.KernelVersion != "" {
 		fmt.Printf("Kernel: %s\n", info.KernelVersion)
 	}
-	
+
 	fmt.Printf("\nCapability Detection:\n")
 	for name, detection := range info.Capabilities {
 		status := "❌"
@@ -120,22 +120,22 @@ func ExamplePlatformDetection() {
 
 func ExampleErrorHandling() {
 	// Demonstrate clear error handling vs stub behavior
-	
+
 	// Try to get network monitoring
 	netCap, err := RequestNetworkMonitoring()
 	if err != nil {
 		if IsCapabilityError(err) {
 			capErr := err.(*CapabilityError)
 			fmt.Printf("Network monitoring not available: %s\n", capErr.Reason)
-			
+
 			// OLD WAY: Would have returned stub with fake data
 			// NEW WAY: Clear error message, no fake data
-			
+
 			return
 		}
 		log.Fatalf("Unexpected error: %v", err)
 	}
-	
+
 	// If we get here, we have real network monitoring
 	fmt.Printf("Network monitoring available: %s\n", netCap.Name())
 }
@@ -172,7 +172,7 @@ func getAvailableCapabilityNames(report *CapabilityReport) []string {
 //
 // Key differences:
 // 1. No fake data - real implementations only
-// 2. Clear error messages about availability  
+// 2. Clear error messages about availability
 // 3. Capability discovery built-in
 // 4. Platform detection integrated
 // 5. Graceful degradation with reporting

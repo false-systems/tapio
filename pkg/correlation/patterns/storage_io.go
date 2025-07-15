@@ -124,8 +124,8 @@ type StorageAnomaly struct {
 	AffectedPods    []string `json:"affected_pods"`
 
 	// Evidence
-	SupportingEvents []types.Event `json:"supporting_events"`
-	MetricValues     map[string]float64  `json:"metric_values"`
+	SupportingEvents []types.Event      `json:"supporting_events"`
+	MetricValues     map[string]float64 `json:"metric_values"`
 
 	// Impact analysis
 	PerformanceImpact    float64  `json:"performance_impact"` // 0.0 to 1.0

@@ -49,7 +49,6 @@ type EngineStats struct {
 	ProcessingRate     float64
 }
 
-
 // Evidence represents evidence supporting an insight
 type Evidence struct {
 	EventID     string

@@ -155,10 +155,10 @@ type EnhancedTestCase struct {
 	Metrics map[string]types.MetricSeries `json:"metrics"`
 
 	// Expected behavior
-	ShouldDetect       bool                 `json:"should_detect"`
-	ExpectedConfidence float64              `json:"expected_confidence"`
-	ExpectedSeverity   types.Severity `json:"expected_severity"`
-	ExpectedTiming     *TimingExpectation   `json:"expected_timing"`
+	ShouldDetect       bool               `json:"should_detect"`
+	ExpectedConfidence float64            `json:"expected_confidence"`
+	ExpectedSeverity   types.Severity     `json:"expected_severity"`
+	ExpectedTiming     *TimingExpectation `json:"expected_timing"`
 
 	// Scenario metadata
 	ClusterProfile    string  `json:"cluster_profile"`
@@ -192,7 +192,7 @@ type ExpectedResult struct {
 	TestCaseID string `json:"test_case_id"`
 
 	// Detection expectations
-	ShouldDetect    bool           `json:"should_detect"`
+	ShouldDetect    bool                 `json:"should_detect"`
 	ExpectedPattern *types.PatternResult `json:"expected_pattern"`
 
 	// Quality expectations
@@ -210,8 +210,8 @@ type TestExecution struct {
 
 	// Results
 	DetectionResult  *types.PatternResult `json:"detection_result"`
-	ActualConfidence float64        `json:"actual_confidence"`
-	DetectionTime    time.Duration  `json:"detection_time"`
+	ActualConfidence float64              `json:"actual_confidence"`
+	DetectionTime    time.Duration        `json:"detection_time"`
 
 	// Validation
 	ValidationResult *EnhancedValidationResult `json:"validation_result"`
@@ -401,7 +401,7 @@ type DistributionConfig struct {
 // ProgressionModel defines how failures progress over time
 type ProgressionModel struct {
 	InitialSeverity types.Severity `json:"initial_severity"`
-	ProgressionRate float64              `json:"progression_rate"`
+	ProgressionRate float64        `json:"progression_rate"`
 	MaxSeverity     types.Severity `json:"max_severity"`
 
 	// Stages of failure progression
@@ -410,11 +410,11 @@ type ProgressionModel struct {
 
 // FailureStage represents a stage in failure progression
 type FailureStage struct {
-	StageName             string               `json:"stage_name"`
-	Duration              time.Duration        `json:"duration"`
-	Severity              types.Severity `json:"severity"`
-	EventCharacteristics  map[string]float64   `json:"event_characteristics"`
-	MetricCharacteristics map[string]float64   `json:"metric_characteristics"`
+	StageName             string             `json:"stage_name"`
+	Duration              time.Duration      `json:"duration"`
+	Severity              types.Severity     `json:"severity"`
+	EventCharacteristics  map[string]float64 `json:"event_characteristics"`
+	MetricCharacteristics map[string]float64 `json:"metric_characteristics"`
 }
 
 // RecoveryModel defines how systems recover from failures

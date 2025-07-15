@@ -711,7 +711,7 @@ func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, res
 		if metrics, ok := result.Metrics.(map[string]interface{}); ok {
 			if memPressure, ok := metrics["MemoryPressure"].(float64); ok && memPressure > 0 {
 				currentLimit := memPressure * 1000 // Simplified calculation
-				newLimit := currentLimit * 1.5                       // Increase by 50%
+				newLimit := currentLimit * 1.5     // Increase by 50%
 				params["new_memory_limit"] = fmt.Sprintf("%.0fMi", newLimit)
 				params["original_memory_limit"] = fmt.Sprintf("%.0fMi", currentLimit)
 			}

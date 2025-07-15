@@ -13,20 +13,20 @@ type TapioEngineService interface {
 	// Health and status
 	HealthCheck(ctx context.Context, req *HealthCheckRequest) (*HealthCheckResponse, error)
 	GetStatus(ctx context.Context, req *StatusRequest) (*StatusResponse, error)
-	
+
 	// Kubernetes analysis
 	AnalyzeCluster(ctx context.Context, req *ClusterAnalysisRequest) (*ClusterAnalysisResponse, error)
 	AnalyzeNamespace(ctx context.Context, req *NamespaceAnalysisRequest) (*NamespaceAnalysisResponse, error)
 	AnalyzeResource(ctx context.Context, req *ResourceAnalysisRequest) (*ResourceAnalysisResponse, error)
-	
+
 	// Event processing
 	ProcessEvents(ctx context.Context, req *EventBatchRequest) (*EventBatchResponse, error)
 	StreamEvents(stream TapioEngine_StreamEventsServer) error
-	
+
 	// Pattern detection
 	DetectPatterns(ctx context.Context, req *PatternDetectionRequest) (*PatternDetectionResponse, error)
 	GetPatterns(ctx context.Context, req *GetPatternsRequest) (*GetPatternsResponse, error)
-	
+
 	// Metrics and monitoring
 	GetMetrics(ctx context.Context, req *MetricsRequest) (*MetricsResponse, error)
 }
@@ -36,10 +36,10 @@ type TapioCollectorService interface {
 	// Collector registration and management
 	RegisterCollector(ctx context.Context, req *CollectorRegistrationRequest) (*CollectorRegistrationResponse, error)
 	HeartBeat(ctx context.Context, req *HeartBeatRequest) (*HeartBeatResponse, error)
-	
+
 	// Event streaming
 	StreamEvents(stream TapioCollector_StreamEventsServer) error
-	
+
 	// Configuration management
 	GetCollectorConfig(ctx context.Context, req *CollectorConfigRequest) (*CollectorConfigResponse, error)
 	UpdateCollectorConfig(ctx context.Context, req *UpdateCollectorConfigRequest) (*UpdateCollectorConfigResponse, error)
@@ -61,11 +61,11 @@ type HealthCheckResponse struct {
 type StatusRequest struct{}
 
 type StatusResponse struct {
-	Version     string                 `json:"version"`
-	Uptime      int64                  `json:"uptime_seconds"`
-	Connections int32                  `json:"active_connections"`
-	EventsPerSec float64              `json:"events_per_second"`
-	Timestamp   *timestamppb.Timestamp `json:"timestamp"`
+	Version      string                 `json:"version"`
+	Uptime       int64                  `json:"uptime_seconds"`
+	Connections  int32                  `json:"active_connections"`
+	EventsPerSec float64                `json:"events_per_second"`
+	Timestamp    *timestamppb.Timestamp `json:"timestamp"`
 }
 
 // Cluster Analysis
@@ -76,12 +76,12 @@ type ClusterAnalysisRequest struct {
 }
 
 type ClusterAnalysisResponse struct {
-	Status      string             `json:"status"`
-	Summary     string             `json:"summary"`
-	Issues      []*Issue           `json:"issues"`
-	Suggestions []*Suggestion      `json:"suggestions"`
-	Namespaces  []*NamespaceStatus `json:"namespaces"`
-	Metrics     *ClusterMetrics    `json:"metrics"`
+	Status      string                 `json:"status"`
+	Summary     string                 `json:"summary"`
+	Issues      []*Issue               `json:"issues"`
+	Suggestions []*Suggestion          `json:"suggestions"`
+	Namespaces  []*NamespaceStatus     `json:"namespaces"`
+	Metrics     *ClusterMetrics        `json:"metrics"`
 	Timestamp   *timestamppb.Timestamp `json:"timestamp"`
 }
 
@@ -121,9 +121,9 @@ type ResourceAnalysisResponse struct {
 
 // Event Processing
 type EventBatchRequest struct {
-	Events    []*Event `json:"events"`
-	BatchId   string   `json:"batch_id"`
-	Source    string   `json:"source"`
+	Events    []*Event               `json:"events"`
+	BatchId   string                 `json:"batch_id"`
+	Source    string                 `json:"source"`
 	Timestamp *timestamppb.Timestamp `json:"timestamp"`
 }
 
@@ -137,8 +137,8 @@ type EventBatchResponse struct {
 
 // Pattern Detection
 type PatternDetectionRequest struct {
-	Events    []*Event `json:"events"`
-	Patterns  []string `json:"patterns"`
+	Events    []*Event   `json:"events"`
+	Patterns  []string   `json:"patterns"`
 	TimeRange *TimeRange `json:"time_range"`
 }
 
@@ -179,25 +179,25 @@ type CollectorRegistrationRequest struct {
 }
 
 type CollectorRegistrationResponse struct {
-	Success     bool   `json:"success"`
-	Message     string `json:"message"`
-	AssignedId  string `json:"assigned_id"`
-	ConfigHash  string `json:"config_hash"`
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	AssignedId string `json:"assigned_id"`
+	ConfigHash string `json:"config_hash"`
 }
 
 // Heartbeat
 type HeartBeatRequest struct {
-	CollectorId string         `json:"collector_id"`
-	Status      string         `json:"status"`
-	Metrics     *CollectorMetrics `json:"metrics"`
+	CollectorId string                 `json:"collector_id"`
+	Status      string                 `json:"status"`
+	Metrics     *CollectorMetrics      `json:"metrics"`
 	Timestamp   *timestamppb.Timestamp `json:"timestamp"`
 }
 
 type HeartBeatResponse struct {
-	Success        bool   `json:"success"`
-	ConfigChanged  bool   `json:"config_changed"`
-	ConfigHash     string `json:"config_hash"`
-	Message        string `json:"message"`
+	Success       bool   `json:"success"`
+	ConfigChanged bool   `json:"config_changed"`
+	ConfigHash    string `json:"config_hash"`
+	Message       string `json:"message"`
 }
 
 // Collector Configuration

@@ -315,8 +315,8 @@ type NetworkAnomaly struct {
 	Deviation     float64 `json:"deviation"` // Z-score or percentage change
 
 	// Evidence
-	SupportingEvents []types.Event `json:"supporting_events"`
-	MetricValues     map[string]float64  `json:"metric_values"`
+	SupportingEvents []types.Event      `json:"supporting_events"`
+	MetricValues     map[string]float64 `json:"metric_values"`
 
 	// Propagation info
 	PropagatedFrom []string `json:"propagated_from,omitempty"`

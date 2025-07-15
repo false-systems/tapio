@@ -14,11 +14,11 @@ import (
 type ConnectionManager struct {
 	connections map[string]*connectionEntry
 	mu          sync.RWMutex
-	
+
 	maxConnections int
 	activeCount    atomic.Int64
 	totalCount     atomic.Int64
-	
+
 	metricsCollector domain.MetricsCollector
 	eventPublisher   domain.EventPublisher
 	logger           domain.Logger
@@ -51,32 +51,32 @@ func (m *ConnectionManager) AcceptConnection(ctx context.Context, connection *do
 	if connection == nil {
 		return domain.ErrInvalidRequest("connection cannot be nil")
 	}
-	
+
 	// Check connection limit
 	currentActive := m.activeCount.Load()
 	if currentActive >= int64(m.maxConnections) {
 		return domain.ErrResourceExhaustedGeneric("maximum connections reached")
 	}
-	
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Check if connection already exists
 	if _, exists := m.connections[connection.ID]; exists {
 		return domain.ErrResourceAlreadyExists(fmt.Sprintf("connection %s already exists", connection.ID))
 	}
-	
+
 	// Create connection entry
 	entry := &connectionEntry{
 		connection: connection,
 		lastPing:   time.Now(),
 	}
-	
+
 	// Store connection
 	m.connections[connection.ID] = entry
 	m.activeCount.Add(1)
 	m.totalCount.Add(1)
-	
+
 	// Record metrics
 	if m.metricsCollector != nil {
 		m.metricsCollector.RecordRequest(ctx, &domain.Request{
@@ -88,7 +88,7 @@ func (m *ConnectionManager) AcceptConnection(ctx context.Context, connection *do
 			},
 		})
 	}
-	
+
 	// Publish event
 	if m.eventPublisher != nil {
 		event := &domain.Event{
@@ -107,13 +107,13 @@ func (m *ConnectionManager) AcceptConnection(ctx context.Context, connection *do
 		}
 		m.eventPublisher.PublishEvent(ctx, event)
 	}
-	
+
 	// Log connection
 	if m.logger != nil {
-		m.logger.Info(ctx, fmt.Sprintf("connection accepted: %s from %s", 
+		m.logger.Info(ctx, fmt.Sprintf("connection accepted: %s from %s",
 			connection.ID, connection.RemoteAddress))
 	}
-	
+
 	return nil
 }
 
@@ -122,24 +122,24 @@ func (m *ConnectionManager) CloseConnection(ctx context.Context, connectionID st
 	if connectionID == "" {
 		return domain.ErrInvalidRequest("connection ID cannot be empty")
 	}
-	
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	entry, exists := m.connections[connectionID]
 	if !exists {
 		return domain.ErrResourceNotFound(fmt.Sprintf("connection %s not found", connectionID))
 	}
-	
+
 	// Update connection status
 	entry.mu.Lock()
 	entry.connection.Status = domain.ConnectionClosed
 	entry.mu.Unlock()
-	
+
 	// Remove from active connections
 	delete(m.connections, connectionID)
 	m.activeCount.Add(-1)
-	
+
 	// Record metrics
 	if m.metricsCollector != nil {
 		m.metricsCollector.RecordRequest(ctx, &domain.Request{
@@ -150,7 +150,7 @@ func (m *ConnectionManager) CloseConnection(ctx context.Context, connectionID st
 			},
 		})
 	}
-	
+
 	// Publish event
 	if m.eventPublisher != nil {
 		event := &domain.Event{
@@ -168,12 +168,12 @@ func (m *ConnectionManager) CloseConnection(ctx context.Context, connectionID st
 		}
 		m.eventPublisher.PublishEvent(ctx, event)
 	}
-	
+
 	// Log closure
 	if m.logger != nil {
 		m.logger.Info(ctx, fmt.Sprintf("connection closed: %s", connectionID))
 	}
-	
+
 	return nil
 }
 
@@ -182,18 +182,18 @@ func (m *ConnectionManager) GetConnection(ctx context.Context, connectionID stri
 	if connectionID == "" {
 		return nil, domain.ErrInvalidRequest("connection ID cannot be empty")
 	}
-	
+
 	m.mu.RLock()
 	entry, exists := m.connections[connectionID]
 	m.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, domain.ErrResourceNotFound(fmt.Sprintf("connection %s not found", connectionID))
 	}
-	
+
 	entry.mu.RLock()
 	defer entry.mu.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	connCopy := *entry.connection
 	return &connCopy, nil
@@ -203,16 +203,16 @@ func (m *ConnectionManager) GetConnection(ctx context.Context, connectionID stri
 func (m *ConnectionManager) GetConnections(ctx context.Context) ([]*domain.Connection, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	connections := make([]*domain.Connection, 0, len(m.connections))
-	
+
 	for _, entry := range m.connections {
 		entry.mu.RLock()
 		connCopy := *entry.connection
 		entry.mu.RUnlock()
 		connections = append(connections, &connCopy)
 	}
-	
+
 	return connections, nil
 }
 
@@ -221,19 +221,19 @@ func (m *ConnectionManager) GetConnectionMetrics(ctx context.Context, connection
 	if connectionID == "" {
 		return nil, domain.ErrInvalidRequest("connection ID cannot be empty")
 	}
-	
+
 	m.mu.RLock()
 	entry, exists := m.connections[connectionID]
 	m.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, domain.ErrResourceNotFound(fmt.Sprintf("connection %s not found", connectionID))
 	}
-	
+
 	entry.mu.RLock()
 	metrics := entry.connection.Metrics
 	entry.mu.RUnlock()
-	
+
 	return &metrics, nil
 }
 
@@ -241,10 +241,10 @@ func (m *ConnectionManager) GetConnectionMetrics(ctx context.Context, connection
 func (m *ConnectionManager) CleanupIdleConnections(ctx context.Context, maxIdle time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	now := time.Now()
 	toClose := []string{}
-	
+
 	for id, entry := range m.connections {
 		entry.mu.RLock()
 		if entry.connection.Status == domain.ConnectionIdle &&
@@ -253,7 +253,7 @@ func (m *ConnectionManager) CleanupIdleConnections(ctx context.Context, maxIdle 
 		}
 		entry.mu.RUnlock()
 	}
-	
+
 	// Close idle connections
 	closedCount := 0
 	for _, id := range toClose {
@@ -261,18 +261,18 @@ func (m *ConnectionManager) CleanupIdleConnections(ctx context.Context, maxIdle 
 			entry.mu.Lock()
 			entry.connection.Status = domain.ConnectionClosed
 			entry.mu.Unlock()
-			
+
 			delete(m.connections, id)
 			m.activeCount.Add(-1)
 			closedCount++
 		}
 	}
-	
+
 	// Log cleanup
 	if m.logger != nil && closedCount > 0 {
 		m.logger.Info(ctx, fmt.Sprintf("cleaned up %d idle connections", closedCount))
 	}
-	
+
 	// Publish event
 	if m.eventPublisher != nil && closedCount > 0 {
 		event := &domain.Event{
@@ -290,7 +290,7 @@ func (m *ConnectionManager) CleanupIdleConnections(ctx context.Context, maxIdle 
 		}
 		m.eventPublisher.PublishEvent(ctx, event)
 	}
-	
+
 	return nil
 }
 
@@ -299,21 +299,21 @@ func (m *ConnectionManager) UpdateConnectionActivity(ctx context.Context, connec
 	m.mu.RLock()
 	entry, exists := m.connections[connectionID]
 	m.mu.RUnlock()
-	
+
 	if !exists {
 		return domain.ErrResourceNotFound(fmt.Sprintf("connection %s not found", connectionID))
 	}
-	
+
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	
+
 	entry.connection.LastActivity = time.Now()
 	entry.lastPing = time.Now()
-	
+
 	if entry.connection.Status == domain.ConnectionIdle {
 		entry.connection.Status = domain.ConnectionActive
 	}
-	
+
 	return nil
 }
 
@@ -321,17 +321,17 @@ func (m *ConnectionManager) UpdateConnectionActivity(ctx context.Context, connec
 func (m *ConnectionManager) GetStatistics() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	statusCounts := make(map[domain.ConnectionStatus]int)
 	protocolCounts := make(map[string]int)
-	
+
 	for _, entry := range m.connections {
 		entry.mu.RLock()
 		statusCounts[entry.connection.Status]++
 		protocolCounts[entry.connection.Protocol]++
 		entry.mu.RUnlock()
 	}
-	
+
 	return map[string]interface{}{
 		"total_connections":   m.totalCount.Load(),
 		"active_connections":  m.activeCount.Load(),

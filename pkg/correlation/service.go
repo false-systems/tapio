@@ -21,17 +21,17 @@ type Service struct {
 func NewService() (*Service, error) {
 	// Create components
 	insightStore := NewInMemoryInsightStore()
-	
+
 	// Create perfect engine with store
 	baseEngine, err := NewPerfectEngine(DefaultPerfectConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create correlation engine: %w", err)
 	}
 	engineWithStore := NewPerfectEngineWithStore(baseEngine, insightStore)
-	
+
 	// Create timeline for analysis
 	timeline := NewTimeline(10000) // Keep last 10k events
-	
+
 	return &Service{
 		engine:       engineWithStore,
 		insightStore: insightStore,
@@ -53,13 +53,13 @@ func (s *Service) Stop() error {
 func (s *Service) AnalyzeCheckResult(ctx context.Context, result *simpleTypes.CheckResult) (*ServiceCorrelationResult, error) {
 	// Convert problems to events for correlation
 	events := s.convertProblemsToEvents(result.Problems)
-	
+
 	// Process events through correlation engine
 	for _, event := range events {
 		if err := s.engine.ProcessEvents(ctx, []*types.Event{event}); err != nil {
 			return nil, fmt.Errorf("failed to process event: %w", err)
 		}
-		
+
 		// Add to timeline for pattern analysis
 		timelineEvent := s.convertToTimelineEvent(event)
 		if err := s.timeline.AddEvent(timelineEvent); err != nil {
@@ -67,7 +67,7 @@ func (s *Service) AnalyzeCheckResult(ctx context.Context, result *simpleTypes.Ch
 			fmt.Printf("Failed to add event to timeline: %v\n", err)
 		}
 	}
-	
+
 	// Get insights for the resources
 	resourceInsights := make(map[string][]*Insight)
 	for _, problem := range result.Problems {
@@ -77,10 +77,10 @@ func (s *Service) AnalyzeCheckResult(ctx context.Context, result *simpleTypes.Ch
 			resourceInsights[key] = insights
 		}
 	}
-	
+
 	// Find patterns in timeline
 	patterns := s.timeline.FindPatterns()
-	
+
 	// Build correlation result
 	return &ServiceCorrelationResult{
 		Insights:         s.insightStore.GetAllInsights(),
@@ -95,7 +95,7 @@ func (s *Service) AnalyzeCheckResult(ctx context.Context, result *simpleTypes.Ch
 // convertProblemsToEvents converts check problems to correlation events
 func (s *Service) convertProblemsToEvents(problems []simpleTypes.Problem) []*types.Event {
 	events := make([]*types.Event, 0, len(problems))
-	
+
 	for _, problem := range problems {
 		event := &types.Event{
 			ID:        fmt.Sprintf("problem-%s-%d", problem.Resource.Name, time.Now().UnixNano()),
@@ -115,7 +115,7 @@ func (s *Service) convertProblemsToEvents(problems []simpleTypes.Problem) []*typ
 				"severity":    string(problem.Severity),
 			},
 		}
-		
+
 		// Add prediction if available
 		if problem.Prediction != nil {
 			event.Data["prediction"] = map[string]interface{}{
@@ -124,10 +124,10 @@ func (s *Service) convertProblemsToEvents(problems []simpleTypes.Problem) []*typ
 				"reason":          problem.Prediction.Reason,
 			}
 		}
-		
+
 		events = append(events, event)
 	}
-	
+
 	return events
 }
 
@@ -164,7 +164,7 @@ func (s *Service) convertSeverity(sev simpleTypes.Severity) types.Severity {
 // buildTimelineSummary builds a summary of timeline events
 func (s *Service) buildTimelineSummary() *TimelineSummary {
 	stats := s.timeline.GetStatistics()
-	
+
 	return &TimelineSummary{
 		TotalEvents:      stats.TotalEvents,
 		TimeRange:        stats.TimeRange,
@@ -176,12 +176,12 @@ func (s *Service) buildTimelineSummary() *TimelineSummary {
 
 // ServiceCorrelationResult contains the results of correlation analysis from the service
 type ServiceCorrelationResult struct {
-	Insights         []*Insight                 `json:"insights"`
-	ResourceInsights map[string][]*Insight      `json:"resource_insights"`
-	Patterns         []EventPattern             `json:"patterns"`
-	Timeline         *TimelineSummary           `json:"timeline"`
-	Statistics       TimelineStatistics         `json:"statistics"`
-	EngineStats      *EngineStats               `json:"engine_stats"`
+	Insights         []*Insight            `json:"insights"`
+	ResourceInsights map[string][]*Insight `json:"resource_insights"`
+	Patterns         []EventPattern        `json:"patterns"`
+	Timeline         *TimelineSummary      `json:"timeline"`
+	Statistics       TimelineStatistics    `json:"statistics"`
+	EngineStats      *EngineStats          `json:"engine_stats"`
 }
 
 // TimelineSummary provides a summary of timeline data
@@ -199,7 +199,7 @@ func (r *ServiceCorrelationResult) GetMostCriticalInsights(limit int) []*Insight
 	critical := make([]*Insight, 0)
 	high := make([]*Insight, 0)
 	medium := make([]*Insight, 0)
-	
+
 	for _, insight := range r.Insights {
 		switch insight.Severity {
 		case "critical":
@@ -210,26 +210,26 @@ func (r *ServiceCorrelationResult) GetMostCriticalInsights(limit int) []*Insight
 			medium = append(medium, insight)
 		}
 	}
-	
+
 	// Combine in priority order
 	result := append(critical, high...)
 	result = append(result, medium...)
-	
+
 	if len(result) > limit {
 		result = result[:limit]
 	}
-	
+
 	return result
 }
 
 // GetActionableRecommendations returns all actionable recommendations
 func (r *ServiceCorrelationResult) GetActionableRecommendations() []*ActionableItem {
 	recommendations := make([]*ActionableItem, 0)
-	
+
 	for _, insight := range r.Insights {
 		recommendations = append(recommendations, insight.ActionableItems...)
 	}
-	
+
 	return recommendations
 }
 

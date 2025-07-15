@@ -17,7 +17,7 @@ type RecoveryMiddleware struct {
 	eventPublisher   domain.EventPublisher
 	metricsCollector domain.MetricsCollector
 	stackTrace       bool
-	
+
 	// Custom panic handler
 	panicHandler func(ctx context.Context, err interface{}, stack []byte)
 }
@@ -43,7 +43,7 @@ func (m *RecoveryMiddleware) Execute(ctx context.Context, request *domain.Reques
 			m.handlePanic(ctx, err, request, response)
 		}
 	}()
-	
+
 	return next()
 }
 
@@ -51,17 +51,17 @@ func (m *RecoveryMiddleware) Execute(ctx context.Context, request *domain.Reques
 func (m *RecoveryMiddleware) handlePanic(ctx context.Context, err interface{}, request *domain.Request, response *domain.Response) {
 	// Get stack trace
 	stack := debug.Stack()
-	
+
 	// Log the panic
 	if m.logger != nil {
 		m.logger.Error(ctx, fmt.Sprintf("panic recovered: %v\n%s", err, string(stack)))
 	}
-	
+
 	// Record metrics
 	if m.metricsCollector != nil {
 		m.metricsCollector.RecordError(ctx, fmt.Errorf("panic: %v", err))
 	}
-	
+
 	// Publish event
 	if m.eventPublisher != nil {
 		event := &domain.Event{
@@ -72,37 +72,37 @@ func (m *RecoveryMiddleware) handlePanic(ctx context.Context, err interface{}, r
 			Message:   fmt.Sprintf("panic recovered: %v", err),
 			Timestamp: time.Now(),
 			Data: map[string]interface{}{
-				"error":      fmt.Sprintf("%v", err),
-				"request_id": request.ID,
+				"error":        fmt.Sprintf("%v", err),
+				"request_id":   request.ID,
 				"request_type": request.Type,
-				"stack_trace": string(stack),
+				"stack_trace":  string(stack),
 			},
 			Context: ctx,
 		}
 		m.eventPublisher.PublishEvent(ctx, event)
 	}
-	
+
 	// Call custom panic handler if set
 	if m.panicHandler != nil {
 		m.panicHandler(ctx, err, stack)
 	}
-	
+
 	// Update response
 	response.Type = domain.ResponseTypeError
 	response.Status = domain.ResponseStatusError
 	response.Error = domain.NewServerError(domain.ErrorCodeInternalError, "internal server error")
-	
+
 	// In production, don't expose stack trace to client
 	errorData := map[string]interface{}{
 		"error": "internal server error",
 		"code":  domain.ErrorCodeInternalError,
 	}
-	
+
 	// Add stack trace in development
 	if m.stackTrace && ctx.Value("environment") == "development" {
 		errorData["stack_trace"] = string(stack)
 	}
-	
+
 	response.Data = errorData
 }
 
@@ -121,11 +121,11 @@ func (m *RecoveryMiddleware) Configure(ctx context.Context, config map[string]in
 	if stackTrace, ok := config["stack_trace"].(bool); ok {
 		m.stackTrace = stackTrace
 	}
-	
+
 	if m.logger != nil {
 		m.logger.Info(ctx, fmt.Sprintf("recovery middleware configured: stackTrace=%v", m.stackTrace))
 	}
-	
+
 	return nil
 }
 
@@ -143,7 +143,7 @@ func (m *RecoveryMiddleware) HTTPMiddleware() func(http.Handler) http.Handler {
 					m.handleHTTPPanic(w, r, err)
 				}
 			}()
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -153,17 +153,17 @@ func (m *RecoveryMiddleware) HTTPMiddleware() func(http.Handler) http.Handler {
 func (m *RecoveryMiddleware) handleHTTPPanic(w http.ResponseWriter, r *http.Request, err interface{}) {
 	// Get stack trace
 	stack := debug.Stack()
-	
+
 	// Log the panic
 	if m.logger != nil {
 		m.logger.Error(r.Context(), fmt.Sprintf("HTTP panic recovered: %v\n%s", err, string(stack)))
 	}
-	
+
 	// Record metrics
 	if m.metricsCollector != nil {
 		m.metricsCollector.RecordError(r.Context(), fmt.Errorf("HTTP panic: %v", err))
 	}
-	
+
 	// Publish event
 	if m.eventPublisher != nil {
 		event := &domain.Event{
@@ -174,21 +174,21 @@ func (m *RecoveryMiddleware) handleHTTPPanic(w http.ResponseWriter, r *http.Requ
 			Message:   fmt.Sprintf("HTTP panic recovered: %v", err),
 			Timestamp: time.Now(),
 			Data: map[string]interface{}{
-				"error":        fmt.Sprintf("%v", err),
-				"method":       r.Method,
-				"path":         r.URL.Path,
-				"remote_addr":  r.RemoteAddr,
-				"stack_trace":  string(stack),
+				"error":       fmt.Sprintf("%v", err),
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"remote_addr": r.RemoteAddr,
+				"stack_trace": string(stack),
 			},
 			Context: r.Context(),
 		}
 		m.eventPublisher.PublishEvent(r.Context(), event)
 	}
-	
+
 	// Set error response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
-	
+
 	// Response body
 	response := map[string]interface{}{
 		"error": map[string]interface{}{
@@ -196,19 +196,19 @@ func (m *RecoveryMiddleware) handleHTTPPanic(w http.ResponseWriter, r *http.Requ
 			"message": "Internal Server Error",
 		},
 	}
-	
+
 	// Add stack trace in development
 	if m.stackTrace && r.Header.Get("X-Environment") == "development" {
 		response["error"].(map[string]interface{})["stack_trace"] = string(stack)
 	}
-	
+
 	json.NewEncoder(w).Encode(response)
 }
 
 // RecoveryStats tracks recovery statistics
 type RecoveryStats struct {
-	TotalPanics   int64
-	LastPanic     time.Time
+	TotalPanics    int64
+	LastPanic      time.Time
 	LastPanicError string
 }
 
@@ -216,8 +216,8 @@ type RecoveryStats struct {
 func (m *RecoveryMiddleware) GetStats() *RecoveryStats {
 	// In production, this would track actual statistics
 	return &RecoveryStats{
-		TotalPanics: 0,
-		LastPanic:   time.Time{},
+		TotalPanics:    0,
+		LastPanic:      time.Time{},
 		LastPanicError: "",
 	}
 }

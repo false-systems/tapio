@@ -819,7 +819,7 @@ func (rts *ResilienceTestSuite) testSelfHealingEngine(ctx context.Context, resul
 	metrics := rts.selfHealingEngine.GetMetrics()
 	componentResult.ComponentSpecificMetrics["healing_attempts"] = metrics.HealingAttempts
 	componentResult.ComponentSpecificMetrics["healing_success"] = metrics.HealingSuccess
-	
+
 	// Also populate the struct fields for consistency
 	componentResult.RecoveryAttempts = metrics.HealingAttempts
 	componentResult.SuccessfulRecoveries = metrics.HealingSuccess

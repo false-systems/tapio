@@ -43,7 +43,7 @@ func (m *Manager) RequestMemoryMonitoring() (MemoryCapability, error) {
 	// No capability available - return clear error instead of stub
 	return nil, NewCapabilityError(
 		"memory-monitoring",
-		fmt.Sprintf("no memory monitoring capability available (platform: %s, available: %v)", 
+		fmt.Sprintf("no memory monitoring capability available (platform: %s, available: %v)",
 			m.platform, m.registry.ListByType("memory")),
 		m.platform,
 	)
@@ -69,7 +69,7 @@ func (m *Manager) RequestNetworkMonitoring() (NetworkCapability, error) {
 
 	return nil, NewCapabilityError(
 		"network-monitoring",
-		fmt.Sprintf("no network monitoring capability available (platform: %s, available: %v)", 
+		fmt.Sprintf("no network monitoring capability available (platform: %s, available: %v)",
 			m.platform, m.registry.ListByType("network")),
 		m.platform,
 	)
@@ -95,7 +95,7 @@ func (m *Manager) RequestSystemMonitoring() (SystemCapability, error) {
 
 	return nil, NewCapabilityError(
 		"system-monitoring",
-		fmt.Sprintf("no system monitoring capability available (platform: %s, available: %v)", 
+		fmt.Sprintf("no system monitoring capability available (platform: %s, available: %v)",
 			m.platform, m.registry.ListByType("system")),
 		m.platform,
 	)
@@ -105,12 +105,12 @@ func (m *Manager) RequestSystemMonitoring() (SystemCapability, error) {
 func (m *Manager) GetCapabilityReport() *CapabilityReport {
 	status := m.registry.GetStatus()
 	health := m.registry.GetHealthStatus()
-	
+
 	report := &CapabilityReport{
-		Platform:      m.platform,
-		Timestamp:     time.Now(),
-		Capabilities:  make(map[string]*CapabilityStatus),
-		Summary:       &CapabilitySummary{},
+		Platform:     m.platform,
+		Timestamp:    time.Now(),
+		Capabilities: make(map[string]*CapabilityStatus),
+		Summary:      &CapabilitySummary{},
 	}
 
 	var available, enabled, errors int
@@ -171,10 +171,10 @@ func (m *Manager) StartWithGracefulDegradation(ctx context.Context) *StartupRepo
 
 // CapabilityReport provides comprehensive capability information
 type CapabilityReport struct {
-	Platform     string                         `json:"platform"`
-	Timestamp    time.Time                      `json:"timestamp"`
-	Capabilities map[string]*CapabilityStatus   `json:"capabilities"`
-	Summary      *CapabilitySummary             `json:"summary"`
+	Platform     string                       `json:"platform"`
+	Timestamp    time.Time                    `json:"timestamp"`
+	Capabilities map[string]*CapabilityStatus `json:"capabilities"`
+	Summary      *CapabilitySummary           `json:"summary"`
 }
 
 // CapabilityStatus combines capability info and health
@@ -206,7 +206,7 @@ func GetPlatformSupportMatrix() map[string][]string {
 	return map[string][]string{
 		"linux": {
 			"ebpf-memory",
-			"ebpf-network", 
+			"ebpf-network",
 			"journald",
 			"native-memory",
 			"native-network",
@@ -214,13 +214,13 @@ func GetPlatformSupportMatrix() map[string][]string {
 		},
 		"darwin": {
 			"native-memory",
-			"native-network", 
+			"native-network",
 			"native-system",
 		},
 		"windows": {
 			"native-memory",
 			"native-network",
-			"native-system", 
+			"native-system",
 		},
 	}
 }
@@ -251,7 +251,7 @@ func RequestMemoryMonitoring() (MemoryCapability, error) {
 	return globalManager.RequestMemoryMonitoring()
 }
 
-// RequestNetworkMonitoring requests network monitoring from global manager  
+// RequestNetworkMonitoring requests network monitoring from global manager
 func RequestNetworkMonitoring() (NetworkCapability, error) {
 	return globalManager.RequestNetworkMonitoring()
 }

@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/yairfalse/tapio/pkg/plugins"
 	"github.com/yairfalse/tapio/pkg/exports/plugins" // Legacy import for existing OTEL plugin
+	"github.com/yairfalse/tapio/pkg/plugins"
 )
 
 const (
@@ -118,7 +118,7 @@ func runPlugin(cmd *cobra.Command, args []string) error {
 // NewOTELPlugin creates a new OTEL plugin using the SDK
 func NewOTELPlugin() plugins.ExportPlugin {
 	return &OTELPlugin{
-		BasePlugin: plugins.NewBasePlugin("tapio-otel", version, "OpenTelemetry export plugin for Tapio"),
+		BasePlugin:   plugins.NewBasePlugin("tapio-otel", version, "OpenTelemetry export plugin for Tapio"),
 		legacyPlugin: nil, // Will be initialized on Start
 	}
 }
@@ -134,10 +134,10 @@ func (p *OTELPlugin) Export(ctx context.Context, data plugins.ExportData) error 
 	if p.legacyPlugin == nil {
 		return fmt.Errorf("legacy plugin not initialized")
 	}
-	
+
 	// Convert new SDK export data to legacy format
 	legacyData := convertToLegacyExportData(data)
-	
+
 	// Use legacy plugin for actual export
 	return p.legacyPlugin.Export(ctx, legacyData)
 }
@@ -177,21 +177,21 @@ func (p *OTELPlugin) Start(ctx context.Context) error {
 	if err := p.BasePlugin.Start(ctx); err != nil {
 		return err
 	}
-	
+
 	// Initialize legacy plugin
 	p.legacyPlugin = plugins.NewOTELExportPlugin()
-	
+
 	// Configure legacy plugin with SDK config
 	legacyConfig := convertToLegacyConfig(p.SDK().GetConfig())
 	if err := p.legacyPlugin.Configure(legacyConfig); err != nil {
 		return fmt.Errorf("failed to configure legacy plugin: %w", err)
 	}
-	
+
 	// Start legacy plugin
 	if err := p.legacyPlugin.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start legacy plugin: %w", err)
 	}
-	
+
 	p.SDK().Log().Info("OTEL plugin started with legacy backend")
 	return nil
 }
@@ -204,7 +204,7 @@ func (p *OTELPlugin) Stop(ctx context.Context) error {
 			p.SDK().Log().Error("Failed to stop legacy plugin: %v", err)
 		}
 	}
-	
+
 	// Call base plugin stop
 	return p.BasePlugin.Stop(ctx)
 }

@@ -235,10 +235,10 @@ func GetDetailedPlatformInfo() *PlatformInfo {
 
 // PlatformInfo contains detailed platform information
 type PlatformInfo struct {
-	OS            string                           `json:"os"`
-	Architecture  string                           `json:"architecture"`
-	KernelVersion string                           `json:"kernel_version,omitempty"`
-	Capabilities  map[string]CapabilityDetection  `json:"capabilities"`
+	OS            string                         `json:"os"`
+	Architecture  string                         `json:"architecture"`
+	KernelVersion string                         `json:"kernel_version,omitempty"`
+	Capabilities  map[string]CapabilityDetection `json:"capabilities"`
 }
 
 func getKernelVersion() (string, error) {

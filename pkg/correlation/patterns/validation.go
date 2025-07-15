@@ -55,10 +55,10 @@ type GroundTruthStore struct {
 
 // GroundTruthFailure represents a known failure for validation
 type GroundTruthFailure struct {
-	FailureID   string               `json:"failure_id"`
-	PatternType string               `json:"pattern_type"`
-	StartTime   time.Time            `json:"start_time"`
-	EndTime     time.Time            `json:"end_time"`
+	FailureID   string         `json:"failure_id"`
+	PatternType string         `json:"pattern_type"`
+	StartTime   time.Time      `json:"start_time"`
+	EndTime     time.Time      `json:"end_time"`
 	Severity    types.Severity `json:"severity"`
 
 	// Ground truth data
@@ -81,13 +81,13 @@ type GroundTruthFailure struct {
 
 // ProductionLabel represents a production incident label for validation
 type ProductionLabel struct {
-	IncidentID    string               `json:"incident_id"`
-	StartTime     time.Time            `json:"start_time"`
-	EndTime       time.Time            `json:"end_time"`
-	PatternType   string               `json:"pattern_type"`
+	IncidentID    string         `json:"incident_id"`
+	StartTime     time.Time      `json:"start_time"`
+	EndTime       time.Time      `json:"end_time"`
+	PatternType   string         `json:"pattern_type"`
 	Severity      types.Severity `json:"severity"`
-	Resolution    string               `json:"resolution"`
-	PostMortemURL string               `json:"postmortem_url"`
+	Resolution    string         `json:"resolution"`
+	PostMortemURL string         `json:"postmortem_url"`
 
 	// Manual validation
 	ValidatedBy     string `json:"validated_by"`
@@ -137,8 +137,8 @@ type ValidationRun struct {
 
 // ValidationResult represents the result of validating a single detection
 type ValidationResult struct {
-	DetectionID   string         `json:"detection_id"`
-	GroundTruthID string         `json:"ground_truth_id,omitempty"`
+	DetectionID   string               `json:"detection_id"`
+	GroundTruthID string               `json:"ground_truth_id,omitempty"`
 	PatternResult *types.PatternResult `json:"pattern_result"`
 
 	// Validation outcome
@@ -153,7 +153,7 @@ type ValidationResult struct {
 
 	// Detailed analysis
 	ExpectedResult *types.PatternResult `json:"expected_result,omitempty"`
-	Discrepancies  []string       `json:"discrepancies"`
+	Discrepancies  []string             `json:"discrepancies"`
 
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -217,7 +217,7 @@ type PatternTemplate struct {
 
 	// Failure characteristics
 	SeverityDistribution map[types.Severity]float64 `json:"severity_distribution"`
-	CauseDistribution    map[string]float64               `json:"cause_distribution"`
+	CauseDistribution    map[string]float64         `json:"cause_distribution"`
 }
 
 // EventTemplate defines how to generate synthetic events
@@ -423,13 +423,13 @@ type TestData struct {
 
 // TestCase represents a single test case for pattern validation
 type TestCase struct {
-	ID          string                              `json:"id"`
-	PatternType string                              `json:"pattern_type"`
-	HasFailure  bool                                `json:"has_failure"`
+	ID          string                        `json:"id"`
+	PatternType string                        `json:"pattern_type"`
+	HasFailure  bool                          `json:"has_failure"`
 	Events      []types.Event                 `json:"events"`
 	Metrics     map[string]types.MetricSeries `json:"metrics"`
-	GroundTruth *GroundTruthFailure                 `json:"ground_truth,omitempty"`
-	CreatedAt   time.Time                           `json:"created_at"`
+	GroundTruth *GroundTruthFailure           `json:"ground_truth,omitempty"`
+	CreatedAt   time.Time                     `json:"created_at"`
 }
 
 // generateTestData generates test data for pattern validation

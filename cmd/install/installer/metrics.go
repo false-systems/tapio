@@ -49,16 +49,16 @@ func (m *metricsCollector) RecordSuccess(step string) {
 func (m *metricsCollector) GetReport() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	report := make(map[string]interface{})
-	
+
 	// Copy durations
 	durations := make(map[string]time.Duration)
 	for k, v := range m.durations {
 		durations[k] = v
 	}
 	report["durations"] = durations
-	
+
 	// Copy errors
 	errors := make(map[string]string)
 	for k, v := range m.errors {
@@ -67,14 +67,14 @@ func (m *metricsCollector) GetReport() map[string]interface{} {
 		}
 	}
 	report["errors"] = errors
-	
+
 	// Copy successes
 	successes := make(map[string]bool)
 	for k, v := range m.successes {
 		successes[k] = v
 	}
 	report["successes"] = successes
-	
+
 	// Calculate totals
 	var totalDuration time.Duration
 	for _, d := range m.durations {
@@ -83,6 +83,6 @@ func (m *metricsCollector) GetReport() map[string]interface{} {
 	report["total_duration"] = totalDuration
 	report["total_errors"] = len(m.errors)
 	report["total_successes"] = len(m.successes)
-	
+
 	return report
 }

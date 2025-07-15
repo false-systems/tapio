@@ -12,10 +12,10 @@ type PatternDetector interface {
 	Name() string
 	Description() string
 	Category() Category
-	
+
 	// Detection
 	Detect(ctx context.Context, events []Event, metrics map[string]MetricSeries) (*PatternResult, error)
-	
+
 	// Configuration
 	RequiredEventTypes() []string
 	RequiredMetricTypes() []string
@@ -27,12 +27,12 @@ type PatternRegistry interface {
 	// Registration
 	Register(detector PatternDetector) error
 	Unregister(patternID string) error
-	
+
 	// Retrieval
 	Get(patternID string) (PatternDetector, error)
 	List() []PatternDetector
 	ListByCategory(category Category) []PatternDetector
-	
+
 	// Execution
 	DetectAll(ctx context.Context, events []Event, metrics map[string]MetricSeries) ([]PatternResult, error)
 }
@@ -42,7 +42,7 @@ type PatternValidator interface {
 	// Validation
 	Validate(ctx context.Context, result *PatternResult) error
 	ValidateBatch(ctx context.Context, results []PatternResult) ([]PatternResult, []error)
-	
+
 	// Configuration
 	SetConfig(config PatternConfig)
 	GetConfig() PatternConfig

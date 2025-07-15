@@ -247,27 +247,27 @@ func createTestService() *ServerService {
 
 func TestNewService(t *testing.T) {
 	service := createTestService()
-	
+
 	if service == nil {
 		t.Error("Expected service to be created, got nil")
 	}
-	
+
 	if service.config == nil {
 		t.Error("Expected service config to be set, got nil")
 	}
-	
+
 	if service.healthChecker == nil {
 		t.Error("Expected service health checker to be set, got nil")
 	}
-	
+
 	if service.metricsCollector == nil {
 		t.Error("Expected service metrics collector to be set, got nil")
 	}
-	
+
 	if service.eventPublisher == nil {
 		t.Error("Expected service event publisher to be set, got nil")
 	}
-	
+
 	if service.connectionManager == nil {
 		t.Error("Expected service connection manager to be set, got nil")
 	}
@@ -276,12 +276,12 @@ func TestNewService(t *testing.T) {
 func TestServiceStart(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	err := service.Start(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when starting service, got: %v", err)
 	}
-	
+
 	// Test that starting an already started service returns error
 	err = service.Start(ctx)
 	if err == nil {
@@ -292,19 +292,19 @@ func TestServiceStart(t *testing.T) {
 func TestServiceStop(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Start the service first
 	err := service.Start(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when starting service, got: %v", err)
 	}
-	
+
 	// Stop the service
 	err = service.Stop(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when stopping service, got: %v", err)
 	}
-	
+
 	// Test that stopping an already stopped service returns error
 	err = service.Stop(ctx)
 	if err == nil {
@@ -315,19 +315,19 @@ func TestServiceStop(t *testing.T) {
 func TestServiceRestart(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Start the service first
 	err := service.Start(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when starting service, got: %v", err)
 	}
-	
+
 	// Restart the service
 	err = service.Restart(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when restarting service, got: %v", err)
 	}
-	
+
 	// Test that we can restart again
 	err = service.Restart(ctx)
 	if err != nil {
@@ -338,20 +338,20 @@ func TestServiceRestart(t *testing.T) {
 func TestServiceGetHealth(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	health, err := service.GetHealth(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when getting health, got: %v", err)
 	}
-	
+
 	if health == nil {
 		t.Error("Expected health check result, got nil")
 	}
-	
+
 	if health.Name != "server" {
 		t.Errorf("Expected health check name 'server', got '%s'", health.Name)
 	}
-	
+
 	if health.Status != domain.HealthStatusPass {
 		t.Errorf("Expected health status 'pass', got '%s'", health.Status)
 	}
@@ -360,30 +360,30 @@ func TestServiceGetHealth(t *testing.T) {
 func TestServiceGetStatus(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Start the service first
 	err := service.Start(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when starting service, got: %v", err)
 	}
-	
+
 	status, err := service.GetStatus(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when getting status, got: %v", err)
 	}
-	
+
 	if status == nil {
 		t.Error("Expected server status, got nil")
 	}
-	
+
 	if status.Name != "test-server" {
 		t.Errorf("Expected server name 'test-server', got '%s'", status.Name)
 	}
-	
+
 	if status.Version != "1.0.0" {
 		t.Errorf("Expected server version '1.0.0', got '%s'", status.Version)
 	}
-	
+
 	if status.Status != domain.StatusHealthy {
 		t.Errorf("Expected server status 'healthy', got '%s'", status.Status)
 	}
@@ -392,24 +392,24 @@ func TestServiceGetStatus(t *testing.T) {
 func TestServiceGetMetrics(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	metrics, err := service.GetMetrics(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when getting metrics, got: %v", err)
 	}
-	
+
 	if metrics == nil {
 		t.Error("Expected metrics, got nil")
 	}
-	
+
 	if metrics.Server.RequestsTotal != 100 {
 		t.Errorf("Expected 100 total requests, got %d", metrics.Server.RequestsTotal)
 	}
-	
+
 	if metrics.Server.RequestsPerSecond != 10.0 {
 		t.Errorf("Expected 10.0 requests per second, got %f", metrics.Server.RequestsPerSecond)
 	}
-	
+
 	if metrics.Server.ErrorsTotal != 5 {
 		t.Errorf("Expected 5 total errors, got %d", metrics.Server.ErrorsTotal)
 	}
@@ -418,24 +418,24 @@ func TestServiceGetMetrics(t *testing.T) {
 func TestServiceGetConfig(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	config, err := service.GetConfig(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when getting config, got: %v", err)
 	}
-	
+
 	if config == nil {
 		t.Error("Expected configuration, got nil")
 	}
-	
+
 	if config.Server.Name != "test-server" {
 		t.Errorf("Expected server name 'test-server', got '%s'", config.Server.Name)
 	}
-	
+
 	if config.Server.Version != "1.0.0" {
 		t.Errorf("Expected server version '1.0.0', got '%s'", config.Server.Version)
 	}
-	
+
 	if config.Server.Environment != "testing" {
 		t.Errorf("Expected environment 'testing', got '%s'", config.Server.Environment)
 	}
@@ -444,7 +444,7 @@ func TestServiceGetConfig(t *testing.T) {
 func TestServiceUpdateConfig(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Create new configuration
 	newConfig := &domain.Configuration{
 		Server: domain.ServerConfig{
@@ -458,26 +458,26 @@ func TestServiceUpdateConfig(t *testing.T) {
 			ShutdownTimeout: 20 * time.Second,
 		},
 	}
-	
+
 	err := service.UpdateConfig(ctx, newConfig)
 	if err != nil {
 		t.Errorf("Expected no error when updating config, got: %v", err)
 	}
-	
+
 	// Verify the configuration was updated
 	config, err := service.GetConfig(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when getting config, got: %v", err)
 	}
-	
+
 	if config.Server.Name != "updated-server" {
 		t.Errorf("Expected server name 'updated-server', got '%s'", config.Server.Name)
 	}
-	
+
 	if config.Server.Version != "2.0.0" {
 		t.Errorf("Expected server version '2.0.0', got '%s'", config.Server.Version)
 	}
-	
+
 	if config.Server.Environment != "production" {
 		t.Errorf("Expected environment 'production', got '%s'", config.Server.Environment)
 	}
@@ -486,7 +486,7 @@ func TestServiceUpdateConfig(t *testing.T) {
 func TestServicePublishEvent(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	event := &domain.Event{
 		ID:        "test-event-1",
 		Type:      domain.EventTypeRequest,
@@ -496,27 +496,27 @@ func TestServicePublishEvent(t *testing.T) {
 		Timestamp: time.Now(),
 		Data:      map[string]interface{}{"key": "value"},
 	}
-	
+
 	err := service.PublishEvent(ctx, event)
 	if err != nil {
 		t.Errorf("Expected no error when publishing event, got: %v", err)
 	}
-	
+
 	// Verify the event was published
 	eventPublisher := service.eventPublisher.(*mockEventPublisher)
 	if len(eventPublisher.events) != 1 {
 		t.Errorf("Expected 1 published event, got %d", len(eventPublisher.events))
 	}
-	
+
 	publishedEvent := eventPublisher.events[0]
 	if publishedEvent.ID != "test-event-1" {
 		t.Errorf("Expected event ID 'test-event-1', got '%s'", publishedEvent.ID)
 	}
-	
+
 	if publishedEvent.Type != domain.EventTypeRequest {
 		t.Errorf("Expected event type 'request', got '%s'", publishedEvent.Type)
 	}
-	
+
 	if publishedEvent.Message != "Test event message" {
 		t.Errorf("Expected event message 'Test event message', got '%s'", publishedEvent.Message)
 	}
@@ -525,7 +525,7 @@ func TestServicePublishEvent(t *testing.T) {
 func TestServiceGetConnections(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Add some test connections
 	conn1 := &domain.Connection{
 		ID:            "conn-1",
@@ -535,7 +535,7 @@ func TestServiceGetConnections(t *testing.T) {
 		LastActivity:  time.Now(),
 		Status:        domain.ConnectionActive,
 	}
-	
+
 	conn2 := &domain.Connection{
 		ID:            "conn-2",
 		RemoteAddress: "127.0.0.1:12346",
@@ -544,16 +544,16 @@ func TestServiceGetConnections(t *testing.T) {
 		LastActivity:  time.Now(),
 		Status:        domain.ConnectionActive,
 	}
-	
+
 	connectionManager := service.connectionManager.(*mockConnectionManager)
 	connectionManager.AcceptConnection(ctx, conn1)
 	connectionManager.AcceptConnection(ctx, conn2)
-	
+
 	connections, err := service.GetConnections(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when getting connections, got: %v", err)
 	}
-	
+
 	if len(connections) != 2 {
 		t.Errorf("Expected 2 connections, got %d", len(connections))
 	}
@@ -562,7 +562,7 @@ func TestServiceGetConnections(t *testing.T) {
 func TestServiceCloseConnection(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Add a test connection
 	conn := &domain.Connection{
 		ID:            "conn-test",
@@ -572,21 +572,21 @@ func TestServiceCloseConnection(t *testing.T) {
 		LastActivity:  time.Now(),
 		Status:        domain.ConnectionActive,
 	}
-	
+
 	connectionManager := service.connectionManager.(*mockConnectionManager)
 	connectionManager.AcceptConnection(ctx, conn)
-	
+
 	err := service.CloseConnection(ctx, "conn-test")
 	if err != nil {
 		t.Errorf("Expected no error when closing connection, got: %v", err)
 	}
-	
+
 	// Verify the connection was closed
 	closedConn, err := connectionManager.GetConnection(ctx, "conn-test")
 	if err != nil {
 		t.Errorf("Expected no error when getting connection, got: %v", err)
 	}
-	
+
 	if closedConn.Status != domain.ConnectionClosed {
 		t.Errorf("Expected connection status 'closed', got '%s'", closedConn.Status)
 	}
@@ -595,22 +595,22 @@ func TestServiceCloseConnection(t *testing.T) {
 func TestServiceUnhealthyStatus(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Make the health checker return unhealthy
 	healthChecker := service.healthChecker.(*mockHealthChecker)
 	healthChecker.healthy = false
-	
+
 	// Start the service first
 	err := service.Start(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when starting service, got: %v", err)
 	}
-	
+
 	status, err := service.GetStatus(ctx)
 	if err != nil {
 		t.Errorf("Expected no error when getting status, got: %v", err)
 	}
-	
+
 	if status.Status != domain.StatusUnhealthy {
 		t.Errorf("Expected server status 'unhealthy', got '%s'", status.Status)
 	}
@@ -619,7 +619,7 @@ func TestServiceUnhealthyStatus(t *testing.T) {
 func TestServiceInvalidConfigUpdate(t *testing.T) {
 	service := createTestService()
 	ctx := context.Background()
-	
+
 	// Create invalid configuration (empty server name)
 	invalidConfig := &domain.Configuration{
 		Server: domain.ServerConfig{
@@ -633,7 +633,7 @@ func TestServiceInvalidConfigUpdate(t *testing.T) {
 			ShutdownTimeout: 20 * time.Second,
 		},
 	}
-	
+
 	err := service.UpdateConfig(ctx, invalidConfig)
 	if err == nil {
 		t.Error("Expected error when updating with invalid config")

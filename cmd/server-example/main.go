@@ -24,31 +24,31 @@ import (
 func main() {
 	// Create context
 	ctx := context.Background()
-	
+
 	// Load configuration
 	cfg, err := config.LoadConfiguration(ctx)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
-	
+
 	// Create logger
 	logger, err := logging.NewZapLogger(&cfg.Logging)
 	if err != nil {
 		log.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Sync()
-	
-	logger.Info(ctx, "Starting Tapio Server", 
+
+	logger.Info(ctx, "Starting Tapio Server",
 		"version", cfg.Server.Version,
 		"environment", cfg.Server.Environment,
 	)
-	
+
 	// Create metrics collector
 	metricsCollector := managers.NewMetricsCollector(logger)
-	
+
 	// Create event publisher (using a simple implementation)
 	eventPublisher := NewSimpleEventPublisher(logger)
-	
+
 	// Create connection manager
 	connectionManager := managers.NewConnectionManager(
 		cfg.Server.MaxConnections,
@@ -56,10 +56,10 @@ func main() {
 		eventPublisher,
 		logger,
 	)
-	
+
 	// Create health checker
 	healthChecker := managers.NewHealthChecker(logger)
-	
+
 	// Register additional health checks
 	healthChecker.RegisterCheck("database", func(ctx context.Context) (*domain.HealthCheck, error) {
 		// Simulate database health check
@@ -71,7 +71,7 @@ func main() {
 			Duration:  10 * time.Millisecond,
 		}, nil
 	})
-	
+
 	// Create server builder
 	serverBuilder := server.NewServerBuilder().
 		WithConfig(cfg).
@@ -80,14 +80,14 @@ func main() {
 		WithHealthChecker(healthChecker).
 		WithMetricsCollector(metricsCollector).
 		WithEventPublisher(eventPublisher)
-	
+
 	// Build server
 	srv, err := serverBuilder.Build()
 	if err != nil {
 		logger.Error(ctx, "Failed to build server", "error", err)
 		os.Exit(1)
 	}
-	
+
 	// Create and register HTTP transport
 	httpConfig := &domain.EndpointConfig{
 		Name:     "http",
@@ -98,56 +98,56 @@ func main() {
 		Enabled:  true,
 		Timeout:  30 * time.Second,
 	}
-	
+
 	// Get request handler from server
 	requestHandler := &serverRequestHandler{server: srv}
-	
+
 	httpTransport := transports.NewHTTPTransport(httpConfig, requestHandler, logger)
-	
+
 	// Setup middleware
 	setupMiddleware(srv, cfg, logger, metricsCollector, eventPublisher)
-	
+
 	// Start metrics server on separate port
 	go startMetricsServer(metricsCollector, logger)
-	
+
 	// Start HTTP transport
 	if err := httpTransport.Start(ctx); err != nil {
 		logger.Error(ctx, "Failed to start HTTP transport", "error", err)
 		os.Exit(1)
 	}
-	
+
 	// Start server
 	if err := srv.Start(ctx); err != nil {
 		logger.Error(ctx, "Failed to start server", "error", err)
 		os.Exit(1)
 	}
-	
+
 	logger.Info(ctx, "Server started successfully",
 		"http_address", fmt.Sprintf("%s:%d", httpConfig.Address, httpConfig.Port),
 		"metrics_address", ":9090",
 	)
-	
+
 	// Wait for shutdown signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
-	
+
 	logger.Info(ctx, "Shutdown signal received, stopping server...")
-	
+
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	
+
 	// Stop HTTP transport
 	if err := httpTransport.Stop(shutdownCtx); err != nil {
 		logger.Error(ctx, "Error stopping HTTP transport", "error", err)
 	}
-	
+
 	// Stop server
 	if err := srv.Stop(shutdownCtx); err != nil {
 		logger.Error(ctx, "Error stopping server", "error", err)
 	}
-	
+
 	logger.Info(ctx, "Server stopped gracefully")
 }
 
@@ -201,16 +201,16 @@ func setupMiddleware(
 ) {
 	// Recovery middleware (highest priority)
 	recoveryMiddleware := middleware.NewRecoveryMiddleware(logger, eventPublisher, metricsCollector)
-	
+
 	// CORS middleware
 	corsMiddleware := middleware.NewCORSMiddleware(&cfg.Security.CORS, logger)
-	
+
 	// Compression middleware
 	compressionMiddleware := middleware.NewCompressionMiddleware(logger)
-	
+
 	// Note: In a real implementation, we would register these with the server's middleware manager
 	// For now, they're created but would need to be integrated into the request pipeline
-	
+
 	_ = recoveryMiddleware
 	_ = corsMiddleware
 	_ = compressionMiddleware
@@ -220,7 +220,7 @@ func setupMiddleware(
 func startMetricsServer(collector *managers.MetricsCollector, logger domain.Logger) {
 	// Create HTTP mux
 	mux := http.NewServeMux()
-	
+
 	// Register Prometheus handler
 	mux.Handle("/metrics", promhttp.HandlerFor(
 		collector.GetRegistry(),
@@ -228,15 +228,15 @@ func startMetricsServer(collector *managers.MetricsCollector, logger domain.Logg
 			EnableOpenMetrics: true,
 		},
 	))
-	
+
 	// Start server
 	server := &http.Server{
 		Addr:    ":9090",
 		Handler: mux,
 	}
-	
+
 	logger.Info(context.Background(), "Metrics server started", "address", ":9090")
-	
+
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error(context.Background(), "Metrics server error", "error", err)
 	}
@@ -244,7 +244,7 @@ func startMetricsServer(collector *managers.MetricsCollector, logger domain.Logg
 
 // SimpleEventPublisher is a basic event publisher implementation
 type SimpleEventPublisher struct {
-	logger domain.Logger
+	logger   domain.Logger
 	handlers map[domain.EventType][]domain.EventHandler
 	mu       sync.RWMutex
 }
@@ -260,7 +260,7 @@ func (p *SimpleEventPublisher) PublishEvent(ctx context.Context, event *domain.E
 	if event == nil {
 		return domain.ErrInvalidRequest("event cannot be nil")
 	}
-	
+
 	// Log event
 	if p.logger != nil {
 		p.logger.Info(ctx, "Event published",
@@ -270,12 +270,12 @@ func (p *SimpleEventPublisher) PublishEvent(ctx context.Context, event *domain.E
 			"message", event.Message,
 		)
 	}
-	
+
 	// Get handlers
 	p.mu.RLock()
 	handlers := p.handlers[event.Type]
 	p.mu.RUnlock()
-	
+
 	// Execute handlers
 	for _, handler := range handlers {
 		go func(h domain.EventHandler) {
@@ -284,7 +284,7 @@ func (p *SimpleEventPublisher) PublishEvent(ctx context.Context, event *domain.E
 			}
 		}(handler)
 	}
-	
+
 	return nil
 }
 
@@ -300,7 +300,7 @@ func (p *SimpleEventPublisher) PublishEvents(ctx context.Context, events []*doma
 func (p *SimpleEventPublisher) Subscribe(ctx context.Context, eventType domain.EventType, handler domain.EventHandler) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	p.handlers[eventType] = append(p.handlers[eventType], handler)
 	return nil
 }
@@ -308,7 +308,7 @@ func (p *SimpleEventPublisher) Subscribe(ctx context.Context, eventType domain.E
 func (p *SimpleEventPublisher) Unsubscribe(ctx context.Context, eventType domain.EventType, handler domain.EventHandler) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	// In a real implementation, we would properly track and remove handlers
 	// For now, just clear all handlers for the event type
 	delete(p.handlers, eventType)

@@ -30,10 +30,10 @@ type memorytrackerMapSpecs struct {
 
 // memorytrackerProgramSpecs contains programs before they are loaded into the kernel.
 type memorytrackerProgramSpecs struct {
-	TraceMmPageAlloc       *ebpf.ProgramSpec `ebpf:"trace_mm_page_alloc"`
-	TraceMmPageFree        *ebpf.ProgramSpec `ebpf:"trace_mm_page_free"`
-	TraceOomKillProcess    *ebpf.ProgramSpec `ebpf:"trace_oom_kill_process"`
-	TraceRssStatThrottled  *ebpf.ProgramSpec `ebpf:"trace_rss_stat_throttled"`
+	TraceMmPageAlloc      *ebpf.ProgramSpec `ebpf:"trace_mm_page_alloc"`
+	TraceMmPageFree       *ebpf.ProgramSpec `ebpf:"trace_mm_page_free"`
+	TraceOomKillProcess   *ebpf.ProgramSpec `ebpf:"trace_oom_kill_process"`
+	TraceRssStatThrottled *ebpf.ProgramSpec `ebpf:"trace_rss_stat_throttled"`
 }
 
 // memorytrackerMaps contains all maps after they have been loaded into the kernel.
@@ -45,10 +45,10 @@ type memorytrackerMaps struct {
 
 // memorytrackerPrograms contains all programs after they have been loaded into the kernel.
 type memorytrackerPrograms struct {
-	TraceMmPageAlloc       *ebpf.Program `ebpf:"trace_mm_page_alloc"`
-	TraceMmPageFree        *ebpf.Program `ebpf:"trace_mm_page_free"`
-	TraceOomKillProcess    *ebpf.Program `ebpf:"trace_oom_kill_process"`
-	TraceRssStatThrottled  *ebpf.Program `ebpf:"trace_rss_stat_throttled"`
+	TraceMmPageAlloc      *ebpf.Program `ebpf:"trace_mm_page_alloc"`
+	TraceMmPageFree       *ebpf.Program `ebpf:"trace_mm_page_free"`
+	TraceOomKillProcess   *ebpf.Program `ebpf:"trace_oom_kill_process"`
+	TraceRssStatThrottled *ebpf.Program `ebpf:"trace_rss_stat_throttled"`
 }
 
 // memorytrackerObjects contains all objects after they have been loaded into the kernel.
@@ -151,6 +151,7 @@ func init() {
 }
 
 // Do not access this directly.
+//
 //go:embed memorytracker_bpfel.o
 var _MemorytrackerBytes []byte
 

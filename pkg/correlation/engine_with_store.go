@@ -324,10 +324,10 @@ func (e *PerfectEngineWithStore) convertToOpinionatedEvent(event *types.Event) *
 	// This is a simplified conversion
 	// Real implementation would map all fields properly
 	return &opinionated.OpinionatedEvent{
-		ID:        event.ID,
-		Timestamp: event.Timestamp,
-		Category:  opinionated.CategorySystemHealth,
-		Severity:  opinionated.SeverityMedium,
+		ID:         event.ID,
+		Timestamp:  event.Timestamp,
+		Category:   opinionated.CategorySystemHealth,
+		Severity:   opinionated.SeverityMedium,
 		Confidence: 0.8,
 
 		Source: opinionated.EventSource{

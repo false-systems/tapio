@@ -59,13 +59,13 @@ func TestCapabilityManager(t *testing.T) {
 	// Test requesting memory monitoring
 	// This should return an error on most platforms except Linux with eBPF
 	_, err := manager.RequestMemoryMonitoring()
-	
+
 	// We expect this to fail on most test environments
 	if err != nil {
 		if !IsCapabilityError(err) {
 			t.Errorf("Expected CapabilityError, got %T: %v", err, err)
 		}
-		
+
 		capErr := err.(*CapabilityError)
 		if capErr.Platform != runtime.GOOS {
 			t.Errorf("Expected platform %s, got %s", runtime.GOOS, capErr.Platform)
@@ -121,11 +121,11 @@ func TestCapabilityReport(t *testing.T) {
 	}
 
 	// Validate summary consistency
-	calculatedTotal := report.Summary.Available + report.Summary.Enabled + 
-					  report.Summary.NotAvailable + report.Summary.Errors
+	calculatedTotal := report.Summary.Available + report.Summary.Enabled +
+		report.Summary.NotAvailable + report.Summary.Errors
 
 	if calculatedTotal != report.Summary.Total {
-		t.Errorf("Summary totals don't match: calculated %d, reported %d", 
+		t.Errorf("Summary totals don't match: calculated %d, reported %d",
 			calculatedTotal, report.Summary.Total)
 	}
 }
@@ -253,7 +253,7 @@ func (m *MockMemoryCapability) GetMemoryPredictions(limits map[uint32]uint64) (m
 
 func TestMemoryCapability(t *testing.T) {
 	registry := NewRegistry()
-	
+
 	mockMemCap := &MockMemoryCapability{
 		MockCapability: MockCapability{
 			name:      "mock-memory",

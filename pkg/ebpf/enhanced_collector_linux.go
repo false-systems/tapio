@@ -24,7 +24,7 @@ type EnhancedCollector struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
-	
+
 	// Statistics
 	stats struct {
 		eventsCollected uint64
@@ -36,17 +36,17 @@ type EnhancedCollector struct {
 // NewEnhancedCollector creates a new enhanced collector
 func NewEnhancedCollector() (*EnhancedCollector, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	collector := &EnhancedCollector{
 		eventChan:    make(chan SystemEvent, 1000),
 		processStats: make(map[uint32]*ProcessMemoryStats),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
-	
+
 	// Mark as having "loaded" programs for compatibility
 	collector.stats.programsLoaded = 4 // Simulating 4 eBPF programs
-	
+
 	return collector, nil
 }
 
@@ -56,7 +56,7 @@ func (c *EnhancedCollector) Start() error {
 	c.wg.Add(2)
 	go c.monitorProcessMemory()
 	go c.monitorSystemEvents()
-	
+
 	return nil
 }
 
@@ -77,7 +77,7 @@ func (c *EnhancedCollector) GetEventChannel() <-chan SystemEvent {
 func (c *EnhancedCollector) GetStatistics() map[string]interface{} {
 	c.statsMutex.RLock()
 	defer c.statsMutex.RUnlock()
-	
+
 	return map[string]interface{}{
 		"events_collected":   c.stats.eventsCollected,
 		"programs_loaded":    c.stats.programsLoaded,
@@ -90,10 +90,10 @@ func (c *EnhancedCollector) GetStatistics() map[string]interface{} {
 // monitorProcessMemory monitors process memory usage via /proc
 func (c *EnhancedCollector) monitorProcessMemory() {
 	defer c.wg.Done()
-	
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -113,29 +113,29 @@ func (c *EnhancedCollector) scanProcesses() {
 		return
 	}
 	defer procDir.Close()
-	
+
 	entries, err := procDir.Readdirnames(-1)
 	if err != nil {
 		c.stats.lastError = err
 		return
 	}
-	
+
 	for _, entry := range entries {
 		// Check if entry is a PID (numeric)
 		pid, err := strconv.ParseUint(entry, 10, 32)
 		if err != nil {
 			continue // Not a PID directory
 		}
-		
+
 		// Read process memory info
 		memInfo := c.readProcessMemory(uint32(pid))
 		if memInfo == nil {
 			continue
 		}
-		
+
 		// Update statistics
 		c.updateProcessStats(uint32(pid), memInfo)
-		
+
 		// Generate events for significant changes
 		c.generateMemoryEvent(uint32(pid), memInfo)
 	}
@@ -149,12 +149,12 @@ func (c *EnhancedCollector) readProcessMemory(pid uint32) *memoryInfo {
 		return nil
 	}
 	defer file.Close()
-	
+
 	info := &memoryInfo{
-		pid: pid,
+		pid:       pid,
 		timestamp: time.Now(),
 	}
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -162,7 +162,7 @@ func (c *EnhancedCollector) readProcessMemory(pid uint32) *memoryInfo {
 		if len(parts) < 2 {
 			continue
 		}
-		
+
 		switch parts[0] {
 		case "Name:":
 			info.command = parts[1]
@@ -180,10 +180,10 @@ func (c *EnhancedCollector) readProcessMemory(pid uint32) *memoryInfo {
 			}
 		}
 	}
-	
+
 	// Check if in container by examining cgroup
 	info.inContainer = c.isInContainer(pid)
-	
+
 	return info
 }
 
@@ -194,10 +194,10 @@ func (c *EnhancedCollector) isInContainer(pid uint32) bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Check for common container patterns in cgroup paths
 	content := string(data)
-	return strings.Contains(content, "docker") || 
+	return strings.Contains(content, "docker") ||
 		strings.Contains(content, "containerd") ||
 		strings.Contains(content, "crio") ||
 		strings.Contains(content, "lxc")
@@ -207,7 +207,7 @@ func (c *EnhancedCollector) isInContainer(pid uint32) bool {
 func (c *EnhancedCollector) updateProcessStats(pid uint32, info *memoryInfo) {
 	c.statsMutex.Lock()
 	defer c.statsMutex.Unlock()
-	
+
 	stats, exists := c.processStats[pid]
 	if !exists {
 		stats = &ProcessMemoryStats{
@@ -218,18 +218,18 @@ func (c *EnhancedCollector) updateProcessStats(pid uint32, info *memoryInfo) {
 		}
 		c.processStats[pid] = stats
 	}
-	
+
 	// Update current values
 	stats.CurrentUsage = info.rss
 	stats.TotalAllocated = info.vmSize
 	stats.LastUpdate = info.timestamp
-	
+
 	// Track growth pattern
 	stats.GrowthPattern = append(stats.GrowthPattern, MemoryDataPoint{
 		Timestamp: info.timestamp,
 		Usage:     info.rss,
 	})
-	
+
 	// Keep only recent data points
 	if len(stats.GrowthPattern) > 100 {
 		stats.GrowthPattern = stats.GrowthPattern[len(stats.GrowthPattern)-100:]
@@ -241,16 +241,16 @@ func (c *EnhancedCollector) generateMemoryEvent(pid uint32, info *memoryInfo) {
 	c.statsMutex.RLock()
 	stats, exists := c.processStats[pid]
 	c.statsMutex.RUnlock()
-	
+
 	if !exists {
 		return
 	}
-	
+
 	// Check for significant memory growth (>10MB in 2 seconds)
 	if len(stats.GrowthPattern) >= 2 {
 		prev := stats.GrowthPattern[len(stats.GrowthPattern)-2]
 		growth := int64(info.rss) - int64(prev.Usage)
-		
+
 		if growth > 10*1024*1024 { // 10MB growth
 			event := SystemEvent{
 				Type:      "memory_spike",
@@ -264,7 +264,7 @@ func (c *EnhancedCollector) generateMemoryEvent(pid uint32, info *memoryInfo) {
 					"in_container":  info.inContainer,
 				},
 			}
-			
+
 			select {
 			case c.eventChan <- event:
 				c.stats.eventsCollected++
@@ -273,7 +273,7 @@ func (c *EnhancedCollector) generateMemoryEvent(pid uint32, info *memoryInfo) {
 			}
 		}
 	}
-	
+
 	// Check for potential OOM (using >90% of system memory)
 	memTotal := c.getSystemMemoryTotal()
 	if memTotal > 0 && float64(info.rss) > float64(memTotal)*0.9 {
@@ -288,7 +288,7 @@ func (c *EnhancedCollector) generateMemoryEvent(pid uint32, info *memoryInfo) {
 				"system_total":     memTotal,
 			},
 		}
-		
+
 		select {
 		case c.eventChan <- event:
 			c.stats.eventsCollected++
@@ -301,11 +301,11 @@ func (c *EnhancedCollector) generateMemoryEvent(pid uint32, info *memoryInfo) {
 // monitorSystemEvents monitors for system-level events
 func (c *EnhancedCollector) monitorSystemEvents() {
 	defer c.wg.Done()
-	
+
 	// Monitor /proc/loadavg for system load
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -322,17 +322,17 @@ func (c *EnhancedCollector) checkSystemLoad() {
 	if err != nil {
 		return
 	}
-	
+
 	parts := strings.Fields(string(data))
 	if len(parts) < 3 {
 		return
 	}
-	
+
 	load1, _ := strconv.ParseFloat(parts[0], 64)
-	
+
 	// Get number of CPUs
 	cpuCount := c.getCPUCount()
-	
+
 	// Generate event if load is high (>2x CPU count)
 	if load1 > float64(cpuCount)*2 {
 		event := SystemEvent{
@@ -344,7 +344,7 @@ func (c *EnhancedCollector) checkSystemLoad() {
 				"load_ratio": load1 / float64(cpuCount),
 			},
 		}
-		
+
 		select {
 		case c.eventChan <- event:
 			c.stats.eventsCollected++
@@ -360,7 +360,7 @@ func (c *EnhancedCollector) getSystemMemoryTotal() uint64 {
 	if err != nil {
 		return 0
 	}
-	
+
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -372,7 +372,7 @@ func (c *EnhancedCollector) getSystemMemoryTotal() uint64 {
 			}
 		}
 	}
-	
+
 	return 0
 }
 
@@ -382,7 +382,7 @@ func (c *EnhancedCollector) getCPUCount() int {
 	if err != nil {
 		return 1
 	}
-	
+
 	count := 0
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
@@ -390,7 +390,7 @@ func (c *EnhancedCollector) getCPUCount() int {
 			count++
 		}
 	}
-	
+
 	if count == 0 {
 		return 1
 	}
@@ -401,7 +401,7 @@ func (c *EnhancedCollector) getCPUCount() int {
 func (c *EnhancedCollector) GetProcessStats() map[uint32]*ProcessMemoryStats {
 	c.statsMutex.RLock()
 	defer c.statsMutex.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	result := make(map[uint32]*ProcessMemoryStats)
 	for pid, stats := range c.processStats {
@@ -410,7 +410,7 @@ func (c *EnhancedCollector) GetProcessStats() map[uint32]*ProcessMemoryStats {
 		copy(statsCopy.GrowthPattern, stats.GrowthPattern)
 		result[pid] = &statsCopy
 	}
-	
+
 	return result
 }
 
@@ -418,7 +418,7 @@ func (c *EnhancedCollector) GetProcessStats() map[uint32]*ProcessMemoryStats {
 func (c *EnhancedCollector) GetMemoryPredictions(limits map[uint32]uint64) map[uint32]*OOMPrediction {
 	stats := c.GetProcessStats()
 	predictions := make(map[uint32]*OOMPrediction)
-	
+
 	for pid, processStats := range stats {
 		if limit, hasLimit := limits[pid]; hasLimit {
 			if prediction := processStats.PredictOOM(limit); prediction != nil {
@@ -426,7 +426,7 @@ func (c *EnhancedCollector) GetMemoryPredictions(limits map[uint32]uint64) map[u
 			}
 		}
 	}
-	
+
 	return predictions
 }
 

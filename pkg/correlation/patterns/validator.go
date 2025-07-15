@@ -12,14 +12,14 @@ import (
 // DefaultPatternValidator implements the PatternValidator interface
 type DefaultPatternValidator struct {
 	config types.PatternConfig
-	
+
 	// Validation rules
 	rules []ValidationRule
-	
+
 	// Validation history
 	history      []ValidationRecord
 	historyMutex sync.RWMutex
-	
+
 	// Statistics
 	stats ValidationStats
 }
@@ -33,20 +33,20 @@ type ValidationRule struct {
 
 // ValidationRecord keeps track of validation history
 type ValidationRecord struct {
-	Timestamp  time.Time
-	PatternID  string
-	Result     bool
-	Error      error
-	Duration   time.Duration
+	Timestamp time.Time
+	PatternID string
+	Result    bool
+	Error     error
+	Duration  time.Duration
 }
 
 // ValidationStats tracks validation statistics
 type ValidationStats struct {
-	TotalValidations   int64
+	TotalValidations      int64
 	SuccessfulValidations int64
-	FailedValidations  int64
+	FailedValidations     int64
 	AverageValidationTime time.Duration
-	mutex sync.RWMutex
+	mutex                 sync.RWMutex
 }
 
 // Ensure DefaultPatternValidator implements types.PatternValidator
@@ -59,27 +59,27 @@ func NewDefaultPatternValidator(config types.PatternConfig) *DefaultPatternValid
 		history: make([]ValidationRecord, 0, 1000),
 		rules:   defaultValidationRules(),
 	}
-	
+
 	return validator
 }
 
 // Validate validates a single pattern result
 func (dpv *DefaultPatternValidator) Validate(ctx context.Context, result *types.PatternResult) error {
 	start := time.Now()
-	
+
 	// Check basic validity
 	if result == nil {
 		return fmt.Errorf("pattern result is nil")
 	}
-	
+
 	// Check confidence threshold
 	if result.Confidence < dpv.config.MinConfidence {
-		err := fmt.Errorf("confidence %.2f below minimum threshold %.2f", 
+		err := fmt.Errorf("confidence %.2f below minimum threshold %.2f",
 			result.Confidence, dpv.config.MinConfidence)
 		dpv.recordValidation(result.PatternID, false, err, time.Since(start))
 		return err
 	}
-	
+
 	// Run all validation rules
 	for _, rule := range dpv.rules {
 		select {
@@ -92,7 +92,7 @@ func (dpv *DefaultPatternValidator) Validate(ctx context.Context, result *types.
 			}
 		}
 	}
-	
+
 	dpv.recordValidation(result.PatternID, true, nil, time.Since(start))
 	return nil
 }
@@ -101,18 +101,18 @@ func (dpv *DefaultPatternValidator) Validate(ctx context.Context, result *types.
 func (dpv *DefaultPatternValidator) ValidateBatch(ctx context.Context, results []types.PatternResult) ([]types.PatternResult, []error) {
 	validResults := make([]types.PatternResult, 0, len(results))
 	errors := make([]error, 0)
-	
+
 	// Use semaphore to limit concurrent validations
 	sem := make(chan struct{}, 10)
 	resultChan := make(chan validationResult, len(results))
-	
+
 	var wg sync.WaitGroup
-	
+
 	for i := range results {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			
+
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -123,7 +123,7 @@ func (dpv *DefaultPatternValidator) ValidateBatch(ctx context.Context, results [
 				}
 				return
 			}
-			
+
 			err := dpv.Validate(ctx, &results[idx])
 			resultChan <- validationResult{
 				index: idx,
@@ -131,19 +131,19 @@ func (dpv *DefaultPatternValidator) ValidateBatch(ctx context.Context, results [
 			}
 		}(i)
 	}
-	
+
 	// Wait for all validations to complete
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
-	
+
 	// Collect results
 	resultMap := make(map[int]error)
 	for res := range resultChan {
 		resultMap[res.index] = res.err
 	}
-	
+
 	// Build ordered results
 	for i := range results {
 		if err, exists := resultMap[i]; exists && err == nil {
@@ -152,7 +152,7 @@ func (dpv *DefaultPatternValidator) ValidateBatch(ctx context.Context, results [
 			errors = append(errors, err)
 		}
 	}
-	
+
 	return validResults, errors
 }
 
@@ -175,7 +175,7 @@ func (dpv *DefaultPatternValidator) recordValidation(patternID string, success b
 		Error:     err,
 		Duration:  duration,
 	}
-	
+
 	dpv.historyMutex.Lock()
 	dpv.history = append(dpv.history, record)
 	// Keep only last 1000 records
@@ -183,7 +183,7 @@ func (dpv *DefaultPatternValidator) recordValidation(patternID string, success b
 		dpv.history = dpv.history[len(dpv.history)-1000:]
 	}
 	dpv.historyMutex.Unlock()
-	
+
 	// Update statistics
 	dpv.stats.mutex.Lock()
 	dpv.stats.TotalValidations++
@@ -215,7 +215,7 @@ func (dpv *DefaultPatternValidator) GetStats() ValidationStats {
 func (dpv *DefaultPatternValidator) GetHistory() []ValidationRecord {
 	dpv.historyMutex.RLock()
 	defer dpv.historyMutex.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	history := make([]ValidationRecord, len(dpv.history))
 	copy(history, dpv.history)

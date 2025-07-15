@@ -2,11 +2,11 @@ package progress
 
 import (
 	"fmt"
+	"github.com/yairfalse/tapio/cmd/install/installer"
 	"io"
 	"os"
 	"strings"
 	"sync"
-	"github.com/yairfalse/tapio/cmd/install/installer"
 	"time"
 )
 

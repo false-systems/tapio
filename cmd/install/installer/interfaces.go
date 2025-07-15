@@ -172,7 +172,6 @@ type CircuitBreaker interface {
 	Reset()
 }
 
-
 // Downloader handles file downloads with progress
 type Downloader interface {
 	// Download downloads a file
@@ -181,7 +180,6 @@ type Downloader interface {
 	// DownloadWithProgress downloads with progress reporting
 	DownloadWithProgress(ctx context.Context, opts DownloadOptions, dst io.Writer, progress func(current, total int64)) error
 }
-
 
 // Command represents a reversible operation
 type Command interface {
