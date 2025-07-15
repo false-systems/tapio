@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"tapio/cmd/install/installer"
+	"github.com/yairfalse/tapio/cmd/install/installer"
 	"time"
 )
 

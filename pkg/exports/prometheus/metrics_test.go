@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/correlation"
 )
 
 func TestMetricsExporter_ExportCorrelationResult(t *testing.T) {

@@ -28,7 +28,7 @@ func TestPolicyViolation_Validation(t *testing.T) {
 		Severity:        "high",
 		RiskScore:       0.8,
 		Labels: map[string]string{
-			"policy":     "security",
+			"policy":      "security",
 			"environment": "prod",
 		},
 	}
@@ -52,9 +52,9 @@ func TestPolicyCollector_DetermineSeverity(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
+		name      string
 		violation *PolicyViolation
-		expected opinionated.EventSeverity
+		expected  opinionated.EventSeverity
 	}{
 		{
 			name: "critical severity",
@@ -127,9 +127,9 @@ func TestPolicyCollector_LateralMovementDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
+		name      string
 		violation *PolicyViolation
-		expected bool
+		expected  bool
 	}{
 		{
 			name: "lateral movement to kube-system",
@@ -215,15 +215,15 @@ func TestPolicyCollector_PrivilegeEscalationDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
+		name      string
 		violation *PolicyViolation
-		expected bool
+		expected  bool
 	}{
 		{
 			name: "SSH access attempt",
 			violation: &PolicyViolation{
 				DestinationPort: 22,
-				Action:         "deny",
+				Action:          "deny",
 			},
 			expected: true,
 		},
@@ -231,7 +231,7 @@ func TestPolicyCollector_PrivilegeEscalationDetection(t *testing.T) {
 			name: "Kubernetes API access",
 			violation: &PolicyViolation{
 				DestinationPort: 6443,
-				Action:         "deny",
+				Action:          "deny",
 			},
 			expected: true,
 		},
@@ -239,7 +239,7 @@ func TestPolicyCollector_PrivilegeEscalationDetection(t *testing.T) {
 			name: "HTTPS access to API server",
 			violation: &PolicyViolation{
 				DestinationPort: 443,
-				Action:         "deny",
+				Action:          "deny",
 			},
 			expected: true,
 		},
@@ -247,7 +247,7 @@ func TestPolicyCollector_PrivilegeEscalationDetection(t *testing.T) {
 			name: "kubelet port access",
 			violation: &PolicyViolation{
 				DestinationPort: 10250,
-				Action:         "deny",
+				Action:          "deny",
 			},
 			expected: true,
 		},
@@ -255,7 +255,7 @@ func TestPolicyCollector_PrivilegeEscalationDetection(t *testing.T) {
 			name: "normal HTTP access",
 			violation: &PolicyViolation{
 				DestinationPort: 80,
-				Action:         "deny",
+				Action:          "deny",
 			},
 			expected: false,
 		},
@@ -263,7 +263,7 @@ func TestPolicyCollector_PrivilegeEscalationDetection(t *testing.T) {
 			name: "allowed SSH access",
 			violation: &PolicyViolation{
 				DestinationPort: 22,
-				Action:         "allow",
+				Action:          "allow",
 			},
 			expected: false,
 		},
@@ -286,15 +286,15 @@ func TestPolicyCollector_DataExfiltrationDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
+		name      string
 		violation *PolicyViolation
-		expected bool
+		expected  bool
 	}{
 		{
 			name: "large external transfer",
 			violation: &PolicyViolation{
-				DestinationIP:   net.ParseIP("8.8.8.8"),
-				BytesBlocked:    2 * 1024 * 1024, // 2MB
+				DestinationIP: net.ParseIP("8.8.8.8"),
+				BytesBlocked:  2 * 1024 * 1024, // 2MB
 			},
 			expected: true,
 		},
@@ -324,8 +324,8 @@ func TestPolicyCollector_DataExfiltrationDetection(t *testing.T) {
 		{
 			name: "small internal transfer",
 			violation: &PolicyViolation{
-				DestinationIP:   net.ParseIP("10.244.1.10"),
-				BytesBlocked:    1024,
+				DestinationIP: net.ParseIP("10.244.1.10"),
+				BytesBlocked:  1024,
 			},
 			expected: false,
 		},
@@ -358,9 +358,9 @@ func TestPolicyCollector_ReconnaissanceDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
+		name      string
 		violation *PolicyViolation
-		expected bool
+		expected  bool
 	}{
 		{
 			name: "port scanning attempt",
@@ -394,8 +394,8 @@ func TestPolicyCollector_ReconnaissanceDetection(t *testing.T) {
 		{
 			name: "normal traffic",
 			violation: &PolicyViolation{
-				Action:         "deny",
-				PacketsBlocked: 10,
+				Action:          "deny",
+				PacketsBlocked:  10,
 				DestinationPort: 80,
 			},
 			expected: false,
@@ -419,9 +419,9 @@ func TestPolicyCollector_C2CommunicationDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
+		name      string
 		violation *PolicyViolation
-		expected bool
+		expected  bool
 	}{
 		{
 			name: "suspicious external port 8080",
@@ -534,7 +534,7 @@ func TestPolicyCollector_ExternalIPDetection(t *testing.T) {
 
 func TestPolicyCollector_ProcessPolicyViolation(t *testing.T) {
 	config := &CNICollectorConfig{
-		CollectionInterval:      5 * time.Second,
+		CollectionInterval:     5 * time.Second,
 		EnablePolicyMonitoring: true,
 	}
 
@@ -591,13 +591,13 @@ func TestPolicyCollector_ProcessPolicyViolation(t *testing.T) {
 	case event := <-eventCh:
 		opinionatedEvent, ok := event.(*opinionated.OpinionatedEvent)
 		require.True(t, ok)
-		
+
 		assert.Contains(t, opinionatedEvent.Id, "policy-violation-")
 		assert.Equal(t, "network.policy_violation", opinionatedEvent.EventType)
 		assert.Equal(t, "application", opinionatedEvent.Namespace)
 		assert.Equal(t, "source-pod", opinionatedEvent.PodName)
 		assert.Equal(t, opinionated.SeverityError, opinionatedEvent.Severity)
-		
+
 		// Check policy-specific attributes
 		assert.Equal(t, "deny-cross-namespace", opinionatedEvent.Attributes["policy.name"])
 		assert.Equal(t, "security", opinionatedEvent.Attributes["policy.namespace"])
@@ -605,7 +605,7 @@ func TestPolicyCollector_ProcessPolicyViolation(t *testing.T) {
 		assert.Equal(t, "deny", opinionatedEvent.Attributes["policy.action"])
 		assert.Equal(t, "high", opinionatedEvent.Attributes["policy.severity"])
 		assert.Equal(t, 0.8, opinionatedEvent.Attributes["policy.risk_score"])
-		
+
 		// Check traffic attributes
 		assert.Equal(t, "10.244.1.100", opinionatedEvent.Attributes["source.ip"])
 		assert.Equal(t, uint16(44321), opinionatedEvent.Attributes["source.port"])
@@ -614,18 +614,18 @@ func TestPolicyCollector_ProcessPolicyViolation(t *testing.T) {
 		assert.Equal(t, "tcp", opinionatedEvent.Attributes["protocol"])
 		assert.Equal(t, uint64(2048), opinionatedEvent.Attributes["traffic.bytes_blocked"])
 		assert.Equal(t, uint64(3), opinionatedEvent.Attributes["traffic.packets_blocked"])
-		
+
 		// Check pod context
 		assert.Equal(t, "source-pod", opinionatedEvent.Attributes["source.pod.name"])
 		assert.Equal(t, "application", opinionatedEvent.Attributes["source.pod.namespace"])
 		assert.Equal(t, "dest-pod", opinionatedEvent.Attributes["destination.pod.name"])
 		assert.Equal(t, "backend", opinionatedEvent.Attributes["destination.pod.namespace"])
-		
+
 		// Check labels and annotations
 		assert.Equal(t, "security", opinionatedEvent.Attributes["label.policy"])
 		assert.Equal(t, "cross-namespace", opinionatedEvent.Attributes["label.type"])
 		assert.Equal(t, "policy-violation", opinionatedEvent.Attributes["annotation.reason"])
-		
+
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Expected policy violation event but none was generated")
 	}
@@ -649,16 +649,16 @@ func TestPolicyCollector_SecurityImplicationDetection(t *testing.T) {
 	collector.eventChan = eventCh
 
 	tests := []struct {
-		name          string
-		violation     *PolicyViolation
-		expectedTags  []string
+		name             string
+		violation        *PolicyViolation
+		expectedTags     []string
 		expectedSeverity opinionated.Severity
 	}{
 		{
 			name: "lateral movement attempt",
 			violation: &PolicyViolation{
-				Action: "deny",
-				SourcePod: &PodInfo{Namespace: "app"},
+				Action:         "deny",
+				SourcePod:      &PodInfo{Namespace: "app"},
 				DestinationPod: &PodInfo{Namespace: "kube-system"},
 			},
 			expectedTags:     []string{"LATERAL_MOVEMENT"},
@@ -668,7 +668,7 @@ func TestPolicyCollector_SecurityImplicationDetection(t *testing.T) {
 			name: "privilege escalation attempt",
 			violation: &PolicyViolation{
 				DestinationPort: 22,
-				Action:         "deny",
+				Action:          "deny",
 			},
 			expectedTags:     []string{"PRIVILEGE_ESCALATION"},
 			expectedSeverity: opinionated.SeverityCritical,
@@ -676,8 +676,8 @@ func TestPolicyCollector_SecurityImplicationDetection(t *testing.T) {
 		{
 			name: "data exfiltration attempt",
 			violation: &PolicyViolation{
-				DestinationIP:   net.ParseIP("8.8.8.8"),
-				BytesBlocked:    2 * 1024 * 1024,
+				DestinationIP: net.ParseIP("8.8.8.8"),
+				BytesBlocked:  2 * 1024 * 1024,
 			},
 			expectedTags:     []string{"DATA_EXFILTRATION"},
 			expectedSeverity: opinionated.SeverityError,
@@ -740,21 +740,21 @@ func TestPolicyCollector_SecurityImplicationDetection(t *testing.T) {
 			case event := <-eventCh:
 				opinionatedEvent, ok := event.(*opinionated.OpinionatedEvent)
 				require.True(t, ok)
-				
+
 				// Check severity
 				assert.Equal(t, tt.expectedSeverity, opinionatedEvent.Severity)
-				
+
 				// Check tags in message
 				for _, tag := range tt.expectedTags {
 					assert.Contains(t, opinionatedEvent.Message, fmt.Sprintf("[%s]", tag))
 				}
-				
+
 				// Check security attributes
 				for _, tag := range tt.expectedTags {
 					securityKey := fmt.Sprintf("security.%s", strings.ToLower(tag))
 					assert.Equal(t, true, opinionatedEvent.Attributes[securityKey])
 				}
-				
+
 			case <-time.After(100 * time.Millisecond):
 				t.Fatalf("Expected security implication event for %s but none was generated", tt.name)
 			}
@@ -829,7 +829,7 @@ func TestNetworkPolicy_Validation(t *testing.T) {
 // Benchmark tests for policy violation processing
 func BenchmarkPolicyCollector_ProcessPolicyViolation(b *testing.B) {
 	config := &CNICollectorConfig{
-		CollectionInterval:      5 * time.Second,
+		CollectionInterval:     5 * time.Second,
 		EnablePolicyMonitoring: true,
 	}
 
@@ -871,17 +871,17 @@ func BenchmarkPolicyCollector_SecurityImplicationDetection(b *testing.B) {
 
 	violations := []*PolicyViolation{
 		{
-			Action: "deny",
-			SourcePod: &PodInfo{Namespace: "app"},
+			Action:         "deny",
+			SourcePod:      &PodInfo{Namespace: "app"},
 			DestinationPod: &PodInfo{Namespace: "kube-system"},
 		},
 		{
 			DestinationPort: 22,
-			Action:         "deny",
+			Action:          "deny",
 		},
 		{
-			DestinationIP:   net.ParseIP("8.8.8.8"),
-			BytesBlocked:    2 * 1024 * 1024,
+			DestinationIP: net.ParseIP("8.8.8.8"),
+			BytesBlocked:  2 * 1024 * 1024,
 		},
 		{
 			Action:         "deny",

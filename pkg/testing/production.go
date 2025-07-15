@@ -23,25 +23,25 @@ type ProductionValidator struct {
 // ValidationConfig defines validation configuration
 type ValidationConfig struct {
 	// General settings
-	Enabled         bool          `yaml:"enabled"`
-	TestTimeout     time.Duration `yaml:"test_timeout"`
-	ParallelTests   int           `yaml:"parallel_tests"`
-	FailFast        bool          `yaml:"fail_fast"`
-	RetryAttempts   int           `yaml:"retry_attempts"`
-	RetryDelay      time.Duration `yaml:"retry_delay"`
-	
+	Enabled       bool          `yaml:"enabled"`
+	TestTimeout   time.Duration `yaml:"test_timeout"`
+	ParallelTests int           `yaml:"parallel_tests"`
+	FailFast      bool          `yaml:"fail_fast"`
+	RetryAttempts int           `yaml:"retry_attempts"`
+	RetryDelay    time.Duration `yaml:"retry_delay"`
+
 	// Test suites configuration
 	FunctionalTests  TestSuiteConfig `yaml:"functional_tests"`
 	PerformanceTests TestSuiteConfig `yaml:"performance_tests"`
 	SecurityTests    TestSuiteConfig `yaml:"security_tests"`
 	IntegrationTests TestSuiteConfig `yaml:"integration_tests"`
 	E2ETests         TestSuiteConfig `yaml:"e2e_tests"`
-	
+
 	// Validation criteria
 	Performance PerformanceCriteria `yaml:"performance"`
 	Security    SecurityCriteria    `yaml:"security"`
 	Quality     QualityCriteria     `yaml:"quality"`
-	
+
 	// Reporting
 	Reporting ReportingConfig `yaml:"reporting"`
 }
@@ -59,13 +59,13 @@ type TestSuiteConfig struct {
 
 // PerformanceCriteria defines performance validation criteria
 type PerformanceCriteria struct {
-	MaxLatencyP99      time.Duration `yaml:"max_latency_p99"`
-	MinThroughput      int           `yaml:"min_throughput"`
-	MaxErrorRate       float64       `yaml:"max_error_rate"`
-	MaxCPUUsage        float64       `yaml:"max_cpu_usage"`
-	MaxMemoryUsage     float64       `yaml:"max_memory_usage"`
-	MaxResponseTime    time.Duration `yaml:"max_response_time"`
-	EventProcessingRate int          `yaml:"event_processing_rate"`
+	MaxLatencyP99       time.Duration `yaml:"max_latency_p99"`
+	MinThroughput       int           `yaml:"min_throughput"`
+	MaxErrorRate        float64       `yaml:"max_error_rate"`
+	MaxCPUUsage         float64       `yaml:"max_cpu_usage"`
+	MaxMemoryUsage      float64       `yaml:"max_memory_usage"`
+	MaxResponseTime     time.Duration `yaml:"max_response_time"`
+	EventProcessingRate int           `yaml:"event_processing_rate"`
 }
 
 // SecurityCriteria defines security validation criteria
@@ -81,22 +81,22 @@ type SecurityCriteria struct {
 
 // QualityCriteria defines quality validation criteria
 type QualityCriteria struct {
-	MinCodeCoverage     float64 `yaml:"min_code_coverage"`
-	MaxCyclomaticComp   int     `yaml:"max_cyclomatic_complexity"`
-	MinSignalToNoise    float64 `yaml:"min_signal_to_noise"`
-	MaxFalsePositives   float64 `yaml:"max_false_positives"`
-	MinCorrelationAcc   float64 `yaml:"min_correlation_accuracy"`
-	RequiredDocs        bool    `yaml:"required_documentation"`
+	MinCodeCoverage   float64 `yaml:"min_code_coverage"`
+	MaxCyclomaticComp int     `yaml:"max_cyclomatic_complexity"`
+	MinSignalToNoise  float64 `yaml:"min_signal_to_noise"`
+	MaxFalsePositives float64 `yaml:"max_false_positives"`
+	MinCorrelationAcc float64 `yaml:"min_correlation_accuracy"`
+	RequiredDocs      bool    `yaml:"required_documentation"`
 }
 
 // ReportingConfig defines reporting configuration
 type ReportingConfig struct {
-	Enabled    bool              `yaml:"enabled"`
-	Format     string            `yaml:"format"` // json, xml, html
-	OutputPath string            `yaml:"output_path"`
-	SlackHook  string            `yaml:"slack_webhook"`
-	Email      EmailConfig       `yaml:"email"`
-	Dashboard  DashboardConfig   `yaml:"dashboard"`
+	Enabled    bool            `yaml:"enabled"`
+	Format     string          `yaml:"format"` // json, xml, html
+	OutputPath string          `yaml:"output_path"`
+	SlackHook  string          `yaml:"slack_webhook"`
+	Email      EmailConfig     `yaml:"email"`
+	Dashboard  DashboardConfig `yaml:"dashboard"`
 }
 
 // EmailConfig defines email reporting
@@ -125,19 +125,19 @@ type TestSuite interface {
 
 // TestResult represents test execution results
 type TestResult struct {
-	SuiteName     string                 `json:"suite_name"`
-	StartTime     time.Time              `json:"start_time"`
-	EndTime       time.Time              `json:"end_time"`
-	Duration      time.Duration          `json:"duration"`
-	Status        TestStatus             `json:"status"`
-	TestsRun      int                    `json:"tests_run"`
-	TestsPassed   int                    `json:"tests_passed"`
-	TestsFailed   int                    `json:"tests_failed"`
-	TestsSkipped  int                    `json:"tests_skipped"`
-	ErrorMessage  string                 `json:"error_message,omitempty"`
-	Details       map[string]interface{} `json:"details"`
-	Metrics       TestMetrics            `json:"metrics"`
-	Artifacts     []string               `json:"artifacts"`
+	SuiteName    string                 `json:"suite_name"`
+	StartTime    time.Time              `json:"start_time"`
+	EndTime      time.Time              `json:"end_time"`
+	Duration     time.Duration          `json:"duration"`
+	Status       TestStatus             `json:"status"`
+	TestsRun     int                    `json:"tests_run"`
+	TestsPassed  int                    `json:"tests_passed"`
+	TestsFailed  int                    `json:"tests_failed"`
+	TestsSkipped int                    `json:"tests_skipped"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	Details      map[string]interface{} `json:"details"`
+	Metrics      TestMetrics            `json:"metrics"`
+	Artifacts    []string               `json:"artifacts"`
 }
 
 // TestStatus represents test execution status
@@ -154,13 +154,13 @@ const (
 
 // TestMetrics contains test performance metrics
 type TestMetrics struct {
-	CPUUsage       float64       `json:"cpu_usage"`
-	MemoryUsage    float64       `json:"memory_usage"`
-	Throughput     int           `json:"throughput"`
-	Latency        time.Duration `json:"latency"`
-	ErrorRate      float64       `json:"error_rate"`
-	ResponseTime   time.Duration `json:"response_time"`
-	CustomMetrics  map[string]float64 `json:"custom_metrics"`
+	CPUUsage      float64            `json:"cpu_usage"`
+	MemoryUsage   float64            `json:"memory_usage"`
+	Throughput    int                `json:"throughput"`
+	Latency       time.Duration      `json:"latency"`
+	ErrorRate     float64            `json:"error_rate"`
+	ResponseTime  time.Duration      `json:"response_time"`
+	CustomMetrics map[string]float64 `json:"custom_metrics"`
 }
 
 // NewProductionValidator creates a new production validator
@@ -192,61 +192,61 @@ func DefaultValidationConfig() *ValidationConfig {
 		FailFast:      false,
 		RetryAttempts: 3,
 		RetryDelay:    10 * time.Second,
-		
+
 		FunctionalTests: TestSuiteConfig{
 			Enabled:  true,
 			Timeout:  10 * time.Minute,
 			Parallel: true,
 			Tests:    []string{"health", "api", "core-functionality"},
 		},
-		
+
 		PerformanceTests: TestSuiteConfig{
 			Enabled:  true,
 			Timeout:  20 * time.Minute,
 			Parallel: false,
 			Tests:    []string{"load", "stress", "endurance"},
 		},
-		
+
 		SecurityTests: TestSuiteConfig{
 			Enabled:  true,
 			Timeout:  15 * time.Minute,
 			Parallel: true,
 			Tests:    []string{"auth", "tls", "input-validation"},
 		},
-		
+
 		IntegrationTests: TestSuiteConfig{
 			Enabled:  true,
 			Timeout:  15 * time.Minute,
 			Parallel: false,
 			Tests:    []string{"k8s-integration", "ebpf-integration"},
 		},
-		
+
 		E2ETests: TestSuiteConfig{
 			Enabled:  true,
 			Timeout:  25 * time.Minute,
 			Parallel: false,
 			Tests:    []string{"full-workflow", "user-scenarios"},
 		},
-		
+
 		Performance: PerformanceCriteria{
-			MaxLatencyP99:      10 * time.Millisecond,
-			MinThroughput:      10000,
-			MaxErrorRate:       0.01,
-			MaxCPUUsage:        0.8,
-			MaxMemoryUsage:     0.9,
-			MaxResponseTime:    2 * time.Second,
+			MaxLatencyP99:       10 * time.Millisecond,
+			MinThroughput:       10000,
+			MaxErrorRate:        0.01,
+			MaxCPUUsage:         0.8,
+			MaxMemoryUsage:      0.9,
+			MaxResponseTime:     2 * time.Second,
 			EventProcessingRate: 50000,
 		},
-		
+
 		Security: SecurityCriteria{
-			RequireTLS:      true,
-			RequireAuth:     true,
-			MaxFailedLogins: 5,
-			RequireAuditLog: true,
-			RequiredHeaders: []string{"X-Frame-Options", "X-Content-Type-Options"},
+			RequireTLS:         true,
+			RequireAuth:        true,
+			MaxFailedLogins:    5,
+			RequireAuditLog:    true,
+			RequiredHeaders:    []string{"X-Frame-Options", "X-Content-Type-Options"},
 			EncryptionRequired: true,
 		},
-		
+
 		Quality: QualityCriteria{
 			MinCodeCoverage:   0.8,
 			MaxCyclomaticComp: 15,
@@ -255,7 +255,7 @@ func DefaultValidationConfig() *ValidationConfig {
 			MinCorrelationAcc: 0.98,
 			RequiredDocs:      true,
 		},
-		
+
 		Reporting: ReportingConfig{
 			Enabled:    true,
 			Format:     "json",
@@ -269,19 +269,19 @@ func (pv *ProductionValidator) registerTestSuites() {
 	if pv.config.FunctionalTests.Enabled {
 		pv.suites["functional"] = NewFunctionalTestSuite(pv.config.FunctionalTests, pv.logger, pv.metrics)
 	}
-	
+
 	if pv.config.PerformanceTests.Enabled {
 		pv.suites["performance"] = NewPerformanceTestSuite(pv.config.PerformanceTests, pv.logger, pv.metrics)
 	}
-	
+
 	if pv.config.SecurityTests.Enabled {
 		pv.suites["security"] = NewSecurityTestSuite(pv.config.SecurityTests, pv.logger, pv.metrics)
 	}
-	
+
 	if pv.config.IntegrationTests.Enabled {
 		pv.suites["integration"] = NewIntegrationTestSuite(pv.config.IntegrationTests, pv.logger, pv.metrics)
 	}
-	
+
 	if pv.config.E2ETests.Enabled {
 		pv.suites["e2e"] = NewE2ETestSuite(pv.config.E2ETests, pv.logger, pv.metrics)
 	}
@@ -292,7 +292,7 @@ func (pv *ProductionValidator) RunValidation(ctx context.Context) (*ValidationRe
 	if !pv.config.Enabled {
 		pv.logger.Info("Production validation is disabled")
 		return &ValidationReport{
-			Status: ValidationStatusSkipped,
+			Status:  ValidationStatusSkipped,
 			Message: "Validation disabled in configuration",
 		}, nil
 	}
@@ -366,13 +366,13 @@ func (pv *ProductionValidator) runSuitesParallel(ctx context.Context, report *Va
 		wg.Add(1)
 		go func(suiteName string, testSuite TestSuite) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
 			result, err := pv.runSuite(ctx, testSuite)
-			
+
 			pv.mutex.Lock()
 			report.Suites[suiteName] = result
 			pv.results[suiteName] = result
@@ -388,7 +388,7 @@ func (pv *ProductionValidator) runSuitesParallel(ctx context.Context, report *Va
 				if pv.config.FailFast {
 					// Cancel context to stop other tests
 					// Note: In real implementation, we'd need a cancellable context
-					pv.logger.Error("Test suite failed, stopping other tests due to fail-fast", 
+					pv.logger.Error("Test suite failed, stopping other tests due to fail-fast",
 						"suite", suiteName, "error", err)
 				}
 			}
@@ -403,7 +403,7 @@ func (pv *ProductionValidator) runSuitesParallel(ctx context.Context, report *Va
 func (pv *ProductionValidator) runSuitesSequential(ctx context.Context, report *ValidationReport) error {
 	for name, suite := range pv.suites {
 		result, err := pv.runSuite(ctx, suite)
-		
+
 		report.Suites[name] = result
 		pv.results[name] = result
 
@@ -411,7 +411,7 @@ func (pv *ProductionValidator) runSuitesSequential(ctx context.Context, report *
 			if pv.config.FailFast {
 				return fmt.Errorf("suite %s failed: %w", name, err)
 			}
-			pv.logger.Error("Test suite failed, continuing with next suite", 
+			pv.logger.Error("Test suite failed, continuing with next suite",
 				"suite", name, "error", err)
 		}
 	}
@@ -459,8 +459,8 @@ func (pv *ProductionValidator) runSuite(ctx context.Context, suite TestSuite) (*
 			pv.logger.Warn("Teardown failed", "suite", suiteName, "error", err)
 		}
 
-		pv.logger.Info("Test suite completed successfully", 
-			"suite", suiteName, 
+		pv.logger.Info("Test suite completed successfully",
+			"suite", suiteName,
 			"duration", result.Duration,
 			"tests_passed", result.TestsPassed,
 		)
@@ -609,14 +609,14 @@ func (pv *ProductionValidator) publishReport(report *ValidationReport) error {
 
 // ValidationReport represents the complete validation report
 type ValidationReport struct {
-	StartTime    time.Time                `json:"start_time"`
-	EndTime      time.Time                `json:"end_time"`
-	Duration     time.Duration            `json:"duration"`
-	Status       ValidationStatus         `json:"status"`
-	ErrorMessage string                   `json:"error_message,omitempty"`
-	Suites       map[string]*TestResult   `json:"suites"`
-	Summary      ValidationSummary        `json:"summary"`
-	Metadata     map[string]interface{}   `json:"metadata"`
+	StartTime    time.Time              `json:"start_time"`
+	EndTime      time.Time              `json:"end_time"`
+	Duration     time.Duration          `json:"duration"`
+	Status       ValidationStatus       `json:"status"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	Suites       map[string]*TestResult `json:"suites"`
+	Summary      ValidationSummary      `json:"summary"`
+	Metadata     map[string]interface{} `json:"metadata"`
 }
 
 // ValidationStatus represents validation status
@@ -632,14 +632,14 @@ const (
 
 // ValidationSummary provides a summary of validation results
 type ValidationSummary struct {
-	TotalSuites    int `json:"total_suites"`
-	SuitesPassed   int `json:"suites_passed"`
-	SuitesFailed   int `json:"suites_failed"`
-	SuitesSkipped  int `json:"suites_skipped"`
-	TotalTests     int `json:"total_tests"`
-	TestsPassed    int `json:"tests_passed"`
-	TestsFailed    int `json:"tests_failed"`
-	TestsSkipped   int `json:"tests_skipped"`
+	TotalSuites   int `json:"total_suites"`
+	SuitesPassed  int `json:"suites_passed"`
+	SuitesFailed  int `json:"suites_failed"`
+	SuitesSkipped int `json:"suites_skipped"`
+	TotalTests    int `json:"total_tests"`
+	TestsPassed   int `json:"tests_passed"`
+	TestsFailed   int `json:"tests_failed"`
+	TestsSkipped  int `json:"tests_skipped"`
 }
 
 // calculatePassedSuites calculates the number of passed suites
@@ -758,7 +758,7 @@ func (pv *ProductionValidator) RegisterCustomTestSuite(name string, suite TestSu
 
 	pv.suites[name] = suite
 	pv.logger.Info("Custom test suite registered", "suite", name)
-	
+
 	return nil
 }
 
@@ -769,6 +769,6 @@ func (pv *ProductionValidator) UnregisterTestSuite(name string) {
 
 	delete(pv.suites, name)
 	delete(pv.results, name)
-	
+
 	pv.logger.Info("Test suite unregistered", "suite", name)
 }

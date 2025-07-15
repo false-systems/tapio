@@ -7,9 +7,9 @@ import (
 	"io"
 	"sync"
 
+	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
-	"github.com/golang/snappy"
 )
 
 // Compressor interface defines compression operations for binary encoding
@@ -43,7 +43,7 @@ type GzipCompressor struct {
 	mutex sync.RWMutex
 }
 
-// ZstdCompressor implements Zstandard compression  
+// ZstdCompressor implements Zstandard compression
 type ZstdCompressor struct {
 	level   int
 	encoder *zstd.Encoder
@@ -94,7 +94,7 @@ func NewGzipCompressor(level int) *GzipCompressor {
 	if level < gzip.DefaultCompression || level > gzip.BestCompression {
 		level = gzip.DefaultCompression
 	}
-	
+
 	return &GzipCompressor{
 		level: level,
 		pool: &sync.Pool{
@@ -117,15 +117,15 @@ type gzipPoolItem struct {
 
 func (g *GzipCompressor) Compress(src, dst []byte) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	// Get writer from pool
 	item := g.pool.Get().(*gzipPoolItem)
 	defer g.pool.Put(item)
-	
+
 	// Reset for reuse
 	item.buffer.Reset()
 	item.writer.Reset(item.buffer)
-	
+
 	// Compress data
 	if _, err := item.writer.Write(src); err != nil {
 		g.mutex.Lock()
@@ -133,17 +133,17 @@ func (g *GzipCompressor) Compress(src, dst []byte) ([]byte, error) {
 		g.mutex.Unlock()
 		return nil, fmt.Errorf("failed to write to gzip compressor: %w", err)
 	}
-	
+
 	if err := item.writer.Close(); err != nil {
 		g.mutex.Lock()
 		g.stats.Errors++
 		g.mutex.Unlock()
 		return nil, fmt.Errorf("failed to close gzip compressor: %w", err)
 	}
-	
+
 	// Get compressed data
 	result := append(dst[:0], item.buffer.Bytes()...)
-	
+
 	// Update statistics
 	g.mutex.Lock()
 	g.stats.TotalCompressed += int64(len(src))
@@ -151,13 +151,13 @@ func (g *GzipCompressor) Compress(src, dst []byte) ([]byte, error) {
 	g.stats.CompressionOps++
 	g.updateCompressionRatio(len(src), len(result))
 	g.mutex.Unlock()
-	
+
 	return result, nil
 }
 
 func (g *GzipCompressor) Decompress(src []byte, originalSize int) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	reader, err := gzip.NewReader(bytes.NewReader(src))
 	if err != nil {
 		g.mutex.Lock()
@@ -166,13 +166,13 @@ func (g *GzipCompressor) Decompress(src []byte, originalSize int) ([]byte, error
 		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 	}
 	defer reader.Close()
-	
+
 	// Pre-allocate buffer if original size is known
 	var result []byte
 	if originalSize > 0 {
 		result = make([]byte, 0, originalSize)
 	}
-	
+
 	// Read decompressed data
 	buf := make([]byte, 4096)
 	for {
@@ -190,14 +190,14 @@ func (g *GzipCompressor) Decompress(src []byte, originalSize int) ([]byte, error
 			return nil, fmt.Errorf("failed to read from gzip reader: %w", err)
 		}
 	}
-	
+
 	// Update statistics
 	g.mutex.Lock()
 	g.stats.TotalDecompressed += int64(len(result))
 	g.stats.DecompressionTime += getCurrentNanoTime() - startTime
 	g.stats.DecompressionOps++
 	g.mutex.Unlock()
-	
+
 	return result, nil
 }
 
@@ -241,7 +241,7 @@ func (g *GzipCompressor) updateCompressionRatio(original, compressed int) {
 func NewZstdCompressor(level int) *ZstdCompressor {
 	encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(level)))
 	decoder, _ := zstd.NewReader(nil)
-	
+
 	return &ZstdCompressor{
 		level:   level,
 		encoder: encoder,
@@ -251,27 +251,27 @@ func NewZstdCompressor(level int) *ZstdCompressor {
 
 func (z *ZstdCompressor) Compress(src, dst []byte) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	result := z.encoder.EncodeAll(src, dst[:0])
-	
+
 	z.mutex.Lock()
 	z.stats.TotalCompressed += int64(len(src))
 	z.stats.CompressionTime += getCurrentNanoTime() - startTime
 	z.stats.CompressionOps++
 	z.updateCompressionRatio(len(src), len(result))
 	z.mutex.Unlock()
-	
+
 	return result, nil
 }
 
 func (z *ZstdCompressor) Decompress(src []byte, originalSize int) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	var dst []byte
 	if originalSize > 0 {
 		dst = make([]byte, 0, originalSize)
 	}
-	
+
 	result, err := z.decoder.DecodeAll(src, dst)
 	if err != nil {
 		z.mutex.Lock()
@@ -279,13 +279,13 @@ func (z *ZstdCompressor) Decompress(src []byte, originalSize int) ([]byte, error
 		z.mutex.Unlock()
 		return nil, fmt.Errorf("failed to decompress with zstd: %w", err)
 	}
-	
+
 	z.mutex.Lock()
 	z.stats.TotalDecompressed += int64(len(result))
 	z.stats.DecompressionTime += getCurrentNanoTime() - startTime
 	z.stats.DecompressionOps++
 	z.mutex.Unlock()
-	
+
 	return result, nil
 }
 
@@ -333,13 +333,13 @@ func NewLZ4Compressor(level int) *LZ4Compressor {
 
 func (l *LZ4Compressor) Compress(src, dst []byte) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	// Ensure dst has enough capacity
 	maxSize := lz4.CompressBlockBound(len(src))
 	if cap(dst) < maxSize {
 		dst = make([]byte, 0, maxSize)
 	}
-	
+
 	compressedSize, err := lz4.CompressBlock(src, dst[:maxSize], nil)
 	if err != nil {
 		l.mutex.Lock()
@@ -347,24 +347,24 @@ func (l *LZ4Compressor) Compress(src, dst []byte) ([]byte, error) {
 		l.mutex.Unlock()
 		return nil, fmt.Errorf("failed to compress with LZ4: %w", err)
 	}
-	
+
 	result := dst[:compressedSize]
-	
+
 	l.mutex.Lock()
 	l.stats.TotalCompressed += int64(len(src))
 	l.stats.CompressionTime += getCurrentNanoTime() - startTime
 	l.stats.CompressionOps++
 	l.updateCompressionRatio(len(src), len(result))
 	l.mutex.Unlock()
-	
+
 	return result, nil
 }
 
 func (l *LZ4Compressor) Decompress(src []byte, originalSize int) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	dst := make([]byte, originalSize)
-	
+
 	decompressedSize, err := lz4.UncompressBlock(src, dst)
 	if err != nil {
 		l.mutex.Lock()
@@ -372,15 +372,15 @@ func (l *LZ4Compressor) Decompress(src []byte, originalSize int) ([]byte, error)
 		l.mutex.Unlock()
 		return nil, fmt.Errorf("failed to decompress with LZ4: %w", err)
 	}
-	
+
 	result := dst[:decompressedSize]
-	
+
 	l.mutex.Lock()
 	l.stats.TotalDecompressed += int64(len(result))
 	l.stats.DecompressionTime += getCurrentNanoTime() - startTime
 	l.stats.DecompressionOps++
 	l.mutex.Unlock()
-	
+
 	return result, nil
 }
 
@@ -426,27 +426,27 @@ func NewSnappyCompressor() *SnappyCompressor {
 
 func (s *SnappyCompressor) Compress(src, dst []byte) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	result := snappy.Encode(dst[:0], src)
-	
+
 	s.mutex.Lock()
 	s.stats.TotalCompressed += int64(len(src))
 	s.stats.CompressionTime += getCurrentNanoTime() - startTime
 	s.stats.CompressionOps++
 	s.updateCompressionRatio(len(src), len(result))
 	s.mutex.Unlock()
-	
+
 	return result, nil
 }
 
 func (s *SnappyCompressor) Decompress(src []byte, originalSize int) ([]byte, error) {
 	startTime := getCurrentNanoTime()
-	
+
 	var dst []byte
 	if originalSize > 0 {
 		dst = make([]byte, 0, originalSize)
 	}
-	
+
 	result, err := snappy.Decode(dst, src)
 	if err != nil {
 		s.mutex.Lock()
@@ -454,13 +454,13 @@ func (s *SnappyCompressor) Decompress(src []byte, originalSize int) ([]byte, err
 		s.mutex.Unlock()
 		return nil, fmt.Errorf("failed to decompress with snappy: %w", err)
 	}
-	
+
 	s.mutex.Lock()
 	s.stats.TotalDecompressed += int64(len(result))
 	s.stats.DecompressionTime += getCurrentNanoTime() - startTime
 	s.stats.DecompressionOps++
 	s.mutex.Unlock()
-	
+
 	return result, nil
 }
 
@@ -652,11 +652,11 @@ func (ac *AdaptiveCompressor) GetStats() CompressionStats {
 		totalStats.DecompressionOps += stats.DecompressionOps
 		totalStats.Errors += stats.Errors
 	}
-	
+
 	if totalStats.CompressionOps > 0 {
 		totalStats.CompressionRatio /= float64(len(ac.compressors))
 	}
-	
+
 	return totalStats
 }
 

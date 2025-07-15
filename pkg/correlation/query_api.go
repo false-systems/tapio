@@ -33,7 +33,7 @@ func (q *QueryAPI) GetPredictions(ctx context.Context, req *GetPredictionsReques
 
 	// Get insights from store
 	insights := q.store.GetInsights(req.ResourceName, req.Namespace)
-	
+
 	// Filter to only predictions
 	var predictions []*Prediction
 	for _, insight := range insights {
@@ -51,7 +51,7 @@ func (q *QueryAPI) GetPredictions(ctx context.Context, req *GetPredictionsReques
 // GetInsights returns all insights for a resource
 func (q *QueryAPI) GetInsights(ctx context.Context, req *GetInsightsRequest) (*GetInsightsResponse, error) {
 	insights := q.store.GetInsights(req.ResourceName, req.Namespace)
-	
+
 	// Convert to response format
 	var responseInsights []*InsightResponse
 	for _, insight := range insights {
@@ -78,7 +78,7 @@ func (q *QueryAPI) GetInsights(ctx context.Context, req *GetInsightsRequest) (*G
 // GetActionableItems returns fix suggestions
 func (q *QueryAPI) GetActionableItems(ctx context.Context, req *GetActionableItemsRequest) (*GetActionableItemsResponse, error) {
 	insights := q.store.GetInsights(req.ResourceName, req.Namespace)
-	
+
 	var items []*ActionableItem
 	for _, insight := range insights {
 		if insight.Severity == "critical" || insight.Severity == "high" {
@@ -117,10 +117,10 @@ func NewIndexedInsightStore() *IndexedInsightStore {
 
 func (s *IndexedInsightStore) Store(insight *Insight) error {
 	s.insights[insight.ID] = insight
-	
+
 	key := fmt.Sprintf("%s/%s", insight.Namespace, insight.ResourceName)
 	s.byResource[key] = append(s.byResource[key], insight)
-	
+
 	// Call parent Store method
 	return s.InMemoryInsightStore.Store(insight)
 }
@@ -145,7 +145,7 @@ func (s *IndexedInsightStore) DeleteOlderThan(cutoff time.Time) error {
 			s.byResource[key] = updated
 		}
 	}
-	
+
 	// Also call parent DeleteOlderThan
 	return s.InMemoryInsightStore.DeleteOlderThan(cutoff)
 }

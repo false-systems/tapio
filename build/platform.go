@@ -60,7 +60,7 @@ func hasEBPFSupport() bool {
 	if runtime.GOOS != "linux" {
 		return false
 	}
-	
+
 	// TODO: Add actual eBPF availability check
 	// For now, assume Linux has eBPF support
 	return true
@@ -71,7 +71,7 @@ func hasJournaldSupport() bool {
 	if runtime.GOOS != "linux" {
 		return false
 	}
-	
+
 	// TODO: Add actual journald availability check
 	// For now, assume Linux has journald support
 	return true
@@ -80,37 +80,37 @@ func hasJournaldSupport() bool {
 // GenerateBuildConstraints generates build constraints for files
 func GenerateBuildConstraints(requireLinux bool, requireEBPF bool) string {
 	var constraints []string
-	
+
 	if requireLinux {
 		constraints = append(constraints, "linux")
 	}
-	
+
 	if requireEBPF {
 		constraints = append(constraints, "ebpf")
 	}
-	
+
 	if len(constraints) == 0 {
 		return ""
 	}
-	
+
 	return "//go:build " + strings.Join(constraints, " && ")
 }
 
 // GenerateStubConstraints generates build constraints for stub files
 func GenerateStubConstraints(requireLinux bool, requireEBPF bool) string {
 	var constraints []string
-	
+
 	if requireLinux {
 		constraints = append(constraints, "!linux")
 	}
-	
+
 	if requireEBPF {
 		constraints = append(constraints, "!ebpf")
 	}
-	
+
 	if len(constraints) == 0 {
 		return ""
 	}
-	
+
 	return "//go:build " + strings.Join(constraints, " || ")
 }

@@ -59,7 +59,7 @@ func NewTestOTELExporter() *TestOTELExporter {
 func (e *TestOTELExporter) ExportCorrelationResult(ctx context.Context, result *TestCorrelationResult) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	// Create minimal span
 	_, span := e.tracer.Start(ctx, "test.correlation.analysis",
 		otel.WithAttributes(
@@ -69,7 +69,7 @@ func (e *TestOTELExporter) ExportCorrelationResult(ctx context.Context, result *
 		),
 	)
 	defer span.End()
-	
+
 	e.count++
 	return nil
 }
@@ -89,7 +89,7 @@ type TestPrometheusExporter struct {
 
 func NewTestPrometheusExporter() *TestPrometheusExporter {
 	registry := prometheus.NewRegistry()
-	
+
 	correlationsTotal := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "test_tapio",
@@ -99,9 +99,9 @@ func NewTestPrometheusExporter() *TestPrometheusExporter {
 		},
 		[]string{"rule_id", "severity"},
 	)
-	
+
 	registry.MustRegister(correlationsTotal)
-	
+
 	return &TestPrometheusExporter{
 		correlationsTotal: correlationsTotal,
 	}
@@ -110,12 +110,12 @@ func NewTestPrometheusExporter() *TestPrometheusExporter {
 func (e *TestPrometheusExporter) ExportCorrelationResult(ctx context.Context, result *TestCorrelationResult) error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	labels := prometheus.Labels{
 		"rule_id":  result.RuleID,
 		"severity": string(result.Severity),
 	}
-	
+
 	e.correlationsTotal.With(labels).Inc()
 	e.count++
 	return nil
@@ -179,7 +179,7 @@ func TestExportLatencyStandalone(t *testing.T) {
 
 	// Calculate statistics
 	avgDuration := totalDuration / numIterations
-	
+
 	// Find min/max
 	minDuration := durations[0]
 	maxDuration := durations[0]
@@ -196,7 +196,7 @@ func TestExportLatencyStandalone(t *testing.T) {
 	fastRequests := 0
 	under10ms := 0
 	under5ms := 0
-	
+
 	for _, d := range durations {
 		if d < 20*time.Millisecond {
 			fastRequests++
@@ -224,10 +224,10 @@ func TestExportLatencyStandalone(t *testing.T) {
 	t.Logf("Requests under 5ms: %.1f%% (%d/%d)", percentageUnder5ms, under5ms, numIterations)
 
 	// Validate latency requirements
-	assert.Less(t, avgDuration, 20*time.Millisecond, 
+	assert.Less(t, avgDuration, 20*time.Millisecond,
 		"REQUIREMENT FAILED: Average export latency must be less than 20ms (got %v)", avgDuration)
-	
-	assert.Greater(t, percentageUnder20ms, 95.0, 
+
+	assert.Greater(t, percentageUnder20ms, 95.0,
 		"REQUIREMENT FAILED: At least 95%% of requests should be under 20ms (got %.1f%%)", percentageUnder20ms)
 
 	// Additional performance validations
@@ -264,7 +264,7 @@ func TestConcurrentExportLatency(t *testing.T) {
 
 	const numGoroutines = 10
 	const exportsPerGoroutine = 10
-	
+
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	durations := make(chan time.Duration, numGoroutines*exportsPerGoroutine)
@@ -275,13 +275,13 @@ func TestConcurrentExportLatency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			
+
 			for j := 0; j < exportsPerGoroutine; j++ {
 				start := time.Now()
-				
+
 				_ = otelExporter.ExportCorrelationResult(ctx, result)
 				_ = promExporter.ExportCorrelationResult(ctx, result)
-				
+
 				durations <- time.Since(start)
 			}
 		}()
@@ -289,7 +289,7 @@ func TestConcurrentExportLatency(t *testing.T) {
 
 	wg.Wait()
 	close(durations)
-	
+
 	totalTestDuration := time.Since(startTime)
 
 	// Analyze concurrent performance
@@ -301,7 +301,7 @@ func TestConcurrentExportLatency(t *testing.T) {
 	for duration := range durations {
 		totalDuration += duration
 		count++
-		
+
 		if duration > maxDuration {
 			maxDuration = duration
 		}
@@ -325,7 +325,7 @@ func TestConcurrentExportLatency(t *testing.T) {
 	// Validate concurrent performance
 	assert.Less(t, avgDuration, 20*time.Millisecond,
 		"Average concurrent export latency must be under 20ms (got %v)", avgDuration)
-	
+
 	assert.Greater(t, percentageUnder20ms, 90.0,
 		"At least 90%% of concurrent exports should be under 20ms (got %.1f%%)", percentageUnder20ms)
 

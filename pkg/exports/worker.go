@@ -19,31 +19,31 @@ type WorkerPool struct {
 	queueSize   int
 
 	// Channels
-	jobQueue    chan Job
-	stopChan    chan struct{}
-	
+	jobQueue chan Job
+	stopChan chan struct{}
+
 	// Worker management
-	workers     []*Worker
-	wg          sync.WaitGroup
-	
+	workers []*Worker
+	wg      sync.WaitGroup
+
 	// State
-	running     bool
-	mutex       sync.RWMutex
-	
+	running bool
+	mutex   sync.RWMutex
+
 	// Callbacks
 	resultCallback func(job interface{}, result interface{}, err error)
-	
+
 	// Metrics
-	processed   uint64
-	failed      uint64
-	queueDepth  int
+	processed  uint64
+	failed     uint64
+	queueDepth int
 }
 
 // Worker represents a single worker in the pool
 type Worker struct {
-	id          int
-	pool        *WorkerPool
-	stopChan    chan struct{}
+	id       int
+	pool     *WorkerPool
+	stopChan chan struct{}
 }
 
 // NewWorkerPool creates a new worker pool
@@ -101,15 +101,15 @@ func (wp *WorkerPool) Stop() {
 
 	// Signal workers to stop
 	close(wp.stopChan)
-	
+
 	// Stop all workers
 	for _, worker := range wp.workers {
 		close(worker.stopChan)
 	}
-	
+
 	// Wait for all workers to finish
 	wp.wg.Wait()
-	
+
 	// Close job queue
 	close(wp.jobQueue)
 }
@@ -193,7 +193,7 @@ func (w *Worker) run(ctx context.Context) {
 func (w *Worker) processJob(ctx context.Context, job Job) {
 	// Execute the job
 	result, err := job.Execute(ctx)
-	
+
 	// Update metrics
 	w.pool.mutex.Lock()
 	if err != nil {
@@ -203,7 +203,7 @@ func (w *Worker) processJob(ctx context.Context, job Job) {
 	}
 	callback := w.pool.resultCallback
 	w.pool.mutex.Unlock()
-	
+
 	// Call result callback if set
 	if callback != nil {
 		callback(job, result, err)
@@ -216,7 +216,7 @@ type RetryableJob struct {
 	MaxRetries  int
 	RetryDelay  time.Duration
 	BackoffRate float64
-	
+
 	currentRetry int
 }
 
@@ -271,14 +271,14 @@ type BatchJob struct {
 func (bj *BatchJob) Execute(ctx context.Context) (interface{}, error) {
 	results := make([]interface{}, len(bj.Jobs))
 	errors := make([]error, len(bj.Jobs))
-	
+
 	// Execute all jobs
 	for i, job := range bj.Jobs {
 		result, err := job.Execute(ctx)
 		results[i] = result
 		errors[i] = err
 	}
-	
+
 	// Check if any job failed
 	var failedCount int
 	for _, err := range errors {
@@ -286,11 +286,11 @@ func (bj *BatchJob) Execute(ctx context.Context) (interface{}, error) {
 			failedCount++
 		}
 	}
-	
+
 	if failedCount > 0 {
 		return results, fmt.Errorf("%d out of %d jobs failed", failedCount, len(bj.Jobs))
 	}
-	
+
 	return results, nil
 }
 
@@ -319,7 +319,7 @@ func NewPriorityQueue() *PriorityQueue {
 func (pq *PriorityQueue) Push(job *PriorityJob) {
 	pq.mutex.Lock()
 	defer pq.mutex.Unlock()
-	
+
 	// Insert job in priority order
 	inserted := false
 	for i, existingJob := range pq.jobs {
@@ -329,11 +329,11 @@ func (pq *PriorityQueue) Push(job *PriorityJob) {
 			break
 		}
 	}
-	
+
 	if !inserted {
 		pq.jobs = append(pq.jobs, job)
 	}
-	
+
 	// Notify waiters
 	select {
 	case pq.notify <- struct{}{}:
@@ -345,11 +345,11 @@ func (pq *PriorityQueue) Push(job *PriorityJob) {
 func (pq *PriorityQueue) Pop() *PriorityJob {
 	pq.mutex.Lock()
 	defer pq.mutex.Unlock()
-	
+
 	if len(pq.jobs) == 0 {
 		return nil
 	}
-	
+
 	job := pq.jobs[0]
 	pq.jobs = pq.jobs[1:]
 	return job
@@ -362,7 +362,7 @@ func (pq *PriorityQueue) PopWait(ctx context.Context) (*PriorityJob, error) {
 		if job != nil {
 			return job, nil
 		}
-		
+
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

@@ -13,25 +13,25 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/grpc"
+	"github.com/yairfalse/tapio/pkg/metrics"
 	"github.com/yairfalse/tapio/pkg/monitoring"
 	"github.com/yairfalse/tapio/pkg/shutdown"
-	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/metrics"
 )
 
 const (
 	// Version information
 	version = "1.0.0"
-	
+
 	// Default configuration
 	defaultConfigPath = "/etc/tapio/server.yaml"
-	defaultPort = 9090
-	defaultAddress = "0.0.0.0"
-	
+	defaultPort       = 9090
+	defaultAddress    = "0.0.0.0"
+
 	// Resource limits (Deployment pattern)
-	defaultMaxMemoryMB = 500  // Higher for server processing
-	defaultMaxCPUMilli = 500  // 50% CPU
+	defaultMaxMemoryMB = 500 // Higher for server processing
+	defaultMaxCPUMilli = 500 // 50% CPU
 )
 
 var (
@@ -44,8 +44,8 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:     "tapio-server",
-		Short:   "Central server for Tapio observability platform",
+		Use:   "tapio-server",
+		Short: "Central server for Tapio observability platform",
 		Long: `Tapio Server is the central processing engine that receives streaming data from lightweight collectors, performs correlation analysis, and provides observability insights.
 
 It processes events from eBPF, Kubernetes, and system sources to detect patterns, predict issues, and provide actionable recommendations.
@@ -191,16 +191,16 @@ func loadConfiguration() (*ServerConfig, error) {
 	viper.SetDefault("server.max_concurrent_streams", 1000)
 	viper.SetDefault("server.max_events_per_sec", 165000)
 	viper.SetDefault("server.max_batch_size", 1000)
-	
+
 	viper.SetDefault("correlation.enabled", true)
 	viper.SetDefault("correlation.buffer_size", 100000)
 	viper.SetDefault("correlation.analysis_window", "5m")
 	viper.SetDefault("correlation.max_correlation_depth", 10)
-	
+
 	viper.SetDefault("metrics.prometheus_enabled", true)
 	viper.SetDefault("metrics.prometheus_port", 9091)
 	viper.SetDefault("metrics.collection_interval", "15s")
-	
+
 	viper.SetDefault("resources.max_memory_mb", defaultMaxMemoryMB)
 	viper.SetDefault("resources.max_cpu_milli", defaultMaxCPUMilli)
 
@@ -218,25 +218,25 @@ func loadConfiguration() (*ServerConfig, error) {
 	// Create configuration struct
 	cfg := &ServerConfig{
 		Address:              viper.GetString("server.address"),
-		Port:                viper.GetInt("server.port"),
-		TLSEnabled:          viper.GetBool("server.tls_enabled"),
+		Port:                 viper.GetInt("server.port"),
+		TLSEnabled:           viper.GetBool("server.tls_enabled"),
 		MaxConcurrentStreams: viper.GetUint32("server.max_concurrent_streams"),
-		MaxEventsPerSec:     viper.GetUint32("server.max_events_per_sec"),
-		MaxBatchSize:        viper.GetUint32("server.max_batch_size"),
-		
+		MaxEventsPerSec:      viper.GetUint32("server.max_events_per_sec"),
+		MaxBatchSize:         viper.GetUint32("server.max_batch_size"),
+
 		Correlation: CorrelationConfig{
-			Enabled:              viper.GetBool("correlation.enabled"),
+			Enabled:             viper.GetBool("correlation.enabled"),
 			BufferSize:          viper.GetInt("correlation.buffer_size"),
 			AnalysisWindow:      viper.GetDuration("correlation.analysis_window"),
 			MaxCorrelationDepth: viper.GetInt("correlation.max_correlation_depth"),
 		},
-		
+
 		Metrics: MetricsConfig{
-			PrometheusEnabled:    viper.GetBool("metrics.prometheus_enabled"),
-			PrometheusPort:      viper.GetInt("metrics.prometheus_port"),
-			CollectionInterval:  viper.GetDuration("metrics.collection_interval"),
+			PrometheusEnabled:  viper.GetBool("metrics.prometheus_enabled"),
+			PrometheusPort:     viper.GetInt("metrics.prometheus_port"),
+			CollectionInterval: viper.GetDuration("metrics.collection_interval"),
 		},
-		
+
 		Resources: ResourceConfig{
 			MaxMemoryMB: viper.GetInt("resources.max_memory_mb"),
 			MaxCPUMilli: viper.GetInt("resources.max_cpu_milli"),
@@ -258,67 +258,67 @@ func initializePerfectCorrelationEngine(cfg *ServerConfig) (*correlation.Perfect
 	// Create perfect configuration optimized for opinionated data
 	perfectConfig := &correlation.PerfectConfig{
 		// Semantic correlation optimized for our format
-		SemanticSimilarityThreshold: 0.85,  // High precision for quality data
-		SemanticEmbeddingDimension:  512,   // Standard embedding size
-		OntologyTagWeight:          0.7,    // Strong weight for curated ontology
-		IntentCorrelationEnabled:   true,   // Leverage intent classification
-		
+		SemanticSimilarityThreshold: 0.85, // High precision for quality data
+		SemanticEmbeddingDimension:  512,  // Standard embedding size
+		OntologyTagWeight:           0.7,  // Strong weight for curated ontology
+		IntentCorrelationEnabled:    true, // Leverage intent classification
+
 		// Behavioral correlation for entity intelligence
-		BehavioralAnomalyThreshold:  0.7,   // Early anomaly detection
-		EntityTrustThreshold:       0.6,    // Moderate trust threshold
-		BehaviorVectorDimension:    256,    // Optimized behavior vector size
-		BehaviorChangeDetection:    true,   // Enable change detection
-		
+		BehavioralAnomalyThreshold: 0.7,  // Early anomaly detection
+		EntityTrustThreshold:       0.6,  // Moderate trust threshold
+		BehaviorVectorDimension:    256,  // Optimized behavior vector size
+		BehaviorChangeDetection:    true, // Enable change detection
+
 		// Temporal correlation for real-time processing
 		TemporalWindow:             cfg.Correlation.AnalysisWindow,
 		PatternDetectionWindow:     time.Hour,
 		PeriodicityDetectionWindow: 24 * time.Hour,
-		
+
 		// Causality analysis for root cause detection
-		CausalityDepth:             cfg.Correlation.MaxCorrelationDepth,
-		CausalityConfidenceMin:     0.6,
-		RootCauseAnalysisEnabled:   true,
-		
+		CausalityDepth:           cfg.Correlation.MaxCorrelationDepth,
+		CausalityConfidenceMin:   0.6,
+		RootCauseAnalysisEnabled: true,
+
 		// AI processing for future enhancement
-		AIEnabled:                  true,
-		AIFeatureProcessing:        true,
-		DenseFeatureDimension:      256,
-		GraphFeatureProcessing:     true,
-		
+		AIEnabled:              true,
+		AIFeatureProcessing:    true,
+		DenseFeatureDimension:  256,
+		GraphFeatureProcessing: true,
+
 		// Performance optimization for 500k+ events/sec
-		MaxEventsInMemory:          cfg.Correlation.BufferSize,
-		CorrelationWorkers:         8,      // Parallel workers
-		PatternCacheSize:           10000,  // Pattern cache
-		EntityCacheSize:            50000,  // Entity behavior cache
+		MaxEventsInMemory:  cfg.Correlation.BufferSize,
+		CorrelationWorkers: 8,     // Parallel workers
+		PatternCacheSize:   10000, // Pattern cache
+		EntityCacheSize:    50000, // Entity behavior cache
 	}
 
 	engine, err := correlation.NewPerfectEngine(perfectConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create perfect correlation engine: %w", err)
 	}
-	
+
 	fmt.Printf("✅ Initialized perfect correlation engine optimized for opinionated data\n")
 	fmt.Printf("   - Semantic similarity threshold: %.2f\n", perfectConfig.SemanticSimilarityThreshold)
 	fmt.Printf("   - Behavioral anomaly threshold: %.2f\n", perfectConfig.BehavioralAnomalyThreshold)
 	fmt.Printf("   - AI features enabled: %v\n", perfectConfig.AIEnabled)
 	fmt.Printf("   - Causality chain depth: %d\n", perfectConfig.CausalityDepth)
 	fmt.Printf("   - Correlation workers: %d\n", perfectConfig.CorrelationWorkers)
-	
+
 	return engine, nil
 }
 
 func initializeMetricsCollector(cfg *ServerConfig) (*metrics.Collector, error) {
 	metricsConfig := metrics.Config{
-		PrometheusEnabled:   cfg.Metrics.PrometheusEnabled,
+		PrometheusEnabled:  cfg.Metrics.PrometheusEnabled,
 		PrometheusPort:     cfg.Metrics.PrometheusPort,
 		CollectionInterval: cfg.Metrics.CollectionInterval,
 	}
 
 	collector := metrics.NewCollector(metricsConfig)
-	
-	fmt.Printf("✅ Initialized metrics collector (Prometheus: %v, Port: %d)\n", 
+
+	fmt.Printf("✅ Initialized metrics collector (Prometheus: %v, Port: %d)\n",
 		cfg.Metrics.PrometheusEnabled, cfg.Metrics.PrometheusPort)
-	
+
 	return collector, nil
 }
 
@@ -338,7 +338,7 @@ func initializeGRPCServer(cfg *ServerConfig, engine *correlation.Engine, metrics
 	// Create gRPC server
 	server := grpc.NewServer(grpcConfig, eventProcessor)
 
-	fmt.Printf("✅ Initialized gRPC server (TLS: %v, Max streams: %d)\n", 
+	fmt.Printf("✅ Initialized gRPC server (TLS: %v, Max streams: %d)\n",
 		cfg.TLSEnabled, cfg.MaxConcurrentStreams)
 
 	return server, nil
@@ -347,13 +347,13 @@ func initializeGRPCServer(cfg *ServerConfig, engine *correlation.Engine, metrics
 func printStatus(monitor *monitoring.ResourceMonitor, server *grpc.Server, engine *correlation.Engine, metricsCollector *metrics.Collector) {
 	// Get resource usage
 	usage := monitor.GetUsage()
-	
+
 	// Get server statistics
 	serverStats := server.GetStats()
-	
+
 	// Get correlation engine status
 	engineStats := engine.GetStats()
-	
+
 	// Get metrics collector status
 	metricsStats := metricsCollector.GetStats()
 
@@ -379,7 +379,7 @@ func printStatus(monitor *monitoring.ResourceMonitor, server *grpc.Server, engin
 	if usage.MemoryMB > float64(defaultMaxMemoryMB)*0.8 {
 		fmt.Printf("⚠️  High memory usage: %.1fMB (limit: %dMB)\n", usage.MemoryMB, defaultMaxMemoryMB)
 	}
-	
+
 	if usage.CPUPercent > float64(defaultMaxCPUMilli)*0.8/10 {
 		fmt.Printf("⚠️  High CPU usage: %.1f%% (limit: %.1f%%)\n", usage.CPUPercent, float64(defaultMaxCPUMilli)/10)
 	}
@@ -388,26 +388,26 @@ func printStatus(monitor *monitoring.ResourceMonitor, server *grpc.Server, engin
 // Configuration structures
 type ServerConfig struct {
 	Address              string
-	Port                int
-	TLSEnabled          bool
+	Port                 int
+	TLSEnabled           bool
 	MaxConcurrentStreams uint32
-	MaxEventsPerSec     uint32
-	MaxBatchSize        uint32
-	
+	MaxEventsPerSec      uint32
+	MaxBatchSize         uint32
+
 	Correlation CorrelationConfig
 	Metrics     MetricsConfig
 	Resources   ResourceConfig
 }
 
 type CorrelationConfig struct {
-	Enabled              bool
+	Enabled             bool
 	BufferSize          int
 	AnalysisWindow      time.Duration
 	MaxCorrelationDepth int
 }
 
 type MetricsConfig struct {
-	PrometheusEnabled   bool
+	PrometheusEnabled  bool
 	PrometheusPort     int
 	CollectionInterval time.Duration
 }
@@ -419,18 +419,18 @@ type ResourceConfig struct {
 
 // EventProcessor integrates with correlation engine and metrics
 type EventProcessor struct {
-	engine          *correlation.Engine
+	engine           *correlation.Engine
 	metricsCollector *metrics.Collector
-	
+
 	// Statistics
-	eventsProcessed   uint64
-	batchesProcessed  uint64
-	processingErrors  uint64
+	eventsProcessed  uint64
+	batchesProcessed uint64
+	processingErrors uint64
 }
 
 func NewEventProcessor(engine *correlation.Engine, metricsCollector *metrics.Collector) *EventProcessor {
 	return &EventProcessor{
-		engine:          engine,
+		engine:           engine,
 		metricsCollector: metricsCollector,
 	}
 }
@@ -441,17 +441,17 @@ func (ep *EventProcessor) ProcessEvents(ctx context.Context, events []*grpc.Unif
 	for i, event := range events {
 		correlationEvents[i] = convertToCorrelationEvent(event)
 	}
-	
+
 	// Process through correlation engine
 	if err := ep.engine.ProcessEvents(ctx, correlationEvents); err != nil {
 		ep.processingErrors++
 		return fmt.Errorf("correlation processing failed: %w", err)
 	}
-	
+
 	// Update metrics
 	ep.metricsCollector.RecordEventsProcessed(len(events))
 	ep.eventsProcessed += uint64(len(events))
-	
+
 	return nil
 }
 
@@ -460,9 +460,9 @@ func (ep *EventProcessor) ProcessEventBatch(ctx context.Context, batch *grpc.Eve
 	if err := ep.ProcessEvents(ctx, batch.Events); err != nil {
 		return nil, err
 	}
-	
+
 	ep.batchesProcessed++
-	
+
 	// Return acknowledgment
 	return &grpc.EventAck{
 		BatchId:        batch.BatchId,
@@ -512,14 +512,14 @@ func convertSeverity(grpcSeverity grpc.EventSeverity) correlation.Severity {
 
 func convertEventData(grpcEvent *grpc.UnifiedEvent) map[string]interface{} {
 	data := make(map[string]interface{})
-	
+
 	// Convert entity context
 	if grpcEvent.Entity != nil {
 		data["entity_type"] = grpcEvent.Entity.EntityType.String()
 		data["entity_id"] = grpcEvent.Entity.EntityId
 		data["entity_name"] = grpcEvent.Entity.EntityName
 	}
-	
+
 	// Convert specific event data based on type
 	switch eventData := grpcEvent.Data.(type) {
 	case *grpc.UnifiedEvent_Network:
@@ -532,14 +532,14 @@ func convertEventData(grpcEvent *grpc.UnifiedEvent) map[string]interface{} {
 		data["memory_usage"] = eventData.Memory.MemoryUsage
 		data["memory_limit"] = eventData.Memory.MemoryLimit
 		data["oom_score"] = eventData.Memory.OomScore
-	// Add more event type conversions as needed
+		// Add more event type conversions as needed
 	}
-	
+
 	// Convert attributes
 	for key, value := range grpcEvent.Attributes {
 		data[key] = convertAttributeValue(value)
 	}
-	
+
 	return data
 }
 

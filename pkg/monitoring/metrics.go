@@ -1,6 +1,9 @@
 package monitoring
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -12,31 +15,31 @@ type MetricsCollector struct {
 	EventsDropped      *prometheus.CounterVec
 	ProcessingDuration *prometheus.HistogramVec
 	ProcessingErrors   *prometheus.CounterVec
-	
+
 	// System metrics
-	ActiveConnections  *prometheus.GaugeVec
-	MemoryUsage        *prometheus.GaugeVec
-	CPUUsage           *prometheus.GaugeVec
-	GoroutineCount     prometheus.Gauge
-	
+	ActiveConnections *prometheus.GaugeVec
+	MemoryUsage       *prometheus.GaugeVec
+	CPUUsage          *prometheus.GaugeVec
+	GoroutineCount    prometheus.Gauge
+
 	// Business metrics
-	CorrelationsActive   *prometheus.GaugeVec
-	CorrelationsCreated  *prometheus.CounterVec
-	InsightsGenerated    *prometheus.CounterVec
-	SignalToNoiseRatio   *prometheus.GaugeVec
-	
+	CorrelationsActive  *prometheus.GaugeVec
+	CorrelationsCreated *prometheus.CounterVec
+	InsightsGenerated   *prometheus.CounterVec
+	SignalToNoiseRatio  *prometheus.GaugeVec
+
 	// Performance metrics
-	CacheHitRate      *prometheus.GaugeVec
-	QueueDepth        *prometheus.GaugeVec
-	ResponseTime      *prometheus.HistogramVec
-	ThroughputRate    *prometheus.GaugeVec
-	
+	CacheHitRate   *prometheus.GaugeVec
+	QueueDepth     *prometheus.GaugeVec
+	ResponseTime   *prometheus.HistogramVec
+	ThroughputRate *prometheus.GaugeVec
+
 	// eBPF metrics
-	EBPFProgramsLoaded  prometheus.Gauge
-	EBPFEventsReceived  *prometheus.CounterVec
+	EBPFProgramsLoaded    prometheus.Gauge
+	EBPFEventsReceived    *prometheus.CounterVec
 	EBPFBufferUtilization *prometheus.GaugeVec
-	EBPFDroppedEvents   *prometheus.CounterVec
-	
+	EBPFDroppedEvents     *prometheus.CounterVec
+
 	// Custom metrics registry
 	customMetrics map[string]prometheus.Collector
 }
@@ -331,15 +334,15 @@ func (mc *MetricsCollector) RecordEBPFEventDropped(program, reason string) {
 
 // MetricsConfig defines metrics configuration
 type MetricsConfig struct {
-	Enabled           bool              `yaml:"enabled"`
-	Address           string            `yaml:"address"`
-	Path              string            `yaml:"path"`
-	PushGateway       string            `yaml:"push_gateway"`
-	PushInterval      time.Duration     `yaml:"push_interval"`
-	CustomLabels      map[string]string `yaml:"custom_labels"`
-	HistogramBuckets  []float64         `yaml:"histogram_buckets"`
-	EnableGoMetrics   bool              `yaml:"enable_go_metrics"`
-	EnableProcessMetrics bool           `yaml:"enable_process_metrics"`
+	Enabled              bool              `yaml:"enabled"`
+	Address              string            `yaml:"address"`
+	Path                 string            `yaml:"path"`
+	PushGateway          string            `yaml:"push_gateway"`
+	PushInterval         time.Duration     `yaml:"push_interval"`
+	CustomLabels         map[string]string `yaml:"custom_labels"`
+	HistogramBuckets     []float64         `yaml:"histogram_buckets"`
+	EnableGoMetrics      bool              `yaml:"enable_go_metrics"`
+	EnableProcessMetrics bool              `yaml:"enable_process_metrics"`
 }
 
 // DefaultMetricsConfig returns default metrics configuration

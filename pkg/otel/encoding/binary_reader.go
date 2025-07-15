@@ -10,23 +10,23 @@ import (
 
 // BinaryReader provides high-performance binary reading with SIMD optimization
 type BinaryReader struct {
-	data     []byte    // Source data
-	pos      int       // Current position
-	limit    int       // Data limit
-	scratch  [16]byte  // Scratch space for reads
-	
+	data    []byte   // Source data
+	pos     int      // Current position
+	limit   int      // Data limit
+	scratch [16]byte // Scratch space for reads
+
 	// Validation
 	checksum       uint32 // Expected checksum
 	enableChecksum bool   // Whether to validate checksum
 	actualChecksum uint32 // Calculated checksum
-	
+
 	// Performance tracking
-	bytesRead      int64  // Total bytes read
-	readOperations int64  // Number of read operations
-	
+	bytesRead      int64 // Total bytes read
+	readOperations int64 // Number of read operations
+
 	// SIMD optimization
-	simdEnabled    bool   // Enable SIMD operations
-	simdThreshold  int    // Use SIMD for reads larger than threshold
+	simdEnabled   bool // Enable SIMD operations
+	simdThreshold int  // Use SIMD for reads larger than threshold
 }
 
 // NewBinaryReader creates a new binary reader for the given data
@@ -45,7 +45,7 @@ func NewBinaryReaderWithLimit(data []byte, limit int) *BinaryReader {
 	if limit > len(data) {
 		limit = len(data)
 	}
-	
+
 	return &BinaryReader{
 		data:           data,
 		limit:          limit,
@@ -92,14 +92,14 @@ func (r *BinaryReader) ReadU8() (uint8, error) {
 	if err := r.ensureAvailable(1); err != nil {
 		return 0, err
 	}
-	
+
 	value := r.data[r.pos]
 	r.pos++
-	
+
 	if r.enableChecksum {
 		r.updateChecksum([]byte{value})
 	}
-	
+
 	r.readOperations++
 	r.bytesRead++
 	return value, nil
@@ -110,14 +110,14 @@ func (r *BinaryReader) ReadU16() (uint16, error) {
 	if err := r.ensureAvailable(2); err != nil {
 		return 0, err
 	}
-	
+
 	value := binary.LittleEndian.Uint16(r.data[r.pos:])
 	r.pos += 2
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(r.data[r.pos-2 : r.pos])
 	}
-	
+
 	r.readOperations++
 	r.bytesRead += 2
 	return value, nil
@@ -128,14 +128,14 @@ func (r *BinaryReader) ReadU32() (uint32, error) {
 	if err := r.ensureAvailable(4); err != nil {
 		return 0, err
 	}
-	
+
 	value := binary.LittleEndian.Uint32(r.data[r.pos:])
 	r.pos += 4
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(r.data[r.pos-4 : r.pos])
 	}
-	
+
 	r.readOperations++
 	r.bytesRead += 4
 	return value, nil
@@ -146,14 +146,14 @@ func (r *BinaryReader) ReadU64() (uint64, error) {
 	if err := r.ensureAvailable(8); err != nil {
 		return 0, err
 	}
-	
+
 	value := binary.LittleEndian.Uint64(r.data[r.pos:])
 	r.pos += 8
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(r.data[r.pos-8 : r.pos])
 	}
-	
+
 	r.readOperations++
 	r.bytesRead += 8
 	return value, nil
@@ -217,7 +217,7 @@ func (r *BinaryReader) ReadBytes() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read bytes length: %w", err)
 	}
-	
+
 	// Read data
 	return r.ReadBytesFixed(int(length))
 }
@@ -227,19 +227,19 @@ func (r *BinaryReader) ReadBytesFixed(length int) ([]byte, error) {
 	if length == 0 {
 		return nil, nil
 	}
-	
+
 	if err := r.ensureAvailable(length); err != nil {
 		return nil, err
 	}
-	
+
 	data := make([]byte, length)
 	copy(data, r.data[r.pos:r.pos+length])
 	r.pos += length
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(data)
 	}
-	
+
 	r.readOperations++
 	r.bytesRead += int64(length)
 	return data, nil
@@ -250,18 +250,18 @@ func (r *BinaryReader) ReadBytesInPlace(length int) ([]byte, error) {
 	if length == 0 {
 		return nil, nil
 	}
-	
+
 	if err := r.ensureAvailable(length); err != nil {
 		return nil, err
 	}
-	
+
 	data := r.data[r.pos : r.pos+length]
 	r.pos += length
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(data)
 	}
-	
+
 	r.readOperations++
 	r.bytesRead += int64(length)
 	return data, nil
@@ -274,7 +274,7 @@ func (r *BinaryReader) ReadString() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read string length: %w", err)
 	}
-	
+
 	// Read string data
 	return r.ReadStringFixed(int(length))
 }
@@ -284,21 +284,21 @@ func (r *BinaryReader) ReadStringFixed(length int) (string, error) {
 	if length == 0 {
 		return "", nil
 	}
-	
+
 	if err := r.ensureAvailable(length); err != nil {
 		return "", err
 	}
-	
+
 	// Use unsafe to create string without copying data
 	data := r.data[r.pos : r.pos+length]
 	r.pos += length
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(data)
 	}
-	
+
 	str := unsafe.String(unsafe.SliceData(data), len(data))
-	
+
 	r.readOperations++
 	r.bytesRead += int64(length)
 	return str, nil
@@ -308,26 +308,26 @@ func (r *BinaryReader) ReadStringFixed(length int) (string, error) {
 func (r *BinaryReader) ReadVarInt() (uint64, error) {
 	var result uint64
 	var shift uint
-	
+
 	for {
 		if shift >= 64 {
 			return 0, fmt.Errorf("varint overflow")
 		}
-		
+
 		b, err := r.ReadU8()
 		if err != nil {
 			return 0, fmt.Errorf("failed to read varint byte: %w", err)
 		}
-		
+
 		result |= uint64(b&0x7F) << shift
-		
+
 		if (b & 0x80) == 0 {
 			break
 		}
-		
+
 		shift += 7
 	}
-	
+
 	return result, nil
 }
 
@@ -337,7 +337,7 @@ func (r *BinaryReader) ReadVarIntSigned() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	// Zigzag decoding: map unsigned back to signed
 	return int64((encoded >> 1) ^ (-(encoded & 1))), nil
 }
@@ -348,7 +348,7 @@ func (r *BinaryReader) ReadLengthPrefixedData() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read data length: %w", err)
 	}
-	
+
 	return r.ReadBytesFixed(int(length))
 }
 
@@ -356,14 +356,14 @@ func (r *BinaryReader) ReadLengthPrefixedData() ([]byte, error) {
 func (r *BinaryReader) ReadAligned(length int, alignment int) ([]byte, error) {
 	// Calculate padding to skip
 	padding := (alignment - (r.pos % alignment)) % alignment
-	
+
 	// Skip padding bytes
 	if padding > 0 {
 		if err := r.Skip(padding); err != nil {
 			return nil, fmt.Errorf("failed to skip padding: %w", err)
 		}
 	}
-	
+
 	// Read aligned data
 	return r.ReadBytesFixed(length)
 }
@@ -374,15 +374,15 @@ func (r *BinaryReader) ReadRemaining() []byte {
 	if remaining <= 0 {
 		return nil
 	}
-	
+
 	data := make([]byte, remaining)
 	copy(data, r.data[r.pos:r.limit])
 	r.pos = r.limit
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(data)
 	}
-	
+
 	r.readOperations++
 	r.bytesRead += int64(remaining)
 	return data
@@ -393,11 +393,11 @@ func (r *BinaryReader) Skip(count int) error {
 	if err := r.ensureAvailable(count); err != nil {
 		return err
 	}
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(r.data[r.pos : r.pos+count])
 	}
-	
+
 	r.pos += count
 	r.readOperations++
 	r.bytesRead += int64(count)
@@ -409,7 +409,7 @@ func (r *BinaryReader) Peek(count int) ([]byte, error) {
 	if err := r.ensureAvailable(count); err != nil {
 		return nil, err
 	}
-	
+
 	return r.data[r.pos : r.pos+count], nil
 }
 
@@ -418,11 +418,11 @@ func (r *BinaryReader) ReadCompact(bitWidth int) (uint64, error) {
 	if bitWidth <= 0 || bitWidth > 64 {
 		return 0, fmt.Errorf("invalid bit width: %d", bitWidth)
 	}
-	
+
 	// Read packed value from minimum required bytes
 	bytes := (bitWidth + 7) / 8
 	var value uint64
-	
+
 	for i := 0; i < bytes; i++ {
 		b, err := r.ReadU8()
 		if err != nil {
@@ -430,7 +430,7 @@ func (r *BinaryReader) ReadCompact(bitWidth int) (uint64, error) {
 		}
 		value |= uint64(b) << (i * 8)
 	}
-	
+
 	// Mask to keep only the required bits
 	mask := (uint64(1) << bitWidth) - 1
 	return value & mask, nil
@@ -442,7 +442,7 @@ func (r *BinaryReader) ReadDelta(previous uint64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return uint64(int64(previous) + delta), nil
 }
 
@@ -453,31 +453,31 @@ func (r *BinaryReader) ReadRLE() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read run count: %w", err)
 	}
-	
+
 	if numRuns == 0 {
 		return nil, nil
 	}
-	
+
 	var result []byte
-	
+
 	// Read each run
 	for i := uint64(0); i < numRuns; i++ {
 		value, err := r.ReadU8()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read run value %d: %w", i, err)
 		}
-		
+
 		length, err := r.ReadVarInt()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read run length %d: %w", i, err)
 		}
-		
+
 		// Expand run
 		for j := uint64(0); j < length; j++ {
 			result = append(result, value)
 		}
 	}
-	
+
 	return result, nil
 }
 
@@ -492,12 +492,12 @@ func (r *BinaryReader) ReadBatch(count int, valueSize int) ([][]byte, error) {
 	if err := r.ensureAvailable(totalSize); err != nil {
 		return nil, err
 	}
-	
+
 	// Use SIMD optimization for large batches
 	if r.simdEnabled && totalSize >= r.simdThreshold {
 		return r.readBatchSIMD(count, valueSize)
 	}
-	
+
 	// Standard batch reading
 	results := make([][]byte, count)
 	for i := 0; i < count; i++ {
@@ -507,7 +507,7 @@ func (r *BinaryReader) ReadBatch(count int, valueSize int) ([][]byte, error) {
 		}
 		results[i] = data
 	}
-	
+
 	return results, nil
 }
 
@@ -515,28 +515,28 @@ func (r *BinaryReader) ReadBatch(count int, valueSize int) ([][]byte, error) {
 func (r *BinaryReader) readBatchSIMD(count int, valueSize int) ([][]byte, error) {
 	// This would use actual SIMD instructions in a real implementation
 	// For now, we use an optimized loop with better cache locality
-	
+
 	results := make([][]byte, count)
 	totalSize := count * valueSize
-	
+
 	// Read all data at once for better cache performance
 	allData := r.data[r.pos : r.pos+totalSize]
 	r.pos += totalSize
-	
+
 	// Split into individual values
 	for i := 0; i < count; i++ {
 		start := i * valueSize
 		end := start + valueSize
-		
+
 		// Create copy for each value
 		results[i] = make([]byte, valueSize)
 		copy(results[i], allData[start:end])
 	}
-	
+
 	if r.enableChecksum {
 		r.updateChecksum(allData)
 	}
-	
+
 	r.readOperations++
 	r.bytesRead += int64(totalSize)
 	return results, nil
@@ -562,11 +562,11 @@ func (r *BinaryReader) ValidateChecksum(expected uint32) error {
 	if !r.enableChecksum {
 		return fmt.Errorf("checksum validation disabled")
 	}
-	
+
 	if r.actualChecksum != expected {
 		return fmt.Errorf("checksum mismatch: expected %08x, got %08x", expected, r.actualChecksum)
 	}
-	
+
 	return nil
 }
 
@@ -588,11 +588,11 @@ func (r *BinaryReader) updateChecksum(data []byte) {
 // GetStats returns reader performance statistics
 func (r *BinaryReader) GetStats() ReaderStats {
 	return ReaderStats{
-		ReadOps:      r.readOperations,
-		BytesRead:    r.bytesRead,
-		Position:     int64(r.pos),
-		Remaining:    int64(r.Remaining()),
-		Utilization:  float64(r.pos) / float64(r.limit),
+		ReadOps:     r.readOperations,
+		BytesRead:   r.bytesRead,
+		Position:    int64(r.pos),
+		Remaining:   int64(r.Remaining()),
+		Utilization: float64(r.pos) / float64(r.limit),
 	}
 }
 
@@ -617,9 +617,9 @@ func (r *BinaryReader) Clone() *BinaryReader {
 		bytesRead:      r.bytesRead,
 		readOperations: r.readOperations,
 	}
-	
+
 	copy(clone.scratch[:], r.scratch[:])
-	
+
 	return clone
 }
 
@@ -642,19 +642,19 @@ func (r *BinaryReader) ReadWithValidation(validator func([]byte) error) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Read data
 	data, err := r.ReadBytesFixed(int(length))
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Validate data
 	if validator != nil {
 		if err := validator(data); err != nil {
 			return nil, fmt.Errorf("validation failed: %w", err)
 		}
 	}
-	
+
 	return data, nil
 }

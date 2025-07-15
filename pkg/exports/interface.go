@@ -10,13 +10,13 @@ import (
 type DataType string
 
 const (
-	DataTypeDriftReport  DataType = "drift_report"
-	DataTypeSnapshot     DataType = "snapshot"
-	DataTypeCorrelation  DataType = "correlation"
-	DataTypeMetrics      DataType = "metrics"
-	DataTypeEvents       DataType = "events"
+	DataTypeDriftReport   DataType = "drift_report"
+	DataTypeSnapshot      DataType = "snapshot"
+	DataTypeCorrelation   DataType = "correlation"
+	DataTypeMetrics       DataType = "metrics"
+	DataTypeEvents        DataType = "events"
 	DataTypePatternResult DataType = "pattern_result"
-	DataTypeAutoFix      DataType = "autofix"
+	DataTypeAutoFix       DataType = "autofix"
 )
 
 // ExportFormat represents the output format
@@ -38,17 +38,17 @@ type ExportPlugin interface {
 	Name() string
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
-	
+
 	// Configuration
 	Configure(config map[string]interface{}) error
 	ValidateConfig() error
 	GetConfigSchema() map[string]interface{}
-	
+
 	// Export operations
 	Export(ctx context.Context, data ExportData) error
 	SupportedFormats() []ExportFormat
 	SupportedDataTypes() []DataType
-	
+
 	// Health monitoring
 	HealthCheck(ctx context.Context) (*HealthStatus, error)
 	GetMetrics() map[string]interface{}
@@ -56,13 +56,13 @@ type ExportPlugin interface {
 
 // ExportData contains the data to be exported
 type ExportData struct {
-	ID         string                 `json:"id"`
-	Type       DataType               `json:"type"`
-	Format     ExportFormat           `json:"format"`
-	Data       interface{}            `json:"data"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	Tags       map[string]string      `json:"tags"`
-	Timestamp  time.Time              `json:"timestamp"`
+	ID        string                 `json:"id"`
+	Type      DataType               `json:"type"`
+	Format    ExportFormat           `json:"format"`
+	Data      interface{}            `json:"data"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	Tags      map[string]string      `json:"tags"`
+	Timestamp time.Time              `json:"timestamp"`
 }
 
 // HealthStatus represents the health of a plugin
@@ -76,10 +76,10 @@ type HealthStatus struct {
 
 // ResourceUsage tracks plugin resource consumption
 type ResourceUsage struct {
-	CPUPercent    float64 `json:"cpu_percent"`
-	MemoryMB      float64 `json:"memory_mb"`
-	GoroutineCount int    `json:"goroutine_count"`
-	ExportsPerSec float64 `json:"exports_per_sec"`
+	CPUPercent     float64 `json:"cpu_percent"`
+	MemoryMB       float64 `json:"memory_mb"`
+	GoroutineCount int     `json:"goroutine_count"`
+	ExportsPerSec  float64 `json:"exports_per_sec"`
 }
 
 // ExportResult represents the result of an export operation
@@ -108,11 +108,11 @@ const (
 // ConfigurablePlugin extends ExportPlugin with advanced configuration
 type ConfigurablePlugin interface {
 	ExportPlugin
-	
+
 	// Hot reload support
 	ReloadConfig(config map[string]interface{}) error
 	GetCurrentConfig() map[string]interface{}
-	
+
 	// Dynamic configuration
 	SetConfigValue(key string, value interface{}) error
 	GetConfigValue(key string) (interface{}, error)
@@ -121,7 +121,7 @@ type ConfigurablePlugin interface {
 // BatchExporter supports batch export operations
 type BatchExporter interface {
 	ExportPlugin
-	
+
 	// Batch operations
 	ExportBatch(ctx context.Context, batch []ExportData) error
 	GetBatchSize() int
@@ -132,7 +132,7 @@ type BatchExporter interface {
 // StreamExporter supports streaming export operations
 type StreamExporter interface {
 	ExportPlugin
-	
+
 	// Streaming operations
 	OpenStream(ctx context.Context) (io.WriteCloser, error)
 	StreamData(writer io.Writer, data ExportData) error
@@ -142,7 +142,7 @@ type StreamExporter interface {
 // TransformableExporter supports data transformation before export
 type TransformableExporter interface {
 	ExportPlugin
-	
+
 	// Transformation operations
 	AddTransformer(name string, transformer DataTransformer) error
 	RemoveTransformer(name string) error
@@ -162,24 +162,24 @@ type ExportManager interface {
 	UnregisterPlugin(name string) error
 	GetPlugin(name string) (ExportPlugin, error)
 	ListPlugins() []string
-	
+
 	// Export operations
 	Export(ctx context.Context, pluginName string, data ExportData) (*ExportResult, error)
 	ExportAsync(ctx context.Context, pluginName string, data ExportData) (string, error)
 	GetExportStatus(exportID string) (*ExportResult, error)
-	
+
 	// Configuration
 	ConfigurePlugin(name string, config map[string]interface{}) error
 	GetPluginConfig(name string) (map[string]interface{}, error)
-	
+
 	// Health monitoring
 	GetPluginHealth(name string) (*HealthStatus, error)
 	GetAllHealth() map[string]*HealthStatus
-	
+
 	// Lifecycle
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
-	
+
 	// Hot reload
 	ReloadConfig(configPath string) error
 	WatchConfig(ctx context.Context, configPath string) error
@@ -192,7 +192,7 @@ type ExportRouter interface {
 	RemoveRoute(routeID string) error
 	GetRoute(routeID string) (*ExportRoute, error)
 	ListRoutes() []*ExportRoute
-	
+
 	// Routing operations
 	RouteData(ctx context.Context, data ExportData) ([]*RouteDecision, error)
 	TestRoute(route *ExportRoute, data ExportData) (bool, error)
@@ -200,14 +200,14 @@ type ExportRouter interface {
 
 // ExportRoute defines a routing rule
 type ExportRoute struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Pattern     *RoutePattern          `json:"pattern"`
-	PluginName  string                 `json:"plugin_name"`
-	Priority    int                    `json:"priority"`
-	Enabled     bool                   `json:"enabled"`
-	Transform   []string               `json:"transform,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID         string                 `json:"id"`
+	Name       string                 `json:"name"`
+	Pattern    *RoutePattern          `json:"pattern"`
+	PluginName string                 `json:"plugin_name"`
+	Priority   int                    `json:"priority"`
+	Enabled    bool                   `json:"enabled"`
+	Transform  []string               `json:"transform,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // RoutePattern defines matching criteria for routing
@@ -235,7 +235,7 @@ type ExportQueue interface {
 	Peek() (*ExportData, error)
 	Size() int
 	Clear() error
-	
+
 	// Status tracking
 	SetStatus(id string, status ExportStatus) error
 	GetStatus(id string) (ExportStatus, error)
@@ -243,14 +243,14 @@ type ExportQueue interface {
 
 // PluginMetrics defines metrics that plugins should expose
 type PluginMetrics struct {
-	ExportsTotal      int64                  `json:"exports_total"`
-	ExportsSuccess    int64                  `json:"exports_success"`
-	ExportsFailed     int64                  `json:"exports_failed"`
-	BytesExported     int64                  `json:"bytes_exported"`
-	AvgExportTime     time.Duration          `json:"avg_export_time"`
-	LastExportTime    time.Time              `json:"last_export_time"`
-	LastError         string                 `json:"last_error,omitempty"`
-	CustomMetrics     map[string]interface{} `json:"custom_metrics,omitempty"`
+	ExportsTotal   int64                  `json:"exports_total"`
+	ExportsSuccess int64                  `json:"exports_success"`
+	ExportsFailed  int64                  `json:"exports_failed"`
+	BytesExported  int64                  `json:"bytes_exported"`
+	AvgExportTime  time.Duration          `json:"avg_export_time"`
+	LastExportTime time.Time              `json:"last_export_time"`
+	LastError      string                 `json:"last_error,omitempty"`
+	CustomMetrics  map[string]interface{} `json:"custom_metrics,omitempty"`
 }
 
 // Error types
@@ -268,8 +268,8 @@ func (e *ExportError) Error() string {
 
 // Configuration validation
 type ConfigSchema struct {
-	Required   []string               `json:"required"`
-	Properties map[string]PropSchema  `json:"properties"`
+	Required   []string              `json:"required"`
+	Properties map[string]PropSchema `json:"properties"`
 }
 
 type PropSchema struct {

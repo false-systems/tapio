@@ -26,7 +26,7 @@ func TestTranslateMarkdown(t *testing.T) {
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
 				require.NotNil(t, config)
-				
+
 				assert.Equal(t, float32(0.85), config.AnomalyThresholds["memory_usage"])
 				assert.Equal(t, 5*time.Minute, config.PredictionConfig.PredictionWindows["oom"])
 			},
@@ -41,7 +41,7 @@ Database timeout leads to API errors within **10 seconds**.
 `,
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
-				
+
 				assert.Equal(t, 45*time.Second, config.CorrelationWindows["oom_restart"])
 				// Should have extracted service dependency
 				assert.Len(t, config.ServiceDependencies, 1)
@@ -61,7 +61,7 @@ service_weights:
 ` + "```",
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
-				
+
 				assert.Equal(t, float32(1.0), config.ImportanceWeights["payment-service"])
 				assert.Equal(t, float32(0.3), config.ImportanceWeights["analytics-service"])
 				assert.Equal(t, float32(0.95), config.ImportanceWeights["api-gateway"])
@@ -81,9 +81,9 @@ service_weights:
 `,
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
-				
+
 				assert.Len(t, config.TimeBasedRules, 3)
-				
+
 				// Find business hours rule
 				var businessHours *TimeBasedRule
 				for _, rule := range config.TimeBasedRules {
@@ -92,7 +92,7 @@ service_weights:
 						break
 					}
 				}
-				
+
 				require.NotNil(t, businessHours)
 				assert.Equal(t, float32(0.7), businessHours.Sensitivity)
 			},
@@ -109,7 +109,7 @@ service_weights:
 `,
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
-				
+
 				assert.Equal(t, float32(0.95), config.ServiceLimits["batch-processor"].MemoryLimit)
 				assert.Equal(t, float32(0.70), config.ServiceLimits["redis-cache"].MemoryLimit)
 			},
@@ -127,10 +127,10 @@ Memory should be below 90%
 `,
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
-				
+
 				// Metadata should be captured
 				assert.NotNil(t, config.Metadata)
-				
+
 				// Should apply production defaults
 				assert.True(t, config.PredictionConfig.EnableOOMPrediction)
 			},
@@ -150,9 +150,9 @@ When **database-primary** has issues, I expect to see:
 `,
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
-				
+
 				assert.Equal(t, float32(0.87), config.AnomalyThresholds["memory_usage"])
-				
+
 				// Should extract dependencies
 				assert.GreaterOrEqual(t, len(config.ServiceDependencies), 2)
 			},
@@ -167,7 +167,7 @@ When **database-primary** has issues, I expect to see:
 `,
 			validate: func(t *testing.T, config *OpinionConfig, err error) {
 				require.NoError(t, err)
-				
+
 				assert.Equal(t, 14*24*time.Hour, config.BehavioralConfig.LearningWindow)
 				assert.Equal(t, float32(0.7), config.BehavioralConfig.DeviationSensitivity)
 			},
@@ -219,7 +219,7 @@ func TestTranslateToMarkdown(t *testing.T) {
 
 	translator := NewTranslator()
 	markdown, err := translator.TranslateToMarkdown(config)
-	
+
 	require.NoError(t, err)
 	require.NotEmpty(t, markdown)
 
@@ -259,27 +259,27 @@ another: 123
 
 	parser := NewMarkdownParser()
 	doc, err := parser.Parse(markdown)
-	
+
 	require.NoError(t, err)
 	require.NotNil(t, doc)
-	
+
 	assert.Equal(t, "Test Document", doc.Title)
 	assert.Equal(t, "Test Author", doc.Metadata["author"])
 	assert.Equal(t, "1.0", doc.Metadata["version"])
-	
+
 	assert.Len(t, doc.Sections, 3)
-	
+
 	// Check first section
 	firstSection := doc.Sections[0]
 	assert.Equal(t, "First Section", firstSection.Title)
 	assert.Len(t, firstSection.Content, 2) // paragraph and list
-	
+
 	// Check code section
 	codeSection := doc.Sections[1]
 	codeBlock := codeSection.FindCodeBlock()
 	assert.NotNil(t, codeBlock)
 	assert.Contains(t, codeBlock.Code, "key: value")
-	
+
 	// Check table section
 	tableSection := doc.Sections[2]
 	table := tableSection.FindTable()
@@ -340,13 +340,13 @@ func TestRuleExtractor(t *testing.T) {
 					},
 				},
 			}
-			
+
 			rules := extractor.ExtractRules(doc)
 			require.Len(t, rules, 1)
-			
+
 			rule := rules[0]
 			assert.Equal(t, tt.expected.Key, rule.Key)
-			
+
 			// Check value based on type
 			switch expected := tt.expected.Value.(type) {
 			case float32:
@@ -391,9 +391,9 @@ func TestOpinionEnricher(t *testing.T) {
 			name: "service weight inference",
 			config: &OpinionConfig{
 				ServiceLimits: map[string]ServiceLimit{
-					"payment-api":       {},
-					"analytics-worker":  {},
-					"database-primary":  {},
+					"payment-api":      {},
+					"analytics-worker": {},
+					"database-primary": {},
 				},
 			},
 			metadata: map[string]string{},
@@ -477,7 +477,7 @@ func TestOpinionValidator(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validator.Validate(tt.config)
-			
+
 			if tt.wantError {
 				assert.Error(t, err)
 				if tt.errMsg != "" {
@@ -564,7 +564,7 @@ service_weights:
 
 	translator := NewTranslator()
 	config, err := translator.TranslateMarkdown(markdown)
-	
+
 	require.NoError(t, err)
 	require.NotNil(t, config)
 
@@ -572,22 +572,22 @@ service_weights:
 	assert.Equal(t, float32(0.85), config.AnomalyThresholds["memory_usage"])
 	assert.Equal(t, 5*time.Minute, config.PredictionConfig.PredictionWindows["oom"])
 	assert.Equal(t, 45*time.Second, config.CorrelationWindows["oom_restart"])
-	
+
 	// Service limits
 	assert.Equal(t, float32(0.90), config.ServiceLimits["payment-processor"].MemoryLimit)
 	assert.Equal(t, float32(0.95), config.ServiceLimits["batch-reports"].MemoryLimit)
 	assert.Equal(t, float32(0.70), config.ServiceLimits["redis-cache"].MemoryLimit)
-	
+
 	// Service weights
 	assert.Equal(t, float32(1.0), config.ImportanceWeights["payment-processor"])
 	assert.Equal(t, float32(0.3), config.ImportanceWeights["analytics-worker"])
-	
+
 	// Time-based rules
 	assert.GreaterOrEqual(t, len(config.TimeBasedRules), 4)
-	
+
 	// Service dependencies
 	assert.GreaterOrEqual(t, len(config.ServiceDependencies), 3)
-	
+
 	// Behavioral config
 	assert.Equal(t, 14*24*time.Hour, config.BehavioralConfig.LearningWindow)
 	assert.Equal(t, 200, config.BehavioralConfig.MinSamplesRequired)

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/correlation"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -238,7 +238,7 @@ func TestTraceExporter_MaxSpansPerTrace(t *testing.T) {
 	otel.SetTracerProvider(tracerProvider)
 
 	config := &TraceConfig{
-		MaxSpansPerTrace: 2, // Limit to 2 spans for testing
+		MaxSpansPerTrace:  2, // Limit to 2 spans for testing
 		IncludeFullEvents: true,
 	}
 	exporter := NewTraceExporter(config)

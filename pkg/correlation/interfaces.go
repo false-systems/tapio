@@ -5,51 +5,48 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/yairfalse/tapio/pkg/correlation/foundation"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // CorrelationEngine defines the interface for correlation processing
 type CorrelationEngine interface {
 	// ProcessEvents processes a batch of events through the correlation engine
-	ProcessEvents(ctx context.Context, events []*Event) error
-	
+	ProcessEvents(ctx context.Context, events []*types.Event) error
+
 	// Start starts the correlation engine
 	Start(ctx context.Context) error
-	
+
 	// Stop stops the correlation engine
 	Stop() error
-	
+
 	// GetStats returns engine statistics
 	GetStats() *EngineStats
 }
 
-// Event represents a generic event for correlation
-type Event struct {
-	ID        string
-	Timestamp time.Time
-	Source    string
-	Type      string
-	Severity  Severity
-	Data      map[string]interface{}
-}
+// Type aliases for backward compatibility
+type Event = types.Event
+type Severity = types.Severity
+type Filter = foundation.Filter
+type TimeWindow = foundation.TimeWindow
 
-// Severity levels for events
-type Severity string
-
+// Severity constants for backward compatibility
 const (
-	SeverityCritical Severity = "critical"
-	SeverityHigh     Severity = "high"
-	SeverityMedium   Severity = "medium"
-	SeverityLow      Severity = "low"
+	SeverityCritical = types.SeverityCritical
+	SeverityHigh     = types.SeverityHigh
+	SeverityMedium   = types.SeverityMedium
+	SeverityLow      = types.SeverityLow
 )
 
 // EngineStats provides statistics about the correlation engine
 type EngineStats struct {
-	EventsProcessed     uint64
-	CorrelationsFound   uint64
-	InsightsGenerated   uint64
-	ActiveRules         int
-	ActiveCorrelations  int
-	ProcessingRate      float64
+	EventsProcessed    uint64
+	CorrelationsFound  uint64
+	InsightsGenerated  uint64
+	ActiveRules        int
+	ActiveCorrelations int
+	ProcessingRate     float64
 }
 
 // Correlation represents a correlation between events
@@ -114,19 +111,19 @@ type Insight struct {
 type InsightStore interface {
 	// Store stores an insight
 	Store(insight *Insight) error
-	
+
 	// Get retrieves an insight by ID
 	Get(id string) (*Insight, error)
-	
+
 	// GetInsights retrieves insights for a specific resource
 	GetInsights(resourceName, namespace string) []*Insight
-	
+
 	// GetAllInsights retrieves all insights
 	GetAllInsights() []*Insight
-	
+
 	// Delete removes an insight by ID
 	Delete(id string) error
-	
+
 	// DeleteOlderThan removes insights older than the specified time
 	DeleteOlderThan(cutoff time.Time) error
 }
@@ -148,7 +145,7 @@ func NewInMemoryInsightStore() *InMemoryInsightStore {
 func (s *InMemoryInsightStore) Store(insight *Insight) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	s.insights[insight.ID] = insight
 	return nil
 }
@@ -157,12 +154,12 @@ func (s *InMemoryInsightStore) Store(insight *Insight) error {
 func (s *InMemoryInsightStore) Get(id string) (*Insight, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	insight, exists := s.insights[id]
 	if !exists {
 		return nil, fmt.Errorf("insight not found: %s", id)
 	}
-	
+
 	return insight, nil
 }
 
@@ -170,14 +167,14 @@ func (s *InMemoryInsightStore) Get(id string) (*Insight, error) {
 func (s *InMemoryInsightStore) GetInsights(resourceName, namespace string) []*Insight {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	var results []*Insight
 	for _, insight := range s.insights {
 		if insight.ResourceName == resourceName && insight.Namespace == namespace {
 			results = append(results, insight)
 		}
 	}
-	
+
 	return results
 }
 
@@ -185,12 +182,12 @@ func (s *InMemoryInsightStore) GetInsights(resourceName, namespace string) []*In
 func (s *InMemoryInsightStore) GetAllInsights() []*Insight {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	results := make([]*Insight, 0, len(s.insights))
 	for _, insight := range s.insights {
 		results = append(results, insight)
 	}
-	
+
 	return results
 }
 
@@ -198,7 +195,7 @@ func (s *InMemoryInsightStore) GetAllInsights() []*Insight {
 func (s *InMemoryInsightStore) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	delete(s.insights, id)
 	return nil
 }
@@ -207,12 +204,12 @@ func (s *InMemoryInsightStore) Delete(id string) error {
 func (s *InMemoryInsightStore) DeleteOlderThan(cutoff time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	for id, insight := range s.insights {
 		if insight.Timestamp.Before(cutoff) {
 			delete(s.insights, id)
 		}
 	}
-	
+
 	return nil
 }

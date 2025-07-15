@@ -48,16 +48,16 @@ type Manager struct {
 
 // ManagerConfig contains manager configuration
 type ManagerConfig struct {
-	MaxWorkers         int           `yaml:"max_workers"`
-	QueueSize          int           `yaml:"queue_size"`
-	HotReloadEnabled   bool          `yaml:"hot_reload_enabled"`
-	ConfigWatchPath    string        `yaml:"config_watch_path"`
-	ReloadInterval     time.Duration `yaml:"reload_interval"`
+	MaxWorkers          int           `yaml:"max_workers"`
+	QueueSize           int           `yaml:"queue_size"`
+	HotReloadEnabled    bool          `yaml:"hot_reload_enabled"`
+	ConfigWatchPath     string        `yaml:"config_watch_path"`
+	ReloadInterval      time.Duration `yaml:"reload_interval"`
 	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
-	
+
 	// Plugin configurations
 	Plugins []PluginConfig `yaml:"plugins"`
-	
+
 	// Routing rules
 	Routes []ExportRoute `yaml:"routes"`
 }
@@ -79,12 +79,12 @@ func NewManager(config *ManagerConfig) (*Manager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
-		plugins:    make(map[string]ExportPlugin),
-		exports:    make(map[string]*ExportResult),
-		config:     config,
-		watchStop:  make(chan struct{}),
-		ctx:        ctx,
-		cancel:     cancel,
+		plugins:   make(map[string]ExportPlugin),
+		exports:   make(map[string]*ExportResult),
+		config:    config,
+		watchStop: make(chan struct{}),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 
 	// Initialize components
@@ -126,7 +126,7 @@ func (m *Manager) RegisterPlugin(plugin ExportPlugin) error {
 	// Start health monitoring for the plugin
 	if m.running {
 		m.healthMonitor.RegisterPlugin(name, plugin)
-		
+
 		// Perform immediate health check
 		if health, err := plugin.HealthCheck(m.ctx); err == nil {
 			m.healthMonitor.UpdateHealth(name, health)
@@ -468,7 +468,7 @@ func (m *Manager) ReloadConfig(configPath string) error {
 // WatchConfig watches configuration file for changes
 func (m *Manager) WatchConfig(ctx context.Context, configPath string) error {
 	m.configPath = configPath
-	
+
 	// Load initial configuration
 	if err := m.ReloadConfig(configPath); err != nil {
 		return err
@@ -476,7 +476,7 @@ func (m *Manager) WatchConfig(ctx context.Context, configPath string) error {
 
 	// Start watching in background
 	go m.watchConfig(ctx)
-	
+
 	return nil
 }
 

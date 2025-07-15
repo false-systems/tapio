@@ -5,20 +5,12 @@ import (
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/yairfalse/tapio/cmd/install/common"
 )
 
-// Info contains platform information
-type Info struct {
-	OS             string
-	Arch           string
-	Distribution   string
-	Version        string
-	Kernel         string
-	IsContainer    bool
-	IsWSL          bool
-	HasSystemd     bool
-	PackageManager string
-}
+// Info is an alias for common.PlatformInfo for backward compatibility
+type Info = common.PlatformInfo
 
 // Detector detects platform information
 type Detector interface {

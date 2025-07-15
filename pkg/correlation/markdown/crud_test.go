@@ -65,7 +65,7 @@ Category: memory`
 		}
 
 		rule := rules[0]
-		
+
 		// Check rule ID generation
 		expectedID := "user_memory_usage_pattern"
 		if rule.ID != expectedID {
@@ -98,7 +98,7 @@ Category: memory`
 		}
 
 		rule := rules[0]
-		
+
 		// Should have same ID but updated properties
 		if rule.ID != "user_memory_usage_pattern" {
 			t.Errorf("Expected same rule ID after update, got '%s'", rule.ID)
@@ -156,13 +156,13 @@ func TestDeleteRulesValidation(t *testing.T) {
 	t.Run("Delete validation", func(t *testing.T) {
 		// Test that delete function properly validates rule IDs
 		ruleIDs := []string{"user_test_rule", ""}
-		
+
 		// This should work in real implementation
 		// For now, just test the structure exists
 		if translator == nil {
 			t.Error("Translator should be initialized")
 		}
-		
+
 		// The actual delete would require a real engine
 		// Here we just verify the function signature exists
 		err := translator.DeleteRulesFromEngine(ruleIDs, nil)

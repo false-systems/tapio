@@ -20,14 +20,14 @@ type TraceExporter struct {
 
 // TraceConfig configures the trace exporter
 type TraceConfig struct {
-	ServiceName     string
-	ServiceVersion  string
-	TracerName      string
-	
+	ServiceName    string
+	ServiceVersion string
+	TracerName     string
+
 	// Performance settings
 	MaxSpansPerTrace int
 	ExportTimeout    time.Duration
-	
+
 	// Content settings
 	IncludeFullEvents bool
 	IncludeMetadata   bool
@@ -39,7 +39,7 @@ func NewTraceExporter(config *TraceConfig) *TraceExporter {
 	if config == nil {
 		config = DefaultTraceConfig()
 	}
-	
+
 	return &TraceExporter{
 		tracer: otel.Tracer(config.TracerName),
 		config: config,
@@ -178,11 +178,11 @@ func (te *TraceExporter) exportEvidence(ctx context.Context, evidence *correlati
 	// Add metric evidence as span events
 	if len(evidence.Metrics) > 0 {
 		_, metricSpan := te.tracer.Start(ctx, "tapio.correlation.evidence.metrics")
-		
+
 		for name, value := range evidence.Metrics {
 			metricSpan.SetAttributes(attribute.Float64(fmt.Sprintf("metric.%s", name), value))
 		}
-		
+
 		metricSpan.End()
 	}
 
@@ -231,7 +231,7 @@ func (te *TraceExporter) exportActions(span trace.Span, actions []correlation.Ac
 func (te *TraceExporter) addEventAttributes(span trace.Span, attributes map[string]interface{}) {
 	for key, value := range attributes {
 		attrKey := fmt.Sprintf("event.attr.%s", key)
-		
+
 		switch v := value.(type) {
 		case string:
 			span.SetAttributes(attribute.String(attrKey, v))
@@ -299,8 +299,8 @@ func (te *TraceExporter) ShouldSample(result *correlation.Result) bool {
 	}
 
 	// Apply sampling rate for lower severity
-	return te.config.SampleRate >= 1.0 || 
-		   (te.config.SampleRate > 0 && float64(time.Now().UnixNano()%1000)/1000.0 < te.config.SampleRate)
+	return te.config.SampleRate >= 1.0 ||
+		(te.config.SampleRate > 0 && float64(time.Now().UnixNano()%1000)/1000.0 < te.config.SampleRate)
 }
 
 // GetTracerProvider returns the configured tracer provider for external use

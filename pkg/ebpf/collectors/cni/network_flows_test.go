@@ -11,7 +11,7 @@ import (
 
 func TestNetworkFlow_IsExpired(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
 		name     string
 		flow     *NetworkFlow
@@ -81,7 +81,7 @@ func TestNetworkFlow_UpdateStats(t *testing.T) {
 	flow := &NetworkFlow{
 		BytesTransmitted:   1000,
 		PacketsTransmitted: 10,
-		LastSeen:          time.Now().Add(-1 * time.Minute),
+		LastSeen:           time.Now().Add(-1 * time.Minute),
 	}
 
 	newBytes := uint64(500)
@@ -186,12 +186,12 @@ func TestFlowCache_GetActiveFlows(t *testing.T) {
 
 	// Should only return active flows
 	assert.Len(t, activeFlows, 2)
-	
+
 	flowIDs := make([]string, len(activeFlows))
 	for i, flow := range activeFlows {
 		flowIDs[i] = flow.FlowID
 	}
-	
+
 	assert.Contains(t, flowIDs, "flow-1")
 	assert.Contains(t, flowIDs, "flow-3")
 	assert.NotContains(t, flowIDs, "flow-2")
@@ -201,7 +201,7 @@ func TestFlowCache_CleanupExpiredFlows(t *testing.T) {
 	cache := NewFlowCache(10, 100*time.Millisecond)
 
 	now := time.Now()
-	
+
 	// Add fresh flow
 	freshFlow := &NetworkFlow{
 		FlowID:   "fresh-flow",
@@ -334,7 +334,7 @@ func TestNetworkFlow_CalculateBandwidth(t *testing.T) {
 	}
 
 	bandwidth := flow.CalculateBandwidth()
-	
+
 	// Should be approximately 1MB/s = 1048576 bytes/s
 	assert.InDelta(t, 1048576.0, bandwidth, 100000.0) // Allow some variance
 }

@@ -11,29 +11,29 @@ import (
 
 // ResourceMonitor provides lightweight resource usage monitoring for DaemonSet collectors
 type ResourceMonitor struct {
-	limits        ResourceLimits
-	
+	limits ResourceLimits
+
 	// Current usage
-	memoryUsageMB   uint64  // Atomic
-	cpuUsagePercent uint64  // Atomic (scaled by 100 for precision)
-	
+	memoryUsageMB   uint64 // Atomic
+	cpuUsagePercent uint64 // Atomic (scaled by 100 for precision)
+
 	// Statistics
-	maxMemoryMB     uint64  // Atomic
-	maxCPUPercent   uint64  // Atomic
-	alertsTriggered uint64  // Atomic
-	
+	maxMemoryMB     uint64 // Atomic
+	maxCPUPercent   uint64 // Atomic
+	alertsTriggered uint64 // Atomic
+
 	// Monitoring state
-	started         atomic.Bool
-	stopped         atomic.Bool
-	
+	started atomic.Bool
+	stopped atomic.Bool
+
 	// Lifecycle
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	// Callbacks
-	alertHandlers  []AlertHandler
-	handlersMu     sync.RWMutex
+	alertHandlers []AlertHandler
+	handlersMu    sync.RWMutex
 }
 
 // ResourceLimits defines resource usage limits for collectors
@@ -44,12 +44,12 @@ type ResourceLimits struct {
 
 // ResourceUsage represents current resource usage
 type ResourceUsage struct {
-	MemoryMB      float64   `json:"memory_mb"`
-	CPUPercent    float64   `json:"cpu_percent"`
-	Timestamp     time.Time `json:"timestamp"`
-	WithinLimits  bool      `json:"within_limits"`
-	MemoryLimit   int       `json:"memory_limit_mb"`
-	CPULimit      float64   `json:"cpu_limit_percent"`
+	MemoryMB     float64   `json:"memory_mb"`
+	CPUPercent   float64   `json:"cpu_percent"`
+	Timestamp    time.Time `json:"timestamp"`
+	WithinLimits bool      `json:"within_limits"`
+	MemoryLimit  int       `json:"memory_limit_mb"`
+	CPULimit     float64   `json:"cpu_limit_percent"`
 }
 
 // AlertHandler defines the interface for handling resource alerts
@@ -59,31 +59,22 @@ type AlertHandler interface {
 
 // ResourceAlert represents a resource usage alert
 type ResourceAlert struct {
-	Type        AlertType `json:"type"`
-	Severity    string    `json:"severity"`
-	Message     string    `json:"message"`
-	CurrentMB   float64   `json:"current_mb,omitempty"`
-	LimitMB     int       `json:"limit_mb,omitempty"`
-	CurrentCPU  float64   `json:"current_cpu_percent,omitempty"`
-	LimitCPU    float64   `json:"limit_cpu_percent,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
+	Type       AlertType `json:"type"`
+	Severity   string    `json:"severity"`
+	Message    string    `json:"message"`
+	CurrentMB  float64   `json:"current_mb,omitempty"`
+	LimitMB    int       `json:"limit_mb,omitempty"`
+	CurrentCPU float64   `json:"current_cpu_percent,omitempty"`
+	LimitCPU   float64   `json:"limit_cpu_percent,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
-// AlertType represents the type of resource alert
-type AlertType string
-
-const (
-	AlertTypeMemoryHigh     AlertType = "memory_high"
-	AlertTypeMemoryCritical AlertType = "memory_critical"
-	AlertTypeCPUHigh        AlertType = "cpu_high"
-	AlertTypeCPUCritical    AlertType = "cpu_critical"
-	AlertTypeRecovered      AlertType = "recovered"
-)
+// Alert types are now defined in types.go
 
 // NewResourceMonitor creates a new resource monitor
 func NewResourceMonitor(limits ResourceLimits) *ResourceMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &ResourceMonitor{
 		limits:        limits,
 		ctx:           ctx,
@@ -97,11 +88,11 @@ func (rm *ResourceMonitor) Start(ctx context.Context) error {
 	if !rm.started.CompareAndSwap(false, true) {
 		return fmt.Errorf("resource monitor already started")
 	}
-	
+
 	// Start monitoring goroutine
 	rm.wg.Add(1)
 	go rm.monitorResources()
-	
+
 	return nil
 }
 
@@ -110,10 +101,10 @@ func (rm *ResourceMonitor) Shutdown() error {
 	if !rm.stopped.CompareAndSwap(false, true) {
 		return nil // Already stopped
 	}
-	
+
 	rm.cancel()
 	rm.wg.Wait()
-	
+
 	return nil
 }
 
@@ -121,10 +112,10 @@ func (rm *ResourceMonitor) Shutdown() error {
 func (rm *ResourceMonitor) GetUsage() ResourceUsage {
 	memoryMB := float64(atomic.LoadUint64(&rm.memoryUsageMB)) / 100.0
 	cpuPercent := float64(atomic.LoadUint64(&rm.cpuUsagePercent)) / 100.0
-	
-	withinLimits := memoryMB <= float64(rm.limits.MaxMemoryMB) && 
+
+	withinLimits := memoryMB <= float64(rm.limits.MaxMemoryMB) &&
 		cpuPercent <= float64(rm.limits.MaxCPUMilli)/10.0
-	
+
 	return ResourceUsage{
 		MemoryMB:     memoryMB,
 		CPUPercent:   cpuPercent,
@@ -139,7 +130,7 @@ func (rm *ResourceMonitor) GetUsage() ResourceUsage {
 func (rm *ResourceMonitor) GetStats() ResourceStats {
 	maxMemoryMB := float64(atomic.LoadUint64(&rm.maxMemoryMB)) / 100.0
 	maxCPUPercent := float64(atomic.LoadUint64(&rm.maxCPUPercent)) / 100.0
-	
+
 	return ResourceStats{
 		CurrentUsage:    rm.GetUsage(),
 		MaxMemoryMB:     maxMemoryMB,
@@ -153,20 +144,20 @@ func (rm *ResourceMonitor) GetStats() ResourceStats {
 func (rm *ResourceMonitor) AddAlertHandler(handler AlertHandler) {
 	rm.handlersMu.Lock()
 	defer rm.handlersMu.Unlock()
-	
+
 	rm.alertHandlers = append(rm.alertHandlers, handler)
 }
 
 // monitorResources continuously monitors resource usage
 func (rm *ResourceMonitor) monitorResources() {
 	defer rm.wg.Done()
-	
+
 	ticker := time.NewTicker(5 * time.Second) // Monitor every 5 seconds
 	defer ticker.Stop()
-	
+
 	var lastMemoryAlert, lastCPUAlert time.Time
 	const alertCooldown = 30 * time.Second
-	
+
 	for {
 		select {
 		case <-rm.ctx.Done():
@@ -183,11 +174,11 @@ func (rm *ResourceMonitor) updateResourceUsage() {
 	// Get memory usage
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	
+
 	// Convert to MB and store (scaled by 100 for precision)
 	memoryMB := uint64(float64(memStats.Alloc) / 1024 / 1024 * 100)
 	atomic.StoreUint64(&rm.memoryUsageMB, memoryMB)
-	
+
 	// Update max memory if needed
 	for {
 		current := atomic.LoadUint64(&rm.maxMemoryMB)
@@ -195,12 +186,12 @@ func (rm *ResourceMonitor) updateResourceUsage() {
 			break
 		}
 	}
-	
+
 	// Get CPU usage (simplified - in production would use more sophisticated measurement)
 	cpuPercent := rm.getCPUUsage()
 	cpuPercentScaled := uint64(cpuPercent * 100)
 	atomic.StoreUint64(&rm.cpuUsagePercent, cpuPercentScaled)
-	
+
 	// Update max CPU if needed
 	for {
 		current := atomic.LoadUint64(&rm.maxCPUPercent)
@@ -215,18 +206,18 @@ func (rm *ResourceMonitor) getCPUUsage() float64 {
 	// This is a simplified implementation
 	// In production, you'd want to use more sophisticated CPU measurement
 	// such as reading from /proc/stat or using cgroups
-	
+
 	numGoroutines := runtime.NumGoroutine()
 	numCPU := runtime.NumCPU()
-	
+
 	// Simple heuristic: assume each goroutine uses a small amount of CPU
 	// This is not accurate but provides a baseline
 	estimatedCPU := float64(numGoroutines) / float64(numCPU) * 0.1
-	
+
 	if estimatedCPU > 100.0 {
 		estimatedCPU = 100.0
 	}
-	
+
 	return estimatedCPU
 }
 
@@ -235,17 +226,17 @@ func (rm *ResourceMonitor) checkAlerts(lastMemoryAlert, lastCPUAlert *time.Time,
 	now := time.Now()
 	memoryMB := float64(atomic.LoadUint64(&rm.memoryUsageMB)) / 100.0
 	cpuPercent := float64(atomic.LoadUint64(&rm.cpuUsagePercent)) / 100.0
-	
+
 	// Check memory alerts
 	if memoryMB > float64(rm.limits.MaxMemoryMB) {
 		if now.Sub(*lastMemoryAlert) > cooldown {
 			alert := ResourceAlert{
-				Type:       AlertTypeMemoryCritical,
-				Severity:   "critical",
-				Message:    fmt.Sprintf("Memory usage %.1fMB exceeds limit %dMB", memoryMB, rm.limits.MaxMemoryMB),
-				CurrentMB:  memoryMB,
-				LimitMB:    rm.limits.MaxMemoryMB,
-				Timestamp:  now,
+				Type:      AlertTypeMemoryCritical,
+				Severity:  "critical",
+				Message:   fmt.Sprintf("Memory usage %.1fMB exceeds limit %dMB", memoryMB, rm.limits.MaxMemoryMB),
+				CurrentMB: memoryMB,
+				LimitMB:   rm.limits.MaxMemoryMB,
+				Timestamp: now,
 			}
 			rm.triggerAlert(alert)
 			*lastMemoryAlert = now
@@ -253,18 +244,18 @@ func (rm *ResourceMonitor) checkAlerts(lastMemoryAlert, lastCPUAlert *time.Time,
 	} else if memoryMB > float64(rm.limits.MaxMemoryMB)*0.8 {
 		if now.Sub(*lastMemoryAlert) > cooldown {
 			alert := ResourceAlert{
-				Type:       AlertTypeMemoryHigh,
-				Severity:   "warning",
-				Message:    fmt.Sprintf("Memory usage %.1fMB is high (80%% of limit %dMB)", memoryMB, rm.limits.MaxMemoryMB),
-				CurrentMB:  memoryMB,
-				LimitMB:    rm.limits.MaxMemoryMB,
-				Timestamp:  now,
+				Type:      AlertTypeMemoryHigh,
+				Severity:  "warning",
+				Message:   fmt.Sprintf("Memory usage %.1fMB is high (80%% of limit %dMB)", memoryMB, rm.limits.MaxMemoryMB),
+				CurrentMB: memoryMB,
+				LimitMB:   rm.limits.MaxMemoryMB,
+				Timestamp: now,
 			}
 			rm.triggerAlert(alert)
 			*lastMemoryAlert = now
 		}
 	}
-	
+
 	// Check CPU alerts
 	cpuLimitPercent := float64(rm.limits.MaxCPUMilli) / 10.0
 	if cpuPercent > cpuLimitPercent {
@@ -299,12 +290,12 @@ func (rm *ResourceMonitor) checkAlerts(lastMemoryAlert, lastCPUAlert *time.Time,
 // triggerAlert sends an alert to all registered handlers
 func (rm *ResourceMonitor) triggerAlert(alert ResourceAlert) {
 	atomic.AddUint64(&rm.alertsTriggered, 1)
-	
+
 	rm.handlersMu.RLock()
 	handlers := make([]AlertHandler, len(rm.alertHandlers))
 	copy(handlers, rm.alertHandlers)
 	rm.handlersMu.RUnlock()
-	
+
 	for _, handler := range handlers {
 		go handler.HandleAlert(alert)
 	}
@@ -333,7 +324,7 @@ func (c *ConsoleAlertHandler) HandleAlert(alert ResourceAlert) {
 	if alert.Severity == "critical" {
 		icon = "🚨"
 	}
-	
+
 	fmt.Printf("%s Resource Alert [%s]: %s\n", icon, alert.Severity, alert.Message)
 }
 
@@ -356,9 +347,9 @@ func (l *LoggingAlertHandler) HandleAlert(alert ResourceAlert) {
 
 // ResourceLimiter provides resource usage limiting capabilities
 type ResourceLimiter struct {
-	limits   ResourceLimits
-	monitor  *ResourceMonitor
-	enabled  atomic.Bool
+	limits  ResourceLimits
+	monitor *ResourceMonitor
+	enabled atomic.Bool
 }
 
 // NewResourceLimiter creates a new resource limiter
@@ -384,26 +375,26 @@ func (rl *ResourceLimiter) ShouldThrottle() bool {
 	if !rl.enabled.Load() {
 		return false
 	}
-	
+
 	usage := rl.monitor.GetUsage()
-	
+
 	// Throttle if memory usage is above 90% of limit
 	if usage.MemoryMB > float64(rl.limits.MaxMemoryMB)*0.9 {
 		return true
 	}
-	
+
 	// Throttle if CPU usage is above 90% of limit
 	if usage.CPUPercent > float64(rl.limits.MaxCPUMilli)/10.0*0.9 {
 		return true
 	}
-	
+
 	return false
 }
 
 // ForceGarbageCollection forces a garbage collection cycle if memory usage is high
 func (rl *ResourceLimiter) ForceGarbageCollection() {
 	usage := rl.monitor.GetUsage()
-	
+
 	// Force GC if memory usage is above 80% of limit
 	if usage.MemoryMB > float64(rl.limits.MaxMemoryMB)*0.8 {
 		runtime.GC()

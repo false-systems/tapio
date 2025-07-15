@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors/types"
+	"github.com/yairfalse/tapio/pkg/collectors/unified"
 )
 
 // TestJournaldCollector tests the complete journald collector
@@ -60,13 +60,13 @@ func TestOOMDetection(t *testing.T) {
 				{
 					Message:           "invoked oom-killer: gfp_mask=0x100cca(GFP_HIGHUSER_MOVABLE), order=0, oom_score_adj=0",
 					Priority:          3,
-					SyslogIdentifier: "kernel",
+					SyslogIdentifier:  "kernel",
 					RealtimeTimestamp: 1000000000,
 				},
 				{
 					Message:           "Out of memory: Killed process 1234 (java) total-vm:4000000kB, anon-rss:3500000kB",
 					Priority:          3,
-					SyslogIdentifier: "kernel",
+					SyslogIdentifier:  "kernel",
 					RealtimeTimestamp: 1000000100,
 				},
 			},
@@ -80,7 +80,7 @@ func TestOOMDetection(t *testing.T) {
 				{
 					Message:           "Memory cgroup out of memory: Killed process 5678 (python3) total-vm:2000000kB",
 					Priority:          3,
-					SyslogIdentifier: "kernel",
+					SyslogIdentifier:  "kernel",
 					RealtimeTimestamp: 2000000000,
 				},
 			},
@@ -94,7 +94,7 @@ func TestOOMDetection(t *testing.T) {
 				{
 					Message:           "Normal log message without OOM",
 					Priority:          6,
-					SyslogIdentifier: "systemd",
+					SyslogIdentifier:  "systemd",
 					RealtimeTimestamp: 3000000000,
 				},
 			},
@@ -105,8 +105,8 @@ func TestOOMDetection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			detector.Reset()
-			
-			var event *types.Event
+
+			var event *unified.Event
 			for _, entry := range tt.entries {
 				e := entry // Create copy
 				event = detector.Detect(&e)
@@ -114,8 +114,8 @@ func TestOOMDetection(t *testing.T) {
 
 			if tt.expectOOM {
 				require.NotNil(t, event, "Expected OOM event")
-				assert.Equal(t, types.EventTypeOOM, event.Type)
-				assert.Equal(t, types.SeverityCritical, event.Severity)
+				assert.Equal(t, unified.EventTypeOOM, event.Type)
+				assert.Equal(t, unified.SeverityCritical, event.Severity)
 				assert.Equal(t, tt.victim, event.Data["victim_name"])
 				assert.Equal(t, tt.pid, event.Data["victim_pid"])
 			} else {
@@ -130,10 +130,10 @@ func TestContainerEventParsing(t *testing.T) {
 	parser := NewContainerEventParser()
 
 	tests := []struct {
-		name         string
-		entry        JournalEntry
-		expectEvent  bool
-		failureType  string
+		name        string
+		entry       JournalEntry
+		expectEvent bool
+		failureType string
 	}{
 		{
 			name: "docker_pull_failure",
@@ -175,7 +175,7 @@ func TestContainerEventParsing(t *testing.T) {
 
 			if tt.expectEvent {
 				require.NotNil(t, event, "Expected container event")
-				assert.Equal(t, types.EventTypeContainerFailure, event.Type)
+				assert.Equal(t, "container_failure", event.Type)
 				assert.Equal(t, tt.failureType, event.Data["failure_type"])
 			} else {
 				assert.Nil(t, event, "Expected no container event")
@@ -264,16 +264,16 @@ func TestSemanticEnrichment(t *testing.T) {
 		BootID:           "boot456",
 	}
 
-	event := &types.Event{
-		Type:     types.EventTypeContainerFailure,
-		Category: types.CategoryReliability,
-		Severity: types.SeverityError,
+	event := &unified.Event{
+		Type:     "container_failure",
+		Category: unified.CategoryReliability,
+		Severity: unified.SeverityError,
 		Data: map[string]interface{}{
 			"message": entry.Message,
 		},
 		Attributes: make(map[string]interface{}),
 		Labels:     make(map[string]string),
-		Context:    &types.EventContext{},
+		Context:    &unified.EventContext{},
 	}
 
 	enricher.Enrich(event, entry)
@@ -291,32 +291,32 @@ func TestParserPatterns(t *testing.T) {
 	parser := NewParser()
 
 	tests := []struct {
-		name     string
-		message  string
+		name        string
+		message     string
 		expectParse bool
-		severity types.Severity
-		category types.Category
+		severity    unified.Severity
+		category    unified.Category
 	}{
 		{
 			name:        "service_crash",
 			message:     "Main process exited, code=killed, status=9/KILL",
 			expectParse: true,
-			severity:    types.SeverityError,
-			category:    types.CategoryReliability,
+			severity:    unified.SeverityError,
+			category:    unified.CategoryReliability,
 		},
 		{
 			name:        "disk_full",
 			message:     "No space left on device",
 			expectParse: true,
-			severity:    types.SeverityCritical,
-			category:    types.CategoryCapacity,
+			severity:    unified.SeverityCritical,
+			category:    unified.CategoryMemory,
 		},
 		{
 			name:        "network_timeout",
 			message:     "Connection timeout after 30s: context deadline exceeded",
 			expectParse: true,
-			severity:    types.SeverityWarning,
-			category:    types.CategoryPerformance,
+			severity:    unified.SeverityWarning,
+			category:    unified.CategorySystem,
 		},
 		{
 			name:        "normal_info",
@@ -351,7 +351,7 @@ func BenchmarkOOMDetection(b *testing.B) {
 	entry := &JournalEntry{
 		Message:           "Out of memory: Killed process 1234 (java) total-vm:4000000kB",
 		Priority:          3,
-		SyslogIdentifier: "kernel",
+		SyslogIdentifier:  "kernel",
 		RealtimeTimestamp: 1000000000,
 	}
 

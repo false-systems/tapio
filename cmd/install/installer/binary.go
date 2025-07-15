@@ -15,13 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"tapio/cmd/install/platform"
-	"tapio/cmd/install/validation"
+	"github.com/yairfalse/tapio/cmd/install/common"
+	"github.com/yairfalse/tapio/cmd/install/validation"
 )
 
 // BinaryInstaller installs Tapio as a binary
 type BinaryInstaller struct {
-	platform       platform.Info
+	platform       common.PlatformInfo
 	client         *http.Client
 	commandHistory CommandHistory
 	pipeline       Pipeline[*binaryInstallData]
@@ -38,7 +38,7 @@ type binaryInstallData struct {
 }
 
 // NewBinaryInstaller creates a new binary installer
-func NewBinaryInstaller(p platform.Info) Installer {
+func NewBinaryInstaller(p common.PlatformInfo) Installer {
 	return &BinaryInstaller{
 		platform: p,
 		client: &http.Client{

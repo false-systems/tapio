@@ -19,49 +19,49 @@ import (
 
 // CLIExportPlugin implements file-based export for CLI usage
 type CLIExportPlugin struct {
-	name          string
-	config        *CLIExportConfig
-	outputDir     string
-	filePrefix    string
-	metrics       *CLIMetrics
-	mutex         sync.RWMutex
-	
+	name       string
+	config     *CLIExportConfig
+	outputDir  string
+	filePrefix string
+	metrics    *CLIMetrics
+	mutex      sync.RWMutex
+
 	// Writers for different formats
-	jsonWriter    *JSONWriter
-	yamlWriter    *YAMLWriter
+	jsonWriter     *JSONWriter
+	yamlWriter     *YAMLWriter
 	markdownWriter *MarkdownWriter
-	csvWriter     *CSVWriter
+	csvWriter      *CSVWriter
 }
 
 // CLIExportConfig configures the CLI export plugin
 type CLIExportConfig struct {
-	OutputDirectory   string                `json:"output_directory"`
-	FilePrefix        string                `json:"file_prefix"`
-	MaxFileSize       int64                 `json:"max_file_size"`
-	RotateFiles       bool                  `json:"rotate_files"`
-	RetentionDays     int                   `json:"retention_days"`
-	
+	OutputDirectory string `json:"output_directory"`
+	FilePrefix      string `json:"file_prefix"`
+	MaxFileSize     int64  `json:"max_file_size"`
+	RotateFiles     bool   `json:"rotate_files"`
+	RetentionDays   int    `json:"retention_days"`
+
 	// Format-specific settings
-	PrettyPrint       bool                  `json:"pretty_print"`
-	CompressOutput    bool                  `json:"compress_output"`
-	IncludeTimestamp  bool                  `json:"include_timestamp"`
-	
+	PrettyPrint      bool `json:"pretty_print"`
+	CompressOutput   bool `json:"compress_output"`
+	IncludeTimestamp bool `json:"include_timestamp"`
+
 	// Format options
-	JSONIndent        string                `json:"json_indent"`
-	YAMLIndent        int                   `json:"yaml_indent"`
-	CSVDelimiter      string                `json:"csv_delimiter"`
-	MarkdownTemplate  string                `json:"markdown_template"`
+	JSONIndent       string `json:"json_indent"`
+	YAMLIndent       int    `json:"yaml_indent"`
+	CSVDelimiter     string `json:"csv_delimiter"`
+	MarkdownTemplate string `json:"markdown_template"`
 }
 
 // CLIMetrics tracks plugin metrics
 type CLIMetrics struct {
-	ExportsTotal      int64
-	ExportsSuccess    int64
-	ExportsFailed     int64
-	BytesWritten      int64
-	FilesCreated      int64
-	LastExportTime    time.Time
-	mutex             sync.RWMutex
+	ExportsTotal   int64
+	ExportsSuccess int64
+	ExportsFailed  int64
+	BytesWritten   int64
+	FilesCreated   int64
+	LastExportTime time.Time
+	mutex          sync.RWMutex
 }
 
 // NewCLIExportPlugin creates a new CLI export plugin
@@ -90,23 +90,23 @@ func (p *CLIExportPlugin) Name() string {
 func (p *CLIExportPlugin) Start(ctx context.Context) error {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	
+
 	// Create output directory
 	if err := os.MkdirAll(p.config.OutputDirectory, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
-	
+
 	// Initialize writers
 	p.jsonWriter = NewJSONWriter(p.config)
 	p.yamlWriter = NewYAMLWriter(p.config)
 	p.markdownWriter = NewMarkdownWriter(p.config)
 	p.csvWriter = NewCSVWriter(p.config)
-	
+
 	// Start file rotation if enabled
 	if p.config.RotateFiles && p.config.RetentionDays > 0 {
 		go p.runFileRotation(ctx)
 	}
-	
+
 	return nil
 }
 
@@ -120,18 +120,18 @@ func (p *CLIExportPlugin) Stop(ctx context.Context) error {
 func (p *CLIExportPlugin) Configure(config map[string]interface{}) error {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	
+
 	// Convert map to config struct
 	data, err := json.Marshal(config)
 	if err != nil {
 		return err
 	}
-	
+
 	newConfig := &CLIExportConfig{}
 	if err := json.Unmarshal(data, newConfig); err != nil {
 		return err
 	}
-	
+
 	// Validate configuration
 	if newConfig.OutputDirectory == "" {
 		newConfig.OutputDirectory = "./exports"
@@ -145,7 +145,7 @@ func (p *CLIExportPlugin) Configure(config map[string]interface{}) error {
 	if newConfig.CSVDelimiter == "" {
 		newConfig.CSVDelimiter = ","
 	}
-	
+
 	p.config = newConfig
 	return nil
 }
@@ -154,15 +154,15 @@ func (p *CLIExportPlugin) Configure(config map[string]interface{}) error {
 func (p *CLIExportPlugin) ValidateConfig() error {
 	p.mutex.RLock()
 	defer p.mutex.RUnlock()
-	
+
 	if p.config.MaxFileSize < 0 {
 		return fmt.Errorf("max_file_size cannot be negative")
 	}
-	
+
 	if p.config.RetentionDays < 0 {
 		return fmt.Errorf("retention_days cannot be negative")
 	}
-	
+
 	return nil
 }
 
@@ -205,13 +205,13 @@ func (p *CLIExportPlugin) Export(ctx context.Context, data exports.ExportData) e
 	p.metrics.mutex.Lock()
 	p.metrics.ExportsTotal++
 	p.metrics.mutex.Unlock()
-	
+
 	start := time.Now()
-	
+
 	// Generate filename
 	filename := p.generateFilename(data.Type, data.Format)
 	filepath := filepath.Join(p.config.OutputDirectory, filename)
-	
+
 	// Export based on format
 	var err error
 	switch data.Format {
@@ -226,19 +226,19 @@ func (p *CLIExportPlugin) Export(ctx context.Context, data exports.ExportData) e
 	default:
 		err = fmt.Errorf("unsupported format: %s", data.Format)
 	}
-	
+
 	if err != nil {
 		p.metrics.mutex.Lock()
 		p.metrics.ExportsFailed++
 		p.metrics.mutex.Unlock()
 		return err
 	}
-	
+
 	p.metrics.mutex.Lock()
 	p.metrics.ExportsSuccess++
 	p.metrics.LastExportTime = time.Now()
 	p.metrics.mutex.Unlock()
-	
+
 	// Call callback if provided
 	if data.Callback != nil {
 		data.Callback(&exports.ExportResult{
@@ -250,7 +250,7 @@ func (p *CLIExportPlugin) Export(ctx context.Context, data exports.ExportData) e
 			},
 		})
 	}
-	
+
 	return nil
 }
 
@@ -281,7 +281,7 @@ func (p *CLIExportPlugin) SupportedDataTypes() []exports.DataType {
 func (p *CLIExportPlugin) HealthCheck(ctx context.Context) (*exports.HealthStatus, error) {
 	p.mutex.RLock()
 	defer p.mutex.RUnlock()
-	
+
 	// Check if output directory is accessible
 	if _, err := os.Stat(p.config.OutputDirectory); err != nil {
 		return &exports.HealthStatus{
@@ -290,17 +290,17 @@ func (p *CLIExportPlugin) HealthCheck(ctx context.Context) (*exports.HealthStatu
 			Message:   fmt.Sprintf("Output directory not accessible: %v", err),
 		}, nil
 	}
-	
+
 	// Check disk space
 	var stat os.FileInfo
 	if info, err := os.Stat(p.config.OutputDirectory); err == nil {
 		stat = info
 	}
-	
+
 	p.metrics.mutex.RLock()
 	metrics := *p.metrics
 	p.metrics.mutex.RUnlock()
-	
+
 	return &exports.HealthStatus{
 		Healthy:   true,
 		LastCheck: time.Now(),
@@ -326,7 +326,7 @@ func (p *CLIExportPlugin) HealthCheck(ctx context.Context) (*exports.HealthStatu
 func (p *CLIExportPlugin) GetMetrics() map[string]interface{} {
 	p.metrics.mutex.RLock()
 	defer p.metrics.mutex.RUnlock()
-	
+
 	return map[string]interface{}{
 		"exports_total":    p.metrics.ExportsTotal,
 		"exports_success":  p.metrics.ExportsSuccess,
@@ -344,12 +344,12 @@ func (p *CLIExportPlugin) generateFilename(dataType exports.DataType, format exp
 	if p.config.IncludeTimestamp {
 		timestamp = fmt.Sprintf("_%s", time.Now().Format("20060102_150405"))
 	}
-	
+
 	extension := p.getFileExtension(format)
 	if p.config.CompressOutput {
 		extension += ".gz"
 	}
-	
+
 	return fmt.Sprintf("%s_%s%s.%s", p.config.FilePrefix, dataType, timestamp, extension)
 }
 
@@ -411,29 +411,29 @@ func (p *CLIExportPlugin) writeFile(filepath string, writeFunc func(io.Writer) e
 		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer file.Close()
-	
+
 	var writer io.Writer = file
 	var gzWriter *gzip.Writer
-	
+
 	// Add compression if enabled
 	if p.config.CompressOutput {
 		gzWriter = gzip.NewWriter(file)
 		writer = gzWriter
 		defer gzWriter.Close()
 	}
-	
+
 	// Write data
 	if err := writeFunc(writer); err != nil {
 		return fmt.Errorf("failed to write data: %w", err)
 	}
-	
+
 	// Close gzip writer before file
 	if gzWriter != nil {
 		if err := gzWriter.Close(); err != nil {
 			return fmt.Errorf("failed to close gzip writer: %w", err)
 		}
 	}
-	
+
 	// Update metrics
 	if stat, err := file.Stat(); err == nil {
 		p.metrics.mutex.Lock()
@@ -441,7 +441,7 @@ func (p *CLIExportPlugin) writeFile(filepath string, writeFunc func(io.Writer) e
 		p.metrics.FilesCreated++
 		p.metrics.mutex.Unlock()
 	}
-	
+
 	return nil
 }
 
@@ -449,7 +449,7 @@ func (p *CLIExportPlugin) writeFile(filepath string, writeFunc func(io.Writer) e
 func (p *CLIExportPlugin) runFileRotation(ctx context.Context) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -465,18 +465,18 @@ func (p *CLIExportPlugin) cleanupOldFiles() {
 	if p.config.RetentionDays <= 0 {
 		return
 	}
-	
+
 	cutoff := time.Now().AddDate(0, 0, -p.config.RetentionDays)
-	
+
 	filepath.Walk(p.config.OutputDirectory, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		
+
 		if !info.IsDir() && info.ModTime().Before(cutoff) {
 			os.Remove(path)
 		}
-		
+
 		return nil
 	})
 }
@@ -520,7 +520,7 @@ func (w *MarkdownWriter) Write(writer io.Writer, data exports.ExportData) error 
 	// Generate markdown based on data type
 	fmt.Fprintf(writer, "# %s Export\n\n", data.Type)
 	fmt.Fprintf(writer, "**Generated:** %s\n\n", time.Now().Format(time.RFC3339))
-	
+
 	if data.Tags != nil && len(data.Tags) > 0 {
 		fmt.Fprintf(writer, "## Tags\n\n")
 		for k, v := range data.Tags {
@@ -528,13 +528,13 @@ func (w *MarkdownWriter) Write(writer io.Writer, data exports.ExportData) error 
 		}
 		fmt.Fprintf(writer, "\n")
 	}
-	
+
 	fmt.Fprintf(writer, "## Data\n\n```json\n")
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
 	encoder.Encode(data.Content)
 	fmt.Fprintf(writer, "```\n")
-	
+
 	return nil
 }
 
@@ -553,7 +553,7 @@ func (w *CSVWriter) Write(writer io.Writer, data exports.ExportData) error {
 		csvWriter.Comma = rune(w.config.CSVDelimiter[0])
 	}
 	defer csvWriter.Flush()
-	
+
 	// Convert data to CSV based on type
 	switch data.Type {
 	case exports.DataTypeMetrics:
@@ -569,7 +569,7 @@ func (w *CSVWriter) Write(writer io.Writer, data exports.ExportData) error {
 func (w *CSVWriter) writeMetricsCSV(writer *csv.Writer, content interface{}) error {
 	// Write header
 	writer.Write([]string{"timestamp", "metric", "value", "labels"})
-	
+
 	// Write metrics data
 	// This is a simplified implementation
 	if metrics, ok := content.([]interface{}); ok {
@@ -585,14 +585,14 @@ func (w *CSVWriter) writeMetricsCSV(writer *csv.Writer, content interface{}) err
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 func (w *CSVWriter) writeEventsCSV(writer *csv.Writer, content interface{}) error {
 	// Write header
 	writer.Write([]string{"timestamp", "type", "severity", "message", "source"})
-	
+
 	// Write events data
 	// This is a simplified implementation
 	if events, ok := content.([]interface{}); ok {
@@ -609,22 +609,22 @@ func (w *CSVWriter) writeEventsCSV(writer *csv.Writer, content interface{}) erro
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 func (w *CSVWriter) writeGenericCSV(writer *csv.Writer, content interface{}) error {
 	// Write as key-value pairs
 	writer.Write([]string{"key", "value"})
-	
+
 	// Use JSON marshaling to flatten the content
 	data, _ := json.Marshal(content)
 	var flat map[string]interface{}
 	json.Unmarshal(data, &flat)
-	
+
 	for k, v := range flat {
 		writer.Write([]string{k, fmt.Sprintf("%v", v)})
 	}
-	
+
 	return nil
 }

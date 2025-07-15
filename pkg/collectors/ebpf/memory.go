@@ -44,35 +44,35 @@ type MemoryEvent struct {
 // MemoryCollector implements high-performance memory tracking with OOM prediction
 type MemoryCollector struct {
 	config collectors.CollectorConfig
-	
+
 	// eBPF program and maps
-	objs     memorytrackerObjects
-	reader   *ringbuf.Reader
-	links    []link.Link
-	
+	objs   memorytrackerObjects
+	reader *ringbuf.Reader
+	links  []link.Link
+
 	// Event processing
-	eventChan    chan *collectors.Event
-	
+	eventChan chan *collectors.Event
+
 	// Memory tracking state
-	processes    map[uint32]*ProcessMemoryTracker
-	processesMu  sync.RWMutex
-	
+	processes   map[uint32]*ProcessMemoryTracker
+	processesMu sync.RWMutex
+
 	// OOM prediction
-	predictor    *OOMPredictor
-	
+	predictor *OOMPredictor
+
 	// Performance metrics
 	eventsProcessed uint64
 	eventsDropped   uint64
 	oomPredictions  uint64
 	accurateOOMs    uint64
-	
+
 	// Lifecycle management
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	started      atomic.Bool
-	stopped      atomic.Bool
-	
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	started atomic.Bool
+	stopped atomic.Bool
+
 	// Health tracking
 	lastEventTime time.Time
 	lastError     error
@@ -86,21 +86,21 @@ type ProcessMemoryTracker struct {
 	TotalAllocated uint64
 	TotalFreed     uint64
 	CurrentUsage   uint64
-	
+
 	// Growth tracking
-	GrowthHistory  []MemoryDataPoint
-	LastUpdate     time.Time
-	
+	GrowthHistory []MemoryDataPoint
+	LastUpdate    time.Time
+
 	// Allocation pattern analysis
-	AllocationRate float64    // bytes per second
-	GrowthTrend    TrendType  
+	AllocationRate float64 // bytes per second
+	GrowthTrend    TrendType
 	IsContainer    bool
 	ContainerPID   uint32
-	
+
 	// OOM risk assessment
-	RiskScore      float64
-	PredictedOOM   *OOMPrediction
-	
+	RiskScore    float64
+	PredictedOOM *OOMPrediction
+
 	mu sync.RWMutex
 }
 
@@ -108,7 +108,7 @@ type ProcessMemoryTracker struct {
 type MemoryDataPoint struct {
 	Timestamp time.Time
 	Usage     uint64
-	Rate      float64  // bytes/second growth rate
+	Rate      float64 // bytes/second growth rate
 }
 
 // TrendType represents memory growth patterns
@@ -139,15 +139,15 @@ type OOMPredictor struct {
 	// Prediction models
 	linearModel      *LinearRegressionModel
 	exponentialModel *ExponentialGrowthModel
-	
+
 	// Historical data for accuracy improvement
-	historicalOOMs   []HistoricalOOM
-	
+	historicalOOMs []HistoricalOOM
+
 	// Configuration
-	predictionWindow time.Duration
-	minDataPoints    int
+	predictionWindow    time.Duration
+	minDataPoints       int
 	confidenceThreshold float64
-	
+
 	mu sync.RWMutex
 }
 
@@ -167,10 +167,10 @@ type ExponentialGrowthModel struct {
 
 // HistoricalOOM tracks historical OOM events for accuracy validation
 type HistoricalOOM struct {
-	PID          uint32
+	PID           uint32
 	ActualOOMTime time.Time
 	PredictedTime time.Time
-	Accuracy     time.Duration
+	Accuracy      time.Duration
 }
 
 // NewMemoryCollector creates a new memory tracking collector
@@ -178,18 +178,18 @@ func NewMemoryCollector(config collectors.CollectorConfig) (collectors.Collector
 	if !ebpf.IsAvailable() {
 		return nil, fmt.Errorf("eBPF is not available on this system")
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	collector := &MemoryCollector{
-		config:     config,
-		ctx:        ctx,
-		cancel:     cancel,
-		eventChan:  make(chan *collectors.Event, config.EventBufferSize),
-		processes:  make(map[uint32]*ProcessMemoryTracker),
-		predictor:  NewOOMPredictor(),
+		config:    config,
+		ctx:       ctx,
+		cancel:    cancel,
+		eventChan: make(chan *collectors.Event, config.EventBufferSize),
+		processes: make(map[uint32]*ProcessMemoryTracker),
+		predictor: NewOOMPredictor(),
 	}
-	
+
 	return collector, nil
 }
 
@@ -220,23 +220,23 @@ func (mc *MemoryCollector) Start(ctx context.Context) error {
 	if !mc.started.CompareAndSwap(false, true) {
 		return fmt.Errorf("memory collector already started")
 	}
-	
+
 	// Check kernel compatibility first
 	if err := mc.validateKernelCompatibility(); err != nil {
 		return fmt.Errorf("kernel compatibility check failed: %w", err)
 	}
-	
+
 	// Load eBPF program
 	if err := loadMemorytracker(&mc.objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF program: %w", err)
 	}
-	
+
 	// Attach tracepoints
 	if err := mc.attachTracepoints(); err != nil {
 		mc.objs.Close()
 		return fmt.Errorf("failed to attach tracepoints: %w", err)
 	}
-	
+
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(mc.objs.Events)
 	if err != nil {
@@ -244,14 +244,14 @@ func (mc *MemoryCollector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create ring buffer reader: %w", err)
 	}
 	mc.reader = reader
-	
+
 	// Start event processing with optimized ring buffer processing
 	mc.wg.Add(4)
-	go mc.optimizeProcessEvents()  // Use optimized processing instead of processEvents
+	go mc.optimizeProcessEvents() // Use optimized processing instead of processEvents
 	go mc.monitorProcesses()
 	go mc.runOOMPrediction()
 	go mc.adaptiveRingBufferTuning()
-	
+
 	return nil
 }
 
@@ -260,12 +260,12 @@ func (mc *MemoryCollector) Stop() error {
 	if !mc.stopped.CompareAndSwap(false, true) {
 		return nil
 	}
-	
+
 	mc.cancel()
 	mc.cleanup()
 	mc.wg.Wait()
 	close(mc.eventChan)
-	
+
 	return nil
 }
 
@@ -278,10 +278,10 @@ func (mc *MemoryCollector) Events() <-chan *collectors.Event {
 func (mc *MemoryCollector) Health() *collectors.Health {
 	mc.healthMu.RLock()
 	defer mc.healthMu.RUnlock()
-	
+
 	status := collectors.HealthStatusHealthy
 	message := "Operating normally"
-	
+
 	if mc.stopped.Load() {
 		status = collectors.HealthStatusStopped
 		message = "Stopped"
@@ -292,7 +292,7 @@ func (mc *MemoryCollector) Health() *collectors.Health {
 		status = collectors.HealthStatusDegraded
 		message = "No recent events"
 	}
-	
+
 	return &collectors.Health{
 		Status:          status,
 		Message:         message,
@@ -300,8 +300,8 @@ func (mc *MemoryCollector) Health() *collectors.Health {
 		EventsProcessed: atomic.LoadUint64(&mc.eventsProcessed),
 		EventsDropped:   atomic.LoadUint64(&mc.eventsDropped),
 		Metrics: map[string]interface{}{
-			"processes_tracked":  len(mc.processes),
-			"oom_predictions":    atomic.LoadUint64(&mc.oomPredictions),
+			"processes_tracked":   len(mc.processes),
+			"oom_predictions":     atomic.LoadUint64(&mc.oomPredictions),
 			"prediction_accuracy": mc.getPredictionAccuracy(),
 		},
 	}
@@ -310,10 +310,10 @@ func (mc *MemoryCollector) Health() *collectors.Health {
 // GetStats returns collector statistics
 func (mc *MemoryCollector) GetStats() *collectors.Stats {
 	return &collectors.Stats{
-		EventsCollected:   atomic.LoadUint64(&mc.eventsProcessed),
-		EventsDropped:     atomic.LoadUint64(&mc.eventsDropped),
-		StartTime:         time.Now(), // Would track actual start time
-		LastEventTime:     mc.lastEventTime,
+		EventsCollected: atomic.LoadUint64(&mc.eventsProcessed),
+		EventsDropped:   atomic.LoadUint64(&mc.eventsDropped),
+		StartTime:       time.Now(), // Would track actual start time
+		LastEventTime:   mc.lastEventTime,
 		CollectorMetrics: map[string]interface{}{
 			"processes_tracked":     len(mc.processes),
 			"oom_predictions_total": atomic.LoadUint64(&mc.oomPredictions),
@@ -348,7 +348,7 @@ func (mc *MemoryCollector) attachTracepoints() error {
 		return fmt.Errorf("failed to attach allocation tracepoint: %w", err)
 	}
 	mc.links = append(mc.links, allocLink)
-	
+
 	// Memory free tracking
 	freeLink, err := link.Tracepoint(link.TracepointOptions{
 		Group:   "kmem",
@@ -359,7 +359,7 @@ func (mc *MemoryCollector) attachTracepoints() error {
 		return fmt.Errorf("failed to attach free tracepoint: %w", err)
 	}
 	mc.links = append(mc.links, freeLink)
-	
+
 	// OOM kill tracking
 	oomLink, err := link.Tracepoint(link.TracepointOptions{
 		Group:   "oom",
@@ -370,7 +370,7 @@ func (mc *MemoryCollector) attachTracepoints() error {
 		return fmt.Errorf("failed to attach OOM tracepoint: %w", err)
 	}
 	mc.links = append(mc.links, oomLink)
-	
+
 	// Process exit tracking
 	exitLink, err := link.Tracepoint(link.TracepointOptions{
 		Group:   "sched",
@@ -381,21 +381,21 @@ func (mc *MemoryCollector) attachTracepoints() error {
 		return fmt.Errorf("failed to attach exit tracepoint: %w", err)
 	}
 	mc.links = append(mc.links, exitLink)
-	
+
 	return nil
 }
 
 // processEvents processes events from the eBPF ring buffer
 func (mc *MemoryCollector) processEvents() {
 	defer mc.wg.Done()
-	
+
 	for {
 		select {
 		case <-mc.ctx.Done():
 			return
 		default:
 		}
-		
+
 		record, err := mc.reader.Read()
 		if err != nil {
 			if err == ringbuf.ErrClosed {
@@ -404,7 +404,7 @@ func (mc *MemoryCollector) processEvents() {
 			mc.recordError(fmt.Errorf("ring buffer read error: %w", err))
 			continue
 		}
-		
+
 		event := parseMemoryEvent(record.RawSample)
 		if event == nil {
 			mc.recordError(fmt.Errorf("failed to parse memory event"))
@@ -422,7 +422,7 @@ func (mc *MemoryCollector) processEvents() {
 			atomic.AddUint64(&mc.eventsDropped, 1)
 			continue
 		}
-		
+
 		atomic.AddUint64(&mc.eventsProcessed, 1)
 		mc.healthMu.Lock()
 		mc.lastEventTime = time.Now()
@@ -435,19 +435,19 @@ func (mc *MemoryCollector) handleMemoryEvent(data []byte) error {
 	if len(data) < 64 { // Minimum expected size
 		return fmt.Errorf("invalid event data size: %d", len(data))
 	}
-	
+
 	// Parse eBPF event (assuming C struct layout)
 	event := parseMemoryEvent(data)
-	
+
 	// Update process tracker
 	mc.updateProcessTracker(event)
-	
+
 	// Generate collector event
 	collectorEvent := mc.createCollectorEvent(event)
 	if collectorEvent == nil {
 		return nil // Event filtered
 	}
-	
+
 	// Send to event channel
 	select {
 	case mc.eventChan <- collectorEvent:
@@ -455,7 +455,7 @@ func (mc *MemoryCollector) handleMemoryEvent(data []byte) error {
 		atomic.AddUint64(&mc.eventsDropped, 1)
 		return fmt.Errorf("event channel full")
 	}
-	
+
 	return nil
 }
 
@@ -463,7 +463,7 @@ func (mc *MemoryCollector) handleMemoryEvent(data []byte) error {
 func (mc *MemoryCollector) updateProcessTracker(event *MemoryEvent) {
 	mc.processesMu.Lock()
 	defer mc.processesMu.Unlock()
-	
+
 	tracker, exists := mc.processes[event.PID]
 	if !exists {
 		tracker = &ProcessMemoryTracker{
@@ -475,10 +475,10 @@ func (mc *MemoryCollector) updateProcessTracker(event *MemoryEvent) {
 		}
 		mc.processes[event.PID] = tracker
 	}
-	
+
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
-	
+
 	now := time.Now()
 	oldUsage := tracker.CurrentUsage
 	tracker.CurrentUsage = event.TotalMemory
@@ -490,7 +490,7 @@ func (mc *MemoryCollector) updateProcessTracker(event *MemoryEvent) {
 	} else if event.EventType == 2 { // EVENT_MEMORY_FREE
 		tracker.TotalFreed += event.Size
 	}
-	
+
 	// Calculate growth rate
 	var rate float64
 	if len(tracker.GrowthHistory) > 0 {
@@ -500,7 +500,7 @@ func (mc *MemoryCollector) updateProcessTracker(event *MemoryEvent) {
 			rate = float64(int64(tracker.CurrentUsage-lastPoint.Usage)) / timeDiff
 		}
 	}
-	
+
 	// Add data point
 	dataPoint := MemoryDataPoint{
 		Timestamp: now,
@@ -508,12 +508,12 @@ func (mc *MemoryCollector) updateProcessTracker(event *MemoryEvent) {
 		Rate:      rate,
 	}
 	tracker.GrowthHistory = append(tracker.GrowthHistory, dataPoint)
-	
+
 	// Limit history size
 	if len(tracker.GrowthHistory) > 100 {
 		tracker.GrowthHistory = tracker.GrowthHistory[len(tracker.GrowthHistory)-100:]
 	}
-	
+
 	// Update allocation rate (exponential moving average)
 	if oldUsage > 0 {
 		alpha := 0.1
@@ -521,10 +521,10 @@ func (mc *MemoryCollector) updateProcessTracker(event *MemoryEvent) {
 	} else {
 		tracker.AllocationRate = rate
 	}
-	
+
 	// Analyze growth trend
 	tracker.GrowthTrend = mc.analyzeGrowthTrend(tracker.GrowthHistory)
-	
+
 	// Update risk score
 	tracker.RiskScore = mc.calculateRiskScore(tracker)
 }
@@ -533,7 +533,7 @@ func (mc *MemoryCollector) updateProcessTracker(event *MemoryEvent) {
 func (mc *MemoryCollector) createCollectorEvent(event *MemoryEvent) *collectors.Event {
 	eventType := "memory_allocation"
 	severity := collectors.SeverityLow
-	
+
 	// Determine event type and severity based on the event
 	if event.EventType == 3 { // EVENT_OOM_KILL
 		severity = collectors.SeverityHigh
@@ -544,12 +544,12 @@ func (mc *MemoryCollector) createCollectorEvent(event *MemoryEvent) *collectors.
 	} else if event.EventType == 2 { // EVENT_MEMORY_FREE
 		eventType = "memory_free"
 	}
-	
+
 	// Get process tracker for additional context
 	mc.processesMu.RLock()
 	tracker := mc.processes[event.PID]
 	mc.processesMu.RUnlock()
-	
+
 	// Create event
 	collectorEvent := &collectors.Event{
 		ID:          fmt.Sprintf("memory_%d_%d", event.PID, time.Now().UnixNano()),
@@ -578,7 +578,7 @@ func (mc *MemoryCollector) createCollectorEvent(event *MemoryEvent) *collectors.
 			ProcessName: event.Command,
 		},
 	}
-	
+
 	// Add container context if available
 	if event.InContainer {
 		collectorEvent.Context.Custom = map[string]string{
@@ -586,19 +586,19 @@ func (mc *MemoryCollector) createCollectorEvent(event *MemoryEvent) *collectors.
 			"in_container":  "true",
 		}
 	}
-	
+
 	// Add OOM prediction if available
 	if tracker != nil && tracker.PredictedOOM != nil {
 		collectorEvent.Data["oom_prediction"] = map[string]interface{}{
-			"time_to_oom":  tracker.PredictedOOM.TimeToOOM.String(),
-			"confidence":   tracker.PredictedOOM.Confidence,
-			"trend_type":   tracker.PredictedOOM.TrendType,
+			"time_to_oom": tracker.PredictedOOM.TimeToOOM.String(),
+			"confidence":  tracker.PredictedOOM.Confidence,
+			"trend_type":  tracker.PredictedOOM.TrendType,
 		}
-		
+
 		// Generate actionable recommendation
 		collectorEvent.Actionable = mc.generateActionable(tracker)
 	}
-	
+
 	return collectorEvent
 }
 
@@ -607,11 +607,11 @@ func (mc *MemoryCollector) analyzeGrowthTrend(history []MemoryDataPoint) TrendTy
 	if len(history) < 3 {
 		return TrendStable
 	}
-	
+
 	// Calculate linear regression
 	n := len(history)
 	var sumX, sumY, sumXY, sumX2 float64
-	
+
 	for i, point := range history {
 		x := float64(i)
 		y := float64(point.Usage)
@@ -620,26 +620,26 @@ func (mc *MemoryCollector) analyzeGrowthTrend(history []MemoryDataPoint) TrendTy
 		sumXY += x * y
 		sumX2 += x * x
 	}
-	
+
 	slope := (float64(n)*sumXY - sumX*sumY) / (float64(n)*sumX2 - sumX*sumX)
-	
+
 	// Check for exponential growth
 	if mc.isExponentialGrowth(history) {
 		return TrendExponential
 	}
-	
+
 	// Linear trend detection
 	if slope > 1000000 { // 1MB/datapoint threshold
 		return TrendLinear
 	} else if slope < -1000000 {
 		return TrendDecreasing
 	}
-	
+
 	// Check for spiky behavior
 	if mc.isSpiky(history) {
 		return TrendSpiky
 	}
-	
+
 	return TrendStable
 }
 
@@ -648,25 +648,25 @@ func (mc *MemoryCollector) isExponentialGrowth(history []MemoryDataPoint) bool {
 	if len(history) < 5 {
 		return false
 	}
-	
+
 	// Check if growth rate is increasing
 	recent := history[len(history)-3:]
 	var growthRates []float64
-	
+
 	for i := 1; i < len(recent); i++ {
 		if recent[i-1].Usage > 0 {
 			rate := float64(recent[i].Usage) / float64(recent[i-1].Usage)
 			growthRates = append(growthRates, rate)
 		}
 	}
-	
+
 	// Exponential if growth rate is consistently > 1.1
 	for _, rate := range growthRates {
 		if rate <= 1.1 {
 			return false
 		}
 	}
-	
+
 	return len(growthRates) >= 2
 }
 
@@ -675,18 +675,18 @@ func (mc *MemoryCollector) isSpiky(history []MemoryDataPoint) bool {
 	if len(history) < 5 {
 		return false
 	}
-	
+
 	// Calculate variance in growth rates
 	var rates []float64
 	for i := 1; i < len(history); i++ {
 		rates = append(rates, history[i].Rate)
 	}
-	
+
 	// Calculate coefficient of variation
 	mean := mc.calculateMean(rates)
 	variance := mc.calculateVariance(rates, mean)
 	cv := math.Sqrt(variance) / mean
-	
+
 	return cv > 2.0 // High coefficient of variation indicates spiky behavior
 }
 
@@ -695,9 +695,9 @@ func (mc *MemoryCollector) calculateRiskScore(tracker *ProcessMemoryTracker) flo
 	if len(tracker.GrowthHistory) < 3 {
 		return 0.0
 	}
-	
+
 	score := 0.0
-	
+
 	// Factor 1: Current memory usage relative to typical usage
 	if tracker.CurrentUsage > 0 {
 		avgUsage := mc.calculateAverageUsage(tracker.GrowthHistory)
@@ -705,7 +705,7 @@ func (mc *MemoryCollector) calculateRiskScore(tracker *ProcessMemoryTracker) flo
 			score += math.Min(float64(tracker.CurrentUsage)/float64(avgUsage), 5.0) * 0.3
 		}
 	}
-	
+
 	// Factor 2: Growth trend
 	switch tracker.GrowthTrend {
 	case TrendExponential:
@@ -715,12 +715,12 @@ func (mc *MemoryCollector) calculateRiskScore(tracker *ProcessMemoryTracker) flo
 	case TrendSpiky:
 		score += 0.1
 	}
-	
+
 	// Factor 3: Allocation rate
 	if tracker.AllocationRate > 1000000 { // 1MB/s
 		score += math.Min(tracker.AllocationRate/10000000, 0.3) // Max 0.3 for 10MB/s
 	}
-	
+
 	return math.Min(score, 1.0)
 }
 
@@ -978,7 +978,7 @@ func (mc *MemoryCollector) calculateMean(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
-	
+
 	sum := 0.0
 	for _, v := range values {
 		sum += v
@@ -990,7 +990,7 @@ func (mc *MemoryCollector) calculateVariance(values []float64, mean float64) flo
 	if len(values) == 0 {
 		return 0
 	}
-	
+
 	sum := 0.0
 	for _, v := range values {
 		diff := v - mean
@@ -1003,7 +1003,7 @@ func (mc *MemoryCollector) calculateAverageUsage(history []MemoryDataPoint) uint
 	if len(history) == 0 {
 		return 0
 	}
-	
+
 	sum := uint64(0)
 	for _, point := range history {
 		sum += point.Usage
@@ -1015,7 +1015,7 @@ func (mc *MemoryCollector) generateActionable(tracker *ProcessMemoryTracker) *co
 	if tracker.PredictedOOM == nil {
 		return nil
 	}
-	
+
 	return &collectors.ActionableItem{
 		Title:           "Potential OOM detected",
 		Description:     fmt.Sprintf("Process %s (PID %d) may run out of memory in %v", tracker.Command, tracker.PID, tracker.PredictedOOM.TimeToOOM),
@@ -1030,11 +1030,11 @@ func (mc *MemoryCollector) generateActionable(tracker *ProcessMemoryTracker) *co
 func (mc *MemoryCollector) getPredictionAccuracy() float64 {
 	accurate := atomic.LoadUint64(&mc.accurateOOMs)
 	total := atomic.LoadUint64(&mc.oomPredictions)
-	
+
 	if total == 0 {
 		return 0.0
 	}
-	
+
 	return float64(accurate) / float64(total)
 }
 
@@ -1049,12 +1049,12 @@ func (mc *MemoryCollector) cleanup() {
 	if mc.reader != nil {
 		mc.reader.Close()
 	}
-	
+
 	// Detach all links
 	for _, l := range mc.links {
 		l.Close()
 	}
-	
+
 	// Close eBPF objects
 	mc.objs.Close()
 }
@@ -1067,14 +1067,14 @@ func parseMemoryEvent(data []byte) *MemoryEvent {
 
 	// Parse C struct from eBPF (memory_event from common.h)
 	event := &MemoryEvent{
-		Timestamp:     binary.LittleEndian.Uint64(data[0:8]),
-		PID:           binary.LittleEndian.Uint32(data[8:12]),
-		TID:           binary.LittleEndian.Uint32(data[12:16]),
-		Size:          binary.LittleEndian.Uint64(data[16:24]),
-		TotalMemory:   binary.LittleEndian.Uint64(data[24:32]),
-		EventType:     binary.LittleEndian.Uint32(data[32:36]),
-		InContainer:   data[52] == 1,
-		ContainerPID:  binary.LittleEndian.Uint32(data[53:57]),
+		Timestamp:    binary.LittleEndian.Uint64(data[0:8]),
+		PID:          binary.LittleEndian.Uint32(data[8:12]),
+		TID:          binary.LittleEndian.Uint32(data[12:16]),
+		Size:         binary.LittleEndian.Uint64(data[16:24]),
+		TotalMemory:  binary.LittleEndian.Uint64(data[24:32]),
+		EventType:    binary.LittleEndian.Uint32(data[32:36]),
+		InContainer:  data[52] == 1,
+		ContainerPID: binary.LittleEndian.Uint32(data[53:57]),
 	}
 
 	// Extract command name (null-terminated)
@@ -1092,10 +1092,10 @@ func parseMemoryEvent(data []byte) *MemoryEvent {
 // monitorProcesses periodically cleans up terminated processes
 func (mc *MemoryCollector) monitorProcesses() {
 	defer mc.wg.Done()
-	
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	optimizeTicker := time.NewTicker(5 * time.Minute)
 	defer optimizeTicker.Stop()
 
@@ -1114,10 +1114,10 @@ func (mc *MemoryCollector) monitorProcesses() {
 // runOOMPrediction periodically runs OOM prediction analysis
 func (mc *MemoryCollector) runOOMPrediction() {
 	defer mc.wg.Done()
-	
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-mc.ctx.Done():
@@ -1132,13 +1132,13 @@ func (mc *MemoryCollector) runOOMPrediction() {
 func (mc *MemoryCollector) cleanupTerminatedProcesses() {
 	mc.processesMu.Lock()
 	defer mc.processesMu.Unlock()
-	
+
 	now := time.Now()
 	for pid, tracker := range mc.processes {
 		tracker.mu.RLock()
 		lastUpdate := tracker.LastUpdate
 		tracker.mu.RUnlock()
-		
+
 		// Remove processes not updated in 5 minutes
 		if now.Sub(lastUpdate) > 5*time.Minute {
 			delete(mc.processes, pid)
@@ -1154,14 +1154,14 @@ func (mc *MemoryCollector) updateOOMPredictions() {
 		processes = append(processes, tracker)
 	}
 	mc.processesMu.RUnlock()
-	
+
 	for _, tracker := range processes {
 		prediction := mc.predictor.PredictOOM(tracker)
 		if prediction != nil {
 			tracker.mu.Lock()
 			tracker.PredictedOOM = prediction
 			tracker.mu.Unlock()
-			
+
 			atomic.AddUint64(&mc.oomPredictions, 1)
 		}
 	}
@@ -1193,7 +1193,7 @@ func (mc *MemoryCollector) handleProcessExit(pid uint32) {
 			accuracy := actualOOM.Sub(predictedOOM)
 			if accuracy.Abs() < 30*time.Second {
 				atomic.AddUint64(&mc.accurateOOMs, 1)
-				
+
 				// Record for future model improvement
 				mc.predictor.recordHistoricalOOM(pid, actualOOM, predictedOOM, accuracy)
 			}
@@ -1272,15 +1272,15 @@ func (mc *MemoryCollector) getProcessLifecycleStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_processes":           totalProcesses,
-		"container_processes":       containerProcesses,
-		"host_processes":            hostProcesses,
-		"total_memory_usage":        totalMemoryUsage,
-		"container_memory_usage":    containerMemoryUsage,
-		"host_memory_usage":         totalMemoryUsage - containerMemoryUsage,
-		"longest_running_duration":  longestRunning.String(),
-		"most_memory_intensive":     mostMemoryIntensive,
-		"avg_memory_per_process":    totalMemoryUsage / uint64(max(totalProcesses, 1)),
+		"total_processes":          totalProcesses,
+		"container_processes":      containerProcesses,
+		"host_processes":           hostProcesses,
+		"total_memory_usage":       totalMemoryUsage,
+		"container_memory_usage":   containerMemoryUsage,
+		"host_memory_usage":        totalMemoryUsage - containerMemoryUsage,
+		"longest_running_duration": longestRunning.String(),
+		"most_memory_intensive":    mostMemoryIntensive,
+		"avg_memory_per_process":   totalMemoryUsage / uint64(max(totalProcesses, 1)),
 	}
 }
 
@@ -1336,14 +1336,14 @@ func max(a, b int) int {
 
 // RingBufferProcessor handles efficient processing of eBPF ring buffer events
 type RingBufferProcessor struct {
-	reader         *ringbuf.Reader
-	eventPool      sync.Pool
-	batchSize      int
-	flushInterval  time.Duration
-	eventBatch     []*MemoryEvent
-	batchMu        sync.Mutex
-	processor      func([]*MemoryEvent) error
-	droppedEvents  *uint64
+	reader          *ringbuf.Reader
+	eventPool       sync.Pool
+	batchSize       int
+	flushInterval   time.Duration
+	eventBatch      []*MemoryEvent
+	batchMu         sync.Mutex
+	processor       func([]*MemoryEvent) error
+	droppedEvents   *uint64
 	processedEvents *uint64
 }
 
@@ -1544,7 +1544,7 @@ type RingBufferMetrics struct {
 func (mc *MemoryCollector) GetRingBufferMetrics() *RingBufferMetrics {
 	now := time.Now()
 	eventsProcessed := atomic.LoadUint64(&mc.eventsProcessed)
-	
+
 	// Calculate processing rate
 	var processingRate float64
 	if !mc.lastEventTime.IsZero() {
@@ -1574,10 +1574,10 @@ func (mc *MemoryCollector) adaptiveRingBufferTuning() {
 			return
 		case <-ticker.C:
 			currentMetrics := mc.GetRingBufferMetrics()
-			
+
 			if lastMetrics != nil {
 				// Calculate drop rate
-				dropRate := float64(currentMetrics.EventsDropped-lastMetrics.EventsDropped) / 
+				dropRate := float64(currentMetrics.EventsDropped-lastMetrics.EventsDropped) /
 					float64(currentMetrics.EventsProcessed-lastMetrics.EventsProcessed+1)
 
 				// Adaptive tuning based on drop rate
@@ -1612,16 +1612,16 @@ func (mc *MemoryCollector) decreaseFlushInterval() {
 
 // KernelCompatibility tracks kernel version and feature support
 type KernelCompatibility struct {
-	Version       string
-	Major         int
-	Minor         int
-	Patch         int
-	SupportsBPF   bool
+	Version         string
+	Major           int
+	Minor           int
+	Patch           int
+	SupportsBPF     bool
 	SupportsRingBuf bool
-	SupportsCO_RE bool
-	SupportsBTF   bool
-	MinKernelMet  bool
-	FeatureList   []string
+	SupportsCO_RE   bool
+	SupportsBTF     bool
+	MinKernelMet    bool
+	FeatureList     []string
 }
 
 // checkKernelCompatibility verifies kernel version and eBPF feature support
@@ -1830,22 +1830,22 @@ func (mc *MemoryCollector) getKernelFeatureRecommendations() []string {
 	recommendations := make([]string, 0)
 
 	if !compat.MinKernelMet {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			fmt.Sprintf("Upgrade kernel from %s to 4.18+ for full eBPF support", compat.Version))
 	}
 
 	if !compat.SupportsRingBuf {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Upgrade to kernel 5.8+ for efficient ring buffer support")
 	}
 
 	if !compat.SupportsCO_RE {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Upgrade to kernel 5.4+ with BTF support for CO-RE compatibility")
 	}
 
 	if !compat.SupportsBTF {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Enable BTF support in kernel configuration for better debugging")
 	}
 
@@ -1861,26 +1861,26 @@ func (mc *MemoryCollector) getKernelFeatureRecommendations() []string {
 // convertToUnifiedEvent converts a MemoryEvent to the unified protobuf format
 func (mc *MemoryCollector) convertToUnifiedEvent(event *MemoryEvent, tracker *ProcessMemoryTracker) (*events.UnifiedEvent, error) {
 	now := time.Now()
-	
+
 	// Generate unique event ID
 	eventID := fmt.Sprintf("memory_%d_%d_%d", event.PID, event.EventType, event.Timestamp)
-	
+
 	// Determine operation type
 	operation := mc.getMemoryOperation(event.EventType)
-	
+
 	// Create memory event data
 	memoryEventData := &events.MemoryEvent{
-		Operation:    operation,
-		SizeBytes:    event.Size,
-		RssBytes:     event.TotalMemory,
-		Allocator:    "kernel",
+		Operation: operation,
+		SizeBytes: event.Size,
+		RssBytes:  event.TotalMemory,
+		Allocator: "kernel",
 		Metadata: map[string]string{
-			"container_id":  fmt.Sprintf("%d", event.ContainerPID),
-			"in_container":  fmt.Sprintf("%t", event.InContainer),
-			"event_type":    fmt.Sprintf("%d", event.EventType),
+			"container_id": fmt.Sprintf("%d", event.ContainerPID),
+			"in_container": fmt.Sprintf("%t", event.InContainer),
+			"event_type":   fmt.Sprintf("%d", event.EventType),
 		},
 	}
-	
+
 	// Add OOM prediction if available
 	if tracker != nil && tracker.PredictedOOM != nil {
 		memoryEventData.Metadata["oom_prediction"] = "true"
@@ -1888,10 +1888,10 @@ func (mc *MemoryCollector) convertToUnifiedEvent(event *MemoryEvent, tracker *Pr
 		memoryEventData.Metadata["time_to_oom"] = tracker.PredictedOOM.TimeToOOM.String()
 		memoryEventData.Metadata["trend_type"] = mc.getTrendTypeName(tracker.PredictedOOM.TrendType)
 	}
-	
+
 	// Determine severity based on event type and predictions
 	severity := mc.getEventSeverity(event, tracker)
-	
+
 	// Create unified event
 	unifiedEvent := &events.UnifiedEvent{
 		Id:        eventID,
@@ -1927,25 +1927,25 @@ func (mc *MemoryCollector) convertToUnifiedEvent(event *MemoryEvent, tracker *Pr
 			Memory: memoryEventData,
 		},
 		Attributes: map[string]*AttributeValue{
-			"collector_name": {Value: &events.AttributeValue_StringValue{StringValue: mc.config.Name}},
-			"host_pid":      {Value: &events.AttributeValue_IntValue{IntValue: int64(event.PID)}},
-			"memory_usage":  {Value: &events.AttributeValue_IntValue{IntValue: int64(event.TotalMemory)}},
+			"collector_name":  {Value: &events.AttributeValue_StringValue{StringValue: mc.config.Name}},
+			"host_pid":        {Value: &events.AttributeValue_IntValue{IntValue: int64(event.PID)}},
+			"memory_usage":    {Value: &events.AttributeValue_IntValue{IntValue: int64(event.TotalMemory)}},
 			"allocation_size": {Value: &events.AttributeValue_IntValue{IntValue: int64(event.Size)}},
 		},
 		Labels: map[string]string{
-			"source":     "ebpf",
-			"collector":  "memory",
-			"process":    event.Command,
-			"node":       mc.getNodeID(),
+			"source":    "ebpf",
+			"collector": "memory",
+			"process":   event.Command,
+			"node":      mc.getNodeID(),
 		},
 		Quality: &events.QualityMetadata{
-			Confidence:    mc.getEventConfidence(event, tracker),
-			Completeness:  1.0, // eBPF data is always complete
-			Accuracy:      mc.getEventAccuracy(tracker),
-			Freshness:     float32(time.Since(time.Unix(0, int64(event.Timestamp))).Seconds()),
+			Confidence:   mc.getEventConfidence(event, tracker),
+			Completeness: 1.0, // eBPF data is always complete
+			Accuracy:     mc.getEventAccuracy(tracker),
+			Freshness:    float32(time.Since(time.Unix(0, int64(event.Timestamp))).Seconds()),
 		},
 	}
-	
+
 	// Add correlation context if available
 	if tracker != nil {
 		unifiedEvent.Correlation = &events.CorrelationContext{
@@ -1955,7 +1955,7 @@ func (mc *MemoryCollector) convertToUnifiedEvent(event *MemoryEvent, tracker *Pr
 			CausalityIds: mc.getCausalityIDs(event, tracker),
 		}
 	}
-	
+
 	return unifiedEvent, nil
 }
 
@@ -2033,18 +2033,18 @@ func (mc *MemoryCollector) getTrendTypeName(trendType TrendType) string {
 // getEventConfidence calculates confidence score for the event
 func (mc *MemoryCollector) getEventConfidence(event *MemoryEvent, tracker *ProcessMemoryTracker) float32 {
 	confidence := float32(0.9) // eBPF data is generally high confidence
-	
+
 	// Adjust based on event type
 	if event.EventType == 3 || event.EventType == 4 { // OOM or exit events
 		confidence = 1.0 // These are definitive events
 	}
-	
+
 	// Factor in prediction confidence if available
 	if tracker != nil && tracker.PredictedOOM != nil {
 		predictionConfidence := float32(tracker.PredictedOOM.Confidence)
 		confidence = (confidence + predictionConfidence) / 2
 	}
-	
+
 	return confidence
 }
 
@@ -2053,13 +2053,13 @@ func (mc *MemoryCollector) getEventAccuracy(tracker *ProcessMemoryTracker) float
 	if tracker == nil {
 		return 0.9 // Default accuracy for eBPF data
 	}
-	
+
 	// Use global prediction accuracy
 	predictionAccuracy := mc.getPredictionAccuracy()
 	if predictionAccuracy > 0 {
 		return float32(predictionAccuracy)
 	}
-	
+
 	return 0.9
 }
 
@@ -2087,21 +2087,21 @@ func (mc *MemoryCollector) generateSessionID(pid uint32, lastUpdate time.Time) s
 // getCausalityIDs generates causality relationships between events
 func (mc *MemoryCollector) getCausalityIDs(event *MemoryEvent, tracker *ProcessMemoryTracker) []string {
 	causalityIDs := make([]string, 0)
-	
+
 	// Link to parent process if available
 	causalityIDs = append(causalityIDs, fmt.Sprintf("process-%d", event.PID))
-	
+
 	// Link to container if in container
 	if event.InContainer {
 		causalityIDs = append(causalityIDs, fmt.Sprintf("container-%d", event.ContainerPID))
 	}
-	
+
 	// Link to previous memory events for this process
 	if tracker != nil && len(tracker.GrowthHistory) > 0 {
 		lastEvent := tracker.GrowthHistory[len(tracker.GrowthHistory)-1]
 		causalityIDs = append(causalityIDs, fmt.Sprintf("memory-history-%d-%d", event.PID, lastEvent.Timestamp.UnixNano()))
 	}
-	
+
 	return causalityIDs
 }
 
@@ -2112,18 +2112,18 @@ func (mc *MemoryCollector) streamToUnifiedFormat(collectorEvent *collectors.Even
 	if !ok {
 		return fmt.Errorf("invalid event data type")
 	}
-	
+
 	// Get process tracker for additional context
 	mc.processesMu.RLock()
 	tracker := mc.processes[event.PID]
 	mc.processesMu.RUnlock()
-	
+
 	// Convert to unified format
 	unifiedEvent, err := mc.convertToUnifiedEvent(event, tracker)
 	if err != nil {
 		return fmt.Errorf("failed to convert to unified format: %w", err)
 	}
-	
+
 	// Stream to gRPC server (this would integrate with the gRPC client)
 	return mc.sendToGRPCStream(unifiedEvent)
 }
@@ -2133,12 +2133,12 @@ func (mc *MemoryCollector) sendToGRPCStream(event *events.UnifiedEvent) error {
 	// This would integrate with the gRPC client from the previous implementation
 	// For now, we'll just log the event
 	if mc.config.Debug {
-		fmt.Printf("Streaming unified event: %s [%s] %s\n", 
+		fmt.Printf("Streaming unified event: %s [%s] %s\n",
 			event.Id, event.Metadata.Type, event.Entity.Name)
 	}
-	
+
 	// TODO: Integrate with actual gRPC streaming client
 	// return mc.grpcClient.SendEvent(event)
-	
+
 	return nil
 }

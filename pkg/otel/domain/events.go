@@ -1,9 +1,9 @@
 package domain
 
 import (
+	"crypto/rand"
 	"fmt"
 	"time"
-	"crypto/rand"
 )
 
 // TraceEvent represents a domain event in the trace aggregate
@@ -240,7 +240,7 @@ func generateEventID() EventID {
 			id.ID[i] = byte(now >> (i * 8))
 		}
 		for i := 8; i < 16; i++ {
-			id.ID[i] = byte(now >> ((i-8) * 8))
+			id.ID[i] = byte(now >> ((i - 8) * 8))
 		}
 	}
 	return id
@@ -252,19 +252,19 @@ func ValidateEvent(event TraceEvent) error {
 	if event == nil {
 		return fmt.Errorf("event cannot be nil")
 	}
-	
+
 	if event.GetEventID().String() == "" {
 		return fmt.Errorf("event ID cannot be empty")
 	}
-	
+
 	if event.GetTimestamp().IsZero() {
 		return fmt.Errorf("event timestamp cannot be zero")
 	}
-	
+
 	if event.GetTraceID() == (TraceID{}) {
 		return fmt.Errorf("trace ID cannot be empty")
 	}
-	
+
 	return nil
 }
 
@@ -283,12 +283,12 @@ func SerializeEvent(event TraceEvent) (*SerializedEvent, error) {
 	if err := ValidateEvent(event); err != nil {
 		return nil, fmt.Errorf("invalid event: %w", err)
 	}
-	
+
 	payload, ok := event.GetPayload().(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid event payload type")
 	}
-	
+
 	return &SerializedEvent{
 		EventID:   event.GetEventID().String(),
 		EventType: getEventTypeString(event.GetEventType()),
@@ -329,10 +329,10 @@ type EventAggregate struct {
 
 func AggregateEvents(events []TraceEvent) map[TraceID]*EventAggregate {
 	aggregates := make(map[TraceID]*EventAggregate)
-	
+
 	for _, event := range events {
 		traceID := event.GetTraceID()
-		
+
 		aggregate, exists := aggregates[traceID]
 		if !exists {
 			aggregate = &EventAggregate{
@@ -343,10 +343,10 @@ func AggregateEvents(events []TraceEvent) map[TraceID]*EventAggregate {
 			}
 			aggregates[traceID] = aggregate
 		}
-		
+
 		aggregate.Events = append(aggregate.Events, event)
 		aggregate.EventCount++
-		
+
 		// Update time range
 		eventTime := event.GetTimestamp()
 		if eventTime.Before(aggregate.StartTime) {
@@ -355,10 +355,10 @@ func AggregateEvents(events []TraceEvent) map[TraceID]*EventAggregate {
 		if eventTime.After(aggregate.EndTime) {
 			aggregate.EndTime = eventTime
 		}
-		
+
 		aggregate.Duration = aggregate.EndTime.Sub(aggregate.StartTime)
 	}
-	
+
 	return aggregates
 }
 
@@ -374,20 +374,20 @@ type EventFilter struct {
 
 func FilterEvents(events []TraceEvent, filter EventFilter) []TraceEvent {
 	var filtered []TraceEvent
-	
+
 	for _, event := range events {
 		if !matchesFilter(event, filter) {
 			continue
 		}
-		
+
 		filtered = append(filtered, event)
-		
+
 		// Apply limit if specified
 		if filter.Limit > 0 && len(filtered) >= filter.Limit {
 			break
 		}
 	}
-	
+
 	return filtered
 }
 
@@ -405,7 +405,7 @@ func matchesFilter(event TraceEvent, filter EventFilter) bool {
 			return false
 		}
 	}
-	
+
 	// Check event type filter
 	if len(filter.EventTypes) > 0 {
 		found := false
@@ -419,7 +419,7 @@ func matchesFilter(event TraceEvent, filter EventFilter) bool {
 			return false
 		}
 	}
-	
+
 	// Check time range filter
 	eventTime := event.GetTimestamp()
 	if filter.StartTime != nil && eventTime.Before(*filter.StartTime) {
@@ -428,6 +428,6 @@ func matchesFilter(event TraceEvent, filter EventFilter) bool {
 	if filter.EndTime != nil && eventTime.After(*filter.EndTime) {
 		return false
 	}
-	
+
 	return true
 }

@@ -88,7 +88,7 @@ func (c *CLITranslator) ExportToMarkdown(inputPath, outputPath string) error {
 func (c *CLITranslator) ValidateFile(path string) (*ValidationResult, error) {
 	// Determine file type
 	ext := filepath.Ext(path)
-	
+
 	var config *OpinionConfig
 	var err error
 
@@ -191,10 +191,10 @@ Workload Type: %s
 
 func (b *InteractiveBuilder) prompt(question, defaultValue string) string {
 	fmt.Fprintf(b.writer, "%s [%s]: ", question, defaultValue)
-	
+
 	var input string
 	fmt.Fscanln(b.reader, &input)
-	
+
 	if input == "" {
 		return defaultValue
 	}
@@ -211,54 +211,54 @@ func (b *InteractiveBuilder) promptChoice(question string, choices []string, def
 		fmt.Fprintf(b.writer, "  %s [%d] %s\n", marker, i+1, choice)
 	}
 	fmt.Fprintf(b.writer, "Choice [%s]: ", defaultChoice)
-	
+
 	var input string
 	fmt.Fscanln(b.reader, &input)
-	
+
 	if input == "" {
 		return defaultChoice
 	}
-	
+
 	// Try to parse as number
 	var idx int
 	if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx > 0 && idx <= len(choices) {
 		return choices[idx-1]
 	}
-	
+
 	// Return as-is if it matches a choice
 	for _, choice := range choices {
 		if input == choice {
 			return input
 		}
 	}
-	
+
 	return defaultChoice
 }
 
 func (b *InteractiveBuilder) promptInt(question string, defaultValue int) int {
 	fmt.Fprintf(b.writer, "%s [%d]: ", question, defaultValue)
-	
+
 	var input string
 	fmt.Fscanln(b.reader, &input)
-	
+
 	if input == "" {
 		return defaultValue
 	}
-	
+
 	var value int
 	if _, err := fmt.Sscanf(input, "%d", &value); err == nil {
 		return value
 	}
-	
+
 	return defaultValue
 }
 
 func (b *InteractiveBuilder) promptDuration(question, defaultValue string) string {
 	fmt.Fprintf(b.writer, "%s [%s]: ", question, defaultValue)
-	
+
 	var input string
 	fmt.Fscanln(b.reader, &input)
-	
+
 	if input == "" {
 		return defaultValue
 	}
@@ -267,14 +267,14 @@ func (b *InteractiveBuilder) promptDuration(question, defaultValue string) strin
 
 func (b *InteractiveBuilder) promptList(question, defaultValue string) []string {
 	fmt.Fprintf(b.writer, "%s [%s]: ", question, defaultValue)
-	
+
 	var input string
 	fmt.Fscanln(b.reader, &input)
-	
+
 	if input == "" {
 		input = defaultValue
 	}
-	
+
 	// Split by comma and trim
 	var result []string
 	for _, item := range strings.Split(input, ",") {
@@ -283,7 +283,7 @@ func (b *InteractiveBuilder) promptList(question, defaultValue string) []string 
 			result = append(result, trimmed)
 		}
 	}
-	
+
 	return result
 }
 

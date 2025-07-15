@@ -2,6 +2,7 @@ package correlation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,19 +16,19 @@ func BenchmarkPerfectEngine(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create perfect engine: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	if err := engine.Start(ctx); err != nil {
 		b.Fatalf("Failed to start engine: %v", err)
 	}
 	defer engine.Stop()
-	
+
 	// Create sample opinionated event optimized for benchmarking
 	event := createBenchmarkOpinionatedEvent(b)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		if err := engine.ProcessOpinionatedEvent(ctx, event); err != nil {
 			b.Fatalf("Failed to process event: %v", err)
@@ -46,13 +47,13 @@ func BenchmarkSemanticCorrelation(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create semantic correlator: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	event := createBenchmarkOpinionatedEvent(b)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := correlator.Correlate(ctx, event)
 		if err != nil {
@@ -72,13 +73,13 @@ func BenchmarkBehavioralMatching(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create behavioral correlator: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	event := createBenchmarkOpinionatedEvent(b)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := correlator.Correlate(ctx, event)
 		if err != nil {
@@ -95,20 +96,20 @@ func BenchmarkAIFeatureProcessing(b *testing.B) {
 		GraphFeaturesEnabled: true,
 		TimeSeriesEnabled:    true,
 		EmbeddingDimension:   512,
-		BatchSize:           1000,
-		FeatureCacheSize:    100000,
-		AIEnabled:           true,
+		BatchSize:            1000,
+		FeatureCacheSize:     100000,
+		AIEnabled:            true,
 	})
 	if err != nil {
 		b.Fatalf("Failed to create AI processor: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	event := createBenchmarkOpinionatedEvent(b)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := processor.ProcessAIFeatures(ctx, event)
 		if err != nil {
@@ -130,17 +131,17 @@ func BenchmarkCrossContextCorrelation(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create pattern matcher: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	events := []*opinionated.OpinionatedEvent{
 		createBenchmarkOpinionatedEvent(b),
 		createBenchmarkOpinionatedEvent(b),
 		createBenchmarkOpinionatedEvent(b),
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := matcher.DetectPatterns(ctx, events)
 		if err != nil {
@@ -156,19 +157,19 @@ func BenchmarkEndToEndProcessing(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create perfect engine: %v", err)
 	}
-	
+
 	processor, err := NewAIReadyProcessor(&AIConfig{
 		DenseFeatureSize:     256,
 		SparseFeatureEnabled: true,
 		GraphFeaturesEnabled: true,
 		TimeSeriesEnabled:    true,
 		EmbeddingDimension:   512,
-		AIEnabled:           true,
+		AIEnabled:            true,
 	})
 	if err != nil {
 		b.Fatalf("Failed to create AI processor: %v", err)
 	}
-	
+
 	matcher, err := NewSemanticPatternMatcher(&SemanticConfig{
 		EmbeddingDimension:   512,
 		SimilarityThreshold:  0.85,
@@ -179,33 +180,33 @@ func BenchmarkEndToEndProcessing(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create pattern matcher: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	if err := engine.Start(ctx); err != nil {
 		b.Fatalf("Failed to start engine: %v", err)
 	}
 	defer engine.Stop()
-	
+
 	event := createBenchmarkOpinionatedEvent(b)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		// Complete processing pipeline
-		
+
 		// 1. Process AI features
 		_, err := processor.ProcessAIFeatures(ctx, event)
 		if err != nil {
 			b.Fatalf("AI processing failed: %v", err)
 		}
-		
+
 		// 2. Pattern matching
 		_, err = matcher.MatchPatterns(ctx, event)
 		if err != nil {
 			b.Fatalf("Pattern matching failed: %v", err)
 		}
-		
+
 		// 3. Correlation engine
 		if err := engine.ProcessOpinionatedEvent(ctx, event); err != nil {
 			b.Fatalf("Correlation processing failed: %v", err)
@@ -219,31 +220,31 @@ func BenchmarkThroughput(b *testing.B) {
 		SemanticSimilarityThreshold: 0.85,
 		SemanticEmbeddingDimension:  512,
 		BehavioralAnomalyThreshold:  0.7,
-		TemporalWindow:             5 * time.Minute,
-		CausalityDepth:             10,
-		AIEnabled:                  true,
-		MaxEventsInMemory:          500000,
-		CorrelationWorkers:         8,
+		TemporalWindow:              5 * time.Minute,
+		CausalityDepth:              10,
+		AIEnabled:                   true,
+		MaxEventsInMemory:           500000,
+		CorrelationWorkers:          8,
 	})
 	if err != nil {
 		b.Fatalf("Failed to create perfect engine: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	if err := engine.Start(ctx); err != nil {
 		b.Fatalf("Failed to start engine: %v", err)
 	}
 	defer engine.Stop()
-	
+
 	// Create batch of events for throughput testing
 	events := make([]*opinionated.OpinionatedEvent, 1000)
 	for i := range events {
 		events[i] = createBenchmarkOpinionatedEvent(b)
 		events[i].Id = generateEventID(i)
 	}
-	
+
 	b.ResetTimer()
-	
+
 	start := time.Now()
 	for i := 0; i < b.N; i++ {
 		for _, event := range events {
@@ -253,10 +254,10 @@ func BenchmarkThroughput(b *testing.B) {
 		}
 	}
 	duration := time.Since(start)
-	
+
 	totalEvents := int64(b.N) * int64(len(events))
 	eventsPerSecond := float64(totalEvents) / duration.Seconds()
-	
+
 	b.ReportMetric(eventsPerSecond, "events/sec")
 }
 
@@ -264,23 +265,23 @@ func BenchmarkThroughput(b *testing.B) {
 func BenchmarkMemoryUsage(b *testing.B) {
 	config := DefaultPerfectConfig()
 	config.MaxEventsInMemory = 100000 // Limit for memory testing
-	
+
 	engine, err := NewPerfectEngine(config)
 	if err != nil {
 		b.Fatalf("Failed to create perfect engine: %v", err)
 	}
-	
+
 	ctx := context.Background()
 	if err := engine.Start(ctx); err != nil {
 		b.Fatalf("Failed to start engine: %v", err)
 	}
 	defer engine.Stop()
-	
+
 	event := createBenchmarkOpinionatedEvent(b)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		if err := engine.ProcessOpinionatedEvent(ctx, event); err != nil {
 			b.Fatalf("Failed to process event: %v", err)
@@ -291,11 +292,11 @@ func BenchmarkMemoryUsage(b *testing.B) {
 // Helper function to create optimized benchmark events
 func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent {
 	b.Helper()
-	
+
 	return &opinionated.OpinionatedEvent{
 		Id:        "benchmark-event-001",
 		Timestamp: timestamppb.Now(),
-		
+
 		// Semantic context optimized for benchmarking
 		Semantic: &opinionated.SemanticContext{
 			EventType:        "resource.exhaustion.memory.oom_kill",
@@ -306,23 +307,23 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 			Intent:           "resource_management",
 			IntentConfidence: 0.95,
 		},
-		
+
 		// Behavioral context for entity correlation
 		Behavioral: &opinionated.BehavioralContext{
 			Entity: &opinionated.EntityFingerprint{
-				Id:               "pod:frontend-abc123",
-				Type:            "kubernetes.pod",
-				Hierarchy:       []string{"cluster:prod", "namespace:web", "deployment:frontend"},
+				Id:                 "pod:frontend-abc123",
+				Type:               "kubernetes.pod",
+				Hierarchy:          []string{"cluster:prod", "namespace:web", "deployment:frontend"},
 				IdentityAttributes: map[string]string{"app": "frontend", "version": "v1.2.3"},
-				LifecycleStage:   "healthy",
-				TrustScore:       0.85,
+				LifecycleStage:     "healthy",
+				TrustScore:         0.85,
 			},
 			BehaviorVector:    generateBenchmarkVector(256),
 			BehaviorDeviation: 0.7,
 			BehaviorCluster:   "normal_pod_behavior",
 			BehaviorTrend:     "stable",
 		},
-		
+
 		// Temporal context for pattern detection
 		Temporal: &opinionated.TemporalContext{
 			Patterns: []*opinionated.TemporalPattern{
@@ -338,7 +339,7 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 				UnusualDurationScore:  0.1,
 			},
 		},
-		
+
 		// Anomaly context for correlation
 		Anomaly: &opinionated.AnomalyContext{
 			AnomalyScore: 0.8,
@@ -350,7 +351,7 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 				Collective:  0.4,
 			},
 		},
-		
+
 		// AI features for ML processing
 		AiFeatures: &opinionated.AIFeatures{
 			DenseFeatures:       generateBenchmarkVector(256),
@@ -371,34 +372,42 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 				Trend_24H: 0.1,
 			},
 		},
-		
+
 		// Causality context for root cause analysis
 		Causality: &opinionated.CausalityContext{
-			RootCause: &opinionated.RootCause{
-				Type:       "resource_exhaustion",
-				Confidence: 0.9,
-				Evidence:   []string{"memory_trend_increasing", "no_memory_limit_set"},
-			},
-			Effects: []*opinionated.PredictedEffect{
+			CausalChain: []opinionated.CausalEvent{
 				{
-					Type:        "service_degradation",
-					Probability: 0.8,
-					Severity:    0.7,
-					Mitigations: []string{"increase_memory_limit", "add_horizontal_autoscaling"},
+					EventID:     "event-001",
+					Description: "Memory usage increased",
+					Timestamp:   time.Now().Add(-5 * time.Minute),
+					Confidence:  0.9,
+				},
+				{
+					EventID:     "event-002",
+					Description: "Memory threshold exceeded",
+					Timestamp:   time.Now().Add(-3 * time.Minute),
+					Confidence:  0.8,
+				},
+				{
+					EventID:     "event-003",
+					Description: "OOM Kill triggered",
+					Timestamp:   time.Now().Add(-1 * time.Minute),
+					Confidence:  0.95,
 				},
 			},
+			RootCause:  "resource_exhaustion",
 			Confidence: 0.85,
 			ChainDepth: 3,
 		},
-		
+
 		// Impact context for business relevance
 		Impact: &opinionated.ImpactContext{
 			BusinessImpact:  0.8,
 			TechnicalImpact: 0.9,
-			UserImpact:     0.7,
-			SecurityImpact: 0.1,
+			UserImpact:      0.7,
+			SecurityImpact:  0.1,
 			BlastRadius: &opinionated.BlastRadius{
-				AffectedEntities:        15,
+				AffectedEntities:       15,
 				AffectedTypes:          []string{"pod", "service", "deployment"},
 				PropagationProbability: 0.6,
 				ContainmentStatus:      "partial",
@@ -406,11 +415,11 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 			Urgency: "high",
 			Actions: []*opinionated.RecommendedAction{
 				{
-					Type:           "mitigate",
-					Action:         "Increase memory limits for frontend deployment",
-					Urgency:        "immediate",
+					Type:            "mitigate",
+					Action:          "Increase memory limits for frontend deployment",
+					Urgency:         "immediate",
 					ExpectedOutcome: "Prevent future OOM kills",
-					Confidence:     0.9,
+					Confidence:      0.9,
 				},
 			},
 		},

@@ -25,33 +25,33 @@ type OTELHandler struct {
 	output    io.Writer
 
 	// OTEL integration
-	tracer       domain.Tracer[any]
+	tracer        domain.Tracer[any]
 	spanProcessor domain.SpanProcessor[any]
-	
+
 	// Performance optimization
-	bufferPool   sync.Pool
-	recordPool   sync.Pool
-	attrPool     sync.Pool
-	
+	bufferPool sync.Pool
+	recordPool sync.Pool
+	attrPool   sync.Pool
+
 	// Lock-free performance counters
 	recordsWritten int64
 	bytesWritten   int64
 	errorsCount    int64
-	
+
 	// Memory arena for zero-allocation paths
-	arena        *Arena
-	
+	arena *Arena
+
 	// Configuration
-	opts         OTELHandlerOptions
-	
+	opts OTELHandlerOptions
+
 	// Groups and attributes handling
-	groups       []string // Immutable slice for groups
-	precomputed  []byte   // Precomputed JSON prefix
-	
+	groups      []string // Immutable slice for groups
+	precomputed []byte   // Precomputed JSON prefix
+
 	// SIMD-optimized buffer management
-	writeBuffer  []byte
-	writePos     int
-	
+	writeBuffer []byte
+	writePos    int
+
 	// Thread-local storage for hot paths
 	localBuffers sync.Map // map[*goroutineID]*localBuffer
 }
@@ -61,40 +61,40 @@ type OTELHandlerOptions struct {
 	// Standard slog options
 	Level     slog.Leveler
 	AddSource bool
-	
+
 	// OTEL-specific options
-	EnableTracing     bool
-	EnableMetrics     bool
-	SpanNamePrefix    string
-	TraceIDKey        string
-	SpanIDKey         string
-	
+	EnableTracing  bool
+	EnableMetrics  bool
+	SpanNamePrefix string
+	TraceIDKey     string
+	SpanIDKey      string
+
 	// Performance options
-	BufferSize        int
-	EnableZeroAlloc   bool
-	EnableSIMD        bool
-	ArenaSize         int64
-	
+	BufferSize      int
+	EnableZeroAlloc bool
+	EnableSIMD      bool
+	ArenaSize       int64
+
 	// Output formatting
-	ReplaceAttr       func(groups []string, a slog.Attr) slog.Attr
-	TimeFormat        string
-	EnableColor       bool
-	EnableProfiling   bool
-	
+	ReplaceAttr     func(groups []string, a slog.Attr) slog.Attr
+	TimeFormat      string
+	EnableColor     bool
+	EnableProfiling bool
+
 	// Structured attributes
-	ServiceName       string
-	ServiceVersion    string
-	Environment       string
-	
+	ServiceName    string
+	ServiceVersion string
+	Environment    string
+
 	// Advanced features
 	EnableCorrelation bool
 	SamplingRate      float64
 	AsyncMode         bool
-	
+
 	// Error handling
-	ErrorHandler      func(error)
-	MaxErrors         int
-	ErrorBackoff      time.Duration
+	ErrorHandler func(error)
+	MaxErrors    int
+	ErrorBackoff time.Duration
 }
 
 // Arena provides memory arena allocation for zero-allocation logging
@@ -117,10 +117,10 @@ type localBuffer struct {
 // TraceAwareRecord extends slog.Record with OTEL context
 type TraceAwareRecord struct {
 	slog.Record
-	traceID  domain.TraceID
-	spanID   domain.SpanID
-	span     domain.Span[any]
-	sampled  bool
+	traceID domain.TraceID
+	spanID  domain.SpanID
+	span    domain.Span[any]
+	sampled bool
 }
 
 // NewOTELHandler creates a new OTEL-integrated slog handler
@@ -128,28 +128,28 @@ func NewOTELHandler(output io.Writer, opts *OTELHandlerOptions) *OTELHandler {
 	if opts == nil {
 		opts = &OTELHandlerOptions{}
 	}
-	
+
 	// Apply defaults
 	applyDefaults(opts)
-	
+
 	// Create arena for zero-allocation paths
 	arena := &Arena{
 		data: make([]byte, opts.ArenaSize),
 		size: opts.ArenaSize,
 	}
-	
+
 	handler := &OTELHandler{
-		level:     opts.Level.Level(),
-		addSource: opts.AddSource,
-		output:    output,
-		arena:     arena,
-		opts:      *opts,
+		level:       opts.Level.Level(),
+		addSource:   opts.AddSource,
+		output:      output,
+		arena:       arena,
+		opts:        *opts,
 		writeBuffer: make([]byte, opts.BufferSize),
 	}
-	
+
 	// Initialize pools for object reuse
 	handler.initializePools()
-	
+
 	return handler
 }
 
@@ -159,17 +159,17 @@ func (h *OTELHandler) Handle(ctx context.Context, record slog.Record) error {
 	if !h.Enabled(ctx, record.Level) {
 		return nil
 	}
-	
+
 	// Increment counters atomically
 	atomic.AddInt64(&h.recordsWritten, 1)
-	
+
 	// Extract OTEL context if available
 	traceRecord := h.enrichWithOTELContext(ctx, record)
-	
+
 	// Get local buffer for this goroutine
 	localBuf := h.getLocalBuffer()
 	defer h.putLocalBuffer(localBuf)
-	
+
 	// Format record with zero-allocation path when possible
 	var err error
 	if h.opts.EnableZeroAlloc {
@@ -177,7 +177,7 @@ func (h *OTELHandler) Handle(ctx context.Context, record slog.Record) error {
 	} else {
 		err = h.formatRecord(localBuf, traceRecord)
 	}
-	
+
 	if err != nil {
 		atomic.AddInt64(&h.errorsCount, 1)
 		if h.opts.ErrorHandler != nil {
@@ -185,14 +185,14 @@ func (h *OTELHandler) Handle(ctx context.Context, record slog.Record) error {
 		}
 		return err
 	}
-	
+
 	// Write to output with optional SIMD acceleration
 	if h.opts.EnableSIMD && len(localBuf.buf) > 64 {
 		err = h.writeSIMDOptimized(localBuf.buf)
 	} else {
 		err = h.writeStandard(localBuf.buf)
 	}
-	
+
 	if err != nil {
 		atomic.AddInt64(&h.errorsCount, 1)
 		if h.opts.ErrorHandler != nil {
@@ -200,12 +200,12 @@ func (h *OTELHandler) Handle(ctx context.Context, record slog.Record) error {
 		}
 		return err
 	}
-	
+
 	// Create OTEL span for this log record if tracing is enabled
 	if h.opts.EnableTracing && h.tracer != nil {
 		h.createLogSpan(ctx, traceRecord)
 	}
-	
+
 	atomic.AddInt64(&h.bytesWritten, int64(len(localBuf.buf)))
 	return nil
 }
@@ -216,12 +216,12 @@ func (h *OTELHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	if level < h.level {
 		return false
 	}
-	
+
 	// OTEL sampling check if configured
 	if h.opts.EnableCorrelation && h.opts.SamplingRate < 1.0 {
 		return h.shouldSample(ctx, level)
 	}
-	
+
 	return true
 }
 
@@ -230,15 +230,15 @@ func (h *OTELHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(attrs) == 0 {
 		return h
 	}
-	
+
 	// Clone handler with new attributes
 	newHandler := *h
-	
+
 	// Precompute JSON for performance
 	if h.opts.EnableZeroAlloc {
 		newHandler.precomputed = h.precomputeAttrs(attrs)
 	}
-	
+
 	return &newHandler
 }
 
@@ -247,11 +247,11 @@ func (h *OTELHandler) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return h
 	}
-	
+
 	// Clone handler with new group
 	newHandler := *h
 	newHandler.groups = append(slices.Clip(h.groups), name)
-	
+
 	return &newHandler
 }
 
@@ -263,9 +263,9 @@ func (h *OTELHandler) GetStats() HandlerStats {
 		ErrorsCount:    atomic.LoadInt64(&h.errorsCount),
 		ArenaUsage:     float64(atomic.LoadInt64(&h.arena.pos)) / float64(h.arena.size),
 		BufferPools: PoolStats{
-			BufferPoolHits:  h.getPoolStats("buffer"),
-			RecordPoolHits:  h.getPoolStats("record"), 
-			AttrPoolHits:    h.getPoolStats("attr"),
+			BufferPoolHits: h.getPoolStats("buffer"),
+			RecordPoolHits: h.getPoolStats("record"),
+			AttrPoolHits:   h.getPoolStats("attr"),
 		},
 	}
 }
@@ -274,7 +274,7 @@ func (h *OTELHandler) GetStats() HandlerStats {
 
 func (h *OTELHandler) enrichWithOTELContext(ctx context.Context, record slog.Record) TraceAwareRecord {
 	traceRecord := TraceAwareRecord{Record: record}
-	
+
 	// Extract span context from Go context
 	if span := extractSpanFromContext(ctx); span != nil {
 		traceRecord.span = span
@@ -282,18 +282,18 @@ func (h *OTELHandler) enrichWithOTELContext(ctx context.Context, record slog.Rec
 		traceRecord.spanID = span.GetSpanID()
 		traceRecord.sampled = span.IsRecording()
 	}
-	
+
 	return traceRecord
 }
 
 func (h *OTELHandler) formatRecordZeroAlloc(localBuf *localBuffer, record TraceAwareRecord) error {
 	// Reset buffer without allocation
 	localBuf.buf = localBuf.buf[:0]
-	
+
 	// Use arena allocation for temporary objects
 	scratch := h.arena.Alloc(1024) // Get 1KB scratch space
 	defer h.arena.Free(scratch)
-	
+
 	// Build JSON using unsafe string operations for performance
 	return h.buildJSONZeroAlloc(localBuf, record, scratch)
 }
@@ -301,70 +301,70 @@ func (h *OTELHandler) formatRecordZeroAlloc(localBuf *localBuffer, record TraceA
 func (h *OTELHandler) formatRecord(localBuf *localBuffer, record TraceAwareRecord) error {
 	// Standard allocation path
 	localBuf.buf = localBuf.buf[:0]
-	
+
 	// Build structured log entry
 	entry := h.buildLogEntry(record)
-	
+
 	// Marshal to JSON
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
-	
+
 	localBuf.buf = append(localBuf.buf, data...)
 	localBuf.buf = append(localBuf.buf, '\n')
-	
+
 	return nil
 }
 
 func (h *OTELHandler) buildJSONZeroAlloc(localBuf *localBuffer, record TraceAwareRecord, scratch []byte) error {
 	// Start JSON object
 	localBuf.buf = append(localBuf.buf, '{')
-	
+
 	// Add timestamp with zero allocation
 	h.appendTimestampZeroAlloc(&localBuf.buf, record.Time)
 	localBuf.buf = append(localBuf.buf, ',')
-	
+
 	// Add level
 	h.appendLevelZeroAlloc(&localBuf.buf, record.Level)
 	localBuf.buf = append(localBuf.buf, ',')
-	
+
 	// Add message with escape handling
 	h.appendMessageZeroAlloc(&localBuf.buf, record.Message)
-	
+
 	// Add OTEL context if available
 	if record.traceID != (domain.TraceID{}) {
 		localBuf.buf = append(localBuf.buf, ',')
 		h.appendOTELContextZeroAlloc(&localBuf.buf, record)
 	}
-	
+
 	// Add source information if enabled
 	if h.addSource {
 		localBuf.buf = append(localBuf.buf, ',')
 		h.appendSourceZeroAlloc(&localBuf.buf, record.PC)
 	}
-	
+
 	// Add attributes
 	if record.NumAttrs() > 0 {
 		localBuf.buf = append(localBuf.buf, ',')
 		h.appendAttrsZeroAlloc(&localBuf.buf, record, scratch)
 	}
-	
+
 	// Add service metadata
 	if h.opts.ServiceName != "" {
 		localBuf.buf = append(localBuf.buf, ',')
 		h.appendServiceMetadataZeroAlloc(&localBuf.buf)
 	}
-	
+
 	// Close JSON object
 	localBuf.buf = append(localBuf.buf, '}', '\n')
-	
+
 	return nil
 }
 
 func (h *OTELHandler) appendTimestampZeroAlloc(buf *[]byte, t time.Time) {
 	*buf = append(*buf, `"timestamp":"`...)
-	
+
 	if h.opts.TimeFormat != "" {
 		formatted := t.Format(h.opts.TimeFormat)
 		*buf = append(*buf, formatted...)
@@ -372,13 +372,13 @@ func (h *OTELHandler) appendTimestampZeroAlloc(buf *[]byte, t time.Time) {
 		// RFC3339Nano format with zero allocation
 		*buf = t.AppendFormat(*buf, time.RFC3339Nano)
 	}
-	
+
 	*buf = append(*buf, '"')
 }
 
 func (h *OTELHandler) appendLevelZeroAlloc(buf *[]byte, level slog.Level) {
 	*buf = append(*buf, `"level":"`...)
-	
+
 	// Use efficient level string conversion
 	switch level {
 	case slog.LevelDebug:
@@ -393,13 +393,13 @@ func (h *OTELHandler) appendLevelZeroAlloc(buf *[]byte, level slog.Level) {
 		// Custom level - convert number
 		*buf = fmt.Appendf(*buf, "LEVEL_%d", int(level))
 	}
-	
+
 	*buf = append(*buf, '"')
 }
 
 func (h *OTELHandler) appendMessageZeroAlloc(buf *[]byte, message string) {
 	*buf = append(*buf, `"message":"`...)
-	
+
 	// Escape JSON characters efficiently
 	for i := 0; i < len(message); i++ {
 		c := message[i]
@@ -423,7 +423,7 @@ func (h *OTELHandler) appendMessageZeroAlloc(buf *[]byte, message string) {
 			}
 		}
 	}
-	
+
 	*buf = append(*buf, '"')
 }
 
@@ -432,12 +432,12 @@ func (h *OTELHandler) appendOTELContextZeroAlloc(buf *[]byte, record TraceAwareR
 	*buf = append(*buf, `"trace_id":"`...)
 	h.appendTraceIDHex(buf, record.traceID)
 	*buf = append(*buf, '"')
-	
+
 	// Add span ID
 	*buf = append(*buf, `,"span_id":"`...)
 	h.appendSpanIDHex(buf, record.spanID)
 	*buf = append(*buf, '"')
-	
+
 	// Add sampling flag
 	*buf = append(*buf, `,"sampled":`...)
 	if record.sampled {
@@ -465,7 +465,7 @@ func (h *OTELHandler) appendSpanIDHex(buf *[]byte, spanID domain.SpanID) {
 
 func (h *OTELHandler) appendSourceZeroAlloc(buf *[]byte, pc uintptr) {
 	frame, _ := runtime.CallersFrames([]uintptr{pc}).Next()
-	
+
 	*buf = append(*buf, `"source":{"file":"`...)
 	*buf = append(*buf, frame.File...)
 	*buf = append(*buf, `","line":`...)
@@ -477,18 +477,18 @@ func (h *OTELHandler) appendSourceZeroAlloc(buf *[]byte, pc uintptr) {
 
 func (h *OTELHandler) appendAttrsZeroAlloc(buf *[]byte, record TraceAwareRecord, scratch []byte) {
 	first := true
-	
+
 	record.Attrs(func(attr slog.Attr) bool {
 		if !first {
 			*buf = append(*buf, ',')
 		}
 		first = false
-		
+
 		// Apply replacer if configured
 		if h.opts.ReplaceAttr != nil {
 			attr = h.opts.ReplaceAttr(h.groups, attr)
 		}
-		
+
 		h.appendAttrZeroAlloc(buf, attr, scratch)
 		return true
 	})
@@ -499,37 +499,37 @@ func (h *OTELHandler) appendAttrZeroAlloc(buf *[]byte, attr slog.Attr, scratch [
 	*buf = append(*buf, '"')
 	*buf = append(*buf, attr.Key...)
 	*buf = append(*buf, `":`...)
-	
+
 	// Append value based on type
 	switch attr.Value.Kind() {
 	case slog.KindString:
 		*buf = append(*buf, '"')
 		h.appendEscapedString(buf, attr.Value.String())
 		*buf = append(*buf, '"')
-		
+
 	case slog.KindInt64:
 		*buf = fmt.Appendf(*buf, "%d", attr.Value.Int64())
-		
+
 	case slog.KindFloat64:
 		*buf = fmt.Appendf(*buf, "%g", attr.Value.Float64())
-		
+
 	case slog.KindBool:
 		if attr.Value.Bool() {
 			*buf = append(*buf, "true"...)
 		} else {
 			*buf = append(*buf, "false"...)
 		}
-		
+
 	case slog.KindTime:
 		*buf = append(*buf, '"')
 		*buf = attr.Value.Time().AppendFormat(*buf, time.RFC3339Nano)
 		*buf = append(*buf, '"')
-		
+
 	case slog.KindDuration:
 		*buf = append(*buf, '"')
 		*buf = append(*buf, attr.Value.Duration().String()...)
 		*buf = append(*buf, '"')
-		
+
 	case slog.KindGroup:
 		*buf = append(*buf, '{')
 		attrs := attr.Value.Group()
@@ -540,7 +540,7 @@ func (h *OTELHandler) appendAttrZeroAlloc(buf *[]byte, attr slog.Attr, scratch [
 			h.appendAttrZeroAlloc(buf, a, scratch)
 		}
 		*buf = append(*buf, '}')
-		
+
 	default:
 		// Any type - use JSON marshaling
 		*buf = append(*buf, '"')
@@ -553,19 +553,19 @@ func (h *OTELHandler) appendServiceMetadataZeroAlloc(buf *[]byte) {
 	*buf = append(*buf, `"service":{"name":"`...)
 	*buf = append(*buf, h.opts.ServiceName...)
 	*buf = append(*buf, '"')
-	
+
 	if h.opts.ServiceVersion != "" {
 		*buf = append(*buf, `,"version":"`...)
 		*buf = append(*buf, h.opts.ServiceVersion...)
 		*buf = append(*buf, '"')
 	}
-	
+
 	if h.opts.Environment != "" {
 		*buf = append(*buf, `,"environment":"`...)
 		*buf = append(*buf, h.opts.Environment...)
 		*buf = append(*buf, '"')
 	}
-	
+
 	*buf = append(*buf, '}')
 }
 
@@ -604,17 +604,17 @@ func (h *OTELHandler) createLogSpan(ctx context.Context, record TraceAwareRecord
 	if h.tracer == nil {
 		return
 	}
-	
+
 	// Create a span for this log record
 	spanName := fmt.Sprintf("%s%s", h.opts.SpanNamePrefix, record.Level.String())
 	span := h.tracer.StartSpan(ctx, spanName)
 	defer span.End()
-	
+
 	// Add log attributes to span
 	span.SetAttribute("log.level", record.Level.String())
 	span.SetAttribute("log.message", record.Message)
 	span.SetAttribute("log.timestamp", record.Time.Format(time.RFC3339Nano))
-	
+
 	// Add source information if available
 	if h.addSource {
 		frame, _ := runtime.CallersFrames([]uintptr{record.PC}).Next()
@@ -622,7 +622,7 @@ func (h *OTELHandler) createLogSpan(ctx context.Context, record TraceAwareRecord
 		span.SetAttribute("log.source.line", frame.Line)
 		span.SetAttribute("log.source.function", frame.Function)
 	}
-	
+
 	// Add custom attributes
 	record.Attrs(func(attr slog.Attr) bool {
 		span.SetAttribute(fmt.Sprintf("log.attr.%s", attr.Key), attr.Value.String())
@@ -635,7 +635,7 @@ func (h *OTELHandler) shouldSample(ctx context.Context, level slog.Level) bool {
 	if level >= slog.LevelError {
 		return true // Always sample errors
 	}
-	
+
 	// Use simple hash-based sampling for deterministic behavior
 	hash := uint64(uintptr(unsafe.Pointer(&level))) // Use level address as seed
 	return (hash % 1000) < uint64(h.opts.SamplingRate*1000)
@@ -644,13 +644,13 @@ func (h *OTELHandler) shouldSample(ctx context.Context, level slog.Level) bool {
 func (h *OTELHandler) getLocalBuffer() *localBuffer {
 	// Get goroutine-specific buffer for thread safety
 	gid := getGoroutineID()
-	
+
 	if buf, ok := h.localBuffers.Load(gid); ok {
 		localBuf := buf.(*localBuffer)
 		localBuf.lastUsed = time.Now()
 		return localBuf
 	}
-	
+
 	// Create new buffer
 	localBuf := &localBuffer{
 		buf:      make([]byte, 0, h.opts.BufferSize),
@@ -658,7 +658,7 @@ func (h *OTELHandler) getLocalBuffer() *localBuffer {
 		groups:   make([]string, 0, 4),
 		lastUsed: time.Now(),
 	}
-	
+
 	h.localBuffers.Store(gid, localBuf)
 	return localBuf
 }
@@ -676,14 +676,14 @@ func (h *OTELHandler) buildLogEntry(record TraceAwareRecord) map[string]any {
 		"level":     record.Level.String(),
 		"message":   record.Message,
 	}
-	
+
 	// Add OTEL context
 	if record.traceID != (domain.TraceID{}) {
 		entry["trace_id"] = fmt.Sprintf("%x", record.traceID)
 		entry["span_id"] = fmt.Sprintf("%x", record.spanID)
 		entry["sampled"] = record.sampled
 	}
-	
+
 	// Add source information
 	if h.addSource {
 		frame, _ := runtime.CallersFrames([]uintptr{record.PC}).Next()
@@ -693,7 +693,7 @@ func (h *OTELHandler) buildLogEntry(record TraceAwareRecord) map[string]any {
 			"function": frame.Function,
 		}
 	}
-	
+
 	// Add attributes
 	record.Attrs(func(attr slog.Attr) bool {
 		if h.opts.ReplaceAttr != nil {
@@ -702,7 +702,7 @@ func (h *OTELHandler) buildLogEntry(record TraceAwareRecord) map[string]any {
 		entry[attr.Key] = attr.Value.Any()
 		return true
 	})
-	
+
 	// Add service metadata
 	if h.opts.ServiceName != "" {
 		service := map[string]any{
@@ -716,7 +716,7 @@ func (h *OTELHandler) buildLogEntry(record TraceAwareRecord) map[string]any {
 		}
 		entry["service"] = service
 	}
-	
+
 	return entry
 }
 
@@ -724,11 +724,11 @@ func (h *OTELHandler) initializePools() {
 	h.bufferPool.New = func() any {
 		return make([]byte, 0, h.opts.BufferSize)
 	}
-	
+
 	h.recordPool.New = func() any {
 		return &TraceAwareRecord{}
 	}
-	
+
 	h.attrPool.New = func() any {
 		return make([]slog.Attr, 0, 16)
 	}
@@ -756,15 +756,15 @@ func (h *OTELHandler) getPoolStats(poolName string) int64 {
 func (a *Arena) Alloc(size int) []byte {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	
+
 	if atomic.LoadInt64(&a.pos)+int64(size) > a.size {
 		// Arena exhausted, reset or expand
 		atomic.StoreInt64(&a.pos, 0)
 	}
-	
+
 	start := atomic.LoadInt64(&a.pos)
 	atomic.AddInt64(&a.pos, int64(size))
-	
+
 	return a.data[start : start+int64(size)]
 }
 
@@ -855,7 +855,7 @@ func (h *OTELHandler) Cleanup() {
 		}
 		return true
 	})
-	
+
 	// Reset arena if needed
 	if atomic.LoadInt64(&h.arena.pos) > h.arena.size*3/4 {
 		h.arena.Reset()

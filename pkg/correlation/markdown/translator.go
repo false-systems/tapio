@@ -118,7 +118,7 @@ func (t *CorrelationTranslator) convertToSemanticRule(mc *MarkdownCorrelation) (
 func (t *CorrelationTranslator) buildSemanticConditions(conditions []Condition) *correlation.SemanticConditions {
 	sc := &correlation.SemanticConditions{
 		RequireAllConditions: true, // AND logic by default
-		Conditions:          []correlation.SemanticCondition{},
+		Conditions:           []correlation.SemanticCondition{},
 	}
 
 	for _, cond := range conditions {

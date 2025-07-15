@@ -1,6 +1,10 @@
 package correlation
 
-import "time"
+import (
+	"time"
+
+	"github.com/yairfalse/tapio/pkg/correlation/types"
+)
 
 // AI component stubs - placeholders for future AI/ML integration
 // These types are referenced in ai_ready.go but not yet implemented
@@ -201,10 +205,10 @@ type GraphRelationship struct {
 
 // AIReadyData represents AI-ready data
 type AIReadyData struct {
-	Features    []AIFeature
-	Embeddings  []Embedding
-	GraphData   []GraphRelationship
-	TimeSeries  []TimeSeriesPoint
+	Features   []AIFeature
+	Embeddings []Embedding
+	GraphData  []GraphRelationship
+	TimeSeries []TimeSeriesPoint
 }
 
 // AIInsight is defined in ai_ready.go
@@ -215,21 +219,11 @@ type BatchProcessor struct{}
 // ComputePool manages compute resources
 type ComputePool struct{}
 
-// Entity represents an entity
-type Entity struct {
-	ID   string
-	Type string
-	Name string
-}
+// Type aliases for backward compatibility
+type Entity = types.Entity
+type MetricSeries = types.MetricSeries
 
 // Event is defined in interfaces.go
-
-// MetricSeries represents a metric series
-type MetricSeries struct {
-	Name   string
-	Values []float64
-	Times  []time.Time
-}
 
 // EventSource represents an event source
 type EventSource struct {
@@ -263,9 +257,9 @@ type ResultHandler interface {
 
 // Result represents a correlation result
 type Result struct {
-	ID          string
-	Findings    []Finding
-	Confidence  float64
+	ID         string
+	Findings   []Finding
+	Confidence float64
 }
 
 // Finding is defined in rule.go
@@ -303,11 +297,5 @@ type SemanticPatternCache struct{}
 // BehavioralEntityCache caches behavioral entities
 type BehavioralEntityCache struct{}
 
-// PatternRegistry manages patterns
-type PatternRegistry struct{}
-
-// PatternValidator validates patterns
-type PatternValidator struct{}
-
-// PatternConfig configures patterns
-type PatternConfig struct{}
+// Note: Pattern types have been moved to pkg/correlation/types/patterns.go
+// to resolve import cycles between correlation and patterns packages

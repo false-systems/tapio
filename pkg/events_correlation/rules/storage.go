@@ -16,7 +16,7 @@ func StorageVolumeCorrelation() *events_correlation.Rule {
 		Description: "Detects PVC issues, disk pressure, storage quotas, and volume mount problems with intelligent root cause analysis",
 		Category:    events_correlation.CategoryStorage,
 		Tags:        []string{"storage", "volume", "pvc", "disk", "quota", "mount", "kubernetes"},
-		
+
 		RequiredSources: []events_correlation.EventSource{
 			events_correlation.SourceKubernetes,
 		},
@@ -25,9 +25,9 @@ func StorageVolumeCorrelation() *events_correlation.Rule {
 			events_correlation.SourceSystemd,
 			events_correlation.SourceMetrics,
 		},
-		
+
 		MinConfidence: 0.7,
-		
+
 		Evaluate: func(ctx *events_correlation.Context) *events_correlation.Result {
 			return evaluateStorageIssues(ctx)
 		},
@@ -42,16 +42,16 @@ func PVCIssueDetection() *events_correlation.Rule {
 		Description: "Detects PersistentVolumeClaim binding failures, provisioning errors, and access issues",
 		Category:    events_correlation.CategoryStorage,
 		Tags:        []string{"pvc", "persistent-volume", "storage", "kubernetes"},
-		
+
 		RequiredSources: []events_correlation.EventSource{
 			events_correlation.SourceKubernetes,
 		},
 		OptionalSources: []events_correlation.EventSource{
 			events_correlation.SourceMetrics,
 		},
-		
+
 		MinConfidence: 0.8,
-		
+
 		Evaluate: func(ctx *events_correlation.Context) *events_correlation.Result {
 			return evaluatePVCIssues(ctx)
 		},
@@ -66,7 +66,7 @@ func DiskPressureDetection() *events_correlation.Rule {
 		Description: "Detects disk pressure conditions that can cause pod evictions and application failures",
 		Category:    events_correlation.CategoryStorage,
 		Tags:        []string{"disk", "pressure", "eviction", "node", "kubernetes"},
-		
+
 		RequiredSources: []events_correlation.EventSource{
 			events_correlation.SourceKubernetes,
 		},
@@ -75,9 +75,9 @@ func DiskPressureDetection() *events_correlation.Rule {
 			events_correlation.SourceSystemd,
 			events_correlation.SourceMetrics,
 		},
-		
+
 		MinConfidence: 0.75,
-		
+
 		Evaluate: func(ctx *events_correlation.Context) *events_correlation.Result {
 			return evaluateDiskPressure(ctx)
 		},
@@ -92,16 +92,16 @@ func StorageQuotaViolation() *events_correlation.Rule {
 		Description: "Detects storage quota violations and capacity limits that prevent normal operations",
 		Category:    events_correlation.CategoryStorage,
 		Tags:        []string{"quota", "storage", "capacity", "limit", "kubernetes"},
-		
+
 		RequiredSources: []events_correlation.EventSource{
 			events_correlation.SourceKubernetes,
 		},
 		OptionalSources: []events_correlation.EventSource{
 			events_correlation.SourceMetrics,
 		},
-		
+
 		MinConfidence: 0.8,
-		
+
 		Evaluate: func(ctx *events_correlation.Context) *events_correlation.Result {
 			return evaluateStorageQuotaViolations(ctx)
 		},
@@ -126,13 +126,13 @@ func evaluateStorageIssues(ctx *events_correlation.Context) *events_correlation.
 
 	// Calculate confidence based on multiple factors
 	confidence := calculateStorageConfidence(pvcIssues, diskPressure, quotaViolations, mountIssues)
-	
+
 	// Generate detailed recommendations
 	recommendations := generateStorageRecommendations(pvcIssues, diskPressure, quotaViolations, mountIssues)
-	
+
 	// Determine root cause
 	rootCause := determineStorageRootCause(pvcIssues, diskPressure, quotaViolations, mountIssues)
-	
+
 	return &events_correlation.Result{
 		RuleID:      "storage-volume-correlation",
 		Confidence:  confidence,
@@ -165,7 +165,7 @@ func evaluatePVCIssues(ctx *events_correlation.Context) *events_correlation.Resu
 	}
 
 	confidence := calculatePVCConfidence(issues)
-	
+
 	return &events_correlation.Result{
 		RuleID:      "pvc-issue-detection",
 		Confidence:  confidence,
@@ -195,7 +195,7 @@ func evaluateDiskPressure(ctx *events_correlation.Context) *events_correlation.R
 	}
 
 	confidence := calculateDiskPressureConfidence(issues)
-	
+
 	return &events_correlation.Result{
 		RuleID:      "disk-pressure-detection",
 		Confidence:  confidence,
@@ -225,7 +225,7 @@ func evaluateStorageQuotaViolations(ctx *events_correlation.Context) *events_cor
 	}
 
 	confidence := calculateQuotaConfidence(violations)
-	
+
 	return &events_correlation.Result{
 		RuleID:      "storage-quota-violation",
 		Confidence:  confidence,
@@ -246,13 +246,13 @@ func evaluateStorageQuotaViolations(ctx *events_correlation.Context) *events_cor
 // Event filtering functions
 func filterStorageEvents(events []events_correlation.Event) []events_correlation.Event {
 	var storageEvents []events_correlation.Event
-	
+
 	storageKeywords := []string{
 		"persistentvolume", "pvc", "pv", "storage", "volume", "mount",
 		"disk", "quota", "capacity", "provisioning", "binding",
 		"diskpressure", "evicted", "insufficient",
 	}
-	
+
 	for _, event := range events {
 		if event.Source == events_correlation.SourceKubernetes {
 			eventText := strings.ToLower(event.Type + " " + fmt.Sprintf("%v", event.Attributes))
@@ -264,71 +264,71 @@ func filterStorageEvents(events []events_correlation.Event) []events_correlation
 			}
 		}
 	}
-	
+
 	return storageEvents
 }
 
 func filterPVCEvents(events []events_correlation.Event) []events_correlation.Event {
 	var pvcEvents []events_correlation.Event
-	
+
 	for _, event := range events {
 		if event.Source == events_correlation.SourceKubernetes {
 			eventText := strings.ToLower(event.Type + " " + fmt.Sprintf("%v", event.Attributes))
-			if strings.Contains(eventText, "persistentvolumeclaim") || 
-			   strings.Contains(eventText, "pvc") ||
-			   strings.Contains(eventText, "persistentvolume") ||
-			   strings.Contains(eventText, "pv") {
+			if strings.Contains(eventText, "persistentvolumeclaim") ||
+				strings.Contains(eventText, "pvc") ||
+				strings.Contains(eventText, "persistentvolume") ||
+				strings.Contains(eventText, "pv") {
 				pvcEvents = append(pvcEvents, event)
 			}
 		}
 	}
-	
+
 	return pvcEvents
 }
 
 func filterDiskPressureEvents(events []events_correlation.Event) []events_correlation.Event {
 	var pressureEvents []events_correlation.Event
-	
+
 	for _, event := range events {
 		if event.Source == events_correlation.SourceKubernetes {
 			eventText := strings.ToLower(event.Type + " " + fmt.Sprintf("%v", event.Attributes))
 			if strings.Contains(eventText, "diskpressure") ||
-			   strings.Contains(eventText, "disk pressure") ||
-			   strings.Contains(eventText, "evicted") ||
-			   strings.Contains(eventText, "insufficient disk") {
+				strings.Contains(eventText, "disk pressure") ||
+				strings.Contains(eventText, "evicted") ||
+				strings.Contains(eventText, "insufficient disk") {
 				pressureEvents = append(pressureEvents, event)
 			}
 		}
 	}
-	
+
 	return pressureEvents
 }
 
 func filterQuotaEvents(events []events_correlation.Event) []events_correlation.Event {
 	var quotaEvents []events_correlation.Event
-	
+
 	for _, event := range events {
 		if event.Source == events_correlation.SourceKubernetes {
 			eventText := strings.ToLower(event.Type + " " + fmt.Sprintf("%v", event.Attributes))
 			if strings.Contains(eventText, "quota") ||
-			   strings.Contains(eventText, "exceeded") ||
-			   strings.Contains(eventText, "limit") ||
-			   strings.Contains(eventText, "capacity") {
+				strings.Contains(eventText, "exceeded") ||
+				strings.Contains(eventText, "limit") ||
+				strings.Contains(eventText, "capacity") {
 				quotaEvents = append(quotaEvents, event)
 			}
 		}
 	}
-	
+
 	return quotaEvents
 }
 
 // Analysis functions
 func analyzePVCEvents(events []events_correlation.Event) []map[string]interface{} {
 	var issues []map[string]interface{}
-	
+
 	bindingFailures := regexp.MustCompile(`(?i)(binding|bound|failed|provision|timeout)`)
 	accessIssues := regexp.MustCompile(`(?i)(permission|access|denied|unauthorized)`)
-	
+
 	for _, event := range events {
 		issue := map[string]interface{}{
 			"timestamp": event.Timestamp,
@@ -336,7 +336,7 @@ func analyzePVCEvents(events []events_correlation.Event) []map[string]interface{
 			"namespace": event.Entity.Namespace,
 			"type":      event.Type,
 		}
-		
+
 		eventStr := fmt.Sprintf("%v", event.Attributes)
 		if bindingFailures.MatchString(eventStr) {
 			issue["issue_type"] = "binding_failure"
@@ -348,79 +348,79 @@ func analyzePVCEvents(events []events_correlation.Event) []map[string]interface{
 			issues = append(issues, issue)
 		}
 	}
-	
+
 	return issues
 }
 
 func analyzeDiskPressureEvents(events []events_correlation.Event) []map[string]interface{} {
 	var issues []map[string]interface{}
-	
+
 	for _, event := range events {
 		eventStr := strings.ToLower(fmt.Sprintf("%v", event.Attributes))
 		if strings.Contains(eventStr, "diskpressure") ||
-		   strings.Contains(eventStr, "evicted") {
+			strings.Contains(eventStr, "evicted") {
 			issue := map[string]interface{}{
-				"timestamp": event.Timestamp,
-				"node":      event.Entity.Node,
-				"type":      event.Type,
+				"timestamp":  event.Timestamp,
+				"node":       event.Entity.Node,
+				"type":       event.Type,
 				"issue_type": "disk_pressure",
-				"severity":  "high",
+				"severity":   "high",
 			}
 			issues = append(issues, issue)
 		}
 	}
-	
+
 	return issues
 }
 
 func analyzeQuotaEvents(events []events_correlation.Event) []map[string]interface{} {
 	var violations []map[string]interface{}
-	
+
 	quotaPattern := regexp.MustCompile(`(?i)(quota|exceeded|limit|capacity)`)
-	
+
 	for _, event := range events {
 		eventStr := fmt.Sprintf("%v", event.Attributes)
 		if quotaPattern.MatchString(eventStr) {
 			violation := map[string]interface{}{
-				"timestamp": event.Timestamp,
-				"namespace": event.Entity.Namespace,
-				"type":      event.Type,
+				"timestamp":  event.Timestamp,
+				"namespace":  event.Entity.Namespace,
+				"type":       event.Type,
 				"issue_type": "quota_violation",
-				"severity":  "medium",
+				"severity":   "medium",
 			}
 			violations = append(violations, violation)
 		}
 	}
-	
+
 	return violations
 }
 
 func analyzeMountEvents(events []events_correlation.Event) []map[string]interface{} {
 	var issues []map[string]interface{}
-	
+
 	mountPattern := regexp.MustCompile(`(?i)(mount|volume|attach|detach|failed)`)
-	
+
 	for _, event := range events {
 		eventStr := fmt.Sprintf("%v", event.Attributes)
 		if mountPattern.MatchString(eventStr) {
 			issue := map[string]interface{}{
-				"timestamp": event.Timestamp,
-				"entity":    event.Entity.Name,
-				"type":      event.Type,
+				"timestamp":  event.Timestamp,
+				"entity":     event.Entity.Name,
+				"type":       event.Type,
 				"issue_type": "mount_issue",
-				"severity":  "medium",
+				"severity":   "medium",
 			}
 			issues = append(issues, issue)
 		}
 	}
-	
+
 	return issues
 }
 
 // Confidence calculation functions
 func calculateStorageConfidence(pvc, disk, quota, mount []map[string]interface{}) float64 {
 	baseConfidence := 0.0
-	
+
 	if len(pvc) > 0 {
 		baseConfidence += 0.3
 	}
@@ -433,22 +433,30 @@ func calculateStorageConfidence(pvc, disk, quota, mount []map[string]interface{}
 	if len(mount) > 0 {
 		baseConfidence += 0.1
 	}
-	
+
 	// Boost confidence if multiple types detected
 	typesDetected := 0
-	if len(pvc) > 0 { typesDetected++ }
-	if len(disk) > 0 { typesDetected++ }
-	if len(quota) > 0 { typesDetected++ }
-	if len(mount) > 0 { typesDetected++ }
-	
+	if len(pvc) > 0 {
+		typesDetected++
+	}
+	if len(disk) > 0 {
+		typesDetected++
+	}
+	if len(quota) > 0 {
+		typesDetected++
+	}
+	if len(mount) > 0 {
+		typesDetected++
+	}
+
 	if typesDetected > 1 {
 		baseConfidence += 0.1 * float64(typesDetected-1)
 	}
-	
+
 	if baseConfidence > 1.0 {
 		baseConfidence = 1.0
 	}
-	
+
 	return baseConfidence
 }
 
@@ -456,19 +464,19 @@ func calculatePVCConfidence(issues []map[string]interface{}) float64 {
 	if len(issues) == 0 {
 		return 0.0
 	}
-	
+
 	highSeverityCount := 0
 	for _, issue := range issues {
 		if severity, ok := issue["severity"].(string); ok && severity == "high" {
 			highSeverityCount++
 		}
 	}
-	
+
 	baseConfidence := 0.7
 	if highSeverityCount > 0 {
 		baseConfidence += 0.2
 	}
-	
+
 	return baseConfidence
 }
 
@@ -476,7 +484,7 @@ func calculateDiskPressureConfidence(issues []map[string]interface{}) float64 {
 	if len(issues) == 0 {
 		return 0.0
 	}
-	
+
 	return 0.9 // Disk pressure events are highly reliable indicators
 }
 
@@ -484,7 +492,7 @@ func calculateQuotaConfidence(violations []map[string]interface{}) float64 {
 	if len(violations) == 0 {
 		return 0.0
 	}
-	
+
 	return 0.8 // Quota violations are clear indicators
 }
 
@@ -502,14 +510,14 @@ func determineStorageRootCause(pvc, disk, quota, mount []map[string]interface{})
 	if len(mount) > 0 {
 		return "Volume mounting issues affecting pod startup"
 	}
-	
+
 	return "Multiple storage-related issues detected"
 }
 
 func determinePVCRootCause(issues []map[string]interface{}) string {
 	bindingFailures := 0
 	accessIssues := 0
-	
+
 	for _, issue := range issues {
 		if issueType, ok := issue["issue_type"].(string); ok {
 			switch issueType {
@@ -520,20 +528,20 @@ func determinePVCRootCause(issues []map[string]interface{}) string {
 			}
 		}
 	}
-	
+
 	if bindingFailures > accessIssues {
 		return "PVC binding failures - storage class or provisioner issues"
 	} else if accessIssues > 0 {
 		return "PVC access permission issues - RBAC or security context problems"
 	}
-	
+
 	return "Multiple PVC issues detected"
 }
 
 // Impact assessment
 func assessStorageImpact(pvc, disk, quota, mount []map[string]interface{}) string {
 	impacts := []string{}
-	
+
 	if len(disk) > 0 {
 		impacts = append(impacts, "Pod evictions and scheduling failures")
 	}
@@ -546,18 +554,18 @@ func assessStorageImpact(pvc, disk, quota, mount []map[string]interface{}) strin
 	if len(mount) > 0 {
 		impacts = append(impacts, "Volume access issues")
 	}
-	
+
 	if len(impacts) == 0 {
 		return "Storage performance degradation"
 	}
-	
+
 	return strings.Join(impacts, ", ")
 }
 
 // Recommendation generation
 func generateStorageRecommendations(pvc, disk, quota, mount []map[string]interface{}) []string {
 	recommendations := []string{}
-	
+
 	if len(disk) > 0 {
 		recommendations = append(recommendations,
 			"Clean up unused files and logs to free disk space",
@@ -565,7 +573,7 @@ func generateStorageRecommendations(pvc, disk, quota, mount []map[string]interfa
 			"Configure log rotation and cleanup policies",
 			"Monitor disk usage proactively")
 	}
-	
+
 	if len(pvc) > 0 {
 		recommendations = append(recommendations,
 			"Check storage class availability and configuration",
@@ -573,7 +581,7 @@ func generateStorageRecommendations(pvc, disk, quota, mount []map[string]interfa
 			"Review PVC requests vs available capacity",
 			"Check RBAC permissions for storage operations")
 	}
-	
+
 	if len(quota) > 0 {
 		recommendations = append(recommendations,
 			"Review and adjust storage quotas based on actual needs",
@@ -581,7 +589,7 @@ func generateStorageRecommendations(pvc, disk, quota, mount []map[string]interfa
 			"Implement storage usage monitoring",
 			"Consider tiered storage strategies")
 	}
-	
+
 	if len(mount) > 0 {
 		recommendations = append(recommendations,
 			"Verify volume mount paths and permissions",
@@ -589,7 +597,7 @@ func generateStorageRecommendations(pvc, disk, quota, mount []map[string]interfa
 			"Review storage class and volume settings",
 			"Ensure nodes have proper storage drivers")
 	}
-	
+
 	return recommendations
 }
 
@@ -601,7 +609,7 @@ func generatePVCRecommendations(issues []map[string]interface{}) []string {
 		"Ensure proper RBAC permissions for storage operations",
 		"Monitor PVC binding timeouts and retry mechanisms",
 	}
-	
+
 	return recommendations
 }
 
@@ -613,7 +621,7 @@ func generateDiskPressureRecommendations(issues []map[string]interface{}) []stri
 		"Implement disk usage monitoring and alerting",
 		"Consider adding taints/tolerations for storage workloads",
 	}
-	
+
 	return recommendations
 }
 
@@ -625,14 +633,14 @@ func generateQuotaRecommendations(violations []map[string]interface{}) []string 
 		"Consider increasing quotas for high-usage namespaces",
 		"Set up monitoring for quota utilization trends",
 	}
-	
+
 	return recommendations
 }
 
 // Summary generation
 func generateStorageSummary(pvc, disk, quota, mount []map[string]interface{}) string {
 	var parts []string
-	
+
 	if len(disk) > 0 {
 		parts = append(parts, fmt.Sprintf("%d disk pressure events", len(disk)))
 	}
@@ -645,10 +653,10 @@ func generateStorageSummary(pvc, disk, quota, mount []map[string]interface{}) st
 	if len(mount) > 0 {
 		parts = append(parts, fmt.Sprintf("%d mount issues", len(mount)))
 	}
-	
+
 	if len(parts) == 0 {
 		return "Storage correlation analysis completed"
 	}
-	
+
 	return "Detected: " + strings.Join(parts, ", ")
 }

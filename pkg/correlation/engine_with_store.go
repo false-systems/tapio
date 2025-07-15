@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
@@ -14,10 +15,10 @@ type PerfectEngineWithStore struct {
 	baseEngine   *PerfectEngine
 	insightStore InsightStore
 	mu           sync.RWMutex
-	
+
 	// Configuration
-	storeAllInsights   bool
-	minSeverityToStore string
+	storeAllInsights       bool
+	minSeverityToStore     string
 	maxInsightsPerResource int
 }
 
@@ -43,12 +44,12 @@ func (e *PerfectEngineWithStore) ProcessOpinionatedEvent(ctx context.Context, ev
 	if err := e.baseEngine.ProcessOpinionatedEvent(ctx, event); err != nil {
 		return err
 	}
-	
+
 	// Extract and store insights generated during processing
 	// In a real implementation, we'd modify PerfectEngine to return insights
 	// For now, we'll simulate insight generation based on the event
 	insights := e.extractInsightsFromEvent(event)
-	
+
 	// Store insights
 	for _, insight := range insights {
 		if e.shouldStoreInsight(insight) {
@@ -58,12 +59,12 @@ func (e *PerfectEngineWithStore) ProcessOpinionatedEvent(ctx context.Context, ev
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 // ProcessEvents implements the CorrelationEngine interface
-func (e *PerfectEngineWithStore) ProcessEvents(ctx context.Context, events []*Event) error {
+func (e *PerfectEngineWithStore) ProcessEvents(ctx context.Context, events []*types.Event) error {
 	// Convert to opinionated events and process
 	for _, event := range events {
 		// In real implementation, we'd convert Event to OpinionatedEvent
@@ -80,7 +81,7 @@ func (e *PerfectEngineWithStore) ProcessEvents(ctx context.Context, events []*Ev
 func (e *PerfectEngineWithStore) Start(ctx context.Context) error {
 	// Start cleanup goroutine for old insights
 	go e.cleanupOldInsights(ctx)
-	
+
 	return e.baseEngine.Start(ctx)
 }
 
@@ -92,77 +93,77 @@ func (e *PerfectEngineWithStore) Stop() error {
 // GetStats returns engine statistics
 func (e *PerfectEngineWithStore) GetStats() *EngineStats {
 	baseStats := e.baseEngine.GetStats()
-	
+
 	// Convert PerfectEngineStats to EngineStats
 	return &EngineStats{
-		EventsProcessed:     baseStats.EventsProcessed,
-		CorrelationsFound:   baseStats.CorrelationsFound,
-		InsightsGenerated:   baseStats.InsightsGenerated,
-		ActiveRules:         100, // Placeholder
-		ActiveCorrelations:  50,  // Placeholder
-		ProcessingRate:      float64(baseStats.EventsProcessed) / time.Since(time.Now().Add(-time.Hour)).Seconds(),
+		EventsProcessed:    baseStats.EventsProcessed,
+		CorrelationsFound:  baseStats.CorrelationsFound,
+		InsightsGenerated:  baseStats.InsightsGenerated,
+		ActiveRules:        100, // Placeholder
+		ActiveCorrelations: 50,  // Placeholder
+		ProcessingRate:     float64(baseStats.EventsProcessed) / time.Since(time.Now().Add(-time.Hour)).Seconds(),
 	}
 }
 
 // extractInsightsFromEvent simulates insight extraction from processed event
 func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.OpinionatedEvent) []*Insight {
 	insights := make([]*Insight, 0)
-	
+
 	// Generate insights based on event data
 	// This is a simplified implementation - real engine would generate from correlations
-	
+
 	// Check for anomalies
 	if event.Anomaly != nil && event.Anomaly.AnomalyScore > 0.7 {
 		insight := &Insight{
 			ID:           generateInsightID(),
-			Title:        fmt.Sprintf("Anomaly detected in %s", event.Entity.Name),
-			Description:  fmt.Sprintf("%s anomaly detected with score %.2f", event.Anomaly.AnomalyType, event.Anomaly.AnomalyScore),
+			Title:        fmt.Sprintf("Anomaly detected in %s", event.Context.Pod),
+			Description:  fmt.Sprintf("Anomaly detected with score %.2f", event.Anomaly.AnomalyScore),
 			Severity:     severityFromScore(event.Anomaly.AnomalyScore),
 			Category:     "anomaly",
-			ResourceName: event.Entity.Name,
-			Namespace:    event.Entity.Namespace,
-			Timestamp:    event.ObservedAt,
+			ResourceName: event.Context.Pod,
+			Namespace:    event.Context.Namespace,
+			Timestamp:    event.Timestamp,
 			Evidence: []*Evidence{
 				{
-					EventID:     event.EventID,
+					EventID:     event.ID,
 					Description: "Anomaly detection triggered",
-					Timestamp:   event.ObservedAt,
-					Source:      event.Source.CollectorType,
+					Timestamp:   event.Timestamp,
+					Source:      event.Source.Collector,
 				},
 			},
 		}
-		
+
 		// Add prediction if behavioral anomaly
-		if event.Behavioral != nil && event.Behavioral.ConfidenceScore > 0.6 {
+		if event.Behavioral != nil && event.Behavioral.Confidence > 0.6 {
 			insight.Prediction = &Prediction{
 				Type:        "behavioral_degradation",
-				Probability: event.Behavioral.ConfidenceScore,
+				Probability: event.Behavioral.Confidence,
 				Confidence:  0.8,
 				TimeToEvent: time.Hour,
 				Description: "Behavioral pattern indicates potential degradation",
 			}
 		}
-		
+
 		// Add actionable items
 		insight.ActionableItems = e.generateActionableItems(event, insight)
-		
+
 		insights = append(insights, insight)
 	}
-	
+
 	// Check for causality chains
 	if event.Causality != nil && len(event.Causality.CausalChain) > 2 {
 		insight := &Insight{
 			ID:           generateInsightID(),
-			Title:        fmt.Sprintf("Causality chain detected for %s", event.Entity.Name),
+			Title:        fmt.Sprintf("Causality chain detected for %s", event.Context.Pod),
 			Description:  fmt.Sprintf("Multi-step causality chain with %d events", len(event.Causality.CausalChain)),
 			Severity:     "medium",
 			Category:     "causality",
-			ResourceName: event.Entity.Name,
-			Namespace:    event.Entity.Namespace,
-			Timestamp:    event.ObservedAt,
+			ResourceName: event.Context.Pod,
+			Namespace:    event.Context.Namespace,
+			Timestamp:    event.Timestamp,
 			Evidence:     e.extractCausalityEvidence(event.Causality),
 		}
-		
+
 		// Add root cause if identified
 		if event.Causality.RootCause != "" {
 			insight.RootCause = &RootCause{
@@ -171,85 +172,81 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 				Confidence:  event.Causality.Confidence,
 			}
 		}
-		
+
 		insights = append(insights, insight)
 	}
-	
-	// Check for performance issues
-	if event.Performance != nil && event.Performance.Impact == "high" {
+
+	// Check for performance issues - simplified for now
+	if false { // TODO: Add performance context when available
 		insight := &Insight{
 			ID:           generateInsightID(),
-			Title:        fmt.Sprintf("Performance degradation in %s", event.Entity.Name),
-			Description:  fmt.Sprintf("%s performance metric degraded by %.1f%%", event.Performance.MetricName, event.Performance.Degradation*100),
+			Title:        fmt.Sprintf("Performance degradation in %s", event.Context.Pod),
+			Description:  fmt.Sprintf("Performance metric degraded"),
 			Severity:     "high",
 			Category:     "performance",
-			ResourceName: event.Entity.Name,
-			Namespace:    event.Entity.Namespace,
-			Timestamp:    event.ObservedAt,
+			ResourceName: event.Context.Pod,
+			Namespace:    event.Context.Namespace,
+			Timestamp:    event.Timestamp,
 			Evidence: []*Evidence{
 				{
-					EventID:     event.EventID,
-					Description: fmt.Sprintf("Performance metric %s degraded", event.Performance.MetricName),
-					Timestamp:   event.ObservedAt,
-					Source:      event.Source.CollectorType,
+					EventID:     event.ID,
+					Description: fmt.Sprintf("Performance metric degraded"),
+					Timestamp:   event.Timestamp,
+					Source:      event.Source.Collector,
 				},
 			},
 		}
-		
+
 		// Add prediction for continued degradation
-		if event.Performance.Trend == "degrading" {
-			insight.Prediction = &Prediction{
-				Type:        "performance_failure",
-				Probability: 0.7,
-				Confidence:  0.75,
-				TimeToEvent: 30 * time.Minute,
-				Description: "Performance trending toward failure threshold",
-			}
+		insight.Prediction = &Prediction{
+			Type:        "performance_failure",
+			Probability: 0.7,
+			Confidence:  0.75,
+			TimeToEvent: 30 * time.Minute,
+			Description: "Performance trending toward failure threshold",
 		}
-		
+
 		insights = append(insights, insight)
 	}
-	
+
 	return insights
 }
 
 // generateActionableItems creates actionable recommendations
 func (e *PerfectEngineWithStore) generateActionableItems(event *opinionated.OpinionatedEvent, insight *Insight) []*ActionableItem {
 	items := make([]*ActionableItem, 0)
-	
+
 	// Generate based on insight category
 	switch insight.Category {
 	case "anomaly":
-		if event.Anomaly.AnomalyType == "memory" {
-			items = append(items, &ActionableItem{
-				Description: "Increase memory limits",
-				Command:     fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"%s\",\"resources\":{\"limits\":{\"memory\":\"2Gi\"}}}]}}}}'", event.Entity.Name, event.Entity.Namespace, event.Entity.Name),
-				Impact:      "Prevents OOM kills and improves stability",
-				Risk:        "low",
-			})
-		}
+		items = append(items, &ActionableItem{
+			Description: "Increase memory limits",
+			Command:     fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"%s\",\"resources\":{\"limits\":{\"memory\":\"2Gi\"}}}]}}}}'", event.Context.Pod, event.Context.Namespace, event.Context.Pod),
+			Impact:      "Prevents OOM kills and improves stability",
+			Risk:        "low",
+		})
 	case "performance":
 		items = append(items, &ActionableItem{
 			Description: "Scale up deployment",
-			Command:     fmt.Sprintf("kubectl scale deployment %s -n %s --replicas=3", event.Entity.Name, event.Entity.Namespace),
+			Command:     fmt.Sprintf("kubectl scale deployment %s -n %s --replicas=3", event.Context.Pod, event.Context.Namespace),
 			Impact:      "Distributes load and improves response times",
 			Risk:        "low",
 		})
 		items = append(items, &ActionableItem{
 			Description: "Enable HPA",
-			Command:     fmt.Sprintf("kubectl autoscale deployment %s -n %s --cpu-percent=70 --min=2 --max=5", event.Entity.Name, event.Entity.Namespace),
+			Command:     fmt.Sprintf("kubectl autoscale deployment %s -n %s --cpu-percent=70 --min=2 --max=5", event.Context.Pod, event.Context.Namespace),
 			Impact:      "Automatically scales based on load",
 			Risk:        "medium",
 		})
 	}
-	
+
 	return items
 }
 
 // extractCausalityEvidence extracts evidence from causality chain
 func (e *PerfectEngineWithStore) extractCausalityEvidence(causality *opinionated.CausalityContext) []*Evidence {
 	evidence := make([]*Evidence, 0, len(causality.CausalChain))
-	
+
 	for _, event := range causality.CausalChain {
 		evidence = append(evidence, &Evidence{
 			EventID:     event.EventID,
@@ -258,7 +255,7 @@ func (e *PerfectEngineWithStore) extractCausalityEvidence(causality *opinionated
 			Source:      "causality_analysis",
 		})
 	}
-	
+
 	return evidence
 }
 
@@ -270,14 +267,14 @@ func (e *PerfectEngineWithStore) shouldStoreInsight(insight *Insight) bool {
 			return false
 		}
 	}
-	
+
 	// Check resource limits
 	existing := e.insightStore.GetInsights(insight.ResourceName, insight.Namespace)
 	if len(existing) >= e.maxInsightsPerResource {
 		// Remove oldest insights to make room
 		e.removeOldestInsights(existing, len(existing)-e.maxInsightsPerResource+1)
 	}
-	
+
 	return true
 }
 
@@ -289,10 +286,10 @@ func (e *PerfectEngineWithStore) meetsMinSeverity(severity string) bool {
 		"medium":   2,
 		"low":      1,
 	}
-	
+
 	minLevel := severityLevels[e.minSeverityToStore]
 	actualLevel := severityLevels[severity]
-	
+
 	return actualLevel >= minLevel
 }
 
@@ -309,7 +306,7 @@ func (e *PerfectEngineWithStore) removeOldestInsights(insights []*Insight, count
 func (e *PerfectEngineWithStore) cleanupOldInsights(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -323,33 +320,28 @@ func (e *PerfectEngineWithStore) cleanupOldInsights(ctx context.Context) {
 }
 
 // convertToOpinionatedEvent converts basic Event to OpinionatedEvent
-func (e *PerfectEngineWithStore) convertToOpinionatedEvent(event *Event) *opinionated.OpinionatedEvent {
+func (e *PerfectEngineWithStore) convertToOpinionatedEvent(event *types.Event) *opinionated.OpinionatedEvent {
 	// This is a simplified conversion
 	// Real implementation would map all fields properly
 	return &opinionated.OpinionatedEvent{
-		EventID:     event.ID,
-		ObservedAt:  event.Timestamp,
-		ProcessedAt: time.Now(),
-		
-		Entity: &opinionated.EntityContext{
-			Type:      "deployment",
-			ID:        event.Data["entity_id"].(string),
-			Name:      event.Data["entity_name"].(string),
-			Namespace: event.Data["namespace"].(string),
+		ID:        event.ID,
+		Timestamp: event.Timestamp,
+		Category:  opinionated.CategorySystemHealth,
+		Severity:  opinionated.SeverityMedium,
+		Confidence: 0.8,
+
+		Source: opinionated.EventSource{
+			Collector: event.Source,
+			Component: "correlation",
+			Node:      event.Entity.Node,
 		},
-		
-		Source: &opinionated.SourceContext{
-			CollectorType: event.Source,
-			CollectorID:   "collector-1",
-			NodeName:      event.Data["node"].(string),
+
+		Context: opinionated.OpinionatedContext{
+			Namespace: event.Entity.Namespace,
+			Pod:       event.Entity.Pod,
+			Container: event.Entity.Container,
 		},
-		
-		Metadata: &opinionated.EventMetadata{
-			EventType: event.Type,
-			Severity:  string(event.Severity),
-			Version:   "1.0",
-		},
-		
+
 		// Other contexts would be populated based on event data
 	}
 }

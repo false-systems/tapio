@@ -161,7 +161,7 @@ func TestCorrelationEngine_IndexAndCorrelate(t *testing.T) {
 
 	// Should find temporal correlation
 	assert.Greater(t, len(result.Correlations), 0)
-	
+
 	// Should find causal correlation
 	hasCausal := false
 	for _, corr := range result.Correlations {
@@ -249,7 +249,7 @@ func TestFutureProofEngine_PrepareForAI(t *testing.T) {
 	// Check temporal features
 	assert.Contains(t, result.Features.Sparse, "hour_of_day")
 	assert.Contains(t, result.Features.Sparse, "day_of_week")
-	
+
 	// Check behavioral features
 	assert.Contains(t, result.Features.Sparse, "behavior_deviation")
 	assert.Equal(t, float32(0.85), result.Features.Sparse["behavior_deviation"])
@@ -347,15 +347,15 @@ func TestCorrelationPatterns(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "cascade failure pattern",
-			events: createCascadeEvents(),
-			pattern: &CascadeFailurePattern{},
+			name:     "cascade failure pattern",
+			events:   createCascadeEvents(),
+			pattern:  &CascadeFailurePattern{},
 			expected: true,
 		},
 		{
-			name: "thundering herd pattern",
-			events: createThunderingHerdEvents(),
-			pattern: &ThunderingHerdPattern{},
+			name:     "thundering herd pattern",
+			events:   createThunderingHerdEvents(),
+			pattern:  &ThunderingHerdPattern{},
 			expected: true,
 		},
 	}
@@ -363,7 +363,7 @@ func TestCorrelationPatterns(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			detection := tt.pattern.Detect(tt.events)
-			
+
 			if tt.expected {
 				assert.NotNil(t, detection)
 				assert.Greater(t, detection.Confidence, float32(0.5))
@@ -414,10 +414,10 @@ func TestFeatureCache(t *testing.T) {
 	}
 
 	cache.Set("event-1", features, 1*time.Minute)
-	
+
 	retrieved := cache.Get("event-1")
 	assert.NotNil(t, retrieved)
-	
+
 	retrievedFeatures, ok := retrieved.(*AIFeatures)
 	assert.True(t, ok)
 	assert.Equal(t, float32(0.5), retrievedFeatures.Sparse["test_feature"])
@@ -471,7 +471,7 @@ func TestOpinionProfiles(t *testing.T) {
 		Profile: "sensitive",
 	}
 	engine := NewFutureProofEngine(config)
-	
+
 	// Should have merged sensitive profile
 	assert.Equal(t, float32(0.75), engine.config.Opinions.AnomalyThresholds["memory_usage"])
 }
@@ -489,7 +489,7 @@ func generateTestEmbedding(size int) []float32 {
 func createCascadeEvents() []*IndexedEvent {
 	baseTime := time.Now().UnixNano()
 	events := make([]*IndexedEvent, 5)
-	
+
 	for i := range events {
 		events[i] = &IndexedEvent{
 			Event: &opinionated.OpinionatedEvent{
@@ -498,14 +498,14 @@ func createCascadeEvents() []*IndexedEvent {
 			Timestamp: baseTime + int64(i*10*time.Second),
 		}
 	}
-	
+
 	return events
 }
 
 func createThunderingHerdEvents() []*IndexedEvent {
 	baseTime := time.Now().UnixNano()
 	events := make([]*IndexedEvent, 15)
-	
+
 	// All events within 2 seconds
 	for i := range events {
 		events[i] = &IndexedEvent{
@@ -515,7 +515,7 @@ func createThunderingHerdEvents() []*IndexedEvent {
 			Timestamp: baseTime + int64(i*100*time.Millisecond),
 		}
 	}
-	
+
 	return events
 }
 
@@ -539,14 +539,14 @@ func TestMetricsTracking(t *testing.T) {
 
 	// Test correlation engine metrics
 	engine := NewCorrelationEngine()
-	
+
 	event := &opinionated.OpinionatedEvent{
 		Id:        "test-metrics",
 		Timestamp: timestamppb.Now(),
 	}
-	
+
 	_ = engine.IndexEvent(ctx, event)
-	
+
 	corrMetrics := engine.Metrics()
 	assert.Equal(t, uint64(1), corrMetrics.EventsIndexed)
 }
@@ -554,7 +554,7 @@ func TestMetricsTracking(t *testing.T) {
 func BenchmarkSemanticEnrichment(b *testing.B) {
 	enricher := NewSemanticEnricher()
 	ctx := context.Background()
-	
+
 	event := RawEvent{
 		Type:      "memory",
 		Source:    "kubelet",
@@ -592,7 +592,7 @@ func BenchmarkCorrelationIndexing(b *testing.B) {
 					Embedding: generateTestEmbedding(128),
 				},
 			}
-			
+
 			err := engine.IndexEvent(ctx, event)
 			if err != nil {
 				b.Fatal(err)

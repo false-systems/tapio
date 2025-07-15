@@ -42,30 +42,30 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 				},
 			},
 		}
-		
+
 		// Verify JSON structure
 		jsonData, err := json.Marshal(expectedResponse)
 		require.NoError(t, err)
-		
+
 		var parsed map[string]interface{}
 		err = json.Unmarshal(jsonData, &parsed)
 		require.NoError(t, err)
-		
+
 		// Verify key fields
 		assert.Equal(t, true, parsed["using_correlation"])
-		
+
 		insights := parsed["insights"].([]interface{})
 		assert.Len(t, insights, 1)
-		
+
 		insight := insights[0].(map[string]interface{})
 		assert.Equal(t, "api-service", insight["resource"])
 		assert.Equal(t, "high", insight["severity"])
-		
+
 		prediction := insight["prediction"].(map[string]interface{})
 		assert.Equal(t, "oom", prediction["type"])
 		assert.Equal(t, 0.85, prediction["probability"])
 	})
-	
+
 	t.Run("Test HTTP Request/Response Pattern", func(t *testing.T) {
 		// Test that we can construct proper HTTP requests
 		fixRequest := map[string]interface{}{
@@ -75,33 +75,33 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 			"auto_apply": false,
 			"dry_run":    true,
 		}
-		
+
 		jsonData, err := json.Marshal(fixRequest)
 		require.NoError(t, err)
-		
+
 		// Verify we can create a proper request
 		assert.Contains(t, string(jsonData), "api-service")
 		assert.Contains(t, string(jsonData), "memory_limit")
 		assert.Contains(t, string(jsonData), "dry_run")
-		
+
 		// Test response parsing
 		expectedResponse := map[string]interface{}{
 			"status":   "dry_run",
 			"commands": []string{"kubectl patch deployment..."},
 			"preview":  "Memory limit would be increased to 512Mi",
 		}
-		
+
 		responseData, err := json.Marshal(expectedResponse)
 		require.NoError(t, err)
-		
+
 		var parsedResponse map[string]interface{}
 		err = json.Unmarshal(responseData, &parsedResponse)
 		require.NoError(t, err)
-		
+
 		assert.Equal(t, "dry_run", parsedResponse["status"])
 		assert.NotNil(t, parsedResponse["commands"])
 	})
-	
+
 	t.Run("Test API Endpoint Patterns", func(t *testing.T) {
 		// Test that our API endpoints follow REST conventions
 		endpoints := []string{
@@ -111,7 +111,7 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 			"/api/v1/flows/default/api-service",
 			"/api/v1/cluster/overview",
 		}
-		
+
 		for _, endpoint := range endpoints {
 			// Verify endpoint structure
 			assert.Contains(t, endpoint, "/api/v1/")
@@ -120,7 +120,7 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 			}
 		}
 	})
-	
+
 	t.Run("Test Correlation Engine Data Flow", func(t *testing.T) {
 		// Test the data structures that flow through the correlation engine
 		event := map[string]interface{}{
@@ -135,18 +135,18 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 				"reason":        "OOMKilled",
 			},
 		}
-		
+
 		// Verify event structure
 		assert.Equal(t, "pod_restart", event["type"])
 		assert.Equal(t, "api-service-xyz", event["resource"])
 		assert.Equal(t, "default", event["namespace"])
-		
+
 		eventData := event["data"].(map[string]interface{})
 		assert.Equal(t, 5, eventData["restart_count"])
 		assert.Equal(t, 137, eventData["exit_code"])
 		assert.Equal(t, "OOMKilled", eventData["reason"])
 	})
-	
+
 	t.Run("Test L7 Protocol Data Structures", func(t *testing.T) {
 		// Test HTTP flow structure
 		httpFlow := map[string]interface{}{
@@ -161,25 +161,25 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 				},
 			},
 			"response": map[string]interface{}{
-				"status":  200,
+				"status": 200,
 				"headers": map[string]string{
 					"Content-Type": "application/json",
 				},
 			},
 			"anomalies": []string{},
 		}
-		
+
 		// Verify HTTP flow structure
 		assert.Equal(t, "flow-1", httpFlow["id"])
 		assert.Equal(t, 150, httpFlow["latency"])
-		
+
 		request := httpFlow["request"].(map[string]interface{})
 		assert.Equal(t, "GET", request["method"])
 		assert.Equal(t, "/api/users", request["path"])
-		
+
 		response := httpFlow["response"].(map[string]interface{})
 		assert.Equal(t, 200, response["status"])
-		
+
 		// Test gRPC flow structure
 		grpcFlow := map[string]interface{}{
 			"id":      "grpc-flow-1",
@@ -189,11 +189,11 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 			"status":  "OK",
 			"latency": 45,
 		}
-		
+
 		assert.Equal(t, "UserService", grpcFlow["service"])
 		assert.Equal(t, "GetUser", grpcFlow["method"])
 		assert.Equal(t, "unary", grpcFlow["type"])
-		
+
 		// Test Kafka flow structure
 		kafkaFlow := map[string]interface{}{
 			"id":        "kafka-flow-1",
@@ -203,25 +203,25 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 			"operation": "produce",
 			"key":       "user-123",
 		}
-		
+
 		assert.Equal(t, "user-events", kafkaFlow["topic"])
 		assert.Equal(t, 0, kafkaFlow["partition"])
 		assert.Equal(t, "produce", kafkaFlow["operation"])
 	})
-	
+
 	t.Run("Test Connection Patterns", func(t *testing.T) {
 		// Test direct in-memory connection pattern
 		directConnection := map[string]interface{}{
-			"type":     "direct",
-			"latency":  "<1ms",
-			"overhead": "none",
+			"type":          "direct",
+			"latency":       "<1ms",
+			"overhead":      "none",
 			"shared_memory": true,
 		}
-		
+
 		assert.Equal(t, "direct", directConnection["type"])
 		assert.Equal(t, "<1ms", directConnection["latency"])
 		assert.Equal(t, true, directConnection["shared_memory"])
-		
+
 		// Test gRPC connection pattern
 		grpcConnection := map[string]interface{}{
 			"type":     "grpc",
@@ -229,7 +229,7 @@ func TestAPIServerBasicConcepts(t *testing.T) {
 			"overhead": "network",
 			"scalable": true,
 		}
-		
+
 		assert.Equal(t, "grpc", grpcConnection["type"])
 		assert.Equal(t, "1-5ms", grpcConnection["latency"])
 		assert.Equal(t, true, grpcConnection["scalable"])
@@ -274,37 +274,37 @@ func TestCorrelationEngineDataFlow(t *testing.T) {
 				},
 			},
 		}
-		
+
 		// Verify event correlation potential
 		resourceEvents := make(map[string][]map[string]interface{})
 		for _, event := range events {
 			resource := event["resource"].(string)
 			resourceEvents[resource] = append(resourceEvents[resource], event)
 		}
-		
+
 		// Should have all events for api-service
 		apiServiceEvents := resourceEvents["api-service"]
 		assert.Len(t, apiServiceEvents, 3)
-		
+
 		// Verify we have the right event types for correlation
 		eventTypes := make(map[string]bool)
 		for _, event := range apiServiceEvents {
 			eventTypes[event["type"].(string)] = true
 		}
-		
+
 		assert.True(t, eventTypes["memory_usage"])
 		assert.True(t, eventTypes["pod_restart"])
 		assert.True(t, eventTypes["response_time"])
-		
+
 		// This combination should trigger OOM prediction
 		hasMemoryIssue := eventTypes["memory_usage"]
 		hasRestartIssue := eventTypes["pod_restart"]
 		hasPerformanceIssue := eventTypes["response_time"]
-		
+
 		shouldPredictOOM := hasMemoryIssue && hasRestartIssue && hasPerformanceIssue
 		assert.True(t, shouldPredictOOM)
 	})
-	
+
 	t.Run("Test Prediction Generation", func(t *testing.T) {
 		// Test the structure of generated predictions
 		prediction := map[string]interface{}{
@@ -319,19 +319,19 @@ func TestCorrelationEngineDataFlow(t *testing.T) {
 				"Degraded performance (2.5s avg latency)",
 			},
 		}
-		
+
 		// Verify prediction structure
 		assert.Equal(t, "oom", prediction["type"])
 		assert.Greater(t, prediction["probability"], 0.8)
 		assert.Equal(t, "high", prediction["confidence"])
-		
+
 		factors := prediction["factors"].([]string)
 		assert.Len(t, factors, 3)
 		assert.Contains(t, factors[0], "memory usage")
 		assert.Contains(t, factors[1], "OOM kills")
 		assert.Contains(t, factors[2], "performance")
 	})
-	
+
 	t.Run("Test Actionable Item Generation", func(t *testing.T) {
 		// Test the structure of actionable items
 		actionableItems := []map[string]interface{}{
@@ -350,15 +350,15 @@ func TestCorrelationEngineDataFlow(t *testing.T) {
 				"impact":       "Identifies root cause",
 			},
 		}
-		
+
 		// Verify actionable items structure
 		assert.Len(t, actionableItems, 2)
-		
+
 		kubectlAction := actionableItems[0]
 		assert.Equal(t, "kubectl", kubectlAction["type"])
 		assert.Equal(t, "medium", kubectlAction["safety_level"])
 		assert.Contains(t, kubectlAction["command"], "kubectl patch")
-		
+
 		investigationAction := actionableItems[1]
 		assert.Equal(t, "investigation", investigationAction["type"])
 		assert.Equal(t, "high", investigationAction["safety_level"])
@@ -386,14 +386,14 @@ pod/api-service-xyz: High restart count
      → Check logs: kubectl logs api-service-xyz --previous
   
   ✅ Using advanced correlation analysis`
-		
+
 		// Verify output contains expected sections
 		assert.Contains(t, expectedOutput, "🔍 ANALYSIS:")
 		assert.Contains(t, expectedOutput, "🔮 PREDICTIONS:")
 		assert.Contains(t, expectedOutput, "💡 ACTIONABLE ITEMS:")
 		assert.Contains(t, expectedOutput, "✅ Using advanced correlation analysis")
 	})
-	
+
 	t.Run("Test CLI Fallback Behavior", func(t *testing.T) {
 		// Test the fallback when correlation server unavailable
 		fallbackOutput := `
@@ -410,7 +410,7 @@ pod/api-service-xyz: High memory usage
      → Pod may OOM in approximately 10 minutes
   
   ⚡ Using local analysis (correlation server unavailable)`
-		
+
 		// Verify fallback output
 		assert.Contains(t, fallbackOutput, "⚠️  WARNINGS:")
 		assert.Contains(t, fallbackOutput, "🔮 PREDICTIONS (local analysis):")
@@ -430,9 +430,9 @@ func BenchmarkDataStructures(b *testing.B) {
 			"description": "API service showing memory growth pattern",
 			"timestamp":   time.Now().Unix(),
 		}
-		
+
 		b.ResetTimer()
-		
+
 		for i := 0; i < b.N; i++ {
 			_, err := json.Marshal(insight)
 			if err != nil {
@@ -440,7 +440,7 @@ func BenchmarkDataStructures(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("Event Processing", func(b *testing.B) {
 		events := make([]map[string]interface{}, 1000)
 		for i := 0; i < 1000; i++ {
@@ -455,9 +455,9 @@ func BenchmarkDataStructures(b *testing.B) {
 				},
 			}
 		}
-		
+
 		b.ResetTimer()
-		
+
 		for i := 0; i < b.N; i++ {
 			// Simulate event processing
 			resourceEvents := make(map[string][]map[string]interface{})

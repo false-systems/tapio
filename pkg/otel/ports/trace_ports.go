@@ -19,21 +19,21 @@ type TraceApplicationService[T domain.TraceData] interface {
 	// Core trace operations
 	StartTrace(ctx context.Context, request StartTraceRequest[T]) (*TraceSession[T], error)
 	EndTrace(ctx context.Context, session *TraceSession[T]) (domain.SpanSnapshot[T], error)
-	
+
 	// Span lifecycle management
 	CreateSpan(ctx context.Context, request CreateSpanRequest[T]) (domain.Span[T], error)
 	UpdateSpan(ctx context.Context, spanID domain.SpanID, updates SpanUpdates[T]) error
 	FinishSpan(ctx context.Context, spanID domain.SpanID) (domain.SpanSnapshot[T], error)
-	
+
 	// Batch operations for performance
 	CreateSpanBatch(ctx context.Context, requests []CreateSpanRequest[T]) ([]domain.Span[T], error)
 	ProcessSpanBatch(ctx context.Context, spans []domain.SpanSnapshot[T]) (*BatchProcessingResult, error)
-	
+
 	// Query operations (CQRS read side)
 	GetTrace(ctx context.Context, traceID domain.TraceID) (*domain.TraceAggregateView[T], error)
 	QuerySpans(ctx context.Context, query SpanQuery) (*SpanQueryResult[T], error)
 	GetTraceMetrics(ctx context.Context, filter MetricsFilter) (*domain.TraceMetrics, error)
-	
+
 	// Health and monitoring
 	GetServiceHealth(ctx context.Context) (*domain.ServiceHealth, error)
 	GetPerformanceMetrics(ctx context.Context) (*domain.PerformanceMetrics, error)
@@ -44,11 +44,11 @@ type TraceCommandService[T domain.TraceData] interface {
 	// Command handling
 	ExecuteCommand(ctx context.Context, cmd TraceCommand[T]) (*CommandResult[T], error)
 	ExecuteCommandBatch(ctx context.Context, commands []TraceCommand[T]) (*BatchCommandResult[T], error)
-	
+
 	// Event handling
 	HandleTraceEvent(ctx context.Context, event domain.TraceEvent) error
 	HandleEventBatch(ctx context.Context, events []domain.TraceEvent) error
-	
+
 	// Saga management for distributed traces
 	StartTraceSaga(ctx context.Context, sagaID string, request domain.SagaStartRequest) error
 	UpdateTraceSaga(ctx context.Context, sagaID string, update domain.SagaUpdate[T]) error
@@ -61,11 +61,11 @@ type TraceQueryService[T domain.TraceData] interface {
 	FindTracesByFilter(ctx context.Context, filter TraceFilter) (*TraceSearchResult[T], error)
 	GetTraceStatistics(ctx context.Context, timeRange domain.TimeRange) (*domain.TraceStatistics, error)
 	GetSpanAnalytics(ctx context.Context, analyticsQuery domain.AnalyticsQuery) (*domain.SpanAnalytics, error)
-	
+
 	// Real-time queries
 	StreamTraces(ctx context.Context, filter TraceFilter) (<-chan domain.TraceStreamEvent[T], error)
 	StreamSpanUpdates(ctx context.Context, traceID domain.TraceID) (<-chan SpanUpdateEvent[T], error)
-	
+
 	// Materialized views
 	GetTraceAggregateView(ctx context.Context, traceID domain.TraceID) (*domain.TraceAggregateView[T], error)
 	RefreshMaterializedViews(ctx context.Context, viewTypes []ViewType) error
@@ -81,19 +81,19 @@ type TraceRepositoryPort[T domain.TraceData] interface {
 	SaveSpanBatch(ctx context.Context, spans []domain.SpanSnapshot[T]) error
 	GetSpan(ctx context.Context, traceID domain.TraceID, spanID domain.SpanID) (domain.SpanSnapshot[T], error)
 	DeleteSpan(ctx context.Context, traceID domain.TraceID, spanID domain.SpanID) error
-	
+
 	// Advanced queries
 	FindSpans(ctx context.Context, query SpanQuery) ([]domain.SpanSnapshot[T], error)
 	FindTraces(ctx context.Context, filter TraceFilter) ([]domain.TraceInfo, error)
 	CountSpans(ctx context.Context, filter SpanFilter) (int64, error)
-	
+
 	// Event sourcing support
 	AppendTraceEvents(ctx context.Context, traceID domain.TraceID, events []domain.TraceEvent) error
 	GetTraceEvents(ctx context.Context, traceID domain.TraceID, fromVersion int64) ([]domain.TraceEvent, error)
-	
+
 	// Streaming support
 	StreamSpans(ctx context.Context, query SpanQuery) (<-chan domain.SpanSnapshot[T], error)
-	
+
 	// Maintenance operations
 	CompactTrace(ctx context.Context, traceID domain.TraceID) error
 	ArchiveOldTraces(ctx context.Context, cutoffTime time.Time) (*ArchiveResult, error)
@@ -105,17 +105,17 @@ type TraceEventStorePort interface {
 	AppendEvents(ctx context.Context, streamID string, expectedVersion int64, events []domain.TraceEvent) error
 	ReadEvents(ctx context.Context, streamID string, fromVersion int64, maxCount int) ([]domain.TraceEvent, error)
 	ReadEventsForward(ctx context.Context, streamID string, fromVersion int64) (<-chan domain.TraceEvent, error)
-	
+
 	// Stream management
 	CreateStream(ctx context.Context, streamID string, metadata map[string]any) error
 	GetStreamMetadata(ctx context.Context, streamID string) (*StreamMetadata, error)
 	DeleteStream(ctx context.Context, streamID string) error
-	
+
 	// Projections
 	RegisterProjection(projection EventProjection) error
 	UpdateProjection(ctx context.Context, projectionName string, fromVersion int64) error
 	GetProjectionState(ctx context.Context, projectionName string) (*ProjectionState, error)
-	
+
 	// Subscriptions
 	SubscribeToStream(ctx context.Context, streamID string, fromVersion int64) (<-chan domain.TraceEvent, error)
 	SubscribeToAll(ctx context.Context, fromPosition int64) (<-chan domain.TraceEvent, error)
@@ -127,17 +127,17 @@ type TraceCachePort[T domain.TraceData] interface {
 	GetSpan(ctx context.Context, key SpanCacheKey) (domain.SpanSnapshot[T], error)
 	SetSpan(ctx context.Context, key SpanCacheKey, span domain.SpanSnapshot[T], ttl time.Duration) error
 	DeleteSpan(ctx context.Context, key SpanCacheKey) error
-	
+
 	// Trace caching
 	GetTrace(ctx context.Context, traceID domain.TraceID) (*domain.TraceAggregateView[T], error)
 	SetTrace(ctx context.Context, traceID domain.TraceID, trace *domain.TraceAggregateView[T], ttl time.Duration) error
 	InvalidateTrace(ctx context.Context, traceID domain.TraceID) error
-	
+
 	// Bulk operations
 	GetSpanBatch(ctx context.Context, keys []SpanCacheKey) (map[SpanCacheKey]domain.SpanSnapshot[T], error)
 	SetSpanBatch(ctx context.Context, items map[SpanCacheKey]CacheItem[T]) error
 	InvalidateBatch(ctx context.Context, keys []SpanCacheKey) error
-	
+
 	// Cache management
 	GetCacheStats(ctx context.Context) (*CacheStats, error)
 	ClearCache(ctx context.Context, pattern string) error
@@ -149,15 +149,15 @@ type TracePublisherPort interface {
 	// Event publishing
 	PublishTraceEvent(ctx context.Context, event TraceEventMessage) error
 	PublishTraceEventBatch(ctx context.Context, events []TraceEventMessage) error
-	
+
 	// Stream publishing
 	PublishToStream(ctx context.Context, stream string, event TraceEventMessage) error
 	PublishToTopic(ctx context.Context, topic string, event TraceEventMessage) error
-	
+
 	// Notification publishing
 	PublishNotification(ctx context.Context, notification TraceNotification) error
 	PublishAlert(ctx context.Context, alert TraceAlert) error
-	
+
 	// Configuration
 	RegisterEventHandler(eventType string, handler EventHandler) error
 	UnregisterEventHandler(eventType string) error
@@ -170,17 +170,17 @@ type MetricsCollectorPort interface {
 	RecordSpanCreated(ctx context.Context, duration time.Duration, labels map[string]string)
 	RecordSpanProcessed(ctx context.Context, processingTime time.Duration, success bool)
 	RecordTraceCompleted(ctx context.Context, traceInfo TraceCompletionInfo)
-	
+
 	// Resource metrics
 	RecordMemoryUsage(ctx context.Context, usage MemoryUsage)
 	RecordCacheMetrics(ctx context.Context, metrics CacheMetrics)
 	RecordRepositoryMetrics(ctx context.Context, operation string, duration time.Duration, success bool)
-	
+
 	// Business metrics
 	RecordUserAction(ctx context.Context, action UserAction)
 	RecordServiceCall(ctx context.Context, call ServiceCall)
 	RecordErrorOccurred(ctx context.Context, error ErrorInfo)
-	
+
 	// Aggregated metrics
 	GetMetricsSummary(ctx context.Context, timeRange domain.TimeRange) (*MetricsSummary, error)
 	ExportMetrics(ctx context.Context, format MetricsFormat) ([]byte, error)
@@ -191,15 +191,15 @@ type ConfigurationPort interface {
 	// Configuration retrieval
 	GetConfiguration(ctx context.Context, key string) (ConfigValue, error)
 	GetConfigurationBatch(ctx context.Context, keys []string) (map[string]ConfigValue, error)
-	
+
 	// Dynamic configuration
 	WatchConfiguration(ctx context.Context, key string) (<-chan ConfigChange, error)
 	UpdateConfiguration(ctx context.Context, key string, value ConfigValue) error
-	
+
 	// Feature flags
 	IsFeatureEnabled(ctx context.Context, feature string) (bool, error)
 	GetFeatureFlags(ctx context.Context) (map[string]bool, error)
-	
+
 	// Environment specific
 	GetEnvironmentConfig(ctx context.Context) (*EnvironmentConfig, error)
 	ValidateConfiguration(ctx context.Context, config map[string]ConfigValue) (*ValidationResult, error)
@@ -211,15 +211,15 @@ type LoggingPort interface {
 	LogTrace(ctx context.Context, event TraceLogEvent)
 	LogSpan(ctx context.Context, event SpanLogEvent)
 	LogError(ctx context.Context, error ErrorLogEvent)
-	
+
 	// Contextual logging
 	WithContext(ctx context.Context) LoggingPort
 	WithFields(fields map[string]any) LoggingPort
 	WithTraceID(traceID domain.TraceID) LoggingPort
-	
+
 	// Log streaming
 	StreamLogs(ctx context.Context, filter LogFilter) (<-chan LogEntry, error)
-	
+
 	// Log analysis
 	AnalyzeLogs(ctx context.Context, query LogAnalysisQuery) (*LogAnalysisResult, error)
 }
@@ -230,15 +230,15 @@ type ExternalServicePort interface {
 	DiscoverServices(ctx context.Context, criteria DiscoveryCriteria) ([]ServiceInfo, error)
 	RegisterService(ctx context.Context, service ServiceRegistration) error
 	DeregisterService(ctx context.Context, serviceID string) error
-	
+
 	// Health checks
 	CheckServiceHealth(ctx context.Context, serviceID string) (*domain.ServiceHealthStatus, error)
 	MonitorServiceHealth(ctx context.Context, serviceID string) (<-chan domain.HealthUpdate, error)
-	
+
 	// Load balancing
 	SelectService(ctx context.Context, serviceName string, strategy LoadBalancingStrategy) (*ServiceEndpoint, error)
 	ReportServiceMetrics(ctx context.Context, serviceID string, metrics ServiceMetrics) error
-	
+
 	// Circuit breaker
 	CallWithCircuitBreaker(ctx context.Context, serviceID string, call func() error) error
 	GetCircuitBreakerState(ctx context.Context, serviceID string) (*CircuitBreakerState, error)
@@ -248,13 +248,13 @@ type ExternalServicePort interface {
 
 // Primary port request/response types
 type StartTraceRequest[T domain.TraceData] struct {
-	TraceName    string
-	ServiceName  string
-	SpanKind     domain.SpanKind
-	Attributes   map[string]T
-	ParentContext context.Context
+	TraceName        string
+	ServiceName      string
+	SpanKind         domain.SpanKind
+	Attributes       map[string]T
+	ParentContext    context.Context
 	SamplingDecision *domain.SamplingDecision
-	Deadline     *time.Time
+	Deadline         *time.Time
 }
 
 type CreateSpanRequest[T domain.TraceData] struct {
@@ -268,18 +268,18 @@ type CreateSpanRequest[T domain.TraceData] struct {
 }
 
 type SpanUpdates[T domain.TraceData] struct {
-	Attributes  map[string]T
-	Events      []domain.SpanEvent[T]
-	Status      *domain.SpanStatus
-	EndTime     *time.Time
+	Attributes map[string]T
+	Events     []domain.SpanEvent[T]
+	Status     *domain.SpanStatus
+	EndTime    *time.Time
 }
 
 type TraceSession[T domain.TraceData] struct {
-	TraceID     domain.TraceID
-	RootSpan    domain.Span[T]
-	Context     context.Context
-	StartTime   time.Time
-	Metadata    map[string]any
+	TraceID      domain.TraceID
+	RootSpan     domain.Span[T]
+	Context      context.Context
+	StartTime    time.Time
+	Metadata     map[string]any
 	SamplingRate float64
 }
 
@@ -357,11 +357,11 @@ type BatchProcessingResult struct {
 }
 
 type CommandResult[T domain.TraceData] struct {
-	CommandID   string
-	Success     bool
-	Result      any
-	Error       error
-	Timestamp   time.Time
+	CommandID     string
+	Success       bool
+	Result        any
+	Error         error
+	Timestamp     time.Time
 	ExecutionTime time.Duration
 }
 
@@ -390,11 +390,11 @@ type TraceSearchResult[T domain.TraceData] struct {
 
 // Event sourcing types
 type StreamMetadata struct {
-	StreamID      string
-	Version       int64
-	Created       time.Time
-	LastModified  time.Time
-	Metadata      map[string]any
+	StreamID     string
+	Version      int64
+	Created      time.Time
+	LastModified time.Time
+	Metadata     map[string]any
 }
 
 type EventProjection interface {
@@ -426,42 +426,42 @@ type CacheItem[T domain.TraceData] struct {
 }
 
 type CacheStats struct {
-	HitCount       int64
-	MissCount      int64
-	HitRatio       float64
-	Size           int64
-	MaxSize        int64
-	EvictionCount  int64
+	HitCount        int64
+	MissCount       int64
+	HitRatio        float64
+	Size            int64
+	MaxSize         int64
+	EvictionCount   int64
 	AverageLoadTime time.Duration
 }
 
 type WarmupRequest struct {
-	Type  WarmupType
-	Keys  []string
+	Type     WarmupType
+	Keys     []string
 	Priority int
 }
 
 // Publisher types
 type TraceEventMessage struct {
-	EventID     string
-	EventType   string
-	TraceID     domain.TraceID
-	SpanID      *domain.SpanID
-	Payload     []byte
-	Headers     map[string]string
-	Timestamp   time.Time
-	Source      string
+	EventID   string
+	EventType string
+	TraceID   domain.TraceID
+	SpanID    *domain.SpanID
+	Payload   []byte
+	Headers   map[string]string
+	Timestamp time.Time
+	Source    string
 }
 
 type TraceNotification struct {
-	Type        NotificationType
-	Severity    NotificationSeverity
-	Title       string
-	Message     string
-	TraceID     domain.TraceID
-	Recipients  []string
-	Metadata    map[string]any
-	Timestamp   time.Time
+	Type       NotificationType
+	Severity   NotificationSeverity
+	Title      string
+	Message    string
+	TraceID    domain.TraceID
+	Recipients []string
+	Metadata   map[string]any
+	Timestamp  time.Time
 }
 
 type TraceAlert struct {
@@ -504,8 +504,8 @@ type EnvironmentConfig struct {
 }
 
 type ValidationResult struct {
-	Valid   bool
-	Errors  []ValidationError
+	Valid    bool
+	Errors   []ValidationError
 	Warnings []ValidationWarning
 }
 

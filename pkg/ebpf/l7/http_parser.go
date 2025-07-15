@@ -37,32 +37,32 @@ type HTTPResponse struct {
 
 // HTTPFlow represents a complete HTTP transaction
 type HTTPFlow struct {
-	ID           string         `json:"id"`
-	Request      *HTTPRequest   `json:"request"`
-	Response     *HTTPResponse  `json:"response,omitempty"`
-	Error        string         `json:"error,omitempty"`
-	
+	ID       string        `json:"id"`
+	Request  *HTTPRequest  `json:"request"`
+	Response *HTTPResponse `json:"response,omitempty"`
+	Error    string        `json:"error,omitempty"`
+
 	// Connection info
-	SrcIP        string         `json:"src_ip"`
-	SrcPort      uint16         `json:"src_port"`
-	DstIP        string         `json:"dst_ip"`
-	DstPort      uint16         `json:"dst_port"`
-	
+	SrcIP   string `json:"src_ip"`
+	SrcPort uint16 `json:"src_port"`
+	DstIP   string `json:"dst_ip"`
+	DstPort uint16 `json:"dst_port"`
+
 	// Kubernetes context
-	SrcPod       string         `json:"src_pod,omitempty"`
-	SrcNamespace string         `json:"src_namespace,omitempty"`
-	DstPod       string         `json:"dst_pod,omitempty"`
-	DstNamespace string         `json:"dst_namespace,omitempty"`
-	DstService   string         `json:"dst_service,omitempty"`
-	
+	SrcPod       string `json:"src_pod,omitempty"`
+	SrcNamespace string `json:"src_namespace,omitempty"`
+	DstPod       string `json:"dst_pod,omitempty"`
+	DstNamespace string `json:"dst_namespace,omitempty"`
+	DstService   string `json:"dst_service,omitempty"`
+
 	// Metrics
-	Latency      time.Duration  `json:"latency,omitempty"`
-	BytesIn      uint64         `json:"bytes_in"`
-	BytesOut     uint64         `json:"bytes_out"`
-	
+	Latency  time.Duration `json:"latency,omitempty"`
+	BytesIn  uint64        `json:"bytes_in"`
+	BytesOut uint64        `json:"bytes_out"`
+
 	// Analysis
-	Anomalies    []string       `json:"anomalies,omitempty"`
-	Tags         []string       `json:"tags,omitempty"`
+	Anomalies []string `json:"anomalies,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 // HTTPParser parses HTTP traffic from eBPF data
@@ -98,7 +98,7 @@ func (p *HTTPParser) ParseRequest(data []byte) (*HTTPRequest, error) {
 
 	headerData := parts[0]
 	lines := bytes.Split(headerData, []byte("\r\n"))
-	
+
 	// Parse request line
 	if len(lines) > 0 {
 		requestLine := string(lines[0])
@@ -116,13 +116,13 @@ func (p *HTTPParser) ParseRequest(data []byte) (*HTTPRequest, error) {
 		if line == "" {
 			break
 		}
-		
+
 		colonIdx := strings.Index(line, ":")
 		if colonIdx > 0 {
 			key := strings.TrimSpace(line[:colonIdx])
 			value := strings.TrimSpace(line[colonIdx+1:])
 			req.Headers[key] = value
-			
+
 			// Extract common headers
 			switch strings.ToLower(key) {
 			case "host":
@@ -139,7 +139,7 @@ func (p *HTTPParser) ParseRequest(data []byte) (*HTTPRequest, error) {
 	if len(parts) > 1 && p.parseBody {
 		req.Body = parts[1]
 		req.BodySize = len(parts[1])
-		
+
 		// Truncate if too large
 		if req.BodySize > p.maxBodySize {
 			req.Body = req.Body[:p.maxBodySize]
@@ -168,7 +168,7 @@ func (p *HTTPParser) ParseResponse(data []byte) (*HTTPResponse, error) {
 
 	headerData := parts[0]
 	lines := bytes.Split(headerData, []byte("\r\n"))
-	
+
 	// Parse status line
 	if len(lines) > 0 {
 		statusLine := string(lines[0])
@@ -188,13 +188,13 @@ func (p *HTTPParser) ParseResponse(data []byte) (*HTTPResponse, error) {
 		if line == "" {
 			break
 		}
-		
+
 		colonIdx := strings.Index(line, ":")
 		if colonIdx > 0 {
 			key := strings.TrimSpace(line[:colonIdx])
 			value := strings.TrimSpace(line[colonIdx+1:])
 			resp.Headers[key] = value
-			
+
 			// Extract content type
 			if strings.ToLower(key) == "content-type" {
 				resp.ContentType = value
@@ -206,7 +206,7 @@ func (p *HTTPParser) ParseResponse(data []byte) (*HTTPResponse, error) {
 	if len(parts) > 1 && p.parseBody {
 		resp.Body = parts[1]
 		resp.BodySize = len(parts[1])
-		
+
 		// Truncate if too large
 		if resp.BodySize > p.maxBodySize {
 			resp.Body = resp.Body[:p.maxBodySize]
@@ -226,14 +226,14 @@ func (p *HTTPParser) AnalyzeFlow(flow *HTTPFlow) {
 		if strings.Contains(flow.Request.Path, "..") {
 			flow.Anomalies = append(flow.Anomalies, "path_traversal_attempt")
 		}
-		
+
 		if strings.Contains(flow.Request.Path, "<script") {
 			flow.Anomalies = append(flow.Anomalies, "potential_xss")
 		}
-		
+
 		// Tag by method
 		flow.Tags = append(flow.Tags, "method:"+strings.ToLower(flow.Request.Method))
-		
+
 		// Tag by content type
 		if flow.Request.ContentType != "" {
 			if strings.Contains(flow.Request.ContentType, "json") {
@@ -242,12 +242,12 @@ func (p *HTTPParser) AnalyzeFlow(flow *HTTPFlow) {
 				flow.Tags = append(flow.Tags, "api:xml")
 			}
 		}
-		
+
 		// Check for API endpoints
 		if strings.HasPrefix(flow.Request.Path, "/api/") {
 			flow.Tags = append(flow.Tags, "api_call")
 		}
-		
+
 		// Check for health checks
 		if flow.Request.Path == "/health" || flow.Request.Path == "/healthz" {
 			flow.Tags = append(flow.Tags, "health_check")
@@ -264,18 +264,18 @@ func (p *HTTPParser) AnalyzeFlow(flow *HTTPFlow) {
 		} else if flow.Response.StatusCode >= 300 {
 			flow.Tags = append(flow.Tags, "redirect")
 		}
-		
+
 		// Check latency
 		if flow.Latency > 1*time.Second {
 			flow.Anomalies = append(flow.Anomalies, "high_latency")
 		}
-		
+
 		// Check response size
 		if flow.Response.BodySize > 10*1024*1024 { // 10MB
 			flow.Anomalies = append(flow.Anomalies, "large_response")
 		}
 	}
-	
+
 	// Check for potential issues
 	if flow.Request != nil && flow.Response == nil && flow.Error == "" {
 		flow.Anomalies = append(flow.Anomalies, "no_response")
@@ -285,21 +285,21 @@ func (p *HTTPParser) AnalyzeFlow(flow *HTTPFlow) {
 // GetMetrics extracts metrics from HTTP flow
 func (p *HTTPParser) GetMetrics(flow *HTTPFlow) map[string]interface{} {
 	metrics := make(map[string]interface{})
-	
+
 	if flow.Request != nil {
 		metrics["method"] = flow.Request.Method
 		metrics["path"] = flow.Request.Path
 		metrics["user_agent"] = flow.Request.UserAgent
 	}
-	
+
 	if flow.Response != nil {
 		metrics["status_code"] = flow.Response.StatusCode
 		metrics["response_size"] = flow.Response.BodySize
 	}
-	
+
 	metrics["latency_ms"] = flow.Latency.Milliseconds()
 	metrics["bytes_in"] = flow.BytesIn
 	metrics["bytes_out"] = flow.BytesOut
-	
+
 	return metrics
 }

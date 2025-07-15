@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // SeverityLevel represents the severity level of a finding
@@ -43,15 +44,16 @@ const (
 	ConfidenceVeryHigh
 )
 
-// Category represents finding categories
-type Category string
+// Type alias for Category
+type Category = types.Category
 
+// Category constants for backward compatibility
 const (
-	CategoryPerformance Category = "performance"
-	CategorySecurity    Category = "security"
-	CategoryReliability Category = "reliability"
-	CategoryCost        Category = "cost"
-	CategoryCapacity    Category = "capacity"
+	CategoryPerformance = types.CategoryPerformance
+	CategorySecurity    = types.CategorySecurity
+	CategoryReliability = types.CategoryReliability
+	CategoryCost        = types.CategoryCost
+	CategoryCapacity    = types.CategoryCapacity
 )
 
 // String returns the string representation of confidence level

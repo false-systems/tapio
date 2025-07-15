@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package journald
 
 import (
@@ -8,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/yairfalse/tapio/pkg/collectors/types"
+	"github.com/yairfalse/tapio/pkg/collectors/unified"
 )
 
 // SemanticEnricher adds semantic context to events at collection time
@@ -19,11 +22,11 @@ type SemanticEnricher struct {
 	containerEnricher  *containerEnricher
 	kubernetesEnricher *kubernetesEnricher
 	errorEnricher      *errorEnricher
-	
+
 	// Caches for performance
-	processCache    *enrichmentCache
-	containerCache  *enrichmentCache
-	
+	processCache   *enrichmentCache
+	containerCache *enrichmentCache
+
 	// Pattern matchers for context extraction
 	patterns map[string]*contextPattern
 }
@@ -55,40 +58,40 @@ func NewSemanticEnricher() *SemanticEnricher {
 		containerCache:     newEnrichmentCache(500),
 		patterns:           make(map[string]*contextPattern),
 	}
-	
+
 	e.initializePatterns()
 	return e
 }
 
 // Enrich adds semantic context to an event
-func (e *SemanticEnricher) Enrich(event *types.Event, entry *JournalEntry) {
+func (e *SemanticEnricher) Enrich(event *unified.Event, entry *JournalEntry) {
 	// Add base enrichment
 	e.addBaseEnrichment(event, entry)
-	
+
 	// Process-specific enrichment
 	if entry.PID > 0 {
 		e.processEnricher.enrich(event, entry, e.processCache)
 	}
-	
+
 	// Container enrichment
 	if containerID := e.detectContainerID(entry); containerID != "" {
 		e.containerEnricher.enrich(event, containerID, e.containerCache)
 	}
-	
+
 	// Kubernetes enrichment
 	e.kubernetesEnricher.enrich(event, entry)
-	
+
 	// Error context enrichment
-	if event.Severity >= types.SeverityWarning {
+	if event.Severity >= unified.SeverityWarning {
 		e.errorEnricher.enrich(event, entry)
 	}
-	
+
 	// Pattern-based enrichment
 	e.applyPatternEnrichment(event, entry)
-	
+
 	// Add event fingerprint for deduplication
 	e.addFingerprint(event)
-	
+
 	// Add correlation hints
 	e.addCorrelationHints(event)
 }
@@ -102,7 +105,7 @@ func (e *SemanticEnricher) initializePatterns() {
 			return map[string]string{"ip_address": matches[1]}
 		},
 	}
-	
+
 	// Port extraction
 	e.patterns["port"] = &contextPattern{
 		regex: regexp.MustCompile(`(?i)port[:\s]+(\d{1,5})`),
@@ -110,7 +113,7 @@ func (e *SemanticEnricher) initializePatterns() {
 			return map[string]string{"port": matches[1]}
 		},
 	}
-	
+
 	// File path extraction
 	e.patterns["file_path"] = &contextPattern{
 		regex: regexp.MustCompile(`(/[\w\-./]+)`),
@@ -118,7 +121,7 @@ func (e *SemanticEnricher) initializePatterns() {
 			return map[string]string{"file_path": matches[1]}
 		},
 	}
-	
+
 	// Error code extraction
 	e.patterns["error_code"] = &contextPattern{
 		regex: regexp.MustCompile(`(?i)(?:error|err|code)[:\s]+([A-Z0-9_]+)`),
@@ -126,7 +129,7 @@ func (e *SemanticEnricher) initializePatterns() {
 			return map[string]string{"error_code": matches[1]}
 		},
 	}
-	
+
 	// Kubernetes resource extraction
 	e.patterns["k8s_resource"] = &contextPattern{
 		regex: regexp.MustCompile(`(?i)(pod|service|deployment|daemonset|statefulset|job)/([a-z0-9-]+)`),
@@ -140,34 +143,34 @@ func (e *SemanticEnricher) initializePatterns() {
 }
 
 // addBaseEnrichment adds basic enrichment to all events
-func (e *SemanticEnricher) addBaseEnrichment(event *types.Event, entry *JournalEntry) {
+func (e *SemanticEnricher) addBaseEnrichment(event *unified.Event, entry *JournalEntry) {
 	// Add systemd context
 	if entry.SystemdUnit != "" {
 		event.Attributes["systemd_unit"] = entry.SystemdUnit
 		event.Attributes["service_type"] = e.classifyService(entry.SystemdUnit)
 	}
-	
+
 	// Add boot context
 	if entry.BootID != "" {
 		event.Attributes["boot_id"] = entry.BootID
 	}
-	
+
 	// Add machine context
 	if entry.MachineID != "" {
 		event.Attributes["machine_id"] = entry.MachineID
 	}
-	
+
 	// Add transport info
 	if entry.Transport != "" {
 		event.Attributes["transport"] = entry.Transport
 	}
-	
+
 	// Add user context if available
 	if entry.UID >= 0 {
 		event.Attributes["uid"] = entry.UID
 		event.Attributes["user_type"] = e.classifyUser(entry.UID)
 	}
-	
+
 	// Add SELinux context if present
 	if entry.SELinuxContext != "" {
 		event.Attributes["selinux_context"] = entry.SELinuxContext
@@ -183,21 +186,21 @@ func (e *SemanticEnricher) detectContainerID(entry *JournalEntry) string {
 			return strings.TrimSuffix(parts[1], ".scope")
 		}
 	}
-	
+
 	// Check message for container ID
 	containerPattern := regexp.MustCompile(`[a-f0-9]{64}|[a-f0-9]{12}`)
 	if matches := containerPattern.FindString(entry.Message); matches != "" {
 		return matches
 	}
-	
+
 	return ""
 }
 
 // applyPatternEnrichment applies pattern-based context extraction
-func (e *SemanticEnricher) applyPatternEnrichment(event *types.Event, entry *JournalEntry) {
+func (e *SemanticEnricher) applyPatternEnrichment(event *unified.Event, entry *JournalEntry) {
 	message := entry.Message
-	
-	for name, pattern := range e.patterns {
+
+	for _, pattern := range e.patterns {
 		if matches := pattern.regex.FindStringSubmatch(message); matches != nil {
 			extracted := pattern.extract(matches)
 			for k, v := range extracted {
@@ -208,14 +211,14 @@ func (e *SemanticEnricher) applyPatternEnrichment(event *types.Event, entry *Jou
 }
 
 // addFingerprint creates a unique fingerprint for deduplication
-func (e *SemanticEnricher) addFingerprint(event *types.Event) {
+func (e *SemanticEnricher) addFingerprint(event *unified.Event) {
 	// Create fingerprint from key fields
 	parts := []string{
 		event.Source.Component,
 		string(event.Type),
 		string(event.Category),
 	}
-	
+
 	// Add key data fields
 	if unit, ok := event.Data["unit"].(string); ok {
 		parts = append(parts, unit)
@@ -226,7 +229,7 @@ func (e *SemanticEnricher) addFingerprint(event *types.Event) {
 	if failureType, ok := event.Data["failure_type"].(string); ok {
 		parts = append(parts, failureType)
 	}
-	
+
 	// Hash the parts
 	h := md5.New()
 	h.Write([]byte(strings.Join(parts, ":")))
@@ -234,21 +237,21 @@ func (e *SemanticEnricher) addFingerprint(event *types.Event) {
 }
 
 // addCorrelationHints adds hints for the correlation engine
-func (e *SemanticEnricher) addCorrelationHints(event *types.Event) {
+func (e *SemanticEnricher) addCorrelationHints(event *unified.Event) {
 	hints := make([]string, 0)
-	
+
 	// Add hints based on event type
 	switch event.Type {
-	case types.EventTypeOOM:
+	case "oom_kill":
 		hints = append(hints, "memory_pressure", "resource_exhaustion")
-	case types.EventTypeContainerFailure:
+	case "container_failure":
 		hints = append(hints, "service_disruption", "deployment_failure")
-	case types.EventTypeLog:
-		if event.Severity >= types.SeverityError {
+	case "log_event":
+		if event.Severity >= unified.SeverityError {
 			hints = append(hints, "system_instability")
 		}
 	}
-	
+
 	// Add hints based on patterns
 	if _, ok := event.Data["network_error"]; ok {
 		hints = append(hints, "network_issue", "connectivity_problem")
@@ -256,7 +259,7 @@ func (e *SemanticEnricher) addCorrelationHints(event *types.Event) {
 	if _, ok := event.Data["timeout_type"]; ok {
 		hints = append(hints, "performance_degradation", "latency_issue")
 	}
-	
+
 	if len(hints) > 0 {
 		event.Attributes["correlation_hints"] = hints
 	}
@@ -303,15 +306,15 @@ func newProcessEnricher() *processEnricher {
 	}
 }
 
-func (pe *processEnricher) enrich(event *types.Event, entry *JournalEntry, cache *enrichmentCache) {
+func (pe *processEnricher) enrich(event *unified.Event, entry *JournalEntry, cache *enrichmentCache) {
 	// Add process hierarchy info
 	event.Attributes["process_tree"] = fmt.Sprintf("pid:%d", entry.PID)
-	
+
 	// Try to extract command from message
 	if matches := pe.commandPattern.FindStringSubmatch(entry.Message); matches != nil {
 		event.Attributes["command"] = matches[1]
 	}
-	
+
 	// Add process classification
 	event.Attributes["process_type"] = pe.classifyProcess(entry.SyslogIdentifier)
 }
@@ -342,7 +345,7 @@ func newContainerEnricher() *containerEnricher {
 	}
 }
 
-func (ce *containerEnricher) enrich(event *types.Event, containerID string, cache *enrichmentCache) {
+func (ce *containerEnricher) enrich(event *unified.Event, containerID string, cache *enrichmentCache) {
 	// Check cache first
 	if cached := cache.get(containerID); cached != nil {
 		for k, v := range cached {
@@ -350,19 +353,19 @@ func (ce *containerEnricher) enrich(event *types.Event, containerID string, cach
 		}
 		return
 	}
-	
+
 	// Add container ID
-	event.Context.ContainerID = containerID
+	event.Context.Container = containerID
 	event.Attributes["container_id"] = containerID
 	event.Labels["container"] = containerID[:12] // Short ID for labels
-	
+
 	// Try to extract image from message
 	if message, ok := event.Data["message"].(string); ok {
 		if matches := ce.imagePattern.FindStringSubmatch(message); matches != nil {
 			event.Attributes["container_image"] = matches[1]
 		}
 	}
-	
+
 	// Cache the enrichment
 	cache.set(containerID, map[string]interface{}{
 		"id": containerID,
@@ -382,21 +385,21 @@ func newKubernetesEnricher() *kubernetesEnricher {
 	}
 }
 
-func (ke *kubernetesEnricher) enrich(event *types.Event, entry *JournalEntry) {
+func (ke *kubernetesEnricher) enrich(event *unified.Event, entry *JournalEntry) {
 	message := entry.Message
-	
+
 	// Extract namespace
 	if matches := ke.namespacePattern.FindStringSubmatch(message); matches != nil {
 		event.Context.Namespace = matches[1]
 		event.Labels["namespace"] = matches[1]
 	}
-	
+
 	// Extract pod name
 	if matches := ke.podPattern.FindStringSubmatch(message); matches != nil {
-		event.Context.PodName = matches[1]
+		event.Context.Pod = matches[1]
 		event.Labels["pod"] = matches[1]
 	}
-	
+
 	// Add Kubernetes context based on service
 	if strings.Contains(entry.SystemdUnit, "kubelet") {
 		event.Attributes["k8s_component"] = "kubelet"
@@ -416,28 +419,28 @@ func newErrorEnricher() *errorEnricher {
 	}
 }
 
-func (ee *errorEnricher) enrich(event *types.Event, entry *JournalEntry) {
+func (ee *errorEnricher) enrich(event *unified.Event, entry *JournalEntry) {
 	message := entry.Message
-	
+
 	// Check for stack trace
 	if ee.stackTracePattern.MatchString(message) {
 		event.Attributes["has_stack_trace"] = true
 		event.Attributes["error_type"] = "crash_with_trace"
 	}
-	
+
 	// Extract error type
 	if matches := ee.errorTypePattern.FindStringSubmatch(message); matches != nil {
 		event.Attributes["error_class"] = matches[1]
 		event.Attributes["error_message"] = strings.TrimSpace(matches[2])
 	}
-	
+
 	// Add error categorization
 	event.Attributes["error_category"] = ee.categorizeError(message)
 }
 
 func (ee *errorEnricher) categorizeError(message string) string {
 	messageLower := strings.ToLower(message)
-	
+
 	switch {
 	case strings.Contains(messageLower, "permission"):
 		return "permission"
@@ -465,7 +468,7 @@ func newEnrichmentCache(maxSize int) *enrichmentCache {
 func (c *enrichmentCache) get(key string) map[string]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	if entry, ok := c.entries[key]; ok {
 		return entry.data
 	}
@@ -475,7 +478,7 @@ func (c *enrichmentCache) get(key string) map[string]interface{} {
 func (c *enrichmentCache) set(key string, data map[string]interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	// Simple eviction if cache is full
 	if len(c.entries) >= c.maxSize {
 		// Remove a random entry
@@ -484,7 +487,7 @@ func (c *enrichmentCache) set(key string, data map[string]interface{}) {
 			break
 		}
 	}
-	
+
 	c.entries[key] = &enrichmentEntry{
 		data:      data,
 		timestamp: 0, // Could add timestamp if needed

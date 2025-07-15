@@ -13,10 +13,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"tapio/cmd/install/installer"
-	"tapio/cmd/install/platform"
-	"tapio/cmd/install/progress"
-	"tapio/cmd/install/validation"
+	"github.com/yairfalse/tapio/cmd/install/factory"
+	"github.com/yairfalse/tapio/cmd/install/installer"
+	"github.com/yairfalse/tapio/cmd/install/platform"
+	"github.com/yairfalse/tapio/cmd/install/progress"
+	"github.com/yairfalse/tapio/cmd/install/validation"
 )
 
 var (
@@ -170,10 +171,10 @@ func runInstall(ctx context.Context, cfg Config) error {
 		"distro", platformInfo.Distribution)
 
 	// Create installer factory
-	factory := platform.NewFactory(platformInfo)
+	f := factory.NewFactory(platformInfo)
 
 	// Create installer
-	inst, err := factory.Create(cfg.Strategy)
+	inst, err := f.Create(cfg.Strategy)
 	if err != nil {
 		progressReporter.Error("Initialization", err)
 		return fmt.Errorf("failed to create installer: %w", err)
@@ -230,10 +231,10 @@ func runUninstall(ctx context.Context, cfg Config) error {
 	platformInfo := detector.Detect()
 
 	// Create installer factory
-	factory := platform.NewFactory(platformInfo)
+	f := factory.NewFactory(platformInfo)
 
 	// Create installer
-	inst, err := factory.Create(cfg.Strategy)
+	inst, err := f.Create(cfg.Strategy)
 	if err != nil {
 		return fmt.Errorf("failed to create installer: %w", err)
 	}
@@ -269,10 +270,10 @@ func runUpgrade(ctx context.Context, cfg Config) error {
 	platformInfo := detector.Detect()
 
 	// Create installer factory
-	factory := platform.NewFactory(platformInfo)
+	f := factory.NewFactory(platformInfo)
 
 	// Create installer
-	inst, err := factory.Create(cfg.Strategy)
+	inst, err := f.Create(cfg.Strategy)
 	if err != nil {
 		return fmt.Errorf("failed to create installer: %w", err)
 	}
@@ -307,10 +308,10 @@ func runValidate(ctx context.Context, cfg Config) error {
 	platformInfo := detector.Detect()
 
 	// Create installer factory
-	factory := platform.NewFactory(platformInfo)
+	f := factory.NewFactory(platformInfo)
 
 	// Create installer
-	inst, err := factory.Create(cfg.Strategy)
+	inst, err := f.Create(cfg.Strategy)
 	if err != nil {
 		return fmt.Errorf("failed to create installer: %w", err)
 	}

@@ -10,10 +10,10 @@ import (
 
 // Router implements the ExportRouter interface
 type Router struct {
-	routes      map[string]*ExportRoute
-	routeOrder  []string // Maintains priority order
-	mutex       sync.RWMutex
-	matchers    map[string]*compiledMatcher
+	routes     map[string]*ExportRoute
+	routeOrder []string // Maintains priority order
+	mutex      sync.RWMutex
+	matchers   map[string]*compiledMatcher
 }
 
 // compiledMatcher holds compiled patterns for efficient matching
@@ -246,7 +246,7 @@ func (r *Router) matchRoute(matcher *compiledMatcher, data ExportData) bool {
 		if !exists {
 			return false
 		}
-		
+
 		// Convert to string for matching
 		strValue := fmt.Sprintf("%v", value)
 		if !re.MatchString(strValue) {
@@ -278,12 +278,12 @@ func (r *Router) updateRouteOrder() {
 	sort.Slice(ids, func(i, j int) bool {
 		routeI := r.routes[ids[i]]
 		routeJ := r.routes[ids[j]]
-		
+
 		// Higher priority comes first
 		if routeI.Priority != routeJ.Priority {
 			return routeI.Priority > routeJ.Priority
 		}
-		
+
 		// If same priority, sort by ID for consistency
 		return ids[i] < ids[j]
 	})
@@ -477,11 +477,11 @@ func (rm *RouteManager) UpdateRoutePriority(routeID string, priority int) error 
 	}
 
 	route.Priority = priority
-	
+
 	// Re-sort routes
 	rm.router.mutex.Lock()
 	rm.router.updateRouteOrder()
 	rm.router.mutex.Unlock()
-	
+
 	return nil
 }

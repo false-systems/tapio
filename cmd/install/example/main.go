@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"tapio/cmd/install/installer"
-	"tapio/cmd/install/platform"
-	"tapio/cmd/install/progress"
+	"github.com/yairfalse/tapio/cmd/install/installer"
+	"github.com/yairfalse/tapio/cmd/install/platform"
+	"github.com/yairfalse/tapio/cmd/install/progress"
 )
 
 func main() {

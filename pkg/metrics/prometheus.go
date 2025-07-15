@@ -12,8 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/events_correlation"
 	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/events_correlation"
 	"github.com/yairfalse/tapio/pkg/simple"
 	"github.com/yairfalse/tapio/pkg/types"
 	"github.com/yairfalse/tapio/pkg/universal"
@@ -23,10 +23,10 @@ import (
 
 // PrometheusExporter exports Tapio metrics to Prometheus format using V2 engine
 type PrometheusExporter struct {
-	checker           CheckerInterface
-	ebpfMonitor       ebpf.Monitor
-	registry          *prometheus.Registry
-	v2Engine          *correlation.Engine
+	checker     CheckerInterface
+	ebpfMonitor ebpf.Monitor
+	registry    *prometheus.Registry
+	v2Engine    *correlation.Engine
 
 	// Universal format components
 	formatter            *formatters.PrometheusFormatter
@@ -45,7 +45,7 @@ type PrometheusExporter struct {
 	// Performance metrics
 	analysisLatency *prometheus.HistogramVec
 	lastUpdateTime  *prometheus.GaugeVec
-	
+
 	// V2 Engine metrics
 	v2EventsProcessed   *prometheus.CounterVec
 	v2EventsDropped     *prometheus.CounterVec
@@ -100,7 +100,7 @@ func New(checker CheckerInterface, config Config) (*PrometheusExporter, error) {
 	// Initialize V2 engine
 	v2Config := correlation.DefaultConfig()
 	v2Engine := correlation.NewEngine(v2Config)
-	
+
 	// Start V2 engine
 	if err := v2Engine.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start V2 engine: %w", err)
@@ -140,10 +140,10 @@ func New(checker CheckerInterface, config Config) (*PrometheusExporter, error) {
 	// Initialize eBPF monitor if enabled
 	if config.IncludeEBPF {
 		ebpfConfig := &ebpf.Config{
-			Enabled:                true,
-			EnableMemoryMonitoring: true,
+			Enabled:                 true,
+			EnableMemoryMonitoring:  true,
 			EnableNetworkMonitoring: true,
-			BufferSize:             1024,
+			BufferSize:              1024,
 		}
 		monitor := ebpf.NewMonitor(ebpfConfig)
 		if err := monitor.Start(); err == nil {
@@ -226,7 +226,7 @@ func (pe *PrometheusExporter) initMetrics() {
 		},
 		[]string{},
 	)
-	
+
 	// V2 Engine specific metrics
 	pe.v2EventsProcessed = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -237,7 +237,7 @@ func (pe *PrometheusExporter) initMetrics() {
 		},
 		[]string{"source"},
 	)
-	
+
 	pe.v2EventsDropped = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "tapio",
@@ -247,7 +247,7 @@ func (pe *PrometheusExporter) initMetrics() {
 		},
 		[]string{"reason"},
 	)
-	
+
 	pe.v2CorrelationsFound = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "tapio",
@@ -257,7 +257,7 @@ func (pe *PrometheusExporter) initMetrics() {
 		},
 		[]string{"rule_id", "severity"},
 	)
-	
+
 	pe.v2ProcessingLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "tapio",
@@ -268,7 +268,7 @@ func (pe *PrometheusExporter) initMetrics() {
 		},
 		[]string{"shard"},
 	)
-	
+
 	pe.v2EngineHealth = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "tapio",
@@ -317,7 +317,7 @@ func (pe *PrometheusExporter) updateMetrics(ctx context.Context) {
 
 	// Process problems to create events for V2 engine
 	events := pe.convertProblemsToEvents(result.Problems)
-	
+
 	// Process events through V2 engine
 	if len(events) > 0 {
 		processed := pe.v2Engine.ProcessBatch(events)
@@ -327,7 +327,7 @@ func (pe *PrometheusExporter) updateMetrics(ctx context.Context) {
 	// Update basic metrics
 	pe.updateHealthMetrics(result)
 	pe.updatePredictionMetrics(result)
-	
+
 	// Update V2 engine metrics
 	pe.updateV2EngineMetrics()
 
@@ -341,7 +341,7 @@ func (pe *PrometheusExporter) updateMetrics(ctx context.Context) {
 // convertProblemsToEvents converts problems to V2 correlation events
 func (pe *PrometheusExporter) convertProblemsToEvents(problems []types.Problem) []*events_correlation.Event {
 	events := make([]*events_correlation.Event, 0, len(problems))
-	
+
 	for _, problem := range problems {
 		event := &events_correlation.Event{
 			ID:        fmt.Sprintf("problem-%s-%d", problem.Resource.Name, time.Now().UnixNano()),
@@ -363,10 +363,10 @@ func (pe *PrometheusExporter) convertProblemsToEvents(problems []types.Problem) 
 				"namespace": problem.Resource.Namespace,
 			},
 		}
-		
+
 		events = append(events, event)
 	}
-	
+
 	return events
 }
 
@@ -382,7 +382,7 @@ func (pe *PrometheusExporter) updateHealthMetrics(result *types.CheckResult) {
 	// Process each problem
 	for _, problem := range result.Problems {
 		totalPods++
-		
+
 		// Update pod health status
 		if problem.Resource.Kind == "pod" {
 			healthValue := 0.0
@@ -390,7 +390,7 @@ func (pe *PrometheusExporter) updateHealthMetrics(result *types.CheckResult) {
 				healthValue = 1.0
 				healthyPods++
 			}
-			
+
 			pe.podHealthStatus.WithLabelValues(
 				problem.Resource.Name,
 				problem.Resource.Namespace,
@@ -442,31 +442,31 @@ func (pe *PrometheusExporter) updatePredictionMetrics(result *types.CheckResult)
 // updateV2EngineMetrics updates V2 engine specific metrics
 func (pe *PrometheusExporter) updateV2EngineMetrics() {
 	stats := pe.v2Engine.Stats()
-	
+
 	// Engine health
 	healthValue := 0.0
 	if stats.IsHealthy {
 		healthValue = 1.0
 	}
 	pe.v2EngineHealth.WithLabelValues("overall").Set(healthValue)
-	
+
 	// Processing metrics per shard
 	for i, shardStats := range stats.ShardStats {
 		shardLabel := fmt.Sprintf("shard_%d", i)
-		
+
 		// Shard health
 		shardHealthValue := 0.0
 		if shardStats.IsHealthy {
 			shardHealthValue = 1.0
 		}
 		pe.v2EngineHealth.WithLabelValues(shardLabel).Set(shardHealthValue)
-		
+
 		// Processing latency
 		if shardStats.AvgProcessingTime > 0 {
 			pe.v2ProcessingLatency.WithLabelValues(shardLabel).Observe(shardStats.AvgProcessingTime.Seconds())
 		}
 	}
-	
+
 	// Router health
 	if stats.RouterStats.BackpressureActive {
 		pe.v2EventsDropped.WithLabelValues("backpressure").Add(float64(stats.RouterStats.EventsDropped))
@@ -483,11 +483,11 @@ func (pe *PrometheusExporter) Shutdown() error {
 	if pe.ebpfMonitor != nil {
 		pe.ebpfMonitor.Stop()
 	}
-	
+
 	if pe.v2Engine != nil {
 		return pe.v2Engine.Stop()
 	}
-	
+
 	return nil
 }
 
@@ -507,16 +507,16 @@ func registerDefaultRules(engine *correlation.Engine) {
 			criticalEvents := ctx.GetEvents(events_correlation.Filter{
 				Type: "critical",
 			})
-			
+
 			if len(criticalEvents) > 5 {
 				return &events_correlation.Result{
-					RuleID:     "metrics-high-error-rate",
-					RuleName:   "High Error Rate Detection",
-					Timestamp:  time.Now(),
-					Confidence: 0.9,
-					Severity:   events_correlation.SeverityCritical,
-					Category:   events_correlation.CategoryReliability,
-					Title:      "High Error Rate Detected",
+					RuleID:      "metrics-high-error-rate",
+					RuleName:    "High Error Rate Detection",
+					Timestamp:   time.Now(),
+					Confidence:  0.9,
+					Severity:    events_correlation.SeverityCritical,
+					Category:    events_correlation.CategoryReliability,
+					Title:       "High Error Rate Detected",
 					Description: fmt.Sprintf("Detected %d critical events indicating high error rate", len(criticalEvents)),
 				}
 			}

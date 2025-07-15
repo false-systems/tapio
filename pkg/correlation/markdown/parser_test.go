@@ -93,26 +93,26 @@ func TestConditionParsing(t *testing.T) {
 	parser := NewCorrelationMarkdownParser()
 
 	tests := []struct {
-		name           string
-		markdown       string
-		expectedType   string
-		expectedValue  string
-		expectedUnit   string
+		name             string
+		markdown         string
+		expectedType     string
+		expectedValue    string
+		expectedUnit     string
 		expectedDuration time.Duration
 	}{
 		{
 			name:          "percentage threshold",
 			markdown:      "## Test\nWhen memory > 80%",
-			expectedType:  "threshold", 
+			expectedType:  "threshold",
 			expectedValue: "80",
 			expectedUnit:  "%",
 		},
 		{
-			name:          "threshold with duration",
-			markdown:      "## Test\nWhen CPU > 90% for 5 minutes",
-			expectedType:  "threshold",
-			expectedValue: "90",
-			expectedUnit:  "%",
+			name:             "threshold with duration",
+			markdown:         "## Test\nWhen CPU > 90% for 5 minutes",
+			expectedType:     "threshold",
+			expectedValue:    "90",
+			expectedUnit:     "%",
 			expectedDuration: 5 * time.Minute,
 		},
 		{
@@ -123,9 +123,9 @@ func TestConditionParsing(t *testing.T) {
 			expectedUnit:  "ms",
 		},
 		{
-			name:          "text condition",
-			markdown:      "## Test\nWhen service is unhealthy",
-			expectedType:  "text",
+			name:         "text condition",
+			markdown:     "## Test\nWhen service is unhealthy",
+			expectedType: "text",
 		},
 	}
 
@@ -188,7 +188,7 @@ func TestActionParsing(t *testing.T) {
 		{
 			name:         "recommendation",
 			markdown:     "## Test\nWhen x > 1\nRecommend: Scale up the service",
-			expectedType: "recommendation", 
+			expectedType: "recommendation",
 			contains:     "Scale up",
 		},
 	}
@@ -210,7 +210,7 @@ func TestActionParsing(t *testing.T) {
 				if action.Type == tt.expectedType {
 					found = true
 					if !strings.Contains(action.Description, tt.contains) {
-						t.Errorf("expected action to contain '%s', got '%s'", 
+						t.Errorf("expected action to contain '%s', got '%s'",
 							tt.contains, action.Description)
 					}
 					break

@@ -1,6 +1,7 @@
 package journald
 
 import (
+	"context"
 	"time"
 )
 
@@ -11,69 +12,69 @@ type JournalEntry struct {
 	MonotonicTimestamp int64  `json:"__MONOTONIC_TIMESTAMP"`
 	Message            string `json:"MESSAGE"`
 	Priority           int    `json:"PRIORITY"`
-	
-	// Process information  
-	PID               int    `json:"_PID"`
-	UID               int    `json:"_UID"`
-	GID               int    `json:"_GID"`
-	Comm              string `json:"_COMM"`
-	Exe               string `json:"_EXE"`
-	CmdLine           string `json:"_CMDLINE"`
-	
+
+	// Process information
+	PID     int    `json:"_PID"`
+	UID     int    `json:"_UID"`
+	GID     int    `json:"_GID"`
+	Comm    string `json:"_COMM"`
+	Exe     string `json:"_EXE"`
+	CmdLine string `json:"_CMDLINE"`
+
 	// Systemd fields
-	SystemdUnit       string `json:"_SYSTEMD_UNIT"`
-	SystemdSlice      string `json:"_SYSTEMD_SLICE"`
-	SystemdCGroup     string `json:"_SYSTEMD_CGROUP"`
-	SystemdSession    string `json:"_SYSTEMD_SESSION"`
-	SystemdOwnerUID   string `json:"_SYSTEMD_OWNER_UID"`
-	
+	SystemdUnit     string `json:"_SYSTEMD_UNIT"`
+	SystemdSlice    string `json:"_SYSTEMD_SLICE"`
+	SystemdCGroup   string `json:"_SYSTEMD_CGROUP"`
+	SystemdSession  string `json:"_SYSTEMD_SESSION"`
+	SystemdOwnerUID string `json:"_SYSTEMD_OWNER_UID"`
+
 	// Source information
-	SyslogIdentifier  string `json:"SYSLOG_IDENTIFIER"`
-	SyslogFacility    string `json:"SYSLOG_FACILITY"`
-	SyslogPID         string `json:"SYSLOG_PID"`
-	
+	SyslogIdentifier string `json:"SYSLOG_IDENTIFIER"`
+	SyslogFacility   string `json:"SYSLOG_FACILITY"`
+	SyslogPID        string `json:"SYSLOG_PID"`
+
 	// Host information
-	Hostname          string `json:"_HOSTNAME"`
-	MachineID         string `json:"_MACHINE_ID"`
-	BootID            string `json:"_BOOT_ID"`
-	
+	Hostname  string `json:"_HOSTNAME"`
+	MachineID string `json:"_MACHINE_ID"`
+	BootID    string `json:"_BOOT_ID"`
+
 	// Additional fields
-	Transport         string `json:"_TRANSPORT"`
-	SELinuxContext    string `json:"_SELINUX_CONTEXT"`
-	Cursor            string `json:"__CURSOR"`
-	
+	Transport      string `json:"_TRANSPORT"`
+	SELinuxContext string `json:"_SELINUX_CONTEXT"`
+	Cursor         string `json:"__CURSOR"`
+
 	// Container fields (if applicable)
-	ContainerName     string `json:"CONTAINER_NAME"`
-	ContainerID       string `json:"CONTAINER_ID"`
-	ContainerTag      string `json:"CONTAINER_TAG"`
-	ImageName         string `json:"IMAGE_NAME"`
+	ContainerName string `json:"CONTAINER_NAME"`
+	ContainerID   string `json:"CONTAINER_ID"`
+	ContainerTag  string `json:"CONTAINER_TAG"`
+	ImageName     string `json:"IMAGE_NAME"`
 }
 
 // JournaldConfig contains configuration for the journald collector
 type JournaldConfig struct {
 	// Collection settings
-	FollowCursor     bool          `json:"follow_cursor"`
-	MaxAge           time.Duration `json:"max_age"`
-	Since            string        `json:"since"`
-	Until            string        `json:"until"`
-	
+	FollowCursor bool          `json:"follow_cursor"`
+	MaxAge       time.Duration `json:"max_age"`
+	Since        string        `json:"since"`
+	Until        string        `json:"until"`
+
 	// Filtering
-	Units            []string      `json:"units"`
-	Priorities       []string      `json:"priorities"`
-	MatchPatterns    []string      `json:"match_patterns"`
-	ExcludePatterns  []string      `json:"exclude_patterns"`
-	
+	Units           []string `json:"units"`
+	Priorities      []string `json:"priorities"`
+	MatchPatterns   []string `json:"match_patterns"`
+	ExcludePatterns []string `json:"exclude_patterns"`
+
 	// Performance tuning
-	StreamBatchSize  int           `json:"stream_batch_size"`
-	MaxEntriesPerSec int           `json:"max_entries_per_sec"`
-	
+	StreamBatchSize  int `json:"stream_batch_size"`
+	MaxEntriesPerSec int `json:"max_entries_per_sec"`
+
 	// Noise reduction
-	FilterNoisyUnits bool          `json:"filter_noisy_units"`
-	NoiseReduction   float64       `json:"noise_reduction_target"` // Target percentage (e.g., 0.95 for 95%)
-	
+	FilterNoisyUnits bool    `json:"filter_noisy_units"`
+	NoiseReduction   float64 `json:"noise_reduction_target"` // Target percentage (e.g., 0.95 for 95%)
+
 	// Advanced options
-	OutputMode       string        `json:"output_mode"` // json, short, verbose
-	ExtraArgs        []string      `json:"extra_args"`
+	OutputMode string   `json:"output_mode"` // json, short, verbose
+	ExtraArgs  []string `json:"extra_args"`
 }
 
 // Reader represents the journald reader interface

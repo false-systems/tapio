@@ -23,7 +23,7 @@ func NewMonitor(config *Config) Monitor {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	
+
 	return &StubMonitor{
 		config:   config,
 		platform: runtime.GOOS,
@@ -34,10 +34,10 @@ func NewMonitor(config *Config) Monitor {
 func (s *StubMonitor) Start(ctx context.Context) error {
 	s.started = true
 	s.lastError = nil
-	
+
 	// Log that we're running in stub mode
 	fmt.Printf("eBPF monitor started in stub mode on %s\n", s.platform)
-	
+
 	return nil
 }
 
@@ -52,7 +52,7 @@ func (s *StubMonitor) GetMemoryStats() ([]ProcessMemoryStats, error) {
 	if !s.started {
 		return nil, fmt.Errorf("monitor not started")
 	}
-	
+
 	// Return mock data for development
 	return []ProcessMemoryStats{
 		{
@@ -105,10 +105,10 @@ func (s *StubMonitor) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32
 	if !s.started {
 		return nil, fmt.Errorf("monitor not started")
 	}
-	
+
 	// Return mock predictions for development
 	predictions := make(map[uint32]*OOMPrediction)
-	
+
 	for pid, limit := range limits {
 		// Create a mock prediction
 		currentUsage := limit / 2 // 50% of limit
@@ -121,7 +121,7 @@ func (s *StubMonitor) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32
 			PredictedPeakUsage: currentUsage + (limit / 4), // 75% of limit
 		}
 	}
-	
+
 	return predictions, nil
 }
 

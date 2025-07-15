@@ -29,41 +29,41 @@ type SecurityHardening struct {
 type SecurityConfig struct {
 	// TLS Configuration
 	TLS TLSConfig `yaml:"tls"`
-	
+
 	// Authentication and Authorization
 	Auth AuthConfig `yaml:"auth"`
-	
+
 	// Rate Limiting
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
-	
+
 	// Security Headers
 	Headers SecurityHeaders `yaml:"headers"`
-	
+
 	// Input Validation
 	Validation InputValidation `yaml:"validation"`
-	
+
 	// Audit Logging
 	Audit AuditConfig `yaml:"audit"`
-	
+
 	// Network Security
 	Network NetworkSecurity `yaml:"network"`
-	
+
 	// Compliance
 	Compliance ComplianceConfig `yaml:"compliance"`
 }
 
 // TLSConfig defines TLS security configuration
 type TLSConfig struct {
-	Enabled            bool     `yaml:"enabled"`
-	CertFile           string   `yaml:"cert_file"`
-	KeyFile            string   `yaml:"key_file"`
-	CAFile             string   `yaml:"ca_file"`
-	MinVersion         string   `yaml:"min_version"`
-	MaxVersion         string   `yaml:"max_version"`
-	CipherSuites       []string `yaml:"cipher_suites"`
-	PreferServerCipher bool     `yaml:"prefer_server_cipher"`
-	InsecureSkipVerify bool     `yaml:"insecure_skip_verify"`
-	ClientAuth         string   `yaml:"client_auth"` // none, request, require, verify, require-verify
+	Enabled            bool       `yaml:"enabled"`
+	CertFile           string     `yaml:"cert_file"`
+	KeyFile            string     `yaml:"key_file"`
+	CAFile             string     `yaml:"ca_file"`
+	MinVersion         string     `yaml:"min_version"`
+	MaxVersion         string     `yaml:"max_version"`
+	CipherSuites       []string   `yaml:"cipher_suites"`
+	PreferServerCipher bool       `yaml:"prefer_server_cipher"`
+	InsecureSkipVerify bool       `yaml:"insecure_skip_verify"`
+	ClientAuth         string     `yaml:"client_auth"` // none, request, require, verify, require-verify
 	HSTS               HSTSConfig `yaml:"hsts"`
 }
 
@@ -102,23 +102,23 @@ type OAuth2Config struct {
 
 // BruteForceConfig defines brute force protection
 type BruteForceConfig struct {
-	Enabled        bool          `yaml:"enabled"`
-	MaxAttempts    int           `yaml:"max_attempts"`
-	LockoutTime    time.Duration `yaml:"lockout_time"`
-	WindowSize     time.Duration `yaml:"window_size"`
-	WhitelistIPs   []string      `yaml:"whitelist_ips"`
+	Enabled      bool          `yaml:"enabled"`
+	MaxAttempts  int           `yaml:"max_attempts"`
+	LockoutTime  time.Duration `yaml:"lockout_time"`
+	WindowSize   time.Duration `yaml:"window_size"`
+	WhitelistIPs []string      `yaml:"whitelist_ips"`
 }
 
 // RateLimitConfig defines rate limiting configuration
 type RateLimitConfig struct {
-	Enabled        bool              `yaml:"enabled"`
-	Global         RateLimitRule     `yaml:"global"`
-	PerEndpoint    map[string]RateLimitRule `yaml:"per_endpoint"`
-	PerUser        RateLimitRule     `yaml:"per_user"`
-	PerIP          RateLimitRule     `yaml:"per_ip"`
-	BurstAllowed   bool              `yaml:"burst_allowed"`
-	WhitelistIPs   []string          `yaml:"whitelist_ips"`
-	BlacklistIPs   []string          `yaml:"blacklist_ips"`
+	Enabled      bool                     `yaml:"enabled"`
+	Global       RateLimitRule            `yaml:"global"`
+	PerEndpoint  map[string]RateLimitRule `yaml:"per_endpoint"`
+	PerUser      RateLimitRule            `yaml:"per_user"`
+	PerIP        RateLimitRule            `yaml:"per_ip"`
+	BurstAllowed bool                     `yaml:"burst_allowed"`
+	WhitelistIPs []string                 `yaml:"whitelist_ips"`
+	BlacklistIPs []string                 `yaml:"blacklist_ips"`
 }
 
 // RateLimitRule defines a single rate limit rule
@@ -130,15 +130,15 @@ type RateLimitRule struct {
 
 // SecurityHeaders defines security headers configuration
 type SecurityHeaders struct {
-	Enabled                bool   `yaml:"enabled"`
-	ContentSecurityPolicy  string `yaml:"content_security_policy"`
-	XFrameOptions          string `yaml:"x_frame_options"`
-	XContentTypeOptions    string `yaml:"x_content_type_options"`
-	XSSProtection          string `yaml:"xss_protection"`
-	ReferrerPolicy         string `yaml:"referrer_policy"`
-	PermissionsPolicy      string `yaml:"permissions_policy"`
-	StrictTransportSecurity string `yaml:"strict_transport_security"`
-	CustomHeaders          map[string]string `yaml:"custom_headers"`
+	Enabled                 bool              `yaml:"enabled"`
+	ContentSecurityPolicy   string            `yaml:"content_security_policy"`
+	XFrameOptions           string            `yaml:"x_frame_options"`
+	XContentTypeOptions     string            `yaml:"x_content_type_options"`
+	XSSProtection           string            `yaml:"xss_protection"`
+	ReferrerPolicy          string            `yaml:"referrer_policy"`
+	PermissionsPolicy       string            `yaml:"permissions_policy"`
+	StrictTransportSecurity string            `yaml:"strict_transport_security"`
+	CustomHeaders           map[string]string `yaml:"custom_headers"`
 }
 
 // InputValidation defines input validation configuration
@@ -156,16 +156,16 @@ type InputValidation struct {
 
 // AuditConfig defines audit logging configuration
 type AuditConfig struct {
-	Enabled           bool              `yaml:"enabled"`
-	LogAuthentication bool              `yaml:"log_authentication"`
-	LogAuthorization  bool              `yaml:"log_authorization"`
-	LogDataAccess     bool              `yaml:"log_data_access"`
-	LogConfigChanges  bool              `yaml:"log_config_changes"`
-	LogErrors         bool              `yaml:"log_errors"`
-	RetentionDays     int               `yaml:"retention_days"`
-	EncryptLogs       bool              `yaml:"encrypt_logs"`
-	SignLogs          bool              `yaml:"sign_logs"`
-	ExternalSIEM      SIEMConfig        `yaml:"external_siem"`
+	Enabled           bool       `yaml:"enabled"`
+	LogAuthentication bool       `yaml:"log_authentication"`
+	LogAuthorization  bool       `yaml:"log_authorization"`
+	LogDataAccess     bool       `yaml:"log_data_access"`
+	LogConfigChanges  bool       `yaml:"log_config_changes"`
+	LogErrors         bool       `yaml:"log_errors"`
+	RetentionDays     int        `yaml:"retention_days"`
+	EncryptLogs       bool       `yaml:"encrypt_logs"`
+	SignLogs          bool       `yaml:"sign_logs"`
+	ExternalSIEM      SIEMConfig `yaml:"external_siem"`
 }
 
 // SIEMConfig defines SIEM integration
@@ -178,40 +178,40 @@ type SIEMConfig struct {
 
 // NetworkSecurity defines network security configuration
 type NetworkSecurity struct {
-	AllowedCIDRs      []string          `yaml:"allowed_cidrs"`
-	DeniedCIDRs       []string          `yaml:"denied_cidrs"`
-	TrustedProxies    []string          `yaml:"trusted_proxies"`
-	MaxConnections    int               `yaml:"max_connections"`
-	ConnectionTimeout time.Duration     `yaml:"connection_timeout"`
-	IdleTimeout       time.Duration     `yaml:"idle_timeout"`
-	DDoSProtection    DDoSProtection    `yaml:"ddos_protection"`
+	AllowedCIDRs      []string       `yaml:"allowed_cidrs"`
+	DeniedCIDRs       []string       `yaml:"denied_cidrs"`
+	TrustedProxies    []string       `yaml:"trusted_proxies"`
+	MaxConnections    int            `yaml:"max_connections"`
+	ConnectionTimeout time.Duration  `yaml:"connection_timeout"`
+	IdleTimeout       time.Duration  `yaml:"idle_timeout"`
+	DDoSProtection    DDoSProtection `yaml:"ddos_protection"`
 }
 
 // DDoSProtection defines DDoS protection configuration
 type DDoSProtection struct {
-	Enabled            bool          `yaml:"enabled"`
-	RequestsPerSecond  int           `yaml:"requests_per_second"`
-	ConcurrentLimit    int           `yaml:"concurrent_limit"`
-	SlidingWindow      time.Duration `yaml:"sliding_window"`
-	BanDuration        time.Duration `yaml:"ban_duration"`
-	GeoBlocking        []string      `yaml:"geo_blocking"`
+	Enabled           bool          `yaml:"enabled"`
+	RequestsPerSecond int           `yaml:"requests_per_second"`
+	ConcurrentLimit   int           `yaml:"concurrent_limit"`
+	SlidingWindow     time.Duration `yaml:"sliding_window"`
+	BanDuration       time.Duration `yaml:"ban_duration"`
+	GeoBlocking       []string      `yaml:"geo_blocking"`
 }
 
 // ComplianceConfig defines compliance requirements
 type ComplianceConfig struct {
-	Standards         []string          `yaml:"standards"` // SOC2, ISO27001, PCI-DSS, GDPR
-	DataClassification DataClassification `yaml:"data_classification"`
-	Encryption        EncryptionConfig  `yaml:"encryption"`
-	AccessControl     AccessControlConfig `yaml:"access_control"`
-	DataRetention     DataRetentionConfig `yaml:"data_retention"`
-	PrivacyControls   PrivacyControls   `yaml:"privacy_controls"`
+	Standards          []string            `yaml:"standards"` // SOC2, ISO27001, PCI-DSS, GDPR
+	DataClassification DataClassification  `yaml:"data_classification"`
+	Encryption         EncryptionConfig    `yaml:"encryption"`
+	AccessControl      AccessControlConfig `yaml:"access_control"`
+	DataRetention      DataRetentionConfig `yaml:"data_retention"`
+	PrivacyControls    PrivacyControls     `yaml:"privacy_controls"`
 }
 
 // DataClassification defines data classification
 type DataClassification struct {
-	Enabled      bool              `yaml:"enabled"`
-	DefaultLevel string            `yaml:"default_level"`
-	Levels       map[string]string `yaml:"levels"`
+	Enabled      bool                  `yaml:"enabled"`
+	DefaultLevel string                `yaml:"default_level"`
+	Levels       map[string]string     `yaml:"levels"`
 	Policies     map[string]DataPolicy `yaml:"policies"`
 }
 
@@ -232,35 +232,35 @@ type EncryptionConfig struct {
 
 // EncryptionPolicy defines encryption policy
 type EncryptionPolicy struct {
-	Required  bool   `yaml:"required"`
-	Algorithm string `yaml:"algorithm"`
-	KeySize   int    `yaml:"key_size"`
+	Required    bool          `yaml:"required"`
+	Algorithm   string        `yaml:"algorithm"`
+	KeySize     int           `yaml:"key_size"`
 	KeyRotation time.Duration `yaml:"key_rotation"`
 }
 
 // AccessControlConfig defines access control
 type AccessControlConfig struct {
-	RBAC         bool              `yaml:"rbac"`
-	ABAC         bool              `yaml:"abac"`
-	DefaultDeny  bool              `yaml:"default_deny"`
-	Permissions  map[string]string `yaml:"permissions"`
-	Roles        map[string][]string `yaml:"roles"`
+	RBAC        bool                `yaml:"rbac"`
+	ABAC        bool                `yaml:"abac"`
+	DefaultDeny bool                `yaml:"default_deny"`
+	Permissions map[string]string   `yaml:"permissions"`
+	Roles       map[string][]string `yaml:"roles"`
 }
 
 // DataRetentionConfig defines data retention policies
 type DataRetentionConfig struct {
-	Enabled       bool              `yaml:"enabled"`
-	DefaultPeriod time.Duration     `yaml:"default_period"`
+	Enabled       bool                     `yaml:"enabled"`
+	DefaultPeriod time.Duration            `yaml:"default_period"`
 	Policies      map[string]time.Duration `yaml:"policies"`
-	AutoPurge     bool              `yaml:"auto_purge"`
+	AutoPurge     bool                     `yaml:"auto_purge"`
 }
 
 // PrivacyControls defines privacy controls
 type PrivacyControls struct {
-	Anonymization bool   `yaml:"anonymization"`
-	Pseudonymization bool `yaml:"pseudonymization"`
-	RightToErasure bool  `yaml:"right_to_erasure"`
-	DataPortability bool `yaml:"data_portability"`
+	Anonymization     bool `yaml:"anonymization"`
+	Pseudonymization  bool `yaml:"pseudonymization"`
+	RightToErasure    bool `yaml:"right_to_erasure"`
+	DataPortability   bool `yaml:"data_portability"`
 	ConsentManagement bool `yaml:"consent_management"`
 }
 
@@ -323,22 +323,22 @@ func DefaultSecurityConfig() *SecurityConfig {
 			Enabled: true,
 			Global: RateLimitRule{
 				RequestsPerSecond: 1000,
-				Burst:            2000,
-				WindowSize:       time.Minute,
+				Burst:             2000,
+				WindowSize:        time.Minute,
 			},
 			PerIP: RateLimitRule{
 				RequestsPerSecond: 100,
-				Burst:            200,
-				WindowSize:       time.Minute,
+				Burst:             200,
+				WindowSize:        time.Minute,
 			},
 		},
 		Headers: SecurityHeaders{
 			Enabled:                 true,
 			ContentSecurityPolicy:   "default-src 'self'",
-			XFrameOptions:          "DENY",
-			XContentTypeOptions:    "nosniff",
-			XSSProtection:          "1; mode=block",
-			ReferrerPolicy:         "strict-origin-when-cross-origin",
+			XFrameOptions:           "DENY",
+			XContentTypeOptions:     "nosniff",
+			XSSProtection:           "1; mode=block",
+			ReferrerPolicy:          "strict-origin-when-cross-origin",
 			StrictTransportSecurity: "max-age=31536000; includeSubDomains; preload",
 		},
 		Validation: InputValidation{
@@ -525,7 +525,7 @@ func (sh *SecurityHardening) applySecurityHeaders(w http.ResponseWriter) {
 	}
 
 	headers := sh.config.Headers
-	
+
 	if headers.ContentSecurityPolicy != "" {
 		w.Header().Set("Content-Security-Policy", headers.ContentSecurityPolicy)
 	}

@@ -191,7 +191,7 @@ func BenchmarkSummary(b *testing.B) {
 		for i := 0; i < 1000; i++ {
 			summary.Observe(float64(i))
 		}
-		
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = summary.GetQuantile(0.95)
@@ -281,14 +281,14 @@ func BenchmarkMetricEventPublisher(b *testing.B) {
 // BenchmarkMetricCollector benchmarks the metric collection with rate limiting
 func BenchmarkMetricCollector(b *testing.B) {
 	logger := slog.Default()
-	
+
 	config := CollectorConfig[*Counter[int64]]{
 		CollectorName:      "benchmark_collector",
 		CollectionInterval: time.Millisecond,
-		Timeout:           time.Second,
-		BufferSize:        10000,
-		BatchSize:         100,
-		MaxConcurrency:    10,
+		Timeout:            time.Second,
+		BufferSize:         10000,
+		BatchSize:          100,
+		MaxConcurrency:     10,
 		CollectionFunc: func(ctx context.Context, opts CollectionOptions) ([]*Counter[int64], error) {
 			// Simulate metric collection
 			counter := NewCounter[int64](
@@ -301,8 +301,8 @@ func BenchmarkMetricCollector(b *testing.B) {
 		},
 		RateLimit: RateLimitSettings{
 			RequestsPerSecond: 1000,
-			BurstSize:        100,
-			Enabled:          true,
+			BurstSize:         100,
+			Enabled:           true,
 		},
 		Backpressure: BackpressureSettings{
 			Strategy:      BackpressureStrategyDrop,
@@ -391,13 +391,13 @@ func BenchmarkMetricCollector(b *testing.B) {
 // BenchmarkMetricStreamer benchmarks the memory-efficient streaming implementation
 func BenchmarkMetricStreamer(b *testing.B) {
 	logger := slog.Default()
-	
+
 	config := StreamerConfig{
-		WorkerCount:         4,
-		WorkerQueueSize:     10000,
-		DefaultBufferSize:   5000,
+		WorkerCount:          4,
+		WorkerQueueSize:      10000,
+		DefaultBufferSize:    5000,
 		DefaultFlushInterval: time.Millisecond,
-		MaxStreams:          100,
+		MaxStreams:           100,
 	}
 
 	streamer := NewPrometheusMetricStreamer[*Counter[int64]](config, logger)
@@ -452,7 +452,7 @@ func BenchmarkMetricStreamer(b *testing.B) {
 		)
 
 		b.ResetTimer()
-		
+
 		// Send metrics to stream
 		go func() {
 			for i := 0; i < b.N; i++ {
@@ -476,7 +476,7 @@ func BenchmarkMetricStreamer(b *testing.B) {
 
 	b.Run("Compression_Overhead", func(b *testing.B) {
 		ctx := context.Background()
-		
+
 		// Without compression
 		b.Run("NoCompression", func(b *testing.B) {
 			streamCh, err := streamer.StartStream(ctx, StreamOptions{
@@ -551,8 +551,8 @@ func BenchmarkMetricFactory(b *testing.B) {
 	config := FactoryConfig{
 		DefaultTimeout:         time.Second,
 		DefaultShutdownTimeout: 5 * time.Second,
-		MaxClients:            1000,
-		EnableMetrics:         true,
+		MaxClients:             1000,
+		EnableMetrics:          true,
 	}
 
 	factory := NewPrometheusMetricFactory(config, logger)
@@ -632,10 +632,10 @@ func BenchmarkMetricFactory(b *testing.B) {
 func BenchmarkMemoryEfficiency(b *testing.B) {
 	b.Run("Counter_Memory_Usage", func(b *testing.B) {
 		counters := make([]*Counter[int64], b.N)
-		
+
 		b.ResetTimer()
 		b.ReportAllocs()
-		
+
 		for i := 0; i < b.N; i++ {
 			counters[i] = NewCounter[int64](
 				"memory_counter",
@@ -652,10 +652,10 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 
 	b.Run("Publisher_Memory_Usage", func(b *testing.B) {
 		config := PublisherConfig{
-			DefaultBufferSize:     1000,
-			DefaultFlushInterval:  time.Second,
-			EnableBatching:        true,
-			WorkerPoolSize:        2,
+			DefaultBufferSize:    1000,
+			DefaultFlushInterval: time.Second,
+			EnableBatching:       true,
+			WorkerPoolSize:       2,
 		}
 
 		publisher := NewMetricEventPublisher[*Counter[int64]](config, slog.Default())
@@ -685,7 +685,7 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 	b.Run("Garbage_Collection_Pressure", func(b *testing.B) {
 		// Test GC pressure under high allocation rates
 		counters := make([]*Counter[int64], 0, 1000)
-		
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			if i%1000 == 0 {
@@ -775,10 +775,10 @@ func BenchmarkConcurrentAccess(b *testing.B) {
 
 // Benchmark observer implementation for testing
 type benchmarkObserver struct {
-	id           int
-	eventCount   int64
-	errorCount   int64
-	mu           sync.Mutex
+	id         int
+	eventCount int64
+	errorCount int64
+	mu         sync.Mutex
 }
 
 func (bo *benchmarkObserver) OnMetricCreated(ctx context.Context, metric *Counter[int64]) error {
@@ -820,7 +820,7 @@ func (bo *benchmarkObserver) GetPriority() ObserverPriority {
 // Performance regression tests
 func BenchmarkPerformanceRegression(b *testing.B) {
 	// These benchmarks help detect performance regressions over time
-	
+
 	b.Run("Counter_Baseline", func(b *testing.B) {
 		counter := NewCounter[int64](
 			"baseline_counter",
@@ -843,9 +843,9 @@ func BenchmarkPerformanceRegression(b *testing.B) {
 
 	b.Run("Publisher_Baseline", func(b *testing.B) {
 		config := PublisherConfig{
-			DefaultBufferSize:     10000,
-			DefaultFlushInterval:  time.Second,
-			WorkerPoolSize:        1,
+			DefaultBufferSize:    10000,
+			DefaultFlushInterval: time.Second,
+			WorkerPoolSize:       1,
 		}
 
 		publisher := NewMetricEventPublisher[*Counter[int64]](config, slog.Default())
@@ -885,7 +885,7 @@ func BenchmarkWithMemProfile(b *testing.B) {
 		b.Run("MemoryProfile", func(b *testing.B) {
 			// Force GC before starting
 			runtime.GC()
-			
+
 			var m1, m2 runtime.MemStats
 			runtime.ReadMemStats(&m1)
 
@@ -905,7 +905,7 @@ func BenchmarkWithMemProfile(b *testing.B) {
 			runtime.ReadMemStats(&m2)
 
 			if testing.Verbose() {
-				b.Logf("Memory allocated per operation: %d bytes", 
+				b.Logf("Memory allocated per operation: %d bytes",
 					(m2.TotalAlloc-m1.TotalAlloc)/uint64(b.N))
 				b.Logf("Heap objects per operation: %.2f",
 					float64(m2.HeapObjects-m1.HeapObjects)/float64(b.N))

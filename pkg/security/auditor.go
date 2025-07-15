@@ -15,11 +15,11 @@ import (
 
 // SecurityAuditor provides comprehensive security audit logging
 type SecurityAuditor struct {
-	config    AuditConfig
-	logger    *logging.Logger
-	events    chan *AuditEvent
-	eventLog  []AuditEvent
-	mutex     sync.RWMutex
+	config     AuditConfig
+	logger     *logging.Logger
+	events     chan *AuditEvent
+	eventLog   []AuditEvent
+	mutex      sync.RWMutex
 	siemSender *SIEMSender
 }
 
@@ -73,11 +73,11 @@ type AuditTarget struct {
 
 // ComplianceInfo contains compliance-related information
 type ComplianceInfo struct {
-	Standards     []string          `json:"standards"`
-	Controls      []string          `json:"controls"`
-	Classification string           `json:"classification"`
-	Retention     time.Duration     `json:"retention"`
-	Tags          map[string]string `json:"tags"`
+	Standards      []string          `json:"standards"`
+	Controls       []string          `json:"controls"`
+	Classification string            `json:"classification"`
+	Retention      time.Duration     `json:"retention"`
+	Tags           map[string]string `json:"tags"`
 }
 
 // NewSecurityAuditor creates a new security auditor
@@ -297,9 +297,9 @@ func (sa *SecurityAuditor) LogDataAccess(userID, operation, dataType string, rec
 			Type:     "data",
 			Resource: dataType,
 		},
-		Action:  operation,
-		Result:  "success",
-		Context: context,
+		Action:    operation,
+		Result:    "success",
+		Context:   context,
 		RiskScore: sa.calculateDataAccessRiskScore(operation, dataType, recordCount),
 		ComplianceInfo: ComplianceInfo{
 			Standards:      []string{"GDPR", "SOC2"},
@@ -438,16 +438,16 @@ func (sa *SecurityAuditor) processEvents() {
 
 		// Log to structured logger
 		sa.logger.WithFields(map[string]interface{}{
-			"audit_event_id":   event.ID,
-			"event_type":       event.EventType,
-			"category":         event.Category,
-			"severity":         event.Severity,
-			"actor_id":         event.Actor.ID,
-			"actor_ip":         event.Actor.IPAddress,
-			"target_resource":  event.Target.Resource,
-			"action":           event.Action,
-			"result":           event.Result,
-			"risk_score":       event.RiskScore,
+			"audit_event_id":  event.ID,
+			"event_type":      event.EventType,
+			"category":        event.Category,
+			"severity":        event.Severity,
+			"actor_id":        event.Actor.ID,
+			"actor_ip":        event.Actor.IPAddress,
+			"target_resource": event.Target.Resource,
+			"action":          event.Action,
+			"result":          event.Result,
+			"risk_score":      event.RiskScore,
 		}).Info("Security audit event")
 
 		// Send to SIEM if configured
@@ -489,7 +489,7 @@ func (sa *SecurityAuditor) logRetentionCleanup() {
 
 func (sa *SecurityAuditor) generateEventID() string {
 	// Generate a unique event ID
-	return fmt.Sprintf("audit-%d-%s", time.Now().UnixNano(), 
+	return fmt.Sprintf("audit-%d-%s", time.Now().UnixNano(),
 		hex.EncodeToString(sha256.New().Sum(nil))[:8])
 }
 
@@ -526,74 +526,74 @@ func (sa *SecurityAuditor) signEvent(event *AuditEvent) string {
 
 func (sa *SecurityAuditor) calculateRiskScore(eventType string, r *http.Request) float64 {
 	score := 0.1 // Base score
-	
+
 	// Increase score for sensitive endpoints
 	path := r.URL.Path
 	if strings.Contains(path, "/admin") || strings.Contains(path, "/config") {
 		score += 0.3
 	}
-	
+
 	// Increase score for non-GET methods
 	if r.Method != "GET" {
 		score += 0.2
 	}
-	
+
 	return min(score, 1.0)
 }
 
 func (sa *SecurityAuditor) calculateAuthRiskScore(result, ipAddress string) float64 {
 	score := 0.1
-	
+
 	if result == "failed" {
 		score += 0.5
 	}
-	
+
 	// Add more risk factors based on IP reputation, geolocation, etc.
-	
+
 	return min(score, 1.0)
 }
 
 func (sa *SecurityAuditor) calculateAuthzRiskScore(action, resource, result string) float64 {
 	score := 0.1
-	
+
 	if result == "denied" {
 		score += 0.3
 	}
-	
+
 	// Increase score for sensitive actions
 	if action == "delete" || action == "modify" {
 		score += 0.2
 	}
-	
+
 	return min(score, 1.0)
 }
 
 func (sa *SecurityAuditor) calculateDataAccessRiskScore(operation, dataType string, recordCount int) float64 {
 	score := 0.1
-	
+
 	// Increase score for large data access
 	if recordCount > 1000 {
 		score += 0.3
 	} else if recordCount > 100 {
 		score += 0.1
 	}
-	
+
 	// Increase score for sensitive operations
 	if operation == "export" || operation == "bulk_read" {
 		score += 0.2
 	}
-	
+
 	return min(score, 1.0)
 }
 
 func (sa *SecurityAuditor) calculateConfigRiskScore(setting string) float64 {
 	score := 0.3 // Config changes are inherently risky
-	
+
 	// Increase score for security-related settings
 	if strings.Contains(setting, "auth") || strings.Contains(setting, "security") {
 		score += 0.4
 	}
-	
+
 	return min(score, 1.0)
 }
 
@@ -657,7 +657,7 @@ func (sa *SecurityAuditor) matchesCriteria(event AuditEvent, criteria AuditSearc
 	if !criteria.EndTime.IsZero() && event.Timestamp.After(criteria.EndTime) {
 		return false
 	}
-	
+
 	return true
 }
 

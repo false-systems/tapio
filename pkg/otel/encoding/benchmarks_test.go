@@ -67,10 +67,10 @@ func BenchmarkBinaryEncoder_EncodeSpan(b *testing.B) {
 	}
 	encoder := NewBinaryEncoder[string](config)
 	span := generateTestSpan()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := encoder.EncodeSpan(span)
 		if err != nil {
@@ -88,10 +88,10 @@ func BenchmarkBinaryEncoder_EncodeSpanLarge(b *testing.B) {
 	}
 	encoder := NewBinaryEncoder[string](config)
 	span := generateLargeSpan()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := encoder.EncodeSpan(span)
 		if err != nil {
@@ -108,16 +108,16 @@ func BenchmarkBinaryEncoder_EncodeSpanBatch(b *testing.B) {
 		EnableSIMD:        true,
 	}
 	encoder := NewBinaryEncoder[string](config)
-	
+
 	batchSizes := []int{1, 10, 100, 1000}
-	
+
 	for _, size := range batchSizes {
 		b.Run(fmt.Sprintf("BatchSize%d", size), func(b *testing.B) {
 			spans := generateSpanBatch(size)
-			
+
 			b.ResetTimer()
 			b.ReportAllocs()
-			
+
 			for i := 0; i < b.N; i++ {
 				_, err := encoder.EncodeSpanBatch(spans)
 				if err != nil {
@@ -135,7 +135,7 @@ func BenchmarkBinaryEncoder_WithCompression(b *testing.B) {
 		CompressionTypeLZ4,
 		CompressionTypeSnappy,
 	}
-	
+
 	for _, compType := range compressionTypes {
 		b.Run(compType.String(), func(b *testing.B) {
 			config := EncoderConfig{
@@ -148,10 +148,10 @@ func BenchmarkBinaryEncoder_WithCompression(b *testing.B) {
 			}
 			encoder := NewBinaryEncoder[string](config)
 			span := generateLargeSpan()
-			
+
 			b.ResetTimer()
 			b.ReportAllocs()
-			
+
 			for i := 0; i < b.N; i++ {
 				_, err := encoder.EncodeSpan(span)
 				if err != nil {
@@ -166,7 +166,7 @@ func BenchmarkBinaryEncoder_WithCompression(b *testing.B) {
 
 func BenchmarkBinaryWriter_WriteOperations(b *testing.B) {
 	writer := NewBinaryWriter(4096)
-	
+
 	b.Run("WriteU8", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -176,7 +176,7 @@ func BenchmarkBinaryWriter_WriteOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("WriteU32", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -186,7 +186,7 @@ func BenchmarkBinaryWriter_WriteOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("WriteU64", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -196,7 +196,7 @@ func BenchmarkBinaryWriter_WriteOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("WriteString", func(b *testing.B) {
 		testString := "test-string-for-benchmarking"
 		b.ResetTimer()
@@ -207,7 +207,7 @@ func BenchmarkBinaryWriter_WriteOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("WriteBytes", func(b *testing.B) {
 		testData := generateRandomData(32)
 		b.ResetTimer()
@@ -222,11 +222,11 @@ func BenchmarkBinaryWriter_WriteOperations(b *testing.B) {
 
 func BenchmarkBinaryWriter_VarInt(b *testing.B) {
 	writer := NewBinaryWriter(4096)
-	
+
 	values := []uint64{
 		0, 127, 128, 16383, 16384, 2097151, 2097152, 268435455, 268435456,
 	}
-	
+
 	for _, value := range values {
 		b.Run(fmt.Sprintf("Value%d", value), func(b *testing.B) {
 			b.ResetTimer()
@@ -240,14 +240,14 @@ func BenchmarkBinaryWriter_VarInt(b *testing.B) {
 
 func BenchmarkBinaryWriter_BufferGrowth(b *testing.B) {
 	initialSizes := []int{512, 1024, 4096, 8192}
-	
+
 	for _, size := range initialSizes {
 		b.Run(fmt.Sprintf("InitialSize%d", size), func(b *testing.B) {
 			testData := generateRandomData(1024 * 1024) // 1MB test data
-			
+
 			b.ResetTimer()
 			b.ReportAllocs()
-			
+
 			for i := 0; i < b.N; i++ {
 				writer := NewBinaryWriter(size)
 				writer.WriteBytes(testData)
@@ -269,7 +269,7 @@ func BenchmarkBinaryReader_ReadOperations(b *testing.B) {
 		writer.WriteBytes(generateRandomData(32))
 	}
 	testData := writer.Bytes()
-	
+
 	b.Run("ReadU8", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -279,7 +279,7 @@ func BenchmarkBinaryReader_ReadOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("ReadU32", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -289,7 +289,7 @@ func BenchmarkBinaryReader_ReadOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("ReadString", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -306,12 +306,12 @@ func BenchmarkBinaryReader_BatchReading(b *testing.B) {
 	writer := NewBinaryWriter(8192)
 	valueSize := 16
 	count := 1000
-	
+
 	for i := 0; i < count; i++ {
 		writer.WriteBytes(generateRandomData(valueSize))
 	}
 	testData := writer.Bytes()
-	
+
 	b.Run("Sequential", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -321,7 +321,7 @@ func BenchmarkBinaryReader_BatchReading(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("BatchSIMD", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -341,18 +341,18 @@ func BenchmarkCompression_Algorithms(b *testing.B) {
 		CompressionTypeLZ4,
 		CompressionTypeSnappy,
 	}
-	
+
 	for _, size := range dataSizes {
 		testData := generateRandomData(size)
-		
+
 		for _, compType := range compressionTypes {
 			b.Run(fmt.Sprintf("%s_Size%d", compType.String(), size), func(b *testing.B) {
 				compressor := NewCompressor(compType, 6)
 				dst := make([]byte, 0, size*2)
-				
+
 				b.ResetTimer()
 				b.ReportAllocs()
-				
+
 				for i := 0; i < b.N; i++ {
 					_, err := compressor.Compress(testData, dst)
 					if err != nil {
@@ -372,21 +372,21 @@ func BenchmarkCompression_Roundtrip(b *testing.B) {
 		CompressionTypeLZ4,
 		CompressionTypeSnappy,
 	}
-	
+
 	for _, compType := range compressionTypes {
 		b.Run(compType.String(), func(b *testing.B) {
 			compressor := NewCompressor(compType, 6)
 			dst := make([]byte, 0, len(testData)*2)
-			
+
 			b.ResetTimer()
 			b.ReportAllocs()
-			
+
 			for i := 0; i < b.N; i++ {
 				compressed, err := compressor.Compress(testData, dst)
 				if err != nil {
 					b.Fatal(err)
 				}
-				
+
 				_, err = compressor.Decompress(compressed, len(testData))
 				if err != nil {
 					b.Fatal(err)
@@ -407,17 +407,17 @@ func BenchmarkMemoryEfficiency_ZeroAllocation(b *testing.B) {
 	}
 	encoder := NewBinaryEncoder[string](config)
 	span := generateTestSpan()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := encoder.EncodeSpan(span)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
-	
+
 	// Verify zero allocations in hot path
 	stats := encoder.GetStats()
 	if stats.PoolMisses > stats.PoolHits {
@@ -428,10 +428,10 @@ func BenchmarkMemoryEfficiency_ZeroAllocation(b *testing.B) {
 func BenchmarkMemoryEfficiency_BufferReuse(b *testing.B) {
 	writer := NewBinaryWriter(4096)
 	testData := generateRandomData(1024)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		writer.Reset()
 		writer.WriteBytes(testData)
@@ -448,10 +448,10 @@ func BenchmarkConcurrentEncoding(b *testing.B) {
 	}
 	encoder := NewBinaryEncoder[string](config)
 	span := generateTestSpan()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			_, err := encoder.EncodeSpan(span)
@@ -465,13 +465,13 @@ func BenchmarkConcurrentEncoding(b *testing.B) {
 func BenchmarkConcurrentCompression(b *testing.B) {
 	testData := generateRandomData(8192)
 	pool := NewCompressorPool(CompressionTypeZstd, 3)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		dst := make([]byte, 0, len(testData)*2)
-		
+
 		for pb.Next() {
 			compressor := pool.Get()
 			_, err := compressor.Compress(testData, dst)
@@ -492,17 +492,17 @@ func BenchmarkRealWorldScenario_HighThroughput(b *testing.B) {
 		EnableCompression:    true,
 		CompressionType:      CompressionTypeZstd,
 		CompressionThreshold: 4096,
-		EnableSIMD:          true,
+		EnableSIMD:           true,
 	}
 	encoder := NewBinaryEncoder[string](config)
-	
+
 	// Simulate high-throughput scenario: 1000 spans/batch, 100 batches
 	spansPerBatch := 1000
 	batchCount := 100
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < batchCount; j++ {
 			spans := generateSpanBatch(spansPerBatch)
@@ -512,7 +512,7 @@ func BenchmarkRealWorldScenario_HighThroughput(b *testing.B) {
 			}
 		}
 	}
-	
+
 	// Report throughput
 	stats := encoder.GetStats()
 	throughput := float64(stats.EncodedSpans) / b.Elapsed().Seconds()
@@ -524,14 +524,14 @@ func BenchmarkRealWorldScenario_LowLatency(b *testing.B) {
 		InitialBufferSize: 4096,
 		MaxBufferSize:     256 * 1024,
 		EnableCompression: false, // Disable compression for low latency
-		EnableSIMD:       true,
-		EnableZeroCopy:   true,
+		EnableSIMD:        true,
+		EnableZeroCopy:    true,
 	}
 	encoder := NewBinaryEncoder[string](config)
 	span := generateTestSpan()
-	
+
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
 		_, err := encoder.EncodeSpan(span)
@@ -539,7 +539,7 @@ func BenchmarkRealWorldScenario_LowLatency(b *testing.B) {
 			b.Fatal(err)
 		}
 		latency := time.Since(start)
-		
+
 		// Verify low latency requirement (< 1ms)
 		if latency > time.Millisecond {
 			b.Errorf("Latency too high: %v", latency)
@@ -579,30 +579,30 @@ type mockSpanSnapshot struct {
 	links     []domain.SpanLink[string]
 }
 
-func (m *mockSpanSnapshot) GetTraceID() domain.TraceID { return m.traceID }
-func (m *mockSpanSnapshot) GetSpanID() domain.SpanID   { return m.spanID }
+func (m *mockSpanSnapshot) GetTraceID() domain.TraceID     { return m.traceID }
+func (m *mockSpanSnapshot) GetSpanID() domain.SpanID       { return m.spanID }
 func (m *mockSpanSnapshot) GetParentSpanID() domain.SpanID { return m.parentID }
-func (m *mockSpanSnapshot) GetName() string { return m.name }
-func (m *mockSpanSnapshot) GetKind() domain.SpanKind { return m.kind }
+func (m *mockSpanSnapshot) GetName() string                { return m.name }
+func (m *mockSpanSnapshot) GetKind() domain.SpanKind       { return m.kind }
 func (m *mockSpanSnapshot) GetStatus() domain.SpanStatus {
 	return domain.SpanStatus{Code: domain.StatusCodeOK, Description: "OK"}
 }
-func (m *mockSpanSnapshot) GetStartTime() time.Time { return m.startTime }
-func (m *mockSpanSnapshot) GetEndTime() time.Time { return m.endTime }
-func (m *mockSpanSnapshot) GetDuration() time.Duration { return m.endTime.Sub(m.startTime) }
+func (m *mockSpanSnapshot) GetStartTime() time.Time                       { return m.startTime }
+func (m *mockSpanSnapshot) GetEndTime() time.Time                         { return m.endTime }
+func (m *mockSpanSnapshot) GetDuration() time.Duration                    { return m.endTime.Sub(m.startTime) }
 func (m *mockSpanSnapshot) GetAttributes() []domain.SpanAttribute[string] { return m.attrs }
-func (m *mockSpanSnapshot) GetEvents() []domain.SpanEvent[string] { return m.events }
-func (m *mockSpanSnapshot) GetLinks() []domain.SpanLink[string] { return m.links }
+func (m *mockSpanSnapshot) GetEvents() []domain.SpanEvent[string]         { return m.events }
+func (m *mockSpanSnapshot) GetLinks() []domain.SpanLink[string]           { return m.links }
 func (m *mockSpanSnapshot) GetResource() domain.Resource {
 	return domain.Resource{Attributes: map[string]any{"service.name": "test-service"}}
 }
 func (m *mockSpanSnapshot) GetInstrumentationScope() domain.InstrumentationScope {
 	return domain.InstrumentationScope{Name: "test-scope", Version: "1.0.0"}
 }
-func (m *mockSpanSnapshot) MarshalBinary() ([]byte, error) { return nil, nil }
+func (m *mockSpanSnapshot) MarshalBinary() ([]byte, error)        { return nil, nil }
 func (m *mockSpanSnapshot) WriteBinaryTo(buf []byte) (int, error) { return 0, nil }
-func (m *mockSpanSnapshot) GetArena() *domain.ArenaRef { return nil }
-func (m *mockSpanSnapshot) Release() {}
+func (m *mockSpanSnapshot) GetArena() *domain.ArenaRef            { return nil }
+func (m *mockSpanSnapshot) Release()                              {}
 
 func generateTraceID() domain.TraceID {
 	var id domain.TraceID

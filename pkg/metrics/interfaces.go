@@ -252,32 +252,32 @@ type (
 type (
 	// PushClientConfig configures push clients
 	PushClientConfig struct {
-		GatewayURL      string
-		JobName         string
-		Instance        string
-		Timeout         time.Duration
-		RetryAttempts   int
-		RetryBackoff    time.Duration
-		BasicAuth       *BasicAuth
-		TLSConfig       *TLSConfig
-		Headers         map[string]string
-		Compression     CompressionConfig
-		RateLimiting    RateLimitConfig
-		CircuitBreaker  CircuitBreakerConfig
+		GatewayURL     string
+		JobName        string
+		Instance       string
+		Timeout        time.Duration
+		RetryAttempts  int
+		RetryBackoff   time.Duration
+		BasicAuth      *BasicAuth
+		TLSConfig      *TLSConfig
+		Headers        map[string]string
+		Compression    CompressionConfig
+		RateLimiting   RateLimitConfig
+		CircuitBreaker CircuitBreakerConfig
 	}
 
 	// PullClientConfig configures pull clients
 	PullClientConfig struct {
-		ListenAddress   string
-		ListenPort      int
-		MetricsPath     string
-		ScrapeInterval  time.Duration
-		ScrapeTimeout   time.Duration
-		TLSConfig       *TLSConfig
-		Authentication  AuthConfig
-		Registry        *prometheus.Registry
-		Gatherer        prometheus.Gatherer
-		MaxConnections  int
+		ListenAddress  string
+		ListenPort     int
+		MetricsPath    string
+		ScrapeInterval time.Duration
+		ScrapeTimeout  time.Duration
+		TLSConfig      *TLSConfig
+		Authentication AuthConfig
+		Registry       *prometheus.Registry
+		Gatherer       prometheus.Gatherer
+		MaxConnections int
 	}
 
 	// StreamClientConfig configures streaming clients
@@ -294,12 +294,12 @@ type (
 
 	// CollectorConfig configures custom collectors
 	CollectorConfig struct {
-		CollectorName     string
-		CollectionFunc    func(context.Context) ([]CustomMetric, error)
+		CollectorName      string
+		CollectionFunc     func(context.Context) ([]CustomMetric, error)
 		CollectionInterval time.Duration
-		ErrorStrategy     ErrorStrategy
-		MemoryLimit       int64
-		TimeoutConfig     TimeoutConfig
+		ErrorStrategy      ErrorStrategy
+		MemoryLimit        int64
+		TimeoutConfig      TimeoutConfig
 	}
 )
 
@@ -338,11 +338,11 @@ type (
 
 	// StreamResult represents streaming results
 	StreamResult[T MetricType] struct {
-		Metrics   []T
-		StreamID  string
-		Error     error
-		Timestamp time.Time
-		Sequence  int64
+		Metrics     []T
+		StreamID    string
+		Error       error
+		Timestamp   time.Time
+		Sequence    int64
 		EndOfStream bool
 	}
 
@@ -359,51 +359,51 @@ type (
 
 	// RegisteredClient information
 	RegisteredClient struct {
-		ID       string
-		Type     ClientType
-		Config   interface{}
-		Health   ClientHealth
-		Stats    ClientStats
-		Created  time.Time
+		ID      string
+		Type    ClientType
+		Config  interface{}
+		Health  ClientHealth
+		Stats   ClientStats
+		Created time.Time
 	}
 
 	// ValidationResult represents validation outcome
 	ValidationResult struct {
-		Valid   bool
-		Errors  []ValidationError
+		Valid    bool
+		Errors   []ValidationError
 		Warnings []ValidationWarning
-		Score   float64
+		Score    float64
 	}
 )
 
 // Supporting types and enums
 type (
-	EventType           string
-	ObserverPriority    string
+	EventType            string
+	ObserverPriority     string
 	BackpressureStrategy string
-	BackpressureMode    string
-	BufferingStrategy   string
+	BackpressureMode     string
+	BufferingStrategy    string
 	CompressionAlgorithm string
-	CompressionLevel    string
-	ExportFormat        string
-	ClientType          string
-	StreamStatus        string
-	ErrorStrategy       string
-	Labels              map[string]string
+	CompressionLevel     string
+	ExportFormat         string
+	ClientType           string
+	StreamStatus         string
+	ErrorStrategy        string
+	Labels               map[string]string
 )
 
 // Options and configuration structures
 type (
 	StreamOptions struct {
-		BufferSize       int
-		FlushInterval    time.Duration
-		EnableBatching   bool
-		BatchSize        int
-		Compression      bool
-		IncludeMetadata  bool
-		FilterFunc       func(MetricType) bool
-		TransformFunc    func(MetricType) MetricType
-		ErrorHandler     func(error) bool
+		BufferSize      int
+		FlushInterval   time.Duration
+		EnableBatching  bool
+		BatchSize       int
+		Compression     bool
+		IncludeMetadata bool
+		FilterFunc      func(MetricType) bool
+		TransformFunc   func(MetricType) MetricType
+		ErrorHandler    func(error) bool
 	}
 
 	CollectionOptions struct {
@@ -417,11 +417,11 @@ type (
 	}
 
 	BackpressureOptions struct {
-		MaxBufferSize    int
-		DropStrategy     string
-		AlertThreshold   float64
-		RecoveryTimeout  time.Duration
-		MetricsCallback  func(BackpressureStats)
+		MaxBufferSize   int
+		DropStrategy    string
+		AlertThreshold  float64
+		RecoveryTimeout time.Duration
+		MetricsCallback func(BackpressureStats)
 	}
 
 	BufferingOptions struct {
@@ -581,17 +581,17 @@ const (
 
 // Constants for backpressure strategies
 const (
-	BackpressureStrategyDrop    BackpressureStrategy = "drop"
-	BackpressureStrategyBuffer  BackpressureStrategy = "buffer"
-	BackpressureStrategyBlock   BackpressureStrategy = "block"
+	BackpressureStrategyDrop     BackpressureStrategy = "drop"
+	BackpressureStrategyBuffer   BackpressureStrategy = "buffer"
+	BackpressureStrategyBlock    BackpressureStrategy = "block"
 	BackpressureStrategyAdaptive BackpressureStrategy = "adaptive"
 )
 
 // Constants for export formats
 const (
-	ExportFormatPrometheus ExportFormat = "prometheus"
-	ExportFormatJSON       ExportFormat = "json"
-	ExportFormatCSV        ExportFormat = "csv"
+	ExportFormatPrometheus  ExportFormat = "prometheus"
+	ExportFormatJSON        ExportFormat = "json"
+	ExportFormatCSV         ExportFormat = "csv"
 	ExportFormatOpenMetrics ExportFormat = "openmetrics"
 )
 
@@ -605,8 +605,8 @@ const (
 
 // Constants for stream status
 const (
-	StreamStatusActive   StreamStatus = "active"
-	StreamStatusPaused   StreamStatus = "paused"
-	StreamStatusStopped  StreamStatus = "stopped"
-	StreamStatusError    StreamStatus = "error"
+	StreamStatusActive  StreamStatus = "active"
+	StreamStatusPaused  StreamStatus = "paused"
+	StreamStatusStopped StreamStatus = "stopped"
+	StreamStatusError   StreamStatus = "error"
 )

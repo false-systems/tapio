@@ -76,33 +76,33 @@ type Entity struct {
 }
 
 type Result struct {
-	ID           string                 `json:"id"`
-	RuleID       string                 `json:"rule_id"`
-	RuleName     string                 `json:"rule_name"`
-	Type         string                 `json:"type"`
-	Title        string                 `json:"title"`
-	Description  string                 `json:"description"`
-	Severity     Severity               `json:"severity"`
-	Confidence   float64                `json:"confidence"`
-	Events       []string               `json:"events"`
-	Entities     []Entity               `json:"entities"`
-	Evidence     []Evidence             `json:"evidence"`
-	Metadata     map[string]interface{} `json:"metadata"`
-	CreatedAt    time.Time              `json:"created_at"`
-	TTL          time.Duration          `json:"ttl"`
+	ID          string                 `json:"id"`
+	RuleID      string                 `json:"rule_id"`
+	RuleName    string                 `json:"rule_name"`
+	Type        string                 `json:"type"`
+	Title       string                 `json:"title"`
+	Description string                 `json:"description"`
+	Severity    Severity               `json:"severity"`
+	Confidence  float64                `json:"confidence"`
+	Events      []string               `json:"events"`
+	Entities    []Entity               `json:"entities"`
+	Evidence    []Evidence             `json:"evidence"`
+	Metadata    map[string]interface{} `json:"metadata"`
+	CreatedAt   time.Time              `json:"created_at"`
+	TTL         time.Duration          `json:"ttl"`
 }
 
 type PatternResult struct {
-	PatternID        string            `json:"pattern_id"`
-	PatternName      string            `json:"pattern_name"`
-	Type             string            `json:"type"`
-	Confidence       float64           `json:"confidence"`
-	Detected         time.Time         `json:"detected"`
-	AffectedEntities []Entity          `json:"affected_entities"`
-	Severity         Severity          `json:"severity"`
-	Description      string            `json:"description"`
-	Evidence         []Evidence        `json:"evidence"`
-	Predictions      []Prediction      `json:"predictions"`
+	PatternID        string                 `json:"pattern_id"`
+	PatternName      string                 `json:"pattern_name"`
+	Type             string                 `json:"type"`
+	Confidence       float64                `json:"confidence"`
+	Detected         time.Time              `json:"detected"`
+	AffectedEntities []Entity               `json:"affected_entities"`
+	Severity         Severity               `json:"severity"`
+	Description      string                 `json:"description"`
+	Evidence         []Evidence             `json:"evidence"`
+	Predictions      []Prediction           `json:"predictions"`
 	Metadata         map[string]interface{} `json:"metadata"`
 }
 
@@ -112,23 +112,23 @@ type TimeWindow struct {
 }
 
 type EventFilter struct {
-	Source       string            `json:"source,omitempty"`
-	Type         string            `json:"type,omitempty"`
-	EntityType   string            `json:"entity_type,omitempty"`
-	EntityName   string            `json:"entity_name,omitempty"`
-	Namespace    string            `json:"namespace,omitempty"`
-	Node         string            `json:"node,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	Since        time.Time         `json:"since,omitempty"`
-	Until        time.Time         `json:"until,omitempty"`
-	Limit        int               `json:"limit,omitempty"`
+	Source     string            `json:"source,omitempty"`
+	Type       string            `json:"type,omitempty"`
+	EntityType string            `json:"entity_type,omitempty"`
+	EntityName string            `json:"entity_name,omitempty"`
+	Namespace  string            `json:"namespace,omitempty"`
+	Node       string            `json:"node,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Since      time.Time         `json:"since,omitempty"`
+	Until      time.Time         `json:"until,omitempty"`
+	Limit      int               `json:"limit,omitempty"`
 }
 
 type MetricSeries struct {
-	Name      string                 `json:"name"`
-	Labels    map[string]string      `json:"labels"`
-	Points    []MetricPoint          `json:"points"`
-	Metadata  map[string]interface{} `json:"metadata"`
+	Name     string                 `json:"name"`
+	Labels   map[string]string      `json:"labels"`
+	Points   []MetricPoint          `json:"points"`
+	Metadata map[string]interface{} `json:"metadata"`
 }
 
 type MetricPoint struct {
@@ -189,37 +189,37 @@ type RuleMetadata struct {
 }
 
 type DataCollection struct {
-	Events      []Event                `json:"events"`
-	Metrics     map[string]MetricSeries `json:"metrics"`
-	Window      TimeWindow             `json:"window"`
-	Sources     []string               `json:"sources"`
+	Events  []Event                 `json:"events"`
+	Metrics map[string]MetricSeries `json:"metrics"`
+	Window  TimeWindow              `json:"window"`
+	Sources []string                `json:"sources"`
 }
 
 type RuleContext struct {
-	RuleID         string                 `json:"rule_id"`
-	CorrelationID  string                 `json:"correlation_id"`
-	Window         TimeWindow             `json:"window"`
-	Events         []Event                `json:"events"`
+	RuleID         string                  `json:"rule_id"`
+	CorrelationID  string                  `json:"correlation_id"`
+	Window         TimeWindow              `json:"window"`
+	Events         []Event                 `json:"events"`
 	Metrics        map[string]MetricSeries `json:"metrics"`
-	EventsBySource map[string][]Event     `json:"events_by_source"`
-	EventsByType   map[string][]Event     `json:"events_by_type"`
-	EventsByEntity map[string][]Event     `json:"events_by_entity"`
-	Metadata       map[string]string      `json:"metadata"`
+	EventsBySource map[string][]Event      `json:"events_by_source"`
+	EventsByType   map[string][]Event      `json:"events_by_type"`
+	EventsByEntity map[string][]Event      `json:"events_by_entity"`
+	Metadata       map[string]string       `json:"metadata"`
 }
 
 type Finding struct {
-	ID          string                 `json:"id"`
-	RuleID      string                 `json:"rule_id"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	Severity    Severity               `json:"severity"`
-	Confidence  float64                `json:"confidence"`
-	Resource    ResourceInfo           `json:"resource,omitempty"`
-	Evidence    []Evidence             `json:"evidence"`
-	Prediction  *Prediction            `json:"prediction,omitempty"`
-	Tags        []string               `json:"tags"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID          string       `json:"id"`
+	RuleID      string       `json:"rule_id"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Severity    Severity     `json:"severity"`
+	Confidence  float64      `json:"confidence"`
+	Resource    ResourceInfo `json:"resource,omitempty"`
+	Evidence    []Evidence   `json:"evidence"`
+	Prediction  *Prediction  `json:"prediction,omitempty"`
+	Tags        []string     `json:"tags"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 type ResourceInfo struct {

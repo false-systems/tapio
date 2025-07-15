@@ -16,12 +16,12 @@ import (
 
 // AuthManager provides comprehensive authentication and authorization
 type AuthManager struct {
-	config      AuthConfig
-	logger      *logging.Logger
-	jwtSecret   []byte
-	sessions    map[string]*Session
+	config       AuthConfig
+	logger       *logging.Logger
+	jwtSecret    []byte
+	sessions     map[string]*Session
 	failedLogins map[string]*LoginAttempts
-	mutex       sync.RWMutex
+	mutex        sync.RWMutex
 }
 
 // Session represents an authenticated session
@@ -41,7 +41,7 @@ type Session struct {
 
 // LoginAttempts tracks failed login attempts for brute force protection
 type LoginAttempts struct {
-	Count       int       `json:"count"`
+	Count        int       `json:"count"`
 	FirstAttempt time.Time `json:"first_attempt"`
 	LastAttempt  time.Time `json:"last_attempt"`
 	LockedUntil  time.Time `json:"locked_until"`
@@ -128,7 +128,7 @@ func (am *AuthManager) authenticateJWT(r *http.Request) bool {
 	}
 
 	tokenString := authHeader[7:]
-	
+
 	// Parse and validate token
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -221,7 +221,7 @@ func (am *AuthManager) authenticateMTLS(r *http.Request) bool {
 	}
 
 	cert := r.TLS.PeerCertificates[0]
-	
+
 	// Add certificate context to request
 	ctx := context.WithValue(r.Context(), "client_cert_subject", cert.Subject.String())
 	ctx = context.WithValue(ctx, "client_cert_serial", cert.SerialNumber.String())
@@ -347,12 +347,12 @@ func (am *AuthManager) Logout(sessionID string) error {
 func (am *AuthManager) validateCredentials(username, password string) (bool, string, []string, []string, error) {
 	// This is a placeholder implementation
 	// In production, this would integrate with your user store (database, LDAP, etc.)
-	
+
 	// For demo purposes, accept any non-empty credentials
 	if username != "" && password != "" {
 		return true, "user-" + username, []string{"user"}, []string{"read"}, nil
 	}
-	
+
 	return false, "", nil, nil, nil
 }
 

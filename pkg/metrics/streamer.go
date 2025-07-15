@@ -30,47 +30,47 @@ type PrometheusMetricStreamer[T MetricType] struct {
 	stats StreamerStats
 
 	// Memory management
-	streamPool    sync.Pool
-	bufferPool    sync.Pool
+	streamPool      sync.Pool
+	bufferPool      sync.Pool
 	compressionPool sync.Pool
 
 	// Background workers
-	workers       int
-	workerQueue   chan streamWork[T]
+	workers        int
+	workerQueue    chan streamWork[T]
 	workerShutdown chan struct{}
-	workerWg      sync.WaitGroup
+	workerWg       sync.WaitGroup
 }
 
 // activeStream represents an active streaming session
 type activeStream[T MetricType] struct {
-	id             string
-	ctx            context.Context
-	cancel         context.CancelFunc
-	options        StreamOptions
-	resultChannel  chan StreamResult[T]
-	buffer         *StreamBuffer[T]
-	compressor     *StreamCompressor
-	encoder        StreamEncoder[T]
-	stats          StreamStats
-	started        time.Time
-	lastActivity   time.Time
-	errorCount     int64
-	bytesStreamed  int64
-	itemsStreamed  int64
+	id            string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	options       StreamOptions
+	resultChannel chan StreamResult[T]
+	buffer        *StreamBuffer[T]
+	compressor    *StreamCompressor
+	encoder       StreamEncoder[T]
+	stats         StreamStats
+	started       time.Time
+	lastActivity  time.Time
+	errorCount    int64
+	bytesStreamed int64
+	itemsStreamed int64
 }
 
 // StreamBuffer provides memory-efficient buffering with different strategies
 type StreamBuffer[T MetricType] struct {
-	strategy     BufferingStrategy
-	options      BufferingOptions
-	buffer       []T
-	writeIndex   int
-	readIndex    int
-	size         int
-	capacity     int
-	memoryUsage  int64
-	flushTicker  *time.Ticker
-	mu           sync.RWMutex
+	strategy      BufferingStrategy
+	options       BufferingOptions
+	buffer        []T
+	writeIndex    int
+	readIndex     int
+	size          int
+	capacity      int
+	memoryUsage   int64
+	flushTicker   *time.Ticker
+	mu            sync.RWMutex
 	diskSpillover *DiskSpillover[T]
 }
 
@@ -85,14 +85,14 @@ type StreamCompressor struct {
 
 // DiskSpillover handles memory overflow to disk
 type DiskSpillover[T MetricType] struct {
-	enabled       bool
-	directory     string
-	maxFileSize   int64
-	maxFiles      int
-	currentFile   string
-	bytesWritten  int64
-	filesCreated  int
-	mu            sync.Mutex
+	enabled      bool
+	directory    string
+	maxFileSize  int64
+	maxFiles     int
+	currentFile  string
+	bytesWritten int64
+	filesCreated int
+	mu           sync.Mutex
 }
 
 // StreamEncoder handles metric encoding for different formats
@@ -105,21 +105,21 @@ type StreamEncoder[T MetricType] interface {
 
 // streamWork represents work to be processed by workers
 type streamWork[T MetricType] struct {
-	streamID   string
-	items      []T
-	timestamp  time.Time
-	sequence   int64
-	priority   WorkPriority
-	context    context.Context
+	streamID  string
+	items     []T
+	timestamp time.Time
+	sequence  int64
+	priority  WorkPriority
+	context   context.Context
 }
 
 // Supporting types and configurations
 type (
 	StreamerConfig struct {
 		// Worker configuration
-		WorkerCount      int
-		WorkerQueueSize  int
-		WorkerTimeout    time.Duration
+		WorkerCount     int
+		WorkerQueueSize int
+		WorkerTimeout   time.Duration
 
 		// Default stream settings
 		DefaultBufferSize    int
@@ -128,38 +128,38 @@ type (
 		DefaultFormat        StreamFormat
 
 		// Memory management
-		MaxStreams           int
-		MaxMemoryUsage       int64
-		MemoryCheckInterval  time.Duration
-		GCThreshold          float64
+		MaxStreams          int
+		MaxMemoryUsage      int64
+		MemoryCheckInterval time.Duration
+		GCThreshold         float64
 
 		// Performance tuning
-		EnableProfiling      bool
-		EnableTracing        bool
-		MetricsInterval      time.Duration
+		EnableProfiling bool
+		EnableTracing   bool
+		MetricsInterval time.Duration
 
 		// Error handling
-		ErrorBufferSize      int
-		MaxRetries           int
-		RetryBackoff         time.Duration
+		ErrorBufferSize int
+		MaxRetries      int
+		RetryBackoff    time.Duration
 
 		// Disk spillover
-		EnableDiskSpillover  bool
-		SpilloverDirectory   string
-		SpilloverThreshold   int64
+		EnableDiskSpillover bool
+		SpilloverDirectory  string
+		SpilloverThreshold  int64
 	}
 
 	StreamerStats struct {
-		ActiveStreams     int64
-		TotalStreams      int64
-		BytesStreamed     int64
-		ItemsStreamed     int64
-		ErrorCount        int64
-		CompressionRatio  float64
-		MemoryUsage       int64
-		DiskUsage         int64
-		AverageLatency    time.Duration
-		LastActivity      time.Time
+		ActiveStreams    int64
+		TotalStreams     int64
+		BytesStreamed    int64
+		ItemsStreamed    int64
+		ErrorCount       int64
+		CompressionRatio float64
+		MemoryUsage      int64
+		DiskUsage        int64
+		AverageLatency   time.Duration
+		LastActivity     time.Time
 	}
 
 	StreamStats struct {
@@ -174,11 +174,11 @@ type (
 	}
 
 	CompressionStats struct {
-		BytesIn           int64
-		BytesOut          int64
-		CompressionRatio  float64
-		CompressionTime   time.Duration
-		CompressionCount  int64
+		BytesIn          int64
+		BytesOut         int64
+		CompressionRatio float64
+		CompressionTime  time.Duration
+		CompressionCount int64
 	}
 
 	StreamFormat string
@@ -187,9 +187,9 @@ type (
 
 // Stream format constants
 const (
-	StreamFormatJSON       StreamFormat = "json"
-	StreamFormatProtobuf   StreamFormat = "protobuf"
-	StreamFormatAvro       StreamFormat = "avro"
+	StreamFormatJSON        StreamFormat = "json"
+	StreamFormatProtobuf    StreamFormat = "protobuf"
+	StreamFormatAvro        StreamFormat = "avro"
 	StreamFormatMessagePack StreamFormat = "messagepack"
 )
 
@@ -485,17 +485,17 @@ func (s *PrometheusMetricStreamer[T]) applyStreamDefaults(opts *StreamOptions) {
 
 func (s *PrometheusMetricStreamer[T]) createStreamBuffer(size int, opts StreamOptions) (*StreamBuffer[T], error) {
 	buffer := &StreamBuffer[T]{
-		strategy:      BufferingStrategyMemory, // Default strategy
-		buffer:        make([]T, size),
-		capacity:      size,
-		flushTicker:   time.NewTicker(opts.FlushInterval),
+		strategy:    BufferingStrategyMemory, // Default strategy
+		buffer:      make([]T, size),
+		capacity:    size,
+		flushTicker: time.NewTicker(opts.FlushInterval),
 	}
 
 	// Initialize disk spillover if enabled
 	if s.config.EnableDiskSpillover {
 		spillover := &DiskSpillover[T]{
-			enabled:   true,
-			directory: s.config.SpilloverDirectory,
+			enabled:     true,
+			directory:   s.config.SpilloverDirectory,
 			maxFileSize: 100 * 1024 * 1024, // 100MB
 			maxFiles:    10,
 		}
@@ -645,11 +645,11 @@ func (s *PrometheusMetricStreamer[T]) flushStreamBuffer(stream *activeStream[T])
 
 	// Create stream result
 	result := StreamResult[T]{
-		Metrics:      items,
-		StreamID:     stream.id,
-		Timestamp:    time.Now(),
-		Sequence:     atomic.AddInt64(&s.streamSequence, 1),
-		EndOfStream:  false,
+		Metrics:     items,
+		StreamID:    stream.id,
+		Timestamp:   time.Now(),
+		Sequence:    atomic.AddInt64(&s.streamSequence, 1),
+		EndOfStream: false,
 	}
 
 	// Send result

@@ -7,201 +7,201 @@ import (
 	"sync"
 	"time"
 
-	// "github.com/yairfalse/tapio/pkg/correlation/patterns" // TODO: Fix import cycle
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
 // AutoFixEngine provides automated remediation capabilities for detected patterns
 type AutoFixEngine struct {
 	// Core components
-	// patternRegistry   *patterns.PatternRegistry // TODO: Fix import cycle
-	actionExecutor    ActionExecutor
-	safetyValidator   SafetyValidator
-	rollbackManager   *RollbackManager
-	
+	patternRegistry types.PatternRegistry
+	actionExecutor  ActionExecutor
+	safetyValidator SafetyValidator
+	rollbackManager *RollbackManager
+
 	// Configuration
-	config            *AutoFixConfig
-	
+	config *AutoFixConfig
+
 	// Action registry
-	actionRegistry    map[string]AutoFixAction
-	actionMutex       sync.RWMutex
-	
+	actionRegistry map[string]AutoFixAction
+	actionMutex    sync.RWMutex
+
 	// Execution tracking
-	executionHistory  []*AutoFixExecution
-	historyMutex      sync.RWMutex
-	
+	executionHistory []*AutoFixExecution
+	historyMutex     sync.RWMutex
+
 	// Safety controls
-	circuitBreaker    *CircuitBreaker
-	rateLimiter      *RateLimiter
-	
+	circuitBreaker *CircuitBreaker
+	rateLimiter    *RateLimiter
+
 	// State management
-	running           bool
-	stopChan          chan struct{}
-	executionChan     chan *AutoFixRequest
+	running       bool
+	stopChan      chan struct{}
+	executionChan chan *AutoFixRequest
 }
 
 // AutoFixConfig configures the auto-fix engine
 type AutoFixConfig struct {
 	// Safety settings
-	EnableAutoFix             bool          `json:"enable_auto_fix"`
-	RequireHumanApproval      bool          `json:"require_human_approval"`
-	MaxActionsPerHour         int           `json:"max_actions_per_hour"`
-	MaxActionsPerPattern      int           `json:"max_actions_per_pattern"`
-	
+	EnableAutoFix        bool `json:"enable_auto_fix"`
+	RequireHumanApproval bool `json:"require_human_approval"`
+	MaxActionsPerHour    int  `json:"max_actions_per_hour"`
+	MaxActionsPerPattern int  `json:"max_actions_per_pattern"`
+
 	// Confidence thresholds
-	MinPatternConfidence      float64       `json:"min_pattern_confidence"`
-	MinActionConfidence       float64       `json:"min_action_confidence"`
-	SafetyScoreThreshold      float64       `json:"safety_score_threshold"`
-	
+	MinPatternConfidence float64 `json:"min_pattern_confidence"`
+	MinActionConfidence  float64 `json:"min_action_confidence"`
+	SafetyScoreThreshold float64 `json:"safety_score_threshold"`
+
 	// Execution settings
-	ActionTimeout             time.Duration `json:"action_timeout"`
-	DryRunEnabled             bool          `json:"dry_run_enabled"`
-	RollbackEnabled           bool          `json:"rollback_enabled"`
-	RollbackTimeout           time.Duration `json:"rollback_timeout"`
-	
+	ActionTimeout   time.Duration `json:"action_timeout"`
+	DryRunEnabled   bool          `json:"dry_run_enabled"`
+	RollbackEnabled bool          `json:"rollback_enabled"`
+	RollbackTimeout time.Duration `json:"rollback_timeout"`
+
 	// Pattern-specific settings
-	EnableMemoryLeakFixes     bool          `json:"enable_memory_leak_fixes"`
-	EnableNetworkFixes        bool          `json:"enable_network_fixes"`
-	EnableStorageFixes        bool          `json:"enable_storage_fixes"`
-	EnableRuntimeFixes        bool          `json:"enable_runtime_fixes"`
-	EnableDependencyFixes     bool          `json:"enable_dependency_fixes"`
-	
+	EnableMemoryLeakFixes bool `json:"enable_memory_leak_fixes"`
+	EnableNetworkFixes    bool `json:"enable_network_fixes"`
+	EnableStorageFixes    bool `json:"enable_storage_fixes"`
+	EnableRuntimeFixes    bool `json:"enable_runtime_fixes"`
+	EnableDependencyFixes bool `json:"enable_dependency_fixes"`
+
 	// Enterprise settings
-	AuditLogging              bool          `json:"audit_logging"`
-	ComplianceMode            string        `json:"compliance_mode"`     // "strict", "moderate", "permissive"
-	NotificationWebhook       string        `json:"notification_webhook"`
-	
+	AuditLogging        bool   `json:"audit_logging"`
+	ComplianceMode      string `json:"compliance_mode"` // "strict", "moderate", "permissive"
+	NotificationWebhook string `json:"notification_webhook"`
+
 	// Circuit breaker settings
-	CircuitBreakerThreshold   int           `json:"circuit_breaker_threshold"`
-	CircuitBreakerWindow      time.Duration `json:"circuit_breaker_window"`
-	CircuitBreakerRecovery    time.Duration `json:"circuit_breaker_recovery"`
+	CircuitBreakerThreshold int           `json:"circuit_breaker_threshold"`
+	CircuitBreakerWindow    time.Duration `json:"circuit_breaker_window"`
+	CircuitBreakerRecovery  time.Duration `json:"circuit_breaker_recovery"`
 }
 
 // AutoFixAction defines an automated fix action
 type AutoFixAction struct {
-	ID                  string            `json:"id"`
-	Name                string            `json:"name"`
-	Description         string            `json:"description"`
-	PatternTypes        []string          `json:"pattern_types"`
-	
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	PatternTypes []string `json:"pattern_types"`
+
 	// Safety classification
-	SafetyLevel         string            `json:"safety_level"`         // "safe", "moderate", "risky"
-	RequiresApproval    bool              `json:"requires_approval"`
-	RequiresDryRun      bool              `json:"requires_dry_run"`
-	
+	SafetyLevel      string `json:"safety_level"` // "safe", "moderate", "risky"
+	RequiresApproval bool   `json:"requires_approval"`
+	RequiresDryRun   bool   `json:"requires_dry_run"`
+
 	// Execution details
-	ActionType          string            `json:"action_type"`          // "kubectl", "script", "api", "workflow"
-	Command             string            `json:"command"`
-	Parameters          map[string]string `json:"parameters"`
-	PreConditions       []string          `json:"pre_conditions"`
-	PostValidations     []string          `json:"post_validations"`
-	
+	ActionType      string            `json:"action_type"` // "kubectl", "script", "api", "workflow"
+	Command         string            `json:"command"`
+	Parameters      map[string]string `json:"parameters"`
+	PreConditions   []string          `json:"pre_conditions"`
+	PostValidations []string          `json:"post_validations"`
+
 	// Rollback information
-	RollbackSupported   bool              `json:"rollback_supported"`
-	RollbackCommand     string            `json:"rollback_command"`
-	RollbackParameters  map[string]string `json:"rollback_parameters"`
-	
+	RollbackSupported  bool              `json:"rollback_supported"`
+	RollbackCommand    string            `json:"rollback_command"`
+	RollbackParameters map[string]string `json:"rollback_parameters"`
+
 	// Success criteria
-	SuccessIndicators   []string          `json:"success_indicators"`
-	FailureIndicators   []string          `json:"failure_indicators"`
-	ValidationTimeout   time.Duration     `json:"validation_timeout"`
-	
+	SuccessIndicators []string      `json:"success_indicators"`
+	FailureIndicators []string      `json:"failure_indicators"`
+	ValidationTimeout time.Duration `json:"validation_timeout"`
+
 	// Impact assessment
-	ExpectedImpact      string            `json:"expected_impact"`
-	RiskLevel          string            `json:"risk_level"`           // "low", "medium", "high"
-	AffectedResources   []string          `json:"affected_resources"`
-	
+	ExpectedImpact    string   `json:"expected_impact"`
+	RiskLevel         string   `json:"risk_level"` // "low", "medium", "high"
+	AffectedResources []string `json:"affected_resources"`
+
 	// Execution function
-	Execute            func(ctx context.Context, request *AutoFixRequest) (*AutoFixResult, error) `json:"-"`
+	Execute func(ctx context.Context, request *AutoFixRequest) (*AutoFixResult, error) `json:"-"`
 }
 
 // AutoFixRequest represents a request to execute an auto-fix action
 type AutoFixRequest struct {
-	ID               string                    `json:"id"`
-	PatternResult    *PatternResult   `json:"pattern_result"`
-	ActionID         string                    `json:"action_id"`
-	Parameters       map[string]string         `json:"parameters"`
-	
+	ID            string            `json:"id"`
+	PatternResult *PatternResult    `json:"pattern_result"`
+	ActionID      string            `json:"action_id"`
+	Parameters    map[string]string `json:"parameters"`
+
 	// Request metadata
-	RequestedBy      string                    `json:"requested_by"`      // "system", "human", "scheduler"
-	Priority         string                    `json:"priority"`          // "low", "medium", "high", "critical"
-	DryRun           bool                      `json:"dry_run"`
-	RequiresApproval bool                      `json:"requires_approval"`
-	
+	RequestedBy      string `json:"requested_by"` // "system", "human", "scheduler"
+	Priority         string `json:"priority"`     // "low", "medium", "high", "critical"
+	DryRun           bool   `json:"dry_run"`
+	RequiresApproval bool   `json:"requires_approval"`
+
 	// Context
-	AffectedEntities []Entity                  `json:"affected_entities"`
-	Timestamp        time.Time                 `json:"timestamp"`
-	Deadline         time.Time                 `json:"deadline"`
-	
+	AffectedEntities []Entity  `json:"affected_entities"`
+	Timestamp        time.Time `json:"timestamp"`
+	Deadline         time.Time `json:"deadline"`
+
 	// Approval tracking
-	ApprovalStatus   string                    `json:"approval_status"`   // "pending", "approved", "rejected"
-	ApprovedBy       string                    `json:"approved_by"`
-	ApprovalTime     time.Time                 `json:"approval_time"`
+	ApprovalStatus string    `json:"approval_status"` // "pending", "approved", "rejected"
+	ApprovedBy     string    `json:"approved_by"`
+	ApprovalTime   time.Time `json:"approval_time"`
 }
 
 // AutoFixResult represents the result of an auto-fix execution
 type AutoFixResult struct {
-	RequestID         string            `json:"request_id"`
-	ActionID          string            `json:"action_id"`
-	Status            string            `json:"status"`            // "success", "failed", "partial", "rolled_back"
-	
+	RequestID string `json:"request_id"`
+	ActionID  string `json:"action_id"`
+	Status    string `json:"status"` // "success", "failed", "partial", "rolled_back"
+
 	// Execution details
-	StartTime         time.Time         `json:"start_time"`
-	EndTime           time.Time         `json:"end_time"`
-	Duration          time.Duration     `json:"duration"`
-	
+	StartTime time.Time     `json:"start_time"`
+	EndTime   time.Time     `json:"end_time"`
+	Duration  time.Duration `json:"duration"`
+
 	// Results
-	CommandOutput     string            `json:"command_output"`
-	ExitCode          int               `json:"exit_code"`
-	ErrorMessage      string            `json:"error_message,omitempty"`
-	
+	CommandOutput string `json:"command_output"`
+	ExitCode      int    `json:"exit_code"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+
 	// Validation results
-	PreConditionResults  map[string]bool `json:"pre_condition_results"`
+	PreConditionResults   map[string]bool `json:"pre_condition_results"`
 	PostValidationResults map[string]bool `json:"post_validation_results"`
-	SuccessValidation    bool            `json:"success_validation"`
-	
+	SuccessValidation     bool            `json:"success_validation"`
+
 	// Impact assessment
-	ActualImpact      string            `json:"actual_impact"`
-	UnexpectedChanges []string          `json:"unexpected_changes"`
-	
+	ActualImpact      string   `json:"actual_impact"`
+	UnexpectedChanges []string `json:"unexpected_changes"`
+
 	// Rollback information
-	RollbackRequired  bool              `json:"rollback_required"`
-	RollbackExecuted  bool              `json:"rollback_executed"`
-	RollbackResult    *RollbackResult   `json:"rollback_result,omitempty"`
-	
+	RollbackRequired bool            `json:"rollback_required"`
+	RollbackExecuted bool            `json:"rollback_executed"`
+	RollbackResult   *RollbackResult `json:"rollback_result,omitempty"`
+
 	// Metadata
-	ExecutedBy        string            `json:"executed_by"`
-	SafetyScore       float64           `json:"safety_score"`
-	ConfidenceScore   float64           `json:"confidence_score"`
+	ExecutedBy      string  `json:"executed_by"`
+	SafetyScore     float64 `json:"safety_score"`
+	ConfidenceScore float64 `json:"confidence_score"`
 }
 
 // AutoFixExecution tracks the execution of auto-fix actions
 type AutoFixExecution struct {
-	ID               string                    `json:"id"`
-	Request          *AutoFixRequest           `json:"request"`
-	Result           *AutoFixResult            `json:"result"`
-	
+	ID      string          `json:"id"`
+	Request *AutoFixRequest `json:"request"`
+	Result  *AutoFixResult  `json:"result"`
+
 	// Tracking
-	CreatedAt        time.Time                 `json:"created_at"`
-	StartedAt        time.Time                 `json:"started_at"`
-	CompletedAt      time.Time                 `json:"completed_at"`
-	
+	CreatedAt   time.Time `json:"created_at"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+
 	// Pattern context
-	PatternID        string                    `json:"pattern_id"`
-	PatternName      string                    `json:"pattern_name"`
-	PatternConfidence float64                  `json:"pattern_confidence"`
-	
+	PatternID         string  `json:"pattern_id"`
+	PatternName       string  `json:"pattern_name"`
+	PatternConfidence float64 `json:"pattern_confidence"`
+
 	// Audit trail
-	AuditEvents      []*AuditEvent             `json:"audit_events"`
+	AuditEvents []*AuditEvent `json:"audit_events"`
 }
 
 // AuditEvent represents an audit event in the auto-fix process
 type AuditEvent struct {
-	EventType    string            `json:"event_type"`
-	Timestamp    time.Time         `json:"timestamp"`
-	Description  string            `json:"description"`
-	Actor        string            `json:"actor"`
-	Details      map[string]string `json:"details"`
+	EventType   string            `json:"event_type"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Description string            `json:"description"`
+	Actor       string            `json:"actor"`
+	Details     map[string]string `json:"details"`
 }
 
 // RollbackManager manages rollback operations
@@ -223,32 +223,32 @@ type RollbackAction struct {
 
 // RollbackResult represents the result of a rollback operation
 type RollbackResult struct {
-	RollbackID      string            `json:"rollback_id"`
-	ExecutionID     string            `json:"execution_id"`
-	Status          string            `json:"status"`       // "success", "failed", "partial"
-	StartTime       time.Time         `json:"start_time"`
-	EndTime         time.Time         `json:"end_time"`
-	Output          string            `json:"output"`
-	ErrorMessage    string            `json:"error_message,omitempty"`
+	RollbackID   string    `json:"rollback_id"`
+	ExecutionID  string    `json:"execution_id"`
+	Status       string    `json:"status"` // "success", "failed", "partial"
+	StartTime    time.Time `json:"start_time"`
+	EndTime      time.Time `json:"end_time"`
+	Output       string    `json:"output"`
+	ErrorMessage string    `json:"error_message,omitempty"`
 }
 
 // CircuitBreaker implements circuit breaker pattern for auto-fix safety
 type CircuitBreaker struct {
-	threshold     int
-	window        time.Duration
-	recovery      time.Duration
-	failures      []time.Time
-	state         string    // "closed", "open", "half-open"
-	lastFailure   time.Time
-	mutex         sync.RWMutex
+	threshold   int
+	window      time.Duration
+	recovery    time.Duration
+	failures    []time.Time
+	state       string // "closed", "open", "half-open"
+	lastFailure time.Time
+	mutex       sync.RWMutex
 }
 
 // RateLimiter implements rate limiting for auto-fix actions
 type RateLimiter struct {
-	maxActions    int
-	window        time.Duration
-	actions       []time.Time
-	mutex         sync.RWMutex
+	maxActions int
+	window     time.Duration
+	actions    []time.Time
+	mutex      sync.RWMutex
 }
 
 // ActionExecutor interface for executing actions
@@ -267,12 +267,12 @@ type SafetyValidator interface {
 
 // SafetyAssessment represents a safety assessment for an action
 type SafetyAssessment struct {
-	SafetyScore       float64           `json:"safety_score"`
-	RiskLevel         string            `json:"risk_level"`
-	SafetyChecks      map[string]bool   `json:"safety_checks"`
-	Warnings          []string          `json:"warnings"`
-	BlockingIssues    []string          `json:"blocking_issues"`
-	Recommendations   []string          `json:"recommendations"`
+	SafetyScore     float64         `json:"safety_score"`
+	RiskLevel       string          `json:"risk_level"`
+	SafetyChecks    map[string]bool `json:"safety_checks"`
+	Warnings        []string        `json:"warnings"`
+	BlockingIssues  []string        `json:"blocking_issues"`
+	Recommendations []string        `json:"recommendations"`
 }
 
 // NewAutoFixEngine creates a new auto-fix engine
@@ -280,7 +280,7 @@ func NewAutoFixEngine(config *AutoFixConfig, executor ActionExecutor, validator 
 	if config == nil {
 		config = DefaultAutoFixConfig()
 	}
-	
+
 	engine := &AutoFixEngine{
 		config:           config,
 		actionExecutor:   executor,
@@ -293,37 +293,37 @@ func NewAutoFixEngine(config *AutoFixConfig, executor ActionExecutor, validator 
 		circuitBreaker:   NewCircuitBreaker(config.CircuitBreakerThreshold, config.CircuitBreakerWindow, config.CircuitBreakerRecovery),
 		rateLimiter:      NewRateLimiter(config.MaxActionsPerHour, time.Hour),
 	}
-	
+
 	// Register default auto-fix actions
 	engine.registerDefaultActions()
-	
+
 	return engine
 }
 
 // DefaultAutoFixConfig returns default auto-fix configuration
 func DefaultAutoFixConfig() *AutoFixConfig {
 	return &AutoFixConfig{
-		EnableAutoFix:             true,
-		RequireHumanApproval:      false,
-		MaxActionsPerHour:         10,
-		MaxActionsPerPattern:      3,
-		MinPatternConfidence:      0.85,
-		MinActionConfidence:       0.8,
-		SafetyScoreThreshold:      0.7,
-		ActionTimeout:             5 * time.Minute,
-		DryRunEnabled:             true,
-		RollbackEnabled:           true,
-		RollbackTimeout:           2 * time.Minute,
-		EnableMemoryLeakFixes:     true,
-		EnableNetworkFixes:        true,
-		EnableStorageFixes:        true,
-		EnableRuntimeFixes:        true,
-		EnableDependencyFixes:     true,
-		AuditLogging:              true,
-		ComplianceMode:            "moderate",
-		CircuitBreakerThreshold:   5,
-		CircuitBreakerWindow:      10 * time.Minute,
-		CircuitBreakerRecovery:    30 * time.Minute,
+		EnableAutoFix:           true,
+		RequireHumanApproval:    false,
+		MaxActionsPerHour:       10,
+		MaxActionsPerPattern:    3,
+		MinPatternConfidence:    0.85,
+		MinActionConfidence:     0.8,
+		SafetyScoreThreshold:    0.7,
+		ActionTimeout:           5 * time.Minute,
+		DryRunEnabled:           true,
+		RollbackEnabled:         true,
+		RollbackTimeout:         2 * time.Minute,
+		EnableMemoryLeakFixes:   true,
+		EnableNetworkFixes:      true,
+		EnableStorageFixes:      true,
+		EnableRuntimeFixes:      true,
+		EnableDependencyFixes:   true,
+		AuditLogging:            true,
+		ComplianceMode:          "moderate",
+		CircuitBreakerThreshold: 5,
+		CircuitBreakerWindow:    10 * time.Minute,
+		CircuitBreakerRecovery:  30 * time.Minute,
 	}
 }
 
@@ -348,7 +348,7 @@ func (afe *AutoFixEngine) registerDefaultActions() {
 		RiskLevel:         "medium",
 		Execute:           afe.executeKubectlAction,
 	})
-	
+
 	afe.registerAction(AutoFixAction{
 		ID:                "increase_memory_limit",
 		Name:              "Increase Memory Limit",
@@ -368,7 +368,7 @@ func (afe *AutoFixEngine) registerDefaultActions() {
 		RiskLevel:         "low",
 		Execute:           afe.executeKubectlAction,
 	})
-	
+
 	// Network failure fixes
 	afe.registerAction(AutoFixAction{
 		ID:                "restart_network_pod",
@@ -388,7 +388,7 @@ func (afe *AutoFixEngine) registerDefaultActions() {
 		RiskLevel:         "medium",
 		Execute:           afe.executeKubectlAction,
 	})
-	
+
 	afe.registerAction(AutoFixAction{
 		ID:                "scale_up_deployment",
 		Name:              "Scale Up Deployment",
@@ -408,7 +408,7 @@ func (afe *AutoFixEngine) registerDefaultActions() {
 		RiskLevel:         "low",
 		Execute:           afe.executeKubectlAction,
 	})
-	
+
 	// Storage fixes
 	afe.registerAction(AutoFixAction{
 		ID:                "cleanup_disk_space",
@@ -428,7 +428,7 @@ func (afe *AutoFixEngine) registerDefaultActions() {
 		RiskLevel:         "medium",
 		Execute:           afe.executeScriptAction,
 	})
-	
+
 	// Container runtime fixes
 	afe.registerAction(AutoFixAction{
 		ID:                "restart_kubelet",
@@ -451,38 +451,38 @@ func (afe *AutoFixEngine) registerDefaultActions() {
 }
 
 // ProcessPatternResult processes a pattern result and determines if auto-fix should be triggered
-func (afe *AutoFixEngine) ProcessPatternResult(ctx context.Context, result *patterns.PatternResult) (*AutoFixExecution, error) {
+func (afe *AutoFixEngine) ProcessPatternResult(ctx context.Context, result *types.PatternResult) (*AutoFixExecution, error) {
 	if !afe.config.EnableAutoFix || !result.Detected {
 		return nil, nil
 	}
-	
+
 	// Check pattern confidence
 	if result.Confidence < afe.config.MinPatternConfidence {
 		return nil, fmt.Errorf("pattern confidence %.2f below threshold %.2f", result.Confidence, afe.config.MinPatternConfidence)
 	}
-	
+
 	// Check circuit breaker
 	if !afe.circuitBreaker.AllowRequest() {
 		return nil, fmt.Errorf("circuit breaker is open, rejecting auto-fix request")
 	}
-	
+
 	// Check rate limiting
 	if !afe.rateLimiter.AllowRequest() {
 		return nil, fmt.Errorf("rate limit exceeded, rejecting auto-fix request")
 	}
-	
+
 	// Find suitable auto-fix actions
 	actions := afe.findActionsForPattern(result)
 	if len(actions) == 0 {
 		return nil, fmt.Errorf("no auto-fix actions available for pattern %s", result.PatternID)
 	}
-	
+
 	// Select best action based on safety and confidence
 	selectedAction, err := afe.selectBestAction(actions, result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select action: %w", err)
 	}
-	
+
 	// Create auto-fix request
 	request := &AutoFixRequest{
 		ID:               fmt.Sprintf("autofix-%d", time.Now().UnixNano()),
@@ -498,12 +498,12 @@ func (afe *AutoFixEngine) ProcessPatternResult(ctx context.Context, result *patt
 		Deadline:         time.Now().Add(10 * time.Minute),
 		ApprovalStatus:   "pending",
 	}
-	
+
 	// Execute or queue for approval
 	if request.RequiresApproval {
 		return afe.queueForApproval(request)
 	}
-	
+
 	return afe.executeAutoFix(ctx, request)
 }
 
@@ -518,7 +518,7 @@ func (afe *AutoFixEngine) executeAutoFix(ctx context.Context, request *AutoFixRe
 		PatternConfidence: request.PatternResult.Confidence,
 		AuditEvents:       []*AuditEvent{},
 	}
-	
+
 	// Add audit event
 	execution.AuditEvents = append(execution.AuditEvents, &AuditEvent{
 		EventType:   "execution_started",
@@ -526,34 +526,34 @@ func (afe *AutoFixEngine) executeAutoFix(ctx context.Context, request *AutoFixRe
 		Description: fmt.Sprintf("Started auto-fix execution for pattern %s", request.PatternResult.PatternID),
 		Actor:       "autofix-engine",
 		Details: map[string]string{
-			"pattern_id":   request.PatternResult.PatternID,
-			"action_id":    request.ActionID,
-			"confidence":   fmt.Sprintf("%.2f", request.PatternResult.Confidence),
+			"pattern_id": request.PatternResult.PatternID,
+			"action_id":  request.ActionID,
+			"confidence": fmt.Sprintf("%.2f", request.PatternResult.Confidence),
 		},
 	})
-	
+
 	// Get action
 	action, exists := afe.getAction(request.ActionID)
 	if !exists {
 		return nil, fmt.Errorf("action %s not found", request.ActionID)
 	}
-	
+
 	// Validate safety
 	safetyAssessment, err := afe.safetyValidator.ValidateSafety(&action, request)
 	if err != nil {
 		return nil, fmt.Errorf("safety validation failed: %w", err)
 	}
-	
+
 	if safetyAssessment.SafetyScore < afe.config.SafetyScoreThreshold {
 		return nil, fmt.Errorf("safety score %.2f below threshold %.2f", safetyAssessment.SafetyScore, afe.config.SafetyScoreThreshold)
 	}
-	
+
 	// Execute action with timeout
 	execution.StartedAt = time.Now()
-	
+
 	actionCtx, cancel := context.WithTimeout(ctx, afe.config.ActionTimeout)
 	defer cancel()
-	
+
 	result, err := afe.actionExecutor.Execute(actionCtx, &action, request)
 	if err != nil {
 		afe.circuitBreaker.RecordFailure()
@@ -572,19 +572,19 @@ func (afe *AutoFixEngine) executeAutoFix(ctx context.Context, request *AutoFixRe
 		execution.Result = result
 		execution.Result.SafetyScore = safetyAssessment.SafetyScore
 	}
-	
+
 	execution.CompletedAt = time.Now()
-	
+
 	// Handle rollback if needed
 	if execution.Result.Status == "failed" && action.RollbackSupported && afe.config.RollbackEnabled {
 		afe.handleRollback(ctx, execution, &action)
 	}
-	
+
 	// Store execution in history
 	afe.historyMutex.Lock()
 	afe.executionHistory = append(afe.executionHistory, execution)
 	afe.historyMutex.Unlock()
-	
+
 	// Add final audit event
 	execution.AuditEvents = append(execution.AuditEvents, &AuditEvent{
 		EventType:   "execution_completed",
@@ -592,22 +592,22 @@ func (afe *AutoFixEngine) executeAutoFix(ctx context.Context, request *AutoFixRe
 		Description: fmt.Sprintf("Completed auto-fix execution with status: %s", execution.Result.Status),
 		Actor:       "autofix-engine",
 		Details: map[string]string{
-			"status":      execution.Result.Status,
-			"duration":    execution.Result.Duration.String(),
+			"status":       execution.Result.Status,
+			"duration":     execution.Result.Duration.String(),
 			"safety_score": fmt.Sprintf("%.2f", execution.Result.SafetyScore),
 		},
 	})
-	
+
 	return execution, nil
 }
 
 // findActionsForPattern finds suitable actions for a pattern
-func (afe *AutoFixEngine) findActionsForPattern(result *patterns.PatternResult) []AutoFixAction {
+func (afe *AutoFixEngine) findActionsForPattern(result *types.PatternResult) []AutoFixAction {
 	afe.actionMutex.RLock()
 	defer afe.actionMutex.RUnlock()
-	
+
 	var actions []AutoFixAction
-	
+
 	for _, action := range afe.actionRegistry {
 		for _, patternType := range action.PatternTypes {
 			if patternType == result.PatternID {
@@ -619,29 +619,29 @@ func (afe *AutoFixEngine) findActionsForPattern(result *patterns.PatternResult) 
 			}
 		}
 	}
-	
+
 	return actions
 }
 
 // selectBestAction selects the best action based on safety and confidence
-func (afe *AutoFixEngine) selectBestAction(actions []AutoFixAction, result *patterns.PatternResult) (AutoFixAction, error) {
+func (afe *AutoFixEngine) selectBestAction(actions []AutoFixAction, result *types.PatternResult) (AutoFixAction, error) {
 	if len(actions) == 0 {
 		return AutoFixAction{}, fmt.Errorf("no actions available")
 	}
-	
+
 	// Score actions based on safety, confidence, and effectiveness
 	type actionScore struct {
 		action AutoFixAction
 		score  float64
 	}
-	
+
 	var scoredActions []actionScore
-	
+
 	for _, action := range actions {
 		score := afe.calculateActionScore(action, result)
 		scoredActions = append(scoredActions, actionScore{action, score})
 	}
-	
+
 	// Sort by score (highest first)
 	for i := 0; i < len(scoredActions)-1; i++ {
 		for j := i + 1; j < len(scoredActions); j++ {
@@ -650,14 +650,14 @@ func (afe *AutoFixEngine) selectBestAction(actions []AutoFixAction, result *patt
 			}
 		}
 	}
-	
+
 	return scoredActions[0].action, nil
 }
 
 // calculateActionScore calculates a score for an action
-func (afe *AutoFixEngine) calculateActionScore(action AutoFixAction, result *patterns.PatternResult) float64 {
+func (afe *AutoFixEngine) calculateActionScore(action AutoFixAction, result *types.PatternResult) float64 {
 	score := 0.0
-	
+
 	// Safety component (higher is better)
 	switch action.SafetyLevel {
 	case "safe":
@@ -667,7 +667,7 @@ func (afe *AutoFixEngine) calculateActionScore(action AutoFixAction, result *pat
 	case "risky":
 		score += 0.1
 	}
-	
+
 	// Risk component (lower risk is better)
 	switch action.RiskLevel {
 	case "low":
@@ -677,22 +677,22 @@ func (afe *AutoFixEngine) calculateActionScore(action AutoFixAction, result *pat
 	case "high":
 		score += 0.1
 	}
-	
+
 	// Pattern confidence component
 	score += result.Confidence * 0.2
-	
+
 	// Rollback support component
 	if action.RollbackSupported {
 		score += 0.1
 	}
-	
+
 	return score
 }
 
 // extractParametersFromPattern extracts action parameters from pattern result
-func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, result *patterns.PatternResult) map[string]string {
+func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, result *types.PatternResult) map[string]string {
 	params := make(map[string]string)
-	
+
 	// Extract entity information
 	if len(result.AffectedEntities) > 0 {
 		entity := result.AffectedEntities[0]
@@ -701,18 +701,18 @@ func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, res
 		params["deployment_name"] = entity.Name
 		params["container_name"] = entity.Container
 	}
-	
+
 	// Extract pattern-specific parameters
 	switch result.PatternID {
 	case "memory_leak_oom_cascade":
 		// Calculate new memory limit based on current usage and growth pattern
 		if result.Metrics.MemoryPressure > 0 {
 			currentLimit := result.Metrics.MemoryPressure * 1000 // Simplified calculation
-			newLimit := currentLimit * 1.5 // Increase by 50%
+			newLimit := currentLimit * 1.5                       // Increase by 50%
 			params["new_memory_limit"] = fmt.Sprintf("%.0fMi", newLimit)
 			params["original_memory_limit"] = fmt.Sprintf("%.0fMi", currentLimit)
 		}
-		
+
 	case "network_failure_cascade", "service_dependency_failure":
 		// Calculate new replica count for scaling
 		if result.Impact.AffectedServices > 0 {
@@ -722,12 +722,12 @@ func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, res
 			params["original_replica_count"] = fmt.Sprintf("%d", currentReplicas)
 		}
 	}
-	
+
 	return params
 }
 
 // determinePriority determines the priority of an auto-fix request
-func (afe *AutoFixEngine) determinePriority(result *patterns.PatternResult) string {
+func (afe *AutoFixEngine) determinePriority(result *types.PatternResult) string {
 	switch result.Severity {
 	case "critical":
 		return "critical"
@@ -833,9 +833,9 @@ func NewCircuitBreaker(threshold int, window, recovery time.Duration) *CircuitBr
 func (cb *CircuitBreaker) AllowRequest() bool {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
-	
+
 	now := time.Now()
-	
+
 	// Clean old failures
 	cutoff := now.Add(-cb.window)
 	var validFailures []time.Time
@@ -845,7 +845,7 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 		}
 	}
 	cb.failures = validFailures
-	
+
 	switch cb.state {
 	case "closed":
 		return len(cb.failures) < cb.threshold
@@ -865,7 +865,7 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 func (cb *CircuitBreaker) RecordSuccess() {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
-	
+
 	if cb.state == "half-open" {
 		cb.state = "closed"
 		cb.failures = []time.Time{}
@@ -875,11 +875,11 @@ func (cb *CircuitBreaker) RecordSuccess() {
 func (cb *CircuitBreaker) RecordFailure() {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
-	
+
 	now := time.Now()
 	cb.failures = append(cb.failures, now)
 	cb.lastFailure = now
-	
+
 	if len(cb.failures) >= cb.threshold {
 		cb.state = "open"
 	}
@@ -897,10 +897,10 @@ func NewRateLimiter(maxActions int, window time.Duration) *RateLimiter {
 func (rl *RateLimiter) AllowRequest() bool {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	
+
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
-	
+
 	// Clean old actions
 	var validActions []time.Time
 	for _, action := range rl.actions {
@@ -909,12 +909,12 @@ func (rl *RateLimiter) AllowRequest() bool {
 		}
 	}
 	rl.actions = validActions
-	
+
 	if len(rl.actions) < rl.maxActions {
 		rl.actions = append(rl.actions, now)
 		return true
 	}
-	
+
 	return false
 }
 
@@ -930,7 +930,7 @@ func NewRollbackManager() *RollbackManager {
 func (afe *AutoFixEngine) GetExecutionHistory() []*AutoFixExecution {
 	afe.historyMutex.RLock()
 	defer afe.historyMutex.RUnlock()
-	
+
 	// Return a copy
 	history := make([]*AutoFixExecution, len(afe.executionHistory))
 	copy(history, afe.executionHistory)
@@ -941,7 +941,7 @@ func (afe *AutoFixEngine) GetExecutionHistory() []*AutoFixExecution {
 func (afe *AutoFixEngine) GetActionRegistry() map[string]AutoFixAction {
 	afe.actionMutex.RLock()
 	defer afe.actionMutex.RUnlock()
-	
+
 	// Return a copy
 	registry := make(map[string]AutoFixAction)
 	for k, v := range afe.actionRegistry {

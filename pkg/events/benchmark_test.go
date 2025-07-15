@@ -11,9 +11,9 @@ import (
 )
 
 // BenchmarkResults documents our performance targets and actuals:
-// 
+//
 // Target: <10µs per event for full enrichment
-// 
+//
 // Current Results (M1 Mac):
 // BenchmarkFullEnrichment-8          120000      9875 ns/op    4096 B/op    52 allocs/op
 // BenchmarkSemanticOnly-8            300000      4125 ns/op    1536 B/op    18 allocs/op
@@ -32,7 +32,7 @@ func BenchmarkFullEnrichment(b *testing.B) {
 	})
 
 	ctx := context.Background()
-	
+
 	// Pre-create events to avoid allocation in benchmark
 	events := make([]RawEvent, 1000)
 	for i := range events {
@@ -54,7 +54,7 @@ func BenchmarkFullEnrichment(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		event := events[i%len(events)]
-		
+
 		// Full enrichment pipeline
 		semantic, err := enricher.Enrich(ctx, event)
 		if err != nil {
@@ -82,7 +82,7 @@ func BenchmarkFullEnrichment(b *testing.B) {
 func BenchmarkSemanticEnrichmentAllocation(b *testing.B) {
 	enricher := NewSemanticEnricher()
 	ctx := context.Background()
-	
+
 	event := RawEvent{
 		Type:      "memory",
 		Source:    "kubelet",
@@ -194,7 +194,7 @@ func BenchmarkCorrelationSearch(b *testing.B) {
 
 func BenchmarkLSHIndexing(b *testing.B) {
 	lsh := newLSHIndex(128, 10)
-	
+
 	// Pre-create embeddings
 	embeddings := make([][]float32, 1000)
 	events := make([]*IndexedEvent, 1000)
@@ -218,7 +218,7 @@ func BenchmarkLSHIndexing(b *testing.B) {
 
 func BenchmarkLSHSearch(b *testing.B) {
 	lsh := newLSHIndex(128, 10)
-	
+
 	// Pre-populate
 	for i := 0; i < 10000; i++ {
 		embedding := generateTestEmbedding(128)
@@ -377,9 +377,9 @@ func createRichEvent() *opinionated.OpinionatedEvent {
 			BehaviorCluster:   "normal-workload",
 			BehaviorTrend:     "degrading",
 			ChangeIndicators: &opinionated.BehaviorChange{
-				Velocity:      0.15,
-				Acceleration:  0.05,
-				Jitter:        0.02,
+				Velocity:       0.15,
+				Acceleration:   0.05,
+				Jitter:         0.02,
 				Predictability: 0.7,
 			},
 		},
@@ -418,7 +418,7 @@ func createRichEvent() *opinionated.OpinionatedEvent {
 					StdDev: 5.2,
 					Max:    95.0,
 				},
-				Trend_1H: 0.15,
+				Trend_1H:  0.15,
 				Trend_24H: 0.08,
 			},
 		},
@@ -465,7 +465,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 func BenchmarkConcurrentEnrichment(b *testing.B) {
 	enricher := NewSemanticEnricher()
 	ctx := context.Background()
-	
+
 	event := RawEvent{
 		Type:   "memory",
 		Entity: "pod/concurrent-test",

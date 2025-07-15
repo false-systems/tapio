@@ -82,216 +82,216 @@ func (c EmergencyCondition) String() string {
 
 // EmergencyProtocolManager handles emergency situations and automatic responses
 type EmergencyProtocolManager struct {
-	config                *EmergencyConfig
-	
+	config *EmergencyConfig
+
 	// Current emergency state
-	currentLevel          int32          // atomic: EmergencyLevel
-	activeEmergencies     map[EmergencyCondition]*ActiveEmergency
-	emergencyMutex        sync.RWMutex
-	
+	currentLevel      int32 // atomic: EmergencyLevel
+	activeEmergencies map[EmergencyCondition]*ActiveEmergency
+	emergencyMutex    sync.RWMutex
+
 	// Protocol registry
-	protocols             map[EmergencyCondition][]*EmergencyProtocol
-	protocolMutex         sync.RWMutex
-	
+	protocols     map[EmergencyCondition][]*EmergencyProtocol
+	protocolMutex sync.RWMutex
+
 	// Monitoring and detection
-	monitors              map[EmergencyCondition]*EmergencyMonitor
-	monitorsMutex         sync.RWMutex
-	
+	monitors      map[EmergencyCondition]*EmergencyMonitor
+	monitorsMutex sync.RWMutex
+
 	// Emergency response execution
-	executionQueue        chan *EmergencyExecution
-	executorWorkers       []*EmergencyExecutor
-	
+	executionQueue  chan *EmergencyExecution
+	executorWorkers []*EmergencyExecutor
+
 	// Integration points
-	healthChecker         *HealthChecker
-	degradationManager    *DegradationManager
-	circuitBreakers       map[string]*CircuitBreaker
-	
+	healthChecker      *HealthChecker
+	degradationManager *DegradationManager
+	circuitBreakers    map[string]*CircuitBreaker
+
 	// Metrics and logging
-	metrics               *EmergencyMetrics
-	
+	metrics *EmergencyMetrics
+
 	// State management
-	running               bool
-	stopChan              chan struct{}
+	running  bool
+	stopChan chan struct{}
 }
 
 // EmergencyConfig configures emergency protocol behavior
 type EmergencyConfig struct {
 	// Detection settings
-	MonitoringInterval       time.Duration               `json:"monitoring_interval"`
-	DetectionSensitivity     float64                     `json:"detection_sensitivity"`     // 0.0-1.0
-	
+	MonitoringInterval   time.Duration `json:"monitoring_interval"`
+	DetectionSensitivity float64       `json:"detection_sensitivity"` // 0.0-1.0
+
 	// Thresholds for emergency conditions
-	CPUThreshold            float64                     `json:"cpu_threshold"`             // 0.0-1.0
-	MemoryThreshold         float64                     `json:"memory_threshold"`          // 0.0-1.0
-	DiskThreshold           float64                     `json:"disk_threshold"`            // 0.0-1.0
-	ErrorRateThreshold      float64                     `json:"error_rate_threshold"`      // 0.0-1.0
-	ResponseTimeThreshold   time.Duration               `json:"response_time_threshold"`
-	ThroughputDropThreshold float64                     `json:"throughput_drop_threshold"` // 0.0-1.0
-	
+	CPUThreshold            float64       `json:"cpu_threshold"`        // 0.0-1.0
+	MemoryThreshold         float64       `json:"memory_threshold"`     // 0.0-1.0
+	DiskThreshold           float64       `json:"disk_threshold"`       // 0.0-1.0
+	ErrorRateThreshold      float64       `json:"error_rate_threshold"` // 0.0-1.0
+	ResponseTimeThreshold   time.Duration `json:"response_time_threshold"`
+	ThroughputDropThreshold float64       `json:"throughput_drop_threshold"` // 0.0-1.0
+
 	// Emergency response settings
-	EnableAutomaticResponse bool                        `json:"enable_automatic_response"`
-	MaxConcurrentResponses  int                         `json:"max_concurrent_responses"`
-	ResponseTimeout         time.Duration               `json:"response_timeout"`
-	CooldownPeriod          time.Duration               `json:"cooldown_period"`
-	
+	EnableAutomaticResponse bool          `json:"enable_automatic_response"`
+	MaxConcurrentResponses  int           `json:"max_concurrent_responses"`
+	ResponseTimeout         time.Duration `json:"response_timeout"`
+	CooldownPeriod          time.Duration `json:"cooldown_period"`
+
 	// Load shedding configuration
-	LoadSheddingEnabled     bool                        `json:"load_shedding_enabled"`
-	LoadSheddingThresholds  map[string]float64          `json:"load_shedding_thresholds"`
-	
+	LoadSheddingEnabled    bool               `json:"load_shedding_enabled"`
+	LoadSheddingThresholds map[string]float64 `json:"load_shedding_thresholds"`
+
 	// Emergency contacts and notifications
-	NotificationChannels    []string                    `json:"notification_channels"`
-	EscalationThresholds    map[EmergencyLevel]time.Duration `json:"escalation_thresholds"`
-	
+	NotificationChannels []string                         `json:"notification_channels"`
+	EscalationThresholds map[EmergencyLevel]time.Duration `json:"escalation_thresholds"`
+
 	// Safety settings
-	RequireApproval         []EmergencyCondition        `json:"require_approval"`
-	DryRunMode              bool                        `json:"dry_run_mode"`
-	SafetyLimits            map[string]interface{}      `json:"safety_limits"`
+	RequireApproval []EmergencyCondition   `json:"require_approval"`
+	DryRunMode      bool                   `json:"dry_run_mode"`
+	SafetyLimits    map[string]interface{} `json:"safety_limits"`
 }
 
 // EmergencyProtocol defines a response protocol for emergency conditions
 type EmergencyProtocol struct {
-	ID                 string             `json:"id"`
-	Name               string             `json:"name"`
-	Description        string             `json:"description"`
-	Condition          EmergencyCondition `json:"condition"`
-	TriggerLevel       EmergencyLevel     `json:"trigger_level"`
-	
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	Condition    EmergencyCondition `json:"condition"`
+	TriggerLevel EmergencyLevel     `json:"trigger_level"`
+
 	// Execution settings
-	Priority           int                `json:"priority"`           // 1-10, 1 = highest
-	RequiresApproval   bool               `json:"requires_approval"`
-	MaxRetries         int                `json:"max_retries"`
-	RetryDelay         time.Duration      `json:"retry_delay"`
-	Timeout            time.Duration      `json:"timeout"`
-	
+	Priority         int           `json:"priority"` // 1-10, 1 = highest
+	RequiresApproval bool          `json:"requires_approval"`
+	MaxRetries       int           `json:"max_retries"`
+	RetryDelay       time.Duration `json:"retry_delay"`
+	Timeout          time.Duration `json:"timeout"`
+
 	// Actions to perform
-	Actions            []EmergencyAction  `json:"actions"`
-	RollbackActions    []EmergencyAction  `json:"rollback_actions"`
-	
+	Actions         []EmergencyAction `json:"actions"`
+	RollbackActions []EmergencyAction `json:"rollback_actions"`
+
 	// Validation and safety
-	PreConditions      []string           `json:"pre_conditions"`
-	PostValidations    []string           `json:"post_validations"`
-	SafetyChecks       []string           `json:"safety_checks"`
-	
+	PreConditions   []string `json:"pre_conditions"`
+	PostValidations []string `json:"post_validations"`
+	SafetyChecks    []string `json:"safety_checks"`
+
 	// Impact assessment
-	ExpectedImpact     string             `json:"expected_impact"`
-	RiskLevel          string             `json:"risk_level"`        // "low", "medium", "high"
-	
+	ExpectedImpact string `json:"expected_impact"`
+	RiskLevel      string `json:"risk_level"` // "low", "medium", "high"
+
 	// Metadata
-	CreatedAt          time.Time          `json:"created_at"`
-	UpdatedAt          time.Time          `json:"updated_at"`
-	Version            int                `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Version   int       `json:"version"`
 }
 
 // EmergencyAction defines a specific action to take during an emergency
 type EmergencyAction struct {
-	Type         string                 `json:"type"`          // "load_shedding", "scale_down", "circuit_breaker", etc.
-	Parameters   map[string]interface{} `json:"parameters"`
+	Type         string                                              `json:"type"` // "load_shedding", "scale_down", "circuit_breaker", etc.
+	Parameters   map[string]interface{}                              `json:"parameters"`
 	ExecuteFunc  func(context.Context, map[string]interface{}) error `json:"-"`
-	ValidateFunc func(map[string]interface{}) error                   `json:"-"`
+	ValidateFunc func(map[string]interface{}) error                  `json:"-"`
 }
 
 // ActiveEmergency represents an ongoing emergency situation
 type ActiveEmergency struct {
-	Condition      EmergencyCondition  `json:"condition"`
-	Level          EmergencyLevel      `json:"level"`
-	StartTime      time.Time           `json:"start_time"`
-	LastUpdate     time.Time           `json:"last_update"`
-	TriggerValue   float64             `json:"trigger_value"`
-	CurrentValue   float64             `json:"current_value"`
-	
+	Condition    EmergencyCondition `json:"condition"`
+	Level        EmergencyLevel     `json:"level"`
+	StartTime    time.Time          `json:"start_time"`
+	LastUpdate   time.Time          `json:"last_update"`
+	TriggerValue float64            `json:"trigger_value"`
+	CurrentValue float64            `json:"current_value"`
+
 	// Response tracking
-	ResponsesTriggered []string         `json:"responses_triggered"`
-	LastResponse       time.Time        `json:"last_response"`
-	ResponseCount      int              `json:"response_count"`
-	
+	ResponsesTriggered []string  `json:"responses_triggered"`
+	LastResponse       time.Time `json:"last_response"`
+	ResponseCount      int       `json:"response_count"`
+
 	// Status
-	Status         string              `json:"status"`        // "detected", "responding", "recovering", "resolved"
-	Escalated      bool                `json:"escalated"`
-	
+	Status    string `json:"status"` // "detected", "responding", "recovering", "resolved"
+	Escalated bool   `json:"escalated"`
+
 	// Context
-	Context        map[string]interface{} `json:"context"`
-	Metadata       map[string]string      `json:"metadata"`
+	Context  map[string]interface{} `json:"context"`
+	Metadata map[string]string      `json:"metadata"`
 }
 
 // EmergencyMonitor monitors specific conditions and triggers emergency protocols
 type EmergencyMonitor struct {
-	Condition         EmergencyCondition `json:"condition"`
-	MonitorFunc       func() float64     `json:"-"`
-	Threshold         float64            `json:"threshold"`
-	CurrentValue      float64            `json:"current_value"`
-	LastCheck         time.Time          `json:"last_check"`
-	
+	Condition    EmergencyCondition `json:"condition"`
+	MonitorFunc  func() float64     `json:"-"`
+	Threshold    float64            `json:"threshold"`
+	CurrentValue float64            `json:"current_value"`
+	LastCheck    time.Time          `json:"last_check"`
+
 	// Trend analysis
-	ValueHistory      []float64          `json:"-"`
-	TrendDirection    string             `json:"trend_direction"`  // "rising", "falling", "stable"
-	
+	ValueHistory   []float64 `json:"-"`
+	TrendDirection string    `json:"trend_direction"` // "rising", "falling", "stable"
+
 	// Alert settings
-	Enabled           bool               `json:"enabled"`
-	CooldownPeriod    time.Duration      `json:"cooldown_period"`
-	LastAlert         time.Time          `json:"last_alert"`
+	Enabled        bool          `json:"enabled"`
+	CooldownPeriod time.Duration `json:"cooldown_period"`
+	LastAlert      time.Time     `json:"last_alert"`
 }
 
 // EmergencyExecution represents an emergency protocol execution
 type EmergencyExecution struct {
-	ID               string             `json:"id"`
-	ProtocolID       string             `json:"protocol_id"`
-	Condition        EmergencyCondition `json:"condition"`
-	Level            EmergencyLevel     `json:"level"`
-	
+	ID         string             `json:"id"`
+	ProtocolID string             `json:"protocol_id"`
+	Condition  EmergencyCondition `json:"condition"`
+	Level      EmergencyLevel     `json:"level"`
+
 	// Execution details
-	StartTime        time.Time          `json:"start_time"`
-	EndTime          time.Time          `json:"end_time"`
-	Duration         time.Duration      `json:"duration"`
-	Status           string             `json:"status"`        // "pending", "executing", "success", "failed", "timeout"
-	
+	StartTime time.Time     `json:"start_time"`
+	EndTime   time.Time     `json:"end_time"`
+	Duration  time.Duration `json:"duration"`
+	Status    string        `json:"status"` // "pending", "executing", "success", "failed", "timeout"
+
 	// Results
-	ActionsExecuted  []string           `json:"actions_executed"`
-	ActionsSuccess   []string           `json:"actions_success"`
-	ActionsFailed    []string           `json:"actions_failed"`
-	ErrorMessage     string             `json:"error_message,omitempty"`
-	
+	ActionsExecuted []string `json:"actions_executed"`
+	ActionsSuccess  []string `json:"actions_success"`
+	ActionsFailed   []string `json:"actions_failed"`
+	ErrorMessage    string   `json:"error_message,omitempty"`
+
 	// Impact
-	ImpactAssessment string             `json:"impact_assessment"`
-	SideEffects      []string           `json:"side_effects"`
-	
+	ImpactAssessment string   `json:"impact_assessment"`
+	SideEffects      []string `json:"side_effects"`
+
 	// Context
-	TriggerValue     float64            `json:"trigger_value"`
-	Context          map[string]interface{} `json:"context"`
+	TriggerValue float64                `json:"trigger_value"`
+	Context      map[string]interface{} `json:"context"`
 }
 
 // EmergencyExecutor executes emergency protocols
 type EmergencyExecutor struct {
-	ID            string
-	Manager       *EmergencyProtocolManager
-	Running       bool
-	CurrentTask   *EmergencyExecution
-	TaskQueue     chan *EmergencyExecution
-	StopChan      chan struct{}
+	ID          string
+	Manager     *EmergencyProtocolManager
+	Running     bool
+	CurrentTask *EmergencyExecution
+	TaskQueue   chan *EmergencyExecution
+	StopChan    chan struct{}
 }
 
 // EmergencyMetrics tracks emergency protocol performance
 type EmergencyMetrics struct {
 	// Detection metrics
-	EmergenciesDetected      uint64                              `json:"emergencies_detected"`
-	FalsePositives          uint64                              `json:"false_positives"`
-	DetectionTime           map[EmergencyCondition]time.Duration `json:"detection_time"`
-	
+	EmergenciesDetected uint64                               `json:"emergencies_detected"`
+	FalsePositives      uint64                               `json:"false_positives"`
+	DetectionTime       map[EmergencyCondition]time.Duration `json:"detection_time"`
+
 	// Response metrics
-	ProtocolsExecuted       uint64                              `json:"protocols_executed"`
-	SuccessfulResponses     uint64                              `json:"successful_responses"`
-	FailedResponses         uint64                              `json:"failed_responses"`
-	AverageResponseTime     time.Duration                       `json:"average_response_time"`
-	
+	ProtocolsExecuted   uint64        `json:"protocols_executed"`
+	SuccessfulResponses uint64        `json:"successful_responses"`
+	FailedResponses     uint64        `json:"failed_responses"`
+	AverageResponseTime time.Duration `json:"average_response_time"`
+
 	// Impact metrics
-	SystemStabilized        uint64                              `json:"system_stabilized"`
-	EmergenciesEscalated    uint64                              `json:"emergencies_escalated"`
-	AverageRecoveryTime     time.Duration                       `json:"average_recovery_time"`
-	
+	SystemStabilized     uint64        `json:"system_stabilized"`
+	EmergenciesEscalated uint64        `json:"emergencies_escalated"`
+	AverageRecoveryTime  time.Duration `json:"average_recovery_time"`
+
 	// Condition-specific metrics
-	ConditionFrequency      map[EmergencyCondition]uint64       `json:"condition_frequency"`
-	ConditionSuccessRate    map[EmergencyCondition]float64      `json:"condition_success_rate"`
-	
-	LastUpdated             time.Time                           `json:"last_updated"`
+	ConditionFrequency   map[EmergencyCondition]uint64  `json:"condition_frequency"`
+	ConditionSuccessRate map[EmergencyCondition]float64 `json:"condition_success_rate"`
+
+	LastUpdated time.Time `json:"last_updated"`
 }
 
 // NewEmergencyProtocolManager creates a new emergency protocol manager
@@ -299,23 +299,23 @@ func NewEmergencyProtocolManager(config *EmergencyConfig) *EmergencyProtocolMana
 	if config == nil {
 		config = DefaultEmergencyConfig()
 	}
-	
+
 	epm := &EmergencyProtocolManager{
-		config:              config,
-		activeEmergencies:   make(map[EmergencyCondition]*ActiveEmergency),
-		protocols:           make(map[EmergencyCondition][]*EmergencyProtocol),
-		monitors:            make(map[EmergencyCondition]*EmergencyMonitor),
-		executionQueue:      make(chan *EmergencyExecution, 100),
-		executorWorkers:     make([]*EmergencyExecutor, config.MaxConcurrentResponses),
-		circuitBreakers:     make(map[string]*CircuitBreaker),
-		metrics:             &EmergencyMetrics{
-			DetectionTime:       make(map[EmergencyCondition]time.Duration),
-			ConditionFrequency:  make(map[EmergencyCondition]uint64),
+		config:            config,
+		activeEmergencies: make(map[EmergencyCondition]*ActiveEmergency),
+		protocols:         make(map[EmergencyCondition][]*EmergencyProtocol),
+		monitors:          make(map[EmergencyCondition]*EmergencyMonitor),
+		executionQueue:    make(chan *EmergencyExecution, 100),
+		executorWorkers:   make([]*EmergencyExecutor, config.MaxConcurrentResponses),
+		circuitBreakers:   make(map[string]*CircuitBreaker),
+		metrics: &EmergencyMetrics{
+			DetectionTime:        make(map[EmergencyCondition]time.Duration),
+			ConditionFrequency:   make(map[EmergencyCondition]uint64),
 			ConditionSuccessRate: make(map[EmergencyCondition]float64),
 		},
-		stopChan:            make(chan struct{}),
+		stopChan: make(chan struct{}),
 	}
-	
+
 	// Initialize executor workers
 	for i := 0; i < config.MaxConcurrentResponses; i++ {
 		epm.executorWorkers[i] = &EmergencyExecutor{
@@ -325,19 +325,19 @@ func NewEmergencyProtocolManager(config *EmergencyConfig) *EmergencyProtocolMana
 			StopChan:  make(chan struct{}),
 		}
 	}
-	
+
 	// Register default protocols and monitors
 	epm.registerDefaultProtocols()
 	epm.registerDefaultMonitors()
-	
+
 	return epm
 }
 
 // DefaultEmergencyConfig returns default emergency configuration
 func DefaultEmergencyConfig() *EmergencyConfig {
 	return &EmergencyConfig{
-		MonitoringInterval:       1 * time.Second,
-		DetectionSensitivity:     0.8,
+		MonitoringInterval:      1 * time.Second,
+		DetectionSensitivity:    0.8,
 		CPUThreshold:            0.9,
 		MemoryThreshold:         0.85,
 		DiskThreshold:           0.95,
@@ -362,7 +362,7 @@ func DefaultEmergencyConfig() *EmergencyConfig {
 			EmergencyCritical: 30 * time.Second,
 		},
 		RequireApproval: []EmergencyCondition{},
-		DryRunMode:     false,
+		DryRunMode:      false,
 		SafetyLimits: map[string]interface{}{
 			"max_restarts_per_hour": 5,
 			"max_scale_down_ratio":  0.5,
@@ -373,18 +373,18 @@ func DefaultEmergencyConfig() *EmergencyConfig {
 // Start starts the emergency protocol manager
 func (epm *EmergencyProtocolManager) Start(ctx context.Context) error {
 	epm.running = true
-	
+
 	// Start monitoring loop
 	go epm.monitoringLoop(ctx)
-	
+
 	// Start executor workers
 	for _, worker := range epm.executorWorkers {
 		go worker.Start(ctx)
 	}
-	
+
 	// Start execution dispatcher
 	go epm.executionDispatcher(ctx)
-	
+
 	return nil
 }
 
@@ -392,12 +392,12 @@ func (epm *EmergencyProtocolManager) Start(ctx context.Context) error {
 func (epm *EmergencyProtocolManager) Stop() error {
 	epm.running = false
 	close(epm.stopChan)
-	
+
 	// Stop executor workers
 	for _, worker := range epm.executorWorkers {
 		worker.Stop()
 	}
-	
+
 	return nil
 }
 
@@ -426,9 +426,9 @@ func (epm *EmergencyProtocolManager) registerDefaultProtocols() {
 			},
 		},
 		ExpectedImpact: "Reduced processing of low-priority requests",
-		RiskLevel:     "low",
+		RiskLevel:      "low",
 	})
-	
+
 	// Memory Pressure Protocol
 	epm.RegisterProtocol(&EmergencyProtocol{
 		ID:               "memory_pressure_gc_force",
@@ -458,9 +458,9 @@ func (epm *EmergencyProtocolManager) registerDefaultProtocols() {
 			},
 		},
 		ExpectedImpact: "Temporary performance impact during GC",
-		RiskLevel:     "low",
+		RiskLevel:      "low",
 	})
-	
+
 	// High Error Rate Protocol
 	epm.RegisterProtocol(&EmergencyProtocol{
 		ID:               "high_error_rate_circuit_break",
@@ -483,9 +483,9 @@ func (epm *EmergencyProtocolManager) registerDefaultProtocols() {
 			},
 		},
 		ExpectedImpact: "Prevent cascade failures by isolating failing components",
-		RiskLevel:     "medium",
+		RiskLevel:      "medium",
 	})
-	
+
 	// Response Time Spike Protocol
 	epm.RegisterProtocol(&EmergencyProtocol{
 		ID:               "response_time_spike_degradation",
@@ -508,7 +508,7 @@ func (epm *EmergencyProtocolManager) registerDefaultProtocols() {
 			},
 		},
 		ExpectedImpact: "Reduced feature availability to improve performance",
-		RiskLevel:     "low",
+		RiskLevel:      "low",
 	})
 }
 
@@ -523,7 +523,7 @@ func (epm *EmergencyProtocolManager) registerDefaultMonitors() {
 		CooldownPeriod: 30 * time.Second,
 		ValueHistory:   make([]float64, 0, 60), // 1 minute of history
 	})
-	
+
 	// Memory Monitor
 	epm.RegisterMonitor(&EmergencyMonitor{
 		Condition:      ConditionMemoryPressure,
@@ -533,7 +533,7 @@ func (epm *EmergencyProtocolManager) registerDefaultMonitors() {
 		CooldownPeriod: 30 * time.Second,
 		ValueHistory:   make([]float64, 0, 60),
 	})
-	
+
 	// Error Rate Monitor
 	epm.RegisterMonitor(&EmergencyMonitor{
 		Condition:      ConditionHighErrorRate,
@@ -543,7 +543,7 @@ func (epm *EmergencyProtocolManager) registerDefaultMonitors() {
 		CooldownPeriod: 1 * time.Minute,
 		ValueHistory:   make([]float64, 0, 60),
 	})
-	
+
 	// Response Time Monitor
 	epm.RegisterMonitor(&EmergencyMonitor{
 		Condition:      ConditionResponseTimeSpike,
@@ -559,16 +559,16 @@ func (epm *EmergencyProtocolManager) registerDefaultMonitors() {
 func (epm *EmergencyProtocolManager) RegisterProtocol(protocol *EmergencyProtocol) {
 	epm.protocolMutex.Lock()
 	defer epm.protocolMutex.Unlock()
-	
+
 	protocol.CreatedAt = time.Now()
 	protocol.UpdatedAt = time.Now()
-	
+
 	if epm.protocols[protocol.Condition] == nil {
 		epm.protocols[protocol.Condition] = make([]*EmergencyProtocol, 0)
 	}
-	
+
 	epm.protocols[protocol.Condition] = append(epm.protocols[protocol.Condition], protocol)
-	
+
 	// Sort by priority (lower number = higher priority)
 	protocols := epm.protocols[protocol.Condition]
 	for i := 0; i < len(protocols)-1; i++ {
@@ -591,7 +591,7 @@ func (epm *EmergencyProtocolManager) RegisterMonitor(monitor *EmergencyMonitor) 
 func (epm *EmergencyProtocolManager) monitoringLoop(ctx context.Context) {
 	ticker := time.NewTicker(epm.config.MonitoringInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -614,7 +614,7 @@ func (epm *EmergencyProtocolManager) checkAllConditions() {
 		}
 	}
 	epm.monitorsMutex.RUnlock()
-	
+
 	for _, monitor := range monitors {
 		epm.checkCondition(monitor)
 	}
@@ -626,21 +626,21 @@ func (epm *EmergencyProtocolManager) checkCondition(monitor *EmergencyMonitor) {
 	if time.Since(monitor.LastAlert) < monitor.CooldownPeriod {
 		return
 	}
-	
+
 	// Get current value
 	currentValue := monitor.MonitorFunc()
 	monitor.CurrentValue = currentValue
 	monitor.LastCheck = time.Now()
-	
+
 	// Update value history
 	monitor.ValueHistory = append(monitor.ValueHistory, currentValue)
 	if len(monitor.ValueHistory) > 60 {
 		monitor.ValueHistory = monitor.ValueHistory[1:]
 	}
-	
+
 	// Analyze trend
 	monitor.TrendDirection = epm.analyzeTrend(monitor.ValueHistory)
-	
+
 	// Check if threshold is exceeded
 	if currentValue > monitor.Threshold {
 		epm.triggerEmergency(monitor.Condition, currentValue, monitor.Threshold)
@@ -654,7 +654,7 @@ func (epm *EmergencyProtocolManager) checkCondition(monitor *EmergencyMonitor) {
 func (epm *EmergencyProtocolManager) triggerEmergency(condition EmergencyCondition, currentValue, threshold float64) {
 	epm.emergencyMutex.Lock()
 	defer epm.emergencyMutex.Unlock()
-	
+
 	// Check if emergency already active
 	if existing, exists := epm.activeEmergencies[condition]; exists {
 		// Update existing emergency
@@ -663,28 +663,33 @@ func (epm *EmergencyProtocolManager) triggerEmergency(condition EmergencyConditi
 		existing.Level = epm.calculateEmergencyLevel(currentValue, threshold)
 		return
 	}
-	
+
 	// Create new emergency
 	level := epm.calculateEmergencyLevel(currentValue, threshold)
 	emergency := &ActiveEmergency{
-		Condition:      condition,
-		Level:          level,
-		StartTime:      time.Now(),
-		LastUpdate:     time.Now(),
-		TriggerValue:   threshold,
-		CurrentValue:   currentValue,
-		Status:         "detected",
-		Context:        make(map[string]interface{}),
-		Metadata:       make(map[string]string),
+		Condition:    condition,
+		Level:        level,
+		StartTime:    time.Now(),
+		LastUpdate:   time.Now(),
+		TriggerValue: threshold,
+		CurrentValue: currentValue,
+		Status:       "detected",
+		Context:      make(map[string]interface{}),
+		Metadata:     make(map[string]string),
 	}
-	
+
 	epm.activeEmergencies[condition] = emergency
 	atomic.AddUint64(&epm.metrics.EmergenciesDetected, 1)
-	atomic.AddUint64(&epm.metrics.ConditionFrequency[condition], 1)
-	
+	// Increment condition frequency
+	if count, exists := epm.metrics.ConditionFrequency[condition]; exists {
+		epm.metrics.ConditionFrequency[condition] = count + 1
+	} else {
+		epm.metrics.ConditionFrequency[condition] = 1
+	}
+
 	// Update current emergency level
 	epm.updateOverallEmergencyLevel()
-	
+
 	// Trigger appropriate protocols
 	if epm.config.EnableAutomaticResponse {
 		epm.executeProtocolsForCondition(condition, level)
@@ -695,12 +700,12 @@ func (epm *EmergencyProtocolManager) triggerEmergency(condition EmergencyConditi
 func (epm *EmergencyProtocolManager) resolveEmergency(condition EmergencyCondition) {
 	epm.emergencyMutex.Lock()
 	defer epm.emergencyMutex.Unlock()
-	
+
 	if emergency, exists := epm.activeEmergencies[condition]; exists {
 		emergency.Status = "resolved"
 		delete(epm.activeEmergencies, condition)
 		atomic.AddUint64(&epm.metrics.SystemStabilized, 1)
-		
+
 		// Update overall emergency level
 		epm.updateOverallEmergencyLevel()
 	}
@@ -709,7 +714,7 @@ func (epm *EmergencyProtocolManager) resolveEmergency(condition EmergencyConditi
 // calculateEmergencyLevel calculates emergency level based on severity
 func (epm *EmergencyProtocolManager) calculateEmergencyLevel(currentValue, threshold float64) EmergencyLevel {
 	ratio := currentValue / threshold
-	
+
 	if ratio >= 2.0 {
 		return EmergencyCritical
 	} else if ratio >= 1.5 {
@@ -724,13 +729,13 @@ func (epm *EmergencyProtocolManager) calculateEmergencyLevel(currentValue, thres
 // updateOverallEmergencyLevel updates the overall emergency level
 func (epm *EmergencyProtocolManager) updateOverallEmergencyLevel() {
 	maxLevel := EmergencyNone
-	
+
 	for _, emergency := range epm.activeEmergencies {
 		if emergency.Level > maxLevel {
 			maxLevel = emergency.Level
 		}
 	}
-	
+
 	atomic.StoreInt32(&epm.currentLevel, int32(maxLevel))
 }
 
@@ -739,26 +744,26 @@ func (epm *EmergencyProtocolManager) executeProtocolsForCondition(condition Emer
 	epm.protocolMutex.RLock()
 	protocols := epm.protocols[condition]
 	epm.protocolMutex.RUnlock()
-	
+
 	for _, protocol := range protocols {
 		if protocol.TriggerLevel <= level {
 			execution := &EmergencyExecution{
-				ID:           fmt.Sprintf("exec-%d", time.Now().UnixNano()),
-				ProtocolID:   protocol.ID,
-				Condition:    condition,
-				Level:        level,
-				StartTime:    time.Now(),
-				Status:       "pending",
-				Context:      make(map[string]interface{}),
+				ID:         fmt.Sprintf("exec-%d", time.Now().UnixNano()),
+				ProtocolID: protocol.ID,
+				Condition:  condition,
+				Level:      level,
+				StartTime:  time.Now(),
+				Status:     "pending",
+				Context:    make(map[string]interface{}),
 			}
-			
+
 			// Queue for execution
 			select {
 			case epm.executionQueue <- execution:
 			default:
 				// Queue full, skip this execution
 			}
-			
+
 			break // Execute only the highest priority protocol
 		}
 	}
@@ -790,7 +795,7 @@ func (epm *EmergencyProtocolManager) dispatchToWorker(execution *EmergencyExecut
 			}
 		}
 	}
-	
+
 	// All workers busy, queue will handle backpressure
 }
 
@@ -808,7 +813,7 @@ func (epm *EmergencyProtocolManager) monitorCPUUsage() float64 {
 func (epm *EmergencyProtocolManager) monitorMemoryUsage() float64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	// Calculate memory pressure
 	if m.Sys == 0 {
 		return 0.0
@@ -835,9 +840,9 @@ func (epm *EmergencyProtocolManager) analyzeTrend(values []float64) string {
 	if len(values) < 3 {
 		return "stable"
 	}
-	
+
 	recent := values[len(values)-3:]
-	
+
 	if recent[2] > recent[1] && recent[1] > recent[0] {
 		return "rising"
 	} else if recent[2] < recent[1] && recent[1] < recent[0] {
@@ -899,7 +904,7 @@ func (epm *EmergencyProtocolManager) executeEnableDegradation(ctx context.Contex
 // Start starts an emergency executor worker
 func (ee *EmergencyExecutor) Start(ctx context.Context) {
 	ee.Running = true
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -922,10 +927,10 @@ func (ee *EmergencyExecutor) Stop() {
 func (ee *EmergencyExecutor) executeEmergencyProtocol(ctx context.Context, execution *EmergencyExecution) {
 	ee.CurrentTask = execution
 	defer func() { ee.CurrentTask = nil }()
-	
+
 	execution.Status = "executing"
 	execution.StartTime = time.Now()
-	
+
 	// Get protocol
 	ee.Manager.protocolMutex.RLock()
 	protocols := ee.Manager.protocols[execution.Condition]
@@ -937,7 +942,7 @@ func (ee *EmergencyExecutor) executeEmergencyProtocol(ctx context.Context, execu
 		}
 	}
 	ee.Manager.protocolMutex.RUnlock()
-	
+
 	if protocol == nil {
 		execution.Status = "failed"
 		execution.ErrorMessage = "Protocol not found"
@@ -945,11 +950,11 @@ func (ee *EmergencyExecutor) executeEmergencyProtocol(ctx context.Context, execu
 		execution.Duration = execution.EndTime.Sub(execution.StartTime)
 		return
 	}
-	
+
 	// Execute actions
 	executionCtx, cancel := context.WithTimeout(ctx, protocol.Timeout)
 	defer cancel()
-	
+
 	for _, action := range protocol.Actions {
 		if action.ExecuteFunc != nil {
 			err := action.ExecuteFunc(executionCtx, action.Parameters)
@@ -962,10 +967,10 @@ func (ee *EmergencyExecutor) executeEmergencyProtocol(ctx context.Context, execu
 			execution.ActionsExecuted = append(execution.ActionsExecuted, action.Type)
 		}
 	}
-	
+
 	execution.EndTime = time.Now()
 	execution.Duration = execution.EndTime.Sub(execution.StartTime)
-	
+
 	if len(execution.ActionsFailed) == 0 {
 		execution.Status = "success"
 		atomic.AddUint64(&ee.Manager.metrics.SuccessfulResponses, 1)
@@ -973,7 +978,7 @@ func (ee *EmergencyExecutor) executeEmergencyProtocol(ctx context.Context, execu
 		execution.Status = "failed"
 		atomic.AddUint64(&ee.Manager.metrics.FailedResponses, 1)
 	}
-	
+
 	atomic.AddUint64(&ee.Manager.metrics.ProtocolsExecuted, 1)
 }
 
@@ -986,7 +991,7 @@ func (epm *EmergencyProtocolManager) GetCurrentEmergencyLevel() EmergencyLevel {
 func (epm *EmergencyProtocolManager) GetActiveEmergencies() map[EmergencyCondition]*ActiveEmergency {
 	epm.emergencyMutex.RLock()
 	defer epm.emergencyMutex.RUnlock()
-	
+
 	// Return a copy
 	result := make(map[EmergencyCondition]*ActiveEmergency)
 	for k, v := range epm.activeEmergencies {

@@ -9,17 +9,16 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
-	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // CorrelationEngine provides OPINIONATED correlation capabilities
 // designed to make AI-powered correlation trivial.
 type CorrelationEngine struct {
 	// Correlation indexes
-	temporalIndex  *TemporalIndex
-	spatialIndex   *SpatialIndex
-	causalIndex    *CausalIndex
-	semanticIndex  *SemanticIndex
+	temporalIndex *TemporalIndex
+	spatialIndex  *SpatialIndex
+	causalIndex   *CausalIndex
+	semanticIndex *SemanticIndex
 
 	// Graph builder
 	graphBuilder *CorrelationGraphBuilder
@@ -42,7 +41,7 @@ type TemporalIndex struct {
 	windows []TimeWindow
 
 	// Temporal patterns
-	patterns map[string]*TemporalPattern
+	patterns map[string]*opinionated.TemporalPattern
 }
 
 // TimeBucket holds events in a time range
@@ -287,9 +286,9 @@ func (ce *CorrelationEngine) IndexEvent(ctx context.Context, event *opinionated.
 	// Create indexed event
 	indexed := &IndexedEvent{
 		Event:     event,
-		Timestamp: event.Timestamp.AsTime().UnixNano(),
-		Vectors:   event.Correlation.Vectors,
-		Groups:    extractGroups(event.Correlation.Groups),
+		Timestamp: event.Timestamp.UnixNano(),
+		Vectors:   &event.Correlation.Vectors[0], // Take first vector
+		Groups:    extractGroupIDs(event.Correlation.Groups),
 	}
 
 	// Index temporally
@@ -411,11 +410,11 @@ type CorrelationGraph struct {
 
 // GraphStats contains graph statistics
 type GraphStats struct {
-	NodeCount          int
-	EdgeCount          int
+	NodeCount           int
+	EdgeCount           int
 	ConnectedComponents int
-	AverageDegree      float32
-	Density            float32
+	AverageDegree       float32
+	Density             float32
 }
 
 // Helper functions
@@ -503,7 +502,7 @@ func (ti *TemporalIndex) FindCorrelated(event *opinionated.OpinionatedEvent, win
 	defer ti.mu.RUnlock()
 
 	correlations := make([]*Correlation, 0)
-	eventTime := event.Timestamp.AsTime().UnixNano()
+	eventTime := event.Timestamp.UnixNano()
 	windowNs := int64(window)
 
 	// Find buckets in time window
@@ -514,7 +513,7 @@ func (ti *TemporalIndex) FindCorrelated(event *opinionated.OpinionatedEvent, win
 		if b, exists := ti.buckets[bucket]; exists {
 			b.mu.RLock()
 			for _, e := range b.Events {
-				if e.Event.Id == event.Id {
+				if e.Event.ID == event.ID {
 					continue // Skip self
 				}
 
@@ -581,7 +580,7 @@ func (si *SpatialIndex) FindCorrelated(event *opinionated.OpinionatedEvent, dept
 	if bucket, exists := si.entities[entity]; exists {
 		bucket.mu.RLock()
 		for _, e := range bucket.Events {
-			if e.Event.Id == event.Id {
+			if e.Event.ID == event.ID {
 				continue
 			}
 
@@ -611,11 +610,11 @@ func (ci *CausalIndex) Index(event *IndexedEvent) error {
 		for _, link := range event.Event.Correlation.CausalLinks {
 			// Update cause-effect mappings
 			if link.Relationship == "causes" {
-				ci.causes[event.Event.Id] = append(ci.causes[event.Event.Id], link.EventId)
-				ci.effects[link.EventId] = append(ci.effects[link.EventId], event.Event.Id)
+				ci.causes[event.Event.ID] = append(ci.causes[event.Event.ID], link.TargetEvent)
+				ci.effects[link.TargetEvent] = append(ci.effects[link.TargetEvent], event.Event.ID)
 			} else if link.Relationship == "caused_by" {
-				ci.effects[event.Event.Id] = append(ci.effects[event.Event.Id], link.EventId)
-				ci.causes[link.EventId] = append(ci.causes[link.EventId], event.Event.Id)
+				ci.effects[event.Event.ID] = append(ci.effects[event.Event.ID], link.TargetEvent)
+				ci.causes[link.TargetEvent] = append(ci.causes[link.TargetEvent], event.Event.ID)
 			}
 		}
 	}
@@ -626,7 +625,7 @@ func (ci *CausalIndex) Index(event *IndexedEvent) error {
 		for _, pred := range predictions {
 			if pred.Probability > model.Threshold {
 				// Store predicted causal relationship
-				ci.causes[event.Event.Id] = append(ci.causes[event.Event.Id], pred.Effect)
+				ci.causes[event.Event.ID] = append(ci.causes[event.Event.ID], pred.Effect)
 			}
 		}
 	}
@@ -642,7 +641,7 @@ func (ci *CausalIndex) FindCorrelated(event *opinionated.OpinionatedEvent, depth
 	visited := make(map[string]bool)
 
 	// Find direct causes
-	if causes, exists := ci.causes[event.Id]; exists {
+	if causes, exists := ci.causes[event.ID]; exists {
 		for _, causeId := range causes {
 			if !visited[causeId] {
 				visited[causeId] = true
@@ -659,7 +658,7 @@ func (ci *CausalIndex) FindCorrelated(event *opinionated.OpinionatedEvent, depth
 	}
 
 	// Find direct effects
-	if effects, exists := ci.effects[event.Id]; exists {
+	if effects, exists := ci.effects[event.ID]; exists {
 		for _, effectId := range effects {
 			if !visited[effectId] {
 				visited[effectId] = true
@@ -697,7 +696,7 @@ func (si *SemanticIndex) Index(event *IndexedEvent) error {
 	// Update clusters (simplified k-means)
 	closestCluster := si.findClosestCluster(embedding)
 	if closestCluster != nil {
-		closestCluster.Events = append(closestCluster.Events, event.Event.Id)
+		closestCluster.Events = append(closestCluster.Events, event.Event.ID)
 		// Update centroid (simplified)
 	}
 
@@ -735,17 +734,25 @@ func (si *SemanticIndex) FindCorrelated(event *opinionated.OpinionatedEvent, thr
 
 // Helper functions
 
+func extractGroupIDs(groups []opinionated.CorrelationGroup) []string {
+	result := make([]string, len(groups))
+	for i, group := range groups {
+		result[i] = group.ID
+	}
+	return result
+}
+
 func extractGroups(groups []*opinionated.CorrelationGroup) []string {
 	result := make([]string, len(groups))
 	for i, g := range groups {
-		result[i] = g.Id
+		result[i] = g.ID
 	}
 	return result
 }
 
 func extractEntity(event *opinionated.OpinionatedEvent) string {
 	if event.Behavioral != nil && event.Behavioral.Entity != nil {
-		return event.Behavioral.Entity.Id
+		return event.Behavioral.Entity.ID
 	}
 	return ""
 }
@@ -785,19 +792,21 @@ func cosineSimilarity(a, b []float32) float32 {
 
 // Pattern builders
 
-func buildTemporalPatterns() map[string]*TemporalPattern {
-	return map[string]*TemporalPattern{
+func buildTemporalPatterns() map[string]*opinionated.TemporalPattern {
+	return map[string]*opinionated.TemporalPattern{
 		"cascade": {
+			ID:          "cascade",
 			Name:        "cascade",
 			Description: "Cascading failures",
-			Confidence:  0,
-			Phase:       0,
+			Confidence:  0.8,
+			Window:      time.Minute * 5,
 		},
 		"periodic": {
+			ID:          "periodic",
 			Name:        "periodic",
 			Description: "Periodic events",
-			Confidence:  0,
-			Phase:       0,
+			Confidence:  0.7,
+			Window:      time.Hour,
 		},
 	}
 }
@@ -863,9 +872,9 @@ func buildPatternModels() map[string]PatternModel {
 
 func buildGraphAlgorithms() map[string]GraphAlgorithm {
 	return map[string]GraphAlgorithm{
-		"pagerank":             &PageRankAlgorithm{},
-		"community_detection":  &CommunityDetectionAlgorithm{},
-		"anomaly_subgraph":     &AnomalySubgraphAlgorithm{},
+		"pagerank":            &PageRankAlgorithm{},
+		"community_detection": &CommunityDetectionAlgorithm{},
+		"anomaly_subgraph":    &AnomalySubgraphAlgorithm{},
 	}
 }
 
@@ -944,7 +953,7 @@ func (lsh *LSHIndex) FindSimilar(embedding []float32, k int) []*IndexedEvent {
 		hash := hashFunc(embedding)
 		if bucket, exists := lsh.buckets[hash]; exists {
 			for _, event := range bucket {
-				candidates[event.Event.Id] = event
+				candidates[event.Event.ID] = event
 			}
 		}
 	}
@@ -1087,7 +1096,7 @@ func (a *AnomalySubgraphAlgorithm) Analyze(nodes map[string]*GraphNode, edges ma
 	// Find anomalous subgraphs
 	anomalies := make([]string, 0)
 	for id, node := range nodes {
-		if node.Event.Event.Anomaly != nil && node.Event.Event.Anomaly.AnomalyScore > 0.8 {
+		if node.Event.Event.Anomaly != nil && node.Event.Event.Anomaly.Score > 0.8 {
 			anomalies = append(anomalies, id)
 		}
 	}
@@ -1099,7 +1108,7 @@ func (a *AnomalySubgraphAlgorithm) Analyze(nodes map[string]*GraphNode, edges ma
 func extractEventIDs(events []*IndexedEvent) []string {
 	ids := make([]string, len(events))
 	for i, e := range events {
-		ids[i] = e.Event.Id
+		ids[i] = e.Event.ID
 	}
 	return ids
 }
@@ -1117,8 +1126,8 @@ func (ce *CorrelationEngine) mergeAndRank(correlations []*Correlation) []*Correl
 		if corr.Event == nil {
 			continue
 		}
-		
-		id := corr.Event.Id
+
+		id := corr.Event.ID
 		if existing, exists := merged[id]; exists {
 			// Keep highest scoring correlation
 			if corr.Score > existing.Score {
@@ -1144,7 +1153,7 @@ func (ce *CorrelationEngine) mergeAndRank(correlations []*Correlation) []*Correl
 
 func (gb *CorrelationGraphBuilder) AddNode(event *IndexedEvent) {
 	node := &GraphNode{
-		ID:    event.Event.Id,
+		ID:    event.Event.ID,
 		Event: event,
 		Attributes: map[string]interface{}{
 			"timestamp": event.Timestamp,
@@ -1161,20 +1170,20 @@ func (gb *CorrelationGraphBuilder) BuildGraph(event *opinionated.OpinionatedEven
 	}
 
 	// Add central event
-	if central, exists := gb.nodes[event.Id]; exists {
-		graph.Nodes[event.Id] = central
+	if central, exists := gb.nodes[event.ID]; exists {
+		graph.Nodes[event.ID] = central
 	}
 
 	// Add correlated events and edges
 	for _, corr := range correlations {
 		if corr.Event != nil {
-			if node, exists := gb.nodes[corr.Event.Id]; exists {
-				graph.Nodes[corr.Event.Id] = node
+			if node, exists := gb.nodes[corr.Event.ID]; exists {
+				graph.Nodes[corr.Event.ID] = node
 
 				// Add edge
 				edge := &GraphEdge{
-					From:   event.Id,
-					To:     corr.Event.Id,
+					From:   event.ID,
+					To:     corr.Event.ID,
 					Type:   corr.Type,
 					Weight: corr.Score,
 					Attributes: map[string]interface{}{
@@ -1189,11 +1198,11 @@ func (gb *CorrelationGraphBuilder) BuildGraph(event *opinionated.OpinionatedEven
 
 	// Calculate stats
 	graph.Stats = &GraphStats{
-		NodeCount:          len(graph.Nodes),
-		EdgeCount:          len(graph.Edges),
+		NodeCount:           len(graph.Nodes),
+		EdgeCount:           len(graph.Edges),
 		ConnectedComponents: 1, // Simplified
-		AverageDegree:      float32(2 * len(graph.Edges)) / float32(len(graph.Nodes)),
-		Density:            float32(2*len(graph.Edges)) / float32(len(graph.Nodes)*(len(graph.Nodes)-1)),
+		AverageDegree:       float32(2*len(graph.Edges)) / float32(len(graph.Nodes)),
+		Density:             float32(2*len(graph.Edges)) / float32(len(graph.Nodes)*(len(graph.Nodes)-1)),
 	}
 
 	return graph
@@ -1205,8 +1214,8 @@ func (pd *PatternDetector) DetectInCorrelations(correlations []*Correlation) []*
 	eventMap := make(map[string]bool)
 
 	for _, corr := range correlations {
-		if corr.Event != nil && !eventMap[corr.Event.Id] {
-			eventMap[corr.Event.Id] = true
+		if corr.Event != nil && !eventMap[corr.Event.ID] {
+			eventMap[corr.Event.ID] = true
 			// Would retrieve full indexed event in production
 		}
 	}

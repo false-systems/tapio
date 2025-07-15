@@ -7,20 +7,20 @@ import (
 	"sort"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // NetworkFailureCascadeDetector implements detection of network failure cascade patterns
 // Detects when network issues in one component cause failures to propagate through the system
 type NetworkFailureCascadeDetector struct {
-	config    PatternConfig
-	analyzer  *StatisticalAnalyzer
-	
+	config   types.PatternConfig
+	analyzer *StatisticalAnalyzer
+
 	// Performance tracking
-	accuracy    float64
+	accuracy          float64
 	falsePositiveRate float64
-	latency     time.Duration
-	
+	latency           time.Duration
+
 	// Network topology learning
 	topologyMap map[string]*NetworkNode
 	connections map[string][]*NetworkConnection
@@ -28,82 +28,82 @@ type NetworkFailureCascadeDetector struct {
 
 // NetworkNode represents a node in the network topology
 type NetworkNode struct {
-	EntityUID         string    `json:"entity_uid"`
-	NodeType          string    `json:"node_type"`          // "pod", "service", "node", "external"
-	BaselineLatency   float64   `json:"baseline_latency"`   // milliseconds
-	BaselineThroughput float64  `json:"baseline_throughput"` // bytes/second
-	ErrorRate         float64   `json:"error_rate"`         // 0.0 to 1.0
-	LastSeen          time.Time `json:"last_seen"`
-	
+	EntityUID          string    `json:"entity_uid"`
+	NodeType           string    `json:"node_type"`           // "pod", "service", "node", "external"
+	BaselineLatency    float64   `json:"baseline_latency"`    // milliseconds
+	BaselineThroughput float64   `json:"baseline_throughput"` // bytes/second
+	ErrorRate          float64   `json:"error_rate"`          // 0.0 to 1.0
+	LastSeen           time.Time `json:"last_seen"`
+
 	// Failure patterns
-	RecentFailures    []time.Time `json:"recent_failures"`
-	FailureTypes      map[string]int `json:"failure_types"`   // timeout, connection_refused, etc.
-	
+	RecentFailures []time.Time    `json:"recent_failures"`
+	FailureTypes   map[string]int `json:"failure_types"` // timeout, connection_refused, etc.
+
 	// Network metrics baselines
-	PacketLossRate    float64   `json:"packet_loss_rate"`
-	JitterMean        float64   `json:"jitter_mean"`
-	JitterStdDev      float64   `json:"jitter_stddev"`
-	BandwidthUsage    float64   `json:"bandwidth_usage"`    // 0.0 to 1.0
+	PacketLossRate float64 `json:"packet_loss_rate"`
+	JitterMean     float64 `json:"jitter_mean"`
+	JitterStdDev   float64 `json:"jitter_stddev"`
+	BandwidthUsage float64 `json:"bandwidth_usage"` // 0.0 to 1.0
 }
 
 // NetworkConnection represents a connection between two nodes
 type NetworkConnection struct {
-	SourceUID         string    `json:"source_uid"`
-	TargetUID         string    `json:"target_uid"`
-	ConnectionType    string    `json:"connection_type"`    // "tcp", "udp", "grpc", "http"
-	Port              int       `json:"port"`
-	
+	SourceUID      string `json:"source_uid"`
+	TargetUID      string `json:"target_uid"`
+	ConnectionType string `json:"connection_type"` // "tcp", "udp", "grpc", "http"
+	Port           int    `json:"port"`
+
 	// Connection health metrics
-	LatencyP50        float64   `json:"latency_p50"`
-	LatencyP95        float64   `json:"latency_p95"`
-	LatencyP99        float64   `json:"latency_p99"`
-	ThroughputMean    float64   `json:"throughput_mean"`
-	ErrorRate         float64   `json:"error_rate"`
-	
+	LatencyP50     float64 `json:"latency_p50"`
+	LatencyP95     float64 `json:"latency_p95"`
+	LatencyP99     float64 `json:"latency_p99"`
+	ThroughputMean float64 `json:"throughput_mean"`
+	ErrorRate      float64 `json:"error_rate"`
+
 	// Failure propagation metrics
-	PropagationDelay  time.Duration `json:"propagation_delay"`
-	FailureCorrelation float64      `json:"failure_correlation"` // 0.0 to 1.0
-	
-	LastHealthCheck   time.Time `json:"last_health_check"`
+	PropagationDelay   time.Duration `json:"propagation_delay"`
+	FailureCorrelation float64       `json:"failure_correlation"` // 0.0 to 1.0
+
+	LastHealthCheck time.Time `json:"last_health_check"`
 }
 
 // NetworkFailureStage represents different stages of network failure progression
 type NetworkFailureStage string
 
 const (
-	NetworkFailureStageLatency     NetworkFailureStage = "latency"      // Increased latency detected
-	NetworkFailureStageThroughput  NetworkFailureStage = "throughput"   // Reduced throughput
-	NetworkFailureStageErrors      NetworkFailureStage = "errors"       // Error rate increase
-	NetworkFailureStageCascade     NetworkFailureStage = "cascade"      // Failure propagation
-	NetworkFailureStageIsolation   NetworkFailureStage = "isolation"    // Node isolation/partition
+	NetworkFailureStageLatency    NetworkFailureStage = "latency"    // Increased latency detected
+	NetworkFailureStageThroughput NetworkFailureStage = "throughput" // Reduced throughput
+	NetworkFailureStageErrors     NetworkFailureStage = "errors"     // Error rate increase
+	NetworkFailureStageCascade    NetworkFailureStage = "cascade"    // Failure propagation
+	NetworkFailureStageIsolation  NetworkFailureStage = "isolation"  // Node isolation/partition
 )
 
 // NewNetworkFailureCascadeDetector creates a new network failure cascade detector
 func NewNetworkFailureCascadeDetector() *NetworkFailureCascadeDetector {
 	config := DefaultPatternConfig()
-	
+
 	// Network failure specific thresholds
 	config.Thresholds = map[string]float64{
-		"latency_increase_threshold":    2.0,   // 2x baseline latency
-		"throughput_decrease_threshold": 0.5,   // 50% throughput reduction
-		"error_rate_threshold":          0.05,  // 5% error rate
-		"packet_loss_threshold":         0.01,  // 1% packet loss
-		"jitter_zscore_threshold":       3.0,   // 3 standard deviations
-		"cascade_correlation_min":       0.7,   // Minimum correlation for cascade
-		"propagation_max_delay":         30.0,  // 30 seconds max propagation
-		"isolation_threshold":           0.9,   // 90% connection failure for isolation
+		"latency_increase_threshold":    2.0,  // 2x baseline latency
+		"throughput_decrease_threshold": 0.5,  // 50% throughput reduction
+		"error_rate_threshold":          0.05, // 5% error rate
+		"packet_loss_threshold":         0.01, // 1% packet loss
+		"jitter_zscore_threshold":       3.0,  // 3 standard deviations
+		"cascade_correlation_min":       0.7,  // Minimum correlation for cascade
+		"propagation_max_delay":         30.0, // 30 seconds max propagation
+		"isolation_threshold":           0.9,  // 90% connection failure for isolation
 	}
-	
+
 	config.LookbackWindow = 10 * time.Minute     // Look back 10 minutes for analysis
 	config.PredictionWindow = 5 * time.Minute    // Predict 5 minutes ahead
 	config.MinPatternDuration = 30 * time.Second // Minimum 30 seconds of issues
-	
+
 	return &NetworkFailureCascadeDetector{
-		config:           config,
-		analyzer:         &StatisticalAnalyzer{},
-		topologyMap:      make(map[string]*NetworkNode),
-		connections:      make(map[string][]*NetworkConnection),
-		accuracy:         0.89, // Target >87% accuracy
+		config:            config,
+		analyzer:          &StatisticalAnalyzer{},
+		topologyMap:       make(map[string]*NetworkNode),
+		connections:       make(map[string][]*NetworkConnection),
+		accuracy:          0.89,  // Target >87% accuracy
 		falsePositiveRate: 0.042, // Target <5% false positives
 	}
 }
@@ -124,18 +124,18 @@ func (nfcd *NetworkFailureCascadeDetector) Description() string {
 }
 
 // Category returns the pattern category
-func (nfcd *NetworkFailureCascadeDetector) Category() correlation.Category {
-	return correlation.CategoryNetwork
+func (nfcd *NetworkFailureCascadeDetector) Category() types.Category {
+	return types.CategoryNetwork
 }
 
 // Configure updates the detector configuration
-func (nfcd *NetworkFailureCascadeDetector) Configure(config PatternConfig) error {
+func (nfcd *NetworkFailureCascadeDetector) Configure(config types.PatternConfig) error {
 	nfcd.config = config
 	return nil
 }
 
 // GetConfig returns the current configuration
-func (nfcd *NetworkFailureCascadeDetector) GetConfig() PatternConfig {
+func (nfcd *NetworkFailureCascadeDetector) GetConfig() types.PatternConfig {
 	return nfcd.config
 }
 
@@ -155,128 +155,128 @@ func (nfcd *NetworkFailureCascadeDetector) GetLatency() time.Duration {
 }
 
 // Detect analyzes events and metrics for network failure cascade patterns
-func (nfcd *NetworkFailureCascadeDetector) Detect(ctx context.Context, events []correlation.Event, metrics map[string]correlation.MetricSeries) (*PatternResult, error) {
+func (nfcd *NetworkFailureCascadeDetector) Detect(ctx context.Context, events []types.Event, metrics map[string]types.MetricSeries) (*types.PatternResult, error) {
 	start := time.Now()
 	defer func() {
 		nfcd.latency = time.Since(start)
 	}()
-	
+
 	// Filter network-related events
 	networkEvents := nfcd.filterNetworkEvents(events)
 	if len(networkEvents) < 2 {
-		return &PatternResult{
+		return &types.PatternResult{
 			PatternID:   nfcd.ID(),
 			PatternName: nfcd.Name(),
 			Detected:    false,
 			Confidence:  0.0,
 		}, nil
 	}
-	
+
 	// Update network topology from events and metrics
 	nfcd.updateNetworkTopology(networkEvents, metrics)
-	
+
 	// Detect network anomalies
 	anomalies := nfcd.detectNetworkAnomalies(networkEvents, metrics)
 	if len(anomalies) == 0 {
-		return &PatternResult{
+		return &types.PatternResult{
 			PatternID:   nfcd.ID(),
 			PatternName: nfcd.Name(),
 			Detected:    false,
 			Confidence:  0.0,
 		}, nil
 	}
-	
+
 	// Analyze failure propagation
 	cascadeAnalysis := nfcd.analyzeCascadePattern(anomalies, networkEvents)
 	if cascadeAnalysis.CascadeStrength < nfcd.config.Thresholds["cascade_correlation_min"] {
-		return &PatternResult{
+		return &types.PatternResult{
 			PatternID:   nfcd.ID(),
 			PatternName: nfcd.Name(),
 			Detected:    false,
 			Confidence:  cascadeAnalysis.CascadeStrength,
 		}, nil
 	}
-	
+
 	// Build causality chain
 	causalChain := nfcd.buildCausalityChain(cascadeAnalysis, anomalies)
-	
+
 	// Generate predictions
 	predictions := nfcd.generateNetworkPredictions(cascadeAnalysis, networkEvents)
-	
+
 	// Assess impact
 	impact := nfcd.assessNetworkImpact(cascadeAnalysis, anomalies)
-	
+
 	// Generate remediation actions
 	remediation := nfcd.generateRemediationActions(cascadeAnalysis, anomalies)
-	
+
 	// Calculate overall confidence
 	confidence := nfcd.calculateConfidence(cascadeAnalysis, anomalies)
-	
-	result := &PatternResult{
-		PatternID:      nfcd.ID(),
-		PatternName:    nfcd.Name(),
-		Detected:       true,
-		Confidence:     confidence,
-		Severity:       nfcd.determineSeverity(cascadeAnalysis, impact),
-		StartTime:      cascadeAnalysis.StartTime,
-		EndTime:        cascadeAnalysis.EndTime,
-		Duration:       cascadeAnalysis.Duration,
-		RootCause:      cascadeAnalysis.RootCause,
-		CausalChain:    causalChain,
+
+	result := &types.PatternResult{
+		PatternID:        nfcd.ID(),
+		PatternName:      nfcd.Name(),
+		Detected:         true,
+		Confidence:       confidence,
+		Severity:         nfcd.determineSeverity(cascadeAnalysis, impact),
+		StartTime:        cascadeAnalysis.StartTime,
+		EndTime:          cascadeAnalysis.EndTime,
+		Duration:         cascadeAnalysis.Duration,
+		RootCause:        cascadeAnalysis.RootCause,
+		CausalChain:      convertCausalityChain(causalChain),
 		AffectedEntities: nfcd.extractAffectedEntities(anomalies),
-		Metrics:        nfcd.buildPatternMetrics(cascadeAnalysis, anomalies),
-		Predictions:    predictions,
-		Impact:         impact,
-		Remediation:    remediation,
-		DetectionTime:  time.Now(),
-		ProcessingTime: time.Since(start),
-		DataQuality:    nfcd.assessDataQuality(networkEvents, metrics),
-		ModelAccuracy:  nfcd.accuracy,
+		Metrics:          nfcd.buildPatternMetrics(cascadeAnalysis, anomalies),
+		Predictions:      convertPredictionsArray(predictions),
+		Impact:           impact,
+		Remediation:      convertRemediationActions(remediation),
+		DetectedAt:       time.Now(),
+		ProcessingTime:   time.Since(start),
+		DataQuality:      nfcd.assessDataQuality(networkEvents, metrics),
+		ModelAccuracy:    nfcd.accuracy,
 	}
-	
+
 	return result, nil
 }
 
 // filterNetworkEvents extracts network-related events
-func (nfcd *NetworkFailureCascadeDetector) filterNetworkEvents(events []correlation.Event) []correlation.Event {
-	var networkEvents []correlation.Event
-	
+func (nfcd *NetworkFailureCascadeDetector) filterNetworkEvents(events []types.Event) []types.Event {
+	var networkEvents []types.Event
+
 	for _, event := range events {
 		// Filter by event types that indicate network issues
 		if nfcd.isNetworkEvent(event) {
 			networkEvents = append(networkEvents, event)
 		}
 	}
-	
+
 	// Sort by timestamp
 	sort.Slice(networkEvents, func(i, j int) bool {
 		return networkEvents[i].Timestamp.Before(networkEvents[j].Timestamp)
 	})
-	
+
 	return networkEvents
 }
 
 // isNetworkEvent determines if an event is network-related
-func (nfcd *NetworkFailureCascadeDetector) isNetworkEvent(event correlation.Event) bool {
+func (nfcd *NetworkFailureCascadeDetector) isNetworkEvent(event types.Event) bool {
 	networkEventTypes := map[string]bool{
 		"connection_timeout":    true,
 		"connection_refused":    true,
 		"dns_resolution_failed": true,
 		"network_unreachable":   true,
-		"packet_loss":          true,
-		"high_latency":         true,
-		"bandwidth_limit":      true,
-		"service_unavailable":  true,
-		"gateway_timeout":      true,
-		"circuit_breaker_open": true,
-		"load_balancer_error":  true,
-		"proxy_error":          true,
+		"packet_loss":           true,
+		"high_latency":          true,
+		"bandwidth_limit":       true,
+		"service_unavailable":   true,
+		"gateway_timeout":       true,
+		"circuit_breaker_open":  true,
+		"load_balancer_error":   true,
+		"proxy_error":           true,
 	}
-	
+
 	if networkEventTypes[event.Type] {
 		return true
 	}
-	
+
 	// Check for network-related attributes
 	if event.Attributes != nil {
 		if _, hasNetworkError := event.Attributes["network_error"]; hasNetworkError {
@@ -296,79 +296,79 @@ func (nfcd *NetworkFailureCascadeDetector) isNetworkEvent(event correlation.Even
 			}
 		}
 	}
-	
+
 	return false
 }
 
 // NetworkAnomaly represents a detected network anomaly
 type NetworkAnomaly struct {
-	NodeUID       string                  `json:"node_uid"`
-	AnomalyType   NetworkFailureStage     `json:"anomaly_type"`
-	StartTime     time.Time               `json:"start_time"`
-	EndTime       time.Time               `json:"end_time"`
-	Severity      float64                 `json:"severity"`        // 0.0 to 1.0
-	Confidence    float64                 `json:"confidence"`      // 0.0 to 1.0
-	
+	NodeUID     string              `json:"node_uid"`
+	AnomalyType NetworkFailureStage `json:"anomaly_type"`
+	StartTime   time.Time           `json:"start_time"`
+	EndTime     time.Time           `json:"end_time"`
+	Severity    float64             `json:"severity"`   // 0.0 to 1.0
+	Confidence  float64             `json:"confidence"` // 0.0 to 1.0
+
 	// Metric details
-	BaselineValue float64                 `json:"baseline_value"`
-	CurrentValue  float64                 `json:"current_value"`
-	Deviation     float64                 `json:"deviation"`       // Z-score or percentage change
-	
+	BaselineValue float64 `json:"baseline_value"`
+	CurrentValue  float64 `json:"current_value"`
+	Deviation     float64 `json:"deviation"` // Z-score or percentage change
+
 	// Evidence
-	SupportingEvents []correlation.Event  `json:"supporting_events"`
-	MetricValues     map[string]float64   `json:"metric_values"`
-	
+	SupportingEvents []types.Event `json:"supporting_events"`
+	MetricValues     map[string]float64  `json:"metric_values"`
+
 	// Propagation info
-	PropagatedFrom   []string            `json:"propagated_from,omitempty"`
-	PropagatedTo     []string            `json:"propagated_to,omitempty"`
+	PropagatedFrom []string `json:"propagated_from,omitempty"`
+	PropagatedTo   []string `json:"propagated_to,omitempty"`
 }
 
 // CascadeAnalysis represents the analysis of failure propagation
 type CascadeAnalysis struct {
-	CascadeStrength   float64              `json:"cascade_strength"`    // 0.0 to 1.0
-	PropagationSpeed  time.Duration        `json:"propagation_speed"`
-	AffectedNodeCount int                  `json:"affected_node_count"`
-	IsolatedNodes     []string             `json:"isolated_nodes"`
-	
+	CascadeStrength   float64       `json:"cascade_strength"` // 0.0 to 1.0
+	PropagationSpeed  time.Duration `json:"propagation_speed"`
+	AffectedNodeCount int           `json:"affected_node_count"`
+	IsolatedNodes     []string      `json:"isolated_nodes"`
+
 	// Temporal analysis
-	StartTime         time.Time            `json:"start_time"`
-	EndTime           time.Time            `json:"end_time"`
-	Duration          time.Duration        `json:"duration"`
-	
+	StartTime time.Time     `json:"start_time"`
+	EndTime   time.Time     `json:"end_time"`
+	Duration  time.Duration `json:"duration"`
+
 	// Root cause
-	RootCause         *CausalityNode       `json:"root_cause"`
-	InitialFailures   []*NetworkAnomaly    `json:"initial_failures"`
-	
+	RootCause       *CausalityNode    `json:"root_cause"`
+	InitialFailures []*NetworkAnomaly `json:"initial_failures"`
+
 	// Propagation paths
-	PropagationPaths  []PropagationPath    `json:"propagation_paths"`
-	CriticalPaths     []PropagationPath    `json:"critical_paths"`
+	PropagationPaths []PropagationPath `json:"propagation_paths"`
+	CriticalPaths    []PropagationPath `json:"critical_paths"`
 }
 
 // PropagationPath represents a failure propagation path
 type PropagationPath struct {
-	PathID        string        `json:"path_id"`
-	SourceNode    string        `json:"source_node"`
-	TargetNode    string        `json:"target_node"`
-	Hops          []string      `json:"hops"`
-	Delay         time.Duration `json:"delay"`
-	Confidence    float64       `json:"confidence"`
-	Impact        float64       `json:"impact"`        // 0.0 to 1.0
+	PathID     string        `json:"path_id"`
+	SourceNode string        `json:"source_node"`
+	TargetNode string        `json:"target_node"`
+	Hops       []string      `json:"hops"`
+	Delay      time.Duration `json:"delay"`
+	Confidence float64       `json:"confidence"`
+	Impact     float64       `json:"impact"` // 0.0 to 1.0
 }
 
 // updateNetworkTopology updates the network topology map from events and metrics
-func (nfcd *NetworkFailureCascadeDetector) updateNetworkTopology(events []correlation.Event, metrics map[string]correlation.MetricSeries) {
+func (nfcd *NetworkFailureCascadeDetector) updateNetworkTopology(events []types.Event, metrics map[string]types.MetricSeries) {
 	cutoff := time.Now().Add(-nfcd.config.LookbackWindow)
-	
+
 	for _, event := range events {
 		if event.Timestamp.Before(cutoff) {
 			continue
 		}
-		
+
 		nodeUID := event.Entity.UID
 		if nodeUID == "" {
 			nodeUID = fmt.Sprintf("%s/%s", event.Entity.Namespace, event.Entity.Name)
 		}
-		
+
 		// Update or create node
 		node, exists := nfcd.topologyMap[nodeUID]
 		if !exists {
@@ -380,94 +380,94 @@ func (nfcd *NetworkFailureCascadeDetector) updateNetworkTopology(events []correl
 			}
 			nfcd.topologyMap[nodeUID] = node
 		}
-		
+
 		// Update node with event data
 		node.LastSeen = event.Timestamp
 		if nfcd.isNetworkEvent(event) {
 			node.RecentFailures = append(node.RecentFailures, event.Timestamp)
 			node.FailureTypes[event.Type]++
 		}
-		
+
 		// Extract connection information
 		nfcd.extractConnections(event, node)
 	}
-	
+
 	// Update metrics baselines
 	nfcd.updateMetricsBaselines(metrics)
 }
 
 // extractConnections extracts connection information from events
-func (nfcd *NetworkFailureCascadeDetector) extractConnections(event correlation.Event, node *NetworkNode) {
+func (nfcd *NetworkFailureCascadeDetector) extractConnections(event types.Event, node *NetworkNode) {
 	// Extract target information from event attributes
 	if event.Attributes == nil {
 		return
 	}
-	
+
 	var targetUID string
 	var port int
 	var connType string
-	
+
 	if target, exists := event.Attributes["target_service"]; exists {
 		if targetStr, ok := target.(string); ok {
 			targetUID = targetStr
 		}
 	}
-	
+
 	if targetHost, exists := event.Attributes["target_host"]; exists {
 		if hostStr, ok := targetHost.(string); ok {
 			targetUID = hostStr
 		}
 	}
-	
+
 	if portAttr, exists := event.Attributes["port"]; exists {
 		if portFloat, ok := portAttr.(float64); ok {
 			port = int(portFloat)
 		}
 	}
-	
+
 	if connTypeAttr, exists := event.Attributes["protocol"]; exists {
 		if typeStr, ok := connTypeAttr.(string); ok {
 			connType = typeStr
 		}
 	}
-	
+
 	if targetUID != "" {
 		connection := &NetworkConnection{
-			SourceUID:      node.EntityUID,
-			TargetUID:      targetUID,
-			ConnectionType: connType,
-			Port:           port,
+			SourceUID:       node.EntityUID,
+			TargetUID:       targetUID,
+			ConnectionType:  connType,
+			Port:            port,
 			LastHealthCheck: event.Timestamp,
 		}
-		
+
 		// Add to connections map
 		nfcd.connections[node.EntityUID] = append(nfcd.connections[node.EntityUID], connection)
 	}
 }
 
 // updateMetricsBaselines updates baseline metrics for network nodes
-func (nfcd *NetworkFailureCascadeDetector) updateMetricsBaselines(metrics map[string]correlation.MetricSeries) {
+func (nfcd *NetworkFailureCascadeDetector) updateMetricsBaselines(metrics map[string]types.MetricSeries) {
 	for metricName, series := range metrics {
 		if len(series.Points) == 0 {
 			continue
 		}
-		
+
 		// Extract node information from metric labels
 		for _, point := range series.Points {
 			if point.Labels == nil {
 				continue
 			}
-			
+
 			nodeUID := nfcd.extractNodeUIDFromLabels(point.Labels)
 			if nodeUID == "" {
 				continue
 			}
-			
+
 			node, exists := nfcd.topologyMap[nodeUID]
 			if !exists {
 				continue
 			}
-			
+
 			// Update specific metrics
 			switch metricName {
 			case "network_latency", "http_request_duration":
@@ -492,73 +492,73 @@ func (nfcd *NetworkFailureCascadeDetector) extractNodeUIDFromLabels(labels map[s
 		}
 		return pod
 	}
-	
+
 	if service, exists := labels["service"]; exists {
 		if namespace, exists := labels["namespace"]; exists {
 			return fmt.Sprintf("%s/%s", namespace, service)
 		}
 		return service
 	}
-	
+
 	if instance, exists := labels["instance"]; exists {
 		return instance
 	}
-	
+
 	return ""
 }
 
 // detectNetworkAnomalies detects anomalies in network metrics
-func (nfcd *NetworkFailureCascadeDetector) detectNetworkAnomalies(events []correlation.Event, metrics map[string]correlation.MetricSeries) []*NetworkAnomaly {
+func (nfcd *NetworkFailureCascadeDetector) detectNetworkAnomalies(events []types.Event, metrics map[string]types.MetricSeries) []*NetworkAnomaly {
 	var anomalies []*NetworkAnomaly
-	
+
 	// Detect latency anomalies
 	anomalies = append(anomalies, nfcd.detectLatencyAnomalies(metrics)...)
-	
+
 	// Detect throughput anomalies
 	anomalies = append(anomalies, nfcd.detectThroughputAnomalies(metrics)...)
-	
+
 	// Detect error rate anomalies
 	anomalies = append(anomalies, nfcd.detectErrorRateAnomalies(events, metrics)...)
-	
+
 	// Detect packet loss anomalies
 	anomalies = append(anomalies, nfcd.detectPacketLossAnomalies(metrics)...)
-	
+
 	// Sort by start time
 	sort.Slice(anomalies, func(i, j int) bool {
 		return anomalies[i].StartTime.Before(anomalies[j].StartTime)
 	})
-	
+
 	return anomalies
 }
 
 // detectLatencyAnomalies detects latency increase anomalies
-func (nfcd *NetworkFailureCascadeDetector) detectLatencyAnomalies(metrics map[string]correlation.MetricSeries) []*NetworkAnomaly {
+func (nfcd *NetworkFailureCascadeDetector) detectLatencyAnomalies(metrics map[string]types.MetricSeries) []*NetworkAnomaly {
 	var anomalies []*NetworkAnomaly
-	
+
 	for metricName, series := range metrics {
 		if !nfcd.isLatencyMetric(metricName) {
 			continue
 		}
-		
+
 		for _, point := range series.Points {
 			if point.Labels == nil {
 				continue
 			}
-			
+
 			nodeUID := nfcd.extractNodeUIDFromLabels(point.Labels)
 			if nodeUID == "" {
 				continue
 			}
-			
+
 			node, exists := nfcd.topologyMap[nodeUID]
 			if !exists || node.BaselineLatency == 0 {
 				continue
 			}
-			
+
 			// Check for latency increase
 			latencyRatio := point.Value / node.BaselineLatency
 			threshold := nfcd.config.Thresholds["latency_increase_threshold"]
-			
+
 			if latencyRatio > threshold {
 				anomaly := &NetworkAnomaly{
 					NodeUID:       nodeUID,
@@ -576,38 +576,38 @@ func (nfcd *NetworkFailureCascadeDetector) detectLatencyAnomalies(metrics map[st
 			}
 		}
 	}
-	
+
 	return anomalies
 }
 
 // detectThroughputAnomalies detects throughput decrease anomalies
-func (nfcd *NetworkFailureCascadeDetector) detectThroughputAnomalies(metrics map[string]correlation.MetricSeries) []*NetworkAnomaly {
+func (nfcd *NetworkFailureCascadeDetector) detectThroughputAnomalies(metrics map[string]types.MetricSeries) []*NetworkAnomaly {
 	var anomalies []*NetworkAnomaly
-	
+
 	for metricName, series := range metrics {
 		if !nfcd.isThroughputMetric(metricName) {
 			continue
 		}
-		
+
 		for _, point := range series.Points {
 			if point.Labels == nil {
 				continue
 			}
-			
+
 			nodeUID := nfcd.extractNodeUIDFromLabels(point.Labels)
 			if nodeUID == "" {
 				continue
 			}
-			
+
 			node, exists := nfcd.topologyMap[nodeUID]
 			if !exists || node.BaselineThroughput == 0 {
 				continue
 			}
-			
+
 			// Check for throughput decrease
 			throughputRatio := point.Value / node.BaselineThroughput
 			threshold := nfcd.config.Thresholds["throughput_decrease_threshold"]
-			
+
 			if throughputRatio < threshold {
 				anomaly := &NetworkAnomaly{
 					NodeUID:       nodeUID,
@@ -625,47 +625,47 @@ func (nfcd *NetworkFailureCascadeDetector) detectThroughputAnomalies(metrics map
 			}
 		}
 	}
-	
+
 	return anomalies
 }
 
 // detectErrorRateAnomalies detects error rate increase anomalies
-func (nfcd *NetworkFailureCascadeDetector) detectErrorRateAnomalies(events []correlation.Event, metrics map[string]correlation.MetricSeries) []*NetworkAnomaly {
+func (nfcd *NetworkFailureCascadeDetector) detectErrorRateAnomalies(events []types.Event, metrics map[string]types.MetricSeries) []*NetworkAnomaly {
 	var anomalies []*NetworkAnomaly
-	
+
 	// Group events by entity and time windows
-	entityEvents := make(map[string][]correlation.Event)
+	entityEvents := make(map[string][]types.Event)
 	for _, event := range events {
 		if !nfcd.isNetworkEvent(event) {
 			continue
 		}
-		
+
 		nodeUID := event.Entity.UID
 		if nodeUID == "" {
 			nodeUID = fmt.Sprintf("%s/%s", event.Entity.Namespace, event.Entity.Name)
 		}
-		
+
 		entityEvents[nodeUID] = append(entityEvents[nodeUID], event)
 	}
-	
+
 	// Analyze error rates in time windows
 	windowSize := 1 * time.Minute
 	threshold := nfcd.config.Thresholds["error_rate_threshold"]
-	
+
 	for nodeUID, nodeEvents := range entityEvents {
 		node, exists := nfcd.topologyMap[nodeUID]
 		if !exists {
 			continue
 		}
-		
+
 		// Calculate error rate in sliding windows
 		for i := 0; i < len(nodeEvents); i += 10 { // Check every 10 events
 			windowStart := nodeEvents[i].Timestamp
 			windowEnd := windowStart.Add(windowSize)
-			
+
 			errorCount := 0
 			totalCount := 0
-			
+
 			for _, event := range nodeEvents {
 				if event.Timestamp.After(windowStart) && event.Timestamp.Before(windowEnd) {
 					totalCount++
@@ -674,7 +674,7 @@ func (nfcd *NetworkFailureCascadeDetector) detectErrorRateAnomalies(events []cor
 					}
 				}
 			}
-			
+
 			if totalCount > 0 {
 				errorRate := float64(errorCount) / float64(totalCount)
 				if errorRate > threshold {
@@ -695,31 +695,31 @@ func (nfcd *NetworkFailureCascadeDetector) detectErrorRateAnomalies(events []cor
 			}
 		}
 	}
-	
+
 	return anomalies
 }
 
 // detectPacketLossAnomalies detects packet loss anomalies
-func (nfcd *NetworkFailureCascadeDetector) detectPacketLossAnomalies(metrics map[string]correlation.MetricSeries) []*NetworkAnomaly {
+func (nfcd *NetworkFailureCascadeDetector) detectPacketLossAnomalies(metrics map[string]types.MetricSeries) []*NetworkAnomaly {
 	var anomalies []*NetworkAnomaly
-	
+
 	for metricName, series := range metrics {
 		if !nfcd.isPacketLossMetric(metricName) {
 			continue
 		}
-		
+
 		for _, point := range series.Points {
 			if point.Labels == nil {
 				continue
 			}
-			
+
 			nodeUID := nfcd.extractNodeUIDFromLabels(point.Labels)
 			if nodeUID == "" {
 				continue
 			}
-			
+
 			threshold := nfcd.config.Thresholds["packet_loss_threshold"]
-			
+
 			if point.Value > threshold {
 				anomaly := &NetworkAnomaly{
 					NodeUID:       nodeUID,
@@ -737,7 +737,7 @@ func (nfcd *NetworkFailureCascadeDetector) detectPacketLossAnomalies(metrics map
 			}
 		}
 	}
-	
+
 	return anomalies
 }
 
@@ -766,7 +766,7 @@ func (nfcd *NetworkFailureCascadeDetector) isPacketLossMetric(metricName string)
 	return metricName == "network_packet_loss" || metricName == "packet_loss_rate"
 }
 
-func (nfcd *NetworkFailureCascadeDetector) isErrorEvent(event correlation.Event) bool {
+func (nfcd *NetworkFailureCascadeDetector) isErrorEvent(event types.Event) bool {
 	errorTypes := []string{"connection_timeout", "connection_refused", "dns_resolution_failed", "network_unreachable", "gateway_timeout"}
 	for _, errorType := range errorTypes {
 		if event.Type == errorType {
@@ -777,31 +777,35 @@ func (nfcd *NetworkFailureCascadeDetector) isErrorEvent(event correlation.Event)
 }
 
 // Placeholder methods - these would contain the actual implementation
-func (nfcd *NetworkFailureCascadeDetector) calculateBaselineLatency(series correlation.MetricSeries) float64 {
-	mean, _ := series.Statistics()
-	return mean
+func (nfcd *NetworkFailureCascadeDetector) calculateBaselineLatency(series types.MetricSeries) float64 {
+	if series.Statistics != nil {
+		return series.Statistics.Mean
+	}
+	return 0.0
 }
 
-func (nfcd *NetworkFailureCascadeDetector) calculateBaselineThroughput(series correlation.MetricSeries) float64 {
-	mean, _ := series.Statistics()
-	return mean
+func (nfcd *NetworkFailureCascadeDetector) calculateBaselineThroughput(series types.MetricSeries) float64 {
+	if series.Statistics != nil {
+		return series.Statistics.Mean
+	}
+	return 0.0
 }
 
-func (nfcd *NetworkFailureCascadeDetector) calculateErrorRate(series correlation.MetricSeries) float64 {
+func (nfcd *NetworkFailureCascadeDetector) calculateErrorRate(series types.MetricSeries) float64 {
 	if len(series.Points) == 0 {
 		return 0.0
 	}
 	return series.Points[len(series.Points)-1].Value
 }
 
-func (nfcd *NetworkFailureCascadeDetector) calculatePacketLoss(series correlation.MetricSeries) float64 {
+func (nfcd *NetworkFailureCascadeDetector) calculatePacketLoss(series types.MetricSeries) float64 {
 	if len(series.Points) == 0 {
 		return 0.0
 	}
 	return series.Points[len(series.Points)-1].Value
 }
 
-func (nfcd *NetworkFailureCascadeDetector) analyzeCascadePattern(anomalies []*NetworkAnomaly, events []correlation.Event) *CascadeAnalysis {
+func (nfcd *NetworkFailureCascadeDetector) analyzeCascadePattern(anomalies []*NetworkAnomaly, events []types.Event) *CascadeAnalysis {
 	// Simplified cascade analysis implementation
 	return &CascadeAnalysis{
 		CascadeStrength:   0.8,
@@ -817,7 +821,7 @@ func (nfcd *NetworkFailureCascadeDetector) buildCausalityChain(analysis *Cascade
 	return []CausalityNode{}
 }
 
-func (nfcd *NetworkFailureCascadeDetector) generateNetworkPredictions(analysis *CascadeAnalysis, events []correlation.Event) []Prediction {
+func (nfcd *NetworkFailureCascadeDetector) generateNetworkPredictions(analysis *CascadeAnalysis, events []types.Event) []Prediction {
 	return []Prediction{}
 }
 
@@ -835,24 +839,24 @@ func (nfcd *NetworkFailureCascadeDetector) calculateConfidence(analysis *Cascade
 	return analysis.CascadeStrength * 0.89
 }
 
-func (nfcd *NetworkFailureCascadeDetector) determineSeverity(analysis *CascadeAnalysis, impact ImpactAssessment) correlation.Severity {
+func (nfcd *NetworkFailureCascadeDetector) determineSeverity(analysis *CascadeAnalysis, impact ImpactAssessment) types.Severity {
 	if analysis.AffectedNodeCount > 5 {
-		return correlation.SeverityCritical
+		return types.SeverityCritical
 	}
-	return correlation.SeverityHigh
+	return types.SeverityHigh
 }
 
-func (nfcd *NetworkFailureCascadeDetector) extractAffectedEntities(anomalies []*NetworkAnomaly) []correlation.Entity {
-	return []correlation.Entity{}
+func (nfcd *NetworkFailureCascadeDetector) extractAffectedEntities(anomalies []*NetworkAnomaly) []types.Entity {
+	return []types.Entity{}
 }
 
 func (nfcd *NetworkFailureCascadeDetector) buildPatternMetrics(analysis *CascadeAnalysis, anomalies []*NetworkAnomaly) PatternMetrics {
 	return PatternMetrics{
 		NetworkUtilization: 0.8,
-		LatencyMean:        float64(analysis.PropagationSpeed / time.Millisecond),
+		Latency:            analysis.PropagationSpeed,
 	}
 }
 
-func (nfcd *NetworkFailureCascadeDetector) assessDataQuality(events []correlation.Event, metrics map[string]correlation.MetricSeries) float64 {
+func (nfcd *NetworkFailureCascadeDetector) assessDataQuality(events []types.Event, metrics map[string]types.MetricSeries) float64 {
 	return 0.9
 }

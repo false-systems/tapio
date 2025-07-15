@@ -172,14 +172,6 @@ type CircuitBreaker interface {
 	Reset()
 }
 
-// Factory creates platform-specific installers
-type Factory interface {
-	// Create creates an installer for the given strategy
-	Create(strategy InstallStrategy) (Installer, error)
-
-	// GetAvailableStrategies returns supported strategies
-	GetAvailableStrategies() []InstallStrategy
-}
 
 // Downloader handles file downloads with progress
 type Downloader interface {
@@ -190,20 +182,6 @@ type Downloader interface {
 	DownloadWithProgress(ctx context.Context, opts DownloadOptions, dst io.Writer, progress func(current, total int64)) error
 }
 
-// Validator performs post-installation validation
-type Validator interface {
-	// ValidateInstallation checks if installation is valid
-	ValidateInstallation(ctx context.Context, installPath string) error
-
-	// ValidateBinary checks binary integrity
-	ValidateBinary(ctx context.Context, binaryPath string, checksum string) error
-
-	// ValidateConnectivity checks network connectivity
-	ValidateConnectivity(ctx context.Context, endpoints []string) error
-
-	// ValidatePermissions checks file permissions
-	ValidatePermissions(ctx context.Context, paths []string) error
-}
 
 // Command represents a reversible operation
 type Command interface {

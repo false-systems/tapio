@@ -38,23 +38,23 @@ func (h *ConsoleHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	// Format timestamp
 	timestamp := r.Time.Format("2006-01-02 15:04:05.000")
-	
+
 	// Format level with color
 	level := h.formatLevel(r.Level)
-	
+
 	// Build message
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s %s", timestamp, level, r.Message)
-	
+
 	// Add attributes
 	r.Attrs(func(a slog.Attr) bool {
 		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value)
 		return true
 	})
-	
+
 	// Write to output
 	fmt.Fprintln(h.writer, b.String())
-	
+
 	return nil
 }
 
@@ -128,7 +128,7 @@ func (h *RedactingHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (h *RedactingHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Create new record with redacted attributes
 	newRecord := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
-	
+
 	r.Attrs(func(a slog.Attr) bool {
 		if h.shouldRedact(a.Key) {
 			newRecord.AddAttrs(slog.String(a.Key, "[REDACTED]"))
@@ -137,7 +137,7 @@ func (h *RedactingHandler) Handle(ctx context.Context, r slog.Record) error {
 		}
 		return true
 	})
-	
+
 	return h.handler.Handle(ctx, newRecord)
 }
 
@@ -154,14 +154,14 @@ func (h *RedactingHandler) shouldRedact(key string) bool {
 		"password", "token", "secret", "key", "credential",
 		"auth", "jwt", "api_key", "private", "ssn", "credit_card",
 	}
-	
+
 	lowerKey := strings.ToLower(key)
 	for _, sensitive := range sensitiveKeys {
 		if strings.Contains(lowerKey, sensitive) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -173,11 +173,11 @@ type SamplingHandler struct {
 
 // LogSampler implements token bucket sampling
 type LogSampler struct {
-	rate  float64
-	burst int
+	rate   float64
+	burst  int
 	tokens float64
-	last  time.Time
-	mutex sync.Mutex
+	last   time.Time
+	mutex  sync.Mutex
 }
 
 // NewSamplingHandler creates a new sampling handler
@@ -198,7 +198,7 @@ func (h *SamplingHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	if level >= slog.LevelError {
 		return h.handler.Enabled(ctx, level)
 	}
-	
+
 	// Sample lower levels
 	return h.sampler.Allow() && h.handler.Enabled(ctx, level)
 }
@@ -224,23 +224,23 @@ func (h *SamplingHandler) WithGroup(name string) slog.Handler {
 func (s *LogSampler) Allow() bool {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	now := time.Now()
 	elapsed := now.Sub(s.last).Seconds()
 	s.last = now
-	
+
 	// Add tokens based on elapsed time
 	s.tokens += elapsed * s.rate
 	if s.tokens > float64(s.burst) {
 		s.tokens = float64(s.burst)
 	}
-	
+
 	// Check if we have tokens
 	if s.tokens >= 1.0 {
 		s.tokens--
 		return true
 	}
-	
+
 	return false
 }
 
@@ -259,10 +259,10 @@ func NewAsyncHandler(handler slog.Handler, bufferSize int) slog.Handler {
 		buffer:  make(chan slog.Record, bufferSize),
 		done:    make(chan struct{}),
 	}
-	
+
 	h.wg.Add(1)
 	go h.process()
-	
+
 	return h
 }
 
@@ -298,7 +298,7 @@ func (h *AsyncHandler) WithGroup(name string) slog.Handler {
 
 func (h *AsyncHandler) process() {
 	defer h.wg.Done()
-	
+
 	for {
 		select {
 		case record := <-h.buffer:
@@ -344,7 +344,7 @@ func NewProductionHandler(handler slog.Handler, config *Config) slog.Handler {
 		config:  config,
 		metrics: &LogMetrics{},
 	}
-	
+
 	if config.Sampling {
 		ph.sampler = &LogSampler{
 			rate:   config.SampleRate,
@@ -353,7 +353,7 @@ func NewProductionHandler(handler slog.Handler, config *Config) slog.Handler {
 			last:   time.Now(),
 		}
 	}
-	
+
 	return ph
 }
 
@@ -362,7 +362,7 @@ func (h *ProductionHandler) Enabled(ctx context.Context, level slog.Level) bool 
 	if level >= slog.LevelError {
 		return h.handler.Enabled(ctx, level)
 	}
-	
+
 	// Apply sampling to lower levels
 	if h.sampler != nil && !h.sampler.Allow() {
 		h.metrics.mutex.Lock()
@@ -370,7 +370,7 @@ func (h *ProductionHandler) Enabled(ctx context.Context, level slog.Level) bool 
 		h.metrics.mutex.Unlock()
 		return false
 	}
-	
+
 	return h.handler.Enabled(ctx, level)
 }
 
@@ -381,7 +381,7 @@ func (h *ProductionHandler) Handle(ctx context.Context, r slog.Record) error {
 		h.metrics.errorLogs++
 	}
 	h.metrics.mutex.Unlock()
-	
+
 	return h.handler.Handle(ctx, r)
 }
 

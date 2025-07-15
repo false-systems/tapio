@@ -28,14 +28,14 @@ type Event struct {
 
 // Entity represents the target of an event (pod, node, service, etc.)
 type Entity struct {
-	Type      string            `json:"type"`      // "pod", "node", "service", etc.
-	Name      string            `json:"name"`      // Resource name
+	Type      string            `json:"type"` // "pod", "node", "service", etc.
+	Name      string            `json:"name"` // Resource name
 	Namespace string            `json:"namespace,omitempty"`
 	Node      string            `json:"node,omitempty"`
 	Pod       string            `json:"pod,omitempty"`
 	Container string            `json:"container,omitempty"`
 	Process   string            `json:"process,omitempty"`
-	UID       string            `json:"uid"`       // Unique identifier
+	UID       string            `json:"uid"` // Unique identifier
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
@@ -171,9 +171,9 @@ type MetricPoint struct {
 
 // MetricSeries represents a time series of metric data
 type MetricSeries struct {
-	Name     string        `json:"name"`
-	Points   []MetricPoint `json:"points"`
-	Unit     string        `json:"unit,omitempty"`
+	Name     string                 `json:"name"`
+	Points   []MetricPoint          `json:"points"`
+	Unit     string                 `json:"unit,omitempty"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -307,13 +307,13 @@ func (f Filter) Matches(event Event) bool {
 
 // Prediction represents a time-based prediction about future events
 type Prediction struct {
-	Event       string        `json:"event"`        // What will happen
-	Description string        `json:"description"`  // Human description
+	Event       string        `json:"event"`         // What will happen
+	Description string        `json:"description"`   // Human description
 	TimeToEvent time.Duration `json:"time_to_event"` // When it will happen
-	Probability float64       `json:"probability"`  // 0.0 to 1.0
-	Confidence  float64       `json:"confidence"`   // 0.0 to 1.0
-	Factors     []string      `json:"factors"`      // Contributing factors
-	Mitigation  []string      `json:"mitigation"`   // Suggested actions
+	Probability float64       `json:"probability"`   // 0.0 to 1.0
+	Confidence  float64       `json:"confidence"`    // 0.0 to 1.0
+	Factors     []string      `json:"factors"`       // Contributing factors
+	Mitigation  []string      `json:"mitigation"`    // Suggested actions
 	UpdatedAt   time.Time     `json:"updated_at"`
 }
 

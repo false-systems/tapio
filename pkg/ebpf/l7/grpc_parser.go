@@ -28,41 +28,41 @@ type GRPCMessage struct {
 
 // GRPCFlow represents a complete gRPC call
 type GRPCFlow struct {
-	ID           string         `json:"id"`
-	Service      string         `json:"service"`
-	Method       string         `json:"method"`
-	Request      *GRPCMessage   `json:"request,omitempty"`
-	Response     *GRPCMessage   `json:"response,omitempty"`
-	Status       string         `json:"status"`        // OK, CANCELLED, DEADLINE_EXCEEDED, etc.
-	Error        string         `json:"error,omitempty"`
-	
+	ID       string       `json:"id"`
+	Service  string       `json:"service"`
+	Method   string       `json:"method"`
+	Request  *GRPCMessage `json:"request,omitempty"`
+	Response *GRPCMessage `json:"response,omitempty"`
+	Status   string       `json:"status"` // OK, CANCELLED, DEADLINE_EXCEEDED, etc.
+	Error    string       `json:"error,omitempty"`
+
 	// Connection info
-	SrcIP        string         `json:"src_ip"`
-	SrcPort      uint16         `json:"src_port"`
-	DstIP        string         `json:"dst_ip"`
-	DstPort      uint16         `json:"dst_port"`
-	
+	SrcIP   string `json:"src_ip"`
+	SrcPort uint16 `json:"src_port"`
+	DstIP   string `json:"dst_ip"`
+	DstPort uint16 `json:"dst_port"`
+
 	// Kubernetes context
-	SrcPod       string         `json:"src_pod,omitempty"`
-	SrcNamespace string         `json:"src_namespace,omitempty"`
-	DstPod       string         `json:"dst_pod,omitempty"`
-	DstNamespace string         `json:"dst_namespace,omitempty"`
-	DstService   string         `json:"dst_service,omitempty"`
-	
+	SrcPod       string `json:"src_pod,omitempty"`
+	SrcNamespace string `json:"src_namespace,omitempty"`
+	DstPod       string `json:"dst_pod,omitempty"`
+	DstNamespace string `json:"dst_namespace,omitempty"`
+	DstService   string `json:"dst_service,omitempty"`
+
 	// Metrics
-	Latency      time.Duration  `json:"latency,omitempty"`
-	MessagesIn   uint64         `json:"messages_in"`
-	MessagesOut  uint64         `json:"messages_out"`
-	BytesIn      uint64         `json:"bytes_in"`
-	BytesOut     uint64         `json:"bytes_out"`
-	
+	Latency     time.Duration `json:"latency,omitempty"`
+	MessagesIn  uint64        `json:"messages_in"`
+	MessagesOut uint64        `json:"messages_out"`
+	BytesIn     uint64        `json:"bytes_in"`
+	BytesOut    uint64        `json:"bytes_out"`
+
 	// Stream tracking
-	StreamID     uint32         `json:"stream_id,omitempty"`
-	StreamType   string         `json:"stream_type,omitempty"` // unary, client_stream, server_stream, bidi_stream
-	
+	StreamID   uint32 `json:"stream_id,omitempty"`
+	StreamType string `json:"stream_type,omitempty"` // unary, client_stream, server_stream, bidi_stream
+
 	// Analysis
-	Anomalies    []string       `json:"anomalies,omitempty"`
-	Tags         []string       `json:"tags,omitempty"`
+	Anomalies []string `json:"anomalies,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 // GRPCParser parses gRPC traffic from eBPF data
@@ -95,10 +95,10 @@ func (p *GRPCParser) ParseMessage(data []byte, msgType string) (*GRPCMessage, er
 	// Parse gRPC frame
 	// First byte: compression flag
 	compressed := data[0] != 0
-	
+
 	// Next 4 bytes: message length (big endian)
 	msg.MessageSize = binary.BigEndian.Uint32(data[1:5])
-	
+
 	if compressed {
 		msg.Metadata["compressed"] = true
 	}
@@ -115,10 +115,10 @@ func (p *GRPCParser) ParseMessage(data []byte, msgType string) (*GRPCMessage, er
 // parseHTTP2Headers parses HTTP/2 headers (simplified implementation)
 func (p *GRPCParser) parseHTTP2Headers(data []byte, msg *GRPCMessage) {
 	// This is a simplified parser - real implementation would need HPACK decoding
-	
+
 	// Look for common gRPC headers in the data
 	dataStr := string(data)
-	
+
 	// Extract :path header (contains service and method)
 	if pathStart := strings.Index(dataStr, ":path"); pathStart != -1 {
 		pathEnd := strings.Index(dataStr[pathStart:], "\x00")
@@ -133,12 +133,12 @@ func (p *GRPCParser) parseHTTP2Headers(data []byte, msg *GRPCMessage) {
 			}
 		}
 	}
-	
+
 	// Extract content-type
 	if ctStart := strings.Index(dataStr, "application/grpc"); ctStart != -1 {
 		msg.Headers["content-type"] = "application/grpc"
 	}
-	
+
 	// Extract grpc-status (for responses)
 	if msg.Type == GRPCMessageTypeResponse {
 		if statusStart := strings.Index(dataStr, "grpc-status"); statusStart != -1 {
@@ -151,7 +151,7 @@ func (p *GRPCParser) parseHTTP2Headers(data []byte, msg *GRPCMessage) {
 				}
 			}
 		}
-		
+
 		// Extract grpc-message
 		if msgStart := strings.Index(dataStr, "grpc-message"); msgStart != -1 {
 			msgEnd := strings.Index(dataStr[msgStart:], "\x00")
@@ -160,7 +160,7 @@ func (p *GRPCParser) parseHTTP2Headers(data []byte, msg *GRPCMessage) {
 			}
 		}
 	}
-	
+
 	// Extract user-agent
 	if uaStart := strings.Index(dataStr, "user-agent"); uaStart != -1 {
 		uaEnd := strings.Index(dataStr[uaStart:], "\x00")
@@ -168,7 +168,7 @@ func (p *GRPCParser) parseHTTP2Headers(data []byte, msg *GRPCMessage) {
 			msg.Headers["user-agent"] = dataStr[uaStart+10 : uaStart+uaEnd]
 		}
 	}
-	
+
 	// Extract grpc-timeout
 	if timeoutStart := strings.Index(dataStr, "grpc-timeout"); timeoutStart != -1 {
 		timeoutEnd := strings.Index(dataStr[timeoutStart:], "\x00")
@@ -187,7 +187,7 @@ func (p *GRPCParser) AnalyzeFlow(flow *GRPCFlow) {
 	if flow.Service != "" {
 		flow.Tags = append(flow.Tags, "service:"+flow.Service)
 	}
-	
+
 	// Tag by method
 	if flow.Method != "" {
 		flow.Tags = append(flow.Tags, "method:"+flow.Method)
@@ -241,7 +241,7 @@ func (p *GRPCParser) AnalyzeFlow(flow *GRPCFlow) {
 		default:
 			flow.Status = "UNKNOWN"
 		}
-		
+
 		// Tag by status
 		if flow.Response.StatusCode != 0 {
 			flow.Tags = append(flow.Tags, "error")
@@ -252,16 +252,16 @@ func (p *GRPCParser) AnalyzeFlow(flow *GRPCFlow) {
 	if flow.Latency > 5*time.Second {
 		flow.Anomalies = append(flow.Anomalies, "high_latency")
 	}
-	
+
 	// Check message sizes
 	if flow.Request != nil && flow.Request.MessageSize > 10*1024*1024 { // 10MB
 		flow.Anomalies = append(flow.Anomalies, "large_request")
 	}
-	
+
 	if flow.Response != nil && flow.Response.MessageSize > 10*1024*1024 { // 10MB
 		flow.Anomalies = append(flow.Anomalies, "large_response")
 	}
-	
+
 	// Detect stream types
 	if flow.MessagesIn > 1 && flow.MessagesOut > 1 {
 		flow.StreamType = "bidi_stream"
@@ -276,16 +276,16 @@ func (p *GRPCParser) AnalyzeFlow(flow *GRPCFlow) {
 		flow.StreamType = "unary"
 		flow.Tags = append(flow.Tags, "unary")
 	}
-	
+
 	// Check for common patterns
 	if strings.Contains(flow.Service, "health") || flow.Method == "Check" {
 		flow.Tags = append(flow.Tags, "health_check")
 	}
-	
+
 	if strings.Contains(flow.Service, "reflection") {
 		flow.Tags = append(flow.Tags, "service_reflection")
 	}
-	
+
 	// Check for potential issues
 	if flow.Request != nil && flow.Response == nil && flow.Error == "" {
 		flow.Anomalies = append(flow.Anomalies, "no_response")
@@ -295,7 +295,7 @@ func (p *GRPCParser) AnalyzeFlow(flow *GRPCFlow) {
 // GetMetrics extracts metrics from gRPC flow
 func (p *GRPCParser) GetMetrics(flow *GRPCFlow) map[string]interface{} {
 	metrics := make(map[string]interface{})
-	
+
 	metrics["service"] = flow.Service
 	metrics["method"] = flow.Method
 	metrics["status"] = flow.Status
@@ -305,18 +305,18 @@ func (p *GRPCParser) GetMetrics(flow *GRPCFlow) map[string]interface{} {
 	metrics["messages_out"] = flow.MessagesOut
 	metrics["bytes_in"] = flow.BytesIn
 	metrics["bytes_out"] = flow.BytesOut
-	
+
 	if flow.Response != nil {
 		metrics["status_code"] = flow.Response.StatusCode
 	}
-	
+
 	return metrics
 }
 
 // DetectGRPCTraffic determines if traffic is gRPC based on patterns
 func DetectGRPCTraffic(data []byte) bool {
 	dataStr := string(data)
-	
+
 	// Look for gRPC indicators
 	indicators := []string{
 		"application/grpc",
@@ -326,13 +326,13 @@ func DetectGRPCTraffic(data []byte) bool {
 		":method\x00POST",
 		"HTTP/2.0",
 	}
-	
+
 	for _, indicator := range indicators {
 		if strings.Contains(dataStr, indicator) {
 			return true
 		}
 	}
-	
+
 	// Check for gRPC frame format (5-byte header)
 	if len(data) >= 5 {
 		// First byte should be 0 or 1 (compression flag)
@@ -345,6 +345,6 @@ func DetectGRPCTraffic(data []byte) bool {
 			}
 		}
 	}
-	
+
 	return false
 }

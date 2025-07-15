@@ -165,7 +165,7 @@ func BenchmarkRingBufferOperations(b *testing.B) {
 
 	b.Run("ConcurrentPushPop", func(b *testing.B) {
 		var wg sync.WaitGroup
-		
+
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -501,10 +501,10 @@ func BenchmarkMemoryUsage(b *testing.B) {
 // RunProfileGuidedOptimization runs benchmarks with profiling for PGO
 func RunProfileGuidedOptimization(b *testing.B) {
 	b.Log("Running Profile-Guided Optimization benchmarks...")
-	
+
 	// This benchmark generates profiles that can be used for PGO compilation
 	// Run with: go test -bench=BenchmarkPGO -cpuprofile=pgo.prof
-	
+
 	b.Run("CPUIntensiveTraceProcessing", func(b *testing.B) {
 		// CPU-intensive operations that benefit from PGO
 		for i := 0; i < b.N; i++ {
@@ -520,7 +520,7 @@ func RunProfileGuidedOptimization(b *testing.B) {
 					nil,
 					nil,
 				)
-				
+
 				// Create multiple child spans
 				if aggregate != nil {
 					rootSpan := aggregate.GetRootSpan()
@@ -587,15 +587,15 @@ func BenchmarkComparison(b *testing.B) {
 func BenchmarkRegressionTest(b *testing.B) {
 	// These benchmarks establish performance baselines
 	// Any significant regression should be investigated
-	
+
 	const expectedMinTraceCreationsPerSec = 100000
 	const expectedMinSpanCreationsPerSec = 500000
-	
+
 	b.Run("TraceCreationThroughput", func(b *testing.B) {
 		start := time.Now()
 		BenchmarkTraceAggregateCreation(b)
 		duration := time.Since(start)
-		
+
 		throughput := float64(b.N) / duration.Seconds()
 		if throughput < expectedMinTraceCreationsPerSec {
 			b.Errorf("Trace creation throughput regression: got %.0f/sec, expected >%.0f/sec",

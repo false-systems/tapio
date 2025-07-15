@@ -28,33 +28,33 @@ const (
 
 // KafkaMessage represents a parsed Kafka message
 type KafkaMessage struct {
-	Type          string                 `json:"type"` // request/response
-	APIKey        int16                  `json:"api_key"`
-	APIVersion    int16                  `json:"api_version"`
-	CorrelationID int32                  `json:"correlation_id"`
-	ClientID      string                 `json:"client_id,omitempty"`
-	
+	Type          string `json:"type"` // request/response
+	APIKey        int16  `json:"api_key"`
+	APIVersion    int16  `json:"api_version"`
+	CorrelationID int32  `json:"correlation_id"`
+	ClientID      string `json:"client_id,omitempty"`
+
 	// Request specific
-	Topics        []string               `json:"topics,omitempty"`
-	Partitions    []int32                `json:"partitions,omitempty"`
-	
+	Topics     []string `json:"topics,omitempty"`
+	Partitions []int32  `json:"partitions,omitempty"`
+
 	// Producer specific
-	RequiredAcks  int16                  `json:"required_acks,omitempty"`
-	Timeout       int32                  `json:"timeout,omitempty"`
-	Records       []*KafkaRecord         `json:"records,omitempty"`
-	
+	RequiredAcks int16          `json:"required_acks,omitempty"`
+	Timeout      int32          `json:"timeout,omitempty"`
+	Records      []*KafkaRecord `json:"records,omitempty"`
+
 	// Consumer specific
-	MaxWaitTime   int32                  `json:"max_wait_time,omitempty"`
-	MinBytes      int32                  `json:"min_bytes,omitempty"`
-	MaxBytes      int32                  `json:"max_bytes,omitempty"`
-	
+	MaxWaitTime int32 `json:"max_wait_time,omitempty"`
+	MinBytes    int32 `json:"min_bytes,omitempty"`
+	MaxBytes    int32 `json:"max_bytes,omitempty"`
+
 	// Response specific
-	ErrorCode     int16                  `json:"error_code,omitempty"`
-	ErrorMessage  string                 `json:"error_message,omitempty"`
-	
+	ErrorCode    int16  `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+
 	// Metadata
-	MessageSize   int32                  `json:"message_size"`
-	Timestamp     time.Time              `json:"timestamp"`
+	MessageSize int32     `json:"message_size"`
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // KafkaRecord represents a Kafka record
@@ -76,40 +76,40 @@ type Header struct {
 
 // KafkaFlow represents a complete Kafka operation
 type KafkaFlow struct {
-	ID           string         `json:"id"`
-	Operation    string         `json:"operation"` // produce, fetch, metadata, etc.
-	Request      *KafkaMessage  `json:"request,omitempty"`
-	Response     *KafkaMessage  `json:"response,omitempty"`
-	Error        string         `json:"error,omitempty"`
-	
+	ID        string        `json:"id"`
+	Operation string        `json:"operation"` // produce, fetch, metadata, etc.
+	Request   *KafkaMessage `json:"request,omitempty"`
+	Response  *KafkaMessage `json:"response,omitempty"`
+	Error     string        `json:"error,omitempty"`
+
 	// Connection info
-	SrcIP        string         `json:"src_ip"`
-	SrcPort      uint16         `json:"src_port"`
-	DstIP        string         `json:"dst_ip"`
-	DstPort      uint16         `json:"dst_port"`
-	
+	SrcIP   string `json:"src_ip"`
+	SrcPort uint16 `json:"src_port"`
+	DstIP   string `json:"dst_ip"`
+	DstPort uint16 `json:"dst_port"`
+
 	// Kubernetes context
-	SrcPod       string         `json:"src_pod,omitempty"`
-	SrcNamespace string         `json:"src_namespace,omitempty"`
-	DstPod       string         `json:"dst_pod,omitempty"`
-	DstNamespace string         `json:"dst_namespace,omitempty"`
-	DstService   string         `json:"dst_service,omitempty"`
-	
+	SrcPod       string `json:"src_pod,omitempty"`
+	SrcNamespace string `json:"src_namespace,omitempty"`
+	DstPod       string `json:"dst_pod,omitempty"`
+	DstNamespace string `json:"dst_namespace,omitempty"`
+	DstService   string `json:"dst_service,omitempty"`
+
 	// Kafka specific
-	Topics       []string       `json:"topics,omitempty"`
-	ClientID     string         `json:"client_id,omitempty"`
-	GroupID      string         `json:"group_id,omitempty"`
-	
+	Topics   []string `json:"topics,omitempty"`
+	ClientID string   `json:"client_id,omitempty"`
+	GroupID  string   `json:"group_id,omitempty"`
+
 	// Metrics
-	Latency      time.Duration  `json:"latency,omitempty"`
-	RecordsIn    uint64         `json:"records_in"`
-	RecordsOut   uint64         `json:"records_out"`
-	BytesIn      uint64         `json:"bytes_in"`
-	BytesOut     uint64         `json:"bytes_out"`
-	
+	Latency    time.Duration `json:"latency,omitempty"`
+	RecordsIn  uint64        `json:"records_in"`
+	RecordsOut uint64        `json:"records_out"`
+	BytesIn    uint64        `json:"bytes_in"`
+	BytesOut   uint64        `json:"bytes_out"`
+
 	// Analysis
-	Anomalies    []string       `json:"anomalies,omitempty"`
-	Tags         []string       `json:"tags,omitempty"`
+	Anomalies []string `json:"anomalies,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 // KafkaParser parses Kafka traffic from eBPF data
@@ -140,42 +140,42 @@ func (p *KafkaParser) ParseMessage(data []byte, msgType string) (*KafkaMessage, 
 	}
 
 	offset := 0
-	
+
 	// Parse message size (4 bytes)
 	if len(data) < offset+4 {
 		return nil, fmt.Errorf("insufficient data for message size")
 	}
-	msg.MessageSize = int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+	msg.MessageSize = int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 	offset += 4
 
 	// Parse API key (2 bytes)
 	if len(data) < offset+2 {
 		return nil, fmt.Errorf("insufficient data for API key")
 	}
-	msg.APIKey = int16(binary.BigEndian.Uint16(data[offset:offset+2]))
+	msg.APIKey = int16(binary.BigEndian.Uint16(data[offset : offset+2]))
 	offset += 2
 
 	// Parse API version (2 bytes)
 	if len(data) < offset+2 {
 		return nil, fmt.Errorf("insufficient data for API version")
 	}
-	msg.APIVersion = int16(binary.BigEndian.Uint16(data[offset:offset+2]))
+	msg.APIVersion = int16(binary.BigEndian.Uint16(data[offset : offset+2]))
 	offset += 2
 
 	// Parse correlation ID (4 bytes)
 	if len(data) < offset+4 {
 		return nil, fmt.Errorf("insufficient data for correlation ID")
 	}
-	msg.CorrelationID = int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+	msg.CorrelationID = int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 	offset += 4
 
 	// Parse client ID length and value
 	if msgType == "request" && len(data) >= offset+2 {
-		clientIDLen := int16(binary.BigEndian.Uint16(data[offset:offset+2]))
+		clientIDLen := int16(binary.BigEndian.Uint16(data[offset : offset+2]))
 		offset += 2
-		
+
 		if clientIDLen > 0 && len(data) >= offset+int(clientIDLen) {
-			msg.ClientID = string(data[offset:offset+int(clientIDLen)])
+			msg.ClientID = string(data[offset : offset+int(clientIDLen)])
 			offset += int(clientIDLen)
 		}
 	}
@@ -205,38 +205,38 @@ func (p *KafkaParser) parseAPISpecificFields(data []byte, msg *KafkaMessage) {
 // parseProduceRequest parses Kafka produce request
 func (p *KafkaParser) parseProduceRequest(data []byte, msg *KafkaMessage) {
 	offset := 0
-	
+
 	// Parse required acks (2 bytes)
 	if len(data) >= offset+2 {
-		msg.RequiredAcks = int16(binary.BigEndian.Uint16(data[offset:offset+2]))
+		msg.RequiredAcks = int16(binary.BigEndian.Uint16(data[offset : offset+2]))
 		offset += 2
 	}
-	
+
 	// Parse timeout (4 bytes)
 	if len(data) >= offset+4 {
-		msg.Timeout = int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+		msg.Timeout = int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 		offset += 4
 	}
-	
+
 	// Parse topic data (simplified - just count topics)
 	if len(data) >= offset+4 {
-		topicCount := int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+		topicCount := int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 		offset += 4
-		
+
 		for i := int32(0); i < topicCount && len(data) > offset+2; i++ {
-			topicLen := int16(binary.BigEndian.Uint16(data[offset:offset+2]))
+			topicLen := int16(binary.BigEndian.Uint16(data[offset : offset+2]))
 			offset += 2
-			
+
 			if topicLen > 0 && len(data) >= offset+int(topicLen) {
-				topic := string(data[offset:offset+int(topicLen)])
+				topic := string(data[offset : offset+int(topicLen)])
 				msg.Topics = append(msg.Topics, topic)
 				offset += int(topicLen)
-				
+
 				// Skip partition data for now
 				if len(data) >= offset+4 {
-					partitionCount := int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+					partitionCount := int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 					offset += 4
-					
+
 					// Skip detailed parsing for now
 					_ = partitionCount
 					break
@@ -249,22 +249,22 @@ func (p *KafkaParser) parseProduceRequest(data []byte, msg *KafkaMessage) {
 // parseFetchRequest parses Kafka fetch request
 func (p *KafkaParser) parseFetchRequest(data []byte, msg *KafkaMessage) {
 	offset := 0
-	
+
 	// Parse max wait time (4 bytes)
 	if len(data) >= offset+4 {
-		msg.MaxWaitTime = int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+		msg.MaxWaitTime = int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 		offset += 4
 	}
-	
+
 	// Parse min bytes (4 bytes)
 	if len(data) >= offset+4 {
-		msg.MinBytes = int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+		msg.MinBytes = int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 		offset += 4
 	}
-	
+
 	// Parse max bytes (4 bytes) - if version supports it
 	if msg.APIVersion >= 3 && len(data) >= offset+4 {
-		msg.MaxBytes = int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+		msg.MaxBytes = int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 		offset += 4
 	}
 }
@@ -272,18 +272,18 @@ func (p *KafkaParser) parseFetchRequest(data []byte, msg *KafkaMessage) {
 // parseMetadataRequest parses Kafka metadata request
 func (p *KafkaParser) parseMetadataRequest(data []byte, msg *KafkaMessage) {
 	offset := 0
-	
+
 	// Parse topic count (4 bytes)
 	if len(data) >= offset+4 {
-		topicCount := int32(binary.BigEndian.Uint32(data[offset:offset+4]))
+		topicCount := int32(binary.BigEndian.Uint32(data[offset : offset+4]))
 		offset += 4
-		
+
 		for i := int32(0); i < topicCount && len(data) > offset+2; i++ {
-			topicLen := int16(binary.BigEndian.Uint16(data[offset:offset+2]))
+			topicLen := int16(binary.BigEndian.Uint16(data[offset : offset+2]))
 			offset += 2
-			
+
 			if topicLen > 0 && len(data) >= offset+int(topicLen) {
-				topic := string(data[offset:offset+int(topicLen)])
+				topic := string(data[offset : offset+int(topicLen)])
 				msg.Topics = append(msg.Topics, topic)
 				offset += int(topicLen)
 			}
@@ -326,12 +326,12 @@ func (p *KafkaParser) AnalyzeFlow(flow *KafkaFlow) {
 		default:
 			flow.Operation = fmt.Sprintf("api_%d", flow.Request.APIKey)
 		}
-		
+
 		// Tag by topics
 		for _, topic := range flow.Request.Topics {
 			flow.Tags = append(flow.Tags, "topic:"+topic)
 		}
-		
+
 		// Tag by client
 		if flow.Request.ClientID != "" {
 			flow.Tags = append(flow.Tags, "client:"+flow.Request.ClientID)
@@ -349,22 +349,22 @@ func (p *KafkaParser) AnalyzeFlow(flow *KafkaFlow) {
 	if flow.Latency > 10*time.Second {
 		flow.Anomalies = append(flow.Anomalies, "high_latency")
 	}
-	
+
 	// Check message sizes
 	if flow.Request != nil && flow.Request.MessageSize > 100*1024*1024 { // 100MB
 		flow.Anomalies = append(flow.Anomalies, "large_message")
 	}
-	
+
 	// Check for potential issues
 	if flow.Request != nil && flow.Response == nil && flow.Error == "" {
 		flow.Anomalies = append(flow.Anomalies, "no_response")
 	}
-	
+
 	// Detect common patterns
 	if flow.Operation == "heartbeat" {
 		flow.Tags = append(flow.Tags, "health_check")
 	}
-	
+
 	if flow.Operation == "metadata" {
 		flow.Tags = append(flow.Tags, "discovery")
 	}
@@ -443,7 +443,7 @@ func (p *KafkaParser) getKafkaErrorMessage(errorCode int16) string {
 // GetMetrics extracts metrics from Kafka flow
 func (p *KafkaParser) GetMetrics(flow *KafkaFlow) map[string]interface{} {
 	metrics := make(map[string]interface{})
-	
+
 	metrics["operation"] = flow.Operation
 	metrics["topics"] = flow.Topics
 	metrics["client_id"] = flow.ClientID
@@ -452,11 +452,11 @@ func (p *KafkaParser) GetMetrics(flow *KafkaFlow) map[string]interface{} {
 	metrics["records_out"] = flow.RecordsOut
 	metrics["bytes_in"] = flow.BytesIn
 	metrics["bytes_out"] = flow.BytesOut
-	
+
 	if flow.Response != nil {
 		metrics["error_code"] = flow.Response.ErrorCode
 	}
-	
+
 	return metrics
 }
 
@@ -470,7 +470,7 @@ func DetectKafkaTraffic(data []byte, port uint16) bool {
 			messageSize := binary.BigEndian.Uint32(data[0:4])
 			apiKey := binary.BigEndian.Uint16(data[4:6])
 			apiVersion := binary.BigEndian.Uint16(data[6:8])
-			
+
 			// Validate message size is reasonable
 			if messageSize > 0 && messageSize < 100*1024*1024 { // < 100MB
 				// Validate API key is known
@@ -483,6 +483,6 @@ func DetectKafkaTraffic(data []byte, port uint16) bool {
 			}
 		}
 	}
-	
+
 	return false
 }

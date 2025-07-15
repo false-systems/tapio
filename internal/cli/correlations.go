@@ -207,7 +207,7 @@ func correlationsListCmd() *cobra.Command {
 			// TODO: Connect to engine and list rules
 			fmt.Println("⚠️  List functionality not yet implemented")
 			fmt.Println("This would show correlation rules currently loaded in the engine")
-			
+
 			// For now, show example output
 			fmt.Println("\nExample output:")
 			fmt.Println("Built-in Rules:")
@@ -217,7 +217,7 @@ func correlationsListCmd() *cobra.Command {
 			fmt.Println("\nCustom Rules:")
 			fmt.Println("  - Memory Leak Pattern (user_defined)")
 			fmt.Println("  - Database Cascade (user_defined)")
-			
+
 			return nil
 		},
 	}
@@ -272,7 +272,7 @@ Category: performance
 // correlationsDeleteCmd deletes correlation rules by ID (DANGEROUS - use disable instead)
 func correlationsDeleteCmd() *cobra.Command {
 	var (
-		force bool
+		force        bool
 		reallyDelete bool
 	)
 
@@ -332,7 +332,7 @@ Example:
 			for _, ruleID := range ruleIDs {
 				fmt.Printf("   - %s (safety checks will be applied)\n", ruleID)
 			}
-			
+
 			fmt.Println("\n🔒 SAFETY: Rules will be backed up before deletion")
 			fmt.Println("⚠️  Note: Actually deleting rules requires server connection (not implemented yet)")
 			fmt.Println("This would call engine.DeleteSemanticRule() with full safety checks")
@@ -451,7 +451,7 @@ Example:
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ruleIDs := args
-			
+
 			if reason == "" {
 				reason = "disabled via CLI"
 			}
@@ -460,7 +460,7 @@ Example:
 			for _, ruleID := range ruleIDs {
 				fmt.Printf("   - %s (reason: %s)\n", ruleID, reason)
 			}
-			
+
 			fmt.Println("\n✅ SAFE: Rules preserved for recovery")
 			fmt.Printf("💡 To re-enable: tapio correlations enable %s\n", args[0])
 			fmt.Println("\n⚠️  Note: Actually disabling rules requires server connection (not implemented yet)")
@@ -495,7 +495,7 @@ Example:
 			for _, ruleID := range ruleIDs {
 				fmt.Printf("   - %s\n", ruleID)
 			}
-			
+
 			fmt.Println("\n✅ Rules will be restored to active processing")
 			fmt.Println("\n⚠️  Note: Actually enabling rules requires server connection (not implemented yet)")
 			fmt.Println("This would call engine.EnableSemanticRule() for each rule")
@@ -532,7 +532,7 @@ Example:
 			fmt.Printf("🔒 Creating correlation rules snapshot: %s\n", snapshotName)
 			fmt.Println("📦 Backing up all correlation rules for disaster recovery")
 			fmt.Printf("💾 Snapshot location: ~/.tapio/backups/correlations-%s.json\n", snapshotName)
-			
+
 			fmt.Println("\n⚠️  Note: Actually creating snapshots requires server connection (not implemented yet)")
 			fmt.Printf("This would call engine.CreateRuleSnapshot('%s')\n", snapshotName)
 
