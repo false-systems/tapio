@@ -93,7 +93,7 @@ type Concept struct {
 	Related []string
 }
 
-// Use the existing PatternResult type from ai_stubs.go
+// PatternResult represents pattern detection results
 
 // Constructor functions
 func NewSemanticPatternEngine() *SemanticPatternEngine {

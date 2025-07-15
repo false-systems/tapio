@@ -11,7 +11,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/correlation/foundation"
 )
 
-// EventSource is already defined in ai_stubs.go
+// EventSource represents an event source for correlation processing
 
 // BaseCorrelationEngine implements the Engine interface
 type BaseCorrelationEngine struct {

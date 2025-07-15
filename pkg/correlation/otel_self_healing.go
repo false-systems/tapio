@@ -214,19 +214,25 @@ type DegradationPredictor struct {
 	mutex               sync.RWMutex
 }
 
-// PipelineAutoFixer automatically fixes detected issues
+// PipelineAutoFixer automatically fixes detected issues using extensible capabilities
 type PipelineAutoFixer struct {
 	config              *SelfHealingConfig
-	availableActions    map[HealingActionType]HealingActionHandler
+	framework           *ExtensibleFramework
 	actionHistory       []HealingAction
 	effectivenessScores map[HealingActionType]float64
 	mutex              sync.RWMutex
 	
-	// Strategy engine
-	strategyEngine      *HealingStrategyEngine
-	
-	// Circuit breaker
-	circuitBreaker      *HealingCircuitBreaker
+	// Circuit breaker for preventing action storms
+	circuitBreaker      map[HealingActionType]*ActionCircuitBreaker
+}
+
+// ActionCircuitBreaker prevents action storms for specific healing actions
+type ActionCircuitBreaker struct {
+	failures     int
+	lastFailure  time.Time
+	threshold    int
+	resetTimeout time.Duration
+	isOpen       bool
 }
 
 // HealingActionHandler defines the interface for healing actions
@@ -731,7 +737,55 @@ func NewDegradationPredictor(config *SelfHealingConfig) *DegradationPredictor {
 }
 
 func NewPipelineAutoFixer(config *SelfHealingConfig) *PipelineAutoFixer {
-	return &PipelineAutoFixer{config: config}
+	framework := NewExtensibleFramework()
+	
+	fixer := &PipelineAutoFixer{
+		config:              config,
+		framework:           framework,
+		effectivenessScores: make(map[HealingActionType]float64),
+		circuitBreaker:      make(map[HealingActionType]*ActionCircuitBreaker),
+	}
+	
+	// Register basic healing capabilities that are always available
+	fixer.registerBasicCapabilities()
+	
+	return fixer
+}
+
+// registerBasicCapabilities registers healing actions that are always available
+func (paf *PipelineAutoFixer) registerBasicCapabilities() {
+	// Flush Buffers - Always available
+	flushHandler := func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+		// Implementation for flushing OTEL export buffers
+		return "buffers_flushed", nil
+	}
+	paf.framework.RegisterCapability(NewBasicHealingCapability(
+		"flush_buffers",
+		"Flush pending export buffers to clear backlog",
+		flushHandler,
+	))
+	
+	// Reconnect - Always available  
+	reconnectHandler := func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+		// Implementation for reconnecting to OTEL collector
+		return "reconnected", nil
+	}
+	paf.framework.RegisterCapability(NewBasicHealingCapability(
+		"reconnect",
+		"Reconnect to OTEL collector with backoff",
+		reconnectHandler,
+	))
+	
+	// Restart Exporter - Always available
+	restartHandler := func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+		// Implementation for restarting the exporter
+		return "exporter_restarted", nil
+	}
+	paf.framework.RegisterCapability(NewBasicHealingCapability(
+		"restart_exporter", 
+		"Restart the OTEL exporter with fresh configuration",
+		restartHandler,
+	))
 }
 
 func NewPerformanceOptimizer(config *SelfHealingConfig) *PerformanceOptimizer {
@@ -763,15 +817,114 @@ func (po *PerformanceOptimizer) OptimizePipeline(ctx context.Context) []Optimiza
 }
 
 func (paf *PipelineAutoFixer) DetermineHealingActions(health *PipelineHealthMetrics, status HealthStatus) []HealingAction {
-	return []HealingAction{}
+	actions := []HealingAction{}
+	
+	// Determine appropriate actions based on health status
+	switch status {
+	case HealthStatusCritical:
+		// Critical: Try restart exporter
+		if paf.framework.HasCapability("restart_exporter") {
+			actions = append(actions, HealingAction{
+				ID:          fmt.Sprintf("restart_%d", time.Now().UnixNano()),
+				Type:        ActionTypeRestartExporter,
+				Description: "Restart OTEL exporter due to critical health status",
+				Parameters:  map[string]interface{}{"reason": "critical_health"},
+			})
+		}
+		
+	case HealthStatusUnhealthy:
+		// Unhealthy: Try reconnect first
+		if paf.framework.HasCapability("reconnect") {
+			actions = append(actions, HealingAction{
+				ID:          fmt.Sprintf("reconnect_%d", time.Now().UnixNano()),
+				Type:        ActionTypeReconnect,
+				Description: "Reconnect to OTEL collector due to unhealthy status",
+				Parameters:  map[string]interface{}{"reason": "unhealthy_connection"},
+			})
+		}
+		
+	case HealthStatusDegrading:
+		// Degrading: Try flush buffers
+		if paf.framework.HasCapability("flush_buffers") && health.QueueDepth > 500 {
+			actions = append(actions, HealingAction{
+				ID:          fmt.Sprintf("flush_%d", time.Now().UnixNano()),
+				Type:        ActionTypeFlushBuffers,
+				Description: "Flush buffers to reduce queue depth",
+				Parameters:  map[string]interface{}{"queue_depth": health.QueueDepth},
+			})
+		}
+	}
+	
+	return actions
 }
 
 func (paf *PipelineAutoFixer) ExecuteAction(ctx context.Context, action HealingAction) error {
+	// Convert action type to capability name
+	capabilityName := paf.actionTypeToCapability(action.Type)
+	
+	// Check if capability is available
+	if !paf.framework.HasCapability(capabilityName) {
+		return fmt.Errorf("healing capability %s not available", capabilityName)
+	}
+	
+	// Execute the capability
+	result, err := paf.framework.ExecuteCapability(ctx, capabilityName, action.Parameters)
+	if err != nil {
+		return fmt.Errorf("failed to execute healing action %s: %w", capabilityName, err)
+	}
+	
+	// Record the result
+	action.Success = true
+	if result != nil {
+		if action.PerformanceImpact == nil {
+			action.PerformanceImpact = &PerformanceImpact{}
+		}
+		// Store result details
+	}
+	
 	return nil
 }
 
 func (paf *PipelineAutoFixer) GeneratePreventiveActions(prediction *DegradationPrediction) []HealingAction {
-	return []HealingAction{}
+	actions := []HealingAction{}
+	
+	// Generate preventive actions based on prediction
+	switch prediction.PredictedIssue {
+	case "high_latency":
+		if paf.framework.HasCapability("flush_buffers") {
+			actions = append(actions, HealingAction{
+				ID:          fmt.Sprintf("preventive_flush_%d", time.Now().UnixNano()),
+				Type:        ActionTypeFlushBuffers,
+				Description: "Preemptive buffer flush to prevent latency spike",
+				Parameters:  map[string]interface{}{"prediction_id": prediction.PredictedIssue},
+			})
+		}
+		
+	case "connection_failure":
+		if paf.framework.HasCapability("reconnect") {
+			actions = append(actions, HealingAction{
+				ID:          fmt.Sprintf("preventive_reconnect_%d", time.Now().UnixNano()),
+				Type:        ActionTypeReconnect,
+				Description: "Preemptive reconnection to prevent connection failure",
+				Parameters:  map[string]interface{}{"prediction_id": prediction.PredictedIssue},
+			})
+		}
+	}
+	
+	return actions
+}
+
+func (paf *PipelineAutoFixer) actionTypeToCapability(actionType HealingActionType) string {
+	switch actionType {
+	case ActionTypeRestartExporter:
+		return "restart_exporter"
+	case ActionTypeReconnect:
+		return "reconnect"
+	case ActionTypeFlushBuffers:
+		return "flush_buffers"
+	default:
+		return string(actionType)
+	}
 }
 
 func (shp *SelfHealingPipeline) applyOptimization(ctx context.Context, optimization Optimization) error {

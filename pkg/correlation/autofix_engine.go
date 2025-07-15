@@ -11,7 +11,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
-// Type aliases are already defined in ai_stubs.go
+// Type aliases for correlation engine components
 
 // AutoFixEngine provides automated remediation capabilities for detected patterns
 type AutoFixEngine struct {
