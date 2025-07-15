@@ -1,46 +1,5 @@
-//go:build !linux || !ebpf
-// +build !linux !ebpf
-
-package ebpf
-
-import (
-	"context"
-	"runtime"
-)
-
-// stubMonitor provides a no-op implementation for non-Linux systems
-type stubMonitor struct {
-	lastError error
-}
-
-// CollectEvents is a no-op for stub monitor
-func (s *stubMonitor) CollectEvents() {
-	// No-op
-}
-
-func (s *stubMonitor) Start(ctx context.Context) error {
-	return ErrNotSupported
-}
-
-func (s *stubMonitor) Stop() error {
-	return nil
-}
-
-func (s *stubMonitor) GetMemoryStats() ([]ProcessMemoryStats, error) {
-	return nil, ErrNotSupported
-}
-
-func (s *stubMonitor) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*OOMPrediction, error) {
-	return nil, ErrNotSupported
-}
-
-func (s *stubMonitor) IsAvailable() bool {
-	return false
-}
-
-func (s *stubMonitor) GetLastError() error {
-	if runtime.GOOS != "linux" {
-		return ErrNotSupported
-	}
-	return s.lastError
-}
+// REMOVED: This stub file has been eliminated as part of the stub-free architecture redesign.
+// The stubMonitor with 47+ lines of no-op implementations has been replaced with:
+// - Clear capability error reporting using pkg/capabilities.CapabilityError
+// - Plugin-based architecture that avoids fake implementations entirely
+// - Meaningful error messages instead of silent no-ops

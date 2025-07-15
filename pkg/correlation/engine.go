@@ -7,7 +7,11 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/yairfalse/tapio/pkg/correlation/foundation"
 )
+
+// EventSource is already defined in ai_stubs.go
 
 // BaseCorrelationEngine implements the Engine interface
 type BaseCorrelationEngine struct {
@@ -18,7 +22,7 @@ type BaseCorrelationEngine struct {
 	enableMetrics      bool
 
 	// Rules management
-	rules   map[string]*Rule
+	rules   map[string]Rule
 	rulesMu sync.RWMutex
 
 	// Event store
@@ -54,11 +58,9 @@ func NewEngine(eventStore EventStore, opts ...EngineOption) *BaseCorrelationEngi
 		processingInterval: 30 * time.Second,
 		maxConcurrentRules: runtime.NumCPU() * 2,
 		enableMetrics:      true,
-		rules:              make(map[string]*Rule),
+		rules:              make(map[string]Rule),
 		eventStore:         eventStore,
-		stats: Stats{
-			RuleExecutionTime: make(map[string]time.Duration),
-		},
+		stats: Stats{},
 		ruleCooldowns:  make(map[string]time.Time),
 		resultHandlers: make([]ResultHandler, 0),
 		resultChan:     make(chan *Result, 1000), // Buffered channel
@@ -80,9 +82,9 @@ func NewEngine(eventStore EventStore, opts ...EngineOption) *BaseCorrelationEngi
 		New: func() interface{} {
 			return &Context{
 				metrics:        make(map[string]MetricSeries),
-				eventsBySource: make(map[EventSource][]Event),
-				eventsByType:   make(map[string][]Event),
-				eventsByEntity: make(map[string][]Event),
+				eventsBySource: make(map[foundation.SourceType][]foundation.Event),
+				eventsByType:   make(map[string][]foundation.Event),
+				eventsByEntity: make(map[string][]foundation.Event),
 				Metadata:       make(map[string]string),
 			}
 		},
@@ -140,51 +142,34 @@ type ruleExecution struct {
 }
 
 // RegisterRule registers a new correlation rule
-func (e *BaseCorrelationEngine) RegisterRule(rule *Rule) error {
+func (e *BaseCorrelationEngine) RegisterRule(rule Rule) error {
 	if rule == nil {
 		return fmt.Errorf("rule cannot be nil")
 	}
 
-	if rule.ID == "" {
+	metadata := rule.GetMetadata()
+	if metadata.ID == "" {
 		return fmt.Errorf("rule ID cannot be empty")
 	}
 
-	if rule.Evaluate == nil {
-		return fmt.Errorf("rule must have an Evaluate function")
+	// Validate the rule
+	if err := rule.Validate(); err != nil {
+		return fmt.Errorf("rule validation failed: %w", err)
 	}
-
-	// Set defaults
-	if rule.MinConfidence <= 0 {
-		rule.MinConfidence = 0.5
-	}
-
-	if rule.Cooldown == 0 {
-		rule.Cooldown = 5 * time.Minute
-	}
-
-	if rule.TTL == 0 {
-		rule.TTL = 24 * time.Hour
-	}
-
-	if rule.Category == "" {
-		rule.Category = CategoryReliability
-	}
-
-	rule.Enabled = true // Enable by default
 
 	e.rulesMu.Lock()
 	defer e.rulesMu.Unlock()
 
 	// Check if rule already exists
-	if _, exists := e.rules[rule.ID]; exists {
-		return fmt.Errorf("rule with ID '%s' already exists", rule.ID)
+	if _, exists := e.rules[metadata.ID]; exists {
+		return fmt.Errorf("rule with ID '%s' already exists", metadata.ID)
 	}
 
-	e.rules[rule.ID] = rule
+	e.rules[metadata.ID] = rule
 
-	// Update stats
+	// Update stats (if supported)
 	e.statsMu.Lock()
-	e.stats.RulesRegistered++
+	// stats.RulesRegistered not available in simple Stats struct
 	e.statsMu.Unlock()
 
 	return nil

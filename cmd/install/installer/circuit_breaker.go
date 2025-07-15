@@ -236,10 +236,10 @@ func (acb *AdaptiveCircuitBreaker) adapt() {
 	// Adjust reset timeout based on response times
 	if avgResponse > 10*time.Second {
 		// Slow responses - increase timeout
-		acb.resetTimeout = min(5*time.Minute, acb.resetTimeout+30*time.Second)
+		acb.resetTimeout = minDuration(5*time.Minute, acb.resetTimeout+30*time.Second)
 	} else if avgResponse < 1*time.Second {
 		// Fast responses - decrease timeout
-		acb.resetTimeout = max(30*time.Second, acb.resetTimeout-30*time.Second)
+		acb.resetTimeout = maxDuration(30*time.Second, acb.resetTimeout-30*time.Second)
 	}
 
 	acb.lastAdaptTime = time.Now()
@@ -255,6 +255,22 @@ func max(a, b int) int {
 
 // min returns the minimum of two integers
 func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// maxDuration returns the maximum of two durations
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// minDuration returns the minimum of two durations
+func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
 		return a
 	}

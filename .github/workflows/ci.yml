@@ -7,7 +7,7 @@ on:
     branches: [ main, develop ]
 
 env:
-  GO_VERSION: '1.21'
+  GO_VERSION: '1.23.0'
   COVERAGE_THRESHOLD: '50'
 
 jobs:
@@ -107,7 +107,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go-version: ['1.20', '1.21']
+        go-version: ['1.22', '1.23']
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -122,11 +122,11 @@ jobs:
         run: make ci-test
 
       - name: Check Coverage Threshold
-        if: matrix.go-version == '1.21' && matrix.os == 'ubuntu-latest'
+        if: matrix.go-version == '1.23' && matrix.os == 'ubuntu-latest'
         run: make check-coverage
 
       - name: Upload Coverage to Codecov
-        if: matrix.go-version == '1.21' && matrix.os == 'ubuntu-latest'
+        if: matrix.go-version == '1.23' && matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.out

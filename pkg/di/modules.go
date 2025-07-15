@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/api"
 	"github.com/yairfalse/tapio/pkg/client"
 	"github.com/yairfalse/tapio/pkg/engine"
 	"github.com/yairfalse/tapio/pkg/plugins"

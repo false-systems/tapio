@@ -209,7 +209,7 @@ func (c *Container) StartAll(ctx context.Context) error {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	for name, serviceDef := range c.services {
+	for name := range c.services {
 		// Get the service instance
 		service, err := c.Get(name)
 		if err != nil {
