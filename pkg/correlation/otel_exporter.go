@@ -35,6 +35,9 @@ type OTELExporter struct {
 	// Configuration
 	config *OTELExporterConfig
 
+	// Semantic grouping (HERO FEATURE!)
+	semanticGrouper *SemanticEventGrouper
+
 	// Metrics instruments
 	patternMetrics     *PatternMetrics
 	correlationMetrics *CorrelationMetrics
@@ -149,7 +152,7 @@ type PerformanceMetrics struct {
 }
 
 // NewOTELExporter creates a new OTEL exporter
-func NewOTELExporter(config *OTELExporterConfig) (*OTELExporter, error) {
+func NewOTELExporter(config *OTELExporterConfig, correlationEngine *Engine) (*OTELExporter, error) {
 	if config == nil {
 		config = DefaultOTELExporterConfig()
 	}
@@ -159,6 +162,11 @@ func NewOTELExporter(config *OTELExporterConfig) (*OTELExporter, error) {
 		eventBuffer:       make([]*opinionated.OpinionatedEvent, 0, config.BatchSize),
 		patternBuffer:     make([]*types.PatternResult, 0, config.BatchSize),
 		correlationBuffer: make([]*Correlation, 0, config.BatchSize),
+	}
+
+	// Initialize semantic grouper for HERO-level correlation
+	if correlationEngine != nil {
+		exporter.semanticGrouper = NewSemanticEventGrouper(correlationEngine)
 	}
 
 	// Initialize OTEL components
@@ -459,22 +467,32 @@ func (oe *OTELExporter) initializeMetrics() error {
 	return nil
 }
 
-// ExportEvent exports an opinionated event to OTEL
+// ExportEvent exports an opinionated event to OTEL with semantic grouping
 func (oe *OTELExporter) ExportEvent(ctx context.Context, event *opinionated.OpinionatedEvent) error {
 	if !oe.config.ExportTraces {
 		return nil
 	}
 
+	// Use semantic grouping for intelligent correlation
+	if oe.semanticGrouper != nil {
+		return oe.semanticGrouper.ProcessEventWithSemanticGrouping(ctx, event)
+	}
+
+	// Fallback to basic event export if semantic grouping not available
+	return oe.exportBasicEvent(ctx, event)
+}
+
+// exportBasicEvent exports event without semantic grouping (fallback)
+func (oe *OTELExporter) exportBasicEvent(ctx context.Context, event *opinionated.OpinionatedEvent) error {
 	// Create trace span for the event
 	ctx, span := oe.tracer.Start(ctx, "correlation.event.process",
 		trace.WithAttributes(
-			attribute.String("event.id", event.Id),
-			attribute.String("event.source", event.Source),
-			attribute.String("event.type", event.Type),
-			attribute.String("event.entity_type", event.Entity.Type),
-			attribute.String("event.entity_name", event.Entity.Name),
-			attribute.String("event.namespace", event.Entity.Namespace),
-			attribute.Int64("event.timestamp", event.TimestampNs),
+			attribute.String("event.id", event.ID),
+			attribute.String("event.category", string(event.Category)),
+			attribute.String("event.severity", string(event.Severity)),
+			attribute.Float64("event.confidence", float64(event.Confidence)),
+			attribute.String("event.source_collector", event.Source.Collector),
+			attribute.String("event.source_component", event.Source.Component),
 		),
 	)
 	defer span.End()
