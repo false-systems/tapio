@@ -148,7 +148,7 @@ func newWatchState() *WatchState {
 func (ws *WatchState) updateResource(resource *types.ResourceInfo) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
-	
+
 	key := fmt.Sprintf("%s/%s/%s", resource.Namespace, resource.Kind, resource.Name)
 	ws.resources[key] = resource
 }
@@ -156,7 +156,7 @@ func (ws *WatchState) updateResource(resource *types.ResourceInfo) {
 func (ws *WatchState) updateProblem(problem *types.Problem) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
-	
+
 	key := fmt.Sprintf("%s/%s/%s", problem.Resource.Namespace, problem.Resource.Kind, problem.Resource.Name)
 	if problem.Severity == types.SeverityHealthy {
 		// Resource is healthy, remove any existing problem
@@ -175,7 +175,7 @@ func (ws *WatchState) incrementEventCount() {
 func (ws *WatchState) getStats() (int, int, int64, time.Duration) {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
-	
+
 	return len(ws.resources), len(ws.problems), ws.eventCount, time.Since(ws.startTime)
 }
 
@@ -315,14 +315,14 @@ func runWatch(cmd *cobra.Command, args []string) error {
 
 func printWatchHeader(namespace, resource string, all bool) {
 	fmt.Println()
-	
+
 	watchTarget := "current namespace"
 	if all {
 		watchTarget = "all namespaces"
 	} else if namespace != "" {
 		watchTarget = fmt.Sprintf("namespace: %s", namespace)
 	}
-	
+
 	if resource != "" {
 		watchTarget = fmt.Sprintf("%s (filtering: %s)", watchTarget, resource)
 	}
@@ -357,7 +357,7 @@ func createEventProcessor(checker *simple.Checker, state *WatchState, outputForm
 		problem := checkResourceHealth(ctx, checker, resourceInfo, event)
 		if problem != nil {
 			state.updateProblem(problem)
-			
+
 			// Run correlation if available
 			if state.correlationSvc != nil {
 				correlateEvent(ctx, state.correlationSvc, problem)
@@ -451,7 +451,7 @@ func analyzePodHealth(pod *corev1.Pod, resource *types.ResourceInfo) *types.Prob
 				Description: fmt.Sprintf("Container %s was OOMKilled", containerStatus.Name),
 				Severity:    types.SeverityCritical,
 				DetectedAt:  time.Now(),
-				SuggestedFix: fmt.Sprintf("kubectl set resources deployment %s -c %s --limits=memory=<higher-value>", 
+				SuggestedFix: fmt.Sprintf("kubectl set resources deployment %s -c %s --limits=memory=<higher-value>",
 					pod.Labels["app"], containerStatus.Name),
 			}
 		}
@@ -459,12 +459,12 @@ func analyzePodHealth(pod *corev1.Pod, resource *types.ResourceInfo) *types.Prob
 		// Check for image pull errors
 		if containerStatus.State.Waiting != nil && strings.Contains(containerStatus.State.Waiting.Reason, "ImagePull") {
 			return &types.Problem{
-				Resource:    *resource,
-				Title:       "Image pull error",
-				Description: fmt.Sprintf("Cannot pull image for container %s: %s", 
+				Resource: *resource,
+				Title:    "Image pull error",
+				Description: fmt.Sprintf("Cannot pull image for container %s: %s",
 					containerStatus.Name, containerStatus.State.Waiting.Message),
-				Severity:    types.SeverityCritical,
-				DetectedAt:  time.Now(),
+				Severity:   types.SeverityCritical,
+				DetectedAt: time.Now(),
 			}
 		}
 	}
@@ -474,12 +474,12 @@ func analyzePodHealth(pod *corev1.Pod, resource *types.ResourceInfo) *types.Prob
 		if condition.Type == corev1.PodReady && condition.Status != corev1.ConditionTrue {
 			if time.Since(condition.LastTransitionTime.Time) > 5*time.Minute {
 				return &types.Problem{
-					Resource:    *resource,
-					Title:       "Pod not ready",
-					Description: fmt.Sprintf("Pod has been not ready for %s: %s", 
+					Resource: *resource,
+					Title:    "Pod not ready",
+					Description: fmt.Sprintf("Pod has been not ready for %s: %s",
 						time.Since(condition.LastTransitionTime.Time).Round(time.Minute), condition.Message),
-					Severity:    types.SeverityWarning,
-					DetectedAt:  time.Now(),
+					Severity:   types.SeverityWarning,
+					DetectedAt: time.Now(),
 				}
 			}
 		}
@@ -548,7 +548,7 @@ func correlateEvent(ctx context.Context, correlationSvc *correlation.Service, pr
 	insights := correlationResult.GetMostCriticalInsights(3)
 	for _, insight := range insights {
 		if insight.Severity == "critical" || insight.Severity == "high" {
-			fmt.Printf("\n%s Correlation Insight: %s\n", 
+			fmt.Printf("\n%s Correlation Insight: %s\n",
 				color.YellowString("⚡"),
 				color.YellowString(insight.Title))
 			if len(insight.Description) > 0 {
@@ -596,21 +596,21 @@ func mergeEventChannels(ctx context.Context, channels ...<-chan k8s.WatchEvent) 
 
 func printWatchStatus(state *WatchState) {
 	resources, problems, events, duration := state.getStats()
-	
+
 	fmt.Printf("\n📊 Status: Monitoring %d resources | %d issues detected | %d events processed | Running for %s\n\n",
 		resources, problems, events, duration.Round(time.Second))
 }
 
 func printWatchSummary(state *WatchState) {
 	resources, problems, events, duration := state.getStats()
-	
+
 	fmt.Println(strings.Repeat("-", 80))
 	fmt.Printf("\n📈 Watch Summary:\n")
 	fmt.Printf("   Duration:          %s\n", duration.Round(time.Second))
 	fmt.Printf("   Resources watched: %d\n", resources)
 	fmt.Printf("   Issues detected:   %d\n", problems)
 	fmt.Printf("   Events processed:  %d\n", events)
-	
+
 	if problems > 0 {
 		fmt.Printf("\n   💡 Run 'tapio check' for detailed analysis of current issues\n")
 	}

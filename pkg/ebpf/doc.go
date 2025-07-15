@@ -23,9 +23,9 @@ The package is organized into several logical components:
   - Parser registry: Manages available parsers
 
 4. **Managers** - Handle collection lifecycle and data flow
-  - CollectorManager: Manages multiple collectors
   - RingBufferManager: Handles eBPF ring buffer operations
   - ErrorHandler: Centralized error handling with recovery
+  - Note: Collector management is handled by pkg/collectors to avoid import cycles
 
 ## Design Principles
 

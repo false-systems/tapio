@@ -1,0 +1,122 @@
+//go:build linux && ebpf
+// +build linux,ebpf
+
+package ebpf
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/yairfalse/tapio/pkg/collectors"
+	ebpfcollectors "github.com/yairfalse/tapio/pkg/collectors/ebpf"
+)
+
+// CollectorManager manages eBPF collectors
+type CollectorManager struct {
+	collectors map[string]collectors.Collector
+	mu         sync.RWMutex
+	ctx        context.Context
+	cancel     context.CancelFunc
+}
+
+// NewCollectorManager creates a new collector manager
+func NewCollectorManager() *CollectorManager {
+	return &CollectorManager{
+		collectors: make(map[string]collectors.Collector),
+	}
+}
+
+// RegisterCollector registers a new collector
+func (cm *CollectorManager) RegisterCollector(name string, collector collectors.Collector) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if _, exists := cm.collectors[name]; exists {
+		return fmt.Errorf("collector %s already registered", name)
+	}
+
+	cm.collectors[name] = collector
+	return nil
+}
+
+// Start starts all registered collectors
+func (cm *CollectorManager) Start(ctx context.Context) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cm.ctx, cm.cancel = context.WithCancel(ctx)
+
+	for name, collector := range cm.collectors {
+		if err := collector.Start(cm.ctx); err != nil {
+			// Stop already started collectors
+			for n, c := range cm.collectors {
+				if n == name {
+					break
+				}
+				c.Stop()
+			}
+			return fmt.Errorf("failed to start collector %s: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// Stop stops all collectors
+func (cm *CollectorManager) Stop() error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if cm.cancel != nil {
+		cm.cancel()
+	}
+
+	var errors []error
+	for name, collector := range cm.collectors {
+		if err := collector.Stop(); err != nil {
+			errors = append(errors, fmt.Errorf("failed to stop collector %s: %w", name, err))
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("errors stopping collectors: %v", errors)
+	}
+
+	return nil
+}
+
+// GetCollector returns a specific collector
+func (cm *CollectorManager) GetCollector(name string) (collectors.Collector, bool) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	collector, exists := cm.collectors[name]
+	return collector, exists
+}
+
+// InitializeDefaultCollectors initializes the default eBPF collectors
+func (cm *CollectorManager) InitializeDefaultCollectors(config *Config) error {
+	// Memory collector
+	memoryConfig := collectors.CollectorConfig{
+		Name:    "memory",
+		Enabled: config.Enabled,
+		Options: map[string]interface{}{
+			"buffer_size":      config.EventBufferSize,
+			"retention_period": config.RetentionPeriod,
+		},
+	}
+
+	memoryCollector, err := ebpfcollectors.NewMemoryCollector(memoryConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create memory collector: %w", err)
+	}
+
+	if err := cm.RegisterCollector("memory", memoryCollector); err != nil {
+		return err
+	}
+
+	// Future: Add more collectors here (network, dns, etc.)
+
+	return nil
+}

@@ -20,7 +20,7 @@ type HTTPTransport struct {
 	config         *domain.EndpointConfig
 	requestHandler domain.RequestHandler
 	logger         domain.Logger
-	
+
 	mu        sync.RWMutex
 	isStarted bool
 	handlers  map[string]http.HandlerFunc
@@ -33,13 +33,13 @@ func NewHTTPTransport(
 	logger domain.Logger,
 ) *HTTPTransport {
 	router := chi.NewRouter()
-	
+
 	// Setup base middleware
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.Timeout(config.Timeout))
-	
+
 	return &HTTPTransport{
 		router:         router,
 		config:         config,
@@ -53,14 +53,14 @@ func NewHTTPTransport(
 func (t *HTTPTransport) Start(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	if t.isStarted {
 		return domain.ErrServerAlreadyRunning()
 	}
-	
+
 	// Setup routes
 	t.setupRoutes()
-	
+
 	// Create HTTP server
 	t.server = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", t.config.Address, t.config.Port),
@@ -69,20 +69,20 @@ func (t *HTTPTransport) Start(ctx context.Context) error {
 		WriteTimeout: t.config.Timeout,
 		IdleTimeout:  120 * time.Second,
 	}
-	
+
 	// Start server in background
 	go func() {
 		if t.logger != nil {
 			t.logger.Info(ctx, fmt.Sprintf("HTTP server starting on %s", t.server.Addr))
 		}
-		
+
 		if err := t.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			if t.logger != nil {
 				t.logger.Error(ctx, fmt.Sprintf("HTTP server error: %v", err))
 			}
 		}
 	}()
-	
+
 	t.isStarted = true
 	return nil
 }
@@ -91,20 +91,20 @@ func (t *HTTPTransport) Start(ctx context.Context) error {
 func (t *HTTPTransport) Stop(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	if !t.isStarted {
 		return domain.NewServerError(domain.ErrorCodeServerNotStarted, "HTTP transport not started")
 	}
-	
+
 	if t.server != nil {
 		shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		
+
 		if err := t.server.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("failed to shutdown HTTP server: %w", err)
 		}
 	}
-	
+
 	t.isStarted = false
 	return nil
 }
@@ -133,11 +133,11 @@ func (t *HTTPTransport) HandleRequest(ctx context.Context, request *domain.Reque
 func (t *HTTPTransport) Configure(ctx context.Context, config *domain.EndpointConfig) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	if t.isStarted {
 		return domain.ErrInvalidRequest("cannot configure running transport")
 	}
-	
+
 	t.config = config
 	return nil
 }
@@ -146,26 +146,26 @@ func (t *HTTPTransport) Configure(ctx context.Context, config *domain.EndpointCo
 func (t *HTTPTransport) setupRoutes() {
 	// Health check endpoint
 	t.router.Get("/health", t.handleHealth)
-	
+
 	// Metrics endpoint
 	t.router.Get("/metrics", t.handleMetrics)
-	
+
 	// API routes
 	t.router.Route("/api", func(r chi.Router) {
 		r.Use(t.apiMiddleware)
-		
+
 		// Server endpoints
 		r.Get("/status", t.handleStatus)
 		r.Get("/config", t.handleConfig)
 		r.Post("/config", t.handleUpdateConfig)
-		
+
 		// Connection endpoints
 		r.Get("/connections", t.handleGetConnections)
 		r.Delete("/connections/{id}", t.handleCloseConnection)
-		
+
 		// Event endpoints
 		r.Post("/events", t.handlePublishEvent)
-		
+
 		// Generic request endpoint
 		r.Post("/request", t.handleGenericRequest)
 	})
@@ -175,18 +175,18 @@ func (t *HTTPTransport) setupRoutes() {
 func (t *HTTPTransport) apiMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		
+
 		// Add request timing
 		start := time.Now()
-		
+
 		// Create wrapped writer to capture status
 		ww := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
+
 		next.ServeHTTP(ww, r)
-		
+
 		// Log request
 		if t.logger != nil {
-			t.logger.Info(r.Context(), fmt.Sprintf("%s %s %d %v", 
+			t.logger.Info(r.Context(), fmt.Sprintf("%s %s %d %v",
 				r.Method, r.URL.Path, ww.statusCode, time.Since(start)))
 		}
 	})
@@ -207,7 +207,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 
 func (t *HTTPTransport) handleHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeHealth,
@@ -215,19 +215,19 @@ func (t *HTTPTransport) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Source:    r.RemoteAddr,
 		Context:   ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response.Data)
 }
 
 func (t *HTTPTransport) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeMetrics,
@@ -235,19 +235,19 @@ func (t *HTTPTransport) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		Source:    r.RemoteAddr,
 		Context:   ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response.Data)
 }
 
 func (t *HTTPTransport) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeQuery,
@@ -256,19 +256,19 @@ func (t *HTTPTransport) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Data:      map[string]interface{}{"type": "server_status"},
 		Context:   ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response.Data)
 }
 
 func (t *HTTPTransport) handleConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeQuery,
@@ -277,25 +277,25 @@ func (t *HTTPTransport) handleConfig(w http.ResponseWriter, r *http.Request) {
 		Data:      map[string]interface{}{"type": "server_config"},
 		Context:   ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response.Data)
 }
 
 func (t *HTTPTransport) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	var config domain.Configuration
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
 		t.writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeCommand,
@@ -307,19 +307,19 @@ func (t *HTTPTransport) handleUpdateConfig(w http.ResponseWriter, r *http.Reques
 		},
 		Context: ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response.Data)
 }
 
 func (t *HTTPTransport) handleGetConnections(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeQuery,
@@ -328,20 +328,20 @@ func (t *HTTPTransport) handleGetConnections(w http.ResponseWriter, r *http.Requ
 		Data:      map[string]interface{}{"type": "connections"},
 		Context:   ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response.Data)
 }
 
 func (t *HTTPTransport) handleCloseConnection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	connectionID := chi.URLParam(r, "id")
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeCommand,
@@ -353,25 +353,25 @@ func (t *HTTPTransport) handleCloseConnection(w http.ResponseWriter, r *http.Req
 		},
 		Context: ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response.Data)
 }
 
 func (t *HTTPTransport) handlePublishEvent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	var event domain.Event
 	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 		t.writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	
+
 	request := &domain.Request{
 		ID:        middleware.GetReqID(ctx),
 		Type:      domain.RequestTypeEvent,
@@ -380,13 +380,13 @@ func (t *HTTPTransport) handlePublishEvent(w http.ResponseWriter, r *http.Reques
 		Data:      &event,
 		Context:   ctx,
 	}
-	
+
 	response, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.WriteHeader(http.StatusAccepted)
 	t.writeJSON(w, map[string]interface{}{
 		"status":  "accepted",
@@ -396,26 +396,26 @@ func (t *HTTPTransport) handlePublishEvent(w http.ResponseWriter, r *http.Reques
 
 func (t *HTTPTransport) handleGenericRequest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	var req domain.Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		t.writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	
+
 	// Override context and metadata
 	req.Context = ctx
 	req.Source = r.RemoteAddr
 	if req.ID == "" {
 		req.ID = middleware.GetReqID(ctx)
 	}
-	
+
 	response, err := t.HandleRequest(ctx, &req)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	
+
 	t.writeJSON(w, response)
 }
 
@@ -433,18 +433,18 @@ func (t *HTTPTransport) writeJSON(w http.ResponseWriter, data interface{}) {
 func (t *HTTPTransport) writeError(w http.ResponseWriter, err error, statusCode int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	
+
 	errorResponse := map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":    statusCode,
 			"message": err.Error(),
 		},
 	}
-	
+
 	if serverErr, ok := err.(*domain.ServerError); ok {
 		errorResponse["error"].(map[string]interface{})["code"] = serverErr.Code
 		errorResponse["error"].(map[string]interface{})["details"] = serverErr.Details
 	}
-	
+
 	json.NewEncoder(w).Encode(errorResponse)
 }

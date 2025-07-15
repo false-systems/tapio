@@ -15,7 +15,7 @@ type BaseDetector struct {
 	description string
 	category    types.Category
 	config      types.PatternConfig
-	
+
 	// Performance metrics
 	accuracy          float64
 	falsePositiveRate float64

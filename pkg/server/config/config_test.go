@@ -169,7 +169,7 @@ func TestLoadFromJSONFile(t *testing.T) {
 	// Create temporary JSON file
 	tempDir := t.TempDir()
 	jsonFile := filepath.Join(tempDir, "config.json")
-	
+
 	jsonContent := `{
 		"server": {
 			"name": "json-server",
@@ -186,7 +186,7 @@ func TestLoadFromJSONFile(t *testing.T) {
 			}
 		}
 	}`
-	
+
 	err := os.WriteFile(jsonFile, []byte(jsonContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write JSON file: %v", err)
@@ -223,7 +223,7 @@ func TestLoadFromYAMLFile(t *testing.T) {
 	// Create temporary YAML file
 	tempDir := t.TempDir()
 	yamlFile := filepath.Join(tempDir, "config.yaml")
-	
+
 	yamlContent := `
 server:
   name: yaml-server
@@ -240,7 +240,7 @@ security:
     requests: 500
     window: 60000000000
 `
-	
+
 	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write YAML file: %v", err)
@@ -286,7 +286,7 @@ func TestLoadFromTOMLFile(t *testing.T) {
 	// Create temporary TOML file
 	tempDir := t.TempDir()
 	tomlFile := filepath.Join(tempDir, "config.toml")
-	
+
 	tomlContent := `
 [server]
 name = "toml-server"
@@ -305,7 +305,7 @@ enabled = true
 allowedOrigins = ["https://example.com", "https://api.example.com"]
 allowedMethods = ["GET", "POST", "PUT"]
 `
-	
+
 	err := os.WriteFile(tomlFile, []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write TOML file: %v", err)
@@ -344,7 +344,7 @@ allowedMethods = ["GET", "POST", "PUT"]
 
 func TestLoadConfiguration(t *testing.T) {
 	ctx := context.Background()
-	
+
 	// Test default configuration loading
 	config, err := LoadConfiguration(ctx)
 	if err != nil {
@@ -353,26 +353,26 @@ func TestLoadConfiguration(t *testing.T) {
 	if config == nil {
 		t.Error("Expected configuration, got nil")
 	}
-	
+
 	// Test with environment variable config file
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "test-config.json")
-	
+
 	jsonContent := `{
 		"server": {
 			"name": "test-server",
 			"environment": "testing"
 		}
 	}`
-	
+
 	err = os.WriteFile(configFile, []byte(jsonContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
-	
+
 	os.Setenv("TAPIO_CONFIG_FILE", configFile)
 	defer os.Unsetenv("TAPIO_CONFIG_FILE")
-	
+
 	config, err = LoadConfiguration(ctx)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -392,14 +392,14 @@ func TestValidateConfiguration(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected no error for valid configuration, got: %v", err)
 	}
-	
+
 	// Test invalid server name
 	config.Server.Name = ""
 	err = ValidateConfiguration(config)
 	if err == nil {
 		t.Error("Expected error for empty server name")
 	}
-	
+
 	// Test invalid port
 	config = DefaultConfiguration()
 	config.Endpoints[0].Port = 0
@@ -407,7 +407,7 @@ func TestValidateConfiguration(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for invalid port")
 	}
-	
+
 	// Test invalid log level
 	config = DefaultConfiguration()
 	config.Server.LogLevel = "invalid"
@@ -426,7 +426,7 @@ func TestGetEnvironmentSpecificConfig(t *testing.T) {
 	if config.Server.Environment != "development" {
 		t.Errorf("Expected environment 'development', got '%s'", config.Server.Environment)
 	}
-	
+
 	// Test production environment
 	config, err = GetEnvironmentSpecificConfig("production")
 	if err != nil {
@@ -438,7 +438,7 @@ func TestGetEnvironmentSpecificConfig(t *testing.T) {
 	if !config.Security.TLS.Enabled {
 		t.Error("Expected TLS to be enabled in production")
 	}
-	
+
 	// Test testing environment
 	config, err = GetEnvironmentSpecificConfig("testing")
 	if err != nil {
@@ -453,7 +453,7 @@ func TestGetEnvironmentSpecificConfig(t *testing.T) {
 	if config.Metrics.Enabled {
 		t.Error("Expected metrics to be disabled in testing")
 	}
-	
+
 	// Test invalid environment
 	config, err = GetEnvironmentSpecificConfig("invalid")
 	if err == nil {
@@ -467,7 +467,7 @@ func TestGetEnvironmentSpecificConfig(t *testing.T) {
 func TestConfigurationManager(t *testing.T) {
 	ctx := context.Background()
 	manager := NewConfigurationManager(nil)
-	
+
 	// Test loading configuration
 	config, err := manager.LoadConfiguration(ctx)
 	if err != nil {
@@ -476,7 +476,7 @@ func TestConfigurationManager(t *testing.T) {
 	if config == nil {
 		t.Error("Expected configuration, got nil")
 	}
-	
+
 	// Test getting configuration
 	retrievedConfig := manager.GetConfiguration()
 	if retrievedConfig == nil {
@@ -485,7 +485,7 @@ func TestConfigurationManager(t *testing.T) {
 	if retrievedConfig.Server.Name != config.Server.Name {
 		t.Errorf("Expected same server name, got different values")
 	}
-	
+
 	// Test updating configuration
 	newConfig := DefaultConfiguration()
 	newConfig.Server.Name = "updated-server"
@@ -493,12 +493,12 @@ func TestConfigurationManager(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
-	
+
 	retrievedConfig = manager.GetConfiguration()
 	if retrievedConfig.Server.Name != "updated-server" {
 		t.Errorf("Expected server name 'updated-server', got '%s'", retrievedConfig.Server.Name)
 	}
-	
+
 	// Test updating server config
 	serverConfig := &domain.ServerConfig{
 		Name:            "new-server",
@@ -514,7 +514,7 @@ func TestConfigurationManager(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
-	
+
 	retrievedConfig = manager.GetConfiguration()
 	if retrievedConfig.Server.Name != "new-server" {
 		t.Errorf("Expected server name 'new-server', got '%s'", retrievedConfig.Server.Name)
@@ -539,9 +539,9 @@ func TestMergeConfigurations(t *testing.T) {
 			},
 		},
 	}
-	
+
 	mergeConfigurations(target, source)
-	
+
 	// Test merged values
 	if target.Server.Name != "merged-server" {
 		t.Errorf("Expected server name 'merged-server', got '%s'", target.Server.Name)
@@ -558,7 +558,7 @@ func TestMergeConfigurations(t *testing.T) {
 	if target.Security.TLS.CertFile != "/new/cert.pem" {
 		t.Errorf("Expected cert file '/new/cert.pem', got '%s'", target.Security.TLS.CertFile)
 	}
-	
+
 	// Test that non-zero values from target are preserved
 	if target.Server.Environment != "development" {
 		t.Errorf("Expected environment 'development' to be preserved, got '%s'", target.Server.Environment)
@@ -571,12 +571,12 @@ func TestMergeConfigurations(t *testing.T) {
 func TestLoadFromFileUnsupportedFormat(t *testing.T) {
 	tempDir := t.TempDir()
 	unsupportedFile := filepath.Join(tempDir, "config.xml")
-	
+
 	err := os.WriteFile(unsupportedFile, []byte("<config></config>"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write unsupported file: %v", err)
 	}
-	
+
 	config := DefaultConfiguration()
 	err = loadFromFile(config, unsupportedFile)
 	if err == nil {

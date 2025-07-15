@@ -93,11 +93,11 @@ func newVersionCommand() *cobra.Command {
 func runCheck(targets []string, all bool) error {
 	// Create CLI application with DI
 	app := di.NewCLIApplication()
-	
+
 	// Start application
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	if err := app.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start CLI application: %w", err)
 	}
@@ -148,7 +148,7 @@ func outputCheckResults(response *client.CheckResponse) error {
 		// JSON output would be implemented here
 		fmt.Printf("{\"status\": \"%s\", \"summary\": \"%s\"}\n", response.Status, response.Summary)
 	case "yaml":
-		// YAML output would be implemented here  
+		// YAML output would be implemented here
 		fmt.Printf("status: %s\nsummary: %s\n", response.Status, response.Summary)
 	default:
 		// Human-readable output
@@ -156,7 +156,7 @@ func outputCheckResults(response *client.CheckResponse) error {
 			fmt.Printf("✅ %s\n", response.Summary)
 		} else {
 			fmt.Printf("⚠️  Issues detected: %s\n", response.Summary)
-			
+
 			for _, issue := range response.Issues {
 				fmt.Printf("\n%s: %s\n", issue.Resource, issue.Message)
 				if issue.Details != "" {

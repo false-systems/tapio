@@ -87,11 +87,11 @@ type ClusterStatus struct {
 
 // API Response types (matching the REST API server)
 type InsightsResponse struct {
-	Resource  string      `json:"resource"`
-	Namespace string      `json:"namespace"`
-	Insights  []*Insight  `json:"insights"`
-	Count     int         `json:"count"`
-	Timestamp time.Time   `json:"timestamp"`
+	Resource  string     `json:"resource"`
+	Namespace string     `json:"namespace"`
+	Insights  []*Insight `json:"insights"`
+	Count     int        `json:"count"`
+	Timestamp time.Time  `json:"timestamp"`
 }
 
 type Insight struct {
@@ -139,7 +139,7 @@ type ClusterHealthResponse struct {
 func (a *App) GetStories() ([]Story, error) {
 	// Try to get insights from all namespaces/resources
 	url := a.serverURL + "/api/v1/insights"
-	
+
 	resp, err := a.httpClient.Get(url)
 	if err != nil {
 		// Fallback to mock data if server is unavailable
@@ -211,7 +211,7 @@ func (a *App) convertInsightToStory(insight *Insight) Story {
 
 	// Convert prediction
 	if insight.Prediction != nil {
-		story.Prediction = fmt.Sprintf("Predicted %s (%.1f%% confidence)", 
+		story.Prediction = fmt.Sprintf("Predicted %s (%.1f%% confidence)",
 			insight.Prediction.Type, insight.Prediction.Confidence*100)
 	}
 
@@ -305,7 +305,7 @@ func (a *App) getMockStories() []Story {
 // GetClusterStatus fetches overall cluster health from tapio-server
 func (a *App) GetClusterStatus() (ClusterStatus, error) {
 	url := a.serverURL + "/api/v1/health/cluster"
-	
+
 	resp, err := a.httpClient.Get(url)
 	if err != nil {
 		// Return mock data if server is unavailable
@@ -359,7 +359,7 @@ func (a *App) ApplyFix(storyID string, actionID string) (bool, error) {
 	// Extract namespace and resource from storyID for API call
 	// This is a simplified implementation - real version would track these properly
 	url := fmt.Sprintf("%s/api/v1/fixes/default/unknown/%s/apply", a.serverURL, actionID)
-	
+
 	resp, err := a.httpClient.Post(url, "application/json", nil)
 	if err != nil {
 		// Simulate fix application if server is unavailable

@@ -49,16 +49,6 @@ type EngineStats struct {
 	ProcessingRate     float64
 }
 
-// Correlation represents a correlation between events
-type Correlation struct {
-	ID          string
-	Type        string
-	Events      []string
-	Confidence  float64
-	Description string
-	Timestamp   time.Time
-}
-
 // Evidence represents evidence supporting an insight
 type Evidence struct {
 	EventID     string

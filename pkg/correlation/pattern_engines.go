@@ -88,9 +88,9 @@ type AnomalyProfile struct {
 }
 
 type Concept struct {
-	ID       string
-	Name     string
-	Related  []string
+	ID      string
+	Name    string
+	Related []string
 }
 
 // Use the existing PatternResult type from ai_stubs.go

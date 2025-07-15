@@ -38,10 +38,10 @@ func NewContext(window foundation.TimeWindow, events []types.Event) *Context {
 	foundationEvents := make([]foundation.Event, len(events))
 	for i, event := range events {
 		foundationEvents[i] = foundation.Event{
-			ID:          event.ID,
-			Timestamp:   event.Timestamp,
-			Source:      foundation.SourceType(event.Source),
-			Type:        event.Type,
+			ID:        event.ID,
+			Timestamp: event.Timestamp,
+			Source:    foundation.SourceType(event.Source),
+			Type:      event.Type,
 			Entity: foundation.Entity{
 				Type:      event.Entity.Type,
 				Name:      event.Entity.Name,

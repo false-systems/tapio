@@ -144,7 +144,7 @@ func (mld *MemoryLeakDetector) Detect(ctx context.Context, events []types.Event,
 			PatternID:      mld.ID(),
 			PatternName:    mld.Name(),
 			Detected:       false,
-			DetectedAt:  time.Now(),
+			DetectedAt:     time.Now(),
 			ProcessingTime: time.Since(startTime),
 		}, nil
 	}
@@ -169,7 +169,7 @@ func (mld *MemoryLeakDetector) Detect(ctx context.Context, events []types.Event,
 			PatternID:      mld.ID(),
 			PatternName:    mld.Name(),
 			Detected:       false,
-			DetectedAt:  time.Now(),
+			DetectedAt:     time.Now(),
 			ProcessingTime: time.Since(startTime),
 		}, nil
 	}
@@ -665,7 +665,7 @@ func parseMemoryString(memStr string) (float64, bool) {
 		"Ti": 1024 * 1024 * 1024 * 1024,
 	}
 
-	for suffix, _ := range suffixes {
+	for suffix := range suffixes {
 		if len(memStr) > len(suffix) && memStr[len(memStr)-len(suffix):] == suffix {
 			// Extract numeric part (simplified)
 			return 1024 * 1024 * 1024, true // Return 1GB as default

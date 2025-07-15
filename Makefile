@@ -10,11 +10,15 @@ BINARY_NAME=tapio
 
 # Build variables
 VERSION ?= dev
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS = -X main.version=$(VERSION) \
-          -X main.gitCommit=$(GIT_COMMIT) \
-          -X main.buildDate=$(BUILD_DATE)
+LDFLAGS = -X github.com/yairfalse/tapio/internal/cli.version=$(VERSION) \
+          -X github.com/yairfalse/tapio/internal/cli.gitCommit=$(GIT_COMMIT) \
+          -X github.com/yairfalse/tapio/internal/cli.buildDate=$(BUILD_DATE)
+
+# Platform detection
+PLATFORM ?= $(shell go env GOOS)
+ARCH ?= $(shell go env GOARCH)
 
 # Coverage settings
 COVERAGE_FILE=coverage.out
@@ -115,6 +119,20 @@ coverage:
 # Generate protobuf code
 proto:
 	@echo "🔧 Generating protobuf code..."
+	@if ! command -v protoc >/dev/null 2>&1; then \
+		echo "❌ protoc not found. Please install protobuf compiler"; \
+		echo "   On macOS: brew install protobuf"; \
+		echo "   On Linux: apt-get install protobuf-compiler"; \
+		exit 1; \
+	fi
+	@if ! command -v protoc-gen-go >/dev/null 2>&1; then \
+		echo "❌ protoc-gen-go not found. Installing..."; \
+		go install google.golang.org/protobuf/cmd/protoc-gen-go@latest; \
+	fi
+	@if ! command -v protoc-gen-go-grpc >/dev/null 2>&1; then \
+		echo "❌ protoc-gen-go-grpc not found. Installing..."; \
+		go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest; \
+	fi
 	@protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		proto/events.proto proto/opinionated_events.proto
@@ -124,21 +142,70 @@ proto:
 
 # Build binary
 build:
+	@echo "🔨 Building $(BINARY_NAME)..."
 	@mkdir -p bin
 	@$(GOBUILD) -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME) ./cmd/tapio
+	@echo "✅ Build complete: bin/$(BINARY_NAME)"
+
+# Build with Docker (all platforms)
+docker-build: ## Build binaries for all platforms using Docker
+	@echo "🐳 Building with Docker..."
+	@mkdir -p bin
+	@docker-compose -f docker-compose.build.yml build
+	@docker-compose -f docker-compose.build.yml run --rm build-standard
+	@docker-compose -f docker-compose.build.yml run --rm build-ebpf
+	@docker-compose -f docker-compose.build.yml run --rm build-darwin
+	@docker-compose -f docker-compose.build.yml run --rm build-windows
+	@echo "✅ Docker build complete. Binaries in bin/"
+	@ls -la bin/
+
+# Build Linux binary with eBPF using Docker
+docker-build-linux-ebpf: ## Build Linux eBPF binary using Docker
+	@echo "🐳 Building Linux eBPF binary with Docker..."
+	@mkdir -p bin
+	@docker-compose -f docker-compose.build.yml build build-ebpf
+	@docker-compose -f docker-compose.build.yml run --rm build-ebpf
+	@echo "✅ Built: bin/tapio-linux-amd64-ebpf"
+
+# Run development environment in Docker
+docker-dev: ## Run development environment in Docker
+	@echo "🐳 Starting development environment..."
+	@docker-compose -f docker-compose.build.yml run --rm -it dev
+
+# Build Docker image
+docker-image: ## Build production Docker image
+	@echo "🐳 Building Docker image..."
+	@docker build -t tapio:latest .
+	@echo "✅ Docker image built: tapio:latest"
+
+# Generate eBPF bindings (Linux only)
+generate-ebpf:
+	@echo "🔧 Generating eBPF bindings..."
+	@if [ "$(PLATFORM)" != "linux" ]; then \
+		echo "⚠️  Warning: eBPF generation is only supported on Linux. Current platform: $(PLATFORM)"; \
+		echo "ℹ️  Stub files will be used for non-Linux builds"; \
+	else \
+		cd ebpf && $(MAKE) generate; \
+	fi
+	@echo "✅ eBPF generation complete"
 
 # Build with eBPF support (Linux only)
-build-ebpf:
-	@mkdir -p bin
-	@$(GOBUILD) -tags ebpf -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-ebpf ./cmd/tapio
+build-ebpf: generate-ebpf
+	@echo "🔨 Building $(BINARY_NAME) with eBPF support..."
+	@if [ "$(PLATFORM)" != "linux" ]; then \
+		echo "⚠️  Warning: eBPF build is only supported on Linux. Current platform: $(PLATFORM)"; \
+		echo "ℹ️  Building without eBPF support"; \
+		$(GOBUILD) -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME) ./cmd/tapio; \
+	else \
+		@mkdir -p bin; \
+		$(GOBUILD) -tags ebpf -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-ebpf ./cmd/tapio; \
+	fi
+	@echo "✅ Build complete"
 
 # CI checks with eBPF
 ci-ebpf: lint-ebpf build-ebpf test-ebpf
 	@echo "[OK] CI checks with eBPF passed!"
 
-# Clean artifacts
-clean:
-	@rm -rf bin/ dist/ *.out *.html fmt-issues.txt
 
 ##@ Legacy Support
 
@@ -151,6 +218,9 @@ vet:
 # Start agent work with proper branch
 agent-start: ## Start new agent task (prompts for agent, component, action)
 	@echo "🤖 Starting new agent task..."
+	@if [ ! -x ./scripts/agent-branch.sh ]; then \
+		chmod +x ./scripts/agent-branch.sh; \
+	fi
 	@read -p "Agent ID: " agent; \
 	read -p "Component: " component; \
 	read -p "Action: " action; \
@@ -163,6 +233,9 @@ agent-start: ## Start new agent task (prompts for agent, component, action)
 
 # Start agent work with interactive menu
 agent-menu: ## Start new agent task with interactive menu
+	@if [ ! -x ./scripts/agent-menu.sh ]; then \
+		chmod +x ./scripts/agent-menu.sh; \
+	fi
 	@./scripts/agent-menu.sh
 
 # Agent status overview
@@ -195,11 +268,46 @@ clean: ## Clean all build artifacts and temporary files
 	@echo "🧹 Cleaning up..."
 	@rm -rf bin/ dist/ build/ *.out *.html *.xml *.txt *.json *.sarif
 	@go clean -cache -testcache -modcache
+	@if [ -d ebpf ]; then cd ebpf && $(MAKE) clean; fi
 	@echo "✅ Cleanup completed!"
 
 # Clean and rebuild
 rebuild: clean build ## Clean and rebuild everything
 	@echo "✅ Rebuild completed!"
+
+##@ CI/CD Targets
+
+# CI Quality checks target
+ci-quality: fmt lint vet
+	@echo "✅ CI Quality checks passed!"
+
+# Check coverage threshold
+check-coverage:
+	@echo "📊 Checking coverage threshold..."
+	@if [ -f coverage.out ]; then \
+		COVERAGE=$$(go tool cover -func=coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'); \
+		echo "Current coverage: $$COVERAGE%"; \
+		echo "Threshold: $(COVERAGE_THRESHOLD)%"; \
+		if command -v bc >/dev/null 2>&1; then \
+			if [ $$(echo "$$COVERAGE >= $(COVERAGE_THRESHOLD)" | bc -l) -eq 1 ]; then \
+				echo "✅ Coverage threshold met"; \
+			else \
+				echo "❌ Coverage below threshold"; \
+				exit 1; \
+			fi; \
+		else \
+			echo "⚠️  bc not available, skipping threshold check"; \
+		fi; \
+	else \
+		echo "❌ No coverage file found"; \
+		exit 1; \
+	fi
+
+# CI Integration tests
+ci-integration:
+	@echo "🧪 Running integration tests..."
+	@$(GOTEST) -tags=integration ./test/integration/...
+	@echo "✅ Integration tests passed!"
 
 # ==========================================
 # Performance & Benchmarking
@@ -231,6 +339,9 @@ bench-mem: ## Run benchmarks with memory profiling
 # Profile-Guided Optimization (PGO) workflow
 bench-pgo: ## Run complete PGO benchmark workflow
 	@echo "🎯 Running Profile-Guided Optimization workflow..."
+	@if [ ! -x ./scripts/benchmark-pgo.sh ]; then \
+		chmod +x ./scripts/benchmark-pgo.sh; \
+	fi
 	@./scripts/benchmark-pgo.sh
 	@echo "✅ PGO workflow completed! Check profiles/ directory"
 
@@ -286,6 +397,22 @@ build-pgo: ## Build with Profile-Guided Optimization
 # ==========================================
 
 ##@ Utilities
+
+# Validate build environment
+validate-env: ## Check build environment and dependencies
+	@echo "🔍 Validating build environment..."
+	@echo "Go version: $$(go version)"
+	@if ! command -v go >/dev/null 2>&1; then \
+		echo "❌ Go not found. Please install Go"; \
+		exit 1; \
+	fi
+	@echo "Git version: $$(git --version)"
+	@if ! command -v git >/dev/null 2>&1; then \
+		echo "❌ Git not found. Please install Git"; \
+		exit 1; \
+	fi
+	@echo "Platform: $(PLATFORM)/$(ARCH)"
+	@echo "✅ Build environment OK"
 
 # Quick syntax check
 syntax-check: ## Quick syntax validation

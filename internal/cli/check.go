@@ -375,7 +375,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				progress.Warning("  • eBPF support not compiled in (use 'make build-ebpf')")
 			}
 			progress.Info("Falling back to standard Kubernetes API checks")
-			
+
 			checker, err = simple.NewChecker()
 			if err != nil {
 				progress.Error(err)

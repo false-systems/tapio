@@ -54,13 +54,13 @@ func ListAllPatterns() []types.PatternDetector {
 
 // PatternDetectorInfo provides information about a pattern detector
 type PatternDetectorInfo struct {
-	ID                string               `json:"id"`
-	Name              string               `json:"name"`
-	Description       string               `json:"description"`
-	Category          types.Category `json:"category"`
-	Accuracy          float64              `json:"accuracy"`
-	FalsePositiveRate float64              `json:"false_positive_rate"`
-	Config            types.PatternConfig        `json:"config"`
+	ID                string              `json:"id"`
+	Name              string              `json:"name"`
+	Description       string              `json:"description"`
+	Category          types.Category      `json:"category"`
+	Accuracy          float64             `json:"accuracy"`
+	FalsePositiveRate float64             `json:"false_positive_rate"`
+	Config            types.PatternConfig `json:"config"`
 }
 
 // GetPatternInfo returns information about all registered patterns
@@ -71,14 +71,14 @@ func GetPatternInfo() []PatternDetectorInfo {
 	info := make([]PatternDetectorInfo, len(detectors))
 	for i, detector := range detectors {
 		info[i] = PatternDetectorInfo{
-			ID:                detector.ID(),
-			Name:              detector.Name(),
-			Description:       detector.Description(),
-			Category:          detector.Category(),
+			ID:          detector.ID(),
+			Name:        detector.Name(),
+			Description: detector.Description(),
+			Category:    detector.Category(),
 			// Note: These methods need to be implemented on the detectors
 			// For now, using default values
-			Accuracy:          0.0, // detector.GetAccuracy(),
-			FalsePositiveRate: 0.0, // detector.GetFalsePositiveRate(),
+			Accuracy:          0.0,                   // detector.GetAccuracy(),
+			FalsePositiveRate: 0.0,                   // detector.GetFalsePositiveRate(),
 			Config:            types.PatternConfig{}, // detector.GetConfig(),
 		}
 	}

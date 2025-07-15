@@ -9,16 +9,16 @@ import (
 type EventSource interface {
 	// GetEvents retrieves events matching the filter
 	GetEvents(ctx context.Context, filter Filter) ([]Event, error)
-	
+
 	// Stream provides a continuous stream of events
 	Stream(ctx context.Context, filter Filter) (<-chan Event, error)
-	
+
 	// GetSourceType returns the source type identifier
 	GetSourceType() string
-	
+
 	// IsAvailable checks if the source is available
 	IsAvailable() bool
-	
+
 	// Close closes the event source
 	Close() error
 }
@@ -27,22 +27,22 @@ type EventSource interface {
 type Rule interface {
 	// ID returns the unique rule identifier
 	ID() string
-	
+
 	// Name returns the human-readable rule name
 	Name() string
-	
+
 	// Evaluate evaluates the rule against events in the context
 	Evaluate(ctx *Context) *Result
-	
+
 	// GetMinConfidence returns the minimum confidence threshold
 	GetMinConfidence() float64
-	
+
 	// GetCooldown returns the cooldown period between rule executions
 	GetCooldown() time.Duration
-	
+
 	// IsEnabled checks if the rule is enabled
 	IsEnabled() bool
-	
+
 	// GetCategory returns the rule category
 	GetCategory() Category
 }
@@ -51,10 +51,10 @@ type Rule interface {
 type Context struct {
 	// Time window for this correlation cycle
 	Window TimeWindow
-	
+
 	// Events in the current window
 	Events []Event
-	
+
 	// Correlation metadata
 	CorrelationID string
 	RuleID        string
@@ -69,12 +69,12 @@ func (c *Context) GetEvents(filter Filter) []Event {
 			result = append(result, event)
 		}
 	}
-	
+
 	// Apply limit if specified
 	if filter.Limit > 0 && len(result) > filter.Limit {
 		result = result[:filter.Limit]
 	}
-	
+
 	return result
 }
 
@@ -110,25 +110,25 @@ func (c *Context) GetEventsForEntity(entityType, entityName string) []Event {
 type Engine interface {
 	// ProcessEvents processes a batch of events
 	ProcessEvents(ctx context.Context, events []Event) ([]*Result, error)
-	
+
 	// RegisterRule registers a correlation rule
 	RegisterRule(rule Rule) error
-	
+
 	// UnregisterRule removes a correlation rule
 	UnregisterRule(ruleID string) error
-	
+
 	// GetRules returns all registered rules
 	GetRules() []Rule
-	
+
 	// Start starts the correlation engine
 	Start(ctx context.Context) error
-	
+
 	// Stop stops the correlation engine
 	Stop() error
-	
+
 	// GetStats returns engine statistics
 	GetStats() Stats
-	
+
 	// Health checks the engine health
 	Health() error
 }
@@ -137,16 +137,16 @@ type Engine interface {
 type EventStore interface {
 	// Store stores events
 	Store(ctx context.Context, events []Event) error
-	
+
 	// Get retrieves events by IDs
 	Get(ctx context.Context, ids []string) ([]Event, error)
-	
+
 	// Query queries events with filters
 	Query(ctx context.Context, filter Filter) ([]Event, error)
-	
+
 	// Delete removes events
 	Delete(ctx context.Context, ids []string) error
-	
+
 	// Cleanup removes old events
 	Cleanup(ctx context.Context, before time.Time) error
 }
@@ -155,7 +155,7 @@ type EventStore interface {
 type ResultHandler interface {
 	// HandleResult processes a correlation result
 	HandleResult(ctx context.Context, result *Result) error
-	
+
 	// GetHandlerType returns the handler type
 	GetHandlerType() string
 }
@@ -164,13 +164,13 @@ type ResultHandler interface {
 type MetricsCollector interface {
 	// RecordEventProcessed records an event processing metric
 	RecordEventProcessed(source string, eventType string, duration time.Duration)
-	
+
 	// RecordCorrelationFound records a correlation found metric
 	RecordCorrelationFound(ruleID string, confidence float64)
-	
+
 	// RecordRuleExecution records a rule execution metric
 	RecordRuleExecution(ruleID string, duration time.Duration, success bool)
-	
+
 	// RecordEngineStats records engine statistics
 	RecordEngineStats(stats Stats)
 }
@@ -179,16 +179,16 @@ type MetricsCollector interface {
 type Logger interface {
 	// Debug logs debug messages
 	Debug(msg string, fields ...interface{})
-	
+
 	// Info logs info messages
 	Info(msg string, fields ...interface{})
-	
+
 	// Warn logs warning messages
 	Warn(msg string, fields ...interface{})
-	
+
 	// Error logs error messages
 	Error(msg string, fields ...interface{})
-	
+
 	// With returns a logger with additional fields
 	With(fields ...interface{}) Logger
 }
@@ -199,19 +199,19 @@ type Config struct {
 	WindowSize         time.Duration `json:"window_size"`
 	ProcessingInterval time.Duration `json:"processing_interval"`
 	MaxConcurrentRules int           `json:"max_concurrent_rules"`
-	
+
 	// Event processing
 	MaxEventsPerWindow int           `json:"max_events_per_window"`
 	EventRetention     time.Duration `json:"event_retention"`
-	
+
 	// Result handling
 	MaxResultsPerRule int           `json:"max_results_per_rule"`
 	ResultRetention   time.Duration `json:"result_retention"`
-	
+
 	// Performance
 	EnableMetrics   bool          `json:"enable_metrics"`
 	MetricsInterval time.Duration `json:"metrics_interval"`
-	
+
 	// Logging
 	LogLevel string `json:"log_level"`
 }

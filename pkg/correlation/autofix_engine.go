@@ -11,6 +11,8 @@ import (
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
+// Type aliases are already defined in ai_stubs.go
+
 // AutoFixEngine provides automated remediation capabilities for detected patterns
 type AutoFixEngine struct {
 	// Core components
@@ -706,20 +708,24 @@ func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, res
 	switch result.PatternID {
 	case "memory_leak_oom_cascade":
 		// Calculate new memory limit based on current usage and growth pattern
-		if result.Metrics.MemoryPressure > 0 {
-			currentLimit := result.Metrics.MemoryPressure * 1000 // Simplified calculation
-			newLimit := currentLimit * 1.5                       // Increase by 50%
-			params["new_memory_limit"] = fmt.Sprintf("%.0fMi", newLimit)
-			params["original_memory_limit"] = fmt.Sprintf("%.0fMi", currentLimit)
+		if metrics, ok := result.Metrics.(map[string]interface{}); ok {
+			if memPressure, ok := metrics["MemoryPressure"].(float64); ok && memPressure > 0 {
+				currentLimit := memPressure * 1000 // Simplified calculation
+				newLimit := currentLimit * 1.5     // Increase by 50%
+				params["new_memory_limit"] = fmt.Sprintf("%.0fMi", newLimit)
+				params["original_memory_limit"] = fmt.Sprintf("%.0fMi", currentLimit)
+			}
 		}
 
 	case "network_failure_cascade", "service_dependency_failure":
 		// Calculate new replica count for scaling
-		if result.Impact.AffectedServices > 0 {
-			currentReplicas := 3 // Default assumption
-			newReplicas := currentReplicas + result.Impact.AffectedServices
-			params["new_replica_count"] = fmt.Sprintf("%d", newReplicas)
-			params["original_replica_count"] = fmt.Sprintf("%d", currentReplicas)
+		if impact, ok := result.Impact.(map[string]interface{}); ok {
+			if affectedServices, ok := impact["AffectedServices"].(int); ok && affectedServices > 0 {
+				currentReplicas := 3 // Default assumption
+				newReplicas := currentReplicas + affectedServices
+				params["new_replica_count"] = fmt.Sprintf("%d", newReplicas)
+				params["original_replica_count"] = fmt.Sprintf("%d", currentReplicas)
+			}
 		}
 	}
 

@@ -349,13 +349,6 @@ func (t *Timeline) Clear() {
 	t.timeRange = TimeRange{}
 }
 
-// TimeWindow represents a time window for correlation
-type TimeWindow struct {
-	Start    time.Time
-	End      time.Time
-	Duration time.Duration
-}
-
 // GetEventsInWindow returns events within a time window around a reference time
 func (t *Timeline) GetEventsInWindow(referenceTime time.Time, windowSize time.Duration) []TimelineEvent {
 	window := &TimeRange{

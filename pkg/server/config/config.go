@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/yairfalse/tapio/pkg/server/domain"
 	"gopkg.in/yaml.v3"
-	"github.com/pelletier/go-toml/v2"
 )
 
 // DefaultConfiguration returns a default server configuration
@@ -286,16 +286,16 @@ func loadFromJSONFile(config *domain.Configuration, filename string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file %s: %w", filename, err)
 	}
-	
+
 	// Parse JSON into a temporary structure
 	var jsonConfig domain.Configuration
 	if err := json.Unmarshal(data, &jsonConfig); err != nil {
 		return fmt.Errorf("failed to parse JSON file %s: %w", filename, err)
 	}
-	
+
 	// Merge with existing configuration
 	mergeConfigurations(config, &jsonConfig)
-	
+
 	return nil
 }
 
@@ -305,16 +305,16 @@ func loadFromYAMLFile(config *domain.Configuration, filename string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read YAML file %s: %w", filename, err)
 	}
-	
+
 	// Parse YAML into a temporary structure
 	var yamlConfig domain.Configuration
 	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
 		return fmt.Errorf("failed to parse YAML file %s: %w", filename, err)
 	}
-	
+
 	// Merge with existing configuration
 	mergeConfigurations(config, &yamlConfig)
-	
+
 	return nil
 }
 
@@ -324,16 +324,16 @@ func loadFromTOMLFile(config *domain.Configuration, filename string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read TOML file %s: %w", filename, err)
 	}
-	
+
 	// Parse TOML into a temporary structure
 	var tomlConfig domain.Configuration
 	if err := toml.Unmarshal(data, &tomlConfig); err != nil {
 		return fmt.Errorf("failed to parse TOML file %s: %w", filename, err)
 	}
-	
+
 	// Merge with existing configuration
 	mergeConfigurations(config, &tomlConfig)
-	
+
 	return nil
 }
 
@@ -368,17 +368,17 @@ func mergeConfigurations(target, source *domain.Configuration) {
 	if len(source.Server.Features) > 0 {
 		target.Server.Features = source.Server.Features
 	}
-	
+
 	// Merge endpoints
 	if len(source.Endpoints) > 0 {
 		target.Endpoints = source.Endpoints
 	}
-	
+
 	// Merge middleware
 	if len(source.Middleware) > 0 {
 		target.Middleware = source.Middleware
 	}
-	
+
 	// Merge logging configuration
 	if source.Logging.Level != "" {
 		target.Logging.Level = source.Logging.Level
@@ -397,7 +397,7 @@ func mergeConfigurations(target, source *domain.Configuration) {
 	}
 	target.Logging.Rotation = source.Logging.Rotation
 	target.Logging.Compress = source.Logging.Compress
-	
+
 	// Merge metrics configuration
 	target.Metrics.Enabled = source.Metrics.Enabled
 	if source.Metrics.Endpoint != "" {
@@ -412,7 +412,7 @@ func mergeConfigurations(target, source *domain.Configuration) {
 	if len(source.Metrics.Exporters) > 0 {
 		target.Metrics.Exporters = source.Metrics.Exporters
 	}
-	
+
 	// Merge security configuration only if source has meaningful values
 	if source.Security.TLS.Enabled || source.Security.TLS.CertFile != "" || source.Security.TLS.KeyFile != "" || source.Security.TLS.CAFile != "" {
 		target.Security.TLS.Enabled = source.Security.TLS.Enabled
@@ -426,7 +426,7 @@ func mergeConfigurations(target, source *domain.Configuration) {
 			target.Security.TLS.CAFile = source.Security.TLS.CAFile
 		}
 	}
-	
+
 	if source.Security.Auth.Enabled || source.Security.Auth.Type != "" || len(source.Security.Auth.Config) > 0 {
 		target.Security.Auth.Enabled = source.Security.Auth.Enabled
 		if source.Security.Auth.Type != "" {
@@ -436,7 +436,7 @@ func mergeConfigurations(target, source *domain.Configuration) {
 			target.Security.Auth.Config = source.Security.Auth.Config
 		}
 	}
-	
+
 	if source.Security.RateLimit.Enabled || source.Security.RateLimit.Requests > 0 || source.Security.RateLimit.Window > 0 || source.Security.RateLimit.BurstLimit > 0 {
 		target.Security.RateLimit.Enabled = source.Security.RateLimit.Enabled
 		if source.Security.RateLimit.Requests > 0 {
@@ -449,7 +449,7 @@ func mergeConfigurations(target, source *domain.Configuration) {
 			target.Security.RateLimit.BurstLimit = source.Security.RateLimit.BurstLimit
 		}
 	}
-	
+
 	if source.Security.CORS.Enabled || len(source.Security.CORS.AllowedOrigins) > 0 || len(source.Security.CORS.AllowedMethods) > 0 || len(source.Security.CORS.AllowedHeaders) > 0 {
 		target.Security.CORS.Enabled = source.Security.CORS.Enabled
 		if len(source.Security.CORS.AllowedOrigins) > 0 {

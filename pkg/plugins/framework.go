@@ -13,16 +13,16 @@ type Plugin interface {
 	Name() string
 	Version() string
 	Description() string
-	
+
 	// Lifecycle
 	Initialize(ctx context.Context, config Config) error
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
-	
+
 	// Health and Status
 	HealthCheck(ctx context.Context) (*HealthStatus, error)
 	GetMetrics() *PluginMetrics
-	
+
 	// Configuration
 	GetConfigSchema() ConfigSchema
 	ValidateConfig(config Config) error
@@ -32,25 +32,25 @@ type Plugin interface {
 // ExportPlugin defines the export plugin interface
 type ExportPlugin interface {
 	Plugin
-	
+
 	// Export functionality
 	Export(ctx context.Context, data ExportData) error
 	SupportedFormats() []ExportFormat
 	SupportedDataTypes() []DataType
-	
+
 	// Batching support
 	SupportsBatching() bool
 	GetBatchConfig() *BatchConfig
 }
 
-// CollectorPlugin defines the collector plugin interface  
+// CollectorPlugin defines the collector plugin interface
 type CollectorPlugin interface {
 	Plugin
-	
+
 	// Collection functionality
 	Collect(ctx context.Context) (<-chan CollectorData, error)
 	GetCollectorConfig() *CollectorConfig
-	
+
 	// Data source management
 	GetDataSources() []DataSource
 	EnableDataSource(source DataSource) error
@@ -60,11 +60,11 @@ type CollectorPlugin interface {
 // AnalysisPlugin defines the analysis plugin interface
 type AnalysisPlugin interface {
 	Plugin
-	
+
 	// Analysis functionality
 	Analyze(ctx context.Context, data AnalysisData) (*AnalysisResult, error)
 	GetSupportedAnalysisTypes() []AnalysisType
-	
+
 	// Pattern detection
 	DetectPatterns(ctx context.Context, events []Event) ([]PatternResult, error)
 	GetPatternTypes() []PatternType
@@ -72,12 +72,12 @@ type AnalysisPlugin interface {
 
 // PluginManager manages plugin lifecycle and registry
 type PluginManager struct {
-	plugins    map[string]Plugin
-	registry   *PluginRegistry
-	lifecycle  *LifecycleManager
-	health     *HealthMonitor
-	metrics    *MetricsCollector
-	mutex      sync.RWMutex
+	plugins   map[string]Plugin
+	registry  *PluginRegistry
+	lifecycle *LifecycleManager
+	health    *HealthMonitor
+	metrics   *MetricsCollector
+	mutex     sync.RWMutex
 }
 
 // PluginRegistry manages plugin discovery and loading
@@ -91,27 +91,27 @@ type PluginRegistry struct {
 
 // LifecycleManager manages plugin lifecycle
 type LifecycleManager struct {
-	plugins     map[string]*PluginState
-	startOrder  []string
-	stopOrder   []string
-	timeout     time.Duration
-	mutex       sync.RWMutex
+	plugins    map[string]*PluginState
+	startOrder []string
+	stopOrder  []string
+	timeout    time.Duration
+	mutex      sync.RWMutex
 }
 
 // HealthMonitor monitors plugin health
 type HealthMonitor struct {
-	plugins      map[string]*HealthStatus
+	plugins       map[string]*HealthStatus
 	checkInterval time.Duration
 	healthChecks  map[string]chan *HealthStatus
-	mutex        sync.RWMutex
+	mutex         sync.RWMutex
 }
 
 // MetricsCollector collects plugin metrics
 type MetricsCollector struct {
-	plugins   map[string]*PluginMetrics
+	plugins    map[string]*PluginMetrics
 	collectors map[string]func() *PluginMetrics
-	interval  time.Duration
-	mutex     sync.RWMutex
+	interval   time.Duration
+	mutex      sync.RWMutex
 }
 
 // Data structures
@@ -124,9 +124,9 @@ type ConfigSchema struct {
 }
 
 type HealthStatus struct {
-	Status    HealthStatusType `json:"status"`
-	Message   string           `json:"message"`
-	Timestamp time.Time        `json:"timestamp"`
+	Status    HealthStatusType       `json:"status"`
+	Message   string                 `json:"message"`
+	Timestamp time.Time              `json:"timestamp"`
 	Details   map[string]interface{} `json:"details"`
 }
 
@@ -140,14 +140,14 @@ const (
 )
 
 type PluginMetrics struct {
-	RequestsTotal    int64     `json:"requests_total"`
-	RequestsSuccess  int64     `json:"requests_success"`
-	RequestsFailed   int64     `json:"requests_failed"`
-	AverageLatency   float64   `json:"average_latency_ms"`
-	MemoryUsage      float64   `json:"memory_usage_mb"`
-	CPUUsage         float64   `json:"cpu_usage_percent"`
-	LastActivity     time.Time `json:"last_activity"`
-	CustomMetrics    map[string]interface{} `json:"custom_metrics"`
+	RequestsTotal   int64                  `json:"requests_total"`
+	RequestsSuccess int64                  `json:"requests_success"`
+	RequestsFailed  int64                  `json:"requests_failed"`
+	AverageLatency  float64                `json:"average_latency_ms"`
+	MemoryUsage     float64                `json:"memory_usage_mb"`
+	CPUUsage        float64                `json:"cpu_usage_percent"`
+	LastActivity    time.Time              `json:"last_activity"`
+	CustomMetrics   map[string]interface{} `json:"custom_metrics"`
 }
 
 type PluginInfo struct {
@@ -207,14 +207,14 @@ const (
 )
 
 type ExportData struct {
-	Type      DataType                `json:"type"`
-	Format    ExportFormat            `json:"format"`
-	Content   interface{}             `json:"content"`
-	Metadata  map[string]interface{}  `json:"metadata"`
-	Timestamp time.Time               `json:"timestamp"`
-	Source    string                  `json:"source"`
-	Tags      map[string]string       `json:"tags"`
-	Callback  func(*ExportResult)     `json:"-"`
+	Type      DataType               `json:"type"`
+	Format    ExportFormat           `json:"format"`
+	Content   interface{}            `json:"content"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	Timestamp time.Time              `json:"timestamp"`
+	Source    string                 `json:"source"`
+	Tags      map[string]string      `json:"tags"`
+	Callback  func(*ExportResult)    `json:"-"`
 }
 
 type ExportResult struct {
@@ -250,12 +250,12 @@ type CollectorConfig struct {
 }
 
 type DataSource struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Endpoint    string            `json:"endpoint"`
-	Config      Config            `json:"config"`
-	Enabled     bool              `json:"enabled"`
-	Metadata    map[string]string `json:"metadata"`
+	Name     string            `json:"name"`
+	Type     string            `json:"type"`
+	Endpoint string            `json:"endpoint"`
+	Config   Config            `json:"config"`
+	Enabled  bool              `json:"enabled"`
+	Metadata map[string]string `json:"metadata"`
 }
 
 // Analysis plugin types
@@ -364,12 +364,12 @@ func NewMetricsCollector() *MetricsCollector {
 func (pm *PluginManager) RegisterPlugin(plugin Plugin) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
-	
+
 	name := plugin.Name()
 	if _, exists := pm.plugins[name]; exists {
 		return fmt.Errorf("plugin %s already registered", name)
 	}
-	
+
 	pm.plugins[name] = plugin
 	return nil
 }
@@ -377,7 +377,7 @@ func (pm *PluginManager) RegisterPlugin(plugin Plugin) error {
 func (pm *PluginManager) GetPlugin(name string) (Plugin, bool) {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	plugin, exists := pm.plugins[name]
 	return plugin, exists
 }
@@ -385,7 +385,7 @@ func (pm *PluginManager) GetPlugin(name string) (Plugin, bool) {
 func (pm *PluginManager) ListPlugins() []string {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
-	
+
 	names := make([]string, 0, len(pm.plugins))
 	for name := range pm.plugins {
 		names = append(names, name)
@@ -398,7 +398,7 @@ func (pm *PluginManager) StartPlugin(ctx context.Context, name string) error {
 	if !exists {
 		return fmt.Errorf("plugin %s not found", name)
 	}
-	
+
 	return pm.lifecycle.StartPlugin(ctx, name, plugin)
 }
 
@@ -407,7 +407,7 @@ func (pm *PluginManager) StopPlugin(ctx context.Context, name string) error {
 	if !exists {
 		return fmt.Errorf("plugin %s not found", name)
 	}
-	
+
 	return pm.lifecycle.StopPlugin(ctx, name, plugin)
 }
 
@@ -424,23 +424,23 @@ func (pm *PluginManager) GetPluginMetrics(name string) (*PluginMetrics, error) {
 func (lm *LifecycleManager) StartPlugin(ctx context.Context, name string, plugin Plugin) error {
 	lm.mutex.Lock()
 	defer lm.mutex.Unlock()
-	
+
 	state := &PluginState{
 		Status:    PluginStatusStarting,
 		StartTime: time.Now(),
 	}
 	lm.plugins[name] = state
-	
+
 	// Start with timeout
 	ctx, cancel := context.WithTimeout(ctx, lm.timeout)
 	defer cancel()
-	
+
 	if err := plugin.Start(ctx); err != nil {
 		state.Status = PluginStatusError
 		state.Error = err
 		return err
 	}
-	
+
 	state.Status = PluginStatusRunning
 	return nil
 }
@@ -448,24 +448,24 @@ func (lm *LifecycleManager) StartPlugin(ctx context.Context, name string, plugin
 func (lm *LifecycleManager) StopPlugin(ctx context.Context, name string, plugin Plugin) error {
 	lm.mutex.Lock()
 	defer lm.mutex.Unlock()
-	
+
 	state, exists := lm.plugins[name]
 	if !exists {
 		return fmt.Errorf("plugin %s not found in lifecycle manager", name)
 	}
-	
+
 	state.Status = PluginStatusStopping
-	
+
 	// Stop with timeout
 	ctx, cancel := context.WithTimeout(ctx, lm.timeout)
 	defer cancel()
-	
+
 	if err := plugin.Stop(ctx); err != nil {
 		state.Status = PluginStatusError
 		state.Error = err
 		return err
 	}
-	
+
 	state.Status = PluginStatusStopped
 	return nil
 }
@@ -473,7 +473,7 @@ func (lm *LifecycleManager) StopPlugin(ctx context.Context, name string, plugin 
 func (lm *LifecycleManager) GetPluginState(name string) (*PluginState, bool) {
 	lm.mutex.RLock()
 	defer lm.mutex.RUnlock()
-	
+
 	state, exists := lm.plugins[name]
 	return state, exists
 }
@@ -483,19 +483,19 @@ func (lm *LifecycleManager) GetPluginState(name string) (*PluginState, bool) {
 func (hm *HealthMonitor) GetHealth(name string) (*HealthStatus, error) {
 	hm.mutex.RLock()
 	defer hm.mutex.RUnlock()
-	
+
 	health, exists := hm.plugins[name]
 	if !exists {
 		return nil, fmt.Errorf("plugin %s not found in health monitor", name)
 	}
-	
+
 	return health, nil
 }
 
 func (hm *HealthMonitor) UpdateHealth(name string, status *HealthStatus) {
 	hm.mutex.Lock()
 	defer hm.mutex.Unlock()
-	
+
 	hm.plugins[name] = status
 }
 
@@ -504,18 +504,18 @@ func (hm *HealthMonitor) UpdateHealth(name string, status *HealthStatus) {
 func (mc *MetricsCollector) GetMetrics(name string) (*PluginMetrics, error) {
 	mc.mutex.RLock()
 	defer mc.mutex.RUnlock()
-	
+
 	metrics, exists := mc.plugins[name]
 	if !exists {
 		return nil, fmt.Errorf("plugin %s not found in metrics collector", name)
 	}
-	
+
 	return metrics, nil
 }
 
 func (mc *MetricsCollector) UpdateMetrics(name string, metrics *PluginMetrics) {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
-	
+
 	mc.plugins[name] = metrics
 }

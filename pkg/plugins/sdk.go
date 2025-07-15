@@ -281,7 +281,7 @@ func (bp *BasePlugin) Start(ctx context.Context) error {
 	if bp.started {
 		return fmt.Errorf("plugin already started")
 	}
-	
+
 	bp.started = true
 	bp.sdk.Health().SetHealthy("Plugin started successfully")
 	bp.sdk.Log().Info("Plugin started")
@@ -292,7 +292,7 @@ func (bp *BasePlugin) Stop(ctx context.Context) error {
 	if !bp.started {
 		return fmt.Errorf("plugin not started")
 	}
-	
+
 	bp.started = false
 	bp.sdk.Health().SetHealthy("Plugin stopped")
 	bp.sdk.Log().Info("Plugin stopped")
@@ -338,7 +338,7 @@ func (bp *BasePlugin) UpdateConfig(config Config) error {
 	if err := bp.ValidateConfig(config); err != nil {
 		return err
 	}
-	
+
 	bp.config = config
 	bp.sdk.SetConfig(config)
 	bp.sdk.Log().Info("Plugin config updated")

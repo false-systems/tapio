@@ -13,22 +13,22 @@ type RESTHandler interface {
 	// Health endpoints
 	HealthCheck(w http.ResponseWriter, r *http.Request)
 	GetStatus(w http.ResponseWriter, r *http.Request)
-	
+
 	// Kubernetes analysis endpoints
 	AnalyzeCluster(w http.ResponseWriter, r *http.Request)
 	AnalyzeNamespace(w http.ResponseWriter, r *http.Request)
 	AnalyzeResource(w http.ResponseWriter, r *http.Request)
-	
+
 	// Pattern detection endpoints
 	DetectPatterns(w http.ResponseWriter, r *http.Request)
 	GetPatterns(w http.ResponseWriter, r *http.Request)
-	
+
 	// Metrics endpoints
 	GetMetrics(w http.ResponseWriter, r *http.Request)
-	
+
 	// Event endpoints
 	ProcessEvents(w http.ResponseWriter, r *http.Request)
-	
+
 	// Collector management endpoints
 	RegisterCollector(w http.ResponseWriter, r *http.Request)
 	GetCollectorConfig(w http.ResponseWriter, r *http.Request)
@@ -69,13 +69,13 @@ type RESTClusterAnalysisRequest struct {
 }
 
 type RESTClusterAnalysisResponse struct {
-	Status      string                   `json:"status"`
-	Summary     string                   `json:"summary"`
-	Issues      []*RESTIssue             `json:"issues"`
-	Suggestions []*RESTSuggestion        `json:"suggestions"`
-	Namespaces  []*RESTNamespaceStatus   `json:"namespaces"`
-	Metrics     *RESTClusterMetrics      `json:"metrics"`
-	Timestamp   time.Time                `json:"timestamp"`
+	Status      string                 `json:"status"`
+	Summary     string                 `json:"summary"`
+	Issues      []*RESTIssue           `json:"issues"`
+	Suggestions []*RESTSuggestion      `json:"suggestions"`
+	Namespaces  []*RESTNamespaceStatus `json:"namespaces"`
+	Metrics     *RESTClusterMetrics    `json:"metrics"`
+	Timestamp   time.Time              `json:"timestamp"`
 }
 
 type RESTNamespaceAnalysisRequest struct {
@@ -84,13 +84,13 @@ type RESTNamespaceAnalysisRequest struct {
 }
 
 type RESTNamespaceAnalysisResponse struct {
-	Namespace   string                  `json:"namespace"`
-	Status      string                  `json:"status"`
-	Summary     string                  `json:"summary"`
-	Issues      []*RESTIssue            `json:"issues"`
-	Suggestions []*RESTSuggestion       `json:"suggestions"`
-	Resources   []*RESTResourceStatus   `json:"resources"`
-	Timestamp   time.Time               `json:"timestamp"`
+	Namespace   string                `json:"namespace"`
+	Status      string                `json:"status"`
+	Summary     string                `json:"summary"`
+	Issues      []*RESTIssue          `json:"issues"`
+	Suggestions []*RESTSuggestion     `json:"suggestions"`
+	Resources   []*RESTResourceStatus `json:"resources"`
+	Timestamp   time.Time             `json:"timestamp"`
 }
 
 type RESTResourceAnalysisRequest struct {
@@ -112,9 +112,9 @@ type RESTResourceAnalysisResponse struct {
 
 // Pattern detection endpoints
 type RESTPatternDetectionRequest struct {
-	Events    []*RESTEvent    `json:"events"`
-	Patterns  []string        `json:"patterns"`
-	TimeRange *RESTTimeRange  `json:"time_range"`
+	Events    []*RESTEvent   `json:"events"`
+	Patterns  []string       `json:"patterns"`
+	TimeRange *RESTTimeRange `json:"time_range"`
 }
 
 type RESTPatternDetectionResponse struct {
@@ -254,14 +254,14 @@ type RESTClusterMetrics struct {
 }
 
 type RESTPatternResult struct {
-	PatternId   string      `json:"pattern_id"`
-	PatternName string      `json:"pattern_name"`
-	Detected    bool        `json:"detected"`
-	Confidence  float64     `json:"confidence"`
-	Severity    string      `json:"severity"`
-	Message     string      `json:"message"`
+	PatternId   string       `json:"pattern_id"`
+	PatternName string       `json:"pattern_name"`
+	Detected    bool         `json:"detected"`
+	Confidence  float64      `json:"confidence"`
+	Severity    string       `json:"severity"`
+	Message     string       `json:"message"`
 	Evidence    []*RESTEvent `json:"evidence"`
-	Timestamp   time.Time   `json:"timestamp"`
+	Timestamp   time.Time    `json:"timestamp"`
 }
 
 type RESTPatternInfo struct {
@@ -300,26 +300,26 @@ type RESTNodeInfo struct {
 func WriteJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	
+
 	response := RESTResponse{
 		Success:   statusCode < 400,
 		Data:      data,
 		Timestamp: time.Now(),
 	}
-	
+
 	json.NewEncoder(w).Encode(response)
 }
 
 func WriteJSONError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	
+
 	response := RESTResponse{
 		Success:   false,
 		Error:     message,
 		Timestamp: time.Now(),
 	}
-	
+
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -332,26 +332,26 @@ const (
 	// Health endpoints
 	EndpointHealthCheck = "/health"
 	EndpointStatus      = "/status"
-	
+
 	// Kubernetes analysis endpoints
 	EndpointAnalyzeCluster   = "/analyze/cluster"
 	EndpointAnalyzeNamespace = "/analyze/namespace"
 	EndpointAnalyzeResource  = "/analyze/resource"
-	
+
 	// Pattern detection endpoints
 	EndpointDetectPatterns = "/patterns/detect"
 	EndpointGetPatterns    = "/patterns"
-	
+
 	// Metrics endpoints
 	EndpointGetMetrics = "/metrics"
-	
+
 	// Event endpoints
 	EndpointProcessEvents = "/events"
-	
+
 	// Collector management endpoints
-	EndpointRegisterCollector      = "/collectors/register"
-	EndpointGetCollectorConfig     = "/collectors/config"
-	EndpointUpdateCollectorConfig  = "/collectors/config"
+	EndpointRegisterCollector     = "/collectors/register"
+	EndpointGetCollectorConfig    = "/collectors/config"
+	EndpointUpdateCollectorConfig = "/collectors/config"
 )
 
 // HTTP methods

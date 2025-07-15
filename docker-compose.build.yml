@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # Build service for standard binary
+  build-standard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: go-builder
+      args:
+        TARGETOS: linux
+        TARGETARCH: amd64
+        BUILD_TAGS: ""
+    volumes:
+      - ./bin:/output
+    command: sh -c "cp /build/tapio /output/tapio-linux-amd64"
+
+  # Build service for eBPF-enabled binary
+  build-ebpf:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: go-builder
+      args:
+        TARGETOS: linux
+        TARGETARCH: amd64
+        BUILD_TAGS: "ebpf"
+    volumes:
+      - ./bin:/output
+    command: sh -c "cp /build/tapio /output/tapio-linux-amd64-ebpf"
+
+  # Build service for macOS binary (no eBPF)
+  build-darwin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: go-builder
+      args:
+        TARGETOS: darwin
+        TARGETARCH: amd64
+        BUILD_TAGS: ""
+    volumes:
+      - ./bin:/output
+    command: sh -c "cp /build/tapio /output/tapio-darwin-amd64"
+
+  # Build service for Windows binary (no eBPF)
+  build-windows:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: go-builder
+      args:
+        TARGETOS: windows
+        TARGETARCH: amd64
+        BUILD_TAGS: ""
+    volumes:
+      - ./bin:/output
+    command: sh -c "cp /build/tapio /output/tapio-windows-amd64.exe"
+
+  # Development environment with hot reload
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - CGO_ENABLED=0
+    working_dir: /workspace
+    command: make dev

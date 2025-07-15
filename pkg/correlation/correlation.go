@@ -23,7 +23,7 @@ func New(config domain.Config, logger domain.Logger) *Correlation {
 	if logger == nil {
 		logger = &noOpLogger{}
 	}
-	
+
 	// Create core engine with injected dependencies
 	engine := core.NewCoreEngine(
 		config,
@@ -31,7 +31,7 @@ func New(config domain.Config, logger domain.Logger) *Correlation {
 		nil, // metricsCollector - can be injected later
 		logger,
 	)
-	
+
 	// Create default event sources based on platform
 	eventSources := []domain.EventSource{
 		sources.NewKubernetesStubSource(), // Always available
@@ -39,7 +39,7 @@ func New(config domain.Config, logger domain.Logger) *Correlation {
 		sources.NewSystemdStubSource(),    // Platform-specific
 		sources.NewJournaldStubSource(),   // Platform-specific
 	}
-	
+
 	return &Correlation{
 		engine:       engine,
 		eventSources: eventSources,
@@ -107,7 +107,7 @@ func (c *Correlation) RegisterDefaultRules() error {
 	if err := c.RegisterRule(rule1); err != nil {
 		return fmt.Errorf("failed to register high frequency rule: %w", err)
 	}
-	
+
 	// Error spike rule
 	rule2 := core.NewErrorSpikeRule(
 		"error_spike",
@@ -116,7 +116,7 @@ func (c *Correlation) RegisterDefaultRules() error {
 	if err := c.RegisterRule(rule2); err != nil {
 		return fmt.Errorf("failed to register error spike rule: %w", err)
 	}
-	
+
 	// Resource exhaustion rule
 	rule3 := core.NewResourceExhaustionRule(
 		"resource_exhaustion",
@@ -125,7 +125,7 @@ func (c *Correlation) RegisterDefaultRules() error {
 	if err := c.RegisterRule(rule3); err != nil {
 		return fmt.Errorf("failed to register resource exhaustion rule: %w", err)
 	}
-	
+
 	// Sequential events rule
 	rule4 := core.NewSequentialEventsRule(
 		"pod_restart_sequence",
@@ -136,7 +136,7 @@ func (c *Correlation) RegisterDefaultRules() error {
 	if err := c.RegisterRule(rule4); err != nil {
 		return fmt.Errorf("failed to register sequential events rule: %w", err)
 	}
-	
+
 	// Cascading failure rule
 	rule5 := core.NewCascadingFailureRule(
 		"cascading_failure",
@@ -145,21 +145,21 @@ func (c *Correlation) RegisterDefaultRules() error {
 	if err := c.RegisterRule(rule5); err != nil {
 		return fmt.Errorf("failed to register cascading failure rule: %w", err)
 	}
-	
+
 	c.logger.Info("registered default correlation rules", "count", 5)
-	
+
 	return nil
 }
 
 // Start starts the correlation service
 func (c *Correlation) Start(ctx context.Context) error {
 	c.logger.Info("starting correlation service")
-	
+
 	// Start the correlation engine
 	if err := c.engine.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start correlation engine: %w", err)
 	}
-	
+
 	// Log available event sources
 	availableSources := 0
 	for _, source := range c.eventSources {
@@ -170,30 +170,30 @@ func (c *Correlation) Start(ctx context.Context) error {
 			c.logger.Debug("event source not available", "source", source.GetSourceType())
 		}
 	}
-	
+
 	c.logger.Info("correlation service started", "available_sources", availableSources)
-	
+
 	return nil
 }
 
 // Stop stops the correlation service
 func (c *Correlation) Stop() error {
 	c.logger.Info("stopping correlation service")
-	
+
 	// Stop the correlation engine
 	if err := c.engine.Stop(); err != nil {
 		return fmt.Errorf("failed to stop correlation engine: %w", err)
 	}
-	
+
 	// Close event sources
 	for _, source := range c.eventSources {
 		if err := source.Close(); err != nil {
 			c.logger.Error("failed to close event source", "source", source.GetSourceType(), "error", err)
 		}
 	}
-	
+
 	c.logger.Info("correlation service stopped")
-	
+
 	return nil
 }
 
@@ -231,8 +231,8 @@ func (c *Correlation) Health() error {
 // noOpLogger is a no-op logger implementation
 type noOpLogger struct{}
 
-func (l *noOpLogger) Debug(msg string, fields ...interface{}) {}
-func (l *noOpLogger) Info(msg string, fields ...interface{})  {}
-func (l *noOpLogger) Warn(msg string, fields ...interface{})  {}
-func (l *noOpLogger) Error(msg string, fields ...interface{}) {}
+func (l *noOpLogger) Debug(msg string, fields ...interface{})  {}
+func (l *noOpLogger) Info(msg string, fields ...interface{})   {}
+func (l *noOpLogger) Warn(msg string, fields ...interface{})   {}
+func (l *noOpLogger) Error(msg string, fields ...interface{})  {}
 func (l *noOpLogger) With(fields ...interface{}) domain.Logger { return l }

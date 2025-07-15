@@ -18,7 +18,7 @@ type App struct {
 func NewApp() *App {
 	// Connect to tapio-engine instead of tapio-server
 	apiClient := NewAPIClient("localhost:9090") // gRPC endpoint for tapio-engine
-	
+
 	return &App{
 		apiClient: apiClient,
 	}
@@ -27,7 +27,7 @@ func NewApp() *App {
 // startup is called when the app starts
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	
+
 	// Connect to engine on startup
 	if err := a.apiClient.Connect(ctx); err != nil {
 		fmt.Printf("Warning: Failed to connect to tapio-engine: %v\n", err)
@@ -92,11 +92,11 @@ type ClusterStatus struct {
 
 // API Response types (matching the REST API server)
 type InsightsResponse struct {
-	Resource  string      `json:"resource"`
-	Namespace string      `json:"namespace"`
-	Insights  []*Insight  `json:"insights"`
-	Count     int         `json:"count"`
-	Timestamp time.Time   `json:"timestamp"`
+	Resource  string     `json:"resource"`
+	Namespace string     `json:"namespace"`
+	Insights  []*Insight `json:"insights"`
+	Count     int        `json:"count"`
+	Timestamp time.Time  `json:"timestamp"`
 }
 
 type Insight struct {
@@ -294,7 +294,7 @@ func (a *App) getMockStories() []Story {
 // GetClusterStatus fetches overall cluster health from tapio-server
 func (a *App) GetClusterStatus() (ClusterStatus, error) {
 	url := a.serverURL + "/api/v1/health/cluster"
-	
+
 	resp, err := a.httpClient.Get(url)
 	if err != nil {
 		// Return mock data if server is unavailable
@@ -348,7 +348,7 @@ func (a *App) ApplyFix(storyID string, actionID string) (bool, error) {
 	// Extract namespace and resource from storyID for API call
 	// This is a simplified implementation - real version would track these properly
 	url := fmt.Sprintf("%s/api/v1/fixes/default/unknown/%s/apply", a.serverURL, actionID)
-	
+
 	resp, err := a.httpClient.Post(url, "application/json", nil)
 	if err != nil {
 		// Simulate fix application if server is unavailable

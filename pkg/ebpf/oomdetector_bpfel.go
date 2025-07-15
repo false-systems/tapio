@@ -26,9 +26,9 @@ func (o *oomdetectorObjects) Close() error {
 
 // oomdetectorMaps contains all maps after they have been loaded into the kernel.
 type oomdetectorMaps struct {
-	Events         *ebpf.Map `ebpf:"events"`
-	LastAllocTime  *ebpf.Map `ebpf:"last_alloc_time"`
-	ProcessMemory  *ebpf.Map `ebpf:"process_memory"`
+	Events        *ebpf.Map `ebpf:"events"`
+	LastAllocTime *ebpf.Map `ebpf:"last_alloc_time"`
+	ProcessMemory *ebpf.Map `ebpf:"process_memory"`
 }
 
 func (m *oomdetectorMaps) Close() error {
@@ -79,7 +79,7 @@ func loadOomdetector() (*ebpf.CollectionSpec, error) {
 				License: "GPL",
 			},
 			"track_memory_free": {
-				Name:    "track_memory_free", 
+				Name:    "track_memory_free",
 				Type:    ebpf.TracePoint,
 				License: "GPL",
 			},
@@ -102,14 +102,14 @@ func loadOomdetector() (*ebpf.CollectionSpec, error) {
 			"process_memory": {
 				Type:       ebpf.Hash,
 				MaxEntries: 10240,
-				KeySize:    4,   // uint32
-				ValueSize:  8,   // uint64
+				KeySize:    4, // uint32
+				ValueSize:  8, // uint64
 			},
 			"last_alloc_time": {
 				Type:       ebpf.Hash,
 				MaxEntries: 1024,
-				KeySize:    4,   // uint32
-				ValueSize:  8,   // uint64
+				KeySize:    4, // uint32
+				ValueSize:  8, // uint64
 			},
 		},
 	}, nil

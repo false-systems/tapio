@@ -1,0 +1,55 @@
+# Development container with all build tools
+FROM golang:1.21-bullseye
+
+# Install development dependencies
+RUN apt-get update && apt-get install -y \
+    # eBPF development
+    clang \
+    llvm \
+    libbpf-dev \
+    linux-headers-generic \
+    bpftool \
+    # Development tools
+    make \
+    git \
+    vim \
+    tmux \
+    htop \
+    strace \
+    tcpdump \
+    # Kubernetes tools
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl \
+    && rm kubectl
+
+# Install Go tools
+RUN go install github.com/go-delve/delve/cmd/dlv@latest \
+    && go install golang.org/x/tools/gopls@latest \
+    && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest \
+    && go install github.com/cilium/ebpf/cmd/bpf2go@latest
+
+# Set up workspace
+WORKDIR /workspace
+
+# Create non-root user for development
+RUN useradd -m -s /bin/bash developer && \
+    usermod -aG sudo developer && \
+    echo 'developer ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Copy go mod files for caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Switch to developer user
+USER developer
+
+# Set environment variables
+ENV GOCACHE=/tmp/go-cache
+ENV GOPATH=/home/developer/go
+ENV PATH=$PATH:$GOPATH/bin
+
+CMD ["/bin/bash"]

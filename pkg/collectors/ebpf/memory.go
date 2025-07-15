@@ -16,13 +16,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cilium/ebpf"
+	ciliumebpf "github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	tapioebpf "github.com/yairfalse/tapio/pkg/ebpf"
 	"github.com/yairfalse/tapio/pkg/events"
 )
 
@@ -175,8 +175,9 @@ type HistoricalOOM struct {
 
 // NewMemoryCollector creates a new memory tracking collector
 func NewMemoryCollector(config collectors.CollectorConfig) (collectors.Collector, error) {
-	if !ebpf.IsAvailable() {
-		return nil, fmt.Errorf("eBPF is not available on this system")
+	availabilityResult := tapioebpf.CheckAvailability()
+	if !availabilityResult.Available {
+		return nil, fmt.Errorf("eBPF is not available on this system: %v", availabilityResult.Details)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -227,7 +228,7 @@ func (mc *MemoryCollector) Start(ctx context.Context) error {
 	}
 
 	// Load eBPF program
-	if err := loadMemorytracker(&mc.objs, nil); err != nil {
+	if err := loadMemorytrackerObjects(&mc.objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF program: %w", err)
 	}
 
@@ -342,7 +343,7 @@ func (mc *MemoryCollector) attachTracepoints() error {
 	allocLink, err := link.Tracepoint(link.TracepointOptions{
 		Group:   "kmem",
 		Name:    "mm_page_alloc",
-		Program: mc.objs.TrackMemoryAlloc,
+		Program: mc.objs.TraceMmPageAlloc,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to attach allocation tracepoint: %w", err)
@@ -353,7 +354,7 @@ func (mc *MemoryCollector) attachTracepoints() error {
 	freeLink, err := link.Tracepoint(link.TracepointOptions{
 		Group:   "kmem",
 		Name:    "mm_page_free",
-		Program: mc.objs.TrackMemoryFree,
+		Program: mc.objs.TraceMmPageFree,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to attach free tracepoint: %w", err)
@@ -364,7 +365,7 @@ func (mc *MemoryCollector) attachTracepoints() error {
 	oomLink, err := link.Tracepoint(link.TracepointOptions{
 		Group:   "oom",
 		Name:    "oom_score_adj_update",
-		Program: mc.objs.TrackOomKill,
+		Program: mc.objs.TraceOomKillProcess,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to attach OOM tracepoint: %w", err)
@@ -375,7 +376,7 @@ func (mc *MemoryCollector) attachTracepoints() error {
 	exitLink, err := link.Tracepoint(link.TracepointOptions{
 		Group:   "sched",
 		Name:    "sched_process_exit",
-		Program: mc.objs.TrackProcessExit,
+		Program: mc.objs.TraceRssStatThrottled,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to attach exit tracepoint: %w", err)
@@ -1720,14 +1721,14 @@ func (mc *MemoryCollector) checkMinimumKernel(compat *KernelCompatibility) bool 
 // checkBPFSupport verifies basic eBPF support
 func (mc *MemoryCollector) checkBPFSupport(compat *KernelCompatibility) {
 	// Try to create a simple BPF map to test support
-	spec := &ebpf.MapSpec{
-		Type:       ebpf.Hash,
+	spec := &ciliumebpf.MapSpec{
+		Type:       ciliumebpf.Hash,
 		KeySize:    4,
 		ValueSize:  8,
 		MaxEntries: 1,
 	}
 
-	testMap, err := ebpf.NewMap(spec)
+	testMap, err := ciliumebpf.NewMap(spec)
 	if err == nil {
 		testMap.Close()
 		compat.SupportsBPF = true
@@ -1740,12 +1741,12 @@ func (mc *MemoryCollector) checkRingBufSupport(compat *KernelCompatibility) {
 	// Ring buffers were introduced in kernel 5.8
 	if compat.Major > 5 || (compat.Major == 5 && compat.Minor >= 8) {
 		// Try to create a small ring buffer to test
-		spec := &ebpf.MapSpec{
-			Type:       ebpf.RingBuf,
+		spec := &ciliumebpf.MapSpec{
+			Type:       ciliumebpf.RingBuf,
 			MaxEntries: 4096,
 		}
 
-		testRingBuf, err := ebpf.NewMap(spec)
+		testRingBuf, err := ciliumebpf.NewMap(spec)
 		if err == nil {
 			testRingBuf.Close()
 			compat.SupportsRingBuf = true

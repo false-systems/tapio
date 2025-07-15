@@ -12,7 +12,7 @@ import (
 func TestCheckCommandWithCorrelation(t *testing.T) {
 	// This is a basic test to ensure the check command works with correlation
 	// In a real test, we would mock the Kubernetes client and correlation service
-	
+
 	// Test that the command is properly initialized
 	if checkCmd == nil {
 		t.Fatal("Check command not initialized")
@@ -34,7 +34,7 @@ func TestCheckCommandWithCorrelation(t *testing.T) {
 
 func TestCorrelationAnalysisOutput(t *testing.T) {
 	// Test the correlation analysis output formatting
-	
+
 	// Create mock correlation result
 	correlationResult := map[string]interface{}{
 		"analysis_type": "intelligent",
@@ -99,7 +99,7 @@ func TestCorrelationAnalysisOutput(t *testing.T) {
 func TestAddCorrelationAnalysis(t *testing.T) {
 	// Test the correlation analysis function
 	ctx := context.Background()
-	
+
 	result := &types.CheckResult{
 		Problems: []types.Problem{
 			{

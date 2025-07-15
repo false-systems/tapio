@@ -9,13 +9,13 @@ import (
 
 // SimpleRule is a basic implementation of the Rule interface
 type SimpleRule struct {
-	id             string
-	name           string
-	category       domain.Category
-	minConfidence  float64
-	cooldown       time.Duration
-	enabled        bool
-	evaluateFunc   func(*domain.Context) *domain.Result
+	id            string
+	name          string
+	category      domain.Category
+	minConfidence float64
+	cooldown      time.Duration
+	enabled       bool
+	evaluateFunc  func(*domain.Context) *domain.Result
 }
 
 // NewSimpleRule creates a new simple rule
@@ -50,7 +50,7 @@ func (r *SimpleRule) Evaluate(ctx *domain.Context) *domain.Result {
 	if r.evaluateFunc == nil {
 		return nil
 	}
-	
+
 	return r.evaluateFunc(ctx)
 }
 
@@ -96,7 +96,7 @@ func NewHighFrequencyRule(id, name string, threshold int, timeWindow time.Durati
 	return NewSimpleRule(id, name, domain.CategoryPerformance, func(ctx *domain.Context) *domain.Result {
 		// Count events in the time window
 		eventCount := len(ctx.Events)
-		
+
 		if eventCount >= threshold {
 			return &domain.Result{
 				ID:          fmt.Sprintf("result-%s-%d", id, time.Now().UnixNano()),
@@ -106,7 +106,7 @@ func NewHighFrequencyRule(id, name string, threshold int, timeWindow time.Durati
 				Events:      ctx.Events,
 			}
 		}
-		
+
 		return nil
 	})
 }
@@ -118,7 +118,7 @@ func NewErrorSpikeRule(id, name string) *SimpleRule {
 		errorEvents := ctx.GetEvents(domain.Filter{
 			Severity: domain.SeverityHigh,
 		})
-		
+
 		if len(errorEvents) > 0 {
 			// Check if errors are clustered in time
 			if len(errorEvents) >= 3 {
@@ -131,7 +131,7 @@ func NewErrorSpikeRule(id, name string) *SimpleRule {
 				}
 			}
 		}
-		
+
 		return nil
 	})
 }
@@ -144,7 +144,7 @@ func NewResourceExhaustionRule(id, name string) *SimpleRule {
 			Category: domain.CategoryResource,
 			Severity: domain.SeverityCritical,
 		})
-		
+
 		if len(resourceEvents) > 0 {
 			return &domain.Result{
 				ID:          fmt.Sprintf("result-%s-%d", id, time.Now().UnixNano()),
@@ -154,7 +154,7 @@ func NewResourceExhaustionRule(id, name string) *SimpleRule {
 				Events:      resourceEvents,
 			}
 		}
-		
+
 		return nil
 	})
 }
@@ -165,7 +165,7 @@ func NewSequentialEventsRule(id, name string, eventTypes []string, maxGap time.D
 		if len(eventTypes) < 2 {
 			return nil
 		}
-		
+
 		// Find events of each type
 		var eventsByType [][]domain.Event
 		for _, eventType := range eventTypes {
@@ -175,13 +175,13 @@ func NewSequentialEventsRule(id, name string, eventTypes []string, maxGap time.D
 			}
 			eventsByType = append(eventsByType, events)
 		}
-		
+
 		// Check if we have a sequence within the time gap
 		// This is a simplified implementation - could be more sophisticated
 		if len(eventsByType) >= 2 {
 			firstType := eventsByType[0]
 			secondType := eventsByType[1]
-			
+
 			for _, first := range firstType {
 				for _, second := range secondType {
 					if second.Timestamp.After(first.Timestamp) {
@@ -199,7 +199,7 @@ func NewSequentialEventsRule(id, name string, eventTypes []string, maxGap time.D
 				}
 			}
 		}
-		
+
 		return nil
 	})
 }
@@ -211,18 +211,18 @@ func NewCascadingFailureRule(id, name string) *SimpleRule {
 		failureEvents := ctx.GetEvents(domain.Filter{
 			Severity: domain.SeverityHigh,
 		})
-		
+
 		if len(failureEvents) < 2 {
 			return nil
 		}
-		
+
 		// Group by entity
 		entityMap := make(map[string][]domain.Event)
 		for _, event := range failureEvents {
 			key := fmt.Sprintf("%s/%s", event.Entity.Type, event.Entity.Name)
 			entityMap[key] = append(entityMap[key], event)
 		}
-		
+
 		// Check if failures span multiple entities
 		if len(entityMap) >= 2 {
 			return &domain.Result{
@@ -233,7 +233,7 @@ func NewCascadingFailureRule(id, name string) *SimpleRule {
 				Events:      failureEvents,
 			}
 		}
-		
+
 		return nil
 	})
 }

@@ -9,7 +9,7 @@ import (
 
 // Container is a dependency injection container
 type Container struct {
-	services map[string]*ServiceDefinition
+	services  map[string]*ServiceDefinition
 	instances map[string]interface{}
 	mutex     sync.RWMutex
 }
@@ -59,7 +59,7 @@ func (c *Container) Register(name string, factory interface{}, singleton bool, t
 	}
 
 	serviceType := factoryType.Out(0)
-	
+
 	c.services[name] = &ServiceDefinition{
 		Name:      name,
 		Type:      serviceType,
@@ -77,7 +77,7 @@ func (c *Container) RegisterInstance(name string, instance interface{}, tags ...
 	defer c.mutex.Unlock()
 
 	instanceType := reflect.TypeOf(instance)
-	
+
 	c.services[name] = &ServiceDefinition{
 		Name:      name,
 		Type:      instanceType,
@@ -85,7 +85,7 @@ func (c *Container) RegisterInstance(name string, instance interface{}, tags ...
 		Singleton: true,
 		Tags:      tags,
 	}
-	
+
 	c.instances[name] = instance
 }
 
@@ -94,7 +94,7 @@ func (c *Container) Get(name string) (interface{}, error) {
 	c.mutex.RLock()
 	serviceDef, exists := c.services[name]
 	c.mutex.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("service %s not found", name)
 	}
@@ -136,9 +136,9 @@ func (c *Container) GetByType(serviceType reflect.Type) (interface{}, error) {
 	defer c.mutex.RUnlock()
 
 	for _, serviceDef := range c.services {
-		if serviceDef.Type == serviceType || 
-		   (serviceDef.Type.Kind() == reflect.Ptr && serviceDef.Type.Elem() == serviceType) ||
-		   serviceDef.Type.Implements(serviceType) {
+		if serviceDef.Type == serviceType ||
+			(serviceDef.Type.Kind() == reflect.Ptr && serviceDef.Type.Elem() == serviceType) ||
+			serviceDef.Type.Implements(serviceType) {
 			c.mutex.RUnlock()
 			return c.Get(serviceDef.Name)
 		}
@@ -180,20 +180,20 @@ func (c *Container) createInstance(serviceDef *ServiceDefinition) (interface{}, 
 	args := make([]reflect.Value, factoryType.NumIn())
 	for i := 0; i < factoryType.NumIn(); i++ {
 		argType := factoryType.In(i)
-		
+
 		// Try to resolve dependency
 		dep, err := c.GetByType(argType)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve dependency %s for service %s: %w", 
+			return nil, fmt.Errorf("failed to resolve dependency %s for service %s: %w",
 				argType.String(), serviceDef.Name, err)
 		}
-		
+
 		args[i] = reflect.ValueOf(dep)
 	}
 
 	// Call factory function
 	results := factoryValue.Call(args)
-	
+
 	// Check for error return
 	if len(results) > 1 {
 		if err, ok := results[1].Interface().(error); ok && err != nil {
@@ -209,7 +209,7 @@ func (c *Container) StartAll(ctx context.Context) error {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	for name, serviceDef := range c.services {
+	for name := range c.services {
 		// Get the service instance
 		service, err := c.Get(name)
 		if err != nil {
@@ -233,7 +233,7 @@ func (c *Container) StopAll(ctx context.Context) error {
 	defer c.mutex.RUnlock()
 
 	var errors []error
-	
+
 	// Stop in reverse order of starting
 	for name := range c.services {
 		if instance, exists := c.instances[name]; exists {
@@ -258,7 +258,7 @@ func (c *Container) HealthCheckAll(ctx context.Context) map[string]error {
 	defer c.mutex.RUnlock()
 
 	results := make(map[string]error)
-	
+
 	for name := range c.services {
 		if instance, exists := c.instances[name]; exists {
 			if checker, ok := instance.(HealthChecker); ok {
@@ -341,12 +341,12 @@ func GetTyped[T any](c *Container, name string) (T, error) {
 	if err != nil {
 		return zero, err
 	}
-	
+
 	typed, ok := service.(T)
 	if !ok {
 		return zero, fmt.Errorf("service %s is not of type %T", name, zero)
 	}
-	
+
 	return typed, nil
 }
 

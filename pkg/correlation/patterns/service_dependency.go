@@ -176,8 +176,8 @@ type DependencyAnomaly struct {
 	RecoveryTime     time.Duration `json:"recovery_time"`
 
 	// Evidence
-	SupportingEvents []types.Event `json:"supporting_events"`
-	MetricDeviations map[string]float64  `json:"metric_deviations"`
+	SupportingEvents []types.Event      `json:"supporting_events"`
+	MetricDeviations map[string]float64 `json:"metric_deviations"`
 
 	// Root cause analysis
 	RootCauseService    string   `json:"root_cause_service"`
