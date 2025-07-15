@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/adapters/sources"
 	"github.com/yairfalse/tapio/pkg/correlation/core"
 	"github.com/yairfalse/tapio/pkg/correlation/domain"
 )
