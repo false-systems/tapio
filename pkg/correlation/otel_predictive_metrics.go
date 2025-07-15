@@ -143,8 +143,6 @@ type PredictionModelType string
 
 const (
 	ModelTypeTimeSeriesRegression PredictionModelType = "time_series_regression"
-	ModelTypeAnomalyDetection     PredictionModelType = "anomaly_detection"
-	ModelTypeClassification       PredictionModelType = "classification"
 	ModelTypeDeepLearning         PredictionModelType = "deep_learning"
 	ModelTypeEnsemble             PredictionModelType = "ensemble"
 )

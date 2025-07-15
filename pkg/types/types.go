@@ -32,11 +32,13 @@ type Summary struct {
 
 // Problem represents an identified issue
 type Problem struct {
-	Resource    ResourceRef `json:"resource"`
-	Severity    Severity    `json:"severity"`
-	Title       string      `json:"title"`
-	Description string      `json:"description"`
-	Prediction  *Prediction `json:"prediction,omitempty"`
+	Resource      ResourceRef `json:"resource"`
+	Severity      Severity    `json:"severity"`
+	Title         string      `json:"title"`
+	Description   string      `json:"description"`
+	Prediction    *Prediction `json:"prediction,omitempty"`
+	NextSteps     []string    `json:"next_steps,omitempty"`
+	SuggestedFix  string      `json:"suggested_fix,omitempty"`
 }
 
 // ResourceRef identifies a Kubernetes resource
@@ -44,6 +46,17 @@ type ResourceRef struct {
 	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
+}
+
+// ResourceInfo provides detailed resource information for watch events
+type ResourceInfo struct {
+	Kind       string            `json:"kind"`
+	Name       string            `json:"name"`
+	Namespace  string            `json:"namespace"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Status     string            `json:"status"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
 }
 
 // Severity levels

@@ -11,6 +11,9 @@ type Event struct {
 	Source      string                 `json:"source"`
 	Type        string                 `json:"type"`
 	Severity    Severity               `json:"severity"`
+	Message     string                 `json:"message,omitempty"`
+	Tags        map[string]string      `json:"tags,omitempty"`
+	Namespace   string                 `json:"namespace,omitempty"`
 	Data        map[string]interface{} `json:"data,omitempty"`
 	Entity      Entity                 `json:"entity"`
 	Attributes  map[string]interface{} `json:"attributes,omitempty"`

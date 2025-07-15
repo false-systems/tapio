@@ -29,7 +29,7 @@ type CorrelationEngine interface {
 type Event = types.Event
 type Severity = types.Severity
 type Filter = foundation.Filter
-type TimeWindow = foundation.TimeWindow
+// TimeWindow is defined in correlators_production.go
 
 // Severity constants for backward compatibility
 const (

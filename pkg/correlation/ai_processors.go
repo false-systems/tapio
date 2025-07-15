@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // FeatureProcessor extracts and processes features from events for AI analysis
@@ -102,7 +102,7 @@ func (fp *FeatureProcessor) ProcessEvent(ctx context.Context, event *types.Event
 	features["timestamp_unix"] = float64(event.Timestamp.Unix())
 	
 	// Event characteristics
-	features["severity_numeric"] = fp.severityToNumeric(event.Severity)
+	features["severity_numeric"] = fp.severityToNumeric(string(event.Severity))
 	features["message_length"] = float64(len(event.Message))
 	features["tag_count"] = float64(len(event.Tags))
 	

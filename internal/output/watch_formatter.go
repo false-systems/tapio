@@ -67,7 +67,7 @@ func (f *StreamFormatter) Format(event *WatchEvent) {
 	}
 }
 
-func (f *StreamFormatter) getEventStyle(event *WatchEvent) (string, func(...interface{}) string) {
+func (f *StreamFormatter) getEventStyle(event *WatchEvent) (string, func(string, ...interface{}) string) {
 	// No problem means it's an informational event
 	if event.Problem == nil {
 		switch event.Type {
@@ -78,7 +78,7 @@ func (f *StreamFormatter) getEventStyle(event *WatchEvent) (string, func(...inte
 		case "DELETED":
 			return "✗", color.YellowString
 		default:
-			return "•", fmt.Sprint
+			return "•", func(format string, args ...interface{}) string { return fmt.Sprintf(format, args...) }
 		}
 	}
 
