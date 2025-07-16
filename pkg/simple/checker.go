@@ -29,18 +29,12 @@ func NewChecker() (*Checker, error) {
 		return nil, enhanceK8sError(err)
 	}
 
-	// Create eBPF monitor with default config (disabled by default)
-	ebpfMonitor := ebpf.NewMonitor(nil)
-
 	checker := &Checker{
-		client:      k8sClient.Clientset,
-		ebpfMonitor: ebpfMonitor,
+		client: k8sClient.Clientset,
 	}
 
-	// Initialize enhanced explainer if eBPF is available
-	if ebpfMonitor != nil {
-		checker.enhancedExplainer = NewSimpleEnhancedExplainer(ebpfMonitor)
-	}
+	// Initialize eBPF monitor if available (Linux + eBPF build)
+	checker.initializeEBPFMonitor(nil)
 
 	return checker, nil
 }
@@ -52,16 +46,12 @@ func NewCheckerWithConfig(ebpfConfig *ebpf.Config) (*Checker, error) {
 		return nil, enhanceK8sError(err)
 	}
 
-	// Create eBPF monitor with provided config
-	ebpfMonitor := ebpf.NewMonitor(ebpfConfig)
-
 	checker := &Checker{
-		client:      k8sClient.Clientset,
-		ebpfMonitor: ebpfMonitor,
+		client: k8sClient.Clientset,
 	}
 
-	// Initialize enhanced explainer
-	checker.enhancedExplainer = NewSimpleEnhancedExplainer(ebpfMonitor)
+	// Initialize eBPF monitor if available (Linux + eBPF build)
+	checker.initializeEBPFMonitor(ebpfConfig)
 
 	return checker, nil
 }

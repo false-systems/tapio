@@ -69,20 +69,36 @@ func NewOTELNativeOutput(config *OTELOutputConfig) (*OTELNativeOutput, error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 	
-	// Create exporter
-	exporter, err := otlptracegrpc.New(
-		context.Background(),
+	// Create exporter with proper configuration
+	opts := []otlptracegrpc.Option{
 		otlptracegrpc.WithEndpoint(config.Endpoint),
-		otlptracegrpc.WithInsecure(),
-	)
+	}
+	
+	if config.Insecure {
+		opts = append(opts, otlptracegrpc.WithInsecure())
+	}
+	
+	if config.Headers != nil && len(config.Headers) > 0 {
+		opts = append(opts, otlptracegrpc.WithHeaders(config.Headers))
+	}
+	
+	if config.Timeout > 0 {
+		opts = append(opts, otlptracegrpc.WithTimeout(config.Timeout))
+	}
+	
+	exporter, err := otlptracegrpc.New(context.Background(), opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTEL exporter: %w", err)
 	}
 	
-	// Create tracer provider
+	// Create tracer provider with batching for performance
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithBatcher(exporter,
+			sdktrace.WithBatchTimeout(time.Second),  // Flush every second
+			sdktrace.WithMaxExportBatchSize(512),    // Max batch size
+		),
 		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()), // Sample everything (we filter intelligently)
 	)
 	
 	otel.SetTracerProvider(tp)
@@ -360,10 +376,22 @@ func (ono *OTELNativeOutput) createPatternSpan(ctx context.Context, pattern corr
 	}
 }
 
-// Close closes the OTEL output
+// Close closes the OTEL output and ensures all traces are sent
 func (ono *OTELNativeOutput) Close() error {
 	if ono.tracerProvider != nil {
-		return ono.tracerProvider.Shutdown(context.Background())
+		// Create a timeout context to ensure we don't hang forever
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		// Force flush any pending traces before shutdown
+		if err := ono.tracerProvider.ForceFlush(ctx); err != nil {
+			return fmt.Errorf("failed to flush traces: %w", err)
+		}
+		
+		// Shutdown the provider which also flushes remaining traces
+		if err := ono.tracerProvider.Shutdown(ctx); err != nil {
+			return fmt.Errorf("failed to shutdown tracer provider: %w", err)
+		}
 	}
 	return nil
 }

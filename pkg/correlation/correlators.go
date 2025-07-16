@@ -716,14 +716,12 @@ func (a *AnomalyAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 	return results
 }
 
-// TrendAnalyzer analyzes trends in the timeline
-type TrendAnalyzer struct {
-	config CorrelatorConfig
-}
+// TrendAnalyzer type is now defined in types_consolidated.go
+// This eliminates the redeclaration conflict
 
-// NewTrendAnalyzer creates a new trend analyzer
-func NewTrendAnalyzer(config CorrelatorConfig) *TrendAnalyzer {
-	return &TrendAnalyzer{config: config}
+// Legacy NewTrendAnalyzer for backward compatibility  
+func NewBasicTrendAnalyzerLegacy(config CorrelatorConfig) *TrendAnalyzer {
+	return NewTrendAnalyzer(config)
 }
 
 func (t *TrendAnalyzer) Name() string {

@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { GetStories, GetClusterStatus, ApplyFix } from '../../wailsjs/go/main/App'
+import OTELTraceView from './OTELTraceView.vue'
 
 interface Story {
   id: string
@@ -47,6 +48,7 @@ const clusterStatus = ref<ClusterStatus | null>(null)
 const loading = ref(true)
 const selectedStory = ref<Story | null>(null)
 const refreshInterval = ref<number | null>(null)
+const activeView = ref<'stories' | 'traces' | 'insights' | 'settings'>('stories')
 
 const startAutoRefresh = () => {
   refreshInterval.value = window.setInterval(async () => {
@@ -131,9 +133,34 @@ onUnmounted(() => {
       </div>
       
       <nav class="header-nav">
-        <button class="nav-item active">Stories</button>
-        <button class="nav-item">Insights</button>
-        <button class="nav-item">Settings</button>
+        <button 
+          class="nav-item" 
+          :class="{ active: activeView === 'stories' }"
+          @click="activeView = 'stories'"
+        >
+          Stories
+        </button>
+        <button 
+          class="nav-item" 
+          :class="{ active: activeView === 'traces' }"
+          @click="activeView = 'traces'"
+        >
+          Traces
+        </button>
+        <button 
+          class="nav-item" 
+          :class="{ active: activeView === 'insights' }"
+          @click="activeView = 'insights'"
+        >
+          Insights
+        </button>
+        <button 
+          class="nav-item" 
+          :class="{ active: activeView === 'settings' }"
+          @click="activeView = 'settings'"
+        >
+          Settings
+        </button>
       </nav>
       
       <div class="header-actions">
@@ -150,8 +177,10 @@ onUnmounted(() => {
     <!-- Main Content -->
     <main class="main">
       <div class="container">
-        <!-- Clean Stats Bar -->
-        <div class="stats-bar">
+        <!-- Stories View -->
+        <div v-if="activeView === 'stories'">
+          <!-- Clean Stats Bar -->
+          <div class="stats-bar">
           <div class="stat">
             <span class="stat-value">{{ stories.length }}</span>
             <span class="stat-label">Active Stories</span>
@@ -259,6 +288,24 @@ onUnmounted(() => {
               </article>
             </div>
           </div>
+        </div>
+        </div>
+        
+        <!-- OTEL Traces View -->
+        <div v-if="activeView === 'traces'">
+          <OTELTraceView />
+        </div>
+        
+        <!-- Insights View (placeholder) -->
+        <div v-if="activeView === 'insights'" class="view-placeholder">
+          <h2>Insights</h2>
+          <p>Advanced correlation insights coming soon...</p>
+        </div>
+        
+        <!-- Settings View (placeholder) -->
+        <div v-if="activeView === 'settings'" class="view-placeholder">
+          <h2>Settings</h2>
+          <p>Configuration options coming soon...</p>
         </div>
       </div>
     </main>
@@ -649,6 +696,28 @@ onUnmounted(() => {
   font-weight: 500;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
+}
+
+/* View Placeholder */
+.view-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  text-align: center;
+  color: var(--gray-500);
+}
+
+.view-placeholder h2 {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--gray-700);
+}
+
+.view-placeholder p {
+  font-size: 16px;
 }
 
 .action-risk.low {

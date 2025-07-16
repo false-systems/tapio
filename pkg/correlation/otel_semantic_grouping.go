@@ -560,7 +560,7 @@ func (seg *SemanticEventGrouper) calculateBehavioralSimilarity(behavioral1, beha
 
 	// Compare anomaly scores
 	if behavioral1.AnomalyScore > 0 && behavioral2.AnomalyScore > 0 {
-		diff := abs(behavioral1.AnomalyScore - behavioral2.AnomalyScore)
+		diff := absFloat32(behavioral1.AnomalyScore - behavioral2.AnomalyScore)
 		score += (1.0 - float64(diff)) * 0.3
 	}
 
@@ -571,7 +571,7 @@ func (seg *SemanticEventGrouper) calculateBehavioralSimilarity(behavioral1, beha
 
 	// Compare entity trust scores
 	if behavioral1.Entity != nil && behavioral2.Entity != nil {
-		trustDiff := abs(float32(behavioral1.Entity.TrustScore - behavioral2.Entity.TrustScore))
+		trustDiff := absFloat32(float32(behavioral1.Entity.TrustScore - behavioral2.Entity.TrustScore))
 		score += (1.0 - float64(trustDiff)) * 0.2
 	}
 
@@ -788,7 +788,7 @@ func (seg *SemanticEventGrouper) generateRecommendedActions(group *SemanticGroup
 
 // Utility functions
 
-func abs(x float32) float32 {
+func absFloat32(x float32) float32 {
 	if x < 0 {
 		return -x
 	}

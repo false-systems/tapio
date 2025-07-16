@@ -65,26 +65,35 @@ type SemanticPattern struct {
 }
 
 type BehaviorProfile struct {
-	ID       string
-	Baseline map[string]float64
+	ID          string
+	Baseline    map[string]float64
+	Anomalies   []string
+	LastUpdated time.Time
 }
 
 type TemporalSequence struct {
 	ID       string
 	Events   []string
 	Duration time.Duration
+	Pattern  string
+	Period   time.Duration // For periodic patterns
 }
 
 type CausalChain struct {
-	ID     string
-	Causes []string
-	Effect string
+	ID         string
+	Causes     []string
+	Effect     string
+	Confidence float64
+	Timestamp  time.Time
 }
 
 type AnomalyProfile struct {
 	ID        string
 	Threshold float64
 	Metrics   map[string]float64
+	Deviation float64
+	Severity  string
+	Timestamp time.Time
 }
 
 type Concept struct {
@@ -94,6 +103,14 @@ type Concept struct {
 }
 
 // PatternResult represents pattern detection results
+type PatternResult struct {
+	PatternID   string
+	PatternType string
+	Confidence  float64
+	Description string
+	Timestamp   time.Time
+	Evidence    map[string]interface{}
+}
 
 // Constructor functions
 func NewSemanticPatternEngine() *SemanticPatternEngine {
@@ -176,28 +193,159 @@ func NewIndexManager() *IndexManager {
 	}
 }
 
-// Stub methods for pattern engines
+// DetectPatterns analyzes events for semantic patterns
 func (e *SemanticPatternEngine) DetectPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternResult, error) {
-	// Stub implementation
-	return []*PatternResult{}, nil
+	var results []*PatternResult
+	
+	// Extract semantic features from event
+	features := e.extractSemanticFeatures(event)
+	
+	// Match against known patterns
+	for _, pattern := range e.patterns {
+		if score := e.calculateSemanticSimilarity(features, pattern); score > 0.7 {
+			results = append(results, &PatternResult{
+				PatternID:   pattern.ID,
+				PatternType: "semantic",
+				Confidence:  score,
+				Description: pattern.Description,
+				Timestamp:   time.Now(),
+				Evidence: map[string]interface{}{
+					"keywords_matched": e.findMatchingKeywords(event, pattern),
+					"semantic_score":   score,
+				},
+			})
+		}
+	}
+	
+	return results, nil
 }
 
 func (e *BehavioralPatternEngine) AnalyzeBehavior(ctx context.Context, event *opinionated.OpinionatedEvent) (*BehaviorProfile, error) {
-	// Stub implementation
-	return &BehaviorProfile{}, nil
+	// Get or create behavior profile for this resource
+	profileID := event.Source + ":" + event.ResourceID
+	profile, exists := e.behaviors[profileID]
+	if !exists {
+		profile = &BehaviorProfile{
+			ID:       profileID,
+			Baseline: make(map[string]float64),
+		}
+		e.behaviors[profileID] = profile
+	}
+	
+	// Extract behavioral metrics
+	metrics := e.extractBehavioralMetrics(event)
+	
+	// Update baseline with exponential moving average
+	for metric, value := range metrics {
+		if baseline, exists := profile.Baseline[metric]; exists {
+			// EMA with alpha=0.1
+			profile.Baseline[metric] = baseline*0.9 + value*0.1
+		} else {
+			profile.Baseline[metric] = value
+		}
+	}
+	
+	// Detect anomalies
+	profile.Anomalies = e.detectBehavioralAnomalies(metrics, profile.Baseline)
+	profile.LastUpdated = time.Now()
+	
+	return profile, nil
 }
 
 func (e *TemporalPatternEngine) DetectSequences(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]*TemporalSequence, error) {
-	// Stub implementation
-	return []*TemporalSequence{}, nil
+	var sequences []*TemporalSequence
+	
+	// Sort events by timestamp
+	e.sortEventsByTime(events)
+	
+	// Sliding window analysis
+	windowSize := 5 // Look at 5 events at a time
+	for i := 0; i <= len(events)-windowSize; i++ {
+		window := events[i : i+windowSize]
+		
+		// Check for known temporal patterns
+		if seq := e.matchKnownSequence(window); seq != nil {
+			sequences = append(sequences, seq)
+		}
+		
+		// Detect periodic patterns
+		if seq := e.detectPeriodicPattern(window); seq != nil {
+			sequences = append(sequences, seq)
+		}
+		
+		// Detect cascading failures
+		if seq := e.detectCascade(window); seq != nil {
+			sequences = append(sequences, seq)
+		}
+	}
+	
+	return sequences, nil
 }
 
 func (e *CausalityPatternEngine) FindCausalChains(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*CausalChain, error) {
-	// Stub implementation
-	return []*CausalChain{}, nil
+	var chains []*CausalChain
+	
+	// Build causality graph from recent events
+	graph := e.buildCausalityGraph(event)
+	
+	// Find chains where this event is the effect
+	for causeID, causes := range graph {
+		if e.isRelated(event, causeID) {
+			chain := &CausalChain{
+				ID:         "chain_" + event.ID,
+				Causes:     causes,
+				Effect:     event.ID,
+				Confidence: e.calculateCausalConfidence(causes, event),
+				Timestamp:  time.Now(),
+			}
+			chains = append(chains, chain)
+			e.causalChains[chain.ID] = chain
+		}
+	}
+	
+	// Apply temporal causality rules
+	chains = e.applyTemporalCausality(chains, event)
+	
+	return chains, nil
 }
 
 func (e *AnomalyPatternEngine) DetectAnomalies(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*AnomalyProfile, error) {
-	// Stub implementation
-	return []*AnomalyProfile{}, nil
+	var anomalies []*AnomalyProfile
+	
+	// Extract metrics from event
+	metrics := e.extractMetrics(event)
+	
+	// Statistical anomaly detection
+	for metricName, value := range metrics {
+		profileID := event.ResourceID + ":" + metricName
+		profile, exists := e.anomalies[profileID]
+		
+		if !exists {
+			// Create new anomaly profile
+			profile = &AnomalyProfile{
+				ID:        profileID,
+				Threshold: 3.0, // 3 standard deviations
+				Metrics:   make(map[string]float64),
+			}
+			e.anomalies[profileID] = profile
+		}
+		
+		// Update statistics
+		e.updateStatistics(profile, metricName, value)
+		
+		// Check for anomaly
+		if e.isAnomaly(profile, value) {
+			anomalyResult := &AnomalyProfile{
+				ID:          "anomaly_" + event.ID + "_" + metricName,
+				Threshold:   profile.Threshold,
+				Metrics:     map[string]float64{metricName: value},
+				Deviation:   e.calculateDeviation(profile, value),
+				Severity:    e.calculateSeverity(profile, value),
+				Timestamp:   time.Now(),
+			}
+			anomalies = append(anomalies, anomalyResult)
+		}
+	}
+	
+	return anomalies, nil
 }

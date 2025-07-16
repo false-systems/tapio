@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/adapters/sources"
 	"github.com/yairfalse/tapio/pkg/correlation/core"
 	"github.com/yairfalse/tapio/pkg/correlation/domain"
 )
@@ -33,11 +32,12 @@ func New(config domain.Config, logger domain.Logger) *Correlation {
 	)
 
 	// Create default event sources based on platform
+	// TODO: Fix import cycle - sources package imports correlation
 	eventSources := []domain.EventSource{
-		sources.NewKubernetesStubSource(), // Always available
-		sources.NewEBPFStubSource(),       // Platform-specific
-		sources.NewSystemdStubSource(),    // Platform-specific
-		sources.NewJournaldStubSource(),   // Platform-specific
+		// sources.NewKubernetesStubSource(), // Always available
+		// sources.NewEBPFStubSource(),       // Platform-specific
+		// sources.NewSystemdStubSource(),    // Platform-specific
+		// sources.NewJournaldStubSource(),   // Platform-specific
 	}
 
 	return &Correlation{

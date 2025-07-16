@@ -10,8 +10,9 @@ import (
 
 // App struct - Tapio GUI client that connects to tapio-engine
 type App struct {
-	ctx       context.Context
-	apiClient *APIClient
+	ctx         context.Context
+	apiClient   *APIClient
+	otelBackend *OTELBackend // Connection to OTEL backend (Jaeger/Tempo)
 }
 
 // NewApp creates a new Tapio GUI application

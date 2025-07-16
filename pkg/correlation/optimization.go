@@ -11,8 +11,11 @@ import (
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
-// PerformanceOptimizer provides comprehensive performance optimization for correlation engine
-type PerformanceOptimizer struct {
+// PerformanceOptimizer type is now defined in types_consolidated.go
+// This eliminates the redeclaration conflict
+
+// LegacyPerformanceOptimizer provides the original implementation for backward compatibility
+type LegacyPerformanceOptimizer struct {
 	// Core components
 	engine    *PatternIntegratedEngine
 	profiler  *PerformanceProfiler
@@ -20,7 +23,7 @@ type PerformanceOptimizer struct {
 	monitor   *PerformanceMonitor
 
 	// Optimization state
-	config         *OptimizationConfig
+	config         *LegacyOptimizationConfig
 	optimizations  map[string]*OptimizationStrategy
 	activeProfiles map[string]*PerformanceProfile
 
@@ -30,8 +33,9 @@ type PerformanceOptimizer struct {
 	mutex            sync.RWMutex
 }
 
-// OptimizationConfig configures performance optimization behavior
-type OptimizationConfig struct {
+// OptimizationConfig is now defined in types_consolidated.go
+// LegacyOptimizationConfig provides backward compatibility
+type LegacyOptimizationConfig struct {
 	// Monitoring settings
 	ProfilingEnabled      bool                   `json:"profiling_enabled"`
 	MonitoringInterval    time.Duration          `json:"monitoring_interval"`
@@ -57,6 +61,35 @@ type OptimizationConfig struct {
 	EnableCPUOptimization         bool `json:"enable_cpu_optimization"`
 	EnableCacheOptimization       bool `json:"enable_cache_optimization"`
 	EnableConcurrencyOptimization bool `json:"enable_concurrency_optimization"`
+}
+
+// DefaultLegacyOptimizationConfig returns default optimization configuration
+func DefaultLegacyOptimizationConfig() *LegacyOptimizationConfig {
+	return &LegacyOptimizationConfig{
+		ProfilingEnabled:      true,
+		MonitoringInterval:    30 * time.Second,
+		PerformanceThresholds: &PerformanceThresholds{
+			MaxLatency:     10 * time.Second,
+			MinThroughput:  100.0,
+			MaxMemoryUsage: 100 * 1024 * 1024, // 100MB
+			MaxCPUUsage:    80.0,
+			MinAccuracy:    0.95,
+			MaxErrorRate:   0.05,
+		},
+		AutoOptimization:              true,
+		OptimizationInterval:          5 * time.Minute,
+		AdaptiveOptimization:          true,
+		MaxMemoryUsage:               100 * 1024 * 1024, // 100MB
+		MaxCPUUsage:                  80.0,
+		MaxGoroutines:                100,
+		TargetLatency:                time.Second,
+		TargetThroughput:             1000.0,
+		TargetAccuracy:               0.95,
+		EnableMemoryOptimization:     true,
+		EnableCPUOptimization:        true,
+		EnableCacheOptimization:      true,
+		EnableConcurrencyOptimization: true,
+	}
 }
 
 // PerformanceThresholds defines when optimization should trigger
@@ -858,7 +891,7 @@ type BenchmarkMetric struct {
 
 // NewPerformanceOptimizer creates a comprehensive performance optimizer
 func NewPerformanceOptimizer(engine *PatternIntegratedEngine) *PerformanceOptimizer {
-	config := DefaultOptimizationConfig()
+	config := DefaultLegacyOptimizationConfig()
 
 	return &PerformanceOptimizer{
 		engine:           engine,
@@ -873,8 +906,8 @@ func NewPerformanceOptimizer(engine *PatternIntegratedEngine) *PerformanceOptimi
 }
 
 // DefaultOptimizationConfig returns default optimization configuration
-func DefaultOptimizationConfig() *OptimizationConfig {
-	return &OptimizationConfig{
+func DefaultOptimizationConfig() *LegacyOptimizationConfig {
+	return &LegacyOptimizationConfig{
 		ProfilingEnabled:              true,
 		MonitoringInterval:            30 * time.Second,
 		AutoOptimization:              true,

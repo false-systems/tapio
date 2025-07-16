@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tapio Insights - Clean GCP Style</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Google Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #F8F9FA;
+            color: #202124;
+        }
+
+        /* Header */
+        .insights-header {
+            background: #FFFFFF;
+            border-bottom: 1px solid #DADCE0;
+            padding: 24px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .view-title {
+            font-size: 24px;
+            font-weight: 400;
+            color: #202124;
+            margin: 0;
+            letter-spacing: -0.02em;
+        }
+
+        .view-subtitle {
+            font-size: 14px;
+            color: #5F6368;
+            margin: 4px 0 0 0;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .filter-select {
+            height: 36px;
+            padding: 0 12px;
+            border: 1px solid #DADCE0;
+            border-radius: 4px;
+            background: #FFFFFF;
+            color: #202124;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-select:hover {
+            border-color: #5F6368;
+        }
+
+        .icon-button {
+            width: 36px;
+            height: 36px;
+            border: 1px solid #DADCE0;
+            border-radius: 4px;
+            background: #FFFFFF;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .icon-button:hover {
+            background: #F8F9FA;
+            border-color: #5F6368;
+        }
+
+        /* Container */
+        .insights-container {
+            padding: 24px 32px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Insight Cards */
+        .insights-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .insight-card {
+            background: #FFFFFF;
+            border: 1px solid #DADCE0;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .insight-card:hover {
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .insight-summary {
+            padding: 20px 24px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .insight-main {
+            flex: 1;
+            margin-right: 24px;
+        }
+
+        .insight-header {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .insight-operation {
+            font-size: 16px;
+            font-weight: 500;
+            color: #202124;
+        }
+
+        .insight-service {
+            font-size: 14px;
+            color: #5F6368;
+        }
+
+        .insight-context {
+            font-size: 14px;
+            color: #5F6368;
+            line-height: 1.5;
+        }
+
+        .insight-meta {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .insight-severity {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .severity-critical {
+            background: #FCE8E6;
+            color: #D93025;
+        }
+
+        .severity-high {
+            background: #FEF7E0;
+            color: #F9AB00;
+        }
+
+        .severity-normal {
+            background: #E6F4EA;
+            color: #1E8E3E;
+        }
+
+        .insight-duration {
+            font-size: 14px;
+            font-weight: 500;
+            color: #202124;
+        }
+
+        .insight-time {
+            font-size: 14px;
+            color: #5F6368;
+        }
+
+        /* Expanded Details */
+        .insight-details {
+            border-top: 1px solid #DADCE0;
+            padding: 24px;
+            background: #FAFAFA;
+            display: none;
+        }
+
+        .insight-details.expanded {
+            display: block;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #202124;
+            margin: 0 0 16px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Flow Timeline */
+        .flow-timeline {
+            background: #FFFFFF;
+            border: 1px solid #DADCE0;
+            border-radius: 4px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .flow-node {
+            margin-bottom: 12px;
+        }
+
+        .node-bar {
+            height: 4px;
+            border-radius: 2px;
+            margin-bottom: 4px;
+        }
+
+        .bar-critical { background: #D93025; }
+        .bar-high { background: #F9AB00; }
+        .bar-normal { background: #1E8E3E; }
+
+        .node-content {
+            padding: 4px 0;
+        }
+
+        .node-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #202124;
+            margin-bottom: 2px;
+        }
+
+        .node-info {
+            display: flex;
+            gap: 12px;
+            font-size: 12px;
+        }
+
+        .node-service {
+            color: #5F6368;
+        }
+
+        .node-duration {
+            font-weight: 500;
+            color: #202124;
+        }
+
+        /* Findings */
+        .findings-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .finding {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            background: #FFFFFF;
+            border: 1px solid #DADCE0;
+            border-radius: 4px;
+        }
+
+        .finding-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .finding-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #202124;
+            margin: 0 0 4px 0;
+        }
+
+        .finding-detail {
+            font-size: 13px;
+            color: #5F6368;
+            margin: 0;
+        }
+
+        /* Link Button */
+        .link-button {
+            padding: 8px 16px;
+            background: #1A73E8;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .link-button:hover {
+            background: #1765CC;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="insights-header">
+        <div class="header-content">
+            <h2 class="view-title">Insights</h2>
+            <p class="view-subtitle">Deep technical context for every story</p>
+        </div>
+        
+        <div class="header-actions">
+            <div class="filter-group">
+                <select class="filter-select">
+                    <option>All services</option>
+                    <option>tapio-relay</option>
+                    <option>tapio-engine</option>
+                </select>
+                
+                <select class="filter-select">
+                    <option>Last hour</option>
+                    <option>Last 6 hours</option>
+                    <option>Last 24 hours</option>
+                </select>
+                
+                <button class="icon-button">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M13.65 2.35A8 8 0 1 0 16 8h-1.5A6.5 6.5 0 1 1 8 1.5V0l4 4-4 4V5.5" 
+                              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Insights Container -->
+    <div class="insights-container">
+        <div class="insights-list">
+            <!-- Insight 1 -->
+            <div class="insight-card">
+                <div class="insight-summary" onclick="toggleInsight('insight1')">
+                    <div class="insight-main">
+                        <div class="insight-header">
+                            <span class="insight-operation">correlation.memory-pressure</span>
+                            <span class="insight-service">tapio-relay</span>
+                        </div>
+                        <div class="insight-context">
+                            Memory pressure detected across multiple pods in production namespace
+                        </div>
+                    </div>
+                    
+                    <div class="insight-meta">
+                        <span class="insight-severity severity-critical">critical</span>
+                        <span class="insight-duration">2.5s</span>
+                        <span class="insight-time">5m ago</span>
+                    </div>
+                </div>
+                
+                <div id="insight1" class="insight-details">
+                    <!-- Event Flow -->
+                    <div class="flow-section">
+                        <h4 class="section-title">Event Flow</h4>
+                        <div class="flow-timeline">
+                            <div class="flow-node">
+                                <div class="node-bar bar-critical" style="width: 92%;"></div>
+                                <div class="node-content">
+                                    <div class="node-name">issue.OOMKiller</div>
+                                    <div class="node-info">
+                                        <span class="node-service">tapio-relay</span>
+                                        <span class="node-duration">2.3ms</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flow-node">
+                                <div class="node-bar bar-high" style="width: 60%; margin-left: 30%;"></div>
+                                <div class="node-content">
+                                    <div class="node-name">prediction.ServiceOutage</div>
+                                    <div class="node-info">
+                                        <span class="node-service">tapio-relay</span>
+                                        <span class="node-duration">1.5ms</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Key Findings -->
+                    <div class="findings-section">
+                        <h4 class="section-title">Key Findings</h4>
+                        <div class="findings-list">
+                            <div class="finding">
+                                <span class="finding-icon">⚠️</span>
+                                <div class="finding-content">
+                                    <p class="finding-title">Memory limit exceeded</p>
+                                    <p class="finding-detail">Pod api-service-abc123 hit 256Mi limit</p>
+                                </div>
+                            </div>
+                            <div class="finding">
+                                <span class="finding-icon">⚡</span>
+                                <div class="finding-content">
+                                    <p class="finding-title">Predicted failure</p>
+                                    <p class="finding-detail">Service outage likely in 45 minutes</p>
+                                </div>
+                            </div>
+                            <div class="finding">
+                                <span class="finding-icon">ℹ️</span>
+                                <div class="finding-content">
+                                    <p class="finding-title">Pattern detected</p>
+                                    <p class="finding-detail">Consistent OOM kills every 5 minutes</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Related Story -->
+                    <div class="story-link">
+                        <button class="link-button">View Related Story →</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Insight 2 -->
+            <div class="insight-card">
+                <div class="insight-summary" onclick="toggleInsight('insight2')">
+                    <div class="insight-main">
+                        <div class="insight-header">
+                            <span class="insight-operation">correlation.network-issue</span>
+                            <span class="insight-service">tapio-engine</span>
+                        </div>
+                        <div class="insight-context">
+                            Network connectivity issues identified between services
+                        </div>
+                    </div>
+                    
+                    <div class="insight-meta">
+                        <span class="insight-severity severity-high">high</span>
+                        <span class="insight-duration">1.2s</span>
+                        <span class="insight-time">2m ago</span>
+                    </div>
+                </div>
+                
+                <div id="insight2" class="insight-details">
+                    <div class="flow-timeline">
+                        <div class="flow-node">
+                            <div class="node-bar bar-high" style="width: 83%;"></div>
+                            <div class="node-content">
+                                <div class="node-name">pattern.connection_timeouts</div>
+                                <div class="node-info">
+                                    <span class="node-service">tapio-engine</span>
+                                    <span class="node-duration">1.0ms</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="story-link">
+                        <button class="link-button">View Related Story →</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Insight 3 - Normal -->
+            <div class="insight-card">
+                <div class="insight-summary">
+                    <div class="insight-main">
+                        <div class="insight-header">
+                            <span class="insight-operation">health.routine-check</span>
+                            <span class="insight-service">tapio-collector</span>
+                        </div>
+                        <div class="insight-context">
+                            Routine health verification completed successfully
+                        </div>
+                    </div>
+                    
+                    <div class="insight-meta">
+                        <span class="insight-severity severity-normal">normal</span>
+                        <span class="insight-duration">0.8s</span>
+                        <span class="insight-time">just now</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Info -->
+        <div style="margin-top: 40px; padding: 20px; background: #E4F7FB; border-radius: 8px; border-left: 4px solid #1A73E8;">
+            <h3 style="margin: 0 0 12px 0; color: #1A73E8;">🎯 GCP-Style Clean Design</h3>
+            <ul style="margin: 0; padding-left: 20px; color: #202124;">
+                <li><strong>Clean Typography</strong> - Google Sans-inspired fonts</li>
+                <li><strong>Subtle Shadows</strong> - Minimal depth without clutter</li>
+                <li><strong>Muted Colors</strong> - Professional grays and blues</li>
+                <li><strong>White Space</strong> - Breathing room for clarity</li>
+                <li><strong>Data Density</strong> - Maximum info, minimum visual noise</li>
+                <li><strong>Micro-interactions</strong> - Smooth, natural transitions</li>
+            </ul>
+            <p style="margin: 16px 0 0 0; color: #5F6368; font-style: italic;">
+                This is how "Insights" will look in the real Tapio GUI - clean, professional, powerful.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function toggleInsight(id) {
+            const details = document.getElementById(id);
+            details.classList.toggle('expanded');
+        }
+    </script>
+</body>
+</html>

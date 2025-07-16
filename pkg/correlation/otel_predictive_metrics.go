@@ -143,8 +143,6 @@ type PredictionModelType string
 
 const (
 	ModelTypeTimeSeriesRegression PredictionModelType = "time_series_regression"
-	ModelTypeAnomalyDetection     PredictionModelType = "anomaly_detection"
-	ModelTypeClassification       PredictionModelType = "classification"
 	ModelTypeDeepLearning         PredictionModelType = "deep_learning"
 	ModelTypeEnsemble             PredictionModelType = "ensemble"
 )
@@ -158,36 +156,10 @@ type DataPoint struct {
 	Metadata   map[string]interface{} `json:"metadata"`
 }
 
-// Prediction represents a future prediction
-type Prediction struct {
-	ID               string                 `json:"id"`
-	Type             PredictionType         `json:"type"`
-	Description      string                 `json:"description"`
-	Value            float64                `json:"value"`
-	Probability      float64                `json:"probability"`
-	Confidence       float64                `json:"confidence"`
-	TimeToEvent      time.Duration          `json:"time_to_event"`
-	PredictionWindow time.Duration          `json:"prediction_window"`
-	Entity           string                 `json:"entity"`
-	Tags             map[string]string      `json:"tags"`
-	CreatedAt        time.Time              `json:"created_at"`
-	ExpiresAt        time.Time              `json:"expires_at"`
-	ModelID          string                 `json:"model_id"`
-	Evidence         []PredictionEvidence   `json:"evidence"`
-}
+// Prediction type is now defined in types_consolidated.go
+// This eliminates the redeclaration conflict
 
-// PredictionType defines types of predictions
-type PredictionType string
-
-const (
-	PredictionTypeFailure         PredictionType = "failure"
-	PredictionTypeCapacity        PredictionType = "capacity"
-	PredictionTypePerformance     PredictionType = "performance"
-	PredictionTypeSecurity        PredictionType = "security"
-	PredictionTypeCascade         PredictionType = "cascade"
-	PredictionTypeAnomaly         PredictionType = "anomaly"
-	PredictionTypeTrend           PredictionType = "trend"
-)
+// PredictionType and constants are now defined in types_consolidated.go
 
 // PredictionEvidence provides evidence supporting a prediction
 type PredictionEvidence struct {
@@ -219,24 +191,10 @@ type FailureEvent struct {
 	Metadata     map[string]interface{} `json:"metadata"`
 }
 
-// TrendAnalyzer analyzes trends in metrics
-type TrendAnalyzer struct {
-	timeSeries     map[string][]float64
-	timestamps     map[string][]time.Time
-	trendModels    map[string]*TrendModel
-	mutex         sync.RWMutex
-}
+// TrendAnalyzer type is now defined in types_consolidated.go
+// This eliminates the redeclaration conflict
 
-// TrendModel represents a trend analysis model
-type TrendModel struct {
-	Slope         float64   `json:"slope"`
-	Intercept     float64   `json:"intercept"`
-	R2Score       float64   `json:"r2_score"`
-	Direction     string    `json:"direction"` // "increasing", "decreasing", "stable"
-	Velocity      float64   `json:"velocity"`
-	Acceleration  float64   `json:"acceleration"`
-	LastUpdated   time.Time `json:"last_updated"`
-}
+// TrendModel is now defined in types_consolidated.go
 
 // NewPredictiveMetricsEngine creates a new predictive metrics engine
 func NewPredictiveMetricsEngine(config *PredictiveMetricsConfig) *PredictiveMetricsEngine {
@@ -781,7 +739,7 @@ func NewCapacityPredictor() *CapacityPredictor { return &CapacityPredictor{} }
 func NewPerformancePredictor() *PerformancePredictor { return &PerformancePredictor{} }
 func NewSecurityPredictor() *SecurityPredictor { return &SecurityPredictor{} }
 func NewCascadePredictor() *CascadePredictor { return &CascadePredictor{} }
-func NewTrendAnalyzer() *TrendAnalyzer { return &TrendAnalyzer{} }
+func NewOTELTrendAnalyzer() *TrendAnalyzer { return &TrendAnalyzer{} }
 func NewSeasonalityDetector() *SeasonalityDetector { return &SeasonalityDetector{} }
 func NewAnomalyForecaster() *AnomalyForecaster { return &AnomalyForecaster{} }
 

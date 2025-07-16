@@ -4,6 +4,5 @@
 package ebpf
 
 // All types and interfaces are defined in types.go
-// This file only contains the stub implementation for non-Linux platforms
-
-// Note: NewMonitor is implemented in monitor_stub.go to avoid duplication
+// This file exists to ensure the package builds on non-Linux platforms
+// eBPF functionality is only available on Linux with eBPF build tags

@@ -715,7 +715,7 @@ type ResourceUsagePredictor struct{}
 type DegradationPatternRecognizer struct{}
 type HealingStrategyEngine struct{}
 type HealingCircuitBreaker struct{}
-type PerformanceOptimizer struct{}
+// PerformanceOptimizer type is now defined in types_consolidated.go
 type PipelineAnomalyDetector struct{}
 type HealingPatternLearner struct{}
 type PredictiveScaler struct{}
@@ -788,8 +788,13 @@ func (paf *PipelineAutoFixer) registerBasicCapabilities() {
 	))
 }
 
-func NewPerformanceOptimizer(config *SelfHealingConfig) *PerformanceOptimizer {
-	return &PerformanceOptimizer{}
+func NewOTELPerformanceOptimizer(config *SelfHealingConfig) *PerformanceOptimizer {
+	return NewPerformanceOptimizer(&OptimizationConfig{
+		ProfilingEnabled:        true,
+		MonitoringInterval:      time.Minute,
+		AutoOptimizationEnabled: true,
+		OptimizationInterval:    time.Minute * 5,
+	})
 }
 
 func NewPipelineAnomalyDetector(config *SelfHealingConfig) *PipelineAnomalyDetector {

@@ -1,0 +1,42 @@
+# Quick OTEL Test Environment for Tapio
+version: '3.8'
+
+services:
+  # Jaeger - All-in-one for easy testing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: tapio-test-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=debug
+    networks:
+      - tapio-test
+
+  # Alternative: OTEL Collector (if you prefer)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: tapio-test-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
+      - "55679:55679" # zpages extension
+    depends_on:
+      - jaeger
+    networks:
+      - tapio-test
+    profiles:
+      - full  # Only start with --profile full
+
+networks:
+  tapio-test:
+    driver: bridge
