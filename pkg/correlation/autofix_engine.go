@@ -119,10 +119,10 @@ type AutoFixAction struct {
 
 // AutoFixRequest represents a request to execute an auto-fix action
 type AutoFixRequest struct {
-	ID            string            `json:"id"`
-	PatternResult *PatternResult    `json:"pattern_result"`
-	ActionID      string            `json:"action_id"`
-	Parameters    map[string]string `json:"parameters"`
+	ID            string                  `json:"id"`
+	PatternResult *types.PatternResult    `json:"pattern_result"`
+	ActionID      string                  `json:"action_id"`
+	Parameters    map[string]string       `json:"parameters"`
 
 	// Request metadata
 	RequestedBy      string `json:"requested_by"` // "system", "human", "scheduler"
@@ -131,7 +131,7 @@ type AutoFixRequest struct {
 	RequiresApproval bool   `json:"requires_approval"`
 
 	// Context
-	AffectedEntities []Entity  `json:"affected_entities"`
+	AffectedEntities []types.Entity  `json:"affected_entities"`
 	Timestamp        time.Time `json:"timestamp"`
 	Deadline         time.Time `json:"deadline"`
 

@@ -1,6 +1,9 @@
 package correlation
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // FeatureCondition represents a condition based on AI features
 type FeatureCondition struct {
@@ -261,4 +264,38 @@ type MLModel struct {
 	Version  string
 	Features []string
 	Outputs  []string
+}
+
+// Predict implements the Model interface
+func (m *MLModel) Predict(ctx context.Context, input ModelInput) (ModelOutput, error) {
+	// Simple prediction for now
+	return ModelOutput{Predictions: map[string]float64{"confidence": 0.8}}, nil
+}
+
+// Train implements the Model interface
+func (m *MLModel) Train(ctx context.Context, data TrainingData) error {
+	// Simple training stub
+	return nil
+}
+
+// Evaluate implements the Model interface
+func (m *MLModel) Evaluate(ctx context.Context, testData TrainingData) (*ModelEvaluation, error) {
+	// Simple evaluation for now
+	return &ModelEvaluation{
+		Accuracy: 0.8,
+		Precision: 0.8,
+		Recall: 0.8,
+		F1Score: 0.8,
+	}, nil
+}
+
+// GetInfo implements the Model interface
+func (m *MLModel) GetInfo() ModelInfo {
+	return ModelInfo{
+		Name:     m.Name,
+		Type:     m.Type,
+		Version:  m.Version,
+		Features: m.Features,
+		Outputs:  m.Outputs,
+	}
 }

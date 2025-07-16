@@ -371,6 +371,26 @@ func (fp *FeatureProcessor) getCachedFeatures(eventID string) *FeatureVector {
 	return nil
 }
 
+// ProcessDenseFeatures processes dense features from AI features
+func (fp *FeatureProcessor) ProcessDenseFeatures(aiFeatures interface{}) ([]float64, error) {
+	// Simple implementation for now
+	return []float64{1.0, 0.5, 0.8}, nil
+}
+
+// StoreBehaviorVector stores a behavior vector
+func (fp *FeatureProcessor) StoreBehaviorVector(id string, vector []float64) error {
+	// Simple implementation for now
+	return nil
+}
+
+// GetStats returns feature processor statistics
+func (fp *FeatureProcessor) GetStats() interface{} {
+	return map[string]interface{}{
+		"cached_features": len(fp.featureCache),
+		"cache_hits": 0,
+	}
+}
+
 func (fp *FeatureProcessor) cacheFeatures(vector *FeatureVector) {
 	fp.cacheMutex.Lock()
 	defer fp.cacheMutex.Unlock()

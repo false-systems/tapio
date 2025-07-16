@@ -197,15 +197,13 @@ func NewAIReadyProcessor(config *AIConfig) (*AIReadyProcessor, error) {
 	processor.computePool = computePool
 
 	// Initialize prediction tracker for quality monitoring
-	predictionTracker, err := NewPredictionTracker(&PredictionTrackerConfig{
+	predictionTracker := NewPredictionTracker(&PredictionTrackerConfig{
 		TrackingEnabled:  config.ModelMonitoring,
 		AccuracyTracking: true,
 		DriftDetection:   config.DriftDetection,
 		HistorySize:      10000,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create prediction tracker: %w", err)
-	}
+	// Prediction tracker created successfully
 	processor.predictionTracker = predictionTracker
 
 	return processor, nil
@@ -302,7 +300,14 @@ func (p *AIReadyProcessor) runInference(ctx context.Context, features map[string
 
 	// Run inference for each model
 	for _, modelName := range models {
-		prediction, err := p.inferenceEngine.RunInference(modelName, features)
+		// Convert features to float64 slice
+		featureSlice := make([]float64, 0)
+		for _, v := range features {
+			if f, ok := v.(float64); ok {
+				featureSlice = append(featureSlice, f)
+			}
+		}
+		prediction, err := p.inferenceEngine.RunInference(modelName, featureSlice)
 		if err != nil {
 			// Log error and continue with other models
 			continue
@@ -398,7 +403,12 @@ func (p *AIReadyProcessor) generateAIRecommendations(features map[string]interfa
 // ProcessBehaviorVector processes behavioral vectors for ML correlation
 func (p *AIReadyProcessor) ProcessBehaviorVector(eventID string, behaviorVector []float32) error {
 	// Store behavior vector for entity behavior analysis
-	return p.featureProcessor.StoreBehaviorVector(eventID, behaviorVector)
+	// Convert float32 to float64
+	behaviorVector64 := make([]float64, len(behaviorVector))
+	for i, v := range behaviorVector {
+		behaviorVector64[i] = float64(v)
+	}
+	return p.featureProcessor.StoreBehaviorVector(eventID, behaviorVector64)
 }
 
 // RegisterMLModel registers a new ML model for inference
