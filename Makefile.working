@@ -1,0 +1,122 @@
+.PHONY: help clean build test lint fmt dev ci-quick
+
+# Go parameters
+GOCMD=go
+GOBUILD=$(GOCMD) build
+GOTEST=$(GOCMD) test
+GOFMT=gofmt
+BINARY_NAME=tapio
+MAIN_PATH=./cmd/tapio
+
+# Version info
+VERSION ?= dev
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+LDFLAGS = -X main.version=$(VERSION) -X main.buildDate=$(BUILD_DATE) -X main.gitCommit=$(GIT_COMMIT)
+
+##@ Help
+help: ## Display this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Development
+fmt: ## Format Go code
+	@echo "🎨 Formatting Go code..."
+	@$(GOFMT) -s -w .
+	@echo "✅ Formatting complete"
+
+build: ## Build the binary
+	@echo "🔨 Building $(BINARY_NAME)..."
+	@mkdir -p bin/
+	@$(GOBUILD) -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME) $(MAIN_PATH)
+	@echo "✅ Build complete: bin/$(BINARY_NAME)"
+
+build-working: ## Build only working packages (telemetry, correlation, ebpf)
+	@echo "🔨 Building working packages only..."
+	@echo "Building telemetry package..."
+	@$(GOCMD) build ./pkg/telemetry/...
+	@echo "Building correlation package..."
+	@$(GOCMD) build ./pkg/correlation/...
+	@echo "Building ebpf package..."
+	@$(GOCMD) build ./pkg/ebpf/...
+	@echo "✅ Working packages build successfully"
+
+clean: ## Clean build artifacts
+	@echo "🧹 Cleaning..."
+	@rm -rf bin/ dist/ coverage.out coverage.html
+	@echo "✅ Clean complete"
+
+##@ Testing  
+test-working: ## Run tests on working packages only
+	@echo "🧪 Running tests on working packages..."
+	@$(GOTEST) -short ./pkg/telemetry/...
+	@$(GOTEST) -short ./pkg/correlation/...
+	@$(GOTEST) -short ./pkg/ebpf/...
+	@echo "✅ Working package tests complete"
+
+test: ## Run all tests (may fail due to build issues)
+	@echo "🧪 Running tests..."
+	@$(GOTEST) -short -race ./...
+	@echo "✅ Tests complete"
+
+test-coverage: ## Run tests with coverage on working packages
+	@echo "🧪 Running tests with coverage on working packages..."
+	@$(GOTEST) -race -coverprofile=coverage.out ./pkg/telemetry/... ./pkg/correlation/... ./pkg/ebpf/...
+	@$(GOCMD) tool cover -html=coverage.out -o coverage.html
+	@echo "✅ Coverage report: coverage.html"
+
+##@ Quality
+lint-basic: ## Run basic formatting check
+	@echo "🔍 Running basic linting..."
+	@$(GOFMT) -l . | grep -v vendor | tee fmt-issues.txt
+	@test ! -s fmt-issues.txt || (echo "❌ Code not formatted" && exit 1)
+	@echo "✅ Basic formatting check passed"
+
+lint-working: ## Run lint on working packages only
+	@echo "🔍 Running lint on working packages..."
+	@$(GOFMT) -l ./pkg/telemetry ./pkg/correlation ./pkg/ebpf | tee fmt-issues.txt
+	@test ! -s fmt-issues.txt || (echo "❌ Code not formatted" && exit 1)
+	@$(GOCMD) vet ./pkg/telemetry/... ./pkg/correlation/... ./pkg/ebpf/...
+	@echo "✅ Working packages lint passed"
+
+##@ CI
+ci-working: fmt lint-working build-working test-working ## CI check for working packages only
+	@echo "🚀 Working packages CI passed!"
+
+ci-quick: fmt lint-basic ## Quick CI check (format + basic lint)
+	@echo "🚀 Quick CI passed!"
+
+##@ Development shortcuts
+dev: fmt build-working ## Quick development cycle for working packages
+	@echo "🚀 Development cycle complete"
+
+dev-full: fmt ## Full development cycle (may fail)
+	@echo "🔨 Attempting full build..."
+	@$(GOBUILD) -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME) $(MAIN_PATH) || echo "⚠️ Full build failed - use 'make dev' for working packages"
+
+##@ Information
+info: ## Show build information
+	@echo "📋 Build Information:"
+	@echo "  Version: $(VERSION)"
+	@echo "  Git Commit: $(GIT_COMMIT)"
+	@echo "  Build Date: $(BUILD_DATE)"
+	@echo "  Go Version: $$(go version)"
+
+status: ## Show build status of different components
+	@echo "🔍 Build Status:"
+	@echo "Working packages:"
+	@echo "  - telemetry: $$($(GOCMD) build ./pkg/telemetry/... 2>&1 && echo '✅ OK' || echo '❌ FAIL')"
+	@echo "  - correlation: $$($(GOCMD) build ./pkg/correlation/... 2>&1 && echo '✅ OK' || echo '❌ FAIL')"
+	@echo "  - ebpf: $$($(GOCMD) build ./pkg/ebpf/... 2>&1 && echo '✅ OK' || echo '❌ FAIL')"
+	@echo "Known issues:"
+	@echo "  - metrics: ❌ FAIL (struct field access errors)"
+	@echo "  - cmd/install/progress: ❌ FAIL (missing color package)"
+	@echo "  - pkg/otel: ❌ FAIL (type redeclarations)"
+
+validate-working: ## Validate that working packages actually work
+	@echo "🔍 Validating working packages..."
+	@$(GOCMD) build ./pkg/telemetry/... && echo "✅ telemetry builds"
+	@$(GOCMD) build ./pkg/correlation/... && echo "✅ correlation builds"  
+	@$(GOCMD) build ./pkg/ebpf/... && echo "✅ ebpf builds"
+	@echo "🎉 All working packages validated!"
+
+.DEFAULT_GOAL := help

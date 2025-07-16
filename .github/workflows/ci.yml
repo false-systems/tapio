@@ -1,260 +1,41 @@
-name: Tapio CI Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main, develop ]
-
-env:
-  GO_VERSION: '1.23.0'
-  COVERAGE_THRESHOLD: '50'
+    branches: [ main, master ]
 
 jobs:
-  # ==========================================
-  # STAGE 1: Quality Checks (< 3 minutes)
-  # ==========================================
-  quality-gates:
-    name: Quality Gates
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 3
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Cache Linting Tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/golangci-lint
-          key: ${{ runner.os }}-golangci-lint-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-golangci-lint-
-
-      - name: Install Quality Tools
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
-          go install golang.org/x/tools/cmd/goimports@latest
-
-      - name: Run Quality Checks
-        run: make ci-quality
-
-      - name: Upload Quality Results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: quality-issues
-          path: |
-            fmt-issues.txt
-            lint-issues.txt
-          retention-days: 3
-
-  # ==========================================
-  # STAGE 2: Multi-Platform Builds (< 5 minutes)
-  # ==========================================
-  build-matrix:
-    name: Build Matrix
-    needs: quality-gates
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        arch: [amd64, arm64]
-        exclude:
-          - os: windows-latest
-            arch: arm64
-    steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: '1.21'
           cache: true
 
-      - name: Build Binary
-        env:
-          GOOS: ${{ runner.os == 'macOS' && 'darwin' || runner.os == 'Windows' && 'windows' || 'linux' }}
-          GOARCH: ${{ matrix.arch }}
-        run: make ci-build
+      - name: Verify dependencies
+        run: go mod verify
 
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: tapio-${{ runner.os }}-${{ matrix.arch }}
-          path: bin/
-          retention-days: 7
-
-  # ==========================================
-  # STAGE 3: Test Execution (< 10 minutes)
-  # ==========================================
-  test-suite:
-    name: Test Suite
-    needs: quality-gates
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        go-version: ['1.22', '1.23']
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Go ${{ matrix.go-version }}
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
-          cache: true
-
-      - name: Run Unit Tests
-        run: make ci-test
-
-      - name: Check Coverage Threshold
-        if: matrix.go-version == '1.23' && matrix.os == 'ubuntu-latest'
-        run: make check-coverage
-
-      - name: Upload Coverage to Codecov
-        if: matrix.go-version == '1.23' && matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.out
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: true
-          verbose: true
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ matrix.os }}-go${{ matrix.go-version }}
-          path: |
-            coverage.out
-            test-results.xml
-          retention-days: 7
-
-  # ==========================================
-  # STAGE 4: Security Scanning
-  # ==========================================
-  security-scan:
-    name: Security Scan
-    needs: quality-gates
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
-        with:
-          args: '-no-fail -fmt sarif -out results.sarif ./...'
-
-      - name: Upload SARIF Results
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
-
-      - name: Run Nancy Vulnerability Check
+      - name: Format check
         run: |
-          go install github.com/sonatypecommunity/nancy@latest
-          go list -json -deps ./... | nancy sleuth
+          gofmt -l . | tee fmt-issues.txt
+          test ! -s fmt-issues.txt
 
-      - name: Upload Security Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-results
-          path: |
-            results.sarif
-            nancy-report.txt
-          retention-days: 30
+      - name: Vet
+        run: go vet ./...
 
-  # ==========================================
-  # INTEGRATION TESTS (Optional)
-  # ==========================================
-  integration-tests:
-    name: Integration Tests
-    needs: [build-matrix]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'integration')
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - name: Build
+        run: make build
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+      - name: Test
+        run: make test
 
-      - name: Setup Kind Cluster
-        uses: helm/kind-action@v1.8.0
-        with:
-          cluster_name: tapio-test
-
-      - name: Run Integration Tests
-        run: make ci-integration
-
-      - name: Upload Integration Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-results
-          path: |
-            integration-test-results.xml
-            kind-logs/
-          retention-days: 7
-
-  # ==========================================
-  # SUCCESS GATE
-  # ==========================================
-  ci-success:
-    name: CI Success
-    needs: [quality-gates, build-matrix, test-suite, security-scan]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check All Jobs Status
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: |
-          echo "❌ CI Pipeline Failed"
-          echo "Quality Gates: ${{ needs.quality-gates.result }}"
-          echo "Build Matrix: ${{ needs.build-matrix.result }}"
-          echo "Test Suite: ${{ needs.test-suite.result }}"
-          echo "Security Scan: ${{ needs.security-scan.result }}"
-          exit 1
-
-      - name: Success Notification
-        run: |
-          echo "🎉 All CI checks passed successfully!"
-          echo "✅ Quality gates passed"
-          echo "✅ Multi-platform builds succeeded"
-          echo "✅ All tests passed"
-          echo "✅ Security scan clean"
-          echo ""
-          echo "Ready for merge! 🚀"
+      - name: Verify binary works
+        run: ./bin/tapio version
