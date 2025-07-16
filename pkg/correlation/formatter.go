@@ -84,22 +84,20 @@ func (f *Formatter) FormatEngineMetrics(metrics EngineMetrics) string {
 	}
 
 	sb.WriteString("================\n")
-	sb.WriteString(fmt.Sprintf("Total Executions: %d\n", metrics.TotalExecutions))
-	sb.WriteString(fmt.Sprintf("Successful: %d\n", metrics.SuccessfulExecutions))
-	sb.WriteString(fmt.Sprintf("Failed: %d\n", metrics.FailedExecutions))
-	sb.WriteString(fmt.Sprintf("Total Findings: %d\n", metrics.TotalFindings))
-	sb.WriteString(fmt.Sprintf("Average Execution Time: %v\n", metrics.AverageExecutionTime))
-	sb.WriteString(fmt.Sprintf("Last Execution: %v\n", metrics.LastExecutionTime.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("Rules Executed: %d\n", metrics.RulesExecuted))
+	sb.WriteString(fmt.Sprintf("Rules Matched: %d\n", metrics.RulesMatched))
+	sb.WriteString(fmt.Sprintf("Rules Failed: %d\n", metrics.RulesFailed))
+	sb.WriteString(fmt.Sprintf("Correlations Found: %d\n", metrics.CorrelationsFound))
+	sb.WriteString(fmt.Sprintf("Average Processing Time: %v\n", metrics.AverageProcessingTime))
+	sb.WriteString(fmt.Sprintf("Last Event: %v\n", metrics.LastEventTime.Format(time.RFC3339)))
 
-	if f.config.Verbose && len(metrics.RuleMetrics) > 0 {
-		sb.WriteString("\n📋 Rule Metrics:\n")
-		for ruleID, ruleMetrics := range metrics.RuleMetrics {
-			sb.WriteString(fmt.Sprintf("  %s:\n", ruleID))
-			sb.WriteString(fmt.Sprintf("    Executions: %d\n", ruleMetrics.ExecutionCount))
-			sb.WriteString(fmt.Sprintf("    Success Rate: %.1f%%\n", float64(ruleMetrics.SuccessCount)/float64(ruleMetrics.ExecutionCount)*100))
-			sb.WriteString(fmt.Sprintf("    Avg Confidence: %.2f\n", ruleMetrics.AverageConfidence))
-			sb.WriteString(fmt.Sprintf("    Avg Duration: %v\n", ruleMetrics.AverageExecutionTime))
-		}
+	if f.config.Verbose {
+		sb.WriteString("\n📋 Additional Metrics:\n")
+		sb.WriteString(fmt.Sprintf("  Events Received: %d\n", metrics.EventsReceived))
+		sb.WriteString(fmt.Sprintf("  Events Processed: %d\n", metrics.EventsProcessed))
+		sb.WriteString(fmt.Sprintf("  Events Dropped: %d\n", metrics.EventsDropped))
+		sb.WriteString(fmt.Sprintf("  Memory Usage: %d bytes\n", metrics.MemoryUsage))
+		sb.WriteString(fmt.Sprintf("  Uptime: %v\n", metrics.Uptime))
 	}
 
 	return sb.String()
@@ -125,7 +123,7 @@ func (f *Formatter) formatHuman(findings []Finding) string {
 	severityGroups := f.groupBySeverity(findings)
 
 	// Display findings in order of severity
-	severities := []Severity{SeverityCritical, SeverityError, SeverityWarning, SeverityInfo}
+	severities := []Severity{SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow}
 
 	for _, severity := range severities {
 		if severityFindings, exists := severityGroups[severity]; exists {
@@ -177,7 +175,8 @@ func (f *Formatter) formatSummaryHeader(findings []Finding) string {
 	// Count findings by severity
 	severityCounts := make(map[Severity]int)
 	for _, finding := range findings {
-		severityCounts[finding.Severity]++
+		severity := f.convertSeverityLevel(finding.Severity)
+		severityCounts[severity]++
 	}
 
 	sb.WriteString(fmt.Sprintf("Total Findings: %d\n", len(findings)))
@@ -185,13 +184,13 @@ func (f *Formatter) formatSummaryHeader(findings []Finding) string {
 	if count, exists := severityCounts[SeverityCritical]; exists && count > 0 {
 		sb.WriteString(fmt.Sprintf("🚨 Critical: %d\n", count))
 	}
-	if count, exists := severityCounts[SeverityError]; exists && count > 0 {
+	if count, exists := severityCounts[SeverityHigh]; exists && count > 0 {
 		sb.WriteString(fmt.Sprintf("❌ Error: %d\n", count))
 	}
-	if count, exists := severityCounts[SeverityWarning]; exists && count > 0 {
+	if count, exists := severityCounts[SeverityMedium]; exists && count > 0 {
 		sb.WriteString(fmt.Sprintf("⚠️  Warning: %d\n", count))
 	}
-	if count, exists := severityCounts[SeverityInfo]; exists && count > 0 {
+	if count, exists := severityCounts[SeverityLow]; exists && count > 0 {
 		sb.WriteString(fmt.Sprintf("ℹ️  Info: %d\n", count))
 	}
 
@@ -230,13 +229,13 @@ func (f *Formatter) formatSeverityHeader(severity Severity) string {
 	case SeverityCritical:
 		icon = "🚨"
 		colorCode = "\033[1;31m" // Bold red
-	case SeverityError:
+	case SeverityHigh:
 		icon = "❌"
 		colorCode = "\033[1;91m" // Bold light red
-	case SeverityWarning:
+	case SeverityMedium:
 		icon = "⚠️"
 		colorCode = "\033[1;33m" // Bold yellow
-	case SeverityInfo:
+	case SeverityLow:
 		icon = "ℹ️"
 		colorCode = "\033[1;36m" // Bold cyan
 	default:
@@ -244,7 +243,7 @@ func (f *Formatter) formatSeverityHeader(severity Severity) string {
 		colorCode = "\033[0m"
 	}
 
-	header := fmt.Sprintf("%s %s Findings", icon, strings.ToUpper(severity.String()))
+	header := fmt.Sprintf("%s %s Findings", icon, strings.ToUpper(f.severityToString(severity)))
 
 	if f.config.UseColors {
 		return fmt.Sprintf("%s%s\033[0m", colorCode, header)
@@ -313,7 +312,7 @@ func (f *Formatter) formatFinding(finding Finding) string {
 }
 
 // formatPrediction formats prediction information
-func (f *Formatter) formatPrediction(prediction *Prediction) string {
+func (f *Formatter) formatPrediction(prediction *RulePrediction) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("  🔮 Prediction: %s", prediction.Event))
@@ -372,7 +371,8 @@ func (f *Formatter) groupBySeverity(findings []Finding) map[Severity][]Finding {
 	groups := make(map[Severity][]Finding)
 
 	for _, finding := range findings {
-		groups[finding.Severity] = append(groups[finding.Severity], finding)
+		severity := f.convertSeverityLevel(finding.Severity)
+		groups[severity] = append(groups[severity], finding)
 	}
 
 	return groups
@@ -437,22 +437,53 @@ func (f *Formatter) FormatSummary(findings []Finding) string {
 
 	severityCounts := make(map[Severity]int)
 	for _, finding := range findings {
-		severityCounts[finding.Severity]++
+		severity := f.convertSeverityLevel(finding.Severity)
+		severityCounts[severity]++
 	}
 
 	var parts []string
 	if count := severityCounts[SeverityCritical]; count > 0 {
 		parts = append(parts, fmt.Sprintf("%d critical", count))
 	}
-	if count := severityCounts[SeverityError]; count > 0 {
+	if count := severityCounts[SeverityHigh]; count > 0 {
 		parts = append(parts, fmt.Sprintf("%d error", count))
 	}
-	if count := severityCounts[SeverityWarning]; count > 0 {
+	if count := severityCounts[SeverityMedium]; count > 0 {
 		parts = append(parts, fmt.Sprintf("%d warning", count))
 	}
-	if count := severityCounts[SeverityInfo]; count > 0 {
+	if count := severityCounts[SeverityLow]; count > 0 {
 		parts = append(parts, fmt.Sprintf("%d info", count))
 	}
 
 	return fmt.Sprintf("Found %d findings: %s", len(findings), strings.Join(parts, ", "))
+}
+
+// convertSeverityLevel converts SeverityLevel to Severity
+func (f *Formatter) convertSeverityLevel(level SeverityLevel) Severity {
+	switch level {
+	case SeverityLevelError:
+		return SeverityCritical
+	case SeverityLevelWarning:
+		return SeverityMedium
+	case SeverityLevelInfo:
+		return SeverityLow
+	default:
+		return SeverityLow
+	}
+}
+
+// severityToString converts Severity to string
+func (f *Formatter) severityToString(s Severity) string {
+	switch s {
+	case SeverityCritical:
+		return "critical"
+	case SeverityHigh:
+		return "high"
+	case SeverityMedium:
+		return "medium"
+	case SeverityLow:
+		return "low"
+	default:
+		return "unknown"
+	}
 }

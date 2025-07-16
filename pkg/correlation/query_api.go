@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -103,19 +104,19 @@ func (q *QueryAPI) StoreInsight(insight *Insight) {
 // IndexedInsightStore extends InMemoryInsightStore with resource indexing
 type IndexedInsightStore struct {
 	InMemoryInsightStore
-	byResource map[string][]*Insight // key: namespace/name
+	byResource map[string][]*domain.Insight // key: namespace/name
 }
 
 func NewIndexedInsightStore() *IndexedInsightStore {
 	return &IndexedInsightStore{
 		InMemoryInsightStore: InMemoryInsightStore{
-			insights: make(map[string]*Insight),
+			insights: make(map[string]*domain.Insight),
 		},
-		byResource: make(map[string][]*Insight),
+		byResource: make(map[string][]*domain.Insight),
 	}
 }
 
-func (s *IndexedInsightStore) Store(insight *Insight) error {
+func (s *IndexedInsightStore) Store(insight *domain.Insight) error {
 	s.insights[insight.ID] = insight
 
 	key := fmt.Sprintf("%s/%s", insight.Namespace, insight.ResourceName)
@@ -181,7 +182,7 @@ type GetActionableItemsRequest struct {
 }
 
 type GetActionableItemsResponse struct {
-	Items     []*ActionableItem
+	Items     []*domain.ActionItem
 	Timestamp time.Time
 }
 
@@ -195,7 +196,7 @@ type InsightResponse struct {
 	Namespace       string
 	Timestamp       time.Time
 	Prediction      *Prediction
-	ActionableItems []*ActionableItem
+	ActionableItems []*domain.ActionItem
 }
 
 // TimeRange is defined in timeline.go

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 	
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
@@ -461,4 +462,31 @@ type Result struct {
 	Metadata      map[string]interface{} `json:"metadata"`
 	Timestamp     time.Time              `json:"timestamp"`
 	ProcessingTime time.Duration         `json:"processing_time"`
+}
+
+// RecommendedAction represents a recommended action based on correlation analysis
+type RecommendedAction struct {
+	ID          string                 `json:"id"`
+	Type        string                 `json:"type"`
+	Priority    string                 `json:"priority"`
+	Description string                 `json:"description"`
+	Impact      string                 `json:"impact"`
+	Risk        string                 `json:"risk"`
+	Command     string                 `json:"command,omitempty"`
+	Script      string                 `json:"script,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// LocalCorrelation represents a correlation between events (renamed to avoid conflict)
+type LocalCorrelation struct {
+	ID          string                 `json:"id"`
+	Type        string                 `json:"type"`
+	Events      []string               `json:"events"`
+	Confidence  float64                `json:"confidence"`
+	Description string                 `json:"description"`
+	Evidence    []domain.Evidence      `json:"evidence"`
+	Timestamp   time.Time              `json:"timestamp"`
+	TTL         time.Duration          `json:"ttl"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }

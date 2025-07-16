@@ -3,7 +3,6 @@ package correlation
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -12,6 +11,15 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+)
+
+// Prediction type constants
+const (
+	PredictionTypeFailure     = "failure"
+	PredictionTypeCapacity    = "capacity"
+	PredictionTypePerformance = "performance"
+	PredictionTypeSecurity    = "security"
+	PredictionTypeCascade     = "cascade"
 )
 
 // PredictiveMetricsEngine generates metrics that predict future states
@@ -218,7 +226,14 @@ func NewPredictiveMetricsEngine(config *PredictiveMetricsConfig) *PredictiveMetr
 	pme.cascadePredictor = NewCascadePredictor()
 	
 	// Initialize analyzers
-	pme.trendAnalyzer = NewTrendAnalyzer()
+	trendConfig := &TrendAnalyzerConfig{
+		WindowSize:      10,
+		SmoothingFactor: 0.3,
+		TrendThreshold:  0.1,
+		VolatilityLimit: 0.2,
+		UpdateInterval:  time.Minute,
+	}
+	pme.trendAnalyzer = NewTrendAnalyzer(trendConfig)
 	pme.seasonalityDetector = NewSeasonalityDetector()
 	pme.anomalyForecaster = NewAnomalyForecaster()
 	
@@ -539,7 +554,7 @@ func (pme *PredictiveMetricsEngine) generateCascadePredictions(ctx context.Conte
 // updatePredictiveMetrics updates metrics based on predictions
 func (pme *PredictiveMetricsEngine) updatePredictiveMetrics(ctx context.Context, predictions []Prediction) {
 	for _, prediction := range predictions {
-		switch prediction.Type {
+		switch prediction.Class {
 		case PredictionTypeFailure:
 			pme.updateFailureMetrics(ctx, prediction)
 		case PredictionTypeCapacity:
@@ -560,17 +575,15 @@ func (pme *PredictiveMetricsEngine) predictOOMFailures(ctx context.Context) *Pre
 	memoryTrend := pme.trendAnalyzer.GetTrend("memory_usage")
 	if memoryTrend != nil && memoryTrend.Direction == "increasing" && memoryTrend.Slope > 0.1 {
 		return &Prediction{
-			ID:               fmt.Sprintf("oom_prediction_%d", time.Now().UnixNano()),
-			Type:             PredictionTypeFailure,
-			Description:      "Out of Memory failure predicted",
-			Value:            0.8, // 80% probability
-			Probability:      0.8,
-			Confidence:       0.7,
-			TimeToEvent:      time.Duration(float64(time.Hour) / memoryTrend.Slope),
-			PredictionWindow: pme.config.ShortTermWindow,
-			Entity:           "system",
-			CreatedAt:        time.Now(),
-			ExpiresAt:        time.Now().Add(pme.config.ShortTermWindow),
+			// Using Prediction fields from ai_models.go
+			Class:       PredictionTypeFailure,
+			Probability: 0.8,
+			Confidence:  0.7,
+			Explanation: "Out of Memory failure predicted based on memory usage trend",
+			Features:    map[string]float64{
+				"memory_trend_slope": memoryTrend.Slope,
+				"trend_direction":    1.0, // increasing
+			},
 		}
 	}
 	return nil
@@ -598,8 +611,13 @@ func (pme *PredictiveMetricsEngine) extractFeatures(event *opinionated.Opinionat
 	features["severity_score"] = pme.severityToScore(string(event.Severity))
 	
 	if event.Behavioral != nil {
-		features["anomaly_score"] = float64(event.Behavioral.AnomalyScore)
+		// event.Behavioral.AnomalyScore field not available, using available fields
 		features["behavior_deviation"] = event.Behavioral.BehaviorDeviation
+		features["confidence"] = event.Behavioral.Confidence
+		if len(event.Behavioral.Anomalies) > 0 {
+			// Use first anomaly score if available
+			features["anomaly_score"] = float64(event.Behavioral.Anomalies[0].Score)
+		}
 	}
 	
 	if event.Impact != nil {

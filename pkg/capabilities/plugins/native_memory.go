@@ -7,8 +7,6 @@ import (
 	"runtime"
 	"sync"
 	"time"
-
-	"github.com/yairfalse/tapio/pkg/capabilities"
 )
 
 // NativeMemoryPlugin provides basic memory monitoring using OS-native APIs
@@ -30,8 +28,8 @@ func (p *NativeMemoryPlugin) Name() string {
 }
 
 // Info returns capability information
-func (p *NativeMemoryPlugin) Info() *capabilities.CapabilityInfo {
-	info := &capabilities.CapabilityInfo{
+func (p *NativeMemoryPlugin) Info() *CapabilityInfo {
+	info := &CapabilityInfo{
 		Name:     p.Name(),
 		Platform: runtime.GOOS,
 		Metadata: map[string]string{
@@ -41,7 +39,7 @@ func (p *NativeMemoryPlugin) Info() *capabilities.CapabilityInfo {
 	}
 
 	if !p.IsAvailable() {
-		info.Status = capabilities.CapabilityNotAvailable
+		info.Status = CapabilityNotAvailable
 		info.Error = "native memory monitoring not implemented for this platform"
 		return info
 	}
@@ -50,9 +48,9 @@ func (p *NativeMemoryPlugin) Info() *capabilities.CapabilityInfo {
 	defer p.mu.RUnlock()
 
 	if p.running {
-		info.Status = capabilities.CapabilityEnabled
+		info.Status = CapabilityEnabled
 	} else {
-		info.Status = capabilities.CapabilityAvailable
+		info.Status = CapabilityAvailable
 	}
 
 	return info
@@ -97,11 +95,11 @@ func (p *NativeMemoryPlugin) Stop() error {
 }
 
 // Health returns the current health status
-func (p *NativeMemoryPlugin) Health() *capabilities.HealthStatus {
+func (p *NativeMemoryPlugin) Health() *HealthStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	status := &capabilities.HealthStatus{
+	status := &HealthStatus{
 		Timestamp: time.Now(),
 		Metrics: map[string]any{
 			"platform": runtime.GOOS,
@@ -114,10 +112,10 @@ func (p *NativeMemoryPlugin) Health() *capabilities.HealthStatus {
 	}
 
 	if p.running {
-		status.Status = capabilities.CapabilityEnabled
+		status.Status = CapabilityEnabled
 		status.Message = "Native memory monitoring active (limited functionality)"
 	} else {
-		status.Status = capabilities.CapabilityAvailable
+		status.Status = CapabilityAvailable
 		status.Message = "Native memory monitoring available"
 	}
 
@@ -125,7 +123,7 @@ func (p *NativeMemoryPlugin) Health() *capabilities.HealthStatus {
 }
 
 // GetMemoryStats returns basic memory statistics using native APIs
-func (p *NativeMemoryPlugin) GetMemoryStats() ([]capabilities.ProcessMemoryStats, error) {
+func (p *NativeMemoryPlugin) GetMemoryStats() ([]ProcessMemoryStats, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -141,7 +139,7 @@ func (p *NativeMemoryPlugin) GetMemoryStats() ([]capabilities.ProcessMemoryStats
 	case "windows":
 		return p.getWindowsMemoryStats()
 	default:
-		return nil, capabilities.NewCapabilityError(
+		return nil, NewCapabilityError(
 			"memory-stats",
 			fmt.Sprintf("native memory monitoring not implemented for %s", runtime.GOOS),
 			runtime.GOOS,
@@ -150,8 +148,8 @@ func (p *NativeMemoryPlugin) GetMemoryStats() ([]capabilities.ProcessMemoryStats
 }
 
 // GetMemoryPredictions returns OOM predictions (limited functionality)
-func (p *NativeMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*capabilities.OOMPrediction, error) {
-	return nil, capabilities.NewCapabilityError(
+func (p *NativeMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*OOMPrediction, error) {
+	return nil, NewCapabilityError(
 		"oom-prediction",
 		"OOM prediction requires eBPF monitoring (Linux only with kernel-level access)",
 		runtime.GOOS,
@@ -160,26 +158,26 @@ func (p *NativeMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map
 
 // Platform-specific implementations
 
-func (p *NativeMemoryPlugin) getLinuxMemoryStats() ([]capabilities.ProcessMemoryStats, error) {
+func (p *NativeMemoryPlugin) getLinuxMemoryStats() ([]ProcessMemoryStats, error) {
 	// Read from /proc filesystem
 	// This is basic implementation - real eBPF is much more accurate
-	return []capabilities.ProcessMemoryStats{}, fmt.Errorf(
+	return []ProcessMemoryStats{}, fmt.Errorf(
 		"basic /proc reading not yet implemented - use eBPF monitoring for accurate Linux memory tracking",
 	)
 }
 
-func (p *NativeMemoryPlugin) getDarwinMemoryStats() ([]capabilities.ProcessMemoryStats, error) {
+func (p *NativeMemoryPlugin) getDarwinMemoryStats() ([]ProcessMemoryStats, error) {
 	// Use macOS system APIs
-	return []capabilities.ProcessMemoryStats{}, capabilities.NewCapabilityError(
+	return []ProcessMemoryStats{}, NewCapabilityError(
 		"memory-stats",
 		"macOS memory monitoring not yet implemented - would use task_info() system calls",
 		"darwin",
 	)
 }
 
-func (p *NativeMemoryPlugin) getWindowsMemoryStats() ([]capabilities.ProcessMemoryStats, error) {
+func (p *NativeMemoryPlugin) getWindowsMemoryStats() ([]ProcessMemoryStats, error) {
 	// Use Windows Performance Counters or WMI
-	return []capabilities.ProcessMemoryStats{}, capabilities.NewCapabilityError(
+	return []ProcessMemoryStats{}, NewCapabilityError(
 		"memory-stats",
 		"Windows memory monitoring not yet implemented - would use Performance Counters API",
 		"windows",
@@ -219,10 +217,10 @@ func (p *NotAvailablePlugin) Name() string {
 	return p.name
 }
 
-func (p *NotAvailablePlugin) Info() *capabilities.CapabilityInfo {
-	return &capabilities.CapabilityInfo{
+func (p *NotAvailablePlugin) Info() *CapabilityInfo {
+	return &CapabilityInfo{
 		Name:     p.name,
-		Status:   capabilities.CapabilityNotAvailable,
+		Status:   CapabilityNotAvailable,
 		Platform: p.platform,
 		Error:    p.reason,
 		Requirements: []string{
@@ -237,16 +235,16 @@ func (p *NotAvailablePlugin) IsAvailable() bool {
 }
 
 func (p *NotAvailablePlugin) Start(ctx context.Context) error {
-	return capabilities.NewCapabilityError(p.name, p.reason, p.platform)
+	return NewCapabilityError(p.name, p.reason, p.platform)
 }
 
 func (p *NotAvailablePlugin) Stop() error {
 	return nil // No-op for unavailable capabilities
 }
 
-func (p *NotAvailablePlugin) Health() *capabilities.HealthStatus {
-	return &capabilities.HealthStatus{
-		Status:    capabilities.CapabilityNotAvailable,
+func (p *NotAvailablePlugin) Health() *HealthStatus {
+	return &HealthStatus{
+		Status:    CapabilityNotAvailable,
 		Message:   p.reason,
 		Timestamp: time.Now(),
 		Metrics: map[string]any{
@@ -256,37 +254,3 @@ func (p *NotAvailablePlugin) Health() *capabilities.HealthStatus {
 	}
 }
 
-// RegisterPlatformCapabilities registers appropriate capabilities for the current platform
-func RegisterPlatformCapabilities() error {
-	platform := runtime.GOOS
-
-	// Register memory capabilities
-	if platform == "linux" {
-		// Register both eBPF and native for Linux
-		if err := capabilities.Register(NewEBPFMemoryPlugin(nil)); err != nil {
-			return fmt.Errorf("failed to register eBPF memory plugin: %w", err)
-		}
-	}
-
-	// Always register native memory (with clear limitations)
-	if err := capabilities.Register(NewNativeMemoryPlugin()); err != nil {
-		return fmt.Errorf("failed to register native memory plugin: %w", err)
-	}
-
-	// Register network capabilities (not available yet)
-	networkReason := fmt.Sprintf("network monitoring not yet implemented for %s - requires platform-specific implementation", platform)
-	if err := capabilities.Register(NewNotAvailablePlugin("native-network", networkReason)); err != nil {
-		return fmt.Errorf("failed to register network not-available plugin: %w", err)
-	}
-
-	// Register system capabilities
-	systemReason := fmt.Sprintf("system monitoring not yet implemented for %s", platform)
-	if platform != "linux" {
-		systemReason += " - journald only available on Linux"
-	}
-	if err := capabilities.Register(NewNotAvailablePlugin("native-system", systemReason)); err != nil {
-		return fmt.Errorf("failed to register system not-available plugin: %w", err)
-	}
-
-	return nil
-}

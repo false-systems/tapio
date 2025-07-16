@@ -721,7 +721,14 @@ func (a *AnomalyAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 
 // Legacy NewTrendAnalyzer for backward compatibility  
 func NewBasicTrendAnalyzerLegacy(config CorrelatorConfig) *TrendAnalyzer {
-	return NewTrendAnalyzer(config)
+	trendConfig := &TrendAnalyzerConfig{
+		WindowSize:      10,
+		SmoothingFactor: 0.1,
+		TrendThreshold:  0.05,
+		VolatilityLimit: 0.2,
+		UpdateInterval:  time.Minute,
+	}
+	return NewTrendAnalyzer(trendConfig)
 }
 
 func (t *TrendAnalyzer) Name() string {
@@ -733,7 +740,7 @@ func (t *TrendAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 
 	// Get events in time windows
 	now := time.Now()
-	windowDuration := time.Duration(t.config.TrendAnalysisWindow) * time.Minute
+	windowDuration := t.config.UpdateInterval
 	last5Min := timeline.GetEvents(&TimeRange{
 		Start: now.Add(-windowDuration),
 		End:   now,
@@ -745,8 +752,8 @@ func (t *TrendAnalyzer) Analyze(timeline *Timeline) []AnalysisResult {
 	})
 
 	if len(last5Min) > 0 && len(last15Min) > 0 {
-		recentRate := float64(len(last5Min)) / float64(t.config.TrendAnalysisWindow)
-		previousRate := float64(len(last15Min)) / float64(2*t.config.TrendAnalysisWindow)
+		recentRate := float64(len(last5Min)) / t.config.UpdateInterval.Minutes()
+		previousRate := float64(len(last15Min)) / (2 * t.config.UpdateInterval.Minutes())
 
 		if recentRate > previousRate*2 {
 			result := AnalysisResult{

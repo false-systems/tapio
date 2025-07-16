@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/yairfalse/tapio/pkg/domain"
 	simpleTypes "github.com/yairfalse/tapio/pkg/types"
 )
 
@@ -103,11 +103,11 @@ func (s *Service) convertProblemsToEvents(problems []simpleTypes.Problem) []*typ
 			Source:    "health-check",
 			Type:      "problem-detected",
 			Severity:  s.convertSeverity(problem.Severity),
-			Entity: types.EntityInfo{
+			Entity: types.Entity{
 				Type:      problem.Resource.Kind,
 				Name:      problem.Resource.Name,
 				Namespace: problem.Resource.Namespace,
-				Pod:       problem.Resource.Name, // Assuming pod for now
+				Container: "", // Not provided in problem
 			},
 			Data: map[string]interface{}{
 				"title":       problem.Title,
@@ -176,8 +176,8 @@ func (s *Service) buildTimelineSummary() *TimelineSummary {
 
 // ServiceCorrelationResult contains the results of correlation analysis from the service
 type ServiceCorrelationResult struct {
-	Insights         []*Insight            `json:"insights"`
-	ResourceInsights map[string][]*Insight `json:"resource_insights"`
+	Insights         []*domain.Insight            `json:"insights"`
+	ResourceInsights map[string][]*domain.Insight `json:"resource_insights"`
 	Patterns         []EventPattern        `json:"patterns"`
 	Timeline         *TimelineSummary      `json:"timeline"`
 	Statistics       TimelineStatistics    `json:"statistics"`

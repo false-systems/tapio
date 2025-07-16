@@ -3,12 +3,10 @@ package correlation
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
 // Type aliases for correlation engine components
@@ -236,13 +234,35 @@ type RollbackResult struct {
 
 // CircuitBreaker implements circuit breaker pattern for auto-fix safety
 type CircuitBreaker struct {
-	threshold   int
-	window      time.Duration
-	recovery    time.Duration
-	failures    []time.Time
-	state       string // "closed", "open", "half-open"
-	lastFailure time.Time
-	mutex       sync.RWMutex
+	name             string
+	threshold        int
+	failureThreshold int
+	window           time.Duration
+	recovery         time.Duration
+	timeout          time.Duration
+	failures         []time.Time
+	state            CircuitBreakerState
+	lastFailure      time.Time
+	lastSuccess      time.Time
+	successCount     int
+	failureCount     int
+	mutex            sync.RWMutex
+}
+
+// NewCircuitBreaker creates a new circuit breaker
+func NewCircuitBreaker(threshold int, window, recovery time.Duration) *CircuitBreaker {
+	return &CircuitBreaker{
+		name:             "circuit-breaker",
+		threshold:        threshold,
+		failureThreshold: threshold,
+		window:           window,
+		recovery:         recovery,
+		timeout:          recovery,
+		failures:         make([]time.Time, 0),
+		state:            CircuitBreakerClosed,
+		successCount:     0,
+		failureCount:     0,
+	}
 }
 
 // RateLimiter implements rate limiting for auto-fix actions
@@ -825,17 +845,7 @@ func (afe *AutoFixEngine) handleRollback(ctx context.Context, execution *AutoFix
 	// Implementation for rollback handling
 }
 
-// Circuit breaker implementation
-func NewCircuitBreaker(threshold int, window, recovery time.Duration) *CircuitBreaker {
-	return &CircuitBreaker{
-		threshold: threshold,
-		window:    window,
-		recovery:  recovery,
-		failures:  []time.Time{},
-		state:     "closed",
-	}
-}
-
+// AllowRequest checks if a request can be allowed
 func (cb *CircuitBreaker) AllowRequest() bool {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
@@ -853,31 +863,33 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 	cb.failures = validFailures
 
 	switch cb.state {
-	case "closed":
+	case CircuitBreakerClosed:
 		return len(cb.failures) < cb.threshold
-	case "open":
+	case CircuitBreakerOpen:
 		if now.Sub(cb.lastFailure) > cb.recovery {
-			cb.state = "half-open"
+			cb.state = CircuitBreakerHalfOpen
 			return true
 		}
 		return false
-	case "half-open":
+	case CircuitBreakerHalfOpen:
 		return true
 	default:
 		return false
 	}
 }
 
+// RecordSuccess records a successful execution
 func (cb *CircuitBreaker) RecordSuccess() {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
 
-	if cb.state == "half-open" {
-		cb.state = "closed"
+	if cb.state == CircuitBreakerHalfOpen {
+		cb.state = CircuitBreakerClosed
 		cb.failures = []time.Time{}
 	}
 }
 
+// RecordFailure records a failed execution
 func (cb *CircuitBreaker) RecordFailure() {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
@@ -887,7 +899,7 @@ func (cb *CircuitBreaker) RecordFailure() {
 	cb.lastFailure = now
 
 	if len(cb.failures) >= cb.threshold {
-		cb.state = "open"
+		cb.state = CircuitBreakerOpen
 	}
 }
 

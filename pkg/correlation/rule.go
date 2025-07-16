@@ -6,33 +6,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// SeverityLevel represents the severity level of a finding
-type SeverityLevel int
+// Type alias for SeverityLevel from domain package
+type SeverityLevel = domain.SeverityLevel
 
+// Severity level constants for backward compatibility
 const (
-	SeverityLevelInfo SeverityLevel = iota
-	SeverityLevelWarning
-	SeverityLevelError
-	SeverityLevelCritical
+	SeverityLevelInfo     = domain.SeverityInfo
+	SeverityLevelWarning  = domain.SeverityWarning
+	SeverityLevelError    = domain.SeverityError
+	SeverityLevelCritical = domain.SeverityCritical
 )
-
-// String returns the string representation of severity
-func (s SeverityLevel) String() string {
-	switch s {
-	case SeverityLevelInfo:
-		return "info"
-	case SeverityLevelWarning:
-		return "warning"
-	case SeverityLevelError:
-		return "error"
-	case SeverityLevelCritical:
-		return "critical"
-	default:
-		return "unknown"
-	}
-}
 
 // ConfidenceLevel represents the confidence level of a finding
 type ConfidenceLevel int
@@ -80,6 +66,19 @@ type RuleEvidence struct {
 	Data        map[string]interface{} `json:"data"`
 	Timestamp   time.Time              `json:"timestamp"`
 	Confidence  float64                `json:"confidence"` // 0.0 to 1.0
+}
+
+// ToDomainEvidence converts RuleEvidence to domain.Evidence
+func (e RuleEvidence) ToDomainEvidence() domain.Evidence {
+	return domain.Evidence{
+		ID:          uuid.New().String(),
+		Type:        e.Type,
+		Source:      string(e.Source),
+		Content:     e.Data,
+		Confidence:  e.Confidence,
+		Description: e.Description,
+		Timestamp:   e.Timestamp,
+	}
 }
 
 // ResourceReference represents a reference to a Kubernetes resource
@@ -144,7 +143,7 @@ func (f *Finding) GetConfidenceLevel() ConfidenceLevel {
 }
 
 // AddEvidence adds supporting evidence to the finding
-func (f *Finding) AddEvidence(evidence Evidence) {
+func (f *Finding) AddEvidence(evidence RuleEvidence) {
 	f.Evidence = append(f.Evidence, evidence)
 	f.UpdatedAt = time.Now()
 }
@@ -201,9 +200,9 @@ func (f *Finding) GetImpact() string {
 
 	// Default based on severity
 	switch f.Severity {
-	case SeverityCritical:
+	case SeverityLevelCritical:
 		return "high"
-	case SeverityError:
+	case SeverityLevelError:
 		return "medium"
 	default:
 		return "low"
@@ -264,6 +263,37 @@ type Rule interface {
 
 	// Validate validates the rule configuration
 	Validate() error
+}
+
+// RuleAdapter adapts correlation.Rule to domain.Rule interface
+type RuleAdapter struct {
+	rule Rule
+}
+
+// NewRuleAdapter creates a new rule adapter
+func NewRuleAdapter(rule Rule) *RuleAdapter {
+	return &RuleAdapter{rule: rule}
+}
+
+// ToDomainRule converts to domain.Rule
+func (a *RuleAdapter) ToDomainRule() domain.Rule {
+	metadata := a.rule.GetMetadata()
+	return domain.Rule{
+		ID:          metadata.ID,
+		Name:        metadata.Name,
+		Description: metadata.Description,
+		Enabled:     metadata.Enabled,
+		Priority:    1, // Default priority
+		Conditions:  []domain.RuleCondition{},
+		Actions:     []domain.RuleAction{},
+		Metadata: map[string]interface{}{
+			"version":    metadata.Version,
+			"author":     metadata.Author,
+			"tags":       metadata.Tags,
+			"created_at": metadata.CreatedAt,
+			"updated_at": metadata.UpdatedAt,
+		},
+	}
 }
 
 // RuleRegistry manages available rules
@@ -408,7 +438,7 @@ func (r *BaseRule) CreateFinding(title, description string, severity SeverityLev
 		Description: description,
 		Severity:    severity,
 		Confidence:  confidence,
-		Evidence:    make([]Evidence, 0),
+		Evidence:    make([]RuleEvidence, 0),
 		Tags:        make([]string, 0),
 		CreatedAt:   now,
 		UpdatedAt:   now,

@@ -381,7 +381,7 @@ func (t *HTTPTransport) handlePublishEvent(w http.ResponseWriter, r *http.Reques
 		Context:   ctx,
 	}
 
-	response, err := t.HandleRequest(ctx, request)
+	_, err := t.HandleRequest(ctx, request)
 	if err != nil {
 		t.writeError(w, err, http.StatusInternalServerError)
 		return
@@ -443,7 +443,7 @@ func (t *HTTPTransport) writeError(w http.ResponseWriter, err error, statusCode 
 
 	if serverErr, ok := err.(*domain.ServerError); ok {
 		errorResponse["error"].(map[string]interface{})["code"] = serverErr.Code
-		errorResponse["error"].(map[string]interface{})["details"] = serverErr.Details
+		errorResponse["error"].(map[string]interface{})["context"] = serverErr.Context
 	}
 
 	json.NewEncoder(w).Encode(errorResponse)

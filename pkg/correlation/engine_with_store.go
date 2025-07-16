@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
@@ -99,22 +100,21 @@ func (e *PerfectEngineWithStore) GetStats() *EngineStats {
 		EventsProcessed:    baseStats.EventsProcessed,
 		CorrelationsFound:  baseStats.CorrelationsFound,
 		InsightsGenerated:  baseStats.InsightsGenerated,
-		ActiveRules:        100, // Placeholder
-		ActiveCorrelations: 50,  // Placeholder
-		ProcessingRate:     float64(baseStats.EventsProcessed) / time.Since(time.Now().Add(-time.Hour)).Seconds(),
+		ErrorCount:         0, // TODO: track errors
+		LastProcessedTime:  time.Now(),
 	}
 }
 
 // extractInsightsFromEvent simulates insight extraction from processed event
-func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.OpinionatedEvent) []*Insight {
-	insights := make([]*Insight, 0)
+func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.OpinionatedEvent) []*domain.Insight {
+	insights := make([]*domain.Insight, 0)
 
 	// Generate insights based on event data
 	// This is a simplified implementation - real engine would generate from correlations
 
 	// Check for anomalies
 	if event.Anomaly != nil && event.Anomaly.AnomalyScore > 0.7 {
-		insight := &Insight{
+		insight := &domain.Insight{
 			ID:           generateInsightID(),
 			Title:        fmt.Sprintf("Anomaly detected in %s", event.Context.Pod),
 			Description:  fmt.Sprintf("Anomaly detected with score %.2f", event.Anomaly.AnomalyScore),
@@ -123,7 +123,7 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 			ResourceName: event.Context.Pod,
 			Namespace:    event.Context.Namespace,
 			Timestamp:    event.Timestamp,
-			Evidence: []*Evidence{
+			Evidence: []domain.Evidence{
 				{
 					EventID:     event.ID,
 					Description: "Anomaly detection triggered",
@@ -136,11 +136,11 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 		// Add prediction if behavioral anomaly
 		if event.Behavioral != nil && event.Behavioral.Confidence > 0.6 {
 			insight.Prediction = &Prediction{
-				Type:        "behavioral_degradation",
+				Class:       "behavioral_degradation",
 				Probability: event.Behavioral.Confidence,
 				Confidence:  0.8,
-				TimeToEvent: time.Hour,
-				Description: "Behavioral pattern indicates potential degradation",
+				Explanation: "Behavioral pattern indicates potential degradation",
+				Features:    make(map[string]float64),
 			}
 		}
 
@@ -152,7 +152,7 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 
 	// Check for causality chains
 	if event.Causality != nil && len(event.Causality.CausalChain) > 2 {
-		insight := &Insight{
+		insight := &domain.Insight{
 			ID:           generateInsightID(),
 			Title:        fmt.Sprintf("Causality chain detected for %s", event.Context.Pod),
 			Description:  fmt.Sprintf("Multi-step causality chain with %d events", len(event.Causality.CausalChain)),
@@ -178,7 +178,7 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 
 	// Check for performance issues - simplified for now
 	if false { // TODO: Add performance context when available
-		insight := &Insight{
+		insight := &domain.Insight{
 			ID:           generateInsightID(),
 			Title:        fmt.Sprintf("Performance degradation in %s", event.Context.Pod),
 			Description:  fmt.Sprintf("Performance metric degraded"),
@@ -187,7 +187,7 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 			ResourceName: event.Context.Pod,
 			Namespace:    event.Context.Namespace,
 			Timestamp:    event.Timestamp,
-			Evidence: []*Evidence{
+			Evidence: []domain.Evidence{
 				{
 					EventID:     event.ID,
 					Description: fmt.Sprintf("Performance metric degraded"),
@@ -199,11 +199,11 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 
 		// Add prediction for continued degradation
 		insight.Prediction = &Prediction{
-			Type:        "performance_failure",
+			Class:       "performance_failure",
 			Probability: 0.7,
 			Confidence:  0.75,
-			TimeToEvent: 30 * time.Minute,
-			Description: "Performance trending toward failure threshold",
+			Explanation: "Performance trending toward failure threshold",
+			Features:    make(map[string]float64),
 		}
 
 		insights = append(insights, insight)
@@ -213,8 +213,8 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 }
 
 // generateActionableItems creates actionable recommendations
-func (e *PerfectEngineWithStore) generateActionableItems(event *opinionated.OpinionatedEvent, insight *Insight) []*ActionableItem {
-	items := make([]*ActionableItem, 0)
+func (e *PerfectEngineWithStore) generateActionableItems(event *opinionated.OpinionatedEvent, insight *domain.Insight) []*domain.ActionItem {
+	items := make([]*domain.ActionItem, 0)
 
 	// Generate based on insight category
 	switch insight.Category {
@@ -244,11 +244,11 @@ func (e *PerfectEngineWithStore) generateActionableItems(event *opinionated.Opin
 }
 
 // extractCausalityEvidence extracts evidence from causality chain
-func (e *PerfectEngineWithStore) extractCausalityEvidence(causality *opinionated.CausalityContext) []*Evidence {
-	evidence := make([]*Evidence, 0, len(causality.CausalChain))
+func (e *PerfectEngineWithStore) extractCausalityEvidence(causality *opinionated.CausalityContext) []domain.Evidence {
+	evidence := make([]domain.Evidence, 0, len(causality.CausalChain))
 
 	for _, event := range causality.CausalChain {
-		evidence = append(evidence, &Evidence{
+		evidence = append(evidence, domain.Evidence{
 			EventID:     event.EventID,
 			Description: event.Description,
 			Timestamp:   event.Timestamp,
@@ -260,7 +260,7 @@ func (e *PerfectEngineWithStore) extractCausalityEvidence(causality *opinionated
 }
 
 // shouldStoreInsight determines if an insight should be stored
-func (e *PerfectEngineWithStore) shouldStoreInsight(insight *Insight) bool {
+func (e *PerfectEngineWithStore) shouldStoreInsight(insight *domain.Insight) bool {
 	if !e.storeAllInsights {
 		// Check severity threshold
 		if !e.meetsMinSeverity(insight.Severity) {
@@ -294,7 +294,7 @@ func (e *PerfectEngineWithStore) meetsMinSeverity(severity string) bool {
 }
 
 // removeOldestInsights removes the oldest insights
-func (e *PerfectEngineWithStore) removeOldestInsights(insights []*Insight, count int) {
+func (e *PerfectEngineWithStore) removeOldestInsights(insights []*domain.Insight, count int) {
 	// Sort by timestamp and remove oldest
 	// In real implementation, this would be handled by the store
 	for i := 0; i < count && i < len(insights); i++ {

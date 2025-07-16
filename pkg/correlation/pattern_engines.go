@@ -62,6 +62,7 @@ type SemanticPattern struct {
 	ID          string
 	Description string
 	Keywords    []string
+	Confidence  float64
 }
 
 type BehaviorProfile struct {
@@ -222,7 +223,7 @@ func (e *SemanticPatternEngine) DetectPatterns(ctx context.Context, event *opini
 
 func (e *BehavioralPatternEngine) AnalyzeBehavior(ctx context.Context, event *opinionated.OpinionatedEvent) (*BehaviorProfile, error) {
 	// Get or create behavior profile for this resource
-	profileID := event.Source + ":" + event.ResourceID
+	profileID := event.Source.Collector + ":" + event.Context.Pod
 	profile, exists := e.behaviors[profileID]
 	if !exists {
 		profile = &BehaviorProfile{
@@ -317,7 +318,7 @@ func (e *AnomalyPatternEngine) DetectAnomalies(ctx context.Context, event *opini
 	
 	// Statistical anomaly detection
 	for metricName, value := range metrics {
-		profileID := event.ResourceID + ":" + metricName
+		profileID := event.Context.Pod + ":" + metricName
 		profile, exists := e.anomalies[profileID]
 		
 		if !exists {
@@ -348,4 +349,100 @@ func (e *AnomalyPatternEngine) DetectAnomalies(ctx context.Context, event *opini
 	}
 	
 	return anomalies, nil
+}
+
+// Missing methods for PatternCache
+
+// Set stores a pattern result in the cache
+func (pc *PatternCache) Set(key string, result *PatternResult) error {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	pc.cache[key] = result
+	return nil
+}
+
+// Get retrieves a pattern result from the cache
+func (pc *PatternCache) Get(key string) (*PatternResult, bool) {
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	result, found := pc.cache[key]
+	return result, found
+}
+
+// GetCached is an alias for Get
+func (pc *PatternCache) GetCached(key string) *PatternResult {
+	result, _ := pc.Get(key)
+	return result
+}
+
+// Missing methods for EmbeddingIndex
+
+// AddEmbedding stores an embedding for an event
+func (ei *EmbeddingIndex) AddEmbedding(eventID string, embedding []float32) error {
+	ei.mu.Lock()
+	defer ei.mu.Unlock()
+	
+	// Convert float32 to float64
+	embeddingFloat64 := make([]float64, len(embedding))
+	for i, v := range embedding {
+		embeddingFloat64[i] = float64(v)
+	}
+	
+	ei.embeddings[eventID] = embeddingFloat64
+	return nil
+}
+
+// SearchSimilar finds similar embeddings
+func (ei *EmbeddingIndex) SearchSimilar(embedding []float32, topK int) ([]string, []float32, error) {
+	ei.mu.RLock()
+	defer ei.mu.RUnlock()
+	
+	// For now, return empty results
+	return []string{}, []float32{}, nil
+}
+
+// Missing methods for OntologyIndex
+
+// AddTags adds tags for an event
+func (oi *OntologyIndex) AddTags(eventID string, tags []string) error {
+	oi.mu.Lock()
+	defer oi.mu.Unlock()
+	
+	// For now, just store as concepts
+	for _, tag := range tags {
+		if _, exists := oi.concepts[tag]; !exists {
+			oi.concepts[tag] = &Concept{
+				ID:      tag,
+				Name:    tag,
+				Related: []string{},
+			}
+		}
+	}
+	
+	return nil
+}
+
+// FindSimilarTags finds patterns with similar ontology tags
+func (oi *OntologyIndex) FindSimilarTags(tags []string, limit int, threshold float32) ([]string, []float32, error) {
+	oi.mu.RLock()
+	defer oi.mu.RUnlock()
+	
+	// For now, return empty results
+	return []string{}, []float32{}, nil
+}
+
+// Missing methods for TemporalPatternEngine
+
+// FindSequences finds temporal sequences in events (wrapper for DetectSequences)
+func (e *TemporalPatternEngine) FindSequences(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]*TemporalSequence, error) {
+	sequences, err := e.DetectSequences(ctx, events)
+	return sequences, err
+}
+
+// Missing methods for CausalityPatternEngine
+
+// DetectCausality detects causal patterns in a single event
+func (e *CausalityPatternEngine) DetectCausality(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*CausalityPattern, error) {
+	// For now, return empty slice - actual implementation would analyze causality
+	return []*CausalityPattern{}, nil
 }

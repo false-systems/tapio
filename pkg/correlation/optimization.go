@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
 // PerformanceOptimizer type is now defined in types_consolidated.go
@@ -32,6 +29,8 @@ type LegacyPerformanceOptimizer struct {
 	optimizationChan chan *OptimizationRequest
 	mutex            sync.RWMutex
 }
+
+// PerformanceOptimizer type defined in missing_core_types.go
 
 // OptimizationConfig is now defined in types_consolidated.go
 // LegacyOptimizationConfig provides backward compatibility
@@ -889,11 +888,11 @@ type BenchmarkMetric struct {
 
 // Main interface implementations
 
-// NewPerformanceOptimizer creates a comprehensive performance optimizer
-func NewPerformanceOptimizer(engine *PatternIntegratedEngine) *PerformanceOptimizer {
+// NewLegacyPerformanceOptimizer creates a comprehensive performance optimizer
+func NewLegacyPerformanceOptimizer(engine *PatternIntegratedEngine) *LegacyPerformanceOptimizer {
 	config := DefaultLegacyOptimizationConfig()
 
-	return &PerformanceOptimizer{
+	return &LegacyPerformanceOptimizer{
 		engine:           engine,
 		profiler:         NewPerformanceProfiler(),
 		optimizer:        NewAdaptiveOptimizer(),
@@ -935,7 +934,7 @@ func DefaultOptimizationConfig() *LegacyOptimizationConfig {
 }
 
 // Start begins performance optimization
-func (po *PerformanceOptimizer) Start(ctx context.Context) error {
+func (po *LegacyPerformanceOptimizer) Start(ctx context.Context) error {
 	po.mutex.Lock()
 	defer po.mutex.Unlock()
 
@@ -962,7 +961,7 @@ func (po *PerformanceOptimizer) Start(ctx context.Context) error {
 }
 
 // ProfilePerformance runs comprehensive performance profiling
-func (po *PerformanceOptimizer) ProfilePerformance(ctx context.Context, duration time.Duration) (*PerformanceProfile, error) {
+func (po *LegacyPerformanceOptimizer) ProfilePerformance(ctx context.Context, duration time.Duration) (*PerformanceProfile, error) {
 	profileID := fmt.Sprintf("profile-%d", time.Now().UnixNano())
 
 	profile := &PerformanceProfile{
@@ -980,7 +979,7 @@ func (po *PerformanceOptimizer) ProfilePerformance(ctx context.Context, duration
 }
 
 // OptimizePerformance runs targeted performance optimization
-func (po *PerformanceOptimizer) OptimizePerformance(ctx context.Context, request *OptimizationRequest) (*OptimizationExecution, error) {
+func (po *LegacyPerformanceOptimizer) OptimizePerformance(ctx context.Context, request *OptimizationRequest) (*OptimizationExecution, error) {
 	// Select optimization strategy
 	strategy, err := po.selectOptimizationStrategy(request)
 	if err != nil {
@@ -992,18 +991,18 @@ func (po *PerformanceOptimizer) OptimizePerformance(ctx context.Context, request
 }
 
 // GetPerformanceMetrics returns current performance metrics
-func (po *PerformanceOptimizer) GetPerformanceMetrics() *PerformanceSnapshot {
+func (po *LegacyPerformanceOptimizer) GetPerformanceMetrics() *PerformanceSnapshot {
 	return po.monitor.GetCurrentMetrics()
 }
 
 // GetOptimizationHistory returns optimization execution history
-func (po *PerformanceOptimizer) GetOptimizationHistory() []*OptimizationExecution {
+func (po *LegacyPerformanceOptimizer) GetOptimizationHistory() []*OptimizationExecution {
 	return po.optimizer.GetOptimizationHistory()
 }
 
 // Helper methods for implementation
 
-func (po *PerformanceOptimizer) optimizationLoop(ctx context.Context) {
+func (po *LegacyPerformanceOptimizer) optimizationLoop(ctx context.Context) {
 	ticker := time.NewTicker(po.config.MonitoringInterval)
 	defer ticker.Stop()
 
@@ -1021,7 +1020,7 @@ func (po *PerformanceOptimizer) optimizationLoop(ctx context.Context) {
 	}
 }
 
-func (po *PerformanceOptimizer) adaptiveOptimizationLoop(ctx context.Context) {
+func (po *LegacyPerformanceOptimizer) adaptiveOptimizationLoop(ctx context.Context) {
 	ticker := time.NewTicker(po.config.OptimizationInterval)
 	defer ticker.Stop()
 
@@ -1035,7 +1034,7 @@ func (po *PerformanceOptimizer) adaptiveOptimizationLoop(ctx context.Context) {
 	}
 }
 
-func (po *PerformanceOptimizer) checkAndOptimize(ctx context.Context) {
+func (po *LegacyPerformanceOptimizer) checkAndOptimize(ctx context.Context) {
 	metrics := po.monitor.GetCurrentMetrics()
 	thresholds := po.config.PerformanceThresholds
 
@@ -1077,7 +1076,7 @@ func (po *PerformanceOptimizer) checkAndOptimize(ctx context.Context) {
 	}
 }
 
-func (po *PerformanceOptimizer) selectOptimizationStrategy(request *OptimizationRequest) (*OptimizationStrategy, error) {
+func (po *LegacyPerformanceOptimizer) selectOptimizationStrategy(request *OptimizationRequest) (*OptimizationStrategy, error) {
 	// Simplified strategy selection
 	// Real implementation would use ML-based decision making
 
@@ -1110,7 +1109,7 @@ func (po *PerformanceOptimizer) selectOptimizationStrategy(request *Optimization
 	return nil, fmt.Errorf("no suitable optimization strategy found")
 }
 
-func (po *PerformanceOptimizer) executeOptimization(ctx context.Context, strategy *OptimizationStrategy, request *OptimizationRequest) (*OptimizationExecution, error) {
+func (po *LegacyPerformanceOptimizer) executeOptimization(ctx context.Context, strategy *OptimizationStrategy, request *OptimizationRequest) (*OptimizationExecution, error) {
 	execution := &OptimizationExecution{
 		ExecutionID:       fmt.Sprintf("exec-%d", time.Now().UnixNano()),
 		StrategyID:        strategy.StrategyID,
@@ -1150,7 +1149,7 @@ func (po *PerformanceOptimizer) executeOptimization(ctx context.Context, strateg
 	return execution, nil
 }
 
-func (po *PerformanceOptimizer) calculateActualImpact(before, after *PerformanceSnapshot) *ActualImpact {
+func (po *LegacyPerformanceOptimizer) calculateActualImpact(before, after *PerformanceSnapshot) *ActualImpact {
 	return &ActualImpact{
 		LatencyChange:      after.Latency - before.Latency,
 		ThroughputChange:   after.Throughput - before.Throughput,
@@ -1162,7 +1161,7 @@ func (po *PerformanceOptimizer) calculateActualImpact(before, after *Performance
 	}
 }
 
-func (po *PerformanceOptimizer) calculateOverallImprovement(before, after *PerformanceSnapshot) float64 {
+func (po *LegacyPerformanceOptimizer) calculateOverallImprovement(before, after *PerformanceSnapshot) float64 {
 	// Simplified overall improvement calculation
 	// Real implementation would use weighted scoring
 
@@ -1187,14 +1186,14 @@ func (po *PerformanceOptimizer) calculateOverallImprovement(before, after *Perfo
 	return overallImprovement
 }
 
-func (po *PerformanceOptimizer) handleOptimizationRequest(ctx context.Context, request *OptimizationRequest) {
+func (po *LegacyPerformanceOptimizer) handleOptimizationRequest(ctx context.Context, request *OptimizationRequest) {
 	_, err := po.OptimizePerformance(ctx, request)
 	if err != nil {
 		// Log error
 	}
 }
 
-func (po *PerformanceOptimizer) runAdaptiveOptimization(ctx context.Context) {
+func (po *LegacyPerformanceOptimizer) runAdaptiveOptimization(ctx context.Context) {
 	// Adaptive optimization using learning engine
 	po.optimizer.RunAdaptiveOptimization(ctx, po.engine, po.monitor.GetCurrentMetrics())
 }
@@ -1761,7 +1760,7 @@ func createDefaultAlertRules() []*AlertRule {
 
 // Additional utility methods
 
-func (po *PerformanceOptimizer) Stop() error {
+func (po *LegacyPerformanceOptimizer) Stop() error {
 	po.mutex.Lock()
 	defer po.mutex.Unlock()
 
@@ -1794,6 +1793,7 @@ func RunPerformanceBenchmark(engine *PatternIntegratedEngine, duration time.Dura
 
 	// Run benchmark
 	startTime := time.Now()
+	benchmark.StartTime = startTime
 
 	// Simulate event processing
 	eventCount := int64(0)

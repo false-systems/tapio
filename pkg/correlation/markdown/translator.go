@@ -82,11 +82,8 @@ func (t *CorrelationTranslator) convertToSemanticRule(mc *MarkdownCorrelation) (
 		ID:          ruleID,
 		Name:        mc.Name,
 		Description: mc.RawDescription,
-		Category:    category,
-		Severity:    severity,
-		Enabled:     true,
 		Version:     "1.0",
-		Author:      "markdown-translator",
+		Enabled:     true,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 
@@ -101,13 +98,21 @@ func (t *CorrelationTranslator) convertToSemanticRule(mc *MarkdownCorrelation) (
 			"source":           "markdown",
 			"user_defined":     true,
 			"confidence_score": confidence,
+			"category":         category,
+			"severity":         severity,
+			"author":           "markdown-translator",
 		},
 
+		// Set priority based on severity
+		Priority:   t.severityToPriority(severity),
+		Confidence: float32(confidence),
+		
 		// Performance hints
-		PerformanceHints: &correlation.PerformanceHints{
-			MaxExecutionTime: 100 * time.Millisecond,
-			CacheResults:     true,
-			CacheDuration:    5 * time.Minute,
+		Performance: &correlation.PerformanceHints{
+			CacheKey:       "semantic_rule",
+			CacheDuration:  300, // 5 minutes in seconds
+			Parallelizable: true,
+			Priority:       t.severityToPriority(severity),
 		},
 	}
 
@@ -117,51 +122,45 @@ func (t *CorrelationTranslator) convertToSemanticRule(mc *MarkdownCorrelation) (
 // buildSemanticConditions creates semantic conditions from parsed conditions
 func (t *CorrelationTranslator) buildSemanticConditions(conditions []Condition) *correlation.SemanticConditions {
 	sc := &correlation.SemanticConditions{
-		RequireAllConditions: true, // AND logic by default
-		Conditions:           []correlation.SemanticCondition{},
+		EventTypePatterns: []string{},
+		SemanticFeatures:  make(map[string]*correlation.FeatureCondition),
 	}
 
 	for _, cond := range conditions {
 		switch cond.Type {
 		case "threshold":
-			// Create a threshold condition
-			sc.Conditions = append(sc.Conditions, correlation.SemanticCondition{
-				Type: "threshold",
-				Config: map[string]interface{}{
-					"resource": cond.Resource,
-					"operator": cond.Operator,
-					"value":    t.parseValue(cond.Value),
-					"unit":     cond.Unit,
-					"duration": cond.Duration.String(),
-				},
-			})
+			// Create a feature condition for threshold
+			sc.SemanticFeatures[cond.Resource] = &correlation.FeatureCondition{
+				Feature:  cond.Resource,
+				Operator: cond.Operator,
+				Value:    t.parseValue(cond.Value),
+			}
+
+		case "event_type":
+			// Add event type pattern
+			sc.EventTypePatterns = append(sc.EventTypePatterns, cond.Value)
 
 		case "text":
-			// Create a semantic text matching condition
-			sc.Conditions = append(sc.Conditions, correlation.SemanticCondition{
-				Type: "semantic_match",
-				Config: map[string]interface{}{
-					"description":     cond.Description,
-					"match_threshold": 0.8,
-				},
-			})
+			// Create a description matching condition
+			if sc.DescriptionMatching == nil {
+				sc.DescriptionMatching = &correlation.DescriptionMatcher{
+					Pattern:      cond.Description,
+					MinScore:     0.8,
+					UseEmbedding: true,
+				}
+			}
 
 		default:
-			// Generic condition
-			sc.Conditions = append(sc.Conditions, correlation.SemanticCondition{
-				Type: "custom",
-				Config: map[string]interface{}{
-					"description": cond.Description,
-				},
-			})
+			// Store other conditions as features
+			sc.SemanticFeatures[cond.Type] = &correlation.FeatureCondition{
+				Feature:  cond.Type,
+				Operator: "equals",
+				Value:    cond.Value,
+			}
 		}
 	}
 
 	// If we have multiple conditions, also create natural language description
-	if len(conditions) > 0 {
-		sc.NaturalLanguageDescription = t.buildNaturalLanguageDescription(conditions)
-	}
-
 	return sc
 }
 
@@ -171,8 +170,9 @@ func (t *CorrelationTranslator) buildSemanticActions(actions []Action) []*correl
 
 	for _, action := range actions {
 		sa := &correlation.SemanticAction{
-			Type: t.mapActionType(action.Type),
-			Config: map[string]interface{}{
+			Type:   t.mapActionType(action.Type),
+			Target: action.Description,
+			Parameters: map[string]interface{}{
 				"description": action.Description,
 			},
 		}
@@ -180,16 +180,16 @@ func (t *CorrelationTranslator) buildSemanticActions(actions []Action) []*correl
 		// Add specific configurations based on action type
 		switch action.Type {
 		case "root_cause":
-			sa.Config["root_cause_description"] = action.Description
-			sa.Config["confidence"] = 0.8
+			sa.Parameters["root_cause_description"] = action.Description
+			sa.Confidence = 0.8
 
 		case "prediction":
-			sa.Config["prediction_description"] = action.Description
-			sa.Config["time_horizon"] = "5m"
+			sa.Parameters["prediction_description"] = action.Description
+			sa.Parameters["time_horizon"] = "5m"
 
 		case "recommendation":
-			sa.Config["recommendation"] = action.Description
-			sa.Config["auto_apply"] = false
+			sa.Parameters["recommendation"] = action.Description
+			sa.Parameters["auto_apply"] = false
 		}
 
 		semanticActions = append(semanticActions, sa)
@@ -197,8 +197,9 @@ func (t *CorrelationTranslator) buildSemanticActions(actions []Action) []*correl
 
 	// Always add a create finding action
 	semanticActions = append(semanticActions, &correlation.SemanticAction{
-		Type: "create_finding",
-		Config: map[string]interface{}{
+		Type:   "create_finding",
+		Target: "finding",
+		Parameters: map[string]interface{}{
 			"template": "User-defined correlation detected: {{.rule.Name}}",
 		},
 	})
@@ -324,3 +325,22 @@ func (t *CorrelationTranslator) DeleteRulesFromEngine(ruleIDs []string, engine *
 
 	return nil
 }
+
+// Helper methods
+
+func (t *CorrelationTranslator) severityToPriority(severity string) int {
+	switch severity {
+	case "critical":
+		return 10
+	case "high":
+		return 8
+	case "medium":
+		return 5
+	case "low":
+		return 3
+	default:
+		return 1
+	}
+}
+
+// parseValue (already defined above)

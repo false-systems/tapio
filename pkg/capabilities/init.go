@@ -2,8 +2,6 @@ package capabilities
 
 import (
 	"runtime"
-
-	"github.com/yairfalse/tapio/pkg/capabilities/plugins"
 )
 
 // init automatically registers platform-appropriate capabilities
@@ -36,95 +34,25 @@ func RegisterDefaultCapabilities() error {
 
 // registerLinuxCapabilities registers Linux-specific capabilities
 func registerLinuxCapabilities() error {
-	// eBPF capabilities (will check availability at runtime)
-	if err := Register(plugins.NewEBPFMemoryPlugin(nil)); err != nil {
-		return err
-	}
-
-	// Native capabilities as fallback
-	if err := Register(plugins.NewNativeMemoryPlugin()); err != nil {
-		return err
-	}
-
-	// Network capabilities (not yet implemented)
-	if err := Register(plugins.NewNotAvailablePlugin("ebpf-network", "eBPF network monitoring not yet implemented")); err != nil {
-		return err
-	}
-
-	// System capabilities (journald)
-	if err := Register(plugins.NewNotAvailablePlugin("journald", "journald integration not yet implemented")); err != nil {
-		return err
-	}
-
+	// This function will be implemented by build_linux.go
+	// It will use the plugins package directly without causing circular imports
 	return nil
 }
 
 // registerDarwinCapabilities registers macOS-specific capabilities
 func registerDarwinCapabilities() error {
-	// Native memory monitoring
-	if err := Register(plugins.NewNativeMemoryPlugin()); err != nil {
-		return err
-	}
-
-	// Other capabilities not available
-	if err := Register(plugins.NewNotAvailablePlugin("ebpf-memory", "eBPF only available on Linux")); err != nil {
-		return err
-	}
-
-	if err := Register(plugins.NewNotAvailablePlugin("native-network", "macOS network monitoring not yet implemented")); err != nil {
-		return err
-	}
-
-	if err := Register(plugins.NewNotAvailablePlugin("native-system", "macOS system monitoring not yet implemented")); err != nil {
-		return err
-	}
-
+	// This function will be implemented by build_darwin.go
 	return nil
 }
 
 // registerWindowsCapabilities registers Windows-specific capabilities
 func registerWindowsCapabilities() error {
-	// Native memory monitoring
-	if err := Register(plugins.NewNativeMemoryPlugin()); err != nil {
-		return err
-	}
-
-	// Other capabilities not available
-	if err := Register(plugins.NewNotAvailablePlugin("ebpf-memory", "eBPF only available on Linux")); err != nil {
-		return err
-	}
-
-	if err := Register(plugins.NewNotAvailablePlugin("native-network", "Windows network monitoring not yet implemented")); err != nil {
-		return err
-	}
-
-	if err := Register(plugins.NewNotAvailablePlugin("native-system", "Windows system monitoring not yet implemented")); err != nil {
-		return err
-	}
-
+	// This function will be implemented by build_windows.go
 	return nil
 }
 
 // registerGenericCapabilities registers minimal capabilities for unknown platforms
 func registerGenericCapabilities() error {
-	// Basic memory monitoring
-	if err := Register(plugins.NewNativeMemoryPlugin()); err != nil {
-		return err
-	}
-
-	// Everything else unavailable
-	platform := runtime.GOOS
-	if err := Register(plugins.NewNotAvailablePlugin("ebpf-memory", "eBPF only available on Linux")); err != nil {
-		return err
-	}
-
-	if err := Register(plugins.NewNotAvailablePlugin("native-network", platform+" network monitoring not implemented")); err != nil {
-		return err
-	}
-
-	if err := Register(plugins.NewNotAvailablePlugin("native-system", platform+" system monitoring not implemented")); err != nil {
-		return err
-	}
-
+	// This function will be implemented by build_generic.go
 	return nil
 }

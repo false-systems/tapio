@@ -55,7 +55,7 @@ func (m *ConnectionManager) AcceptConnection(ctx context.Context, connection *do
 	// Check connection limit
 	currentActive := m.activeCount.Load()
 	if currentActive >= int64(m.maxConnections) {
-		return domain.ErrResourceExhaustedGeneric("maximum connections reached")
+		return domain.ErrResourceExhausted("connections")
 	}
 
 	m.mu.Lock()
@@ -63,7 +63,7 @@ func (m *ConnectionManager) AcceptConnection(ctx context.Context, connection *do
 
 	// Check if connection already exists
 	if _, exists := m.connections[connection.ID]; exists {
-		return domain.ErrResourceAlreadyExists(fmt.Sprintf("connection %s already exists", connection.ID))
+		return domain.ErrAlreadyExists
 	}
 
 	// Create connection entry

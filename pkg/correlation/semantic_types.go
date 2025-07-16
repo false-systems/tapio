@@ -2,6 +2,8 @@ package correlation
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -171,6 +173,16 @@ type SemanticIndex struct {
 type EmbeddingEngine struct {
 	model string
 	cache map[string][]float64
+	config *EmbeddingConfig
+}
+
+// NewEmbeddingEngine creates a new embedding engine
+func NewEmbeddingEngine(config *EmbeddingConfig) (*EmbeddingEngine, error) {
+	return &EmbeddingEngine{
+		model:  "default",
+		cache:  make(map[string][]float64),
+		config: config,
+	}, nil
 }
 
 // OntologyEngine handles ontology operations
@@ -221,6 +233,26 @@ type InterpretabilityHints struct {
 type SemanticCacheManager struct {
 	cache map[string]interface{}
 	ttl   map[string]time.Time
+	mu    sync.RWMutex
+}
+
+// InvalidateRuleCache invalidates cached data for a specific rule
+func (scm *SemanticCacheManager) InvalidateRuleCache(ruleID string) {
+	scm.mu.Lock()
+	defer scm.mu.Unlock()
+	
+	// Remove any cached data for this rule
+	delete(scm.cache, ruleID)
+	delete(scm.ttl, ruleID)
+	
+	// Also remove any related cache entries (e.g., rule results)
+	prefix := ruleID + ":"
+	for key := range scm.cache {
+		if strings.HasPrefix(key, prefix) {
+			delete(scm.cache, key)
+			delete(scm.ttl, key)
+		}
+	}
 }
 
 // MLFeatureExtractor extracts ML features
@@ -269,7 +301,18 @@ type MLModel struct {
 // Predict implements the Model interface
 func (m *MLModel) Predict(ctx context.Context, input ModelInput) (ModelOutput, error) {
 	// Simple prediction for now
-	return ModelOutput{Predictions: map[string]float64{"confidence": 0.8}}, nil
+	return ModelOutput{
+		Predictions: []Prediction{
+			{
+				Class:       "default",
+				Probability: 0.8,
+				Confidence:  0.8,
+				Explanation: "Default prediction",
+			},
+		},
+		Confidence: 0.8,
+		Scores:     map[string]float64{"confidence": 0.8},
+	}, nil
 }
 
 // Train implements the Model interface
@@ -292,10 +335,47 @@ func (m *MLModel) Evaluate(ctx context.Context, testData TrainingData) (*ModelEv
 // GetInfo implements the Model interface
 func (m *MLModel) GetInfo() ModelInfo {
 	return ModelInfo{
-		Name:     m.Name,
-		Type:     m.Type,
-		Version:  m.Version,
-		Features: m.Features,
-		Outputs:  m.Outputs,
+		Name:        m.Name,
+		Version:     m.Version,
+		Type:        ModelTypeClassification,  // Use proper ModelType constant
+		Description: "Default ML model implementation",
+		Created:     time.Now(),
+		Updated:     time.Now(),
+		Author:      "tapio",
+		Framework:   "internal",
 	}
+}
+
+// GetMetrics implements the Model interface
+func (m *MLModel) GetMetrics() ModelMetrics {
+	return ModelMetrics{
+		PredictionCount: 0,
+		AverageLatency:  0,
+		ErrorRate:       0.0,
+		LastPrediction:  time.Now(),
+		TotalErrors:     0,
+		MemoryUsage:     0,
+		CPUUsage:        0.0,
+		Throughput:      0.0,
+	}
+}
+
+// GetVersion implements the Model interface
+func (m *MLModel) GetVersion() string {
+	return m.Version
+}
+
+// IsLoaded implements the Model interface
+func (m *MLModel) IsLoaded() bool {
+	return true // Simple implementation - assume loaded
+}
+
+// Load implements the Model interface
+func (m *MLModel) Load(ctx context.Context) error {
+	return nil // Simple implementation - assume already loaded
+}
+
+// Unload implements the Model interface
+func (m *MLModel) Unload(ctx context.Context) error {
+	return nil // Simple implementation - nothing to unload
 }

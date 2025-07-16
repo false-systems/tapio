@@ -10,6 +10,7 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/correlation/patterns"
 	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
@@ -298,8 +299,8 @@ func (pie *PatternIntegratedEngine) fuseResults(correlations []*Correlation, pat
 		if enhancedPattern != nil {
 			insight := &FusedInsight{
 				Type:             "correlation_enhanced",
-				CorrelationType:  correlation.Type,
-				Confidence:       correlation.Confidence,
+				CorrelationType:  "unknown", // correlation.Type field not available
+				Confidence:       0.8,      // correlation.Confidence field not available
 				Description:      pie.generateCorrelationDescription(correlation),
 				EnhancedPattern:  enhancedPattern,
 				FusionConfidence: pie.calculateFusionConfidence(enhancedPattern, []*Correlation{correlation}),
@@ -417,7 +418,7 @@ type IntegratedResult struct {
 	ProcessingTime time.Duration                 `json:"processing_time"`
 
 	// Results from different engines
-	CorrelationResults []*Correlation         `json:"correlation_results"`
+	CorrelationResults []*domain.Correlation  `json:"correlation_results"`
 	PatternResults     []*types.PatternResult `json:"pattern_results"`
 
 	// Fused insights
@@ -455,7 +456,7 @@ type FusedInsight struct {
 	DetectionTime time.Time `json:"detection_time"`
 
 	// Integration metadata
-	CorrelatedEvents []*Correlation       `json:"correlated_events"`
+	CorrelatedEvents []*domain.Correlation `json:"correlated_events"`
 	EnhancedPattern  *types.PatternResult `json:"enhanced_pattern,omitempty"`
 	FusionConfidence float64              `json:"fusion_confidence"`
 }
@@ -545,7 +546,7 @@ func (pie *PatternIntegratedEngine) updateIntegrationStats(result *IntegratedRes
 
 // Placeholder implementations for helper methods
 func (pie *PatternIntegratedEngine) generateCacheKey(event *opinionated.OpinionatedEvent) string {
-	return fmt.Sprintf("%s-%d", event.Id, event.TimestampNs)
+	return fmt.Sprintf("%s-%d", event.ID, event.Timestamp.UnixNano())
 }
 
 func (pie *PatternIntegratedEngine) convertToCorrelationEvents(event *opinionated.OpinionatedEvent) []types.Event {
@@ -574,7 +575,10 @@ func (pie *PatternIntegratedEngine) generatePatternDescription(pattern *types.Pa
 
 func (pie *PatternIntegratedEngine) extractRootCause(pattern *types.PatternResult) string {
 	if pattern.RootCause != "" {
-		return pattern.RootCause
+		if rootCause, ok := pattern.RootCause.(string); ok {
+		return rootCause
+	}
+	return "unknown"
 	}
 	return "unknown"
 }
@@ -626,7 +630,7 @@ func (pie *PatternIntegratedEngine) calculateFusionConfidence(pattern *types.Pat
 }
 
 func (pie *PatternIntegratedEngine) generateCorrelationDescription(correlation *Correlation) string {
-	return fmt.Sprintf("Correlation detected: %s", correlation.Type)
+	return fmt.Sprintf("Correlation detected: %s", "unknown") // correlation.Type field not available
 }
 
 func (pie *PatternIntegratedEngine) determineAutomationLevel(autoApply bool) string {

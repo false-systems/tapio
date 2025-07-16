@@ -6,9 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/foundation"
 	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
+
+// EngineStats contains statistics about the correlation engine
+type EngineStats struct {
+	EventsProcessed    uint64
+	CorrelationsFound  uint64
+	InsightsGenerated  uint64
+	ErrorCount         uint64
+	LastProcessedTime  time.Time
+}
 
 // CorrelationEngine defines the interface for correlation processing
 type CorrelationEngine interface {
@@ -25,85 +34,76 @@ type CorrelationEngine interface {
 	GetStats() *EngineStats
 }
 
-// Type aliases for backward compatibility
-type Event = types.Event
-type Severity = types.Severity
-type Filter = foundation.Filter
-// TimeWindow is defined in correlators_production.go
-
-// Severity constants for backward compatibility
-const (
-	SeverityCritical = types.SeverityCritical
-	SeverityHigh     = types.SeverityHigh
-	SeverityMedium   = types.SeverityMedium
-	SeverityLow      = types.SeverityLow
-)
-
-// EngineStats provides statistics about the correlation engine
-type EngineStats struct {
-	EventsProcessed    uint64
-	CorrelationsFound  uint64
-	InsightsGenerated  uint64
-	ActiveRules        int
-	ActiveCorrelations int
-	ProcessingRate     float64
+// PatternDetector detects patterns in event streams
+type PatternDetector interface {
+	// DetectPatterns analyzes events for patterns
+	DetectPatterns(ctx context.Context, events []domain.Event) ([]domain.Pattern, error)
+	// UpdatePattern updates pattern statistics
+	UpdatePattern(ctx context.Context, patternID string, event domain.Event) error
 }
 
-// Evidence represents evidence supporting an insight
-type Evidence struct {
-	EventID     string
-	Description string
-	Timestamp   time.Time
-	Source      string
+// InsightGenerator generates actionable insights
+type InsightGenerator interface {
+	// GenerateInsights creates insights from correlations and patterns
+	GenerateInsights(ctx context.Context, correlations []domain.Correlation, patterns []domain.Pattern) ([]domain.Insight, error)
 }
 
-// RootCause represents identified root cause
-type RootCause struct {
-	EventID     string
-	Description string
-	Confidence  float64
+// CorrelationStore persists correlation data
+type CorrelationStore interface {
+	// StoreCorrelation persists a correlation
+	StoreCorrelation(ctx context.Context, correlation domain.Correlation) error
+	// GetCorrelation retrieves a correlation by ID
+	GetCorrelation(ctx context.Context, id string) (*domain.Correlation, error)
+	// QueryCorrelations queries correlations
+	QueryCorrelations(ctx context.Context, window domain.TimeWindow, types []string) ([]domain.Correlation, error)
+	// DeleteCorrelation removes a correlation
+	DeleteCorrelation(ctx context.Context, id string) error
 }
 
-// ActionableItem represents a recommended action
-type ActionableItem struct {
-	Description string
-	Command     string
-	Impact      string
-	Risk        string
+// RuleRepository manages correlation rules
+type RuleRepository interface {
+	// Save persists a rule
+	Save(ctx context.Context, rule domain.Rule) error
+	// Get retrieves a rule by ID
+	Get(ctx context.Context, id string) (*domain.Rule, error)
+	// List lists all rules
+	List(ctx context.Context) ([]domain.Rule, error)
+	// Delete removes a rule
+	Delete(ctx context.Context, id string) error
 }
 
-// Prediction type is now defined in types_consolidated.go
-// This prevents redeclaration conflicts while maintaining interface compatibility
+// CorrelationResult represents the result of correlation analysis
+type CorrelationResult struct {
+	Correlations []domain.Correlation `json:"correlations"`
+	Insights     []domain.Insight     `json:"insights"`
+	Patterns     []domain.Pattern     `json:"patterns"`
+	ProcessingTime time.Duration      `json:"processing_time"`
+	EventsAnalyzed int               `json:"events_analyzed"`
+}
 
-// Insight represents a correlated insight from multiple events
-type Insight struct {
-	ID              string
-	Title           string
-	Description     string
-	Severity        string
-	Category        string
-	ResourceName    string
-	Namespace       string
-	Timestamp       time.Time
-	Evidence        []*Evidence
-	RootCause       *RootCause
-	Prediction      *Prediction
-	ActionableItems []*ActionableItem
+// AnalysisOptions configures correlation analysis
+type AnalysisOptions struct {
+	TimeWindow      domain.TimeWindow
+	EventTypes      []string
+	MinConfidence   float64
+	MaxCorrelations int
+	IncludePatterns bool
+	IncludeInsights bool
 }
 
 // InsightStore defines the interface for storing and retrieving insights
 type InsightStore interface {
 	// Store stores an insight
-	Store(insight *Insight) error
+	Store(insight *domain.Insight) error
 
 	// Get retrieves an insight by ID
-	Get(id string) (*Insight, error)
+	Get(id string) (*domain.Insight, error)
 
 	// GetInsights retrieves insights for a specific resource
-	GetInsights(resourceName, namespace string) []*Insight
+	GetInsights(resourceName, namespace string) []*domain.Insight
 
 	// GetAllInsights retrieves all insights
-	GetAllInsights() []*Insight
+	GetAllInsights() []*domain.Insight
 
 	// Delete removes an insight by ID
 	Delete(id string) error
@@ -114,19 +114,19 @@ type InsightStore interface {
 
 // InMemoryInsightStore implements InsightStore using memory storage
 type InMemoryInsightStore struct {
-	insights map[string]*Insight
+	insights map[string]*domain.Insight
 	mu       sync.RWMutex
 }
 
 // NewInMemoryInsightStore creates a new in-memory insight store
 func NewInMemoryInsightStore() *InMemoryInsightStore {
 	return &InMemoryInsightStore{
-		insights: make(map[string]*Insight),
+		insights: make(map[string]*domain.Insight),
 	}
 }
 
 // Store stores an insight
-func (s *InMemoryInsightStore) Store(insight *Insight) error {
+func (s *InMemoryInsightStore) Store(insight *domain.Insight) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,7 +135,7 @@ func (s *InMemoryInsightStore) Store(insight *Insight) error {
 }
 
 // Get retrieves an insight by ID
-func (s *InMemoryInsightStore) Get(id string) (*Insight, error) {
+func (s *InMemoryInsightStore) Get(id string) (*domain.Insight, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -148,11 +148,11 @@ func (s *InMemoryInsightStore) Get(id string) (*Insight, error) {
 }
 
 // GetInsights retrieves insights for a specific resource
-func (s *InMemoryInsightStore) GetInsights(resourceName, namespace string) []*Insight {
+func (s *InMemoryInsightStore) GetInsights(resourceName, namespace string) []*domain.Insight {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var results []*Insight
+	var results []*domain.Insight
 	for _, insight := range s.insights {
 		if insight.ResourceName == resourceName && insight.Namespace == namespace {
 			results = append(results, insight)
@@ -163,11 +163,11 @@ func (s *InMemoryInsightStore) GetInsights(resourceName, namespace string) []*In
 }
 
 // GetAllInsights retrieves all insights
-func (s *InMemoryInsightStore) GetAllInsights() []*Insight {
+func (s *InMemoryInsightStore) GetAllInsights() []*domain.Insight {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	results := make([]*Insight, 0, len(s.insights))
+	results := make([]*domain.Insight, 0, len(s.insights))
 	for _, insight := range s.insights {
 		results = append(results, insight)
 	}

@@ -3,7 +3,6 @@ package correlation
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -153,7 +152,8 @@ func (seg *SemanticEventGrouper) classifySemanticIntent(event *opinionated.Opini
 
 	// Classify based on behavioral patterns
 	if event.Behavioral != nil {
-		if event.Behavioral.AnomalyScore > 0.8 {
+		// Use available fields since AnomalyScore doesn't exist
+		if event.Behavioral.BehaviorDeviation > 0.8 {
 			return "anomaly_investigation"
 		}
 		if event.Behavioral.BehaviorTrend == "degrading" {
@@ -172,7 +172,7 @@ func (seg *SemanticEventGrouper) classifySemanticIntent(event *opinionated.Opini
 	}
 
 	// Classify based on temporal patterns
-	if event.Temporal != nil && event.Temporal.IsPeriodic {
+	if event.Temporal != nil && event.Temporal.Periodicity > 0.5 {
 		return "periodic_maintenance"
 	}
 
@@ -354,7 +354,8 @@ func (seg *SemanticEventGrouper) createSemanticCorrelationTrace(ctx context.Cont
 	// Add behavioral context if available
 	if event.Behavioral != nil {
 		span.SetAttributes(
-			attribute.Float64("behavioral.anomaly_score", float64(event.Behavioral.AnomalyScore)),
+			// attribute.Float64("behavioral.anomaly_score", float64(event.Behavioral.AnomalyScore)), // Field not available
+			attribute.Float64("behavioral.deviation", event.Behavioral.BehaviorDeviation),
 			attribute.String("behavioral.trend", event.Behavioral.BehaviorTrend),
 			attribute.Float64("behavioral.deviation", event.Behavioral.BehaviorDeviation),
 			attribute.StringSlice("behavioral.patterns", event.Behavioral.Patterns),
@@ -372,8 +373,9 @@ func (seg *SemanticEventGrouper) createSemanticCorrelationTrace(ctx context.Cont
 	// Add temporal context if available
 	if event.Temporal != nil {
 		span.SetAttributes(
-			attribute.Bool("temporal.is_periodic", event.Temporal.IsPeriodic),
-			attribute.Float64("temporal.frequency_hz", event.Temporal.FrequencyHz),
+			// attribute.Bool("temporal.is_periodic", event.Temporal.IsPeriodic), // Field not available
+			attribute.Float64("temporal.frequency", event.Temporal.Frequency),
+			attribute.Float64("temporal.periodicity", event.Temporal.Periodicity),
 			attribute.Int64("temporal.period_seconds", int64(event.Temporal.Period.Seconds())),
 		)
 	}
@@ -558,9 +560,9 @@ func (seg *SemanticEventGrouper) calculateBehavioralSimilarity(behavioral1, beha
 	// Simple similarity calculation - in production would use ML
 	score := 0.0
 
-	// Compare anomaly scores
-	if behavioral1.AnomalyScore > 0 && behavioral2.AnomalyScore > 0 {
-		diff := absFloat32(behavioral1.AnomalyScore - behavioral2.AnomalyScore)
+	// Compare behavior deviations (using available field instead of AnomalyScore)
+	if behavioral1.BehaviorDeviation > 0 && behavioral2.BehaviorDeviation > 0 {
+		diff := absFloat32(float32(behavioral1.BehaviorDeviation - behavioral2.BehaviorDeviation))
 		score += (1.0 - float64(diff)) * 0.3
 	}
 

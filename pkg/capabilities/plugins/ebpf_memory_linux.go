@@ -10,8 +10,6 @@ import (
 	"runtime"
 	"sync"
 	"time"
-
-	"github.com/yairfalse/tapio/pkg/capabilities"
 )
 
 // EBPFMemoryPlugin provides eBPF-based memory monitoring on Linux
@@ -21,7 +19,7 @@ type EBPFMemoryPlugin struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	lastError  error
-	statistics map[uint32]*capabilities.ProcessMemoryStats
+	statistics map[uint32]*ProcessMemoryStats
 	config     *EBPFConfig
 }
 
@@ -46,7 +44,7 @@ func NewEBPFMemoryPlugin(config *EBPFConfig) *EBPFMemoryPlugin {
 
 	return &EBPFMemoryPlugin{
 		config:     config,
-		statistics: make(map[uint32]*capabilities.ProcessMemoryStats),
+		statistics: make(map[uint32]*ProcessMemoryStats),
 	}
 }
 
@@ -56,8 +54,8 @@ func (p *EBPFMemoryPlugin) Name() string {
 }
 
 // Info returns capability information
-func (p *EBPFMemoryPlugin) Info() *capabilities.CapabilityInfo {
-	info := &capabilities.CapabilityInfo{
+func (p *EBPFMemoryPlugin) Info() *CapabilityInfo {
+	info := &CapabilityInfo{
 		Name:     p.Name(),
 		Platform: runtime.GOOS,
 		Metadata: map[string]string{
@@ -67,7 +65,7 @@ func (p *EBPFMemoryPlugin) Info() *capabilities.CapabilityInfo {
 	}
 
 	if !p.IsAvailable() {
-		info.Status = capabilities.CapabilityNotAvailable
+		info.Status = CapabilityNotAvailable
 		info.Requirements = []string{
 			"Linux kernel 4.14+",
 			"Root privileges or CAP_BPF capability",
@@ -83,9 +81,9 @@ func (p *EBPFMemoryPlugin) Info() *capabilities.CapabilityInfo {
 	defer p.mu.RUnlock()
 
 	if p.running {
-		info.Status = capabilities.CapabilityEnabled
+		info.Status = CapabilityEnabled
 	} else {
-		info.Status = capabilities.CapabilityAvailable
+		info.Status = CapabilityAvailable
 	}
 
 	return info
@@ -171,11 +169,11 @@ func (p *EBPFMemoryPlugin) Stop() error {
 }
 
 // Health returns the current health status
-func (p *EBPFMemoryPlugin) Health() *capabilities.HealthStatus {
+func (p *EBPFMemoryPlugin) Health() *HealthStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	status := &capabilities.HealthStatus{
+	status := &HealthStatus{
 		Timestamp: time.Now(),
 		Metrics: map[string]any{
 			"processes_tracked": len(p.statistics),
@@ -185,7 +183,7 @@ func (p *EBPFMemoryPlugin) Health() *capabilities.HealthStatus {
 	}
 
 	if !p.IsAvailable() {
-		status.Status = capabilities.CapabilityNotAvailable
+		status.Status = CapabilityNotAvailable
 		status.Message = "eBPF memory monitoring not available"
 		if p.lastError != nil {
 			status.Metrics["error"] = p.lastError.Error()
@@ -194,10 +192,10 @@ func (p *EBPFMemoryPlugin) Health() *capabilities.HealthStatus {
 	}
 
 	if p.running {
-		status.Status = capabilities.CapabilityEnabled
+		status.Status = CapabilityEnabled
 		status.Message = "eBPF memory monitoring active"
 	} else {
-		status.Status = capabilities.CapabilityAvailable
+		status.Status = CapabilityAvailable
 		status.Message = "eBPF memory monitoring available but not started"
 	}
 
@@ -205,7 +203,7 @@ func (p *EBPFMemoryPlugin) Health() *capabilities.HealthStatus {
 }
 
 // GetMemoryStats returns current memory statistics
-func (p *EBPFMemoryPlugin) GetMemoryStats() ([]capabilities.ProcessMemoryStats, error) {
+func (p *EBPFMemoryPlugin) GetMemoryStats() ([]ProcessMemoryStats, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -213,7 +211,7 @@ func (p *EBPFMemoryPlugin) GetMemoryStats() ([]capabilities.ProcessMemoryStats, 
 		return nil, fmt.Errorf("eBPF memory monitoring not running")
 	}
 
-	stats := make([]capabilities.ProcessMemoryStats, 0, len(p.statistics))
+	stats := make([]ProcessMemoryStats, 0, len(p.statistics))
 	for _, stat := range p.statistics {
 		stats = append(stats, *stat)
 	}
@@ -222,7 +220,7 @@ func (p *EBPFMemoryPlugin) GetMemoryStats() ([]capabilities.ProcessMemoryStats, 
 }
 
 // GetMemoryPredictions returns OOM predictions
-func (p *EBPFMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*capabilities.OOMPrediction, error) {
+func (p *EBPFMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map[uint32]*OOMPrediction, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -230,7 +228,7 @@ func (p *EBPFMemoryPlugin) GetMemoryPredictions(limits map[uint32]uint64) (map[u
 		return nil, fmt.Errorf("eBPF memory monitoring not running")
 	}
 
-	predictions := make(map[uint32]*capabilities.OOMPrediction)
+	predictions := make(map[uint32]*OOMPrediction)
 
 	for pid, limit := range limits {
 		if stat, exists := p.statistics[pid]; exists {
@@ -292,10 +290,10 @@ func (p *EBPFMemoryPlugin) collectMemoryStats() {
 	// Update p.statistics with real data
 }
 
-func (p *EBPFMemoryPlugin) calculateOOMPrediction(stat *capabilities.ProcessMemoryStats, limit uint64) *capabilities.OOMPrediction {
+func (p *EBPFMemoryPlugin) calculateOOMPrediction(stat *ProcessMemoryStats, limit uint64) *OOMPrediction {
 	// Simple linear prediction based on allocation rate
 	if stat.AllocationRate <= 0 {
-		return &capabilities.OOMPrediction{
+		return &OOMPrediction{
 			PID:                stat.PID,
 			TimeToOOM:          time.Duration(0),
 			Confidence:         0.0,
@@ -308,7 +306,7 @@ func (p *EBPFMemoryPlugin) calculateOOMPrediction(stat *capabilities.ProcessMemo
 	remainingMemory := limit - stat.CurrentUsage
 	timeToOOM := time.Duration(float64(remainingMemory)/stat.AllocationRate) * time.Second
 
-	return &capabilities.OOMPrediction{
+	return &OOMPrediction{
 		PID:                stat.PID,
 		TimeToOOM:          timeToOOM,
 		Confidence:         0.8, // High confidence for real eBPF data

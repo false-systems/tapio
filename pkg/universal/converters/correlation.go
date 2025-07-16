@@ -52,7 +52,7 @@ func (c *CorrelationConverter) ConvertFinding(finding *correlation.Finding) (*un
 	if finding.Prediction != nil {
 		prediction.TimeToEvent = finding.Prediction.TimeToEvent
 		prediction.Probability = finding.Prediction.Confidence
-		prediction.Impact = c.mapSeverityToImpact(finding.Severity)
+		prediction.Impact = c.mapSeverityLevelToImpact(finding.Severity)
 		prediction.Description = finding.Prediction.Event
 
 		// Add factors
@@ -71,13 +71,13 @@ func (c *CorrelationConverter) ConvertFinding(finding *correlation.Finding) (*un
 		// Create prediction from finding data
 		prediction.TimeToEvent = 0 // Immediate issue
 		prediction.Probability = finding.Confidence
-		prediction.Impact = c.mapSeverityToImpact(finding.Severity)
+		prediction.Impact = c.mapSeverityLevelToImpact(finding.Severity)
 		prediction.Description = finding.Description
 	}
 
 	// Convert evidence
 	for _, ev := range finding.Evidence {
-		prediction.Evidence = append(prediction.Evidence, c.convertEvidence(ev))
+		prediction.Evidence = append(prediction.Evidence, c.convertRuleEvidence(ev))
 	}
 
 	// Set quality
@@ -222,30 +222,57 @@ func (c *CorrelationConverter) mapFindingToPredictionType(title string) universa
 	}
 }
 
-// mapSeverityToImpact maps correlation severity to impact level
-func (c *CorrelationConverter) mapSeverityToImpact(severity correlation.Severity) universal.ImpactLevel {
+// mapSeverityLevelToImpact maps correlation severity level to impact level
+func (c *CorrelationConverter) mapSeverityLevelToImpact(severity correlation.SeverityLevel) universal.ImpactLevel {
 	switch severity {
-	case correlation.SeverityCritical:
+	case correlation.SeverityLevelCritical:
 		return universal.ImpactLevelCritical
-	case correlation.SeverityError:
+	case correlation.SeverityLevelError:
 		return universal.ImpactLevelHigh
-	case correlation.SeverityWarning:
+	case correlation.SeverityLevelWarning:
 		return universal.ImpactLevelMedium
-	case correlation.SeverityInfo:
+	case correlation.SeverityLevelInfo:
 		return universal.ImpactLevelLow
 	default:
 		return universal.ImpactLevelMedium
 	}
 }
 
-// convertEvidence converts correlation evidence to universal evidence
-func (c *CorrelationConverter) convertEvidence(ev correlation.Evidence) universal.Evidence {
+// mapSeverityToImpact maps correlation severity to impact level
+func (c *CorrelationConverter) mapSeverityToImpact(severity correlation.Severity) universal.ImpactLevel {
+	switch severity {
+	case correlation.SeverityCritical:
+		return universal.ImpactLevelCritical
+	case correlation.SeverityHigh:
+		return universal.ImpactLevelHigh
+	case correlation.SeverityMedium:
+		return universal.ImpactLevelMedium
+	case correlation.SeverityLow:
+		return universal.ImpactLevelLow
+	default:
+		return universal.ImpactLevelMedium
+	}
+}
+
+// convertRuleEvidence converts correlation rule evidence to universal evidence
+func (c *CorrelationConverter) convertRuleEvidence(ev correlation.RuleEvidence) universal.Evidence {
 	return universal.Evidence{
 		Type:        ev.Type,
 		Description: ev.Description,
 		Data:        ev.Data,
 		Confidence:  ev.Confidence,
 		Source:      string(ev.Source),
+	}
+}
+
+// convertEvidence converts correlation evidence to universal evidence
+func (c *CorrelationConverter) convertEvidence(ev correlation.Evidence) universal.Evidence {
+	return universal.Evidence{
+		Type:        "generic",
+		Description: fmt.Sprintf("%v", ev),
+		Data:        map[string]interface{}{"evidence": ev},
+		Confidence:  0.5,
+		Source:      c.sourceID,
 	}
 }
 

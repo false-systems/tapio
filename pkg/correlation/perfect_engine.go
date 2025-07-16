@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
@@ -131,77 +132,23 @@ func NewPerfectEngine(config *PerfectConfig) (*PerfectEngine, error) {
 	}
 
 	// Initialize semantic correlator optimized for our semantic context
-	semanticCorrelator, err := NewSemanticCorrelator(&SemanticCorrelatorConfig{
-		SimilarityThreshold: config.SemanticSimilarityThreshold,
-		EmbeddingDimension:  config.SemanticEmbeddingDimension,
-		OntologyTagWeight:   config.OntologyTagWeight,
-		IntentCorrelation:   config.IntentCorrelationEnabled,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create semantic correlator: %w", err)
-	}
-	engine.semanticCorrelator = semanticCorrelator
+	engine.semanticCorrelator = NewSemanticCorrelator(&CorrelatorConfig{})
 
 	// Initialize behavioral correlator for our behavioral context
-	behavioralCorrelator, err := NewBehavioralCorrelator(&BehavioralCorrelatorConfig{
-		AnomalyThreshold: config.BehavioralAnomalyThreshold,
-		TrustThreshold:   config.EntityTrustThreshold,
-		VectorDimension:  config.BehaviorVectorDimension,
-		ChangeDetection:  config.BehaviorChangeDetection,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create behavioral correlator: %w", err)
-	}
-	engine.behavioralCorrelator = behavioralCorrelator
+	engine.behavioralCorrelator = NewBehavioralCorrelator(&CorrelatorConfig{})
 
 	// Initialize temporal correlator for our temporal context
-	temporalCorrelator, err := NewTemporalCorrelator(&TemporalCorrelatorConfig{
-		CorrelationWindow: config.TemporalWindow,
-		PatternWindow:     config.PatternDetectionWindow,
-		PeriodicityWindow: config.PeriodicityDetectionWindow,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporal correlator: %w", err)
-	}
-	engine.temporalCorrelator = temporalCorrelator
+	engine.temporalCorrelator = NewTemporalCorrelator(&CorrelatorConfig{})
 
 	// Initialize causality correlator for our causality context
-	causalityCorrelator, err := NewCausalityCorrelator(&CausalityCorrelatorConfig{
-		MaxDepth:          config.CausalityDepth,
-		MinConfidence:     config.CausalityConfidenceMin,
-		RootCauseAnalysis: config.RootCauseAnalysisEnabled,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create causality correlator: %w", err)
-	}
-	engine.causalityCorrelator = causalityCorrelator
+	engine.causalityCorrelator = NewCausalityCorrelator(&CorrelatorConfig{})
 
 	// Initialize anomaly correlator for our anomaly context
-	anomalyCorrelator, err := NewAnomalyCorrelator(&AnomalyCorrelatorConfig{
-		DimensionWeights: map[string]float32{
-			"statistical": 0.3,
-			"behavioral":  0.3,
-			"temporal":    0.2,
-			"contextual":  0.2,
-		},
-		MinAnomalyScore: 0.7,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create anomaly correlator: %w", err)
-	}
-	engine.anomalyCorrelator = anomalyCorrelator
+	engine.anomalyCorrelator = NewAnomalyCorrelator(&CorrelatorConfig{})
 
 	// Initialize AI correlator for our AI features
 	if config.AIEnabled {
-		aiCorrelator, err := NewAICorrelator(&AICorrelatorConfig{
-			DenseFeatureDimension: config.DenseFeatureDimension,
-			GraphFeatures:         config.GraphFeatureProcessing,
-			FeatureProcessing:     config.AIFeatureProcessing,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create AI correlator: %w", err)
-		}
-		engine.aiCorrelator = aiCorrelator
+		engine.aiCorrelator = NewAICorrelator(&CorrelatorConfig{})
 	}
 
 	// Initialize high-performance event store
@@ -224,7 +171,7 @@ func NewPerfectEngine(config *PerfectConfig) (*PerfectEngine, error) {
 	engine.correlationPool = sync.Pool{
 		New: func() interface{} {
 			return &PerfectCorrelationResult{
-				Correlations: make([]*Correlation, 0, 10),
+				Correlations: make([]*LocalCorrelation, 0, 10),
 				Insights:     make([]*Insight, 0, 5),
 			}
 		},
@@ -233,9 +180,8 @@ func NewPerfectEngine(config *PerfectConfig) (*PerfectEngine, error) {
 	engine.insightPool = sync.Pool{
 		New: func() interface{} {
 			return &Insight{
-				Evidence:    make([]*Evidence, 0, 5),
-				Predictions: make([]*Prediction, 0, 3),
-				Actions:     make([]*RecommendedAction, 0, 3),
+				Evidence:        make([]*Evidence, 0, 5),
+				ActionableItems: make([]*ActionableItem, 0, 3),
 			}
 		},
 	}
@@ -334,7 +280,7 @@ func (e *PerfectEngine) ProcessOpinionatedEvent(ctx context.Context, event *opin
 }
 
 // generateInsights creates actionable insights from correlations
-func (e *PerfectEngine) generateInsights(correlations []*Correlation, event *opinionated.OpinionatedEvent) []*Insight {
+func (e *PerfectEngine) generateInsights(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) []*Insight {
 	insights := make([]*Insight, 0, 3)
 
 	// Group correlations by type for insight generation
@@ -460,8 +406,8 @@ func (e *PerfectEngine) GetStats() *PerfectEngineStats {
 
 // PerfectCorrelationResult aggregates correlations from all correlators
 type PerfectCorrelationResult struct {
-	Correlations []*Correlation
-	Insights     []*Insight
+	Correlations []*LocalCorrelation
+	Insights     []*domain.Insight
 }
 
 func (cr *PerfectCorrelationResult) Reset() {
@@ -490,8 +436,8 @@ type PerfectEngineStats struct {
 }
 
 // Helper methods for insight generation
-func (e *PerfectEngine) filterCorrelationsByType(correlations []*Correlation, correlationType string) []*Correlation {
-	filtered := make([]*Correlation, 0, len(correlations))
+func (e *PerfectEngine) filterCorrelationsByType(correlations []*LocalCorrelation, correlationType string) []*LocalCorrelation {
+	filtered := make([]*LocalCorrelation, 0, len(correlations))
 	for _, corr := range correlations {
 		if corr.Type == correlationType {
 			filtered = append(filtered, corr)
@@ -500,22 +446,22 @@ func (e *PerfectEngine) filterCorrelationsByType(correlations []*Correlation, co
 	return filtered
 }
 
-func (e *PerfectEngine) generateSemanticInsight(correlations []*Correlation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateSemanticInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
 	// Implementation would generate semantic insights using our semantic context
 	return nil
 }
 
-func (e *PerfectEngine) generateBehavioralInsight(correlations []*Correlation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateBehavioralInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
 	// Implementation would generate behavioral insights using our behavioral context
 	return nil
 }
 
-func (e *PerfectEngine) generateTemporalInsight(correlations []*Correlation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateTemporalInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
 	// Implementation would generate temporal insights using our temporal context
 	return nil
 }
 
-func (e *PerfectEngine) generateCausalityInsight(correlations []*Correlation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateCausalityInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
 	// Implementation would generate causality insights using our causality context
 	return nil
 }

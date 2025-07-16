@@ -127,39 +127,28 @@ func DefaultOTELOutputConfig() *OTELOutputConfig {
 }
 
 // OutputHealthCheck outputs health check results as OTEL traces
-func (ono *OTELNativeOutput) OutputHealthCheck(ctx context.Context, analysis *health.Analysis) error {
+func (ono *OTELNativeOutput) OutputHealthCheck(ctx context.Context, report *health.Report) error {
 	// Create root span for health check
 	ctx, span := ono.tracer.Start(ctx, "tapio.check",
 		trace.WithAttributes(
-			attribute.String("check.target", analysis.Target),
-			attribute.String("check.namespace", analysis.Namespace),
-			attribute.String("check.status", string(analysis.Status)),
-			attribute.Float64("check.health_score", analysis.HealthScore),
-			attribute.Int("check.issues_found", len(analysis.Issues)),
+			attribute.String("check.status", string(report.OverallStatus)),
+			attribute.Int("check.total_pods", report.TotalPods),
+			attribute.Int("check.healthy_pods", report.HealthyPods),
+			attribute.Int("check.issues_found", len(report.Issues)),
 		),
 	)
 	defer span.End()
 	
 	// Create spans for each issue with full Tapio intelligence
-	for _, issue := range analysis.Issues {
-		ono.createIssueSpan(ctx, issue)
-	}
-	
-	// Create span for predictions if available
-	if len(analysis.Predictions) > 0 && ono.config.IncludePredictions {
-		ono.createPredictionSpan(ctx, analysis.Predictions)
-	}
-	
-	// Create span for recommendations
-	if len(analysis.Recommendations) > 0 && ono.config.IncludeRecommendations {
-		ono.createRecommendationSpan(ctx, analysis.Recommendations)
+	for _, issue := range report.Issues {
+		ono.createHealthIssueSpan(ctx, issue)
 	}
 	
 	// Set overall span status
-	if analysis.Status == health.StatusCritical {
+	if report.OverallStatus == health.StatusCritical {
 		span.SetStatus(codes.Error, "Critical health issues detected")
-	} else if analysis.Status == health.StatusDegraded {
-		span.SetStatus(codes.Error, "Degraded health detected")
+	} else if report.OverallStatus == health.StatusWarning {
+		span.SetStatus(codes.Error, "Warning health issues detected")
 	} else {
 		span.SetStatus(codes.Ok, "System healthy")
 	}
@@ -167,155 +156,31 @@ func (ono *OTELNativeOutput) OutputHealthCheck(ctx context.Context, analysis *he
 	return nil
 }
 
-// createIssueSpan creates a span for a health issue with rich Tapio metadata
-func (ono *OTELNativeOutput) createIssueSpan(ctx context.Context, issue health.Issue) {
-	ctx, span := ono.tracer.Start(ctx, fmt.Sprintf("issue.%s", issue.Type),
+// createHealthIssueSpan creates a span for a health issue
+func (ono *OTELNativeOutput) createHealthIssueSpan(ctx context.Context, issue health.Issue) {
+	ctx, span := ono.tracer.Start(ctx, "health.issue",
 		trace.WithAttributes(
 			// Core issue attributes
-			attribute.String("issue.id", issue.ID),
-			attribute.String("issue.type", issue.Type),
 			attribute.String("issue.severity", string(issue.Severity)),
-			attribute.Float64("issue.confidence", issue.Confidence),
-			
-			// Entity information
-			attribute.String("entity.type", issue.Entity.Type),
-			attribute.String("entity.name", issue.Entity.Name),
-			attribute.String("entity.namespace", issue.Entity.Namespace),
-			
-			// Tapio intelligence attributes
-			attribute.String("tapio.pattern", issue.Pattern),
-			attribute.Bool("tapio.is_predicted", issue.IsPredicted),
-			attribute.Float64("tapio.risk_score", issue.RiskScore),
+			attribute.String("issue.message", issue.Message),
+			attribute.String("issue.resource", issue.Resource),
 		),
 	)
 	defer span.End()
-	
-	// Add human explanation if enabled
-	if ono.config.IncludeHumanExplanations && issue.HumanExplanation != nil {
-		span.SetAttributes(
-			attribute.String("human.what_happened", issue.HumanExplanation.WhatHappened),
-			attribute.String("human.why_it_happened", issue.HumanExplanation.WhyItHappened),
-			attribute.String("human.what_to_do", issue.HumanExplanation.WhatToDo),
-			attribute.String("human.how_to_prevent", issue.HumanExplanation.HowToPrevent),
-			attribute.Bool("human.is_urgent", issue.HumanExplanation.IsUrgent),
-		)
-	}
-	
-	// Add business impact if enabled
-	if ono.config.IncludeBusinessImpact && issue.BusinessImpact != nil {
-		span.SetAttributes(
-			attribute.Float64("business.impact_score", issue.BusinessImpact.Score),
-			attribute.String("business.affected_services", fmt.Sprintf("%v", issue.BusinessImpact.AffectedServices)),
-			attribute.Int("business.affected_users", issue.BusinessImpact.AffectedUsers),
-			attribute.Float64("business.revenue_risk", issue.BusinessImpact.RevenueRisk),
-		)
-	}
-	
-	// Add correlation information
-	if issue.CorrelationGroup != nil {
-		span.SetAttributes(
-			attribute.String("correlation.group_id", issue.CorrelationGroup.ID),
-			attribute.String("correlation.root_cause", issue.CorrelationGroup.RootCause),
-			attribute.Int("correlation.related_events", issue.CorrelationGroup.RelatedEvents),
-			attribute.Float64("correlation.confidence", issue.CorrelationGroup.Confidence),
-		)
-		
-		// Create span link to correlation group
-		if issue.CorrelationGroup.TraceID != "" {
-			// Link to semantic correlation trace
-			span.AddLink(trace.Link{
-				SpanContext: trace.SpanContext{},
-				Attributes: []attribute.KeyValue{
-					attribute.String("link.type", "correlation_group"),
-					attribute.String("link.group_id", issue.CorrelationGroup.ID),
-				},
-			})
-		}
-	}
-	
-	// Add evidence as span events
-	for i, evidence := range issue.Evidence {
-		span.AddEvent(fmt.Sprintf("evidence_%d", i),
-			trace.WithAttributes(
-				attribute.String("evidence.type", evidence.Type),
-				attribute.String("evidence.description", evidence.Description),
-				attribute.Float64("evidence.confidence", evidence.Confidence),
-			),
-			trace.WithTimestamp(evidence.Timestamp),
-		)
-	}
 	
 	// Set span status based on severity
 	switch issue.Severity {
 	case health.SeverityCritical:
 		span.SetStatus(codes.Error, "Critical issue detected")
-	case health.SeverityHigh:
-		span.SetStatus(codes.Error, "High severity issue")
-	case health.SeverityMedium:
-		span.SetStatus(codes.Error, "Medium severity issue")
+	case health.SeverityWarning:
+		span.SetStatus(codes.Error, "Warning issue detected")
 	default:
-		span.SetStatus(codes.Ok, "Low severity issue")
+		span.SetStatus(codes.Ok, "Info issue")
 	}
 }
 
-// createPredictionSpan creates a span for predictions
-func (ono *OTELNativeOutput) createPredictionSpan(ctx context.Context, predictions []health.Prediction) {
-	ctx, span := ono.tracer.Start(ctx, "tapio.predictions",
-		trace.WithAttributes(
-			attribute.Int("predictions.count", len(predictions)),
-		),
-	)
-	defer span.End()
-	
-	for _, prediction := range predictions {
-		// Create child span for each prediction
-		_, predSpan := ono.tracer.Start(ctx, fmt.Sprintf("prediction.%s", prediction.Type),
-			trace.WithAttributes(
-				attribute.String("prediction.id", prediction.ID),
-				attribute.String("prediction.type", prediction.Type),
-				attribute.String("prediction.scenario", prediction.Scenario),
-				attribute.Float64("prediction.probability", prediction.Probability),
-				attribute.Float64("prediction.confidence", prediction.Confidence),
-				attribute.Int64("prediction.time_to_event_seconds", int64(prediction.TimeToEvent.Seconds())),
-				attribute.String("prediction.severity", prediction.Severity),
-			),
-		)
-		
-		// Add prevention actions
-		for i, action := range prediction.PreventionActions {
-			predSpan.AddEvent(fmt.Sprintf("prevention_action_%d", i),
-				trace.WithAttributes(
-					attribute.String("action.type", "prevention"),
-					attribute.String("action.command", action),
-				),
-			)
-		}
-		
-		predSpan.End()
-	}
-}
-
-// createRecommendationSpan creates a span for recommendations
-func (ono *OTELNativeOutput) createRecommendationSpan(ctx context.Context, recommendations []health.Recommendation) {
-	ctx, span := ono.tracer.Start(ctx, "tapio.recommendations",
-		trace.WithAttributes(
-			attribute.Int("recommendations.count", len(recommendations)),
-		),
-	)
-	defer span.End()
-	
-	for i, rec := range recommendations {
-		span.AddEvent(fmt.Sprintf("recommendation_%d", i),
-			trace.WithAttributes(
-				attribute.String("recommendation.type", rec.Type),
-				attribute.String("recommendation.action", rec.Action),
-				attribute.String("recommendation.command", rec.Command),
-				attribute.Float64("recommendation.priority", rec.Priority),
-				attribute.Float64("recommendation.expected_improvement", rec.ExpectedImprovement),
-			),
-		)
-	}
-}
+// Additional methods for predictions and recommendations would be added here
+// when the health package is extended with these types
 
 // OutputCorrelation outputs correlation results as OTEL traces
 func (ono *OTELNativeOutput) OutputCorrelation(ctx context.Context, result *correlation.CorrelationResult) error {

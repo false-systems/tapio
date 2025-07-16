@@ -2,7 +2,6 @@ package markdown
 
 import (
 	"bufio"
-	"fmt"
 	"regexp"
 	"strings"
 	"time"

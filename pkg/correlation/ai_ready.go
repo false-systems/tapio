@@ -3,7 +3,6 @@ package correlation
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 

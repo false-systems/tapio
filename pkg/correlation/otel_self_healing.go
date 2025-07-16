@@ -261,7 +261,7 @@ func NewSelfHealingPipeline(config *SelfHealingConfig) *SelfHealingPipeline {
 	shp.healthMonitor = NewPipelineHealthMonitor(config)
 	shp.degradationPredictor = NewDegradationPredictor(config)
 	shp.autoFixer = NewPipelineAutoFixer(config)
-	shp.performanceOptimizer = NewPerformanceOptimizer(config)
+	shp.performanceOptimizer = NewOTELPerformanceOptimizer(config)
 	
 	// Initialize AI components if enabled
 	if config.EnableAnomalyDetection {
@@ -789,12 +789,14 @@ func (paf *PipelineAutoFixer) registerBasicCapabilities() {
 }
 
 func NewOTELPerformanceOptimizer(config *SelfHealingConfig) *PerformanceOptimizer {
-	return NewPerformanceOptimizer(&OptimizationConfig{
-		ProfilingEnabled:        true,
-		MonitoringInterval:      time.Minute,
-		AutoOptimizationEnabled: true,
-		OptimizationInterval:    time.Minute * 5,
-	})
+	// Use available NewMissingPerformanceOptimizer with LegacyOptimizationConfig
+	legacyConfig := &LegacyOptimizationConfig{
+		ProfilingEnabled:     true,
+		MonitoringInterval:   time.Minute,
+		AutoOptimization:     true,
+		OptimizationInterval: time.Minute * 5,
+	}
+	return NewMissingPerformanceOptimizer(legacyConfig)
 }
 
 func NewPipelineAnomalyDetector(config *SelfHealingConfig) *PipelineAnomalyDetector {

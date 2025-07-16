@@ -1,7 +1,6 @@
 package correlation
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"

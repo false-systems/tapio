@@ -113,7 +113,7 @@ type EnhancedEngine struct {
 
 	// Channels
 	eventChan  chan TimelineEvent
-	resultChan chan CorrelationResult
+	resultChan chan EnhancedCorrelationResult
 
 	// Lifecycle
 	ctx    context.Context
@@ -152,7 +152,7 @@ type EnhancedEngineConfig struct {
 // Correlator defines the interface for event correlation
 type Correlator interface {
 	Name() string
-	Correlate(events []TimelineEvent) []CorrelationResult
+	Correlate(events []TimelineEvent) []EnhancedCorrelationResult
 }
 
 // Analyzer defines the interface for event analysis
@@ -161,8 +161,8 @@ type Analyzer interface {
 	Analyze(timeline *Timeline) []AnalysisResult
 }
 
-// CorrelationResult represents the result of correlation analysis
-type CorrelationResult struct {
+// EnhancedCorrelationResult represents the result of correlation analysis
+type EnhancedCorrelationResult struct {
 	ID          string
 	Type        string
 	Confidence  float64
@@ -216,7 +216,7 @@ func NewEnhancedEngine(config *EnhancedEngineConfig) *EnhancedEngine {
 		config:          config,
 		circuitBreakers: make(map[SourceType]*CircuitBreaker),
 		eventChan:       make(chan TimelineEvent, config.EventBufferSize),
-		resultChan:      make(chan CorrelationResult, 1000),
+		resultChan:      make(chan EnhancedCorrelationResult, 1000),
 		ctx:             ctx,
 		cancel:          cancel,
 	}
@@ -260,8 +260,8 @@ func (e *EnhancedEngine) AddSource(sourceType SourceType, source DataSource) {
 	// Initialize circuit breaker for this source if enabled
 	if e.config.EnableCircuitBreaker {
 		e.circuitBreakers[sourceType] = NewCircuitBreaker(
-			string(sourceType),
 			e.config.FailureThreshold,
+			1*time.Minute, // window
 			e.config.RecoveryTimeout,
 		)
 	}
@@ -596,7 +596,7 @@ func (e *EnhancedEngine) processCorrelations() {
 }
 
 // handleCorrelationResult handles a correlation result
-func (e *EnhancedEngine) handleCorrelationResult(result CorrelationResult) {
+func (e *EnhancedEngine) handleCorrelationResult(result EnhancedCorrelationResult) {
 	// Update timeline with correlations
 	for i, eventID := range result.Events {
 		for j, otherID := range result.Events {
@@ -653,7 +653,7 @@ func (e *EnhancedEngine) GetTimeline() *Timeline {
 }
 
 // GetCorrelationResults returns recent correlation results
-func (e *EnhancedEngine) GetCorrelationResults(limit int) []CorrelationResult {
+func (e *EnhancedEngine) GetCorrelationResults(limit int) []EnhancedCorrelationResult {
 	// In a real implementation, this would return stored results
 	return nil
 }
@@ -728,5 +728,5 @@ func (e *EnhancedEngine) initializeDefaultAnalyzers() {
 	config := DefaultCorrelatorConfig()
 	e.analyzers = append(e.analyzers, NewPatternAnalyzer(config))
 	e.analyzers = append(e.analyzers, NewAnomalyAnalyzer(config))
-	e.analyzers = append(e.analyzers, NewTrendAnalyzer(config))
+	e.analyzers = append(e.analyzers, NewTrendAnalyzer(nil)) // Use default config
 }

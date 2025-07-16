@@ -14,21 +14,50 @@ import (
 func (e *SemanticPatternEngine) extractSemanticFeatures(event *opinionated.OpinionatedEvent) map[string]interface{} {
 	features := make(map[string]interface{})
 	
-	// Extract text features
-	features["message"] = strings.ToLower(event.Message)
-	features["source"] = event.Source
-	features["type"] = event.Type
-	features["severity"] = event.Severity
+	// Extract text features using available fields
+	// event.Message, event.Type don't exist - use available data
+	if len(event.Data) > 0 {
+		if msg, ok := event.Data["message"]; ok {
+			features["message"] = strings.ToLower(msg.(string))
+		}
+	}
+	features["source"] = event.Source.Collector
+	features["category"] = string(event.Category)
+	features["severity"] = string(event.Severity)
 	
-	// Extract keywords
-	keywords := e.extractKeywords(event.Message)
+	// Extract keywords from available data
+	keywords := e.extractKeywordsFromData(event.Data)
 	features["keywords"] = keywords
 	
-	// Extract entities
-	features["resource"] = event.ResourceID
-	features["namespace"] = event.Namespace
+	// Extract entities using available context
+	features["resource"] = event.Context.Pod
+	features["namespace"] = event.Context.Namespace
 	
 	return features
+}
+
+// extractKeywordsFromData extracts keywords from event data
+func (e *SemanticPatternEngine) extractKeywordsFromData(data map[string]interface{}) []string {
+	var keywords []string
+	
+	// Extract keywords from message if available
+	if msg, ok := data["message"]; ok {
+		if msgStr, ok := msg.(string); ok {
+			keywords = append(keywords, e.extractKeywords(msgStr)...)
+		}
+	}
+	
+	// Extract keywords from other string fields
+	for key, value := range data {
+		if strValue, ok := value.(string); ok && len(strValue) > 0 {
+			keywords = append(keywords, strings.ToLower(key))
+			if len(strValue) > 3 { // Only extract from longer strings
+				keywords = append(keywords, e.extractKeywords(strValue)...)
+			}
+		}
+	}
+	
+	return keywords
 }
 
 func (e *SemanticPatternEngine) calculateSemanticSimilarity(features map[string]interface{}, pattern *SemanticPattern) float64 {
@@ -55,7 +84,16 @@ func (e *SemanticPatternEngine) calculateSemanticSimilarity(features map[string]
 
 func (e *SemanticPatternEngine) findMatchingKeywords(event *opinionated.OpinionatedEvent, pattern *SemanticPattern) []string {
 	var matched []string
-	eventText := strings.ToLower(event.Message + " " + event.Type)
+	eventText := strings.ToLower(string(event.Category) + " " + string(event.Severity))
+	
+	// Add message text if available in Data
+	if len(event.Data) > 0 {
+		if msg, ok := event.Data["message"]; ok {
+			if msgStr, ok := msg.(string); ok {
+				eventText += " " + strings.ToLower(msgStr)
+			}
+		}
+	}
 	
 	for _, keyword := range pattern.Keywords {
 		if strings.Contains(eventText, keyword) {
@@ -91,20 +129,25 @@ func (e *SemanticPatternEngine) extractKeywords(text string) []string {
 func (e *BehavioralPatternEngine) extractBehavioralMetrics(event *opinionated.OpinionatedEvent) map[string]float64 {
 	metrics := make(map[string]float64)
 	
-	// Extract numeric metrics from event
-	if event.Metrics != nil {
-		for k, v := range event.Metrics {
-			if fval, ok := v.(float64); ok {
-				metrics[k] = fval
-			} else if ival, ok := v.(int); ok {
-				metrics[k] = float64(ival)
-			}
+	// Extract numeric metrics from event data and attributes
+	for k, v := range event.Data {
+		if fval, ok := v.(float64); ok {
+			metrics[k] = fval
+		} else if ival, ok := v.(int); ok {
+			metrics[k] = float64(ival)
+		}
+	}
+	for k, v := range event.Attributes {
+		if fval, ok := v.(float64); ok {
+			metrics[k] = fval
+		} else if ival, ok := v.(int); ok {
+			metrics[k] = float64(ival)
 		}
 	}
 	
 	// Add derived metrics
 	metrics["event_count"] = 1.0
-	metrics["severity_score"] = e.severityToScore(event.Severity)
+	metrics["severity_score"] = e.severityToScore(string(event.Severity))
 	
 	return metrics
 }
@@ -151,7 +194,7 @@ func (e *TemporalPatternEngine) matchKnownSequence(window []*opinionated.Opinion
 	// Check for known sequences
 	eventTypes := make([]string, len(window))
 	for i, event := range window {
-		eventTypes[i] = event.Type
+		eventTypes[i] = string(event.Category)
 	}
 	
 	// Example: OOM followed by restart
@@ -223,7 +266,7 @@ func (e *TemporalPatternEngine) detectCascade(window []*opinionated.OpinionatedE
 	// Check if severity escalates
 	severityEscalating := true
 	for i := 1; i < len(window); i++ {
-		if e.severityLevel(window[i].Severity) < e.severityLevel(window[i-1].Severity) {
+		if e.severityLevel(string(window[i].Severity)) < e.severityLevel(string(window[i-1].Severity)) {
 			severityEscalating = false
 			break
 		}
@@ -262,7 +305,7 @@ func (e *CausalityPatternEngine) buildCausalityGraph(event *opinionated.Opiniona
 	graph := make(map[string][]string)
 	
 	// Simple causality rules
-	switch event.Type {
+	switch string(event.Category) {
 	case "container_restart":
 		graph[event.ID] = []string{"oom_killed", "crash_loop", "health_check_failed"}
 	case "service_unavailable":
@@ -325,17 +368,17 @@ func (e *CausalityPatternEngine) applyTemporalCausality(chains []*CausalChain, e
 func (e *AnomalyPatternEngine) extractMetrics(event *opinionated.OpinionatedEvent) map[string]float64 {
 	metrics := make(map[string]float64)
 	
-	// Extract all numeric values from event
-	if event.Metrics != nil {
-		for k, v := range event.Metrics {
-			switch val := v.(type) {
-			case float64:
-				metrics[k] = val
-			case int:
-				metrics[k] = float64(val)
-			case int64:
-				metrics[k] = float64(val)
-			}
+	// Extract all numeric values from event data and attributes
+	for k, v := range event.Data {
+		switch val := v.(type) {
+		case float64:
+			metrics[k] = val
+		case int:
+			metrics[k] = float64(val)
+		case int64:
+			metrics[k] = float64(val)
+		case float32:
+			metrics[k] = float64(val)
 		}
 	}
 	

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // ModelRegistry manages ML models for different correlation tasks

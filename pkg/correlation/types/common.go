@@ -90,3 +90,14 @@ type MetricPoint struct {
 	Value     float64           `json:"value"`
 	Labels    map[string]string `json:"labels,omitempty"`
 }
+
+// Stats holds statistics for the correlation engine
+type Stats struct {
+	RulesRegistered   int                       `json:"rules_registered"`
+	RuleExecutionTime map[string]time.Duration `json:"rule_execution_time"`
+	EventsProcessed   int64                     `json:"events_processed"`
+	CorrelationsFound int64                     `json:"correlations_found"`
+	ProcessingLatency time.Duration            `json:"processing_latency"`
+	LastProcessedAt   time.Time                `json:"last_processed_at"`
+	MemoryUsage       uint64                   `json:"memory_usage"`
+}
