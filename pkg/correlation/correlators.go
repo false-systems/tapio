@@ -8,6 +8,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// Use EnhancedCorrelationResult directly or create a local type
+// CorrelationResult conflicts with interfaces.go, so we'll update the code to use EnhancedCorrelationResult
+
 // CorrelatorConfig configures threshold values for correlators
 type CorrelatorConfig struct {
 	// Memory pressure thresholds
@@ -61,8 +64,8 @@ func (m *MemoryPressureCorrelator) Name() string {
 	return "memory_pressure"
 }
 
-func (m *MemoryPressureCorrelator) Correlate(events []TimelineEvent) []CorrelationResult {
-	var results []CorrelationResult
+func (m *MemoryPressureCorrelator) Correlate(events []TimelineEvent) []EnhancedCorrelationResult {
+	var results []EnhancedCorrelationResult
 
 	// Group events by entity
 	entityEvents := make(map[string][]TimelineEvent)
@@ -110,7 +113,7 @@ func (m *MemoryPressureCorrelator) Correlate(events []TimelineEvent) []Correlati
 				allEvents = append(allEvents, e.ID)
 			}
 
-			result := CorrelationResult{
+			result := EnhancedCorrelationResult{
 				ID:          fmt.Sprintf("mem_pressure_%s_%s", entity, uuid.New().String()),
 				Type:        "memory_pressure",
 				Confidence:  confidence,
@@ -168,8 +171,8 @@ func (s *ServiceFailureCorrelator) Name() string {
 	return "service_failure"
 }
 
-func (s *ServiceFailureCorrelator) Correlate(events []TimelineEvent) []CorrelationResult {
-	var results []CorrelationResult
+func (s *ServiceFailureCorrelator) Correlate(events []TimelineEvent) []EnhancedCorrelationResult {
+	var results []EnhancedCorrelationResult
 
 	// Group events by service
 	serviceEvents := make(map[string][]TimelineEvent)
@@ -208,7 +211,7 @@ func (s *ServiceFailureCorrelator) Correlate(events []TimelineEvent) []Correlati
 				eventIDs = append(eventIDs, e.ID)
 			}
 
-			result := CorrelationResult{
+			result := EnhancedCorrelationResult{
 				ID:          fmt.Sprintf("crash_loop_%s_%s", service, uuid.New().String()),
 				Type:        "crash_loop",
 				Confidence:  0.9,
@@ -255,7 +258,7 @@ func (s *ServiceFailureCorrelator) Correlate(events []TimelineEvent) []Correlati
 				eventIDs = append(eventIDs, e.ID)
 			}
 
-			result := CorrelationResult{
+			result := EnhancedCorrelationResult{
 				ID:          fmt.Sprintf("service_degraded_%s_%s", service, uuid.New().String()),
 				Type:        "service_degradation",
 				Confidence:  0.7,
@@ -304,8 +307,8 @@ func (n *NetworkIssueCorrelator) Name() string {
 	return "network_issue"
 }
 
-func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []CorrelationResult {
-	var results []CorrelationResult
+func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []EnhancedCorrelationResult {
+	var results []EnhancedCorrelationResult
 
 	var networkEvents []TimelineEvent
 	var dnsEvents []TimelineEvent
@@ -345,7 +348,7 @@ func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []Correlation
 			eventIDs = append(eventIDs, e.ID)
 		}
 
-		result := CorrelationResult{
+		result := EnhancedCorrelationResult{
 			ID:          fmt.Sprintf("dns_issue_%s", uuid.New().String()),
 			Type:        "dns_resolution_failure",
 			Confidence:  0.85,
@@ -397,7 +400,7 @@ func (n *NetworkIssueCorrelator) Correlate(events []TimelineEvent) []Correlation
 			affected = append(affected, service)
 		}
 
-		result := CorrelationResult{
+		result := EnhancedCorrelationResult{
 			ID:          fmt.Sprintf("connection_issue_%s", uuid.New().String()),
 			Type:        "network_connectivity",
 			Confidence:  0.8,
@@ -453,8 +456,8 @@ func (s *SecurityThreatCorrelator) Name() string {
 	return "security_threat"
 }
 
-func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []CorrelationResult {
-	var results []CorrelationResult
+func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []EnhancedCorrelationResult {
+	var results []EnhancedCorrelationResult
 
 	var authFailures []TimelineEvent
 	var privilegeEscalation []TimelineEvent
@@ -508,7 +511,7 @@ func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []Correlati
 					eventIDs = append(eventIDs, e.ID)
 				}
 
-				result := CorrelationResult{
+				result := EnhancedCorrelationResult{
 					ID:          fmt.Sprintf("brute_force_%s_%s", source, uuid.New().String()),
 					Type:        "brute_force_attempt",
 					Confidence:  0.9,
@@ -556,7 +559,7 @@ func (s *SecurityThreatCorrelator) Correlate(events []TimelineEvent) []Correlati
 			eventIDs = append(eventIDs, e.ID)
 		}
 
-		result := CorrelationResult{
+		result := EnhancedCorrelationResult{
 			ID:          fmt.Sprintf("priv_escalation_%s", uuid.New().String()),
 			Type:        "privilege_escalation",
 			Confidence:  0.85,

@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // CertificateCascadeRule detects certificate chain failures that cascade through the system
 // Pattern: Root cert renewal → webhook cert mismatch → admission failures → deployment blocks
 type CertificateCascadeRule struct {
+	*correlation.BaseRule
 	config CertificateCascadeConfig
 }
 
@@ -40,32 +41,10 @@ func DefaultCertificateCascadeConfig() CertificateCascadeConfig {
 
 // NewCertificateCascadeRule creates a new certificate cascade detection rule
 func NewCertificateCascadeRule(config CertificateCascadeConfig) *CertificateCascadeRule {
-	return &CertificateCascadeRule{
-		config: config,
-	}
-}
-
-// ID returns the unique identifier for this rule
-func (r *CertificateCascadeRule) ID() string {
-	return "certificate_chain_failure"
-}
-
-// Name returns the human-readable name
-func (r *CertificateCascadeRule) Name() string {
-	return "Certificate Chain Failure Detection"
-}
-
-// Description returns a detailed description
-func (r *CertificateCascadeRule) Description() string {
-	return "Detects when certificate expiry or renewal issues cascade through webhooks causing admission controller failures and deployment blockages"
-}
-
-// GetMetadata returns metadata about the rule
-func (r *CertificateCascadeRule) GetMetadata() correlation.RuleMetadata {
-	return correlation.RuleMetadata{
-		ID:          r.ID(),
-		Name:        r.Name(),
-		Description: r.Description(),
+	metadata := correlation.RuleMetadata{
+		ID:          "certificate_chain_failure",
+		Name:        "Certificate Chain Failure Detection",
+		Description: "Detects when certificate expiry or renewal issues cascade through webhooks causing admission controller failures and deployment blockages",
 		Version:     "1.0.0",
 		Author:      "Tapio Correlation Engine",
 		Tags:        []string{"certificates", "webhooks", "cascade", "security"},
@@ -80,12 +59,18 @@ func (r *CertificateCascadeRule) GetMetadata() correlation.RuleMetadata {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+
+	return &CertificateCascadeRule{
+		BaseRule: correlation.NewBaseRule(metadata),
+		config:   config,
+	}
 }
+
 
 // CheckRequirements verifies that required data sources are available
 func (r *CertificateCascadeRule) CheckRequirements(ctx context.Context, data *correlation.DataCollection) error {
 	if !data.IsSourceAvailable(correlation.SourceKubernetes) {
-		return correlation.NewRequirementNotMetError(r.ID(), r.GetMetadata().Requirements[0])
+		return correlation.NewRequirementNotMetError(r.GetID(), r.GetMetadata().Requirements[0])
 	}
 	return nil
 }
@@ -169,7 +154,7 @@ func (r *CertificateCascadeRule) Execute(ctx context.Context, ruleCtx *correlati
 					"Review and fix any manual certificate deployments",
 					"Restart affected webhook pods after certificate updates",
 				},
-				Prediction: &correlation.Prediction{
+				Prediction: &correlation.RulePrediction{
 					Event:       "Complete admission control failure",
 					TimeToEvent: r.predictTimeToFailure(certIssues),
 					Confidence:  confidence,
@@ -535,17 +520,17 @@ func (r *CertificateCascadeRule) determineSeverity(certs []certIssue, webhooks [
 	// Control plane certificates are always critical
 	for _, cert := range certs {
 		if cert.IsControlPlane {
-			return correlation.SeverityCritical
+			return correlation.SeverityLevelCritical
 		}
 	}
 
 	// Many webhook failures indicate critical issue
 	if len(webhooks) > 5 {
-		return correlation.SeverityCritical
+		return correlation.SeverityLevelCritical
 	}
 
 	// Otherwise high severity
-	return correlation.SeverityHigh
+	return correlation.SeverityLevelError
 }
 
 func (r *CertificateCascadeRule) assessImpact(webhooks []webhookFailure, admission []admissionError, deployments []deploymentFailure) string {
@@ -580,13 +565,13 @@ func (r *CertificateCascadeRule) identifyRootCause(certs []certIssue) string {
 	return "Certificate chain validation failure"
 }
 
-func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []webhookFailure, admission []admissionError, deployments []deploymentFailure) []correlation.Evidence {
-	evidence := []correlation.Evidence{}
+func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []webhookFailure, admission []admissionError, deployments []deploymentFailure) []correlation.RuleEvidence {
+	evidence := []correlation.RuleEvidence{}
 
 	// Certificate evidence
 	for i, cert := range certs {
 		if i >= 3 {
-			evidence = append(evidence, correlation.Evidence{
+			evidence = append(evidence, correlation.RuleEvidence{
 				Type:        "certificate_issue_summary",
 				Source:      correlation.SourceKubernetes,
 				Description: fmt.Sprintf("... and %d more certificate issues", len(certs)-3),
@@ -598,7 +583,7 @@ func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []w
 			})
 			break
 		}
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "certificate_issue",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("Certificate issue in %s/%s", cert.ResourceKind, cert.ResourceName),
@@ -615,7 +600,7 @@ func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []w
 
 	// Webhook evidence
 	if len(webhooks) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "webhook_failures",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d webhooks experiencing TLS/certificate failures", len(webhooks)),
@@ -629,7 +614,7 @@ func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []w
 
 	// Admission evidence
 	if len(admission) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "admission_errors",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d admission control errors recorded", len(admission)),
@@ -643,7 +628,7 @@ func (r *CertificateCascadeRule) collectEvidence(certs []certIssue, webhooks []w
 
 	// Deployment evidence
 	if len(deployments) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "deployment_failures",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d deployments blocked by admission failures", len(deployments)),

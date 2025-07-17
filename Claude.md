@@ -1,614 +1,767 @@
-# Tapio - Kubernetes Intelligence Platform
+# Claude Code Agent Configuration for Tapio
 
-**Named after Tapio, Finnish forest god** - because debugging Kubernetes clusters shouldn't require divine intervention.
+## 🌲 **Project Overview**
 
----
+**Tapio** is an advanced system monitoring and intelligence platform that provides predictive analytics, correlation analysis, and automated incident response for complex distributed systems. Named after the Finnish forest god, Tapio watches over your digital infrastructure with the wisdom of nature.
 
-## 🎯 Mission Statement
+### **Core Capabilities**
 
-**Make Kubernetes and eBPF accessible to ANYONE.**
+- **Intelligent Event Collection**: Multi-source data gathering from eBPF, Kubernetes, systemd, journald, and container runtimes
+- **Advanced Correlation**: Sophisticated pattern recognition and causal analysis across system events
+- **Predictive Analytics**: Machine learning-powered prediction of failures, resource exhaustion, and performance issues
+- **Self-Healing Integration**: Automated responses and remediation through OpenTelemetry, Prometheus, and webhook integrations
+- **Human-Friendly Interfaces**: CLI and server interfaces that explain complex correlations in understandable terms
 
-We are building the tool that transforms complex kernel-level debugging into simple, human-readable insights. A junior developer should be able to install Tapio and immediately become a Kubernetes expert.
+### **What Makes Tapio Special**
 
----
-
-## 🏗️ Core Architecture Principles
-
-### Dual-Input Intelligence Philosophy
-
-- **Kubernetes API**: What the cluster *thinks* is happening
-- **eBPF Kernel Data**: What's *actually* happening at the kernel level
-- **Correlation Engine**: Finds dangerous mismatches and predicts failures
-
-### Zero-Dashboard Approach
-
-- **NO dashboards** - information comes to YOU
-- **NO configuration** - works out of the box like kubectl
-- **NO extra data** - only what matters for debugging
-- **NO technical jargon** - human language only
-
-### Accessibility First
-
-- Junior dev installs → 5 minutes later fixes K8s problems
-- No eBPF knowledge needed → tool handles all complexity
-- No K8s expertise required → plain English explanations
+1. **Deep System Understanding**: Goes beyond simple metrics to understand causal relationships between events
+2. **Predictive Intelligence**: Anticipates problems before they become critical issues
+3. **Contextual Correlation**: Understands how different system layers interact and influence each other
+4. **Extensible Architecture**: Modular design allows adding new data sources and intelligence algorithms
+5. **Zero-Dependency Domain**: Clean, type-safe foundation that's easy to understand and maintain
 
 ---
 
-## 📁 Project Structure
+## 🏗️ **Architecture Overview**
+
+Tapio follows a strict **5-level dependency hierarchy** designed for modularity, testability, and maintainability:
 
 ```
-tapio/
-├── cmd/tapio/                    # CLI entry point
-├── pkg/
-│   ├── k8s/                     # Kubernetes client & API integration
-│   ├── ebpf/                    # eBPF collectors & kernel monitoring
-│   ├── simple/                  # Basic health checker (current)
-│   ├── health/                  # Health analysis engine
-│   ├── correlation/             # Multi-source intelligence engine
-│   ├── types/                   # Shared data structures
-│   ├── metrics/                 # Prometheus integration
-│   └── output/                  # Human-readable formatters
-├── internal/
-│   ├── cli/                     # Cobra command implementations
-│   └── output/                  # Internal output formatting
-├── deploy/
-│   └── helm/tapio/             # Helm charts for cluster deployment
-├── scripts/                     # Development and agent management
-├── .github/workflows/           # CI/CD pipelines
-├── Makefile                     # Build and quality gates
-└── Taskfile.yml               # Task automation
+Level 0: pkg/domain/          # Zero dependencies - Core types and contracts
+Level 1: pkg/collectors/      # Domain only - Data collection (eBPF, K8s, systemd, journald, runtime)
+Level 2: pkg/intelligence/    # Domain + L1 - Correlation, prediction, anomaly detection, patterns
+Level 3: pkg/integrations/    # Domain + L1 + L2 - OpenTelemetry, Prometheus, gRPC, webhooks
+Level 4: pkg/interfaces/      # All above - CLI, server, output formatting, configuration
 ```
 
----
+### **Component Isolation**
 
-## 🚀 Current Implementation Status
+- **No cross-imports** between same-level components
+- **Communication via APIs**, not Go imports
+- **Independent modules** with minimal dependencies
+- **Platform-specific builds** with stub implementations
 
-### ✅ COMPLETED
+### **Current Implementation Status**
 
-- **Basic CLI framework** with Cobra + Viper
-- **Simple health checker** (`tapio check`)
-- **Kubernetes API integration**
-- **CI/CD pipeline** with quality gates
-- **Agent workflow system** for organized development
-- **Comprehensive Makefile** with linting and testing
-
-### 🔄 IN PROGRESS
-
-- **eBPF system collector** (high-performance kernel monitoring)
-- **Advanced correlation engine** (multi-source intelligence)
-
-### 📋 PLANNED
-
-- **Complete system monitoring** (systemd + journald integration)
-- **Auto-fix capabilities** (`tapio fix`)
-- **OTEL integration** for enterprise observability
+- ✅ **Domain Layer**: Type-safe foundation with Event, Correlation, and Finding models
+- 🚧 **Next Phase**: Level 1 collectors starting with eBPF
+- 📋 **Planned**: Intelligence layer with correlation engine and prediction algorithms
 
 ---
 
-## 🎮 Command Interface
+## 🎯 **Development Philosophy**
 
-### Dead Simple Commands
+### **Quality Over Speed**
+
+- **No technical debt** - Build it right the first time
+- **No stubs, no shortcuts** - Every function must be fully implemented
+- **Type safety first** - Eliminate `map[string]interface{}` abuse
+- **Test everything** - 80% minimum coverage, comprehensive integration tests
+- **Document thoroughly** - Self-explanatory code with rich documentation
+
+### **Predictable Architecture**
+
+- **Consistent patterns** across all components
+- **Clear interfaces** between layers
+- **Explicit error handling** with rich context
+- **Resource management** with proper cleanup
+
+### **Extensibility by Design**
+
+- **Interface-driven** development for easy mocking and testing
+- **Plugin architecture** for new data sources and algorithms
+- **Configuration-driven** behavior where appropriate
+- **Platform abstraction** for cross-platform compatibility
+
+---
+
+# 🔒 **MANDATORY CONSTRAINTS FOR ALL CLAUDE CODE AGENTS**
+
+### **CRITICAL: Every Claude Code agent MUST follow these rules without exception**
+
+---
+
+## 📋 **SECTION 1: ARCHITECTURE CONSTRAINTS**
+
+### **🏗️ Rule A1: Dependency Hierarchy (MANDATORY)**
+
+```
+STRICT HIERARCHY - NO EXCEPTIONS:
+Level 0: pkg/domain/          # Zero external dependencies
+Level 1: pkg/collectors/      # ONLY depends on pkg/domain
+Level 2: pkg/intelligence/    # ONLY depends on pkg/domain + Level 1
+Level 3: pkg/integrations/    # ONLY depends on pkg/domain + Level 1 + Level 2  
+Level 4: pkg/interfaces/      # Can depend on all above levels
+```
+
+**ENFORCEMENT:**
+
+- ❌ **FORBIDDEN:** Any Level 1 component importing another Level 1 component
+- ❌ **FORBIDDEN:** Any component importing a higher-level component
+- ✅ **REQUIRED:** Each component MUST have its own go.mod with minimal dependencies
+- ✅ **REQUIRED:** Run `go list -deps` to verify hierarchy compliance
+
+### **🏗️ Rule A2: Component Isolation (MANDATORY)**
+
+```
+NO DIRECT GO IMPORTS BETWEEN SAME-LEVEL COMPONENTS
+```
+
+**Examples:**
+
+- ❌ `pkg/collectors/ebpf` importing `pkg/collectors/k8s`
+- ❌ `pkg/intelligence/correlation` importing `pkg/intelligence/prediction`
+- ✅ Communication via HTTP/gRPC APIs
+- ✅ Communication via message queues
+- ✅ Communication via file-based interfaces
+
+### **🏗️ Rule A3: Module Structure (MANDATORY)**
+
+Every component MUST have:
+
+```
+pkg/[area]/[component]/
+├── go.mod                    # Independent module
+├── core/                     # Core interfaces and types
+│   ├── interfaces.go         # Component contracts
+│   ├── types.go             # Component-specific types
+│   └── errors.go            # Component-specific errors
+├── internal/                # Internal implementation
+├── [platform]/             # Platform-specific code (linux/, windows/, etc.)
+├── stub/                    # Stub implementations for unsupported platforms
+└── README.md               # Component documentation
+```
+
+### **🏗️ Rule A4: Implementation Completeness (MANDATORY)**
+
+```
+NO STUBS, NO SHORTCUTS, NO PLACEHOLDER CODE
+```
+
+**ENFORCEMENT:**
+
+- ❌ **FORBIDDEN:** Functions that return `nil, fmt.Errorf("not implemented")`
+- ❌ **FORBIDDEN:** Empty function bodies with TODO comments
+- ❌ **FORBIDDEN:** Placeholder implementations that don't work
+- ❌ **FORBIDDEN:** "We'll fix this later" code
+- ✅ **REQUIRED:** Every function must be fully implemented and working
+- ✅ **REQUIRED:** Every feature must be complete before moving to next component
+- ✅ **REQUIRED:** All code paths must be tested and functional
+
+**Example of FORBIDDEN code:**
+
+```go
+// ❌ ABSOLUTELY FORBIDDEN
+func (c *Collector) CollectEvents(ctx context.Context, criteria Criteria) ([]Event, error) {
+    // TODO: implement this later
+    return nil, fmt.Errorf("not implemented")
+}
+
+func (c *Collector) ProcessEvent(event Event) error {
+    // We'll add the real logic later
+    return nil
+}
+```
+
+**Example of REQUIRED code:**
+
+```go
+// ✅ REQUIRED - Fully implemented, working code
+func (c *Collector) CollectEvents(ctx context.Context, criteria Criteria) ([]Event, error) {
+    if err := criteria.Validate(); err != nil {
+        return nil, fmt.Errorf("invalid criteria: %w", err)
+    }
+    
+    select {
+    case <-ctx.Done():
+        return nil, ctx.Err()
+    default:
+    }
+    
+    // Real implementation with error handling, validation, and proper logic
+    events, err := c.queryDataSource(ctx, criteria)
+    if err != nil {
+        return nil, fmt.Errorf("failed to query data source: %w", err)
+    }
+    
+    return events, nil
+}
+```
+
+### **🏗️ Rule A5: Independent Build and Run (MANDATORY)**
+
+```
+EVERY AREA MUST BUILD AND RUN INDEPENDENTLY
+```
+
+**ENFORCEMENT:**
+
+- ✅ **REQUIRED:** Each area must build without requiring other areas
+- ✅ **REQUIRED:** Each area must have its own executable/runnable components
+- ✅ **REQUIRED:** Each area must have standalone tests that don't depend on other areas
+- ✅ **REQUIRED:** Each area must have its own configuration and initialization
+- ❌ **FORBIDDEN:** Build dependencies between areas at the same level
+- ❌ **FORBIDDEN:** Runtime dependencies that prevent standalone operation
+
+**Examples of REQUIRED independence:**
 
 ```bash
-tapio check           # "Is stuff broken?"
-tapio fix            # "Fix it now" (future)
-tapio why            # "Explain like I'm 5" (future)
-tapio watch          # "Tell me when things break" (future)
+# Each area builds independently
+cd pkg/collectors/ebpf && go build ./...     # Works standalone
+cd pkg/collectors/k8s && go build ./...      # Works standalone
+cd pkg/intelligence/correlation && go build ./... # Works standalone
+
+# Each area tests independently  
+cd pkg/collectors/ebpf && go test ./...      # No external dependencies
+cd pkg/intelligence/correlation && go test ./... # No external dependencies
+
+# Each area can run standalone for testing
+cd pkg/collectors/ebpf && go run ./cmd/collector  # Runs independently
+cd pkg/interfaces/cli && go run ./cmd/tapio check # Runs with available components
 ```
 
-### Current Capabilities
+**REQUIRED Area Structure:**
+
+```
+pkg/[area]/[component]/
+├── go.mod                    # Independent module
+├── cmd/                      # Standalone executables for testing
+│   ├── collector/           # Area-specific test runners
+│   └── debug/               # Debug utilities
+├── core/                     # Core interfaces and types
+├── internal/                # Internal implementation  
+├── testdata/                # Test data and fixtures
+└── examples/                # Usage examples
+```
+
+**REQUIRED Independence Patterns:**
+
+- **Graceful degradation** when other areas are unavailable
+- **Configuration-driven** feature enablement
+- **Interface-based** communication with optional implementations
+- **Self-contained** test suites with mocked dependencies
+
+```
+NO STUBS, NO SHORTCUTS, NO PLACEHOLDER CODE
+```
+
+**ENFORCEMENT:**
+
+- ❌ **FORBIDDEN:** Functions that return `nil, fmt.Errorf("not implemented")`
+- ❌ **FORBIDDEN:** Empty function bodies with TODO comments
+- ❌ **FORBIDDEN:** Placeholder implementations that don't work
+- ❌ **FORBIDDEN:** "We'll fix this later" code
+- ✅ **REQUIRED:** Every function must be fully implemented and working
+- ✅ **REQUIRED:** Every feature must be complete before moving to next component
+- ✅ **REQUIRED:** All code paths must be tested and functional
+
+**Example of FORBIDDEN code:**
+
+```go
+// ❌ ABSOLUTELY FORBIDDEN
+func (c *Collector) CollectEvents(ctx context.Context, criteria Criteria) ([]Event, error) {
+    // TODO: implement this later
+    return nil, fmt.Errorf("not implemented")
+}
+
+func (c *Collector) ProcessEvent(event Event) error {
+    // We'll add the real logic later
+    return nil
+}
+```
+
+**Example of REQUIRED code:**
+
+```go
+// ✅ REQUIRED - Fully implemented, working code
+func (c *Collector) CollectEvents(ctx context.Context, criteria Criteria) ([]Event, error) {
+    if err := criteria.Validate(); err != nil {
+        return nil, fmt.Errorf("invalid criteria: %w", err)
+    }
+    
+    select {
+    case <-ctx.Done():
+        return nil, ctx.Err()
+    default:
+    }
+    
+    // Real implementation with error handling, validation, and proper logic
+    events, err := c.queryDataSource(ctx, criteria)
+    if err != nil {
+        return nil, fmt.Errorf("failed to query data source: %w", err)
+    }
+    
+    return events, nil
+}
+```
+
+Every component MUST have:
+
+```
+pkg/[area]/[component]/
+├── go.mod                    # Independent module
+├── core/                     # Core interfaces and types
+│   ├── interfaces.go         # Component contracts
+│   ├── types.go             # Component-specific types
+│   └── errors.go            # Component-specific errors
+├── internal/                # Internal implementation
+├── [platform]/             # Platform-specific code (linux/, windows/, etc.)
+├── stub/                    # Stub implementations for unsupported platforms
+└── README.md               # Component documentation
+```
+
+---
+
+## 🔍 **SECTION 2: CODE QUALITY CONSTRAINTS**
+
+### **💎 Rule Q1: Type Safety (MANDATORY)**
+
+```go
+❌ FORBIDDEN: map[string]interface{} without strong justification
+❌ FORBIDDEN: interface{} in public APIs
+❌ FORBIDDEN: any without explicit comment explaining why
+✅ REQUIRED: Strongly-typed structs for all data
+✅ REQUIRED: Validation methods for all input types
+✅ REQUIRED: Type assertions with error handling
+```
+
+**Example of REQUIRED pattern:**
+
+```go
+// ✅ GOOD - Type safe
+type Config struct {
+    Host     string        `json:"host" validate:"required"`
+    Port     int           `json:"port" validate:"min=1,max=65535"`
+    Timeout  time.Duration `json:"timeout" validate:"min=1s"`
+}
+
+func (c Config) Validate() error {
+    // Validation logic here
+    return nil
+}
+
+// ❌ BAD - Type unsafe
+type Config map[string]interface{}
+```
+
+### **💎 Rule Q2: Error Handling (MANDATORY)**
+
+```go
+✅ REQUIRED: Every error must be handled explicitly
+✅ REQUIRED: Wrapped errors with context using fmt.Errorf("context: %w", err)
+✅ REQUIRED: Custom error types for domain-specific errors
+❌ FORBIDDEN: Silent error ignoring with _
+❌ FORBIDDEN: Panic in library code (except for programmer errors)
+```
+
+**REQUIRED Error Pattern:**
+
+```go
+// Custom error types
+type ValidationError struct {
+    Field   string
+    Value   interface{}
+    Message string
+}
+
+func (e ValidationError) Error() string {
+    return fmt.Sprintf("validation failed for field %s: %s", e.Field, e.Message)
+}
+
+// Error wrapping
+func processData(data []byte) error {
+    if err := validate(data); err != nil {
+        return fmt.Errorf("failed to process data: %w", err)
+    }
+    return nil
+}
+```
+
+### **💎 Rule Q3: Context Handling (MANDATORY)**
+
+```go
+✅ REQUIRED: Every public function that does I/O MUST accept context.Context as first parameter
+✅ REQUIRED: Context cancellation MUST be respected
+✅ REQUIRED: Context timeout MUST be handled gracefully
+❌ FORBIDDEN: Using context.Background() in library code
+```
+
+**REQUIRED Context Pattern:**
+
+```go
+func (c *Collector) CollectEvents(ctx context.Context, criteria Criteria) ([]Event, error) {
+    select {
+    case <-ctx.Done():
+        return nil, ctx.Err()
+    default:
+    }
+    
+    // Use ctx throughout the function
+    return c.doCollection(ctx, criteria)
+}
+```
+
+### **💎 Rule Q4: Resource Management (MANDATORY)**
+
+```go
+✅ REQUIRED: Every resource MUST have explicit cleanup
+✅ REQUIRED: Use defer for cleanup when possible
+✅ REQUIRED: Implement io.Closer for stateful types
+✅ REQUIRED: Context-aware resource cleanup
+❌ FORBIDDEN: Resource leaks
+```
+
+**REQUIRED Resource Pattern:**
+
+```go
+type Collector struct {
+    conn   net.Conn
+    cancel context.CancelFunc
+}
+
+func (c *Collector) Close() error {
+    c.cancel()
+    if c.conn != nil {
+        return c.conn.Close()
+    }
+    return nil
+}
+
+func NewCollector(ctx context.Context) (*Collector, error) {
+    ctx, cancel := context.WithCancel(ctx)
+    conn, err := dial(ctx)
+    if err != nil {
+        cancel()
+        return nil, fmt.Errorf("failed to create collector: %w", err)
+    }
+    
+    return &Collector{
+        conn:   conn,
+        cancel: cancel,
+    }, nil
+}
+```
+
+---
+
+## 🧪 **SECTION 3: TESTING CONSTRAINTS**
+
+### **🧪 Rule T1: Test Coverage (MANDATORY)**
+
+```
+✅ REQUIRED: Minimum 80% test coverage for all public functions
+✅ REQUIRED: Unit tests for all validation logic
+✅ REQUIRED: Integration tests for external dependencies
+✅ REQUIRED: Benchmark tests for performance-critical code
+❌ FORBIDDEN: Untested public APIs
+```
+
+### **🧪 Rule T2: Test Structure (MANDATORY)**
+
+```go
+✅ REQUIRED: Table-driven tests for multiple scenarios
+✅ REQUIRED: Test helpers in testhelpers/ directory
+✅ REQUIRED: Mock implementations for external dependencies
+✅ REQUIRED: Cleanup in test teardown
+```
+
+**REQUIRED Test Pattern:**
+
+```go
+func TestCollector_CollectEvents(t *testing.T) {
+    tests := []struct {
+        name     string
+        criteria Criteria
+        want     []Event
+        wantErr  bool
+    }{
+        {
+            name:     "valid criteria",
+            criteria: validCriteria(),
+            want:     expectedEvents(),
+            wantErr:  false,
+        },
+        {
+            name:     "invalid criteria",
+            criteria: invalidCriteria(),
+            want:     nil,
+            wantErr:  true,
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            c := setupCollector(t)
+            defer c.Close()
+            
+            got, err := c.CollectEvents(context.Background(), tt.criteria)
+            
+            if (err != nil) != tt.wantErr {
+                t.Errorf("CollectEvents() error = %v, wantErr %v", err, tt.wantErr)
+                return
+            }
+            
+            if !reflect.DeepEqual(got, tt.want) {
+                t.Errorf("CollectEvents() = %v, want %v", got, tt.want)
+            }
+        })
+    }
+}
+```
+
+---
+
+## ⚡ **SECTION 4: PERFORMANCE CONSTRAINTS**
+
+### **⚡ Rule P1: Memory Management (MANDATORY)**
+
+```go
+✅ REQUIRED: Pre-allocate slices with known capacity
+✅ REQUIRED: Reuse buffers where possible
+✅ REQUIRED: Limit concurrent goroutines with semaphores
+✅ REQUIRED: Pool expensive objects
+❌ FORBIDDEN: Unbounded memory growth
+❌ FORBIDDEN: Memory leaks
+```
+
+### **⚡ Rule P2: Goroutine Management (MANDATORY)**
+
+```go
+✅ REQUIRED: Bounded goroutine pools
+✅ REQUIRED: Graceful shutdown with context cancellation
+✅ REQUIRED: WaitGroup for goroutine coordination
+❌ FORBIDDEN: Unbounded goroutine creation
+❌ FORBIDDEN: Goroutine leaks
+```
+
+---
+
+## 🔐 **SECTION 5: SECURITY CONSTRAINTS**
+
+### **🔐 Rule S1: Input Validation (MANDATORY)**
+
+```go
+✅ REQUIRED: Validate ALL external inputs
+✅ REQUIRED: Sanitize data before processing
+✅ REQUIRED: Rate limiting for external requests
+✅ REQUIRED: Timeout limits for all operations
+❌ FORBIDDEN: Trusting external data
+❌ FORBIDDEN: SQL injection vulnerabilities
+❌ FORBIDDEN: Path traversal vulnerabilities
+```
+
+### **🔐 Rule S2: Secrets Management (MANDATORY)**
+
+```go
+✅ REQUIRED: Environment variables for secrets
+✅ REQUIRED: Clear secrets from memory after use
+✅ REQUIRED: No secrets in logs
+✅ REQUIRED: Encrypted secrets at rest
+❌ FORBIDDEN: Hardcoded secrets
+❌ FORBIDDEN: Secrets in configuration files
+❌ FORBIDDEN: Secrets in error messages
+```
+
+---
+
+## 📚 **SECTION 6: DOCUMENTATION CONSTRAINTS**
+
+### **📚 Rule D1: Code Documentation (MANDATORY)**
+
+```go
+✅ REQUIRED: Godoc comments for ALL public types and functions
+✅ REQUIRED: Examples in documentation
+✅ REQUIRED: Error documentation
+✅ REQUIRED: Performance characteristics documentation
+```
+
+**REQUIRED Documentation Pattern:**
+
+```go
+// CollectEvents retrieves events matching the specified criteria.
+// It returns a slice of events and an error if the operation fails.
+//
+// The context is used for cancellation and timeout control.
+// If the context is cancelled, the operation will return immediately.
+//
+// Performance: This operation has O(n) time complexity where n is the
+// number of events in the time window.
+//
+// Errors:
+//   - ValidationError: if criteria is invalid
+//   - ConnectionError: if unable to connect to data source
+//   - TimeoutError: if operation exceeds context deadline
+//
+// Example:
+//   criteria := Criteria{TimeWindow: TimeWindow{Start: start, End: end}}
+//   events, err := collector.CollectEvents(ctx, criteria)
+//   if err != nil {
+//       return fmt.Errorf("failed to collect events: %w", err)
+//   }
+func (c *Collector) CollectEvents(ctx context.Context, criteria Criteria) ([]Event, error) {
+    // Implementation
+}
+```
+
+---
+
+## ✅ **VALIDATION CHECKLIST**
+
+### **Before Submitting ANY Code, Verify:**
+
+#### **Architecture Validation:**
+
+- [ ] Component is at correct dependency level
+- [ ] No cross-imports between same-level components  
+- [ ] Independent go.mod with minimal dependencies
+- [ ] Correct directory structure
+
+#### **Implementation Validation:**
+
+- [ ] No stub functions or placeholder code
+- [ ] Every function is fully implemented and working
+- [ ] All code paths tested and functional
+- [ ] No "TODO: implement later" comments
+
+#### **Independence Validation:**
+
+- [ ] Area builds without requiring other areas (`cd pkg/[area]/[component] && go build ./...`)
+- [ ] Area tests run independently (`go test ./...` works standalone)
+- [ ] Area has standalone executables for testing and debugging
+- [ ] Area gracefully handles missing dependencies from other areas
+- [ ] Area configuration is self-contained
+
+#### **Code Quality Validation:**
+
+- [ ] No `map[string]interface{}` without justification
+- [ ] All errors handled explicitly
+- [ ] Context passed to all I/O operations
+- [ ] All resources properly cleaned up
+- [ ] Input validation implemented
+
+#### **Testing Validation:**
+
+- [ ] `go test ./...` passes
+- [ ] Coverage ≥ 80% (`go test -cover ./...`)
+- [ ] Benchmarks for performance-critical code
+- [ ] Integration tests for external dependencies
+
+#### **Performance Validation:**
+
+- [ ] No unbounded memory growth
+- [ ] Goroutines properly managed
+- [ ] No resource leaks
+- [ ] Appropriate use of pools and caching
+
+#### **Security Validation:**
+
+- [ ] All inputs validated
+- [ ] No hardcoded secrets
+- [ ] Rate limiting implemented
+- [ ] Timeouts configured
+
+#### **Documentation Validation:**
+
+- [ ] All public APIs documented
+- [ ] Examples provided
+- [ ] Error conditions documented
+- [ ] README.md updated
+
+---
+
+## 🛠️ **Quick Reference Commands**
+
+### **Validation Commands:**
 
 ```bash
-tapio check                    # Current namespace health
-tapio check my-app             # Specific deployment
-tapio check pod/my-pod-xyz     # Specific pod
-tapio check --all              # Entire cluster
-tapio check --output json      # Machine-readable output
+# Architecture validation
+go list -deps pkg/[component]               # Check dependency hierarchy
+go mod graph | grep pkg/                    # Visualize module dependencies
+
+# Build verification  
+go build ./...                              # Verify everything compiles
+go mod tidy                                 # Clean up dependencies
+
+# Testing
+go test ./...                               # Run all tests
+go test -cover ./...                        # Test with coverage
+go test -race ./...                         # Race condition detection
+go test -bench=. ./...                      # Run benchmarks
+
+# Code quality
+go vet ./...                                # Static analysis
+gofmt -l .                                  # Format checking
+golint ./...                                # Linting (if available)
+
+# Security
+go list -m all                              # Audit dependencies
 ```
 
-### Expected Output Style
-
-```
-ANALYSIS: my-app has issues
-
-pod/api-service-xyz: High restart count
-  Container restarted 8 times in last hour
-  Pattern: Consistent OOMKilled events
-  
-  Likely cause: Memory limit (256Mi) too low
-  
-  Next steps:
-  [1] kubectl logs api-service-xyz --previous
-  [2] kubectl top pod api-service-xyz
-  
-  Suggested fix:
-  kubectl patch deployment my-app -p '{"spec":{"template":{"spec":{"containers":[{"name":"api","resources":{"limits":{"memory":"512Mi"}}}]}}}}'
-```
-
----
-
-## 🔧 Development Standards
-
-### Quality Gates (MANDATORY)
-
-- **Formatting**: `make fmt` - gofmt + goimports
-- **Linting**: `make lint` - golangci-lint with 25+ rules
-- **Testing**: `make test` - minimum 70% coverage
-- **Security**: `make security` - gosec vulnerability scanning
-- **Build**: `make ci` - complete pipeline validation
-
-### Testing Strategy
-
-1. **Unit Tests**: Fast, isolated component testing
-2. **Integration Tests**: Multi-component interaction
-3. **System Tests**: Full application testing
-4. **E2E Tests**: Real cluster scenarios with Kind
-
-### Code Quality Requirements
-
-- **Error Handling**: Every function properly handles errors
-- **Documentation**: GoDoc for all public functions
-- **Performance**: Built-in monitoring and benchmarking
-- **Concurrency**: Thread-safe patterns, proper context usage
-
----
-
-## 🌊 Branch Management & Agent Workflow
-
-### Agent Task System
+### **Independence Commands:**
 
 ```bash
-# Start new work
-make agent-start
-# Agent ID: agent-1
-# Component: correlation
-# Action: enhancement
-# → Creates feature/agent-1/correlation-enhancement
+# Build and test individual areas
+cd pkg/collectors/ebpf && go build ./... && go test ./...
+cd pkg/collectors/k8s && go build ./... && go test ./...
+cd pkg/intelligence/correlation && go build ./... && go test ./...
 
-# Check work status
-make agent-status
+# Run standalone area executables
+cd pkg/collectors/ebpf && go run ./cmd/collector --config=testdata/config.yaml
+cd pkg/interfaces/cli && go run ./cmd/tapio check --collectors=ebpf
 
-# Prepare for PR
-make pr-ready
+# Validate area independence
+go list -deps pkg/[area]/[component]        # Check dependency hierarchy
+go mod why pkg/[external-dependency]        # Understand why dependencies exist
 ```
 
-### Branch Strategy
-
-- `main` - Production-ready code
-- `develop` - Integration branch
-- `feature/agent-[id]/[component]-[action]` - Agent work branches
-
-### Commit Standards
-
-- Format: `feat(component): description` or `fix(component): description`
-- Small PRs: < 200 lines per PR
-- Quality gates: All checks must pass before merge
-
----
-
-## ⚡ Performance Requirements
-
-### High-Performance Architecture
-
-- **Event Throughput**: 165,000 events/sec per node → 5,000 relevant/sec (97% filtering)
-- **Processing Latency**: <500µs per event
-- **Memory Usage**: <100MB per node for eBPF buffers
-- **CPU Overhead**: <1% system impact
-- **Response Time**: `tapio check` in <2 seconds
-
-### Optimization Strategies
-
-- **Smart Caching**: K8s API data cached for 30 seconds
-- **Batch Processing**: eBPF events in 1-second windows
-- **Object Pooling**: Zero-GC pressure design
-- **Lock-Free Data Structures**: Maximum throughput
-- **Load Shedding**: Progressive event dropping under load
-
----
-
-## 🏭 Deployment Architecture
-
-### Single Deployment with Modular Components
-
-```yaml
-# DaemonSet on each node
-tapio-agent:
-  - eBPF collectors
-  - systemd monitoring
-  - journald analysis
-  - correlation engine
-  
-# Cluster-level service
-tapio-server:
-  - Central intelligence
-  - Prometheus metrics
-  - API endpoints
-```
-
-### Installation Methods
+### **Component Creation Template:**
 
 ```bash
-# CLI installation
-curl -sSL https://install.tapio.sh | sh
+# Create new component structure
+mkdir -p pkg/[area]/[component]/{core,internal,[platform],stub}
+cd pkg/[area]/[component]
 
-# Helm deployment
-helm install tapio deploy/helm/tapio
+# Initialize module
+go mod init github.com/falseyair/tapio/pkg/[area]/[component]
 
-# kubectl deployment
-kubectl apply -f deploy/kubernetes/
+# Add domain dependency
+go mod edit -require github.com/falseyair/tapio/pkg/domain@latest
 ```
 
 ---
 
-## 🔍 Key Implementation Guidelines
+## 🚨 **ENFORCEMENT**
 
-### eBPF Development
+### **Automated Checks (REQUIRED):**
 
-- Use `cilium/ebpf` framework for all eBPF programs
-- Build tags: `//go:build ebpf` for eBPF-specific code
-- Privilege checking: Graceful fallback if eBPF unavailable
-- Performance focus: Kernel filtering for 97% event reduction
+Every component MUST pass all validation checks before acceptance.
 
-### Kubernetes Integration
+### **Manual Review (REQUIRED):**
 
-- Use official `k8s.io/client-go` library
-- Support multiple kubeconfig sources
-- Graceful degradation if cluster access limited
-- Context-aware operations (current namespace)
+- Architecture review for dependency compliance
+- Code review for quality standards  
+- Security review for security constraints
+- Performance review for critical paths
 
-### Output Formatting
+### **Failure Consequences:**
 
-- **Human-first**: Clear, actionable explanations
-- **Context-aware**: Show relevant information only
-- **Color-coded**: Green (healthy), Yellow (warning), Red (critical)
-- **No emojis**: Professional terminal output
-
-### Configuration Management
-
-- **Zero-config default**: Works like kubectl out of the box
-- **Hierarchical**: CLI flags → env vars → config file → defaults
-- **Environment variables**: `TAPIO_*` prefix
-- **Kubernetes-native**: YAML configuration
+- ❌ **Code MUST be rejected** if any constraint is violated
+- ❌ **No exceptions** without explicit architectural committee approval
+- ❌ **Technical debt is NOT acceptable** for constraint violations
 
 ---
 
-## 🧪 Testing Philosophy
+## 🏁 **FINAL MANDATE**
 
-### Test Everything
+**Every Claude Code agent MUST:**
 
-- **Unit tests**: Every function with edge cases
-- **Integration tests**: Component interactions
-- **E2E tests**: Real cluster scenarios
-- **Performance tests**: Benchmarks and race detection
+1. **Read and understand** these constraints completely
+2. **Apply ALL rules** without exception
+3. **Implement everything fully** - no stubs, no shortcuts, no placeholders
+4. **Validate compliance** before submitting code
+5. **Document any deviations** with architectural justification
 
-### Quality Standards
+**NO CODE will be accepted that violates these constraints.**
+**NO INCOMPLETE IMPLEMENTATIONS will be accepted.**
 
-- **Coverage**: Minimum 70% test coverage
-- **Race detection**: All tests run with `-race`
-- **Table-driven tests**: Consistent patterns
-- **Mock interfaces**: Clean test isolation
-
----
-
-## 🎯 Implementation Priorities
-
-### Phase 1: Foundation (DONE)
-
-- ✅ CLI framework
-- ✅ Basic health checking
-- ✅ CI/CD pipeline
-- ✅ Quality gates
-
-### Phase 2: Intelligence (IN PROGRESS)
-
-- 🔄 eBPF system collector
-- 🔄 Correlation engine
-- 📋 Multi-source intelligence
-
-### Phase 3: Auto-Healing (PLANNED)
-
-- 📋 `tapio fix` command
-- 📋 Automated remediation
-- 📋 Predictive capabilities
-
-### Phase 4: Enterprise (PLANNED)
-
-- 📋 OTEL integration
-- 📋 Advanced monitoring
-- 📋 Federation support
-
----
-
-## 💡 Success Criteria
-
-### For Every Task
-
-- [ ] Code follows all quality standards
-- [ ] Tests pass with >70% coverage
-- [ ] `make pr-ready` succeeds
-- [ ] Human-readable output
-- [ ] Zero-config operation
-
-### For the Project
-
-- A junior developer can install Tapio and immediately solve K8s problems
-- The tool explains complex issues in simple, actionable terms
-- Performance impact is minimal (<1% CPU, <100MB memory)
-- Works reliably across different K8s distributions
-
----
-
-## 🚨 Important Notes
-
-### What We DON'T Do
-
-- ❌ Build dashboards (information comes to users)
-- ❌ Require configuration (zero-config philosophy)
-- ❌ Use technical jargon (human language only)
-- ❌ Create data overload (show only what matters)
-
-### What We DO Focus On
-
-- ✅ Accessibility for everyone
-- ✅ Actionable insights
-- ✅ Production reliability
-- ✅ Performance efficiency
-
----
-
-## 🔄 Continuous Improvement
-
-### Code Quality
-
-- Pre-commit hooks enforce standards
-- CI pipeline catches issues early
-- Regular dependency updates
-- Security scanning on every commit
-
-### Performance Monitoring
-
-- Built-in metrics collection
-- Benchmark tracking
-- Memory profiling
-- Performance regression prevention
-
----
-
-## 🔬 Engineering Philosophy: No Patches, Only Solutions
-
-### Root Cause Analysis (MANDATORY)
-
-When you encounter ANY problem:
-
-1. **STOP** - Don't immediately patch or workaround
-2. **UNDERSTAND** - Systematically analyze the root cause
-3. **DESIGN** - Create a proper solution that addresses the core issue
-4. **IMPLEMENT** - Build well-designed, maintainable code
-5. **VALIDATE** - Ensure the solution prevents the problem class, not just the symptom
-
-### What We DON'T Accept
-
-- ❌ **Quick patches** that hide underlying issues
-- ❌ **Band-aid fixes** that create technical debt
-- ❌ **Workarounds** that bypass proper design
-- ❌ **Shortcuts** that compromise code quality
-- ❌ **"It works for now"** mentality
-
-### What We DEMAND
-
-- ✅ **Systematic analysis** of every problem
-- ✅ **Well-designed solutions** that address root causes
-- ✅ **Properly architected code** that's maintainable
-- ✅ **Comprehensive testing** that prevents regressions
-- ✅ **Documentation** that explains the WHY behind decisions
-
-### Problem-Solving Workflow
-
-```bash
-# When you hit a problem:
-1. Document the problem clearly
-2. Analyze dependencies and root causes
-3. Design a proper solution
-4. Implement with tests
-5. Validate the solution prevents the problem class
-6. Document the architectural decision
-```
-
----
-
-## 🔄 Development Workflows
-
-### 1. Feature Development Workflow
-
-```bash
-# Start new feature
-make agent-start
-# Agent ID: agent-2
-# Component: correlation  
-# Action: multi-source-intelligence
-
-# Development cycle
-while [[ "$feature_complete" != "true" ]]; do
-  # Write failing test first
-  go test ./pkg/correlation/... -v
-  
-  # Implement solution
-  # Focus on: clean design, proper error handling, performance
-  
-  # Validate solution
-  make pr-ready
-  
-  # Commit incremental progress
-  git add .
-  git commit -m "feat(correlation): add event timeline analysis"
-done
-
-# Final validation
-make ci
-git push origin feature/agent-2/correlation-multi-source-intelligence
-```
-
-### 2. Bug Investigation Workflow
-
-```bash
-# Bug reported
-1. REPRODUCE the bug consistently
-2. ANALYZE the root cause (not just symptoms)
-3. DESIGN proper fix (not patch)
-4. IMPLEMENT with comprehensive tests
-5. VALIDATE fix prevents entire problem class
-6. DOCUMENT the architectural decision
-
-# Example investigation:
-echo "BUG: eBPF events getting dropped"
-echo "SYMPTOM: Missing events in correlation engine"
-echo "ROOT CAUSE: Ring buffer overflow under load"
-echo "PROPER FIX: Implement backpressure and load shedding"
-echo "NOT ACCEPTABLE: Increase buffer size (band-aid)"
-```
-
-### 3. Performance Optimization Workflow
-
-```bash
-# Performance issue detected
-1. MEASURE current performance with benchmarks
-2. PROFILE to identify actual bottlenecks
-3. ANALYZE system-wide impact
-4. DESIGN optimization strategy
-5. IMPLEMENT with before/after metrics
-6. VALIDATE performance improvement
-7. DOCUMENT optimization decisions
-
-# Example:
-go test -bench=. -benchmem ./pkg/correlation/
-go tool pprof cpu.prof
-# Identify actual bottleneck (not assumed)
-# Design proper solution (not micro-optimization)
-```
-
-### 4. Code Review Workflow
-
-```bash
-# Before requesting review:
-make pr-ready              # All quality gates pass
-make test-coverage         # >70% coverage verified
-make security             # Security scan clean
-
-# PR checklist:
-- [ ] Root cause properly addressed (no patches)
-- [ ] Well-designed solution with clean architecture
-- [ ] Comprehensive tests prevent regression
-- [ ] Performance impact measured and acceptable
-- [ ] Documentation explains architectural decisions
-- [ ] Human-readable output maintained
-- [ ] Zero-config philosophy preserved
-```
-
-### 5. Architecture Decision Workflow
-
-```bash
-# Major design decisions
-1. RESEARCH existing patterns and solutions
-2. ANALYZE trade-offs and alternatives
-3. DESIGN with future extensibility in mind
-4. PROTOTYPE to validate approach
-5. IMPLEMENT with comprehensive testing
-6. DOCUMENT decision rationale
-
-# Example architectural decision:
-echo "DECISION: Use single deployment with modular components"
-echo "RATIONALE: Operational simplicity + performance benefits"
-echo "ALTERNATIVES CONSIDERED: Microservices (rejected: complexity)"
-echo "TRADE-OFFS: Larger binary vs simpler deployment"
-```
-
-### 6. Debugging Workflow for Complex Issues
-
-```bash
-# Complex system issues
-1. COLLECT comprehensive data (logs, metrics, traces)
-2. BUILD hypothesis about root cause
-3. TEST hypothesis systematically
-4. ISOLATE the actual problem
-5. DESIGN comprehensive solution
-6. IMPLEMENT with prevention measures
-7. DOCUMENT troubleshooting process
-
-# Tools for systematic debugging:
-make test-e2e             # Real cluster scenarios
-make profile              # Performance profiling
-make trace                # Execution tracing
-kubectl logs -f           # Runtime behavior
-```
-
----
-
-## 🏗️ Architectural Decision Documentation
-
-### Required Documentation for Major Changes
-
-```markdown
-# ADR: [Decision Title]
-
-## Status
-[Proposed/Accepted/Superseded]
-
-## Context
-[What forces are at play? Technical, business, team?]
-
-## Decision
-[What we decided to do]
-
-## Rationale
-[Why this decision over alternatives]
-
-## Consequences
-[Positive and negative impacts]
-
-## Implementation Notes
-[How to implement this decision]
-```
-
-### Decision Review Process
-
-- All architectural decisions must be discussed before implementation
-- Consider impact on accessibility, performance, and maintainability
-- Document trade-offs clearly
-- Plan migration strategy for breaking changes
-
----
-
-## 🤝 Agent Collaboration
-
-### Communication Style
-
-- Be direct and actionable in commit messages
-- Ask questions when requirements are unclear
-- Share knowledge through code comments
-- Document architectural decisions and rationale
-
-### Quality Partnership
-
-- Use the branch management system religiously
-- Follow the testing pyramid consistently
-- Maintain performance standards always
-- Keep human accessibility as top priority
-- **NEVER accept patches - only proper solutions**
-
-### Escalation Process
-
-- **Technical blockers**: Document analysis and ask for architectural guidance
-- **Design decisions**: Present alternatives with trade-off analysis
-- **Performance issues**: Provide profiling data and systematic analysis
-- **Complex bugs**: Share investigation process and root cause analysis
-
----
-
-**Remember**: We're building production-grade software that will be used by thousands of developers. Every line of code should be:
-
-- **Well-designed** (not patched together)
-- **Properly tested** (preventing entire problem classes)
-- **Human-accessible** (making K8s understandable)
-- **Performance-conscious** (respecting system resources)
-- **Maintainable** (for long-term evolution)
+These rules ensure we build a maintainable, secure, performant, and scalable system that serves as the foundation for Tapio's sophisticated intelligence and correlation capabilities.

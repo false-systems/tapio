@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+        "github.com/falseyair/tapio/pkg/domain"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
 )
 
 // AIReadyProcessor is the perfect foundation for future AI enhancement
@@ -209,7 +209,7 @@ func NewAIReadyProcessor(config *AIConfig) (*AIReadyProcessor, error) {
 }
 
 // ProcessAIFeatures processes the AI features from our opinionated event
-func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinionated.OpinionatedEvent) (*AIProcessingResult, error) {
+func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *domain.Event) (*AIProcessingResult, error) {
 	if event.AiFeatures == nil {
 		return nil, fmt.Errorf("no AI features in event")
 	}
@@ -291,11 +291,17 @@ func (p *AIReadyProcessor) ProcessAIFeatures(ctx context.Context, event *opinion
 }
 
 // runInference executes ML models on the processed features
-func (p *AIReadyProcessor) runInference(ctx context.Context, features map[string]interface{}, event *opinionated.OpinionatedEvent) (map[string]*MLPrediction, error) {
+func (p *AIReadyProcessor) runInference(ctx context.Context, features map[string]interface{}, event *domain.Event) (map[string]*MLPrediction, error) {
 	predictions := make(map[string]*MLPrediction)
 
 	// Get available models for this event type
-	models := p.modelRegistry.GetModelsForEventType(event.Semantic.EventType)
+	eventType := ""
+	if event.Semantic != nil {
+		if et, ok := event.Semantic["EventType"].(string); ok {
+			eventType = et
+		}
+	}
+	models := p.modelRegistry.GetModelsForEventType(eventType)
 
 	// Run inference for each model
 	for _, modelName := range models {
@@ -329,7 +335,7 @@ func (p *AIReadyProcessor) runInference(ctx context.Context, features map[string
 }
 
 // generateAIInsights creates AI-powered insights
-func (p *AIReadyProcessor) generateAIInsights(features map[string]interface{}, predictions map[string]*MLPrediction, event *opinionated.OpinionatedEvent) []*AIInsight {
+func (p *AIReadyProcessor) generateAIInsights(features map[string]interface{}, predictions map[string]*MLPrediction, event *domain.Event) []*AIInsight {
 	insights := make([]*AIInsight, 0, 3)
 
 	// Feature importance insights
@@ -365,7 +371,7 @@ func (p *AIReadyProcessor) generateAIInsights(features map[string]interface{}, p
 }
 
 // generateAIRecommendations creates AI-powered recommendations
-func (p *AIReadyProcessor) generateAIRecommendations(features map[string]interface{}, predictions map[string]*MLPrediction, event *opinionated.OpinionatedEvent) []*AIRecommendation {
+func (p *AIReadyProcessor) generateAIRecommendations(features map[string]interface{}, predictions map[string]*MLPrediction, event *domain.Event) []*AIRecommendation {
 	recommendations := make([]*AIRecommendation, 0, 2)
 
 	// Performance optimization recommendations
@@ -519,12 +525,12 @@ func (p *AIReadyProcessor) shouldRecommendOptimization(features map[string]inter
 	return false
 }
 
-func (p *AIReadyProcessor) generateFeatureImportanceInsight(features []float32, event *opinionated.OpinionatedEvent) *AIInsight {
+func (p *AIReadyProcessor) generateFeatureImportanceInsight(features []float32, event *domain.Event) *AIInsight {
 	// Implementation would generate feature importance insights
 	return nil
 }
 
-func (p *AIReadyProcessor) generatePredictionInsight(modelName string, prediction *MLPrediction, event *opinionated.OpinionatedEvent) *AIInsight {
+func (p *AIReadyProcessor) generatePredictionInsight(modelName string, prediction *MLPrediction, event *domain.Event) *AIInsight {
 	// Implementation would generate prediction insights
 	return nil
 }

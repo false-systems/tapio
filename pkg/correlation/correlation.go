@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/correlation/domain"
 )
 
-// Engine is the main correlation engine implementation
-type Engine struct {
+// CorrelationEngineImpl is the main correlation engine implementation
+type CorrelationEngineImpl struct {
 	eventSources []domain.EventSource
 	eventStore   domain.EventStore
 	ruleEngine   domain.RuleEngine
@@ -54,12 +54,12 @@ func DefaultConfig() Config {
 }
 
 // New creates a new correlation engine
-func New(config Config, logger domain.Logger) *Engine {
+func New(config Config, logger domain.Logger) *CorrelationEngineImpl {
 	if logger == nil {
 		logger = &noOpLogger{}
 	}
 	
-	return &Engine{
+	return &CorrelationEngineImpl{
 		config:       config,
 		logger:       logger,
 		correlations: make(map[string]*domain.Correlation),
@@ -69,31 +69,31 @@ func New(config Config, logger domain.Logger) *Engine {
 }
 
 // WithEventSource adds an event source to the engine
-func (e *Engine) WithEventSource(source domain.EventSource) *Engine {
+func (e *CorrelationEngineImpl) WithEventSource(source domain.EventSource) *CorrelationEngineImpl {
 	e.eventSources = append(e.eventSources, source)
 	return e
 }
 
 // WithEventStore sets the event store
-func (e *Engine) WithEventStore(store domain.EventStore) *Engine {
+func (e *CorrelationEngineImpl) WithEventStore(store domain.EventStore) *CorrelationEngineImpl {
 	e.eventStore = store
 	return e
 }
 
 // WithRuleEngine sets the rule engine
-func (e *Engine) WithRuleEngine(engine domain.RuleEngine) *Engine {
+func (e *CorrelationEngineImpl) WithRuleEngine(engine domain.RuleEngine) *CorrelationEngineImpl {
 	e.ruleEngine = engine
 	return e
 }
 
 // WithMetricsCollector sets the metrics collector
-func (e *Engine) WithMetricsCollector(collector domain.MetricsCollector) *Engine {
+func (e *CorrelationEngineImpl) WithMetricsCollector(collector domain.MetricsCollector) *CorrelationEngineImpl {
 	e.metrics = collector
 	return e
 }
 
 // Start begins processing events
-func (e *Engine) Start(ctx context.Context) error {
+func (e *CorrelationEngineImpl) Start(ctx context.Context) error {
 	if len(e.eventSources) == 0 {
 		return fmt.Errorf("no event sources configured")
 	}
@@ -119,7 +119,7 @@ func (e *Engine) Start(ctx context.Context) error {
 }
 
 // ProcessEvent implements domain.CorrelationEngine
-func (e *Engine) ProcessEvent(ctx context.Context, event domain.Event) error {
+func (e *CorrelationEngineImpl) ProcessEvent(ctx context.Context, event domain.Event) error {
 	// Record metric
 	if e.metrics != nil {
 		e.metrics.RecordEvent(event.Type)
@@ -175,7 +175,7 @@ func (e *Engine) ProcessEvent(ctx context.Context, event domain.Event) error {
 }
 
 // GetCorrelations implements domain.CorrelationEngine
-func (e *Engine) GetCorrelations(ctx context.Context, window domain.TimeWindow) ([]domain.Correlation, error) {
+func (e *CorrelationEngineImpl) GetCorrelations(ctx context.Context, window domain.TimeWindow) ([]domain.Correlation, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	
@@ -190,7 +190,7 @@ func (e *Engine) GetCorrelations(ctx context.Context, window domain.TimeWindow) 
 }
 
 // GetInsights implements domain.CorrelationEngine
-func (e *Engine) GetInsights(ctx context.Context, window domain.TimeWindow) ([]domain.Insight, error) {
+func (e *CorrelationEngineImpl) GetInsights(ctx context.Context, window domain.TimeWindow) ([]domain.Insight, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	
@@ -205,7 +205,7 @@ func (e *Engine) GetInsights(ctx context.Context, window domain.TimeWindow) ([]d
 }
 
 // processEventStream processes events from a source
-func (e *Engine) processEventStream(ctx context.Context, sourceType string, events <-chan domain.Event) {
+func (e *CorrelationEngineImpl) processEventStream(ctx context.Context, sourceType string, events <-chan domain.Event) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -227,7 +227,7 @@ func (e *Engine) processEventStream(ctx context.Context, sourceType string, even
 }
 
 // correlateEvent performs correlation on an event
-func (e *Engine) correlateEvent(ctx context.Context, event domain.Event) []domain.Correlation {
+func (e *CorrelationEngineImpl) correlateEvent(ctx context.Context, event domain.Event) []domain.Correlation {
 	// This is a simplified implementation
 	// Real implementation would use sophisticated correlation algorithms
 	
@@ -269,7 +269,7 @@ func (e *Engine) correlateEvent(ctx context.Context, event domain.Event) []domai
 }
 
 // generateInsights generates insights from correlations
-func (e *Engine) generateInsights(ctx context.Context, event domain.Event, correlations []domain.Correlation) []domain.Insight {
+func (e *CorrelationEngineImpl) generateInsights(ctx context.Context, event domain.Event, correlations []domain.Correlation) []domain.Insight {
 	var insights []domain.Insight
 	
 	// Generate insights based on correlations
@@ -292,13 +292,13 @@ func (e *Engine) generateInsights(ctx context.Context, event domain.Event, corre
 }
 
 // detectPatterns detects patterns in events
-func (e *Engine) detectPatterns(ctx context.Context, event domain.Event) {
+func (e *CorrelationEngineImpl) detectPatterns(ctx context.Context, event domain.Event) {
 	// Simplified pattern detection
 	// Real implementation would use pattern detection algorithms
 }
 
 // processRuleMatch processes a rule match
-func (e *Engine) processRuleMatch(ctx context.Context, event domain.Event, match domain.RuleMatch) {
+func (e *CorrelationEngineImpl) processRuleMatch(ctx context.Context, event domain.Event, match domain.RuleMatch) {
 	// Process actions for the matched rule
 	e.logger.Info("rule matched", 
 		"rule_id", match.RuleID,
@@ -307,21 +307,21 @@ func (e *Engine) processRuleMatch(ctx context.Context, event domain.Event, match
 }
 
 // storeCorrelation stores a correlation
-func (e *Engine) storeCorrelation(correlation domain.Correlation) {
+func (e *CorrelationEngineImpl) storeCorrelation(correlation domain.Correlation) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.correlations[correlation.ID] = &correlation
 }
 
 // storeInsight stores an insight
-func (e *Engine) storeInsight(insight domain.Insight) {
+func (e *CorrelationEngineImpl) storeInsight(insight domain.Insight) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.insights[insight.ID] = &insight
 }
 
 // periodicFlush periodically flushes old data
-func (e *Engine) periodicFlush(ctx context.Context) {
+func (e *CorrelationEngineImpl) periodicFlush(ctx context.Context) {
 	ticker := time.NewTicker(e.config.FlushInterval)
 	defer ticker.Stop()
 	
@@ -336,7 +336,7 @@ func (e *Engine) periodicFlush(ctx context.Context) {
 }
 
 // flushOldData removes old correlations and insights
-func (e *Engine) flushOldData() {
+func (e *CorrelationEngineImpl) flushOldData() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	

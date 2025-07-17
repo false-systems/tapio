@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 func TestCorrelationService(t *testing.T) {

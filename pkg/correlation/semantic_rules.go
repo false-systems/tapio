@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // SemanticRulesEngine processes rules that leverage our rich semantic context
@@ -306,7 +306,7 @@ func NewSemanticRulesEngine(config *SemanticRulesConfig) (*SemanticRulesEngine, 
 }
 
 // ExecuteSemanticRules processes an opinionated event through semantic rules
-func (e *SemanticRulesEngine) ExecuteSemanticRules(ctx context.Context, event *opinionated.OpinionatedEvent) (*SemanticRuleResult, error) {
+func (e *SemanticRulesEngine) ExecuteSemanticRules(ctx context.Context, event *domain.Event) (*SemanticRuleResult, error) {
 	startTime := time.Now()
 
 	// Extract semantic features from our opinionated event
@@ -329,7 +329,7 @@ func (e *SemanticRulesEngine) ExecuteSemanticRules(ctx context.Context, event *o
 	result := &SemanticRuleResult{
 		EventID:          event.ID,
 		ProcessingTime:   time.Duration(0),
-		MatchingRules:    make([]*RuleExecution, 0, len(matchingRules)),
+		MatchingRules:    make([]*SemanticRuleExecution, 0, len(matchingRules)),
 		SemanticInsights: make([]*SemanticInsight, 0),
 		Correlations:     make([]*SemanticCorrelation, 0),
 		Actions:          make([]*SemanticAction, 0),
@@ -362,8 +362,8 @@ func (e *SemanticRulesEngine) ExecuteSemanticRules(ctx context.Context, event *o
 }
 
 // executeSemanticRule executes a single rule with semantic intelligence
-func (e *SemanticRulesEngine) executeSemanticRule(ctx context.Context, rule *SemanticRule, event *opinionated.OpinionatedEvent, features *SemanticFeatures) (*RuleExecution, error) {
-	execution := &RuleExecution{
+func (e *SemanticRulesEngine) executeSemanticRule(ctx context.Context, rule *SemanticRule, event *domain.Event, features *SemanticFeatures) (*SemanticRuleExecution, error) {
+	execution := &SemanticRuleExecution{
 		RuleID:       rule.ID,
 		RuleName:     rule.Name,
 		StartTime:    time.Now(),
@@ -409,7 +409,7 @@ func (e *SemanticRulesEngine) executeSemanticRule(ctx context.Context, rule *Sem
 }
 
 // extractSemanticFeatures extracts features from our opinionated event format
-func (e *SemanticRulesEngine) extractSemanticFeatures(event *opinionated.OpinionatedEvent) (*SemanticFeatures, error) {
+func (e *SemanticRulesEngine) extractSemanticFeatures(event *domain.Event) (*SemanticFeatures, error) {
 	features := &SemanticFeatures{
 		EventID:   event.ID,
 		Timestamp: event.Timestamp,
@@ -783,14 +783,14 @@ type SemanticFeatures struct {
 type SemanticRuleResult struct {
 	EventID          string                 `json:"event_id"`
 	ProcessingTime   time.Duration          `json:"processing_time"`
-	MatchingRules    []*RuleExecution       `json:"matching_rules"`
+	MatchingRules    []*SemanticRuleExecution       `json:"matching_rules"`
 	SemanticInsights []*SemanticInsight     `json:"semantic_insights"`
 	Correlations     []*SemanticCorrelation `json:"correlations"`
 	Actions          []*SemanticAction      `json:"actions"`
 }
 
-// RuleExecution tracks the execution of a single rule
-type RuleExecution struct {
+// SemanticRuleExecution tracks the execution of a single rule
+type SemanticRuleExecution struct {
 	RuleID         string                 `json:"rule_id"`
 	RuleName       string                 `json:"rule_name"`
 	StartTime      time.Time              `json:"start_time"`
@@ -807,7 +807,7 @@ type RuleExecution struct {
 // Additional helper methods and implementations would continue here...
 // Each optimized for our opinionated data format and designed for AI enhancement
 
-func extractAnomalyDimensions(dimensions *opinionated.AnomalyDimensions) map[string]float32 {
+func extractAnomalyDimensions(dimensions *domain.AnomalyDimensions) map[string]float32 {
 	if dimensions == nil {
 		return nil
 	}

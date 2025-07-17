@@ -519,11 +519,11 @@ func (r *MemoryLeakRule) createMemoryLeakFinding(podName, podNamespace string, a
 	// Determine severity based on confidence and growth rate
 	var severity correlation.Severity
 	if analysis.ConfidenceLevel >= 0.9 && analysis.GrowthRate >= r.config.LeakThreshold*2 {
-		severity = correlation.SeverityCritical
+		severity = correlation.SeverityLevelCritical
 	} else if analysis.ConfidenceLevel >= 0.8 {
-		severity = correlation.SeverityError
+		severity = correlation.SeverityLevelError
 	} else {
-		severity = correlation.SeverityWarning
+		severity = correlation.SeverityLevelWarning
 	}
 
 	// Create finding
@@ -545,7 +545,7 @@ func (r *MemoryLeakRule) createMemoryLeakFinding(podName, podNamespace string, a
 	if analysis.GrowthRate > 0 {
 		// Estimate time to memory exhaustion (simplified)
 		estimatedTimeToExhaustion := 24 * time.Hour // Default estimate
-		finding.Prediction = &correlation.Prediction{
+		finding.Prediction = &correlation.RulePrediction{
 			Event:       "Memory Exhaustion",
 			TimeToEvent: estimatedTimeToExhaustion,
 			Confidence:  analysis.ConfidenceLevel,
@@ -563,7 +563,7 @@ func (r *MemoryLeakRule) createMemoryLeakFinding(podName, podNamespace string, a
 
 	// Add evidence from different sources
 	for _, source := range analysis.DataSources {
-		evidence := correlation.Evidence{
+		evidence := correlation.RuleEvidence{
 			Type:        "memory_leak_pattern",
 			Source:      correlation.SourceType(source),
 			Description: fmt.Sprintf("Memory growth pattern analysis from %s", source),

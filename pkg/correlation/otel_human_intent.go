@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -255,7 +255,7 @@ func DefaultHumanIntentConfig() *HumanIntentConfig {
 }
 
 // CreateHumanIntentTrace creates a trace with human explanations
-func (hit *HumanIntentTracer) CreateHumanIntentTrace(ctx context.Context, event *opinionated.OpinionatedEvent) error {
+func (hit *HumanIntentTracer) CreateHumanIntentTrace(ctx context.Context, event *domain.Event) error {
 	// Create main trace for human explanation
 	ctx, span := hit.tracer.Start(ctx, "human_intent.explanation_generation")
 	defer span.End()
@@ -300,7 +300,7 @@ func (hit *HumanIntentTracer) CreateHumanIntentTrace(ctx context.Context, event 
 }
 
 // generateHumanExplanation generates a human-readable explanation
-func (hit *HumanIntentTracer) generateHumanExplanation(ctx context.Context, event *opinionated.OpinionatedEvent, intent *Intent) *HumanExplanation {
+func (hit *HumanIntentTracer) generateHumanExplanation(ctx context.Context, event *domain.Event, intent *Intent) *HumanExplanation {
 	ctx, span := hit.tracer.Start(ctx, "human_intent.generate_explanation")
 	defer span.End()
 	
@@ -354,7 +354,7 @@ func (hit *HumanIntentTracer) generateHumanExplanation(ctx context.Context, even
 }
 
 // generateStoryNarrative generates a story-like narrative
-func (hit *HumanIntentTracer) generateStoryNarrative(ctx context.Context, event *opinionated.OpinionatedEvent, intent *Intent, explanation *HumanExplanation) *StoryNarrative {
+func (hit *HumanIntentTracer) generateStoryNarrative(ctx context.Context, event *domain.Event, intent *Intent, explanation *HumanExplanation) *StoryNarrative {
 	if !hit.shouldGenerateStory(event, explanation) {
 		return nil
 	}
@@ -450,7 +450,7 @@ func (hit *HumanIntentTracer) addStoryNarrativeToSpan(span trace.Span, story *St
 }
 
 // createExplanationDetailSpans creates child spans for different aspects
-func (hit *HumanIntentTracer) createExplanationDetailSpans(ctx context.Context, event *opinionated.OpinionatedEvent, explanation *HumanExplanation) {
+func (hit *HumanIntentTracer) createExplanationDetailSpans(ctx context.Context, event *domain.Event, explanation *HumanExplanation) {
 	// Create span for business impact
 	if explanation.BusinessImpact != "" {
 		_, businessSpan := hit.tracer.Start(ctx, "human_intent.business_impact")
@@ -487,7 +487,7 @@ func (hit *HumanIntentTracer) createExplanationDetailSpans(ctx context.Context, 
 }
 
 // generateFromTemplate generates explanation from templates
-func (hit *HumanIntentTracer) generateFromTemplate(ctx context.Context, event *opinionated.OpinionatedEvent, intent *Intent) *HumanExplanation {
+func (hit *HumanIntentTracer) generateFromTemplate(ctx context.Context, event *domain.Event, intent *Intent) *HumanExplanation {
 	// Find matching template
 	template := hit.findBestTemplate(event, intent)
 	if template == nil {
@@ -518,7 +518,7 @@ func (hit *HumanIntentTracer) generateFromTemplate(ctx context.Context, event *o
 }
 
 // Helper methods for generating explanations based on event characteristics
-func (hit *HumanIntentTracer) generateMemoryLeakExplanation(event *opinionated.OpinionatedEvent) *HumanExplanation {
+func (hit *HumanIntentTracer) generateMemoryLeakExplanation(event *domain.Event) *HumanExplanation {
 	return &HumanExplanation{
 		WhatHappened:   "A memory leak was detected in your application",
 		WhyItHappened:  "The application is consuming more memory over time without releasing it",
@@ -533,7 +533,7 @@ func (hit *HumanIntentTracer) generateMemoryLeakExplanation(event *opinionated.O
 	}
 }
 
-func (hit *HumanIntentTracer) generateNetworkFailureExplanation(event *opinionated.OpinionatedEvent) *HumanExplanation {
+func (hit *HumanIntentTracer) generateNetworkFailureExplanation(event *domain.Event) *HumanExplanation {
 	return &HumanExplanation{
 		WhatHappened:   "Network connectivity issues were detected",
 		WhyItHappened:  "Services are unable to communicate properly",
@@ -548,7 +548,7 @@ func (hit *HumanIntentTracer) generateNetworkFailureExplanation(event *opinionat
 	}
 }
 
-func (hit *HumanIntentTracer) generatePerformanceDegradationExplanation(event *opinionated.OpinionatedEvent) *HumanExplanation {
+func (hit *HumanIntentTracer) generatePerformanceDegradationExplanation(event *domain.Event) *HumanExplanation {
 	return &HumanExplanation{
 		WhatHappened:   "Performance degradation was observed",
 		WhyItHappened:  "System response times are increasing beyond normal thresholds",
@@ -564,14 +564,14 @@ func (hit *HumanIntentTracer) generatePerformanceDegradationExplanation(event *o
 }
 
 // Helper methods
-func (hit *HumanIntentTracer) shouldGenerateStory(event *opinionated.OpinionatedEvent, explanation *HumanExplanation) bool {
+func (hit *HumanIntentTracer) shouldGenerateStory(event *domain.Event, explanation *HumanExplanation) bool {
 	// Generate stories for complex incidents with multiple related events
 	return explanation.IsUrgent || 
 		   string(event.Severity) == "critical" || 
 		   explanation.RequiresEscalation
 }
 
-func (hit *HumanIntentTracer) findBestTemplate(event *opinionated.OpinionatedEvent, intent *Intent) *ExplanationTemplate {
+func (hit *HumanIntentTracer) findBestTemplate(event *domain.Event, intent *Intent) *ExplanationTemplate {
 	// Find template that best matches the event characteristics
 	for _, template := range hit.explanationTemplates {
 		if hit.templateMatches(template, event, intent) {
@@ -581,7 +581,7 @@ func (hit *HumanIntentTracer) findBestTemplate(event *opinionated.OpinionatedEve
 	return nil
 }
 
-func (hit *HumanIntentTracer) templateMatches(template *ExplanationTemplate, event *opinionated.OpinionatedEvent, intent *Intent) bool {
+func (hit *HumanIntentTracer) templateMatches(template *ExplanationTemplate, event *domain.Event, intent *Intent) bool {
 	// Check if template matches event type
 	for _, eventType := range template.EventTypes {
 		if eventType == string(event.Category) {
@@ -599,7 +599,7 @@ func (hit *HumanIntentTracer) templateMatches(template *ExplanationTemplate, eve
 	return false
 }
 
-func (hit *HumanIntentTracer) extractTemplateVariables(event *opinionated.OpinionatedEvent, intent *Intent) map[string]string {
+func (hit *HumanIntentTracer) extractTemplateVariables(event *domain.Event, intent *Intent) map[string]string {
 	variables := make(map[string]string)
 	
 	// Extract basic variables
@@ -638,7 +638,7 @@ func (hit *HumanIntentTracer) fillTemplate(template string, variables map[string
 	return result
 }
 
-func (hit *HumanIntentTracer) enhanceWithContext(ctx context.Context, explanation *HumanExplanation, event *opinionated.OpinionatedEvent) {
+func (hit *HumanIntentTracer) enhanceWithContext(ctx context.Context, explanation *HumanExplanation, event *domain.Event) {
 	// Add business impact context
 	if event.Impact != nil {
 		if event.Impact.BusinessImpact > 0.7 {
@@ -654,7 +654,7 @@ func (hit *HumanIntentTracer) enhanceWithContext(ctx context.Context, explanatio
 	explanation.Timeline = fmt.Sprintf("Detected at %s", event.Timestamp.Format("2006-01-02 15:04:05"))
 }
 
-func (hit *HumanIntentTracer) addRecommendations(ctx context.Context, explanation *HumanExplanation, event *opinionated.OpinionatedEvent) {
+func (hit *HumanIntentTracer) addRecommendations(ctx context.Context, explanation *HumanExplanation, event *domain.Event) {
 	commands := []string{}
 	
 	// Add context-specific commands
@@ -816,16 +816,16 @@ func NewContextualExplainer(config *HumanIntentConfig) *ContextualExplainer { re
 func NewExplanationKnowledgeBase() *ExplanationKnowledgeBase { return &ExplanationKnowledgeBase{} }
 func NewContextualMemory() *ContextualMemory { return &ContextualMemory{} }
 
-func (iae *IntentAnalysisEngine) AnalyzeIntent(ctx context.Context, event *opinionated.OpinionatedEvent) *Intent {
+func (iae *IntentAnalysisEngine) AnalyzeIntent(ctx context.Context, event *domain.Event) *Intent {
 	return &Intent{}
 }
 
-func (heai *HumanExplainerAI) GenerateExplanation(ctx context.Context, event *opinionated.OpinionatedEvent, intent *Intent) *HumanExplanation {
+func (heai *HumanExplainerAI) GenerateExplanation(ctx context.Context, event *domain.Event, intent *Intent) *HumanExplanation {
 	// AI-powered explanation generation would be implemented here
 	return nil
 }
 
-func (sb *StoryBuilder) BuildStory(ctx context.Context, event *opinionated.OpinionatedEvent, intent *Intent, explanation *HumanExplanation) *StoryNarrative {
+func (sb *StoryBuilder) BuildStory(ctx context.Context, event *domain.Event, intent *Intent, explanation *HumanExplanation) *StoryNarrative {
 	// Story narrative generation would be implemented here
 	return nil
 }

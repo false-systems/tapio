@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/correlation/domain"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,7 +36,7 @@ func (q *QueryAPI) GetPredictions(ctx context.Context, req *GetPredictionsReques
 	insights := q.store.GetInsights(req.ResourceName, req.Namespace)
 
 	// Filter to only predictions
-	var predictions []*Prediction
+	var predictions []*domain.Prediction
 	for _, insight := range insights {
 		if insight.Prediction != nil {
 			predictions = append(predictions, insight.Prediction)
@@ -80,10 +80,12 @@ func (q *QueryAPI) GetInsights(ctx context.Context, req *GetInsightsRequest) (*G
 func (q *QueryAPI) GetActionableItems(ctx context.Context, req *GetActionableItemsRequest) (*GetActionableItemsResponse, error) {
 	insights := q.store.GetInsights(req.ResourceName, req.Namespace)
 
-	var items []*ActionableItem
+	var items []*domain.ActionItem
 	for _, insight := range insights {
 		if insight.Severity == "critical" || insight.Severity == "high" {
-			items = append(items, insight.ActionableItems...)
+			for i := range insight.ActionableItems {
+				items = append(items, &insight.ActionableItems[i])
+			}
 		}
 	}
 
@@ -94,7 +96,7 @@ func (q *QueryAPI) GetActionableItems(ctx context.Context, req *GetActionableIte
 }
 
 // StoreInsight stores a new insight from the correlation engine
-func (q *QueryAPI) StoreInsight(insight *Insight) {
+func (q *QueryAPI) StoreInsight(insight *domain.Insight) {
 	q.store.Store(insight)
 }
 
@@ -126,7 +128,7 @@ func (s *IndexedInsightStore) Store(insight *domain.Insight) error {
 	return s.InMemoryInsightStore.Store(insight)
 }
 
-func (s *IndexedInsightStore) GetInsights(resourceName, namespace string) []*Insight {
+func (s *IndexedInsightStore) GetInsights(resourceName, namespace string) []*domain.Insight {
 	key := fmt.Sprintf("%s/%s", namespace, resourceName)
 	return s.byResource[key]
 }
@@ -137,7 +139,7 @@ func (s *IndexedInsightStore) DeleteOlderThan(cutoff time.Time) error {
 			delete(s.insights, id)
 			// Also remove from byResource
 			key := fmt.Sprintf("%s/%s", insight.Namespace, insight.ResourceName)
-			var updated []*Insight
+			var updated []*domain.Insight
 			for _, i := range s.byResource[key] {
 				if i.ID != id {
 					updated = append(updated, i)
@@ -159,7 +161,7 @@ type GetPredictionsRequest struct {
 }
 
 type GetPredictionsResponse struct {
-	Predictions []*Prediction
+	Predictions []*domain.Prediction
 	Timestamp   time.Time
 }
 
@@ -195,8 +197,8 @@ type InsightResponse struct {
 	ResourceName    string
 	Namespace       string
 	Timestamp       time.Time
-	Prediction      *Prediction
-	ActionableItems []*domain.ActionItem
+	Prediction      *domain.Prediction
+	ActionableItems []domain.ActionItem
 }
 
 // TimeRange is defined in timeline.go

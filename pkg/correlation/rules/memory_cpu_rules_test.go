@@ -107,7 +107,7 @@ func TestMemoryPressureCascadeRule(t *testing.T) {
 			}(),
 			expectedResult: true,
 			expectedConf:   0.65, // Base 0.5 + restarts 0.15
-			expectedSev:    correlation.SeverityMedium,
+			expectedSev:    correlation.SeverityLevelWarning,
 		},
 		{
 			name: "high severity cascade with many affected pods",
@@ -142,7 +142,7 @@ func TestMemoryPressureCascadeRule(t *testing.T) {
 				return events
 			}(),
 			expectedResult: true,
-			expectedSev:    correlation.SeverityHigh,
+			expectedSev:    correlation.SeverityLevelError,
 		},
 	}
 
@@ -461,7 +461,7 @@ func TestContainerOOMPredictionRule(t *testing.T) {
 					return
 				}
 
-				if tt.expectCritical && result.Severity != correlation.SeverityCritical {
+				if tt.expectCritical && result.Severity != correlation.SeverityLevelCritical {
 					t.Errorf("expected critical severity, got %v", result.Severity)
 				}
 

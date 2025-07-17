@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/health"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -187,11 +188,11 @@ func (ono *OTELNativeOutput) OutputCorrelation(ctx context.Context, result *corr
 	// Create span for correlation analysis
 	ctx, span := ono.tracer.Start(ctx, "tapio.correlation",
 		trace.WithAttributes(
-			attribute.String("correlation.id", result.ID),
-			attribute.String("correlation.type", result.Type),
-			attribute.Float64("correlation.confidence", result.Confidence),
+			attribute.Int("correlation.count", len(result.Correlations)),
+			attribute.Int("insight.count", len(result.Insights)),
+			attribute.Int("pattern.count", len(result.Patterns)),
 			attribute.Int("correlation.events_analyzed", result.EventsAnalyzed),
-			attribute.Int("correlation.patterns_found", len(result.Patterns)),
+			attribute.String("correlation.processing_time", result.ProcessingTime.String()),
 		),
 	)
 	defer span.End()
@@ -205,10 +206,11 @@ func (ono *OTELNativeOutput) OutputCorrelation(ctx context.Context, result *corr
 	for i, insight := range result.Insights {
 		span.AddEvent(fmt.Sprintf("insight_%d", i),
 			trace.WithAttributes(
-				attribute.String("insight.type", insight.Type),
+				attribute.String("insight.id", insight.ID),
+				attribute.String("insight.category", insight.Category),
+				attribute.String("insight.severity", insight.Severity),
 				attribute.String("insight.description", insight.Description),
-				attribute.Float64("insight.confidence", insight.Confidence),
-				attribute.Bool("insight.actionable", insight.IsActionable),
+				attribute.Bool("insight.has_actionable_items", len(insight.ActionableItems) > 0),
 			),
 		)
 	}
@@ -217,27 +219,22 @@ func (ono *OTELNativeOutput) OutputCorrelation(ctx context.Context, result *corr
 }
 
 // createPatternSpan creates a span for a detected pattern
-func (ono *OTELNativeOutput) createPatternSpan(ctx context.Context, pattern correlation.Pattern) {
+func (ono *OTELNativeOutput) createPatternSpan(ctx context.Context, pattern domain.Pattern) {
 	_, span := ono.tracer.Start(ctx, fmt.Sprintf("pattern.%s", pattern.Type),
 		trace.WithAttributes(
 			attribute.String("pattern.id", pattern.ID),
 			attribute.String("pattern.type", pattern.Type),
-			attribute.String("pattern.name", pattern.Name),
+			attribute.String("pattern.description", pattern.Description),
 			attribute.Float64("pattern.confidence", pattern.Confidence),
-			attribute.Bool("pattern.is_anomaly", pattern.IsAnomaly),
 			attribute.Int("pattern.occurrence_count", pattern.OccurrenceCount),
-			attribute.Int64("pattern.time_window_seconds", int64(pattern.TimeWindow.Seconds())),
+			attribute.String("pattern.last_occurrence", pattern.LastOccurrence.Format(time.RFC3339)),
 		),
 	)
 	defer span.End()
 	
-	// Add affected entities
-	if len(pattern.AffectedEntities) > 0 {
-		entities := make([]string, len(pattern.AffectedEntities))
-		for i, entity := range pattern.AffectedEntities {
-			entities[i] = fmt.Sprintf("%s:%s", entity.Type, entity.Name)
-		}
-		span.SetAttributes(attribute.StringSlice("pattern.affected_entities", entities))
+	// Add pattern metadata if available
+	if pattern.PredictedNext != nil {
+		span.SetAttributes(attribute.String("pattern.predicted_next", pattern.PredictedNext.Format(time.RFC3339)))
 	}
 }
 
@@ -262,11 +259,11 @@ func (ono *OTELNativeOutput) Close() error {
 }
 
 // FormatHealthCheck formats health check results for display (fallback to text)
-func (ono *OTELNativeOutput) FormatHealthCheck(analysis *health.Analysis) string {
+func (ono *OTELNativeOutput) FormatHealthCheck(analysis *health.Report) string {
 	// This is only used when --human flag is specified
 	return fmt.Sprintf("OTEL traces exported to %s\nHealth Status: %s\nIssues Found: %d\n",
 		ono.config.Endpoint,
-		analysis.Status,
+		analysis.OverallStatus,
 		len(analysis.Issues),
 	)
 }

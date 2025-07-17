@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/domain"
 	v1 "k8s.io/api/core/v1"
 )
 

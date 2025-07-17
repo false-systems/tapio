@@ -14,7 +14,7 @@ const (
 	CapabilityNotAvailable CapabilityStatus = iota
 	CapabilityAvailable
 	CapabilityEnabled
-	CapabilityError
+	CapabilityStatusError
 )
 
 func (s CapabilityStatus) String() string {
@@ -25,7 +25,7 @@ func (s CapabilityStatus) String() string {
 		return "available"
 	case CapabilityEnabled:
 		return "enabled"
-	case CapabilityError:
+	case CapabilityStatusError:
 		return "error"
 	default:
 		return "unknown"

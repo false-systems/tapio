@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/foundation"
-	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/correlation/foundation"
+	"github.com/falseyair/tapio/pkg/correlation/types"
 )
 
 // Context provides the execution environment for correlation rules

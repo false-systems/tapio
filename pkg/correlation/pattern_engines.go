@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // SemanticPatternEngine handles semantic pattern detection
@@ -195,7 +195,7 @@ func NewIndexManager() *IndexManager {
 }
 
 // DetectPatterns analyzes events for semantic patterns
-func (e *SemanticPatternEngine) DetectPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternResult, error) {
+func (e *SemanticPatternEngine) DetectPatterns(ctx context.Context, event *domain.Event) ([]*PatternResult, error) {
 	var results []*PatternResult
 	
 	// Extract semantic features from event
@@ -221,7 +221,7 @@ func (e *SemanticPatternEngine) DetectPatterns(ctx context.Context, event *opini
 	return results, nil
 }
 
-func (e *BehavioralPatternEngine) AnalyzeBehavior(ctx context.Context, event *opinionated.OpinionatedEvent) (*BehaviorProfile, error) {
+func (e *BehavioralPatternEngine) AnalyzeBehavior(ctx context.Context, event *domain.Event) (*BehaviorProfile, error) {
 	// Get or create behavior profile for this resource
 	profileID := event.Source.Collector + ":" + event.Context.Pod
 	profile, exists := e.behaviors[profileID]
@@ -253,7 +253,7 @@ func (e *BehavioralPatternEngine) AnalyzeBehavior(ctx context.Context, event *op
 	return profile, nil
 }
 
-func (e *TemporalPatternEngine) DetectSequences(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]*TemporalSequence, error) {
+func (e *TemporalPatternEngine) DetectSequences(ctx context.Context, events []*domain.Event) ([]*TemporalSequence, error) {
 	var sequences []*TemporalSequence
 	
 	// Sort events by timestamp
@@ -283,7 +283,7 @@ func (e *TemporalPatternEngine) DetectSequences(ctx context.Context, events []*o
 	return sequences, nil
 }
 
-func (e *CausalityPatternEngine) FindCausalChains(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*CausalChain, error) {
+func (e *CausalityPatternEngine) FindCausalChains(ctx context.Context, event *domain.Event) ([]*CausalChain, error) {
 	var chains []*CausalChain
 	
 	// Build causality graph from recent events
@@ -310,7 +310,7 @@ func (e *CausalityPatternEngine) FindCausalChains(ctx context.Context, event *op
 	return chains, nil
 }
 
-func (e *AnomalyPatternEngine) DetectAnomalies(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*AnomalyProfile, error) {
+func (e *AnomalyPatternEngine) DetectAnomalies(ctx context.Context, event *domain.Event) ([]*AnomalyProfile, error) {
 	var anomalies []*AnomalyProfile
 	
 	// Extract metrics from event
@@ -434,7 +434,7 @@ func (oi *OntologyIndex) FindSimilarTags(tags []string, limit int, threshold flo
 // Missing methods for TemporalPatternEngine
 
 // FindSequences finds temporal sequences in events (wrapper for DetectSequences)
-func (e *TemporalPatternEngine) FindSequences(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]*TemporalSequence, error) {
+func (e *TemporalPatternEngine) FindSequences(ctx context.Context, events []*domain.Event) ([]*TemporalSequence, error) {
 	sequences, err := e.DetectSequences(ctx, events)
 	return sequences, err
 }
@@ -442,7 +442,7 @@ func (e *TemporalPatternEngine) FindSequences(ctx context.Context, events []*opi
 // Missing methods for CausalityPatternEngine
 
 // DetectCausality detects causal patterns in a single event
-func (e *CausalityPatternEngine) DetectCausality(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*CausalityPattern, error) {
+func (e *CausalityPatternEngine) DetectCausality(ctx context.Context, event *domain.Event) ([]*CausalityPattern, error) {
 	// For now, return empty slice - actual implementation would analyze causality
 	return []*CausalityPattern{}, nil
 }

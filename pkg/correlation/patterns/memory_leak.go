@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/correlation/types"
 )
 
 // MemoryLeakDetector implements detection of memory leak → OOM cascade patterns

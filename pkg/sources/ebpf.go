@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collector"
 	"github.com/yairfalse/tapio/pkg/correlation"
 )
 

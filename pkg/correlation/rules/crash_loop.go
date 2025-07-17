@@ -431,11 +431,11 @@ func (r *CrashLoopRule) createCrashLoopFinding(podName, podNamespace string, ana
 	// Determine severity based on restart count and rate
 	var severity correlation.Severity
 	if analysis.RestartCount >= 10 || analysis.RestartRate >= 10 {
-		severity = correlation.SeverityCritical
+		severity = correlation.SeverityLevelCritical
 	} else if analysis.RestartCount >= 5 || analysis.RestartRate >= 5 {
-		severity = correlation.SeverityError
+		severity = correlation.SeverityLevelError
 	} else {
-		severity = correlation.SeverityWarning
+		severity = correlation.SeverityLevelWarning
 	}
 
 	// Create finding
@@ -455,7 +455,7 @@ func (r *CrashLoopRule) createCrashLoopFinding(podName, podNamespace string, ana
 
 	// Add prediction if applicable
 	if analysis.EstimatedRecoveryTime > 0 {
-		finding.Prediction = &correlation.Prediction{
+		finding.Prediction = &correlation.RulePrediction{
 			Event:       "Pod Recovery",
 			TimeToEvent: analysis.EstimatedRecoveryTime,
 			Confidence:  analysis.ConfidenceLevel * 0.7, // Lower confidence for recovery prediction
@@ -473,7 +473,7 @@ func (r *CrashLoopRule) createCrashLoopFinding(podName, podNamespace string, ana
 
 	// Add evidence
 	for _, source := range analysis.DataSources {
-		evidence := correlation.Evidence{
+		evidence := correlation.RuleEvidence{
 			Type:        "crash_loop_pattern",
 			Source:      correlation.SourceType(source),
 			Description: fmt.Sprintf("Crash loop analysis from %s", source),

@@ -7,9 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
-	"github.com/yairfalse/tapio/pkg/journald"
-	"github.com/yairfalse/tapio/pkg/systemd"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // Circuit breaker functionality is implemented in autofix_engine.go
@@ -355,22 +353,22 @@ func (e *EnhancedEngine) collectFromSources() {
 // collectSourceData collects data from all sources and converts to timeline events
 func (e *EnhancedEngine) collectSourceData() {
 	// Collect from eBPF source
-	if source, exists := e.sources[SourceEBPF]; exists && source.IsAvailable() {
+	if source, exists := e.sources[SourceEBPF]; exists {
 		e.collectFromSource(SourceEBPF, source, "events", e.processEBPFEvents)
 	}
 
 	// Collect from systemd source
-	if source, exists := e.sources[SourceSystemd]; exists && source.IsAvailable() {
+	if source, exists := e.sources[SourceSystemd]; exists {
 		e.collectFromSource(SourceSystemd, source, "events", e.processSystemdEvents)
 	}
 
 	// Collect from journald source
-	if source, exists := e.sources[SourceJournald]; exists && source.IsAvailable() {
+	if source, exists := e.sources[SourceJournald]; exists {
 		e.collectFromSource(SourceJournald, source, "events", e.processJournaldEvents)
 	}
 
 	// Collect from Kubernetes source
-	if source, exists := e.sources[SourceKubernetes]; exists && source.IsAvailable() {
+	if source, exists := e.sources[SourceKubernetes]; exists {
 		e.collectFromSource(SourceKubernetes, source, "events", e.processKubernetesEvents)
 	}
 }
@@ -414,7 +412,7 @@ func (e *EnhancedEngine) collectFromSource(sourceType SourceType, source DataSou
 
 // processEBPFEvents converts eBPF events to timeline events
 func (e *EnhancedEngine) processEBPFEvents(data interface{}) {
-	events, ok := data.([]ebpf.SystemEvent)
+	events, ok := data.([]domain.SystemEvent)
 	if !ok {
 		return
 	}
@@ -447,23 +445,23 @@ func (e *EnhancedEngine) processEBPFEvents(data interface{}) {
 
 // processSystemdEvents converts systemd events to timeline events
 func (e *EnhancedEngine) processSystemdEvents(data interface{}) {
-	events, ok := data.([]*systemd.ServiceEvent)
+	events, ok := data.([]*domain.ServiceEvent)
 	if !ok {
 		return
 	}
 
 	for _, event := range events {
 		severity := "info"
-		if event.EventType == systemd.ServiceEventFailure {
+		if event.EventType == "failure" {
 			severity = "error"
-		} else if event.EventType == systemd.ServiceEventRestart {
+		} else if event.EventType == "restart" {
 			severity = "warning"
 		}
 
 		timelineEvent := TimelineEvent{
 			Timestamp: event.Timestamp,
 			Source:    SourceSystemd,
-			EventType: event.EventType.String(),
+			EventType: event.EventType,
 			Severity:  severity,
 			Message:   fmt.Sprintf("Service %s: %s -> %s", event.ServiceName, event.OldState, event.NewState),
 			Entity: EntityReference{
@@ -488,7 +486,7 @@ func (e *EnhancedEngine) processSystemdEvents(data interface{}) {
 
 // processJournaldEvents converts journald events to timeline events
 func (e *EnhancedEngine) processJournaldEvents(data interface{}) {
-	events, ok := data.([]*journald.LogEvent)
+	events, ok := data.([]*domain.LogEvent)
 	if !ok {
 		return
 	}
@@ -504,13 +502,14 @@ func (e *EnhancedEngine) processJournaldEvents(data interface{}) {
 			Message:   event.Message,
 			Entity: EntityReference{
 				Type: "service",
-				Name: event.Service,
+				Name: event.Unit,
 			},
 			Metadata: map[string]interface{}{
-				"priority":         event.Priority,
-				"matched_patterns": event.MatchedPatterns,
-				"classification":   event.Classification,
-				"fields":           event.Fields,
+				"priority": event.Priority,
+				"hostname": event.Hostname,
+				"pid":      event.PID,
+				"uid":      event.UID,
+				"fields":   event.Fields,
 			},
 		}
 
@@ -689,7 +688,7 @@ func (e *EnhancedEngine) GetStatistics() map[string]interface{} {
 
 // Helper methods
 
-func (e *EnhancedEngine) mapEBPFSeverity(event ebpf.SystemEvent) string {
+func (e *EnhancedEngine) mapEBPFSeverity(event domain.SystemEvent) string {
 	if strings.Contains(strings.ToLower(event.Type), "error") {
 		return "error"
 	}

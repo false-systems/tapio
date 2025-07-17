@@ -8,11 +8,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/patterns"
-	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/yairfalse/tapio/pkg/correlation/domain"
+	"github.com/falseyair/tapio/pkg/correlation/patterns"
+	"github.com/falseyair/tapio/pkg/correlation/types"
+	pkgdomain "github.com/yairfalse/tapio/pkg/correlation/domain"
 )
+
+// Type alias for domain.Correlation
+type Correlation = domain.Correlation
 
 // PatternIntegratedEngine extends PerfectEngine with ML-based pattern detection
 type PatternIntegratedEngine struct {
@@ -184,7 +187,7 @@ func (pie *PatternIntegratedEngine) configurePatternDetectors() {
 }
 
 // ProcessOpinionatedEventWithPatterns processes an event through both correlation and pattern detection
-func (pie *PatternIntegratedEngine) ProcessOpinionatedEventWithPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) (*IntegratedResult, error) {
+func (pie *PatternIntegratedEngine) ProcessOpinionatedEventWithPatterns(ctx context.Context, event *domain.Event) (*IntegratedResult, error) {
 	start := time.Now()
 
 	// Process through original correlation engine
@@ -196,7 +199,7 @@ func (pie *PatternIntegratedEngine) ProcessOpinionatedEventWithPatterns(ctx cont
 	result := &IntegratedResult{
 		Event:              event,
 		ProcessingTime:     time.Since(start),
-		CorrelationResults: []*Correlation{}, // Would extract from perfect engine
+		CorrelationResults: []*pkgdomain.Correlation{}, // Would extract from perfect engine
 		PatternResults:     []*types.PatternResult{},
 		FusedInsights:      []*FusedInsight{},
 	}
@@ -228,7 +231,7 @@ func (pie *PatternIntegratedEngine) ProcessOpinionatedEventWithPatterns(ctx cont
 }
 
 // runPatternDetection executes pattern detection for an event
-func (pie *PatternIntegratedEngine) runPatternDetection(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*types.PatternResult, error) {
+func (pie *PatternIntegratedEngine) runPatternDetection(ctx context.Context, event *domain.Event) ([]*types.PatternResult, error) {
 	// Check cache first
 	cacheKey := pie.generateCacheKey(event)
 	if cachedResult := pie.patternCache.Get(cacheKey); cachedResult != nil {
@@ -265,9 +268,30 @@ func (pie *PatternIntegratedEngine) runPatternDetection(ctx context.Context, eve
 	return filteredResults, nil
 }
 
+// convertToLocalCorrelations converts from pkg/domain to local domain correlations
+func (pie *PatternIntegratedEngine) convertToLocalCorrelations(correlations []*pkgdomain.Correlation) []*Correlation {
+	var localCorrelations []*Correlation
+	for _, c := range correlations {
+		localCorrelations = append(localCorrelations, &Correlation{
+			ID:          c.ID,
+			Type:        c.Type,
+			Events:      c.Events,
+			Confidence:  c.Confidence,
+			Description: c.Description,
+			Timestamp:   c.Timestamp,
+			TTL:         c.TTL,
+			Metadata:    c.Metadata,
+		})
+	}
+	return localCorrelations
+}
+
 // fuseResults combines correlation and pattern results into unified insights
-func (pie *PatternIntegratedEngine) fuseResults(correlations []*Correlation, patterns []*types.PatternResult) []*FusedInsight {
+func (pie *PatternIntegratedEngine) fuseResults(correlations []*pkgdomain.Correlation, patterns []*types.PatternResult) []*FusedInsight {
 	var fusedInsights []*FusedInsight
+	
+	// Convert to local correlations for helper functions
+	localCorrelations := pie.convertToLocalCorrelations(correlations)
 
 	// Create pattern-driven insights
 	for _, pattern := range patterns {
@@ -285,25 +309,25 @@ func (pie *PatternIntegratedEngine) fuseResults(correlations []*Correlation, pat
 			DetectionTime:    pattern.DetectedAt,
 
 			// Integration metadata
-			CorrelatedEvents: pie.findCorrelatedEvents(pattern, correlations),
-			FusionConfidence: pie.calculateFusionConfidence(pattern, correlations),
+			CorrelatedEvents: pie.findCorrelatedEvents(pattern, localCorrelations),
+			FusionConfidence: pie.calculateFusionConfidence(pattern, localCorrelations),
 		}
 
 		fusedInsights = append(fusedInsights, insight)
 	}
 
 	// Create correlation-enhanced insights
-	for _, correlation := range correlations {
+	for i := range correlations {
 		// Check if this correlation enhances any pattern
-		enhancedPattern := pie.findEnhancingPattern(correlation, patterns)
+		enhancedPattern := pie.findEnhancingPattern(localCorrelations[i], patterns)
 		if enhancedPattern != nil {
 			insight := &FusedInsight{
 				Type:             "correlation_enhanced",
-				CorrelationType:  "unknown", // correlation.Type field not available
-				Confidence:       0.8,      // correlation.Confidence field not available
-				Description:      pie.generateCorrelationDescription(correlation),
+				CorrelationType:  correlations[i].Type,
+				Confidence:       correlations[i].Confidence,
+				Description:      pie.generateCorrelationDescription(correlations[i]),
 				EnhancedPattern:  enhancedPattern,
-				FusionConfidence: pie.calculateFusionConfidence(enhancedPattern, []*Correlation{correlation}),
+				FusionConfidence: pie.calculateFusionConfidence(enhancedPattern, []*Correlation{localCorrelations[i]}),
 			}
 			fusedInsights = append(fusedInsights, insight)
 		}
@@ -414,12 +438,12 @@ func (pie *PatternIntegratedEngine) GetIntegratedStats() *IntegratedEngineStats 
 
 // IntegratedResult represents the result of integrated processing
 type IntegratedResult struct {
-	Event          *opinionated.OpinionatedEvent `json:"event"`
+	Event          *domain.Event `json:"event"`
 	ProcessingTime time.Duration                 `json:"processing_time"`
 
 	// Results from different engines
-	CorrelationResults []*domain.Correlation  `json:"correlation_results"`
-	PatternResults     []*types.PatternResult `json:"pattern_results"`
+	CorrelationResults []*pkgdomain.Correlation `json:"correlation_results"`
+	PatternResults     []*types.PatternResult  `json:"pattern_results"`
 
 	// Fused insights
 	FusedInsights []*FusedInsight `json:"fused_insights"`
@@ -545,16 +569,16 @@ func (pie *PatternIntegratedEngine) updateIntegrationStats(result *IntegratedRes
 }
 
 // Placeholder implementations for helper methods
-func (pie *PatternIntegratedEngine) generateCacheKey(event *opinionated.OpinionatedEvent) string {
+func (pie *PatternIntegratedEngine) generateCacheKey(event *domain.Event) string {
 	return fmt.Sprintf("%s-%d", event.ID, event.Timestamp.UnixNano())
 }
 
-func (pie *PatternIntegratedEngine) convertToCorrelationEvents(event *opinionated.OpinionatedEvent) []types.Event {
+func (pie *PatternIntegratedEngine) convertToCorrelationEvents(event *domain.Event) []types.Event {
 	// Convert opinionated event to correlation events
 	return []types.Event{} // Simplified placeholder
 }
 
-func (pie *PatternIntegratedEngine) extractMetricsFromOpinionatedEvent(event *opinionated.OpinionatedEvent) map[string]types.MetricSeries {
+func (pie *PatternIntegratedEngine) extractMetricsFromOpinionatedEvent(event *domain.Event) map[string]types.MetricSeries {
 	// Extract metrics from opinionated event
 	return make(map[string]types.MetricSeries) // Simplified placeholder
 }
@@ -629,8 +653,8 @@ func (pie *PatternIntegratedEngine) calculateFusionConfidence(pattern *types.Pat
 	return math.Min(baseConfidence+correlationBoost, 1.0)
 }
 
-func (pie *PatternIntegratedEngine) generateCorrelationDescription(correlation *Correlation) string {
-	return fmt.Sprintf("Correlation detected: %s", "unknown") // correlation.Type field not available
+func (pie *PatternIntegratedEngine) generateCorrelationDescription(correlation *pkgdomain.Correlation) string {
+	return fmt.Sprintf("Correlation detected: %s", correlation.Type)
 }
 
 func (pie *PatternIntegratedEngine) determineAutomationLevel(autoApply bool) string {

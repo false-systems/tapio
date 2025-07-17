@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -300,7 +300,7 @@ func (pme *PredictiveMetricsEngine) Stop(ctx context.Context) error {
 }
 
 // ProcessEvent processes an event for predictive analysis
-func (pme *PredictiveMetricsEngine) ProcessEvent(ctx context.Context, event *opinionated.OpinionatedEvent) error {
+func (pme *PredictiveMetricsEngine) ProcessEvent(ctx context.Context, event *domain.Event) error {
 	// Create processing trace
 	ctx, span := pme.tracer.Start(ctx, "predictive_metrics.process_event")
 	defer span.End()
@@ -603,7 +603,7 @@ func (pme *PredictiveMetricsEngine) predictAnomalyRisks(ctx context.Context) *Pr
 func (pme *PredictiveMetricsEngine) predictCascadeFailures(ctx context.Context) *Prediction { return nil }
 
 // Helper methods
-func (pme *PredictiveMetricsEngine) extractFeatures(event *opinionated.OpinionatedEvent) map[string]float64 {
+func (pme *PredictiveMetricsEngine) extractFeatures(event *domain.Event) map[string]float64 {
 	features := make(map[string]float64)
 	
 	// Extract numerical features from event
@@ -678,8 +678,8 @@ func (pme *PredictiveMetricsEngine) updateCascadeMetrics(ctx context.Context, pr
 }
 
 // Placeholder methods for component initialization
-func (pme *PredictiveMetricsEngine) updateModelsWithEvent(ctx context.Context, event *opinionated.OpinionatedEvent, features map[string]float64) {}
-func (pme *PredictiveMetricsEngine) generatePredictions(ctx context.Context, event *opinionated.OpinionatedEvent, features map[string]float64) []Prediction { return []Prediction{} }
+func (pme *PredictiveMetricsEngine) updateModelsWithEvent(ctx context.Context, event *domain.Event, features map[string]float64) {}
+func (pme *PredictiveMetricsEngine) generatePredictions(ctx context.Context, event *domain.Event, features map[string]float64) []Prediction { return []Prediction{} }
 func (pme *PredictiveMetricsEngine) updateAllModels(ctx context.Context) {}
 func (pme *PredictiveMetricsEngine) evaluatePredictionAccuracy(ctx context.Context) float64 { return 0.85 }
 

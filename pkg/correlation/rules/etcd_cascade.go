@@ -157,7 +157,7 @@ func (r *ETCDCascadeRule) Execute(ctx context.Context, ruleCtx *correlation.Rule
 				RuleID:      r.ID(),
 				Title:       "ETCD Cascading Failure Detected",
 				Description: r.buildDescription(etcdMemoryIssues, apiTimeouts, dnsFailures, workloadFailures),
-				Severity:    correlation.SeverityCritical,
+				Severity:    correlation.SeverityLevelCritical,
 				Confidence:  confidence,
 				Evidence:    r.collectEvidence(etcdMemoryIssues, apiTimeouts, dnsFailures, workloadFailures),
 				Tags:        []string{"etcd", "cascade", "memory", "critical"},
@@ -173,7 +173,7 @@ func (r *ETCDCascadeRule) Execute(ctx context.Context, ruleCtx *correlation.Rule
 					"Review etcd compaction and defragmentation settings",
 					"Check for large keys or excessive watch operations",
 				},
-				Prediction: &correlation.Prediction{
+				Prediction: &correlation.RulePrediction{
 					Event:       "Complete cluster control plane failure",
 					TimeToEvent: r.predictTimeToFailure(etcdMemoryIssues, apiTimeouts),
 					Confidence:  confidence,
@@ -491,11 +491,11 @@ func (r *ETCDCascadeRule) identifyRootCause(etcd []etcdMemoryIssue) string {
 	return fmt.Sprintf("ETCD memory pressure (%.1f%%), trending toward exhaustion", maxUsage)
 }
 
-func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeoutIssue, dns []dnsFailure, workload []workloadFailure) []correlation.Evidence {
-	evidence := []correlation.Evidence{}
+func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeoutIssue, dns []dnsFailure, workload []workloadFailure) []correlation.RuleEvidence {
+	evidence := []correlation.RuleEvidence{}
 
 	for _, issue := range etcd {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "etcd_memory_pressure",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("ETCD pod %s at %.1f%% memory usage", issue.PodName, issue.UsagePercent),
@@ -508,7 +508,7 @@ func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeo
 			Confidence: 0.95,
 		})
 		if issue.HasEBPFData {
-			evidence = append(evidence, correlation.Evidence{
+			evidence = append(evidence, correlation.RuleEvidence{
 				Type:        "kernel_memory_tracking",
 				Source:      correlation.SourceEBPF,
 				Description: "Kernel-level memory tracking confirms high usage",
@@ -522,7 +522,7 @@ func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeo
 	}
 
 	if len(api) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "api_timeout_errors",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d API server timeout errors detected", len(api)),
@@ -535,7 +535,7 @@ func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeo
 	}
 
 	if len(dns) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "dns_failures",
 			Source:      correlation.SourceKubernetes,
 			Description: "CoreDNS pods failing or restarting",
@@ -548,7 +548,7 @@ func (r *ETCDCascadeRule) collectEvidence(etcd []etcdMemoryIssue, api []apiTimeo
 	}
 
 	if len(workload) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "workload_dns_impact",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d workload pods affected by DNS resolution failures", len(workload)),

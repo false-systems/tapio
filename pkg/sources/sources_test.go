@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collector"
 )
 
 func TestDataSource_Interface(t *testing.T) {

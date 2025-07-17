@@ -2,8 +2,8 @@ package correlation
 
 import "time"
 
-// RulePerformance tracks performance metrics for a correlation rule
-type RulePerformance struct {
+// CorrelationRulePerformance tracks performance metrics for a correlation rule
+type CorrelationRulePerformance struct {
 	RuleID          string
 	TotalExecutions uint64
 	TotalMatches    uint64

@@ -372,11 +372,11 @@ func (r *CPUThrottlingRule) createCPUThrottlingFinding(podName, podNamespace str
 	// Determine severity
 	var severity correlation.Severity
 	if analysis.PerformanceImpact >= 0.3 || analysis.ThrottledPercentage >= 0.5 {
-		severity = correlation.SeverityCritical
+		severity = correlation.SeverityLevelCritical
 	} else if analysis.PerformanceImpact >= 0.2 || analysis.ThrottledPercentage >= 0.3 {
-		severity = correlation.SeverityError
+		severity = correlation.SeverityLevelError
 	} else {
-		severity = correlation.SeverityWarning
+		severity = correlation.SeverityLevelWarning
 	}
 
 	// Create finding
@@ -396,7 +396,7 @@ func (r *CPUThrottlingRule) createCPUThrottlingFinding(podName, podNamespace str
 
 	// Add evidence
 	for _, source := range analysis.DataSources {
-		evidence := correlation.Evidence{
+		evidence := correlation.RuleEvidence{
 			Type:        "cpu_throttling",
 			Source:      correlation.SourceType(source),
 			Description: fmt.Sprintf("CPU throttling analysis from %s", source),

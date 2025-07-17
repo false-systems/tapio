@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collector"
 )
 
 // MockSource implements mock data collection for testing

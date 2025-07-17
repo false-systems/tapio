@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collector"
 	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/grpc"
 	"github.com/yairfalse/tapio/pkg/monitoring"
@@ -164,7 +164,7 @@ func runCollector(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func loadConfiguration() (*collectors.Config, error) {
+func loadConfiguration() (*collector.Config, error) {
 	// Set configuration defaults
 	viper.SetDefault("collector.enabled_collectors", []string{"ebpf", "k8s", "systemd"})
 	viper.SetDefault("collector.sampling_rate", 1.0)
@@ -193,13 +193,13 @@ func loadConfiguration() (*collectors.Config, error) {
 	}
 
 	// Create configuration struct
-	cfg := &collectors.Config{
+	cfg := &collector.Config{
 		EnabledCollectors: viper.GetStringSlice("collector.enabled_collectors"),
 		SamplingRate:      viper.GetFloat64("collector.sampling_rate"),
 		MaxEventsPerSec:   viper.GetInt("collector.max_events_per_sec"),
 		BufferSize:        viper.GetInt("collector.buffer_size"),
 
-		GRPC: collectors.GRPCConfig{
+		GRPC: collector.GRPCConfig{
 			ServerEndpoints:      viper.GetStringSlice("grpc.server_endpoints"),
 			TLSEnabled:           viper.GetBool("grpc.tls_enabled"),
 			MaxBatchSize:         viper.GetInt("grpc.max_batch_size"),
@@ -208,7 +208,7 @@ func loadConfiguration() (*collectors.Config, error) {
 			MaxReconnectAttempts: viper.GetInt("grpc.max_reconnect_attempts"),
 		},
 
-		Resources: collectors.ResourceConfig{
+		Resources: collector.ResourceConfig{
 			MaxMemoryMB: viper.GetInt("resources.max_memory_mb"),
 			MaxCPUMilli: viper.GetInt("resources.max_cpu_milli"),
 		},
@@ -222,7 +222,7 @@ func loadConfiguration() (*collectors.Config, error) {
 	return cfg, nil
 }
 
-func initializeGRPCClient(cfg *collectors.Config) (*collectors.GRPCStreamingClient, error) {
+func initializeGRPCClient(cfg *collector.Config) (*collector.GRPCStreamingClient, error) {
 	// Create gRPC client configuration
 	grpcConfig := grpc.DefaultClientConfig()
 	grpcConfig.ServerEndpoints = cfg.GRPC.ServerEndpoints
@@ -245,16 +245,16 @@ func initializeGRPCClient(cfg *collectors.Config) (*collectors.GRPCStreamingClie
 	// Create and configure gRPC client
 	grpcClient := grpc.NewClient(grpcConfig, nodeInfo)
 
-	return collectors.NewGRPCStreamingClient(grpcClient), nil
+	return collector.NewGRPCStreamingClient(grpcClient), nil
 }
 
-func initializeCollectorManager(cfg *collectors.Config, grpcClient *collectors.GRPCStreamingClient) (*collectors.Manager, error) {
+func initializeCollectorManager(cfg *collector.Config, grpcClient *collector.GRPCStreamingClient) (*collector.Manager, error) {
 	// Create collector manager
-	manager := collectors.NewManager(cfg, grpcClient)
+	manager := collector.NewManager(cfg, grpcClient)
 
 	// Register enabled collectors
 	for _, collectorName := range cfg.EnabledCollectors {
-		collector, err := collectors.CreateCollector(collectorName, cfg)
+		collector, err := collector.CreateCollector(collectorName, cfg)
 		if err != nil {
 			fmt.Printf("⚠️  Failed to create collector %s: %v\n", collectorName, err)
 			continue
@@ -271,7 +271,7 @@ func initializeCollectorManager(cfg *collectors.Config, grpcClient *collectors.G
 	return manager, nil
 }
 
-func printStatus(monitor *monitoring.ResourceMonitor, grpcClient *collectors.GRPCStreamingClient, manager *collectors.Manager) {
+func printStatus(monitor *monitoring.ResourceMonitor, grpcClient *collector.GRPCStreamingClient, manager *collector.Manager) {
 	// Get resource usage
 	usage := monitor.GetUsage()
 
@@ -291,7 +291,7 @@ func printStatus(monitor *monitoring.ResourceMonitor, grpcClient *collectors.GRP
 	// Print collector health summary
 	healthyCount := 0
 	for name, h := range health {
-		if h.Status == collectors.HealthStatusHealthy {
+		if h.Status == collector.HealthStatusHealthy {
 			healthyCount++
 		} else {
 			fmt.Printf("⚠️  Collector %s: %s - %s\n", name, h.Status, h.Message)

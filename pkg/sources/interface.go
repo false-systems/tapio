@@ -3,7 +3,7 @@ package sources
 import (
 	"context"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collector"
 )
 
 // DataSource represents a source of monitoring data

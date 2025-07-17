@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/correlation/types"
 )
 
 // NetworkFailureCascadeDetector implements detection of network failure cascade patterns

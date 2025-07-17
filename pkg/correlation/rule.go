@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/domain"
 )
 
 // Type alias for SeverityLevel from domain package
@@ -247,8 +247,8 @@ type RuleContext struct {
 	Metadata         map[string]interface{}
 }
 
-// Rule defines the interface for correlation rules
-type Rule interface {
+// CorrelationRule defines the interface for correlation rules
+type CorrelationRule interface {
 	// GetMetadata returns metadata about the rule
 	GetMetadata() RuleMetadata
 
@@ -267,11 +267,11 @@ type Rule interface {
 
 // RuleAdapter adapts correlation.Rule to domain.Rule interface
 type RuleAdapter struct {
-	rule Rule
+	rule CorrelationRule
 }
 
 // NewRuleAdapter creates a new rule adapter
-func NewRuleAdapter(rule Rule) *RuleAdapter {
+func NewRuleAdapter(rule CorrelationRule) *RuleAdapter {
 	return &RuleAdapter{rule: rule}
 }
 
@@ -298,20 +298,20 @@ func (a *RuleAdapter) ToDomainRule() domain.Rule {
 
 // RuleRegistry manages available rules
 type RuleRegistry struct {
-	rules   map[string]Rule
+	rules   map[string]CorrelationRule
 	enabled map[string]bool
 }
 
 // NewRuleRegistry creates a new rule registry
 func NewRuleRegistry() *RuleRegistry {
 	return &RuleRegistry{
-		rules:   make(map[string]Rule),
+		rules:   make(map[string]CorrelationRule),
 		enabled: make(map[string]bool),
 	}
 }
 
 // RegisterRule registers a new rule
-func (r *RuleRegistry) RegisterRule(rule Rule) error {
+func (r *RuleRegistry) RegisterRule(rule CorrelationRule) error {
 	metadata := rule.GetMetadata()
 	if err := rule.Validate(); err != nil {
 		return err
@@ -330,8 +330,8 @@ func (r *RuleRegistry) GetRule(id string) (Rule, bool) {
 }
 
 // GetEnabledRules returns all enabled rules
-func (r *RuleRegistry) GetEnabledRules() []Rule {
-	var enabled []Rule
+func (r *RuleRegistry) GetEnabledRules() []CorrelationRule {
+	var enabled []CorrelationRule
 	for id, rule := range r.rules {
 		if r.enabled[id] {
 			enabled = append(enabled, rule)
@@ -341,8 +341,8 @@ func (r *RuleRegistry) GetEnabledRules() []Rule {
 }
 
 // GetAllRules returns all registered rules
-func (r *RuleRegistry) GetAllRules() []Rule {
-	var all []Rule
+func (r *RuleRegistry) GetAllRules() []CorrelationRule {
+	var all []CorrelationRule
 	for _, rule := range r.rules {
 		all = append(all, rule)
 	}
@@ -373,8 +373,8 @@ func (r *RuleRegistry) IsEnabled(id string) bool {
 }
 
 // GetRulesByTag returns rules with the specified tag
-func (r *RuleRegistry) GetRulesByTag(tag string) []Rule {
-	var tagged []Rule
+func (r *RuleRegistry) GetRulesByTag(tag string) []CorrelationRule {
+	var tagged []CorrelationRule
 	for _, rule := range r.rules {
 		metadata := rule.GetMetadata()
 		for _, ruleTag := range metadata.Tags {
@@ -402,6 +402,100 @@ func NewBaseRule(metadata RuleMetadata) *BaseRule {
 // GetMetadata returns the rule metadata
 func (r *BaseRule) GetMetadata() RuleMetadata {
 	return r.metadata
+}
+
+// GetID returns the rule ID (foundation.Rule interface)
+func (r *BaseRule) GetID() string {
+	return r.metadata.ID
+}
+
+// GetName returns the rule name (foundation.Rule interface)
+func (r *BaseRule) GetName() string {
+	return r.metadata.Name
+}
+
+// GetDescription returns the rule description (foundation.Rule interface)
+func (r *BaseRule) GetDescription() string {
+	return r.metadata.Description
+}
+
+// GetCategory returns the rule category (foundation.Rule interface)
+func (r *BaseRule) GetCategory() Category {
+	return CategoryPerformance // Default category
+}
+
+// GetVersion returns the rule version (foundation.Rule interface)
+func (r *BaseRule) GetVersion() string {
+	return r.metadata.Version
+}
+
+// GetAuthor returns the rule author (foundation.Rule interface)
+func (r *BaseRule) GetAuthor() string {
+	return r.metadata.Author
+}
+
+// GetTags returns the rule tags (foundation.Rule interface)
+func (r *BaseRule) GetTags() []string {
+	return r.metadata.Tags
+}
+
+// IsEnabled returns whether the rule is enabled (foundation.Rule interface)
+func (r *BaseRule) IsEnabled() bool {
+	return r.metadata.Enabled
+}
+
+// GetMinConfidence returns the minimum confidence (foundation.Rule interface)
+func (r *BaseRule) GetMinConfidence() float64 {
+	return 0.7 // Default confidence
+}
+
+// GetCooldown returns the cooldown duration (foundation.Rule interface)
+func (r *BaseRule) GetCooldown() time.Duration {
+	return 5 * time.Minute // Default cooldown
+}
+
+// GetTTL returns the TTL duration (foundation.Rule interface)
+func (r *BaseRule) GetTTL() time.Duration {
+	return 24 * time.Hour // Default TTL
+}
+
+// GetRequiredSources returns required sources (foundation.Rule interface)
+func (r *BaseRule) GetRequiredSources() []SourceType {
+	var sources []SourceType
+	for _, req := range r.metadata.Requirements {
+		if req.Required {
+			sources = append(sources, req.SourceType)
+		}
+	}
+	return sources
+}
+
+// GetOptionalSources returns optional sources (foundation.Rule interface)
+func (r *BaseRule) GetOptionalSources() []SourceType {
+	var sources []SourceType
+	for _, req := range r.metadata.Requirements {
+		if !req.Required {
+			sources = append(sources, req.SourceType)
+		}
+	}
+	return sources
+}
+
+// GetPerformance returns performance metrics (foundation.Rule interface)
+func (r *BaseRule) GetPerformance() RulePerformance {
+	return RulePerformance{
+		ExecutionCount:  0,
+		AverageLatency:  0,
+		SuccessRate:     1.0,
+		LastExecuted:    time.Time{},
+		TotalDuration:   0,
+		ErrorCount:      0,
+	}
+}
+
+// UpdatePerformance updates performance metrics (foundation.Rule interface)
+func (r *BaseRule) UpdatePerformance(execution RuleExecution) {
+	// Default implementation - can be overridden by specific rules
 }
 
 // GetConfidenceFactors returns default confidence factors
@@ -491,6 +585,7 @@ func NewRequirementNotMetError(ruleID string, requirement RuleRequirement) *Requ
 		Requirement: requirement,
 	}
 }
+
 
 // generateFindingID generates a unique finding ID
 func generateFindingID() string {

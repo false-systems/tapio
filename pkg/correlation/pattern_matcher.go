@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // SemanticPatternMatcher is optimized for our opinionated data structure
@@ -118,7 +118,7 @@ func NewSemanticPatternMatcher(config *SemanticConfig) (*SemanticPatternMatcher,
 }
 
 // DetectPatterns finds patterns in opinionated events
-func (m *SemanticPatternMatcher) DetectPatterns(ctx context.Context, events []*opinionated.OpinionatedEvent) (*PatternDetectionResult, error) {
+func (m *SemanticPatternMatcher) DetectPatterns(ctx context.Context, events []*domain.Event) (*PatternDetectionResult, error) {
 	if len(events) == 0 {
 		return &PatternDetectionResult{}, nil
 	}
@@ -208,7 +208,7 @@ func (m *SemanticPatternMatcher) DetectPatterns(ctx context.Context, events []*o
 }
 
 // MatchPatterns finds existing patterns that match the given event
-func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) (*PatternMatchResult, error) {
+func (m *SemanticPatternMatcher) MatchPatterns(ctx context.Context, event *domain.Event) (*PatternMatchResult, error) {
 	startTime := time.Now()
 
 	result := &PatternMatchResult{
@@ -353,7 +353,7 @@ func (m *SemanticPatternMatcher) detectCrossContextPatterns(ctx context.Context,
 
 // Pattern matching methods for each context
 
-func (m *SemanticPatternMatcher) matchSemanticPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternMatch, error) {
+func (m *SemanticPatternMatcher) matchSemanticPatterns(ctx context.Context, event *domain.Event) ([]*PatternMatch, error) {
 	if len(event.Semantic.Embedding) == 0 {
 		return []*PatternMatch{}, nil
 	}
@@ -382,27 +382,27 @@ func (m *SemanticPatternMatcher) matchSemanticPatterns(ctx context.Context, even
 	return matches, nil
 }
 
-func (m *SemanticPatternMatcher) matchBehavioralPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternMatch, error) {
+func (m *SemanticPatternMatcher) matchBehavioralPatterns(ctx context.Context, event *domain.Event) ([]*PatternMatch, error) {
 	// Implementation for behavioral pattern matching
 	return []*PatternMatch{}, nil
 }
 
-func (m *SemanticPatternMatcher) matchTemporalPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternMatch, error) {
+func (m *SemanticPatternMatcher) matchTemporalPatterns(ctx context.Context, event *domain.Event) ([]*PatternMatch, error) {
 	// Implementation for temporal pattern matching
 	return []*PatternMatch{}, nil
 }
 
-func (m *SemanticPatternMatcher) matchCausalityPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternMatch, error) {
+func (m *SemanticPatternMatcher) matchCausalityPatterns(ctx context.Context, event *domain.Event) ([]*PatternMatch, error) {
 	// Implementation for causality pattern matching
 	return []*PatternMatch{}, nil
 }
 
-func (m *SemanticPatternMatcher) matchAnomalyPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternMatch, error) {
+func (m *SemanticPatternMatcher) matchAnomalyPatterns(ctx context.Context, event *domain.Event) ([]*PatternMatch, error) {
 	// Implementation for anomaly pattern matching
 	return []*PatternMatch{}, nil
 }
 
-func (m *SemanticPatternMatcher) matchOntologyPatterns(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*PatternMatch, error) {
+func (m *SemanticPatternMatcher) matchOntologyPatterns(ctx context.Context, event *domain.Event) ([]*PatternMatch, error) {
 	// Find patterns with similar ontology tags
 	similarPatterns, scores, err := m.ontologyIndex.FindSimilarTags(event.Semantic.OntologyTags, 10, 0.7)
 	if err != nil {
@@ -429,7 +429,7 @@ func (m *SemanticPatternMatcher) matchOntologyPatterns(ctx context.Context, even
 
 // Helper methods
 
-func (m *SemanticPatternMatcher) generatePatternCacheKey(event *opinionated.OpinionatedEvent) string {
+func (m *SemanticPatternMatcher) generatePatternCacheKey(event *domain.Event) string {
 	// Generate a cache key based on event characteristics
 	return fmt.Sprintf("%s_%s_%d", event.ID, event.Semantic.Intent, event.Timestamp.Unix())
 }

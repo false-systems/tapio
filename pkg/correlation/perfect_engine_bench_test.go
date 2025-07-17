@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -107,7 +106,7 @@ func BenchmarkCrossContextCorrelation(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	events := []*opinionated.OpinionatedEvent{
+	events := []*domain.Event{
 		createBenchmarkOpinionatedEvent(b),
 		createBenchmarkOpinionatedEvent(b),
 		createBenchmarkOpinionatedEvent(b),
@@ -151,7 +150,7 @@ func BenchmarkThroughput(b *testing.B) {
 	defer engine.Stop()
 
 	// Create batch of events for throughput testing
-	events := make([]*opinionated.OpinionatedEvent, 1000)
+	events := make([]*domain.Event, 1000)
 	for i := range events {
 		events[i] = createBenchmarkOpinionatedEvent(b)
 		events[i].Id = generateEventID(i)
@@ -204,15 +203,15 @@ func BenchmarkMemoryUsage(b *testing.B) {
 }
 
 // Helper function to create optimized benchmark events
-func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent {
+func createBenchmarkOpinionatedEvent(b *testing.B) *domain.Event {
 	b.Helper()
 
-	return &opinionated.OpinionatedEvent{
+	return &domain.Event{
 		Id:        "benchmark-event-001",
 		Timestamp: timestamppb.Now(),
 
 		// Semantic context optimized for benchmarking
-		Semantic: &opinionated.SemanticContext{
+		Semantic: &domain.SemanticContext{
 			EventType:        "resource.exhaustion.memory.oom_kill",
 			Embedding:        generateBenchmarkEmbedding(512),
 			OntologyTags:     []string{"kubernetes.pod", "resource.memory", "failure.oom"},
@@ -223,8 +222,8 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 		},
 
 		// Behavioral context for entity correlation
-		Behavioral: &opinionated.BehavioralContext{
-			Entity: &opinionated.EntityFingerprint{
+		Behavioral: &domain.BehavioralContext{
+			Entity: &domain.EntityFingerprint{
 				Id:                 "pod:frontend-abc123",
 				Type:               "kubernetes.pod",
 				Hierarchy:          []string{"cluster:prod", "namespace:web", "deployment:frontend"},
@@ -239,15 +238,15 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 		},
 
 		// Temporal context for pattern detection
-		Temporal: &opinionated.TemporalContext{
-			Patterns: []*opinionated.TemporalPattern{
+		Temporal: &domain.TemporalContext{
+			Patterns: []*domain.TemporalPattern{
 				{
 					Name:       "daily_peak_hours",
 					Confidence: 0.8,
 					Phase:      0.6,
 				},
 			},
-			TimeAnomaly: &opinionated.TimeAnomaly{
+			TimeAnomaly: &domain.TimeAnomaly{
 				UnusualTimeScore:      0.3,
 				UnusualFrequencyScore: 0.2,
 				UnusualDurationScore:  0.1,
@@ -255,9 +254,9 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 		},
 
 		// Anomaly context for correlation
-		Anomaly: &opinionated.AnomalyContext{
+		Anomaly: &domain.AnomalyContext{
 			AnomalyScore: 0.8,
-			Dimensions: &opinionated.AnomalyDimensions{
+			Dimensions: &domain.AnomalyDimensions{
 				Statistical: 0.7,
 				Behavioral:  0.8,
 				Temporal:    0.3,
@@ -267,12 +266,12 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 		},
 
 		// AI features for ML processing
-		AiFeatures: &opinionated.AIFeatures{
+		AiFeatures: &domain.AIFeatures{
 			DenseFeatures:       generateBenchmarkVector(256),
 			CategoricalFeatures: map[string]string{"pod_type": "frontend", "cluster": "prod"},
 			SparseFeatures:      map[string]float32{"cpu_utilization": 0.8, "memory_utilization": 0.95},
-			TimeSeries: &opinionated.TimeSeriesFeatures{
-				Rolling_1M: &opinionated.RollingStats{
+			TimeSeries: &domain.TimeSeriesFeatures{
+				Rolling_1M: &domain.RollingStats{
 					Mean:          0.7,
 					StdDev:        0.1,
 					Min:           0.5,
@@ -288,8 +287,8 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 		},
 
 		// Causality context for root cause analysis
-		Causality: &opinionated.CausalityContext{
-			CausalChain: []opinionated.CausalEvent{
+		Causality: &domain.CausalityContext{
+			CausalChain: []domain.CausalEvent{
 				{
 					EventID:     "event-001",
 					Description: "Memory usage increased",
@@ -315,19 +314,19 @@ func createBenchmarkOpinionatedEvent(b *testing.B) *opinionated.OpinionatedEvent
 		},
 
 		// Impact context for business relevance
-		Impact: &opinionated.ImpactContext{
+		Impact: &domain.ImpactContext{
 			BusinessImpact:  0.8,
 			TechnicalImpact: 0.9,
 			UserImpact:      0.7,
 			SecurityImpact:  0.1,
-			BlastRadius: &opinionated.BlastRadius{
+			BlastRadius: &domain.BlastRadius{
 				AffectedEntities:       15,
 				AffectedTypes:          []string{"pod", "service", "deployment"},
 				PropagationProbability: 0.6,
 				ContainmentStatus:      "partial",
 			},
 			Urgency: "high",
-			Actions: []*opinionated.RecommendedAction{
+			Actions: []*domain.RecommendedAction{
 				{
 					Type:            "mitigate",
 					Action:          "Increase memory limits for frontend deployment",

@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/correlation/types"
 )
 
 // Type aliases for correlation engine components
 
 // AutoFixEngine provides automated remediation capabilities for detected patterns
-type AutoFixEngine struct {
+type AutoFixEngineImpl struct {
 	// Core components
 	patternRegistry types.PatternRegistry
 	actionExecutor  ActionExecutor
@@ -298,12 +298,12 @@ type SafetyAssessment struct {
 }
 
 // NewAutoFixEngine creates a new auto-fix engine
-func NewAutoFixEngine(config *AutoFixConfig, executor ActionExecutor, validator SafetyValidator) *AutoFixEngine {
+func NewAutoFixEngine(config *AutoFixConfig, executor ActionExecutor, validator SafetyValidator) *AutoFixEngineImpl {
 	if config == nil {
 		config = DefaultAutoFixConfig()
 	}
 
-	engine := &AutoFixEngine{
+	engine := &AutoFixEngineImpl{
 		config:           config,
 		actionExecutor:   executor,
 		safetyValidator:  validator,
@@ -350,7 +350,7 @@ func DefaultAutoFixConfig() *AutoFixConfig {
 }
 
 // registerDefaultActions registers built-in auto-fix actions
-func (afe *AutoFixEngine) registerDefaultActions() {
+func (afe *AutoFixEngineImpl) registerDefaultActions() {
 	// Memory leak fixes
 	afe.registerAction(AutoFixAction{
 		ID:                "restart_high_memory_pod",
@@ -473,7 +473,7 @@ func (afe *AutoFixEngine) registerDefaultActions() {
 }
 
 // ProcessPatternResult processes a pattern result and determines if auto-fix should be triggered
-func (afe *AutoFixEngine) ProcessPatternResult(ctx context.Context, result *types.PatternResult) (*AutoFixExecution, error) {
+func (afe *AutoFixEngineImpl) ProcessPatternResult(ctx context.Context, result *types.PatternResult) (*AutoFixExecution, error) {
 	if !afe.config.EnableAutoFix || !result.Detected {
 		return nil, nil
 	}
@@ -530,7 +530,7 @@ func (afe *AutoFixEngine) ProcessPatternResult(ctx context.Context, result *type
 }
 
 // executeAutoFix executes an auto-fix request
-func (afe *AutoFixEngine) executeAutoFix(ctx context.Context, request *AutoFixRequest) (*AutoFixExecution, error) {
+func (afe *AutoFixEngineImpl) executeAutoFix(ctx context.Context, request *AutoFixRequest) (*AutoFixExecution, error) {
 	execution := &AutoFixExecution{
 		ID:                fmt.Sprintf("exec-%d", time.Now().UnixNano()),
 		Request:           request,
@@ -624,7 +624,7 @@ func (afe *AutoFixEngine) executeAutoFix(ctx context.Context, request *AutoFixRe
 }
 
 // findActionsForPattern finds suitable actions for a pattern
-func (afe *AutoFixEngine) findActionsForPattern(result *types.PatternResult) []AutoFixAction {
+func (afe *AutoFixEngineImpl) findActionsForPattern(result *types.PatternResult) []AutoFixAction {
 	afe.actionMutex.RLock()
 	defer afe.actionMutex.RUnlock()
 
@@ -646,7 +646,7 @@ func (afe *AutoFixEngine) findActionsForPattern(result *types.PatternResult) []A
 }
 
 // selectBestAction selects the best action based on safety and confidence
-func (afe *AutoFixEngine) selectBestAction(actions []AutoFixAction, result *types.PatternResult) (AutoFixAction, error) {
+func (afe *AutoFixEngineImpl) selectBestAction(actions []AutoFixAction, result *types.PatternResult) (AutoFixAction, error) {
 	if len(actions) == 0 {
 		return AutoFixAction{}, fmt.Errorf("no actions available")
 	}
@@ -677,7 +677,7 @@ func (afe *AutoFixEngine) selectBestAction(actions []AutoFixAction, result *type
 }
 
 // calculateActionScore calculates a score for an action
-func (afe *AutoFixEngine) calculateActionScore(action AutoFixAction, result *types.PatternResult) float64 {
+func (afe *AutoFixEngineImpl) calculateActionScore(action AutoFixAction, result *types.PatternResult) float64 {
 	score := 0.0
 
 	// Safety component (higher is better)
@@ -712,7 +712,7 @@ func (afe *AutoFixEngine) calculateActionScore(action AutoFixAction, result *typ
 }
 
 // extractParametersFromPattern extracts action parameters from pattern result
-func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, result *types.PatternResult) map[string]string {
+func (afe *AutoFixEngineImpl) extractParametersFromPattern(action AutoFixAction, result *types.PatternResult) map[string]string {
 	params := make(map[string]string)
 
 	// Extract entity information
@@ -753,7 +753,7 @@ func (afe *AutoFixEngine) extractParametersFromPattern(action AutoFixAction, res
 }
 
 // determinePriority determines the priority of an auto-fix request
-func (afe *AutoFixEngine) determinePriority(result *types.PatternResult) string {
+func (afe *AutoFixEngineImpl) determinePriority(result *types.PatternResult) string {
 	switch result.Severity {
 	case "critical":
 		return "critical"
@@ -767,7 +767,7 @@ func (afe *AutoFixEngine) determinePriority(result *types.PatternResult) string 
 }
 
 // isActionEnabledForPattern checks if an action is enabled for a specific pattern
-func (afe *AutoFixEngine) isActionEnabledForPattern(action AutoFixAction, patternID string) bool {
+func (afe *AutoFixEngineImpl) isActionEnabledForPattern(action AutoFixAction, patternID string) bool {
 	switch patternID {
 	case "memory_leak_oom_cascade":
 		return afe.config.EnableMemoryLeakFixes
@@ -785,7 +785,7 @@ func (afe *AutoFixEngine) isActionEnabledForPattern(action AutoFixAction, patter
 }
 
 // Action execution methods
-func (afe *AutoFixEngine) executeKubectlAction(ctx context.Context, request *AutoFixRequest) (*AutoFixResult, error) {
+func (afe *AutoFixEngineImpl) executeKubectlAction(ctx context.Context, request *AutoFixRequest) (*AutoFixResult, error) {
 	// This would execute kubectl commands
 	// Placeholder implementation
 	return &AutoFixResult{
@@ -803,7 +803,7 @@ func (afe *AutoFixEngine) executeKubectlAction(ctx context.Context, request *Aut
 	}, nil
 }
 
-func (afe *AutoFixEngine) executeScriptAction(ctx context.Context, request *AutoFixRequest) (*AutoFixResult, error) {
+func (afe *AutoFixEngineImpl) executeScriptAction(ctx context.Context, request *AutoFixRequest) (*AutoFixResult, error) {
 	// This would execute shell scripts
 	// Placeholder implementation
 	return &AutoFixResult{
@@ -823,25 +823,25 @@ func (afe *AutoFixEngine) executeScriptAction(ctx context.Context, request *Auto
 
 // Helper methods and infrastructure
 
-func (afe *AutoFixEngine) registerAction(action AutoFixAction) {
+func (afe *AutoFixEngineImpl) registerAction(action AutoFixAction) {
 	afe.actionMutex.Lock()
 	defer afe.actionMutex.Unlock()
 	afe.actionRegistry[action.ID] = action
 }
 
-func (afe *AutoFixEngine) getAction(actionID string) (AutoFixAction, bool) {
+func (afe *AutoFixEngineImpl) getAction(actionID string) (AutoFixAction, bool) {
 	afe.actionMutex.RLock()
 	defer afe.actionMutex.RUnlock()
 	action, exists := afe.actionRegistry[actionID]
 	return action, exists
 }
 
-func (afe *AutoFixEngine) queueForApproval(request *AutoFixRequest) (*AutoFixExecution, error) {
+func (afe *AutoFixEngineImpl) queueForApproval(request *AutoFixRequest) (*AutoFixExecution, error) {
 	// Implementation for human approval workflow
 	return nil, fmt.Errorf("approval workflow not implemented")
 }
 
-func (afe *AutoFixEngine) handleRollback(ctx context.Context, execution *AutoFixExecution, action *AutoFixAction) {
+func (afe *AutoFixEngineImpl) handleRollback(ctx context.Context, execution *AutoFixExecution, action *AutoFixAction) {
 	// Implementation for rollback handling
 }
 
@@ -945,7 +945,7 @@ func NewRollbackManager() *RollbackManager {
 }
 
 // GetExecutionHistory returns the execution history
-func (afe *AutoFixEngine) GetExecutionHistory() []*AutoFixExecution {
+func (afe *AutoFixEngineImpl) GetExecutionHistory() []*AutoFixExecution {
 	afe.historyMutex.RLock()
 	defer afe.historyMutex.RUnlock()
 
@@ -956,7 +956,7 @@ func (afe *AutoFixEngine) GetExecutionHistory() []*AutoFixExecution {
 }
 
 // GetActionRegistry returns all registered actions
-func (afe *AutoFixEngine) GetActionRegistry() map[string]AutoFixAction {
+func (afe *AutoFixEngineImpl) GetActionRegistry() map[string]AutoFixAction {
 	afe.actionMutex.RLock()
 	defer afe.actionMutex.RUnlock()
 

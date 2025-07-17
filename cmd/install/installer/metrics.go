@@ -46,43 +46,49 @@ func (m *metricsCollector) RecordSuccess(step string) {
 }
 
 // GetReport returns metrics report
-func (m *metricsCollector) GetReport() map[string]interface{} {
+func (m *metricsCollector) GetReport() MetricsReport {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	report := make(map[string]interface{})
+	report := MetricsReport{
+		StepDurations: make(map[string]time.Duration),
+		Errors:        make(map[string][]error),
+	}
 
 	// Copy durations
-	durations := make(map[string]time.Duration)
 	for k, v := range m.durations {
-		durations[k] = v
+		report.StepDurations[k] = v
 	}
-	report["durations"] = durations
 
 	// Copy errors
-	errors := make(map[string]string)
 	for k, v := range m.errors {
 		if v != nil {
-			errors[k] = v.Error()
+			report.Errors[k] = []error{v}
 		}
 	}
-	report["errors"] = errors
 
-	// Copy successes
-	successes := make(map[string]bool)
-	for k, v := range m.successes {
-		successes[k] = v
+	// Collect successful and failed steps
+	for k, success := range m.successes {
+		if success {
+			report.SuccessfulSteps = append(report.SuccessfulSteps, k)
+		} else {
+			report.FailedSteps = append(report.FailedSteps, k)
+		}
 	}
-	report["successes"] = successes
 
-	// Calculate totals
+	// Add failed steps from errors
+	for k := range m.errors {
+		if _, ok := m.successes[k]; !ok {
+			report.FailedSteps = append(report.FailedSteps, k)
+		}
+	}
+
+	// Calculate total duration
 	var totalDuration time.Duration
 	for _, d := range m.durations {
 		totalDuration += d
 	}
-	report["total_duration"] = totalDuration
-	report["total_errors"] = len(m.errors)
-	report["total_successes"] = len(m.successes)
+	report.TotalDuration = totalDuration
 
 	return report
 }

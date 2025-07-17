@@ -3,7 +3,6 @@ package plugins
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"sync"
 	"time"

@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 	
-	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 )
+
 
 // BatchProcessor processes events in batches for improved performance
 type BatchProcessor struct {
@@ -276,7 +276,7 @@ type Entity struct {
 }
 
 // EventStore stores and retrieves events
-type EventStore struct {
+type EventStoreImpl struct {
 	config *EventStoreConfig
 	store  map[string]interface{}
 	mutex  sync.RWMutex
@@ -294,7 +294,7 @@ type EventStoreConfig struct {
 
 // OpinionatedEventStore stores opinionated events for correlation
 type OpinionatedEventStore struct {
-	events []opinionated.OpinionatedEvent
+	events []domain.Event
 	mutex  sync.RWMutex
 	config *EventStoreConfig
 }
@@ -302,13 +302,13 @@ type OpinionatedEventStore struct {
 // NewOpinionatedEventStore creates a new event store
 func NewOpinionatedEventStore(config *EventStoreConfig) (*OpinionatedEventStore, error) {
 	return &OpinionatedEventStore{
-		events: make([]opinionated.OpinionatedEvent, 0, config.MaxEvents),
+		events: make([]domain.Event, 0, config.MaxEvents),
 		config: config,
 	}, nil
 }
 
 // Store stores an event
-func (es *OpinionatedEventStore) Store(event *opinionated.OpinionatedEvent) error {
+func (es *OpinionatedEventStore) Store(event *domain.Event) error {
 	es.mutex.Lock()
 	defer es.mutex.Unlock()
 	

@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // Helper methods for SemanticPatternEngine
 
-func (e *SemanticPatternEngine) extractSemanticFeatures(event *opinionated.OpinionatedEvent) map[string]interface{} {
+func (e *SemanticPatternEngine) extractSemanticFeatures(event *domain.Event) map[string]interface{} {
 	features := make(map[string]interface{})
 	
 	// Extract text features using available fields
@@ -82,7 +82,7 @@ func (e *SemanticPatternEngine) calculateSemanticSimilarity(features map[string]
 	return score
 }
 
-func (e *SemanticPatternEngine) findMatchingKeywords(event *opinionated.OpinionatedEvent, pattern *SemanticPattern) []string {
+func (e *SemanticPatternEngine) findMatchingKeywords(event *domain.Event, pattern *SemanticPattern) []string {
 	var matched []string
 	eventText := strings.ToLower(string(event.Category) + " " + string(event.Severity))
 	
@@ -126,7 +126,7 @@ func (e *SemanticPatternEngine) extractKeywords(text string) []string {
 
 // Helper methods for BehavioralPatternEngine
 
-func (e *BehavioralPatternEngine) extractBehavioralMetrics(event *opinionated.OpinionatedEvent) map[string]float64 {
+func (e *BehavioralPatternEngine) extractBehavioralMetrics(event *domain.Event) map[string]float64 {
 	metrics := make(map[string]float64)
 	
 	// Extract numeric metrics from event data and attributes
@@ -184,13 +184,13 @@ func (e *BehavioralPatternEngine) severityToScore(severity string) float64 {
 
 // Helper methods for TemporalPatternEngine
 
-func (e *TemporalPatternEngine) sortEventsByTime(events []*opinionated.OpinionatedEvent) {
+func (e *TemporalPatternEngine) sortEventsByTime(events []*domain.Event) {
 	sort.Slice(events, func(i, j int) bool {
 		return events[i].Timestamp.Before(events[j].Timestamp)
 	})
 }
 
-func (e *TemporalPatternEngine) matchKnownSequence(window []*opinionated.OpinionatedEvent) *TemporalSequence {
+func (e *TemporalPatternEngine) matchKnownSequence(window []*domain.Event) *TemporalSequence {
 	// Check for known sequences
 	eventTypes := make([]string, len(window))
 	for i, event := range window {
@@ -212,7 +212,7 @@ func (e *TemporalPatternEngine) matchKnownSequence(window []*opinionated.Opinion
 	return nil
 }
 
-func (e *TemporalPatternEngine) detectPeriodicPattern(window []*opinionated.OpinionatedEvent) *TemporalSequence {
+func (e *TemporalPatternEngine) detectPeriodicPattern(window []*domain.Event) *TemporalSequence {
 	// Detect if events occur at regular intervals
 	if len(window) < 3 {
 		return nil
@@ -257,7 +257,7 @@ func (e *TemporalPatternEngine) detectPeriodicPattern(window []*opinionated.Opin
 	return nil
 }
 
-func (e *TemporalPatternEngine) detectCascade(window []*opinionated.OpinionatedEvent) *TemporalSequence {
+func (e *TemporalPatternEngine) detectCascade(window []*domain.Event) *TemporalSequence {
 	// Detect cascading failures
 	if len(window) < 3 {
 		return nil
@@ -301,7 +301,7 @@ func (e *TemporalPatternEngine) severityLevel(severity string) int {
 
 // Helper methods for CausalityPatternEngine
 
-func (e *CausalityPatternEngine) buildCausalityGraph(event *opinionated.OpinionatedEvent) map[string][]string {
+func (e *CausalityPatternEngine) buildCausalityGraph(event *domain.Event) map[string][]string {
 	graph := make(map[string][]string)
 	
 	// Simple causality rules
@@ -317,7 +317,7 @@ func (e *CausalityPatternEngine) buildCausalityGraph(event *opinionated.Opiniona
 	return graph
 }
 
-func (e *CausalityPatternEngine) isRelated(event *opinionated.OpinionatedEvent, causeID string) bool {
+func (e *CausalityPatternEngine) isRelated(event *domain.Event, causeID string) bool {
 	// Check if events are related by resource or namespace
 	for _, chain := range e.causalChains {
 		if chain.Effect == event.ID || containsString(chain.Causes, causeID) {
@@ -327,7 +327,7 @@ func (e *CausalityPatternEngine) isRelated(event *opinionated.OpinionatedEvent, 
 	return false
 }
 
-func (e *CausalityPatternEngine) calculateCausalConfidence(causes []string, effect *opinionated.OpinionatedEvent) float64 {
+func (e *CausalityPatternEngine) calculateCausalConfidence(causes []string, effect *domain.Event) float64 {
 	// Simple confidence calculation based on number of causes and timing
 	baseConfidence := 0.5
 	causeBonus := float64(len(causes)) * 0.1
@@ -340,7 +340,7 @@ func (e *CausalityPatternEngine) calculateCausalConfidence(causes []string, effe
 	return confidence
 }
 
-func (e *CausalityPatternEngine) applyTemporalCausality(chains []*CausalChain, event *opinionated.OpinionatedEvent) []*CausalChain {
+func (e *CausalityPatternEngine) applyTemporalCausality(chains []*CausalChain, event *domain.Event) []*CausalChain {
 	// Filter chains based on temporal constraints
 	filtered := make([]*CausalChain, 0)
 	
@@ -365,7 +365,7 @@ func (e *CausalityPatternEngine) applyTemporalCausality(chains []*CausalChain, e
 
 // Helper methods for AnomalyPatternEngine
 
-func (e *AnomalyPatternEngine) extractMetrics(event *opinionated.OpinionatedEvent) map[string]float64 {
+func (e *AnomalyPatternEngine) extractMetrics(event *domain.Event) map[string]float64 {
 	metrics := make(map[string]float64)
 	
 	// Extract all numeric values from event data and attributes

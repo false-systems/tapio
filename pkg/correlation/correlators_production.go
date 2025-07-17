@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // =============================================================================
@@ -50,7 +50,7 @@ func NewSemanticCorrelator(config *CorrelatorConfig) *SemanticCorrelator {
 }
 
 // Correlate performs semantic correlation (renamed to avoid conflict)
-func (sc *SemanticCorrelator) CorrelateOriginal(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (sc *SemanticCorrelator) CorrelateOriginal(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	for _, event := range events {
@@ -80,7 +80,7 @@ func (sc *SemanticCorrelator) CorrelateOriginal(ctx context.Context, events []*o
 }
 
 // extractSemanticFeatures extracts semantic features from events
-func (sc *SemanticCorrelator) extractSemanticFeatures(event *opinionated.OpinionatedEvent) map[string]interface{} {
+func (sc *SemanticCorrelator) extractSemanticFeatures(event *domain.Event) map[string]interface{} {
 	features := make(map[string]interface{})
 	
 	// Extract text-based features from available fields
@@ -182,8 +182,8 @@ func (sc *SemanticCorrelator) GetStats() interface{} {
 }
 
 // Correlate single event wrapper for perfect engine compatibility
-func (sc *SemanticCorrelator) Correlate(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*LocalCorrelation, error) {
-	results, err := sc.CorrelateEvents(ctx, []*opinionated.OpinionatedEvent{event})
+func (sc *SemanticCorrelator) Correlate(ctx context.Context, event *domain.Event) ([]*LocalCorrelation, error) {
+	results, err := sc.CorrelateEvents(ctx, []*domain.Event{event})
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (sc *SemanticCorrelator) Correlate(ctx context.Context, event *opinionated.
 			Type:        result.Type,
 			Description: result.Summary,
 			Confidence:  0.8, // Default confidence
-			Evidence:    []Evidence{},
+			Evidence:    []domain.Evidence{},
 			Metadata:    result.Details,
 		}
 		correlations = append(correlations, correlation)
@@ -206,7 +206,7 @@ func (sc *SemanticCorrelator) Correlate(ctx context.Context, event *opinionated.
 }
 
 // CorrelateEvents is the original batch correlation method
-func (sc *SemanticCorrelator) CorrelateEvents(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (sc *SemanticCorrelator) CorrelateEvents(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	for _, event := range events {
@@ -265,7 +265,7 @@ func NewBehavioralCorrelator(config *CorrelatorConfig) *BehavioralCorrelator {
 }
 
 // Correlate performs behavioral correlation (renamed to avoid conflict)
-func (bc *BehavioralCorrelator) CorrelateOriginal(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (bc *BehavioralCorrelator) CorrelateOriginal(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	for _, event := range events {
@@ -295,7 +295,7 @@ func (bc *BehavioralCorrelator) CorrelateOriginal(ctx context.Context, events []
 }
 
 // createBehaviorProfile creates a behavior profile from an event
-func (bc *BehavioralCorrelator) createBehaviorProfile(event *opinionated.OpinionatedEvent) *BehaviorProfile {
+func (bc *BehavioralCorrelator) createBehaviorProfile(event *domain.Event) *BehaviorProfile {
 	profile := &BehaviorProfile{
 		ID:       event.ID, // Use event ID as resource identifier
 		Baseline: make(map[string]float64),
@@ -313,7 +313,9 @@ func (bc *BehavioralCorrelator) createBehaviorProfile(event *opinionated.Opinion
 	// Also check AI features for numerical data
 	if event.AiFeatures != nil {
 		for k, v := range event.AiFeatures {
-			profile.Baseline[k] = float64(v)
+			if fv, ok := v.(float64); ok {
+				profile.Baseline[k] = fv
+			}
 		}
 	}
 	
@@ -390,8 +392,8 @@ func (bc *BehavioralCorrelator) GetStats() interface{} {
 }
 
 // Correlate single event wrapper for perfect engine compatibility
-func (bc *BehavioralCorrelator) Correlate(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*LocalCorrelation, error) {
-	results, err := bc.CorrelateEvents(ctx, []*opinionated.OpinionatedEvent{event})
+func (bc *BehavioralCorrelator) Correlate(ctx context.Context, event *domain.Event) ([]*LocalCorrelation, error) {
+	results, err := bc.CorrelateEvents(ctx, []*domain.Event{event})
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +406,7 @@ func (bc *BehavioralCorrelator) Correlate(ctx context.Context, event *opinionate
 			Type:        result.Type,
 			Description: result.Summary,
 			Confidence:  0.8,
-			Evidence:    []Evidence{},
+			Evidence:    []domain.Evidence{},
 			Metadata:    result.Details,
 		}
 		correlations = append(correlations, correlation)
@@ -414,7 +416,7 @@ func (bc *BehavioralCorrelator) Correlate(ctx context.Context, event *opinionate
 }
 
 // CorrelateEvents is the original batch correlation method
-func (bc *BehavioralCorrelator) CorrelateEvents(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (bc *BehavioralCorrelator) CorrelateEvents(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	for _, event := range events {
@@ -457,7 +459,7 @@ type TemporalCorrelator struct {
 
 // TimeWindow represents a time-based analysis window
 type TimeWindow struct {
-	Events    []*opinionated.OpinionatedEvent
+	Events    []*domain.Event
 	StartTime time.Time
 	EndTime   time.Time
 	Size      time.Duration
@@ -473,7 +475,7 @@ func NewTemporalCorrelator(config *CorrelatorConfig) *TemporalCorrelator {
 }
 
 // Correlate performs temporal correlation (renamed to avoid conflict)
-func (tc *TemporalCorrelator) CorrelateOriginal(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (tc *TemporalCorrelator) CorrelateOriginal(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	// Group events by time windows
@@ -502,7 +504,7 @@ func (tc *TemporalCorrelator) CorrelateOriginal(ctx context.Context, events []*o
 }
 
 // createTimeWindows creates time windows from events
-func (tc *TemporalCorrelator) createTimeWindows(events []*opinionated.OpinionatedEvent) []*TimeWindow {
+func (tc *TemporalCorrelator) createTimeWindows(events []*domain.Event) []*TimeWindow {
 	var windows []*TimeWindow
 	
 	if len(events) == 0 {
@@ -510,12 +512,12 @@ func (tc *TemporalCorrelator) createTimeWindows(events []*opinionated.Opinionate
 	}
 	
 	// Sort events by timestamp
-	sortedEvents := make([]*opinionated.OpinionatedEvent, len(events))
+	sortedEvents := make([]*domain.Event, len(events))
 	copy(sortedEvents, events)
 	
 	windowSize := 5 * time.Minute
 	currentWindow := &TimeWindow{
-		Events:    []*opinionated.OpinionatedEvent{},
+		Events:    []*domain.Event{},
 		StartTime: sortedEvents[0].Timestamp,
 		Size:      windowSize,
 	}
@@ -527,7 +529,7 @@ func (tc *TemporalCorrelator) createTimeWindows(events []*opinionated.Opinionate
 			windows = append(windows, currentWindow)
 			
 			currentWindow = &TimeWindow{
-				Events:    []*opinionated.OpinionatedEvent{event},
+				Events:    []*domain.Event{event},
 				StartTime: event.Timestamp,
 				Size:      windowSize,
 			}
@@ -576,7 +578,7 @@ func (tc *TemporalCorrelator) analyzeTemporalPatterns(window *TimeWindow) []*Tem
 }
 
 // detectSequences detects event sequences
-func (tc *TemporalCorrelator) detectSequences(events []*opinionated.OpinionatedEvent) []*TemporalSequence {
+func (tc *TemporalCorrelator) detectSequences(events []*domain.Event) []*TemporalSequence {
 	var sequences []*TemporalSequence
 	
 	// Simple sequence detection - look for common patterns
@@ -599,7 +601,7 @@ func (tc *TemporalCorrelator) detectSequences(events []*opinionated.OpinionatedE
 }
 
 // isKnownSequence checks if two events form a known sequence
-func (tc *TemporalCorrelator) isKnownSequence(event1, event2 *opinionated.OpinionatedEvent) bool {
+func (tc *TemporalCorrelator) isKnownSequence(event1, event2 *domain.Event) bool {
 	// Define known sequence patterns using categories
 	knownSequences := map[string]string{
 		"system_health":     "app_health",
@@ -612,7 +614,7 @@ func (tc *TemporalCorrelator) isKnownSequence(event1, event2 *opinionated.Opinio
 }
 
 // detectPeriodicity detects periodic patterns in events
-func (tc *TemporalCorrelator) detectPeriodicity(events []*opinionated.OpinionatedEvent) time.Duration {
+func (tc *TemporalCorrelator) detectPeriodicity(events []*domain.Event) time.Duration {
 	if len(events) < 3 {
 		return 0
 	}
@@ -692,8 +694,8 @@ func (tc *TemporalCorrelator) GetStats() interface{} {
 }
 
 // Correlate single event wrapper for perfect engine compatibility
-func (tc *TemporalCorrelator) Correlate(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*LocalCorrelation, error) {
-	results, err := tc.CorrelateEvents(ctx, []*opinionated.OpinionatedEvent{event})
+func (tc *TemporalCorrelator) Correlate(ctx context.Context, event *domain.Event) ([]*LocalCorrelation, error) {
+	results, err := tc.CorrelateEvents(ctx, []*domain.Event{event})
 	if err != nil {
 		return nil, err
 	}
@@ -706,7 +708,7 @@ func (tc *TemporalCorrelator) Correlate(ctx context.Context, event *opinionated.
 			Type:        result.Type,
 			Description: result.Summary,
 			Confidence:  0.8,
-			Evidence:    []Evidence{},
+			Evidence:    []domain.Evidence{},
 			Metadata:    result.Details,
 		}
 		correlations = append(correlations, correlation)
@@ -716,7 +718,7 @@ func (tc *TemporalCorrelator) Correlate(ctx context.Context, event *opinionated.
 }
 
 // CorrelateEvents is the renamed original method
-func (tc *TemporalCorrelator) CorrelateEvents(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (tc *TemporalCorrelator) CorrelateEvents(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	return tc.CorrelateOriginal(ctx, events)
 }
 
@@ -740,7 +742,7 @@ func NewCausalityCorrelator(config *CorrelatorConfig) *CausalityCorrelator {
 }
 
 // Correlate performs causality correlation (renamed to avoid conflict)
-func (cc *CausalityCorrelator) CorrelateOriginal(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (cc *CausalityCorrelator) CorrelateOriginal(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	// Build causal chains
@@ -761,7 +763,7 @@ func (cc *CausalityCorrelator) CorrelateOriginal(ctx context.Context, events []*
 }
 
 // buildCausalChains builds causal chains from events
-func (cc *CausalityCorrelator) buildCausalChains(events []*opinionated.OpinionatedEvent) []*CausalChain {
+func (cc *CausalityCorrelator) buildCausalChains(events []*domain.Event) []*CausalChain {
 	var chains []*CausalChain
 	
 	// Simple causality rules
@@ -817,8 +819,8 @@ func (cc *CausalityCorrelator) GetStats() interface{} {
 }
 
 // Correlate single event wrapper for perfect engine compatibility
-func (cc *CausalityCorrelator) Correlate(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*LocalCorrelation, error) {
-	results, err := cc.CorrelateEvents(ctx, []*opinionated.OpinionatedEvent{event})
+func (cc *CausalityCorrelator) Correlate(ctx context.Context, event *domain.Event) ([]*LocalCorrelation, error) {
+	results, err := cc.CorrelateEvents(ctx, []*domain.Event{event})
 	if err != nil {
 		return nil, err
 	}
@@ -831,7 +833,7 @@ func (cc *CausalityCorrelator) Correlate(ctx context.Context, event *opinionated
 			Type:        result.Type,
 			Description: result.Summary,
 			Confidence:  0.8,
-			Evidence:    []Evidence{},
+			Evidence:    []domain.Evidence{},
 			Metadata:    result.Details,
 		}
 		correlations = append(correlations, correlation)
@@ -841,7 +843,7 @@ func (cc *CausalityCorrelator) Correlate(ctx context.Context, event *opinionated
 }
 
 // CorrelateEvents is the renamed original method
-func (cc *CausalityCorrelator) CorrelateEvents(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (cc *CausalityCorrelator) CorrelateEvents(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	return cc.CorrelateOriginal(ctx, events)
 }
 
@@ -861,7 +863,7 @@ func NewAnomalyCorrelator(config *CorrelatorConfig) *AnomalyCorrelator {
 }
 
 // Correlate performs anomaly correlation (renamed to avoid conflict)
-func (ac *AnomalyCorrelator) CorrelateOriginal(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (ac *AnomalyCorrelator) CorrelateOriginal(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	for _, event := range events {
@@ -883,7 +885,7 @@ func (ac *AnomalyCorrelator) CorrelateOriginal(ctx context.Context, events []*op
 }
 
 // detectAnomalies detects anomalies in an event
-func (ac *AnomalyCorrelator) detectAnomalies(event *opinionated.OpinionatedEvent) []*DetectedAnomaly {
+func (ac *AnomalyCorrelator) detectAnomalies(event *domain.Event) []*DetectedAnomaly {
 	var anomalies []*DetectedAnomaly
 	
 	// Check for unusual event types
@@ -923,7 +925,7 @@ func (ac *AnomalyCorrelator) isUnusualEventType(eventType string) bool {
 }
 
 // isUnusualSeverity checks for unusual severity patterns
-func (ac *AnomalyCorrelator) isUnusualSeverity(event *opinionated.OpinionatedEvent) bool {
+func (ac *AnomalyCorrelator) isUnusualSeverity(event *domain.Event) bool {
 	// Critical events for normally safe operations are unusual
 	normalOperations := map[string]bool{
 		"pod_ready":        true,
@@ -956,8 +958,8 @@ func (ac *AnomalyCorrelator) GetStats() interface{} {
 }
 
 // Correlate single event wrapper for perfect engine compatibility
-func (ac *AnomalyCorrelator) Correlate(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*LocalCorrelation, error) {
-	results, err := ac.CorrelateEvents(ctx, []*opinionated.OpinionatedEvent{event})
+func (ac *AnomalyCorrelator) Correlate(ctx context.Context, event *domain.Event) ([]*LocalCorrelation, error) {
+	results, err := ac.CorrelateEvents(ctx, []*domain.Event{event})
 	if err != nil {
 		return nil, err
 	}
@@ -970,7 +972,7 @@ func (ac *AnomalyCorrelator) Correlate(ctx context.Context, event *opinionated.O
 			Type:        result.Type,
 			Description: result.Summary,
 			Confidence:  0.8,
-			Evidence:    []Evidence{},
+			Evidence:    []domain.Evidence{},
 			Metadata:    result.Details,
 		}
 		correlations = append(correlations, correlation)
@@ -980,7 +982,7 @@ func (ac *AnomalyCorrelator) Correlate(ctx context.Context, event *opinionated.O
 }
 
 // CorrelateEvents is the renamed original method
-func (ac *AnomalyCorrelator) CorrelateEvents(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (ac *AnomalyCorrelator) CorrelateEvents(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	return ac.CorrelateOriginal(ctx, events)
 }
 
@@ -1008,7 +1010,7 @@ func NewAICorrelator(config *CorrelatorConfig) *AICorrelator {
 }
 
 // Correlate performs AI-based correlation (renamed to avoid conflict)
-func (aic *AICorrelator) CorrelateOriginal(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (aic *AICorrelator) CorrelateOriginal(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 	
 	// Simple AI-based pattern recognition
@@ -1029,7 +1031,7 @@ func (aic *AICorrelator) CorrelateOriginal(ctx context.Context, events []*opinio
 }
 
 // detectAIPatterns detects AI patterns
-func (aic *AICorrelator) detectAIPatterns(events []*opinionated.OpinionatedEvent) []*AIPattern {
+func (aic *AICorrelator) detectAIPatterns(events []*domain.Event) []*AIPattern {
 	var patterns []*AIPattern
 	
 	// Simple pattern: Cascading failures
@@ -1044,7 +1046,7 @@ func (aic *AICorrelator) detectAIPatterns(events []*opinionated.OpinionatedEvent
 }
 
 // detectCascadingFailure detects cascading failure patterns
-func (aic *AICorrelator) detectCascadingFailure(events []*opinionated.OpinionatedEvent) *AIPattern {
+func (aic *AICorrelator) detectCascadingFailure(events []*domain.Event) *AIPattern {
 	severityOrder := map[string]int{
 		"info":     1,
 		"warning":  2,
@@ -1095,8 +1097,8 @@ func (aic *AICorrelator) GetStats() interface{} {
 }
 
 // Correlate single event wrapper for perfect engine compatibility
-func (aic *AICorrelator) Correlate(ctx context.Context, event *opinionated.OpinionatedEvent) ([]*LocalCorrelation, error) {
-	results, err := aic.CorrelateEvents(ctx, []*opinionated.OpinionatedEvent{event})
+func (aic *AICorrelator) Correlate(ctx context.Context, event *domain.Event) ([]*LocalCorrelation, error) {
+	results, err := aic.CorrelateEvents(ctx, []*domain.Event{event})
 	if err != nil {
 		return nil, err
 	}
@@ -1109,7 +1111,7 @@ func (aic *AICorrelator) Correlate(ctx context.Context, event *opinionated.Opini
 			Type:        result.Type,
 			Description: result.Summary,
 			Confidence:  0.8,
-			Evidence:    []Evidence{},
+			Evidence:    []domain.Evidence{},
 			Metadata:    result.Details,
 		}
 		correlations = append(correlations, correlation)
@@ -1119,7 +1121,7 @@ func (aic *AICorrelator) Correlate(ctx context.Context, event *opinionated.Opini
 }
 
 // CorrelateEvents is the renamed original method
-func (aic *AICorrelator) CorrelateEvents(ctx context.Context, events []*opinionated.OpinionatedEvent) ([]AnalysisResult, error) {
+func (aic *AICorrelator) CorrelateEvents(ctx context.Context, events []*domain.Event) ([]AnalysisResult, error) {
 	return aic.CorrelateOriginal(ctx, events)
 }
 

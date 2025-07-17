@@ -447,12 +447,12 @@ func (r *DiskPressureRule) createDiskPressureFinding(resourceName, resourceNames
 	var severity correlation.Severity
 	if analysis.DiskUsagePercent >= 0.95 || analysis.InodeUsagePercent >= 0.95 ||
 		(analysis.TimeToFull > 0 && analysis.TimeToFull < 24*time.Hour) {
-		severity = correlation.SeverityCritical
+		severity = correlation.SeverityLevelCritical
 	} else if analysis.DiskUsagePercent >= 0.90 || analysis.InodeUsagePercent >= 0.90 ||
 		(analysis.TimeToFull > 0 && analysis.TimeToFull < 7*24*time.Hour) {
-		severity = correlation.SeverityError
+		severity = correlation.SeverityLevelError
 	} else {
-		severity = correlation.SeverityWarning
+		severity = correlation.SeverityLevelWarning
 	}
 
 	// Create finding
@@ -476,7 +476,7 @@ func (r *DiskPressureRule) createDiskPressureFinding(resourceName, resourceNames
 
 	// Add prediction if time to full is calculated
 	if analysis.TimeToFull > 0 {
-		finding.Prediction = &correlation.Prediction{
+		finding.Prediction = &correlation.RulePrediction{
 			Event:       "Disk Full",
 			TimeToEvent: analysis.TimeToFull,
 			Confidence:  analysis.ConfidenceLevel,
@@ -494,7 +494,7 @@ func (r *DiskPressureRule) createDiskPressureFinding(resourceName, resourceNames
 
 	// Add evidence
 	for _, source := range analysis.DataSources {
-		evidence := correlation.Evidence{
+		evidence := correlation.RuleEvidence{
 			Type:        "disk_pressure",
 			Source:      correlation.SourceType(source),
 			Description: fmt.Sprintf("Disk pressure analysis from %s", source),

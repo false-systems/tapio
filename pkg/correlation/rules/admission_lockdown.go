@@ -9,12 +9,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // AdmissionLockdownRule detects when strict policies lock down the cluster preventing operations
 // Pattern: Policy tightening → service account denials → controller failures → operational paralysis
 type AdmissionLockdownRule struct {
+	*correlation.BaseRule
 	config AdmissionLockdownConfig
 }
 
@@ -45,32 +46,10 @@ func DefaultAdmissionLockdownConfig() AdmissionLockdownConfig {
 
 // NewAdmissionLockdownRule creates a new admission lockdown detection rule
 func NewAdmissionLockdownRule(config AdmissionLockdownConfig) *AdmissionLockdownRule {
-	return &AdmissionLockdownRule{
-		config: config,
-	}
-}
-
-// ID returns the unique identifier for this rule
-func (r *AdmissionLockdownRule) ID() string {
-	return "admission_controller_lockdown"
-}
-
-// Name returns the human-readable name
-func (r *AdmissionLockdownRule) Name() string {
-	return "Admission Controller Lockdown Detection"
-}
-
-// Description returns a detailed description
-func (r *AdmissionLockdownRule) Description() string {
-	return "Detects when overly restrictive admission policies prevent legitimate operations, locking down cluster functionality"
-}
-
-// GetMetadata returns metadata about the rule
-func (r *AdmissionLockdownRule) GetMetadata() correlation.RuleMetadata {
-	return correlation.RuleMetadata{
-		ID:          r.ID(),
-		Name:        r.Name(),
-		Description: r.Description(),
+	metadata := correlation.RuleMetadata{
+		ID:          "admission_controller_lockdown",
+		Name:        "Admission Controller Lockdown Detection",
+		Description: "Detects when overly restrictive admission policies prevent legitimate operations, locking down cluster functionality",
 		Version:     "1.0.0",
 		Author:      "Tapio Correlation Engine",
 		Tags:        []string{"admission", "security", "policy", "lockdown"},
@@ -85,12 +64,18 @@ func (r *AdmissionLockdownRule) GetMetadata() correlation.RuleMetadata {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+
+	return &AdmissionLockdownRule{
+		BaseRule: correlation.NewBaseRule(metadata),
+		config:   config,
+	}
 }
+
 
 // CheckRequirements verifies that required data sources are available
 func (r *AdmissionLockdownRule) CheckRequirements(ctx context.Context, data *correlation.DataCollection) error {
 	if !data.IsSourceAvailable(correlation.SourceKubernetes) {
-		return correlation.NewRequirementNotMetError(r.ID(), r.GetMetadata().Requirements[0])
+		return correlation.NewRequirementNotMetError(r.GetID(), r.GetMetadata().Requirements[0])
 	}
 	return nil
 }
@@ -183,7 +168,7 @@ func (r *AdmissionLockdownRule) Execute(ctx context.Context, ruleCtx *correlatio
 					"Consider implementing policy dry-run before enforcement",
 					"Check for misconfigured policy engines (OPA, Kyverno, etc.)",
 				},
-				Prediction: &correlation.Prediction{
+				Prediction: &correlation.RulePrediction{
 					Event:       "Complete operational paralysis",
 					TimeToEvent: r.predictTimeToParalysis(denialStats, controllerFailures),
 					Confidence:  confidence,
@@ -638,21 +623,21 @@ func (r *AdmissionLockdownRule) determineSeverity(stats denialStatistics, sadeni
 	// System service account denials are critical
 	for _, sad := range sadenials {
 		if sad.IsSystemSA && sad.DenialCount > 5 {
-			return correlation.SeverityCritical
+			return correlation.SeverityLevelCritical
 		}
 	}
 
 	// High denial rate with controller failures
 	if stats.denialRate > r.config.CriticalDenialPercent && len(controllers) > 0 {
-		return correlation.SeverityCritical
+		return correlation.SeverityLevelCritical
 	}
 
 	// Many system namespace denials
 	if stats.SystemDenials > 10 {
-		return correlation.SeverityCritical
+		return correlation.SeverityLevelCritical
 	}
 
-	return correlation.SeverityHigh
+	return correlation.SeverityLevelError
 }
 
 func (r *AdmissionLockdownRule) assessImpact(stats denialStatistics, controllers []controllerFailure, impact operationalImpact) string {
@@ -705,14 +690,15 @@ func (r *AdmissionLockdownRule) identifyRootCause(denials []admissionDenial, sad
 	return "Admission control policies preventing legitimate cluster operations"
 }
 
-func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenials []serviceAccountDenial, controllers []controllerFailure, impact operationalImpact) []correlation.Evidence {
-	evidence := []correlation.Evidence{
+func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenials []serviceAccountDenial, controllers []controllerFailure, impact operationalImpact) []correlation.RuleEvidence {
+	evidence := []correlation.RuleEvidence{
 		{
 			Type:        "denial_rate",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%.0f denials per minute detected", stats.denialRate/100),
 			Timestamp:   time.Now(),
 			Confidence:  0.9,
+			Data:        make(map[string]interface{}),
 		},
 		{
 			Type:        "total_denials",
@@ -724,37 +710,40 @@ func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenial
 	}
 
 	if stats.SystemDenials > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "system_denials",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d denials in system namespaces", stats.SystemDenials),
 			Timestamp:   time.Now(),
 			Confidence:  0.9,
+			Data:        make(map[string]interface{}),
 		})
 	}
 
 	if len(sadenials) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "sa_denials",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d service accounts experiencing denials", len(sadenials)),
 			Timestamp:   time.Now(),
 			Confidence:  0.85,
+			Data:        make(map[string]interface{}),
 		})
 	}
 
 	if len(controllers) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "controller_failures",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d controllers affected by admission denials", len(controllers)),
 			Timestamp:   time.Now(),
 			Confidence:  0.9,
+			Data:        make(map[string]interface{}),
 		})
 	}
 
 	if impact.StuckDeployments > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "deployment_impact",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d deployments unable to progress", impact.StuckDeployments),
@@ -773,7 +762,7 @@ func (r *AdmissionLockdownRule) collectEvidence(stats denialStatistics, sadenial
 		}
 	}
 	if topResource != "" {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "resource_pattern",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("Most denied resource type: %s (%d denials)", topResource, maxDenials),

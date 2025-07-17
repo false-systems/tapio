@@ -6,9 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/domain"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -50,7 +49,7 @@ type OTELExporter struct {
 	mutex   sync.RWMutex
 
 	// Buffering for batch export
-	eventBuffer       []*opinionated.OpinionatedEvent
+	eventBuffer       []*domain.Event
 	patternBuffer     []*types.PatternResult
 	correlationBuffer []*domain.Correlation
 	bufferMutex       sync.Mutex
@@ -161,7 +160,7 @@ func NewOTELExporter(config *OTELExporterConfig, correlationEngine *Engine) (*OT
 
 	exporter := &OTELExporter{
 		config:            config,
-		eventBuffer:       make([]*opinionated.OpinionatedEvent, 0, config.BatchSize),
+		eventBuffer:       make([]*domain.Event, 0, config.BatchSize),
 		patternBuffer:     make([]*types.PatternResult, 0, config.BatchSize),
 		correlationBuffer: make([]*domain.Correlation, 0, config.BatchSize),
 	}
@@ -461,7 +460,7 @@ func (oe *OTELExporter) initializeMetrics() error {
 }
 
 // ExportEvent exports an opinionated event to OTEL with semantic grouping
-func (oe *OTELExporter) ExportEvent(ctx context.Context, event *opinionated.OpinionatedEvent) error {
+func (oe *OTELExporter) ExportEvent(ctx context.Context, event *domain.Event) error {
 	if !oe.config.ExportTraces {
 		return nil
 	}
@@ -476,7 +475,7 @@ func (oe *OTELExporter) ExportEvent(ctx context.Context, event *opinionated.Opin
 }
 
 // exportBasicEvent exports event without semantic grouping (fallback)
-func (oe *OTELExporter) exportBasicEvent(ctx context.Context, event *opinionated.OpinionatedEvent) error {
+func (oe *OTELExporter) exportBasicEvent(ctx context.Context, event *domain.Event) error {
 	// Create trace span for the event
 	ctx, span := oe.tracer.Start(ctx, "correlation.event.process",
 		trace.WithAttributes(
@@ -772,7 +771,7 @@ func (oe *OTELExporter) RecordPerformanceMetrics(ctx context.Context, stats *Int
 
 // Buffer management methods
 
-func (oe *OTELExporter) bufferEvent(event *opinionated.OpinionatedEvent) {
+func (oe *OTELExporter) bufferEvent(event *domain.Event) {
 	oe.bufferMutex.Lock()
 	defer oe.bufferMutex.Unlock()
 
@@ -807,7 +806,7 @@ func (oe *OTELExporter) bufferCorrelation(correlation *domain.Correlation) {
 
 func (oe *OTELExporter) flushEventBuffer() {
 	oe.bufferMutex.Lock()
-	events := make([]*opinionated.OpinionatedEvent, len(oe.eventBuffer))
+	events := make([]*domain.Event, len(oe.eventBuffer))
 	copy(events, oe.eventBuffer)
 	oe.eventBuffer = oe.eventBuffer[:0]
 	oe.bufferMutex.Unlock()
@@ -911,7 +910,7 @@ func (oe *OTELExporter) periodicFlush(ctx context.Context) {
 }
 
 // Placeholder implementations for log export
-func (oe *OTELExporter) exportEventToLog(event *opinionated.OpinionatedEvent) {
+func (oe *OTELExporter) exportEventToLog(event *domain.Event) {
 	// Would export to OTEL logs exporter
 }
 

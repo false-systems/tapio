@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"path/filepath"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collector"
 )
 
 // K8sSource implements Kubernetes API-based data collection

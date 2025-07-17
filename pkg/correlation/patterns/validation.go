@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/correlation/types"
 )
 
 // GroundTruthValidator validates pattern detection accuracy with real cluster data

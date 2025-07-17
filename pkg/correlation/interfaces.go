@@ -6,9 +6,34 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/falseyair/tapio/pkg/correlation/foundation"
+	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/domain"
 )
+
+// ============================================================================
+// INTERFACE ALIASES FOR BACKWARD COMPATIBILITY
+// ============================================================================
+
+// Core engine interfaces
+type Engine = foundation.Engine
+type Rule = foundation.Rule
+
+// Data source interfaces
+type EventStore = foundation.EventStore
+type DataSource = foundation.DataSource
+type DataHandler = foundation.DataHandler
+
+// Pattern detection interfaces
+type PatternDetector = foundation.PatternDetector
+type PatternRegistry = foundation.PatternRegistry
+
+// AutoFix interfaces
+type AutoFixEngine = foundation.AutoFixEngine
+
+// Performance interfaces
+type RulePerformance = foundation.RulePerformance
+type RuleExecution = foundation.RuleExecution
 
 // EngineStats contains statistics about the correlation engine
 type EngineStats struct {
@@ -34,13 +59,6 @@ type CorrelationEngine interface {
 	GetStats() *EngineStats
 }
 
-// PatternDetector detects patterns in event streams
-type PatternDetector interface {
-	// DetectPatterns analyzes events for patterns
-	DetectPatterns(ctx context.Context, events []domain.Event) ([]domain.Pattern, error)
-	// UpdatePattern updates pattern statistics
-	UpdatePattern(ctx context.Context, patternID string, event domain.Event) error
-}
 
 // InsightGenerator generates actionable insights
 type InsightGenerator interface {

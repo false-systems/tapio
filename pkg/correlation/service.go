@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/domain"
-	simpleTypes "github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/domain"
+	simpleTypes "github.com/falseyair/tapio/pkg/domain"
 )
 
 // Service provides correlation analysis for the CLI
@@ -69,7 +69,7 @@ func (s *Service) AnalyzeCheckResult(ctx context.Context, result *simpleTypes.Ch
 	}
 
 	// Get insights for the resources
-	resourceInsights := make(map[string][]*Insight)
+	resourceInsights := make(map[string][]*domain.Insight)
 	for _, problem := range result.Problems {
 		insights := s.insightStore.GetInsights(problem.Resource.Name, problem.Resource.Namespace)
 		if len(insights) > 0 {
@@ -194,11 +194,11 @@ type TimelineSummary struct {
 }
 
 // GetMostCriticalInsights returns the most critical insights
-func (r *ServiceCorrelationResult) GetMostCriticalInsights(limit int) []*Insight {
+func (r *ServiceCorrelationResult) GetMostCriticalInsights(limit int) []*domain.Insight {
 	// Sort insights by severity and return top ones
-	critical := make([]*Insight, 0)
-	high := make([]*Insight, 0)
-	medium := make([]*Insight, 0)
+	critical := make([]*domain.Insight, 0)
+	high := make([]*domain.Insight, 0)
+	medium := make([]*domain.Insight, 0)
 
 	for _, insight := range r.Insights {
 		switch insight.Severity {
@@ -223,8 +223,8 @@ func (r *ServiceCorrelationResult) GetMostCriticalInsights(limit int) []*Insight
 }
 
 // GetActionableRecommendations returns all actionable recommendations
-func (r *ServiceCorrelationResult) GetActionableRecommendations() []*ActionableItem {
-	recommendations := make([]*ActionableItem, 0)
+func (r *ServiceCorrelationResult) GetActionableRecommendations() []domain.ActionItem {
+	recommendations := make([]domain.ActionItem, 0)
 
 	for _, insight := range r.Insights {
 		recommendations = append(recommendations, insight.ActionableItems...)

@@ -7,6 +7,17 @@ import (
 	"time"
 )
 
+// Type aliases for types used in this file
+type Severity = SeverityLevel
+
+// Severity constants for formatter
+const (
+	SeverityLow      = SeverityLevelInfo
+	SeverityMedium   = SeverityLevelWarning
+	SeverityHigh     = SeverityLevelError
+	SeverityCritical = SeverityLevelCritical
+)
+
 // OutputFormat defines the output format type
 type OutputFormat int
 

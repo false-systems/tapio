@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/domain"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -109,7 +109,7 @@ func TestETCDCascadeRule(t *testing.T) {
 		// Should detect the cascade pattern
 		if len(findings) > 0 {
 			assert.Equal(t, "ETCD Cascading Failure Detected", findings[0].Title)
-			assert.Equal(t, correlation.SeverityCritical, findings[0].Severity)
+			assert.Equal(t, correlation.SeverityLevelCritical, findings[0].Severity)
 			assert.NotNil(t, findings[0].Prediction)
 		}
 	})
@@ -180,7 +180,7 @@ func TestCertificateCascadeRule(t *testing.T) {
 		// May detect certificate cascade
 		if len(findings) > 0 {
 			assert.Contains(t, findings[0].Title, "Certificate")
-			assert.True(t, findings[0].Severity >= correlation.SeverityHigh)
+			assert.True(t, findings[0].Severity >= correlation.SeverityLevelError)
 		}
 	})
 }

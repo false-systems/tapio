@@ -8,7 +8,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // SourceType represents the type of data source
@@ -36,8 +36,8 @@ type AnalysisData struct {
 	TimeWindow     time.Duration   `json:"time_window"`
 }
 
-// DataSource defines the interface for retrieving data from different sources
-type DataSource interface {
+// CorrelationDataSource defines the interface for retrieving data from different sources
+type CorrelationDataSource interface {
 	// GetType returns the source type
 	GetType() SourceType
 
@@ -61,7 +61,7 @@ type KubernetesData struct {
 	Secrets      []corev1.Secret        `json:"secrets"`
 	Logs         map[string][]LogEntry  `json:"logs"`
 	Metrics      map[string]interface{} `json:"metrics"`
-	Problems     []types.Problem        `json:"problems"`
+	Problems     []domain.Problem        `json:"problems"`
 	Timestamp    time.Time              `json:"timestamp"`
 }
 
@@ -234,7 +234,7 @@ type JournaldData struct {
 
 // DataCollection provides unified access to multiple data sources
 type DataCollection struct {
-	sources  map[SourceType]DataSource
+	sources  map[SourceType]CorrelationDataSource
 	cache    map[string]*CachedData
 	cacheTTL time.Duration
 }
@@ -246,7 +246,7 @@ type CachedData struct {
 }
 
 // NewDataCollection creates a new data collection with specified sources
-func NewDataCollection(sources map[SourceType]DataSource) *DataCollection {
+func NewDataCollection(sources map[SourceType]CorrelationDataSource) *DataCollection {
 	return &DataCollection{
 		sources:  sources,
 		cache:    make(map[string]*CachedData),
@@ -255,7 +255,7 @@ func NewDataCollection(sources map[SourceType]DataSource) *DataCollection {
 }
 
 // AddSource adds a new data source
-func (dc *DataCollection) AddSource(sourceType SourceType, source DataSource) {
+func (dc *DataCollection) AddSource(sourceType SourceType, source CorrelationDataSource) {
 	dc.sources[sourceType] = source
 }
 

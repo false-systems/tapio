@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/foundation"
-	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/correlation/foundation"
+	"github.com/falseyair/tapio/pkg/correlation/types"
 )
 
 // EventSource represents an event source for correlation processing
@@ -639,15 +639,8 @@ func (e *BaseCorrelationEngine) GetRuleStats(ruleID string) (RulePerformance, er
 	}
 
 	foundationPerf := rule.GetPerformance()
-	// Convert foundation.RulePerformance to local RulePerformance
-	localPerf := RulePerformance{
-		RuleID:           ruleID,
-		TotalExecutions:  uint64(foundationPerf.ExecutionCount),
-		AverageLatency:   foundationPerf.AverageExecutionTime,
-		MaxLatency:       foundationPerf.MaxExecutionTime,
-		MinLatency:       foundationPerf.MinExecutionTime,
-		LastExecuted:     foundationPerf.LastExecuted,
-	}
+	// Return foundation.RulePerformance directly
+	localPerf := foundationPerf
 
 	return localPerf, nil
 }

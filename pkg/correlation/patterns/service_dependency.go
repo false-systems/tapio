@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/correlation/types"
 )
 
 // ServiceDependencyFailureDetector implements detection of service dependency failure patterns

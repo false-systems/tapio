@@ -6,9 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/correlation/types"
-	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // PerfectEngineWithStore wraps PerfectEngine to automatically store insights
@@ -40,7 +39,7 @@ func (e *PerfectEngineWithStore) GetBaseEngine() *PerfectEngine {
 }
 
 // ProcessOpinionatedEvent processes event and stores resulting insights
-func (e *PerfectEngineWithStore) ProcessOpinionatedEvent(ctx context.Context, event *opinionated.OpinionatedEvent) error {
+func (e *PerfectEngineWithStore) ProcessOpinionatedEvent(ctx context.Context, event *domain.Event) error {
 	// Process through base engine
 	if err := e.baseEngine.ProcessOpinionatedEvent(ctx, event); err != nil {
 		return err
@@ -106,70 +105,106 @@ func (e *PerfectEngineWithStore) GetStats() *EngineStats {
 }
 
 // extractInsightsFromEvent simulates insight extraction from processed event
-func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.OpinionatedEvent) []*domain.Insight {
+func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *domain.Event) []*domain.Insight {
 	insights := make([]*domain.Insight, 0)
 
 	// Generate insights based on event data
 	// This is a simplified implementation - real engine would generate from correlations
 
 	// Check for anomalies
-	if event.Anomaly != nil && event.Anomaly.AnomalyScore > 0.7 {
+	anomalyScore := 0.0
+	if event.Anomaly != nil {
+		if score, ok := event.Anomaly["AnomalyScore"].(float64); ok {
+			anomalyScore = score
+		}
+	}
+	
+	if anomalyScore > 0.7 {
+		pod := ""
+		namespace := ""
+		if event.Context != nil {
+			if p, ok := event.Context["Pod"].(string); ok {
+				pod = p
+			}
+			if n, ok := event.Context["Namespace"].(string); ok {
+				namespace = n
+			}
+		}
+		
 		insight := &domain.Insight{
 			ID:           generateInsightID(),
-			Title:        fmt.Sprintf("Anomaly detected in %s", event.Context.Pod),
-			Description:  fmt.Sprintf("Anomaly detected with score %.2f", event.Anomaly.AnomalyScore),
-			Severity:     severityFromScore(event.Anomaly.AnomalyScore),
-			Category:     "anomaly",
-			ResourceName: event.Context.Pod,
-			Namespace:    event.Context.Namespace,
-			Timestamp:    event.Timestamp,
-			Evidence: []domain.Evidence{
-				{
-					EventID:     event.ID,
-					Description: "Anomaly detection triggered",
-					Timestamp:   event.Timestamp,
-					Source:      event.Source.Collector,
-				},
+			Type:         "anomaly",
+			Title:        fmt.Sprintf("Anomaly detected in %s", pod),
+			Description:  fmt.Sprintf("Anomaly detected with score %.2f", anomalyScore),
+			Severity:     domain.SeverityLevel(severityFromScore(float32(anomalyScore))),
+			Data: map[string]interface{}{
+				"category":     "anomaly",
+				"resourceName": pod,
+				"namespace":    namespace,
+				"anomalyScore": anomalyScore,
 			},
+			Timestamp:    event.Timestamp,
 		}
 
-		// Add prediction if behavioral anomaly
-		if event.Behavioral != nil && event.Behavioral.Confidence > 0.6 {
-			insight.Prediction = &Prediction{
-				Class:       "behavioral_degradation",
-				Probability: event.Behavioral.Confidence,
-				Confidence:  0.8,
-				Explanation: "Behavioral pattern indicates potential degradation",
-				Features:    make(map[string]float64),
+		// Add prediction data if behavioral anomaly
+		if event.Behavioral != nil {
+			if confidence, ok := event.Behavioral["Confidence"].(float64); ok && confidence > 0.6 {
+				insight.Data["prediction"] = map[string]interface{}{
+					"id":          fmt.Sprintf("pred_%s", event.ID),
+					"type":        "behavioral_degradation",
+					"event":       "Service degradation",
+					"probability": confidence,
+					"confidence":  0.8,
+					"description": "Behavioral pattern indicates potential degradation",
+					"timeWindow": map[string]interface{}{
+						"start":    event.Timestamp,
+						"end":      event.Timestamp.Add(time.Hour),
+						"duration": time.Hour.String(),
+					},
+				}
 			}
 		}
 
-		// Add actionable items
-		insight.ActionableItems = e.generateActionableItems(event, insight)
+		// Add actionable items to data
+		insight.Data["actionableItems"] = e.generateActionableItems(event, insight)
 
 		insights = append(insights, insight)
 	}
 
 	// Check for causality chains
 	if event.Causality != nil && len(event.Causality.CausalChain) > 2 {
+		pod := ""
+		namespace := ""
+		if event.Context != nil {
+			if p, ok := event.Context["Pod"].(string); ok {
+				pod = p
+			}
+			if n, ok := event.Context["Namespace"].(string); ok {
+				namespace = n
+			}
+		}
+		
 		insight := &domain.Insight{
 			ID:           generateInsightID(),
-			Title:        fmt.Sprintf("Causality chain detected for %s", event.Context.Pod),
+			Type:         "causality",
+			Title:        fmt.Sprintf("Causality chain detected for %s", pod),
 			Description:  fmt.Sprintf("Multi-step causality chain with %d events", len(event.Causality.CausalChain)),
-			Severity:     "medium",
-			Category:     "causality",
-			ResourceName: event.Context.Pod,
-			Namespace:    event.Context.Namespace,
+			Severity:     domain.SeverityMedium,
+			Data: map[string]interface{}{
+				"category":        "causality",
+				"resourceName":    pod,
+				"namespace":       namespace,
+				"causalityEvidence": e.extractCausalityEvidence(event.Causality),
+			},
 			Timestamp:    event.Timestamp,
-			Evidence:     e.extractCausalityEvidence(event.Causality),
 		}
 
 		// Add root cause if identified
 		if event.Causality.RootCause != "" {
-			insight.RootCause = &RootCause{
-				EventID:     event.Causality.RootCause,
-				Description: "Identified root cause in causality chain",
-				Confidence:  event.Causality.Confidence,
+			insight.Data["rootCause"] = map[string]interface{}{
+				"id":          event.Causality.RootCause,
+				"description": "Identified root cause in causality chain",
+				"confidence":  event.Causality.Confidence,
 			}
 		}
 
@@ -177,7 +212,9 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 	}
 
 	// Check for performance issues - simplified for now
-	if false { // TODO: Add performance context when available
+	/*
+	// TODO: Add performance context when available
+	if false {
 		insight := &domain.Insight{
 			ID:           generateInsightID(),
 			Title:        fmt.Sprintf("Performance degradation in %s", event.Context.Pod),
@@ -189,50 +226,91 @@ func (e *PerfectEngineWithStore) extractInsightsFromEvent(event *opinionated.Opi
 			Timestamp:    event.Timestamp,
 			Evidence: []domain.Evidence{
 				{
-					EventID:     event.ID,
+					ID:          event.ID,
+					Type:        "performance",
 					Description: fmt.Sprintf("Performance metric degraded"),
 					Timestamp:   event.Timestamp,
 					Source:      event.Source.Collector,
+					Confidence:  0.8,
 				},
 			},
 		}
 
 		// Add prediction for continued degradation
-		insight.Prediction = &Prediction{
-			Class:       "performance_failure",
+		insight.Prediction = &domain.Prediction{
+			ID:          fmt.Sprintf("pred_perf_%s", event.ID),
+			Type:        "performance_failure",
+			Event:       "Service performance failure",
 			Probability: 0.7,
 			Confidence:  0.75,
-			Explanation: "Performance trending toward failure threshold",
-			Features:    make(map[string]float64),
+			Description: "Performance trending toward failure threshold",
+			TimeWindow: domain.TimeWindow{
+				Start:    event.Timestamp,
+				End:      event.Timestamp.Add(30 * time.Minute),
+				Duration: 30 * time.Minute,
+			},
+			Evidence: []domain.Evidence{},
 		}
 
 		insights = append(insights, insight)
 	}
+	*/
 
 	return insights
 }
 
 // generateActionableItems creates actionable recommendations
-func (e *PerfectEngineWithStore) generateActionableItems(event *opinionated.OpinionatedEvent, insight *domain.Insight) []*domain.ActionItem {
-	items := make([]*domain.ActionItem, 0)
+func (e *PerfectEngineWithStore) generateActionableItems(event *domain.Event, insight *domain.Insight) []domain.ActionItem {
+	items := make([]domain.ActionItem, 0)
+
+	// Get category from insight data
+	category := ""
+	if insight.Data != nil {
+		if cat, ok := insight.Data["category"].(string); ok {
+			category = cat
+		}
+	}
+	
+	// Get pod and namespace from event context
+	pod := ""
+	namespace := ""
+	if event.Context != nil {
+		if p, ok := event.Context["Pod"].(string); ok {
+			pod = p
+		}
+		if n, ok := event.Context["Namespace"].(string); ok {
+			namespace = n
+		}
+	}
 
 	// Generate based on insight category
-	switch insight.Category {
+	switch category {
 	case "anomaly":
-		items = append(items, &ActionableItem{
+		items = append(items, domain.ActionItem{
+			ID:          fmt.Sprintf("action_mem_%s", event.ID),
+			Type:        "resource_adjustment",
 			Description: "Increase memory limits",
-			Command:     fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"%s\",\"resources\":{\"limits\":{\"memory\":\"2Gi\"}}}]}}}}'", event.Context.Pod, event.Context.Namespace, event.Context.Pod),
-			Impact:      "Prevents OOM kills and improves stability",
-			Risk:        "low",
+			Command:     fmt.Sprintf("kubectl patch deployment %s -n %s -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"%s\",\"resources\":{\"limits\":{\"memory\":\"2Gi\"}}}]}}}}'", pod, namespace, pod),
+			Priority:    "high",
+			Metadata: map[string]interface{}{
+				"impact": "Prevents OOM kills and improves stability",
+				"risk":   "low",
+			},
 		})
 	case "performance":
-		items = append(items, &ActionableItem{
+		items = append(items, domain.ActionItem{
+			ID:          fmt.Sprintf("action_scale_%s", event.ID),
+			Type:        "scaling",
 			Description: "Scale up deployment",
-			Command:     fmt.Sprintf("kubectl scale deployment %s -n %s --replicas=3", event.Context.Pod, event.Context.Namespace),
-			Impact:      "Distributes load and improves response times",
-			Risk:        "low",
+			Command:     fmt.Sprintf("kubectl scale deployment %s -n %s --replicas=3", pod, namespace),
+			Priority:    "medium",
+			Metadata: map[string]interface{}{
+				"impact": "Distributes load and improves response times",
+				"risk":   "low",
+			},
 		})
-		items = append(items, &ActionableItem{
+		items = append(items, domain.ActionItem{
+			ID:          fmt.Sprintf("action_hpa_%s", event.ID),
 			Description: "Enable HPA",
 			Command:     fmt.Sprintf("kubectl autoscale deployment %s -n %s --cpu-percent=70 --min=2 --max=5", event.Context.Pod, event.Context.Namespace),
 			Impact:      "Automatically scales based on load",
@@ -244,15 +322,18 @@ func (e *PerfectEngineWithStore) generateActionableItems(event *opinionated.Opin
 }
 
 // extractCausalityEvidence extracts evidence from causality chain
-func (e *PerfectEngineWithStore) extractCausalityEvidence(causality *opinionated.CausalityContext) []domain.Evidence {
+func (e *PerfectEngineWithStore) extractCausalityEvidence(causality *domain.CausalityContext) []domain.Evidence {
 	evidence := make([]domain.Evidence, 0, len(causality.CausalChain))
 
 	for _, event := range causality.CausalChain {
 		evidence = append(evidence, domain.Evidence{
-			EventID:     event.EventID,
+			ID:          event.EventID,
+			Type:        "causality",
 			Description: event.Description,
 			Timestamp:   event.Timestamp,
 			Source:      "causality_analysis",
+			Content:     event,
+			Confidence:  0.8,
 		})
 	}
 
@@ -320,23 +401,23 @@ func (e *PerfectEngineWithStore) cleanupOldInsights(ctx context.Context) {
 }
 
 // convertToOpinionatedEvent converts basic Event to OpinionatedEvent
-func (e *PerfectEngineWithStore) convertToOpinionatedEvent(event *types.Event) *opinionated.OpinionatedEvent {
+func (e *PerfectEngineWithStore) convertToOpinionatedEvent(event *types.Event) *domain.Event {
 	// This is a simplified conversion
 	// Real implementation would map all fields properly
-	return &opinionated.OpinionatedEvent{
+	return &domain.Event{
 		ID:         event.ID,
 		Timestamp:  event.Timestamp,
-		Category:   opinionated.CategorySystemHealth,
-		Severity:   opinionated.SeverityMedium,
+		Category:   domain.CategorySystemHealth,
+		Severity:   domain.SeverityMedium,
 		Confidence: 0.8,
 
-		Source: opinionated.EventSource{
+		Source: domain.EventSource{
 			Collector: event.Source,
 			Component: "correlation",
 			Node:      event.Entity.Node,
 		},
 
-		Context: opinionated.OpinionatedContext{
+		Context: domain.OpinionatedContext{
 			Namespace: event.Entity.Namespace,
 			Pod:       event.Entity.Pod,
 			Container: event.Entity.Container,

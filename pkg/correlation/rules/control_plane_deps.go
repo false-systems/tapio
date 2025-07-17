@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/types"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // ControlPlaneDepsRule detects control plane dependency failures that cascade through components
@@ -185,7 +185,7 @@ func (r *ControlPlaneDepsRule) Execute(ctx context.Context, ruleCtx *correlation
 					"Add health checks and retries for critical paths",
 					"Review and optimize API rate limits",
 				},
-				Prediction: &correlation.Prediction{
+				Prediction: &correlation.RulePrediction{
 					Event:       "Complete control plane failure",
 					TimeToEvent: r.predictTimeToFailure(componentFailures, cascadeEffects),
 					Confidence:  confidence,
@@ -764,22 +764,22 @@ func (r *ControlPlaneDepsRule) determineSeverity(componentFailures []componentFa
 	}
 
 	if criticalDown > 1 {
-		return correlation.SeverityCritical
+		return correlation.SeverityLevelCritical
 	}
 
 	// Significant workload impact
 	if impact.UnhealthyDeployments > 10 || impact.PendingPods > 50 {
-		return correlation.SeverityCritical
+		return correlation.SeverityLevelCritical
 	}
 
 	// Leader election issues are critical
 	for _, failure := range componentFailures {
 		if failure.LeaderElectionIssue {
-			return correlation.SeverityCritical
+			return correlation.SeverityLevelCritical
 		}
 	}
 
-	return correlation.SeverityHigh
+	return correlation.SeverityLevelError
 }
 
 func (r *ControlPlaneDepsRule) assessImpact(componentFailures []componentFailure, impact workloadImpact) string {
@@ -838,8 +838,8 @@ func (r *ControlPlaneDepsRule) identifyRootCause(depIssues []dependencyIssue, ch
 	return "External dependency failures affecting control plane components"
 }
 
-func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, componentFailures []componentFailure, cascadeEffects []cascadeEffect, impact workloadImpact) []correlation.Evidence {
-	evidence := []correlation.Evidence{}
+func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, componentFailures []componentFailure, cascadeEffects []cascadeEffect, impact workloadImpact) []correlation.RuleEvidence {
+	evidence := []correlation.RuleEvidence{}
 	now := time.Now()
 
 	// Dependency evidence
@@ -848,7 +848,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 		depTypes[issue.DependencyType]++
 	}
 	for depType, count := range depTypes {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "dependency_failure",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d %s dependency failures", count, depType),
@@ -863,7 +863,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 
 	// Component evidence
 	if len(componentFailures) > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "component_failure",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d control plane components affected", len(componentFailures)),
@@ -876,7 +876,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 
 		for _, failure := range componentFailures {
 			if failure.LeaderElectionIssue {
-				evidence = append(evidence, correlation.Evidence{
+				evidence = append(evidence, correlation.RuleEvidence{
 					Type:        "leader_election_failure",
 					Source:      correlation.SourceKubernetes,
 					Description: fmt.Sprintf("%s: leader election failures", failure.ComponentType),
@@ -897,7 +897,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 		totalDownstream += len(effect.DownstreamFailures)
 	}
 	if totalDownstream > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "cascade_effect",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d downstream resource failures", totalDownstream),
@@ -911,7 +911,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 
 	// Impact evidence
 	if impact.UnhealthyDeployments > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "workload_impact",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d deployments unhealthy", impact.UnhealthyDeployments),
@@ -923,7 +923,7 @@ func (r *ControlPlaneDepsRule) collectEvidence(depIssues []dependencyIssue, comp
 		})
 	}
 	if impact.UnscheduledPods > 0 {
-		evidence = append(evidence, correlation.Evidence{
+		evidence = append(evidence, correlation.RuleEvidence{
 			Type:        "scheduling_failure",
 			Source:      correlation.SourceKubernetes,
 			Description: fmt.Sprintf("%d pods cannot be scheduled", impact.UnscheduledPods),

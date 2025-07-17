@@ -7,8 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 )
 
 // PerfectEngine is the correlation engine perfectly designed for our opinionated data format
@@ -172,7 +171,7 @@ func NewPerfectEngine(config *PerfectConfig) (*PerfectEngine, error) {
 		New: func() interface{} {
 			return &PerfectCorrelationResult{
 				Correlations: make([]*LocalCorrelation, 0, 10),
-				Insights:     make([]*Insight, 0, 5),
+				Insights:     make([]*domain.Insight, 0, 5),
 			}
 		},
 	}
@@ -190,7 +189,7 @@ func NewPerfectEngine(config *PerfectConfig) (*PerfectEngine, error) {
 }
 
 // ProcessOpinionatedEvent processes a single opinionated event through all correlators
-func (e *PerfectEngine) ProcessOpinionatedEvent(ctx context.Context, event *opinionated.OpinionatedEvent) error {
+func (e *PerfectEngine) ProcessOpinionatedEvent(ctx context.Context, event *domain.Event) error {
 	if !e.running.Load() {
 		return fmt.Errorf("correlation engine is not running")
 	}
@@ -280,8 +279,8 @@ func (e *PerfectEngine) ProcessOpinionatedEvent(ctx context.Context, event *opin
 }
 
 // generateInsights creates actionable insights from correlations
-func (e *PerfectEngine) generateInsights(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) []*Insight {
-	insights := make([]*Insight, 0, 3)
+func (e *PerfectEngine) generateInsights(correlations []*LocalCorrelation, event *domain.Event) []*domain.Insight {
+	insights := make([]*domain.Insight, 0, 3)
 
 	// Group correlations by type for insight generation
 	semanticCorrelations := e.filterCorrelationsByType(correlations, "semantic")
@@ -446,22 +445,22 @@ func (e *PerfectEngine) filterCorrelationsByType(correlations []*LocalCorrelatio
 	return filtered
 }
 
-func (e *PerfectEngine) generateSemanticInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateSemanticInsight(correlations []*LocalCorrelation, event *domain.Event) *domain.Insight {
 	// Implementation would generate semantic insights using our semantic context
 	return nil
 }
 
-func (e *PerfectEngine) generateBehavioralInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateBehavioralInsight(correlations []*LocalCorrelation, event *domain.Event) *domain.Insight {
 	// Implementation would generate behavioral insights using our behavioral context
 	return nil
 }
 
-func (e *PerfectEngine) generateTemporalInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateTemporalInsight(correlations []*LocalCorrelation, event *domain.Event) *domain.Insight {
 	// Implementation would generate temporal insights using our temporal context
 	return nil
 }
 
-func (e *PerfectEngine) generateCausalityInsight(correlations []*LocalCorrelation, event *opinionated.OpinionatedEvent) *Insight {
+func (e *PerfectEngine) generateCausalityInsight(correlations []*LocalCorrelation, event *domain.Event) *domain.Insight {
 	// Implementation would generate causality insights using our causality context
 	return nil
 }

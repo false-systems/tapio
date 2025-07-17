@@ -363,11 +363,11 @@ func (r *OOMPredictionRule) createOOMFinding(podName, podNamespace string, analy
 	// Determine severity based on risk level
 	var severity correlation.Severity
 	if analysis.RiskLevel >= r.config.CriticalThreshold {
-		severity = correlation.SeverityCritical
+		severity = correlation.SeverityLevelCritical
 	} else if analysis.RiskLevel >= r.config.WarningThreshold {
-		severity = correlation.SeverityWarning
+		severity = correlation.SeverityLevelWarning
 	} else {
-		severity = correlation.SeverityInfo
+		severity = correlation.SeverityLevelInfo
 	}
 
 	// Create finding
@@ -387,7 +387,7 @@ func (r *OOMPredictionRule) createOOMFinding(podName, podNamespace string, analy
 
 	// Add prediction if time to OOM is calculated
 	if analysis.TimeToOOM > 0 {
-		finding.Prediction = &correlation.Prediction{
+		finding.Prediction = &correlation.RulePrediction{
 			Event:       "Out of Memory (OOM) Kill",
 			TimeToEvent: analysis.TimeToOOM,
 			Confidence:  analysis.RiskLevel,
@@ -404,7 +404,7 @@ func (r *OOMPredictionRule) createOOMFinding(podName, podNamespace string, analy
 
 	// Add evidence from different sources
 	for _, source := range analysis.DataSources {
-		evidence := correlation.Evidence{
+		evidence := correlation.RuleEvidence{
 			Type:        "memory_usage",
 			Source:      correlation.SourceType(source),
 			Description: fmt.Sprintf("Memory usage data from %s", source),

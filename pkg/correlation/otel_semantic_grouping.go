@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/events/opinionated"
+	"github.com/falseyair/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -31,10 +31,10 @@ type SemanticGroup struct {
 	ID               string                          `json:"id"`
 	Intent           string                          `json:"intent"`           // What is this group trying to achieve?
 	SemanticType     string                          `json:"semantic_type"`    // memory_cascade, network_failure, etc.
-	RootCause        *opinionated.OpinionatedEvent   `json:"root_cause"`       // The triggering event
-	CausalChain      []*opinionated.OpinionatedEvent `json:"causal_chain"`     // Events in causal order
-	SpatialCluster   []*opinionated.OpinionatedEvent `json:"spatial_cluster"`  // Events in same spatial area
-	TemporalCluster  []*opinionated.OpinionatedEvent `json:"temporal_cluster"` // Events in same time window
+	RootCause        *domain.Event   `json:"root_cause"`       // The triggering event
+	CausalChain      []*domain.Event `json:"causal_chain"`     // Events in causal order
+	SpatialCluster   []*domain.Event `json:"spatial_cluster"`  // Events in same spatial area
+	TemporalCluster  []*domain.Event `json:"temporal_cluster"` // Events in same time window
 	ConfidenceScore  float64                         `json:"confidence_score"` // Group coherence confidence
 	ImpactAssessment *GroupImpactAssessment          `json:"impact_assessment"`
 	PredictedOutcome *PredictedOutcome               `json:"predicted_outcome"`
@@ -132,7 +132,7 @@ func NewSemanticEventGrouper(engine *Engine) *SemanticEventGrouper {
 }
 
 // ProcessEventWithSemanticGrouping processes an event and creates intelligent OTEL traces
-func (seg *SemanticEventGrouper) ProcessEventWithSemanticGrouping(ctx context.Context, event *opinionated.OpinionatedEvent) error {
+func (seg *SemanticEventGrouper) ProcessEventWithSemanticGrouping(ctx context.Context, event *domain.Event) error {
 	// Step 1: Classify the semantic intent
 	intent := seg.classifySemanticIntent(event)
 
@@ -144,7 +144,7 @@ func (seg *SemanticEventGrouper) ProcessEventWithSemanticGrouping(ctx context.Co
 }
 
 // classifySemanticIntent determines the semantic intent of the event
-func (seg *SemanticEventGrouper) classifySemanticIntent(event *opinionated.OpinionatedEvent) string {
+func (seg *SemanticEventGrouper) classifySemanticIntent(event *domain.Event) string {
 	// Use existing semantic context if available
 	if event.Semantic != nil && event.Semantic.Intent != "" {
 		return event.Semantic.Intent
@@ -181,7 +181,7 @@ func (seg *SemanticEventGrouper) classifySemanticIntent(event *opinionated.Opini
 }
 
 // findOrCreateSemanticGroup finds existing group or creates new one
-func (seg *SemanticEventGrouper) findOrCreateSemanticGroup(ctx context.Context, event *opinionated.OpinionatedEvent, intent string) *SemanticGroup {
+func (seg *SemanticEventGrouper) findOrCreateSemanticGroup(ctx context.Context, event *domain.Event, intent string) *SemanticGroup {
 	// Check for existing causal relationships
 	if existingGroup := seg.findCausallyRelatedGroup(event); existingGroup != nil {
 		return existingGroup
@@ -207,7 +207,7 @@ func (seg *SemanticEventGrouper) findOrCreateSemanticGroup(ctx context.Context, 
 }
 
 // findCausallyRelatedGroup finds group based on causality
-func (seg *SemanticEventGrouper) findCausallyRelatedGroup(event *opinionated.OpinionatedEvent) *SemanticGroup {
+func (seg *SemanticEventGrouper) findCausallyRelatedGroup(event *domain.Event) *SemanticGroup {
 	if event.Causality == nil || len(event.Causality.CausalChain) == 0 {
 		return nil
 	}
@@ -227,7 +227,7 @@ func (seg *SemanticEventGrouper) findCausallyRelatedGroup(event *opinionated.Opi
 }
 
 // findSpatiallyRelatedGroup finds group based on spatial proximity
-func (seg *SemanticEventGrouper) findSpatiallyRelatedGroup(event *opinionated.OpinionatedEvent) *SemanticGroup {
+func (seg *SemanticEventGrouper) findSpatiallyRelatedGroup(event *domain.Event) *SemanticGroup {
 	eventEntity := seg.getEntityIdentifier(event)
 
 	for _, group := range seg.semanticGroupCache {
@@ -240,7 +240,7 @@ func (seg *SemanticEventGrouper) findSpatiallyRelatedGroup(event *opinionated.Op
 }
 
 // findTemporallyRelatedGroup finds group based on temporal proximity
-func (seg *SemanticEventGrouper) findTemporallyRelatedGroup(event *opinionated.OpinionatedEvent) *SemanticGroup {
+func (seg *SemanticEventGrouper) findTemporallyRelatedGroup(event *domain.Event) *SemanticGroup {
 	eventTime := event.Timestamp
 
 	// Get adaptive time window for this event type
@@ -256,7 +256,7 @@ func (seg *SemanticEventGrouper) findTemporallyRelatedGroup(event *opinionated.O
 }
 
 // findBehaviorallyRelatedGroup finds group based on behavioral patterns
-func (seg *SemanticEventGrouper) findBehaviorallyRelatedGroup(event *opinionated.OpinionatedEvent) *SemanticGroup {
+func (seg *SemanticEventGrouper) findBehaviorallyRelatedGroup(event *domain.Event) *SemanticGroup {
 	if event.Behavioral == nil {
 		return nil
 	}
@@ -271,7 +271,7 @@ func (seg *SemanticEventGrouper) findBehaviorallyRelatedGroup(event *opinionated
 }
 
 // createNewSemanticGroup creates a new semantic group
-func (seg *SemanticEventGrouper) createNewSemanticGroup(ctx context.Context, event *opinionated.OpinionatedEvent, intent string) *SemanticGroup {
+func (seg *SemanticEventGrouper) createNewSemanticGroup(ctx context.Context, event *domain.Event, intent string) *SemanticGroup {
 	groupID := fmt.Sprintf("semantic_group_%s_%d", intent, time.Now().UnixNano())
 
 	// Create OTEL trace context for this semantic group
@@ -282,9 +282,9 @@ func (seg *SemanticEventGrouper) createNewSemanticGroup(ctx context.Context, eve
 		Intent:          intent,
 		SemanticType:    seg.deriveSemanticType(event),
 		RootCause:       event,
-		CausalChain:     []*opinionated.OpinionatedEvent{event},
-		SpatialCluster:  []*opinionated.OpinionatedEvent{event},
-		TemporalCluster: []*opinionated.OpinionatedEvent{event},
+		CausalChain:     []*domain.Event{event},
+		SpatialCluster:  []*domain.Event{event},
+		TemporalCluster: []*domain.Event{event},
 		ConfidenceScore: seg.calculateInitialConfidence(event),
 		TraceID:         span.SpanContext().TraceID().String(),
 		SpanContext:     span.SpanContext(),
@@ -303,7 +303,7 @@ func (seg *SemanticEventGrouper) createNewSemanticGroup(ctx context.Context, eve
 }
 
 // createSemanticCorrelationTrace creates OTEL trace with correlation information
-func (seg *SemanticEventGrouper) createSemanticCorrelationTrace(ctx context.Context, event *opinionated.OpinionatedEvent, group *SemanticGroup) error {
+func (seg *SemanticEventGrouper) createSemanticCorrelationTrace(ctx context.Context, event *domain.Event, group *SemanticGroup) error {
 	// Use the group's span context
 	ctx = trace.ContextWithSpanContext(ctx, group.SpanContext)
 
@@ -439,7 +439,7 @@ func (seg *SemanticEventGrouper) createSemanticCorrelationTrace(ctx context.Cont
 
 // Helper methods for semantic grouping logic
 
-func (seg *SemanticEventGrouper) getEntityIdentifier(event *opinionated.OpinionatedEvent) string {
+func (seg *SemanticEventGrouper) getEntityIdentifier(event *domain.Event) string {
 	if event.Context.Namespace != "" && event.Context.Pod != "" {
 		return fmt.Sprintf("%s/%s", event.Context.Namespace, event.Context.Pod)
 	}
@@ -504,7 +504,7 @@ func (seg *SemanticEventGrouper) extractNamespace(entity string) string {
 	return ""
 }
 
-func (seg *SemanticEventGrouper) getAdaptiveTimeWindow(event *opinionated.OpinionatedEvent) time.Duration {
+func (seg *SemanticEventGrouper) getAdaptiveTimeWindow(event *domain.Event) time.Duration {
 	// Get adaptive window based on event characteristics
 	eventType := seg.deriveSemanticType(event)
 
@@ -538,7 +538,7 @@ func (seg *SemanticEventGrouper) isWithinTemporalWindow(eventTime time.Time, gro
 	return false
 }
 
-func (seg *SemanticEventGrouper) hasSimilarBehavioralPattern(event *opinionated.OpinionatedEvent, group *SemanticGroup) bool {
+func (seg *SemanticEventGrouper) hasSimilarBehavioralPattern(event *domain.Event, group *SemanticGroup) bool {
 	if event.Behavioral == nil {
 		return false
 	}
@@ -556,7 +556,7 @@ func (seg *SemanticEventGrouper) hasSimilarBehavioralPattern(event *opinionated.
 	return false
 }
 
-func (seg *SemanticEventGrouper) calculateBehavioralSimilarity(behavioral1, behavioral2 *opinionated.BehavioralContext) float64 {
+func (seg *SemanticEventGrouper) calculateBehavioralSimilarity(behavioral1, behavioral2 *domain.BehavioralContext) float64 {
 	// Simple similarity calculation - in production would use ML
 	score := 0.0
 
@@ -587,7 +587,7 @@ func (seg *SemanticEventGrouper) calculateBehavioralSimilarity(behavioral1, beha
 	return score
 }
 
-func (seg *SemanticEventGrouper) deriveSemanticType(event *opinionated.OpinionatedEvent) string {
+func (seg *SemanticEventGrouper) deriveSemanticType(event *domain.Event) string {
 	// Derive semantic type from event characteristics
 	if event.Semantic != nil && event.Semantic.EventType != "" {
 		return event.Semantic.EventType
@@ -610,7 +610,7 @@ func (seg *SemanticEventGrouper) deriveSemanticType(event *opinionated.Opinionat
 	return category
 }
 
-func (seg *SemanticEventGrouper) calculateInitialConfidence(event *opinionated.OpinionatedEvent) float64 {
+func (seg *SemanticEventGrouper) calculateInitialConfidence(event *domain.Event) float64 {
 	// Calculate initial confidence for new semantic group
 	confidence := float64(event.Confidence)
 
