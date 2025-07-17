@@ -9,13 +9,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 )
 
 // EBPFCollector implements the Collector interface for eBPF-based monitoring
 type EBPFCollector struct {
 	// Core components
-	monitor   ebpf.Monitor
+	monitor   core.Collector
 	eventChan chan Event
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -29,7 +29,7 @@ type EBPFCollector struct {
 	isRunning       bool
 
 	// Event processing
-	eventBuffer   chan *ebpf.ProcessMemoryStats
+	eventBuffer   chan *core.ProcessMemoryStats
 	processCache  *ProcessCache
 	pidTranslator PIDTranslator
 }
@@ -40,7 +40,7 @@ type PIDTranslator interface {
 }
 
 // NewEBPFCollector creates a new eBPF-based sniffer
-func NewEBPFCollector(monitor ebpf.Monitor, translator PIDTranslator) *EBPFCollector {
+func NewEBPFCollector(monitor core.Collector, translator PIDTranslator) *EBPFCollector {
 	return &EBPFCollector{
 		monitor:       monitor,
 		pidTranslator: translator,
@@ -69,7 +69,7 @@ func (s *EBPFCollector) Start(ctx context.Context, config Config) error {
 
 	s.config = config
 	s.eventChan = make(chan Event, config.EventBufferSize)
-	s.eventBuffer = make(chan *ebpf.ProcessMemoryStats, 1000)
+	s.eventBuffer = make(chan *core.ProcessMemoryStats, 1000)
 
 	// Create cancellable context
 	s.ctx, s.cancel = context.WithCancel(ctx)
@@ -160,7 +160,7 @@ func (s *EBPFCollector) collectEvents() {
 
 // processEvents processes raw eBPF data into events
 func (s *EBPFCollector) processEvents() {
-	batch := make([]*ebpf.ProcessMemoryStats, 0, 100)
+	batch := make([]*core.ProcessMemoryStats, 0, 100)
 	batchTimer := time.NewTicker(10 * time.Millisecond) // 10ms batch timeout
 	defer batchTimer.Stop()
 
@@ -189,7 +189,7 @@ func (s *EBPFCollector) processEvents() {
 }
 
 // processBatch processes a batch of memory stats
-func (s *EBPFCollector) processBatch(batch []*ebpf.ProcessMemoryStats) {
+func (s *EBPFCollector) processBatch(batch []*core.ProcessMemoryStats) {
 	for _, stat := range batch {
 		// Update process cache
 		s.processCache.Update(stat)
@@ -202,7 +202,7 @@ func (s *EBPFCollector) processBatch(batch []*ebpf.ProcessMemoryStats) {
 }
 
 // checkForAnomalies detects issues in process stats
-func (s *EBPFCollector) checkForAnomalies(stat *ebpf.ProcessMemoryStats) *Event {
+func (s *EBPFCollector) checkForAnomalies(stat *core.ProcessMemoryStats) *Event {
 	// Memory leak detection
 	if stat.AllocationRate > 10*1024*1024 { // 10MB/s
 		return s.createMemoryLeakEvent(stat)
@@ -217,7 +217,7 @@ func (s *EBPFCollector) checkForAnomalies(stat *ebpf.ProcessMemoryStats) *Event 
 }
 
 // createMemoryLeakEvent creates a memory leak detection event
-func (s *EBPFCollector) createMemoryLeakEvent(stat *ebpf.ProcessMemoryStats) *Event {
+func (s *EBPFCollector) createMemoryLeakEvent(stat *core.ProcessMemoryStats) *Event {
 	event := &Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -255,7 +255,7 @@ func (s *EBPFCollector) createMemoryLeakEvent(stat *ebpf.ProcessMemoryStats) *Ev
 }
 
 // createHighMemoryEvent creates a high memory usage event
-func (s *EBPFCollector) createHighMemoryEvent(stat *ebpf.ProcessMemoryStats) *Event {
+func (s *EBPFCollector) createHighMemoryEvent(stat *core.ProcessMemoryStats) *Event {
 	event := &Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -314,7 +314,7 @@ func (s *EBPFCollector) predictOOMs() {
 }
 
 // emitOOMPrediction emits an OOM prediction event
-func (s *EBPFCollector) emitOOMPrediction(pid uint32, pred *ebpf.OOMPrediction, proc *ProcessInfo) {
+func (s *EBPFCollector) emitOOMPrediction(pid uint32, pred *core.OOMPrediction, proc *ProcessInfo) {
 	event := &Event{
 		ID:        uuid.New().String(),
 		Timestamp: time.Now(),
@@ -428,7 +428,7 @@ func NewProcessCache(maxSizeBytes int) *ProcessCache {
 }
 
 // Update updates process information
-func (c *ProcessCache) Update(stat *ebpf.ProcessMemoryStats) {
+func (c *ProcessCache) Update(stat *core.ProcessMemoryStats) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

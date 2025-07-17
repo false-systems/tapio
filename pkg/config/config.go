@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 )
 
 // Config represents the complete Tapio configuration
@@ -48,7 +48,7 @@ type FeaturesConfig struct {
 // EBPFConfig wraps the existing eBPF configuration with additional settings
 type EBPFConfig struct {
 	// Embed existing eBPF config
-	ebpf.Config `yaml:",inline" json:",inline"`
+	core.Config `yaml:",inline" json:",inline"`
 
 	// Additional Tapio-specific eBPF settings
 	AutoDetectCapabilities bool     `yaml:"auto_detect_capabilities" json:"auto_detect_capabilities"`
@@ -118,7 +118,6 @@ type ResourcesConfig struct {
 	MaxCPUPercent       float64       `yaml:"max_cpu_percent" json:"max_cpu_percent"`
 	EventBufferSize     int           `yaml:"event_buffer_size" json:"event_buffer_size"`
 	MaxEventsPerSecond  int           `yaml:"max_events_per_second" json:"max_events_per_second"`
-	DataRetentionPeriod time.Duration `yaml:"data_retention_period" json:"data_retention_period"`
 	CleanupInterval     time.Duration `yaml:"cleanup_interval" json:"cleanup_interval"`
 	ParallelWorkers     int           `yaml:"parallel_workers" json:"parallel_workers"`
 }
@@ -150,17 +149,10 @@ func DefaultConfig() *Config {
 		},
 
 		EBPF: EBPFConfig{
-			Config: ebpf.Config{
+			Config: core.Config{
 				Enabled:                 true,
-				EnableMemoryMonitoring:  true,
-				EnableNetworkMonitoring: true,
-				EnablePacketAnalysis:    false, // Disabled by default for performance
-				EnableDNSMonitoring:     true,
-				EnableProtocolAnalysis:  false, // Disabled by default for performance
-				SamplingRate:            1.0,
-				BufferSize:              4096,
-				EventBufferSize:         1024,
-				RetentionPeriod:         "1h",
+				EnableMemory:  true,
+				EnableNetwork: true,
 			},
 			AutoDetectCapabilities: true,
 			FallbackOnFailure:      true,
@@ -221,7 +213,6 @@ func DefaultConfig() *Config {
 			MaxCPUPercent:       25.0,
 			EventBufferSize:     1024,
 			MaxEventsPerSecond:  1000,
-			DataRetentionPeriod: 24 * time.Hour,
 			CleanupInterval:     1 * time.Hour,
 			ParallelWorkers:     getDefaultWorkerCount(),
 		},
@@ -250,7 +241,7 @@ func ZeroConfig() *Config {
 	// Reduce resource usage for unknown environments
 	config.Resources.MaxMemoryUsage = 256
 	config.Resources.MaxCPUPercent = 15.0
-	config.EBPF.SamplingRate = 0.1 // Reduce sampling for performance
+	config.EBPF.SamplingInterval = 100 * time.Millisecond // Reduce sampling for performance
 
 	return config
 }
@@ -317,27 +308,6 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate retention periods
-	if c.EBPF.RetentionPeriod != "" {
-		if _, err := time.ParseDuration(c.EBPF.RetentionPeriod); err != nil {
-			errors = append(errors, ValidationError{
-				Field:      "ebpf.retention_period",
-				Message:    fmt.Sprintf("invalid duration format: %s", c.EBPF.RetentionPeriod),
-				Suggestion: "use duration format like '5m', '1h', '24h'",
-				FixCommand: "tapio config set ebpf.retention_period 5m",
-			})
-		}
-	}
-
-	if c.Resources.DataRetentionPeriod != 0 {
-		if c.Resources.DataRetentionPeriod < time.Minute {
-			errors = append(errors, ValidationError{
-				Field:      "resources.data_retention_period",
-				Message:    "data retention period too short",
-				Suggestion: "use minimum 1 minute retention",
-				FixCommand: "tapio config set resources.data_retention_period 1h",
-			})
-		}
-	}
 
 	// Validate output format
 	validFormats := []string{"human", "json", "yaml", "table", "csv"}

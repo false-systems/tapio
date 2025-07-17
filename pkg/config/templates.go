@@ -114,14 +114,12 @@ func GetProductionTemplate() *ConfigTemplate {
 
 	config.Resources.MaxMemoryUsage = 2048
 	config.Resources.MaxCPUPercent = 75
-	config.Resources.DataRetentionPeriod = 7 * 24 * time.Hour
 
 	config.Output.Format = "json"
 	config.Output.Color = false
 
 	config.EBPF.Enabled = true
-	config.EBPF.SamplingRate = 0.1
-	config.EBPF.RetentionPeriod = "1h"
+	config.EBPF.SamplingInterval = 100 * time.Millisecond
 
 	config.Advanced.ProfilerEnabled = true
 	config.Advanced.ProfilerPort = 6060
@@ -296,7 +294,7 @@ func GetPerformanceTemplate() *ConfigTemplate {
 	config.Features.EnablePrediction = true
 
 	config.EBPF.Enabled = true
-	config.EBPF.SamplingRate = 0.05 // Lower sampling for performance
+	config.EBPF.SamplingInterval = 50 * time.Millisecond // Lower sampling for performance
 	config.EBPF.EventBufferSize = 2048
 
 	config.Resources.MaxMemoryUsage = 4096

@@ -11,7 +11,7 @@ import (
 type SimpleManager struct {
 	// Core components
 	collectors  map[string]Collector
-	correlation *CorrelationEngine
+	correlation CorrelationEngineInterface
 	eventChan   chan Event
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -51,7 +51,7 @@ func DefaultManagerConfig() ManagerConfig {
 
 // NewSimpleManager creates a new sniffer manager
 func NewSimpleManager(config ManagerConfig) *SimpleManager {
-	correlation := NewCorrelationEngine(config.CorrelationBatchSize, config.CorrelationBatchTimeout)
+	correlation := NewSemanticCorrelationEngine(config.CorrelationBatchSize, config.CorrelationBatchTimeout)
 
 	return &SimpleManager{
 		collectors:  make(map[string]Collector),

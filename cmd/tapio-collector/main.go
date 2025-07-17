@@ -85,7 +85,7 @@ func runCollector(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	// Initialize shutdown handler
-	shutdownHandler := shutdown.NewHandler()
+	shutdownHandler := shutdown.NewHandler(30 * time.Second)
 	defer shutdownHandler.Shutdown()
 
 	// Setup signal handling for graceful shutdown
@@ -95,7 +95,7 @@ func runCollector(cmd *cobra.Command, args []string) error {
 	go func() {
 		sig := <-sigCh
 		fmt.Printf("Received signal %v, initiating graceful shutdown...\n", sig)
-		shutdownHandler.Initiate()
+		shutdownHandler.Start()
 		cancel()
 	}()
 
@@ -104,21 +104,21 @@ func runCollector(cmd *cobra.Command, args []string) error {
 		MaxMemoryMB: defaultMaxMemoryMB,
 		MaxCPUMilli: defaultMaxCPUMilli,
 	})
-	shutdownHandler.RegisterCleanup("resource-monitor", monitor.Shutdown)
+	shutdownHandler.Register("resource-monitor", func(ctx context.Context) error { return monitor.Shutdown() })
 
 	// Initialize gRPC client for server communication
 	grpcClient, err := initializeGRPCClient(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gRPC client: %w", err)
 	}
-	shutdownHandler.RegisterCleanup("grpc-client", grpcClient.Stop)
+	shutdownHandler.Register("grpc-client", func(ctx context.Context) error { return grpcClient.Stop() })
 
 	// Initialize collector manager
 	collectorManager, err := initializeCollectorManager(cfg, grpcClient)
 	if err != nil {
 		return fmt.Errorf("failed to initialize collector manager: %w", err)
 	}
-	shutdownHandler.RegisterCleanup("collector-manager", collectorManager.Stop)
+	shutdownHandler.Register("collector-manager", func(ctx context.Context) error { return collectorManager.Stop() })
 
 	// Start all components
 	fmt.Printf("🚀 Starting Tapio Collector v%s\n", version)
@@ -157,7 +157,7 @@ func runCollector(cmd *cobra.Command, args []string) error {
 		case <-statusTicker.C:
 			printStatus(monitor, grpcClient, collectorManager)
 
-		case <-shutdownHandler.Done():
+		case <-shutdownHandler.Wait(); return nil:
 			fmt.Printf("🏁 Collector shutdown completed\n")
 			return nil
 		}
@@ -194,12 +194,9 @@ func loadConfiguration() (*collector.Config, error) {
 
 	// Create configuration struct
 	cfg := &collector.Config{
-		EnabledCollectors: viper.GetStringSlice("collector.enabled_collectors"),
 		SamplingRate:      viper.GetFloat64("collector.sampling_rate"),
 		MaxEventsPerSec:   viper.GetInt("collector.max_events_per_sec"),
-		BufferSize:        viper.GetInt("collector.buffer_size"),
 
-		GRPC: collector.GRPCConfig{
 			ServerEndpoints:      viper.GetStringSlice("grpc.server_endpoints"),
 			TLSEnabled:           viper.GetBool("grpc.tls_enabled"),
 			MaxBatchSize:         viper.GetInt("grpc.max_batch_size"),
@@ -208,7 +205,6 @@ func loadConfiguration() (*collector.Config, error) {
 			MaxReconnectAttempts: viper.GetInt("grpc.max_reconnect_attempts"),
 		},
 
-		Resources: collector.ResourceConfig{
 			MaxMemoryMB: viper.GetInt("resources.max_memory_mb"),
 			MaxCPUMilli: viper.GetInt("resources.max_cpu_milli"),
 		},
@@ -216,21 +212,14 @@ func loadConfiguration() (*collector.Config, error) {
 
 	// Override with command-line flags if provided
 	if serverEndpoint != defaultServerEndpoint {
-		cfg.GRPC.ServerEndpoints = []string{serverEndpoint}
 	}
 
 	return cfg, nil
 }
 
-func initializeGRPCClient(cfg *collector.Config) (*collector.GRPCStreamingClient, error) {
+func initializeGRPCClient(cfg *collector.Config) (*grpc.Client, error) {
 	// Create gRPC client configuration
 	grpcConfig := grpc.DefaultClientConfig()
-	grpcConfig.ServerEndpoints = cfg.GRPC.ServerEndpoints
-	grpcConfig.TLSEnabled = cfg.GRPC.TLSEnabled
-	grpcConfig.MaxBatchSize = uint32(cfg.GRPC.MaxBatchSize)
-	grpcConfig.BatchTimeout = cfg.GRPC.BatchTimeout
-	grpcConfig.ReconnectEnabled = cfg.GRPC.ReconnectEnabled
-	grpcConfig.MaxReconnectAttempts = cfg.GRPC.MaxReconnectAttempts
 
 	// Create node information for registration
 	nodeInfo := &grpc.NodeInfo{
@@ -248,9 +237,9 @@ func initializeGRPCClient(cfg *collector.Config) (*collector.GRPCStreamingClient
 	return collector.NewGRPCStreamingClient(grpcClient), nil
 }
 
-func initializeCollectorManager(cfg *collector.Config, grpcClient *collector.GRPCStreamingClient) (*collector.Manager, error) {
+func initializeCollectorManager(cfg *collector.Config, grpcClient *grpc.Client) (*collector.SimpleManager, error) {
 	// Create collector manager
-	manager := collector.NewManager(cfg, grpcClient)
+	manager := collector.NewSimpleManager(collector.DefaultManagerConfig())
 
 	// Register enabled collectors
 	for _, collectorName := range cfg.EnabledCollectors {
@@ -271,7 +260,7 @@ func initializeCollectorManager(cfg *collector.Config, grpcClient *collector.GRP
 	return manager, nil
 }
 
-func printStatus(monitor *monitoring.ResourceMonitor, grpcClient *collector.GRPCStreamingClient, manager *collector.Manager) {
+func printStatus(monitor *monitoring.ResourceMonitor, grpcClient *grpc.Client, manager *collector.SimpleManager) {
 	// Get resource usage
 	usage := monitor.GetUsage()
 

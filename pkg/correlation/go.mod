@@ -1,9 +1,9 @@
-module github.com/falseyair/tapio/pkg/correlation
+module github.com/yairfalse/tapio/pkg/correlation
 
 go 1.24.3
 
 require (
-	github.com/falseyair/tapio/pkg/domain v0.0.0
+	github.com/yairfalse/tapio/pkg/domain v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.10.0
 	github.com/yairfalse/tapio v0.0.0-20250716215701-8135cc5f50a8
@@ -54,4 +54,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/falseyair/tapio/pkg/domain => ../domain
+replace github.com/yairfalse/tapio/pkg/domain => ../domain
