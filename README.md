@@ -1,263 +1,244 @@
-# Tapio 🌲
+# Tapio Observability Platform
 
-> **Work in Progress** - A simple Kubernetes debugging tool
+<div align="center">
 
-Tapio is being developed to make Kubernetes debugging more accessible. Currently in early development with basic functionality working.
+![Tapio Logo](https://img.shields.io/badge/Tapio-Observability%20Platform-blue?style=for-the-badge)
 
-## What Works Today
+**Observability Platform with Semantic Correlation**
 
-### Basic Commands
-```bash
-# Check the health of your Kubernetes resources
-tapio check
+[![Go Version](https://img.shields.io/badge/Go-1.24-blue.svg)](https://golang.org)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-# Export metrics for Prometheus
-tapio prometheus --port 8080
+[Features](#features) • [Architecture](#architecture) • [Development](#development)
 
-# Show version information
-tapio version
-```
+</div>
 
-### Current Features
-- ✅ **Simple Health Checks** - Basic analysis of pods and deployments
-- ✅ **Kubernetes Integration** - Works with your existing kubeconfig
-- ✅ **Prometheus Metrics** - Exports health metrics for monitoring
-- ✅ **Clean CLI** - Human-readable output, no configuration required
+## Overview
 
-## Installation
+Tapio is an observability platform that combines multi-source data collection with semantic correlation capabilities. The platform includes modular collectors for various data sources and a correlation engine that provides insights into system behavior.
+
+## 🚀 Key Features
+
+### **Semantic Correlation**
+- **SemanticCorrelationEngine**: Advanced event analysis and correlation
+- **Intent Classification**: Automatic categorization of system events
+- **Real-time Processing**: Event correlation with configurable time windows
+- **OTEL Integration**: OpenTelemetry traces with semantic enrichment
+
+### **Multi-Source Collection**
+- **eBPF Collector**: Kernel-level monitoring capabilities
+- **Kubernetes Collector**: Cluster event monitoring
+- **SystemD Collector**: Service monitoring and health tracking
+- **JournalD Collector**: Structured log processing
+- **CNI Collector**: Network event collection
+
+### **Modular Architecture**
+- **Independent Modules**: Each collector has its own go.mod
+- **Pluggable Design**: Collectors can be enabled/disabled independently
+- **Clean Interfaces**: Standardized event processing pipeline
+- **Production Ready**: Built for reliability and maintainability
+
+## 🏃 Development Setup
 
 ### Prerequisites
-- Kubernetes cluster access (if `kubectl get pods` works, Tapio will work)
-- Go 1.21+ (for building from source)
+- Go 1.24+
+- Git
 
 ### Build from Source
 ```bash
-git clone https://github.com/your-org/tapio
+git clone https://github.com/yairfalse/tapio.git
 cd tapio
-make build
-./bin/tapio check
+
+# Build collector
+go build ./cmd/tapio-collector/
+
+# Build server  
+go build ./cmd/tapio-server/
+
+# Build individual collector modules
+go build ./pkg/collectors/ebpf/
+go build ./pkg/collectors/k8s/
+go build ./pkg/collectors/systemd/
+go build ./pkg/collectors/journald/
 ```
 
-## Example Output
+## 🏗️ Architecture
 
+Tapio follows a modular architecture with independent components:
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Collectors    │───▶│  Correlation     │───▶│    Server       │
+│                 │    │     Engine       │    │                 │
+│ • eBPF          │    │                  │    │ • gRPC API      │
+│ • Kubernetes    │    │ • Semantic       │    │ • REST API      │
+│ • SystemD       │    │ • Intent Class   │    │ • Health Checks │
+│ • JournalD      │    │ • OTEL Traces    │    │                 │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+### Repository Structure
+
+```
+pkg/
+├── collectors/
+│   ├── ebpf/           # go.mod - Kernel monitoring
+│   ├── k8s/            # go.mod - Kubernetes events  
+│   ├── systemd/        # go.mod - Service monitoring
+│   ├── journald/       # go.mod - Log processing
+│   └── cni/            # Network event collection
+├── collector/          # Manager and correlation engine
+├── correlation/        # Legacy correlation system
+├── intelligence/
+│   └── correlation/    # go.mod - Extracted semantic engine
+├── domain/             # go.mod - Shared types
+├── dataflow/           # Event routing
+└── server/             # Server implementation
+
+cmd/
+├── tapio-collector/    # Collector service
+├── tapio-server/       # Server service
+├── tapio-gui/          # GUI application
+└── tapio-cli/          # CLI tool
+```
+
+### Core Components
+
+#### **SimpleManager** (`pkg/collector/manager.go`)
+- Coordinates multiple collectors
+- Manages event routing to correlation engine
+- Provides health monitoring and statistics
+
+#### **SemanticCorrelationEngine** (`pkg/collector/semantic_correlation_engine.go`)
+- Processes events for semantic correlation
+- Generates insights with intent classification
+- Integrates with OpenTelemetry for trace enrichment
+
+#### **Modular Collectors**
+Each collector is independently buildable:
+- **eBPF**: `pkg/collectors/ebpf/` - System-level event collection
+- **Kubernetes**: `pkg/collectors/k8s/` - Cluster event monitoring
+- **SystemD**: `pkg/collectors/systemd/` - Service health tracking
+- **JournalD**: `pkg/collectors/journald/` - Structured log processing
+
+## 🔧 Configuration
+
+### Basic Collector Configuration
+```yaml
+# Example configuration structure
+collectors:
+  ebpf:
+    enabled: true
+    enable_memory: true
+    enable_network: true
+    
+  kubernetes:
+    enabled: true
+    
+  systemd:
+    enabled: true
+
+correlation:
+  batch_size: 100
+  batch_timeout: 100ms
+```
+
+*Note: Complete configuration examples available in source code*
+
+## 🧪 Development
+
+### Local Development Setup
 ```bash
-$ tapio check
-HEALTHY: 3 pods running normally
-WARNING: 1 pod has resource issues
-  - api-service: Memory usage at 85% of limit
+# Clone repository
+git clone https://github.com/yairfalse/tapio.git
+cd tapio
 
-READY: 2/3 deployments fully available
+# Install dependencies
+go mod download
+
+# Build components
+go build ./cmd/tapio-collector/
+go build ./cmd/tapio-server/
+
+# Test individual modules
+go test ./pkg/collector/
+go test ./pkg/collectors/ebpf/
+go test ./pkg/collectors/k8s/
+go test ./pkg/collectors/systemd/
+go test ./pkg/collectors/journald/
 ```
 
-## Planned Features (Work in Progress)
-
-We're working on adding more advanced capabilities:
-
-- 🚧 **eBPF Integration** - Kernel-level insights for deeper debugging
-- 🚧 **Advanced Correlation** - Connect Kubernetes events with system behavior  
-- 🚧 **Predictive Analysis** - Early warning for potential issues
-- 🚧 **Multi-layer Monitoring** - System, network, and application insights
-
-## Architecture
-
-### Current Architecture
-Tapio is built with a modular, extensible foundation:
-
-```
-tapio/
-├── cmd/tapio/          # CLI entry point
-├── pkg/
-│   ├── k8s/           # Kubernetes client integration
-│   ├── simple/        # Basic health checking
-│   ├── metrics/       # Prometheus metrics
-│   └── ebpf/          # eBPF framework (foundation ready)
-└── deploy/helm/       # Kubernetes deployment
-```
-
-### Future Vision: Complete System Intelligence
-
-We're designing Tapio to eventually provide unprecedented visibility into Kubernetes systems. Here's the architecture we're working toward:
-
-```
-┌─ User Experience ────────────────────────────────────────┐
-│ tapio check → "Pod will OOM in 7 minutes"               │
-│ tapio why   → "Memory leak in /api/users endpoint"       │
-│ tapio fix   → "Applied memory limit increase"           │
-└──────────────────────────────────────────────────────────┘
-                             │
-┌─ Correlation Engine ─────────────────────────────────────┐
-│ • Timeline analysis across all data sources             │
-│ • Pattern recognition for known failure modes           │
-│ • Confidence scoring for predictions                    │
-│ • Human-readable root cause explanations                │
-└──────────────────────────────────────────────────────────┘
-                             │
-┌─ Multi-Layer Data Collection ───────────────────────────┐
-│                                                          │
-│ eBPF Layer (In Development)                             │
-│ ├─ Memory: allocation tracking, leak detection          │
-│ ├─ Network: packet analysis, connection mapping         │
-│ ├─ Process: syscall patterns, resource usage            │
-│ └─ Performance: CPU scheduling, I/O bottlenecks         │
-│                                                          │
-│ System Layer (Planned)                                  │
-│ ├─ systemd: service health, restart patterns           │
-│ ├─ journald: log analysis, error correlation            │
-│ └─ container runtime: lifecycle events                  │
-│                                                          │
-│ Kubernetes Layer (Working Today) ✅                     │
-│ ├─ API resources: pods, deployments, services           │
-│ ├─ Events: scheduling, failures, scaling                │
-│ └─ Metrics: resource usage, health status               │
-└──────────────────────────────────────────────────────────┘
-```
-
-#### The Big Idea: Predictive Kubernetes Debugging
-
-Instead of reactive debugging ("why did it crash?"), we want to enable predictive insights:
-
-**Today's Debugging:**
+### Module Development
+Each collector module can be developed independently:
 ```bash
-# Something breaks first, then you investigate
-kubectl get pods  → CrashLoopBackOff
-kubectl logs pod  → "OutOfMemoryError"
-kubectl describe  → "Container was OOMKilled"
+# Work on eBPF collector
+cd pkg/collectors/ebpf
+go build ./...
+go test ./...
+
+# Work on Kubernetes collector  
+cd pkg/collectors/k8s
+go build ./...
+go test ./...
 ```
 
-**Tapio's Vision:**
+### Testing
 ```bash
-# Catch problems before they happen
-tapio check → "WARNING: api-service will OOM in 7m23s"
-tapio why   → "Memory leak: 18MB/min growth in user session cache"
-tapio fix   → "Recommendation: Increase memory limit to 512Mi"
+# Test core collector functionality
+go test ./pkg/collector/
+
+# Test semantic correlation
+go test ./pkg/collector/ -run TestSemanticCorrelation
+
+# Test individual collectors
+go test ./pkg/collectors/...
 ```
 
-#### Technical Approach: Correlation Across Layers
+### Contributing
+We welcome contributions! Please follow these guidelines:
 
-The key insight is that Kubernetes problems usually have signatures across multiple system layers:
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Make your changes and add tests
+4. Ensure tests pass: `go test ./...`
+5. Commit your changes: `git commit -m 'Add your feature'`
+6. Push to the branch: `git push origin feature/your-feature`
+7. Open a Pull Request
 
-```
-Problem: Memory Leak → OOM → Pod Restart
-├─ eBPF sees: Growing heap allocations, no corresponding frees
-├─ systemd sees: containerd memory pressure warnings  
-├─ journald sees: "Memory cgroup out of memory" messages
-└─ Kubernetes sees: OOMKilled event, pod restart
+## 📋 Current Status
 
-Tapio correlates these signals to predict the OOM before it happens
-```
+### Working Components
+- ✅ **Modular collector architecture** with independent go.mod files
+- ✅ **SemanticCorrelationEngine** integrated into SimpleManager
+- ✅ **Core data flow** from collectors through correlation to server
+- ✅ **eBPF, K8s, SystemD, JournalD collectors** with basic functionality
+- ✅ **Server framework** with gRPC and REST API structure
+- ✅ **CLI and GUI applications** (framework present)
 
-#### Why This Approach Could Work
+### Development Areas
+- 🔧 **Interface compatibility** - Some main service interfaces need updating
+- 🔧 **Full feature implementation** - Core collectors need feature completion
+- 🔧 **Configuration validation** - Enhanced config validation and examples
+- 🔧 **Documentation** - Complete API documentation and examples
+- 🔧 **Testing** - Comprehensive test suite expansion
 
-1. **Layer Correlation**: Most K8s issues leave traces across multiple system layers
-2. **Early Signals**: Kernel/system events often precede K8s-visible failures  
-3. **Pattern Recognition**: Similar failure modes create recognizable signatures
-4. **Explainable AI**: Rule-based correlation provides clear explanations
+## 📄 License
 
-#### Development Philosophy
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-We're building this incrementally:
-- ✅ **Foundation First**: Solid CLI, K8s integration, metrics (working today)
-- 🚧 **Add Layers Gradually**: eBPF, then systemd, then advanced correlation
-- 🔮 **Keep It Simple**: Complex backend, simple frontend ("just run `tapio check`")
-- 📚 **Learn and Iterate**: Real-world testing drives feature priorities
+## 🙏 Acknowledgments
 
-The goal isn't to replace existing tools, but to provide the "first command" you run when something seems wrong - the one that gives you the clearest picture of what's actually happening in your cluster.
-
-## Development Status
-
-### Completed Components
-- [x] CLI framework with Cobra
-- [x] Kubernetes API integration
-- [x] Basic health analysis
-- [x] Prometheus metrics export
-- [x] Helm deployment charts
-- [x] Cross-platform builds
-
-### In Development
-- [ ] eBPF-based system monitoring
-- [ ] Advanced correlation engine
-- [ ] systemd integration
-- [ ] Network monitoring
-- [ ] Performance optimization
-
-## Contributing
-
-This is an early-stage project and we welcome contributions! Areas where help is especially appreciated:
-
-- Testing on different Kubernetes distributions
-- eBPF program development
-- Documentation improvements
-- Feature suggestions and bug reports
-
-### Development Setup
-```bash
-# Install development tools
-make setup
-
-# Run tests
-make test
-
-# Build and test locally
-make build
-./bin/tapio check
-```
-
-## Configuration
-
-Tapio works with zero configuration by default. It uses your existing Kubernetes configuration from:
-- `~/.kube/config`
-- `KUBECONFIG` environment variable  
-- In-cluster service account (when running as a pod)
-
-## Deployment
-
-### Kubernetes Deployment
-```bash
-# Deploy as a DaemonSet for cluster-wide monitoring
-helm install tapio ./deploy/helm/tapio
-
-# Or run locally
-./bin/tapio check --all-namespaces
-```
-
-## Roadmap
-
-### Short Term (Current Focus)
-- Improve health analysis accuracy
-- Add more Kubernetes resource types
-- Enhanced error messages and debugging
-
-### Medium Term
-- eBPF integration for system-level insights
-- Advanced correlation between K8s and system events
-- Performance monitoring and predictions
-
-### Long Term
-- Machine learning for anomaly detection
-- Integration with popular monitoring stacks
-- Multi-cluster support
-
-## Why Tapio?
-
-Kubernetes debugging often requires deep expertise and multiple tools. Tapio aims to:
-
-- **Simplify** - One command to understand what's wrong
-- **Explain** - Clear, human-readable explanations
-- **Predict** - Catch issues before they become problems
-- **Integrate** - Work with existing tools and workflows
-
-Named after the Finnish forest god, representing the deep roots needed to understand complex systems.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-org/tapio/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/tapio/discussions)
-- **Documentation**: [Wiki](https://github.com/your-org/tapio/wiki)
+- The eBPF community for kernel observability foundations
+- The OpenTelemetry project for observability standards  
+- The Kubernetes community for container orchestration
+- The Go community for excellent tooling and libraries
 
 ---
 
-**Note**: This project is in active development. APIs and commands may change as we iterate toward v1.0. We appreciate your patience and feedback!
+<div align="center">
+
+**Built with Go and ❤️**
+
+[Repository](https://github.com/yairfalse/tapio) • [Issues](https://github.com/yairfalse/tapio/issues)
+
+</div>
