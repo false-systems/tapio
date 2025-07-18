@@ -5,8 +5,12 @@
 *.so
 *.dylib
 
-# Go binary name
+# Go binary names
 tapio
+tapio-*
+!tapio-*.go
+server-example
+pattern-tester
 
 # Test binary, built with `go test -c`
 *.test
