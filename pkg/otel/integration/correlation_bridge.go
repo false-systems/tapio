@@ -9,7 +9,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/collector"
 	"github.com/yairfalse/tapio/pkg/otel/cqrs"
 	"github.com/yairfalse/tapio/pkg/otel/domain"
-	"github.com/yairfalse/tapio/pkg/telemetry"
 )
 
 // CorrelationBridge connects OTEL Phase 3 integration with the correlation engine v2
@@ -22,7 +21,7 @@ type CorrelationBridge[T domain.TraceData] struct {
 
 	// Correlation engine v2
 	correlationEngine *collector.CorrelationEngine
-	correlationTracer *telemetry.CorrelationTracer
+	// correlationTracer removed - telemetry deleted
 
 	// Bridge configuration
 	config BridgeConfig
@@ -104,7 +103,7 @@ func NewCorrelationBridge[T domain.TraceData](
 	queryBus *cqrs.QueryBus[T],
 	eventBus *cqrs.EventBus,
 	correlationEngine *collector.CorrelationEngine,
-	correlationTracer *telemetry.CorrelationTracer,
+	// correlationTracer removed - telemetry deleted,
 	config BridgeConfig,
 ) *CorrelationBridge[T] {
 

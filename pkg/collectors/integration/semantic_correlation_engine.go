@@ -21,6 +21,9 @@ type SemanticCorrelationEngine struct {
     // Semantic processing (our improved correlation)
     semanticGrouper *SimpleSemanticGrouper
     
+    // Revolutionary OTEL semantic tracer
+    semanticTracer *SemanticOTELTracer
+    
     // Pattern recognition engine
     patternEngine patternrecognition.PatternRecognitionEngine
     
@@ -28,6 +31,9 @@ type SemanticCorrelationEngine struct {
     eventBuffer      []domain.Event
     eventBufferMutex sync.RWMutex
     bufferSize       int
+    
+    // Human-readable output formatter
+    humanFormatter *HumanReadableFormatter
     
     // State
     ctx     context.Context
@@ -51,9 +57,11 @@ func NewSemanticCorrelationEngine(batchSize int, batchTimeout time.Duration) *Se
         eventChan:      make(chan Event, 1000),
         insightChan:    make(chan Insight, 100),
         semanticGrouper: NewSimpleSemanticGrouper(),
+        semanticTracer:  NewSemanticOTELTracer(),
         patternEngine:   patternrecognition.Engine(patternConfig),
         eventBuffer:     make([]domain.Event, 0, batchSize),
         bufferSize:      batchSize,
+        humanFormatter:  NewHumanReadableFormatter(StyleSimple, AudienceDeveloper),
         stats:          make(map[string]interface{}),
     }
 }
@@ -101,6 +109,13 @@ func (sce *SemanticCorrelationEngine) processEvents() {
             // Add to buffer for pattern detection
             sce.addToEventBuffer(*domainEvent)
             
+            // Process through revolutionary OTEL semantic tracer
+            if err := sce.semanticTracer.ProcessEventWithSemanticTrace(sce.ctx, domainEvent); err != nil {
+                sce.updateStats("trace_errors")
+            } else {
+                sce.updateStats("traces_created")
+            }
+            
             // Process through our semantic grouper
             finding, err := sce.semanticGrouper.ProcessEvent(sce.ctx, domainEvent)
             if err != nil {
@@ -109,6 +124,9 @@ func (sce *SemanticCorrelationEngine) processEvents() {
             
             // Convert finding to insight
             insight := sce.convertToInsight(finding)
+            
+            // Enrich insight with semantic group information
+            sce.enrichInsightWithSemanticGroups(domainEvent, &insight)
             
             // Send to insights channel
             select {
@@ -452,6 +470,23 @@ func (sce *SemanticCorrelationEngine) ConfigurePatterns(config *patternrecogniti
     return sce.patternEngine.Configure(config)
 }
 
+// SetHumanOutputStyle changes the human output formatting style
+func (sce *SemanticCorrelationEngine) SetHumanOutputStyle(style ExplanationStyle, audience Audience) {
+    sce.mu.Lock()
+    defer sce.mu.Unlock()
+    sce.humanFormatter = NewHumanReadableFormatter(style, audience)
+}
+
+// GetHumanExplanation returns a human-readable explanation for an insight
+func (sce *SemanticCorrelationEngine) GetHumanExplanation(insight Insight) *HumanReadableExplanation {
+    return sce.humanFormatter.FormatInsight(insight)
+}
+
+// GetInsightStory creates a narrative story from multiple related insights
+func (sce *SemanticCorrelationEngine) GetInsightStory(insights []Insight) string {
+    return sce.humanFormatter.FormatAsStory(insights)
+}
+
 // SimpleSemanticGrouper - embedded from our dataflow work
 type SimpleSemanticGrouper struct {
     // Simplified for now
@@ -473,4 +508,69 @@ func (sg *SimpleSemanticGrouper) ProcessEvent(ctx context.Context, event *domain
     }
     
     return finding, nil
+}
+
+// enrichInsightWithSemanticGroups adds semantic trace group information to insights
+func (sce *SemanticCorrelationEngine) enrichInsightWithSemanticGroups(event *domain.Event, insight *Insight) {
+    // Find the semantic group this event belongs to
+    groups := sce.semanticTracer.GetSemanticGroups()
+    
+    for _, group := range groups {
+        // Check if event is in this group
+        for _, groupEvent := range group.CausalChain {
+            if groupEvent.ID == event.ID {
+                // Enrich insight with semantic group data
+                insight.SemanticGroupID = group.ID
+                insight.SemanticIntent = group.Intent
+                insight.TraceID = group.TraceID
+                
+                // Add predicted outcome if available
+                if group.PredictedOutcome != nil {
+                    insight.Prediction = &Prediction{
+                        Type:        group.PredictedOutcome.Scenario,
+                        Probability: group.PredictedOutcome.Probability,
+                        Confidence:  group.PredictedOutcome.ConfidenceLevel,
+                        TimeToOutcome: group.PredictedOutcome.TimeToOutcome,
+                    }
+                }
+                
+                // Add impact assessment
+                if group.ImpactAssessment != nil {
+                    insight.BusinessImpact = group.ImpactAssessment.BusinessImpact
+                    insight.CascadeRisk = group.ImpactAssessment.CascadeRisk
+                    
+                    // Add recommended actions if not already present
+                    for _, action := range group.ImpactAssessment.RecommendedActions {
+                        insight.Actions = append(insight.Actions, ActionableItem{
+                            Title:       "Semantic Recommendation",
+                            Description: action,
+                            Commands:    []string{action},
+                            Risk:        "low",
+                            EstimatedImpact: "Based on semantic correlation analysis",
+                        })
+                    }
+                }
+                
+                // Add related events from causal chain
+                for _, causalEvent := range group.CausalChain {
+                    if causalEvent.ID != event.ID {
+                        insight.RelatedEvents = append(insight.RelatedEvents, string(causalEvent.ID))
+                    }
+                }
+                
+                return
+            }
+        }
+    }
+}
+
+// GetSemanticTraceGroups returns current semantic trace groups for monitoring
+func (sce *SemanticCorrelationEngine) GetSemanticTraceGroups() map[string]*SemanticTraceGroup {
+    return sce.semanticTracer.GetSemanticGroups()
+}
+
+// CleanupSemanticGroups removes old semantic groups
+func (sce *SemanticCorrelationEngine) CleanupSemanticGroups(retention time.Duration) {
+    sce.semanticTracer.CleanupOldGroups(retention)
+    sce.updateStats("semantic_groups_cleaned")
 }

@@ -79,6 +79,13 @@ type Insight struct {
 
 	// Prediction details
 	Prediction *Prediction
+
+	// Revolutionary semantic trace correlation fields
+	SemanticGroupID string  // ID of the semantic group this insight belongs to
+	SemanticIntent  string  // What this group of events is trying to achieve
+	TraceID         string  // OTEL trace ID for distributed tracing
+	BusinessImpact  float32 // Business impact score (0.0-1.0)
+	CascadeRisk     float32 // Risk of cascade failure (0.0-1.0)
 }
 
 // AffectedResource identifies resources affected by an insight
@@ -91,10 +98,11 @@ type AffectedResource struct {
 
 // Prediction contains prediction details
 type Prediction struct {
-	Type        string  // "oom", "crash_loop", "disk_full"
-	Probability float64 // 0.0-1.0
-	TimeToEvent time.Duration
-	Confidence  float64 // 0.0-1.0
+	Type          string        // "oom", "crash_loop", "disk_full"
+	Probability   float64       // 0.0-1.0
+	TimeToEvent   time.Duration // Deprecated: use TimeToOutcome
+	TimeToOutcome time.Duration // Time until predicted outcome
+	Confidence    float64       // 0.0-1.0
 }
 
 // LegacyCircuitBreaker prevents overwhelming the system (legacy implementation)
