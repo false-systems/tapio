@@ -45,6 +45,11 @@ type SemanticCorrelationEngine struct {
     stats map[string]interface{}
 }
 
+// GetSemanticTracer returns the semantic OTEL tracer
+func (sce *SemanticCorrelationEngine) GetSemanticTracer() *SemanticOTELTracer {
+    return sce.semanticTracer
+}
+
 // NewSemanticCorrelationEngine creates our improved correlation engine
 func NewSemanticCorrelationEngine(batchSize int, batchTimeout time.Duration) *SemanticCorrelationEngine {
     // Configure pattern recognition
