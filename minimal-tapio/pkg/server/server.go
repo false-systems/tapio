@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio-minimal/pkg/domain"
-	"github.com/yairfalse/tapio-minimal/pkg/server/api"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/server/api"
 )
 
 // Server represents the main Tapio server

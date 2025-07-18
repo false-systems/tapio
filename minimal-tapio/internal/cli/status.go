@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/yairfalse/tapio-minimal/pkg/client"
+	"github.com/yairfalse/tapio/pkg/client"
 )
 
 var statusCmd = &cobra.Command{

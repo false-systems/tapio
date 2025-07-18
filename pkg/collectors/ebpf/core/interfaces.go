@@ -38,12 +38,20 @@ type Config struct {
 	EnableFile    bool `json:"enable_file"`
 	
 	// Performance tuning
-	RingBufferSize   int           `json:"ring_buffer_size"`
-	EventRateLimit   int           `json:"event_rate_limit"`
-	SamplingInterval time.Duration `json:"sampling_interval"`
+	RingBufferSize     int           `json:"ring_buffer_size"`
+	EventRateLimit     int           `json:"event_rate_limit"`
+	SamplingInterval   time.Duration `json:"sampling_interval"`
+	BatchSize          int           `json:"batch_size"`          // New: for batch processing
+	CollectionInterval time.Duration `json:"collection_interval"` // New: for batch collection
+	MaxEventsPerSecond int           `json:"max_events_per_second"` // New: rate limiting
+	
+	// Advanced features
+	Programs []ProgramSpec `json:"programs"` // New: eBPF program specifications
+	Filter   Filter        `json:"filter"`   // New: event filtering
 	
 	// Data retention
-	RetentionPeriod string `json:"retention_period"`
+	RetentionPeriod string        `json:"retention_period"`
+	Timeout         time.Duration `json:"timeout"` // New: operation timeout
 }
 
 // Health represents collector health status
@@ -143,9 +151,75 @@ type ProgramInfo struct {
 	ErrorCount   uint64      `json:"error_count"`
 }
 
+// MapInfo contains information about an eBPF map
+type MapInfo struct {
+	Name       string  `json:"name"`
+	Type       MapType `json:"type"`
+	KeySize    uint32  `json:"key_size"`
+	ValueSize  uint32  `json:"value_size"`
+	MaxEntries uint32  `json:"max_entries"`
+	UsedEntries uint32 `json:"used_entries"`
+}
+
+// Filter defines event filtering criteria
+type Filter struct {
+	EventTypes             []string `json:"event_types,omitempty"`
+	ProcessNames           []string `json:"process_names,omitempty"`
+	ProcessIDs             []uint32 `json:"process_ids,omitempty"`
+	ContainerIDs           []string `json:"container_ids,omitempty"`
+	Namespaces             []string `json:"namespaces,omitempty"`
+	ExcludeSystemProcesses bool     `json:"exclude_system_processes"`
+	MinSeverity            string   `json:"min_severity,omitempty"`
+}
+
 // EventProcessor processes raw eBPF events into domain events
 type EventProcessor interface {
 	ProcessEvent(ctx context.Context, raw RawEvent) (domain.Event, error)
+}
+
+// RingBufferReader reads events from eBPF ring buffers for better performance
+type RingBufferReader interface {
+	// Read reads the next event from the ring buffer
+	Read() ([]byte, error)
+	
+	// ReadBatch reads multiple events at once for efficiency
+	ReadBatch(maxEvents int) ([][]byte, error)
+	
+	// Close closes the ring buffer reader
+	Close() error
+}
+
+// MapManager manages eBPF maps for advanced data structures
+type MapManager interface {
+	// CreateMap creates a new eBPF map
+	CreateMap(spec MapSpec) (Map, error)
+	
+	// GetMap retrieves an existing map by name
+	GetMap(name string) (Map, error)
+	
+	// DeleteMap removes a map
+	DeleteMap(name string) error
+	
+	// ListMaps returns all managed maps
+	ListMaps() ([]MapInfo, error)
+}
+
+// Map represents an eBPF map
+type Map interface {
+	// Lookup retrieves a value by key
+	Lookup(key []byte) ([]byte, error)
+	
+	// Update sets a key-value pair
+	Update(key, value []byte) error
+	
+	// Delete removes a key
+	Delete(key []byte) error
+	
+	// Iterate iterates over all entries
+	Iterate(fn func(key, value []byte) error) error
+	
+	// Close closes the map
+	Close() error
 }
 
 // RawEvent represents a raw eBPF event

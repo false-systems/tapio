@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yairfalse/tapio-minimal/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Client represents a REST API client

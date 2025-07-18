@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/yairfalse/tapio-minimal/pkg/client"
-	"github.com/yairfalse/tapio-minimal/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/client"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 var (

@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/yairfalse/tapio-minimal/pkg/domain"
-	"github.com/yairfalse/tapio-minimal/pkg/server"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/server"
 )
 
 func main() {

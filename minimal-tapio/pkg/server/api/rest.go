@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/yairfalse/tapio-minimal/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // ServerInterface defines what the REST API needs from the server

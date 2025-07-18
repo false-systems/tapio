@@ -1,13 +1,13 @@
-package ebpf_new_test
+package ebpf_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf_new/core"
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf_new/internal"
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf_new/linux"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf/internal"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf/linux"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
