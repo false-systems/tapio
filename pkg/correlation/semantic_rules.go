@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // SemanticRulesEngine processes rules that leverage our rich semantic context
@@ -444,12 +444,17 @@ func (e *SemanticRulesEngine) extractSemanticFeatures(event *domain.Event) (*Sem
 	}
 
 	// Extract anomaly context features
+	// TODO: Commented out - event.Anomaly doesn't exist
+	/*
 	if event.Anomaly != nil {
 		features.AnomalyScore = event.Anomaly.AnomalyScore
 		features.AnomalyDimensions = extractAnomalyDimensions(event.Anomaly.Dimensions)
 	}
+	*/
 
 	// Extract AI features
+	// TODO: Commented out - event.AiFeatures doesn't exist
+	/*
 	if event.AiFeatures != nil {
 		// AiFeatures is map[string]float32, convert to dense features
 		features.DenseFeatures = make([]float32, 0, len(event.AiFeatures))
@@ -459,6 +464,7 @@ func (e *SemanticRulesEngine) extractSemanticFeatures(event *domain.Event) (*Sem
 		// features.CategoricalFeatures = event.AiFeatures.CategoricalFeatures // Not available
 		features.SparseFeatures = event.AiFeatures // It's already map[string]float32
 	}
+	*/
 
 	return features, nil
 }
@@ -807,6 +813,8 @@ type SemanticRuleExecution struct {
 // Additional helper methods and implementations would continue here...
 // Each optimized for our opinionated data format and designed for AI enhancement
 
+// TODO: Commented out - AnomalyDimensions not properly defined
+/*
 func extractAnomalyDimensions(dimensions *domain.AnomalyDimensions) map[string]float32 {
 	if dimensions == nil {
 		return nil
@@ -820,3 +828,4 @@ func extractAnomalyDimensions(dimensions *domain.AnomalyDimensions) map[string]f
 		"spatial":     dimensions.Spatial,
 	}
 }
+*/

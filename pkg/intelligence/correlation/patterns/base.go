@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
 )
 // BasePattern provides a base implementation for correlation patterns
 type BasePattern struct {

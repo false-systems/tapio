@@ -12,7 +12,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/resilience"
 	"github.com/yairfalse/tapio/pkg/types"
 )

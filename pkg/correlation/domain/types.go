@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"time"
 )
 
@@ -223,4 +224,122 @@ type Stats struct {
 
 	// Rule-specific stats
 	RuleExecutionTime map[string]time.Duration `json:"rule_execution_time,omitempty"`
+}
+
+// RuleEngine processes events through rules to generate insights
+type RuleEngine interface {
+	// ProcessEvent processes a single event through all rules
+	ProcessEvent(ctx context.Context, event Event) ([]Insight, error)
+	
+	// ProcessEvents processes multiple events
+	ProcessEvents(ctx context.Context, events []Event) ([]Insight, error)
+	
+	// RegisterRule registers a new rule
+	RegisterRule(rule Rule) error
+	
+	// GetRules returns all registered rules
+	GetRules() []Rule
+}
+
+
+// Insight represents a correlation insight
+type Insight struct {
+	ID          string                 `json:"id"`
+	Type        string                 `json:"type"`
+	Severity    Severity               `json:"severity"`
+	Title       string                 `json:"title"`
+	Description string                 `json:"description"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Evidence    []Event                `json:"evidence"`
+	Actions     []ActionItem           `json:"actions"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// Pattern represents a pattern that can be detected in events
+type Pattern struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Type        string                 `json:"type"`
+	Confidence  float64                `json:"confidence"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// Prediction represents a future prediction
+type Prediction struct {
+	ID           string                 `json:"id"`
+	Type         string                 `json:"type"`
+	Confidence   float64                `json:"confidence"`
+	TimeHorizon  time.Duration          `json:"time_horizon"`
+	Description  string                 `json:"description"`
+	Evidence     []Event                `json:"evidence"`
+	Actions      []ActionItem           `json:"actions"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ActionItem represents a recommended action
+type ActionItem struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`        // "manual", "automated", "preventive"
+	Priority    string    `json:"priority"`    // "low", "medium", "high", "critical"
+	Description string    `json:"description"`
+	Command     string    `json:"command,omitempty"`
+	Deadline    time.Time `json:"deadline,omitempty"`
+	Status      string    `json:"status"`      // "pending", "in_progress", "completed", "failed"
+}
+
+// SeverityLevel is an alias for Severity (for compatibility)
+type SeverityLevel = Severity
+
+// Additional severity constants
+const (
+	SeverityInfo    Severity = "info"
+	SeverityWarning Severity = "warning"
+	SeverityError   Severity = "error"
+)
+
+// RuleMatch represents a rule match result
+type RuleMatch struct {
+	RuleID      string                 `json:"rule_id"`
+	RuleName    string                 `json:"rule_name"`
+	Confidence  float64                `json:"confidence"`
+	Evidence    []Event                `json:"evidence"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// SystemEvent represents a system-level event
+type SystemEvent struct {
+	Event
+	SystemInfo map[string]interface{} `json:"system_info,omitempty"`
+}
+
+// Evidence represents evidence for a finding
+type Evidence struct {
+	Type        string                 `json:"type"`
+	Description string                 `json:"description"`
+	Events      []Event                `json:"events"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// AnomalyDimensions represents dimensions for anomaly detection
+type AnomalyDimensions struct {
+	Temporal    bool `json:"temporal"`
+	Spatial     bool `json:"spatial"`
+	Behavioral  bool `json:"behavioral"`
+	Statistical bool `json:"statistical"`
+}
+
+// EventQuery represents a query for events
+type EventQuery struct {
+	TimeRange   *TimeRange `json:"time_range,omitempty"`
+	ResourceIDs []string   `json:"resource_ids,omitempty"`
+	Types       []string   `json:"types,omitempty"`
+	MinSeverity Severity   `json:"min_severity,omitempty"`
+	Limit       int        `json:"limit,omitempty"`
+}
+
+// TimeRange represents a time range for queries
+type TimeRange struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
 }

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 // ControlPlaneDepsRule detects control plane dependency failures that cascade through components
 // Pattern: Cloud provider timeout → controller-manager failures → scheduler issues → workload impacts

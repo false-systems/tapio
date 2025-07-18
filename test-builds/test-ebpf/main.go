@@ -2,7 +2,7 @@ package main
 
 import (
     "fmt"
-    "github.com/yairfalse/tapio/pkg/ebpf"
+    "github.com/yairfalse/tapio/pkg/collectors/ebpf"
 )
 
 func main() {

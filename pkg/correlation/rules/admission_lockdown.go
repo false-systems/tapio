@@ -9,7 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // AdmissionLockdownRule detects when strict policies lock down the cluster preventing operations

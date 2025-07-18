@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/metrics"
 	"github.com/yairfalse/tapio/pkg/simple"
 )

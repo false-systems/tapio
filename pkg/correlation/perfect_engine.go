@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // PerfectEngine is the correlation engine perfectly designed for our opinionated data format
@@ -249,12 +249,15 @@ func (e *PerfectEngine) ProcessOpinionatedEvent(ctx context.Context, event *doma
 	}
 
 	// AI correlation using AI features
+	// TODO: Commented out - event.AiFeatures doesn't exist
+	/*
 	if e.aiCorrelator != nil && event.AiFeatures != nil {
 		aiCorrelations, err := e.aiCorrelator.Correlate(ctx, event)
 		if err == nil {
 			result.Correlations = append(result.Correlations, aiCorrelations...)
 		}
 	}
+	*/
 
 	// Generate insights from correlations
 	if len(result.Correlations) > 0 {

@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/events_correlation"
 	"github.com/yairfalse/tapio/pkg/simple"
 	"github.com/yairfalse/tapio/pkg/types"

@@ -1,7 +1,7 @@
 package rules
 import (
 	"fmt"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // RegisterAll registers all built-in correlation rules with the engine
 func RegisterAll(engine correlation.Engine) error {

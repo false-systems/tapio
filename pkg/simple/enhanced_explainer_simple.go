@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/types"
 )
 
@@ -377,12 +377,10 @@ func (e *SimpleEnhancedExplainer) addEBPFInsights(ctx context.Context, resource 
 	}
 
 	// Try to get memory stats
-	if memStats, err := e.ebpfMonitor.GetMemoryStats(); err == nil && len(memStats) > 0 {
-		for _, stats := range memStats {
-			if stats.InContainer {
-				explanation.Analysis.RealityCheck.ActualMemory = fmt.Sprintf("eBPF: %d bytes current usage", stats.CurrentUsage)
-				break
-			}
+	if memStats := e.ebpfMonitor.GetMemoryStats(); len(memStats) > 0 {
+		// Extract memory usage from the stats map
+		if currentUsage, ok := memStats["current_usage"]; ok {
+			explanation.Analysis.RealityCheck.ActualMemory = fmt.Sprintf("eBPF: %v bytes current usage", currentUsage)
 		}
 	}
 }

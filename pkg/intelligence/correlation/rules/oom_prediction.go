@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 	"github.com/google/uuid"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // OOMPredictionRule predicts Out-of-Memory events using multiple data sources
 type OOMPredictionRule struct {

@@ -8,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/resilience"
+	correlationAdapter "github.com/yairfalse/tapio/pkg/server/adapters/correlation"
+	"github.com/yairfalse/tapio/pkg/server/domain"
 	"go.uber.org/zap"
 )
 

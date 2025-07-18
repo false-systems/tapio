@@ -4,8 +4,8 @@ import (
 	"sort"
 	"sync"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
 )
 // eventBuffer implements core.EventBuffer
 type eventBuffer struct {

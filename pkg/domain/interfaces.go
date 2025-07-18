@@ -127,6 +127,33 @@ type DeleteCriteria struct {
 // CORRELATION ENGINE INTERFACES
 // =============================================================================
 
+// RuleEngine processes events through rules to generate insights
+type RuleEngine interface {
+	// ProcessEvent processes a single event through all rules
+	ProcessEvent(ctx context.Context, event Event) ([]Insight, error)
+	
+	// ProcessEvents processes multiple events
+	ProcessEvents(ctx context.Context, events []Event) ([]Insight, error)
+	
+	// RegisterRule registers a new rule
+	RegisterRule(rule Rule) error
+	
+	// GetRules returns all registered rules
+	GetRules() []Rule
+}
+
+// Rule defines a correlation rule
+type Rule interface {
+	// GetID returns the rule ID
+	GetID() string
+	
+	// GetName returns the rule name
+	GetName() string
+	
+	// Evaluate evaluates the rule against events
+	Evaluate(ctx context.Context, events []Event) ([]Insight, error)
+}
+
 // CorrelationEngine analyzes events to find relationships
 type CorrelationEngine interface {
 	// ProcessEvents processes a batch of events for correlation

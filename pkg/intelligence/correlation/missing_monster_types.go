@@ -3,7 +3,7 @@ package correlation
 import (
     "context"
     "time"
-    "github.com/falseyair/tapio/pkg/domain"
+    "github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Concrete engine implementation

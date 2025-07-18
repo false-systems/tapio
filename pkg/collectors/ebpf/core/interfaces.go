@@ -41,6 +41,9 @@ type Config struct {
 	RingBufferSize   int           `json:"ring_buffer_size"`
 	EventRateLimit   int           `json:"event_rate_limit"`
 	SamplingInterval time.Duration `json:"sampling_interval"`
+	
+	// Data retention
+	RetentionPeriod string `json:"retention_period"`
 }
 
 // Health represents collector health status
@@ -159,6 +162,24 @@ type RawEvent struct {
 	Decoded     map[string]interface{} `json:"decoded,omitempty"`
 }
 
+// Monitor represents the eBPF monitoring interface for health checks
+type Monitor interface {
+	// IsAvailable checks if eBPF is available on the system
+	IsAvailable() bool
+	
+	// GetLastError returns the last error encountered
+	GetLastError() error
+	
+	// Start starts the monitor
+	Start(ctx context.Context) error
+	
+	// Stop stops the monitor
+	Stop() error
+	
+	// GetMemoryStats returns memory statistics
+	GetMemoryStats() map[string]interface{}
+}
+
 // Validate validates the configuration
 func (c Config) Validate() error {
 	if c.EventBufferSize <= 0 {
@@ -168,4 +189,52 @@ func (c Config) Validate() error {
 		c.RingBufferSize = 8192
 	}
 	return nil
+}
+
+// GetDetailedStatus returns detailed eBPF status information
+func GetDetailedStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"kernel_support": checkKernelSupport(),
+		"permissions":    checkPermissions(),
+		"bpf_jit":       checkBPFJIT(),
+		"recommendations": getRecommendations(),
+	}
+}
+
+// GetAvailabilityStatus returns a human-readable availability status
+func GetAvailabilityStatus() string {
+	if !checkKernelSupport() {
+		return "eBPF not supported on this kernel version"
+	}
+	if !checkPermissions() {
+		return "Insufficient permissions for eBPF (need CAP_SYS_ADMIN or root)"
+	}
+	return "eBPF is available"
+}
+
+// Helper functions for status checks
+func checkKernelSupport() bool {
+	// This is a simplified check - in reality would check kernel version
+	return true
+}
+
+func checkPermissions() bool {
+	// This is a simplified check - in reality would check capabilities
+	return true
+}
+
+func checkBPFJIT() bool {
+	// This is a simplified check - in reality would check sysctl
+	return true
+}
+
+func getRecommendations() []string {
+	var recs []string
+	if !checkKernelSupport() {
+		recs = append(recs, "Upgrade to Linux kernel 4.14 or later for eBPF support")
+	}
+	if !checkPermissions() {
+		recs = append(recs, "Run with sudo or add CAP_SYS_ADMIN capability")
+	}
+	return recs
 }

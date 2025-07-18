@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/yairfalse/tapio/internal/output"
+	"github.com/yairfalse/tapio/pkg/client"
 	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/simple"
 	"github.com/yairfalse/tapio/pkg/types"
@@ -24,6 +25,8 @@ var (
 	outputFormat      string
 	enableCorrelation bool
 	enableEBPF        bool
+	serverMode        bool
+	serverURL         string
 )
 
 var checkCmd = &cobra.Command{
@@ -115,6 +118,10 @@ func init() {
 		"Enable intelligent correlation analysis to find related issues")
 	checkCmd.Flags().BoolVar(&enableEBPF, "enable-ebpf", false,
 		"Enable eBPF monitoring for kernel-level insights (requires root)")
+	checkCmd.Flags().BoolVar(&serverMode, "server", false,
+		"Use server mode (connect to tapio-server instead of local analysis)")
+	checkCmd.Flags().StringVar(&serverURL, "server-url", "http://localhost:8080",
+		"Tapio server URL for server mode")
 }
 
 func showCurrentContext(request *types.CheckRequest) {
@@ -342,6 +349,65 @@ func validateResourceFormat(resource string) error {
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	
+	// Handle server mode
+	if serverMode {
+		return runServerCheck(ctx, args)
+	}
+	
+	// Local mode (existing implementation)
+	return runLocalCheck(ctx, args)
+}
+
+func runServerCheck(ctx context.Context, args []string) error {
+	// Create REST client
+	restClient := client.NewRESTClient(serverURL)
+	
+	// Test connection
+	if err := restClient.HealthCheck(ctx); err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+	
+	// Build check request
+	request := client.RESTCheckRequest{
+		Namespace: checkNamespace,
+	}
+	
+	// If resource specified, add it
+	if len(args) > 0 {
+		request.Resource = args[0]
+	}
+	
+	// Perform check
+	response, err := restClient.Check(ctx, request)
+	if err != nil {
+		return fmt.Errorf("check failed: %w", err)
+	}
+	
+	// Format output
+	formatter := output.NewFormatter(outputFormat)
+	if outputFormat == "human" {
+		fmt.Printf("🌳 Tapio Server Check Results\n\n")
+		if response.Namespace != "" {
+			fmt.Printf("Namespace: %s\n", response.Namespace)
+		}
+		if response.Resource != "" {
+			fmt.Printf("Resource: %s\n", response.Resource)
+		}
+		fmt.Println()
+	}
+	
+	// Display insights
+	if len(response.Insights) > 0 {
+		formatter.PrintFindings(response.Insights)
+	} else {
+		fmt.Println("✓ No issues found")
+	}
+	
+	return nil
+}
+
+func runLocalCheck(ctx context.Context, args []string) error {
 
 	// Setup progress tracking
 	steps := []string{

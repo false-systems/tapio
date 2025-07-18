@@ -1,8 +1,8 @@
 package rules
 import (
 	"strings"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/domain"
 	v1 "k8s.io/api/core/v1"
 )
 // isETCDPod checks if a pod is an etcd instance

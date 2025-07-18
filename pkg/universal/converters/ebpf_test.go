@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/universal"
 )
 

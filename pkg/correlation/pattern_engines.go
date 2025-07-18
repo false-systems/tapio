@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // SemanticPatternEngine handles semantic pattern detection

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 	"github.com/yairfalse/tapio/pkg/correlation/domain"
 )
 

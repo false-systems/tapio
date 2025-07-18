@@ -13,7 +13,7 @@ import (
 func main() {
 	packages := []string{
 		"github.com/yairfalse/tapio/pkg/collector",
-		"github.com/yairfalse/tapio/pkg/ebpf",
+		"github.com/yairfalse/tapio/pkg/collectors/ebpf",
 		"github.com/yairfalse/tapio/pkg/collectors",
 		"github.com/yairfalse/tapio/pkg/collectors/ebpf",
 	}

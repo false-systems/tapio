@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/yairfalse/tapio/pkg/collector"
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 )
 
 var sniffCmd = &cobra.Command{

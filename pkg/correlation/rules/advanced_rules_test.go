@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 	v1 "k8s.io/api/core/v1"
 )
 

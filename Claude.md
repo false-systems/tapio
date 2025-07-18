@@ -722,10 +722,10 @@ mkdir -p pkg/[area]/[component]/{core,internal,[platform],stub}
 cd pkg/[area]/[component]
 
 # Initialize module
-go mod init github.com/falseyair/tapio/pkg/[area]/[component]
+go mod init github.com/yairfalse/tapio/pkg/[area]/[component]
 
 # Add domain dependency
-go mod edit -require github.com/falseyair/tapio/pkg/domain@latest
+go mod edit -require github.com/yairfalse/tapio/pkg/domain@latest
 ```
 
 ---

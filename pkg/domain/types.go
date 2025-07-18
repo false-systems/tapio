@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"context"
 	"fmt"
 	"time"
 )
@@ -552,12 +551,6 @@ const (
 	CategoryResource    Category = "resource"
 )
 
-// Rule interface for correlation rules
-type Rule interface {
-	ID() string
-	Name() string
-	Evaluate(ctx context.Context, events []Event) (*Finding, error)
-}
 
 // =============================================================================
 // MONSTER COMPATIBILITY TYPES
@@ -576,6 +569,28 @@ type ActionItem struct {
     Deadline    time.Time `json:"deadline,omitempty"`
     Status      string    `json:"status"`      // "pending", "in_progress", "completed", "failed"
 }
+
+// Pattern represents a pattern that can be detected in events
+type Pattern struct {
+    ID          string                 `json:"id"`
+    Name        string                 `json:"name"`
+    Description string                 `json:"description"`
+    Type        string                 `json:"type"`
+    Confidence  float64                `json:"confidence"`
+    Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// Problem represents an identified problem
+type Problem struct {
+    ID          string                 `json:"id"`
+    Type        string                 `json:"type"`
+    Severity    Severity               `json:"severity"`
+    Title       string                 `json:"title"`
+    Description string                 `json:"description"`
+    Evidence    []Event                `json:"evidence"`
+    Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
 
 // CausalityContext represents causal relationship context
 type CausalityContext struct {

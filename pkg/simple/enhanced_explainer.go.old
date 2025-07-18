@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/ebpf"
-	"github.com/falseyair/tapio/pkg/types"
+	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // EnhancedExplainer provides intelligent explanations using correlation analysis and eBPF insights

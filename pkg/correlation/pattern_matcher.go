@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // SemanticPatternMatcher is optimized for our opinionated data structure

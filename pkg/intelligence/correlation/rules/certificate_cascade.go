@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 // CertificateCascadeRule detects certificate chain failures that cascade through the system
 // Pattern: Root cert renewal → webhook cert mismatch → admission failures → deployment blocks

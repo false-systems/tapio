@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // BaseDetector provides base implementation for PatternDetector interface

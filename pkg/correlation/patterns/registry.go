@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // DefaultPatternRegistry creates and registers all built-in pattern detectors

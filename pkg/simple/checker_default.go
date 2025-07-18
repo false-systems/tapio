@@ -3,7 +3,7 @@
 
 package simple
 
-import "github.com/yairfalse/tapio/pkg/ebpf"
+import "github.com/yairfalse/tapio/pkg/collectors/ebpf"
 
 // initializeEBPFMonitor is a no-op on non-Linux platforms
 func (c *Checker) initializeEBPFMonitor(config *ebpf.Config) {

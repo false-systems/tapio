@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/foundation"
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/foundation"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // EventSource represents an event source for correlation processing

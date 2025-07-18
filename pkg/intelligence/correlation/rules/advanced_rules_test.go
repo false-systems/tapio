@@ -5,8 +5,8 @@ import (
 	"time"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/domain"
 	v1 "k8s.io/api/core/v1"
 )
 func TestETCDCascadeRule(t *testing.T) {

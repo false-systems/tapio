@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 // Mock data source for testing
 type mockDataSource struct {

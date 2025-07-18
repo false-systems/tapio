@@ -17,6 +17,9 @@ import (
 	"github.com/yairfalse/tapio/pkg/grpc"
 	"github.com/yairfalse/tapio/pkg/metrics"
 	"github.com/yairfalse/tapio/pkg/monitoring"
+	"github.com/yairfalse/tapio/pkg/server/adapters/correlation"
+	"github.com/yairfalse/tapio/pkg/server/api"
+	"github.com/yairfalse/tapio/pkg/server/logging"
 	"github.com/yairfalse/tapio/pkg/shutdown"
 )
 
@@ -26,7 +29,8 @@ const (
 
 	// Default configuration
 	defaultConfigPath = "/etc/tapio/server.yaml"
-	defaultPort       = 9090
+	defaultGRPCPort   = 9090
+	defaultRESTPort   = 8080
 	defaultAddress    = "0.0.0.0"
 
 	// Resource limits (Deployment pattern)
@@ -35,11 +39,14 @@ const (
 )
 
 var (
-	configPath string
-	port       int
-	address    string
-	logLevel   string
-	debug      bool
+	configPath   string
+	grpcPort     int
+	restPort     int
+	restEnabled  bool
+	grpcEnabled  bool
+	address      string
+	logLevel     string
+	debug        bool
 )
 
 func main() {
@@ -53,16 +60,20 @@ It processes events from eBPF, Kubernetes, and system sources to detect patterns
 Features:
 - High-performance gRPC streaming (165k+ events/sec)
 - Real-time correlation engine with pattern detection
+- REST API for CLI and GUI connectivity
 - Automatic backpressure and flow control
 - Prometheus metrics integration
-- RESTful API for queries and health checks`,
+- Dual protocol support (gRPC and REST)`,
 		Version: version,
 		RunE:    runServer,
 	}
 
 	// Command-line flags
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Path to configuration file")
-	rootCmd.PersistentFlags().IntVar(&port, "port", defaultPort, "gRPC server port")
+	rootCmd.PersistentFlags().IntVar(&grpcPort, "grpc-port", defaultGRPCPort, "gRPC server port")
+	rootCmd.PersistentFlags().IntVar(&restPort, "rest-port", defaultRESTPort, "REST API server port")
+	rootCmd.PersistentFlags().BoolVar(&restEnabled, "rest-enabled", true, "Enable REST API server")
+	rootCmd.PersistentFlags().BoolVar(&grpcEnabled, "grpc-enabled", true, "Enable gRPC server")
 	rootCmd.PersistentFlags().StringVar(&address, "address", defaultAddress, "Server bind address")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug mode")
@@ -125,16 +136,42 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	shutdownHandler.RegisterCleanup("metrics-collector", metricsCollector.Stop)
 
-	// Initialize gRPC server
-	grpcServer, err := initializeGRPCServer(cfg, correlationEngine, metricsCollector)
-	if err != nil {
-		return fmt.Errorf("failed to initialize gRPC server: %w", err)
+	// Initialize correlation adapter for REST API
+	var correlationAdapter *correlation.CorrelationAdapter
+	var restServer *api.RESTServer
+	
+	if restEnabled {
+		// Create logger for correlation adapter
+		logger := logging.NewZapLogger("info")
+		correlationAdapter = correlation.NewCorrelationAdapter(logger)
+		correlationAdapter.Enable()
+		
+		// Initialize REST API server
+		restServer = api.NewRESTServer(restPort, correlationAdapter)
+		shutdownHandler.RegisterCleanup("rest-server", func() error {
+			return restServer.Stop(ctx)
+		})
 	}
-	shutdownHandler.RegisterCleanup("grpc-server", grpcServer.Stop)
+
+	// Initialize gRPC server
+	var grpcServer *grpc.Server
+	if grpcEnabled {
+		grpcServer, err = initializeGRPCServer(cfg, correlationEngine, metricsCollector)
+		if err != nil {
+			return fmt.Errorf("failed to initialize gRPC server: %w", err)
+		}
+		shutdownHandler.RegisterCleanup("grpc-server", grpcServer.Stop)
+	}
 
 	// Start all components
 	fmt.Printf("🚀 Starting Tapio Server v%s\n", version)
-	fmt.Printf("   Bind address: %s:%d\n", address, port)
+	fmt.Printf("   Bind address: %s\n", address)
+	if grpcEnabled {
+		fmt.Printf("   gRPC port: %d\n", grpcPort)
+	}
+	if restEnabled {
+		fmt.Printf("   REST port: %d\n", restPort)
+	}
 	fmt.Printf("   Config path: %s\n", configPath)
 	fmt.Printf("   Resource limits: %dMB memory, %dm CPU\n", defaultMaxMemoryMB, defaultMaxCPUMilli)
 	fmt.Printf("   Target throughput: 165,000 events/sec\n")
@@ -155,12 +192,29 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start gRPC server
-	if err := grpcServer.Start(); err != nil {
-		return fmt.Errorf("failed to start gRPC server: %w", err)
+	if grpcEnabled && grpcServer != nil {
+		if err := grpcServer.Start(); err != nil {
+			return fmt.Errorf("failed to start gRPC server: %w", err)
+		}
+	}
+	
+	// Start REST API server
+	if restEnabled && restServer != nil {
+		go func() {
+			fmt.Printf("📡 Starting REST API server on port %d\n", restPort)
+			if err := restServer.Start(ctx); err != nil {
+				fmt.Printf("❌ REST API server error: %v\n", err)
+			}
+		}()
 	}
 
 	fmt.Printf("✅ Tapio Server started successfully\n")
-	fmt.Printf("📡 Listening for collector connections on %s:%d\n", address, port)
+	if grpcEnabled {
+		fmt.Printf("📡 Listening for collector connections on %s:%d (gRPC)\n", address, grpcPort)
+	}
+	if restEnabled {
+		fmt.Printf("🌐 REST API available on %s:%d\n", address, restPort)
+	}
 
 	// Setup periodic status reporting
 	statusTicker := time.NewTicker(30 * time.Second)
@@ -218,11 +272,14 @@ func loadConfiguration() (*ServerConfig, error) {
 	// Create configuration struct
 	cfg := &ServerConfig{
 		Address:              viper.GetString("server.address"),
-		Port:                 viper.GetInt("server.port"),
-		TLSEnabled:           viper.GetBool("server.tls_enabled"),
+		GRPCPort:            viper.GetInt("server.grpc_port"),
+		RESTPort:            viper.GetInt("server.rest_port"),
+		RESTEnabled:         viper.GetBool("server.rest_enabled"),
+		GRPCEnabled:         viper.GetBool("server.grpc_enabled"),
+		TLSEnabled:          viper.GetBool("server.tls_enabled"),
 		MaxConcurrentStreams: viper.GetUint32("server.max_concurrent_streams"),
-		MaxEventsPerSec:      viper.GetUint32("server.max_events_per_sec"),
-		MaxBatchSize:         viper.GetUint32("server.max_batch_size"),
+		MaxEventsPerSec:     viper.GetUint32("server.max_events_per_sec"),
+		MaxBatchSize:        viper.GetUint32("server.max_batch_size"),
 
 		Correlation: CorrelationConfig{
 			Enabled:             viper.GetBool("correlation.enabled"),
@@ -241,15 +298,34 @@ func loadConfiguration() (*ServerConfig, error) {
 			MaxMemoryMB: viper.GetInt("resources.max_memory_mb"),
 			MaxCPUMilli: viper.GetInt("resources.max_cpu_milli"),
 		},
+		
+		REST: RESTConfig{
+			Enabled:      viper.GetBool("rest.enabled"),
+			Port:         viper.GetInt("rest.port"),
+			Host:         viper.GetString("rest.host"),
+			EnableCORS:   viper.GetBool("rest.enable_cors"),
+			ReadTimeout:  viper.GetDuration("rest.read_timeout"),
+			WriteTimeout: viper.GetDuration("rest.write_timeout"),
+		},
 	}
 
 	// Override with command-line flags if provided
-	if port != defaultPort {
-		cfg.Port = port
+	if grpcPort != defaultGRPCPort {
+		cfg.GRPCPort = grpcPort
+	}
+	if restPort != defaultRESTPort {
+		cfg.RESTPort = restPort
+		// Also update REST config
+		cfg.REST.Port = restPort
 	}
 	if address != defaultAddress {
 		cfg.Address = address
+		cfg.REST.Host = address
 	}
+	// Override enable flags
+	cfg.RESTEnabled = restEnabled
+	cfg.GRPCEnabled = grpcEnabled
+	cfg.REST.Enabled = restEnabled
 
 	return cfg, nil
 }
@@ -329,7 +405,7 @@ func initializeGRPCServer(cfg *ServerConfig, engine *correlation.Engine, metrics
 	// Create gRPC server configuration
 	grpcConfig := grpc.DefaultServerConfig()
 	grpcConfig.Address = cfg.Address
-	grpcConfig.Port = cfg.Port
+	grpcConfig.Port = cfg.GRPCPort
 	grpcConfig.TLSEnabled = cfg.TLSEnabled
 	grpcConfig.MaxConcurrentStreams = cfg.MaxConcurrentStreams
 	grpcConfig.DefaultEventsPerSec = cfg.MaxEventsPerSec
@@ -388,7 +464,10 @@ func printStatus(monitor *monitoring.ResourceMonitor, server *grpc.Server, engin
 // Configuration structures
 type ServerConfig struct {
 	Address              string
-	Port                 int
+	GRPCPort             int
+	RESTPort             int
+	RESTEnabled          bool
+	GRPCEnabled          bool
 	TLSEnabled           bool
 	MaxConcurrentStreams uint32
 	MaxEventsPerSec      uint32
@@ -397,6 +476,7 @@ type ServerConfig struct {
 	Correlation CorrelationConfig
 	Metrics     MetricsConfig
 	Resources   ResourceConfig
+	REST        RESTConfig
 }
 
 type CorrelationConfig struct {
@@ -415,6 +495,15 @@ type MetricsConfig struct {
 type ResourceConfig struct {
 	MaxMemoryMB int
 	MaxCPUMilli int
+}
+
+type RESTConfig struct {
+	Enabled      bool          `mapstructure:"enabled"`
+	Port         int           `mapstructure:"port"`
+	Host         string        `mapstructure:"host"`
+	EnableCORS   bool          `mapstructure:"enable_cors"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 }
 
 // EventProcessor integrates with correlation engine and metrics

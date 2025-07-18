@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
 )
 // MemoryLeakPattern detects memory leak patterns across different sources
 type MemoryLeakPattern struct {

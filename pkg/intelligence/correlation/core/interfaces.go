@@ -2,7 +2,7 @@ package core
 import (
 	"context"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 // CorrelationEngine defines the main interface for event correlation
 type CorrelationEngine interface {

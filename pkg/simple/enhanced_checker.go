@@ -1,24 +1,25 @@
 package simple
 
 import (
-	"context"
-	"fmt"
-	"strings"
-	"time"
-
-	"github.com/yairfalse/tapio/pkg/degradation"
-	"github.com/yairfalse/tapio/pkg/diagnostics"
-	"github.com/yairfalse/tapio/pkg/k8s"
-	"github.com/yairfalse/tapio/pkg/timeout"
+        "context"
+        "fmt"
+        "strings"
+        "time"
+        
+        "github.com/yairfalse/tapio/pkg/diagnostics"
+        "github.com/yairfalse/tapio/pkg/k8s"
+        "github.com/yairfalse/tapio/pkg/resilience"
+        "github.com/yairfalse/tapio/pkg/types"
+)
 	"github.com/yairfalse/tapio/pkg/types"
 )
 
 // EnhancedChecker provides checking with graceful degradation
 type EnhancedChecker struct {
 	*Checker
-	degradationManager *degradation.Manager
+	degradationManager *resilience.DegradationManager
 	healthChecker      *diagnostics.HealthChecker
-	timeoutManager     *timeout.Manager
+	timeoutManager *resilience.TimeoutManager
 }
 
 // NewEnhancedChecker creates a checker with full degradation support
@@ -32,8 +33,8 @@ func NewEnhancedChecker() (*EnhancedChecker, error) {
 	}
 
 	// Create managers
-	degradationManager := degradation.NewManager()
-	timeoutManager := timeout.NewManager(nil)
+	degradationManager := resilience.NewDegradationManager(nil)
+	timeoutManager := resilience.NewTimeoutManager(nil)
 
 	// Create health checker if K8s is available
 	var healthChecker *diagnostics.HealthChecker
@@ -60,11 +61,11 @@ func NewEnhancedChecker() (*EnhancedChecker, error) {
 	go degradationManager.MonitorFeatures(context.Background(), 30*time.Second)
 
 	// Register state change callbacks
-	degradationManager.RegisterCallback(func(feature string, oldState, newState degradation.FeatureState) {
-		stateStr := map[degradation.FeatureState]string{
-			degradation.FeatureEnabled:  "enabled",
-			degradation.FeatureDegraded: "degraded",
-			degradation.FeatureDisabled: "disabled",
+	degradationManager.RegisterCallback(func(feature string, oldState, newState resilience.FeatureState) {
+		stateStr := map[resilience.FeatureState]string{
+			resilience.FeatureEnabled:  "enabled",
+			resilience.FeatureDegraded: "degraded",
+			resilience.FeatureDisabled: "disabled",
 		}
 		fmt.Printf("ℹ️  Feature '%s' changed from %s to %s\n",
 			feature, stateStr[oldState], stateStr[newState])
@@ -192,7 +193,7 @@ func (ec *EnhancedChecker) RunDiagnostics(ctx context.Context) (*diagnostics.Hea
 }
 
 // GetFeatureStatus returns the status of all features
-func (ec *EnhancedChecker) GetFeatureStatus() map[string]degradation.FeatureInfo {
+func (ec *EnhancedChecker) GetFeatureStatus() map[string]resilience.FeatureInfo {
 	return ec.degradationManager.GetFeatureStatus()
 }
 

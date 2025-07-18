@@ -5,7 +5,7 @@ import (
 	"math"
 	"sort"
 	"time"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // MemoryLeakRule detects memory leaks using pattern analysis
 type MemoryLeakRule struct {

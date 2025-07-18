@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation/domain"
-	"github.com/falseyair/tapio/pkg/correlation/patterns"
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/patterns"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 	pkgdomain "github.com/yairfalse/tapio/pkg/correlation/domain"
 )
 

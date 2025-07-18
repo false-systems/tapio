@@ -1,7 +1,7 @@
 package core
 import (
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 // EngineConfig defines correlation engine configuration
 type EngineConfig struct {

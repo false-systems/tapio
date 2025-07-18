@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 // PerfectEngineWithStore wraps PerfectEngine to automatically store insights
 type PerfectEngineWithStore struct {

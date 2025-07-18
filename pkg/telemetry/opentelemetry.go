@@ -26,7 +26,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/correlation/rules"
 	"github.com/yairfalse/tapio/pkg/correlation/sources"
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/simple"
 	"github.com/yairfalse/tapio/pkg/types"
 	"github.com/yairfalse/tapio/pkg/universal"

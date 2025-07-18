@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // StorageIOBottleneckDetector implements detection of storage I/O bottleneck patterns

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // ControlPlaneDepsRule detects control plane dependency failures that cascade through components

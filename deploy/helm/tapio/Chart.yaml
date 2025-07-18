@@ -11,9 +11,9 @@ keywords:
   - oom-killer
   - ebpf
   - observability
-home: https://github.com/falseyair/tapio
+home: https://github.com/yairfalse/tapio
 sources:
-  - https://github.com/falseyair/tapio
+  - https://github.com/yairfalse/tapio
 maintainers:
   - name: Tapio Team
     email: tapio@example.com

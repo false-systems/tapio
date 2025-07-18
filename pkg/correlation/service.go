@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
-	"github.com/falseyair/tapio/pkg/domain"
-	simpleTypes "github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/domain"
+	simpleTypes "github.com/yairfalse/tapio/pkg/types"
 )
 
 // Service provides correlation analysis for the CLI

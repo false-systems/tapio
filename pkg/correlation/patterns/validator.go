@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // DefaultPatternValidator implements the PatternValidator interface

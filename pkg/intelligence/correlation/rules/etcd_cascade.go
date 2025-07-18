@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // ETCDCascadeRule detects etcd cascading failures that affect the entire control plane
 // Pattern: etcd health → control plane → data plane isolation

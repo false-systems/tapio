@@ -97,7 +97,7 @@ func (s *InMemoryEventStore) Store(ctx context.Context, events []corrDomain.Even
 }
 
 // Query implements EventStore interface with optimized querying
-func (s *InMemoryEventStore) Query(ctx context.Context, query corrDomain.EventQuery) ([]corrDomain.Event, error) {
+func (s *InMemoryEventStore) Query(ctx context.Context, filter corrDomain.Filter) ([]corrDomain.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	
@@ -108,13 +108,13 @@ func (s *InMemoryEventStore) Query(ctx context.Context, query corrDomain.EventQu
 	}()
 	
 	// Build candidate set using indices
-	candidates := s.getCandidates(query)
+	candidates := s.getCandidates(filter)
 	
 	// Apply filters
 	var results []corrDomain.Event
 	for pos := range candidates {
 		if event, exists := s.eventMap[pos]; exists {
-			if s.matchesQuery(event, query) {
+			if s.matchesFilter(event, filter) {
 				results = append(results, event)
 			}
 		}
@@ -124,8 +124,8 @@ func (s *InMemoryEventStore) Query(ctx context.Context, query corrDomain.EventQu
 	s.sortEventsByTime(results)
 	
 	// Apply limit
-	if query.Limit > 0 && len(results) > query.Limit {
-		results = results[:query.Limit]
+	if filter.Limit > 0 && len(results) > filter.Limit {
+		results = results[:filter.Limit]
 	}
 	
 	return results, nil
@@ -133,11 +133,9 @@ func (s *InMemoryEventStore) Query(ctx context.Context, query corrDomain.EventQu
 
 // GetLatest implements EventStore interface
 func (s *InMemoryEventStore) GetLatest(ctx context.Context, limit int) ([]corrDomain.Event, error) {
-	return s.Query(ctx, corrDomain.EventQuery{
-		TimeRange: &corrDomain.TimeRange{
-			Start: time.Now().Add(-time.Hour),
-			End:   time.Now(),
-		},
+	return s.Query(ctx, corrDomain.Filter{
+		Since: time.Now().Add(-time.Hour),
+		Until: time.Now(),
 		Limit: limit,
 	})
 }
@@ -162,9 +160,13 @@ func (s *InMemoryEventStore) updateIndices(event corrDomain.Event, position int)
 	timeBucket := event.Timestamp.Unix() / 60
 	s.timeIndex[timeBucket] = append(s.timeIndex[timeBucket], position)
 	
-	// Resource index
-	if event.ResourceID != "" {
-		s.resourceIndex[event.ResourceID] = append(s.resourceIndex[event.ResourceID], position)
+	// Resource index - use Entity.Name as ResourceID
+	resourceID := event.Entity.Name
+	if resourceID == "" && event.Entity.Type != "" {
+		resourceID = event.Entity.Type + "/" + event.Entity.Namespace + "/" + event.Entity.Name
+	}
+	if resourceID != "" {
+		s.resourceIndex[resourceID] = append(s.resourceIndex[resourceID], position)
 	}
 	
 	// Type index
@@ -175,25 +177,45 @@ func (s *InMemoryEventStore) updateIndices(event corrDomain.Event, position int)
 func (s *InMemoryEventStore) removeFromIndices(event corrDomain.Event, position int) {
 	// Remove from time index
 	timeBucket := event.Timestamp.Unix() / 60
-	s.removeFromSlice(&s.timeIndex[timeBucket], position)
+	if positions, exists := s.timeIndex[timeBucket]; exists {
+		s.removeFromSlice(&positions, position)
+		s.timeIndex[timeBucket] = positions
+	}
 	
-	// Remove from resource index
-	if event.ResourceID != "" {
-		s.removeFromSlice(&s.resourceIndex[event.ResourceID], position)
+	// Remove from resource index - use Entity.Name as ResourceID
+	resourceID := event.Entity.Name
+	if resourceID == "" && event.Entity.Type != "" {
+		resourceID = event.Entity.Type + "/" + event.Entity.Namespace + "/" + event.Entity.Name
+	}
+	if resourceID != "" && len(s.resourceIndex[resourceID]) > 0 {
+		positions := s.resourceIndex[resourceID]
+		s.removeFromSlice(&positions, position)
+		s.resourceIndex[resourceID] = positions
 	}
 	
 	// Remove from type index
-	s.removeFromSlice(&s.typeIndex[event.Type], position)
+	if positions, exists := s.typeIndex[event.Type]; exists {
+		s.removeFromSlice(&positions, position)
+		s.typeIndex[event.Type] = positions
+	}
 }
 
-// getCandidates returns event positions that might match the query
-func (s *InMemoryEventStore) getCandidates(query corrDomain.EventQuery) map[int]bool {
+// getCandidates returns event positions that might match the filter
+func (s *InMemoryEventStore) getCandidates(filter corrDomain.Filter) map[int]bool {
 	candidates := make(map[int]bool)
 	
 	// If we have a time range, use time index
-	if query.TimeRange != nil {
-		startBucket := query.TimeRange.Start.Unix() / 60
-		endBucket := query.TimeRange.End.Unix() / 60
+	if !filter.Since.IsZero() || !filter.Until.IsZero() {
+		start := filter.Since
+		if start.IsZero() {
+			start = time.Unix(0, 0)
+		}
+		end := filter.Until
+		if end.IsZero() {
+			end = time.Now()
+		}
+		startBucket := start.Unix() / 60
+		endBucket := end.Unix() / 60
 		
 		for bucket := startBucket; bucket <= endBucket; bucket++ {
 			for _, pos := range s.timeIndex[bucket] {
@@ -203,22 +225,18 @@ func (s *InMemoryEventStore) getCandidates(query corrDomain.EventQuery) map[int]
 		return candidates
 	}
 	
-	// If we have resource filters, use resource index
-	if len(query.ResourceIDs) > 0 {
-		for _, resourceID := range query.ResourceIDs {
-			for _, pos := range s.resourceIndex[resourceID] {
-				candidates[pos] = true
-			}
+	// If we have entity filters, use resource index
+	if filter.EntityName != "" {
+		for _, pos := range s.resourceIndex[filter.EntityName] {
+			candidates[pos] = true
 		}
 		return candidates
 	}
 	
-	// If we have type filters, use type index
-	if len(query.Types) > 0 {
-		for _, eventType := range query.Types {
-			for _, pos := range s.typeIndex[eventType] {
-				candidates[pos] = true
-			}
+	// If we have type filter, use type index
+	if filter.Type != "" {
+		for _, pos := range s.typeIndex[filter.Type] {
+			candidates[pos] = true
 		}
 		return candidates
 	}
@@ -231,49 +249,58 @@ func (s *InMemoryEventStore) getCandidates(query corrDomain.EventQuery) map[int]
 	return candidates
 }
 
-// matchesQuery checks if event matches all query criteria
-func (s *InMemoryEventStore) matchesQuery(event corrDomain.Event, query corrDomain.EventQuery) bool {
+// matchesFilter checks if event matches all filter criteria
+func (s *InMemoryEventStore) matchesFilter(event corrDomain.Event, filter corrDomain.Filter) bool {
 	// Time range filter
-	if query.TimeRange != nil {
-		if event.Timestamp.Before(query.TimeRange.Start) || event.Timestamp.After(query.TimeRange.End) {
-			return false
-		}
+	if !filter.Since.IsZero() && event.Timestamp.Before(filter.Since) {
+		return false
+	}
+	if !filter.Until.IsZero() && event.Timestamp.After(filter.Until) {
+		return false
 	}
 	
-	// Resource filter
-	if len(query.ResourceIDs) > 0 {
-		found := false
-		for _, id := range query.ResourceIDs {
-			if event.ResourceID == id {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
+	// Entity filter
+	if filter.EntityName != "" && event.Entity.Name != filter.EntityName {
+		return false
+	}
+	if filter.EntityType != "" && event.Entity.Type != filter.EntityType {
+		return false
+	}
+	if filter.Namespace != "" && event.Entity.Namespace != filter.Namespace {
+		return false
 	}
 	
 	// Type filter
-	if len(query.Types) > 0 {
-		found := false
-		for _, t := range query.Types {
-			if event.Type == t {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
+	if filter.Type != "" && event.Type != filter.Type {
+		return false
 	}
 	
 	// Severity filter
-	if query.MinSeverity != "" && event.Severity < query.MinSeverity {
+	if filter.Severity != "" && event.Severity != filter.Severity {
 		return false
 	}
 	
 	return true
+}
+
+// Cleanup implements EventStore interface - removes events before specified time
+func (s *InMemoryEventStore) Cleanup(ctx context.Context, before time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	// Remove events before specified time
+	for pos, event := range s.eventMap {
+		if event.Timestamp.Before(before) {
+			s.removeFromIndices(event, pos)
+			delete(s.eventMap, pos)
+		}
+	}
+	
+	// Compact indices
+	s.compactIndices()
+	
+	s.stats.LastCleanup = time.Now()
+	return nil
 }
 
 // cleanup removes old events and compacts indices
@@ -348,4 +375,48 @@ func (s *InMemoryEventStore) GetStats() EventStoreStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.stats
+}
+
+// Delete implements EventStore interface - deletes events by ID
+func (s *InMemoryEventStore) Delete(ctx context.Context, eventIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	// Create set for quick lookup
+	toDelete := make(map[string]bool)
+	for _, id := range eventIDs {
+		toDelete[id] = true
+	}
+	
+	// Delete matching events
+	for pos, event := range s.eventMap {
+		if toDelete[event.ID] {
+			s.removeFromIndices(event, pos)
+			delete(s.eventMap, pos)
+		}
+	}
+	
+	return nil
+}
+
+// Get implements EventStore interface - retrieves events by IDs
+func (s *InMemoryEventStore) Get(ctx context.Context, eventIDs []string) ([]corrDomain.Event, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	// Create set for quick lookup
+	requested := make(map[string]bool)
+	for _, id := range eventIDs {
+		requested[id] = true
+	}
+	
+	// Find matching events
+	var events []corrDomain.Event
+	for _, event := range s.eventMap {
+		if requested[event.ID] {
+			events = append(events, event)
+		}
+	}
+	
+	return events, nil
 }

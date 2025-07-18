@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // =============================================================================
@@ -311,6 +311,8 @@ func (bc *BehavioralCorrelator) createBehaviorProfile(event *domain.Event) *Beha
 	}
 	
 	// Also check AI features for numerical data
+	// TODO: Commented out - event.AiFeatures doesn't exist
+	/*
 	if event.AiFeatures != nil {
 		for k, v := range event.AiFeatures {
 			if fv, ok := v.(float64); ok {
@@ -318,6 +320,7 @@ func (bc *BehavioralCorrelator) createBehaviorProfile(event *domain.Event) *Beha
 			}
 		}
 	}
+	*/
 	
 	profile.LastUpdated = time.Now()
 	return profile

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
 )
 // eventProcessor implements core.EventProcessor
 type eventProcessor struct {

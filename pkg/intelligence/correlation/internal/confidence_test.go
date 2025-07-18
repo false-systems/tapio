@@ -2,8 +2,8 @@ package internal
 import (
 	"testing"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
 )
 func TestNewConfidenceCalculator(t *testing.T) {
 	calc := NewConfidenceCalculator()

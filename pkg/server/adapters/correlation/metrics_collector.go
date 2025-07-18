@@ -76,11 +76,11 @@ func (m *PrometheusMetricsCollector) RecordEngineStats(stats corrDomain.Stats) {
 	// Update counters
 	m.eventsProcessed.Store(int64(stats.EventsProcessed))
 	m.correlationsFound.Store(int64(stats.CorrelationsFound))
-	m.insightsGenerated.Store(int64(stats.InsightsGenerated))
+	// InsightsGenerated is tracked separately, not in Stats
 	
 	// Update gauges
-	m.activeRules.Store(int32(stats.ActiveRules))
-	m.activeCorrelations.Store(int32(stats.ActiveCorrelations))
+	m.activeRules.Store(int32(stats.RulesActive))
+	m.activeCorrelations.Store(int32(stats.CorrelationsActive))
 	
 	// Record processing rate
 	m.rateCalculator.RecordEvent("processing_rate", time.Now())
@@ -89,7 +89,7 @@ func (m *PrometheusMetricsCollector) RecordEngineStats(stats corrDomain.Stats) {
 // RecordRuleExecution implements MetricsCollector interface
 func (m *PrometheusMetricsCollector) RecordRuleExecution(ruleID string, duration time.Duration, success bool) {
 	// Record execution time
-	m.ruleExecutionTimes.Observe(duration.Milliseconds())
+	m.ruleExecutionTimes.Observe(float64(duration.Milliseconds()))
 	
 	// Update counters
 	m.rulesExecuted.Add(1)
@@ -108,7 +108,7 @@ func (m *PrometheusMetricsCollector) RecordRuleExecution(ruleID string, duration
 
 // RecordCorrelation records correlation-specific metrics
 func (m *PrometheusMetricsCollector) RecordCorrelation(correlationID string, latency time.Duration, eventCount int) {
-	m.correlationLatency.Observe(latency.Milliseconds())
+	m.correlationLatency.Observe(float64(latency.Milliseconds()))
 	m.correlationsFound.Add(1)
 	
 	// Track correlation patterns
@@ -121,6 +121,35 @@ func (m *PrometheusMetricsCollector) RecordInsight(insightType string, confidenc
 	
 	// Track insight generation rate
 	m.rateCalculator.RecordEvent("insight_"+insightType, time.Now())
+}
+
+// RecordCorrelationFound implements MetricsCollector interface
+func (m *PrometheusMetricsCollector) RecordCorrelationFound(correlationType string, confidence float64) {
+	m.correlationsFound.Add(1)
+	
+	// Track correlation type
+	m.mu.Lock()
+	m.labels["correlation_"+correlationType] = formatLabel(correlationType, true)
+	m.mu.Unlock()
+	
+	// Track correlation rate by type
+	m.rateCalculator.RecordEvent("correlation_"+correlationType, time.Now())
+}
+
+// RecordEventProcessed implements MetricsCollector interface
+func (m *PrometheusMetricsCollector) RecordEventProcessed(eventType string, source string, processingTime time.Duration) {
+	m.eventsProcessed.Add(1)
+	
+	// Track processing time
+	m.ruleExecutionTimes.Observe(float64(processingTime.Milliseconds()))
+	
+	// Track event processing rate
+	m.rateCalculator.RecordEvent("event_processed", time.Now())
+	
+	// Track by event type
+	m.mu.Lock()
+	m.labels["event_"+eventType] = formatLabel(eventType, true)
+	m.mu.Unlock()
 }
 
 // GetMetrics returns Prometheus-compatible metrics

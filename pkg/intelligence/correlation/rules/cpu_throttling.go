@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // CPUThrottlingRule detects CPU throttling affecting performance
 type CPUThrottlingRule struct {

@@ -1,6 +1,6 @@
 package rules
 import (
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // RegisterDefaultRules registers all default correlation rules to the registry
 func RegisterDefaultRules(registry *correlation.RuleRegistry) error {

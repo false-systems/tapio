@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // CausalityNode represents a node in the causality chain

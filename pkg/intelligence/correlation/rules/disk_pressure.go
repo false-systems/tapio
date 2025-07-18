@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // DiskPressureRule detects disk pressure affecting performance and stability
 type DiskPressureRule struct {

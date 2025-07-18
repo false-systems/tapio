@@ -2,7 +2,7 @@ package rules
 import (
 	"testing"
 	"time"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 // TestMemoryPressureCascadeRule tests the memory pressure cascade detection rule
 func TestMemoryPressureCascadeRule(t *testing.T) {

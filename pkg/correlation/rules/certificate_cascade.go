@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // CertificateCascadeRule detects certificate chain failures that cascade through the system

@@ -4,7 +4,7 @@ import (
     "context"
     "fmt"
     "time"
-    "github.com/falseyair/tapio/pkg/domain"
+    "github.com/yairfalse/tapio/pkg/domain"
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/attribute"
     "go.opentelemetry.io/otel/trace"

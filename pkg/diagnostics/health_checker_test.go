@@ -6,7 +6,7 @@ import (
 
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/yairfalse/tapio/pkg/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 )
 
 func TestHealthChecker_RunHealthCheck(t *testing.T) {

@@ -18,6 +18,9 @@ import (
 	"github.com/yairfalse/tapio/pkg/grpc"
 	"github.com/yairfalse/tapio/pkg/metrics"
 	"github.com/yairfalse/tapio/pkg/monitoring"
+	correlationAdapter "github.com/yairfalse/tapio/pkg/server/adapters/correlation"
+	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/server/logging"
 	"github.com/yairfalse/tapio/pkg/shutdown"
 )
 
@@ -358,7 +361,7 @@ func initializePerfectCorrelationEngine(cfg *ServerConfig, insightStore correlat
 	return engine, nil
 }
 
-func initializeAPIServer(cfg *ServerConfig, engine correlation.CorrelationEngine, insightStore correlation.InsightStore) (*api.Server, error) {
+func initializeAPIServer(cfg *ServerConfig, engine correlation.CorrelationEngine, insightStore correlation.InsightStore) (*api.ServerWithAdapter, error) {
 	apiConfig := &api.Config{
 		Port:            fmt.Sprintf("%d", cfg.RESTPort),
 		EnableCORS:      cfg.API.EnableCORS,
@@ -367,13 +370,24 @@ func initializeAPIServer(cfg *ServerConfig, engine correlation.CorrelationEngine
 		CacheTimeout:    cfg.API.CacheTimeout,
 	}
 
-	// Create API server with shared insight store
-	server := api.NewServerWithStore(engine.(*correlation.PerfectEngineWithStore).GetBaseEngine(), insightStore, apiConfig)
+	// Create correlation adapter
+	logger := logging.NewZapLogger(logging.Config{
+		Level:  logLevel,
+		Format: "json",
+	})
+	adapter := correlationAdapter.NewCorrelationAdapter(logger)
+	
+	// Enable the adapter
+	adapter.Enable()
 
-	fmt.Printf("✅ Initialized REST API server\n")
+	// Create API server with correlation adapter
+	server := api.NewServerWithAdapter(adapter, apiConfig)
+
+	fmt.Printf("✅ Initialized REST API server with correlation adapter\n")
 	fmt.Printf("   - CORS enabled: %v\n", cfg.API.EnableCORS)
 	fmt.Printf("   - Rate limit: %d/min\n", cfg.API.RateLimitPerMin)
 	fmt.Printf("   - Cache timeout: %v\n", cfg.API.CacheTimeout)
+	fmt.Printf("   - Correlation adapter: enabled\n")
 
 	return server, nil
 }

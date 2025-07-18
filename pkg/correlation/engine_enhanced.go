@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Circuit breaker functionality is implemented in autofix_engine.go
@@ -688,11 +688,18 @@ func (e *EnhancedEngine) GetStatistics() map[string]interface{} {
 
 // Helper methods
 
-func (e *EnhancedEngine) mapEBPFSeverity(event domain.SystemEvent) string {
-	if strings.Contains(strings.ToLower(event.Type), "error") {
+func (e *EnhancedEngine) mapEBPFSeverity(event interface{}) string {
+	// TODO: SystemEvent type needs to be properly defined
+	eventType := ""
+	if evt, ok := event.(map[string]interface{}); ok {
+		if t, ok := evt["type"].(string); ok {
+			eventType = t
+		}
+	}
+	if strings.Contains(strings.ToLower(eventType), "error") {
 		return "error"
 	}
-	if strings.Contains(strings.ToLower(event.Type), "warning") {
+	if strings.Contains(strings.ToLower(eventType), "warning") {
 		return "warning"
 	}
 	return "info"

@@ -3,8 +3,8 @@ import (
 	"context"
 	"testing"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
 )
 func TestNewCorrelationEngine(t *testing.T) {
 	config := core.EngineConfig{

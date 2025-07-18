@@ -178,7 +178,7 @@ tasks:
     desc: Format Go code
     cmds:
       - go fmt ./...
-      - goimports -w -local github.com/falseyair/tapio .
+      - goimports -w -local github.com/yairfalse/tapio .
 
   vet:
     desc: Run go vet

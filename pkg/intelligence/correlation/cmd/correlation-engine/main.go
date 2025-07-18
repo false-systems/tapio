@@ -9,9 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/internal"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/internal"
 )
 func main() {
 	var (

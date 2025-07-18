@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 	corev1 "k8s.io/api/core/v1"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 // AdmissionLockdownRule detects when strict policies lock down the cluster preventing operations
 // Pattern: Policy tightening → service account denials → controller failures → operational paralysis

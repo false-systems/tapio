@@ -18,7 +18,7 @@ This script will:
 
 ### Download Binary
 
-1. Go to [Releases](https://github.com/falseyair/tapio/releases)
+1. Go to [Releases](https://github.com/yairfalse/tapio/releases)
 2. Download the binary for your platform
 3. Extract and move to your PATH:
 
@@ -30,7 +30,7 @@ sudo mv tapio /usr/local/bin/
 ### Build from Source
 
 ```bash
-git clone https://github.com/falseyair/tapio.git
+git clone https://github.com/yairfalse/tapio.git
 cd tapio
 go build -o tapio ./cmd/tapio
 sudo mv tapio /usr/local/bin/
@@ -226,5 +226,5 @@ After installation:
 ## Support
 
 - Documentation: https://docs.tapio.io
-- Issues: https://github.com/falseyair/tapio/issues
-- Discussions: https://github.com/falseyair/tapio/discussions
+- Issues: https://github.com/yairfalse/tapio/issues
+- Discussions: https://github.com/yairfalse/tapio/discussions

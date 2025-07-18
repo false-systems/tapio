@@ -4,8 +4,8 @@ import (
 	"math"
 	"sort"
 	"time"
-	"github.com/falseyair/tapio/pkg/domain"
-	"github.com/falseyair/tapio/pkg/intelligence/correlation/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
 )
 // causalAnalyzer implements causal correlation analysis
 type causalAnalyzer struct {

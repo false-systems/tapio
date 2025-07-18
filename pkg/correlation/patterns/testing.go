@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // PatternTestingFramework provides comprehensive testing capabilities for pattern detectors

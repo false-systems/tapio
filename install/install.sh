@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 TAPIO_VERSION=${TAPIO_VERSION:-latest}
 INSTALL_DIR=${INSTALL_DIR:-/usr/local/bin}
 CONFIG_DIR=${CONFIG_DIR:-$HOME/.tapio}
-REPO_URL="https://github.com/falseyair/tapio"
+REPO_URL="https://github.com/yairfalse/tapio"
 BINARY_NAME="tapio"
 
 # Platform detection
@@ -153,7 +153,7 @@ install_binary() {
 }
 
 install_from_release() {
-    local download_url="https://github.com/falseyair/tapio/releases/download/${TAPIO_VERSION}/tapio_${TAPIO_VERSION#v}_${OS}_${ARCH}.tar.gz"
+    local download_url="https://github.com/yairfalse/tapio/releases/download/${TAPIO_VERSION}/tapio_${TAPIO_VERSION#v}_${OS}_${ARCH}.tar.gz"
     local temp_dir=$(mktemp -d)
     
     debug "Download URL: $download_url"
@@ -301,7 +301,7 @@ show_next_steps() {
     echo "    tapio help                     # Show all commands"
     echo "    tapio docs                     # Open documentation"
     echo
-    echo "  Questions? Visit: https://github.com/falseyair/tapio"
+    echo "  Questions? Visit: https://github.com/yairfalse/tapio"
 }
 
 # Main installation flow

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/correlation/types"
+	"github.com/yairfalse/tapio/pkg/correlation/types"
 )
 
 // ContainerRuntimeFailureDetector implements detection of container runtime failure patterns

@@ -107,7 +107,7 @@ go run main.go
 When developing locally, use replace directives:
 ```go
 replace github.com/yairfalse/tapio/pkg/domain => ../domain
-replace github.com/yairfalse/tapio/pkg/ebpf => ../ebpf
+replace github.com/yairfalse/tapio/pkg/collectors/ebpf => ../ebpf
 ```
 
 ## Testing Independence

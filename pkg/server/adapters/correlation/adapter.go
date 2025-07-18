@@ -54,12 +54,15 @@ func NewCorrelationAdapter(logger domain.Logger) *CorrelationAdapter {
 	eventStore := NewInMemoryEventStore(10000, time.Hour*24) // 10k events, 24h retention
 	metricsCollector := NewPrometheusMetricsCollector()
 	
+	// Create logger adapter for interface compatibility
+	corrLogger := NewLoggerAdapter(logger)
+	
 	// Create engine with real implementations
 	engine := core.NewCoreEngine(
 		coreConfig,
 		eventStore,
 		metricsCollector,
-		logger,
+		corrLogger,
 	)
 
 	// Initialize pattern registry
@@ -245,10 +248,16 @@ func (a *CorrelationAdapter) CorrelateEvents(ctx context.Context, events []*doma
 	correlations := make([]*Correlation, len(results))
 	for i, result := range results {
 		if result != nil {
+			// Extract event IDs from result events
+			eventIDs := make([]string, len(result.Events))
+			for j, event := range result.Events {
+				eventIDs[j] = event.ID
+			}
+			
 			correlations[i] = &Correlation{
 				ID:          result.ID,
 				Type:        result.Type,
-				EventIDs:    result.EventIDs,
+				EventIDs:    eventIDs,
 				Confidence:  result.Confidence,
 				Description: result.Description,
 				Metadata:    result.Metadata,
@@ -330,10 +339,10 @@ func (a *CorrelationAdapter) GetPatternMatches(ctx context.Context, patternID st
 		match := &PatternMatch{
 			ID:         a.generateID(),
 			PatternID:  patternID,
-			EventIDs:   extractEventIDs(result.Evidence),
+			EventIDs:   extractEventIDsFromPatternResult(result),
 			Confidence: result.Confidence,
 			Timestamp:  time.Now(),
-			Metadata:   result.Metadata,
+			Metadata:   extractMetadataFromPatternResult(result),
 		}
 		matches = append(matches, match)
 	}
@@ -658,20 +667,37 @@ type CorrelationStats struct {
 
 // convertToCorrEvent converts a server domain event to correlation domain event
 func (a *CorrelationAdapter) convertToCorrEvent(event *domain.Event) corrDomain.Event {
-	return corrDomain.Event{
+	// Map server event to correlation event
+	corrEvent := corrDomain.Event{
 		ID:        event.ID,
-		Type:      event.Type,
+		Type:      string(event.Type),
 		Timestamp: event.Timestamp,
 		Source:    event.Source,
-		Severity:  event.Severity,
-		Message:   event.Message,
+		Severity:  corrDomain.Severity(event.Severity),
+		// Category can be derived from Type
+		Category:  "system",
+		// Entity needs to be extracted from Data if available
 		Entity: corrDomain.Entity{
-			Type:      event.Entity.Type,
-			Name:      event.Entity.Name,
-			Namespace: event.Entity.Namespace,
+			Type: "system",
+			Name: event.Source,
 		},
-		Metadata: event.Metadata,
 	}
+	
+	// Copy data as attributes
+	if event.Data != nil {
+		corrEvent.Data = event.Data
+		corrEvent.Attributes = event.Data
+	}
+	
+	// Add message to data if available
+	if event.Message != "" {
+		if corrEvent.Data == nil {
+			corrEvent.Data = make(map[string]interface{})
+		}
+		corrEvent.Data["message"] = event.Message
+	}
+	
+	return corrEvent
 }
 
 // convertToPatternEvents converts domain events to pattern events
@@ -684,8 +710,16 @@ func (a *CorrelationAdapter) convertToPatternEvents(events []corrDomain.Event) [
 			Timestamp: event.Timestamp,
 			Source:    event.Source,
 			Severity:  types.Severity(event.Severity),
-			Message:   event.Message,
-			Metadata:  event.Metadata,
+			// Extract message from data if available
+			Message:   extractMessage(event),
+			Data:      event.Data,
+			Attributes: event.Attributes,
+			Labels:    event.Labels,
+			Entity:    types.Entity{
+				Type:      event.Entity.Type,
+				Name:      event.Entity.Name,
+				Namespace: event.Entity.Namespace,
+			},
 		}
 	}
 	return patternEvents
@@ -702,23 +736,27 @@ func (a *CorrelationAdapter) convertToInsights(patternResults []types.PatternRes
 		
 		insight := &Insight{
 			ID:          a.generateID(),
-			Title:       result.Pattern.Name,
-			Description: result.Pattern.Description,
+			Title:       result.PatternName,
+			Description: fmt.Sprintf("Pattern %s detected with confidence %.2f", result.PatternName, result.Confidence),
 			Severity:    a.mapPatternSeverity(result.Confidence),
-			Category:    string(result.Pattern.Category),
+			Category:    string(result.Category),
 			Resource:    resource,
 			Namespace:   namespace,
 			Timestamp:   time.Now(),
-			Metadata:    result.Metadata,
+			Metadata:    map[string]interface{}{
+				"pattern_id": result.PatternID,
+				"confidence": result.Confidence,
+				"severity":   result.Severity,
+			},
 		}
 		
 		// Add prediction if available
-		if result.Prediction != nil {
+		if result.Prediction != "" {
 			insight.Prediction = &Prediction{
-				Type:        result.Prediction.Type,
-				TimeToEvent: result.Prediction.TimeToEvent,
-				Probability: result.Prediction.Probability,
-				Confidence:  result.Prediction.Confidence,
+				Type:        "pattern_based",
+				TimeToEvent: 30 * time.Minute, // Default prediction window
+				Probability: result.Confidence,
+				Confidence:  result.Confidence, // Use pattern confidence
 			}
 		}
 		
@@ -735,23 +773,23 @@ func (a *CorrelationAdapter) convertToInsights(patternResults []types.PatternRes
 func (a *CorrelationAdapter) generateActionableItems(result types.PatternResult) []*ActionableItem {
 	var items []*ActionableItem
 	
-	// Add pattern-specific recommendations
-	switch result.Pattern.Category {
-	case types.CategoryMemory:
+	// Add pattern-specific recommendations based on pattern name
+	switch result.Category {
+	case "memory":
 		items = append(items, &ActionableItem{
 			Description: "Increase memory limits",
 			Command:     "kubectl patch deployment <name> -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"<container>\",\"resources\":{\"limits\":{\"memory\":\"<new-limit>\"}}}]}}}}'",
 			Impact:      "Prevents OOM kills",
 			Risk:        "Low",
 		})
-	case types.CategoryNetwork:
+	case "network":
 		items = append(items, &ActionableItem{
 			Description: "Check network connectivity",
 			Command:     "kubectl exec <pod> -- netstat -tuln",
 			Impact:      "Diagnoses network issues",
 			Risk:        "Low",
 		})
-	case types.CategoryStorage:
+	case "storage":
 		items = append(items, &ActionableItem{
 			Description: "Check disk usage",
 			Command:     "kubectl exec <pod> -- df -h",
@@ -868,6 +906,52 @@ func extractEventIDs(evidence []types.Evidence) []string {
 		}
 	}
 	return eventIDs
+}
+
+// extractEventIDsFromPatternResult extracts event IDs from pattern result
+func extractEventIDsFromPatternResult(result *types.PatternResult) []string {
+	var eventIDs []string
+	// Extract from MatchedEvents if available
+	for _, event := range result.MatchedEvents {
+		eventIDs = append(eventIDs, event.ID)
+	}
+	return eventIDs
+}
+
+// extractMetadataFromPatternResult extracts metadata from pattern result
+func extractMetadataFromPatternResult(result *types.PatternResult) map[string]interface{} {
+	metadata := make(map[string]interface{})
+	metadata["pattern_name"] = result.PatternName
+	metadata["confidence"] = result.Confidence
+	metadata["severity"] = result.Severity
+	return metadata
+}
+
+// extractMessage extracts message from event data
+func extractMessage(event corrDomain.Event) string {
+	if event.Data != nil {
+		if msg, ok := event.Data["message"].(string); ok {
+			return msg
+		}
+	}
+	return ""
+}
+
+// extractMetadata converts event data/attributes to metadata
+func extractMetadata(event corrDomain.Event) map[string]interface{} {
+	metadata := make(map[string]interface{})
+	
+	// Copy attributes
+	for k, v := range event.Attributes {
+		metadata[k] = v
+	}
+	
+	// Add labels if present
+	if len(event.Labels) > 0 {
+		metadata["labels"] = event.Labels
+	}
+	
+	return metadata
 }
 
 // Production implementations are now in separate files:

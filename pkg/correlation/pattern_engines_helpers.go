@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Helper methods for SemanticPatternEngine
