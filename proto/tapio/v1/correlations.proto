@@ -1,0 +1,366 @@
+syntax = "proto3";
+
+package tapio.v1;
+
+option go_package = "github.com/yairfalse/tapio/proto/tapio/v1;tapiov1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "tapio/v1/common.proto";
+import "tapio/v1/events.proto";
+
+// SemanticGroup represents a group of semantically related events
+message SemanticGroup {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  
+  // Semantic classification
+  string semantic_type = 4;    // e.g., "deployment", "failure_cascade", "security_breach"
+  string intent = 5;           // Human-readable intent description
+  double confidence_score = 6;  // 0.0 to 1.0
+  
+  // Related events in causal order
+  repeated Event events = 7;
+  repeated string event_ids = 8;  // For reference without full events
+  
+  // Temporal characteristics
+  google.protobuf.Timestamp start_time = 9;
+  google.protobuf.Timestamp end_time = 10;
+  google.protobuf.Duration duration = 11;
+  
+  // OTEL trace context
+  string trace_id = 12;
+  repeated string span_ids = 13;
+  
+  // Impact assessment
+  ImpactAssessment impact = 14;
+  
+  // Predicted outcome
+  PredictedOutcome prediction = 15;
+  
+  // Root cause analysis
+  RootCauseAnalysis root_cause = 16;
+  
+  // Metadata and labels
+  map<string, string> metadata = 17;
+  map<string, string> labels = 18;
+}
+
+// ImpactAssessment evaluates the business impact of a correlation
+message ImpactAssessment {
+  enum ImpactLevel {
+    IMPACT_LEVEL_UNSPECIFIED = 0;
+    IMPACT_LEVEL_MINIMAL = 1;
+    IMPACT_LEVEL_LOW = 2;
+    IMPACT_LEVEL_MEDIUM = 3;
+    IMPACT_LEVEL_HIGH = 4;
+    IMPACT_LEVEL_CRITICAL = 5;
+  }
+  
+  ImpactLevel level = 1;
+  double business_impact_score = 2;  // 0.0 to 1.0
+  double technical_impact_score = 3;  // 0.0 to 1.0
+  
+  // Affected business services
+  repeated string affected_services = 4;
+  
+  // Estimated downtime or degradation
+  google.protobuf.Duration estimated_duration = 5;
+  
+  // Number of affected users/requests
+  int64 affected_users = 6;
+  int64 affected_requests = 7;
+  
+  // Financial impact estimate
+  double estimated_cost = 8;
+  string currency = 9;
+  
+  // Cascade risk
+  double cascade_probability = 10;
+  repeated string potential_cascade_targets = 11;
+}
+
+// PredictedOutcome represents AI-predicted future states
+message PredictedOutcome {
+  string scenario = 1;
+  double probability = 2;  // 0.0 to 1.0
+  google.protobuf.Duration time_to_outcome = 3;
+  
+  // Predicted events that may occur
+  repeated PredictedEvent predicted_events = 4;
+  
+  // Recommended preventive actions
+  repeated string prevention_actions = 5;
+  
+  // Confidence in prediction
+  double confidence = 6;
+  
+  // Model metadata
+  string model_version = 7;
+  google.protobuf.Timestamp prediction_timestamp = 8;
+}
+
+// PredictedEvent represents a potential future event
+message PredictedEvent {
+  EventType type = 1;
+  EventSeverity severity = 2;
+  string description = 3;
+  double probability = 4;
+  google.protobuf.Duration estimated_time = 5;
+}
+
+// RootCauseAnalysis provides deep analysis of event causality
+message RootCauseAnalysis {
+  // Primary root cause
+  string root_cause_summary = 1;
+  repeated CausalFactor causal_factors = 2;
+  
+  // Causal chain from root to symptom
+  repeated CausalLink causal_chain = 3;
+  
+  // Contributing factors
+  repeated ContributingFactor contributing_factors = 4;
+  
+  // Analysis confidence
+  double confidence = 5;
+  
+  // Evidence supporting the analysis
+  repeated Evidence evidence = 6;
+}
+
+// CausalFactor represents a factor in root cause
+message CausalFactor {
+  string id = 1;
+  string description = 2;
+  double contribution_weight = 3;  // How much this factor contributed
+  string category = 4;  // e.g., "configuration", "resource", "code", "external"
+}
+
+// CausalLink represents a cause-effect relationship
+message CausalLink {
+  string from_event_id = 1;
+  string to_event_id = 2;
+  string relationship_type = 3;  // e.g., "caused", "triggered", "correlated"
+  double confidence = 4;
+  google.protobuf.Duration time_delta = 5;
+}
+
+// ContributingFactor represents secondary factors
+message ContributingFactor {
+  string factor = 1;
+  double weight = 2;
+  string evidence = 3;
+}
+
+// Evidence supporting root cause analysis
+message Evidence {
+  string type = 1;  // e.g., "metric_anomaly", "log_pattern", "trace_span"
+  string description = 2;
+  google.protobuf.Struct data = 3;
+  double relevance_score = 4;
+}
+
+// Correlation represents a discovered correlation
+message Correlation {
+  string id = 1;
+  CorrelationType type = 2;
+  string title = 3;
+  string description = 4;
+  
+  // Correlation strength and confidence
+  double correlation_score = 5;  // -1.0 to 1.0 for statistical correlations
+  double confidence = 6;         // 0.0 to 1.0
+  
+  // Related events
+  repeated string event_ids = 7;
+  int32 event_count = 8;
+  
+  // Semantic groups if applicable
+  repeated string semantic_group_ids = 9;
+  
+  // Time characteristics
+  google.protobuf.Timestamp discovered_at = 10;
+  TimeRange time_range = 11;
+  
+  // Statistical properties
+  map<string, double> statistics = 12;
+  
+  // Visualization hints
+  string visualization_type = 13;  // e.g., "timeline", "graph", "heatmap"
+  google.protobuf.Struct visualization_data = 14;
+  
+  // Actions and recommendations
+  repeated RecommendedAction actions = 15;
+  
+  // Metadata
+  map<string, string> metadata = 16;
+}
+
+// RecommendedAction suggests remediation steps
+message RecommendedAction {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  
+  enum ActionType {
+    ACTION_TYPE_UNSPECIFIED = 0;
+    ACTION_TYPE_INVESTIGATE = 1;
+    ACTION_TYPE_MITIGATE = 2;
+    ACTION_TYPE_PREVENT = 3;
+    ACTION_TYPE_ESCALATE = 4;
+  }
+  ActionType type = 4;
+  
+  enum Priority {
+    PRIORITY_UNSPECIFIED = 0;
+    PRIORITY_LOW = 1;
+    PRIORITY_MEDIUM = 2;
+    PRIORITY_HIGH = 3;
+    PRIORITY_CRITICAL = 4;
+  }
+  Priority priority = 5;
+  
+  // Action details
+  repeated string commands = 6;
+  map<string, string> parameters = 7;
+  
+  // Expected outcome
+  string expected_result = 8;
+  google.protobuf.Duration estimated_duration = 9;
+  
+  // Risk assessment
+  string risk_level = 10;
+  string risk_description = 11;
+}
+
+// CorrelationQuery for searching correlations
+message CorrelationQuery {
+  Filter filter = 1;
+  
+  // Correlation-specific filters
+  repeated CorrelationType correlation_types = 2;
+  double min_confidence = 3;
+  double min_correlation_score = 4;
+  
+  // Include related data
+  bool include_events = 5;
+  bool include_semantic_groups = 6;
+  bool include_root_cause = 7;
+  bool include_predictions = 8;
+  
+  repeated SortOrder sort_orders = 9;
+}
+
+// GetCorrelationsRequest
+message GetCorrelationsRequest {
+  repeated string correlation_ids = 1;
+  CorrelationQuery query = 2;
+}
+
+// GetCorrelationsResponse
+message GetCorrelationsResponse {
+  repeated Correlation correlations = 1;
+  int64 total_count = 2;
+  string next_page_token = 3;
+  map<string, string> metadata = 4;
+}
+
+// GetSemanticGroupsRequest
+message GetSemanticGroupsRequest {
+  repeated string group_ids = 1;
+  Filter filter = 2;
+  bool include_events = 3;
+  bool include_analysis = 4;
+}
+
+// GetSemanticGroupsResponse
+message GetSemanticGroupsResponse {
+  repeated SemanticGroup groups = 1;
+  int64 total_count = 2;
+  string next_page_token = 3;
+}
+
+// AnalyzeEventsRequest for on-demand analysis
+message AnalyzeEventsRequest {
+  repeated string event_ids = 1;
+  EventQuery event_query = 2;
+  
+  // Analysis options
+  bool enable_root_cause = 3;
+  bool enable_predictions = 4;
+  bool enable_impact_assessment = 5;
+  
+  // Time window for analysis
+  TimeRange time_range = 6;
+  
+  // Correlation preferences
+  repeated CorrelationType preferred_correlation_types = 7;
+  double min_confidence_threshold = 8;
+}
+
+// AnalyzeEventsResponse
+message AnalyzeEventsResponse {
+  repeated Correlation correlations = 1;
+  repeated SemanticGroup semantic_groups = 2;
+  RootCauseAnalysis root_cause = 3;
+  repeated PredictedOutcome predictions = 4;
+  ImpactAssessment overall_impact = 5;
+  
+  // Analysis metadata
+  google.protobuf.Duration analysis_duration = 6;
+  int32 events_analyzed = 7;
+  map<string, string> metadata = 8;
+}
+
+// CorrelationUpdate for real-time correlation updates
+message CorrelationUpdate {
+  enum UpdateType {
+    UPDATE_TYPE_UNSPECIFIED = 0;
+    UPDATE_TYPE_NEW_CORRELATION = 1;
+    UPDATE_TYPE_CORRELATION_STRENGTHENED = 2;
+    UPDATE_TYPE_NEW_EVENTS_ADDED = 3;
+    UPDATE_TYPE_PREDICTION_UPDATED = 4;
+    UPDATE_TYPE_IMPACT_CHANGED = 5;
+  }
+  
+  UpdateType type = 1;
+  Correlation correlation = 2;
+  SemanticGroup semantic_group = 3;
+  google.protobuf.Timestamp update_timestamp = 4;
+  map<string, string> update_metadata = 5;
+}
+
+// SubscribeToCorrelationsRequest
+message SubscribeToCorrelationsRequest {
+  Filter filter = 1;
+  repeated CorrelationType correlation_types = 2;
+  double min_confidence = 3;
+  bool include_predictions = 4;
+}
+
+// CorrelationService provides correlation and analysis capabilities
+service CorrelationService {
+  // Query existing correlations
+  rpc GetCorrelations(GetCorrelationsRequest) returns (GetCorrelationsResponse);
+  
+  // Get semantic groups
+  rpc GetSemanticGroups(GetSemanticGroupsRequest) returns (GetSemanticGroupsResponse);
+  
+  // Analyze events on-demand
+  rpc AnalyzeEvents(AnalyzeEventsRequest) returns (AnalyzeEventsResponse);
+  
+  // Subscribe to real-time correlation updates
+  rpc SubscribeToCorrelations(SubscribeToCorrelationsRequest) returns (stream CorrelationUpdate);
+  
+  // Get recommended actions for a correlation
+  rpc GetRecommendedActions(GetCorrelationsRequest) returns (GetRecommendedActionsResponse);
+}
+
+// GetRecommendedActionsResponse
+message GetRecommendedActionsResponse {
+  repeated RecommendedAction actions = 1;
+  string correlation_id = 2;
+  map<string, string> metadata = 3;
+}
