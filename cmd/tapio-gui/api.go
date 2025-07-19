@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/api"
-	"github.com/yairfalse/tapio/pkg/client"
+	"github.com/yairfalse/tapio/pkg/interfaces/server/api"
 )
 
 // APIClient provides the GUI backend API

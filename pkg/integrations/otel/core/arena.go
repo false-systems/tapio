@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/yairfalse/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"
 )
 
 // ArenaManager provides zero-allocation span creation using memory arenas

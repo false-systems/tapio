@@ -2,8 +2,8 @@ package core
 
 import (
 	"context"
-	"github.com/falseyair/tapio/pkg/domain"
-	integration "github.com/falseyair/tapio/pkg/integrations/core"
+	"github.com/yairfalse/tapio/pkg/domain"
+	integration "github.com/yairfalse/tapio/pkg/integrations/core"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )

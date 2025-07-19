@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/yairfalse/tapio/pkg/logging"
+	"github.com/yairfalse/tapio/pkg/interfaces/logging"
 )
 
 // AuthManager provides comprehensive authentication and authorization

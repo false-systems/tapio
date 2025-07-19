@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/otel/domain"
-	"github.com/yairfalse/tapio/pkg/otel/ports"
+	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"
+	"github.com/yairfalse/tapio/pkg/integrations/otel/ports"
 )
 
 // PostgreSQLTraceRepositoryAdapter implements the TraceRepositoryPort using PostgreSQL

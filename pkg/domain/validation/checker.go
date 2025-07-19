@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/cmd/install/common"
 )
 
 // Validator implements the installer.Validator interface

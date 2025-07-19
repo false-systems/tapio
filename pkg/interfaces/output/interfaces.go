@@ -2,7 +2,7 @@ package output
 
 import (
 	"context"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // HumanOutputGenerator converts technical events into human-readable insights

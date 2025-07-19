@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation/core"
-	corrDomain "github.com/yairfalse/tapio/pkg/intelligence/correlation/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation/patterns"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation/types"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	corrDomain "github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 

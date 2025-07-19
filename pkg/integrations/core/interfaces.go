@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"github.com/falseyair/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Integration defines the base contract for all integrations

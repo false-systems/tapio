@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/yairfalse/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"
 )
 
 // LockFreeRingBuffer implements a high-performance lock-free ring buffer
