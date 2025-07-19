@@ -1,0 +1,35 @@
+version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: github.com/yairfalse/tapio/proto
+plugins:
+  # Go code generation
+  - plugin: go
+    out: gen
+    opt:
+      - paths=source_relative
+  
+  # gRPC Go code generation
+  - plugin: go-grpc
+    out: gen
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=false
+  
+  # gRPC-Gateway generation
+  - plugin: grpc-gateway
+    out: gen
+    opt:
+      - paths=source_relative
+      - generate_unbound_methods=true
+      - logtostderr=true
+  
+  # OpenAPI v2 generation for Swagger UI
+  - plugin: openapiv2
+    out: gen/openapiv2
+    opt:
+      - logtostderr=true
+      - allow_merge=true
+      - merge_file_name=tapio
+      - json_names_for_fields=false

@@ -1,12 +1,14 @@
 syntax = "proto3";
 
-package tapio.collector.v1;
+package tapio.v1;
 
-option go_package = "github.com/yairfalse/tapio/pkg/grpc;grpc";
+option go_package = "github.com/yairfalse/tapio/proto/tapio/v1;tapiov1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
-import "proto/events.proto";
+import "google/api/annotations.proto";
+import "tapio/v1/events.proto";
+import "tapio/v1/common.proto";
 
 // CollectorService defines the streaming communication between
 // collectors and the Tapio server, optimized for high-throughput
@@ -29,7 +31,47 @@ service CollectorService {
   rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse);
   
   // GetServerInfo returns server capabilities and configuration
-  rpc GetServerInfo(ServerInfoRequest) returns (ServerInfoResponse);
+  rpc GetServerInfo(ServerInfoRequest) returns (ServerInfoResponse) {
+    option (google.api.http) = {
+      get: "/v1/collector/server-info"
+    };
+  }
+  
+  // GetConfig retrieves dynamic collector configuration
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse) {
+    option (google.api.http) = {
+      get: "/v1/collector/{collector_id}/config"
+    };
+  }
+  
+  // UpdateConfig updates collector configuration dynamically
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse) {
+    option (google.api.http) = {
+      put: "/v1/collector/{collector_id}/config"
+      body: "*"
+    };
+  }
+  
+  // GetMetrics retrieves collector performance metrics
+  rpc GetMetrics(GetCollectorMetricsRequest) returns (GetCollectorMetricsResponse) {
+    option (google.api.http) = {
+      get: "/v1/collector/{collector_id}/metrics"
+    };
+  }
+  
+  // ListCollectors lists all registered collectors
+  rpc ListCollectors(ListCollectorsRequest) returns (ListCollectorsResponse) {
+    option (google.api.http) = {
+      get: "/v1/collectors"
+    };
+  }
+  
+  // UnregisterCollector removes a collector from the system
+  rpc UnregisterCollector(UnregisterCollectorRequest) returns (UnregisterCollectorResponse) {
+    option (google.api.http) = {
+      delete: "/v1/collector/{collector_id}"
+    };
+  }
 }
 
 // StreamRequest contains events or control messages from collector to server
@@ -43,7 +85,7 @@ message StreamRequest {
   // Request payload
   oneof payload {
     // Batch of events to process
-    EventBatch events = 10;
+    CollectorEventBatch events = 10;
     
     // Flow control message
     FlowControlMessage flow_control = 11;
@@ -67,7 +109,7 @@ message StreamResponse {
   // Response payload
   oneof payload {
     // Acknowledgment of processed events
-    EventAck event_ack = 10;
+    CollectorEventAck event_ack = 10;
     
     // Flow control directive
     FlowControlDirective flow_control = 11;
@@ -80,8 +122,8 @@ message StreamResponse {
   }
 }
 
-// EventBatch contains multiple events for efficient transmission
-message EventBatch {
+// CollectorEventBatch contains multiple events for efficient transmission
+message CollectorEventBatch {
   // Batch identifier for tracking and deduplication
   string batch_id = 1;
   
@@ -94,7 +136,7 @@ message EventBatch {
   string node_id = 5;
   
   // Events in this batch
-  repeated tapio.events.v1.UnifiedEvent events = 6;
+  repeated Event events = 6;
   
   // Batch metadata
   BatchMetadata metadata = 7;
@@ -200,8 +242,8 @@ message FlowControlDirective {
   google.protobuf.Duration valid_duration = 6;
 }
 
-// EventAck acknowledges successful processing of events
-message EventAck {
+// CollectorEventAck acknowledges successful processing of events
+message CollectorEventAck {
   // Batch ID that was processed
   string batch_id = 1;
   
@@ -349,7 +391,7 @@ message ErrorCounters {
 
 // EventBatchRequest for non-streaming batch sending
 message EventBatchRequest {
-  EventBatch batch = 1;
+  CollectorEventBatch batch = 1;
   bool require_ack = 2;
   google.protobuf.Duration timeout = 3;
 }
@@ -358,7 +400,7 @@ message EventBatchRequest {
 message EventBatchResponse {
   bool success = 1;
   string message = 2;
-  EventAck ack = 3;
+  CollectorEventAck ack = 3;
   FlowControlDirective flow_control = 4;
 }
 
@@ -498,7 +540,7 @@ message ServerEndpoint {
   bool tls_enabled = 3;
   string region = 4;
   uint32 weight = 5;
-  HealthStatus health = 6;
+  CollectorHealthStatus health = 6;
 }
 
 // HeartbeatRequest maintains connection health
@@ -576,6 +618,203 @@ message ErrorResponse {
   google.protobuf.Duration retry_after = 6;
 }
 
+// GetConfigRequest retrieves collector configuration
+message GetConfigRequest {
+  string collector_id = 1;
+  string version = 2;  // Optional: specific version
+}
+
+// GetConfigResponse returns collector configuration
+message GetConfigResponse {
+  CollectorConfig config = 1;
+  google.protobuf.Timestamp last_updated = 2;
+  string etag = 3;  // For conditional updates
+}
+
+// UpdateConfigRequest updates collector configuration
+message UpdateConfigRequest {
+  string collector_id = 1;
+  CollectorConfig config = 2;
+  string etag = 3;  // For optimistic concurrency
+  bool validate_only = 4;  // Validate without applying
+}
+
+// UpdateConfigResponse confirms configuration update
+message UpdateConfigResponse {
+  bool success = 1;
+  string message = 2;
+  CollectorConfig applied_config = 3;
+  string new_etag = 4;
+  repeated ConfigValidationError validation_errors = 5;
+}
+
+// ConfigValidationError for configuration issues
+message ConfigValidationError {
+  string field = 1;
+  string error = 2;
+  string suggestion = 3;
+}
+
+// GetCollectorMetricsRequest for performance metrics
+message GetCollectorMetricsRequest {
+  string collector_id = 1;
+  google.protobuf.Duration time_window = 2;
+  repeated string metric_names = 3;
+  bool include_histograms = 4;
+}
+
+// GetCollectorMetricsResponse returns performance metrics
+message GetCollectorMetricsResponse {
+  string collector_id = 1;
+  CollectorMetrics metrics = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// CollectorMetrics contains detailed performance data
+message CollectorMetrics {
+  // Event processing metrics
+  int64 events_processed = 1;
+  int64 events_dropped = 2;
+  int64 events_filtered = 3;
+  double events_per_second = 4;
+  
+  // Resource utilization
+  ResourceUtilization resources = 5;
+  
+  // Quality metrics
+  QualityMetrics quality = 6;
+  
+  // Network metrics
+  NetworkMetrics network = 7;
+  
+  // Error metrics
+  ErrorMetrics errors = 8;
+  
+  // Latency histograms
+  map<string, LatencyHistogram> latency_histograms = 9;
+}
+
+// NetworkMetrics for network performance
+message NetworkMetrics {
+  int64 bytes_sent = 1;
+  int64 bytes_received = 2;
+  int64 connections_active = 3;
+  int64 connections_failed = 4;
+  double avg_latency_ms = 5;
+  double p99_latency_ms = 6;
+}
+
+// ErrorMetrics for error tracking
+message ErrorMetrics {
+  map<string, int64> errors_by_type = 1;
+  double error_rate = 2;
+  google.protobuf.Timestamp last_error = 3;
+  repeated RecentError recent_errors = 4;
+}
+
+// RecentError for error details
+message RecentError {
+  google.protobuf.Timestamp timestamp = 1;
+  string error_type = 2;
+  string message = 3;
+  string stack_trace = 4;
+  map<string, string> context = 5;
+}
+
+// LatencyHistogram for latency distribution
+message LatencyHistogram {
+  string operation = 1;
+  int64 count = 2;
+  double min = 3;
+  double max = 4;
+  double mean = 5;
+  double p50 = 6;
+  double p95 = 7;
+  double p99 = 8;
+  double p999 = 9;
+  repeated HistogramBucket buckets = 10;
+}
+
+// HistogramBucket for histogram data
+message HistogramBucket {
+  double upper_bound = 1;
+  int64 count = 2;
+}
+
+// ListCollectorsRequest for collector listing
+message ListCollectorsRequest {
+  // Filtering options
+  repeated string collector_types = 1;
+  repeated string node_ids = 2;
+  repeated CollectorState states = 3;
+  
+  // Pagination
+  int32 page_size = 4;
+  string page_token = 5;
+  
+  // Sorting
+  string sort_by = 6;  // "name", "type", "created", "events_per_second"
+  bool descending = 7;
+}
+
+// ListCollectorsResponse returns collector list
+message ListCollectorsResponse {
+  repeated CollectorInfo collectors = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+  
+  // Summary statistics
+  CollectorSummaryStats stats = 4;
+}
+
+// CollectorInfo provides collector details
+message CollectorInfo {
+  string collector_id = 1;
+  string collector_type = 2;
+  string version = 3;
+  CollectorState state = 4;
+  
+  NodeInfo node = 5;
+  google.protobuf.Timestamp registered_at = 6;
+  google.protobuf.Timestamp last_seen = 7;
+  
+  // Performance summary
+  double events_per_second = 8;
+  int64 total_events = 9;
+  double error_rate = 10;
+  
+  // Health indicators
+  HealthStatus health = 11;
+  repeated string warnings = 12;
+  
+  // Configuration summary
+  map<string, string> config_summary = 13;
+}
+
+// CollectorSummaryStats provides fleet-wide statistics
+message CollectorSummaryStats {
+  int32 total_collectors = 1;
+  map<string, int32> collectors_by_type = 2;
+  map<string, int32> collectors_by_state = 3;
+  double total_events_per_second = 4;
+  int32 unhealthy_collectors = 5;
+}
+
+// UnregisterCollectorRequest removes a collector
+message UnregisterCollectorRequest {
+  string collector_id = 1;
+  bool force = 2;  // Force removal even if active
+  string reason = 3;
+}
+
+// UnregisterCollectorResponse confirms removal
+message UnregisterCollectorResponse {
+  bool success = 1;
+  string message = 2;
+  google.protobuf.Timestamp unregistered_at = 3;
+  int64 pending_events_dropped = 4;
+}
+
 // Enums for type safety and forward compatibility
 
 enum CompressionType {
@@ -612,7 +851,7 @@ enum LoadBalancingStrategy {
   LOAD_BALANCING_LOCALITY_AWARE = 4;
 }
 
-enum HealthStatus {
+enum CollectorHealthStatus {
   HEALTH_UNKNOWN = 0;
   HEALTH_HEALTHY = 1;
   HEALTH_DEGRADED = 2;

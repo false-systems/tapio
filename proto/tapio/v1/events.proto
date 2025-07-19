@@ -1,0 +1,214 @@
+syntax = "proto3";
+
+package tapio.v1;
+
+option go_package = "github.com/yairfalse/tapio/proto/tapio/v1;tapiov1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "tapio/v1/common.proto";
+
+// Event represents a single observability event with full OTEL context
+message Event {
+  // Unique identifier for the event
+  string id = 1;
+  
+  // Event classification
+  EventType type = 2;
+  EventSeverity severity = 3;
+  SourceType source = 4;
+  
+  // Core event data
+  string message = 5;
+  string description = 6;
+  google.protobuf.Timestamp timestamp = 7;
+  
+  // Contextual information
+  EventContext context = 8;
+  
+  // OTEL trace context (duplicated for top-level access)
+  string trace_id = 9;
+  string span_id = 10;
+  string parent_span_id = 11;
+  
+  // Structured data and attributes
+  google.protobuf.Struct data = 12;
+  map<string, string> attributes = 13;
+  
+  // Metrics associated with this event
+  repeated MetricValue metrics = 14;
+  
+  // Related resources
+  repeated ResourceIdentifier resources = 15;
+  
+  // Correlation hints
+  repeated string correlation_ids = 16;
+  
+  // Processing metadata
+  string collector_id = 17;
+  google.protobuf.Timestamp processed_at = 18;
+  
+  // Confidence score (0.0 to 1.0)
+  double confidence = 19;
+  
+  // Tags for categorization
+  repeated string tags = 20;
+}
+
+// EventBatch for efficient bulk event transmission
+message EventBatch {
+  string batch_id = 1;
+  repeated Event events = 2;
+  google.protobuf.Timestamp created_at = 3;
+  string collector_id = 4;
+  map<string, string> metadata = 5;
+}
+
+// EventAck acknowledges event processing
+message EventAck {
+  string event_id = 1;
+  string batch_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string status = 4;  // "received", "processing", "processed", "failed"
+  string message = 5;
+  map<string, string> metadata = 6;
+}
+
+// EventQuery for searching events
+message EventQuery {
+  Filter filter = 1;
+  repeated SortOrder sort_orders = 2;
+  
+  // Include related data
+  bool include_correlations = 3;
+  bool include_metrics = 4;
+  bool include_traces = 5;
+  
+  // Aggregation options
+  message AggregationOptions {
+    string group_by_field = 1;
+    google.protobuf.Duration time_window = 2;
+    repeated string aggregate_functions = 3;  // "count", "avg", "min", "max", "sum"
+  }
+  AggregationOptions aggregation = 6;
+}
+
+// StreamEventsRequest for bidirectional streaming
+message StreamEventsRequest {
+  oneof request {
+    Event event = 1;
+    EventBatch batch = 2;
+    HealthStatus health_check = 3;
+  }
+}
+
+// StreamEventsResponse for bidirectional streaming
+message StreamEventsResponse {
+  oneof response {
+    EventAck ack = 1;
+    Error error = 2;
+    HealthStatus health_status = 3;
+  }
+}
+
+// SubscribeRequest for event subscriptions
+message SubscribeRequest {
+  string subscription_id = 1;
+  Filter filter = 2;
+  
+  // Subscription options
+  bool include_existing = 3;  // Include historical events
+  google.protobuf.Duration lookback = 4;  // How far back to include
+  
+  // Delivery guarantees
+  enum DeliveryMode {
+    DELIVERY_MODE_UNSPECIFIED = 0;
+    DELIVERY_MODE_BEST_EFFORT = 1;
+    DELIVERY_MODE_AT_LEAST_ONCE = 2;
+  }
+  DeliveryMode delivery_mode = 5;
+  
+  // Rate limiting
+  int32 max_events_per_second = 6;
+}
+
+// EventUpdate for real-time event updates
+message EventUpdate {
+  enum UpdateType {
+    UPDATE_TYPE_UNSPECIFIED = 0;
+    UPDATE_TYPE_NEW = 1;
+    UPDATE_TYPE_MODIFIED = 2;
+    UPDATE_TYPE_CORRELATED = 3;  // New correlation found
+    UPDATE_TYPE_ENRICHED = 4;     // Additional context added
+  }
+  
+  UpdateType type = 1;
+  Event event = 2;
+  google.protobuf.Timestamp update_timestamp = 3;
+  map<string, string> update_metadata = 4;
+}
+
+// GetEventsRequest for retrieving events
+message GetEventsRequest {
+  repeated string event_ids = 1;
+  EventQuery query = 2;
+}
+
+// GetEventsResponse returns requested events
+message GetEventsResponse {
+  repeated Event events = 1;
+  int64 total_count = 2;
+  string next_page_token = 3;
+  map<string, string> metadata = 4;
+}
+
+// EventStatistics provides event analytics
+message EventStatistics {
+  TimeRange time_range = 1;
+  int64 total_events = 2;
+  
+  // Breakdown by type
+  map<string, int64> events_by_type = 3;
+  
+  // Breakdown by severity
+  map<string, int64> events_by_severity = 4;
+  
+  // Breakdown by source
+  map<string, int64> events_by_source = 5;
+  
+  // Top resources
+  repeated ResourceCount top_resources = 6;
+  
+  // Event rate
+  double events_per_second = 7;
+  
+  // Processing stats
+  google.protobuf.Duration avg_processing_time = 8;
+  int64 failed_events = 9;
+}
+
+// ResourceCount for statistics
+message ResourceCount {
+  ResourceIdentifier resource = 1;
+  int64 count = 2;
+  double percentage = 3;
+}
+
+// EventService provides event collection and querying
+service EventService {
+  // Bidirectional streaming for high-throughput event ingestion
+  rpc StreamEvents(stream StreamEventsRequest) returns (stream StreamEventsResponse);
+  
+  // Subscribe to real-time event updates
+  rpc Subscribe(SubscribeRequest) returns (stream EventUpdate);
+  
+  // Query historical events
+  rpc GetEvents(GetEventsRequest) returns (GetEventsResponse);
+  
+  // Get event statistics
+  rpc GetStatistics(TimeRange) returns (EventStatistics);
+  
+  // Batch event submission (unary)
+  rpc SubmitEventBatch(EventBatch) returns (EventAck);
+}
