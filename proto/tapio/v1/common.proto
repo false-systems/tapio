@@ -1,0 +1,262 @@
+syntax = "proto3";
+
+package tapio.v1;
+
+option go_package = "github.com/yairfalse/tapio/proto/tapio/v1;tapiov1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// Core enums following OTEL semantic standards
+
+// EventType represents the semantic type of an event
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  
+  // Infrastructure events
+  EVENT_TYPE_NETWORK = 1;
+  EVENT_TYPE_SYSCALL = 2;
+  EVENT_TYPE_FILE_SYSTEM = 3;
+  EVENT_TYPE_PROCESS = 4;
+  EVENT_TYPE_CONTAINER = 5;
+  EVENT_TYPE_KUBERNETES = 6;
+  
+  // Application events
+  EVENT_TYPE_HTTP = 10;
+  EVENT_TYPE_GRPC = 11;
+  EVENT_TYPE_DATABASE = 12;
+  EVENT_TYPE_CACHE = 13;
+  EVENT_TYPE_MESSAGE_QUEUE = 14;
+  
+  // Security events
+  EVENT_TYPE_SECURITY_ALERT = 20;
+  EVENT_TYPE_AUTHENTICATION = 21;
+  EVENT_TYPE_AUTHORIZATION = 22;
+  EVENT_TYPE_AUDIT = 23;
+  
+  // Performance events
+  EVENT_TYPE_LATENCY_SPIKE = 30;
+  EVENT_TYPE_ERROR_RATE = 31;
+  EVENT_TYPE_RESOURCE_USAGE = 32;
+  EVENT_TYPE_SATURATION = 33;
+  
+  // Business events
+  EVENT_TYPE_TRANSACTION = 40;
+  EVENT_TYPE_WORKFLOW = 41;
+  EVENT_TYPE_BUSINESS_METRIC = 42;
+}
+
+// EventSeverity represents the severity level of an event
+enum EventSeverity {
+  EVENT_SEVERITY_UNSPECIFIED = 0;
+  EVENT_SEVERITY_DEBUG = 1;
+  EVENT_SEVERITY_INFO = 2;
+  EVENT_SEVERITY_WARNING = 3;
+  EVENT_SEVERITY_ERROR = 4;
+  EVENT_SEVERITY_CRITICAL = 5;
+}
+
+// SourceType represents the origin of an event
+enum SourceType {
+  SOURCE_TYPE_UNSPECIFIED = 0;
+  
+  // Kernel-level sources
+  SOURCE_TYPE_EBPF = 1;
+  SOURCE_TYPE_KPROBE = 2;
+  SOURCE_TYPE_TRACEPOINT = 3;
+  SOURCE_TYPE_PERF_EVENT = 4;
+  
+  // System sources
+  SOURCE_TYPE_JOURNALD = 10;
+  SOURCE_TYPE_SYSLOG = 11;
+  SOURCE_TYPE_AUDITD = 12;
+  
+  // Container sources
+  SOURCE_TYPE_DOCKER = 20;
+  SOURCE_TYPE_CONTAINERD = 21;
+  SOURCE_TYPE_KUBERNETES_API = 22;
+  SOURCE_TYPE_KUBERNETES_EVENTS = 23;
+  
+  // Application sources
+  SOURCE_TYPE_OTEL = 30;
+  SOURCE_TYPE_PROMETHEUS = 31;
+  SOURCE_TYPE_JAEGER = 32;
+  SOURCE_TYPE_APPLICATION_LOG = 33;
+  
+  // Network sources
+  SOURCE_TYPE_PACKET_CAPTURE = 40;
+  SOURCE_TYPE_NETFLOW = 41;
+  SOURCE_TYPE_DNS = 42;
+  
+  // Cloud sources
+  SOURCE_TYPE_AWS_CLOUDTRAIL = 50;
+  SOURCE_TYPE_GCP_LOGGING = 51;
+  SOURCE_TYPE_AZURE_MONITOR = 52;
+}
+
+// CorrelationType represents different correlation strategies
+enum CorrelationType {
+  CORRELATION_TYPE_UNSPECIFIED = 0;
+  CORRELATION_TYPE_TEMPORAL = 1;      // Time-based correlation
+  CORRELATION_TYPE_CAUSAL = 2;        // Cause-effect relationships
+  CORRELATION_TYPE_SPATIAL = 3;       // Location/topology based
+  CORRELATION_TYPE_SEMANTIC = 4;      // Meaning-based correlation
+  CORRELATION_TYPE_STATISTICAL = 5;   // Statistical patterns
+  CORRELATION_TYPE_TRACE_CONTEXT = 6; // OTEL trace-based
+}
+
+// Shared message types
+
+// EventContext provides contextual information for events
+message EventContext {
+  // Service and component information
+  string service = 1;
+  string component = 2;
+  string version = 3;
+  
+  // Infrastructure context
+  string namespace = 4;
+  string cluster = 5;
+  string node = 6;
+  string pod = 7;
+  string container = 8;
+  
+  // Host information
+  string host = 9;
+  string ip_address = 10;
+  string mac_address = 11;
+  
+  // User context
+  string user_id = 12;
+  string session_id = 13;
+  
+  // Geographic context
+  string region = 14;
+  string zone = 15;
+  string datacenter = 16;
+  
+  // OTEL trace context
+  string trace_id = 17;
+  string span_id = 18;
+  string parent_span_id = 19;
+  
+  // Additional labels for filtering (Hubble/Parca inspired)
+  map<string, string> labels = 20;
+  
+  // Custom metadata
+  map<string, string> metadata = 21;
+}
+
+// Metadata represents arbitrary key-value pairs
+message Metadata {
+  map<string, string> values = 1;
+  google.protobuf.Timestamp created_at = 2;
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+// TimeRange represents a time interval
+message TimeRange {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+}
+
+// ResourceIdentifier uniquely identifies a resource
+message ResourceIdentifier {
+  string type = 1;        // e.g., "pod", "node", "service"
+  string name = 2;        // Resource name
+  string namespace = 3;   // Namespace (if applicable)
+  string uid = 4;         // Unique identifier
+  map<string, string> labels = 5;  // Resource labels
+}
+
+// MetricValue represents a single metric data point
+message MetricValue {
+  string name = 1;
+  double value = 2;
+  string unit = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  map<string, string> labels = 5;
+}
+
+// HealthStatus represents component health
+message HealthStatus {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_HEALTHY = 1;
+    STATUS_DEGRADED = 2;
+    STATUS_UNHEALTHY = 3;
+    STATUS_UNKNOWN = 4;
+  }
+  
+  Status status = 1;
+  string message = 2;
+  google.protobuf.Timestamp last_check = 3;
+  map<string, string> details = 4;
+}
+
+// Filter represents a generic filter for queries
+message Filter {
+  // Label-based filtering (inspired by Hubble/Parca)
+  message LabelSelector {
+    string key = 1;
+    string operator = 2;  // "=", "!=", "in", "notin", "exists", "!exists"
+    repeated string values = 3;
+  }
+  
+  repeated LabelSelector label_selectors = 1;
+  TimeRange time_range = 2;
+  repeated EventType event_types = 3;
+  repeated EventSeverity severities = 4;
+  repeated SourceType source_types = 5;
+  
+  // Text search across message/description fields
+  string search_text = 6;
+  
+  // Namespace filtering
+  repeated string namespaces = 7;
+  
+  // Service filtering
+  repeated string services = 8;
+  
+  // Limit and pagination
+  int32 limit = 9;
+  string page_token = 10;
+}
+
+// SortOrder for query results
+message SortOrder {
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DIRECTION_ASC = 1;
+    DIRECTION_DESC = 2;
+  }
+  
+  string field = 1;
+  Direction direction = 2;
+}
+
+// Error represents a standardized error response
+message Error {
+  string code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  string trace_id = 5;  // For error tracking
+}
+
+// BatchRequest for bulk operations
+message BatchRequest {
+  string batch_id = 1;
+  repeated string item_ids = 2;
+  map<string, string> options = 3;
+}
+
+// BatchResponse for bulk operation results
+message BatchResponse {
+  string batch_id = 1;
+  int32 total_items = 2;
+  int32 successful_items = 3;
+  int32 failed_items = 4;
+  repeated Error errors = 5;
+  google.protobuf.Duration processing_time = 6;
+}

@@ -1,0 +1,372 @@
+syntax = "proto3";
+
+package tapio.v1;
+
+option go_package = "github.com/yairfalse/tapio/proto/tapio/v1;tapiov1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/api/annotations.proto";
+import "tapio/v1/common.proto";
+import "tapio/v1/events.proto";
+import "tapio/v1/correlations.proto";
+
+// TapioService provides the main API for Tapio observability platform
+service TapioService {
+  // StreamEvents establishes bidirectional streaming for real-time event processing
+  // Inspired by Hubble's efficient streaming design
+  rpc StreamEvents(stream TapioStreamEventsRequest) returns (stream TapioStreamEventsResponse) {
+    option (google.api.http) = {
+      post: "/v1/events/stream"
+      body: "*"
+    };
+  }
+  
+  // GetCorrelations queries correlation findings with rich filtering
+  // Inspired by Parca's query interface
+  rpc GetCorrelations(GetCorrelationsRequest) returns (GetCorrelationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/correlations"
+    };
+  }
+  
+  // SubscribeToEvents provides real-time filtered event subscriptions
+  // Server-sent events for web clients
+  rpc SubscribeToEvents(SubscribeRequest) returns (stream EventUpdate) {
+    option (google.api.http) = {
+      get: "/v1/events/subscribe"
+    };
+  }
+  
+  // GetSemanticGroups queries semantic correlation groups
+  rpc GetSemanticGroups(GetSemanticGroupsRequest) returns (GetSemanticGroupsResponse) {
+    option (google.api.http) = {
+      get: "/v1/semantic-groups"
+    };
+  }
+  
+  // GetEvents retrieves historical events with pagination
+  rpc GetEvents(GetEventsRequest) returns (GetEventsResponse) {
+    option (google.api.http) = {
+      get: "/v1/events"
+    };
+  }
+  
+  // GetEventById retrieves a specific event
+  rpc GetEventById(GetEventByIdRequest) returns (Event) {
+    option (google.api.http) = {
+      get: "/v1/events/{id}"
+    };
+  }
+  
+  // AnalyzeEvents performs on-demand correlation analysis
+  rpc AnalyzeEvents(AnalyzeEventsRequest) returns (AnalyzeEventsResponse) {
+    option (google.api.http) = {
+      post: "/v1/analyze"
+      body: "*"
+    };
+  }
+  
+  // GetInsights retrieves AI-generated insights
+  rpc GetInsights(GetInsightsRequest) returns (GetInsightsResponse) {
+    option (google.api.http) = {
+      get: "/v1/insights"
+    };
+  }
+  
+  // GetMetrics retrieves system metrics and statistics
+  rpc GetMetrics(TapioGetMetricsRequest) returns (TapioGetMetricsResponse) {
+    option (google.api.http) = {
+      get: "/v1/metrics"
+    };
+  }
+  
+  // HealthCheck monitors service health
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {
+    option (google.api.http) = {
+      get: "/v1/health"
+    };
+  }
+  
+  // GetServiceInfo returns service capabilities and version
+  rpc GetServiceInfo(google.protobuf.Empty) returns (TapioServiceInfo) {
+    option (google.api.http) = {
+      get: "/v1/info"
+    };
+  }
+}
+
+// TapioStreamEventsRequest for bidirectional streaming
+message TapioStreamEventsRequest {
+  oneof request {
+    // Send events to the server
+    Event event = 1;
+    EventBatch batch = 2;
+    
+    // Control messages
+    StreamControl control = 3;
+    
+    // Subscription filters
+    SubscribeRequest subscribe = 4;
+  }
+}
+
+// TapioStreamEventsResponse from the server
+message TapioStreamEventsResponse {
+  oneof response {
+    // Acknowledgment of received events
+    EventAck ack = 1;
+    
+    // Real-time correlation findings
+    Correlation correlation = 2;
+    
+    // Semantic group updates
+    SemanticGroup semantic_group = 3;
+    
+    // Stream control response
+    StreamControlResponse control = 4;
+    
+    // Error information
+    Error error = 5;
+  }
+}
+
+// StreamControl for flow control and configuration
+message StreamControl {
+  enum ControlType {
+    CONTROL_TYPE_UNSPECIFIED = 0;
+    CONTROL_TYPE_PAUSE = 1;
+    CONTROL_TYPE_RESUME = 2;
+    CONTROL_TYPE_CONFIGURE = 3;
+    CONTROL_TYPE_HEARTBEAT = 4;
+  }
+  
+  ControlType type = 1;
+  map<string, string> parameters = 2;
+}
+
+// StreamControlResponse acknowledges control messages
+message StreamControlResponse {
+  bool success = 1;
+  string message = 2;
+  map<string, string> parameters = 3;
+}
+
+// GetEventByIdRequest for single event retrieval
+message GetEventByIdRequest {
+  string id = 1;
+  bool include_correlations = 2;
+  bool include_semantic_groups = 3;
+}
+
+// GetInsightsRequest for AI-generated insights
+message GetInsightsRequest {
+  TimeRange time_range = 1;
+  Filter filter = 2;
+  
+  // Insight preferences
+  repeated string insight_types = 3;
+  double min_confidence = 4;
+  int32 limit = 5;
+  
+  // Audience for human-readable explanations
+  enum Audience {
+    AUDIENCE_UNSPECIFIED = 0;
+    AUDIENCE_DEVELOPER = 1;
+    AUDIENCE_SRE = 2;
+    AUDIENCE_MANAGER = 3;
+    AUDIENCE_EXECUTIVE = 4;
+  }
+  Audience audience = 6;
+}
+
+// GetInsightsResponse returns AI insights
+message GetInsightsResponse {
+  repeated Insight insights = 1;
+  int64 total_count = 2;
+  string next_page_token = 3;
+  
+  // Summary statistics
+  InsightStats stats = 4;
+}
+
+// Insight represents an AI-generated insight
+message Insight {
+  string id = 1;
+  string type = 2;
+  string title = 3;
+  string summary = 4;
+  
+  // Human-readable explanation
+  HumanExplanation explanation = 5;
+  
+  // Supporting data
+  repeated string event_ids = 6;
+  repeated string correlation_ids = 7;
+  repeated string semantic_group_ids = 8;
+  
+  // Confidence and impact
+  double confidence = 9;
+  ImpactAssessment impact = 10;
+  
+  // Recommendations
+  repeated RecommendedAction actions = 11;
+  
+  // Metadata
+  google.protobuf.Timestamp created_at = 12;
+  map<string, string> metadata = 13;
+}
+
+// HumanExplanation provides multi-audience explanations
+message HumanExplanation {
+  string technical_explanation = 1;
+  string business_explanation = 2;
+  string executive_summary = 3;
+  
+  // Visual aids
+  repeated Visualization visualizations = 4;
+  
+  // Key metrics
+  repeated KeyMetric key_metrics = 5;
+}
+
+// Visualization hints for UI rendering
+message Visualization {
+  string type = 1;  // "timeline", "graph", "heatmap", etc.
+  string title = 2;
+  google.protobuf.Struct data = 3;
+  map<string, string> options = 4;
+}
+
+// KeyMetric for highlighting important values
+message KeyMetric {
+  string name = 1;
+  string value = 2;
+  string unit = 3;
+  string trend = 4;  // "up", "down", "stable"
+  string severity = 5;  // "good", "warning", "critical"
+}
+
+// InsightStats provides insight statistics
+message InsightStats {
+  map<string, int32> insights_by_type = 1;
+  map<string, int32> insights_by_severity = 2;
+  double avg_confidence = 3;
+  int32 total_recommendations = 4;
+}
+
+// TapioGetMetricsRequest for system metrics
+message TapioGetMetricsRequest {
+  // Component to get metrics for
+  enum Component {
+    COMPONENT_UNSPECIFIED = 0;
+    COMPONENT_ALL = 1;
+    COMPONENT_SERVER = 2;
+    COMPONENT_COLLECTORS = 3;
+    COMPONENT_CORRELATION = 4;
+    COMPONENT_STORAGE = 5;
+  }
+  Component component = 1;
+  
+  TimeRange time_range = 2;
+  repeated string metric_names = 3;
+}
+
+// TapioGetMetricsResponse returns system metrics
+message TapioGetMetricsResponse {
+  repeated SystemMetric metrics = 1;
+  google.protobuf.Timestamp timestamp = 2;
+}
+
+// SystemMetric represents a system metric
+message SystemMetric {
+  string name = 1;
+  string component = 2;
+  double value = 3;
+  string unit = 4;
+  map<string, string> labels = 5;
+  
+  // Time series data if requested
+  repeated MetricDataPoint time_series = 6;
+}
+
+// MetricDataPoint for time series
+message MetricDataPoint {
+  google.protobuf.Timestamp timestamp = 1;
+  double value = 2;
+}
+
+// HealthCheckRequest for service health monitoring
+message HealthCheckRequest {
+  // Check specific components
+  repeated string components = 1;
+  bool include_details = 2;
+}
+
+// HealthCheckResponse returns health status
+message HealthCheckResponse {
+  HealthStatus overall_status = 1;
+  map<string, ComponentHealth> components = 2;
+  google.protobuf.Timestamp checked_at = 3;
+  
+  // Cluster health if running in HA mode
+  ClusterHealth cluster = 4;
+}
+
+// ComponentHealth for individual components
+message ComponentHealth {
+  HealthStatus status = 1;
+  string message = 2;
+  google.protobuf.Timestamp last_healthy = 3;
+  map<string, string> details = 4;
+  
+  // Component-specific metrics
+  map<string, double> metrics = 5;
+}
+
+// ClusterHealth for HA deployments
+message ClusterHealth {
+  int32 total_nodes = 1;
+  int32 healthy_nodes = 2;
+  string leader_node = 3;
+  bool is_quorum = 4;
+  repeated NodeHealth nodes = 5;
+}
+
+// NodeHealth for cluster nodes
+message NodeHealth {
+  string node_id = 1;
+  string address = 2;
+  HealthStatus status = 3;
+  google.protobuf.Timestamp last_seen = 4;
+  map<string, double> metrics = 5;
+}
+
+// TapioServiceInfo provides service capabilities
+message TapioServiceInfo {
+  string version = 1;
+  string build_commit = 2;
+  google.protobuf.Timestamp build_time = 3;
+  
+  // Capabilities
+  repeated string supported_features = 4;
+  repeated string enabled_collectors = 5;
+  repeated string correlation_engines = 6;
+  
+  // Limits and quotas
+  ServiceLimits limits = 7;
+  
+  // API versions
+  repeated string api_versions = 8;
+}
+
+// ServiceLimits defines operational limits
+message ServiceLimits {
+  int64 max_events_per_second = 1;
+  int64 max_concurrent_streams = 2;
+  int64 max_event_size = 3;
+  int64 max_batch_size = 4;
+  google.protobuf.Duration retention_period = 5;
+}

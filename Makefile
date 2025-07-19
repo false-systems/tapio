@@ -1,13 +1,19 @@
 # Tapio - Simple & Fast Makefile
 # Container-first development with proper linting
 
-.PHONY: help build test lint clean docker-all dev ci
+.PHONY: help build test lint clean docker-all dev ci proto proto-install proto-generate
 
 # Build variables
 VERSION ?= dev
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -w -s -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
+
+# Proto variables
+GOPATH := $(shell go env GOPATH)
+GOBIN := $(GOPATH)/bin
+PROTOC := $(shell which protoc)
+BUF := $(shell which buf)
 
 # Colors for output
 RED := \033[0;31m
@@ -21,7 +27,7 @@ NC := \033[0m # No Color
 dev: fmt lint-fix test build ## Quick development cycle (format, lint, test, build)
 	@echo "$(GREEN)✅ Development cycle complete!$(NC)"
 
-build: ## Build all binaries
+build: proto ## Build all binaries (includes proto generation)
 	@echo "$(BLUE)🔨 Building binaries...$(NC)"
 	@mkdir -p bin
 	@go build -ldflags "$(LDFLAGS)" -o bin/tapio-server ./cmd/tapio-server
@@ -145,16 +151,55 @@ skaffold-dev: ## Start Skaffold development (hot-reload)
 	@echo "$(BLUE)🔥 Starting Skaffold hot-reload development...$(NC)"
 	@skaffold dev --port-forward
 
+##@ Protobuf Generation
+
+proto: proto-install proto-generate ## Generate protobuf code
+
+proto-install: ## Install protobuf tools
+	@echo "$(BLUE)🔧 Installing protobuf tools...$(NC)"
+	@if ! which buf > /dev/null; then \
+		echo "Installing buf..."; \
+		go install github.com/bufbuild/buf/cmd/buf@latest; \
+	fi
+	@if ! which protoc-gen-go > /dev/null; then \
+		echo "Installing protoc-gen-go..."; \
+		go install google.golang.org/protobuf/cmd/protoc-gen-go@latest; \
+	fi
+	@if ! which protoc-gen-go-grpc > /dev/null; then \
+		echo "Installing protoc-gen-go-grpc..."; \
+		go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest; \
+	fi
+	@if ! which protoc-gen-grpc-gateway > /dev/null; then \
+		echo "Installing protoc-gen-grpc-gateway..."; \
+		go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest; \
+	fi
+	@if ! which protoc-gen-openapiv2 > /dev/null; then \
+		echo "Installing protoc-gen-openapiv2..."; \
+		go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest; \
+	fi
+	@echo "$(GREEN)✅ Protobuf tools installed$(NC)"
+
+proto-generate: ## Generate protobuf code
+	@echo "$(BLUE)📝 Generating protobuf code...$(NC)"
+	@mkdir -p proto/gen
+	@cd proto && buf generate
+	@echo "$(GREEN)✅ Protobuf code generated$(NC)"
+
+proto-lint: ## Lint protobuf files
+	@echo "$(BLUE)🔍 Linting protobuf files...$(NC)"
+	@cd proto && buf lint
+	@echo "$(GREEN)✅ Protobuf lint passed$(NC)"
+
 ##@ Utilities
 
 clean: ## Clean all build artifacts
 	@echo "$(BLUE)🧹 Cleaning up...$(NC)"
-	@rm -rf bin/ dist/ coverage.out coverage.html *.log
+	@rm -rf bin/ dist/ coverage.out coverage.html *.log proto/gen
 	@docker system prune -f --volumes || echo "Docker cleanup done"
 	@go clean -cache -testcache -modcache
 	@echo "$(GREEN)✅ Cleanup complete!$(NC)"
 
-install-tools: ## Install required development tools  
+install-tools: proto-install ## Install required development tools  
 	@echo "$(BLUE)🛠️  Installing development tools...$(NC)"
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@go install golang.org/x/tools/cmd/goimports@latest
