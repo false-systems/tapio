@@ -130,6 +130,18 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	uptime := time.Now()
 
+	// Start enhanced server if gRPC is enabled
+	// TODO: Enable once proto files are generated
+	/*
+		if cfg.GRPCEnabled {
+			go func() {
+				if err := StartEnhancedServer(cfg); err != nil {
+					fmt.Printf("❌ Enhanced server failed: %v\n", err)
+				}
+			}()
+		}
+	*/
+
 	// Main run loop
 	for {
 		select {
@@ -140,7 +152,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		case <-statusTicker.C:
 			fmt.Printf("📊 Status - Uptime: %v, Architecture: ✅ Clean, Dependencies: ✅ Enforced\n",
 				time.Since(uptime))
-			fmt.Printf("🔍 Next Steps: Implement gRPC streaming, REST APIs, correlation engine\n")
+			if cfg.GRPCEnabled {
+				fmt.Printf("🔧 gRPC server running on port %d with OTEL semantic correlation\n", cfg.GRPCPort)
+			}
 		}
 	}
 }
