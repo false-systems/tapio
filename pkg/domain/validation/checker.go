@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
 )
 
 // Validator implements the installer.Validator interface

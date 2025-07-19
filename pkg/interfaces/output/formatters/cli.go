@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
 )
 
 // CLIFormatter formats universal data for command-line output

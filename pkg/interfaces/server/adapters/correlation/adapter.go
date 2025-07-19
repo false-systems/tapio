@@ -6,11 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	corrDomain "github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // CorrelationAdapter provides an interface to the correlation package

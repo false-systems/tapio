@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/interfaces/server/adapters"
 	"github.com/yairfalse/tapio/pkg/interfaces/server/config"
 	"github.com/yairfalse/tapio/pkg/interfaces/server/core"
-	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Server represents the main server instance

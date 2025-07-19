@@ -25,8 +25,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"k8s.io/client-go/kubernetes"
 )
 
