@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // HealthChecker implements health checking for the server

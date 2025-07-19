@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // ServerService implements the core server service

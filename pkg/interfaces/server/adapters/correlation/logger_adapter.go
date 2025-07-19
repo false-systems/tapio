@@ -3,8 +3,8 @@ package correlation
 import (
 	"context"
 
-	corrDomain "github.com/yairfalse/tapio/pkg/correlation/domain"
-	serverDomain "github.com/yairfalse/tapio/pkg/server/domain"
+	corrDomain "github.com/yairfalse/tapio/pkg/intelligence/correlation/domain"
+	serverDomain "github.com/yairfalse/tapio/pkg/domain"
 )
 
 // LoggerAdapter adapts server domain logger to correlation domain logger

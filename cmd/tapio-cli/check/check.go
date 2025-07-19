@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yairfalse/tapio/pkg/health"
-	"github.com/yairfalse/tapio/pkg/k8s"
+	"github.com/yairfalse/tapio/pkg/collectors/k8s"
 	"github.com/yairfalse/tapio/pkg/output"
 )
 

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // CompressionMiddleware handles response compression

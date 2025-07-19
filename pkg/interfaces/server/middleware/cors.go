@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // CORSMiddleware handles Cross-Origin Resource Sharing

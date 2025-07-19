@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	corrDomain "github.com/yairfalse/tapio/pkg/correlation/domain"
+	corrDomain "github.com/yairfalse/tapio/pkg/intelligence/correlation/domain"
 )
 
 // InMemoryEventStore provides a production-ready in-memory event store

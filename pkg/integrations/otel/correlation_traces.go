@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/yairfalse/tapio/pkg/collector"
-	"github.com/yairfalse/tapio/pkg/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 
 // CorrelationTracer provides distributed tracing for correlation analysis
