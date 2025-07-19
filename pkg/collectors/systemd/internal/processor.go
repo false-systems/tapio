@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/systemd/core"
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -19,74 +18,70 @@ func newEventProcessor() core.EventProcessor {
 
 // ProcessEvent converts a raw systemd event to a domain event
 func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (domain.Event, error) {
-	// Create service event payload
-	payload := p.createServicePayload(raw)
+	// Create service event data
+	eventData := p.createServiceData(raw)
 	
 	// Determine severity based on event type and state
 	severity := p.determineSeverity(raw)
 	
 	// Create the domain event
 	event := domain.Event{
-		ID:        domain.EventID(fmt.Sprintf("systemd_%s_%s_%d", raw.UnitName, raw.Type, raw.Timestamp.UnixNano())),
-		Type:      domain.EventTypeService,
-		Source:    domain.SourceSystemd,
-		Timestamp: raw.Timestamp,
-		Payload:   payload,
-		Context:   p.createContext(raw),
-		Metadata:  p.createMetadata(raw),
-		Severity:  severity,
+		ID:         fmt.Sprintf("systemd_%s_%s_%d", raw.UnitName, raw.Type, raw.Timestamp.UnixNano()),
+		Type:       string(domain.EventTypeService),
+		Source:     string(domain.SourceSystemd),
+		Timestamp:  raw.Timestamp,
+		Data:       eventData,
+		Context:    p.createContextData(raw),
+		Severity:   string(severity),
 		Confidence: 1.0, // systemd events are direct observations
-		Fingerprint: domain.EventFingerprint{
-			Hash:      p.generateHash(raw),
-			Signature: fmt.Sprintf("%s:%s", raw.UnitName, string(raw.Type)),
-			Fields: map[string]string{
-				"unit_name": raw.UnitName,
-				"unit_type": raw.UnitType,
-				"type":      string(raw.Type),
-			},
+		Attributes: map[string]interface{}{
+			"hash":      p.generateHash(raw),
+			"signature": fmt.Sprintf("%s:%s", raw.UnitName, string(raw.Type)),
+			"unit_name": raw.UnitName,
+			"unit_type": raw.UnitType,
+			"type":      string(raw.Type),
 		},
 	}
 	
 	return event, nil
 }
 
-// createServicePayload creates a service event payload
-func (p *eventProcessor) createServicePayload(raw core.RawEvent) domain.ServiceEventPayload {
-	payload := domain.ServiceEventPayload{
-		ServiceName: raw.UnitName,
-		EventType:   p.mapEventType(raw.Type),
-		OldState:    raw.OldState,
-		NewState:    raw.NewState,
-		Properties:  make(map[string]string),
+// createServiceData creates a service event data map
+func (p *eventProcessor) createServiceData(raw core.RawEvent) map[string]interface{} {
+	data := map[string]interface{}{
+		"service_name": raw.UnitName,
+		"unit_type":    raw.UnitType,
+		"event_type":   p.mapEventType(raw.Type),
+		"old_state":    raw.OldState,
+		"new_state":    raw.NewState,
+		"sub_state":    raw.SubState,
+		"result":       raw.Result,
 	}
 	
 	// Add exit code and signal if present
 	if raw.ExitCode != 0 {
-		payload.ExitCode = &raw.ExitCode
+		data["exit_code"] = raw.ExitCode
 	}
 	
 	if raw.ExitStatus != 0 {
-		exitStatus := raw.ExitStatus
-		payload.Signal = &exitStatus
+		data["exit_status"] = raw.ExitStatus
+		data["signal"] = raw.ExitStatus
 	}
 	
-	// Convert properties to string map
-	for k, v := range raw.Properties {
-		if str, ok := v.(string); ok {
-			payload.Properties[k] = str
-		} else {
-			payload.Properties[k] = fmt.Sprintf("%v", v)
-		}
-	}
-	
-	// Add important properties
-	payload.Properties["sub_state"] = raw.SubState
-	payload.Properties["result"] = raw.Result
 	if raw.MainPID > 0 {
-		payload.Properties["main_pid"] = fmt.Sprintf("%d", raw.MainPID)
+		data["main_pid"] = raw.MainPID
 	}
 	
-	return payload
+	// Add all properties
+	if len(raw.Properties) > 0 {
+		properties := make(map[string]interface{})
+		for k, v := range raw.Properties {
+			properties[k] = v
+		}
+		data["properties"] = properties
+	}
+	
+	return data
 }
 
 // mapEventType maps internal event types to domain event types
@@ -110,8 +105,16 @@ func (p *eventProcessor) mapEventType(eventType core.EventType) string {
 }
 
 // createContext creates the event context
-func (p *eventProcessor) createContext(raw core.RawEvent) domain.EventContext {
-	labels := domain.Labels{
+func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interface{} {
+	context := map[string]interface{}{
+		"host":      p.getHostname(),
+		"unit_name": raw.UnitName,
+		"unit_type": raw.UnitType,
+		"state":     raw.NewState,
+		"sub_state": raw.SubState,
+	}
+	
+	labels := map[string]string{
 		"unit_name": raw.UnitName,
 		"unit_type": raw.UnitType,
 		"state":     raw.NewState,
@@ -121,12 +124,10 @@ func (p *eventProcessor) createContext(raw core.RawEvent) domain.EventContext {
 	// Add result for failed services
 	if raw.Result != "" && raw.Result != "success" {
 		labels["result"] = raw.Result
+		context["result"] = raw.Result
 	}
 	
-	tags := domain.Tags{
-		"systemd",
-		raw.UnitType,
-	}
+	tags := []string{"systemd", raw.UnitType}
 	
 	// Add state tags
 	if raw.NewState == core.StateFailed {
@@ -136,74 +137,47 @@ func (p *eventProcessor) createContext(raw core.RawEvent) domain.EventContext {
 		tags = append(tags, "failure")
 	}
 	
-	ctx := domain.EventContext{
-		Host:   p.getHostname(),
-		Labels: labels,
-		Tags:   tags,
-	}
+	context["labels"] = labels
+	context["tags"] = tags
 	
 	// Add PID if available
 	if raw.MainPID > 0 {
-		pid := raw.MainPID
-		ctx.PID = &pid
+		context["pid"] = raw.MainPID
 	}
 	
-	return ctx
+	return context
 }
 
-// createMetadata creates the event metadata
-func (p *eventProcessor) createMetadata(raw core.RawEvent) domain.EventMetadata {
-	annotations := map[string]string{
-		"event_type": string(raw.Type),
-		"unit_type":  raw.UnitType,
-		"result":     raw.Result,
-	}
-	
-	// Add exit information if present
-	if raw.ExitCode != 0 {
-		annotations["exit_code"] = fmt.Sprintf("%d", raw.ExitCode)
-	}
-	if raw.ExitStatus != 0 {
-		annotations["exit_status"] = fmt.Sprintf("%d", raw.ExitStatus)
-	}
-	
-	return domain.EventMetadata{
-		SchemaVersion: "1.0",
-		ProcessedAt:   time.Now(),
-		ProcessedBy:   "systemd-collector",
-		Annotations:   annotations,
-	}
-}
 
 // determineSeverity determines the event severity
-func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.Severity {
+func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
 	// Check for failures
 	if raw.Type == core.EventTypeFailure || raw.NewState == core.StateFailed {
 		// Critical services
 		if p.isCriticalService(raw.UnitName) {
 			return domain.SeverityCritical
 		}
-		return domain.SeverityError
+		return domain.SeverityHigh
 	}
 	
 	// Check for restart events
 	if raw.Type == core.EventTypeRestart {
-		return domain.SeverityWarn
+		return domain.SeverityWarning
 	}
 	
 	// State changes
 	if raw.Type == core.EventTypeStateChange {
 		if raw.OldState == core.StateActive && raw.NewState == core.StateInactive {
-			return domain.SeverityWarn
+			return domain.SeverityWarning
 		}
 	}
 	
 	// Exit codes
 	if raw.ExitCode != 0 {
-		return domain.SeverityWarn
+		return domain.SeverityWarning
 	}
 	
-	return domain.SeverityInfo
+	return domain.SeverityLow
 }
 
 // isCriticalService checks if a service is considered critical

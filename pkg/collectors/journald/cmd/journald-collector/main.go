@@ -204,8 +204,8 @@ func printEvent(event domain.Event, verbose bool) {
 }
 
 func getEventMessage(event domain.Event) string {
-	if payload, ok := event.Payload.(domain.LogEventPayload); ok {
-		return payload.Message
+	if message, ok := event.Data["message"].(string); ok {
+		return message
 	}
 	return "Unknown message"
 }

@@ -1,0 +1,29 @@
+go 1.24.3
+
+use (
+	.
+	./pkg/collectors/ebpf
+	./pkg/collectors/journald
+	./pkg/collectors/k8s
+	./pkg/collectors/systemd
+	./pkg/domain
+	./pkg/integrations
+	./pkg/integrations/grpc
+	./pkg/integrations/monitoring
+	./pkg/integrations/otel
+	./pkg/integrations/prometheus
+	./pkg/integrations/resilience
+	./pkg/integrations/security
+	./pkg/integrations/webhooks
+	./pkg/intelligence/patterns
+	./pkg/intelligence/performance
+	./pkg/intelligence/correlation
+	./pkg/interfaces
+	./pkg/interfaces/cli
+	./pkg/interfaces/client
+	./pkg/interfaces/config
+	./pkg/interfaces/health
+	./pkg/interfaces/logging
+	./pkg/interfaces/output
+	./pkg/interfaces/server
+)

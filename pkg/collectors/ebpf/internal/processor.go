@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -18,161 +17,157 @@ func newEventProcessor() core.EventProcessor {
 
 // ProcessEvent converts a raw eBPF event to a domain event
 func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (domain.Event, error) {
-	// Determine event type and create appropriate payload
-	eventType, payload, err := p.createPayload(raw)
+	// Determine event type and create appropriate data
+	eventType, eventData, err := p.createEventData(raw)
 	if err != nil {
-		return domain.Event{}, fmt.Errorf("failed to create payload: %w", err)
+		return domain.Event{}, fmt.Errorf("failed to create event data: %w", err)
 	}
 	
 	// Create the domain event
 	event := domain.Event{
-		ID:        domain.EventID(fmt.Sprintf("ebpf_%d_%d_%d", raw.Timestamp.UnixNano(), raw.PID, raw.CPU)),
-		Type:      eventType,
-		Source:    domain.SourceEBPF,
-		Timestamp: raw.Timestamp,
-		Payload:   payload,
-		Context:   p.createContext(raw),
-		Metadata:  p.createMetadata(raw),
-		Severity:  p.determineSeverity(raw),
+		ID:         fmt.Sprintf("ebpf_%d_%d_%d", raw.Timestamp.UnixNano(), raw.PID, raw.CPU),
+		Type:       string(eventType),
+		Source:     string(domain.SourceEBPF),
+		Timestamp:  raw.Timestamp,
+		Data:       eventData,
+		Context:    p.createContextData(raw),
+		Severity:   string(p.determineSeverity(raw)),
 		Confidence: 1.0, // eBPF events are direct observations
-		Fingerprint: domain.EventFingerprint{
-			Hash:      p.generateHash(raw),
-			Signature: raw.Type,
-			Fields: map[string]string{
-				"type": raw.Type,
-				"pid":  fmt.Sprintf("%d", raw.PID),
-				"comm": raw.Comm,
-			},
+		Attributes: map[string]interface{}{
+			"hash":      p.generateHash(raw),
+			"signature": raw.Type,
+			"pid":       raw.PID,
+			"comm":      raw.Comm,
 		},
 	}
 	
 	return event, nil
 }
 
-// createPayload creates the appropriate payload based on event type
-func (p *eventProcessor) createPayload(raw core.RawEvent) (domain.EventType, domain.EventPayload, error) {
+// createEventData creates the appropriate event data based on event type
+func (p *eventProcessor) createEventData(raw core.RawEvent) (domain.EventType, map[string]interface{}, error) {
 	switch raw.Type {
 	case "syscall", "network", "memory":
-		return domain.EventTypeSystem, p.createSystemPayload(raw), nil
+		return domain.EventTypeSystem, p.createSystemData(raw), nil
 		
 	case "process_start", "process_exit":
-		return domain.EventTypeProcess, p.createSystemPayload(raw), nil
+		return domain.EventTypeProcess, p.createSystemData(raw), nil
 		
 	default:
-		return domain.EventTypeSystem, p.createSystemPayload(raw), nil
+		return domain.EventTypeSystem, p.createSystemData(raw), nil
 	}
 }
 
-// createSystemPayload creates a system event payload
-func (p *eventProcessor) createSystemPayload(raw core.RawEvent) domain.SystemEventPayload {
-	payload := domain.SystemEventPayload{
-		Arguments: make(map[string]string),
-	}
+// createSystemData creates a system event data map
+func (p *eventProcessor) createSystemData(raw core.RawEvent) map[string]interface{} {
+	data := make(map[string]interface{})
+	
+	// Add basic event information
+	data["ebpf_type"] = raw.Type
+	data["pid"] = raw.PID
+	data["tid"] = raw.TID
+	data["uid"] = raw.UID
+	data["gid"] = raw.GID
+	data["comm"] = raw.Comm
+	data["cpu"] = raw.CPU
 	
 	// Extract common fields
 	if syscall, ok := raw.Decoded["syscall"].(string); ok {
-		payload.Syscall = syscall
+		data["syscall"] = syscall
 	}
 	
 	if retCode, ok := raw.Decoded["return_code"].(int32); ok {
-		payload.ReturnCode = retCode
+		data["return_code"] = retCode
 	}
 	
 	// Extract memory-related fields
 	if memUsage, ok := raw.Decoded["memory_usage"].(int64); ok {
-		payload.MemoryUsage = &memUsage
+		data["memory_usage"] = memUsage
 	}
 	
 	if memLimit, ok := raw.Decoded["memory_limit"].(int64); ok {
-		payload.MemoryLimit = &memLimit
+		data["memory_limit"] = memLimit
 	}
 	
 	// Extract network-related fields
 	if srcIP, ok := raw.Decoded["source_ip"].(string); ok {
-		payload.SourceIP = srcIP
+		data["source_ip"] = srcIP
 	}
 	
 	if dstIP, ok := raw.Decoded["dest_ip"].(string); ok {
-		payload.DestIP = dstIP
+		data["dest_ip"] = dstIP
 	}
 	
 	if port, ok := raw.Decoded["port"].(int32); ok {
-		payload.Port = &port
+		data["port"] = port
 	}
 	
 	if protocol, ok := raw.Decoded["protocol"].(string); ok {
-		payload.Protocol = protocol
+		data["protocol"] = protocol
 	}
 	
 	if bytesSent, ok := raw.Decoded["bytes_sent"].(int64); ok {
-		payload.BytesSent = &bytesSent
+		data["bytes_sent"] = bytesSent
 	}
 	
 	if bytesRecv, ok := raw.Decoded["bytes_received"].(int64); ok {
-		payload.BytesReceived = &bytesRecv
+		data["bytes_received"] = bytesRecv
 	}
 	
-	// Add any additional arguments
+	// Add any additional decoded fields
 	for k, v := range raw.Decoded {
-		if str, ok := v.(string); ok {
-			payload.Arguments[k] = str
+		if _, exists := data[k]; !exists {
+			data[k] = v
 		}
 	}
 	
-	return payload
+	return data
 }
 
-// createContext creates the event context
-func (p *eventProcessor) createContext(raw core.RawEvent) domain.EventContext {
-	pid := int32(raw.PID)
-	uid := int32(raw.UID)
-	gid := int32(raw.GID)
+// createContextData creates the event context data
+func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interface{} {
+	context := make(map[string]interface{})
 	
-	return domain.EventContext{
-		PID: &pid,
-		UID: &uid,
-		GID: &gid,
-		Labels: domain.Labels{
-			"comm": raw.Comm,
-			"cpu":  fmt.Sprintf("%d", raw.CPU),
-		},
-		Tags: domain.Tags{
-			"ebpf",
-			raw.Type,
-		},
+	context["pid"] = raw.PID
+	context["uid"] = raw.UID
+	context["gid"] = raw.GID
+	context["comm"] = raw.Comm
+	context["cpu"] = raw.CPU
+	context["tid"] = raw.TID
+	
+	// Add labels
+	context["labels"] = map[string]string{
+		"comm": raw.Comm,
+		"cpu":  fmt.Sprintf("%d", raw.CPU),
 	}
+	
+	// Add tags
+	context["tags"] = []string{
+		"ebpf",
+		raw.Type,
+	}
+	
+	return context
 }
 
-// createMetadata creates the event metadata
-func (p *eventProcessor) createMetadata(raw core.RawEvent) domain.EventMetadata {
-	return domain.EventMetadata{
-		SchemaVersion: "1.0",
-		ProcessedAt:   time.Now(),
-		ProcessedBy:   "ebpf-collector",
-		Annotations: map[string]string{
-			"raw_type": raw.Type,
-			"tid":      fmt.Sprintf("%d", raw.TID),
-		},
-	}
-}
 
 // determineSeverity determines the event severity
-func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.Severity {
+func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
 	switch raw.Type {
 	case "oom_kill", "kernel_panic":
 		return domain.SeverityCritical
 		
 	case "memory_pressure", "cpu_throttle":
-		return domain.SeverityWarn
+		return domain.SeverityWarning
 		
 	case "syscall_error":
 		if retCode, ok := raw.Decoded["return_code"].(int32); ok && retCode < 0 {
-			return domain.SeverityError
+			return domain.SeverityHigh
 		}
-		return domain.SeverityInfo
+		return domain.SeverityLow
 		
 	default:
-		return domain.SeverityInfo
+		return domain.SeverityLow
 	}
 }
 

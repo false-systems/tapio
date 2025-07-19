@@ -157,7 +157,7 @@ func runCollector(cmd *cobra.Command, args []string) error {
 		case <-statusTicker.C:
 			printStatus(monitor, grpcClient, collectorManager)
 
-		case <-shutdownHandler.Wait(); return nil:
+		case <-shutdownHandler.Wait():
 			fmt.Printf("🏁 Collector shutdown completed\n")
 			return nil
 		}
@@ -196,22 +196,12 @@ func loadConfiguration() (*collector.Config, error) {
 	cfg := &collector.Config{
 		SamplingRate:      viper.GetFloat64("collector.sampling_rate"),
 		MaxEventsPerSec:   viper.GetInt("collector.max_events_per_sec"),
-
-			ServerEndpoints:      viper.GetStringSlice("grpc.server_endpoints"),
-			TLSEnabled:           viper.GetBool("grpc.tls_enabled"),
-			MaxBatchSize:         viper.GetInt("grpc.max_batch_size"),
-			BatchTimeout:         viper.GetDuration("grpc.batch_timeout"),
-			ReconnectEnabled:     viper.GetBool("grpc.reconnect_enabled"),
-			MaxReconnectAttempts: viper.GetInt("grpc.max_reconnect_attempts"),
-		},
-
-			MaxMemoryMB: viper.GetInt("resources.max_memory_mb"),
-			MaxCPUMilli: viper.GetInt("resources.max_cpu_milli"),
-		},
+		EnabledCollectors: viper.GetStringSlice("collector.enabled_collectors"),
 	}
 
 	// Override with command-line flags if provided
 	if serverEndpoint != defaultServerEndpoint {
+		// Server endpoint override would go here
 	}
 
 	return cfg, nil

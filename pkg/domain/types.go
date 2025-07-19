@@ -1,9 +1,6 @@
 package domain
 
-import (
-	"fmt"
-	"time"
-)
+import "time"
 
 // =============================================================================
 // CORE EVENT ABSTRACTION
@@ -38,710 +35,234 @@ const (
 	SourceK8s      SourceType = "kubernetes"
 	SourceSystemd  SourceType = "systemd"
 	SourceJournald SourceType = "journald"
-	SourceRuntime  SourceType = "runtime"
+	SourceCNI      SourceType = "cni"
+	SourceCustom   SourceType = "custom"
 )
 
-// Aliases for backward compatibility
-const (
-	SourceKubernetes = SourceK8s
-)
+// Core domain types - only the ones NOT already in interfaces.go
 
-// Severity represents the severity level
-type Severity string
-
-const (
-	SeverityTrace    Severity = "trace"
-	SeverityDebug    Severity = "debug"
-	SeverityInfo     Severity = "info"
-	SeverityWarn     Severity = "warn"
-	SeverityError    Severity = "error"
-	SeverityCritical Severity = "critical"
-)
-
-// Event is the core event abstraction - all events implement this
+// Event represents a system event
 type Event struct {
-	// Core identification
-	ID        EventID    `json:"id"`
-	Type      EventType  `json:"type"`
-	Source    SourceType `json:"source"`
-	Timestamp time.Time  `json:"timestamp"`
-
-	// Content and context
-	Payload  EventPayload  `json:"payload"`
-	Context  EventContext  `json:"context"`
-	Metadata EventMetadata `json:"metadata"`
-
-	// Correlation and analysis
-	Severity    Severity         `json:"severity"`
-	Confidence  float64          `json:"confidence"`
-	Fingerprint EventFingerprint `json:"fingerprint"`
+    ID         string                 `json:"id"`
+    Timestamp  time.Time             `json:"timestamp"`
+    Type       string                `json:"type"`
+    Source     string                `json:"source"`
+    Data       map[string]interface{} `json:"data"`
+    Category   string                `json:"category,omitempty"`
+    Confidence float64               `json:"confidence,omitempty"`
+    Attributes map[string]interface{} `json:"attributes,omitempty"`
+    AiFeatures map[string]interface{} `json:"ai_features,omitempty"`
+    Semantic   map[string]interface{} `json:"semantic,omitempty"`
+    Severity   string                `json:"severity,omitempty"`
+    Anomaly    map[string]interface{} `json:"anomaly,omitempty"`
+    Context    map[string]interface{} `json:"context,omitempty"`
+    Behavioral map[string]interface{} `json:"behavioral,omitempty"`
+    Causality  *CausalityContext      `json:"causality,omitempty"`
 }
 
-// EventPayload contains the actual event data - strongly typed
-type EventPayload interface {
-	PayloadType() string
-	Validate() error
+// Finding represents a correlation result  
+type Finding struct {
+    ID          string    `json:"id"`
+    Type        string    `json:"type"`
+    Confidence  float64   `json:"confidence"`
+    Description string    `json:"description"`
+    Events      []string  `json:"events"`
+    Timestamp   time.Time `json:"timestamp"`
 }
 
-// EventContext provides environmental context
-type EventContext struct {
-	// Resource context
-	Resource  *ResourceRef `json:"resource,omitempty"`
-	Host      string       `json:"host,omitempty"`
-	Cluster   string       `json:"cluster,omitempty"`
-	Namespace string       `json:"namespace,omitempty"`
-
-	// Process context
-	PID       *int32 `json:"pid,omitempty"`
-	UID       *int32 `json:"uid,omitempty"`
-	GID       *int32 `json:"gid,omitempty"`
-	Container string `json:"container,omitempty"`
-
-	// Labels and tags
-	Labels Labels `json:"labels,omitempty"`
-	Tags   Tags   `json:"tags,omitempty"`
+// Target represents a monitoring target
+type Target struct {
+    Type      string            `json:"type"`
+    Name      string            `json:"name"`
+    Namespace string            `json:"namespace,omitempty"`
+    Labels    map[string]string `json:"labels,omitempty"`
 }
 
-// EventMetadata contains processing metadata
-type EventMetadata struct {
-	SchemaVersion string            `json:"schema_version"`
-	ProcessedAt   time.Time         `json:"processed_at"`
-	ProcessedBy   string            `json:"processed_by"`
-	Annotations   map[string]string `json:"annotations,omitempty"`
+// TimeWindow represents a time range for analysis
+type TimeWindow struct {
+    Start    time.Time     `json:"start"`
+    End      time.Time     `json:"end"`
+    Duration time.Duration `json:"duration"`
 }
 
-// EventFingerprint uniquely identifies similar events for deduplication
-type EventFingerprint struct {
-	Hash      string            `json:"hash"`
-	Signature string            `json:"signature"`
-	Fields    map[string]string `json:"fields"`
+// Correlation represents a correlation between events
+type Correlation struct {
+    ID         string    `json:"id"`
+    Type       string    `json:"type"`
+    Events     []string  `json:"events"`
+    Confidence float64   `json:"confidence"`
+    Timestamp  time.Time `json:"timestamp"`
 }
 
-// =============================================================================
-// SPECIFIC EVENT PAYLOADS - TYPE SAFE
-// =============================================================================
-
-// SystemEventPayload for eBPF system events
-type SystemEventPayload struct {
-	Syscall    string            `json:"syscall,omitempty"`
-	ReturnCode int32             `json:"return_code,omitempty"`
-	Arguments  map[string]string `json:"arguments,omitempty"`
-
-	// Memory events
-	MemoryUsage *int64 `json:"memory_usage,omitempty"`
-	MemoryLimit *int64 `json:"memory_limit,omitempty"`
-
-	// Network events
-	SourceIP      string `json:"source_ip,omitempty"`
-	DestIP        string `json:"dest_ip,omitempty"`
-	Port          *int32 `json:"port,omitempty"`
-	Protocol      string `json:"protocol,omitempty"`
-	BytesSent     *int64 `json:"bytes_sent,omitempty"`
-	BytesReceived *int64 `json:"bytes_received,omitempty"`
+// Insight represents an analytical insight
+type Insight struct {
+    ID          string                 `json:"id"`
+    Type        string                 `json:"type"`
+    Title       string                 `json:"title"`
+    Description string                 `json:"description"`
+    Severity    SeverityLevel          `json:"severity"`
+    Data        map[string]interface{} `json:"data"`
+    Timestamp   time.Time              `json:"timestamp"`
 }
 
-func (p SystemEventPayload) PayloadType() string { return "system" }
-func (p SystemEventPayload) Validate() error {
-	// Add validation logic
-	return nil
+// Evidence represents supporting evidence for a finding
+type Evidence struct {
+    Type        string                 `json:"type"`
+    Source      string                 `json:"source"`
+    Description string                 `json:"description"`
+    Data        map[string]interface{} `json:"data"`
+    Timestamp   time.Time              `json:"timestamp"`
 }
 
-// KubernetesEventPayload for K8s events
-type KubernetesEventPayload struct {
-	Resource  ResourceRef `json:"resource"`
-	EventType string      `json:"event_type"`
-	Reason    string      `json:"reason"`
-	Message   string      `json:"message"`
-	Count     int32       `json:"count"`
+// SeverityLevel represents the severity of an issue
+type SeverityLevel string
 
-	// State changes
-	OldState string `json:"old_state,omitempty"`
-	NewState string `json:"new_state,omitempty"`
+const (
+    SeverityLow      SeverityLevel = "low"
+    SeverityMedium   SeverityLevel = "medium"
+    SeverityHigh     SeverityLevel = "high"
+    SeverityCritical SeverityLevel = "critical"
+)
 
-	// Resource details
-	ResourceVersion string `json:"resource_version,omitempty"`
-	FieldPath       string `json:"field_path,omitempty"`
+// MetricsReport represents a metrics collection report
+type MetricsReport struct {
+    ID        string                 `json:"id"`
+    Source    string                 `json:"source"`
+    Metrics   map[string]float64     `json:"metrics"`
+    Labels    map[string]string      `json:"labels"`
+    Timestamp time.Time              `json:"timestamp"`
 }
 
-func (p KubernetesEventPayload) PayloadType() string { return "kubernetes" }
-func (p KubernetesEventPayload) Validate() error {
-	if p.Resource.Kind == "" || p.Resource.Name == "" {
-		return fmt.Errorf("resource kind and name are required")
-	}
-	return nil
+// CausalityContext represents causality information for events
+type CausalityContext struct {
+    RootCause    string                 `json:"root_cause"`
+    CausalChain  []string              `json:"causal_chain"`
+    Confidence   float64               `json:"confidence"`
+    Metadata     map[string]interface{} `json:"metadata"`
 }
 
-// ServiceEventPayload for systemd events
-type ServiceEventPayload struct {
-	ServiceName string            `json:"service_name"`
-	EventType   string            `json:"event_type"`
-	OldState    string            `json:"old_state,omitempty"`
-	NewState    string            `json:"new_state,omitempty"`
-	ExitCode    *int32            `json:"exit_code,omitempty"`
-	Signal      *int32            `json:"signal,omitempty"`
-	Properties  map[string]string `json:"properties,omitempty"`
+// Problem represents an issue detected in the system
+type Problem struct {
+    Resource    ResourceRef            `json:"resource"`
+    Severity    SeverityLevel          `json:"severity"`
+    Title       string                 `json:"title"`
+    Description string                 `json:"description"`
+    Evidence    []Evidence             `json:"evidence,omitempty"`
+    Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
-
-func (p ServiceEventPayload) PayloadType() string { return "service" }
-func (p ServiceEventPayload) Validate() error {
-	if p.ServiceName == "" {
-		return fmt.Errorf("service_name is required")
-	}
-	return nil
-}
-
-// State returns the current state (NewState if available, otherwise OldState)
-func (p ServiceEventPayload) State() string {
-	if p.NewState != "" {
-		return p.NewState
-	}
-	return p.OldState
-}
-
-// LogEventPayload for journald/log events
-type LogEventPayload struct {
-	Message    string            `json:"message"`
-	Unit       string            `json:"unit,omitempty"`
-	Priority   int32             `json:"priority"`
-	Facility   string            `json:"facility,omitempty"`
-	Identifier string            `json:"identifier,omitempty"`
-	Fields     map[string]string `json:"fields,omitempty"`
-}
-
-func (p LogEventPayload) PayloadType() string { return "log" }
-func (p LogEventPayload) Validate() error {
-	if p.Message == "" {
-		return fmt.Errorf("message is required")
-	}
-	return nil
-}
-
-// =============================================================================
-// SUPPORT TYPES
-// =============================================================================
 
 // ResourceRef represents a reference to a Kubernetes resource
 type ResourceRef struct {
-	APIVersion string `json:"api_version,omitempty"`
-	Kind       string `json:"kind"`
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace,omitempty"`
-	UID        string `json:"uid,omitempty"`
+    Kind      string `json:"kind"`
+    Name      string `json:"name"`
+    Namespace string `json:"namespace,omitempty"`
 }
 
-// Labels represents key-value labels
-type Labels map[string]string
-
-// Tags represents categorization tags
-type Tags []string
-
-// TimeWindow represents a time range
-type TimeWindow struct {
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
+// SystemEvent represents a system-level event from eBPF
+type SystemEvent struct {
+    ID        string                 `json:"id"`
+    Timestamp time.Time             `json:"timestamp"`
+    Type      string                `json:"type"`
+    PID       int                   `json:"pid"`
+    Data      map[string]interface{} `json:"data,omitempty"`
 }
 
-func (tw TimeWindow) Duration() time.Duration {
-	return tw.End.Sub(tw.Start)
+// BehavioralContext represents behavioral patterns and context
+type BehavioralContext struct {
+    Pattern     string                 `json:"pattern"`
+    Frequency   float64               `json:"frequency"`
+    Confidence  float64               `json:"confidence"`
+    TimeWindow  TimeWindow            `json:"time_window"`
+    Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
-
-func (tw TimeWindow) Contains(t time.Time) bool {
-	return !t.Before(tw.Start) && !t.After(tw.End)
-}
-
-// =============================================================================
-// CORRELATION AND FINDINGS
-// =============================================================================
-
-// CorrelationID uniquely identifies a correlation
-type CorrelationID string
-
-// FindingID uniquely identifies a finding
-type FindingID string
-
-// Correlation represents relationships between events
-type Correlation struct {
-	ID         CorrelationID       `json:"id"`
-	Type       CorrelationType     `json:"type"`
-	Events     []EventReference    `json:"events"`
-	Confidence ConfidenceScore     `json:"confidence"`
-	Timestamp  time.Time           `json:"timestamp"`
-	TimeWindow TimeWindow          `json:"time_window"`
-	Pattern    PatternSignature    `json:"pattern"`
-	Metadata   CorrelationMetadata `json:"metadata"`
-	// Additional fields for correlation engine compatibility
-	Description string             `json:"description"`
-	Context     CorrelationContext `json:"context"`
-	Findings    []Finding          `json:"findings"`
-}
-
-// CorrelationType defines types of correlations
-type CorrelationType string
-
-const (
-	CorrelationCausal       CorrelationType = "causal"
-	CorrelationTemporal     CorrelationType = "temporal"
-	CorrelationSpatial      CorrelationType = "spatial"
-	CorrelationPatternBased CorrelationType = "pattern"
-	CorrelationAnomaly      CorrelationType = "anomaly"
-	// Additional types for correlation engine
-	CorrelationTypeResource    CorrelationType = "resource"
-	CorrelationTypeNetwork     CorrelationType = "network"
-	CorrelationTypeService     CorrelationType = "service"
-	CorrelationTypeSecurity    CorrelationType = "security"
-	CorrelationTypePerformance CorrelationType = "performance"
-	CorrelationTypeCascade     CorrelationType = "cascade"
-	CorrelationTypePredictive  CorrelationType = "predictive"
-	CorrelationTypeStatistical CorrelationType = "statistical"
-	CorrelationTypeGeneral     CorrelationType = "general"
-)
-
-// Aliases for backward compatibility
-const (
-	CorrelationTypeCausal   = CorrelationCausal
-	CorrelationTypeTemporal = CorrelationTemporal
-)
-
-// EventReference links to an event with relationship context
-type EventReference struct {
-	EventID      EventID           `json:"event_id"`
-	Role         string            `json:"role"`         // "trigger", "effect", "context"
-	Relationship string            `json:"relationship"` // "causes", "follows", "coincides"
-	Weight       float64           `json:"weight"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
-}
-
-// ConfidenceScore provides detailed confidence breakdown
-type ConfidenceScore struct {
-	Overall     float64 `json:"overall"`
-	Temporal    float64 `json:"temporal"`
-	Causal      float64 `json:"causal"`
-	Pattern     float64 `json:"pattern"`
-	Statistical float64 `json:"statistical"`
-}
-
-// Float64 returns the overall confidence as a float64
-func (c ConfidenceScore) Float64() float64 {
-	return c.Overall
-}
-
-// GreaterThan checks if confidence is greater than a float64 value
-func (c ConfidenceScore) GreaterThan(threshold float64) bool {
-	return c.Overall > threshold
-}
-
-// GreaterThanOrEqual checks if confidence is greater than or equal to a float64 value
-func (c ConfidenceScore) GreaterThanOrEqual(threshold float64) bool {
-	return c.Overall >= threshold
-}
-
-// PatternSignature identifies the correlation pattern
-type PatternSignature struct {
-	Name        string            `json:"name"`
-	Version     string            `json:"version"`
-	Fingerprint string            `json:"fingerprint"`
-	Attributes  map[string]string `json:"attributes"`
-}
-
-// CorrelationMetadata contains processing information
-type CorrelationMetadata struct {
-	Algorithm   string            `json:"algorithm"`
-	ProcessedAt time.Time         `json:"processed_at"`
-	ProcessedBy string            `json:"processed_by"`
-	Annotations map[string]string `json:"annotations,omitempty"`
-	// Additional fields for correlation engine compatibility
-	SchemaVersion string `json:"schema_version"`
-}
-
-// CorrelationContext provides context for correlations
-type CorrelationContext struct {
-	Host      string            `json:"host,omitempty"`
-	Cluster   string            `json:"cluster,omitempty"`
-	Namespace string            `json:"namespace,omitempty"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	Tags      []string          `json:"tags,omitempty"`
-}
-
-// Finding represents a high-level conclusion from correlations
-type Finding struct {
-	ID           FindingID       `json:"id"`
-	Type         FindingType     `json:"type"`
-	Title        string          `json:"title"`
-	Description  string          `json:"description"`
-	Severity     Severity        `json:"severity"`
-	Confidence   ConfidenceScore `json:"confidence"`
-	Correlations []CorrelationID `json:"correlations"`
-	Evidence     []Evidence      `json:"evidence"`
-	Impact       Impact          `json:"impact"`
-	Timestamp    time.Time       `json:"timestamp"`
-	TTL          *time.Duration  `json:"ttl,omitempty"`
-	// Additional fields for correlation engine compatibility
-	Category string          `json:"category,omitempty"`
-	Metadata FindingMetadata `json:"metadata,omitempty"`
-}
-
-// FindingMetadata contains metadata about findings
-type FindingMetadata struct {
-	Algorithm     string            `json:"algorithm,omitempty"`
-	ProcessedBy   string            `json:"processed_by,omitempty"`
-	Annotations   map[string]string `json:"annotations,omitempty"`
-	SchemaVersion string            `json:"schema_version,omitempty"`
-	ProcessedAt   time.Time         `json:"processed_at,omitempty"`
-}
-
-// FindingType categorizes findings
-type FindingType string
-
-const (
-	FindingMemoryLeak     FindingType = "memory_leak"
-	FindingCascadeFailure FindingType = "cascade_failure"
-	FindingOOMPrediction  FindingType = "oom_prediction"
-	FindingNetworkIssue   FindingType = "network_issue"
-	FindingAnomalous      FindingType = "anomalous_behavior"
-)
-
-// Evidence supports a finding with specific data
-type Evidence struct {
-	Type        string                 `json:"type"`
-	Source      SourceType             `json:"source"`
-	Description string                 `json:"description"`
-	Data        interface{}            `json:"data"` // Specific evidence data
-	Timestamp   time.Time              `json:"timestamp"`
-	Weight      float64                `json:"weight"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// Impact describes the business/operational impact
-type Impact struct {
-	Scope        []string      `json:"scope"`
-	Affected     []ResourceRef `json:"affected"`
-	Risk         string        `json:"risk"`
-	Consequences []string      `json:"consequences"`
-}
-
-// =============================================================================
-// HELPER FUNCTIONS
-// =============================================================================
-
-// NewEvent creates a new event with proper defaults
-func NewEvent(eventType EventType, source SourceType, payload EventPayload) *Event {
-	return &Event{
-		ID:        EventID(generateID()),
-		Type:      eventType,
-		Source:    source,
-		Timestamp: time.Now(),
-		Payload:   payload,
-		Context:   EventContext{},
-		Metadata: EventMetadata{
-			SchemaVersion: "v1",
-			ProcessedAt:   time.Now(),
-		},
-		Confidence: 1.0,
-	}
-}
-
-// Helper function to generate IDs (implement based on your needs)
-func generateID() string {
-	// Implementation depends on your ID generation strategy
-	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-// =============================================================================
-// ADDITIONAL EVENT PAYLOAD IMPLEMENTATIONS
-// =============================================================================
-
-// MemoryEventPayload represents memory-related event data
-type MemoryEventPayload struct {
-	Usage     float64 `json:"usage"`     // Percentage (0-100)
-	Available uint64  `json:"available"` // Bytes available
-	Total     uint64  `json:"total"`     // Total bytes
-}
-
-func (p MemoryEventPayload) PayloadType() string { return "memory" }
-func (p MemoryEventPayload) Validate() error     { return nil }
-
-// NetworkEventPayload represents network-related event data
-type NetworkEventPayload struct {
-	Protocol          string `json:"protocol"`
-	SourceIP          string `json:"source_ip"`
-	DestinationIP     string `json:"destination_ip"`
-	SourcePort        int    `json:"source_port"`
-	DestinationPort   int    `json:"destination_port"`
-	BytesSent         uint64 `json:"bytes_sent"`
-	BytesReceived     uint64 `json:"bytes_received"`
-	PacketsDropped    uint64 `json:"packets_dropped"`
-	ConnectionsFailed uint64 `json:"connections_failed"`
-	Errors            uint64 `json:"errors"`
-}
-
-func (p NetworkEventPayload) PayloadType() string { return "network" }
-func (p NetworkEventPayload) Validate() error     { return nil }
-
-// =============================================================================
-// HELPER FUNCTIONS FOR COMPATIBILITY
-// =============================================================================
-
-// EventIDsToEventReferences converts event IDs to event references
-func EventIDsToEventReferences(eventIDs []EventID) []EventReference {
-	refs := make([]EventReference, len(eventIDs))
-	for i, id := range eventIDs {
-		refs[i] = EventReference{
-			EventID:      id,
-			Role:         "participant",
-			Relationship: "related",
-			Weight:       1.0,
-		}
-	}
-	return refs
-}
-
-// FloatToConfidenceScore converts a float64 to a ConfidenceScore
-func FloatToConfidenceScore(confidence float64) ConfidenceScore {
-	return ConfidenceScore{
-		Overall:     confidence,
-		Temporal:    confidence,
-		Causal:      confidence,
-		Pattern:     confidence,
-		Statistical: confidence,
-	}
-}
-
-// EventContextToCorrelationContext converts EventContext to CorrelationContext
-func EventContextToCorrelationContext(ctx EventContext) CorrelationContext {
-	labels := make(map[string]string)
-	for k, v := range ctx.Labels {
-		labels[k] = v
-	}
-
-	tags := make([]string, len(ctx.Tags))
-	copy(tags, ctx.Tags)
-
-	return CorrelationContext{
-		Host:      ctx.Host,
-		Cluster:   ctx.Cluster,
-		Namespace: ctx.Namespace,
-		Labels:    labels,
-		Tags:      tags,
-	}
-}
-
-// =============================================================================
-// CORRELATION COMPATIBILITY LAYER
-// =============================================================================
-
-// Entity maps to ResourceRef for correlation system compatibility
-type Entity = ResourceRef
-
-// Result maps to Finding for correlation system compatibility
-type Result = Finding
-
-// Filter maps to QueryCriteria for correlation system compatibility
-type Filter = QueryCriteria
-
-// Stats maps to SystemMetrics for correlation system compatibility
-type Stats = SystemMetrics
-
-// Category represents event categories for correlation
-type Category string
-
-const (
-	CategoryReliability Category = "reliability"
-	CategoryPerformance Category = "performance"
-	CategorySecurity    Category = "security"
-	CategoryResource    Category = "resource"
-)
-
-
-// =============================================================================
-// MONSTER COMPATIBILITY TYPES
-// =============================================================================
-
-// Insight represents a correlation insight (same as Finding but different name)
-type Insight = Finding
 
 // ActionItem represents a recommended action
 type ActionItem struct {
-    ID          string    `json:"id"`
-    Type        string    `json:"type"`        // "manual", "automated", "preventive"
-    Priority    string    `json:"priority"`    // "low", "medium", "high", "critical"
-    Description string    `json:"description"`
-    Command     string    `json:"command,omitempty"`
-    Deadline    time.Time `json:"deadline,omitempty"`
-    Status      string    `json:"status"`      // "pending", "in_progress", "completed", "failed"
+    ID          string                 `json:"id"`
+    Type        string                 `json:"type"`
+    Description string                 `json:"description"`
+    Priority    string                 `json:"priority"`
+    Command     string                 `json:"command,omitempty"`
+    Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// Pattern represents a pattern that can be detected in events
+// AnomalyDimensions represents dimensions of an anomaly
+type AnomalyDimensions struct {
+    Temporal   float64 `json:"temporal"`
+    Spatial    float64 `json:"spatial"`
+    Behavioral float64 `json:"behavioral"`
+    Contextual float64 `json:"contextual"`
+}
+
+// ServiceEvent represents a systemd service event
+type ServiceEvent struct {
+    ServiceName string                 `json:"service_name"`
+    EventType   string                 `json:"event_type"`
+    Timestamp   time.Time             `json:"timestamp"`
+    Message     string                 `json:"message"`
+    OldState    string                 `json:"old_state,omitempty"`
+    NewState    string                 `json:"new_state,omitempty"`
+    Reason      string                 `json:"reason,omitempty"`
+    Properties  map[string]interface{} `json:"properties,omitempty"`
+    Data        map[string]interface{} `json:"data,omitempty"`
+}
+
+// LogEvent represents a journald log event
+type LogEvent struct {
+    Timestamp   time.Time              `json:"timestamp"`
+    Unit        string                 `json:"unit"`
+    Message     string                 `json:"message"`
+    Priority    int                    `json:"priority"`
+    Hostname    string                 `json:"hostname,omitempty"`
+    Identifier  string                 `json:"identifier,omitempty"`
+    PID         int                    `json:"pid,omitempty"`
+    UID         int                    `json:"uid,omitempty"`
+    Fields      map[string]interface{} `json:"fields,omitempty"`
+}
+
+// Pattern represents a correlation pattern
 type Pattern struct {
     ID          string                 `json:"id"`
     Name        string                 `json:"name"`
-    Description string                 `json:"description"`
     Type        string                 `json:"type"`
-    Confidence  float64                `json:"confidence"`
+    Description string                 `json:"description"`
+    Conditions  []interface{}          `json:"conditions"`
+    Actions     []interface{}          `json:"actions"`
     Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// Problem represents an identified problem
-type Problem struct {
-    ID          string                 `json:"id"`
-    Type        string                 `json:"type"`
-    Severity    Severity               `json:"severity"`
-    Title       string                 `json:"title"`
-    Description string                 `json:"description"`
-    Evidence    []Event                `json:"evidence"`
-    Metadata    map[string]interface{} `json:"metadata,omitempty"`
-}
-
-
-// CausalityContext represents causal relationship context
-type CausalityContext struct {
-    RootCause     *Event                 `json:"root_cause"`
-    CausalChain   []*Event              `json:"causal_chain"`
-    Confidence    float64               `json:"confidence"`
-    TimeWindow    TimeWindow            `json:"time_window"`
-    Metadata      map[string]interface{} `json:"metadata"`
-}
-
-// BehavioralContext represents behavioral analysis context
-type BehavioralContext struct {
-    EntityType      string                 `json:"entity_type"`
-    BaselineBehavior map[string]interface{} `json:"baseline_behavior"`
-    CurrentBehavior  map[string]interface{} `json:"current_behavior"`
-    Anomalies       []string               `json:"anomalies"`
-    Confidence      float64                `json:"confidence"`
-    TimeWindow      TimeWindow             `json:"time_window"`
-}
-
-// Event extension for monster compatibility
-type EventExtension struct {
-    Anomaly bool `json:"anomaly,omitempty"`
-}
-
-// CheckRequest represents a health check request
-type CheckRequest struct {
-	Resource  string // Optional resource to check (e.g., "my-app", "pod/my-pod")
-	Namespace string // Kubernetes namespace
-	All       bool   // Check all namespaces
-	Verbose   bool   // Include detailed information
-}
-
-// CheckResult represents the result of a health check
+// CheckResult represents the result of a system check
 type CheckResult struct {
-	Summary             Summary     `json:"summary"`
-	Problems            []Problem   `json:"problems"`
-	QuickFixes          []QuickFix  `json:"quick_fixes"`
-	CorrelationAnalysis interface{} `json:"correlation_analysis,omitempty"`
-	Timestamp           time.Time   `json:"timestamp"`
+    Status      string    `json:"status"`
+    Summary     string    `json:"summary"`
+    Problems    []Problem `json:"problems"`
+    Timestamp   time.Time `json:"timestamp"`
 }
 
-// Summary provides overall health statistics
-type Summary struct {
-	HealthyPods  int `json:"healthy_pods"`
-	WarningPods  int `json:"warning_pods"`
-	CriticalPods int `json:"critical_pods"`
-	TotalPods    int `json:"total_pods"`
-}
+// Severity represents severity levels for issues
+type Severity = SeverityLevel
 
-// ResourceInfo provides detailed resource information for watch events
-type ResourceInfo struct {
-	Kind       string            `json:"kind"`
-	Name       string            `json:"name"`
-	Namespace  string            `json:"namespace"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	Status     string            `json:"status"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
-}
+// Define additional severity constants if needed
+const (
+    SeverityWarning SeverityLevel = "warning"
+)
 
-// QuickFix represents an actionable fix
-type QuickFix struct {
-	Command     string   `json:"command"`
-	Description string   `json:"description"`
-	Urgency     Severity `json:"urgency"`
-	Safe        bool     `json:"safe"` // Can be auto-applied safely
-}
+// Additional types needed by interfaces.go
+type CorrelationType string
+type FindingID string
+type FindingType string
 
-// ExplainRequest represents a request for explanation
-type ExplainRequest struct {
-	Resource  *ResourceRef `json:"resource"`
-	Namespace string       `json:"namespace"`
-	Verbose   bool         `json:"verbose"`
-}
+const (
+    CorrelationTypeTemporal CorrelationType = "temporal"
+    CorrelationTypeSpatial  CorrelationType = "spatial"
+    CorrelationTypeCausal   CorrelationType = "causal"
+)
 
-// Explanation contains the detailed analysis and explanation
-type Explanation struct {
-	Resource   *ResourceRef       `json:"resource"`
-	Summary    string             `json:"summary"`
-	Problems   []Problem          `json:"problems"`
-	Analysis   *Analysis          `json:"analysis"`
-	RootCauses []RootCause        `json:"root_causes"`
-	Solutions  []Solution         `json:"solutions"`
-	Prediction *PredictionSummary `json:"prediction,omitempty"`
-	Learning   *Learning          `json:"learning,omitempty"`
-	Timestamp  time.Time          `json:"timestamp"`
-}
+const (
+    FindingTypeAnomaly     FindingType = "anomaly"
+    FindingTypePattern     FindingType = "pattern"
+    FindingTypePrediction  FindingType = "prediction"
+)
 
-// Analysis contains the technical details
-type Analysis struct {
-	KubernetesView *KubernetesView `json:"kubernetes_view"`
-	RealityCheck   *RealityCheck   `json:"reality_check"`
-}
-
-// KubernetesView shows what Kubernetes API reports
-type KubernetesView struct {
-	Status     string            `json:"status"`
-	Phase      string            `json:"phase"`
-	Conditions []string          `json:"conditions"`
-	Resources  map[string]string `json:"resources"`
-	Events     []string          `json:"recent_events"`
-}
-
-// RealityCheck shows actual system state
-type RealityCheck struct {
-	ActualMemory   string   `json:"actual_memory,omitempty"`
-	RestartPattern string   `json:"restart_pattern,omitempty"`
-	ErrorPatterns  []string `json:"error_patterns,omitempty"`
-	NetworkIssues  []string `json:"network_issues,omitempty"`
-}
-
-// RootCause represents an identified root cause
-type RootCause struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Evidence    []string `json:"evidence"`
-	Confidence  float64  `json:"confidence"`
-}
-
-// Solution represents a recommended fix
-type Solution struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Commands    []string `json:"commands"`
-	Urgency     Severity `json:"urgency"`
-	Difficulty  string   `json:"difficulty"` // "easy", "medium", "hard"
-	Risk        string   `json:"risk"`       // "low", "medium", "high"
-}
-
-// Learning contains educational information
-type Learning struct {
-	ConceptExplanation string   `json:"concept_explanation"`
-	WhyItMatters       string   `json:"why_it_matters"`
-	CommonMistakes     []string `json:"common_mistakes"`
-	BestPractices      []string `json:"best_practices"`
-}
-
-// PredictionSummary contains prediction data
-type PredictionSummary struct {
-	Type        string        `json:"type"`
-	TimeToEvent time.Duration `json:"time_to_event"`
-	Confidence  float64       `json:"confidence"`
-	Impact      []string      `json:"impact"`
-}
-
-// PodInfo represents essential pod information for analysis
-type PodInfo struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Labels    map[string]string `json:"labels"`
-	// Spec and Status fields would require k8s.io/api imports
-	// For now we'll keep it simple
-}
+// NOTE: Rule, RuleCondition, RuleAction, RuleMatch, and QueryCriteria 
+// are already defined in interfaces.go, so we don't redefine them here

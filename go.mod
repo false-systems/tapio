@@ -1,8 +1,6 @@
 module github.com/yairfalse/tapio
 
-go 1.24.0
-
-toolchain go1.24.3
+go 1.23
 
 require (
 	github.com/briandowns/spinner v1.23.2
@@ -38,9 +36,9 @@ require (
 	google.golang.org/grpc v1.73.0
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.33.3
-	k8s.io/apimachinery v0.33.3
-	k8s.io/client-go v0.33.3
+	k8s.io/api v0.30.6
+	k8s.io/apimachinery v0.30.6
+	k8s.io/client-go v0.30.6
 )
 
 require (

@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/k8s/core"
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -20,95 +19,97 @@ func newEventProcessor() core.EventProcessor {
 
 // ProcessEvent converts a raw Kubernetes event to a domain event
 func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (domain.Event, error) {
-	// Create Kubernetes event payload
-	payload := p.createKubernetesPayload(raw)
+	// Create Kubernetes event data
+	eventData := p.createKubernetesData(raw)
 	
 	// Determine severity based on event type and content
 	severity := p.determineSeverity(raw)
 	
 	// Create the domain event
 	event := domain.Event{
-		ID:        domain.EventID(fmt.Sprintf("k8s_%s_%s_%s_%d", raw.ResourceKind, raw.Namespace, raw.Name, raw.Timestamp.UnixNano())),
-		Type:      domain.EventTypeKubernetes,
-		Source:    domain.SourceK8s,
-		Timestamp: raw.Timestamp,
-		Payload:   payload,
-		Context:   p.createContext(raw),
-		Metadata:  p.createMetadata(raw),
-		Severity:  severity,
+		ID:         fmt.Sprintf("k8s_%s_%s_%s_%d", raw.ResourceKind, raw.Namespace, raw.Name, raw.Timestamp.UnixNano()),
+		Type:       string(domain.EventTypeKubernetes),
+		Source:     string(domain.SourceK8s),
+		Timestamp:  raw.Timestamp,
+		Data:       eventData,
+		Context:    p.createContextData(raw),
+		Severity:   string(severity),
 		Confidence: 1.0, // K8s events are direct observations
-		Fingerprint: domain.EventFingerprint{
-			Hash:      p.generateHash(raw),
-			Signature: fmt.Sprintf("%s:%s", raw.ResourceKind, string(raw.Type)),
-			Fields: map[string]string{
-				"kind":      raw.ResourceKind,
-				"namespace": raw.Namespace,
-				"name":      raw.Name,
-				"type":      string(raw.Type),
-			},
+		Attributes: map[string]interface{}{
+			"hash":      p.generateHash(raw),
+			"signature": fmt.Sprintf("%s:%s", raw.ResourceKind, string(raw.Type)),
+			"kind":      raw.ResourceKind,
+			"namespace": raw.Namespace,
+			"name":      raw.Name,
+			"type":      string(raw.Type),
 		},
 	}
 	
 	return event, nil
 }
 
-// createKubernetesPayload creates a Kubernetes event payload
-func (p *eventProcessor) createKubernetesPayload(raw core.RawEvent) domain.KubernetesEventPayload {
-	payload := domain.KubernetesEventPayload{
-		Resource: domain.ResourceRef{
-			APIVersion: p.extractAPIVersion(raw),
-			Kind:       raw.ResourceKind,
-			Namespace:  raw.Namespace,
-			Name:       raw.Name,
+// createKubernetesData creates a Kubernetes event data map
+func (p *eventProcessor) createKubernetesData(raw core.RawEvent) map[string]interface{} {
+	data := map[string]interface{}{
+		"resource": map[string]interface{}{
+			"api_version": p.extractAPIVersion(raw),
+			"kind":       raw.ResourceKind,
+			"namespace":  raw.Namespace,
+			"name":       raw.Name,
 		},
-		EventType: string(raw.Type),
-		Count:     1,
+		"event_type": string(raw.Type),
+		"count":      1,
 	}
 	
 	// Extract additional information based on resource type
 	switch raw.ResourceKind {
 	case "Pod":
-		p.enrichPodPayload(&payload, raw)
+		p.enrichPodData(data, raw)
 	case "Node":
-		p.enrichNodePayload(&payload, raw)
+		p.enrichNodeData(data, raw)
 	case "Service":
-		p.enrichServicePayload(&payload, raw)
+		p.enrichServiceData(data, raw)
 	case "Event":
-		p.enrichEventPayload(&payload, raw)
+		p.enrichEventData(data, raw)
 	}
 	
 	// Handle state changes for MODIFIED events
 	if raw.Type == core.EventTypeModified && raw.OldObject != nil {
-		payload.OldState = p.extractState(raw.OldObject)
-		payload.NewState = p.extractState(raw.Object)
+		data["old_state"] = p.extractState(raw.OldObject)
+		data["new_state"] = p.extractState(raw.Object)
 	}
 	
-	return payload
+	return data
 }
 
-// enrichPodPayload adds Pod-specific information
-func (p *eventProcessor) enrichPodPayload(payload *domain.KubernetesEventPayload, raw core.RawEvent) {
+// enrichPodData adds Pod-specific information
+func (p *eventProcessor) enrichPodData(data map[string]interface{}, raw core.RawEvent) {
 	if pod, ok := raw.Object.(*corev1.Pod); ok {
-		payload.Message = fmt.Sprintf("Pod %s in namespace %s: %s", pod.Name, pod.Namespace, pod.Status.Phase)
-		payload.Reason = string(pod.Status.Phase)
+		data["message"] = fmt.Sprintf("Pod %s in namespace %s: %s", pod.Name, pod.Namespace, pod.Status.Phase)
+		data["reason"] = string(pod.Status.Phase)
+		data["resource_version"] = pod.ResourceVersion
+		data["phase"] = string(pod.Status.Phase)
 		
-		// Extract resource version
-		payload.ResourceVersion = pod.ResourceVersion
-		
-		// Add container information to message if available
+		// Add container information if available
 		if len(pod.Status.ContainerStatuses) > 0 {
 			status := pod.Status.ContainerStatuses[0]
 			if status.State.Waiting != nil {
-				payload.Message = fmt.Sprintf("%s - Container waiting: %s", payload.Message, status.State.Waiting.Reason)
+				data["message"] = fmt.Sprintf("%s - Container waiting: %s", data["message"], status.State.Waiting.Reason)
+				data["container_state"] = "waiting"
+				data["container_reason"] = status.State.Waiting.Reason
 			} else if status.State.Terminated != nil {
-				payload.Message = fmt.Sprintf("%s - Container terminated: %s", payload.Message, status.State.Terminated.Reason)
+				data["message"] = fmt.Sprintf("%s - Container terminated: %s", data["message"], status.State.Terminated.Reason)
+				data["container_state"] = "terminated"
+				data["container_reason"] = status.State.Terminated.Reason
+			} else if status.State.Running != nil {
+				data["container_state"] = "running"
 			}
 		}
 	}
 }
 
-// enrichNodePayload adds Node-specific information
-func (p *eventProcessor) enrichNodePayload(payload *domain.KubernetesEventPayload, raw core.RawEvent) {
+// enrichNodeData adds Node-specific information
+func (p *eventProcessor) enrichNodeData(data map[string]interface{}, raw core.RawEvent) {
 	if node, ok := raw.Object.(*corev1.Node); ok {
 		// Extract node conditions
 		conditions := []string{}
@@ -118,55 +119,70 @@ func (p *eventProcessor) enrichNodePayload(payload *domain.KubernetesEventPayloa
 			}
 		}
 		
-		payload.Message = fmt.Sprintf("Node %s conditions: %v", node.Name, conditions)
-		payload.ResourceVersion = node.ResourceVersion
+		data["message"] = fmt.Sprintf("Node %s conditions: %v", node.Name, conditions)
+		data["resource_version"] = node.ResourceVersion
+		data["conditions"] = conditions
 		
 		// Check for important conditions
 		for _, cond := range node.Status.Conditions {
 			if cond.Type == corev1.NodeReady && cond.Status != corev1.ConditionTrue {
-				payload.Reason = "NodeNotReady"
-				payload.Message = fmt.Sprintf("Node %s is not ready: %s", node.Name, cond.Message)
+				data["reason"] = "NodeNotReady"
+				data["message"] = fmt.Sprintf("Node %s is not ready: %s", node.Name, cond.Message)
+				data["ready"] = false
 				break
+			} else if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
+				data["ready"] = true
 			}
 		}
 	}
 }
 
-// enrichServicePayload adds Service-specific information
-func (p *eventProcessor) enrichServicePayload(payload *domain.KubernetesEventPayload, raw core.RawEvent) {
+// enrichServiceData adds Service-specific information
+func (p *eventProcessor) enrichServiceData(data map[string]interface{}, raw core.RawEvent) {
 	if svc, ok := raw.Object.(*corev1.Service); ok {
-		payload.Message = fmt.Sprintf("Service %s in namespace %s", svc.Name, svc.Namespace)
-		payload.ResourceVersion = svc.ResourceVersion
+		data["message"] = fmt.Sprintf("Service %s in namespace %s", svc.Name, svc.Namespace)
+		data["resource_version"] = svc.ResourceVersion
+		data["service_type"] = string(svc.Spec.Type)
 		
 		if svc.Spec.Type == corev1.ServiceTypeLoadBalancer && len(svc.Status.LoadBalancer.Ingress) > 0 {
-			payload.Message = fmt.Sprintf("%s - LoadBalancer IP: %s", payload.Message, svc.Status.LoadBalancer.Ingress[0].IP)
+			ip := svc.Status.LoadBalancer.Ingress[0].IP
+			data["message"] = fmt.Sprintf("%s - LoadBalancer IP: %s", data["message"], ip)
+			data["load_balancer_ip"] = ip
 		}
 	}
 }
 
-// enrichEventPayload adds Event-specific information
-func (p *eventProcessor) enrichEventPayload(payload *domain.KubernetesEventPayload, raw core.RawEvent) {
+// enrichEventData adds Event-specific information
+func (p *eventProcessor) enrichEventData(data map[string]interface{}, raw core.RawEvent) {
 	if event, ok := raw.Object.(*corev1.Event); ok {
-		payload.Message = event.Message
-		payload.Reason = event.Reason
-		payload.Count = event.Count
-		payload.Resource = domain.ResourceRef{
-			APIVersion: event.InvolvedObject.APIVersion,
-			Kind:       event.InvolvedObject.Kind,
-			Namespace:  event.InvolvedObject.Namespace,
-			Name:       event.InvolvedObject.Name,
-			UID:        string(event.InvolvedObject.UID),
+		data["message"] = event.Message
+		data["reason"] = event.Reason
+		data["count"] = event.Count
+		data["resource"] = map[string]interface{}{
+			"api_version": event.InvolvedObject.APIVersion,
+			"kind":       event.InvolvedObject.Kind,
+			"namespace":  event.InvolvedObject.Namespace,
+			"name":       event.InvolvedObject.Name,
+			"uid":        string(event.InvolvedObject.UID),
 		}
-		payload.FieldPath = event.InvolvedObject.FieldPath
-		
-		// Override event type with the K8s event type
-		payload.EventType = event.Type
+		data["field_path"] = event.InvolvedObject.FieldPath
+		data["event_type"] = event.Type
+		data["first_timestamp"] = event.FirstTimestamp
+		data["last_timestamp"] = event.LastTimestamp
 	}
 }
 
-// createContext creates the event context
-func (p *eventProcessor) createContext(raw core.RawEvent) domain.EventContext {
-	labels := domain.Labels{
+// createContextData creates the event context data
+func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interface{} {
+	context := map[string]interface{}{
+		"kind":      raw.ResourceKind,
+		"namespace": raw.Namespace,
+		"name":      raw.Name,
+		"cluster":   "", // Would be set from cluster info
+	}
+	
+	// Create base labels
+	labels := map[string]string{
 		"kind":      raw.ResourceKind,
 		"namespace": raw.Namespace,
 		"name":      raw.Name,
@@ -179,64 +195,43 @@ func (p *eventProcessor) createContext(raw core.RawEvent) domain.EventContext {
 		}
 	}
 	
-	return domain.EventContext{
-		Resource: &domain.ResourceRef{
-			Kind:      raw.ResourceKind,
-			Namespace: raw.Namespace,
-			Name:      raw.Name,
-		},
-		Cluster:   "", // Would be set from cluster info
-		Namespace: raw.Namespace,
-		Labels:    labels,
-		Tags: domain.Tags{
-			"kubernetes",
-			raw.ResourceKind,
-			string(raw.Type),
-		},
+	context["labels"] = labels
+	context["tags"] = []string{
+		"kubernetes",
+		raw.ResourceKind,
+		string(raw.Type),
 	}
+	
+	// Add resource reference
+	context["resource"] = map[string]string{
+		"kind":      raw.ResourceKind,
+		"namespace": raw.Namespace,
+		"name":      raw.Name,
+	}
+	
+	return context
 }
 
-// createMetadata creates the event metadata
-func (p *eventProcessor) createMetadata(raw core.RawEvent) domain.EventMetadata {
-	annotations := map[string]string{
-		"event_type":    string(raw.Type),
-		"resource_kind": raw.ResourceKind,
-	}
-	
-	// Extract annotations from the object if available
-	if obj, ok := raw.Object.(metav1.Object); ok {
-		for k, v := range obj.GetAnnotations() {
-			annotations[k] = v
-		}
-	}
-	
-	return domain.EventMetadata{
-		SchemaVersion: "1.0",
-		ProcessedAt:   time.Now(),
-		ProcessedBy:   "k8s-collector",
-		Annotations:   annotations,
-	}
-}
 
 // determineSeverity determines the event severity
-func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.Severity {
+func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
 	// Handle K8s Event objects specially
 	if event, ok := raw.Object.(*corev1.Event); ok {
 		switch event.Type {
 		case corev1.EventTypeWarning:
-			return domain.SeverityWarn
+			return domain.SeverityWarning
 		case corev1.EventTypeNormal:
-			return domain.SeverityInfo
+			return domain.SeverityLow
 		}
 		
 		// Check specific reasons
 		switch event.Reason {
 		case "Failed", "FailedCreate", "FailedDelete", "FailedScheduling":
-			return domain.SeverityError
+			return domain.SeverityHigh
 		case "Killing", "Evicted", "NodeNotReady":
 			return domain.SeverityCritical
 		case "BackOff", "Unhealthy":
-			return domain.SeverityWarn
+			return domain.SeverityWarning
 		}
 	}
 	
@@ -244,15 +239,15 @@ func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.Severity {
 	switch raw.Type {
 	case core.EventTypeDeleted:
 		if raw.ResourceKind == "Pod" || raw.ResourceKind == "Node" {
-			return domain.SeverityWarn
+			return domain.SeverityWarning
 		}
-		return domain.SeverityInfo
+		return domain.SeverityLow
 		
 	case core.EventTypeError:
-		return domain.SeverityError
+		return domain.SeverityHigh
 		
 	default:
-		return domain.SeverityInfo
+		return domain.SeverityLow
 	}
 }
 

@@ -205,6 +205,63 @@ linters-settings:
       - e error
       - i int
 
+  # TAPIO ARCHITECTURE ENFORCEMENT - Critical for 5-level hierarchy
+  depguard:
+    rules:
+      prevent-domain-violations:
+        files:
+          - "pkg/domain/**/*.go"
+        deny:
+          - pkg: "github.com/yairfalse/tapio/pkg/collectors"
+            desc: "domain layer cannot import collectors (violates hierarchy)"
+          - pkg: "github.com/yairfalse/tapio/pkg/intelligence"
+            desc: "domain layer cannot import intelligence (violates hierarchy)"
+          - pkg: "github.com/yairfalse/tapio/pkg/integrations"
+            desc: "domain layer cannot import integrations (violates hierarchy)"
+          - pkg: "github.com/yairfalse/tapio/pkg/interfaces"
+            desc: "domain layer cannot import interfaces (violates hierarchy)"
+      
+      prevent-collector-cross-imports:
+        files:
+          - "pkg/collectors/**/*.go"
+        deny:
+          - pkg: "github.com/yairfalse/tapio/pkg/collectors/ebpf"
+            desc: "collectors cannot import other collectors (violates isolation)"
+          - pkg: "github.com/yairfalse/tapio/pkg/collectors/k8s"
+            desc: "collectors cannot import other collectors (violates isolation)"
+          - pkg: "github.com/yairfalse/tapio/pkg/collectors/systemd"
+            desc: "collectors cannot import other collectors (violates isolation)"
+          - pkg: "github.com/yairfalse/tapio/pkg/collectors/journald"
+            desc: "collectors cannot import other collectors (violates isolation)"
+          - pkg: "github.com/yairfalse/tapio/pkg/intelligence"
+            desc: "collectors cannot import intelligence layer (violates hierarchy)"
+          - pkg: "github.com/yairfalse/tapio/pkg/integrations"
+            desc: "collectors cannot import integrations layer (violates hierarchy)"
+          - pkg: "github.com/yairfalse/tapio/pkg/interfaces"
+            desc: "collectors cannot import interfaces layer (violates hierarchy)"
+      
+      prevent-intelligence-violations:
+        files:
+          - "pkg/intelligence/**/*.go"
+        deny:
+          - pkg: "github.com/yairfalse/tapio/pkg/integrations"
+            desc: "intelligence cannot import integrations layer (violates hierarchy)"
+          - pkg: "github.com/yairfalse/tapio/pkg/interfaces"
+            desc: "intelligence cannot import interfaces layer (violates hierarchy)"
+
+  # Import aliases for consistency
+  importas:
+    no-unaliased: true
+    alias:
+      - pkg: "context"
+        alias: "ctx"
+      - pkg: "github.com/yairfalse/tapio/pkg/domain"
+        alias: "domain"
+      - pkg: "k8s.io/api/core/v1"
+        alias: "corev1"
+      - pkg: "k8s.io/apimachinery/pkg/apis/meta/v1"
+        alias: "metav1"
+
 # ==========================================
 # Enabled Linters
 # ==========================================
@@ -250,6 +307,10 @@ linters:
     # Advanced
     - gocritic          # Provides diagnostics that check for bugs, performance and style issues
     - nilnil            # Checks that there is no simultaneous return of nil error and an invalid value
+
+    # Architecture enforcement (CRITICAL for Tapio)
+    - depguard          # Enforces 5-level hierarchy and prevents cross-imports
+    - importas          # Enforces consistent import aliases
 
     # Test quality
     - testpackage       # Makes you use a separate _test package
