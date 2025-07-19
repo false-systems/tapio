@@ -18,23 +18,23 @@ import (
 // Implementation provides Linux-specific systemd functionality
 type Implementation struct {
 	config core.Config
-	
+
 	// D-Bus connection
-	conn        *dbus.Conn
-	connMutex   sync.RWMutex
-	
+	conn      *dbus.Conn
+	connMutex sync.RWMutex
+
 	// Event processing
-	eventChan   chan core.RawEvent
-	
+	eventChan chan core.RawEvent
+
 	// State tracking
 	services    map[string]*serviceState
 	servicesMux sync.RWMutex
-	
+
 	// Lifecycle
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	// System info
 	systemdVersion string
 }
@@ -59,17 +59,17 @@ func New() *Implementation {
 // Init initializes the implementation
 func (impl *Implementation) Init(config core.Config) error {
 	impl.config = config
-	
+
 	// Connect to D-Bus
 	conn, err := dbus.NewSystemConnection()
 	if err != nil {
 		return fmt.Errorf("failed to connect to system D-Bus: %w", err)
 	}
-	
+
 	impl.connMutex.Lock()
 	impl.conn = conn
 	impl.connMutex.Unlock()
-	
+
 	// Get systemd version
 	version, err := conn.GetManagerProperty("Version")
 	if err != nil {
@@ -77,32 +77,32 @@ func (impl *Implementation) Init(config core.Config) error {
 		return fmt.Errorf("failed to get systemd version: %w", err)
 	}
 	impl.systemdVersion = strings.Trim(version, "\"")
-	
+
 	return nil
 }
 
 // Start starts the systemd monitoring
 func (impl *Implementation) Start(ctx context.Context) error {
 	impl.ctx, impl.cancel = context.WithCancel(ctx)
-	
+
 	// Subscribe to systemd signals
 	if err := impl.subscribeToSignals(); err != nil {
 		return fmt.Errorf("failed to subscribe to signals: %w", err)
 	}
-	
+
 	// Initial service scan
 	if err := impl.scanServices(); err != nil {
 		return fmt.Errorf("failed to scan services: %w", err)
 	}
-	
+
 	// Start monitoring
 	impl.wg.Add(1)
 	go impl.monitorSystemd()
-	
+
 	// Start periodic scanning
 	impl.wg.Add(1)
 	go impl.periodicScan()
-	
+
 	return nil
 }
 
@@ -111,18 +111,18 @@ func (impl *Implementation) Stop() error {
 	if impl.cancel != nil {
 		impl.cancel()
 	}
-	
+
 	impl.wg.Wait()
-	
+
 	impl.connMutex.Lock()
 	if impl.conn != nil {
 		impl.conn.Close()
 		impl.conn = nil
 	}
 	impl.connMutex.Unlock()
-	
+
 	close(impl.eventChan)
-	
+
 	return nil
 }
 
@@ -154,7 +154,7 @@ func (impl *Implementation) ServicesMonitored() int {
 func (impl *Implementation) ActiveServices() int {
 	impl.servicesMux.RLock()
 	defer impl.servicesMux.RUnlock()
-	
+
 	count := 0
 	for _, svc := range impl.services {
 		if svc.activeState == core.StateActive {
@@ -168,7 +168,7 @@ func (impl *Implementation) ActiveServices() int {
 func (impl *Implementation) FailedServices() int {
 	impl.servicesMux.RLock()
 	defer impl.servicesMux.RUnlock()
-	
+
 	count := 0
 	for _, svc := range impl.services {
 		if svc.activeState == core.StateFailed {
@@ -183,16 +183,16 @@ func (impl *Implementation) subscribeToSignals() error {
 	impl.connMutex.RLock()
 	conn := impl.conn
 	impl.connMutex.RUnlock()
-	
+
 	if conn == nil {
 		return fmt.Errorf("not connected to D-Bus")
 	}
-	
+
 	// Subscribe to unit state changes
 	if err := conn.Subscribe(); err != nil {
 		return fmt.Errorf("failed to subscribe to systemd signals: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -201,26 +201,26 @@ func (impl *Implementation) scanServices() error {
 	impl.connMutex.RLock()
 	conn := impl.conn
 	impl.connMutex.RUnlock()
-	
+
 	if conn == nil {
 		return fmt.Errorf("not connected to D-Bus")
 	}
-	
+
 	// List all units
 	units, err := conn.ListUnits()
 	if err != nil {
 		return fmt.Errorf("failed to list units: %w", err)
 	}
-	
+
 	impl.servicesMux.Lock()
 	defer impl.servicesMux.Unlock()
-	
+
 	for _, unit := range units {
 		// Filter based on configuration
 		if !impl.shouldWatchUnit(unit.Name, unit.Description) {
 			continue
 		}
-		
+
 		// Update service state
 		impl.services[unit.Name] = &serviceState{
 			name:        unit.Name,
@@ -229,35 +229,35 @@ func (impl *Implementation) scanServices() error {
 			lastSeen:    time.Now(),
 		}
 	}
-	
+
 	return nil
 }
 
 // monitorSystemd monitors systemd signals
 func (impl *Implementation) monitorSystemd() {
 	defer impl.wg.Done()
-	
+
 	impl.connMutex.RLock()
 	conn := impl.conn
 	impl.connMutex.RUnlock()
-	
+
 	if conn == nil {
 		return
 	}
-	
+
 	// Get the signal channel
 	sigChan, sigErrs := conn.SubscribeUnits(time.Duration(0))
-	
+
 	for {
 		select {
 		case <-impl.ctx.Done():
 			return
-			
+
 		case changes := <-sigChan:
 			for unit, change := range changes {
 				impl.processUnitChange(unit, change)
 			}
-			
+
 		case err := <-sigErrs:
 			if err != nil {
 				// Log error but continue
@@ -271,23 +271,23 @@ func (impl *Implementation) processUnitChange(unitName string, change *dbus.Unit
 	if change == nil {
 		return
 	}
-	
+
 	// Check if we should watch this unit
 	if !impl.shouldWatchUnit(unitName, change.Description) {
 		return
 	}
-	
+
 	// Get previous state
 	impl.servicesMux.RLock()
 	oldSvc, exists := impl.services[unitName]
 	impl.servicesMux.RUnlock()
-	
+
 	var oldState, oldSubState string
 	if exists {
 		oldState = oldSvc.activeState
 		oldSubState = oldSvc.subState
 	}
-	
+
 	// Create event
 	event := core.RawEvent{
 		Type:      impl.determineEventType(oldState, change.ActiveState),
@@ -304,12 +304,12 @@ func (impl *Implementation) processUnitChange(unitName string, change *dbus.Unit
 			"description":  change.Description,
 		},
 	}
-	
+
 	// Get additional properties if it's a service
 	if strings.HasSuffix(unitName, ".service") {
 		impl.enrichServiceEvent(&event)
 	}
-	
+
 	// Update tracked state
 	impl.servicesMux.Lock()
 	impl.services[unitName] = &serviceState{
@@ -319,7 +319,7 @@ func (impl *Implementation) processUnitChange(unitName string, change *dbus.Unit
 		lastSeen:    time.Now(),
 	}
 	impl.servicesMux.Unlock()
-	
+
 	// Send event
 	select {
 	case impl.eventChan <- event:
@@ -335,30 +335,30 @@ func (impl *Implementation) enrichServiceEvent(event *core.RawEvent) {
 	impl.connMutex.RLock()
 	conn := impl.conn
 	impl.connMutex.RUnlock()
-	
+
 	if conn == nil {
 		return
 	}
-	
+
 	// Get service properties
 	props, err := conn.GetUnitProperties(event.UnitName)
 	if err != nil {
 		return
 	}
-	
+
 	// Extract relevant properties
 	if mainPID, ok := props["MainPID"].(uint32); ok {
 		event.MainPID = int32(mainPID)
 	}
-	
+
 	if result, ok := props["Result"].(string); ok {
 		event.Result = result
 	}
-	
+
 	if exitCode, ok := props["ExecMainExitCode"].(int32); ok {
 		event.ExitCode = exitCode
 	}
-	
+
 	if exitStatus, ok := props["ExecMainStatus"].(int32); ok {
 		event.ExitStatus = exitStatus
 	}
@@ -368,7 +368,7 @@ func (impl *Implementation) enrichServiceEvent(event *core.RawEvent) {
 func (impl *Implementation) shouldWatchUnit(unitName, description string) bool {
 	// Extract unit type
 	unitType := impl.extractUnitType(unitName)
-	
+
 	// Check unit type filter
 	typeAllowed := false
 	for _, allowedType := range impl.config.UnitTypes {
@@ -380,7 +380,7 @@ func (impl *Implementation) shouldWatchUnit(unitName, description string) bool {
 	if !typeAllowed {
 		return false
 	}
-	
+
 	// Check service filter
 	if len(impl.config.ServiceFilter) > 0 {
 		matched := false
@@ -394,14 +394,14 @@ func (impl *Implementation) shouldWatchUnit(unitName, description string) bool {
 			return false
 		}
 	}
-	
+
 	// Check exclusion list
 	for _, exclude := range impl.config.ServiceExclude {
 		if strings.Contains(unitName, exclude) {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -434,15 +434,15 @@ func (impl *Implementation) determineEventType(oldState, newState string) core.E
 // periodicScan performs periodic service scanning
 func (impl *Implementation) periodicScan() {
 	defer impl.wg.Done()
-	
+
 	ticker := time.NewTicker(impl.config.PollInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-impl.ctx.Done():
 			return
-			
+
 		case <-ticker.C:
 			if err := impl.scanServices(); err != nil {
 				// Log error but continue

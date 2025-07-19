@@ -35,7 +35,7 @@ func (d *DatabaseChecker) Check(ctx context.Context) Check {
 			Message: "Database connection is nil",
 		}
 	}
-	
+
 	// Try to ping the database
 	err := d.db.PingContext(ctx)
 	if err != nil {
@@ -44,17 +44,17 @@ func (d *DatabaseChecker) Check(ctx context.Context) Check {
 			Message: fmt.Sprintf("Database ping failed: %v", err),
 		}
 	}
-	
+
 	// Get connection stats
 	stats := d.db.Stats()
-	
+
 	return Check{
 		Status:  StatusHealthy,
 		Message: "Database is accessible",
 		Metadata: map[string]interface{}{
 			"open_connections": stats.OpenConnections,
-			"in_use":          stats.InUse,
-			"idle":            stats.Idle,
+			"in_use":           stats.InUse,
+			"idle":             stats.Idle,
 		},
 	}
 }
@@ -91,7 +91,7 @@ func (h *HTTPChecker) Check(ctx context.Context) Check {
 			Message: fmt.Sprintf("Failed to create request: %v", err),
 		}
 	}
-	
+
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return Check{
@@ -100,14 +100,14 @@ func (h *HTTPChecker) Check(ctx context.Context) Check {
 		}
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return Check{
 			Status:  StatusHealthy,
 			Message: fmt.Sprintf("HTTP endpoint is accessible (status: %d)", resp.StatusCode),
 		}
 	}
-	
+
 	return Check{
 		Status:  StatusDegraded,
 		Message: fmt.Sprintf("HTTP endpoint returned non-2xx status: %d", resp.StatusCode),
@@ -137,7 +137,7 @@ func (m *MemoryChecker) Name() string {
 func (m *MemoryChecker) Check(ctx context.Context) Check {
 	// This is a simplified example - in production you'd use runtime.MemStats
 	// or system-level memory stats
-	
+
 	// For now, return healthy
 	return Check{
 		Status:  StatusHealthy,

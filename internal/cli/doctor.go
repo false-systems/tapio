@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
+	"github.com/yairfalse/tapio/pkg/config"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )

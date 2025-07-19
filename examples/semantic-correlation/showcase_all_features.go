@@ -26,7 +26,7 @@ func main() {
 	// Scenario: Memory pressure leading to OOM
 	fmt.Println("📊 SCENARIO: Memory exhaustion cascade")
 	fmt.Println("=====================================")
-	
+
 	// Event 1: Initial memory pressure
 	event1 := &domain.Event{
 		ID:        "mem-001",
@@ -45,7 +45,7 @@ func main() {
 		Payload: domain.MemoryEventPayload{
 			Usage:     85.5,
 			Total:     8589934592, // 8GB
-			Available: 1288490188,  // ~1.2GB
+			Available: 1288490188, // ~1.2GB
 			Trend:     "increasing",
 		},
 		Confidence: 0.95,
@@ -100,7 +100,7 @@ func main() {
 
 	// Process events through the engine
 	fmt.Println("\n⚡ Processing events...")
-	
+
 	finding1, _ := engine.ProcessEvent(ctx, event1)
 	if finding1 != nil {
 		printFinding(finding1, 1)
@@ -130,14 +130,14 @@ func main() {
 			fmt.Printf("🎯 Intent: %s\n", group.Intent)
 			fmt.Printf("🔗 Events correlated: %d\n", len(group.CausalChain))
 			fmt.Printf("📈 Confidence: %.0f%%\n", group.ConfidenceScore*100)
-			
+
 			if group.ImpactAssessment != nil {
 				fmt.Printf("\n💼 BUSINESS IMPACT:\n")
 				fmt.Printf("  • Business Impact: %.0f%%\n", group.ImpactAssessment.BusinessImpact*100)
 				fmt.Printf("  • Cascade Risk: %.0f%%\n", group.ImpactAssessment.CascadeRisk*100)
 				fmt.Printf("  • Technical Severity: %s\n", group.ImpactAssessment.TechnicalSeverity)
 			}
-			
+
 			if group.PredictedOutcome != nil {
 				fmt.Printf("\n🔮 PREDICTION:\n")
 				fmt.Printf("  • Scenario: %s\n", group.PredictedOutcome.Scenario)
@@ -153,7 +153,7 @@ func main() {
 	fmt.Println("tapio_memory_exhaustion_eta_minutes{pod=\"payment-api-xyz123\"} 3.2")
 	fmt.Println("tapio_cascade_failure_risk{namespace=\"critical-services\"} 0.85")
 	fmt.Println("tapio_service_degradation_probability{service=\"checkout-api\"} 0.92")
-	
+
 	fmt.Println("\n✨ REVOLUTIONARY CAPABILITIES DEMONSTRATED:")
 	fmt.Println("==========================================")
 	fmt.Println("✅ Human-readable explanations of technical events")
@@ -161,7 +161,7 @@ func main() {
 	fmt.Println("✅ Semantic trace grouping by meaning, not just time")
 	fmt.Println("✅ Business impact assessment in every trace")
 	fmt.Println("✅ Actionable remediation steps provided automatically")
-	
+
 	fmt.Println("\n🎯 Tapio: The first observability platform that truly understands your system!")
 }
 
@@ -171,13 +171,13 @@ func printFinding(finding *domain.Finding, eventNum int) {
 	fmt.Printf("Severity: %s\n", finding.Severity)
 	fmt.Printf("Title: %s\n", finding.Title)
 	fmt.Printf("Description: %s\n", finding.Description)
-	
+
 	// Show human-readable output
 	formatter := collector.NewHumanReadableFormatter(
 		collector.ExplanationStyleSimple,
 		collector.AudienceDeveloper,
 	)
-	
+
 	insight := &domain.Insight{
 		ID:          finding.ID,
 		Type:        finding.Type,
@@ -187,13 +187,13 @@ func printFinding(finding *domain.Finding, eventNum int) {
 		Confidence:  0.95,
 		Actions:     finding.Actions,
 	}
-	
+
 	humanOutput := formatter.FormatInsight(insight)
 	fmt.Println("\n📝 HUMAN-READABLE EXPLANATION:")
 	fmt.Printf("What happened: %s\n", humanOutput.WhatHappened)
 	fmt.Printf("Why it matters: %s\n", humanOutput.Impact)
 	fmt.Printf("What to do: %s\n", humanOutput.WhatToDo)
-	
+
 	if len(humanOutput.Commands) > 0 {
 		fmt.Println("Commands to run:")
 		for _, cmd := range humanOutput.Commands {

@@ -20,21 +20,21 @@ func init() {
 
 func runStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	
+
 	// Create client
 	c := client.NewClient(serverURL)
-	
+
 	// Get status
 	status, err := c.Status(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get status: %w", err)
 	}
-	
+
 	// Display status
 	fmt.Println("Server Status:")
 	for k, v := range status {
 		fmt.Printf("  %s: %v\n", k, v)
 	}
-	
+
 	return nil
 }

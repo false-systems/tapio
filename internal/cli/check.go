@@ -349,12 +349,12 @@ func validateResourceFormat(resource string) error {
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	
+
 	// Handle server mode
 	if serverMode {
 		return runServerCheck(ctx, args)
 	}
-	
+
 	// Local mode (existing implementation)
 	return runLocalCheck(ctx, args)
 }
@@ -362,28 +362,28 @@ func runCheck(cmd *cobra.Command, args []string) error {
 func runServerCheck(ctx context.Context, args []string) error {
 	// Create REST client
 	restClient := client.NewRESTClient(serverURL)
-	
+
 	// Test connection
 	if err := restClient.HealthCheck(ctx); err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
-	
+
 	// Build check request
 	request := client.RESTCheckRequest{
 		Namespace: checkNamespace,
 	}
-	
+
 	// If resource specified, add it
 	if len(args) > 0 {
 		request.Resource = args[0]
 	}
-	
+
 	// Perform check
 	response, err := restClient.Check(ctx, request)
 	if err != nil {
 		return fmt.Errorf("check failed: %w", err)
 	}
-	
+
 	// Format output
 	formatter := output.NewFormatter(outputFormat)
 	if outputFormat == "human" {
@@ -396,14 +396,14 @@ func runServerCheck(ctx context.Context, args []string) error {
 		}
 		fmt.Println()
 	}
-	
+
 	// Display insights
 	if len(response.Insights) > 0 {
 		formatter.PrintFindings(response.Insights)
 	} else {
 		fmt.Println("✓ No issues found")
 	}
-	
+
 	return nil
 }
 

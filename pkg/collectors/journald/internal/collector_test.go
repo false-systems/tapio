@@ -39,7 +39,7 @@ func TestNewCollector(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			collector, err := NewCollector(tt.config)
-			
+
 			// On non-Linux platforms, platform initialization will fail
 			if runtime.GOOS != "linux" {
 				if err == nil {
@@ -48,12 +48,12 @@ func TestNewCollector(t *testing.T) {
 				t.Skipf("Skipping test on non-Linux platform (%s)", runtime.GOOS)
 				return
 			}
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewCollector() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr && collector == nil {
 				t.Error("NewCollector() returned nil collector")
 			}
@@ -88,11 +88,11 @@ func TestCollectorLifecycle(t *testing.T) {
 
 	// Test double start protection
 	ctx := context.Background()
-	
+
 	// First start should work (or fail gracefully on non-Linux)
 	_ = collector.Start(ctx)
 	err2 := collector.Start(ctx)
-	
+
 	if err2 == nil {
 		t.Error("Expected second Start() call to fail")
 	}
@@ -156,16 +156,16 @@ func TestCollectorStatistics(t *testing.T) {
 	}
 
 	stats := collector.Statistics()
-	
+
 	// Verify initial statistics
 	if stats.StartTime.IsZero() {
 		t.Error("Expected StartTime to be set")
 	}
-	
+
 	if stats.Custom == nil {
 		t.Error("Expected Custom metrics to be initialized")
 	}
-	
+
 	// Verify that statistics contain expected fields
 	expectedFields := []string{
 		"uptime_seconds",
@@ -175,7 +175,7 @@ func TestCollectorStatistics(t *testing.T) {
 		"boot_id",
 		"machine_id",
 	}
-	
+
 	for _, field := range expectedFields {
 		if _, exists := stats.Custom[field]; !exists {
 			t.Errorf("Expected custom metric %s to exist", field)

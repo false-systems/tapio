@@ -16,29 +16,29 @@ import (
 // CorrelationAdapter provides an interface to the correlation package
 type CorrelationAdapter struct {
 	// Core correlation engine
-	engine           *core.CoreEngine
-	patternRegistry  *patterns.PatternRegistry
-	
+	engine          *core.CoreEngine
+	patternRegistry *patterns.PatternRegistry
+
 	// Configuration
-	enabled          bool
-	logger           domain.Logger
-	config           *CorrelationAdapterConfig
-	
+	enabled bool
+	logger  domain.Logger
+	config  *CorrelationAdapterConfig
+
 	// Statistics
-	stats            CorrelationStats
-	mutex            sync.RWMutex
+	stats CorrelationStats
+	mutex sync.RWMutex
 }
 
 // NewCorrelationAdapter creates a new correlation adapter
 func NewCorrelationAdapter(logger domain.Logger) *CorrelationAdapter {
 	// Create correlation engine configuration
 	config := &CorrelationAdapterConfig{
-		WindowSize:           5 * time.Minute,
-		ProcessingInterval:   30 * time.Second,
-		MaxConcurrentRules:   10,
-		EnablePatterns:       true,
-		EnableMLPrediction:   false, // Disabled by default for stability
-		ConfidenceThreshold:  0.7,
+		WindowSize:          5 * time.Minute,
+		ProcessingInterval:  30 * time.Second,
+		MaxConcurrentRules:  10,
+		EnablePatterns:      true,
+		EnableMLPrediction:  false, // Disabled by default for stability
+		ConfidenceThreshold: 0.7,
 	}
 
 	// Create core engine configuration
@@ -53,10 +53,10 @@ func NewCorrelationAdapter(logger domain.Logger) *CorrelationAdapter {
 	// Create production-ready components
 	eventStore := NewInMemoryEventStore(10000, time.Hour*24) // 10k events, 24h retention
 	metricsCollector := NewPrometheusMetricsCollector()
-	
+
 	// Create logger adapter for interface compatibility
 	corrLogger := NewLoggerAdapter(logger)
-	
+
 	// Create engine with real implementations
 	engine := core.NewCoreEngine(
 		coreConfig,
@@ -253,7 +253,7 @@ func (a *CorrelationAdapter) CorrelateEvents(ctx context.Context, events []*doma
 			for j, event := range result.Events {
 				eventIDs[j] = event.ID
 			}
-			
+
 			correlations[i] = &Correlation{
 				ID:          result.ID,
 				Type:        result.Type,
@@ -646,12 +646,12 @@ func (m *MockCorrelationAdapter) AddPatternMatch(match *PatternMatch) {
 
 // CorrelationAdapterConfig configures the correlation adapter
 type CorrelationAdapterConfig struct {
-	WindowSize           time.Duration
-	ProcessingInterval   time.Duration
-	MaxConcurrentRules   int
-	EnablePatterns       bool
-	EnableMLPrediction   bool
-	ConfidenceThreshold  float64
+	WindowSize          time.Duration
+	ProcessingInterval  time.Duration
+	MaxConcurrentRules  int
+	EnablePatterns      bool
+	EnableMLPrediction  bool
+	ConfidenceThreshold float64
 }
 
 // CorrelationStats tracks correlation adapter statistics
@@ -675,20 +675,20 @@ func (a *CorrelationAdapter) convertToCorrEvent(event *domain.Event) corrDomain.
 		Source:    event.Source,
 		Severity:  corrDomain.Severity(event.Severity),
 		// Category can be derived from Type
-		Category:  "system",
+		Category: "system",
 		// Entity needs to be extracted from Data if available
 		Entity: corrDomain.Entity{
 			Type: "system",
 			Name: event.Source,
 		},
 	}
-	
+
 	// Copy data as attributes
 	if event.Data != nil {
 		corrEvent.Data = event.Data
 		corrEvent.Attributes = event.Data
 	}
-	
+
 	// Add message to data if available
 	if event.Message != "" {
 		if corrEvent.Data == nil {
@@ -696,7 +696,7 @@ func (a *CorrelationAdapter) convertToCorrEvent(event *domain.Event) corrDomain.
 		}
 		corrEvent.Data["message"] = event.Message
 	}
-	
+
 	return corrEvent
 }
 
@@ -711,11 +711,11 @@ func (a *CorrelationAdapter) convertToPatternEvents(events []corrDomain.Event) [
 			Source:    event.Source,
 			Severity:  types.Severity(event.Severity),
 			// Extract message from data if available
-			Message:   extractMessage(event),
-			Data:      event.Data,
+			Message:    extractMessage(event),
+			Data:       event.Data,
 			Attributes: event.Attributes,
-			Labels:    event.Labels,
-			Entity:    types.Entity{
+			Labels:     event.Labels,
+			Entity: types.Entity{
 				Type:      event.Entity.Type,
 				Name:      event.Entity.Name,
 				Namespace: event.Entity.Namespace,
@@ -728,12 +728,12 @@ func (a *CorrelationAdapter) convertToPatternEvents(events []corrDomain.Event) [
 // convertToInsights converts pattern results to insights
 func (a *CorrelationAdapter) convertToInsights(patternResults []types.PatternResult, resource, namespace string) []*Insight {
 	var insights []*Insight
-	
+
 	for _, result := range patternResults {
 		if !result.Detected {
 			continue
 		}
-		
+
 		insight := &Insight{
 			ID:          a.generateID(),
 			Title:       result.PatternName,
@@ -743,13 +743,13 @@ func (a *CorrelationAdapter) convertToInsights(patternResults []types.PatternRes
 			Resource:    resource,
 			Namespace:   namespace,
 			Timestamp:   time.Now(),
-			Metadata:    map[string]interface{}{
+			Metadata: map[string]interface{}{
 				"pattern_id": result.PatternID,
 				"confidence": result.Confidence,
 				"severity":   result.Severity,
 			},
 		}
-		
+
 		// Add prediction if available
 		if result.Prediction != "" {
 			insight.Prediction = &Prediction{
@@ -759,20 +759,20 @@ func (a *CorrelationAdapter) convertToInsights(patternResults []types.PatternRes
 				Confidence:  result.Confidence, // Use pattern confidence
 			}
 		}
-		
+
 		// Generate actionable items
 		insight.ActionableItems = a.generateActionableItems(result)
-		
+
 		insights = append(insights, insight)
 	}
-	
+
 	return insights
 }
 
 // generateActionableItems generates actionable items from pattern results
 func (a *CorrelationAdapter) generateActionableItems(result types.PatternResult) []*ActionableItem {
 	var items []*ActionableItem
-	
+
 	// Add pattern-specific recommendations based on pattern name
 	switch result.Category {
 	case "memory":
@@ -797,14 +797,14 @@ func (a *CorrelationAdapter) generateActionableItems(result types.PatternResult)
 			Risk:        "Low",
 		})
 	}
-	
+
 	return items
 }
 
 // generateBasicPredictions generates basic predictions from historical events
 func (a *CorrelationAdapter) generateBasicPredictions(events []corrDomain.Event, resource, namespace string) []*Prediction {
 	var predictions []*Prediction
-	
+
 	// Simple trend analysis for demonstration
 	if len(events) >= 10 {
 		// Look for increasing error patterns
@@ -814,7 +814,7 @@ func (a *CorrelationAdapter) generateBasicPredictions(events []corrDomain.Event,
 				errorCount++
 			}
 		}
-		
+
 		if errorCount >= 3 {
 			predictions = append(predictions, &Prediction{
 				Type:        "service_degradation",
@@ -824,14 +824,14 @@ func (a *CorrelationAdapter) generateBasicPredictions(events []corrDomain.Event,
 			})
 		}
 	}
-	
+
 	return predictions
 }
 
 // generateResourceRecommendations generates general recommendations for a resource
 func (a *CorrelationAdapter) generateResourceRecommendations(resource, namespace string) []*ActionableItem {
 	var items []*ActionableItem
-	
+
 	// Add general monitoring recommendations
 	items = append(items, &ActionableItem{
 		Description: "Check resource logs",
@@ -839,14 +839,14 @@ func (a *CorrelationAdapter) generateResourceRecommendations(resource, namespace
 		Impact:      "Provides diagnostic information",
 		Risk:        "Low",
 	})
-	
+
 	items = append(items, &ActionableItem{
 		Description: "Check resource status",
 		Command:     fmt.Sprintf("kubectl describe -n %s %s", namespace, resource),
 		Impact:      "Shows resource details and events",
 		Risk:        "Low",
 	})
-	
+
 	return items
 }
 
@@ -868,7 +868,7 @@ func (a *CorrelationAdapter) getRecentEvents(ctx context.Context, window time.Du
 func (a *CorrelationAdapter) updateStats(success bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	
+
 	a.stats.EventsProcessed++
 	a.stats.LastProcessedAt = time.Now()
 }
@@ -877,7 +877,7 @@ func (a *CorrelationAdapter) updateStats(success bool) {
 func (a *CorrelationAdapter) updateStatsWithResults(correlationCount int) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	
+
 	if correlationCount > 0 {
 		a.stats.InsightsGenerated++
 	}
@@ -940,17 +940,17 @@ func extractMessage(event corrDomain.Event) string {
 // extractMetadata converts event data/attributes to metadata
 func extractMetadata(event corrDomain.Event) map[string]interface{} {
 	metadata := make(map[string]interface{})
-	
+
 	// Copy attributes
 	for k, v := range event.Attributes {
 		metadata[k] = v
 	}
-	
+
 	// Add labels if present
 	if len(event.Labels) > 0 {
 		metadata["labels"] = event.Labels
 	}
-	
+
 	return metadata
 }
 

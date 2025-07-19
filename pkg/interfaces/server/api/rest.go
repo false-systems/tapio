@@ -8,23 +8,23 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/yairfalse/tapio/pkg/server/adapters/correlation"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/server/adapters/correlation"
 	serverDomain "github.com/yairfalse/tapio/pkg/server/domain"
 )
 
 // RESTServer provides REST API endpoints for tapio-server
 type RESTServer struct {
 	correlationAdapter *correlation.CorrelationAdapter
-	router            *mux.Router
-	server            *http.Server
+	router             *mux.Router
+	server             *http.Server
 }
 
 // NewRESTServer creates a new REST API server
 func NewRESTServer(port int, correlationAdapter *correlation.CorrelationAdapter) *RESTServer {
 	rs := &RESTServer{
 		correlationAdapter: correlationAdapter,
-		router:            mux.NewRouter(),
+		router:             mux.NewRouter(),
 	}
 
 	// Setup routes
@@ -93,7 +93,7 @@ func (rs *RESTServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status": "healthy",
 		"time":   time.Now().Unix(),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -176,11 +176,11 @@ func (rs *RESTServer) handleResourceCheck(w http.ResponseWriter, r *http.Request
 // handleGetFindings handles GET requests for findings
 func (rs *RESTServer) handleGetFindings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// Parse query parameters
 	namespace := r.URL.Query().Get("namespace")
 	resource := r.URL.Query().Get("resource")
-	
+
 	// Get insights as findings from correlation adapter
 	insights, err := rs.correlationAdapter.GetInsights(ctx, resource, namespace)
 	if err != nil {
@@ -275,7 +275,7 @@ func (rs *RESTServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		stats = &correlation.Stats{} // Empty stats on error
 	}
-	
+
 	response := map[string]interface{}{
 		"status":      "running",
 		"correlation": rs.correlationAdapter.IsEnabled(),

@@ -61,14 +61,14 @@ func main() {
 	// Send the analysis as OTEL traces
 	ctx := context.Background()
 	fmt.Println("Sending test traces to OTEL collector...")
-	
+
 	if err := otelOutput.OutputHealthCheck(ctx, analysis); err != nil {
 		log.Fatalf("Failed to output health check: %v", err)
 	}
 
 	fmt.Println("✓ Traces sent successfully!")
 	fmt.Println()
-	
+
 	// Give time for traces to be processed
 	fmt.Println("Waiting 2 seconds for traces to be processed...")
 	time.Sleep(2 * time.Second)
@@ -112,11 +112,11 @@ func createTestAnalysis() *health.Analysis {
 					Namespace: "default",
 				},
 				HumanExplanation: &health.HumanExplanation{
-					WhatHappened:   "Your API service is running out of memory and being killed",
-					WhyItHappened:  "Memory limit (256Mi) is too low for current traffic load",
-					WhatToDo:       "Increase memory limit to at least 512Mi",
-					HowToPrevent:   "Set up memory alerts at 80% usage",
-					IsUrgent:       true,
+					WhatHappened:  "Your API service is running out of memory and being killed",
+					WhyItHappened: "Memory limit (256Mi) is too low for current traffic load",
+					WhatToDo:      "Increase memory limit to at least 512Mi",
+					HowToPrevent:  "Set up memory alerts at 80% usage",
+					IsUrgent:      true,
 				},
 				BusinessImpact: &health.BusinessImpact{
 					Score:            0.9,
@@ -158,11 +158,11 @@ func createTestAnalysis() *health.Analysis {
 					Namespace: "default",
 				},
 				HumanExplanation: &health.HumanExplanation{
-					WhatHappened:   "Worker service is being CPU throttled",
-					WhyItHappened:  "CPU limit is causing performance degradation",
-					WhatToDo:       "Consider removing CPU limits or increasing to 2 cores",
-					HowToPrevent:   "Monitor CPU throttling metrics",
-					IsUrgent:       false,
+					WhatHappened:  "Worker service is being CPU throttled",
+					WhyItHappened: "CPU limit is causing performance degradation",
+					WhatToDo:      "Consider removing CPU limits or increasing to 2 cores",
+					HowToPrevent:  "Monitor CPU throttling metrics",
+					IsUrgent:      false,
 				},
 			},
 		},

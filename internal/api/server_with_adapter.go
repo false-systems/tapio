@@ -15,10 +15,10 @@ import (
 
 // ServerWithAdapter provides REST API using the correlation adapter
 type ServerWithAdapter struct {
-	router              *gin.Engine
-	correlationAdapter  *correlationAdapter.CorrelationAdapter
-	logger              *zap.Logger
-	config              *Config
+	router             *gin.Engine
+	correlationAdapter *correlationAdapter.CorrelationAdapter
+	logger             *zap.Logger
+	config             *Config
 }
 
 // NewServerWithAdapter creates a new API server with correlation adapter
@@ -35,8 +35,8 @@ func NewServerWithAdapter(adapter *correlationAdapter.CorrelationAdapter, config
 	s := &ServerWithAdapter{
 		router:             gin.New(),
 		correlationAdapter: adapter,
-		logger:            zap.NewNop(), // Should inject real logger
-		config:            config,
+		logger:             zap.NewNop(), // Should inject real logger
+		config:             config,
 	}
 
 	s.setupMiddleware()
@@ -135,17 +135,17 @@ func (s *ServerWithAdapter) getResourceInsights(c *gin.Context) {
 	var responseInsights []gin.H
 	for _, insight := range insights {
 		responseInsights = append(responseInsights, gin.H{
-			"id":          insight.ID,
-			"title":       insight.Title,
-			"description": insight.Description,
-			"severity":    insight.Severity,
-			"category":    insight.Category,
-			"resource":    insight.Resource,
-			"namespace":   insight.Namespace,
-			"timestamp":   insight.Timestamp,
-			"prediction":  insight.Prediction,
+			"id":               insight.ID,
+			"title":            insight.Title,
+			"description":      insight.Description,
+			"severity":         insight.Severity,
+			"category":         insight.Category,
+			"resource":         insight.Resource,
+			"namespace":        insight.Namespace,
+			"timestamp":        insight.Timestamp,
+			"prediction":       insight.Prediction,
 			"actionable_items": insight.ActionableItems,
-			"metadata":    insight.Metadata,
+			"metadata":         insight.Metadata,
 		})
 	}
 
@@ -208,11 +208,11 @@ func (s *ServerWithAdapter) getResourceFixes(c *gin.Context) {
 	var fixes []gin.H
 	for i, item := range actionableItems {
 		fixes = append(fixes, gin.H{
-			"id":          fmt.Sprintf("fix-%d", i),
-			"description": item.Description,
-			"command":     item.Command,
-			"impact":      item.Impact,
-			"risk":        item.Risk,
+			"id":           fmt.Sprintf("fix-%d", i),
+			"description":  item.Description,
+			"command":      item.Command,
+			"impact":       item.Impact,
+			"risk":         item.Risk,
 			"auto_fixable": item.Risk == "low",
 		})
 	}
@@ -334,13 +334,13 @@ func (s *ServerWithAdapter) getStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"enabled":                stats.Enabled,
-		"events_processed":       stats.EventsProcessed,
-		"insights_generated":     stats.InsightsGenerated,
-		"predictions_generated":  stats.PredictionsGenerated,
-		"correlations_found":     stats.CorrelationsFound,
-		"last_processed_at":      stats.LastProcessedAt,
-		"timestamp":              time.Now(),
+		"enabled":               stats.Enabled,
+		"events_processed":      stats.EventsProcessed,
+		"insights_generated":    stats.InsightsGenerated,
+		"predictions_generated": stats.PredictionsGenerated,
+		"correlations_found":    stats.CorrelationsFound,
+		"last_processed_at":     stats.LastProcessedAt,
+		"timestamp":             time.Now(),
 	})
 }
 

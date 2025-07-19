@@ -17,19 +17,19 @@ type PrometheusMetricsCollector struct {
 	insightsGenerated atomic.Int64
 	rulesExecuted     atomic.Int64
 	rulesFailed       atomic.Int64
-	
+
 	// Histograms (using exponential buckets)
 	ruleExecutionTimes *TimeHistogram
 	correlationLatency *TimeHistogram
-	
+
 	// Gauges
 	activeRules        atomic.Int32
 	activeCorrelations atomic.Int32
 	queueDepth         atomic.Int32
-	
+
 	// Rate calculation
 	rateCalculator *RateCalculator
-	
+
 	// Labels for metrics
 	labels map[string]string
 	mu     sync.RWMutex
@@ -37,17 +37,17 @@ type PrometheusMetricsCollector struct {
 
 // TimeHistogram provides efficient histogram for timing metrics
 type TimeHistogram struct {
-	buckets   []float64 // Bucket boundaries in milliseconds
-	counts    []atomic.Int64
-	sum       atomic.Int64
-	count     atomic.Int64
-	mu        sync.RWMutex
+	buckets []float64 // Bucket boundaries in milliseconds
+	counts  []atomic.Int64
+	sum     atomic.Int64
+	count   atomic.Int64
+	mu      sync.RWMutex
 }
 
 // RateCalculator calculates rates over time windows
 type RateCalculator struct {
-	windows    map[string]*TimeWindow
-	mu         sync.RWMutex
+	windows map[string]*TimeWindow
+	mu      sync.RWMutex
 }
 
 // TimeWindow tracks events in a time window
@@ -77,11 +77,11 @@ func (m *PrometheusMetricsCollector) RecordEngineStats(stats corrDomain.Stats) {
 	m.eventsProcessed.Store(int64(stats.EventsProcessed))
 	m.correlationsFound.Store(int64(stats.CorrelationsFound))
 	// InsightsGenerated is tracked separately, not in Stats
-	
+
 	// Update gauges
 	m.activeRules.Store(int32(stats.RulesActive))
 	m.activeCorrelations.Store(int32(stats.CorrelationsActive))
-	
+
 	// Record processing rate
 	m.rateCalculator.RecordEvent("processing_rate", time.Now())
 }
@@ -90,18 +90,18 @@ func (m *PrometheusMetricsCollector) RecordEngineStats(stats corrDomain.Stats) {
 func (m *PrometheusMetricsCollector) RecordRuleExecution(ruleID string, duration time.Duration, success bool) {
 	// Record execution time
 	m.ruleExecutionTimes.Observe(float64(duration.Milliseconds()))
-	
+
 	// Update counters
 	m.rulesExecuted.Add(1)
 	if !success {
 		m.rulesFailed.Add(1)
 	}
-	
+
 	// Record rule-specific metrics
 	m.mu.Lock()
 	m.labels[ruleID] = formatLabel(ruleID, success)
 	m.mu.Unlock()
-	
+
 	// Track execution rate
 	m.rateCalculator.RecordEvent("rule_execution", time.Now())
 }
@@ -110,7 +110,7 @@ func (m *PrometheusMetricsCollector) RecordRuleExecution(ruleID string, duration
 func (m *PrometheusMetricsCollector) RecordCorrelation(correlationID string, latency time.Duration, eventCount int) {
 	m.correlationLatency.Observe(float64(latency.Milliseconds()))
 	m.correlationsFound.Add(1)
-	
+
 	// Track correlation patterns
 	m.rateCalculator.RecordEvent("correlation", time.Now())
 }
@@ -118,7 +118,7 @@ func (m *PrometheusMetricsCollector) RecordCorrelation(correlationID string, lat
 // RecordInsight records insight generation metrics
 func (m *PrometheusMetricsCollector) RecordInsight(insightType string, confidence float64) {
 	m.insightsGenerated.Add(1)
-	
+
 	// Track insight generation rate
 	m.rateCalculator.RecordEvent("insight_"+insightType, time.Now())
 }
@@ -126,12 +126,12 @@ func (m *PrometheusMetricsCollector) RecordInsight(insightType string, confidenc
 // RecordCorrelationFound implements MetricsCollector interface
 func (m *PrometheusMetricsCollector) RecordCorrelationFound(correlationType string, confidence float64) {
 	m.correlationsFound.Add(1)
-	
+
 	// Track correlation type
 	m.mu.Lock()
 	m.labels["correlation_"+correlationType] = formatLabel(correlationType, true)
 	m.mu.Unlock()
-	
+
 	// Track correlation rate by type
 	m.rateCalculator.RecordEvent("correlation_"+correlationType, time.Now())
 }
@@ -139,13 +139,13 @@ func (m *PrometheusMetricsCollector) RecordCorrelationFound(correlationType stri
 // RecordEventProcessed implements MetricsCollector interface
 func (m *PrometheusMetricsCollector) RecordEventProcessed(eventType string, source string, processingTime time.Duration) {
 	m.eventsProcessed.Add(1)
-	
+
 	// Track processing time
 	m.ruleExecutionTimes.Observe(float64(processingTime.Milliseconds()))
-	
+
 	// Track event processing rate
 	m.rateCalculator.RecordEvent("event_processed", time.Now())
-	
+
 	// Track by event type
 	m.mu.Lock()
 	m.labels["event_"+eventType] = formatLabel(eventType, true)
@@ -155,33 +155,33 @@ func (m *PrometheusMetricsCollector) RecordEventProcessed(eventType string, sour
 // GetMetrics returns Prometheus-compatible metrics
 func (m *PrometheusMetricsCollector) GetMetrics() map[string]interface{} {
 	metrics := make(map[string]interface{})
-	
+
 	// Counters
 	metrics["events_processed_total"] = m.eventsProcessed.Load()
 	metrics["correlations_found_total"] = m.correlationsFound.Load()
 	metrics["insights_generated_total"] = m.insightsGenerated.Load()
 	metrics["rules_executed_total"] = m.rulesExecuted.Load()
 	metrics["rules_failed_total"] = m.rulesFailed.Load()
-	
+
 	// Gauges
 	metrics["active_rules"] = m.activeRules.Load()
 	metrics["active_correlations"] = m.activeCorrelations.Load()
 	metrics["queue_depth"] = m.queueDepth.Load()
-	
+
 	// Histograms
 	metrics["rule_execution_time_ms"] = m.ruleExecutionTimes.GetQuantiles()
 	metrics["correlation_latency_ms"] = m.correlationLatency.GetQuantiles()
-	
+
 	// Rates
 	metrics["events_per_second"] = m.rateCalculator.GetRate("processing_rate", time.Second)
 	metrics["correlations_per_minute"] = m.rateCalculator.GetRate("correlation", time.Minute)
 	metrics["rules_per_second"] = m.rateCalculator.GetRate("rule_execution", time.Second)
-	
+
 	// Labels
 	m.mu.RLock()
 	metrics["rule_labels"] = m.copyLabels()
 	m.mu.RUnlock()
-	
+
 	return metrics
 }
 
@@ -204,7 +204,7 @@ func (h *TimeHistogram) Observe(value float64) {
 			break
 		}
 	}
-	
+
 	// Update counts
 	h.counts[bucket].Add(1)
 	h.count.Add(1)
@@ -214,11 +214,11 @@ func (h *TimeHistogram) Observe(value float64) {
 func (h *TimeHistogram) GetQuantiles() map[string]float64 {
 	quantiles := make(map[string]float64)
 	total := h.count.Load()
-	
+
 	if total == 0 {
 		return quantiles
 	}
-	
+
 	// Calculate common quantiles
 	targets := []struct {
 		name     string
@@ -230,13 +230,13 @@ func (h *TimeHistogram) GetQuantiles() map[string]float64 {
 		{"p99", 0.99},
 		{"p999", 0.999},
 	}
-	
+
 	cumulative := int64(0)
 	bucketIdx := 0
-	
+
 	for _, target := range targets {
 		targetCount := int64(float64(total) * target.quantile)
-		
+
 		// Find the bucket containing the target quantile
 		for bucketIdx < len(h.counts) && cumulative < targetCount {
 			cumulative += h.counts[bucketIdx].Load()
@@ -251,12 +251,12 @@ func (h *TimeHistogram) GetQuantiles() map[string]float64 {
 			bucketIdx++
 		}
 	}
-	
+
 	// Add mean
 	if total > 0 {
 		quantiles["mean"] = float64(h.sum.Load()) / float64(total)
 	}
-	
+
 	return quantiles
 }
 
@@ -271,21 +271,21 @@ func NewRateCalculator() *RateCalculator {
 func (r *RateCalculator) RecordEvent(metric string, timestamp time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if _, exists := r.windows[metric]; !exists {
 		r.windows[metric] = &TimeWindow{
 			events:     make([]time.Time, 0, 1000),
 			windowSize: time.Minute * 5,
 		}
 	}
-	
+
 	window := r.windows[metric]
 	window.mu.Lock()
 	defer window.mu.Unlock()
-	
+
 	// Add new event
 	window.events = append(window.events, timestamp)
-	
+
 	// Clean old events
 	cutoff := timestamp.Add(-window.windowSize)
 	i := 0
@@ -301,18 +301,18 @@ func (r *RateCalculator) GetRate(metric string, period time.Duration) float64 {
 	r.mu.RLock()
 	window, exists := r.windows[metric]
 	r.mu.RUnlock()
-	
+
 	if !exists {
 		return 0
 	}
-	
+
 	window.mu.Lock()
 	defer window.mu.Unlock()
-	
+
 	now := time.Now()
 	cutoff := now.Add(-period)
 	count := 0
-	
+
 	for i := len(window.events) - 1; i >= 0; i-- {
 		if window.events[i].After(cutoff) {
 			count++
@@ -320,7 +320,7 @@ func (r *RateCalculator) GetRate(metric string, period time.Duration) float64 {
 			break
 		}
 	}
-	
+
 	return float64(count) / period.Seconds()
 }
 

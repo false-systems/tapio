@@ -11,7 +11,7 @@ import (
 
 func TestCollector_NewCollector(t *testing.T) {
 	config := systemd.DefaultConfig()
-	
+
 	collector, err := systemd.NewCollector(config)
 	if runtime.GOOS != "linux" {
 		// On non-Linux platforms, we expect it to succeed creation
@@ -19,7 +19,7 @@ func TestCollector_NewCollector(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewCollector should succeed on %s: %v", runtime.GOOS, err)
 		}
-		
+
 		// Verify Start fails appropriately
 		ctx := context.Background()
 		err = collector.Start(ctx)
@@ -28,12 +28,12 @@ func TestCollector_NewCollector(t *testing.T) {
 		}
 		return
 	}
-	
+
 	// Linux-specific tests (may still fail due to D-Bus permissions)
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	if collector == nil {
 		t.Fatal("NewCollector returned nil collector")
 	}
@@ -45,18 +45,18 @@ func TestCollector_Health(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	health := collector.Health()
-	
+
 	// Before starting, status should be unknown
 	if health.Status != systemd.HealthStatusUnknown {
 		t.Errorf("Expected status Unknown before start, got %s", health.Status)
 	}
-	
+
 	if health.EventsProcessed != 0 {
 		t.Errorf("Expected 0 events processed, got %d", health.EventsProcessed)
 	}
-	
+
 	if health.DBusConnected {
 		t.Error("Expected not connected before start")
 	}
@@ -68,17 +68,17 @@ func TestCollector_Statistics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	stats := collector.Statistics()
-	
+
 	if stats.EventsCollected != 0 {
 		t.Errorf("Expected 0 events collected, got %d", stats.EventsCollected)
 	}
-	
+
 	if stats.StartTime.After(time.Now()) {
 		t.Error("Start time is in the future")
 	}
-	
+
 	if stats.ServicesMonitored != 0 {
 		t.Errorf("Expected 0 services monitored before start, got %d", stats.ServicesMonitored)
 	}
@@ -90,12 +90,12 @@ func TestCollector_Configure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	// Update configuration
 	newConfig := config
 	newConfig.EventBufferSize = 2000
 	newConfig.WatchAllServices = true
-	
+
 	err = collector.Configure(newConfig)
 	if err != nil {
 		t.Fatalf("Configure failed: %v", err)
@@ -106,32 +106,32 @@ func TestCollector_Lifecycle(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Skipping lifecycle test on non-Linux platform")
 	}
-	
+
 	config := systemd.DefaultConfig()
 	collector, err := systemd.NewCollector(config)
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	// Start collector (may fail due to D-Bus permissions)
 	err = collector.Start(ctx)
 	if err != nil {
 		t.Logf("Start failed (may be due to permissions): %v", err)
 		return
 	}
-	
+
 	// Let it run briefly
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Check health shows it's running
 	health := collector.Health()
 	if health.Status == systemd.HealthStatusUnknown {
 		t.Error("Health status should not be Unknown after start")
 	}
-	
+
 	// Stop collector
 	err = collector.Stop()
 	if err != nil {
@@ -177,7 +177,7 @@ func TestConfig_Validate(t *testing.T) {
 			valid: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := systemd.NewCollector(tt.config)
@@ -217,23 +217,23 @@ func TestDefaultConfigs(t *testing.T) {
 			expectTypes: []string{"service", "socket", "timer"},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := tt.configFunc()
-			
+
 			if config.Name != tt.expectName {
 				t.Errorf("Expected name %s, got %s", tt.expectName, config.Name)
 			}
-			
+
 			if !config.Enabled {
 				t.Error("Expected collector to be enabled by default")
 			}
-			
+
 			if len(config.UnitTypes) != len(tt.expectTypes) {
 				t.Errorf("Expected %d unit types, got %d", len(tt.expectTypes), len(config.UnitTypes))
 			}
-			
+
 			for i, expectedType := range tt.expectTypes {
 				if i >= len(config.UnitTypes) || config.UnitTypes[i] != expectedType {
 					t.Errorf("Expected unit type %s at position %d, got %v", expectedType, i, config.UnitTypes)
@@ -245,12 +245,12 @@ func TestDefaultConfigs(t *testing.T) {
 
 func TestCriticalServicesConfig(t *testing.T) {
 	config := systemd.CriticalServicesConfig()
-	
+
 	// Should have some critical services in the filter
 	if len(config.ServiceFilter) == 0 {
 		t.Error("Expected critical services config to have service filters")
 	}
-	
+
 	// Should include common critical services
 	criticalServices := []string{"sshd", "dbus", "systemd-journald"}
 	for _, critical := range criticalServices {
@@ -269,15 +269,15 @@ func TestCriticalServicesConfig(t *testing.T) {
 
 func TestAllServicesConfig(t *testing.T) {
 	config := systemd.AllServicesConfig()
-	
+
 	if !config.WatchAllServices {
 		t.Error("Expected all services config to watch all services")
 	}
-	
+
 	if config.EventRateLimit <= systemd.DefaultConfig().EventRateLimit {
 		t.Error("Expected all services config to have higher rate limit")
 	}
-	
+
 	// Should watch multiple unit types
 	expectedTypes := []string{"service", "socket", "timer"}
 	if len(config.UnitTypes) < len(expectedTypes) {

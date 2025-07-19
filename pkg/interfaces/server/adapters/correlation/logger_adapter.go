@@ -2,7 +2,7 @@ package correlation
 
 import (
 	"context"
-	
+
 	corrDomain "github.com/yairfalse/tapio/pkg/correlation/domain"
 	serverDomain "github.com/yairfalse/tapio/pkg/server/domain"
 )

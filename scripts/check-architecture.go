@@ -32,13 +32,13 @@ var levelHierarchy = map[string]int{
 }
 
 type ArchitectureViolation struct {
-	File        string
-	Line        int
-	Import      string
-	FromLevel   int
-	ToLevel     int
-	Violation   string
-	Severity    string
+	File      string
+	Line      int
+	Import    string
+	FromLevel int
+	ToLevel   int
+	Violation string
+	Severity  string
 }
 
 type ArchitectureChecker struct {
@@ -190,7 +190,7 @@ func (ac *ArchitectureChecker) validateImport(filePath string, currentLevel int,
 func (ac *ArchitectureChecker) getImportLevel(importPath string) (int, string) {
 	// Remove the base prefix
 	localPath := strings.TrimPrefix(importPath, "github.com/yairfalse/tapio/")
-	
+
 	for levelName, level := range levelHierarchy {
 		if strings.HasPrefix(localPath, levelName+"/") {
 			return level, levelName
@@ -203,7 +203,7 @@ func (ac *ArchitectureChecker) isSameComponent(filePath, importPath string) bool
 	// Extract component paths
 	fileComponent := ac.getComponentPath(filePath)
 	importComponent := ac.getComponentPath(strings.TrimPrefix(importPath, "github.com/yairfalse/tapio/"))
-	
+
 	return fileComponent == importComponent
 }
 
@@ -287,7 +287,7 @@ func (ac *ArchitectureChecker) reportResults() {
 
 	fmt.Printf("%sArchitecture Rules:%s\n", BLUE+BOLD, NC)
 	ac.printHierarchy()
-	
+
 	fmt.Printf("\n%sTo fix these violations:%s\n", YELLOW+BOLD, NC)
 	fmt.Printf("1. Remove forbidden imports\n")
 	fmt.Printf("2. Communicate via APIs, not Go imports\n")
@@ -297,20 +297,20 @@ func (ac *ArchitectureChecker) reportResults() {
 
 func (ac *ArchitectureChecker) printHierarchy() {
 	fmt.Printf("\n%sAllowed Dependency Hierarchy:%s\n", BLUE, NC)
-	
+
 	levels := make([]string, 0, len(levelHierarchy))
 	for level := range levelHierarchy {
 		levels = append(levels, level)
 	}
-	
+
 	sort.Slice(levels, func(i, j int) bool {
 		return levelHierarchy[levels[i]] < levelHierarchy[levels[j]]
 	})
-	
+
 	for _, level := range levels {
 		levelNum := levelHierarchy[level]
 		allowedLevels := ac.getAllowedLevels(levelNum)
-		
+
 		fmt.Printf("  L%d: %s", levelNum, level)
 		if len(allowedLevels) == 0 {
 			fmt.Printf(" → %sZero dependencies%s\n", GREEN, NC)

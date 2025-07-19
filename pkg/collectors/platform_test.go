@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors/unified"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/unified"
 )
 
 func TestPlatformDetection(t *testing.T) {

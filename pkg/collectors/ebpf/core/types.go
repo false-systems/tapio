@@ -55,23 +55,23 @@ type EventFilter struct {
 	GIDs       []uint32 `json:"gids,omitempty"`
 	Comms      []string `json:"comms,omitempty"`
 	Namespaces []string `json:"namespaces,omitempty"`
-	
+
 	// Event type filters
 	EventTypes []string `json:"event_types,omitempty"`
 	Syscalls   []string `json:"syscalls,omitempty"`
-	
+
 	// Network filters
 	SourceIPs []string `json:"source_ips,omitempty"`
 	DestIPs   []string `json:"dest_ips,omitempty"`
 	Ports     []uint16 `json:"ports,omitempty"`
 	Protocols []string `json:"protocols,omitempty"`
-	
+
 	// File filters
 	Paths        []string `json:"paths,omitempty"`
 	PathPrefixes []string `json:"path_prefixes,omitempty"`
-	
+
 	// Rate limiting
-	MaxEventsPerSecond int `json:"max_events_per_second,omitempty"`
+	MaxEventsPerSecond int     `json:"max_events_per_second,omitempty"`
 	SampleRate         float64 `json:"sample_rate,omitempty"`
 }
 
@@ -86,11 +86,11 @@ const (
 
 // Metric represents a collector metric
 type Metric struct {
-	Name      string                 `json:"name"`
-	Type      MetricType             `json:"type"`
-	Value     float64                `json:"value"`
-	Labels    map[string]string      `json:"labels,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
-	Unit      string                 `json:"unit,omitempty"`
-	Help      string                 `json:"help,omitempty"`
+	Name      string            `json:"name"`
+	Type      MetricType        `json:"type"`
+	Value     float64           `json:"value"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	Timestamp time.Time         `json:"timestamp"`
+	Unit      string            `json:"unit,omitempty"`
+	Help      string            `json:"help,omitempty"`
 }

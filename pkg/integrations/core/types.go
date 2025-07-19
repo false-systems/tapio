@@ -25,15 +25,15 @@ const (
 
 // Trace represents a distributed trace
 type Trace struct {
-	TraceID    string    `json:"trace_id"`
-	SpanID     string    `json:"span_id"`
-	ParentID   string    `json:"parent_id,omitempty"`
-	Name       string    `json:"name"`
-	StartTime  time.Time `json:"start_time"`
-	EndTime    time.Time `json:"end_time"`
+	TraceID    string                 `json:"trace_id"`
+	SpanID     string                 `json:"span_id"`
+	ParentID   string                 `json:"parent_id,omitempty"`
+	Name       string                 `json:"name"`
+	StartTime  time.Time              `json:"start_time"`
+	EndTime    time.Time              `json:"end_time"`
 	Attributes map[string]interface{} `json:"attributes"`
-	Events     []TraceEvent          `json:"events,omitempty"`
-	Status     TraceStatus           `json:"status"`
+	Events     []TraceEvent           `json:"events,omitempty"`
+	Status     TraceStatus            `json:"status"`
 }
 
 // TraceEvent represents an event within a trace span
@@ -60,11 +60,11 @@ const (
 
 // Webhook represents a webhook payload
 type Webhook struct {
-	URL     string                 `json:"url"`
-	Method  string                 `json:"method"`
-	Headers map[string]string      `json:"headers"`
-	Body    interface{}            `json:"body"`
-	Timeout time.Duration          `json:"timeout"`
+	URL     string            `json:"url"`
+	Method  string            `json:"method"`
+	Headers map[string]string `json:"headers"`
+	Body    interface{}       `json:"body"`
+	Timeout time.Duration     `json:"timeout"`
 }
 
 // IntegrationError represents an integration-specific error

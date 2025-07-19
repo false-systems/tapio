@@ -21,13 +21,13 @@ func (p *eventProcessor) ProcessEntry(ctx context.Context, entry *core.LogEntry)
 	if entry == nil {
 		return domain.Event{}, fmt.Errorf("nil entry")
 	}
-	
+
 	// Create log event data
 	eventData := p.createLogData(entry)
-	
+
 	// Determine severity based on priority
 	severity := p.determineSeverity(entry.Priority)
-	
+
 	// Create the domain event
 	event := domain.Event{
 		ID:         fmt.Sprintf("journald_%s_%d", entry.Cursor, entry.Timestamp.UnixNano()),
@@ -46,7 +46,7 @@ func (p *eventProcessor) ProcessEntry(ctx context.Context, entry *core.LogEntry)
 			"comm":      entry.Comm,
 		},
 	}
-	
+
 	return event, nil
 }
 
@@ -62,7 +62,7 @@ func (p *eventProcessor) createLogData(entry *core.LogEntry) map[string]interfac
 		"boot_id":    entry.BootID,
 		"machine_id": entry.MachineID,
 	}
-	
+
 	// Add important fields
 	if entry.Comm != "" {
 		data["comm"] = entry.Comm
@@ -82,7 +82,7 @@ func (p *eventProcessor) createLogData(entry *core.LogEntry) map[string]interfac
 	if entry.UserUnit != "" {
 		data["user_unit"] = entry.UserUnit
 	}
-	
+
 	// Add all systemd journal fields
 	if len(entry.Fields) > 0 {
 		fields := make(map[string]interface{})
@@ -91,7 +91,7 @@ func (p *eventProcessor) createLogData(entry *core.LogEntry) map[string]interfac
 		}
 		data["fields"] = fields
 	}
-	
+
 	return data
 }
 
@@ -103,13 +103,13 @@ func (p *eventProcessor) createContextData(entry *core.LogEntry) map[string]inte
 		"facility":   entry.Facility,
 		"identifier": entry.Identifier,
 	}
-	
+
 	labels := map[string]string{
 		"priority":   entry.Priority.String(),
 		"facility":   entry.Facility,
 		"identifier": entry.Identifier,
 	}
-	
+
 	// Add unit information
 	if entry.Unit != "" {
 		labels["unit"] = entry.Unit
@@ -119,15 +119,15 @@ func (p *eventProcessor) createContextData(entry *core.LogEntry) map[string]inte
 		labels["user_unit"] = entry.UserUnit
 		context["user_unit"] = entry.UserUnit
 	}
-	
+
 	// Add process information
 	if entry.Comm != "" {
 		labels["comm"] = entry.Comm
 		context["comm"] = entry.Comm
 	}
-	
+
 	tags := []string{"journald", entry.Priority.String()}
-	
+
 	// Add unit type tags
 	if entry.Unit != "" {
 		tags = append(tags, "systemd")
@@ -139,7 +139,7 @@ func (p *eventProcessor) createContextData(entry *core.LogEntry) map[string]inte
 			tags = append(tags, "timer")
 		}
 	}
-	
+
 	// Add severity tags
 	if entry.Priority <= core.PriorityError {
 		tags = append(tags, "error")
@@ -147,10 +147,10 @@ func (p *eventProcessor) createContextData(entry *core.LogEntry) map[string]inte
 	if entry.Priority <= core.PriorityWarning {
 		tags = append(tags, "warning")
 	}
-	
+
 	context["labels"] = labels
 	context["tags"] = tags
-	
+
 	// Add PID, UID, GID if available
 	if entry.PID > 0 {
 		context["pid"] = entry.PID
@@ -161,17 +161,16 @@ func (p *eventProcessor) createContextData(entry *core.LogEntry) map[string]inte
 	if entry.GID >= 0 {
 		context["gid"] = entry.GID
 	}
-	
+
 	// Add container if available
 	if containerID, ok := entry.Fields["CONTAINER_ID"]; ok {
 		if str, ok := containerID.(string); ok {
 			context["container"] = str
 		}
 	}
-	
+
 	return context
 }
-
 
 // determineSeverity determines the event severity based on syslog priority
 func (p *eventProcessor) determineSeverity(priority core.Priority) domain.SeverityLevel {
@@ -203,9 +202,9 @@ func (p *eventProcessor) generateHash(entry *core.LogEntry) string {
 	if entry.Cursor != "" {
 		return entry.Cursor
 	}
-	
+
 	// Fallback to timestamp + message hash
-	return fmt.Sprintf("%d-%s-%s", 
+	return fmt.Sprintf("%d-%s-%s",
 		entry.Timestamp.UnixNano(),
 		entry.Unit,
 		p.hashString(entry.Message))

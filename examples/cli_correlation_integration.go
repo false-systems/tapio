@@ -96,7 +96,7 @@ func printUsage() {
 
 func getInsights(namespace, resource string) {
 	url := fmt.Sprintf("%s/api/v1/insights/%s/%s", baseURL, namespace, resource)
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("Error getting insights: %v\n", err)
@@ -105,32 +105,32 @@ func getInsights(namespace, resource string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
-	
+
 	insights, _ := result["insights"].([]interface{})
 	fmt.Printf("Found %d insights for %s/%s:\n\n", len(insights), namespace, resource)
-	
+
 	for _, insight := range insights {
 		i := insight.(map[string]interface{})
 		fmt.Printf("ID: %s\n", i["id"])
 		fmt.Printf("Title: %s\n", i["title"])
 		fmt.Printf("Severity: %s\n", i["severity"])
 		fmt.Printf("Description: %s\n", i["description"])
-		
+
 		if pred, ok := i["prediction"].(map[string]interface{}); ok {
-			fmt.Printf("Prediction: %s in %s (probability: %.2f)\n", 
+			fmt.Printf("Prediction: %s in %s (probability: %.2f)\n",
 				pred["type"], pred["time_to_event"], pred["probability"])
 		}
-		
+
 		fmt.Println("---")
 	}
 }
 
 func getPredictions(namespace, resource string) {
 	url := fmt.Sprintf("%s/api/v1/predictions/%s/%s", baseURL, namespace, resource)
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("Error getting predictions: %v\n", err)
@@ -139,13 +139,13 @@ func getPredictions(namespace, resource string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
-	
+
 	predictions, _ := result["predictions"].([]interface{})
 	fmt.Printf("Found %d predictions for %s/%s:\n\n", len(predictions), namespace, resource)
-	
+
 	for _, prediction := range predictions {
 		p := prediction.(map[string]interface{})
 		fmt.Printf("Type: %s\n", p["type"])
@@ -175,7 +175,7 @@ func sendEvent(eventType string) {
 	}
 
 	jsonData, _ := json.Marshal(event)
-	
+
 	resp, err := http.Post(
 		fmt.Sprintf("%s/api/v1/events", baseURL),
 		"application/json",
@@ -188,10 +188,10 @@ func sendEvent(eventType string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
-	
+
 	fmt.Printf("Event sent successfully!\n")
 	fmt.Printf("Event ID: %s\n", result["event_id"])
 	fmt.Printf("Status: %s\n", result["status"])
@@ -223,7 +223,7 @@ func correlateRecentEvents() {
 	}
 
 	jsonData, _ := json.Marshal(events)
-	
+
 	resp, err := http.Post(
 		fmt.Sprintf("%s/api/v1/correlate", baseURL),
 		"application/json",
@@ -236,14 +236,14 @@ func correlateRecentEvents() {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
-	
+
 	fmt.Printf("Correlation Result:\n")
 	fmt.Printf("Correlation ID: %s\n", result["correlation_id"])
 	fmt.Printf("Event Count: %.0f\n", result["event_count"])
-	
+
 	if correlations, ok := result["correlations"].([]interface{}); ok {
 		fmt.Printf("Found %d correlations\n", len(correlations))
 		for _, corr := range correlations {
@@ -262,13 +262,13 @@ func listPatterns() {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
-	
+
 	patterns, _ := result["patterns"].([]interface{})
 	fmt.Printf("Available Patterns (%d):\n\n", len(patterns))
-	
+
 	for _, pattern := range patterns {
 		p := pattern.(map[string]interface{})
 		fmt.Printf("ID: %s\n", p["id"])
@@ -289,10 +289,10 @@ func getStats() {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
-	
+
 	fmt.Println("Correlation Engine Statistics:")
 	fmt.Printf("  Enabled: %v\n", result["enabled"])
 	fmt.Printf("  Events Processed: %.0f\n", result["events_processed"])
@@ -311,12 +311,12 @@ func checkHealth() {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
-	
+
 	fmt.Printf("API Health: %s\n", result["status"])
-	
+
 	// Check readiness
 	resp, err = http.Get(fmt.Sprintf("%s/ready", baseURL))
 	if err != nil {
@@ -327,7 +327,7 @@ func checkHealth() {
 
 	body, _ = io.ReadAll(resp.Body)
 	json.Unmarshal(body, &result)
-	
+
 	fmt.Printf("API Ready: %s\n", result["status"])
 	fmt.Printf("Adapter Enabled: %v\n", result["adapter"])
 }

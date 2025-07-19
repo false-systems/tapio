@@ -61,40 +61,40 @@ func TestEventProcessor_ProcessEntry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			event, err := processor.ProcessEntry(ctx, tt.entry)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ProcessEntry() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if tt.wantErr {
 				return
 			}
-			
+
 			// Verify event structure
 			if event.Type != domain.EventTypeLog {
 				t.Errorf("Expected event type %v, got %v", domain.EventTypeLog, event.Type)
 			}
-			
+
 			if event.Source != domain.SourceJournald {
 				t.Errorf("Expected event source %v, got %v", domain.SourceJournald, event.Source)
 			}
-			
+
 			if event.Confidence != 1.0 {
 				t.Errorf("Expected confidence 1.0, got %v", event.Confidence)
 			}
-			
+
 			// Verify payload
 			payload, ok := event.Payload.(domain.LogEventPayload)
 			if !ok {
 				t.Errorf("Expected LogEventPayload, got %T", event.Payload)
 				return
 			}
-			
+
 			if payload.Message != tt.entry.Message {
 				t.Errorf("Expected message %q, got %q", tt.entry.Message, payload.Message)
 			}
-			
+
 			if payload.Priority != int32(tt.entry.Priority) {
 				t.Errorf("Expected priority %d, got %d", int32(tt.entry.Priority), payload.Priority)
 			}
@@ -124,7 +124,7 @@ func TestDetermineSeverity(t *testing.T) {
 		t.Run(tt.priority.String(), func(t *testing.T) {
 			severity := processor.determineSeverity(tt.priority)
 			if severity != tt.expected {
-				t.Errorf("Expected severity %v for priority %v, got %v", 
+				t.Errorf("Expected severity %v for priority %v, got %v",
 					tt.expected, tt.priority, severity)
 			}
 		})
@@ -133,7 +133,7 @@ func TestDetermineSeverity(t *testing.T) {
 
 func TestCreateLogPayload(t *testing.T) {
 	processor := &eventProcessor{}
-	
+
 	entry := &core.LogEntry{
 		Message:    "Test message",
 		Priority:   core.PriorityWarning,
@@ -161,28 +161,28 @@ func TestCreateLogPayload(t *testing.T) {
 	if payload.Message != entry.Message {
 		t.Errorf("Expected message %q, got %q", entry.Message, payload.Message)
 	}
-	
+
 	if payload.Unit != entry.Unit {
 		t.Errorf("Expected unit %q, got %q", entry.Unit, payload.Unit)
 	}
-	
+
 	if payload.Priority != int32(entry.Priority) {
 		t.Errorf("Expected priority %d, got %d", int32(entry.Priority), payload.Priority)
 	}
 
 	// Test that fields are properly mapped
 	expectedFields := map[string]string{
-		"_COMM":               entry.Comm,
-		"_EXE":                entry.Exe,
-		"_CMDLINE":            entry.Cmdline,
-		"_HOSTNAME":           entry.HostName,
-		"_SYSTEMD_SESSION":    entry.Session,
-		"_SYSTEMD_USER_UNIT":  entry.UserUnit,
-		"_BOOT_ID":            entry.BootID,
-		"_MACHINE_ID":         entry.MachineID,
-		"__CURSOR":            entry.Cursor,
-		"CUSTOM_STRING":       "value",
-		"CUSTOM_INT":          "42",
+		"_COMM":              entry.Comm,
+		"_EXE":               entry.Exe,
+		"_CMDLINE":           entry.Cmdline,
+		"_HOSTNAME":          entry.HostName,
+		"_SYSTEMD_SESSION":   entry.Session,
+		"_SYSTEMD_USER_UNIT": entry.UserUnit,
+		"_BOOT_ID":           entry.BootID,
+		"_MACHINE_ID":        entry.MachineID,
+		"__CURSOR":           entry.Cursor,
+		"CUSTOM_STRING":      "value",
+		"CUSTOM_INT":         "42",
 	}
 
 	for key, expectedValue := range expectedFields {
@@ -222,17 +222,17 @@ func TestGenerateHash(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			hash1 := processor.generateHash(tt.entry)
 			hash2 := processor.generateHash(tt.entry)
-			
+
 			// Hash should be deterministic
 			if hash1 != hash2 {
 				t.Errorf("Hash should be deterministic, got %q and %q", hash1, hash2)
 			}
-			
+
 			// Hash should not be empty
 			if hash1 == "" {
 				t.Error("Hash should not be empty")
 			}
-			
+
 			// If cursor is present, hash should equal cursor
 			if tt.entry.Cursor != "" && hash1 != tt.entry.Cursor {
 				t.Errorf("Expected hash to equal cursor %q, got %q", tt.entry.Cursor, hash1)

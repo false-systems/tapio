@@ -118,7 +118,7 @@ func BenchmarkConfigValidation(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			config := tc.config
 			b.ResetTimer()
-			
+
 			for i := 0; i < b.N; i++ {
 				_ = config.Validate()
 			}
@@ -128,7 +128,7 @@ func BenchmarkConfigValidation(b *testing.B) {
 
 func BenchmarkEventParsing(b *testing.B) {
 	parser := linux.NewEventParser()
-	
+
 	// Create sample event data for different event types
 	events := []struct {
 		name      string
@@ -161,7 +161,7 @@ func BenchmarkEventParsing(b *testing.B) {
 		b.Run(event.name, func(b *testing.B) {
 			b.SetBytes(int64(len(event.data)))
 			b.ResetTimer()
-			
+
 			for i := 0; i < b.N; i++ {
 				_, _ = parser.Parse(event.data, event.eventType)
 			}
@@ -203,7 +203,7 @@ func BenchmarkCollectorSubscribe(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		ch, err := collector.Subscribe(ctx, criteria, options)
 		if err != nil {
@@ -300,7 +300,7 @@ func BenchmarkFilterEvaluation(b *testing.B) {
 		event  domain.Event
 	}{
 		{
-			name: "NoFilter",
+			name:   "NoFilter",
 			filter: core.Filter{},
 			event: domain.Event{
 				Type:     domain.EventTypeSystem,
@@ -358,7 +358,7 @@ func BenchmarkFilterEvaluation(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			// Simulate filter evaluation
 			b.ResetTimer()
-			
+
 			for i := 0; i < b.N; i++ {
 				// Check event type
 				if len(tc.filter.EventTypes) > 0 {
@@ -414,7 +414,7 @@ func BenchmarkStatsCollection(b *testing.B) {
 	defer collector.Close()
 
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, _ = collector.GetStats()
 	}
@@ -443,7 +443,7 @@ func BenchmarkHealthCheck(b *testing.B) {
 	defer collector.Close()
 
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = collector.Health()
 	}

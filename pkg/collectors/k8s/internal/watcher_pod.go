@@ -18,16 +18,16 @@ func newPodWatcher(clientset kubernetes.Interface, config core.Config) core.Reso
 		baseWatcher: newBaseWatcher("Pod", config),
 		clientset:   clientset,
 	}
-	
+
 	// Create informer factory
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
 		config.ResyncPeriod,
 		informers.WithNamespace(config.Namespace),
 	)
-	
+
 	// Create Pod informer
 	watcher.informer = factory.Core().V1().Pods().Informer()
-	
+
 	return watcher
 }

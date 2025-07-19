@@ -62,8 +62,8 @@ type Correlation struct {
 
 // HealthStatus represents system health
 type HealthStatus struct {
-	Status    string    `json:"status"`
-	Timestamp time.Time `json:"timestamp"`
+	Status    string                 `json:"status"`
+	Timestamp time.Time              `json:"timestamp"`
 	Details   map[string]interface{} `json:"details,omitempty"`
 }
 

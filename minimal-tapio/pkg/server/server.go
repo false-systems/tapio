@@ -18,10 +18,10 @@ type Server struct {
 	restServer *api.RESTServer
 	httpServer *http.Server
 	mu         sync.RWMutex
-	
+
 	// In-memory storage for demo
-	events     []domain.Event
-	findings   []domain.Finding
+	events   []domain.Event
+	findings []domain.Finding
 }
 
 // NewServer creates a new server instance
@@ -37,7 +37,7 @@ func NewServer(config *domain.Config) *Server {
 func (s *Server) Start(ctx context.Context) error {
 	// Create REST server
 	s.restServer = api.NewRESTServer(s)
-	
+
 	// Create HTTP server
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.config.ServerPort),
@@ -46,7 +46,7 @@ func (s *Server) Start(ctx context.Context) error {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-	
+
 	// Start server in goroutine
 	go func() {
 		log.Printf("Starting server on port %d", s.config.ServerPort)
@@ -54,14 +54,14 @@ func (s *Server) Start(ctx context.Context) error {
 			log.Printf("Server error: %v", err)
 		}
 	}()
-	
+
 	// Wait for context cancellation
 	<-ctx.Done()
-	
+
 	// Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	return s.httpServer.Shutdown(shutdownCtx)
 }
 
@@ -89,15 +89,15 @@ func (s *Server) GetHealth() domain.HealthStatus {
 func (s *Server) ProcessEvent(ctx context.Context, event domain.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Add timestamp if missing
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
-	
+
 	// Store event
 	s.events = append(s.events, event)
-	
+
 	// Simple correlation: if we see multiple errors, create a finding
 	errorCount := 0
 	for _, e := range s.events {
@@ -105,7 +105,7 @@ func (s *Server) ProcessEvent(ctx context.Context, event domain.Event) error {
 			errorCount++
 		}
 	}
-	
+
 	if errorCount >= 3 {
 		finding := domain.Finding{
 			ID:          domain.FindingID(fmt.Sprintf("finding-%d", time.Now().UnixNano())),
@@ -118,7 +118,7 @@ func (s *Server) ProcessEvent(ctx context.Context, event domain.Event) error {
 		}
 		s.findings = append(s.findings, finding)
 	}
-	
+
 	return nil
 }
 
@@ -126,16 +126,16 @@ func (s *Server) ProcessEvent(ctx context.Context, event domain.Event) error {
 func (s *Server) GetEvents(ctx context.Context, limit int) []domain.Event {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	if limit <= 0 || limit > len(s.events) {
 		limit = len(s.events)
 	}
-	
+
 	// Return last N events
 	if limit < len(s.events) {
 		return s.events[len(s.events)-limit:]
 	}
-	
+
 	return s.events
 }
 
@@ -143,7 +143,7 @@ func (s *Server) GetEvents(ctx context.Context, limit int) []domain.Event {
 func (s *Server) GetFindings(ctx context.Context) []domain.Finding {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	return s.findings
 }
 
@@ -151,11 +151,11 @@ func (s *Server) GetFindings(ctx context.Context) []domain.Finding {
 func (s *Server) CorrelateEvents(ctx context.Context, events []domain.Event) (*domain.Correlation, error) {
 	// Simple correlation: group by source
 	sourceGroups := make(map[domain.SourceType][]string)
-	
+
 	for _, event := range events {
 		sourceGroups[event.Source] = append(sourceGroups[event.Source], string(event.ID))
 	}
-	
+
 	// If events are from same source, they might be related
 	for source, ids := range sourceGroups {
 		if len(ids) >= 2 {
@@ -169,7 +169,7 @@ func (s *Server) CorrelateEvents(ctx context.Context, events []domain.Event) (*d
 			}, nil
 		}
 	}
-	
+
 	return &domain.Correlation{
 		ID:          fmt.Sprintf("corr-%d", time.Now().UnixNano()),
 		Type:        "no_correlation",

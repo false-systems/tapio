@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors/unified"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/unified"
 	"github.com/yairfalse/tapio/pkg/logging"
 )
 

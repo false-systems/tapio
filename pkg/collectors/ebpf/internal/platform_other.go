@@ -1,10 +1,11 @@
+//go:build !linux
 // +build !linux
 
 package internal
 
 import (
 	"context"
-	
+
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/stub"
 )

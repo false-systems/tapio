@@ -11,7 +11,7 @@ import (
 
 func TestCollector_NewCollector(t *testing.T) {
 	config := ebpf.DefaultConfig()
-	
+
 	collector, err := ebpf.NewCollector(config)
 	if runtime.GOOS != "linux" {
 		// On non-Linux platforms, we expect it to succeed creation
@@ -19,7 +19,7 @@ func TestCollector_NewCollector(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewCollector should succeed on %s: %v", runtime.GOOS, err)
 		}
-		
+
 		// Verify Start fails appropriately
 		ctx := context.Background()
 		err = collector.Start(ctx)
@@ -28,12 +28,12 @@ func TestCollector_NewCollector(t *testing.T) {
 		}
 		return
 	}
-	
+
 	// Linux-specific tests
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	if collector == nil {
 		t.Fatal("NewCollector returned nil collector")
 	}
@@ -45,14 +45,14 @@ func TestCollector_Health(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	health := collector.Health()
-	
+
 	// Before starting, status should be unknown
 	if health.Status != ebpf.HealthStatusUnknown {
 		t.Errorf("Expected status Unknown before start, got %s", health.Status)
 	}
-	
+
 	if health.EventsProcessed != 0 {
 		t.Errorf("Expected 0 events processed, got %d", health.EventsProcessed)
 	}
@@ -64,13 +64,13 @@ func TestCollector_Statistics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	stats := collector.Statistics()
-	
+
 	if stats.EventsCollected != 0 {
 		t.Errorf("Expected 0 events collected, got %d", stats.EventsCollected)
 	}
-	
+
 	if stats.StartTime.After(time.Now()) {
 		t.Error("Start time is in the future")
 	}
@@ -82,12 +82,12 @@ func TestCollector_Configure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	// Update configuration
 	newConfig := config
 	newConfig.EventBufferSize = 2000
 	newConfig.EnableNetwork = false
-	
+
 	err = collector.Configure(newConfig)
 	if err != nil {
 		t.Fatalf("Configure failed: %v", err)
@@ -98,16 +98,16 @@ func TestCollector_Lifecycle(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Skipping lifecycle test on non-Linux platform")
 	}
-	
+
 	config := ebpf.DefaultConfig()
 	collector, err := ebpf.NewCollector(config)
 	if err != nil {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	// Start collector
 	err = collector.Start(ctx)
 	if err != nil {
@@ -115,16 +115,16 @@ func TestCollector_Lifecycle(t *testing.T) {
 		t.Logf("Start failed (may be due to permissions): %v", err)
 		return
 	}
-	
+
 	// Let it run briefly
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Check health shows it's running
 	health := collector.Health()
 	if health.Status == ebpf.HealthStatusUnknown {
 		t.Error("Health status should not be Unknown after start")
 	}
-	
+
 	// Stop collector
 	err = collector.Stop()
 	if err != nil {
@@ -161,7 +161,7 @@ func TestConfig_Validate(t *testing.T) {
 			valid: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ebpf.NewCollector(tt.config)

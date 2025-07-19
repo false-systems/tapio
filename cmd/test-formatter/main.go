@@ -79,8 +79,8 @@ func main() {
 	fmt.Println("-------------------------")
 
 	explanation := &types.Explanation{
-		Title:       "Why is my pod restarting?",
-		Summary:     "Your pod is experiencing memory issues that lead to OOM kills",
+		Title:   "Why is my pod restarting?",
+		Summary: "Your pod is experiencing memory issues that lead to OOM kills",
 		Details: []string{
 			"The pod's memory usage has been steadily increasing",
 			"It reached the memory limit of 2Gi",

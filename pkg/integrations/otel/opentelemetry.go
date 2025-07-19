@@ -23,10 +23,10 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/correlation"
 	"github.com/yairfalse/tapio/pkg/correlation/rules"
 	"github.com/yairfalse/tapio/pkg/correlation/sources"
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/universal"
 	"github.com/yairfalse/tapio/pkg/universal/converters"
 	"k8s.io/client-go/kubernetes"
@@ -81,7 +81,6 @@ type OpenTelemetryExporter struct {
 	totalSpansCreated  int64
 	totalSpansExported int64
 }
-
 
 // Config holds OpenTelemetry exporter configuration
 type Config struct {
@@ -553,7 +552,6 @@ func (e *OpenTelemetryExporter) UpdateTelemetry(ctx context.Context) error {
 
 	return nil
 }
-
 
 // updateEBPFTelemetry creates telemetry from eBPF data with real Kubernetes context
 func (e *OpenTelemetryExporter) updateEBPFTelemetry(ctx context.Context) {

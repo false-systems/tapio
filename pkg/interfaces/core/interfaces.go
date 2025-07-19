@@ -9,16 +9,16 @@ import (
 type Interface interface {
 	// Name returns the interface identifier
 	Name() string
-	
+
 	// Initialize sets up the interface
 	Initialize(ctx context.Context, config Config) error
-	
+
 	// Start begins serving the interface
 	Start(ctx context.Context) error
-	
+
 	// Stop gracefully shuts down the interface
 	Stop(ctx context.Context) error
-	
+
 	// Health checks the interface status
 	Health(ctx context.Context) (*HealthStatus, error)
 }
@@ -39,13 +39,13 @@ type HealthStatus struct {
 type OutputFormatter interface {
 	// Format formats the data according to the implementation
 	Format(w io.Writer, data interface{}) error
-	
+
 	// FormatString returns formatted string
 	FormatString(data interface{}) (string, error)
-	
+
 	// SupportsStreaming indicates if streaming is supported
 	SupportsStreaming() bool
-	
+
 	// ContentType returns the MIME type of the output
 	ContentType() string
 }
@@ -53,10 +53,10 @@ type OutputFormatter interface {
 // CLI represents command-line interface
 type CLI interface {
 	Interface
-	
+
 	// Execute runs the CLI with given arguments
 	Execute(args []string) error
-	
+
 	// AddCommand adds a new command to the CLI
 	AddCommand(cmd Command) error
 }
@@ -65,13 +65,13 @@ type CLI interface {
 type Command interface {
 	// Name returns the command name
 	Name() string
-	
+
 	// Description returns command description
 	Description() string
-	
+
 	// Execute runs the command
 	Execute(ctx context.Context, args []string) error
-	
+
 	// Validate validates command arguments
 	Validate(args []string) error
 }
@@ -79,13 +79,13 @@ type Command interface {
 // Server represents a server interface (HTTP/gRPC)
 type Server interface {
 	Interface
-	
+
 	// ListenAndServe starts the server
 	ListenAndServe() error
-	
+
 	// Shutdown gracefully shuts down the server
 	Shutdown(ctx context.Context) error
-	
+
 	// Port returns the port the server is listening on
 	Port() int
 }
@@ -94,16 +94,16 @@ type Server interface {
 type ConfigManager interface {
 	// Load loads configuration from various sources
 	Load(ctx context.Context) error
-	
+
 	// Get retrieves a configuration value
 	Get(key string) (interface{}, error)
-	
+
 	// Set sets a configuration value
 	Set(key string, value interface{}) error
-	
+
 	// Watch watches for configuration changes
 	Watch(ctx context.Context, callback func(key string, oldValue, newValue interface{})) error
-	
+
 	// Validate validates the entire configuration
 	Validate() error
 }

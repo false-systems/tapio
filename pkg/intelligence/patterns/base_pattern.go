@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
-	
+
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -140,12 +140,12 @@ func (bp *BasePattern) CreateCorrelation(events []domain.Event, confidence float
 	if len(events) == 0 {
 		return domain.Correlation{}
 	}
-	
+
 	// Sort events by timestamp
 	sort.Slice(events, func(i, j int) bool {
 		return events[i].Timestamp.Before(events[j].Timestamp)
 	})
-	
+
 	// Create event references
 	eventRefs := make([]domain.EventReference, len(events))
 	for i, event := range events {
@@ -156,14 +156,14 @@ func (bp *BasePattern) CreateCorrelation(events []domain.Event, confidence float
 			Weight:       bp.calculateEventWeight(event),
 		}
 	}
-	
+
 	// Determine correlation type based on pattern
 	correlationType := bp.mapPatternToCorrelationType()
-	
+
 	return domain.Correlation{
-		ID:          domain.CorrelationID(fmt.Sprintf("correlation-%s-%d", bp.id, time.Now().UnixNano())),
-		Type:        correlationType,
-		Pattern:     domain.PatternSignature{
+		ID:   domain.CorrelationID(fmt.Sprintf("correlation-%s-%d", bp.id, time.Now().UnixNano())),
+		Type: correlationType,
+		Pattern: domain.PatternSignature{
 			Name:        bp.name,
 			Version:     bp.metadata.Version,
 			Fingerprint: bp.id,
@@ -185,18 +185,18 @@ func (bp *BasePattern) CreateCorrelation(events []domain.Event, confidence float
 func (bp *BasePattern) SortEventsByTimestamp(events []domain.Event) []domain.Event {
 	sorted := make([]domain.Event, len(events))
 	copy(sorted, events)
-	
+
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Timestamp.Before(sorted[j].Timestamp)
 	})
-	
+
 	return sorted
 }
 
 // GroupEventsByHost groups events by host
 func (bp *BasePattern) GroupEventsByHost(events []domain.Event) map[string][]domain.Event {
 	groups := make(map[string][]domain.Event)
-	
+
 	for _, event := range events {
 		host := event.Context.Host
 		if host == "" {
@@ -204,7 +204,7 @@ func (bp *BasePattern) GroupEventsByHost(events []domain.Event) map[string][]dom
 		}
 		groups[host] = append(groups[host], event)
 	}
-	
+
 	return groups
 }
 
@@ -213,7 +213,7 @@ func (bp *BasePattern) FilterEventsByTimeWindow(events []domain.Event, window ti
 	if len(events) == 0 {
 		return events
 	}
-	
+
 	// Find the latest event
 	latest := events[0].Timestamp
 	for _, event := range events {
@@ -221,17 +221,17 @@ func (bp *BasePattern) FilterEventsByTimeWindow(events []domain.Event, window ti
 			latest = event.Timestamp
 		}
 	}
-	
+
 	// Filter events within window from latest
 	cutoff := latest.Add(-window)
 	filtered := make([]domain.Event, 0)
-	
+
 	for _, event := range events {
 		if event.Timestamp.After(cutoff) {
 			filtered = append(filtered, event)
 		}
 	}
-	
+
 	return filtered
 }
 
@@ -258,12 +258,12 @@ func (bp *BasePattern) determineEventRole(event domain.Event, index, total int) 
 	if index == 0 {
 		return "trigger"
 	}
-	
+
 	// Last event might be the consequence
 	if index == total-1 {
 		return "consequence"
 	}
-	
+
 	// Middle events are participants
 	return "participant"
 }

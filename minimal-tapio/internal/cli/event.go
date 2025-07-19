@@ -15,19 +15,19 @@ var (
 		Use:   "event",
 		Short: "Manage events",
 	}
-	
+
 	submitCmd = &cobra.Command{
 		Use:   "submit",
 		Short: "Submit an event",
 		RunE:  runSubmitEvent,
 	}
-	
+
 	listCmd = &cobra.Command{
 		Use:   "list",
 		Short: "List events",
 		RunE:  runListEvents,
 	}
-	
+
 	// Flags
 	eventType     string
 	eventSource   string
@@ -40,24 +40,24 @@ func init() {
 	rootCmd.AddCommand(eventCmd)
 	eventCmd.AddCommand(submitCmd)
 	eventCmd.AddCommand(listCmd)
-	
+
 	// Submit flags
 	submitCmd.Flags().StringVar(&eventType, "type", "system", "Event type")
 	submitCmd.Flags().StringVar(&eventSource, "source", "cli", "Event source")
 	submitCmd.Flags().StringVar(&eventSeverity, "severity", "info", "Event severity (info, warning, error, critical)")
 	submitCmd.Flags().StringVar(&eventMessage, "message", "", "Event message")
 	submitCmd.MarkFlagRequired("message")
-	
+
 	// List flags
 	listCmd.Flags().IntVar(&eventLimit, "limit", 10, "Number of events to retrieve")
 }
 
 func runSubmitEvent(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	
+
 	// Create client
 	c := client.NewClient(serverURL)
-	
+
 	// Create event
 	event := domain.Event{
 		Type:      domain.EventType(eventType),
@@ -66,34 +66,34 @@ func runSubmitEvent(cmd *cobra.Command, args []string) error {
 		Message:   eventMessage,
 		Timestamp: time.Now(),
 	}
-	
+
 	// Submit event
 	if err := c.SubmitEvent(ctx, event); err != nil {
 		return fmt.Errorf("failed to submit event: %w", err)
 	}
-	
+
 	fmt.Println("Event submitted successfully")
 	return nil
 }
 
 func runListEvents(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	
+
 	// Create client
 	c := client.NewClient(serverURL)
-	
+
 	// Get events
 	events, err := c.GetEvents(ctx, eventLimit)
 	if err != nil {
 		return fmt.Errorf("failed to get events: %w", err)
 	}
-	
+
 	// Display events
 	if len(events) == 0 {
 		fmt.Println("No events found")
 		return nil
 	}
-	
+
 	fmt.Printf("Found %d events:\n\n", len(events))
 	for _, event := range events {
 		fmt.Printf("ID:       %s\n", event.ID)
@@ -104,6 +104,6 @@ func runListEvents(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Message:  %s\n", event.Message)
 		fmt.Println("---")
 	}
-	
+
 	return nil
 }
