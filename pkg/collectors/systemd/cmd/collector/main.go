@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
+	"github.com/yairfalse/tapio/pkg/collectors/systemd/internal"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -24,6 +25,8 @@ func main() {
 		pollInterval     = flag.Duration("poll-interval", 30*time.Second, "Polling interval for service scanning")
 		bufferSize       = flag.Int("buffer-size", 1000, "Event buffer size")
 		watchAllServices = flag.Bool("watch-all", false, "Watch all services")
+		serverAddr       = flag.String("server", "", "Tapio server address (e.g., localhost:50051)")
+		standalone       = flag.Bool("standalone", false, "Run in standalone mode without connecting to Tapio server")
 	)
 	flag.Parse()
 
@@ -82,6 +85,22 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Initialize gRPC client if server address is provided
+	var grpcClient *internal.GRPCClient
+	if *serverAddr != "" && !*standalone {
+		grpcClient, err = internal.NewGRPCClient(*serverAddr)
+		if err != nil {
+			log.Fatalf("Failed to create gRPC client: %v", err)
+		}
+
+		// Connect to server
+		if err := grpcClient.Connect(ctx); err != nil {
+			log.Fatalf("Failed to connect to Tapio server: %v", err)
+		}
+		fmt.Printf("Connected to Tapio server at %s\n", *serverAddr)
+		defer grpcClient.Close()
+	}
+
 	// Start collector
 	if err := collector.Start(ctx); err != nil {
 		log.Fatalf("Failed to start collector: %v", err)
@@ -107,35 +126,60 @@ func main() {
 		eventCount := 0
 		for event := range collector.Events() {
 			eventCount++
-			fmt.Printf("\n[Event #%d] %s\n", eventCount, time.Now().Format(time.RFC3339))
-			fmt.Printf("  ID: %s\n", event.ID)
-			fmt.Printf("  Type: %s\n", event.Type)
-			fmt.Printf("  Source: %s\n", event.Source)
-			fmt.Printf("  Severity: %s\n", event.Severity)
 
-			// Print systemd-specific payload information
-			if servicePayload, ok := event.Data.(domain.ServiceEventPayload); ok {
-				fmt.Printf("  Service: %s\n", servicePayload.ServiceName)
-				fmt.Printf("  Event Type: %s\n", servicePayload.EventType)
-				if servicePayload.OldState != "" {
-					fmt.Printf("  State Change: %s -> %s\n", servicePayload.OldState, servicePayload.NewState)
-				} else {
-					fmt.Printf("  New State: %s\n", servicePayload.NewState)
+			// Send event to Tapio server if connected
+			if grpcClient != nil && grpcClient.IsConnected() {
+				if err := grpcClient.SendEvent(ctx, event); err != nil {
+					fmt.Printf("Failed to send event to server: %v\n", err)
 				}
+			}
 
-				if servicePayload.ExitCode != nil {
-					fmt.Printf("  Exit Code: %d\n", *servicePayload.ExitCode)
-				}
+			// Print event details in standalone mode or verbose output
+			if *standalone || grpcClient == nil {
+				fmt.Printf("\n[Event #%d] %s\n", eventCount, time.Now().Format(time.RFC3339))
+				fmt.Printf("  ID: %s\n", event.ID)
+				fmt.Printf("  Type: %s\n", event.Type)
+				fmt.Printf("  Source: %s\n", event.Source)
+				fmt.Printf("  Severity: %s\n", event.Severity)
 
-				if servicePayload.Signal != nil {
-					fmt.Printf("  Signal: %d\n", *servicePayload.Signal)
-				}
-
-				// Print important properties
-				for key, value := range servicePayload.Properties {
-					if key == "result" || key == "sub_state" || key == "main_pid" {
-						fmt.Printf("  %s: %s\n", strings.Title(strings.ReplaceAll(key, "_", " ")), value)
+				// Print systemd-specific payload information
+				if eventData, ok := event.Data.(map[string]interface{}); ok {
+					if serviceName, ok := eventData["service_name"].(string); ok {
+						fmt.Printf("  Service: %s\n", serviceName)
 					}
+					if eventType, ok := eventData["event_type"].(string); ok {
+						fmt.Printf("  Event Type: %s\n", eventType)
+					}
+
+					oldState, hasOld := eventData["old_state"].(string)
+					newState, hasNew := eventData["new_state"].(string)
+					if hasOld && hasNew && oldState != "" {
+						fmt.Printf("  State Change: %s -> %s\n", oldState, newState)
+					} else if hasNew {
+						fmt.Printf("  New State: %s\n", newState)
+					}
+
+					if exitCode, ok := eventData["exit_code"].(int); ok {
+						fmt.Printf("  Exit Code: %d\n", exitCode)
+					}
+
+					if signal, ok := eventData["signal"].(int); ok {
+						fmt.Printf("  Signal: %d\n", signal)
+					}
+
+					// Print important properties
+					if properties, ok := eventData["properties"].(map[string]interface{}); ok {
+						for key, value := range properties {
+							if key == "result" || key == "sub_state" || key == "main_pid" {
+								fmt.Printf("  %s: %v\n", strings.Title(strings.ReplaceAll(key, "_", " ")), value)
+							}
+						}
+					}
+				}
+			} else if grpcClient != nil {
+				// In server mode, just show brief status
+				if eventCount%10 == 0 {
+					fmt.Printf("\rEvents sent to server: %d", eventCount)
 				}
 			}
 		}

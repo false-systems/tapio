@@ -83,27 +83,27 @@ func runGateway(ctx context.Context, logger *zap.Logger) error {
 
 	// Register gRPC service handlers
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	
+
 	// Register TapioService
 	if err := pb.RegisterTapioServiceHandlerFromEndpoint(ctx, gwmux, *grpcServerEndpoint, opts); err != nil {
 		return fmt.Errorf("failed to register TapioService: %w", err)
 	}
-	
+
 	// Register CollectorService
 	if err := pb.RegisterCollectorServiceHandlerFromEndpoint(ctx, gwmux, *grpcServerEndpoint, opts); err != nil {
 		return fmt.Errorf("failed to register CollectorService: %w", err)
 	}
-	
+
 	// Register EventService
 	if err := pb.RegisterEventServiceHandlerFromEndpoint(ctx, gwmux, *grpcServerEndpoint, opts); err != nil {
 		return fmt.Errorf("failed to register EventService: %w", err)
 	}
-	
+
 	// Register CorrelationService
 	if err := pb.RegisterCorrelationServiceHandlerFromEndpoint(ctx, gwmux, *grpcServerEndpoint, opts); err != nil {
 		return fmt.Errorf("failed to register CorrelationService: %w", err)
 	}
-	
+
 	// Register ObservabilityService
 	if err := pb.RegisterObservabilityServiceHandlerFromEndpoint(ctx, gwmux, *grpcServerEndpoint, opts); err != nil {
 		return fmt.Errorf("failed to register ObservabilityService: %w", err)
@@ -111,22 +111,22 @@ func runGateway(ctx context.Context, logger *zap.Logger) error {
 
 	// Create HTTP mux
 	mux := http.NewServeMux()
-	
+
 	// Mount gRPC-Gateway
 	mux.Handle("/v1/", gwmux)
-	
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
-	
+
 	// Swagger UI
 	if *enableSwagger {
 		mux.HandleFunc("/swagger.json", func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFile(w, r, fmt.Sprintf("%s/tapio.swagger.json", *swaggerDir))
 		})
-		
+
 		// Serve Swagger UI (you'll need to add swagger-ui files)
 		mux.HandleFunc("/swagger/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
@@ -138,7 +138,7 @@ func runGateway(ctx context.Context, logger *zap.Logger) error {
 	handler := loggingMiddleware(logger)(mux)
 	handler = authMiddleware(handler)
 	handler = rateLimitMiddleware(handler)
-	
+
 	// Configure CORS
 	if *enableCORS {
 		c := cors.New(cors.Options{
@@ -162,7 +162,7 @@ func runGateway(ctx context.Context, logger *zap.Logger) error {
 	}
 
 	// Start server
-	logger.Info("Starting gRPC-Gateway", 
+	logger.Info("Starting gRPC-Gateway",
 		zap.String("grpc_endpoint", *grpcServerEndpoint),
 		zap.Int("http_port", *httpPort),
 		zap.Bool("cors_enabled", *enableCORS),
@@ -195,13 +195,13 @@ func loggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			
+
 			// Wrap response writer to capture status
 			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-			
+
 			// Process request
 			next.ServeHTTP(wrapped, r)
-			
+
 			// Log request
 			logger.Info("HTTP request",
 				zap.String("method", r.Method),
@@ -221,16 +221,16 @@ func authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		
+
 		// Check for API key or Bearer token
 		apiKey := r.Header.Get("X-API-Key")
 		authHeader := r.Header.Get("Authorization")
-		
+
 		if apiKey == "" && authHeader == "" {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		
+
 		// TODO: Implement actual authentication logic
 		// For now, just pass through
 		next.ServeHTTP(w, r)

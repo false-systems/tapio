@@ -38,4 +38,3 @@ func DefaultConfig() Config {
 func NewCollector(config Config) (Collector, error) {
 	return internal.NewCollector(config)
 }
-
