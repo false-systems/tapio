@@ -17,10 +17,10 @@ func newNodeWatcher(clientset kubernetes.Interface, config core.Config) core.Res
 		baseWatcher: newBaseWatcher("Node", config),
 		clientset:   clientset,
 	}
-	
+
 	factory := informers.NewSharedInformerFactory(clientset, config.ResyncPeriod)
 	watcher.informer = factory.Core().V1().Nodes().Informer()
-	
+
 	return watcher
 }
 
@@ -35,14 +35,14 @@ func newServiceWatcher(clientset kubernetes.Interface, config core.Config) core.
 		baseWatcher: newBaseWatcher("Service", config),
 		clientset:   clientset,
 	}
-	
+
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
 		config.ResyncPeriod,
 		informers.WithNamespace(config.Namespace),
 	)
 	watcher.informer = factory.Core().V1().Services().Informer()
-	
+
 	return watcher
 }
 
@@ -57,14 +57,14 @@ func newDeploymentWatcher(clientset kubernetes.Interface, config core.Config) co
 		baseWatcher: newBaseWatcher("Deployment", config),
 		clientset:   clientset,
 	}
-	
+
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
 		config.ResyncPeriod,
 		informers.WithNamespace(config.Namespace),
 	)
 	watcher.informer = factory.Apps().V1().Deployments().Informer()
-	
+
 	return watcher
 }
 
@@ -79,14 +79,14 @@ func newEventWatcher(clientset kubernetes.Interface, config core.Config) core.Re
 		baseWatcher: newBaseWatcher("Event", config),
 		clientset:   clientset,
 	}
-	
+
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
 		config.ResyncPeriod,
 		informers.WithNamespace(config.Namespace),
 	)
 	watcher.informer = factory.Core().V1().Events().Informer()
-	
+
 	return watcher
 }
 
@@ -101,14 +101,14 @@ func newConfigMapWatcher(clientset kubernetes.Interface, config core.Config) cor
 		baseWatcher: newBaseWatcher("ConfigMap", config),
 		clientset:   clientset,
 	}
-	
+
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
 		config.ResyncPeriod,
 		informers.WithNamespace(config.Namespace),
 	)
 	watcher.informer = factory.Core().V1().ConfigMaps().Informer()
-	
+
 	return watcher
 }
 
@@ -123,13 +123,13 @@ func newSecretWatcher(clientset kubernetes.Interface, config core.Config) core.R
 		baseWatcher: newBaseWatcher("Secret", config),
 		clientset:   clientset,
 	}
-	
+
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
 		config.ResyncPeriod,
 		informers.WithNamespace(config.Namespace),
 	)
 	watcher.informer = factory.Core().V1().Secrets().Informer()
-	
+
 	return watcher
 }

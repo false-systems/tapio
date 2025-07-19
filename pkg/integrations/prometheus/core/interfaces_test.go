@@ -1,10 +1,10 @@
 package core_test
 
 import (
-    "testing"
+	"testing"
 )
 
 func TestPlaceholder(t *testing.T) {
-    // TODO: Implement tests
-    t.Skip("Not implemented")
+	// TODO: Implement tests
+	t.Skip("Not implemented")
 }

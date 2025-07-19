@@ -14,31 +14,31 @@ import (
 )
 
 const (
-	RED           = "\033[0;31m"
-	GREEN         = "\033[0;32m"
-	YELLOW        = "\033[0;33m"
-	BLUE          = "\033[0;34m"
-	NC            = "\033[0m"
-	BOLD          = "\033[1m"
-	
+	RED    = "\033[0;31m"
+	GREEN  = "\033[0;32m"
+	YELLOW = "\033[0;33m"
+	BLUE   = "\033[0;34m"
+	NC     = "\033[0m"
+	BOLD   = "\033[1m"
+
 	COVERAGE_THRESHOLD = 80.0 // Minimum 80% coverage required
 )
 
 type ModuleCoverage struct {
-	Path           string
-	Coverage       float64
-	TotalLines     int
-	CoveredLines   int
-	HasTests       bool
-	TestFiles      []string
-	PublicFuncs    []string
-	UntestedFuncs  []string
-	Errors         []string
+	Path          string
+	Coverage      float64
+	TotalLines    int
+	CoveredLines  int
+	HasTests      bool
+	TestFiles     []string
+	PublicFuncs   []string
+	UntestedFuncs []string
+	Errors        []string
 }
 
 type CoverageChecker struct {
-	modules    []ModuleCoverage
-	totalFailed int
+	modules         []ModuleCoverage
+	totalFailed     int
 	publicFuncRegex *regexp.Regexp
 }
 
@@ -90,17 +90,17 @@ func (cc *CoverageChecker) findModules() error {
 		if info.Name() == "go.mod" {
 			modulePath := filepath.Dir(path)
 			module := ModuleCoverage{
-				Path:        modulePath,
-				HasTests:    false,
-				TestFiles:   []string{},
-				PublicFuncs: []string{},
+				Path:          modulePath,
+				HasTests:      false,
+				TestFiles:     []string{},
+				PublicFuncs:   []string{},
 				UntestedFuncs: []string{},
-				Errors:      []string{},
+				Errors:        []string{},
 			}
 
 			// Find test files
 			cc.findTestFiles(&module)
-			
+
 			// Find public functions
 			cc.findPublicFunctions(&module)
 
@@ -147,7 +147,7 @@ func (cc *CoverageChecker) findPublicFunctions(module *ModuleCoverage) {
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
-			
+
 			// Find public function declarations
 			matches := cc.publicFuncRegex.FindStringSubmatch(line)
 			if len(matches) > 1 {
@@ -239,7 +239,7 @@ func (cc *CoverageChecker) checkModuleCoverage(module *ModuleCoverage) {
 
 func (cc *CoverageChecker) parseUncoveredFunctions(module *ModuleCoverage, coverageOutput string) {
 	lines := strings.Split(coverageOutput, "\n")
-	
+
 	for _, line := range lines {
 		if strings.Contains(line, "0.0%") {
 			// Function with 0% coverage
@@ -253,9 +253,9 @@ func (cc *CoverageChecker) parseUncoveredFunctions(module *ModuleCoverage, cover
 }
 
 func (cc *CoverageChecker) reportResults() {
-	fmt.Printf("%s" + strings.Repeat("=", 70) + "%s\n", BLUE, NC)
+	fmt.Printf("%s"+strings.Repeat("=", 70)+"%s\n", BLUE, NC)
 	fmt.Printf("%sTest Coverage Report%s\n", BOLD+BLUE, NC)
-	fmt.Printf("%s" + strings.Repeat("=", 70) + "%s\n\n", BLUE, NC)
+	fmt.Printf("%s"+strings.Repeat("=", 70)+"%s\n\n", BLUE, NC)
 
 	passed := len(cc.modules) - cc.totalFailed
 
@@ -306,11 +306,11 @@ func (cc *CoverageChecker) reportResults() {
 	// Error details
 	if cc.totalFailed > 0 {
 		fmt.Printf("\n%sDetailed Issues:%s\n", RED+BOLD, NC)
-		
+
 		for _, module := range cc.modules {
 			if len(module.Errors) > 0 || len(module.UntestedFuncs) > 0 {
 				fmt.Printf("\n%s%s:%s\n", YELLOW, module.Path, NC)
-				
+
 				for _, err := range module.Errors {
 					fmt.Printf("  ❌ %s\n", err)
 				}
@@ -339,7 +339,7 @@ func (cc *CoverageChecker) reportResults() {
 		fmt.Printf("4. Use table-driven tests for multiple scenarios\n")
 		fmt.Printf("5. Add benchmark tests for performance-critical code\n")
 		fmt.Printf("6. Ensure test coverage >= %.1f%% for all modules\n", COVERAGE_THRESHOLD)
-		
+
 		fmt.Printf("\n%sExample test structure:%s\n", GREEN, NC)
 		fmt.Printf(`func TestCollector_CollectEvents(t *testing.T) {
     tests := []struct {

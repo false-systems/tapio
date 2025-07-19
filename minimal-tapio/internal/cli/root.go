@@ -27,10 +27,10 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	
+
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&serverURL, "server", "http://localhost:8080", "Tapio server URL")
-	
+
 	// Bind flags to viper
 	viper.BindPFlag("server", rootCmd.PersistentFlags().Lookup("server"))
 }
@@ -38,7 +38,7 @@ func init() {
 func initConfig() {
 	// Set defaults
 	viper.SetDefault("server", "http://localhost:8080")
-	
+
 	// Read from environment
 	viper.SetEnvPrefix("TAPIO")
 	viper.AutomaticEnv()

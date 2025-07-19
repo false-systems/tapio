@@ -22,13 +22,13 @@ const (
 )
 
 type TypeViolation struct {
-	File        string
-	Line        int
-	Function    string
-	Issue       string
-	Severity    string
-	Code        string
-	Suggestion  string
+	File       string
+	Line       int
+	Function   string
+	Issue      string
+	Severity   string
+	Code       string
+	Suggestion string
 }
 
 type TypeSafetyChecker struct {
@@ -296,12 +296,12 @@ func (tsc *TypeSafetyChecker) isEmptyInterface(expr ast.Expr) bool {
 	if interfaceType, ok := expr.(*ast.InterfaceType); ok {
 		return len(interfaceType.Methods.List) == 0
 	}
-	
+
 	// Check for 'any' type (Go 1.18+)
 	if ident, ok := expr.(*ast.Ident); ok {
 		return ident.Name == "any"
 	}
-	
+
 	return false
 }
 
@@ -415,7 +415,7 @@ func (tsc *TypeSafetyChecker) reportResults() {
 
 	fmt.Printf("%sClaude.md Rule Q1 - Type Safety Requirements:%s\n", BLUE+BOLD, NC)
 	fmt.Printf("❌ FORBIDDEN: map[string]interface{} without strong justification\n")
-	fmt.Printf("❌ FORBIDDEN: interface{} in public APIs\n") 
+	fmt.Printf("❌ FORBIDDEN: interface{} in public APIs\n")
 	fmt.Printf("❌ FORBIDDEN: any without explicit comment explaining why\n")
 	fmt.Printf("✅ REQUIRED: Strongly-typed structs for all data\n")
 	fmt.Printf("✅ REQUIRED: Validation methods for all input types\n")

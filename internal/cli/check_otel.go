@@ -46,15 +46,15 @@ Configure with TAPIO_OTEL_ENDPOINT environment variable.`,
 
 var (
 	// Output flags
-	humanOutput    bool
-	otelEndpoint   string
-	outputFormat   string
-	
+	humanOutput  bool
+	otelEndpoint string
+	outputFormat string
+
 	// Check flags
-	allNamespaces  bool
-	namespace      string
-	selector       string
-	
+	allNamespaces bool
+	namespace     string
+	selector      string
+
 	// OTEL feature flags
 	includePredictions     bool
 	includeRecommendations bool
@@ -63,17 +63,17 @@ var (
 
 func init() {
 	rootCmd.AddCommand(checkCmd)
-	
+
 	// Output format flags
 	checkCmd.Flags().BoolVar(&humanOutput, "human", false, "Output human-readable text instead of OTEL traces")
 	checkCmd.Flags().StringVar(&outputFormat, "output", "otel", "Output format: otel, json, yaml (default: otel)")
 	checkCmd.Flags().StringVar(&otelEndpoint, "otel-endpoint", "", "OTEL collector endpoint (default: localhost:4317)")
-	
+
 	// Check scope flags
 	checkCmd.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "Check all namespaces")
 	checkCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Namespace to check")
 	checkCmd.Flags().StringVarP(&selector, "selector", "l", "", "Label selector")
-	
+
 	// OTEL enrichment flags
 	checkCmd.Flags().BoolVar(&includePredictions, "predictions", true, "Include failure predictions in OTEL traces")
 	checkCmd.Flags().BoolVar(&includeRecommendations, "recommendations", true, "Include recommendations in OTEL traces")
@@ -82,31 +82,31 @@ func init() {
 
 func runCheckWithOTEL(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	
+
 	// Determine target
 	target := "."
 	if len(args) > 0 {
 		target = args[0]
 	}
-	
+
 	// Initialize health checker
 	checker, err := initializeHealthChecker()
 	if err != nil {
 		return fmt.Errorf("failed to initialize health checker: %w", err)
 	}
-	
+
 	// Perform health analysis
 	analysis, err := checker.Analyze(ctx, target, namespace, allNamespaces)
 	if err != nil {
 		return fmt.Errorf("health analysis failed: %w", err)
 	}
-	
+
 	// Output results based on format
 	if humanOutput || outputFormat == "human" {
 		// Human-readable output for debugging
 		return outputHumanReadable(analysis)
 	}
-	
+
 	// Default: OTEL output
 	return outputOTEL(ctx, analysis)
 }
@@ -120,7 +120,7 @@ func outputOTEL(ctx context.Context, analysis interface{}) error {
 	if endpoint == "" {
 		endpoint = "localhost:4317"
 	}
-	
+
 	// Create OTEL output config
 	config := &output.OTELOutputConfig{
 		Endpoint:                 endpoint,
@@ -132,21 +132,21 @@ func outputOTEL(ctx context.Context, analysis interface{}) error {
 		IncludeRecommendations:   includeRecommendations,
 		IncludeBusinessImpact:    includeBusinessImpact,
 	}
-	
+
 	// Create OTEL output handler
 	otelOutput, err := output.NewOTELNativeOutput(config)
 	if err != nil {
 		return fmt.Errorf("failed to create OTEL output: %w", err)
 	}
 	defer otelOutput.Close()
-	
+
 	// Output based on analysis type
 	switch a := analysis.(type) {
 	case *health.Analysis:
 		if err := otelOutput.OutputHealthCheck(ctx, a); err != nil {
 			return fmt.Errorf("failed to output health check: %w", err)
 		}
-		
+
 		// Print summary for user feedback
 		fmt.Printf("✓ OTEL traces exported to %s\n", endpoint)
 		fmt.Printf("  Status: %s\n", a.Status)
@@ -155,24 +155,24 @@ func outputOTEL(ctx context.Context, analysis interface{}) error {
 			fmt.Printf("  Predictions: %d future issues predicted\n", len(a.Predictions))
 		}
 		fmt.Printf("\nView traces in your OTEL backend (Jaeger, Grafana, etc.)\n")
-		
+
 	case *correlation.CorrelationResult:
 		if err := otelOutput.OutputCorrelation(ctx, a); err != nil {
 			return fmt.Errorf("failed to output correlation: %w", err)
 		}
-		
+
 		fmt.Printf("✓ Correlation analysis exported to %s\n", endpoint)
 		fmt.Printf("  Patterns found: %d\n", len(a.Patterns))
 		fmt.Printf("  Insights generated: %d\n", len(a.Insights))
 	}
-	
+
 	return nil
 }
 
 func outputHumanReadable(analysis interface{}) error {
 	// Use existing human formatter
 	formatter := output.NewHumanFormatter()
-	
+
 	switch a := analysis.(type) {
 	case *health.Analysis:
 		fmt.Println(formatter.FormatHealthAnalysis(a))
@@ -181,7 +181,7 @@ func outputHumanReadable(analysis interface{}) error {
 	default:
 		return fmt.Errorf("unknown analysis type: %T", analysis)
 	}
-	
+
 	return nil
 }
 

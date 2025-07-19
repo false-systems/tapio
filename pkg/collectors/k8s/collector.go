@@ -44,14 +44,14 @@ func DefaultConfig() Config {
 			kubeconfig = ""
 		}
 	}
-	
+
 	// Check if running in cluster
 	inCluster := false
 	if _, err := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount/token"); err == nil {
 		inCluster = true
 		kubeconfig = ""
 	}
-	
+
 	return Config{
 		Name:             "k8s-collector",
 		Enabled:          true,

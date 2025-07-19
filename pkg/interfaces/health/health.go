@@ -23,12 +23,12 @@ const (
 
 // Response represents the standardized health check response
 type Response struct {
-	Status    Status            `json:"status"`
-	Timestamp time.Time         `json:"timestamp"`
-	Service   string            `json:"service"`
-	Version   string            `json:"version"`
-	Uptime    string            `json:"uptime,omitempty"`
-	Checks    map[string]Check  `json:"checks,omitempty"`
+	Status    Status           `json:"status"`
+	Timestamp time.Time        `json:"timestamp"`
+	Service   string           `json:"service"`
+	Version   string           `json:"version"`
+	Uptime    string           `json:"uptime,omitempty"`
+	Checks    map[string]Check `json:"checks,omitempty"`
 }
 
 // Check represents an individual health check result
@@ -76,13 +76,13 @@ func (h *Handler) AddChecker(checker Checker) {
 // ServeHTTP implements http.Handler for health checks
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// Run all health checks
 	checks := h.runChecks(ctx)
-	
+
 	// Determine overall status
 	status := h.calculateOverallStatus(checks)
-	
+
 	// Build response
 	response := Response{
 		Status:    status,
@@ -92,7 +92,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Uptime:    time.Since(h.startTime).Round(time.Second).String(),
 		Checks:    checks,
 	}
-	
+
 	// Set appropriate status code
 	statusCode := http.StatusOK
 	if status == StatusUnhealthy {
@@ -100,7 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else if status == StatusDegraded {
 		statusCode = http.StatusOK // Still return 200 for degraded
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
@@ -115,7 +115,7 @@ func (h *Handler) LivenessHandler() http.HandlerFunc {
 			"timestamp": time.Now(),
 			"service":   h.service,
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
@@ -128,19 +128,19 @@ func (h *Handler) ReadinessHandler() http.HandlerFunc {
 		ctx := r.Context()
 		checks := h.runChecks(ctx)
 		status := h.calculateOverallStatus(checks)
-		
+
 		response := map[string]interface{}{
 			"status":    string(status),
 			"timestamp": time.Now(),
 			"service":   h.service,
 			"ready":     status != StatusUnhealthy,
 		}
-		
+
 		statusCode := http.StatusOK
 		if status == StatusUnhealthy {
 			statusCode = http.StatusServiceUnavailable
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
 		json.NewEncoder(w).Encode(response)
@@ -153,30 +153,30 @@ func (h *Handler) runChecks(ctx context.Context) map[string]Check {
 	checkers := make([]Checker, len(h.checkers))
 	copy(checkers, h.checkers)
 	h.mu.RUnlock()
-	
+
 	checks := make(map[string]Check)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	
+
 	for _, checker := range checkers {
 		wg.Add(1)
 		go func(c Checker) {
 			defer wg.Done()
-			
+
 			// Run check with timeout
 			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			
+
 			start := time.Now()
 			check := c.Check(checkCtx)
 			check.Latency = time.Since(start).String()
-			
+
 			mu.Lock()
 			checks[c.Name()] = check
 			mu.Unlock()
 		}(checker)
 	}
-	
+
 	wg.Wait()
 	return checks
 }
@@ -186,10 +186,10 @@ func (h *Handler) calculateOverallStatus(checks map[string]Check) Status {
 	if len(checks) == 0 {
 		return StatusHealthy
 	}
-	
+
 	hasUnhealthy := false
 	hasDegraded := false
-	
+
 	for _, check := range checks {
 		switch check.Status {
 		case StatusUnhealthy:
@@ -198,7 +198,7 @@ func (h *Handler) calculateOverallStatus(checks map[string]Check) Status {
 			hasDegraded = true
 		}
 	}
-	
+
 	if hasUnhealthy {
 		return StatusUnhealthy
 	}

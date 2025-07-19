@@ -12,14 +12,14 @@ type Collector interface {
 	// Lifecycle management
 	Start(ctx context.Context) error
 	Stop() error
-	
+
 	// Event streaming
 	Events() <-chan domain.Event
-	
+
 	// Health and monitoring
 	Health() Health
 	Statistics() Statistics
-	
+
 	// Configuration
 	Configure(config Config) error
 }
@@ -27,28 +27,28 @@ type Collector interface {
 // Config defines eBPF collector configuration
 type Config struct {
 	// Basic settings
-	Name            string        `json:"name"`
-	Enabled         bool          `json:"enabled"`
-	EventBufferSize int           `json:"event_buffer_size"`
-	
+	Name            string `json:"name"`
+	Enabled         bool   `json:"enabled"`
+	EventBufferSize int    `json:"event_buffer_size"`
+
 	// Feature toggles
 	EnableNetwork bool `json:"enable_network"`
 	EnableMemory  bool `json:"enable_memory"`
 	EnableProcess bool `json:"enable_process"`
 	EnableFile    bool `json:"enable_file"`
-	
+
 	// Performance tuning
 	RingBufferSize     int           `json:"ring_buffer_size"`
 	EventRateLimit     int           `json:"event_rate_limit"`
 	SamplingInterval   time.Duration `json:"sampling_interval"`
-	BatchSize          int           `json:"batch_size"`          // New: for batch processing
-	CollectionInterval time.Duration `json:"collection_interval"` // New: for batch collection
+	BatchSize          int           `json:"batch_size"`            // New: for batch processing
+	CollectionInterval time.Duration `json:"collection_interval"`   // New: for batch collection
 	MaxEventsPerSecond int           `json:"max_events_per_second"` // New: rate limiting
-	
+
 	// Advanced features
 	Programs []ProgramSpec `json:"programs"` // New: eBPF program specifications
 	Filter   Filter        `json:"filter"`   // New: event filtering
-	
+
 	// Data retention
 	RetentionPeriod string        `json:"retention_period"`
 	Timeout         time.Duration `json:"timeout"` // New: operation timeout
@@ -56,12 +56,12 @@ type Config struct {
 
 // Health represents collector health status
 type Health struct {
-	Status          HealthStatus      `json:"status"`
-	Message         string            `json:"message"`
-	LastEventTime   time.Time         `json:"last_event_time"`
-	EventsProcessed uint64            `json:"events_processed"`
-	EventsDropped   uint64            `json:"events_dropped"`
-	ErrorCount      uint64            `json:"error_count"`
+	Status          HealthStatus       `json:"status"`
+	Message         string             `json:"message"`
+	LastEventTime   time.Time          `json:"last_event_time"`
+	EventsProcessed uint64             `json:"events_processed"`
+	EventsDropped   uint64             `json:"events_dropped"`
+	ErrorCount      uint64             `json:"error_count"`
 	Metrics         map[string]float64 `json:"metrics"`
 }
 
@@ -77,15 +77,15 @@ const (
 
 // Statistics represents runtime statistics
 type Statistics struct {
-	StartTime          time.Time          `json:"start_time"`
-	EventsCollected    uint64             `json:"events_collected"`
-	EventsDropped      uint64             `json:"events_dropped"`
-	BytesProcessed     uint64             `json:"bytes_processed"`
-	ProgramsLoaded     int                `json:"programs_loaded"`
-	MapsCreated        int                `json:"maps_created"`
-	CPUTimeNanos       uint64             `json:"cpu_time_nanos"`
-	MemoryBytes        uint64             `json:"memory_bytes"`
-	Custom             map[string]interface{} `json:"custom"`
+	StartTime       time.Time              `json:"start_time"`
+	EventsCollected uint64                 `json:"events_collected"`
+	EventsDropped   uint64                 `json:"events_dropped"`
+	BytesProcessed  uint64                 `json:"bytes_processed"`
+	ProgramsLoaded  int                    `json:"programs_loaded"`
+	MapsCreated     int                    `json:"maps_created"`
+	CPUTimeNanos    uint64                 `json:"cpu_time_nanos"`
+	MemoryBytes     uint64                 `json:"memory_bytes"`
+	Custom          map[string]interface{} `json:"custom"`
 }
 
 // ProgramLoader loads eBPF programs
@@ -97,10 +97,10 @@ type ProgramLoader interface {
 
 // ProgramSpec defines an eBPF program specification
 type ProgramSpec struct {
-	Name       string            `json:"name"`
-	Type       ProgramType       `json:"type"`
-	AttachType AttachType        `json:"attach_type"`
-	Source     []byte            `json:"-"` // BPF bytecode
+	Name       string             `json:"name"`
+	Type       ProgramType        `json:"type"`
+	AttachType AttachType         `json:"attach_type"`
+	Source     []byte             `json:"-"` // BPF bytecode
 	Maps       map[string]MapSpec `json:"maps"`
 }
 
@@ -143,22 +143,22 @@ const (
 
 // ProgramInfo contains information about a loaded program
 type ProgramInfo struct {
-	Name         string    `json:"name"`
-	Type         ProgramType `json:"type"`
-	AttachType   AttachType  `json:"attach_type"`
-	LoadedAt     time.Time   `json:"loaded_at"`
-	EventCount   uint64      `json:"event_count"`
-	ErrorCount   uint64      `json:"error_count"`
+	Name       string      `json:"name"`
+	Type       ProgramType `json:"type"`
+	AttachType AttachType  `json:"attach_type"`
+	LoadedAt   time.Time   `json:"loaded_at"`
+	EventCount uint64      `json:"event_count"`
+	ErrorCount uint64      `json:"error_count"`
 }
 
 // MapInfo contains information about an eBPF map
 type MapInfo struct {
-	Name       string  `json:"name"`
-	Type       MapType `json:"type"`
-	KeySize    uint32  `json:"key_size"`
-	ValueSize  uint32  `json:"value_size"`
-	MaxEntries uint32  `json:"max_entries"`
-	UsedEntries uint32 `json:"used_entries"`
+	Name        string  `json:"name"`
+	Type        MapType `json:"type"`
+	KeySize     uint32  `json:"key_size"`
+	ValueSize   uint32  `json:"value_size"`
+	MaxEntries  uint32  `json:"max_entries"`
+	UsedEntries uint32  `json:"used_entries"`
 }
 
 // Filter defines event filtering criteria
@@ -181,10 +181,10 @@ type EventProcessor interface {
 type RingBufferReader interface {
 	// Read reads the next event from the ring buffer
 	Read() ([]byte, error)
-	
+
 	// ReadBatch reads multiple events at once for efficiency
 	ReadBatch(maxEvents int) ([][]byte, error)
-	
+
 	// Close closes the ring buffer reader
 	Close() error
 }
@@ -193,13 +193,13 @@ type RingBufferReader interface {
 type MapManager interface {
 	// CreateMap creates a new eBPF map
 	CreateMap(spec MapSpec) (Map, error)
-	
+
 	// GetMap retrieves an existing map by name
 	GetMap(name string) (Map, error)
-	
+
 	// DeleteMap removes a map
 	DeleteMap(name string) error
-	
+
 	// ListMaps returns all managed maps
 	ListMaps() ([]MapInfo, error)
 }
@@ -208,48 +208,48 @@ type MapManager interface {
 type Map interface {
 	// Lookup retrieves a value by key
 	Lookup(key []byte) ([]byte, error)
-	
+
 	// Update sets a key-value pair
 	Update(key, value []byte) error
-	
+
 	// Delete removes a key
 	Delete(key []byte) error
-	
+
 	// Iterate iterates over all entries
 	Iterate(fn func(key, value []byte) error) error
-	
+
 	// Close closes the map
 	Close() error
 }
 
 // RawEvent represents a raw eBPF event
 type RawEvent struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	Type        string                 `json:"type"`
-	CPU         uint32                 `json:"cpu"`
-	PID         uint32                 `json:"pid"`
-	TID         uint32                 `json:"tid"`
-	UID         uint32                 `json:"uid"`
-	GID         uint32                 `json:"gid"`
-	Comm        string                 `json:"comm"`
-	Data        []byte                 `json:"-"`
-	Decoded     map[string]interface{} `json:"decoded,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      string                 `json:"type"`
+	CPU       uint32                 `json:"cpu"`
+	PID       uint32                 `json:"pid"`
+	TID       uint32                 `json:"tid"`
+	UID       uint32                 `json:"uid"`
+	GID       uint32                 `json:"gid"`
+	Comm      string                 `json:"comm"`
+	Data      []byte                 `json:"-"`
+	Decoded   map[string]interface{} `json:"decoded,omitempty"`
 }
 
 // Monitor represents the eBPF monitoring interface for health checks
 type Monitor interface {
 	// IsAvailable checks if eBPF is available on the system
 	IsAvailable() bool
-	
+
 	// GetLastError returns the last error encountered
 	GetLastError() error
-	
+
 	// Start starts the monitor
 	Start(ctx context.Context) error
-	
+
 	// Stop stops the monitor
 	Stop() error
-	
+
 	// GetMemoryStats returns memory statistics
 	GetMemoryStats() map[string]interface{}
 }
@@ -268,9 +268,9 @@ func (c Config) Validate() error {
 // GetDetailedStatus returns detailed eBPF status information
 func GetDetailedStatus() map[string]interface{} {
 	return map[string]interface{}{
-		"kernel_support": checkKernelSupport(),
-		"permissions":    checkPermissions(),
-		"bpf_jit":       checkBPFJIT(),
+		"kernel_support":  checkKernelSupport(),
+		"permissions":     checkPermissions(),
+		"bpf_jit":         checkBPFJIT(),
 		"recommendations": getRecommendations(),
 	}
 }

@@ -15,18 +15,18 @@ import (
 // SemanticOTELTracer adds revolutionary multi-dimensional correlation to OTEL traces
 // This is the crown jewel - grouping traces by MEANING, not just time
 type SemanticOTELTracer struct {
-	tracer             trace.Tracer
-	semanticGroups     map[string]*SemanticTraceGroup
-	adaptiveWindows    map[string]time.Duration
-	causalityTracker   *SimpleCausalityTracker
-	spatialRadius      int
+	tracer           trace.Tracer
+	semanticGroups   map[string]*SemanticTraceGroup
+	adaptiveWindows  map[string]time.Duration
+	causalityTracker *SimpleCausalityTracker
+	spatialRadius    int
 }
 
 // SemanticTraceGroup represents events grouped by meaning and causality
 type SemanticTraceGroup struct {
 	ID               string
-	Intent           string    // What is this group trying to achieve?
-	SemanticType     string    // memory_cascade, network_failure, etc.
+	Intent           string // What is this group trying to achieve?
+	SemanticType     string // memory_cascade, network_failure, etc.
 	RootCause        *domain.Event
 	CausalChain      []*domain.Event
 	ConfidenceScore  float64
@@ -48,7 +48,7 @@ type ImpactAssessment struct {
 
 // PredictedOutcome predicts what will happen
 type PredictedOutcome struct {
-	Scenario          string        // "cascade_failure", "recovery", etc.
+	Scenario          string // "cascade_failure", "recovery", etc.
 	Probability       float64
 	TimeToOutcome     time.Duration
 	PreventionActions []string
@@ -67,7 +67,7 @@ type CausalLink struct {
 	SourceEventID string
 	TargetEventID string
 	Strength      float64
-	Type          string  // "triggers", "causes", "correlates"
+	Type          string // "triggers", "causes", "correlates"
 }
 
 // NewSemanticOTELTracer creates the revolutionary tracer
@@ -96,10 +96,10 @@ func NewSemanticOTELTracer() *SemanticOTELTracer {
 func (st *SemanticOTELTracer) ProcessEventWithSemanticTrace(ctx context.Context, event *domain.Event) error {
 	// Step 1: Classify semantic intent
 	intent := st.classifySemanticIntent(event)
-	
+
 	// Step 2: Find or create semantic group
 	group := st.findOrCreateSemanticGroup(ctx, event, intent)
-	
+
 	// Step 3: Create the revolutionary correlation trace
 	return st.createSemanticCorrelationTrace(ctx, event, group)
 }
@@ -134,19 +134,19 @@ func (st *SemanticOTELTracer) findOrCreateSemanticGroup(ctx context.Context, eve
 		st.addEventToGroup(event, group)
 		return group
 	}
-	
+
 	// Check spatial relationships (same namespace/node)
 	if group := st.findSpatiallyRelatedGroup(event); group != nil {
 		st.addEventToGroup(event, group)
 		return group
 	}
-	
+
 	// Check temporal relationships with adaptive windows
 	if group := st.findTemporallyRelatedGroup(event); group != nil {
 		st.addEventToGroup(event, group)
 		return group
 	}
-	
+
 	// Create new semantic group
 	return st.createNewSemanticGroup(ctx, event, intent)
 }
@@ -155,7 +155,7 @@ func (st *SemanticOTELTracer) findOrCreateSemanticGroup(ctx context.Context, eve
 func (st *SemanticOTELTracer) findCausallyRelatedGroup(event *domain.Event) *SemanticTraceGroup {
 	// Look for causal links
 	eventID := string(event.ID)
-	
+
 	// Check if this event is caused by events in existing groups
 	for _, group := range st.semanticGroups {
 		for _, groupEvent := range group.CausalChain {
@@ -164,7 +164,7 @@ func (st *SemanticOTELTracer) findCausallyRelatedGroup(event *domain.Event) *Sem
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -181,7 +181,7 @@ func (st *SemanticOTELTracer) findSpatiallyRelatedGroup(event *domain.Event) *Se
 // findTemporallyRelatedGroup uses adaptive time windows
 func (st *SemanticOTELTracer) findTemporallyRelatedGroup(event *domain.Event) *SemanticTraceGroup {
 	window := st.getAdaptiveTimeWindow(event)
-	
+
 	for _, group := range st.semanticGroups {
 		// Check if event is within adaptive window of group
 		for _, groupEvent := range group.CausalChain {
@@ -190,17 +190,17 @@ func (st *SemanticOTELTracer) findTemporallyRelatedGroup(event *domain.Event) *S
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 // createNewSemanticGroup creates a new trace group
 func (st *SemanticOTELTracer) createNewSemanticGroup(ctx context.Context, event *domain.Event, intent string) *SemanticTraceGroup {
 	groupID := fmt.Sprintf("semantic_%s_%d", intent, time.Now().UnixNano())
-	
+
 	// Create OTEL trace for this semantic group
 	ctx, span := st.tracer.Start(ctx, fmt.Sprintf("semantic.%s", intent))
-	
+
 	group := &SemanticTraceGroup{
 		ID:              groupID,
 		Intent:          intent,
@@ -211,14 +211,14 @@ func (st *SemanticOTELTracer) createNewSemanticGroup(ctx context.Context, event 
 		TraceID:         span.SpanContext().TraceID().String(),
 		SpanContext:     span.SpanContext(),
 	}
-	
+
 	// Assess impact and predict outcome
 	group.ImpactAssessment = st.assessGroupImpact(group)
 	group.PredictedOutcome = st.predictGroupOutcome(group)
-	
+
 	// Cache the group
 	st.semanticGroups[groupID] = group
-	
+
 	return group
 }
 
@@ -226,7 +226,7 @@ func (st *SemanticOTELTracer) createNewSemanticGroup(ctx context.Context, event 
 func (st *SemanticOTELTracer) createSemanticCorrelationTrace(ctx context.Context, event *domain.Event, group *SemanticTraceGroup) error {
 	// Use group's span context for correlation
 	ctx = trace.ContextWithSpanContext(ctx, group.SpanContext)
-	
+
 	// Create span with multi-dimensional attributes
 	ctx, span := st.tracer.Start(ctx, fmt.Sprintf("event.%s", event.Type),
 		trace.WithAttributes(
@@ -235,24 +235,24 @@ func (st *SemanticOTELTracer) createSemanticCorrelationTrace(ctx context.Context
 			attribute.String("event.type", string(event.Type)),
 			attribute.String("event.severity", string(event.Severity)),
 			attribute.Float64("event.confidence", event.Confidence),
-			
+
 			// Revolutionary semantic grouping
 			attribute.String("semantic.group_id", group.ID),
 			attribute.String("semantic.intent", group.Intent),
 			attribute.String("semantic.type", group.SemanticType),
 			attribute.Float64("semantic.group_confidence", group.ConfidenceScore),
 			attribute.Int("semantic.causal_chain_length", len(group.CausalChain)),
-			
+
 			// Multi-dimensional correlation
 			attribute.Bool("correlation.is_root_cause", event.ID == group.RootCause.ID),
 			attribute.Int("correlation.related_events", len(group.CausalChain)),
 			attribute.String("correlation.dimension", st.getCorrelationDimension(event, group)),
-			
+
 			// Business impact in traces!
 			attribute.Float64("impact.business", float64(group.ImpactAssessment.BusinessImpact)),
 			attribute.String("impact.severity", group.ImpactAssessment.TechnicalSeverity),
 			attribute.Float64("impact.cascade_risk", float64(group.ImpactAssessment.CascadeRisk)),
-			
+
 			// Predictions in traces!
 			attribute.String("prediction.scenario", group.PredictedOutcome.Scenario),
 			attribute.Float64("prediction.probability", group.PredictedOutcome.Probability),
@@ -260,10 +260,10 @@ func (st *SemanticOTELTracer) createSemanticCorrelationTrace(ctx context.Context
 		),
 	)
 	defer span.End()
-	
+
 	// Add context-specific attributes
 	st.addContextAttributes(span, event)
-	
+
 	// Add causal chain as span events
 	for i, causalEvent := range group.CausalChain {
 		span.AddEvent(fmt.Sprintf("causal_event_%d", i),
@@ -275,7 +275,7 @@ func (st *SemanticOTELTracer) createSemanticCorrelationTrace(ctx context.Context
 			trace.WithTimestamp(causalEvent.Timestamp),
 		)
 	}
-	
+
 	// Add recommended actions as span events
 	for i, action := range group.ImpactAssessment.RecommendedActions {
 		span.AddEvent(fmt.Sprintf("action_%d", i),
@@ -285,7 +285,7 @@ func (st *SemanticOTELTracer) createSemanticCorrelationTrace(ctx context.Context
 			),
 		)
 	}
-	
+
 	return nil
 }
 
@@ -293,7 +293,7 @@ func (st *SemanticOTELTracer) createSemanticCorrelationTrace(ctx context.Context
 
 func (st *SemanticOTELTracer) addEventToGroup(event *domain.Event, group *SemanticTraceGroup) {
 	group.CausalChain = append(group.CausalChain, event)
-	
+
 	// Update impact assessment with new event
 	group.ImpactAssessment = st.assessGroupImpact(group)
 	group.PredictedOutcome = st.predictGroupOutcome(group)
@@ -304,13 +304,13 @@ func (st *SemanticOTELTracer) areEventsCausallyLinked(sourceID, targetID string)
 	if !exists {
 		return false
 	}
-	
+
 	for _, link := range links {
 		if link.TargetEventID == targetID && link.Strength >= st.causalityTracker.strengthThreshold {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -319,12 +319,12 @@ func (st *SemanticOTELTracer) areEventsSpatiallyRelated(event1, event2 *domain.E
 	if event1.Context.Namespace != "" && event1.Context.Namespace == event2.Context.Namespace {
 		return true
 	}
-	
+
 	// Same node = spatially related
 	if event1.Context.Host != "" && event1.Context.Host == event2.Context.Host {
 		return true
 	}
-	
+
 	// Same pod = definitely related
 	if event1.Context.Labels != nil && event2.Context.Labels != nil {
 		pod1, _ := event1.Context.Labels["pod"]
@@ -333,7 +333,7 @@ func (st *SemanticOTELTracer) areEventsSpatiallyRelated(event1, event2 *domain.E
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -342,7 +342,7 @@ func (st *SemanticOTELTracer) getAdaptiveTimeWindow(event *domain.Event) time.Du
 	if window, exists := st.adaptiveWindows[string(event.Type)]; exists {
 		return window
 	}
-	
+
 	// Adjust based on severity
 	baseWindow := 30 * time.Second
 	switch event.Severity {
@@ -360,7 +360,7 @@ func (st *SemanticOTELTracer) getAdaptiveTimeWindow(event *domain.Event) time.Du
 func (st *SemanticOTELTracer) deriveSemanticType(event *domain.Event) string {
 	// Derive semantic type from event
 	eventType := string(event.Type)
-	
+
 	// Add context for richer semantic types
 	if strings.Contains(eventType, "memory") {
 		return "memory_pressure_cascade"
@@ -374,14 +374,14 @@ func (st *SemanticOTELTracer) deriveSemanticType(event *domain.Event) string {
 	if strings.Contains(eventType, "service") {
 		return "service_reliability_event"
 	}
-	
+
 	return eventType
 }
 
 func (st *SemanticOTELTracer) calculateConfidence(event *domain.Event) float64 {
 	// Start with event confidence
 	confidence := event.Confidence
-	
+
 	// Boost confidence based on available context
 	if event.Context.Namespace != "" {
 		confidence += 0.1
@@ -389,12 +389,12 @@ func (st *SemanticOTELTracer) calculateConfidence(event *domain.Event) float64 {
 	if event.Context.Host != "" {
 		confidence += 0.1
 	}
-	
+
 	// Cap at 1.0
 	if confidence > 1.0 {
 		confidence = 1.0
 	}
-	
+
 	return confidence
 }
 
@@ -406,18 +406,18 @@ func (st *SemanticOTELTracer) assessGroupImpact(group *SemanticTraceGroup) *Impa
 			TimeToResolution:   30 * time.Minute,
 		}
 	}
-	
+
 	assessment := &ImpactAssessment{
 		AffectedResources:  []string{},
 		RecommendedActions: []string{},
 	}
-	
+
 	// Analyze impact across all events
 	maxBusinessImpact := float32(0)
 	severityScore := 0
-	
+
 	resourceMap := make(map[string]bool)
-	
+
 	for _, event := range group.CausalChain {
 		// Track affected resources
 		if event.Context.Namespace != "" && event.Context.Labels != nil {
@@ -426,7 +426,7 @@ func (st *SemanticOTELTracer) assessGroupImpact(group *SemanticTraceGroup) *Impa
 				resourceMap[resource] = true
 			}
 		}
-		
+
 		// Calculate severity
 		switch event.Severity {
 		case "critical":
@@ -443,9 +443,9 @@ func (st *SemanticOTELTracer) assessGroupImpact(group *SemanticTraceGroup) *Impa
 			maxBusinessImpact = max(maxBusinessImpact, 0.3)
 		}
 	}
-	
+
 	assessment.BusinessImpact = maxBusinessImpact
-	
+
 	// Convert severity score
 	switch severityScore {
 	case 4:
@@ -457,24 +457,24 @@ func (st *SemanticOTELTracer) assessGroupImpact(group *SemanticTraceGroup) *Impa
 	default:
 		assessment.TechnicalSeverity = "low"
 	}
-	
+
 	// Calculate cascade risk (more sensitive)
-	assessment.CascadeRisk = float32(len(group.CausalChain)) / 5.0  // More sensitive to cascade size
+	assessment.CascadeRisk = float32(len(group.CausalChain)) / 5.0 // More sensitive to cascade size
 	if assessment.CascadeRisk > 1.0 {
 		assessment.CascadeRisk = 1.0
 	}
-	
+
 	// Convert resources
 	for resource := range resourceMap {
 		assessment.AffectedResources = append(assessment.AffectedResources, resource)
 	}
-	
+
 	// Generate actions based on semantic type
 	assessment.RecommendedActions = st.generateRecommendedActions(group)
-	
+
 	// Estimate resolution time
 	assessment.TimeToResolution = st.estimateResolutionTime(group)
-	
+
 	return assessment
 }
 
@@ -482,7 +482,7 @@ func (st *SemanticOTELTracer) predictGroupOutcome(group *SemanticTraceGroup) *Pr
 	outcome := &PredictedOutcome{
 		PreventionActions: []string{},
 	}
-	
+
 	// Predict based on semantic type
 	switch group.SemanticType {
 	case "memory_pressure_cascade":
@@ -493,7 +493,7 @@ func (st *SemanticOTELTracer) predictGroupOutcome(group *SemanticTraceGroup) *Pr
 			"kubectl scale deployment --replicas=+2",
 			"kubectl set resources deployment --limits=memory=2Gi",
 		}
-		
+
 	case "network_connectivity_issue":
 		outcome.Scenario = "service_isolation"
 		outcome.Probability = 0.7
@@ -502,7 +502,7 @@ func (st *SemanticOTELTracer) predictGroupOutcome(group *SemanticTraceGroup) *Pr
 			"kubectl get networkpolicies",
 			"kubectl rollout restart deployment",
 		}
-		
+
 	case "pod_lifecycle_event":
 		outcome.Scenario = "pod_crash_loop"
 		outcome.Probability = 0.6
@@ -511,7 +511,7 @@ func (st *SemanticOTELTracer) predictGroupOutcome(group *SemanticTraceGroup) *Pr
 			"kubectl describe pod",
 			"kubectl logs --previous",
 		}
-		
+
 	default:
 		outcome.Scenario = "service_degradation"
 		outcome.Probability = 0.5
@@ -521,51 +521,51 @@ func (st *SemanticOTELTracer) predictGroupOutcome(group *SemanticTraceGroup) *Pr
 			"kubectl top pods --sort-by=cpu",
 		}
 	}
-	
+
 	outcome.ConfidenceLevel = group.ConfidenceScore * outcome.Probability
-	
+
 	return outcome
 }
 
 func (st *SemanticOTELTracer) generateRecommendedActions(group *SemanticTraceGroup) []string {
 	actions := []string{}
-	
+
 	// Get namespace from root cause
 	namespace := group.RootCause.Context.Namespace
 	if namespace == "" {
 		namespace = "default"
 	}
-	
+
 	switch group.SemanticType {
 	case "memory_pressure_cascade":
 		actions = append(actions,
 			fmt.Sprintf("kubectl top pods -n %s | sort -k3 -h", namespace),
 			"kubectl describe nodes | grep -A 5 'Allocated resources'",
 		)
-		
+
 	case "service_reliability_event":
 		actions = append(actions,
 			fmt.Sprintf("kubectl get pods -n %s -o wide", namespace),
 			fmt.Sprintf("kubectl get events -n %s --sort-by='.lastTimestamp'", namespace),
 		)
-		
+
 	default:
 		actions = append(actions,
 			"kubectl get events --all-namespaces --sort-by='.lastTimestamp'",
 		)
 	}
-	
+
 	return actions
 }
 
 func (st *SemanticOTELTracer) estimateResolutionTime(group *SemanticTraceGroup) time.Duration {
 	// Base estimation on severity and type
 	baseTime := 10 * time.Minute
-	
+
 	if group == nil || group.ImpactAssessment == nil {
 		return baseTime
 	}
-	
+
 	switch group.ImpactAssessment.TechnicalSeverity {
 	case "critical":
 		baseTime = 5 * time.Minute
@@ -576,18 +576,18 @@ func (st *SemanticOTELTracer) estimateResolutionTime(group *SemanticTraceGroup) 
 	default:
 		baseTime = 60 * time.Minute
 	}
-	
+
 	// Adjust based on cascade risk
 	if group.ImpactAssessment.CascadeRisk > 0.7 {
 		baseTime = baseTime / 2 // Urgent
 	}
-	
+
 	return baseTime
 }
 
 func (st *SemanticOTELTracer) getCorrelationDimension(event *domain.Event, group *SemanticTraceGroup) string {
 	// Determine which dimension caused the correlation
-	
+
 	// Check temporal
 	window := st.getAdaptiveTimeWindow(event)
 	for _, groupEvent := range group.CausalChain {
@@ -595,19 +595,19 @@ func (st *SemanticOTELTracer) getCorrelationDimension(event *domain.Event, group
 			return "temporal"
 		}
 	}
-	
+
 	// Check spatial
 	if st.areEventsSpatiallyRelated(event, group.RootCause) {
 		return "spatial"
 	}
-	
+
 	// Check causal
 	for _, groupEvent := range group.CausalChain {
 		if st.areEventsCausallyLinked(string(groupEvent.ID), string(event.ID)) {
 			return "causal"
 		}
 	}
-	
+
 	return "semantic"
 }
 
@@ -619,7 +619,7 @@ func (st *SemanticOTELTracer) addContextAttributes(span trace.Span, event *domai
 	if event.Context.Host != "" {
 		span.SetAttributes(attribute.String("k8s.node", event.Context.Host))
 	}
-	
+
 	// Add pod info from labels
 	if event.Context.Labels != nil {
 		if pod, exists := event.Context.Labels["pod"]; exists {
@@ -629,7 +629,7 @@ func (st *SemanticOTELTracer) addContextAttributes(span trace.Span, event *domai
 			span.SetAttributes(attribute.String("k8s.deployment", deployment))
 		}
 	}
-	
+
 	// Add event-specific context based on payload type
 	switch payload := event.Payload.(type) {
 	case domain.MemoryEventPayload:
@@ -669,9 +669,9 @@ func (st *SemanticOTELTracer) AddCausalLink(sourceID, targetID string, strength 
 		Strength:      strength,
 		Type:          linkType,
 	}
-	
+
 	st.causalityTracker.causalLinks[sourceID] = append(
-		st.causalityTracker.causalLinks[sourceID], 
+		st.causalityTracker.causalLinks[sourceID],
 		link,
 	)
 }
@@ -684,7 +684,7 @@ func (st *SemanticOTELTracer) GetSemanticGroups() map[string]*SemanticTraceGroup
 // CleanupOldGroups removes groups older than retention period
 func (st *SemanticOTELTracer) CleanupOldGroups(retention time.Duration) {
 	cutoff := time.Now().Add(-retention)
-	
+
 	for id, group := range st.semanticGroups {
 		if len(group.CausalChain) > 0 {
 			lastEvent := group.CausalChain[len(group.CausalChain)-1]

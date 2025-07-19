@@ -131,13 +131,13 @@ type DeleteCriteria struct {
 type RuleEngine interface {
 	// ProcessEvent processes a single event through all rules
 	ProcessEvent(ctx context.Context, event Event) ([]Insight, error)
-	
+
 	// ProcessEvents processes multiple events
 	ProcessEvents(ctx context.Context, events []Event) ([]Insight, error)
-	
+
 	// RegisterRule registers a new rule
 	RegisterRule(rule Rule) error
-	
+
 	// GetRules returns all registered rules
 	GetRules() []Rule
 }
@@ -146,10 +146,10 @@ type RuleEngine interface {
 type Rule interface {
 	// GetID returns the rule ID
 	GetID() string
-	
+
 	// GetName returns the rule name
 	GetName() string
-	
+
 	// Evaluate evaluates the rule against events
 	Evaluate(ctx context.Context, events []Event) ([]Insight, error)
 }

@@ -15,12 +15,12 @@ func main() {
 	// Feature 1: Human-Readable Output
 	fmt.Println("📝 FEATURE 1: HUMAN-READABLE OUTPUT")
 	fmt.Println("===================================")
-	
+
 	formatter := collector.NewHumanReadableFormatter(
 		collector.StyleSimple,
 		collector.AudienceDeveloper,
 	)
-	
+
 	// Create a sample insight
 	insight := collector.Insight{
 		ID:          "demo-001",
@@ -38,7 +38,7 @@ func main() {
 		},
 		CreatedAt: time.Now(),
 	}
-	
+
 	humanOutput := formatter.FormatInsight(insight)
 	fmt.Printf("What happened: %s\n", humanOutput.WhatHappened)
 	fmt.Printf("Why it matters: %s\n", humanOutput.Impact)
@@ -49,7 +49,7 @@ func main() {
 			fmt.Printf("  $ %s\n", cmd)
 		}
 	}
-	
+
 	fmt.Println()
 	fmt.Println("📈 FEATURE 2: PREDICTIVE METRICS")
 	fmt.Println("================================")
@@ -58,12 +58,12 @@ func main() {
 	fmt.Println("# Memory exhaustion prediction")
 	fmt.Println("tapio_memory_exhaustion_eta_minutes{pod=\"payment-api-xyz123\"} 12.5")
 	fmt.Println()
-	fmt.Println("# CPU exhaustion prediction")  
+	fmt.Println("# CPU exhaustion prediction")
 	fmt.Println("tapio_cpu_exhaustion_eta_minutes{pod=\"api-gateway-abc456\"} 45.2")
 	fmt.Println()
 	fmt.Println("# Cascade failure risk")
 	fmt.Println("tapio_cascade_failure_risk{namespace=\"production\"} 0.75")
-	
+
 	fmt.Println()
 	fmt.Println("🔍 FEATURE 3: SEMANTIC OTEL TRACE CORRELATION")
 	fmt.Println("============================================")
@@ -79,10 +79,10 @@ func main() {
 	fmt.Println()
 	fmt.Println("Key Innovation: Events grouped by MEANING, not just time!")
 	fmt.Println("  - Memory pressure at T0")
-	fmt.Println("  - OOM warning at T0+30s")  
+	fmt.Println("  - OOM warning at T0+30s")
 	fmt.Println("  - Service degradation at T0+45s")
 	fmt.Println("  → All linked in ONE semantic trace group!")
-	
+
 	fmt.Println()
 	fmt.Println("✨ INTEGRATION COMPLETE")
 	fmt.Println("======================")

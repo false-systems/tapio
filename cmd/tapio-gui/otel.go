@@ -34,18 +34,18 @@ type OTELSpan struct {
 	Logs          []SpanLog      `json:"logs"`
 	Process       SpanProcess    `json:"process"`
 	References    []SpanRef      `json:"references,omitempty"`
-	
+
 	// Tapio-specific fields
-	StoryID       string  `json:"storyId,omitempty"`
-	CorrelationID string  `json:"correlationId,omitempty"`
-	Severity      string  `json:"severity,omitempty"`
-	Pattern       string  `json:"pattern,omitempty"`
+	StoryID       string `json:"storyId,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty"`
+	Severity      string `json:"severity,omitempty"`
+	Pattern       string `json:"pattern,omitempty"`
 }
 
 // SpanLog represents a log entry in a span
 type SpanLog struct {
-	Timestamp int64          `json:"timestamp"`
-	Fields    []LogField     `json:"fields"`
+	Timestamp int64      `json:"timestamp"`
+	Fields    []LogField `json:"fields"`
 }
 
 // LogField represents a field in a span log
@@ -79,7 +79,7 @@ func NewOTELBackend(endpoint string) *OTELBackend {
 	if endpoint == "" {
 		endpoint = "http://localhost:16686" // Default Jaeger UI
 	}
-	
+
 	return &OTELBackend{
 		jaegerEndpoint: endpoint,
 		httpClient: &http.Client{
@@ -93,19 +93,19 @@ func (a *App) GetTraces(service string, limit int) ([]OTELTrace, error) {
 	if a.otelBackend == nil {
 		a.otelBackend = NewOTELBackend("")
 	}
-	
+
 	// Default to tapio services
 	if service == "" {
 		service = "tapio"
 	}
-	
+
 	// Query Jaeger for traces
 	traces, err := a.otelBackend.SearchTraces(service, limit)
 	if err != nil {
 		// Return mock traces for development
 		return a.getMockTraces(), nil
 	}
-	
+
 	return traces, nil
 }
 
@@ -114,7 +114,7 @@ func (a *App) GetTraceByID(traceID string) (*OTELTrace, error) {
 	if a.otelBackend == nil {
 		a.otelBackend = NewOTELBackend("")
 	}
-	
+
 	trace, err := a.otelBackend.GetTrace(traceID)
 	if err != nil {
 		// Return mock trace for development
@@ -124,7 +124,7 @@ func (a *App) GetTraceByID(traceID string) (*OTELTrace, error) {
 		}
 		return nil, err
 	}
-	
+
 	return trace, nil
 }
 
@@ -132,10 +132,10 @@ func (a *App) GetTraceByID(traceID string) (*OTELTrace, error) {
 func (a *App) GetTracesForStory(storyID string) ([]OTELTrace, error) {
 	// In a real implementation, we'd query by story correlation ID
 	// For now, return mock traces that match the story
-	
+
 	mockTraces := a.getMockTraces()
 	relatedTraces := []OTELTrace{}
-	
+
 	for _, trace := range mockTraces {
 		// Check if any span references this story
 		for _, span := range trace.Spans {
@@ -145,35 +145,35 @@ func (a *App) GetTracesForStory(storyID string) ([]OTELTrace, error) {
 			}
 		}
 	}
-	
+
 	return relatedTraces, nil
 }
 
 // SearchTraces queries Jaeger for traces
 func (ob *OTELBackend) SearchTraces(service string, limit int) ([]OTELTrace, error) {
 	// Jaeger Query API: /api/traces?service=SERVICE&limit=N
-	url := fmt.Sprintf("%s/api/traces?service=%s&limit=%d&lookback=1h", 
+	url := fmt.Sprintf("%s/api/traces?service=%s&limit=%d&lookback=1h",
 		ob.jaegerEndpoint, service, limit)
-	
+
 	resp, err := ob.httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query Jaeger: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("Jaeger returned %d: %s", resp.StatusCode, body)
 	}
-	
+
 	var result struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode Jaeger response: %w", err)
 	}
-	
+
 	traces := make([]OTELTrace, 0, len(result.Data))
 	for _, rawTrace := range result.Data {
 		var trace OTELTrace
@@ -182,43 +182,43 @@ func (ob *OTELBackend) SearchTraces(service string, limit int) ([]OTELTrace, err
 		}
 		traces = append(traces, trace)
 	}
-	
+
 	return traces, nil
 }
 
 // GetTrace fetches a specific trace by ID
 func (ob *OTELBackend) GetTrace(traceID string) (*OTELTrace, error) {
 	url := fmt.Sprintf("%s/api/traces/%s", ob.jaegerEndpoint, traceID)
-	
+
 	resp, err := ob.httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trace: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("trace not found")
 	}
-	
+
 	var result struct {
 		Data []OTELTrace `json:"data"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
-	
+
 	if len(result.Data) > 0 {
 		return &result.Data[0], nil
 	}
-	
+
 	return nil, fmt.Errorf("trace not found")
 }
 
 // getMockTraces returns mock OTEL traces for development
 func (a *App) getMockTraces() []OTELTrace {
 	now := time.Now()
-	
+
 	return []OTELTrace{
 		{
 			TraceID:       "1234567890abcdef",
@@ -228,9 +228,9 @@ func (a *App) getMockTraces() []OTELTrace {
 			Duration:      2500000, // 2.5 seconds
 			StartTime:     now.Add(-5 * time.Minute),
 			Tags: map[string]any{
-				"correlation.id":   "corr-memory-pressure",
-				"cluster":          "production",
-				"severity":         "high",
+				"correlation.id": "corr-memory-pressure",
+				"cluster":        "production",
+				"severity":       "high",
 			},
 			Spans: []OTELSpan{
 				{
@@ -241,11 +241,11 @@ func (a *App) getMockTraces() []OTELTrace {
 					StartTime:     now.Add(-5 * time.Minute).UnixMicro(),
 					Duration:      2300,
 					Tags: map[string]any{
-						"k8s.namespace":     "production",
-						"k8s.pod":          "api-service-abc123",
-						"memory.limit":     "256Mi",
-						"memory.used":      "256Mi",
-						"pattern":          "memory_pressure",
+						"k8s.namespace": "production",
+						"k8s.pod":       "api-service-abc123",
+						"memory.limit":  "256Mi",
+						"memory.used":   "256Mi",
+						"pattern":       "memory_pressure",
 					},
 					StoryID:       "story-001",
 					CorrelationID: "corr-memory-pressure",
@@ -299,8 +299,8 @@ func (a *App) getMockTraces() []OTELTrace {
 					StartTime:     now.Add(-2 * time.Minute).UnixMicro(),
 					Duration:      1000,
 					Tags: map[string]any{
-						"service.from": "api-service",
-						"service.to":   "database",
+						"service.from":  "api-service",
+						"service.to":    "database",
 						"timeout.count": 47,
 					},
 					StoryID: "story-002",
@@ -314,7 +314,7 @@ func (a *App) getMockTraces() []OTELTrace {
 func (a *App) LinkStoryToTrace(storyID string, traceID string) error {
 	// In a real implementation, this would update the correlation engine
 	// to maintain story-trace relationships
-	
+
 	fmt.Printf("Linking story %s to trace %s\n", storyID, traceID)
 	return nil
 }

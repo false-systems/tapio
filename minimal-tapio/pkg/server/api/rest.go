@@ -34,7 +34,7 @@ func NewRESTServer(server ServerInterface) *RESTServer {
 		server: server,
 		router: mux.NewRouter(),
 	}
-	
+
 	rs.setupRoutes()
 	return rs
 }
@@ -48,23 +48,23 @@ func (rs *RESTServer) Router() *mux.Router {
 func (rs *RESTServer) setupRoutes() {
 	// Health check
 	rs.router.HandleFunc("/health", rs.handleHealth).Methods("GET")
-	
+
 	// API v1 routes
 	api := rs.router.PathPrefix("/api/v1").Subrouter()
-	
+
 	// Event endpoints
 	api.HandleFunc("/events", rs.handleSubmitEvent).Methods("POST")
 	api.HandleFunc("/events", rs.handleGetEvents).Methods("GET")
-	
+
 	// Findings endpoints
 	api.HandleFunc("/findings", rs.handleGetFindings).Methods("GET")
-	
+
 	// Correlation endpoint
 	api.HandleFunc("/correlate", rs.handleCorrelate).Methods("POST")
-	
+
 	// Status endpoint
 	api.HandleFunc("/status", rs.handleStatus).Methods("GET")
-	
+
 	// Add middleware
 	rs.router.Use(loggingMiddleware)
 	rs.router.Use(corsMiddleware)
@@ -73,7 +73,7 @@ func (rs *RESTServer) setupRoutes() {
 // handleHealth handles health check requests
 func (rs *RESTServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	health := rs.server.GetHealth()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
 }
@@ -85,23 +85,23 @@ func (rs *RESTServer) handleSubmitEvent(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Generate ID if missing
 	if event.ID == "" {
 		event.ID = domain.EventID(fmt.Sprintf("event-%d", time.Now().UnixNano()))
 	}
-	
+
 	// Process event
 	if err := rs.server.ProcessEvent(r.Context(), event); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	response := map[string]interface{}{
 		"status": "accepted",
 		"id":     event.ID,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
@@ -116,9 +116,9 @@ func (rs *RESTServer) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	
+
 	events := rs.server.GetEvents(r.Context(), limit)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(events)
 }
@@ -126,7 +126,7 @@ func (rs *RESTServer) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 // handleGetFindings handles findings retrieval
 func (rs *RESTServer) handleGetFindings(w http.ResponseWriter, r *http.Request) {
 	findings := rs.server.GetFindings(r.Context())
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(findings)
 }
@@ -136,18 +136,18 @@ func (rs *RESTServer) handleCorrelate(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Events []domain.Event `json:"events"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	correlation, err := rs.server.CorrelateEvents(r.Context(), request.Events)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(correlation)
 }
@@ -159,7 +159,7 @@ func (rs *RESTServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"timestamp": time.Now().Unix(),
 		"version":   "1.0.0",
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
 }
@@ -179,12 +179,12 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }

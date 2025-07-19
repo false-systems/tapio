@@ -38,7 +38,7 @@ func main() {
 
 	// Create configuration
 	config := createConfig(*configFile, *units, *follow, *priority, *maxEvents)
-	
+
 	if *verbose {
 		configJSON, _ := json.MarshalIndent(config, "", "  ")
 		fmt.Printf("Configuration:\n%s\n", configJSON)
@@ -212,7 +212,7 @@ func getEventMessage(event domain.Event) string {
 
 func showHealth(collector core.Collector) {
 	health := collector.Health()
-	
+
 	fmt.Printf("Health Status: %s\n", health.Status)
 	fmt.Printf("Message: %s\n", health.Message)
 	fmt.Printf("Journal Open: %t\n", health.JournalOpen)
@@ -222,7 +222,7 @@ func showHealth(collector core.Collector) {
 	fmt.Printf("Current Cursor: %s\n", health.CurrentCursor)
 	fmt.Printf("Boot ID: %s\n", health.BootID)
 	fmt.Printf("Machine ID: %s\n", health.MachineID)
-	
+
 	if len(health.Metrics) > 0 {
 		fmt.Println("Metrics:")
 		for key, value := range health.Metrics {
@@ -233,7 +233,7 @@ func showHealth(collector core.Collector) {
 
 func showStatistics(collector core.Collector, verbose bool) {
 	stats := collector.Statistics()
-	
+
 	fmt.Printf("\nCollection Statistics:\n")
 	fmt.Printf("  Start Time: %s\n", stats.StartTime.Format("2006-01-02 15:04:05"))
 	fmt.Printf("  Uptime: %v\n", time.Since(stats.StartTime))
@@ -242,7 +242,7 @@ func showStatistics(collector core.Collector, verbose bool) {
 	fmt.Printf("  Bytes Read: %d\n", stats.BytesRead)
 	fmt.Printf("  Entries Read: %d\n", stats.EntriesRead)
 	fmt.Printf("  Read Errors: %d\n", stats.ReadErrors)
-	
+
 	if verbose && len(stats.Custom) > 0 {
 		fmt.Println("  Custom Metrics:")
 		for key, value := range stats.Custom {

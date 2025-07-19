@@ -24,18 +24,18 @@ const (
 )
 
 type ImplementationViolation struct {
-	File        string
-	Line        int
-	Function    string
-	Issue       string
-	Severity    string
-	Code        string
+	File     string
+	Line     int
+	Function string
+	Issue    string
+	Severity string
+	Code     string
 }
 
 type CompletenessChecker struct {
 	violations []ImplementationViolation
 	fileSet    *token.FileSet
-	
+
 	// Forbidden patterns
 	forbiddenPatterns []*regexp.Regexp
 	todoPatterns      []*regexp.Regexp
@@ -82,7 +82,7 @@ func (cc *CompletenessChecker) initializePatterns() {
 		`panic\("TODO.*"\)`,
 	}
 
-	// TODO patterns  
+	// TODO patterns
 	todoPatterns := []string{
 		`// TODO:.*implement.*later`,
 		`// TODO.*implement.*`,
@@ -96,7 +96,7 @@ func (cc *CompletenessChecker) initializePatterns() {
 
 	// Stub patterns
 	stubPatterns := []string{
-		`func.*\{[\s]*return nil[\s]*\}`,  // Empty return nil
+		`func.*\{[\s]*return nil[\s]*\}`, // Empty return nil
 		`func.*\{[\s]*return.*nil, fmt\.Errorf\("not implemented"\)[\s]*\}`,
 		`func.*\{[\s]*// TODO.*[\s]*return`,
 		`func.*\{[\s]*panic\("not implemented"\)[\s]*\}`,
@@ -169,7 +169,7 @@ func (cc *CompletenessChecker) checkFile(filePath string) error {
 
 func (cc *CompletenessChecker) checkPatterns(filePath, content string) {
 	lines := strings.Split(content, "\n")
-	
+
 	for lineNum, line := range lines {
 		lineNum++ // 1-indexed
 
@@ -323,7 +323,7 @@ func (cc *CompletenessChecker) reportResults() {
 
 	fmt.Printf("%sClaude.md Rule A4 - Implementation Completeness:%s\n", BLUE+BOLD, NC)
 	fmt.Printf("❌ FORBIDDEN: Functions that return 'not implemented'\n")
-	fmt.Printf("❌ FORBIDDEN: Empty function bodies with TODO comments\n") 
+	fmt.Printf("❌ FORBIDDEN: Empty function bodies with TODO comments\n")
 	fmt.Printf("❌ FORBIDDEN: Placeholder implementations that don't work\n")
 	fmt.Printf("❌ FORBIDDEN: 'We'll fix this later' code\n")
 	fmt.Printf("✅ REQUIRED: Every function must be fully implemented and working\n")

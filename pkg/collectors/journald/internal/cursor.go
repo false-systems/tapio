@@ -28,29 +28,29 @@ func newFileCursorManager(filePath string) core.CursorManager {
 func (f *fileCursorManager) SaveCursor(cursor string) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	if cursor == "" {
 		return fmt.Errorf("empty cursor")
 	}
-	
+
 	// Ensure directory exists
 	dir := filepath.Dir(f.filePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create cursor directory: %w", err)
 	}
-	
+
 	// Write cursor to temporary file first
 	tempFile := f.filePath + ".tmp"
 	if err := ioutil.WriteFile(tempFile, []byte(cursor), 0644); err != nil {
 		return fmt.Errorf("failed to write cursor to temp file: %w", err)
 	}
-	
+
 	// Atomic rename
 	if err := os.Rename(tempFile, f.filePath); err != nil {
 		os.Remove(tempFile) // Clean up temp file
 		return fmt.Errorf("failed to rename cursor file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -58,7 +58,7 @@ func (f *fileCursorManager) SaveCursor(cursor string) error {
 func (f *fileCursorManager) LoadCursor() (string, error) {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
-	
+
 	data, err := ioutil.ReadFile(f.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -66,12 +66,12 @@ func (f *fileCursorManager) LoadCursor() (string, error) {
 		}
 		return "", fmt.Errorf("failed to read cursor file: %w", err)
 	}
-	
+
 	cursor := strings.TrimSpace(string(data))
 	if cursor == "" {
 		return "", core.ErrCursorFileCorrupt
 	}
-	
+
 	return cursor, nil
 }
 
@@ -79,7 +79,7 @@ func (f *fileCursorManager) LoadCursor() (string, error) {
 func (f *fileCursorManager) HasCursor() bool {
 	f.mutex.RLock()
 	defer f.mutex.RUnlock()
-	
+
 	_, err := os.Stat(f.filePath)
 	return err == nil
 }
@@ -88,12 +88,12 @@ func (f *fileCursorManager) HasCursor() bool {
 func (f *fileCursorManager) ClearCursor() error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	
+
 	err := os.Remove(f.filePath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove cursor file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -112,7 +112,7 @@ func newMemoryCursorManager() core.CursorManager {
 func (m *memoryCursorManager) SaveCursor(cursor string) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	m.cursor = cursor
 	return nil
 }
@@ -121,11 +121,11 @@ func (m *memoryCursorManager) SaveCursor(cursor string) error {
 func (m *memoryCursorManager) LoadCursor() (string, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	if m.cursor == "" {
 		return "", core.ErrCursorNotFound
 	}
-	
+
 	return m.cursor, nil
 }
 
@@ -133,7 +133,7 @@ func (m *memoryCursorManager) LoadCursor() (string, error) {
 func (m *memoryCursorManager) HasCursor() bool {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	return m.cursor != ""
 }
 
@@ -141,7 +141,7 @@ func (m *memoryCursorManager) HasCursor() bool {
 func (m *memoryCursorManager) ClearCursor() error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	
+
 	m.cursor = ""
 	return nil
 }

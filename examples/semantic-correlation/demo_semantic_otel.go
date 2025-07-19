@@ -34,9 +34,9 @@ func main() {
 			Pod:       "payment-api-xyz123",
 		},
 		Data: map[string]interface{}{
-			"type":                "memory_pressure",
+			"type":                 "memory_pressure",
 			"memory_usage_percent": 85,
-			"trend":               "increasing",
+			"trend":                "increasing",
 		},
 	}
 
@@ -52,9 +52,9 @@ func main() {
 			Pod:       "payment-api-xyz123",
 		},
 		Data: map[string]interface{}{
-			"type":                "memory_oom_warning",
+			"type":                 "memory_oom_warning",
 			"memory_usage_percent": 95,
-			"time_to_oom":         "3 minutes",
+			"time_to_oom":          "3 minutes",
 		},
 	}
 
@@ -98,7 +98,7 @@ func main() {
 		fmt.Printf("🔤 Type: %s\n", group.SemanticType)
 		fmt.Printf("📈 Confidence: %.0f%%\n", group.ConfidenceScore*100)
 		fmt.Printf("🔗 Events: %d correlated\n", len(group.CausalChain))
-		
+
 		if group.RootCause != nil {
 			fmt.Printf("🔴 Root Cause: %s\n", group.RootCause.ID)
 		}
@@ -113,7 +113,7 @@ func main() {
 		fmt.Printf("  • Scenario: %s\n", group.PredictedOutcome.Scenario)
 		fmt.Printf("  • Probability: %.0f%%\n", group.PredictedOutcome.Probability*100)
 		fmt.Printf("  • Time to Outcome: %v\n", group.PredictedOutcome.TimeToOutcome)
-		
+
 		fmt.Println("\n🛠️ PREVENTION ACTIONS:")
 		for i, action := range group.PredictedOutcome.PreventionActions {
 			fmt.Printf("  %d. %s\n", i+1, action)

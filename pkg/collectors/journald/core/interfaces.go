@@ -12,14 +12,14 @@ type Collector interface {
 	// Lifecycle management
 	Start(ctx context.Context) error
 	Stop() error
-	
+
 	// Event streaming
 	Events() <-chan domain.Event
-	
+
 	// Health and monitoring
 	Health() Health
 	Statistics() Statistics
-	
+
 	// Configuration
 	Configure(config Config) error
 }
@@ -39,37 +39,37 @@ type PlatformImpl interface {
 // Config defines journald collector configuration
 type Config struct {
 	// Basic settings
-	Name            string        `json:"name"`
-	Enabled         bool          `json:"enabled"`
-	EventBufferSize int           `json:"event_buffer_size"`
-	
+	Name            string `json:"name"`
+	Enabled         bool   `json:"enabled"`
+	EventBufferSize int    `json:"event_buffer_size"`
+
 	// Journal reading configuration
-	FollowMode      bool          `json:"follow_mode"`       // Real-time vs batch mode
-	SeekToEnd       bool          `json:"seek_to_end"`       // Start from end vs beginning
-	MaxEntries      int           `json:"max_entries"`       // Max entries per read
-	ReadTimeout     time.Duration `json:"read_timeout"`      // Timeout for read operations
-	
+	FollowMode  bool          `json:"follow_mode"`  // Real-time vs batch mode
+	SeekToEnd   bool          `json:"seek_to_end"`  // Start from end vs beginning
+	MaxEntries  int           `json:"max_entries"`  // Max entries per read
+	ReadTimeout time.Duration `json:"read_timeout"` // Timeout for read operations
+
 	// Filtering configuration
-	Units           []string      `json:"units"`             // Filter by systemd units
-	Priorities      []Priority    `json:"priorities"`        // Filter by log priorities
-	BootID          string        `json:"boot_id"`           // Filter by boot ID (empty = current)
-	Since           time.Time     `json:"since"`             // Start time filter
-	Until           time.Time     `json:"until"`             // End time filter
-	
+	Units      []string   `json:"units"`      // Filter by systemd units
+	Priorities []Priority `json:"priorities"` // Filter by log priorities
+	BootID     string     `json:"boot_id"`    // Filter by boot ID (empty = current)
+	Since      time.Time  `json:"since"`      // Start time filter
+	Until      time.Time  `json:"until"`      // End time filter
+
 	// Field filtering
-	IncludeFields   []string      `json:"include_fields"`    // Fields to include in events
-	ExcludeFields   []string      `json:"exclude_fields"`    // Fields to exclude from events
-	RequiredFields  []string      `json:"required_fields"`   // Only include entries with these fields
-	
+	IncludeFields  []string `json:"include_fields"`  // Fields to include in events
+	ExcludeFields  []string `json:"exclude_fields"`  // Fields to exclude from events
+	RequiredFields []string `json:"required_fields"` // Only include entries with these fields
+
 	// Cursor management
-	PersistCursor   bool          `json:"persist_cursor"`    // Save cursor to disk
-	CursorFile      string        `json:"cursor_file"`       // File to save cursor
-	InitialCursor   string        `json:"initial_cursor"`    // Starting cursor
-	
+	PersistCursor bool   `json:"persist_cursor"` // Save cursor to disk
+	CursorFile    string `json:"cursor_file"`    // File to save cursor
+	InitialCursor string `json:"initial_cursor"` // Starting cursor
+
 	// Performance tuning
-	BatchSize       int           `json:"batch_size"`        // Entries to process in batch
-	FlushInterval   time.Duration `json:"flush_interval"`    // How often to flush cursor
-	EventRateLimit  int           `json:"event_rate_limit"`  // Max events per second
+	BatchSize      int           `json:"batch_size"`       // Entries to process in batch
+	FlushInterval  time.Duration `json:"flush_interval"`   // How often to flush cursor
+	EventRateLimit int           `json:"event_rate_limit"` // Max events per second
 }
 
 // Health represents collector health status
@@ -99,46 +99,46 @@ const (
 
 // Statistics represents runtime statistics
 type Statistics struct {
-	StartTime         time.Time              `json:"start_time"`
-	EventsCollected   uint64                 `json:"events_collected"`
-	EventsDropped     uint64                 `json:"events_dropped"`
-	BytesRead         uint64                 `json:"bytes_read"`
-	EntriesRead       uint64                 `json:"entries_read"`
-	CursorUpdates     uint64                 `json:"cursor_updates"`
-	JournalSeeks      uint64                 `json:"journal_seeks"`
-	ReadErrors        uint64                 `json:"read_errors"`
-	Custom            map[string]interface{} `json:"custom"`
+	StartTime       time.Time              `json:"start_time"`
+	EventsCollected uint64                 `json:"events_collected"`
+	EventsDropped   uint64                 `json:"events_dropped"`
+	BytesRead       uint64                 `json:"bytes_read"`
+	EntriesRead     uint64                 `json:"entries_read"`
+	CursorUpdates   uint64                 `json:"cursor_updates"`
+	JournalSeeks    uint64                 `json:"journal_seeks"`
+	ReadErrors      uint64                 `json:"read_errors"`
+	Custom          map[string]interface{} `json:"custom"`
 }
 
 // LogReader reads journal entries
 type LogReader interface {
 	// Open the journal
 	Open() error
-	
+
 	// Close the journal
 	Close() error
-	
+
 	// Check if journal is open
 	IsOpen() bool
-	
+
 	// Read next entry
 	ReadEntry() (*LogEntry, error)
-	
+
 	// Seek to cursor
 	SeekCursor(cursor string) error
-	
+
 	// Seek to timestamp
 	SeekTime(timestamp time.Time) error
-	
+
 	// Get current cursor
 	GetCursor() (string, error)
-	
+
 	// Wait for new entries
 	WaitForEntries(timeout time.Duration) error
-	
+
 	// Get boot ID
 	GetBootID() string
-	
+
 	// Get machine ID
 	GetMachineID() string
 }
@@ -151,32 +151,32 @@ type EventProcessor interface {
 // LogEntry represents a raw journald log entry
 type LogEntry struct {
 	// Standard journald fields
-	Message       string            `json:"MESSAGE"`
-	Priority      Priority          `json:"PRIORITY"`
-	Facility      string            `json:"SYSLOG_FACILITY"`
-	Identifier    string            `json:"SYSLOG_IDENTIFIER"`
-	PID           int32             `json:"_PID"`
-	UID           int32             `json:"_UID"`
-	GID           int32             `json:"_GID"`
-	Comm          string            `json:"_COMM"`
-	Exe           string            `json:"_EXE"`
-	Cmdline       string            `json:"_CMDLINE"`
-	Unit          string            `json:"_SYSTEMD_UNIT"`
-	UserUnit      string            `json:"_SYSTEMD_USER_UNIT"`
-	Session       string            `json:"_SYSTEMD_SESSION"`
-	HostName      string            `json:"_HOSTNAME"`
-	
+	Message    string   `json:"MESSAGE"`
+	Priority   Priority `json:"PRIORITY"`
+	Facility   string   `json:"SYSLOG_FACILITY"`
+	Identifier string   `json:"SYSLOG_IDENTIFIER"`
+	PID        int32    `json:"_PID"`
+	UID        int32    `json:"_UID"`
+	GID        int32    `json:"_GID"`
+	Comm       string   `json:"_COMM"`
+	Exe        string   `json:"_EXE"`
+	Cmdline    string   `json:"_CMDLINE"`
+	Unit       string   `json:"_SYSTEMD_UNIT"`
+	UserUnit   string   `json:"_SYSTEMD_USER_UNIT"`
+	Session    string   `json:"_SYSTEMD_SESSION"`
+	HostName   string   `json:"_HOSTNAME"`
+
 	// Timestamps
-	Timestamp     time.Time         `json:"_SOURCE_REALTIME_TIMESTAMP"`
-	BootID        string            `json:"_BOOT_ID"`
-	MachineID     string            `json:"_MACHINE_ID"`
-	
+	Timestamp time.Time `json:"_SOURCE_REALTIME_TIMESTAMP"`
+	BootID    string    `json:"_BOOT_ID"`
+	MachineID string    `json:"_MACHINE_ID"`
+
 	// Cursor and metadata
-	Cursor        string            `json:"__CURSOR"`
-	MonotonicTime uint64            `json:"__MONOTONIC_TIMESTAMP"`
-	
+	Cursor        string `json:"__CURSOR"`
+	MonotonicTime uint64 `json:"__MONOTONIC_TIMESTAMP"`
+
 	// All fields (including custom ones)
-	Fields        map[string]interface{} `json:"fields"`
+	Fields map[string]interface{} `json:"fields"`
 }
 
 // Priority represents syslog priority levels
@@ -221,13 +221,13 @@ func (p Priority) String() string {
 type CursorManager interface {
 	// Save cursor to persistent storage
 	SaveCursor(cursor string) error
-	
+
 	// Load cursor from persistent storage
 	LoadCursor() (string, error)
-	
+
 	// Check if cursor exists
 	HasCursor() bool
-	
+
 	// Clear saved cursor
 	ClearCursor() error
 }
@@ -249,7 +249,7 @@ func (c Config) Validate() error {
 	if c.FlushInterval <= 0 {
 		c.FlushInterval = 10 * time.Second
 	}
-	
+
 	// Default to info and above if no priorities specified
 	if len(c.Priorities) == 0 {
 		c.Priorities = []Priority{
@@ -262,6 +262,6 @@ func (c Config) Validate() error {
 			PriorityInfo,
 		}
 	}
-	
+
 	return nil
 }

@@ -72,7 +72,7 @@ func TestSemanticOTELTracer_MultiDimensionalCorrelation(t *testing.T) {
 		assert.Equal(t, "memory_exhaustion_investigation", group.Intent)
 		assert.Len(t, group.CausalChain, 2, "Should have both events in causal chain")
 		assert.Equal(t, memoryEvent.ID, group.RootCause.ID)
-		
+
 		// Verify predictions
 		assert.NotNil(t, group.PredictedOutcome)
 		assert.Equal(t, "oom_kill_cascade", group.PredictedOutcome.Scenario)
@@ -107,7 +107,7 @@ func TestSemanticOTELTracer_MultiDimensionalCorrelation(t *testing.T) {
 			Timestamp: time.Now().Add(1 * time.Minute), // Outside temporal window
 			Context: domain.EventContext{
 				Namespace: "microservices", // Same namespace
-				Host:      "node-3",         // Different node
+				Host:      "node-3",        // Different node
 				Labels: domain.Labels{
 					"pod": "backend-123", // Different pod
 				},
@@ -271,38 +271,38 @@ func TestSemanticOTELTracer_AdaptiveTimeWindows(t *testing.T) {
 
 	// Test adaptive windows for different event types
 	testCases := []struct {
-		name         string
-		eventType    domain.EventType
-		delay        time.Duration
-		shouldGroup  bool
+		name           string
+		eventType      domain.EventType
+		delay          time.Duration
+		shouldGroup    bool
 		expectedWindow time.Duration
 	}{
 		{
-			name:         "MemoryLeakFastWindow",
-			eventType:    "memory_leak",
-			delay:        25 * time.Second, // Within 30s window
-			shouldGroup:  true,
+			name:           "MemoryLeakFastWindow",
+			eventType:      "memory_leak",
+			delay:          25 * time.Second, // Within 30s window
+			shouldGroup:    true,
 			expectedWindow: 30 * time.Second,
 		},
 		{
-			name:         "NetworkFailureFasterWindow",
-			eventType:    "network_failure",
-			delay:        8 * time.Second, // Within 10s window
-			shouldGroup:  true,
+			name:           "NetworkFailureFasterWindow",
+			eventType:      "network_failure",
+			delay:          8 * time.Second, // Within 10s window
+			shouldGroup:    true,
 			expectedWindow: 10 * time.Second,
 		},
 		{
-			name:         "DiskPressureSlowWindow",
-			eventType:    "disk_pressure",
-			delay:        90 * time.Second, // Within 2m window
-			shouldGroup:  true,
+			name:           "DiskPressureSlowWindow",
+			eventType:      "disk_pressure",
+			delay:          90 * time.Second, // Within 2m window
+			shouldGroup:    true,
 			expectedWindow: 2 * time.Minute,
 		},
 		{
-			name:         "CPUThrottlingImmediate",
-			eventType:    "cpu_throttling",
-			delay:        4 * time.Second, // Within 5s window
-			shouldGroup:  true,
+			name:           "CPUThrottlingImmediate",
+			eventType:      "cpu_throttling",
+			delay:          4 * time.Second, // Within 5s window
+			shouldGroup:    true,
 			expectedWindow: 5 * time.Second,
 		},
 	}

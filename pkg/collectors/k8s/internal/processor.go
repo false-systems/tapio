@@ -21,10 +21,10 @@ func newEventProcessor() core.EventProcessor {
 func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (domain.Event, error) {
 	// Create Kubernetes event data
 	eventData := p.createKubernetesData(raw)
-	
+
 	// Determine severity based on event type and content
 	severity := p.determineSeverity(raw)
-	
+
 	// Create the domain event
 	event := domain.Event{
 		ID:         fmt.Sprintf("k8s_%s_%s_%s_%d", raw.ResourceKind, raw.Namespace, raw.Name, raw.Timestamp.UnixNano()),
@@ -44,7 +44,7 @@ func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (d
 			"type":      string(raw.Type),
 		},
 	}
-	
+
 	return event, nil
 }
 
@@ -53,14 +53,14 @@ func (p *eventProcessor) createKubernetesData(raw core.RawEvent) map[string]inte
 	data := map[string]interface{}{
 		"resource": map[string]interface{}{
 			"api_version": p.extractAPIVersion(raw),
-			"kind":       raw.ResourceKind,
-			"namespace":  raw.Namespace,
-			"name":       raw.Name,
+			"kind":        raw.ResourceKind,
+			"namespace":   raw.Namespace,
+			"name":        raw.Name,
 		},
 		"event_type": string(raw.Type),
 		"count":      1,
 	}
-	
+
 	// Extract additional information based on resource type
 	switch raw.ResourceKind {
 	case "Pod":
@@ -72,13 +72,13 @@ func (p *eventProcessor) createKubernetesData(raw core.RawEvent) map[string]inte
 	case "Event":
 		p.enrichEventData(data, raw)
 	}
-	
+
 	// Handle state changes for MODIFIED events
 	if raw.Type == core.EventTypeModified && raw.OldObject != nil {
 		data["old_state"] = p.extractState(raw.OldObject)
 		data["new_state"] = p.extractState(raw.Object)
 	}
-	
+
 	return data
 }
 
@@ -89,7 +89,7 @@ func (p *eventProcessor) enrichPodData(data map[string]interface{}, raw core.Raw
 		data["reason"] = string(pod.Status.Phase)
 		data["resource_version"] = pod.ResourceVersion
 		data["phase"] = string(pod.Status.Phase)
-		
+
 		// Add container information if available
 		if len(pod.Status.ContainerStatuses) > 0 {
 			status := pod.Status.ContainerStatuses[0]
@@ -118,11 +118,11 @@ func (p *eventProcessor) enrichNodeData(data map[string]interface{}, raw core.Ra
 				conditions = append(conditions, string(cond.Type))
 			}
 		}
-		
+
 		data["message"] = fmt.Sprintf("Node %s conditions: %v", node.Name, conditions)
 		data["resource_version"] = node.ResourceVersion
 		data["conditions"] = conditions
-		
+
 		// Check for important conditions
 		for _, cond := range node.Status.Conditions {
 			if cond.Type == corev1.NodeReady && cond.Status != corev1.ConditionTrue {
@@ -143,7 +143,7 @@ func (p *eventProcessor) enrichServiceData(data map[string]interface{}, raw core
 		data["message"] = fmt.Sprintf("Service %s in namespace %s", svc.Name, svc.Namespace)
 		data["resource_version"] = svc.ResourceVersion
 		data["service_type"] = string(svc.Spec.Type)
-		
+
 		if svc.Spec.Type == corev1.ServiceTypeLoadBalancer && len(svc.Status.LoadBalancer.Ingress) > 0 {
 			ip := svc.Status.LoadBalancer.Ingress[0].IP
 			data["message"] = fmt.Sprintf("%s - LoadBalancer IP: %s", data["message"], ip)
@@ -160,10 +160,10 @@ func (p *eventProcessor) enrichEventData(data map[string]interface{}, raw core.R
 		data["count"] = event.Count
 		data["resource"] = map[string]interface{}{
 			"api_version": event.InvolvedObject.APIVersion,
-			"kind":       event.InvolvedObject.Kind,
-			"namespace":  event.InvolvedObject.Namespace,
-			"name":       event.InvolvedObject.Name,
-			"uid":        string(event.InvolvedObject.UID),
+			"kind":        event.InvolvedObject.Kind,
+			"namespace":   event.InvolvedObject.Namespace,
+			"name":        event.InvolvedObject.Name,
+			"uid":         string(event.InvolvedObject.UID),
 		}
 		data["field_path"] = event.InvolvedObject.FieldPath
 		data["event_type"] = event.Type
@@ -180,38 +180,37 @@ func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interfa
 		"name":      raw.Name,
 		"cluster":   "", // Would be set from cluster info
 	}
-	
+
 	// Create base labels
 	labels := map[string]string{
 		"kind":      raw.ResourceKind,
 		"namespace": raw.Namespace,
 		"name":      raw.Name,
 	}
-	
+
 	// Extract labels from the object if available
 	if obj, ok := raw.Object.(metav1.Object); ok {
 		for k, v := range obj.GetLabels() {
 			labels[k] = v
 		}
 	}
-	
+
 	context["labels"] = labels
 	context["tags"] = []string{
 		"kubernetes",
 		raw.ResourceKind,
 		string(raw.Type),
 	}
-	
+
 	// Add resource reference
 	context["resource"] = map[string]string{
 		"kind":      raw.ResourceKind,
 		"namespace": raw.Namespace,
 		"name":      raw.Name,
 	}
-	
+
 	return context
 }
-
 
 // determineSeverity determines the event severity
 func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
@@ -223,7 +222,7 @@ func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLev
 		case corev1.EventTypeNormal:
 			return domain.SeverityLow
 		}
-		
+
 		// Check specific reasons
 		switch event.Reason {
 		case "Failed", "FailedCreate", "FailedDelete", "FailedScheduling":
@@ -234,7 +233,7 @@ func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLev
 			return domain.SeverityWarning
 		}
 	}
-	
+
 	// For resource events
 	switch raw.Type {
 	case core.EventTypeDeleted:
@@ -242,10 +241,10 @@ func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLev
 			return domain.SeverityWarning
 		}
 		return domain.SeverityLow
-		
+
 	case core.EventTypeError:
 		return domain.SeverityHigh
-		
+
 	default:
 		return domain.SeverityLow
 	}
@@ -284,7 +283,7 @@ func (p *eventProcessor) extractState(obj interface{}) string {
 // generateHash generates a hash for event deduplication
 func (p *eventProcessor) generateHash(raw core.RawEvent) string {
 	// Simple hash based on resource identity and event type
-	return fmt.Sprintf("%s-%s-%s-%s-%d", 
+	return fmt.Sprintf("%s-%s-%s-%s-%d",
 		raw.ResourceKind,
 		raw.Namespace,
 		raw.Name,

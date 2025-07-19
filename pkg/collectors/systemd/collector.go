@@ -35,12 +35,12 @@ func NewCollector(config Config) (Collector, error) {
 // DefaultConfig returns a default configuration
 func DefaultConfig() Config {
 	return Config{
-		Name:                "systemd-collector",
-		Enabled:             true,
-		EventBufferSize:     1000,
-		WatchAllServices:    false,
-		ServiceFilter:       []string{}, // Empty means watch based on other criteria
-		ServiceExclude:      []string{
+		Name:             "systemd-collector",
+		Enabled:          true,
+		EventBufferSize:  1000,
+		WatchAllServices: false,
+		ServiceFilter:    []string{}, // Empty means watch based on other criteria
+		ServiceExclude: []string{
 			// Exclude noisy/unimportant services by default
 			"getty@",
 			"user@",

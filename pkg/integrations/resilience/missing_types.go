@@ -10,60 +10,60 @@ import (
 // SelfHealingEngine provides automated self-healing capabilities
 type SelfHealingEngine struct {
 	// Core components
-	diagnoser        *ProblemDiagnoser
-	healer           *AutomaticHealer
-	verifier         *HealingVerifier
-	learner          *HealingLearner
-	
+	diagnoser *ProblemDiagnoser
+	healer    *AutomaticHealer
+	verifier  *HealingVerifier
+	learner   *HealingLearner
+
 	// Healing strategies
 	strategies       map[string]*HealingStrategy
 	strategySelector *StrategySelector
-	
+
 	// State management
-	config           *SelfHealingConfig
-	activeHealings   map[string]*HealingSession
-	healingHistory   []HealingAttempt
-	mutex            sync.RWMutex
-	
+	config         *SelfHealingConfig
+	activeHealings map[string]*HealingSession
+	healingHistory []HealingAttempt
+	mutex          sync.RWMutex
+
 	// Performance tracking
-	successRate      float64
-	averageHealTime  time.Duration
-	totalAttempts    int64
-	successfulHeals  int64
+	successRate     float64
+	averageHealTime time.Duration
+	totalAttempts   int64
+	successfulHeals int64
 }
 
 // SelfHealingConfig configures self-healing behavior
 type SelfHealingConfig struct {
 	// Detection settings
-	DetectionEnabled        bool          `json:"detection_enabled"`
-	DetectionInterval       time.Duration `json:"detection_interval"`
-	ProblemThreshold        float64       `json:"problem_threshold"`
-	
+	DetectionEnabled  bool          `json:"detection_enabled"`
+	DetectionInterval time.Duration `json:"detection_interval"`
+	ProblemThreshold  float64       `json:"problem_threshold"`
+
 	// Healing settings
-	HealingEnabled          bool          `json:"healing_enabled"`
-	MaxConcurrentHealings   int           `json:"max_concurrent_healings"`
-	HealingTimeout          time.Duration `json:"healing_timeout"`
-	MaxRetryAttempts        int           `json:"max_retry_attempts"`
-	
+	HealingEnabled        bool          `json:"healing_enabled"`
+	MaxConcurrentHealings int           `json:"max_concurrent_healings"`
+	HealingTimeout        time.Duration `json:"healing_timeout"`
+	MaxRetryAttempts      int           `json:"max_retry_attempts"`
+
 	// Safety settings
-	SafetyMode              bool          `json:"safety_mode"`
-	RequireApproval         bool          `json:"require_approval"`
-	DryRunMode              bool          `json:"dry_run_mode"`
-	RiskThreshold           float64       `json:"risk_threshold"`
-	
+	SafetyMode      bool    `json:"safety_mode"`
+	RequireApproval bool    `json:"require_approval"`
+	DryRunMode      bool    `json:"dry_run_mode"`
+	RiskThreshold   float64 `json:"risk_threshold"`
+
 	// Learning settings
-	LearningEnabled         bool          `json:"learning_enabled"`
-	FeedbackCollection      bool          `json:"feedback_collection"`
-	StrategyEvolution       bool          `json:"strategy_evolution"`
+	LearningEnabled    bool `json:"learning_enabled"`
+	FeedbackCollection bool `json:"feedback_collection"`
+	StrategyEvolution  bool `json:"strategy_evolution"`
 }
 
 // ProblemDiagnoser diagnoses system problems
 type ProblemDiagnoser struct {
-	config              *DiagnoserConfig
-	diagnosticRules     []DiagnosticRule
-	problemPatterns     map[string]*ProblemPattern
-	diagnosisHistory    []DiagnosisResult
-	mutex               sync.RWMutex
+	config           *DiagnoserConfig
+	diagnosticRules  []DiagnosticRule
+	problemPatterns  map[string]*ProblemPattern
+	diagnosisHistory []DiagnosisResult
+	mutex            sync.RWMutex
 }
 
 // DiagnoserConfig configures problem diagnosis
@@ -76,27 +76,27 @@ type DiagnoserConfig struct {
 
 // DiagnosticRule represents a diagnostic rule
 type DiagnosticRule struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Condition   func(interface{}) bool `json:"-"`
+	ID          string                            `json:"id"`
+	Name        string                            `json:"name"`
+	Description string                            `json:"description"`
+	Condition   func(interface{}) bool            `json:"-"`
 	Action      func(interface{}) DiagnosisResult `json:"-"`
-	Priority    int                    `json:"priority"`
-	Enabled     bool                   `json:"enabled"`
+	Priority    int                               `json:"priority"`
+	Enabled     bool                              `json:"enabled"`
 }
 
 // ProblemPattern represents a known problem pattern
 type ProblemPattern struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description"`
-	Symptoms     []string               `json:"symptoms"`
-	Causes       []string               `json:"causes"`
-	Solutions    []string               `json:"solutions"`
-	Confidence   float64                `json:"confidence"`
-	Frequency    int                    `json:"frequency"`
-	LastSeen     time.Time              `json:"last_seen"`
-	Metadata     map[string]interface{} `json:"metadata"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Symptoms    []string               `json:"symptoms"`
+	Causes      []string               `json:"causes"`
+	Solutions   []string               `json:"solutions"`
+	Confidence  float64                `json:"confidence"`
+	Frequency   int                    `json:"frequency"`
+	LastSeen    time.Time              `json:"last_seen"`
+	Metadata    map[string]interface{} `json:"metadata"`
 }
 
 // DiagnosisResult represents the result of problem diagnosis
@@ -116,34 +116,34 @@ type DiagnosisResult struct {
 
 // AutomaticHealer performs automatic healing actions
 type AutomaticHealer struct {
-	config           *HealerConfig
-	healingActions   map[string]*HealingAction
-	actionExecutor   *ActionExecutor
-	mutex            sync.RWMutex
+	config         *HealerConfig
+	healingActions map[string]*HealingAction
+	actionExecutor *ActionExecutor
+	mutex          sync.RWMutex
 }
 
 // HealerConfig configures automatic healing
 type HealerConfig struct {
-	HealingEnabled      bool          `json:"healing_enabled"`
-	MaxConcurrentHeals  int           `json:"max_concurrent_heals"`
-	HealingTimeout      time.Duration `json:"healing_timeout"`
-	SafetyChecks        bool          `json:"safety_checks"`
-	RollbackEnabled     bool          `json:"rollback_enabled"`
+	HealingEnabled     bool          `json:"healing_enabled"`
+	MaxConcurrentHeals int           `json:"max_concurrent_heals"`
+	HealingTimeout     time.Duration `json:"healing_timeout"`
+	SafetyChecks       bool          `json:"safety_checks"`
+	RollbackEnabled    bool          `json:"rollback_enabled"`
 }
 
 // HealingAction represents a healing action
 type HealingAction struct {
-	ID           string                          `json:"id"`
-	Name         string                          `json:"name"`
-	Description  string                          `json:"description"`
-	Type         string                          `json:"type"`
-	Execute      func(context.Context) error     `json:"-"`
-	Rollback     func(context.Context) error     `json:"-"`
-	Validate     func(context.Context) bool      `json:"-"`
-	Risk         float64                         `json:"risk"`
-	Timeout      time.Duration                   `json:"timeout"`
-	Prerequisites []string                       `json:"prerequisites"`
-	Parameters   map[string]interface{}          `json:"parameters"`
+	ID            string                      `json:"id"`
+	Name          string                      `json:"name"`
+	Description   string                      `json:"description"`
+	Type          string                      `json:"type"`
+	Execute       func(context.Context) error `json:"-"`
+	Rollback      func(context.Context) error `json:"-"`
+	Validate      func(context.Context) bool  `json:"-"`
+	Risk          float64                     `json:"risk"`
+	Timeout       time.Duration               `json:"timeout"`
+	Prerequisites []string                    `json:"prerequisites"`
+	Parameters    map[string]interface{}      `json:"parameters"`
 }
 
 // ActionExecutor executes healing actions
@@ -164,16 +164,16 @@ type ExecutorConfig struct {
 
 // ActionExecution tracks action execution
 type ActionExecution struct {
-	ID          string                 `json:"id"`
-	ActionID    string                 `json:"action_id"`
-	Status      string                 `json:"status"`
-	StartTime   time.Time              `json:"start_time"`
-	EndTime     *time.Time             `json:"end_time"`
-	Duration    time.Duration          `json:"duration"`
-	Success     bool                   `json:"success"`
-	Error       string                 `json:"error"`
-	Result      map[string]interface{} `json:"result"`
-	Context     map[string]interface{} `json:"context"`
+	ID        string                 `json:"id"`
+	ActionID  string                 `json:"action_id"`
+	Status    string                 `json:"status"`
+	StartTime time.Time              `json:"start_time"`
+	EndTime   *time.Time             `json:"end_time"`
+	Duration  time.Duration          `json:"duration"`
+	Success   bool                   `json:"success"`
+	Error     string                 `json:"error"`
+	Result    map[string]interface{} `json:"result"`
+	Context   map[string]interface{} `json:"context"`
 }
 
 // HealingVerifier verifies healing success
@@ -194,80 +194,80 @@ type VerifierConfig struct {
 
 // VerificationRule represents a verification rule
 type VerificationRule struct {
-	ID          string                                `json:"id"`
-	Name        string                                `json:"name"`
-	Description string                                `json:"description"`
-	Verify      func(context.Context) bool            `json:"-"`
-	Weight      float64                               `json:"weight"`
-	Timeout     time.Duration                         `json:"timeout"`
-	Required    bool                                  `json:"required"`
+	ID          string                     `json:"id"`
+	Name        string                     `json:"name"`
+	Description string                     `json:"description"`
+	Verify      func(context.Context) bool `json:"-"`
+	Weight      float64                    `json:"weight"`
+	Timeout     time.Duration              `json:"timeout"`
+	Required    bool                       `json:"required"`
 }
 
 // VerificationResult represents verification results
 type VerificationResult struct {
-	HealingID     string                 `json:"healing_id"`
-	Success       bool                   `json:"success"`
-	Confidence    float64                `json:"confidence"`
-	Details       map[string]interface{} `json:"details"`
-	Issues        []string               `json:"issues"`
-	Timestamp     time.Time              `json:"timestamp"`
-	VerificationTime time.Duration       `json:"verification_time"`
+	HealingID        string                 `json:"healing_id"`
+	Success          bool                   `json:"success"`
+	Confidence       float64                `json:"confidence"`
+	Details          map[string]interface{} `json:"details"`
+	Issues           []string               `json:"issues"`
+	Timestamp        time.Time              `json:"timestamp"`
+	VerificationTime time.Duration          `json:"verification_time"`
 }
 
 // HealingLearner learns from healing attempts
 type HealingLearner struct {
-	config         *LearnerConfig
-	learningData   []HealingOutcome
-	strategies     map[string]*StrategyPerformance
-	model          interface{} // ML model for strategy selection
-	mutex          sync.RWMutex
+	config       *LearnerConfig
+	learningData []HealingOutcome
+	strategies   map[string]*StrategyPerformance
+	model        interface{} // ML model for strategy selection
+	mutex        sync.RWMutex
 }
 
 // LearnerConfig configures healing learning
 type LearnerConfig struct {
-	LearningEnabled    bool          `json:"learning_enabled"`
+	LearningEnabled     bool          `json:"learning_enabled"`
 	ModelUpdateInterval time.Duration `json:"model_update_interval"`
-	MinLearningData    int           `json:"min_learning_data"`
-	PerformanceTracking bool         `json:"performance_tracking"`
+	MinLearningData     int           `json:"min_learning_data"`
+	PerformanceTracking bool          `json:"performance_tracking"`
 }
 
 // HealingOutcome represents the outcome of a healing attempt
 type HealingOutcome struct {
-	HealingID       string                 `json:"healing_id"`
-	ProblemType     string                 `json:"problem_type"`
-	Strategy        string                 `json:"strategy"`
-	Success         bool                   `json:"success"`
-	HealingTime     time.Duration          `json:"healing_time"`
-	Effectiveness   float64                `json:"effectiveness"`
-	SideEffects     []string               `json:"side_effects"`
-	Feedback        map[string]interface{} `json:"feedback"`
-	Timestamp       time.Time              `json:"timestamp"`
+	HealingID     string                 `json:"healing_id"`
+	ProblemType   string                 `json:"problem_type"`
+	Strategy      string                 `json:"strategy"`
+	Success       bool                   `json:"success"`
+	HealingTime   time.Duration          `json:"healing_time"`
+	Effectiveness float64                `json:"effectiveness"`
+	SideEffects   []string               `json:"side_effects"`
+	Feedback      map[string]interface{} `json:"feedback"`
+	Timestamp     time.Time              `json:"timestamp"`
 }
 
 // StrategyPerformance tracks strategy performance
 type StrategyPerformance struct {
-	StrategyID      string    `json:"strategy_id"`
-	SuccessRate     float64   `json:"success_rate"`
-	AverageTime     time.Duration `json:"average_time"`
-	Effectiveness   float64   `json:"effectiveness"`
-	UsageCount      int64     `json:"usage_count"`
-	LastUsed        time.Time `json:"last_used"`
-	PerformanceTrend string   `json:"performance_trend"`
+	StrategyID       string        `json:"strategy_id"`
+	SuccessRate      float64       `json:"success_rate"`
+	AverageTime      time.Duration `json:"average_time"`
+	Effectiveness    float64       `json:"effectiveness"`
+	UsageCount       int64         `json:"usage_count"`
+	LastUsed         time.Time     `json:"last_used"`
+	PerformanceTrend string        `json:"performance_trend"`
 }
 
 // HealingStrategy represents a healing strategy
 type HealingStrategy struct {
-	ID             string                 `json:"id"`
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description"`
-	Type           string                 `json:"type"`
-	Actions        []string               `json:"actions"`
-	Conditions     map[string]interface{} `json:"conditions"`
-	Priority       int                    `json:"priority"`
-	Risk           float64                `json:"risk"`
-	Effectiveness  float64                `json:"effectiveness"`
-	Enabled        bool                   `json:"enabled"`
-	Metadata       map[string]interface{} `json:"metadata"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description"`
+	Type          string                 `json:"type"`
+	Actions       []string               `json:"actions"`
+	Conditions    map[string]interface{} `json:"conditions"`
+	Priority      int                    `json:"priority"`
+	Risk          float64                `json:"risk"`
+	Effectiveness float64                `json:"effectiveness"`
+	Enabled       bool                   `json:"enabled"`
+	Metadata      map[string]interface{} `json:"metadata"`
 }
 
 // StrategySelector selects appropriate healing strategies
@@ -280,10 +280,10 @@ type StrategySelector struct {
 
 // SelectorConfig configures strategy selection
 type SelectorConfig struct {
-	SelectionMethod    string  `json:"selection_method"` // "rule_based", "ml_based", "hybrid"
-	RiskTolerance      float64 `json:"risk_tolerance"`
-	PerformanceWeight  float64 `json:"performance_weight"`
-	RecentnessWeight   float64 `json:"recentness_weight"`
+	SelectionMethod   string  `json:"selection_method"` // "rule_based", "ml_based", "hybrid"
+	RiskTolerance     float64 `json:"risk_tolerance"`
+	PerformanceWeight float64 `json:"performance_weight"`
+	RecentnessWeight  float64 `json:"recentness_weight"`
 }
 
 // HealingSession represents an active healing session
@@ -318,15 +318,15 @@ type HealingAttempt struct {
 type FailureEvent struct {
 	ID           string                 `json:"id"`
 	Type         FailureType            `json:"type"`
-	FailureType  FailureType            `json:"failure_type"`  // alias for backward compatibility
+	FailureType  FailureType            `json:"failure_type"` // alias for backward compatibility
 	Target       string                 `json:"target"`
-	Component    string                 `json:"component"`     // backward compatibility
+	Component    string                 `json:"component"` // backward compatibility
 	Severity     string                 `json:"severity"`
 	Duration     time.Duration          `json:"duration"`
 	Impact       float64                `json:"impact"`
 	Parameters   map[string]interface{} `json:"parameters"`
 	StartTime    time.Time              `json:"start_time"`
-	Timestamp    time.Time              `json:"timestamp"`     // backward compatibility
+	Timestamp    time.Time              `json:"timestamp"` // backward compatibility
 	EndTime      *time.Time             `json:"end_time"`
 	Triggered    bool                   `json:"triggered"`
 	ErrorMessage string                 `json:"error_message"` // backward compatibility
@@ -370,14 +370,14 @@ func NewSelfHealingEngine(config *SelfHealingConfig) *SelfHealingEngine {
 			StrategyEvolution:     true,
 		}
 	}
-	
+
 	engine := &SelfHealingEngine{
 		config:         config,
 		strategies:     make(map[string]*HealingStrategy),
 		activeHealings: make(map[string]*HealingSession),
 		healingHistory: make([]HealingAttempt, 0),
 	}
-	
+
 	// Initialize components
 	engine.diagnoser = &ProblemDiagnoser{
 		config: &DiagnoserConfig{
@@ -390,7 +390,7 @@ func NewSelfHealingEngine(config *SelfHealingConfig) *SelfHealingEngine {
 		problemPatterns:  make(map[string]*ProblemPattern),
 		diagnosisHistory: make([]DiagnosisResult, 0),
 	}
-	
+
 	engine.healer = &AutomaticHealer{
 		config: &HealerConfig{
 			HealingEnabled:     config.HealingEnabled,
@@ -411,7 +411,7 @@ func NewSelfHealingEngine(config *SelfHealingConfig) *SelfHealingEngine {
 			activeExecutions: make(map[string]*ActionExecution),
 		},
 	}
-	
+
 	engine.verifier = &HealingVerifier{
 		config: &VerifierConfig{
 			VerificationEnabled:  true,
@@ -422,7 +422,7 @@ func NewSelfHealingEngine(config *SelfHealingConfig) *SelfHealingEngine {
 		verificationRules:   make([]VerificationRule, 0),
 		verificationHistory: make([]VerificationResult, 0),
 	}
-	
+
 	engine.learner = &HealingLearner{
 		config: &LearnerConfig{
 			LearningEnabled:     config.LearningEnabled,
@@ -433,7 +433,7 @@ func NewSelfHealingEngine(config *SelfHealingConfig) *SelfHealingEngine {
 		learningData: make([]HealingOutcome, 0),
 		strategies:   make(map[string]*StrategyPerformance),
 	}
-	
+
 	engine.strategySelector = &StrategySelector{
 		config: &SelectorConfig{
 			SelectionMethod:   "rule_based",
@@ -443,7 +443,7 @@ func NewSelfHealingEngine(config *SelfHealingConfig) *SelfHealingEngine {
 		},
 		strategies: make(map[string]*HealingStrategy),
 	}
-	
+
 	return engine
 }
 
@@ -461,21 +461,21 @@ func (she *SelfHealingEngine) Stop() error {
 
 // SelfHealingMetrics represents metrics returned by GetStats/GetMetrics
 type SelfHealingMetrics struct {
-	SuccessRate         float64 `json:"success_rate"`
+	SuccessRate         float64       `json:"success_rate"`
 	AverageHealTime     time.Duration `json:"average_heal_time"`
-	TotalAttempts       int64   `json:"total_attempts"`
-	SuccessfulHeals     int64   `json:"successful_heals"`
-	ActiveHealings      int     `json:"active_healings"`
-	AvailableStrategies int     `json:"available_strategies"`
-	HealingAttempts     uint64   `json:"healing_attempts"`     // alias for total_attempts
-	HealingSuccess      uint64   `json:"healing_success"`      // alias for successful_heals
+	TotalAttempts       int64         `json:"total_attempts"`
+	SuccessfulHeals     int64         `json:"successful_heals"`
+	ActiveHealings      int           `json:"active_healings"`
+	AvailableStrategies int           `json:"available_strategies"`
+	HealingAttempts     uint64        `json:"healing_attempts"` // alias for total_attempts
+	HealingSuccess      uint64        `json:"healing_success"`  // alias for successful_heals
 }
 
 // GetStats returns self-healing engine statistics
 func (she *SelfHealingEngine) GetStats() *SelfHealingMetrics {
 	she.mutex.RLock()
 	defer she.mutex.RUnlock()
-	
+
 	return &SelfHealingMetrics{
 		SuccessRate:         she.successRate,
 		AverageHealTime:     she.averageHealTime,
@@ -483,8 +483,8 @@ func (she *SelfHealingEngine) GetStats() *SelfHealingMetrics {
 		SuccessfulHeals:     she.successfulHeals,
 		ActiveHealings:      len(she.activeHealings),
 		AvailableStrategies: len(she.strategies),
-		HealingAttempts:     uint64(she.totalAttempts),     // alias
-		HealingSuccess:      uint64(she.successfulHeals),   // alias
+		HealingAttempts:     uint64(she.totalAttempts),   // alias
+		HealingSuccess:      uint64(she.successfulHeals), // alias
 	}
 }
 
@@ -497,7 +497,7 @@ func (she *SelfHealingEngine) GetMetrics() *SelfHealingMetrics {
 func (she *SelfHealingEngine) ReportFailure(failure *FailureEvent) error {
 	she.mutex.Lock()
 	defer she.mutex.Unlock()
-	
+
 	// Create a healing session for this failure
 	sessionID := fmt.Sprintf("heal_%s_%d", failure.ID, time.Now().UnixNano())
 	session := &HealingSession{
@@ -515,13 +515,13 @@ func (she *SelfHealingEngine) ReportFailure(failure *FailureEvent) error {
 			"severity":     failure.Severity,
 		},
 	}
-	
+
 	she.activeHealings[sessionID] = session
 	she.totalAttempts++
-	
+
 	// Start healing process asynchronously
 	go she.processHealing(session, failure)
-	
+
 	return nil
 }
 
@@ -530,19 +530,18 @@ func (she *SelfHealingEngine) processHealing(session *HealingSession, failure *F
 	// Simplified healing process
 	session.Progress = 0.5
 	session.CurrentAction = "applying_strategy"
-	
+
 	// Simulate healing action
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Mark as completed
 	session.Progress = 1.0
 	session.CurrentAction = "completed"
 	session.Status = "success"
-	
+
 	she.mutex.Lock()
 	she.successfulHeals++
 	she.successRate = float64(she.successfulHeals) / float64(she.totalAttempts)
 	delete(she.activeHealings, session.ID)
 	she.mutex.Unlock()
 }
-

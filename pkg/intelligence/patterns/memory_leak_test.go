@@ -5,35 +5,35 @@ import (
 	"fmt"
 	"testing"
 	"time"
-	
+
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 func TestNewMemoryLeakPattern(t *testing.T) {
 	pattern := NewMemoryLeakPattern()
-	
+
 	if pattern == nil {
 		t.Fatal("Pattern should not be nil")
 	}
-	
+
 	if pattern.ID() != "memory_leak_pattern" {
 		t.Errorf("Expected pattern ID 'memory_leak_pattern', got %s", pattern.ID())
 	}
-	
+
 	if pattern.Category() != PatternCategoryResource {
 		t.Errorf("Expected category resource, got %v", pattern.Category())
 	}
-	
+
 	if pattern.Priority() != PatternPriorityCritical {
 		t.Errorf("Expected critical priority, got %v", pattern.Priority())
 	}
-	
+
 	expectedSources := []domain.SourceType{
 		domain.SourceEBPF,
 		domain.SourceSystemd,
 		domain.SourceK8s,
 	}
-	
+
 	requiredSources := pattern.RequiredSources()
 	if len(requiredSources) != len(expectedSources) {
 		t.Errorf("Expected %d required sources, got %d", len(expectedSources), len(requiredSources))
@@ -42,7 +42,7 @@ func TestNewMemoryLeakPattern(t *testing.T) {
 
 func TestMemoryLeakPattern_CanMatch(t *testing.T) {
 	pattern := NewMemoryLeakPattern()
-	
+
 	tests := []struct {
 		name     string
 		event    domain.Event
@@ -74,7 +74,7 @@ func TestMemoryLeakPattern_CanMatch(t *testing.T) {
 			expected: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := pattern.CanMatch(tt.event)
@@ -88,7 +88,7 @@ func TestMemoryLeakPattern_CanMatch(t *testing.T) {
 func TestMemoryLeakPattern_Match(t *testing.T) {
 	pattern := NewMemoryLeakPattern()
 	ctx := context.Background()
-	
+
 	tests := []struct {
 		name                 string
 		events               []domain.Event
@@ -110,8 +110,8 @@ func TestMemoryLeakPattern_Match(t *testing.T) {
 			events: []domain.Event{
 				createMemoryEventWithTime(domain.SourceEBPF, 85.0, time.Now().Add(-10*time.Minute)),
 				createMemoryEventWithTime(domain.SourceEBPF, 90.0, time.Now().Add(-8*time.Minute)),
-				createServiceRestartEventWithTime(time.Now().Add(-5*time.Minute)),
-				createPodEvictionEventWithTime(time.Now().Add(-2*time.Minute)),
+				createServiceRestartEventWithTime(time.Now().Add(-5 * time.Minute)),
+				createPodEvictionEventWithTime(time.Now().Add(-2 * time.Minute)),
 			},
 			expectedCorrelations: 1,
 			minConfidence:        0.8,
@@ -129,18 +129,18 @@ func TestMemoryLeakPattern_Match(t *testing.T) {
 			expectedCorrelations: 2, // One per host
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			correlations, err := pattern.Match(ctx, tt.events)
 			if err != nil {
 				t.Fatalf("Match() error = %v", err)
 			}
-			
+
 			if len(correlations) != tt.expectedCorrelations {
 				t.Errorf("Match() returned %d correlations, expected %d", len(correlations), tt.expectedCorrelations)
 			}
-			
+
 			// Check confidence scores
 			for _, correlation := range correlations {
 				if tt.minConfidence > 0 && correlation.Confidence.Overall < tt.minConfidence {

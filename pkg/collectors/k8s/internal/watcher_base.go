@@ -34,26 +34,26 @@ func newBaseWatcher(resourceType string, config core.Config) *baseWatcher {
 // Start starts the watcher
 func (w *baseWatcher) Start(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(ctx)
-	
+
 	if w.informer == nil {
 		return fmt.Errorf("informer not initialized for %s watcher", w.resourceType)
 	}
-	
+
 	// Add event handlers
 	w.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    w.handleAdd,
 		UpdateFunc: w.handleUpdate,
 		DeleteFunc: w.handleDelete,
 	})
-	
+
 	// Start informer
 	go w.informer.Run(w.ctx.Done())
-	
+
 	// Wait for cache sync
 	if !cache.WaitForCacheSync(w.ctx.Done(), w.informer.HasSynced) {
 		return fmt.Errorf("failed to sync cache for %s", w.resourceType)
 	}
-	
+
 	return nil
 }
 
@@ -103,7 +103,7 @@ func (w *baseWatcher) sendEvent(eventType core.EventType, obj, oldObj interface{
 		// Log error and return
 		return
 	}
-	
+
 	event := core.RawEvent{
 		Type:         eventType,
 		Object:       obj,
@@ -113,7 +113,7 @@ func (w *baseWatcher) sendEvent(eventType core.EventType, obj, oldObj interface{
 		Name:         meta.GetName(),
 		Timestamp:    time.Now(),
 	}
-	
+
 	select {
 	case w.eventChan <- event:
 		// Event sent successfully
@@ -139,15 +139,15 @@ func (w *baseWatcher) extractMetadata(obj interface{}) (metav1.Object, error) {
 // createListOptions creates list options for the watcher
 func (w *baseWatcher) createListOptions() metav1.ListOptions {
 	opts := metav1.ListOptions{}
-	
+
 	if w.config.LabelSelector != "" {
 		opts.LabelSelector = w.config.LabelSelector
 	}
-	
+
 	if w.config.FieldSelector != "" {
 		opts.FieldSelector = w.config.FieldSelector
 	}
-	
+
 	return opts
 }
 

@@ -15,9 +15,9 @@ import (
 
 // platformImpl implements the platform-specific journald functionality for Linux
 type platformImpl struct {
-	config core.Config
+	config  core.Config
 	journal *sdjournal.Journal
-	reader core.LogReader
+	reader  core.LogReader
 }
 
 // NewPlatformImpl creates a new Linux platform implementation
@@ -28,13 +28,13 @@ func NewPlatformImpl() (*platformImpl, error) {
 // Init initializes the platform implementation
 func (p *platformImpl) Init(config core.Config) error {
 	p.config = config
-	
+
 	// Create journal reader
 	reader, err := newJournalReader(config)
 	if err != nil {
 		return fmt.Errorf("failed to create journal reader: %w", err)
 	}
-	
+
 	p.reader = reader
 	return nil
 }
@@ -44,11 +44,11 @@ func (p *platformImpl) Start(ctx context.Context) error {
 	if p.reader == nil {
 		return fmt.Errorf("reader not initialized")
 	}
-	
+
 	if err := p.reader.Open(); err != nil {
 		return fmt.Errorf("failed to open journal: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -116,7 +116,7 @@ func newJournalReader(config core.Config) (core.LogReader, error) {
 // Open opens the systemd journal
 func (r *journalReader) Open() error {
 	var err error
-	
+
 	// Open the journal
 	if len(r.config.Units) > 0 {
 		// Open with unit filters
@@ -124,7 +124,7 @@ func (r *journalReader) Open() error {
 		if err != nil {
 			return core.NewCollectorError(core.ErrorTypeJournal, "failed to open journal", err)
 		}
-		
+
 		// Add unit filters
 		for _, unit := range r.config.Units {
 			err = r.journal.AddMatch("_SYSTEMD_UNIT=" + unit)
@@ -140,14 +140,14 @@ func (r *journalReader) Open() error {
 			return core.NewCollectorError(core.ErrorTypeJournal, "failed to open journal", err)
 		}
 	}
-	
+
 	// Add priority filters
 	if len(r.config.Priorities) > 0 {
 		priorityMatches := make([]string, 0, len(r.config.Priorities))
 		for _, priority := range r.config.Priorities {
 			priorityMatches = append(priorityMatches, fmt.Sprintf("PRIORITY=%d", int(priority)))
 		}
-		
+
 		// Add OR-ed priority matches
 		for _, match := range priorityMatches {
 			err = r.journal.AddMatch(match)
@@ -156,7 +156,7 @@ func (r *journalReader) Open() error {
 				return core.NewCollectorError(core.ErrorTypeJournal, "failed to add priority filter", err)
 			}
 		}
-		
+
 		// Use OR logic for priorities
 		err = r.journal.AddDisjunction()
 		if err != nil {
@@ -164,7 +164,7 @@ func (r *journalReader) Open() error {
 			return core.NewCollectorError(core.ErrorTypeJournal, "failed to add priority disjunction", err)
 		}
 	}
-	
+
 	// Add boot ID filter if specified
 	if r.config.BootID != "" {
 		err = r.journal.AddMatch("_BOOT_ID=" + r.config.BootID)
@@ -173,11 +173,11 @@ func (r *journalReader) Open() error {
 			return core.NewCollectorError(core.ErrorTypeJournal, "failed to add boot ID filter", err)
 		}
 	}
-	
+
 	// Get system information
 	r.bootID = r.getBootIDFromJournal()
 	r.machineID = r.getMachineIDFromJournal()
-	
+
 	return nil
 }
 
@@ -203,26 +203,26 @@ func (r *journalReader) ReadEntry() (*core.LogEntry, error) {
 	if r.journal == nil {
 		return nil, core.ErrJournalNotOpen
 	}
-	
+
 	// Move to next entry
 	ret, err := r.journal.Next()
 	if err != nil {
 		return nil, core.NewCollectorError(core.ErrorTypeRead, "failed to read next entry", err)
 	}
-	
+
 	if ret == 0 {
 		return nil, core.ErrNoMoreEntries
 	}
-	
+
 	// Get all entry data
 	entry, err := r.journal.GetEntry()
 	if err != nil {
 		return nil, core.NewCollectorError(core.ErrorTypeRead, "failed to get entry data", err)
 	}
-	
+
 	// Convert to our LogEntry format
 	logEntry := r.convertEntry(entry)
-	
+
 	return logEntry, nil
 }
 
@@ -231,12 +231,12 @@ func (r *journalReader) SeekCursor(cursor string) error {
 	if r.journal == nil {
 		return core.ErrJournalNotOpen
 	}
-	
+
 	err := r.journal.SeekCursor(cursor)
 	if err != nil {
 		return core.NewCollectorError(core.ErrorTypeSeek, "failed to seek to cursor", err)
 	}
-	
+
 	return nil
 }
 
@@ -245,15 +245,15 @@ func (r *journalReader) SeekTime(timestamp time.Time) error {
 	if r.journal == nil {
 		return core.ErrJournalNotOpen
 	}
-	
+
 	// Convert to microseconds since epoch
 	usec := uint64(timestamp.UnixNano() / 1000)
-	
+
 	err := r.journal.SeekRealtimeUsec(usec)
 	if err != nil {
 		return core.NewCollectorError(core.ErrorTypeSeek, "failed to seek to timestamp", err)
 	}
-	
+
 	return nil
 }
 
@@ -262,12 +262,12 @@ func (r *journalReader) GetCursor() (string, error) {
 	if r.journal == nil {
 		return "", core.ErrJournalNotOpen
 	}
-	
+
 	cursor, err := r.journal.GetCursor()
 	if err != nil {
 		return "", core.NewCollectorError(core.ErrorTypeCursor, "failed to get cursor", err)
 	}
-	
+
 	return cursor, nil
 }
 
@@ -276,10 +276,10 @@ func (r *journalReader) WaitForEntries(timeout time.Duration) error {
 	if r.journal == nil {
 		return core.ErrJournalNotOpen
 	}
-	
+
 	// Convert timeout to microseconds
 	timeoutUsec := int(timeout.Microseconds())
-	
+
 	ret := r.journal.Wait(timeoutUsec)
 	switch ret {
 	case sdjournal.SD_JOURNAL_NOP:
@@ -310,16 +310,16 @@ func (r *journalReader) convertEntry(entry *sdjournal.JournalEntry) *core.LogEnt
 	logEntry := &core.LogEntry{
 		Fields: make(map[string]interface{}),
 	}
-	
+
 	// Set timestamp
 	logEntry.Timestamp = time.Unix(0, int64(entry.RealtimeTimestamp*1000))
 	logEntry.MonotonicTime = entry.MonotonicTimestamp
-	
+
 	// Process all fields
 	for key, value := range entry.Fields {
 		// Store in fields map
 		logEntry.Fields[key] = value
-		
+
 		// Map important fields to struct fields
 		switch key {
 		case "MESSAGE":
@@ -366,7 +366,7 @@ func (r *journalReader) convertEntry(entry *sdjournal.JournalEntry) *core.LogEnt
 			logEntry.Cursor = value
 		}
 	}
-	
+
 	// Set defaults for missing required fields
 	if logEntry.BootID == "" {
 		logEntry.BootID = r.bootID
@@ -374,14 +374,14 @@ func (r *journalReader) convertEntry(entry *sdjournal.JournalEntry) *core.LogEnt
 	if logEntry.MachineID == "" {
 		logEntry.MachineID = r.machineID
 	}
-	
+
 	// Get cursor if not in fields
 	if logEntry.Cursor == "" {
 		if cursor, err := r.journal.GetCursor(); err == nil {
 			logEntry.Cursor = cursor
 		}
 	}
-	
+
 	return logEntry
 }
 
@@ -390,7 +390,7 @@ func (r *journalReader) getBootIDFromJournal() string {
 	if r.journal == nil {
 		return ""
 	}
-	
+
 	// Try to get boot ID from current entry or seek to first entry
 	entry, err := r.journal.GetEntry()
 	if err != nil {
@@ -402,11 +402,11 @@ func (r *journalReader) getBootIDFromJournal() string {
 			return ""
 		}
 	}
-	
+
 	if bootID, exists := entry.Fields["_BOOT_ID"]; exists {
 		return bootID
 	}
-	
+
 	return ""
 }
 
@@ -415,7 +415,7 @@ func (r *journalReader) getMachineIDFromJournal() string {
 	if r.journal == nil {
 		return ""
 	}
-	
+
 	// Try to get machine ID from current entry
 	entry, err := r.journal.GetEntry()
 	if err != nil {
@@ -427,10 +427,10 @@ func (r *journalReader) getMachineIDFromJournal() string {
 			return ""
 		}
 	}
-	
+
 	if machineID, exists := entry.Fields["_MACHINE_ID"]; exists {
 		return machineID
 	}
-	
+
 	return ""
 }

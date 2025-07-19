@@ -22,7 +22,7 @@ func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (d
 	if err != nil {
 		return domain.Event{}, fmt.Errorf("failed to create event data: %w", err)
 	}
-	
+
 	// Create the domain event
 	event := domain.Event{
 		ID:         fmt.Sprintf("ebpf_%d_%d_%d", raw.Timestamp.UnixNano(), raw.PID, raw.CPU),
@@ -40,7 +40,7 @@ func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (d
 			"comm":      raw.Comm,
 		},
 	}
-	
+
 	return event, nil
 }
 
@@ -49,10 +49,10 @@ func (p *eventProcessor) createEventData(raw core.RawEvent) (domain.EventType, m
 	switch raw.Type {
 	case "syscall", "network", "memory":
 		return domain.EventTypeSystem, p.createSystemData(raw), nil
-		
+
 	case "process_start", "process_exit":
 		return domain.EventTypeProcess, p.createSystemData(raw), nil
-		
+
 	default:
 		return domain.EventTypeSystem, p.createSystemData(raw), nil
 	}
@@ -61,7 +61,7 @@ func (p *eventProcessor) createEventData(raw core.RawEvent) (domain.EventType, m
 // createSystemData creates a system event data map
 func (p *eventProcessor) createSystemData(raw core.RawEvent) map[string]interface{} {
 	data := make(map[string]interface{})
-	
+
 	// Add basic event information
 	data["ebpf_type"] = raw.Type
 	data["pid"] = raw.PID
@@ -70,102 +70,101 @@ func (p *eventProcessor) createSystemData(raw core.RawEvent) map[string]interfac
 	data["gid"] = raw.GID
 	data["comm"] = raw.Comm
 	data["cpu"] = raw.CPU
-	
+
 	// Extract common fields
 	if syscall, ok := raw.Decoded["syscall"].(string); ok {
 		data["syscall"] = syscall
 	}
-	
+
 	if retCode, ok := raw.Decoded["return_code"].(int32); ok {
 		data["return_code"] = retCode
 	}
-	
+
 	// Extract memory-related fields
 	if memUsage, ok := raw.Decoded["memory_usage"].(int64); ok {
 		data["memory_usage"] = memUsage
 	}
-	
+
 	if memLimit, ok := raw.Decoded["memory_limit"].(int64); ok {
 		data["memory_limit"] = memLimit
 	}
-	
+
 	// Extract network-related fields
 	if srcIP, ok := raw.Decoded["source_ip"].(string); ok {
 		data["source_ip"] = srcIP
 	}
-	
+
 	if dstIP, ok := raw.Decoded["dest_ip"].(string); ok {
 		data["dest_ip"] = dstIP
 	}
-	
+
 	if port, ok := raw.Decoded["port"].(int32); ok {
 		data["port"] = port
 	}
-	
+
 	if protocol, ok := raw.Decoded["protocol"].(string); ok {
 		data["protocol"] = protocol
 	}
-	
+
 	if bytesSent, ok := raw.Decoded["bytes_sent"].(int64); ok {
 		data["bytes_sent"] = bytesSent
 	}
-	
+
 	if bytesRecv, ok := raw.Decoded["bytes_received"].(int64); ok {
 		data["bytes_received"] = bytesRecv
 	}
-	
+
 	// Add any additional decoded fields
 	for k, v := range raw.Decoded {
 		if _, exists := data[k]; !exists {
 			data[k] = v
 		}
 	}
-	
+
 	return data
 }
 
 // createContextData creates the event context data
 func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interface{} {
 	context := make(map[string]interface{})
-	
+
 	context["pid"] = raw.PID
 	context["uid"] = raw.UID
 	context["gid"] = raw.GID
 	context["comm"] = raw.Comm
 	context["cpu"] = raw.CPU
 	context["tid"] = raw.TID
-	
+
 	// Add labels
 	context["labels"] = map[string]string{
 		"comm": raw.Comm,
 		"cpu":  fmt.Sprintf("%d", raw.CPU),
 	}
-	
+
 	// Add tags
 	context["tags"] = []string{
 		"ebpf",
 		raw.Type,
 	}
-	
+
 	return context
 }
-
 
 // determineSeverity determines the event severity
 func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
 	switch raw.Type {
 	case "oom_kill", "kernel_panic":
 		return domain.SeverityCritical
-		
+
 	case "memory_pressure", "cpu_throttle":
 		return domain.SeverityWarning
-		
+
 	case "syscall_error":
 		if retCode, ok := raw.Decoded["return_code"].(int32); ok && retCode < 0 {
 			return domain.SeverityHigh
 		}
 		return domain.SeverityLow
-		
+
 	default:
 		return domain.SeverityLow
 	}

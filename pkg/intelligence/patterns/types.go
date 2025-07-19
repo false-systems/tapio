@@ -2,7 +2,7 @@ package patternrecognition
 
 import (
 	"time"
-	
+
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -31,20 +31,20 @@ const (
 // Config represents pattern recognition engine configuration
 type Config struct {
 	// Engine settings
-	Name                string        `json:"name"`
-	Enabled             bool          `json:"enabled"`
-	MaxConcurrentEvents int           `json:"max_concurrent_events"`
-	
+	Name                string `json:"name"`
+	Enabled             bool   `json:"enabled"`
+	MaxConcurrentEvents int    `json:"max_concurrent_events"`
+
 	// Pattern settings
-	EnabledPatterns     []string      `json:"enabled_patterns"`
-	DefaultTimeWindow   time.Duration `json:"default_time_window"`
-	MinConfidenceScore  float64       `json:"min_confidence_score"`
-	
+	EnabledPatterns    []string      `json:"enabled_patterns"`
+	DefaultTimeWindow  time.Duration `json:"default_time_window"`
+	MinConfidenceScore float64       `json:"min_confidence_score"`
+
 	// Performance settings
 	BatchSize           int           `json:"batch_size"`
 	ProcessingTimeout   time.Duration `json:"processing_timeout"`
 	PatternMatchTimeout time.Duration `json:"pattern_match_timeout"`
-	
+
 	// Memory management
 	EventBufferSize     int           `json:"event_buffer_size"`
 	MaxEventsPerPattern int           `json:"max_events_per_pattern"`
@@ -79,8 +79,8 @@ type EventGroup struct {
 
 // TemporalWindow represents a time window for pattern analysis
 type TemporalWindow struct {
-	Start    time.Time `json:"start"`
-	End      time.Time `json:"end"`
+	Start    time.Time     `json:"start"`
+	End      time.Time     `json:"end"`
 	Duration time.Duration `json:"duration"`
 }
 

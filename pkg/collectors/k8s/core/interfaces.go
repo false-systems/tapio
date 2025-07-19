@@ -12,14 +12,14 @@ type Collector interface {
 	// Lifecycle management
 	Start(ctx context.Context) error
 	Stop() error
-	
+
 	// Event streaming
 	Events() <-chan domain.Event
-	
+
 	// Health and monitoring
 	Health() Health
 	Statistics() Statistics
-	
+
 	// Configuration
 	Configure(config Config) error
 }
@@ -27,29 +27,29 @@ type Collector interface {
 // Config defines Kubernetes collector configuration
 type Config struct {
 	// Basic settings
-	Name            string        `json:"name"`
-	Enabled         bool          `json:"enabled"`
-	EventBufferSize int           `json:"event_buffer_size"`
-	
+	Name            string `json:"name"`
+	Enabled         bool   `json:"enabled"`
+	EventBufferSize int    `json:"event_buffer_size"`
+
 	// Kubernetes configuration
-	KubeConfig      string        `json:"kubeconfig,omitempty"`      // Path to kubeconfig file
-	InCluster       bool          `json:"in_cluster"`                // Use in-cluster config
-	Namespace       string        `json:"namespace,omitempty"`       // Namespace to watch (empty = all)
-	
+	KubeConfig string `json:"kubeconfig,omitempty"` // Path to kubeconfig file
+	InCluster  bool   `json:"in_cluster"`           // Use in-cluster config
+	Namespace  string `json:"namespace,omitempty"`  // Namespace to watch (empty = all)
+
 	// Resource filters
-	WatchPods       bool          `json:"watch_pods"`
-	WatchNodes      bool          `json:"watch_nodes"`
-	WatchServices   bool          `json:"watch_services"`
-	WatchDeployments bool         `json:"watch_deployments"`
-	WatchEvents     bool          `json:"watch_events"`
-	WatchConfigMaps bool          `json:"watch_configmaps"`
-	WatchSecrets    bool          `json:"watch_secrets"`
-	
+	WatchPods        bool `json:"watch_pods"`
+	WatchNodes       bool `json:"watch_nodes"`
+	WatchServices    bool `json:"watch_services"`
+	WatchDeployments bool `json:"watch_deployments"`
+	WatchEvents      bool `json:"watch_events"`
+	WatchConfigMaps  bool `json:"watch_configmaps"`
+	WatchSecrets     bool `json:"watch_secrets"`
+
 	// Performance tuning
-	ResyncPeriod    time.Duration `json:"resync_period"`
-	EventRateLimit  int           `json:"event_rate_limit"`
-	LabelSelector   string        `json:"label_selector,omitempty"`
-	FieldSelector   string        `json:"field_selector,omitempty"`
+	ResyncPeriod   time.Duration `json:"resync_period"`
+	EventRateLimit int           `json:"event_rate_limit"`
+	LabelSelector  string        `json:"label_selector,omitempty"`
+	FieldSelector  string        `json:"field_selector,omitempty"`
 }
 
 // Health represents collector health status
@@ -77,37 +77,37 @@ const (
 
 // Statistics represents runtime statistics
 type Statistics struct {
-	StartTime          time.Time              `json:"start_time"`
-	EventsCollected    uint64                 `json:"events_collected"`
-	EventsDropped      uint64                 `json:"events_dropped"`
-	ResourcesWatched   map[string]int         `json:"resources_watched"`
-	WatchersActive     int                    `json:"watchers_active"`
-	APICallsTotal      uint64                 `json:"api_calls_total"`
-	APIErrors          uint64                 `json:"api_errors"`
-	ReconnectCount     uint64                 `json:"reconnect_count"`
-	Custom             map[string]interface{} `json:"custom"`
+	StartTime        time.Time              `json:"start_time"`
+	EventsCollected  uint64                 `json:"events_collected"`
+	EventsDropped    uint64                 `json:"events_dropped"`
+	ResourcesWatched map[string]int         `json:"resources_watched"`
+	WatchersActive   int                    `json:"watchers_active"`
+	APICallsTotal    uint64                 `json:"api_calls_total"`
+	APIErrors        uint64                 `json:"api_errors"`
+	ReconnectCount   uint64                 `json:"reconnect_count"`
+	Custom           map[string]interface{} `json:"custom"`
 }
 
 // ClusterInfo contains information about the connected cluster
 type ClusterInfo struct {
-	Name             string    `json:"name"`
-	Version          string    `json:"version"`
-	Platform         string    `json:"platform"`
-	ConnectedAt      time.Time `json:"connected_at"`
-	APIServerURL     string    `json:"api_server_url"`
+	Name         string    `json:"name"`
+	Version      string    `json:"version"`
+	Platform     string    `json:"platform"`
+	ConnectedAt  time.Time `json:"connected_at"`
+	APIServerURL string    `json:"api_server_url"`
 }
 
 // ResourceWatcher watches specific Kubernetes resources
 type ResourceWatcher interface {
 	// Start watching resources
 	Start(ctx context.Context) error
-	
+
 	// Stop watching
 	Stop() error
-	
+
 	// Events channel
 	Events() <-chan RawEvent
-	
+
 	// Resource type being watched
 	ResourceType() string
 }
@@ -147,14 +147,14 @@ func (c Config) Validate() error {
 	if c.ResyncPeriod <= 0 {
 		c.ResyncPeriod = 30 * time.Minute
 	}
-	
+
 	// At least one resource type should be watched
-	if !c.WatchPods && !c.WatchNodes && !c.WatchServices && 
-	   !c.WatchDeployments && !c.WatchEvents && !c.WatchConfigMaps && !c.WatchSecrets {
+	if !c.WatchPods && !c.WatchNodes && !c.WatchServices &&
+		!c.WatchDeployments && !c.WatchEvents && !c.WatchConfigMaps && !c.WatchSecrets {
 		// Default to watching pods and events
 		c.WatchPods = true
 		c.WatchEvents = true
 	}
-	
+
 	return nil
 }

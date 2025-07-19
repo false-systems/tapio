@@ -14,20 +14,20 @@ type DegradationManager struct {
 	config *DegradationConfig
 
 	// State tracking
-	currentHealth     int64 // atomic: float64 * 1000 for precision
-	degradationLevel  int32 // atomic: DegradationLevel
-	lastHealthUpdate  int64 // atomic: unix timestamp in nanoseconds
+	currentHealth    int64 // atomic: float64 * 1000 for precision
+	degradationLevel int32 // atomic: DegradationLevel
+	lastHealthUpdate int64 // atomic: unix timestamp in nanoseconds
 
 	// Degradation detection
-	healthHistory     []HealthMeasurement
-	historyMutex      sync.RWMutex
-	trendAnalyzer     *TrendAnalyzer
-	thresholdMonitor  *ThresholdMonitor
+	healthHistory    []HealthMeasurement
+	historyMutex     sync.RWMutex
+	trendAnalyzer    *TrendAnalyzer
+	thresholdMonitor *ThresholdMonitor
 
 	// Response management
-	responseManager   *ResponseManager
-	recoveryManager   *RecoveryManager
-	alertManager      *AlertManager
+	responseManager *ResponseManager
+	recoveryManager *RecoveryManager
+	alertManager    *AlertManager
 
 	// Performance tracking
 	detectionCount    uint64 // atomic
@@ -36,24 +36,24 @@ type DegradationManager struct {
 	falsePositiveRate float64
 
 	// State management
-	mu                sync.RWMutex
-	running           bool
-	stopChan          chan struct{}
+	mu       sync.RWMutex
+	running  bool
+	stopChan chan struct{}
 }
 
 // DegradationConfig configures degradation management
 type DegradationConfig struct {
 	// Detection thresholds
-	HealthyThreshold    float64 `json:"healthy_threshold"`    // 0.95
-	DegradedThreshold   float64 `json:"degraded_threshold"`   // 0.8
-	CriticalThreshold   float64 `json:"critical_threshold"`   // 0.6
-	FailureThreshold    float64 `json:"failure_threshold"`    // 0.4
+	HealthyThreshold  float64 `json:"healthy_threshold"`  // 0.95
+	DegradedThreshold float64 `json:"degraded_threshold"` // 0.8
+	CriticalThreshold float64 `json:"critical_threshold"` // 0.6
+	FailureThreshold  float64 `json:"failure_threshold"`  // 0.4
 
 	// Detection sensitivity
-	TrendWindowSize     int           `json:"trend_window_size"`     // 10 measurements
-	DetectionWindow     time.Duration `json:"detection_window"`      // 5 minutes
-	ConfirmationWindow  time.Duration `json:"confirmation_window"`   // 30 seconds
-	MinSampleSize       int           `json:"min_sample_size"`       // 3 measurements
+	TrendWindowSize    int           `json:"trend_window_size"`   // 10 measurements
+	DetectionWindow    time.Duration `json:"detection_window"`    // 5 minutes
+	ConfirmationWindow time.Duration `json:"confirmation_window"` // 30 seconds
+	MinSampleSize      int           `json:"min_sample_size"`     // 3 measurements
 
 	// Response configuration
 	AutoRecoveryEnabled bool          `json:"auto_recovery_enabled"` // true
@@ -62,14 +62,14 @@ type DegradationConfig struct {
 	MaxRetryAttempts    int           `json:"max_retry_attempts"`    // 3
 
 	// Alert configuration
-	AlertsEnabled       bool          `json:"alerts_enabled"`        // true
-	AlertCooldown       time.Duration `json:"alert_cooldown"`        // 10 minutes
-	EscalationTimeout   time.Duration `json:"escalation_timeout"`    // 30 minutes
+	AlertsEnabled     bool          `json:"alerts_enabled"`     // true
+	AlertCooldown     time.Duration `json:"alert_cooldown"`     // 10 minutes
+	EscalationTimeout time.Duration `json:"escalation_timeout"` // 30 minutes
 
 	// Performance settings
-	HistorySize         int           `json:"history_size"`          // 1000 measurements
-	CleanupInterval     time.Duration `json:"cleanup_interval"`      // 1 hour
-	MetricsEnabled      bool          `json:"metrics_enabled"`       // true
+	HistorySize     int           `json:"history_size"`     // 1000 measurements
+	CleanupInterval time.Duration `json:"cleanup_interval"` // 1 hour
+	MetricsEnabled  bool          `json:"metrics_enabled"`  // true
 }
 
 // DegradationLevel represents the level of system degradation
@@ -121,27 +121,27 @@ type TrendAnalyzer struct {
 
 // TrendConfig configures trend analysis
 type TrendConfig struct {
-	WindowSize       int     `json:"window_size"`       // 10
-	SmoothingFactor  float64 `json:"smoothing_factor"`  // 0.3
-	TrendThreshold   float64 `json:"trend_threshold"`   // 0.1
-	VolatilityLimit  float64 `json:"volatility_limit"`  // 0.2
+	WindowSize      int     `json:"window_size"`      // 10
+	SmoothingFactor float64 `json:"smoothing_factor"` // 0.3
+	TrendThreshold  float64 `json:"trend_threshold"`  // 0.1
+	VolatilityLimit float64 `json:"volatility_limit"` // 0.2
 }
 
 // TrendMetrics contains trend analysis results
 type TrendMetrics struct {
-	Slope            float64   `json:"slope"`
-	R2               float64   `json:"r2"`
-	Volatility       float64   `json:"volatility"`
-	Trend            string    `json:"trend"` // "improving", "stable", "degrading"
-	Confidence       float64   `json:"confidence"`
-	LastUpdated      time.Time `json:"last_updated"`
+	Slope       float64   `json:"slope"`
+	R2          float64   `json:"r2"`
+	Volatility  float64   `json:"volatility"`
+	Trend       string    `json:"trend"` // "improving", "stable", "degrading"
+	Confidence  float64   `json:"confidence"`
+	LastUpdated time.Time `json:"last_updated"`
 }
 
 // ThresholdMonitor monitors health thresholds
 type ThresholdMonitor struct {
-	config           *ThresholdConfig
+	config            *ThresholdConfig
 	thresholdBreaches map[string]*ThresholdBreach
-	mu               sync.RWMutex
+	mu                sync.RWMutex
 }
 
 // ThresholdConfig configures threshold monitoring
@@ -154,13 +154,13 @@ type ThresholdConfig struct {
 
 // ThresholdBreach represents a threshold breach event
 type ThresholdBreach struct {
-	Threshold    string    `json:"threshold"`
-	Value        float64   `json:"value"`
-	Limit        float64   `json:"limit"`
-	BreachTime   time.Time `json:"breach_time"`
+	Threshold    string        `json:"threshold"`
+	Value        float64       `json:"value"`
+	Limit        float64       `json:"limit"`
+	BreachTime   time.Time     `json:"breach_time"`
 	Duration     time.Duration `json:"duration"`
-	Severity     string    `json:"severity"`
-	Acknowledged bool      `json:"acknowledged"`
+	Severity     string        `json:"severity"`
+	Acknowledged bool          `json:"acknowledged"`
 }
 
 // ResponseManager manages degradation responses
@@ -172,10 +172,10 @@ type ResponseManager struct {
 
 // ResponseConfig configures degradation responses
 type ResponseConfig struct {
-	ResponseMapping  map[string][]string `json:"response_mapping"`
-	ParallelExecution bool               `json:"parallel_execution"`
-	FailureHandling   string             `json:"failure_handling"` // "continue", "abort", "retry"
-	ExecutionTimeout  time.Duration      `json:"execution_timeout"`
+	ResponseMapping   map[string][]string `json:"response_mapping"`
+	ParallelExecution bool                `json:"parallel_execution"`
+	FailureHandling   string              `json:"failure_handling"` // "continue", "abort", "retry"
+	ExecutionTimeout  time.Duration       `json:"execution_timeout"`
 }
 
 // Response represents a degradation response action
@@ -190,7 +190,7 @@ type Response interface {
 type ResponseExecutor struct {
 	executionHistory []ResponseExecution
 	activeResponses  map[string]context.CancelFunc
-	mu              sync.RWMutex
+	mu               sync.RWMutex
 }
 
 // ResponseExecution tracks response execution
@@ -205,18 +205,18 @@ type ResponseExecution struct {
 
 // RecoveryManager manages system recovery
 type RecoveryManager struct {
-	config         *RecoveryConfig
-	recoveryPlan   *RecoveryPlan
-	recoveryState  *RecoveryState
+	config        *RecoveryConfig
+	recoveryPlan  *RecoveryPlan
+	recoveryState *RecoveryState
 }
 
 // RecoveryConfig configures recovery management
 type RecoveryConfig struct {
-	AutoRecovery       bool          `json:"auto_recovery"`
-	RecoverySteps      []string      `json:"recovery_steps"`
-	StepTimeout        time.Duration `json:"step_timeout"`
-	VerificationDelay  time.Duration `json:"verification_delay"`
-	MaxRecoveryTime    time.Duration `json:"max_recovery_time"`
+	AutoRecovery      bool          `json:"auto_recovery"`
+	RecoverySteps     []string      `json:"recovery_steps"`
+	StepTimeout       time.Duration `json:"step_timeout"`
+	VerificationDelay time.Duration `json:"verification_delay"`
+	MaxRecoveryTime   time.Duration `json:"max_recovery_time"`
 }
 
 // RecoveryPlan defines recovery steps
@@ -238,11 +238,11 @@ type RecoveryStep struct {
 
 // RecoveryState tracks recovery progress
 type RecoveryState struct {
-	InProgress    bool                   `json:"in_progress"`
-	CurrentStep   int                    `json:"current_step"`
-	StartTime     time.Time              `json:"start_time"`
-	StepResults   []RecoveryStepResult   `json:"step_results"`
-	OverallResult string                 `json:"overall_result"`
+	InProgress    bool                 `json:"in_progress"`
+	CurrentStep   int                  `json:"current_step"`
+	StartTime     time.Time            `json:"start_time"`
+	StepResults   []RecoveryStepResult `json:"step_results"`
+	OverallResult string               `json:"overall_result"`
 }
 
 // RecoveryStepResult tracks individual step results
@@ -259,16 +259,16 @@ type AlertManager struct {
 	config        *AlertConfig
 	alertChannels []AlertChannel
 	alertHistory  []Alert
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 }
 
 // AlertConfig configures alert management
 type AlertConfig struct {
-	Channels     []string      `json:"channels"`     // "email", "slack", "webhook"
-	Severity     []string      `json:"severity"`     // "info", "warning", "critical"
-	Cooldown     time.Duration `json:"cooldown"`     // 10 minutes
-	Escalation   bool          `json:"escalation"`   // true
-	Aggregation  bool          `json:"aggregation"`  // true
+	Channels    []string      `json:"channels"`    // "email", "slack", "webhook"
+	Severity    []string      `json:"severity"`    // "info", "warning", "critical"
+	Cooldown    time.Duration `json:"cooldown"`    // 10 minutes
+	Escalation  bool          `json:"escalation"`  // true
+	Aggregation bool          `json:"aggregation"` // true
 }
 
 // AlertChannel represents an alert delivery channel
@@ -280,16 +280,16 @@ type AlertChannel interface {
 
 // Alert represents a degradation alert
 type Alert struct {
-	ID          string                 `json:"id"`
-	Type        string                 `json:"type"`
-	Severity    string                 `json:"severity"`
-	Title       string                 `json:"title"`
-	Message     string                 `json:"message"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Source      string                 `json:"source"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	Acknowledged bool                  `json:"acknowledged"`
-	Resolved    bool                   `json:"resolved"`
+	ID           string                 `json:"id"`
+	Type         string                 `json:"type"`
+	Severity     string                 `json:"severity"`
+	Title        string                 `json:"title"`
+	Message      string                 `json:"message"`
+	Timestamp    time.Time              `json:"timestamp"`
+	Source       string                 `json:"source"`
+	Metadata     map[string]interface{} `json:"metadata"`
+	Acknowledged bool                   `json:"acknowledged"`
+	Resolved     bool                   `json:"resolved"`
 }
 
 // NewDegradationManager creates a new degradation manager
@@ -299,9 +299,9 @@ func NewDegradationManager(config *DegradationConfig) *DegradationManager {
 	}
 
 	dm := &DegradationManager{
-		config:       config,
+		config:        config,
 		healthHistory: make([]HealthMeasurement, 0, config.HistorySize),
-		stopChan:     make(chan struct{}),
+		stopChan:      make(chan struct{}),
 	}
 
 	// Initialize trend analyzer
@@ -454,7 +454,7 @@ func (dm *DegradationManager) UpdateHealth(measurement HealthMeasurement) {
 	// Add to history
 	dm.historyMutex.Lock()
 	dm.healthHistory = append(dm.healthHistory, measurement)
-	
+
 	// Trim history if it exceeds max size
 	if len(dm.healthHistory) > dm.config.HistorySize {
 		dm.healthHistory = dm.healthHistory[1:]
@@ -546,8 +546,8 @@ func (dm *DegradationManager) handleDegradationChange(oldLevel, newLevel Degrada
 			Timestamp: time.Now(),
 			Source:    "degradation_manager",
 			Metadata: map[string]interface{}{
-				"old_level": oldLevel.String(),
-				"new_level": newLevel.String(),
+				"old_level":    oldLevel.String(),
+				"new_level":    newLevel.String(),
 				"health_score": measurement.Score,
 			},
 		}
@@ -567,7 +567,7 @@ func (dm *DegradationManager) executeResponse(level DegradationLevel, measuremen
 
 	// Get responses for this degradation level
 	responses := dm.responseManager.responses[level]
-	
+
 	for _, response := range responses {
 		err := response.Execute(ctx)
 		if err != nil {
@@ -582,18 +582,18 @@ func (dm *DegradationManager) executeResponse(level DegradationLevel, measuremen
 func (dm *DegradationManager) updateTrendAnalysis(measurement HealthMeasurement) {
 	// Get recent measurements for trend analysis
 	recentMeasurements := dm.GetHealthHistory(dm.config.TrendWindowSize)
-	
+
 	if len(recentMeasurements) < dm.config.MinSampleSize {
 		return
 	}
 
 	// Calculate trend metrics (simplified implementation)
 	dm.trendAnalyzer.trendMetrics.LastUpdated = time.Now()
-	
+
 	// Calculate slope (simplified linear regression)
 	n := len(recentMeasurements)
 	sumX, sumY, sumXY, sumX2 := 0.0, 0.0, 0.0, 0.0
-	
+
 	for i, m := range recentMeasurements {
 		x := float64(i)
 		y := m.Score
@@ -602,10 +602,10 @@ func (dm *DegradationManager) updateTrendAnalysis(measurement HealthMeasurement)
 		sumXY += x * y
 		sumX2 += x * x
 	}
-	
+
 	slope := (float64(n)*sumXY - sumX*sumY) / (float64(n)*sumX2 - sumX*sumX)
 	dm.trendAnalyzer.trendMetrics.Slope = slope
-	
+
 	// Determine trend direction
 	if slope > dm.trendAnalyzer.config.TrendThreshold {
 		dm.trendAnalyzer.trendMetrics.Trend = "improving"
@@ -614,7 +614,7 @@ func (dm *DegradationManager) updateTrendAnalysis(measurement HealthMeasurement)
 	} else {
 		dm.trendAnalyzer.trendMetrics.Trend = "stable"
 	}
-	
+
 	dm.trendAnalyzer.trendMetrics.Confidence = 0.8 // Simplified confidence
 }
 
@@ -695,14 +695,14 @@ func (dm *DegradationManager) cleanupLoop(ctx context.Context) {
 func (dm *DegradationManager) performPeriodicAnalysis() {
 	// Get recent health measurements
 	recentMeasurements := dm.GetHealthHistory(dm.config.TrendWindowSize)
-	
+
 	if len(recentMeasurements) < dm.config.MinSampleSize {
 		return
 	}
 
 	// Analyze trends and patterns
 	dm.analyzeTrends(recentMeasurements)
-	
+
 	// Check for anomalies
 	dm.detectAnomalies(recentMeasurements)
 }

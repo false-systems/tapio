@@ -12,8 +12,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/yairfalse/tapio/pkg/diagnostics"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
+	"github.com/yairfalse/tapio/pkg/diagnostics"
 	"github.com/yairfalse/tapio/pkg/k8s"
 )
 

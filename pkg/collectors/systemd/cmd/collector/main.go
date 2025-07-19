@@ -26,7 +26,7 @@ func main() {
 		watchAllServices = flag.Bool("watch-all", false, "Watch all services")
 	)
 	flag.Parse()
-	
+
 	// Create configuration based on type
 	var config systemd.Config
 	switch *configType {
@@ -37,13 +37,13 @@ func main() {
 	default:
 		config = systemd.DefaultConfig()
 	}
-	
+
 	// Override with command line flags
 	config.Name = "systemd-collector-standalone"
 	config.EventBufferSize = *bufferSize
 	config.PollInterval = *pollInterval
 	config.WatchAllServices = *watchAllServices
-	
+
 	if *serviceFilter != "" {
 		config.ServiceFilter = strings.Split(*serviceFilter, ",")
 		// Trim whitespace
@@ -51,7 +51,7 @@ func main() {
 			config.ServiceFilter[i] = strings.TrimSpace(config.ServiceFilter[i])
 		}
 	}
-	
+
 	if *excludeServices != "" {
 		config.ServiceExclude = strings.Split(*excludeServices, ",")
 		// Trim whitespace
@@ -59,7 +59,7 @@ func main() {
 			config.ServiceExclude[i] = strings.TrimSpace(config.ServiceExclude[i])
 		}
 	}
-	
+
 	if *unitTypes != "" {
 		config.UnitTypes = strings.Split(*unitTypes, ",")
 		// Trim whitespace
@@ -67,33 +67,33 @@ func main() {
 			config.UnitTypes[i] = strings.TrimSpace(config.UnitTypes[i])
 		}
 	}
-	
+
 	// Create collector
 	collector, err := systemd.NewCollector(config)
 	if err != nil {
 		log.Fatalf("Failed to create collector: %v", err)
 	}
-	
+
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	// Start collector
 	if err := collector.Start(ctx); err != nil {
 		log.Fatalf("Failed to start collector: %v", err)
 	}
 	fmt.Println("systemd collector started successfully")
-	
+
 	// Get initial health
 	health := collector.Health()
 	if health.DBusConnected {
 		fmt.Printf("Connected to D-Bus, systemd version: %s\n", health.SystemdVersion)
 	}
-	
+
 	// Print configuration
 	fmt.Printf("Configuration:\n")
 	fmt.Printf("  Watch all services: %v\n", config.WatchAllServices)
@@ -101,7 +101,7 @@ func main() {
 	fmt.Printf("  Service exclude: %v\n", config.ServiceExclude)
 	fmt.Printf("  Unit types: %v\n", config.UnitTypes)
 	fmt.Printf("  Poll interval: %v\n", config.PollInterval)
-	
+
 	// Start event processor
 	go func() {
 		eventCount := 0
@@ -112,7 +112,7 @@ func main() {
 			fmt.Printf("  Type: %s\n", event.Type)
 			fmt.Printf("  Source: %s\n", event.Source)
 			fmt.Printf("  Severity: %s\n", event.Severity)
-			
+
 			// Print systemd-specific payload information
 			if servicePayload, ok := event.Payload.(domain.ServiceEventPayload); ok {
 				fmt.Printf("  Service: %s\n", servicePayload.ServiceName)
@@ -122,15 +122,15 @@ func main() {
 				} else {
 					fmt.Printf("  New State: %s\n", servicePayload.NewState)
 				}
-				
+
 				if servicePayload.ExitCode != nil {
 					fmt.Printf("  Exit Code: %d\n", *servicePayload.ExitCode)
 				}
-				
+
 				if servicePayload.Signal != nil {
 					fmt.Printf("  Signal: %d\n", *servicePayload.Signal)
 				}
-				
+
 				// Print important properties
 				for key, value := range servicePayload.Properties {
 					if key == "result" || key == "sub_state" || key == "main_pid" {
@@ -140,18 +140,18 @@ func main() {
 			}
 		}
 	}()
-	
+
 	// Start health monitor
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
 				health := collector.Health()
 				stats := collector.Statistics()
-				
+
 				fmt.Printf("\n=== Health Report ===\n")
 				fmt.Printf("Status: %s - %s\n", health.Status, health.Message)
 				fmt.Printf("D-Bus Connected: %v\n", health.DBusConnected)
@@ -163,22 +163,22 @@ func main() {
 				fmt.Printf("D-Bus: Calls=%d, Errors=%d\n",
 					stats.DBusCallsTotal, stats.DBusErrors)
 				fmt.Printf("Reconnect Count: %d\n", stats.ReconnectCount)
-				
+
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
-	
+
 	// Wait for signal
 	<-sigChan
 	fmt.Println("\nShutting down...")
-	
+
 	// Stop collector
 	if err := collector.Stop(); err != nil {
 		log.Printf("Error stopping collector: %v", err)
 	}
-	
+
 	// Get final statistics
 	stats := collector.Statistics()
 	fmt.Printf("\nFinal Statistics:\n")
@@ -187,6 +187,6 @@ func main() {
 	fmt.Printf("Total D-Bus Calls: %d\n", stats.DBusCallsTotal)
 	fmt.Printf("Total D-Bus Errors: %d\n", stats.DBusErrors)
 	fmt.Printf("Services Monitored: %d\n", stats.ServicesMonitored)
-	
+
 	fmt.Println("Collector stopped successfully")
 }

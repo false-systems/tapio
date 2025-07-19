@@ -21,15 +21,15 @@ const (
 )
 
 type ModuleTest struct {
-	Path        string
-	Name        string
-	HasGoMod    bool
-	CanBuild    bool
-	CanTest     bool
-	HasCmd      bool
-	BuildTime   time.Duration
-	TestTime    time.Duration
-	Errors      []string
+	Path      string
+	Name      string
+	HasGoMod  bool
+	CanBuild  bool
+	CanTest   bool
+	HasCmd    bool
+	BuildTime time.Duration
+	TestTime  time.Duration
+	Errors    []string
 }
 
 type IndependenceChecker struct {
@@ -60,7 +60,7 @@ func main() {
 
 	// Test each module independently
 	fmt.Printf("Testing %d modules for independence...\n\n", len(checker.modules))
-	
+
 	for i := range checker.modules {
 		checker.testModule(&checker.modules[i])
 	}
@@ -89,7 +89,7 @@ func (ic *IndependenceChecker) findModules() error {
 				HasGoMod: true,
 				Errors:   []string{},
 			}
-			
+
 			// Check if module has cmd/ directory
 			cmdDir := filepath.Join(modulePath, "cmd")
 			if _, err := os.Stat(cmdDir); err == nil {
@@ -108,7 +108,7 @@ func (ic *IndependenceChecker) testModule(module *ModuleTest) {
 
 	// Test 1: Independent Build
 	module.CanBuild = ic.testBuild(module)
-	
+
 	// Test 2: Independent Test
 	module.CanTest = ic.testTest(module)
 
@@ -131,7 +131,7 @@ func (ic *IndependenceChecker) testBuild(module *ModuleTest) bool {
 	start := time.Now()
 	cmd := exec.Command("go", "build", "./...")
 	cmd.Dir = module.Path
-	
+
 	// Capture output
 	output, err := cmd.CombinedOutput()
 	module.BuildTime = time.Since(start)
@@ -152,7 +152,7 @@ func (ic *IndependenceChecker) testTest(module *ModuleTest) bool {
 	start := time.Now()
 	cmd := exec.Command("go", "test", "./...")
 	cmd.Dir = module.Path
-	
+
 	// Capture output
 	output, err := cmd.CombinedOutput()
 	module.TestTime = time.Since(start)
@@ -190,11 +190,11 @@ func (ic *IndependenceChecker) testStandaloneExecutables(module *ModuleTest) {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			execPath := filepath.Join(cmdDir, entry.Name())
-			
+
 			// Try to build the executable
 			cmd := exec.Command("go", "build", "-o", "/dev/null", ".")
 			cmd.Dir = execPath
-			
+
 			if err := cmd.Run(); err != nil {
 				module.Errors = append(module.Errors, fmt.Sprintf("Executable %s failed to build: %v", entry.Name(), err))
 			} else {
@@ -212,9 +212,9 @@ func (ic *IndependenceChecker) testStandaloneExecutables(module *ModuleTest) {
 }
 
 func (ic *IndependenceChecker) reportResults() {
-	fmt.Printf("%s" + strings.Repeat("=", 60) + "%s\n", BLUE, NC)
+	fmt.Printf("%s"+strings.Repeat("=", 60)+"%s\n", BLUE, NC)
 	fmt.Printf("%sModule Independence Report%s\n", BOLD+BLUE, NC)
-	fmt.Printf("%s" + strings.Repeat("=", 60) + "%s\n\n", BLUE, NC)
+	fmt.Printf("%s"+strings.Repeat("=", 60)+"%s\n\n", BLUE, NC)
 
 	if ic.failed == 0 {
 		fmt.Printf("%s✅ ALL MODULES INDEPENDENT%s\n", GREEN+BOLD, NC)

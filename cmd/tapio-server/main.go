@@ -28,14 +28,14 @@ const (
 )
 
 var (
-	configPath   string
-	grpcPort     int
-	restPort     int
-	restEnabled  bool
-	grpcEnabled  bool
-	address      string
-	logLevel     string
-	debug        bool
+	configPath  string
+	grpcPort    int
+	restPort    int
+	restEnabled bool
+	grpcEnabled bool
+	address     string
+	logLevel    string
+	debug       bool
 )
 
 func main() {
@@ -138,7 +138,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 			return nil
 
 		case <-statusTicker.C:
-			fmt.Printf("📊 Status - Uptime: %v, Architecture: ✅ Clean, Dependencies: ✅ Enforced\n", 
+			fmt.Printf("📊 Status - Uptime: %v, Architecture: ✅ Clean, Dependencies: ✅ Enforced\n",
 				time.Since(uptime))
 			fmt.Printf("🔍 Next Steps: Implement gRPC streaming, REST APIs, correlation engine\n")
 		}
@@ -147,15 +147,15 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 // ServerConfig represents the basic server configuration
 type ServerConfig struct {
-	Address      string        `json:"address"`
-	GRPCPort     int           `json:"grpc_port"`
-	RESTPort     int           `json:"rest_port"`
-	RESTEnabled  bool          `json:"rest_enabled"`
-	GRPCEnabled  bool          `json:"grpc_enabled"`
-	LogLevel     string        `json:"log_level"`
-	Debug        bool          `json:"debug"`
-	MaxMemoryMB  int           `json:"max_memory_mb"`
-	MaxCPUMilli  int           `json:"max_cpu_milli"`
+	Address     string `json:"address"`
+	GRPCPort    int    `json:"grpc_port"`
+	RESTPort    int    `json:"rest_port"`
+	RESTEnabled bool   `json:"rest_enabled"`
+	GRPCEnabled bool   `json:"grpc_enabled"`
+	LogLevel    string `json:"log_level"`
+	Debug       bool   `json:"debug"`
+	MaxMemoryMB int    `json:"max_memory_mb"`
+	MaxCPUMilli int    `json:"max_cpu_milli"`
 }
 
 func loadConfiguration() (*ServerConfig, error) {
@@ -183,15 +183,15 @@ func loadConfiguration() (*ServerConfig, error) {
 
 	// Create configuration struct
 	cfg := &ServerConfig{
-		Address:      viper.GetString("server.address"),
-		GRPCPort:     viper.GetInt("server.grpc_port"),
-		RESTPort:     viper.GetInt("server.rest_port"),
-		RESTEnabled:  viper.GetBool("server.rest_enabled"),
-		GRPCEnabled:  viper.GetBool("server.grpc_enabled"),
-		LogLevel:     viper.GetString("server.log_level"),
-		Debug:        viper.GetBool("server.debug"),
-		MaxMemoryMB:  viper.GetInt("server.max_memory_mb"),
-		MaxCPUMilli:  viper.GetInt("server.max_cpu_milli"),
+		Address:     viper.GetString("server.address"),
+		GRPCPort:    viper.GetInt("server.grpc_port"),
+		RESTPort:    viper.GetInt("server.rest_port"),
+		RESTEnabled: viper.GetBool("server.rest_enabled"),
+		GRPCEnabled: viper.GetBool("server.grpc_enabled"),
+		LogLevel:    viper.GetString("server.log_level"),
+		Debug:       viper.GetBool("server.debug"),
+		MaxMemoryMB: viper.GetInt("server.max_memory_mb"),
+		MaxCPUMilli: viper.GetInt("server.max_cpu_milli"),
 	}
 
 	// Override with command-line flags if provided

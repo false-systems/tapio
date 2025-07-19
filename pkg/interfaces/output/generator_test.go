@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 	"time"
-	
+
 	"github.com/falseyair/tapio/pkg/domain"
 )
 
 func TestGenerateInsight(t *testing.T) {
 	generator := NewGenerator(DefaultConfig())
-	
+
 	tests := []struct {
 		name     string
 		finding  *domain.Finding
@@ -86,16 +86,16 @@ func TestGenerateInsight(t *testing.T) {
 			validate: nil,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			insight, err := generator.GenerateInsight(context.Background(), tt.finding)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateInsight() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr && tt.validate != nil {
 				tt.validate(t, insight)
 			}
@@ -105,7 +105,7 @@ func TestGenerateInsight(t *testing.T) {
 
 func TestGenerateEventExplanation(t *testing.T) {
 	generator := NewGenerator(DefaultConfig())
-	
+
 	event := &domain.Event{
 		ID:        domain.EventID("test-event-001"),
 		Type:      domain.EventTypeNetwork,
@@ -125,21 +125,21 @@ func TestGenerateEventExplanation(t *testing.T) {
 			ConnectionsFailed: 100,
 		},
 	}
-	
+
 	insight, err := generator.GenerateEventExplanation(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Failed to generate event explanation: %v", err)
 	}
-	
+
 	// Validate basic properties
 	if insight.Severity != "critical" {
 		t.Errorf("Expected severity critical, got %s", insight.Severity)
 	}
-	
+
 	if insight.Timeline == "" {
 		t.Errorf("Expected Timeline to be set")
 	}
-	
+
 	if len(insight.Commands) == 0 {
 		t.Errorf("Expected Commands to be populated")
 	}
@@ -147,7 +147,7 @@ func TestGenerateEventExplanation(t *testing.T) {
 
 func TestGenerateReport(t *testing.T) {
 	generator := NewGenerator(DefaultConfig())
-	
+
 	findings := []*domain.Finding{
 		{
 			ID:          "finding-1",
@@ -174,25 +174,25 @@ func TestGenerateReport(t *testing.T) {
 			Timestamp:   time.Now(),
 		},
 	}
-	
+
 	report, err := generator.GenerateReport(context.Background(), findings)
 	if err != nil {
 		t.Fatalf("Failed to generate report: %v", err)
 	}
-	
+
 	// Validate report structure
 	if report.Title == "" {
 		t.Errorf("Expected report title to be set")
 	}
-	
+
 	if len(report.Insights) != len(findings) {
 		t.Errorf("Expected %d insights, got %d", len(findings), len(report.Insights))
 	}
-	
+
 	if report.OverallHealth == "" {
 		t.Errorf("Expected overall health assessment")
 	}
-	
+
 	if report.Summary == "" {
 		t.Errorf("Expected report summary")
 	}
@@ -201,7 +201,7 @@ func TestGenerateReport(t *testing.T) {
 func TestTemplateMatching(t *testing.T) {
 	config := DefaultConfig()
 	tm := NewTemplateManager(config)
-	
+
 	tests := []struct {
 		name     string
 		category string
@@ -231,13 +231,13 @@ func TestTemplateMatching(t *testing.T) {
 			wantNil:  true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			template := tm.FindBestTemplate(tt.category, tt.severity, tt.audience)
-			
+
 			if (template == nil) != tt.wantNil {
-				t.Errorf("FindBestTemplate() returned nil = %v, want nil = %v", 
+				t.Errorf("FindBestTemplate() returned nil = %v, want nil = %v",
 					template == nil, tt.wantNil)
 			}
 		})
@@ -246,7 +246,7 @@ func TestTemplateMatching(t *testing.T) {
 
 func TestQualityChecks(t *testing.T) {
 	generator := NewGenerator(DefaultConfig())
-	
+
 	insight := &HumanInsight{
 		WhatHappened:  "A simple event occurred in the system.",
 		WhyItHappened: "The system detected an issue.",
@@ -255,26 +255,26 @@ func TestQualityChecks(t *testing.T) {
 		Severity:      "critical",
 		Commands:      []string{"kubectl logs"},
 	}
-	
+
 	generator.performQualityCheck(insight)
-	
+
 	// Validate quality metrics
 	if insight.ReadabilityScore == 0 {
 		t.Errorf("Expected readability score to be calculated")
 	}
-	
+
 	if insight.ComplexityScore == 0 {
 		t.Errorf("Expected complexity score to be calculated")
 	}
-	
+
 	if !insight.IsUrgent {
 		t.Errorf("Expected critical severity to be marked as urgent")
 	}
-	
+
 	if !insight.IsActionable {
 		t.Errorf("Expected insight with commands to be actionable")
 	}
-	
+
 	if insight.EstimatedReadTime == 0 {
 		t.Errorf("Expected read time to be estimated")
 	}
@@ -282,14 +282,14 @@ func TestQualityChecks(t *testing.T) {
 
 func TestVariableExtraction(t *testing.T) {
 	generator := NewGenerator(DefaultConfig())
-	
+
 	// Test finding variable extraction
 	finding := &domain.Finding{
-		ID:          "test-finding",
-		Type:        domain.FindingMemoryLeak,
-		Severity:    domain.SeverityCritical,
-		Title:       "Test Finding",
-		Timestamp:   time.Now(),
+		ID:        "test-finding",
+		Type:      domain.FindingMemoryLeak,
+		Severity:  domain.SeverityCritical,
+		Title:     "Test Finding",
+		Timestamp: time.Now(),
 		Evidence: []domain.Evidence{
 			{
 				Data: map[string]interface{}{
@@ -299,17 +299,17 @@ func TestVariableExtraction(t *testing.T) {
 			},
 		},
 	}
-	
+
 	vars := generator.extractFindingVariables(finding)
-	
+
 	if vars["type"] != "memory_leak" {
 		t.Errorf("Expected type to be 'memory_leak', got %s", vars["type"])
 	}
-	
+
 	if vars["severity"] != "critical" {
 		t.Errorf("Expected severity to be 'critical', got %s", vars["severity"])
 	}
-	
+
 	if vars["pod"] != "test-pod" {
 		t.Errorf("Expected pod to be 'test-pod', got %s", vars["pod"])
 	}
@@ -321,18 +321,18 @@ func TestTemplateFilling(t *testing.T) {
 		"pod":       "api-service",
 		"namespace": "production",
 	}
-	
+
 	result := FillTemplate(template, variables)
 	expected := "A memory leak was detected in api-service (namespace: production)"
-	
+
 	if result != expected {
 		t.Errorf("FillTemplate() = %s, want %s", result, expected)
 	}
-	
+
 	// Test with missing variables
 	templateWithMissing := "Pod {{.pod}} in {{.missing}} namespace"
 	result = FillTemplate(templateWithMissing, variables)
-	
+
 	if !strings.Contains(result, "[unknown]") {
 		t.Errorf("Expected missing variable to be replaced with [unknown]")
 	}
