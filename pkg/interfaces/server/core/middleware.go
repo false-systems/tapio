@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // MiddlewareManager manages middleware execution

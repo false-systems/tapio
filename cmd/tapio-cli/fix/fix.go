@@ -8,9 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/yairfalse/tapio/internal/cli"
-	"github.com/yairfalse/tapio/pkg/k8s"
-	"github.com/yairfalse/tapio/pkg/output"
+	"github.com/yairfalse/tapio/pkg/collectors/k8s"
+	"github.com/yairfalse/tapio/pkg/interfaces/output"
 )
 
 var (

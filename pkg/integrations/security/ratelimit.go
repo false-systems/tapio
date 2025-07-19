@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/logging"
+	"github.com/yairfalse/tapio/pkg/interfaces/logging"
 	"golang.org/x/time/rate"
 )
 

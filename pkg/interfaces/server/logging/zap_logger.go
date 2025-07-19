@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

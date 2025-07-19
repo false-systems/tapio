@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	corrDomain "github.com/yairfalse/tapio/pkg/correlation/domain"
+	corrDomain "github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 
 // PrometheusMetricsCollector provides production-ready metrics collection

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/logging"
+	"github.com/yairfalse/tapio/pkg/interfaces/logging"
 )
 
 // SecurityAuditor provides comprehensive security audit logging

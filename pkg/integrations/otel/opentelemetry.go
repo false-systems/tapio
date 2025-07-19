@@ -22,13 +22,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
-	"github.com/yairfalse/tapio/pkg/collector"
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
-	"github.com/yairfalse/tapio/pkg/correlation"
-	"github.com/yairfalse/tapio/pkg/correlation/rules"
-	"github.com/yairfalse/tapio/pkg/correlation/sources"
-	"github.com/yairfalse/tapio/pkg/universal"
-	"github.com/yairfalse/tapio/pkg/universal/converters"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"k8s.io/client-go/kubernetes"
 )
 

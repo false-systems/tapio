@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/resilience"
+	"github.com/yairfalse/tapio/pkg/integrations/resilience"
 )
 
 // EnterpriseServer provides enterprise-grade OpenTelemetry HTTP endpoints

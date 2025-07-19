@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/falseyair/tapio/pkg/integrations/core"
+	"github.com/yairfalse/tapio/pkg/integrations/core"
 )
 
 // Registry manages all active integrations

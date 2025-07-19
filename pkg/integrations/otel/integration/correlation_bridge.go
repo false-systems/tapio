@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collector"
-	"github.com/yairfalse/tapio/pkg/otel/cqrs"
-	"github.com/yairfalse/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/integrations/otel/cqrs"
+	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"
 )
 
 // CorrelationBridge connects OTEL Phase 3 integration with the correlation engine v2

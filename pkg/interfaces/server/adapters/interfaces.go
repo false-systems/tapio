@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // ConnectionManagerAdapter implements connection management

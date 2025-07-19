@@ -9,8 +9,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/server/adapters/correlation"
-	serverDomain "github.com/yairfalse/tapio/pkg/server/domain"
+	serverDomain "github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/interfaces/server/adapters/correlation"
 )
 
 // RESTServer provides REST API endpoints for tapio-server

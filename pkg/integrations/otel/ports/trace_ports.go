@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/otel/domain"
+	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"
 )
 
 // PRIMARY PORTS - Driving side (inbound)

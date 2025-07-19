@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yairfalse/tapio/pkg/health"
-	"github.com/yairfalse/tapio/pkg/k8s"
-	"github.com/yairfalse/tapio/pkg/output"
+	"github.com/yairfalse/tapio/pkg/collectors/k8s"
+	"github.com/yairfalse/tapio/pkg/interfaces/health"
+	"github.com/yairfalse/tapio/pkg/interfaces/output"
 )
 
 var (

@@ -114,7 +114,7 @@ func main() {
 			fmt.Printf("  Severity: %s\n", event.Severity)
 
 			// Print systemd-specific payload information
-			if servicePayload, ok := event.Payload.(domain.ServiceEventPayload); ok {
+			if servicePayload, ok := event.Data.(domain.ServiceEventPayload); ok {
 				fmt.Printf("  Service: %s\n", servicePayload.ServiceName)
 				fmt.Printf("  Event Type: %s\n", servicePayload.EventType)
 				if servicePayload.OldState != "" {

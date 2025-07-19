@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/server/domain"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // RequestHandler implements the request handling logic

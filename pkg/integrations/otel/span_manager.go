@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/yairfalse/tapio/pkg/resilience"
+	"github.com/yairfalse/tapio/pkg/integrations/resilience"
 )
 
 // SpanEvent represents an event that occurred during a span

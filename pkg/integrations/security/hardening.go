@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/logging"
-	"github.com/yairfalse/tapio/pkg/monitoring"
+	"github.com/yairfalse/tapio/pkg/integrations/monitoring"
+	"github.com/yairfalse/tapio/pkg/interfaces/logging"
 )
 
 // SecurityHardening provides comprehensive security hardening for production deployments

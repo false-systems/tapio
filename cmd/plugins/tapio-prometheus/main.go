@@ -10,8 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/yairfalse/tapio/pkg/exports"
-	"github.com/yairfalse/tapio/pkg/exports/plugins"
+	"github.com/yairfalse/tapio/pkg/integrations/prometheus/core"
 )
 
 const (
