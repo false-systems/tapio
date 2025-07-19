@@ -78,7 +78,7 @@ func main() {
 			fmt.Printf("  Severity: %s\n", event.Severity)
 
 			// Print K8s-specific payload information
-			if k8sPayload, ok := event.Payload.(domain.KubernetesEventPayload); ok {
+			if k8sPayload, ok := event.Data.(domain.KubernetesEventPayload); ok {
 				fmt.Printf("  Resource: %s/%s in namespace %s\n",
 					k8sPayload.Resource.Kind,
 					k8sPayload.Resource.Name,

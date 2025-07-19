@@ -44,7 +44,7 @@ func main() {
 				event.ID, event.Type, event.Source, event.Severity)
 
 			// Print payload details if it's a system event
-			if payload, ok := event.Payload.(interface{ PayloadType() string }); ok {
+			if payload, ok := event.Data.(interface{ PayloadType() string }); ok {
 				fmt.Printf("  Payload Type: %s\n", payload.PayloadType())
 			}
 		}
