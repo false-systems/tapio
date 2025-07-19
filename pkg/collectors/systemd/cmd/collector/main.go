@@ -14,6 +14,8 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd/internal"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 func main() {
@@ -171,7 +173,8 @@ func main() {
 					if properties, ok := eventData["properties"].(map[string]interface{}); ok {
 						for key, value := range properties {
 							if key == "result" || key == "sub_state" || key == "main_pid" {
-								fmt.Printf("  %s: %v\n", strings.Title(strings.ReplaceAll(key, "_", " ")), value)
+								caser := cases.Title(language.English)
+								fmt.Printf("  %s: %v\n", caser.String(strings.ReplaceAll(key, "_", " ")), value)
 							}
 						}
 					}

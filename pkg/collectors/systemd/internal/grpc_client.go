@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"log"
 )
 
 // GRPCClient handles streaming events to the Tapio server
@@ -306,7 +307,7 @@ func (c *GRPCClient) receiveResponses(ctx context.Context) {
 			}
 			if err != nil {
 				// Log error but continue
-				fmt.Printf("Failed to receive response: %v\n", err)
+				log.Printf("[gRPC Client] Failed to receive response: %v", err)
 				continue
 			}
 
@@ -321,7 +322,7 @@ func (c *GRPCClient) receiveResponses(ctx context.Context) {
 				}
 
 			case *pb.TapioStreamEventsResponse_Error:
-				fmt.Printf("Server error: %s\n", resp.Error.Message)
+				log.Printf("[gRPC Client] Server error: %s", resp.Error.Message)
 
 			case *pb.TapioStreamEventsResponse_Control:
 				// Handle control response
@@ -331,11 +332,11 @@ func (c *GRPCClient) receiveResponses(ctx context.Context) {
 
 			case *pb.TapioStreamEventsResponse_Correlation:
 				// Handle correlation found by server
-				fmt.Printf("Correlation found: %s - %s\n", resp.Correlation.Id, resp.Correlation.Description)
+				log.Printf("[gRPC Client] Correlation found: %s - %s", resp.Correlation.Id, resp.Correlation.Description)
 
 			case *pb.TapioStreamEventsResponse_SemanticGroup:
 				// Handle semantic group update
-				fmt.Printf("Semantic group: %s - %s\n", resp.SemanticGroup.Id, resp.SemanticGroup.Name)
+				log.Printf("[gRPC Client] Semantic group: %s - %s", resp.SemanticGroup.Id, resp.SemanticGroup.Name)
 			}
 		}
 	}

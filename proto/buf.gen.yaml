@@ -2,7 +2,9 @@ version: v1
 managed:
   enabled: true
   go_package_prefix:
-    default: github.com/yairfalse/tapio/proto
+    default: github.com/yairfalse/tapio/proto/gen
+    except:
+      - buf.build/googleapis/googleapis
 plugins:
   # Go code generation
   - plugin: go

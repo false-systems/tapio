@@ -25,7 +25,7 @@ type CollectorServer struct {
 	eventStore EventStore
 	tracer     trace.Tracer
 	pipeline   *performance.EventPipeline
-	batchProc  *performance.BatchProcessor
+	batchProc  *performance.BatchProcessor[*domain.Event]
 	ringBuffer *performance.RingBuffer
 
 	// Collector registry
@@ -134,7 +134,16 @@ func NewCollectorServer(
 	batchProc := performance.NewBatchProcessor(
 		1000,                 // batch size
 		100*time.Millisecond, // timeout
-		16,                   // workers
+		10000,                // max queue size
+		func(ctx context.Context, batch []*domain.Event) error {
+			// Process batch of events
+			for _, event := range batch {
+				if err := eventStore.Store(ctx, convertEventToProto(event)); err != nil {
+					logger.Error("Failed to store event", zap.Error(err))
+				}
+			}
+			return nil
+		},
 	)
 
 	ringBuffer := performance.NewRingBuffer(1024 * 1024) // 1MB buffer
