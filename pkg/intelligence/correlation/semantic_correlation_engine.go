@@ -3,13 +3,16 @@ package correlation
 import (
 	"context"
 	"fmt"
-	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/patternrecognition"
 	"sync"
 	"time"
+
+	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// SemanticCorrelationEngine replaces the old correlation with our semantic version
+// SemanticCorrelationEngine provides AI-powered semantic correlation with OTEL integration
 type SemanticCorrelationEngine struct {
 	// Collectors
 	collectors map[string]Collector
@@ -24,16 +27,17 @@ type SemanticCorrelationEngine struct {
 	// Revolutionary OTEL semantic tracer
 	semanticTracer *SemanticOTELTracer
 
-	// Pattern recognition engine
-	patternEngine patternrecognition.PatternRecognitionEngine
-
-	// Event buffer for pattern detection
+	// Event buffer for temporal correlation
 	eventBuffer      []domain.Event
 	eventBufferMutex sync.RWMutex
 	bufferSize       int
+	bufferTimeout    time.Duration
 
 	// Human-readable output formatter
 	humanFormatter *HumanReadableFormatter
+
+	// OTEL tracing
+	tracer trace.Tracer
 
 	// State
 	ctx     context.Context
@@ -42,33 +46,31 @@ type SemanticCorrelationEngine struct {
 	mu      sync.RWMutex
 
 	// Stats
-	stats map[string]interface{}
-}
-
-// GetSemanticTracer returns the semantic OTEL tracer
-func (sce *SemanticCorrelationEngine) GetSemanticTracer() *SemanticOTELTracer {
-	return sce.semanticTracer
+	stats           map[string]interface{}
+	statsUpdateTime time.Time
 }
 
 // NewSemanticCorrelationEngine creates our improved correlation engine
-func NewSemanticCorrelationEngine(batchSize int, batchTimeout time.Duration) *SemanticCorrelationEngine {
-	// Configure pattern recognition
-	patternConfig := patternrecognition.DefaultConfig()
-	patternConfig.DefaultTimeWindow = 30 * time.Minute
-	patternConfig.EnabledPatterns = []string{"memory_leak"} // Enable memory leak pattern by default
-
+func NewSemanticCorrelationEngine() *SemanticCorrelationEngine {
 	return &SemanticCorrelationEngine{
 		collectors:      make(map[string]Collector),
 		eventChan:       make(chan Event, 1000),
 		insightChan:     make(chan Insight, 100),
 		semanticGrouper: NewSimpleSemanticGrouper(),
 		semanticTracer:  NewSemanticOTELTracer(),
-		patternEngine:   patternrecognition.Engine(patternConfig),
-		eventBuffer:     make([]domain.Event, 0, batchSize),
-		bufferSize:      batchSize,
+		eventBuffer:     make([]domain.Event, 0, 1000),
+		bufferSize:      1000,
+		bufferTimeout:   30 * time.Second,
 		humanFormatter:  NewHumanReadableFormatter(StyleSimple, AudienceDeveloper),
+		tracer:          otel.Tracer("tapio.correlation.engine"),
 		stats:           make(map[string]interface{}),
+		statsUpdateTime: time.Now(),
 	}
+}
+
+// GetSemanticTracer returns the semantic OTEL tracer
+func (sce *SemanticCorrelationEngine) GetSemanticTracer() *SemanticOTELTracer {
+	return sce.semanticTracer
 }
 
 // RegisterCollector registers a collector with the engine
@@ -82,7 +84,7 @@ func (sce *SemanticCorrelationEngine) RegisterCollector(c Collector) error {
 }
 
 // Start begins the semantic correlation engine
-func (sce *SemanticCorrelationEngine) Start(ctx context.Context) error {
+func (sce *SemanticCorrelationEngine) Start() error {
 	sce.mu.Lock()
 	defer sce.mu.Unlock()
 
@@ -90,210 +92,96 @@ func (sce *SemanticCorrelationEngine) Start(ctx context.Context) error {
 		return nil
 	}
 
-	sce.ctx, sce.cancel = context.WithCancel(ctx)
+	sce.ctx, sce.cancel = context.WithCancel(context.Background())
 	sce.running = true
 
 	// Start processing events with our semantic correlation
 	go sce.processEvents()
 
+	// Start periodic semantic analysis
+	go sce.periodicSemanticAnalysis()
+
 	return nil
 }
 
-// processEvents handles events using our semantic correlation
-func (sce *SemanticCorrelationEngine) processEvents() {
-	// Create ticker for periodic pattern detection
-	patternTicker := time.NewTicker(5 * time.Second)
-	defer patternTicker.Stop()
+// Stop gracefully shuts down the engine
+func (sce *SemanticCorrelationEngine) Stop() error {
+	sce.mu.Lock()
+	defer sce.mu.Unlock()
 
-	for {
-		select {
-		case event := <-sce.eventChan:
-			// Convert Event to domain.Event
-			domainEvent := sce.convertToDomainEvent(event)
-
-			// Add to buffer for pattern detection
-			sce.addToEventBuffer(*domainEvent)
-
-			// Process through revolutionary OTEL semantic tracer
-			if err := sce.semanticTracer.ProcessEventWithSemanticTrace(sce.ctx, domainEvent); err != nil {
-				sce.updateStats("trace_errors")
-			} else {
-				sce.updateStats("traces_created")
-			}
-
-			// Process through our semantic grouper
-			finding, err := sce.semanticGrouper.ProcessEvent(sce.ctx, domainEvent)
-			if err != nil {
-				continue
-			}
-
-			// Convert finding to insight
-			insight := sce.convertToInsight(finding)
-
-			// Enrich insight with semantic group information
-			sce.enrichInsightWithSemanticGroups(domainEvent, &insight)
-
-			// Send to insights channel
-			select {
-			case sce.insightChan <- insight:
-				sce.updateStats("insights_generated")
-			default:
-				sce.updateStats("insights_dropped")
-			}
-
-		case <-patternTicker.C:
-			// Run pattern detection periodically
-			sce.detectPatterns()
-
-		case <-sce.ctx.Done():
-			return
-		}
+	if !sce.running {
+		return nil
 	}
+
+	sce.cancel()
+	sce.running = false
+
+	// Close channels
+	close(sce.eventChan)
+	close(sce.insightChan)
+
+	return nil
 }
 
-// convertToDomainEvent converts collector Event to domain.Event
-func (sce *SemanticCorrelationEngine) convertToDomainEvent(event Event) *domain.Event {
-	// Extract common fields from data
-	context := domain.EventContext{}
-
-	// Extract metadata from event.Data
-	if event.Data != nil {
-		if node, ok := event.Data["node"].(string); ok {
-			context.Host = node
-		}
-		if ns, ok := event.Data["namespace"].(string); ok {
-			context.Namespace = ns
-		}
-		if pod, ok := event.Data["pod"].(string); ok {
-			context.Labels = domain.Labels{
-				"pod": pod,
-			}
-		}
-	}
-
-	// Create appropriate payload based on event type
-	var payload domain.EventPayload
-	switch event.Type {
-	case "kubernetes", "pod_evicted", "pod_restart", "pod_crash":
-		pod := ""
-		namespace := ""
-		reason := ""
-		message := ""
-		eventType := event.Type
-
-		if event.Data != nil {
-			if p, ok := event.Data["pod"].(string); ok {
-				pod = p
-			}
-			if ns, ok := event.Data["namespace"].(string); ok {
-				namespace = ns
-			}
-			if r, ok := event.Data["reason"].(string); ok {
-				reason = r
-			}
-			if m, ok := event.Data["message"].(string); ok {
-				message = m
-			}
-			if et, ok := event.Data["event_type"].(string); ok {
-				eventType = et
-			}
-		}
-
-		payload = domain.KubernetesEventPayload{
-			Resource: domain.ResourceRef{
-				Kind:      "Pod",
-				Name:      pod,
-				Namespace: namespace,
-			},
-			EventType: eventType,
-			Reason:    reason,
-			Message:   message,
-		}
-
-	case "service", "service_restart", "service_failure":
-		serviceName := ""
-		eventType := event.Type
-
-		if event.Data != nil {
-			if svc, ok := event.Data["service"].(string); ok {
-				serviceName = svc
-			}
-			if et, ok := event.Data["event_type"].(string); ok {
-				eventType = et
-			}
-		}
-
-		payload = domain.ServiceEventPayload{
-			ServiceName: serviceName,
-			EventType:   eventType,
-		}
-
-	case "memory", "memory_oom", "memory_pressure":
-		// Extract memory metrics from data
-		usage := 0.0
-		available := uint64(0)
-		total := uint64(0)
-
-		if event.Data != nil {
-			if u, ok := event.Data["usage"]; ok {
-				switch v := u.(type) {
-				case float64:
-					usage = v
-				case int:
-					usage = float64(v)
-				}
-			}
-			if a, ok := event.Data["available"]; ok {
-				if av, ok := a.(float64); ok {
-					available = uint64(av)
-				}
-			}
-			if t, ok := event.Data["total"]; ok {
-				if tv, ok := t.(float64); ok {
-					total = uint64(tv)
-				}
-			}
-		}
-
-		payload = domain.MemoryEventPayload{
-			Usage:     usage,
-			Available: available,
-			Total:     total,
-		}
-
+// ProcessEvent processes a single event through the correlation engine
+func (sce *SemanticCorrelationEngine) ProcessEvent(event *domain.Event) {
+	select {
+	case sce.eventChan <- Event(*event):
+		sce.updateStats("events_received")
 	default:
-		// Use system event as default
-		payload = domain.SystemEventPayload{}
-	}
-
-	return &domain.Event{
-		ID:        domain.EventID(event.ID),
-		Type:      domain.EventType(event.Type),
-		Source:    domain.SourceType(event.Source),
-		Severity:  domain.Severity(event.Severity),
-		Timestamp: event.Timestamp,
-		Context:   context,
-		Payload:   payload,
-		Metadata: domain.EventMetadata{
-			SchemaVersion: "v1",
-			ProcessedAt:   time.Now(),
-			ProcessedBy:   "semantic-correlation-engine",
-		},
-		Confidence: 1.0,
+		sce.updateStats("events_dropped")
 	}
 }
 
-// convertToInsight converts domain.Finding to Insight
-func (sce *SemanticCorrelationEngine) convertToInsight(finding *domain.Finding) Insight {
-	return Insight{
-		ID:            string(finding.ID),
-		Type:          string(finding.Type),
-		Severity:      Severity(finding.Severity),
-		Title:         finding.Title,
-		Description:   finding.Description,
-		Timestamp:     finding.Timestamp,
-		RelatedEvents: []string{},
+// GetLatestFindings returns the latest correlation findings
+func (sce *SemanticCorrelationEngine) GetLatestFindings() *Finding {
+	sce.mu.RLock()
+	defer sce.mu.RUnlock()
+
+	// Get semantic groups from tracer
+	groups := sce.semanticTracer.GetSemanticGroups()
+	if len(groups) == 0 {
+		return nil
 	}
+
+	// Return the most recent semantic group as a finding
+	var latest *SemanticTraceGroup
+	var latestTime time.Time
+
+	for _, group := range groups {
+		if len(group.CausalChain) > 0 {
+			lastEvent := group.CausalChain[len(group.CausalChain)-1]
+			if lastEvent.Timestamp.After(latestTime) {
+				latest = group
+				latestTime = lastEvent.Timestamp
+			}
+		}
+	}
+
+	if latest == nil {
+		return nil
+	}
+
+	return &Finding{
+		ID:            latest.ID,
+		PatternType:   latest.SemanticType,
+		Confidence:    latest.ConfidenceScore,
+		RelatedEvents: latest.CausalChain,
+		SemanticGroup: &SemanticGroupSummary{
+			ID:         latest.ID,
+			Intent:     latest.Intent,
+			Type:       latest.SemanticType,
+			Impact:     latest.ImpactAssessment,
+			Prediction: latest.PredictedOutcome,
+		},
+		Timestamp:   latestTime,
+		Description: fmt.Sprintf("Semantic correlation: %s", latest.Intent),
+	}
+}
+
+// Events returns the event channel
+func (sce *SemanticCorrelationEngine) Events() <-chan Event {
+	return sce.eventChan
 }
 
 // Insights returns the insights channel
@@ -301,18 +189,310 @@ func (sce *SemanticCorrelationEngine) Insights() <-chan Insight {
 	return sce.insightChan
 }
 
-// GetStats returns correlation engine statistics
-func (sce *SemanticCorrelationEngine) GetStats() map[string]interface{} {
-	sce.mu.RLock()
-	defer sce.mu.RUnlock()
+// processEvents is the main event processing loop
+func (sce *SemanticCorrelationEngine) processEvents() {
+	ctx, span := sce.tracer.Start(sce.ctx, "correlation.process_events")
+	defer span.End()
 
-	// Copy stats to avoid race conditions
-	statsCopy := make(map[string]interface{})
-	for k, v := range sce.stats {
-		statsCopy[k] = v
+	for {
+		select {
+		case event := <-sce.eventChan:
+			// Convert to domain event
+			domainEvent := sce.convertToDomainEvent(event)
+			if domainEvent == nil {
+				continue
+			}
+
+			// Process with OTEL semantic tracer
+			if err := sce.semanticTracer.ProcessEventWithSemanticTrace(ctx, domainEvent); err != nil {
+				span.RecordError(err)
+				sce.updateStats("semantic_trace_errors")
+			}
+
+			// Add to buffer for temporal analysis
+			sce.addToBuffer(*domainEvent)
+
+			// Generate insights from semantic groups
+			sce.generateSemanticInsights()
+
+			sce.updateStats("events_processed")
+
+		case <-sce.ctx.Done():
+			return
+		}
+	}
+}
+
+// periodicSemanticAnalysis runs periodic analysis on buffered events
+func (sce *SemanticCorrelationEngine) periodicSemanticAnalysis() {
+	ticker := time.NewTicker(sce.bufferTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			sce.analyzeSemanticPatterns()
+			sce.cleanupOldGroups()
+
+		case <-sce.ctx.Done():
+			return
+		}
+	}
+}
+
+// analyzeSemanticPatterns performs deep semantic analysis on buffered events
+func (sce *SemanticCorrelationEngine) analyzeSemanticPatterns() {
+	_, span := sce.tracer.Start(sce.ctx, "correlation.analyze_patterns",
+		trace.WithAttributes(
+			attribute.Int("buffer_size", len(sce.eventBuffer)),
+		),
+	)
+	defer span.End()
+
+	sce.eventBufferMutex.RLock()
+	events := make([]domain.Event, len(sce.eventBuffer))
+	copy(events, sce.eventBuffer)
+	sce.eventBufferMutex.RUnlock()
+
+	// Run semantic grouping
+	groups := sce.semanticGrouper.GroupEvents(events)
+
+	// Generate insights from semantic groups
+	for _, group := range groups {
+		insight := sce.createInsightFromSemanticGroup(group)
+
+		select {
+		case sce.insightChan <- insight:
+			sce.updateStats("semantic_insights_generated")
+		default:
+			sce.updateStats("semantic_insights_dropped")
+		}
 	}
 
-	return statsCopy
+	span.SetAttributes(
+		attribute.Int("groups_found", len(groups)),
+		attribute.Int64("insights_generated", sce.getStatValue("semantic_insights_generated")),
+	)
+}
+
+// generateSemanticInsights creates insights from current semantic trace groups
+func (sce *SemanticCorrelationEngine) generateSemanticInsights() {
+	groups := sce.semanticTracer.GetSemanticGroups()
+
+	for _, group := range groups {
+		// Only generate insights for groups with significant events
+		if len(group.CausalChain) < 2 {
+			continue
+		}
+
+		// Check if we've already generated an insight for this group
+		insightID := fmt.Sprintf("semantic-%s", group.ID)
+		if sce.hasGeneratedInsight(insightID) {
+			continue
+		}
+
+		insight := sce.createInsightFromTraceGroup(group)
+
+		select {
+		case sce.insightChan <- insight:
+			sce.markInsightGenerated(insightID)
+			sce.updateStats("trace_insights_generated")
+		default:
+			sce.updateStats("trace_insights_dropped")
+		}
+	}
+}
+
+// createInsightFromTraceGroup creates an insight from a semantic trace group
+func (sce *SemanticCorrelationEngine) createInsightFromTraceGroup(group *SemanticTraceGroup) Insight {
+	// Determine severity based on impact assessment
+	severity := SeverityMedium
+	if group.ImpactAssessment != nil {
+		if group.ImpactAssessment.BusinessImpact > 0.8 {
+			severity = SeverityCritical
+		} else if group.ImpactAssessment.BusinessImpact > 0.6 {
+			severity = SeverityHigh
+		}
+	}
+
+	// Extract event IDs
+	relatedEvents := make([]string, 0, len(group.CausalChain))
+	for _, event := range group.CausalChain {
+		relatedEvents = append(relatedEvents, string(event.ID))
+	}
+
+	// Extract affected resources
+	resources := make([]AffectedResource, 0)
+	resourceMap := make(map[string]bool)
+
+	for _, event := range group.CausalChain {
+		// Add namespace/pod resources
+		if event.Context.Namespace != "" && event.Context.Labels != nil {
+			if pod, exists := event.Context.Labels["pod"]; exists {
+				key := fmt.Sprintf("%s/%s", event.Context.Namespace, pod)
+				if !resourceMap[key] {
+					resources = append(resources, AffectedResource{
+						Type: "pod",
+						Name: key,
+					})
+					resourceMap[key] = true
+				}
+			}
+		}
+
+		// Add node resources
+		if event.Context.Host != "" {
+			if !resourceMap[event.Context.Host] {
+				resources = append(resources, AffectedResource{
+					Type: "node",
+					Name: event.Context.Host,
+				})
+				resourceMap[event.Context.Host] = true
+			}
+		}
+	}
+
+	// Create prediction from group's predicted outcome
+	var prediction *Prediction
+	if group.PredictedOutcome != nil {
+		actions := make([]ActionItem, 0, len(group.PredictedOutcome.PreventionActions))
+		for i, action := range group.PredictedOutcome.PreventionActions {
+			actions = append(actions, ActionItem{
+				ID:          fmt.Sprintf("action-%d", i+1),
+				Type:        "prevention",
+				Description: action,
+				Priority:    "high",
+				Command:     action,
+			})
+		}
+
+		prediction = &Prediction{
+			Scenario:    group.PredictedOutcome.Scenario,
+			Probability: group.PredictedOutcome.Probability,
+			TimeWindow:  group.PredictedOutcome.TimeToOutcome,
+			Actions:     actions,
+		}
+	}
+
+	// Create actionable items from impact assessment
+	actions := make([]ActionableItem, 0)
+	if group.ImpactAssessment != nil {
+		for _, action := range group.ImpactAssessment.RecommendedActions {
+			actions = append(actions, ActionableItem{
+				Title:       fmt.Sprintf("Action: %s", group.Intent),
+				Description: "Recommended action based on semantic correlation",
+				Commands:    []string{action},
+				Risk:        "medium",
+				EstimatedImpact: fmt.Sprintf("Business impact: %.2f, Cascade risk: %.2f",
+					group.ImpactAssessment.BusinessImpact,
+					group.ImpactAssessment.CascadeRisk),
+			})
+		}
+	}
+
+	correlationInsight := CorrelationInsight{
+		Insight: domain.Insight{
+			ID:       fmt.Sprintf("semantic-%s-%d", group.ID, time.Now().UnixNano()),
+			Type:     fmt.Sprintf("semantic:%s", group.SemanticType),
+			Severity: severity,
+			Title:    fmt.Sprintf("Semantic Correlation: %s", group.Intent),
+			Description: fmt.Sprintf("Detected %s pattern with %d related events. Confidence: %.2f",
+				group.SemanticType, len(group.CausalChain), group.ConfidenceScore),
+			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"semantic_group_id": group.ID,
+				"trace_id":          group.TraceID,
+				"correlation_type":  "semantic",
+			},
+		},
+		RelatedEvents: relatedEvents,
+		Resources:     resources,
+		Actions:       actions,
+		Prediction:    prediction,
+	}
+
+	// Convert to domain.Insight for compatibility
+	return correlationInsight.ToInsight()
+}
+
+// createInsightFromSemanticGroup creates an insight from a semantic group
+func (sce *SemanticCorrelationEngine) createInsightFromSemanticGroup(group EventGroup) Insight {
+	// Extract event IDs
+	relatedEvents := make([]string, 0, len(group.Events))
+	for _, event := range group.Events {
+		relatedEvents = append(relatedEvents, string(event.ID))
+	}
+
+	// Determine severity based on events
+	severity := SeverityLow
+	for _, event := range group.Events {
+		switch event.Severity {
+		case domain.EventSeverityCritical:
+			severity = SeverityCritical
+		case domain.EventSeverityHigh:
+			if severity < SeverityHigh {
+				severity = SeverityHigh
+			}
+		case domain.EventSeverityMedium:
+			if severity < SeverityMedium {
+				severity = SeverityMedium
+			}
+		}
+	}
+
+	return domain.Insight{
+		ID:       fmt.Sprintf("group-%s-%d", group.ID, time.Now().UnixNano()),
+		Type:     fmt.Sprintf("semantic_group:%s", group.Type),
+		Severity: severity,
+		Title:    fmt.Sprintf("Semantic Group: %s", group.Description),
+		Description: fmt.Sprintf("Identified semantic group with %d events over %s",
+			len(group.Events), group.TimeSpan),
+		Timestamp: time.Now(),
+		Metadata: map[string]interface{}{
+			"group_id":       group.ID,
+			"group_type":     group.Type,
+			"confidence":     group.Confidence,
+			"related_events": relatedEvents,
+		},
+	}
+}
+
+// convertToDomainEvent converts collector Event to domain.Event
+func (sce *SemanticCorrelationEngine) convertToDomainEvent(event Event) *domain.Event {
+	// Type assertion to domain.Event
+	if domainEvent, ok := interface{}(event).(domain.Event); ok {
+		return &domainEvent
+	}
+
+	// If not directly convertible, create new domain event
+	return &domain.Event{
+		ID:         domain.EventID(fmt.Sprintf("evt-%d", time.Now().UnixNano())),
+		Type:       domain.EventType("unknown"),
+		Timestamp:  time.Now(),
+		Source:     domain.SourceType("collector"),
+		Severity:   domain.EventSeverityInfo,
+		Confidence: 0.5,
+		Context:    domain.EventContext{},
+	}
+}
+
+// addToBuffer adds an event to the temporal buffer
+func (sce *SemanticCorrelationEngine) addToBuffer(event domain.Event) {
+	sce.eventBufferMutex.Lock()
+	defer sce.eventBufferMutex.Unlock()
+
+	sce.eventBuffer = append(sce.eventBuffer, event)
+
+	// Maintain buffer size
+	if len(sce.eventBuffer) > sce.bufferSize {
+		sce.eventBuffer = sce.eventBuffer[len(sce.eventBuffer)-sce.bufferSize:]
+	}
+}
+
+// cleanupOldGroups removes old semantic groups
+func (sce *SemanticCorrelationEngine) cleanupOldGroups() {
+	sce.semanticTracer.CleanupOldGroups(30 * time.Minute)
+	sce.updateStats("cleanup_runs")
 }
 
 // updateStats updates internal statistics
@@ -320,159 +500,52 @@ func (sce *SemanticCorrelationEngine) updateStats(key string) {
 	sce.mu.Lock()
 	defer sce.mu.Unlock()
 
-	if count, ok := sce.stats[key].(int64); ok {
-		sce.stats[key] = count + 1
+	if val, exists := sce.stats[key]; exists {
+		if count, ok := val.(int64); ok {
+			sce.stats[key] = count + 1
+		}
 	} else {
 		sce.stats[key] = int64(1)
 	}
+
+	sce.stats["last_update"] = time.Now()
 }
 
-// Stop gracefully stops the correlation engine
-func (sce *SemanticCorrelationEngine) Stop() {
+// getStatValue returns a stat value
+func (sce *SemanticCorrelationEngine) getStatValue(key string) int64 {
+	sce.mu.RLock()
+	defer sce.mu.RUnlock()
+
+	if val, exists := sce.stats[key]; exists {
+		if count, ok := val.(int64); ok {
+			return count
+		}
+	}
+	return 0
+}
+
+// hasGeneratedInsight checks if we've already generated an insight
+func (sce *SemanticCorrelationEngine) hasGeneratedInsight(insightID string) bool {
+	sce.mu.RLock()
+	defer sce.mu.RUnlock()
+
+	key := fmt.Sprintf("insight_generated_%s", insightID)
+	_, exists := sce.stats[key]
+	return exists
+}
+
+// markInsightGenerated marks an insight as generated
+func (sce *SemanticCorrelationEngine) markInsightGenerated(insightID string) {
 	sce.mu.Lock()
 	defer sce.mu.Unlock()
 
-	if !sce.running {
-		return
-	}
-
-	sce.running = false
-	if sce.cancel != nil {
-		sce.cancel()
-	}
-
-	close(sce.insightChan)
+	key := fmt.Sprintf("insight_generated_%s", insightID)
+	sce.stats[key] = time.Now()
 }
 
-// addToEventBuffer adds an event to the circular buffer
-func (sce *SemanticCorrelationEngine) addToEventBuffer(event domain.Event) {
-	sce.eventBufferMutex.Lock()
-	defer sce.eventBufferMutex.Unlock()
-
-	sce.eventBuffer = append(sce.eventBuffer, event)
-
-	// Maintain buffer size limit
-	if len(sce.eventBuffer) > sce.bufferSize {
-		sce.eventBuffer = sce.eventBuffer[len(sce.eventBuffer)-sce.bufferSize:]
-	}
-}
-
-// detectPatterns runs pattern detection on buffered events
-func (sce *SemanticCorrelationEngine) detectPatterns() {
-	sce.eventBufferMutex.RLock()
-	events := make([]domain.Event, len(sce.eventBuffer))
-	copy(events, sce.eventBuffer)
-	sce.eventBufferMutex.RUnlock()
-
-	if len(events) == 0 {
-		return
-	}
-
-	// Run pattern detection
-	matches, err := sce.patternEngine.DetectPatterns(sce.ctx, events)
-	if err != nil {
-		sce.updateStats("pattern_errors")
-		return
-	}
-
-	// Convert pattern matches to insights
-	for _, match := range matches {
-		insight := sce.convertPatternMatchToInsight(match)
-
-		select {
-		case sce.insightChan <- insight:
-			sce.updateStats("pattern_insights_generated")
-		default:
-			sce.updateStats("pattern_insights_dropped")
-		}
-	}
-
-	sce.updateStats("pattern_detections_run")
-}
-
-// convertPatternMatchToInsight converts a pattern match to an insight
-func (sce *SemanticCorrelationEngine) convertPatternMatchToInsight(match patternrecognition.PatternMatch) Insight {
-	// Extract event IDs from the correlation
-	relatedEvents := make([]string, 0, len(match.Correlation.Events))
-	for _, eventRef := range match.Correlation.Events {
-		relatedEvents = append(relatedEvents, string(eventRef.EventID))
-	}
-
-	// Create prediction if confidence is high enough
-	var prediction *Prediction
-	if match.Confidence >= 0.7 {
-		prediction = &Prediction{
-			Type:        string(match.Pattern.ID),
-			Probability: match.Confidence,
-			Confidence:  match.Confidence,
-		}
-	}
-
-	// Create affected resources from correlation context
-	resources := []AffectedResource{}
-	if match.Correlation.Context.Host != "" {
-		resources = append(resources, AffectedResource{
-			Type: "node",
-			Name: match.Correlation.Context.Host,
-		})
-	}
-
-	// Create actionable items
-	actions := []ActionableItem{}
-	if match.Pattern.ID == "memory_leak" && match.Confidence >= 0.8 {
-		actions = append(actions, ActionableItem{
-			Title:           "Restart affected service",
-			Description:     "Service has a memory leak and should be restarted to clear accumulated memory",
-			Commands:        []string{"kubectl rollout restart deployment <service>"},
-			Risk:            "low",
-			EstimatedImpact: "Service will be restarted with zero downtime using rolling update",
-		})
-		actions = append(actions, ActionableItem{
-			Title:       "Investigate memory allocation",
-			Description: "Analyze heap dumps and memory profiles to identify the root cause",
-			Commands: []string{
-				"kubectl exec <pod> -- jmap -dump:format=b,file=/tmp/heapdump.hprof <pid>",
-				"kubectl cp <pod>:/tmp/heapdump.hprof ./heapdump.hprof",
-			},
-			Risk:            "low",
-			EstimatedImpact: "No service impact, diagnostic only",
-		})
-	}
-
-	// Determine severity based on pattern and confidence
-	severity := SeverityMedium
-	if match.Pattern.Priority == patternrecognition.PatternPriorityHigh {
-		severity = SeverityHigh
-	} else if match.Pattern.Priority == patternrecognition.PatternPriorityCritical {
-		severity = SeverityCritical
-	}
-
-	// Create title from pattern name and description
-	title := fmt.Sprintf("%s Detected", match.Pattern.Name)
-
-	return Insight{
-		ID:       fmt.Sprintf("pattern-%s-%d", match.Pattern.ID, time.Now().UnixNano()),
-		Type:     fmt.Sprintf("pattern:%s", match.Pattern.ID),
-		Severity: severity,
-		Title:    title,
-		Description: fmt.Sprintf("%s (Pattern: %s, Confidence: %.2f)",
-			match.Correlation.Description, match.Pattern.Name, match.Confidence),
-		Timestamp:     match.Detected,
-		RelatedEvents: relatedEvents,
-		Resources:     resources,
-		Actions:       actions,
-		Prediction:    prediction,
-	}
-}
-
-// GetPatternStats returns pattern recognition statistics
-func (sce *SemanticCorrelationEngine) GetPatternStats() patternrecognition.PatternStats {
-	return sce.patternEngine.GetPatternStats()
-}
-
-// ConfigurePatterns allows runtime configuration of pattern engine
-func (sce *SemanticCorrelationEngine) ConfigurePatterns(config *patternrecognition.Config) error {
-	return sce.patternEngine.Configure(config)
+// GetHumanExplanation returns a human-readable explanation for an insight
+func (sce *SemanticCorrelationEngine) GetHumanExplanation(insight Insight) *HumanReadableExplanation {
+	return sce.humanFormatter.FormatInsight(insight)
 }
 
 // SetHumanOutputStyle changes the human output formatting style
@@ -482,100 +555,22 @@ func (sce *SemanticCorrelationEngine) SetHumanOutputStyle(style ExplanationStyle
 	sce.humanFormatter = NewHumanReadableFormatter(style, audience)
 }
 
-// GetHumanExplanation returns a human-readable explanation for an insight
-func (sce *SemanticCorrelationEngine) GetHumanExplanation(insight Insight) *HumanReadableExplanation {
-	return sce.humanFormatter.FormatInsight(insight)
-}
+// GetStats returns current engine statistics
+func (sce *SemanticCorrelationEngine) GetStats() map[string]interface{} {
+	sce.mu.RLock()
+	defer sce.mu.RUnlock()
 
-// GetInsightStory creates a narrative story from multiple related insights
-func (sce *SemanticCorrelationEngine) GetInsightStory(insights []Insight) string {
-	return sce.humanFormatter.FormatAsStory(insights)
-}
-
-// SimpleSemanticGrouper - embedded from our dataflow work
-type SimpleSemanticGrouper struct {
-	// Simplified for now
-}
-
-func NewSimpleSemanticGrouper() *SimpleSemanticGrouper {
-	return &SimpleSemanticGrouper{}
-}
-
-func (sg *SimpleSemanticGrouper) ProcessEvent(ctx context.Context, event *domain.Event) (*domain.Finding, error) {
-	// Our semantic correlation logic from before
-	finding := &domain.Finding{
-		ID:          domain.FindingID("semantic-" + string(event.ID)),
-		Type:        "semantic-correlation",
-		Severity:    event.Severity,
-		Title:       "Semantic correlation for " + string(event.Type),
-		Description: "Advanced semantic analysis with intent classification",
-		Timestamp:   time.Now(),
+	// Create a copy of stats
+	statsCopy := make(map[string]interface{})
+	for k, v := range sce.stats {
+		statsCopy[k] = v
 	}
 
-	return finding, nil
-}
+	// Add current state
+	statsCopy["running"] = sce.running
+	statsCopy["buffer_size"] = len(sce.eventBuffer)
+	statsCopy["semantic_groups"] = len(sce.semanticTracer.GetSemanticGroups())
+	statsCopy["collectors_registered"] = len(sce.collectors)
 
-// enrichInsightWithSemanticGroups adds semantic trace group information to insights
-func (sce *SemanticCorrelationEngine) enrichInsightWithSemanticGroups(event *domain.Event, insight *Insight) {
-	// Find the semantic group this event belongs to
-	groups := sce.semanticTracer.GetSemanticGroups()
-
-	for _, group := range groups {
-		// Check if event is in this group
-		for _, groupEvent := range group.CausalChain {
-			if groupEvent.ID == event.ID {
-				// Enrich insight with semantic group data
-				insight.SemanticGroupID = group.ID
-				insight.SemanticIntent = group.Intent
-				insight.TraceID = group.TraceID
-
-				// Add predicted outcome if available
-				if group.PredictedOutcome != nil {
-					insight.Prediction = &Prediction{
-						Type:          group.PredictedOutcome.Scenario,
-						Probability:   group.PredictedOutcome.Probability,
-						Confidence:    group.PredictedOutcome.ConfidenceLevel,
-						TimeToOutcome: group.PredictedOutcome.TimeToOutcome,
-					}
-				}
-
-				// Add impact assessment
-				if group.ImpactAssessment != nil {
-					insight.BusinessImpact = group.ImpactAssessment.BusinessImpact
-					insight.CascadeRisk = group.ImpactAssessment.CascadeRisk
-
-					// Add recommended actions if not already present
-					for _, action := range group.ImpactAssessment.RecommendedActions {
-						insight.Actions = append(insight.Actions, ActionableItem{
-							Title:           "Semantic Recommendation",
-							Description:     action,
-							Commands:        []string{action},
-							Risk:            "low",
-							EstimatedImpact: "Based on semantic correlation analysis",
-						})
-					}
-				}
-
-				// Add related events from causal chain
-				for _, causalEvent := range group.CausalChain {
-					if causalEvent.ID != event.ID {
-						insight.RelatedEvents = append(insight.RelatedEvents, string(causalEvent.ID))
-					}
-				}
-
-				return
-			}
-		}
-	}
-}
-
-// GetSemanticTraceGroups returns current semantic trace groups for monitoring
-func (sce *SemanticCorrelationEngine) GetSemanticTraceGroups() map[string]*SemanticTraceGroup {
-	return sce.semanticTracer.GetSemanticGroups()
-}
-
-// CleanupSemanticGroups removes old semantic groups
-func (sce *SemanticCorrelationEngine) CleanupSemanticGroups(retention time.Duration) {
-	sce.semanticTracer.CleanupOldGroups(retention)
-	sce.updateStats("semantic_groups_cleaned")
+	return statsCopy
 }

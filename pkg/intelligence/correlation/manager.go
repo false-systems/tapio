@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/patternrecognition"
+	// "github.com/yairfalse/tapio/pkg/patternrecognition"
 )
 
-// CollectionManager provides AI pattern recognition for collected events
+// CollectionManager provides semantic correlation for collected events
 type CollectionManager struct {
-	// AI Pattern Recognition
-	patternManager *patternrecognition.PatternManager
+	// Semantic correlation engine
+	semanticEngine *SemanticCorrelationEngine
 
 	// Event processing
 	eventBus    chan domain.Event
@@ -42,12 +42,12 @@ func DefaultConfig() Config {
 	}
 }
 
-// NewCollectionManager creates a collection manager with AI pattern recognition
+// NewCollectionManager creates a collection manager with semantic correlation
 func NewCollectionManager(config Config) *CollectionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &CollectionManager{
-		patternManager: patternrecognition.NewPatternManager(),
+		semanticEngine: NewSemanticCorrelationEngine(),
 		eventBus:       make(chan domain.Event, config.EventBufferSize),
 		insightChan:    make(chan domain.Insight, 100),
 		ctx:            ctx,
@@ -56,26 +56,32 @@ func NewCollectionManager(config Config) *CollectionManager {
 	}
 }
 
-// Start begins AI pattern recognition processing
+// Start begins semantic correlation processing
 func (cm *CollectionManager) Start() error {
-	// Start pattern recognition
-	if err := cm.patternManager.Start(cm.ctx); err != nil {
-		return fmt.Errorf("failed to start pattern manager: %w", err)
+	// Start semantic correlation engine
+	if err := cm.semanticEngine.Start(); err != nil {
+		return fmt.Errorf("failed to start semantic engine: %w", err)
 	}
 
 	// Start event processing goroutine
 	cm.wg.Add(1)
 	go cm.processEvents()
 
+	// Connect insight channels
+	cm.wg.Add(1)
+	go cm.forwardInsights()
+
 	return nil
 }
 
-// ProcessEvents processes a batch of events through AI pattern recognition
+// ProcessEvents processes a batch of events through semantic correlation
 func (cm *CollectionManager) ProcessEvents(events []domain.Event) []domain.Insight {
 	// Send events to processing pipeline
 	for _, event := range events {
 		select {
 		case cm.eventBus <- event:
+			// Also send directly to semantic engine
+			cm.semanticEngine.ProcessEvent(&event)
 		case <-cm.ctx.Done():
 			return nil
 		}
@@ -112,7 +118,7 @@ func (cm *CollectionManager) GetInsights() []domain.Insight {
 	}
 }
 
-// processEvents runs continuous AI pattern recognition
+// processEvents runs continuous semantic correlation
 func (cm *CollectionManager) processEvents() {
 	defer cm.wg.Done()
 
@@ -127,14 +133,14 @@ func (cm *CollectionManager) processEvents() {
 
 			// Process when buffer reaches threshold
 			if len(eventBuffer) >= 10 {
-				cm.analyzePatterns(eventBuffer)
+				cm.analyzeSemantics(eventBuffer)
 				eventBuffer = eventBuffer[:0] // Reset buffer
 			}
 
 		case <-ticker.C:
-			// Periodic pattern analysis
+			// Periodic semantic analysis
 			if len(eventBuffer) > 0 {
-				cm.analyzePatterns(eventBuffer)
+				cm.analyzeSemantics(eventBuffer)
 				eventBuffer = eventBuffer[:0]
 			}
 
@@ -144,29 +150,99 @@ func (cm *CollectionManager) processEvents() {
 	}
 }
 
-// analyzePatterns runs AI pattern recognition on events
-func (cm *CollectionManager) analyzePatterns(events []domain.Event) {
-	matches := cm.patternManager.DetectPatterns(events)
+// analyzeSemantics runs semantic correlation on events
+func (cm *CollectionManager) analyzeSemantics(events []domain.Event) {
+	// Use semantic grouper to analyze events
+	groups := cm.semanticEngine.semanticGrouper.GroupEvents(events)
 
-	for _, match := range matches {
+	for _, group := range groups {
 		insight := domain.Insight{
-			ID:          fmt.Sprintf("ai-pattern-%d", time.Now().UnixNano()),
-			Type:        "ai_pattern_detection",
-			Title:       fmt.Sprintf("AI Pattern: %s", match.Pattern.Name()),
-			Description: fmt.Sprintf("%s (Confidence: %.2f)", match.Description, match.Confidence),
-			Confidence:  match.Confidence,
-			Source:      "ai_pattern_recognition",
+			ID:          fmt.Sprintf("semantic-%s", group.ID),
+			Type:        "semantic_correlation",
+			Title:       fmt.Sprintf("Semantic Correlation: %s", group.Type),
+			Description: fmt.Sprintf("%s (Confidence: %.2f)", group.Description, group.Confidence),
+			Severity:    cm.calculateSeverityFromGroup(group),
+			Source:      "semantic_correlation",
 			Timestamp:   time.Now(),
 			Metadata: map[string]interface{}{
-				"pattern_type":     match.Pattern.Type(),
+				"group_type":       group.Type,
 				"events_analyzed":  len(events),
-				"recommendation":   match.Recommendation,
-				"confidence_score": match.Confidence,
+				"events_in_group":  len(group.Events),
+				"confidence_score": group.Confidence,
+				"business_impact":  group.BusinessImpact,
+				"trace_id":         group.TraceID,
 			},
+		}
+
+		// Add root cause analysis if available
+		if group.RootCauseAnalysis != nil {
+			insight.Metadata["root_cause"] = group.RootCauseAnalysis.RootCauseEvent.ID
+			insight.Metadata["causal_chain_length"] = len(group.RootCauseAnalysis.CausalChain)
+		}
+
+		// Add predictions if available
+		if len(group.PredictedEvolution) > 0 {
+			insight.Metadata["has_predictions"] = true
+			insight.Metadata["predicted_events"] = len(group.PredictedEvolution)
 		}
 
 		select {
 		case cm.insightChan <- insight:
+		case <-cm.ctx.Done():
+			return
+		}
+	}
+}
+
+// calculateSeverityFromGroup determines severity from event group
+func (cm *CollectionManager) calculateSeverityFromGroup(group EventGroup) domain.Severity {
+	// Use business impact and event severities
+	if group.BusinessImpact > 0.8 {
+		return domain.SeverityCritical
+	} else if group.BusinessImpact > 0.6 {
+		return domain.SeverityHigh
+	} else if group.BusinessImpact > 0.4 {
+		return domain.SeverityMedium
+	}
+
+	// Check max severity in events
+	maxSeverity := domain.SeverityInfo
+	for _, event := range group.Events {
+		// Convert EventSeverity to SeverityLevel
+		var severity domain.SeverityLevel
+		switch event.Severity {
+		case domain.EventSeverityCritical:
+			severity = domain.SeverityCritical
+		case domain.EventSeverityHigh, domain.EventSeverityError:
+			severity = domain.SeverityHigh
+		case domain.EventSeverityMedium, domain.EventSeverityWarning:
+			severity = domain.SeverityMedium
+		default:
+			severity = domain.SeverityInfo
+		}
+
+		if severity > maxSeverity {
+			maxSeverity = severity
+		}
+	}
+
+	return maxSeverity
+}
+
+// forwardInsights forwards insights from semantic engine to manager channel
+func (cm *CollectionManager) forwardInsights() {
+	defer cm.wg.Done()
+
+	for {
+		select {
+		case insight := <-cm.semanticEngine.Insights():
+			// Convert and forward
+			domainInsight := domain.Insight(insight)
+			select {
+			case cm.insightChan <- domainInsight:
+			case <-cm.ctx.Done():
+				return
+			}
 		case <-cm.ctx.Done():
 			return
 		}
@@ -178,8 +254,13 @@ func (cm *CollectionManager) Insights() <-chan domain.Insight {
 	return cm.insightChan
 }
 
-// Stop gracefully shuts down pattern recognition
+// Stop gracefully shuts down semantic correlation
 func (cm *CollectionManager) Stop() error {
+	// Stop semantic engine first
+	if err := cm.semanticEngine.Stop(); err != nil {
+		return fmt.Errorf("failed to stop semantic engine: %w", err)
+	}
+
 	cm.cancel()
 	cm.wg.Wait()
 	close(cm.eventBus)
@@ -189,9 +270,15 @@ func (cm *CollectionManager) Stop() error {
 
 // Statistics returns processing statistics
 func (cm *CollectionManager) Statistics() map[string]interface{} {
-	return map[string]interface{}{
-		"event_buffer_size":     len(cm.eventBus),
-		"insight_queue_size":    len(cm.insightChan),
-		"pattern_manager_stats": cm.patternManager.Statistics(),
+	stats := map[string]interface{}{
+		"event_buffer_size":  len(cm.eventBus),
+		"insight_queue_size": len(cm.insightChan),
 	}
+
+	// Add semantic engine stats
+	if cm.semanticEngine != nil {
+		stats["semantic_engine_stats"] = cm.semanticEngine.GetStats()
+	}
+
+	return stats
 }

@@ -56,4 +56,12 @@ type CorrelationEngineInterface interface {
 // Context aliases for event contexts
 type EventContext = domain.EventContext
 type EventPayload = domain.EventPayload
-type EventMetadata = domain.EventMetadata
+
+// Severity constants
+const (
+	SeverityCritical Severity = domain.SeverityCritical
+	SeverityHigh     Severity = domain.SeverityHigh
+	SeverityMedium   Severity = domain.SeverityMedium
+	SeverityLow      Severity = domain.SeverityLow
+	SeverityInfo     Severity = domain.SeverityInfo
+)

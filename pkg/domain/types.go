@@ -41,23 +41,171 @@ const (
 
 // Core domain types - only the ones NOT already in interfaces.go
 
-// Event represents a system event
+// Event represents a comprehensive system event supporting multiple use cases
 type Event struct {
-	ID         string                 `json:"id"`
-	Timestamp  time.Time              `json:"timestamp"`
-	Type       string                 `json:"type"`
-	Source     string                 `json:"source"`
-	Data       map[string]interface{} `json:"data"`
-	Category   string                 `json:"category,omitempty"`
-	Confidence float64                `json:"confidence,omitempty"`
+	// Core fields (backward compatible)
+	ID        EventID                `json:"id"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      EventType              `json:"type"`
+	Source    SourceType             `json:"source"`
+	Data      map[string]interface{} `json:"data"`
+
+	// Classification fields
+	Category   string        `json:"category,omitempty"`
+	Severity   EventSeverity `json:"severity,omitempty"`
+	Confidence float64       `json:"confidence,omitempty"`
+
+	// Context (structured for OTEL correlation)
+	Context EventContext `json:"context,omitempty"`
+
+	// Message and tags
+	Message string   `json:"message,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+
+	// Enrichment fields
 	Attributes map[string]interface{} `json:"attributes,omitempty"`
 	AiFeatures map[string]interface{} `json:"ai_features,omitempty"`
 	Semantic   map[string]interface{} `json:"semantic,omitempty"`
-	Severity   string                 `json:"severity,omitempty"`
 	Anomaly    map[string]interface{} `json:"anomaly,omitempty"`
-	Context    map[string]interface{} `json:"context,omitempty"`
 	Behavioral map[string]interface{} `json:"behavioral,omitempty"`
 	Causality  *CausalityContext      `json:"causality,omitempty"`
+
+	// Payload for specific event types
+	Payload EventPayload `json:"payload,omitempty"`
+}
+
+// EventContext provides structured context for events
+type EventContext struct {
+	// Service context
+	Service   string `json:"service,omitempty"`
+	Component string `json:"component,omitempty"`
+
+	// Kubernetes context
+	Namespace string `json:"namespace,omitempty"`
+	Host      string `json:"host,omitempty"`
+	Node      string `json:"node,omitempty"`
+	Pod       string `json:"pod,omitempty"`
+	Container string `json:"container,omitempty"`
+
+	// Process context
+	PID  int    `json:"pid,omitempty"`
+	UID  int    `json:"uid,omitempty"`
+	GID  int    `json:"gid,omitempty"`
+	Comm string `json:"comm,omitempty"`
+
+	// Labels and metadata
+	Labels   map[string]string      `json:"labels,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// Trace context for OTEL
+	TraceID string `json:"trace_id,omitempty"`
+	SpanID  string `json:"span_id,omitempty"`
+}
+
+// EventSeverity represents event severity levels
+type EventSeverity string
+
+const (
+	EventSeverityDebug    EventSeverity = "debug"
+	EventSeverityInfo     EventSeverity = "info"
+	EventSeverityLow      EventSeverity = "low"
+	EventSeverityMedium   EventSeverity = "medium"
+	EventSeverityWarning  EventSeverity = "warning"
+	EventSeverityHigh     EventSeverity = "high"
+	EventSeverityError    EventSeverity = "error"
+	EventSeverityCritical EventSeverity = "critical"
+)
+
+// EventPayload is an interface for event-specific payloads
+type EventPayload interface {
+	GetType() string
+}
+
+// Common event payload types
+
+// MemoryEventPayload for memory-related events
+type MemoryEventPayload struct {
+	Usage     float64 `json:"usage_percent"`
+	Available uint64  `json:"available_bytes"`
+	Total     uint64  `json:"total_bytes"`
+	RSS       uint64  `json:"rss_bytes,omitempty"`
+	Cache     uint64  `json:"cache_bytes,omitempty"`
+}
+
+func (m MemoryEventPayload) GetType() string { return "memory" }
+
+// CPUEventPayload for CPU-related events
+type CPUEventPayload struct {
+	Usage            float64 `json:"usage_percent"`
+	UserTime         uint64  `json:"user_time_ns"`
+	SystemTime       uint64  `json:"system_time_ns"`
+	ThrottledTime    uint64  `json:"throttled_time_ns,omitempty"`
+	ThrottledPeriods uint64  `json:"throttled_periods,omitempty"`
+}
+
+func (c CPUEventPayload) GetType() string { return "cpu" }
+
+// NetworkEventPayload for network-related events
+type NetworkEventPayload struct {
+	Protocol    string `json:"protocol"`
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Bytes       uint64 `json:"bytes,omitempty"`
+	Packets     uint64 `json:"packets,omitempty"`
+	Latency     uint64 `json:"latency_ms,omitempty"`
+}
+
+func (n NetworkEventPayload) GetType() string { return "network" }
+
+// DiskEventPayload for disk-related events
+type DiskEventPayload struct {
+	Device    string  `json:"device"`
+	Mount     string  `json:"mount,omitempty"`
+	Usage     float64 `json:"usage_percent"`
+	Available uint64  `json:"available_bytes"`
+	Total     uint64  `json:"total_bytes"`
+	IOPs      uint64  `json:"iops,omitempty"`
+}
+
+func (d DiskEventPayload) GetType() string { return "disk" }
+
+// SystemEventPayload for system-level events
+type SystemEventPayload struct {
+	Subsystem string                 `json:"subsystem"`
+	EventType string                 `json:"event_type"`
+	Message   string                 `json:"message"`
+	Details   map[string]interface{} `json:"details,omitempty"`
+}
+
+func (s SystemEventPayload) GetType() string { return "system" }
+
+// ServiceEventPayload for service-related events
+type ServiceEventPayload struct {
+	ServiceName string `json:"service_name"`
+	EventType   string `json:"event_type"`
+	OldState    string `json:"old_state,omitempty"`
+	NewState    string `json:"new_state,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+func (s ServiceEventPayload) GetType() string { return "service" }
+
+// KubernetesEventPayload for Kubernetes events
+type KubernetesEventPayload struct {
+	Resource  ResourceInfo `json:"resource"`
+	EventType string       `json:"event_type"`
+	Reason    string       `json:"reason"`
+	Message   string       `json:"message"`
+}
+
+func (k KubernetesEventPayload) GetType() string { return "kubernetes" }
+
+// ResourceInfo contains Kubernetes resource information
+type ResourceInfo struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	UID       string `json:"uid,omitempty"`
 }
 
 // Finding represents a correlation result
@@ -87,11 +235,29 @@ type TimeWindow struct {
 
 // Correlation represents a correlation between events
 type Correlation struct {
-	ID         string    `json:"id"`
-	Type       string    `json:"type"`
-	Events     []string  `json:"events"`
-	Confidence float64   `json:"confidence"`
-	Timestamp  time.Time `json:"timestamp"`
+	ID          string              `json:"id"`
+	Type        string              `json:"type"`
+	Events      []string            `json:"events"`
+	Confidence  float64             `json:"confidence"`
+	Timestamp   time.Time           `json:"timestamp"`
+	Pattern     PatternSignature    `json:"pattern,omitempty"`
+	Description string              `json:"description,omitempty"`
+	Metadata    CorrelationMetadata `json:"metadata,omitempty"`
+}
+
+// String converts CorrelationID to string
+func (c CorrelationID) String() string {
+	return string(c)
+}
+
+// String converts PatternSignature to string
+func (p PatternSignature) String() string {
+	return string(p)
+}
+
+// Float64 converts ConfidenceScore to float64
+func (c ConfidenceScore) Float64() float64 {
+	return float64(c)
 }
 
 // Insight represents an analytical insight
@@ -101,7 +267,9 @@ type Insight struct {
 	Title       string                 `json:"title"`
 	Description string                 `json:"description"`
 	Severity    SeverityLevel          `json:"severity"`
+	Source      string                 `json:"source,omitempty"`
 	Data        map[string]interface{} `json:"data"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 	Timestamp   time.Time              `json:"timestamp"`
 }
 
@@ -256,6 +424,14 @@ const (
 	CorrelationTypeTemporal CorrelationType = "temporal"
 	CorrelationTypeSpatial  CorrelationType = "spatial"
 	CorrelationTypeCausal   CorrelationType = "causal"
+	CorrelationTypeResource CorrelationType = "resource"
+)
+
+// Additional severity constants for compatibility
+const (
+	SeverityError SeverityLevel = "error"
+	SeverityWarn  SeverityLevel = "warning"
+	SeverityInfo  SeverityLevel = "info"
 )
 
 const (
@@ -266,3 +442,48 @@ const (
 
 // NOTE: Rule, RuleCondition, RuleAction, RuleMatch, and QueryCriteria
 // are already defined in interfaces.go, so we don't redefine them here
+
+// EventReference represents a reference to an event
+type EventReference struct {
+	ID           EventID
+	EventID      EventID // Alias for compatibility
+	Timestamp    time.Time
+	Type         EventType
+	Source       SourceType
+	Role         string  // Role in correlation
+	Relationship string  // Type of relationship
+	Weight       float64 // Weight/importance
+}
+
+// CorrelationID is a strongly-typed correlation identifier
+type CorrelationID string
+
+// PatternSignature represents a unique pattern signature
+type PatternSignature string
+
+// ConfidenceScore represents a confidence score (0.0-1.0)
+type ConfidenceScore float64
+
+// FloatToConfidenceScore converts a float to a ConfidenceScore with bounds checking
+func FloatToConfidenceScore(f float64) ConfidenceScore {
+	if f < 0.0 {
+		return ConfidenceScore(0.0)
+	}
+	if f > 1.0 {
+		return ConfidenceScore(1.0)
+	}
+	return ConfidenceScore(f)
+}
+
+// CorrelationMetadata contains metadata about a correlation
+type CorrelationMetadata struct {
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	ProcessedAt   time.Time // When correlation was processed
+	Source        string
+	Algorithm     string
+	Version       string
+	SchemaVersion string // Schema version for compatibility
+	ProcessedBy   string // Pattern processor name
+	Parameters    map[string]interface{}
+}
