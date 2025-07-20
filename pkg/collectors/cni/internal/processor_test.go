@@ -144,6 +144,15 @@ func TestCNIEventProcessor_ProcessEvent(t *testing.T) {
 					t.Errorf("expected direction 'ingress', got %s", net.Direction)
 				}
 
+				// Verify Trace context
+				if event.TraceContext == nil {
+					t.Fatal("Trace context should not be nil")
+				}
+				trace := event.TraceContext
+				if trace.TraceID != "abc123def456" {
+					t.Errorf("expected trace ID abc123def456, got %s", trace.TraceID)
+				}
+
 				// Verify Impact context
 				if event.Impact == nil {
 					t.Fatal("Impact context should not be nil")
@@ -523,6 +532,88 @@ func BenchmarkCNIEventProcessor_ProcessEvent(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestCNIEventProcessor_TraceContextExtraction(t *testing.T) {
+	processor := &cniEventProcessor{}
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		expectTrace bool
+		expectedID  string
+		expectedSpan string
+	}{
+		{
+			name: "OpenTelemetry annotations",
+			annotations: map[string]string{
+				"opentelemetry.io/trace-id": "abc123def456789",
+				"opentelemetry.io/span-id":  "span987654321",
+			},
+			expectTrace:  true,
+			expectedID:   "abc123def456789",
+			expectedSpan: "span987654321",
+		},
+		{
+			name: "Jaeger annotations",
+			annotations: map[string]string{
+				"jaeger.trace-id": "jaeger-trace-123",
+				"jaeger.span-id":  "jaeger-span-456",
+			},
+			expectTrace:  true,
+			expectedID:   "jaeger-trace-123",
+			expectedSpan: "jaeger-span-456",
+		},
+		{
+			name: "Simple trace headers",
+			annotations: map[string]string{
+				"trace-id": "simple-trace-id",
+				"span-id":  "simple-span-id",
+			},
+			expectTrace:  true,
+			expectedID:   "simple-trace-id",
+			expectedSpan: "simple-span-id",
+		},
+		{
+			name:        "No trace annotations",
+			annotations: map[string]string{},
+			expectTrace: false,
+		},
+		{
+			name: "Empty trace values",
+			annotations: map[string]string{
+				"trace-id": "",
+				"span-id":  "",
+			},
+			expectTrace: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawEvent := core.CNIRawEvent{
+				Annotations: tt.annotations,
+			}
+
+			traceCtx := processor.extractTraceContext(rawEvent)
+
+			if tt.expectTrace {
+				if traceCtx == nil {
+					t.Fatal("expected trace context but got nil")
+				}
+				if traceCtx.TraceID != tt.expectedID {
+					t.Errorf("expected trace ID %s, got %s", tt.expectedID, traceCtx.TraceID)
+				}
+				if traceCtx.SpanID != tt.expectedSpan {
+					t.Errorf("expected span ID %s, got %s", tt.expectedSpan, traceCtx.SpanID)
+				}
+			} else {
+				if traceCtx != nil {
+					t.Errorf("expected no trace context but got %+v", traceCtx)
+				}
+			}
+		})
 	}
 }
 
