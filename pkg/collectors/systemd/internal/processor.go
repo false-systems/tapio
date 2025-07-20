@@ -642,6 +642,165 @@ func (p *eventProcessor) isCriticalService(serviceName string) bool {
 	return false
 }
 
+// createCorrelationContext creates service dependency and correlation context
+func (p *eventProcessor) createCorrelationContext(raw core.RawEvent) *domain.CorrelationContext {
+	if raw.UnitName == "" {
+		return nil
+	}
+
+	// Detect service type and category
+	serviceType := p.detectServiceType(raw.UnitName)
+	category := p.categorizeService(raw.UnitName)
+	
+	// Determine dependencies
+	dependencies := p.inferServiceDependencies(raw.UnitName)
+	dependents := p.inferServiceDependents(raw.UnitName)
+	
+	// Calculate startup order priority
+	startupPriority := p.calculateStartupPriority(raw.UnitName, serviceType)
+	
+	return &domain.CorrelationContext{
+		CorrelationID: fmt.Sprintf("systemd-%s-%s", raw.UnitName, serviceType),
+		Pattern:       fmt.Sprintf("service-%s-event", category),
+		Stage:         p.mapStateToHealth(raw.NewState),
+	}
+}
+
+// detectServiceType determines the type of systemd service
+func (p *eventProcessor) detectServiceType(unitName string) string {
+	switch {
+	case strings.Contains(unitName, "docker") || strings.Contains(unitName, "containerd"):
+		return "container-runtime"
+	case strings.Contains(unitName, "kubernetes") || strings.Contains(unitName, "k8s"):
+		return "orchestrator"
+	case strings.Contains(unitName, "network") || strings.Contains(unitName, "ssh"):
+		return "network"
+	case strings.Contains(unitName, "nginx") || strings.Contains(unitName, "apache") || strings.Contains(unitName, "httpd"):
+		return "web-server"
+	case strings.Contains(unitName, "database") || strings.Contains(unitName, "postgres") || strings.Contains(unitName, "mysql"):
+		return "database"
+	case strings.Contains(unitName, "monitoring") || strings.Contains(unitName, "prometheus") || strings.Contains(unitName, "grafana"):
+		return "monitoring"
+	case strings.HasSuffix(unitName, ".timer"):
+		return "timer"
+	case strings.HasSuffix(unitName, ".socket"):
+		return "socket"
+	case strings.HasSuffix(unitName, ".mount"):
+		return "mount"
+	default:
+		return "application"
+	}
+}
+
+// categorizeService categorizes services for impact analysis
+func (p *eventProcessor) categorizeService(unitName string) string {
+	switch {
+	case p.isCriticalService(unitName):
+		return "critical-infrastructure"
+	case strings.Contains(unitName, "api") || strings.Contains(unitName, "web"):
+		return "api-service"
+	case strings.Contains(unitName, "database"):
+		return "data-service"
+	case strings.Contains(unitName, "monitoring"):
+		return "observability"
+	case strings.Contains(unitName, "network"):
+		return "network-service"
+	default:
+		return "application-service"
+	}
+}
+
+// inferServiceDependencies infers likely service dependencies
+func (p *eventProcessor) inferServiceDependencies(unitName string) []string {
+	dependencies := []string{}
+	
+	// Most services depend on network
+	if !strings.Contains(unitName, "network") {
+		dependencies = append(dependencies, "network.target")
+	}
+	
+	// Web services typically depend on database
+	if strings.Contains(unitName, "web") || strings.Contains(unitName, "api") {
+		dependencies = append(dependencies, "postgresql.service", "mysql.service")
+	}
+	
+	// Kubernetes services depend on container runtime
+	if strings.Contains(unitName, "kubernetes") || strings.Contains(unitName, "k8s") {
+		dependencies = append(dependencies, "docker.service", "containerd.service")
+	}
+	
+	// Application services depend on container runtime
+	if strings.Contains(unitName, "app") && !strings.Contains(unitName, "network") {
+		dependencies = append(dependencies, "docker.service")
+	}
+	
+	return dependencies
+}
+
+// inferServiceDependents infers services that depend on this one
+func (p *eventProcessor) inferServiceDependents(unitName string) []string {
+	dependents := []string{}
+	
+	// Container runtime supports many services
+	if strings.Contains(unitName, "docker") || strings.Contains(unitName, "containerd") {
+		dependents = append(dependents, "kubernetes.service", "application-containers")
+	}
+	
+	// Database supports web services
+	if strings.Contains(unitName, "postgres") || strings.Contains(unitName, "mysql") {
+		dependents = append(dependents, "web-applications", "api-services")
+	}
+	
+	// Network services support everything
+	if strings.Contains(unitName, "network") {
+		dependents = append(dependents, "all-network-dependent-services")
+	}
+	
+	return dependents
+}
+
+// calculateStartupPriority determines startup order priority (lower = earlier)
+func (p *eventProcessor) calculateStartupPriority(unitName, serviceType string) int {
+	switch serviceType {
+	case "mount":
+		return 100 // Mounts first
+	case "network":
+		return 200 // Network infrastructure
+	case "database":
+		return 300 // Data layer
+	case "container-runtime":
+		return 400 // Container platform
+	case "orchestrator":
+		return 500 // Kubernetes
+	case "monitoring":
+		return 600 // Observability
+	case "web-server":
+		return 700 // Application layer
+	case "application":
+		return 800 // User applications
+	default:
+		return 900 // Everything else
+	}
+}
+
+// mapStateToHealth maps systemd states to health status
+func (p *eventProcessor) mapStateToHealth(state core.State) string {
+	switch state {
+	case core.StateActive:
+		return "healthy"
+	case core.StateActivating:
+		return "starting"
+	case core.StateDeactivating:
+		return "stopping"
+	case core.StateInactive:
+		return "stopped"
+	case core.StateFailed:
+		return "failed"
+	default:
+		return "unknown"
+	}
+}
+
 // getHostname gets the system hostname
 func (p *eventProcessor) getHostname() string {
 	hostname, err := os.Hostname()

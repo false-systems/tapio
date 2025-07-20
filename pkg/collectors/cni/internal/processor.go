@@ -50,6 +50,9 @@ func (p *cniEventProcessor) ProcessEvent(ctx context.Context, raw core.CNIRawEve
 		// Kubernetes correlation context
 		Kubernetes: p.createKubernetesContext(raw),
 
+		// Distributed tracing correlation context
+		TraceContext: p.extractTraceContext(raw),
+
 		// Complete impact context with all fields
 		Impact: p.createImpactContext(raw, severity),
 	}
@@ -582,4 +585,58 @@ func (p *cniEventProcessor) generateK8sMessage(raw core.CNIRawEvent) string {
 	default:
 		return fmt.Sprintf("CNI %s operation completed using %s plugin", raw.Operation, plugin)
 	}
+}
+
+// extractTraceContext extracts distributed tracing context from CNI event annotations
+func (p *cniEventProcessor) extractTraceContext(raw core.CNIRawEvent) *domain.TraceContext {
+	// Look for trace context in pod annotations or environment
+	traceID := extractTraceID(raw.Annotations)
+	spanID := extractSpanID(raw.Annotations)
+
+	if traceID == "" && spanID == "" {
+		return nil
+	}
+
+	return &domain.TraceContext{
+		TraceID: traceID,
+		SpanID:  spanID,
+	}
+}
+
+// extractTraceID extracts trace ID from various annotation keys
+func extractTraceID(annotations map[string]string) string {
+	traceKeys := []string{
+		"trace-id",
+		"traceId", 
+		"traceid",
+		"x-trace-id",
+		"opentelemetry.io/trace-id",
+		"jaeger.trace-id",
+	}
+	
+	for _, key := range traceKeys {
+		if value, ok := annotations[key]; ok && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// extractSpanID extracts span ID from various annotation keys  
+func extractSpanID(annotations map[string]string) string {
+	spanKeys := []string{
+		"span-id",
+		"spanId",
+		"spanid", 
+		"x-span-id",
+		"opentelemetry.io/span-id",
+		"jaeger.span-id",
+	}
+	
+	for _, key := range spanKeys {
+		if value, ok := annotations[key]; ok && value != "" {
+			return value
+		}
+	}
+	return ""
 }
