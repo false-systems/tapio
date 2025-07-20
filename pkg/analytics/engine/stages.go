@@ -27,7 +27,7 @@ func (s *ValidationStage) Name() string {
 func (s *ValidationStage) Process(ctx context.Context, event *performance.Event) (*performance.Event, error) {
 	// Extract unified event from metadata
 	unifiedEvent := (*domain.UnifiedEvent)(unsafe.Pointer(uintptr(event.Metadata[0])))
-	
+
 	// Validate required fields
 	if unifiedEvent.ID == "" {
 		return nil, fmt.Errorf("event ID is required")
@@ -41,7 +41,7 @@ func (s *ValidationStage) Process(ctx context.Context, event *performance.Event)
 	if unifiedEvent.Source == "" {
 		return nil, fmt.Errorf("event source is required")
 	}
-	
+
 	// Validate layer-specific data
 	layerCount := 0
 	if unifiedEvent.Kernel != nil {
@@ -59,15 +59,15 @@ func (s *ValidationStage) Process(ctx context.Context, event *performance.Event)
 	if unifiedEvent.Metrics != nil {
 		layerCount++
 	}
-	
+
 	// At least one layer should be populated
 	if layerCount == 0 {
 		return nil, fmt.Errorf("event must have at least one layer of data")
 	}
-	
+
 	// Mark as validated
 	event.Metadata[1] = 1 // Validation flag
-	
+
 	return event, nil
 }
 
@@ -93,7 +93,7 @@ func (s *EnrichmentStage) Name() string {
 func (s *EnrichmentStage) Process(ctx context.Context, event *performance.Event) (*performance.Event, error) {
 	// Extract unified event from metadata
 	unifiedEvent := (*domain.UnifiedEvent)(unsafe.Pointer(uintptr(event.Metadata[0])))
-	
+
 	// Enrich with default trace context if missing
 	if !unifiedEvent.HasTraceContext() {
 		unifiedEvent.TraceContext = &domain.TraceContext{
@@ -102,7 +102,7 @@ func (s *EnrichmentStage) Process(ctx context.Context, event *performance.Event)
 			Sampled: true,
 		}
 	}
-	
+
 	// Enrich with severity if missing
 	if unifiedEvent.Impact == nil {
 		severity := inferSeverity(unifiedEvent)
@@ -110,7 +110,7 @@ func (s *EnrichmentStage) Process(ctx context.Context, event *performance.Event)
 			Severity: severity,
 		}
 	}
-	
+
 	// Enrich with semantic intent if missing
 	if unifiedEvent.Semantic == nil {
 		intent := inferSemanticIntent(unifiedEvent)
@@ -122,17 +122,17 @@ func (s *EnrichmentStage) Process(ctx context.Context, event *performance.Event)
 			}
 		}
 	}
-	
+
 	// Enrich correlation context
 	if unifiedEvent.Correlation == nil {
 		unifiedEvent.Correlation = &domain.CorrelationContext{
 			CorrelationID: unifiedEvent.TraceContext.TraceID,
 		}
 	}
-	
+
 	// Mark as enriched
 	event.Metadata[2] = 1 // Enrichment flag
-	
+
 	return event, nil
 }
 
@@ -169,7 +169,7 @@ func (s *CorrelationStage) Name() string {
 func (s *CorrelationStage) Process(ctx context.Context, event *performance.Event) (*performance.Event, error) {
 	// Extract unified event from metadata
 	unifiedEvent := (*domain.UnifiedEvent)(unsafe.Pointer(uintptr(event.Metadata[0])))
-	
+
 	// Find or create correlation group
 	groupID := unifiedEvent.TraceContext.TraceID
 	group, exists := s.correlationCache[groupID]
@@ -181,11 +181,11 @@ func (s *CorrelationStage) Process(ctx context.Context, event *performance.Event
 		}
 		s.correlationCache[groupID] = group
 	}
-	
+
 	// Add event to group
 	group.events = append(group.events, unifiedEvent.ID)
 	group.lastUpdate = time.Now()
-	
+
 	// Detect patterns
 	if len(group.events) >= 3 {
 		pattern := detectPattern(unifiedEvent, len(group.events))
@@ -194,27 +194,27 @@ func (s *CorrelationStage) Process(ctx context.Context, event *performance.Event
 			unifiedEvent.Correlation.Pattern = pattern
 		}
 	}
-	
+
 	// Update correlation context
 	if len(group.events) > 1 {
 		unifiedEvent.Correlation.RelatedEvents = group.events
-		
+
 		// Build causal chain for certain patterns
 		if isCausalPattern(unifiedEvent) {
 			unifiedEvent.Correlation.CausalChain = buildCausalChain(group.events)
 		}
 	}
-	
+
 	// Clean old groups (simple TTL)
 	for id, g := range s.correlationCache {
 		if time.Since(g.lastUpdate) > 5*time.Minute {
 			delete(s.correlationCache, id)
 		}
 	}
-	
+
 	// Mark as correlated
 	event.Metadata[3] = 1 // Correlation flag
-	
+
 	return event, nil
 }
 
@@ -240,24 +240,24 @@ func (s *AnalyticsStage) Name() string {
 func (s *AnalyticsStage) Process(ctx context.Context, event *performance.Event) (*performance.Event, error) {
 	// Extract unified event from metadata
 	unifiedEvent := (*domain.UnifiedEvent)(unsafe.Pointer(uintptr(event.Metadata[0])))
-	
+
 	// Calculate event score
 	score := calculateEventScore(unifiedEvent)
 	event.Metadata[4] = uint64(score * 100) // Store score as percentage
-	
+
 	// Determine if this is an anomaly
 	if isAnomaly(unifiedEvent, score) {
 		event.Metadata[5] = 1 // Anomaly flag
 		event.Priority = 0    // Highest priority for anomalies
 	}
-	
+
 	// Mark processing time
 	processingTime := time.Since(time.Unix(0, event.Timestamp))
 	event.Metadata[6] = uint64(processingTime.Nanoseconds())
-	
+
 	// Mark as analyzed
 	event.Metadata[7] = 1 // Analytics flag
-	
+
 	return event, nil
 }
 
@@ -278,7 +278,7 @@ func inferSeverity(event *domain.UnifiedEvent) string {
 			return "high"
 		}
 	}
-	
+
 	// Network events
 	if event.IsNetworkEvent() && event.Network != nil {
 		if event.Network.StatusCode >= 500 {
@@ -291,7 +291,7 @@ func inferSeverity(event *domain.UnifiedEvent) string {
 			return "high"
 		}
 	}
-	
+
 	// Application events
 	if event.IsApplicationEvent() && event.Application != nil {
 		switch event.Application.Level {
@@ -303,7 +303,7 @@ func inferSeverity(event *domain.UnifiedEvent) string {
 			return "medium"
 		}
 	}
-	
+
 	// Kubernetes events
 	if event.IsKubernetesEvent() && event.Kubernetes != nil {
 		if event.Kubernetes.EventType == "Warning" {
@@ -317,7 +317,7 @@ func inferSeverity(event *domain.UnifiedEvent) string {
 			}
 		}
 	}
-	
+
 	return "low"
 }
 
@@ -337,7 +337,7 @@ func inferSemanticIntent(event *domain.UnifiedEvent) string {
 			}
 		}
 	}
-	
+
 	// Network intents
 	if event.IsNetworkEvent() && event.Network != nil {
 		if event.Network.StatusCode == 429 {
@@ -356,7 +356,7 @@ func inferSemanticIntent(event *domain.UnifiedEvent) string {
 			return "slow-response"
 		}
 	}
-	
+
 	// Application intents
 	if event.IsApplicationEvent() && event.Application != nil {
 		if event.Application.ErrorType != "" {
@@ -364,7 +364,7 @@ func inferSemanticIntent(event *domain.UnifiedEvent) string {
 			return fmt.Sprintf("%s-error", event.Application.ErrorType)
 		}
 	}
-	
+
 	// Kubernetes intents
 	if event.IsKubernetesEvent() && event.Kubernetes != nil {
 		switch event.Kubernetes.Reason {
@@ -377,12 +377,12 @@ func inferSemanticIntent(event *domain.UnifiedEvent) string {
 		case "FailedMount":
 			return "storage-failure"
 		}
-		
+
 		if event.Kubernetes.Action == "ADDED" && event.Kubernetes.ObjectKind == "Deployment" {
 			return "deployment-started"
 		}
 	}
-	
+
 	return ""
 }
 
@@ -390,13 +390,13 @@ func inferCategory(event *domain.UnifiedEvent) string {
 	if event.Semantic != nil && event.Semantic.Category != "" {
 		return event.Semantic.Category
 	}
-	
+
 	severity := event.GetSeverity()
 	switch severity {
 	case "critical", "high":
 		return "availability"
 	}
-	
+
 	if event.IsNetworkEvent() {
 		return "performance"
 	}
@@ -406,7 +406,7 @@ func inferCategory(event *domain.UnifiedEvent) string {
 	if event.IsApplicationEvent() {
 		return "application"
 	}
-	
+
 	return "general"
 }
 
@@ -415,7 +415,7 @@ func detectPattern(event *domain.UnifiedEvent, groupSize int) string {
 	if event.IsKernelEvent() && event.Kernel != nil && event.Kernel.Syscall == "oom_kill" {
 		return "memory-exhaustion-pattern"
 	}
-	
+
 	if event.IsNetworkEvent() && event.Network != nil {
 		if event.Network.StatusCode >= 500 && groupSize > 5 {
 			return "service-degradation-pattern"
@@ -424,17 +424,17 @@ func detectPattern(event *domain.UnifiedEvent, groupSize int) string {
 			return "rate-limiting-pattern"
 		}
 	}
-	
+
 	if event.IsApplicationEvent() && event.Application != nil {
 		if event.Application.Level == "error" && groupSize > 10 {
 			return "error-spike-pattern"
 		}
 	}
-	
+
 	if groupSize > 20 {
 		return "high-volume-pattern"
 	}
-	
+
 	return ""
 }
 
@@ -448,17 +448,17 @@ func isCausalPattern(event *domain.UnifiedEvent) bool {
 			return true
 		}
 	}
-	
+
 	// OOM kills cause cascading failures
 	if event.IsKernelEvent() && event.Kernel != nil && event.Kernel.Syscall == "oom_kill" {
 		return true
 	}
-	
+
 	// Service errors can cascade
 	if event.IsNetworkEvent() && event.Network != nil && event.Network.StatusCode >= 500 {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -467,14 +467,14 @@ func buildCausalChain(events []string) []string {
 	if len(events) <= 1 {
 		return events
 	}
-	
+
 	// For now, return events in order (oldest to newest)
 	return events
 }
 
 func calculateEventScore(event *domain.UnifiedEvent) float64 {
 	score := 0.5 // Base score
-	
+
 	// Severity contributes to score
 	switch event.GetSeverity() {
 	case "critical":
@@ -486,7 +486,7 @@ func calculateEventScore(event *domain.UnifiedEvent) float64 {
 	case "low":
 		score += 0.1
 	}
-	
+
 	// Impact contributes to score
 	if event.Impact != nil {
 		score += event.Impact.BusinessImpact * 0.3
@@ -497,17 +497,17 @@ func calculateEventScore(event *domain.UnifiedEvent) float64 {
 			score += 0.1
 		}
 	}
-	
+
 	// Correlation patterns increase score
 	if event.Correlation != nil && event.Correlation.Pattern != "" {
 		score += 0.2
 	}
-	
+
 	// Cap at 1.0
 	if score > 1.0 {
 		score = 1.0
 	}
-	
+
 	return score
 }
 
@@ -516,7 +516,7 @@ func isAnomaly(event *domain.UnifiedEvent, score float64) bool {
 	if score > 0.8 {
 		return true
 	}
-	
+
 	// Specific patterns are anomalies
 	if event.Correlation != nil {
 		switch event.Correlation.Pattern {
@@ -526,11 +526,11 @@ func isAnomaly(event *domain.UnifiedEvent, score float64) bool {
 			return true
 		}
 	}
-	
+
 	// Critical events are anomalies
 	if event.GetSeverity() == "critical" {
 		return true
 	}
-	
+
 	return false
 }

@@ -279,7 +279,6 @@ func (s *CorrelationServer) AnalyzeEvents(ctx context.Context, req *pb.AnalyzeEv
 
 	// Get events for analysis
 	var events []*domain.Event
-	var err error
 
 	if len(req.EventIds) > 0 {
 		// Get specific events by ID
@@ -349,13 +348,13 @@ func (s *CorrelationServer) AnalyzeEvents(ctx context.Context, req *pb.AnalyzeEv
 
 	// Convert result to proto
 	response := &pb.AnalyzeEventsResponse{
-		AnalysisId:     fmt.Sprintf("analysis_%d", time.Now().UnixNano()),
-		Correlations:   make([]*pb.Correlation, len(result.Correlations)),
-		SemanticGroups: make([]*pb.SemanticGroup, len(result.SemanticGroups)),
-		Predictions:    make([]*pb.PredictedOutcome, len(result.Predictions)),
-		AnalysisTime:   durationpb.New(time.Since(start)),
-		EventsAnalyzed: int32(len(events)),
+		Correlations:     make([]*pb.Correlation, len(result.Correlations)),
+		SemanticGroups:   make([]*pb.SemanticGroup, len(result.SemanticGroups)),
+		Predictions:      make([]*pb.PredictedOutcome, len(result.Predictions)),
+		AnalysisDuration: durationpb.New(time.Since(start)),
+		EventsAnalyzed:   int32(len(events)),
 		Metadata: map[string]string{
+			"analysis_id":               fmt.Sprintf("analysis_%d", time.Now().UnixNano()),
 			"root_cause_enabled":        fmt.Sprintf("%t", req.EnableRootCause),
 			"predictions_enabled":       fmt.Sprintf("%t", req.EnablePredictions),
 			"impact_assessment_enabled": fmt.Sprintf("%t", req.EnableImpactAssessment),
@@ -401,7 +400,7 @@ func (s *CorrelationServer) AnalyzeEvents(ctx context.Context, req *pb.AnalyzeEv
 	}
 
 	s.logger.Info("Event analysis completed",
-		zap.String("analysis_id", response.AnalysisId),
+		zap.String("analysis_id", response.Metadata["analysis_id"]),
 		zap.Int("events_analyzed", len(events)),
 		zap.Int("correlations_found", len(response.Correlations)),
 		zap.Int("semantic_groups_found", len(response.SemanticGroups)),
@@ -423,9 +422,12 @@ func (s *CorrelationServer) SubscribeToCorrelations(req *pb.SubscribeToCorrelati
 		return err
 	}
 
+	// Generate unique subscription ID
+	subscriptionID := fmt.Sprintf("sub_%d_%d", time.Now().UnixNano(), stream.Context().Value("request-id"))
+
 	// Create subscription
 	subscription := &CorrelationSubscription{
-		ID:               req.SubscriptionId,
+		ID:               subscriptionID,
 		Filter:           req.Filter,
 		CorrelationTypes: req.CorrelationTypes,
 		MinConfidence:    req.MinConfidence,

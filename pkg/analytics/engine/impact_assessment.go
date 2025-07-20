@@ -28,13 +28,13 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 		AffectedServices:   []string{},
 		RecommendedActions: []string{},
 	}
-	
+
 	// Use event's impact context if available
 	if event.Impact != nil {
 		result.TechnicalSeverity = event.Impact.Severity
 		result.BusinessImpact = event.Impact.BusinessImpact
 		result.AffectedServices = event.Impact.AffectedServices
-		
+
 		// Increase cascade risk for customer-facing or revenue-impacting events
 		if event.Impact.CustomerFacing {
 			result.CascadeRisk += 0.3
@@ -46,24 +46,24 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 			result.CascadeRisk += 0.3
 		}
 	}
-	
+
 	// Layer-specific impact assessment
 	if event.IsKernelEvent() && event.Kernel != nil {
 		ia.assessKernelImpact(event.Kernel, result)
 	}
-	
+
 	if event.IsNetworkEvent() && event.Network != nil {
 		ia.assessNetworkImpact(event.Network, result)
 	}
-	
+
 	if event.IsApplicationEvent() && event.Application != nil {
 		ia.assessApplicationImpact(event.Application, result)
 	}
-	
+
 	if event.IsKubernetesEvent() && event.Kubernetes != nil {
 		ia.assessKubernetesImpact(event.Kubernetes, result)
 	}
-	
+
 	// Adjust severity based on entity type
 	if event.Entity != nil {
 		switch event.Entity.Type {
@@ -76,7 +76,7 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 		case "cache":
 			result.BusinessImpact *= 1.1 // Cache issues cause performance degradation
 		}
-		
+
 		// Critical namespace/labels
 		if event.Entity.Namespace == "production" || event.Entity.Namespace == "prod" {
 			result.BusinessImpact *= 1.2
@@ -88,7 +88,7 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 			}
 		}
 	}
-	
+
 	// Cap values
 	if result.BusinessImpact > 1.0 {
 		result.BusinessImpact = 1.0
@@ -96,10 +96,10 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 	if result.CascadeRisk > 1.0 {
 		result.CascadeRisk = 1.0
 	}
-	
+
 	// Generate recommendations based on assessment
 	ia.generateRecommendations(event, result)
-	
+
 	return result, nil
 }
 
@@ -109,13 +109,13 @@ func (ia *ImpactAssessment) assessKernelImpact(kernel *domain.KernelData, result
 	if kernel.Syscall == "oom_kill" || strings.Contains(kernel.Comm, "OOM") {
 		result.TechnicalSeverity = "critical"
 		result.BusinessImpact = 0.9
-		result.RecommendedActions = append(result.RecommendedActions, 
+		result.RecommendedActions = append(result.RecommendedActions,
 			"Increase memory limits for affected container",
 			"Review application memory usage patterns",
 			"Enable memory usage alerts",
 		)
 	}
-	
+
 	// Failed syscalls indicate issues
 	if kernel.ReturnCode < 0 {
 		switch kernel.Syscall {
@@ -160,7 +160,7 @@ func (ia *ImpactAssessment) assessNetworkImpact(network *domain.NetworkData, res
 			"Check API documentation",
 		)
 	}
-	
+
 	// High latency
 	if network.Latency > 5000000000 { // > 5 seconds
 		result.TechnicalSeverity = "high"
@@ -172,7 +172,7 @@ func (ia *ImpactAssessment) assessNetworkImpact(network *domain.NetworkData, res
 			"Review network path",
 		)
 	}
-	
+
 	// Connection failures
 	if network.StatusCode == 0 && network.Protocol != "" {
 		result.TechnicalSeverity = "critical"
@@ -208,7 +208,7 @@ func (ia *ImpactAssessment) assessApplicationImpact(app *domain.ApplicationData,
 		result.TechnicalSeverity = "medium"
 		result.BusinessImpact = 0.5
 	}
-	
+
 	// Specific error types
 	if app.ErrorType != "" {
 		switch {
@@ -240,7 +240,7 @@ func (ia *ImpactAssessment) assessKubernetesImpact(k8s *domain.KubernetesData, r
 	// Warning events
 	if k8s.EventType == "Warning" {
 		result.TechnicalSeverity = "high"
-		
+
 		switch k8s.Reason {
 		case "BackOff", "CrashLoopBackOff":
 			result.BusinessImpact = 0.8
@@ -273,7 +273,7 @@ func (ia *ImpactAssessment) assessKubernetesImpact(k8s *domain.KubernetesData, r
 			)
 		}
 	}
-	
+
 	// Object types
 	switch k8s.ObjectKind {
 	case "Deployment", "StatefulSet", "DaemonSet":
@@ -307,7 +307,7 @@ func (ia *ImpactAssessment) generateRecommendations(event *domain.UnifiedEvent, 
 			)
 		}
 	}
-	
+
 	// Add correlation-based recommendations
 	if event.Correlation != nil && len(event.Correlation.CausalChain) > 3 {
 		result.RecommendedActions = append(result.RecommendedActions,
@@ -315,7 +315,7 @@ func (ia *ImpactAssessment) generateRecommendations(event *domain.UnifiedEvent, 
 			"Identify root cause in causal chain",
 		)
 	}
-	
+
 	// Add cascade risk recommendations
 	if result.CascadeRisk > 0.5 {
 		result.RecommendedActions = append(result.RecommendedActions,

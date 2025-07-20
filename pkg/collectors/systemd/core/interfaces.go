@@ -176,12 +176,12 @@ type UnitStatus struct {
 }
 
 // Validate validates the configuration
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
 	if c.EventBufferSize <= 0 {
 		c.EventBufferSize = 1000
 	}
 	if c.PollInterval <= 0 {
-		c.PollInterval = 10 * time.Second
+		c.PollInterval = 5 * time.Second
 	}
 	if c.DBusTimeout <= 0 {
 		c.DBusTimeout = 30 * time.Second

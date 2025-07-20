@@ -150,7 +150,8 @@ func NewCollectorServer(
 		func(ctx context.Context, batch []*domain.Event) error {
 			// Process batch of events
 			for _, event := range batch {
-				if err := eventStore.Store(ctx, convertEventToProto(event)); err != nil {
+				// Store expects []domain.Event, not proto
+				if err := eventStore.Store(ctx, []domain.Event{*event}); err != nil {
 					logger.Error("Failed to store event", zap.Error(err))
 				}
 			}
@@ -455,7 +456,9 @@ func (s *CollectorServer) SendEventBatch(ctx context.Context, req *pb.EventBatch
 	failed := 0
 
 	for _, event := range req.Batch.Events {
-		if err := s.eventStore.Store(ctx, event); err != nil {
+		// Convert proto event to domain event
+		domainEvent := convertProtoEventToDomain(event)
+		if err := s.eventStore.Store(ctx, []domain.Event{*domainEvent}); err != nil {
 			failed++
 			s.logger.Error("Failed to store event", zap.Error(err))
 		} else {

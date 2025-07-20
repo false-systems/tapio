@@ -37,6 +37,11 @@ func convertEventFromProto(event *pb.Event) *domain.Event {
 	}
 }
 
+// convertProtoEventToDomain is an alias for convertEventFromProto for clarity
+func convertProtoEventToDomain(event *pb.Event) *domain.Event {
+	return convertEventFromProto(event)
+}
+
 func convertEventToProto(event *domain.Event) *pb.Event {
 	if event == nil {
 		return nil

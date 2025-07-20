@@ -8,7 +8,7 @@ import (
 
 func TestCollectorError(t *testing.T) {
 	baseErr := errors.New("base error")
-	
+
 	tests := []struct {
 		name        string
 		err         CollectorError
@@ -127,7 +127,7 @@ func TestConfigValidate(t *testing.T) {
 			// Make a copy to avoid modifying test data
 			config := tt.config
 			err := config.Validate()
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}

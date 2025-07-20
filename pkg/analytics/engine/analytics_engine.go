@@ -620,7 +620,7 @@ func (ae *AnalyticsEngine) processCorrelationFindings(findings *correlation.Find
 	// Add correlation metadata
 	result.Metadata["pattern_type"] = findings.PatternType
 	result.Metadata["description"] = findings.Description
-	
+
 	// Add semantic group info if available
 	if findings.SemanticGroup != nil {
 		result.SemanticGroupID = findings.SemanticGroup.ID

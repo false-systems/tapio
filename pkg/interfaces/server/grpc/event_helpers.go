@@ -126,7 +126,7 @@ func (s *EventServer) processStreamRequest(ctx context.Context, req *pb.StreamEv
 			Response: &pb.StreamEventsResponse_HealthStatus{
 				HealthStatus: &pb.HealthStatus{
 					Status:    pb.HealthStatus_STATUS_HEALTHY,
-					Timestamp: timestamppb.Now(),
+					LastCheck: timestamppb.Now(),
 					Message:   "EventService is healthy",
 				},
 			},
@@ -269,7 +269,7 @@ func (s *EventServer) notifySubscribers(events []domain.Event) {
 						// Channel full, log warning
 						s.logger.Warn("Subscription channel full, dropping event",
 							zap.String("subscription_id", subID),
-							zap.String("event_id", event.ID),
+							zap.String("event_id", string(event.ID)),
 						)
 					}
 				}

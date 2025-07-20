@@ -14,7 +14,7 @@ import (
 // NewCorrelationServerWithRealStore creates a CorrelationService with production-ready storage backend
 func NewCorrelationServerWithRealStore(logger *zap.Logger, tracer trace.Tracer) *CorrelationServer {
 	// Create real correlation manager
-	correlationMgr := &corrDomain.Manager{
+	correlationManager := &corrDomain.Manager{
 		CollectionManager: &corrDomain.CollectionManager{},
 	}
 
@@ -46,6 +46,9 @@ func NewCorrelationServerWithRealStore(logger *zap.Logger, tracer trace.Tracer) 
 		tracer,
 		eventStore,
 	)
+
+	// Use the custom correlation manager
+	server.correlationMgr = correlationManager
 
 	logger.Info("CorrelationService initialized with real storage backend",
 		zap.String("store_type", "in-memory"),
@@ -153,16 +156,28 @@ func (s *CorrelationServer) AnalyzeEventsFromCollector(collectorID string, event
 	}
 
 	// Perform correlation analysis
-	result, err := s.correlationMgr.AnalyzeEvents(ctx, events)
-	if err != nil {
+	analysisOptions := &corrDomain.AnalysisOptions{
+		EnableRootCause:        true,
+		EnablePredictions:      s.config.EnablePredictions,
+		EnableImpactAssessment: s.config.EnableImpactAssessment,
+		MinConfidence:          s.config.MinConfidenceThreshold,
+	}
+
+	// Convert domain.Event to []*domain.Event
+	eventPtrs := make([]*domain.Event, len(events))
+	for i := range events {
+		eventPtrs[i] = &events[i]
+	}
+
+	result := s.correlationMgr.AnalyzeEvents(ctx, eventPtrs, analysisOptions)
+	if result == nil {
 		s.logger.Error("Failed to analyze events from collector",
 			zap.String("collector_id", collectorID),
-			zap.Error(err),
 		)
 		s.stats.mu.Lock()
 		s.stats.FailedAnalyses++
 		s.stats.mu.Unlock()
-		return nil, err
+		return nil, fmt.Errorf("analysis returned nil result")
 	}
 
 	// Update statistics
@@ -389,9 +404,22 @@ func (s *CorrelationServer) performPeriodicAnalysis() {
 	}
 
 	// Perform analysis
-	result, err := s.correlationMgr.AnalyzeEvents(ctx, events)
-	if err != nil {
-		s.logger.Error("Failed to perform periodic analysis", zap.Error(err))
+	// Convert domain.Event to []*domain.Event
+	eventPtrs := make([]*domain.Event, len(events))
+	for i := range events {
+		eventPtrs[i] = &events[i]
+	}
+
+	analysisOptions := &corrDomain.AnalysisOptions{
+		EnableRootCause:        s.config.EnableRootCauseAnalysis,
+		EnablePredictions:      s.config.EnablePredictions,
+		EnableImpactAssessment: s.config.EnableImpactAssessment,
+		MinConfidence:          s.config.MinConfidenceThreshold,
+	}
+
+	result := s.correlationMgr.AnalyzeEvents(ctx, eventPtrs, analysisOptions)
+	if result == nil {
+		s.logger.Error("Failed to perform periodic analysis")
 		s.stats.mu.Lock()
 		s.stats.FailedAnalyses++
 		s.stats.mu.Unlock()

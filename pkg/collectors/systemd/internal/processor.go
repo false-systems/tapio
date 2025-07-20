@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/yairfalse/tapio/pkg/collectors/systemd/core"
@@ -26,13 +27,13 @@ func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (d
 
 	// Create the domain event
 	event := domain.Event{
-		ID:         fmt.Sprintf("systemd_%s_%s_%d", raw.UnitName, raw.Type, raw.Timestamp.UnixNano()),
-		Type:       string(domain.EventTypeService),
-		Source:     string(domain.SourceSystemd),
+		ID:         domain.EventID(fmt.Sprintf("systemd_%s_%s_%d", raw.UnitName, raw.Type, raw.Timestamp.UnixNano())),
+		Type:       domain.EventTypeService,
+		Source:     domain.SourceSystemd,
 		Timestamp:  raw.Timestamp,
 		Data:       eventData,
-		Context:    p.createContextData(raw),
-		Severity:   string(severity),
+		Context:    p.createEventContext(raw),
+		Severity:   severity,
 		Confidence: 1.0, // systemd events are direct observations
 		Attributes: map[string]interface{}{
 			"hash":      p.generateHash(raw),
@@ -104,16 +105,8 @@ func (p *eventProcessor) mapEventType(eventType core.EventType) string {
 	}
 }
 
-// createContext creates the event context
-func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interface{} {
-	context := map[string]interface{}{
-		"host":      p.getHostname(),
-		"unit_name": raw.UnitName,
-		"unit_type": raw.UnitType,
-		"state":     raw.NewState,
-		"sub_state": raw.SubState,
-	}
-
+// createEventContext creates the event context
+func (p *eventProcessor) createEventContext(raw core.RawEvent) domain.EventContext {
 	labels := map[string]string{
 		"unit_name": raw.UnitName,
 		"unit_type": raw.UnitType,
@@ -124,59 +117,65 @@ func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interfa
 	// Add result for failed services
 	if raw.Result != "" && raw.Result != "success" {
 		labels["result"] = raw.Result
-		context["result"] = raw.Result
 	}
 
-	tags := []string{"systemd", raw.UnitType}
+	metadata := map[string]interface{}{
+		"unit_path": fmt.Sprintf("/system/%s/%s", raw.UnitType, raw.UnitName),
+		"source":    "systemd",
+	}
 
 	// Add state tags
+	tags := []string{"systemd", raw.UnitType}
 	if raw.NewState == core.StateFailed {
 		tags = append(tags, "failed")
+		metadata["failed"] = true
 	}
 	if raw.Type == core.EventTypeFailure {
 		tags = append(tags, "failure")
+		metadata["failure_event"] = true
 	}
 
-	context["labels"] = labels
-	context["tags"] = tags
+	metadata["tags"] = tags
 
-	// Add PID if available
-	if raw.MainPID > 0 {
-		context["pid"] = raw.MainPID
+	return domain.EventContext{
+		Service:   "systemd",
+		Component: raw.UnitName,
+		Host:      p.getHostname(),
+		PID:       int(raw.MainPID),
+		Labels:    labels,
+		Metadata:  metadata,
 	}
-
-	return context
 }
 
 // determineSeverity determines the event severity
-func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
+func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.EventSeverity {
 	// Check for failures
 	if raw.Type == core.EventTypeFailure || raw.NewState == core.StateFailed {
 		// Critical services
 		if p.isCriticalService(raw.UnitName) {
-			return domain.SeverityCritical
+			return domain.EventSeverityCritical
 		}
-		return domain.SeverityHigh
+		return domain.EventSeverityHigh
 	}
 
 	// Check for restart events
 	if raw.Type == core.EventTypeRestart {
-		return domain.SeverityWarning
+		return domain.EventSeverityWarning
 	}
 
 	// State changes
 	if raw.Type == core.EventTypeStateChange {
 		if raw.OldState == core.StateActive && raw.NewState == core.StateInactive {
-			return domain.SeverityWarning
+			return domain.EventSeverityWarning
 		}
 	}
 
 	// Exit codes
 	if raw.ExitCode != 0 {
-		return domain.SeverityWarning
+		return domain.EventSeverityWarning
 	}
 
-	return domain.SeverityLow
+	return domain.EventSeverityLow
 }
 
 // isCriticalService checks if a service is considered critical
@@ -214,7 +213,9 @@ func (p *eventProcessor) generateHash(raw core.RawEvent) string {
 
 // getHostname gets the system hostname
 func (p *eventProcessor) getHostname() string {
-	// In production, use os.Hostname()
-	// For now, return a placeholder
-	return "localhost"
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "localhost"
+	}
+	return hostname
 }

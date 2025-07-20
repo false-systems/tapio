@@ -62,7 +62,7 @@ func TestCollectorLifecycle(t *testing.T) {
 	// Test starting when not enabled
 	config.Enabled = false
 	collector.Configure(config)
-	
+
 	ctx := context.Background()
 	err = collector.Start(ctx)
 	if err == nil {
@@ -72,7 +72,7 @@ func TestCollectorLifecycle(t *testing.T) {
 	// Test starting with enabled collector
 	config.Enabled = true
 	collector.Configure(config)
-	
+
 	// Note: This will fail without a valid kubeconfig
 	// In a real test environment, you'd mock the kubernetes client
 	err = collector.Start(ctx)
@@ -246,7 +246,7 @@ func TestCollectorConfigValidation(t *testing.T) {
 				Name:            "test",
 				Enabled:         true,
 				EventBufferSize: 0, // Should be set to default
-				ResyncPeriod:    0,  // Should be set to default
+				ResyncPeriod:    0, // Should be set to default
 			},
 			valid: true,
 		},
