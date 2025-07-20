@@ -40,8 +40,8 @@ func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (*
 		Semantic: p.createSemanticContext(raw),
 		Entity:   p.createEntityContext(raw),
 
-		// System-specific data (NOT generic Data!)
-		System: p.createSystemContext(raw),
+		// Application-specific data (systemd services are applications)
+		Application: p.createApplicationContext(raw),
 
 		// Complete impact context with all fields
 		Impact: p.createImpactContext(raw, severity),
@@ -100,52 +100,63 @@ func (p *eventProcessor) createEntityContext(raw core.RawEvent) *domain.EntityCo
 	}
 }
 
-// createSystemContext creates system-specific context
-func (p *eventProcessor) createSystemContext(raw core.RawEvent) *domain.SystemData {
-	// Extract process info
-	var processInfo *domain.ProcessInfo
+// createApplicationContext creates application context for systemd services
+func (p *eventProcessor) createApplicationContext(raw core.RawEvent) *domain.ApplicationData {
+	level := "info"
+	if raw.Type == core.EventTypeFailure || raw.NewState == core.StateFailed {
+		level = "error"
+	} else if raw.Type == core.EventTypeRestart {
+		level = "warning"
+	}
+
+	// Build custom data with all relevant systemd information
+	custom := map[string]interface{}{
+		"unit_name": raw.UnitName,
+		"unit_type": raw.UnitType,
+		"old_state": raw.OldState,
+		"new_state": raw.NewState,
+		"sub_state": raw.SubState,
+		"result":    raw.Result,
+	}
+
 	if raw.MainPID > 0 {
-		processInfo = &domain.ProcessInfo{
-			PID:      int(raw.MainPID),
-			ExitCode: int(raw.ExitCode),
-			Signal:   int(raw.ExitStatus),
+		custom["main_pid"] = raw.MainPID
+	}
+	if raw.ExitCode != 0 {
+		custom["exit_code"] = raw.ExitCode
+	}
+	if raw.ExitStatus != 0 {
+		custom["exit_status"] = raw.ExitStatus
+	}
+
+	// Add selected properties that are most relevant
+	if len(raw.Properties) > 0 {
+		// Extract key properties
+		relevantProps := []string{
+			"ExecMainStartTimestamp",
+			"ExecMainExitTimestamp",
+			"RestartSec",
+			"TimeoutStartSec",
+			"TimeoutStopSec",
+			"Restart",
+			"RestartCount",
+		}
+		props := make(map[string]interface{})
+		for _, key := range relevantProps {
+			if value, ok := raw.Properties[key]; ok {
+				props[key] = value
+			}
+		}
+		if len(props) > 0 {
+			custom["properties"] = props
 		}
 	}
 
-	// Map systemd properties to system metrics
-	metrics := make(map[string]float64)
-	if props, ok := raw.Properties["CPUUsageNSec"]; ok {
-		if cpuNano, ok := props.(uint64); ok {
-			metrics["cpu_usage_seconds"] = float64(cpuNano) / 1e9
-		}
-	}
-	if props, ok := raw.Properties["MemoryCurrent"]; ok {
-		if memBytes, ok := props.(uint64); ok {
-			metrics["memory_current_bytes"] = float64(memBytes)
-		}
-	}
-	if props, ok := raw.Properties["TasksCurrent"]; ok {
-		if tasks, ok := props.(uint64); ok {
-			metrics["tasks_current"] = float64(tasks)
-		}
-	}
-
-	// Convert properties to attributes
-	attributes := make(map[string]string)
-	for k, v := range raw.Properties {
-		attributes[k] = fmt.Sprintf("%v", v)
-	}
-
-	return &domain.SystemData{
-		Component:   raw.UnitName,
-		Operation:   p.mapEventTypeToOperation(raw.Type),
-		Status:      raw.NewState,
-		Message:     p.generateSystemMessage(raw),
-		Process:     processInfo,
-		Metrics:     metrics,
-		Attributes:  attributes,
-		ErrorCode:   fmt.Sprintf("%d", raw.ExitCode),
-		ErrorDetail: raw.Result,
+	return &domain.ApplicationData{
+		Level:   level,
+		Message: p.generateMessage(raw),
+		Logger:  "systemd-collector",
+		Custom:  custom,
 	}
 }
 
@@ -589,7 +600,7 @@ func (p *eventProcessor) mapEventTypeToOperation(eventType core.EventType) strin
 	}
 }
 
-func (p *eventProcessor) generateSystemMessage(raw core.RawEvent) string {
+func (p *eventProcessor) generateMessage(raw core.RawEvent) string {
 	switch raw.Type {
 	case core.EventTypeFailure:
 		if raw.ExitCode != 0 {

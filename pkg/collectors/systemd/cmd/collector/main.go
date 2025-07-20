@@ -13,6 +13,7 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd/internal"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -125,12 +126,15 @@ func main() {
 	// Start event processor
 	go func() {
 		eventCount := 0
-		for event := range collector.Events() {
+		for unifiedEvent := range collector.Events() {
 			eventCount++
+
+			// Convert UnifiedEvent to legacy Event for grpcClient compatibility
+			legacyEvent := convertUnifiedEventToLegacy(unifiedEvent)
 
 			// Send event to Tapio server if connected
 			if grpcClient != nil && grpcClient.IsConnected() {
-				if err := grpcClient.SendEvent(ctx, event); err != nil {
+				if err := grpcClient.SendEvent(ctx, legacyEvent); err != nil {
 					fmt.Printf("Failed to send event to server: %v\n", err)
 				}
 			}
@@ -138,19 +142,19 @@ func main() {
 			// Print event details in standalone mode or verbose output
 			if *standalone || grpcClient == nil {
 				fmt.Printf("\n[Event #%d] %s\n", eventCount, time.Now().Format(time.RFC3339))
-				fmt.Printf("  ID: %s\n", event.ID)
-				fmt.Printf("  Type: %s\n", event.Type)
-				fmt.Printf("  Source: %s\n", event.Source)
-				fmt.Printf("  Severity: %s\n", event.Severity)
+				fmt.Printf("  ID: %s\n", unifiedEvent.ID)
+				fmt.Printf("  Type: %s\n", unifiedEvent.Type)
+				fmt.Printf("  Source: %s\n", unifiedEvent.Source)
+				fmt.Printf("  Severity: %s\n", unifiedEvent.GetSeverity())
 
-				// Print systemd-specific payload information
-				if event.Data != nil {
-					eventData := event.Data
-					if serviceName, ok := eventData["service_name"].(string); ok {
-						fmt.Printf("  Service: %s\n", serviceName)
+				// Print systemd-specific payload information from Application context
+				if unifiedEvent.Application != nil && unifiedEvent.Application.Custom != nil {
+					eventData := unifiedEvent.Application.Custom
+					if unitName, ok := eventData["unit_name"].(string); ok {
+						fmt.Printf("  Service: %s\n", unitName)
 					}
-					if eventType, ok := eventData["event_type"].(string); ok {
-						fmt.Printf("  Event Type: %s\n", eventType)
+					if unitType, ok := eventData["unit_type"].(string); ok {
+						fmt.Printf("  Unit Type: %s\n", unitType)
 					}
 
 					oldState, hasOld := eventData["old_state"].(string)
@@ -165,8 +169,8 @@ func main() {
 						fmt.Printf("  Exit Code: %d\n", exitCode)
 					}
 
-					if signal, ok := eventData["signal"].(int); ok {
-						fmt.Printf("  Signal: %d\n", signal)
+					if exitStatus, ok := eventData["exit_status"]; ok {
+						fmt.Printf("  Exit Status: %v\n", exitStatus)
 					}
 
 					// Print important properties
@@ -236,4 +240,76 @@ func main() {
 	fmt.Printf("Services Monitored: %d\n", stats.ServicesMonitored)
 
 	fmt.Println("Collector stopped successfully")
+}
+
+// convertUnifiedEventToLegacy converts a UnifiedEvent to the legacy Event format for grpcClient compatibility
+func convertUnifiedEventToLegacy(unified domain.UnifiedEvent) domain.Event {
+	// Create data map from Application custom data
+	data := make(map[string]interface{})
+	if unified.Application != nil && unified.Application.Custom != nil {
+		for k, v := range unified.Application.Custom {
+			data[k] = v
+		}
+	}
+
+	// Create legacy event context
+	context := domain.EventContext{
+		Service:   "systemd",
+		Component: "systemd-collector",
+		Host:      getHostname(),
+		Labels:    make(map[string]string),
+		Metadata:  make(map[string]interface{}),
+	}
+
+	// Copy entity context to labels if available
+	if unified.Entity != nil {
+		if unified.Entity.Name != "" {
+			context.Component = unified.Entity.Name
+			context.Labels["unit_name"] = unified.Entity.Name
+		}
+		if unified.Entity.Namespace != "" {
+			context.Labels["unit_type"] = unified.Entity.Namespace
+		}
+		for k, v := range unified.Entity.Labels {
+			context.Labels[k] = v
+		}
+	}
+
+	// Add semantic context to metadata
+	if unified.Semantic != nil {
+		context.Metadata["semantic_intent"] = unified.Semantic.Intent
+		context.Metadata["semantic_category"] = unified.Semantic.Category
+		context.Metadata["semantic_tags"] = unified.Semantic.Tags
+		context.Metadata["semantic_confidence"] = unified.Semantic.Confidence
+	}
+
+	return domain.Event{
+		ID:        domain.EventID(unified.ID),
+		Timestamp: unified.Timestamp,
+		Type:      unified.Type,
+		Source:    domain.SourceType(unified.Source),
+		Data:      data,
+		Severity:  domain.EventSeverity(unified.GetSeverity()),
+		Context:   context,
+		Message:   func() string {
+			if unified.Application != nil && unified.Application.Message != "" {
+				return unified.Application.Message
+			}
+			return ""
+		}(),
+		Confidence: func() float64 {
+			if unified.Semantic != nil {
+				return unified.Semantic.Confidence
+			}
+			return 1.0
+		}(),
+	}
+}
+
+func getHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "localhost"
+	}
+	return hostname
 }
