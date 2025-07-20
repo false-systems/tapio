@@ -309,7 +309,7 @@ func (s *TapioServer) processStreamControl(ctx context.Context, conn *streamConn
 
 	case pb.StreamControl_CONTROL_TYPE_CONFIGURE:
 		// Apply configuration parameters
-		for k, v := range control.Parameters {
+		for k := range control.Parameters {
 			switch k {
 			case "batch_size":
 				// Update batch size for this stream
@@ -356,16 +356,19 @@ func (s *TapioServer) processStreamSubscribe(ctx context.Context, conn *streamCo
 func (s *TapioServer) analyzeEventCorrelations(ctx context.Context, event *pb.Event, conn *streamConnection) {
 	// Convert to domain event
 	domainEvent := &domain.Event{
-		ID:          event.Id,
-		Type:        domain.EventType(event.Type),
-		Severity:    domain.EventSeverity(event.Severity),
-		Source:      domain.SourceType(event.Source),
-		Message:     event.Message,
-		Timestamp:   event.Timestamp.AsTime(),
-		TraceID:     event.TraceId,
-		SpanID:      event.SpanId,
-		Attributes:  event.Attributes,
-		CollectorID: event.CollectorId,
+		ID:        domain.EventID(event.Id),
+		Type:      domain.EventType(event.Type),
+		Severity:  domain.EventSeverity(event.Severity),
+		Source:    domain.SourceType(event.Source),
+		Message:   event.Message,
+		Timestamp: event.Timestamp.AsTime(),
+		Context: domain.EventContext{
+			TraceID: event.TraceId,
+			SpanID:  event.SpanId,
+		},
+		Attributes: convertStringMapToInterface(event.Attributes),
+		Confidence: event.Confidence,
+		Tags:       event.Tags,
 	}
 
 	// Analyze correlations
@@ -386,7 +389,7 @@ func (s *TapioServer) analyzeEventCorrelations(ctx context.Context, event *pb.Ev
 		conn.eventsSent++
 		conn.mu.Unlock()
 
-		s.metricsCollector.RecordCorrelation(corr.Type)
+		s.metricsCollector.RecordCorrelation(fmt.Sprintf("%v", corr.Type))
 	}
 }
 
@@ -395,16 +398,19 @@ func (s *TapioServer) analyzeBatchCorrelations(ctx context.Context, events []*pb
 	domainEvents := make([]*domain.Event, 0, len(events))
 	for _, event := range events {
 		domainEvents = append(domainEvents, &domain.Event{
-			ID:          event.Id,
-			Type:        domain.EventType(event.Type),
-			Severity:    domain.EventSeverity(event.Severity),
-			Source:      domain.SourceType(event.Source),
-			Message:     event.Message,
-			Timestamp:   event.Timestamp.AsTime(),
-			TraceID:     event.TraceId,
-			SpanID:      event.SpanId,
-			Attributes:  event.Attributes,
-			CollectorID: event.CollectorId,
+			ID:        domain.EventID(event.Id),
+			Type:      domain.EventType(event.Type),
+			Severity:  domain.EventSeverity(event.Severity),
+			Source:    domain.SourceType(event.Source),
+			Message:   event.Message,
+			Timestamp: event.Timestamp.AsTime(),
+			Context: domain.EventContext{
+				TraceID: event.TraceId,
+				SpanID:  event.SpanId,
+			},
+			Attributes: convertStringMapToInterface(event.Attributes),
+			Confidence: event.Confidence,
+			Tags:       event.Tags,
 		})
 	}
 
@@ -441,15 +447,6 @@ func (s *TapioServer) sendHistoricalEvents(conn *streamConnection, sub *subscrip
 
 	for _, event := range events {
 		if matchesFilter(event, sub.filter) {
-			update := &pb.EventUpdate{
-				Type:            pb.EventUpdate_UPDATE_TYPE_NEW,
-				Event:           event,
-				UpdateTimestamp: timestamppb.Now(),
-				UpdateMetadata: map[string]string{
-					"historical": "true",
-				},
-			}
-
 			// Note: In real implementation, this would be sent via SubscribeToEvents RPC
 			// For now, we're sending via the main stream
 			if err := conn.stream.Send(&pb.TapioStreamEventsResponse{
@@ -472,13 +469,16 @@ func (s *TapioServer) sendHistoricalEvents(conn *streamConnection, sub *subscrip
 
 func (s *TapioServer) sendErrorResponse(stream pb.TapioService_StreamEventsServer, err error) {
 	errResp := &pb.Error{
-		Code:    int32(codes.Internal),
+		Code:    codes.Internal.String(),
 		Message: err.Error(),
-		Details: "Internal processing error",
+		Details: map[string]string{
+			"error": "Internal processing error",
+		},
+		Timestamp: timestamppb.Now(),
 	}
 
 	if st, ok := status.FromError(err); ok {
-		errResp.Code = int32(st.Code())
+		errResp.Code = st.Code().String()
 		errResp.Message = st.Message()
 	}
 
@@ -703,33 +703,45 @@ func (s *TapioServer) GetMetrics(ctx context.Context, req *pb.TapioGetMetricsReq
 
 func (s *TapioServer) HealthCheck(ctx context.Context, req *pb.HealthCheckRequest) (*pb.HealthCheckResponse, error) {
 	// Perform health checks
-	overallStatus := pb.HealthStatus_HEALTH_STATUS_HEALTHY
+	overallStatus := pb.HealthStatus_STATUS_HEALTHY
 	components := make(map[string]*pb.ComponentHealth)
 
 	// Check event store
 	if err := s.eventStore.HealthCheck(ctx); err != nil {
-		overallStatus = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		overallStatus = pb.HealthStatus_STATUS_DEGRADED
 		components["event_store"] = &pb.ComponentHealth{
-			Status:  pb.HealthStatus_HEALTH_STATUS_UNHEALTHY,
+			Status: &pb.HealthStatus{
+				Status:  pb.HealthStatus_STATUS_UNHEALTHY,
+				Message: err.Error(),
+			},
 			Message: err.Error(),
 		}
 	} else {
 		components["event_store"] = &pb.ComponentHealth{
-			Status:  pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+			Status: &pb.HealthStatus{
+				Status:  pb.HealthStatus_STATUS_HEALTHY,
+				Message: "Healthy",
+			},
 			Message: "Event store is healthy",
 		}
 	}
 
 	// Check correlation manager
 	if err := s.correlationManager.HealthCheck(ctx); err != nil {
-		overallStatus = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		overallStatus = pb.HealthStatus_STATUS_DEGRADED
 		components["correlation_manager"] = &pb.ComponentHealth{
-			Status:  pb.HealthStatus_HEALTH_STATUS_UNHEALTHY,
+			Status: &pb.HealthStatus{
+				Status:  pb.HealthStatus_STATUS_UNHEALTHY,
+				Message: err.Error(),
+			},
 			Message: err.Error(),
 		}
 	} else {
 		components["correlation_manager"] = &pb.ComponentHealth{
-			Status:  pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+			Status: &pb.HealthStatus{
+				Status:  pb.HealthStatus_STATUS_HEALTHY,
+				Message: "Healthy",
+			},
 			Message: "Correlation manager is healthy",
 		}
 	}
@@ -740,17 +752,23 @@ func (s *TapioServer) HealthCheck(ctx context.Context, req *pb.HealthCheckReques
 	s.streamsMu.RUnlock()
 
 	components["streams"] = &pb.ComponentHealth{
-		Status:  pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+		Status: &pb.HealthStatus{
+			Status:  pb.HealthStatus_STATUS_HEALTHY,
+			Message: "Healthy",
+		},
 		Message: fmt.Sprintf("%d active streams", activeStreams),
-		Metrics: map[string]float64{
-			"active_streams": float64(activeStreams),
+		Details: map[string]string{
+			"active_streams": fmt.Sprintf("%d", activeStreams),
 		},
 	}
 
 	return &pb.HealthCheckResponse{
-		OverallStatus: overallStatus,
-		Components:    components,
-		CheckedAt:     timestamppb.Now(),
+		OverallStatus: &pb.HealthStatus{
+			Status:  overallStatus,
+			Message: "System health check",
+		},
+		Components: components,
+		CheckedAt:  timestamppb.Now(),
 	}, nil
 }
 

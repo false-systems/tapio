@@ -110,32 +110,35 @@ func (s *CollectorServer) getErrorStats(collectorID string) *pb.ErrorStats {
 	}
 }
 
-func (s *CollectorServer) calculateCollectorHealth(collector *collectorInfo) pb.HealthStatus {
+func (s *CollectorServer) calculateCollectorHealth(collector *collectorInfo) *pb.HealthStatus {
 	// Calculate health based on various factors
+	var status pb.HealthStatus_Status
+
 	if collector.State == pb.CollectorState_COLLECTOR_ERROR {
-		return pb.HealthStatus_HEALTH_STATUS_UNHEALTHY
+		status = pb.HealthStatus_STATUS_UNHEALTHY
+	} else if collector.State == pb.CollectorState_COLLECTOR_STOPPED {
+		status = pb.HealthStatus_STATUS_UNHEALTHY
+	} else {
+		// Check error rate
+		errorRate := float64(0)
+		if collector.Metrics.EventsReceived > 0 {
+			errorRate = float64(collector.Metrics.ErrorCount) / float64(collector.Metrics.EventsReceived)
+		}
+
+		if errorRate > 0.1 { // More than 10% errors
+			status = pb.HealthStatus_STATUS_DEGRADED
+		} else if time.Since(collector.LastSeen) > 2*time.Minute {
+			status = pb.HealthStatus_STATUS_DEGRADED
+		} else {
+			status = pb.HealthStatus_STATUS_HEALTHY
+		}
 	}
 
-	if collector.State == pb.CollectorState_COLLECTOR_STOPPED {
-		return pb.HealthStatus_HEALTH_STATUS_UNHEALTHY
+	return &pb.HealthStatus{
+		Status:    status,
+		Message:   fmt.Sprintf("Collector %s health check", collector.ID),
+		LastCheck: timestamppb.Now(),
 	}
-
-	// Check error rate
-	errorRate := float64(0)
-	if collector.Metrics.EventsReceived > 0 {
-		errorRate = float64(collector.Metrics.ErrorCount) / float64(collector.Metrics.EventsReceived)
-	}
-
-	if errorRate > 0.1 { // More than 10% errors
-		return pb.HealthStatus_HEALTH_STATUS_DEGRADED
-	}
-
-	// Check last seen time
-	if time.Since(collector.LastSeen) > 2*time.Minute {
-		return pb.HealthStatus_HEALTH_STATUS_DEGRADED
-	}
-
-	return pb.HealthStatus_HEALTH_STATUS_HEALTHY
 }
 
 func (s *CollectorServer) calculateCollectorStats() *pb.CollectorSummaryStats {
@@ -162,7 +165,7 @@ func (s *CollectorServer) calculateCollectorStats() *pb.CollectorSummaryStats {
 
 		// Count unhealthy
 		health := s.calculateCollectorHealth(collector)
-		if health != pb.HealthStatus_HEALTH_STATUS_HEALTHY {
+		if health.Status != pb.HealthStatus_STATUS_HEALTHY {
 			stats.UnhealthyCollectors++
 		}
 	}

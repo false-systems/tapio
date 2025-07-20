@@ -267,6 +267,7 @@ type Insight struct {
 	Title       string                 `json:"title"`
 	Description string                 `json:"description"`
 	Severity    SeverityLevel          `json:"severity"`
+	Confidence  float64                `json:"confidence"`
 	Source      string                 `json:"source,omitempty"`
 	Data        map[string]interface{} `json:"data"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
