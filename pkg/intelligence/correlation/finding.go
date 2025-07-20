@@ -8,13 +8,14 @@ import (
 
 // Finding represents a correlation finding with semantic context
 type Finding struct {
-	ID            string
-	PatternType   string
-	Confidence    float64
-	RelatedEvents []*domain.Event
-	SemanticGroup *SemanticGroupSummary
-	Timestamp     time.Time
-	Description   string
+	ID                   string
+	PatternType          string
+	Confidence           float64
+	RelatedEvents        []*domain.Event        // Keeping for backward compatibility
+	RelatedUnifiedEvents []*domain.UnifiedEvent // New field for UnifiedEvents
+	SemanticGroup        *SemanticGroupSummary
+	Timestamp            time.Time
+	Description          string
 }
 
 // SemanticGroupSummary is a simplified view of SemanticTraceGroup for findings

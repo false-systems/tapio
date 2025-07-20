@@ -199,6 +199,14 @@ type KubernetesEventPayload struct {
 
 func (k KubernetesEventPayload) GetType() string { return "kubernetes" }
 
+// GenericEventPayload for general events with flexible data
+type GenericEventPayload struct {
+	Type string                 `json:"type"`
+	Data map[string]interface{} `json:"data"`
+}
+
+func (g GenericEventPayload) GetType() string { return g.Type }
+
 // ResourceInfo contains Kubernetes resource information
 type ResourceInfo struct {
 	Kind      string `json:"kind"`

@@ -28,7 +28,7 @@ type SemanticCorrelationEngine struct {
 	semanticTracer *SemanticOTELTracer
 
 	// Event buffer for temporal correlation
-	eventBuffer      []domain.Event
+	eventBuffer      []*domain.UnifiedEvent
 	eventBufferMutex sync.RWMutex
 	bufferSize       int
 	bufferTimeout    time.Duration
@@ -58,7 +58,7 @@ func NewSemanticCorrelationEngine() *SemanticCorrelationEngine {
 		insightChan:     make(chan Insight, 100),
 		semanticGrouper: NewSimpleSemanticGrouper(),
 		semanticTracer:  NewSemanticOTELTracer(),
-		eventBuffer:     make([]domain.Event, 0, 1000),
+		eventBuffer:     make([]*domain.UnifiedEvent, 0, 1000),
 		bufferSize:      1000,
 		bufferTimeout:   30 * time.Second,
 		humanFormatter:  NewHumanReadableFormatter(StyleSimple, AudienceDeveloper),
@@ -130,6 +130,15 @@ func (sce *SemanticCorrelationEngine) ProcessEvent(event *domain.Event) {
 		sce.updateStats("events_received")
 	default:
 		sce.updateStats("events_dropped")
+	}
+}
+
+// ProcessUnifiedEvent processes a unified event through the correlation engine
+func (sce *SemanticCorrelationEngine) ProcessUnifiedEvent(event *domain.UnifiedEvent) {
+	// Convert to domain.Event for now (temporary until full migration)
+	domainEvent := sce.convertUnifiedToDomainEvent(event)
+	if domainEvent != nil {
+		sce.ProcessEvent(domainEvent)
 	}
 }
 
@@ -251,7 +260,12 @@ func (sce *SemanticCorrelationEngine) analyzeSemanticPatterns() {
 
 	sce.eventBufferMutex.RLock()
 	events := make([]domain.Event, len(sce.eventBuffer))
-	copy(events, sce.eventBuffer)
+	// Convert UnifiedEvents to domain.Events for semantic grouping
+	for i, ue := range sce.eventBuffer {
+		if de := sce.convertUnifiedToDomainEvent(ue); de != nil {
+			events[i] = *de
+		}
+	}
 	sce.eventBufferMutex.RUnlock()
 
 	// Run semantic grouping
@@ -478,6 +492,13 @@ func (sce *SemanticCorrelationEngine) convertToDomainEvent(event Event) *domain.
 
 // addToBuffer adds an event to the temporal buffer
 func (sce *SemanticCorrelationEngine) addToBuffer(event domain.Event) {
+	// For now, convert domain.Event to UnifiedEvent for storage
+	unifiedEvent := sce.convertDomainToUnifiedEvent(&event)
+	sce.addUnifiedToBuffer(unifiedEvent)
+}
+
+// addUnifiedToBuffer adds a unified event to the temporal buffer
+func (sce *SemanticCorrelationEngine) addUnifiedToBuffer(event *domain.UnifiedEvent) {
 	sce.eventBufferMutex.Lock()
 	defer sce.eventBufferMutex.Unlock()
 
@@ -573,4 +594,236 @@ func (sce *SemanticCorrelationEngine) GetStats() map[string]interface{} {
 	statsCopy["collectors_registered"] = len(sce.collectors)
 
 	return statsCopy
+}
+
+// convertUnifiedToDomainEvent converts UnifiedEvent to domain.Event for backward compatibility
+func (sce *SemanticCorrelationEngine) convertUnifiedToDomainEvent(ue *domain.UnifiedEvent) *domain.Event {
+	if ue == nil {
+		return nil
+	}
+
+	// Map severity
+	severity := domain.EventSeverityInfo
+	switch ue.GetSeverity() {
+	case "critical":
+		severity = domain.EventSeverityCritical
+	case "high":
+		severity = domain.EventSeverityHigh
+	case "medium":
+		severity = domain.EventSeverityMedium
+	case "low":
+		severity = domain.EventSeverityLow
+	}
+
+	// Extract confidence from semantic context
+	confidence := 0.5
+	if ue.Semantic != nil {
+		confidence = ue.Semantic.Confidence
+	}
+
+	// Build event context
+	ctx := domain.EventContext{
+		TraceID: "",
+		SpanID:  "",
+		Host:    "",
+		Labels:  make(map[string]string),
+	}
+
+	// Extract trace context
+	if ue.TraceContext != nil {
+		ctx.TraceID = ue.TraceContext.TraceID
+		ctx.SpanID = ue.TraceContext.SpanID
+	}
+
+	// Extract entity info
+	if ue.Entity != nil {
+		if ue.Entity.Namespace != "" {
+			ctx.Namespace = ue.Entity.Namespace
+		}
+		if ue.Entity.Labels != nil {
+			for k, v := range ue.Entity.Labels {
+				ctx.Labels[k] = v
+			}
+		}
+		ctx.Labels["entity_type"] = ue.Entity.Type
+		ctx.Labels["entity_name"] = ue.Entity.Name
+	}
+
+	// Extract host from kernel data if available
+	if ue.Kernel != nil && ue.Kernel.Comm != "" {
+		ctx.Host = ue.Kernel.Comm
+	}
+
+	// Create payload based on event type
+	// Use a generic payload type that implements EventPayload interface
+	var payload domain.EventPayload
+
+	// Try to create specific payload based on event type
+	if ue.IsKernelEvent() && ue.Kernel != nil {
+		// For kernel events, create a generic payload
+		payload = domain.GenericEventPayload{
+			Type: "kernel_event",
+			Data: map[string]interface{}{
+				"syscall":     ue.Kernel.Syscall,
+				"pid":         ue.Kernel.PID,
+				"return_code": ue.Kernel.ReturnCode,
+			},
+		}
+	} else if ue.IsNetworkEvent() && ue.Network != nil {
+		payload = domain.GenericEventPayload{
+			Type: "network_event",
+			Data: map[string]interface{}{
+				"protocol":    ue.Network.Protocol,
+				"source":      fmt.Sprintf("%s:%d", ue.Network.SourceIP, ue.Network.SourcePort),
+				"destination": fmt.Sprintf("%s:%d", ue.Network.DestIP, ue.Network.DestPort),
+				"status_code": ue.Network.StatusCode,
+			},
+		}
+	} else if ue.IsApplicationEvent() && ue.Application != nil {
+		payload = domain.GenericEventPayload{
+			Type: "application_event",
+			Data: map[string]interface{}{
+				"level":   ue.Application.Level,
+				"message": ue.Application.Message,
+				"logger":  ue.Application.Logger,
+				"error":   ue.Application.ErrorType,
+			},
+		}
+	} else {
+		// Default generic payload
+		payload = domain.GenericEventPayload{
+			Type: "unified_event",
+			Data: map[string]interface{}{
+				"unified_id": ue.ID,
+				"source":     ue.Source,
+			},
+		}
+	}
+
+	return &domain.Event{
+		ID:         domain.EventID(ue.ID),
+		Type:       domain.EventType(ue.Type),
+		Timestamp:  ue.Timestamp,
+		Source:     domain.SourceType(ue.Source),
+		Severity:   severity,
+		Confidence: confidence,
+		Context:    ctx,
+		Payload:    payload,
+	}
+}
+
+// convertDomainToUnifiedEvent converts domain.Event to UnifiedEvent for storage
+func (sce *SemanticCorrelationEngine) convertDomainToUnifiedEvent(de *domain.Event) *domain.UnifiedEvent {
+	if de == nil {
+		return nil
+	}
+
+	ue := &domain.UnifiedEvent{
+		ID:        string(de.ID),
+		Timestamp: de.Timestamp,
+		Type:      domain.EventType(de.Type),
+		Source:    string(de.Source),
+	}
+
+	// Map trace context
+	if de.Context.TraceID != "" || de.Context.SpanID != "" {
+		ue.TraceContext = &domain.TraceContext{
+			TraceID: de.Context.TraceID,
+			SpanID:  de.Context.SpanID,
+			Sampled: true,
+		}
+	}
+
+	// Map semantic context from confidence
+	if de.Confidence > 0 {
+		ue.Semantic = &domain.SemanticContext{
+			Confidence: de.Confidence,
+			Category:   string(de.Severity),
+		}
+	}
+
+	// Extract entity from context
+	if de.Context.Namespace != "" || len(de.Context.Labels) > 0 {
+		ue.Entity = &domain.EntityContext{
+			Namespace: de.Context.Namespace,
+			Labels:    de.Context.Labels,
+		}
+		// Extract entity type and name from labels
+		if entityType, ok := de.Context.Labels["entity_type"]; ok {
+			ue.Entity.Type = entityType
+		}
+		if entityName, ok := de.Context.Labels["entity_name"]; ok {
+			ue.Entity.Name = entityName
+		}
+	}
+
+	// Map severity to impact
+	severity := "info"
+	businessImpact := 0.1
+	switch de.Severity {
+	case domain.EventSeverityCritical:
+		severity = "critical"
+		businessImpact = 0.9
+	case domain.EventSeverityHigh:
+		severity = "high"
+		businessImpact = 0.7
+	case domain.EventSeverityMedium:
+		severity = "medium"
+		businessImpact = 0.5
+	case domain.EventSeverityLow:
+		severity = "low"
+		businessImpact = 0.3
+	}
+
+	ue.Impact = &domain.ImpactContext{
+		Severity:       severity,
+		BusinessImpact: businessImpact,
+	}
+
+	// Extract layer-specific data from payload
+	// Check if payload is a generic payload with data
+	if genericPayload, ok := de.Payload.(domain.GenericEventPayload); ok {
+		if genericPayload.Data != nil {
+			if kernel, ok := genericPayload.Data["kernel"].(map[string]interface{}); ok {
+				ue.Kernel = &domain.KernelData{}
+				if syscall, ok := kernel["syscall"].(string); ok {
+					ue.Kernel.Syscall = syscall
+				}
+				if pid, ok := kernel["pid"].(uint32); ok {
+					ue.Kernel.PID = pid
+				}
+				if rc, ok := kernel["return_code"].(int32); ok {
+					ue.Kernel.ReturnCode = rc
+				}
+			}
+
+			if network, ok := genericPayload.Data["network"].(map[string]interface{}); ok {
+				ue.Network = &domain.NetworkData{}
+				if protocol, ok := network["protocol"].(string); ok {
+					ue.Network.Protocol = protocol
+				}
+				if statusCode, ok := network["status_code"].(int); ok {
+					ue.Network.StatusCode = statusCode
+				}
+			}
+
+			if app, ok := genericPayload.Data["application"].(map[string]interface{}); ok {
+				ue.Application = &domain.ApplicationData{}
+				if level, ok := app["level"].(string); ok {
+					ue.Application.Level = level
+				}
+				if message, ok := app["message"].(string); ok {
+					ue.Application.Message = message
+				}
+				if logger, ok := app["logger"].(string); ok {
+					ue.Application.Logger = logger
+				}
+				if errorType, ok := app["error"].(string); ok {
+					ue.Application.ErrorType = errorType
+				}
+			}
+		}
+	}
+
+	return ue
 }
