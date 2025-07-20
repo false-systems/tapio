@@ -15,9 +15,7 @@ import (
 func NewCorrelationServerWithRealStore(logger *zap.Logger, tracer trace.Tracer) *CorrelationServer {
 	// Create real correlation manager
 	correlationMgr := &corrDomain.Manager{
-		CollectionManager: &corrDomain.CollectionManager{
-			Logger: logger.Named("correlation-manager"),
-		},
+		CollectionManager: &corrDomain.CollectionManager{},
 	}
 
 	// Create real event store using our simple implementation
@@ -46,9 +44,7 @@ func NewCorrelationServerWithRealStore(logger *zap.Logger, tracer trace.Tracer) 
 	server := NewCorrelationServer(
 		logger,
 		tracer,
-		correlationMgr,
 		eventStore,
-		config,
 	)
 
 	logger.Info("CorrelationService initialized with real storage backend",
