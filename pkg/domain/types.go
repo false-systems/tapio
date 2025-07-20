@@ -31,12 +31,11 @@ type SourceType string
 type Source = SourceType
 
 const (
-	SourceEBPF     SourceType = "ebpf"
-	SourceK8s      SourceType = "kubernetes"
-	SourceSystemd  SourceType = "systemd"
-	SourceJournald SourceType = "journald"
-	SourceCNI      SourceType = "cni"
-	SourceCustom   SourceType = "custom"
+	SourceEBPF    SourceType = "ebpf"
+	SourceK8s     SourceType = "kubernetes"
+	SourceSystemd SourceType = "systemd"
+	SourceCNI     SourceType = "cni"
+	SourceCustom  SourceType = "custom"
 )
 
 // Core domain types - only the ones NOT already in interfaces.go
@@ -487,4 +486,16 @@ type CorrelationMetadata struct {
 	SchemaVersion string // Schema version for compatibility
 	ProcessedBy   string // Pattern processor name
 	Parameters    map[string]interface{}
+}
+
+// Filter provides filtering criteria for event queries
+type Filter struct {
+	Since       time.Time `json:"since,omitempty"`
+	Until       time.Time `json:"until,omitempty"`
+	Type        string    `json:"type,omitempty"`
+	Severity    string    `json:"severity,omitempty"`
+	Namespace   string    `json:"namespace,omitempty"`
+	EntityName  string    `json:"entity_name,omitempty"`
+	EntityType  string    `json:"entity_type,omitempty"`
+	Limit       int       `json:"limit,omitempty"`
 }

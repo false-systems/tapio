@@ -2,12 +2,9 @@ package security
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/integrations/monitoring"

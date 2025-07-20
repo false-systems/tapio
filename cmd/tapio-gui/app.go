@@ -137,13 +137,11 @@ type ClusterHealthResponse struct {
 	LastChecked    time.Time `json:"lastChecked"`
 }
 
-
 // GetStories fetches current stories from tapio-engine
 func (a *App) GetStories() []Story {
 	// Return mock data for demonstration
 	return a.getMockStories()
 }
-
 
 // getMockStories returns mock data for demonstration when server is unavailable
 func (a *App) getMockStories() []Story {

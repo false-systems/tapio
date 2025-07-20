@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"
-	"github.com/yairfalse/tapio/pkg/integrations/otel/ports"
 )
 
 // CommandBus orchestrates command processing in the CQRS pattern

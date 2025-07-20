@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/events"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	pb "github.com/yairfalse/tapio/proto/tapio/v1"
 	"go.opentelemetry.io/otel"

@@ -24,7 +24,7 @@ type TapioServer struct {
 	pb.UnimplementedTapioServiceServer
 	logger             *zap.Logger
 	correlationManager *correlation.Manager
-	eventStore         EventStore
+	eventStore         TapioEventStore
 	metricsCollector   MetricsCollector
 	tracer             trace.Tracer
 
@@ -59,7 +59,8 @@ type subscription struct {
 	matched uint64
 }
 
-type EventStore interface {
+// TapioEventStore interface for tapio-specific event operations
+type TapioEventStore interface {
 	Store(ctx context.Context, event *pb.Event) error
 	StoreBatch(ctx context.Context, events []*pb.Event) error
 	Get(ctx context.Context, id string) (*pb.Event, error)
@@ -787,7 +788,6 @@ func (s *TapioServer) GetServiceInfo(ctx context.Context, _ *emptypb.Empty) (*pb
 		},
 		EnabledCollectors: []string{
 			"ebpf",
-			"journald",
 			"kubernetes",
 			"systemd",
 		},

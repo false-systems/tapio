@@ -4,7 +4,6 @@ package ports
 
 import (
 	"context"
-	"io"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"

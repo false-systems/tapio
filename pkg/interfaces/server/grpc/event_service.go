@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/interfaces/server/adapters/correlation"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -61,6 +60,15 @@ type EventServiceStats struct {
 	ProcessingTime      time.Duration
 }
 
+// EventStoreStats provides statistics about the event store
+type EventStoreStats struct {
+	TotalEvents     int64
+	StorageSize     int64
+	OldestEvent     time.Time
+	NewestEvent     time.Time
+	EventsPerSecond float64
+}
+
 // EventStore interface for event storage operations
 type EventStore interface {
 	Store(ctx context.Context, events []domain.Event) error
@@ -69,7 +77,7 @@ type EventStore interface {
 	GetLatest(ctx context.Context, limit int) ([]domain.Event, error)
 	Cleanup(ctx context.Context, before time.Time) error
 	Delete(ctx context.Context, eventIDs []string) error
-	GetStats() correlation.EventStoreStats
+	GetStats() EventStoreStats
 }
 
 // EventProcessor handles event enrichment and correlation

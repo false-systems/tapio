@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"

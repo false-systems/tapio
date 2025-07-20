@@ -13,7 +13,6 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd/internal"
-	"github.com/yairfalse/tapio/pkg/domain"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )

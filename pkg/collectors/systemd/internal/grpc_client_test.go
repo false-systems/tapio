@@ -63,7 +63,6 @@ func TestGRPCClient_ConvertSource(t *testing.T) {
 		{"Systemd", domain.SourceSystemd, "SOURCE_TYPE_SYSTEMD"},
 		{"EBPF", domain.SourceEBPF, "SOURCE_TYPE_EBPF"},
 		{"K8s", domain.SourceK8s, "SOURCE_TYPE_KUBERNETES"},
-		{"Journald", domain.SourceJournald, "SOURCE_TYPE_JOURNALD"},
 	}
 
 	for _, tt := range tests {

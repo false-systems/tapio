@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/interfaces/server/adapters/correlation"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
@@ -64,7 +63,7 @@ func (s *EventServer) GetServiceStats() map[string]interface{} {
 
 	// Get event store stats if available
 	var storeStats interface{}
-	if store, ok := s.eventStore.(*correlation.InMemoryEventStore); ok {
+	if store, ok := s.eventStore.(*SimpleEventStore); ok {
 		storeStats = store.GetStats()
 	}
 

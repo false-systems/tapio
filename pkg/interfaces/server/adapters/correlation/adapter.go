@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	corrDomain "github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 

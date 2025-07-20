@@ -414,8 +414,6 @@ func (c *TapioGRPCClient) mapSourceType(source domain.SourceType) pb.SourceType 
 		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
 	case domain.SourceSystemd:
 		return pb.SourceType_SOURCE_TYPE_SYSLOG
-	case domain.SourceJournald:
-		return pb.SourceType_SOURCE_TYPE_JOURNALD
 	default:
 		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
 	}

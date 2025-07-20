@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 
 func TestTapioDataFlow_BasicOperation(t *testing.T) {

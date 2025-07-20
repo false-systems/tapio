@@ -1,13 +1,10 @@
 package encoding
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"

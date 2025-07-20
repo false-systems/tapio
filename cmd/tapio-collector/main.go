@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 	// Commented out until collectors are fixed
 	// "github.com/yairfalse/tapio/pkg/collectors/ebpf"
-	// "github.com/yairfalse/tapio/pkg/collectors/journald"
 	// "github.com/yairfalse/tapio/pkg/collectors/k8s"
 	// "github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/dataflow"
@@ -36,7 +35,6 @@ var (
 	enableEBPF      bool
 	enableK8s       bool
 	enableSystemd   bool
-	enableJournald  bool
 	bufferSize      int
 	flushInterval   time.Duration
 	grpcInsecure    bool
@@ -50,7 +48,7 @@ func main() {
 		Long: `Tapio Collector v2.0 - Unified collector with semantic correlation
 
 Features:
-- Multiple collectors: eBPF, Kubernetes, SystemD, JournalD
+- Multiple collectors: eBPF, Kubernetes, SystemD
 - OTEL semantic correlation with trace context propagation
 - Intelligent event grouping and impact assessment
 - gRPC streaming to Tapio server
@@ -65,7 +63,6 @@ Features:
 	rootCmd.Flags().BoolVar(&enableEBPF, "enable-ebpf", true, "Enable eBPF collector")
 	rootCmd.Flags().BoolVar(&enableK8s, "enable-k8s", true, "Enable Kubernetes collector")
 	rootCmd.Flags().BoolVar(&enableSystemd, "enable-systemd", true, "Enable SystemD collector")
-	rootCmd.Flags().BoolVar(&enableJournald, "enable-journald", true, "Enable JournalD collector")
 	rootCmd.Flags().IntVar(&bufferSize, "buffer-size", 1000, "Event buffer size")
 	rootCmd.Flags().DurationVar(&flushInterval, "flush-interval", time.Second, "Event flush interval")
 	rootCmd.Flags().BoolVar(&grpcInsecure, "grpc-insecure", true, "Use insecure gRPC connection")
@@ -128,15 +125,6 @@ func runCollector(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if enableJournald {
-			collector, err := journald.NewCollector(journald.DefaultConfig())
-			if err == nil {
-				manager.AddCollector("journald", collector)
-				log.Printf("✅ JournalD collector enabled")
-			} else {
-				log.Printf("⚠️  JournalD collector disabled: %v", err)
-			}
-		}
 	*/
 
 	log.Printf("⚠️  All collectors temporarily disabled pending fixes")

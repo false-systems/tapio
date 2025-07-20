@@ -694,8 +694,6 @@ func convertSourceTypeToProto(source domain.SourceType) pb.SourceType {
 		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
 	case domain.SourceSystemd:
 		return pb.SourceType_SOURCE_TYPE_SYSLOG // Map systemd to syslog
-	case domain.SourceJournald:
-		return pb.SourceType_SOURCE_TYPE_JOURNALD
 	case domain.SourceCNI:
 		return pb.SourceType_SOURCE_TYPE_CONTAINERD // Map CNI to containerd
 	default:

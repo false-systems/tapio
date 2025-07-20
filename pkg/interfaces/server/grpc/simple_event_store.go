@@ -164,12 +164,18 @@ func (s *SimpleEventStore) Delete(ctx context.Context, eventIDs []string) error 
 	return nil
 }
 
-// GetStats implements EventStore interface - return our own stats as interface{}
-func (s *SimpleEventStore) GetStats() interface{} {
+// GetStats implements EventStore interface - return EventStoreStats
+func (s *SimpleEventStore) GetStats() EventStoreStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return s.stats
+	return EventStoreStats{
+		TotalEvents:     s.stats.TotalEvents,
+		StorageSize:     s.stats.StorageSize,
+		OldestEvent:     s.stats.OldestEvent,
+		NewestEvent:     s.stats.NewestEvent,
+		EventsPerSecond: s.stats.EventsPerSecond,
+	}
 }
 
 // Helper methods

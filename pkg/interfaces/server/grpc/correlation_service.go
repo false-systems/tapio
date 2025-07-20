@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // CorrelationServer implements the CorrelationService gRPC interface
@@ -53,6 +52,8 @@ type CorrelationServiceConfig struct {
 	EnableRootCauseAnalysis   bool
 	DefaultAnalysisTimeWindow time.Duration
 	MinConfidenceThreshold    float64
+	AnalysisTimeout           time.Duration
+	CorrelationRetentionPeriod time.Duration
 }
 
 // CorrelationServiceStats tracks service metrics
@@ -66,6 +67,8 @@ type CorrelationServiceStats struct {
 	CorrelationsPerSecond float64
 	SuccessfulAnalyses    int64
 	FailedAnalyses        int64
+	TotalAnalyses         int64
+	PredictionsMade       int64
 }
 
 // CorrelationSubscription tracks active correlation subscriptions

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+
 	"github.com/yairfalse/tapio/pkg/domain"
 	integration "github.com/yairfalse/tapio/pkg/integrations/core"
 	"go.opentelemetry.io/otel/metric"

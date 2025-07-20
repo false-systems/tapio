@@ -8,8 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	"github.com/yairfalse/tapio/pkg/interfaces/core"
 )
 
 const version = "1.0.0"

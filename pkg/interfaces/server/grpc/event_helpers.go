@@ -620,8 +620,6 @@ func (s *EventServer) convertSourceType(domainSource domain.SourceType) pb.Sourc
 		return pb.SourceType_SOURCE_TYPE_KUBERNETES
 	case domain.SourceSystemd:
 		return pb.SourceType_SOURCE_TYPE_SYSTEMD
-	case domain.SourceJournald:
-		return pb.SourceType_SOURCE_TYPE_JOURNALD
 	default:
 		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
 	}

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"log"
+
 	"github.com/yairfalse/tapio/pkg/domain"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"go.opentelemetry.io/otel"
@@ -17,7 +19,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"log"
 )
 
 // GRPCClient handles streaming events to the Tapio server
@@ -287,8 +288,6 @@ func (c *GRPCClient) domainSourceToProto(source domain.SourceType) pb.SourceType
 		return pb.SourceType_SOURCE_TYPE_EBPF
 	case domain.SourceK8s:
 		return pb.SourceType_SOURCE_TYPE_KUBERNETES
-	case domain.SourceJournald:
-		return pb.SourceType_SOURCE_TYPE_JOURNALD
 	default:
 		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
 	}

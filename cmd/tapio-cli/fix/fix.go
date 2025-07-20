@@ -9,7 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/yairfalse/tapio/pkg/collectors/k8s"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"github.com/yairfalse/tapio/pkg/interfaces/output"
+	"k8s.io/client-go/kubernetes"
 )
 
 var (

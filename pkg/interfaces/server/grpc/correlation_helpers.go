@@ -243,10 +243,10 @@ func (s *CorrelationServer) enrichCorrelationsWithPredictions(ctx context.Contex
 		if correlation.Prediction == nil && s.config.EnablePredictions {
 			// Generate mock prediction
 			correlation.Prediction = &pb.PredictedOutcome{
-				Scenario:        "Service degradation likely to continue",
-				Probability:     0.75,
-				TimeToOutcome:   durationpb.New(15 * time.Minute),
-				Confidence:      0.70,
+				Scenario:      "Service degradation likely to continue",
+				Probability:   0.75,
+				TimeToOutcome: durationpb.New(15 * time.Minute),
+				Confidence:    0.70,
 				PreventionActions: []string{
 					"Restart affected service",
 					"Check resource allocation",
@@ -293,16 +293,16 @@ func (s *CorrelationServer) enrichSemanticGroupsWithAnalysis(ctx context.Context
 		// Add impact assessment if missing
 		if group.Impact == nil && s.config.EnableImpactAssessment {
 			group.Impact = &pb.ImpactAssessment{
-				Level:                  pb.ImpactAssessment_IMPACT_LEVEL_MEDIUM,
-				BusinessImpactScore:    0.6,
-				TechnicalImpactScore:   0.7,
-				AffectedServices:       []string{"web-service", "api-gateway"},
-				EstimatedDuration:      durationpb.New(30 * time.Minute),
-				AffectedUsers:          1000,
-				AffectedRequests:       5000,
-				EstimatedCost:          2500.0,
-				Currency:               "USD",
-				CascadeProbability:     0.3,
+				Level:                   pb.ImpactAssessment_IMPACT_LEVEL_MEDIUM,
+				BusinessImpactScore:     0.6,
+				TechnicalImpactScore:    0.7,
+				AffectedServices:        []string{"web-service", "api-gateway"},
+				EstimatedDuration:       durationpb.New(30 * time.Minute),
+				AffectedUsers:           1000,
+				AffectedRequests:        5000,
+				EstimatedCost:           2500.0,
+				Currency:                "USD",
+				CascadeProbability:      0.3,
 				PotentialCascadeTargets: []string{"database", "cache-service"},
 			}
 		}
@@ -345,12 +345,12 @@ func (s *CorrelationServer) notifyCorrelationSubscribers(result *corrDomain.Anal
 	for _, correlation := range result.Correlations {
 		protoCorr := s.convertCorrelationToProto(correlation)
 		update := &pb.CorrelationUpdate{
-			Type:         pb.CorrelationUpdate_UPDATE_TYPE_NEW_CORRELATION,
-			Correlation:  protoCorr,
-			Timestamp:    timestamppb.Now(),
+			Type:        pb.CorrelationUpdate_UPDATE_TYPE_NEW_CORRELATION,
+			Correlation: protoCorr,
+			Timestamp:   timestamppb.Now(),
 			AnalysisInfo: &pb.AnalysisInfo{
-				AnalysisId:    fmt.Sprintf("realtime_%d", time.Now().UnixNano()),
-				TriggerType:   "real_time_analysis",
+				AnalysisId:      fmt.Sprintf("realtime_%d", time.Now().UnixNano()),
+				TriggerType:     "real_time_analysis",
 				ConfidenceScore: correlation.Confidence,
 			},
 		}
@@ -644,15 +644,15 @@ func (s *CorrelationServer) convertCorrelationTypeToProto(corrType corrDomain.Co
 // convertDomainEventToProto converts domain.Event to pb.Event (reuse from event service)
 func (s *CorrelationServer) convertDomainEventToProto(domainEvent domain.Event) *pb.Event {
 	return &pb.Event{
-		Id:        string(domainEvent.ID),
-		Type:      s.convertEventType(domainEvent.Type),
-		Severity:  s.convertEventSeverity(domainEvent.Severity),
-		Source:    s.convertSourceType(domainEvent.Source),
-		Message:   domainEvent.Message,
-		Timestamp: timestamppb.New(domainEvent.Timestamp),
-		TraceId:   domainEvent.Context.TraceID,
-		SpanId:    domainEvent.Context.SpanID,
-		Tags:      domainEvent.Tags,
+		Id:         string(domainEvent.ID),
+		Type:       s.convertEventType(domainEvent.Type),
+		Severity:   s.convertEventSeverity(domainEvent.Severity),
+		Source:     s.convertSourceType(domainEvent.Source),
+		Message:    domainEvent.Message,
+		Timestamp:  timestamppb.New(domainEvent.Timestamp),
+		TraceId:    domainEvent.Context.TraceID,
+		SpanId:     domainEvent.Context.SpanID,
+		Tags:       domainEvent.Tags,
 		Confidence: domainEvent.Confidence,
 	}
 }
@@ -702,8 +702,6 @@ func (s *CorrelationServer) convertSourceType(domainSource domain.SourceType) pb
 		return pb.SourceType_SOURCE_TYPE_KUBERNETES
 	case domain.SourceSystemd:
 		return pb.SourceType_SOURCE_TYPE_SYSTEMD
-	case domain.SourceJournald:
-		return pb.SourceType_SOURCE_TYPE_JOURNALD
 	default:
 		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
 	}

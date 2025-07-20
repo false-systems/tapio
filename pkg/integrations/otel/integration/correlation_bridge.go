@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/integrations/otel/cqrs"
 	"github.com/yairfalse/tapio/pkg/integrations/otel/domain"
 )
