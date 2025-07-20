@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import MainDashboard from './components/MainDashboard.vue'
+import UltraModernDashboard from './components/UltraModernDashboard.vue'
 </script>
 
 <template>
   <div id="app">
-    <MainDashboard/>
+    <UltraModernDashboard/>
   </div>
 </template>
 
@@ -65,7 +65,7 @@ import MainDashboard from './components/MainDashboard.vue'
 
 body {
   font-family: var(--font-sans);
-  background: white;
+  background: #fafafa;
   color: var(--gray-900);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -79,7 +79,7 @@ body {
   height: 100vh;
   overflow: hidden;
   position: relative;
-  background: var(--gray-50);
+  background: transparent;
 }
 
 /* Professional Scrollbar */

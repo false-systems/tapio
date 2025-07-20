@@ -1,5 +1,5 @@
 # Tapio Server - Production Ready Container
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make ca-certificates
@@ -7,7 +7,7 @@ RUN apk add --no-cache git make ca-certificates
 WORKDIR /build
 
 # Copy go modules first (better caching)
-COPY go.mod go.sum go.work go.work.sum ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code

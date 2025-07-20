@@ -40,19 +40,19 @@ type CorrelationServer struct {
 
 // CorrelationServiceConfig configures the correlation service
 type CorrelationServiceConfig struct {
-	MaxCorrelationsPerQuery   int
-	MaxSemanticGroupsPerQuery int
-	MaxEventsPerAnalysis      int
-	MaxSubscriptions          int
-	SubscriptionBufferSize    int
-	AnalysisWorkers           int
-	EnableRealTimeAnalysis    bool
-	EnableImpactAssessment    bool
-	EnablePredictions         bool
-	EnableRootCauseAnalysis   bool
-	DefaultAnalysisTimeWindow time.Duration
-	MinConfidenceThreshold    float64
-	AnalysisTimeout           time.Duration
+	MaxCorrelationsPerQuery    int
+	MaxSemanticGroupsPerQuery  int
+	MaxEventsPerAnalysis       int
+	MaxSubscriptions           int
+	SubscriptionBufferSize     int
+	AnalysisWorkers            int
+	EnableRealTimeAnalysis     bool
+	EnableImpactAssessment     bool
+	EnablePredictions          bool
+	EnableRootCauseAnalysis    bool
+	DefaultAnalysisTimeWindow  time.Duration
+	MinConfidenceThreshold     float64
+	AnalysisTimeout            time.Duration
 	CorrelationRetentionPeriod time.Duration
 }
 

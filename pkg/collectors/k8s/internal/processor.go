@@ -27,13 +27,13 @@ func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (d
 
 	// Create the domain event
 	event := domain.Event{
-		ID:         fmt.Sprintf("k8s_%s_%s_%s_%d", raw.ResourceKind, raw.Namespace, raw.Name, raw.Timestamp.UnixNano()),
-		Type:       string(domain.EventTypeKubernetes),
-		Source:     string(domain.SourceK8s),
+		ID:         domain.EventID(fmt.Sprintf("k8s_%s_%s_%s_%d", raw.ResourceKind, raw.Namespace, raw.Name, raw.Timestamp.UnixNano())),
+		Type:       domain.EventTypeKubernetes,
+		Source:     domain.SourceK8s,
 		Timestamp:  raw.Timestamp,
 		Data:       eventData,
-		Context:    p.createContextData(raw),
-		Severity:   string(severity),
+		Context:    p.createEventContext(raw),
+		Severity:   severity,
 		Confidence: 1.0, // K8s events are direct observations
 		Attributes: map[string]interface{}{
 			"hash":      p.generateHash(raw),
@@ -172,20 +172,14 @@ func (p *eventProcessor) enrichEventData(data map[string]interface{}, raw core.R
 	}
 }
 
-// createContextData creates the event context data
-func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interface{} {
-	context := map[string]interface{}{
-		"kind":      raw.ResourceKind,
-		"namespace": raw.Namespace,
-		"name":      raw.Name,
-		"cluster":   "", // Would be set from cluster info
-	}
-
+// createEventContext creates the event context
+func (p *eventProcessor) createEventContext(raw core.RawEvent) domain.EventContext {
 	// Create base labels
 	labels := map[string]string{
-		"kind":      raw.ResourceKind,
-		"namespace": raw.Namespace,
-		"name":      raw.Name,
+		"kind":       raw.ResourceKind,
+		"namespace":  raw.Namespace,
+		"name":       raw.Name,
+		"event_type": string(raw.Type),
 	}
 
 	// Extract labels from the object if available
@@ -195,42 +189,50 @@ func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interfa
 		}
 	}
 
-	context["labels"] = labels
-	context["tags"] = []string{
-		"kubernetes",
-		raw.ResourceKind,
-		string(raw.Type),
+	// Create metadata
+	metadata := map[string]interface{}{
+		"resource_path": fmt.Sprintf("/%s/%s/%s", raw.ResourceKind, raw.Namespace, raw.Name),
+		"api_source":    "k8s-api",
 	}
 
-	// Add resource reference
-	context["resource"] = map[string]string{
-		"kind":      raw.ResourceKind,
-		"namespace": raw.Namespace,
-		"name":      raw.Name,
+	// Extract node name for pod events
+	var nodeName string
+	if pod, ok := raw.Object.(*corev1.Pod); ok {
+		nodeName = pod.Spec.NodeName
 	}
 
-	return context
+	return domain.EventContext{
+		Service:   "kubernetes",
+		Component: raw.ResourceKind,
+		Namespace: raw.Namespace,
+		Host:      nodeName,
+		Node:      nodeName,
+		Labels:    labels,
+		Metadata:  metadata,
+		TraceID:   "", // Could be extracted from annotations
+		SpanID:    "", // Could be extracted from annotations
+	}
 }
 
 // determineSeverity determines the event severity
-func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
+func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.EventSeverity {
 	// Handle K8s Event objects specially
 	if event, ok := raw.Object.(*corev1.Event); ok {
 		switch event.Type {
 		case corev1.EventTypeWarning:
-			return domain.SeverityWarning
+			return domain.EventSeverityWarning
 		case corev1.EventTypeNormal:
-			return domain.SeverityLow
+			return domain.EventSeverityLow
 		}
 
 		// Check specific reasons
 		switch event.Reason {
 		case "Failed", "FailedCreate", "FailedDelete", "FailedScheduling":
-			return domain.SeverityHigh
+			return domain.EventSeverityHigh
 		case "Killing", "Evicted", "NodeNotReady":
-			return domain.SeverityCritical
+			return domain.EventSeverityCritical
 		case "BackOff", "Unhealthy":
-			return domain.SeverityWarning
+			return domain.EventSeverityWarning
 		}
 	}
 
@@ -238,15 +240,15 @@ func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLev
 	switch raw.Type {
 	case core.EventTypeDeleted:
 		if raw.ResourceKind == "Pod" || raw.ResourceKind == "Node" {
-			return domain.SeverityWarning
+			return domain.EventSeverityWarning
 		}
-		return domain.SeverityLow
+		return domain.EventSeverityLow
 
 	case core.EventTypeError:
-		return domain.SeverityHigh
+		return domain.EventSeverityHigh
 
 	default:
-		return domain.SeverityLow
+		return domain.EventSeverityLow
 	}
 }
 

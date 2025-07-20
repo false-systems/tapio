@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/k8s"
-	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 func main() {
@@ -77,19 +76,24 @@ func main() {
 			fmt.Printf("  Source: %s\n", event.Source)
 			fmt.Printf("  Severity: %s\n", event.Severity)
 
-			// Print K8s-specific payload information
-			if k8sPayload, ok := event.Data.(domain.KubernetesEventPayload); ok {
+			// Print K8s-specific data from the map
+			if resource, ok := event.Data["resource"].(map[string]interface{}); ok {
 				fmt.Printf("  Resource: %s/%s in namespace %s\n",
-					k8sPayload.Resource.Kind,
-					k8sPayload.Resource.Name,
-					k8sPayload.Resource.Namespace)
-				fmt.Printf("  Event Type: %s\n", k8sPayload.EventType)
-				if k8sPayload.Reason != "" {
-					fmt.Printf("  Reason: %s\n", k8sPayload.Reason)
-				}
-				if k8sPayload.Message != "" {
-					fmt.Printf("  Message: %s\n", k8sPayload.Message)
-				}
+					resource["kind"],
+					resource["name"],
+					resource["namespace"])
+			}
+
+			if eventType, ok := event.Data["event_type"].(string); ok {
+				fmt.Printf("  Event Type: %s\n", eventType)
+			}
+
+			if reason, ok := event.Data["reason"].(string); ok && reason != "" {
+				fmt.Printf("  Reason: %s\n", reason)
+			}
+
+			if message, ok := event.Data["message"].(string); ok && message != "" {
+				fmt.Printf("  Message: %s\n", message)
 			}
 		}
 	}()

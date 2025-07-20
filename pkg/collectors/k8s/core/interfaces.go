@@ -140,7 +140,7 @@ const (
 )
 
 // Validate validates the configuration
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
 	if c.EventBufferSize <= 0 {
 		c.EventBufferSize = 1000
 	}
