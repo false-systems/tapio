@@ -1,49 +1,19 @@
 # eBPF Collector
 
-The eBPF collector provides deep system observability using eBPF (Extended Berkeley Packet Filter) technology on Linux systems.
+The eBPF collector provides deep kernel-level observability using eBPF (Extended Berkeley Packet Filter) technology, capturing system events with minimal overhead and unprecedented visibility into system behavior.
 
-## Architecture
-
-This module follows the Tapio 5-level dependency hierarchy:
-
-```
-pkg/collectors/ebpf/
-├── go.mod                    # Independent module
-├── core/                     # Public interfaces and types
-│   ├── interfaces.go         # Collector contracts
-│   ├── types.go             # eBPF-specific types
-│   └── errors.go            # Error definitions
-├── internal/                # Internal implementation
-│   ├── collector.go         # Main collector logic
-│   ├── processor.go         # Event processing
-│   └── platform_*.go        # Platform-specific factories
-├── linux/                   # Linux-specific eBPF implementation
-│   └── implementation.go    # Actual eBPF functionality
-├── stub/                    # Stub for non-Linux platforms
-│   └── implementation.go    # Returns appropriate errors
-└── collector.go             # Public API exports
-```
-
-## Features
-
-- **Memory Monitoring**: Track memory allocations, OOM events, and pressure
-- **Process Tracking**: Monitor process lifecycle, syscalls, and behavior
-- **Network Observability**: Connection tracking, packet analysis, and latency
-- **File System Events**: File operations, access patterns, and I/O
-
-## Usage
+## Quick Start
 
 ```go
 import "github.com/yairfalse/tapio/pkg/collectors/ebpf"
 
-// Create collector with default config
+// Create and start collector
 config := ebpf.DefaultConfig()
 collector, err := ebpf.NewCollector(config)
 if err != nil {
     log.Fatal(err)
 }
 
-// Start collection
 ctx := context.Background()
 if err := collector.Start(ctx); err != nil {
     log.Fatal(err)
@@ -51,53 +21,99 @@ if err := collector.Start(ctx); err != nil {
 
 // Process events
 for event := range collector.Events() {
-    // Events are domain.Event types
     fmt.Printf("Event: %+v\n", event)
 }
-
-// Check health
-health := collector.Health()
-fmt.Printf("Collector health: %s\n", health.Status)
-
-// Stop collection
-collector.Stop()
 ```
 
-## Platform Support
+## Key Features
 
-- **Linux**: Full eBPF functionality (requires kernel 4.9+)
-- **Other platforms**: Returns appropriate error indicating eBPF is not supported
+- **Dual-Path Architecture**: Preserves raw kernel events while enabling semantic correlation
+- **Kernel-Level Visibility**: Direct observation of syscalls, network packets, and kernel events  
+- **Zero-Copy Performance**: Ring buffer maps for efficient event transfer
+- **Adaptive Sampling**: Intelligent rate limiting based on event importance
+- **Real-Time Streaming**: Bidirectional gRPC streaming to Tapio server
+- **Multi-Category Events**: Network, Process, File, Security, Container, and Memory events
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    eBPF Collector                        │
+├─────────────────────────────────────────────────────────┤
+│  Kernel Space: BPF Programs → Ring Buffers              │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│  User Space:                                             │
+│    ┌────────────┐     ┌─────────────┐                  │
+│    │Event Filter│────▶│Event Enricher│                  │
+│    └────────────┘     └─────────────┘                  │
+│           │                   │                          │
+│           ▼                   ▼                          │
+│    ┌─────────────┐    ┌──────────────┐   ┌────────────┐│
+│    │ Raw Storage │    │Semantic Layer│───▶│Correlation ││
+│    └─────────────┘    └──────────────┘   └────────────┘│
+└─────────────────────────────────────────────────────────┘
+```
+
+## Module Structure
+
+```
+pkg/collectors/ebpf/
+├── core/                  # Public interfaces
+├── internal/              # Internal implementation  
+├── linux/                 # Linux eBPF programs
+├── stub/                  # Non-Linux stubs
+├── types.go              # Event type definitions
+├── filter.go             # Event filtering logic
+├── enricher.go           # Context enrichment
+├── processor.go          # Dual-path processor
+├── tapio_client.go       # gRPC integration
+└── raw_event_formatter.go # Human-readable formatting
+```
 
 ## Requirements
 
-- Linux kernel 4.9+ with eBPF support
-- CAP_SYS_ADMIN capability or root privileges
-- Sufficient locked memory limit (handled automatically)
+- Linux kernel 4.18+ (5.8+ recommended)
+- BPF/BTF support enabled
+- CAP_SYS_ADMIN capability
+- Go 1.24+ for building
 
-## Configuration
+## Documentation
 
+For comprehensive documentation including:
+- Detailed architecture and design
+- Installation and deployment guides
+- Configuration reference
+- Security best practices
+- Performance tuning
+- Troubleshooting guides
+- API reference
+
+See: [📚 **eBPF Collector Documentation**](/docs/collectors/ebpf.md)
+
+## Quick Examples
+
+### High-Performance Configuration
 ```go
-config := ebpf.Config{
-    Name:            "my-ebpf-collector",
-    Enabled:         true,
-    EventBufferSize: 2000,
-    
-    // Feature toggles
-    EnableNetwork: true,
-    EnableMemory:  true,
-    EnableProcess: true,
-    EnableFile:    false,
-    
-    // Performance tuning
-    RingBufferSize:   16384,
-    EventRateLimit:   5000,
-    SamplingInterval: time.Second,
-}
+config := ebpf.HighPerformanceConfig()
+collector, _ := ebpf.NewCollector(config)
+```
+
+### Security-Focused Monitoring
+```go
+config := ebpf.SecurityConfig()
+collector, _ := ebpf.NewCollector(config)
+```
+
+### Dual-Path Processing
+```go
+processor := ebpf.NewDualPathProcessor(
+    ebpf.WithRawStorage("/var/lib/tapio/raw"),
+    ebpf.WithSemanticFiltering(0.8),
+    ebpf.WithCorrelation(tapioClient),
+)
 ```
 
 ## Building
-
-This module can be built independently:
 
 ```bash
 cd pkg/collectors/ebpf
@@ -105,16 +121,6 @@ go build ./...
 go test ./...
 ```
 
-## Testing
+## License
 
-Run tests with:
-
-```bash
-go test -v ./...
-```
-
-For Linux-specific tests (requires root):
-
-```bash
-sudo go test -v ./linux/...
-```
+See [LICENSE](../../../LICENSE) for details.
