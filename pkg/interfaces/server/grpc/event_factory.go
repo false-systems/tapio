@@ -15,8 +15,8 @@ import (
 func NewEventServerWithRealStore(logger *zap.Logger, tracer trace.Tracer) *EventServer {
 	// Create real event store using our simple implementation
 	eventStore := NewSimpleEventStore(
-		50000,                    // Max events in memory
-		7*24*time.Hour,          // 7 days retention
+		50000,          // Max events in memory
+		7*24*time.Hour, // 7 days retention
 		logger.Named("event-store"),
 	)
 
@@ -70,23 +70,23 @@ func (s *EventServer) GetServiceStats() map[string]interface{} {
 
 	return map[string]interface{}{
 		"service": map[string]interface{}{
-			"total_events":        s.stats.TotalEvents,
-			"events_per_second":   s.stats.EventsPerSecond,
-			"active_streams":      s.stats.ActiveStreams,
+			"total_events":         s.stats.TotalEvents,
+			"events_per_second":    s.stats.EventsPerSecond,
+			"active_streams":       s.stats.ActiveStreams,
 			"active_subscriptions": s.stats.ActiveSubscriptions,
-			"failed_events":       s.stats.FailedEvents,
-			"avg_processing_time": s.stats.ProcessingTime.String(),
+			"failed_events":        s.stats.FailedEvents,
+			"avg_processing_time":  s.stats.ProcessingTime.String(),
 		},
 		"subscriptions": map[string]interface{}{
 			"count": subscriptionCount,
 			"max":   s.config.MaxSubscriptions,
 		},
 		"config": map[string]interface{}{
-			"max_events_per_batch":      s.config.MaxEventsPerBatch,
-			"max_events_per_second":     s.config.MaxEventsPerSecond,
-			"real_time_streaming":       s.config.EnableRealTimeStreaming,
-			"statistics_enabled":        s.config.EnableStatistics,
-			"retention_period":          s.config.RetentionPeriod.String(),
+			"max_events_per_batch":  s.config.MaxEventsPerBatch,
+			"max_events_per_second": s.config.MaxEventsPerSecond,
+			"real_time_streaming":   s.config.EnableRealTimeStreaming,
+			"statistics_enabled":    s.config.EnableStatistics,
+			"retention_period":      s.config.RetentionPeriod.String(),
 		},
 		"store": storeStats,
 	}

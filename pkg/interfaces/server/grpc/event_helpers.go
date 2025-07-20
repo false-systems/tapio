@@ -629,19 +629,19 @@ func (s *EventServer) convertSourceType(domainSource domain.SourceType) pb.Sourc
 
 func (s *EventServer) convertEventContext(domainContext domain.EventContext) *pb.EventContext {
 	return &pb.EventContext{
-		TraceId:     domainContext.TraceID,
-		SpanId:      domainContext.SpanID,
-		Service:     domainContext.Service,
-		Component:   domainContext.Component,
-		Namespace:   domainContext.Namespace,
-		Host:        domainContext.Host,
-		Node:        domainContext.Node,
-		Pod:         domainContext.Pod,
-		Container:   domainContext.Container,
-		ProcessId:   int32(domainContext.PID),
-		UserId:      int32(domainContext.UID),
-		GroupId:     int32(domainContext.GID),
-		Command:     domainContext.Comm,
-		Labels:      domainContext.Labels,
+		TraceId:   domainContext.TraceID,
+		SpanId:    domainContext.SpanID,
+		Service:   domainContext.Service,
+		Component: domainContext.Component,
+		Namespace: domainContext.Namespace,
+		Host:      domainContext.Host,
+		Node:      domainContext.Node,
+		Pod:       domainContext.Pod,
+		Container: domainContext.Container,
+		ProcessId: int32(domainContext.PID),
+		UserId:    int32(domainContext.UID),
+		GroupId:   int32(domainContext.GID),
+		Command:   domainContext.Comm,
+		Labels:    domainContext.Labels,
 	}
 }

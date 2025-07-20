@@ -52,13 +52,13 @@ type EventServiceConfig struct {
 
 // EventServiceStats tracks service metrics
 type EventServiceStats struct {
-	mu                sync.RWMutex
-	TotalEvents       int64
-	EventsPerSecond   float64
-	ActiveStreams     int32
+	mu                  sync.RWMutex
+	TotalEvents         int64
+	EventsPerSecond     float64
+	ActiveStreams       int32
 	ActiveSubscriptions int32
-	FailedEvents      int64
-	ProcessingTime    time.Duration
+	FailedEvents        int64
+	ProcessingTime      time.Duration
 }
 
 // EventStore interface for event storage operations
@@ -81,13 +81,13 @@ type EventProcessor struct {
 
 // EventSubscription tracks active event subscriptions
 type EventSubscription struct {
-	ID           string
-	Filter       *pb.Filter
-	DeliveryMode pb.SubscribeRequest_DeliveryMode
+	ID              string
+	Filter          *pb.Filter
+	DeliveryMode    pb.SubscribeRequest_DeliveryMode
 	MaxEventsPerSec int32
-	StartTime    time.Time
-	LastActivity time.Time
-	EventsSent   int64
+	StartTime       time.Time
+	LastActivity    time.Time
+	EventsSent      int64
 }
 
 // NewEventServer creates a new event server
@@ -214,13 +214,13 @@ func (s *EventServer) Subscribe(req *pb.SubscribeRequest, stream pb.EventService
 		s.stats.ActiveSubscriptions--
 		s.stats.mu.Unlock()
 
-		s.logger.Info("Subscription closed", 
+		s.logger.Info("Subscription closed",
 			zap.String("subscription_id", subscription.ID),
 			zap.Int64("events_sent", subscription.EventsSent),
 		)
 	}()
 
-	s.logger.Info("Event subscription started", 
+	s.logger.Info("Event subscription started",
 		zap.String("subscription_id", subscription.ID),
 		zap.Any("filter", req.Filter),
 	)
@@ -245,7 +245,7 @@ func (s *EventServer) Subscribe(req *pb.SubscribeRequest, stream pb.EventService
 
 			// Apply rate limiting
 			if err := s.applyRateLimit(subscription); err != nil {
-				s.logger.Warn("Rate limit exceeded", 
+				s.logger.Warn("Rate limit exceeded",
 					zap.String("subscription_id", subscription.ID),
 					zap.Error(err),
 				)
@@ -325,7 +325,7 @@ func (s *EventServer) GetEvents(ctx context.Context, req *pb.GetEventsRequest) (
 	metadata := map[string]string{
 		"query_duration_ms": fmt.Sprintf("%.2f", time.Since(start).Seconds()*1000),
 		"result_count":      fmt.Sprintf("%d", len(protoEvents)),
-		"enrichment_applied": fmt.Sprintf("%t", req.Query != nil && 
+		"enrichment_applied": fmt.Sprintf("%t", req.Query != nil &&
 			(req.Query.IncludeCorrelations || req.Query.IncludeMetrics || req.Query.IncludeTraces)),
 	}
 
@@ -361,7 +361,7 @@ func (s *EventServer) GetStatistics(ctx context.Context, req *pb.TimeRange) (*pb
 
 	// Generate statistics
 	stats := s.generateStatistics(req, events)
-	
+
 	s.logger.Debug("Generated event statistics",
 		zap.Int64("total_events", stats.TotalEvents),
 		zap.Float64("events_per_second", stats.EventsPerSecond),
