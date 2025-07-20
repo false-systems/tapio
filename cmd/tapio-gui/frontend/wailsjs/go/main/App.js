@@ -14,6 +14,14 @@ export function GetClusterStatus() {
   return window['go']['main']['App']['GetClusterStatus']();
 }
 
+export function GetHealth() {
+  return window['go']['main']['App']['GetHealth']();
+}
+
+export function GetRealTimeData() {
+  return window['go']['main']['App']['GetRealTimeData']();
+}
+
 export function GetServerInfo() {
   return window['go']['main']['App']['GetServerInfo']();
 }
@@ -22,10 +30,46 @@ export function GetStories() {
   return window['go']['main']['App']['GetStories']();
 }
 
+export function GetTraceByID(arg1) {
+  return window['go']['main']['App']['GetTraceByID'](arg1);
+}
+
+export function GetTraceTimeline(arg1, arg2) {
+  return window['go']['main']['App']['GetTraceTimeline'](arg1, arg2);
+}
+
+export function GetTraces(arg1, arg2) {
+  return window['go']['main']['App']['GetTraces'](arg1, arg2);
+}
+
+export function GetTracesForStory(arg1) {
+  return window['go']['main']['App']['GetTracesForStory'](arg1);
+}
+
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
 
+export function HandleWebSocket(arg1) {
+  return window['go']['main']['App']['HandleWebSocket'](arg1);
+}
+
+export function LinkStoryToTrace(arg1, arg2) {
+  return window['go']['main']['App']['LinkStoryToTrace'](arg1, arg2);
+}
+
 export function RefreshStories() {
   return window['go']['main']['App']['RefreshStories']();
+}
+
+export function StartDevServer(arg1) {
+  return window['go']['main']['App']['StartDevServer'](arg1);
+}
+
+export function StartRealTimeUpdates(arg1) {
+  return window['go']['main']['App']['StartRealTimeUpdates'](arg1);
+}
+
+export function StopDevServer() {
+  return window['go']['main']['App']['StopDevServer']();
 }

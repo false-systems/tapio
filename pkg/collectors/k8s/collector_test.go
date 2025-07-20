@@ -9,6 +9,22 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
+func TestDefaultConfig(t *testing.T) {
+	config := DefaultConfig()
+
+	if config.Name != "k8s-collector" {
+		t.Errorf("Expected name k8s-collector, got %s", config.Name)
+	}
+
+	if !config.Enabled {
+		t.Error("Expected collector to be enabled by default")
+	}
+
+	if config.EventBufferSize != 1000 {
+		t.Errorf("Expected buffer size 1000, got %d", config.EventBufferSize)
+	}
+}
+
 func TestNewCollector(t *testing.T) {
 	config := core.Config{
 		Name:            "test-k8s-collector",
@@ -183,6 +199,27 @@ func TestCollectorEvents(t *testing.T) {
 		t.Errorf("Expected no events initially, got %v", event)
 	case <-time.After(100 * time.Millisecond):
 		// Expected timeout
+	}
+}
+
+func TestConfigValidation(t *testing.T) {
+	config := core.Config{
+		Name:            "test",
+		EventBufferSize: 0, // Should be set to default
+		ResyncPeriod:    0, // Should be set to default
+	}
+
+	err := config.Validate()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if config.EventBufferSize != 1000 {
+		t.Errorf("Expected buffer size to be set to 1000, got %d", config.EventBufferSize)
+	}
+
+	if config.ResyncPeriod == 0 {
+		t.Error("Expected resync period to be set to default")
 	}
 }
 
