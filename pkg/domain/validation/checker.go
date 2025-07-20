@@ -20,7 +20,7 @@ type Validator struct {
 }
 
 // NewValidator creates a new validator
-func NewValidator() common.Validator {
+func NewValidator() *Validator {
 	return &Validator{
 		timeout: 30 * time.Second,
 	}
