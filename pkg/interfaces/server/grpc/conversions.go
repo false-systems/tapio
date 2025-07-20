@@ -1,6 +1,7 @@
 package grpc
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -8,7 +9,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -21,20 +21,19 @@ func convertEventFromProto(event *pb.Event) *domain.Event {
 	}
 
 	return &domain.Event{
-		ID:           event.Id,
-		Type:         domain.EventType(event.Type),
-		Severity:     domain.EventSeverity(event.Severity),
-		Source:       domain.SourceType(event.Source),
-		Message:      event.Message,
-		Description:  event.Description,
-		Timestamp:    event.Timestamp.AsTime(),
-		TraceID:      event.TraceId,
-		SpanID:       event.SpanId,
-		ParentSpanID: event.ParentSpanId,
-		Attributes:   event.Attributes,
-		CollectorID:  event.CollectorId,
-		Confidence:   event.Confidence,
-		Tags:         event.Tags,
+		ID:         domain.EventID(event.Id),
+		Type:       domain.EventType(event.Type),
+		Severity:   domain.EventSeverity(event.Severity),
+		Source:     domain.SourceType(event.Source),
+		Message:    event.Message,
+		Timestamp:  event.Timestamp.AsTime(),
+		Attributes: convertStringMapToInterface(event.Attributes),
+		Confidence: event.Confidence,
+		Tags:       event.Tags,
+		Context: domain.EventContext{
+			TraceID: event.TraceId,
+			SpanID:  event.SpanId,
+		},
 	}
 }
 
@@ -44,52 +43,32 @@ func convertEventToProto(event *domain.Event) *pb.Event {
 	}
 
 	pbEvent := &pb.Event{
-		Id:           event.ID,
-		Type:         pb.EventType(event.Type),
-		Severity:     pb.EventSeverity(event.Severity),
-		Source:       pb.SourceType(event.Source),
+		Id:           string(event.ID),
+		Type:         convertEventTypeToProto(event.Type),
+		Severity:     convertEventSeverityToProto(event.Severity),
+		Source:       convertSourceTypeToProto(event.Source),
 		Message:      event.Message,
-		Description:  event.Description,
+		Description:  "", // Not available in domain.Event
 		Timestamp:    timestamppb.New(event.Timestamp),
-		TraceId:      event.TraceID,
-		SpanId:       event.SpanID,
-		ParentSpanId: event.ParentSpanID,
-		Attributes:   event.Attributes,
-		CollectorId:  event.CollectorID,
+		TraceId:      event.Context.TraceID,
+		SpanId:       event.Context.SpanID,
+		ParentSpanId: "", // Not available in domain.Event
+		Attributes:   convertInterfaceMapToString(event.Attributes),
+		CollectorId:  "", // Not available in domain.Event
 		Confidence:   event.Confidence,
 		Tags:         event.Tags,
 	}
 
 	// Convert context
 	pbEvent.Context = &pb.EventContext{
-		TraceId:      event.TraceID,
-		SpanId:       event.SpanID,
-		ParentSpanId: event.ParentSpanID,
-		TraceFlags:   event.TraceFlags,
-		Labels:       event.Labels,
+		TraceId:      event.Context.TraceID,
+		SpanId:       event.Context.SpanID,
+		ParentSpanId: "", // Not available in domain.Event
+		// TraceFlags not available in domain.Event
+		Labels: event.Context.Labels,
 	}
 
-	// Convert resources
-	for _, res := range event.Resources {
-		pbEvent.Resources = append(pbEvent.Resources, &pb.ResourceIdentifier{
-			Type:       res.Type,
-			Id:         res.ID,
-			Name:       res.Name,
-			Namespace:  res.Namespace,
-			Region:     res.Region,
-			Attributes: res.Attributes,
-		})
-	}
-
-	// Convert metrics
-	for _, metric := range event.Metrics {
-		pbEvent.Metrics = append(pbEvent.Metrics, &pb.MetricValue{
-			Name:  metric.Name,
-			Value: metric.Value,
-			Unit:  metric.Unit,
-			Type:  metric.Type,
-		})
-	}
+	// Resources and metrics not available in domain.Event
 
 	return pbEvent
 }
@@ -128,7 +107,7 @@ func convertCorrelationToProto(corr *correlation.Correlation) *pb.Correlation {
 
 	// Convert recommendations
 	for _, action := range corr.RecommendedActions {
-		pbCorr.Actions = append(pbCorr.Actions, convertActionToProto(action))
+		pbCorr.Actions = append(pbCorr.Actions, convertRecommendedActionToProto(action))
 	}
 
 	// Visualization hints
@@ -175,7 +154,7 @@ func convertCorrelationFromProto(corr *pb.Correlation) *correlation.Correlation 
 
 	// Convert actions
 	for _, action := range corr.Actions {
-		result.RecommendedActions = append(result.RecommendedActions, convertActionFromProto(action))
+		result.RecommendedActions = append(result.RecommendedActions, convertRecommendedActionFromProto(action))
 	}
 
 	return result
@@ -276,18 +255,33 @@ func convertImpactToProto(impact *correlation.ImpactAssessment) *pb.ImpactAssess
 		return nil
 	}
 
+	// Map ImpactLevel from correlation package to pb
+	var level pb.ImpactAssessment_ImpactLevel
+	switch impact.TechnicalSeverity {
+	case "critical":
+		level = pb.ImpactAssessment_IMPACT_LEVEL_CRITICAL
+	case "high":
+		level = pb.ImpactAssessment_IMPACT_LEVEL_HIGH
+	case "medium":
+		level = pb.ImpactAssessment_IMPACT_LEVEL_MEDIUM
+	case "low":
+		level = pb.ImpactAssessment_IMPACT_LEVEL_LOW
+	default:
+		level = pb.ImpactAssessment_IMPACT_LEVEL_UNSPECIFIED
+	}
+
 	return &pb.ImpactAssessment{
-		Level:                   pb.ImpactAssessment_ImpactLevel(impact.Level),
-		BusinessImpactScore:     impact.BusinessImpactScore,
-		TechnicalImpactScore:    impact.TechnicalImpactScore,
-		AffectedServices:        impact.AffectedServices,
-		EstimatedDuration:       durationpb.New(impact.EstimatedDuration),
-		AffectedUsers:           impact.AffectedUsers,
-		AffectedRequests:        impact.AffectedRequests,
-		EstimatedCost:           impact.EstimatedCost,
-		Currency:                impact.Currency,
-		CascadeProbability:      impact.CascadeProbability,
-		PotentialCascadeTargets: impact.PotentialCascadeTargets,
+		Level:                   level,
+		BusinessImpactScore:     float64(impact.BusinessImpact),
+		TechnicalImpactScore:    0.7, // Default value
+		AffectedServices:        impact.AffectedResources,
+		EstimatedDuration:       durationpb.New(impact.TimeToResolution),
+		AffectedUsers:           0,  // Not available in semantic_otel_tracer version
+		AffectedRequests:        0,  // Not available in semantic_otel_tracer version
+		EstimatedCost:           0,  // Not available in semantic_otel_tracer version
+		Currency:                "", // Not available in semantic_otel_tracer version
+		CascadeProbability:      float64(impact.CascadeRisk),
+		PotentialCascadeTargets: []string{}, // Not available in semantic_otel_tracer version
 	}
 }
 
@@ -296,18 +290,28 @@ func convertImpactFromProto(impact *pb.ImpactAssessment) *correlation.ImpactAsse
 		return nil
 	}
 
+	// Map technical severity from pb
+	var severity string
+	switch impact.Level {
+	case pb.ImpactAssessment_IMPACT_LEVEL_CRITICAL:
+		severity = "critical"
+	case pb.ImpactAssessment_IMPACT_LEVEL_HIGH:
+		severity = "high"
+	case pb.ImpactAssessment_IMPACT_LEVEL_MEDIUM:
+		severity = "medium"
+	case pb.ImpactAssessment_IMPACT_LEVEL_LOW:
+		severity = "low"
+	default:
+		severity = "unknown"
+	}
+
 	return &correlation.ImpactAssessment{
-		Level:                   correlation.ImpactLevel(impact.Level),
-		BusinessImpactScore:     impact.BusinessImpactScore,
-		TechnicalImpactScore:    impact.TechnicalImpactScore,
-		AffectedServices:        impact.AffectedServices,
-		EstimatedDuration:       impact.EstimatedDuration.AsDuration(),
-		AffectedUsers:           impact.AffectedUsers,
-		AffectedRequests:        impact.AffectedRequests,
-		EstimatedCost:           impact.EstimatedCost,
-		Currency:                impact.Currency,
-		CascadeProbability:      impact.CascadeProbability,
-		PotentialCascadeTargets: impact.PotentialCascadeTargets,
+		BusinessImpact:     float32(impact.BusinessImpactScore),
+		TechnicalSeverity:  severity,
+		CascadeRisk:        float32(impact.CascadeProbability),
+		AffectedResources:  impact.AffectedServices,
+		TimeToResolution:   impact.EstimatedDuration.AsDuration(),
+		RecommendedActions: []string{}, // Not directly available from proto
 	}
 }
 
@@ -323,21 +327,13 @@ func convertPredictionToProto(pred *correlation.PredictedOutcome) *pb.PredictedO
 		Probability:         pred.Probability,
 		TimeToOutcome:       durationpb.New(pred.TimeToOutcome),
 		PreventionActions:   pred.PreventionActions,
-		Confidence:          pred.Confidence,
-		ModelVersion:        pred.ModelVersion,
-		PredictionTimestamp: timestamppb.New(pred.PredictionTimestamp),
+		Confidence:          pred.ConfidenceLevel,
+		ModelVersion:        "1.0", // Default version
+		PredictionTimestamp: timestamppb.New(time.Now()),
 	}
 
-	// Convert predicted events
-	for _, event := range pred.PredictedEvents {
-		pbPred.PredictedEvents = append(pbPred.PredictedEvents, &pb.PredictedEvent{
-			Type:          pb.EventType(event.Type),
-			Severity:      pb.EventSeverity(event.Severity),
-			Description:   event.Description,
-			Probability:   event.Probability,
-			EstimatedTime: durationpb.New(event.EstimatedTime),
-		})
-	}
+	// Note: PredictedEvents not available in semantic_otel_tracer version
+	pbPred.PredictedEvents = []*pb.PredictedEvent{}
 
 	return pbPred
 }
@@ -348,24 +344,11 @@ func convertPredictionFromProto(pred *pb.PredictedOutcome) *correlation.Predicte
 	}
 
 	result := &correlation.PredictedOutcome{
-		Scenario:            pred.Scenario,
-		Probability:         pred.Probability,
-		TimeToOutcome:       pred.TimeToOutcome.AsDuration(),
-		PreventionActions:   pred.PreventionActions,
-		Confidence:          pred.Confidence,
-		ModelVersion:        pred.ModelVersion,
-		PredictionTimestamp: pred.PredictionTimestamp.AsTime(),
-	}
-
-	// Convert predicted events
-	for _, event := range pred.PredictedEvents {
-		result.PredictedEvents = append(result.PredictedEvents, correlation.PredictedEvent{
-			Type:          correlation.EventType(event.Type),
-			Severity:      correlation.EventSeverity(event.Severity),
-			Description:   event.Description,
-			Probability:   event.Probability,
-			EstimatedTime: event.EstimatedTime.AsDuration(),
-		})
+		Scenario:          pred.Scenario,
+		Probability:       pred.Probability,
+		TimeToOutcome:     pred.TimeToOutcome.AsDuration(),
+		PreventionActions: pred.PreventionActions,
+		ConfidenceLevel:   pred.Confidence,
 	}
 
 	return result
@@ -379,28 +362,19 @@ func convertRootCauseToProto(rc *correlation.RootCauseAnalysis) *pb.RootCauseAna
 	}
 
 	pbRC := &pb.RootCauseAnalysis{
-		RootCauseSummary: rc.Summary,
+		RootCauseSummary: "", // Not available in semantic_types version
 		Confidence:       rc.Confidence,
 	}
 
-	// Convert causal factors
-	for _, factor := range rc.CausalFactors {
-		pbRC.CausalFactors = append(pbRC.CausalFactors, &pb.CausalFactor{
-			Id:                 factor.ID,
-			Description:        factor.Description,
-			ContributionWeight: factor.ContributionWeight,
-			Category:           factor.Category,
-		})
-	}
-
-	// Convert causal chain
+	// Note: RootCauseAnalysis in semantic_types.go has different structure
+	// Map CausalChain from CausalLinkDetail to pb.CausalLink
 	for _, link := range rc.CausalChain {
 		pbRC.CausalChain = append(pbRC.CausalChain, &pb.CausalLink{
-			FromEventId:      link.FromEventID,
-			ToEventId:        link.ToEventID,
-			RelationshipType: link.RelationshipType,
-			Confidence:       link.Confidence,
-			TimeDelta:        durationpb.New(link.TimeDelta),
+			FromEventId:      link.FromEvent,
+			ToEventId:        link.ToEvent,
+			RelationshipType: link.Mechanism,
+			Confidence:       link.Probability,
+			TimeDelta:        durationpb.New(link.Latency),
 		})
 	}
 
@@ -408,19 +382,18 @@ func convertRootCauseToProto(rc *correlation.RootCauseAnalysis) *pb.RootCauseAna
 	for _, factor := range rc.ContributingFactors {
 		pbRC.ContributingFactors = append(pbRC.ContributingFactors, &pb.ContributingFactor{
 			Factor:   factor.Factor,
-			Weight:   factor.Weight,
-			Evidence: factor.Evidence,
+			Weight:   factor.Impact,
+			Evidence: factor.Type + "; " + factor.Remediation,
 		})
 	}
 
 	// Convert evidence
 	for _, evidence := range rc.Evidence {
-		data, _ := structpb.NewStruct(evidence.Data)
 		pbRC.Evidence = append(pbRC.Evidence, &pb.Evidence{
-			Type:           evidence.Type,
-			Description:    evidence.Description,
-			Data:           data,
-			RelevanceScore: evidence.RelevanceScore,
+			Type:           "root_cause",
+			Description:    evidence,
+			Data:           nil,
+			RelevanceScore: 0.8,
 		})
 	}
 
@@ -433,52 +406,37 @@ func convertRootCauseFromProto(rc *pb.RootCauseAnalysis) *correlation.RootCauseA
 	}
 
 	result := &correlation.RootCauseAnalysis{
-		Summary:    rc.RootCauseSummary,
-		Confidence: rc.Confidence,
-	}
-
-	// Convert causal factors
-	for _, factor := range rc.CausalFactors {
-		result.CausalFactors = append(result.CausalFactors, correlation.CausalFactor{
-			ID:                 factor.Id,
-			Description:        factor.Description,
-			ContributionWeight: factor.ContributionWeight,
-			Category:           factor.Category,
-		})
+		RootCauseEvent:      nil, // Would need to be set separately
+		CausalChain:         []correlation.CausalLinkDetail{},
+		ContributingFactors: []correlation.ContributingFactor{},
+		Confidence:          rc.Confidence,
+		Evidence:            []string{},
 	}
 
 	// Convert causal chain
 	for _, link := range rc.CausalChain {
-		result.CausalChain = append(result.CausalChain, correlation.CausalLink{
-			FromEventID:      link.FromEventId,
-			ToEventID:        link.ToEventId,
-			RelationshipType: link.RelationshipType,
-			Confidence:       link.Confidence,
-			TimeDelta:        link.TimeDelta.AsDuration(),
+		result.CausalChain = append(result.CausalChain, correlation.CausalLinkDetail{
+			FromEvent:   link.FromEventId,
+			ToEvent:     link.ToEventId,
+			Mechanism:   link.RelationshipType,
+			Probability: link.Confidence,
+			Latency:     link.TimeDelta.AsDuration(),
 		})
 	}
 
 	// Convert contributing factors
 	for _, factor := range rc.ContributingFactors {
 		result.ContributingFactors = append(result.ContributingFactors, correlation.ContributingFactor{
-			Factor:   factor.Factor,
-			Weight:   factor.Weight,
-			Evidence: factor.Evidence,
+			Factor:      factor.Factor,
+			Impact:      factor.Weight,
+			Type:        "unknown", // Extract from evidence if available
+			Remediation: "",        // Extract from evidence if available
 		})
 	}
 
 	// Convert evidence
 	for _, evidence := range rc.Evidence {
-		var data map[string]interface{}
-		if evidence.Data != nil {
-			data = evidence.Data.AsMap()
-		}
-		result.Evidence = append(result.Evidence, correlation.Evidence{
-			Type:           evidence.Type,
-			Description:    evidence.Description,
-			Data:           data,
-			RelevanceScore: evidence.RelevanceScore,
-		})
+		result.Evidence = append(result.Evidence, evidence.Description)
 	}
 
 	return result
@@ -486,7 +444,24 @@ func convertRootCauseFromProto(rc *pb.RootCauseAnalysis) *correlation.RootCauseA
 
 // Action conversions
 
-func convertActionToProto(action correlation.RecommendedAction) *pb.RecommendedAction {
+func convertActionToProto(action string) *pb.RecommendedAction {
+	// Simple conversion from string action to RecommendedAction proto
+	return &pb.RecommendedAction{
+		Id:                fmt.Sprintf("action_%d", rand.Int()),
+		Title:             "Recommended Action",
+		Description:       action,
+		Type:              pb.RecommendedAction_ACTION_TYPE_INVESTIGATE,
+		Priority:          pb.RecommendedAction_PRIORITY_MEDIUM,
+		Commands:          []string{action},
+		Parameters:        map[string]string{},
+		ExpectedResult:    "Issue resolution",
+		EstimatedDuration: durationpb.New(10 * time.Minute),
+		RiskLevel:         "medium",
+		RiskDescription:   "Standard operational action",
+	}
+}
+
+func convertRecommendedActionToProto(action correlation.RecommendedAction) *pb.RecommendedAction {
 	return &pb.RecommendedAction{
 		Id:                action.ID,
 		Title:             action.Title,
@@ -502,7 +477,15 @@ func convertActionToProto(action correlation.RecommendedAction) *pb.RecommendedA
 	}
 }
 
-func convertActionFromProto(action *pb.RecommendedAction) correlation.RecommendedAction {
+func convertActionFromProto(action *pb.RecommendedAction) string {
+	// Simple conversion from RecommendedAction proto to string
+	if action == nil {
+		return ""
+	}
+	return action.Description
+}
+
+func convertRecommendedActionFromProto(action *pb.RecommendedAction) correlation.RecommendedAction {
 	return correlation.RecommendedAction{
 		ID:                action.Id,
 		Title:             action.Title,
@@ -520,7 +503,7 @@ func convertActionFromProto(action *pb.RecommendedAction) correlation.Recommende
 
 // Insight conversions
 
-func convertInsightToProto(insight *correlation.Insight) *pb.Insight {
+func convertInsightToProto(insight *correlation.CorrelationInsight) *pb.Insight {
 	if insight == nil {
 		return nil
 	}
@@ -529,54 +512,41 @@ func convertInsightToProto(insight *correlation.Insight) *pb.Insight {
 		Id:               insight.ID,
 		Type:             insight.Type,
 		Title:            insight.Title,
-		Summary:          insight.Summary,
-		EventIds:         insight.EventIDs,
-		CorrelationIds:   insight.CorrelationIDs,
-		SemanticGroupIds: insight.SemanticGroupIDs,
+		Summary:          insight.Description,
+		EventIds:         insight.RelatedEvents,
+		CorrelationIds:   []string{}, // Not available in CorrelationInsight
+		SemanticGroupIds: []string{}, // Not available in CorrelationInsight
 		Confidence:       insight.Confidence,
-		CreatedAt:        timestamppb.New(insight.CreatedAt),
-		Metadata:         insight.Metadata,
+		CreatedAt:        timestamppb.New(insight.Timestamp),
+		Metadata:         convertMetadataToStringMap(insight.Metadata),
 	}
 
-	// Convert explanation
-	if insight.Explanation != nil {
-		pbInsight.Explanation = &pb.HumanExplanation{
-			TechnicalExplanation: insight.Explanation.Technical,
-			BusinessExplanation:  insight.Explanation.Business,
-			ExecutiveSummary:     insight.Explanation.Executive,
-		}
-
-		// Convert visualizations
-		for _, viz := range insight.Explanation.Visualizations {
-			data, _ := structpb.NewStruct(viz.Data)
-			pbInsight.Explanation.Visualizations = append(pbInsight.Explanation.Visualizations, &pb.Visualization{
-				Type:    viz.Type,
-				Title:   viz.Title,
-				Data:    data,
-				Options: viz.Options,
-			})
-		}
-
-		// Convert key metrics
-		for _, metric := range insight.Explanation.KeyMetrics {
-			pbInsight.Explanation.KeyMetrics = append(pbInsight.Explanation.KeyMetrics, &pb.KeyMetric{
-				Name:     metric.Name,
-				Value:    metric.Value,
-				Unit:     metric.Unit,
-				Trend:    metric.Trend,
-				Severity: metric.Severity,
-			})
+	// Convert explanation from metadata if available
+	if explanationData, ok := insight.Metadata["explanation"]; ok {
+		if explanationMap, ok := explanationData.(map[string]interface{}); ok {
+			pbInsight.Explanation = &pb.HumanExplanation{
+				TechnicalExplanation: getStringFromMap(explanationMap, "technical"),
+				BusinessExplanation:  getStringFromMap(explanationMap, "business"),
+				ExecutiveSummary:     getStringFromMap(explanationMap, "executive"),
+			}
 		}
 	}
 
-	// Convert impact
-	if insight.Impact != nil {
-		pbInsight.Impact = convertImpactToProto(insight.Impact)
+	// Convert impact from metadata if available
+	if impactData, ok := insight.Metadata["impact"]; ok {
+		if impact, ok := impactData.(*correlation.ImpactAssessment); ok {
+			pbInsight.Impact = convertImpactToProto(impact)
+		}
 	}
 
 	// Convert actions
 	for _, action := range insight.Actions {
-		pbInsight.Actions = append(pbInsight.Actions, convertActionToProto(action))
+		pbInsight.Actions = append(pbInsight.Actions, &pb.RecommendedAction{
+			Id:          fmt.Sprintf("action_%d", rand.Int()),
+			Title:       action.Title,
+			Description: action.Description,
+			RiskLevel:   action.Risk,
+		})
 	}
 
 	return pbInsight
@@ -590,20 +560,20 @@ func convertFilterFromProto(filter *pb.Filter) *correlation.Filter {
 	}
 
 	result := &correlation.Filter{
-		Query:             filter.Query,
+		Query:             filter.SearchText,
 		EventTypes:        make([]correlation.EventType, 0, len(filter.EventTypes)),
 		Severities:        make([]correlation.EventSeverity, 0, len(filter.Severities)),
-		Sources:           make([]correlation.SourceType, 0, len(filter.Sources)),
-		ResourceTypes:     filter.ResourceTypes,
-		ResourceIDs:       filter.ResourceIds,
-		TraceIDs:          filter.TraceIds,
-		CorrelationIDs:    filter.CorrelationIds,
-		SemanticGroupIDs:  filter.SemanticGroupIds,
-		Labels:            filter.Labels,
-		HasCorrelations:   filter.HasCorrelations,
-		HasSemanticGroups: filter.HasSemanticGroups,
-		MinConfidence:     filter.MinConfidence,
-		Limit:             int(filter.Limit),
+		Sources:           make([]correlation.SourceType, 0, len(filter.SourceTypes)),
+		ResourceTypes:     []string{},              // Not available in proto Filter
+		ResourceIDs:       []string{},              // Not available in proto Filter
+		TraceIDs:          []string{},              // Not available in proto Filter
+		CorrelationIDs:    []string{},              // Not available in proto Filter
+		SemanticGroupIDs:  []string{},              // Not available in proto Filter
+		Labels:            make(map[string]string), // Convert from label selectors
+		HasCorrelations:   false,                   // Not available in proto Filter
+		HasSemanticGroups: false,                   // Not available in proto Filter
+		MinConfidence:     0.0,                     // Not available in proto Filter
+		Limit:             0,                       // Not available in proto Filter
 	}
 
 	// Convert enums
@@ -613,7 +583,7 @@ func convertFilterFromProto(filter *pb.Filter) *correlation.Filter {
 	for _, s := range filter.Severities {
 		result.Severities = append(result.Severities, correlation.EventSeverity(s))
 	}
-	for _, s := range filter.Sources {
+	for _, s := range filter.SourceTypes {
 		result.Sources = append(result.Sources, correlation.SourceType(s))
 	}
 
@@ -641,3 +611,105 @@ func convertTimeRangeFromProto(tr *pb.TimeRange) *correlation.TimeRange {
 
 // EventStore Subscribe method signature
 type UnsubscribeFunc func()
+
+// Helper functions
+
+func convertMetadataToStringMap(metadata map[string]interface{}) map[string]string {
+	result := make(map[string]string)
+	for k, v := range metadata {
+		result[k] = fmt.Sprintf("%v", v)
+	}
+	return result
+}
+
+func getStringFromMap(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+		return fmt.Sprintf("%v", val)
+	}
+	return ""
+}
+
+func convertStringMapToInterface(m map[string]string) map[string]interface{} {
+	result := make(map[string]interface{})
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
+}
+
+func convertEventTypeToProto(eventType domain.EventType) pb.EventType {
+	switch eventType {
+	case domain.EventTypeSystem:
+		return pb.EventType_EVENT_TYPE_SYSCALL
+	case domain.EventTypeKubernetes:
+		return pb.EventType_EVENT_TYPE_KUBERNETES
+	case domain.EventTypeService:
+		return pb.EventType_EVENT_TYPE_HTTP // Map service to HTTP for now
+	case domain.EventTypeNetwork:
+		return pb.EventType_EVENT_TYPE_NETWORK
+	case domain.EventTypeProcess:
+		return pb.EventType_EVENT_TYPE_PROCESS
+	case domain.EventTypeMemory:
+		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
+	case domain.EventTypeCPU:
+		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
+	case domain.EventTypeDisk:
+		return pb.EventType_EVENT_TYPE_FILE_SYSTEM
+	default:
+		return pb.EventType_EVENT_TYPE_UNSPECIFIED
+	}
+}
+
+func convertEventSeverityToProto(severity domain.EventSeverity) pb.EventSeverity {
+	switch severity {
+	case domain.EventSeverityDebug:
+		return pb.EventSeverity_EVENT_SEVERITY_DEBUG
+	case domain.EventSeverityInfo:
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
+	case domain.EventSeverityLow:
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
+	case domain.EventSeverityMedium:
+		return pb.EventSeverity_EVENT_SEVERITY_WARNING
+	case domain.EventSeverityWarning:
+		return pb.EventSeverity_EVENT_SEVERITY_WARNING
+	case domain.EventSeverityHigh:
+		return pb.EventSeverity_EVENT_SEVERITY_ERROR
+	case domain.EventSeverityError:
+		return pb.EventSeverity_EVENT_SEVERITY_ERROR
+	case domain.EventSeverityCritical:
+		return pb.EventSeverity_EVENT_SEVERITY_CRITICAL
+	default:
+		return pb.EventSeverity_EVENT_SEVERITY_UNSPECIFIED
+	}
+}
+
+func convertSourceTypeToProto(source domain.SourceType) pb.SourceType {
+	switch source {
+	case domain.SourceEBPF:
+		return pb.SourceType_SOURCE_TYPE_EBPF
+	case domain.SourceK8s:
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
+	case domain.SourceSystemd:
+		return pb.SourceType_SOURCE_TYPE_SYSLOG // Map systemd to syslog
+	case domain.SourceJournald:
+		return pb.SourceType_SOURCE_TYPE_JOURNALD
+	case domain.SourceCNI:
+		return pb.SourceType_SOURCE_TYPE_CONTAINERD // Map CNI to containerd
+	default:
+		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
+	}
+}
+
+func convertInterfaceMapToString(m map[string]interface{}) map[string]string {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]string)
+	for k, v := range m {
+		result[k] = fmt.Sprintf("%v", v)
+	}
+	return result
+}

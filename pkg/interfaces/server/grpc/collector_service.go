@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/performance"
@@ -51,18 +52,19 @@ type CollectorServer struct {
 }
 
 type collectorInfo struct {
-	ID           string
-	Type         string
-	Version      string
-	Node         *pb.NodeInfo
-	Capabilities *pb.CollectorCapabilities
-	Config       *pb.CollectorConfig
-	RegisteredAt time.Time
-	LastSeen     time.Time
-	State        pb.CollectorState
-	StreamID     string
-	Metrics      *collectorMetrics
-	mu           sync.RWMutex
+	ID               string
+	Type             string
+	Version          string
+	Node             *pb.NodeInfo
+	Capabilities     *pb.CollectorCapabilities
+	Config           *pb.CollectorConfig
+	RegisteredAt     time.Time
+	LastSeen         time.Time
+	LastConfigUpdate time.Time
+	State            pb.CollectorState
+	StreamID         string
+	Metrics          *collectorMetrics
+	mu               sync.RWMutex
 }
 
 type collectorMetrics struct {
@@ -125,13 +127,23 @@ func NewCollectorServer(
 	tracer trace.Tracer,
 ) *CollectorServer {
 	// Create performance components
-	pipeline := performance.NewEventPipeline(
-		performance.WithWorkers(16),
-		performance.WithBufferSize(10000),
-		performance.WithMaxBatchSize(1000),
-	)
+	pipelineConfig := performance.DefaultPipelineConfig()
+	pipelineConfig.WorkersPerStage = 16
+	pipelineConfig.BufferSize = 16384 // Must be power of 2
+	pipelineConfig.BatchSize = 1000
 
-	batchProc := performance.NewBatchProcessor(
+	// Create stages for the pipeline
+	stages := []performance.Stage{
+		// Add default stages here - in production, these would be actual implementations
+	}
+
+	pipeline, err := performance.NewEventPipeline(stages, pipelineConfig)
+	if err != nil {
+		logger.Error("Failed to create event pipeline", zap.Error(err))
+		return nil
+	}
+
+	batchProc := performance.NewBatchProcessor[*domain.Event](
 		1000,                 // batch size
 		100*time.Millisecond, // timeout
 		10000,                // max queue size
@@ -146,7 +158,11 @@ func NewCollectorServer(
 		},
 	)
 
-	ringBuffer := performance.NewRingBuffer(1024 * 1024) // 1MB buffer
+	ringBuffer, err := performance.NewRingBuffer(1024 * 1024) // 1MB buffer
+	if err != nil {
+		logger.Error("Failed to create ring buffer", zap.Error(err))
+		return nil
+	}
 
 	server := &CollectorServer{
 		logger:             logger,
@@ -169,8 +185,14 @@ func NewCollectorServer(
 	go server.flowControlManager()
 
 	// Start pipeline
-	pipeline.Start()
-	batchProc.Start()
+	if err := pipeline.Start(); err != nil {
+		logger.Error("Failed to start pipeline", zap.Error(err))
+		return nil
+	}
+	if err := batchProc.Start(); err != nil {
+		logger.Error("Failed to start batch processor", zap.Error(err))
+		return nil
+	}
 
 	return server
 }
@@ -300,18 +322,28 @@ func (s *CollectorServer) processEventBatch(ctx context.Context, stream *collect
 	processed := 0
 	failed := 0
 
-	results := s.pipeline.ProcessBatch(ctx, domainEvents)
-	for _, result := range results {
-		if result.Error != nil {
-			failed++
-			s.failedEvents.Add(1)
-			s.logger.Error("Failed to process event",
-				zap.Error(result.Error),
-				zap.String("event_id", result.Event.ID))
-		} else {
-			processed++
-			s.totalEvents.Add(1)
+	// Convert domain events to pipeline events
+	pipelineEvents := make([]*performance.Event, 0, len(domainEvents))
+	for _, event := range domainEvents {
+		pipelineEvent := &performance.Event{
+			ID:        uint64(time.Now().UnixNano()),
+			Type:      string(event.Type),
+			Timestamp: event.Timestamp.UnixNano(),
+			Data:      unsafe.Pointer(event),
 		}
+		pipelineEvents = append(pipelineEvents, pipelineEvent)
+	}
+
+	// Submit events to pipeline
+	if err := s.pipeline.SubmitBatch(pipelineEvents); err != nil {
+		failed = len(pipelineEvents)
+		s.failedEvents.Add(uint64(failed))
+		s.logger.Error("Failed to submit events to pipeline",
+			zap.Error(err),
+			zap.String("collector_id", stream.CollectorID))
+	} else {
+		processed = len(pipelineEvents)
+		s.totalEvents.Add(uint64(processed))
 	}
 
 	// Update collector metrics
@@ -386,7 +418,7 @@ func (s *CollectorServer) processCollectorStatus(ctx context.Context, stream *co
 	// Update metrics from status
 	if status.Stats != nil {
 		collector.Metrics.EventsReceived = status.Stats.TotalEvents
-		collector.Metrics.CurrentRate = status.Stats.EventsPerSecond
+		collector.Metrics.CurrentRate = float64(status.Stats.EventsPerSecond)
 	}
 	collector.mu.Unlock()
 
@@ -597,8 +629,8 @@ func (s *CollectorServer) GetConfig(ctx context.Context, req *pb.GetConfigReques
 
 	return &pb.GetConfigResponse{
 		Config:      collector.Config,
-		LastUpdated: timestamppb.New(collector.Config.LastUpdated),
-		Etag:        fmt.Sprintf("%d", collector.Config.LastUpdated.Unix()),
+		LastUpdated: timestamppb.New(collector.LastConfigUpdate),
+		Etag:        fmt.Sprintf("%d", collector.LastConfigUpdate.Unix()),
 	}, nil
 }
 
@@ -630,7 +662,7 @@ func (s *CollectorServer) UpdateConfig(ctx context.Context, req *pb.UpdateConfig
 	}
 
 	// Check etag for optimistic concurrency
-	currentEtag := fmt.Sprintf("%d", collector.Config.LastUpdated.Unix())
+	currentEtag := fmt.Sprintf("%d", collector.LastConfigUpdate.Unix())
 	if req.Etag != "" && req.Etag != currentEtag {
 		return &pb.UpdateConfigResponse{
 			Success: false,
@@ -641,13 +673,13 @@ func (s *CollectorServer) UpdateConfig(ctx context.Context, req *pb.UpdateConfig
 	// Apply configuration
 	collector.Config = req.Config
 	collector.Config.ConfigVersion = fmt.Sprintf("v%d", time.Now().Unix())
-	collector.Config.LastUpdated = time.Now()
+	collector.LastConfigUpdate = time.Now()
 
 	return &pb.UpdateConfigResponse{
 		Success:       true,
 		Message:       "Configuration updated successfully",
 		AppliedConfig: collector.Config,
-		NewEtag:       fmt.Sprintf("%d", collector.Config.LastUpdated.Unix()),
+		NewEtag:       fmt.Sprintf("%d", collector.LastConfigUpdate.Unix()),
 	}, nil
 }
 
@@ -930,7 +962,7 @@ func (s *CollectorServer) generateCollectorConfig(req *pb.CollectorRegistration)
 		Endpoints:         endpoints,
 		HeartbeatInterval: durationpb.New(s.heartbeatInterval),
 		ConfigTtl:         durationpb.New(24 * time.Hour),
-		LastUpdated:       time.Now(),
+		// LastUpdated is tracked separately in collectorInfo
 	}
 }
 
@@ -983,9 +1015,7 @@ func (s *CollectorServer) updateCollectorMetrics(collectorID string, batch *pb.C
 }
 
 func (s *CollectorServer) getServerStatus() *pb.ServerStatus {
-	s.streamsMu.RLock()
-	activeStreams := len(s.activeStreams)
-	s.streamsMu.RUnlock()
+	// Active streams count not used in current ServerStatus proto
 
 	s.collectorsMu.RLock()
 	activeCollectors := 0
