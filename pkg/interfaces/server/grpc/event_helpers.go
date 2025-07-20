@@ -381,7 +381,7 @@ func (s *EventServer) generateStatistics(timeRange *pb.TimeRange, events []domai
 		resourceList = append(resourceList, &pb.ResourceCount{
 			Resource: &pb.ResourceIdentifier{
 				Type: "kubernetes",
-				Id:   resource,
+				Name: resource,
 			},
 			Count:      count,
 			Percentage: percentage,
@@ -579,13 +579,13 @@ func (s *EventServer) enrichEventsWithTraces(events []*pb.Event) {
 func (s *EventServer) convertEventType(domainType domain.EventType) pb.EventType {
 	switch domainType {
 	case domain.EventTypeSystem:
-		return pb.EventType_EVENT_TYPE_SYSTEM
+		return pb.EventType_EVENT_TYPE_PROCESS
 	case domain.EventTypeKubernetes:
 		return pb.EventType_EVENT_TYPE_KUBERNETES
 	case domain.EventTypeService:
-		return pb.EventType_EVENT_TYPE_SERVICE
+		return pb.EventType_EVENT_TYPE_HTTP
 	case domain.EventTypeLog:
-		return pb.EventType_EVENT_TYPE_LOG
+		return pb.EventType_EVENT_TYPE_AUDIT
 	case domain.EventTypeNetwork:
 		return pb.EventType_EVENT_TYPE_NETWORK
 	case domain.EventTypeProcess:
@@ -617,9 +617,9 @@ func (s *EventServer) convertSourceType(domainSource domain.SourceType) pb.Sourc
 	case domain.SourceEBPF:
 		return pb.SourceType_SOURCE_TYPE_EBPF
 	case domain.SourceK8s:
-		return pb.SourceType_SOURCE_TYPE_KUBERNETES
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
 	case domain.SourceSystemd:
-		return pb.SourceType_SOURCE_TYPE_SYSTEMD
+		return pb.SourceType_SOURCE_TYPE_JOURNALD
 	default:
 		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
 	}
@@ -636,10 +636,7 @@ func (s *EventServer) convertEventContext(domainContext domain.EventContext) *pb
 		Node:      domainContext.Node,
 		Pod:       domainContext.Pod,
 		Container: domainContext.Container,
-		ProcessId: int32(domainContext.PID),
-		UserId:    int32(domainContext.UID),
-		GroupId:   int32(domainContext.GID),
-		Command:   domainContext.Comm,
+		UserId:    fmt.Sprintf("%d", domainContext.UID),
 		Labels:    domainContext.Labels,
 	}
 }

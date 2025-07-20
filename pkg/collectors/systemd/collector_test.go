@@ -46,12 +46,12 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestNewCollector(t *testing.T) {
 	config := core.Config{
-		Name:                "test-collector",
-		Enabled:             true,
-		EventBufferSize:     100,
-		WatchServiceStates:  true,
+		Name:                 "test-collector",
+		Enabled:              true,
+		EventBufferSize:      100,
+		WatchServiceStates:   true,
 		WatchServiceFailures: true,
-		UnitTypes:           []string{"service"},
+		UnitTypes:            []string{"service"},
 	}
 
 	collector, err := NewCollector(config)
@@ -123,9 +123,9 @@ func TestConfigValidation(t *testing.T) {
 
 func TestConfigServiceFiltering(t *testing.T) {
 	config := core.Config{
-		Name:          "test",
-		Enabled:       true,
-		ServiceFilter: []string{"nginx.service", "mysql.service"},
+		Name:           "test",
+		Enabled:        true,
+		ServiceFilter:  []string{"nginx.service", "mysql.service"},
 		ServiceExclude: []string{"*-test", "*-debug"},
 	}
 

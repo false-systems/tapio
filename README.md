@@ -1,94 +1,130 @@
-# Tapio: Cross-Layer Observability with Semantic Correlation
+# Tapio: Cross-Layer Observability (Early Development)
 
 <div align="center">
 
 ![Tapio Logo](https://img.shields.io/badge/Tapio-Cross--Layer%20Observability-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Early%20Development-orange?style=for-the-badge)
 
-**Revolutionary observability platform that correlates events across ALL layers - from kernel to user**
+**Building an observability platform that aims to correlate events across ALL layers - from kernel to user**
 
 [![Go Version](https://img.shields.io/badge/Go-1.24-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Performance](https://img.shields.io/badge/Throughput-165k%20events%2Fsec-green.svg)](docs/ARCHITECTURE.md)
+[![Build Status](https://img.shields.io/badge/Build-Passing-green.svg)](#)
 
-[Quick Start](#-quick-start) • [Why Tapio](#-why-tapio) • [Architecture](docs/ARCHITECTURE.md) • [Documentation](#-documentation)
+[Current State](#-current-state) • [Vision](#-our-vision) • [Architecture](docs/ARCHITECTURE.md) • [Contributing](#-contributing)
 
 </div>
 
-## 🚀 The Problem We Solve
+## 🔍 The Problem We're Trying to Solve
 
 When your payment service fails at 3 AM, you need answers:
 - **Why** did it fail? (root cause)
-- **What** is the business impact? (revenue loss)
+- **What** is the business impact? (revenue loss)  
 - **How** do we fix it? (actionable steps)
 
-Current tools show symptoms across disconnected dashboards. **Tapio shows the complete story:**
+Current tools show symptoms across disconnected dashboards. **Our goal is to show the complete story:**
 
 ```
 User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak → Kernel Syscalls
                      All connected by trace_id: abc123
 ```
 
-## ✨ Key Innovations
+## 📍 Current State
 
-### 1. **UnifiedEvent Format**
-One event format that can represent ANY observability signal:
-- eBPF kernel events
+**What we have built so far:**
+
+✅ **UnifiedEvent Format** - A single event structure that can represent different observability signals  
+✅ **Basic Analytics Engine** - Foundation for real-time event processing  
+✅ **Correlation Framework** - Early semantic correlation between events  
+✅ **gRPC/REST APIs** - Basic service interfaces  
+✅ **Single Module Architecture** - Clean, maintainable codebase  
+✅ **CNI Collector** - First collector using UnifiedEvent format  
+
+**What we're actively working on:**
+
+🔄 **Event Collectors** - eBPF, Kubernetes, SystemD data sources  
+🔄 **Performance Optimization** - Targeting high-throughput processing  
+🔄 **Cross-Layer Correlation** - Linking events from kernel to application  
+🔄 **Developer Experience** - Making it easy to run and test  
+
+**What we haven't built yet:**
+
+❌ Full production deployment  
+❌ Complete end-to-end correlation  
+❌ Business impact assessment  
+❌ Automated remediation  
+❌ UI/Dashboard  
+❌ Distributed deployment
+
+## 🎯 Our Vision
+
+### 1. **UnifiedEvent Format** ✅ *Built*
+A single event structure that can represent different observability signals:
+- eBPF kernel events  
 - OpenTelemetry traces
-- Kubernetes events  
+- Kubernetes events
 - Network packets
 - Application logs
 
 [Learn more about UnifiedEvent →](docs/UNIFIED_EVENT_DESIGN.md)
 
-### 2. **Automatic Cross-Layer Correlation**
-Using OTEL trace context, we automatically link:
+### 2. **Cross-Layer Correlation** 🔄 *Building*
+Using OTEL trace context, we want to automatically link:
 ```
 HTTP 500 error → DB timeout → OOM kill → memory leak syscalls
 ```
-No manual correlation needed!
+*Goal: No manual correlation needed!*
 
-### 3. **Semantic Understanding**
-We don't just collect data, we understand it:
+### 3. **Semantic Understanding** 🔄 *Prototyping*
+Instead of just collecting data, we want to understand it:
 ```go
-// Traditional: "connection refused error"
-// Tapio: "Payment database unreachable, affecting 127 customers, $12K revenue at risk"
+// Traditional: "connection refused error"  
+// Our Goal: "Payment database unreachable, affecting 127 customers, $12K revenue at risk"
 ```
 
-### 4. **Business Impact Assessment**
-Every event is scored for business impact:
+### 4. **Business Impact Assessment** ❌ *Future*
+Vision: Every event scored for business impact:
 - Customer facing?
-- Revenue impacting?
+- Revenue impacting?  
 - SLO violation?
 - Cascade risk?
 
-## 🏃 Quick Start
+## 🏃 Getting Started
 
-### Installation
+### For Developers
 
 ```bash
 # Clone the repository
 git clone https://github.com/yairfalse/tapio.git
 cd tapio
 
-# Build the platform
-make build
+# Build components (what's working so far)
+go build ./...
 
-# Run with example configuration
-./tapio-server --config examples/config.yaml
+# Run tests to see current functionality
+go test ./...
+
+# Format code (required for contributions)
+gofmt -w .
 ```
 
-### Docker Compose
+### Current Working Components
 
 ```bash
-# Start entire stack
-docker-compose up -d
+# Test the UnifiedEvent format
+go test ./pkg/domain/ -v
 
-# View real-time events
-tapio-cli stream events
+# Test analytics engine foundation  
+go test ./pkg/analytics/ -v
 
-# Check system health
-tapio-cli health
+# Test correlation framework
+go test ./pkg/intelligence/correlation/ -v
+
+# Test gRPC service foundations
+go test ./pkg/interfaces/server/grpc/ -v
 ```
+
+**Note:** Full end-to-end system integration is still in development. We're building this incrementally and testing each component thoroughly.
 
 ## 🏗️ Architecture
 
@@ -129,13 +165,17 @@ tapio-cli health
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| **UnifiedEvent** | Universal event format with OTEL context | ✅ Production |
-| **Analytics Engine** | 165k events/sec real-time processing | ✅ Production |
-| **Correlation Engine** | Semantic correlation across layers | ✅ Production |
-| **eBPF Collector** | Kernel-level event collection | ✅ Beta |
-| **OTEL Collector** | OpenTelemetry integration | ✅ Production |
-| **K8s Collector** | Kubernetes event monitoring | ✅ Production |
-| **gRPC/REST API** | High-performance streaming API | ✅ Production |
+| **UnifiedEvent** | Universal event format with OTEL context | ✅ Built |
+| **Analytics Engine** | Foundation for real-time processing | 🔄 In Progress |
+| **Correlation Engine** | Early semantic correlation framework | 🔄 In Progress |
+| **CNI Collector** | Container network interface events | ✅ Prototype |
+| **eBPF Collector** | Kernel-level event collection | 🔄 In Progress |
+| **K8s Collector** | Kubernetes event monitoring | 🔄 In Progress |
+| **SystemD Collector** | System service monitoring | 🔄 In Progress |
+| **gRPC/REST API** | Service interfaces | ✅ Basic Framework |
+| **End-to-End Integration** | Full system working together | ❌ Not Yet |
+| **Performance Optimization** | High-throughput processing | 🔄 Building |
+| **Production Deployment** | Ready for real workloads | ❌ Future |
 
 ## 🔧 Configuration
 
@@ -172,12 +212,14 @@ correlation:
   groupRetentionPeriod: 30m
 ```
 
-## 📊 Example: Real-World Correlation
+## Example: What We're Building Towards
 
-### Scenario: Payment Service Degradation
+### Vision: Payment Service Issue Correlation
+
+*This is our goal for what end-to-end correlation might look like:*
 
 ```bash
-# What you see in Tapio
+# Future vision of tapio-cli
 $ tapio-cli correlate --trace-id abc123
 
 CORRELATION SUMMARY
@@ -209,37 +251,38 @@ RECOMMENDED ACTIONS
 1. IMMEDIATE: Scale payment-service to 5 replicas
 2. SHORT-TERM: Increase memory limit to 4Gi
 3. LONG-TERM: Fix memory leak in v2.1.0 (goroutine leak detected)
-
-$ tapio-cli apply recommendation 1
-✓ Scaled payment-service to 5 replicas
-✓ Service recovering, latency dropping
-✓ Estimated recovery: 2 minutes
 ```
 
-## 🎯 Use Cases
+**Note**: This end-to-end correlation doesn't exist yet. We're building the foundation to make this possible.
+
+## Intended Use Cases
 
 ### 1. **Root Cause Analysis**
-From symptom to root cause in seconds, not hours.
+Goal: From symptom to root cause in seconds, not hours.
 
 ### 2. **Predictive Failure Detection**
-Detect cascading failures before they impact customers.
+Goal: Detect cascading failures before they impact customers.
 
 ### 3. **Business Impact Assessment**
-Understand the real cost of technical issues.
+Goal: Understand the real cost of technical issues.
 
 ### 4. **SLO/SLA Compliance**
-Track and predict SLO violations across all layers.
+Goal: Track and predict SLO violations across all layers.
 
 ### 5. **Cost Correlation**
-Link performance issues to cloud costs.
+Goal: Link performance issues to cloud costs.
 
-## 🚀 Performance
+## 🎯 Performance Goals
 
-- **Throughput**: 165,000+ events/second
-- **Latency**: < 1ms p99 event processing
-- **Correlation Time**: < 100ms for 1000-event chains
-- **Memory**: ~4GB for 1M events in memory
-- **Storage**: Configurable retention (default 7 days)
+*These are our targets as we build towards production:*
+
+- **Throughput Target**: 165,000+ events/second *(not yet achieved)*
+- **Latency Target**: < 1ms p99 event processing *(in development)*
+- **Correlation Target**: < 100ms for 1000-event chains *(prototyping)*
+- **Memory Goal**: ~4GB for 1M events in memory *(optimizing)*
+- **Storage Goal**: Configurable retention *(future feature)*
+
+**Current Performance**: We're building the foundation and haven't benchmarked full end-to-end performance yet. Our focus is on correctness first, then optimization.
 
 ## 📖 Documentation
 
@@ -315,34 +358,38 @@ We love contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - [ ] Improve CLI output formatting
 - [ ] Add integration tests
 
-## 📈 Roadmap
+## Development Roadmap
 
-### Q1 2025
-- [x] UnifiedEvent format
-- [x] Analytics engine (165k events/sec)
-- [x] Basic correlation engine
+### Current (Q1 2025)
+- [x] UnifiedEvent format foundation
+- [x] Basic analytics engine structure
+- [x] Early correlation framework
 - [ ] Production-ready eBPF collector
-- [ ] Grafana integration
+- [ ] End-to-end integration
+- [ ] Performance optimization
 
-### Q2 2025
+### Next Steps (Q2 2025)
+- [ ] Complete cross-layer correlation
 - [ ] ML-powered anomaly detection
 - [ ] Automated remediation triggers
 - [ ] Multi-cluster federation
 - [ ] Cost correlation features
 
-### Q3 2025
-- [ ] SaaS offering
+### Future Vision (Q3 2025)
+- [ ] SaaS offering consideration
 - [ ] Enterprise features
 - [ ] Compliance reporting
 - [ ] Advanced visualizations
 
-## 🙏 Acknowledgments
+**Note**: This roadmap represents our goals and may change based on development progress and user feedback.
 
-Standing on the shoulders of giants:
+## Acknowledgments
+
+Building on excellent foundations:
 - **eBPF** community for kernel observability
 - **OpenTelemetry** for standardizing observability
 - **Kubernetes** for container orchestration
-- **Go** community for amazing tools
+- **Go** community for excellent tooling
 
 ## 📄 License
 
@@ -352,10 +399,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Built with Go and ❤️ for the frustrated SRE at 3 AM**
+**Built with Go for the SRE debugging at 3 AM**
 
-[Website](https://tapio.dev) • [Documentation](https://docs.tapio.dev) • [Blog](https://blog.tapio.dev)
-
-[![Star History](https://api.star-history.com/svg?repos=yairfalse/tapio&type=Date)](https://github.com/yairfalse/tapio/stargazers)
+[Repository](https://github.com/yairfalse/tapio) • [Issues](https://github.com/yairfalse/tapio/issues) • [Contributing](CONTRIBUTING.md)
 
 </div>

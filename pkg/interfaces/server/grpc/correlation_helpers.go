@@ -292,10 +292,9 @@ func (s *CorrelationServer) enrichSemanticGroupsWithAnalysis(ctx context.Context
 		if group.RootCause == nil && s.config.EnableRootCauseAnalysis {
 			// Convert simple map to protobuf Struct for evidence data
 			evidenceData, _ := structpb.NewStruct(map[string]interface{}{
-				"pattern": "connection_timeout",
+				"pattern":   "connection_timeout",
 				"frequency": 5,
 			})
-			
 			group.RootCause = &pb.RootCauseAnalysis{
 				RootCauseSummary: "Configuration change triggered cascade",
 				CausalFactors: []*pb.CausalFactor{
@@ -594,9 +593,8 @@ func (s *CorrelationServer) convertRootCauseAnalysisToProto(rootCause *corrDomai
 	// Convert simple map to protobuf Struct for evidence data
 	evidenceData, _ := structpb.NewStruct(map[string]interface{}{
 		"pattern": "primary_root_cause",
-		"source": "system_analysis",
+		"source":  "system_analysis",
 	})
-	
 	return &pb.RootCauseAnalysis{
 		RootCauseSummary: "Primary root cause identified",
 		CausalFactors: []*pb.CausalFactor{

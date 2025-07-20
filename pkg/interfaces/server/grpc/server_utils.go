@@ -137,10 +137,10 @@ func (s *TapioGRPCServer) InitializeServices() error {
 	s.logger.Info("Initializing Tapio gRPC services")
 
 	// Create service instances with real storage
-	s.tapioService = NewTapioServerWithRealStore(s.logger.Named("tapio"), s.tracer)
-	s.collectorService = NewCollectorServerWithRealStore(s.logger.Named("collector"), s.tracer)
+	s.tapioService = NewTapioServer(s.logger.Named("tapio"), s.tracer)
+	s.collectorService = NewCollectorServer(s.logger.Named("collector"), s.tracer)
 	s.eventService = NewEventServerWithRealStore(s.logger.Named("event"), s.tracer)
-	s.observabilityService = NewObservabilityServerWithRealStore(s.logger.Named("observability"), s.tracer)
+	s.observabilityService = NewObservabilityServer(s.logger.Named("observability"), s.tracer)
 	s.correlationService = NewCorrelationServerWithRealStore(s.logger.Named("correlation"), s.tracer)
 
 	// Register services with gRPC server
