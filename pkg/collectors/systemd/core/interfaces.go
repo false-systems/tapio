@@ -14,7 +14,7 @@ type Collector interface {
 	Stop() error
 
 	// Event streaming
-	Events() <-chan domain.Event
+	Events() <-chan domain.UnifiedEvent
 
 	// Health and monitoring
 	Health() Health
@@ -104,7 +104,7 @@ type ServiceWatcher interface {
 
 // EventProcessor processes raw systemd events into domain events
 type EventProcessor interface {
-	ProcessEvent(ctx context.Context, raw RawEvent) (domain.Event, error)
+	ProcessEvent(ctx context.Context, raw RawEvent) (*domain.UnifiedEvent, error)
 }
 
 // RawEvent represents a raw systemd event

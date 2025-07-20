@@ -21,7 +21,7 @@ type collector struct {
 	stopped atomic.Bool
 
 	// Event processing
-	eventChan chan domain.Event
+	eventChan chan domain.UnifiedEvent
 	processor core.EventProcessor
 
 	// Service watching
@@ -70,7 +70,7 @@ func NewCollector(config core.Config) (core.Collector, error) {
 
 	c := &collector{
 		config:    config,
-		eventChan: make(chan domain.Event, config.EventBufferSize),
+		eventChan: make(chan domain.UnifiedEvent, config.EventBufferSize),
 		startTime: time.Now(),
 		processor: newEventProcessor(),
 	}
@@ -156,7 +156,7 @@ func (c *collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *collector) Events() <-chan domain.Event {
+func (c *collector) Events() <-chan domain.UnifiedEvent {
 	return c.eventChan
 }
 
@@ -266,7 +266,7 @@ func (c *collector) processEvents() {
 
 			// Try to send event
 			select {
-			case c.eventChan <- event:
+			case c.eventChan <- *event:
 				// Event sent successfully
 			default:
 				// Buffer full, drop event

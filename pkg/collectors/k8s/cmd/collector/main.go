@@ -74,26 +74,38 @@ func main() {
 			fmt.Printf("  ID: %s\n", event.ID)
 			fmt.Printf("  Type: %s\n", event.Type)
 			fmt.Printf("  Source: %s\n", event.Source)
-			fmt.Printf("  Severity: %s\n", event.Severity)
+			fmt.Printf("  Severity: %s\n", event.GetSeverity())
 
-			// Print K8s-specific data from the map
-			if resource, ok := event.Data["resource"].(map[string]interface{}); ok {
-				fmt.Printf("  Resource: %s/%s in namespace %s\n",
-					resource["kind"],
-					resource["name"],
-					resource["namespace"])
+			// Print semantic context
+			if event.Semantic != nil {
+				fmt.Printf("  Intent: %s\n", event.Semantic.Intent)
+				fmt.Printf("  Category: %s\n", event.Semantic.Category)
+				fmt.Printf("  Narrative: %s\n", event.Semantic.Narrative)
 			}
 
-			if eventType, ok := event.Data["event_type"].(string); ok {
-				fmt.Printf("  Event Type: %s\n", eventType)
+			// Print entity information
+			if event.Entity != nil {
+				fmt.Printf("  Entity: %s/%s", event.Entity.Type, event.Entity.Name)
+				if event.Entity.Namespace != "" {
+					fmt.Printf(" in namespace %s", event.Entity.Namespace)
+				}
+				fmt.Printf("\n")
 			}
 
-			if reason, ok := event.Data["reason"].(string); ok && reason != "" {
-				fmt.Printf("  Reason: %s\n", reason)
+			// Print K8s-specific data
+			if event.Kubernetes != nil {
+				fmt.Printf("  K8s Action: %s\n", event.Kubernetes.Action)
+				fmt.Printf("  K8s Reason: %s\n", event.Kubernetes.Reason)
+				fmt.Printf("  K8s Message: %s\n", event.Kubernetes.Message)
 			}
 
-			if message, ok := event.Data["message"].(string); ok && message != "" {
-				fmt.Printf("  Message: %s\n", message)
+			// Print impact information
+			if event.Impact != nil {
+				fmt.Printf("  Impact: %s (%.2f business impact)\n",
+					event.Impact.Severity, event.Impact.BusinessImpact)
+				if len(event.Impact.AffectedServices) > 0 {
+					fmt.Printf("  Affected Services: %v\n", event.Impact.AffectedServices)
+				}
 			}
 		}
 	}()

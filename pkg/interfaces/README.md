@@ -99,7 +99,7 @@ defer cli.Stop(ctx)
 - `pkg/humanoutput/` → `pkg/interfaces/output/`
 - `pkg/server/` → `pkg/interfaces/server/`
 - `pkg/api/` → `pkg/interfaces/server/http/`
-- `cmd/tapio-cli/` → Use `pkg/interfaces/cli/`
+- CLI interface → Use `pkg/interfaces/cli/`
 - `cmd/tapio-server/` → Use `pkg/interfaces/server/`
 
 ### New Implementations:

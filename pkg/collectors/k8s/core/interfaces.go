@@ -13,8 +13,8 @@ type Collector interface {
 	Start(ctx context.Context) error
 	Stop() error
 
-	// Event streaming
-	Events() <-chan domain.Event
+	// Event streaming - Returns UnifiedEvent for direct analytics integration
+	Events() <-chan domain.UnifiedEvent
 
 	// Health and monitoring
 	Health() Health
@@ -112,9 +112,10 @@ type ResourceWatcher interface {
 	ResourceType() string
 }
 
-// EventProcessor processes raw K8s events into domain events
+// EventProcessor processes raw K8s events into UnifiedEvents
+// This eliminates conversion overhead and enables rich semantic correlation
 type EventProcessor interface {
-	ProcessEvent(ctx context.Context, raw RawEvent) (domain.Event, error)
+	ProcessEvent(ctx context.Context, raw RawEvent) (*domain.UnifiedEvent, error)
 }
 
 // RawEvent represents a raw Kubernetes event

@@ -7,6 +7,7 @@ option go_package = "github.com/yairfalse/tapio/proto/tapio/v1;tapiov1";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
+import "google/api/annotations.proto";
 import "tapio/v1/common.proto";
 
 // Event represents a single observability event with full OTEL context
@@ -204,11 +205,24 @@ service EventService {
   rpc Subscribe(SubscribeRequest) returns (stream EventUpdate);
   
   // Query historical events
-  rpc GetEvents(GetEventsRequest) returns (GetEventsResponse);
+  rpc GetEvents(GetEventsRequest) returns (GetEventsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/events"
+    };
+  }
   
   // Get event statistics
-  rpc GetStatistics(TimeRange) returns (EventStatistics);
+  rpc GetStatistics(TimeRange) returns (EventStatistics) {
+    option (google.api.http) = {
+      get: "/api/v1/events/statistics"
+    };
+  }
   
   // Batch event submission (unary)
-  rpc SubmitEventBatch(EventBatch) returns (EventAck);
+  rpc SubmitEventBatch(EventBatch) returns (EventAck) {
+    option (google.api.http) = {
+      post: "/api/v1/events/batch"
+      body: "*"
+    };
+  }
 }

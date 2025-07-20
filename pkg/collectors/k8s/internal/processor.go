@@ -17,69 +17,391 @@ func newEventProcessor() core.EventProcessor {
 	return &eventProcessor{}
 }
 
-// ProcessEvent converts a raw Kubernetes event to a domain event
-func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (domain.Event, error) {
-	// Create Kubernetes event data
-	eventData := p.createKubernetesData(raw)
+// ProcessEvent converts a raw Kubernetes event to a UnifiedEvent
+// This creates rich semantic correlation context directly from K8s events
+func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (*domain.UnifiedEvent, error) {
+	// Generate unique event ID
+	eventID := domain.GenerateEventID()
 
-	// Determine severity based on event type and content
+	// Determine event type and severity
+	eventType := p.mapEventTypeToDomain(raw.Type)
 	severity := p.determineSeverity(raw)
 
-	// Create the domain event
-	event := domain.Event{
-		ID:         domain.EventID(fmt.Sprintf("k8s_%s_%s_%s_%d", raw.ResourceKind, raw.Namespace, raw.Name, raw.Timestamp.UnixNano())),
-		Type:       domain.EventTypeKubernetes,
-		Source:     domain.SourceK8s,
-		Timestamp:  raw.Timestamp,
-		Data:       eventData,
-		Context:    p.createEventContext(raw),
-		Severity:   severity,
-		Confidence: 1.0, // K8s events are direct observations
-		Attributes: map[string]interface{}{
-			"hash":      p.generateHash(raw),
-			"signature": fmt.Sprintf("%s:%s", raw.ResourceKind, string(raw.Type)),
-			"kind":      raw.ResourceKind,
-			"namespace": raw.Namespace,
-			"name":      raw.Name,
-			"type":      string(raw.Type),
-		},
+	// Create semantic context based on K8s resource and action
+	semantic := p.createSemanticContext(raw)
+
+	// Create entity context from K8s resource
+	entity := p.createEntityContext(raw)
+
+	// Create Kubernetes-specific data
+	k8sData := p.createKubernetesData(raw)
+
+	// Create impact context based on severity and resource type
+	impact := p.createImpactContext(raw, severity)
+
+	// Build the UnifiedEvent
+	event := &domain.UnifiedEvent{
+		ID:        eventID,
+		Timestamp: raw.Timestamp,
+		Type:      eventType,
+		Source:    string(domain.SourceK8s),
+
+		// Rich semantic correlation context
+		Semantic: semantic,
+		Entity:   entity,
+
+		// K8s-specific data
+		Kubernetes: k8sData,
+
+		// Impact and correlation
+		Impact: impact,
 	}
 
 	return event, nil
 }
 
-// createKubernetesData creates a Kubernetes event data map
-func (p *eventProcessor) createKubernetesData(raw core.RawEvent) map[string]interface{} {
-	data := map[string]interface{}{
-		"resource": map[string]interface{}{
-			"api_version": p.extractAPIVersion(raw),
-			"kind":        raw.ResourceKind,
-			"namespace":   raw.Namespace,
-			"name":        raw.Name,
-		},
-		"event_type": string(raw.Type),
-		"count":      1,
+// mapEventTypeToDomain maps K8s event types to domain event types
+func (p *eventProcessor) mapEventTypeToDomain(k8sType core.EventType) domain.EventType {
+	switch k8sType {
+	case core.EventTypeAdded:
+		return domain.EventTypeKubernetes
+	case core.EventTypeModified:
+		return domain.EventTypeKubernetes
+	case core.EventTypeDeleted:
+		return domain.EventTypeKubernetes
+	case core.EventTypeError:
+		return domain.EventTypeSystem
+	default:
+		return domain.EventTypeKubernetes
+	}
+}
+
+// createSemanticContext creates semantic context for K8s events
+func (p *eventProcessor) createSemanticContext(raw core.RawEvent) *domain.SemanticContext {
+	intent := p.determineSemanticIntent(raw)
+	category := p.determineSemanticCategory(raw)
+	tags := p.generateSemanticTags(raw)
+	narrative := p.generateNarrative(raw)
+	confidence := p.calculateSemanticConfidence(raw)
+
+	return &domain.SemanticContext{
+		Intent:     intent,
+		Category:   category,
+		Tags:       tags,
+		Narrative:  narrative,
+		Confidence: confidence,
+	}
+}
+
+// createEntityContext creates entity context from K8s resource
+func (p *eventProcessor) createEntityContext(raw core.RawEvent) *domain.EntityContext {
+	// Extract labels and UID from the object if available
+	var labels map[string]string
+	var uid string
+
+	if obj, ok := raw.Object.(metav1.Object); ok {
+		labels = obj.GetLabels()
+		uid = string(obj.GetUID())
 	}
 
-	// Extract additional information based on resource type
+	return &domain.EntityContext{
+		Type:      raw.ResourceKind,
+		Name:      raw.Name,
+		Namespace: raw.Namespace,
+		UID:       uid,
+		Labels:    labels,
+		Attributes: map[string]string{
+			"api_version": p.extractAPIVersion(raw),
+			"event_type":  string(raw.Type),
+		},
+	}
+}
+
+// createImpactContext creates impact context based on severity and resource type
+func (p *eventProcessor) createImpactContext(raw core.RawEvent, severity string) *domain.ImpactContext {
+	businessImpact := p.calculateBusinessImpact(raw, severity)
+	affectedServices := p.determineAffectedServices(raw)
+	customerFacing := p.isCustomerFacing(raw)
+
+	return &domain.ImpactContext{
+		Severity:         severity,
+		BusinessImpact:   businessImpact,
+		AffectedServices: affectedServices,
+		CustomerFacing:   customerFacing,
+		SLOImpact:        severity == "critical" || severity == "high",
+	}
+}
+
+// createKubernetesData creates Kubernetes-specific data for UnifiedEvent
+func (p *eventProcessor) createKubernetesData(raw core.RawEvent) *domain.KubernetesData {
+	// Extract labels and annotations from the object if available
+	var labels, annotations map[string]string
+	var resourceVersion string
+
+	if obj, ok := raw.Object.(metav1.Object); ok {
+		labels = obj.GetLabels()
+		annotations = obj.GetAnnotations()
+		resourceVersion = obj.GetResourceVersion()
+	}
+
+	// Extract message and reason based on resource type
+	message, reason, eventType := p.extractMessageAndReason(raw)
+
+	k8sData := &domain.KubernetesData{
+		EventType:       eventType,
+		Reason:          reason,
+		Object:          fmt.Sprintf("%s/%s", raw.ResourceKind, raw.Name),
+		ObjectKind:      raw.ResourceKind,
+		Message:         message,
+		Action:          string(raw.Type),
+		APIVersion:      p.extractAPIVersion(raw),
+		ResourceVersion: resourceVersion,
+		Labels:          labels,
+		Annotations:     annotations,
+	}
+
+	return k8sData
+}
+
+// extractMessageAndReason extracts message, reason, and event type from K8s resources
+func (p *eventProcessor) extractMessageAndReason(raw core.RawEvent) (string, string, string) {
 	switch raw.ResourceKind {
 	case "Pod":
-		p.enrichPodData(data, raw)
-	case "Node":
-		p.enrichNodeData(data, raw)
-	case "Service":
-		p.enrichServiceData(data, raw)
+		if pod, ok := raw.Object.(*corev1.Pod); ok {
+			return fmt.Sprintf("Pod %s: %s", pod.Name, pod.Status.Phase), string(pod.Status.Phase), "Normal"
+		}
 	case "Event":
-		p.enrichEventData(data, raw)
+		if event, ok := raw.Object.(*corev1.Event); ok {
+			return event.Message, event.Reason, event.Type
+		}
+	case "Node":
+		if node, ok := raw.Object.(*corev1.Node); ok {
+			for _, cond := range node.Status.Conditions {
+				if cond.Type == corev1.NodeReady {
+					if cond.Status == corev1.ConditionTrue {
+						return fmt.Sprintf("Node %s is ready", node.Name), "Ready", "Normal"
+					} else {
+						return fmt.Sprintf("Node %s is not ready: %s", node.Name, cond.Message), "NotReady", "Warning"
+					}
+				}
+			}
+		}
 	}
 
-	// Handle state changes for MODIFIED events
-	if raw.Type == core.EventTypeModified && raw.OldObject != nil {
-		data["old_state"] = p.extractState(raw.OldObject)
-		data["new_state"] = p.extractState(raw.Object)
+	return fmt.Sprintf("%s %s: %s", raw.ResourceKind, raw.Name, string(raw.Type)), string(raw.Type), "Normal"
+}
+
+// determineSemanticIntent determines the semantic intent of a K8s event
+func (p *eventProcessor) determineSemanticIntent(raw core.RawEvent) string {
+	switch raw.ResourceKind {
+	case "Pod":
+		switch raw.Type {
+		case core.EventTypeAdded:
+			return "pod-created"
+		case core.EventTypeDeleted:
+			return "pod-terminated"
+		case core.EventTypeModified:
+			if pod, ok := raw.Object.(*corev1.Pod); ok {
+				switch pod.Status.Phase {
+				case corev1.PodRunning:
+					return "pod-running"
+				case corev1.PodFailed:
+					return "pod-failed"
+				case corev1.PodSucceeded:
+					return "pod-completed"
+				}
+			}
+			return "pod-state-change"
+		}
+	case "Node":
+		switch raw.Type {
+		case core.EventTypeAdded:
+			return "node-joined"
+		case core.EventTypeDeleted:
+			return "node-removed"
+		case core.EventTypeModified:
+			return "node-state-change"
+		}
+	case "Service":
+		switch raw.Type {
+		case core.EventTypeAdded:
+			return "service-created"
+		case core.EventTypeDeleted:
+			return "service-removed"
+		case core.EventTypeModified:
+			return "service-updated"
+		}
+	case "Event":
+		if event, ok := raw.Object.(*corev1.Event); ok {
+			switch event.Reason {
+			case "Failed", "FailedCreate", "FailedDelete":
+				return "operation-failed"
+			case "Killing", "Evicted":
+				return "pod-evicted"
+			case "BackOff":
+				return "backoff-restart"
+			}
+		}
+		return "k8s-event"
 	}
 
-	return data
+	return fmt.Sprintf("%s-%s", raw.ResourceKind, string(raw.Type))
+}
+
+// determineSemanticCategory determines the semantic category
+func (p *eventProcessor) determineSemanticCategory(raw core.RawEvent) string {
+	if event, ok := raw.Object.(*corev1.Event); ok {
+		switch event.Type {
+		case corev1.EventTypeWarning:
+			return "availability"
+		case corev1.EventTypeNormal:
+			return "operations"
+		}
+
+		switch event.Reason {
+		case "Failed", "FailedCreate", "FailedDelete", "FailedScheduling":
+			return "reliability"
+		case "Killing", "Evicted":
+			return "resource-management"
+		case "BackOff", "Unhealthy":
+			return "performance"
+		}
+	}
+
+	switch raw.Type {
+	case core.EventTypeError:
+		return "reliability"
+	case core.EventTypeDeleted:
+		return "operations"
+	default:
+		return "operations"
+	}
+}
+
+// generateSemanticTags generates semantic tags for correlation
+func (p *eventProcessor) generateSemanticTags(raw core.RawEvent) []string {
+	tags := []string{"kubernetes", raw.ResourceKind}
+
+	if raw.Namespace != "" {
+		tags = append(tags, "namespaced")
+	}
+
+	// Add resource-specific tags
+	switch raw.ResourceKind {
+	case "Pod":
+		tags = append(tags, "workload", "container")
+	case "Node":
+		tags = append(tags, "infrastructure", "cluster")
+	case "Service":
+		tags = append(tags, "networking", "discovery")
+	case "Event":
+		tags = append(tags, "observability", "audit")
+	}
+
+	// Add event type tags
+	switch raw.Type {
+	case core.EventTypeError:
+		tags = append(tags, "error", "critical-path")
+	case core.EventTypeDeleted:
+		tags = append(tags, "lifecycle", "cleanup")
+	}
+
+	return tags
+}
+
+// generateNarrative creates human-readable description
+func (p *eventProcessor) generateNarrative(raw core.RawEvent) string {
+	message, _, _ := p.extractMessageAndReason(raw)
+	return fmt.Sprintf("Kubernetes %s event: %s", raw.ResourceKind, message)
+}
+
+// calculateSemanticConfidence calculates confidence in semantic classification
+func (p *eventProcessor) calculateSemanticConfidence(raw core.RawEvent) float64 {
+	// K8s events are well-structured, so confidence is high
+	switch raw.ResourceKind {
+	case "Event":
+		return 0.95 // K8s Event objects are very reliable
+	case "Pod", "Node", "Service":
+		return 0.90 // Core resources are well-defined
+	default:
+		return 0.80 // Other resources are still reliable
+	}
+}
+
+// calculateBusinessImpact calculates business impact score
+func (p *eventProcessor) calculateBusinessImpact(raw core.RawEvent, severity string) float64 {
+	base := 0.1
+
+	// Adjust based on severity
+	switch severity {
+	case "critical":
+		base = 0.9
+	case "high":
+		base = 0.7
+	case "warning":
+		base = 0.4
+	case "info":
+		base = 0.1
+	}
+
+	// Adjust based on resource type
+	switch raw.ResourceKind {
+	case "Node":
+		base += 0.2 // Node issues affect multiple workloads
+	case "Service":
+		base += 0.1 // Service issues affect availability
+	case "Pod":
+		// Check if it's a system pod
+		if raw.Namespace == "kube-system" || raw.Namespace == "kube-public" {
+			base += 0.2
+		}
+	}
+
+	if base > 1.0 {
+		base = 1.0
+	}
+
+	return base
+}
+
+// determineAffectedServices determines which services might be affected
+func (p *eventProcessor) determineAffectedServices(raw core.RawEvent) []string {
+	services := []string{}
+
+	switch raw.ResourceKind {
+	case "Node":
+		services = append(services, "cluster-scheduler", "node-management")
+	case "Pod":
+		if raw.Namespace == "kube-system" {
+			services = append(services, "kubernetes-control-plane")
+		} else {
+			services = append(services, fmt.Sprintf("%s-workload", raw.Namespace))
+		}
+	case "Service":
+		services = append(services, "service-discovery", "networking")
+	}
+
+	return services
+}
+
+// isCustomerFacing determines if the event affects customer-facing services
+func (p *eventProcessor) isCustomerFacing(raw core.RawEvent) bool {
+	// System namespaces are usually not customer-facing
+	if raw.Namespace == "kube-system" || raw.Namespace == "kube-public" || raw.Namespace == "kube-node-lease" {
+		return false
+	}
+
+	// Services are often customer-facing
+	if raw.ResourceKind == "Service" {
+		return true
+	}
+
+	// Pod failures in application namespaces affect customers
+	if raw.ResourceKind == "Pod" && raw.Type == core.EventTypeError {
+		return true
+	}
+
+	return false
 }
 
 // enrichPodData adds Pod-specific information
@@ -215,24 +537,24 @@ func (p *eventProcessor) createEventContext(raw core.RawEvent) domain.EventConte
 }
 
 // determineSeverity determines the event severity
-func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.EventSeverity {
+func (p *eventProcessor) determineSeverity(raw core.RawEvent) string {
 	// Handle K8s Event objects specially
 	if event, ok := raw.Object.(*corev1.Event); ok {
 		switch event.Type {
 		case corev1.EventTypeWarning:
-			return domain.EventSeverityWarning
+			return "warning"
 		case corev1.EventTypeNormal:
-			return domain.EventSeverityLow
+			return "info"
 		}
 
 		// Check specific reasons
 		switch event.Reason {
 		case "Failed", "FailedCreate", "FailedDelete", "FailedScheduling":
-			return domain.EventSeverityHigh
+			return "high"
 		case "Killing", "Evicted", "NodeNotReady":
-			return domain.EventSeverityCritical
+			return "critical"
 		case "BackOff", "Unhealthy":
-			return domain.EventSeverityWarning
+			return "warning"
 		}
 	}
 
@@ -240,15 +562,15 @@ func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.EventSeveri
 	switch raw.Type {
 	case core.EventTypeDeleted:
 		if raw.ResourceKind == "Pod" || raw.ResourceKind == "Node" {
-			return domain.EventSeverityWarning
+			return "warning"
 		}
-		return domain.EventSeverityLow
+		return "info"
 
 	case core.EventTypeError:
-		return domain.EventSeverityHigh
+		return "high"
 
 	default:
-		return domain.EventSeverityLow
+		return "info"
 	}
 }
 

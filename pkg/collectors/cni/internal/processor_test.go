@@ -59,11 +59,53 @@ func TestCNIEventProcessor_ProcessEvent(t *testing.T) {
 				if event.ID == "" {
 					t.Error("event ID should not be empty")
 				}
+				if !strings.HasPrefix(event.ID, "cni-") {
+					t.Errorf("expected event ID to start with 'cni-', got %s", event.ID)
+				}
 				if event.Source != string(domain.SourceCNI) {
 					t.Errorf("expected source %s, got %s", domain.SourceCNI, event.Source)
 				}
 				if event.Type != domain.EventTypeNetwork {
 					t.Errorf("expected type %s, got %s", domain.EventTypeNetwork, event.Type)
+				}
+
+				// Verify Semantic context
+				if event.Semantic == nil {
+					t.Fatal("Semantic context should not be nil")
+				}
+				sem := event.Semantic
+				if sem.Intent != "pod-network-attached" {
+					t.Errorf("expected intent 'pod-network-attached', got %s", sem.Intent)
+				}
+				if sem.Category != "lifecycle" {
+					t.Errorf("expected category 'lifecycle', got %s", sem.Category)
+				}
+				if len(sem.Tags) == 0 {
+					t.Error("expected semantic tags to be present")
+				}
+				if sem.Narrative == "" {
+					t.Error("expected narrative to be present")
+				}
+				if sem.Confidence <= 0 || sem.Confidence > 1 {
+					t.Errorf("expected confidence between 0 and 1, got %f", sem.Confidence)
+				}
+
+				// Verify Entity context
+				if event.Entity == nil {
+					t.Fatal("Entity context should not be nil")
+				}
+				entity := event.Entity
+				if entity.Type != "Pod" {
+					t.Errorf("expected entity type 'Pod', got %s", entity.Type)
+				}
+				if entity.Name != "nginx-deployment-abc123" {
+					t.Errorf("expected entity name 'nginx-deployment-abc123', got %s", entity.Name)
+				}
+				if entity.Namespace != "default" {
+					t.Errorf("expected namespace 'default', got %s", entity.Namespace)
+				}
+				if entity.UID != "pod-uid-123" {
+					t.Errorf("expected UID 'pod-uid-123', got %s", entity.UID)
 				}
 
 				// Verify Kubernetes context
@@ -77,6 +119,12 @@ func TestCNIEventProcessor_ProcessEvent(t *testing.T) {
 				if k8s.ObjectKind != "Pod" {
 					t.Errorf("expected object kind Pod, got %s", k8s.ObjectKind)
 				}
+				if k8s.EventType != "Normal" {
+					t.Errorf("expected event type 'Normal', got %s", k8s.EventType)
+				}
+				if k8s.Reason != "NetworkAttached" {
+					t.Errorf("expected reason 'NetworkAttached', got %s", k8s.Reason)
+				}
 
 				// Verify Network context
 				if event.Network == nil {
@@ -89,42 +137,34 @@ func TestCNIEventProcessor_ProcessEvent(t *testing.T) {
 				if net.Headers["subnet"] != "10.244.1.0/24" {
 					t.Errorf("expected subnet 10.244.1.0/24, got %s", net.Headers["subnet"])
 				}
-				if net.Headers["cni-plugin"] != "cilium" {
-					t.Errorf("expected plugin cilium, got %s", net.Headers["cni-plugin"])
+				if net.Headers["cni_plugin"] != "cilium" {
+					t.Errorf("expected plugin cilium, got %s", net.Headers["cni_plugin"])
 				}
-
-				// Verify Application context
-				if event.Application == nil {
-					t.Fatal("Application context should not be nil")
-				}
-				app := event.Application
-				if !strings.Contains(app.Message, "nginx") {
-					t.Errorf("expected app message to contain nginx, got %s", app.Message)
-				}
-				if app.Custom["node_name"] != "worker-node-1" {
-					t.Errorf("expected node worker-node-1, got %v", app.Custom["node_name"])
-				}
-
-				// Verify Trace context
-				if event.TraceContext == nil {
-					t.Fatal("Trace context should not be nil")
-				}
-				trace := event.TraceContext
-				if trace.TraceID != "abc123def456" {
-					t.Errorf("expected trace ID abc123def456, got %s", trace.TraceID)
+				if net.Direction != "ingress" {
+					t.Errorf("expected direction 'ingress', got %s", net.Direction)
 				}
 
 				// Verify Impact context
 				if event.Impact == nil {
 					t.Fatal("Impact context should not be nil")
 				}
-				if event.Impact.Severity == "" {
-					t.Error("expected severity to be set")
+				impact := event.Impact
+				if impact.Severity != "info" {
+					t.Errorf("expected severity 'info', got %s", impact.Severity)
+				}
+				if impact.BusinessImpact < 0 || impact.BusinessImpact > 1 {
+					t.Errorf("expected business impact between 0 and 1, got %f", impact.BusinessImpact)
+				}
+				if len(impact.AffectedServices) == 0 {
+					t.Error("expected affected services to be present")
+				}
+				if impact.AffectedUsers != 0 {
+					t.Errorf("expected 0 affected users for successful operation, got %d", impact.AffectedUsers)
 				}
 			},
 		},
 		{
-			name: "failed DEL operation",
+			name: "failed DEL operation in production",
 			rawEvent: core.CNIRawEvent{
 				ID:           "test-del-fail",
 				Timestamp:    time.Now(),
@@ -134,26 +174,94 @@ func TestCNIEventProcessor_ProcessEvent(t *testing.T) {
 				Success:      false,
 				ErrorMessage: "failed to delete interface",
 				Duration:     5 * time.Second,
-				PodName:      "failed-pod",
+				PodName:      "payment-service-xyz",
+				PodNamespace: "production",
+				Labels: map[string]string{
+					"service": "payment",
+				},
 			},
 			validate: func(t *testing.T, event *domain.UnifiedEvent, err error) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 
-				// Verify error handling in application context
-				if event.Application == nil || event.Application.Level != "error" {
-					t.Error("expected error level in application context")
+				// Verify semantic context for failure
+				if event.Semantic == nil || event.Semantic.Intent != "network-cleanup-failed" {
+					t.Error("expected intent 'network-cleanup-failed'")
+				}
+				if event.Semantic.Category != "reliability" {
+					t.Errorf("expected category 'reliability', got %s", event.Semantic.Category)
+				}
+
+				// Verify Kubernetes context for failure
+				if event.Kubernetes == nil || event.Kubernetes.EventType != "Warning" {
+					t.Error("expected Kubernetes event type 'Warning'")
+				}
+				if event.Kubernetes.Reason != "NetworkCleanupFailed" {
+					t.Errorf("expected reason 'NetworkCleanupFailed', got %s", event.Kubernetes.Reason)
 				}
 
 				// Verify severity in impact context
-				if event.Impact == nil || event.Impact.Severity != "error" {
-					t.Error("expected error severity in impact context")
+				if event.Impact == nil || event.Impact.Severity != "high" {
+					t.Errorf("expected high severity for production failure, got %s", event.Impact.Severity)
+				}
+				if !event.Impact.CustomerFacing {
+					t.Error("expected customer-facing to be true for production namespace")
+				}
+				if !event.Impact.RevenueImpacting {
+					t.Error("expected revenue-impacting to be true for payment service")
+				}
+				if !event.Impact.SLOImpact {
+					t.Error("expected SLO impact for high severity production failure")
+				}
+			},
+		},
+		{
+			name: "slow operation in kube-system",
+			rawEvent: core.CNIRawEvent{
+				ID:           "test-slow-op",
+				Timestamp:    time.Now(),
+				Source:       "test",
+				Operation:    core.CNIOperationAdd,
+				PluginName:   "flannel",
+				Success:      true,
+				Duration:     15 * time.Second,
+				PodName:      "kube-dns-abc",
+				PodNamespace: "kube-system",
+				AssignedIP:   "10.96.0.10",
+			},
+			validate: func(t *testing.T, event *domain.UnifiedEvent, err error) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
 
-				// Verify message is in raw data
-				if !strings.Contains(string(event.RawData), "failed") {
-					t.Errorf("expected failure message in raw data, got %s", string(event.RawData))
+				// Verify severity for slow operation
+				if event.Impact == nil || event.Impact.Severity != "warning" {
+					t.Errorf("expected warning severity for slow operation, got %s", event.Impact.Severity)
+				}
+
+				// Verify semantic tags include slow-operation
+				found := false
+				for _, tag := range event.Semantic.Tags {
+					if tag == "system-critical" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Error("expected 'system-critical' tag for kube-system namespace")
+				}
+
+				// Verify affected services include system services
+				found = false
+				for _, svc := range event.Impact.AffectedServices {
+					if strings.Contains(svc, "kubernetes-networking") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Error("expected kubernetes-networking in affected services")
 				}
 			},
 		},
@@ -179,12 +287,25 @@ func TestCNIEventProcessor_ProcessEvent(t *testing.T) {
 					t.Errorf("expected source %s, got %s", domain.SourceCNI, event.Source)
 				}
 
+				// Semantic context should still be present
+				if event.Semantic == nil {
+					t.Fatal("Semantic context should not be nil")
+				}
+				if event.Semantic.Intent != "network-health-verified" {
+					t.Errorf("expected intent 'network-health-verified', got %s", event.Semantic.Intent)
+				}
+
+				// Entity context should be present but minimal
+				if event.Entity == nil {
+					t.Fatal("Entity context should not be nil")
+				}
+
 				// Optional contexts should be nil for minimal event
 				if event.Kubernetes != nil {
 					t.Error("Kubernetes context should be nil for minimal event")
 				}
-				if event.Application != nil {
-					t.Error("Application context should be nil for minimal event")
+				if event.Network != nil {
+					t.Error("Network context should be nil for minimal event")
 				}
 
 				// Impact context should still be present
@@ -203,159 +324,168 @@ func TestCNIEventProcessor_ProcessEvent(t *testing.T) {
 	}
 }
 
-func TestCNIEventProcessor_EventTypeMapping(t *testing.T) {
+func TestCNIEventProcessor_SemanticIntent(t *testing.T) {
 	processor := &cniEventProcessor{}
 
 	tests := []struct {
 		name     string
-		cniType  core.CNIEventType
-		expected domain.EventType
-	}{
-		{"IP allocation", core.CNIEventTypeIPAllocation, domain.EventTypeNetwork},
-		{"IP deallocation", core.CNIEventTypeIPDeallocation, domain.EventTypeNetwork},
-		{"Interface setup", core.CNIEventTypeInterfaceSetup, domain.EventTypeNetwork},
-		{"Interface teardown", core.CNIEventTypeInterfaceTeardown, domain.EventTypeNetwork},
-		{"Policy apply", core.CNIEventTypePolicyApply, domain.EventTypeSystem},
-		{"Error", core.CNIEventTypeError, domain.EventTypeSystem},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := processor.mapEventTypeToDomain(tt.cniType)
-			if result != tt.expected {
-				t.Errorf("expected %s, got %s", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestCNIEventProcessor_SeverityMapping(t *testing.T) {
-	processor := &cniEventProcessor{}
-
-	tests := []struct {
-		name     string
-		cniSev   core.CNISeverity
-		expected string
-	}{
-		{"Info", core.CNISeverityInfo, "info"},
-		{"Warning", core.CNISeverityWarning, "warning"},
-		{"Error", core.CNISeverityError, "error"},
-		{"Critical", core.CNISeverityCritical, "critical"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := processor.mapSeverityToDomain(tt.cniSev)
-			if result != tt.expected {
-				t.Errorf("expected %s, got %s", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestCNIEventProcessor_ApplicationNameExtraction(t *testing.T) {
-	tests := []struct {
-		name     string
-		podName  string
-		labels   map[string]string
+		raw      core.CNIRawEvent
 		expected string
 	}{
 		{
-			name:    "standard Kubernetes app label",
-			podName: "nginx-deployment-abc123",
-			labels: map[string]string{
-				"app.kubernetes.io/name": "nginx",
-			},
-			expected: "nginx",
-		},
-		{
-			name:    "simple app label",
-			podName: "redis-master-xyz789",
-			labels: map[string]string{
-				"app": "redis",
-			},
-			expected: "redis",
-		},
-		{
-			name:     "extract from pod name with deployment suffix",
-			podName:  "webapp-deployment-5c6c8d7f9-abc123",
-			labels:   map[string]string{},
-			expected: "webapp",
-		},
-		{
-			name:     "extract from pod name with single suffix",
-			podName:  "database-abc123",
-			labels:   map[string]string{},
-			expected: "database",
-		},
-		{
-			name:     "simple pod name",
-			podName:  "simple-pod",
-			labels:   map[string]string{},
-			expected: "simple-pod",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractApplicationName(tt.podName, tt.labels)
-			if result != tt.expected {
-				t.Errorf("expected %s, got %s", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestCNIEventProcessor_MessageGeneration(t *testing.T) {
-	processor := &cniEventProcessor{}
-
-	tests := []struct {
-		name      string
-		rawEvent  core.CNIRawEvent
-		eventType core.CNIEventType
-		contains  []string
-	}{
-		{
-			name: "successful IP allocation",
-			rawEvent: core.CNIRawEvent{
+			name: "successful ADD with IP",
+			raw: core.CNIRawEvent{
+				Operation:  core.CNIOperationAdd,
 				Success:    true,
 				AssignedIP: "10.244.1.10",
-				PodName:    "nginx-pod",
-				PluginName: "cilium",
 			},
-			eventType: core.CNIEventTypeIPAllocation,
-			contains:  []string{"IP", "10.244.1.10", "allocated", "nginx-pod", "cilium"},
+			expected: "pod-network-attached",
 		},
 		{
-			name: "failed operation",
-			rawEvent: core.CNIRawEvent{
-				Success:      false,
-				PodName:      "failed-pod",
-				Operation:    core.CNIOperationAdd,
-				ErrorMessage: "timeout waiting for response",
+			name: "successful ADD without IP",
+			raw: core.CNIRawEvent{
+				Operation: core.CNIOperationAdd,
+				Success:   true,
 			},
-			eventType: core.CNIEventTypeError,
-			contains:  []string{"failed", "failed-pod", "timeout waiting for response"},
+			expected: "network-interface-created",
 		},
 		{
-			name: "interface setup",
-			rawEvent: core.CNIRawEvent{
-				Success:       true,
-				InterfaceName: "eth0",
-				PodName:       "web-pod",
+			name: "failed ADD",
+			raw: core.CNIRawEvent{
+				Operation: core.CNIOperationAdd,
+				Success:   false,
 			},
-			eventType: core.CNIEventTypeInterfaceSetup,
-			contains:  []string{"interface", "eth0", "configured", "web-pod"},
+			expected: "network-setup-failed",
+		},
+		{
+			name: "successful DEL",
+			raw: core.CNIRawEvent{
+				Operation: core.CNIOperationDel,
+				Success:   true,
+			},
+			expected: "pod-network-detached",
+		},
+		{
+			name: "failed CHECK",
+			raw: core.CNIRawEvent{
+				Operation: core.CNIOperationCheck,
+				Success:   false,
+			},
+			expected: "network-connectivity-lost",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			message := processor.generateMessage(tt.rawEvent, tt.eventType)
-			for _, expected := range tt.contains {
-				if !contains(message, expected) {
-					t.Errorf("expected message to contain '%s', got: %s", expected, message)
-				}
+			result := processor.determineSemanticIntent(tt.raw)
+			if result != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestCNIEventProcessor_BusinessImpact(t *testing.T) {
+	processor := &cniEventProcessor{}
+
+	tests := []struct {
+		name     string
+		raw      core.CNIRawEvent
+		severity string
+		minScore float64
+		maxScore float64
+	}{
+		{
+			name: "critical failure in production",
+			raw: core.CNIRawEvent{
+				PodNamespace: "production",
+				Success:      false,
+			},
+			severity: "critical",
+			minScore: 0.9,
+			maxScore: 1.0,
+		},
+		{
+			name: "normal operation in default namespace",
+			raw: core.CNIRawEvent{
+				PodNamespace: "default",
+				Success:      true,
+			},
+			severity: "info",
+			minScore: 0.1,
+			maxScore: 0.6,
+		},
+		{
+			name: "failure in kube-system",
+			raw: core.CNIRawEvent{
+				PodNamespace: "kube-system",
+				Success:      false,
+			},
+			severity: "warning",
+			minScore: 0.6,
+			maxScore: 0.8,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := processor.calculateBusinessImpact(tt.raw, tt.severity)
+			if score < tt.minScore || score > tt.maxScore {
+				t.Errorf("expected score between %f and %f, got %f", tt.minScore, tt.maxScore, score)
+			}
+		})
+	}
+}
+
+func TestCNIEventProcessor_CustomerFacing(t *testing.T) {
+	processor := &cniEventProcessor{}
+
+	tests := []struct {
+		name     string
+		raw      core.CNIRawEvent
+		expected bool
+	}{
+		{
+			name: "production namespace",
+			raw: core.CNIRawEvent{
+				PodNamespace: "production",
+			},
+			expected: true,
+		},
+		{
+			name: "kube-system namespace",
+			raw: core.CNIRawEvent{
+				PodNamespace: "kube-system",
+			},
+			expected: false,
+		},
+		{
+			name: "frontend tier label",
+			raw: core.CNIRawEvent{
+				PodNamespace: "staging",
+				Labels: map[string]string{
+					"tier": "frontend",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "customer-facing label",
+			raw: core.CNIRawEvent{
+				PodNamespace: "dev",
+				Labels: map[string]string{
+					"customer-facing": "true",
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := processor.isCustomerFacing(tt.raw)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
 	}
@@ -398,7 +528,5 @@ func BenchmarkCNIEventProcessor_ProcessEvent(b *testing.B) {
 
 // Helper function for string contains check
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (len(substr) == 0 || s != "" &&
-		len(s) >= len(substr) && s[0:len(substr)] == substr ||
-		len(s) > len(substr) && contains(s[1:], substr))
+	return strings.Contains(s, substr)
 }

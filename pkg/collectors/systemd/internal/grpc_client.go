@@ -283,11 +283,11 @@ func (c *GRPCClient) domainSeverityToProto(severity domain.EventSeverity) pb.Eve
 func (c *GRPCClient) domainSourceToProto(source domain.SourceType) pb.SourceType {
 	switch source {
 	case domain.SourceSystemd:
-		return pb.SourceType_SOURCE_TYPE_SYSTEMD
+		return pb.SourceType_SOURCE_TYPE_JOURNALD
 	case domain.SourceEBPF:
 		return pb.SourceType_SOURCE_TYPE_EBPF
 	case domain.SourceK8s:
-		return pb.SourceType_SOURCE_TYPE_KUBERNETES
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
 	default:
 		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
 	}

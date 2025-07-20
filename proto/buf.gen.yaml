@@ -7,20 +7,27 @@ managed:
       - buf.build/googleapis/googleapis
 plugins:
   # Go code generation
-  - plugin: go
+  - plugin: buf.build/protocolbuffers/go
     out: gen
     opt:
       - paths=source_relative
   
   # gRPC Go code generation
-  - plugin: go-grpc
+  - plugin: buf.build/grpc/go
     out: gen
     opt:
       - paths=source_relative
       - require_unimplemented_servers=false
   
+  # VT protobuf for optimized performance (like Polar Signals)
+  - plugin: buf.build/community/planetscale-vtprotobuf
+    out: gen
+    opt:
+      - paths=source_relative
+      - features=marshal+unmarshal+size+pool+grpc
+  
   # gRPC-Gateway generation
-  - plugin: grpc-gateway
+  - plugin: buf.build/grpc-ecosystem/gateway
     out: gen
     opt:
       - paths=source_relative
@@ -28,10 +35,18 @@ plugins:
       - logtostderr=true
   
   # OpenAPI v2 generation for Swagger UI
-  - plugin: openapiv2
+  - plugin: buf.build/grpc-ecosystem/openapiv2
     out: gen/openapiv2
     opt:
       - logtostderr=true
       - allow_merge=true
       - merge_file_name=tapio
       - json_names_for_fields=false
+  
+  # TypeScript client generation for future UI
+  - plugin: buf.build/community/timostamm-protobuf-ts
+    out: gen/typescript
+    opt:
+      - generate_dependencies
+      - long_type_string
+      - optimize_code_size

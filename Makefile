@@ -30,9 +30,7 @@ dev: fmt lint-fix test build ## Quick development cycle (format, lint, test, bui
 build: proto ## Build all binaries (includes proto generation)
 	@echo "$(BLUE)🔨 Building binaries...$(NC)"
 	@mkdir -p bin
-	@go build -ldflags "$(LDFLAGS)" -o bin/tapio-server ./cmd/tapio-server
-	@go build -ldflags "$(LDFLAGS)" -o bin/tapio-collector ./cmd/tapio-collector  
-	@go build -ldflags "$(LDFLAGS)" -o bin/tapio-cli ./cmd/tapio-cli
+	@go build -ldflags "$(LDFLAGS)" -o bin/tapio-collector ./cmd/tapio-collector
 	@echo "$(GREEN)✅ Build complete: bin/$(NC)"
 	@ls -la bin/
 
@@ -100,7 +98,7 @@ enforce-all: check-architecture check-independence check-completeness check-cove
 
 docker-all: ## Build all Docker images
 	@echo "$(BLUE)🐳 Building all Docker images...$(NC)"
-	@make docker-server docker-collector docker-cli
+	@make docker-server docker-collector
 	@echo "$(GREEN)✅ All Docker images built!$(NC)"
 
 docker-server: ## Build server Docker image
@@ -111,15 +109,10 @@ docker-collector: ## Build collector Docker image
 	@echo "$(BLUE)🐳 Building tapio-collector image...$(NC)"
 	@docker build -f cmd/tapio-collector/Dockerfile -t tapio-collector:latest .
 
-docker-cli: ## Build CLI Docker image
-	@echo "$(BLUE)🐳 Building tapio-cli image...$(NC)"
-	@docker build -f cmd/tapio-cli/Dockerfile -t tapio-cli:latest .
-
 docker-test: docker-all ## Test all Docker images
 	@echo "$(BLUE)🐳 Testing Docker images...$(NC)"
 	@docker run --rm tapio-server:latest --help || echo "Server image OK"
-	@docker run --rm tapio-collector:latest --help || echo "Collector image OK"  
-	@docker run --rm tapio-cli:latest --help || echo "CLI image OK"
+	@docker run --rm tapio-collector:latest --help || echo "Collector image OK"
 	@echo "$(GREEN)✅ All Docker images working!$(NC)"
 
 ##@ CI/CD

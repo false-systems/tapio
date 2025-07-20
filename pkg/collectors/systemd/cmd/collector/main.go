@@ -144,7 +144,8 @@ func main() {
 				fmt.Printf("  Severity: %s\n", event.Severity)
 
 				// Print systemd-specific payload information
-				if eventData, ok := event.Data.(map[string]interface{}); ok {
+				if event.Data != nil {
+					eventData := event.Data
 					if serviceName, ok := eventData["service_name"].(string); ok {
 						fmt.Printf("  Service: %s\n", serviceName)
 					}

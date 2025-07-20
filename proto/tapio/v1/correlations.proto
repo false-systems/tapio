@@ -7,6 +7,7 @@ option go_package = "github.com/yairfalse/tapio/proto/tapio/v1;tapiov1";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
+import "google/api/annotations.proto";
 import "tapio/v1/common.proto";
 import "tapio/v1/events.proto";
 
@@ -343,19 +344,36 @@ message SubscribeToCorrelationsRequest {
 // CorrelationService provides correlation and analysis capabilities
 service CorrelationService {
   // Query existing correlations
-  rpc GetCorrelations(GetCorrelationsRequest) returns (GetCorrelationsResponse);
+  rpc GetCorrelations(GetCorrelationsRequest) returns (GetCorrelationsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/correlations"
+    };
+  }
   
   // Get semantic groups
-  rpc GetSemanticGroups(GetSemanticGroupsRequest) returns (GetSemanticGroupsResponse);
+  rpc GetSemanticGroups(GetSemanticGroupsRequest) returns (GetSemanticGroupsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/correlations/semantic-groups"
+    };
+  }
   
   // Analyze events on-demand
-  rpc AnalyzeEvents(AnalyzeEventsRequest) returns (AnalyzeEventsResponse);
+  rpc AnalyzeEvents(AnalyzeEventsRequest) returns (AnalyzeEventsResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/correlations/analyze"
+      body: "*"
+    };
+  }
   
   // Subscribe to real-time correlation updates
   rpc SubscribeToCorrelations(SubscribeToCorrelationsRequest) returns (stream CorrelationUpdate);
   
   // Get recommended actions for a correlation
-  rpc GetRecommendedActions(GetCorrelationsRequest) returns (GetRecommendedActionsResponse);
+  rpc GetRecommendedActions(GetCorrelationsRequest) returns (GetRecommendedActionsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/correlations/recommended-actions"
+    };
+  }
 }
 
 // GetRecommendedActionsResponse

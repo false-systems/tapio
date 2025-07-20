@@ -47,6 +47,14 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 🔄 **Cross-Layer Correlation** - Linking events from kernel to application  
 🔄 **Developer Experience** - Making it easy to run and test  
 
+**What we haven't built yet:**
+
+❌ Full production deployment  
+❌ Complete end-to-end correlation  
+❌ Business impact assessment  
+❌ Automated remediation  
+❌ UI/Dashboard  
+❌ Distributed deployment
 
 ## 🎯 Our Vision
 
