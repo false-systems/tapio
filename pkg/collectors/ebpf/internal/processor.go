@@ -25,19 +25,23 @@ func (p *eventProcessor) ProcessEvent(ctx context.Context, raw core.RawEvent) (d
 
 	// Create the domain event
 	event := domain.Event{
-		ID:         fmt.Sprintf("ebpf_%d_%d_%d", raw.Timestamp.UnixNano(), raw.PID, raw.CPU),
-		Type:       string(eventType),
-		Source:     string(domain.SourceEBPF),
+		ID:         domain.EventID(fmt.Sprintf("ebpf_%d_%d_%d", raw.Timestamp.UnixNano(), raw.PID, raw.CPU)),
+		Type:       eventType,
+		Source:     domain.SourceEBPF,
 		Timestamp:  raw.Timestamp,
 		Data:       eventData,
 		Context:    p.createContextData(raw),
-		Severity:   string(p.determineSeverity(raw)),
+		Severity:   p.determineSeverity(raw),
 		Confidence: 1.0, // eBPF events are direct observations
 		Attributes: map[string]interface{}{
 			"hash":      p.generateHash(raw),
 			"signature": raw.Type,
 			"pid":       raw.PID,
 			"comm":      raw.Comm,
+		},
+		Tags: []string{
+			"ebpf",
+			raw.Type,
 		},
 	}
 
@@ -125,48 +129,37 @@ func (p *eventProcessor) createSystemData(raw core.RawEvent) map[string]interfac
 }
 
 // createContextData creates the event context data
-func (p *eventProcessor) createContextData(raw core.RawEvent) map[string]interface{} {
-	context := make(map[string]interface{})
-
-	context["pid"] = raw.PID
-	context["uid"] = raw.UID
-	context["gid"] = raw.GID
-	context["comm"] = raw.Comm
-	context["cpu"] = raw.CPU
-	context["tid"] = raw.TID
-
-	// Add labels
-	context["labels"] = map[string]string{
-		"comm": raw.Comm,
-		"cpu":  fmt.Sprintf("%d", raw.CPU),
+func (p *eventProcessor) createContextData(raw core.RawEvent) domain.EventContext {
+	return domain.EventContext{
+		PID:  int(raw.PID),
+		UID:  int(raw.UID),
+		GID:  int(raw.GID),
+		Comm: raw.Comm,
+		Labels: map[string]string{
+			"comm":      raw.Comm,
+			"cpu":       fmt.Sprintf("%d", raw.CPU),
+			"ebpf_type": raw.Type,
+		},
 	}
-
-	// Add tags
-	context["tags"] = []string{
-		"ebpf",
-		raw.Type,
-	}
-
-	return context
 }
 
 // determineSeverity determines the event severity
-func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.SeverityLevel {
+func (p *eventProcessor) determineSeverity(raw core.RawEvent) domain.EventSeverity {
 	switch raw.Type {
 	case "oom_kill", "kernel_panic":
-		return domain.SeverityCritical
+		return domain.EventSeverityCritical
 
 	case "memory_pressure", "cpu_throttle":
-		return domain.SeverityWarning
+		return domain.EventSeverityWarning
 
 	case "syscall_error":
 		if retCode, ok := raw.Decoded["return_code"].(int32); ok && retCode < 0 {
-			return domain.SeverityHigh
+			return domain.EventSeverityHigh
 		}
-		return domain.SeverityLow
+		return domain.EventSeverityLow
 
 	default:
-		return domain.SeverityLow
+		return domain.EventSeverityLow
 	}
 }
 

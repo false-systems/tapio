@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import TapioDashboard from './components/TapioDashboard.vue'
+import MainDashboard from './components/MainDashboard.vue'
 </script>
 
 <template>
   <div id="app">
-    <TapioDashboard/>
+    <MainDashboard/>
   </div>
 </template>
 

@@ -43,10 +43,8 @@ func main() {
 			fmt.Printf("Event: ID=%s Type=%s Source=%s Severity=%s\n",
 				event.ID, event.Type, event.Source, event.Severity)
 
-			// Print payload details if it's a system event
-			if payload, ok := event.Data.(interface{ PayloadType() string }); ok {
-				fmt.Printf("  Payload Type: %s\n", payload.PayloadType())
-			}
+			// Print payload details
+			fmt.Printf("  Data: %+v\n", event.Data)
 		}
 	}()
 

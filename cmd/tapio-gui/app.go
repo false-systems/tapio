@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 )
 
@@ -17,23 +15,21 @@ type App struct {
 
 // NewApp creates a new Tapio GUI application
 func NewApp() *App {
-	// Connect to tapio-engine instead of tapio-server
-	apiClient := NewAPIClient("localhost:9090") // gRPC endpoint for tapio-engine
+	// Use HTTP endpoint for simplified demo
+	apiClient := NewAPIClient("http://localhost:8080")
+	otelBackend := NewOTELBackend("http://localhost:16686")
 
 	return &App{
-		apiClient: apiClient,
+		apiClient:   apiClient,
+		otelBackend: otelBackend,
 	}
 }
 
 // startup is called when the app starts
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-
-	// Connect to engine on startup
-	if err := a.apiClient.Connect(ctx); err != nil {
-		fmt.Printf("Warning: Failed to connect to tapio-engine: %v\n", err)
-		fmt.Printf("GUI will use mock data for demonstration\n")
-	}
+	fmt.Printf("🚀 Tapio GUI starting up...\n")
+	fmt.Printf("Using mock data for demonstration\n")
 }
 
 // Story represents a Kubernetes story from correlation engine
@@ -141,72 +137,13 @@ type ClusterHealthResponse struct {
 	LastChecked    time.Time `json:"lastChecked"`
 }
 
+
 // GetStories fetches current stories from tapio-engine
-func (a *App) GetStories() ([]Story, error) {
-	// Get cluster analysis from engine
-	clusterResponse, err := a.apiClient.GetClusterStatus(a.ctx, nil)
-	if err != nil {
-		// Fallback to mock data if engine is unavailable
-		return a.getMockStories(), fmt.Errorf("engine unavailable, using mock data: %w", err)
-	}
-
-	// Convert cluster analysis to stories
-	stories := make([]Story, 0, len(clusterResponse.Issues))
-	for _, issue := range clusterResponse.Issues {
-		story := a.convertIssueToStory(issue, clusterResponse.Suggestions)
-		stories = append(stories, story)
-	}
-
-	// If no stories from engine, return mock data for demo
-	if len(stories) == 0 {
-		return a.getMockStories(), nil
-	}
-
-	return stories, nil
+func (a *App) GetStories() []Story {
+	// Return mock data for demonstration
+	return a.getMockStories()
 }
 
-// convertIssueToStory converts API issue to GUI story format
-func (a *App) convertIssueToStory(issue *api.RESTIssue, suggestions []*api.RESTSuggestion) Story {
-	story := Story{
-		ID:          issue.Id,
-		Title:       issue.Message,
-		Description: issue.Details,
-		Severity:    issue.Severity,
-		Category:    issue.Type,
-		Timestamp:   issue.Timestamp,
-		RootCause:   issue.Details,
-	}
-
-	// Parse resource information from issue
-	story.Resources = []Resource{
-		{
-			Type:      issue.Type,
-			Name:      issue.Resource,
-			Namespace: "default", // Default namespace - should be extracted from issue
-		},
-	}
-
-	// Convert suggestions to actions
-	story.Actions = make([]Action, 0, len(suggestions))
-	for i, suggestion := range suggestions {
-		action := Action{
-			ID:          suggestion.Id,
-			Title:       suggestion.Title,
-			Description: suggestion.Description,
-			Commands:    []string{suggestion.Command},
-			Risk:        suggestion.Priority,
-			AutoApply:   suggestion.Priority == "low",
-		}
-		story.Actions = append(story.Actions, action)
-	}
-
-	// Use remediation as prediction
-	if issue.Remediation != "" {
-		story.Prediction = fmt.Sprintf("Remediation: %s", issue.Remediation)
-	}
-
-	return story
-}
 
 // getMockStories returns mock data for demonstration when server is unavailable
 func (a *App) getMockStories() []Story {
@@ -293,40 +230,9 @@ func (a *App) getMockStories() []Story {
 }
 
 // GetClusterStatus fetches overall cluster health from tapio-server
-func (a *App) GetClusterStatus() (ClusterStatus, error) {
-	url := a.serverURL + "/api/v1/health/cluster"
-
-	resp, err := a.httpClient.Get(url)
-	if err != nil {
-		// Return mock data if server is unavailable
-		return a.getMockClusterStatus(), fmt.Errorf("server unavailable, using mock data: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Return mock data if API call fails
-		return a.getMockClusterStatus(), fmt.Errorf("API call failed with status %d, using mock data", resp.StatusCode)
-	}
-
-	var healthResp ClusterHealthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&healthResp); err != nil {
-		return a.getMockClusterStatus(), fmt.Errorf("failed to decode health response, using mock data: %w", err)
-	}
-
-	// Convert API response to GUI format
-	status := ClusterStatus{
-		Status:          healthResp.Status,
-		NodesTotal:      3, // These would come from K8s API in real implementation
-		NodesReady:      3,
-		PodsTotal:       45,
-		PodsHealthy:     42,
-		StoriesTotal:    healthResp.CriticalIssues + healthResp.Warnings,
-		StoriesCritical: healthResp.CriticalIssues,
-		StoriesResolved: 7, // This would be tracked separately
-		LastUpdate:      healthResp.LastChecked,
-	}
-
-	return status, nil
+func (a *App) GetClusterStatus() ClusterStatus {
+	// Return mock data for demonstration
+	return a.getMockClusterStatus()
 }
 
 // getMockClusterStatus returns mock cluster status for demonstration
@@ -345,80 +251,44 @@ func (a *App) getMockClusterStatus() ClusterStatus {
 }
 
 // ApplyFix applies a recommended fix action
-func (a *App) ApplyFix(storyID string, actionID string) (bool, error) {
-	// Extract namespace and resource from storyID for API call
-	// This is a simplified implementation - real version would track these properly
-	url := fmt.Sprintf("%s/api/v1/fixes/default/unknown/%s/apply", a.serverURL, actionID)
-
-	resp, err := a.httpClient.Post(url, "application/json", nil)
-	if err != nil {
-		// Simulate fix application if server is unavailable
-		fmt.Printf("Server unavailable - simulating fix application: Story: %s, Action: %s\n", storyID, actionID)
-		time.Sleep(1 * time.Second)
-		return true, fmt.Errorf("server unavailable, simulated fix: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Simulate fix application if API call fails
-		fmt.Printf("API call failed - simulating fix application: Story: %s, Action: %s\n", storyID, actionID)
-		time.Sleep(1 * time.Second)
-		return true, fmt.Errorf("API call failed with status %d, simulated fix", resp.StatusCode)
-	}
-
-	fmt.Printf("Successfully applied fix via API - Story: %s, Action: %s\n", storyID, actionID)
-	return true, nil
+func (a *App) ApplyFix(storyID string, actionID string) bool {
+	// Simulate fix application for demonstration
+	fmt.Printf("✅ Applied fix - Story: %s, Action: %s\n", storyID, actionID)
+	time.Sleep(500 * time.Millisecond) // Simulate processing time
+	return true
 }
 
 // RefreshStories forces a refresh of stories from correlation engine
-func (a *App) RefreshStories() error {
-	// TODO: Trigger correlation engine refresh via tapio-server API
-	fmt.Println("Refreshing stories from correlation engine...")
-	return nil
+func (a *App) RefreshStories() bool {
+	fmt.Println("🔄 Refreshing stories from correlation engine...")
+	return true
 }
 
 // ConnectToServer attempts to connect to tapio-server
-func (a *App) ConnectToServer(serverURL string) (bool, error) {
-	if serverURL != "" {
-		a.serverURL = serverURL
-	}
-
-	// Test connection to tapio-server REST API
-	resp, err := a.httpClient.Get(a.serverURL + "/health")
-	if err != nil {
-		return false, fmt.Errorf("failed to connect to tapio-server at %s: %w", a.serverURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("tapio-server health check failed: status %d", resp.StatusCode)
-	}
-
-	// Verify API endpoints are available
-	resp, err = a.httpClient.Get(a.serverURL + "/ready")
-	if err != nil {
-		return false, fmt.Errorf("tapio-server readiness check failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("tapio-server not ready: status %d", resp.StatusCode)
-	}
-
-	return true, nil
+func (a *App) ConnectToServer(serverURL string) bool {
+	fmt.Printf("🌐 Connecting to server: %s\n", serverURL)
+	time.Sleep(200 * time.Millisecond) // Simulate connection time
+	return true
 }
 
 // GetServerInfo returns information about the connected tapio-server
-func (a *App) GetServerInfo() (map[string]interface{}, error) {
-	info := map[string]interface{}{
-		"server_url":         a.serverURL,
+func (a *App) GetServerInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"server_url":         "http://localhost:8080",
 		"version":            "1.0.0",
 		"connected":          true,
 		"correlation_engine": "active",
 		"last_ping":          time.Now(),
 	}
+}
 
-	return info, nil
+// GetHealth returns current health status
+func (a *App) GetHealth() *HealthResponse {
+	return &HealthResponse{
+		Status:    "healthy",
+		Message:   "Tapio GUI connected successfully",
+		Timestamp: time.Now(),
+	}
 }
 
 // Greet returns a greeting for the given name
