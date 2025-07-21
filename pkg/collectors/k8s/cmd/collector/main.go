@@ -175,7 +175,7 @@ func main() {
 					fmt.Printf("Events Sent to Tapio: %d\n", tapioStats["events_sent"])
 					fmt.Printf("Events Dropped (Tapio): %d\n", tapioStats["events_dropped"])
 					fmt.Printf("Tapio Reconnects: %d\n", tapioStats["reconnects"])
-					fmt.Printf("Buffer Utilization: %d/%d\n", 
+					fmt.Printf("Buffer Utilization: %d/%d\n",
 						tapioStats["buffer_size"], tapioStats["buffer_capacity"])
 				}
 

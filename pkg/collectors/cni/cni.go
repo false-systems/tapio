@@ -54,6 +54,8 @@
 package cni
 
 import (
+	"time"
+
 	"github.com/yairfalse/tapio/pkg/collectors/cni/core"
 	"github.com/yairfalse/tapio/pkg/collectors/cni/internal"
 )
@@ -102,11 +104,11 @@ func DefaultConfig() core.Config {
 		EnableEventMonitoring:   true,
 		EnableFileMonitoring:    false, // Enable for config change tracking
 		InCluster:               true,
-		PollInterval:            5000, // 5 seconds in milliseconds
+		PollInterval:            5 * time.Second,
 		EventRateLimit:          100,  // Events per second
 		MaxConcurrentWatch:      10,
 		EnableTraceCorrelation:  true,
-		CorrelationTimeout:      30000, // 30 seconds in milliseconds
+		CorrelationTimeout:      30 * time.Second,
 	}
 }
 
@@ -140,7 +142,7 @@ func DevelopmentConfig() core.Config {
 	config.EventBufferSize = 100
 	config.EnableProcessMonitoring = true
 	config.EnableFileMonitoring = true
-	config.PollInterval = 2000 // 2 seconds
+	config.PollInterval = 2 * time.Second
 	config.EventRateLimit = 50
 	config.MaxConcurrentWatch = 5
 	return config

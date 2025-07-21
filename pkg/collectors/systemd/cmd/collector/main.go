@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
-	"github.com/yairfalse/tapio/pkg/collectors/systemd/internal"
-	"github.com/yairfalse/tapio/pkg/domain"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -87,20 +85,15 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Initialize gRPC client if server address is provided
-	var grpcClient *internal.GRPCClient
+	// Initialize Tapio gRPC client if server address is provided
+	var tapioClient *systemd.TapioGRPCClient
 	if *serverAddr != "" && !*standalone {
-		grpcClient, err = internal.NewGRPCClient(*serverAddr)
+		tapioClient, err = systemd.NewTapioGRPCClient(*serverAddr)
 		if err != nil {
-			log.Fatalf("Failed to create gRPC client: %v", err)
-		}
-
-		// Connect to server
-		if err := grpcClient.Connect(ctx); err != nil {
-			log.Fatalf("Failed to connect to Tapio server: %v", err)
+			log.Fatalf("Failed to create Tapio gRPC client: %v", err)
 		}
 		fmt.Printf("Connected to Tapio server at %s\n", *serverAddr)
-		defer grpcClient.Close()
+		defer tapioClient.Close()
 	}
 
 	// Start collector
@@ -129,18 +122,15 @@ func main() {
 		for unifiedEvent := range collector.Events() {
 			eventCount++
 
-			// Convert UnifiedEvent to legacy Event for grpcClient compatibility
-			legacyEvent := convertUnifiedEventToLegacy(unifiedEvent)
-
 			// Send event to Tapio server if connected
-			if grpcClient != nil && grpcClient.IsConnected() {
-				if err := grpcClient.SendEvent(ctx, legacyEvent); err != nil {
+			if tapioClient != nil {
+				if err := tapioClient.SendEvent(ctx, &unifiedEvent); err != nil {
 					fmt.Printf("Failed to send event to server: %v\n", err)
 				}
 			}
 
 			// Print event details in standalone mode or verbose output
-			if *standalone || grpcClient == nil {
+			if *standalone || tapioClient == nil {
 				fmt.Printf("\n[Event #%d] %s\n", eventCount, time.Now().Format(time.RFC3339))
 				fmt.Printf("  ID: %s\n", unifiedEvent.ID)
 				fmt.Printf("  Type: %s\n", unifiedEvent.Type)
@@ -183,7 +173,7 @@ func main() {
 						}
 					}
 				}
-			} else if grpcClient != nil {
+			} else if tapioClient != nil {
 				// In server mode, just show brief status
 				if eventCount%10 == 0 {
 					fmt.Printf("\rEvents sent to server: %d", eventCount)
@@ -242,69 +232,6 @@ func main() {
 	fmt.Println("Collector stopped successfully")
 }
 
-// convertUnifiedEventToLegacy converts a UnifiedEvent to the legacy Event format for grpcClient compatibility
-func convertUnifiedEventToLegacy(unified domain.UnifiedEvent) domain.Event {
-	// Create data map from Application custom data
-	data := make(map[string]interface{})
-	if unified.Application != nil && unified.Application.Custom != nil {
-		for k, v := range unified.Application.Custom {
-			data[k] = v
-		}
-	}
-
-	// Create legacy event context
-	context := domain.EventContext{
-		Service:   "systemd",
-		Component: "systemd-collector",
-		Host:      getHostname(),
-		Labels:    make(map[string]string),
-		Metadata:  make(map[string]interface{}),
-	}
-
-	// Copy entity context to labels if available
-	if unified.Entity != nil {
-		if unified.Entity.Name != "" {
-			context.Component = unified.Entity.Name
-			context.Labels["unit_name"] = unified.Entity.Name
-		}
-		if unified.Entity.Namespace != "" {
-			context.Labels["unit_type"] = unified.Entity.Namespace
-		}
-		for k, v := range unified.Entity.Labels {
-			context.Labels[k] = v
-		}
-	}
-
-	// Add semantic context to metadata
-	if unified.Semantic != nil {
-		context.Metadata["semantic_intent"] = unified.Semantic.Intent
-		context.Metadata["semantic_category"] = unified.Semantic.Category
-		context.Metadata["semantic_tags"] = unified.Semantic.Tags
-		context.Metadata["semantic_confidence"] = unified.Semantic.Confidence
-	}
-
-	return domain.Event{
-		ID:        domain.EventID(unified.ID),
-		Timestamp: unified.Timestamp,
-		Type:      unified.Type,
-		Source:    domain.SourceType(unified.Source),
-		Data:      data,
-		Severity:  domain.EventSeverity(unified.GetSeverity()),
-		Context:   context,
-		Message: func() string {
-			if unified.Application != nil && unified.Application.Message != "" {
-				return unified.Application.Message
-			}
-			return ""
-		}(),
-		Confidence: func() float64 {
-			if unified.Semantic != nil {
-				return unified.Semantic.Confidence
-			}
-			return 1.0
-		}(),
-	}
-}
 
 func getHostname() string {
 	hostname, err := os.Hostname()

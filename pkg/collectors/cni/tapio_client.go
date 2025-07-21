@@ -1,4 +1,4 @@
-package k8s
+package cni
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// TapioGRPCClient implements the TapioClient interface for streaming K8s events to Tapio server
+// TapioGRPCClient implements the TapioClient interface for streaming CNI events to Tapio server
 type TapioGRPCClient struct {
 	// Configuration
 	serverAddr  string
@@ -64,11 +64,11 @@ type TapioClientConfig struct {
 	EnableOTEL    bool          `json:"enable_otel"`
 }
 
-// NewTapioGRPCClient creates a new Tapio gRPC client for K8s collector
+// NewTapioGRPCClient creates a new Tapio gRPC client for CNI collector
 func NewTapioGRPCClient(serverAddr string) (*TapioGRPCClient, error) {
 	config := &TapioClientConfig{
 		ServerAddr:    serverAddr,
-		CollectorID:   "k8s-collector",
+		CollectorID:   "cni-collector",
 		BufferSize:    10000,
 		BatchSize:     100,
 		FlushInterval: time.Second,
@@ -108,16 +108,20 @@ func NewTapioGRPCClientWithConfig(config *TapioClientConfig) (*TapioGRPCClient, 
 
 // initializeOTEL sets up OpenTelemetry tracing
 func (c *TapioGRPCClient) initializeOTEL() {
-	// Initialize tracer for K8s collector
-	c.tracer = otel.Tracer("tapio.k8s.collector")
+	// Initialize tracer for CNI collector
+	c.tracer = otel.Tracer("tapio.cni.collector")
 	c.propagator = otel.GetTextMapPropagator()
 }
 
 // SendEvent sends a single UnifiedEvent to Tapio with OTEL tracing
 func (c *TapioGRPCClient) SendEvent(ctx context.Context, event *domain.UnifiedEvent) error {
 	// Create OTEL span for event sending
-	ctx, span := c.createEventSpan(ctx, event, "k8s.collector.send_event")
-	defer span.End()
+	ctx, span := c.createEventSpan(ctx, event, "cni.collector.send_event")
+	defer func() {
+		if span != nil {
+			span.End()
+		}
+	}()
 
 	select {
 	case c.eventBuffer <- event:
@@ -154,26 +158,33 @@ func (c *TapioGRPCClient) SendEvent(ctx context.Context, event *domain.UnifiedEv
 
 // SendBatch sends a batch of UnifiedEvents to Tapio with OTEL tracing
 func (c *TapioGRPCClient) SendBatch(ctx context.Context, events []*domain.UnifiedEvent) error {
-	ctx, span := c.tracer.Start(ctx, "k8s.collector.send_batch",
-		trace.WithAttributes(
-			attribute.Int("batch.size", len(events)),
-			attribute.String("collector.id", c.collectorID),
-		),
-	)
-	defer span.End()
+	var span trace.Span
+	if c.tracer != nil {
+		ctx, span = c.tracer.Start(ctx, "cni.collector.send_batch",
+			trace.WithAttributes(
+				attribute.Int("batch.size", len(events)),
+				attribute.String("collector.id", c.collectorID),
+			),
+		)
+		defer span.End()
+	}
 
 	for i, event := range events {
 		if err := c.SendEvent(ctx, event); err != nil {
-			span.RecordError(err)
-			span.SetAttributes(
-				attribute.Int("batch.failed_at_index", i),
-				attribute.Int("batch.events_processed", i),
-			)
+			if span != nil {
+				span.RecordError(err)
+				span.SetAttributes(
+					attribute.Int("batch.failed_at_index", i),
+					attribute.Int("batch.events_processed", i),
+				)
+			}
 			return err
 		}
 	}
 
-	span.SetAttributes(attribute.Int("batch.events_sent", len(events)))
+	if span != nil {
+		span.SetAttributes(attribute.Int("batch.events_sent", len(events)))
+	}
 	return nil
 }
 
@@ -186,7 +197,7 @@ func (c *TapioGRPCClient) Subscribe(ctx context.Context, opts domain.Subscriptio
 func (c *TapioGRPCClient) Close() error {
 	var span trace.Span
 	if c.tracer != nil {
-		_, span = c.tracer.Start(context.Background(), "k8s.collector.close")
+		_, span = c.tracer.Start(context.Background(), "cni.collector.close")
 		defer span.End()
 	}
 
@@ -218,20 +229,29 @@ func (c *TapioGRPCClient) connectionManager() {
 			return
 		case <-ticker.C:
 			if !c.isConnected() {
-				_, span := c.tracer.Start(c.ctx, "k8s.collector.connection_attempt",
-					trace.WithAttributes(
-						attribute.String("server.addr", c.serverAddr),
-					),
-				)
+				var span trace.Span
+				if c.tracer != nil {
+					_, span = c.tracer.Start(c.ctx, "cni.collector.connection_attempt",
+						trace.WithAttributes(
+							attribute.String("server.addr", c.serverAddr),
+						),
+					)
+				}
 
 				if err := c.connect(); err != nil {
 					log.Printf("Failed to connect to Tapio server: %v", err)
-					span.RecordError(err)
-					span.SetAttributes(attribute.Bool("connection.successful", false))
+					if span != nil {
+						span.RecordError(err)
+						span.SetAttributes(attribute.Bool("connection.successful", false))
+					}
 				} else {
-					span.SetAttributes(attribute.Bool("connection.successful", true))
+					if span != nil {
+						span.SetAttributes(attribute.Bool("connection.successful", true))
+					}
 				}
-				span.End()
+				if span != nil {
+					span.End()
+				}
 			}
 		}
 	}
@@ -248,27 +268,36 @@ func (c *TapioGRPCClient) eventSender() {
 			return
 		}
 
-		ctx, span := c.tracer.Start(c.ctx, "k8s.collector.flush_batch",
-			trace.WithAttributes(
-				attribute.Int("batch.size", len(batch)),
-				attribute.String("collector.id", c.collectorID),
-			),
-		)
-
-		if err := c.sendBatchToStream(ctx, batch); err != nil {
-			log.Printf("Failed to send batch to Tapio: %v", err)
-			span.RecordError(err)
-			span.SetAttributes(attribute.Bool("batch.successful", false))
-		} else {
-			c.eventsSent += uint64(len(batch))
-			c.lastSent = time.Now()
-			span.SetAttributes(
-				attribute.Bool("batch.successful", true),
-				attribute.Int64("batch.events_sent_total", int64(c.eventsSent)),
+		if c.tracer != nil {
+			ctx, span := c.tracer.Start(c.ctx, "cni.collector.flush_batch",
+				trace.WithAttributes(
+					attribute.Int("batch.size", len(batch)),
+					attribute.String("collector.id", c.collectorID),
+				),
 			)
+			defer span.End()
+
+			if err := c.sendBatchToStream(ctx, batch); err != nil {
+				log.Printf("Failed to send batch to Tapio: %v", err)
+				span.RecordError(err)
+				span.SetAttributes(attribute.Bool("batch.successful", false))
+			} else {
+				c.eventsSent += uint64(len(batch))
+				c.lastSent = time.Now()
+				span.SetAttributes(
+					attribute.Bool("batch.successful", true),
+					attribute.Int64("batch.events_sent_total", int64(c.eventsSent)),
+				)
+			}
+		} else {
+			if err := c.sendBatchToStream(c.ctx, batch); err != nil {
+				log.Printf("Failed to send batch to Tapio: %v", err)
+			} else {
+				c.eventsSent += uint64(len(batch))
+				c.lastSent = time.Now()
+			}
 		}
 
-		span.End()
 		batch = batch[:0] // Reset batch
 	}
 
@@ -347,13 +376,16 @@ func (c *TapioGRPCClient) sendBatchToStream(ctx context.Context, events []*domai
 		return fmt.Errorf("not connected to Tapio server")
 	}
 
-	ctx, span := c.tracer.Start(ctx, "k8s.collector.send_batch_to_stream",
-		trace.WithAttributes(
-			attribute.Int("batch.size", len(events)),
-			attribute.String("collector.id", c.collectorID),
-		),
-	)
-	defer span.End()
+	var span trace.Span
+	if c.tracer != nil {
+		ctx, span = c.tracer.Start(ctx, "cni.collector.send_batch_to_stream",
+			trace.WithAttributes(
+				attribute.Int("batch.size", len(events)),
+				attribute.String("collector.id", c.collectorID),
+			),
+		)
+		defer span.End()
+	}
 
 	// Convert UnifiedEvents to protobuf events
 	pbEvents := make([]*pb.Event, 0, len(events))
@@ -364,20 +396,21 @@ func (c *TapioGRPCClient) sendBatchToStream(ctx context.Context, events []*domai
 
 	// Create batch request
 	batch := &pb.EventBatch{
-		BatchId:     fmt.Sprintf("k8s-batch-%d", time.Now().UnixNano()),
+		BatchId:     fmt.Sprintf("cni-batch-%d", time.Now().UnixNano()),
 		CollectorId: c.collectorID,
 		Events:      pbEvents,
 		Metadata: map[string]string{
-			"batch_size":   fmt.Sprintf("%d", len(pbEvents)),
-			"source":       "k8s-collector",
-			"cluster_name": c.extractClusterName(events),
+			"batch_size": fmt.Sprintf("%d", len(pbEvents)),
+			"source":     "cni-collector",
 		},
 	}
 
 	// Propagate OTEL context
-	md := metadata.New(nil)
-	c.propagator.Inject(ctx, &metadataCarrier{md: &md})
-	ctx = metadata.NewOutgoingContext(ctx, md)
+	if c.propagator != nil {
+		md := metadata.New(nil)
+		c.propagator.Inject(ctx, &metadataCarrier{md: &md})
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
 
 	// Send batch
 	req := &pb.TapioStreamEventsRequest{
@@ -388,28 +421,20 @@ func (c *TapioGRPCClient) sendBatchToStream(ctx context.Context, events []*domai
 
 	err := stream.Send(req)
 	if err != nil {
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("stream.send.successful", false))
+		if span != nil {
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("stream.send.successful", false))
+		}
 	} else {
-		span.SetAttributes(
-			attribute.Bool("stream.send.successful", true),
-			attribute.String("batch.id", batch.BatchId),
-		)
+		if span != nil {
+			span.SetAttributes(
+				attribute.Bool("stream.send.successful", true),
+				attribute.String("batch.id", batch.BatchId),
+			)
+		}
 	}
 
 	return err
-}
-
-// extractClusterName extracts cluster name from events for metadata
-func (c *TapioGRPCClient) extractClusterName(events []*domain.UnifiedEvent) string {
-	for _, event := range events {
-		if event.Entity != nil && event.Entity.Labels != nil {
-			if cluster, ok := event.Entity.Labels["cluster"]; ok {
-				return cluster
-			}
-		}
-	}
-	return "unknown"
 }
 
 // handleResponses handles responses from the Tapio server with OTEL tracing
@@ -429,19 +454,26 @@ func (c *TapioGRPCClient) handleResponses() {
 	}
 
 	for {
-		_, span := c.tracer.Start(c.ctx, "k8s.collector.handle_response")
+		var span trace.Span
+		if c.tracer != nil {
+			_, span = c.tracer.Start(c.ctx, "cni.collector.handle_response")
+		}
 
 		resp, err := stream.Recv()
 		if err != nil {
 			log.Printf("Stream receive error: %v", err)
-			span.RecordError(err)
-			span.End()
+			if span != nil {
+				span.RecordError(err)
+				span.End()
+			}
 			return
 		}
 
 		c.handleResponse(resp)
-		span.SetAttributes(attribute.String("response.type", c.getResponseType(resp)))
-		span.End()
+		if span != nil {
+			span.SetAttributes(attribute.String("response.type", c.getResponseType(resp)))
+			span.End()
+		}
 	}
 }
 
@@ -521,7 +553,7 @@ func (c *TapioGRPCClient) convertUnifiedEventToProto(ctx context.Context, event 
 		pbEvent.SpanId = event.TraceContext.SpanID
 	}
 
-	// Add K8s-specific context
+	// Add CNI-specific context
 	if event.Entity != nil {
 		clusterName := ""
 		nodeName := ""
@@ -536,7 +568,7 @@ func (c *TapioGRPCClient) convertUnifiedEventToProto(ctx context.Context, event 
 			Cluster:   clusterName,
 			Namespace: event.Entity.Namespace,
 			Node:      nodeName,
-			Pod:       event.Entity.Name, // For K8s, the entity name is often the pod name
+			Pod:       event.Entity.Name, // For CNI, the entity often represents a pod
 			Labels:    event.Entity.Labels,
 		}
 	}
@@ -544,27 +576,27 @@ func (c *TapioGRPCClient) convertUnifiedEventToProto(ctx context.Context, event 
 	return pbEvent
 }
 
-// Helper mapping functions for K8s events
+// Helper mapping functions for CNI events
 func (c *TapioGRPCClient) mapEventType(eventType domain.EventType) pb.EventType {
 	switch eventType {
+	case domain.EventTypeNetwork:
+		return pb.EventType_EVENT_TYPE_NETWORK
 	case domain.EventTypeKubernetes:
 		return pb.EventType_EVENT_TYPE_KUBERNETES
 	case domain.EventTypeSystem:
 		return pb.EventType_EVENT_TYPE_SYSCALL
-	case domain.EventTypeNetwork:
-		return pb.EventType_EVENT_TYPE_NETWORK
 	case domain.EventTypeProcess:
 		return pb.EventType_EVENT_TYPE_PROCESS
+	case domain.EventTypeService:
+		return pb.EventType_EVENT_TYPE_HTTP
 	case domain.EventTypeMemory:
 		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
 	case domain.EventTypeCPU:
 		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
 	case domain.EventTypeDisk:
 		return pb.EventType_EVENT_TYPE_FILE_SYSTEM
-	case domain.EventTypeService:
-		return pb.EventType_EVENT_TYPE_HTTP // Services often use HTTP
 	default:
-		return pb.EventType_EVENT_TYPE_KUBERNETES
+		return pb.EventType_EVENT_TYPE_NETWORK // Default for CNI events
 	}
 }
 
@@ -593,29 +625,20 @@ func (c *TapioGRPCClient) mapEventSeverity(severity domain.EventSeverity) pb.Eve
 
 func (c *TapioGRPCClient) mapSourceType(source domain.SourceType) pb.SourceType {
 	switch source {
+	case domain.SourceCNI:
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
 	case domain.SourceK8s:
 		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
 	case domain.SourceEBPF:
 		return pb.SourceType_SOURCE_TYPE_EBPF
 	case domain.SourceSystemd:
 		return pb.SourceType_SOURCE_TYPE_JOURNALD
-	case domain.SourceCNI:
-		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
 	default:
-		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API // Default for CNI
 	}
-}
-
-func (c *TapioGRPCClient) convertAttributes(attrs map[string]interface{}) map[string]string {
-	result := make(map[string]string)
-	for k, v := range attrs {
-		result[k] = fmt.Sprintf("%v", v)
-	}
-	return result
 }
 
 // Helper methods to extract data from UnifiedEvent structure
-
 func (c *TapioGRPCClient) extractMessage(event *domain.UnifiedEvent) string {
 	if event.Kubernetes != nil && event.Kubernetes.Message != "" {
 		return event.Kubernetes.Message
@@ -626,7 +649,14 @@ func (c *TapioGRPCClient) extractMessage(event *domain.UnifiedEvent) string {
 	if event.Semantic != nil && event.Semantic.Narrative != "" {
 		return event.Semantic.Narrative
 	}
-	return fmt.Sprintf("Event %s from %s", event.Type, event.Source)
+	// Construct message from network data if available
+	if event.Network != nil {
+		if event.Network.Protocol != "" && event.Network.SourceIP != "" {
+			return fmt.Sprintf("Network traffic: %s from %s to %s", 
+				event.Network.Protocol, event.Network.SourceIP, event.Network.DestIP)
+		}
+	}
+	return fmt.Sprintf("CNI event %s from %s", event.Type, event.Source)
 }
 
 func (c *TapioGRPCClient) extractSeverity(event *domain.UnifiedEvent) domain.EventSeverity {
@@ -703,9 +733,6 @@ func (c *TapioGRPCClient) convertEventAttributes(event *domain.UnifiedEvent) map
 		if event.Kubernetes.APIVersion != "" {
 			attributes["k8s.api_version"] = event.Kubernetes.APIVersion
 		}
-		if event.Kubernetes.ResourceVersion != "" {
-			attributes["k8s.resource_version"] = event.Kubernetes.ResourceVersion
-		}
 
 		// Add K8s labels with prefix
 		for k, v := range event.Kubernetes.Labels {
@@ -718,7 +745,7 @@ func (c *TapioGRPCClient) convertEventAttributes(event *domain.UnifiedEvent) map
 		}
 	}
 
-	// Add network data if present
+	// Add network data (CNI-specific)
 	if event.Network != nil {
 		if event.Network.Protocol != "" {
 			attributes["network.protocol"] = event.Network.Protocol
@@ -735,6 +762,27 @@ func (c *TapioGRPCClient) convertEventAttributes(event *domain.UnifiedEvent) map
 		if event.Network.StatusCode != 0 {
 			attributes["network.status_code"] = fmt.Sprintf("%d", event.Network.StatusCode)
 		}
+		if event.Network.SourcePort != 0 {
+			attributes["network.source_port"] = fmt.Sprintf("%d", event.Network.SourcePort)
+		}
+		if event.Network.DestPort != 0 {
+			attributes["network.dest_port"] = fmt.Sprintf("%d", event.Network.DestPort)
+		}
+		if event.Network.BytesSent != 0 {
+			attributes["network.bytes_sent"] = fmt.Sprintf("%d", event.Network.BytesSent)
+		}
+		if event.Network.BytesRecv != 0 {
+			attributes["network.bytes_recv"] = fmt.Sprintf("%d", event.Network.BytesRecv)
+		}
+		if event.Network.Latency != 0 {
+			attributes["network.latency_ns"] = fmt.Sprintf("%d", event.Network.Latency)
+		}
+		if event.Network.Method != "" {
+			attributes["network.method"] = event.Network.Method
+		}
+		if event.Network.Path != "" {
+			attributes["network.path"] = event.Network.Path
+		}
 	}
 
 	// Add application data if present
@@ -748,14 +796,10 @@ func (c *TapioGRPCClient) convertEventAttributes(event *domain.UnifiedEvent) map
 		if event.Application.ErrorType != "" {
 			attributes["app.error_type"] = event.Application.ErrorType
 		}
-		if event.Application.UserID != "" {
-			attributes["app.user_id"] = event.Application.UserID
-		}
-		if event.Application.SessionID != "" {
-			attributes["app.session_id"] = event.Application.SessionID
-		}
-		if event.Application.RequestID != "" {
-			attributes["app.request_id"] = event.Application.RequestID
+
+		// Add application custom data
+		for k, v := range event.Application.Custom {
+			attributes["app."+k] = fmt.Sprintf("%v", v)
 		}
 	}
 
@@ -804,7 +848,6 @@ func (c *TapioGRPCClient) GetStatistics() map[string]interface{} {
 }
 
 // OTEL gRPC interceptors
-
 func (c *TapioGRPCClient) otelUnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	if c.tracer == nil {
 		return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
@@ -824,12 +867,14 @@ func (c *TapioGRPCClient) otelUnaryClientInterceptor() grpc.UnaryClientIntercept
 		defer span.End()
 
 		// Propagate trace context
-		md, _ := metadata.FromOutgoingContext(ctx)
-		if md == nil {
-			md = metadata.New(nil)
+		if c.propagator != nil {
+			md, _ := metadata.FromOutgoingContext(ctx)
+			if md == nil {
+				md = metadata.New(nil)
+			}
+			c.propagator.Inject(ctx, &metadataCarrier{md: &md})
+			ctx = metadata.NewOutgoingContext(ctx, md)
 		}
-		c.propagator.Inject(ctx, &metadataCarrier{md: &md})
-		ctx = metadata.NewOutgoingContext(ctx, md)
 
 		err := invoker(ctx, method, req, reply, cc, opts...)
 		if err != nil {
@@ -861,12 +906,14 @@ func (c *TapioGRPCClient) otelStreamClientInterceptor() grpc.StreamClientInterce
 		)
 
 		// Propagate trace context
-		md, _ := metadata.FromOutgoingContext(ctx)
-		if md == nil {
-			md = metadata.New(nil)
+		if c.propagator != nil {
+			md, _ := metadata.FromOutgoingContext(ctx)
+			if md == nil {
+				md = metadata.New(nil)
+			}
+			c.propagator.Inject(ctx, &metadataCarrier{md: &md})
+			ctx = metadata.NewOutgoingContext(ctx, md)
 		}
-		c.propagator.Inject(ctx, &metadataCarrier{md: &md})
-		ctx = metadata.NewOutgoingContext(ctx, md)
 
 		stream, err := streamer(ctx, desc, cc, method, opts...)
 		if err != nil {

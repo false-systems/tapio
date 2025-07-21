@@ -1,4 +1,4 @@
-package k8s
+package systemd
 
 import (
 	"context"
@@ -21,8 +21,8 @@ func TestTapioGRPCClient_NewClient(t *testing.T) {
 		t.Errorf("Expected server address 'localhost:8080', got '%s'", client.serverAddr)
 	}
 
-	if client.collectorID != "k8s-collector" {
-		t.Errorf("Expected collector ID 'k8s-collector', got '%s'", client.collectorID)
+	if client.collectorID != "systemd-collector" {
+		t.Errorf("Expected collector ID 'systemd-collector', got '%s'", client.collectorID)
 	}
 }
 
@@ -34,43 +34,43 @@ func TestTapioGRPCClient_SendEvent(t *testing.T) {
 	}
 	defer client.Close()
 
-	// Create a sample K8s UnifiedEvent
+	// Create a sample systemd UnifiedEvent
 	event := &domain.UnifiedEvent{
-		ID:        "k8s-test-event-123",
-		Type:      domain.EventTypeKubernetes,
-		Source:    "k8s-collector",
+		ID:        "systemd-test-event-123",
+		Type:      domain.EventTypeService,
+		Source:    "systemd-collector",
 		Timestamp: time.Now(),
 		Entity: &domain.EntityContext{
-			Type:      "pod",
-			Name:      "test-pod",
-			Namespace: "default",
+			Type: "service",
+			Name: "nginx.service",
 			Labels: map[string]string{
-				"app":     "test-app",
-				"version": "v1.0",
-				"cluster": "test-cluster",
-				"node":    "worker-1",
+				"state": "active",
+				"type":  "service",
 			},
 		},
 		Semantic: &domain.SemanticContext{
-			Intent:     "Pod lifecycle event",
+			Intent:     "Service state change",
 			Category:   "infrastructure",
-			Tags:       []string{"k8s", "pod", "creation"},
-			Narrative:  "A new pod was created in the default namespace",
-			Confidence: 0.9,
+			Tags:       []string{"systemd", "service", "state-change"},
+			Narrative:  "nginx service state changed to active",
+			Confidence: 0.95,
 		},
 		Impact: &domain.ImpactContext{
 			Severity:         "low",
 			BusinessImpact:   0.1,
-			AffectedServices: []string{"test-service"},
+			AffectedServices: []string{"web-server"},
 		},
-		Kubernetes: &domain.KubernetesData{
-			EventType:  "Normal",
-			Reason:     "Created",
-			Message:    "Pod created successfully",
-			Action:     "ADDED",
-			ObjectKind: "Pod",
-			Object:     "pod/test-pod",
-			APIVersion: "v1",
+		Application: &domain.ApplicationData{
+			Message: "Service nginx.service started successfully",
+			Level:   "info",
+			Custom: map[string]interface{}{
+				"unit_name":  "nginx.service",
+				"unit_type":  "service",
+				"old_state":  "inactive",
+				"new_state":  "active",
+				"result":     "success",
+				"exit_code":  0,
+			},
 		},
 	}
 
@@ -98,20 +98,20 @@ func TestTapioGRPCClient_SendBatch(t *testing.T) {
 	}
 	defer client.Close()
 
-	// Create a batch of sample K8s UnifiedEvents
+	// Create a batch of sample systemd UnifiedEvents
 	events := make([]*domain.UnifiedEvent, 5)
 	for i := 0; i < 5; i++ {
 		events[i] = &domain.UnifiedEvent{
-			ID:        fmt.Sprintf("k8s-batch-event-%d", i),
-			Type:      domain.EventTypeKubernetes,
-			Source:    "k8s-collector",
+			ID:        fmt.Sprintf("systemd-batch-event-%d", i),
+			Type:      domain.EventTypeSystem,
+			Source:    "systemd-collector",
 			Timestamp: time.Now(),
 			Entity: &domain.EntityContext{
-				Type:      "service",
-				Name:      fmt.Sprintf("test-service-%d", i),
-				Namespace: "default",
+				Type: "service",
+				Name: fmt.Sprintf("test-service-%d.service", i),
 				Labels: map[string]string{
-					"cluster": "test-cluster",
+					"state": "active",
+					"type":  "service",
 				},
 			},
 			Semantic: &domain.SemanticContext{
@@ -119,13 +119,14 @@ func TestTapioGRPCClient_SendBatch(t *testing.T) {
 				Category:   "infrastructure",
 				Confidence: 0.9,
 			},
-			Kubernetes: &domain.KubernetesData{
-				EventType:  "Normal",
-				Reason:     "Updated",
-				Message:    fmt.Sprintf("Service event %d", i),
-				Action:     "MODIFIED",
-				ObjectKind: "Service",
-				Object:     fmt.Sprintf("service/test-service-%d", i),
+			Application: &domain.ApplicationData{
+				Message: fmt.Sprintf("Service event %d", i),
+				Level:   "info",
+				Custom: map[string]interface{}{
+					"unit_name": fmt.Sprintf("test-service-%d.service", i),
+					"unit_type": "service",
+					"new_state": "active",
+				},
 			},
 		}
 	}
@@ -150,7 +151,7 @@ func TestTapioGRPCClient_SendBatch(t *testing.T) {
 func TestTapioGRPCClient_CustomConfig(t *testing.T) {
 	config := &TapioClientConfig{
 		ServerAddr:    "custom.server:9090",
-		CollectorID:   "custom-k8s-collector",
+		CollectorID:   "custom-systemd-collector",
 		BufferSize:    5000,
 		BatchSize:     50,
 		FlushInterval: 2 * time.Second,
@@ -169,8 +170,8 @@ func TestTapioGRPCClient_CustomConfig(t *testing.T) {
 		t.Errorf("Expected server address 'custom.server:9090', got '%s'", client.serverAddr)
 	}
 
-	if client.collectorID != "custom-k8s-collector" {
-		t.Errorf("Expected collector ID 'custom-k8s-collector', got '%s'", client.collectorID)
+	if client.collectorID != "custom-systemd-collector" {
+		t.Errorf("Expected collector ID 'custom-systemd-collector', got '%s'", client.collectorID)
 	}
 
 	if cap(client.eventBuffer) != 5000 {
@@ -195,11 +196,11 @@ func TestTapioGRPCClient_EventMapping(t *testing.T) {
 		domainType domain.EventType
 		expected   string // We'll check the string representation
 	}{
-		{domain.EventTypeKubernetes, "EVENT_TYPE_KUBERNETES"},
+		{domain.EventTypeSystem, "EVENT_TYPE_PROCESS"},
+		{domain.EventTypeService, "EVENT_TYPE_PROCESS"},
+		{domain.EventTypeLog, "EVENT_TYPE_AUDIT"},
 		{domain.EventTypeNetwork, "EVENT_TYPE_NETWORK"},
 		{domain.EventTypeProcess, "EVENT_TYPE_PROCESS"},
-		{domain.EventTypeService, "EVENT_TYPE_HTTP"},
-		{domain.EventTypeSystem, "EVENT_TYPE_SYSCALL"},
 	}
 
 	for _, tc := range testCases {
@@ -264,8 +265,8 @@ func TestTapioGRPCClient_Statistics(t *testing.T) {
 		t.Errorf("Expected server_addr to be 'localhost:8080', got '%s'", stats["server_addr"].(string))
 	}
 
-	if stats["collector_id"].(string) != "k8s-collector" {
-		t.Errorf("Expected collector_id to be 'k8s-collector', got '%s'", stats["collector_id"].(string))
+	if stats["collector_id"].(string) != "systemd-collector" {
+		t.Errorf("Expected collector_id to be 'systemd-collector', got '%s'", stats["collector_id"].(string))
 	}
 }
 
@@ -279,8 +280,8 @@ func TestTapioGRPCClient_Close(t *testing.T) {
 	// Send an event before closing
 	event := &domain.UnifiedEvent{
 		ID:     "test-close-event",
-		Type:   domain.EventTypeKubernetes,
-		Source: "k8s-collector",
+		Type:   domain.EventTypeSystem,
+		Source: "systemd-collector",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -297,10 +298,11 @@ func TestTapioGRPCClient_Close(t *testing.T) {
 		t.Errorf("Failed to close client: %v", err)
 	}
 
-	// Try to send another event after close (should fail or be ignored)
+	// Try to send another event after close (should fail)
 	err = client.SendEvent(ctx, event)
-	// We expect this to either fail or be silently ignored
-	// The exact behavior depends on the implementation
+	if err == nil {
+		t.Error("Expected error when sending to closed client, got nil")
+	}
 }
 
 // Benchmark test for event sending
@@ -313,12 +315,11 @@ func BenchmarkTapioGRPCClient_SendEvent(b *testing.B) {
 
 	event := &domain.UnifiedEvent{
 		ID:     "benchmark-event",
-		Type:   domain.EventTypeKubernetes,
-		Source: "k8s-collector",
+		Type:   domain.EventTypeSystem,
+		Source: "systemd-collector",
 		Entity: &domain.EntityContext{
-			Type:      "pod",
-			Name:      "benchmark-pod",
-			Namespace: "default",
+			Type: "service",
+			Name: "benchmark-service",
 		},
 	}
 
@@ -331,5 +332,52 @@ func BenchmarkTapioGRPCClient_SendEvent(b *testing.B) {
 		if err != nil {
 			b.Errorf("Failed to send event: %v", err)
 		}
+	}
+}
+
+// TestTapioGRPCClient_ExtractMessage tests message extraction from events
+func TestTapioGRPCClient_ExtractMessage(t *testing.T) {
+	client, err := NewTapioGRPCClient("localhost:8080")
+	if err != nil {
+		t.Fatalf("Failed to create Tapio client: %v", err)
+	}
+	defer client.Close()
+
+	// Test message extraction from Application context
+	event := &domain.UnifiedEvent{
+		Application: &domain.ApplicationData{
+			Message: "Service started successfully",
+		},
+	}
+
+	message := client.extractMessage(event)
+	expected := "Service started successfully"
+	if message != expected {
+		t.Errorf("Expected message '%s', got '%s'", expected, message)
+	}
+
+	// Test message extraction from Semantic context
+	event2 := &domain.UnifiedEvent{
+		Semantic: &domain.SemanticContext{
+			Narrative: "System event occurred",
+		},
+	}
+
+	message2 := client.extractMessage(event2)
+	expected2 := "System event occurred"
+	if message2 != expected2 {
+		t.Errorf("Expected message '%s', got '%s'", expected2, message2)
+	}
+
+	// Test fallback message
+	event3 := &domain.UnifiedEvent{
+		Type:   domain.EventTypeService,
+		Source: "systemd",
+	}
+
+	message3 := client.extractMessage(event3)
+	expected3 := "Systemd event service from systemd"
+	if message3 != expected3 {
+		t.Errorf("Expected message '%s', got '%s'", expected3, message3)
 	}
 }
