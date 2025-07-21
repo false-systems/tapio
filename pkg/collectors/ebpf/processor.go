@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 
 // DualPathProcessor handles both raw eBPF events (Hubble-style) and semantic processing
@@ -19,7 +18,7 @@ type DualPathProcessor struct {
 	// Components
 	filterEngine *FilterEngine
 	enricher     *EventEnricher
-	correlator   *correlation.Manager
+	correlationHandler func(*EnrichedEvent) // Injected correlation handler
 
 	// Raw path (Hubble-style)
 	rawEventBuffer chan *RawEvent
@@ -127,7 +126,7 @@ func NewDualPathProcessor(config *ProcessorConfig) *DualPathProcessor {
 	filterConfig := DefaultFilterConfig()
 	processor.filterEngine = NewFilterEngine(filterConfig)
 	processor.enricher = NewEventEnricher()
-	processor.correlator = correlation.NewManager()
+	// Correlation handler will be injected by integration layer
 
 	// Initialize storage if raw path enabled
 	if config.EnableRawPath {
@@ -394,12 +393,11 @@ func (p *DualPathProcessor) semanticBatchProcessor() {
 			}
 		}
 
-		// Send to correlation engine
-		if p.correlator != nil {
-			go func(events []*domain.Event) {
-				correlations := p.correlator.AnalyzeBatch(context.Background(), events)
-				log.Printf("Generated %d correlations from batch", len(correlations))
-			}(domainEvents)
+		// Send enriched events to correlation handler (injected from integration layer)
+		if p.correlationHandler != nil {
+			for _, enriched := range batch {
+				p.correlationHandler(enriched)
+			}
 		}
 
 		batch = batch[:0] // Reset batch
@@ -663,4 +661,11 @@ func (s *MemoryRawEventStore) matchesFilter(event *RawEvent, filter *EventFilter
 	}
 
 	return true
+}
+
+// SetCorrelationHandler allows integration layer to inject correlation functionality
+func (p *DualPathProcessor) SetCorrelationHandler(handler func(*EnrichedEvent)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.correlationHandler = handler
 }

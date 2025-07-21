@@ -652,12 +652,7 @@ func (p *eventProcessor) createCorrelationContext(raw core.RawEvent) *domain.Cor
 	serviceType := p.detectServiceType(raw.UnitName)
 	category := p.categorizeService(raw.UnitName)
 	
-	// Determine dependencies
-	dependencies := p.inferServiceDependencies(raw.UnitName)
-	dependents := p.inferServiceDependents(raw.UnitName)
-	
-	// Calculate startup order priority
-	startupPriority := p.calculateStartupPriority(raw.UnitName, serviceType)
+	// Dependencies and startup priority calculations removed for simplicity
 	
 	return &domain.CorrelationContext{
 		CorrelationID: fmt.Sprintf("systemd-%s-%s", raw.UnitName, serviceType),
@@ -784,7 +779,7 @@ func (p *eventProcessor) calculateStartupPriority(unitName, serviceType string) 
 }
 
 // mapStateToHealth maps systemd states to health status
-func (p *eventProcessor) mapStateToHealth(state core.State) string {
+func (p *eventProcessor) mapStateToHealth(state string) string {
 	switch state {
 	case core.StateActive:
 		return "healthy"

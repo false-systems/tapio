@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
+	ebpfcollector "github.com/yairfalse/tapio/pkg/collectors/ebpf"
 )
 
 // Implementation provides Linux-specific eBPF functionality
@@ -23,9 +24,8 @@ type Implementation struct {
 	config core.Config
 
 	// eBPF objects
-	programs map[string]*ebpf.Program
-	maps     map[string]*ebpf.Map
-	links    []link.Link
+	memoryObjects *ebpfcollector.MemorytrackerObjects
+	links         []link.Link
 
 	// Event processing
 	perfReader *perf.Reader
@@ -39,8 +39,6 @@ type Implementation struct {
 // New creates a new Linux eBPF implementation
 func New() *Implementation {
 	return &Implementation{
-		programs:  make(map[string]*ebpf.Program),
-		maps:      make(map[string]*ebpf.Map),
 		links:     make([]link.Link, 0),
 		eventChan: make(chan core.RawEvent, 1000),
 	}
@@ -103,14 +101,9 @@ func (impl *Implementation) Stop() error {
 		l.Close()
 	}
 
-	// Close all programs
-	for _, prog := range impl.programs {
-		prog.Close()
-	}
-
-	// Close all maps
-	for _, m := range impl.maps {
-		m.Close()
+	// Close eBPF objects
+	if impl.memoryObjects != nil {
+		impl.memoryObjects.Close()
 	}
 
 	close(impl.eventChan)
@@ -125,37 +118,69 @@ func (impl *Implementation) Events() <-chan core.RawEvent {
 
 // ProgramsLoaded returns the number of loaded programs
 func (impl *Implementation) ProgramsLoaded() int {
-	return len(impl.programs)
+	if impl.memoryObjects != nil {
+		return 4 // Number of memory tracking programs
+	}
+	return 0
 }
 
 // MapsCreated returns the number of created maps
 func (impl *Implementation) MapsCreated() int {
-	return len(impl.maps)
+	if impl.memoryObjects != nil {
+		return 3 // Number of memory tracking maps
+	}
+	return 0
 }
 
 // loadMemoryPrograms loads memory-related eBPF programs
 func (impl *Implementation) loadMemoryPrograms() error {
-	// Create perf event map
-	perfMap, err := ebpf.NewMap(&ebpf.MapSpec{
-		Type:       ebpf.PerfEventArray,
-		KeySize:    4,
-		ValueSize:  4,
-		MaxEntries: uint32(os.Getpagesize()),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create perf map: %w", err)
+	// Load the eBPF memory tracker programs
+	impl.memoryObjects = &ebpfcollector.MemorytrackerObjects{}
+	if err := ebpfcollector.LoadMemorytrackerObjects(impl.memoryObjects, nil); err != nil {
+		return fmt.Errorf("failed to load memory tracker objects: %w", err)
 	}
-	impl.maps["memory_events"] = perfMap
 
-	// Create perf reader
-	reader, err := perf.NewReader(perfMap, os.Getpagesize())
+	// Create perf reader for events map
+	reader, err := perf.NewReader(impl.memoryObjects.Events, os.Getpagesize())
 	if err != nil {
+		impl.memoryObjects.Close()
 		return fmt.Errorf("failed to create perf reader: %w", err)
 	}
 	impl.perfReader = reader
 
-	// Note: Actual eBPF program loading would go here
-	// For now, we're creating a functional skeleton
+	// Attach tracepoint programs
+	if l, err := link.Tracepoint(link.TracepointOptions{
+		Group:   "mm",
+		Name:    "mm_page_alloc",
+		Program: impl.memoryObjects.TraceMmPageAlloc,
+	}); err != nil {
+		impl.memoryObjects.Close()
+		return fmt.Errorf("failed to attach mm_page_alloc: %w", err)
+	} else {
+		impl.links = append(impl.links, l)
+	}
+
+	if l, err := link.Tracepoint(link.TracepointOptions{
+		Group:   "mm",
+		Name:    "mm_page_free",
+		Program: impl.memoryObjects.TraceMmPageFree,
+	}); err != nil {
+		impl.memoryObjects.Close()
+		return fmt.Errorf("failed to attach mm_page_free: %w", err)
+	} else {
+		impl.links = append(impl.links, l)
+	}
+
+	if l, err := link.Tracepoint(link.TracepointOptions{
+		Group:   "oom",
+		Name:    "oom_kill_process",
+		Program: impl.memoryObjects.TraceOomKillProcess,
+	}); err != nil {
+		impl.memoryObjects.Close()
+		return fmt.Errorf("failed to attach oom_kill_process: %w", err)
+	} else {
+		impl.links = append(impl.links, l)
+	}
 
 	return nil
 }
@@ -208,7 +233,7 @@ func (impl *Implementation) readEvents() {
 	}
 }
 
-// parseEvent parses a raw perf event record
+// parseEvent parses a raw perf event record from eBPF memory tracker
 func (impl *Implementation) parseEvent(record perf.Record) core.RawEvent {
 	event := core.RawEvent{
 		Timestamp: time.Now(),
@@ -217,14 +242,44 @@ func (impl *Implementation) parseEvent(record perf.Record) core.RawEvent {
 		Decoded:   make(map[string]interface{}),
 	}
 
-	// Basic parsing - would be extended based on actual event structure
-	if len(record.RawSample) >= 8 {
+	// Parse memory tracking event structure
+	if len(record.RawSample) >= 24 { // Minimum event size
 		event.PID = binary.LittleEndian.Uint32(record.RawSample[0:4])
 		event.TID = binary.LittleEndian.Uint32(record.RawSample[4:8])
+		
+		// Extract memory-specific fields
+		eventType := binary.LittleEndian.Uint32(record.RawSample[8:12])
+		size := binary.LittleEndian.Uint64(record.RawSample[12:20])
+		addr := binary.LittleEndian.Uint64(record.RawSample[20:28])
+		
+		switch eventType {
+		case 1: // mm_page_alloc
+			event.Type = "memory_alloc"
+			event.Decoded["operation"] = "page_alloc"
+			event.Decoded["size"] = size
+			event.Decoded["address"] = fmt.Sprintf("0x%x", addr)
+		case 2: // mm_page_free
+			event.Type = "memory_free"
+			event.Decoded["operation"] = "page_free"
+			event.Decoded["size"] = size
+			event.Decoded["address"] = fmt.Sprintf("0x%x", addr)
+		case 3: // oom_kill_process
+			event.Type = "memory_oom"
+			event.Decoded["operation"] = "oom_kill"
+			event.Decoded["victim_pid"] = size // Reused field for victim PID
+		default:
+			event.Type = "memory_unknown"
+			event.Decoded["operation"] = "unknown"
+		}
+		
+		// Add common memory context
+		event.Decoded["memory_event"] = true
+		event.Decoded["kernel_source"] = "tracepoint"
+	} else {
+		// Fallback for incomplete events
+		event.Type = "memory_partial"
+		event.Decoded["error"] = "incomplete_event_data"
 	}
-
-	// Determine event type based on context
-	event.Type = "system"
 
 	return event
 }
