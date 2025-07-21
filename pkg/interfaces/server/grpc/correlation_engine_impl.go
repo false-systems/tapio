@@ -807,8 +807,8 @@ func (e *RealTimeCorrelationEngine) analyzeTemporalPatterns(events []*domain.Uni
 					"events_per_second": fmt.Sprintf("%.1f", eventsPerSecond),
 					"duration_seconds":  fmt.Sprintf("%.1f", timeSpan.Seconds()),
 				},
-				CreatedAt:   timestamppb.Now(),
-				UpdatedAt:   timestamppb.Now(),
+				CreatedAt: timestamppb.Now(),
+				UpdatedAt: timestamppb.Now(),
 			})
 		}
 	}

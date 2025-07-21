@@ -577,9 +577,9 @@ func (s *TapioServiceComplete) AnalyzeEvents(ctx context.Context, req *pb.Analyz
 	analysisID := fmt.Sprintf("analysis-%d", time.Now().UnixNano())
 
 	return &pb.AnalyzeEventsResponse{
-		AnalysisId: analysisID,
-		Status:     pb.AnalysisStatus_ANALYSIS_STATUS_COMPLETED,
-		Correlations:   correlations,
+		AnalysisId:   analysisID,
+		Status:       pb.AnalysisStatus_ANALYSIS_STATUS_COMPLETED,
+		Correlations: correlations,
 		Summary: &pb.AnalysisSummary{
 			TotalEvents:       int32(len(req.Events)),
 			CorrelationsFound: int32(len(correlations)),
