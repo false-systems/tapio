@@ -291,7 +291,7 @@ func convertUnifiedEventToLegacy(unified domain.UnifiedEvent) domain.Event {
 		Data:      data,
 		Severity:  domain.EventSeverity(unified.GetSeverity()),
 		Context:   context,
-		Message:   func() string {
+		Message: func() string {
 			if unified.Application != nil && unified.Application.Message != "" {
 				return unified.Application.Message
 			}

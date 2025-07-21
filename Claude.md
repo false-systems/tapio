@@ -81,6 +81,7 @@ go mod verify
 - Architectural violations
 - Missing verification output
 - Stub functions or TODOs
+- work on dedicated branchs, PR only your code!
 
 ### No Excuses For
 
@@ -89,6 +90,7 @@ go mod verify
 - "Need to refactor first" - Follow requirements
 - "Just one small TODO" - Zero tolerance
 - "Can't find interfaces" - Ask for help
+- "fast solutions"- ask for advice
 
 ## 📋 Task Template
 

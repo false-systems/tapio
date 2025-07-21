@@ -15,8 +15,8 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 	ebpfcollector "github.com/yairfalse/tapio/pkg/collectors/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 )
 
 // Implementation provides Linux-specific eBPF functionality
@@ -246,12 +246,12 @@ func (impl *Implementation) parseEvent(record perf.Record) core.RawEvent {
 	if len(record.RawSample) >= 24 { // Minimum event size
 		event.PID = binary.LittleEndian.Uint32(record.RawSample[0:4])
 		event.TID = binary.LittleEndian.Uint32(record.RawSample[4:8])
-		
+
 		// Extract memory-specific fields
 		eventType := binary.LittleEndian.Uint32(record.RawSample[8:12])
 		size := binary.LittleEndian.Uint64(record.RawSample[12:20])
 		addr := binary.LittleEndian.Uint64(record.RawSample[20:28])
-		
+
 		switch eventType {
 		case 1: // mm_page_alloc
 			event.Type = "memory_alloc"
@@ -271,7 +271,7 @@ func (impl *Implementation) parseEvent(record perf.Record) core.RawEvent {
 			event.Type = "memory_unknown"
 			event.Decoded["operation"] = "unknown"
 		}
-		
+
 		// Add common memory context
 		event.Decoded["memory_event"] = true
 		event.Decoded["kernel_source"] = "tracepoint"

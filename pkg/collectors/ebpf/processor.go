@@ -16,8 +16,8 @@ type DualPathProcessor struct {
 	config *ProcessorConfig
 
 	// Components
-	filterEngine *FilterEngine
-	enricher     *EventEnricher
+	filterEngine       *FilterEngine
+	enricher           *EventEnricher
 	correlationHandler func(*EnrichedEvent) // Injected correlation handler
 
 	// Raw path (Hubble-style)

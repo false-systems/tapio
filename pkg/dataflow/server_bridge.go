@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/events"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
@@ -23,7 +23,7 @@ type ServerBridge struct {
 	// Server connection
 	serverAddr  string
 	grpcConn    *grpc.ClientConn
-	eventClient events.EventServiceClient
+	eventClient pb.TapioServiceClient
 
 	// Data flow integration
 	dataFlow       *TapioDataFlow
@@ -98,7 +98,7 @@ func NewServerBridge(cfg BridgeConfig, dataFlow *TapioDataFlow) (*ServerBridge, 
 	bridge := &ServerBridge{
 		serverAddr:     cfg.ServerAddress,
 		grpcConn:       conn,
-		eventClient:    events.NewEventServiceClient(conn),
+		eventClient:    pb.NewTapioServiceClient(conn),
 		dataFlow:       dataFlow,
 		findingsBuffer: make(chan *EnrichedFinding, cfg.BufferSize),
 		semanticBuffer: make(chan *SemanticUpdate, cfg.BufferSize),

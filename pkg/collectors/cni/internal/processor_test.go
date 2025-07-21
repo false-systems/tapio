@@ -539,10 +539,10 @@ func TestCNIEventProcessor_TraceContextExtraction(t *testing.T) {
 	processor := &cniEventProcessor{}
 
 	tests := []struct {
-		name        string
-		annotations map[string]string
-		expectTrace bool
-		expectedID  string
+		name         string
+		annotations  map[string]string
+		expectTrace  bool
+		expectedID   string
 		expectedSpan string
 	}{
 		{

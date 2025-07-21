@@ -29,7 +29,8 @@ const (
 
 // NewCollector creates a new eBPF collector with the given configuration
 func NewCollector(config Config) (Collector, error) {
-	return internal.NewCollector(config)
+	// Use the production-hardened collector implementation
+	return internal.NewProductionCollector(config)
 }
 
 // DefaultConfig returns a default configuration with advanced features
