@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	// Commented out until collectors are fixed
-	// "github.com/yairfalse/tapio/pkg/collectors/ebpf"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
+	// K8s and SystemD collectors disabled pending additional fixes
 	// "github.com/yairfalse/tapio/pkg/collectors/k8s"
 	// "github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/dataflow"
@@ -93,23 +93,41 @@ func runCollector(cmd *cobra.Command, args []string) error {
 	manager := NewCollectorManager()
 
 	// Initialize collectors based on flags
-	// TODO: Uncomment once collectors are fixed
-	/*
-		if enableEBPF {
-			collector, err := ebpf.NewCollector(ebpf.DefaultConfig())
-			if err == nil {
-				manager.AddCollector("ebpf", collector)
-				log.Printf("✅ eBPF collector enabled")
-			} else {
-				log.Printf("⚠️  eBPF collector disabled: %v", err)
-			}
-		}
+	collectorsEnabled := 0
 
+	if enableEBPF {
+		// Create eBPF collector with gRPC server connection
+		config := ebpf.DefaultConfig()
+
+		collector, err := ebpf.NewCollector(config)
+		if err == nil {
+			// Create adapter to handle gRPC connection
+			ebpfAdapter := &EBPFCollectorAdapter{
+				collector:     collector,
+				serverAddress: serverAddress,
+				eventChan:     make(chan domain.Event, 1000),
+			}
+
+			if err := ebpfAdapter.Start(ctx); err != nil {
+				log.Printf("⚠️  eBPF adapter failed to start: %v", err)
+			} else {
+				manager.AddCollector("ebpf", ebpfAdapter)
+				collectorsEnabled++
+				log.Printf("✅ eBPF collector enabled with gRPC connection to %s", serverAddress)
+			}
+		} else {
+			log.Printf("⚠️  eBPF collector disabled: %v", err)
+		}
+	}
+
+	// K8s and SystemD collectors disabled pending additional fixes
+	/*
 		if enableK8s {
 			collector, err := k8s.NewCollector(k8s.DefaultConfig())
 			if err == nil {
 				manager.AddCollector("k8s", collector)
 				log.Printf("✅ Kubernetes collector enabled")
+				collectorsEnabled++
 			} else {
 				log.Printf("⚠️  Kubernetes collector disabled: %v", err)
 			}
@@ -120,14 +138,18 @@ func runCollector(cmd *cobra.Command, args []string) error {
 			if err == nil {
 				manager.AddCollector("systemd", collector)
 				log.Printf("✅ SystemD collector enabled")
+				collectorsEnabled++
 			} else {
 				log.Printf("⚠️  SystemD collector disabled: %v", err)
 			}
 		}
-
 	*/
 
-	log.Printf("⚠️  All collectors temporarily disabled pending fixes")
+	if collectorsEnabled == 0 {
+		log.Printf("⚠️  No collectors enabled - check configuration")
+	} else {
+		log.Printf("🚀 %d collector(s) enabled", collectorsEnabled)
+	}
 
 	// Create event channels
 	inputEvents := make(chan domain.Event, bufferSize)
@@ -359,5 +381,132 @@ func (cm *CollectorManager) Statistics() struct {
 	}{
 		ActiveCollectors: len(cm.collectors),
 		TotalEvents:      0, // TODO: Track this
+	}
+}
+
+// EBPFCollectorAdapter adapts the eBPF collector to include gRPC connectivity
+type EBPFCollectorAdapter struct {
+	collector     ebpf.Collector
+	serverAddress string
+	eventChan     chan domain.Event
+	processor     *ebpf.DualPathProcessor
+	ctx           context.Context
+	cancel        context.CancelFunc
+}
+
+// Start starts the eBPF collector with gRPC processor
+func (a *EBPFCollectorAdapter) Start(ctx context.Context) error {
+	a.ctx, a.cancel = context.WithCancel(ctx)
+
+	// Start the underlying eBPF collector
+	if err := a.collector.Start(a.ctx); err != nil {
+		return fmt.Errorf("failed to start eBPF collector: %w", err)
+	}
+
+	// Create dual-path processor with gRPC connection
+	processorConfig := &ebpf.ProcessorConfig{
+		RawBufferSize:      10000,
+		SemanticBufferSize: 5000,
+		WorkerCount:        4,
+		BatchSize:          100,
+		FlushInterval:      time.Second,
+		EnableRawPath:      false, // Disable raw path for production
+		EnableSemanticPath: true,  // Enable semantic correlation path
+		RawRetentionPeriod: 1 * time.Hour,
+		RawStorageBackend:  "memory",
+		SemanticBatchSize:  50,
+		TapioServerAddr:    a.serverAddress,   // Connect to gRPC server
+		MaxMemoryUsage:     512 * 1024 * 1024, // 512MB
+		MetricsInterval:    30 * time.Second,
+	}
+
+	a.processor = ebpf.NewDualPathProcessor(processorConfig)
+	if err := a.processor.Start(); err != nil {
+		return fmt.Errorf("failed to start eBPF processor: %w", err)
+	}
+
+	// Bridge events from collector to processor and output channel
+	go func() {
+		for {
+			select {
+			case event, ok := <-a.collector.Events():
+				if !ok {
+					close(a.eventChan)
+					return
+				}
+
+				// Convert domain.Event to RawEvent for processor
+				rawEvent := &ebpf.RawEvent{
+					Type:      ebpf.EventTypeProcess,
+					Timestamp: uint64(event.Timestamp.UnixNano()),
+					PID:       uint32(event.Context.PID),
+					UID:       uint32(event.Context.UID),
+					GID:       uint32(event.Context.GID),
+					Comm:      event.Context.Comm,
+					Details:   event.Data,
+				}
+
+				// Process through dual-path processor (includes gRPC sending)
+				if err := a.processor.ProcessRawEvent(rawEvent); err != nil {
+					log.Printf("Error processing eBPF event: %v", err)
+				}
+
+				// Also send to local event channel for dataflow
+				select {
+				case a.eventChan <- event:
+				case <-a.ctx.Done():
+					return
+				}
+
+			case <-a.ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+// Stop stops the eBPF collector and processor
+func (a *EBPFCollectorAdapter) Stop() error {
+	if a.cancel != nil {
+		a.cancel()
+	}
+
+	var errs []error
+
+	if a.processor != nil {
+		if err := a.processor.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("processor stop error: %w", err))
+		}
+	}
+
+	if err := a.collector.Stop(); err != nil {
+		errs = append(errs, fmt.Errorf("collector stop error: %w", err))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("stop errors: %v", errs)
+	}
+
+	return nil
+}
+
+// Events returns the event channel
+func (a *EBPFCollectorAdapter) Events() <-chan domain.Event {
+	return a.eventChan
+}
+
+// Health returns the health status
+func (a *EBPFCollectorAdapter) Health() domain.HealthStatus {
+	// Get health from underlying collector
+	if healthProvider, ok := a.collector.(interface{ Health() domain.HealthStatus }); ok {
+		return healthProvider.Health()
+	}
+
+	// Fallback to basic health
+	return domain.HealthStatus{
+		Status:  "healthy",
+		Message: "eBPF adapter running",
 	}
 }

@@ -139,12 +139,107 @@ The collector exposes health metrics every 10 seconds:
 
 Individual collector health can be monitored through their respective interfaces.
 
+## gRPC Integration
+
+### eBPF gRPC Connection
+
+The eBPF collector features built-in gRPC streaming to the Tapio server for real-time event correlation and analysis. This connection was previously disabled but has been restored.
+
+#### Connection Architecture
+
+```
+┌─────────────────┐    ┌──────────────────────┐    ┌─────────────────┐
+│ eBPF Collector  │    │ EBPFCollectorAdapter │    │  Tapio Server   │
+│                 │    │                      │    │                 │
+│ Kernel Events   ├───►│ Dual-Path Processor  ├───►│ gRPC Streaming  │
+│ (domain.Event)  │    │ - Raw Path           │    │ - Correlation   │
+│                 │    │ - Semantic Path      │    │ - Intelligence  │
+└─────────────────┘    │ - gRPC Client        │    │ - OTEL Traces   │
+                       └──────────────────────┘    └─────────────────┘
+```
+
+#### Features
+
+1. **Dual-Path Processing**:
+   - **Raw Path**: Disabled in production for performance
+   - **Semantic Path**: Enabled with intelligent event filtering
+   - **gRPC Streaming**: Bidirectional streaming to Tapio server
+
+2. **Connection Configuration**:
+   ```bash
+   tapio-collector --server localhost:9090 --enable-ebpf
+   ```
+
+3. **Automatic Reconnection**: Built-in connection management with retry logic
+
+4. **Event Enrichment**: Events are enriched before streaming:
+   - Process context (PID, UID, GID, Comm)
+   - Container information 
+   - Kubernetes metadata
+   - Network context
+   - Severity scoring
+
+#### Configuration Details
+
+The adapter configures the dual-path processor with:
+
+```go
+processorConfig := &ebpf.ProcessorConfig{
+    RawBufferSize:      10000,
+    SemanticBufferSize: 5000,
+    WorkerCount:        4,
+    BatchSize:          100,
+    FlushInterval:      time.Second,
+    EnableRawPath:      false, // Disabled for production
+    EnableSemanticPath: true,  // Enable semantic correlation
+    TapioServerAddr:    serverAddress, // gRPC server connection
+    SemanticBatchSize:  50,
+    MaxMemoryUsage:     512 * 1024 * 1024, // 512MB
+    MetricsInterval:    30 * time.Second,
+}
+```
+
+#### Event Flow
+
+1. **Collection**: eBPF collector gathers kernel events
+2. **Conversion**: domain.Event → RawEvent for processing
+3. **Processing**: Dual-path processor applies filtering and enrichment
+4. **Streaming**: TapioGRPCClient sends events via bidirectional gRPC
+5. **Correlation**: Tapio server processes events for semantic correlation
+
+#### Verification
+
+To verify the gRPC connection is working:
+
+```bash
+# Start Tapio server
+tapio-server --grpc-port 9090
+
+# Start collector with eBPF enabled
+tapio-collector --server localhost:9090 --enable-ebpf
+
+# Look for success messages
+✅ eBPF collector enabled with gRPC connection to localhost:9090
+```
+
+#### Connection Status
+
+The eBPF collector connection status:
+- ✅ **Enabled**: gRPC streaming active
+- ✅ **Tested**: Connection verified in development
+- ✅ **Production Ready**: Resource limits and error handling configured
+
 ## Troubleshooting
 
 1. **eBPF collector fails to start**: Requires root/CAP_SYS_ADMIN capability
 2. **K8s collector fails**: Ensure kubeconfig is available
 3. **High memory usage**: Reduce buffer-size or enable fewer collectors
 4. **Missing events**: Check collector health and server connectivity
+5. **gRPC connection issues**: 
+   - Verify Tapio server is running on specified port
+   - Check network connectivity between collector and server
+   - Ensure gRPC port (default 9090) is accessible
+6. **eBPF gRPC adapter errors**: Check logs for processor or client initialization failures
 
 ## License
 

@@ -44,6 +44,7 @@ type SemanticCorrelationEngine struct {
 	cancel  context.CancelFunc
 	running bool
 	mu      sync.RWMutex
+	wg      sync.WaitGroup
 
 	// Stats
 	stats           map[string]interface{}
@@ -96,9 +97,11 @@ func (sce *SemanticCorrelationEngine) Start() error {
 	sce.running = true
 
 	// Start processing events with our semantic correlation
+	sce.wg.Add(1)
 	go sce.processEvents()
 
 	// Start periodic semantic analysis
+	sce.wg.Add(1)
 	go sce.periodicSemanticAnalysis()
 
 	return nil
@@ -107,14 +110,17 @@ func (sce *SemanticCorrelationEngine) Start() error {
 // Stop gracefully shuts down the engine
 func (sce *SemanticCorrelationEngine) Stop() error {
 	sce.mu.Lock()
-	defer sce.mu.Unlock()
-
 	if !sce.running {
+		sce.mu.Unlock()
 		return nil
 	}
 
 	sce.cancel()
 	sce.running = false
+	sce.mu.Unlock()
+
+	// Wait for all goroutines to finish
+	sce.wg.Wait()
 
 	// Close channels
 	close(sce.eventChan)
@@ -125,11 +131,23 @@ func (sce *SemanticCorrelationEngine) Stop() error {
 
 // ProcessEvent processes a single event through the correlation engine
 func (sce *SemanticCorrelationEngine) ProcessEvent(event *domain.Event) {
-	select {
-	case sce.eventChan <- Event(*event):
-		sce.updateStats("events_received")
-	default:
-		sce.updateStats("events_dropped")
+	if sce.ctx != nil {
+		select {
+		case sce.eventChan <- Event(*event):
+			sce.updateStats("events_received")
+		case <-sce.ctx.Done():
+			return // Exit if context is cancelled
+		default:
+			sce.updateStats("events_dropped")
+		}
+	} else {
+		// Engine not started, just drop event to event channel
+		select {
+		case sce.eventChan <- Event(*event):
+			sce.updateStats("events_received")
+		default:
+			sce.updateStats("events_dropped")
+		}
 	}
 }
 
@@ -200,6 +218,7 @@ func (sce *SemanticCorrelationEngine) Insights() <-chan Insight {
 
 // processEvents is the main event processing loop
 func (sce *SemanticCorrelationEngine) processEvents() {
+	defer sce.wg.Done()
 	ctx, span := sce.tracer.Start(sce.ctx, "correlation.process_events")
 	defer span.End()
 
@@ -234,6 +253,7 @@ func (sce *SemanticCorrelationEngine) processEvents() {
 
 // periodicSemanticAnalysis runs periodic analysis on buffered events
 func (sce *SemanticCorrelationEngine) periodicSemanticAnalysis() {
+	defer sce.wg.Done()
 	ticker := time.NewTicker(sce.bufferTimeout)
 	defer ticker.Stop()
 
@@ -278,6 +298,8 @@ func (sce *SemanticCorrelationEngine) analyzeSemanticPatterns() {
 		select {
 		case sce.insightChan <- insight:
 			sce.updateStats("semantic_insights_generated")
+		case <-sce.ctx.Done():
+			return // Exit if context is cancelled
 		default:
 			sce.updateStats("semantic_insights_dropped")
 		}
@@ -311,6 +333,8 @@ func (sce *SemanticCorrelationEngine) generateSemanticInsights() {
 		case sce.insightChan <- insight:
 			sce.markInsightGenerated(insightID)
 			sce.updateStats("trace_insights_generated")
+		case <-sce.ctx.Done():
+			return // Exit if context is cancelled
 		default:
 			sce.updateStats("trace_insights_dropped")
 		}
