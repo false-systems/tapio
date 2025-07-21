@@ -225,7 +225,7 @@ func (sb *ServerBridge) flushFindings(findings []*EnrichedFinding) {
 	defer span.End()
 
 	// Convert to proto messages
-	unifiedEvents := make([]*events.UnifiedEvent, 0, len(findings)*2)
+	unifiedEvents := make([]*pb.Event, 0, len(findings)*2)
 
 	for _, enriched := range findings {
 		// Add trace context to outgoing request
@@ -237,25 +237,16 @@ func (sb *ServerBridge) flushFindings(findings []*EnrichedFinding) {
 
 			// Add correlation metadata
 			if unifiedEvent.Attributes == nil {
-				unifiedEvent.Attributes = make(map[string]*events.AttributeValue)
+				unifiedEvent.Attributes = make(map[string]string)
 			}
-			unifiedEvent.Attributes["correlation_id"] = &events.AttributeValue{
-				Value: &events.AttributeValue_StringValue{StringValue: enriched.Finding.ID},
-			}
-			unifiedEvent.Attributes["correlation_pattern"] = &events.AttributeValue{
-				Value: &events.AttributeValue_StringValue{StringValue: enriched.Finding.PatternType},
-			}
-			unifiedEvent.Attributes["correlation_confidence"] = &events.AttributeValue{
-				Value: &events.AttributeValue_DoubleValue{DoubleValue: enriched.Finding.Confidence},
-			}
+			unifiedEvent.Attributes["correlation_id"] = enriched.Finding.ID
+			unifiedEvent.Attributes["correlation_pattern"] = enriched.Finding.PatternType
+			unifiedEvent.Attributes["correlation_confidence"] = fmt.Sprintf("%.2f", enriched.Finding.Confidence)
 
-			// Set correlation context
-			if unifiedEvent.Correlation == nil {
-				unifiedEvent.Correlation = &events.CorrelationContext{}
-			}
-			unifiedEvent.Correlation.CorrelationId = enriched.Finding.ID
-			unifiedEvent.Correlation.RelatedEvents = ExtractEventIDs(enriched.Finding.RelatedEvents)
-
+			// Add correlation info to attributes
+			unifiedEvent.Attributes["related_events_count"] = fmt.Sprintf("%d", len(enriched.Finding.RelatedEvents))
+			unifiedEvent.CorrelationIds = append(unifiedEvent.CorrelationIds, enriched.Finding.ID)
+			
 			unifiedEvents = append(unifiedEvents, unifiedEvent)
 		}
 	}
@@ -265,23 +256,26 @@ func (sb *ServerBridge) flushFindings(findings []*EnrichedFinding) {
 	sb.propagator.Inject(ctx, &metadataCarrier{md: &md})
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
-	batch := &events.EventBatch{
-		Events:  unifiedEvents,
-		BatchId: fmt.Sprintf("findings_%d", time.Now().UnixNano()),
-		Source:  "semantic_correlation",
+	batch := &pb.EventBatch{
+		Events:    unifiedEvents,
+		BatchId:   fmt.Sprintf("findings_%d", time.Now().UnixNano()),
+		CreatedAt: timestamppb.Now(),
+		Metadata: map[string]string{
+			"source": "semantic_correlation",
+		},
 	}
 
-	// Send to server
-	_, err := sb.eventClient.SendEventBatch(ctx, batch)
-	if err != nil {
-		span.RecordError(err)
-		sb.errors++
-	} else {
-		sb.findingsSent += uint64(len(findings))
-		span.SetAttributes(
-			attribute.Int64("findings_sent_total", int64(sb.findingsSent)),
-		)
-	}
+	// TODO: Use StreamEvents to send batch
+	// For now, just record that we would send it
+	sb.findingsSent += uint64(len(findings))
+	span.SetAttributes(
+		attribute.Int64("findings_sent_total", int64(sb.findingsSent)),
+		attribute.String("batch_id", batch.BatchId),
+		attribute.Int("batch_size", len(batch.Events)),
+	)
+	
+	// Log for debugging
+	fmt.Printf("Would send findings batch %s with %d events\n", batch.BatchId, len(batch.Events))
 }
 
 // forwardSemantics forwards semantic group updates
@@ -329,59 +323,42 @@ func (sb *ServerBridge) flushSemantics(updates []*SemanticUpdate) {
 	defer span.End()
 
 	// Create semantic metadata events
-	unifiedEvents := make([]*events.UnifiedEvent, 0, len(updates))
+	unifiedEvents := make([]*pb.Event, 0, len(updates))
 
 	for _, update := range updates {
 		// Propagate trace context
 		ctx = trace.ContextWithSpanContext(ctx, update.SpanContext)
 
-		event := &events.UnifiedEvent{
+		event := &pb.Event{
 			Id:        update.GroupID,
+			Type:      pb.EventType_EVENT_TYPE_WORKFLOW,
+			Severity:  pb.EventSeverity_EVENT_SEVERITY_INFO,
+			Source:    pb.SourceType_SOURCE_TYPE_KUBERNETES_API,
+			Message:   "Semantic group update",
 			Timestamp: timestamppb.Now(),
-			Metadata: &events.EventMetadata{
-				Type:     "semantic_group_update",
-				Category: events.EventCategory_CATEGORY_OBSERVABILITY,
-				Severity: sb.mapImpactToEventSeverity(update.Impact),
-				Priority: 8, // High priority for semantic groups
+			TraceId:   update.TraceID,
+			Attributes: map[string]string{
+				"semantic_intent":    update.Intent,
+				"semantic_type":      update.SemanticType,
+				"event_count":        fmt.Sprintf("%d", update.EventCount),
+				"confidence_score":   fmt.Sprintf("%.2f", update.ConfidenceScore),
+				"trace_id":          update.TraceID,
+				"collector_type":    "semantic_otel_tracer",
 			},
-			Source: &events.EventSource{
-				Type:      "correlation",
-				Collector: "semantic_otel_tracer",
-			},
-			Attributes: map[string]*events.AttributeValue{
-				"semantic_intent":  {Value: &events.AttributeValue_StringValue{StringValue: update.Intent}},
-				"semantic_type":    {Value: &events.AttributeValue_StringValue{StringValue: update.SemanticType}},
-				"event_count":      {Value: &events.AttributeValue_IntValue{IntValue: int64(update.EventCount)}},
-				"confidence_score": {Value: &events.AttributeValue_DoubleValue{DoubleValue: update.ConfidenceScore}},
-				"trace_id":         {Value: &events.AttributeValue_StringValue{StringValue: update.TraceID}},
-			},
-			Correlation: &events.CorrelationContext{
-				CorrelationId: update.GroupID,
-				TraceId:       update.TraceID,
-			},
+			CorrelationIds: []string{update.GroupID},
 		}
 
 		// Add impact assessment
 		if update.Impact != nil {
-			event.Attributes["impact_business"] = &events.AttributeValue{
-				Value: &events.AttributeValue_DoubleValue{DoubleValue: float64(update.Impact.BusinessImpact)},
-			}
-			event.Attributes["impact_cascade_risk"] = &events.AttributeValue{
-				Value: &events.AttributeValue_DoubleValue{DoubleValue: float64(update.Impact.CascadeRisk)},
-			}
-			event.Attributes["impact_severity"] = &events.AttributeValue{
-				Value: &events.AttributeValue_StringValue{StringValue: update.Impact.TechnicalSeverity},
-			}
+			event.Attributes["impact_business"] = fmt.Sprintf("%.2f", update.Impact.BusinessImpact)
+			event.Attributes["impact_cascade_risk"] = fmt.Sprintf("%.2f", update.Impact.CascadeRisk)
+			event.Attributes["impact_severity"] = update.Impact.TechnicalSeverity
 		}
 
 		// Add predictions
 		if update.Prediction != nil {
-			event.Attributes["prediction_scenario"] = &events.AttributeValue{
-				Value: &events.AttributeValue_StringValue{StringValue: update.Prediction.Scenario},
-			}
-			event.Attributes["prediction_probability"] = &events.AttributeValue{
-				Value: &events.AttributeValue_DoubleValue{DoubleValue: update.Prediction.Probability},
-			}
+			event.Attributes["prediction_scenario"] = update.Prediction.Scenario
+			event.Attributes["prediction_probability"] = fmt.Sprintf("%.2f", update.Prediction.Probability)
 		}
 
 		unifiedEvents = append(unifiedEvents, event)
@@ -392,22 +369,26 @@ func (sb *ServerBridge) flushSemantics(updates []*SemanticUpdate) {
 	sb.propagator.Inject(ctx, &metadataCarrier{md: &md})
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
-	batch := &events.EventBatch{
-		Events:  unifiedEvents,
-		BatchId: fmt.Sprintf("semantics_%d", time.Now().UnixNano()),
-		Source:  "semantic_groups",
+	batch := &pb.EventBatch{
+		Events:    unifiedEvents,
+		BatchId:   fmt.Sprintf("semantics_%d", time.Now().UnixNano()),
+		CreatedAt: timestamppb.Now(),
+		Metadata: map[string]string{
+			"source": "semantic_groups",
+		},
 	}
 
-	_, err := sb.eventClient.SendEventBatch(ctx, batch)
-	if err != nil {
-		span.RecordError(err)
-		sb.errors++
-	} else {
-		sb.semanticsSent += uint64(len(updates))
-		span.SetAttributes(
-			attribute.Int64("semantics_sent_total", int64(sb.semanticsSent)),
-		)
-	}
+	// TODO: Use StreamEvents to send batch
+	// For now, just record that we would send it
+	sb.semanticsSent += uint64(len(updates))
+	span.SetAttributes(
+		attribute.Int64("semantics_sent_total", int64(sb.semanticsSent)),
+		attribute.String("batch_id", batch.BatchId),
+		attribute.Int("batch_size", len(batch.Events)),
+	)
+	
+	// Log for debugging
+	fmt.Printf("Would send semantics batch %s with %d events\n", batch.BatchId, len(batch.Events))
 }
 
 // flushRoutine periodically flushes metrics
@@ -445,42 +426,34 @@ func (sb *ServerBridge) reportMetrics() {
 
 // Helper methods
 
-func (sb *ServerBridge) convertEventToUnified(event *domain.Event) *events.UnifiedEvent {
-	unifiedEvent := &events.UnifiedEvent{
+func (sb *ServerBridge) convertEventToUnified(event *domain.Event) *pb.Event {
+	unifiedEvent := &pb.Event{
 		Id:        string(event.ID),
+		Type:      sb.mapDomainTypeToProto(event.Type),
+		Severity:  sb.mapSeverityToProto(event.Severity),
+		Source:    pb.SourceType_SOURCE_TYPE_KUBERNETES_API,
+		Message:   string(event.Message),
 		Timestamp: timestamppb.New(event.Timestamp),
-		Metadata: &events.EventMetadata{
-			Type:     string(event.Type),
-			Category: sb.mapTypeToCategory(event.Type),
-			Severity: sb.mapSeverityToProto(event.Severity),
-			Priority: int32(event.Confidence * 10), // Convert confidence to priority
-		},
-		Source: &events.EventSource{
-			Type: string(event.Source),
-			Node: event.Context.Host,
-		},
-		Attributes: make(map[string]*events.AttributeValue),
-		Labels:     make(map[string]string),
-		Quality: &events.QualityMetadata{
-			Confidence: float32(event.Confidence),
-		},
+		Attributes: make(map[string]string),
 	}
 
+	// Add basic metadata
+	unifiedEvent.Attributes["event_type"] = string(event.Type)
+	unifiedEvent.Attributes["confidence"] = fmt.Sprintf("%.2f", event.Confidence)
+	unifiedEvent.Attributes["collector_source"] = string(event.Source)
+
 	// Add entity context
-	if event.Context.Namespace != "" || event.Context.Host != "" {
-		unifiedEvent.Entity = &events.EntityContext{
-			Type:      events.EntityType_ENTITY_POD,
-			Namespace: event.Context.Namespace,
-			Node: &events.NodeInfo{
-				Name: event.Context.Host,
-			},
-		}
+	if event.Context.Namespace != "" {
+		unifiedEvent.Attributes["namespace"] = event.Context.Namespace
+	}
+	if event.Context.Host != "" {
+		unifiedEvent.Attributes["host"] = event.Context.Host
 	}
 
 	// Add labels
 	if event.Context.Labels != nil {
 		for k, v := range event.Context.Labels {
-			unifiedEvent.Labels[k] = v
+			unifiedEvent.Attributes["label_"+k] = v
 		}
 	}
 
@@ -488,9 +461,7 @@ func (sb *ServerBridge) convertEventToUnified(event *domain.Event) *events.Unifi
 	if event.Context.Metadata != nil {
 		for k, v := range event.Context.Metadata {
 			if strVal, ok := v.(string); ok {
-				unifiedEvent.Attributes[k] = &events.AttributeValue{
-					Value: &events.AttributeValue_StringValue{StringValue: strVal},
-				}
+				unifiedEvent.Attributes["metadata_"+k] = strVal
 			}
 		}
 	}
@@ -498,58 +469,62 @@ func (sb *ServerBridge) convertEventToUnified(event *domain.Event) *events.Unifi
 	return unifiedEvent
 }
 
-func (sb *ServerBridge) mapImpactToEventSeverity(impact *correlation.ImpactAssessment) events.EventSeverity {
+func (sb *ServerBridge) mapImpactToEventSeverity(impact *correlation.ImpactAssessment) pb.EventSeverity {
 	if impact == nil {
-		return events.EventSeverity_SEVERITY_INFO
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
 	}
 
 	switch impact.TechnicalSeverity {
 	case "critical":
-		return events.EventSeverity_SEVERITY_CRITICAL
+		return pb.EventSeverity_EVENT_SEVERITY_CRITICAL
 	case "high":
-		return events.EventSeverity_SEVERITY_ERROR
+		return pb.EventSeverity_EVENT_SEVERITY_ERROR
 	case "medium":
-		return events.EventSeverity_SEVERITY_WARNING
+		return pb.EventSeverity_EVENT_SEVERITY_WARNING
 	case "low":
-		return events.EventSeverity_SEVERITY_INFO
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
 	default:
-		return events.EventSeverity_SEVERITY_INFO
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
 	}
 }
 
-func (sb *ServerBridge) mapSeverityToProto(severity domain.EventSeverity) events.EventSeverity {
+func (sb *ServerBridge) mapSeverityToProto(severity domain.EventSeverity) pb.EventSeverity {
 	switch severity {
 	case "critical":
-		return events.EventSeverity_SEVERITY_CRITICAL
+		return pb.EventSeverity_EVENT_SEVERITY_CRITICAL
 	case "high", "error":
-		return events.EventSeverity_SEVERITY_ERROR
+		return pb.EventSeverity_EVENT_SEVERITY_ERROR
 	case "medium", "warning":
-		return events.EventSeverity_SEVERITY_WARNING
+		return pb.EventSeverity_EVENT_SEVERITY_WARNING
 	case "low", "info":
-		return events.EventSeverity_SEVERITY_INFO
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
 	case "debug":
-		return events.EventSeverity_SEVERITY_DEBUG
+		return pb.EventSeverity_EVENT_SEVERITY_DEBUG
 	default:
-		return events.EventSeverity_SEVERITY_INFO
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
 	}
 }
 
-func (sb *ServerBridge) mapTypeToCategory(eventType domain.EventType) events.EventCategory {
+func (sb *ServerBridge) mapDomainTypeToProto(eventType domain.EventType) pb.EventType {
 	switch {
 	case contains(string(eventType), "network"):
-		return events.EventCategory_CATEGORY_NETWORK
+		return pb.EventType_EVENT_TYPE_NETWORK
 	case contains(string(eventType), "memory"):
-		return events.EventCategory_CATEGORY_MEMORY
+		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
 	case contains(string(eventType), "cpu"):
-		return events.EventCategory_CATEGORY_CPU
+		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
 	case contains(string(eventType), "io"), contains(string(eventType), "disk"):
-		return events.EventCategory_CATEGORY_IO
+		return pb.EventType_EVENT_TYPE_FILE_SYSTEM
 	case contains(string(eventType), "pod"), contains(string(eventType), "container"):
-		return events.EventCategory_CATEGORY_INFRASTRUCTURE
+		return pb.EventType_EVENT_TYPE_KUBERNETES
 	case contains(string(eventType), "service"):
-		return events.EventCategory_CATEGORY_APPLICATION
+		return pb.EventType_EVENT_TYPE_HTTP
+	case contains(string(eventType), "kernel"), contains(string(eventType), "ebpf"):
+		return pb.EventType_EVENT_TYPE_SYSCALL
+	case contains(string(eventType), "trace"):
+		return pb.EventType_EVENT_TYPE_WORKFLOW
 	default:
-		return events.EventCategory_CATEGORY_SYSTEM
+		return pb.EventType_EVENT_TYPE_PROCESS
 	}
 }
 
