@@ -11,35 +11,35 @@ import (
 
 // EventValidator validates raw eBPF events for security and correctness
 type EventValidator struct {
-	mu              sync.RWMutex
-	maxEventSize    int
-	maxCommLength   int
-	validEventTypes map[string]bool
+	mu               sync.RWMutex
+	maxEventSize     int
+	maxCommLength    int
+	validEventTypes  map[string]bool
 	processNameRegex *regexp.Regexp
-	metrics         ValidatorMetrics
+	metrics          ValidatorMetrics
 }
 
 // ValidatorMetrics tracks validation statistics
 type ValidatorMetrics struct {
-	TotalValidated   uint64
-	InvalidEvents    uint64
+	TotalValidated     uint64
+	InvalidEvents      uint64
 	SecurityViolations uint64
-	MalformedEvents  uint64
-	OversizedEvents  uint64
+	MalformedEvents    uint64
+	OversizedEvents    uint64
 }
 
 // NewEventValidator creates a new event validator
 func NewEventValidator() *EventValidator {
 	return &EventValidator{
-		maxEventSize:    1024 * 1024, // 1MB max event size
-		maxCommLength:   256,         // Max process name length
+		maxEventSize:  1024 * 1024, // 1MB max event size
+		maxCommLength: 256,         // Max process name length
 		validEventTypes: map[string]bool{
-			"syscall":     true,
-			"network":     true,
-			"file":        true,
-			"process":     true,
-			"memory":      true,
-			"security":    true,
+			"syscall":  true,
+			"network":  true,
+			"file":     true,
+			"process":  true,
+			"memory":   true,
+			"security": true,
 		},
 		processNameRegex: regexp.MustCompile(`^[a-zA-Z0-9\-_./:]+$`),
 	}
@@ -164,7 +164,7 @@ func containsPathTraversal(s string) bool {
 		"..%2f",
 		"..%5c",
 	}
-	
+
 	for _, pattern := range patterns {
 		if regexp.MustCompile(pattern).MatchString(s) {
 			return true
@@ -183,7 +183,7 @@ func containsSQLInjection(s string) bool {
 		`(?i)(drop.*table)`,
 		`(?i)(';|--|/\*|\*/|xp_|sp_)`,
 	}
-	
+
 	for _, pattern := range patterns {
 		if regexp.MustCompile(pattern).MatchString(s) {
 			return true
@@ -198,7 +198,7 @@ func (v *EventValidator) recordInvalid(reason string) {
 	defer v.mu.Unlock()
 
 	v.metrics.InvalidEvents++
-	
+
 	switch reason {
 	case "oversized":
 		v.metrics.OversizedEvents++

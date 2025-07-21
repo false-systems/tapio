@@ -7,12 +7,12 @@ import (
 
 // RateLimiter implements token bucket algorithm for rate limiting
 type RateLimiter struct {
-	mu           sync.Mutex
-	maxTokens    int64
-	tokens       int64
-	refillRate   int64 // tokens per second
-	lastRefill   time.Time
-	metrics      *RateLimiterMetrics
+	mu         sync.Mutex
+	maxTokens  int64
+	tokens     int64
+	refillRate int64 // tokens per second
+	lastRefill time.Time
+	metrics    *RateLimiterMetrics
 }
 
 // RateLimiterMetrics tracks rate limiter statistics
@@ -79,16 +79,16 @@ func (r *RateLimiter) AllowN(n int64) bool {
 func (r *RateLimiter) refill() {
 	now := time.Now()
 	elapsed := now.Sub(r.lastRefill).Seconds()
-	
+
 	if elapsed > 0 {
 		tokensToAdd := int64(elapsed * float64(r.refillRate))
 		r.tokens += tokensToAdd
-		
+
 		// Cap at max tokens
 		if r.tokens > r.maxTokens {
 			r.tokens = r.maxTokens
 		}
-		
+
 		r.lastRefill = now
 	}
 }
@@ -114,7 +114,7 @@ func (r *RateLimiter) updateMetrics(allowed bool) {
 func (r *RateLimiter) GetMetrics() RateLimiterMetrics {
 	r.metrics.mu.RLock()
 	defer r.metrics.mu.RUnlock()
-	
+
 	return RateLimiterMetrics{
 		allowed:        r.metrics.allowed,
 		limited:        r.metrics.limited,
@@ -130,7 +130,7 @@ func (r *RateLimiter) Reset() {
 
 	r.tokens = r.maxTokens
 	r.lastRefill = time.Now()
-	
+
 	r.metrics.mu.Lock()
 	r.metrics.allowed = 0
 	r.metrics.limited = 0

@@ -10,24 +10,24 @@ import (
 type CircuitBreakerState int32
 
 const (
-	StateClosed    CircuitBreakerState = iota // Normal operation
-	StateOpen                                  // Circuit broken, rejecting requests
-	StateHalfOpen                              // Testing if service recovered
+	StateClosed   CircuitBreakerState = iota // Normal operation
+	StateOpen                                // Circuit broken, rejecting requests
+	StateHalfOpen                            // Testing if service recovered
 )
 
 // CircuitBreaker implements circuit breaker pattern for fault tolerance
 type CircuitBreaker struct {
 	// Configuration
-	failureThreshold  int           // Number of failures before opening
-	successThreshold  int           // Number of successes to close from half-open
-	timeout           time.Duration // Time before trying half-open
-	
+	failureThreshold int           // Number of failures before opening
+	successThreshold int           // Number of successes to close from half-open
+	timeout          time.Duration // Time before trying half-open
+
 	// State
 	state        atomic.Int32 // CircuitBreakerState
 	failures     atomic.Int32
 	successes    atomic.Int32
 	lastFailTime atomic.Value // time.Time
-	
+
 	// Metrics
 	mu      sync.RWMutex
 	metrics CircuitBreakerMetrics
@@ -70,11 +70,11 @@ func (cb *CircuitBreaker) Call(fn func() error) error {
 // canExecute checks if request can proceed
 func (cb *CircuitBreaker) canExecute() bool {
 	state := CircuitBreakerState(cb.state.Load())
-	
+
 	switch state {
 	case StateClosed:
 		return true
-		
+
 	case StateOpen:
 		// Check if timeout has passed
 		lastFail := cb.lastFailTime.Load().(time.Time)
@@ -83,10 +83,10 @@ func (cb *CircuitBreaker) canExecute() bool {
 			return true
 		}
 		return false
-		
+
 	case StateHalfOpen:
 		return true
-		
+
 	default:
 		return false
 	}
@@ -99,22 +99,22 @@ func (cb *CircuitBreaker) recordResult(err error) {
 	cb.mu.Unlock()
 
 	state := CircuitBreakerState(cb.state.Load())
-	
+
 	if err != nil {
 		cb.recordFailure()
-		
+
 		switch state {
 		case StateClosed:
 			if cb.failures.Load() >= int32(cb.failureThreshold) {
 				cb.transitionTo(StateOpen)
 			}
-			
+
 		case StateHalfOpen:
 			cb.transitionTo(StateOpen)
 		}
 	} else {
 		cb.recordSuccess()
-		
+
 		switch state {
 		case StateHalfOpen:
 			if cb.successes.Load() >= int32(cb.successThreshold) {
@@ -128,7 +128,7 @@ func (cb *CircuitBreaker) recordResult(err error) {
 func (cb *CircuitBreaker) recordFailure() {
 	cb.failures.Add(1)
 	cb.lastFailTime.Store(time.Now())
-	
+
 	cb.mu.Lock()
 	cb.metrics.FailureCount++
 	cb.mu.Unlock()
@@ -137,7 +137,7 @@ func (cb *CircuitBreaker) recordFailure() {
 // recordSuccess records a success
 func (cb *CircuitBreaker) recordSuccess() {
 	cb.successes.Add(1)
-	
+
 	cb.mu.Lock()
 	cb.metrics.SuccessCount++
 	cb.mu.Unlock()
@@ -154,18 +154,18 @@ func (cb *CircuitBreaker) recordRejection() {
 // transitionTo transitions to a new state
 func (cb *CircuitBreaker) transitionTo(newState CircuitBreakerState) {
 	oldState := CircuitBreakerState(cb.state.Swap(int32(newState)))
-	
+
 	if oldState != newState {
 		// Reset counters on state change
 		switch newState {
 		case StateClosed:
 			cb.failures.Store(0)
-			
+
 		case StateHalfOpen:
 			cb.successes.Store(0)
 			cb.failures.Store(0)
 		}
-		
+
 		cb.mu.Lock()
 		cb.metrics.StateChanges++
 		cb.metrics.LastStateChange = time.Now()
@@ -198,7 +198,7 @@ func (cb *CircuitBreaker) GetState() string {
 func (cb *CircuitBreaker) GetMetrics() CircuitBreakerMetrics {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
-	
+
 	metrics := cb.metrics
 	metrics.CurrentState = cb.GetState()
 	return metrics
