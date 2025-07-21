@@ -294,7 +294,7 @@ func TestDegradedMode(t *testing.T) {
 	// Create mock components properly
 	rateLimiterConfig := DefaultRateLimiterConfig()
 	pc.rateLimiter = NewRateLimiter(rateLimiterConfig)
-	
+
 	monitoringConfig := DefaultMonitoringConfig()
 	pc.monitoring = NewMonitoringManager(monitoringConfig)
 

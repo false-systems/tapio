@@ -7,19 +7,19 @@ import (
 
 // Common errors
 var (
-	ErrAlreadyStarted      = errors.New("collector already started")
-	ErrNotStarted          = errors.New("collector not started")
-	ErrCircuitBreakerOpen  = errors.New("circuit breaker is open")
-	ErrRateLimitExceeded   = errors.New("rate limit exceeded")
-	ErrResourcesExhausted  = errors.New("resources exhausted")
-	ErrValidationFailed    = errors.New("event validation failed")
+	ErrAlreadyStarted     = errors.New("collector already started")
+	ErrNotStarted         = errors.New("collector not started")
+	ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
+	ErrRateLimitExceeded  = errors.New("rate limit exceeded")
+	ErrResourcesExhausted = errors.New("resources exhausted")
+	ErrValidationFailed   = errors.New("event validation failed")
 )
 
 // EventPriority defines event priority levels
 type EventPriority int
 
 const (
-	PriorityLow      EventPriority = iota
+	PriorityLow EventPriority = iota
 	PriorityNormal
 	PriorityHigh
 	PriorityCritical
