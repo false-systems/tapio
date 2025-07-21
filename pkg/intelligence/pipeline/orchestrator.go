@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/context"
+	contextpkg "github.com/yairfalse/tapio/pkg/intelligence/context"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 )
 
@@ -69,24 +69,30 @@ func (v *ValidationStage) Process(ctx context.Context, event *domain.UnifiedEven
 	if event.ID == "" {
 		return fmt.Errorf("event ID is empty")
 	}
+	if event.Source == "" {
+		return fmt.Errorf("event source is empty")
+	}
 	if event.Timestamp.IsZero() {
 		return fmt.Errorf("event timestamp is zero")
+	}
+	if time.Since(event.Timestamp) > 24*time.Hour {
+		return fmt.Errorf("event is too old: %v", event.Timestamp)
 	}
 	return nil
 }
 
 // ContextStage builds context for events
 type ContextStage struct {
-	validator *context.ContextValidator
-	scorer    *context.ConfidenceScorer
-	analyzer  *context.ImpactAnalyzer
+	validator *contextpkg.EventValidator
+	scorer    *contextpkg.ConfidenceScorer
+	analyzer  *contextpkg.ImpactAnalyzer
 }
 
 func NewContextStage() *ContextStage {
-	validator := context.NewContextValidator()
-	scorer := context.NewConfidenceScorer()
-	analyzer := context.NewImpactAnalyzer()
-	
+	validator := contextpkg.NewEventValidator()
+	scorer := contextpkg.NewConfidenceScorer()
+	analyzer := contextpkg.NewImpactAnalyzer()
+
 	return &ContextStage{
 		validator: validator,
 		scorer:    scorer,
@@ -100,14 +106,13 @@ func (c *ContextStage) Name() string {
 
 func (c *ContextStage) Process(ctx context.Context, event *domain.UnifiedEvent) error {
 	// Stage 1: Context Validation
-	validationResult := c.validator.ValidateContext(event)
-	if !validationResult.IsValid {
-		return fmt.Errorf("context validation failed: %v", validationResult.Issues)
+	if err := c.validator.Validate(event); err != nil {
+		return fmt.Errorf("context validation failed: %w", err)
 	}
 
 	// Stage 2: Confidence Scoring
 	confidenceResult := c.scorer.CalculateConfidence(event)
-	
+
 	// Stage 3: Impact Assessment
 	impactResult := c.analyzer.AssessImpact(event)
 
@@ -115,10 +120,13 @@ func (c *ContextStage) Process(ctx context.Context, event *domain.UnifiedEvent) 
 	if event.Correlation == nil {
 		event.Correlation = &domain.CorrelationContext{}
 	}
-	
-	event.Correlation.ConfidenceScore = confidenceResult.Score
-	event.Correlation.ValidationScore = validationResult.Score
-	event.Impact = &impactResult
+
+	if event.Semantic == nil {
+		event.Semantic = &domain.SemanticContext{}
+	}
+
+	event.Semantic.Confidence = confidenceResult
+	event.Impact = impactResult
 
 	return nil
 }
@@ -133,7 +141,7 @@ func NewCorrelationStage(config *correlation.ProcessorConfig) (*CorrelationStage
 	if err != nil {
 		return nil, fmt.Errorf("failed to create correlation processor: %w", err)
 	}
-	
+
 	return &CorrelationStage{
 		processor: processor,
 	}, nil
@@ -153,10 +161,10 @@ func (c *CorrelationStage) Process(ctx context.Context, event *domain.UnifiedEve
 	if event.Correlation == nil {
 		event.Correlation = &domain.CorrelationContext{}
 	}
-	
+
 	event.Correlation.CorrelationID = result.ID
-	event.Correlation.CorrelationScore = result.Score
-	event.Correlation.PatternType = result.PatternType
+	event.Semantic.Confidence = result.Score
+	event.Correlation.Pattern = result.PatternType
 
 	return nil
 }
@@ -174,23 +182,23 @@ type HighPerformanceOrchestrator struct {
 	stages     []ProcessingStage
 	workerPool *WorkerPool
 	metrics    *Metrics
-	
+
 	// Processing channels
-	eventChan   chan *domain.UnifiedEvent
-	resultChan  chan *ProcessingResult
-	
+	eventChan  chan *domain.UnifiedEvent
+	resultChan chan *ProcessingResult
+
 	// Control channels
-	stopChan    chan struct{}
-	doneChan    chan struct{}
-	
+	stopChan chan struct{}
+	doneChan chan struct{}
+
 	// Synchronization
-	wg          sync.WaitGroup
-	running     int32
-	
+	wg      sync.WaitGroup
+	running int32
+
 	// Metrics tracking
-	metricsLock    sync.RWMutex
+	metricsLock     sync.RWMutex
 	lastMetricsTime time.Time
-	processedCount int64
+	processedCount  int64
 }
 
 // ProcessingResult contains the result of processing an event
@@ -210,12 +218,12 @@ func NewHighPerformanceOrchestrator(config *OrchestratorConfig) (*HighPerformanc
 	// Create stages
 	validationStage := &ValidationStage{}
 	contextStage := NewContextStage()
-	
+
 	stages := []ProcessingStage{
 		validationStage,
 		contextStage,
 	}
-	
+
 	// Add correlation stage if enabled
 	if config.CorrelationEnabled {
 		correlationConfig := &correlation.ProcessorConfig{
@@ -223,7 +231,7 @@ func NewHighPerformanceOrchestrator(config *OrchestratorConfig) (*HighPerformanc
 			TimeWindow:        5 * time.Minute,
 			CorrelationWindow: 10 * time.Minute,
 		}
-		
+
 		correlationStage, err := NewCorrelationStage(correlationConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create correlation stage: %w", err)
@@ -235,14 +243,14 @@ func NewHighPerformanceOrchestrator(config *OrchestratorConfig) (*HighPerformanc
 	workerPool := NewWorkerPool(config.WorkerCount, config.BufferSize)
 
 	orchestrator := &HighPerformanceOrchestrator{
-		config:     config,
-		stages:     stages,
-		workerPool: workerPool,
-		metrics:    &Metrics{},
-		eventChan:  make(chan *domain.UnifiedEvent, config.BufferSize),
-		resultChan: make(chan *ProcessingResult, config.BufferSize),
-		stopChan:   make(chan struct{}),
-		doneChan:   make(chan struct{}),
+		config:          config,
+		stages:          stages,
+		workerPool:      workerPool,
+		metrics:         &Metrics{},
+		eventChan:       make(chan *domain.UnifiedEvent, config.BufferSize),
+		resultChan:      make(chan *ProcessingResult, config.BufferSize),
+		stopChan:        make(chan struct{}),
+		doneChan:        make(chan struct{}),
 		lastMetricsTime: time.Now(),
 	}
 
@@ -254,6 +262,9 @@ func (o *HighPerformanceOrchestrator) Start(ctx context.Context) error {
 	if !atomic.CompareAndSwapInt32(&o.running, 0, 1) {
 		return fmt.Errorf("orchestrator is already running")
 	}
+
+	// Re-create stopChan if it was closed
+	o.stopChan = make(chan struct{})
 
 	// Start worker pool
 	if err := o.workerPool.Start(ctx); err != nil {
@@ -286,11 +297,6 @@ func (o *HighPerformanceOrchestrator) Stop() error {
 
 	// Wait for processing to complete
 	o.wg.Wait()
-
-	// Close channels
-	close(o.eventChan)
-	close(o.resultChan)
-	close(o.doneChan)
 
 	return nil
 }
@@ -379,18 +385,18 @@ func (o *HighPerformanceOrchestrator) processEvents(ctx context.Context) {
 // processEventThroughStages processes an event through all pipeline stages
 func (o *HighPerformanceOrchestrator) processEventThroughStages(ctx context.Context, event *domain.UnifiedEvent) {
 	startTime := time.Now()
-	
+
 	// Process through each stage sequentially
 	for _, stage := range o.stages {
 		stageStart := time.Now()
-		
+
 		err := stage.Process(ctx, event)
-		
+
 		stageDuration := time.Since(stageStart)
-		
+
 		// Update stage-specific metrics
 		o.updateStageMetrics(stage.Name(), err)
-		
+
 		if err != nil {
 			// Send error result
 			result := &ProcessingResult{
@@ -399,7 +405,7 @@ func (o *HighPerformanceOrchestrator) processEventThroughStages(ctx context.Cont
 				Duration: stageDuration,
 				Stage:    stage.Name(),
 			}
-			
+
 			select {
 			case o.resultChan <- result:
 			default:
@@ -408,7 +414,7 @@ func (o *HighPerformanceOrchestrator) processEventThroughStages(ctx context.Cont
 			return
 		}
 	}
-	
+
 	// Send success result
 	totalDuration := time.Since(startTime)
 	result := &ProcessingResult{
@@ -417,7 +423,7 @@ func (o *HighPerformanceOrchestrator) processEventThroughStages(ctx context.Cont
 		Duration: totalDuration,
 		Stage:    "complete",
 	}
-	
+
 	select {
 	case o.resultChan <- result:
 	default:
@@ -468,10 +474,10 @@ func (o *HighPerformanceOrchestrator) updateStageMetrics(stage string, err error
 // collectMetrics periodically calculates and updates metrics
 func (o *HighPerformanceOrchestrator) collectMetrics(ctx context.Context) {
 	defer o.wg.Done()
-	
+
 	ticker := time.NewTicker(o.config.MetricsInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -488,18 +494,18 @@ func (o *HighPerformanceOrchestrator) collectMetrics(ctx context.Context) {
 func (o *HighPerformanceOrchestrator) calculateMetrics() {
 	o.metricsLock.Lock()
 	defer o.metricsLock.Unlock()
-	
+
 	now := time.Now()
 	duration := now.Sub(o.lastMetricsTime)
-	
+
 	if duration > 0 {
 		currentProcessed := atomic.LoadInt64(&o.metrics.EventsProcessed)
-		
+
 		if o.processedCount > 0 {
 			eventsDelta := currentProcessed - o.processedCount
 			o.metrics.ThroughputPerSecond = float64(eventsDelta) / duration.Seconds()
 		}
-		
+
 		o.processedCount = currentProcessed
 		o.lastMetricsTime = now
 		o.metrics.ProcessingDuration = duration

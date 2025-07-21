@@ -180,36 +180,48 @@ deploy/
 
 ## 🚀 Getting Started
 
-### 1. Prerequisites
-```bash
-# Required
-- Go 1.21+
-- Docker (for eBPF development)
-- Make
+### 1. Quick Setup (Recommended)
 
-# Optional
-- Kubernetes cluster (for K8s collector)
-- Linux system (for eBPF/systemd collectors)
+Use our automated installer for the complete development environment:
+
+```bash
+# Install all tools (Go, Docker, Colima, Minikube, Skaffold, etc.)
+./scripts/install.sh
+
+# Start development services
+./scripts/dev-up.sh
+
+# Verify everything is working
+./scripts/install.sh --verify-only
 ```
 
-### 2. Initial Setup
+This sets up:
+- **Container runtime** (Colima on macOS, Docker on Linux)  
+- **Kubernetes** (Minikube with monitoring)
+- **All development tools** (Go, kubectl, Skaffold, Helm)
+- **Complete environment** for running all collectors locally
+
+### 2. Manual Setup (Alternative)
+
+If you prefer manual installation:
+
 ```bash
-# Clone the repo
+# Prerequisites
+- Go 1.21+
+- Docker or Colima (for containers + eBPF VMs)
+- Minikube (for K8s collector)
+- Make, kubectl, Skaffold
+
+# Clone and setup
 git clone https://github.com/yairfalse/tapio.git
 cd tapio
-
-# Install dependencies
 go mod download
-
-# Format code (ALWAYS do this before commits!)
 make fmt
-
-# Build everything
 go build ./...
-
-# Run tests
 go test ./...
 ```
+
+For detailed manual setup instructions, see [DEVELOPMENT_SETUP.md](docs/DEVELOPMENT_SETUP.md).
 
 ### 3. Running Tapio
 
@@ -233,6 +245,25 @@ go run cmd/tapio-collector/main.go
 
 ### 4. Development Workflow
 
+#### Quick Start (Full Environment)
+```bash
+# Start everything locally
+./scripts/dev-up.sh
+
+# Run collector with all sources
+go run cmd/tapio-collector/main.go
+
+# Run server
+go run cmd/tapio-server/main.go
+
+# Deploy to local Kubernetes
+kubectl apply -f deploy/k8s/
+
+# Use Skaffold for hot reload
+skaffold dev
+```
+
+#### Component Development
 1. **Pick a collector to work on** (e.g., `pkg/collectors/cni`)
 2. **Understand its structure**:
    - `core/` - Interfaces and types
@@ -250,6 +281,8 @@ go run cmd/tapio-collector/main.go
    go build ./...
    go test ./...
    ```
+
+For advanced development workflows, see [DEVELOPMENT_SETUP.md](docs/DEVELOPMENT_SETUP.md).
 
 ## 📋 Common Tasks
 

@@ -18,12 +18,12 @@ type Job struct {
 	Payload  interface{}
 	Handler  JobHandler
 	Priority int
-	
+
 	// Timing information
 	SubmittedAt time.Time
 	StartedAt   time.Time
 	CompletedAt time.Time
-	
+
 	// Result tracking
 	Error    error
 	Duration time.Duration
@@ -35,7 +35,7 @@ type Worker struct {
 	jobChan  chan *Job
 	quitChan chan struct{}
 	wg       *sync.WaitGroup
-	
+
 	// Worker metrics
 	jobsProcessed int64
 	totalDuration time.Duration
@@ -44,27 +44,27 @@ type Worker struct {
 
 // WorkerPool manages a pool of workers for parallel processing
 type WorkerPool struct {
-	workers    []*Worker
-	jobQueue   chan *Job
-	quitChan   chan struct{}
-	wg         sync.WaitGroup
-	
+	workers  []*Worker
+	jobQueue chan *Job
+	quitChan chan struct{}
+	wg       sync.WaitGroup
+
 	// Configuration
 	workerCount int
 	bufferSize  int
-	
+
 	// State management
-	running    int32
-	stopped    int32
-	
+	running int32
+	stopped int32
+
 	// Metrics
-	metricsLock       sync.RWMutex
+	metricsLock        sync.RWMutex
 	totalJobsSubmitted int64
 	totalJobsCompleted int64
 	totalJobsFailed    int64
 	averageLatency     time.Duration
 	throughputPerSec   float64
-	
+
 	// Performance tracking
 	lastMetricsUpdate time.Time
 	completedSnapshot int64
@@ -95,6 +95,9 @@ func (wp *WorkerPool) Start(ctx context.Context) error {
 		return fmt.Errorf("worker pool is already running")
 	}
 
+	// Re-create quitChan if it was closed
+	wp.quitChan = make(chan struct{})
+
 	// Create and start workers
 	for i := 0; i < wp.workerCount; i++ {
 		worker := &Worker{
@@ -103,9 +106,9 @@ func (wp *WorkerPool) Start(ctx context.Context) error {
 			quitChan: make(chan struct{}),
 			wg:       &wp.wg,
 		}
-		
+
 		wp.workers[i] = worker
-		
+
 		// Start worker goroutine
 		wp.wg.Add(1)
 		go wp.runWorker(ctx, worker)
@@ -130,13 +133,10 @@ func (wp *WorkerPool) Stop() error {
 
 	// Signal all workers to quit
 	close(wp.quitChan)
-	
+
 	// Wait for all workers to finish
 	wp.wg.Wait()
-	
-	// Close job queue
-	close(wp.jobQueue)
-	
+
 	atomic.StoreInt32(&wp.stopped, 1)
 	return nil
 }
@@ -146,18 +146,18 @@ func (wp *WorkerPool) Submit(job *Job) error {
 	if atomic.LoadInt32(&wp.running) == 0 {
 		return fmt.Errorf("worker pool is not running")
 	}
-	
+
 	if job == nil {
 		return fmt.Errorf("job cannot be nil")
 	}
-	
+
 	if job.Handler == nil {
 		return fmt.Errorf("job must have a handler")
 	}
-	
+
 	// Set submission time
 	job.SubmittedAt = time.Now()
-	
+
 	// Try to submit job
 	select {
 	case wp.jobQueue <- job:
@@ -173,13 +173,13 @@ func (wp *WorkerPool) SubmitWithTimeout(job *Job, timeout time.Duration) error {
 	if atomic.LoadInt32(&wp.running) == 0 {
 		return fmt.Errorf("worker pool is not running")
 	}
-	
+
 	if job == nil {
 		return fmt.Errorf("job cannot be nil")
 	}
-	
+
 	job.SubmittedAt = time.Now()
-	
+
 	select {
 	case wp.jobQueue <- job:
 		atomic.AddInt64(&wp.totalJobsSubmitted, 1)
@@ -193,17 +193,17 @@ func (wp *WorkerPool) SubmitWithTimeout(job *Job, timeout time.Duration) error {
 func (wp *WorkerPool) GetMetrics() WorkerPoolMetrics {
 	wp.metricsLock.RLock()
 	defer wp.metricsLock.RUnlock()
-	
+
 	return WorkerPoolMetrics{
-		WorkerCount:        wp.workerCount,
-		JobsSubmitted:      atomic.LoadInt64(&wp.totalJobsSubmitted),
-		JobsCompleted:      atomic.LoadInt64(&wp.totalJobsCompleted),
-		JobsFailed:         atomic.LoadInt64(&wp.totalJobsFailed),
-		AverageLatency:     wp.averageLatency,
-		ThroughputPerSec:   wp.throughputPerSec,
-		QueueSize:          len(wp.jobQueue),
-		QueueCapacity:      wp.bufferSize,
-		IsRunning:          atomic.LoadInt32(&wp.running) == 1,
+		WorkerCount:      wp.workerCount,
+		JobsSubmitted:    atomic.LoadInt64(&wp.totalJobsSubmitted),
+		JobsCompleted:    atomic.LoadInt64(&wp.totalJobsCompleted),
+		JobsFailed:       atomic.LoadInt64(&wp.totalJobsFailed),
+		AverageLatency:   wp.averageLatency,
+		ThroughputPerSec: wp.throughputPerSec,
+		QueueSize:        len(wp.jobQueue),
+		QueueCapacity:    wp.bufferSize,
+		IsRunning:        atomic.LoadInt32(&wp.running) == 1,
 	}
 }
 
@@ -223,7 +223,7 @@ type WorkerPoolMetrics struct {
 // GetWorkerMetrics returns metrics for individual workers
 func (wp *WorkerPool) GetWorkerMetrics() []WorkerMetrics {
 	metrics := make([]WorkerMetrics, len(wp.workers))
-	
+
 	for i, worker := range wp.workers {
 		if worker != nil {
 			metrics[i] = WorkerMetrics{
@@ -235,7 +235,7 @@ func (wp *WorkerPool) GetWorkerMetrics() []WorkerMetrics {
 			}
 		}
 	}
-	
+
 	return metrics
 }
 
@@ -266,9 +266,9 @@ func (wp *WorkerPool) GetCapacity() int {
 // dispatch distributes jobs from the main queue to worker queues
 func (wp *WorkerPool) dispatch(ctx context.Context) {
 	defer wp.wg.Done()
-	
+
 	workerIndex := 0
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -279,14 +279,14 @@ func (wp *WorkerPool) dispatch(ctx context.Context) {
 			if job != nil {
 				// Round-robin job distribution
 				worker := wp.workers[workerIndex]
-				
+
 				select {
 				case worker.jobChan <- job:
 					workerIndex = (workerIndex + 1) % wp.workerCount
 				case <-time.After(100 * time.Millisecond):
 					// Worker queue full, try next worker
 					workerIndex = (workerIndex + 1) % wp.workerCount
-					
+
 					// Try to dispatch to next available worker
 					for i := 0; i < wp.workerCount; i++ {
 						nextWorker := wp.workers[(workerIndex+i)%wp.workerCount]
@@ -298,10 +298,10 @@ func (wp *WorkerPool) dispatch(ctx context.Context) {
 							continue
 						}
 					}
-					
+
 					// All workers busy, increment failed jobs
 					atomic.AddInt64(&wp.totalJobsFailed, 1)
-					dispatched:
+				dispatched:
 				}
 			}
 		}
@@ -311,7 +311,7 @@ func (wp *WorkerPool) dispatch(ctx context.Context) {
 // runWorker executes jobs in a worker goroutine
 func (wp *WorkerPool) runWorker(ctx context.Context, worker *Worker) {
 	defer wp.wg.Done()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -331,23 +331,23 @@ func (wp *WorkerPool) processJob(ctx context.Context, worker *Worker, job *Job) 
 	// Update worker activity
 	worker.lastActivity = time.Now()
 	job.StartedAt = time.Now()
-	
+
 	// Create job-specific context with timeout
 	jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	
+
 	// Execute job handler
 	err := job.Handler(jobCtx, job)
-	
+
 	// Record completion
 	job.CompletedAt = time.Now()
 	job.Duration = job.CompletedAt.Sub(job.StartedAt)
 	job.Error = err
-	
+
 	// Update worker metrics
 	atomic.AddInt64(&worker.jobsProcessed, 1)
 	worker.totalDuration += job.Duration
-	
+
 	// Update pool metrics
 	if err != nil {
 		atomic.AddInt64(&wp.totalJobsFailed, 1)
@@ -359,10 +359,10 @@ func (wp *WorkerPool) processJob(ctx context.Context, worker *Worker, job *Job) 
 // collectMetrics periodically calculates performance metrics
 func (wp *WorkerPool) collectMetrics(ctx context.Context) {
 	defer wp.wg.Done()
-	
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -379,32 +379,32 @@ func (wp *WorkerPool) collectMetrics(ctx context.Context) {
 func (wp *WorkerPool) updateMetrics() {
 	wp.metricsLock.Lock()
 	defer wp.metricsLock.Unlock()
-	
+
 	now := time.Now()
 	duration := now.Sub(wp.lastMetricsUpdate)
-	
+
 	if duration > 0 {
 		currentCompleted := atomic.LoadInt64(&wp.totalJobsCompleted)
-		
+
 		if wp.completedSnapshot > 0 {
 			jobsDelta := currentCompleted - wp.completedSnapshot
 			wp.throughputPerSec = float64(jobsDelta) / duration.Seconds()
 		}
-		
+
 		wp.completedSnapshot = currentCompleted
 		wp.lastMetricsUpdate = now
-		
+
 		// Calculate average latency from worker durations
 		totalDuration := time.Duration(0)
 		totalJobs := int64(0)
-		
+
 		for _, worker := range wp.workers {
 			if worker != nil {
 				totalDuration += worker.totalDuration
 				totalJobs += atomic.LoadInt64(&worker.jobsProcessed)
 			}
 		}
-		
+
 		if totalJobs > 0 {
 			wp.averageLatency = totalDuration / time.Duration(totalJobs)
 		}
