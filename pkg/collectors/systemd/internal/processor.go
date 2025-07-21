@@ -651,9 +651,9 @@ func (p *eventProcessor) createCorrelationContext(raw core.RawEvent) *domain.Cor
 	// Detect service type and category
 	serviceType := p.detectServiceType(raw.UnitName)
 	category := p.categorizeService(raw.UnitName)
-	
+
 	// Dependencies and startup priority calculations removed for simplicity
-	
+
 	return &domain.CorrelationContext{
 		CorrelationID: fmt.Sprintf("systemd-%s-%s", raw.UnitName, serviceType),
 		Pattern:       fmt.Sprintf("service-%s-event", category),
@@ -708,49 +708,49 @@ func (p *eventProcessor) categorizeService(unitName string) string {
 // inferServiceDependencies infers likely service dependencies
 func (p *eventProcessor) inferServiceDependencies(unitName string) []string {
 	dependencies := []string{}
-	
+
 	// Most services depend on network
 	if !strings.Contains(unitName, "network") {
 		dependencies = append(dependencies, "network.target")
 	}
-	
+
 	// Web services typically depend on database
 	if strings.Contains(unitName, "web") || strings.Contains(unitName, "api") {
 		dependencies = append(dependencies, "postgresql.service", "mysql.service")
 	}
-	
+
 	// Kubernetes services depend on container runtime
 	if strings.Contains(unitName, "kubernetes") || strings.Contains(unitName, "k8s") {
 		dependencies = append(dependencies, "docker.service", "containerd.service")
 	}
-	
+
 	// Application services depend on container runtime
 	if strings.Contains(unitName, "app") && !strings.Contains(unitName, "network") {
 		dependencies = append(dependencies, "docker.service")
 	}
-	
+
 	return dependencies
 }
 
 // inferServiceDependents infers services that depend on this one
 func (p *eventProcessor) inferServiceDependents(unitName string) []string {
 	dependents := []string{}
-	
+
 	// Container runtime supports many services
 	if strings.Contains(unitName, "docker") || strings.Contains(unitName, "containerd") {
 		dependents = append(dependents, "kubernetes.service", "application-containers")
 	}
-	
+
 	// Database supports web services
 	if strings.Contains(unitName, "postgres") || strings.Contains(unitName, "mysql") {
 		dependents = append(dependents, "web-applications", "api-services")
 	}
-	
+
 	// Network services support everything
 	if strings.Contains(unitName, "network") {
 		dependents = append(dependents, "all-network-dependent-services")
 	}
-	
+
 	return dependents
 }
 

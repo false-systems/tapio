@@ -1,0 +1,310 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	oteltrace "go.opentelemetry.io/otel/trace"
+)
+
+func main() {
+	fmt.Println("=== Tapio OTEL Integration Test (With Full Console Output) ===")
+	fmt.Println()
+
+	// Create context
+	ctx := context.Background()
+
+	// Initialize OTEL with pure console exporter
+	shutdown, err := initPureConsoleOTEL(ctx)
+	if err != nil {
+		log.Fatalf("Failed to initialize OTEL: %v", err)
+	}
+	defer func() {
+		// Ensure all spans are flushed
+		time.Sleep(1 * time.Second)
+		shutdown(ctx)
+	}()
+
+	// Create tracer directly
+	tracer := otel.Tracer("tapio-test")
+
+	// Demo 1: Simple CNI Event Processing
+	fmt.Println("\n--- Demo 1: Simple CNI Event Processing ---")
+	demoCNIEventProcessing(ctx, tracer)
+
+	// Demo 2: Parent-Child Relationship
+	fmt.Println("\n--- Demo 2: Parent-Child Span Relationships ---")
+	demoParentChildRelationship(ctx, tracer)
+
+	// Demo 3: Cross-Collector Correlation
+	fmt.Println("\n--- Demo 3: Cross-Collector Event Correlation ---")
+	demoCrossCollectorCorrelation(ctx, tracer)
+
+	// Demo 4: Error Handling
+	fmt.Println("\n--- Demo 4: Error Handling and Span Status ---")
+	demoErrorHandling(ctx, tracer)
+
+	fmt.Println("\n=== Test Complete ===")
+}
+
+// initPureConsoleOTEL creates OTEL with only console output
+func initPureConsoleOTEL(ctx context.Context) (func(context.Context) error, error) {
+	// Create console exporter with detailed output
+	exporter, err := stdouttrace.New(
+		stdouttrace.WithPrettyPrint(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create console exporter: %w", err)
+	}
+
+	// Create resource with service information
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String("tapio-cni-collector"),
+			semconv.ServiceVersionKey.String("1.0.0"),
+			semconv.DeploymentEnvironmentKey.String("test"),
+			attribute.String("node.name", "test-node-1"),
+			attribute.String("cluster.name", "test-cluster"),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resource: %w", err)
+	}
+
+	// Create tracer provider with synchronous console exporter
+	provider := trace.NewTracerProvider(
+		trace.WithSyncer(exporter), // Use Syncer for immediate output
+		trace.WithResource(res),
+		trace.WithSampler(trace.AlwaysSample()),
+	)
+
+	// Set as global provider
+	otel.SetTracerProvider(provider)
+
+	return provider.Shutdown, nil
+}
+
+// demoCNIEventProcessing shows a simple CNI event being processed
+func demoCNIEventProcessing(ctx context.Context, tracer oteltrace.Tracer) {
+	// Create root span for CNI event processing
+	ctx, span := tracer.Start(ctx, "cni-event-processing",
+		oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
+		oteltrace.WithAttributes(
+			attribute.String("component", "cni-collector"),
+			attribute.String("event.type", "network-setup"),
+		),
+	)
+	defer span.End()
+
+	// Simulate CNI ADD operation
+	cniCtx, cniSpan := tracer.Start(ctx, "cni-add-operation",
+		oteltrace.WithAttributes(
+			attribute.String("pod.name", "web-app-123"),
+			attribute.String("pod.namespace", "production"),
+			attribute.String("pod.uid", "abc-def-123"),
+			attribute.String("cni.plugin", "calico"),
+			attribute.String("cni.version", "0.3.1"),
+		),
+	)
+
+	// Add event for IP allocation
+	cniSpan.AddEvent("ip-allocated",
+		oteltrace.WithAttributes(
+			attribute.String("assigned.ip", "10.244.1.42"),
+			attribute.String("subnet", "10.244.1.0/24"),
+			attribute.String("gateway", "10.244.1.1"),
+		),
+	)
+
+	// Add event for interface creation
+	cniSpan.AddEvent("interface-created",
+		oteltrace.WithAttributes(
+			attribute.String("interface.name", "eth0"),
+			attribute.String("interface.mac", "02:42:ac:11:00:02"),
+		),
+	)
+
+	// Record success
+	cniSpan.SetStatus(codes.Ok, "Network setup successful")
+	cniSpan.End()
+
+	// Create UnifiedEvent with trace context
+	event := &domain.UnifiedEvent{
+		ID:        fmt.Sprintf("cni-%d", time.Now().UnixNano()),
+		Timestamp: time.Now(),
+		Source:    string(domain.SourceCNI),
+		Type:      domain.EventTypeNetwork,
+		TraceContext: &domain.TraceContext{
+			TraceID: span.SpanContext().TraceID().String(),
+			SpanID:  cniSpan.SpanContext().SpanID().String(),
+		},
+	}
+
+	// Process the event (this would normally be done by the collector)
+	_, processSpan := tracer.Start(cniCtx, "process-unified-event",
+		oteltrace.WithAttributes(
+			attribute.String("event.id", event.ID),
+			attribute.String("event.source", event.Source),
+		),
+	)
+	processSpan.AddEvent("event-enriched")
+	processSpan.AddEvent("event-sent-to-server")
+	processSpan.End()
+
+	fmt.Printf("Created UnifiedEvent with Trace ID: %s\n", event.TraceContext.TraceID)
+}
+
+// demoParentChildRelationship shows parent-child span relationships
+func demoParentChildRelationship(ctx context.Context, tracer oteltrace.Tracer) {
+	// Parent span: Pod lifecycle
+	ctx, parentSpan := tracer.Start(ctx, "pod-lifecycle",
+		oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
+		oteltrace.WithAttributes(
+			attribute.String("pod.name", "api-server"),
+			attribute.String("operation", "startup"),
+		),
+	)
+	defer parentSpan.End()
+
+	// Child 1: Schedule pod
+	_, scheduleSpan := tracer.Start(ctx, "schedule-pod",
+		oteltrace.WithAttributes(
+			attribute.String("scheduler", "default-scheduler"),
+			attribute.String("node", "worker-2"),
+		),
+	)
+	scheduleSpan.End()
+
+	// Child 2: Setup network (CNI)
+	networkCtx, networkSpan := tracer.Start(ctx, "setup-network",
+		oteltrace.WithAttributes(
+			attribute.String("cni.plugin", "weave"),
+		),
+	)
+
+	// Grandchild: Allocate IP
+	_, ipSpan := tracer.Start(networkCtx, "allocate-ip",
+		oteltrace.WithAttributes(
+			attribute.String("ipam", "host-local"),
+		),
+	)
+	ipSpan.AddEvent("ip-allocated", oteltrace.WithAttributes(
+		attribute.String("ip", "10.32.0.5"),
+	))
+	ipSpan.End()
+
+	networkSpan.End()
+
+	// Child 3: Start container
+	_, containerSpan := tracer.Start(ctx, "start-container",
+		oteltrace.WithAttributes(
+			attribute.String("runtime", "containerd"),
+		),
+	)
+	containerSpan.End()
+
+	parentSpan.SetStatus(codes.Ok, "Pod started successfully")
+}
+
+// demoCrossCollectorCorrelation shows events from different collectors sharing trace context
+func demoCrossCollectorCorrelation(ctx context.Context, tracer oteltrace.Tracer) {
+	// Root span for a service deployment
+	ctx, rootSpan := tracer.Start(ctx, "service-deployment",
+		oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
+		oteltrace.WithAttributes(
+			attribute.String("service.name", "payment-service"),
+			attribute.String("version", "v2.3.1"),
+		),
+	)
+	defer rootSpan.End()
+
+	traceID := rootSpan.SpanContext().TraceID().String()
+
+	// K8s Event: Deployment created
+	k8sCtx, k8sSpan := tracer.Start(ctx, "k8s-deployment-created",
+		oteltrace.WithAttributes(
+			attribute.String("collector", "k8s"),
+			attribute.String("event.reason", "DeploymentCreated"),
+			attribute.String("replicas", "3"),
+		),
+	)
+	k8sSpan.End()
+
+	// CNI Event: Network interfaces created for each pod
+	for i := 1; i <= 3; i++ {
+		_, cniSpan := tracer.Start(k8sCtx, fmt.Sprintf("cni-setup-pod-%d", i),
+			oteltrace.WithAttributes(
+				attribute.String("collector", "cni"),
+				attribute.String("pod.name", fmt.Sprintf("payment-service-%d", i)),
+				attribute.String("cni.plugin", "cilium"),
+			),
+		)
+		cniSpan.AddEvent("network-configured")
+		cniSpan.End()
+	}
+
+	// SystemD Event: Service registered
+	_, systemdSpan := tracer.Start(ctx, "systemd-service-registered",
+		oteltrace.WithAttributes(
+			attribute.String("collector", "systemd"),
+			attribute.String("unit", "payment-service.service"),
+			attribute.String("status", "active"),
+		),
+	)
+	systemdSpan.End()
+
+	fmt.Printf("All collectors share Trace ID: %s\n", traceID)
+}
+
+// demoErrorHandling shows error handling with spans
+func demoErrorHandling(ctx context.Context, tracer oteltrace.Tracer) {
+	// Create span for failed CNI operation
+	ctx, span := tracer.Start(ctx, "cni-network-setup-failed",
+		oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
+		oteltrace.WithAttributes(
+			attribute.String("pod.name", "database-pod"),
+			attribute.String("error.type", "ip_exhaustion"),
+		),
+	)
+	defer span.End()
+
+	// Simulate IP allocation failure
+	_, allocSpan := tracer.Start(ctx, "allocate-ip-failed",
+		oteltrace.WithAttributes(
+			attribute.String("ipam", "calico-ipam"),
+			attribute.String("pool", "10.244.0.0/16"),
+		),
+	)
+
+	// Record the error
+	err := fmt.Errorf("IP pool exhausted: no available addresses in 10.244.0.0/16")
+	allocSpan.RecordError(err, oteltrace.WithAttributes(
+		attribute.String("pool.used", "65534"),
+		attribute.String("pool.total", "65534"),
+	))
+	allocSpan.SetStatus(codes.Error, "IP allocation failed")
+	allocSpan.End()
+
+	// Add retry attempt
+	_, retrySpan := tracer.Start(ctx, "retry-ip-allocation",
+		oteltrace.WithAttributes(
+			attribute.Int("retry.attempt", 1),
+			attribute.String("strategy", "exponential-backoff"),
+		),
+	)
+	retrySpan.SetStatus(codes.Error, "Retry failed - pool still exhausted")
+	retrySpan.End()
+
+	// Set parent span status
+	span.SetStatus(codes.Error, "Network setup failed after retries")
+}

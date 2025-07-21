@@ -52,6 +52,12 @@ type Config struct {
 	// Data retention
 	RetentionPeriod string        `json:"retention_period"`
 	Timeout         time.Duration `json:"timeout"` // New: operation timeout
+
+	// Resource limits
+	MaxMemoryBytes uint64 `json:"max_memory_bytes"` // Maximum memory usage in bytes
+
+	// OpenTelemetry integration
+	EnableOTEL bool `json:"enable_otel"` // Enable OpenTelemetry distributed tracing
 }
 
 // Health represents collector health status
