@@ -51,10 +51,10 @@ type collector struct {
 	// otelInstrumentation *otel.CollectorInstrumentation
 
 	// Production hardening components
-	rateLimiter    *RateLimiter
-	circuitBreaker *CircuitBreaker
-	validator      *EventValidator
-	backpressure   *BackpressureController
+	rateLimiter     *RateLimiter
+	circuitBreaker  *CircuitBreaker
+	validator       *EventValidator
+	backpressure    *BackpressureController
 	resourceMonitor *ResourceMonitor
 }
 
@@ -141,14 +141,14 @@ func (c *collector) initProductionComponents(config core.Config) {
 		maxMemoryMB = int(config.MaxMemoryBytes / (1024 * 1024))
 	}
 	c.resourceMonitor = NewResourceMonitor(maxMemoryMB, 10000)
-	
+
 	// Set resource violation callbacks
 	c.resourceMonitor.SetMemoryCallback(func(usage uint64) {
 		fmt.Printf("eBPF collector memory limit exceeded: %d MB\n", usage/(1024*1024))
 		// Force garbage collection
 		c.resourceMonitor.ForceGC()
 	})
-	
+
 	c.resourceMonitor.SetGoroutineCallback(func(count int) {
 		fmt.Printf("eBPF collector goroutine limit exceeded: %d\n", count)
 	})
@@ -272,7 +272,7 @@ func (c *collector) Health() core.Health {
 		EventsProcessed: c.stats.eventsCollected.Load(),
 		EventsDropped:   c.stats.eventsDropped.Load(),
 		ErrorCount:      c.stats.errorCount.Load(),
-		Metrics: c.getHealthMetrics(),
+		Metrics:         c.getHealthMetrics(),
 	}
 }
 

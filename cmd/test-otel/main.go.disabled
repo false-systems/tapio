@@ -8,7 +8,7 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/cni/core"
 	"github.com/yairfalse/tapio/pkg/domain"
-	tapiotel "github.com/yairfalse/tapio/pkg/integrations/otel"
+	// tapiotel "github.com/yairfalse/tapio/pkg/integrations/otel" // TODO: Package doesn't exist yet
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
