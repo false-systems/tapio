@@ -16,8 +16,8 @@ import (
 // TapioDataFlow integrates OTEL semantic correlation into the existing collector pipeline
 type TapioDataFlow struct {
 	// Core components
-	eventStream       <-chan domain.Event
-	outputStream      chan<- domain.Event
+	eventStream       <-chan domain.UnifiedEvent
+	outputStream      chan<- domain.UnifiedEvent
 	semanticTracer    *correlation.SemanticOTELTracer
 	correlationEngine *correlation.SemanticCorrelationEngine
 
@@ -84,7 +84,7 @@ func NewTapioDataFlow(cfg Config) *TapioDataFlow {
 }
 
 // Connect links the data flow to input and output streams
-func (tdf *TapioDataFlow) Connect(input <-chan domain.Event, output chan<- domain.Event) {
+func (tdf *TapioDataFlow) Connect(input <-chan domain.UnifiedEvent, output chan<- domain.UnifiedEvent) {
 	tdf.eventStream = input
 	tdf.outputStream = output
 }
@@ -157,24 +157,27 @@ func (tdf *TapioDataFlow) processEvents() {
 }
 
 // processEventWithSemantics enriches event with OTEL semantic correlation
-func (tdf *TapioDataFlow) processEventWithSemantics(event domain.Event) error {
+func (tdf *TapioDataFlow) processEventWithSemantics(event domain.UnifiedEvent) error {
 	ctx, span := tdf.tracer.Start(tdf.ctx, "dataflow.process_event",
 		trace.WithAttributes(
-			attribute.String("event.id", string(event.ID)),
+			attribute.String("event.id", event.ID),
 			attribute.String("event.type", string(event.Type)),
-			attribute.String("event.severity", string(event.Severity)),
+			attribute.String("event.severity", event.GetSeverity()),
 		),
 	)
 	defer span.End()
 
 	// Apply semantic correlation
-	if err := tdf.semanticTracer.ProcessEventWithSemanticTrace(ctx, &event); err != nil {
+	if err := tdf.semanticTracer.ProcessUnifiedEventWithSemanticTrace(ctx, &event); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("semantic trace processing failed: %w", err)
 	}
 
 	// Feed to correlation engine
-	tdf.correlationEngine.ProcessEvent(&event)
+	if err := tdf.correlationEngine.ProcessEvent(ctx, &event); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("correlation engine processing failed: %w", err)
+	}
 
 	// Get correlation findings
 	if findings := tdf.correlationEngine.GetLatestFindings(); findings != nil {
@@ -204,31 +207,22 @@ func (tdf *TapioDataFlow) processEventWithSemantics(event domain.Event) error {
 }
 
 // enrichEventWithFindings adds correlation findings to event metadata
-func (tdf *TapioDataFlow) enrichEventWithFindings(event *domain.Event, findings *correlation.Finding) {
-	if event.Context.Metadata == nil {
-		event.Context.Metadata = make(map[string]interface{})
+func (tdf *TapioDataFlow) enrichEventWithFindings(event *domain.UnifiedEvent, findings *interfaces.Finding) {
+	if event.Metadata == nil {
+		event.Metadata = make(map[string]string)
 	}
 
 	// Add correlation data
-	event.Context.Metadata["correlation_id"] = findings.ID
-	event.Context.Metadata["correlation_confidence"] = findings.Confidence
-	event.Context.Metadata["correlation_pattern"] = findings.PatternType
-	event.Context.Metadata["related_event_count"] = len(findings.RelatedEvents)
+	event.Metadata["correlation_id"] = findings.ID
+	event.Metadata["correlation_confidence"] = fmt.Sprintf("%.2f", findings.Confidence)
+	event.Metadata["correlation_pattern"] = findings.PatternType
+	event.Metadata["related_event_count"] = fmt.Sprintf("%d", len(findings.RelatedEvents))
 
 	// Add semantic group info if available
 	if findings.SemanticGroup != nil {
-		event.Context.Metadata["semantic_group_id"] = findings.SemanticGroup.ID
-		event.Context.Metadata["semantic_intent"] = findings.SemanticGroup.Intent
-		event.Context.Metadata["semantic_type"] = findings.SemanticGroup.Type
-
-		// Add impact assessment
-		if findings.SemanticGroup.Impact != nil {
-			event.Context.Metadata["impact_business"] = findings.SemanticGroup.Impact.BusinessImpact
-			event.Context.Metadata["impact_cascade_risk"] = findings.SemanticGroup.Impact.CascadeRisk
-		}
-
-		// Add predictions
-		if findings.SemanticGroup.Prediction != nil {
+		event.Metadata["semantic_group_id"] = findings.SemanticGroup.ID
+		event.Metadata["semantic_intent"] = findings.SemanticGroup.Intent
+		event.Metadata["semantic_type"] = findings.SemanticGroup.Type
 			event.Context.Metadata["prediction_scenario"] = findings.SemanticGroup.Prediction.Scenario
 			event.Context.Metadata["prediction_probability"] = findings.SemanticGroup.Prediction.Probability
 		}
