@@ -108,26 +108,6 @@ Comprehensive project documentation.
 - API documentation
 - Migration guides
 
-### `/deploy` - Deployment Configurations
-Production deployment resources.
-
-- **`k8s/`** - Raw Kubernetes manifests
-- **`helm/tapio/`** - Helm chart for Kubernetes deployment
-- Docker and namespace configurations
-
-### `/config` - Configuration Files
-Application and testing configurations.
-
-- `collector.yaml` - Collector configuration
-- `testing/` - Test environment configs
-
-### `/scripts` - Build Scripts
-Automation and utility scripts.
-
-- `generate-proto.sh` - Protocol buffer generation
-
-### `/tools` - Development Tools
-Internal development utilities.
 
 - **`architecture/`** - Architecture analysis tools
 - **`coverage/`** - Code coverage reporting
