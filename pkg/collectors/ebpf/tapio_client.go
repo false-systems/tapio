@@ -32,9 +32,10 @@ type TapioGRPCClient struct {
 	cancel    context.CancelFunc
 
 	// Buffering
-	eventBuffer   chan *domain.Event
+	eventBuffer   chan *domain.UnifiedEvent
 	batchSize     int
 	flushInterval time.Duration
+	converter     *domain.EventConverter
 
 	// Metrics
 	eventsSent    uint64
@@ -76,11 +77,12 @@ func NewTapioGRPCClientWithConfig(config *TapioClientConfig) (*TapioGRPCClient, 
 	client := &TapioGRPCClient{
 		serverAddr:    config.ServerAddr,
 		collectorID:   config.CollectorID,
-		eventBuffer:   make(chan *domain.Event, config.BufferSize),
+		eventBuffer:   make(chan *domain.UnifiedEvent, config.BufferSize),
 		batchSize:     config.BatchSize,
 		flushInterval: config.FlushInterval,
 		ctx:           ctx,
 		cancel:        cancel,
+		converter:     domain.NewEventConverter(),
 	}
 
 	// Start connection management
@@ -91,7 +93,7 @@ func NewTapioGRPCClientWithConfig(config *TapioClientConfig) (*TapioGRPCClient, 
 }
 
 // SendEvent sends a single event to Tapio
-func (c *TapioGRPCClient) SendEvent(ctx context.Context, event *domain.Event) error {
+func (c *TapioGRPCClient) SendEvent(ctx context.Context, event *domain.UnifiedEvent) error {
 	select {
 	case c.eventBuffer <- event:
 		return nil
@@ -104,7 +106,7 @@ func (c *TapioGRPCClient) SendEvent(ctx context.Context, event *domain.Event) er
 }
 
 // SendBatch sends a batch of events to Tapio
-func (c *TapioGRPCClient) SendBatch(ctx context.Context, events []*domain.Event) error {
+func (c *TapioGRPCClient) SendBatch(ctx context.Context, events []*domain.UnifiedEvent) error {
 	for _, event := range events {
 		if err := c.SendEvent(ctx, event); err != nil {
 			return err
@@ -114,7 +116,7 @@ func (c *TapioGRPCClient) SendBatch(ctx context.Context, events []*domain.Event)
 }
 
 // Subscribe is not implemented for the client (server functionality)
-func (c *TapioGRPCClient) Subscribe(ctx context.Context, opts domain.SubscriptionOptions) (<-chan *domain.Event, error) {
+func (c *TapioGRPCClient) Subscribe(ctx context.Context, opts domain.SubscriptionOptions) (<-chan *domain.UnifiedEvent, error) {
 	return nil, fmt.Errorf("subscribe not supported on client")
 }
 
@@ -158,7 +160,7 @@ func (c *TapioGRPCClient) connectionManager() {
 
 // eventSender handles buffered event sending
 func (c *TapioGRPCClient) eventSender() {
-	batch := make([]*domain.Event, 0, c.batchSize)
+	batch := make([]*domain.UnifiedEvent, 0, c.batchSize)
 	flushTicker := time.NewTicker(c.flushInterval)
 	defer flushTicker.Stop()
 
@@ -240,7 +242,7 @@ func (c *TapioGRPCClient) connect() error {
 }
 
 // sendBatchToStream sends a batch of events to the Tapio stream
-func (c *TapioGRPCClient) sendBatchToStream(events []*domain.Event) error {
+func (c *TapioGRPCClient) sendBatchToStream(events []*domain.UnifiedEvent) error {
 	c.mu.RLock()
 	stream := c.stream
 	connected := c.connected
@@ -330,8 +332,10 @@ func (c *TapioGRPCClient) handleResponse(resp *pb.TapioStreamEventsResponse) {
 	}
 }
 
-// convertDomainEventToProto converts a domain event to protobuf format
-func (c *TapioGRPCClient) convertDomainEventToProto(event *domain.Event) *pb.Event {
+// convertDomainEventToProto converts a unified event to protobuf format
+func (c *TapioGRPCClient) convertDomainEventToProto(unifiedEvent *domain.UnifiedEvent) *pb.Event {
+	// First convert UnifiedEvent to domain.Event using the converter
+	event := c.converter.FromUnifiedEvent(unifiedEvent)
 	pbEvent := &pb.Event{
 		Id:          string(event.ID),
 		Type:        c.mapEventType(event.Type),

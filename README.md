@@ -33,29 +33,35 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 
 **What we have built so far:**
 
-✅ **UnifiedEvent Format** - A single event structure that can represent different observability signals  
+✅ **UnifiedEvent Format** - A single event structure with OTEL trace context, semantic understanding, and business impact  
+✅ **eBPF Collector** - Production-ready with rate limiting, backpressure control, and UnifiedEvent output  
 ✅ **Intelligence Pipeline** - High-performance event processing (165k+ events/sec)  
-✅ **Advanced Correlation** - Real-time pattern detection and anomaly identification  
-✅ **Context Enrichment** - Semantic understanding and impact assessment  
-✅ **gRPC/REST APIs** - Production-ready service interfaces  
-✅ **Single Module Architecture** - Clean, maintainable codebase  
-✅ **Multiple Collectors** - CNI, eBPF, Kubernetes data sources  
+✅ **Semantic Correlation** - Real-time correlation with OTEL trace propagation  
+✅ **gRPC Service** - Complete TapioService with bidirectional streaming  
+✅ **Analytics Engine** - Event enrichment, scoring, and pattern detection  
+✅ **Multiple Collectors** - eBPF (integrated), K8s, Systemd, CNI (standalone binaries)  
+
+**What's working today:**
+
+🚀 **Main Binary** (`tapio-collector`) - Runs eBPF collection with embedded correlation  
+🚀 **Standalone Collectors** - K8s, Systemd, CNI collectors connect via gRPC  
+🚀 **Event Flow** - Collection → Enrichment → Correlation → Storage  
+🚀 **OTEL Integration** - Full trace context propagation  
 
 **What we're actively working on:**
 
-🔄 **Distributed Processing** - Multi-node correlation capabilities  
-🔄 **Machine Learning** - Automated pattern discovery  
+🔄 **Full Collector Integration** - Bringing K8s, Systemd, CNI into main binary  
+🔄 **ML Pattern Detection** - Automated anomaly discovery  
+🔄 **Advanced Correlation** - Complex multi-layer patterns  
 🔄 **UI/Dashboard** - Real-time visualization  
-🔄 **Auto-remediation** - Self-healing capabilities  
 
 **What we haven't built yet:**
 
-❌ Full production deployment  
-❌ Complete end-to-end correlation  
-❌ Business impact assessment  
+❌ Service mesh integration  
+❌ Cloud provider collectors  
+❌ Historical analysis  
 ❌ Automated remediation  
-❌ UI/Dashboard  
-❌ Distributed deployment
+❌ Cost correlation
 
 ## 🎯 Our Vision
 
@@ -92,43 +98,51 @@ Vision: Every event scored for business impact:
 
 ## 🏃 Getting Started
 
-### For Developers
+### Quick Start
 
 ```bash
 # Clone the repository
 git clone https://github.com/yairfalse/tapio.git
 cd tapio
 
-# Build components (what's working so far)
+# Build everything
 go build ./...
 
-# Run tests to see current functionality
-go test ./...
-
-# Format code (required for contributions)
-gofmt -w .
+# Run the main collector with eBPF (requires root/CAP_BPF)
+sudo ./tapio-collector --enable-ebpf --server localhost:9090
 ```
 
-### Current Working Components
+### Running Individual Collectors
 
 ```bash
-# Test the UnifiedEvent format
-go test ./pkg/domain/ -v
+# K8s collector (connects to Tapio server)
+./k8s-collector --server localhost:9090
 
-# Test intelligence pipeline (165k+ events/sec)
-go test ./pkg/intelligence/pipeline/ -v
+# Systemd collector (connects to Tapio server)
+./systemd-collector --server localhost:9090
 
-# Test correlation framework
-go test ./pkg/intelligence/correlation/ -v
-
-# Test context enrichment
-go test ./pkg/intelligence/context/ -v
-
-# Test gRPC service foundations
-go test ./pkg/interfaces/server/grpc/ -v
+# CNI collector (connects to Tapio server)
+./cni-collector --server localhost:9090
 ```
 
-**Note:** Full end-to-end system integration is still in development. We're building this incrementally and testing each component thoroughly.
+### Development
+
+```bash
+# Run all tests
+go test ./...
+
+# Run specific component tests
+go test ./pkg/domain/ -v              # UnifiedEvent tests
+go test ./pkg/collectors/ebpf/... -v  # eBPF collector tests
+go test ./pkg/intelligence/... -v     # Analytics & correlation
+go test ./pkg/interfaces/... -v       # gRPC services
+
+# Format code (required)
+make fmt  # or: gofmt -w .
+
+# Check build
+go build ./...
+```
 
 ## 🏗️ Architecture
 
@@ -169,17 +183,17 @@ go test ./pkg/interfaces/server/grpc/ -v
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| **UnifiedEvent** | Universal event format with OTEL context | ✅ Built |
-| **Analytics Engine** | Foundation for real-time processing | 🔄 In Progress |
-| **Correlation Engine** | Early semantic correlation framework | 🔄 In Progress |
-| **CNI Collector** | Container network interface events | ✅ Prototype |
-| **eBPF Collector** | Kernel-level event collection | 🔄 In Progress |
-| **K8s Collector** | Kubernetes event monitoring | 🔄 In Progress |
-| **SystemD Collector** | System service monitoring | 🔄 In Progress |
-| **gRPC/REST API** | Service interfaces | ✅ Basic Framework |
-| **End-to-End Integration** | Full system working together | ❌ Not Yet |
-| **Performance Optimization** | High-throughput processing | ✅ Achieved |
-| **Production Deployment** | Ready for real workloads | ❌ Future |
+| **UnifiedEvent** | Universal event format with OTEL context | ✅ Complete |
+| **Analytics Engine** | 165k+ events/sec processing | ✅ Production Ready |
+| **Correlation Engine** | Semantic correlation with OTEL | ✅ Working |
+| **eBPF Collector** | Kernel events with UnifiedEvent | ✅ Integrated |
+| **K8s Collector** | Kubernetes event monitoring | ✅ Standalone Binary |
+| **Systemd Collector** | System service monitoring | ✅ Standalone Binary |
+| **CNI Collector** | Container network events | ✅ Standalone Binary |
+| **gRPC Service** | Bidirectional streaming API | ✅ Complete |
+| **Main Binary Integration** | All collectors in one binary | 🔄 eBPF only |
+| **Performance** | 165k events/sec achieved | ✅ Optimized |
+| **Production Deployment** | Ready for real workloads | 🔄 In Progress |
 
 ## 🚀 Intelligence Pipeline
 

@@ -80,8 +80,8 @@ type RawEventSink interface {
 }
 
 type SemanticEventSink interface {
-	Send(ctx context.Context, event *domain.Event) error
-	SendBatch(ctx context.Context, events []*domain.Event) error
+	Send(ctx context.Context, event *domain.UnifiedEvent) error
+	SendBatch(ctx context.Context, events []*domain.UnifiedEvent) error
 	Close() error
 }
 
@@ -96,9 +96,9 @@ type RawEventStore interface {
 }
 
 type TapioClient interface {
-	SendEvent(ctx context.Context, event *domain.Event) error
-	SendBatch(ctx context.Context, events []*domain.Event) error
-	Subscribe(ctx context.Context, opts domain.SubscriptionOptions) (<-chan *domain.Event, error)
+	SendEvent(ctx context.Context, event *domain.UnifiedEvent) error
+	SendBatch(ctx context.Context, events []*domain.UnifiedEvent) error
+	Subscribe(ctx context.Context, opts domain.SubscriptionOptions) (<-chan *domain.UnifiedEvent, error)
 	Close() error
 }
 
@@ -368,27 +368,27 @@ func (p *DualPathProcessor) semanticBatchProcessor() {
 			return
 		}
 
-		// Convert to domain events
-		domainEvents := make([]*domain.Event, 0, len(batch))
+		// Convert to unified events
+		unifiedEvents := make([]*domain.UnifiedEvent, 0, len(batch))
 		for _, enriched := range batch {
-			domainEvent := enriched.ToDomainEvent()
-			domainEvents = append(domainEvents, domainEvent)
+			unifiedEvent := enriched.ToUnifiedEvent()
+			unifiedEvents = append(unifiedEvents, unifiedEvent)
 		}
 
 		// Send to Tapio client
 		if p.tapioClient != nil {
-			if err := p.tapioClient.SendBatch(p.ctx, domainEvents); err != nil {
+			if err := p.tapioClient.SendBatch(p.ctx, unifiedEvents); err != nil {
 				log.Printf("Failed to send batch to Tapio: %v", err)
 			} else {
 				p.mu.Lock()
-				p.semanticEventsSent += uint64(len(domainEvents))
+				p.semanticEventsSent += uint64(len(unifiedEvents))
 				p.mu.Unlock()
 			}
 		}
 
 		// Send to semantic sinks
 		for _, sink := range p.semanticSinks {
-			if err := sink.SendBatch(p.ctx, domainEvents); err != nil {
+			if err := sink.SendBatch(p.ctx, unifiedEvents); err != nil {
 				log.Printf("Failed to send semantic batch: %v", err)
 			}
 		}

@@ -344,14 +344,17 @@ func (ae *AnalyticsEngine) ProcessBatch(ctx context.Context, events []*domain.Un
 		result, err := ae.ProcessEvent(ctx, event)
 		if err != nil {
 			errors++
-			eventID := "unknown"
 			if event != nil {
-				eventID = event.ID
+				ae.logger.Error("Failed to process event in batch",
+					zap.String("event_id", event.ID),
+					zap.Error(err),
+				)
+			} else {
+				ae.logger.Error("Failed to process nil event in batch",
+					zap.Int("index", i),
+					zap.Error(err),
+				)
 			}
-			ae.logger.Error("Failed to process event in batch",
-				zap.String("event_id", eventID),
-				zap.Error(err),
-			)
 			continue
 		}
 		results[i] = result

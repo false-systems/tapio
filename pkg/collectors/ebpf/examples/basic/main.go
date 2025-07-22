@@ -41,10 +41,16 @@ func main() {
 	go func() {
 		for event := range collector.Events() {
 			fmt.Printf("Event: ID=%s Type=%s Source=%s Severity=%s\n",
-				event.ID, event.Type, event.Source, event.Severity)
+				event.ID, event.Type, event.Source, event.GetSeverity())
 
-			// Print payload details
-			fmt.Printf("  Data: %+v\n", event.Data)
+			// Print kernel details if available
+			if event.Kernel != nil {
+				fmt.Printf("  Kernel: PID=%d Comm=%s\n", event.Kernel.PID, event.Kernel.Comm)
+			}
+			// Print semantic context if available
+			if event.Semantic != nil {
+				fmt.Printf("  Semantic: Intent=%s Category=%s\n", event.Semantic.Intent, event.Semantic.Category)
+			}
 		}
 	}()
 

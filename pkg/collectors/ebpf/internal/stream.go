@@ -9,7 +9,7 @@ import (
 
 // eventStream implements domain.EventStream
 type eventStream struct {
-	eventChan chan domain.Event
+	eventChan chan domain.UnifiedEvent
 	errorChan chan error
 	closeChan chan struct{}
 	closeOnce sync.Once
@@ -20,14 +20,14 @@ type eventStream struct {
 // newEventStream creates a new event stream
 func newEventStream(bufferSize int) *eventStream {
 	return &eventStream{
-		eventChan: make(chan domain.Event, bufferSize),
+		eventChan: make(chan domain.UnifiedEvent, bufferSize),
 		errorChan: make(chan error, 10),
 		closeChan: make(chan struct{}),
 	}
 }
 
 // Events implements domain.EventStream
-func (s *eventStream) Events() <-chan domain.Event {
+func (s *eventStream) Events() <-chan domain.UnifiedEvent {
 	return s.eventChan
 }
 
@@ -51,7 +51,7 @@ func (s *eventStream) Close() error {
 }
 
 // sendEvent sends an event to the stream
-func (s *eventStream) sendEvent(event domain.Event) bool {
+func (s *eventStream) sendEvent(event domain.UnifiedEvent) bool {
 	s.mu.RLock()
 	if s.closed {
 		s.mu.RUnlock()

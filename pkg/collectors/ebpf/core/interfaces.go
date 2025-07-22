@@ -14,7 +14,7 @@ type Collector interface {
 	Stop() error
 
 	// Event streaming
-	Events() <-chan domain.Event
+	Events() <-chan domain.UnifiedEvent
 
 	// Health and monitoring
 	Health() Health
@@ -180,7 +180,7 @@ type Filter struct {
 
 // EventProcessor processes raw eBPF events into domain events
 type EventProcessor interface {
-	ProcessEvent(ctx context.Context, raw RawEvent) (domain.Event, error)
+	ProcessEvent(ctx context.Context, raw RawEvent) (domain.UnifiedEvent, error)
 }
 
 // RingBufferReader reads events from eBPF ring buffers for better performance

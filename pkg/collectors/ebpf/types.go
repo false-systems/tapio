@@ -336,6 +336,108 @@ func (e EventType) String() string {
 	}
 }
 
+// ToUnifiedEvent converts EnrichedEvent to domain.UnifiedEvent for Tapio integration
+func (e *EnrichedEvent) ToUnifiedEvent() *domain.UnifiedEvent {
+	// Create builder
+	builder := domain.NewUnifiedEvent().
+		WithSource(string(domain.SourceEBPF)).
+		WithType(e.mapEventType())
+
+	// Add trace context if available
+	if e.TraceID != "" && e.SpanID != "" {
+		builder = builder.WithTraceContext(e.TraceID, e.SpanID)
+	}
+
+	// Add semantic context
+	builder = builder.WithSemantic(
+		e.getSemanticIntent(),
+		e.getSemanticCategory(),
+		e.Tags...,
+	)
+
+	// Add entity context
+	if e.Container != nil {
+		builder = builder.WithEntity("container", e.Container.Name, e.Container.ID)
+	} else if e.Kubernetes != nil {
+		builder = builder.WithEntity("pod", e.Kubernetes.PodName, e.Kubernetes.Namespace)
+	} else {
+		builder = builder.WithEntity("process", e.Raw.Comm, "")
+	}
+
+	// Add kernel data
+	builder = builder.WithKernelData(string(e.Raw.Type), e.Raw.PID)
+
+	// Add impact based on importance
+	severity := "low"
+	if e.Importance > 0.8 {
+		severity = "high"
+	} else if e.Importance > 0.5 {
+		severity = "medium"
+	}
+	builder = builder.WithImpact(severity, e.Importance)
+
+	// Build the event
+	event := builder.Build()
+
+	// Add additional kernel data
+	if event.Kernel != nil {
+		event.Kernel.TID = e.Raw.TID
+		event.Kernel.UID = e.Raw.UID
+		event.Kernel.GID = e.Raw.GID
+		event.Kernel.Comm = e.Raw.Comm
+	}
+
+	// Add raw data if available
+	if e.Raw.Data != nil {
+		event.RawData = e.Raw.Data
+	}
+
+	return event
+}
+
+func (e *EnrichedEvent) mapEventType() domain.EventType {
+	switch e.Raw.Type {
+	case EventTypeNetwork:
+		return domain.EventTypeNetwork
+	case EventTypeProcess:
+		return domain.EventTypeProcess
+	case EventTypeMemory:
+		return domain.EventTypeMemory
+	case EventTypeCPU:
+		return domain.EventTypeCPU
+	default:
+		return domain.EventTypeSystem
+	}
+}
+
+func (e *EnrichedEvent) getSemanticIntent() string {
+	switch e.Raw.Type {
+	case EventTypeNetwork:
+		return "network-activity"
+	case EventTypeProcess:
+		return "process-lifecycle"
+	case EventTypeMemory:
+		return "memory-usage"
+	case EventTypeCPU:
+		return "cpu-usage"
+	case EventTypeSecurity:
+		return "security-event"
+	default:
+		return "system-event"
+	}
+}
+
+func (e *EnrichedEvent) getSemanticCategory() string {
+	switch e.Raw.Type {
+	case EventTypeSecurity:
+		return "security"
+	case EventTypeMemory, EventTypeCPU:
+		return "performance"
+	default:
+		return "system"
+	}
+}
+
 // ToDomainEvent converts EnrichedEvent to domain.Event for Tapio integration
 func (e *EnrichedEvent) ToDomainEvent() *domain.Event {
 	eventType := domain.EventTypeSystem

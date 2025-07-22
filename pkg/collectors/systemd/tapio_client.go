@@ -1,4 +1,4 @@
-package common
+package systemd
 
 import (
 	"context"
@@ -19,26 +19,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// CollectorAdapter defines the interface for collector-specific behavior
-type CollectorAdapter interface {
-	// Identity
-	GetCollectorID() string
-	GetTracerName() string
-	GetBatchIDPrefix() string
-
-	// Event processing - the main differences between collectors
-	MapEventType(eventType domain.EventType) pb.EventType
-	MapSourceType(source domain.SourceType) pb.SourceType
-	ExtractMessage(event *domain.UnifiedEvent) string
-	CreateEventContext(event *domain.UnifiedEvent) *pb.EventContext
-	ExtractAttributes(event *domain.UnifiedEvent) map[string]string
-}
-
-// TapioGRPCClient implements the TapioClient interface for streaming events to Tapio server
+// TapioGRPCClient implements the TapioClient interface for streaming systemd events to Tapio server
 type TapioGRPCClient struct {
 	// Configuration
-	serverAddr string
-	adapter    CollectorAdapter
+	serverAddr  string
+	collectorID string
 
 	// gRPC connection
 	conn   *grpc.ClientConn
@@ -47,7 +32,6 @@ type TapioGRPCClient struct {
 
 	// State management
 	connected bool
-	closed    bool
 	mu        sync.RWMutex
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -71,6 +55,7 @@ type TapioGRPCClient struct {
 // TapioClientConfig contains configuration for the Tapio client
 type TapioClientConfig struct {
 	ServerAddr    string        `json:"server_addr"`
+	CollectorID   string        `json:"collector_id"`
 	BufferSize    int           `json:"buffer_size"`
 	BatchSize     int           `json:"batch_size"`
 	FlushInterval time.Duration `json:"flush_interval"`
@@ -79,10 +64,11 @@ type TapioClientConfig struct {
 	EnableOTEL    bool          `json:"enable_otel"`
 }
 
-// NewTapioGRPCClient creates a new Tapio gRPC client with the specified adapter
-func NewTapioGRPCClient(serverAddr string, adapter CollectorAdapter) (*TapioGRPCClient, error) {
+// NewTapioGRPCClient creates a new Tapio gRPC client for systemd collector
+func NewTapioGRPCClient(serverAddr string) (*TapioGRPCClient, error) {
 	config := &TapioClientConfig{
 		ServerAddr:    serverAddr,
+		CollectorID:   "systemd-collector",
 		BufferSize:    10000,
 		BatchSize:     100,
 		FlushInterval: time.Second,
@@ -91,16 +77,16 @@ func NewTapioGRPCClient(serverAddr string, adapter CollectorAdapter) (*TapioGRPC
 		EnableOTEL:    true,
 	}
 
-	return NewTapioGRPCClientWithConfig(config, adapter)
+	return NewTapioGRPCClientWithConfig(config)
 }
 
 // NewTapioGRPCClientWithConfig creates a new Tapio gRPC client with custom configuration
-func NewTapioGRPCClientWithConfig(config *TapioClientConfig, adapter CollectorAdapter) (*TapioGRPCClient, error) {
+func NewTapioGRPCClientWithConfig(config *TapioClientConfig) (*TapioGRPCClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	client := &TapioGRPCClient{
 		serverAddr:    config.ServerAddr,
-		adapter:       adapter,
+		collectorID:   config.CollectorID,
 		eventBuffer:   make(chan *domain.UnifiedEvent, config.BufferSize),
 		batchSize:     config.BatchSize,
 		flushInterval: config.FlushInterval,
@@ -122,15 +108,15 @@ func NewTapioGRPCClientWithConfig(config *TapioClientConfig, adapter CollectorAd
 
 // initializeOTEL sets up OpenTelemetry tracing
 func (c *TapioGRPCClient) initializeOTEL() {
-	// Initialize tracer with collector-specific name
-	c.tracer = otel.Tracer(c.adapter.GetTracerName())
+	// Initialize tracer for systemd collector
+	c.tracer = otel.Tracer("tapio.systemd.collector")
 	c.propagator = otel.GetTextMapPropagator()
 }
 
 // SendEvent sends a single UnifiedEvent to Tapio with OTEL tracing
 func (c *TapioGRPCClient) SendEvent(ctx context.Context, event *domain.UnifiedEvent) error {
 	// Create OTEL span for event sending
-	ctx, span := c.createEventSpan(ctx, event, c.adapter.GetTracerName()+".send_event")
+	ctx, span := c.createEventSpan(ctx, event, "systemd.collector.send_event")
 	defer func() {
 		if span != nil {
 			span.End()
@@ -174,10 +160,10 @@ func (c *TapioGRPCClient) SendEvent(ctx context.Context, event *domain.UnifiedEv
 func (c *TapioGRPCClient) SendBatch(ctx context.Context, events []*domain.UnifiedEvent) error {
 	var span trace.Span
 	if c.tracer != nil {
-		ctx, span = c.tracer.Start(ctx, c.adapter.GetTracerName()+".send_batch",
+		ctx, span = c.tracer.Start(ctx, "systemd.collector.send_batch",
 			trace.WithAttributes(
 				attribute.Int("batch.size", len(events)),
-				attribute.String("collector.id", c.adapter.GetCollectorID()),
+				attribute.String("collector.id", c.collectorID),
 			),
 		)
 		defer span.End()
@@ -209,23 +195,17 @@ func (c *TapioGRPCClient) Subscribe(ctx context.Context, opts domain.Subscriptio
 
 // Close closes the client connection
 func (c *TapioGRPCClient) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Prevent multiple closes
-	if c.closed {
-		return nil
-	}
-	c.closed = true
-
 	var span trace.Span
 	if c.tracer != nil {
-		_, span = c.tracer.Start(context.Background(), c.adapter.GetTracerName()+".close")
+		_, span = c.tracer.Start(context.Background(), "systemd.collector.close")
 		defer span.End()
 	}
 
 	c.cancel()
 	close(c.eventBuffer)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	if c.stream != nil {
 		c.stream.CloseSend()
@@ -251,7 +231,7 @@ func (c *TapioGRPCClient) connectionManager() {
 			if !c.isConnected() {
 				var span trace.Span
 				if c.tracer != nil {
-					_, span = c.tracer.Start(c.ctx, c.adapter.GetTracerName()+".connection_attempt",
+					_, span = c.tracer.Start(c.ctx, "systemd.collector.connection_attempt",
 						trace.WithAttributes(
 							attribute.String("server.addr", c.serverAddr),
 						),
@@ -289,10 +269,10 @@ func (c *TapioGRPCClient) eventSender() {
 		}
 
 		if c.tracer != nil {
-			ctx, span := c.tracer.Start(c.ctx, c.adapter.GetTracerName()+".flush_batch",
+			ctx, span := c.tracer.Start(c.ctx, "systemd.collector.flush_batch",
 				trace.WithAttributes(
 					attribute.Int("batch.size", len(batch)),
-					attribute.String("collector.id", c.adapter.GetCollectorID()),
+					attribute.String("collector.id", c.collectorID),
 				),
 			)
 			defer span.End()
@@ -398,16 +378,16 @@ func (c *TapioGRPCClient) sendBatchToStream(ctx context.Context, events []*domai
 
 	var span trace.Span
 	if c.tracer != nil {
-		ctx, span = c.tracer.Start(ctx, c.adapter.GetTracerName()+".send_batch_to_stream",
+		ctx, span = c.tracer.Start(ctx, "systemd.collector.send_batch_to_stream",
 			trace.WithAttributes(
 				attribute.Int("batch.size", len(events)),
-				attribute.String("collector.id", c.adapter.GetCollectorID()),
+				attribute.String("collector.id", c.collectorID),
 			),
 		)
 		defer span.End()
 	}
 
-	// Convert UnifiedEvents to protobuf events using adapter
+	// Convert UnifiedEvents to protobuf events
 	pbEvents := make([]*pb.Event, 0, len(events))
 	for _, event := range events {
 		pbEvent := c.convertUnifiedEventToProto(ctx, event)
@@ -416,12 +396,12 @@ func (c *TapioGRPCClient) sendBatchToStream(ctx context.Context, events []*domai
 
 	// Create batch request
 	batch := &pb.EventBatch{
-		BatchId:     fmt.Sprintf("%s-%d", c.adapter.GetBatchIDPrefix(), time.Now().UnixNano()),
-		CollectorId: c.adapter.GetCollectorID(),
+		BatchId:     fmt.Sprintf("systemd-batch-%d", time.Now().UnixNano()),
+		CollectorId: c.collectorID,
 		Events:      pbEvents,
 		Metadata: map[string]string{
 			"batch_size": fmt.Sprintf("%d", len(pbEvents)),
-			"source":     c.adapter.GetCollectorID(),
+			"source":     "systemd-collector",
 		},
 	}
 
@@ -476,7 +456,7 @@ func (c *TapioGRPCClient) handleResponses() {
 	for {
 		var span trace.Span
 		if c.tracer != nil {
-			_, span = c.tracer.Start(c.ctx, c.adapter.GetTracerName()+".handle_response")
+			_, span = c.tracer.Start(c.ctx, "systemd.collector.handle_response")
 		}
 
 		resp, err := stream.Recv()
@@ -540,25 +520,25 @@ func (c *TapioGRPCClient) getResponseType(resp *pb.TapioStreamEventsResponse) st
 	}
 }
 
-// convertUnifiedEventToProto converts a UnifiedEvent to protobuf format using the adapter
+// convertUnifiedEventToProto converts a UnifiedEvent to protobuf format with OTEL context
 func (c *TapioGRPCClient) convertUnifiedEventToProto(ctx context.Context, event *domain.UnifiedEvent) *pb.Event {
-	// Use adapter for collector-specific processing
-	message := c.adapter.ExtractMessage(event)
+	// Determine message and severity from the appropriate source
+	message := c.extractMessage(event)
 	severity := c.extractSeverity(event)
 	confidence := c.extractConfidence(event)
 	tags := c.extractTags(event)
 
 	pbEvent := &pb.Event{
 		Id:          event.ID,
-		Type:        c.adapter.MapEventType(event.Type),
+		Type:        c.mapEventType(event.Type),
 		Severity:    c.mapEventSeverity(severity),
-		Source:      c.adapter.MapSourceType(domain.SourceType(event.Source)),
+		Source:      c.mapSourceType(domain.SourceType(event.Source)),
 		Message:     message,
 		Timestamp:   timestamppb.New(event.Timestamp),
-		CollectorId: c.adapter.GetCollectorID(),
+		CollectorId: c.collectorID,
 		Confidence:  float64(confidence),
 		Tags:        tags,
-		Attributes:  c.adapter.ExtractAttributes(event),
+		Attributes:  c.convertEventAttributes(event),
 	}
 
 	// Add trace context if available from OTEL span
@@ -573,17 +553,106 @@ func (c *TapioGRPCClient) convertUnifiedEventToProto(ctx context.Context, event 
 		pbEvent.SpanId = event.TraceContext.SpanID
 	}
 
-	// Add collector-specific context using adapter
-	pbEvent.Context = c.adapter.CreateEventContext(event)
-	if pbEvent.Context != nil {
-		pbEvent.Context.TraceId = pbEvent.TraceId
-		pbEvent.Context.SpanId = pbEvent.SpanId
+	// Add systemd-specific context
+	if event.Entity != nil {
+		pbEvent.Context = &pb.EventContext{
+			TraceId:   pbEvent.TraceId,
+			SpanId:    pbEvent.SpanId,
+			Service:   event.Entity.Name, // For systemd, the entity name is often the service name
+			Component: "systemd",
+			Host:      c.getHostname(),
+			Labels:    event.Entity.Labels,
+		}
 	}
 
 	return pbEvent
 }
 
-// Common helper methods (not collector-specific)
+// Helper mapping functions for systemd events
+func (c *TapioGRPCClient) mapEventType(eventType domain.EventType) pb.EventType {
+	switch eventType {
+	case domain.EventTypeSystem:
+		return pb.EventType_EVENT_TYPE_PROCESS
+	case domain.EventTypeService:
+		return pb.EventType_EVENT_TYPE_PROCESS
+	case domain.EventTypeLog:
+		return pb.EventType_EVENT_TYPE_AUDIT
+	case domain.EventTypeKubernetes:
+		return pb.EventType_EVENT_TYPE_KUBERNETES
+	case domain.EventTypeNetwork:
+		return pb.EventType_EVENT_TYPE_NETWORK
+	case domain.EventTypeProcess:
+		return pb.EventType_EVENT_TYPE_PROCESS
+	case domain.EventTypeMemory:
+		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
+	case domain.EventTypeCPU:
+		return pb.EventType_EVENT_TYPE_RESOURCE_USAGE
+	case domain.EventTypeDisk:
+		return pb.EventType_EVENT_TYPE_FILE_SYSTEM
+	default:
+		return pb.EventType_EVENT_TYPE_PROCESS
+	}
+}
+
+func (c *TapioGRPCClient) mapEventSeverity(severity domain.EventSeverity) pb.EventSeverity {
+	switch severity {
+	case domain.EventSeverityDebug:
+		return pb.EventSeverity_EVENT_SEVERITY_DEBUG
+	case domain.EventSeverityInfo:
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
+	case domain.EventSeverityLow:
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
+	case domain.EventSeverityMedium:
+		return pb.EventSeverity_EVENT_SEVERITY_WARNING
+	case domain.EventSeverityWarning:
+		return pb.EventSeverity_EVENT_SEVERITY_WARNING
+	case domain.EventSeverityHigh:
+		return pb.EventSeverity_EVENT_SEVERITY_ERROR
+	case domain.EventSeverityError:
+		return pb.EventSeverity_EVENT_SEVERITY_ERROR
+	case domain.EventSeverityCritical:
+		return pb.EventSeverity_EVENT_SEVERITY_CRITICAL
+	default:
+		return pb.EventSeverity_EVENT_SEVERITY_UNSPECIFIED
+	}
+}
+
+func (c *TapioGRPCClient) mapSourceType(source domain.SourceType) pb.SourceType {
+	switch source {
+	case domain.SourceSystemd:
+		return pb.SourceType_SOURCE_TYPE_JOURNALD
+	case domain.SourceEBPF:
+		return pb.SourceType_SOURCE_TYPE_EBPF
+	case domain.SourceK8s:
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
+	case domain.SourceCNI:
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
+	default:
+		return pb.SourceType_SOURCE_TYPE_JOURNALD
+	}
+}
+
+// Helper methods to extract data from UnifiedEvent structure
+func (c *TapioGRPCClient) extractMessage(event *domain.UnifiedEvent) string {
+	if event.Application != nil && event.Application.Message != "" {
+		return event.Application.Message
+	}
+	if event.Semantic != nil && event.Semantic.Narrative != "" {
+		return event.Semantic.Narrative
+	}
+	// Try to construct a message from systemd custom data
+	if event.Application != nil && event.Application.Custom != nil {
+		if unitName, ok := event.Application.Custom["unit_name"].(string); ok {
+			if newState, ok := event.Application.Custom["new_state"].(string); ok {
+				if oldState, ok := event.Application.Custom["old_state"].(string); ok && oldState != "" {
+					return fmt.Sprintf("Service %s changed from %s to %s", unitName, oldState, newState)
+				}
+				return fmt.Sprintf("Service %s is %s", unitName, newState)
+			}
+		}
+	}
+	return fmt.Sprintf("Systemd event %s from %s", event.Type, event.Source)
+}
 
 func (c *TapioGRPCClient) extractSeverity(event *domain.UnifiedEvent) domain.EventSeverity {
 	// Use the UnifiedEvent's GetSeverity method
@@ -610,27 +679,87 @@ func (c *TapioGRPCClient) extractTags(event *domain.UnifiedEvent) []string {
 	return tags
 }
 
-func (c *TapioGRPCClient) mapEventSeverity(severity domain.EventSeverity) pb.EventSeverity {
-	switch severity {
-	case domain.EventSeverityDebug:
-		return pb.EventSeverity_EVENT_SEVERITY_DEBUG
-	case domain.EventSeverityInfo:
-		return pb.EventSeverity_EVENT_SEVERITY_INFO
-	case domain.EventSeverityLow:
-		return pb.EventSeverity_EVENT_SEVERITY_INFO
-	case domain.EventSeverityMedium:
-		return pb.EventSeverity_EVENT_SEVERITY_WARNING
-	case domain.EventSeverityWarning:
-		return pb.EventSeverity_EVENT_SEVERITY_WARNING
-	case domain.EventSeverityHigh:
-		return pb.EventSeverity_EVENT_SEVERITY_ERROR
-	case domain.EventSeverityError:
-		return pb.EventSeverity_EVENT_SEVERITY_ERROR
-	case domain.EventSeverityCritical:
-		return pb.EventSeverity_EVENT_SEVERITY_CRITICAL
-	default:
-		return pb.EventSeverity_EVENT_SEVERITY_UNSPECIFIED
+func (c *TapioGRPCClient) convertEventAttributes(event *domain.UnifiedEvent) map[string]string {
+	attributes := make(map[string]string)
+
+	// Add entity attributes
+	if event.Entity != nil {
+		if event.Entity.UID != "" {
+			attributes["entity.uid"] = event.Entity.UID
+		}
+		if event.Entity.Type != "" {
+			attributes["entity.type"] = event.Entity.Type
+		}
+		if event.Entity.Name != "" {
+			attributes["entity.name"] = event.Entity.Name
+			attributes["systemd.service"] = event.Entity.Name
+		}
+
+		// Add entity labels with prefix
+		for k, v := range event.Entity.Labels {
+			attributes["entity.label."+k] = v
+		}
+
+		// Add entity attributes with prefix
+		for k, v := range event.Entity.Attributes {
+			attributes["entity."+k] = v
+		}
 	}
+
+	// Add systemd-specific attributes from Application custom data
+	if event.Application != nil && event.Application.Custom != nil {
+		if pid, ok := event.Application.Custom["pid"].(int); ok {
+			attributes["system.pid"] = fmt.Sprintf("%d", pid)
+		}
+		if uid, ok := event.Application.Custom["uid"].(int); ok {
+			attributes["system.uid"] = fmt.Sprintf("%d", uid)
+		}
+		if gid, ok := event.Application.Custom["gid"].(int); ok {
+			attributes["system.gid"] = fmt.Sprintf("%d", gid)
+		}
+		if cmd, ok := event.Application.Custom["command"].(string); ok {
+			attributes["system.command"] = cmd
+		}
+		if exitCode, ok := event.Application.Custom["exit_code"].(int); ok {
+			attributes["system.exit_code"] = fmt.Sprintf("%d", exitCode)
+		}
+		// Add other systemd-specific fields
+		if unitName, ok := event.Application.Custom["unit_name"].(string); ok {
+			attributes["systemd.unit_name"] = unitName
+		}
+		if unitType, ok := event.Application.Custom["unit_type"].(string); ok {
+			attributes["systemd.unit_type"] = unitType
+		}
+		if oldState, ok := event.Application.Custom["old_state"].(string); ok {
+			attributes["systemd.old_state"] = oldState
+		}
+		if newState, ok := event.Application.Custom["new_state"].(string); ok {
+			attributes["systemd.new_state"] = newState
+		}
+		if result, ok := event.Application.Custom["result"].(string); ok {
+			attributes["systemd.result"] = result
+		}
+	}
+
+	// Add application data if present
+	if event.Application != nil {
+		if event.Application.Level != "" {
+			attributes["app.level"] = event.Application.Level
+		}
+		if event.Application.Logger != "" {
+			attributes["app.logger"] = event.Application.Logger
+		}
+		if event.Application.ErrorType != "" {
+			attributes["app.error_type"] = event.Application.ErrorType
+		}
+
+		// Add application custom data
+		for k, v := range event.Application.Custom {
+			attributes["app."+k] = fmt.Sprintf("%v", v)
+		}
+	}
+
+	return attributes
 }
 
 // createEventSpan creates an OTEL span for event operations
@@ -644,7 +773,7 @@ func (c *TapioGRPCClient) createEventSpan(ctx context.Context, event *domain.Uni
 			attribute.String("event.id", event.ID),
 			attribute.String("event.type", string(event.Type)),
 			attribute.String("event.source", string(event.Source)),
-			attribute.String("collector.id", c.adapter.GetCollectorID()),
+			attribute.String("collector.id", c.collectorID),
 		),
 	)
 }
@@ -670,12 +799,15 @@ func (c *TapioGRPCClient) GetStatistics() map[string]interface{} {
 		"buffer_capacity": cap(c.eventBuffer),
 		"last_sent":       c.lastSent,
 		"server_addr":     c.serverAddr,
-		"collector_id":    c.adapter.GetCollectorID(),
+		"collector_id":    c.collectorID,
 	}
 }
 
-// OTEL gRPC interceptors
+func (c *TapioGRPCClient) getHostname() string {
+	return "localhost" // Simple implementation, could be enhanced
+}
 
+// OTEL gRPC interceptors
 func (c *TapioGRPCClient) otelUnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	if c.tracer == nil {
 		return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
@@ -689,7 +821,7 @@ func (c *TapioGRPCClient) otelUnaryClientInterceptor() grpc.UnaryClientIntercept
 			trace.WithAttributes(
 				attribute.String("rpc.system", "grpc"),
 				attribute.String("rpc.method", method),
-				attribute.String("collector.id", c.adapter.GetCollectorID()),
+				attribute.String("collector.id", c.collectorID),
 			),
 		)
 		defer span.End()
@@ -729,7 +861,7 @@ func (c *TapioGRPCClient) otelStreamClientInterceptor() grpc.StreamClientInterce
 			trace.WithAttributes(
 				attribute.String("rpc.system", "grpc"),
 				attribute.String("rpc.method", method),
-				attribute.String("collector.id", c.adapter.GetCollectorID()),
+				attribute.String("collector.id", c.collectorID),
 			),
 		)
 

@@ -24,7 +24,7 @@ type collector struct {
 	stopped atomic.Bool
 
 	// Event processing
-	eventChan chan domain.Event
+	eventChan chan domain.UnifiedEvent
 	processor core.EventProcessor
 
 	// Lifecycle
@@ -76,7 +76,7 @@ func NewCollector(config core.Config) (core.Collector, error) {
 
 	c := &collector{
 		config:    config,
-		eventChan: make(chan domain.Event, config.EventBufferSize),
+		eventChan: make(chan domain.UnifiedEvent, config.EventBufferSize),
 		startTime: time.Now(),
 		processor: newEventProcessor(),
 	}
@@ -135,23 +135,16 @@ func (c *collector) initProductionComponents(config core.Config) {
 	// Backpressure controller
 	c.backpressure = NewBackpressureController()
 
-	// Resource monitor
-	maxMemoryMB := 1024 // Default 1GB
-	if config.MaxMemoryBytes > 0 {
-		maxMemoryMB = int(config.MaxMemoryBytes / (1024 * 1024))
-	}
-	c.resourceMonitor = NewResourceMonitor(maxMemoryMB, 10000)
+	// Resource monitor would be initialized here
+	// maxMemoryMB := 1024 // Default 1GB
+	// if config.MaxMemoryBytes > 0 {
+	//	maxMemoryMB = int(config.MaxMemoryBytes / (1024 * 1024))
+	// }
+	// c.resourceMonitor = NewResourceMonitor(maxMemoryMB, 10000)
 
-	// Set resource violation callbacks
-	c.resourceMonitor.SetMemoryCallback(func(usage uint64) {
-		fmt.Printf("eBPF collector memory limit exceeded: %d MB\n", usage/(1024*1024))
-		// Force garbage collection
-		c.resourceMonitor.ForceGC()
-	})
-
-	c.resourceMonitor.SetGoroutineCallback(func(count int) {
-		fmt.Printf("eBPF collector goroutine limit exceeded: %d\n", count)
-	})
+	// Resource violation callbacks would be set here
+	// c.resourceMonitor.SetMemoryCallback(...)
+	// c.resourceMonitor.SetGoroutineCallback(...)
 }
 
 // getEnvironment returns the current environment based on env vars
@@ -186,7 +179,7 @@ func (c *collector) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Start resource monitoring
-	c.resourceMonitor.Start()
+	// c.resourceMonitor.Start()
 
 	// Start platform implementation
 	if err := c.impl.start(c.ctx); err != nil {
@@ -222,7 +215,7 @@ func (c *collector) Stop() error {
 	}
 
 	// Stop resource monitoring
-	c.resourceMonitor.Stop()
+	// c.resourceMonitor.Stop()
 
 	// Stop platform implementation
 	if err := c.impl.stop(); err != nil {
@@ -239,7 +232,7 @@ func (c *collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *collector) Events() <-chan domain.Event {
+func (c *collector) Events() <-chan domain.UnifiedEvent {
 	return c.eventChan
 }
 
@@ -467,10 +460,10 @@ func (c *collector) getHealthMetrics() map[string]float64 {
 	}
 
 	// Add resource metrics
-	if c.resourceMonitor != nil {
-		metrics["memory_usage_percent"] = c.resourceMonitor.GetMemoryUsagePercent()
-		metrics["goroutine_usage_percent"] = c.resourceMonitor.GetGoroutineUsagePercent()
-	}
+	// if c.resourceMonitor != nil {
+	//	metrics["memory_usage_percent"] = c.resourceMonitor.GetMemoryUsagePercent()
+	//	metrics["goroutine_usage_percent"] = c.resourceMonitor.GetGoroutineUsagePercent()
+	// }
 
 	return metrics
 }

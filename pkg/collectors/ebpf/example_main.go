@@ -178,13 +178,18 @@ type DomainEventSink struct {
 	output *os.File
 }
 
-func (s *DomainEventSink) Send(ctx context.Context, event *domain.Event) error {
-	log.Printf("🧠 Semantic Event: %s [%s] %s (importance: %.2f)",
-		event.Type, event.Severity, event.Message, event.Confidence)
+func (s *DomainEventSink) Send(ctx context.Context, event *domain.UnifiedEvent) error {
+	severity := event.GetSeverity()
+	importance := 0.0
+	if event.Impact != nil {
+		importance = event.Impact.BusinessImpact
+	}
+	log.Printf("🧠 Semantic Event: %s [%s] Source: %s (importance: %.2f)",
+		event.Type, severity, event.Source, importance)
 	return nil
 }
 
-func (s *DomainEventSink) SendBatch(ctx context.Context, events []*domain.Event) error {
+func (s *DomainEventSink) SendBatch(ctx context.Context, events []*domain.UnifiedEvent) error {
 	for _, event := range events {
 		if err := s.Send(ctx, event); err != nil {
 			return err
@@ -313,15 +318,26 @@ func IntegrateWithExistingCollector() {
 }
 
 // convertDomainEventToRaw converts domain events to raw events for dual processing
-func convertDomainEventToRaw(event *domain.Event) *RawEvent {
+func convertDomainEventToRaw(event *domain.UnifiedEvent) *RawEvent {
+	// Extract PID from kernel data if available
+	var pid, uid, gid uint32
+	var comm string
+
+	if event.Kernel != nil {
+		pid = event.Kernel.PID
+		uid = event.Kernel.UID
+		gid = event.Kernel.GID
+		comm = event.Kernel.Comm
+	}
+
 	return &RawEvent{
 		Type:      EventTypeProcess, // Map from domain.EventType
 		Timestamp: uint64(event.Timestamp.UnixNano()),
-		PID:       uint32(event.Context.PID),
-		UID:       uint32(event.Context.UID),
-		GID:       uint32(event.Context.GID),
-		Comm:      event.Context.Comm,
-		Data:      nil,        // Raw data not available from domain event
-		Details:   event.Data, // Use domain event data as details
+		PID:       pid,
+		UID:       uid,
+		GID:       gid,
+		Comm:      comm,
+		Data:      event.RawData,
+		Details:   nil, // Would need to convert from UnifiedEvent
 	}
 }

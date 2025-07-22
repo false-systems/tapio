@@ -33,6 +33,7 @@ type TapioServiceComplete struct {
 	correlator CorrelationEngine
 	collectors CollectorRegistry
 	metrics    MetricsCollector
+	converter  *domain.EventConverter
 
 	// Configuration
 	config ServiceConfiguration
@@ -155,6 +156,7 @@ func NewTapioServiceComplete(
 		correlator:  correlator,
 		collectors:  collectors,
 		metrics:     metrics,
+		converter:   domain.NewEventConverter(),
 		config:      config,
 		startTime:   time.Now(),
 		version:     "1.0.0",
@@ -761,129 +763,194 @@ func (s *TapioServiceComplete) GetServiceInfo(ctx context.Context, req *emptypb.
 // Helper methods
 
 func (s *TapioServiceComplete) convertProtoToUnifiedEvent(event *pb.Event) (*domain.UnifiedEvent, error) {
-	// Comprehensive conversion logic will be implemented here
-	ue := &domain.UnifiedEvent{
-		ID:        event.Id,
+	// First convert pb.Event to domain.Event
+	domainEvent := &domain.Event{
+		ID:        domain.EventID(event.Id),
 		Timestamp: event.Timestamp.AsTime(),
 		Type:      s.mapProtoEventType(event.Type),
-		Source:    event.Source,
+		Source:    s.mapProtoSourceType(event.Source),
+		Message:   event.Message,
+		Severity:  s.mapProtoEventSeverity(event.Severity),
 	}
 
-	// Add trace context if present
-	if event.Context != nil && event.Context.TraceId != "" {
-		ue.TraceContext = &domain.TraceContext{
-			TraceID: event.Context.TraceId,
-			SpanID:  event.Context.SpanId,
-		}
-	}
-
-	// Add entity context
-	if event.Context != nil && event.Context.EntityType != "" {
-		ue.Entity = &domain.EntityContext{
-			Type:      event.Context.EntityType,
-			Name:      event.Context.EntityName,
+	// Add context from protobuf
+	if event.Context != nil {
+		domainEvent.Context = domain.EventContext{
+			Service:   event.Context.Service,
+			Component: event.Context.Component,
 			Namespace: event.Context.Namespace,
+			Host:      event.Context.Host,
+			Node:      event.Context.Node,
+			Pod:       event.Context.Pod,
+			Container: event.Context.Container,
 		}
 	}
 
-	// Add layer-specific data based on event type
-	switch event.Type {
-	case pb.EventType_EVENT_TYPE_KERNEL:
-		if event.KernelData != nil {
-			ue.Kernel = &domain.KernelData{
-				Syscall: event.KernelData.Syscall,
-				PID:     event.KernelData.Pid,
-				Comm:    event.KernelData.Comm,
-			}
-		}
-	case pb.EventType_EVENT_TYPE_NETWORK:
-		if event.NetworkData != nil {
-			ue.Network = &domain.NetworkData{
-				Protocol:   event.NetworkData.Protocol,
-				SourceIP:   event.NetworkData.SourceIp,
-				SourcePort: uint16(event.NetworkData.SourcePort),
-				DestIP:     event.NetworkData.DestIp,
-				DestPort:   uint16(event.NetworkData.DestPort),
-			}
-		}
-	case pb.EventType_EVENT_TYPE_APPLICATION:
-		if event.ApplicationData != nil {
-			ue.Application = &domain.ApplicationData{
-				Level:   event.ApplicationData.Level,
-				Message: event.ApplicationData.Message,
-				Logger:  event.ApplicationData.Logger,
-			}
+	// Convert data from protobuf struct to map
+	if event.Data != nil {
+		domainEvent.Data = event.Data.AsMap()
+	} else {
+		domainEvent.Data = make(map[string]interface{})
+	}
+
+	// Add layer-specific data to the data map
+	if event.KernelData != nil {
+		domainEvent.Data["kernel"] = map[string]interface{}{
+			"syscall": event.KernelData.Syscall,
+			"pid":     event.KernelData.Pid,
+			"comm":    event.KernelData.Comm,
 		}
 	}
 
+	if event.NetworkData != nil {
+		domainEvent.Data["network"] = map[string]interface{}{
+			"protocol":    event.NetworkData.Protocol,
+			"source_ip":   event.NetworkData.SourceIp,
+			"source_port": event.NetworkData.SourcePort,
+			"dest_ip":     event.NetworkData.DestIp,
+			"dest_port":   event.NetworkData.DestPort,
+		}
+	}
+
+	if event.ApplicationData != nil {
+		domainEvent.Data["application"] = map[string]interface{}{
+			"level":   event.ApplicationData.Level,
+			"message": event.ApplicationData.Message,
+			"logger":  event.ApplicationData.Logger,
+		}
+	}
+
+	// Convert attributes
+	if event.Attributes != nil {
+		domainEvent.Attributes = make(map[string]interface{})
+		for k, v := range event.Attributes {
+			domainEvent.Attributes[k] = v
+		}
+	}
+
+	// Use EventConverter to convert domain.Event to UnifiedEvent
+	ue := s.converter.ToUnifiedEvent(domainEvent)
 	return ue, nil
 }
 
 func (s *TapioServiceComplete) convertUnifiedEventToProto(event *domain.UnifiedEvent) (*pb.Event, error) {
+	// First convert UnifiedEvent to domain.Event using the EventConverter
+	domainEvent := s.converter.FromUnifiedEvent(event)
+
+	// Then convert domain.Event to pb.Event
 	pe := &pb.Event{
-		Id:        event.ID,
-		Timestamp: timestamppb.New(event.Timestamp),
-		Type:      s.mapDomainEventType(event.Type),
-		Source:    event.Source,
+		Id:        string(domainEvent.ID),
+		Timestamp: timestamppb.New(domainEvent.Timestamp),
+		Type:      s.mapDomainEventType(domainEvent.Type),
+		Source:    s.mapDomainSourceType(domainEvent.Source),
 	}
 
-	// Add context
-	pe.Context = &pb.EventContext{}
-
-	// Add trace context
-	if event.TraceContext != nil {
-		pe.Context.TraceId = event.TraceContext.TraceID
-		pe.Context.SpanId = event.TraceContext.SpanID
+	// Add context from domain.Event
+	pe.Context = &pb.EventContext{
+		Service:   domainEvent.Context.Service,
+		Component: domainEvent.Context.Component,
+		Namespace: domainEvent.Context.Namespace,
+		Host:      domainEvent.Context.Host,
+		Node:      domainEvent.Context.Node,
+		Pod:       domainEvent.Context.Pod,
+		Container: domainEvent.Context.Container,
 	}
 
-	// Add entity context
-	if event.Entity != nil {
-		pe.Context.EntityType = event.Entity.Type
-		pe.Context.EntityName = event.Entity.Name
-		pe.Context.Namespace = event.Entity.Namespace
-	}
+	// Add message and severity
+	pe.Message = domainEvent.Message
+	pe.Severity = s.mapDomainEventSeverity(domainEvent.Severity)
 
-	// Add layer-specific data
-	if event.Kernel != nil {
-		pe.KernelData = &pb.KernelEventData{
-			Syscall: event.Kernel.Syscall,
-			Pid:     event.Kernel.PID,
-			Comm:    event.Kernel.Comm,
+	// Convert data map to protobuf struct
+	if domainEvent.Data != nil {
+		dataStruct, err := structpb.NewStruct(domainEvent.Data)
+		if err != nil {
+			s.logger.Warn("Failed to convert event data to struct",
+				zap.Error(err),
+				zap.String("event_id", pe.Id))
+		} else {
+			pe.Data = dataStruct
 		}
 	}
 
-	if event.Network != nil {
-		pe.NetworkData = &pb.NetworkEventData{
-			Protocol:   event.Network.Protocol,
-			SourceIp:   event.Network.SourceIP,
-			SourcePort: uint32(event.Network.SourcePort),
-			DestIp:     event.Network.DestIP,
-			DestPort:   uint32(event.Network.DestPort),
+	// Convert attributes
+	if domainEvent.Attributes != nil {
+		pe.Attributes = make(map[string]string)
+		for k, v := range domainEvent.Attributes {
+			if strVal, ok := v.(string); ok {
+				pe.Attributes[k] = strVal
+			}
 		}
 	}
 
-	if event.Application != nil {
-		pe.ApplicationData = &pb.ApplicationEventData{
-			Level:   event.Application.Level,
-			Message: event.Application.Message,
-			Logger:  event.Application.Logger,
+	// Add layer-specific data from the data map
+	if domainEvent.Data != nil {
+		// Check for kernel data
+		if kernelData, ok := domainEvent.Data["kernel"].(map[string]interface{}); ok {
+			pe.KernelData = &pb.KernelEventData{
+				Syscall: getStringFromMap(kernelData, "syscall"),
+				Pid:     uint32(getIntFromMap(kernelData, "pid")),
+				Comm:    getStringFromMap(kernelData, "comm"),
+			}
+		}
+
+		// Check for network data
+		if networkData, ok := domainEvent.Data["network"].(map[string]interface{}); ok {
+			pe.NetworkData = &pb.NetworkEventData{
+				Protocol:   getStringFromMap(networkData, "protocol"),
+				SourceIp:   getStringFromMap(networkData, "source_ip"),
+				SourcePort: uint32(getIntFromMap(networkData, "source_port")),
+				DestIp:     getStringFromMap(networkData, "dest_ip"),
+				DestPort:   uint32(getIntFromMap(networkData, "dest_port")),
+			}
+		}
+
+		// Check for application data
+		if appData, ok := domainEvent.Data["application"].(map[string]interface{}); ok {
+			pe.ApplicationData = &pb.ApplicationEventData{
+				Level:   getStringFromMap(appData, "level"),
+				Message: getStringFromMap(appData, "message"),
+				Logger:  getStringFromMap(appData, "logger"),
+			}
 		}
 	}
 
 	return pe, nil
 }
 
+func getStringFromMap(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func getIntFromMap(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case int32:
+			return int(v)
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		}
+	}
+	return 0
+}
+
 func (s *TapioServiceComplete) mapProtoEventType(eventType pb.EventType) domain.EventType {
 	switch eventType {
-	case pb.EventType_EVENT_TYPE_KERNEL:
+	case pb.EventType_EVENT_TYPE_PROCESS:
 		return domain.EventTypeProcess
 	case pb.EventType_EVENT_TYPE_NETWORK:
 		return domain.EventTypeNetwork
-	case pb.EventType_EVENT_TYPE_APPLICATION:
-		return domain.EventTypeLog
 	case pb.EventType_EVENT_TYPE_KUBERNETES:
 		return domain.EventTypeKubernetes
-	case pb.EventType_EVENT_TYPE_SYSTEM:
+	case pb.EventType_EVENT_TYPE_SYSCALL:
 		return domain.EventTypeSystem
 	default:
 		return domain.EventTypeSystem
@@ -893,17 +960,81 @@ func (s *TapioServiceComplete) mapProtoEventType(eventType pb.EventType) domain.
 func (s *TapioServiceComplete) mapDomainEventType(eventType domain.EventType) pb.EventType {
 	switch eventType {
 	case domain.EventTypeProcess:
-		return pb.EventType_EVENT_TYPE_KERNEL
+		return pb.EventType_EVENT_TYPE_PROCESS
 	case domain.EventTypeNetwork:
 		return pb.EventType_EVENT_TYPE_NETWORK
 	case domain.EventTypeLog:
-		return pb.EventType_EVENT_TYPE_APPLICATION
+		return pb.EventType_EVENT_TYPE_UNSPECIFIED // No direct mapping for log
 	case domain.EventTypeKubernetes:
 		return pb.EventType_EVENT_TYPE_KUBERNETES
 	case domain.EventTypeSystem:
-		return pb.EventType_EVENT_TYPE_SYSTEM
+		return pb.EventType_EVENT_TYPE_UNSPECIFIED // No direct mapping for system
 	default:
-		return pb.EventType_EVENT_TYPE_SYSTEM
+		return pb.EventType_EVENT_TYPE_UNSPECIFIED
+	}
+}
+
+func (s *TapioServiceComplete) mapDomainEventSeverity(severity domain.EventSeverity) pb.EventSeverity {
+	switch severity {
+	case domain.EventSeverityCritical:
+		return pb.EventSeverity_EVENT_SEVERITY_CRITICAL
+	case domain.EventSeverityHigh, domain.EventSeverityError:
+		return pb.EventSeverity_EVENT_SEVERITY_ERROR
+	case domain.EventSeverityMedium, domain.EventSeverityWarning:
+		return pb.EventSeverity_EVENT_SEVERITY_WARNING
+	case domain.EventSeverityLow, domain.EventSeverityInfo:
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
+	case domain.EventSeverityDebug:
+		return pb.EventSeverity_EVENT_SEVERITY_DEBUG
+	default:
+		return pb.EventSeverity_EVENT_SEVERITY_INFO
+	}
+}
+
+func (s *TapioServiceComplete) mapDomainSourceType(source domain.SourceType) pb.SourceType {
+	switch source {
+	case domain.SourceEBPF:
+		return pb.SourceType_SOURCE_TYPE_EBPF
+	case domain.SourceK8s:
+		return pb.SourceType_SOURCE_TYPE_KUBERNETES_API
+	case domain.SourceSystemd:
+		return pb.SourceType_SOURCE_TYPE_JOURNALD
+	case domain.SourceCNI:
+		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED // No direct mapping for CNI
+	case domain.SourceCustom:
+		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
+	default:
+		return pb.SourceType_SOURCE_TYPE_UNSPECIFIED
+	}
+}
+
+func (s *TapioServiceComplete) mapProtoSourceType(source pb.SourceType) domain.SourceType {
+	switch source {
+	case pb.SourceType_SOURCE_TYPE_EBPF:
+		return domain.SourceEBPF
+	case pb.SourceType_SOURCE_TYPE_KUBERNETES_API, pb.SourceType_SOURCE_TYPE_KUBERNETES_EVENTS:
+		return domain.SourceK8s
+	case pb.SourceType_SOURCE_TYPE_JOURNALD:
+		return domain.SourceSystemd
+	default:
+		return domain.SourceCustom
+	}
+}
+
+func (s *TapioServiceComplete) mapProtoEventSeverity(severity pb.EventSeverity) domain.EventSeverity {
+	switch severity {
+	case pb.EventSeverity_EVENT_SEVERITY_CRITICAL:
+		return domain.EventSeverityCritical
+	case pb.EventSeverity_EVENT_SEVERITY_ERROR:
+		return domain.EventSeverityError
+	case pb.EventSeverity_EVENT_SEVERITY_WARNING:
+		return domain.EventSeverityWarning
+	case pb.EventSeverity_EVENT_SEVERITY_INFO:
+		return domain.EventSeverityInfo
+	case pb.EventSeverity_EVENT_SEVERITY_DEBUG:
+		return domain.EventSeverityDebug
+	default:
+		return domain.EventSeverityInfo
 	}
 }
 
