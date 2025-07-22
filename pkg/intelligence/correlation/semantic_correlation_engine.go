@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -130,25 +131,41 @@ func (sce *SemanticCorrelationEngine) Stop() error {
 }
 
 // ProcessEvent processes a single event through the correlation engine
-func (sce *SemanticCorrelationEngine) ProcessEvent(event *domain.Event) {
+func (sce *SemanticCorrelationEngine) ProcessEvent(ctx context.Context, event *domain.UnifiedEvent) error {
+	// Convert UnifiedEvent to domain.Event for backward compatibility
+	// TODO: Update internal processing to use UnifiedEvent directly
+	domainEvent := &domain.Event{
+		ID:        domain.EventID(event.ID),
+		Type:      event.Type,
+		Timestamp: event.Timestamp,
+		Severity:  domain.EventSeverity(event.GetSeverity()),
+		Source:    domain.SourceType(event.Source),
+		Message:   event.GetMessage(),
+	}
+	
 	if sce.ctx != nil {
 		select {
-		case sce.eventChan <- Event(*event):
+		case sce.eventChan <- Event(*domainEvent):
 			sce.updateStats("events_received")
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-sce.ctx.Done():
-			return // Exit if context is cancelled
+			return fmt.Errorf("correlation engine is shutting down")
 		default:
 			sce.updateStats("events_dropped")
+			return fmt.Errorf("event buffer full")
 		}
 	} else {
 		// Engine not started, just drop event to event channel
 		select {
-		case sce.eventChan <- Event(*event):
+		case sce.eventChan <- Event(*domainEvent):
 			sce.updateStats("events_received")
 		default:
 			sce.updateStats("events_dropped")
+			return fmt.Errorf("event buffer full")
 		}
 	}
+	return nil
 }
 
 // ProcessUnifiedEvent processes a unified event through the correlation engine
@@ -161,7 +178,7 @@ func (sce *SemanticCorrelationEngine) ProcessUnifiedEvent(event *domain.UnifiedE
 }
 
 // GetLatestFindings returns the latest correlation findings
-func (sce *SemanticCorrelationEngine) GetLatestFindings() *Finding {
+func (sce *SemanticCorrelationEngine) GetLatestFindings() *interfaces.Finding {
 	sce.mu.RLock()
 	defer sce.mu.RUnlock()
 
@@ -189,21 +206,37 @@ func (sce *SemanticCorrelationEngine) GetLatestFindings() *Finding {
 		return nil
 	}
 
-	return &Finding{
+	return &interfaces.Finding{
 		ID:            latest.ID,
 		PatternType:   latest.SemanticType,
 		Confidence:    latest.ConfidenceScore,
 		RelatedEvents: latest.CausalChain,
-		SemanticGroup: &SemanticGroupSummary{
-			ID:         latest.ID,
-			Intent:     latest.Intent,
-			Type:       latest.SemanticType,
-			Impact:     latest.ImpactAssessment,
-			Prediction: latest.PredictedOutcome,
+		SemanticGroup: &interfaces.SemanticGroup{
+			ID:     latest.ID,
+			Intent: latest.Intent,
+			Type:   latest.SemanticType,
 		},
-		Timestamp:   latestTime,
 		Description: fmt.Sprintf("Semantic correlation: %s", latest.Intent),
 	}
+}
+
+// GetSemanticGroups returns current semantic groups
+func (sce *SemanticCorrelationEngine) GetSemanticGroups() []*interfaces.SemanticGroup {
+	sce.mu.RLock()
+	defer sce.mu.RUnlock()
+	
+	groups := sce.semanticTracer.GetSemanticGroups()
+	result := make([]*interfaces.SemanticGroup, 0, len(groups))
+	
+	for _, group := range groups {
+		result = append(result, &interfaces.SemanticGroup{
+			ID:     group.ID,
+			Intent: group.Intent,
+			Type:   group.SemanticType,
+		})
+	}
+	
+	return result
 }
 
 // Events returns the event channel
