@@ -112,7 +112,7 @@ func New(config *Config) (*Orchestrator, error) {
 
 // Run starts the collector and blocks until context cancellation
 func (o *Orchestrator) Run(ctx context.Context) error {
-	tp, err := a.initOTEL(ctx)
+	tp, err := o.initOTEL(ctx)
 	if err != nil {
 		return fmt.Errorf("OTEL initialization failed: %w", err)
 	}
@@ -121,56 +121,56 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	o.manager = NewCollectorManager()
 
-	if err := a.initCollectors(ctx); err != nil {
+	if err := o.initCollectors(ctx); err != nil {
 		return fmt.Errorf("collector initialization failed: %w", err)
 	}
 
 	dataFlowConfig := dataflow.Config{
-		EnableSemanticGrouping: a.config.CorrelationMode == "semantic",
+		EnableSemanticGrouping: o.config.CorrelationMode == "semantic",
 		GroupRetentionPeriod:   30 * time.Minute,
-		ServiceName:            a.config.ServiceName,
-		ServiceVersion:         a.config.ServiceVersion,
-		Environment:            a.config.Environment,
-		BufferSize:             a.config.BufferSize,
-		FlushInterval:          a.config.FlushInterval,
+		ServiceName:            o.config.ServiceName,
+		ServiceVersion:         o.config.ServiceVersion,
+		Environment:            o.config.Environment,
+		BufferSize:             o.config.BufferSize,
+		FlushInterval:          o.config.FlushInterval,
 	}
 
 	o.dataFlow = dataflow.NewTapioDataFlow(dataFlowConfig)
-	o.dataFlow.Connect(a.inputEvents, a.outputEvents)
+	o.dataFlow.Connect(o.inputEvents, o.outputEvents)
 
 	bridgeConfig := dataflow.BridgeConfig{
-		ServerAddress: a.config.ServerAddress,
-		BufferSize:    a.config.BufferSize / 2,
-		FlushInterval: a.config.FlushInterval * 2,
+		ServerAddress: o.config.ServerAddress,
+		BufferSize:    o.config.BufferSize / 2,
+		FlushInterval: o.config.FlushInterval * 2,
 		MaxBatchSize:  100,
 		EnableTracing: true,
 	}
 
-	bridge, err := dataflow.NewServerBridge(bridgeConfig, a.dataFlow)
+	bridge, err := dataflow.NewServerBridge(bridgeConfig, o.dataFlow)
 	if err != nil {
 		return fmt.Errorf("server bridge creation failed: %w", err)
 	}
 	o.bridge = bridge
 
-	log.Printf("🚀 Starting Tapio Collector %s", a.config.ServiceVersion)
-	log.Printf("   Server: %s", a.config.ServerAddress)
-	log.Printf("   OTEL: %s", a.config.OTELEndpoint)
-	log.Printf("   Correlation: %s", a.config.CorrelationMode)
+	log.Printf("🚀 Starting Tapio Collector %s", o.config.ServiceVersion)
+	log.Printf("   Server: %s", o.config.ServerAddress)
+	log.Printf("   OTEL: %s", o.config.OTELEndpoint)
+	log.Printf("   Correlation: %s", o.config.CorrelationMode)
 
-	if err := a.manager.Start(ctx); err != nil {
+	if err := o.manager.Start(ctx); err != nil {
 		return fmt.Errorf("collector manager start failed: %w", err)
 	}
 
-	if err := a.dataFlow.Start(); err != nil {
+	if err := o.dataFlow.Start(); err != nil {
 		return fmt.Errorf("data flow start failed: %w", err)
 	}
 
-	if err := a.bridge.Start(); err != nil {
+	if err := o.bridge.Start(); err != nil {
 		return fmt.Errorf("server bridge start failed: %w", err)
 	}
 
-	go a.routeCollectorEvents(ctx)
-	go a.processCorrelatedEvents(ctx)
+	go o.routeCollectorEvents(ctx)
+	go o.processCorrelatedEvents(ctx)
 
 	log.Printf("✅ Tapio Collector operational")
 
@@ -180,8 +180,8 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	o.manager.Stop()
 	o.dataFlow.Stop()
 	o.bridge.Stop()
-	close(a.inputEvents)
-	close(a.outputEvents)
+	close(o.inputEvents)
+	close(o.outputEvents)
 
 	log.Printf("👋 Tapio Collector stopped")
 	return nil
@@ -190,9 +190,9 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 // initOTEL configures OpenTelemetry tracing
 func (o *Orchestrator) initOTEL(ctx context.Context) (*sdktrace.TracerProvider, error) {
 	opts := []otlptracegrpc.Option{
-		otlptracegrpc.WithEndpoint(a.config.OTELEndpoint),
+		otlptracegrpc.WithEndpoint(o.config.OTELEndpoint),
 	}
-	if a.config.GRPCInsecure {
+	if o.config.GRPCInsecure {
 		opts = append(opts, otlptracegrpc.WithInsecure())
 	}
 
@@ -205,9 +205,9 @@ func (o *Orchestrator) initOTEL(ctx context.Context) (*sdktrace.TracerProvider, 
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(a.config.ServiceName),
-			semconv.ServiceVersionKey.String(a.config.ServiceVersion),
-			semconv.DeploymentEnvironmentKey.String(a.config.Environment),
+			semconv.ServiceNameKey.String(o.config.ServiceName),
+			semconv.ServiceVersionKey.String(o.config.ServiceVersion),
+			semconv.DeploymentEnvironmentKey.String(o.config.Environment),
 		)),
 	)
 
@@ -219,13 +219,13 @@ func (o *Orchestrator) initOTEL(ctx context.Context) (*sdktrace.TracerProvider, 
 func (o *Orchestrator) initCollectors(ctx context.Context) error {
 	collectorsEnabled := 0
 
-	if a.config.EnableEBPF {
+	if o.config.EnableEBPF {
 		config := ebpf.DefaultConfig()
 		collector, err := ebpf.NewCollector(config)
 		if err == nil {
 			adapter := &EBPFCollectorAdapter{
 				collector:     collector,
-				serverAddress: a.config.ServerAddress,
+				serverAddress: o.config.ServerAddress,
 				eventChan:     make(chan domain.Event, 1000),
 			}
 
@@ -253,9 +253,9 @@ func (o *Orchestrator) initCollectors(ctx context.Context) error {
 func (o *Orchestrator) routeCollectorEvents(ctx context.Context) {
 	for {
 		select {
-		case event := <-a.manager.Events():
+		case event := <-o.manager.Events():
 			select {
-			case a.inputEvents <- event:
+			case o.inputEvents <- event:
 			case <-ctx.Done():
 				return
 			}
@@ -272,15 +272,15 @@ func (o *Orchestrator) processCorrelatedEvents(ctx context.Context) {
 
 	for {
 		select {
-		case event := <-a.outputEvents:
-			count := atomic.AddInt64(&a.eventCount, 1)
+		case event := <-o.outputEvents:
+			count := atomic.AddInt64(&o.eventCount, 1)
 			if count%1000 == 0 {
 				log.Printf("📊 Processed %d events, latest: %s", count, event.ID)
 			}
 
 		case <-ticker.C:
-			stats := a.manager.Statistics()
-			count := atomic.LoadInt64(&a.eventCount)
+			stats := o.manager.Statistics()
+			count := atomic.LoadInt64(&o.eventCount)
 			log.Printf("📈 Status: Events=%d, Active Collectors=%d", count, stats.ActiveCollectors)
 
 		case <-ctx.Done():
@@ -295,12 +295,12 @@ func (o *Orchestrator) Statistics() struct {
 	ProcessedEvents   int64
 	BufferUtilization float64
 } {
-	managerStats := a.manager.Statistics()
-	processedEvents := atomic.LoadInt64(&a.eventCount)
+	managerStats := o.manager.Statistics()
+	processedEvents := atomic.LoadInt64(&o.eventCount)
 
-	inputLen := float64(len(a.inputEvents))
-	outputLen := float64(len(a.outputEvents))
-	totalCapacity := float64(cap(a.inputEvents) + cap(a.outputEvents))
+	inputLen := float64(len(o.inputEvents))
+	outputLen := float64(len(o.outputEvents))
+	totalCapacity := float64(cap(o.inputEvents) + cap(o.outputEvents))
 	utilization := (inputLen + outputLen) / totalCapacity * 100
 
 	return struct {
