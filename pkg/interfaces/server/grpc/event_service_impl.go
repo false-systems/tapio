@@ -79,12 +79,13 @@ func (s *EventServiceImpl) StreamEvents(stream grpc.BidiStreamingServer[pb.Strea
 	s.stats.activeStreams.Add(1)
 	defer s.stats.activeStreams.Add(-1)
 
-	// Send initial connected response
+	// Send initial health status response to indicate connection
 	if err := stream.Send(&pb.StreamEventsResponse{
-		Response: &pb.StreamEventsResponse_Control{
-			Control: &pb.StreamControl{
-				Type:      pb.StreamControlType_STREAM_CONTROL_TYPE_CONNECTED,
-				Timestamp: timestamppb.Now(),
+		Response: &pb.StreamEventsResponse_HealthStatus{
+			HealthStatus: &pb.HealthStatus{
+				Status:    pb.HealthStatus_STATUS_HEALTHY,
+				Message:   "Stream connected",
+				LastCheck: timestamppb.Now(),
 			},
 		},
 	}); err != nil {
@@ -127,7 +128,7 @@ func (s *EventServiceImpl) StreamEvents(stream grpc.BidiStreamingServer[pb.Strea
 					Ack: &pb.EventAck{
 						EventId:   r.Event.Id,
 						Timestamp: timestamppb.Now(),
-						Status:    pb.AckStatus_ACK_STATUS_SUCCESS,
+						Status:    "processed",
 					},
 				},
 			}
@@ -155,12 +156,16 @@ func (s *EventServiceImpl) StreamEvents(stream grpc.BidiStreamingServer[pb.Strea
 
 			// Send batch acknowledgment
 			batchAck := &pb.StreamEventsResponse{
-				Response: &pb.StreamEventsResponse_BatchAck{
-					BatchAck: &pb.EventBatchAck{
-						BatchId:        r.Batch.BatchId,
-						ReceivedCount:  int32(batchSize),
-						ProcessedCount: int32(successCount),
-						Timestamp:      timestamppb.Now(),
+				Response: &pb.StreamEventsResponse_Ack{
+					Ack: &pb.EventAck{
+						BatchId:   r.Batch.BatchId,
+						Timestamp: timestamppb.Now(),
+						Status:    "processed",
+						Message:   fmt.Sprintf("Batch processed: %d/%d events successful", successCount, batchSize),
+						Metadata: map[string]string{
+							"received_count":  fmt.Sprintf("%d", batchSize),
+							"processed_count": fmt.Sprintf("%d", successCount),
+						},
 					},
 				},
 			}
@@ -169,21 +174,19 @@ func (s *EventServiceImpl) StreamEvents(stream grpc.BidiStreamingServer[pb.Strea
 				return err
 			}
 
-		case *pb.StreamEventsRequest_Control:
-			// Handle control messages
-			if r.Control.Type == pb.StreamControlType_STREAM_CONTROL_TYPE_HEARTBEAT {
-				// Send heartbeat response
-				hb := &pb.StreamEventsResponse{
-					Response: &pb.StreamEventsResponse_Control{
-						Control: &pb.StreamControl{
-							Type:      pb.StreamControlType_STREAM_CONTROL_TYPE_HEARTBEAT_ACK,
-							Timestamp: timestamppb.Now(),
-						},
+		case *pb.StreamEventsRequest_HealthCheck:
+			// Handle health check messages (use as heartbeat)
+			hb := &pb.StreamEventsResponse{
+				Response: &pb.StreamEventsResponse_HealthStatus{
+					HealthStatus: &pb.HealthStatus{
+						Status:    pb.HealthStatus_STATUS_HEALTHY,
+						Message:   "Heartbeat acknowledged",
+						LastCheck: timestamppb.Now(),
 					},
-				}
-				if err := stream.Send(hb); err != nil {
-					return err
-				}
+				},
+			}
+			if err := stream.Send(hb); err != nil {
+				return err
 			}
 		}
 	}

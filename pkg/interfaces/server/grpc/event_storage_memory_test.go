@@ -401,7 +401,7 @@ func TestMemoryEventStorage_Health(t *testing.T) {
 
 	// Initially healthy
 	health := storage.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY, health.Status)
 
 	// Fill to near capacity
 	for i := 0; i < 9; i++ {
@@ -417,7 +417,7 @@ func TestMemoryEventStorage_Health(t *testing.T) {
 
 	// Should be degraded when near capacity
 	health = storage.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_DEGRADED, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_DEGRADED, health.Status)
 	assert.Contains(t, health.Message, "utilization high")
 }
 

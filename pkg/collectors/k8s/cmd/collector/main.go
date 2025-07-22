@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors/common"
 	"github.com/yairfalse/tapio/pkg/collectors/k8s"
 )
 
@@ -69,7 +70,7 @@ func main() {
 	}
 
 	// Initialize Tapio client if enabled
-	var tapioClient *k8s.TapioGRPCClient
+	var tapioClient *common.TapioGRPCClient
 	if *enableTapio {
 		client, err := k8s.NewTapioGRPCClient(*serverAddr)
 		if err != nil {

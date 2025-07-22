@@ -41,6 +41,7 @@ const (
 // Core domain types - only the ones NOT already in interfaces.go
 
 // Event represents a comprehensive system event supporting multiple use cases
+// DEPRECATED: Use UnifiedEvent instead. This type will be removed in a future version.
 type Event struct {
 	// Core fields (backward compatible)
 	ID        EventID                `json:"id"`
@@ -309,13 +310,7 @@ type MetricsReport struct {
 	Timestamp time.Time          `json:"timestamp"`
 }
 
-// CausalityContext represents causality information for events
-type CausalityContext struct {
-	RootCause   string                 `json:"root_cause"`
-	CausalChain []string               `json:"causal_chain"`
-	Confidence  float64                `json:"confidence"`
-	Metadata    map[string]interface{} `json:"metadata"`
-}
+// CausalityContext is defined in unified_event.go to avoid circular imports
 
 // Problem represents an issue detected in the system
 type Problem struct {
@@ -343,14 +338,7 @@ type SystemEvent struct {
 	Data      map[string]interface{} `json:"data,omitempty"`
 }
 
-// BehavioralContext represents behavioral patterns and context
-type BehavioralContext struct {
-	Pattern    string                 `json:"pattern"`
-	Frequency  float64                `json:"frequency"`
-	Confidence float64                `json:"confidence"`
-	TimeWindow TimeWindow             `json:"time_window"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
-}
+// BehavioralContext is defined in unified_event.go to avoid circular imports
 
 // ActionItem represents a recommended action
 type ActionItem struct {

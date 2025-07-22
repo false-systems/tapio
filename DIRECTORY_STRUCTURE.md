@@ -16,8 +16,7 @@ Tapio follows a strict 5-level hierarchical architecture for its Go packages, en
 
 ## Directory Structure
 
-### `/cmd` - Executable Applications
-Command-line applications and services that can be compiled into binaries.
+
 
 - **`tapio-collector/`** - Main collector service that runs multiple collectors
 - **`tapio-server/`** - gRPC/REST API server for event processing

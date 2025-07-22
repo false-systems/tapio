@@ -69,7 +69,7 @@ func (r *InMemoryCollectorRegistry) RegisterCollector(name string, info Collecto
 		Info:         info,
 		RegisteredAt: time.Now(),
 		HealthStatus: HealthStatus{
-			Status:      pb.HealthStatus_HEALTH_STATUS_UNKNOWN,
+			Status:      pb.HealthStatus_STATUS_UNKNOWN,
 			Message:     "Newly registered",
 			LastHealthy: time.Now(),
 			Metrics:     make(map[string]float64),
@@ -155,7 +155,7 @@ func (r *InMemoryCollectorRegistry) UpdateCollectorHealth(name string, status He
 	collector.LastHealthCheck = time.Now()
 	collector.Info.LastSeen = time.Now()
 
-	if status.Status == pb.HealthStatus_HEALTH_STATUS_HEALTHY {
+	if status.Status == pb.HealthStatus_STATUS_HEALTHY {
 		collector.HealthStatus.LastHealthy = time.Now()
 	}
 
@@ -213,27 +213,27 @@ func (r *InMemoryCollectorRegistry) Health() HealthStatus {
 	for _, collector := range r.collectors {
 		collector.mu.RLock()
 		switch collector.HealthStatus.Status {
-		case pb.HealthStatus_HEALTH_STATUS_HEALTHY:
+		case pb.HealthStatus_STATUS_HEALTHY:
 			healthyCollectors++
-		case pb.HealthStatus_HEALTH_STATUS_DEGRADED:
+		case pb.HealthStatus_STATUS_DEGRADED:
 			degradedCollectors++
-		case pb.HealthStatus_HEALTH_STATUS_UNHEALTHY:
+		case pb.HealthStatus_STATUS_UNHEALTHY:
 			unhealthyCollectors++
 		}
 		collector.mu.RUnlock()
 	}
 
 	// Determine overall status
-	status := pb.HealthStatus_HEALTH_STATUS_HEALTHY
+	status := pb.HealthStatus_STATUS_HEALTHY
 	message := fmt.Sprintf("Registry healthy: %d collectors registered", totalCollectors)
 
 	if unhealthyCollectors > 0 {
-		status = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		status = pb.HealthStatus_STATUS_DEGRADED
 		message = fmt.Sprintf("Registry degraded: %d unhealthy collectors", unhealthyCollectors)
 	}
 
 	if unhealthyCollectors > totalCollectors/2 {
-		status = pb.HealthStatus_HEALTH_STATUS_UNHEALTHY
+		status = pb.HealthStatus_STATUS_UNHEALTHY
 		message = fmt.Sprintf("Registry unhealthy: %d/%d collectors unhealthy", unhealthyCollectors, totalCollectors)
 	}
 
@@ -335,11 +335,11 @@ func (r *InMemoryCollectorRegistry) checkCollectorHealth(name string) {
 
 	if timeSinceLastSeen > 2*r.healthCheckInterval {
 		// Collector hasn't reported in too long
-		collector.HealthStatus.Status = pb.HealthStatus_HEALTH_STATUS_UNHEALTHY
+		collector.HealthStatus.Status = pb.HealthStatus_STATUS_UNHEALTHY
 		collector.HealthStatus.Message = fmt.Sprintf("No updates for %.0f seconds", timeSinceLastSeen.Seconds())
 	} else if timeSinceLastSeen > r.healthCheckInterval {
 		// Collector is late but not critically
-		collector.HealthStatus.Status = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		collector.HealthStatus.Status = pb.HealthStatus_STATUS_DEGRADED
 		collector.HealthStatus.Message = fmt.Sprintf("Late update: %.0f seconds ago", timeSinceLastSeen.Seconds())
 	}
 

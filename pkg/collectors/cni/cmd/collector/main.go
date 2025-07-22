@@ -13,24 +13,25 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/cni"
 	"github.com/yairfalse/tapio/pkg/collectors/cni/core"
+	"github.com/yairfalse/tapio/pkg/collectors/common"
 )
 
 func main() {
 	var (
-		configType       = flag.String("config", "default", "Configuration type: default, production, development")
-		cniBinPath       = flag.String("cni-bin-path", "/opt/cni/bin", "Path to CNI binary directory")
-		cniConfPath      = flag.String("cni-conf-path", "/etc/cni/net.d", "Path to CNI configuration directory")
-		bufferSize       = flag.Int("buffer-size", 1000, "Event buffer size")
-		pollInterval     = flag.Int("poll-interval", 5000, "Polling interval in milliseconds")
-		eventRateLimit   = flag.Int("rate-limit", 100, "Event rate limit per second")
-		enableLogMon     = flag.Bool("enable-log-monitoring", true, "Enable CNI log monitoring")
-		enableProcMon    = flag.Bool("enable-process-monitoring", false, "Enable CNI process monitoring")
-		enableEventMon   = flag.Bool("enable-event-monitoring", true, "Enable Kubernetes event monitoring")
-		enableFileMon    = flag.Bool("enable-file-monitoring", false, "Enable CNI configuration file monitoring")
-		inCluster        = flag.Bool("in-cluster", true, "Running in Kubernetes cluster")
-		serverAddr       = flag.String("server", "", "Tapio server address (e.g., localhost:50051)")
-		standalone       = flag.Bool("standalone", false, "Run in standalone mode without connecting to Tapio server")
-		verbose          = flag.Bool("verbose", false, "Enable verbose output")
+		configType     = flag.String("config", "default", "Configuration type: default, production, development")
+		cniBinPath     = flag.String("cni-bin-path", "/opt/cni/bin", "Path to CNI binary directory")
+		cniConfPath    = flag.String("cni-conf-path", "/etc/cni/net.d", "Path to CNI configuration directory")
+		bufferSize     = flag.Int("buffer-size", 1000, "Event buffer size")
+		pollInterval   = flag.Int("poll-interval", 5000, "Polling interval in milliseconds")
+		eventRateLimit = flag.Int("rate-limit", 100, "Event rate limit per second")
+		enableLogMon   = flag.Bool("enable-log-monitoring", true, "Enable CNI log monitoring")
+		enableProcMon  = flag.Bool("enable-process-monitoring", false, "Enable CNI process monitoring")
+		enableEventMon = flag.Bool("enable-event-monitoring", true, "Enable Kubernetes event monitoring")
+		enableFileMon  = flag.Bool("enable-file-monitoring", false, "Enable CNI configuration file monitoring")
+		inCluster      = flag.Bool("in-cluster", true, "Running in Kubernetes cluster")
+		serverAddr     = flag.String("server", "", "Tapio server address (e.g., localhost:50051)")
+		standalone     = flag.Bool("standalone", false, "Run in standalone mode without connecting to Tapio server")
+		verbose        = flag.Bool("verbose", false, "Enable verbose output")
 	)
 	flag.Parse()
 
@@ -73,7 +74,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Initialize Tapio gRPC client if server address is provided
-	var tapioClient *cni.TapioGRPCClient
+	var tapioClient *common.TapioGRPCClient
 	if *serverAddr != "" && !*standalone {
 		tapioClient, err = cni.NewTapioGRPCClient(*serverAddr)
 		if err != nil {

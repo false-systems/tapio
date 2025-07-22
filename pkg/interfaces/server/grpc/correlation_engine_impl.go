@@ -215,9 +215,9 @@ func (e *RealTimeCorrelationEngine) GetCorrelations(ctx context.Context, filter 
 		}
 	}
 
-	// Sort by creation time (newest first)
+	// Sort by discovery time (newest first)
 	sort.Slice(correlations, func(i, j int) bool {
-		return correlations[i].CreatedAt.AsTime().After(correlations[j].CreatedAt.AsTime())
+		return correlations[i].DiscoveredAt.AsTime().After(correlations[j].DiscoveredAt.AsTime())
 	})
 
 	return correlations, nil
@@ -238,7 +238,7 @@ func (e *RealTimeCorrelationEngine) GetSemanticGroups(ctx context.Context, filte
 
 	// Sort by event count (largest first)
 	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].EventCount > groups[j].EventCount
+		return len(groups[i].EventIds) > len(groups[j].EventIds)
 	})
 
 	return groups, nil
@@ -257,15 +257,14 @@ func (e *RealTimeCorrelationEngine) AnalyzeEvents(ctx context.Context, events []
 	for _, matcher := range e.patterns {
 		if match, found := matcher.Match(events); found {
 			correlation := &pb.Correlation{
-				Id:          fmt.Sprintf("correlation-%d", time.Now().UnixNano()),
-				Type:        pb.CorrelationType_CORRELATION_TYPE_PATTERN,
-				Pattern:     match.Pattern,
-				Confidence:  match.Confidence,
-				Description: match.Description,
-				EventIds:    match.EventIDs,
-				Metadata:    match.Metadata,
-				CreatedAt:   timestamppb.Now(),
-				UpdatedAt:   timestamppb.Now(),
+				Id:           fmt.Sprintf("correlation-%d", time.Now().UnixNano()),
+				Type:         pb.CorrelationType_CORRELATION_TYPE_SEMANTIC,
+				Title:        match.Pattern,
+				Description:  match.Description,
+				Confidence:   match.Confidence,
+				EventIds:     match.EventIDs,
+				EventCount:   int32(len(match.EventIDs)),
+				DiscoveredAt: timestamppb.Now(),
 			}
 			correlations = append(correlations, correlation)
 		}
@@ -289,12 +288,12 @@ func (e *RealTimeCorrelationEngine) Health() HealthStatus {
 	groupCount := len(e.semanticGroups)
 	e.mu.RUnlock()
 
-	status := pb.HealthStatus_HEALTH_STATUS_HEALTHY
+	status := pb.HealthStatus_STATUS_HEALTHY
 	message := "Correlation engine is healthy"
 
 	// Check if we're at capacity
 	if e.config.MaxCorrelations > 0 && correlationCount > int(float64(e.config.MaxCorrelations)*0.9) {
-		status = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		status = pb.HealthStatus_STATUS_DEGRADED
 		message = "Correlation storage near capacity"
 	}
 
@@ -335,15 +334,14 @@ func (e *RealTimeCorrelationEngine) initializePatterns() {
 // createCorrelation creates a new correlation from a match
 func (e *RealTimeCorrelationEngine) createCorrelation(match *CorrelationMatch, triggerEvent *domain.UnifiedEvent) *pb.Correlation {
 	return &pb.Correlation{
-		Id:          fmt.Sprintf("corr-%d", time.Now().UnixNano()),
-		Type:        pb.CorrelationType_CORRELATION_TYPE_PATTERN,
-		Pattern:     match.Pattern,
-		Confidence:  match.Confidence,
-		Description: match.Description,
-		EventIds:    match.EventIDs,
-		CreatedAt:   timestamppb.Now(),
-		UpdatedAt:   timestamppb.Now(),
-		Metadata:    match.Metadata,
+		Id:           fmt.Sprintf("corr-%d", time.Now().UnixNano()),
+		Type:         pb.CorrelationType_CORRELATION_TYPE_SEMANTIC,
+		Title:        match.Pattern,
+		Description:  match.Description,
+		Confidence:   match.Confidence,
+		EventIds:     match.EventIDs,
+		EventCount:   int32(len(match.EventIDs)),
+		DiscoveredAt: timestamppb.Now(),
 	}
 }
 
@@ -355,24 +353,23 @@ func (e *RealTimeCorrelationEngine) updateSemanticGroup(event *domain.UnifiedEve
 	groupID := fmt.Sprintf("sg-%s", event.Semantic.Intent)
 
 	if group, exists := e.semanticGroups[groupID]; exists {
-		group.EventCount++
-		group.UpdatedAt = timestamppb.Now()
+		// Add event to existing group
 		if len(group.EventIds) < 1000 { // Limit stored event IDs
 			group.EventIds = append(group.EventIds, event.ID)
 		}
+		group.EndTime = timestamppb.Now() // Update end time
 	} else {
+		// Create new semantic group
 		e.semanticGroups[groupID] = &pb.SemanticGroup{
-			Id:          groupID,
-			Name:        event.Semantic.Intent,
-			Description: fmt.Sprintf("Events with semantic intent: %s", event.Semantic.Intent),
-			EventCount:  1,
-			EventIds:    []string{event.ID},
-			CreatedAt:   timestamppb.Now(),
-			UpdatedAt:   timestamppb.Now(),
-			Metadata: map[string]string{
-				"category":   event.Semantic.Category,
-				"confidence": fmt.Sprintf("%.2f", event.Semantic.Confidence),
-			},
+			Id:              groupID,
+			Name:            event.Semantic.Intent,
+			Description:     fmt.Sprintf("Events with semantic intent: %s", event.Semantic.Intent),
+			SemanticType:    event.Semantic.Category,
+			Intent:          event.Semantic.Intent,
+			ConfidenceScore: event.Semantic.Confidence,
+			EventIds:        []string{event.ID},
+			StartTime:       timestamppb.Now(),
+			EndTime:         timestamppb.Now(),
 		}
 	}
 }
@@ -403,7 +400,7 @@ func (e *RealTimeCorrelationEngine) cleanup() {
 
 	// Clean up correlations
 	for id, corr := range e.correlations {
-		if corr.CreatedAt.AsTime().Before(cutoff) {
+		if corr.DiscoveredAt.AsTime().Before(cutoff) {
 			delete(e.correlations, id)
 
 			// Clean up event index
@@ -415,7 +412,7 @@ func (e *RealTimeCorrelationEngine) cleanup() {
 
 	// Clean up semantic groups
 	for id, group := range e.semanticGroups {
-		if group.UpdatedAt.AsTime().Before(cutoff) {
+		if group.EndTime.AsTime().Before(cutoff) {
 			delete(e.semanticGroups, id)
 		}
 	}
@@ -428,11 +425,8 @@ func (e *RealTimeCorrelationEngine) matchesFilter(corr *pb.Correlation, filter *
 		return true
 	}
 
-	if filter.Query != "" {
-		if !contains(corr.Pattern, filter.Query) && !contains(corr.Description, filter.Query) {
-			return false
-		}
-	}
+	// Note: Filter.Query field not available in current proto definition
+	// Would check filter query against correlation title and description
 
 	return true
 }
@@ -442,11 +436,11 @@ func (e *RealTimeCorrelationEngine) inTimeRange(corr *pb.Correlation, timeRange 
 		return true
 	}
 
-	if timeRange.Start != nil && corr.CreatedAt.AsTime().Before(timeRange.Start.AsTime()) {
+	if timeRange.Start != nil && corr.DiscoveredAt.AsTime().Before(timeRange.Start.AsTime()) {
 		return false
 	}
 
-	if timeRange.End != nil && corr.CreatedAt.AsTime().After(timeRange.End.AsTime()) {
+	if timeRange.End != nil && corr.DiscoveredAt.AsTime().After(timeRange.End.AsTime()) {
 		return false
 	}
 
@@ -458,9 +452,8 @@ func (e *RealTimeCorrelationEngine) matchesGroupFilter(group *pb.SemanticGroup, 
 		return true
 	}
 
-	if filter.Query != "" {
-		return contains(group.Name, filter.Query) || contains(group.Description, filter.Query)
-	}
+	// Note: Filter.Query field not available in current proto definition
+	// Would check filter query against group name and description
 
 	return true
 }
@@ -488,8 +481,7 @@ func (p *ErrorCascadePattern) Match(events []*domain.UnifiedEvent) (*Correlation
 	for _, event := range events {
 		if event.GetSeverity() == "error" || event.GetSeverity() == "critical" {
 			if event.Entity != nil {
-				service := event.Entity.Name
-				errorsByService[service] = append(errorsByService[service], event)
+				errorsByService[event.Entity.Name] = append(errorsByService[event.Entity.Name], event)
 			}
 		}
 	}
@@ -782,7 +774,7 @@ func (e *RealTimeCorrelationEngine) analyzeTemporalPatterns(events []*domain.Uni
 	var correlations []*pb.Correlation
 
 	if len(events) < 10 {
-		return findings
+		return correlations
 	}
 
 	// Calculate event rate
@@ -797,18 +789,14 @@ func (e *RealTimeCorrelationEngine) analyzeTemporalPatterns(events []*domain.Uni
 			}
 
 			correlations = append(correlations, &pb.Correlation{
-				Id:          fmt.Sprintf("temporal-%d", time.Now().UnixNano()),
-				Type:        pb.CorrelationType_CORRELATION_TYPE_TEMPORAL,
-				Pattern:     "event_burst",
-				Confidence:  0.9,
-				Description: fmt.Sprintf("Event burst detected: %.1f events/second", eventsPerSecond),
-				EventIds:    eventIDs,
-				Metadata: map[string]string{
-					"events_per_second": fmt.Sprintf("%.1f", eventsPerSecond),
-					"duration_seconds":  fmt.Sprintf("%.1f", timeSpan.Seconds()),
-				},
-				CreatedAt: timestamppb.Now(),
-				UpdatedAt: timestamppb.Now(),
+				Id:           fmt.Sprintf("temporal-%d", time.Now().UnixNano()),
+				Type:         pb.CorrelationType_CORRELATION_TYPE_TEMPORAL,
+				Title:        "event_burst",
+				Confidence:   0.9,
+				Description:  fmt.Sprintf("Event burst detected: %.1f events/second", eventsPerSecond),
+				EventIds:     eventIDs,
+				EventCount:   int32(len(events)),
+				DiscoveredAt: timestamppb.Now(),
 			})
 		}
 	}
@@ -828,17 +816,15 @@ func (e *RealTimeCorrelationEngine) analyzeCausalPatterns(events []*domain.Unifi
 		if cause.Kernel != nil && effect.GetSeverity() == "error" {
 			timeDiff := effect.Timestamp.Sub(cause.Timestamp)
 			if timeDiff < 5*time.Second && timeDiff > 0 {
-				findings = append(findings, &pb.CorrelationFinding{
-					Id:          fmt.Sprintf("causal-%d", time.Now().UnixNano()),
-					Type:        pb.CorrelationType_CORRELATION_TYPE_CAUSAL,
-					Pattern:     "syscall_error",
-					Confidence:  0.7,
-					Description: fmt.Sprintf("Error occurred %.1fs after syscall %s", timeDiff.Seconds(), cause.Kernel.Syscall),
-					EventIds:    []string{cause.ID, effect.ID},
-					Metadata: map[string]string{
-						"syscall":     cause.Kernel.Syscall,
-						"time_diff_s": fmt.Sprintf("%.1f", timeDiff.Seconds()),
-					},
+				correlations = append(correlations, &pb.Correlation{
+					Id:           fmt.Sprintf("causal-%d", time.Now().UnixNano()),
+					Type:         pb.CorrelationType_CORRELATION_TYPE_CAUSAL,
+					Title:        "syscall_error",
+					Confidence:   0.7,
+					Description:  fmt.Sprintf("Error occurred %.1fs after syscall %s", timeDiff.Seconds(), cause.Kernel.Syscall),
+					EventIds:     []string{cause.ID, effect.ID},
+					EventCount:   2,
+					DiscoveredAt: timestamppb.Now(),
 				})
 			}
 		}
@@ -847,23 +833,21 @@ func (e *RealTimeCorrelationEngine) analyzeCausalPatterns(events []*domain.Unifi
 		if cause.Network != nil && cause.Network.StatusCode >= 500 && effect.Application != nil && effect.Application.Level == "error" {
 			timeDiff := effect.Timestamp.Sub(cause.Timestamp)
 			if timeDiff < 10*time.Second && timeDiff > 0 {
-				findings = append(findings, &pb.CorrelationFinding{
-					Id:          fmt.Sprintf("causal-%d", time.Now().UnixNano()),
-					Type:        pb.CorrelationType_CORRELATION_TYPE_CAUSAL,
-					Pattern:     "network_app_error",
-					Confidence:  0.8,
-					Description: fmt.Sprintf("Application error after network failure (status %d)", cause.Network.StatusCode),
-					EventIds:    []string{cause.ID, effect.ID},
-					Metadata: map[string]string{
-						"status_code": fmt.Sprintf("%d", cause.Network.StatusCode),
-						"time_diff_s": fmt.Sprintf("%.1f", timeDiff.Seconds()),
-					},
+				correlations = append(correlations, &pb.Correlation{
+					Id:           fmt.Sprintf("causal-%d", time.Now().UnixNano()),
+					Type:         pb.CorrelationType_CORRELATION_TYPE_CAUSAL,
+					Title:        "network_app_error",
+					Confidence:   0.8,
+					Description:  fmt.Sprintf("Application error after network failure (status %d)", cause.Network.StatusCode),
+					EventIds:     []string{cause.ID, effect.ID},
+					EventCount:   2,
+					DiscoveredAt: timestamppb.Now(),
 				})
 			}
 		}
 	}
 
-	return findings
+	return correlations
 }
 
 // contains checks if a string contains a substring (case-insensitive)

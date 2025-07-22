@@ -377,7 +377,7 @@ func TestRealTimeProcessor_PatternMatchers(t *testing.T) {
 	// Test Anomaly Pattern - unusual event type
 	// Clear buffer first to avoid temporal pattern interference
 	proc.buffer.Clear()
-	
+
 	anomalyEvent := &domain.UnifiedEvent{
 		ID:        "anomaly1",
 		Type:      domain.EventTypeSystem,
@@ -402,7 +402,7 @@ func TestRealTimeProcessor_PatternMatchers(t *testing.T) {
 	// Test Escalation Pattern - warning then error then crash
 	// Clear buffer for clean test
 	proc.buffer.Clear()
-	
+
 	escalationEvents := []struct {
 		eventType domain.EventType
 		category  string

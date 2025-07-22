@@ -473,7 +473,7 @@ func TestTapioServiceComplete_GetHealth(t *testing.T) {
 
 	resp, err := service.GetHealth(context.Background(), &pb.TapioGetHealthRequest{})
 	require.NoError(t, err)
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, resp.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY, resp.Status)
 	assert.NotNil(t, resp.Components)
 }
 

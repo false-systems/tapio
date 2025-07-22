@@ -8,8 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/performance"
+	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -19,9 +18,9 @@ import (
 // AnalyticsEngine provides real-time analytics and correlation capabilities
 type AnalyticsEngine struct {
 	// Core processing
-	eventPipeline     *performance.EventPipeline
-	correlationEngine *correlation.SemanticCorrelationEngine
-	semanticTracer    *correlation.SemanticOTELTracer
+	eventPipeline     interfaces.EventPipeline
+	correlationEngine interfaces.CorrelationEngine
+	semanticTracer    interfaces.SemanticTracer
 
 	// Real-time processor
 	realTimeProcessor *RealTimeProcessor
@@ -141,8 +140,14 @@ type PredictionResult struct {
 	Mitigation  []string
 }
 
-// NewAnalyticsEngine creates a new analytics engine
-func NewAnalyticsEngine(config Config, logger *zap.Logger) (*AnalyticsEngine, error) {
+// NewAnalyticsEngine creates a new analytics engine with dependency injection
+func NewAnalyticsEngine(
+	config Config,
+	logger *zap.Logger,
+	eventPipeline interfaces.EventPipeline,
+	correlationEngine interfaces.CorrelationEngine,
+	semanticTracer interfaces.SemanticTracer,
+) (*AnalyticsEngine, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize OTEL tracer
@@ -151,40 +156,13 @@ func NewAnalyticsEngine(config Config, logger *zap.Logger) (*AnalyticsEngine, er
 		trace.WithInstrumentationVersion(config.ServiceVersion),
 	)
 
-	// Create event pipeline with high-performance stages
-	pipelineConfig := performance.DefaultPipelineConfig()
-	pipelineConfig.BufferSize = uint64(config.BufferSize)
-	pipelineConfig.WorkersPerStage = config.WorkerCount
-	pipelineConfig.BatchSize = config.BatchSize
-	pipelineConfig.MaxLatency = config.MaxLatency
-	pipelineConfig.EnableZeroCopy = config.EnableZeroCopy
-	pipelineConfig.UseAffinity = config.UseAffinity
-
-	// Create processing stages
-	stages := []performance.Stage{
-		NewValidationStage("validation"),
-		NewEnrichmentStage("enrichment"),
-		NewCorrelationStage("correlation"),
-		NewAnalyticsStage("analytics"),
-	}
-
-	pipeline, err := performance.NewEventPipeline(stages, pipelineConfig)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create event pipeline: %w", err)
-	}
-
 	// Initialize analytics components
 	realTimeProcessor := NewRealTimeProcessor(config.MaxEventsPerSecond)
 	confidenceScorer := NewConfidenceScorer(config.ConfidenceThreshold)
 	impactAssessment := NewImpactAssessment()
 
-	// Initialize correlation components
-	correlationEngine := correlation.NewSemanticCorrelationEngine()
-	semanticTracer := correlation.NewSemanticOTELTracer()
-
 	engine := &AnalyticsEngine{
-		eventPipeline:     pipeline,
+		eventPipeline:     eventPipeline,
 		correlationEngine: correlationEngine,
 		semanticTracer:    semanticTracer,
 		realTimeProcessor: realTimeProcessor,
@@ -281,6 +259,10 @@ func (ae *AnalyticsEngine) ProcessEvent(ctx context.Context, event *domain.Unifi
 		return nil, fmt.Errorf("analytics engine not running")
 	}
 
+	if event == nil {
+		return nil, fmt.Errorf("event cannot be nil")
+	}
+
 	start := time.Now()
 	ctx, span := ae.tracer.Start(ctx, "analytics.process_event",
 		trace.WithAttributes(
@@ -362,8 +344,12 @@ func (ae *AnalyticsEngine) ProcessBatch(ctx context.Context, events []*domain.Un
 		result, err := ae.ProcessEvent(ctx, event)
 		if err != nil {
 			errors++
+			eventID := "unknown"
+			if event != nil {
+				eventID = event.ID
+			}
 			ae.logger.Error("Failed to process event in batch",
-				zap.String("event_id", event.ID),
+				zap.String("event_id", eventID),
 				zap.Error(err),
 			)
 			continue
@@ -406,7 +392,7 @@ func (ae *AnalyticsEngine) GetMetrics() *AnalyticsMetrics {
 		SemanticGroups:    ae.groupsCreated,
 		AnalysisLatency:   ae.analysisLatency,
 		Throughput:        pipelineMetrics.Throughput,
-		PipelineMetrics:   &pipelineMetrics,
+		PipelineMetrics:   pipelineMetrics,
 		QueueDepth:        len(ae.inputStream),
 		OutputBacklog:     len(ae.outputStream),
 		IsRunning:         ae.running,
@@ -421,7 +407,7 @@ type AnalyticsMetrics struct {
 	SemanticGroups    uint64
 	AnalysisLatency   time.Duration
 	Throughput        uint64
-	PipelineMetrics   *performance.PipelineMetrics
+	PipelineMetrics   *interfaces.PipelineMetrics
 	QueueDepth        int
 	OutputBacklog     int
 	IsRunning         bool
@@ -549,7 +535,7 @@ func (ae *AnalyticsEngine) flushBatch() {
 	}
 
 	// Convert to pipeline events
-	pipelineEvents := make([]*performance.Event, len(ae.eventBatch))
+	pipelineEvents := make([]*interfaces.PipelineEvent, len(ae.eventBatch))
 	for i, event := range ae.eventBatch {
 		pipelineEvents[i] = ae.convertToPipelineEvent(event)
 	}
@@ -567,7 +553,7 @@ func (ae *AnalyticsEngine) flushBatch() {
 }
 
 // convertToPipelineEvent converts unified event to pipeline event
-func (ae *AnalyticsEngine) convertToPipelineEvent(event *domain.UnifiedEvent) *performance.Event {
+func (ae *AnalyticsEngine) convertToPipelineEvent(event *domain.UnifiedEvent) *interfaces.PipelineEvent {
 	pipelineEvent := ae.eventPipeline.GetEvent()
 	pipelineEvent.ID = uint64(time.Now().UnixNano())
 	pipelineEvent.Type = string(event.Type)
@@ -581,7 +567,7 @@ func (ae *AnalyticsEngine) convertToPipelineEvent(event *domain.UnifiedEvent) *p
 }
 
 // processAnalyticsEvent processes an event from the analytics pipeline
-func (ae *AnalyticsEngine) processAnalyticsEvent(event *performance.Event) {
+func (ae *AnalyticsEngine) processAnalyticsEvent(event *interfaces.PipelineEvent) {
 	// Extract unified event from metadata
 	unifiedEvent := (*domain.UnifiedEvent)(unsafe.Pointer(uintptr(event.Metadata[0])))
 
@@ -606,7 +592,7 @@ func (ae *AnalyticsEngine) processAnalyticsEvent(event *performance.Event) {
 }
 
 // processCorrelationFindings processes correlation findings
-func (ae *AnalyticsEngine) processCorrelationFindings(findings *correlation.Finding) {
+func (ae *AnalyticsEngine) processCorrelationFindings(findings *interfaces.Finding) {
 	// Create enhanced analytics result
 	result := &AnalyticsResult{
 		EventID:         findings.ID,

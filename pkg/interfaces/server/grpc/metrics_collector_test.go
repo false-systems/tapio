@@ -164,7 +164,7 @@ func TestPrometheusMetricsCollector_Health(t *testing.T) {
 
 	// Initially healthy
 	health := collector.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY, health.Status)
 	assert.Contains(t, health.Message, "healthy")
 
 	// Create many metrics to test cardinality warning
@@ -182,7 +182,7 @@ func TestPrometheusMetricsCollector_Health(t *testing.T) {
 	health = collector.Health()
 	totalMetrics := health.Metrics["total_metrics"]
 	if totalMetrics > 10000 {
-		assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_DEGRADED, health.Status)
+		assert.Equal(t, pb.HealthStatus_STATUS_DEGRADED, health.Status)
 		assert.Contains(t, health.Message, "High metric cardinality")
 	}
 }

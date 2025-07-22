@@ -72,7 +72,7 @@ func (cb *CircularBuffer) Get(n int) []*BufferedEvent {
 	}
 
 	result := make([]*BufferedEvent, 0, n)
-	
+
 	// Start from the most recent and work backwards
 	idx := cb.tail - 1
 	if idx < 0 {

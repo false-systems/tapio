@@ -86,7 +86,7 @@ type CorrelationEngine interface {
 	ProcessEvent(ctx context.Context, event *domain.UnifiedEvent) ([]*pb.Correlation, error)
 	GetCorrelations(ctx context.Context, filter *pb.Filter, timeRange *pb.TimeRange) ([]*pb.Correlation, error)
 	GetSemanticGroups(ctx context.Context, filter *pb.Filter) ([]*pb.SemanticGroup, error)
-	AnalyzeEvents(ctx context.Context, events []*domain.UnifiedEvent) ([]*pb.CorrelationFinding, error)
+	AnalyzeEvents(ctx context.Context, events []*domain.UnifiedEvent) ([]*pb.Correlation, error)
 	Health() HealthStatus
 	Close() error
 }
@@ -123,7 +123,7 @@ type CollectorInfo struct {
 
 // HealthStatus represents component health
 type HealthStatus struct {
-	Status      pb.HealthStatus
+	Status      pb.HealthStatus_Status
 	Message     string
 	LastHealthy time.Time
 	Metrics     map[string]float64
@@ -687,13 +687,13 @@ func (s *TapioServiceComplete) HealthCheck(ctx context.Context, req *pb.HealthCh
 	}
 
 	// Determine overall health
-	overallStatus := pb.HealthStatus_HEALTH_STATUS_HEALTHY
+	overallStatus := pb.HealthStatus_STATUS_HEALTHY
 	for _, comp := range components {
-		if comp.Status == pb.HealthStatus_HEALTH_STATUS_UNHEALTHY {
-			overallStatus = pb.HealthStatus_HEALTH_STATUS_UNHEALTHY
+		if comp.Status == pb.HealthStatus_STATUS_UNHEALTHY {
+			overallStatus = pb.HealthStatus_STATUS_UNHEALTHY
 			break
-		} else if comp.Status == pb.HealthStatus_HEALTH_STATUS_DEGRADED {
-			overallStatus = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		} else if comp.Status == pb.HealthStatus_STATUS_DEGRADED {
+			overallStatus = pb.HealthStatus_STATUS_DEGRADED
 		}
 	}
 

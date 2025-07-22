@@ -55,7 +55,7 @@ type collector struct {
 	circuitBreaker  *CircuitBreaker
 	validator       *EventValidator
 	backpressure    *BackpressureController
-	resourceMonitor *ResourceMonitor
+	resourceMonitor ResourceMonitorInterface
 }
 
 // platformImpl is the platform-specific interface
@@ -121,9 +121,9 @@ func NewCollector(config core.Config) (core.Collector, error) {
 func (c *collector) initProductionComponents(config core.Config) {
 	// Rate limiter
 	if config.MaxEventsPerSecond > 0 {
-		c.rateLimiter = NewRateLimiter(int64(config.MaxEventsPerSecond))
+		c.rateLimiter = NewRateLimiterSimple(int64(config.MaxEventsPerSecond))
 	} else {
-		c.rateLimiter = NewRateLimiter(10000) // Default 10k/sec
+		c.rateLimiter = NewRateLimiterSimple(10000) // Default 10k/sec
 	}
 
 	// Circuit breaker
@@ -320,7 +320,7 @@ func (c *collector) processEvents() {
 			}
 
 			// Apply rate limiting
-			if !c.rateLimiter.Allow() {
+			if !c.rateLimiter.Allow(c.ctx) {
 				c.stats.eventsDropped.Add(1)
 				continue
 			}

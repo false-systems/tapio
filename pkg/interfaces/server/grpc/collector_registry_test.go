@@ -106,11 +106,11 @@ func TestInMemoryCollectorRegistry_GetCollectorHealth(t *testing.T) {
 	// Get health status
 	health, err := registry.GetCollectorHealth("test-collector")
 	require.NoError(t, err)
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_UNKNOWN, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_UNKNOWN, health.Status)
 
 	// Update health
 	newHealth := HealthStatus{
-		Status:      pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+		Status:      pb.HealthStatus_STATUS_HEALTHY,
 		Message:     "All systems operational",
 		LastHealthy: time.Now(),
 		Metrics: map[string]float64{
@@ -123,7 +123,7 @@ func TestInMemoryCollectorRegistry_GetCollectorHealth(t *testing.T) {
 	// Verify updated health
 	health, err = registry.GetCollectorHealth("test-collector")
 	require.NoError(t, err)
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY, health.Status)
 	assert.Equal(t, "All systems operational", health.Message)
 
 	// Test non-existent collector
@@ -289,17 +289,17 @@ func TestInMemoryCollectorRegistry_Health(t *testing.T) {
 
 	// Initially healthy with no collectors
 	health := registry.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY, health.Status)
 
 	// Register collectors with different health statuses
 	collectors := []struct {
 		name   string
 		status pb.HealthStatus_Status
 	}{
-		{"healthy-1", pb.HealthStatus_HEALTH_STATUS_HEALTHY},
-		{"healthy-2", pb.HealthStatus_HEALTH_STATUS_HEALTHY},
-		{"degraded-1", pb.HealthStatus_HEALTH_STATUS_DEGRADED},
-		{"unhealthy-1", pb.HealthStatus_HEALTH_STATUS_UNHEALTHY},
+		{"healthy-1", pb.HealthStatus_STATUS_HEALTHY},
+		{"healthy-2", pb.HealthStatus_STATUS_HEALTHY},
+		{"degraded-1", pb.HealthStatus_STATUS_DEGRADED},
+		{"unhealthy-1", pb.HealthStatus_STATUS_UNHEALTHY},
 	}
 
 	for _, c := range collectors {
@@ -320,13 +320,13 @@ func TestInMemoryCollectorRegistry_Health(t *testing.T) {
 
 	// Registry should be degraded with one unhealthy collector
 	health = registry.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_DEGRADED, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_DEGRADED, health.Status)
 	assert.Contains(t, health.Message, "degraded")
 
 	// Make majority unhealthy
 	for i := 2; i <= 3; i++ {
 		healthStatus := HealthStatus{
-			Status:  pb.HealthStatus_HEALTH_STATUS_UNHEALTHY,
+			Status:  pb.HealthStatus_STATUS_UNHEALTHY,
 			Message: "Test unhealthy",
 		}
 		err := registry.UpdateCollectorHealth(collectors[i].name, healthStatus)
@@ -335,7 +335,7 @@ func TestInMemoryCollectorRegistry_Health(t *testing.T) {
 
 	// Registry should be unhealthy
 	health = registry.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_UNHEALTHY, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_UNHEALTHY, health.Status)
 }
 
 func TestInMemoryCollectorRegistry_HealthMonitoring(t *testing.T) {
@@ -368,7 +368,7 @@ func TestInMemoryCollectorRegistry_HealthMonitoring(t *testing.T) {
 	// Collector should be degraded or unhealthy due to no updates
 	health, err := registry.GetCollectorHealth("test-collector")
 	require.NoError(t, err)
-	assert.NotEqual(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, health.Status)
+	assert.NotEqual(t, pb.HealthStatus_STATUS_HEALTHY, health.Status)
 	assert.Contains(t, health.Message, "update")
 }
 
@@ -390,11 +390,11 @@ func TestInMemoryCollectorRegistry_GetStatistics(t *testing.T) {
 
 	// Update some health statuses
 	statuses := []pb.HealthStatus_Status{
-		pb.HealthStatus_HEALTH_STATUS_HEALTHY,
-		pb.HealthStatus_HEALTH_STATUS_HEALTHY,
-		pb.HealthStatus_HEALTH_STATUS_DEGRADED,
-		pb.HealthStatus_HEALTH_STATUS_UNHEALTHY,
-		pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+		pb.HealthStatus_STATUS_HEALTHY,
+		pb.HealthStatus_STATUS_HEALTHY,
+		pb.HealthStatus_STATUS_DEGRADED,
+		pb.HealthStatus_STATUS_UNHEALTHY,
+		pb.HealthStatus_STATUS_HEALTHY,
 	}
 
 	for i, status := range statuses {
@@ -420,9 +420,9 @@ func TestInMemoryCollectorRegistry_GetStatistics(t *testing.T) {
 
 	// Check status distribution
 	statusCount := stats["collectors_by_status"].(map[string]int)
-	assert.Equal(t, 3, statusCount[pb.HealthStatus_HEALTH_STATUS_HEALTHY.String()])
-	assert.Equal(t, 1, statusCount[pb.HealthStatus_HEALTH_STATUS_DEGRADED.String()])
-	assert.Equal(t, 1, statusCount[pb.HealthStatus_HEALTH_STATUS_UNHEALTHY.String()])
+	assert.Equal(t, 3, statusCount[pb.HealthStatus_STATUS_HEALTHY.String()])
+	assert.Equal(t, 1, statusCount[pb.HealthStatus_STATUS_DEGRADED.String()])
+	assert.Equal(t, 1, statusCount[pb.HealthStatus_STATUS_UNHEALTHY.String()])
 }
 
 func TestInMemoryCollectorRegistry_GetCollectorStatistics(t *testing.T) {
@@ -443,7 +443,7 @@ func TestInMemoryCollectorRegistry_GetCollectorStatistics(t *testing.T) {
 
 	// Update health and metrics
 	healthStatus := HealthStatus{
-		Status:      pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+		Status:      pb.HealthStatus_STATUS_HEALTHY,
 		Message:     "Running smoothly",
 		LastHealthy: time.Now(),
 	}
@@ -463,7 +463,7 @@ func TestInMemoryCollectorRegistry_GetCollectorStatistics(t *testing.T) {
 
 	assert.Equal(t, "test-collector", stats.Name)
 	assert.Equal(t, "process", stats.Type)
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY.String(), stats.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY.String(), stats.Status)
 	assert.Equal(t, info.Capabilities, stats.Capabilities)
 	assert.Equal(t, info.EventTypes, stats.EventTypes)
 	assert.Equal(t, metrics, stats.Metrics)
@@ -507,7 +507,7 @@ func TestInMemoryCollectorRegistry_ConcurrentAccess(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 
 			health := HealthStatus{
-				Status:  pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+				Status:  pb.HealthStatus_STATUS_HEALTHY,
 				Message: "Concurrent update",
 			}
 			err := registry.UpdateCollectorHealth("concurrent-"+string(rune('a'+id)), health)
@@ -590,7 +590,7 @@ func BenchmarkCollectorRegistry_UpdateHealth(b *testing.B) {
 	registry.RegisterCollector("bench-collector", info)
 
 	health := HealthStatus{
-		Status:      pb.HealthStatus_HEALTH_STATUS_HEALTHY,
+		Status:      pb.HealthStatus_STATUS_HEALTHY,
 		Message:     "Benchmark",
 		LastHealthy: time.Now(),
 		Metrics: map[string]float64{

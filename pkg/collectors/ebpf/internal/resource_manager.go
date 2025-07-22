@@ -650,3 +650,78 @@ func (rm *ResourceMonitor) GetStats() map[string]interface{} {
 		"sample_count":    count,
 	}
 }
+
+// Additional ResourceMonitor interface for the collector
+type ResourceMonitorInterface interface {
+	Start()
+	Stop()
+	SetMemoryCallback(func(uint64))
+	SetGoroutineCallback(func(int))
+	ForceGC()
+	GetMemoryUsagePercent() float64
+	GetGoroutineUsagePercent() float64
+}
+
+// ResourceMonitorImpl wraps ResourceMonitor with additional methods needed by collector
+type ResourceMonitorImpl struct {
+	*ResourceMonitor
+	memoryCallback    func(uint64)
+	goroutineCallback func(int)
+	maxMemoryMB       int
+	maxGoroutines     int
+}
+
+// NewResourceMonitor creates the resource monitor interface expected by collector
+func NewResourceMonitor(maxMemoryMB, maxGoroutines int) ResourceMonitorInterface {
+	rm := &ResourceMonitor{
+		interval:   1 * time.Second,
+		maxSamples: 60,
+		samples:    make([]ResourceSample, 60),
+		stopCh:     make(chan struct{}),
+	}
+
+	return &ResourceMonitorImpl{
+		ResourceMonitor: rm,
+		maxMemoryMB:     maxMemoryMB,
+		maxGoroutines:   maxGoroutines,
+	}
+}
+
+// SetMemoryCallback sets the callback for memory limit violations
+func (rmi *ResourceMonitorImpl) SetMemoryCallback(callback func(uint64)) {
+	rmi.memoryCallback = callback
+}
+
+// SetGoroutineCallback sets the callback for goroutine limit violations
+func (rmi *ResourceMonitorImpl) SetGoroutineCallback(callback func(int)) {
+	rmi.goroutineCallback = callback
+}
+
+// ForceGC forces garbage collection
+func (rmi *ResourceMonitorImpl) ForceGC() {
+	runtime.GC()
+	runtime.Gosched()
+}
+
+// GetMemoryUsagePercent returns current memory usage as percentage
+func (rmi *ResourceMonitorImpl) GetMemoryUsagePercent() float64 {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	maxMemoryBytes := uint64(rmi.maxMemoryMB) * 1024 * 1024
+	if maxMemoryBytes == 0 {
+		return 0
+	}
+
+	return float64(memStats.Alloc) / float64(maxMemoryBytes) * 100
+}
+
+// GetGoroutineUsagePercent returns current goroutine usage as percentage
+func (rmi *ResourceMonitorImpl) GetGoroutineUsagePercent() float64 {
+	current := runtime.NumGoroutine()
+	if rmi.maxGoroutines == 0 {
+		return 0
+	}
+
+	return float64(current) / float64(rmi.maxGoroutines) * 100
+}

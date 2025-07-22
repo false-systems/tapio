@@ -314,3 +314,30 @@ func (tdf *TapioDataFlow) GetMetrics() map[string]interface{} {
 		"uptime_seconds":         time.Since(tdf.lastStatus).Seconds(),
 	}
 }
+
+// SubmitEvent submits a single event to the dataflow for processing
+func (tdf *TapioDataFlow) SubmitEvent(ctx context.Context, event *domain.UnifiedEvent) error {
+	if tdf.outputStream == nil {
+		return fmt.Errorf("dataflow not connected: output stream is nil")
+	}
+
+	// Convert UnifiedEvent to Event
+	domainEvent := domain.Event{
+		ID:        domain.EventID(event.ID),
+		Type:      event.Type,
+		Source:    domain.SourceType(event.Source),
+		Timestamp: event.Timestamp,
+		Severity:  domain.EventSeverity(event.GetSeverity()),
+		Data:      map[string]interface{}{"unified_event": event},
+	}
+
+	// Send to output stream with context
+	select {
+	case tdf.outputStream <- domainEvent:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-tdf.ctx.Done():
+		return fmt.Errorf("dataflow is shutting down")
+	}
+}

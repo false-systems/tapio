@@ -24,7 +24,7 @@ type PrometheusMetricsCollector struct {
 
 	// Gauges
 	activeStreams      atomic.Int64
-	storageUtilization atomic.Float64
+	storageUtilization AtomicFloat64
 	correlationCount   atomic.Int64
 
 	// Configuration
@@ -50,7 +50,7 @@ type MetricHistogram struct {
 	labels       map[string]string
 	buckets      []float64
 	bucketCounts []atomic.Uint64
-	sum          atomic.Float64
+	sum          AtomicFloat64
 	count        atomic.Uint64
 }
 
@@ -58,7 +58,7 @@ type MetricHistogram struct {
 type MetricGauge struct {
 	name   string
 	labels map[string]string
-	value  atomic.Float64
+	value  AtomicFloat64
 }
 
 // NewPrometheusMetricsCollector creates a new metrics collector
@@ -134,12 +134,12 @@ func (m *PrometheusMetricsCollector) Health() HealthStatus {
 
 	totalMetrics := counterCount + histogramCount + 3 // +3 for gauges
 
-	status := pb.HealthStatus_HEALTH_STATUS_HEALTHY
+	status := pb.HealthStatus_STATUS_HEALTHY
 	message := "Metrics collector is healthy"
 
 	// Check if we have too many metrics (cardinality)
 	if totalMetrics > 10000 {
-		status = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		status = pb.HealthStatus_STATUS_DEGRADED
 		message = fmt.Sprintf("High metric cardinality: %d metrics", totalMetrics)
 	}
 

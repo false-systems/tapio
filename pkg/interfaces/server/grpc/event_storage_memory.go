@@ -462,19 +462,19 @@ func (ms *MemoryEventStorage) Health() HealthStatus {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
-	status := pb.HealthStatus_HEALTH_STATUS_HEALTHY
+	status := pb.HealthStatus_STATUS_HEALTHY
 	message := "Memory storage is healthy"
 
 	// Check capacity
 	utilizationPct := float64(len(ms.events)) / float64(ms.maxSize) * 100
 	if ms.maxSize > 0 && utilizationPct > 90 {
-		status = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		status = pb.HealthStatus_STATUS_DEGRADED
 		message = fmt.Sprintf("Storage utilization high: %.1f%%", utilizationPct)
 	}
 
 	// Check if we're evicting too many events
 	if ms.evictedCount > ms.totalStored/10 {
-		status = pb.HealthStatus_HEALTH_STATUS_DEGRADED
+		status = pb.HealthStatus_STATUS_DEGRADED
 		message = "High event eviction rate detected"
 	}
 

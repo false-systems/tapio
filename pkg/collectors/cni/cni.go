@@ -105,7 +105,7 @@ func DefaultConfig() core.Config {
 		EnableFileMonitoring:    false, // Enable for config change tracking
 		InCluster:               true,
 		PollInterval:            5 * time.Second,
-		EventRateLimit:          100,  // Events per second
+		EventRateLimit:          100, // Events per second
 		MaxConcurrentWatch:      10,
 		EnableTraceCorrelation:  true,
 		CorrelationTimeout:      30 * time.Second,

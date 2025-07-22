@@ -69,7 +69,7 @@ func NewRealTimeProcessor(config *ProcessorConfig) (*RealTimeProcessor, error) {
 		activePatterns: make(map[string]*CorrelationResult),
 		config:         config,
 		patternMatchers: []PatternMatcher{
-			&EscalationPatternMatcher{},  // Most specific first
+			&EscalationPatternMatcher{}, // Most specific first
 			&AnomalyPatternMatcher{},
 			&SequencePatternMatcher{},
 			&TemporalPatternMatcher{},
@@ -203,7 +203,7 @@ func (s *SequencePatternMatcher) Match(events []*BufferedEvent) (bool, float64) 
 			serviceEvents[event.Event.Entity.Name] = append(serviceEvents[event.Event.Entity.Name], event)
 		}
 	}
-	
+
 	for _, svcEvents := range serviceEvents {
 		if len(svcEvents) >= 3 {
 			// Check if events are similar (same category)
@@ -213,7 +213,7 @@ func (s *SequencePatternMatcher) Match(events []*BufferedEvent) (bool, float64) 
 					categoryCounts[e.Event.Semantic.Category]++
 				}
 			}
-			
+
 			// Only count as sequence if majority are same category
 			for _, count := range categoryCounts {
 				if count >= 3 {
@@ -267,16 +267,16 @@ func (a *AnomalyPatternMatcher) Name() string {
 func (a *AnomalyPatternMatcher) Match(events []*BufferedEvent) (bool, float64) {
 	for _, event := range events {
 		// Check for crash or critical events
-		if event.Event.Semantic != nil && 
-		   (event.Event.Semantic.Category == "crash" || 
-		    event.Event.Semantic.Category == "critical") {
+		if event.Event.Semantic != nil &&
+			(event.Event.Semantic.Category == "crash" ||
+				event.Event.Semantic.Category == "critical") {
 			return true, 0.9
 		}
 
 		// Check for system events in production
 		if event.Event.Type == domain.EventTypeSystem &&
-		   event.Event.Entity != nil &&
-		   event.Event.Entity.Namespace == "prod" {
+			event.Event.Entity != nil &&
+			event.Event.Entity.Namespace == "prod" {
 			return true, 0.8
 		}
 	}

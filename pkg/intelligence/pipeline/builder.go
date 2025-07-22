@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
 )
 
 // PipelineBuilder provides a fluent interface for building pipelines
@@ -158,8 +159,13 @@ func (pb *PipelineBuilder) Build() (IntelligencePipeline, error) {
 
 // buildHighPerformancePipeline creates a high-performance pipeline
 func (pb *PipelineBuilder) buildHighPerformancePipeline() (IntelligencePipeline, error) {
+	// Create default implementations for now
+	// TODO: These should be injected as dependencies
+	var contextProcessor interfaces.ContextProcessor
+	var correlationEngine interfaces.CorrelationEngine
+
 	// Use the existing HighPerformanceOrchestrator
-	orchestrator, err := NewHighPerformanceOrchestrator(pb.config.OrchestratorConfig)
+	orchestrator, err := NewHighPerformanceOrchestrator(pb.config.OrchestratorConfig, contextProcessor, correlationEngine)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
 	}

@@ -856,7 +856,7 @@ func (c *ProductionCollector) registerHealthChecks() {
 	// These would be called periodically by the monitoring system
 }
 
-func getEnvironment() string {
+func getEnvironmentProd() string {
 	if env := os.Getenv("TAPIO_ENV"); env != "" {
 		return env
 	}

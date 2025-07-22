@@ -246,7 +246,7 @@ func (sb *ServerBridge) flushFindings(findings []*EnrichedFinding) {
 			// Add correlation info to attributes
 			unifiedEvent.Attributes["related_events_count"] = fmt.Sprintf("%d", len(enriched.Finding.RelatedEvents))
 			unifiedEvent.CorrelationIds = append(unifiedEvent.CorrelationIds, enriched.Finding.ID)
-			
+
 			unifiedEvents = append(unifiedEvents, unifiedEvent)
 		}
 	}
@@ -273,7 +273,7 @@ func (sb *ServerBridge) flushFindings(findings []*EnrichedFinding) {
 		attribute.String("batch_id", batch.BatchId),
 		attribute.Int("batch_size", len(batch.Events)),
 	)
-	
+
 	// Log for debugging
 	fmt.Printf("Would send findings batch %s with %d events\n", batch.BatchId, len(batch.Events))
 }
@@ -338,12 +338,12 @@ func (sb *ServerBridge) flushSemantics(updates []*SemanticUpdate) {
 			Timestamp: timestamppb.Now(),
 			TraceId:   update.TraceID,
 			Attributes: map[string]string{
-				"semantic_intent":    update.Intent,
-				"semantic_type":      update.SemanticType,
-				"event_count":        fmt.Sprintf("%d", update.EventCount),
-				"confidence_score":   fmt.Sprintf("%.2f", update.ConfidenceScore),
-				"trace_id":          update.TraceID,
-				"collector_type":    "semantic_otel_tracer",
+				"semantic_intent":  update.Intent,
+				"semantic_type":    update.SemanticType,
+				"event_count":      fmt.Sprintf("%d", update.EventCount),
+				"confidence_score": fmt.Sprintf("%.2f", update.ConfidenceScore),
+				"trace_id":         update.TraceID,
+				"collector_type":   "semantic_otel_tracer",
 			},
 			CorrelationIds: []string{update.GroupID},
 		}
@@ -386,7 +386,7 @@ func (sb *ServerBridge) flushSemantics(updates []*SemanticUpdate) {
 		attribute.String("batch_id", batch.BatchId),
 		attribute.Int("batch_size", len(batch.Events)),
 	)
-	
+
 	// Log for debugging
 	fmt.Printf("Would send semantics batch %s with %d events\n", batch.BatchId, len(batch.Events))
 }
@@ -428,12 +428,12 @@ func (sb *ServerBridge) reportMetrics() {
 
 func (sb *ServerBridge) convertEventToUnified(event *domain.Event) *pb.Event {
 	unifiedEvent := &pb.Event{
-		Id:        string(event.ID),
-		Type:      sb.mapDomainTypeToProto(event.Type),
-		Severity:  sb.mapSeverityToProto(event.Severity),
-		Source:    pb.SourceType_SOURCE_TYPE_KUBERNETES_API,
-		Message:   string(event.Message),
-		Timestamp: timestamppb.New(event.Timestamp),
+		Id:         string(event.ID),
+		Type:       sb.mapDomainTypeToProto(event.Type),
+		Severity:   sb.mapSeverityToProto(event.Severity),
+		Source:     pb.SourceType_SOURCE_TYPE_KUBERNETES_API,
+		Message:    string(event.Message),
+		Timestamp:  timestamppb.New(event.Timestamp),
 		Attributes: make(map[string]string),
 	}
 

@@ -421,7 +421,7 @@ func TestRealTimeCorrelationEngine_Health(t *testing.T) {
 
 	// Initially healthy
 	health := engine.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY, health.Status)
 
 	// Add correlations near capacity
 	ctx := context.Background()
@@ -444,7 +444,7 @@ func TestRealTimeCorrelationEngine_Health(t *testing.T) {
 	// Check health again
 	health = engine.Health()
 	if len(engine.correlations) > 9 {
-		assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_DEGRADED, health.Status)
+		assert.Equal(t, pb.HealthStatus_STATUS_DEGRADED, health.Status)
 		assert.Contains(t, health.Message, "near capacity")
 	}
 }
@@ -782,6 +782,6 @@ func TestRealTimeCorrelationEngine_ConcurrentAccess(t *testing.T) {
 
 	// Verify data integrity
 	health := engine.Health()
-	assert.Equal(t, pb.HealthStatus_HEALTH_STATUS_HEALTHY, health.Status)
+	assert.Equal(t, pb.HealthStatus_STATUS_HEALTHY, health.Status)
 	assert.Greater(t, health.Metrics["events_processed"], float64(0))
 }

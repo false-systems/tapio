@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors/common"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -86,7 +87,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Initialize Tapio gRPC client if server address is provided
-	var tapioClient *systemd.TapioGRPCClient
+	var tapioClient *common.TapioGRPCClient
 	if *serverAddr != "" && !*standalone {
 		tapioClient, err = systemd.NewTapioGRPCClient(*serverAddr)
 		if err != nil {
@@ -231,7 +232,6 @@ func main() {
 
 	fmt.Println("Collector stopped successfully")
 }
-
 
 func getHostname() string {
 	hostname, err := os.Hostname()

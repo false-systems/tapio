@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	contextpkg "github.com/yairfalse/tapio/pkg/intelligence/context"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
 )
 
 // Metrics tracks orchestrator performance
@@ -83,20 +82,12 @@ func (v *ValidationStage) Process(ctx context.Context, event *domain.UnifiedEven
 
 // ContextStage builds context for events
 type ContextStage struct {
-	validator *contextpkg.EventValidator
-	scorer    *contextpkg.ConfidenceScorer
-	analyzer  *contextpkg.ImpactAnalyzer
+	processor interfaces.ContextProcessor
 }
 
-func NewContextStage() *ContextStage {
-	validator := contextpkg.NewEventValidator()
-	scorer := contextpkg.NewConfidenceScorer()
-	analyzer := contextpkg.NewImpactAnalyzer()
-
+func NewContextStage(processor interfaces.ContextProcessor) *ContextStage {
 	return &ContextStage{
-		validator: validator,
-		scorer:    scorer,
-		analyzer:  analyzer,
+		processor: processor,
 	}
 }
 
@@ -106,15 +97,18 @@ func (c *ContextStage) Name() string {
 
 func (c *ContextStage) Process(ctx context.Context, event *domain.UnifiedEvent) error {
 	// Stage 1: Context Validation
-	if err := c.validator.Validate(event); err != nil {
+	if err := c.processor.Validate(ctx, event); err != nil {
 		return fmt.Errorf("context validation failed: %w", err)
 	}
 
 	// Stage 2: Confidence Scoring
-	confidenceResult := c.scorer.CalculateConfidence(event)
+	confidenceScore := c.processor.Score(ctx, event)
 
 	// Stage 3: Impact Assessment
-	impactResult := c.analyzer.AssessImpact(event)
+	impactResult, err := c.processor.AssessImpact(ctx, event)
+	if err != nil {
+		return fmt.Errorf("impact assessment failed: %w", err)
+	}
 
 	// Enrich event with context results
 	if event.Correlation == nil {
@@ -125,26 +119,27 @@ func (c *ContextStage) Process(ctx context.Context, event *domain.UnifiedEvent) 
 		event.Semantic = &domain.SemanticContext{}
 	}
 
-	event.Semantic.Confidence = confidenceResult
-	event.Impact = impactResult
+	event.Semantic.Confidence = confidenceScore
+	if impactResult != nil {
+		event.Impact = &domain.ImpactContext{
+			BusinessImpact:   impactResult.BusinessImpact,
+			Severity:         impactResult.TechnicalSeverity,
+			AffectedServices: impactResult.AffectedServices,
+		}
+	}
 
 	return nil
 }
 
 // CorrelationStage performs event correlation
 type CorrelationStage struct {
-	processor *correlation.RealTimeProcessor
+	engine interfaces.CorrelationEngine
 }
 
-func NewCorrelationStage(config *correlation.ProcessorConfig) (*CorrelationStage, error) {
-	processor, err := correlation.NewRealTimeProcessor(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create correlation processor: %w", err)
-	}
-
+func NewCorrelationStage(engine interfaces.CorrelationEngine) *CorrelationStage {
 	return &CorrelationStage{
-		processor: processor,
-	}, nil
+		engine: engine,
+	}
 }
 
 func (c *CorrelationStage) Name() string {
@@ -152,19 +147,24 @@ func (c *CorrelationStage) Name() string {
 }
 
 func (c *CorrelationStage) Process(ctx context.Context, event *domain.UnifiedEvent) error {
-	result := c.processor.ProcessEvent(ctx, event)
-	if result == nil {
-		return fmt.Errorf("correlation processing returned nil result")
+	if err := c.engine.ProcessEvent(ctx, event); err != nil {
+		return fmt.Errorf("correlation processing failed: %w", err)
 	}
 
-	// Enrich event with correlation results
-	if event.Correlation == nil {
-		event.Correlation = &domain.CorrelationContext{}
-	}
+	// Get latest findings to enrich event
+	finding := c.engine.GetLatestFindings()
+	if finding != nil {
+		// Enrich event with correlation results
+		if event.Correlation == nil {
+			event.Correlation = &domain.CorrelationContext{}
+		}
 
-	event.Correlation.CorrelationID = result.ID
-	event.Semantic.Confidence = result.Score
-	event.Correlation.Pattern = result.PatternType
+		event.Correlation.CorrelationID = finding.ID
+		if event.Semantic != nil {
+			event.Semantic.Confidence = finding.Confidence
+		}
+		event.Correlation.Pattern = finding.PatternType
+	}
 
 	return nil
 }
@@ -210,14 +210,18 @@ type ProcessingResult struct {
 }
 
 // NewHighPerformanceOrchestrator creates a new orchestrator with all stages
-func NewHighPerformanceOrchestrator(config *OrchestratorConfig) (*HighPerformanceOrchestrator, error) {
+func NewHighPerformanceOrchestrator(
+	config *OrchestratorConfig,
+	contextProcessor interfaces.ContextProcessor,
+	correlationEngine interfaces.CorrelationEngine,
+) (*HighPerformanceOrchestrator, error) {
 	if config == nil {
 		config = DefaultOrchestratorConfig()
 	}
 
 	// Create stages
 	validationStage := &ValidationStage{}
-	contextStage := NewContextStage()
+	contextStage := NewContextStage(contextProcessor)
 
 	stages := []ProcessingStage{
 		validationStage,
@@ -225,17 +229,8 @@ func NewHighPerformanceOrchestrator(config *OrchestratorConfig) (*HighPerformanc
 	}
 
 	// Add correlation stage if enabled
-	if config.CorrelationEnabled {
-		correlationConfig := &correlation.ProcessorConfig{
-			BufferSize:        1000,
-			TimeWindow:        5 * time.Minute,
-			CorrelationWindow: 10 * time.Minute,
-		}
-
-		correlationStage, err := NewCorrelationStage(correlationConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create correlation stage: %w", err)
-		}
+	if config.CorrelationEnabled && correlationEngine != nil {
+		correlationStage := NewCorrelationStage(correlationEngine)
 		stages = append(stages, correlationStage)
 	}
 
