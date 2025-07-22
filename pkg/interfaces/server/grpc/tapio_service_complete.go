@@ -493,14 +493,20 @@ func (s *TapioServiceComplete) GetEvents(ctx context.Context, req *pb.GetEventsR
 	ctx, span := s.tracer.Start(ctx, "tapio.get_events")
 	defer span.End()
 
-	// Validate page size
-	pageSize := int(req.PageSize)
-	if pageSize <= 0 || pageSize > 1000 {
-		pageSize = 100
+	// Extract filter and pagination from query
+	var filter *pb.Filter
+	var pageSize int = 100
+	var pageToken string
+
+	if req.Query != nil {
+		filter = req.Query.Filter
 	}
 
+	// TODO: Extract pagination from filter if needed
+	// For now, use defaults
+
 	// Query events from storage
-	events, nextToken, err := s.storage.Query(ctx, req.Filter, req.TimeRange, pageSize, req.PageToken)
+	events, nextToken, err := s.storage.Query(ctx, filter, nil, pageSize, pageToken)
 	if err != nil {
 		span.RecordError(err)
 		return nil, status.Errorf(codes.Internal, "failed to query events: %v", err)
@@ -518,7 +524,7 @@ func (s *TapioServiceComplete) GetEvents(ctx context.Context, req *pb.GetEventsR
 	}
 
 	// Get total count
-	totalCount, err := s.storage.Count(ctx, req.Filter, req.TimeRange)
+	totalCount, err := s.storage.Count(ctx, filter, nil)
 	if err != nil {
 		s.logger.Warn("Failed to get total count", zap.Error(err))
 		totalCount = int64(len(protoEvents))
@@ -557,16 +563,29 @@ func (s *TapioServiceComplete) AnalyzeEvents(ctx context.Context, req *pb.Analyz
 	ctx, span := s.tracer.Start(ctx, "tapio.analyze_events")
 	defer span.End()
 
-	// Convert proto events to unified events
-	unifiedEvents := make([]*domain.UnifiedEvent, 0, len(req.Events))
-	for _, event := range req.Events {
-		ue, err := s.convertProtoToUnifiedEvent(event)
-		if err != nil {
-			s.logger.Error("Failed to convert event for analysis", zap.Error(err))
-			continue
+	// Retrieve events based on IDs or query
+	var events []*domain.UnifiedEvent
+
+	if len(req.EventIds) > 0 {
+		// Fetch specific events by IDs
+		for _, eventID := range req.EventIds {
+			event, err := s.storage.Get(ctx, eventID)
+			if err != nil {
+				s.logger.Warn("Failed to fetch event for analysis", zap.String("event_id", eventID), zap.Error(err))
+				continue
+			}
+			events = append(events, event)
 		}
-		unifiedEvents = append(unifiedEvents, ue)
+	} else if req.EventQuery != nil {
+		// Query events based on filter
+		queriedEvents, _, err := s.storage.Query(ctx, req.EventQuery.Filter, req.TimeRange, 1000, "")
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to query events: %v", err)
+		}
+		events = queriedEvents
 	}
+
+	unifiedEvents := events
 
 	startTime := time.Now()
 	correlations, err := s.correlator.AnalyzeEvents(ctx, unifiedEvents)
@@ -583,7 +602,7 @@ func (s *TapioServiceComplete) AnalyzeEvents(ctx context.Context, req *pb.Analyz
 		Status:       pb.AnalysisStatus_ANALYSIS_STATUS_COMPLETED,
 		Correlations: correlations,
 		Summary: &pb.AnalysisSummary{
-			TotalEvents:       int32(len(req.Events)),
+			TotalEvents:       int32(len(unifiedEvents)),
 			CorrelationsFound: int32(len(correlations)),
 			ProcessingTime:    processingTime,
 		},

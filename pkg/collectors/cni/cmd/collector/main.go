@@ -76,7 +76,7 @@ func main() {
 	// Initialize Tapio gRPC client if server address is provided
 	var tapioClient *common.TapioGRPCClient
 	if *serverAddr != "" && !*standalone {
-		tapioClient, err = common.NewTapioGRPCClient(*serverAddr)
+		tapioClient, err = cni.NewTapioGRPCClient(*serverAddr)
 		if err != nil {
 			log.Fatalf("Failed to create Tapio gRPC client: %v", err)
 		}
