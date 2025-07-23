@@ -265,17 +265,54 @@ func (sb *ServerBridge) flushFindings(findings []*EnrichedFinding) {
 		},
 	}
 
-	// TODO: Use StreamEvents to send batch
-	// For now, just record that we would send it
-	sb.findingsSent += uint64(len(findings))
-	span.SetAttributes(
-		attribute.Int64("findings_sent_total", int64(sb.findingsSent)),
-		attribute.String("batch_id", batch.BatchId),
-		attribute.Int("batch_size", len(batch.Events)),
-	)
+	// Create a stream for sending events
+	stream, err := sb.eventClient.StreamEvents(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error", "failed to create stream"))
+		sb.errors++
+		return
+	}
+	defer stream.CloseSend()
 
-	// Log for debugging
-	fmt.Printf("Would send findings batch %s with %d events\n", batch.BatchId, len(batch.Events))
+	// Send batch through stream
+	req := &pb.TapioStreamEventsRequest{
+		Request: &pb.TapioStreamEventsRequest_Batch{
+			Batch: batch,
+		},
+	}
+
+	if err := stream.Send(req); err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error", "failed to send batch"))
+		sb.errors++
+		return
+	}
+
+	// Wait for acknowledgment
+	resp, err := stream.Recv()
+	if err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error", "failed to receive ack"))
+		sb.errors++
+		return
+	}
+
+	// Check for acknowledgment
+	if ack, ok := resp.Response.(*pb.TapioStreamEventsResponse_Ack); ok {
+		if ack.Ack.BatchId == batch.BatchId {
+			sb.findingsSent += uint64(len(findings))
+			span.SetAttributes(
+				attribute.Int64("findings_sent_total", int64(sb.findingsSent)),
+				attribute.String("batch_id", batch.BatchId),
+				attribute.Int("batch_size", len(batch.Events)),
+				attribute.Bool("acknowledged", true),
+			)
+		}
+	} else if errResp, ok := resp.Response.(*pb.TapioStreamEventsResponse_Error); ok {
+		span.RecordError(fmt.Errorf("server error: %s", errResp.Error.Message))
+		sb.errors++
+	}
 }
 
 // forwardSemantics forwards semantic group updates
@@ -378,17 +415,54 @@ func (sb *ServerBridge) flushSemantics(updates []*SemanticUpdate) {
 		},
 	}
 
-	// TODO: Use StreamEvents to send batch
-	// For now, just record that we would send it
-	sb.semanticsSent += uint64(len(updates))
-	span.SetAttributes(
-		attribute.Int64("semantics_sent_total", int64(sb.semanticsSent)),
-		attribute.String("batch_id", batch.BatchId),
-		attribute.Int("batch_size", len(batch.Events)),
-	)
+	// Create a stream for sending events
+	stream, err := sb.eventClient.StreamEvents(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error", "failed to create stream"))
+		sb.errors++
+		return
+	}
+	defer stream.CloseSend()
 
-	// Log for debugging
-	fmt.Printf("Would send semantics batch %s with %d events\n", batch.BatchId, len(batch.Events))
+	// Send batch through stream
+	req := &pb.TapioStreamEventsRequest{
+		Request: &pb.TapioStreamEventsRequest_Batch{
+			Batch: batch,
+		},
+	}
+
+	if err := stream.Send(req); err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error", "failed to send batch"))
+		sb.errors++
+		return
+	}
+
+	// Wait for acknowledgment
+	resp, err := stream.Recv()
+	if err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error", "failed to receive ack"))
+		sb.errors++
+		return
+	}
+
+	// Check for acknowledgment
+	if ack, ok := resp.Response.(*pb.TapioStreamEventsResponse_Ack); ok {
+		if ack.Ack.BatchId == batch.BatchId {
+			sb.semanticsSent += uint64(len(updates))
+			span.SetAttributes(
+				attribute.Int64("semantics_sent_total", int64(sb.semanticsSent)),
+				attribute.String("batch_id", batch.BatchId),
+				attribute.Int("batch_size", len(batch.Events)),
+				attribute.Bool("acknowledged", true),
+			)
+		}
+	} else if errResp, ok := resp.Response.(*pb.TapioStreamEventsResponse_Error); ok {
+		span.RecordError(fmt.Errorf("server error: %s", errResp.Error.Message))
+		sb.errors++
+	}
 }
 
 // flushRoutine periodically flushes metrics

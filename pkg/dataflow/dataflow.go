@@ -8,8 +8,10 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	otelpkg "github.com/yairfalse/tapio/pkg/otel"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -22,8 +24,10 @@ type TapioDataFlow struct {
 	correlationEngine *correlation.SemanticCorrelationEngine
 
 	// OTEL components
-	tracer   trace.Tracer
-	rootSpan trace.Span
+	tracer           trace.Tracer
+	meter            metric.Meter
+	metricsCollector *otelpkg.MetricsCollector
+	rootSpan         trace.Span
 
 	// Control
 	ctx    context.Context
@@ -35,6 +39,10 @@ type TapioDataFlow struct {
 	groupsCreated   uint64
 	tracesExported  uint64
 	lastStatus      time.Time
+
+	// Subscriptions for real-time event delivery
+	subscriptions map[string]*subscription
+	subMutex      sync.RWMutex
 }
 
 // Config holds configuration for TapioDataFlow
@@ -54,7 +62,7 @@ type Config struct {
 }
 
 // NewTapioDataFlow creates a new data flow integration layer
-func NewTapioDataFlow(cfg Config) *TapioDataFlow {
+func NewTapioDataFlow(cfg Config) (*TapioDataFlow, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize OTEL tracer
@@ -62,6 +70,19 @@ func NewTapioDataFlow(cfg Config) *TapioDataFlow {
 		cfg.ServiceName,
 		trace.WithInstrumentationVersion(cfg.ServiceVersion),
 	)
+
+	// Initialize OTEL meter
+	meter := otel.Meter(
+		cfg.ServiceName,
+		metric.WithInstrumentationVersion(cfg.ServiceVersion),
+	)
+
+	// Create metrics collector
+	metricsCollector, err := otelpkg.NewMetricsCollector(meter)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create metrics collector: %w", err)
+	}
 
 	// Create root span for the data flow
 	ctx, rootSpan := tracer.Start(ctx, "tapio.dataflow.pipeline",
@@ -72,15 +93,32 @@ func NewTapioDataFlow(cfg Config) *TapioDataFlow {
 		),
 	)
 
-	return &TapioDataFlow{
+	tdf := &TapioDataFlow{
 		semanticTracer:    correlation.NewSemanticOTELTracer(),
 		correlationEngine: correlation.NewSemanticCorrelationEngine(),
 		tracer:            tracer,
+		meter:             meter,
+		metricsCollector:  metricsCollector,
 		rootSpan:          rootSpan,
 		ctx:               ctx,
 		cancel:            cancel,
 		lastStatus:        time.Now(),
+		subscriptions:     make(map[string]*subscription),
 	}
+
+	// Register buffer utilization callback
+	if err := metricsCollector.RegisterBufferCallback(ctx, func() float64 {
+		if tdf.eventStream == nil {
+			return 0
+		}
+		// This is approximate since we can't get channel length for receive-only channels
+		return 0 // Would need access to actual buffer to calculate
+	}); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to register buffer callback: %w", err)
+	}
+
+	return tdf, nil
 }
 
 // Connect links the data flow to input and output streams
@@ -119,6 +157,11 @@ func (tdf *TapioDataFlow) Stop() error {
 		return fmt.Errorf("failed to stop correlation engine: %w", err)
 	}
 
+	// Shutdown metrics collector
+	if err := tdf.metricsCollector.Shutdown(); err != nil {
+		return fmt.Errorf("failed to shutdown metrics collector: %w", err)
+	}
+
 	// End root span
 	tdf.rootSpan.End()
 
@@ -140,15 +183,21 @@ func (tdf *TapioDataFlow) processEvents() {
 			}
 
 			// Process with semantic correlation
+			start := time.Now()
 			if err := tdf.processEventWithSemantics(event); err != nil {
 				// Log error but continue processing
 				tdf.recordError(err, "failed to process event")
+				tdf.metricsCollector.RecordError(tdf.ctx, "event_processing", "dataflow")
 			}
+
+			// Record processing duration
+			tdf.metricsCollector.RecordEventProcessingDuration(tdf.ctx, time.Since(start), string(event.Type))
 
 			// Forward enriched event
 			select {
 			case tdf.outputStream <- event:
 				tdf.eventsProcessed++
+				tdf.metricsCollector.RecordEventProcessed(tdf.ctx, string(event.Type), string(event.Source))
 			case <-tdf.ctx.Done():
 				return
 			}
@@ -190,11 +239,16 @@ func (tdf *TapioDataFlow) processEventWithSemantics(event domain.UnifiedEvent) e
 			attribute.Float64("correlation.confidence", findings.Confidence),
 			attribute.String("correlation.pattern", findings.PatternType),
 		)
+
+		// Record correlation metrics
+		tdf.metricsCollector.RecordCorrelationFound(ctx, findings.Confidence, findings.PatternType)
 	}
 
 	// Get semantic groups for metrics
 	groups := tdf.semanticTracer.GetSemanticGroups()
 	if len(groups) > int(tdf.groupsCreated) {
+		delta := int64(len(groups)) - int64(tdf.groupsCreated)
+		tdf.metricsCollector.UpdateActiveSemanticGroups(ctx, delta)
 		tdf.groupsCreated = uint64(len(groups))
 	}
 
@@ -334,4 +388,50 @@ func (tdf *TapioDataFlow) SubmitEvent(ctx context.Context, event *domain.Unified
 	case <-tdf.ctx.Done():
 		return fmt.Errorf("dataflow is shutting down")
 	}
+}
+
+// Subscribe creates a subscription for filtered events
+func (tdf *TapioDataFlow) Subscribe(ctx context.Context, filter string, eventChan chan<- *domain.UnifiedEvent) string {
+	tdf.subMutex.Lock()
+	defer tdf.subMutex.Unlock()
+
+	// Generate unique subscription ID
+	subID := fmt.Sprintf("sub-%d-%d", time.Now().UnixNano(), len(tdf.subscriptions))
+
+	// Create subscription
+	sub := &subscription{
+		id:        subID,
+		filter:    filter,
+		eventChan: eventChan,
+	}
+
+	tdf.subscriptions[subID] = sub
+
+	return subID
+}
+
+// Unsubscribe removes a subscription
+func (tdf *TapioDataFlow) Unsubscribe(subID string) error {
+	tdf.subMutex.Lock()
+	defer tdf.subMutex.Unlock()
+
+	sub, exists := tdf.subscriptions[subID]
+	if !exists {
+		return fmt.Errorf("subscription %s not found", subID)
+	}
+
+	// Close the channel if we own it
+	close(sub.eventChan)
+
+	// Remove subscription
+	delete(tdf.subscriptions, subID)
+
+	return nil
+}
+
+// subscription represents an event subscription
+type subscription struct {
+	id        string
+	filter    string
+	eventChan chan<- *domain.UnifiedEvent
 }
