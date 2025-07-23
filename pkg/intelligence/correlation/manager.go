@@ -81,7 +81,15 @@ func (cm *CollectionManager) ProcessEvents(events []domain.Event) []domain.Insig
 		select {
 		case cm.eventBus <- event:
 			// Also send directly to semantic engine
-			cm.semanticEngine.ProcessEvent(&event)
+			// Convert domain.Event to UnifiedEvent for semantic engine
+			unifiedEvent := &domain.UnifiedEvent{
+				ID:        string(event.ID),
+				Timestamp: event.Timestamp,
+				Type:      event.Type,
+				Source:    string(event.Source),
+			}
+			ctx := context.Background()
+			cm.semanticEngine.ProcessEvent(ctx, unifiedEvent)
 		case <-cm.ctx.Done():
 			return nil
 		}

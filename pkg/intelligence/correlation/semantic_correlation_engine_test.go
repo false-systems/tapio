@@ -1,6 +1,7 @@
 package correlation
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -162,10 +163,10 @@ func TestSemanticCorrelationEngine_Stop(t *testing.T) {
 
 func TestSemanticCorrelationEngine_ProcessEvent(t *testing.T) {
 	engine := NewSemanticCorrelationEngine()
-	event := createTestEvent("test-1", "cpu_high", domain.EventSeverityHigh)
-
 	// Process event (should not block)
-	engine.ProcessEvent(event)
+	ctx := context.Background()
+	unifiedEvent := createTestUnifiedEvent("test-1", "cpu_high")
+	engine.ProcessEvent(ctx, unifiedEvent)
 
 	// Check stats
 	stats := engine.GetStats()
@@ -602,8 +603,15 @@ func TestSemanticCorrelationEngine_Integration(t *testing.T) {
 		createTestEvent("int-3", "disk_full", domain.EventSeverityCritical),
 	}
 
+	ctx := context.Background()
 	for _, event := range events {
-		engine.ProcessEvent(event)
+		unifiedEvent := &domain.UnifiedEvent{
+			ID:        string(event.ID),
+			Type:      event.Type,
+			Timestamp: event.Timestamp,
+			Source:    string(event.Source),
+		}
+		engine.ProcessEvent(ctx, unifiedEvent)
 	}
 
 	// Allow some processing time
@@ -635,9 +643,10 @@ func TestSemanticCorrelationEngine_ConcurrentAccess(t *testing.T) {
 
 	// Goroutine 1: Process events
 	go func() {
+		ctx := context.Background()
 		for i := 0; i < 10; i++ {
-			event := createTestEvent(fmt.Sprintf("concurrent-1-%d", i), "test", domain.EventSeverityLow)
-			engine.ProcessEvent(event)
+			unifiedEvent := createTestUnifiedEvent(fmt.Sprintf("concurrent-1-%d", i), "test")
+			engine.ProcessEvent(ctx, unifiedEvent)
 		}
 		done <- true
 	}()
@@ -670,13 +679,86 @@ func TestSemanticCorrelationEngine_ConcurrentAccess(t *testing.T) {
 	engine.Stop()
 }
 
+func TestSemanticCorrelationEngine_EventsChannelCleanup(t *testing.T) {
+	// Test that Events() channel goroutine properly cleans up
+	engine := NewSemanticCorrelationEngine()
+
+	// Start the engine
+	err := engine.Start()
+	require.NoError(t, err)
+
+	// Get the events channel
+	eventsChan := engine.Events()
+
+	// Stop the engine
+	err = engine.Stop()
+	require.NoError(t, err)
+
+	// Verify the events channel is eventually closed
+	timeout := time.After(1 * time.Second)
+	for {
+		select {
+		case _, ok := <-eventsChan:
+			if !ok {
+				// Channel closed successfully
+				return
+			}
+		case <-timeout:
+			t.Fatal("Events channel was not closed after engine stop")
+		}
+	}
+}
+
+func TestSemanticCorrelationEngine_MultipleEventsChannels(t *testing.T) {
+	// Test that multiple calls to Events() don't leak goroutines
+	engine := NewSemanticCorrelationEngine()
+	ctx := context.Background()
+
+	// Start the engine
+	err := engine.Start()
+	require.NoError(t, err)
+
+	// Create multiple event channels
+	channels := make([]<-chan Event, 5)
+	for i := 0; i < 5; i++ {
+		channels[i] = engine.Events()
+	}
+
+	// Process an event
+	unifiedEvent := createTestUnifiedEvent("test-1", "test")
+	err = engine.ProcessEvent(ctx, unifiedEvent)
+	require.NoError(t, err)
+
+	// Stop the engine
+	err = engine.Stop()
+	require.NoError(t, err)
+
+	// Verify all channels are closed
+	timeout := time.After(2 * time.Second)
+	for i, ch := range channels {
+		for {
+			select {
+			case _, ok := <-ch:
+				if !ok {
+					// Channel closed successfully
+					break
+				}
+			case <-timeout:
+				t.Fatalf("Events channel %d was not closed after engine stop", i)
+			}
+			break
+		}
+	}
+}
+
 func BenchmarkSemanticCorrelationEngine_ProcessEvent(b *testing.B) {
 	engine := NewSemanticCorrelationEngine()
-	event := createTestEvent("bench-1", "cpu_high", domain.EventSeverityHigh)
 
+	ctx := context.Background()
+	unifiedEvent := createTestUnifiedEvent("bench-1", "cpu_high")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		engine.ProcessEvent(event)
+		engine.ProcessEvent(ctx, unifiedEvent)
 	}
 }
 

@@ -19,7 +19,7 @@ type SemanticCorrelationEngine struct {
 	collectors map[string]Collector
 
 	// Event processing
-	eventChan   chan Event
+	eventChan   chan *domain.UnifiedEvent
 	insightChan chan Insight
 
 	// Semantic processing (our improved correlation)
@@ -56,7 +56,7 @@ type SemanticCorrelationEngine struct {
 func NewSemanticCorrelationEngine() *SemanticCorrelationEngine {
 	return &SemanticCorrelationEngine{
 		collectors:      make(map[string]Collector),
-		eventChan:       make(chan Event, 1000),
+		eventChan:       make(chan *domain.UnifiedEvent, 1000),
 		insightChan:     make(chan Insight, 100),
 		semanticGrouper: NewSimpleSemanticGrouper(),
 		semanticTracer:  NewSemanticOTELTracer(),
@@ -132,20 +132,9 @@ func (sce *SemanticCorrelationEngine) Stop() error {
 
 // ProcessEvent processes a single event through the correlation engine
 func (sce *SemanticCorrelationEngine) ProcessEvent(ctx context.Context, event *domain.UnifiedEvent) error {
-	// Convert UnifiedEvent to domain.Event for backward compatibility
-	// TODO: Update internal processing to use UnifiedEvent directly
-	domainEvent := &domain.Event{
-		ID:        domain.EventID(event.ID),
-		Type:      event.Type,
-		Timestamp: event.Timestamp,
-		Severity:  domain.EventSeverity(event.GetSeverity()),
-		Source:    domain.SourceType(event.Source),
-		Message:   event.GetMessage(),
-	}
-	
 	if sce.ctx != nil {
 		select {
-		case sce.eventChan <- Event(*domainEvent):
+		case sce.eventChan <- event:
 			sce.updateStats("events_received")
 		case <-ctx.Done():
 			return ctx.Err()
@@ -158,7 +147,7 @@ func (sce *SemanticCorrelationEngine) ProcessEvent(ctx context.Context, event *d
 	} else {
 		// Engine not started, just drop event to event channel
 		select {
-		case sce.eventChan <- Event(*domainEvent):
+		case sce.eventChan <- event:
 			sce.updateStats("events_received")
 		default:
 			sce.updateStats("events_dropped")
@@ -170,11 +159,8 @@ func (sce *SemanticCorrelationEngine) ProcessEvent(ctx context.Context, event *d
 
 // ProcessUnifiedEvent processes a unified event through the correlation engine
 func (sce *SemanticCorrelationEngine) ProcessUnifiedEvent(event *domain.UnifiedEvent) {
-	// Convert to domain.Event for now (temporary until full migration)
-	domainEvent := sce.convertUnifiedToDomainEvent(event)
-	if domainEvent != nil {
-		sce.ProcessEvent(domainEvent)
-	}
+	ctx := context.Background()
+	_ = sce.ProcessEvent(ctx, event)
 }
 
 // GetLatestFindings returns the latest correlation findings
@@ -224,10 +210,10 @@ func (sce *SemanticCorrelationEngine) GetLatestFindings() *interfaces.Finding {
 func (sce *SemanticCorrelationEngine) GetSemanticGroups() []*interfaces.SemanticGroup {
 	sce.mu.RLock()
 	defer sce.mu.RUnlock()
-	
+
 	groups := sce.semanticTracer.GetSemanticGroups()
 	result := make([]*interfaces.SemanticGroup, 0, len(groups))
-	
+
 	for _, group := range groups {
 		result = append(result, &interfaces.SemanticGroup{
 			ID:     group.ID,
@@ -235,13 +221,53 @@ func (sce *SemanticCorrelationEngine) GetSemanticGroups() []*interfaces.Semantic
 			Type:   group.SemanticType,
 		})
 	}
-	
+
 	return result
 }
 
 // Events returns the event channel
 func (sce *SemanticCorrelationEngine) Events() <-chan Event {
-	return sce.eventChan
+	// Create a conversion channel for backward compatibility
+	convertedChan := make(chan Event, cap(sce.eventChan))
+
+	// Track this goroutine
+	sce.wg.Add(1)
+	go func() {
+		defer sce.wg.Done()
+		defer close(convertedChan)
+
+		for {
+			// Check if context exists (engine might not be started)
+			if sce.ctx != nil {
+				select {
+				case ue, ok := <-sce.eventChan:
+					if !ok {
+						return
+					}
+					if de := sce.convertUnifiedToDomainEvent(ue); de != nil {
+						select {
+						case convertedChan <- *de:
+						case <-sce.ctx.Done():
+							return
+						}
+					}
+				case <-sce.ctx.Done():
+					return
+				}
+			} else {
+				// No context yet, just forward events
+				ue, ok := <-sce.eventChan
+				if !ok {
+					return
+				}
+				if de := sce.convertUnifiedToDomainEvent(ue); de != nil {
+					convertedChan <- *de
+				}
+			}
+		}
+	}()
+
+	return convertedChan
 }
 
 // Insights returns the insights channel
@@ -258,20 +284,17 @@ func (sce *SemanticCorrelationEngine) processEvents() {
 	for {
 		select {
 		case event := <-sce.eventChan:
-			// Convert to domain event
-			domainEvent := sce.convertToDomainEvent(event)
-			if domainEvent == nil {
-				continue
-			}
-
-			// Process with OTEL semantic tracer
-			if err := sce.semanticTracer.ProcessEventWithSemanticTrace(ctx, domainEvent); err != nil {
-				span.RecordError(err)
-				sce.updateStats("semantic_trace_errors")
+			// Process with OTEL semantic tracer (convert for compatibility)
+			domainEvent := sce.convertUnifiedToDomainEvent(event)
+			if domainEvent != nil {
+				if err := sce.semanticTracer.ProcessEventWithSemanticTrace(ctx, domainEvent); err != nil {
+					span.RecordError(err)
+					sce.updateStats("semantic_trace_errors")
+				}
 			}
 
 			// Add to buffer for temporal analysis
-			sce.addToBuffer(*domainEvent)
+			sce.addUnifiedToBuffer(event)
 
 			// Generate insights from semantic groups
 			sce.generateSemanticInsights()
@@ -549,7 +572,7 @@ func (sce *SemanticCorrelationEngine) convertToDomainEvent(event Event) *domain.
 
 // addToBuffer adds an event to the temporal buffer
 func (sce *SemanticCorrelationEngine) addToBuffer(event domain.Event) {
-	// For now, convert domain.Event to UnifiedEvent for storage
+	// Legacy method for backward compatibility
 	unifiedEvent := sce.convertDomainToUnifiedEvent(&event)
 	sce.addUnifiedToBuffer(unifiedEvent)
 }
