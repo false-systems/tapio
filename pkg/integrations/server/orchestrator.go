@@ -126,43 +126,43 @@ func New(config *Config) (*Orchestrator, error) {
 
 // Run starts the server and blocks until context cancellation
 func (o *Orchestrator) Run(ctx context.Context) error {
-	defer a.logger.Sync()
+	defer o.logger.Sync()
 
-	if err := a.initGRPCServer(); err != nil {
+	if err := o.initGRPCServer(); err != nil {
 		return fmt.Errorf("gRPC server initialization failed: %w", err)
 	}
 
-	grpcListener, err := net.Listen("tcp", ":"+a.config.GRPCPort)
+	grpcListener, err := net.Listen("tcp", ":"+o.config.GRPCPort)
 	if err != nil {
-		return fmt.Errorf("gRPC listener creation failed on port %s: %w", a.config.GRPCPort, err)
+		return fmt.Errorf("gRPC listener creation failed on port %s: %w", o.config.GRPCPort, err)
 	}
 
 	o.logger.Info("Starting gRPC server",
-		zap.String("port", a.config.GRPCPort),
-		zap.String("environment", a.config.Environment),
-		zap.Bool("reflection", a.config.EnableReflection),
-		zap.Bool("health", a.config.EnableHealth),
+		zap.String("port", o.config.GRPCPort),
+		zap.String("environment", o.config.Environment),
+		zap.Bool("reflection", o.config.EnableReflection),
+		zap.Bool("health", o.config.EnableHealth),
 	)
 
 	go func() {
-		if err := a.grpcServer.Serve(grpcListener); err != nil {
+		if err := o.grpcServer.Serve(grpcListener); err != nil {
 			o.logger.Fatal("gRPC server failed", zap.Error(err))
 		}
 	}()
 
-	if err := a.initHTTPGateway(ctx); err != nil {
+	if err := o.initHTTPGateway(ctx); err != nil {
 		return fmt.Errorf("HTTP gateway initialization failed: %w", err)
 	}
 
 	o.logger.Info("Tapio server operational",
-		zap.String("grpc_port", a.config.GRPCPort),
-		zap.String("http_port", a.config.HTTPPort),
+		zap.String("grpc_port", o.config.GRPCPort),
+		zap.String("http_port", o.config.HTTPPort),
 	)
 
 	<-ctx.Done()
 
 	o.logger.Info("Initiating graceful shutdown")
-	return a.gracefulShutdown()
+	return o.gracefulShutdown()
 }
 
 // initLogger creates structured logger with appropriate configuration
@@ -193,29 +193,29 @@ func initLogger(level string) (*zap.Logger, error) {
 // initGRPCServer configures and initializes the gRPC server with all services
 func (o *Orchestrator) initGRPCServer() error {
 	grpcOpts := []grpc_server.ServerOption{
-		grpc_server.MaxRecvMsgSize(int(a.config.MaxEventSize)),
-		grpc_server.MaxSendMsgSize(int(a.config.MaxEventSize)),
+		grpc_server.MaxRecvMsgSize(int(o.config.MaxEventSize)),
+		grpc_server.MaxSendMsgSize(int(o.config.MaxEventSize)),
 	}
 	o.grpcServer = grpc_server.NewServer(grpcOpts...)
 
-	o.tapioService = grpc.NewTapioServiceImpl(a.logger, a.tracer)
+	o.tapioService = grpc.NewTapioServiceImpl(o.logger, o.tracer)
 	o.tapioService.SetConfig(grpc.ServiceConfig{
-		MaxEventSize: a.config.MaxEventSize,
-		MaxBatchSize: a.config.MaxBatchSize,
-		Environment:  a.config.Environment,
+		MaxEventSize: o.config.MaxEventSize,
+		MaxBatchSize: o.config.MaxBatchSize,
+		Environment:  o.config.Environment,
 	})
 
-	pb.RegisterTapioServiceServer(a.grpcServer, a.tapioService)
+	pb.RegisterTapioServiceServer(o.grpcServer, o.tapioService)
 
-	if a.config.EnableHealth {
+	if o.config.EnableHealth {
 		o.healthServer = health.NewServer()
-		grpc_health_v1.RegisterHealthServer(a.grpcServer, a.healthServer)
+		grpc_health_v1.RegisterHealthServer(o.grpcServer, o.healthServer)
 		o.healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 		o.healthServer.SetServingStatus("tapio.v1.TapioService", grpc_health_v1.HealthCheckResponse_SERVING)
 	}
 
-	if a.config.EnableReflection {
-		reflection.Register(a.grpcServer)
+	if o.config.EnableReflection {
+		reflection.Register(o.grpcServer)
 		o.logger.Info("gRPC reflection enabled")
 	}
 
@@ -231,27 +231,27 @@ func (o *Orchestrator) initHTTPGateway(ctx context.Context) error {
 	)
 
 	opts := []grpc_server.DialOption{grpc_server.WithTransportCredentials(insecure.NewCredentials())}
-	grpcEndpoint := fmt.Sprintf("localhost:%s", a.config.GRPCPort)
+	grpcEndpoint := fmt.Sprintf("localhost:%s", o.config.GRPCPort)
 
 	if err := pb.RegisterTapioServiceHandlerFromEndpoint(ctx, mux, grpcEndpoint, opts); err != nil {
 		return fmt.Errorf("REST gateway registration failed: %w", err)
 	}
 
 	o.httpServer = &http.Server{
-		Addr:         ":" + a.config.HTTPPort,
-		Handler:      a.corsHandler(mux),
-		ReadTimeout:  a.config.ReadTimeout,
-		WriteTimeout: a.config.WriteTimeout,
-		IdleTimeout:  a.config.IdleTimeout,
+		Addr:         ":" + o.config.HTTPPort,
+		Handler:      o.corsHandler(mux),
+		ReadTimeout:  o.config.ReadTimeout,
+		WriteTimeout: o.config.WriteTimeout,
+		IdleTimeout:  o.config.IdleTimeout,
 	}
 
 	o.logger.Info("Starting HTTP gateway",
-		zap.String("port", a.config.HTTPPort),
+		zap.String("port", o.config.HTTPPort),
 		zap.String("grpc_endpoint", grpcEndpoint),
 	)
 
 	go func() {
-		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := o.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			o.logger.Fatal("HTTP server failed", zap.Error(err))
 		}
 	}()
@@ -277,16 +277,16 @@ func (o *Orchestrator) corsHandler(h http.Handler) http.Handler {
 
 // gracefulShutdown performs orderly shutdown of all server components
 func (o *Orchestrator) gracefulShutdown() error {
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), o.config.ShutdownTimeout)
 	defer cancel()
 
-	if a.httpServer != nil {
-		if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
+	if o.httpServer != nil {
+		if err := o.httpServer.Shutdown(shutdownCtx); err != nil {
 			o.logger.Error("HTTP server shutdown failed", zap.Error(err))
 		}
 	}
 
-	if a.grpcServer != nil {
+	if o.grpcServer != nil {
 		o.grpcServer.GracefulStop()
 	}
 
@@ -304,11 +304,11 @@ func (o *Orchestrator) Health() map[string]interface{} {
 		},
 	}
 
-	if a.config.EnableHealth && a.healthServer != nil {
+	if o.config.EnableHealth && o.healthServer != nil {
 		health["health_checks"] = "enabled"
 	}
 
-	if a.tapioService != nil {
+	if o.tapioService != nil {
 		health["tapio_service"] = "operational"
 	}
 
@@ -318,11 +318,11 @@ func (o *Orchestrator) Health() map[string]interface{} {
 // Statistics returns real-time server performance metrics
 func (o *Orchestrator) Statistics() map[string]interface{} {
 	return map[string]interface{}{
-		"grpc_port":      a.config.GRPCPort,
-		"http_port":      a.config.HTTPPort,
-		"environment":    a.config.Environment,
-		"max_event_size": a.config.MaxEventSize,
-		"max_batch_size": a.config.MaxBatchSize,
+		"grpc_port":      o.config.GRPCPort,
+		"http_port":      o.config.HTTPPort,
+		"environment":    o.config.Environment,
+		"max_event_size": o.config.MaxEventSize,
+		"max_batch_size": o.config.MaxBatchSize,
 		"uptime":         time.Now().Format(time.RFC3339),
 	}
 }
