@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/adapters"
 	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
 )
 
@@ -159,22 +160,28 @@ func (pb *PipelineBuilder) Build() (IntelligencePipeline, error) {
 
 // buildHighPerformancePipeline creates a high-performance pipeline
 func (pb *PipelineBuilder) buildHighPerformancePipeline() (IntelligencePipeline, error) {
-	// Create default implementations for now
-	// TODO: These should be injected as dependencies
-	var contextProcessor interfaces.ContextProcessor
-	var correlationEngine interfaces.CorrelationEngine
+	// Create actual implementations using adapters
+	contextProcessor := adapters.CreateDefaultContextProcessor()
+	correlationEngine := adapters.CreateDefaultCorrelationEngine()
+
+	// Start the correlation engine
+	if err := correlationEngine.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start correlation engine: %w", err)
+	}
 
 	// Use the existing HighPerformanceOrchestrator
 	orchestrator, err := NewHighPerformanceOrchestrator(pb.config.OrchestratorConfig, contextProcessor, correlationEngine)
 	if err != nil {
+		correlationEngine.Stop() // Clean up on error
 		return nil, fmt.Errorf("failed to create orchestrator: %w", err)
 	}
 
 	// Wrap in pipeline adapter
 	pipeline := &pipelineAdapter{
-		orchestrator: orchestrator,
-		config:       pb.config.Clone(),
-		metrics:      NewMetricsCollector(),
+		orchestrator:      orchestrator,
+		config:            pb.config.Clone(),
+		metrics:           NewMetricsCollector(),
+		correlationEngine: correlationEngine,
 	}
 
 	// Add custom stages if any
@@ -211,10 +218,11 @@ func (pb *PipelineBuilder) buildDebugPipeline() (IntelligencePipeline, error) {
 
 // pipelineAdapter adapts the orchestrator to the IntelligencePipeline interface
 type pipelineAdapter struct {
-	orchestrator *HighPerformanceOrchestrator
-	config       *PipelineConfig
-	metrics      *MetricsCollector
-	customStages []ProcessingStage
+	orchestrator      *HighPerformanceOrchestrator
+	config            *PipelineConfig
+	metrics           *MetricsCollector
+	customStages      []ProcessingStage
+	correlationEngine interfaces.CorrelationEngine
 
 	// State
 	running int32
@@ -335,7 +343,19 @@ func (pa *pipelineAdapter) Stop() error {
 		return fmt.Errorf("pipeline is not running")
 	}
 
-	return pa.orchestrator.Stop()
+	// Stop the orchestrator first
+	if err := pa.orchestrator.Stop(); err != nil {
+		return fmt.Errorf("failed to stop orchestrator: %w", err)
+	}
+
+	// Stop the correlation engine
+	if pa.correlationEngine != nil {
+		if err := pa.correlationEngine.Stop(); err != nil {
+			return fmt.Errorf("failed to stop correlation engine: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // Shutdown is an alias for Stop
