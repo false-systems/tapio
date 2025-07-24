@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/cni/core"
+	"github.com/yairfalse/tapio/pkg/collectors/common"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -22,6 +23,9 @@ type CNICollector struct {
 	// Event streaming
 	eventChan    chan domain.UnifiedEvent
 	rawEventChan chan core.CNIRawEvent
+
+	// Performance adapter for high-throughput event handling
+	perfAdapter *common.PerformanceAdapter
 
 	// Lifecycle management
 	ctx     context.Context
@@ -47,11 +51,32 @@ func NewCNICollector(config core.Config) (*CNICollector, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// Initialize performance adapter
+	perfConfig := common.DefaultPerformanceConfig("cni")
+	if config.EventBufferSize > 0 {
+		// Ensure power of 2
+		size := uint64(config.EventBufferSize)
+		if size&(size-1) != 0 {
+			// Round up to next power of 2
+			size = 1
+			for size < uint64(config.EventBufferSize) {
+				size *= 2
+			}
+		}
+		perfConfig.BufferSize = size
+	}
+
+	perfAdapter, err := common.NewPerformanceAdapter(perfConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create performance adapter: %w", err)
+	}
+
 	collector := &CNICollector{
 		config:       config,
 		eventChan:    make(chan domain.UnifiedEvent, config.EventBufferSize),
 		rawEventChan: make(chan core.CNIRawEvent, config.EventBufferSize*2),
 		processor:    newCNIEventProcessor(),
+		perfAdapter:  perfAdapter,
 		health: core.Health{
 			Status:             core.HealthStatusUnknown,
 			Message:            "Initializing",
@@ -88,6 +113,11 @@ func (c *CNICollector) Start(ctx context.Context) error {
 	c.running = true
 	c.startTime = time.Now()
 	c.statistics.StartTime = c.startTime
+
+	// Start performance adapter
+	if err := c.perfAdapter.Start(); err != nil {
+		return fmt.Errorf("failed to start performance adapter: %w", err)
+	}
 
 	// Start raw event processing
 	c.wg.Add(1)
@@ -152,6 +182,11 @@ func (c *CNICollector) Stop() error {
 		c.recordError(fmt.Errorf("timeout waiting for goroutines to finish"))
 	}
 
+	// Stop performance adapter
+	if err := c.perfAdapter.Stop(); err != nil {
+		c.recordError(fmt.Errorf("failed to stop performance adapter: %w", err))
+	}
+
 	// Close channels
 	close(c.rawEventChan)
 	close(c.eventChan)
@@ -164,7 +199,8 @@ func (c *CNICollector) Stop() error {
 
 // Events returns the channel of processed UnifiedEvent
 func (c *CNICollector) Events() <-chan domain.UnifiedEvent {
-	return c.eventChan
+	// Return the performance adapter's output channel for zero-copy operation
+	return c.perfAdapter.Events()
 }
 
 // Health returns current health status
@@ -178,6 +214,22 @@ func (c *CNICollector) Health() core.Health {
 func (c *CNICollector) Statistics() core.Statistics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
+	// Get performance metrics
+	perfMetrics := c.perfAdapter.GetMetrics()
+
+	// Add performance metrics to custom stats
+	if c.statistics.Custom == nil {
+		c.statistics.Custom = make(map[string]interface{})
+	}
+	c.statistics.Custom["buffer_size"] = perfMetrics.BufferSize
+	c.statistics.Custom["buffer_capacity"] = perfMetrics.BufferCapacity
+	c.statistics.Custom["buffer_utilization"] = perfMetrics.BufferUtilization
+	c.statistics.Custom["batches_processed"] = perfMetrics.BatchesProcessed
+	c.statistics.Custom["pool_allocated"] = perfMetrics.PoolAllocated
+	c.statistics.Custom["pool_recycled"] = perfMetrics.PoolRecycled
+	c.statistics.Custom["pool_in_use"] = perfMetrics.PoolInUse
+
 	return c.statistics
 }
 
@@ -282,16 +334,12 @@ func (c *CNICollector) processRawEvents() {
 			// Update statistics
 			c.updateStatistics(rawEvent, unifiedEvent)
 
-			// Send the processed event
-			select {
-			case c.eventChan <- *unifiedEvent:
-				c.statistics.EventsCollected++
-			case <-c.ctx.Done():
-				return
-			default:
-				// Channel full, drop event
+			// Submit to performance adapter for high-throughput processing
+			if err := c.perfAdapter.Submit(unifiedEvent); err != nil {
 				c.statistics.EventsDropped++
-				c.recordError(fmt.Errorf("event channel full, dropped event %s", unifiedEvent.ID))
+				c.recordError(fmt.Errorf("failed to submit event to performance adapter: %w", err))
+			} else {
+				c.statistics.EventsCollected++
 			}
 		}
 	}

@@ -165,3 +165,20 @@ func (ebb *EventBatchBuffer) DrainTo(events []*domain.UnifiedEvent) int {
 	}
 	return count
 }
+
+// TryPut attempts to add an event without blocking.
+// Returns true if successful, false if the buffer is full.
+func (ebb *EventBatchBuffer) TryPut(event *domain.UnifiedEvent) bool {
+	return ebb.buffer.TryPut(event)
+}
+
+// Put adds an event to the buffer.
+// Returns an error if the buffer is full.
+func (ebb *EventBatchBuffer) Put(event *domain.UnifiedEvent) error {
+	return ebb.buffer.Put(event)
+}
+
+// GetStats returns statistics about the batch buffer
+func (ebb *EventBatchBuffer) GetStats() RingBufferStats {
+	return ebb.buffer.GetStats()
+}
