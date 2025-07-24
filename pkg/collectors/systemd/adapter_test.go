@@ -147,7 +147,7 @@ func TestSystemdAdapter_CreateEventContext(t *testing.T) {
 		Type:   domain.EventTypeSystem,
 		Source: "systemd-collector",
 	}
-	
+
 	result := adapter.CreateEventContext(event)
 	if result != nil {
 		t.Errorf("Expected nil context for event without entity, got %+v", result)

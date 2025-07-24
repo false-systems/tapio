@@ -145,7 +145,7 @@ func TestK8sAdapter_CreateEventContext(t *testing.T) {
 		Type:   domain.EventTypeKubernetes,
 		Source: "k8s-collector",
 	}
-	
+
 	result := adapter.CreateEventContext(event)
 	if result != nil {
 		t.Errorf("Expected nil context for event without entity, got %+v", result)

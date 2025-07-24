@@ -59,7 +59,7 @@ func (a *CorrelationEngineAdapter) GetLatestFindings() *interfaces.Finding {
 // GetSemanticGroups returns current semantic groups
 func (a *CorrelationEngineAdapter) GetSemanticGroups() []*interfaces.SemanticGroup {
 	groups := a.engine.GetSemanticTracer().GetSemanticGroups()
-	
+
 	result := make([]*interfaces.SemanticGroup, 0, len(groups))
 	for _, group := range groups {
 		result = append(result, &interfaces.SemanticGroup{
@@ -68,7 +68,7 @@ func (a *CorrelationEngineAdapter) GetSemanticGroups() []*interfaces.SemanticGro
 			Type:   group.SemanticType,
 		})
 	}
-	
+
 	return result
 }
 
@@ -77,7 +77,7 @@ func convertSemanticGroup(group *correlation.SemanticGroupSummary) *interfaces.S
 	if group == nil {
 		return nil
 	}
-	
+
 	return &interfaces.SemanticGroup{
 		ID:     group.ID,
 		Intent: group.Intent,

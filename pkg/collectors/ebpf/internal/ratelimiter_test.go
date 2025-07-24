@@ -37,7 +37,7 @@ func TestRateLimiterSimple(t *testing.T) {
 
 func TestRateLimiterWithCancelledContext(t *testing.T) {
 	rl := NewRateLimiterSimple(100)
-	
+
 	// Create a cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

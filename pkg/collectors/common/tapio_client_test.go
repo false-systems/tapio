@@ -12,9 +12,9 @@ import (
 
 // MockAdapter implements CollectorAdapter for testing
 type MockAdapter struct {
-	CollectorID    string
-	TracerName     string
-	BatchIDPrefix  string
+	CollectorID   string
+	TracerName    string
+	BatchIDPrefix string
 }
 
 func NewMockAdapter() *MockAdapter {
