@@ -60,3 +60,6 @@ tmp/
 # Goreleaser
 .goreleaser.yml
 .goreleaser.yamlpkg/mod/
+
+# Generated protobuf files
+proto/gen/
