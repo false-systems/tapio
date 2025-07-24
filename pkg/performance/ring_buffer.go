@@ -164,6 +164,104 @@ func (r *RingBuffer) TryGet() (unsafe.Pointer, bool) {
 	return nil, false
 }
 
+// PutBatch adds multiple items to the ring buffer in a single operation.
+// Returns the number of items successfully added.
+func (r *RingBuffer) PutBatch(items []unsafe.Pointer) int {
+	if len(items) == 0 {
+		return 0
+	}
+
+	added := 0
+	for {
+		writeIdx := r.writeIndex.Load()
+		readIdx := r.readIndex.Load()
+
+		// Calculate available space
+		available := r.capacity - (writeIdx - readIdx)
+		if available == 0 {
+			return added
+		}
+
+		// Determine how many items we can add
+		toAdd := uint64(len(items) - added)
+		if toAdd > available {
+			toAdd = available
+		}
+
+		// Try to claim slots
+		if r.writeIndex.CompareAndSwap(writeIdx, writeIdx+toAdd) {
+			// Successfully claimed slots, now write items
+			for i := uint64(0); i < toAdd; i++ {
+				idx := (writeIdx + i) & r.capacityMask
+				atomic.StorePointer(&r.buffer[idx], items[added+int(i)])
+			}
+			added += int(toAdd)
+
+			// Check if we've added all items
+			if added >= len(items) {
+				return added
+			}
+		}
+
+		// Failed to claim slots or need to add more, retry
+		runtime.Gosched()
+	}
+}
+
+// GetBatch retrieves multiple items from the ring buffer in a single operation.
+// Returns the number of items successfully retrieved.
+func (r *RingBuffer) GetBatch(items []unsafe.Pointer) int {
+	if len(items) == 0 {
+		return 0
+	}
+
+	retrieved := 0
+	for {
+		readIdx := r.readIndex.Load()
+		writeIdx := r.writeIndex.Load()
+
+		// Calculate available items
+		available := writeIdx - readIdx
+		if available == 0 {
+			return retrieved
+		}
+
+		// Determine how many items we can get
+		toGet := uint64(len(items) - retrieved)
+		if toGet > available {
+			toGet = available
+		}
+
+		// Try to claim slots
+		if r.readIndex.CompareAndSwap(readIdx, readIdx+toGet) {
+			// Successfully claimed slots, now read items
+			for i := uint64(0); i < toGet; i++ {
+				idx := (readIdx + i) & r.capacityMask
+				
+				// Spin wait for the item to be written
+				for {
+					item := atomic.LoadPointer(&r.buffer[idx])
+					if item != nil {
+						items[retrieved+int(i)] = item
+						atomic.StorePointer(&r.buffer[idx], nil)
+						break
+					}
+					runtime.Gosched()
+				}
+			}
+			retrieved += int(toGet)
+
+			// Check if we've retrieved enough items
+			if retrieved >= len(items) {
+				return retrieved
+			}
+		}
+
+		// Failed to claim slots or need to get more, retry
+		runtime.Gosched()
+	}
+}
+
 // Size returns the current number of items in the buffer
 func (r *RingBuffer) Size() uint64 {
 	writeIdx := r.writeIndex.Load()

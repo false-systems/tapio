@@ -495,18 +495,34 @@ func (s *TapioServiceComplete) GetEvents(ctx context.Context, req *pb.GetEventsR
 
 	// Extract filter and pagination from query
 	var filter *pb.Filter
-	var pageSize int = 100
-	var pageToken string
+	var pageSize int32 = 100 // Default page size
+	var pageToken string = ""
 
-	if req.Query != nil {
+	if req.Query != nil && req.Query.Filter != nil {
 		filter = req.Query.Filter
+
+		// Extract pagination from filter
+		if filter.Limit > 0 {
+			pageSize = filter.Limit
+			// Cap at reasonable maximum
+			if pageSize > 1000 {
+				pageSize = 1000
+			}
+		}
+
+		if filter.PageToken != "" {
+			pageToken = filter.PageToken
+		}
 	}
 
-	// TODO: Extract pagination from filter if needed
-	// For now, use defaults
+	// Add pagination info to span
+	span.SetAttributes(
+		attribute.Int("page_size", int(pageSize)),
+		attribute.String("page_token", pageToken),
+	)
 
 	// Query events from storage
-	events, nextToken, err := s.storage.Query(ctx, filter, nil, pageSize, pageToken)
+	events, nextToken, err := s.storage.Query(ctx, filter, nil, int(pageSize), pageToken)
 	if err != nil {
 		span.RecordError(err)
 		return nil, status.Errorf(codes.Internal, "failed to query events: %v", err)
@@ -529,6 +545,13 @@ func (s *TapioServiceComplete) GetEvents(ctx context.Context, req *pb.GetEventsR
 		s.logger.Warn("Failed to get total count", zap.Error(err))
 		totalCount = int64(len(protoEvents))
 	}
+
+	// Update span with results
+	span.SetAttributes(
+		attribute.Int("events_returned", len(protoEvents)),
+		attribute.Int64("total_count", totalCount),
+		attribute.Bool("has_more", nextToken != ""),
+	)
 
 	return &pb.GetEventsResponse{
 		Events:        protoEvents,

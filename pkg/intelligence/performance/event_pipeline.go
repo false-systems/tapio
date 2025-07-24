@@ -228,20 +228,14 @@ func (p *EventPipeline) SubmitBatch(events []*Event) error {
 		ptrs[i] = unsafe.Pointer(event)
 	}
 
-	// For now, fall back to individual puts
-	// TODO: Implement BatchRingBuffer for better performance
-
-	// Fall back to individual puts
-	errors := 0
-	for _, ptr := range ptrs {
-		if err := p.buffers[0].Put(ptr); err != nil {
-			errors++
-			p.dropped.Add(1)
-		}
-	}
-
-	if errors > 0 {
-		return fmt.Errorf("failed to submit %d events", errors)
+	// Use batch put for better performance
+	added := p.buffers[0].PutBatch(ptrs)
+	
+	// Track dropped events
+	dropped := len(ptrs) - added
+	if dropped > 0 {
+		p.dropped.Add(int64(dropped))
+		return fmt.Errorf("failed to submit %d events", dropped)
 	}
 
 	return nil
@@ -269,18 +263,15 @@ func (p *EventPipeline) GetOutput() (*Event, error) {
 
 // GetOutputBatch retrieves multiple processed events
 func (p *EventPipeline) GetOutputBatch(events []*Event) int {
-	// For now, fall back to individual gets
-	// TODO: Implement BatchRingBuffer for better performance
-
-	// Fall back to individual gets
-	count := 0
-	for i := range events {
-		ptr, err := p.buffers[len(p.buffers)-1].Get()
-		if err != nil {
-			break
-		}
-		events[i] = (*Event)(ptr)
-		count++
+	// Create a slice of unsafe pointers
+	ptrs := make([]unsafe.Pointer, len(events))
+	
+	// Use batch get for better performance
+	count := p.buffers[len(p.buffers)-1].GetBatch(ptrs)
+	
+	// Convert pointers back to events
+	for i := 0; i < count; i++ {
+		events[i] = (*Event)(ptrs[i])
 	}
 
 	return count

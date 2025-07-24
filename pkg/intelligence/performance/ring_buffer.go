@@ -164,6 +164,94 @@ func (r *RingBuffer) IsFull() bool {
 	return r.Size() >= r.capacity
 }
 
+// PutBatch adds multiple items to the ring buffer in a single operation.
+// Returns the number of items successfully added.
+func (r *RingBuffer) PutBatch(items []unsafe.Pointer) int {
+	n := uint64(len(items))
+	if n == 0 {
+		return 0
+	}
+
+	for {
+		writeIdx := r.writeIndex.Load()
+		readIdx := r.readIndex.Load()
+
+		// Check available space
+		available := r.capacity - (writeIdx - readIdx)
+		if available == 0 {
+			return 0
+		}
+
+		// Limit to available space
+		if n > available {
+			n = available
+		}
+
+		// Try to claim the slots
+		if r.writeIndex.CompareAndSwap(writeIdx, writeIdx+n) {
+			// Successfully claimed the slots
+			for i := uint64(0); i < n; i++ {
+				idx := (writeIdx + i) & r.capacityMask
+				atomic.StorePointer(&r.buffer[idx], items[i])
+			}
+			return int(n)
+		}
+
+		// Failed to claim slot, retry
+		runtime.Gosched()
+	}
+}
+
+// GetBatch retrieves multiple items from the ring buffer in a single operation.
+// Returns the number of items successfully retrieved.
+func (r *RingBuffer) GetBatch(items []unsafe.Pointer) int {
+	maxItems := uint64(len(items))
+	if maxItems == 0 {
+		return 0
+	}
+
+	for {
+		readIdx := r.readIndex.Load()
+		writeIdx := r.writeIndex.Load()
+
+		// Calculate available items
+		available := writeIdx - readIdx
+		if available == 0 {
+			return 0
+		}
+
+		// Limit to requested size
+		if available > maxItems {
+			available = maxItems
+		}
+
+		// Try to claim the slots
+		if r.readIndex.CompareAndSwap(readIdx, readIdx+available) {
+			// Successfully claimed the slots
+			retrieved := 0
+			for i := uint64(0); i < available; i++ {
+				idx := (readIdx + i) & r.capacityMask
+
+				// Spin wait for item
+				for {
+					item := atomic.LoadPointer(&r.buffer[idx])
+					if item != nil {
+						atomic.StorePointer(&r.buffer[idx], nil)
+						items[retrieved] = item
+						retrieved++
+						break
+					}
+					runtime.Gosched()
+				}
+			}
+			return retrieved
+		}
+
+		// Failed to claim slot, retry
+		runtime.Gosched()
+	}
+}
+
 // SPSCRingBuffer is a lock-free single-producer single-consumer ring buffer
 // Optimized for single producer/consumer scenarios
 type SPSCRingBuffer struct {
