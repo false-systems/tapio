@@ -448,14 +448,19 @@ func TestCollectorManager_Statistics(t *testing.T) {
 	cm.AddCollector("collector1", collector1)
 	cm.AddCollector("collector2", collector2)
 
+	// Simulate some events being processed
+	collector1.statistics.(*mockCollectorStatistics).eventsProcessed = 100
+	collector2.statistics.(*mockCollectorStatistics).eventsProcessed = 50
+	
 	stats = cm.Statistics()
 	assert.Equal(t, 2, stats.ActiveCollectors)
-	assert.Equal(t, int64(0), stats.TotalEvents) // TODO: Track this in implementation
+	assert.Equal(t, int64(150), stats.TotalEvents) // Now properly tracked from collectors
 
-	// Remove one collector (by overwriting)
+	// Remove one collector (by overwriting with nil)
 	cm.AddCollector("collector1", nil)
 	stats = cm.Statistics()
-	assert.Equal(t, 2, stats.ActiveCollectors) // Still 2 slots (one is nil)
+	assert.Equal(t, 1, stats.ActiveCollectors) // Only 1 active collector now (nil not counted)
+	assert.Equal(t, int64(50), stats.TotalEvents) // Only events from collector2
 }
 
 func TestCollectorManager_ConcurrentAccess(t *testing.T) {

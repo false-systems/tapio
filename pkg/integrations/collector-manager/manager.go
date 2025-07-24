@@ -106,11 +106,23 @@ func (cm *CollectorManager) Statistics() struct {
 	ActiveCollectors int
 	TotalEvents      int64
 } {
+	// Aggregate events from all collectors
+	var totalEvents int64
+	var activeCollectors int
+	for _, collector := range cm.collectors {
+		if collector != nil {
+			activeCollectors++
+			if stats := collector.Statistics(); stats != nil {
+				totalEvents += int64(stats.EventsProcessed())
+			}
+		}
+	}
+	
 	return struct {
 		ActiveCollectors int
 		TotalEvents      int64
 	}{
-		ActiveCollectors: len(cm.collectors),
-		TotalEvents:      0, // TODO: Track this
+		ActiveCollectors: activeCollectors,
+		TotalEvents:      totalEvents,
 	}
 }
