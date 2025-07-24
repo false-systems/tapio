@@ -234,7 +234,7 @@ func (p *EventPipeline) SubmitBatch(events []*Event) error {
 	// Track dropped events
 	dropped := len(ptrs) - added
 	if dropped > 0 {
-		p.dropped.Add(int64(dropped))
+		p.dropped.Add(uint64(dropped))
 		return fmt.Errorf("failed to submit %d events", dropped)
 	}
 
