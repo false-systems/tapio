@@ -117,15 +117,17 @@ func TestRingBufferBatchConcurrent(t *testing.T) {
 	const batchSize = 10
 	const numBatches = 100
 
-	var wg sync.WaitGroup
+	var producersWg sync.WaitGroup
+	var consumersWg sync.WaitGroup
 	var totalProduced atomic.Int64
 	var totalConsumed atomic.Int64
+	done := make(chan struct{})
 
 	// Producers
 	for p := 0; p < numProducers; p++ {
-		wg.Add(1)
+		producersWg.Add(1)
 		go func(producerID int) {
-			defer wg.Done()
+			defer producersWg.Done()
 
 			for batch := 0; batch < numBatches; batch++ {
 				items := make([]unsafe.Pointer, batchSize)
@@ -140,28 +142,46 @@ func TestRingBufferBatchConcurrent(t *testing.T) {
 		}(p)
 	}
 
+	// Signal when producers are done
+	go func() {
+		producersWg.Wait()
+		close(done)
+	}()
+
 	// Consumers
 	for c := 0; c < numConsumers; c++ {
-		wg.Add(1)
+		consumersWg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer consumersWg.Done()
 
 			items := make([]unsafe.Pointer, batchSize)
 			for {
 				count := rb.GetBatch(items)
-				if count == 0 {
-					// Check if producers are done
-					if totalProduced.Load() == totalConsumed.Load() {
-						break
-					}
+				if count > 0 {
+					totalConsumed.Add(int64(count))
 					continue
 				}
-				totalConsumed.Add(int64(count))
+
+				// No items available
+				select {
+				case <-done:
+					// Producers done, drain remaining
+					for {
+						count = rb.GetBatch(items)
+						if count == 0 {
+							return
+						}
+						totalConsumed.Add(int64(count))
+					}
+				default:
+					// Continue trying
+				}
 			}
 		}()
 	}
 
-	wg.Wait()
+	producersWg.Wait()
+	consumersWg.Wait()
 
 	// Verify all items were consumed
 	produced := totalProduced.Load()

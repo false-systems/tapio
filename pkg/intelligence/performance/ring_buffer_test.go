@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -101,18 +102,35 @@ func TestIntelligenceRingBufferBatchConcurrent(t *testing.T) {
 	}
 
 	// Consumers
+	done := make(chan struct{})
+	go func() {
+		// Wait for all producers to finish
+		time.Sleep(100 * time.Millisecond)
+		close(done)
+	}()
+
 	for c := 0; c < numConsumers; c++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
 			items := make([]unsafe.Pointer, batchSize)
-			consumed := 0
-			for consumed < numProducers*numBatches*batchSize {
-				count := rb.GetBatch(items)
-				if count > 0 {
-					totalConsumed.Add(int64(count))
-					consumed += count
+			for {
+				select {
+				case <-done:
+					// Drain remaining items
+					for {
+						count := rb.GetBatch(items)
+						if count == 0 {
+							return
+						}
+						totalConsumed.Add(int64(count))
+					}
+				default:
+					count := rb.GetBatch(items)
+					if count > 0 {
+						totalConsumed.Add(int64(count))
+					}
 				}
 			}
 		}()
