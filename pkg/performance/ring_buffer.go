@@ -237,7 +237,7 @@ func (r *RingBuffer) GetBatch(items []unsafe.Pointer) int {
 			// Successfully claimed slots, now read items
 			for i := uint64(0); i < toGet; i++ {
 				idx := (readIdx + i) & r.capacityMask
-				
+
 				// Spin wait for the item to be written
 				for {
 					item := atomic.LoadPointer(&r.buffer[idx])

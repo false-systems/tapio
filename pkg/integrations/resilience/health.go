@@ -2,8 +2,10 @@ package resilience
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -632,11 +634,68 @@ func (hc *HealthChecker) startHTTPServer(ctx context.Context) {
 
 	// Detailed health endpoint
 	mux.HandleFunc(hc.config.HTTPPath+"/detailed", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		w.Header().Set("Content-Type", "application/json")
-		// For now, return simple response
-		// TODO: In the future, use hc.GetHealth() to return detailed health data
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"detailed":"health_data"}`))
+
+		// Get detailed health data
+		health := hc.GetHealth()
+
+		// Get additional metrics for detailed view
+		metrics := hc.GetMetrics()
+
+		// Build detailed response
+		detailedResponse := map[string]interface{}{
+			"status": map[string]interface{}{
+				"overall_status": health.OverallStatus.String(),
+				"overall_score":  health.OverallScore,
+				"summary": map[string]int{
+					"healthy":   health.HealthyComponents,
+					"degraded":  health.DegradedComponents,
+					"unhealthy": health.UnhealthyComponents,
+					"critical":  health.CriticalComponents,
+				},
+			},
+			"components": hc.getDetailedComponentStatus(health),
+			"metrics": map[string]interface{}{
+				"total_requests":       metrics.TotalRequests,
+				"requests_under_1ms":   metrics.RequestsUnder1ms,
+				"requests_under_500us": metrics.RequestsUnder500us,
+				"requests_under_100us": metrics.RequestsUnder100us,
+				"avg_response_time":    metrics.AverageResponseTime.String(),
+				"median_response_time": metrics.MedianResponseTime.String(),
+				"p95_response_time":    metrics.P95ResponseTime.String(),
+				"p99_response_time":    metrics.P99ResponseTime.String(),
+				"cache_hit_rate":       metrics.CacheHitRate,
+				"computation_count":    metrics.ComputationCount,
+				"avg_compute_time":     metrics.AverageComputeTime.String(),
+			},
+			"performance": map[string]interface{}{
+				"computation_time_ns": health.ComputationTimeNs,
+				"response_time_ns":    time.Since(start).Nanoseconds(),
+				"computed_at":         health.ComputedAt.Format(time.RFC3339),
+				"valid_until":         health.ValidUntil.Format(time.RFC3339),
+			},
+		}
+
+		// Determine HTTP status code
+		statusCode := http.StatusOK
+		if health.OverallStatus == HealthCritical {
+			statusCode = http.StatusServiceUnavailable
+		} else if health.OverallStatus == HealthDegraded {
+			statusCode = http.StatusServiceUnavailable
+		}
+
+		w.WriteHeader(statusCode)
+
+		// Marshal and write response
+		response, err := json.Marshal(detailedResponse)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"failed to marshal health data"}`))
+			return
+		}
+
+		w.Write(response)
 	})
 
 	server := &http.Server{
@@ -759,36 +818,20 @@ func DatabaseHealthMeasurement() HealthMeasurement {
 
 // Helper functions for formatting (optimized for speed)
 func formatFloat(f float64) string {
-	// Simplified float formatting for speed
-	if f >= 1.0 {
-		return "1.0"
-	}
-	if f >= 0.95 {
-		return "0.95"
-	}
-	if f >= 0.9 {
-		return "0.9"
-	}
-	if f >= 0.8 {
-		return "0.8"
-	}
-	if f >= 0.7 {
-		return "0.7"
-	}
-	if f >= 0.5 {
-		return "0.5"
-	}
-	return "0.0"
+	// Use strconv.FormatFloat with fixed precision for consistent output
+	// 'f' format, 2 decimal places, 64-bit float
+	return strconv.FormatFloat(f, 'f', 2, 64)
 }
 
 func formatInt64(i int64) string {
-	// Simplified int formatting for speed
-	return "0" // Would implement proper formatting
+	// Use strconv.FormatInt for fast integer conversion
+	// Base 10 for decimal representation
+	return strconv.FormatInt(i, 10)
 }
 
 func formatInt(i int) string {
-	// Simplified int formatting for speed
-	return "8080" // Would implement proper formatting
+	// Use strconv.Itoa for fast int to string conversion
+	return strconv.Itoa(i)
 }
 
 // Global health checker instance
@@ -829,4 +872,39 @@ func GetGlobalHealthStatus() HealthStatus {
 		return globalHealthChecker.GetHealthStatus()
 	}
 	return HealthUnknown
+}
+
+// getDetailedComponentStatus builds detailed component status information
+func (hc *HealthChecker) getDetailedComponentStatus(health *CachedHealthData) map[string]interface{} {
+	componentDetails := make(map[string]interface{})
+
+	hc.componentsMutex.RLock()
+	defer hc.componentsMutex.RUnlock()
+
+	for name, component := range hc.components {
+		// Get current status and score
+		status := HealthStatus(atomic.LoadInt32(&component.currentStatus))
+		scoreInt := atomic.LoadInt64(&component.currentScore)
+		score := float64(scoreInt) / 1000.0
+		lastUpdate := atomic.LoadInt64(&component.lastUpdate)
+
+		// Get status from cached data if available
+		if cachedStatus, ok := health.ComponentStatuses[name]; ok {
+			status = cachedStatus
+		}
+		if cachedScore, ok := health.ComponentScores[name]; ok {
+			score = cachedScore
+		}
+
+		componentDetails[name] = map[string]interface{}{
+			"status":          status.String(),
+			"score":           score,
+			"type":            component.Type,
+			"weight":          component.Weight,
+			"last_update":     time.Unix(0, lastUpdate).Format(time.RFC3339),
+			"update_interval": component.updateInterval.String(),
+		}
+	}
+
+	return componentDetails
 }

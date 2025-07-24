@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	otelpkg "github.com/yairfalse/tapio/pkg/integrations/otel"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -277,9 +277,8 @@ func (tdf *TapioDataFlow) enrichEventWithFindings(event *domain.UnifiedEvent, fi
 		event.Metadata["semantic_group_id"] = findings.SemanticGroup.ID
 		event.Metadata["semantic_intent"] = findings.SemanticGroup.Intent
 		event.Metadata["semantic_type"] = findings.SemanticGroup.Type
-			event.Context.Metadata["prediction_scenario"] = findings.SemanticGroup.Prediction.Scenario
-			event.Context.Metadata["prediction_probability"] = findings.SemanticGroup.Prediction.Probability
-		}
+		event.Context.Metadata["prediction_scenario"] = findings.SemanticGroup.Prediction.Scenario
+		event.Context.Metadata["prediction_probability"] = findings.SemanticGroup.Prediction.Probability
 	}
 }
 

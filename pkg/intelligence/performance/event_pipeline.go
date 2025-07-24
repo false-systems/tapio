@@ -230,7 +230,7 @@ func (p *EventPipeline) SubmitBatch(events []*Event) error {
 
 	// Use batch put for better performance
 	added := p.buffers[0].PutBatch(ptrs)
-	
+
 	// Track dropped events
 	dropped := len(ptrs) - added
 	if dropped > 0 {
@@ -265,10 +265,10 @@ func (p *EventPipeline) GetOutput() (*Event, error) {
 func (p *EventPipeline) GetOutputBatch(events []*Event) int {
 	// Create a slice of unsafe pointers
 	ptrs := make([]unsafe.Pointer, len(events))
-	
+
 	// Use batch get for better performance
 	count := p.buffers[len(p.buffers)-1].GetBatch(ptrs)
-	
+
 	// Convert pointers back to events
 	for i := 0; i < count; i++ {
 		events[i] = (*Event)(ptrs[i])

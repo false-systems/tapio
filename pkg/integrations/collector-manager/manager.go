@@ -117,7 +117,7 @@ func (cm *CollectorManager) Statistics() struct {
 			}
 		}
 	}
-	
+
 	return struct {
 		ActiveCollectors int
 		TotalEvents      int64

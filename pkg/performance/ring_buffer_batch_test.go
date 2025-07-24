@@ -10,34 +10,34 @@ import (
 
 func TestRingBufferPutBatch(t *testing.T) {
 	tests := []struct {
-		name         string
-		bufferSize   uint64
-		batchSize    int
-		expectAdded  int
+		name        string
+		bufferSize  uint64
+		batchSize   int
+		expectAdded int
 	}{
 		{
-			name:         "empty buffer full batch",
-			bufferSize:   16,
-			batchSize:    10,
-			expectAdded:  10,
+			name:        "empty buffer full batch",
+			bufferSize:  16,
+			batchSize:   10,
+			expectAdded: 10,
 		},
 		{
-			name:         "partial space available",
-			bufferSize:   8,
-			batchSize:    10,
-			expectAdded:  8,
+			name:        "partial space available",
+			bufferSize:  8,
+			batchSize:   10,
+			expectAdded: 8,
 		},
 		{
-			name:         "exact fit",
-			bufferSize:   16,
-			batchSize:    16,
-			expectAdded:  16,
+			name:        "exact fit",
+			bufferSize:  16,
+			batchSize:   16,
+			expectAdded: 16,
 		},
 		{
-			name:         "empty batch",
-			bufferSize:   16,
-			batchSize:    0,
-			expectAdded:  0,
+			name:        "empty batch",
+			bufferSize:  16,
+			batchSize:   0,
+			expectAdded: 0,
 		},
 	}
 
@@ -133,7 +133,7 @@ func TestRingBufferBatchConcurrent(t *testing.T) {
 					val := producerID*1000000 + batch*1000 + i
 					items[i] = unsafe.Pointer(&val)
 				}
-				
+
 				added := rb.PutBatch(items)
 				totalProduced.Add(int64(added))
 			}
@@ -226,7 +226,7 @@ func TestRingBufferMixedBatchOperations(t *testing.T) {
 
 func BenchmarkRingBufferPutBatch(b *testing.B) {
 	sizes := []int{10, 100, 1000}
-	
+
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("batch_%d", size), func(b *testing.B) {
 			rb, _ := NewRingBuffer(65536)
@@ -248,20 +248,20 @@ func BenchmarkRingBufferPutBatch(b *testing.B) {
 
 func BenchmarkRingBufferGetBatch(b *testing.B) {
 	sizes := []int{10, 100, 1000}
-	
+
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("batch_%d", size), func(b *testing.B) {
 			rb, _ := NewRingBuffer(65536)
-			
+
 			// Pre-fill buffer
 			items := make([]unsafe.Pointer, size)
 			for i := 0; i < size; i++ {
 				val := i
 				items[i] = unsafe.Pointer(&val)
 			}
-			
+
 			retrieved := make([]unsafe.Pointer, size)
-			
+
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				rb.PutBatch(items)
@@ -274,7 +274,7 @@ func BenchmarkRingBufferGetBatch(b *testing.B) {
 // Compare batch vs individual operations
 func BenchmarkBatchVsIndividual(b *testing.B) {
 	const batchSize = 100
-	
+
 	b.Run("individual_put", func(b *testing.B) {
 		rb, _ := NewRingBuffer(65536)
 		items := make([]unsafe.Pointer, batchSize)
@@ -282,7 +282,7 @@ func BenchmarkBatchVsIndividual(b *testing.B) {
 			val := i
 			items[i] = unsafe.Pointer(&val)
 		}
-		
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for _, item := range items {
@@ -291,7 +291,7 @@ func BenchmarkBatchVsIndividual(b *testing.B) {
 			rb.Clear()
 		}
 	})
-	
+
 	b.Run("batch_put", func(b *testing.B) {
 		rb, _ := NewRingBuffer(65536)
 		items := make([]unsafe.Pointer, batchSize)
@@ -299,7 +299,7 @@ func BenchmarkBatchVsIndividual(b *testing.B) {
 			val := i
 			items[i] = unsafe.Pointer(&val)
 		}
-		
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			rb.PutBatch(items)

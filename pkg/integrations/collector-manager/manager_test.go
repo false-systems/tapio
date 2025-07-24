@@ -451,7 +451,7 @@ func TestCollectorManager_Statistics(t *testing.T) {
 	// Simulate some events being processed
 	collector1.statistics.(*mockCollectorStatistics).eventsProcessed = 100
 	collector2.statistics.(*mockCollectorStatistics).eventsProcessed = 50
-	
+
 	stats = cm.Statistics()
 	assert.Equal(t, 2, stats.ActiveCollectors)
 	assert.Equal(t, int64(150), stats.TotalEvents) // Now properly tracked from collectors
@@ -459,7 +459,7 @@ func TestCollectorManager_Statistics(t *testing.T) {
 	// Remove one collector (by overwriting with nil)
 	cm.AddCollector("collector1", nil)
 	stats = cm.Statistics()
-	assert.Equal(t, 1, stats.ActiveCollectors) // Only 1 active collector now (nil not counted)
+	assert.Equal(t, 1, stats.ActiveCollectors)    // Only 1 active collector now (nil not counted)
 	assert.Equal(t, int64(50), stats.TotalEvents) // Only events from collector2
 }
 
