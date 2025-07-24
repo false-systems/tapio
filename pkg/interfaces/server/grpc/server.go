@@ -27,6 +27,11 @@ type Server struct {
 	healthServer *health.Server
 
 	listener net.Listener
+	
+	// Service implementations
+	eventService      *EventServiceImpl
+	collectorService  *CollectorServiceImpl
+	tapioService      *TapioServiceComplete
 }
 
 // Config holds server configuration
@@ -34,6 +39,10 @@ type Config struct {
 	Address          string
 	EnableReflection bool
 	EnableHealth     bool
+	MaxBatchSize     int
+	MaxEventsPerSecond int
+	ClusterID        string
+	NodeID           string
 }
 
 // NewServer creates a new unified server
@@ -62,22 +71,60 @@ func NewServer(config Config, logger *zap.Logger) (*Server, error) {
 	}, nil
 }
 
+// SetEventService sets the event service implementation
+func (s *Server) SetEventService(service *EventServiceImpl) {
+	s.eventService = service
+	pb.RegisterEventServiceServer(s.grpcServer, service)
+}
+
+// SetCollectorService sets the collector service implementation
+func (s *Server) SetCollectorService(service *CollectorServiceImpl) {
+	s.collectorService = service
+	pb.RegisterCollectorServiceServer(s.grpcServer, service)
+}
+
+// SetTapioService sets the tapio service implementation
+func (s *Server) SetTapioService(service *TapioServiceComplete) {
+	s.tapioService = service
+	pb.RegisterTapioServiceServer(s.grpcServer, service)
+}
+
 // RegisterServices registers all gRPC services and their REST gateways
 func (s *Server) RegisterServices() error {
 	ctx := context.Background()
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 
 	// Register EventService REST gateway
-	if err := pb.RegisterEventServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
-		return fmt.Errorf("failed to register EventService REST gateway: %w", err)
+	if s.eventService != nil {
+		if err := pb.RegisterEventServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
+			return fmt.Errorf("failed to register EventService REST gateway: %w", err)
+		}
+		s.healthServer.SetServingStatus("tapio.v1.EventService", grpc_health_v1.HealthCheckResponse_SERVING)
 	}
 
-	// Register CorrelationService REST gateway
-	if err := pb.RegisterCorrelationServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
-		return fmt.Errorf("failed to register CorrelationService REST gateway: %w", err)
+	// Register CollectorService REST gateway (if it has REST endpoints)
+	if s.collectorService != nil {
+		if err := pb.RegisterCollectorServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
+			// CollectorService might not have REST endpoints, log but don't fail
+			s.logger.Debug("CollectorService has no REST endpoints", zap.Error(err))
+		}
+		s.healthServer.SetServingStatus("tapio.v1.CollectorService", grpc_health_v1.HealthCheckResponse_SERVING)
+	}
+	
+	// Register TapioService REST gateway
+	if s.tapioService != nil {
+		if err := pb.RegisterTapioServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
+			return fmt.Errorf("failed to register TapioService REST gateway: %w", err)
+		}
+		s.healthServer.SetServingStatus("tapio.v1.TapioService", grpc_health_v1.HealthCheckResponse_SERVING)
 	}
 
-	// Set health status
+	// Register CorrelationService REST gateway (when implemented)
+	// if err := pb.RegisterCorrelationServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
+	//     return fmt.Errorf("failed to register CorrelationService REST gateway: %w", err)
+	// }
+
+	// Set overall health status
 	s.healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	return nil

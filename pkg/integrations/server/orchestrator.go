@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/yairfalse/tapio/pkg/integrations/collector-manager"
 	"github.com/yairfalse/tapio/pkg/interfaces/server/grpc"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"go.opentelemetry.io/otel"
@@ -95,13 +96,15 @@ func (c *Config) Validate() error {
 
 // Orchestrator orchestrates the complete server infrastructure
 type Orchestrator struct {
-	config       *Config
-	logger       *zap.Logger
-	tracer       trace.Tracer
-	grpcServer   *grpc_server.Server
-	httpServer   *http.Server
-	healthServer *health.Server
-	tapioService *grpc.TapioServiceImpl
+	config           *Config
+	logger           *zap.Logger
+	tracer           trace.Tracer
+	grpcServer       *grpc_server.Server
+	httpServer       *http.Server
+	healthServer     *health.Server
+	tapioService     *grpc.TapioServiceComplete
+	collectorService *grpc.CollectorServiceImpl
+	eventService     *grpc.EventServiceImpl
 }
 
 // New creates a server orchestrator with validated configuration
@@ -198,20 +201,62 @@ func (o *Orchestrator) initGRPCServer() error {
 	}
 	o.grpcServer = grpc_server.NewServer(grpcOpts...)
 
-	o.tapioService = grpc.NewTapioServiceImpl(o.logger, o.tracer)
-	o.tapioService.SetConfig(grpc.ServiceConfig{
-		MaxEventSize: o.config.MaxEventSize,
-		MaxBatchSize: o.config.MaxBatchSize,
-		Environment:  o.config.Environment,
+	// Create service dependencies
+	storage := grpc.NewMemoryEventStorage(10000, 24*time.Hour)
+	correlator := grpc.NewRealTimeCorrelationEngine(o.logger, grpc.CorrelationConfig{
+		MaxEvents:       1000,
+		WindowSize:      5 * time.Minute,
+		CorrelationTTL:  30 * time.Minute,
+		EnableGrouping:  true,
 	})
+	registry := grpc.NewInMemoryCollectorRegistry(o.logger)
+	metrics := grpc.NewPrometheusMetricsCollector(o.logger)
 
+	// Create TapioService
+	o.tapioService = grpc.NewTapioServiceComplete(
+		o.logger,
+		o.tracer,
+		storage,
+		correlator,
+		registry,
+		metrics,
+		grpc.ServiceConfiguration{
+			MaxEventSize:        o.config.MaxEventSize,
+			MaxBatchSize:        o.config.MaxBatchSize,
+			MaxEventsPerSecond:  10000,
+			RetentionPeriod:     24 * time.Hour,
+			Environment:         o.config.Environment,
+			EnableTracing:       true,
+			EnableMetrics:       true,
+			MaxConcurrentStream: 100,
+			EventBufferSize:     1000,
+		},
+	)
+
+	// Create CollectorService with dependencies
+	collectorManager := manager.NewCollectorManager()
+
+	o.collectorService = grpc.NewCollectorServiceImpl(o.logger, o.tracer)
+	// Note: TapioDataFlow integration pending - CollectorService will work with basic functionality
+	o.collectorService.SetDependencies(collectorManager, nil, registry)
+
+	// Create EventService
+	o.eventService = grpc.NewEventServiceImpl(o.logger, o.tracer)
+	// Set dependencies for EventService (CollectorManager and DataFlow when available)
+	o.eventService.SetDependencies(collectorManager, nil)
+
+	// Register services
 	pb.RegisterTapioServiceServer(o.grpcServer, o.tapioService)
+	pb.RegisterCollectorServiceServer(o.grpcServer, o.collectorService)
+	pb.RegisterEventServiceServer(o.grpcServer, o.eventService)
 
 	if o.config.EnableHealth {
 		o.healthServer = health.NewServer()
 		grpc_health_v1.RegisterHealthServer(o.grpcServer, o.healthServer)
 		o.healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 		o.healthServer.SetServingStatus("tapio.v1.TapioService", grpc_health_v1.HealthCheckResponse_SERVING)
+		o.healthServer.SetServingStatus("tapio.v1.CollectorService", grpc_health_v1.HealthCheckResponse_SERVING)
+		o.healthServer.SetServingStatus("tapio.v1.EventService", grpc_health_v1.HealthCheckResponse_SERVING)
 	}
 
 	if o.config.EnableReflection {
@@ -233,8 +278,20 @@ func (o *Orchestrator) initHTTPGateway(ctx context.Context) error {
 	opts := []grpc_server.DialOption{grpc_server.WithTransportCredentials(insecure.NewCredentials())}
 	grpcEndpoint := fmt.Sprintf("localhost:%s", o.config.GRPCPort)
 
+	// Register TapioService REST gateway
 	if err := pb.RegisterTapioServiceHandlerFromEndpoint(ctx, mux, grpcEndpoint, opts); err != nil {
-		return fmt.Errorf("REST gateway registration failed: %w", err)
+		return fmt.Errorf("TapioService REST gateway registration failed: %w", err)
+	}
+
+	// Register EventService REST gateway
+	if err := pb.RegisterEventServiceHandlerFromEndpoint(ctx, mux, grpcEndpoint, opts); err != nil {
+		return fmt.Errorf("EventService REST gateway registration failed: %w", err)
+	}
+
+	// Register CollectorService REST gateway (if it has REST endpoints)
+	if err := pb.RegisterCollectorServiceHandlerFromEndpoint(ctx, mux, grpcEndpoint, opts); err != nil {
+		// CollectorService might not have REST endpoints, log but don't fail
+		o.logger.Debug("CollectorService has no REST endpoints", zap.Error(err))
 	}
 
 	o.httpServer = &http.Server{
