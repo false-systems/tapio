@@ -63,7 +63,9 @@ func (a *LegacyCollectorAdapter) Events() <-chan domain.UnifiedEvent {
 // Health adapts legacy health to modern interface
 func (a *LegacyCollectorAdapter) Health() CollectorHealth {
 	legacyHealth := a.legacyCollector.Health()
-	return &legacyHealthAdapter{status: string(legacyHealth)}
+	// Extract status value from the interface
+	statusValue := legacyHealth.Status()
+	return &legacyHealthAdapter{status: string(statusValue)}
 }
 
 // Statistics provides basic statistics for legacy collectors

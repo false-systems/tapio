@@ -7,10 +7,113 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/cni"
+	"github.com/yairfalse/tapio/pkg/collectors/cni/core"
 	"github.com/yairfalse/tapio/pkg/domain"
 	manager "github.com/yairfalse/tapio/pkg/integrations/collector-manager"
 	"github.com/yairfalse/tapio/pkg/intelligence/pipeline"
 )
+
+// CollectorAdapter adapts core.Collector to manager.Collector interface
+type CollectorAdapter struct {
+	collector core.Collector
+}
+
+func (ca *CollectorAdapter) Start(ctx context.Context) error {
+	return ca.collector.Start(ctx)
+}
+
+func (ca *CollectorAdapter) Stop() error {
+	return ca.collector.Stop()
+}
+
+func (ca *CollectorAdapter) Events() <-chan domain.UnifiedEvent {
+	return ca.collector.Events()
+}
+
+func (ca *CollectorAdapter) Health() manager.CollectorHealth {
+	health := ca.collector.Health()
+	return &healthAdapter{health: health}
+}
+
+func (ca *CollectorAdapter) Statistics() manager.CollectorStatistics {
+	stats := ca.collector.Statistics()
+	return &statsAdapter{stats: stats}
+}
+
+// healthAdapter adapts domain.HealthStatus to manager.CollectorHealth
+type healthAdapter struct {
+	health domain.HealthStatus
+}
+
+func (ha *healthAdapter) Status() string {
+	return string(ha.health.Status())
+}
+
+func (ha *healthAdapter) IsHealthy() bool {
+	return ha.health.Status() == domain.HealthHealthy
+}
+
+func (ha *healthAdapter) LastEventTime() time.Time {
+	details := ha.health.Details()
+	if t, ok := details["last_event_time"].(time.Time); ok {
+		return t
+	}
+	return time.Time{}
+}
+
+func (ha *healthAdapter) ErrorCount() uint64 {
+	details := ha.health.Details()
+	if count, ok := details["error_count"].(uint64); ok {
+		return count
+	}
+	return 0
+}
+
+func (ha *healthAdapter) Metrics() map[string]float64 {
+	details := ha.health.Details()
+	if metrics, ok := details["metrics"].(map[string]float64); ok {
+		return metrics
+	}
+	return make(map[string]float64)
+}
+
+// statsAdapter provides a basic implementation of CollectorStatistics
+type statsAdapter struct {
+	stats core.Statistics
+}
+
+func (sa *statsAdapter) EventsProcessed() uint64 {
+	return sa.stats.EventsCollected
+}
+
+func (sa *statsAdapter) EventsDropped() uint64 {
+	return sa.stats.EventsDropped
+}
+
+func (sa *statsAdapter) StartTime() time.Time {
+	return sa.stats.StartTime
+}
+
+func (sa *statsAdapter) Custom() map[string]interface{} {
+	// Convert core.Statistics to custom map
+	custom := make(map[string]interface{})
+	custom["cni_operations_total"] = sa.stats.CNIOperationsTotal
+	custom["cni_operations_failed"] = sa.stats.CNIOperationsFailed
+	custom["ip_allocations_total"] = sa.stats.IPAllocationsTotal
+	custom["ip_deallocations_total"] = sa.stats.IPDeallocationsTotal
+	custom["policy_events_total"] = sa.stats.PolicyEventsTotal
+	custom["monitoring_errors"] = sa.stats.MonitoringErrors
+	custom["k8s_events_processed"] = sa.stats.K8sEventsProcessed
+
+	// Merge with any existing custom stats
+	if sa.stats.Custom != nil {
+		for k, v := range sa.stats.Custom {
+			custom[k] = v
+		}
+	}
+
+	return custom
+}
 
 // DemoFullSemanticCorrelationPipeline demonstrates the complete event flow:
 // CNI Collector → CollectorManager → DataFlow → Semantic Intelligence
@@ -31,7 +134,12 @@ func DemoFullSemanticCorrelationPipeline() error {
 	// Step 2: Create CollectorManager (L3: Integration)
 	log.Printf("🔧 Creating CollectorManager...")
 	collectorMgr := manager.NewCollectorManager()
-	collectorMgr.AddCollector("cni", cniCollector)
+
+	// Create an adapter to convert core.Collector to manager.Collector
+	cniAdapter := &CollectorAdapter{
+		collector: cniCollector,
+	}
+	collectorMgr.AddCollector("cni", cniAdapter)
 
 	// Step 3: Create Pipeline for semantic correlation (L2: Intelligence)
 	log.Printf("🔧 Creating Pipeline with semantic correlation...")
@@ -140,11 +248,8 @@ func DemoFullSemanticCorrelationPipeline() error {
 			log.Printf("📈 Pipeline Status:")
 			log.Printf("   Active Collectors: %d", stats.ActiveCollectors)
 
-			// Check collector health
-			for name, collector := range collectorMgr.collectors {
-				health := collector.Health()
-				log.Printf("   %s: %s (healthy: %t)", name, health.Status(), health.IsHealthy())
-			}
+			// Note: CollectorManager doesn't have a Health() method
+			// You would need to check individual collector health
 
 		case <-ctx.Done():
 			return ctx.Err()

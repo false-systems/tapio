@@ -279,10 +279,10 @@ func (ms *MemoryEventStorage) getCandidateIDs(filter *pb.Filter, timeRange *pb.T
 				candidateIDs = append(candidateIDs, ids...)
 			}
 		}
-	} else if filter != nil && len(filter.Sources) > 0 {
+	} else if filter != nil && len(filter.SourceTypes) > 0 {
 		// Use source index
-		for _, source := range filter.Sources {
-			if ids, exists := ms.sourceIndex[source]; exists {
+		for _, source := range filter.SourceTypes {
+			if ids, exists := ms.sourceIndex[source.String()]; exists {
 				candidateIDs = append(candidateIDs, ids...)
 			}
 		}
@@ -371,8 +371,8 @@ func (ms *MemoryEventStorage) matchesFilter(event *domain.UnifiedEvent, filter *
 	}
 
 	// Query filter
-	if filter.Query != "" {
-		queryLower := strings.ToLower(filter.Query)
+	if filter.SearchText != "" {
+		queryLower := strings.ToLower(filter.SearchText)
 		if !strings.Contains(strings.ToLower(string(event.Type)), queryLower) &&
 			!strings.Contains(strings.ToLower(event.Source), queryLower) &&
 			!strings.Contains(strings.ToLower(event.GetSemanticIntent()), queryLower) {
@@ -384,7 +384,7 @@ func (ms *MemoryEventStorage) matchesFilter(event *domain.UnifiedEvent, filter *
 	if len(filter.EventTypes) > 0 {
 		matched := false
 		for _, t := range filter.EventTypes {
-			if string(event.Type) == t {
+			if string(event.Type) == t.String() {
 				matched = true
 				break
 			}
@@ -395,10 +395,10 @@ func (ms *MemoryEventStorage) matchesFilter(event *domain.UnifiedEvent, filter *
 	}
 
 	// Source filter
-	if len(filter.Sources) > 0 {
+	if len(filter.SourceTypes) > 0 {
 		matched := false
-		for _, s := range filter.Sources {
-			if event.Source == s {
+		for _, s := range filter.SourceTypes {
+			if event.Source == s.String() {
 				matched = true
 				break
 			}
@@ -413,7 +413,7 @@ func (ms *MemoryEventStorage) matchesFilter(event *domain.UnifiedEvent, filter *
 		matched := false
 		severity := event.GetSeverity()
 		for _, s := range filter.Severities {
-			if severity == s {
+			if severity == s.String() {
 				matched = true
 				break
 			}

@@ -30,7 +30,8 @@ import (
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/yairfalse/tapio/pkg/integrations/collector-manager"
+	"github.com/yairfalse/tapio/pkg/domain"
+	manager "github.com/yairfalse/tapio/pkg/integrations/collector-manager"
 	"github.com/yairfalse/tapio/pkg/interfaces/server/grpc"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"go.opentelemetry.io/otel"
@@ -42,6 +43,13 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
+
+// EventProcessor interface for integrating with UnifiedOrchestrator
+type EventProcessor interface {
+	ProcessedEvents() <-chan *domain.UnifiedEvent
+	GetMetrics() interface{}
+	GetHealth() domain.HealthStatus
+}
 
 // Config defines comprehensive server configuration
 type Config struct {
@@ -94,8 +102,9 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Orchestrator orchestrates the complete server infrastructure
-type Orchestrator struct {
+// ServerManager manages the complete server infrastructure including gRPC and HTTP gateways
+// This is renamed from Orchestrator to avoid confusion with the event processing orchestrator
+type ServerManager struct {
 	config           *Config
 	logger           *zap.Logger
 	tracer           trace.Tracer
@@ -105,10 +114,20 @@ type Orchestrator struct {
 	tapioService     *grpc.TapioServiceComplete
 	collectorService *grpc.CollectorServiceImpl
 	eventService     *grpc.EventServiceImpl
+
+	// Integration with event processing
+	eventProcessor EventProcessor // Interface to UnifiedOrchestrator
 }
 
 // New creates a server orchestrator with validated configuration
-func New(config *Config) (*Orchestrator, error) {
+// New creates a production-ready server manager
+// Deprecated: Use NewServerManager instead
+func New(config *Config) (*ServerManager, error) {
+	return NewServerManager(config)
+}
+
+// NewServerManager creates a production-ready server manager
+func NewServerManager(config *Config) (*ServerManager, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -120,15 +139,21 @@ func New(config *Config) (*Orchestrator, error) {
 
 	tracer := otel.Tracer("tapio-server")
 
-	return &Orchestrator{
+	return &ServerManager{
 		config: config,
 		logger: logger,
 		tracer: tracer,
 	}, nil
 }
 
+// WithEventProcessor sets the event processor (UnifiedOrchestrator)
+func (o *ServerManager) WithEventProcessor(processor EventProcessor) *ServerManager {
+	o.eventProcessor = processor
+	return o
+}
+
 // Run starts the server and blocks until context cancellation
-func (o *Orchestrator) Run(ctx context.Context) error {
+func (o *ServerManager) Run(ctx context.Context) error {
 	defer o.logger.Sync()
 
 	if err := o.initGRPCServer(); err != nil {
@@ -194,7 +219,7 @@ func initLogger(level string) (*zap.Logger, error) {
 }
 
 // initGRPCServer configures and initializes the gRPC server with all services
-func (o *Orchestrator) initGRPCServer() error {
+func (o *ServerManager) initGRPCServer() error {
 	grpcOpts := []grpc_server.ServerOption{
 		grpc_server.MaxRecvMsgSize(int(o.config.MaxEventSize)),
 		grpc_server.MaxSendMsgSize(int(o.config.MaxEventSize)),
@@ -204,10 +229,12 @@ func (o *Orchestrator) initGRPCServer() error {
 	// Create service dependencies
 	storage := grpc.NewMemoryEventStorage(10000, 24*time.Hour)
 	correlator := grpc.NewRealTimeCorrelationEngine(o.logger, grpc.CorrelationConfig{
-		MaxEvents:      1000,
-		WindowSize:     5 * time.Minute,
-		CorrelationTTL: 30 * time.Minute,
-		EnableGrouping: true,
+		BufferSize:        1000,
+		TimeWindow:        5 * time.Minute,
+		MaxCorrelations:   10000,
+		PatternConfidence: 0.8,
+		CleanupInterval:   5 * time.Minute,
+		RetentionPeriod:   30 * time.Minute,
 	})
 	registry := grpc.NewInMemoryCollectorRegistry(o.logger)
 	metrics := grpc.NewPrometheusMetricsCollector(o.logger)
@@ -268,7 +295,7 @@ func (o *Orchestrator) initGRPCServer() error {
 }
 
 // initHTTPGateway configures and starts the HTTP gateway for REST API access
-func (o *Orchestrator) initHTTPGateway(ctx context.Context) error {
+func (o *ServerManager) initHTTPGateway(ctx context.Context) error {
 	mux := runtime.NewServeMux(
 		runtime.WithIncomingHeaderMatcher(func(h string) (string, bool) {
 			return h, true
@@ -317,7 +344,7 @@ func (o *Orchestrator) initHTTPGateway(ctx context.Context) error {
 }
 
 // corsHandler adds comprehensive CORS headers for cross-origin requests
-func (o *Orchestrator) corsHandler(h http.Handler) http.Handler {
+func (o *ServerManager) corsHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -333,7 +360,7 @@ func (o *Orchestrator) corsHandler(h http.Handler) http.Handler {
 }
 
 // gracefulShutdown performs orderly shutdown of all server components
-func (o *Orchestrator) gracefulShutdown() error {
+func (o *ServerManager) gracefulShutdown() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), o.config.ShutdownTimeout)
 	defer cancel()
 
@@ -352,7 +379,7 @@ func (o *Orchestrator) gracefulShutdown() error {
 }
 
 // Health returns comprehensive server health status
-func (o *Orchestrator) Health() map[string]interface{} {
+func (o *ServerManager) Health() map[string]interface{} {
 	health := map[string]interface{}{
 		"status": "healthy",
 		"components": map[string]string{
@@ -373,7 +400,7 @@ func (o *Orchestrator) Health() map[string]interface{} {
 }
 
 // Statistics returns real-time server performance metrics
-func (o *Orchestrator) Statistics() map[string]interface{} {
+func (o *ServerManager) Statistics() map[string]interface{} {
 	return map[string]interface{}{
 		"grpc_port":      o.config.GRPCPort,
 		"http_port":      o.config.HTTPPort,

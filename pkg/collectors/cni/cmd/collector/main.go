@@ -92,10 +92,13 @@ func main() {
 
 	// Get initial health
 	health := collector.Health()
-	fmt.Printf("Collector Status: %s - %s\n", health.Status, health.Message)
-	fmt.Printf("Active Monitors: %d\n", health.ActiveMonitors)
-	if len(health.CNIPluginsDetected) > 0 {
-		fmt.Printf("CNI Plugins Detected: %v\n", health.CNIPluginsDetected)
+	fmt.Printf("Collector Status: %s - %s\n", health.Status(), health.Message())
+	details := health.Details()
+	if activeMonitors, ok := details["active_monitors"]; ok {
+		fmt.Printf("Active Monitors: %v\n", activeMonitors)
+	}
+	if plugins, ok := details["cni_plugins_detected"]; ok {
+		fmt.Printf("CNI Plugins Detected: %v\n", plugins)
 	}
 
 	// Print configuration
@@ -222,9 +225,14 @@ func main() {
 
 				if *verbose || *standalone {
 					fmt.Printf("\n=== Health Report ===\n")
-					fmt.Printf("Status: %s - %s\n", health.Status, health.Message)
-					fmt.Printf("Active Monitors: %d\n", health.ActiveMonitors)
-					fmt.Printf("Error Count: %d\n", health.ErrorCount)
+					fmt.Printf("Status: %s - %s\n", health.Status(), health.Message())
+					details := health.Details()
+					if activeMonitors, ok := details["active_monitors"]; ok {
+						fmt.Printf("Active Monitors: %v\n", activeMonitors)
+					}
+					if errorCount, ok := details["error_count"]; ok {
+						fmt.Printf("Error Count: %v\n", errorCount)
+					}
 					fmt.Printf("CNI Operations: Total=%d, Failed=%d\n",
 						stats.CNIOperationsTotal, stats.CNIOperationsFailed)
 					fmt.Printf("IP Allocations: Total=%d, Deallocations=%d\n",

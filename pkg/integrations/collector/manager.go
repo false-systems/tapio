@@ -135,22 +135,50 @@ func (cm *CollectorManager) Statistics() Statistics {
 // Health returns aggregated health status of all collectors
 func (cm *CollectorManager) Health() domain.HealthStatus {
 	if len(cm.collectors) == 0 {
-		return domain.HealthUnhealthy
+		return domain.NewHealthStatus(domain.HealthUnhealthy, "No collectors registered", nil)
 	}
 
 	healthyCount := 0
-	for _, collector := range cm.collectors {
+	degradedCount := 0
+	unhealthyCount := 0
+	details := make(map[string]interface{})
+	collectorStatuses := make(map[string]string)
+
+	for name, collector := range cm.collectors {
 		health := collector.Health()
-		if health == domain.HealthHealthy {
+		status := health.Status()
+		collectorStatuses[name] = string(status)
+
+		switch status {
+		case domain.HealthHealthy:
 			healthyCount++
+		case domain.HealthDegraded:
+			degradedCount++
+		case domain.HealthUnhealthy:
+			unhealthyCount++
 		}
 	}
 
+	details["collectors"] = collectorStatuses
+	details["healthy_count"] = healthyCount
+	details["degraded_count"] = degradedCount
+	details["unhealthy_count"] = unhealthyCount
+	details["total_count"] = len(cm.collectors)
+
+	var status domain.HealthStatusValue
+	var message string
+
 	if healthyCount == len(cm.collectors) {
-		return domain.HealthHealthy
-	} else if healthyCount > 0 {
-		return domain.HealthDegraded
+		status = domain.HealthHealthy
+		message = fmt.Sprintf("All %d collectors are healthy", len(cm.collectors))
+	} else if healthyCount > 0 || degradedCount > 0 {
+		status = domain.HealthDegraded
+		message = fmt.Sprintf("System degraded: %d healthy, %d degraded, %d unhealthy collectors",
+			healthyCount, degradedCount, unhealthyCount)
 	} else {
-		return domain.HealthUnhealthy
+		status = domain.HealthUnhealthy
+		message = fmt.Sprintf("All %d collectors are unhealthy", len(cm.collectors))
 	}
+
+	return domain.NewHealthStatus(status, message, details)
 }

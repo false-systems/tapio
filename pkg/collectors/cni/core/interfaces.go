@@ -20,7 +20,7 @@ type Collector interface {
 	Events() <-chan domain.UnifiedEvent
 
 	// Health and monitoring
-	Health() Health
+	Health() domain.HealthStatus
 	Statistics() Statistics
 
 	// Configuration
@@ -106,6 +106,49 @@ type Health struct {
 	ActiveMonitors     int                `json:"active_monitors"`
 	K8sConnected       bool               `json:"k8s_connected"`
 	Metrics            map[string]float64 `json:"metrics"`
+}
+
+// HealthStatusAdapter wraps Health to implement domain.HealthStatus interface
+type HealthStatusAdapter struct {
+	health Health
+}
+
+// NewHealthStatusAdapter creates an adapter for the Health struct
+func NewHealthStatusAdapter(h Health) domain.HealthStatus {
+	return &HealthStatusAdapter{health: h}
+}
+
+// Status returns the health status value
+func (a *HealthStatusAdapter) Status() domain.HealthStatusValue {
+	switch a.health.Status {
+	case HealthStatusHealthy:
+		return domain.HealthHealthy
+	case HealthStatusDegraded:
+		return domain.HealthDegraded
+	case HealthStatusUnhealthy:
+		return domain.HealthUnhealthy
+	default:
+		return domain.HealthUnknown
+	}
+}
+
+// Message returns the health message
+func (a *HealthStatusAdapter) Message() string {
+	return a.health.Message
+}
+
+// Details returns health details
+func (a *HealthStatusAdapter) Details() map[string]interface{} {
+	return map[string]interface{}{
+		"last_event_time":      a.health.LastEventTime,
+		"events_processed":     a.health.EventsProcessed,
+		"events_dropped":       a.health.EventsDropped,
+		"error_count":          a.health.ErrorCount,
+		"cni_plugins_detected": a.health.CNIPluginsDetected,
+		"active_monitors":      a.health.ActiveMonitors,
+		"k8s_connected":        a.health.K8sConnected,
+		"metrics":              a.health.Metrics,
+	}
 }
 
 // HealthStatus represents the health state

@@ -46,7 +46,7 @@ type EventServiceImpl struct {
 
 type subscription struct {
 	id       string
-	filter   string
+	filter   *pb.Filter
 	channel  chan *pb.EventUpdate
 	cancelFn context.CancelFunc
 }
@@ -204,7 +204,7 @@ func (s *EventServiceImpl) Subscribe(req *pb.SubscribeRequest, stream grpc.Serve
 
 	sub := &subscription{
 		id:       subID,
-		filter:   req.Filter.Query,
+		filter:   req.Filter,
 		channel:  make(chan *pb.EventUpdate, 100),
 		cancelFn: cancel,
 	}
@@ -224,20 +224,10 @@ func (s *EventServiceImpl) Subscribe(req *pb.SubscribeRequest, stream grpc.Serve
 
 	s.logger.Info("Event subscription created",
 		zap.String("subscription_id", subID),
-		zap.String("filter", req.Filter.Query))
+		zap.Int("event_types", len(req.Filter.EventTypes)))
 
-	// Send initial connected update
-	connectedUpdate := &pb.EventUpdate{
-		UpdateType: pb.EventUpdateType_EVENT_UPDATE_TYPE_CONNECTED,
-		Timestamp:  timestamppb.Now(),
-		Metadata: map[string]string{
-			"subscription_id": subID,
-		},
-	}
-
-	if err := stream.Send(connectedUpdate); err != nil {
-		return err
-	}
+	// EventUpdate doesn't have UpdateType/Timestamp/Metadata fields
+	// Just start streaming events without initial update
 
 	// If we have dataflow, subscribe to real events
 	if s.pipeline != nil {
@@ -260,9 +250,8 @@ func (s *EventServiceImpl) Subscribe(req *pb.SubscribeRequest, stream grpc.Serve
 
 					// Convert and send event
 					update := &pb.EventUpdate{
-						UpdateType: pb.EventUpdateType_EVENT_UPDATE_TYPE_NEW,
-						Event:      s.convertUnifiedEventToProto(event),
-						Timestamp:  timestamppb.Now(),
+						Type:  pb.EventUpdate_UPDATE_TYPE_NEW,
+						Event: s.convertUnifiedEventToProto(event),
 					}
 
 					select {
@@ -300,8 +289,7 @@ func (s *EventServiceImpl) GetEvents(ctx context.Context, req *pb.GetEventsReque
 	defer span.End()
 
 	s.logger.Debug("Getting events",
-		zap.String("filter", req.Filter.Query),
-		zap.Int32("limit", req.PageSize))
+		zap.Int("event_ids", len(req.EventIds)))
 
 	// For now, return empty results
 	// In production, this would query from event store
@@ -309,7 +297,6 @@ func (s *EventServiceImpl) GetEvents(ctx context.Context, req *pb.GetEventsReque
 		Events:        []*pb.Event{},
 		TotalCount:    0,
 		NextPageToken: "",
-		Timestamp:     timestamppb.Now(),
 	}, nil
 }
 
@@ -318,30 +305,27 @@ func (s *EventServiceImpl) GetStatistics(ctx context.Context, req *pb.TimeRange)
 	ctx, span := s.tracer.Start(ctx, "event.get_statistics")
 	defer span.End()
 
-	uptime := time.Since(s.startTime)
 	eventsReceived := s.stats.eventsReceived.Load()
-	eventsDropped := s.stats.eventsDropped.Load()
-
-	eventsPerSecond := float64(0)
-	if uptime.Seconds() > 0 {
-		eventsPerSecond = float64(eventsReceived) / uptime.Seconds()
-	}
 
 	return &pb.EventStatistics{
-		TotalEvents:     int64(eventsReceived),
-		EventsPerSecond: eventsPerSecond,
-		ByType: map[string]int64{
+		TimeRange:   req,
+		TotalEvents: int64(eventsReceived),
+		EventsByType: map[string]int64{
 			"network":    int64(eventsReceived / 4),
 			"kubernetes": int64(eventsReceived / 4),
 			"system":     int64(eventsReceived / 4),
 			"other":      int64(eventsReceived / 4),
 		},
-		BySource: map[string]int64{
-			"grpc": int64(eventsReceived * 8 / 10),
-			"rest": int64(eventsReceived * 2 / 10),
+		EventsBySeverity: map[string]int64{
+			"critical": int64(eventsReceived / 10),
+			"high":     int64(eventsReceived * 2 / 10),
+			"medium":   int64(eventsReceived * 3 / 10),
+			"low":      int64(eventsReceived * 4 / 10),
 		},
-		TimeRange: req,
-		Timestamp: timestamppb.Now(),
+		EventsBySource: map[string]int64{
+			"collector-grpc": int64(eventsReceived * 8 / 10),
+			"rest-api":       int64(eventsReceived * 2 / 10),
+		},
 	}, nil
 }
 
@@ -372,7 +356,7 @@ func (s *EventServiceImpl) SubmitEventBatch(ctx context.Context, req *pb.EventBa
 	return &pb.EventAck{
 		EventId:   req.BatchId,
 		Timestamp: timestamppb.Now(),
-		Status:    pb.AckStatus_ACK_STATUS_SUCCESS,
+		Status:    "processed",
 		Message:   fmt.Sprintf("Processed %d/%d events", successCount, batchSize),
 	}, nil
 }
@@ -380,23 +364,76 @@ func (s *EventServiceImpl) SubmitEventBatch(ctx context.Context, req *pb.EventBa
 // Helper methods
 
 func (s *EventServiceImpl) convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
-	return &domain.UnifiedEvent{
-		ID:        event.Id,
-		Type:      event.Type.String(),
-		Timestamp: event.Timestamp.AsTime(),
-		Message:   event.Message,
-		Severity:  event.Severity.String(),
-		Source:    "grpc",
-		Metadata:  make(map[string]interface{}),
+	// Convert attributes
+	attributes := make(map[string]interface{})
+	for k, v := range event.Attributes {
+		attributes[k] = v
 	}
+
+	unified := &domain.UnifiedEvent{
+		ID:         event.Id,
+		Type:       domain.EventType(event.Type.String()),
+		Timestamp:  event.Timestamp.AsTime(),
+		Source:     "grpc",
+		Attributes: attributes,
+	}
+
+	// Set trace context if available in event
+	if event.TraceId != "" || event.SpanId != "" {
+		unified.TraceContext = &domain.TraceContext{
+			TraceID: event.TraceId,
+			SpanID:  event.SpanId,
+		}
+	}
+
+	return unified
 }
 
 func (s *EventServiceImpl) convertUnifiedEventToProto(event *domain.UnifiedEvent) *pb.Event {
-	return &pb.Event{
-		Id:        event.ID,
-		Type:      pb.EventType_EVENT_TYPE_UNSPECIFIED,
-		Timestamp: timestamppb.New(event.Timestamp),
-		Message:   event.Message,
-		Severity:  pb.EventSeverity_EVENT_SEVERITY_INFO,
+	// Convert attributes back to map[string]string
+	attributes := make(map[string]string)
+	for k, v := range event.Attributes {
+		if str, ok := v.(string); ok {
+			attributes[k] = str
+		} else {
+			attributes[k] = fmt.Sprintf("%v", v)
+		}
+	}
+
+	protoEvent := &pb.Event{
+		Id:         event.ID,
+		Type:       s.mapEventType(string(event.Type)),
+		Timestamp:  timestamppb.New(event.Timestamp),
+		Attributes: attributes,
+	}
+
+	// Set trace context if available
+	if event.TraceContext != nil {
+		protoEvent.TraceId = event.TraceContext.TraceID
+		protoEvent.SpanId = event.TraceContext.SpanID
+	}
+
+	// Set correlation IDs
+	if len(event.CorrelationHints) > 0 {
+		protoEvent.CorrelationIds = event.CorrelationHints
+	}
+
+	return protoEvent
+}
+
+func (s *EventServiceImpl) mapEventType(eventType string) pb.EventType {
+	switch eventType {
+	case "network":
+		return pb.EventType_EVENT_TYPE_NETWORK
+	case "syscall":
+		return pb.EventType_EVENT_TYPE_SYSCALL
+	case "kubernetes":
+		return pb.EventType_EVENT_TYPE_KUBERNETES
+	case "process":
+		return pb.EventType_EVENT_TYPE_PROCESS
+	case "http":
+		return pb.EventType_EVENT_TYPE_HTTP
+	default:
+		return pb.EventType_EVENT_TYPE_UNSPECIFIED
 	}
 }

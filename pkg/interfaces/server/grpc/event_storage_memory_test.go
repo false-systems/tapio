@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"sort"
 	"testing"
 	"time"
 

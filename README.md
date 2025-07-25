@@ -41,7 +41,8 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 ✅ **CorrelationOutput Storage** - Intelligence persistence with vector embeddings for AI  
 ✅ **Context Processing** - Impact assessment with business logic and cascade risk calculation  
 ✅ **Adapters Layer** - Clean interfaces between implementations and pipeline stages  
-✅ **gRPC Service** - Complete TapioService with bidirectional streaming  
+✅ **gRPC Services** - Complete TapioService, EventService, CollectorService, and CorrelationService  
+✅ **CorrelationService** - Real-time correlation analysis with AI-powered insights and recommendations  
 ✅ **Multiple Collectors** - eBPF (integrated), K8s, Systemd, CNI (standalone binaries)  
 
 **What's working today:**
@@ -200,7 +201,9 @@ go build ./...
 | **K8s Collector** | Kubernetes event monitoring | ✅ Standalone Binary |
 | **Systemd Collector** | System service monitoring | ✅ Standalone Binary |
 | **CNI Collector** | Container network events | ✅ Standalone Binary |
-| **gRPC Service** | Bidirectional streaming API | ✅ Complete |
+| **gRPC Services** | TapioService, EventService, CollectorService, CorrelationService | ✅ Complete |
+| **CorrelationService** | Real-time correlation with ML insights | ✅ Complete |
+| **REST API** | Auto-generated via grpc-gateway | ✅ Complete |
 | **Performance** | 1M+ events/sec achieved with ring buffers | ✅ Optimized |
 | **Production Deployment** | Ready for real workloads | ✅ Ready |
 
@@ -436,6 +439,7 @@ Goal: Link performance issues to cloud costs.
 | [UnifiedEvent Design](docs/UNIFIED_EVENT_DESIGN.md) | Deep dive into the event format |
 | [Rationale](docs/RATIONALE.md) | Why we built Tapio this way |
 | [API Reference](docs/API.md) | gRPC and REST API documentation |
+| [CorrelationService](docs/CORRELATION_SERVICE.md) | Correlation API documentation |
 | [Collector Guide](docs/COLLECTORS.md) | How to write custom collectors |
 | [Deployment](docs/DEPLOYMENT.md) | Production deployment guide |
 

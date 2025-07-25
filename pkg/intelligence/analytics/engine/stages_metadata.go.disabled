@@ -7,7 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/performance"
+	"github.com/yairfalse/tapio/pkg/performance"
 )
 
 // ValidationStage validates events before processing
@@ -25,20 +25,20 @@ func (s *ValidationStage) Name() string {
 }
 
 func (s *ValidationStage) Process(ctx context.Context, event *performance.Event) (*performance.Event, error) {
-	// Extract unified event from metadata
-	unifiedEvent := (*domain.UnifiedEvent)(unsafe.Pointer(uintptr(event.Metadata[0])))
+	// performance.Event is an alias for domain.UnifiedEvent
+	// No need for unsafe pointer conversion
 
 	// Validate required fields
-	if unifiedEvent.ID == "" {
+	if event.ID == "" {
 		return nil, fmt.Errorf("event ID is required")
 	}
-	if unifiedEvent.Timestamp.IsZero() {
+	if event.Timestamp.IsZero() {
 		return nil, fmt.Errorf("event timestamp is required")
 	}
-	if unifiedEvent.Type == "" {
+	if event.Type == "" {
 		return nil, fmt.Errorf("event type is required")
 	}
-	if unifiedEvent.Source == "" {
+	if event.Source == "" {
 		return nil, fmt.Errorf("event source is required")
 	}
 

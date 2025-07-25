@@ -11,7 +11,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"

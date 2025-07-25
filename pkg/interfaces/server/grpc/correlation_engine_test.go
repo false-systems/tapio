@@ -10,7 +10,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func createCorrelationTestEvent(id string, eventType domain.EventType, severity string, service string, timestamp time.Time) *domain.UnifiedEvent {

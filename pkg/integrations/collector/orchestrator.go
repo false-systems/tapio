@@ -87,12 +87,11 @@ func (c *Config) Validate() error {
 
 // Orchestrator orchestrates the complete collection pipeline
 type Orchestrator struct {
-	config            *Config
-	manager           *CollectorManager
-	pipeline          pipeline.IntelligencePipeline
-	tracer            *sdktrace.TracerProvider
-	correlationBuffer chan pipeline.CorrelationOutput
-	eventCount        int64
+	config     *Config
+	manager    *CollectorManager
+	pipeline   *pipeline.UnifiedOrchestrator
+	tracer     *sdktrace.TracerProvider
+	eventCount int64
 }
 
 // New creates a collector orchestrator with validated configuration
@@ -102,8 +101,7 @@ func New(config *Config) (*Orchestrator, error) {
 	}
 
 	return &Orchestrator{
-		config:            config,
-		correlationBuffer: make(chan pipeline.CorrelationOutput, config.BufferSize),
+		config: config,
 	}, nil
 }
 
@@ -122,29 +120,19 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return fmt.Errorf("collector initialization failed: %w", err)
 	}
 
-	// Create pipeline configuration based on correlation mode
-	var pipelineConfig *pipeline.PipelineConfig
-	if o.config.CorrelationMode == "ring-buffer" {
-		pipelineConfig = pipeline.RingBufferPipelineConfig()
-	} else if o.config.CorrelationMode == "semantic" {
-		pipelineConfig = pipeline.DefaultPipelineConfig()
-	} else {
-		pipelineConfig = pipeline.StandardPipelineConfig()
-	}
+	// Create unified orchestrator configuration
+	orchestratorConfig := pipeline.DefaultUnifiedConfig()
+	orchestratorConfig.BufferSize = o.config.BufferSize
+	orchestratorConfig.EnableCorrelation = o.config.CorrelationMode == "semantic"
+	orchestratorConfig.ProcessingTimeout = 5 * time.Second
+	orchestratorConfig.ShutdownTimeout = 30 * time.Second
 
-	// Apply custom configuration
-	pipelineConfig.BufferSize = o.config.BufferSize
-	pipelineConfig.ProcessingTimeout = o.config.FlushInterval
-	pipelineConfig.EnableTracing = o.config.OTELEndpoint != ""
-
-	// Build the pipeline
-	builder := pipeline.NewPipelineBuilder()
-	builder.WithConfig(pipelineConfig)
-	pipeline, err := builder.Build()
+	// Create the unified orchestrator
+	orchestrator, err := pipeline.NewUnifiedOrchestrator(orchestratorConfig)
 	if err != nil {
-		return fmt.Errorf("pipeline creation failed: %w", err)
+		return fmt.Errorf("failed to create unified orchestrator: %w", err)
 	}
-	o.pipeline = pipeline
+	o.pipeline = orchestrator
 
 	log.Printf("🚀 Starting Tapio Collector %s", o.config.ServiceVersion)
 	log.Printf("   Server: %s", o.config.ServerAddress)
@@ -155,13 +143,17 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return fmt.Errorf("collector manager start failed: %w", err)
 	}
 
+	// Start the unified pipeline without direct collector integration
+	// We'll bridge events from manager to pipeline instead
 	if err := o.pipeline.Start(ctx); err != nil {
 		return fmt.Errorf("pipeline start failed: %w", err)
 	}
 
-	go o.routeCollectorEvents(ctx)
-	go o.processCorrelationOutputs(ctx)
-	go o.sendToServer(ctx)
+	// Bridge events from collector manager to pipeline
+	go o.bridgeEvents(ctx)
+
+	// Process events from the pipeline
+	go o.processEvents(ctx)
 
 	log.Printf("✅ Tapio Collector operational")
 
@@ -169,8 +161,9 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	log.Printf("🛑 Shutting down...")
 	o.manager.Stop()
-	o.pipeline.Stop()
-	close(o.correlationBuffer)
+	if o.pipeline != nil {
+		o.pipeline.Stop()
+	}
 
 	log.Printf("👋 Tapio Collector stopped")
 	return nil
@@ -238,75 +231,27 @@ func (o *Orchestrator) initCollectors(ctx context.Context) error {
 	return nil
 }
 
-// routeCollectorEvents routes raw events from collectors to intelligence pipeline
-func (o *Orchestrator) routeCollectorEvents(ctx context.Context) {
-	for {
-		select {
-		case event := <-o.manager.Events():
-			// Process through pipeline
-			if err := o.pipeline.ProcessEvent(&event); err != nil {
-				log.Printf("⚠️  Failed to process event %s: %v", event.ID, err)
-			}
-
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// processCorrelationOutputs retrieves and processes correlation results from pipeline
-func (o *Orchestrator) processCorrelationOutputs(ctx context.Context) {
-	ticker := time.NewTicker(100 * time.Millisecond) // Check for outputs frequently
-	defer ticker.Stop()
-
-	// Buffer for batch retrieval
-	outputs := make([]pipeline.CorrelationOutput, 100)
-
-	for {
-		select {
-		case <-ticker.C:
-			// For ring buffer pipeline, retrieve outputs
-			if ringBuffer, ok := o.pipeline.(*pipeline.RingBufferPipeline); ok {
-				count := ringBuffer.GetCorrelationOutputs(outputs)
-				for i := 0; i < count; i++ {
-					select {
-					case o.correlationBuffer <- outputs[i]:
-						atomic.AddInt64(&o.eventCount, 1)
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// sendToServer sends correlated events to the Tapio server
-func (o *Orchestrator) sendToServer(ctx context.Context) {
+// processEvents handles events from the unified pipeline
+func (o *Orchestrator) processEvents(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case output := <-o.correlationBuffer:
-			// TODO: Implement server communication
-			// For now, just log high-confidence correlations
-			if output.Confidence > 0.8 {
-				log.Printf("🎯 High-confidence correlation: %s (%.2f)",
-					output.OriginalEvent.ID, output.Confidence)
+		case event := <-o.pipeline.ProcessedEvents():
+			count := atomic.AddInt64(&o.eventCount, 1)
+			if count%1000 == 0 {
+				log.Printf("📊 Processed %d events, latest: %s", count, event.ID)
 			}
 
 		case <-ticker.C:
-			metrics := o.pipeline.GetMetrics()
-			managerStats := o.manager.Statistics()
-			log.Printf("📈 Pipeline: Processed=%d, Correlated=%d, Dropped=%d | Collectors=%d",
-				metrics.EventsProcessed,
-				metrics.EventsCorrelated,
-				metrics.EventsDropped,
-				managerStats.ActiveCollectors)
+			if o.pipeline != nil {
+				metrics := o.pipeline.GetMetrics()
+				log.Printf("📈 Status: Events=%d, Throughput=%.2f/sec, Dropped=%d",
+					metrics.EventsProcessed,
+					metrics.ThroughputPerSecond,
+					metrics.EventsDropped)
+			}
 
 		case <-ctx.Done():
 			return
@@ -314,21 +259,92 @@ func (o *Orchestrator) sendToServer(ctx context.Context) {
 	}
 }
 
-// Statistics returns real-time collector and pipeline statistics
+// bridgeEvents bridges events from CollectorManager (domain.Event) to pipeline (domain.UnifiedEvent)
+func (o *Orchestrator) bridgeEvents(ctx context.Context) {
+	// Create a channel adapter that converts Event to UnifiedEvent
+	adapter := &ManagerAdapter{
+		manager: o.manager,
+		ctx:     ctx,
+	}
+
+	// Add the adapter as a collector to the pipeline
+	if err := o.pipeline.AddCollector("manager-bridge", adapter); err != nil {
+		log.Printf("Failed to add manager bridge: %v", err)
+	}
+}
+
+// ManagerAdapter adapts CollectorManager to the pipeline.Collector interface
+type ManagerAdapter struct {
+	manager   *CollectorManager
+	ctx       context.Context
+	eventChan chan *domain.UnifiedEvent
+}
+
+func (ma *ManagerAdapter) Start(ctx context.Context) error {
+	ma.eventChan = make(chan *domain.UnifiedEvent, 10000)
+
+	// Start conversion goroutine
+	go func() {
+		for {
+			select {
+			case event, ok := <-ma.manager.Events():
+				if !ok {
+					close(ma.eventChan)
+					return
+				}
+
+				// Forward the event (already UnifiedEvent)
+				select {
+				case ma.eventChan <- &event:
+				case <-ctx.Done():
+					return
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (ma *ManagerAdapter) Stop() error {
+	// Manager stop is handled by orchestrator
+	return nil
+}
+
+func (ma *ManagerAdapter) Events() <-chan *domain.UnifiedEvent {
+	return ma.eventChan
+}
+
+func (ma *ManagerAdapter) Health() domain.HealthStatus {
+	return ma.manager.Health()
+}
+
+// Statistics returns real-time collector statistics
 func (o *Orchestrator) Statistics() struct {
 	ActiveCollectors  int
 	ProcessedEvents   int64
 	CorrelatedEvents  int64
 	DroppedEvents     int64
 	BufferUtilization float64
-	PipelineRunning   bool
+	Throughput        float64
 } {
-	managerStats := o.manager.Statistics()
-	pipelineMetrics := o.pipeline.GetMetrics()
+	var activeCollectors int
+	var throughput float64
 
-	bufferLen := float64(len(o.correlationBuffer))
-	bufferCapacity := float64(cap(o.correlationBuffer))
-	utilization := bufferLen / bufferCapacity * 100
+	if o.manager != nil {
+		stats := o.manager.Statistics()
+		activeCollectors = stats.ActiveCollectors
+	}
+
+	processedEvents := atomic.LoadInt64(&o.eventCount)
+
+	if o.pipeline != nil {
+		metrics := o.pipeline.GetMetrics()
+		throughput = metrics.ThroughputPerSecond
+	}
 
 	return struct {
 		ActiveCollectors  int
@@ -336,13 +352,11 @@ func (o *Orchestrator) Statistics() struct {
 		CorrelatedEvents  int64
 		DroppedEvents     int64
 		BufferUtilization float64
-		PipelineRunning   bool
+		Throughput        float64
 	}{
-		ActiveCollectors:  managerStats.ActiveCollectors,
-		ProcessedEvents:   pipelineMetrics.EventsProcessed,
-		CorrelatedEvents:  pipelineMetrics.EventsCorrelated,
-		DroppedEvents:     pipelineMetrics.EventsDropped,
-		BufferUtilization: utilization,
-		PipelineRunning:   o.pipeline.IsRunning(),
+		ActiveCollectors:  activeCollectors,
+		ProcessedEvents:   processedEvents,
+		BufferUtilization: 0, // No longer relevant with unified pipeline
+		Throughput:        throughput,
 	}
 }

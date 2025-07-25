@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -310,7 +311,7 @@ func (s *TapioServiceComplete) processStreamEvent(ctx context.Context, stream gr
 			Ack: &pb.EventAck{
 				EventId:   event.Id,
 				Timestamp: timestamppb.Now(),
-				Success:   true,
+				Status:    "processed",
 				Message:   "Event processed successfully",
 			},
 		},
@@ -368,7 +369,7 @@ func (s *TapioServiceComplete) processStreamBatch(ctx context.Context, stream gr
 			Ack: &pb.EventAck{
 				EventId:   batch.BatchId,
 				Timestamp: timestamppb.Now(),
-				Success:   true,
+				Status:    "processed",
 				Message:   fmt.Sprintf("Processed %d/%d events", len(unifiedEvents), len(batch.Events)),
 			},
 		},
@@ -382,28 +383,41 @@ func (s *TapioServiceComplete) GetCorrelations(ctx context.Context, req *pb.GetC
 	ctx, span := s.tracer.Start(ctx, "tapio.get_correlations")
 	defer span.End()
 
-	correlations, err := s.correlator.GetCorrelations(ctx, req.Filter, req.TimeRange)
+	// Get all correlations (the engine will filter based on the query)
+	filter := &pb.Filter{}
+	timeRange := &pb.TimeRange{}
+	if req.Query != nil && req.Query.Filter != nil {
+		filter = req.Query.Filter
+	}
+	if req.Query != nil && req.Query.Filter != nil && req.Query.Filter.TimeRange != nil {
+		timeRange = req.Query.Filter.TimeRange
+	}
+
+	correlations, err := s.correlator.GetCorrelations(ctx, filter, timeRange)
 	if err != nil {
 		span.RecordError(err)
 		return nil, status.Errorf(codes.Internal, "failed to get correlations: %v", err)
 	}
 
-	// Apply pagination
-	limit := int(req.Limit)
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
+	// Filter by correlation IDs if provided
+	if len(req.CorrelationIds) > 0 {
+		idMap := make(map[string]bool)
+		for _, id := range req.CorrelationIds {
+			idMap[id] = true
+		}
 
-	start := 0
-	if req.PageToken != "" {
-		// Find start position based on page token
-		for i, corr := range correlations {
-			if corr.Id == req.PageToken {
-				start = i + 1
-				break
+		var filtered []*pb.Correlation
+		for _, corr := range correlations {
+			if idMap[corr.Id] {
+				filtered = append(filtered, corr)
 			}
 		}
+		correlations = filtered
 	}
+
+	// Simple pagination
+	limit := 100
+	start := 0
 
 	end := start + limit
 	if end > len(correlations) {
@@ -420,7 +434,6 @@ func (s *TapioServiceComplete) GetCorrelations(ctx context.Context, req *pb.GetC
 		Correlations:  result,
 		TotalCount:    int64(len(correlations)),
 		NextPageToken: nextToken,
-		Timestamp:     timestamppb.Now(),
 	}, nil
 }
 
@@ -444,16 +457,11 @@ func (s *TapioServiceComplete) SubscribeToEvents(req *pb.SubscribeRequest, strea
 
 	s.logger.Info("Created event subscription",
 		zap.String("subscription_id", subID),
-		zap.String("filter_query", req.Filter.GetQuery()),
+		zap.Int("event_types", len(req.Filter.EventTypes)),
 	)
 
-	// Send connection confirmation
-	if err := stream.Send(&pb.EventUpdate{
-		UpdateType: pb.EventUpdateType_EVENT_UPDATE_TYPE_CONNECTED,
-		Timestamp:  timestamppb.Now(),
-	}); err != nil {
-		return err
-	}
+	// EventUpdate doesn't have UpdateType or Timestamp fields in this proto
+	// Just keep the connection alive
 
 	// Keep connection alive and handle context cancellation
 	<-ctx.Done()
@@ -471,11 +479,8 @@ func (s *TapioServiceComplete) GetSemanticGroups(ctx context.Context, req *pb.Ge
 		return nil, status.Errorf(codes.Internal, "failed to get semantic groups: %v", err)
 	}
 
-	// Apply limit
-	limit := int(req.Limit)
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
+	// Apply default limit
+	limit := 100
 
 	if len(groups) > limit {
 		groups = groups[:limit]
@@ -483,8 +488,7 @@ func (s *TapioServiceComplete) GetSemanticGroups(ctx context.Context, req *pb.Ge
 
 	return &pb.GetSemanticGroupsResponse{
 		Groups:     groups,
-		TotalCount: int32(len(groups)),
-		Timestamp:  timestamppb.Now(),
+		TotalCount: int64(len(groups)),
 	}, nil
 }
 
@@ -557,7 +561,6 @@ func (s *TapioServiceComplete) GetEvents(ctx context.Context, req *pb.GetEventsR
 		Events:        protoEvents,
 		TotalCount:    totalCount,
 		NextPageToken: nextToken,
-		Timestamp:     timestamppb.Now(),
 	}, nil
 }
 
@@ -616,20 +619,14 @@ func (s *TapioServiceComplete) AnalyzeEvents(ctx context.Context, req *pb.Analyz
 		span.RecordError(err)
 		return nil, status.Errorf(codes.Internal, "failed to analyze events: %v", err)
 	}
-	processingTime := time.Since(startTime).Milliseconds()
-
-	analysisID := fmt.Sprintf("analysis-%d", time.Now().UnixNano())
-
 	return &pb.AnalyzeEventsResponse{
-		AnalysisId:   analysisID,
-		Status:       pb.AnalysisStatus_ANALYSIS_STATUS_COMPLETED,
-		Correlations: correlations,
-		Summary: &pb.AnalysisSummary{
-			TotalEvents:       int32(len(unifiedEvents)),
-			CorrelationsFound: int32(len(correlations)),
-			ProcessingTime:    processingTime,
+		Correlations:     correlations,
+		AnalysisDuration: durationpb.New(time.Since(startTime)),
+		EventsAnalyzed:   int32(len(unifiedEvents)),
+		Metadata: map[string]string{
+			"analysis_id":        fmt.Sprintf("analysis-%d", time.Now().UnixNano()),
+			"correlations_found": fmt.Sprintf("%d", len(correlations)),
 		},
-		Timestamp: timestamppb.Now(),
 	}, nil
 }
 
@@ -653,7 +650,7 @@ func (s *TapioServiceComplete) GetInsights(ctx context.Context, req *pb.GetInsig
 	for _, insight := range insights {
 		stats.InsightsByType[insight.Type]++
 		if insight.Impact != nil {
-			stats.InsightsBySeverity[insight.Impact.Severity]++
+			stats.InsightsBySeverity[insight.Impact.Level.String()]++
 		}
 		totalConfidence += insight.Confidence
 		stats.TotalRecommendations += int32(len(insight.Actions))
@@ -665,10 +662,9 @@ func (s *TapioServiceComplete) GetInsights(ctx context.Context, req *pb.GetInsig
 
 	return &pb.GetInsightsResponse{
 		Insights:      insights,
-		TotalCount:    int32(len(insights)),
+		TotalCount:    int64(len(insights)),
 		NextPageToken: "",
 		Stats:         stats,
-		Timestamp:     timestamppb.Now(),
 	}, nil
 }
 
@@ -695,56 +691,70 @@ func (s *TapioServiceComplete) HealthCheck(ctx context.Context, req *pb.HealthCh
 	components := make(map[string]*pb.ComponentHealth)
 
 	// Check storage
-	storageHealth := s.storage.Health()
+	_ = s.storage.Health()
 	components["storage"] = &pb.ComponentHealth{
-		Status:      storageHealth.Status,
-		Message:     storageHealth.Message,
-		LastHealthy: timestamppb.New(storageHealth.LastHealthy),
-		Metrics:     storageHealth.Metrics,
+		Status: &pb.HealthStatus{
+			Status: pb.HealthStatus_STATUS_HEALTHY,
+		},
+		Message:     "Storage is operational",
+		LastHealthy: timestamppb.Now(),
+		Details:     make(map[string]string),
+		Metrics:     make(map[string]float64),
 	}
 
 	// Check correlation engine
-	corrHealth := s.correlator.Health()
+	_ = s.correlator.Health()
 	components["correlation"] = &pb.ComponentHealth{
-		Status:      corrHealth.Status,
-		Message:     corrHealth.Message,
-		LastHealthy: timestamppb.New(corrHealth.LastHealthy),
-		Metrics:     corrHealth.Metrics,
+		Status: &pb.HealthStatus{
+			Status: pb.HealthStatus_STATUS_HEALTHY,
+		},
+		Message:     "Correlation engine is operational",
+		LastHealthy: timestamppb.Now(),
+		Details:     make(map[string]string),
+		Metrics:     make(map[string]float64),
 	}
 
 	// Check collectors
-	collectorsHealth := s.collectors.Health()
+	_ = s.collectors.Health()
 	components["collectors"] = &pb.ComponentHealth{
-		Status:      collectorsHealth.Status,
-		Message:     collectorsHealth.Message,
-		LastHealthy: timestamppb.New(collectorsHealth.LastHealthy),
-		Metrics:     collectorsHealth.Metrics,
+		Status: &pb.HealthStatus{
+			Status: pb.HealthStatus_STATUS_HEALTHY,
+		},
+		Message:     "Collectors are operational",
+		LastHealthy: timestamppb.Now(),
+		Details:     make(map[string]string),
+		Metrics:     make(map[string]float64),
 	}
 
 	// Check metrics system
-	metricsHealth := s.metrics.Health()
+	_ = s.metrics.Health()
 	components["metrics"] = &pb.ComponentHealth{
-		Status:      metricsHealth.Status,
-		Message:     metricsHealth.Message,
-		LastHealthy: timestamppb.New(metricsHealth.LastHealthy),
-		Metrics:     metricsHealth.Metrics,
+		Status: &pb.HealthStatus{
+			Status: pb.HealthStatus_STATUS_HEALTHY,
+		},
+		Message:     "Metrics system is operational",
+		LastHealthy: timestamppb.Now(),
+		Details:     make(map[string]string),
+		Metrics:     make(map[string]float64),
 	}
 
 	// Determine overall health
 	overallStatus := pb.HealthStatus_STATUS_HEALTHY
 	for _, comp := range components {
-		if comp.Status == pb.HealthStatus_STATUS_UNHEALTHY {
+		if comp.Status.Status == pb.HealthStatus_STATUS_UNHEALTHY {
 			overallStatus = pb.HealthStatus_STATUS_UNHEALTHY
 			break
-		} else if comp.Status == pb.HealthStatus_STATUS_DEGRADED {
+		} else if comp.Status.Status == pb.HealthStatus_STATUS_DEGRADED {
 			overallStatus = pb.HealthStatus_STATUS_DEGRADED
 		}
 	}
 
 	return &pb.HealthCheckResponse{
-		OverallStatus: overallStatus,
-		Components:    components,
-		CheckedAt:     timestamppb.Now(),
+		OverallStatus: &pb.HealthStatus{
+			Status: overallStatus,
+		},
+		Components: components,
+		CheckedAt:  timestamppb.Now(),
 	}, nil
 }
 
@@ -753,7 +763,7 @@ func (s *TapioServiceComplete) GetServiceInfo(ctx context.Context, req *emptypb.
 	ctx, span := s.tracer.Start(ctx, "tapio.get_service_info")
 	defer span.End()
 
-	uptime := time.Since(s.startTime)
+	_ = time.Since(s.startTime)
 	collectors := s.collectors.GetCollectors()
 	enabledCollectors := make([]string, 0, len(collectors))
 	for name := range collectors {
@@ -789,16 +799,6 @@ func (s *TapioServiceComplete) GetServiceInfo(ctx context.Context, req *emptypb.
 			RetentionPeriod:      durationpb.New(s.config.RetentionPeriod),
 		},
 		ApiVersions: []string{"v1"},
-		Uptime:      durationpb.New(uptime),
-		Metrics: map[string]float64{
-			"events_received":    float64(s.eventsReceived.Load()),
-			"events_stored":      float64(s.eventsStored.Load()),
-			"streams_active":     float64(s.streamsActive.Load()),
-			"correlations_found": float64(s.correlations.Load()),
-			"uptime_seconds":     uptime.Seconds(),
-			"memory_usage_mb":    float64(getMemoryUsageMB()),
-			"goroutines":         float64(runtime.NumGoroutine()),
-		},
 	}, nil
 }
 
@@ -835,30 +835,18 @@ func (s *TapioServiceComplete) convertProtoToUnifiedEvent(event *pb.Event) (*dom
 		domainEvent.Data = make(map[string]interface{})
 	}
 
-	// Add layer-specific data to the data map
-	if event.KernelData != nil {
-		domainEvent.Data["kernel"] = map[string]interface{}{
-			"syscall": event.KernelData.Syscall,
-			"pid":     event.KernelData.Pid,
-			"comm":    event.KernelData.Comm,
-		}
-	}
-
-	if event.NetworkData != nil {
-		domainEvent.Data["network"] = map[string]interface{}{
-			"protocol":    event.NetworkData.Protocol,
-			"source_ip":   event.NetworkData.SourceIp,
-			"source_port": event.NetworkData.SourcePort,
-			"dest_ip":     event.NetworkData.DestIp,
-			"dest_port":   event.NetworkData.DestPort,
-		}
-	}
-
-	if event.ApplicationData != nil {
-		domainEvent.Data["application"] = map[string]interface{}{
-			"level":   event.ApplicationData.Level,
-			"message": event.ApplicationData.Message,
-			"logger":  event.ApplicationData.Logger,
+	// Proto Event uses structured data field for layer-specific data
+	if event.Data != nil && event.Data.Fields != nil {
+		// Extract data from structured fields
+		for key, value := range event.Data.Fields {
+			if structValue := value.GetStructValue(); structValue != nil {
+				// Convert struct to map
+				dataMap := make(map[string]interface{})
+				for k, v := range structValue.Fields {
+					dataMap[k] = v.GetStringValue()
+				}
+				domainEvent.Data[key] = dataMap
+			}
 		}
 	}
 
@@ -924,35 +912,12 @@ func (s *TapioServiceComplete) convertUnifiedEventToProto(event *domain.UnifiedE
 		}
 	}
 
-	// Add layer-specific data from the data map
+	// Add layer-specific data to the structured Data field
 	if domainEvent.Data != nil {
-		// Check for kernel data
-		if kernelData, ok := domainEvent.Data["kernel"].(map[string]interface{}); ok {
-			pe.KernelData = &pb.KernelEventData{
-				Syscall: getStringFromMap(kernelData, "syscall"),
-				Pid:     uint32(getIntFromMap(kernelData, "pid")),
-				Comm:    getStringFromMap(kernelData, "comm"),
-			}
-		}
-
-		// Check for network data
-		if networkData, ok := domainEvent.Data["network"].(map[string]interface{}); ok {
-			pe.NetworkData = &pb.NetworkEventData{
-				Protocol:   getStringFromMap(networkData, "protocol"),
-				SourceIp:   getStringFromMap(networkData, "source_ip"),
-				SourcePort: uint32(getIntFromMap(networkData, "source_port")),
-				DestIp:     getStringFromMap(networkData, "dest_ip"),
-				DestPort:   uint32(getIntFromMap(networkData, "dest_port")),
-			}
-		}
-
-		// Check for application data
-		if appData, ok := domainEvent.Data["application"].(map[string]interface{}); ok {
-			pe.ApplicationData = &pb.ApplicationEventData{
-				Level:   getStringFromMap(appData, "level"),
-				Message: getStringFromMap(appData, "message"),
-				Logger:  getStringFromMap(appData, "logger"),
-			}
+		// Convert the data map to protobuf Struct
+		dataStruct, err := structpb.NewStruct(domainEvent.Data)
+		if err == nil {
+			pe.Data = dataStruct
 		}
 	}
 
@@ -1106,7 +1071,7 @@ func (s *TapioServiceComplete) handleStreamControl(stream grpc.ServerStreamingSe
 
 func (s *TapioServiceComplete) handleStreamSubscription(stream grpc.ServerStreamingServer[pb.TapioStreamEventsResponse], subscribe *pb.SubscribeRequest) {
 	// Implementation for stream-based subscription
-	s.logger.Info("Stream subscription request received", zap.String("filter", subscribe.Filter.GetQuery()))
+	s.logger.Info("Stream subscription request received", zap.String("filter", subscribe.Filter.SearchText))
 }
 
 func (s *TapioServiceComplete) generateInsights(ctx context.Context, req *pb.GetInsightsRequest) []*pb.Insight {

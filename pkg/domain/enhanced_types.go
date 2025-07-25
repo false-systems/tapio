@@ -10,7 +10,7 @@ type CollectorMetadata struct {
 	Type          SourceType             `json:"type"`
 	Version       string                 `json:"version"`
 	Capabilities  []string               `json:"capabilities"`
-	Health        HealthStatus           `json:"health"`
+	Health        *HealthStatus          `json:"health,omitempty"`
 	Node          string                 `json:"node,omitempty"`
 	StartTime     time.Time              `json:"start_time"`
 	LastHeartbeat time.Time              `json:"last_heartbeat"`

@@ -1,6 +1,7 @@
 package grpc
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 

@@ -65,10 +65,10 @@ func (a *EBPFCollectorAdapter) processEvents() {
 				return
 			}
 
-			// Extract kernel data if available
+			// Extract data from UnifiedEvent
 			var pid, uid, gid uint32
 			var comm string
-			var details interface{}
+			var details map[string]interface{}
 
 			if event.Kernel != nil {
 				pid = event.Kernel.PID
@@ -145,14 +145,38 @@ func (a *EBPFCollectorAdapter) Health() domain.HealthStatus {
 	health := a.collector.Health()
 
 	// Convert ebpf.Health to domain.HealthStatus
+	var statusValue domain.HealthStatusValue
 	switch health.Status {
 	case "healthy":
-		return domain.HealthHealthy
+		statusValue = domain.HealthHealthy
 	case "degraded":
-		return domain.HealthDegraded
+		statusValue = domain.HealthDegraded
 	case "unhealthy":
-		return domain.HealthUnhealthy
+		statusValue = domain.HealthUnhealthy
 	default:
-		return domain.HealthUnknown
+		statusValue = domain.HealthUnknown
 	}
+
+	// Create health status with details from the collector
+	details := make(map[string]interface{})
+	if health.Message != "" {
+		details["collector_message"] = health.Message
+	}
+	if !health.LastEventTime.IsZero() {
+		details["last_event_time"] = health.LastEventTime.Format(time.RFC3339)
+	}
+	if health.EventsProcessed > 0 {
+		details["events_processed"] = health.EventsProcessed
+	}
+	if health.EventsDropped > 0 {
+		details["events_dropped"] = health.EventsDropped
+	}
+	if health.ErrorCount > 0 {
+		details["error_count"] = health.ErrorCount
+	}
+	if len(health.Metrics) > 0 {
+		details["metrics"] = health.Metrics
+	}
+
+	return domain.NewHealthStatus(statusValue, health.Message, details)
 }

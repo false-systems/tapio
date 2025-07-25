@@ -491,7 +491,7 @@ func (p *ErrorCascadePattern) Match(events []*domain.UnifiedEvent) (*Correlation
 		var eventIDs []string
 		serviceCount := 0
 
-		for service, serviceErrors := range errorsByService {
+		for _, serviceErrors := range errorsByService {
 			if len(serviceErrors) >= 2 {
 				serviceCount++
 				for _, event := range serviceErrors {

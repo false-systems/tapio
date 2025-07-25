@@ -204,10 +204,10 @@ func (c *CNICollector) Events() <-chan domain.UnifiedEvent {
 }
 
 // Health returns current health status
-func (c *CNICollector) Health() core.Health {
+func (c *CNICollector) Health() domain.HealthStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.health
+	return core.NewHealthStatusAdapter(c.health)
 }
 
 // Statistics returns runtime statistics

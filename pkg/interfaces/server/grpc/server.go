@@ -29,9 +29,10 @@ type Server struct {
 	listener net.Listener
 
 	// Service implementations
-	eventService     *EventServiceImpl
-	collectorService *CollectorServiceImpl
-	tapioService     *TapioServiceComplete
+	eventService       *EventServiceImpl
+	collectorService   *CollectorServiceImpl
+	tapioService       *TapioServiceComplete
+	correlationService *CorrelationServiceImpl
 }
 
 // Config holds server configuration
@@ -89,6 +90,12 @@ func (s *Server) SetTapioService(service *TapioServiceComplete) {
 	pb.RegisterTapioServiceServer(s.grpcServer, service)
 }
 
+// SetCorrelationService sets the correlation service implementation
+func (s *Server) SetCorrelationService(service *CorrelationServiceImpl) {
+	s.correlationService = service
+	pb.RegisterCorrelationServiceServer(s.grpcServer, service)
+}
+
 // RegisterServices registers all gRPC services and their REST gateways
 func (s *Server) RegisterServices() error {
 	ctx := context.Background()
@@ -119,10 +126,13 @@ func (s *Server) RegisterServices() error {
 		s.healthServer.SetServingStatus("tapio.v1.TapioService", grpc_health_v1.HealthCheckResponse_SERVING)
 	}
 
-	// Register CorrelationService REST gateway (when implemented)
-	// if err := pb.RegisterCorrelationServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
-	//     return fmt.Errorf("failed to register CorrelationService REST gateway: %w", err)
-	// }
+	// Register CorrelationService REST gateway
+	if s.correlationService != nil {
+		if err := pb.RegisterCorrelationServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {
+			return fmt.Errorf("failed to register CorrelationService REST gateway: %w", err)
+		}
+		s.healthServer.SetServingStatus("tapio.v1.CorrelationService", grpc_health_v1.HealthCheckResponse_SERVING)
+	}
 
 	// Set overall health status
 	s.healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)

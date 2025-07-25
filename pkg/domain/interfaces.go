@@ -80,14 +80,26 @@ type SourceHealth struct {
 	Warnings  int          `json:"warnings"`
 }
 
-// HealthStatus represents health states
-type HealthStatus string
+// HealthStatus represents health information with rich details
+type HealthStatus interface {
+	// Status returns the health status value
+	Status() HealthStatusValue
+
+	// Message returns a human-readable health message
+	Message() string
+
+	// Details returns collector-specific health details
+	Details() map[string]interface{}
+}
+
+// HealthStatusValue represents health state values
+type HealthStatusValue string
 
 const (
-	HealthHealthy   HealthStatus = "healthy"
-	HealthDegraded  HealthStatus = "degraded"
-	HealthUnhealthy HealthStatus = "unhealthy"
-	HealthUnknown   HealthStatus = "unknown"
+	HealthHealthy   HealthStatusValue = "healthy"
+	HealthDegraded  HealthStatusValue = "degraded"
+	HealthUnhealthy HealthStatusValue = "unhealthy"
+	HealthUnknown   HealthStatusValue = "unknown"
 )
 
 // =============================================================================
