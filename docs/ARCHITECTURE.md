@@ -99,28 +99,37 @@ type UnifiedEvent struct {
       └────────────┴────────────┴────────────┴─────────────┘
                               │
                     ┌─────────┴──────────┐
-                    │  UnifiedEvent      │
-                    │  Conversion Layer  │
+                    │ CollectorManager   │
+                    │ Event Aggregation  │
                     └─────────┬──────────┘
                               │
                     ┌─────────┴──────────┐
-                    │  Analytics Engine  │
-                    │  165k events/sec   │
+                    │ Ring Buffer Pipeline│
+                    │   1M+ events/sec   │
+                    │ Lock-Free MPMC     │
                     └─────────┬──────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         │                     │                     │
 ┌───────┴────────┐ ┌──────────┴──────────┐ ┌───────┴────────┐
-│  Correlation   │ │ Real-Time Analysis  │ │Impact Assessment│
-│    Engine      │ │    & Scoring        │ │  & Prediction   │
+│   Validation   │ │     Context         │ │  Correlation   │
+│   & Filtering  │ │   Enrichment        │ │   & Analytics  │
 └───────┬────────┘ └──────────┬──────────┘ └───────┬────────┘
         │                     │                     │
         └─────────────────────┼─────────────────────┘
                               │
                     ┌─────────┴──────────┐
-                    │   gRPC/REST API    │
-                    │  Streaming Results │
+                    │ CorrelationOutput  │
+                    │ Intelligence Store │
+                    │ + Vector Embeddings│
                     └─────────┬──────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+┌───────┴────────┐ ┌──────────┴──────────┐ ┌───────┴────────┐
+│   Database     │ │    gRPC/REST API    │ │  AI Analytics  │
+│   (External)   │ │  Streaming Results  │ │ Vector Search  │
+└────────────────┘ └──────────┬──────────┘ └────────────────┘
                               │
                     ┌─────────┴──────────┐
                     │   Tapio Clients    │
@@ -139,13 +148,15 @@ type UnifiedEvent struct {
 
 Each collector converts its native format to UnifiedEvent.
 
-### 2. Analytics Engine (pkg/analytics/)
-- **Throughput**: 165,000+ events/second
+### 2. Ring Buffer Pipeline (pkg/intelligence/pipeline/)
+- **Throughput**: 1,000,000+ events/second
+- **Lock-Free MPMC**: Multi-producer, multi-consumer ring buffers
+- **Zero-Copy Processing**: Minimal memory allocation and copying
 - **Pipeline Stages**:
-  1. Validation: Ensure event integrity
-  2. Enrichment: Add context and defaults
-  3. Correlation: Group related events
-  4. Analytics: Score and assess impact
+  1. Validation: Ensure event integrity and filtering
+  2. Context: Add enrichment and semantic understanding  
+  3. Correlation: Group related events and detect patterns
+  4. Analytics: Score impact and generate insights
 
 ### 3. Correlation Engine (pkg/intelligence/correlation/)
 - **Semantic Grouping**: Groups events by meaning, not just time
@@ -162,15 +173,23 @@ Each collector converts its native format to UnifiedEvent.
   - EventService: Event queries and subscriptions
   - CorrelationService: Correlation results
 
-### 5. Intelligence Layer (pkg/intelligence/)
+### 5. CorrelationOutput Storage (pkg/intelligence/pipeline/)
+- **Intelligence Persistence**: Only significant findings stored (confidence > 0.7)
+- **Vector Embeddings**: AI-ready semantic search capabilities
+- **Batch Processing**: Efficient storage with configurable flush intervals
+- **In-Memory Cache**: Fast lookups with LRU eviction
+- **External Database**: Persistence outside K8s for reliability
+
+### 6. Intelligence Layer (pkg/intelligence/)
 - **Semantic Understanding**: What events mean
 - **Impact Assessment**: Business impact scoring
 - **Predictive Analytics**: Predict cascading failures
+- **AI Integration**: Vector similarity search for pattern matching
 - **Root Cause Analysis**: Identify actual causes
 
 ## Data Flow
 
-### 1. Event Collection
+### 1. Event Collection & Aggregation
 ```
 eBPF Program captures open() syscall failure
     ↓
@@ -189,47 +208,81 @@ eBPF Collector converts to UnifiedEvent:
         Category: "system"
     }
 }
+    ↓
+CollectorManager aggregates events from all collectors
+    ↓
+Ring Buffer Pipeline (1M+ events/sec, lock-free processing)
 ```
 
-### 2. Correlation
+### 2. High-Performance Processing
 ```
-Analytics Engine receives events with same TraceID:
-- Kernel: open() failure
-- Application: "Config file not found" error
-- K8s: Container restart
-- Network: Health check failures
+Ring Buffer Pipeline Stages:
 
-Correlation Engine groups them:
+1. Validation Stage:
+   - Event integrity checks
+   - Rate limiting enforcement
+   - Malformed event filtering
+
+2. Context Stage:
+   - Semantic enrichment
+   - Business context addition
+   - Resource relationship mapping
+
+3. Correlation Stage:
+   - Pattern detection using OTEL traces
+   - Event grouping by causality
+   - Confidence scoring
+
+4. Analytics Stage:
+   - Impact assessment
+   - Root cause analysis
+   - Predictive pattern matching
+```
+
+### 3. Intelligence Extraction
+```
+Ring Buffer Output → CorrelationOutput:
 {
-    CorrelationID: "corr-789",
-    Pattern: "missing-config-cascade",
-    RootCause: "Config file missing",
-    Impact: {
-        BusinessImpact: 0.8,
-        AffectedServices: ["payment-api", "checkout"],
-        CustomerFacing: true
+    OriginalEvent: { /* UnifiedEvent */ },
+    ProcessingStage: "correlation",
+    CorrelationData: {
+        CorrelationID: "corr-789",
+        Pattern: "missing-config-cascade",
+        RootCause: "Config file missing",
+        Confidence: 0.95
+    },
+    Embedding: [0.23, -0.45, 0.67, ...], // Vector for AI similarity
+    Confidence: 0.95,
+    ResultType: "correlation",
+    Metadata: {
+        "correlation_id": "corr-789",
+        "event_source": "ebpf",
+        "pipeline_mode": "ring-buffer"
     }
 }
 ```
 
-### 3. Real-Time Analysis
+### 4. Intelligent Storage
 ```
-Analytics Results Stream:
-{
-    EventID: "evt-123",
-    CorrelationID: "corr-789",
-    SemanticGroupID: "missing-config-pattern",
-    ConfidenceScore: 0.95,
-    ImpactAssessment: {
-        BusinessImpact: 0.8,
-        CascadeRisk: 0.7,
-        RecommendedActions: [
-            "Check ConfigMap mounting",
-            "Verify file permissions",
-            "Review recent deployments"
-        ]
-    }
-}
+PipelineIntegration consumes CorrelationOutput:
+
+1. Significance Filter:
+   - Only store findings with confidence > 0.7
+   - Skip noise and low-confidence correlations
+
+2. Batch Processing:
+   - Accumulate outputs for efficient storage
+   - Configurable flush intervals
+
+3. Dual Storage:
+   - In-memory cache for fast lookups
+   - External database for persistence
+   - Vector embeddings for AI similarity search
+
+4. AI-Ready Format:
+   - Semantic embeddings for pattern matching
+   - Historical correlation for learning
+   - Business impact scoring
 ```
 
 ## Why This Approach

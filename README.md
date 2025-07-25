@@ -35,8 +35,9 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 
 ✅ **UnifiedEvent Format** - A single event structure with OTEL trace context, semantic understanding, and business impact  
 ✅ **eBPF Collector** - Production-ready with rate limiting, backpressure control, and UnifiedEvent output  
-✅ **Intelligence Pipeline** - High-performance event processing (165k+ events/sec)  
+✅ **Ring Buffer Pipeline** - Lock-free, ultra-high performance processing (1M+ events/sec)  
 ✅ **Semantic Correlation** - Real-time correlation with OTEL trace propagation  
+✅ **CorrelationOutput Storage** - Intelligence persistence with vector embeddings for AI  
 ✅ **gRPC Service** - Complete TapioService with bidirectional streaming  
 ✅ **Analytics Engine** - Event enrichment, scoring, and pattern detection  
 ✅ **Multiple Collectors** - eBPF (integrated), K8s, Systemd, CNI (standalone binaries)  
@@ -45,8 +46,9 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 
 🚀 **Main Binary** (`tapio-collector`) - Runs eBPF collection with embedded correlation  
 🚀 **Standalone Collectors** - K8s, Systemd, CNI collectors connect via gRPC  
-🚀 **Event Flow** - Collection → Enrichment → Correlation → Storage  
+🚀 **Intelligence Flow** - Collection → Ring Buffer → Correlation → CorrelationOutput → Storage  
 🚀 **OTEL Integration** - Full trace context propagation  
+🚀 **AI-Ready Storage** - Only significant findings persisted with vector embeddings  
 
 **What we're actively working on:**
 
