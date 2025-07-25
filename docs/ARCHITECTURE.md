@@ -99,43 +99,83 @@ type UnifiedEvent struct {
       └────────────┴────────────┴────────────┴─────────────┘
                               │
                     ┌─────────┴──────────┐
-                    │ CollectorManager   │
-                    │ Event Aggregation  │
+                    │   UnifiedEvent     │
+                    │ Conversion Layer   │
                     └─────────┬──────────┘
                               │
                     ┌─────────┴──────────┐
-                    │ Ring Buffer Pipeline│
-                    │   1M+ events/sec   │
-                    │ Lock-Free MPMC     │
+                    │ Intelligence       │
+                    │ Pipeline System    │
+                    │ (4 Modes Available)│
                     └─────────┬──────────┘
                               │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-┌───────┴────────┐ ┌──────────┴──────────┐ ┌───────┴────────┐
-│   Validation   │ │     Context         │ │  Correlation   │
-│   & Filtering  │ │   Enrichment        │ │   & Analytics  │
-└───────┬────────┘ └──────────┬──────────┘ └───────┬────────┘
-        │                     │                     │
-        └─────────────────────┼─────────────────────┘
+              ┌───────────────┼───────────────┐
+              │               │               │
+    ┌─────────┴────┐ ┌────────┴────┐ ┌───────┴─────┐
+    │ Ring Buffer  │ │High Perform │ │Standard/Debug│
+    │1M+ evt/sec   │ │165k evt/sec │ │50k+ evt/sec  │
+    └─────────┬────┘ └────────┬────┘ └───────┬─────┘
+              │               │               │
+              └───────────────┼───────────────┘
+                              │
+                    ┌─────────┴──────────┐
+                    │   Context          │
+                    │  Processing        │
+                    │ • Validation       │
+                    │ • Impact Assessment│
+                    │ • Confidence Score │
+                    └─────────┬──────────┘
+                              │
+                    ┌─────────┴──────────┐
+                    │  Semantic          │
+                    │ Correlation Engine │
+                    │ • OTEL Tracing     │
+                    │ • Pattern Matching │
+                    │ • Event Enrichment │
+                    └─────────┬──────────┘
                               │
                     ┌─────────┴──────────┐
                     │ CorrelationOutput  │
-                    │ Intelligence Store │
-                    │ + Vector Embeddings│
+                    │   Storage          │
+                    │ • Vector Embeddings│
+                    │ • Significance     │
+                    │   Filtering        │
                     └─────────┬──────────┘
                               │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-┌───────┴────────┐ ┌──────────┴──────────┐ ┌───────┴────────┐
-│   Database     │ │    gRPC/REST API    │ │  AI Analytics  │
-│   (External)   │ │  Streaming Results  │ │ Vector Search  │
-└────────────────┘ └──────────┬──────────┘ └────────────────┘
-                              │
                     ┌─────────┴──────────┐
-                    │   Tapio Clients    │
-                    │  (GUI, CLI, SDK)   │
+                    │   gRPC/REST API    │
+                    │ • Real-time Stream │
+                    │ • Business Impact  │
+                    │ • Action Recommend │
                     └────────────────────┘
 ```
+
+## Intelligence Pipeline System
+
+The core of Tapio's architecture is the **Unified Intelligence Pipeline** - a high-performance, multi-mode event processing system that consolidates semantic correlation, context processing, and business impact assessment into a single coherent framework.
+
+### Pipeline Architecture
+
+```
+CollectorManager → Pipeline Selection → Intelligence Processing → Storage
+       ↓                    ↓                      ↓                ↓
+Event Routing     Mode: Ring Buffer        Context Processing    Vector DB
+& Aggregation     Mode: High Performance   Impact Assessment     Significance
+                  Mode: Standard           Confidence Scoring      Filtering
+                  Mode: Debug              ↓
+                                          Semantic Correlation
+                                          OTEL Trace Context
+                                          Pattern Matching
+```
+
+### Pipeline Modes
+
+1. **Ring Buffer Mode**: 1M+ events/sec, lock-free processing
+2. **High Performance**: 165k+ events/sec, production-ready
+3. **Standard**: 50k+ events/sec, balanced resource usage  
+4. **Debug**: 10k+ events/sec, full tracing and profiling
+
+[Detailed Pipeline Architecture →](PIPELINE_ARCHITECTURE.md)
 
 ## Key Components
 
