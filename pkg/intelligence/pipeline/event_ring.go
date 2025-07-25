@@ -43,8 +43,8 @@ func NewEventRing(capacity uint64) *EventRing {
 // Returns true if added, false if would overwrite (though we overwrite anyway)
 func (er *EventRing) Put(event *domain.UnifiedEvent) bool {
 	// Get current write position atomically
-	writePos := atomic.LoadUint64(&er.writePos)
-	readPos := atomic.LoadUint64(&er.readPos)
+	writePos := er.writePos.Load()
+	readPos := er.readPos.Load()
 
 	// Calculate if we're about to overwrite
 	willOverwrite := (writePos - readPos) >= er.capacity
@@ -54,11 +54,11 @@ func (er *EventRing) Put(event *domain.UnifiedEvent) bool {
 	atomic.StorePointer(&er.buffer[idx], unsafe.Pointer(event))
 
 	// Advance write position atomically
-	atomic.StoreUint64(&er.writePos, writePos+1)
+	er.writePos.Store(writePos + 1)
 
 	// If we overwrote, advance read position too
 	if willOverwrite {
-		atomic.StoreUint64(&er.readPos, readPos+1)
+		er.readPos.Store(readPos + 1)
 	}
 
 	return !willOverwrite
@@ -67,8 +67,8 @@ func (er *EventRing) Put(event *domain.UnifiedEvent) bool {
 // Get retrieves an event from the ring buffer (lock-free)
 // Returns nil if no events available
 func (er *EventRing) Get() *domain.UnifiedEvent {
-	readPos := atomic.LoadUint64(&er.readPos)
-	writePos := atomic.LoadUint64(&er.writePos)
+	readPos := er.readPos.Load()
+	writePos := er.writePos.Load()
 
 	// Check if data available
 	if readPos >= writePos {
@@ -83,15 +83,15 @@ func (er *EventRing) Get() *domain.UnifiedEvent {
 	}
 
 	// Advance read position atomically
-	atomic.StoreUint64(&er.readPos, readPos+1)
+	er.readPos.Store(readPos + 1)
 
 	return (*domain.UnifiedEvent)(ptr)
 }
 
 // GetBatch retrieves multiple events efficiently
 func (er *EventRing) GetBatch(events []*domain.UnifiedEvent) int {
-	readPos := atomic.LoadUint64(&er.readPos)
-	writePos := atomic.LoadUint64(&er.writePos)
+	readPos := er.readPos.Load()
+	writePos := er.writePos.Load()
 
 	// Calculate available events
 	available := writePos - readPos
@@ -117,15 +117,15 @@ func (er *EventRing) GetBatch(events []*domain.UnifiedEvent) int {
 	}
 
 	// Advance read position by actual events retrieved
-	atomic.StoreUint64(&er.readPos, readPos+uint64(count))
+	er.readPos.Store(readPos + uint64(count))
 
 	return count
 }
 
 // Size returns current number of events in ring (approximate - lock-free)
 func (er *EventRing) Size() uint64 {
-	writePos := atomic.LoadUint64(&er.writePos)
-	readPos := atomic.LoadUint64(&er.readPos)
+	writePos := er.writePos.Load()
+	readPos := er.readPos.Load()
 
 	if writePos >= readPos {
 		return writePos - readPos
@@ -150,8 +150,8 @@ func (er *EventRing) Capacity() uint64 {
 
 // Reset clears the ring buffer (for testing)
 func (er *EventRing) Reset() {
-	atomic.StoreUint64(&er.writePos, 0)
-	atomic.StoreUint64(&er.readPos, 0)
+	er.writePos.Store(0)
+	er.readPos.Store(0)
 }
 
 // RealtimeEventPipeline implements the hybrid approach
@@ -243,8 +243,8 @@ func (rep *RealtimeEventPipeline) GetEventRingMetrics() EventRingMetrics {
 	return EventRingMetrics{
 		Capacity:    rep.eventRing.Capacity(),
 		Size:        rep.eventRing.Size(),
-		WritePos:    atomic.LoadUint64(&rep.eventRing.writePos),
-		ReadPos:     atomic.LoadUint64(&rep.eventRing.readPos),
+		WritePos:    rep.eventRing.writePos.Load(),
+		ReadPos:     rep.eventRing.readPos.Load(),
 		Utilization: float64(rep.eventRing.Size()) / float64(rep.eventRing.Capacity()),
 	}
 }

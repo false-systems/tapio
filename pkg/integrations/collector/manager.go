@@ -13,14 +13,14 @@ import (
 type Collector interface {
 	Start(ctx context.Context) error
 	Stop() error
-	Events() <-chan domain.Event
+	Events() <-chan domain.UnifiedEvent
 	Health() domain.HealthStatus
 }
 
 // CollectorManager orchestrates multiple collectors and aggregates their events
 type CollectorManager struct {
 	collectors    map[string]Collector
-	eventChan     chan domain.Event
+	eventChan     chan domain.UnifiedEvent
 	totalEvents   int64
 	droppedEvents int64
 	ctx           context.Context
@@ -39,7 +39,7 @@ type Statistics struct {
 func NewCollectorManager() *CollectorManager {
 	return &CollectorManager{
 		collectors: make(map[string]Collector),
-		eventChan:  make(chan domain.Event, 10000),
+		eventChan:  make(chan domain.UnifiedEvent, 10000),
 	}
 }
 
@@ -110,7 +110,7 @@ func (cm *CollectorManager) Stop() {
 }
 
 // Events returns the aggregated event channel from all collectors
-func (cm *CollectorManager) Events() <-chan domain.Event {
+func (cm *CollectorManager) Events() <-chan domain.UnifiedEvent {
 	return cm.eventChan
 }
 
@@ -135,29 +135,22 @@ func (cm *CollectorManager) Statistics() Statistics {
 // Health returns aggregated health status of all collectors
 func (cm *CollectorManager) Health() domain.HealthStatus {
 	if len(cm.collectors) == 0 {
-		return domain.HealthStatus{
-			Status:  "unhealthy",
-			Message: "no collectors registered",
-		}
+		return domain.HealthUnhealthy
 	}
 
 	healthyCount := 0
 	for _, collector := range cm.collectors {
 		health := collector.Health()
-		if health.Status == "healthy" {
+		if health == domain.HealthHealthy {
 			healthyCount++
 		}
 	}
 
-	status := "healthy"
-	if healthyCount == 0 {
-		status = "unhealthy"
-	} else if healthyCount < len(cm.collectors) {
-		status = "degraded"
-	}
-
-	return domain.HealthStatus{
-		Status:  status,
-		Message: fmt.Sprintf("%d/%d collectors healthy", healthyCount, len(cm.collectors)),
+	if healthyCount == len(cm.collectors) {
+		return domain.HealthHealthy
+	} else if healthyCount > 0 {
+		return domain.HealthDegraded
+	} else {
+		return domain.HealthUnhealthy
 	}
 }

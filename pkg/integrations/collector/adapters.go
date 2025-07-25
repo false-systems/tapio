@@ -15,7 +15,7 @@ import (
 type EBPFCollectorAdapter struct {
 	collector     ebpf.Collector
 	serverAddress string
-	eventChan     chan domain.Event
+	eventChan     chan domain.UnifiedEvent
 	processor     *ebpf.DualPathProcessor
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -24,7 +24,7 @@ type EBPFCollectorAdapter struct {
 // Start initializes the eBPF collector with gRPC processor integration
 func (a *EBPFCollectorAdapter) Start(ctx context.Context) error {
 	a.ctx, a.cancel = context.WithCancel(ctx)
-	a.eventChan = make(chan domain.Event, 1000)
+	a.eventChan = make(chan domain.UnifiedEvent, 1000)
 
 	if err := a.collector.Start(a.ctx); err != nil {
 		return fmt.Errorf("eBPF collector start failed: %w", err)
@@ -65,20 +65,38 @@ func (a *EBPFCollectorAdapter) processEvents() {
 				return
 			}
 
+			// Extract kernel data if available
+			var pid, uid, gid uint32
+			var comm string
+			var details interface{}
+
+			if event.Kernel != nil {
+				pid = event.Kernel.PID
+				uid = event.Kernel.UID
+				gid = event.Kernel.GID
+				comm = event.Kernel.Comm
+			}
+
+			// Use attributes as details if available
+			if event.Attributes != nil {
+				details = event.Attributes
+			}
+
 			rawEvent := &ebpf.RawEvent{
 				Type:      ebpf.EventTypeProcess,
 				Timestamp: uint64(event.Timestamp.UnixNano()),
-				PID:       uint32(event.Context.PID),
-				UID:       uint32(event.Context.UID),
-				GID:       uint32(event.Context.GID),
-				Comm:      event.Context.Comm,
-				Details:   event.Data,
+				PID:       pid,
+				UID:       uid,
+				GID:       gid,
+				Comm:      comm,
+				Details:   details,
 			}
 
 			if err := a.processor.ProcessRawEvent(rawEvent); err != nil {
 				log.Printf("eBPF event processing error: %v", err)
 			}
 
+			// Event is already UnifiedEvent, so pass it along
 			select {
 			case a.eventChan <- event:
 			case <-a.ctx.Done():
@@ -117,18 +135,24 @@ func (a *EBPFCollectorAdapter) Stop() error {
 }
 
 // Events returns the event channel for this adapter
-func (a *EBPFCollectorAdapter) Events() <-chan domain.Event {
+func (a *EBPFCollectorAdapter) Events() <-chan domain.UnifiedEvent {
 	return a.eventChan
 }
 
 // Health returns the health status of the eBPF collector
 func (a *EBPFCollectorAdapter) Health() domain.HealthStatus {
-	if healthProvider, ok := a.collector.(interface{ Health() domain.HealthStatus }); ok {
-		return healthProvider.Health()
-	}
+	// Check the actual collector health
+	health := a.collector.Health()
 
-	return domain.HealthStatus{
-		Status:  "healthy",
-		Message: "eBPF adapter operational",
+	// Convert ebpf.Health to domain.HealthStatus
+	switch health.Status {
+	case "healthy":
+		return domain.HealthHealthy
+	case "degraded":
+		return domain.HealthDegraded
+	case "unhealthy":
+		return domain.HealthUnhealthy
+	default:
+		return domain.HealthUnknown
 	}
 }

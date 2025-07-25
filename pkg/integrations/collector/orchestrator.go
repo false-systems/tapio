@@ -79,7 +79,7 @@ func (c *Config) Validate() error {
 	if c.Environment == "" {
 		c.Environment = "production"
 	}
-	if c.CorrelationMode != "semantic" && c.CorrelationMode != "basic" {
+	if c.CorrelationMode != "semantic" && c.CorrelationMode != "basic" && c.CorrelationMode != "ring-buffer" {
 		c.CorrelationMode = "semantic"
 	}
 	return nil
@@ -87,14 +87,12 @@ func (c *Config) Validate() error {
 
 // Orchestrator orchestrates the complete collection pipeline
 type Orchestrator struct {
-	config       *Config
-	manager      *CollectorManager
-	dataFlow     *dataflow.TapioDataFlow
-	bridge       *dataflow.ServerBridge
-	tracer       *sdktrace.TracerProvider
-	inputEvents  chan domain.Event
-	outputEvents chan domain.Event
-	eventCount   int64
+	config            *Config
+	manager           *CollectorManager
+	pipeline          pipeline.IntelligencePipeline
+	tracer            *sdktrace.TracerProvider
+	correlationBuffer chan pipeline.CorrelationOutput
+	eventCount        int64
 }
 
 // New creates a collector orchestrator with validated configuration
@@ -104,9 +102,8 @@ func New(config *Config) (*Orchestrator, error) {
 	}
 
 	return &Orchestrator{
-		config:       config,
-		inputEvents:  make(chan domain.Event, config.BufferSize),
-		outputEvents: make(chan domain.Event, config.BufferSize),
+		config:            config,
+		correlationBuffer: make(chan pipeline.CorrelationOutput, config.BufferSize),
 	}, nil
 }
 
@@ -125,32 +122,29 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return fmt.Errorf("collector initialization failed: %w", err)
 	}
 
-	dataFlowConfig := dataflow.Config{
-		EnableSemanticGrouping: o.config.CorrelationMode == "semantic",
-		GroupRetentionPeriod:   30 * time.Minute,
-		ServiceName:            o.config.ServiceName,
-		ServiceVersion:         o.config.ServiceVersion,
-		Environment:            o.config.Environment,
-		BufferSize:             o.config.BufferSize,
-		FlushInterval:          o.config.FlushInterval,
+	// Create pipeline configuration based on correlation mode
+	var pipelineConfig *pipeline.PipelineConfig
+	if o.config.CorrelationMode == "ring-buffer" {
+		pipelineConfig = pipeline.RingBufferPipelineConfig()
+	} else if o.config.CorrelationMode == "semantic" {
+		pipelineConfig = pipeline.DefaultPipelineConfig()
+	} else {
+		pipelineConfig = pipeline.StandardPipelineConfig()
 	}
 
-	o.dataFlow = dataflow.NewTapioDataFlow(dataFlowConfig)
-	o.dataFlow.Connect(o.inputEvents, o.outputEvents)
+	// Apply custom configuration
+	pipelineConfig.BufferSize = o.config.BufferSize
+	pipelineConfig.ProcessingTimeout = o.config.FlushInterval
+	pipelineConfig.EnableTracing = o.config.OTELEndpoint != ""
 
-	bridgeConfig := dataflow.BridgeConfig{
-		ServerAddress: o.config.ServerAddress,
-		BufferSize:    o.config.BufferSize / 2,
-		FlushInterval: o.config.FlushInterval * 2,
-		MaxBatchSize:  100,
-		EnableTracing: true,
-	}
-
-	bridge, err := dataflow.NewServerBridge(bridgeConfig, o.dataFlow)
+	// Build the pipeline
+	builder := pipeline.NewPipelineBuilder()
+	builder.WithConfig(pipelineConfig)
+	pipeline, err := builder.Build()
 	if err != nil {
-		return fmt.Errorf("server bridge creation failed: %w", err)
+		return fmt.Errorf("pipeline creation failed: %w", err)
 	}
-	o.bridge = bridge
+	o.pipeline = pipeline
 
 	log.Printf("🚀 Starting Tapio Collector %s", o.config.ServiceVersion)
 	log.Printf("   Server: %s", o.config.ServerAddress)
@@ -161,16 +155,13 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return fmt.Errorf("collector manager start failed: %w", err)
 	}
 
-	if err := o.dataFlow.Start(); err != nil {
-		return fmt.Errorf("data flow start failed: %w", err)
-	}
-
-	if err := o.bridge.Start(); err != nil {
-		return fmt.Errorf("server bridge start failed: %w", err)
+	if err := o.pipeline.Start(ctx); err != nil {
+		return fmt.Errorf("pipeline start failed: %w", err)
 	}
 
 	go o.routeCollectorEvents(ctx)
-	go o.processCorrelatedEvents(ctx)
+	go o.processCorrelationOutputs(ctx)
+	go o.sendToServer(ctx)
 
 	log.Printf("✅ Tapio Collector operational")
 
@@ -178,10 +169,8 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	log.Printf("🛑 Shutting down...")
 	o.manager.Stop()
-	o.dataFlow.Stop()
-	o.bridge.Stop()
-	close(o.inputEvents)
-	close(o.outputEvents)
+	o.pipeline.Stop()
+	close(o.correlationBuffer)
 
 	log.Printf("👋 Tapio Collector stopped")
 	return nil
@@ -226,7 +215,7 @@ func (o *Orchestrator) initCollectors(ctx context.Context) error {
 			adapter := &EBPFCollectorAdapter{
 				collector:     collector,
 				serverAddress: o.config.ServerAddress,
-				eventChan:     make(chan domain.Event, 1000),
+				eventChan:     make(chan domain.UnifiedEvent, 1000),
 			}
 
 			if err := adapter.Start(ctx); err != nil {
@@ -249,39 +238,75 @@ func (o *Orchestrator) initCollectors(ctx context.Context) error {
 	return nil
 }
 
-// routeCollectorEvents routes raw events from collectors to correlation pipeline
+// routeCollectorEvents routes raw events from collectors to intelligence pipeline
 func (o *Orchestrator) routeCollectorEvents(ctx context.Context) {
 	for {
 		select {
 		case event := <-o.manager.Events():
-			select {
-			case o.inputEvents <- event:
-			case <-ctx.Done():
-				return
+			// Process through pipeline
+			if err := o.pipeline.ProcessEvent(&event); err != nil {
+				log.Printf("⚠️  Failed to process event %s: %v", event.ID, err)
 			}
+
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// processCorrelatedEvents handles semantically correlated events
-func (o *Orchestrator) processCorrelatedEvents(ctx context.Context) {
+// processCorrelationOutputs retrieves and processes correlation results from pipeline
+func (o *Orchestrator) processCorrelationOutputs(ctx context.Context) {
+	ticker := time.NewTicker(100 * time.Millisecond) // Check for outputs frequently
+	defer ticker.Stop()
+
+	// Buffer for batch retrieval
+	outputs := make([]pipeline.CorrelationOutput, 100)
+
+	for {
+		select {
+		case <-ticker.C:
+			// For ring buffer pipeline, retrieve outputs
+			if ringBuffer, ok := o.pipeline.(*pipeline.RingBufferPipeline); ok {
+				count := ringBuffer.GetCorrelationOutputs(outputs)
+				for i := 0; i < count; i++ {
+					select {
+					case o.correlationBuffer <- outputs[i]:
+						atomic.AddInt64(&o.eventCount, 1)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// sendToServer sends correlated events to the Tapio server
+func (o *Orchestrator) sendToServer(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case event := <-o.outputEvents:
-			count := atomic.AddInt64(&o.eventCount, 1)
-			if count%1000 == 0 {
-				log.Printf("📊 Processed %d events, latest: %s", count, event.ID)
+		case output := <-o.correlationBuffer:
+			// TODO: Implement server communication
+			// For now, just log high-confidence correlations
+			if output.Confidence > 0.8 {
+				log.Printf("🎯 High-confidence correlation: %s (%.2f)",
+					output.OriginalEvent.ID, output.Confidence)
 			}
 
 		case <-ticker.C:
-			stats := o.manager.Statistics()
-			count := atomic.LoadInt64(&o.eventCount)
-			log.Printf("📈 Status: Events=%d, Active Collectors=%d", count, stats.ActiveCollectors)
+			metrics := o.pipeline.GetMetrics()
+			managerStats := o.manager.Statistics()
+			log.Printf("📈 Pipeline: Processed=%d, Correlated=%d, Dropped=%d | Collectors=%d",
+				metrics.EventsProcessed,
+				metrics.EventsCorrelated,
+				metrics.EventsDropped,
+				managerStats.ActiveCollectors)
 
 		case <-ctx.Done():
 			return
@@ -289,27 +314,35 @@ func (o *Orchestrator) processCorrelatedEvents(ctx context.Context) {
 	}
 }
 
-// Statistics returns real-time collector statistics
+// Statistics returns real-time collector and pipeline statistics
 func (o *Orchestrator) Statistics() struct {
 	ActiveCollectors  int
 	ProcessedEvents   int64
+	CorrelatedEvents  int64
+	DroppedEvents     int64
 	BufferUtilization float64
+	PipelineRunning   bool
 } {
 	managerStats := o.manager.Statistics()
-	processedEvents := atomic.LoadInt64(&o.eventCount)
+	pipelineMetrics := o.pipeline.GetMetrics()
 
-	inputLen := float64(len(o.inputEvents))
-	outputLen := float64(len(o.outputEvents))
-	totalCapacity := float64(cap(o.inputEvents) + cap(o.outputEvents))
-	utilization := (inputLen + outputLen) / totalCapacity * 100
+	bufferLen := float64(len(o.correlationBuffer))
+	bufferCapacity := float64(cap(o.correlationBuffer))
+	utilization := bufferLen / bufferCapacity * 100
 
 	return struct {
 		ActiveCollectors  int
 		ProcessedEvents   int64
+		CorrelatedEvents  int64
+		DroppedEvents     int64
 		BufferUtilization float64
+		PipelineRunning   bool
 	}{
 		ActiveCollectors:  managerStats.ActiveCollectors,
-		ProcessedEvents:   processedEvents,
+		ProcessedEvents:   pipelineMetrics.EventsProcessed,
+		CorrelatedEvents:  pipelineMetrics.EventsCorrelated,
+		DroppedEvents:     pipelineMetrics.EventsDropped,
 		BufferUtilization: utilization,
+		PipelineRunning:   o.pipeline.IsRunning(),
 	}
 }
