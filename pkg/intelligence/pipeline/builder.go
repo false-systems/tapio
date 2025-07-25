@@ -153,6 +153,8 @@ func (pb *PipelineBuilder) Build() (IntelligencePipeline, error) {
 		return pb.buildStandardPipeline()
 	case PipelineModeDebug:
 		return pb.buildDebugPipeline()
+	case PipelineModeRingBuffer:
+		return pb.buildRingBufferPipeline()
 	default:
 		return nil, fmt.Errorf("unknown pipeline mode: %s", pb.config.Mode)
 	}
@@ -545,6 +547,11 @@ func NewDebugPipeline() (IntelligencePipeline, error) {
 	return NewPipeline(DebugPipelineConfig())
 }
 
+// NewRingBufferPipelineViaBuilder creates a ring buffer pipeline through the builder
+func NewRingBufferPipelineViaBuilder() (IntelligencePipeline, error) {
+	return NewPipeline(RingBufferPipelineConfig())
+}
+
 // NewCustomPipeline creates a pipeline with custom configuration
 func NewCustomPipeline(opts ...func(*PipelineConfig)) (IntelligencePipeline, error) {
 	config := DefaultPipelineConfig()
@@ -552,6 +559,17 @@ func NewCustomPipeline(opts ...func(*PipelineConfig)) (IntelligencePipeline, err
 		opt(config)
 	}
 	return NewPipeline(config)
+}
+
+// buildRingBufferPipeline creates a ring buffer pipeline
+func (pb *PipelineBuilder) buildRingBufferPipeline() (IntelligencePipeline, error) {
+	// Use the ring buffer pipeline implementation directly
+	pipeline, err := NewRingBufferPipeline()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ring buffer pipeline: %w", err)
+	}
+	
+	return pipeline, nil
 }
 
 // Ensure defaults are set correctly

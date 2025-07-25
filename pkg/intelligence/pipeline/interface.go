@@ -46,6 +46,9 @@ const (
 
 	// PipelineModeDebug enables additional logging and validation
 	PipelineModeDebug PipelineMode = "debug"
+
+	// PipelineModeRingBuffer uses lock-free ring buffers for ultra-high performance
+	PipelineModeRingBuffer PipelineMode = "ring-buffer"
 )
 
 // PipelineConfig holds configuration for pipeline creation
@@ -138,6 +141,19 @@ func DebugPipelineConfig() *PipelineConfig {
 	config.MaxConcurrency = 1
 	config.EnableTracing = true
 	config.EnableProfiling = true
+	return config
+}
+
+// RingBufferPipelineConfig returns configuration for ring buffer mode
+func RingBufferPipelineConfig() *PipelineConfig {
+	config := DefaultPipelineConfig()
+	config.Mode = PipelineModeRingBuffer
+	config.BatchSize = 10000 // Large batches for ultra-high performance
+	config.BufferSize = 65536 // Large ring buffer capacity
+	config.MaxConcurrency = 0 // Use all available cores
+	config.EnableMetrics = true
+	config.EnableTracing = false // Disable tracing for maximum performance
+	config.EnableProfiling = false
 	return config
 }
 
