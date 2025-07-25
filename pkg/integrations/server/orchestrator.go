@@ -204,10 +204,10 @@ func (o *Orchestrator) initGRPCServer() error {
 	// Create service dependencies
 	storage := grpc.NewMemoryEventStorage(10000, 24*time.Hour)
 	correlator := grpc.NewRealTimeCorrelationEngine(o.logger, grpc.CorrelationConfig{
-		MaxEvents:       1000,
-		WindowSize:      5 * time.Minute,
-		CorrelationTTL:  30 * time.Minute,
-		EnableGrouping:  true,
+		MaxEvents:      1000,
+		WindowSize:     5 * time.Minute,
+		CorrelationTTL: 30 * time.Minute,
+		EnableGrouping: true,
 	})
 	registry := grpc.NewInMemoryCollectorRegistry(o.logger)
 	metrics := grpc.NewPrometheusMetricsCollector(o.logger)

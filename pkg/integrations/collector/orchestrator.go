@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
-	"github.com/yairfalse/tapio/pkg/dataflow"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/pipeline"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"

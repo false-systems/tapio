@@ -60,7 +60,6 @@ func (a *CorrelationEngineAdapter) GetSemanticGroups() []*interfaces.SemanticGro
 	return result
 }
 
-
 // CreateDefaultContextProcessor creates a context processor with default configuration
 func CreateDefaultContextProcessor() interfaces.ContextProcessor {
 	return intelligenceContext.NewContextProcessor()

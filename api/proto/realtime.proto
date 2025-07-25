@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package tapio.realtime;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/yairfalse/tapio/pkg/interfaces/grpc";
+
+// RealtimeObservability service provides real-time event and correlation streaming
+service RealtimeObservability {
+  // StreamEvents provides real-time event streaming from the ring buffer
+  rpc StreamEvents(StreamEventsRequest) returns (stream StreamEventsResponse);
+  
+  // StreamCorrelations provides real-time correlation findings streaming
+  rpc StreamCorrelations(StreamCorrelationsRequest) returns (stream StreamCorrelationsResponse);
+  
+  // GetEventRingMetrics returns current ring buffer metrics
+  rpc GetEventRingMetrics(GetEventRingMetricsRequest) returns (GetEventRingMetricsResponse);
+}
+
+// StreamEventsRequest configures the event stream
+message StreamEventsRequest {
+  // Event type filters (empty = all types)
+  repeated string event_types = 1;
+  
+  // Source filters (empty = all sources)
+  repeated string sources = 2;
+  
+  // Minimum event level
+  string min_level = 3;
+  
+  // Include trace context
+  bool include_trace_context = 4;
+}
+
+// StreamEventsResponse contains a streamed event
+message StreamEventsResponse {
+  Event event = 1;
+}
+
+// Event represents a unified event for streaming
+message Event {
+  string id = 1;
+  string type = 2;
+  string source = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  string message = 5;
+  string level = 6;
+  
+  // Trace context
+  string trace_id = 7;
+  string span_id = 8;
+  
+  // Event attributes
+  map<string, string> attributes = 9;
+}
+
+// StreamCorrelationsRequest configures the correlation stream
+message StreamCorrelationsRequest {
+  // Minimum confidence threshold (0.0 - 1.0)
+  float min_confidence = 1;
+  
+  // Result type filters
+  repeated string result_types = 2;
+  
+  // Include only significant correlations
+  bool significant_only = 3;
+}
+
+// StreamCorrelationsResponse contains a streamed correlation
+message StreamCorrelationsResponse {
+  CorrelationOutput correlation = 1;
+}
+
+// CorrelationOutput represents a correlation finding
+message CorrelationOutput {
+  string correlation_id = 1;
+  float confidence = 2;
+  google.protobuf.Timestamp processed_at = 3;
+  string result_type = 4;
+  
+  // Original event reference
+  string event_id = 5;
+  string event_type = 6;
+  string event_source = 7;
+  
+  // Correlation findings
+  string pattern_type = 8;
+  string description = 9;
+  
+  // Metadata
+  map<string, string> metadata = 10;
+}
+
+// GetEventRingMetricsRequest requests ring buffer metrics
+message GetEventRingMetricsRequest {
+  // Request parameters (empty for now)
+}
+
+// GetEventRingMetricsResponse contains ring buffer metrics
+message GetEventRingMetricsResponse {
+  uint64 capacity = 1;
+  uint64 size = 2;
+  uint64 write_pos = 3;
+  uint64 read_pos = 4;
+  float utilization = 5;
+}

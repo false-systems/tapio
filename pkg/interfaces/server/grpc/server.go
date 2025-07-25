@@ -27,22 +27,22 @@ type Server struct {
 	healthServer *health.Server
 
 	listener net.Listener
-	
+
 	// Service implementations
-	eventService      *EventServiceImpl
-	collectorService  *CollectorServiceImpl
-	tapioService      *TapioServiceComplete
+	eventService     *EventServiceImpl
+	collectorService *CollectorServiceImpl
+	tapioService     *TapioServiceComplete
 }
 
 // Config holds server configuration
 type Config struct {
-	Address          string
-	EnableReflection bool
-	EnableHealth     bool
-	MaxBatchSize     int
+	Address            string
+	EnableReflection   bool
+	EnableHealth       bool
+	MaxBatchSize       int
 	MaxEventsPerSecond int
-	ClusterID        string
-	NodeID           string
+	ClusterID          string
+	NodeID             string
 }
 
 // NewServer creates a new unified server
@@ -110,7 +110,7 @@ func (s *Server) RegisterServices() error {
 		}
 		s.healthServer.SetServingStatus("tapio.v1.CollectorService", grpc_health_v1.HealthCheckResponse_SERVING)
 	}
-	
+
 	// Register TapioService REST gateway
 	if s.tapioService != nil {
 		if err := pb.RegisterTapioServiceHandlerFromEndpoint(ctx, s.httpMux, s.config.Address, opts); err != nil {

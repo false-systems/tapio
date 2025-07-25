@@ -568,7 +568,7 @@ func (pb *PipelineBuilder) buildRingBufferPipeline() (IntelligencePipeline, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ring buffer pipeline: %w", err)
 	}
-	
+
 	return pipeline, nil
 }
 

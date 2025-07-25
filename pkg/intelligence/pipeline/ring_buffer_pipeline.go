@@ -177,10 +177,10 @@ func (rb *RingBufferPipeline) GetMetrics() PipelineMetrics {
 		CorrelationErrors:   0,
 		AverageLatency:      1 * time.Millisecond, // Estimate
 		ThroughputPerSecond: float64(rb.eventsProcessed),
-		QueueDepth:          0, // Would calculate from buffer usage
-		QueueCapacity:       65536, // Input buffer size
-		ActiveWorkers:       1, // Simplified
-		StartTime:           time.Now(), // Should be set at Start()
+		QueueDepth:          0,                      // Would calculate from buffer usage
+		QueueCapacity:       65536,                  // Input buffer size
+		ActiveWorkers:       1,                      // Simplified
+		StartTime:           time.Now(),             // Should be set at Start()
 		Uptime:              time.Since(time.Now()), // Simplified
 		LastUpdateTime:      time.Now(),
 	}
@@ -202,24 +202,24 @@ func (rb *RingBufferPipeline) GetConfig() PipelineConfig {
 func (rb *RingBufferPipeline) GetCorrelationOutputs(outputs []CorrelationOutput) int {
 	outputCount := 0
 	maxOutputs := len(outputs)
-	
+
 	// Try to get processed events from output buffer
 	for outputCount < maxOutputs {
 		ptr, err := rb.outputBuffer.Get()
 		if err != nil {
 			break // No more events available
 		}
-		
+
 		// Convert unsafe pointer back to UnifiedEvent
 		event := (*domain.UnifiedEvent)(ptr)
-		
+
 		// Convert processed event to CorrelationOutput
 		if correlationOutput := rb.convertEventToCorrelationOutput(event); correlationOutput != nil {
 			outputs[outputCount] = *correlationOutput
 			outputCount++
 		}
 	}
-	
+
 	return outputCount
 }
 
@@ -229,17 +229,17 @@ func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.Unif
 	if event.Attributes == nil {
 		return nil
 	}
-	
+
 	correlationIDInterface, hasCorrelation := event.Attributes["correlation_id"]
 	if !hasCorrelation {
 		return nil // No correlation findings
 	}
-	
+
 	correlationID, ok := correlationIDInterface.(string)
 	if !ok || correlationID == "" {
 		return nil // Invalid correlation ID
 	}
-	
+
 	// Extract confidence score
 	confidence := 0.0
 	if confidenceInterface, exists := event.Attributes["correlation_confidence"]; exists {
@@ -247,13 +247,13 @@ func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.Unif
 			fmt.Sscanf(confidenceStr, "%f", &confidence)
 		}
 	}
-	
+
 	// Get the latest correlation findings from engine
 	var correlationData *interfaces.Finding
 	if rb.correlationStage != nil && rb.correlationStage.correlationEngine != nil {
 		correlationData = rb.correlationStage.correlationEngine.GetLatestFindings()
 	}
-	
+
 	// Determine result type based on correlation data
 	resultType := CorrelationTypeCorrelation
 	if correlationData != nil {
@@ -264,7 +264,7 @@ func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.Unif
 			resultType = CorrelationTypeAnalytics
 		}
 	}
-	
+
 	// Convert interfaces.Finding to correlation.Finding for compatibility
 	var correlationFinding *correlation.Finding
 	if correlationData != nil {
@@ -283,10 +283,10 @@ func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.Unif
 		ProcessingTime:  time.Since(event.Timestamp),
 		ResultType:      resultType,
 		Metadata: map[string]string{
-			"correlation_id":      correlationID,
-			"event_source":        string(event.Source),
-			"event_type":          string(event.Type),
-			"pipeline_mode":       "ring-buffer",
+			"correlation_id": correlationID,
+			"event_source":   string(event.Source),
+			"event_type":     string(event.Type),
+			"pipeline_mode":  "ring-buffer",
 		},
 	}
 }

@@ -148,7 +148,7 @@ func DebugPipelineConfig() *PipelineConfig {
 func RingBufferPipelineConfig() *PipelineConfig {
 	config := DefaultPipelineConfig()
 	config.Mode = PipelineModeRingBuffer
-	config.BatchSize = 10000 // Large batches for ultra-high performance
+	config.BatchSize = 10000  // Large batches for ultra-high performance
 	config.BufferSize = 65536 // Large ring buffer capacity
 	config.MaxConcurrency = 0 // Use all available cores
 	config.EnableMetrics = true

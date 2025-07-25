@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/cni"
-	"github.com/yairfalse/tapio/pkg/intelligence/pipeline"
 	"github.com/yairfalse/tapio/pkg/domain"
 	manager "github.com/yairfalse/tapio/pkg/integrations/collector-manager"
+	"github.com/yairfalse/tapio/pkg/intelligence/pipeline"
 )
 
 // DemoFullSemanticCorrelationPipeline demonstrates the complete event flow:

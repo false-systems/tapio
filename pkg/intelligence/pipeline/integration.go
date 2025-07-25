@@ -35,10 +35,10 @@ type PipelineIntegration struct {
 	flushInterval time.Duration
 
 	// Metrics
-	outputsStored   uint64
-	outputsDropped  uint64
-	cacheHits       uint64
-	cacheMisses     uint64
+	outputsStored  uint64
+	outputsDropped uint64
+	cacheHits      uint64
+	cacheMisses    uint64
 }
 
 // CorrelationCache provides fast in-memory access to recent correlations
