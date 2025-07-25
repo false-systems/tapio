@@ -18,18 +18,18 @@ type RingBufferPipeline struct {
 	// Ring buffers for ultra-fast processing
 	inputBuffer  *performance.RingBuffer
 	outputBuffer *performance.RingBuffer
-	
+
 	// DataFlow correlation intelligence
 	correlationStage *CorrelationStage
-	
+
 	// OTEL integration
 	tracer trace.Tracer
-	
+
 	// Control
 	ctx     context.Context
 	cancel  context.CancelFunc
 	running bool
-	
+
 	// Metrics
 	eventsProcessed uint64
 	eventsDropped   uint64
@@ -49,27 +49,27 @@ func NewRingBufferPipeline() (IntelligencePipeline, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create input buffer: %w", err)
 	}
-	
+
 	outputBuffer, err := performance.NewRingBuffer(32768)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create output buffer: %w", err)
 	}
-	
+
 	// Create OTEL tracer
 	tracer := otel.Tracer("tapio-ring-buffer-pipeline")
-	
+
 	// Create correlation stage with DataFlow intelligence
 	correlationStage := &CorrelationStage{
 		semanticTracer:    correlation.NewSemanticOTELTracer(),
 		correlationEngine: correlation.NewSemanticCorrelationEngine(),
 		tracer:            tracer,
 	}
-	
+
 	// Start correlation engine
 	if err := correlationStage.correlationEngine.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start correlation engine: %w", err)
 	}
-	
+
 	return &RingBufferPipeline{
 		inputBuffer:      inputBuffer,
 		outputBuffer:     outputBuffer,
@@ -83,7 +83,7 @@ func (rb *RingBufferPipeline) ProcessEvent(event *domain.UnifiedEvent) error {
 	if !rb.running {
 		return fmt.Errorf("pipeline not running")
 	}
-	
+
 	// Create processing span
 	ctx, span := rb.tracer.Start(rb.ctx, "ringbuffer.process_event",
 		trace.WithAttributes(
@@ -92,14 +92,14 @@ func (rb *RingBufferPipeline) ProcessEvent(event *domain.UnifiedEvent) error {
 		),
 	)
 	defer span.End()
-	
+
 	// Apply DataFlow correlation intelligence
 	if err := rb.processWithCorrelation(ctx, event); err != nil {
 		span.RecordError(err)
 		rb.eventsDropped++
 		return err
 	}
-	
+
 	rb.eventsProcessed++
 	return nil
 }
@@ -110,12 +110,12 @@ func (rb *RingBufferPipeline) processWithCorrelation(ctx context.Context, event 
 	if err := rb.correlationStage.semanticTracer.ProcessUnifiedEventWithSemanticTrace(ctx, event); err != nil {
 		return fmt.Errorf("semantic trace failed: %w", err)
 	}
-	
+
 	// Phase 2: Correlation engine (from DataFlow)
 	if err := rb.correlationStage.correlationEngine.ProcessEvent(ctx, event); err != nil {
 		return fmt.Errorf("correlation failed: %w", err)
 	}
-	
+
 	// Phase 3: Event enrichment (from DataFlow)
 	findings := rb.correlationStage.correlationEngine.GetLatestFindings()
 	if findings != nil {
@@ -126,7 +126,7 @@ func (rb *RingBufferPipeline) processWithCorrelation(ctx context.Context, event 
 		event.Metadata["correlation_confidence"] = fmt.Sprintf("%.2f", findings.Confidence)
 		event.Metadata["correlation_pattern"] = findings.PatternType
 	}
-	
+
 	return nil
 }
 
@@ -194,6 +194,83 @@ func (rb *RingBufferPipeline) GetConfig() PipelineConfig {
 	}
 }
 
+// GetCorrelationOutputs retrieves correlation outputs from the pipeline output buffer
+func (rb *RingBufferPipeline) GetCorrelationOutputs(outputs []CorrelationOutput) int {
+	outputCount := 0
+	maxOutputs := len(outputs)
+	
+	// Try to get processed events from output buffer
+	for outputCount < maxOutputs {
+		ptr, err := rb.outputBuffer.Get()
+		if err != nil {
+			break // No more events available
+		}
+		
+		// Convert unsafe pointer back to UnifiedEvent
+		event := (*domain.UnifiedEvent)(ptr)
+		
+		// Convert processed event to CorrelationOutput
+		if correlationOutput := rb.convertEventToCorrelationOutput(event); correlationOutput != nil {
+			outputs[outputCount] = *correlationOutput
+			outputCount++
+		}
+	}
+	
+	return outputCount
+}
+
+// convertEventToCorrelationOutput converts a processed UnifiedEvent to CorrelationOutput
+func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.UnifiedEvent) *CorrelationOutput {
+	// Check if event has correlation data (from our correlation processing)
+	if event.Metadata == nil {
+		return nil
+	}
+	
+	correlationID, hasCorrelation := event.Metadata["correlation_id"]
+	if !hasCorrelation || correlationID == "" {
+		return nil // No correlation findings
+	}
+	
+	// Extract confidence score
+	confidence := 0.0
+	if confidenceStr, exists := event.Metadata["correlation_confidence"]; exists {
+		fmt.Sscanf(confidenceStr, "%f", &confidence)
+	}
+	
+	// Get the latest correlation findings from engine
+	var correlationData *correlation.Finding
+	if rb.correlationStage != nil && rb.correlationStage.correlationEngine != nil {
+		correlationData = rb.correlationStage.correlationEngine.GetLatestFindings()
+	}
+	
+	// Determine result type based on correlation data
+	resultType := CorrelationTypeCorrelation
+	if correlationData != nil {
+		switch correlationData.PatternType {
+		case "anomaly":
+			resultType = CorrelationTypeAnomaly
+		case "analytics":
+			resultType = CorrelationTypeAnalytics
+		}
+	}
+	
+	return &CorrelationOutput{
+		OriginalEvent:   event,
+		ProcessingStage: "correlation",
+		CorrelationData: correlationData,
+		Confidence:      confidence,
+		ProcessedAt:     time.Now(),
+		ProcessingTime:  time.Since(event.Timestamp),
+		ResultType:      resultType,
+		Metadata: map[string]string{
+			"correlation_id":      correlationID,
+			"event_source":        event.Source,
+			"event_type":          event.Type,
+			"pipeline_mode":       "ring-buffer",
+		},
+	}
+}
+
 // Helper function
 func max(a, b uint64) uint64 {
 	if a > b {
@@ -208,6 +285,6 @@ func max(a, b uint64) uint64 {
 // ✅ Provides OTEL tracing integration
 // ✅ Implements the IntelligencePipeline interface
 // ✅ Supports both single and batch event processing
-// 
+//
 // It serves as the foundation for Razi to add ProcessingResult
 // and results persistence on top of.
