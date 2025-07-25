@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/cni"
-	"github.com/yairfalse/tapio/pkg/dataflow"
+	"github.com/yairfalse/tapio/pkg/intelligence/pipeline"
 	"github.com/yairfalse/tapio/pkg/domain"
 	manager "github.com/yairfalse/tapio/pkg/integrations/collector-manager"
 )
@@ -33,26 +33,19 @@ func DemoFullSemanticCorrelationPipeline() error {
 	collectorMgr := manager.NewCollectorManager()
 	collectorMgr.AddCollector("cni", cniCollector)
 
-	// Step 3: Create DataFlow for semantic correlation (L2: Intelligence)
-	log.Printf("🔧 Creating DataFlow with semantic correlation...")
-	dataFlowConfig := dataflow.Config{
-		EnableSemanticGrouping: true,
-		GroupRetentionPeriod:   30 * time.Minute,
-		ServiceName:            "demo-collector",
-		ServiceVersion:         "1.0.0",
-		Environment:            "demo",
-		BufferSize:             1000,
-		FlushInterval:          time.Second,
+	// Step 3: Create Pipeline for semantic correlation (L2: Intelligence)
+	log.Printf("🔧 Creating Pipeline with semantic correlation...")
+	pipelineInstance, err := pipeline.NewHighPerformancePipeline()
+	if err != nil {
+		return fmt.Errorf("failed to create pipeline: %w", err)
 	}
-
-	dataFlow := dataflow.NewTapioDataFlow(dataFlowConfig)
 
 	// Step 4: Connect the pipeline
 	log.Printf("🔗 Connecting pipeline components...")
 	inputEvents := make(chan domain.UnifiedEvent, 1000)
 	outputEvents := make(chan domain.UnifiedEvent, 1000)
 
-	dataFlow.Connect(inputEvents, outputEvents)
+	// Pipeline doesn't need explicit connection - it processes events directly
 
 	// Step 5: Start all components
 	log.Printf("🚀 Starting pipeline...")
@@ -64,10 +57,10 @@ func DemoFullSemanticCorrelationPipeline() error {
 	defer collectorMgr.Stop()
 
 	// Start DataFlow
-	if err := dataFlow.Start(); err != nil {
+	if err := pipelineInstance.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start data flow: %w", err)
 	}
-	defer dataFlow.Stop()
+	defer pipelineInstance.Stop()
 
 	// Step 6: Route events through the pipeline
 	log.Printf("📊 Starting event routing...")

@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/dataflow"
+	"github.com/yairfalse/tapio/pkg/intelligence/pipeline"
 	"github.com/yairfalse/tapio/pkg/domain"
 	manager "github.com/yairfalse/tapio/pkg/integrations/collector-manager"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
@@ -27,7 +27,7 @@ type EventServiceImpl struct {
 
 	// Dependencies
 	collectorMgr *manager.CollectorManager
-	dataFlow     *dataflow.TapioDataFlow
+	pipeline     pipeline.IntelligencePipeline
 
 	// Subscription management
 	mu            sync.RWMutex
@@ -62,9 +62,9 @@ func NewEventServiceImpl(logger *zap.Logger, tracer trace.Tracer) *EventServiceI
 }
 
 // SetDependencies injects dependencies
-func (s *EventServiceImpl) SetDependencies(collectorMgr *manager.CollectorManager, dataFlow *dataflow.TapioDataFlow) {
+func (s *EventServiceImpl) SetDependencies(collectorMgr *manager.CollectorManager, pipelineInstance pipeline.IntelligencePipeline) {
 	s.collectorMgr = collectorMgr
-	s.dataFlow = dataFlow
+	s.pipeline = pipelineInstance
 }
 
 // StreamEvents implements bidirectional streaming for high-throughput event ingestion
@@ -109,12 +109,12 @@ func (s *EventServiceImpl) StreamEvents(stream grpc.BidiStreamingServer[pb.Strea
 			// Process the event
 			s.stats.eventsReceived.Add(1)
 
-			if s.dataFlow != nil {
+			if s.pipeline != nil {
 				// Convert to unified event
 				unifiedEvent := s.convertProtoToUnifiedEvent(r.Event)
 
 				// Submit to dataflow
-				if err := s.dataFlow.SubmitEvent(ctx, unifiedEvent); err != nil {
+				if err := s.pipeline.ProcessEvent(unifiedEvent); err != nil {
 					s.logger.Error("Failed to submit event to dataflow",
 						zap.String("event_id", r.Event.Id),
 						zap.Error(err))
@@ -143,10 +143,10 @@ func (s *EventServiceImpl) StreamEvents(stream grpc.BidiStreamingServer[pb.Strea
 			s.stats.eventsReceived.Add(uint64(batchSize))
 
 			successCount := 0
-			if s.dataFlow != nil {
+			if s.pipeline != nil {
 				for _, event := range r.Batch.Events {
 					unifiedEvent := s.convertProtoToUnifiedEvent(event)
-					if err := s.dataFlow.SubmitEvent(ctx, unifiedEvent); err == nil {
+					if err := s.pipeline.ProcessEvent(unifiedEvent); err == nil {
 						successCount++
 					} else {
 						s.stats.eventsDropped.Add(1)
@@ -240,10 +240,12 @@ func (s *EventServiceImpl) Subscribe(req *pb.SubscribeRequest, stream grpc.Serve
 	}
 
 	// If we have dataflow, subscribe to real events
-	if s.dataFlow != nil {
+	if s.pipeline != nil {
 		eventChan := make(chan *domain.UnifiedEvent, 100)
-		dataflowSubID := s.dataFlow.Subscribe(ctx, req.Filter.Query, eventChan)
-		defer s.dataFlow.Unsubscribe(dataflowSubID)
+		// Note: Pipeline interface doesn't support subscriptions yet
+		// This functionality needs to be reimplemented when subscription support is added
+		// dataflowSubID := s.pipeline.Subscribe(ctx, req.Filter.Query, eventChan)
+		// defer s.pipeline.Unsubscribe(dataflowSubID)
 
 		// Forward events from dataflow to client
 		go func() {
@@ -356,10 +358,10 @@ func (s *EventServiceImpl) SubmitEventBatch(ctx context.Context, req *pb.EventBa
 	s.stats.eventsReceived.Add(uint64(batchSize))
 
 	successCount := 0
-	if s.dataFlow != nil {
+	if s.pipeline != nil {
 		for _, event := range req.Events {
 			unifiedEvent := s.convertProtoToUnifiedEvent(event)
-			if err := s.dataFlow.SubmitEvent(ctx, unifiedEvent); err == nil {
+			if err := s.pipeline.ProcessEvent(unifiedEvent); err == nil {
 				successCount++
 			} else {
 				s.stats.eventsDropped.Add(1)
