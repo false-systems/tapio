@@ -40,20 +40,8 @@ func (a *CorrelationEngineAdapter) ProcessEvent(ctx context.Context, event *doma
 
 // GetLatestFindings returns the most recent correlation findings
 func (a *CorrelationEngineAdapter) GetLatestFindings() *interfaces.Finding {
-	findings := a.engine.GetLatestFindings()
-	if findings == nil {
-		return nil
-	}
-
-	// Convert internal Finding to interface Finding
-	return &interfaces.Finding{
-		ID:            findings.ID,
-		Confidence:    findings.Confidence,
-		PatternType:   findings.PatternType,
-		Description:   findings.Description,
-		RelatedEvents: findings.RelatedEvents,
-		SemanticGroup: convertSemanticGroup(findings.SemanticGroup),
-	}
+	// The engine already returns *interfaces.Finding, so no conversion needed
+	return a.engine.GetLatestFindings()
 }
 
 // GetSemanticGroups returns current semantic groups
@@ -72,18 +60,6 @@ func (a *CorrelationEngineAdapter) GetSemanticGroups() []*interfaces.SemanticGro
 	return result
 }
 
-// convertSemanticGroup converts internal semantic group to interface type
-func convertSemanticGroup(group *correlation.SemanticGroupSummary) *interfaces.SemanticGroup {
-	if group == nil {
-		return nil
-	}
-
-	return &interfaces.SemanticGroup{
-		ID:     group.ID,
-		Intent: group.Intent,
-		Type:   group.Type,
-	}
-}
 
 // CreateDefaultContextProcessor creates a context processor with default configuration
 func CreateDefaultContextProcessor() interfaces.ContextProcessor {
