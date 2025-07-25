@@ -22,6 +22,7 @@ const (
 	EventTypeMemory     EventType = "memory"
 	EventTypeCPU        EventType = "cpu"
 	EventTypeDisk       EventType = "disk"
+	EventTypeMetric     EventType = "metric"
 )
 
 // SourceType represents the source of an event

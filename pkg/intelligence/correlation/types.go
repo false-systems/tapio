@@ -1,8 +1,6 @@
 package correlation
 
 import (
-	"context"
-
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -33,23 +31,8 @@ type Collector interface {
 	Stop() error
 }
 
-// CorrelationEngineInterface defines the correlation engine contract
-type CorrelationEngineInterface interface {
-	// RegisterCollector registers a collector
-	RegisterCollector(c Collector) error
-
-	// Start begins correlation processing
-	Start(ctx context.Context) error
-
-	// Stop ends correlation processing
-	Stop()
-
-	// Insights returns the insights channel
-	Insights() <-chan Insight
-
-	// Events returns the events channel
-	Events() <-chan Event
-}
+// DEPRECATED: Use interfaces.CorrelationEngine instead
+// This interface is kept for backward compatibility and will be removed in future versions
 
 // Additional type aliases for collector package compatibility
 
