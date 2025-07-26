@@ -65,16 +65,17 @@ type OAuth2Config struct {
 	ClientSecret string   `yaml:"client_secret" json:"client_secret"`
 	AuthURL      string   `yaml:"auth_url" json:"auth_url"`
 	TokenURL     string   `yaml:"token_url" json:"token_url"`
+	UserInfoURL  string   `yaml:"userinfo_url" json:"userinfo_url"`
 	RedirectURL  string   `yaml:"redirect_url" json:"redirect_url"`
 	Scopes       []string `yaml:"scopes" json:"scopes"`
 }
 
 // APIKeyConfig defines API key settings
 type APIKeyConfig struct {
-	Header         string `yaml:"header" json:"header"`
-	QueryParam     string `yaml:"query_param" json:"query_param"`
-	Cookie         string `yaml:"cookie" json:"cookie"`
-	HashedKeys     bool   `yaml:"hashed_keys" json:"hashed_keys"`
+	Header         string        `yaml:"header" json:"header"`
+	QueryParam     string        `yaml:"query_param" json:"query_param"`
+	Cookie         string        `yaml:"cookie" json:"cookie"`
+	HashedKeys     bool          `yaml:"hashed_keys" json:"hashed_keys"`
 	RotationPeriod time.Duration `yaml:"rotation_period" json:"rotation_period"`
 }
 
@@ -86,15 +87,15 @@ type BasicAuthConfig struct {
 
 // RateLimitConfig defines rate limiting settings
 type RateLimitConfig struct {
-	Enabled           bool                     `yaml:"enabled" json:"enabled"`
-	Global            RateLimitRule            `yaml:"global" json:"global"`
-	PerEndpoint       map[string]RateLimitRule `yaml:"per_endpoint" json:"per_endpoint"`
-	PerUser           RateLimitRule            `yaml:"per_user" json:"per_user"`
-	PerIP             RateLimitRule            `yaml:"per_ip" json:"per_ip"`
-	WhitelistIPs      []string                 `yaml:"whitelist_ips" json:"whitelist_ips"`
-	BlacklistIPs      []string                 `yaml:"blacklist_ips" json:"blacklist_ips"`
-	Distributed       bool                     `yaml:"distributed" json:"distributed"`
-	RedisURL          string                   `yaml:"redis_url" json:"redis_url"`
+	Enabled      bool                     `yaml:"enabled" json:"enabled"`
+	Global       RateLimitRule            `yaml:"global" json:"global"`
+	PerEndpoint  map[string]RateLimitRule `yaml:"per_endpoint" json:"per_endpoint"`
+	PerUser      RateLimitRule            `yaml:"per_user" json:"per_user"`
+	PerIP        RateLimitRule            `yaml:"per_ip" json:"per_ip"`
+	WhitelistIPs []string                 `yaml:"whitelist_ips" json:"whitelist_ips"`
+	BlacklistIPs []string                 `yaml:"blacklist_ips" json:"blacklist_ips"`
+	Distributed  bool                     `yaml:"distributed" json:"distributed"`
+	RedisURL     string                   `yaml:"redis_url" json:"redis_url"`
 }
 
 // RateLimitRule defines a rate limit rule

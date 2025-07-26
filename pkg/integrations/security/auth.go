@@ -3,10 +3,14 @@ package security
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +59,29 @@ type JWTClaims struct {
 	Permissions []string `json:"permissions"`
 	SessionID   string   `json:"session_id"`
 	jwt.RegisteredClaims
+}
+
+// OAuth2UserInfo represents OAuth2 user information
+type OAuth2UserInfo struct {
+	UserID   string   `json:"user_id"`
+	Username string   `json:"username"`
+	Email    string   `json:"email"`
+	Roles    []string `json:"roles"`
+	Provider string   `json:"provider"`
+}
+
+// UserAccount represents a user account in the simulated store
+type UserAccount struct {
+	UserID       string     `json:"user_id"`
+	Username     string     `json:"username"`
+	Email        string     `json:"email"`
+	PasswordHash string     `json:"password_hash"`
+	Roles        []string   `json:"roles"`
+	Permissions  []string   `json:"permissions"`
+	Active       bool       `json:"active"`
+	CreatedAt    time.Time  `json:"created_at"`
+	LastLogin    *time.Time `json:"last_login"`
+	LockedUntil  *time.Time `json:"locked_until"`
 }
 
 // NewAuthManager creates a new authentication manager
@@ -208,9 +235,37 @@ func (am *AuthManager) authenticateAPIKey(r *http.Request) bool {
 
 // authenticateOAuth2 validates OAuth2 tokens
 func (am *AuthManager) authenticateOAuth2(r *http.Request) bool {
-	// Implementation would validate OAuth2 access tokens
-	// This is a placeholder for OAuth2 integration
-	return false
+	// Extract token from Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return false
+	}
+
+	if len(authHeader) < 7 || authHeader[:7] != "Bearer " {
+		return false
+	}
+
+	tokenString := authHeader[7:]
+	if tokenString == "" {
+		return false
+	}
+
+	// Validate token with OAuth2 provider
+	userInfo, err := am.validateOAuth2Token(tokenString)
+	if err != nil {
+		am.logger.Debug("OAuth2 token validation failed", "error", err)
+		return false
+	}
+
+	// Add OAuth2 user context to request
+	ctx := context.WithValue(r.Context(), "user_id", userInfo.UserID)
+	ctx = context.WithValue(ctx, "username", userInfo.Username)
+	ctx = context.WithValue(ctx, "email", userInfo.Email)
+	ctx = context.WithValue(ctx, "roles", userInfo.Roles)
+	ctx = context.WithValue(ctx, "oauth2_provider", userInfo.Provider)
+	*r = *r.WithContext(ctx)
+
+	return true
 }
 
 // authenticateMTLS validates mutual TLS certificates
@@ -345,15 +400,45 @@ func (am *AuthManager) Logout(sessionID string) error {
 
 // validateCredentials validates user credentials
 func (am *AuthManager) validateCredentials(username, password string) (bool, string, []string, []string, error) {
-	// This is a placeholder implementation
-	// In production, this would integrate with your user store (database, LDAP, etc.)
-
-	// For demo purposes, accept any non-empty credentials
-	if username != "" && password != "" {
-		return true, "user-" + username, []string{"user"}, []string{"read"}, nil
+	// Basic input validation
+	if username == "" || password == "" {
+		return false, "", nil, nil, fmt.Errorf("username and password are required")
 	}
 
-	return false, "", nil, nil, nil
+	// Length validation
+	if len(username) < 3 || len(username) > 50 {
+		return false, "", nil, nil, fmt.Errorf("username must be between 3 and 50 characters")
+	}
+	if len(password) < 8 || len(password) > 128 {
+		return false, "", nil, nil, fmt.Errorf("password must be between 8 and 128 characters")
+	}
+
+	// Simulate user store lookup
+	// In production, this would query your user database, LDAP, etc.
+	userStore := am.getSimulatedUserStore()
+	
+	user, exists := userStore[username]
+	if !exists {
+		return false, "", nil, nil, nil // User not found
+	}
+
+	// Validate password (in production, use proper password hashing)
+	if !am.validatePassword(password, user.PasswordHash) {
+		return false, "", nil, nil, nil // Invalid password
+	}
+
+	// Check if user account is active
+	if !user.Active {
+		return false, "", nil, nil, fmt.Errorf("user account is disabled")
+	}
+
+	// Check if account is locked
+	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		return false, "", nil, nil, fmt.Errorf("user account is temporarily locked")
+	}
+
+	// Return user information
+	return true, user.UserID, user.Roles, user.Permissions, nil
 }
 
 // isIPLocked checks if an IP address is locked due to failed login attempts
@@ -537,6 +622,163 @@ func (am *AuthManager) AuthorizeRequest(r *http.Request, requiredPermission stri
 	}
 
 	return false
+}
+
+// validateOAuth2Token validates an OAuth2 token with the provider
+func (am *AuthManager) validateOAuth2Token(tokenString string) (*OAuth2UserInfo, error) {
+	// Create request to OAuth2 provider's userinfo endpoint
+	req, err := http.NewRequest("GET", am.config.OAuth2Config.UserInfoURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create userinfo request: %w", err)
+	}
+
+	// Add bearer token
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	req.Header.Set("Accept", "application/json")
+
+	// Make request to OAuth2 provider
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate token with OAuth2 provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OAuth2 provider returned status %d", resp.StatusCode)
+	}
+
+	// Parse response
+	var userInfo struct {
+		Sub      string   `json:"sub"`
+		Username string   `json:"preferred_username"`
+		Email    string   `json:"email"`
+		Name     string   `json:"name"`
+		Groups   []string `json:"groups"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+		return nil, fmt.Errorf("failed to decode OAuth2 userinfo response: %w", err)
+	}
+
+	// Map to internal user info structure
+	roles := am.mapOAuth2GroupsToRoles(userInfo.Groups)
+	username := userInfo.Username
+	if username == "" {
+		username = userInfo.Name
+	}
+	if username == "" {
+		username = strings.Split(userInfo.Email, "@")[0]
+	}
+
+	return &OAuth2UserInfo{
+		UserID:   userInfo.Sub,
+		Username: username,
+		Email:    userInfo.Email,
+		Roles:    roles,
+		Provider: "oauth2",
+	}, nil
+}
+
+// mapOAuth2GroupsToRoles maps OAuth2 groups to internal roles
+func (am *AuthManager) mapOAuth2GroupsToRoles(groups []string) []string {
+	roleMapping := map[string]string{
+		"admin":     "admin",
+		"user":      "user",
+		"readonly":  "readonly",
+		"developer": "developer",
+		"operator":  "operator",
+	}
+
+	var roles []string
+	roleSet := make(map[string]bool)
+
+	for _, group := range groups {
+		if role, exists := roleMapping[strings.ToLower(group)]; exists {
+			if !roleSet[role] {
+				roles = append(roles, role)
+				roleSet[role] = true
+			}
+		}
+	}
+
+	// Default to user role if no roles mapped
+	if len(roles) == 0 {
+		roles = []string{"user"}
+	}
+
+	return roles
+}
+
+// getSimulatedUserStore returns a simulated user store for demonstration
+func (am *AuthManager) getSimulatedUserStore() map[string]*UserAccount {
+	// In production, this would be replaced with actual database/LDAP queries
+	return map[string]*UserAccount{
+		"admin": {
+			UserID:       "admin-001",
+			Username:     "admin",
+			Email:        "admin@example.com",
+			PasswordHash: am.hashPassword("admin123"),
+			Roles:        []string{"admin"},
+			Permissions:  []string{"read", "write", "delete", "admin"},
+			Active:       true,
+			CreatedAt:    time.Now().Add(-30 * 24 * time.Hour),
+		},
+		"user": {
+			UserID:       "user-001",
+			Username:     "user",
+			Email:        "user@example.com",
+			PasswordHash: am.hashPassword("user123"),
+			Roles:        []string{"user"},
+			Permissions:  []string{"read"},
+			Active:       true,
+			CreatedAt:    time.Now().Add(-15 * 24 * time.Hour),
+		},
+		"operator": {
+			UserID:       "operator-001",
+			Username:     "operator",
+			Email:        "operator@example.com",
+			PasswordHash: am.hashPassword("operator123"),
+			Roles:        []string{"operator"},
+			Permissions:  []string{"read", "write"},
+			Active:       true,
+			CreatedAt:    time.Now().Add(-7 * 24 * time.Hour),
+		},
+		"readonly": {
+			UserID:       "readonly-001",
+			Username:     "readonly",
+			Email:        "readonly@example.com",
+			PasswordHash: am.hashPassword("readonly123"),
+			Roles:        []string{"readonly"},
+			Permissions:  []string{"read"},
+			Active:       true,
+			CreatedAt:    time.Now().Add(-3 * 24 * time.Hour),
+		},
+		"disabled": {
+			UserID:       "disabled-001",
+			Username:     "disabled",
+			Email:        "disabled@example.com",
+			PasswordHash: am.hashPassword("disabled123"),
+			Roles:        []string{"user"},
+			Permissions:  []string{"read"},
+			Active:       false, // Disabled account
+			CreatedAt:    time.Now().Add(-60 * 24 * time.Hour),
+		},
+	}
+}
+
+// hashPassword creates a simple hash of the password (use bcrypt in production)
+func (am *AuthManager) hashPassword(password string) string {
+	hash := sha256.Sum256([]byte(password + "tapio-salt"))
+	return hex.EncodeToString(hash[:])
+}
+
+// validatePassword validates a password against its hash
+func (am *AuthManager) validatePassword(password, passwordHash string) bool {
+	expectedHash := am.hashPassword(password)
+	return subtle.ConstantTimeCompare([]byte(expectedHash), []byte(passwordHash)) == 1
 }
 
 // HasRole checks if the authenticated user has a specific role

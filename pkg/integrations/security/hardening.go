@@ -95,6 +95,7 @@ type OAuth2Config struct {
 	Scopes       []string `yaml:"scopes"`
 	AuthURL      string   `yaml:"auth_url"`
 	TokenURL     string   `yaml:"token_url"`
+	UserInfoURL  string   `yaml:"userinfo_url"`
 }
 
 // BruteForceConfig defines brute force protection
@@ -166,12 +167,6 @@ type AuditConfig struct {
 }
 
 // SIEMConfig defines SIEM integration
-type SIEMConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	Endpoint  string `yaml:"endpoint"`
-	Format    string `yaml:"format"` // cef, leef, json
-	BatchSize int    `yaml:"batch_size"`
-}
 
 // NetworkSecurity defines network security configuration
 type NetworkSecurity struct {

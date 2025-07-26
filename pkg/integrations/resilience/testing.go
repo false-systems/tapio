@@ -1022,20 +1022,273 @@ func (rts *ResilienceTestSuite) executeAction(ctx context.Context, action *TestA
 	}
 }
 
-// Placeholder action implementations
+// Action implementations for resilience testing
+
+// injectFault injects specified faults into the system
 func (rts *ResilienceTestSuite) injectFault(ctx context.Context, params map[string]interface{}, result *TestResult) error {
-	rts.logEvent(result, "action_executed", "test_suite", "Fault injected", "info", params)
+	faultType, ok := params["fault_type"].(string)
+	if !ok {
+		return fmt.Errorf("fault_type parameter is required")
+	}
+
+	duration, ok := params["duration"].(float64)
+	if !ok {
+		duration = 10.0 // Default 10 seconds
+	}
+
+	target, ok := params["target"].(string)
+	if !ok {
+		target = "system"
+	}
+
+	rts.logEvent(result, "fault_injection_start", "fault_injector", 
+		fmt.Sprintf("Injecting %s fault to %s for %.1fs", faultType, target, duration), "info", params)
+
+	// Create fault injection profile
+	faultProfile := &FaultProfile{
+		Enabled:          true,
+		FaultTypes:       []FaultType{FaultType(faultType)},
+		InjectionRate:    1.0,
+		Duration:         time.Duration(duration) * time.Second,
+		TargetComponents: []string{target},
+	}
+
+	// Start fault injection
+	err := rts.faultInjector.StartFaultInjection(ctx, faultProfile)
+	if err != nil {
+		rts.logError(result, "fault_injector", "injection_failed", err.Error(), "", params)
+		return fmt.Errorf("failed to inject fault: %w", err)
+	}
+
+	// Wait for fault duration
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(time.Duration(duration) * time.Second):
+		// Fault injection completed
+	}
+
+	// Stop fault injection
+	rts.faultInjector.Stop()
+
+	rts.logEvent(result, "fault_injection_complete", "fault_injector", 
+		fmt.Sprintf("Completed %s fault injection to %s", faultType, target), "info", params)
+
 	return nil
 }
 
+// increaseLoad increases system load for testing
 func (rts *ResilienceTestSuite) increaseLoad(ctx context.Context, params map[string]interface{}, result *TestResult) error {
-	rts.logEvent(result, "action_executed", "test_suite", "Load increased", "info", params)
+	targetRate, ok := params["target_rate"].(float64)
+	if !ok {
+		targetRate = 1000.0 // Default 1000 requests/second
+	}
+
+	duration, ok := params["duration"].(float64)
+	if !ok {
+		duration = 30.0 // Default 30 seconds
+	}
+
+	rampTime, ok := params["ramp_time"].(float64)
+	if !ok {
+		rampTime = 5.0 // Default 5 second ramp
+	}
+
+	rts.logEvent(result, "load_increase_start", "load_generator", 
+		fmt.Sprintf("Increasing load to %.1f req/s over %.1fs for %.1fs", targetRate, rampTime, duration), "info", params)
+
+	// Create load pattern
+	loadPattern := &LoadPattern{
+		Type:      "ramp",
+		StartRate: int(atomic.LoadInt64(&rts.loadGenerator.requestRate)),
+		EndRate:   int(targetRate),
+		Duration:  time.Duration(duration) * time.Second,
+		Parameters: map[string]interface{}{
+			"ramp_time": rampTime,
+		},
+	}
+
+	// Start load generation
+	err := rts.loadGenerator.StartLoadGeneration(ctx, loadPattern)
+	if err != nil {
+		rts.logError(result, "load_generator", "load_increase_failed", err.Error(), "", params)
+		return fmt.Errorf("failed to increase load: %w", err)
+	}
+
+	// Monitor load increase
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	startTime := time.Now()
+	endTime := startTime.Add(time.Duration(duration) * time.Second)
+
+	for time.Now().Before(endTime) {
+		select {
+		case <-ctx.Done():
+			rts.loadGenerator.Stop()
+			return ctx.Err()
+		case <-ticker.C:
+			currentRate := atomic.LoadInt64(&rts.loadGenerator.requestRate)
+			rts.logEvent(result, "load_monitoring", "load_generator", 
+				fmt.Sprintf("Current load: %d req/s", currentRate), "info", 
+				map[string]interface{}{"current_rate": currentRate})
+		}
+	}
+
+	rts.logEvent(result, "load_increase_complete", "load_generator", 
+		fmt.Sprintf("Completed load increase test (peak: %.1f req/s)", targetRate), "info", params)
+
 	return nil
 }
 
+// simulateFailure simulates various types of component failures
 func (rts *ResilienceTestSuite) simulateFailure(ctx context.Context, params map[string]interface{}, result *TestResult) error {
-	rts.logEvent(result, "action_executed", "test_suite", "Failure simulated", "info", params)
+	failureType, ok := params["failure_type"].(string)
+	if !ok {
+		return fmt.Errorf("failure_type parameter is required")
+	}
+
+	component, ok := params["component"].(string)
+	if !ok {
+		component = "test_component"
+	}
+
+	duration, ok := params["duration"].(float64)
+	if !ok {
+		duration = 15.0 // Default 15 seconds
+	}
+
+	severity, ok := params["severity"].(string)
+	if !ok {
+		severity = "medium"
+	}
+
+	rts.logEvent(result, "failure_simulation_start", "failure_simulator", 
+		fmt.Sprintf("Simulating %s failure in %s (severity: %s) for %.1fs", failureType, component, severity, duration), 
+		"warning", params)
+
+	// Create failure event for self-healing engine
+	if rts.selfHealingEngine != nil {
+		failureEvent := &FailureEvent{
+			ID:           fmt.Sprintf("sim-%d", time.Now().UnixNano()),
+			Timestamp:    time.Now(),
+			Component:    component,
+			FailureType:  FailureType(failureType),
+			Severity:     severity,
+			ErrorMessage: fmt.Sprintf("Simulated %s failure for testing", failureType),
+			Context: map[string]interface{}{
+				"simulated":     true,
+				"test_case":     result.ScenarioName,
+				"duration":      duration,
+				"failure_type":  failureType,
+			},
+		}
+
+		// Report failure to self-healing engine
+		err := rts.selfHealingEngine.ReportFailure(failureEvent)
+		if err != nil {
+			rts.logError(result, "failure_simulator", "report_failure_error", err.Error(), "", params)
+		} else {
+			rts.logEvent(result, "failure_reported", "failure_simulator", 
+				"Failure reported to self-healing engine", "info", 
+				map[string]interface{}{"failure_id": failureEvent.ID})
+		}
+	}
+
+	// Simulate failure impact based on type
+	switch failureType {
+	case "connectivity":
+		rts.simulateConnectivityFailure(ctx, component, duration, result)
+	case "performance":
+		rts.simulatePerformanceFailure(ctx, component, duration, result)
+	case "resource":
+		rts.simulateResourceFailure(ctx, component, duration, result)
+	case "data":
+		rts.simulateDataFailure(ctx, component, duration, result)
+	default:
+		rts.simulateGenericFailure(ctx, component, failureType, duration, result)
+	}
+
+	// Wait for failure duration
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(time.Duration(duration) * time.Second):
+		// Failure simulation completed
+	}
+
+	rts.logEvent(result, "failure_simulation_complete", "failure_simulator", 
+		fmt.Sprintf("Completed %s failure simulation for %s", failureType, component), "info", params)
+
 	return nil
+}
+
+// Helper methods for failure simulation
+
+// simulateConnectivityFailure simulates network connectivity issues
+func (rts *ResilienceTestSuite) simulateConnectivityFailure(ctx context.Context, component string, duration float64, result *TestResult) {
+	rts.logEvent(result, "connectivity_failure", component, 
+		"Simulating network connectivity loss", "warning", 
+		map[string]interface{}{"duration": duration})
+
+	// In a real implementation, this might:
+	// - Block network ports
+	// - Introduce packet loss
+	// - Add network latency
+	// - Disconnect network interfaces
+}
+
+// simulatePerformanceFailure simulates performance degradation
+func (rts *ResilienceTestSuite) simulatePerformanceFailure(ctx context.Context, component string, duration float64, result *TestResult) {
+	rts.logEvent(result, "performance_failure", component, 
+		"Simulating performance degradation", "warning", 
+		map[string]interface{}{"duration": duration})
+
+	// In a real implementation, this might:
+	// - Consume CPU resources
+	// - Add artificial delays
+	// - Reduce thread pool sizes
+	// - Limit I/O bandwidth
+}
+
+// simulateResourceFailure simulates resource exhaustion
+func (rts *ResilienceTestSuite) simulateResourceFailure(ctx context.Context, component string, duration float64, result *TestResult) {
+	rts.logEvent(result, "resource_failure", component, 
+		"Simulating resource exhaustion", "warning", 
+		map[string]interface{}{"duration": duration})
+
+	// In a real implementation, this might:
+	// - Consume memory until near limits
+	// - Fill disk space
+	// - Exhaust file descriptors
+	// - Create thread exhaustion
+}
+
+// simulateDataFailure simulates data corruption or loss
+func (rts *ResilienceTestSuite) simulateDataFailure(ctx context.Context, component string, duration float64, result *TestResult) {
+	rts.logEvent(result, "data_failure", component, 
+		"Simulating data corruption/loss", "critical", 
+		map[string]interface{}{"duration": duration})
+
+	// In a real implementation, this might:
+	// - Corrupt database entries
+	// - Delete temporary files
+	// - Introduce data inconsistencies
+	// - Simulate storage failures
+}
+
+// simulateGenericFailure simulates other types of failures
+func (rts *ResilienceTestSuite) simulateGenericFailure(ctx context.Context, component, failureType string, duration float64, result *TestResult) {
+	rts.logEvent(result, "generic_failure", component, 
+		fmt.Sprintf("Simulating %s failure", failureType), "warning", 
+		map[string]interface{}{
+			"failure_type": failureType,
+			"duration":     duration,
+		})
+
+	// Generic failure simulation - log the event and wait
+	// In a real implementation, this could be extended to handle
+	// custom failure types based on the failureType parameter
 }
 
 // runValidations runs scenario validations

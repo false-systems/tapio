@@ -1,7 +1,9 @@
 package security
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -30,6 +32,8 @@ type AuditEvent struct {
 	EventType      string                 `json:"event_type"`
 	Category       string                 `json:"category"`
 	Severity       string                 `json:"severity"`
+	Title          string                 `json:"title"`
+	Message        string                 `json:"message"`
 	Source         AuditSource            `json:"source"`
 	Actor          AuditActor             `json:"actor"`
 	Target         AuditTarget            `json:"target"`
@@ -661,17 +665,65 @@ func (sa *SecurityAuditor) matchesCriteria(event AuditEvent, criteria AuditSearc
 	return true
 }
 
+// SIEMConfig configures SIEM integration
+type SIEMConfig struct {
+	Enabled    bool              `json:"enabled"`
+	Type       string            `json:"type"`       // "splunk", "elasticsearch", "webhook", "syslog"
+	Endpoint   string            `json:"endpoint"`   // SIEM endpoint URL
+	Format     string            `json:"format"`     // "json", "cef", "leef", "syslog"
+	AuthType   string            `json:"auth_type"`  // "bearer", "basic", "api_key"
+	AuthToken  string            `json:"auth_token"` // Authentication token
+	BatchSize  int               `json:"batch_size"` // Events per batch
+	Timeout    time.Duration     `json:"timeout"`    // Request timeout
+	RetryCount int               `json:"retry_count"`
+	Headers    map[string]string `json:"headers"`    // Additional HTTP headers
+	TLSConfig  *TLSSettings      `json:"tls_config"` // TLS settings
+}
+
+// TLSSettings defines TLS configuration for SIEM connection
+type TLSSettings struct {
+	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+	CertFile           string `json:"cert_file"`
+	KeyFile            string `json:"key_file"`
+	CAFile             string `json:"ca_file"`
+}
+
 // SIEMSender sends audit events to external SIEM systems
 type SIEMSender struct {
 	config SIEMConfig
 	logger *logging.Logger
+	client *http.Client
 }
 
 // NewSIEMSender creates a new SIEM sender
 func NewSIEMSender(config SIEMConfig, logger *logging.Logger) *SIEMSender {
+	// Configure HTTP client with timeout and TLS settings
+	client := &http.Client{
+		Timeout: config.Timeout,
+	}
+
+	if config.TLSConfig != nil {
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: config.TLSConfig.InsecureSkipVerify,
+		}
+		
+		// Load client certificates if provided
+		if config.TLSConfig.CertFile != "" && config.TLSConfig.KeyFile != "" {
+			cert, err := tls.LoadX509KeyPair(config.TLSConfig.CertFile, config.TLSConfig.KeyFile)
+			if err == nil {
+				tlsConfig.Certificates = []tls.Certificate{cert}
+			}
+		}
+
+		client.Transport = &http.Transport{
+			TLSClientConfig: tlsConfig,
+		}
+	}
+
 	return &SIEMSender{
 		config: config,
 		logger: logger.WithComponent("siem-sender"),
+		client: client,
 	}
 }
 
@@ -686,13 +738,192 @@ func (ss *SIEMSender) Initialize() error {
 
 // SendEvent sends an audit event to the SIEM system
 func (ss *SIEMSender) SendEvent(event *AuditEvent) error {
-	// Implementation would send event to external SIEM
-	// This is a placeholder
-	ss.logger.Debug("Sending event to SIEM",
+	if !ss.config.Enabled {
+		return nil
+	}
+
+	// Format event based on SIEM type
+	payload, err := ss.formatEvent(event)
+	if err != nil {
+		return fmt.Errorf("failed to format event for SIEM: %w", err)
+	}
+
+	// Send to SIEM endpoint
+	err = ss.sendToSIEM(payload)
+	if err != nil {
+		ss.logger.Error("Failed to send event to SIEM",
+			"event_id", event.ID,
+			"error", err,
+		)
+		return err
+	}
+
+	ss.logger.Debug("Successfully sent event to SIEM",
 		"event_id", event.ID,
 		"event_type", event.EventType,
+		"siem_endpoint", ss.config.Endpoint,
 	)
 	return nil
+}
+
+// formatEvent formats an audit event for the target SIEM system
+func (ss *SIEMSender) formatEvent(event *AuditEvent) ([]byte, error) {
+	switch strings.ToLower(ss.config.Format) {
+	case "json":
+		return json.Marshal(event)
+	case "cef":
+		return ss.formatCEF(event), nil
+	case "leef":
+		return ss.formatLEEF(event), nil
+	case "syslog":
+		return ss.formatSyslog(event), nil
+	default:
+		// Default to JSON
+		return json.Marshal(event)
+	}
+}
+
+// formatCEF formats event in Common Event Format
+func (ss *SIEMSender) formatCEF(event *AuditEvent) []byte {
+	// CEF:Version|Device Vendor|Device Product|Device Version|Device Event Class ID|Name|Severity|[Extension]
+	cefHeader := fmt.Sprintf("CEF:0|Tapio|SecurityAuditor|1.0|%s|%s|%s",
+		event.EventType,
+		event.Title,
+		ss.mapSeverityToCEF(event.Severity),
+	)
+	
+	// Add extensions
+	extensions := fmt.Sprintf("src=%s duser=%s rt=%d",
+		event.Actor.IPAddress,
+		event.Actor.Username,
+		event.Timestamp.Unix()*1000, // CEF expects milliseconds
+	)
+	
+	return []byte(cefHeader + "|" + extensions)
+}
+
+// formatLEEF formats event in Log Event Extended Format
+func (ss *SIEMSender) formatLEEF(event *AuditEvent) []byte {
+	// LEEF:Version|Vendor|Product|Version|EventID|DelimiterCharacter
+	leefHeader := fmt.Sprintf("LEEF:2.0|Tapio|SecurityAuditor|1.0|%s|^",
+		event.EventType,
+	)
+	
+	// Add attributes
+	attributes := fmt.Sprintf("devTime=%s^src=%s^usrName=%s^severity=%s",
+		event.Timestamp.Format("MMM dd yyyy HH:mm:ss"),
+		event.Actor.IPAddress,
+		event.Actor.Username,
+		event.Severity,
+	)
+	
+	return []byte(leefHeader + attributes)
+}
+
+// formatSyslog formats event in syslog format
+func (ss *SIEMSender) formatSyslog(event *AuditEvent) []byte {
+	priority := ss.mapSeverityToSyslog(event.Severity)
+	timestamp := event.Timestamp.Format("Jan 02 15:04:05")
+	hostname := "tapio-auditor"
+	
+	message := fmt.Sprintf("<%d>%s %s tapio[%s]: %s - %s",
+		priority,
+		timestamp,
+		hostname,
+		event.ID,
+		event.EventType,
+		event.Title,
+	)
+	
+	return []byte(message)
+}
+
+// sendToSIEM sends the formatted payload to the SIEM system
+func (ss *SIEMSender) sendToSIEM(payload []byte) error {
+	req, err := http.NewRequest("POST", ss.config.Endpoint, bytes.NewBuffer(payload))
+	if err != nil {
+		return fmt.Errorf("failed to create SIEM request: %w", err)
+	}
+
+	// Set content type based on format
+	switch strings.ToLower(ss.config.Format) {
+	case "json":
+		req.Header.Set("Content-Type", "application/json")
+	case "cef", "leef", "syslog":
+		req.Header.Set("Content-Type", "text/plain")
+	default:
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Set authentication
+	switch strings.ToLower(ss.config.AuthType) {
+	case "bearer":
+		req.Header.Set("Authorization", "Bearer "+ss.config.AuthToken)
+	case "basic":
+		req.Header.Set("Authorization", "Basic "+ss.config.AuthToken)
+	case "api_key":
+		req.Header.Set("X-API-Key", ss.config.AuthToken)
+	}
+
+	// Set additional headers
+	for key, value := range ss.config.Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Send request with retry logic
+	var lastErr error
+	for attempt := 0; attempt <= ss.config.RetryCount; attempt++ {
+		resp, err := ss.client.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt < ss.config.RetryCount {
+				time.Sleep(time.Duration(attempt+1) * time.Second)
+				continue
+			}
+			break
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return nil // Success
+		}
+
+		lastErr = fmt.Errorf("SIEM returned status %d", resp.StatusCode)
+		if attempt < ss.config.RetryCount {
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+
+	return fmt.Errorf("failed to send to SIEM after %d attempts: %w", ss.config.RetryCount+1, lastErr)
+}
+
+// Helper methods for format mapping
+func (ss *SIEMSender) mapSeverityToCEF(severity string) string {
+	switch strings.ToLower(severity) {
+	case "critical":
+		return "10"
+	case "warning":
+		return "5"
+	case "info":
+		return "2"
+	default:
+		return "5"
+	}
+}
+
+func (ss *SIEMSender) mapSeverityToSyslog(severity string) int {
+	// Syslog facility (16 = local0) + severity
+	facility := 16 << 3
+	switch strings.ToLower(severity) {
+	case "critical":
+		return facility + 2 // Critical
+	case "warning":
+		return facility + 4 // Warning
+	case "info":
+		return facility + 6 // Info
+	default:
+		return facility + 4 // Warning
+	}
 }
 
 // Helper function
