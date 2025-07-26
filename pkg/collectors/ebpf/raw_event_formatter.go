@@ -42,7 +42,7 @@ func NewRawEventFormatter(opts *RawEventFormatterOptions) *RawEventFormatter {
 	}
 }
 
-// FormatEvent formats a raw eBPF event in Hubble style
+// FormatEvent formats a raw eBPF event for human readability
 func (f *RawEventFormatter) FormatEvent(event *RawEvent) string {
 	var parts []string
 
@@ -80,10 +80,10 @@ func (f *RawEventFormatter) FormatEvent(event *RawEvent) string {
 	return strings.Join(parts, " ")
 }
 
-// FormatEventJSON formats an event as JSON (similar to hubble observe -o json)
+// FormatEventJSON formats an event as JSON for programmatic consumption
 func (f *RawEventFormatter) FormatEventJSON(event *RawEvent) (string, error) {
-	hubbleEvent := f.convertToHubbleEvent(event)
-	data, err := json.MarshalIndent(hubbleEvent, "", "  ")
+	formattedEvent := f.convertToStructuredEvent(event)
+	data, err := json.MarshalIndent(formattedEvent, "", "  ")
 	if err != nil {
 		return "", err
 	}
@@ -145,7 +145,7 @@ func (f *RawEventFormatter) formatEventDescription(event *RawEvent) string {
 	}
 }
 
-// formatNetworkEvent formats network events in Hubble style
+// formatNetworkEvent formats network events for structured output
 func (f *RawEventFormatter) formatNetworkEvent(event *RawEvent) string {
 	if net, ok := event.Details.(*NetworkEvent); ok {
 		direction := "→"
@@ -361,11 +361,11 @@ func (f *RawEventFormatter) formatMetadata(event *RawEvent) string {
 	return fmt.Sprintf("[%s]", strings.Join(parts, " "))
 }
 
-// convertToHubbleEvent converts to Hubble-compatible JSON structure
-func (f *RawEventFormatter) convertToHubbleEvent(event *RawEvent) map[string]interface{} {
+// convertToStructuredEvent converts to structured JSON format
+func (f *RawEventFormatter) convertToStructuredEvent(event *RawEvent) map[string]interface{} {
 	timestamp := time.Unix(0, int64(event.Timestamp))
 
-	hubbleEvent := map[string]interface{}{
+	structuredEvent := map[string]interface{}{
 		"time":      timestamp.Format(time.RFC3339Nano),
 		"node_name": "localhost", // Would be actual node name in production
 		"event_type": map[string]interface{}{
@@ -384,34 +384,34 @@ func (f *RawEventFormatter) convertToHubbleEvent(event *RawEvent) map[string]int
 	switch event.Type {
 	case EventTypeNetwork:
 		if net, ok := event.Details.(*NetworkEvent); ok {
-			hubbleEvent["l4"] = map[string]interface{}{
+			structuredEvent["l4"] = map[string]interface{}{
 				"TCP": map[string]interface{}{
 					"source_port":      net.SourcePort,
 					"destination_port": net.DestPort,
 				},
 			}
-			hubbleEvent["source_endpoint"] = map[string]interface{}{
+			structuredEvent["source_endpoint"] = map[string]interface{}{
 				"IP": net.SourceIP,
 			}
-			hubbleEvent["destination_endpoint"] = map[string]interface{}{
+			structuredEvent["destination_endpoint"] = map[string]interface{}{
 				"IP": net.DestIP,
 			}
 			if net.L7Protocol != "" {
-				hubbleEvent["l7"] = map[string]interface{}{
+				structuredEvent["l7"] = map[string]interface{}{
 					"type": strings.ToUpper(net.L7Protocol),
 				}
 			}
 		}
 	case EventTypeProcess:
 		if proc, ok := event.Details.(*ProcessEvent); ok {
-			hubbleEvent["process"] = map[string]interface{}{
+			structuredEvent["process"] = map[string]interface{}{
 				"command": proc.Args,
 				"parent":  proc.ParentPID,
 			}
 		}
 	}
 
-	return hubbleEvent
+	return structuredEvent
 }
 
 // Helper methods

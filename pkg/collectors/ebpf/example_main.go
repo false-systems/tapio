@@ -22,7 +22,7 @@ func ExampleMain() {
 		WorkerCount:        8,
 		BatchSize:          1000,
 		FlushInterval:      time.Second,
-		EnableRawPath:      true, // Enable Hubble-style raw access
+		EnableRawPath:      true, // Enable detailed raw event access
 		EnableSemanticPath: true, // Enable semantic correlation
 		RawRetentionPeriod: 24 * time.Hour,
 		RawStorageBackend:  "memory",
@@ -108,9 +108,9 @@ func ExampleMain() {
 	}
 
 	log.Println("✅ eBPF Collector with Dual-Path Architecture started successfully!")
-	log.Println("📊 Raw events (Hubble-style) will be displayed below")
+	log.Println("📊 Raw events will be displayed below")
 	log.Println("🧠 Semantic events will be sent to Tapio correlation engine")
-	log.Println("🔍 Raw events are also stored for Hubble-style querying")
+	log.Println("🔍 Raw events are also stored for detailed analysis")
 
 	// Set up graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -235,9 +235,9 @@ func reportMetrics(collector Collector, processor *DualPathProcessor) {
 	log.Println("📈 === END METRICS ===")
 }
 
-// DemoQueryInterface demonstrates Hubble-style querying
+// DemoQueryInterface demonstrates raw event querying
 func DemoQueryInterface(processor *DualPathProcessor) {
-	log.Println("🔍 Demonstrating Hubble-style raw event querying...")
+	log.Println("🔍 Demonstrating raw event querying capabilities...")
 
 	// Query for network events in the last 5 minutes
 	filter := &EventFilter{
@@ -267,7 +267,7 @@ func DemoQueryInterface(processor *DualPathProcessor) {
 		log.Printf("📝 Raw Event %d: %s", i+1, formatted)
 	}
 
-	// Demonstrate JSON export (Hubble compatible)
+	// Demonstrate JSON export for structured analysis
 	if len(events) > 0 {
 		jsonEvent, err := formatter.FormatEventJSON(events[0])
 		if err == nil {

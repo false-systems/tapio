@@ -190,7 +190,7 @@ func (fe *FilterEngine) ProcessRawEvent(event *RawEvent) bool {
 // ProcessEnrichedEvent determines if enriched event should be sent to semantic layer
 func (fe *FilterEngine) ProcessEnrichedEvent(event *EnrichedEvent) FilterDecision {
 	decision := FilterDecision{
-		SendRaw:      true, // Always preserve raw events for Hubble-style access
+		SendRaw:      true, // Always preserve raw events for detailed analysis
 		SendSemantic: false,
 		SampleRate:   1.0,
 	}

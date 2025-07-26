@@ -10,7 +10,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// DualPathProcessor handles both raw eBPF events (Hubble-style) and semantic processing
+// DualPathProcessor handles both raw eBPF events and semantic processing
 type DualPathProcessor struct {
 	// Configuration
 	config *ProcessorConfig
@@ -20,7 +20,7 @@ type DualPathProcessor struct {
 	enricher           *EventEnricher
 	correlationHandler func(*EnrichedEvent) // Injected correlation handler
 
-	// Raw path (Hubble-style)
+	// Raw path (detailed kernel data)
 	rawEventBuffer chan *RawEvent
 	rawEventSinks  []RawEventSink
 	rawEventStore  RawEventStore
@@ -241,7 +241,7 @@ func (p *DualPathProcessor) ProcessRawEvent(event *RawEvent) error {
 		return nil // Filtered out
 	}
 
-	// Raw path: Send to raw event buffer for Hubble-style access
+	// Raw path: Send to raw event buffer for detailed analysis
 	if p.config.EnableRawPath {
 		select {
 		case p.rawEventBuffer <- event:
@@ -465,7 +465,7 @@ func (p *DualPathProcessor) AddSemanticEventSink(sink SemanticEventSink) {
 	p.semanticSinks = append(p.semanticSinks, sink)
 }
 
-// QueryRawEvents queries stored raw events (Hubble-style API)
+// QueryRawEvents queries stored raw events for analysis
 func (p *DualPathProcessor) QueryRawEvents(ctx context.Context, filter *EventFilter) ([]*RawEvent, error) {
 	if p.rawEventStore == nil {
 		return nil, fmt.Errorf("raw event store not available")

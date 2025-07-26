@@ -203,16 +203,25 @@ event := domain.NewUnifiedEvent().
 
 #### Active Collectors:
 
-**eBPF Collector** (`pkg/collectors/ebpf/`)
-- Kernel-level events using eBPF programs
-- Production hardening: rate limiting, circuit breaker, backpressure control
-- Integrated in main binary
-- Produces UnifiedEvent directly
-- Features:
+**eBPF Collector** (`pkg/collectors/ebpf/`) - **Dual Layer Architecture**
+- **Dual-path processing** preserves both raw kernel data and semantic events
+- **Raw Event Path** - Detailed kernel-level data for specialized tools:
+  - Process context (PID, TID, UID, GID, Comm)
+  - CPU core information and kernel timestamps
+  - Network packet details and L7 protocol analysis
+  - File operations and memory allocation patterns
+  - Raw event storage with configurable retention
+- **Semantic Event Path** - UnifiedEvent integration for correlation:
+  - Automatic conversion to domain.UnifiedEvent
+  - Intelligence pipeline integration
+  - OTEL trace context propagation
+  - Business impact assessment
+- **Production Features**:
+  - Rate limiting, circuit breaker, backpressure control
+  - Configurable dual-path enablement
   - Memory and CPU monitoring
-  - Process lifecycle tracking
-  - Network activity monitoring
   - Security event detection
+  - External tooling integration via gRPC
 
 **K8s Collector** (`pkg/collectors/k8s/`)
 - Kubernetes API events and state changes
@@ -427,14 +436,14 @@ Other nodes:
 
 ### ✅ Completed
 - UnifiedEvent structure and builder
-- eBPF collector with UnifiedEvent support
-- Analytics engine (165k+ events/sec)
-- Semantic correlation engine
-- gRPC service implementation
+- **Dual layer eBPF collector** with raw event preservation and semantic conversion
+- Analytics engine (165k+ events/sec) 
+- Semantic correlation engine with modular architecture (8 organized modules)
+- Production-grade resilience (circuit breaker, rate limiting, recovery strategies)
+- gRPC service implementation with bidirectional streaming
 - OTEL trace context propagation
-- Production hardening for eBPF collector
-- Event storage interface
-- Real-time streaming
+- Event storage interface with intelligent persistence
+- Real-time streaming and correlation
 
 ### 🚧 In Progress
 - K8s collector integration in main binary

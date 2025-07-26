@@ -34,7 +34,7 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 **What we have built so far:**
 
 ✅ **UnifiedEvent Format** - A single event structure with OTEL trace context, semantic understanding, and business impact  
-✅ **eBPF Collector** - Production-ready with rate limiting, backpressure control, and UnifiedEvent output  
+✅ **Dual Layer eBPF Collector** - Preserves raw kernel data while producing UnifiedEvent for correlation  
 ✅ **Unified Intelligence Pipeline** - Ring buffer + Semantic correlation in single pipeline (1M+ events/sec)  
 ✅ **4 Pipeline Modes** - High-performance, Standard, Debug, Ring-buffer modes via builder pattern  
 ✅ **DataFlow Intelligence Integration** - Semantic correlation with OTEL trace propagation  
@@ -44,9 +44,10 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 ✅ **Modular Intelligence Architecture** - Refactored 3,855 lines into 8 organized modules for maintainability  
 ✅ **Production-Grade Resilience** - Circuit breaker, rate limiting, and recovery strategies for correlation engine  
 ✅ **Advanced Recovery** - Timeout, memory pressure, and correlation failure recovery strategies  
+✅ **Dual Layer eBPF Architecture** - Preserves raw kernel data for specialized tools while providing semantic correlation  
 ✅ **gRPC Services** - Complete TapioService, EventService, CollectorService, and CorrelationService  
 ✅ **CorrelationService** - Real-time correlation analysis with AI-powered insights and recommendations  
-✅ **Multiple Collectors** - eBPF (integrated), K8s, Systemd, CNI (standalone binaries)  
+✅ **Multiple Collectors** - eBPF (dual layer), K8s, Systemd, CNI (standalone binaries)  
 
 **What's working today:**
 
@@ -64,6 +65,7 @@ User Request → API Error → Database Timeout → Pod OOMKill → Memory Leak 
 ✅ **Production-Grade Resilience** - Added circuit breaker, rate limiting, and health monitoring  
 ✅ **Advanced Recovery Strategies** - Implemented timeout, memory pressure, and correlation failure recovery  
 ✅ **Enhanced Semantic Correlation** - Improved OTEL trace propagation and business impact assessment  
+✅ **Dual Layer eBPF Implementation** - Complete dual-path processing with raw data preservation and semantic conversion  
 
 **What we're actively working on:**
 
@@ -92,12 +94,12 @@ A single event structure that can represent different observability signals:
 
 [Learn more about UnifiedEvent →](docs/UNIFIED_EVENT_DESIGN.md)
 
-### 2. **Cross-Layer Correlation** 🔄 *Building*
-Using OTEL trace context, we want to automatically link:
+### 2. **Cross-Layer Correlation** ✅ *Built*
+Using OTEL trace context and dual layer eBPF, we automatically link:
 ```
 HTTP 500 error → DB timeout → OOM kill → memory leak syscalls
 ```
-*Goal: No manual correlation needed!*
+*Achievement: Automatic correlation with preserved raw kernel data for deep analysis!*
 
 ### 3. **Semantic Understanding** 🔄 *Prototyping*
 Instead of just collecting data, we want to understand it:
@@ -210,7 +212,7 @@ go build ./...
 | **Modular Intelligence** | 8 organized modules (3,855 lines refactored) | ✅ Complete |
 | **Production Resilience** | Circuit breaker, rate limiting, error recovery | ✅ Complete |
 | **Recovery Strategies** | Timeout, memory, correlation failure recovery | ✅ Complete |
-| **eBPF Collector** | Kernel events with UnifiedEvent | ✅ Integrated |
+| **Dual Layer eBPF Collector** | Raw kernel data + UnifiedEvent semantic correlation | ✅ Integrated |
 | **K8s Collector** | Kubernetes event monitoring | ✅ Standalone Binary |
 | **Systemd Collector** | System service monitoring | ✅ Standalone Binary |
 | **CNI Collector** | Container network events | ✅ Standalone Binary |
@@ -300,6 +302,8 @@ fmt.Printf("Processed: %d events\n", metrics.EventsProcessed)
 ✅ **Modular Architecture** - 8 well-organized modules for semantic correlation (refactored from 3,855 lines)  
 ✅ **Production Resilience** - Circuit breaker, rate limiting, health monitoring, and error recovery  
 ✅ **Recovery Strategies** - Advanced error handling for timeout, memory pressure, and correlation failures  
+✅ **Dual Layer eBPF Processing** - Raw kernel data preservation with DualPathProcessor for specialized analysis  
+✅ **Raw Event Storage** - Configurable retention of detailed kernel events for security and debugging tools  
 
 [See detailed benchmarks →](docs/performance/benchmarks.md)
 
