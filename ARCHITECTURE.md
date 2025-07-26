@@ -269,15 +269,27 @@ event := domain.NewUnifiedEvent().
 
 ### 3. Intelligence Layer (`pkg/intelligence/`)
 
-#### Correlation Engine (`pkg/intelligence/correlation/`)
-- Semantic event grouping
-- Pattern detection and matching
-- OTEL trace-based correlation
-- Features:
-  - Real-time correlation
-  - Configurable time windows
-  - Pattern library
-  - Finding generation
+#### Correlation Engine (`pkg/intelligence/correlation/`) - **Modular Architecture**
+- **Modular file structure** - Split from 3 massive files (3,855 lines) into 8 organized modules:
+  - `semantic_core.go` - Core types and structures (SimpleSemanticGrouper, EventGroup, SemanticPattern)
+  - `semantic_analysis.go` - Core analysis methods and temporal pattern analysis
+  - `semantic_formatter.go` - Human-readable formatting and insight generation
+  - `semantic_tracer.go` - Core OTEL tracer implementation with trace context propagation
+  - `semantic_trace_groups.go` - Group management and unified event support
+  - `semantic_engine_core.go` - Engine structure and lifecycle management
+  - `semantic_engine_analysis.go` - Event processing and insight generation
+  - `semantic_engine_converters.go` - Event conversion utilities between formats
+  - `resilient_semantic_tracer.go` - Production-grade resilience with recovery strategies
+
+#### Core Features:
+- **Semantic event grouping** with multi-dimensional correlation (temporal, causal, spatial)
+- **Pattern detection and matching** with confidence scoring
+- **OTEL trace-based correlation** with full trace context propagation
+- **Production resilience** with circuit breaker, rate limiting, and error recovery
+- **Recovery strategies** for timeout, memory pressure, and correlation failures
+- **Real-time correlation** with configurable time windows
+- **Pattern library** with extensible semantic patterns
+- **Finding generation** with business impact assessment
 
 #### Performance Optimizations (`pkg/intelligence/performance/`)
 - Ring buffers for high-throughput
@@ -430,6 +442,12 @@ Other nodes:
 - CNI collector integration in main binary
 - ML-based pattern detection
 - Advanced correlation patterns
+
+### 🎉 Recently Completed
+- **Intelligence Package Refactoring** - Modularized 3 massive files (3,855 lines) into 8 well-organized modules
+- **Recovery Strategies** - Implemented production-grade error recovery for timeout, memory pressure, and correlation failures
+- **Semantic Correlation** - Enhanced with OTEL trace context propagation and business impact assessment
+- **Resilient Architecture** - Added circuit breaker, rate limiting, and health monitoring to correlation engine
 
 ### 📋 Planned
 - Service mesh integration
