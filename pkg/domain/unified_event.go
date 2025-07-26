@@ -67,6 +67,16 @@ type UnifiedEvent struct {
 	Correlation      *CorrelationContext `json:"correlation,omitempty"`
 	CorrelationHints []string            `json:"correlation_hints,omitempty"`
 
+	// ENHANCED: Rich K8s context and analysis
+	K8sContext         *K8sContext         `json:"k8s_context,omitempty"`
+	ResourceContext    *ResourceContext    `json:"resource_context,omitempty"`
+	OperationalContext *OperationalContext `json:"operational_context,omitempty"`
+	
+	// ENHANCED: Analysis results
+	Correlations []CorrelationRef `json:"correlations,omitempty"`
+	Patterns     []PatternMatch   `json:"patterns,omitempty"`
+	Anomalies    []AnomalyRef      `json:"anomalies,omitempty"`
+
 	// Collector metadata
 	CollectorMetadata *CollectorMetadata `json:"collector_metadata,omitempty"`
 
