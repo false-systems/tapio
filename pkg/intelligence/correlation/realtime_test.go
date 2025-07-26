@@ -303,11 +303,11 @@ func TestRealTimeProcessor_GetActiveCorrelations(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add some active patterns
-	result1 := &CorrelationResult{
+	result1 := &PatternMatchResult{
 		ID:    "corr1",
 		Score: 0.8,
 	}
-	result2 := &CorrelationResult{
+	result2 := &PatternMatchResult{
 		ID:    "corr2",
 		Score: 0.6,
 	}

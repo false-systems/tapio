@@ -22,7 +22,6 @@ type SemanticOTELTracer struct {
 	spatialRadius    int
 }
 
-
 // NewSemanticOTELTracer creates the revolutionary tracer
 func NewSemanticOTELTracer() *SemanticOTELTracer {
 	return &SemanticOTELTracer{

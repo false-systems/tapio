@@ -27,8 +27,8 @@ type EventPattern struct {
 	MinOccurrences int
 }
 
-// CorrelationResult represents the result of pattern matching
-type CorrelationResult struct {
+// PatternMatchResult represents the result of pattern matching
+type PatternMatchResult struct {
 	ID            string
 	PatternID     string
 	PatternType   string
@@ -51,7 +51,7 @@ type RealTimeProcessor struct {
 	mu              sync.RWMutex
 	buffer          *CircularBuffer
 	patterns        map[string]*EventPattern
-	activePatterns  map[string]*CorrelationResult
+	activePatterns  map[string]*PatternMatchResult
 	config          *ProcessorConfig
 	patternMatchers []PatternMatcher
 }
@@ -66,7 +66,7 @@ func NewRealTimeProcessor(config *ProcessorConfig) (*RealTimeProcessor, error) {
 	processor := &RealTimeProcessor{
 		buffer:         buffer,
 		patterns:       make(map[string]*EventPattern),
-		activePatterns: make(map[string]*CorrelationResult),
+		activePatterns: make(map[string]*PatternMatchResult),
 		config:         config,
 		patternMatchers: []PatternMatcher{
 			&EscalationPatternMatcher{}, // Most specific first
@@ -80,7 +80,7 @@ func NewRealTimeProcessor(config *ProcessorConfig) (*RealTimeProcessor, error) {
 }
 
 // ProcessEvent processes a single event and returns correlation results
-func (proc *RealTimeProcessor) ProcessEvent(ctx context.Context, event *domain.UnifiedEvent) *CorrelationResult {
+func (proc *RealTimeProcessor) ProcessEvent(ctx context.Context, event *domain.UnifiedEvent) *PatternMatchResult {
 	if event == nil {
 		return nil
 	}
@@ -97,14 +97,14 @@ func (proc *RealTimeProcessor) ProcessEvent(ctx context.Context, event *domain.U
 	recentEvents := proc.buffer.GetByTimeWindow(proc.config.TimeWindow)
 
 	// Run pattern matchers
-	var bestResult *CorrelationResult
+	var bestResult *PatternMatchResult
 	bestScore := 0.0
 
 	for _, matcher := range proc.patternMatchers {
 		matched, score := matcher.Match(recentEvents)
 		if matched && score > bestScore {
 			bestScore = score
-			bestResult = &CorrelationResult{
+			bestResult = &PatternMatchResult{
 				ID:            domain.GenerateEventID(),
 				PatternType:   matcher.Name(),
 				Score:         score,
@@ -122,7 +122,7 @@ func (proc *RealTimeProcessor) ProcessEvent(ctx context.Context, event *domain.U
 
 	// If no pattern matched, create a basic result
 	if bestResult == nil {
-		bestResult = &CorrelationResult{
+		bestResult = &PatternMatchResult{
 			ID:            domain.GenerateEventID(),
 			PatternType:   "single-event",
 			Score:         0.1,
@@ -160,11 +160,11 @@ func (proc *RealTimeProcessor) RegisterPattern(pattern *EventPattern) error {
 }
 
 // GetActiveCorrelations returns currently active correlations
-func (proc *RealTimeProcessor) GetActiveCorrelations() []*CorrelationResult {
+func (proc *RealTimeProcessor) GetActiveCorrelations() []*PatternMatchResult {
 	proc.mu.RLock()
 	defer proc.mu.RUnlock()
 
-	results := make([]*CorrelationResult, 0, len(proc.activePatterns))
+	results := make([]*PatternMatchResult, 0, len(proc.activePatterns))
 	for _, result := range proc.activePatterns {
 		results = append(results, result)
 	}
