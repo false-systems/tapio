@@ -1,0 +1,268 @@
+# Sample integration configuration demonstrating the unified config framework
+
+# Base configuration fields (common to all integrations)
+name: sample-integration
+type: collector
+version: 1.0.0
+environment: production
+enabled: true
+timeout: 30s
+
+# Retry configuration
+retry:
+  enabled: true
+  max_attempts: 5
+  initial_wait: 100ms
+  max_wait: 10s
+  multiplier: 2.0
+
+# Observability configuration
+observability:
+  tracing_enabled: true
+  tracing_sampling: 0.1
+  tracing_endpoint: http://jaeger:14268/api/traces
+  metrics_enabled: true
+  metrics_interval: 60s
+  metrics_endpoint: http://prometheus:9090/api/v1/write
+  log_level: info
+  log_format: json
+  log_sampling: true
+  log_rate_limit: 100
+  sensitive_keys:
+    - password
+    - api_key
+    - secret
+
+# Resource limits
+limits:
+  max_connections: 100
+  max_concurrency: 10
+  max_memory_mb: 512
+  max_cpu_percent: 80.0
+  max_requests_per_sec: 1000
+  connection_timeout: 10s
+  idle_timeout: 60s
+  shutdown_timeout: 30s
+
+# Labels and metadata
+labels:
+  team: platform
+  service: tapio
+  region: us-west-2
+
+metadata:
+  owner: platform-team@example.com
+  sla: 99.9
+  tier: critical
+
+# Custom integration-specific fields
+endpoint: https://api.example.com/v1/events
+batch_size: 200
+buffer_size: 5000
+workers: 10
+batch_delay: 2s
+
+# Optional security configuration
+security:
+  tls:
+    enabled: true
+    cert_file: /etc/certs/client.crt
+    key_file: /etc/certs/client.key
+    ca_file: /etc/certs/ca.crt
+    min_version: TLS1.2
+    cipher_suites:
+      - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  
+  auth:
+    enabled: true
+    method: jwt
+    jwt:
+      secret: ${JWT_SECRET}
+      issuer: tapio
+      audience:
+        - api.example.com
+      expiration: 1h
+      clock_skew: 5m
+  
+  rate_limit:
+    enabled: true
+    global:
+      rate: 1000
+      burst: 2000
+      period: 1s
+    per_ip:
+      rate: 100
+      burst: 200
+      period: 1s
+    whitelist_ips:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+
+# Optional resilience configuration
+resilience:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 10
+    success_threshold: 3
+    timeout: 30s
+    half_open_max_requests: 5
+    observation_window: 60s
+  
+  load_shedding:
+    enabled: true
+    strategy: adaptive
+    cpu_threshold: 75.0
+    memory_threshold: 85.0
+    latency_threshold: 2s
+    error_rate_threshold: 0.1
+    priority_levels:
+      - critical
+      - high
+      - normal
+      - low
+    adaptive:
+      enabled: true
+      window: 5m
+      learning_rate: 0.1
+      min_samples: 100
+  
+  timeout:
+    default: 30s
+    connect: 10s
+    read: 30s
+    write: 30s
+    idle: 60s
+    keep_alive: 30s
+    adaptive: true
+    multiplier: 1.5
+  
+  bulkhead:
+    enabled: true
+    max_concurrency: 50
+    max_queue_size: 500
+    queue_timeout: 30s
+    keep_alive_time: 60s
+    core_pool_size: 10
+    max_pool_size: 50
+  
+  health_check:
+    enabled: true
+    interval: 30s
+    timeout: 5s
+    failure_threshold: 3
+    success_threshold: 2
+    deep_check: true
+    endpoints:
+      - name: api
+        url: https://api.example.com/health
+        method: GET
+        timeout: 5s
+        critical: true
+      - name: database
+        url: https://db.example.com/health
+        method: GET
+        timeout: 3s
+        critical: true
+
+# Optional monitoring configuration
+monitoring:
+  metrics:
+    enabled: true
+    provider: prometheus
+    endpoint: http://prometheus:9090
+    interval: 60s
+    histograms: true
+    buckets:
+      - 0.005
+      - 0.01
+      - 0.025
+      - 0.05
+      - 0.1
+      - 0.25
+      - 0.5
+      - 1
+      - 2.5
+      - 5
+      - 10
+    quantiles:
+      - 0.5
+      - 0.9
+      - 0.95
+      - 0.99
+    cardinality:
+      enabled: true
+      max_series: 10000
+      max_labels: 20
+      max_label_value: 100
+  
+  performance:
+    enabled: true
+    cpu_profiling: true
+    memory_profiling: true
+    goroutine_tracking: true
+    slo:
+      enabled: true
+      availability_target: 99.95
+      latency_targets:
+        p50: 50ms
+        p90: 100ms
+        p99: 500ms
+      error_budget: 0.05
+      window: 24h
+    thresholds:
+      cpu_warning: 70.0
+      cpu_critical: 90.0
+      memory_warning: 75.0
+      memory_critical: 90.0
+      latency_warning: 1s
+      latency_critical: 5s
+      error_rate_warning: 0.01
+      error_rate_critical: 0.05
+  
+  alerting:
+    enabled: true
+    providers:
+      - name: slack
+        type: webhook
+        endpoint: https://hooks.slack.com/services/xxx/yyy/zzz
+        timeout: 10s
+      - name: pagerduty
+        type: pagerduty
+        endpoint: https://events.pagerduty.com/v2/enqueue
+        headers:
+          Authorization: Token token=${PAGERDUTY_TOKEN}
+        timeout: 10s
+    rules:
+      - name: high_error_rate
+        expression: error_rate > 0.05
+        duration: 5m
+        severity: critical
+        labels:
+          team: platform
+        annotations:
+          summary: High error rate detected
+          description: Error rate is {{ .Value }} which is above threshold
+    grouping:
+      enabled: true
+      group_by:
+        - alertname
+        - cluster
+        - service
+      group_wait: 30s
+      group_interval: 5m
+    throttling:
+      enabled: true
+      max_per_hour: 10
+      cooldown_period: 1h
+  
+  profiling:
+    enabled: false
+    cpu: true
+    memory: true
+    goroutine: true
+    mutex: false
+    block: false
+    endpoint: http://profiler:6060
+    sample_rate: 100
+    upload_period: 5m
