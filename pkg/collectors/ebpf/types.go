@@ -68,7 +68,7 @@ const (
 )
 
 // RawEvent represents a raw eBPF event as captured from kernel
-// This preserves detailed kernel-level data for specialized analysis
+// This preserves the Hubble-style raw format
 type RawEvent struct {
 	// Core fields
 	Type      EventType `json:"type"`
