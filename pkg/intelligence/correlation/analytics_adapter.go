@@ -149,11 +149,11 @@ func (a *AnalyticsCorrelationAdapter) convertInsightToFinding(insight domain.Ins
 	correlationType := "unknown"
 	confidence := 0.5
 
-	if meta, ok := insight.Metadata.(map[string]interface{}); ok {
-		if ct, ok := meta["correlation_type"].(string); ok {
+	if insight.Metadata != nil {
+		if ct, ok := insight.Metadata["correlation_type"].(string); ok {
 			correlationType = ct
 		}
-		if conf, ok := meta["confidence"].(float64); ok {
+		if conf, ok := insight.Metadata["confidence"].(float64); ok {
 			confidence = conf
 		}
 	}
@@ -162,20 +162,21 @@ func (a *AnalyticsCorrelationAdapter) convertInsightToFinding(insight domain.Ins
 	relatedEvents := a.getRelatedEventsForInsight(insight)
 
 	// Create or update semantic group based on multi-dimensional context
-	semanticGroup := a.getOrCreateSemanticGroup(insight)
+	semanticGroup := a.getOrCreateSemanticGroupInternal(insight)
 
-	// Enhance finding with multi-dimensional context
-	finding := &interfaces.Finding{
-		ID:            insight.ID,
-		Confidence:    confidence,
-		PatternType:   correlationType,
-		Description:   a.enhanceDescription(insight, relatedEvents),
-		RelatedEvents: a.convertToLegacyEvents(relatedEvents),
-		SemanticGroup: semanticGroup,
+	// Create internal Finding with UnifiedEvents
+	internalFinding := &Finding{
+		ID:                   insight.ID,
+		PatternType:          correlationType,
+		Confidence:           confidence,
+		Description:          a.enhanceDescription(insight, relatedEvents),
+		RelatedUnifiedEvents: relatedEvents,
+		SemanticGroup:        semanticGroup,
+		Timestamp:            time.Now(),
 	}
 
-	// Update latest findings
-	a.latestFindings = finding
+	// Convert to interfaces.Finding for external use
+	a.latestFindings = ConvertToInterfacesFinding(internalFinding)
 
 	a.logger.Debug("Converted insight to finding",
 		zap.String("insight_id", insight.ID),
@@ -260,14 +261,19 @@ func (a *AnalyticsCorrelationAdapter) updateSemanticGroup(event *domain.UnifiedE
 	}
 }
 
-// getOrCreateSemanticGroup gets or creates a semantic group for an insight
-func (a *AnalyticsCorrelationAdapter) getOrCreateSemanticGroup(insight domain.Insight) *interfaces.SemanticGroup {
+// getOrCreateSemanticGroupInternal gets or creates a semantic group summary for an insight
+func (a *AnalyticsCorrelationAdapter) getOrCreateSemanticGroupInternal(insight domain.Insight) *SemanticGroupSummary {
 	// Try to find existing group based on insight metadata
 	groupID := fmt.Sprintf("sg-%s-%d", insight.Type, time.Now().Unix())
 
 	for _, group := range a.semanticGroups {
 		if group.Type == insight.Type {
-			return group
+			// Return as SemanticGroupSummary
+			return &SemanticGroupSummary{
+				ID:     group.ID,
+				Intent: group.Intent,
+				Type:   group.Type,
+			}
 		}
 	}
 
@@ -279,7 +285,13 @@ func (a *AnalyticsCorrelationAdapter) getOrCreateSemanticGroup(insight domain.In
 	}
 
 	a.semanticGroups = append(a.semanticGroups, group)
-	return group
+
+	// Return as SemanticGroupSummary
+	return &SemanticGroupSummary{
+		ID:     group.ID,
+		Intent: group.Intent,
+		Type:   group.Type,
+	}
 }
 
 // updateSpanHierarchy tracks span parent-child relationships
@@ -327,8 +339,8 @@ func (a *AnalyticsCorrelationAdapter) inferSemanticIntent(event *domain.UnifiedE
 	// Fall back to type-based inference
 	switch event.Type {
 	case domain.EventTypeKubernetes:
-		if event.KubernetesData != nil {
-			switch event.KubernetesData.EventType {
+		if event.Kubernetes != nil {
+			switch event.Kubernetes.EventType {
 			case "pod_oom_killed":
 				return "resource_exhaustion"
 			case "pod_crash_loop":
@@ -339,14 +351,14 @@ func (a *AnalyticsCorrelationAdapter) inferSemanticIntent(event *domain.UnifiedE
 				return "infrastructure_change"
 			}
 		}
-	case domain.EventTypeApplication:
-		if event.ApplicationData != nil && event.ApplicationData.Level == "error" {
+	case domain.EventTypeLog:
+		if event.Application != nil && event.Application.Level == "error" {
 			return "error_condition"
 		}
 		return "application_event"
 	case domain.EventTypeNetwork:
 		return "network_activity"
-	case domain.EventTypeKernel:
+	case domain.EventTypeSystem:
 		return "system_event"
 	}
 	return "unknown_intent"
@@ -354,8 +366,8 @@ func (a *AnalyticsCorrelationAdapter) inferSemanticIntent(event *domain.UnifiedE
 
 // inferSemanticType infers semantic type from event
 func (a *AnalyticsCorrelationAdapter) inferSemanticType(event *domain.UnifiedEvent) string {
-	if event.KubernetesData != nil {
-		return fmt.Sprintf("k8s_%s", event.KubernetesData.ObjectKind)
+	if event.Kubernetes != nil {
+		return fmt.Sprintf("k8s_%s", event.Kubernetes.ObjectKind)
 	}
 	return string(event.Type)
 }
@@ -422,8 +434,8 @@ func (a *AnalyticsCorrelationAdapter) isEventRelatedToInsight(event *domain.Unif
 	// 2. Trace dimension matching
 	if event.HasTraceContext() {
 		// Check if event is in same trace as any event mentioned in insight
-		if meta, ok := insight.Metadata.(map[string]interface{}); ok {
-			if traceID, ok := meta["trace_id"].(string); ok && event.TraceContext.TraceID == traceID {
+		if insight.Metadata != nil {
+			if traceID, ok := insight.Metadata["trace_id"].(string); ok && event.TraceContext.TraceID == traceID {
 				score += 0.4 // Strong correlation if same trace
 			}
 		}
@@ -432,12 +444,12 @@ func (a *AnalyticsCorrelationAdapter) isEventRelatedToInsight(event *domain.Unif
 	// 3. Semantic dimension matching
 	if event.Semantic != nil {
 		// Check semantic intent alignment
-		if meta, ok := insight.Metadata.(map[string]interface{}); ok {
-			if intent, ok := meta["semantic_intent"].(string); ok && event.Semantic.Intent == intent {
+		if insight.Metadata != nil {
+			if intent, ok := insight.Metadata["semantic_intent"].(string); ok && event.Semantic.Intent == intent {
 				score += 0.2
 			}
 			// Check semantic tags overlap
-			if tags, ok := meta["semantic_tags"].([]string); ok {
+			if tags, ok := insight.Metadata["semantic_tags"].([]string); ok {
 				for _, tag := range tags {
 					for _, eventTag := range event.Semantic.Tags {
 						if tag == eventTag {
@@ -452,13 +464,13 @@ func (a *AnalyticsCorrelationAdapter) isEventRelatedToInsight(event *domain.Unif
 
 	// 4. Entity dimension matching
 	if event.Entity != nil {
-		if meta, ok := insight.Metadata.(map[string]interface{}); ok {
+		if insight.Metadata != nil {
 			// Check if same entity
-			if entityName, ok := meta["entity_name"].(string); ok && event.Entity.Name == entityName {
+			if entityName, ok := insight.Metadata["entity_name"].(string); ok && event.Entity.Name == entityName {
 				score += 0.3
 			}
 			// Check if same namespace
-			if namespace, ok := meta["namespace"].(string); ok && event.Entity.Namespace == namespace {
+			if namespace, ok := insight.Metadata["namespace"].(string); ok && event.Entity.Namespace == namespace {
 				score += 0.1
 			}
 		}
@@ -492,26 +504,30 @@ func (a *AnalyticsCorrelationAdapter) convertToLegacyEvents(events []*domain.Uni
 			ID:        domain.EventID(ue.ID),
 			Type:      ue.Type,
 			Timestamp: ue.Timestamp,
-			Source:    ue.Source,
+			Source:    domain.SourceType(ue.Source),
+			Message:   ue.Message,
+			Tags:      ue.Tags,
+			Category:  ue.Category,
+			Severity:  ue.Severity,
+			Confidence: ue.Confidence,
 		}
 
-		// Copy available fields
-		if ue.KubernetesData != nil {
-			le.Kubernetes = &domain.KubernetesEvent{
-				EventType:  ue.KubernetesData.EventType,
-				ObjectKind: ue.KubernetesData.ObjectKind,
-				Object:     ue.KubernetesData.Object,
-				Reason:     ue.KubernetesData.Reason,
-				Message:    ue.KubernetesData.Message,
-			}
+		// Convert data to generic map
+		le.Data = make(map[string]interface{})
+		
+		// Add kubernetes data if present
+		if ue.Kubernetes != nil {
+			le.Data["kubernetes"] = ue.Kubernetes
 		}
 
-		if ue.ApplicationData != nil {
-			le.Application = &domain.ApplicationEvent{
-				Level:   ue.ApplicationData.Level,
-				Message: ue.ApplicationData.Message,
-				Logger:  ue.ApplicationData.Logger,
-			}
+		// Add application data if present
+		if ue.Application != nil {
+			le.Data["application"] = ue.Application
+		}
+
+		// Copy attributes
+		if ue.Attributes != nil {
+			le.Attributes = ue.Attributes
 		}
 
 		legacyEvents = append(legacyEvents, le)
@@ -536,4 +552,73 @@ func (a *AnalyticsCorrelationAdapter) GetStats() map[string]interface{} {
 	}
 
 	return stats
+}
+
+// ConvertToInterfacesFinding converts internal Finding to interfaces.Finding
+func ConvertToInterfacesFinding(f *Finding) *interfaces.Finding {
+	if f == nil {
+		return nil
+	}
+
+	// Convert SemanticGroupSummary to interfaces.SemanticGroup
+	var semanticGroup *interfaces.SemanticGroup
+	if f.SemanticGroup != nil {
+		semanticGroup = &interfaces.SemanticGroup{
+			ID:     f.SemanticGroup.ID,
+			Intent: f.SemanticGroup.Intent,
+			Type:   f.SemanticGroup.Type,
+		}
+	}
+
+	// For backward compatibility, use RelatedEvents if available
+	// Otherwise, convert UnifiedEvents to Events
+	relatedEvents := f.RelatedEvents
+	if len(relatedEvents) == 0 && len(f.RelatedUnifiedEvents) > 0 {
+		relatedEvents = make([]*domain.Event, 0, len(f.RelatedUnifiedEvents))
+		for _, ue := range f.RelatedUnifiedEvents {
+			// Convert UnifiedEvent to Event for interface compatibility
+			event := &domain.Event{
+				ID:        domain.EventID(ue.ID),
+				Type:      ue.Type,
+				Timestamp: ue.Timestamp,
+				Source:    domain.SourceType(ue.Source),
+			}
+			relatedEvents = append(relatedEvents, event)
+		}
+	}
+
+	return &interfaces.Finding{
+		ID:            f.ID,
+		Confidence:    f.Confidence,
+		PatternType:   f.PatternType,
+		Description:   f.Description,
+		RelatedEvents: relatedEvents,
+		SemanticGroup: semanticGroup,
+	}
+}
+
+// ConvertFromInterfacesFinding converts interfaces.Finding to internal Finding
+func ConvertFromInterfacesFinding(f *interfaces.Finding) *Finding {
+	if f == nil {
+		return nil
+	}
+
+	// Convert interfaces.SemanticGroup to SemanticGroupSummary
+	var semanticGroup *SemanticGroupSummary
+	if f.SemanticGroup != nil {
+		semanticGroup = &SemanticGroupSummary{
+			ID:     f.SemanticGroup.ID,
+			Intent: f.SemanticGroup.Intent,
+			Type:   f.SemanticGroup.Type,
+		}
+	}
+
+	return &Finding{
+		ID:            f.ID,
+		PatternType:   f.PatternType,
+		Confidence:    f.Confidence,
+		Description:   f.Description,
+		RelatedEvents: f.RelatedEvents,
+		SemanticGroup: semanticGroup,
+	}
 }

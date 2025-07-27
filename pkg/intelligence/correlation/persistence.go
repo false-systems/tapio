@@ -128,11 +128,12 @@ type StorageStatistics struct {
 
 // InMemoryCorrelationStore provides a simple in-memory implementation
 type InMemoryCorrelationStore struct {
-	correlations map[string]*StoredCorrelation
-	patterns     map[string]*LearnedPattern
-	stats        *CorrelationStatistics
-	mu           sync.RWMutex
-	logger       *zap.Logger
+	correlations     map[string]*StoredCorrelation
+	patterns         map[string]*LearnedPattern
+	stats            *CorrelationStatistics
+	correlationCount int
+	mu               sync.RWMutex
+	logger           *zap.Logger
 }
 
 // NewInMemoryCorrelationStore creates a new in-memory correlation store
@@ -167,6 +168,7 @@ func (s *InMemoryCorrelationStore) StoreCorrelation(ctx context.Context, correla
 
 	// Store the correlation
 	s.correlations[correlation.ID] = correlation
+	s.correlationCount++
 
 	// Update statistics
 	s.updateStatistics(correlation)
@@ -174,10 +176,13 @@ func (s *InMemoryCorrelationStore) StoreCorrelation(ctx context.Context, correla
 	// Learn patterns
 	s.learnPattern(correlation)
 
-	s.logger.Debug("Stored correlation",
-		zap.String("id", correlation.ID),
-		zap.String("type", correlation.Type),
-		zap.Float64("confidence", correlation.Confidence))
+	// Only log every 100th correlation to reduce test log spam
+	if s.correlationCount%100 == 1 {
+		s.logger.Debug("Stored correlations",
+			zap.Int("total_count", s.correlationCount),
+			zap.String("latest_type", correlation.Type),
+			zap.Float64("latest_confidence", correlation.Confidence))
+	}
 
 	return nil
 }

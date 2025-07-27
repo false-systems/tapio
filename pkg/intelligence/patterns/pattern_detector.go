@@ -412,12 +412,6 @@ func NewAnomalyDetector() *AnomalyDetector {
 	return &AnomalyDetector{}
 }
 
-type AnomalyPattern struct {
-	Type   string
-	Score  float64
-	Reason string
-}
-
 func (a *AnomalyDetector) DetectAnomalies(event *domain.UnifiedEvent, relatedEvents []*domain.UnifiedEvent) []*AnomalyPattern {
 	// Implement anomaly detection logic
 	// For now, return empty

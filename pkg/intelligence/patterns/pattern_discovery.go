@@ -214,6 +214,26 @@ func (s *PatternDiscoveryService) mineTemporalPatterns(incident *Incident) []*K8
 	return patterns
 }
 
+// findTimeCorrelatedEvents finds events that correlate in time
+func (s *PatternDiscoveryService) findTimeCorrelatedEvents(events []*domain.UnifiedEvent) [][]interface{} {
+	// Stub implementation
+	return nil
+}
+
+// createTimeCorrelationPattern creates a pattern from time correlated events
+func (s *PatternDiscoveryService) createTimeCorrelationPattern(correlated []interface{}, incident *Incident) *K8sPattern {
+	// Stub implementation
+	return &K8sPattern{
+		ID:           fmt.Sprintf("time-correlation-%s", incident.ID),
+		Name:         "Time Correlated Events",
+		Category:     CategoryResource, // Use temporal pattern category
+		Description:  "Events that occur together in time",
+		Indicators:   []PatternIndicator{},
+		Impact:       PatternImpact{Severity: "low"},
+		Correlations: []string{},
+	}
+}
+
 // mineCausalPatterns finds cause-effect relationships
 func (s *PatternDiscoveryService) mineCausalPatterns(incident *Incident) []*K8sPattern {
 	var patterns []*K8sPattern

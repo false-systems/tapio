@@ -17,6 +17,7 @@ Module Structure (MANDATORY)
 We use one go.mod file.
 Must build standalone: cd pkg/X && go build ./...
 Must test standalone: cd pkg/X && go test ./...
+We Never Git -a: We only add our changes per work.
 
 ⚡ Agent Instructions (BRUTAL)
 
@@ -26,6 +27,7 @@ MUST COMPILE: go build ./... must pass
 MUST TEST: go test ./... must pass
 NO STUBS: No "TODO", "not implemented", empty functions
 SHOW PROOF: Paste build/test output or FAIL
+NO PUSH TO MAIN:  We work with branches and PR.
 
 Quality Standards
 80% test coverage minimum

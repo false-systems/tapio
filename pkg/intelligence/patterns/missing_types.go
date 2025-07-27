@@ -83,14 +83,15 @@ func NewSuffixTree() *SuffixTree {
 // Add adds an event to the suffix tree
 func (st *SuffixTree) Add(event *domain.UnifiedEvent) {
 	// Stub implementation
-	if st.root.children[event.Type.String()] == nil {
-		st.root.children[event.Type.String()] = &SuffixNode{
+	eventType := string(event.Type)
+	if st.root.children[eventType] == nil {
+		st.root.children[eventType] = &SuffixNode{
 			children: make(map[string]*SuffixNode),
 			events:   []*domain.UnifiedEvent{event},
 		}
 	} else {
-		st.root.children[event.Type.String()].events = append(
-			st.root.children[event.Type.String()].events, event)
+		st.root.children[eventType].events = append(
+			st.root.children[eventType].events, event)
 	}
 }
 
@@ -273,18 +274,22 @@ func NewGrangerCausalityTest(maxLag int, threshold float64) *GrangerCausalityTes
 	}
 }
 
+// CausalityResult represents the result of a causality test
+type CausalityResult struct {
+	Probability float64
+	Lag         int
+	Direction   string // X->Y or Y->X
+}
+
 // Test performs Granger causality test between two time series
 func (gct *GrangerCausalityTest) Test(x, y *TimeSeries) CausalityResult {
 	// Stub implementation
 	return CausalityResult{
-		IsSignificant: false,
-		PValue:        1.0,
-		FStatistic:    0.0,
-		Lag:           0,
+		Probability: 0.0,
+		Lag:         0,
+		Direction:   "X->Y",
 	}
 }
-
-// CausalityResult is already defined in learning_algorithms.go
 
 // Intervention represents an experimental intervention for causal discovery
 type Intervention struct {
@@ -799,6 +804,30 @@ func NewNormalBehaviorModel() *NormalBehaviorModel {
 		Thresholds:  make(map[string]float64),
 		LastTrained: time.Now(),
 	}
+}
+
+// SequencePattern represents a detected sequence pattern
+type SequencePattern struct {
+	Pattern    []string
+	Support    float64 // How often this sequence occurs
+	Confidence float64 // How reliable this pattern is
+	Instances  []SequenceInstance
+}
+
+// SequenceInstance represents an instance of a sequence pattern
+type SequenceInstance struct {
+	Events    []*domain.UnifiedEvent
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// AnomalyPattern represents a detected anomaly pattern
+type AnomalyPattern struct {
+	Type        string
+	Description string
+	Severity    float64
+	Events      []*domain.UnifiedEvent
+	DetectedAt  time.Time
 }
 
 // Additional missing types from self_learning_system.go and other files

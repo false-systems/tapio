@@ -40,8 +40,13 @@ func (a *CorrelationEngineAdapter) ProcessEvent(ctx context.Context, event *doma
 
 // GetLatestFindings returns the most recent correlation findings
 func (a *CorrelationEngineAdapter) GetLatestFindings() *interfaces.Finding {
-	// The engine already returns *interfaces.Finding, so no conversion needed
-	return a.engine.GetLatestFindings()
+	// Get internal finding from engine
+	internalFinding := a.engine.GetLatestFindings()
+	if internalFinding == nil {
+		return nil
+	}
+	// Convert to interfaces.Finding
+	return correlation.ConvertToInterfacesFinding(internalFinding)
 }
 
 // GetSemanticGroups returns current semantic groups

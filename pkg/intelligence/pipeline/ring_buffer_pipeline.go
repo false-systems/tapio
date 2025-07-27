@@ -251,7 +251,11 @@ func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.Unif
 	// Get the latest correlation findings from engine
 	var correlationData *interfaces.Finding
 	if rb.correlationStage != nil && rb.correlationStage.correlationEngine != nil {
-		correlationData = rb.correlationStage.correlationEngine.GetLatestFindings()
+		// Get internal finding and convert to interfaces.Finding
+		internalFinding := rb.correlationStage.correlationEngine.GetLatestFindings()
+		if internalFinding != nil {
+			correlationData = correlation.ConvertToInterfacesFinding(internalFinding)
+		}
 	}
 
 	// Determine result type based on correlation data
@@ -268,10 +272,7 @@ func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.Unif
 	// Convert interfaces.Finding to correlation.Finding for compatibility
 	var correlationFinding *correlation.Finding
 	if correlationData != nil {
-		// For now, we can't easily convert interface types to internal types
-		// This is a design issue that should be resolved by updating CorrelationOutput
-		// to use interfaces.Finding instead of correlation.Finding
-		correlationFinding = nil // Skip for now
+		correlationFinding = correlation.ConvertFromInterfacesFinding(correlationData)
 	}
 
 	return &CorrelationOutput{
