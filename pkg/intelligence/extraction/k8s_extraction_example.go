@@ -31,10 +31,9 @@ func ExampleK8sContextExtraction() {
 			Type:      domain.EventTypeSystem,
 			Source:    "ebpf",
 			Kernel: &domain.KernelData{
-				Syscall:     "openat",
-				PID:         1234,
-				ContainerID: "docker://abc123def456",
-				Comm:        "nginx",
+				Syscall: "openat",
+				PID:     1234,
+				Comm:    "nginx",
 			},
 			Entity: &domain.EntityContext{
 				Type: "container",

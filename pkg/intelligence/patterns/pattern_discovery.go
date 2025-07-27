@@ -300,6 +300,66 @@ func (s *PatternDiscoveryService) extractSequence(events []*domain.UnifiedEvent)
 	return seq
 }
 
+func (s *PatternDiscoveryService) isCausalRelationship(cause, effect *domain.UnifiedEvent, allEvents []*domain.UnifiedEvent) bool {
+	// Simple causality check: cause must precede effect and be within reasonable time window
+	if !cause.Timestamp.Before(effect.Timestamp) {
+		return false
+	}
+
+	timeDiff := effect.Timestamp.Sub(cause.Timestamp)
+	if timeDiff > 5*time.Minute {
+		return false // Too far apart to be causal
+	}
+
+	// Check if they're related (same entity, namespace, or explicit dependency)
+	if cause.Entity != nil && effect.Entity != nil {
+		if cause.Entity.Name == effect.Entity.Name {
+			return true
+		}
+		if cause.Entity.Namespace == effect.Entity.Namespace {
+			return true
+		}
+	}
+
+	// Check severity escalation (errors often cause more errors)
+	if cause.Severity == domain.EventSeverityError && effect.Severity == domain.EventSeverityError {
+		return true
+	}
+
+	return false
+}
+
+func (s *PatternDiscoveryService) createCausalPattern(cause, effect *domain.UnifiedEvent, incident *Incident) *K8sPattern {
+	return &K8sPattern{
+		ID:          fmt.Sprintf("discovered-causal-%s-%d", cause.ID, time.Now().Unix()),
+		Name:        fmt.Sprintf("Causal Pattern: %s -> %s", cause.Type, effect.Type),
+		Category:    CategoryFailure,
+		Description: fmt.Sprintf("Discovered causal relationship: %s leads to %s", cause.Message, effect.Message),
+		Indicators: []PatternIndicator{
+			{
+				Type:      IndicatorCausality,
+				Field:     "event.causal",
+				Condition: "matches",
+				Value: map[string]interface{}{
+					"cause":  cause.Type,
+					"effect": effect.Type,
+					"window": "5m",
+				},
+			},
+		},
+		Impact: PatternImpact{
+			Severity:   "high",
+			Scope:      "service",
+			UserImpact: true,
+		},
+		RootCause: &RootCausePattern{
+			EventType:   string(cause.Type),
+			Indicators:  []string{cause.Message},
+			Probability: 0.8,
+		},
+	}
+}
+
 func (s *PatternDiscoveryService) isSignificantSequence(seq *eventSequence) bool {
 	// Check if sequence has enough variety
 	uniqueEvents := make(map[string]bool)

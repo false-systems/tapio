@@ -162,9 +162,7 @@ func (e *K8sContextExtractor) isK8sRelated(event *domain.UnifiedEvent) bool {
 	}
 
 	// Check if has container/pod identifiers
-	if event.Kernel != nil && event.Kernel.ContainerID != "" {
-		return true
-	}
+	// Note: ContainerID would need to be extracted from kernel namespace info
 
 	// Check if entity is K8s related
 	if event.Entity != nil {
@@ -222,9 +220,8 @@ func (e *K8sContextExtractor) extractBasicIdentity(ctx context.Context, event *d
 	}
 
 	// Method 2: From container ID (eBPF events)
-	if pod == nil && event.Kernel != nil && event.Kernel.ContainerID != "" {
-		pod, _ = cache.GetPodByContainerID(event.Kernel.ContainerID)
-	}
+	// Note: ContainerID would need to be extracted from kernel namespace info
+	// For now, skip this method as ContainerID is not in KernelData
 
 	// Method 3: From entity
 	if pod == nil && event.Entity != nil && event.Entity.Type == "pod" {

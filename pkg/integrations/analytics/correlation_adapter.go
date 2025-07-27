@@ -1,7 +1,7 @@
 //go:build experimental
 // +build experimental
 
-package correlation
+package analytics
 
 import (
 	"context"
@@ -10,19 +10,20 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
 	"go.uber.org/zap"
 )
 
-// AnalyticsCorrelationAdapter adapts SimpleCorrelationSystem to CorrelationEngine interface
+// AnalyticsCorrelationAdapter adapts correlation.SimpleCorrelationSystem to CorrelationEngine interface
 type AnalyticsCorrelationAdapter struct {
-	correlationSystem *SimpleCorrelationSystem
+	correlationSystem *correlation.SimpleCorrelationSystem
 	logger            *zap.Logger
 
 	// State tracking
-	latestFindings *interfaces.Finding
-	semanticGroups []*interfaces.SemanticGroup
-	groupsByEvent  map[string]*interfaces.SemanticGroup
+	latestFindings *correlation.Finding
+	semanticGroups []*correlation.SemanticGroupSummary
+	groupsByEvent  map[string]*correlation.SemanticGroupSummary
 	mu             sync.RWMutex
 
 	// Event tracking for findings
@@ -42,11 +43,11 @@ type AnalyticsCorrelationAdapter struct {
 }
 
 // NewAnalyticsCorrelationAdapter creates an adapter for analytics engine integration
-func NewAnalyticsCorrelationAdapter(correlationSystem *SimpleCorrelationSystem, logger *zap.Logger) *AnalyticsCorrelationAdapter {
+func NewAnalyticsCorrelationAdapter(correlationSystem *correlation.SimpleCorrelationSystem, logger *zap.Logger) *AnalyticsCorrelationAdapter {
 	return &AnalyticsCorrelationAdapter{
 		correlationSystem: correlationSystem,
 		logger:            logger,
-		groupsByEvent:     make(map[string]*interfaces.SemanticGroup),
+		groupsByEvent:     make(map[string]*correlation.SemanticGroupSummary),
 		eventBuffer:       make([]*domain.UnifiedEvent, 0, 100),
 		eventBufferSize:   100,
 		spanHierarchy:     make(map[string][]string),
@@ -108,7 +109,7 @@ func (a *AnalyticsCorrelationAdapter) ProcessEvent(ctx context.Context, event *d
 func (a *AnalyticsCorrelationAdapter) GetLatestFindings() *interfaces.Finding {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.latestFindings
+	return ConvertToInterfacesFinding(a.latestFindings)
 }
 
 // GetSemanticGroups returns current semantic groups
@@ -116,9 +117,15 @@ func (a *AnalyticsCorrelationAdapter) GetSemanticGroups() []*interfaces.Semantic
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	// Return a copy to avoid race conditions
+	// Convert correlation.SemanticGroupSummary to interfaces.SemanticGroup
 	groups := make([]*interfaces.SemanticGroup, len(a.semanticGroups))
-	copy(groups, a.semanticGroups)
+	for i, sg := range a.semanticGroups {
+		groups[i] = &interfaces.SemanticGroup{
+			ID:     sg.ID,
+			Intent: sg.Intent,
+			Type:   sg.Type,
+		}
+	}
 	return groups
 }
 
@@ -175,8 +182,8 @@ func (a *AnalyticsCorrelationAdapter) convertInsightToFinding(insight domain.Ins
 		Timestamp:            time.Now(),
 	}
 
-	// Convert to interfaces.Finding for external use
-	a.latestFindings = ConvertToInterfacesFinding(internalFinding)
+	// Store the internal finding
+	a.latestFindings = internalFinding
 
 	a.logger.Debug("Converted insight to finding",
 		zap.String("insight_id", insight.ID),
@@ -233,7 +240,7 @@ func (a *AnalyticsCorrelationAdapter) updateSemanticGroup(event *domain.UnifiedE
 	traceID := event.TraceContext.TraceID
 
 	// Find or create semantic group for this trace
-	var group *interfaces.SemanticGroup
+	var group *correlation.SemanticGroupSummary
 	for _, sg := range a.semanticGroups {
 		if sg.ID == traceID {
 			group = sg
@@ -243,7 +250,7 @@ func (a *AnalyticsCorrelationAdapter) updateSemanticGroup(event *domain.UnifiedE
 
 	if group == nil {
 		// Create new semantic group from trace
-		group = &interfaces.SemanticGroup{
+		group = &correlation.SemanticGroupSummary{
 			ID:     traceID,
 			Intent: a.inferSemanticIntent(event),
 			Type:   a.inferSemanticType(event),
@@ -262,14 +269,14 @@ func (a *AnalyticsCorrelationAdapter) updateSemanticGroup(event *domain.UnifiedE
 }
 
 // getOrCreateSemanticGroupInternal gets or creates a semantic group summary for an insight
-func (a *AnalyticsCorrelationAdapter) getOrCreateSemanticGroupInternal(insight domain.Insight) *SemanticGroupSummary {
+func (a *AnalyticsCorrelationAdapter) getOrCreateSemanticGroupInternal(insight domain.Insight) *correlation.SemanticGroupSummary {
 	// Try to find existing group based on insight metadata
 	groupID := fmt.Sprintf("sg-%s-%d", insight.Type, time.Now().Unix())
 
 	for _, group := range a.semanticGroups {
 		if group.Type == insight.Type {
-			// Return as SemanticGroupSummary
-			return &SemanticGroupSummary{
+			// Return as correlation.SemanticGroupSummary
+			return &correlation.SemanticGroupSummary{
 				ID:     group.ID,
 				Intent: group.Intent,
 				Type:   group.Type,
@@ -278,7 +285,7 @@ func (a *AnalyticsCorrelationAdapter) getOrCreateSemanticGroupInternal(insight d
 	}
 
 	// Create new group
-	group := &interfaces.SemanticGroup{
+	group := &correlation.SemanticGroupSummary{
 		ID:     groupID,
 		Intent: a.inferIntentFromInsight(insight),
 		Type:   insight.Type,
@@ -286,12 +293,8 @@ func (a *AnalyticsCorrelationAdapter) getOrCreateSemanticGroupInternal(insight d
 
 	a.semanticGroups = append(a.semanticGroups, group)
 
-	// Return as SemanticGroupSummary
-	return &SemanticGroupSummary{
-		ID:     group.ID,
-		Intent: group.Intent,
-		Type:   group.Type,
-	}
+	// Return the group
+	return group
 }
 
 // updateSpanHierarchy tracks span parent-child relationships
@@ -501,20 +504,20 @@ func (a *AnalyticsCorrelationAdapter) convertToLegacyEvents(events []*domain.Uni
 
 	for _, ue := range events {
 		le := &domain.Event{
-			ID:        domain.EventID(ue.ID),
-			Type:      ue.Type,
-			Timestamp: ue.Timestamp,
-			Source:    domain.SourceType(ue.Source),
-			Message:   ue.Message,
-			Tags:      ue.Tags,
-			Category:  ue.Category,
-			Severity:  ue.Severity,
+			ID:         domain.EventID(ue.ID),
+			Type:       ue.Type,
+			Timestamp:  ue.Timestamp,
+			Source:     domain.SourceType(ue.Source),
+			Message:    ue.Message,
+			Tags:       ue.Tags,
+			Category:   ue.Category,
+			Severity:   ue.Severity,
 			Confidence: ue.Confidence,
 		}
 
 		// Convert data to generic map
 		le.Data = make(map[string]interface{})
-		
+
 		// Add kubernetes data if present
 		if ue.Kubernetes != nil {
 			le.Data["kubernetes"] = ue.Kubernetes
@@ -555,12 +558,12 @@ func (a *AnalyticsCorrelationAdapter) GetStats() map[string]interface{} {
 }
 
 // ConvertToInterfacesFinding converts internal Finding to interfaces.Finding
-func ConvertToInterfacesFinding(f *Finding) *interfaces.Finding {
+func ConvertToInterfacesFinding(f *correlation.Finding) *interfaces.Finding {
 	if f == nil {
 		return nil
 	}
 
-	// Convert SemanticGroupSummary to interfaces.SemanticGroup
+	// Convert correlation.SemanticGroupSummary to interfaces.SemanticGroup
 	var semanticGroup *interfaces.SemanticGroup
 	if f.SemanticGroup != nil {
 		semanticGroup = &interfaces.SemanticGroup{
@@ -598,15 +601,15 @@ func ConvertToInterfacesFinding(f *Finding) *interfaces.Finding {
 }
 
 // ConvertFromInterfacesFinding converts interfaces.Finding to internal Finding
-func ConvertFromInterfacesFinding(f *interfaces.Finding) *Finding {
+func ConvertFromInterfacesFinding(f *interfaces.Finding) *correlation.Finding {
 	if f == nil {
 		return nil
 	}
 
-	// Convert interfaces.SemanticGroup to SemanticGroupSummary
-	var semanticGroup *SemanticGroupSummary
+	// Convert interfaces.SemanticGroup to correlation.SemanticGroupSummary
+	var semanticGroup *correlation.SemanticGroupSummary
 	if f.SemanticGroup != nil {
-		semanticGroup = &SemanticGroupSummary{
+		semanticGroup = &correlation.SemanticGroupSummary{
 			ID:     f.SemanticGroup.ID,
 			Intent: f.SemanticGroup.Intent,
 			Type:   f.SemanticGroup.Type,

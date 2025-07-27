@@ -22,7 +22,7 @@ func (e *NetworkContextExtractor) ExtractNetworkContext(ctx context.Context, eve
 		return nil
 	}
 
-	netData := event.Network
+	_ = event.Network // Will be used in correlation functions
 	k8sCtx := event.K8sContext
 	if k8sCtx == nil {
 		k8sCtx = &domain.K8sContext{}

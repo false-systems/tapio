@@ -17,6 +17,7 @@ type K8sPattern struct {
 	Indicators   []PatternIndicator
 	Impact       PatternImpact
 	Correlations []string // Related pattern IDs
+	RootCause    *RootCausePattern
 }
 
 // PatternCategory categorizes K8s behavioral patterns
@@ -51,6 +52,7 @@ const (
 	IndicatorState     IndicatorType = "state"
 	IndicatorSequence  IndicatorType = "sequence"
 	IndicatorFrequency IndicatorType = "frequency"
+	IndicatorCausality IndicatorType = "causality"
 )
 
 // PatternImpact describes the impact of a pattern
@@ -60,6 +62,13 @@ type PatternImpact struct {
 	UserImpact      bool
 	DataRisk        bool
 	PerformanceRisk bool
+}
+
+// RootCausePattern represents root cause information for a pattern
+type RootCausePattern struct {
+	EventType   string
+	Indicators  []string
+	Probability float64
 }
 
 // K8sPatternLibrary contains all known K8s patterns
