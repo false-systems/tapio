@@ -62,7 +62,7 @@ func convertUnifiedEventToProto(event *domain.UnifiedEvent) (*pb.Event, error) {
 	// Note: The proto Event has a simpler structure than UnifiedEvent
 	// Create a combined data map with all context information
 	dataMap := make(map[string]interface{})
-	
+
 	// Add semantic context to data
 	if event.Semantic != nil {
 		dataMap["semantic"] = map[string]interface{}{
@@ -72,7 +72,7 @@ func convertUnifiedEventToProto(event *domain.UnifiedEvent) (*pb.Event, error) {
 			"narrative":  event.Semantic.Narrative,
 		}
 	}
-	
+
 	// Add entity context to data
 	if event.Entity != nil {
 		dataMap["entity"] = map[string]interface{}{
@@ -82,16 +82,16 @@ func convertUnifiedEventToProto(event *domain.UnifiedEvent) (*pb.Event, error) {
 			"uid":       event.Entity.UID,
 		}
 	}
-	
+
 	// Add impact context to data
 	if event.Impact != nil {
 		dataMap["impact"] = map[string]interface{}{
-			"severity":      event.Impact.Severity,
+			"severity":       event.Impact.Severity,
 			"businessImpact": event.Impact.BusinessImpact,
-			"affectedUsers": event.Impact.AffectedUsers,
+			"affectedUsers":  event.Impact.AffectedUsers,
 		}
 	}
-	
+
 	// Add layer-specific data
 	if event.Kernel != nil {
 		dataMap["kernel"] = map[string]interface{}{
@@ -102,7 +102,7 @@ func convertUnifiedEventToProto(event *domain.UnifiedEvent) (*pb.Event, error) {
 			"comm":    event.Kernel.Comm,
 		}
 	}
-	
+
 	if event.Network != nil {
 		dataMap["network"] = map[string]interface{}{
 			"protocol":    event.Network.Protocol,
@@ -113,7 +113,7 @@ func convertUnifiedEventToProto(event *domain.UnifiedEvent) (*pb.Event, error) {
 			"direction":   event.Network.Direction,
 		}
 	}
-	
+
 	if event.Application != nil {
 		dataMap["application"] = map[string]interface{}{
 			"level":   event.Application.Level,
@@ -121,7 +121,7 @@ func convertUnifiedEventToProto(event *domain.UnifiedEvent) (*pb.Event, error) {
 			"logger":  event.Application.Logger,
 		}
 	}
-	
+
 	// Convert all data to protobuf Struct
 	if len(dataMap) > 0 {
 		dataStruct, err := structpb.NewStruct(dataMap)
@@ -177,7 +177,7 @@ func convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
 	// Extract contexts from the Data field if available
 	if event.Data != nil {
 		dataMap := event.Data.AsMap()
-		
+
 		// Extract semantic context
 		if semanticData, ok := dataMap["semantic"].(map[string]interface{}); ok {
 			ue.Semantic = &domain.SemanticContext{
@@ -187,7 +187,7 @@ func convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
 				Narrative:  getStringFromMap(semanticData, "narrative"),
 			}
 		}
-		
+
 		// Extract entity context
 		if entityData, ok := dataMap["entity"].(map[string]interface{}); ok {
 			ue.Entity = &domain.EntityContext{
@@ -197,7 +197,7 @@ func convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
 				UID:       getStringFromMap(entityData, "uid"),
 			}
 		}
-		
+
 		// Extract impact context
 		if impactData, ok := dataMap["impact"].(map[string]interface{}); ok {
 			ue.Impact = &domain.ImpactContext{
@@ -206,7 +206,7 @@ func convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
 				AffectedUsers:  getIntFromMap(impactData, "affectedUsers"),
 			}
 		}
-		
+
 		// Extract layer-specific data
 		if kernelData, ok := dataMap["kernel"].(map[string]interface{}); ok {
 			ue.Kernel = &domain.KernelData{
@@ -217,7 +217,7 @@ func convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
 				Comm:    getStringFromMap(kernelData, "comm"),
 			}
 		}
-		
+
 		if networkData, ok := dataMap["network"].(map[string]interface{}); ok {
 			ue.Network = &domain.NetworkData{
 				Protocol:   getStringFromMap(networkData, "protocol"),
@@ -228,7 +228,7 @@ func convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
 				Direction:  getStringFromMap(networkData, "direction"),
 			}
 		}
-		
+
 		if appData, ok := dataMap["application"].(map[string]interface{}); ok {
 			ue.Application = &domain.ApplicationData{
 				Level:   getStringFromMap(appData, "level"),
@@ -236,7 +236,7 @@ func convertProtoToUnifiedEvent(event *pb.Event) *domain.UnifiedEvent {
 				Logger:  getStringFromMap(appData, "logger"),
 			}
 		}
-		
+
 		// Note: UnifiedEvent doesn't have a Data field - data is extracted into specific fields above
 	}
 
@@ -326,4 +326,3 @@ func mapProtoToSeverity(severity pb.EventSeverity) domain.Severity {
 		return domain.SeverityInfo
 	}
 }
-

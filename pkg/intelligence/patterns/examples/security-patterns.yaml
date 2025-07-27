@@ -1,0 +1,102 @@
+version: "1.0"
+patterns:
+  - id: crypto-mining-detection
+    name: Cryptocurrency Mining Detection
+    category: security
+    description: Detects potential cryptocurrency mining in containers
+    enabled: true
+    tags: ["security", "crypto", "malware"]
+    indicators:
+      - type: metric
+        field: cpu.usage
+        condition: greater_than
+        threshold: 0.95
+        time_window: 30m
+      - type: event
+        field: network.destination
+        condition: matches
+        value: ".*\\.mining\\..*|.*pool\\.*"
+      - type: event
+        field: process.name
+        condition: in
+        value: ["xmrig", "cgminer", "ethminer", "minergate"]
+    impact:
+      severity: critical
+      scope: pod
+      user_impact: false
+      data_risk: true
+      performance_risk: true
+
+  - id: container-escape-attempt
+    name: Container Escape Attempt
+    category: security
+    description: Detects attempts to escape container isolation
+    enabled: true
+    tags: ["security", "container", "escape"]
+    indicators:
+      - type: event
+        field: syscall
+        condition: in
+        value: ["mount", "chroot", "pivot_root", "setns"]
+      - type: event
+        field: file.path
+        condition: matches
+        value: "/proc/.*/ns/.*"
+      - type: event
+        field: capabilities.added
+        condition: contains
+        value: "CAP_SYS_ADMIN"
+    impact:
+      severity: critical
+      scope: node
+      user_impact: false
+      data_risk: true
+
+  - id: suspicious-pod-exec
+    name: Suspicious Pod Exec Activity
+    category: security
+    description: Detects suspicious kubectl exec patterns
+    enabled: true
+    tags: ["security", "kubectl", "exec"]
+    indicators:
+      - type: event
+        field: audit.verb
+        condition: equals
+        value: "create"
+      - type: event
+        field: audit.objectRef.subresource
+        condition: equals
+        value: "exec"
+      - type: sequence
+        field: exec.commands
+        condition: contains_sequence
+        value: ["sh", "curl", "base64"]
+        time_window: 1m
+    impact:
+      severity: high
+      scope: pod
+      data_risk: true
+
+  - id: rbac-privilege-escalation
+    name: RBAC Privilege Escalation
+    category: security
+    description: Detects RBAC changes that grant excessive permissions
+    enabled: true
+    tags: ["security", "rbac", "privilege"]
+    indicators:
+      - type: event
+        field: audit.objectRef.resource
+        condition: in
+        value: ["clusterroles", "clusterrolebindings"]
+      - type: event
+        field: audit.verb
+        condition: in
+        value: ["create", "patch", "update"]
+      - type: event
+        field: rules.verbs
+        condition: contains
+        value: "*"
+    impact:
+      severity: critical
+      scope: cluster
+      data_risk: true

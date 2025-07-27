@@ -416,7 +416,7 @@ func (am *AuthManager) validateCredentials(username, password string) (bool, str
 	// Simulate user store lookup
 	// In production, this would query your user database, LDAP, etc.
 	userStore := am.getSimulatedUserStore()
-	
+
 	user, exists := userStore[username]
 	if !exists {
 		return false, "", nil, nil, nil // User not found

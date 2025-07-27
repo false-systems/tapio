@@ -1,0 +1,44 @@
+version: "1.0"
+patterns:
+  - id: cpu-throttling
+    name: CPU Throttling Pattern
+    category: performance
+    description: Containers being CPU throttled
+    enabled: true
+    tags: ["cpu", "throttling", "performance"]
+    indicators:
+      - type: metric
+        field: container.cpu.cfs_throttled_ratio
+        condition: greater_than
+        threshold: 0.2
+      - type: metric
+        field: container.cpu.usage
+        condition: equals
+        value: container.cpu.limit
+    impact:
+      severity: medium
+      scope: pod
+      performance_risk: true
+      user_impact: true
+    correlations: []
+
+  - id: memory-leak
+    name: Memory Leak Pattern
+    category: performance
+    description: Container showing signs of memory leak
+    enabled: true
+    tags: ["memory", "leak", "performance"]
+    indicators:
+      - type: metric
+        field: container.memory.usage
+        condition: increasing
+        time_window: 1h
+      - type: frequency
+        field: oom_kill
+        threshold: 2
+        time_window: 1h
+    impact:
+      severity: high
+      scope: pod
+      performance_risk: true
+    correlations: []

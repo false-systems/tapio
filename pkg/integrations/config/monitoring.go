@@ -21,15 +21,15 @@ type MonitoringConfig struct {
 
 // MetricsConfig defines metrics collection settings
 type MetricsConfig struct {
-	Enabled       bool              `yaml:"enabled" json:"enabled"`
-	Provider      string            `yaml:"provider" json:"provider"` // prometheus, otel, statsd
-	Endpoint      string            `yaml:"endpoint" json:"endpoint"`
-	Interval      time.Duration     `yaml:"interval" json:"interval"`
-	Histograms    bool              `yaml:"histograms" json:"histograms"`
-	Buckets       []float64         `yaml:"buckets" json:"buckets"`
-	Quantiles     []float64         `yaml:"quantiles" json:"quantiles"`
-	Labels        map[string]string `yaml:"labels" json:"labels"`
-	Cardinality   CardinalityConfig `yaml:"cardinality" json:"cardinality"`
+	Enabled     bool              `yaml:"enabled" json:"enabled"`
+	Provider    string            `yaml:"provider" json:"provider"` // prometheus, otel, statsd
+	Endpoint    string            `yaml:"endpoint" json:"endpoint"`
+	Interval    time.Duration     `yaml:"interval" json:"interval"`
+	Histograms  bool              `yaml:"histograms" json:"histograms"`
+	Buckets     []float64         `yaml:"buckets" json:"buckets"`
+	Quantiles   []float64         `yaml:"quantiles" json:"quantiles"`
+	Labels      map[string]string `yaml:"labels" json:"labels"`
+	Cardinality CardinalityConfig `yaml:"cardinality" json:"cardinality"`
 }
 
 // CardinalityConfig defines cardinality limits
@@ -42,38 +42,38 @@ type CardinalityConfig struct {
 
 // PerformanceConfig defines performance monitoring settings
 type PerformanceConfig struct {
-	Enabled           bool                   `yaml:"enabled" json:"enabled"`
-	CPUProfiling      bool                   `yaml:"cpu_profiling" json:"cpu_profiling"`
-	MemoryProfiling   bool                   `yaml:"memory_profiling" json:"memory_profiling"`
-	GoroutineTracking bool                   `yaml:"goroutine_tracking" json:"goroutine_tracking"`
-	SLO               SLOConfig              `yaml:"slo" json:"slo"`
-	Thresholds        PerformanceThresholds  `yaml:"thresholds" json:"thresholds"`
+	Enabled           bool                  `yaml:"enabled" json:"enabled"`
+	CPUProfiling      bool                  `yaml:"cpu_profiling" json:"cpu_profiling"`
+	MemoryProfiling   bool                  `yaml:"memory_profiling" json:"memory_profiling"`
+	GoroutineTracking bool                  `yaml:"goroutine_tracking" json:"goroutine_tracking"`
+	SLO               SLOConfig             `yaml:"slo" json:"slo"`
+	Thresholds        PerformanceThresholds `yaml:"thresholds" json:"thresholds"`
 }
 
 // SLOConfig defines Service Level Objectives
 type SLOConfig struct {
-	Enabled           bool              `yaml:"enabled" json:"enabled"`
-	AvailabilityTarget float64          `yaml:"availability_target" json:"availability_target"`
-	LatencyTargets    map[string]time.Duration `yaml:"latency_targets" json:"latency_targets"`
-	ErrorBudget       float64           `yaml:"error_budget" json:"error_budget"`
-	Window            time.Duration     `yaml:"window" json:"window"`
+	Enabled            bool                     `yaml:"enabled" json:"enabled"`
+	AvailabilityTarget float64                  `yaml:"availability_target" json:"availability_target"`
+	LatencyTargets     map[string]time.Duration `yaml:"latency_targets" json:"latency_targets"`
+	ErrorBudget        float64                  `yaml:"error_budget" json:"error_budget"`
+	Window             time.Duration            `yaml:"window" json:"window"`
 }
 
 // PerformanceThresholds defines performance thresholds
 type PerformanceThresholds struct {
-	CPUWarning      float64       `yaml:"cpu_warning" json:"cpu_warning"`
-	CPUCritical     float64       `yaml:"cpu_critical" json:"cpu_critical"`
-	MemoryWarning   float64       `yaml:"memory_warning" json:"memory_warning"`
-	MemoryCritical  float64       `yaml:"memory_critical" json:"memory_critical"`
-	LatencyWarning  time.Duration `yaml:"latency_warning" json:"latency_warning"`
-	LatencyCritical time.Duration `yaml:"latency_critical" json:"latency_critical"`
-	ErrorRateWarning float64      `yaml:"error_rate_warning" json:"error_rate_warning"`
-	ErrorRateCritical float64     `yaml:"error_rate_critical" json:"error_rate_critical"`
+	CPUWarning        float64       `yaml:"cpu_warning" json:"cpu_warning"`
+	CPUCritical       float64       `yaml:"cpu_critical" json:"cpu_critical"`
+	MemoryWarning     float64       `yaml:"memory_warning" json:"memory_warning"`
+	MemoryCritical    float64       `yaml:"memory_critical" json:"memory_critical"`
+	LatencyWarning    time.Duration `yaml:"latency_warning" json:"latency_warning"`
+	LatencyCritical   time.Duration `yaml:"latency_critical" json:"latency_critical"`
+	ErrorRateWarning  float64       `yaml:"error_rate_warning" json:"error_rate_warning"`
+	ErrorRateCritical float64       `yaml:"error_rate_critical" json:"error_rate_critical"`
 }
 
 // AlertingConfig defines alerting settings
 type AlertingConfig struct {
-	Enabled    bool           `yaml:"enabled" json:"enabled"`
+	Enabled    bool            `yaml:"enabled" json:"enabled"`
 	Providers  []AlertProvider `yaml:"providers" json:"providers"`
 	Rules      []AlertRule     `yaml:"rules" json:"rules"`
 	Silences   []AlertSilence  `yaml:"silences" json:"silences"`
@@ -110,31 +110,31 @@ type AlertSilence struct {
 
 // AlertGrouping defines alert grouping
 type AlertGrouping struct {
-	Enabled      bool          `yaml:"enabled" json:"enabled"`
-	GroupBy      []string      `yaml:"group_by" json:"group_by"`
-	GroupWait    time.Duration `yaml:"group_wait" json:"group_wait"`
+	Enabled       bool          `yaml:"enabled" json:"enabled"`
+	GroupBy       []string      `yaml:"group_by" json:"group_by"`
+	GroupWait     time.Duration `yaml:"group_wait" json:"group_wait"`
 	GroupInterval time.Duration `yaml:"group_interval" json:"group_interval"`
 }
 
 // AlertThrottling defines alert throttling
 type AlertThrottling struct {
-	Enabled       bool          `yaml:"enabled" json:"enabled"`
-	MaxPerHour    int           `yaml:"max_per_hour" json:"max_per_hour"`
+	Enabled        bool          `yaml:"enabled" json:"enabled"`
+	MaxPerHour     int           `yaml:"max_per_hour" json:"max_per_hour"`
 	CooldownPeriod time.Duration `yaml:"cooldown_period" json:"cooldown_period"`
 }
 
 // ProfilingConfig defines profiling settings
 type ProfilingConfig struct {
-	Enabled      bool                `yaml:"enabled" json:"enabled"`
-	CPU          bool                `yaml:"cpu" json:"cpu"`
-	Memory       bool                `yaml:"memory" json:"memory"`
-	Goroutine    bool                `yaml:"goroutine" json:"goroutine"`
-	Mutex        bool                `yaml:"mutex" json:"mutex"`
-	Block        bool                `yaml:"block" json:"block"`
-	Endpoint     string              `yaml:"endpoint" json:"endpoint"`
-	SampleRate   int                 `yaml:"sample_rate" json:"sample_rate"`
-	UploadPeriod time.Duration       `yaml:"upload_period" json:"upload_period"`
-	Labels       map[string]string   `yaml:"labels" json:"labels"`
+	Enabled      bool              `yaml:"enabled" json:"enabled"`
+	CPU          bool              `yaml:"cpu" json:"cpu"`
+	Memory       bool              `yaml:"memory" json:"memory"`
+	Goroutine    bool              `yaml:"goroutine" json:"goroutine"`
+	Mutex        bool              `yaml:"mutex" json:"mutex"`
+	Block        bool              `yaml:"block" json:"block"`
+	Endpoint     string            `yaml:"endpoint" json:"endpoint"`
+	SampleRate   int               `yaml:"sample_rate" json:"sample_rate"`
+	UploadPeriod time.Duration     `yaml:"upload_period" json:"upload_period"`
+	Labels       map[string]string `yaml:"labels" json:"labels"`
 }
 
 // DefaultMonitoringConfig returns default monitoring configuration
@@ -142,12 +142,12 @@ func DefaultMonitoringConfig() MonitoringConfig {
 	return MonitoringConfig{
 		BaseConfig: DefaultBaseConfig(),
 		Metrics: MetricsConfig{
-			Enabled:  true,
-			Provider: "prometheus",
-			Interval: 60 * time.Second,
+			Enabled:    true,
+			Provider:   "prometheus",
+			Interval:   60 * time.Second,
 			Histograms: true,
-			Buckets:  []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
-			Quantiles: []float64{0.5, 0.9, 0.95, 0.99},
+			Buckets:    []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+			Quantiles:  []float64{0.5, 0.9, 0.95, 0.99},
 		},
 		Performance: PerformanceConfig{
 			Enabled: true,

@@ -1041,7 +1041,7 @@ func (rts *ResilienceTestSuite) injectFault(ctx context.Context, params map[stri
 		target = "system"
 	}
 
-	rts.logEvent(result, "fault_injection_start", "fault_injector", 
+	rts.logEvent(result, "fault_injection_start", "fault_injector",
 		fmt.Sprintf("Injecting %s fault to %s for %.1fs", faultType, target, duration), "info", params)
 
 	// Create fault injection profile
@@ -1071,7 +1071,7 @@ func (rts *ResilienceTestSuite) injectFault(ctx context.Context, params map[stri
 	// Stop fault injection
 	rts.faultInjector.Stop()
 
-	rts.logEvent(result, "fault_injection_complete", "fault_injector", 
+	rts.logEvent(result, "fault_injection_complete", "fault_injector",
 		fmt.Sprintf("Completed %s fault injection to %s", faultType, target), "info", params)
 
 	return nil
@@ -1094,7 +1094,7 @@ func (rts *ResilienceTestSuite) increaseLoad(ctx context.Context, params map[str
 		rampTime = 5.0 // Default 5 second ramp
 	}
 
-	rts.logEvent(result, "load_increase_start", "load_generator", 
+	rts.logEvent(result, "load_increase_start", "load_generator",
 		fmt.Sprintf("Increasing load to %.1f req/s over %.1fs for %.1fs", targetRate, rampTime, duration), "info", params)
 
 	// Create load pattern
@@ -1129,13 +1129,13 @@ func (rts *ResilienceTestSuite) increaseLoad(ctx context.Context, params map[str
 			return ctx.Err()
 		case <-ticker.C:
 			currentRate := atomic.LoadInt64(&rts.loadGenerator.requestRate)
-			rts.logEvent(result, "load_monitoring", "load_generator", 
-				fmt.Sprintf("Current load: %d req/s", currentRate), "info", 
+			rts.logEvent(result, "load_monitoring", "load_generator",
+				fmt.Sprintf("Current load: %d req/s", currentRate), "info",
 				map[string]interface{}{"current_rate": currentRate})
 		}
 	}
 
-	rts.logEvent(result, "load_increase_complete", "load_generator", 
+	rts.logEvent(result, "load_increase_complete", "load_generator",
 		fmt.Sprintf("Completed load increase test (peak: %.1f req/s)", targetRate), "info", params)
 
 	return nil
@@ -1163,8 +1163,8 @@ func (rts *ResilienceTestSuite) simulateFailure(ctx context.Context, params map[
 		severity = "medium"
 	}
 
-	rts.logEvent(result, "failure_simulation_start", "failure_simulator", 
-		fmt.Sprintf("Simulating %s failure in %s (severity: %s) for %.1fs", failureType, component, severity, duration), 
+	rts.logEvent(result, "failure_simulation_start", "failure_simulator",
+		fmt.Sprintf("Simulating %s failure in %s (severity: %s) for %.1fs", failureType, component, severity, duration),
 		"warning", params)
 
 	// Create failure event for self-healing engine
@@ -1177,10 +1177,10 @@ func (rts *ResilienceTestSuite) simulateFailure(ctx context.Context, params map[
 			Severity:     severity,
 			ErrorMessage: fmt.Sprintf("Simulated %s failure for testing", failureType),
 			Context: map[string]interface{}{
-				"simulated":     true,
-				"test_case":     result.ScenarioName,
-				"duration":      duration,
-				"failure_type":  failureType,
+				"simulated":    true,
+				"test_case":    result.ScenarioName,
+				"duration":     duration,
+				"failure_type": failureType,
 			},
 		}
 
@@ -1189,8 +1189,8 @@ func (rts *ResilienceTestSuite) simulateFailure(ctx context.Context, params map[
 		if err != nil {
 			rts.logError(result, "failure_simulator", "report_failure_error", err.Error(), "", params)
 		} else {
-			rts.logEvent(result, "failure_reported", "failure_simulator", 
-				"Failure reported to self-healing engine", "info", 
+			rts.logEvent(result, "failure_reported", "failure_simulator",
+				"Failure reported to self-healing engine", "info",
 				map[string]interface{}{"failure_id": failureEvent.ID})
 		}
 	}
@@ -1217,7 +1217,7 @@ func (rts *ResilienceTestSuite) simulateFailure(ctx context.Context, params map[
 		// Failure simulation completed
 	}
 
-	rts.logEvent(result, "failure_simulation_complete", "failure_simulator", 
+	rts.logEvent(result, "failure_simulation_complete", "failure_simulator",
 		fmt.Sprintf("Completed %s failure simulation for %s", failureType, component), "info", params)
 
 	return nil
@@ -1227,8 +1227,8 @@ func (rts *ResilienceTestSuite) simulateFailure(ctx context.Context, params map[
 
 // simulateConnectivityFailure simulates network connectivity issues
 func (rts *ResilienceTestSuite) simulateConnectivityFailure(ctx context.Context, component string, duration float64, result *TestResult) {
-	rts.logEvent(result, "connectivity_failure", component, 
-		"Simulating network connectivity loss", "warning", 
+	rts.logEvent(result, "connectivity_failure", component,
+		"Simulating network connectivity loss", "warning",
 		map[string]interface{}{"duration": duration})
 
 	// In a real implementation, this might:
@@ -1240,8 +1240,8 @@ func (rts *ResilienceTestSuite) simulateConnectivityFailure(ctx context.Context,
 
 // simulatePerformanceFailure simulates performance degradation
 func (rts *ResilienceTestSuite) simulatePerformanceFailure(ctx context.Context, component string, duration float64, result *TestResult) {
-	rts.logEvent(result, "performance_failure", component, 
-		"Simulating performance degradation", "warning", 
+	rts.logEvent(result, "performance_failure", component,
+		"Simulating performance degradation", "warning",
 		map[string]interface{}{"duration": duration})
 
 	// In a real implementation, this might:
@@ -1253,8 +1253,8 @@ func (rts *ResilienceTestSuite) simulatePerformanceFailure(ctx context.Context, 
 
 // simulateResourceFailure simulates resource exhaustion
 func (rts *ResilienceTestSuite) simulateResourceFailure(ctx context.Context, component string, duration float64, result *TestResult) {
-	rts.logEvent(result, "resource_failure", component, 
-		"Simulating resource exhaustion", "warning", 
+	rts.logEvent(result, "resource_failure", component,
+		"Simulating resource exhaustion", "warning",
 		map[string]interface{}{"duration": duration})
 
 	// In a real implementation, this might:
@@ -1266,8 +1266,8 @@ func (rts *ResilienceTestSuite) simulateResourceFailure(ctx context.Context, com
 
 // simulateDataFailure simulates data corruption or loss
 func (rts *ResilienceTestSuite) simulateDataFailure(ctx context.Context, component string, duration float64, result *TestResult) {
-	rts.logEvent(result, "data_failure", component, 
-		"Simulating data corruption/loss", "critical", 
+	rts.logEvent(result, "data_failure", component,
+		"Simulating data corruption/loss", "critical",
 		map[string]interface{}{"duration": duration})
 
 	// In a real implementation, this might:
@@ -1279,8 +1279,8 @@ func (rts *ResilienceTestSuite) simulateDataFailure(ctx context.Context, compone
 
 // simulateGenericFailure simulates other types of failures
 func (rts *ResilienceTestSuite) simulateGenericFailure(ctx context.Context, component, failureType string, duration float64, result *TestResult) {
-	rts.logEvent(result, "generic_failure", component, 
-		fmt.Sprintf("Simulating %s failure", failureType), "warning", 
+	rts.logEvent(result, "generic_failure", component,
+		fmt.Sprintf("Simulating %s failure", failureType), "warning",
 		map[string]interface{}{
 			"failure_type": failureType,
 			"duration":     duration,

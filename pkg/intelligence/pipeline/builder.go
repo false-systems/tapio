@@ -167,7 +167,7 @@ func (pb *PipelineBuilder) buildHighPerformancePipeline() (IntelligencePipeline,
 	unifiedConfig.EnableCorrelation = pb.config.EnableCorrelation
 	unifiedConfig.ProcessingTimeout = pb.config.ProcessingTimeout
 	unifiedConfig.ShutdownTimeout = 30 * time.Second
-	
+
 	orchestrator, err := NewUnifiedOrchestrator(unifiedConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create unified orchestrator: %w", err)

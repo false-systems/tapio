@@ -193,12 +193,12 @@ func (s *SampleIntegration) Statistics() config.Statistics {
 		ErrorCount:     s.errorCount,
 		LastActivity:   s.lastActivity,
 		Custom: map[string]interface{}{
-			"endpoint":        s.config.Endpoint,
-			"batch_size":      s.config.BatchSize,
-			"buffer_size":     s.config.BufferSize,
-			"workers":         s.config.Workers,
-			"events_per_sec":  s.calculateEventsPerSecond(),
-			"error_rate":      s.calculateErrorRate(),
+			"endpoint":       s.config.Endpoint,
+			"batch_size":     s.config.BatchSize,
+			"buffer_size":    s.config.BufferSize,
+			"workers":        s.config.Workers,
+			"events_per_sec": s.calculateEventsPerSecond(),
+			"error_rate":     s.calculateErrorRate(),
 		},
 	}
 }
@@ -294,14 +294,14 @@ func validateSampleConfig(cfg SampleIntegrationConfig) error {
 // DefaultSampleConfig returns a default configuration
 func DefaultSampleConfig() SampleIntegrationConfig {
 	return SampleIntegrationConfig{
-		BaseConfig:  config.DefaultBaseConfig(),
-		Endpoint:    "http://localhost:8080",
-		BatchSize:   100,
-		BufferSize:  1000,
-		Workers:     5,
-		BatchDelay:  5 * time.Second,
-		Security:    nil, // Optional
-		Resilience:  nil, // Optional
-		Monitoring:  nil, // Optional
+		BaseConfig: config.DefaultBaseConfig(),
+		Endpoint:   "http://localhost:8080",
+		BatchSize:  100,
+		BufferSize: 1000,
+		Workers:    5,
+		BatchDelay: 5 * time.Second,
+		Security:   nil, // Optional
+		Resilience: nil, // Optional
+		Monitoring: nil, // Optional
 	}
 }

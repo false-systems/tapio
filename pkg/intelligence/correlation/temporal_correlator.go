@@ -50,9 +50,9 @@ type EventWindow struct {
 	mu        sync.RWMutex
 
 	// Indexes for fast lookup
-	byType   map[string][]int // event type -> indexes
-	byEntity map[string][]int // entity -> indexes
-	byTime   *TimeIndex       // time-based index
+	byType   map[string][]int   // event type -> indexes
+	byEntity map[string][]int   // entity -> indexes
+	byTime   *TemporalTimeIndex // time-based index
 }
 
 // WindowEvent is an event in the window
@@ -63,9 +63,9 @@ type WindowEvent struct {
 	Index     int // Position in window
 }
 
-// TimeIndex allows efficient time-range queries
-type TimeIndex struct {
-	buckets    map[int64][]int // timestamp bucket -> event indexes
+// TemporalTimeIndex allows efficient time-range queries
+type TemporalTimeIndex struct {
+	buckets    map[int64][]*WindowEvent // timestamp bucket -> window events
 	bucketSize time.Duration
 }
 
@@ -103,8 +103,8 @@ func NewTemporalCorrelator(logger *zap.Logger, config TemporalConfig) *TemporalC
 			maxEvents: 10000,
 			byType:    make(map[string][]int),
 			byEntity:  make(map[string][]int),
-			byTime: &TimeIndex{
-				buckets:    make(map[int64][]int),
+			byTime: &TemporalTimeIndex{
+				buckets:    make(map[int64][]*WindowEvent),
 				bucketSize: 1 * time.Minute,
 			},
 		},
@@ -168,13 +168,27 @@ func (t *TemporalCorrelator) findCorrelations(event *domain.UnifiedEvent) []Temp
 			continue // Skip self
 		}
 
+		// Skip if events are from different entities (unless it's a cross-entity pattern)
+		if getEntityKey(nearby.Event) != getEntityKey(event) {
+			// Only correlate cross-entity events if they have high confidence already
+			pairKey := EventPairKey{
+				EventA: getEventKey(nearby.Event),
+				EventB: eventKey,
+			}
+			if stats := t.cooccurrence.GetStats(pairKey); stats == nil || stats.Confidence < 0.9 {
+				continue
+			}
+		}
+
 		// Check co-occurrence statistics
 		pairKey := EventPairKey{
 			EventA: getEventKey(nearby.Event),
 			EventB: eventKey,
 		}
 
-		if stats := t.cooccurrence.GetStats(pairKey); stats != nil && stats.Confidence >= t.config.MinConfidence {
+		if stats := t.cooccurrence.GetStats(pairKey); stats != nil &&
+			stats.Confidence >= t.config.MinConfidence &&
+			stats.Count >= t.config.MinOccurrences {
 			correlation := TemporalCorrelation{
 				SourceEvent: EventReference{
 					EventID:   nearby.Event.ID,
@@ -251,7 +265,7 @@ func (w *EventWindow) Add(event *domain.UnifiedEvent) {
 
 	// Update time index
 	bucket := we.Timestamp.Unix() / int64(w.byTime.bucketSize.Seconds())
-	w.byTime.buckets[bucket] = append(w.byTime.buckets[bucket], we.Index)
+	w.byTime.buckets[bucket] = append(w.byTime.buckets[bucket], &we)
 
 	// Maintain size limit
 	if len(w.events) > w.maxEvents {
@@ -271,10 +285,10 @@ func (w *EventWindow) GetEventsInRange(start, end time.Time) []WindowEvent {
 	endBucket := end.Unix() / int64(w.byTime.bucketSize.Seconds())
 
 	for bucket := startBucket; bucket <= endBucket; bucket++ {
-		if indexes, exists := w.byTime.buckets[bucket]; exists {
-			for _, idx := range indexes {
-				if idx < len(w.events) {
-					event := w.events[idx]
+		if windowEvents, exists := w.byTime.buckets[bucket]; exists {
+			for _, we := range windowEvents {
+				if we.Index < len(w.events) {
+					event := w.events[we.Index]
 					if event.Timestamp.After(start) && event.Timestamp.Before(end) {
 						result = append(result, event)
 					}
@@ -433,7 +447,7 @@ func (w *EventWindow) rebuildIndexes() {
 	// Clear indexes
 	w.byType = make(map[string][]int)
 	w.byEntity = make(map[string][]int)
-	w.byTime.buckets = make(map[int64][]int)
+	w.byTime.buckets = make(map[int64][]*WindowEvent)
 
 	// Rebuild
 	for i, event := range w.events {
@@ -443,6 +457,6 @@ func (w *EventWindow) rebuildIndexes() {
 		w.byEntity[entityKey] = append(w.byEntity[entityKey], i)
 
 		bucket := event.Timestamp.Unix() / int64(w.byTime.bucketSize.Seconds())
-		w.byTime.buckets[bucket] = append(w.byTime.buckets[bucket], i)
+		w.byTime.buckets[bucket] = append(w.byTime.buckets[bucket], &event)
 	}
 }

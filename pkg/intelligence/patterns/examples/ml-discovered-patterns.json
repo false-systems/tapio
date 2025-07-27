@@ -1,0 +1,106 @@
+{
+  "version": "1.0",
+  "patterns": [
+    {
+      "id": "ml-periodic-restart-pattern",
+      "name": "ML Discovered: Periodic Restart Pattern",
+      "category": "failure",
+      "description": "ML discovered pattern of pods restarting every 6 hours",
+      "enabled": true,
+      "tags": ["ml-generated", "restart", "periodic"],
+      "indicators": [
+        {
+          "type": "frequency",
+          "field": "container.restart",
+          "threshold": 4,
+          "time_window": "24h"
+        },
+        {
+          "type": "temporal",
+          "field": "restart.interval",
+          "condition": "periodic",
+          "value": "6h",
+          "threshold": 0.9
+        }
+      ],
+      "impact": {
+        "severity": "medium",
+        "scope": "pod",
+        "user_impact": true,
+        "performance_risk": true
+      },
+      "correlations": ["memory-leak"]
+    },
+    {
+      "id": "ml-traffic-surge-cascade",
+      "name": "ML Discovered: Traffic Surge Cascade",
+      "category": "performance",
+      "description": "ML identified cascade pattern when traffic surges hit the system",
+      "enabled": true,
+      "tags": ["ml-generated", "traffic", "cascade"],
+      "indicators": [
+        {
+          "type": "metric",
+          "field": "ingress.requests_per_second",
+          "condition": "spike",
+          "threshold": 2.5,
+          "time_window": "1m"
+        },
+        {
+          "type": "sequence",
+          "field": "service.latency",
+          "condition": "propagating_increase",
+          "value": ["frontend", "api", "database"],
+          "time_window": "5m"
+        },
+        {
+          "type": "metric",
+          "field": "pod.cpu_throttling",
+          "condition": "greater_than",
+          "threshold": 0.3
+        }
+      ],
+      "impact": {
+        "severity": "high",
+        "scope": "namespace",
+        "user_impact": true,
+        "performance_risk": true
+      },
+      "correlations": ["cascading-failure", "cpu-throttling"]
+    },
+    {
+      "id": "ml-dns-timeout-cluster",
+      "name": "ML Discovered: DNS Timeout Clustering",
+      "category": "network",
+      "description": "ML clustering found correlated DNS timeouts across services",
+      "enabled": true,
+      "tags": ["ml-generated", "dns", "clustering"],
+      "indicators": [
+        {
+          "type": "event",
+          "field": "dns.error",
+          "condition": "equals",
+          "value": "timeout"
+        },
+        {
+          "type": "spatial",
+          "field": "affected.services",
+          "condition": "cluster_size",
+          "threshold": 3,
+          "time_window": "30s"
+        },
+        {
+          "type": "metric",
+          "field": "coredns.query_duration",
+          "condition": "greater_than",
+          "threshold": 5000
+        }
+      ],
+      "impact": {
+        "severity": "high",
+        "scope": "cluster",
+        "user_impact": true
+      }
+    }
+  ]
+}

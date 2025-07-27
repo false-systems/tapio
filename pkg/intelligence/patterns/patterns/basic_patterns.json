@@ -1,0 +1,41 @@
+{
+  "patterns": [
+    {
+      "id": "config-restart",
+      "name": "ConfigMap Update Triggers Pod Restart",
+      "description": "Pod restarts after ConfigMap update",
+      "category": "configuration",
+      "conditions": [
+        {
+          "eventType": "k8s:ConfigMapUpdated",
+          "timeWindow": "5m"
+        },
+        {
+          "eventType": "k8s:Killing",
+          "relationship": "same-namespace"
+        }
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "deployment-cascade",
+      "name": "Deployment Update Cascade",
+      "description": "Deployment update causes ReplicaSet and Pod changes",
+      "category": "deployment",
+      "conditions": [
+        {
+          "eventType": "k8s:DeploymentUpdated"
+        },
+        {
+          "eventType": "k8s:ReplicaSetCreated",
+          "relationship": "owner-reference"
+        },
+        {
+          "eventType": "k8s:Scheduled",
+          "relationship": "same-deployment"
+        }
+      ],
+      "confidence": 1.0
+    }
+  ]
+}

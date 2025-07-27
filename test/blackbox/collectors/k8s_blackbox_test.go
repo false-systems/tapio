@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -115,10 +117,10 @@ func (s *K8sBlackBoxTestSuite) testPodLifecycleEvents(t *testing.T) {
 
 	// Validate collected events
 	events := eventCollector.getEvents()
-	
+
 	// Should have pod created, running, and terminated events
 	assert.GreaterOrEqual(t, len(events), 3, "Should have at least 3 pod lifecycle events")
-	
+
 	// Validate event sequence
 	var createdEvent, runningEvent, terminatedEvent *Event
 	for _, e := range events {
@@ -177,7 +179,7 @@ func (s *K8sBlackBoxTestSuite) testServiceDiscovery(t *testing.T) {
 
 	// Validate events
 	events := eventCollector.getEvents()
-	
+
 	// Should have service created and endpoint events
 	serviceEvents := filterEventsByType(events, "service_created", "endpoints_updated")
 	assert.GreaterOrEqual(t, len(serviceEvents), 2, "Should have service and endpoint events")
@@ -185,7 +187,7 @@ func (s *K8sBlackBoxTestSuite) testServiceDiscovery(t *testing.T) {
 	// Validate service discovery correlation
 	var serviceCreated *Event
 	var endpointsUpdated []*Event
-	
+
 	for _, e := range events {
 		if e.Type == "service_created" {
 			serviceCreated = e
@@ -231,8 +233,8 @@ func (s *K8sBlackBoxTestSuite) testHighVolumeEvents(t *testing.T) {
 			Spec: v1.PodSpec{
 				Containers: []v1.Container{
 					{
-						Name:  "test",
-						Image: "busybox",
+						Name:    "test",
+						Image:   "busybox",
 						Command: []string{"sh", "-c", "echo 'test' && sleep 10"},
 					},
 				},
@@ -249,10 +251,10 @@ func (s *K8sBlackBoxTestSuite) testHighVolumeEvents(t *testing.T) {
 
 	// Validate high volume handling
 	events := eventCollector.getEvents()
-	
+
 	// Should have events for all pods
 	podEvents := filterEventsByLabel(events, "test", "high-volume")
-	assert.GreaterOrEqual(t, len(podEvents), podCount, 
+	assert.GreaterOrEqual(t, len(podEvents), podCount,
 		"Should have events for all %d pods", podCount)
 
 	// Check for duplicate events
@@ -307,7 +309,7 @@ func (s *K8sBlackBoxTestSuite) testFailureScenarios(t *testing.T) {
 		time.Sleep(30 * time.Second)
 
 		events := eventCollector.getEvents()
-		
+
 		// Should have pod failure events
 		failureEvents := filterEventsByType(events, "pod_failed", "image_pull_failed")
 		assert.NotEmpty(t, failureEvents, "Should have failure events for invalid pod")
@@ -357,7 +359,7 @@ func (s *K8sBlackBoxTestSuite) testFailureScenarios(t *testing.T) {
 		time.Sleep(10 * time.Second)
 
 		events := eventCollector.getEvents()
-		
+
 		// Should have scheduling failure events
 		scheduleEvents := filterEventsByType(events, "pod_scheduling_failed", "insufficient_resources")
 		assert.NotEmpty(t, scheduleEvents, "Should have resource exhaustion events")

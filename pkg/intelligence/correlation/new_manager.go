@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.uber.org/zap"
 )
 
 // SimpleCollectionManager provides correlation using the new simple system
@@ -29,7 +30,7 @@ type SimpleCollectionManager struct {
 }
 
 // NewSimpleCollectionManager creates a manager with the simple correlation system
-func NewSimpleCollectionManager(config Config) *SimpleCollectionManager {
+func NewSimpleCollectionManager(config Config, logger *zap.Logger) *SimpleCollectionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create simple correlation system with default config
@@ -37,7 +38,7 @@ func NewSimpleCollectionManager(config Config) *SimpleCollectionManager {
 	simpleConfig.EventBufferSize = config.EventBufferSize
 
 	return &SimpleCollectionManager{
-		correlationSystem: NewSimpleCorrelationSystem(nil, simpleConfig),
+		correlationSystem: NewSimpleCorrelationSystem(logger, simpleConfig),
 		eventBus:          make(chan domain.Event, config.EventBufferSize),
 		insightChan:       make(chan domain.Insight, 100),
 		ctx:               ctx,

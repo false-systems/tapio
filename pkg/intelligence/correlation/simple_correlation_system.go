@@ -16,11 +16,12 @@ type SimpleCorrelationSystem struct {
 	logger *zap.Logger
 
 	// Core correlation engines
-	k8sCorrelator      *K8sNativeCorrelator // 100% accurate K8s relationships
-	temporalCorrelator *TemporalCorrelator  // Time-based patterns
-	sequenceDetector   *SequenceDetector    // Sequential patterns
-	confidenceScorer   *ConfidenceScorer    // Multi-dimensional scoring
-	explanationEngine  *ExplanationEngine   // Human explanations
+	k8sCorrelator      *K8sNativeCorrelator           // 100% accurate K8s relationships
+	temporalCorrelator *TemporalCorrelator            // Time-based patterns
+	sequenceDetector   *SequenceDetector              // Sequential patterns
+	confidenceScorer   *ConfidenceScorer              // Multi-dimensional scoring
+	explanationEngine  *ExplanationEngine             // Human explanations
+	persistenceService *CorrelationPersistenceService // Persistence layer
 
 	// Event processing
 	eventChan   chan *domain.UnifiedEvent
@@ -93,10 +94,11 @@ func NewSimpleCorrelationSystem(logger *zap.Logger, config SimpleSystemConfig) *
 		sequenceDetector:   NewSequenceDetector(logger, DefaultSequenceConfig()),
 		confidenceScorer:   NewConfidenceScorer(logger, DefaultScorerConfig()),
 		explanationEngine:  NewExplanationEngine(),
+		persistenceService: NewCorrelationPersistenceService(NewInMemoryCorrelationStore(logger), logger),
 
 		// Event channels
 		eventChan:   make(chan *domain.UnifiedEvent, config.EventBufferSize),
-		insightChan: make(chan domain.Insight, 100),
+		insightChan: make(chan domain.Insight, config.EventBufferSize), // Match event buffer size
 
 		config: config,
 		ctx:    ctx,
@@ -140,9 +142,15 @@ func (s *SimpleCorrelationSystem) ProcessEvent(ctx context.Context, event *domai
 		return fmt.Errorf("correlation system not running")
 	}
 
+	// Use a timeout to prevent indefinite blocking
+	timer := time.NewTimer(s.config.ProcessingTimeout)
+	defer timer.Stop()
+
 	select {
 	case s.eventChan <- event:
 		return nil
+	case <-timer.C:
+		return fmt.Errorf("timeout sending event to processing queue")
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-s.ctx.Done():
@@ -228,6 +236,17 @@ func (s *SimpleCorrelationSystem) createInsightFromK8sCorrelation(event *domain.
 	}
 
 	s.sendInsight(insight)
+
+	// Persist the K8s correlation for historical analysis
+	if s.persistenceService != nil {
+		go func() {
+			ctx := context.Background()
+			err := s.persistenceService.PersistCorrelation(ctx, event, corr, explanation, corr.Confidence)
+			if err != nil {
+				s.logger.Warn("Failed to persist K8s correlation", zap.Error(err))
+			}
+		}()
+	}
 }
 
 // createInsightFromTemporalCorrelation creates insights from temporal correlations
@@ -255,6 +274,17 @@ func (s *SimpleCorrelationSystem) createInsightFromTemporalCorrelation(event *do
 	}
 
 	s.sendInsight(insight)
+
+	// Persist the temporal correlation for historical analysis
+	if s.persistenceService != nil {
+		go func() {
+			ctx := context.Background()
+			err := s.persistenceService.PersistCorrelation(ctx, event, corr, explanation, corr.Confidence)
+			if err != nil {
+				s.logger.Warn("Failed to persist temporal correlation", zap.Error(err))
+			}
+		}()
+	}
 }
 
 // createInsightFromSequenceCorrelation creates insights from sequence correlations
@@ -281,6 +311,17 @@ func (s *SimpleCorrelationSystem) createInsightFromSequenceCorrelation(event *do
 	}
 
 	s.sendInsight(insight)
+
+	// Persist the sequence correlation for historical analysis
+	if s.persistenceService != nil {
+		go func() {
+			ctx := context.Background()
+			err := s.persistenceService.PersistCorrelation(ctx, event, corr, explanation, corr.Confidence)
+			if err != nil {
+				s.logger.Warn("Failed to persist sequence correlation", zap.Error(err))
+			}
+		}()
+	}
 }
 
 // sendInsight sends an insight to the channel
@@ -291,8 +332,10 @@ func (s *SimpleCorrelationSystem) sendInsight(insight domain.Insight) {
 	case <-s.ctx.Done():
 		return
 	default:
-		// Channel full, drop insight (could also log this)
-		s.logger.Warn("Insight channel full, dropping insight", zap.String("insight_id", insight.ID))
+		// Channel full, log and drop
+		s.logger.Debug("Insight channel full, dropping insight",
+			zap.String("insight_id", insight.ID),
+			zap.String("insight_type", insight.Type))
 	}
 }
 

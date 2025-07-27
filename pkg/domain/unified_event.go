@@ -71,11 +71,11 @@ type UnifiedEvent struct {
 	K8sContext         *K8sContext         `json:"k8s_context,omitempty"`
 	ResourceContext    *ResourceContext    `json:"resource_context,omitempty"`
 	OperationalContext *OperationalContext `json:"operational_context,omitempty"`
-	
+
 	// ENHANCED: Analysis results
 	Correlations []CorrelationRef `json:"correlations,omitempty"`
 	Patterns     []PatternMatch   `json:"patterns,omitempty"`
-	Anomalies    []AnomalyRef      `json:"anomalies,omitempty"`
+	Anomalies    []AnomalyRef     `json:"anomalies,omitempty"`
 
 	// Collector metadata
 	CollectorMetadata *CollectorMetadata `json:"collector_metadata,omitempty"`

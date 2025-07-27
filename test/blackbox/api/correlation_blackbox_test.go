@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,14 +21,14 @@ type CorrelationBlackBoxTest struct {
 
 // CorrelationRequest represents API request for correlation
 type CorrelationRequest struct {
-	Events    []Event           `json:"events"`
-	TimeRange TimeRange         `json:"time_range"`
+	Events    []Event            `json:"events"`
+	TimeRange TimeRange          `json:"time_range"`
 	Options   CorrelationOptions `json:"options"`
 }
 
 // CorrelationResponse represents API response
 type CorrelationResponse struct {
-	CorrelationID string              `json:"correlation_id"`
+	CorrelationID string               `json:"correlation_id"`
 	Patterns      []CorrelationPattern `json:"patterns"`
 	Insights      []Insight            `json:"insights"`
 	Score         float64              `json:"score"`
@@ -45,11 +46,11 @@ type CorrelationPattern struct {
 
 // Insight represents AI-generated insight
 type Insight struct {
-	Type        string                 `json:"type"`
-	Severity    string                 `json:"severity"`
-	Message     string                 `json:"message"`
-	Recommendations []string           `json:"recommendations"`
-	Evidence    map[string]interface{} `json:"evidence"`
+	Type            string                 `json:"type"`
+	Severity        string                 `json:"severity"`
+	Message         string                 `json:"message"`
+	Recommendations []string               `json:"recommendations"`
+	Evidence        map[string]interface{} `json:"evidence"`
 }
 
 // TimeRange for correlation window
@@ -109,9 +110,9 @@ func (ct *CorrelationBlackBoxTest) testBasicCorrelation(t *testing.T) {
 			Source:    "k8s-collector",
 			Timestamp: now,
 			Data: map[string]interface{}{
-				"pod_name":  "api-server-xyz",
-				"namespace": "production",
-				"node":      "node-1",
+				"pod_name":     "api-server-xyz",
+				"namespace":    "production",
+				"node":         "node-1",
 				"memory_limit": "1Gi",
 				"memory_used":  "1.2Gi",
 			},
@@ -187,7 +188,7 @@ func (ct *CorrelationBlackBoxTest) testBasicCorrelation(t *testing.T) {
 func (ct *CorrelationBlackBoxTest) testCascadingFailureDetection(t *testing.T) {
 	// Simulate cascading failure scenario
 	baseTime := time.Now()
-	
+
 	// Database failure leads to service failures
 	events := []Event{
 		// Initial database connection failure
@@ -306,16 +307,16 @@ func (ct *CorrelationBlackBoxTest) testPerformanceDegradationCorrelation(t *test
 
 	// Generate gradual degradation events
 	for i := 0; i < 10; i++ {
-		latency := 100.0 + float64(i*50) // Increasing latency
+		latency := 100.0 + float64(i*50)  // Increasing latency
 		cpuUsage := 0.3 + float64(i)*0.07 // Increasing CPU
-		
+
 		events = append(events, Event{
 			ID:        fmt.Sprintf("perf-%d", i),
 			Type:      "service_latency_high",
 			Source:    "prometheus-collector",
 			Timestamp: baseTime.Add(time.Duration(i) * time.Minute),
 			Data: map[string]interface{}{
-				"service": "api-service",
+				"service":        "api-service",
 				"p99_latency_ms": latency,
 				"p95_latency_ms": latency * 0.8,
 				"p50_latency_ms": latency * 0.5,
@@ -362,10 +363,10 @@ func (ct *CorrelationBlackBoxTest) testPerformanceDegradationCorrelation(t *test
 
 	require.NotNil(t, perfPattern, "Should detect performance degradation")
 	assert.GreaterOrEqual(t, perfPattern.Confidence, 0.75)
-	
+
 	// Should identify trend
 	assert.Contains(t, perfPattern.Description, "gradual")
-	
+
 	// Should provide scaling recommendations
 	scalingRecommended := false
 	for _, insight := range resp.Insights {
@@ -383,7 +384,7 @@ func (ct *CorrelationBlackBoxTest) testSecurityIncidentCorrelation(t *testing.T)
 	// Simulate security incident
 	baseTime := time.Now()
 	attackerIP := "192.168.100.50"
-	
+
 	events := []Event{
 		// Initial reconnaissance
 		{
@@ -392,9 +393,9 @@ func (ct *CorrelationBlackBoxTest) testSecurityIncidentCorrelation(t *testing.T)
 			Source:    "ebpf-collector",
 			Timestamp: baseTime,
 			Data: map[string]interface{}{
-				"source_ip": attackerIP,
+				"source_ip":    attackerIP,
 				"target_ports": []int{22, 80, 443, 3306, 5432},
-				"scan_type": "SYN",
+				"scan_type":    "SYN",
 			},
 		},
 		// Failed login attempts
@@ -479,13 +480,13 @@ func (ct *CorrelationBlackBoxTest) testSecurityIncidentCorrelation(t *testing.T)
 
 	// Should identify attack progression
 	assert.Contains(t, secPattern.Description, "attack")
-	
+
 	// Should have critical severity insight
 	criticalInsight := false
 	for _, insight := range resp.Insights {
 		if insight.Severity == "critical" {
 			criticalInsight = true
-			
+
 			// Should recommend immediate actions
 			immediateAction := false
 			for _, rec := range insight.Recommendations {
@@ -503,7 +504,7 @@ func (ct *CorrelationBlackBoxTest) testSecurityIncidentCorrelation(t *testing.T)
 func (ct *CorrelationBlackBoxTest) testRealTimeStreaming(t *testing.T) {
 	// Test SSE streaming endpoint
 	streamURL := fmt.Sprintf("%s/api/v1/correlations/stream", ct.apiURL)
-	
+
 	// Create streaming request
 	req, err := http.NewRequest("GET", streamURL, nil)
 	require.NoError(t, err)
@@ -515,11 +516,11 @@ func (ct *CorrelationBlackBoxTest) testRealTimeStreaming(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
-	
+
 	// Send some events to trigger correlations
 	go func() {
 		time.Sleep(1 * time.Second)
-		
+
 		// Send related events
 		events := []Event{
 			{
@@ -571,7 +572,7 @@ func (ct *CorrelationBlackBoxTest) testRealTimeStreaming(t *testing.T) {
 				receivedEvents++
 				// Validate SSE format
 				assert.Contains(t, event, "data:")
-				
+
 				// Extract and validate correlation data
 				if contains(event, "correlation_id") {
 					var correlation CorrelationResponse
@@ -622,7 +623,7 @@ func (ct *CorrelationBlackBoxTest) testHighVolumeCorrelation(t *testing.T) {
 		// Create clusters of related events
 		clusterID := i / 10
 		serviceName := fmt.Sprintf("service-%d", clusterID%10)
-		
+
 		events[i] = Event{
 			ID:        fmt.Sprintf("high-vol-%d", i),
 			Type:      eventType,
@@ -637,7 +638,7 @@ func (ct *CorrelationBlackBoxTest) testHighVolumeCorrelation(t *testing.T) {
 	}
 
 	startTime := time.Now()
-	
+
 	req := CorrelationRequest{
 		Events: events,
 		TimeRange: TimeRange{
@@ -655,13 +656,13 @@ func (ct *CorrelationBlackBoxTest) testHighVolumeCorrelation(t *testing.T) {
 	responseTime := time.Since(startTime)
 
 	// Performance assertions
-	assert.Less(t, responseTime, 5*time.Second, 
+	assert.Less(t, responseTime, 5*time.Second,
 		"Should process %d events in less than 5 seconds", eventCount)
-	
+
 	// Should find patterns
 	assert.NotEmpty(t, resp.Patterns)
 	assert.LessOrEqual(t, len(resp.Patterns), 100, "Should respect max patterns limit")
-	
+
 	// Validate pattern quality despite high volume
 	highConfidencePatterns := 0
 	for _, p := range resp.Patterns {
@@ -669,7 +670,7 @@ func (ct *CorrelationBlackBoxTest) testHighVolumeCorrelation(t *testing.T) {
 			highConfidencePatterns++
 		}
 	}
-	assert.Greater(t, highConfidencePatterns, 0, 
+	assert.Greater(t, highConfidencePatterns, 0,
 		"Should find high confidence patterns even in high volume")
 }
 
@@ -679,13 +680,13 @@ func (ct *CorrelationBlackBoxTest) sendCorrelationRequest(t *testing.T, req Corr
 	body, err := json.Marshal(req)
 	require.NoError(t, err)
 
-	httpReq, err := http.NewRequest("POST", 
+	httpReq, err := http.NewRequest("POST",
 		fmt.Sprintf("%s/api/v1/correlations", ct.apiURL),
 		bytes.NewBuffer(body))
 	require.NoError(t, err)
-	
+
 	httpReq.Header.Set("Content-Type", "application/json")
-	
+
 	resp, err := ct.httpClient.Do(httpReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -710,7 +711,7 @@ func (ct *CorrelationBlackBoxTest) sendEvents(t *testing.T, events []Event) {
 			bytes.NewBuffer(body))
 		require.NoError(t, err)
 		resp.Body.Close()
-		
+
 		assert.Equal(t, http.StatusCreated, resp.StatusCode)
 	}
 }

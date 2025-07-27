@@ -34,13 +34,13 @@ type CircuitBreakerConfig struct {
 
 // LoadSheddingConfig defines load shedding settings
 type LoadSheddingConfig struct {
-	Enabled            bool                  `yaml:"enabled" json:"enabled"`
-	Strategy           string                `yaml:"strategy" json:"strategy"` // adaptive, threshold, priority
-	CPUThreshold       float64               `yaml:"cpu_threshold" json:"cpu_threshold"`
-	MemoryThreshold    float64               `yaml:"memory_threshold" json:"memory_threshold"`
-	LatencyThreshold   time.Duration         `yaml:"latency_threshold" json:"latency_threshold"`
-	ErrorRateThreshold float64               `yaml:"error_rate_threshold" json:"error_rate_threshold"`
-	PriorityLevels     []string              `yaml:"priority_levels" json:"priority_levels"`
+	Enabled            bool                   `yaml:"enabled" json:"enabled"`
+	Strategy           string                 `yaml:"strategy" json:"strategy"` // adaptive, threshold, priority
+	CPUThreshold       float64                `yaml:"cpu_threshold" json:"cpu_threshold"`
+	MemoryThreshold    float64                `yaml:"memory_threshold" json:"memory_threshold"`
+	LatencyThreshold   time.Duration          `yaml:"latency_threshold" json:"latency_threshold"`
+	ErrorRateThreshold float64                `yaml:"error_rate_threshold" json:"error_rate_threshold"`
+	PriorityLevels     []string               `yaml:"priority_levels" json:"priority_levels"`
 	Adaptive           AdaptiveSheddingConfig `yaml:"adaptive" json:"adaptive"`
 }
 
@@ -67,24 +67,24 @@ type TimeoutConfig struct {
 
 // BulkheadConfig defines bulkhead isolation settings
 type BulkheadConfig struct {
-	Enabled          bool `yaml:"enabled" json:"enabled"`
-	MaxConcurrency   int  `yaml:"max_concurrency" json:"max_concurrency"`
-	MaxQueueSize     int  `yaml:"max_queue_size" json:"max_queue_size"`
-	QueueTimeout     time.Duration `yaml:"queue_timeout" json:"queue_timeout"`
-	KeepAliveTime    time.Duration `yaml:"keep_alive_time" json:"keep_alive_time"`
-	CorePoolSize     int  `yaml:"core_pool_size" json:"core_pool_size"`
-	MaxPoolSize      int  `yaml:"max_pool_size" json:"max_pool_size"`
+	Enabled        bool          `yaml:"enabled" json:"enabled"`
+	MaxConcurrency int           `yaml:"max_concurrency" json:"max_concurrency"`
+	MaxQueueSize   int           `yaml:"max_queue_size" json:"max_queue_size"`
+	QueueTimeout   time.Duration `yaml:"queue_timeout" json:"queue_timeout"`
+	KeepAliveTime  time.Duration `yaml:"keep_alive_time" json:"keep_alive_time"`
+	CorePoolSize   int           `yaml:"core_pool_size" json:"core_pool_size"`
+	MaxPoolSize    int           `yaml:"max_pool_size" json:"max_pool_size"`
 }
 
 // HealthCheckConfig defines health check settings
 type HealthCheckConfig struct {
-	Enabled         bool              `yaml:"enabled" json:"enabled"`
-	Interval        time.Duration     `yaml:"interval" json:"interval"`
-	Timeout         time.Duration     `yaml:"timeout" json:"timeout"`
+	Enabled          bool             `yaml:"enabled" json:"enabled"`
+	Interval         time.Duration    `yaml:"interval" json:"interval"`
+	Timeout          time.Duration    `yaml:"timeout" json:"timeout"`
 	FailureThreshold int              `yaml:"failure_threshold" json:"failure_threshold"`
 	SuccessThreshold int              `yaml:"success_threshold" json:"success_threshold"`
-	DeepCheck       bool              `yaml:"deep_check" json:"deep_check"`
-	Endpoints       []HealthEndpoint  `yaml:"endpoints" json:"endpoints"`
+	DeepCheck        bool             `yaml:"deep_check" json:"deep_check"`
+	Endpoints        []HealthEndpoint `yaml:"endpoints" json:"endpoints"`
 }
 
 // HealthEndpoint defines a health check endpoint

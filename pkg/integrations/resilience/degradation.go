@@ -785,7 +785,7 @@ func (dm *DegradationManager) analyzeTrends(measurements []HealthMeasurement) {
 	} else if shortTermAvg < longTermAvg-0.05 {
 		dm.trendAnalyzer.trendMetrics.Trend = "degrading"
 		dm.trendAnalyzer.trendMetrics.Confidence = 0.8
-		
+
 		// Trigger early warning for degrading trends
 		if dm.trendAnalyzer.trendMetrics.Trend == "degrading" && shortTermAvg < dm.config.DegradedThreshold {
 			dm.sendTrendAlert("degrading_trend_detected", shortTermAvg, longTermAvg)
@@ -799,7 +799,7 @@ func (dm *DegradationManager) analyzeTrends(measurements []HealthMeasurement) {
 	if len(measurements) >= 3 {
 		velocity := dm.calculateTrendVelocity(measurements)
 		dm.trendAnalyzer.trendMetrics.Slope = velocity
-		
+
 		// High velocity changes are more concerning
 		if abs(velocity) > 0.1 {
 			dm.trendAnalyzer.trendMetrics.Confidence = min(1.0, dm.trendAnalyzer.trendMetrics.Confidence+0.2)
@@ -809,7 +809,7 @@ func (dm *DegradationManager) analyzeTrends(measurements []HealthMeasurement) {
 	// Update volatility measurement
 	volatility := dm.calculateVolatility(measurements)
 	dm.trendAnalyzer.trendMetrics.Volatility = volatility
-	
+
 	// High volatility reduces confidence in trend detection
 	if volatility > dm.trendAnalyzer.config.VolatilityLimit {
 		dm.trendAnalyzer.trendMetrics.Confidence *= 0.7
@@ -824,21 +824,21 @@ func (dm *DegradationManager) detectAnomalies(measurements []HealthMeasurement) 
 	}
 
 	latestMeasurement := measurements[len(measurements)-1]
-	
+
 	// Statistical anomaly detection using Z-score
 	anomalyScore := dm.calculateAnomalyScore(measurements, latestMeasurement.Score)
-	
+
 	// Threshold for anomaly detection (typically 2-3 standard deviations)
 	anomalyThreshold := 2.5
-	
+
 	if abs(anomalyScore) > anomalyThreshold {
 		anomalyType := "statistical_outlier"
 		severity := "warning"
-		
+
 		if abs(anomalyScore) > 3.0 {
 			severity = "critical"
 		}
-		
+
 		dm.sendAnomalyAlert(anomalyType, severity, latestMeasurement, anomalyScore)
 	}
 
@@ -846,16 +846,16 @@ func (dm *DegradationManager) detectAnomalies(measurements []HealthMeasurement) 
 	if len(measurements) >= 2 {
 		previousMeasurement := measurements[len(measurements)-2]
 		dropThreshold := 0.2 // 20% drop
-		
+
 		if latestMeasurement.Score < previousMeasurement.Score-dropThreshold {
-			dm.sendAnomalyAlert("sudden_drop", "critical", latestMeasurement, 
+			dm.sendAnomalyAlert("sudden_drop", "critical", latestMeasurement,
 				(previousMeasurement.Score - latestMeasurement.Score))
 		}
 	}
 
 	// Detect sustained degradation patterns
 	dm.detectSustainedDegradation(measurements)
-	
+
 	// Detect cyclical patterns that might indicate systemic issues
 	dm.detectCyclicalAnomalies(measurements)
 }
@@ -948,12 +948,12 @@ func (dm *DegradationManager) sendTrendAlert(alertType string, shortTerm, longTe
 		Timestamp: time.Now(),
 		Source:    "trend_analyzer",
 		Metadata: map[string]interface{}{
-			"alert_type":        alertType,
-			"short_term_avg":    shortTerm,
-			"long_term_avg":     longTerm,
-			"trend_direction":   dm.trendAnalyzer.trendMetrics.Trend,
-			"trend_confidence":  dm.trendAnalyzer.trendMetrics.Confidence,
-			"trend_volatility":  dm.trendAnalyzer.trendMetrics.Volatility,
+			"alert_type":       alertType,
+			"short_term_avg":   shortTerm,
+			"long_term_avg":    longTerm,
+			"trend_direction":  dm.trendAnalyzer.trendMetrics.Trend,
+			"trend_confidence": dm.trendAnalyzer.trendMetrics.Confidence,
+			"trend_volatility": dm.trendAnalyzer.trendMetrics.Volatility,
 		},
 	}
 	dm.sendAlert(alert)
@@ -1013,7 +1013,7 @@ func (dm *DegradationManager) detectSustainedDegradation(measurements []HealthMe
 	// If majority of recent measurements are degraded, it's sustained
 	if float64(degradationCount)/float64(windowSize) >= 0.6 {
 		latestMeasurement := measurements[len(measurements)-1]
-		dm.sendAnomalyAlert("sustained_degradation", "warning", latestMeasurement, 
+		dm.sendAnomalyAlert("sustained_degradation", "warning", latestMeasurement,
 			float64(degradationCount)/float64(windowSize))
 	}
 }
@@ -1027,19 +1027,19 @@ func (dm *DegradationManager) detectCyclicalAnomalies(measurements []HealthMeasu
 	// Look for repeating patterns of degradation
 	windowSize := min(len(measurements)/2, 10)
 	recentWindow := measurements[len(measurements)-windowSize:]
-	
+
 	// Calculate pattern signature for recent window
 	recentSignature := dm.calculatePatternSignature(recentWindow)
-	
+
 	// Compare with earlier windows to detect repetition
 	for i := 0; i < len(measurements)-2*windowSize; i += windowSize {
 		if i+windowSize >= len(measurements)-windowSize {
 			break
 		}
-		
+
 		compareWindow := measurements[i : i+windowSize]
 		compareSignature := dm.calculatePatternSignature(compareWindow)
-		
+
 		// If patterns are similar, we might have a cyclical issue
 		similarity := dm.calculatePatternSimilarity(recentSignature, compareSignature)
 		if similarity > 0.8 {
@@ -1057,17 +1057,17 @@ func (dm *DegradationManager) calculatePatternSignature(measurements []HealthMea
 	}
 
 	signature := make([]float64, len(measurements))
-	
+
 	// Normalize measurements relative to the first measurement
 	baseline := measurements[0].Score
 	if baseline == 0 {
 		baseline = 0.001 // Avoid division by zero
 	}
-	
+
 	for i, measurement := range measurements {
 		signature[i] = measurement.Score / baseline
 	}
-	
+
 	return signature
 }
 
@@ -1080,25 +1080,25 @@ func (dm *DegradationManager) calculatePatternSimilarity(sig1, sig2 []float64) f
 	// Calculate correlation coefficient
 	mean1 := dm.calculateMean(sig1)
 	mean2 := dm.calculateMean(sig2)
-	
+
 	numerator := 0.0
 	sumSq1 := 0.0
 	sumSq2 := 0.0
-	
+
 	for i := 0; i < len(sig1); i++ {
 		diff1 := sig1[i] - mean1
 		diff2 := sig2[i] - mean2
-		
+
 		numerator += diff1 * diff2
 		sumSq1 += diff1 * diff1
 		sumSq2 += diff2 * diff2
 	}
-	
+
 	denominator := sqrt(sumSq1 * sumSq2)
 	if denominator == 0 {
 		return 0.0
 	}
-	
+
 	correlation := numerator / denominator
 	return abs(correlation) // Return absolute correlation
 }
@@ -1108,12 +1108,12 @@ func (dm *DegradationManager) calculateMean(values []float64) float64 {
 	if len(values) == 0 {
 		return 0.0
 	}
-	
+
 	sum := 0.0
 	for _, value := range values {
 		sum += value
 	}
-	
+
 	return sum / float64(len(values))
 }
 
@@ -1128,12 +1128,12 @@ func (dm *DegradationManager) sendAnomalyAlert(anomalyType, severity string, mea
 		Timestamp: time.Now(),
 		Source:    "anomaly_detector",
 		Metadata: map[string]interface{}{
-			"anomaly_type":   anomalyType,
-			"health_score":   measurement.Score,
-			"anomaly_score":  score,
+			"anomaly_type":     anomalyType,
+			"health_score":     measurement.Score,
+			"anomaly_score":    score,
 			"measurement_time": measurement.Timestamp,
-			"metric":         measurement.Metric,
-			"source":         measurement.Source,
+			"metric":           measurement.Metric,
+			"source":           measurement.Source,
 		},
 	}
 	dm.sendAlert(alert)

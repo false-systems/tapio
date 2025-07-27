@@ -17,11 +17,11 @@ embed BaseConfig and optionally include aspect-specific configurations:
 
 	type MyIntegrationConfig struct {
 		config.BaseConfig `yaml:",inline" json:",inline"`
-		
+
 		// Custom fields
 		Endpoint string `yaml:"endpoint" json:"endpoint"`
 		BatchSize int   `yaml:"batch_size" json:"batch_size"`
-		
+
 		// Optional aspects
 		Security   *config.SecurityConfig   `yaml:"security,omitempty"`
 		Resilience *config.ResilienceConfig `yaml:"resilience,omitempty"`
@@ -85,7 +85,7 @@ Configurations can be loaded from YAML or JSON files:
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	// Validate configuration
 	if err := config.Validate(cfg); err != nil {
 		log.Fatal(err)
@@ -100,11 +100,11 @@ All integrations should implement the Integration interface:
 		Start() error
 		Stop() error
 		Reload(config interface{}) error
-		
+
 		// Health and monitoring
 		Health() HealthStatus
 		Statistics() Statistics
-		
+
 		// Configuration access
 		GetConfig() interface{}
 		ValidateConfig() error
@@ -118,7 +118,7 @@ All integrations should implement the Integration interface:
 		config SimpleConfig
 		// ... other fields
 	}
-	
+
 	func (s *SimpleIntegration) Start() error {
 		// Use s.config.BaseConfig fields
 		if !s.config.Enabled {
@@ -133,7 +133,7 @@ All integrations should implement the Integration interface:
 		config SecureConfig
 		tlsConfig *tls.Config
 	}
-	
+
 	func NewSecureIntegration(cfg SecureConfig) (*SecureIntegration, error) {
 		var tlsConfig *tls.Config
 		if cfg.Security != nil && cfg.Security.TLS.Enabled {
@@ -148,7 +148,7 @@ All integrations should implement the Integration interface:
 		config ResilientConfig
 		circuitBreaker *CircuitBreaker
 	}
-	
+
 	func (r *ResilientIntegration) processRequest(req Request) error {
 		if r.config.Resilience != nil && r.config.Resilience.CircuitBreaker.Enabled {
 			return r.circuitBreaker.Call(func() error {
@@ -197,6 +197,5 @@ See the examples/ directory for complete implementations:
 - sample_integration.go: Full integration implementation
 - sample_integration_test.go: Comprehensive test suite
 - sample_config.yaml: Complete configuration example
-
 */
 package config

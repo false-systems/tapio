@@ -44,11 +44,11 @@ type RetryConfig struct {
 // ObservabilityConfig defines observability settings
 type ObservabilityConfig struct {
 	// Tracing
-	TracingEnabled   bool                 `yaml:"tracing_enabled" json:"tracing_enabled"`
-	TracingSampling  float64              `yaml:"tracing_sampling" json:"tracing_sampling"`
-	TracingEndpoint  string               `yaml:"tracing_endpoint" json:"tracing_endpoint"`
-	TracingHeaders   map[string]string    `yaml:"tracing_headers" json:"tracing_headers"`
-	ResourceAttrs    []attribute.KeyValue `yaml:"-" json:"-"`
+	TracingEnabled  bool                 `yaml:"tracing_enabled" json:"tracing_enabled"`
+	TracingSampling float64              `yaml:"tracing_sampling" json:"tracing_sampling"`
+	TracingEndpoint string               `yaml:"tracing_endpoint" json:"tracing_endpoint"`
+	TracingHeaders  map[string]string    `yaml:"tracing_headers" json:"tracing_headers"`
+	ResourceAttrs   []attribute.KeyValue `yaml:"-" json:"-"`
 
 	// Metrics
 	MetricsEnabled  bool          `yaml:"metrics_enabled" json:"metrics_enabled"`
@@ -56,23 +56,23 @@ type ObservabilityConfig struct {
 	MetricsEndpoint string        `yaml:"metrics_endpoint" json:"metrics_endpoint"`
 
 	// Logging
-	LogLevel      string `yaml:"log_level" json:"log_level"`
-	LogFormat     string `yaml:"log_format" json:"log_format"`
-	LogSampling   bool   `yaml:"log_sampling" json:"log_sampling"`
-	LogRateLimit  int    `yaml:"log_rate_limit" json:"log_rate_limit"`
+	LogLevel      string   `yaml:"log_level" json:"log_level"`
+	LogFormat     string   `yaml:"log_format" json:"log_format"`
+	LogSampling   bool     `yaml:"log_sampling" json:"log_sampling"`
+	LogRateLimit  int      `yaml:"log_rate_limit" json:"log_rate_limit"`
 	SensitiveKeys []string `yaml:"sensitive_keys" json:"sensitive_keys"`
 }
 
 // ResourceLimits defines resource usage limits
 type ResourceLimits struct {
-	MaxConnections     int           `yaml:"max_connections" json:"max_connections"`
-	MaxConcurrency     int           `yaml:"max_concurrency" json:"max_concurrency"`
-	MaxMemoryMB        int           `yaml:"max_memory_mb" json:"max_memory_mb"`
-	MaxCPUPercent      float64       `yaml:"max_cpu_percent" json:"max_cpu_percent"`
-	MaxRequestsPerSec  int           `yaml:"max_requests_per_sec" json:"max_requests_per_sec"`
-	ConnectionTimeout  time.Duration `yaml:"connection_timeout" json:"connection_timeout"`
-	IdleTimeout        time.Duration `yaml:"idle_timeout" json:"idle_timeout"`
-	ShutdownTimeout    time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout"`
+	MaxConnections    int           `yaml:"max_connections" json:"max_connections"`
+	MaxConcurrency    int           `yaml:"max_concurrency" json:"max_concurrency"`
+	MaxMemoryMB       int           `yaml:"max_memory_mb" json:"max_memory_mb"`
+	MaxCPUPercent     float64       `yaml:"max_cpu_percent" json:"max_cpu_percent"`
+	MaxRequestsPerSec int           `yaml:"max_requests_per_sec" json:"max_requests_per_sec"`
+	ConnectionTimeout time.Duration `yaml:"connection_timeout" json:"connection_timeout"`
+	IdleTimeout       time.Duration `yaml:"idle_timeout" json:"idle_timeout"`
+	ShutdownTimeout   time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout"`
 }
 
 // Integration is the base interface all integrations must implement

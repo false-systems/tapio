@@ -706,7 +706,7 @@ func NewSIEMSender(config SIEMConfig, logger *logging.Logger) *SIEMSender {
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: config.TLSConfig.InsecureSkipVerify,
 		}
-		
+
 		// Load client certificates if provided
 		if config.TLSConfig.CertFile != "" && config.TLSConfig.KeyFile != "" {
 			cert, err := tls.LoadX509KeyPair(config.TLSConfig.CertFile, config.TLSConfig.KeyFile)
@@ -791,14 +791,14 @@ func (ss *SIEMSender) formatCEF(event *AuditEvent) []byte {
 		event.Title,
 		ss.mapSeverityToCEF(event.Severity),
 	)
-	
+
 	// Add extensions
 	extensions := fmt.Sprintf("src=%s duser=%s rt=%d",
 		event.Actor.IPAddress,
 		event.Actor.Username,
 		event.Timestamp.Unix()*1000, // CEF expects milliseconds
 	)
-	
+
 	return []byte(cefHeader + "|" + extensions)
 }
 
@@ -808,7 +808,7 @@ func (ss *SIEMSender) formatLEEF(event *AuditEvent) []byte {
 	leefHeader := fmt.Sprintf("LEEF:2.0|Tapio|SecurityAuditor|1.0|%s|^",
 		event.EventType,
 	)
-	
+
 	// Add attributes
 	attributes := fmt.Sprintf("devTime=%s^src=%s^usrName=%s^severity=%s",
 		event.Timestamp.Format("MMM dd yyyy HH:mm:ss"),
@@ -816,7 +816,7 @@ func (ss *SIEMSender) formatLEEF(event *AuditEvent) []byte {
 		event.Actor.Username,
 		event.Severity,
 	)
-	
+
 	return []byte(leefHeader + attributes)
 }
 
@@ -825,7 +825,7 @@ func (ss *SIEMSender) formatSyslog(event *AuditEvent) []byte {
 	priority := ss.mapSeverityToSyslog(event.Severity)
 	timestamp := event.Timestamp.Format("Jan 02 15:04:05")
 	hostname := "tapio-auditor"
-	
+
 	message := fmt.Sprintf("<%d>%s %s tapio[%s]: %s - %s",
 		priority,
 		timestamp,
@@ -834,7 +834,7 @@ func (ss *SIEMSender) formatSyslog(event *AuditEvent) []byte {
 		event.EventType,
 		event.Title,
 	)
-	
+
 	return []byte(message)
 }
 

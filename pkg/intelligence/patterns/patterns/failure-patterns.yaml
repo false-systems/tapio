@@ -1,0 +1,70 @@
+version: "1.0"
+patterns:
+  - id: rolling-update-failure
+    name: Rolling Update Failure
+    category: deployment
+    description: New pods failing during rolling update
+    enabled: true
+    tags: ["deployment", "update", "failure"]
+    indicators:
+      - type: event
+        field: reason
+        condition: equals
+        value: FailedScheduling
+        time_window: 5m
+      - type: event
+        field: reason
+        condition: equals
+        value: CrashLoopBackOff
+        time_window: 5m
+      - type: state
+        field: deployment.status.updatedReplicas
+        condition: less_than
+        value: deployment.spec.replicas
+        time_window: 10m
+    impact:
+      severity: high
+      scope: service
+      user_impact: true
+    correlations: []
+
+  - id: cascading-failure
+    name: Cascading Service Failure
+    category: failure
+    description: Failure propagating through dependent services
+    enabled: true
+    tags: ["failure", "cascade", "dependency"]
+    indicators:
+      - type: sequence
+        field: service.error.upstream
+        time_window: 2m
+      - type: metric
+        field: error_rate
+        condition: greater_than
+        threshold: 0.5
+    impact:
+      severity: critical
+      scope: namespace
+      user_impact: true
+    correlations: []
+
+  - id: init-container-failure
+    name: Init Container Failure Pattern
+    category: failure
+    description: Init containers repeatedly failing
+    enabled: true
+    tags: ["init", "container", "failure"]
+    indicators:
+      - type: state
+        field: pod.status.initContainerStatuses.state
+        condition: equals
+        value: terminated
+      - type: frequency
+        field: container.restart
+        threshold: 3
+        time_window: 5m
+    impact:
+      severity: high
+      scope: pod
+      user_impact: true
+    correlations: []
