@@ -365,7 +365,7 @@ func (e *EnrichedEvent) ToUnifiedEvent() *domain.UnifiedEvent {
 	}
 
 	// Add kernel data
-	builder = builder.WithKernelData(string(e.Raw.Type), e.Raw.PID)
+	builder = builder.WithKernelData(e.Raw.Type.String(), e.Raw.PID)
 
 	// Add impact based on importance
 	severity := "low"

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -164,7 +163,7 @@ func (sce *SemanticCorrelationEngine) ProcessUnifiedEvent(event *domain.UnifiedE
 }
 
 // GetLatestFindings returns the latest correlation findings
-func (sce *SemanticCorrelationEngine) GetLatestFindings() *interfaces.Finding {
+func (sce *SemanticCorrelationEngine) GetLatestFindings() *Finding {
 	sce.mu.RLock()
 	defer sce.mu.RUnlock()
 
@@ -192,12 +191,12 @@ func (sce *SemanticCorrelationEngine) GetLatestFindings() *interfaces.Finding {
 		return nil
 	}
 
-	return &interfaces.Finding{
+	return &Finding{
 		ID:            latest.ID,
 		PatternType:   latest.SemanticType,
 		Confidence:    latest.ConfidenceScore,
 		RelatedEvents: latest.CausalChain,
-		SemanticGroup: &interfaces.SemanticGroup{
+		SemanticGroup: &SemanticGroupSummary{
 			ID:     latest.ID,
 			Intent: latest.Intent,
 			Type:   latest.SemanticType,
@@ -207,18 +206,18 @@ func (sce *SemanticCorrelationEngine) GetLatestFindings() *interfaces.Finding {
 }
 
 // GetSemanticGroups returns current semantic groups
-func (sce *SemanticCorrelationEngine) GetSemanticGroups() []*interfaces.SemanticGroup {
+func (sce *SemanticCorrelationEngine) GetSemanticGroups() []*SemanticGroup {
 	sce.mu.RLock()
 	defer sce.mu.RUnlock()
 
 	groups := sce.semanticTracer.GetSemanticGroups()
-	result := make([]*interfaces.SemanticGroup, 0, len(groups))
+	result := make([]*SemanticGroup, 0, len(groups))
 
 	for _, group := range groups {
-		result = append(result, &interfaces.SemanticGroup{
-			ID:     group.ID,
-			Intent: group.Intent,
-			Type:   group.SemanticType,
+		result = append(result, &SemanticGroup{
+			ID:           group.ID,
+			Intent:       group.Intent,
+			SemanticType: group.SemanticType,
 		})
 	}
 

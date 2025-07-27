@@ -14,7 +14,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
-	ebpfcollector "github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 )
 
@@ -23,7 +22,7 @@ type Implementation struct {
 	config core.Config
 
 	// eBPF objects
-	memoryObjects *ebpfcollector.MemorytrackerObjects
+	memoryObjects *memorytrackerObjects
 	links         []link.Link
 
 	// Event processing
@@ -134,13 +133,14 @@ func (impl *Implementation) MapsCreated() int {
 // loadMemoryPrograms loads memory-related eBPF programs
 func (impl *Implementation) loadMemoryPrograms() error {
 	// Load the eBPF memory tracker programs
-	impl.memoryObjects = &ebpfcollector.MemorytrackerObjects{}
-	if err := ebpfcollector.LoadMemorytrackerObjects(impl.memoryObjects, nil); err != nil {
+	objs := &memorytrackerObjects{}
+	if err := loadMemorytrackerObjects(objs, nil); err != nil {
 		return fmt.Errorf("failed to load memory tracker objects: %w", err)
 	}
+	impl.memoryObjects = objs
 
 	// Create perf reader for events map
-	reader, err := perf.NewReader(impl.memoryObjects.Events, os.Getpagesize())
+	reader, err := perf.NewReader(objs.Events, os.Getpagesize())
 	if err != nil {
 		impl.memoryObjects.Close()
 		return fmt.Errorf("failed to create perf reader: %w", err)
@@ -148,22 +148,14 @@ func (impl *Implementation) loadMemoryPrograms() error {
 	impl.perfReader = reader
 
 	// Attach tracepoint programs
-	if l, err := link.Tracepoint(link.TracepointOptions{
-		Group:   "mm",
-		Name:    "mm_page_alloc",
-		Program: impl.memoryObjects.TraceMmPageAlloc,
-	}); err != nil {
+	if l, err := link.Tracepoint("kmem", "mm_page_alloc", objs.TraceMmPageAlloc, nil); err != nil {
 		impl.memoryObjects.Close()
 		return fmt.Errorf("failed to attach mm_page_alloc: %w", err)
 	} else {
 		impl.links = append(impl.links, l)
 	}
 
-	if l, err := link.Tracepoint(link.TracepointOptions{
-		Group:   "mm",
-		Name:    "mm_page_free",
-		Program: impl.memoryObjects.TraceMmPageFree,
-	}); err != nil {
+	if l, err := link.Tracepoint("kmem", "mm_page_free", objs.TraceMmPageFree, nil); err != nil {
 		impl.memoryObjects.Close()
 		return fmt.Errorf("failed to attach mm_page_free: %w", err)
 	} else {

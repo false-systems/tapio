@@ -10,10 +10,10 @@ CFLAGS := -O2 -g -Wall -Werror
 ARCHS := amd64 arm64
 
 # eBPF programs to build
-PROGRAMS := network_monitor packet_analyzer dns_monitor protocol_analyzer oom_detector
+PROGRAMS := network_monitor packet_analyzer dns_monitor protocol_analyzer oom_detector memory_tracker
 
 # Output directory
-OUTPUT_DIR := ../pkg/ebpf
+OUTPUT_DIR := ..
 
 # Include directories
 INCLUDES := -I. -I/usr/include -I/usr/include/bpf
@@ -31,15 +31,14 @@ all: generate
 
 generate:
 	@echo "Generating eBPF Go bindings..."
-	@for prog in $(PROGRAMS); do \
+	@cd $(OUTPUT_DIR) && for prog in $(PROGRAMS); do \
 		echo "Building $$prog..."; \
-		$(CLANG) $(BPF_CFLAGS) -c $$prog.c -o $$prog.o; \
-		go run github.com/cilium/ebpf/cmd/bpf2go \
+		$(CLANG) $(BPF_CFLAGS) -c bpf/$$prog.c -o bpf/$$prog.o; \
+		GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
 			-cc $(CLANG) \
-			-cflags "$(CFLAGS)" \
+			-cflags "$(BPF_CFLAGS)" \
 			-target amd64,arm64 \
-			-output-dir $(OUTPUT_DIR) \
-			$$prog $$prog.c -- $(INCLUDES); \
+			$$prog bpf/$$prog.c -- $(INCLUDES); \
 	done
 
 clean:
@@ -54,52 +53,56 @@ clean:
 network_monitor:
 	@echo "Building network_monitor..."
 	@$(CLANG) $(BPF_CFLAGS) -c network_monitor.c -o network_monitor.o
-	@go run github.com/cilium/ebpf/cmd/bpf2go \
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
 		-cc $(CLANG) \
-		-cflags "$(CFLAGS)" \
+		-cflags "$(BPF_CFLAGS)" \
 		-target amd64,arm64 \
-		-output-dir $(OUTPUT_DIR) \
-		networkmonitor network_monitor.c -- $(INCLUDES)
+		networkmonitor bpf/network_monitor.c -- $(INCLUDES)
 
 packet_analyzer:
 	@echo "Building packet_analyzer..."
 	@$(CLANG) $(BPF_CFLAGS) -c packet_analyzer.c -o packet_analyzer.o
-	@go run github.com/cilium/ebpf/cmd/bpf2go \
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
 		-cc $(CLANG) \
-		-cflags "$(CFLAGS)" \
+		-cflags "$(BPF_CFLAGS)" \
 		-target amd64,arm64 \
-		-output-dir $(OUTPUT_DIR) \
-		packetanalyzer packet_analyzer.c -- $(INCLUDES)
+		packetanalyzer bpf/packet_analyzer.c -- $(INCLUDES)
 
 dns_monitor:
 	@echo "Building dns_monitor..."
 	@$(CLANG) $(BPF_CFLAGS) -c dns_monitor.c -o dns_monitor.o
-	@go run github.com/cilium/ebpf/cmd/bpf2go \
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
 		-cc $(CLANG) \
-		-cflags "$(CFLAGS)" \
+		-cflags "$(BPF_CFLAGS)" \
 		-target amd64,arm64 \
-		-output-dir $(OUTPUT_DIR) \
-		dnsmonitor dns_monitor.c -- $(INCLUDES)
+		dnsmonitor bpf/dns_monitor.c -- $(INCLUDES)
 
 protocol_analyzer:
 	@echo "Building protocol_analyzer..."
 	@$(CLANG) $(BPF_CFLAGS) -c protocol_analyzer.c -o protocol_analyzer.o
-	@go run github.com/cilium/ebpf/cmd/bpf2go \
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
 		-cc $(CLANG) \
-		-cflags "$(CFLAGS)" \
+		-cflags "$(BPF_CFLAGS)" \
 		-target amd64,arm64 \
-		-output-dir $(OUTPUT_DIR) \
-		protocolanalyzer protocol_analyzer.c -- $(INCLUDES)
+		protocolanalyzer bpf/protocol_analyzer.c -- $(INCLUDES)
 
 oom_detector:
 	@echo "Building oom_detector..."
 	@$(CLANG) $(BPF_CFLAGS) -c oom_detector.c -o oom_detector.o
-	@go run github.com/cilium/ebpf/cmd/bpf2go \
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
 		-cc $(CLANG) \
-		-cflags "$(CFLAGS)" \
+		-cflags "$(BPF_CFLAGS)" \
 		-target amd64,arm64 \
-		-output-dir $(OUTPUT_DIR) \
-		oomdetector oom_detector.c -- $(INCLUDES)
+		oomdetector bpf/oom_detector.c -- $(INCLUDES)
+
+memory_tracker:
+	@echo "Building memory_tracker..."
+	@$(CLANG) $(BPF_CFLAGS) -c memory_tracker.c -o memory_tracker.o
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
+		-cc $(CLANG) \
+		-cflags "$(BPF_CFLAGS)" \
+		-target amd64,arm64 \
+		memorytracker bpf/memory_tracker.c -- $(INCLUDES)
 
 # Helper targets
 check-deps:
@@ -124,6 +127,7 @@ help:
 	@echo "  dns_monitor      - Build DNS monitoring program"
 	@echo "  protocol_analyzer- Build protocol analysis program"
 	@echo "  oom_detector     - Build OOM detection program"
+	@echo "  memory_tracker   - Build memory tracking program"
 	@echo ""
 	@echo "Variables:"
 	@echo "  CLANG           - Clang compiler (default: clang)"
