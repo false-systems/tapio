@@ -1,11 +1,5 @@
-#include <linux/bpf.h>
-#include <linux/in.h>
-#include <linux/if_ether.h>
-#include <linux/ip.h>
-#include <linux/tcp.h>
-#include <linux/udp.h>
-#include <linux/ptrace.h>
-#include <linux/skbuff.h>
+#include "headers/vmlinux.h"
+#include "common.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
@@ -31,7 +25,7 @@ struct flow_key {
     __u8 protocol;
 };
 
-struct flow_stats {
+struct packet_flow_stats {
     __u64 start_time;
     __u64 last_seen;
     __u64 packets_sent;
@@ -81,7 +75,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_ENTRIES);
     __type(key, struct flow_key);
-    __type(value, struct flow_stats);
+    __type(value, struct packet_flow_stats);
 } flow_tracker SEC(".maps");
 
 struct {
@@ -139,10 +133,10 @@ static void emit_packet_event(__u8 event_type, __u32 pid, __u32 tgid,
 }
 
 // Parse IP and TCP headers
-static int parse_tcp_packet(struct sk_buff *skb, struct flow_key *flow,
+static int parse_tcp_packet(struct __sk_buff *ctx, struct flow_key *flow,
                            __u32 *seq_num, __u32 *ack_num, __u16 *window_size, __u8 *tcp_flags) {
-    void *data_end = (void *)(long)skb->data_end;
-    void *data = (void *)(long)skb->data;
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
     
     struct ethhdr *eth = data;
     if ((void *)eth + sizeof(*eth) > data_end)
@@ -197,9 +191,9 @@ int tc_egress(struct __sk_buff *skb) {
     bpf_map_update_elem(&packet_timestamps, &flow, &ts, BPF_ANY);
     
     // Update flow statistics
-    struct flow_stats *stats = bpf_map_lookup_elem(&flow_tracker, &flow);
+    struct packet_flow_stats *stats = bpf_map_lookup_elem(&flow_tracker, &flow);
     if (!stats) {
-        struct flow_stats new_stats = {
+        struct packet_flow_stats new_stats = {
             .start_time = bpf_ktime_get_ns(),
             .last_seen = bpf_ktime_get_ns(),
             .packets_sent = 1,
@@ -244,7 +238,7 @@ int tc_ingress(struct __sk_buff *skb) {
             __u32 rtt_us = rtt_ns / 1000;
             
             // Update flow RTT statistics
-            struct flow_stats *stats = bpf_map_lookup_elem(&flow_tracker, &reverse_flow);
+            struct packet_flow_stats *stats = bpf_map_lookup_elem(&flow_tracker, &reverse_flow);
             if (stats) {
                 if (rtt_us < stats->rtt_min)
                     stats->rtt_min = rtt_us;
@@ -274,7 +268,7 @@ int tc_ingress(struct __sk_buff *skb) {
     }
     
     // Check for packet reordering
-    struct flow_stats *stats = bpf_map_lookup_elem(&flow_tracker, &flow);
+    struct packet_flow_stats *stats = bpf_map_lookup_elem(&flow_tracker, &flow);
     if (stats) {
         if (seq_num < stats->last_seq) {
             // Potential reordering detected

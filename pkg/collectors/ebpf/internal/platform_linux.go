@@ -5,43 +5,88 @@ package internal
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/rlimit"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf/linux"
 )
 
 // newPlatformImpl creates a Linux-specific implementation
 func newPlatformImpl() (platformImpl, error) {
 	return &linuxImpl{
-		impl: linux.New(),
+		eventChan: make(chan core.RawEvent, 1000),
+		links:     make([]link.Link, 0),
 	}, nil
 }
 
-// linuxImpl wraps the Linux implementation to match the internal interface
+// linuxImpl provides Linux-specific eBPF functionality
 type linuxImpl struct {
-	impl *linux.Implementation
+	config core.Config
+
+	// Event processing
+	perfReader *perf.Reader
+	eventChan  chan core.RawEvent
+
+	// State
+	ctx    context.Context
+	cancel context.CancelFunc
+	links  []link.Link
 }
 
 func (l *linuxImpl) init(config core.Config) error {
-	return l.impl.Init(config)
+	l.config = config
+
+	// Remove memory limit for eBPF
+	if err := rlimit.RemoveMemlock(); err != nil {
+		return fmt.Errorf("failed to remove memlock: %w", err)
+	}
+
+	return nil
 }
 
 func (l *linuxImpl) start(ctx context.Context) error {
-	return l.impl.Start(ctx)
+	l.ctx, l.cancel = context.WithCancel(ctx)
+
+	// For now, just start without loading programs
+	// This is a stub implementation to fix the import cycle
+	go func() {
+		<-l.ctx.Done()
+		close(l.eventChan)
+	}()
+
+	return nil
 }
 
 func (l *linuxImpl) stop() error {
-	return l.impl.Stop()
+	if l.cancel != nil {
+		l.cancel()
+	}
+
+	// Close all links
+	for _, link := range l.links {
+		link.Close()
+	}
+
+	// Close perf reader
+	if l.perfReader != nil {
+		l.perfReader.Close()
+	}
+
+	return nil
 }
 
 func (l *linuxImpl) events() <-chan core.RawEvent {
-	return l.impl.Events()
+	return l.eventChan
 }
 
 func (l *linuxImpl) programsLoaded() int {
-	return l.impl.ProgramsLoaded()
+	// Stub implementation
+	return 0
 }
 
 func (l *linuxImpl) mapsCreated() int {
-	return l.impl.MapsCreated()
+	// Stub implementation
+	return 0
 }

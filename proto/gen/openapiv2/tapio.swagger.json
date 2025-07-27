@@ -28,6 +28,1007 @@
     "application/json"
   ],
   "paths": {
+    "/api/v1/correlations": {
+      "get": {
+        "summary": "Query existing correlations",
+        "operationId": "CorrelationService_GetCorrelations",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetCorrelationsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "correlation_ids",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.time_range.start",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "query.filter.time_range.end",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "query.filter.event_types",
+            "description": " - EVENT_TYPE_NETWORK: Infrastructure events\n - EVENT_TYPE_HTTP: Application events\n - EVENT_TYPE_SECURITY_ALERT: Security events\n - EVENT_TYPE_LATENCY_SPIKE: Performance events\n - EVENT_TYPE_TRANSACTION: Business events",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_TYPE_UNSPECIFIED",
+                "EVENT_TYPE_NETWORK",
+                "EVENT_TYPE_SYSCALL",
+                "EVENT_TYPE_FILE_SYSTEM",
+                "EVENT_TYPE_PROCESS",
+                "EVENT_TYPE_CONTAINER",
+                "EVENT_TYPE_KUBERNETES",
+                "EVENT_TYPE_HTTP",
+                "EVENT_TYPE_GRPC",
+                "EVENT_TYPE_DATABASE",
+                "EVENT_TYPE_CACHE",
+                "EVENT_TYPE_MESSAGE_QUEUE",
+                "EVENT_TYPE_SECURITY_ALERT",
+                "EVENT_TYPE_AUTHENTICATION",
+                "EVENT_TYPE_AUTHORIZATION",
+                "EVENT_TYPE_AUDIT",
+                "EVENT_TYPE_LATENCY_SPIKE",
+                "EVENT_TYPE_ERROR_RATE",
+                "EVENT_TYPE_RESOURCE_USAGE",
+                "EVENT_TYPE_SATURATION",
+                "EVENT_TYPE_TRANSACTION",
+                "EVENT_TYPE_WORKFLOW",
+                "EVENT_TYPE_BUSINESS_METRIC"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.severities",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_SEVERITY_UNSPECIFIED",
+                "EVENT_SEVERITY_DEBUG",
+                "EVENT_SEVERITY_INFO",
+                "EVENT_SEVERITY_WARNING",
+                "EVENT_SEVERITY_ERROR",
+                "EVENT_SEVERITY_CRITICAL"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.source_types",
+            "description": " - SOURCE_TYPE_EBPF: Kernel-level sources\n - SOURCE_TYPE_JOURNALD: System sources\n - SOURCE_TYPE_DOCKER: Container sources\n - SOURCE_TYPE_OTEL: Application sources\n - SOURCE_TYPE_PACKET_CAPTURE: Network sources\n - SOURCE_TYPE_AWS_CLOUDTRAIL: Cloud sources",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "SOURCE_TYPE_UNSPECIFIED",
+                "SOURCE_TYPE_EBPF",
+                "SOURCE_TYPE_KPROBE",
+                "SOURCE_TYPE_TRACEPOINT",
+                "SOURCE_TYPE_PERF_EVENT",
+                "SOURCE_TYPE_JOURNALD",
+                "SOURCE_TYPE_SYSLOG",
+                "SOURCE_TYPE_AUDITD",
+                "SOURCE_TYPE_DOCKER",
+                "SOURCE_TYPE_CONTAINERD",
+                "SOURCE_TYPE_KUBERNETES_API",
+                "SOURCE_TYPE_KUBERNETES_EVENTS",
+                "SOURCE_TYPE_OTEL",
+                "SOURCE_TYPE_PROMETHEUS",
+                "SOURCE_TYPE_JAEGER",
+                "SOURCE_TYPE_APPLICATION_LOG",
+                "SOURCE_TYPE_PACKET_CAPTURE",
+                "SOURCE_TYPE_NETFLOW",
+                "SOURCE_TYPE_DNS",
+                "SOURCE_TYPE_AWS_CLOUDTRAIL",
+                "SOURCE_TYPE_GCP_LOGGING",
+                "SOURCE_TYPE_AZURE_MONITOR"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.search_text",
+            "description": "Text search across message/description fields",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.filter.namespaces",
+            "description": "Namespace filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.services",
+            "description": "Service filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.limit",
+            "description": "Limit and pagination",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "query.filter.page_token",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.correlation_types",
+            "description": "Correlation-specific filters\n\n - CORRELATION_TYPE_TEMPORAL: Time-based correlation\n - CORRELATION_TYPE_CAUSAL: Cause-effect relationships\n - CORRELATION_TYPE_SPATIAL: Location/topology based\n - CORRELATION_TYPE_SEMANTIC: Meaning-based correlation\n - CORRELATION_TYPE_STATISTICAL: Statistical patterns\n - CORRELATION_TYPE_TRACE_CONTEXT: OTEL trace-based",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "CORRELATION_TYPE_UNSPECIFIED",
+                "CORRELATION_TYPE_TEMPORAL",
+                "CORRELATION_TYPE_CAUSAL",
+                "CORRELATION_TYPE_SPATIAL",
+                "CORRELATION_TYPE_SEMANTIC",
+                "CORRELATION_TYPE_STATISTICAL",
+                "CORRELATION_TYPE_TRACE_CONTEXT"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.min_confidence",
+            "in": "query",
+            "required": false,
+            "type": "number",
+            "format": "double"
+          },
+          {
+            "name": "query.min_correlation_score",
+            "in": "query",
+            "required": false,
+            "type": "number",
+            "format": "double"
+          },
+          {
+            "name": "query.include_events",
+            "description": "Include related data",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_semantic_groups",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_root_cause",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_predictions",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "CorrelationService"
+        ]
+      }
+    },
+    "/api/v1/correlations/analyze": {
+      "post": {
+        "summary": "Analyze events on-demand",
+        "operationId": "CorrelationService_AnalyzeEvents",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AnalyzeEventsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1AnalyzeEventsRequest"
+            }
+          }
+        ],
+        "tags": [
+          "CorrelationService"
+        ]
+      }
+    },
+    "/api/v1/correlations/recommended-actions": {
+      "get": {
+        "summary": "Get recommended actions for a correlation",
+        "operationId": "CorrelationService_GetRecommendedActions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetRecommendedActionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "correlation_ids",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.time_range.start",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "query.filter.time_range.end",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "query.filter.event_types",
+            "description": " - EVENT_TYPE_NETWORK: Infrastructure events\n - EVENT_TYPE_HTTP: Application events\n - EVENT_TYPE_SECURITY_ALERT: Security events\n - EVENT_TYPE_LATENCY_SPIKE: Performance events\n - EVENT_TYPE_TRANSACTION: Business events",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_TYPE_UNSPECIFIED",
+                "EVENT_TYPE_NETWORK",
+                "EVENT_TYPE_SYSCALL",
+                "EVENT_TYPE_FILE_SYSTEM",
+                "EVENT_TYPE_PROCESS",
+                "EVENT_TYPE_CONTAINER",
+                "EVENT_TYPE_KUBERNETES",
+                "EVENT_TYPE_HTTP",
+                "EVENT_TYPE_GRPC",
+                "EVENT_TYPE_DATABASE",
+                "EVENT_TYPE_CACHE",
+                "EVENT_TYPE_MESSAGE_QUEUE",
+                "EVENT_TYPE_SECURITY_ALERT",
+                "EVENT_TYPE_AUTHENTICATION",
+                "EVENT_TYPE_AUTHORIZATION",
+                "EVENT_TYPE_AUDIT",
+                "EVENT_TYPE_LATENCY_SPIKE",
+                "EVENT_TYPE_ERROR_RATE",
+                "EVENT_TYPE_RESOURCE_USAGE",
+                "EVENT_TYPE_SATURATION",
+                "EVENT_TYPE_TRANSACTION",
+                "EVENT_TYPE_WORKFLOW",
+                "EVENT_TYPE_BUSINESS_METRIC"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.severities",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_SEVERITY_UNSPECIFIED",
+                "EVENT_SEVERITY_DEBUG",
+                "EVENT_SEVERITY_INFO",
+                "EVENT_SEVERITY_WARNING",
+                "EVENT_SEVERITY_ERROR",
+                "EVENT_SEVERITY_CRITICAL"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.source_types",
+            "description": " - SOURCE_TYPE_EBPF: Kernel-level sources\n - SOURCE_TYPE_JOURNALD: System sources\n - SOURCE_TYPE_DOCKER: Container sources\n - SOURCE_TYPE_OTEL: Application sources\n - SOURCE_TYPE_PACKET_CAPTURE: Network sources\n - SOURCE_TYPE_AWS_CLOUDTRAIL: Cloud sources",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "SOURCE_TYPE_UNSPECIFIED",
+                "SOURCE_TYPE_EBPF",
+                "SOURCE_TYPE_KPROBE",
+                "SOURCE_TYPE_TRACEPOINT",
+                "SOURCE_TYPE_PERF_EVENT",
+                "SOURCE_TYPE_JOURNALD",
+                "SOURCE_TYPE_SYSLOG",
+                "SOURCE_TYPE_AUDITD",
+                "SOURCE_TYPE_DOCKER",
+                "SOURCE_TYPE_CONTAINERD",
+                "SOURCE_TYPE_KUBERNETES_API",
+                "SOURCE_TYPE_KUBERNETES_EVENTS",
+                "SOURCE_TYPE_OTEL",
+                "SOURCE_TYPE_PROMETHEUS",
+                "SOURCE_TYPE_JAEGER",
+                "SOURCE_TYPE_APPLICATION_LOG",
+                "SOURCE_TYPE_PACKET_CAPTURE",
+                "SOURCE_TYPE_NETFLOW",
+                "SOURCE_TYPE_DNS",
+                "SOURCE_TYPE_AWS_CLOUDTRAIL",
+                "SOURCE_TYPE_GCP_LOGGING",
+                "SOURCE_TYPE_AZURE_MONITOR"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.search_text",
+            "description": "Text search across message/description fields",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.filter.namespaces",
+            "description": "Namespace filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.services",
+            "description": "Service filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.limit",
+            "description": "Limit and pagination",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "query.filter.page_token",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.correlation_types",
+            "description": "Correlation-specific filters\n\n - CORRELATION_TYPE_TEMPORAL: Time-based correlation\n - CORRELATION_TYPE_CAUSAL: Cause-effect relationships\n - CORRELATION_TYPE_SPATIAL: Location/topology based\n - CORRELATION_TYPE_SEMANTIC: Meaning-based correlation\n - CORRELATION_TYPE_STATISTICAL: Statistical patterns\n - CORRELATION_TYPE_TRACE_CONTEXT: OTEL trace-based",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "CORRELATION_TYPE_UNSPECIFIED",
+                "CORRELATION_TYPE_TEMPORAL",
+                "CORRELATION_TYPE_CAUSAL",
+                "CORRELATION_TYPE_SPATIAL",
+                "CORRELATION_TYPE_SEMANTIC",
+                "CORRELATION_TYPE_STATISTICAL",
+                "CORRELATION_TYPE_TRACE_CONTEXT"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.min_confidence",
+            "in": "query",
+            "required": false,
+            "type": "number",
+            "format": "double"
+          },
+          {
+            "name": "query.min_correlation_score",
+            "in": "query",
+            "required": false,
+            "type": "number",
+            "format": "double"
+          },
+          {
+            "name": "query.include_events",
+            "description": "Include related data",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_semantic_groups",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_root_cause",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_predictions",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "CorrelationService"
+        ]
+      }
+    },
+    "/api/v1/correlations/semantic-groups": {
+      "get": {
+        "summary": "Get semantic groups",
+        "operationId": "CorrelationService_GetSemanticGroups",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetSemanticGroupsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "group_ids",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "filter.time_range.start",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "filter.time_range.end",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "filter.event_types",
+            "description": " - EVENT_TYPE_NETWORK: Infrastructure events\n - EVENT_TYPE_HTTP: Application events\n - EVENT_TYPE_SECURITY_ALERT: Security events\n - EVENT_TYPE_LATENCY_SPIKE: Performance events\n - EVENT_TYPE_TRANSACTION: Business events",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_TYPE_UNSPECIFIED",
+                "EVENT_TYPE_NETWORK",
+                "EVENT_TYPE_SYSCALL",
+                "EVENT_TYPE_FILE_SYSTEM",
+                "EVENT_TYPE_PROCESS",
+                "EVENT_TYPE_CONTAINER",
+                "EVENT_TYPE_KUBERNETES",
+                "EVENT_TYPE_HTTP",
+                "EVENT_TYPE_GRPC",
+                "EVENT_TYPE_DATABASE",
+                "EVENT_TYPE_CACHE",
+                "EVENT_TYPE_MESSAGE_QUEUE",
+                "EVENT_TYPE_SECURITY_ALERT",
+                "EVENT_TYPE_AUTHENTICATION",
+                "EVENT_TYPE_AUTHORIZATION",
+                "EVENT_TYPE_AUDIT",
+                "EVENT_TYPE_LATENCY_SPIKE",
+                "EVENT_TYPE_ERROR_RATE",
+                "EVENT_TYPE_RESOURCE_USAGE",
+                "EVENT_TYPE_SATURATION",
+                "EVENT_TYPE_TRANSACTION",
+                "EVENT_TYPE_WORKFLOW",
+                "EVENT_TYPE_BUSINESS_METRIC"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "filter.severities",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_SEVERITY_UNSPECIFIED",
+                "EVENT_SEVERITY_DEBUG",
+                "EVENT_SEVERITY_INFO",
+                "EVENT_SEVERITY_WARNING",
+                "EVENT_SEVERITY_ERROR",
+                "EVENT_SEVERITY_CRITICAL"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "filter.source_types",
+            "description": " - SOURCE_TYPE_EBPF: Kernel-level sources\n - SOURCE_TYPE_JOURNALD: System sources\n - SOURCE_TYPE_DOCKER: Container sources\n - SOURCE_TYPE_OTEL: Application sources\n - SOURCE_TYPE_PACKET_CAPTURE: Network sources\n - SOURCE_TYPE_AWS_CLOUDTRAIL: Cloud sources",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "SOURCE_TYPE_UNSPECIFIED",
+                "SOURCE_TYPE_EBPF",
+                "SOURCE_TYPE_KPROBE",
+                "SOURCE_TYPE_TRACEPOINT",
+                "SOURCE_TYPE_PERF_EVENT",
+                "SOURCE_TYPE_JOURNALD",
+                "SOURCE_TYPE_SYSLOG",
+                "SOURCE_TYPE_AUDITD",
+                "SOURCE_TYPE_DOCKER",
+                "SOURCE_TYPE_CONTAINERD",
+                "SOURCE_TYPE_KUBERNETES_API",
+                "SOURCE_TYPE_KUBERNETES_EVENTS",
+                "SOURCE_TYPE_OTEL",
+                "SOURCE_TYPE_PROMETHEUS",
+                "SOURCE_TYPE_JAEGER",
+                "SOURCE_TYPE_APPLICATION_LOG",
+                "SOURCE_TYPE_PACKET_CAPTURE",
+                "SOURCE_TYPE_NETFLOW",
+                "SOURCE_TYPE_DNS",
+                "SOURCE_TYPE_AWS_CLOUDTRAIL",
+                "SOURCE_TYPE_GCP_LOGGING",
+                "SOURCE_TYPE_AZURE_MONITOR"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "filter.search_text",
+            "description": "Text search across message/description fields",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "filter.namespaces",
+            "description": "Namespace filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "filter.services",
+            "description": "Service filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "filter.limit",
+            "description": "Limit and pagination",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "filter.page_token",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "include_events",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "include_analysis",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "CorrelationService"
+        ]
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "summary": "Query historical events",
+        "operationId": "EventService_GetEvents",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetEventsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "event_ids",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.time_range.start",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "query.filter.time_range.end",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "query.filter.event_types",
+            "description": " - EVENT_TYPE_NETWORK: Infrastructure events\n - EVENT_TYPE_HTTP: Application events\n - EVENT_TYPE_SECURITY_ALERT: Security events\n - EVENT_TYPE_LATENCY_SPIKE: Performance events\n - EVENT_TYPE_TRANSACTION: Business events",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_TYPE_UNSPECIFIED",
+                "EVENT_TYPE_NETWORK",
+                "EVENT_TYPE_SYSCALL",
+                "EVENT_TYPE_FILE_SYSTEM",
+                "EVENT_TYPE_PROCESS",
+                "EVENT_TYPE_CONTAINER",
+                "EVENT_TYPE_KUBERNETES",
+                "EVENT_TYPE_HTTP",
+                "EVENT_TYPE_GRPC",
+                "EVENT_TYPE_DATABASE",
+                "EVENT_TYPE_CACHE",
+                "EVENT_TYPE_MESSAGE_QUEUE",
+                "EVENT_TYPE_SECURITY_ALERT",
+                "EVENT_TYPE_AUTHENTICATION",
+                "EVENT_TYPE_AUTHORIZATION",
+                "EVENT_TYPE_AUDIT",
+                "EVENT_TYPE_LATENCY_SPIKE",
+                "EVENT_TYPE_ERROR_RATE",
+                "EVENT_TYPE_RESOURCE_USAGE",
+                "EVENT_TYPE_SATURATION",
+                "EVENT_TYPE_TRANSACTION",
+                "EVENT_TYPE_WORKFLOW",
+                "EVENT_TYPE_BUSINESS_METRIC"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.severities",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "EVENT_SEVERITY_UNSPECIFIED",
+                "EVENT_SEVERITY_DEBUG",
+                "EVENT_SEVERITY_INFO",
+                "EVENT_SEVERITY_WARNING",
+                "EVENT_SEVERITY_ERROR",
+                "EVENT_SEVERITY_CRITICAL"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.source_types",
+            "description": " - SOURCE_TYPE_EBPF: Kernel-level sources\n - SOURCE_TYPE_JOURNALD: System sources\n - SOURCE_TYPE_DOCKER: Container sources\n - SOURCE_TYPE_OTEL: Application sources\n - SOURCE_TYPE_PACKET_CAPTURE: Network sources\n - SOURCE_TYPE_AWS_CLOUDTRAIL: Cloud sources",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "SOURCE_TYPE_UNSPECIFIED",
+                "SOURCE_TYPE_EBPF",
+                "SOURCE_TYPE_KPROBE",
+                "SOURCE_TYPE_TRACEPOINT",
+                "SOURCE_TYPE_PERF_EVENT",
+                "SOURCE_TYPE_JOURNALD",
+                "SOURCE_TYPE_SYSLOG",
+                "SOURCE_TYPE_AUDITD",
+                "SOURCE_TYPE_DOCKER",
+                "SOURCE_TYPE_CONTAINERD",
+                "SOURCE_TYPE_KUBERNETES_API",
+                "SOURCE_TYPE_KUBERNETES_EVENTS",
+                "SOURCE_TYPE_OTEL",
+                "SOURCE_TYPE_PROMETHEUS",
+                "SOURCE_TYPE_JAEGER",
+                "SOURCE_TYPE_APPLICATION_LOG",
+                "SOURCE_TYPE_PACKET_CAPTURE",
+                "SOURCE_TYPE_NETFLOW",
+                "SOURCE_TYPE_DNS",
+                "SOURCE_TYPE_AWS_CLOUDTRAIL",
+                "SOURCE_TYPE_GCP_LOGGING",
+                "SOURCE_TYPE_AZURE_MONITOR"
+              ]
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.search_text",
+            "description": "Text search across message/description fields",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.filter.namespaces",
+            "description": "Namespace filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.services",
+            "description": "Service filtering",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "query.filter.limit",
+            "description": "Limit and pagination",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "query.filter.page_token",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.include_correlations",
+            "description": "Include related data",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_metrics",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.include_traces",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "query.aggregation.group_by_field",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.aggregation.time_window",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query.aggregation.aggregate_functions",
+            "description": "\"count\", \"avg\", \"min\", \"max\", \"sum\"",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "EventService"
+        ]
+      }
+    },
+    "/api/v1/events/batch": {
+      "post": {
+        "summary": "Batch event submission (unary)",
+        "operationId": "EventService_SubmitEventBatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EventAck"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1EventBatch"
+            }
+          }
+        ],
+        "tags": [
+          "EventService"
+        ]
+      }
+    },
+    "/api/v1/events/statistics": {
+      "get": {
+        "summary": "Get event statistics",
+        "operationId": "EventService_GetStatistics",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EventStatistics"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          }
+        ],
+        "tags": [
+          "EventService"
+        ]
+      }
+    },
     "/v1/analyze": {
       "post": {
         "summary": "AnalyzeEvents performs on-demand correlation analysis",

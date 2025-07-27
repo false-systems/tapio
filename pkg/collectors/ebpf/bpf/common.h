@@ -1,7 +1,18 @@
 #ifndef __TAPIO_COMMON_H
 #define __TAPIO_COMMON_H
 
-#include <linux/types.h>
+// Common constants for eBPF programs
+#ifndef ETH_P_IP
+#define ETH_P_IP 0x0800
+#endif
+
+#ifndef TC_ACT_OK
+#define TC_ACT_OK 0
+#endif
+
+#ifndef UINT32_MAX
+#define UINT32_MAX 0xffffffff
+#endif
 
 // Maximum command name length
 #define TASK_COMM_LEN 16

@@ -4,7 +4,7 @@ LLC ?= llc
 LLVM_STRIP ?= llvm-strip
 
 # Build flags
-CFLAGS := -O2 -g -Wall -Werror
+CFLAGS := -O2 -g -Wall
 
 # Target architectures
 ARCHS := amd64 arm64

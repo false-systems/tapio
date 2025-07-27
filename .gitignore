@@ -63,3 +63,6 @@ tmp/
 
 # Generated protobuf files
 proto/gen/
+
+# eBPF object files
+*.o
