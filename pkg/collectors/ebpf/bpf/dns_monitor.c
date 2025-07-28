@@ -3,11 +3,13 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 
 #define MAX_ENTRIES 4096
 #define MAX_DOMAIN_LEN 256
 #define DNS_PORT 53
 #define DNS_TIMEOUT_MS 5000  // 5 second timeout
+#define IPPROTO_UDP 17
 
 // DNS event types
 enum dns_event_type {
@@ -20,34 +22,34 @@ enum dns_event_type {
 
 // DNS query tracking
 struct dns_query_key {
-    __u32 pid;
-    __u16 query_id;
-    __u32 src_ip;
+    u32 pid;
+    u16 query_id;
+    u32 src_ip;
 };
 
 struct dns_query_info {
-    __u64 start_time;
-    __u32 dst_ip;
-    __u16 query_type;
-    __u16 query_class;
+    u64 start_time;
+    u32 dst_ip;
+    u16 query_type;
+    u16 query_class;
     char domain[MAX_DOMAIN_LEN];
 };
 
 // DNS event structure
 struct dns_event {
-    __u64 timestamp;
-    __u32 pid;
-    __u32 tgid;
-    __u32 uid;
-    __u32 src_ip;
-    __u32 dst_ip;
-    __u16 query_id;
-    __u16 query_type;
-    __u16 query_class;
-    __u8 event_type;
-    __u8 response_code;
-    __u32 latency_ms;
-    __u32 answer_count;
+    u64 timestamp;
+    u32 pid;
+    u32 tgid;
+    u32 uid;
+    u32 src_ip;
+    u32 dst_ip;
+    u16 query_id;
+    u16 query_type;
+    u16 query_class;
+    u8 event_type;
+    u8 response_code;
+    u32 latency_ms;
+    u32 answer_count;
     char domain[MAX_DOMAIN_LEN];
     char comm[16];
     char container_id[64];
@@ -67,18 +69,23 @@ struct {
 } dns_events SEC(".maps");
 
 // Helper function to extract container ID
-static int extract_container_id(char *container_id) {
-    // Simplified container ID extraction
-    __builtin_memset(container_id, 0, 64);
-    bpf_probe_read_str(container_id, 8, "unknown");
+static __always_inline int extract_container_id(char *container_id) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task) {
+        __builtin_memcpy(container_id, "host\0", 5);
+        return 0;
+    }
+    
+    // For now, simplified container detection
+    __builtin_memcpy(container_id, "container\0", 10);
     return 0;
 }
 
 // Helper function to emit DNS event
-static void emit_dns_event(__u8 event_type, __u32 pid, __u32 tgid, __u32 uid,
-                          __u32 src_ip, __u32 dst_ip, __u16 query_id,
-                          __u16 query_type, __u16 query_class, __u8 response_code,
-                          __u32 latency_ms, __u32 answer_count, const char *domain) {
+static __always_inline void emit_dns_event(u8 event_type, u32 pid, u32 tgid, u32 uid,
+                          u32 src_ip, u32 dst_ip, u16 query_id,
+                          u16 query_type, u16 query_class, u8 response_code,
+                          u32 latency_ms, u32 answer_count, const char *domain) {
     struct dns_event *event;
     
     event = bpf_ringbuf_reserve(&dns_events, sizeof(*event), 0);
@@ -100,7 +107,7 @@ static void emit_dns_event(__u8 event_type, __u32 pid, __u32 tgid, __u32 uid,
     event->answer_count = answer_count;
     
     if (domain) {
-        bpf_probe_read_str(event->domain, MAX_DOMAIN_LEN, domain);
+        bpf_probe_read_kernel_str(event->domain, MAX_DOMAIN_LEN, domain);
     } else {
         __builtin_memset(event->domain, 0, MAX_DOMAIN_LEN);
     }
@@ -113,17 +120,17 @@ static void emit_dns_event(__u8 event_type, __u32 pid, __u32 tgid, __u32 uid,
 
 // Parse DNS header
 struct dns_header {
-    __u16 id;
-    __u16 flags;
-    __u16 qdcount;
-    __u16 ancount;
-    __u16 nscount;
-    __u16 arcount;
+    u16 id;
+    u16 flags;
+    u16 qdcount;
+    u16 ancount;
+    u16 nscount;
+    u16 arcount;
 } __attribute__((packed));
 
-// Parse DNS query
-static int parse_dns_query(void *data, void *data_end, struct dns_header *dns_hdr,
-                          __u16 *query_type, __u16 *query_class, char *domain) {
+// Parse DNS query - simplified version that handles basic domains
+static __always_inline int parse_dns_query(void *data, void *data_end, struct dns_header *dns_hdr,
+                          u16 *query_type, u16 *query_class, char *domain) {
     void *query_start = (void *)dns_hdr + sizeof(*dns_hdr);
     void *ptr = query_start;
     int domain_len = 0;
@@ -131,9 +138,13 @@ static int parse_dns_query(void *data, void *data_end, struct dns_header *dns_hd
     if (ptr >= data_end)
         return -1;
     
-    // Parse domain name (simplified)
+    // Parse domain name
+    #pragma unroll
     for (int i = 0; i < 32 && ptr < data_end; i++) {
-        __u8 len = *(__u8 *)ptr;
+        u8 len;
+        if (bpf_probe_read_kernel(&len, 1, ptr) < 0)
+            return -1;
+            
         if (len == 0)
             break;
         
@@ -147,8 +158,10 @@ static int parse_dns_query(void *data, void *data_end, struct dns_header *dns_hd
                 domain[domain_len++] = '.';
             }
             
-            bpf_probe_read(domain + domain_len, len, ptr);
-            domain_len += len;
+            if (ptr + len <= data_end) {
+                bpf_probe_read_kernel(domain + domain_len, len, ptr);
+                domain_len += len;
+            }
         }
         
         ptr += len;
@@ -159,14 +172,18 @@ static int parse_dns_query(void *data, void *data_end, struct dns_header *dns_hd
     
     ptr++; // Skip null terminator
     
-    if (ptr + 4 >= data_end)
+    if (ptr + 4 > data_end)
         return -1;
     
-    *query_type = __builtin_bswap16(*(__u16 *)ptr);
+    bpf_probe_read_kernel(query_type, 2, ptr);
+    *query_type = bpf_ntohs(*query_type);
     ptr += 2;
-    *query_class = __builtin_bswap16(*(__u16 *)ptr);
     
-    domain[domain_len] = '\0';
+    bpf_probe_read_kernel(query_class, 2, ptr);
+    *query_class = bpf_ntohs(*query_class);
+    
+    if (domain_len < MAX_DOMAIN_LEN)
+        domain[domain_len] = '\0';
     
     return 0;
 }
@@ -181,7 +198,7 @@ int tc_dns_egress(struct __sk_buff *skb) {
     if ((void *)eth + sizeof(*eth) > data_end)
         return TC_ACT_OK;
     
-    if (eth->h_proto != __builtin_bswap16(ETH_P_IP))
+    if (bpf_ntohs(eth->h_proto) != ETH_P_IP)
         return TC_ACT_OK;
     
     struct iphdr *ip = (void *)eth + sizeof(*eth);
@@ -195,27 +212,27 @@ int tc_dns_egress(struct __sk_buff *skb) {
     if ((void *)udp + sizeof(*udp) > data_end)
         return TC_ACT_OK;
     
-    if (udp->dest != __builtin_bswap16(DNS_PORT))
+    if (bpf_ntohs(udp->dest) != DNS_PORT)
         return TC_ACT_OK;
     
     struct dns_header *dns_hdr = (void *)udp + sizeof(*udp);
     if ((void *)dns_hdr + sizeof(*dns_hdr) > data_end)
         return TC_ACT_OK;
     
-    __u16 query_id = __builtin_bswap16(dns_hdr->id);
-    __u16 flags = __builtin_bswap16(dns_hdr->flags);
-    __u16 qdcount = __builtin_bswap16(dns_hdr->qdcount);
+    u16 query_id = bpf_ntohs(dns_hdr->id);
+    u16 flags = bpf_ntohs(dns_hdr->flags);
+    u16 qdcount = bpf_ntohs(dns_hdr->qdcount);
     
     // Check if this is a query (QR bit = 0)
     if ((flags & 0x8000) != 0 || qdcount == 0)
         return TC_ACT_OK;
     
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
-    __u16 query_type, query_class;
+    u16 query_type = 0, query_class = 0;
     char domain[MAX_DOMAIN_LEN] = {0};
     
     if (parse_dns_query(data, data_end, dns_hdr, &query_type, &query_class, domain) < 0)
@@ -235,7 +252,7 @@ int tc_dns_egress(struct __sk_buff *skb) {
         .query_class = query_class,
     };
     
-    bpf_probe_read_str(info.domain, MAX_DOMAIN_LEN, domain);
+    __builtin_memcpy(info.domain, domain, MAX_DOMAIN_LEN);
     bpf_map_update_elem(&dns_queries, &key, &info, BPF_ANY);
     
     // Emit query event
@@ -255,7 +272,7 @@ int tc_dns_ingress(struct __sk_buff *skb) {
     if ((void *)eth + sizeof(*eth) > data_end)
         return TC_ACT_OK;
     
-    if (eth->h_proto != __builtin_bswap16(ETH_P_IP))
+    if (bpf_ntohs(eth->h_proto) != ETH_P_IP)
         return TC_ACT_OK;
     
     struct iphdr *ip = (void *)eth + sizeof(*eth);
@@ -269,40 +286,52 @@ int tc_dns_ingress(struct __sk_buff *skb) {
     if ((void *)udp + sizeof(*udp) > data_end)
         return TC_ACT_OK;
     
-    if (udp->source != __builtin_bswap16(DNS_PORT))
+    if (bpf_ntohs(udp->source) != DNS_PORT)
         return TC_ACT_OK;
     
     struct dns_header *dns_hdr = (void *)udp + sizeof(*udp);
     if ((void *)dns_hdr + sizeof(*dns_hdr) > data_end)
         return TC_ACT_OK;
     
-    __u16 query_id = __builtin_bswap16(dns_hdr->id);
-    __u16 flags = __builtin_bswap16(dns_hdr->flags);
-    __u16 ancount = __builtin_bswap16(dns_hdr->ancount);
+    u16 query_id = bpf_ntohs(dns_hdr->id);
+    u16 flags = bpf_ntohs(dns_hdr->flags);
+    u16 ancount = bpf_ntohs(dns_hdr->ancount);
     
     // Check if this is a response (QR bit = 1)
     if ((flags & 0x8000) == 0)
         return TC_ACT_OK;
     
-    __u8 response_code = flags & 0x000F;
+    u8 response_code = flags & 0x000F;
     
-    // Find matching query
-    struct dns_query_key key = {
-        .query_id = query_id,
-        .src_ip = ip->daddr,  // Reversed for response
-    };
+    // Try to find matching query
+    u64 min_latency = UINT32_MAX;
+    struct dns_query_info *found_query = NULL;
     
-    // Try to find the query by iterating through possible PIDs
-    // This is simplified - in practice we'd need a better lookup mechanism
-    struct dns_query_info *query_info = NULL;
+    // Search for query (simplified - in production would use better lookup)
+    #pragma unroll
+    for (int i = 0; i < 10; i++) {
+        struct dns_query_key key = {
+            .pid = i,  // This is simplified
+            .query_id = query_id,
+            .src_ip = ip->daddr,  // Reversed for response
+        };
+        
+        struct dns_query_info *query_info = bpf_map_lookup_elem(&dns_queries, &key);
+        if (query_info) {
+            u64 latency = bpf_ktime_get_ns() - query_info->start_time;
+            if (latency < min_latency) {
+                min_latency = latency;
+                found_query = query_info;
+            }
+        }
+    }
     
-    // For now, just emit the response event without latency calculation
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
-    __u8 event_type;
+    u8 event_type;
     if (response_code == 0) {
         event_type = DNS_RESPONSE;
     } else if (response_code == 3) {
@@ -311,30 +340,44 @@ int tc_dns_ingress(struct __sk_buff *skb) {
         event_type = DNS_ERROR;
     }
     
+    u32 latency_ms = 0;
+    char *domain = NULL;
+    
+    if (found_query) {
+        latency_ms = min_latency / 1000000;  // Convert to ms
+        domain = found_query->domain;
+    }
+    
     emit_dns_event(event_type, pid, tgid, uid, ip->daddr, ip->saddr,
-                   query_id, 0, 0, response_code, 0, ancount, NULL);
+                   query_id, 0, 0, response_code, latency_ms, ancount, domain);
     
     return TC_ACT_OK;
 }
 
-// Track DNS timeouts using a periodic cleanup
-SEC("kprobe/do_sys_poll")
-int check_dns_timeouts(struct pt_regs *ctx) {
-    // This is a simplified timeout detection mechanism
-    // In practice, we'd use a more sophisticated approach
+// Track getaddrinfo() calls for higher-level DNS monitoring
+SEC("uprobe/libc:getaddrinfo")
+int BPF_KPROBE(getaddrinfo_entry, const char *node, const char *service) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    
+    if (!node)
+        return 0;
+    
+    // Store the hostname being queried
+    char domain[MAX_DOMAIN_LEN] = {0};
+    bpf_probe_read_user_str(domain, sizeof(domain), node);
+    
+    // We could store this for correlation with the return
     
     return 0;
 }
 
-// Track getaddrinfo() calls for higher-level DNS monitoring
-SEC("uretprobe/getaddrinfo")
-int getaddrinfo_ret(struct pt_regs *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
-    
-    int ret = PT_REGS_RC(ctx);
+SEC("uretprobe/libc:getaddrinfo")
+int BPF_KRETPROBE(getaddrinfo_exit, int ret) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
     if (ret != 0) {
         // DNS resolution failed at libc level
@@ -345,14 +388,27 @@ int getaddrinfo_ret(struct pt_regs *ctx) {
 }
 
 // Track gethostbyname() calls
-SEC("uretprobe/gethostbyname")
-int gethostbyname_ret(struct pt_regs *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+SEC("uprobe/libc:gethostbyname")
+int BPF_KPROBE(gethostbyname_entry, const char *name) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
     
-    void *ret = (void *)PT_REGS_RC(ctx);
+    if (!name)
+        return 0;
+    
+    // Store the hostname being queried
+    char domain[MAX_DOMAIN_LEN] = {0};
+    bpf_probe_read_user_str(domain, sizeof(domain), name);
+    
+    return 0;
+}
+
+SEC("uretprobe/libc:gethostbyname")
+int BPF_KRETPROBE(gethostbyname_exit, struct hostent *ret) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
     if (!ret) {
         // DNS resolution failed

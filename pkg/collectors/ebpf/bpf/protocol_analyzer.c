@@ -3,6 +3,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 
 #define MAX_ENTRIES 4096
 #define MAX_PAYLOAD_SIZE 256
@@ -12,6 +13,7 @@
 #define MYSQL_PORT 3306
 #define POSTGRES_PORT 5432
 #define REDIS_PORT 6379
+#define IPPROTO_TCP 6
 
 // Protocol types
 enum protocol_type {
@@ -44,20 +46,20 @@ enum http_status_category {
 
 // Protocol event structure
 struct protocol_event {
-    __u64 timestamp;
-    __u32 pid;
-    __u32 tgid;
-    __u32 uid;
-    __u32 src_ip;
-    __u32 dst_ip;
-    __u16 src_port;
-    __u16 dst_port;
-    __u8 protocol_type;
-    __u8 event_type;
-    __u16 status_code;
-    __u32 latency_us;
-    __u32 payload_size;
-    __u32 request_id;
+    u64 timestamp;
+    u32 pid;
+    u32 tgid;
+    u32 uid;
+    u32 src_ip;
+    u32 dst_ip;
+    u16 src_port;
+    u16 dst_port;
+    u8 protocol_type;
+    u8 event_type;
+    u16 status_code;
+    u32 latency_us;
+    u32 payload_size;
+    u32 request_id;
     char method[16];        // HTTP method, SQL command, etc.
     char path[128];         // HTTP path, DB table, etc.
     char user_agent[64];    // HTTP User-Agent
@@ -68,17 +70,17 @@ struct protocol_event {
 
 // Request tracking
 struct request_key {
-    __u32 src_ip;
-    __u32 dst_ip;
-    __u16 src_port;
-    __u16 dst_port;
-    __u32 seq_num;
+    u32 src_ip;
+    u32 dst_ip;
+    u16 src_port;
+    u16 dst_port;
+    u32 seq_num;
 };
 
 struct request_info {
-    __u64 start_time;
-    __u8 protocol_type;
-    __u32 request_id;
+    u64 start_time;
+    u8 protocol_type;
+    u32 request_id;
     char method[16];
     char path[128];
 };
@@ -97,17 +99,23 @@ struct {
 } protocol_events SEC(".maps");
 
 // Helper function to extract container ID
-static int extract_container_id(char *container_id) {
-    __builtin_memset(container_id, 0, 64);
-    bpf_probe_read_str(container_id, 8, "unknown");
+static __always_inline int extract_container_id(char *container_id) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task) {
+        __builtin_memcpy(container_id, "host\0", 5);
+        return 0;
+    }
+    
+    // For now, simplified container detection
+    __builtin_memcpy(container_id, "container\0", 10);
     return 0;
 }
 
 // Helper function to emit protocol event
-static void emit_protocol_event(__u8 protocol_type, __u8 event_type, __u32 pid, __u32 tgid, __u32 uid,
-                               __u32 src_ip, __u32 dst_ip, __u16 src_port, __u16 dst_port,
-                               __u16 status_code, __u32 latency_us, __u32 payload_size,
-                               __u32 request_id, const char *method, const char *path,
+static __always_inline void emit_protocol_event(u8 protocol_type, u8 event_type, u32 pid, u32 tgid, u32 uid,
+                               u32 src_ip, u32 dst_ip, u16 src_port, u16 dst_port,
+                               u16 status_code, u32 latency_us, u32 payload_size,
+                               u32 request_id, const char *method, const char *path,
                                const char *user_agent, const char *error_msg) {
     struct protocol_event *event;
     
@@ -131,22 +139,22 @@ static void emit_protocol_event(__u8 protocol_type, __u8 event_type, __u32 pid, 
     event->request_id = request_id;
     
     if (method)
-        bpf_probe_read_str(event->method, sizeof(event->method), method);
+        bpf_probe_read_kernel_str(event->method, sizeof(event->method), method);
     else
         __builtin_memset(event->method, 0, sizeof(event->method));
     
     if (path)
-        bpf_probe_read_str(event->path, sizeof(event->path), path);
+        bpf_probe_read_kernel_str(event->path, sizeof(event->path), path);
     else
         __builtin_memset(event->path, 0, sizeof(event->path));
     
     if (user_agent)
-        bpf_probe_read_str(event->user_agent, sizeof(event->user_agent), user_agent);
+        bpf_probe_read_kernel_str(event->user_agent, sizeof(event->user_agent), user_agent);
     else
         __builtin_memset(event->user_agent, 0, sizeof(event->user_agent));
     
     if (error_msg)
-        bpf_probe_read_str(event->error_msg, sizeof(event->error_msg), error_msg);
+        bpf_probe_read_kernel_str(event->error_msg, sizeof(event->error_msg), error_msg);
     else
         __builtin_memset(event->error_msg, 0, sizeof(event->error_msg));
     
@@ -157,7 +165,7 @@ static void emit_protocol_event(__u8 protocol_type, __u8 event_type, __u32 pid, 
 }
 
 // Determine protocol type based on port
-static __u8 get_protocol_type(__u16 port) {
+static __always_inline u8 get_protocol_type(u16 port) {
     switch (port) {
         case HTTP_PORT:
             return PROTO_HTTP;
@@ -177,111 +185,159 @@ static __u8 get_protocol_type(__u16 port) {
 }
 
 // Parse HTTP request
-static int parse_http_request(void *data, __u32 data_len, char *method, char *path, char *user_agent) {
+static __always_inline int parse_http_request(void *data, void *data_end, char *method, char *path, char *user_agent) {
     char *payload = (char *)data;
     
-    if (data_len < 16)
+    if (data + 16 > data_end)
         return -1;
     
     // Check for HTTP methods
-    if (bpf_probe_read(method, 7, payload) < 0)
-        return -1;
-    
-    if (__builtin_memcmp(method, "GET ", 4) == 0) {
-        bpf_probe_read_str(method, 4, "GET");
-    } else if (__builtin_memcmp(method, "POST ", 5) == 0) {
-        bpf_probe_read_str(method, 5, "POST");
-    } else if (__builtin_memcmp(method, "PUT ", 4) == 0) {
-        bpf_probe_read_str(method, 4, "PUT");
-    } else if (__builtin_memcmp(method, "DELETE ", 7) == 0) {
-        bpf_probe_read_str(method, 7, "DELETE");
+    if (data + 7 <= data_end && __builtin_memcmp(payload, "GET ", 4) == 0) {
+        __builtin_memcpy(method, "GET", 4);
+    } else if (data + 8 <= data_end && __builtin_memcmp(payload, "POST ", 5) == 0) {
+        __builtin_memcpy(method, "POST", 5);
+    } else if (data + 7 <= data_end && __builtin_memcmp(payload, "PUT ", 4) == 0) {
+        __builtin_memcpy(method, "PUT", 4);
+    } else if (data + 10 <= data_end && __builtin_memcmp(payload, "DELETE ", 7) == 0) {
+        __builtin_memcpy(method, "DELETE", 7);
+    } else if (data + 9 <= data_end && __builtin_memcmp(payload, "PATCH ", 6) == 0) {
+        __builtin_memcpy(method, "PATCH", 6);
+    } else if (data + 8 <= data_end && __builtin_memcmp(payload, "HEAD ", 5) == 0) {
+        __builtin_memcpy(method, "HEAD", 5);
     } else {
         return -1; // Not HTTP
     }
     
     // Extract path (simplified)
-    for (int i = 0; i < data_len - 10 && i < 120; i++) {
-        char c;
-        if (bpf_probe_read(&c, 1, payload + i) < 0)
-            break;
-        
-        if (c == ' ') {
-            // Found space after method, next is path
-            int path_start = i + 1;
-            for (int j = 0; j < 120 && path_start + j < data_len; j++) {
-                if (bpf_probe_read(&c, 1, payload + path_start + j) < 0)
-                    break;
-                if (c == ' ' || c == '\r' || c == '\n') {
-                    path[j] = '\0';
-                    break;
-                }
-                path[j] = c;
-            }
+    int method_len = __builtin_strlen(method) + 1; // +1 for space
+    char *path_start = payload + method_len;
+    
+    if (path_start >= (char *)data_end)
+        return -1;
+    
+    #pragma unroll
+    for (int i = 0; i < 127 && path_start + i < (char *)data_end; i++) {
+        char c = path_start[i];
+        if (c == ' ' || c == '\r' || c == '\n' || c == '?') {
+            path[i] = '\0';
             break;
         }
+        path[i] = c;
     }
     
-    // Extract User-Agent (simplified)
-    bpf_probe_read_str(user_agent, 16, "unknown");
+    // Extract User-Agent (simplified - just mark as present)
+    __builtin_memcpy(user_agent, "browser", 8);
     
     return 0;
 }
 
 // Parse HTTP response
-static int parse_http_response(void *data, __u32 data_len, __u16 *status_code) {
+static __always_inline int parse_http_response(void *data, void *data_end, u16 *status_code) {
     char *payload = (char *)data;
     
-    if (data_len < 12)
+    if (data + 12 > data_end)
         return -1;
     
     // Check for HTTP response
-    char http_version[9];
-    if (bpf_probe_read(http_version, 8, payload) < 0)
+    if (__builtin_memcmp(payload, "HTTP/1.0 ", 9) != 0 &&
+        __builtin_memcmp(payload, "HTTP/1.1 ", 9) != 0 &&
+        __builtin_memcmp(payload, "HTTP/2 ", 7) != 0)
         return -1;
     
-    if (__builtin_memcmp(http_version, "HTTP/1.", 7) != 0)
-        return -1;
-    
-    // Extract status code (simplified)
-    if (data_len >= 12) {
-        char status_str[4];
-        if (bpf_probe_read(status_str, 3, payload + 9) == 0) {
-            // Convert to number (simplified)
-            *status_code = (status_str[0] - '0') * 100 +
-                          (status_str[1] - '0') * 10 +
-                          (status_str[2] - '0');
-        }
+    // Find status code position
+    char *status_start = NULL;
+    if (__builtin_memcmp(payload, "HTTP/2 ", 7) == 0) {
+        status_start = payload + 7;
+    } else {
+        status_start = payload + 9;
     }
+    
+    if (status_start + 3 > (char *)data_end)
+        return -1;
+    
+    // Convert to number
+    *status_code = (status_start[0] - '0') * 100 +
+                   (status_start[1] - '0') * 10 +
+                   (status_start[2] - '0');
     
     return 0;
 }
 
 // Parse MySQL packet
-static int parse_mysql_packet(void *data, __u32 data_len, char *command) {
-    if (data_len < 5)
+static __always_inline int parse_mysql_packet(void *data, void *data_end, char *command) {
+    if (data + 5 > data_end)
         return -1;
     
     // MySQL packet header: 3 bytes length + 1 byte sequence + 1 byte command
-    __u8 cmd;
-    if (bpf_probe_read(&cmd, 1, (char *)data + 4) < 0)
-        return -1;
+    u8 cmd = *((u8 *)data + 4);
     
     switch (cmd) {
         case 0x03:
-            bpf_probe_read_str(command, 6, "QUERY");
+            __builtin_memcpy(command, "QUERY", 6);
             break;
         case 0x01:
-            bpf_probe_read_str(command, 5, "QUIT");
+            __builtin_memcpy(command, "QUIT", 5);
             break;
         case 0x02:
-            bpf_probe_read_str(command, 8, "USE_DB");
+            __builtin_memcpy(command, "USE_DB", 7);
+            break;
+        case 0x04:
+            __builtin_memcpy(command, "FIELD_LIST", 11);
+            break;
+        case 0x05:
+            __builtin_memcpy(command, "CREATE_DB", 10);
+            break;
+        case 0x06:
+            __builtin_memcpy(command, "DROP_DB", 8);
             break;
         default:
-            bpf_probe_read_str(command, 8, "UNKNOWN");
+            __builtin_memcpy(command, "UNKNOWN", 8);
             break;
     }
     
     return 0;
+}
+
+// Parse Redis command
+static __always_inline int parse_redis_command(void *data, void *data_end, char *command) {
+    if (data + 3 > data_end)
+        return -1;
+    
+    char *payload = (char *)data;
+    
+    // Redis protocol: *<number of args>\r\n$<length>\r\n<command>\r\n...
+    if (payload[0] == '*') {
+        // Find first command after protocol headers
+        char *cmd_start = payload;
+        
+        // Skip to first $
+        #pragma unroll
+        for (int i = 0; i < 20 && cmd_start + i < (char *)data_end; i++) {
+            if (cmd_start[i] == '$') {
+                // Skip $ and length until \r\n
+                cmd_start = cmd_start + i + 1;
+                #pragma unroll
+                for (int j = 0; j < 10 && cmd_start + j < (char *)data_end; j++) {
+                    if (cmd_start[j] == '\n') {
+                        cmd_start = cmd_start + j + 1;
+                        // Copy command
+                        #pragma unroll
+                        for (int k = 0; k < 15 && cmd_start + k < (char *)data_end; k++) {
+                            if (cmd_start[k] == '\r' || cmd_start[k] == '\n') {
+                                command[k] = '\0';
+                                return 0;
+                            }
+                            command[k] = cmd_start[k];
+                        }
+                        return 0;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    return -1;
 }
 
 // Track protocol traffic
@@ -294,7 +350,7 @@ int tc_protocol_monitor(struct __sk_buff *skb) {
     if ((void *)eth + sizeof(*eth) > data_end)
         return TC_ACT_OK;
     
-    if (eth->h_proto != __builtin_bswap16(ETH_P_IP))
+    if (bpf_ntohs(eth->h_proto) != ETH_P_IP)
         return TC_ACT_OK;
     
     struct iphdr *ip = (void *)eth + sizeof(*eth);
@@ -308,11 +364,11 @@ int tc_protocol_monitor(struct __sk_buff *skb) {
     if ((void *)tcp + sizeof(*tcp) > data_end)
         return TC_ACT_OK;
     
-    __u16 src_port = __builtin_bswap16(tcp->source);
-    __u16 dst_port = __builtin_bswap16(tcp->dest);
-    __u32 seq_num = __builtin_bswap32(tcp->seq);
+    u16 src_port = bpf_ntohs(tcp->source);
+    u16 dst_port = bpf_ntohs(tcp->dest);
+    u32 seq_num = bpf_ntohl(tcp->seq);
     
-    __u8 protocol_type = get_protocol_type(dst_port);
+    u8 protocol_type = get_protocol_type(dst_port);
     if (protocol_type == PROTO_UNKNOWN) {
         protocol_type = get_protocol_type(src_port);
     }
@@ -321,15 +377,15 @@ int tc_protocol_monitor(struct __sk_buff *skb) {
         return TC_ACT_OK;
     
     void *payload = (void *)tcp + (tcp->doff * 4);
-    __u32 payload_size = data_end - payload;
+    u32 payload_size = data_end - payload;
     
-    if (payload_size == 0)
+    if (payload_size == 0 || payload >= data_end)
         return TC_ACT_OK;
     
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
     // Check if this is a request or response based on port
     bool is_request = (dst_port == HTTP_PORT || dst_port == HTTPS_PORT ||
@@ -357,13 +413,17 @@ int tc_protocol_monitor(struct __sk_buff *skb) {
         char user_agent[64] = {0};
         
         if (protocol_type == PROTO_HTTP) {
-            if (parse_http_request(payload, payload_size, method, path, user_agent) == 0) {
-                bpf_probe_read_str(req_info.method, sizeof(req_info.method), method);
-                bpf_probe_read_str(req_info.path, sizeof(req_info.path), path);
+            if (parse_http_request(payload, data_end, method, path, user_agent) == 0) {
+                __builtin_memcpy(req_info.method, method, sizeof(req_info.method));
+                __builtin_memcpy(req_info.path, path, sizeof(req_info.path));
             }
         } else if (protocol_type == PROTO_MYSQL) {
-            if (parse_mysql_packet(payload, payload_size, method) == 0) {
-                bpf_probe_read_str(req_info.method, sizeof(req_info.method), method);
+            if (parse_mysql_packet(payload, data_end, method) == 0) {
+                __builtin_memcpy(req_info.method, method, sizeof(req_info.method));
+            }
+        } else if (protocol_type == PROTO_REDIS) {
+            if (parse_redis_command(payload, data_end, method) == 0) {
+                __builtin_memcpy(req_info.method, method, sizeof(req_info.method));
             }
         }
         
@@ -381,25 +441,25 @@ int tc_protocol_monitor(struct __sk_buff *skb) {
             .dst_port = src_port,
         };
         
-        // Find matching request (simplified - in practice we'd need better matching)
+        // Find matching request
         struct request_info *req_info = bpf_map_lookup_elem(&active_requests, &req_key);
         
-        __u32 latency_us = 0;
+        u32 latency_us = 0;
         if (req_info) {
-            __u64 latency_ns = bpf_ktime_get_ns() - req_info->start_time;
+            u64 latency_ns = bpf_ktime_get_ns() - req_info->start_time;
             latency_us = latency_ns / 1000;
         }
         
-        __u16 status_code = 0;
+        u16 status_code = 0;
         char error_msg[128] = {0};
         
         if (protocol_type == PROTO_HTTP) {
-            if (parse_http_response(payload, payload_size, &status_code) < 0) {
-                bpf_probe_read_str(error_msg, sizeof(error_msg), "Parse error");
+            if (parse_http_response(payload, data_end, &status_code) < 0) {
+                __builtin_memcpy(error_msg, "Parse error", 12);
             }
         }
         
-        __u8 event_type = PROTO_RESPONSE;
+        u8 event_type = PROTO_RESPONSE;
         if (status_code >= 400) {
             event_type = PROTO_ERROR;
         } else if (latency_us > 1000000) { // > 1 second
@@ -421,34 +481,33 @@ int tc_protocol_monitor(struct __sk_buff *skb) {
     return TC_ACT_OK;
 }
 
-// Track socket system calls for higher-level protocol monitoring
-SEC("kprobe/sys_sendto")
-int sys_sendto(struct pt_regs *ctx) {
-    // Track send operations that might be protocol-related
-    return 0;
-}
-
-SEC("kprobe/sys_recvfrom")
-int sys_recvfrom(struct pt_regs *ctx) {
-    // Track receive operations that might be protocol-related
-    return 0;
-}
-
-// Track SSL/TLS handshakes for HTTPS monitoring
-SEC("uretprobe/SSL_connect")
-int ssl_connect_ret(struct pt_regs *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+// Track SSL/TLS operations
+SEC("uprobe/libssl:SSL_write")
+int BPF_KPROBE(ssl_write_entry, void *ssl, const void *buf, int num) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
-    int ret = PT_REGS_RC(ctx);
-    
-    if (ret <= 0) {
-        // SSL connection failed
-        emit_protocol_event(PROTO_HTTPS, PROTO_ERROR, pid, tgid, uid,
-                           0, 0, 0, 0, 0, 0, 0, 0, "SSL_connect", NULL, NULL, "SSL handshake failed");
+    if (num > 0) {
+        // Track SSL write for HTTPS monitoring
+        emit_protocol_event(PROTO_HTTPS, PROTO_REQUEST, pid, tgid, uid,
+                           0, 0, 0, 443, 0, 0, num, 0, "SSL_WRITE", NULL, NULL, NULL);
     }
+    
+    return 0;
+}
+
+SEC("uprobe/libssl:SSL_read")
+int BPF_KPROBE(ssl_read_entry, void *ssl, void *buf, int num) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
+    
+    // Track SSL read for HTTPS monitoring
+    emit_protocol_event(PROTO_HTTPS, PROTO_RESPONSE, pid, tgid, uid,
+                       0, 0, 443, 0, 0, 0, num, 0, "SSL_READ", NULL, NULL, NULL);
     
     return 0;
 }

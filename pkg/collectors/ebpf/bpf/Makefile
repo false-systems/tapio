@@ -10,13 +10,13 @@ CFLAGS := -O2 -g -Wall
 ARCHS := amd64 arm64
 
 # eBPF programs to build
-PROGRAMS := network_monitor packet_analyzer dns_monitor protocol_analyzer oom_detector memory_tracker
+PROGRAMS := network_monitor packet_analyzer dns_monitor protocol_analyzer oom_detector memory_tracker http_tracer grpc_tracer
 
 # Output directory
 OUTPUT_DIR := ..
 
 # Include directories
-INCLUDES := -I. -I/usr/include -I/usr/include/bpf
+INCLUDES := -I. -I/usr/include -I/usr/include/bpf -I/usr/include/x86_64-linux-gnu
 
 # BPF target flags
 BPF_CFLAGS := $(CFLAGS) \
@@ -104,6 +104,24 @@ memory_tracker:
 		-target amd64,arm64 \
 		memorytracker bpf/memory_tracker.c -- $(INCLUDES)
 
+http_tracer:
+	@echo "Building http_tracer..."
+	@$(CLANG) $(BPF_CFLAGS) -c http_tracer.c -o http_tracer.o
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
+		-cc $(CLANG) \
+		-cflags "$(BPF_CFLAGS)" \
+		-target amd64,arm64 \
+		httptracer bpf/http_tracer.c -- $(INCLUDES)
+
+grpc_tracer:
+	@echo "Building grpc_tracer..."
+	@$(CLANG) $(BPF_CFLAGS) -c grpc_tracer.c -o grpc_tracer.o
+	@cd $(OUTPUT_DIR) && GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go \
+		-cc $(CLANG) \
+		-cflags "$(BPF_CFLAGS)" \
+		-target amd64,arm64 \
+		grpctracer bpf/grpc_tracer.c -- $(INCLUDES)
+
 # Helper targets
 check-deps:
 	@echo "Checking dependencies..."
@@ -128,6 +146,8 @@ help:
 	@echo "  protocol_analyzer- Build protocol analysis program"
 	@echo "  oom_detector     - Build OOM detection program"
 	@echo "  memory_tracker   - Build memory tracking program"
+	@echo "  http_tracer      - Build HTTP tracing program"
+	@echo "  grpc_tracer      - Build gRPC tracing program"
 	@echo ""
 	@echo "Variables:"
 	@echo "  CLANG           - Clang compiler (default: clang)"

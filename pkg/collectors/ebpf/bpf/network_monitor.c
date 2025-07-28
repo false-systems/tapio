@@ -1,4 +1,5 @@
 #include "headers/vmlinux.h"
+#include "common.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
@@ -31,44 +32,44 @@ enum network_event_type {
 
 // Network connection tracking
 struct connection_key {
-    __u32 pid;
-    __u32 src_ip;
-    __u32 dst_ip;
-    __u16 src_port;
-    __u16 dst_port;
-    __u8 protocol; // TCP=6, UDP=17
+    u32 pid;
+    u32 src_ip;
+    u32 dst_ip;
+    u16 src_port;
+    u16 dst_port;
+    u8 protocol; // TCP=6, UDP=17
 };
 
 struct connection_stats {
-    __u64 start_time;
-    __u64 last_seen;
-    __u64 bytes_sent;
-    __u64 bytes_recv;
-    __u64 packets_sent;
-    __u64 packets_recv;
-    __u64 retransmits;
-    __u32 rtt_min;
-    __u32 rtt_max;
-    __u32 rtt_avg;
-    __u8 state;
-    __u8 failed;
+    u64 start_time;
+    u64 last_seen;
+    u64 bytes_sent;
+    u64 bytes_recv;
+    u64 packets_sent;
+    u64 packets_recv;
+    u64 retransmits;
+    u32 rtt_min;
+    u32 rtt_max;
+    u32 rtt_avg;
+    u8 state;
+    u8 failed;
 };
 
 // Network event structure
 struct network_event {
-    __u64 timestamp;
-    __u32 pid;
-    __u32 tgid;
-    __u32 uid;
-    __u32 src_ip;
-    __u32 dst_ip;
-    __u16 src_port;
-    __u16 dst_port;
-    __u8 protocol;
-    __u8 event_type;
-    __u32 latency_us;
-    __u32 bytes;
-    __u16 error_code;
+    u64 timestamp;
+    u32 pid;
+    u32 tgid;
+    u32 uid;
+    u32 src_ip;
+    u32 dst_ip;
+    u16 src_port;
+    u16 dst_port;
+    u8 protocol;
+    u8 event_type;
+    u32 latency_us;
+    u32 bytes;
+    u16 error_code;
     char comm[16];
     char container_id[64];
 };
@@ -89,34 +90,37 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_ENTRIES);
-    __type(key, __u32);
-    __type(value, __u64);
+    __type(key, u32);
+    __type(value, u64);
 } pid_start_time SEC(".maps");
 
 // Helper function to extract container ID from cgroup
-static int extract_container_id(char *container_id) {
+static __always_inline int extract_container_id(char *container_id) {
     struct task_struct *task;
     struct css_set *cgroups;
-    char *cgroup_path;
+    struct cgroup_subsys_state *css;
     
     task = (struct task_struct *)bpf_get_current_task();
     if (!task)
         return -1;
     
-    // This is a simplified version - in reality we'd need to traverse
-    // the cgroup hierarchy and extract the container ID from the path
-    __builtin_memset(container_id, 0, 64);
+    // Read the cgroups from task
+    BPF_CORE_READ_INTO(&cgroups, task, cgroups);
+    if (!cgroups) {
+        __builtin_memcpy(container_id, "host\0", 5);
+        return 0;
+    }
     
-    // For now, just mark it as unknown
-    bpf_probe_read_str(container_id, 8, "unknown");
+    // For now, just mark it as unknown - full implementation would parse cgroup path
+    __builtin_memcpy(container_id, "container\0", 10);
     
     return 0;
 }
 
 // Helper function to get connection key
-static void get_connection_key(struct connection_key *key, __u32 pid,
-                              __u32 src_ip, __u32 dst_ip, 
-                              __u16 src_port, __u16 dst_port, __u8 protocol) {
+static __always_inline void get_connection_key(struct connection_key *key, u32 pid,
+                              u32 src_ip, u32 dst_ip, 
+                              u16 src_port, u16 dst_port, u8 protocol) {
     key->pid = pid;
     key->src_ip = src_ip;
     key->dst_ip = dst_ip;
@@ -126,9 +130,9 @@ static void get_connection_key(struct connection_key *key, __u32 pid,
 }
 
 // Helper function to emit network event
-static void emit_network_event(__u8 event_type, __u32 pid, __u32 tgid, __u32 uid,
-                              __u32 src_ip, __u32 dst_ip, __u16 src_port, __u16 dst_port,
-                              __u8 protocol, __u32 latency_us, __u32 bytes, __u16 error_code) {
+static __always_inline void emit_network_event(u8 event_type, u32 pid, u32 tgid, u32 uid,
+                              u32 src_ip, u32 dst_ip, u16 src_port, u16 dst_port,
+                              u8 protocol, u32 latency_us, u32 bytes, u16 error_code) {
     struct network_event *event;
     
     event = bpf_ringbuf_reserve(&network_events, sizeof(*event), 0);
@@ -157,9 +161,9 @@ static void emit_network_event(__u8 event_type, __u32 pid, __u32 tgid, __u32 uid
 
 // Track TCP connection establishment
 SEC("kprobe/tcp_v4_connect")
-int tcp_v4_connect_entry(struct pt_regs *ctx) {
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u64 start_time = bpf_ktime_get_ns();
+int BPF_KPROBE(tcp_v4_connect_entry, struct sock *sk) {
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    u64 start_time = bpf_ktime_get_ns();
     
     bpf_map_update_elem(&pid_start_time, &pid, &start_time, BPF_ANY);
     
@@ -167,19 +171,18 @@ int tcp_v4_connect_entry(struct pt_regs *ctx) {
 }
 
 SEC("kretprobe/tcp_v4_connect")
-int tcp_v4_connect_exit(struct pt_regs *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
-    int ret = PT_REGS_RC(ctx);
+int BPF_KRETPROBE(tcp_v4_connect_exit, int ret) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
-    __u64 *start_time = bpf_map_lookup_elem(&pid_start_time, &pid);
+    u64 *start_time = bpf_map_lookup_elem(&pid_start_time, &pid);
     if (!start_time)
         return 0;
     
-    __u64 latency_ns = bpf_ktime_get_ns() - *start_time;
-    __u32 latency_us = latency_ns / 1000;
+    u64 latency_ns = bpf_ktime_get_ns() - *start_time;
+    u32 latency_us = latency_ns / 1000;
     
     bpf_map_delete_elem(&pid_start_time, &pid);
     
@@ -198,28 +201,55 @@ int tcp_v4_connect_exit(struct pt_regs *ctx) {
 
 // Track TCP connection closure
 SEC("kprobe/tcp_close")
-int tcp_close(struct pt_regs *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+int BPF_KPROBE(tcp_close_entry, struct sock *sk) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
+    
+    struct inet_sock *inet = (struct inet_sock *)sk;
+    u32 src_ip = 0, dst_ip = 0;
+    u16 src_port = 0, dst_port = 0;
+    
+    // Read socket information
+    BPF_CORE_READ_INTO(&src_ip, inet, inet_saddr);
+    BPF_CORE_READ_INTO(&dst_ip, inet, inet_daddr);
+    BPF_CORE_READ_INTO(&src_port, inet, inet_sport);
+    BPF_CORE_READ_INTO(&dst_port, inet, inet_dport);
+    
+    // Convert from network to host byte order
+    src_port = bpf_ntohs(src_port);
+    dst_port = bpf_ntohs(dst_port);
     
     emit_network_event(NET_CONN_CLOSED, pid, tgid, uid,
-                      0, 0, 0, 0, 6, 0, 0, 0);
+                      src_ip, dst_ip, src_port, dst_port, 6, 0, 0, 0);
     
     return 0;
 }
 
 // Track TCP retransmissions
 SEC("kprobe/tcp_retransmit_skb")
-int tcp_retransmit_skb(struct pt_regs *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+int BPF_KPROBE(tcp_retransmit_entry, struct sock *sk, struct sk_buff *skb) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
+    
+    struct inet_sock *inet = (struct inet_sock *)sk;
+    u32 src_ip = 0, dst_ip = 0;
+    u16 src_port = 0, dst_port = 0;
+    
+    // Read socket information
+    BPF_CORE_READ_INTO(&src_ip, inet, inet_saddr);
+    BPF_CORE_READ_INTO(&dst_ip, inet, inet_daddr);
+    BPF_CORE_READ_INTO(&src_port, inet, inet_sport);
+    BPF_CORE_READ_INTO(&dst_port, inet, inet_dport);
+    
+    src_port = bpf_ntohs(src_port);
+    dst_port = bpf_ntohs(dst_port);
     
     emit_network_event(NET_RETRANSMIT, pid, tgid, uid,
-                      0, 0, 0, 0, 6, 0, 0, 0);
+                      src_ip, dst_ip, src_port, dst_port, 6, 0, 0, 0);
     
     return 0;
 }
@@ -227,40 +257,81 @@ int tcp_retransmit_skb(struct pt_regs *ctx) {
 // Track packet drops
 SEC("tracepoint/skb/kfree_skb")
 int trace_kfree_skb(struct trace_event_raw_kfree_skb *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
-    // Check if this is a network-related drop
-    void *location = (void *)ctx->location;
+    // Get drop reason from context
+    enum skb_drop_reason reason = ctx->reason;
     
-    emit_network_event(NET_PACKET_DROP, pid, tgid, uid,
-                      0, 0, 0, 0, 0, 0, 0, 0);
+    // Only track network-related drops
+    if (reason != SKB_DROP_REASON_NOT_SPECIFIED) {
+        emit_network_event(NET_PACKET_DROP, pid, tgid, uid,
+                          0, 0, 0, 0, 0, 0, 0, reason);
+    }
     
     return 0;
 }
 
-// Track high network latency
+// Track high network latency via TCP RTT
 SEC("kprobe/tcp_rcv_established")
-int tcp_rcv_established(struct pt_regs *ctx) {
-    // This would track when packets are received and calculate latency
-    // Implementation would involve tracking packet timestamps
+int BPF_KPROBE(tcp_rcv_established_entry, struct sock *sk, struct sk_buff *skb) {
+    struct tcp_sock *tp = (struct tcp_sock *)sk;
+    struct inet_sock *inet = (struct inet_sock *)sk;
+    u32 srtt = 0;
+    
+    // Read smoothed RTT (in jiffies shifted left 3)
+    BPF_CORE_READ_INTO(&srtt, tp, srtt_us);
+    
+    // If RTT is high (> 100ms), emit event
+    if (srtt > 100000) { // 100ms in microseconds
+        u64 id = bpf_get_current_pid_tgid();
+        u32 pid = id >> 32;
+        u32 tgid = id;
+        u32 uid = bpf_get_current_uid_gid();
+        
+        u32 src_ip = 0, dst_ip = 0;
+        u16 src_port = 0, dst_port = 0;
+        
+        BPF_CORE_READ_INTO(&src_ip, inet, inet_saddr);
+        BPF_CORE_READ_INTO(&dst_ip, inet, inet_daddr);
+        BPF_CORE_READ_INTO(&src_port, inet, inet_sport);
+        BPF_CORE_READ_INTO(&dst_port, inet, inet_dport);
+        
+        src_port = bpf_ntohs(src_port);
+        dst_port = bpf_ntohs(dst_port);
+        
+        emit_network_event(NET_HIGH_LATENCY, pid, tgid, uid,
+                          src_ip, dst_ip, src_port, dst_port, 6, srtt, 0, 0);
+    }
     
     return 0;
 }
 
 // Track UDP operations
 SEC("kprobe/udp_sendmsg")
-int udp_sendmsg(struct pt_regs *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
-    __u32 uid = bpf_get_current_uid_gid();
+int BPF_KPROBE(udp_sendmsg_entry, struct sock *sk, struct msghdr *msg, size_t len) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
+    u32 uid = bpf_get_current_uid_gid();
     
-    // Track UDP send operations
+    struct inet_sock *inet = (struct inet_sock *)sk;
+    u32 src_ip = 0, dst_ip = 0;
+    u16 src_port = 0, dst_port = 0;
+    
+    BPF_CORE_READ_INTO(&src_ip, inet, inet_saddr);
+    BPF_CORE_READ_INTO(&dst_ip, inet, inet_daddr);
+    BPF_CORE_READ_INTO(&src_port, inet, inet_sport);
+    BPF_CORE_READ_INTO(&dst_port, inet, inet_dport);
+    
+    src_port = bpf_ntohs(src_port);
+    dst_port = bpf_ntohs(dst_port);
+    
+    // For UDP, we emit a connection event for each send
     emit_network_event(NET_CONN_ESTABLISHED, pid, tgid, uid,
-                      0, 0, 0, 0, 17, 0, 0, 0);
+                      src_ip, dst_ip, src_port, dst_port, 17, 0, len, 0);
     
     return 0;
 }

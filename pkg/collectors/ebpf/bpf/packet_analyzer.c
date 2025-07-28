@@ -3,9 +3,12 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 
 #define MAX_ENTRIES 8192
 #define LATENCY_THRESHOLD_US 1000  // 1ms threshold
+#define IPPROTO_TCP 6
+#define IPPROTO_UDP 17
 
 // Packet analysis event types
 enum packet_event_type {
@@ -18,56 +21,56 @@ enum packet_event_type {
 
 // Packet flow tracking
 struct flow_key {
-    __u32 src_ip;
-    __u32 dst_ip;
-    __u16 src_port;
-    __u16 dst_port;
-    __u8 protocol;
+    u32 src_ip;
+    u32 dst_ip;
+    u16 src_port;
+    u16 dst_port;
+    u8 protocol;
 };
 
 struct packet_flow_stats {
-    __u64 start_time;
-    __u64 last_seen;
-    __u64 packets_sent;
-    __u64 packets_recv;
-    __u64 bytes_sent;
-    __u64 bytes_recv;
-    __u64 packets_lost;
-    __u64 packets_reordered;
-    __u64 packets_duplicated;
-    __u32 rtt_min;
-    __u32 rtt_max;
-    __u32 rtt_sum;
-    __u32 rtt_count;
-    __u32 last_seq;
-    __u16 expected_seq;
+    u64 start_time;
+    u64 last_seen;
+    u64 packets_sent;
+    u64 packets_recv;
+    u64 bytes_sent;
+    u64 bytes_recv;
+    u64 packets_lost;
+    u64 packets_reordered;
+    u64 packets_duplicated;
+    u32 rtt_min;
+    u32 rtt_max;
+    u32 rtt_sum;
+    u32 rtt_count;
+    u32 last_seq;
+    u16 expected_seq;
 };
 
 // Packet event structure
 struct packet_event {
-    __u64 timestamp;
-    __u32 pid;
-    __u32 tgid;
-    __u32 src_ip;
-    __u32 dst_ip;
-    __u16 src_port;
-    __u16 dst_port;
-    __u8 protocol;
-    __u8 event_type;
-    __u32 latency_us;
-    __u32 packet_size;
-    __u32 sequence_num;
-    __u32 ack_num;
-    __u16 window_size;
-    __u8 tcp_flags;
+    u64 timestamp;
+    u32 pid;
+    u32 tgid;
+    u32 src_ip;
+    u32 dst_ip;
+    u16 src_port;
+    u16 dst_port;
+    u8 protocol;
+    u8 event_type;
+    u32 latency_us;
+    u32 packet_size;
+    u32 sequence_num;
+    u32 ack_num;
+    u16 window_size;
+    u8 tcp_flags;
     char comm[16];
     char interface[16];
 };
 
 // Timestamp tracking for latency calculation
 struct packet_timestamp {
-    __u64 tx_time;
-    __u32 seq_num;
+    u64 tx_time;
+    u32 seq_num;
 };
 
 // Maps
@@ -91,8 +94,8 @@ struct {
 } packet_timestamps SEC(".maps");
 
 // Helper function to get flow key
-static void get_flow_key(struct flow_key *key, __u32 src_ip, __u32 dst_ip,
-                        __u16 src_port, __u16 dst_port, __u8 protocol) {
+static __always_inline void get_flow_key(struct flow_key *key, u32 src_ip, u32 dst_ip,
+                        u16 src_port, u16 dst_port, u8 protocol) {
     key->src_ip = src_ip;
     key->dst_ip = dst_ip;
     key->src_port = src_port;
@@ -101,10 +104,10 @@ static void get_flow_key(struct flow_key *key, __u32 src_ip, __u32 dst_ip,
 }
 
 // Helper function to emit packet event
-static void emit_packet_event(__u8 event_type, __u32 pid, __u32 tgid,
-                             __u32 src_ip, __u32 dst_ip, __u16 src_port, __u16 dst_port,
-                             __u8 protocol, __u32 latency_us, __u32 packet_size,
-                             __u32 seq_num, __u32 ack_num, __u16 window_size, __u8 tcp_flags) {
+static __always_inline void emit_packet_event(u8 event_type, u32 pid, u32 tgid,
+                             u32 src_ip, u32 dst_ip, u16 src_port, u16 dst_port,
+                             u8 protocol, u32 latency_us, u32 packet_size,
+                             u32 seq_num, u32 ack_num, u16 window_size, u8 tcp_flags) {
     struct packet_event *event;
     
     event = bpf_ringbuf_reserve(&packet_events, sizeof(*event), 0);
@@ -133,16 +136,16 @@ static void emit_packet_event(__u8 event_type, __u32 pid, __u32 tgid,
 }
 
 // Parse IP and TCP headers
-static int parse_tcp_packet(struct __sk_buff *ctx, struct flow_key *flow,
-                           __u32 *seq_num, __u32 *ack_num, __u16 *window_size, __u8 *tcp_flags) {
-    void *data_end = (void *)(long)ctx->data_end;
-    void *data = (void *)(long)ctx->data;
+static __always_inline int parse_tcp_packet(struct __sk_buff *skb, struct flow_key *flow,
+                           u32 *seq_num, u32 *ack_num, u16 *window_size, u8 *tcp_flags) {
+    void *data_end = (void *)(long)skb->data_end;
+    void *data = (void *)(long)skb->data;
     
     struct ethhdr *eth = data;
     if ((void *)eth + sizeof(*eth) > data_end)
         return -1;
     
-    if (eth->h_proto != __builtin_bswap16(ETH_P_IP))
+    if (bpf_ntohs(eth->h_proto) != ETH_P_IP)
         return -1;
     
     struct iphdr *ip = (void *)eth + sizeof(*eth);
@@ -162,9 +165,9 @@ static int parse_tcp_packet(struct __sk_buff *ctx, struct flow_key *flow,
     flow->dst_port = tcp->dest;
     flow->protocol = IPPROTO_TCP;
     
-    *seq_num = __builtin_bswap32(tcp->seq);
-    *ack_num = __builtin_bswap32(tcp->ack_seq);
-    *window_size = __builtin_bswap16(tcp->window);
+    *seq_num = bpf_ntohl(tcp->seq);
+    *ack_num = bpf_ntohl(tcp->ack_seq);
+    *window_size = bpf_ntohs(tcp->window);
     *tcp_flags = tcp->fin | (tcp->syn << 1) | (tcp->rst << 2) | (tcp->psh << 3) |
                  (tcp->ack << 4) | (tcp->urg << 5);
     
@@ -175,11 +178,11 @@ static int parse_tcp_packet(struct __sk_buff *ctx, struct flow_key *flow,
 SEC("tc")
 int tc_egress(struct __sk_buff *skb) {
     struct flow_key flow;
-    __u32 seq_num, ack_num;
-    __u16 window_size;
-    __u8 tcp_flags;
+    u32 seq_num, ack_num;
+    u16 window_size;
+    u8 tcp_flags;
     
-    if (parse_tcp_packet((struct sk_buff *)skb, &flow, &seq_num, &ack_num, &window_size, &tcp_flags) < 0)
+    if (parse_tcp_packet(skb, &flow, &seq_num, &ack_num, &window_size, &tcp_flags) < 0)
         return TC_ACT_OK;
     
     // Store timestamp for outgoing packets
@@ -216,11 +219,11 @@ int tc_egress(struct __sk_buff *skb) {
 SEC("tc")
 int tc_ingress(struct __sk_buff *skb) {
     struct flow_key flow, reverse_flow;
-    __u32 seq_num, ack_num;
-    __u16 window_size;
-    __u8 tcp_flags;
+    u32 seq_num, ack_num;
+    u16 window_size;
+    u8 tcp_flags;
     
-    if (parse_tcp_packet((struct sk_buff *)skb, &flow, &seq_num, &ack_num, &window_size, &tcp_flags) < 0)
+    if (parse_tcp_packet(skb, &flow, &seq_num, &ack_num, &window_size, &tcp_flags) < 0)
         return TC_ACT_OK;
     
     // Create reverse flow key for lookup
@@ -234,8 +237,8 @@ int tc_ingress(struct __sk_buff *skb) {
     if (tcp_flags & (1 << 4)) { // ACK flag
         struct packet_timestamp *ts = bpf_map_lookup_elem(&packet_timestamps, &reverse_flow);
         if (ts && ack_num > ts->seq_num) {
-            __u64 rtt_ns = bpf_ktime_get_ns() - ts->tx_time;
-            __u32 rtt_us = rtt_ns / 1000;
+            u64 rtt_ns = bpf_ktime_get_ns() - ts->tx_time;
+            u32 rtt_us = rtt_ns / 1000;
             
             // Update flow RTT statistics
             struct packet_flow_stats *stats = bpf_map_lookup_elem(&flow_tracker, &reverse_flow);
@@ -250,9 +253,9 @@ int tc_ingress(struct __sk_buff *skb) {
                 
                 // Check for high latency
                 if (rtt_us > LATENCY_THRESHOLD_US) {
-                    __u64 id = bpf_get_current_pid_tgid();
-                    __u32 pid = id >> 32;
-                    __u32 tgid = id;
+                    u64 id = bpf_get_current_pid_tgid();
+                    u32 pid = id >> 32;
+                    u32 tgid = id;
                     
                     emit_packet_event(PKT_HIGH_LATENCY, pid, tgid,
                                      reverse_flow.src_ip, reverse_flow.dst_ip,
@@ -274,9 +277,9 @@ int tc_ingress(struct __sk_buff *skb) {
             // Potential reordering detected
             stats->packets_reordered++;
             
-            __u64 id = bpf_get_current_pid_tgid();
-            __u32 pid = id >> 32;
-            __u32 tgid = id;
+            u64 id = bpf_get_current_pid_tgid();
+            u32 pid = id >> 32;
+            u32 tgid = id;
             
             emit_packet_event(PKT_REORDER, pid, tgid,
                              flow.src_ip, flow.dst_ip,
@@ -296,36 +299,34 @@ int tc_ingress(struct __sk_buff *skb) {
 // Track packet drops in network stack
 SEC("tracepoint/skb/kfree_skb")
 int trace_packet_drop(struct trace_event_raw_kfree_skb *ctx) {
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 pid = id >> 32;
-    __u32 tgid = id;
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+    u32 tgid = id;
     
-    // Extract packet information if possible
-    struct sk_buff *skb = (struct sk_buff *)ctx->skbaddr;
-    if (!skb)
-        return 0;
+    // Extract drop reason
+    enum skb_drop_reason reason = ctx->reason;
     
-    // This is a simplified version - in reality we'd parse the packet
-    emit_packet_event(PKT_LOSS, pid, tgid, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    // Emit event for drops
+    if (reason != SKB_DROP_REASON_NOT_SPECIFIED) {
+        emit_packet_event(PKT_LOSS, pid, tgid, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
     
     return 0;
 }
 
 // Track socket buffer allocation failures
 SEC("kprobe/alloc_skb")
-int alloc_skb_entry(struct pt_regs *ctx) {
+int BPF_KPROBE(alloc_skb_entry, unsigned int size, gfp_t priority) {
     return 0;
 }
 
 SEC("kretprobe/alloc_skb")
-int alloc_skb_exit(struct pt_regs *ctx) {
-    void *ret = (void *)PT_REGS_RC(ctx);
-    
+int BPF_KRETPROBE(alloc_skb_exit, struct sk_buff *ret) {
     if (!ret) {
         // Allocation failed - potential memory pressure
-        __u64 id = bpf_get_current_pid_tgid();
-        __u32 pid = id >> 32;
-        __u32 tgid = id;
+        u64 id = bpf_get_current_pid_tgid();
+        u32 pid = id >> 32;
+        u32 tgid = id;
         
         emit_packet_event(PKT_LOSS, pid, tgid, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
