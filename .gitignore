@@ -66,3 +66,21 @@ proto/gen/
 
 # eBPF object files
 *.o
+
+# BPF generated files
+*bpfel*.go
+*bpfel*.o
+*bpfeb*.go
+*bpfeb*.o
+*.o
+
+# Test binaries
+*-tests
+*-tests-linux
+ebpf-tests*
+
+# Build artifacts
+/bin/
+/dist/
+*.test
+

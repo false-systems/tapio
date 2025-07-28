@@ -47,6 +47,11 @@ type Config struct {
 	EnableEventMonitoring   bool `json:"enable_event_monitoring"`   // Monitor Kubernetes CNI events
 	EnableFileMonitoring    bool `json:"enable_file_monitoring"`    // Monitor CNI config file changes
 
+	// Efficient monitoring options
+	UseEBPF        bool `json:"use_ebpf"`         // Use eBPF for kernel-level CNI observation
+	UseInotify     bool `json:"use_inotify"`      // Use inotify for file monitoring
+	UseK8sInformer bool `json:"use_k8s_informer"` // Use K8s informers instead of kubectl
+
 	// Plugin-specific configurations
 	CiliumConfig  *CiliumConfig  `json:"cilium_config,omitempty"`
 	CalicoConfig  *CalicoConfig  `json:"calico_config,omitempty"`
@@ -59,10 +64,11 @@ type Config struct {
 	MaxConcurrentWatch int           `json:"max_concurrent_watch"`
 
 	// Kubernetes integration
-	KubeConfig    string `json:"kubeconfig,omitempty"`
-	InCluster     bool   `json:"in_cluster"`
-	Namespace     string `json:"namespace,omitempty"` // Watch specific namespace
-	LabelSelector string `json:"label_selector,omitempty"`
+	KubeConfig     string `json:"kubeconfig,omitempty"`
+	KubeConfigPath string `json:"kubeconfig_path,omitempty"` // Path to kubeconfig file
+	InCluster      bool   `json:"in_cluster"`
+	Namespace      string `json:"namespace,omitempty"` // Watch specific namespace
+	LabelSelector  string `json:"label_selector,omitempty"`
 
 	// Correlation settings
 	EnableTraceCorrelation bool          `json:"enable_trace_correlation"`

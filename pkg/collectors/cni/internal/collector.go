@@ -273,33 +273,84 @@ func (c *CNICollector) initializeMonitors() error {
 		}
 	}
 
-	// Initialize process monitor if enabled
+	// Initialize process monitor if enabled (or eBPF if available)
 	if c.config.EnableProcessMonitoring {
-		monitor, err := NewProcessMonitor(c.config)
-		if err != nil {
-			c.recordError(fmt.Errorf("failed to create process monitor: %w", err))
+		// Try eBPF monitor first for kernel-level observation
+		if c.config.UseEBPF {
+			monitor, err := NewEBPFMonitor(c.config)
+			if err != nil {
+				c.recordError(fmt.Errorf("failed to create eBPF monitor, falling back to process monitor: %w", err))
+				// Fall back to process monitor
+				monitor, err := NewProcessMonitor(c.config)
+				if err != nil {
+					c.recordError(fmt.Errorf("failed to create process monitor: %w", err))
+				} else {
+					c.monitors = append(c.monitors, monitor)
+				}
+			} else {
+				c.monitors = append(c.monitors, monitor)
+			}
 		} else {
-			c.monitors = append(c.monitors, monitor)
+			monitor, err := NewProcessMonitor(c.config)
+			if err != nil {
+				c.recordError(fmt.Errorf("failed to create process monitor: %w", err))
+			} else {
+				c.monitors = append(c.monitors, monitor)
+			}
 		}
 	}
 
-	// Initialize event monitor if enabled
+	// Initialize event monitor if enabled (prefer K8s informer)
 	if c.config.EnableEventMonitoring {
-		monitor, err := NewEventMonitor(c.config)
-		if err != nil {
-			c.recordError(fmt.Errorf("failed to create event monitor: %w", err))
+		// Try K8s informer first for efficient event monitoring
+		if c.config.UseK8sInformer {
+			monitor, err := NewK8sInformerMonitor(c.config)
+			if err != nil {
+				c.recordError(fmt.Errorf("failed to create K8s informer monitor, falling back to kubectl: %w", err))
+				// Fall back to kubectl-based monitor
+				monitor, err := NewEventMonitor(c.config)
+				if err != nil {
+					c.recordError(fmt.Errorf("failed to create event monitor: %w", err))
+				} else {
+					c.monitors = append(c.monitors, monitor)
+				}
+			} else {
+				c.monitors = append(c.monitors, monitor)
+			}
 		} else {
-			c.monitors = append(c.monitors, monitor)
+			monitor, err := NewEventMonitor(c.config)
+			if err != nil {
+				c.recordError(fmt.Errorf("failed to create event monitor: %w", err))
+			} else {
+				c.monitors = append(c.monitors, monitor)
+			}
 		}
 	}
 
-	// Initialize file monitor if enabled
+	// Initialize file monitor if enabled (prefer inotify)
 	if c.config.EnableFileMonitoring {
-		monitor, err := NewFileMonitor(c.config)
-		if err != nil {
-			c.recordError(fmt.Errorf("failed to create file monitor: %w", err))
+		// Try inotify monitor first for efficient file watching
+		if c.config.UseInotify {
+			monitor, err := NewInotifyFileMonitor(c.config)
+			if err != nil {
+				c.recordError(fmt.Errorf("failed to create inotify file monitor, falling back to polling: %w", err))
+				// Fall back to polling-based monitor
+				monitor, err := NewFileMonitor(c.config)
+				if err != nil {
+					c.recordError(fmt.Errorf("failed to create file monitor: %w", err))
+				} else {
+					c.monitors = append(c.monitors, monitor)
+				}
+			} else {
+				c.monitors = append(c.monitors, monitor)
+			}
 		} else {
-			c.monitors = append(c.monitors, monitor)
+			monitor, err := NewFileMonitor(c.config)
+			if err != nil {
+				c.recordError(fmt.Errorf("failed to create file monitor: %w", err))
+			} else {
+				c.monitors = append(c.monitors, monitor)
+			}
 		}
 	}
 
