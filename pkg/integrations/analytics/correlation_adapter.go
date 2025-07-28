@@ -172,7 +172,7 @@ func (a *AnalyticsCorrelationAdapter) convertInsightToFinding(insight domain.Ins
 	semanticGroup := a.getOrCreateSemanticGroupInternal(insight)
 
 	// Create internal Finding with UnifiedEvents
-	internalFinding := &Finding{
+	internalFinding := &correlation.Finding{
 		ID:                   insight.ID,
 		PatternType:          correlationType,
 		Confidence:           confidence,
@@ -616,7 +616,7 @@ func ConvertFromInterfacesFinding(f *interfaces.Finding) *correlation.Finding {
 		}
 	}
 
-	return &Finding{
+	return &correlation.Finding{
 		ID:            f.ID,
 		PatternType:   f.PatternType,
 		Confidence:    f.Confidence,
