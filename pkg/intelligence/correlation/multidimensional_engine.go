@@ -225,9 +225,9 @@ func (e *MultiDimensionalEngine) Process(ctx context.Context, event *domain.Unif
 	// Update event with correlation references
 	for _, result := range results {
 		event.Correlations = append(event.Correlations, domain.CorrelationRef{
-			ID:         result.ID,
-			Type:       result.Type,
-			Confidence: result.Confidence,
+			CorrelationID: result.ID,
+			Type:          result.Type,
+			Confidence:    result.Confidence,
 		})
 	}
 

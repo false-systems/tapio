@@ -1,6 +1,3 @@
-//go:build experimental
-// +build experimental
-
 package analytics
 
 import (
@@ -9,10 +6,11 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"github.com/yairfalse/tapio/pkg/intelligence/interfaces"
-	"go.uber.org/zap"
 )
 
 // AnalyticsCorrelationAdapter adapts correlation.SimpleCorrelationSystem to CorrelationEngine interface
