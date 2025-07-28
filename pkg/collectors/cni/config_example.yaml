@@ -1,0 +1,55 @@
+# Example CNI Collector Configuration for Colima/Linux environments
+name: "cni-collector"
+enabled: true
+event_buffer_size: 10000
+
+# CNI paths
+cni_bin_path: "/opt/cni/bin"
+cni_conf_path: "/etc/cni/net.d"
+
+# Enable monitoring approaches
+enable_log_monitoring: true
+enable_process_monitoring: true
+enable_event_monitoring: true
+enable_file_monitoring: true
+
+# Enable efficient monitoring (works great in Colima Linux VMs)
+use_ebpf: true         # Kernel-level CNI observation
+use_inotify: true      # Real-time file monitoring
+use_k8s_informer: true # Native K8s API instead of kubectl
+
+# Performance tuning
+poll_interval: 30s
+event_rate_limit: 1000
+max_concurrent_watch: 10
+
+# Kubernetes integration
+in_cluster: false  # Set to true if running inside K8s
+namespace: ""      # Empty for all namespaces
+label_selector: "" # Optional pod label selector
+
+# Correlation
+enable_trace_correlation: true
+correlation_timeout: 5m
+
+# Plugin-specific configs (optional)
+cilium_config:
+  hubble_endpoint: "localhost:4245"
+  enable_flow_monitor: true
+  enable_policy_audit: true
+
+calico_config:
+  felix_metrics_port: 9091
+  enable_bgp_monitor: false
+  policy_log_level: "info"
+
+# Production settings for Colima testing
+monitored_plugins:
+  - "bridge"
+  - "loopback"
+  - "host-local"
+  - "portmap"
+  - "tuning"
+  - "cilium"
+  - "calico"
+  - "flannel"
