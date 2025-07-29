@@ -336,7 +336,6 @@ func (e EventType) String() string {
 	}
 }
 
-
 // ToUnifiedEvent converts EnrichedEvent to domain.UnifiedEvent for Tapio integration
 func (e *EnrichedEvent) ToUnifiedEvent() *domain.UnifiedEvent {
 	// Create builder

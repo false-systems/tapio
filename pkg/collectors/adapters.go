@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	ebpfcore "github.com/yairfalse/tapio/pkg/collectors/ebpf/core"
 	"github.com/yairfalse/tapio/pkg/collectors/k8s"
 	k8score "github.com/yairfalse/tapio/pkg/collectors/k8s/core"

@@ -227,4 +227,3 @@ func TestMockSimpleCollector(t *testing.T) {
 		t.Fatalf("failed to stop collector: %v", err)
 	}
 }
-

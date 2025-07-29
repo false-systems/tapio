@@ -16,11 +16,11 @@ type ProgramManager struct {
 	loader   *BPFLoader
 	programs map[string]*ManagedProgram
 	mu       sync.RWMutex
-	
+
 	// Event handling
 	eventHandlers map[string]EventHandler
 	readers       map[string]EventReader
-	
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,11 +43,11 @@ type ManagedProgram struct {
 
 // Attachment represents how a program is attached to the kernel
 type Attachment struct {
-	Type        AttachType
-	Point       string
-	Priority    int
-	Attached    bool
-	AttachedAt  time.Time
+	Type       AttachType
+	Point      string
+	Priority   int
+	Attached   bool
+	AttachedAt time.Time
 }
 
 // ProgramState represents the current state of a program
@@ -66,22 +66,22 @@ const (
 // ProgramConfig contains configuration for a BPF program
 type ProgramConfig struct {
 	// Loading options
-	AutoAttach       bool              `json:"auto_attach"`
-	AttachPoints     []AttachmentSpec  `json:"attach_points"`
-	
+	AutoAttach   bool             `json:"auto_attach"`
+	AttachPoints []AttachmentSpec `json:"attach_points"`
+
 	// Resource limits
-	MaxMemory        uint64            `json:"max_memory"`
-	MaxMaps          int               `json:"max_maps"`
-	
+	MaxMemory uint64 `json:"max_memory"`
+	MaxMaps   int    `json:"max_maps"`
+
 	// Event handling
-	EventBufferSize  int               `json:"event_buffer_size"`
-	EventHandler     string            `json:"event_handler"`
-	
+	EventBufferSize int    `json:"event_buffer_size"`
+	EventHandler    string `json:"event_handler"`
+
 	// Map configuration
-	MapConfigs       map[string]MapConfig `json:"map_configs"`
-	
+	MapConfigs map[string]MapConfig `json:"map_configs"`
+
 	// Tail call configuration
-	TailCalls        map[int32]string  `json:"tail_calls"`
+	TailCalls map[int32]string `json:"tail_calls"`
 }
 
 // AttachmentSpec specifies how to attach a program
@@ -93,9 +93,9 @@ type AttachmentSpec struct {
 
 // MapConfig contains configuration for a BPF map
 type MapConfig struct {
-	Persist     bool   `json:"persist"`
-	PinPath     string `json:"pin_path"`
-	MaxEntries  uint32 `json:"max_entries"`
+	Persist    bool   `json:"persist"`
+	PinPath    string `json:"pin_path"`
+	MaxEntries uint32 `json:"max_entries"`
 }
 
 // EventHandler processes events from BPF programs
@@ -113,7 +113,7 @@ type EventReader interface {
 // NewProgramManager creates a new BPF program manager
 func NewProgramManager(loader *BPFLoader) *ProgramManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &ProgramManager{
 		loader:        loader,
 		programs:      make(map[string]*ManagedProgram),
@@ -128,12 +128,12 @@ func NewProgramManager(loader *BPFLoader) *ProgramManager {
 func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *ProgramConfig) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	
+
 	// Check if already loaded
 	if _, exists := pm.programs[name]; exists {
 		return fmt.Errorf("program %s already loaded", name)
 	}
-	
+
 	// Create managed program
 	managed := &ManagedProgram{
 		Name:        name,
@@ -143,7 +143,7 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 		Config:      config,
 		Attachments: make([]Attachment, 0),
 	}
-	
+
 	// Load program specification
 	spec, err := pm.loader.LoadProgramSpec(elfPath)
 	if err != nil {
@@ -151,7 +151,7 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 		return fmt.Errorf("failed to load program spec: %w", err)
 	}
 	managed.Spec = spec
-	
+
 	// Apply map configurations
 	for mapName, mapConfig := range config.MapConfigs {
 		if mapSpec, exists := spec.Maps[mapName]; exists {
@@ -160,7 +160,7 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 			}
 		}
 	}
-	
+
 	// Load collection
 	coll, err := ebpf.NewCollection(spec)
 	if err != nil {
@@ -168,7 +168,7 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 		return fmt.Errorf("failed to load collection: %w", err)
 	}
 	managed.Collection = coll
-	
+
 	// Setup maps
 	for mapName, m := range coll.Maps {
 		// Handle map persistence
@@ -177,7 +177,7 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 		}
 		managed.Maps[mapName] = m
 	}
-	
+
 	// Setup tail calls if configured
 	if len(config.TailCalls) > 0 {
 		if err := pm.setupTailCalls(managed); err != nil {
@@ -185,7 +185,7 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 			return fmt.Errorf("failed to setup tail calls: %w", err)
 		}
 	}
-	
+
 	// Setup event handling
 	if config.EventHandler != "" {
 		if err := pm.setupEventHandling(managed); err != nil {
@@ -193,10 +193,10 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 			return fmt.Errorf("failed to setup event handling: %w", err)
 		}
 	}
-	
+
 	managed.State = StateLoaded
 	pm.programs[name] = managed
-	
+
 	// Auto-attach if configured
 	if config.AutoAttach {
 		if err := pm.AttachProgram(name); err != nil {
@@ -204,7 +204,7 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 			return fmt.Errorf("failed to auto-attach: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -212,38 +212,38 @@ func (pm *ProgramManager) LoadProgram(name string, elfPath string, config *Progr
 func (pm *ProgramManager) UnloadProgram(name string) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	
+
 	managed, exists := pm.programs[name]
 	if !exists {
 		return fmt.Errorf("program %s not found", name)
 	}
-	
+
 	// Detach if attached
 	if managed.State == StateAttached {
 		if err := pm.detachProgram(managed); err != nil {
 			return fmt.Errorf("failed to detach: %w", err)
 		}
 	}
-	
+
 	// Close event handling
 	if reader, exists := pm.readers[name]; exists {
 		reader.Close()
 		delete(pm.readers, name)
 	}
-	
+
 	if handler, exists := pm.eventHandlers[name]; exists {
 		handler.Close()
 		delete(pm.eventHandlers, name)
 	}
-	
+
 	// Close collection
 	if managed.Collection != nil {
 		managed.Collection.Close()
 	}
-	
+
 	managed.State = StateUnloaded
 	delete(pm.programs, name)
-	
+
 	return nil
 }
 
@@ -251,18 +251,18 @@ func (pm *ProgramManager) UnloadProgram(name string) error {
 func (pm *ProgramManager) AttachProgram(name string) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	
+
 	managed, exists := pm.programs[name]
 	if !exists {
 		return fmt.Errorf("program %s not found", name)
 	}
-	
+
 	if managed.State != StateLoaded {
 		return fmt.Errorf("program %s not in loaded state", name)
 	}
-	
+
 	managed.State = StateAttaching
-	
+
 	// Attach based on configuration
 	for _, attachSpec := range managed.Config.AttachPoints {
 		attachType, err := parseAttachType(attachSpec.Type)
@@ -270,7 +270,7 @@ func (pm *ProgramManager) AttachProgram(name string) error {
 			managed.State = StateError
 			return err
 		}
-		
+
 		// Find the program in collection
 		var prog *ebpf.Program
 		for _, p := range managed.Collection.Programs {
@@ -278,18 +278,18 @@ func (pm *ProgramManager) AttachProgram(name string) error {
 			prog = p
 			break
 		}
-		
+
 		if prog == nil {
 			managed.State = StateError
 			return fmt.Errorf("no program found for attachment")
 		}
-		
+
 		// Use loader to attach
 		if err := pm.loader.AttachProgram(name, attachType, attachSpec.Point); err != nil {
 			managed.State = StateError
 			return fmt.Errorf("failed to attach to %s: %w", attachSpec.Point, err)
 		}
-		
+
 		managed.Attachments = append(managed.Attachments, Attachment{
 			Type:       attachType,
 			Point:      attachSpec.Point,
@@ -298,7 +298,7 @@ func (pm *ProgramManager) AttachProgram(name string) error {
 			AttachedAt: time.Now(),
 		})
 	}
-	
+
 	managed.State = StateAttached
 	return nil
 }
@@ -307,12 +307,12 @@ func (pm *ProgramManager) AttachProgram(name string) error {
 func (pm *ProgramManager) DetachProgram(name string) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	
+
 	managed, exists := pm.programs[name]
 	if !exists {
 		return fmt.Errorf("program %s not found", name)
 	}
-	
+
 	return pm.detachProgram(managed)
 }
 
@@ -320,12 +320,12 @@ func (pm *ProgramManager) DetachProgram(name string) error {
 func (pm *ProgramManager) GetProgramState(name string) (ProgramState, error) {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	
+
 	managed, exists := pm.programs[name]
 	if !exists {
 		return StateUnloaded, fmt.Errorf("program %s not found", name)
 	}
-	
+
 	return managed.State, nil
 }
 
@@ -333,18 +333,18 @@ func (pm *ProgramManager) GetProgramState(name string) (ProgramState, error) {
 func (pm *ProgramManager) GetProgramStats(name string) (*ProgramStats, error) {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	
+
 	managed, exists := pm.programs[name]
 	if !exists {
 		return nil, fmt.Errorf("program %s not found", name)
 	}
-	
+
 	// Get fresh stats from loader
 	stats, err := pm.loader.GetProgramStats(name)
 	if err != nil {
 		return managed.Statistics, err
 	}
-	
+
 	managed.Statistics = stats
 	return stats, nil
 }
@@ -353,7 +353,7 @@ func (pm *ProgramManager) GetProgramStats(name string) (*ProgramStats, error) {
 func (pm *ProgramManager) ListPrograms() []ProgramInfo {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	
+
 	programs := make([]ProgramInfo, 0, len(pm.programs))
 	for name, managed := range pm.programs {
 		info := ProgramInfo{
@@ -366,7 +366,7 @@ func (pm *ProgramManager) ListPrograms() []ProgramInfo {
 		}
 		programs = append(programs, info)
 	}
-	
+
 	return programs
 }
 
@@ -376,12 +376,12 @@ func (pm *ProgramManager) ReloadProgram(name string, elfPath string, config *Pro
 	if err := pm.UnloadProgram(name); err != nil {
 		return fmt.Errorf("failed to unload existing program: %w", err)
 	}
-	
+
 	// Load new version
 	if err := pm.LoadProgram(name, elfPath, config); err != nil {
 		return fmt.Errorf("failed to load new program: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -396,7 +396,7 @@ func (pm *ProgramManager) Start() error {
 		}
 	}
 	pm.mu.RUnlock()
-	
+
 	return nil
 }
 
@@ -404,15 +404,15 @@ func (pm *ProgramManager) Start() error {
 func (pm *ProgramManager) Stop() error {
 	pm.cancel()
 	pm.wg.Wait()
-	
+
 	// Unload all programs
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	
+
 	for name := range pm.programs {
 		pm.UnloadProgram(name)
 	}
-	
+
 	return nil
 }
 
@@ -421,7 +421,7 @@ func (pm *ProgramManager) Stop() error {
 func (pm *ProgramManager) setupTailCalls(managed *ManagedProgram) error {
 	// Setup tail call map
 	progArrayName := managed.Name + "_progs"
-	
+
 	// Find program array map
 	progArray, exists := managed.Maps[progArrayName]
 	if !exists {
@@ -435,23 +435,23 @@ func (pm *ProgramManager) setupTailCalls(managed *ManagedProgram) error {
 			}
 		}
 	}
-	
+
 	if progArray == nil {
 		return fmt.Errorf("no program array map found for tail calls")
 	}
-	
+
 	// Populate tail call map
 	for idx, progName := range managed.Config.TailCalls {
 		prog, exists := managed.Collection.Programs[progName]
 		if !exists {
 			return fmt.Errorf("tail call program %s not found", progName)
 		}
-		
+
 		if err := progArray.Put(idx, prog); err != nil {
 			return fmt.Errorf("failed to setup tail call %d->%s: %w", idx, progName, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -459,7 +459,7 @@ func (pm *ProgramManager) setupEventHandling(managed *ManagedProgram) error {
 	// Find event map (ring buffer or perf array)
 	var eventMap *ebpf.Map
 	var mapType ebpf.MapType
-	
+
 	for mapName, m := range managed.Maps {
 		info, _ := m.Info()
 		if info != nil {
@@ -470,15 +470,15 @@ func (pm *ProgramManager) setupEventHandling(managed *ManagedProgram) error {
 			}
 		}
 	}
-	
+
 	if eventMap == nil {
 		return fmt.Errorf("no event map found")
 	}
-	
+
 	// Create appropriate reader
 	var reader EventReader
 	var err error
-	
+
 	switch mapType {
 	case ebpf.RingBuf:
 		rd, err := ringbuf.NewReader(eventMap)
@@ -486,40 +486,40 @@ func (pm *ProgramManager) setupEventHandling(managed *ManagedProgram) error {
 			return fmt.Errorf("failed to create ring buffer reader: %w", err)
 		}
 		reader = &ringBufReader{rd}
-		
+
 	case ebpf.PerfEventArray:
 		rd, err := perf.NewReader(eventMap, managed.Config.EventBufferSize)
 		if err != nil {
 			return fmt.Errorf("failed to create perf reader: %w", err)
 		}
 		reader = &perfReader{rd}
-		
+
 	default:
 		return fmt.Errorf("unsupported event map type: %v", mapType)
 	}
-	
+
 	pm.readers[managed.Name] = reader
-	
+
 	// TODO: Create event handler based on config
 	// For now, we'll use a dummy handler
 	pm.eventHandlers[managed.Name] = &dummyEventHandler{}
-	
+
 	return nil
 }
 
 func (pm *ProgramManager) processEvents(name string) {
 	defer pm.wg.Done()
-	
+
 	reader, exists := pm.readers[name]
 	if !exists {
 		return
 	}
-	
+
 	handler, exists := pm.eventHandlers[name]
 	if !exists {
 		return
 	}
-	
+
 	for {
 		select {
 		case <-pm.ctx.Done():
@@ -532,7 +532,7 @@ func (pm *ProgramManager) processEvents(name string) {
 				}
 				continue
 			}
-			
+
 			if err := handler.HandleEvent(event); err != nil {
 				// Log error
 			}
@@ -542,12 +542,12 @@ func (pm *ProgramManager) processEvents(name string) {
 
 func (pm *ProgramManager) detachProgram(managed *ManagedProgram) error {
 	managed.State = StateDetaching
-	
+
 	// Detach all attachments
 	for i := range managed.Attachments {
 		managed.Attachments[i].Attached = false
 	}
-	
+
 	managed.State = StateLoaded
 	return nil
 }

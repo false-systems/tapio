@@ -18,21 +18,21 @@ import (
 type BPFLoader struct {
 	// BTF information
 	kernelBTF *btf.Spec
-	
+
 	// Loaded programs and maps
 	programs map[string]*BPFProgram
 	maps     map[string]*ebpf.Map
-	
+
 	// Program management
-	mu            sync.RWMutex
+	mu             sync.RWMutex
 	collectionOpts *ebpf.CollectionOptions
-	
+
 	// Map persistence
-	pinnedPath    string
-	persistMaps   bool
-	
+	pinnedPath  string
+	persistMaps bool
+
 	// Tail call support
-	tailCallMaps  map[string]*ebpf.Map
+	tailCallMaps map[string]*ebpf.Map
 }
 
 // BPFProgram represents a loaded BPF program with its metadata
@@ -48,20 +48,20 @@ type BPFProgram struct {
 // BPFLoaderConfig contains configuration for the BPF loader
 type BPFLoaderConfig struct {
 	// BTF options
-	UseKernelBTF   bool   `json:"use_kernel_btf"`
-	BTFPath        string `json:"btf_path"` // Custom BTF file path
-	
+	UseKernelBTF bool   `json:"use_kernel_btf"`
+	BTFPath      string `json:"btf_path"` // Custom BTF file path
+
 	// Map persistence
 	EnablePersistence bool   `json:"enable_persistence"`
-	PinnedPath       string `json:"pinned_path"` // Path for pinned maps
-	
+	PinnedPath        string `json:"pinned_path"` // Path for pinned maps
+
 	// Loading options
 	VerifierLogLevel uint32 `json:"verifier_log_level"`
 	VerifierLogSize  int    `json:"verifier_log_size"`
-	
+
 	// CO-RE options
-	EnableCORE       bool     `json:"enable_core"`
-	TargetKernels    []string `json:"target_kernels"` // Kernel versions to support
+	EnableCORE    bool     `json:"enable_core"`
+	TargetKernels []string `json:"target_kernels"` // Kernel versions to support
 }
 
 // NewBPFLoader creates a new CO-RE enabled BPF loader
@@ -383,13 +383,13 @@ func (l *BPFLoader) GetMapStats(name string) (*MapStats, error) {
 	}
 
 	return &MapStats{
-		Name:        name,
-		Type:        info.Type.String(),
-		KeySize:     info.KeySize,
-		ValueSize:   info.ValueSize,
-		MaxEntries:  info.MaxEntries,
-		Flags:       info.Flags,
-		ID:          info.ID,
+		Name:       name,
+		Type:       info.Type.String(),
+		KeySize:    info.KeySize,
+		ValueSize:  info.ValueSize,
+		MaxEntries: info.MaxEntries,
+		Flags:      info.Flags,
+		ID:         info.ID,
 	}, nil
 }
 
