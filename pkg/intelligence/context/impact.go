@@ -6,15 +6,9 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// ImpactAnalyzer calculates business impact and severity for events
+// ImpactAnalyzer calculates infrastructure impact and severity for events
 type ImpactAnalyzer struct {
-	// Business rules for determining impact
-	criticalNamespaces   map[string]bool
-	revenueNamespaces    map[string]bool
-	customerServices     map[string]bool
-	sloMonitoredServices map[string]bool
-
-	// Severity weights based on event characteristics
+	// Infrastructure-based severity weights
 	severityWeights map[string]float64
 
 	// Thresholds for severity determination
@@ -23,45 +17,9 @@ type ImpactAnalyzer struct {
 	mediumThreshold   float64
 }
 
-// NewImpactAnalyzer creates a new impact analyzer with default configuration
+// NewImpactAnalyzer creates a new impact analyzer focused on infrastructure
 func NewImpactAnalyzer() *ImpactAnalyzer {
 	return &ImpactAnalyzer{
-		criticalNamespaces: map[string]bool{
-			"production":     true,
-			"prod":           true,
-			"payments":       true,
-			"billing":        true,
-			"checkout":       true,
-			"authentication": true,
-			"auth":           true,
-		},
-		revenueNamespaces: map[string]bool{
-			"payments":  true,
-			"billing":   true,
-			"checkout":  true,
-			"orders":    true,
-			"inventory": true,
-			"cart":      true,
-		},
-		customerServices: map[string]bool{
-			"api-gateway":     true,
-			"frontend":        true,
-			"mobile-api":      true,
-			"web-api":         true,
-			"graphql":         true,
-			"checkout":        true,
-			"user-service":    true,
-			"cart-service":    true,
-			"order-service":   true,
-			"payment-service": true,
-		},
-		sloMonitoredServices: map[string]bool{
-			"api-gateway":     true,
-			"payment-service": true,
-			"order-service":   true,
-			"checkout":        true,
-			"auth-service":    true,
-		},
 		severityWeights: map[string]float64{
 			"error_rate":     0.25,
 			"latency":        0.20,
@@ -74,32 +32,7 @@ func NewImpactAnalyzer() *ImpactAnalyzer {
 	}
 }
 
-// NewImpactAnalyzerWithConfig creates an analyzer with custom configuration
-func NewImpactAnalyzerWithConfig(
-	criticalNamespaces map[string]bool,
-	revenueNamespaces map[string]bool,
-	customerServices map[string]bool,
-	sloServices map[string]bool,
-) *ImpactAnalyzer {
-	analyzer := NewImpactAnalyzer()
-
-	if criticalNamespaces != nil {
-		analyzer.criticalNamespaces = criticalNamespaces
-	}
-	if revenueNamespaces != nil {
-		analyzer.revenueNamespaces = revenueNamespaces
-	}
-	if customerServices != nil {
-		analyzer.customerServices = customerServices
-	}
-	if sloServices != nil {
-		analyzer.sloMonitoredServices = sloServices
-	}
-
-	return analyzer
-}
-
-// AssessImpact analyzes the business impact of an event
+// AssessImpact analyzes the infrastructure impact of an event
 func (ia *ImpactAnalyzer) AssessImpact(ue *domain.UnifiedEvent) *domain.ImpactContext {
 	if ue == nil {
 		return nil
@@ -107,49 +40,43 @@ func (ia *ImpactAnalyzer) AssessImpact(ue *domain.UnifiedEvent) *domain.ImpactCo
 
 	impact := &domain.ImpactContext{
 		AffectedServices: ia.identifyAffectedServices(ue),
-		CustomerFacing:   ia.isCustomerFacing(ue),
-		RevenueImpacting: ia.isRevenueImpacting(ue),
-		SLOImpact:        ia.hasSLOImpact(ue),
 	}
 
-	// Calculate business impact score
-	impact.BusinessImpact = ia.calculateBusinessImpact(ue, impact)
+	// Calculate infrastructure impact score based on technical indicators
+	impactScore := ia.calculateInfrastructureImpact(ue)
 
-	// Determine severity based on impact score and event characteristics
-	impact.Severity = ia.determineSeverity(ue, impact.BusinessImpact)
+	// Determine severity based on technical characteristics
+	impact.Severity = ia.determineSeverity(ue, impactScore)
 
-	// Estimate affected users
-	impact.AffectedUsers = ia.estimateAffectedUsers(ue, impact)
+	// Set technical impact indicators (removing business assumptions)
+	impact.BusinessImpact = impactScore    // Rename this field to InfrastructureImpact in domain
+	impact.CustomerFacing = false           // Remove business assumptions
+	impact.RevenueImpacting = false         // Remove business assumptions
+	impact.SLOImpact = ia.hasSLOImpact(ue) // Keep as this is technical
 
 	return impact
 }
 
-// calculateBusinessImpact computes a normalized impact score (0.0-1.0)
-func (ia *ImpactAnalyzer) calculateBusinessImpact(ue *domain.UnifiedEvent, impact *domain.ImpactContext) float64 {
+// calculateInfrastructureImpact computes a normalized impact score (0.0-1.0) based on technical indicators
+func (ia *ImpactAnalyzer) calculateInfrastructureImpact(ue *domain.UnifiedEvent) float64 {
 	score := 0.0
 
-	// Base score from event type and characteristics
+	// Base score from event type and technical characteristics
 	baseScore := ia.getBaseScore(ue)
-	score += baseScore * 0.3
+	score += baseScore * 0.4
 
-	// Namespace criticality
-	if ia.isInCriticalNamespace(ue) {
+	// Production environment detection (without business assumptions)
+	if ia.isProductionEnvironment(ue) {
 		score += 0.2
 	}
 
-	// Customer-facing impact
-	if impact.CustomerFacing {
+	// Cascade risk based on resource type
+	cascadeRisk := ia.calculateCascadeRisk(ue)
+	score += cascadeRisk * 0.2
+
+	// System resource criticality
+	if ia.isSystemCritical(ue) {
 		score += 0.2
-	}
-
-	// Revenue impact
-	if impact.RevenueImpacting {
-		score += 0.15
-	}
-
-	// SLO impact
-	if impact.SLOImpact {
-		score += 0.15
 	}
 
 	// Cap at 1.0
@@ -161,146 +88,43 @@ func (ia *ImpactAnalyzer) calculateBusinessImpact(ue *domain.UnifiedEvent, impac
 }
 
 // determineSeverity maps impact score and event characteristics to severity levels
-func (ia *ImpactAnalyzer) determineSeverity(ue *domain.UnifiedEvent, businessImpact float64) string {
-	// Check for critical indicators
-	if ia.hasCriticalIndicators(ue) || businessImpact >= ia.criticalThreshold {
+func (ia *ImpactAnalyzer) determineSeverity(ue *domain.UnifiedEvent, impactScore float64) string {
+	// Check for critical technical indicators
+	if ia.hasCriticalIndicators(ue) || impactScore >= ia.criticalThreshold {
 		return "critical"
 	}
 
-	// Check for high severity indicators
-	if ia.hasHighSeverityIndicators(ue) || businessImpact >= ia.highThreshold {
+	// Check for high severity technical indicators
+	if ia.hasHighSeverityIndicators(ue) || impactScore >= ia.highThreshold {
 		return "high"
 	}
 
 	// Check for medium severity
-	if businessImpact >= ia.mediumThreshold {
+	if impactScore >= ia.mediumThreshold {
 		return "medium"
 	}
 
 	return "low"
 }
 
-// isCustomerFacing checks if the event affects customer-facing services
-func (ia *ImpactAnalyzer) isCustomerFacing(ue *domain.UnifiedEvent) bool {
-	// Check entity context
-	if ue.Entity != nil {
-		serviceName := strings.ToLower(ue.Entity.Name)
-		if ia.customerServices[serviceName] {
-			return true
-		}
-
-		// Check if entity name contains customer-facing keywords
-		for service := range ia.customerServices {
-			if strings.Contains(serviceName, service) {
-				return true
-			}
-		}
-
-		// Check namespace
-		namespace := strings.ToLower(ue.Entity.Namespace)
-		if strings.Contains(namespace, "frontend") || strings.Contains(namespace, "api") {
-			return true
-		}
-	}
-
-	// Check Kubernetes data
-	if ue.Kubernetes != nil && ue.Kubernetes.Object != "" {
-		objectLower := strings.ToLower(ue.Kubernetes.Object)
-		for service := range ia.customerServices {
-			if strings.Contains(objectLower, service) {
-				return true
-			}
-		}
-	}
-
-	// Check application logs for customer-facing indicators
-	if ue.Application != nil && ue.Application.Message != "" {
-		message := strings.ToLower(ue.Application.Message)
-		customerIndicators := []string{"user", "customer", "client", "frontend", "ui", "mobile"}
-		for _, indicator := range customerIndicators {
-			if strings.Contains(message, indicator) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// isRevenueImpacting checks if the event affects revenue-critical services
-func (ia *ImpactAnalyzer) isRevenueImpacting(ue *domain.UnifiedEvent) bool {
-	// Check namespace
-	if ue.Entity != nil {
-		namespace := strings.ToLower(ue.Entity.Namespace)
-		if ia.revenueNamespaces[namespace] {
-			return true
-		}
-
-		// Check service name
-		serviceName := strings.ToLower(ue.Entity.Name)
-		revenueServices := []string{"payment", "billing", "checkout", "order", "cart", "subscription"}
-		for _, service := range revenueServices {
-			if strings.Contains(serviceName, service) {
-				return true
-			}
-		}
-	}
-
-	// Check for payment/billing related errors
-	if ue.Application != nil && ue.Application.Level == "error" {
-		message := strings.ToLower(ue.Application.Message)
-		revenueIndicators := []string{"payment", "transaction", "billing", "invoice", "charge", "refund"}
-		for _, indicator := range revenueIndicators {
-			if strings.Contains(message, indicator) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// hasSLOImpact checks if the event affects SLO-monitored services
+// hasSLOImpact checks if the event affects service level objectives (technical metric)
 func (ia *ImpactAnalyzer) hasSLOImpact(ue *domain.UnifiedEvent) bool {
-	// Don't apply SLO impact to non-production environments
-	if ue.Entity != nil {
-		namespace := strings.ToLower(ue.Entity.Namespace)
-		if strings.Contains(namespace, "staging") || strings.Contains(namespace, "test") || strings.Contains(namespace, "dev") {
-			return false
-		}
-
-		serviceName := strings.ToLower(ue.Entity.Name)
-		if ia.sloMonitoredServices[serviceName] {
-			return true
-		}
-
-		// Check if entity name contains any SLO monitored service
-		for sloService := range ia.sloMonitoredServices {
-			if strings.Contains(serviceName, sloService) {
-				return true
-			}
-		}
-	}
-
-	// Check if it's a latency or availability issue in production
+	// Check for latency or availability issues
 	if ue.Type == domain.EventTypeNetwork || ue.Type == domain.EventTypeService {
-		// Skip non-production environments
-		if ue.Entity != nil {
-			namespace := strings.ToLower(ue.Entity.Namespace)
-			if strings.Contains(namespace, "staging") || strings.Contains(namespace, "test") || strings.Contains(namespace, "dev") {
-				return false
-			}
-		}
-
 		// Network timeouts or service failures impact SLOs
 		if ue.Application != nil && ue.Application.Level == "error" {
 			message := strings.ToLower(ue.Application.Message)
-			sloIndicators := []string{"timeout", "unavailable", "refused", "latency", "slow"}
+			sloIndicators := []string{"timeout", "unavailable", "refused", "latency", "slow", "degraded"}
 			for _, indicator := range sloIndicators {
 				if strings.Contains(message, indicator) {
 					return true
 				}
 			}
+		}
+
+		// High latency network events
+		if ue.Network != nil && ue.Network.Latency > 1000000000 { // > 1 second
+			return true
 		}
 	}
 
@@ -328,14 +152,6 @@ func (ia *ImpactAnalyzer) identifyAffectedServices(ue *domain.UnifiedEvent) []st
 		}
 	}
 
-	// From network connections
-	if ue.Network != nil {
-		// Could identify services by port conventions
-		if service := ia.identifyServiceByPort(ue.Network.DestPort); service != "" {
-			services[service] = true
-		}
-	}
-
 	// Convert map to slice
 	result := make([]string, 0, len(services))
 	for service := range services {
@@ -345,71 +161,28 @@ func (ia *ImpactAnalyzer) identifyAffectedServices(ue *domain.UnifiedEvent) []st
 	return result
 }
 
-// estimateAffectedUsers estimates the number of users impacted
-func (ia *ImpactAnalyzer) estimateAffectedUsers(ue *domain.UnifiedEvent, impact *domain.ImpactContext) int {
-	// Base estimation on service type and severity
-	baseUsers := 0
-
-	if impact.CustomerFacing {
-		switch impact.Severity {
-		case "critical":
-			baseUsers = 10000 // All users potentially affected
-		case "high":
-			baseUsers = 5000 // Significant portion
-		case "medium":
-			baseUsers = 1000 // Moderate impact
-		case "low":
-			baseUsers = 100 // Limited impact
-		}
-	} else {
-		// Internal services have indirect impact
-		switch impact.Severity {
-		case "critical":
-			baseUsers = 1000
-		case "high":
-			baseUsers = 500
-		case "medium":
-			baseUsers = 100
-		case "low":
-			baseUsers = 10
-		}
-	}
-
-	// Adjust based on namespace/service
-	if ue.Entity != nil {
-		namespace := strings.ToLower(ue.Entity.Namespace)
-		if namespace == "production" || namespace == "prod" {
-			baseUsers = int(float64(baseUsers) * 1.5)
-		} else if strings.Contains(namespace, "staging") || strings.Contains(namespace, "test") {
-			baseUsers = int(float64(baseUsers) * 0.1)
-		}
-	}
-
-	return baseUsers
-}
-
-// Helper methods
+// Infrastructure-focused helper methods
 
 func (ia *ImpactAnalyzer) getBaseScore(ue *domain.UnifiedEvent) float64 {
-	// Base score by event type
+	// Base score by event type (technical severity)
 	switch ue.Type {
 	case domain.EventTypeSystem, domain.EventTypeCPU, domain.EventTypeMemory:
-		// System issues have high base impact
+		// System resource issues
 		return 0.7
 	case domain.EventTypeNetwork:
-		// Network issues often cascade
-		return 0.8
+		// Network issues can cascade
+		return 0.6
 	case domain.EventTypeService:
-		// Service failures are critical
-		return 0.9
+		// Service failures
+		return 0.8
 	case domain.EventTypeKubernetes:
-		// Depends on the specific event
+		// Kubernetes events
 		if ue.Kubernetes != nil && ue.Kubernetes.EventType == "Warning" {
-			return 0.4
+			return 0.5
 		}
 		return 0.4
 	case domain.EventTypeLog:
-		// Depends on log level
+		// Based on log level
 		if ue.Application != nil {
 			switch ue.Application.Level {
 			case "error", "fatal":
@@ -426,11 +199,67 @@ func (ia *ImpactAnalyzer) getBaseScore(ue *domain.UnifiedEvent) float64 {
 	}
 }
 
-func (ia *ImpactAnalyzer) isInCriticalNamespace(ue *domain.UnifiedEvent) bool {
+func (ia *ImpactAnalyzer) isProductionEnvironment(ue *domain.UnifiedEvent) bool {
 	if ue.Entity != nil {
 		namespace := strings.ToLower(ue.Entity.Namespace)
-		return ia.criticalNamespaces[namespace]
+		// Simple check for non-development environments
+		return !strings.Contains(namespace, "dev") &&
+			!strings.Contains(namespace, "test") &&
+			!strings.Contains(namespace, "staging")
 	}
+	return true // Assume production if unknown
+}
+
+func (ia *ImpactAnalyzer) calculateCascadeRisk(ue *domain.UnifiedEvent) float64 {
+	risk := 0.0
+
+	// Network components have high cascade risk
+	if ue.Entity != nil {
+		entityType := strings.ToLower(ue.Entity.Type)
+		switch entityType {
+		case "service", "ingress", "networkpolicy":
+			risk = 0.8
+		case "deployment", "replicaset", "statefulset":
+			risk = 0.6
+		case "pod":
+			risk = 0.4
+		case "configmap", "secret":
+			risk = 0.3
+		}
+	}
+
+	// Critical infrastructure components
+	if ue.Kubernetes != nil {
+		objKind := strings.ToLower(ue.Kubernetes.ObjectKind)
+		if objKind == "node" {
+			risk = 1.0 // Node issues affect all pods
+		} else if objKind == "namespace" {
+			risk = 0.9 // Namespace issues affect multiple resources
+		}
+	}
+
+	return risk
+}
+
+func (ia *ImpactAnalyzer) isSystemCritical(ue *domain.UnifiedEvent) bool {
+	// Check for system-level critical resources
+	if ue.Entity != nil {
+		namespace := strings.ToLower(ue.Entity.Namespace)
+		// System namespaces are critical
+		if namespace == "kube-system" || namespace == "kube-public" || namespace == "kube-node-lease" {
+			return true
+		}
+
+		// Critical workload types
+		entityName := strings.ToLower(ue.Entity.Name)
+		criticalComponents := []string{"kube-apiserver", "kube-controller", "kube-scheduler", "etcd", "coredns", "kube-proxy"}
+		for _, component := range criticalComponents {
+			if strings.Contains(entityName, component) {
+				return true
+			}
+		}
+	}
+
 	return false
 }
 
@@ -448,15 +277,20 @@ func (ia *ImpactAnalyzer) hasCriticalIndicators(ue *domain.UnifiedEvent) bool {
 		}
 	}
 
-	// Check for critical service failures
-	if ue.Type == domain.EventTypeService && ue.Application != nil {
+	// Check for critical failures
+	if ue.Application != nil {
 		message := strings.ToLower(ue.Application.Message)
-		criticalPatterns := []string{"panic", "fatal", "crash", "oom", "out of memory", "segfault"}
+		criticalPatterns := []string{"panic", "fatal", "crash", "oom", "out of memory", "segfault", "kernel panic"}
 		for _, pattern := range criticalPatterns {
 			if strings.Contains(message, pattern) {
 				return true
 			}
 		}
+	}
+
+	// Node failures are critical
+	if ue.Kubernetes != nil && ue.Kubernetes.ObjectKind == "Node" && ue.Kubernetes.Action == "DELETED" {
+		return true
 	}
 
 	return false
@@ -472,7 +306,7 @@ func (ia *ImpactAnalyzer) hasHighSeverityIndicators(ue *domain.UnifiedEvent) boo
 	if ue.Type == domain.EventTypeService || ue.Type == domain.EventTypeNetwork {
 		if ue.Application != nil {
 			message := strings.ToLower(ue.Application.Message)
-			highPatterns := []string{"timeout", "refused", "unavailable", "degraded", "slow"}
+			highPatterns := []string{"timeout", "refused", "unavailable", "degraded", "slow", "connection reset"}
 			for _, pattern := range highPatterns {
 				if strings.Contains(message, pattern) {
 					return true
@@ -481,40 +315,20 @@ func (ia *ImpactAnalyzer) hasHighSeverityIndicators(ue *domain.UnifiedEvent) boo
 		}
 	}
 
-	// Kubernetes warnings are medium severity, not high
-	// Remove this check from high severity indicators
+	// Pod evictions and failures
+	if ue.Kubernetes != nil {
+		if ue.Kubernetes.Reason == "Evicted" || ue.Kubernetes.Reason == "Failed" || ue.Kubernetes.Reason == "OOMKilled" {
+			return true
+		}
+	}
 
 	return false
-}
-
-func (ia *ImpactAnalyzer) identifyServiceByPort(port uint16) string {
-	// Common service port mappings
-	switch port {
-	case 80, 8080:
-		return "web-service"
-	case 443, 8443:
-		return "https-service"
-	case 3306:
-		return "mysql"
-	case 5432:
-		return "postgresql"
-	case 6379:
-		return "redis"
-	case 9200:
-		return "elasticsearch"
-	case 5672:
-		return "rabbitmq"
-	case 9092:
-		return "kafka"
-	default:
-		return ""
-	}
 }
 
 // extractServiceName extracts service name from pod name or similar
 func extractServiceName(podName string) string {
 	// Remove common suffixes and hash
-	// e.g., "payment-service-7d4b8c6f5-x2p4n" -> "payment-service"
+	// e.g., "nginx-deployment-7d4b8c6f5-x2p4n" -> "nginx-deployment"
 	parts := strings.Split(podName, "-")
 	if len(parts) < 2 {
 		return podName
@@ -534,7 +348,7 @@ func extractServiceName(podName string) string {
 }
 
 func isHash(s string) bool {
-	// Simple heuristic: contains both letters and numbers, length 5-10, no special chars
+	// Simple heuristic: contains both letters and numbers, length 5-10
 	if len(s) < 5 || len(s) > 10 {
 		return false
 	}
@@ -546,8 +360,8 @@ func isHash(s string) bool {
 			hasLetter = true
 		} else if r >= '0' && r <= '9' {
 			hasNumber = true
-		} else {
-			// Has special character, not a valid hash
+		} else if r != '-' {
+			// Allow hyphens in hashes
 			return false
 		}
 	}
@@ -556,26 +370,6 @@ func isHash(s string) bool {
 }
 
 // Configuration methods
-
-// AddCriticalNamespace adds a namespace to the critical list
-func (ia *ImpactAnalyzer) AddCriticalNamespace(namespace string) {
-	ia.criticalNamespaces[strings.ToLower(namespace)] = true
-}
-
-// AddRevenueNamespace adds a namespace to the revenue-critical list
-func (ia *ImpactAnalyzer) AddRevenueNamespace(namespace string) {
-	ia.revenueNamespaces[strings.ToLower(namespace)] = true
-}
-
-// AddCustomerService adds a service to the customer-facing list
-func (ia *ImpactAnalyzer) AddCustomerService(service string) {
-	ia.customerServices[strings.ToLower(service)] = true
-}
-
-// AddSLOService adds a service to the SLO-monitored list
-func (ia *ImpactAnalyzer) AddSLOService(service string) {
-	ia.sloMonitoredServices[strings.ToLower(service)] = true
-}
 
 // SetSeverityThresholds updates the thresholds for severity determination
 func (ia *ImpactAnalyzer) SetSeverityThresholds(critical, high, medium float64) {

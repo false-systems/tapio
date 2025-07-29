@@ -7,7 +7,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// ImpactAssessment evaluates the business and technical impact of events
+// ImpactAssessment evaluates the technical and infrastructure impact of events
 type ImpactAssessment struct {
 	serviceGraph map[string][]string // service dependencies
 }
@@ -23,7 +23,7 @@ func NewImpactAssessment() *ImpactAssessment {
 func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEvent) (*ImpactResult, error) {
 	result := &ImpactResult{
 		TechnicalSeverity:  "medium", // default
-		BusinessImpact:     0.5,      // default
+		InfrastructureImpact: 0.5,    // default
 		CascadeRisk:        0.0,
 		AffectedServices:   []string{},
 		RecommendedActions: []string{},
@@ -32,16 +32,10 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 	// Use event's impact context if available
 	if event.Impact != nil {
 		result.TechnicalSeverity = event.Impact.Severity
-		result.BusinessImpact = event.Impact.BusinessImpact
+		result.InfrastructureImpact = event.Impact.BusinessImpact // TODO: rename field in domain
 		result.AffectedServices = event.Impact.AffectedServices
-
-		// Increase cascade risk for customer-facing or revenue-impacting events
-		if event.Impact.CustomerFacing {
-			result.CascadeRisk += 0.3
-		}
-		if event.Impact.RevenueImpacting {
-			result.CascadeRisk += 0.4
-		}
+		
+		// Calculate cascade risk based on technical indicators
 		if event.Impact.SLOImpact {
 			result.CascadeRisk += 0.3
 		}
@@ -64,34 +58,40 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 		ia.assessKubernetesImpact(event.Kubernetes, result)
 	}
 
-	// Adjust severity based on entity type
+	// Adjust severity based on entity type and infrastructure role
 	if event.Entity != nil {
 		switch event.Entity.Type {
-		case "database":
-			result.BusinessImpact *= 1.5 // Databases are critical
-			result.CascadeRisk += 0.2
-		case "gateway", "loadbalancer":
-			result.BusinessImpact *= 1.3 // Gateways affect many services
+		case "node":
+			result.InfrastructureImpact *= 2.0 // Nodes affect all pods
+			result.CascadeRisk += 0.5
+		case "service", "ingress", "networkpolicy":
+			result.InfrastructureImpact *= 1.5 // Network resources affect connectivity
 			result.CascadeRisk += 0.3
-		case "cache":
-			result.BusinessImpact *= 1.1 // Cache issues cause performance degradation
+		case "deployment", "statefulset", "daemonset":
+			result.InfrastructureImpact *= 1.3 // Workload controllers
+			result.CascadeRisk += 0.2
+		case "configmap", "secret":
+			result.InfrastructureImpact *= 1.1 // Configuration changes
 		}
 
-		// Critical namespace/labels
-		if event.Entity.Namespace == "production" || event.Entity.Namespace == "prod" {
-			result.BusinessImpact *= 1.2
+		// System namespace detection
+		if event.Entity.Namespace == "kube-system" || event.Entity.Namespace == "kube-public" {
+			result.InfrastructureImpact *= 1.5
+			result.TechnicalSeverity = "high"
 		}
+
+		// Technical tier labels
 		if event.Entity.Labels != nil {
-			if event.Entity.Labels["tier"] == "critical" || event.Entity.Labels["tier"] == "tier-1" {
-				result.BusinessImpact *= 1.5
-				result.TechnicalSeverity = "critical"
+			if event.Entity.Labels["tier"] == "infrastructure" || event.Entity.Labels["tier"] == "system" {
+				result.InfrastructureImpact *= 1.5
+				result.TechnicalSeverity = "high"
 			}
 		}
 	}
 
 	// Cap values
-	if result.BusinessImpact > 1.0 {
-		result.BusinessImpact = 1.0
+	if result.InfrastructureImpact > 1.0 {
+		result.InfrastructureImpact = 1.0
 	}
 	if result.CascadeRisk > 1.0 {
 		result.CascadeRisk = 1.0
@@ -105,10 +105,10 @@ func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEve
 
 // assessKernelImpact evaluates kernel event impact
 func (ia *ImpactAssessment) assessKernelImpact(kernel *domain.KernelData, result *ImpactResult) {
-	// OOM kills are critical
+	// OOM kills are critical infrastructure events
 	if kernel.Syscall == "oom_kill" || strings.Contains(kernel.Comm, "OOM") {
 		result.TechnicalSeverity = "critical"
-		result.BusinessImpact = 0.9
+		result.InfrastructureImpact = 0.9
 		result.RecommendedActions = append(result.RecommendedActions,
 			"Increase memory limits for affected container",
 			"Review application memory usage patterns",
@@ -132,7 +132,7 @@ func (ia *ImpactAssessment) assessKernelImpact(kernel *domain.KernelData, result
 			)
 		case "malloc", "mmap":
 			result.TechnicalSeverity = "high"
-			result.BusinessImpact = 0.8
+			result.InfrastructureImpact = 0.8
 			result.RecommendedActions = append(result.RecommendedActions,
 				"Monitor memory usage",
 				"Check for memory leaks",
@@ -146,7 +146,7 @@ func (ia *ImpactAssessment) assessNetworkImpact(network *domain.NetworkData, res
 	// HTTP/gRPC errors
 	if network.StatusCode >= 500 {
 		result.TechnicalSeverity = "high"
-		result.BusinessImpact = 0.8
+		result.InfrastructureImpact = 0.8
 		result.RecommendedActions = append(result.RecommendedActions,
 			"Check service health",
 			"Review error logs",
@@ -154,7 +154,7 @@ func (ia *ImpactAssessment) assessNetworkImpact(network *domain.NetworkData, res
 		)
 	} else if network.StatusCode >= 400 {
 		result.TechnicalSeverity = "medium"
-		result.BusinessImpact = 0.6
+		result.InfrastructureImpact = 0.5
 		result.RecommendedActions = append(result.RecommendedActions,
 			"Review client requests",
 			"Check API documentation",
@@ -164,7 +164,7 @@ func (ia *ImpactAssessment) assessNetworkImpact(network *domain.NetworkData, res
 	// High latency
 	if network.Latency > 5000000000 { // > 5 seconds
 		result.TechnicalSeverity = "high"
-		result.BusinessImpact = 0.7
+		result.InfrastructureImpact = 0.7
 		result.CascadeRisk += 0.2 // Slow services cause cascading timeouts
 		result.RecommendedActions = append(result.RecommendedActions,
 			"Investigate service performance",
@@ -176,7 +176,7 @@ func (ia *ImpactAssessment) assessNetworkImpact(network *domain.NetworkData, res
 	// Connection failures
 	if network.StatusCode == 0 && network.Protocol != "" {
 		result.TechnicalSeverity = "critical"
-		result.BusinessImpact = 0.9
+		result.InfrastructureImpact = 0.9
 		result.RecommendedActions = append(result.RecommendedActions,
 			"Verify service is running",
 			"Check network policies",
@@ -191,7 +191,7 @@ func (ia *ImpactAssessment) assessApplicationImpact(app *domain.ApplicationData,
 	switch app.Level {
 	case "critical", "fatal":
 		result.TechnicalSeverity = "critical"
-		result.BusinessImpact = 0.9
+		result.InfrastructureImpact = 0.9
 		result.RecommendedActions = append(result.RecommendedActions,
 			"Immediate investigation required",
 			"Check for data corruption",
@@ -199,31 +199,32 @@ func (ia *ImpactAssessment) assessApplicationImpact(app *domain.ApplicationData,
 		)
 	case "error":
 		result.TechnicalSeverity = "high"
-		result.BusinessImpact = 0.7
+		result.InfrastructureImpact = 0.7
 		result.RecommendedActions = append(result.RecommendedActions,
 			"Review error details",
 			"Check recent deployments",
 		)
 	case "warn", "warning":
 		result.TechnicalSeverity = "medium"
-		result.BusinessImpact = 0.5
+		result.InfrastructureImpact = 0.5
 	}
 
-	// Specific error types
+	// Technical error types
 	if app.ErrorType != "" {
 		switch {
 		case strings.Contains(strings.ToLower(app.ErrorType), "database"):
-			result.BusinessImpact *= 1.3
+			result.InfrastructureImpact *= 1.3
 			result.CascadeRisk += 0.3
 			result.RecommendedActions = append(result.RecommendedActions,
 				"Check database connections",
 				"Review query performance",
 			)
-		case strings.Contains(strings.ToLower(app.ErrorType), "auth"):
-			result.BusinessImpact *= 1.2
+		case strings.Contains(strings.ToLower(app.ErrorType), "connection"):
+			result.InfrastructureImpact *= 1.2
+			result.CascadeRisk += 0.2
 			result.RecommendedActions = append(result.RecommendedActions,
-				"Verify authentication service",
-				"Check token validity",
+				"Verify network connectivity",
+				"Check service discovery",
 			)
 		case strings.Contains(strings.ToLower(app.ErrorType), "timeout"):
 			result.CascadeRisk += 0.4
@@ -243,14 +244,14 @@ func (ia *ImpactAssessment) assessKubernetesImpact(k8s *domain.KubernetesData, r
 
 		switch k8s.Reason {
 		case "BackOff", "CrashLoopBackOff":
-			result.BusinessImpact = 0.8
+			result.InfrastructureImpact = 0.8
 			result.RecommendedActions = append(result.RecommendedActions,
 				"Check container logs",
 				"Review liveness/readiness probes",
 				"Verify image availability",
 			)
 		case "OOMKilled":
-			result.BusinessImpact = 0.9
+			result.InfrastructureImpact = 0.9
 			result.TechnicalSeverity = "critical"
 			result.RecommendedActions = append(result.RecommendedActions,
 				"Increase memory limits",
@@ -258,14 +259,14 @@ func (ia *ImpactAssessment) assessKubernetesImpact(k8s *domain.KubernetesData, r
 				"Check for memory leaks",
 			)
 		case "FailedScheduling":
-			result.BusinessImpact = 0.7
+			result.InfrastructureImpact = 0.7
 			result.RecommendedActions = append(result.RecommendedActions,
 				"Check node resources",
 				"Review pod requirements",
 				"Scale cluster if needed",
 			)
 		case "FailedMount":
-			result.BusinessImpact = 0.8
+			result.InfrastructureImpact = 0.8
 			result.RecommendedActions = append(result.RecommendedActions,
 				"Verify volume availability",
 				"Check storage class",
@@ -274,15 +275,21 @@ func (ia *ImpactAssessment) assessKubernetesImpact(k8s *domain.KubernetesData, r
 		}
 	}
 
-	// Object types
+	// Object types impact assessment
 	switch k8s.ObjectKind {
+	case "Node":
+		result.InfrastructureImpact *= 2.0 // Nodes are critical infrastructure
+		result.CascadeRisk += 0.5
 	case "Deployment", "StatefulSet", "DaemonSet":
-		result.BusinessImpact *= 1.2 // Workload controllers are important
+		result.InfrastructureImpact *= 1.2 // Workload controllers
 	case "Service", "Ingress":
-		result.BusinessImpact *= 1.3 // Network objects affect connectivity
+		result.InfrastructureImpact *= 1.3 // Network objects affect connectivity
 		result.CascadeRisk += 0.2
 	case "PersistentVolumeClaim", "PersistentVolume":
-		result.BusinessImpact *= 1.4 // Storage issues are critical
+		result.InfrastructureImpact *= 1.4 // Storage issues are critical
+	case "NetworkPolicy":
+		result.InfrastructureImpact *= 1.2 // Network policies affect connectivity
+		result.CascadeRisk += 0.1
 	}
 }
 
@@ -322,6 +329,15 @@ func (ia *ImpactAssessment) generateRecommendations(event *domain.UnifiedEvent, 
 			"Monitor dependent services",
 			"Prepare to scale affected services",
 			"Enable circuit breakers",
+		)
+	}
+
+	// Infrastructure-specific recommendations
+	if event.Entity != nil && event.Entity.Type == "node" {
+		result.RecommendedActions = append(result.RecommendedActions,
+			"Check node health metrics",
+			"Verify kubelet status",
+			"Review node conditions",
 		)
 	}
 }
