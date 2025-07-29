@@ -2,9 +2,23 @@
 
 #include "headers/vmlinux.h"
 #include "common.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-#include <bpf/bpf_core_read.h>
+
+// Map definition macros
+#define __uint(name, val) int(*name)[val]
+#define __type(name, val) typeof(val) *name
+#define __array(name, val) typeof(val) *name[]
+
+// Section attributes
+#define SEC(name) __attribute__((section(name), used))
+
+#define BPF_MAP_TYPE_PERF_EVENT_ARRAY 4
+#define BPF_F_CURRENT_CPU 0xffffffffULL
+
+// BPF helper prototypes
+static long (*bpf_ktime_get_ns)(void) = (void *) 5;
+static long (*bpf_get_current_pid_tgid)(void) = (void *) 14;
+static long (*bpf_get_current_comm)(void *buf, __u32 size_of_buf) = (void *) 16;
+static long (*bpf_perf_event_output)(void *ctx, void *map, __u64 flags, void *data, __u64 size) = (void *) 25;
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);

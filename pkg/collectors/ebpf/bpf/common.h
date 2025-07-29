@@ -13,7 +13,7 @@ typedef signed int s32;
 typedef signed long long s64;
 
 typedef unsigned long size_t;
-typedef int bool;
+// bool is already defined in vmlinux.h, so we don't need to define it
 
 #define true 1
 #define false 0
