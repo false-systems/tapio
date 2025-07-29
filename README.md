@@ -85,18 +85,6 @@ A standardized event format that represents data from any source with:
 - Analytics engine achieving 165k events/second
 - Semantic correlation with trace propagation
 - gRPC service infrastructure
-- Kubernetes deployment via Skaffold
-
-### In Progress
-- ML-based pattern detection
-- Advanced multi-layer correlation
-- Real-time visualization dashboard
-
-### Planned
-- Service mesh integration
-- Cloud provider collectors
-- Automated remediation actions
-- Historical analysis capabilities
 
 ## Getting Started
 
@@ -207,23 +195,6 @@ Key areas for contribution:
 - Performance optimizations
 - Documentation improvements
 - Test coverage
-
-## Roadmap
-
-### Q1 2025
-- Production-ready eBPF collector
-- Core correlation engine
-- Basic pattern detection
-
-### Q2 2025
-- ML-powered anomaly detection
-- Advanced visualization
-- Multi-cluster support
-
-### Q3 2025
-- Automated remediation
-- Cost analysis integration
-- Enterprise features
 
 ## License
 
