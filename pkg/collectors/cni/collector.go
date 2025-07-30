@@ -34,8 +34,8 @@ type Collector struct {
 
 	// eBPF support (linux only)
 	ebpfEnabled bool
-	ebpfColl    interface{} // *ebpf.Collection on linux
-	ebpfReader  interface{} // *perf.Reader on linux
+	ebpfColl    interface{}   // *ebpf.Collection on linux
+	ebpfReader  interface{}   // *perf.Reader on linux
 	ebpfLinks   []interface{} // []link.Link on linux
 
 	ctx    context.Context
@@ -119,8 +119,7 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	// Try to initialize eBPF (only works on Linux)
 	if err := c.initEBPF(); err != nil {
-		// Log but don't fail - eBPF is optional enhancement
-		// fmt.Printf("CNI collector: eBPF not available: %v\n", err)
+		// eBPF is optional enhancement - continue without it
 	}
 
 	// Start collection goroutines
@@ -128,11 +127,11 @@ func (c *Collector) Start(ctx context.Context) error {
 	if c.ebpfEnabled {
 		goroutineCount = 3
 	}
-	
+
 	c.wg.Add(goroutineCount)
 	go c.watchFiles()
 	go c.watchLogs()
-	
+
 	if c.ebpfEnabled {
 		go c.readEBPFEvents()
 	}
