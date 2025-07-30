@@ -8,6 +8,10 @@ Minimal Container Network Interface (CNI) event collector for Tapio.
 - **Multi-CNI support**: Optimized collection for Calico, Cilium, and Flannel
 - **Raw data only**: Emits raw events without processing (following Tapio philosophy)
 - **Simple interface**: Just 5 methods to implement
+- **eBPF syscall tracing** (Linux): Deep visibility into CNI operations at kernel level
+  - Tracks CNI binary execution
+  - Monitors network namespace creation/switching
+  - Captures exact syscalls and timing
 
 ## Supported CNI Plugins
 
