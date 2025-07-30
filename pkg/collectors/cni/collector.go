@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Collector implements minimal CNI collection with auto-detection
@@ -31,6 +32,11 @@ type Collector struct {
 
 	// File watchers
 	watcher *fsnotify.Watcher
+
+	// eBPF components (Linux only)
+	ebpfCollection interface{}
+	ebpfReader     interface{}
+	ebpfLinks      []interface{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -53,9 +59,9 @@ func NewCollector(config collectors.CollectorConfig) (*Collector, error) {
 	k8sConfig, err := rest.InClusterConfig()
 	if err != nil {
 		// Try out-of-cluster config for development
-		k8sConfig, err = rest.NewNonInteractiveDeferredLoadingClientConfig(
-			&rest.ClientConfigLoadingRules{},
-			&rest.ConfigOverrides{},
+		k8sConfig, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			clientcmd.NewDefaultClientConfigLoadingRules(),
+			&clientcmd.ConfigOverrides{},
 		).ClientConfig()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create k8s config: %w", err)
@@ -111,6 +117,17 @@ func (c *Collector) Start(ctx context.Context) error {
 		}
 	}
 
+	// Initialize eBPF if on Linux
+	if runtime.GOOS == "linux" {
+		if err := c.initEBPF(); err != nil {
+			// Log but don't fail - eBPF is optional enhancement
+			// In production, would use proper logging
+		} else {
+			c.wg.Add(1)
+			go c.readEBPFEvents()
+		}
+	}
+
 	// Start collection goroutines
 	c.wg.Add(2)
 	go c.watchFiles()
@@ -130,6 +147,11 @@ func (c *Collector) Stop() error {
 
 	if c.watcher != nil {
 		c.watcher.Close()
+	}
+
+	// Cleanup eBPF resources
+	if runtime.GOOS == "linux" {
+		c.cleanupEBPF()
 	}
 
 	c.wg.Wait()

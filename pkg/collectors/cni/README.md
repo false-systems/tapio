@@ -1,11 +1,12 @@
 # CNI Collector
 
-Minimal Container Network Interface (CNI) event collector for Tapio.
+Minimal Container Network Interface (CNI) event collector for Tapio with optional eBPF enhancement.
 
 ## Features
 
 - **Auto-detection**: Automatically detects CNI plugin from K8s DaemonSets
 - **Multi-CNI support**: Optimized collection for Calico, Cilium, and Flannel
+- **eBPF Integration**: Deep kernel-level visibility into CNI operations (Linux only)
 - **Raw data only**: Emits raw events without processing (following Tapio philosophy)
 - **Simple interface**: Just 5 methods to implement
 
@@ -57,3 +58,12 @@ The collector follows Tapio's minimal collector pattern:
 - No data transformation
 - Just raw event emission
 - All intelligence in the pipeline
+
+## eBPF Enhancement (Linux Only)
+
+When running on Linux, the collector automatically enables eBPF programs to track:
+- CNI binary execution (`/opt/cni/bin/*`)
+- Network namespace creation (CLONE_NEWNET)
+- Network namespace changes (setns)
+
+This provides deeper visibility into CNI operations at the kernel level without requiring CNI plugin cooperation.

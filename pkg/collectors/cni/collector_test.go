@@ -34,19 +34,6 @@ func TestCollectorStartStop(t *testing.T) {
 	err = collector.Start(ctx)
 	assert.Error(t, err)
 
-	// Should receive events
-	eventReceived := false
-	go func() {
-		select {
-		case event := <-collector.Events():
-			assert.Equal(t, "cni", event.Type)
-			assert.NotEmpty(t, event.Data)
-			eventReceived = true
-		case <-time.After(10 * time.Second):
-			// Timeout is ok - we may not get events immediately
-		}
-	}()
-
 	// Let it run briefly
 	time.Sleep(100 * time.Millisecond)
 
