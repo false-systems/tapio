@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package ebpf
 
 import (
@@ -5,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -25,9 +29,11 @@ type SimpleCollector struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu      sync.RWMutex
-	started bool
-	healthy bool
+	mu            sync.RWMutex
+	started       bool
+	healthy       bool
+	errorCount    uint64
+	droppedEvents uint64
 }
 
 // NewSimpleCollector creates a new minimal eBPF collector
@@ -70,6 +76,7 @@ func (c *SimpleCollector) Start(ctx context.Context) error {
 	// Get the events map
 	eventsMap, ok := c.collection.Maps["events"]
 	if !ok {
+		c.collection.Close()
 		return errors.New("events map not found")
 	}
 
@@ -87,9 +94,10 @@ func (c *SimpleCollector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to attach programs: %w", err)
 	}
 
+	// Only mark as started after all resources are initialized
 	c.started = true
 
-	// Start event reader
+	// Start event reader goroutine only after everything is set up
 	c.wg.Add(1)
 	go c.readEvents()
 
@@ -105,7 +113,11 @@ func (c *SimpleCollector) Stop() error {
 		return nil
 	}
 
+	// Signal shutdown
 	c.cancel()
+
+	// Mark as unhealthy immediately
+	c.healthy = false
 
 	// Close links
 	for _, l := range c.links {
@@ -122,12 +134,12 @@ func (c *SimpleCollector) Stop() error {
 		c.collection.Close()
 	}
 
-	// Wait for goroutines
+	// Wait for goroutines to finish
 	c.wg.Wait()
 
+	// Close events channel only after goroutines are done
 	close(c.events)
 	c.started = false
-	c.healthy = false
 
 	return nil
 }
@@ -182,6 +194,9 @@ func (c *SimpleCollector) attachPrograms() error {
 func (c *SimpleCollector) readEvents() {
 	defer c.wg.Done()
 
+	const maxConsecutiveErrors = 10
+	consecutiveErrors := 0
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -192,9 +207,21 @@ func (c *SimpleCollector) readEvents() {
 				if errors.Is(err, perf.ErrClosed) {
 					return
 				}
-				// Log error but continue
+				// Track errors
+				atomic.AddUint64(&c.errorCount, 1)
+				consecutiveErrors++
+
+				// If too many consecutive errors, mark unhealthy
+				if consecutiveErrors >= maxConsecutiveErrors {
+					c.mu.Lock()
+					c.healthy = false
+					c.mu.Unlock()
+				}
 				continue
 			}
+
+			// Reset consecutive error counter on success
+			consecutiveErrors = 0
 
 			// Create raw event with just the bytes
 			event := collectors.RawEvent{
@@ -220,6 +247,9 @@ func (c *SimpleCollector) readEvents() {
 			case c.events <- event:
 			case <-c.ctx.Done():
 				return
+			default:
+				// Buffer full, track dropped event
+				atomic.AddUint64(&c.droppedEvents, 1)
 			}
 		}
 	}
@@ -239,19 +269,29 @@ func (c *SimpleCollector) determineEventType(data []byte) string {
 	//     ...
 	// }
 
-	if len(data) > 32 {
-		eventType := data[32]
-		switch eventType {
-		case 0:
-			return "memory_alloc"
-		case 1:
-			return "memory_free"
-		case 2:
-			return "oom_kill"
-		}
+	if data == nil || len(data) <= 32 {
+		return "unknown"
 	}
 
-	return "unknown"
+	eventType := data[32]
+	switch eventType {
+	case 0:
+		return "memory_alloc"
+	case 1:
+		return "memory_free"
+	case 2:
+		return "oom_kill"
+	default:
+		return "unknown"
+	}
+}
+
+// Stats returns collector statistics
+func (c *SimpleCollector) Stats() map[string]uint64 {
+	return map[string]uint64{
+		"errors":         atomic.LoadUint64(&c.errorCount),
+		"dropped_events": atomic.LoadUint64(&c.droppedEvents),
+	}
 }
 
 // DefaultSimpleConfig returns a default configuration
