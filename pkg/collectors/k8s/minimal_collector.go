@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -19,8 +20,8 @@ import (
 
 // MinimalK8sCollector implements minimal K8s collection following the blueprint
 type MinimalK8sCollector struct {
-	config MinimalConfig
-	events chan MinimalRawEvent
+	config collectors.CollectorConfig
+	events chan collectors.RawEvent
 
 	// K8s clients
 	clientset     kubernetes.Interface
@@ -40,10 +41,10 @@ type MinimalK8sCollector struct {
 }
 
 // NewMinimalK8sCollector creates a new minimal K8s collector
-func NewMinimalK8sCollector(config MinimalConfig) (*MinimalK8sCollector, error) {
+func NewMinimalK8sCollector(config collectors.CollectorConfig) (*MinimalK8sCollector, error) {
 	return &MinimalK8sCollector{
 		config:  config,
-		events:  make(chan MinimalRawEvent, config.BufferSize),
+		events:  make(chan collectors.RawEvent, config.BufferSize),
 		healthy: true,
 		stopCh:  make(chan struct{}),
 	}, nil
@@ -109,7 +110,7 @@ func (c *MinimalK8sCollector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *MinimalK8sCollector) Events() <-chan MinimalRawEvent {
+func (c *MinimalK8sCollector) Events() <-chan collectors.RawEvent {
 	return c.events
 }
 
@@ -217,7 +218,7 @@ func (c *MinimalK8sCollector) handleResourceEvent(eventType, resource string, ob
 	}
 
 	// Create raw event
-	event := MinimalRawEvent{
+	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "k8s",
 		Data:      data, // Raw K8s object as JSON
@@ -235,8 +236,8 @@ func (c *MinimalK8sCollector) handleResourceEvent(eventType, resource string, ob
 }
 
 // MinimalK8sConfig returns a minimal K8s collector config
-func MinimalK8sConfig() MinimalConfig {
-	config := DefaultMinimalConfig()
+func MinimalK8sConfig() collectors.CollectorConfig {
+	config := DefaultK8sConfig()
 	config.Labels["collector"] = "k8s-minimal"
 	return config
 }
