@@ -34,11 +34,6 @@ Service Error → Pod OOMKill → Node Memory Pressure → Kernel Memory Allocat
 **What we have built so far:**
 
 ✅ **UnifiedEvent Format** - A single event structure with OTEL trace context and infrastructure context  
-✅ **Dual Layer eBPF Collector** - Preserves raw kernel data while producing UnifiedEvent for correlation  
-✅ **Unified Intelligence Pipeline** - Ring buffer + deterministic correlation in single pipeline (1M+ events/sec)  
-✅ **4 Pipeline Modes** - High-performance, Standard, Debug, Ring-buffer modes via builder pattern  
-✅ **DataFlow Intelligence Integration** - Rule-based correlation with OTEL trace propagation  
-✅ **Infrastructure Impact Analysis** - Technical severity, cascade risk, and SLO impact calculation  
 ✅ **Context Processing** - Infrastructure impact assessment with automated recommendations  
 ✅ **Adapters Layer** - Clean interfaces between implementations and pipeline stages  
 ✅ **Modular Intelligence Architecture** - Refactored 3,855 lines into 8 organized modules for maintainability  
@@ -65,19 +60,8 @@ Service Error → Pod OOMKill → Node Memory Pressure → Kernel Memory Allocat
 ✅ **Enhanced Correlation** - Improved OTEL trace propagation and K8s-native correlation  
 ✅ **Dual Layer eBPF Implementation** - Complete dual-path processing with raw data preservation  
 
-**What we're actively working on:**
 
-🔄 **Full Collector Integration** - Bringing K8s, Systemd, CNI into main binary  
-🔄 **Pattern Detection** - Automated infrastructure pattern discovery  
-🔄 **Advanced Correlation** - Complex multi-layer patterns  
-🔄 **UI/Dashboard** - Real-time visualization  
 
-**What we haven't built yet:**
-
-❌ Service mesh integration  
-❌ Cloud provider collectors  
-❌ Historical analysis  
-❌ Automated remediation  
 
 ## 🎯 Our Vision
 
