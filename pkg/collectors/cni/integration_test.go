@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package cni
@@ -83,7 +84,7 @@ func TestCollectorWithRealCNIDetection(t *testing.T) {
 
 	ctx := context.Background()
 	err = collector.Start(ctx)
-	
+
 	// If we can't connect to K8s, skip the test
 	if err != nil && contains(err.Error(), "failed to detect CNI") {
 		t.Skip("Cannot connect to Kubernetes cluster")
@@ -201,7 +202,7 @@ func TestCollectorStressFileChanges(t *testing.T) {
 		filename := filepath.Join(tempDir, fmt.Sprintf("test-%d.conf", i))
 		err := os.WriteFile(filename, []byte(fmt.Sprintf(`{"id": %d}`, i)), 0644)
 		require.NoError(t, err)
-		
+
 		// Small delay to avoid overwhelming the watcher
 		if i%10 == 0 {
 			time.Sleep(10 * time.Millisecond)

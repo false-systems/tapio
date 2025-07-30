@@ -13,25 +13,25 @@ import (
 // CollectorPipeline is the main pipeline implementation
 type CollectorPipeline struct {
 	config PipelineConfig
-	
+
 	// Converters for different sources
 	converters map[string]EventConverter
-	
+
 	// Enrichers
 	enrichers []Enricher
-	
+
 	// Output channel
 	output chan *domain.UnifiedEvent
-	
+
 	// State
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	
+
 	mu      sync.RWMutex
 	started bool
 	healthy bool
-	
+
 	// Metrics
 	processedCount uint64
 	errorCount     uint64
@@ -45,7 +45,7 @@ func NewPipeline(config PipelineConfig) Pipeline {
 	if config.Workers <= 0 {
 		config.Workers = 4
 	}
-	
+
 	return &CollectorPipeline{
 		config:     config,
 		converters: make(map[string]EventConverter),
@@ -59,7 +59,7 @@ func NewPipeline(config PipelineConfig) Pipeline {
 func (p *CollectorPipeline) RegisterConverter(converter EventConverter) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	p.converters[converter.SourceType()] = converter
 }
 
@@ -67,7 +67,7 @@ func (p *CollectorPipeline) RegisterConverter(converter EventConverter) {
 func (p *CollectorPipeline) AddEnricher(enricher Enricher) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	p.enrichers = append(p.enrichers, enricher)
 }
 
@@ -76,18 +76,18 @@ func (p *CollectorPipeline) Process(ctx context.Context, event collectors.RawEve
 	p.mu.RLock()
 	converter, exists := p.converters[event.Type]
 	p.mu.RUnlock()
-	
+
 	if !exists {
 		return fmt.Errorf("no converter for source type: %s", event.Type)
 	}
-	
+
 	// Convert to UnifiedEvent
 	unified, err := converter.Convert(ctx, event)
 	if err != nil {
 		p.incrementErrorCount()
 		return fmt.Errorf("conversion failed: %w", err)
 	}
-	
+
 	// Apply enrichers
 	for _, enricher := range p.enrichers {
 		if err := enricher.Enrich(ctx, unified); err != nil {
@@ -95,7 +95,7 @@ func (p *CollectorPipeline) Process(ctx context.Context, event collectors.RawEve
 			// In production, use proper logging
 		}
 	}
-	
+
 	// Send to output
 	select {
 	case p.output <- unified:
@@ -107,7 +107,7 @@ func (p *CollectorPipeline) Process(ctx context.Context, event collectors.RawEve
 		// In production, add metrics for dropped events
 		return fmt.Errorf("output buffer full")
 	}
-	
+
 	return nil
 }
 
@@ -115,18 +115,18 @@ func (p *CollectorPipeline) Process(ctx context.Context, event collectors.RawEve
 func (p *CollectorPipeline) Start(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	if p.started {
 		return fmt.Errorf("pipeline already started")
 	}
-	
+
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.started = true
-	
+
 	// Start health monitor
 	p.wg.Add(1)
 	go p.healthMonitor()
-	
+
 	return nil
 }
 
@@ -134,18 +134,18 @@ func (p *CollectorPipeline) Start(ctx context.Context) error {
 func (p *CollectorPipeline) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	if !p.started {
 		return nil
 	}
-	
+
 	p.cancel()
 	p.wg.Wait()
-	
+
 	close(p.output)
 	p.started = false
 	p.healthy = false
-	
+
 	return nil
 }
 
@@ -164,10 +164,10 @@ func (p *CollectorPipeline) IsHealthy() bool {
 // healthMonitor monitors pipeline health
 func (p *CollectorPipeline) healthMonitor() {
 	defer p.wg.Done()
-	
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-p.ctx.Done():

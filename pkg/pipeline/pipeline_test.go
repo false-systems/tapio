@@ -45,14 +45,14 @@ func (m *MockEnricher) Enrich(ctx context.Context, event *domain.UnifiedEvent) e
 
 func TestPipeline_Process(t *testing.T) {
 	ctx := context.Background()
-	
+
 	config := PipelineConfig{
 		OutputBufferSize: 10,
 		Workers:          2,
 	}
-	
+
 	pipeline := NewPipeline(config).(*CollectorPipeline)
-	
+
 	// Register a mock converter
 	converter := &MockConverter{
 		sourceType: "test",
@@ -65,7 +65,7 @@ func TestPipeline_Process(t *testing.T) {
 		},
 	}
 	pipeline.RegisterConverter(converter)
-	
+
 	// Add a mock enricher
 	enricher := &MockEnricher{
 		enrichFn: func(ctx context.Context, event *domain.UnifiedEvent) error {
@@ -74,12 +74,12 @@ func TestPipeline_Process(t *testing.T) {
 		},
 	}
 	pipeline.AddEnricher(enricher)
-	
+
 	// Start pipeline
 	err := pipeline.Start(ctx)
 	require.NoError(t, err)
 	defer pipeline.Stop()
-	
+
 	// Process an event
 	rawEvent := collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -87,10 +87,10 @@ func TestPipeline_Process(t *testing.T) {
 		Data:      []byte("test data"),
 		Metadata:  map[string]string{"key": "value"},
 	}
-	
+
 	err = pipeline.Process(ctx, rawEvent)
 	require.NoError(t, err)
-	
+
 	// Check output
 	select {
 	case event := <-pipeline.Output():
@@ -105,14 +105,14 @@ func TestPipeline_Process(t *testing.T) {
 
 func TestPipeline_UnknownSourceType(t *testing.T) {
 	ctx := context.Background()
-	
+
 	pipeline := NewPipeline(PipelineConfig{}).(*CollectorPipeline)
-	
+
 	rawEvent := collectors.RawEvent{
 		Type: "unknown",
 		Data: []byte("data"),
 	}
-	
+
 	err := pipeline.Process(ctx, rawEvent)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no converter for source type")
@@ -120,46 +120,46 @@ func TestPipeline_UnknownSourceType(t *testing.T) {
 
 func TestPipeline_HealthCheck(t *testing.T) {
 	pipeline := NewPipeline(PipelineConfig{}).(*CollectorPipeline)
-	
+
 	// Should be healthy initially
 	assert.True(t, pipeline.IsHealthy())
-	
+
 	// Simulate many errors
 	for i := 0; i < 150; i++ {
 		pipeline.incrementErrorCount()
 	}
-	
+
 	// Start pipeline to trigger health monitor
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
 	require.NoError(t, err)
 	defer pipeline.Stop()
-	
+
 	// Wait for health check
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Should be unhealthy after many errors
 	assert.False(t, pipeline.IsHealthy())
 }
 
 func TestPipeline_BufferFull(t *testing.T) {
 	ctx := context.Background()
-	
+
 	// Small buffer to test overflow
 	config := PipelineConfig{
 		OutputBufferSize: 1,
 	}
-	
+
 	pipeline := NewPipeline(config).(*CollectorPipeline)
-	
+
 	// Register converter
 	pipeline.RegisterConverter(&MockConverter{sourceType: "test"})
-	
+
 	// Start pipeline
 	err := pipeline.Start(ctx)
 	require.NoError(t, err)
 	defer pipeline.Stop()
-	
+
 	// Process multiple events quickly
 	for i := 0; i < 3; i++ {
 		rawEvent := collectors.RawEvent{
@@ -169,7 +169,7 @@ func TestPipeline_BufferFull(t *testing.T) {
 		}
 		_ = pipeline.Process(ctx, rawEvent)
 	}
-	
+
 	// At least one should have failed due to buffer full
 	assert.Greater(t, pipeline.errorCount, uint64(0))
 }
@@ -177,19 +177,19 @@ func TestPipeline_BufferFull(t *testing.T) {
 func TestPipeline_StartStop(t *testing.T) {
 	ctx := context.Background()
 	pipeline := NewPipeline(PipelineConfig{})
-	
+
 	// Start
 	err := pipeline.Start(ctx)
 	assert.NoError(t, err)
-	
+
 	// Can't start again
 	err = pipeline.Start(ctx)
 	assert.Error(t, err)
-	
+
 	// Stop
 	err = pipeline.Stop()
 	assert.NoError(t, err)
-	
+
 	// Can stop again (idempotent)
 	err = pipeline.Stop()
 	assert.NoError(t, err)

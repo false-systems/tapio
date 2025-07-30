@@ -14,11 +14,11 @@ import (
 type IntelligenceBridge struct {
 	collectorPipeline    Pipeline
 	intelligencePipeline intelligencePipeline.IntelligencePipeline
-	
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	
+
 	mu      sync.RWMutex
 	started bool
 }
@@ -38,23 +38,23 @@ func NewIntelligenceBridge(
 func (b *IntelligenceBridge) Start(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	if b.started {
 		return fmt.Errorf("bridge already started")
 	}
-	
+
 	b.ctx, b.cancel = context.WithCancel(ctx)
 	b.started = true
-	
+
 	// Start the intelligence pipeline
 	if err := b.intelligencePipeline.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start intelligence pipeline: %w", err)
 	}
-	
+
 	// Start forwarding events
 	b.wg.Add(1)
 	go b.forwardEvents()
-	
+
 	return nil
 }
 
@@ -62,19 +62,19 @@ func (b *IntelligenceBridge) Start(ctx context.Context) error {
 func (b *IntelligenceBridge) Stop() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	if !b.started {
 		return nil
 	}
-	
+
 	b.cancel()
 	b.wg.Wait()
-	
+
 	// Stop the intelligence pipeline
 	if err := b.intelligencePipeline.Stop(); err != nil {
 		return fmt.Errorf("failed to stop intelligence pipeline: %w", err)
 	}
-	
+
 	b.started = false
 	return nil
 }
@@ -85,7 +85,7 @@ func (b *IntelligenceBridge) ProcessRawEvent(ctx context.Context, event collecto
 	if err := b.collectorPipeline.Process(ctx, event); err != nil {
 		return fmt.Errorf("collector pipeline error: %w", err)
 	}
-	
+
 	// The forwardEvents goroutine will handle the rest
 	return nil
 }
@@ -93,7 +93,7 @@ func (b *IntelligenceBridge) ProcessRawEvent(ctx context.Context, event collecto
 // forwardEvents reads from collector pipeline and forwards to intelligence
 func (b *IntelligenceBridge) forwardEvents() {
 	defer b.wg.Done()
-	
+
 	for {
 		select {
 		case event, ok := <-b.collectorPipeline.Output():
@@ -101,13 +101,13 @@ func (b *IntelligenceBridge) forwardEvents() {
 				// Channel closed
 				return
 			}
-			
+
 			// Forward to intelligence pipeline
 			if err := b.intelligencePipeline.ProcessEvent(event); err != nil {
 				// Log error but continue
 				// In production, use proper logging
 			}
-			
+
 		case <-b.ctx.Done():
 			return
 		}
@@ -139,10 +139,10 @@ func CreateDefaultBridge(config BridgeConfig) (*IntelligenceBridge, error) {
 		EnableK8sEnrichment: config.EnableK8sEnrichment,
 		EnableTracing:       config.EnableTracing,
 	})
-	
+
 	// Register converters
 	RegisterConverters(collectorPipeline.(*CollectorPipeline))
-	
+
 	// Add enrichers if enabled
 	if config.EnableK8sEnrichment && config.KubeConfig != "" {
 		k8sEnricher, err := NewK8sEnricher(config.KubeConfig)
@@ -151,11 +151,11 @@ func CreateDefaultBridge(config BridgeConfig) (*IntelligenceBridge, error) {
 		}
 		collectorPipeline.(*CollectorPipeline).AddEnricher(k8sEnricher)
 	}
-	
+
 	if config.EnableTracing {
 		collectorPipeline.(*CollectorPipeline).AddEnricher(NewTraceEnricher())
 	}
-	
+
 	// Create intelligence pipeline
 	// Note: In production, you would create the actual intelligence pipeline here
 	// For now, we'll return an error indicating this needs to be implemented
@@ -171,7 +171,7 @@ type BridgeConfig struct {
 	EnableK8sEnrichment bool
 	EnableTracing       bool
 	KubeConfig          string
-	
+
 	// Intelligence pipeline config
 	IntelligenceMode       string
 	IntelligenceWorkers    int

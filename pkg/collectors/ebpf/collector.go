@@ -187,6 +187,65 @@ func (c *SimpleCollector) attachPrograms() error {
 		}
 	}
 
+	// Attach K8s-specific programs
+	if err := c.attachK8sPrograms(); err != nil {
+		// K8s programs are optional, log but don't fail
+		// In production, would log this error
+	}
+
+	return nil
+}
+
+// attachK8sPrograms attaches K8s-specific eBPF programs
+func (c *SimpleCollector) attachK8sPrograms() error {
+	// Attach container creation tracking
+	if prog, ok := c.collection.Programs["TraceContainerCreate"]; ok {
+		l, err := link.RawTracepoint("sys_enter", prog, nil)
+		if err != nil {
+			return fmt.Errorf("failed to attach container create: %w", err)
+		}
+		c.links = append(c.links, l)
+	}
+
+	// Attach cgroup tracking
+	if prog, ok := c.collection.Programs["TraceCgroupMkdir"]; ok {
+		l, err := link.Kprobe("cgroup_mkdir", prog, nil)
+		if err != nil {
+			// Might not exist on all kernels
+		} else {
+			c.links = append(c.links, l)
+		}
+	}
+
+	if prog, ok := c.collection.Programs["TraceCgroupRmdir"]; ok {
+		l, err := link.Kprobe("cgroup_rmdir", prog, nil)
+		if err != nil {
+			// Might not exist on all kernels
+		} else {
+			c.links = append(c.links, l)
+		}
+	}
+
+	// Attach exec in container tracking
+	if prog, ok := c.collection.Programs["TraceExecInContainer"]; ok {
+		l, err := link.Tracepoint("syscalls", "sys_enter_execve", prog, nil)
+		if err != nil {
+			// Optional feature
+		} else {
+			c.links = append(c.links, l)
+		}
+	}
+
+	// Attach network namespace tracking
+	if prog, ok := c.collection.Programs["TraceNetnsCreate"]; ok {
+		l, err := link.Kprobe("create_new_namespaces", prog, nil)
+		if err != nil {
+			// Optional feature
+		} else {
+			c.links = append(c.links, l)
+		}
+	}
+
 	return nil
 }
 
@@ -258,29 +317,44 @@ func (c *SimpleCollector) readEvents() {
 // determineEventType tries to determine the event type from raw data
 // This is minimal metadata extraction - no business logic
 func (c *SimpleCollector) determineEventType(data []byte) string {
-	// Our memory_event struct has event_type at offset 32
-	// struct memory_event {
-	//     __u64 timestamp;      // 0-7
-	//     __u32 pid;           // 8-11
-	//     __u32 tid;           // 12-15
-	//     __u64 addr;          // 16-23
-	//     __u64 size;          // 24-31
-	//     __u8 event_type;     // 32
-	//     ...
-	// }
+	// Unified event structure from unified.c:
+	// struct event {
+	//     __u64 timestamp;  // 0-7
+	//     __u32 pid;       // 8-11
+	//     __u32 tid;       // 12-15
+	//     __u32 cpu;       // 16-19
+	//     __u8  type;      // 20
+	//     __u8  flags;     // 21
+	//     __u16 data_len;  // 22-23
+	//     __u8  data[64];  // 24+
+	// };
 
-	if data == nil || len(data) <= 32 {
+	if data == nil || len(data) < 21 {
 		return "unknown"
 	}
 
-	eventType := data[32]
+	// Event type is at offset 20 in unified structure
+	eventType := data[20]
 	switch eventType {
-	case 0:
-		return "memory_alloc"
 	case 1:
-		return "memory_free"
+		return "network"
 	case 2:
-		return "oom_kill"
+		return "syscall"
+	case 3:
+		return "memory"
+	case 4:
+		return "oom"
+	// K8s event types
+	case 10:
+		return "k8s_container_create"
+	case 11:
+		return "k8s_container_delete"
+	case 12:
+		return "k8s_cgroup_create"
+	case 13:
+		return "k8s_cgroup_delete"
+	case 14:
+		return "k8s_exec_in_pod"
 	default:
 		return "unknown"
 	}

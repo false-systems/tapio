@@ -108,7 +108,7 @@ func TestRateLimiter_AllowN(t *testing.T) {
 func TestRateLimiter_ContextCancellation(t *testing.T) {
 	rl := NewRateLimiter(100)
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Cancel context immediately
 	cancel()
 
@@ -121,14 +121,14 @@ func TestRateLimiter_ContextCancellation(t *testing.T) {
 func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 	rl := NewRateLimiter(1000)
 	ctx := context.Background()
-	
+
 	const numGoroutines = 100
 	const requestsPerGoroutine = 50
-	
+
 	var wg sync.WaitGroup
 	allowedCount := int64(0)
 	deniedCount := int64(0)
-	
+
 	var mu sync.Mutex
 
 	for i := 0; i < numGoroutines; i++ {
@@ -137,7 +137,7 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			localAllowed := 0
 			localDenied := 0
-			
+
 			for j := 0; j < requestsPerGoroutine; j++ {
 				if rl.Allow(ctx) {
 					localAllowed++
@@ -145,16 +145,16 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 					localDenied++
 				}
 			}
-			
+
 			mu.Lock()
 			allowedCount += int64(localAllowed)
 			deniedCount += int64(localDenied)
 			mu.Unlock()
 		}()
 	}
-	
+
 	wg.Wait()
-	
+
 	totalRequests := int64(numGoroutines * requestsPerGoroutine)
 	if allowedCount+deniedCount != totalRequests {
 		t.Errorf("Total processed requests %d != expected %d", allowedCount+deniedCount, totalRequests)
@@ -173,7 +173,7 @@ func TestRateLimiter_MetricsAccuracy(t *testing.T) {
 	// Make some requests
 	allowed := 0
 	denied := 0
-	
+
 	for i := 0; i < 10; i++ {
 		if rl.Allow(ctx) {
 			allowed++
@@ -183,14 +183,14 @@ func TestRateLimiter_MetricsAccuracy(t *testing.T) {
 	}
 
 	metrics := rl.GetMetrics()
-	
+
 	if int(metrics.Allowed) != allowed {
 		t.Errorf("Metrics allowed %d != actual allowed %d", metrics.Allowed, allowed)
 	}
 	if int(metrics.Limited) != denied {
 		t.Errorf("Metrics limited %d != actual denied %d", metrics.Limited, denied)
 	}
-	
+
 	// Check utilization percentage
 	if metrics.UtilizationPct < 0 || metrics.UtilizationPct > 100 {
 		t.Errorf("Utilization percentage %f should be between 0-100", metrics.UtilizationPct)
@@ -218,7 +218,7 @@ func TestRateLimiter_Stop(t *testing.T) {
 
 func TestRateLimiter_Refill(t *testing.T) {
 	rl := NewRateLimiter(10)
-	
+
 	// Consume all tokens
 	rl.mu.Lock()
 	rl.tokens = 0
@@ -226,7 +226,7 @@ func TestRateLimiter_Refill(t *testing.T) {
 	rl.mu.Unlock()
 
 	ctx := context.Background()
-	
+
 	// Should be allowed due to refill
 	if !rl.Allow(ctx) {
 		t.Error("Request should be allowed after refill")
@@ -247,7 +247,7 @@ func BenchmarkRateLimiter_Allow(b *testing.B) {
 
 func BenchmarkRateLimiter_AllowN(b *testing.B) {
 	rl := NewRateLimiter(1000000) // High limit to avoid blocking
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {

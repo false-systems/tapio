@@ -74,6 +74,15 @@ typedef __u32 __wsum;
 #define EVENT_OOM_KILL     3
 #define EVENT_PROCESS_EXIT 4
 
+// K8s event types
+#define EVENT_K8S_CONTAINER_CREATE 10
+#define EVENT_K8S_CONTAINER_DELETE 11
+#define EVENT_K8S_NETNS_CREATE    12
+#define EVENT_K8S_NETNS_DELETE    13
+#define EVENT_K8S_CGROUP_CREATE   14
+#define EVENT_K8S_CGROUP_DELETE   15
+#define EVENT_K8S_EXEC_IN_POD     16
+
 // Memory event structure (shared between eBPF and Go)
 struct memory_event {
     u64 timestamp;      // Nanoseconds since boot
@@ -99,6 +108,19 @@ struct network_event {
     u32 bytes;
     u8 failed;         // 1 if connection failed
     char comm[TASK_COMM_LEN];
+};
+
+// K8s event structure
+struct k8s_event {
+    u64 timestamp;
+    u32 pid;
+    u32 tid;
+    u64 cgroup_id;         // cgroup ID (can correlate to container)
+    u32 namespace_pid;     // PID in namespace
+    u32 event_type;
+    char comm[TASK_COMM_LEN];
+    char container_id[64]; // Container ID from cgroup path
+    u32 netns_ino;        // Network namespace inode
 };
 
 #endif /* __TAPIO_COMMON_H */

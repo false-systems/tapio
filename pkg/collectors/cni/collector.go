@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Collector implements minimal CNI collection with auto-detection
@@ -59,10 +59,8 @@ func NewCollector(config collectors.CollectorConfig) (*Collector, error) {
 	k8sConfig, err := rest.InClusterConfig()
 	if err != nil {
 		// Try out-of-cluster config for development
-		k8sConfig, err = rest.NewNonInteractiveDeferredLoadingClientConfig(
-			&rest.ClientConfigLoadingRules{},
-			&rest.ConfigOverrides{},
-		).ClientConfig()
+		kubeconfig := clientcmd.NewDefaultClientConfigLoadingRules().GetDefaultFilename()
+		k8sConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create k8s config: %w", err)
 		}
@@ -144,19 +142,33 @@ func (c *Collector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Check if already stopped
+	if c.ctx == nil {
+		return nil
+	}
+
 	if c.cancel != nil {
 		c.cancel()
+		c.cancel = nil
 	}
 
 	if c.watcher != nil {
 		c.watcher.Close()
+		c.watcher = nil
 	}
 
 	// Cleanup eBPF resources
 	c.cleanupEBPF()
 
 	c.wg.Wait()
-	close(c.events)
+	
+	// Only close events channel once
+	if c.events != nil {
+		close(c.events)
+		c.events = nil
+	}
+
+	c.ctx = nil
 
 	return nil
 }

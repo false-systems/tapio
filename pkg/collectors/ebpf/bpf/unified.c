@@ -13,6 +13,13 @@
 #define EVENT_MEMORY   3
 #define EVENT_OOM      4
 
+// K8s-specific event types
+#define EVENT_K8S_CONTAINER_CREATE 10
+#define EVENT_K8S_CONTAINER_DELETE 11
+#define EVENT_K8S_CGROUP_CREATE   12
+#define EVENT_K8S_CGROUP_DELETE   13
+#define EVENT_K8S_EXEC_IN_POD     14
+
 // Network families
 #ifndef AF_INET
 #define AF_INET 2
@@ -206,6 +213,102 @@ int BPF_PROG(trace_exec)
     
     // Store comm (process name)
     bpf_get_current_comm(&e->data[0], 16);
+    
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+// K8s: Track cgroup operations (container lifecycle)
+SEC("tp_btf/cgroup/cgroup_mkdir")
+int BPF_PROG(trace_cgroup_mkdir)
+{
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+    if (!e)
+        return 0;
+    
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
+    
+    e->timestamp = bpf_ktime_get_ns();
+    e->pid = pid_tgid >> 32;
+    e->tid = (__u32)pid_tgid;
+    e->cpu = bpf_get_smp_processor_id();
+    e->type = EVENT_K8S_CGROUP_CREATE;
+    e->flags = 0;
+    e->data_len = 16;
+    
+    // Store cgroup ID and parent PID
+    *(__u64 *)&e->data[0] = cgroup_id;
+    *(__u32 *)&e->data[8] = e->pid;
+    
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp_btf/cgroup/cgroup_rmdir")
+int BPF_PROG(trace_cgroup_rmdir)
+{
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+    if (!e)
+        return 0;
+    
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
+    
+    e->timestamp = bpf_ktime_get_ns();
+    e->pid = pid_tgid >> 32;
+    e->tid = (__u32)pid_tgid;
+    e->cpu = bpf_get_smp_processor_id();
+    e->type = EVENT_K8S_CGROUP_DELETE;
+    e->flags = 0;
+    e->data_len = 16;
+    
+    // Store cgroup ID
+    *(__u64 *)&e->data[0] = cgroup_id;
+    *(__u32 *)&e->data[8] = e->pid;
+    
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+// K8s: Enhanced exec tracking for kubectl exec and debugging
+SEC("tp_btf/sched_process_exec")
+int BPF_PROG(trace_k8s_exec)
+{
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
+    
+    // Only track exec in containers
+    if (!is_container_process(task))
+        return 0;
+    
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+    if (!e)
+        return 0;
+    
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
+    
+    e->timestamp = bpf_ktime_get_ns();
+    e->pid = pid_tgid >> 32;
+    e->tid = (__u32)pid_tgid;
+    e->cpu = bpf_get_smp_processor_id();
+    e->type = EVENT_K8S_EXEC_IN_POD;
+    e->flags = 0;
+    e->data_len = 32;
+    
+    // Store cgroup ID and command
+    *(__u64 *)&e->data[0] = cgroup_id;
+    bpf_get_current_comm(&e->data[8], 16);
+    
+    // Get namespace level to confirm container
+    __u32 ns_level = 0;
+    if (bpf_core_field_exists(task->nsproxy)) {
+        struct pid_namespace *pidns = BPF_CORE_READ(task, nsproxy, pid_ns_for_children);
+        if (pidns) {
+            ns_level = BPF_CORE_READ(pidns, level);
+        }
+    }
+    *(__u32 *)&e->data[24] = ns_level;
     
     bpf_ringbuf_submit(e, 0);
     return 0;

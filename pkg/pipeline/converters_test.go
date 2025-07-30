@@ -16,9 +16,9 @@ import (
 func TestEBPFConverter(t *testing.T) {
 	ctx := context.Background()
 	converter := NewEBPFConverter()
-	
+
 	assert.Equal(t, "ebpf", converter.SourceType())
-	
+
 	tests := []struct {
 		name      string
 		eventType string
@@ -56,7 +56,7 @@ func TestEBPFConverter(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := collectors.RawEvent{
@@ -68,11 +68,11 @@ func TestEBPFConverter(t *testing.T) {
 					"cpu":        "2",
 				},
 			}
-			
+
 			event, err := converter.Convert(ctx, raw)
 			require.NoError(t, err)
 			require.NotNil(t, event)
-			
+
 			assert.Equal(t, "ebpf", event.Source)
 			tt.check(t, event)
 		})
@@ -82,9 +82,9 @@ func TestEBPFConverter(t *testing.T) {
 func TestK8sConverter(t *testing.T) {
 	ctx := context.Background()
 	converter := NewK8sConverter()
-	
+
 	assert.Equal(t, "k8s", converter.SourceType())
-	
+
 	// Test pod creation event
 	podObj := map[string]interface{}{
 		"apiVersion": "v1",
@@ -95,10 +95,10 @@ func TestK8sConverter(t *testing.T) {
 			"uid":       "12345",
 		},
 	}
-	
+
 	podData, err := json.Marshal(podObj)
 	require.NoError(t, err)
-	
+
 	raw := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "k8s",
@@ -111,16 +111,16 @@ func TestK8sConverter(t *testing.T) {
 			"uid":       "12345",
 		},
 	}
-	
+
 	event, err := converter.Convert(ctx, raw)
 	require.NoError(t, err)
 	require.NotNil(t, event)
-	
+
 	assert.Equal(t, "k8s", event.Source)
 	assert.Equal(t, domain.EventTypeKubernetes, event.Type)
 	assert.Equal(t, "pod-created", event.SemanticContext.Event)
 	assert.Equal(t, "lifecycle", event.SemanticContext.Category)
-	
+
 	assert.NotNil(t, event.K8s)
 	assert.Equal(t, "default", event.K8s.Namespace)
 	assert.Equal(t, "pods", event.K8s.Resource)
@@ -131,28 +131,28 @@ func TestK8sConverter(t *testing.T) {
 func TestSystemdConverter(t *testing.T) {
 	ctx := context.Background()
 	converter := NewSystemdConverter()
-	
+
 	assert.Equal(t, "systemd", converter.SourceType())
-	
+
 	entry := map[string]interface{}{
 		"_SYSTEMD_UNIT": "docker.service",
 		"MESSAGE":       "Started Docker Application Container Engine",
 		"PRIORITY":      "6",
 	}
-	
+
 	data, err := json.Marshal(entry)
 	require.NoError(t, err)
-	
+
 	raw := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "systemd",
 		Data:      data,
 	}
-	
+
 	event, err := converter.Convert(ctx, raw)
 	require.NoError(t, err)
 	require.NotNil(t, event)
-	
+
 	assert.Equal(t, "systemd", event.Source)
 	assert.Equal(t, domain.EventTypeSystem, event.Type)
 	assert.Equal(t, "systemd-log", event.SemanticContext.Event)
@@ -163,21 +163,21 @@ func TestSystemdConverter(t *testing.T) {
 func TestCNIConverter(t *testing.T) {
 	ctx := context.Background()
 	converter := NewCNIConverter()
-	
+
 	assert.Equal(t, "cni", converter.SourceType())
-	
+
 	logLine := "2024-01-15 10:30:45 [INFO] CNI ADD: pod=test-pod namespace=default"
-	
+
 	raw := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "cni",
 		Data:      []byte(logLine),
 	}
-	
+
 	event, err := converter.Convert(ctx, raw)
 	require.NoError(t, err)
 	require.NotNil(t, event)
-	
+
 	assert.Equal(t, "cni", event.Source)
 	assert.Equal(t, domain.EventTypeNetwork, event.Type)
 	assert.Equal(t, "cni-event", event.SemanticContext.Event)
@@ -206,7 +206,7 @@ func TestDetermineEventSeverity(t *testing.T) {
 			expected: "info",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		severity := determineEventSeverity(tt.event)
 		assert.Equal(t, tt.expected, severity)

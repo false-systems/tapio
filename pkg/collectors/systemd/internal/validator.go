@@ -5,26 +5,26 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	
+
 	"github.com/yairfalse/tapio/pkg/collectors/systemd/core"
 )
 
 // EventValidator validates and sanitizes systemd events
 type EventValidator struct {
 	// Security patterns
-	pathTraversalPattern *regexp.Regexp
-	sqlInjectionPattern  *regexp.Regexp
+	pathTraversalPattern    *regexp.Regexp
+	sqlInjectionPattern     *regexp.Regexp
 	commandInjectionPattern *regexp.Regexp
-	
+
 	// Validation rules
 	maxServiceNameLength int
 	maxPropertyLength    int
-	maxEventSize        int
-	
+	maxEventSize         int
+
 	// Metrics
-	validatedEvents   uint64
-	invalidEvents     uint64
-	sanitizedEvents   uint64
+	validatedEvents uint64
+	invalidEvents   uint64
+	sanitizedEvents uint64
 }
 
 // NewEventValidator creates a new event validator
@@ -35,7 +35,7 @@ func NewEventValidator() *EventValidator {
 		commandInjectionPattern: regexp.MustCompile(`[;&|]|\$\(|\${|` + "`"),
 		maxServiceNameLength:    256,
 		maxPropertyLength:       1024,
-		maxEventSize:           1024 * 1024, // 1MB
+		maxEventSize:            1024 * 1024, // 1MB
 	}
 }
 
@@ -60,7 +60,7 @@ func (v *EventValidator) ValidateEvent(event *core.RawEvent) error {
 
 	// Sanitize fields
 	v.sanitizeEvent(event)
-	
+
 	v.validatedEvents++
 	return nil
 }
@@ -116,7 +116,7 @@ func (v *EventValidator) validateSecurity(event *core.RawEvent) error {
 	for key, value := range event.Properties {
 		keyStr := fmt.Sprintf("%v", key)
 		valueStr := fmt.Sprintf("%v", value)
-		
+
 		if len(keyStr) > 256 || len(valueStr) > v.maxPropertyLength {
 			return fmt.Errorf("property too long: %s", keyStr)
 		}
@@ -131,12 +131,12 @@ func (v *EventValidator) validateSecurity(event *core.RawEvent) error {
 func (v *EventValidator) sanitizeEvent(event *core.RawEvent) {
 	// Sanitize unit name
 	event.UnitName = sanitizeString(event.UnitName)
-	
+
 	// Sanitize properties
 	sanitizedProps := make(map[string]interface{})
 	for key, value := range event.Properties {
 		sanitizedKey := sanitizeString(fmt.Sprintf("%v", key))
-		
+
 		// Handle different value types
 		switch val := value.(type) {
 		case string:
@@ -166,7 +166,7 @@ func (v *EventValidator) sanitizeEvent(event *core.RawEvent) {
 func isValidServiceName(name string) bool {
 	// Must end with .service, .socket, .device, .mount, .automount, .swap, .target, .path, .timer, .slice, or .scope
 	validSuffixes := []string{".service", ".socket", ".device", ".mount", ".automount", ".swap", ".target", ".path", ".timer", ".slice", ".scope"}
-	
+
 	hasValidSuffix := false
 	for _, suffix := range validSuffixes {
 		if strings.HasSuffix(name, suffix) {
@@ -174,7 +174,7 @@ func isValidServiceName(name string) bool {
 			break
 		}
 	}
-	
+
 	if !hasValidSuffix {
 		return false
 	}
@@ -188,13 +188,13 @@ func isValidServiceName(name string) bool {
 func isValidStateTransition(oldState, newState string) bool {
 	// Define valid systemd states
 	validStates := map[string]bool{
-		"inactive":      true,
-		"active":        true,
-		"activating":    true,
-		"deactivating":  true,
-		"failed":        true,
-		"reloading":     true,
-		"maintenance":   true,
+		"inactive":     true,
+		"active":       true,
+		"activating":   true,
+		"deactivating": true,
+		"failed":       true,
+		"reloading":    true,
+		"maintenance":  true,
 	}
 
 	// Empty old state is valid (initial state)
@@ -209,7 +209,7 @@ func isValidStateTransition(oldState, newState string) bool {
 func sanitizeString(s string) string {
 	// Remove null bytes
 	s = strings.ReplaceAll(s, "\x00", "")
-	
+
 	// Remove control characters except newline and tab
 	result := strings.Builder{}
 	for _, r := range s {
@@ -217,7 +217,7 @@ func sanitizeString(s string) string {
 			result.WriteRune(r)
 		}
 	}
-	
+
 	return strings.TrimSpace(result.String())
 }
 
@@ -231,7 +231,7 @@ func (v *EventValidator) DeterminePriority(event *core.RawEvent) EventPriority {
 		"NetworkManager.service",
 		"systemd-resolved.service",
 	}
-	
+
 	for _, service := range criticalServices {
 		if event.UnitName == service && event.NewState == "failed" {
 			return PriorityCritical
@@ -258,6 +258,6 @@ func (v *EventValidator) Metrics() map[string]interface{} {
 		"validated_events": v.validatedEvents,
 		"invalid_events":   v.invalidEvents,
 		"sanitized_events": v.sanitizedEvents,
-		"validation_rate":  float64(v.validatedEvents) / float64(v.validatedEvents + v.invalidEvents + 1),
+		"validation_rate":  float64(v.validatedEvents) / float64(v.validatedEvents+v.invalidEvents+1),
 	}
 }

@@ -60,7 +60,7 @@ func TestCollectorContext(t *testing.T) {
 
 	// Cancel context should stop collector
 	cancel()
-	
+
 	// Give it time to clean up
 	time.Sleep(100 * time.Millisecond)
 
@@ -80,48 +80,48 @@ func TestCollectorContext(t *testing.T) {
 
 func TestCNIStrategyImplementations(t *testing.T) {
 	tests := []struct {
-		name             string
-		strategy         CNIStrategy
-		wantName         string
-		minLogPaths      int
-		minWatchPaths    int
-		expectedLogPath  string
+		name              string
+		strategy          CNIStrategy
+		wantName          string
+		minLogPaths       int
+		minWatchPaths     int
+		expectedLogPath   string
 		expectedWatchPath string
 	}{
 		{
-			name:             "Calico strategy",
-			strategy:         &CalicoStrategy{},
-			wantName:         "calico",
-			minLogPaths:      2,
-			minWatchPaths:    2,
-			expectedLogPath:  "/var/log/calico/cni/",
+			name:              "Calico strategy",
+			strategy:          &CalicoStrategy{},
+			wantName:          "calico",
+			minLogPaths:       2,
+			minWatchPaths:     2,
+			expectedLogPath:   "/var/log/calico/cni/",
 			expectedWatchPath: "/etc/cni/net.d/",
 		},
 		{
-			name:             "Cilium strategy",
-			strategy:         &CiliumStrategy{},
-			wantName:         "cilium",
-			minLogPaths:      2,
-			minWatchPaths:    2,
-			expectedLogPath:  "/var/run/cilium/cilium.log",
+			name:              "Cilium strategy",
+			strategy:          &CiliumStrategy{},
+			wantName:          "cilium",
+			minLogPaths:       2,
+			minWatchPaths:     2,
+			expectedLogPath:   "/var/run/cilium/cilium.log",
 			expectedWatchPath: "/var/run/cilium/",
 		},
 		{
-			name:             "Flannel strategy",
-			strategy:         &FlannelStrategy{},
-			wantName:         "flannel",
-			minLogPaths:      1,
-			minWatchPaths:    2,
-			expectedLogPath:  "/var/log/flanneld.log",
+			name:              "Flannel strategy",
+			strategy:          &FlannelStrategy{},
+			wantName:          "flannel",
+			minLogPaths:       1,
+			minWatchPaths:     2,
+			expectedLogPath:   "/var/log/flanneld.log",
 			expectedWatchPath: "/run/flannel/",
 		},
 		{
-			name:             "Generic strategy",
-			strategy:         &GenericStrategy{},
-			wantName:         "generic",
-			minLogPaths:      1,
-			minWatchPaths:    2,
-			expectedLogPath:  "/var/log/cni/",
+			name:              "Generic strategy",
+			strategy:          &GenericStrategy{},
+			wantName:          "generic",
+			minLogPaths:       1,
+			minWatchPaths:     2,
+			expectedLogPath:   "/var/log/cni/",
 			expectedWatchPath: "/var/lib/cni/",
 		},
 	}
@@ -129,11 +129,11 @@ func TestCNIStrategyImplementations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.wantName, tt.strategy.GetName())
-			
+
 			logPaths := tt.strategy.GetLogPaths()
 			assert.GreaterOrEqual(t, len(logPaths), tt.minLogPaths)
 			assert.Contains(t, logPaths, tt.expectedLogPath)
-			
+
 			watchPaths := tt.strategy.GetWatchPaths()
 			assert.GreaterOrEqual(t, len(watchPaths), tt.minWatchPaths)
 			assert.Contains(t, watchPaths, tt.expectedWatchPath)
@@ -163,7 +163,7 @@ func TestCollectorHealthy(t *testing.T) {
 func TestEventStructure(t *testing.T) {
 	config := collectors.DefaultCollectorConfig()
 	config.BufferSize = 10
-	
+
 	collector, err := NewCollector(config)
 	require.NoError(t, err)
 
@@ -180,16 +180,16 @@ func TestEventStructure(t *testing.T) {
 		assert.NotZero(t, event.Timestamp)
 		assert.NotEmpty(t, event.Data)
 		assert.NotNil(t, event.Metadata)
-		
+
 		// Verify metadata
 		assert.Contains(t, event.Metadata, "source")
 		assert.Contains(t, event.Metadata, "cni_plugin")
-		
+
 		// Verify data is valid JSON
 		var data map[string]interface{}
 		err := json.Unmarshal(event.Data, &data)
 		assert.NoError(t, err)
-		
+
 	case <-time.After(10 * time.Second):
 		t.Skip("No events received in timeout period")
 	}
@@ -198,14 +198,13 @@ func TestEventStructure(t *testing.T) {
 func TestCollectorBufferHandling(t *testing.T) {
 	config := collectors.DefaultCollectorConfig()
 	config.BufferSize = 2 // Very small buffer
-	
+
 	collector, err := NewCollector(config)
 	require.NoError(t, err)
 
 	// Mock the internal collector to control event generation
-	mockCollector := collector.(*Collector)
-	mockCollector.detectedCNI = "test"
-	mockCollector.strategy = &GenericStrategy{}
+	collector.detectedCNI = "test"
+	collector.strategy = &GenericStrategy{}
 
 	ctx := context.Background()
 	err = collector.Start(ctx)
@@ -222,7 +221,7 @@ func TestCollectorBufferHandling(t *testing.T) {
 func TestCollectorWithMultipleConsumers(t *testing.T) {
 	config := collectors.DefaultCollectorConfig()
 	config.BufferSize = 100
-	
+
 	collector, err := NewCollector(config)
 	require.NoError(t, err)
 
@@ -234,7 +233,7 @@ func TestCollectorWithMultipleConsumers(t *testing.T) {
 	// Start multiple consumers
 	var wg sync.WaitGroup
 	consumedEvents := make([]int, 3)
-	
+
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go func(consumerID int) {
@@ -281,7 +280,7 @@ func TestCollectorPerformance(t *testing.T) {
 
 	config := collectors.DefaultCollectorConfig()
 	config.BufferSize = 1000
-	
+
 	collector, err := NewCollector(config)
 	require.NoError(t, err)
 
@@ -307,9 +306,9 @@ func TestCollectorPerformance(t *testing.T) {
 		case <-timeout:
 			duration := time.Since(start)
 			eventsPerSecond := float64(eventCount) / duration.Seconds()
-			t.Logf("Performance: %d events in %v (%.2f events/sec)", 
+			t.Logf("Performance: %d events in %v (%.2f events/sec)",
 				eventCount, duration, eventsPerSecond)
-			
+
 			// Should handle at least heartbeat events
 			assert.Greater(t, eventCount, 0, "Should have processed some events")
 			return
@@ -324,7 +323,7 @@ func TestCollectorMemoryUsage(t *testing.T) {
 
 	config := collectors.DefaultCollectorConfig()
 	config.BufferSize = 10000 // Large buffer
-	
+
 	collector, err := NewCollector(config)
 	require.NoError(t, err)
 
@@ -349,7 +348,7 @@ func TestCollectorMemoryUsage(t *testing.T) {
 func BenchmarkCollectorEventGeneration(b *testing.B) {
 	config := collectors.DefaultCollectorConfig()
 	config.BufferSize = 10000
-	
+
 	collector, err := NewCollector(config)
 	require.NoError(b, err)
 
@@ -363,7 +362,7 @@ func BenchmarkCollectorEventGeneration(b *testing.B) {
 	// Consume events
 	eventCount := 0
 	timeout := time.After(time.Duration(b.N) * time.Millisecond)
-	
+
 	for {
 		select {
 		case _, ok := <-collector.Events():
@@ -400,19 +399,16 @@ func BenchmarkCNIStrategyCreation(b *testing.B) {
 // Helper function for future e2e tests
 func createTestCollectorWithMockK8s(t *testing.T) *Collector {
 	t.Helper()
-	
+
 	config := collectors.DefaultCollectorConfig()
 	collector, err := NewCollector(config)
 	require.NoError(t, err)
-	
-	// Cast to concrete type to access internals
-	c := collector.(*Collector)
-	
+
 	// Set a known CNI for testing
-	c.detectedCNI = "test-cni"
-	c.strategy = &GenericStrategy{}
-	
-	return c
+	collector.detectedCNI = "test-cni"
+	collector.strategy = &GenericStrategy{}
+
+	return collector
 }
 
 // Example e2e test structure (would need actual K8s environment)
@@ -420,12 +416,12 @@ func TestCollectorE2EWithK8s(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
 	}
-	
+
 	// This would require:
 	// 1. K8s test environment (kind, minikube, etc)
 	// 2. Deploy test CNI DaemonSet
 	// 3. Verify detection and event collection
-	
+
 	t.Skip("E2E test requires Kubernetes environment")
 }
 
@@ -442,7 +438,7 @@ func TestCollectorErrorCases(t *testing.T) {
 		config := collectors.DefaultCollectorConfig()
 		collector, err := NewCollector(config)
 		require.NoError(t, err)
-		
+
 		// Should handle stop without start gracefully
 		err = collector.Stop()
 		assert.NoError(t, err)
@@ -452,15 +448,15 @@ func TestCollectorErrorCases(t *testing.T) {
 		config := collectors.DefaultCollectorConfig()
 		collector, err := NewCollector(config)
 		require.NoError(t, err)
-		
+
 		ctx := context.Background()
 		err = collector.Start(ctx)
 		require.NoError(t, err)
-		
+
 		// First stop
 		err = collector.Stop()
 		assert.NoError(t, err)
-		
+
 		// Second stop should be safe
 		err = collector.Stop()
 		assert.NoError(t, err)
@@ -470,7 +466,7 @@ func TestCollectorErrorCases(t *testing.T) {
 // Test helpers
 func waitForEvent(t *testing.T, collector collectors.Collector, timeout time.Duration) *collectors.RawEvent {
 	t.Helper()
-	
+
 	select {
 	case event := <-collector.Events():
 		return &event
@@ -482,12 +478,12 @@ func waitForEvent(t *testing.T, collector collectors.Collector, timeout time.Dur
 
 func assertEventValid(t *testing.T, event *collectors.RawEvent) {
 	t.Helper()
-	
+
 	assert.NotNil(t, event)
 	assert.Equal(t, "cni", event.Type)
 	assert.NotZero(t, event.Timestamp)
 	assert.NotEmpty(t, event.Data)
-	
+
 	// Verify JSON validity
 	var data interface{}
 	err := json.Unmarshal(event.Data, &data)
@@ -502,7 +498,7 @@ func TestCollectorUnderLoad(t *testing.T) {
 
 	config := collectors.DefaultCollectorConfig()
 	config.BufferSize = 100
-	
+
 	collector, err := NewCollector(config)
 	require.NoError(t, err)
 

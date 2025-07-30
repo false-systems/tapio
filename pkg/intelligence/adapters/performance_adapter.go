@@ -43,7 +43,7 @@ type PerformanceAdapter struct {
 func NewPerformanceAdapter(engine interfaces.CorrelationEngine, opts ...PerformanceOption) *PerformanceAdapter {
 	// Default configuration
 	channelSize := 10000
-	
+
 	pa := &PerformanceAdapter{
 		engine:         engine,
 		stopChan:       make(chan struct{}),
@@ -54,12 +54,12 @@ func NewPerformanceAdapter(engine interfaces.CorrelationEngine, opts ...Performa
 		eventBuffer:    make([]byte, 0, 1024*1024), // 1MB initial buffer
 		eventOffsets:   make([]uint32, 0, 10000),
 	}
-	
+
 	// Apply options before creating channels (so channel size can be configured)
 	for _, opt := range opts {
 		opt(pa)
 	}
-	
+
 	// Use channelSize from options if WithChannelSize was called
 	if pa.inputChan == nil {
 		pa.inputChan = make(chan *interfaces.PipelineEvent, channelSize)

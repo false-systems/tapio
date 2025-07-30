@@ -241,7 +241,7 @@ func (bc *BackpressureController) Accept(event *domain.UnifiedEvent) bool {
 
 	// Map severity to priority (since UnifiedEvent doesn't have Priority field)
 	priority := bc.getPriorityFromEvent(event)
-	
+
 	// Always accept critical events
 	if priority <= int(PriorityCritical) {
 		return true

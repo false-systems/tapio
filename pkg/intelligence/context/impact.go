@@ -50,8 +50,8 @@ func (ia *ImpactAnalyzer) AssessImpact(ue *domain.UnifiedEvent) *domain.ImpactCo
 
 	// Set technical impact indicators (removing business assumptions)
 	impact.BusinessImpact = impactScore    // Rename this field to InfrastructureImpact in domain
-	impact.CustomerFacing = false           // Remove business assumptions
-	impact.RevenueImpacting = false         // Remove business assumptions
+	impact.CustomerFacing = false          // Remove business assumptions
+	impact.RevenueImpacting = false        // Remove business assumptions
 	impact.SLOImpact = ia.hasSLOImpact(ue) // Keep as this is technical
 
 	return impact
