@@ -31,6 +31,12 @@ type MinimalK8sCollector struct {
 	informerFactory dynamicinformer.DynamicSharedInformerFactory
 	stopCh          chan struct{}
 
+	// eBPF integration
+	ebpfCollector *K8sEBPFCollector
+	enableEBPF    bool
+	podCgroupMap  map[string]uint64 // pod UID -> cgroup ID
+	cgroupPodMap  map[uint64]string // cgroup ID -> pod UID
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -42,12 +48,28 @@ type MinimalK8sCollector struct {
 
 // NewMinimalK8sCollector creates a new minimal K8s collector
 func NewMinimalK8sCollector(config collectors.CollectorConfig) (*MinimalK8sCollector, error) {
-	return &MinimalK8sCollector{
-		config:  config,
-		events:  make(chan collectors.RawEvent, config.BufferSize),
-		healthy: true,
-		stopCh:  make(chan struct{}),
-	}, nil
+	collector := &MinimalK8sCollector{
+		config:       config,
+		events:       make(chan collectors.RawEvent, config.BufferSize),
+		healthy:      true,
+		stopCh:       make(chan struct{}),
+		podCgroupMap: make(map[string]uint64),
+		cgroupPodMap: make(map[uint64]string),
+	}
+
+	// Check if eBPF is enabled in config
+	if ebpfEnabled, ok := config.Labels["enable_ebpf"]; ok && ebpfEnabled == "true" {
+		ebpfCollector, err := NewK8sEBPFCollector()
+		if err != nil {
+			// Log error but don't fail - eBPF is optional
+			fmt.Printf("Failed to initialize eBPF collector: %v\n", err)
+		} else {
+			collector.ebpfCollector = ebpfCollector
+			collector.enableEBPF = true
+		}
+	}
+
+	return collector, nil
 }
 
 // Name returns the collector name
@@ -80,6 +102,18 @@ func (c *MinimalK8sCollector) Start(ctx context.Context) error {
 	// Start informers
 	c.informerFactory.Start(c.stopCh)
 
+	// Start eBPF collection if enabled
+	if c.enableEBPF && c.ebpfCollector != nil {
+		if err := c.ebpfCollector.Start(ctx); err != nil {
+			fmt.Printf("Failed to start eBPF collector: %v\n", err)
+			// Don't fail - continue without eBPF
+		} else {
+			// Start goroutine to process eBPF events
+			c.wg.Add(1)
+			go c.processEBPFEvents()
+		}
+	}
+
 	c.started = true
 	return nil
 }
@@ -95,6 +129,11 @@ func (c *MinimalK8sCollector) Stop() error {
 
 	// Stop informers
 	close(c.stopCh)
+
+	// Stop eBPF collector if running
+	if c.enableEBPF && c.ebpfCollector != nil {
+		c.ebpfCollector.Stop()
+	}
 
 	// Cancel context
 	c.cancel()
@@ -165,7 +204,12 @@ func (c *MinimalK8sCollector) setupWatchers() {
 	}
 
 	for _, gvr := range resources {
-		c.setupResourceWatcher(gvr)
+		// Special handling for pods when eBPF is enabled
+		if gvr.Resource == "pods" && c.enableEBPF {
+			c.setupPodWatcher(gvr)
+		} else {
+			c.setupResourceWatcher(gvr)
+		}
 	}
 }
 
@@ -240,4 +284,149 @@ func MinimalK8sConfig() collectors.CollectorConfig {
 	config := DefaultK8sConfig()
 	config.Labels["collector"] = "k8s-minimal"
 	return config
+}
+
+// setupPodWatcher sets up a pod watcher with eBPF integration
+func (c *MinimalK8sCollector) setupPodWatcher(gvr schema.GroupVersionResource) {
+	informer := c.informerFactory.ForResource(gvr).Informer()
+
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			c.handlePodEvent("ADDED", obj)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			c.handlePodEvent("MODIFIED", newObj)
+		},
+		DeleteFunc: func(obj interface{}) {
+			c.handlePodEvent("DELETED", obj)
+		},
+	})
+}
+
+// handlePodEvent handles pod events with eBPF cgroup tracking
+func (c *MinimalK8sCollector) handlePodEvent(eventType string, obj interface{}) {
+	// First handle as normal resource event
+	c.handleResourceEvent(eventType, "pods", obj)
+
+	// Then update cgroup tracking if eBPF is enabled
+	if !c.enableEBPF || c.ebpfCollector == nil {
+		return
+	}
+
+	// Extract pod info
+	unstructuredObj, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			return
+		}
+		unstructuredObj, ok = tombstone.Obj.(*unstructured.Unstructured)
+		if !ok {
+			return
+		}
+	}
+
+	podUID := string(unstructuredObj.GetUID())
+	namespace := unstructuredObj.GetNamespace()
+	podName := unstructuredObj.GetName()
+
+	// Extract cgroup ID from pod status if available
+	status, found, err := unstructured.NestedMap(unstructuredObj.Object, "status")
+	if err != nil || !found {
+		return
+	}
+
+	// Look for container statuses
+	containerStatuses, found, err := unstructured.NestedSlice(status, "containerStatuses")
+	if err != nil || !found {
+		return
+	}
+
+	for _, cs := range containerStatuses {
+		containerStatus, ok := cs.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract container ID
+		containerID, found, err := unstructured.NestedString(containerStatus, "containerID")
+		if err != nil || !found {
+			continue
+		}
+
+		// Generate a pseudo cgroup ID based on container ID
+		// In production, we'd extract the actual cgroup ID
+		cgroupID := generateCgroupID(containerID)
+
+		// Update mappings
+		c.mu.Lock()
+		if eventType == "DELETED" {
+			delete(c.podCgroupMap, podUID)
+			delete(c.cgroupPodMap, cgroupID)
+		} else {
+			c.podCgroupMap[podUID] = cgroupID
+			c.cgroupPodMap[cgroupID] = podUID
+		}
+		c.mu.Unlock()
+
+		// Update eBPF collector
+		if eventType != "DELETED" {
+			c.ebpfCollector.UpdatePodInfo(cgroupID, podUID, namespace, podName)
+		}
+	}
+}
+
+// processEBPFEvents processes events from the eBPF collector
+func (c *MinimalK8sCollector) processEBPFEvents() {
+	defer c.wg.Done()
+
+	for {
+		select {
+		case event, ok := <-c.ebpfCollector.Events():
+			if !ok {
+				return
+			}
+
+			// Convert to raw event
+			rawEvent := ConvertK8sSyscallEvent(event)
+
+			// Enrich with pod info if we have it
+			c.mu.RLock()
+			if podUID, ok := c.cgroupPodMap[parseCgroupID(event.ContainerID)]; ok {
+				rawEvent.Metadata["k8s_pod_uid"] = podUID
+			}
+			c.mu.RUnlock()
+
+			// Send event
+			select {
+			case c.events <- rawEvent:
+			case <-c.ctx.Done():
+				return
+			}
+
+		case <-c.ctx.Done():
+			return
+		}
+	}
+}
+
+// Helper function to generate cgroup ID from container ID
+func generateCgroupID(containerID string) uint64 {
+	// Simple hash function for demo
+	// In production, extract actual cgroup ID
+	var hash uint64
+	for i := 0; i < len(containerID) && i < 8; i++ {
+		hash = hash*31 + uint64(containerID[i])
+	}
+	return hash
+}
+
+// Helper function to parse cgroup ID from container ID string
+func parseCgroupID(containerID string) uint64 {
+	// Reverse of generateCgroupID
+	var hash uint64
+	for i := 0; i < len(containerID) && i < 8; i++ {
+		hash = hash*31 + uint64(containerID[i])
+	}
+	return hash
 }
