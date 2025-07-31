@@ -59,7 +59,7 @@ struct {
 static __always_inline bool is_container_process(__u32 pid)
 {
     __u8 *flag = bpf_map_lookup_elem(&container_pids, &pid);
-    return flag != NULL;
+    return flag != 0;
 }
 
 // Helper to extract cgroup ID from task struct
