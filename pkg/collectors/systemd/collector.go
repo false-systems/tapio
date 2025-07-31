@@ -220,6 +220,10 @@ func (c *Collector) processEvents() {
 				"filename":  c.nullTerminatedString(event.Filename[:]),
 				"exit_code": fmt.Sprintf("%d", event.ExitCode),
 			},
+			// Generate new trace ID for systemd events
+			// TODO: Extract from journal metadata if available
+			TraceID: collectors.GenerateTraceID(),
+			SpanID:  collectors.GenerateSpanID(),
 		}
 
 		select {

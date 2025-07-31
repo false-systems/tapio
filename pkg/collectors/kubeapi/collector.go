@@ -90,8 +90,18 @@ func (c *Collector) IsHealthy() bool {
 }
 
 // Helper to create a KubeAPI raw event
-func (c *Collector) createEvent(eventType string, data interface{}) collectors.RawEvent {
+func (c *Collector) createEvent(eventType string, data interface{}, traceID, spanID string) collectors.RawEvent {
 	jsonData, _ := json.Marshal(data)
+
+	// Generate new span ID if not provided
+	if spanID == "" {
+		spanID = collectors.GenerateSpanID()
+	}
+
+	// Generate new trace ID if not provided
+	if traceID == "" {
+		traceID = collectors.GenerateTraceID()
+	}
 
 	return collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -101,5 +111,7 @@ func (c *Collector) createEvent(eventType string, data interface{}) collectors.R
 			"collector": c.name,
 			"event":     eventType,
 		},
+		TraceID: traceID,
+		SpanID:  spanID,
 	}
 }

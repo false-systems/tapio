@@ -91,5 +91,9 @@ func (c *Collector) createEvent(eventType string, data interface{}) collectors.R
 			"collector": c.name,
 			"event":     eventType,
 		},
+		// Generate new trace ID for etcd events
+		// TODO: Extract from gRPC headers when frame parsing is implemented
+		TraceID: collectors.GenerateTraceID(),
+		SpanID:  collectors.GenerateSpanID(),
 	}
 }

@@ -91,5 +91,8 @@ func (c *Collector) createEvent(eventType string, data interface{}) collectors.R
 			"collector": c.name,
 			"event":     eventType,
 		},
+		// Generate new trace ID for CNI events
+		TraceID: collectors.GenerateTraceID(),
+		SpanID:  collectors.GenerateSpanID(),
 	}
 }

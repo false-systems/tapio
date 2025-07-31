@@ -58,7 +58,7 @@ func TestEventCreation(t *testing.T) {
 		"resource": "pods",
 		"action":   "ADDED",
 		"name":     "test-pod",
-	})
+	}, "", "")
 
 	assert.Equal(t, "kubeapi", event.Type)
 	assert.Equal(t, "test-kubeapi", event.Metadata["collector"])

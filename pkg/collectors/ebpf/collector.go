@@ -37,22 +37,24 @@ type PodInfo struct {
 
 // Collector implements minimal kernel monitoring via eBPF
 type Collector struct {
-	name    string
-	objs    *kernelmonitorObjects
-	links   []link.Link
-	reader  *ringbuf.Reader
-	events  chan collectors.RawEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	healthy bool
+	name        string
+	objs        *kernelmonitorObjects
+	links       []link.Link
+	reader      *ringbuf.Reader
+	events      chan collectors.RawEvent
+	ctx         context.Context
+	cancel      context.CancelFunc
+	healthy     bool
+	podTraceMap map[string]string // Map pod UID to trace ID
 }
 
 // NewCollector creates a new minimal eBPF collector
 func NewCollector(name string) (*Collector, error) {
 	return &Collector{
-		name:    name,
-		events:  make(chan collectors.RawEvent, 1000),
-		healthy: true,
+		name:        name,
+		events:      make(chan collectors.RawEvent, 1000),
+		healthy:     true,
+		podTraceMap: make(map[string]string),
 	}, nil
 }
 
@@ -239,6 +241,9 @@ func (c *Collector) processEvents() {
 				"cgroup_id": fmt.Sprintf("%d", event.CgroupID),
 				"pod_uid":   c.nullTerminatedString(event.PodUID[:]),
 			},
+			// Generate new trace for kernel events, or reuse pod trace if available
+			TraceID: c.getOrGenerateTraceID(event),
+			SpanID:  collectors.GenerateSpanID(),
 		}
 
 		select {
@@ -320,4 +325,23 @@ func (c *Collector) GetPodInfo(cgroupID uint64) (*PodInfo, error) {
 	}
 
 	return &podInfo, nil
+}
+
+// getOrGenerateTraceID returns an existing trace ID for a pod or generates a new one
+func (c *Collector) getOrGenerateTraceID(event KernelEvent) string {
+	// If we have a pod UID, use it to maintain consistent trace ID per pod
+	podUID := c.nullTerminatedString(event.PodUID[:])
+	if podUID != "" && podUID != "unknown" {
+		// Check if we already have a trace ID for this pod
+		if traceID, exists := c.podTraceMap[podUID]; exists {
+			return traceID
+		}
+		// Generate new trace ID for this pod
+		traceID := collectors.GenerateTraceID()
+		c.podTraceMap[podUID] = traceID
+		return traceID
+	}
+	
+	// For non-pod events, generate a new trace ID each time
+	return collectors.GenerateTraceID()
 }

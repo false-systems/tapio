@@ -158,6 +158,9 @@ func (c *GRPCClient) flush() {
 			Timestamp: timestamppb.New(event.Timestamp),
 			Data:      event.Data,
 			Metadata:  event.Metadata,
+			// TODO: Add these fields when proto is updated
+			// TraceId:   event.TraceID,
+			// SpanId:    event.SpanID,
 		}
 		protoEvents = append(protoEvents, protoEvent)
 	}
