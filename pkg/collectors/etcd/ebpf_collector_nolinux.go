@@ -3,12 +3,19 @@
 
 package etcd
 
-import (
-	"fmt"
-	"github.com/yairfalse/tapio/pkg/collectors"
-)
+import "fmt"
 
-// NewEBPFCollector returns an error on non-Linux systems
-func NewEBPFCollector(config collectors.CollectorConfig) (collectors.Collector, error) {
-	return nil, fmt.Errorf("eBPF collector is only supported on Linux")
+// startEBPF is a no-op on non-Linux platforms
+func (c *Collector) startEBPF() error {
+	return fmt.Errorf("eBPF monitoring not supported on this platform")
+}
+
+// stopEBPF is a no-op on non-Linux platforms
+func (c *Collector) stopEBPF() {
+	// No-op
+}
+
+// readEBPFEvents is not used on non-Linux platforms
+func (c *Collector) readEBPFEvents() {
+	// No-op
 }

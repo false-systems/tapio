@@ -5,148 +5,64 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
-func TestCollector(t *testing.T) {
-	config := collectors.CollectorConfig{
-		BufferSize: 100,
-		Labels: map[string]string{
-			"etcd_endpoints": "localhost:2379",
-		},
-	}
-	collector, err := NewCollector(config)
-	if err != nil {
-		t.Logf("Expected error creating collector without etcd server: %v", err)
-		return // This is expected if no etcd server is running
-	}
+func TestNewCollector(t *testing.T) {
+	collector, err := NewCollector("test-etcd")
+	require.NoError(t, err)
 
-	ctx := context.Background()
-	err = collector.Start(ctx)
-	if err != nil {
-		t.Logf("Expected error starting collector without etcd server: %v", err)
-		collector.Stop() // Always clean up
-		return
-	}
-	defer collector.Stop()
+	assert.Equal(t, "test-etcd", collector.Name())
+	assert.True(t, collector.IsHealthy())
+}
 
-	// Verify basic properties
-	name := collector.Name()
-	if name != "etcd" && name != "etcd-ebpf" {
-		t.Errorf("Expected name 'etcd' or 'etcd-ebpf', got '%s'", name)
-	}
+func TestCollectorInterface(t *testing.T) {
+	collector, err := NewCollector("test-etcd")
+	require.NoError(t, err)
 
-	if !collector.IsHealthy() {
-		t.Error("Collector should be healthy initially")
-	}
-
-	// Check that we can receive from the events channel
-	eventsChan := collector.Events()
-	if eventsChan == nil {
-		t.Error("Events channel should not be nil")
-	}
+	// Verify it implements collectors.Collector
+	var _ collectors.Collector = collector
 }
 
 func TestCollectorStartStop(t *testing.T) {
-	config := collectors.CollectorConfig{
-		BufferSize: 100,
-		Labels: map[string]string{
-			"etcd_endpoints": "localhost:2379",
-		},
-	}
-	collector, err := NewCollector(config)
-	if err != nil {
-		t.Logf("Expected error creating collector without etcd server: %v", err)
-		return
-	}
+	collector, err := NewCollector("test-etcd")
+	require.NoError(t, err)
 
-	// Test double start
 	ctx := context.Background()
 	err = collector.Start(ctx)
-	if err != nil {
-		t.Logf("Expected error starting collector without etcd server: %v", err)
-		collector.Stop()
-		return
-	}
+	require.NoError(t, err)
 
+	// Should not be able to start twice
 	err = collector.Start(ctx)
-	if err == nil {
-		t.Error("Expected error on double start")
-	}
+	assert.Error(t, err)
 
-	// Test stop
-	err = collector.Stop()
-	if err != nil {
-		t.Errorf("Failed to stop collector: %v", err)
-	}
-}
-
-func TestCollectorHealthCheck(t *testing.T) {
-	config := collectors.CollectorConfig{
-		BufferSize: 100,
-		Labels: map[string]string{
-			"etcd_endpoints": "localhost:2379",
-		},
-	}
-	collector, err := NewCollector(config)
-	if err != nil {
-		t.Logf("Expected error creating collector without etcd server: %v", err)
-		return
-	}
-
-	// Should be healthy on creation
-	if !collector.IsHealthy() {
-		t.Error("Collector should be healthy on creation")
-	}
-
-	// Start and verify still healthy (may fail without etcd server)
-	ctx := context.Background()
-	err = collector.Start(ctx)
-	if err != nil {
-		t.Logf("Expected error starting collector without etcd server: %v", err)
-		collector.Stop()
-		return
-	}
-	defer collector.Stop()
-
-	if !collector.IsHealthy() {
-		t.Error("Collector should remain healthy after start")
-	}
-}
-
-func TestCollectorContextCancellation(t *testing.T) {
-	config := collectors.CollectorConfig{
-		BufferSize: 100,
-		Labels: map[string]string{
-			"etcd_endpoints": "localhost:2379",
-		},
-	}
-	collector, err := NewCollector(config)
-	if err != nil {
-		t.Logf("Expected error creating collector without etcd server: %v", err)
-		return
-	}
-
-	// Create cancellable context
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // Always call cancel to avoid leak
-
-	err = collector.Start(ctx)
-	if err != nil {
-		t.Logf("Expected error starting collector without etcd server: %v", err)
-		collector.Stop()
-		return
-	}
-
-	// Cancel context
-	cancel()
-
-	// Give collector time to stop
+	// Let it run briefly
 	time.Sleep(100 * time.Millisecond)
 
-	// Clean shutdown
+	// Stop collector
 	err = collector.Stop()
-	if err != nil {
-		t.Errorf("Failed to stop collector: %v", err)
-	}
+	require.NoError(t, err)
+
+	// Should not be healthy after stop
+	assert.False(t, collector.IsHealthy())
+}
+
+func TestEventCreation(t *testing.T) {
+	collector, err := NewCollector("test-etcd")
+	require.NoError(t, err)
+
+	// Test event creation
+	event := collector.createEvent("test_event", map[string]interface{}{
+		"key":   "value",
+		"num":   123,
+		"array": []int{1, 2, 3},
+	})
+
+	assert.Equal(t, "etcd", event.Type)
+	assert.Equal(t, "test-etcd", event.Metadata["collector"])
+	assert.Equal(t, "test_event", event.Metadata["event"])
+	assert.NotNil(t, event.Data)
+	assert.False(t, event.Timestamp.IsZero())
 }
