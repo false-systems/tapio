@@ -1,6 +1,6 @@
 //go:build ignore
 
-#include "../../ebpf/bpf/headers/vmlinux.h"
+#include "../../ebpf/bpf/vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
@@ -40,7 +40,7 @@ struct {
 
 // Helper to check if PID is systemd-related
 static inline int is_systemd_process(__u32 pid) {
-    return bpf_map_lookup_elem(&systemd_pids, &pid) != NULL;
+    return bpf_map_lookup_elem(&systemd_pids, &pid) != 0;
 }
 
 // Track process execution

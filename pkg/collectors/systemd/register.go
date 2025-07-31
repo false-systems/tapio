@@ -19,6 +19,11 @@ func CreateCollector(config map[string]interface{}) (collectors.Collector, error
 		collectorConfig.BufferSize = bufferSize
 	}
 	
-	// Use factory function
-	return New(collectorConfig)
+	// Use factory function - get name from config or default
+	name := "systemd"
+	if n, ok := config["name"].(string); ok {
+		name = n
+	}
+	
+	return NewCollector(name)
 }
