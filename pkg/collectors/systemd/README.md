@@ -1,50 +1,37 @@
 # systemd Collector
 
-The systemd collector provides comprehensive monitoring of systemd services and units, tracking state changes, failures, and system events through D-Bus integration.
+Minimal systemd collector using eBPF to monitor systemd-managed processes with zero business logic.
 
 ## Architecture
 
-This module follows the Tapio 5-level dependency hierarchy:
-
 ```
 pkg/collectors/systemd/
-├── go.mod                    # Independent module
-├── core/                     # Public interfaces and types
-│   ├── interfaces.go         # Collector contracts
-│   ├── types.go             # systemd-specific types
-│   └── errors.go            # Error definitions
-├── internal/                # Internal implementation
-│   ├── collector.go         # Main collector logic
-│   ├── processor.go         # Event processing
-│   ├── platform_linux.go   # Linux platform factory
-│   └── platform_other.go   # Non-Linux platform factory
-├── linux/                   # Linux-specific D-Bus implementation
-│   └── implementation.go    # Real systemd/D-Bus functionality
-├── stub/                    # Stub for non-Linux platforms
-│   └── implementation.go    # Returns appropriate errors
-├── cmd/                     # Standalone executables
-│   └── collector/           # Test collector binary
-└── collector.go             # Public API exports
+├── collector.go              # Minimal collector implementation
+├── collector_test.go         # Unit tests
+├── generate.go              # bpf2go generation
+├── register.go              # Registry integration
+├── bpf/                     # eBPF programs
+│   ├── systemd_monitor.c    # Main eBPF program
+│   ├── k8s_service_syscalls.c  # K8s service syscall monitoring
+│   └── common.h             # Shared headers
+└── systemdmonitor_*.go/o    # Generated eBPF objects
 ```
 
 ## Features
 
-- **Service Monitoring**: Track start, stop, restart, and failure events
-- **State Tracking**: Monitor active, inactive, failed, and transitional states
-- **D-Bus Integration**: Real-time event streaming via systemd D-Bus API
-- **Service Discovery**: Automatic discovery and filtering of services
-- **Failure Analysis**: Detailed exit codes, signals, and failure reasons
-- **Platform Abstraction**: Works on Linux, graceful degradation elsewhere
-- **Flexible Filtering**: Watch specific services or all services with exclusions
+- **Minimal Design**: Zero business logic, just raw event collection
+- **eBPF-Based**: Uses tracepoints for execve/exit events
+- **K8s Focus**: Specifically monitors systemd units relevant to K8s
+- **Low Overhead**: Efficient kernel-level monitoring
+- **Container-Aware**: Detects container processes via cgroup analysis
 
 ## Usage
 
 ```go
 import "github.com/yairfalse/tapio/pkg/collectors/systemd"
 
-// Create collector with default config
-config := systemd.DefaultConfig()
-collector, err := systemd.NewCollector(config)
+// Create minimal collector
+collector, err := systemd.NewCollector("systemd")
 if err != nil {
     log.Fatal(err)
 }
