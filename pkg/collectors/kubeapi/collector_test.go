@@ -1,4 +1,4 @@
-package k8s
+package kubeapi
 
 import (
 	"context"
@@ -11,15 +11,15 @@ import (
 )
 
 func TestNewCollector(t *testing.T) {
-	collector, err := NewCollector("test-k8s")
+	collector, err := NewCollector("test-kubeapi")
 	require.NoError(t, err)
 
-	assert.Equal(t, "test-k8s", collector.Name())
+	assert.Equal(t, "test-kubeapi", collector.Name())
 	assert.True(t, collector.IsHealthy())
 }
 
 func TestCollectorInterface(t *testing.T) {
-	collector, err := NewCollector("test-k8s")
+	collector, err := NewCollector("test-kubeapi")
 	require.NoError(t, err)
 
 	// Verify it implements collectors.Collector
@@ -27,7 +27,7 @@ func TestCollectorInterface(t *testing.T) {
 }
 
 func TestCollectorStartStop(t *testing.T) {
-	collector, err := NewCollector("test-k8s")
+	collector, err := NewCollector("test-kubeapi")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -50,7 +50,7 @@ func TestCollectorStartStop(t *testing.T) {
 }
 
 func TestEventCreation(t *testing.T) {
-	collector, err := NewCollector("test-k8s")
+	collector, err := NewCollector("test-kubeapi")
 	require.NoError(t, err)
 
 	// Test event creation
@@ -60,9 +60,25 @@ func TestEventCreation(t *testing.T) {
 		"name":     "test-pod",
 	})
 
-	assert.Equal(t, "k8s", event.Type)
-	assert.Equal(t, "test-k8s", event.Metadata["collector"])
+	assert.Equal(t, "kubeapi", event.Type)
+	assert.Equal(t, "test-kubeapi", event.Metadata["collector"])
 	assert.Equal(t, "test_event", event.Metadata["event"])
 	assert.NotNil(t, event.Data)
 	assert.False(t, event.Timestamp.IsZero())
+}
+
+func TestNewCollectorFromCollectorConfig(t *testing.T) {
+	config := collectors.CollectorConfig{
+		BufferSize: 100,
+		Labels: map[string]string{
+			"test": "true",
+			"name": "custom-kubeapi",
+		},
+	}
+
+	collector, err := NewCollectorFromCollectorConfig(config)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom-kubeapi", collector.Name())
+	assert.True(t, collector.IsHealthy())
 }

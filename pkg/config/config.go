@@ -92,7 +92,7 @@ func (c *Config) applyDefaults() {
 		c.Collectors.Labels = make(map[string]string)
 	}
 	if len(c.Collectors.Enabled) == 0 {
-		c.Collectors.Enabled = []string{"cni", "etcd", "k8s"}
+		c.Collectors.Enabled = []string{"cni", "etcd", "kubeapi"}
 	}
 }
 

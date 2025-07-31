@@ -43,7 +43,7 @@ import (
     "log"
     
     "github.com/yairfalse/tapio/pkg/collectors"
-    k8score "github.com/yairfalse/tapio/pkg/collectors/k8s/core"
+    "github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 )
 
 func main() {
@@ -52,7 +52,7 @@ func main() {
     manager := collectors.NewManager(config)
     
     // Create and register collectors
-    k8sConfig := k8score.Config{
+    k8sConfig := kubeapi.Config{
         Name:            "k8s-main",
         Enabled:         true,
         EventBufferSize: 10000,

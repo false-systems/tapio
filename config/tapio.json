@@ -5,7 +5,7 @@
     "retries": 3
   },
   "collectors": {
-    "enabled": ["cni", "etcd", "k8s"],
+    "enabled": ["cni", "etcd", "kubeapi"],
     "buffer_size": 2000,
     "metrics_enabled": true,
     "labels": {

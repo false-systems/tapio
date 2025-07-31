@@ -234,7 +234,7 @@ func (c *EventConverter) extractLayerData(event *Event, unified *UnifiedEvent) {
 			Custom: event.Data,
 		}
 
-	case "k8s", "kubernetes":
+	case "kubeapi", "kubernetes":
 		unified.Kubernetes = &KubernetesData{
 			ObjectKind:      getStringFromMap(event.Data, "kind"),
 			Object:          getStringFromMap(event.Data, "name"),

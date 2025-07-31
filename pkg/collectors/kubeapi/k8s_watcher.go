@@ -1,4 +1,4 @@
-package k8s
+package kubeapi
 
 import (
 	"fmt"
@@ -50,6 +50,7 @@ func (c *Collector) startK8sWatch() error {
 
 	// Set up watchers for core resources
 	resources := []schema.GroupVersionResource{
+		{Group: "", Version: "v1", Resource: "namespaces"},
 		{Group: "", Version: "v1", Resource: "pods"},
 		{Group: "", Version: "v1", Resource: "services"},
 		{Group: "", Version: "v1", Resource: "nodes"},

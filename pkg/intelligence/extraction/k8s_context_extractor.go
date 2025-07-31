@@ -174,7 +174,7 @@ func (e *K8sContextExtractor) isK8sRelated(event *domain.UnifiedEvent) bool {
 
 	// Check source
 	switch event.Source {
-	case "k8s", "kubernetes", "ebpf", "cni":
+	case "kubeapi", "kubernetes", "ebpf", "cni":
 		return true
 	}
 

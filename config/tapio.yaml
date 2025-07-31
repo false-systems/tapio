@@ -12,7 +12,7 @@ collectors:
   enabled:
     - cni
     - etcd
-    - k8s
+    - kubeapi
     - systemd
     - ebpf
   

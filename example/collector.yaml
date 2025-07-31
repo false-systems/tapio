@@ -49,7 +49,7 @@ collectors:
         collector_type: "kernel"
 
   # Kubernetes API collector
-  - type: k8s
+  - type: kubeapi
     enabled: true
     config:
       # Namespace to watch (empty = all namespaces)
@@ -70,7 +70,7 @@ collectors:
       buffer_size: 5000
       
       labels:
-        collector_type: "k8s-api"
+        collector_type: "kubeapi"
 
   # CNI collector for network interface events
   - type: cni
@@ -165,7 +165,7 @@ pipeline:
 # collectors:
 #   - type: ebpf
 #     enabled: true
-#   - type: k8s
+#   - type: kubeapi
 #     enabled: true
 # pipeline:
 #   endpoint: "pipeline-service:9090"

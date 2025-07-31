@@ -1,4 +1,4 @@
-package k8s
+package kubeapi
 
 import (
 	"github.com/yairfalse/tapio/pkg/collectors"
@@ -6,18 +6,18 @@ import (
 )
 
 func init() {
-	// Register the K8s collector factory
-	registry.Register("k8s", NewCollectorFromConfig)
+	// Register the KubeAPI collector factory
+	registry.Register("kubeapi", NewCollectorFromConfig)
 }
 
-// NewCollectorFromConfig creates a new K8s collector from configuration
+// NewCollectorFromConfig creates a new KubeAPI collector from configuration
 func NewCollectorFromConfig(config map[string]interface{}) (collectors.Collector, error) {
-	// Extract name from config, default to "k8s"
-	name := "k8s"
+	// Extract name from config, default to "kubeapi"
+	name := "kubeapi"
 	if n, ok := config["name"].(string); ok {
 		name = n
 	}
 
-	// Create minimal K8s collector
+	// Create minimal KubeAPI collector
 	return NewCollector(name)
 }

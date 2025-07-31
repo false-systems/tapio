@@ -28,7 +28,7 @@ func NewConfidenceScorer() *ConfidenceScorer {
 		},
 		knownSources: map[string]bool{
 			"ebpf":        true,
-			"k8s":         true,
+			"kubeapi":     true,
 			"kubernetes":  true,
 			"cni":         true,
 			"systemd":     true,

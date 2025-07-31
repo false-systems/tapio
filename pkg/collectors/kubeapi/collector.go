@@ -1,4 +1,4 @@
-package k8s
+package kubeapi
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
-// Collector implements minimal K8s monitoring
+// Collector implements minimal KubeAPI monitoring
 type Collector struct {
 	name    string
 	events  chan collectors.RawEvent
@@ -18,13 +18,24 @@ type Collector struct {
 	healthy bool
 }
 
-// NewCollector creates a new minimal K8s collector
+// NewCollector creates a new minimal KubeAPI collector
 func NewCollector(name string) (*Collector, error) {
 	return &Collector{
 		name:    name,
 		events:  make(chan collectors.RawEvent, 1000),
 		healthy: true,
 	}, nil
+}
+
+// NewCollectorFromCollectorConfig creates a collector from CollectorConfig
+func NewCollectorFromCollectorConfig(config collectors.CollectorConfig) (*Collector, error) {
+	name := "kubeapi"
+	if config.Labels != nil {
+		if n, ok := config.Labels["name"]; ok {
+			name = n
+		}
+	}
+	return NewCollector(name)
 }
 
 // Name returns collector name
@@ -78,13 +89,13 @@ func (c *Collector) IsHealthy() bool {
 	return c.healthy
 }
 
-// Helper to create a K8s raw event
+// Helper to create a KubeAPI raw event
 func (c *Collector) createEvent(eventType string, data interface{}) collectors.RawEvent {
 	jsonData, _ := json.Marshal(data)
 
 	return collectors.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "k8s",
+		Type:      "kubeapi",
 		Data:      jsonData,
 		Metadata: map[string]string{
 			"collector": c.name,
