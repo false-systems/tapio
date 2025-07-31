@@ -134,7 +134,7 @@ func (c *EBPFCollector) IsHealthy() bool {
 	return c.healthy
 }
 
-// attachPrograms attaches all eBPF programs
+// attachPrograms attaches all eBPF programs  
 func (c *EBPFCollector) attachPrograms() error {
 	// Attach write syscall tracepoint to monitor etcd WAL writes
 	if prog := c.ebpfCollection.Programs["trace_write"]; prog != nil {

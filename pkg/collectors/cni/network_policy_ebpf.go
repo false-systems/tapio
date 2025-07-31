@@ -499,8 +499,8 @@ func loadNetworkPolicyObjects(obj *networkPolicyObjects, opts *ebpf.CollectionOp
 				// Real kprobe program for netfilter hook tracing
 				Instructions: asm.Instructions{
 					// Get struct sk_buff pointer from function arguments
-					asm.LoadMem(asm.R1, asm.R1, 8, asm.DWord), // skb = arg1
-					asm.JEq.Imm(asm.R1, 0, "exit"),            // Exit if skb is NULL
+					asm.LoadMem(asm.R1, asm.R1, 8, asm.DWord),   // skb = arg1
+					asm.JEq.Imm(asm.R1, 0, "exit"),              // Exit if skb is NULL
 
 					// Extract IP header info from sk_buff
 					asm.LoadMem(asm.R2, asm.R1, 16, asm.Word),   // network_header offset
