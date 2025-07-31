@@ -7,11 +7,9 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	"github.com/yairfalse/tapio/pkg/collectors/manager"
 	"github.com/yairfalse/tapio/pkg/config"
 
 	// Import collectors to trigger init() registration
@@ -23,8 +21,9 @@ import (
 )
 
 var (
-	configFile      = flag.String("config", "", "Path to configuration file")
-	collectorList   = flag.String("collectors", "cni,etcd,k8s", "Comma-separated list of collectors to enable")
+	configFile    = flag.String("config", "", "Path to configuration file")
+	collectorList = flag.String("collectors", "cni,etcd,k8s", "Comma-separated list of collectors to enable")
+	healthAddr    = flag.String("health", ":8080", "Address for health endpoint")
 )
 
 func main() {
@@ -35,7 +34,7 @@ func main() {
 	// Load configuration
 	var cfg *config.Config
 	var err error
-	
+
 	if *configFile != "" {
 		cfg, err = config.LoadConfig(*configFile)
 		if err != nil {
@@ -53,6 +52,9 @@ func main() {
 		cfg.Collectors.Labels = make(map[string]string)
 	}
 
+	// Create collector manager
+	mgr := manager.NewManager(cfg)
+
 	// Create root context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -61,60 +63,36 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Get enabled collectors from config
-	enabledCollectors := cfg.Collectors.Enabled
-	log.Printf("Pipeline endpoint: %s", cfg.Pipeline.Endpoint)
-	log.Printf("Enabled collectors: %v", enabledCollectors)
-	
-	// Start collectors
-	var wg sync.WaitGroup
-	activeCollectors := make([]collectors.Collector, 0)
-
-	for _, name := range enabledCollectors {
-		log.Printf("Starting %s collector...", name)
-		
-		// Create collector from registry with unified config
-		collectorConfig := cfg.Collectors.ToCollectorConfig()
-		collector, err := registry.CreateCollector(name, collectorConfig)
-		if err != nil {
-			log.Printf("Failed to create %s collector: %v", name, err)
-			continue
+	// Start health endpoint
+	if *healthAddr != "" {
+		log.Printf("Starting health endpoint on %s", *healthAddr)
+		if err := mgr.StartHealthEndpoint(*healthAddr); err != nil {
+			log.Printf("Failed to start health endpoint: %v", err)
 		}
-
-		// Start collector
-		if err := collector.Start(ctx); err != nil {
-			log.Printf("Failed to start %s collector: %v", name, err)
-			continue
-		}
-
-		activeCollectors = append(activeCollectors, collector)
-
-		// Process events from collector
-		wg.Add(1)
-		go func(c collectors.Collector) {
-			defer wg.Done()
-			processEvents(ctx, c)
-		}(collector)
 	}
 
-	log.Printf("Started %d collectors", len(activeCollectors))
+	// Start collector manager
+	log.Printf("Pipeline endpoint: %s", cfg.Pipeline.Endpoint)
+	log.Printf("Enabled collectors: %v", cfg.Collectors.Enabled)
+
+	if err := mgr.Start(ctx); err != nil {
+		log.Fatalf("Failed to start collector manager: %v", err)
+	}
+
+	// Process events from all collectors
+	go processManagerEvents(ctx, mgr)
+
+	log.Printf("Collector manager started successfully")
 
 	// Wait for shutdown signal
 	<-sigChan
 	log.Println("Shutting down...")
 
-	// Cancel context to stop all collectors
-	cancel()
-
-	// Stop all collectors
-	for _, c := range activeCollectors {
-		if err := c.Stop(); err != nil {
-			log.Printf("Error stopping %s: %v", c.Name(), err)
-		}
+	// Stop manager
+	if err := mgr.Stop(); err != nil {
+		log.Printf("Error stopping manager: %v", err)
 	}
 
-	// Wait for all goroutines to finish
-	wg.Wait()
 	log.Println("Shutdown complete")
 }
 
@@ -129,8 +107,8 @@ func parseCollectorList(list string) []string {
 	return result
 }
 
-func processEvents(ctx context.Context, collector collectors.Collector) {
-	events := collector.Events()
+func processManagerEvents(ctx context.Context, mgr *manager.CollectorManager) {
+	events := mgr.Events()
 	for {
 		select {
 		case event, ok := <-events:
@@ -138,7 +116,8 @@ func processEvents(ctx context.Context, collector collectors.Collector) {
 				return
 			}
 			// For now, just log events
-			log.Printf("[%s] Event: %s at %v", collector.Name(), event.Type, event.Timestamp)
+			// TODO: Send to pipeline service
+			log.Printf("Event: %s at %v", event.Type, event.Timestamp)
 		case <-ctx.Done():
 			return
 		}
