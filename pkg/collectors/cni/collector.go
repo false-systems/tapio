@@ -119,12 +119,16 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	// Initialize eBPF if on Linux
 	if runtime.GOOS == "linux" {
-		if err := c.initEBPF(); err != nil {
-			// Log but don't fail - eBPF is optional enhancement
-			// In production, would use proper logging
-		} else {
-			c.wg.Add(1)
-			go c.readEBPFEvents()
+		// Try enhanced network policy monitoring first
+		if err := c.EnhanceWithNetworkPolicy(); err != nil {
+			// Fall back to basic eBPF
+			if err := c.initEBPF(); err != nil {
+				// Log but don't fail - eBPF is optional enhancement
+				// In production, would use proper logging
+			} else {
+				c.wg.Add(1)
+				go c.readEBPFEvents()
+			}
 		}
 	}
 
