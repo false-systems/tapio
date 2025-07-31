@@ -132,7 +132,9 @@ func (c *MinimalK8sCollector) Stop() error {
 
 	// Stop eBPF collector if running
 	if c.enableEBPF && c.ebpfCollector != nil {
-		c.ebpfCollector.Stop()
+		if err := c.ebpfCollector.Stop(); err != nil {
+			fmt.Printf("Error stopping eBPF collector: %v\n", err)
+		}
 	}
 
 	// Cancel context
@@ -217,7 +219,7 @@ func (c *MinimalK8sCollector) setupWatchers() {
 func (c *MinimalK8sCollector) setupResourceWatcher(gvr schema.GroupVersionResource) {
 	informer := c.informerFactory.ForResource(gvr).Informer()
 
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			c.handleResourceEvent("ADDED", gvr.Resource, obj)
 		},
@@ -227,7 +229,10 @@ func (c *MinimalK8sCollector) setupResourceWatcher(gvr schema.GroupVersionResour
 		DeleteFunc: func(obj interface{}) {
 			c.handleResourceEvent("DELETED", gvr.Resource, obj)
 		},
-	})
+	}); err != nil {
+		// Log error but continue - informer will still work
+		fmt.Printf("Error adding event handler: %v\n", err)
+	}
 }
 
 // handleResourceEvent handles K8s resource events
@@ -290,7 +295,7 @@ func MinimalK8sConfig() collectors.CollectorConfig {
 func (c *MinimalK8sCollector) setupPodWatcher(gvr schema.GroupVersionResource) {
 	informer := c.informerFactory.ForResource(gvr).Informer()
 
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			c.handlePodEvent("ADDED", obj)
 		},
@@ -300,7 +305,10 @@ func (c *MinimalK8sCollector) setupPodWatcher(gvr schema.GroupVersionResource) {
 		DeleteFunc: func(obj interface{}) {
 			c.handlePodEvent("DELETED", obj)
 		},
-	})
+	}); err != nil {
+		// Log error but continue
+		fmt.Printf("Error adding pod event handler: %v\n", err)
+	}
 }
 
 // handlePodEvent handles pod events with eBPF cgroup tracking
@@ -371,7 +379,9 @@ func (c *MinimalK8sCollector) handlePodEvent(eventType string, obj interface{}) 
 
 		// Update eBPF collector
 		if eventType != "DELETED" {
-			c.ebpfCollector.UpdatePodInfo(cgroupID, podUID, namespace, podName)
+			if err := c.ebpfCollector.UpdatePodInfo(cgroupID, podUID, namespace, podName); err != nil {
+				fmt.Printf("Error updating pod info in eBPF: %v\n", err)
+			}
 		}
 	}
 }
