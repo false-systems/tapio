@@ -1,27 +1,24 @@
 package systemd
 
 import (
-	"fmt"
-
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
 func init() {
-	// Register with unified binary - will need to implement this
-	// For now, just export the creation function
+	registry.Register("systemd", CreateCollector)
 }
 
 // CreateCollector creates a new systemd collector from config
 func CreateCollector(config map[string]interface{}) (collectors.Collector, error) {
-	name := "systemd"
-	if n, ok := config["name"].(string); ok {
-		name = n
+	// Parse configuration
+	collectorConfig := collectors.DefaultCollectorConfig()
+	
+	// Override with provided config
+	if bufferSize, ok := config["buffer_size"].(int); ok {
+		collectorConfig.BufferSize = bufferSize
 	}
-
-	collector, err := NewCollector(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create systemd collector: %w", err)
-	}
-
-	return collector, nil
+	
+	// Use factory function
+	return New(collectorConfig)
 }

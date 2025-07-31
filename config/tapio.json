@@ -1,0 +1,17 @@
+{
+  "pipeline": {
+    "endpoint": "localhost:50051",
+    "timeout": 30,
+    "retries": 3
+  },
+  "collectors": {
+    "enabled": ["cni", "etcd", "k8s"],
+    "buffer_size": 2000,
+    "metrics_enabled": true,
+    "labels": {
+      "cluster": "dev",
+      "region": "us-east-1",
+      "environment": "development"
+    }
+  }
+}
