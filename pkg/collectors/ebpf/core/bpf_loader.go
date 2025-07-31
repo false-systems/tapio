@@ -437,18 +437,18 @@ func (l *BPFLoader) getPinPath(name string) string {
 	return ""
 }
 
-// AttachType represents different BPF program attachment types
-type AttachType int
+// BPFAttachType represents different BPF program attachment types
+type BPFAttachType int
 
 const (
-	AttachTypeKprobe AttachType = iota
-	AttachTypeKretprobe
-	AttachTypeTracepoint
-	AttachTypeRawTracepoint
-	AttachTypeCgroup
-	AttachTypeXDP
-	AttachTypeTC
-	AttachTypePerfEvent
+	BPFAttachTypeKprobe BPFAttachType = iota
+	BPFAttachTypeKretprobe
+	BPFAttachTypeTracepoint
+	BPFAttachTypeRawTracepoint
+	BPFAttachTypeCgroup
+	BPFAttachTypeXDP
+	BPFAttachTypeTC
+	BPFAttachTypePerfEvent
 )
 
 // ProgramStats contains runtime statistics for a BPF program

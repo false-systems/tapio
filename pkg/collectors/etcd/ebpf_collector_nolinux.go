@@ -9,9 +9,6 @@ import (
 )
 
 // NewEBPFCollector returns an error on non-Linux systems
-func NewEBPFCollector(config collectors.CollectorConfig) (*EBPFCollector, error) {
+func NewEBPFCollector(config collectors.CollectorConfig) (collectors.Collector, error) {
 	return nil, fmt.Errorf("eBPF collector is only supported on Linux")
 }
-
-// EBPFCollector is not available on non-Linux systems
-type EBPFCollector struct{}

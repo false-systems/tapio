@@ -15,23 +15,22 @@ fi
 case "$1" in
     "cni")
         echo "🔧 Testing CNI collector..."
-        docker run --rm -v $(pwd):/app -w /app golang:1.21-alpine \
+        docker run --rm -v $(pwd):/app -w /app golang:1.24-alpine \
             sh -c "apk add --no-cache build-base linux-headers && go test -v ./pkg/collectors/cni/..."
         ;;
     "ebpf")
         echo "🔧 Testing eBPF collector..."
-        docker run --rm --privileged -v $(pwd):/app -w /app golang:1.21-alpine \
+        docker run --rm --privileged -v $(pwd):/app -w /app golang:1.24-alpine \
             sh -c "apk add --no-cache build-base linux-headers && go test -v ./pkg/collectors/ebpf/..."
         ;;
     "systemd")
         echo "🔧 Testing systemd collector..."
-        # Systemd requires special container
-        docker run --rm -v $(pwd):/app -w /app golang:1.21 \
-            sh -c "go test -v ./pkg/collectors/systemd/..."
+        docker run --rm -v $(pwd):/app -w /app golang:1.24-alpine \
+            sh -c "apk add --no-cache build-base linux-headers && go test -v ./pkg/collectors/systemd/..."
         ;;
     "all")
         echo "🔧 Testing all collectors..."
-        docker run --rm --privileged -v $(pwd):/app -w /app golang:1.21-alpine \
+        docker run --rm --privileged -v $(pwd):/app -w /app golang:1.24-alpine \
             sh -c "apk add --no-cache build-base linux-headers && go test -v ./pkg/collectors/..."
         ;;
     *)

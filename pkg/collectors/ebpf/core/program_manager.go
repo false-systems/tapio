@@ -569,8 +569,8 @@ func parseAttachType(typeStr string) (AttachType, error) {
 	}
 }
 
-// ProgramInfo contains information about a managed program
-type ProgramInfo struct {
+// ManagedProgramInfo contains information about a managed program
+type ManagedProgramInfo struct {
 	Name        string
 	Type        string
 	State       string
