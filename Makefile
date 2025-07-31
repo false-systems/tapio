@@ -27,10 +27,16 @@ NC := \033[0m # No Color
 dev: fmt lint-fix test build ## Quick development cycle (format, lint, test, build)
 	@echo "$(GREEN)✅ Development cycle complete!$(NC)"
 
-build: proto ## Build all binaries (includes proto generation)
+generate-ebpf: ## Generate eBPF programs
+	@echo "$(BLUE)🔨 Generating eBPF programs...$(NC)"
+	@cd pkg/collectors/ebpf && go generate ./...
+	@cd pkg/collectors/etcd && go generate ./...
+	@echo "$(GREEN)✅ eBPF programs generated!$(NC)"
+
+build: proto generate-ebpf ## Build all binaries (includes proto generation)
 	@echo "$(BLUE)🔨 Building binaries...$(NC)"
 	@mkdir -p bin
-	@go build -ldflags "$(LDFLAGS)" -o bin/tapio-collector ./cmd/tapio-collector
+	@CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/tapio-collector ./cmd/tapio-collector
 	@echo "$(GREEN)✅ Build complete: bin/$(NC)"
 	@ls -la bin/
 
@@ -175,7 +181,7 @@ proto-install: ## Install protobuf tools
 proto-generate: ## Generate protobuf code
 	@echo "$(BLUE)📝 Generating protobuf code...$(NC)"
 	@mkdir -p proto/gen
-	@cd proto && buf generate
+	@cd proto && $(GOBIN)/buf generate
 	@echo "$(GREEN)✅ Protobuf code generated$(NC)"
 
 proto-lint: ## Lint protobuf files

@@ -410,7 +410,7 @@ func TestOptimizedEventProcessor_ConcurrentSubmission(t *testing.T) {
 				case 3:
 					eventType = domain.EventTypeDisk
 				}
-				
+
 				event := &domain.UnifiedEvent{
 					ID:   string(rune(id*eventsPerGoroutine + j)),
 					Type: eventType,

@@ -48,11 +48,11 @@ pkg/collectors/k8s/
 
 ### UnifiedEvent Enhancements
 - **Rich Semantic Correlation**: Every event includes intent, category, and semantic tags
-- **Business Impact Assessment**: Automatic calculation of business impact scores
+- **Infrastructure Impact Assessment**: Automatic calculation of infrastructure impact scores
 - **Intent Detection**: Identifies event purpose (e.g., "pod-created", "node-failed", "service-updated")
 - **Category Classification**: Groups events (availability, reliability, performance, operations)
 - **Affected Services Tracking**: Determines which services are impacted by events
-- **Customer-Facing Detection**: Identifies if events affect customer-facing services
+- **System-Critical Detection**: Identifies if events affect system-critical services
 - **SLO Impact Analysis**: Flags events that may affect Service Level Objectives
 
 ## Usage
@@ -79,7 +79,7 @@ for event := range collector.Events() {
     fmt.Printf("Event ID: %s\n", event.ID)
     fmt.Printf("Intent: %s\n", event.Semantic.Intent)
     fmt.Printf("Category: %s\n", event.Semantic.Category)
-    fmt.Printf("Business Impact: %.2f\n", event.Impact.BusinessImpact)
+    fmt.Printf("Infrastructure Impact: %.2f\n", event.Impact.InfrastructureImpact)
     
     // Access K8s-specific data
     if event.Kubernetes != nil {
@@ -87,9 +87,9 @@ for event := range collector.Events() {
         fmt.Printf("K8s Reason: %s\n", event.Kubernetes.Reason)
     }
     
-    // Check if customer-facing
-    if event.Impact.CustomerFacing {
-        fmt.Printf("ALERT: Customer-facing service affected!\n")
+    // Check if system-critical
+    if event.Impact.SystemCritical {
+        fmt.Printf("ALERT: System-critical service affected!\n")
     }
 }
 
@@ -252,16 +252,16 @@ Each UnifiedEvent includes:
     "intent": "pod-created",
     "category": "operations",
     "tags": ["kubernetes", "Pod", "workload", "container"],
-    "narrative": "Kubernetes Pod event: Pod payment-service-7d8f9: Running",
+    "narrative": "Kubernetes Pod event: Pod api-server-7d8f9: Running",
     "confidence": 0.9
   },
   "entity": {
     "type": "Pod",
-    "name": "payment-service-7d8f9",
+    "name": "api-server-7d8f9",
     "namespace": "production",
     "uid": "12345-67890",
     "labels": {
-      "app": "payment-service",
+      "app": "api-server",
       "version": "v2.1.0"
     }
   },
@@ -269,14 +269,14 @@ Each UnifiedEvent includes:
     "eventType": "Normal",
     "reason": "Running",
     "action": "ADDED",
-    "message": "Pod payment-service-7d8f9: Running",
+    "message": "Pod api-server-7d8f9: Running",
     "objectKind": "Pod"
   },
   "impact": {
     "severity": "info",
-    "businessImpact": 0.2,
+    "infrastructureImpact": 0.2,
     "affectedServices": ["production-workload"],
-    "customerFacing": true,
+    "systemCritical": true,
     "sloImpact": false
   }
 }
@@ -313,9 +313,9 @@ Each UnifiedEvent includes:
   },
   "impact": {
     "severity": "critical",
-    "businessImpact": 0.9,
+    "infrastructureImpact": 0.9,
     "affectedServices": ["cluster-scheduler", "node-management"],
-    "customerFacing": false,
+    "systemCritical": false,
     "sloImpact": true
   }
 }
@@ -337,21 +337,21 @@ Each UnifiedEvent includes:
   },
   "entity": {
     "type": "Event",
-    "name": "payment-service-7d8f9.oomkilled",
+    "name": "api-server-7d8f9.oomkilled",
     "namespace": "production"
   },
   "kubernetes": {
     "eventType": "Warning",
     "reason": "OOMKilled",
-    "message": "Container payment-service exceeded memory limit (2Gi)",
-    "object": "Pod/payment-service-7d8f9",
+    "message": "Container api-server exceeded memory limit (2Gi)",
+    "object": "Pod/api-server-7d8f9",
     "objectKind": "Pod"
   },
   "impact": {
     "severity": "high",
-    "businessImpact": 0.8,
+    "infrastructureImpact": 0.8,
     "affectedServices": ["production-workload"],
-    "customerFacing": true,
+    "systemCritical": true,
     "sloImpact": true
   }
 }

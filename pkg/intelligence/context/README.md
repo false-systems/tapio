@@ -7,7 +7,7 @@ The `context` package provides individual event intelligence capabilities for th
 This package is responsible for:
 - **Event Validation**: Ensuring events meet structural and temporal requirements
 - **Confidence Scoring**: Calculating reliability scores based on event properties
-- **Impact Assessment**: Determining business and operational impact of events
+- **Impact Assessment**: Determining infrastructure and operational impact of events
 - **Context Building**: Enriching events with semantic and operational context
 
 ## Architecture
@@ -50,9 +50,9 @@ confidence := scorer.CalculateConfidence(event)
 ### ImpactAnalyzer
 
 Assesses potential impact across multiple dimensions:
-- Business impact (0.0-1.0)
+- Infrastructure impact (0.0-1.0)
 - Service dependencies
-- User impact estimation
+- Component cascade risk
 - SLO implications
 
 ```go
@@ -107,7 +107,7 @@ if err != nil {
 
 // Access enriched data
 fmt.Printf("Confidence: %.2f\n", enrichedEvent.Semantic.Confidence)
-fmt.Printf("Business Impact: %.2f\n", enrichedEvent.Impact.BusinessImpact)
+fmt.Printf("Infrastructure Impact: %.2f\n", enrichedEvent.Impact.InfrastructureImpact)
 ```
 
 ## Configuration

@@ -22,22 +22,25 @@ func NewImpactAssessment() *ImpactAssessment {
 // Assess evaluates the impact of an event
 func (ia *ImpactAssessment) Assess(ctx context.Context, event *domain.UnifiedEvent) (*ImpactResult, error) {
 	result := &ImpactResult{
-		TechnicalSeverity:  "medium", // default
-		InfrastructureImpact: 0.5,    // default
-		CascadeRisk:        0.0,
-		AffectedServices:   []string{},
-		RecommendedActions: []string{},
+		TechnicalSeverity:    "medium", // default
+		InfrastructureImpact: 0.5,      // default
+		CascadeRisk:          0.0,
+		AffectedServices:     []string{},
+		RecommendedActions:   []string{},
 	}
 
 	// Use event's impact context if available
 	if event.Impact != nil {
 		result.TechnicalSeverity = event.Impact.Severity
-		result.InfrastructureImpact = event.Impact.BusinessImpact // TODO: rename field in domain
+		result.InfrastructureImpact = event.Impact.InfrastructureImpact
 		result.AffectedServices = event.Impact.AffectedServices
-		
+
 		// Calculate cascade risk based on technical indicators
 		if event.Impact.SLOImpact {
 			result.CascadeRisk += 0.3
+		}
+		if event.Impact.CascadeRisk {
+			result.CascadeRisk += 0.2
 		}
 	}
 

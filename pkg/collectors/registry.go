@@ -216,4 +216,3 @@ func (r *Registry) forwardEvents(name string, collector Collector) {
 		}
 	}
 }
-

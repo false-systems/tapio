@@ -8,7 +8,7 @@ The intelligence layer provides:
 - **Real-time Event Processing**: 165,000+ events/second throughput
 - **Contextual Enrichment**: Semantic understanding of individual events
 - **Pattern Recognition**: Multi-event correlation and anomaly detection
-- **Impact Assessment**: Business and operational impact analysis
+- **Impact Assessment**: Infrastructure and operational impact analysis
 - **Root Cause Analysis**: Automated problem identification
 
 ## Architecture

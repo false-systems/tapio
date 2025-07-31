@@ -393,4 +393,3 @@ func (f *failingCollector) Start(ctx context.Context) error { return fmt.Errorf(
 func (f *failingCollector) Stop() error                     { return nil }
 func (f *failingCollector) Events() <-chan RawEvent         { return nil }
 func (f *failingCollector) IsHealthy() bool                 { return false }
-

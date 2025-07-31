@@ -135,12 +135,12 @@ type ComponentHealth struct {
 	measureFunc func() HealthMeasurement `json:"-"`
 
 	// Update frequency
-	updateInterval time.Duration `json:"update_interval"`
+	UpdateInterval time.Duration `json:"update_interval"`
 
 	// Health history (lock-free ring buffer for performance)
 	historyBuffer []HealthMeasurement `json:"-"`
 	historyIndex  int64               // atomic: current index in ring buffer
-	historySize   int                 `json:"history_size"`
+	HistorySize   int                 `json:"history_size"`
 
 	// Circuit breaker integration
 	circuitBreaker *CircuitBreaker `json:"-"`

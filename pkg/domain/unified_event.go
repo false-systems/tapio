@@ -203,13 +203,13 @@ type MetricsData struct {
 
 // ImpactContext describes the impact of this event
 type ImpactContext struct {
-	Severity         string   `json:"severity"`        // critical, high, medium, low
-	BusinessImpact   float64  `json:"business_impact"` // 0.0-1.0
-	AffectedServices []string `json:"affected_services"`
-	AffectedUsers    int      `json:"affected_users,omitempty"`
-	SLOImpact        bool     `json:"slo_impact"`
-	CustomerFacing   bool     `json:"customer_facing"`
-	RevenueImpacting bool     `json:"revenue_impacting"`
+	Severity             string   `json:"severity"`              // critical, high, medium, low
+	InfrastructureImpact float64  `json:"infrastructure_impact"` // 0.0-1.0
+	AffectedServices     []string `json:"affected_services"`
+	AffectedComponents   int      `json:"affected_components,omitempty"`
+	SLOImpact            bool     `json:"slo_impact"`
+	SystemCritical       bool     `json:"system_critical"`
+	CascadeRisk          bool     `json:"cascade_risk"`
 }
 
 // CorrelationContext helps group related events
@@ -378,10 +378,10 @@ func (b *UnifiedEventBuilder) WithApplicationData(level, message string) *Unifie
 	return b
 }
 
-func (b *UnifiedEventBuilder) WithImpact(severity string, businessImpact float64) *UnifiedEventBuilder {
+func (b *UnifiedEventBuilder) WithImpact(severity string, infrastructureImpact float64) *UnifiedEventBuilder {
 	b.event.Impact = &ImpactContext{
-		Severity:       severity,
-		BusinessImpact: businessImpact,
+		Severity:             severity,
+		InfrastructureImpact: infrastructureImpact,
 	}
 	return b
 }

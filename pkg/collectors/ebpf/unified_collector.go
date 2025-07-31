@@ -9,14 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/yairfalse/tapio/pkg/collectors"
 )
-
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -I./bpf -I./bpf/headers" -target amd64,arm64 -type event unified ./bpf/unified.c -- -I./bpf -I./bpf/headers
 
 // Event types from BPF program
 const (
@@ -148,32 +145,20 @@ func (c *UnifiedCollector) GetMetrics() CollectorMetrics {
 // attachPrograms attaches all BPF programs
 func (c *UnifiedCollector) attachPrograms() error {
 	// Attach memory tracking
-	kmalloc, err := link.AttachTracepoint(link.TracepointOptions{
-		Group:   "kmem",
-		Name:    "kmalloc",
-		Program: c.objs.TraceKmalloc,
-	})
+	kmalloc, err := link.Tracepoint("kmem", "kmalloc", c.objs.TraceKmalloc, nil)
 	if err != nil {
 		return fmt.Errorf("attaching kmalloc: %w", err)
 	}
 	c.links = append(c.links, kmalloc)
 
-	kfree, err := link.AttachTracepoint(link.TracepointOptions{
-		Group:   "kmem",
-		Name:    "kfree",
-		Program: c.objs.TraceKfree,
-	})
+	kfree, err := link.Tracepoint("kmem", "kfree", c.objs.TraceKfree, nil)
 	if err != nil {
 		return fmt.Errorf("attaching kfree: %w", err)
 	}
 	c.links = append(c.links, kfree)
 
 	// Attach OOM tracking
-	oom, err := link.AttachTracepoint(link.TracepointOptions{
-		Group:   "oom",
-		Name:    "oom_score_adj_update",
-		Program: c.objs.TraceOom,
-	})
+	oom, err := link.Tracepoint("oom", "oom_score_adj_update", c.objs.TraceOom, nil)
 	if err != nil {
 		// OOM tracking might not be available on all kernels
 		// Log but don't fail
@@ -193,11 +178,7 @@ func (c *UnifiedCollector) attachPrograms() error {
 	}
 
 	// Attach process execution tracking
-	exec, err := link.AttachTracepoint(link.TracepointOptions{
-		Group:   "sched",
-		Name:    "sched_process_exec",
-		Program: c.objs.TraceExec,
-	})
+	exec, err := link.Tracepoint("sched", "sched_process_exec", c.objs.TraceExec, nil)
 	if err != nil {
 		// Process tracking might fail in some environments
 		// Log but don't fail

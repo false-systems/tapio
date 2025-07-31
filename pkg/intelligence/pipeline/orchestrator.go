@@ -122,9 +122,9 @@ func (c *ContextStage) Process(ctx context.Context, event *domain.UnifiedEvent) 
 	event.Semantic.Confidence = confidenceScore
 	if impactResult != nil {
 		event.Impact = &domain.ImpactContext{
-			BusinessImpact:   impactResult.BusinessImpact,
-			Severity:         impactResult.TechnicalSeverity,
-			AffectedServices: impactResult.AffectedServices,
+			InfrastructureImpact: impactResult.InfrastructureImpact,
+			Severity:             impactResult.TechnicalSeverity,
+			AffectedServices:     impactResult.AffectedServices,
 		}
 	}
 

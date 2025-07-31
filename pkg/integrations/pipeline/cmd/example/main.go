@@ -1,6 +1,3 @@
-//go:build experimental
-// +build experimental
-
 package main
 
 import (

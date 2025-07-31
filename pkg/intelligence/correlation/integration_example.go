@@ -1,6 +1,3 @@
-//go:build experimental
-// +build experimental
-
 // NOTE: This example is temporarily disabled because the analytics adapter
 // has been moved to pkg/integrations/analytics to fix architecture violations
 

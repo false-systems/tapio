@@ -317,7 +317,7 @@ func TestBackpressureController_Accept(t *testing.T) {
 
 	// Test normal load (50%)
 	bc.UpdateLoad(500)
-	
+
 	event := &domain.UnifiedEvent{
 		ID:       "test-1",
 		Type:     domain.EventTypeSystem,
@@ -330,7 +330,7 @@ func TestBackpressureController_Accept(t *testing.T) {
 
 	// Test high load (80%)
 	bc.UpdateLoad(800)
-	
+
 	// High priority should still be accepted
 	highPriorityEvent := &domain.UnifiedEvent{
 		ID:       "test-2",
@@ -344,7 +344,7 @@ func TestBackpressureController_Accept(t *testing.T) {
 
 	// Test critical load (95%)
 	bc.UpdateLoad(950)
-	
+
 	// Only critical events should pass
 	lowPriorityEvent := &domain.UnifiedEvent{
 		ID:       "test-3",
@@ -393,7 +393,7 @@ func TestBackpressureController_FilterBatch(t *testing.T) {
 	// Critical load - only high priority should pass
 	bc.UpdateLoad(950)
 	filtered = bc.FilterBatch(events)
-	
+
 	// Should include critical and error events (first 2)
 	if len(filtered) < 2 {
 		t.Error("Should include at least critical and error events")
@@ -415,8 +415,8 @@ func TestBackpressureController_FilterBatch(t *testing.T) {
 func TestResourceMonitor_CheckLimits(t *testing.T) {
 	violationCalled := false
 	rm := &ResourceMonitor{
-		maxMemoryBytes: 1,        // Impossibly low to trigger violation
-		maxGoroutines:  1,        // Impossibly low
+		maxMemoryBytes: 1, // Impossibly low to trigger violation
+		maxGoroutines:  1, // Impossibly low
 		checkInterval:  time.Second,
 		violationHandler: func(violation string) {
 			violationCalled = true

@@ -67,11 +67,11 @@ func (c *EventConverter) ToUnifiedEvent(event *Event) *UnifiedEvent {
 
 	// Convert impact information
 	unified.Impact = &ImpactContext{
-		Severity:         string(event.Severity),
-		BusinessImpact:   getFloatFromMap(event.Data, "business_impact"),
-		CustomerFacing:   getBoolFromMap(event.Data, "customer_facing"),
-		RevenueImpacting: getBoolFromMap(event.Data, "revenue_impacting"),
-		SLOImpact:        getBoolFromMap(event.Data, "slo_impact"),
+		Severity:             string(event.Severity),
+		InfrastructureImpact: getFloatFromMap(event.Data, "infrastructure_impact"),
+		SystemCritical:       getBoolFromMap(event.Data, "system_critical"),
+		CascadeRisk:          getBoolFromMap(event.Data, "cascade_risk"),
+		SLOImpact:            getBoolFromMap(event.Data, "slo_impact"),
 	}
 
 	// Convert correlation context
@@ -144,9 +144,9 @@ func (c *EventConverter) FromUnifiedEvent(unified *UnifiedEvent) *Event {
 
 	// Add impact data
 	if unified.Impact != nil {
-		event.Data["business_impact"] = unified.Impact.BusinessImpact
-		event.Data["customer_facing"] = unified.Impact.CustomerFacing
-		event.Data["revenue_impacting"] = unified.Impact.RevenueImpacting
+		event.Data["infrastructure_impact"] = unified.Impact.InfrastructureImpact
+		event.Data["system_critical"] = unified.Impact.SystemCritical
+		event.Data["cascade_risk"] = unified.Impact.CascadeRisk
 		event.Data["slo_impact"] = unified.Impact.SLOImpact
 		event.Data["affected_services"] = unified.Impact.AffectedServices
 	}

@@ -1,0 +1,171 @@
+# Tapio Collector Configuration
+# This example shows all available options
+
+# Global configuration
+global:
+  # Node name (defaults to hostname)
+  # node_name: "k8s-node-1"
+  
+  # Cluster name
+  cluster_name: "production"
+  
+  # Additional labels added to all events
+  labels:
+    environment: "prod"
+    region: "us-west-2"
+    team: "platform"
+  
+  # Feature gates for gradual rollout
+  feature_gates:
+    enhanced_ebpf_metrics: false
+    experimental_collectors: false
+  
+  # Resource limits
+  resources:
+    memory_limit: "500Mi"
+    cpu_limit: "2"
+    event_buffer_size: 10000
+
+# Collector configurations
+collectors:
+  # eBPF collector for kernel-level visibility
+  - type: ebpf
+    enabled: true
+    config:
+      # Ring buffer size in bytes (8MB)
+      ring_buffer_size: 8388608
+      
+      # Per-CPU buffer size
+      per_cpu_buffer_size: 65536
+      
+      # Enable specific probes
+      probes:
+        network: true
+        memory: true
+        process: true
+        
+      # Labels for eBPF events
+      labels:
+        collector_type: "kernel"
+
+  # Kubernetes API collector
+  - type: k8s
+    enabled: true
+    config:
+      # Namespace to watch (empty = all namespaces)
+      namespace: ""
+      
+      # Resources to watch
+      resources:
+        - pods
+        - services
+        - deployments
+        - nodes
+        - events
+      
+      # Resync period for informers
+      resync_period: "30m"
+      
+      # Event buffer size
+      buffer_size: 5000
+      
+      labels:
+        collector_type: "k8s-api"
+
+  # CNI collector for network interface events
+  - type: cni
+    enabled: true
+    config:
+      # Auto-detect CNI plugin
+      auto_detect: true
+      
+      # Override CNI type if needed (calico, cilium, flannel)
+      # cni_type: "calico"
+      
+      # Watch paths
+      watch_paths:
+        - "/var/log/calico"
+        - "/var/run/calico"
+        - "/etc/cni/net.d"
+      
+      labels:
+        collector_type: "network"
+
+  # Systemd collector for system services
+  - type: systemd
+    enabled: false  # Disabled by default
+    config:
+      # Units to monitor
+      units:
+        - "kubelet.service"
+        - "containerd.service"
+        - "docker.service"
+      
+      # Include journal metadata
+      include_metadata: true
+      
+      labels:
+        collector_type: "system"
+
+  # Etcd collector using syscalls
+  - type: etcd
+    enabled: true
+    config:
+      # Monitor etcd processes
+      process_names:
+        - "etcd"
+        - "etcd3"
+      
+      # Capture operation types
+      operations:
+        - "get"
+        - "put"
+        - "delete"
+        - "watch"
+        - "lease"
+        - "txn"
+      
+      # Event buffer size
+      buffer_size: 10000
+      
+      labels:
+        collector_type: "datastore"
+
+# Pipeline configuration
+pipeline:
+  # Pipeline service endpoint
+  endpoint: "pipeline-service.tapio-system.svc.cluster.local:9090"
+  
+  # For development/testing, can use external endpoint
+  # endpoint: "localhost:9090"
+  
+  # Batch configuration
+  batch_size: 1000
+  flush_interval: "5s"
+  
+  # Connection settings
+  timeout: "30s"
+  
+  # Retry configuration
+  retry:
+    max_retries: 3
+    initial_backoff: "1s"
+    max_backoff: "30s"
+  
+  # TLS configuration (optional)
+  tls:
+    enabled: false
+    # ca_file: "/etc/tapio/ca.crt"
+    # cert_file: "/etc/tapio/client.crt"
+    # key_file: "/etc/tapio/client.key"
+    # insecure_skip_verify: false
+
+# Example minimal configuration:
+# ---
+# collectors:
+#   - type: ebpf
+#     enabled: true
+#   - type: k8s
+#     enabled: true
+# pipeline:
+#   endpoint: "pipeline-service:9090"
