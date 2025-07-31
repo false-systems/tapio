@@ -77,6 +77,8 @@ func TestEventTypeToString(t *testing.T) {
 		{1, "memory_alloc"},
 		{2, "memory_free"},
 		{3, "process_exec"},
+		{4, "pod_syscall"},
+		{5, "network_conn"},
 		{99, "unknown"},
 	}
 
@@ -106,5 +108,27 @@ func TestNullTerminatedString(t *testing.T) {
 		if result != tc.expected {
 			t.Errorf("For input %v, expected '%s', got '%s'", tc.input, tc.expected, result)
 		}
+	}
+}
+
+func TestPodManagement(t *testing.T) {
+	collector, _ := NewCollector("ebpf-pod")
+
+	// Test UpdatePodInfo with uninitialized eBPF objects (should fail gracefully)
+	err := collector.UpdatePodInfo(12345, "pod-123", "default", "nginx-pod")
+	if err == nil {
+		t.Error("Expected error when eBPF objects not initialized")
+	}
+
+	// Test RemovePodInfo with uninitialized eBPF objects (should fail gracefully)
+	err = collector.RemovePodInfo(12345)
+	if err == nil {
+		t.Error("Expected error when eBPF objects not initialized")
+	}
+
+	// Test GetPodInfo with uninitialized eBPF objects (should fail gracefully)
+	_, err = collector.GetPodInfo(12345)
+	if err == nil {
+		t.Error("Expected error when eBPF objects not initialized")
 	}
 }

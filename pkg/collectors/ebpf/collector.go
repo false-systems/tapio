@@ -21,7 +21,18 @@ type KernelEvent struct {
 	EventType uint32
 	Size      uint64
 	Comm      [16]byte
+	CgroupID  uint64   // Add cgroup ID for pod correlation
+	PodUID    [36]byte // Add pod UID
+	_         [4]byte  // Padding to match C struct alignment
 	Data      [64]byte
+}
+
+// PodInfo represents pod information for correlation
+type PodInfo struct {
+	PodUID    [36]byte
+	Namespace [64]byte
+	PodName   [128]byte
+	CreatedAt uint64
 }
 
 // Collector implements minimal kernel monitoring via eBPF
@@ -214,7 +225,7 @@ func (c *Collector) processEvents() {
 		}
 		event = *(*KernelEvent)(unsafe.Pointer(&record.RawSample[0]))
 
-		// Convert to RawEvent - NO BUSINESS LOGIC
+		// Convert to RawEvent - NO BUSINESS LOGIC, just add pod correlation
 		rawEvent := collectors.RawEvent{
 			Timestamp: time.Unix(0, int64(event.Timestamp)),
 			Type:      c.eventTypeToString(event.EventType),
@@ -225,6 +236,8 @@ func (c *Collector) processEvents() {
 				"tid":       fmt.Sprintf("%d", event.TID),
 				"comm":      c.nullTerminatedString(event.Comm[:]),
 				"size":      fmt.Sprintf("%d", event.Size),
+				"cgroup_id": fmt.Sprintf("%d", event.CgroupID),
+				"pod_uid":   c.nullTerminatedString(event.PodUID[:]),
 			},
 		}
 
@@ -247,6 +260,10 @@ func (c *Collector) eventTypeToString(eventType uint32) string {
 		return "memory_free"
 	case 3:
 		return "process_exec"
+	case 4:
+		return "pod_syscall"
+	case 5:
+		return "network_conn"
 	default:
 		return "unknown"
 	}
@@ -260,4 +277,47 @@ func (c *Collector) nullTerminatedString(b []byte) string {
 		}
 	}
 	return string(b)
+}
+
+// UpdatePodInfo updates pod information in the eBPF map for correlation
+func (c *Collector) UpdatePodInfo(cgroupID uint64, podUID, namespace, podName string) error {
+	if c.objs == nil || c.objs.PodInfoMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	podInfo := PodInfo{
+		CreatedAt: uint64(time.Now().UnixNano()),
+	}
+
+	// Copy strings with proper bounds checking
+	copy(podInfo.PodUID[:], podUID)
+	copy(podInfo.Namespace[:], namespace)
+	copy(podInfo.PodName[:], podName)
+
+	// Update the eBPF map
+	return c.objs.PodInfoMap.Put(cgroupID, podInfo)
+}
+
+// RemovePodInfo removes pod information from the eBPF map
+func (c *Collector) RemovePodInfo(cgroupID uint64) error {
+	if c.objs == nil || c.objs.PodInfoMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	return c.objs.PodInfoMap.Delete(cgroupID)
+}
+
+// GetPodInfo retrieves pod information for a given cgroup ID
+func (c *Collector) GetPodInfo(cgroupID uint64) (*PodInfo, error) {
+	if c.objs == nil || c.objs.PodInfoMap == nil {
+		return nil, fmt.Errorf("eBPF maps not initialized")
+	}
+
+	var podInfo PodInfo
+	err := c.objs.PodInfoMap.Lookup(cgroupID, &podInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	return &podInfo, nil
 }
