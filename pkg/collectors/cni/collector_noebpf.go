@@ -3,18 +3,19 @@
 
 package cni
 
-// initEBPF is a no-op on non-Linux systems
-func (c *Collector) initEBPF() error {
-	// eBPF is only available on Linux
-	return nil
+import "fmt"
+
+// startEBPF is a no-op on non-Linux platforms
+func (c *Collector) startEBPF() error {
+	return fmt.Errorf("eBPF monitoring not supported on this platform")
 }
 
-// readEBPFEvents is a no-op on non-Linux systems
-func (c *Collector) readEBPFEvents() {
+// stopEBPF is a no-op on non-Linux platforms
+func (c *Collector) stopEBPF() {
 	// No-op
 }
 
-// cleanupEBPF is a no-op on non-Linux systems
-func (c *Collector) cleanupEBPF() {
+// readEBPFEvents is not used on non-Linux platforms
+func (c *Collector) readEBPFEvents() {
 	// No-op
 }

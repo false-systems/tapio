@@ -5,24 +5,21 @@ package cni
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
 func TestCollectorWithEBPF(t *testing.T) {
 	// Skip if not running as root
-	if !isRoot() {
+	if os.Geteuid() != 0 {
 		t.Skip("eBPF tests require root privileges")
 	}
 
-	config := collectors.DefaultCollectorConfig()
-	config.BufferSize = 100
-
-	collector, err := NewCollector(config)
+	collector, err := NewCollector("test-cni-ebpf")
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -33,9 +30,7 @@ func TestCollectorWithEBPF(t *testing.T) {
 	defer collector.Stop()
 
 	// Verify eBPF components were initialized
-	assert.NotNil(t, collector.ebpfCollection)
-	assert.NotNil(t, collector.ebpfReader)
-	assert.Greater(t, len(collector.ebpfLinks), 0)
+	assert.NotNil(t, collector.ebpfState)
 
 	// Let it run briefly
 	time.Sleep(100 * time.Millisecond)
@@ -45,12 +40,11 @@ func TestCollectorWithEBPF(t *testing.T) {
 }
 
 func TestEBPFCleanup(t *testing.T) {
-	if !isRoot() {
+	if os.Geteuid() != 0 {
 		t.Skip("eBPF tests require root privileges")
 	}
 
-	config := collectors.DefaultCollectorConfig()
-	collector, err := NewCollector(config)
+	collector, err := NewCollector("test-cni-cleanup")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -61,13 +55,7 @@ func TestEBPFCleanup(t *testing.T) {
 	err = collector.Stop()
 	require.NoError(t, err)
 
-	// Verify cleanup
-	assert.Nil(t, collector.ebpfCollection)
-	assert.Nil(t, collector.ebpfReader)
-	assert.Empty(t, collector.ebpfLinks)
-}
-
-func isRoot() bool {
-	// Simple check - in production would use proper method
-	return false // Always skip in tests for now
+	// eBPF state should be cleaned up
+	assert.Nil(t, collector.ebpfState)
+	assert.False(t, collector.IsHealthy())
 }

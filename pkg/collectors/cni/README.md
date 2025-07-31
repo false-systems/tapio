@@ -1,42 +1,43 @@
 # CNI Collector
 
-Minimal Container Network Interface (CNI) event collector for Tapio with optional eBPF enhancement.
+Minimal Container Network Interface (CNI) collector using eBPF to monitor network namespace operations with zero business logic.
+
+## Architecture
+
+```
+pkg/collectors/cni/
+├── collector.go              # Minimal collector implementation
+├── collector_ebpf.go         # Linux eBPF implementation
+├── collector_noebpf.go       # Non-Linux stub
+├── collector_test.go         # Unit tests
+├── generate.go              # bpf2go generation
+├── init.go                  # Registry integration
+├── bpf/                     # eBPF programs
+│   ├── cni_monitor.c        # Network namespace monitoring
+│   └── vmlinux.h            # Kernel headers
+└── cnimonitor_*.go/o        # Generated eBPF objects
+```
 
 ## Features
 
-- **Auto-detection**: Automatically detects CNI plugin from K8s DaemonSets
-- **Multi-CNI support**: Optimized collection for Calico, Cilium, and Flannel
-- **eBPF Integration**: Deep kernel-level visibility into CNI operations (Linux only)
-- **Raw data only**: Emits raw events without processing (following Tapio philosophy)
-- **Simple interface**: Just 5 methods to implement
-
-## Supported CNI Plugins
-
-1. **Calico** - Detected from calico-node DaemonSet
-   - Monitors: `/var/log/calico/`, Felix logs
-   - Watches: CNI config, Calico state directory
-
-2. **Cilium** - Detected from cilium-agent DaemonSet  
-   - Monitors: Cilium logs, CNI logs
-   - Watches: CNI config, Cilium runtime directory
-
-3. **Flannel** - Detected from kube-flannel DaemonSet
-   - Monitors: Flanneld logs
-   - Watches: CNI config, Flannel state directory
-
-4. **Generic** - Fallback for unknown CNIs
-   - Monitors: Standard CNI paths
-   - Watches: Common CNI directories
+- **Minimal Design**: Zero business logic, just raw event collection
+- **eBPF-Based**: Monitors network namespace operations (setns, unshare)
+- **Network Focus**: Tracks container network creation and changes
+- **Low Overhead**: Efficient kernel-level monitoring
+- **K8s Aware**: Designed for Kubernetes CNI monitoring
 
 ## Usage
 
 ```go
-config := collectors.DefaultCollectorConfig()
-collector, err := cni.NewCollector(config)
+import "github.com/yairfalse/tapio/pkg/collectors/cni"
+
+// Create minimal collector
+collector, err := cni.NewCollector("cni")
 if err != nil {
     log.Fatal(err)
 }
 
+// Start collection
 ctx := context.Background()
 if err := collector.Start(ctx); err != nil {
     log.Fatal(err)
@@ -45,25 +46,28 @@ defer collector.Stop()
 
 // Process raw events
 for event := range collector.Events() {
-    // Raw CNI data in event.Data
-    // CNI type in event.Metadata["cni_plugin"]
-    pipeline.Process(event)
+    // Raw network namespace events in event.Data
+    fmt.Printf("CNI Event: %s\n", event.Type)
 }
 ```
 
-## Architecture
+## Event Types
 
-The collector follows Tapio's minimal collector pattern:
-- No business logic
-- No data transformation
-- Just raw event emission
-- All intelligence in the pipeline
+The collector monitors:
+- Network namespace creation (unshare with CLONE_NEWNET)
+- Network namespace entry (setns)
+- Network namespace exit
 
-## eBPF Enhancement (Linux Only)
+All events include:
+- Process information (PID, comm)
+- Network namespace ID
+- Timestamp
+- Event type
 
-When running on Linux, the collector automatically enables eBPF programs to track:
-- CNI binary execution (`/opt/cni/bin/*`)
-- Network namespace creation (CLONE_NEWNET)
-- Network namespace changes (setns)
+## eBPF Details
 
-This provides deeper visibility into CNI operations at the kernel level without requiring CNI plugin cooperation.
+The collector uses tracepoints to monitor:
+- `syscalls:sys_enter_setns` - Entering network namespaces
+- `syscalls:sys_enter_unshare` - Creating new namespaces
+
+Events are delivered via a ring buffer for efficiency.

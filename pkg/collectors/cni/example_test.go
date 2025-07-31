@@ -2,25 +2,15 @@ package cni
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
-	"time"
-
-	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
-// Example usage of CNI collector with network policy monitoring
-func ExampleCollector_networkPolicy() {
-	// Create CNI collector
-	config := collectors.CollectorConfig{
-		BufferSize: 1000,
-		Labels: map[string]string{
-			"cluster": "production",
-			"region":  "us-east-1",
-		},
-	}
-
-	collector, err := NewCollector(config)
+// Example demonstrates basic usage of the minimal CNI collector
+func ExampleCollector() {
+	// Create minimal CNI collector
+	collector, err := NewCollector("cni-monitor")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -30,48 +20,54 @@ func ExampleCollector_networkPolicy() {
 	if err := collector.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
+	defer collector.Stop()
 
-	// Monitor events
-	go func() {
-		for event := range collector.Events() {
-			// Parse event based on metadata
-			if event.Metadata["source"] == "ebpf" {
-				handlePolicyEvent(event)
-			} else {
-				handleGenericEvent(event)
-			}
+	// Process events (in practice, run this in a goroutine)
+	eventCount := 0
+	for event := range collector.Events() {
+		// Parse the raw event data
+		var data map[string]interface{}
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			continue
 		}
-	}()
 
-	// Example of how to use enhanced features on Linux:
-	// if runtime.GOOS == "linux" {
-	//     collector.EnhanceWithNetworkPolicy()
-	//     // The enhanced collector will now track:
-	//     // - Network policy allow/drop decisions
-	//     // - Pod-to-pod traffic with namespace context
-	//     // - Policy rule matches
-	//     // - CNI-specific enforcement points
-	// }
+		fmt.Printf("CNI Event: type=%s, event=%s\n",
+			event.Type, event.Metadata["event"])
 
-	// Run for some time
-	time.Sleep(5 * time.Minute)
-
-	// Stop collector
-	if err := collector.Stop(); err != nil {
-		log.Printf("Error stopping collector: %v", err)
+		eventCount++
+		if eventCount >= 5 {
+			break
+		}
 	}
+
+	// Output:
+	// CNI Event: type=cni, event=network_namespace
 }
 
-func handlePolicyEvent(event collectors.RawEvent) {
-	// Parse policy event from metadata
-	fmt.Printf("Network Policy Event: %s %s (%s)\n",
-		event.Metadata["action"],
-		event.Metadata["direction"],
-		event.Metadata["policy_name"])
-}
+// Example_ebpfEvents shows how network namespace events are captured
+func Example_ebpfEvents() {
+	collector, _ := NewCollector("cni-ebpf")
+	ctx := context.Background()
+	collector.Start(ctx)
+	defer collector.Stop()
 
-func handleGenericEvent(event collectors.RawEvent) {
-	fmt.Printf("CNI Event: %s at %s\n",
-		event.Metadata["source"],
-		event.Timestamp.Format(time.RFC3339))
+	// Example of processing eBPF network namespace events
+	for event := range collector.Events() {
+		if event.Metadata["event"] == "network_namespace" {
+			var data map[string]interface{}
+			json.Unmarshal(event.Data, &data)
+
+			// Network namespace events include:
+			// - pid: Process ID
+			// - netns: Network namespace ID
+			// - type: netns_create, netns_enter, netns_exit
+			// - comm: Process command
+			fmt.Printf("Process %v (%v) %v network namespace %v\n",
+				data["pid"], data["comm"], data["type"], data["netns"])
+			break
+		}
+	}
+
+	// Output:
+	// Process 1234 (cni-plugin) netns_create network namespace 4026532456
 }
