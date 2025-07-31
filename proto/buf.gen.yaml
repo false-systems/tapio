@@ -20,11 +20,12 @@ plugins:
       - require_unimplemented_servers=false
   
   # VT protobuf for optimized performance (like Polar Signals)
-  - plugin: buf.build/community/planetscale-vtprotobuf
-    out: gen
-    opt:
-      - paths=source_relative
-      - features=marshal+unmarshal+size+pool+grpc
+  # Disabled for now - conflicts with grpc generation
+  # - plugin: buf.build/community/planetscale-vtprotobuf
+  #   out: gen
+  #   opt:
+  #     - paths=source_relative
+  #     - features=marshal+unmarshal+size+pool+grpc
   
   # gRPC-Gateway generation
   - plugin: buf.build/grpc-ecosystem/gateway

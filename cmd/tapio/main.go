@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/manager"
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/pipeline"
 
 	// Import collectors to trigger init() registration
 	_ "github.com/yairfalse/tapio/pkg/collectors/cni"
@@ -59,6 +61,20 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Create pipeline client
+	pipelineConfig := &pipeline.ClientConfig{
+		Endpoint:      cfg.Pipeline.Endpoint,
+		BatchSize:     100,
+		FlushInterval: "5s",
+		Timeout:       fmt.Sprintf("%ds", cfg.Pipeline.Timeout),
+	}
+
+	pipelineClient, err := pipeline.NewClient(pipelineConfig)
+	if err != nil {
+		log.Fatalf("Failed to create pipeline client: %v", err)
+	}
+	defer pipelineClient.Close()
+
 	// Setup signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -80,7 +96,7 @@ func main() {
 	}
 
 	// Process events from all collectors
-	go processManagerEvents(ctx, mgr)
+	go processManagerEvents(ctx, mgr, pipelineClient)
 
 	log.Printf("Collector manager started successfully")
 
@@ -107,7 +123,7 @@ func parseCollectorList(list string) []string {
 	return result
 }
 
-func processManagerEvents(ctx context.Context, mgr *manager.CollectorManager) {
+func processManagerEvents(ctx context.Context, mgr *manager.CollectorManager, pipelineClient pipeline.Client) {
 	events := mgr.Events()
 	for {
 		select {
@@ -115,9 +131,10 @@ func processManagerEvents(ctx context.Context, mgr *manager.CollectorManager) {
 			if !ok {
 				return
 			}
-			// For now, just log events
-			// TODO: Send to pipeline service
-			log.Printf("Event: %s at %v", event.Type, event.Timestamp)
+			// Send to pipeline service
+			if err := pipelineClient.Send(ctx, event); err != nil {
+				log.Printf("Failed to send event to pipeline: %v", err)
+			}
 		case <-ctx.Done():
 			return
 		}

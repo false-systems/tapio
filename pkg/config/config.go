@@ -14,7 +14,7 @@ import (
 type Config struct {
 	// Pipeline configuration
 	Pipeline PipelineConfig `yaml:"pipeline" json:"pipeline"`
-	
+
 	// Collectors configuration - unified for all collectors
 	Collectors CollectorsConfig `yaml:"collectors" json:"collectors"`
 }
@@ -30,7 +30,7 @@ type PipelineConfig struct {
 type CollectorsConfig struct {
 	// Which collectors to enable
 	Enabled []string `yaml:"enabled" json:"enabled"`
-	
+
 	// Common configuration for ALL collectors
 	BufferSize     int               `yaml:"buffer_size" json:"buffer_size"`
 	MetricsEnabled bool              `yaml:"metrics_enabled" json:"metrics_enabled"`
@@ -46,7 +46,7 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Determine format by extension
 	ext := strings.ToLower(filepath.Ext(path))
-	
+
 	config := &Config{}
 	switch ext {
 	case ".yaml", ".yml":
@@ -60,14 +60,14 @@ func LoadConfig(path string) (*Config, error) {
 			err = json.Unmarshal(data, config)
 		}
 	}
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
-	
+
 	// Apply defaults
 	config.applyDefaults()
-	
+
 	return config, nil
 }
 
@@ -83,7 +83,7 @@ func (c *Config) applyDefaults() {
 	if c.Pipeline.Retries == 0 {
 		c.Pipeline.Retries = 3
 	}
-	
+
 	// Collector defaults
 	if c.Collectors.BufferSize == 0 {
 		c.Collectors.BufferSize = 1000
@@ -101,13 +101,13 @@ func (c *CollectorsConfig) ToCollectorConfig() map[string]interface{} {
 	config := make(map[string]interface{})
 	config["buffer_size"] = c.BufferSize
 	config["metrics_enabled"] = c.MetricsEnabled
-	
+
 	// Convert labels to interface map
 	labels := make(map[string]interface{})
 	for k, v := range c.Labels {
 		labels[k] = v
 	}
 	config["labels"] = labels
-	
+
 	return config
 }
