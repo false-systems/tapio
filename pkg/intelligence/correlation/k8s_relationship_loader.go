@@ -712,7 +712,7 @@ func makeSelectorKey(selector map[string]string) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	
+
 	key := ""
 	for _, k := range keys {
 		key += k + "=" + selector[k] + ","
