@@ -112,10 +112,10 @@ type EventGroup struct {
 	TraceID string
 	SpanID  string
 
-	// Business context
-	BusinessImpact    float64
-	AffectedServices  []string
-	RootCauseAnalysis *RootCauseAnalysis
+	// Infrastructure context
+	InfrastructureImpact float64
+	AffectedServices     []string
+	RootCauseAnalysis    *RootCauseAnalysis
 
 	// ML predictions
 	PredictedEvolution []PredictedEvent
@@ -362,8 +362,8 @@ func (sg *SimpleSemanticGrouper) enhanceGroupWithSemantics(ctx context.Context, 
 	// Calculate semantic scores
 	group.SemanticScore = sg.calculateSemanticScore(group)
 
-	// Extract business impact
-	group.BusinessImpact = sg.assessBusinessImpact(group)
+	// Extract infrastructure impact
+	group.InfrastructureImpact = sg.assessInfrastructureImpact(group)
 
 	// Identify affected services
 	group.AffectedServices = sg.identifyAffectedServices(group)
@@ -852,7 +852,7 @@ func (sg *SimpleSemanticGrouper) calculateSeverityAlignment(group *EventGroup) f
 	return 1.0 / (1.0 + variance)
 }
 
-func (sg *SimpleSemanticGrouper) assessBusinessImpact(group *EventGroup) float64 {
+func (sg *SimpleSemanticGrouper) assessInfrastructureImpact(group *EventGroup) float64 {
 	impact := 0.0
 
 	// Factor 1: Severity of events

@@ -107,12 +107,12 @@ type CausalStep struct {
 
 // ImpactAnalysis describes correlation impact
 type ImpactAnalysis struct {
-	Severity        string
-	Scope           []string // Affected resources
-	BusinessImpact  float64
-	UserImpact      int
-	ServiceImpact   []string
-	MitigationSteps []string
+	Severity             string
+	Scope                []string // Affected resources
+	InfrastructureImpact float64
+	UserImpact           int
+	ServiceImpact        []string
+	MitigationSteps      []string
 }
 
 // NewMultiDimensionalEngine creates a new correlation engine
@@ -450,7 +450,7 @@ func (e *MultiDimensionalEngine) analyzeImpact(result *MultiDimCorrelationResult
 	impact := &ImpactAnalysis{
 		Severity:       e.calculateSeverity(events),
 		Scope:          e.calculateScope(events),
-		BusinessImpact: e.calculateBusinessImpact(events),
+		InfrastructureImpact: e.calculateInfrastructureImpact(events),
 		UserImpact:     e.calculateUserImpact(events),
 		ServiceImpact:  e.calculateServiceImpact(events),
 	}
@@ -627,7 +627,7 @@ func (e *MultiDimensionalEngine) calculateScope(events []*domain.UnifiedEvent) [
 	return result
 }
 
-func (e *MultiDimensionalEngine) calculateBusinessImpact(events []*domain.UnifiedEvent) float64 {
+func (e *MultiDimensionalEngine) calculateInfrastructureImpact(events []*domain.UnifiedEvent) float64 {
 	maxImpact := 0.0
 
 	for _, event := range events {

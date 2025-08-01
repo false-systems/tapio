@@ -386,7 +386,7 @@ func eventGroupToSemanticGroup(group EventGroup) *SemanticGroup {
 		Duration:     group.TimeSpan,
 		TraceID:      group.TraceID,
 		Impact: &ImpactAssessment{
-			BusinessImpact: float32(group.BusinessImpact),
+			BusinessImpact: float32(group.InfrastructureImpact),
 		},
 		Metadata: make(map[string]string),
 		Labels:   make(map[string]string),

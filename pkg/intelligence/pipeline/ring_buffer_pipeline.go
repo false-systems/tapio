@@ -38,8 +38,7 @@ type RingBufferPipeline struct {
 
 // RingBufferCorrelationStage brings DataFlow intelligence to ring buffer pipeline
 type RingBufferCorrelationStage struct {
-	semanticTracer    *correlation.SemanticOTELTracer
-	correlationEngine *correlation.SemanticCorrelationEngine
+	correlationSystem *correlation.SimpleCorrelationSystem
 	tracer            trace.Tracer
 }
 
@@ -60,15 +59,15 @@ func NewRingBufferPipeline() (IntelligencePipeline, error) {
 	tracer := otel.Tracer("tapio-ring-buffer-pipeline")
 
 	// Create correlation stage with DataFlow intelligence
+	// Using nil logger will create a no-op logger in SimpleCorrelationSystem
 	correlationStage := &RingBufferCorrelationStage{
-		semanticTracer:    correlation.NewSemanticOTELTracer(),
-		correlationEngine: correlation.NewSemanticCorrelationEngine(),
+		correlationSystem: correlation.NewSimpleCorrelationSystem(nil, correlation.DefaultSimpleSystemConfig()),
 		tracer:            tracer,
 	}
 
-	// Start correlation engine
-	if err := correlationStage.correlationEngine.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start correlation engine: %w", err)
+	// Start correlation system
+	if err := correlationStage.correlationSystem.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start correlation system: %w", err)
 	}
 
 	return &RingBufferPipeline{
@@ -112,20 +111,14 @@ func (rb *RingBufferPipeline) processWithCorrelation(ctx context.Context, event 
 	// For now, skip semantic tracing step
 
 	// Phase 2: Correlation engine (from DataFlow)
-	if err := rb.correlationStage.correlationEngine.ProcessEvent(ctx, event); err != nil {
+	if err := rb.correlationStage.correlationSystem.ProcessEvent(ctx, event); err != nil {
 		return fmt.Errorf("correlation failed: %w", err)
 	}
 
-	// Phase 3: Event enrichment (from DataFlow)
-	findings := rb.correlationStage.correlationEngine.GetLatestFindings()
-	if findings != nil {
-		if event.Attributes == nil {
-			event.Attributes = make(map[string]interface{})
-		}
-		event.Attributes["correlation_id"] = findings.ID
-		event.Attributes["correlation_confidence"] = fmt.Sprintf("%.2f", findings.Confidence)
-		event.Attributes["correlation_pattern"] = findings.PatternType
-	}
+	// Phase 3: Event enrichment
+	// SimpleCorrelationSystem generates insights through the Insights() channel
+	// rather than providing findings on demand
+	// For ring buffer pipeline, correlation enrichment is handled asynchronously
 
 	return nil
 }
@@ -153,8 +146,8 @@ func (rb *RingBufferPipeline) Stop() error {
 	if rb.cancel != nil {
 		rb.cancel()
 	}
-	if rb.correlationStage != nil && rb.correlationStage.correlationEngine != nil {
-		return rb.correlationStage.correlationEngine.Stop()
+	if rb.correlationStage != nil && rb.correlationStage.correlationSystem != nil {
+		return rb.correlationStage.correlationSystem.Stop()
 	}
 	return nil
 }
@@ -248,15 +241,9 @@ func (rb *RingBufferPipeline) convertEventToCorrelationOutput(event *domain.Unif
 		}
 	}
 
-	// Get the latest correlation findings from engine
-	var correlationData *interfaces.Finding
-	if rb.correlationStage != nil && rb.correlationStage.correlationEngine != nil {
-		// Get internal finding and convert to interfaces.Finding
-		internalFinding := rb.correlationStage.correlationEngine.GetLatestFindings()
-		if internalFinding != nil {
-			correlationData = correlation.ConvertToInterfacesFinding(internalFinding)
-		}
-	}
+	// SimpleCorrelationSystem doesn't have GetLatestFindings
+	// It generates insights through the Insights() channel
+	var correlationData *interfaces.Finding = nil
 
 	// Determine result type based on correlation data
 	resultType := CorrelationTypeCorrelation

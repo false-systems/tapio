@@ -10,9 +10,23 @@ import (
 	"go.uber.org/zap"
 )
 
-// SimpleCollectionManager provides correlation using the new simple system
+// Config for the collection manager
+type Config struct {
+	EventBufferSize          int
+	PatternDetectionInterval time.Duration
+}
+
+// DefaultConfig returns sensible defaults
+func DefaultConfig() Config {
+	return Config{
+		EventBufferSize:          1000,
+		PatternDetectionInterval: 5 * time.Second,
+	}
+}
+
+// CollectionManager provides correlation using the simple system
 // This replaces the old "AI-powered" semantic engine with something that actually works
-type SimpleCollectionManager struct {
+type CollectionManager struct {
 	// New simple correlation system (replaces the fake AI one)
 	correlationSystem *SimpleCorrelationSystem
 
@@ -29,15 +43,15 @@ type SimpleCollectionManager struct {
 	config Config
 }
 
-// NewSimpleCollectionManager creates a manager with the simple correlation system
-func NewSimpleCollectionManager(config Config, logger *zap.Logger) *SimpleCollectionManager {
+// NewCollectionManager creates a manager with the simple correlation system
+func NewCollectionManager(config Config, logger *zap.Logger) *CollectionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create simple correlation system with default config
 	simpleConfig := DefaultSimpleSystemConfig()
 	simpleConfig.EventBufferSize = config.EventBufferSize
 
-	return &SimpleCollectionManager{
+	return &CollectionManager{
 		correlationSystem: NewSimpleCorrelationSystem(logger, simpleConfig),
 		eventBus:          make(chan domain.Event, config.EventBufferSize),
 		insightChan:       make(chan domain.Insight, 100),
@@ -48,7 +62,7 @@ func NewSimpleCollectionManager(config Config, logger *zap.Logger) *SimpleCollec
 }
 
 // Start begins correlation processing with the new simple system
-func (cm *SimpleCollectionManager) Start() error {
+func (cm *CollectionManager) Start() error {
 	// Start the simple correlation system
 	if err := cm.correlationSystem.Start(); err != nil {
 		return fmt.Errorf("failed to start simple correlation system: %w", err)
@@ -66,7 +80,7 @@ func (cm *SimpleCollectionManager) Start() error {
 }
 
 // ProcessEvents processes events through the new simple correlation system
-func (cm *SimpleCollectionManager) ProcessEvents(events []domain.Event) []domain.Insight {
+func (cm *CollectionManager) ProcessEvents(events []domain.Event) []domain.Insight {
 	ctx := context.Background()
 
 	// Send events to the simple correlation system
@@ -105,7 +119,7 @@ func (cm *SimpleCollectionManager) ProcessEvents(events []domain.Event) []domain
 }
 
 // convertToUnifiedEvent converts domain.Event to UnifiedEvent
-func (cm *SimpleCollectionManager) convertToUnifiedEvent(event *domain.Event) *domain.UnifiedEvent {
+func (cm *CollectionManager) convertToUnifiedEvent(event *domain.Event) *domain.UnifiedEvent {
 	ue := &domain.UnifiedEvent{
 		ID:        string(event.ID),
 		Timestamp: event.Timestamp,
@@ -162,7 +176,7 @@ func (cm *SimpleCollectionManager) convertToUnifiedEvent(event *domain.Event) *d
 }
 
 // processEvents handles batch event processing
-func (cm *SimpleCollectionManager) processEvents() {
+func (cm *CollectionManager) processEvents() {
 	defer cm.wg.Done()
 
 	eventBuffer := make([]domain.Event, 0, 100)
@@ -194,7 +208,7 @@ func (cm *SimpleCollectionManager) processEvents() {
 }
 
 // processBatch processes a batch of events
-func (cm *SimpleCollectionManager) processBatch(events []domain.Event) {
+func (cm *CollectionManager) processBatch(events []domain.Event) {
 	// The simple correlation system already processes individual events
 	// This could be used for additional batch analysis if needed
 
@@ -203,7 +217,7 @@ func (cm *SimpleCollectionManager) processBatch(events []domain.Event) {
 }
 
 // forwardInsights forwards insights from correlation system
-func (cm *SimpleCollectionManager) forwardInsights() {
+func (cm *CollectionManager) forwardInsights() {
 	defer cm.wg.Done()
 
 	for {
@@ -222,7 +236,7 @@ func (cm *SimpleCollectionManager) forwardInsights() {
 }
 
 // GetInsights returns all available insights
-func (cm *SimpleCollectionManager) GetInsights() []domain.Insight {
+func (cm *CollectionManager) GetInsights() []domain.Insight {
 	var insights []domain.Insight
 
 	// Non-blocking read of available insights
@@ -237,12 +251,12 @@ func (cm *SimpleCollectionManager) GetInsights() []domain.Insight {
 }
 
 // Insights returns the channel of insights
-func (cm *SimpleCollectionManager) Insights() <-chan domain.Insight {
+func (cm *CollectionManager) Insights() <-chan domain.Insight {
 	return cm.insightChan
 }
 
 // Stop gracefully shuts down the manager
-func (cm *SimpleCollectionManager) Stop() error {
+func (cm *CollectionManager) Stop() error {
 	// Stop the simple correlation system
 	if err := cm.correlationSystem.Stop(); err != nil {
 		return fmt.Errorf("failed to stop correlation system: %w", err)
@@ -260,7 +274,7 @@ func (cm *SimpleCollectionManager) Stop() error {
 }
 
 // Statistics returns processing statistics
-func (cm *SimpleCollectionManager) Statistics() map[string]interface{} {
+func (cm *CollectionManager) Statistics() map[string]interface{} {
 	stats := map[string]interface{}{
 		"event_buffer_size":  len(cm.eventBus),
 		"insight_queue_size": len(cm.insightChan),

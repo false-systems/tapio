@@ -342,7 +342,7 @@ func printResults(event string, results []*MultiDimCorrelationResult) {
 		if result.Impact != nil {
 			fmt.Printf("\nImpact Analysis:\n")
 			fmt.Printf("  Severity: %s\n", result.Impact.Severity)
-			fmt.Printf("  Infrastructure Impact: %.2f\n", result.Impact.BusinessImpact)
+			fmt.Printf("  Infrastructure Impact: %.2f\n", result.Impact.InfrastructureImpact)
 			fmt.Printf("  Affected Services: %v\n", result.Impact.ServiceImpact)
 			if result.Impact.UserImpact > 0 {
 				fmt.Printf("  Users Affected: %d\n", result.Impact.UserImpact)
