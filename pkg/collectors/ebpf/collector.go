@@ -13,6 +13,18 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
+// NetworkInfo represents network connection information
+type NetworkInfo struct {
+	SAddr     uint32 // Source IP (IPv4)
+	DAddr     uint32 // Destination IP (IPv4)
+	SPort     uint16 // Source port
+	DPort     uint16 // Destination port
+	Protocol  uint8  // IPPROTO_TCP or IPPROTO_UDP
+	State     uint8  // Connection state
+	Direction uint8  // 0=outgoing, 1=incoming
+	_         uint8  // Padding
+}
+
 // KernelEvent represents a kernel event from eBPF
 type KernelEvent struct {
 	Timestamp uint64
@@ -23,8 +35,7 @@ type KernelEvent struct {
 	Comm      [16]byte
 	CgroupID  uint64   // Add cgroup ID for pod correlation
 	PodUID    [36]byte // Add pod UID
-	_         [4]byte  // Padding to match C struct alignment
-	Data      [64]byte
+	Data      [64]byte // Can contain NetworkInfo for network events
 }
 
 // PodInfo represents pod information for correlation
@@ -33,6 +44,39 @@ type PodInfo struct {
 	Namespace [64]byte
 	PodName   [128]byte
 	CreatedAt uint64
+}
+
+// ContainerInfo represents container information for PID correlation
+type ContainerInfo struct {
+	ContainerID [64]byte  // Docker/containerd ID
+	PodUID      [36]byte  // Associated pod
+	Image       [128]byte // Container image
+	StartedAt   uint64    // Container start time
+}
+
+// ServiceEndpoint represents K8s service endpoint information
+type ServiceEndpoint struct {
+	ServiceName [64]byte // K8s service name
+	Namespace   [64]byte // K8s namespace
+	ClusterIP   [16]byte // Service cluster IP
+	Port        uint16   // Service port
+	_           [2]byte  // Padding
+}
+
+// FileInfo represents file operation information
+type FileInfo struct {
+	Filename [56]byte // File path (truncated)
+	Flags    uint32   // Open flags
+	Mode     uint32   // File mode
+}
+
+// MountInfo represents ConfigMap/Secret mount information
+type MountInfo struct {
+	Name      [64]byte  // ConfigMap/Secret name
+	Namespace [64]byte  // K8s namespace
+	MountPath [128]byte // Mount path in container
+	IsSecret  uint8     // 1 if secret, 0 if configmap
+	_         [7]byte   // Padding
 }
 
 // Collector implements minimal kernel monitoring via eBPF
@@ -102,6 +146,24 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to attach exec tracepoint: %w", err)
 	}
 	c.links = append(c.links, execLink)
+
+	// Attach network connection tracking
+	tcpLink, err := link.Kprobe("tcp_v4_connect", c.objs.TraceTcpConnect, nil)
+	if err != nil {
+		// Log but don't fail - network tracking is optional
+		fmt.Printf("Warning: failed to attach tcp connect kprobe: %v\n", err)
+	} else {
+		c.links = append(c.links, tcpLink)
+	}
+
+	// Attach file operation tracking
+	openLink, err := link.Tracepoint("syscalls", "sys_enter_openat", c.objs.TraceOpenat, nil)
+	if err != nil {
+		// Log but don't fail - file tracking is optional
+		fmt.Printf("Warning: failed to attach openat tracepoint: %v\n", err)
+	} else {
+		c.links = append(c.links, openLink)
+	}
 
 	// Open ring buffer
 	c.reader, err = ringbuf.NewReader(c.objs.Events)
@@ -227,20 +289,74 @@ func (c *Collector) processEvents() {
 		}
 		event = *(*KernelEvent)(unsafe.Pointer(&record.RawSample[0]))
 
-		// Convert to RawEvent - NO BUSINESS LOGIC, just add pod correlation
+		// Convert to RawEvent - NO BUSINESS LOGIC, just add correlation metadata
+		metadata := map[string]string{
+			"collector": "ebpf",
+			"pid":       fmt.Sprintf("%d", event.PID),
+			"tid":       fmt.Sprintf("%d", event.TID),
+			"comm":      c.nullTerminatedString(event.Comm[:]),
+			"size":      fmt.Sprintf("%d", event.Size),
+			"cgroup_id": fmt.Sprintf("%d", event.CgroupID),
+			"pod_uid":   c.nullTerminatedString(event.PodUID[:]),
+		}
+
+		// Add container information if available
+		if containerInfo, err := c.GetContainerInfo(event.PID); err == nil {
+			metadata["container_id"] = c.nullTerminatedString(containerInfo.ContainerID[:])
+			metadata["container_image"] = c.nullTerminatedString(containerInfo.Image[:])
+			metadata["container_started_at"] = fmt.Sprintf("%d", containerInfo.StartedAt)
+		}
+
+		// Process network events for service correlation
+		if event.EventType == 5 { // EVENT_TYPE_NETWORK_CONN
+			// Extract network info from event data
+			if len(event.Data) >= int(unsafe.Sizeof(NetworkInfo{})) {
+				netInfo := *(*NetworkInfo)(unsafe.Pointer(&event.Data[0]))
+
+				// Add network metadata
+				metadata["src_ip"] = c.ipToString(netInfo.SAddr)
+				metadata["dst_ip"] = c.ipToString(netInfo.DAddr)
+				metadata["src_port"] = fmt.Sprintf("%d", netInfo.SPort)
+				metadata["dst_port"] = fmt.Sprintf("%d", netInfo.DPort)
+				metadata["protocol"] = c.protocolToString(netInfo.Protocol)
+				metadata["direction"] = c.directionToString(netInfo.Direction)
+
+				// Check if destination is a known service endpoint
+				if serviceEndpoint, err := c.GetServiceEndpoint(netInfo.DAddr, netInfo.DPort); err == nil {
+					metadata["service_name"] = c.nullTerminatedString(serviceEndpoint.ServiceName[:])
+					metadata["service_namespace"] = c.nullTerminatedString(serviceEndpoint.Namespace[:])
+					metadata["service_cluster_ip"] = c.nullTerminatedString(serviceEndpoint.ClusterIP[:])
+				}
+			}
+		} else if event.EventType == 8 { // EVENT_TYPE_FILE_OPEN
+			// Extract file info from event data
+			if len(event.Data) >= int(unsafe.Sizeof(FileInfo{})) {
+				fileInfo := *(*FileInfo)(unsafe.Pointer(&event.Data[0]))
+
+				// Add file metadata
+				filename := c.nullTerminatedString(fileInfo.Filename[:])
+				metadata["filename"] = filename
+				metadata["flags"] = fmt.Sprintf("%d", fileInfo.Flags)
+				metadata["mode"] = fmt.Sprintf("%d", fileInfo.Mode)
+
+				// Check if this is a known ConfigMap/Secret mount
+				if mountInfo, err := c.GetMountInfo(filename); err == nil {
+					metadata["mount_name"] = c.nullTerminatedString(mountInfo.Name[:])
+					metadata["mount_namespace"] = c.nullTerminatedString(mountInfo.Namespace[:])
+					if mountInfo.IsSecret == 1 {
+						metadata["mount_type"] = "secret"
+					} else {
+						metadata["mount_type"] = "configmap"
+					}
+				}
+			}
+		}
+
 		rawEvent := collectors.RawEvent{
 			Timestamp: time.Unix(0, int64(event.Timestamp)),
 			Type:      c.eventTypeToString(event.EventType),
 			Data:      record.RawSample, // Raw eBPF event data
-			Metadata: map[string]string{
-				"collector": "ebpf",
-				"pid":       fmt.Sprintf("%d", event.PID),
-				"tid":       fmt.Sprintf("%d", event.TID),
-				"comm":      c.nullTerminatedString(event.Comm[:]),
-				"size":      fmt.Sprintf("%d", event.Size),
-				"cgroup_id": fmt.Sprintf("%d", event.CgroupID),
-				"pod_uid":   c.nullTerminatedString(event.PodUID[:]),
-			},
+			Metadata:  metadata,
 			// Generate new trace for kernel events, or reuse pod trace if available
 			TraceID: c.getOrGenerateTraceID(event),
 			SpanID:  collectors.GenerateSpanID(),
@@ -269,6 +385,12 @@ func (c *Collector) eventTypeToString(eventType uint32) string {
 		return "pod_syscall"
 	case 5:
 		return "network_conn"
+	case 8:
+		return "file_open"
+	case 9:
+		return "file_read"
+	case 10:
+		return "file_write"
 	default:
 		return "unknown"
 	}
@@ -327,6 +449,49 @@ func (c *Collector) GetPodInfo(cgroupID uint64) (*PodInfo, error) {
 	return &podInfo, nil
 }
 
+// UpdateContainerInfo updates container information in the eBPF map for PID correlation
+func (c *Collector) UpdateContainerInfo(pid uint32, containerID, podUID, image string) error {
+	if c.objs == nil || c.objs.ContainerInfoMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	containerInfo := &ContainerInfo{
+		StartedAt: uint64(time.Now().Unix()),
+	}
+
+	// Copy strings with proper bounds checking
+	copy(containerInfo.ContainerID[:], containerID)
+	copy(containerInfo.PodUID[:], podUID)
+	copy(containerInfo.Image[:], image)
+
+	// Update the eBPF map
+	return c.objs.ContainerInfoMap.Put(pid, containerInfo)
+}
+
+// RemoveContainerInfo removes container information from the eBPF map
+func (c *Collector) RemoveContainerInfo(pid uint32) error {
+	if c.objs == nil || c.objs.ContainerInfoMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	return c.objs.ContainerInfoMap.Delete(pid)
+}
+
+// GetContainerInfo retrieves container information for a given PID
+func (c *Collector) GetContainerInfo(pid uint32) (*ContainerInfo, error) {
+	if c.objs == nil || c.objs.ContainerInfoMap == nil {
+		return nil, fmt.Errorf("eBPF maps not initialized")
+	}
+
+	var containerInfo ContainerInfo
+	err := c.objs.ContainerInfoMap.Lookup(pid, &containerInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	return &containerInfo, nil
+}
+
 // getOrGenerateTraceID returns an existing trace ID for a pod or generates a new one
 func (c *Collector) getOrGenerateTraceID(event KernelEvent) string {
 	// If we have a pod UID, use it to maintain consistent trace ID per pod
@@ -341,7 +506,181 @@ func (c *Collector) getOrGenerateTraceID(event KernelEvent) string {
 		c.podTraceMap[podUID] = traceID
 		return traceID
 	}
-	
+
 	// For non-pod events, generate a new trace ID each time
 	return collectors.GenerateTraceID()
+}
+
+// UpdateServiceEndpoint updates service endpoint information for network correlation
+func (c *Collector) UpdateServiceEndpoint(ip string, port uint16, serviceName, namespace, clusterIP string) error {
+	if c.objs == nil || c.objs.ServiceEndpointsMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	// Convert IP string to uint32
+	ipAddr := c.parseIPv4(ip)
+	if ipAddr == 0 {
+		return fmt.Errorf("invalid IP address: %s", ip)
+	}
+
+	// Create endpoint key
+	key := c.makeEndpointKey(ipAddr, port)
+
+	serviceEndpoint := &ServiceEndpoint{
+		Port: port,
+	}
+
+	// Copy strings with proper bounds checking
+	copy(serviceEndpoint.ServiceName[:], serviceName)
+	copy(serviceEndpoint.Namespace[:], namespace)
+	copy(serviceEndpoint.ClusterIP[:], clusterIP)
+
+	// Update the eBPF map
+	return c.objs.ServiceEndpointsMap.Put(key, serviceEndpoint)
+}
+
+// RemoveServiceEndpoint removes service endpoint information
+func (c *Collector) RemoveServiceEndpoint(ip string, port uint16) error {
+	if c.objs == nil || c.objs.ServiceEndpointsMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	// Convert IP string to uint32
+	ipAddr := c.parseIPv4(ip)
+	if ipAddr == 0 {
+		return fmt.Errorf("invalid IP address: %s", ip)
+	}
+
+	// Create endpoint key
+	key := c.makeEndpointKey(ipAddr, port)
+
+	return c.objs.ServiceEndpointsMap.Delete(key)
+}
+
+// GetServiceEndpoint retrieves service information for a given IP and port
+func (c *Collector) GetServiceEndpoint(ip uint32, port uint16) (*ServiceEndpoint, error) {
+	if c.objs == nil || c.objs.ServiceEndpointsMap == nil {
+		return nil, fmt.Errorf("eBPF maps not initialized")
+	}
+
+	// Create endpoint key
+	key := c.makeEndpointKey(ip, port)
+
+	var serviceEndpoint ServiceEndpoint
+	err := c.objs.ServiceEndpointsMap.Lookup(key, &serviceEndpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	return &serviceEndpoint, nil
+}
+
+// Helper functions for network correlation
+
+// makeEndpointKey creates a key from IP and port for the service endpoints map
+func (c *Collector) makeEndpointKey(ip uint32, port uint16) uint64 {
+	return (uint64(ip) << 16) | uint64(port)
+}
+
+// parseIPv4 converts an IPv4 string to uint32
+func (c *Collector) parseIPv4(ip string) uint32 {
+	var a, b, c1, d uint32
+	n, _ := fmt.Sscanf(ip, "%d.%d.%d.%d", &a, &b, &c1, &d)
+	if n != 4 || a > 255 || b > 255 || c1 > 255 || d > 255 {
+		return 0
+	}
+	return (a << 24) | (b << 16) | (c1 << 8) | d
+}
+
+// ipToString converts uint32 IP to string
+func (c *Collector) ipToString(ip uint32) string {
+	return fmt.Sprintf("%d.%d.%d.%d",
+		(ip>>24)&0xff,
+		(ip>>16)&0xff,
+		(ip>>8)&0xff,
+		ip&0xff)
+}
+
+// protocolToString converts protocol number to string
+func (c *Collector) protocolToString(proto uint8) string {
+	switch proto {
+	case 6:
+		return "tcp"
+	case 17:
+		return "udp"
+	default:
+		return fmt.Sprintf("%d", proto)
+	}
+}
+
+// directionToString converts direction flag to string
+func (c *Collector) directionToString(dir uint8) string {
+	if dir == 0 {
+		return "outgoing"
+	}
+	return "incoming"
+}
+
+// UpdateMountInfo updates mount information for ConfigMap/Secret correlation
+func (c *Collector) UpdateMountInfo(mountPath, name, namespace string, isSecret bool) error {
+	if c.objs == nil || c.objs.MountInfoMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	// Create mount key from path hash
+	key := c.hashPath(mountPath)
+
+	mountInfo := &MountInfo{}
+	if isSecret {
+		mountInfo.IsSecret = 1
+	} else {
+		mountInfo.IsSecret = 0
+	}
+
+	// Copy strings with proper bounds checking
+	copy(mountInfo.Name[:], name)
+	copy(mountInfo.Namespace[:], namespace)
+	copy(mountInfo.MountPath[:], mountPath)
+
+	// Update the eBPF map
+	return c.objs.MountInfoMap.Put(key, mountInfo)
+}
+
+// RemoveMountInfo removes mount information
+func (c *Collector) RemoveMountInfo(mountPath string) error {
+	if c.objs == nil || c.objs.MountInfoMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	// Create mount key from path hash
+	key := c.hashPath(mountPath)
+
+	return c.objs.MountInfoMap.Delete(key)
+}
+
+// GetMountInfo retrieves mount information for a given path
+func (c *Collector) GetMountInfo(path string) (*MountInfo, error) {
+	if c.objs == nil || c.objs.MountInfoMap == nil {
+		return nil, fmt.Errorf("eBPF maps not initialized")
+	}
+
+	// Create mount key from path hash
+	key := c.hashPath(path)
+
+	var mountInfo MountInfo
+	err := c.objs.MountInfoMap.Lookup(key, &mountInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mountInfo, nil
+}
+
+// hashPath computes a hash of a file path (simple DJB2 hash)
+func (c *Collector) hashPath(path string) uint64 {
+	hash := uint64(5381)
+	for i := 0; i < len(path) && i < 64; i++ {
+		hash = ((hash << 5) + hash) + uint64(path[i])
+	}
+	return hash
 }
