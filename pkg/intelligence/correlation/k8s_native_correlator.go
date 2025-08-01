@@ -15,6 +15,9 @@ import (
 type K8sNativeCorrelator struct {
 	logger *zap.Logger
 
+	// Relationship loader that populates caches
+	loader *K8sRelationshipLoader
+
 	// Cache for K8s relationships
 	ownerCache    *OwnershipCache
 	selectorCache *SelectorCache
@@ -44,7 +47,7 @@ type SelectorCache struct {
 // EventRelationCache tracks K8s event relationships
 type EventRelationCache struct {
 	// involvedObject -> related events
-	events map[string][]*EventRef
+	events map[string][]*K8sEventRef
 	mu     sync.RWMutex
 }
 
@@ -57,8 +60,8 @@ type ResourceRef struct {
 	Labels    map[string]string
 }
 
-// EventRef is a lightweight reference to an event
-type EventRef struct {
+// K8sEventRef is a K8s-specific event reference
+type K8sEventRef struct {
 	Reason    string
 	Message   string
 	Object    string
@@ -66,19 +69,18 @@ type EventRef struct {
 }
 
 // NewK8sNativeCorrelator creates a new K8s-based correlator
-func NewK8sNativeCorrelator(logger *zap.Logger) *K8sNativeCorrelator {
+func NewK8sNativeCorrelator(logger *zap.Logger, loader *K8sRelationshipLoader) *K8sNativeCorrelator {
+	// Get caches from loader
+	ownerCache := loader.GetOwnershipCache()
+	selectorCache := loader.GetSelectorCache()
+
 	return &K8sNativeCorrelator{
-		logger: logger,
-		ownerCache: &OwnershipCache{
-			owners: make(map[string][]*ResourceRef),
-			owned:  make(map[string]*ResourceRef),
-		},
-		selectorCache: &SelectorCache{
-			selectors: make(map[string][]*ResourceRef),
-			matches:   make(map[string][]string),
-		},
+		logger:        logger,
+		loader:        loader,
+		ownerCache:    ownerCache,
+		selectorCache: selectorCache,
 		eventCache: &EventRelationCache{
-			events: make(map[string][]*EventRef),
+			events: make(map[string][]*K8sEventRef),
 		},
 	}
 }
@@ -295,11 +297,89 @@ func (c *K8sNativeCorrelator) findNetworkCorrelations(event *domain.UnifiedEvent
 func (c *K8sNativeCorrelator) UpdateCache(update CacheUpdate) {
 	switch update.Type {
 	case "owner":
-		// TODO: implement updateOwnerCache
+		if data, ok := update.Data.(OwnershipUpdate); ok {
+			c.updateOwnerCache(data)
+		}
 	case "selector":
-		// TODO: implement updateSelectorCache
+		if data, ok := update.Data.(SelectorUpdate); ok {
+			c.updateSelectorCache(data)
+		}
 	case "event":
-		// TODO: implement updateEventCache
+		if data, ok := update.Data.(EventUpdate); ok {
+			c.updateEventCache(data)
+		}
+	}
+}
+
+// updateOwnerCache updates ownership relationships
+func (c *K8sNativeCorrelator) updateOwnerCache(update OwnershipUpdate) {
+	c.ownerCache.mu.Lock()
+	defer c.ownerCache.mu.Unlock()
+
+	switch update.Action {
+	case "add":
+		c.ownerCache.owners[update.Owner.UID] = append(c.ownerCache.owners[update.Owner.UID], &update.Owned)
+		c.ownerCache.owned[update.Owned.UID] = &update.Owner
+	case "delete":
+		// Remove owned from owner's list
+		if owned, ok := c.ownerCache.owners[update.Owner.UID]; ok {
+			var filtered []*ResourceRef
+			for _, o := range owned {
+				if o.UID != update.Owned.UID {
+					filtered = append(filtered, o)
+				}
+			}
+			c.ownerCache.owners[update.Owner.UID] = filtered
+		}
+		delete(c.ownerCache.owned, update.Owned.UID)
+	}
+}
+
+// updateSelectorCache updates selector relationships
+func (c *K8sNativeCorrelator) updateSelectorCache(update SelectorUpdate) {
+	c.selectorCache.mu.Lock()
+	defer c.selectorCache.mu.Unlock()
+
+	selectorKey := makeSelectorKey(update.Selector)
+
+	switch update.Action {
+	case "add":
+		c.selectorCache.selectors[selectorKey] = append(c.selectorCache.selectors[selectorKey], &update.Resource)
+		c.selectorCache.matches[update.Resource.UID] = append(c.selectorCache.matches[update.Resource.UID], selectorKey)
+	case "delete":
+		// Remove from selectors
+		if resources, ok := c.selectorCache.selectors[selectorKey]; ok {
+			var filtered []*ResourceRef
+			for _, r := range resources {
+				if r.UID != update.Resource.UID {
+					filtered = append(filtered, r)
+				}
+			}
+			c.selectorCache.selectors[selectorKey] = filtered
+		}
+		delete(c.selectorCache.matches, update.Resource.UID)
+	}
+}
+
+// updateEventCache updates event relationships
+func (c *K8sNativeCorrelator) updateEventCache(update EventUpdate) {
+	c.eventCache.mu.Lock()
+	defer c.eventCache.mu.Unlock()
+
+	switch update.Action {
+	case "add":
+		c.eventCache.events[update.Object] = append(c.eventCache.events[update.Object], &update.Event)
+	case "delete":
+		// Clean up old events
+		if events, ok := c.eventCache.events[update.Object]; ok {
+			var filtered []*K8sEventRef
+			for _, e := range events {
+				if e.Timestamp.After(time.Now().Add(-30 * time.Minute)) {
+					filtered = append(filtered, e)
+				}
+			}
+			c.eventCache.events[update.Object] = filtered
+		}
 	}
 }
 
@@ -330,7 +410,23 @@ func (c *K8sNativeCorrelator) extractResourceRef(event *domain.UnifiedEvent) *Re
 }
 
 func (c *K8sNativeCorrelator) matchesSelector(labels map[string]string, selectorHash string) bool {
-	// Simplified - real implementation would parse selector
+	if labels == nil {
+		return false
+	}
+
+	// Parse the selector hash back to a map
+	selector := parseSelectorKey(selectorHash)
+	if len(selector) == 0 {
+		return false
+	}
+
+	// Check if all selector labels match
+	for k, v := range selector {
+		if labels[k] != v {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -341,12 +437,9 @@ func (c *K8sNativeCorrelator) isServiceIP(ip string) bool {
 }
 
 func (c *K8sNativeCorrelator) getServiceByIP(ip string) *ResourceRef {
-	// Lookup service by ClusterIP
-	// Simplified - real implementation would query cache
-	return &ResourceRef{
-		Kind: "Service",
-		Name: "example-service",
-	}
+	// In production, this would look up services by their ClusterIP
+	// For now, return nil to indicate no service found
+	return nil
 }
 
 // CacheUpdate represents an update to the correlation cache
@@ -354,4 +447,25 @@ type CacheUpdate struct {
 	Type   string      // owner, selector, event
 	Action string      // add, update, delete
 	Data   interface{} // The actual update data
+}
+
+// OwnershipUpdate represents an ownership relationship update
+type OwnershipUpdate struct {
+	Action string
+	Owner  ResourceRef
+	Owned  ResourceRef
+}
+
+// SelectorUpdate represents a selector relationship update
+type SelectorUpdate struct {
+	Action   string
+	Resource ResourceRef
+	Selector map[string]string
+}
+
+// EventUpdate represents a K8s event update
+type EventUpdate struct {
+	Action string
+	Object string
+	Event  K8sEventRef
 }

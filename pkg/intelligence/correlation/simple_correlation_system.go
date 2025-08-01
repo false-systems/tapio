@@ -8,6 +8,7 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
+	"k8s.io/client-go/kubernetes"
 )
 
 // SimpleCorrelationSystem - The new zero-config correlation engine
@@ -82,14 +83,28 @@ type ProcessingStatistics struct {
 }
 
 // NewSimpleCorrelationSystem creates the new correlation system
-func NewSimpleCorrelationSystem(logger *zap.Logger, config SimpleSystemConfig) *SimpleCorrelationSystem {
+// Note: This now requires a K8s client for proper correlation. Pass nil to disable K8s correlation.
+func NewSimpleCorrelationSystem(logger *zap.Logger, config SimpleSystemConfig, k8sClient kubernetes.Interface) *SimpleCorrelationSystem {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Create K8s correlator with proper loader if client is provided
+	var k8sCorrelator *K8sNativeCorrelator
+	if k8sClient != nil && config.EnableK8sNative {
+		loader := NewK8sRelationshipLoader(logger, k8sClient)
+		// Start loader in background
+		go func() {
+			if err := loader.Start(ctx); err != nil {
+				logger.Error("Failed to start K8s relationship loader", zap.Error(err))
+			}
+		}()
+		k8sCorrelator = NewK8sNativeCorrelator(logger, loader)
+	}
 
 	return &SimpleCorrelationSystem{
 		logger: logger,
 
 		// Initialize all correlation engines
-		k8sCorrelator:      NewK8sNativeCorrelator(logger),
+		k8sCorrelator:      k8sCorrelator,
 		temporalCorrelator: NewTemporalCorrelator(logger, DefaultTemporalConfig()),
 		sequenceDetector:   NewSequenceDetector(logger, DefaultSequenceConfig()),
 		confidenceScorer:   NewConfidenceScorer(logger, DefaultScorerConfig()),

@@ -8,6 +8,7 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Config for the collection manager
@@ -44,7 +45,8 @@ type CollectionManager struct {
 }
 
 // NewCollectionManager creates a manager with the simple correlation system
-func NewCollectionManager(config Config, logger *zap.Logger) *CollectionManager {
+// Pass nil for k8sClient to disable K8s correlation
+func NewCollectionManager(config Config, logger *zap.Logger, k8sClient kubernetes.Interface) *CollectionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create simple correlation system with default config
@@ -52,7 +54,7 @@ func NewCollectionManager(config Config, logger *zap.Logger) *CollectionManager 
 	simpleConfig.EventBufferSize = config.EventBufferSize
 
 	return &CollectionManager{
-		correlationSystem: NewSimpleCorrelationSystem(logger, simpleConfig),
+		correlationSystem: NewSimpleCorrelationSystem(logger, simpleConfig, k8sClient),
 		eventBus:          make(chan domain.Event, config.EventBufferSize),
 		insightChan:       make(chan domain.Insight, 100),
 		ctx:               ctx,

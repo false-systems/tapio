@@ -18,7 +18,7 @@ type Manager struct {
 func NewManager() *Manager {
 	logger, _ := zap.NewProduction()
 	return &Manager{
-		CollectionManager: NewCollectionManager(DefaultConfig(), logger),
+		CollectionManager: NewCollectionManager(DefaultConfig(), logger, nil), // No K8s client in simple manager
 	}
 }
 
