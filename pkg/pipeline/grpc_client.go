@@ -162,7 +162,6 @@ func (c *GRPCClient) flush() {
 			// TODO: Add these fields when proto is updated
 			// TraceId:   event.TraceID,
 			// SpanId:    event.SpanID,
-main
 		}
 		protoEvents = append(protoEvents, protoEvent)
 	}
