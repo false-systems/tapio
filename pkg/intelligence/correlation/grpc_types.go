@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.uber.org/zap"
 )
 
 // Manager wraps CollectionManager for gRPC compatibility
@@ -15,8 +16,9 @@ type Manager struct {
 
 // NewManager creates a new correlation manager
 func NewManager() *Manager {
+	logger, _ := zap.NewProduction()
 	return &Manager{
-		CollectionManager: NewCollectionManager(DefaultConfig()),
+		CollectionManager: NewCollectionManager(DefaultConfig(), logger),
 	}
 }
 
@@ -44,8 +46,9 @@ func (m *Manager) AnalyzeBatch(ctx context.Context, events []*domain.Event) []*S
 		}
 	}
 
-	// Process through semantic engine
-	groups := m.semanticEngine.semanticGrouper.GroupEvents(eventValues)
+	// Process through correlation system (semantic engine was removed)
+	// For now, return empty groups since semantic engine is gone
+	groups := []EventGroup{}
 
 	// Convert to semantic groups
 	semanticGroups := make([]*SemanticGroup, 0, len(groups))
@@ -386,7 +389,7 @@ func eventGroupToSemanticGroup(group EventGroup) *SemanticGroup {
 		Duration:     group.TimeSpan,
 		TraceID:      group.TraceID,
 		Impact: &ImpactAssessment{
-			BusinessImpact: float32(group.InfrastructureImpact),
+			InfrastructureImpact: float32(group.InfrastructureImpact),
 		},
 		Metadata: make(map[string]string),
 		Labels:   make(map[string]string),
