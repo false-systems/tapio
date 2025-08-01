@@ -12,7 +12,7 @@ import (
 
 // MultiDimensionalCorrelationDemo demonstrates the correlation engine in action
 func MultiDimensionalCorrelationDemo() {
-	fmt.Println("\n=== Multi-Dimensional K8s Correlation Demo ===\n")
+	fmt.Println("\n=== Multi-Dimensional K8s Correlation Demo ===")
 
 	// Create engine with all dimensions enabled
 	logger, _ := zap.NewProduction()
@@ -34,7 +34,7 @@ func MultiDimensionalCorrelationDemo() {
 	ctx := context.Background()
 
 	// Scenario: E-commerce platform experiencing cascading failure
-	fmt.Println("## Scenario: E-commerce Platform Cascading Failure\n")
+	fmt.Println("## Scenario: E-commerce Platform Cascading Failure")
 
 	baseTime := time.Now()
 
@@ -358,7 +358,7 @@ func printResults(event string, results []*MultiDimCorrelationResult) {
 
 // DimensionExamples shows how each dimension works
 func DimensionExamples() {
-	fmt.Println("\n=== K8s Correlation Dimensions Explained ===\n")
+	fmt.Println("\n=== K8s Correlation Dimensions Explained ===")
 
 	fmt.Println("## 1. Ownership Dimension")
 	fmt.Println("Correlates events by K8s ownership hierarchy:")
@@ -409,7 +409,7 @@ func DimensionExamples() {
 
 // PhilosophicalContext explains the Kantian approach
 func PhilosophicalContext() {
-	fmt.Println("\n=== Kantian Epistemology Applied to K8s ===\n")
+	fmt.Println("\n=== Kantian Epistemology Applied to K8s ===")
 
 	fmt.Println("## The K8s Noumenon")
 	fmt.Println("K8s cluster state is unknowable in its totality (noumenon)")
