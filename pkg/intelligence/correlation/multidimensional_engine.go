@@ -631,8 +631,8 @@ func (e *MultiDimensionalEngine) calculateBusinessImpact(events []*domain.Unifie
 	maxImpact := 0.0
 
 	for _, event := range events {
-		if event.Impact != nil && event.Impact.BusinessImpact > maxImpact {
-			maxImpact = event.Impact.BusinessImpact
+		if event.Impact != nil && event.Impact.InfrastructureImpact > maxImpact {
+			maxImpact = event.Impact.InfrastructureImpact
 		}
 	}
 
@@ -640,15 +640,16 @@ func (e *MultiDimensionalEngine) calculateBusinessImpact(events []*domain.Unifie
 }
 
 func (e *MultiDimensionalEngine) calculateUserImpact(events []*domain.UnifiedEvent) int {
-	maxUsers := 0
+	// Since we don't have AffectedUsers in the domain, we'll use AffectedComponents as a proxy
+	maxComponents := 0
 
 	for _, event := range events {
-		if event.Impact != nil && event.Impact.AffectedUsers > maxUsers {
-			maxUsers = event.Impact.AffectedUsers
+		if event.Impact != nil && event.Impact.AffectedComponents > maxComponents {
+			maxComponents = event.Impact.AffectedComponents
 		}
 	}
 
-	return maxUsers
+	return maxComponents
 }
 
 func (e *MultiDimensionalEngine) calculateServiceImpact(events []*domain.UnifiedEvent) []string {

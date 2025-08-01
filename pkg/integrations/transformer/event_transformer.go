@@ -34,8 +34,8 @@ func (t *EventTransformer) Transform(ctx context.Context, raw collectors.RawEven
 		Tags:      []string{raw.Type},
 	}
 
-	// Extract OTEL context from metadata
-	event.TraceContext = t.extractOTELContext(raw.Metadata)
+	// Extract OTEL context from both RawEvent fields and metadata
+	event.TraceContext = t.extractOTELContext(raw)
 
 	// Add entity context
 	event.Entity = &domain.EntityContext{
@@ -78,22 +78,32 @@ func (t *EventTransformer) Transform(ctx context.Context, raw collectors.RawEven
 	return event, nil
 }
 
-// extractOTELContext extracts OTEL trace context from metadata
-func (t *EventTransformer) extractOTELContext(metadata map[string]string) *domain.TraceContext {
-	if _, hasTrace := metadata["trace_id"]; !hasTrace {
+// extractOTELContext extracts OTEL trace context from RawEvent fields and metadata
+func (t *EventTransformer) extractOTELContext(raw collectors.RawEvent) *domain.TraceContext {
+	// Check if we have any trace information
+	if raw.TraceID == "" && raw.Metadata["trace_id"] == "" {
 		return nil
 	}
 
 	ctx := &domain.TraceContext{
-		TraceID:      metadata["trace_id"],
-		SpanID:       metadata["span_id"],
-		ParentSpanID: metadata["parent_span_id"],
-		TraceState:   metadata["trace_state"],
+		// Prefer RawEvent fields over metadata
+		TraceID:      raw.TraceID,
+		SpanID:       raw.SpanID,
+		ParentSpanID: raw.Metadata["parent_span_id"],
+		TraceState:   raw.Metadata["trace_state"],
 		Baggage:      make(map[string]string),
 	}
 
+	// Fallback to metadata if RawEvent fields are empty
+	if ctx.TraceID == "" {
+		ctx.TraceID = raw.Metadata["trace_id"]
+	}
+	if ctx.SpanID == "" {
+		ctx.SpanID = raw.Metadata["span_id"]
+	}
+
 	// Extract baggage
-	for k, v := range metadata {
+	for k, v := range raw.Metadata {
 		if strings.HasPrefix(k, "baggage.") {
 			baggageKey := strings.TrimPrefix(k, "baggage.")
 			ctx.Baggage[baggageKey] = v

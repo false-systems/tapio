@@ -2,6 +2,7 @@ package correlation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -378,8 +379,8 @@ func TestMultiDimensionalCascadingFailure(t *testing.T) {
 			StatusCode: 500,
 		},
 		Impact: &domain.ImpactContext{
-			Severity:       "critical",
-			BusinessImpact: 0.9,
+			Severity:             "critical",
+			InfrastructureImpact: 0.9,
 		},
 	}
 
@@ -391,7 +392,7 @@ func TestMultiDimensionalCascadingFailure(t *testing.T) {
 		apiEvent := &domain.UnifiedEvent{
 			ID:        fmt.Sprintf("api-failure-%d", i),
 			Timestamp: baseTime.Add(time.Duration(i+1) * 5 * time.Second),
-			Type:      domain.EventTypeApplication,
+			Type:      "application",
 			Severity:  domain.EventSeverityError,
 			K8sContext: &domain.K8sContext{
 				Name:         fmt.Sprintf("api-pod-%d", i),

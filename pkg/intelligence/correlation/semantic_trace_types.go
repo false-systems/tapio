@@ -22,14 +22,14 @@ type SemanticTraceGroup struct {
 	SpanContext        trace.SpanContext
 }
 
-// ImpactAssessment assesses business and technical impact
+// ImpactAssessment assesses infrastructure and technical impact
 type ImpactAssessment struct {
-	BusinessImpact     float32
-	TechnicalSeverity  string
-	CascadeRisk        float32
-	AffectedResources  []string
-	TimeToResolution   time.Duration
-	RecommendedActions []string
+	InfrastructureImpact float32
+	TechnicalSeverity    string
+	CascadeRisk          float32
+	AffectedResources    []string
+	TimeToResolution     time.Duration
+	RecommendedActions   []string
 }
 
 // PredictedOutcome predicts what will happen

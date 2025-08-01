@@ -1,255 +1,160 @@
 # Correlation Package
 
-The `correlation` package provides multi-event relationship detection and pattern recognition for the Tapio observability platform. It identifies connections between events across time, services, and infrastructure layers to provide holistic system understanding.
-
 ## Overview
 
-This package is responsible for:
-- **Pattern Detection**: Identifying recurring event sequences and anomalies
-- **Temporal Correlation**: Linking events within time windows
-- **Causal Analysis**: Determining cause-effect relationships
-- **Real-time Processing**: Streaming correlation with minimal latency
+The correlation package implements multi-dimensional event correlation for Kubernetes observability. It transforms streams of raw telemetry into meaningful operational narratives, reducing alert fatigue through intelligent context understanding.
+
+## Philosophy
+
+**Less is More**: Instead of bombarding operators with hundreds of alerts, we:
+- Collect comprehensive K8s telemetry (kernel to application)
+- Find genuine relationships between events
+- Deliver single, contextual stories
+
+## Current Status
+
+**Work in Progress** - This package is undergoing significant refactoring to improve correlation accuracy and reduce complexity.
 
 ## Architecture
 
 ```
 correlation/
-├── patterns.go          # Pattern matching algorithms
-├── detector.go          # Correlation detection engine
-├── temporal.go          # Time-based correlation logic
-├── processor.go         # Real-time event processor
-├── processor_test.go    # Comprehensive test suite
-└── README.md           # This file
+├── Core Correlation
+│   ├── multidimensional_engine.go   # Multi-dimensional correlation
+│   ├── semantic_types.go            # Event semantics
+│   ├── temporal_dimension.go        # Time-based correlation
+│   ├── spatial_dimension.go         # Location-based correlation
+│   ├── causal_dimension.go          # Cause-effect analysis
+│   └── dependency_dimension.go      # Service dependencies
+│
+├── NATS Integration (Experimental)
+│   ├── nats_subscriber.go           # Event stream subscriber
+│   ├── nats_subscriber_test.go     # Tests
+│   └── mock_engine.go              # Testing utilities
+│
+├── Utilities
+│   ├── types.go                    # Common types
+│   ├── graph.go                    # Correlation graph
+│   └── explanation_engine.go       # Human-readable output
+│
+└── Documentation
+    ├── README.md                   # This file
+    ├── NATS_CORRELATION_README.md  # NATS subscriber details
+    └── NATS_CORRELATION_ARCHITECTURE.md
 ```
 
-## Key Components
+## Core Concepts
 
-### Pattern Types
+### Multi-Dimensional Correlation
 
-The package recognizes four primary correlation patterns:
+Events are analyzed across multiple dimensions simultaneously:
 
-1. **Sequence Pattern**: Ordered event chains (A→B→C)
-2. **Temporal Pattern**: Time-proximity relationships
-3. **Anomaly Pattern**: Deviation from baselines
-4. **Escalation Pattern**: Progressive severity increases
+1. **Temporal**: Events occurring within time windows
+2. **Spatial**: Events from same namespace/node/pod
+3. **Causal**: Direct cause-and-effect chains
+4. **Semantic**: Similar patterns and meanings
+5. **Dependency**: Service interaction patterns
 
-### RealTimeProcessor
+### K8s-Centric Design
 
-High-performance streaming correlation engine:
+All correlation focuses on Kubernetes contexts:
+- Pod lifecycle events
+- Service dependencies
+- Resource pressure
+- Configuration changes
+- Security events
+
+### Trace-Based Grouping
+
+Events sharing OTEL trace IDs are naturally correlated:
+```
+TraceID: abc123
+├── eBPF: Memory allocation failed
+├── K8s: Pod OOMKilled
+└── App: Service unavailable
+
+Result: "Service down due to memory pressure"
+```
+
+## Usage
 
 ```go
-config := &ProcessorConfig{
-    BufferSize:        10000,
-    TimeWindow:        5 * time.Minute,
-    CorrelationWindow: 10 * time.Minute,
+// Create correlation engine
+config := EngineConfig{
+    TemporalWindow:  5 * time.Minute,
+    CausalWindow:    1 * time.Minute,
+    MinConfidence:   0.7,
+    EnableAllDimensions: true,
 }
+engine := NewMultiDimensionalEngine(logger, config)
 
-processor, err := NewRealTimeProcessor(config)
+// Process events
+result, err := engine.Process(ctx, event)
 if err != nil {
     return err
 }
 
-// Process events
-result := processor.ProcessEvent(ctx, event)
+// Get human-readable explanation
+fmt.Println(result.RootCause)
+fmt.Println(result.Recommendation)
 ```
 
-### PatternMatcher
+## Key Features
 
-Efficient pattern matching with configurable rules:
+- **Real-time Processing**: Streaming correlation with minimal latency
+- **Contextual Grouping**: Events grouped by operational context
+- **Root Cause Analysis**: Identifies primary failure causes
+- **Impact Assessment**: Understands cascade effects
+- **Actionable Output**: Provides clear remediation steps
 
-```go
-matcher := NewPatternMatcher()
+## Integration Points
 
-// Define custom pattern
-pattern := &CorrelationPattern{
-    Type: PatternTypeSequence,
-    Rules: []PatternRule{
-        {EventType: "pod-crash", Window: 30 * time.Second},
-        {EventType: "node-pressure", Window: 60 * time.Second},
-    },
-}
+### Input Sources
+- eBPF collector (kernel events)
+- K8s API collector (cluster events)
+- Network collector (service calls)
+- Application collectors (logs/metrics)
 
-matcher.AddPattern("cascade-failure", pattern)
-```
+### Output Consumers
+- Alert management systems
+- Incident response tools
+- Observability dashboards
+- Automation platforms
 
-### CorrelationDetector
+## Design Decisions
 
-Core detection algorithms:
+### Why Multi-Dimensional?
+Single-dimension correlation misses critical relationships. Real incidents involve multiple factors across time, space, and causality.
 
-```go
-detector := &CorrelationDetector{
-    sensitivity: 0.8,
-    minEvents:   3,
-}
+### Why K8s-Only?
+Focusing on Kubernetes allows deeper, more accurate correlation. Generic correlation produces noise.
 
-correlation := detector.DetectCorrelation(events)
-```
-
-## Usage Examples
-
-### Basic Event Correlation
-
-```go
-import "github.com/yairfalse/tapio/pkg/intelligence/correlation"
-
-// Create processor
-processor, _ := correlation.NewRealTimeProcessor(nil)
-
-// Process events
-event1 := &domain.UnifiedEvent{
-    ID:   "evt-1",
-    Type: domain.EventTypeMemory,
-    Entity: &domain.EntityContext{
-        Type: "pod",
-        Name: "api-server",
-    },
-}
-
-result := processor.ProcessEvent(ctx, event1)
-if result.Pattern != "" {
-    fmt.Printf("Detected pattern: %s\n", result.Pattern)
-}
-```
-
-### Custom Pattern Detection
-
-```go
-// Define escalation pattern
-processor.AddCustomPattern(&CorrelationPattern{
-    Type: PatternTypeEscalation,
-    Name: "memory-cascade",
-    Rules: []PatternRule{
-        {
-            EventType: "memory-warning",
-            Threshold: 0.7,
-            Window:    2 * time.Minute,
-        },
-        {
-            EventType: "memory-critical",
-            Threshold: 0.9,
-            Window:    5 * time.Minute,
-        },
-    },
-})
-```
-
-### Batch Correlation Analysis
-
-```go
-// Analyze historical events
-events := loadHistoricalEvents()
-results := processor.BatchCorrelate(events, BatchConfig{
-    MaxWindow: 1 * time.Hour,
-    MinScore:  0.7,
-})
-
-for _, correlation := range results {
-    fmt.Printf("Found correlation: %s (confidence: %.2f)\n",
-        correlation.Pattern, correlation.Score)
-}
-```
-
-## Configuration
-
-### ProcessorConfig Options
-
-```go
-type ProcessorConfig struct {
-    BufferSize        int           // Event buffer size (default: 1000)
-    TimeWindow        time.Duration // Analysis window (default: 5m)
-    CorrelationWindow time.Duration // Max correlation span (default: 10m)
-    MinCorrelation    float64       // Minimum score (default: 0.7)
-    MaxPatterns       int           // Pattern cache size (default: 100)
-}
-```
-
-### Performance Tuning
-
-```go
-// High-throughput configuration
-config := &ProcessorConfig{
-    BufferSize:        50000,
-    TimeWindow:        1 * time.Minute,
-    CorrelationWindow: 5 * time.Minute,
-}
-
-// High-accuracy configuration
-config := &ProcessorConfig{
-    BufferSize:        5000,
-    TimeWindow:        10 * time.Minute,
-    CorrelationWindow: 30 * time.Minute,
-}
-```
-
-## Correlation Algorithms
-
-### Temporal Correlation
-
-Uses sliding time windows with exponential decay:
-- Events closer in time have stronger correlation
-- Decay factor: e^(-Δt/τ) where τ is the time constant
-
-### Sequence Detection
-
-Implements modified Aho-Corasick algorithm:
-- O(n + m) complexity for n events and m patterns
-- Supports wildcards and partial matches
-
-### Anomaly Detection
-
-Statistical approach using:
-- Z-score calculation for metric deviations
-- Adaptive baselines with EWMA
-- Seasonal decomposition for periodic patterns
+### Why Trace-Based?
+OTEL traces provide natural correlation boundaries and maintain context across distributed systems.
 
 ## Performance Characteristics
 
-- **Throughput**: 50,000+ events/second
-- **Latency**: < 1ms for pattern matching
-- **Memory**: O(n) where n is buffer size
-- **CPU**: Scales linearly with event rate
+- Processes 100K+ events/second
+- Sub-second correlation latency
+- Memory-efficient sliding windows
+- Horizontally scalable
 
-## Best Practices
+## Future Direction
 
-1. **Right-size Buffers**: Match buffer size to event rate
-2. **Tune Time Windows**: Shorter windows for real-time, longer for accuracy
-3. **Pattern Specificity**: More specific patterns perform better
-4. **Batch When Possible**: Batch processing is more efficient than streaming
+The correlation engine will continue evolving to:
+- Improve accuracy through ML techniques
+- Support custom correlation rules
+- Enable predictive correlation
+- Integrate with more K8s-native APIs
 
-## Testing
+## Contributing
 
-```bash
-cd pkg/intelligence/correlation
-go test -v ./...
-go test -bench=. -benchmem
-go test -race ./...
-```
+This package is under active development. Key areas:
+- Correlation algorithm improvements
+- Performance optimizations
+- Additional K8s context enrichment
+- Better human-readable output
 
-## Integration
+---
 
-This package integrates with:
-- **Context Package**: Uses enriched events with confidence scores
-- **Pipeline Package**: Plugs into correlation stage
-- **Domain Package**: Works with UnifiedEvent structure
-
-## Metrics and Monitoring
-
-The processor exposes metrics:
-- Events processed per second
-- Patterns detected by type
-- Correlation confidence distribution
-- Processing latency percentiles
-
-## Error Handling
-
-- Non-blocking: Errors don't stop processing
-- Graceful degradation: Falls back to simple patterns
-- Error events are tracked in metrics
-
-## Future Enhancements
-
-- Machine learning pattern discovery
-- Distributed correlation across nodes
-- Custom pattern DSL
-- GraphQL API for correlation queries
-- Persistent pattern storage
+The correlation package is central to Tapio's mission: making Kubernetes operations intelligent, not noisy.

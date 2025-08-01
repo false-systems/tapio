@@ -235,14 +235,14 @@ func (p *EventPublisher) PublishRawEvent(ctx context.Context, event collectors.R
 	msg.Header.Set("Timestamp", event.Timestamp.Format(time.RFC3339Nano))
 
 	// Add trace context if present
-	if traceID := event.Metadata["trace_id"]; traceID != "" {
-		msg.Header.Set("Trace-ID", traceID)
+	if event.TraceID != "" {
+		msg.Header.Set("Trace-ID", event.TraceID)
 	}
-	if spanID := event.Metadata["span_id"]; spanID != "" {
-		msg.Header.Set("Span-ID", spanID)
+	if event.SpanID != "" {
+		msg.Header.Set("Span-ID", event.SpanID)
 	}
 
-	// Publish
+	// Publish to main subject
 	if p.config.AsyncPublish {
 		_, err = p.js.PublishMsgAsync(msg)
 	} else {
@@ -251,6 +251,23 @@ func (p *EventPublisher) PublishRawEvent(ctx context.Context, event collectors.R
 
 	if err != nil {
 		return fmt.Errorf("failed to publish event: %w", err)
+	}
+
+	// Also publish to trace subject for correlation if we have a trace ID
+	if event.TraceID != "" {
+		traceSubject := p.generateTraceSubject(event.TraceID)
+		traceMsg := &natsgo.Msg{
+			Subject: traceSubject,
+			Data:    data,
+			Header:  msg.Header, // Copy headers
+		}
+		
+		// Publish to trace subject (don't fail if this fails)
+		if p.config.AsyncPublish {
+			p.js.PublishMsgAsync(traceMsg)
+		} else {
+			p.js.PublishMsg(traceMsg, natsgo.Context(ctx))
+		}
 	}
 
 	return nil
@@ -317,6 +334,23 @@ func (p *EventPublisher) PublishUnifiedEvent(ctx context.Context, event *domain.
 		return fmt.Errorf("failed to publish event: %w", err)
 	}
 
+	// Also publish to trace subject for correlation if we have a trace ID
+	if event.TraceContext != nil && event.TraceContext.TraceID != "" {
+		traceSubject := p.generateTraceSubject(event.TraceContext.TraceID)
+		traceMsg := &natsgo.Msg{
+			Subject: traceSubject,
+			Data:    data,
+			Header:  msg.Header, // Copy headers
+		}
+		
+		// Publish to trace subject (don't fail if this fails)
+		if p.config.AsyncPublish {
+			p.js.PublishMsgAsync(traceMsg)
+		} else {
+			p.js.PublishMsg(traceMsg, natsgo.Context(ctx))
+		}
+	}
+
 	return nil
 }
 
@@ -341,6 +375,16 @@ func (p *EventPublisher) generateRawEventSubject(event collectors.RawEvent) stri
 	}
 
 	return strings.Join(parts, ".")
+}
+
+// generateTraceSubject creates subject for trace-based routing
+func (p *EventPublisher) generateTraceSubject(traceID string) string {
+	prefix := "traces"
+	if strings.HasPrefix(p.config.StreamName, "TEST_") {
+		basePrefix := strings.ToLower(strings.ReplaceAll(p.config.StreamName, "_", "."))
+		prefix = basePrefix + ".traces"
+	}
+	return fmt.Sprintf("%s.%s", prefix, traceID)
 }
 
 // generateUnifiedEventSubjects creates multi-dimensional subjects

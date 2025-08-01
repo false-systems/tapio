@@ -938,10 +938,10 @@ func (st *SemanticOTELTracer) addUnifiedContextAttributes(span trace.Span, event
 	if event.Impact != nil {
 		span.SetAttributes(
 			attribute.String("impact.severity", event.Impact.Severity),
-			attribute.Float64("impact.business", event.Impact.BusinessImpact),
-			attribute.Bool("impact.customer_facing", event.Impact.CustomerFacing),
-			attribute.Bool("impact.revenue_impacting", event.Impact.RevenueImpacting),
+			attribute.Float64("impact.infrastructure", event.Impact.InfrastructureImpact),
 			attribute.Bool("impact.slo_impact", event.Impact.SLOImpact),
+			attribute.Bool("impact.system_critical", event.Impact.SystemCritical),
+			attribute.Bool("impact.cascade_risk", event.Impact.CascadeRisk),
 		)
 	}
 }
@@ -1024,7 +1024,7 @@ func (st *SemanticOTELTracer) assessUnifiedGroupImpact(group *SemanticTraceGroup
 	for _, event := range group.UnifiedCausalChain {
 		// Use event's own impact assessment if available
 		if event.Impact != nil {
-			maxBusinessImpact = max(maxBusinessImpact, float32(event.Impact.BusinessImpact))
+			maxBusinessImpact = max(maxBusinessImpact, float32(event.Impact.InfrastructureImpact))
 
 			// Track affected services
 			for _, service := range event.Impact.AffectedServices {

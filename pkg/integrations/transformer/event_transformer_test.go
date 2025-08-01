@@ -372,9 +372,52 @@ func TestEventTransformer_ExtractOTELContext(t *testing.T) {
 		},
 	}
 
+	// Add test cases for new TraceID/SpanID fields
+	testsWithFields := []struct {
+		name     string
+		traceID  string
+		spanID   string
+		metadata map[string]string
+		expected *domain.TraceContext
+	}{
+		{
+			name:    "TraceID and SpanID from fields",
+			traceID: "field-trace-123",
+			spanID:  "field-span-456",
+			metadata: map[string]string{
+				"parent_span_id": "parent-789",
+			},
+			expected: &domain.TraceContext{
+				TraceID:      "field-trace-123",
+				SpanID:       "field-span-456",
+				ParentSpanID: "parent-789",
+				Baggage:      map[string]string{},
+			},
+		},
+		{
+			name:    "Fields override metadata",
+			traceID: "field-trace",
+			spanID:  "field-span",
+			metadata: map[string]string{
+				"trace_id": "metadata-trace",
+				"span_id":  "metadata-span",
+			},
+			expected: &domain.TraceContext{
+				TraceID: "field-trace",
+				SpanID:  "field-span",
+				Baggage: map[string]string{},
+			},
+		},
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := transformer.extractOTELContext(tt.metadata)
+			// Create a RawEvent with the metadata
+			rawEvent := collectors.RawEvent{
+				Type:     "test",
+				Metadata: tt.metadata,
+			}
+			ctx := transformer.extractOTELContext(rawEvent)
 
 			if tt.expected == nil {
 				assert.Nil(t, ctx)
@@ -386,6 +429,26 @@ func TestEventTransformer_ExtractOTELContext(t *testing.T) {
 			assert.Equal(t, tt.expected.SpanID, ctx.SpanID)
 			assert.Equal(t, tt.expected.ParentSpanID, ctx.ParentSpanID)
 			assert.Equal(t, tt.expected.TraceState, ctx.TraceState)
+			assert.Equal(t, tt.expected.Baggage, ctx.Baggage)
+		})
+	}
+
+	// Test new TraceID/SpanID fields
+	for _, tt := range testsWithFields {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a RawEvent with both fields and metadata
+			rawEvent := collectors.RawEvent{
+				Type:     "test",
+				TraceID:  tt.traceID,
+				SpanID:   tt.spanID,
+				Metadata: tt.metadata,
+			}
+			ctx := transformer.extractOTELContext(rawEvent)
+
+			require.NotNil(t, ctx)
+			assert.Equal(t, tt.expected.TraceID, ctx.TraceID)
+			assert.Equal(t, tt.expected.SpanID, ctx.SpanID)
+			assert.Equal(t, tt.expected.ParentSpanID, ctx.ParentSpanID)
 			assert.Equal(t, tt.expected.Baggage, ctx.Baggage)
 		})
 	}

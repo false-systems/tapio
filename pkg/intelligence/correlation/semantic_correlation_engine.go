@@ -855,8 +855,8 @@ func (sce *SemanticCorrelationEngine) convertDomainToUnifiedEvent(de *domain.Eve
 	}
 
 	ue.Impact = &domain.ImpactContext{
-		Severity:       severity,
-		BusinessImpact: businessImpact,
+		Severity:             severity,
+		InfrastructureImpact: businessImpact,
 	}
 
 	// Extract layer-specific data from payload

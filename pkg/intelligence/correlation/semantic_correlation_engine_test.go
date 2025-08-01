@@ -88,8 +88,8 @@ func createTestUnifiedEvent(id string, eventType string) *domain.UnifiedEvent {
 			Namespace: "test-ns",
 		},
 		Impact: &domain.ImpactContext{
-			Severity:       "medium",
-			BusinessImpact: 0.5,
+			Severity:             "medium",
+			InfrastructureImpact: 0.5,
 		},
 		Semantic: &domain.SemanticContext{
 			Confidence: 0.8,

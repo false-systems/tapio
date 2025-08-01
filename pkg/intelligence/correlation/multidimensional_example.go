@@ -151,11 +151,11 @@ func MultiDimensionalCorrelationDemo() {
 				Domain:   "orders",
 			},
 			Impact: &domain.ImpactContext{
-				Severity:         "high",
-				BusinessImpact:   0.8,
-				CustomerFacing:   true,
-				RevenueImpacting: true,
-				AffectedServices: []string{"order-service"},
+				Severity:             "high",
+				InfrastructureImpact: 0.8,
+				SLOImpact:           true,
+				SystemCritical:      true,
+				AffectedServices:    []string{"order-service"},
 			},
 		}
 
@@ -249,12 +249,13 @@ func MultiDimensionalCorrelationDemo() {
 			Domain:   "customer-facing",
 		},
 		Impact: &domain.ImpactContext{
-			Severity:         "critical",
-			BusinessImpact:   0.95,
-			CustomerFacing:   true,
-			RevenueImpacting: true,
-			AffectedUsers:    1250,
-			AffectedServices: []string{"frontend", "order-service", "payment-service"},
+			Severity:             "critical",
+			InfrastructureImpact: 0.95,
+			SLOImpact:           true,
+			SystemCritical:      true,
+			CascadeRisk:         true,
+			AffectedComponents:  3,
+			AffectedServices:    []string{"frontend", "order-service", "payment-service"},
 		},
 	}
 
@@ -341,7 +342,7 @@ func printResults(event string, results []*MultiDimCorrelationResult) {
 		if result.Impact != nil {
 			fmt.Printf("\nImpact Analysis:\n")
 			fmt.Printf("  Severity: %s\n", result.Impact.Severity)
-			fmt.Printf("  Business Impact: %.2f\n", result.Impact.BusinessImpact)
+			fmt.Printf("  Infrastructure Impact: %.2f\n", result.Impact.BusinessImpact)
 			fmt.Printf("  Affected Services: %v\n", result.Impact.ServiceImpact)
 			if result.Impact.UserImpact > 0 {
 				fmt.Printf("  Users Affected: %d\n", result.Impact.UserImpact)
