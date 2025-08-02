@@ -9,7 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/performance"
+	"github.com/yairfalse/tapio/pkg/domain/performance"
 )
 
 // RawEventPerformanceConfig holds configuration for the raw event performance adapter
@@ -148,7 +148,7 @@ func (a *RawEventPerformanceAdapter) Submit(event *collectors.RawEvent) error {
 
 	// Serialize event for ring buffer
 	data := a.serializeEvent(event)
-	
+
 	// Try to put in buffer
 	if err := a.buffer.Put(unsafe.Pointer(&data)); err != nil {
 		a.eventsDropped.Add(1)
@@ -298,7 +298,7 @@ func (a *RawEventPerformanceAdapter) collectMetrics() {
 // serializeEvent converts RawEvent to bytes for ring buffer storage
 func (a *RawEventPerformanceAdapter) serializeEvent(event *collectors.RawEvent) []byte {
 	// Simple serialization: timestamp(8) + type_len(2) + type + data_len(4) + data + metadata_len(2) + metadata + traceid_len(1) + traceid + spanid_len(1) + spanid
-	
+
 	// Calculate total size
 	typeLen := len(event.Type)
 	dataLen := len(event.Data)
@@ -308,14 +308,14 @@ func (a *RawEventPerformanceAdapter) serializeEvent(event *collectors.RawEvent) 
 	}
 	traceLen := len(event.TraceID)
 	spanLen := len(event.SpanID)
-	
+
 	totalSize := 8 + 2 + typeLen + 4 + dataLen + 2 + metadataSize + 1 + traceLen + 1 + spanLen
-	
+
 	// Get buffer from pool
 	buf := a.bytePool.Get(totalSize)
-	
+
 	offset := 0
-	
+
 	// Write timestamp
 	ts := event.Timestamp.UnixNano()
 	buf[offset] = byte(ts)
@@ -327,14 +327,14 @@ func (a *RawEventPerformanceAdapter) serializeEvent(event *collectors.RawEvent) 
 	buf[offset+6] = byte(ts >> 48)
 	buf[offset+7] = byte(ts >> 56)
 	offset += 8
-	
+
 	// Write type
 	buf[offset] = byte(typeLen)
 	buf[offset+1] = byte(typeLen >> 8)
 	offset += 2
 	copy(buf[offset:], event.Type)
 	offset += typeLen
-	
+
 	// Write data
 	buf[offset] = byte(dataLen)
 	buf[offset+1] = byte(dataLen >> 8)
@@ -343,13 +343,13 @@ func (a *RawEventPerformanceAdapter) serializeEvent(event *collectors.RawEvent) 
 	offset += 4
 	copy(buf[offset:], event.Data)
 	offset += dataLen
-	
+
 	// Write metadata count
 	metadataCount := len(event.Metadata)
 	buf[offset] = byte(metadataCount)
 	buf[offset+1] = byte(metadataCount >> 8)
 	offset += 2
-	
+
 	// Write metadata entries
 	for k, v := range event.Metadata {
 		kLen := len(k)
@@ -363,7 +363,7 @@ func (a *RawEventPerformanceAdapter) serializeEvent(event *collectors.RawEvent) 
 		copy(buf[offset:], v)
 		offset += vLen
 	}
-	
+
 	// Write trace ID
 	buf[offset] = byte(traceLen)
 	offset++
@@ -371,14 +371,14 @@ func (a *RawEventPerformanceAdapter) serializeEvent(event *collectors.RawEvent) 
 		copy(buf[offset:], event.TraceID)
 		offset += traceLen
 	}
-	
+
 	// Write span ID
 	buf[offset] = byte(spanLen)
 	offset++
 	if spanLen > 0 {
 		copy(buf[offset:], event.SpanID)
 	}
-	
+
 	return buf[:totalSize]
 }
 
@@ -387,7 +387,7 @@ func (a *RawEventPerformanceAdapter) deserializeEvent(data []byte) *collectors.R
 	if len(data) < 8 {
 		return nil
 	}
-	
+
 	// Get event from pool
 	var event *collectors.RawEvent
 	if a.config.EnableZeroCopy {
@@ -398,9 +398,9 @@ func (a *RawEventPerformanceAdapter) deserializeEvent(data []byte) *collectors.R
 			Metadata: make(map[string]string),
 		}
 	}
-	
+
 	offset := 0
-	
+
 	// Read timestamp
 	ts := int64(data[offset]) |
 		int64(data[offset+1])<<8 |
@@ -412,13 +412,13 @@ func (a *RawEventPerformanceAdapter) deserializeEvent(data []byte) *collectors.R
 		int64(data[offset+7])<<56
 	event.Timestamp = time.Unix(0, ts)
 	offset += 8
-	
+
 	// Read type
 	typeLen := int(data[offset]) | int(data[offset+1])<<8
 	offset += 2
 	event.Type = string(data[offset : offset+typeLen])
 	offset += typeLen
-	
+
 	// Read data
 	dataLen := int(data[offset]) |
 		int(data[offset+1])<<8 |
@@ -428,25 +428,25 @@ func (a *RawEventPerformanceAdapter) deserializeEvent(data []byte) *collectors.R
 	event.Data = make([]byte, dataLen)
 	copy(event.Data, data[offset:offset+dataLen])
 	offset += dataLen
-	
+
 	// Read metadata
 	metadataCount := int(data[offset]) | int(data[offset+1])<<8
 	offset += 2
-	
+
 	for i := 0; i < metadataCount; i++ {
 		kLen := int(data[offset])
 		offset++
 		key := string(data[offset : offset+kLen])
 		offset += kLen
-		
+
 		vLen := int(data[offset])
 		offset++
 		value := string(data[offset : offset+vLen])
 		offset += vLen
-		
+
 		event.Metadata[key] = value
 	}
-	
+
 	// Read trace ID
 	traceLen := int(data[offset])
 	offset++
@@ -454,13 +454,13 @@ func (a *RawEventPerformanceAdapter) deserializeEvent(data []byte) *collectors.R
 		event.TraceID = string(data[offset : offset+traceLen])
 		offset += traceLen
 	}
-	
+
 	// Read span ID
 	spanLen := int(data[offset])
 	offset++
 	if spanLen > 0 {
 		event.SpanID = string(data[offset : offset+spanLen])
 	}
-	
+
 	return event
 }

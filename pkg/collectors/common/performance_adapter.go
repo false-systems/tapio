@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/performance"
+	"github.com/yairfalse/tapio/pkg/domain/performance"
 )
 
 // PerformanceConfig holds configuration for the performance adapter

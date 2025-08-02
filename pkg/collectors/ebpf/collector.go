@@ -94,8 +94,8 @@ type Collector struct {
 	cancel        context.CancelFunc
 	healthy       bool
 	mu            sync.RWMutex
-	podTraceMap   map[string]string // Map pod UID to trace ID
-	natsPublisher *NATSPublisher    // NATS publisher for events
+	podTraceMap   map[string]string                  // Map pod UID to trace ID
+	natsPublisher *NATSPublisher                     // NATS publisher for events
 	perfAdapter   *common.RawEventPerformanceAdapter // Performance adapter
 	stats         CollectorStats
 }
@@ -121,10 +121,10 @@ func NewCollector(name string) (*Collector, error) {
 func NewCollectorWithConfig(config *Config) (*Collector, error) {
 	// Create performance adapter configuration
 	perfConfig := common.DefaultRawEventPerformanceConfig("ebpf-" + config.Name)
-	perfConfig.BufferSize = 32768 // Very large buffer for high-volume kernel events
-	perfConfig.BatchSize = 500    // Process more events per batch
+	perfConfig.BufferSize = 32768                   // Very large buffer for high-volume kernel events
+	perfConfig.BatchSize = 500                      // Process more events per batch
 	perfConfig.BatchTimeout = 50 * time.Millisecond // Faster processing for kernel events
-	
+
 	// Create performance adapter
 	perfAdapter, err := common.NewRawEventPerformanceAdapter(perfConfig)
 	if err != nil {
@@ -244,7 +244,7 @@ func (c *Collector) Start(ctx context.Context) error {
 func (c *Collector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -481,7 +481,6 @@ func (c *Collector) processEvents() {
 			if err := c.natsPublisher.PublishEvent(unifiedEvent); err != nil {
 				// Log error but continue processing
 			}
-		}
 		}
 	}
 }
@@ -818,7 +817,7 @@ func (c *Collector) Health() (bool, map[string]interface{}) {
 }
 
 // Statistics returns collector statistics
-func (c *Collector) Statistics() map[string]interface{}) {
+func (c *Collector) Statistics() map[string]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
