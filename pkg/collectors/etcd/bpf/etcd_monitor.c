@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Minimal etcd eBPF monitor - raw syscall monitoring only
+// Minimal etcd eBPF monitor - CO-RE enabled raw syscall monitoring
 
 #include "headers/vmlinux.h"
 #include <bpf/bpf_helpers.h>
@@ -36,11 +36,14 @@ struct {
     __uint(max_entries, 256 * 1024); // 256KB
 } events SEC(".maps");
 
-// Helper to check if process might be etcd (basic check)
+// Helper to check if process might be etcd (CO-RE enabled)
 static __always_inline bool is_etcd_like(struct task_struct *task)
 {
     char comm[16];
-    bpf_probe_read_kernel_str(&comm, sizeof(comm), &task->comm);
+    // Use CO-RE field access for task->comm
+    int ret = bpf_core_read_str(&comm, sizeof(comm), &task->comm);
+    if (ret < 0)
+        return false;
     
     // Very basic check - just see if it contains "etcd"
     return (comm[0] == 'e' && comm[1] == 't' && comm[2] == 'c' && comm[3] == 'd');

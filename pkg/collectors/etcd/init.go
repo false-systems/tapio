@@ -20,8 +20,28 @@ func NewCollectorFromConfig(config map[string]interface{}) (collectors.Collector
 		name = n
 	}
 
-	// Create minimal etcd collector
-	collector, err := NewCollector(name)
+	// Parse etcd config
+	etcdConfig := Config{}
+
+	// Parse endpoints
+	if endpoints, ok := config["endpoints"].([]interface{}); ok {
+		for _, ep := range endpoints {
+			if epStr, ok := ep.(string); ok {
+				etcdConfig.Endpoints = append(etcdConfig.Endpoints, epStr)
+			}
+		}
+	}
+
+	// Parse authentication
+	if username, ok := config["username"].(string); ok {
+		etcdConfig.Username = username
+	}
+	if password, ok := config["password"].(string); ok {
+		etcdConfig.Password = password
+	}
+
+	// Create etcd collector with config
+	collector, err := NewCollector(name, etcdConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create etcd collector: %w", err)
 	}
