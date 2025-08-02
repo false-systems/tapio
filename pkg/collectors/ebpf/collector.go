@@ -12,7 +12,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/common"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
@@ -96,7 +95,7 @@ type Collector struct {
 	mu            sync.RWMutex
 	podTraceMap   map[string]string                  // Map pod UID to trace ID
 	natsPublisher *NATSPublisher                     // NATS publisher for events
-	perfAdapter   *common.RawEventPerformanceAdapter // Performance adapter
+	// Removed performance adapter - using channels directly
 	stats         CollectorStats
 }
 
@@ -119,24 +118,13 @@ func NewCollector(name string) (*Collector, error) {
 
 // NewCollectorWithConfig creates a new eBPF collector with config
 func NewCollectorWithConfig(config *Config) (*Collector, error) {
-	// Create performance adapter configuration
-	perfConfig := common.DefaultRawEventPerformanceConfig("ebpf-" + config.Name)
-	perfConfig.BufferSize = 32768                   // Very large buffer for high-volume kernel events
-	perfConfig.BatchSize = 500                      // Process more events per batch
-	perfConfig.BatchTimeout = 50 * time.Millisecond // Faster processing for kernel events
-
-	// Create performance adapter
-	perfAdapter, err := common.NewRawEventPerformanceAdapter(perfConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create performance adapter: %w", err)
-	}
+	// Removed performance adapter - using direct channels is simpler
 
 	c := &Collector{
 		name:        config.Name,
-		events:      make(chan collectors.RawEvent, 1000), // Keep fallback channel
+		events:      make(chan collectors.RawEvent, 10000), // Large buffer for kernel events
 		healthy:     true,
 		podTraceMap: make(map[string]string),
-		perfAdapter: perfAdapter,
 	}
 
 	// Initialize NATS publisher if URL provided

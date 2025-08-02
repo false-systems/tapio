@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/common"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -40,7 +39,6 @@ type Collector struct {
 	mu          sync.RWMutex
 	ebpfState   interface{} // Platform-specific eBPF state
 	stats       CollectorStats
-	perfAdapter *common.RawEventPerformanceAdapter // Performance adapter
 }
 
 // CollectorStats tracks collector statistics
@@ -57,23 +55,11 @@ func NewCollector(name string, config Config) (*Collector, error) {
 		config.Endpoints = []string{"localhost:2379"}
 	}
 
-	// Create performance adapter configuration
-	perfConfig := common.DefaultRawEventPerformanceConfig("etcd-" + name)
-	perfConfig.BufferSize = 16384 // Larger buffer for etcd events
-	perfConfig.BatchSize = 200    // Process more events per batch
-
-	// Create performance adapter
-	perfAdapter, err := common.NewRawEventPerformanceAdapter(perfConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create performance adapter: %w", err)
-	}
-
 	return &Collector{
-		name:        name,
-		config:      config,
-		events:      make(chan collectors.RawEvent, 1000), // Keep fallback channel
-		healthy:     true,
-		perfAdapter: perfAdapter,
+		name:    name,
+		config:  config,
+		events:  make(chan collectors.RawEvent, 10000), // Large buffer
+		healthy: true,
 	}, nil
 }
 
@@ -122,12 +108,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
-	// Start performance adapter
-	if err := c.perfAdapter.Start(); err != nil {
-		c.client.Close()
-		c.client = nil
-		return fmt.Errorf("failed to start performance adapter: %w", err)
-	}
+	// Ready to start processing
 
 	// Start watching K8s registry
 	go c.watchRegistry()
@@ -161,10 +142,7 @@ func (c *Collector) Stop() error {
 	// Stop eBPF if running
 	c.stopEBPF()
 
-	// Stop performance adapter
-	if c.perfAdapter != nil {
-		c.perfAdapter.Stop()
-	}
+	// Cleanup complete
 
 	// Close events channel
 	if c.events != nil {
@@ -178,11 +156,6 @@ func (c *Collector) Stop() error {
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan collectors.RawEvent {
-	// Return performance adapter's output channel if available
-	if c.perfAdapter != nil {
-		return c.perfAdapter.Events()
-	}
-	// Fallback to direct channel
 	return c.events
 }
 
@@ -250,34 +223,20 @@ func (c *Collector) processEtcdEvent(event *clientv3.Event) {
 	rawEvent.Metadata["resource_type"] = resourceType
 	rawEvent.Metadata["operation"] = operation
 
-	// Submit through performance adapter if available
-	if c.perfAdapter != nil {
-		if err := c.perfAdapter.Submit(&rawEvent); err != nil {
-			c.mu.Lock()
-			c.stats.EventsDropped++
-			c.mu.Unlock()
-		} else {
-			c.mu.Lock()
-			c.stats.EventsCollected++
-			c.stats.LastEventTime = time.Now()
-			c.mu.Unlock()
-		}
-	} else {
-		// Fallback to direct channel send
-		select {
-		case c.events <- rawEvent:
-			c.mu.Lock()
-			c.stats.EventsCollected++
-			c.stats.LastEventTime = time.Now()
-			c.mu.Unlock()
-		case <-c.ctx.Done():
-			return
-		default:
-			// Buffer full, drop event
-			c.mu.Lock()
-			c.stats.EventsDropped++
-			c.mu.Unlock()
-		}
+	// Send event
+	select {
+	case c.events <- rawEvent:
+		c.mu.Lock()
+		c.stats.EventsCollected++
+		c.stats.LastEventTime = time.Now()
+		c.mu.Unlock()
+	case <-c.ctx.Done():
+		return
+	default:
+		// Buffer full, drop event
+		c.mu.Lock()
+		c.stats.EventsDropped++
+		c.mu.Unlock()
 	}
 }
 
@@ -340,15 +299,7 @@ func (c *Collector) Statistics() map[string]interface{} {
 		"last_event_time":  c.stats.LastEventTime,
 	}
 
-	// Add performance metrics if available
-	if c.perfAdapter != nil {
-		perfMetrics := c.perfAdapter.GetMetrics()
-		stats["perf_buffer_size"] = perfMetrics.BufferSize
-		stats["perf_buffer_capacity"] = perfMetrics.BufferCapacity
-		stats["perf_buffer_utilization"] = perfMetrics.BufferUtilization
-		stats["perf_batches_processed"] = perfMetrics.BatchesProcessed
-		stats["perf_pool_in_use"] = perfMetrics.PoolInUse
-	}
+	// Ready to return stats
 
 	return stats
 }

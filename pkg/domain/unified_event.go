@@ -77,8 +77,7 @@ type UnifiedEvent struct {
 	Patterns     []PatternMatch   `json:"patterns,omitempty"`
 	Anomalies    []AnomalyRef     `json:"anomalies,omitempty"`
 
-	// Collector metadata
-	CollectorMetadata *CollectorMetadata `json:"collector_metadata,omitempty"`
+	// Collector metadata removed - was over-engineered
 
 	// Original raw data (for debugging/replay)
 	RawData []byte `json:"raw_data,omitempty"`
@@ -135,8 +134,7 @@ type KernelData struct {
 	CPUCore         int               `json:"cpu_core,omitempty"`
 	BPFProgram      string            `json:"bpf_program,omitempty"`
 	BPFMapStats     map[string]int    `json:"bpf_map_stats,omitempty"`
-	KprobeDetails   *KprobeDetails    `json:"kprobe_details,omitempty"`
-	SecurityContext *SecurityContext  `json:"security_context,omitempty"`
+	// Removed kprobe and security details - over-engineered
 }
 
 // NetworkData for network events (enhanced with CNI/network policy context)
@@ -154,8 +152,7 @@ type NetworkData struct {
 	Method         string             `json:"method,omitempty"`      // HTTP/gRPC method
 	Path           string             `json:"path,omitempty"`        // HTTP/gRPC path
 	Headers        map[string]string  `json:"headers,omitempty"`
-	NetworkPolicy  *NetworkPolicyInfo `json:"network_policy,omitempty"`
-	IPTablesRules  []IPTablesRule     `json:"iptables_rules,omitempty"`
+	// Removed network policy details - over-engineered
 	ContainerID    string             `json:"container_id,omitempty"`
 	InterfaceName  string             `json:"interface_name,omitempty"`
 	VirtualNetwork string             `json:"virtual_network,omitempty"`
@@ -187,8 +184,7 @@ type KubernetesData struct {
 	Labels           map[string]string   `json:"labels,omitempty"`
 	Annotations      map[string]string   `json:"annotations,omitempty"`
 	ClusterName      string              `json:"cluster_name,omitempty"`
-	CustomResource   *CustomResourceInfo `json:"custom_resource,omitempty"`
-	AdmissionWebhook *WebhookInfo        `json:"admission_webhook,omitempty"`
+	// Removed CRD and webhook details - over-engineered
 }
 
 // MetricsData for time-series metrics

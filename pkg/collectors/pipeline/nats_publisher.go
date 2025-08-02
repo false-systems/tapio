@@ -24,7 +24,7 @@ func NewNATSPublisher(logger *zap.Logger, url, subjectBase string) (*NATSPublish
 		// Return nil publisher for testing
 		return nil, nil
 	}
-	
+
 	// Connect with retry
 	nc, err := nats.Connect(url,
 		nats.RetryOnFailedConnect(true),
