@@ -10,9 +10,9 @@ import (
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
-	"go.uber.org/zap"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.uber.org/zap"
 )
 
 // NetworkInfo represents network connection information
@@ -112,7 +112,7 @@ func NewCollectorWithConfig(config *Config) (*Collector, error) {
 		healthy:     true,
 		podTraceMap: make(map[string]string),
 	}
-	
+
 	// Initialize NATS publisher if URL provided
 	if config.NATSURL != "" && config.Logger != nil {
 		publisher, err := NewNATSPublisher(config.NATSURL, config.Logger)
@@ -123,7 +123,7 @@ func NewCollectorWithConfig(config *Config) (*Collector, error) {
 			c.natsPublisher = publisher
 		}
 	}
-	
+
 	return c, nil
 }
 
@@ -733,30 +733,30 @@ func (c *Collector) convertToUnifiedEvent(raw *collectors.RawEvent, kernelEvent 
 		Type:      "ebpf",
 		Source:    c.name,
 		Severity:  c.getSeverityForEventType(kernelEvent.EventType),
-		
+
 		// Add trace context
 		TraceContext: &domain.TraceContext{
 			TraceID: raw.TraceID,
 			SpanID:  raw.SpanID,
 			Sampled: true,
 		},
-		
+
 		// Kernel data
 		Kernel: &domain.KernelData{
 			PID:  kernelEvent.PID,
 			TID:  kernelEvent.TID,
 			Comm: c.nullTerminatedString(kernelEvent.Comm[:]),
 		},
-		
+
 		// Copy metadata to attributes
 		Attributes: make(map[string]interface{}),
 	}
-	
+
 	// Copy all metadata to attributes
 	for k, v := range raw.Metadata {
 		event.Attributes[k] = v
 	}
-	
+
 	// Add K8s context if we have pod info
 	if podUID := c.nullTerminatedString(kernelEvent.PodUID[:]); podUID != "" {
 		event.K8sContext = &domain.K8sContext{}
@@ -765,7 +765,7 @@ func (c *Collector) convertToUnifiedEvent(raw *collectors.RawEvent, kernelEvent 
 			event.K8sContext.Namespace = c.nullTerminatedString(podInfo.Namespace[:])
 		}
 	}
-	
+
 	// Add entity context
 	if event.K8sContext != nil && event.K8sContext.Name != "" {
 		event.Entity = &domain.EntityContext{
@@ -774,10 +774,10 @@ func (c *Collector) convertToUnifiedEvent(raw *collectors.RawEvent, kernelEvent 
 			Namespace: event.K8sContext.Namespace,
 		}
 	}
-	
+
 	// Add correlation hints
 	event.CorrelationHints = []string{raw.TraceID}
-	
+
 	return event
 }
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -45,23 +44,20 @@ func main() {
 	}
 
 	// 2. Create the correlation system with all components
-	correlationConfig := &correlation.SimpleCorrelationConfig{
-		K8sLoader:            k8sLoader,
-		CorrelationWindow:    5 * time.Minute,
-		MinEventsForPattern:  2,
-		EnableK8sCorrelation: true,
-		EnableTemporal:       true,
-		EnableSequence:       true,
-		EnablePatterns:       true,
+	correlationConfig := correlation.SimpleSystemConfig{
+		EventBufferSize:     1000,
+		MaxConcurrency:      10,
+		EnableK8sNative:     true,
+		EnableTemporal:      true,
+		EnableSequence:      true,
+		ProcessingTimeout:   30 * time.Second,
+		CleanupInterval:     5 * time.Minute,
 	}
 
-	correlationSystem, err := correlation.NewSimpleCorrelationSystem(logger, correlationConfig)
-	if err != nil {
-		logger.Fatal("Failed to create correlation system", zap.Error(err))
-	}
+	correlationSystem := correlation.NewSimpleCorrelationSystem(logger, correlationConfig, clientset)
 
 	// Start correlation system
-	if err := correlationSystem.Start(ctx); err != nil {
+	if err := correlationSystem.Start(); err != nil {
 		logger.Fatal("Failed to start correlation system", zap.Error(err))
 	}
 
