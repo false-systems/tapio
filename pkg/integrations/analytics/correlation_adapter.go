@@ -201,8 +201,8 @@ func (a *AnalyticsCorrelationAdapter) enhanceDescription(insight domain.Insight,
 
 	for _, event := range events {
 		if event.Impact != nil {
-			if event.Impact.BusinessImpact > maxImpact {
-				maxImpact = event.Impact.BusinessImpact
+			if event.Impact.InfrastructureImpact > maxImpact {
+				maxImpact = event.Impact.InfrastructureImpact
 			}
 			for _, svc := range event.Impact.AffectedServices {
 				serviceMap[svc] = true

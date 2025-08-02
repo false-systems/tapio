@@ -195,7 +195,7 @@ func (e *K8sContextExtractor) determineExtractionDepth(event *domain.UnifiedEven
 	}
 
 	// Events with high impact get medium extraction
-	if event.Impact != nil && event.Impact.BusinessImpact > 0.7 {
+	if event.Impact != nil && event.Impact.InfrastructureImpact > 0.7 {
 		return Medium
 	}
 

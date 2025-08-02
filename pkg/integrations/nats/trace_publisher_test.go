@@ -46,7 +46,7 @@ func TestEventPublisher_TraceRouting(t *testing.T) {
 	// Test event with TraceID and SpanID
 	traceID := "abc123def456"
 	spanID := "span789"
-	
+
 	event := collectors.RawEvent{
 		Type:      "kubeapi",
 		TraceID:   traceID,
@@ -70,7 +70,7 @@ func TestEventPublisher_TraceRouting(t *testing.T) {
 	msg := msgs[0]
 	expectedTraceSubject := basePrefix + ".traces." + traceID
 	assert.Equal(t, expectedTraceSubject, msg.Subject)
-	
+
 	// Check headers
 	assert.Equal(t, traceID, msg.Header.Get("Trace-ID"))
 	assert.Equal(t, spanID, msg.Header.Get("Span-ID"))
@@ -110,7 +110,7 @@ func TestEventPublisher_UnifiedEventTraceRouting(t *testing.T) {
 	// Create unified event with trace context
 	traceID := "unified-trace-123"
 	spanID := "unified-span-456"
-	
+
 	event := &domain.UnifiedEvent{
 		ID:        "evt-123",
 		Type:      domain.EventTypeKubernetes,
@@ -141,7 +141,7 @@ func TestEventPublisher_UnifiedEventTraceRouting(t *testing.T) {
 	msg := msgs[0]
 	expectedTraceSubject := basePrefix + ".traces." + traceID
 	assert.Equal(t, expectedTraceSubject, msg.Subject)
-	
+
 	// Check headers
 	assert.Equal(t, traceID, msg.Header.Get("Trace-ID"))
 	assert.Equal(t, spanID, msg.Header.Get("Span-ID"))
@@ -180,7 +180,7 @@ func TestEventPublisher_MultipleEventsTraceCorrelation(t *testing.T) {
 
 	// Same trace ID for correlation
 	traceID := "correlation-trace-999"
-	
+
 	// Publish multiple events with same trace ID
 	events := []collectors.RawEvent{
 		{
@@ -217,7 +217,7 @@ func TestEventPublisher_MultipleEventsTraceCorrelation(t *testing.T) {
 
 	expectedTraceSubject := basePrefix + ".traces." + traceID
 	collectorTypes := make([]string, 0, 3)
-	
+
 	for _, msg := range msgs {
 		assert.Equal(t, expectedTraceSubject, msg.Subject)
 		assert.Equal(t, traceID, msg.Header.Get("Trace-ID"))

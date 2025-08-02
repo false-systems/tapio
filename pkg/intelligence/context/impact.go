@@ -48,10 +48,8 @@ func (ia *ImpactAnalyzer) AssessImpact(ue *domain.UnifiedEvent) *domain.ImpactCo
 	// Determine severity based on technical characteristics
 	impact.Severity = ia.determineSeverity(ue, impactScore)
 
-	// Set technical impact indicators (removing business assumptions)
-	impact.BusinessImpact = impactScore    // Rename this field to InfrastructureImpact in domain
-	impact.CustomerFacing = false          // Remove business assumptions
-	impact.RevenueImpacting = false        // Remove business assumptions
+	// Set technical impact indicators (infrastructure only)
+	impact.InfrastructureImpact = impactScore
 	impact.SLOImpact = ia.hasSLOImpact(ue) // Keep as this is technical
 
 	return impact

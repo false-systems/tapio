@@ -6,19 +6,19 @@ import (
 
 func TestGenerateTraceID(t *testing.T) {
 	traceID := GenerateTraceID()
-	
+
 	// Should be 32 characters (128 bits in hex)
 	if len(traceID) != 32 {
 		t.Errorf("Expected trace ID length 32, got %d", len(traceID))
 	}
-	
+
 	// Should be valid hex
 	for _, c := range traceID {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
 			t.Errorf("Invalid character in trace ID: %c", c)
 		}
 	}
-	
+
 	// Should be unique
 	traceID2 := GenerateTraceID()
 	if traceID == traceID2 {
@@ -28,12 +28,12 @@ func TestGenerateTraceID(t *testing.T) {
 
 func TestGenerateSpanID(t *testing.T) {
 	spanID := GenerateSpanID()
-	
+
 	// Should be 16 characters (64 bits in hex)
 	if len(spanID) != 16 {
 		t.Errorf("Expected span ID length 16, got %d", len(spanID))
 	}
-	
+
 	// Should be valid hex
 	for _, c := range spanID {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
@@ -44,10 +44,10 @@ func TestGenerateSpanID(t *testing.T) {
 
 func TestExtractTraceIDFromHeaders(t *testing.T) {
 	tests := []struct {
-		name           string
-		headers        map[string]string
-		expectedTrace  string
-		expectedSpan   string
+		name          string
+		headers       map[string]string
+		expectedTrace string
+		expectedSpan  string
 	}{
 		{
 			name: "valid traceparent header",
@@ -72,7 +72,7 @@ func TestExtractTraceIDFromHeaders(t *testing.T) {
 			expectedSpan:  "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			traceID, spanID := ExtractTraceIDFromHeaders(tt.headers)
@@ -88,10 +88,10 @@ func TestExtractTraceIDFromHeaders(t *testing.T) {
 
 func TestExtractTraceIDFromAnnotations(t *testing.T) {
 	tests := []struct {
-		name           string
-		annotations    map[string]string
-		expectedTrace  string
-		expectedSpan   string
+		name          string
+		annotations   map[string]string
+		expectedTrace string
+		expectedSpan  string
 	}{
 		{
 			name: "standard opentelemetry annotations",
@@ -118,7 +118,7 @@ func TestExtractTraceIDFromAnnotations(t *testing.T) {
 			expectedSpan:  "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			traceID, spanID := ExtractTraceIDFromAnnotations(tt.annotations)

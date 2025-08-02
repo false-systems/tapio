@@ -55,7 +55,7 @@ func main() {
 		select {
 		case event := <-collector.Events():
 			eventCount++
-			
+
 			fmt.Printf("📥 Raw Event #%d:\n", eventCount)
 			fmt.Printf("   Type: %s\n", event.Type)
 			fmt.Printf("   TraceID: %s\n", event.TraceID)
@@ -109,7 +109,7 @@ func main() {
 	fmt.Println("\n🔗 Correlation Analysis:")
 	fmt.Printf("📊 Total events processed: %d\n", eventCount)
 	fmt.Printf("📋 Unique traces: %d\n", len(traceGroups))
-	
+
 	for traceID, eventTypes := range traceGroups {
 		fmt.Printf("   Trace %s: %v\n", traceID[:8], eventTypes)
 	}

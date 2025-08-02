@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  namespace: tapio-system
+data:
+  nats.conf: |
+    port: 4222
+    monitor_port: 8222
+    
+    jetstream {
+      store_dir: /data
+      max_memory_store: 1G
+      max_file_store: 10G
+    }
+    
+    cluster {
+      name: tapio-nats
+      port: 6222
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: tapio-system
+  labels:
+    app: nats
+spec:
+  selector:
+    app: nats
+  ports:
+  - name: client
+    port: 4222
+    targetPort: 4222
+  - name: monitor
+    port: 8222
+    targetPort: 8222
+  - name: cluster
+    port: 6222
+    targetPort: 6222
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: tapio-system
+  labels:
+    app: nats
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      containers:
+      - name: nats
+        image: nats:2.10-alpine
+        ports:
+        - containerPort: 4222
+          name: client
+        - containerPort: 8222
+          name: monitor
+        - containerPort: 6222
+          name: cluster
+        command:
+        - nats-server
+        - --config
+        - /etc/nats-config/nats.conf
+        - -DV
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nats-config
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: nats-config
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi

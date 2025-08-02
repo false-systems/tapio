@@ -57,7 +57,7 @@ func (cs *ConfidenceScorer) Score(event *domain.UnifiedEvent) float64 {
 
 	// Boost score based on impact assessment
 	if event.Impact != nil {
-		if event.Impact.SLOImpact || event.Impact.CustomerFacing || event.Impact.RevenueImpacting {
+		if event.Impact.SLOImpact || event.Impact.SystemCritical || event.Impact.CascadeRisk {
 			score += 0.2 // High-impact events get higher confidence
 		}
 		// Critical severity

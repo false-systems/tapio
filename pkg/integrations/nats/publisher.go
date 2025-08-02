@@ -261,7 +261,7 @@ func (p *EventPublisher) PublishRawEvent(ctx context.Context, event collectors.R
 			Data:    data,
 			Header:  msg.Header, // Copy headers
 		}
-		
+
 		// Publish to trace subject (don't fail if this fails)
 		if p.config.AsyncPublish {
 			p.js.PublishMsgAsync(traceMsg)
@@ -342,7 +342,7 @@ func (p *EventPublisher) PublishUnifiedEvent(ctx context.Context, event *domain.
 			Data:    data,
 			Header:  msg.Header, // Copy headers
 		}
-		
+
 		// Publish to trace subject (don't fail if this fails)
 		if p.config.AsyncPublish {
 			p.js.PublishMsgAsync(traceMsg)

@@ -27,10 +27,10 @@ type NATSSubscriberConfig struct {
 	RawEventSubjects []string // e.g., ["events.raw.>"]
 
 	// Processing
-	BatchSize       int           // Events to process together
-	BatchTimeout    time.Duration // Max time to wait for batch
-	WorkerCount     int           // Concurrent correlation workers
-	MaxPending      int           // Max unprocessed messages
+	BatchSize    int           // Events to process together
+	BatchTimeout time.Duration // Max time to wait for batch
+	WorkerCount  int           // Concurrent correlation workers
+	MaxPending   int           // Max unprocessed messages
 
 	// Correlation
 	CorrelationWindow time.Duration // How long to collect related events
@@ -97,7 +97,7 @@ func NewNATSSubscriber(config *NATSSubscriberConfig, correlationEngine Correlati
 	}
 
 	// Connect to NATS
-	nc, err := natsgo.Connect(config.URL, 
+	nc, err := natsgo.Connect(config.URL,
 		natsgo.Name(config.Name),
 		natsgo.MaxReconnects(-1),
 		natsgo.ReconnectWait(2*time.Second))
@@ -167,14 +167,14 @@ func (s *NATSSubscriber) Stop() error {
 	}
 
 	s.logger.Info("Stopping NATS correlation subscriber...")
-	
+
 	s.cancel()
 	s.wg.Wait()
-	
+
 	close(s.rawEventCh)
 	close(s.unifiedEventCh)
 	close(s.resultsCh)
-	
+
 	s.nc.Close()
 	s.started = false
 
@@ -192,7 +192,7 @@ func (s *NATSSubscriber) startSubscriptions() error {
 	// Subscribe to trace subjects for correlation
 	for _, subject := range s.config.TraceSubjects {
 		consumerName := fmt.Sprintf("%s-trace-%d", s.config.Name, time.Now().UnixNano())
-		
+
 		_, err := s.js.Subscribe(subject, s.handleTraceMessage,
 			natsgo.Durable(consumerName),
 			natsgo.MaxDeliver(3),
@@ -210,7 +210,7 @@ func (s *NATSSubscriber) startSubscriptions() error {
 	// Subscribe to raw event subjects if configured
 	for _, subject := range s.config.RawEventSubjects {
 		consumerName := fmt.Sprintf("%s-raw-%d", s.config.Name, time.Now().UnixNano())
-		
+
 		_, err := s.js.Subscribe(subject, s.handleRawMessage,
 			natsgo.Durable(consumerName),
 			natsgo.MaxDeliver(3),
@@ -245,7 +245,7 @@ func (s *NATSSubscriber) handleTraceMessage(msg *natsgo.Msg) {
 			zap.String("trace_id", traceID),
 			zap.String("event_id", unifiedEvent.ID),
 			zap.String("source", unifiedEvent.Source))
-		
+
 		s.addEventToTrace(traceID, &unifiedEvent)
 		msg.Ack()
 		return
@@ -257,7 +257,7 @@ func (s *NATSSubscriber) handleTraceMessage(msg *natsgo.Msg) {
 		s.logger.Debug("Received raw event for trace",
 			zap.String("trace_id", traceID),
 			zap.String("type", rawEvent.Type))
-		
+
 		select {
 		case s.rawEventCh <- rawEvent:
 		case <-s.ctx.Done():
@@ -267,7 +267,7 @@ func (s *NATSSubscriber) handleTraceMessage(msg *natsgo.Msg) {
 		return
 	}
 
-	s.logger.Warn("Could not parse message data", 
+	s.logger.Warn("Could not parse message data",
 		zap.String("subject", msg.Subject))
 	msg.Ack()
 }
@@ -374,7 +374,7 @@ func (s *NATSSubscriber) addEventToTrace(traceID string, event *domain.UnifiedEv
 	defer s.traceMu.Unlock()
 
 	s.traceEvents[traceID] = append(s.traceEvents[traceID], event)
-	
+
 	s.logger.Debug("Added event to trace",
 		zap.String("trace_id", traceID),
 		zap.String("event_id", event.ID),
@@ -386,7 +386,7 @@ func (s *NATSSubscriber) startCorrelationScheduler() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		
+
 		ticker := time.NewTicker(s.config.CorrelationWindow / 2) // Check twice per window
 		defer ticker.Stop()
 
@@ -436,7 +436,7 @@ func (s *NATSSubscriber) processTraceGroups() {
 
 		// Correlate events in this trace
 		allResults := make([]*MultiDimCorrelationResult, 0)
-		
+
 		for _, event := range events {
 			results, err := s.correlationEngine.Process(s.ctx, event)
 			if err != nil {

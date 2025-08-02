@@ -41,11 +41,11 @@ func (cp *ContextProcessor) AssessImpact(ctx context.Context, event *domain.Unif
 	impactCtx := cp.impactAnalyzer.AssessImpact(event)
 	if impactCtx == nil {
 		return &interfaces.ImpactResult{
-			BusinessImpact:     0.0,
-			TechnicalSeverity:  "unknown",
-			CascadeRisk:        0.0,
-			AffectedServices:   []string{},
-			RecommendedActions: []string{},
+			InfrastructureImpact: 0.0,
+			TechnicalSeverity:    "unknown",
+			CascadeRisk:          0.0,
+			AffectedServices:     []string{},
+			RecommendedActions:   []string{},
 		}, nil
 	}
 
@@ -55,36 +55,36 @@ func (cp *ContextProcessor) AssessImpact(ctx context.Context, event *domain.Unif
 	if impactCtx.SLOImpact {
 		cascadeRisk += 0.3
 	}
-	if impactCtx.CustomerFacing {
-		cascadeRisk += 0.3
-	}
-	if impactCtx.RevenueImpacting {
+	if impactCtx.CascadeRisk {
 		cascadeRisk += 0.4
+	}
+	if impactCtx.SystemCritical {
+		cascadeRisk += 0.3
 	}
 
 	// Generate recommended actions based on impact assessment
 	recommendedActions := []string{}
-	if impactCtx.BusinessImpact > 0.8 {
+	if impactCtx.InfrastructureImpact > 0.8 {
 		recommendedActions = append(recommendedActions, "Escalate to on-call engineer")
 	}
 	if impactCtx.SLOImpact {
 		recommendedActions = append(recommendedActions, "Check SLA dashboard")
 	}
-	if impactCtx.CustomerFacing {
-		recommendedActions = append(recommendedActions, "Update status page")
+	if impactCtx.SystemCritical {
+		recommendedActions = append(recommendedActions, "Check system health metrics")
 	}
-	if impactCtx.RevenueImpacting {
-		recommendedActions = append(recommendedActions, "Notify business stakeholders")
+	if impactCtx.CascadeRisk {
+		recommendedActions = append(recommendedActions, "Monitor downstream services")
 	}
 	if len(recommendedActions) == 0 {
 		recommendedActions = append(recommendedActions, "Monitor for escalation")
 	}
 
 	return &interfaces.ImpactResult{
-		BusinessImpact:     impactCtx.BusinessImpact,
-		TechnicalSeverity:  impactCtx.Severity,
-		CascadeRisk:        cascadeRisk,
-		AffectedServices:   impactCtx.AffectedServices,
-		RecommendedActions: recommendedActions,
+		InfrastructureImpact: impactCtx.InfrastructureImpact,
+		TechnicalSeverity:    impactCtx.Severity,
+		CascadeRisk:          cascadeRisk,
+		AffectedServices:     impactCtx.AffectedServices,
+		RecommendedActions:   recommendedActions,
 	}, nil
 }

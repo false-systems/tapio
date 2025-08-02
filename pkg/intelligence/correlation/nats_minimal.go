@@ -40,7 +40,7 @@ func (m *MinimalMockEngine) Process(ctx context.Context, event *domain.UnifiedEv
 	if m.processFunc != nil {
 		return m.processFunc(ctx, event)
 	}
-	
+
 	// Default behavior: create a simple correlation
 	result := &MinimalCorrelationResult{
 		ID:               "corr-" + event.ID,
@@ -52,12 +52,12 @@ func (m *MinimalMockEngine) Process(ctx context.Context, event *domain.UnifiedEv
 		RootCauseEventID: event.ID,
 		Description:      "Test correlation for " + event.ID,
 	}
-	
+
 	// Add trace ID if available
 	if event.TraceContext != nil && event.TraceContext.TraceID != "" {
 		result.TraceID = event.TraceContext.TraceID
 	}
-	
+
 	return []*MinimalCorrelationResult{result}, nil
 }
 

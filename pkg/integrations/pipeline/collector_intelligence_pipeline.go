@@ -395,20 +395,20 @@ func (p *CollectorIntelligencePipeline) inferKubernetesImpact(k8s *domain.Kubern
 	switch k8s.EventType {
 	case "pod_oom_killed":
 		impact.Severity = "high"
-		impact.BusinessImpact = 0.8
-		impact.CustomerFacing = true
+		impact.InfrastructureImpact = 0.8
+		impact.SystemCritical = true
 	case "pod_crash_loop":
 		impact.Severity = "critical"
-		impact.BusinessImpact = 0.9
-		impact.CustomerFacing = true
+		impact.InfrastructureImpact = 0.9
+		impact.SystemCritical = true
 	case "deployment_failed":
 		impact.Severity = "high"
-		impact.BusinessImpact = 0.7
-		impact.CustomerFacing = false
+		impact.InfrastructureImpact = 0.7
+		impact.CascadeRisk = true
 	case "node_not_ready":
 		impact.Severity = "critical"
-		impact.BusinessImpact = 0.95
-		impact.CustomerFacing = true
+		impact.InfrastructureImpact = 0.95
+		impact.SystemCritical = true
 	}
 
 	// Add affected service

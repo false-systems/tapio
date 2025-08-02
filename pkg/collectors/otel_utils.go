@@ -61,14 +61,14 @@ func ExtractTraceIDFromAnnotations(annotations map[string]string) (traceID, span
 		"x-trace-id",
 		"trace-id",
 	}
-	
+
 	for _, key := range keys {
 		if id, ok := annotations[key]; ok {
 			traceID = id
 			break
 		}
 	}
-	
+
 	// Check for span ID
 	spanKeys := []string{
 		"trace.opentelemetry.io/spanid",
@@ -76,13 +76,13 @@ func ExtractTraceIDFromAnnotations(annotations map[string]string) (traceID, span
 		"x-span-id",
 		"span-id",
 	}
-	
+
 	for _, key := range spanKeys {
 		if id, ok := annotations[key]; ok {
 			spanID = id
 			break
 		}
 	}
-	
+
 	return traceID, spanID
 }

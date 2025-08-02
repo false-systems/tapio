@@ -18,6 +18,7 @@ manifests:
   rawYaml:
   - deploy/k8s/namespace.yaml
   - deploy/k8s/*.yaml
+  - deployments/nats/*.yaml
 portForward:
 - resourceType: service
   resourceName: tapio-server
@@ -34,3 +35,13 @@ portForward:
   namespace: tapio-system
   port: 16686
   localPort: 16686  # Jaeger UI
+- resourceType: service
+  resourceName: nats
+  namespace: tapio-system
+  port: 4222
+  localPort: 4222  # NATS client
+- resourceType: service
+  resourceName: nats
+  namespace: tapio-system
+  port: 8222
+  localPort: 8222  # NATS monitoring

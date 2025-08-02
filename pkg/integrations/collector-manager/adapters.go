@@ -100,9 +100,8 @@ func (a *LegacyCollectorAdapter) convertEvents() {
 
 				// Basic impact context
 				Impact: &domain.ImpactContext{
-					Severity:       "info",
-					BusinessImpact: 0.1,
-					CustomerFacing: false,
+					Severity:             "info",
+					InfrastructureImpact: 0.1,
 				},
 
 				// Store original event data

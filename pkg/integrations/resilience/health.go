@@ -334,9 +334,9 @@ func (hc *HealthChecker) RegisterComponent(name, componentType string, measureFu
 		Type:           componentType,
 		Weight:         weight,
 		measureFunc:    measureFunc,
-		updateInterval: updateInterval,
+		UpdateInterval: updateInterval,
 		historyBuffer:  make([]HealthMeasurement, 100), // Ring buffer
-		historySize:    100,
+		HistorySize:    100,
 	}
 
 	// Initialize with neutral values
@@ -479,7 +479,7 @@ func (hc *HealthChecker) calculateOverallStatus(score float64) HealthStatus {
 
 // componentUpdateLoop updates individual component health
 func (hc *HealthChecker) componentUpdateLoop(ctx context.Context, component *ComponentHealth) {
-	ticker := time.NewTicker(component.updateInterval)
+	ticker := time.NewTicker(component.UpdateInterval)
 	defer ticker.Stop()
 
 	for {
@@ -550,7 +550,7 @@ func (hc *HealthChecker) updateComponentHealth(component *ComponentHealth) {
 
 	// Update ring buffer (lock-free)
 	index := atomic.AddInt64(&component.historyIndex, 1) - 1
-	component.historyBuffer[index%int64(component.historySize)] = measurement
+	component.historyBuffer[index%int64(component.HistorySize)] = measurement
 
 	// Update performance metrics
 	atomic.AddUint64(&component.measurementCount, 1)
@@ -902,7 +902,7 @@ func (hc *HealthChecker) getDetailedComponentStatus(health *CachedHealthData) ma
 			"type":            component.Type,
 			"weight":          component.Weight,
 			"last_update":     time.Unix(0, lastUpdate).Format(time.RFC3339),
-			"update_interval": component.updateInterval.String(),
+			"update_interval": component.UpdateInterval.String(),
 		}
 	}
 

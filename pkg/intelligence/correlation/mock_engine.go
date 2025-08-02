@@ -3,13 +3,13 @@ package correlation
 import (
 	"context"
 	"time"
-	
+
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // CorrelationEngine interface for correlation processing
 type CorrelationEngine interface {
-	Process(ctx context.Context, event *domain.UnifiedEvent) ([]*MultiDimCorrelationResult, error)  
+	Process(ctx context.Context, event *domain.UnifiedEvent) ([]*MultiDimCorrelationResult, error)
 }
 
 // MockCorrelationEngine implements a simple mock for testing
@@ -30,15 +30,15 @@ func (m *MockCorrelationEngine) Process(ctx context.Context, event *domain.Unifi
 	if m.processFunc != nil {
 		return m.processFunc(ctx, event)
 	}
-	
+
 	// Default mock behavior: create a simple correlation result
 	result := &MultiDimCorrelationResult{
-		ID:          "mock-correlation-" + event.ID,
-		Type:        "mock-pattern",
-		Confidence:  0.8,
-		Events:      []string{event.ID},
-		Dimensions:  []DimensionMatch{},
-		RootCause:   &MultiDimRootCauseAnalysis{
+		ID:         "mock-correlation-" + event.ID,
+		Type:       "mock-pattern",
+		Confidence: 0.8,
+		Events:     []string{event.ID},
+		Dimensions: []DimensionMatch{},
+		RootCause: &MultiDimRootCauseAnalysis{
 			EventID:    event.ID,
 			Confidence: 0.8,
 			Reasoning:  "Mock root cause for testing",
@@ -50,7 +50,7 @@ func (m *MockCorrelationEngine) Process(ctx context.Context, event *domain.Unifi
 		Recommendation: "Mock recommendation",
 		CreatedAt:      time.Now(),
 	}
-	
+
 	return []*MultiDimCorrelationResult{result}, nil
 }
 

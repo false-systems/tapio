@@ -124,11 +124,11 @@ type AnalyticsResult struct {
 
 // ImpactResult contains impact assessment results
 type ImpactResult struct {
-	BusinessImpact     float64
-	TechnicalSeverity  string
-	CascadeRisk        float64
-	AffectedServices   []string
-	RecommendedActions []string
+	InfrastructureImpact float64
+	TechnicalSeverity    string
+	CascadeRisk          float64
+	AffectedServices     []string
+	RecommendedActions   []string
 }
 
 // PredictionResult contains prediction results

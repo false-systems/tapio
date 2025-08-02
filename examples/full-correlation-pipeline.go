@@ -44,18 +44,18 @@ func main() {
 	correlationEngine := correlation.NewMultiDimensionalEngine(
 		logger,
 		correlation.EngineConfig{
-			TemporalWindow:    10 * time.Second,
-			CausalWindow:      5 * time.Second,
-			MinConfidence:     0.7,
-			MinCorrelation:    0.5,
-			MaxGraphSize:      1000,
-			MaxCorrelations:   100,
-			EnableOwnership:   true,
-			EnableSpatial:     true,
-			EnableTemporal:    true,
-			EnableCausal:      true,
-			EnableSemantic:    true,
-			EnableDependency:  true,
+			TemporalWindow:   10 * time.Second,
+			CausalWindow:     5 * time.Second,
+			MinConfidence:    0.7,
+			MinCorrelation:   0.5,
+			MaxGraphSize:     1000,
+			MaxCorrelations:  100,
+			EnableOwnership:  true,
+			EnableSpatial:    true,
+			EnableTemporal:   true,
+			EnableCausal:     true,
+			EnableSemantic:   true,
+			EnableDependency: true,
 		},
 	)
 
@@ -117,7 +117,7 @@ func main() {
 	// 7. Generate sample events and publish events from collector
 	go func() {
 		logger.Info("Starting event generation and publishing...")
-		
+
 		eventCount := 0
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -126,7 +126,7 @@ func main() {
 			select {
 			case event := <-collector.Events():
 				eventCount++
-				
+
 				logger.Info("Publishing event from collector",
 					zap.Int("count", eventCount),
 					zap.String("type", event.Type),
@@ -173,7 +173,7 @@ func main() {
 // generateSyntheticEvents creates correlated events for demo
 func generateSyntheticEvents(ctx context.Context, publisher *nats.EventPublisher, logger *zap.Logger, baseCount int) {
 	traceID := fmt.Sprintf("demo-trace-%d", time.Now().Unix())
-	
+
 	// Simulate a Pod OOM scenario across multiple components
 	events := []collectors.RawEvent{
 		{
@@ -208,7 +208,7 @@ func generateSyntheticEvents(ctx context.Context, publisher *nats.EventPublisher
 
 	for i, event := range events {
 		if err := publisher.PublishRawEvent(ctx, event); err != nil {
-			logger.Error("Failed to publish synthetic event", 
+			logger.Error("Failed to publish synthetic event",
 				zap.Int("index", i),
 				zap.Error(err))
 		}
@@ -225,22 +225,22 @@ func processCorrelationResults(logger *zap.Logger, results []*correlation.MultiD
 		fmt.Printf("  🆔 ID: %s\n", result.ID)
 		fmt.Printf("  🏷️  Type: %s\n", result.Type)
 		fmt.Printf("  📈 Confidence: %.2f\n", result.Confidence)
-		
+
 		if result.RootCause != nil {
 			fmt.Printf("  🎯 Root Cause: %s\n", result.RootCause.Reasoning)
 		}
-		
+
 		fmt.Printf("  📅 Created: %s\n", result.CreatedAt.Format("15:04:05.000"))
-		
+
 		fmt.Printf("  🔗 Correlated Events: %d\n", len(result.Events))
-		
+
 		// Show event types in this correlation
 		eventTypes := make(map[string]int)
 		for _, eventID := range result.Events {
 			// This is simplified - in real implementation you'd look up event details
 			eventTypes["various"]++
 		}
-		
+
 		for eventType, count := range eventTypes {
 			fmt.Printf("    - %s: %d events\n", eventType, count)
 		}

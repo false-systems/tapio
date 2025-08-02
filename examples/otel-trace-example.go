@@ -28,7 +28,7 @@ func main() {
 
 	// 3. Simulate a traced request flow
 	traceID := "trace-abc-123-def"
-	
+
 	// API Gateway receives request
 	gatewayEvent := collectors.RawEvent{
 		Type:      "kubeapi",
@@ -96,9 +96,9 @@ func main() {
 
 	// Process and publish all events
 	events := []collectors.RawEvent{gatewayEvent, authEvent, apiEvent, etcdEvent, webhookEvent}
-	
+
 	fmt.Printf("=== Trace Flow for Request %s ===\n\n", traceID)
-	
+
 	for _, rawEvent := range events {
 		// Transform to unified event
 		unified, err := transformer.Transform(context.Background(), rawEvent)
@@ -124,8 +124,8 @@ func main() {
 		if unified.TraceContext.ParentSpanID != "" {
 			indent = "  → "
 		}
-		
-		fmt.Printf("%s[%s] %s: %s\n", 
+
+		fmt.Printf("%s[%s] %s: %s\n",
 			indent,
 			unified.TraceContext.SpanID,
 			unified.Source,

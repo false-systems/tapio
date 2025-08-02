@@ -10,7 +10,9 @@ import (
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"go.uber.org/zap"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // NetworkInfo represents network connection information
@@ -81,25 +83,48 @@ type MountInfo struct {
 
 // Collector implements minimal kernel monitoring via eBPF
 type Collector struct {
-	name        string
-	objs        *kernelmonitorObjects
-	links       []link.Link
-	reader      *ringbuf.Reader
-	events      chan collectors.RawEvent
-	ctx         context.Context
-	cancel      context.CancelFunc
-	healthy     bool
-	podTraceMap map[string]string // Map pod UID to trace ID
+	name          string
+	objs          *kernelmonitorObjects
+	links         []link.Link
+	reader        *ringbuf.Reader
+	events        chan collectors.RawEvent
+	ctx           context.Context
+	cancel        context.CancelFunc
+	healthy       bool
+	podTraceMap   map[string]string // Map pod UID to trace ID
+	natsPublisher *NATSPublisher    // NATS publisher for events
 }
 
 // NewCollector creates a new minimal eBPF collector
 func NewCollector(name string) (*Collector, error) {
-	return &Collector{
-		name:        name,
+	return NewCollectorWithConfig(&Config{
+		Name:    name,
+		NATSURL: "",
+		Logger:  nil,
+	})
+}
+
+// NewCollectorWithConfig creates a new eBPF collector with config
+func NewCollectorWithConfig(config *Config) (*Collector, error) {
+	c := &Collector{
+		name:        config.Name,
 		events:      make(chan collectors.RawEvent, 1000),
 		healthy:     true,
 		podTraceMap: make(map[string]string),
-	}, nil
+	}
+	
+	// Initialize NATS publisher if URL provided
+	if config.NATSURL != "" && config.Logger != nil {
+		publisher, err := NewNATSPublisher(config.NATSURL, config.Logger)
+		if err != nil {
+			// Log error but don't fail collector creation
+			config.Logger.Error("Failed to create NATS publisher", zap.Error(err))
+		} else {
+			c.natsPublisher = publisher
+		}
+	}
+	
+	return c, nil
 }
 
 // Name returns collector name
@@ -182,6 +207,11 @@ func (c *Collector) Start(ctx context.Context) error {
 func (c *Collector) Stop() error {
 	if c.cancel != nil {
 		c.cancel()
+	}
+
+	// Close NATS publisher
+	if c.natsPublisher != nil {
+		c.natsPublisher.Close()
 	}
 
 	// Close links
@@ -360,6 +390,15 @@ func (c *Collector) processEvents() {
 			// Generate new trace for kernel events, or reuse pod trace if available
 			TraceID: c.getOrGenerateTraceID(event),
 			SpanID:  collectors.GenerateSpanID(),
+		}
+
+		// Publish to NATS if publisher available
+		if c.natsPublisher != nil {
+			// Convert to UnifiedEvent for NATS
+			unifiedEvent := c.convertToUnifiedEvent(&rawEvent, event)
+			if err := c.natsPublisher.PublishEvent(unifiedEvent); err != nil {
+				// Log error but continue processing
+			}
 		}
 
 		select {
@@ -683,4 +722,77 @@ func (c *Collector) hashPath(path string) uint64 {
 		hash = ((hash << 5) + hash) + uint64(path[i])
 	}
 	return hash
+}
+
+// convertToUnifiedEvent converts RawEvent to UnifiedEvent for NATS
+func (c *Collector) convertToUnifiedEvent(raw *collectors.RawEvent, kernelEvent *KernelEvent) *domain.UnifiedEvent {
+	// Build UnifiedEvent
+	event := &domain.UnifiedEvent{
+		ID:        domain.GenerateEventID(),
+		Timestamp: raw.Timestamp,
+		Type:      "ebpf",
+		Source:    c.name,
+		Severity:  c.getSeverityForEventType(kernelEvent.EventType),
+		
+		// Add trace context
+		TraceContext: &domain.TraceContext{
+			TraceID: raw.TraceID,
+			SpanID:  raw.SpanID,
+			Sampled: true,
+		},
+		
+		// Kernel data
+		Kernel: &domain.KernelData{
+			PID:  kernelEvent.PID,
+			TID:  kernelEvent.TID,
+			Comm: c.nullTerminatedString(kernelEvent.Comm[:]),
+		},
+		
+		// Copy metadata to attributes
+		Attributes: make(map[string]interface{}),
+	}
+	
+	// Copy all metadata to attributes
+	for k, v := range raw.Metadata {
+		event.Attributes[k] = v
+	}
+	
+	// Add K8s context if we have pod info
+	if podUID := c.nullTerminatedString(kernelEvent.PodUID[:]); podUID != "" {
+		event.K8sContext = &domain.K8sContext{}
+		if podInfo, err := c.GetPodInfo(kernelEvent.CgroupID); err == nil {
+			event.K8sContext.Name = c.nullTerminatedString(podInfo.PodName[:])
+			event.K8sContext.Namespace = c.nullTerminatedString(podInfo.Namespace[:])
+		}
+	}
+	
+	// Add entity context
+	if event.K8sContext != nil && event.K8sContext.Name != "" {
+		event.Entity = &domain.EntityContext{
+			Type:      "pod",
+			Name:      event.K8sContext.Name,
+			Namespace: event.K8sContext.Namespace,
+		}
+	}
+	
+	// Add correlation hints
+	event.CorrelationHints = []string{raw.TraceID}
+	
+	return event
+}
+
+// getSeverityForEventType returns severity based on event type
+func (c *Collector) getSeverityForEventType(eventType uint32) domain.EventSeverity {
+	switch eventType {
+	case 1, 2: // memory alloc/free
+		return domain.EventSeverityInfo
+	case 3: // process exec
+		return domain.EventSeverityWarning
+	case 5: // network conn
+		return domain.EventSeverityInfo
+	case 8, 9, 10: // file operations
+		return domain.EventSeverityInfo
+	default:
+		return domain.EventSeverityInfo
+	}
 }

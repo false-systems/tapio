@@ -18,13 +18,13 @@ import (
 	_ "github.com/yairfalse/tapio/pkg/collectors/cni"
 	// _ "github.com/yairfalse/tapio/pkg/collectors/ebpf" // Needs eBPF bindings generated
 	_ "github.com/yairfalse/tapio/pkg/collectors/etcd"
-	_ "github.com/yairfalse/tapio/pkg/collectors/k8s"
+	_ "github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	// _ "github.com/yairfalse/tapio/pkg/collectors/systemd" // Needs eBPF bindings generated
 )
 
 var (
 	configFile    = flag.String("config", "", "Path to configuration file")
-	collectorList = flag.String("collectors", "cni,etcd,k8s", "Comma-separated list of collectors to enable")
+	collectorList = flag.String("collectors", "cni,etcd,kubeapi", "Comma-separated list of collectors to enable")
 	healthAddr    = flag.String("health", ":8080", "Address for health endpoint")
 )
 

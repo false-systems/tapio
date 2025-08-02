@@ -448,11 +448,11 @@ func (e *MultiDimensionalEngine) analyzeImpact(result *MultiDimCorrelationResult
 	events := e.graph.GetEvents(result.Events)
 
 	impact := &ImpactAnalysis{
-		Severity:       e.calculateSeverity(events),
-		Scope:          e.calculateScope(events),
+		Severity:             e.calculateSeverity(events),
+		Scope:                e.calculateScope(events),
 		InfrastructureImpact: e.calculateInfrastructureImpact(events),
-		UserImpact:     e.calculateUserImpact(events),
-		ServiceImpact:  e.calculateServiceImpact(events),
+		UserImpact:           e.calculateUserImpact(events),
+		ServiceImpact:        e.calculateServiceImpact(events),
 	}
 
 	// Generate mitigation steps based on pattern

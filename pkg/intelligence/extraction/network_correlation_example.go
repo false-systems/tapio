@@ -339,10 +339,10 @@ func ExampleNetworkEventWithContext() *domain.UnifiedEvent {
 		},
 
 		Impact: &domain.ImpactContext{
-			Severity:         "high",
-			BusinessImpact:   0.8,
-			CustomerFacing:   true,
-			AffectedServices: []string{"frontend", "api"},
+			Severity:             "high",
+			InfrastructureImpact: 0.8,
+			SystemCritical:       true,
+			AffectedServices:     []string{"frontend", "api"},
 		},
 	}
 }

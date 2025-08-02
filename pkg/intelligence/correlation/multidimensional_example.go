@@ -153,9 +153,9 @@ func MultiDimensionalCorrelationDemo() {
 			Impact: &domain.ImpactContext{
 				Severity:             "high",
 				InfrastructureImpact: 0.8,
-				SLOImpact:           true,
-				SystemCritical:      true,
-				AffectedServices:    []string{"order-service"},
+				SLOImpact:            true,
+				SystemCritical:       true,
+				AffectedServices:     []string{"order-service"},
 			},
 		}
 
@@ -251,11 +251,11 @@ func MultiDimensionalCorrelationDemo() {
 		Impact: &domain.ImpactContext{
 			Severity:             "critical",
 			InfrastructureImpact: 0.95,
-			SLOImpact:           true,
-			SystemCritical:      true,
-			CascadeRisk:         true,
-			AffectedComponents:  3,
-			AffectedServices:    []string{"frontend", "order-service", "payment-service"},
+			SLOImpact:            true,
+			SystemCritical:       true,
+			CascadeRisk:          true,
+			AffectedComponents:   3,
+			AffectedServices:     []string{"frontend", "order-service", "payment-service"},
 		},
 	}
 

@@ -11,10 +11,10 @@ import (
 // TestNATSSubscriber_BasicFunctionality tests basic NATS subscriber operations
 func TestNATSSubscriber_BasicFunctionality(t *testing.T) {
 	logger := zap.NewNop()
-	
+
 	// Create mock correlation engine
 	mockEngine := NewMockCorrelationEngine()
-	
+
 	// Create config
 	config := &NATSSubscriberConfig{
 		URL:               "nats://localhost:4222",
@@ -25,12 +25,12 @@ func TestNATSSubscriber_BasicFunctionality(t *testing.T) {
 		MinEventsForCorr:  2,
 		Logger:            logger,
 	}
-	
+
 	// Test config defaults
 	assert.Equal(t, "nats://localhost:4222", config.URL)
 	assert.Equal(t, 2*time.Second, config.CorrelationWindow)
 	assert.Equal(t, 2, config.MinEventsForCorr)
-	
+
 	// Test that we can create the subscriber (will fail without NATS server, but that's OK)
 	_, err := NewNATSSubscriber(config, mockEngine)
 	assert.Error(t, err) // Expected to fail without NATS server
@@ -43,7 +43,7 @@ func TestNATSSubscriber_TraceIDExtraction(t *testing.T) {
 		config: &NATSSubscriberConfig{Logger: zap.NewNop()},
 		logger: zap.NewNop(),
 	}
-	
+
 	tests := []struct {
 		name     string
 		subject  string
@@ -65,7 +65,7 @@ func TestNATSSubscriber_TraceIDExtraction(t *testing.T) {
 			expected: "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := subscriber.extractTraceIDFromSubject(tt.subject)
