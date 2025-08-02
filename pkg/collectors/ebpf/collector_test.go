@@ -4,47 +4,36 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCollectorCreation(t *testing.T) {
 	collector, err := NewCollector("ebpf-test")
-	if err != nil {
-		t.Fatalf("Failed to create collector: %v", err)
-	}
-
-	if collector.Name() != "ebpf-test" {
-		t.Errorf("Expected name 'ebpf-test', got '%s'", collector.Name())
-	}
-
-	if !collector.IsHealthy() {
-		t.Error("Expected collector to be healthy initially")
-	}
+	require.NoError(t, err)
+	
+	assert.Equal(t, "ebpf-test", collector.Name())
+	assert.True(t, collector.IsHealthy())
+	assert.NotNil(t, collector.perfAdapter, "Performance adapter should be initialized")
 }
 
 func TestCollectorLifecycle(t *testing.T) {
 	collector, err := NewCollector("ebpf-lifecycle")
-	if err != nil {
-		t.Fatalf("Failed to create collector: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Test that events channel is available
 	events := collector.Events()
-	if events == nil {
-		t.Error("Events channel should not be nil")
-	}
+	assert.NotNil(t, events, "Events channel should not be nil")
 
 	// Test stop without start
 	err = collector.Stop()
-	if err != nil {
-		t.Errorf("Stop should not fail even if not started: %v", err)
-	}
+	assert.NoError(t, err, "Stop should not fail even if not started")
 }
 
 func TestEventChannelCapacity(t *testing.T) {
 	collector, err := NewCollector("ebpf-events")
-	if err != nil {
-		t.Fatalf("Failed to create collector: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Start collector
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -62,9 +51,54 @@ func TestEventChannelCapacity(t *testing.T) {
 	defer collector.Stop()
 
 	// Test that collector reports as healthy
-	if !collector.IsHealthy() {
-		t.Error("Collector should be healthy after successful start")
-	}
+	assert.True(t, collector.IsHealthy(), "Collector should be healthy after successful start")
+}
+
+func TestCollectorHealthAndStatistics(t *testing.T) {
+	collector, err := NewCollector("ebpf-stats")
+	require.NoError(t, err)
+
+	// Test initial health
+	healthy, details := collector.Health()
+	assert.True(t, healthy)
+	assert.Contains(t, details, "healthy")
+	assert.Contains(t, details, "events_collected")
+	assert.Contains(t, details, "events_dropped")
+	assert.Contains(t, details, "error_count")
+	assert.Contains(t, details, "ebpf_loaded")
+	assert.Contains(t, details, "links_count")
+
+	// Test statistics
+	stats := collector.Statistics()
+	assert.Contains(t, stats, "events_collected")
+	assert.Contains(t, stats, "events_dropped")
+	assert.Contains(t, stats, "error_count")
+	assert.Contains(t, stats, "last_event_time")
+	assert.Contains(t, stats, "pod_trace_count")
+	
+	// Performance metrics should be present
+	assert.Contains(t, stats, "perf_buffer_size")
+	assert.Contains(t, stats, "perf_buffer_capacity")
+	assert.Contains(t, stats, "perf_buffer_utilization")
+	assert.Contains(t, stats, "perf_batches_processed")
+	assert.Contains(t, stats, "perf_pool_in_use")
+	assert.Contains(t, stats, "perf_events_processed")
+}
+
+func TestPerformanceAdapterMetrics(t *testing.T) {
+	collector, err := NewCollector("ebpf-perf")
+	require.NoError(t, err)
+
+	// Verify performance adapter configuration
+	stats := collector.Statistics()
+	
+	// Check buffer capacity is as configured (32768)
+	assert.Equal(t, uint64(32768), stats["perf_buffer_capacity"])
+	
+	// Initial metrics should be zero
+	assert.Equal(t, uint64(0), stats["perf_buffer_size"])
+	assert.Equal(t, uint64(0), stats["perf_batches_processed"])
+	assert.Equal(t, uint64(0), stats["perf_events_processed"])
 }
 
 func TestEventTypeToString(t *testing.T) {

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/common"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
@@ -91,8 +93,19 @@ type Collector struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	healthy       bool
+	mu            sync.RWMutex
 	podTraceMap   map[string]string // Map pod UID to trace ID
 	natsPublisher *NATSPublisher    // NATS publisher for events
+	perfAdapter   *common.RawEventPerformanceAdapter // Performance adapter
+	stats         CollectorStats
+}
+
+// CollectorStats tracks collector statistics
+type CollectorStats struct {
+	EventsCollected uint64
+	EventsDropped   uint64
+	ErrorCount      uint64
+	LastEventTime   time.Time
 }
 
 // NewCollector creates a new minimal eBPF collector
@@ -106,11 +119,24 @@ func NewCollector(name string) (*Collector, error) {
 
 // NewCollectorWithConfig creates a new eBPF collector with config
 func NewCollectorWithConfig(config *Config) (*Collector, error) {
+	// Create performance adapter configuration
+	perfConfig := common.DefaultRawEventPerformanceConfig("ebpf-" + config.Name)
+	perfConfig.BufferSize = 32768 // Very large buffer for high-volume kernel events
+	perfConfig.BatchSize = 500    // Process more events per batch
+	perfConfig.BatchTimeout = 50 * time.Millisecond // Faster processing for kernel events
+	
+	// Create performance adapter
+	perfAdapter, err := common.NewRawEventPerformanceAdapter(perfConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create performance adapter: %w", err)
+	}
+
 	c := &Collector{
 		name:        config.Name,
-		events:      make(chan collectors.RawEvent, 1000),
+		events:      make(chan collectors.RawEvent, 1000), // Keep fallback channel
 		healthy:     true,
 		podTraceMap: make(map[string]string),
+		perfAdapter: perfAdapter,
 	}
 
 	// Initialize NATS publisher if URL provided
@@ -196,6 +222,17 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
 
+	// Start performance adapter
+	if err := c.perfAdapter.Start(); err != nil {
+		// Clean up eBPF resources
+		for _, l := range c.links {
+			l.Close()
+		}
+		c.reader.Close()
+		c.objs.Close()
+		return fmt.Errorf("failed to start performance adapter: %w", err)
+	}
+
 	// Start event processing
 	go c.processEvents()
 
@@ -205,6 +242,9 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -229,13 +269,25 @@ func (c *Collector) Stop() error {
 		c.objs.Close()
 	}
 
-	close(c.events)
+	// Stop performance adapter
+	if c.perfAdapter != nil {
+		c.perfAdapter.Stop()
+	}
+
+	if c.events != nil {
+		close(c.events)
+	}
 	c.healthy = false
 	return nil
 }
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan collectors.RawEvent {
+	// Return performance adapter's output channel if available
+	if c.perfAdapter != nil {
+		return c.perfAdapter.Events()
+	}
+	// Fallback to direct channel
 	return c.events
 }
 
@@ -392,6 +444,36 @@ func (c *Collector) processEvents() {
 			SpanID:  collectors.GenerateSpanID(),
 		}
 
+		// Submit through performance adapter if available
+		if c.perfAdapter != nil {
+			if err := c.perfAdapter.Submit(&rawEvent); err != nil {
+				c.mu.Lock()
+				c.stats.EventsDropped++
+				c.mu.Unlock()
+			} else {
+				c.mu.Lock()
+				c.stats.EventsCollected++
+				c.stats.LastEventTime = time.Now()
+				c.mu.Unlock()
+			}
+		} else {
+			// Fallback to direct channel send
+			select {
+			case c.events <- rawEvent:
+				c.mu.Lock()
+				c.stats.EventsCollected++
+				c.stats.LastEventTime = time.Now()
+				c.mu.Unlock()
+			case <-c.ctx.Done():
+				return
+			default:
+				// Drop event if buffer full
+				c.mu.Lock()
+				c.stats.EventsDropped++
+				c.mu.Unlock()
+			}
+		}
+
 		// Publish to NATS if publisher available
 		if c.natsPublisher != nil {
 			// Convert to UnifiedEvent for NATS
@@ -400,13 +482,6 @@ func (c *Collector) processEvents() {
 				// Log error but continue processing
 			}
 		}
-
-		select {
-		case c.events <- rawEvent:
-		case <-c.ctx.Done():
-			return
-		default:
-			// Drop event if buffer full
 		}
 	}
 }
@@ -722,6 +797,51 @@ func (c *Collector) hashPath(path string) uint64 {
 		hash = ((hash << 5) + hash) + uint64(path[i])
 	}
 	return hash
+}
+
+// Health returns detailed health information
+func (c *Collector) Health() (bool, map[string]interface{}) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	health := map[string]interface{}{
+		"healthy":          c.healthy,
+		"events_collected": c.stats.EventsCollected,
+		"events_dropped":   c.stats.EventsDropped,
+		"error_count":      c.stats.ErrorCount,
+		"last_event":       c.stats.LastEventTime,
+		"ebpf_loaded":      c.objs != nil,
+		"links_count":      len(c.links),
+	}
+
+	return c.healthy, health
+}
+
+// Statistics returns collector statistics
+func (c *Collector) Statistics() map[string]interface{}) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	stats := map[string]interface{}{
+		"events_collected": c.stats.EventsCollected,
+		"events_dropped":   c.stats.EventsDropped,
+		"error_count":      c.stats.ErrorCount,
+		"last_event_time":  c.stats.LastEventTime,
+		"pod_trace_count":  len(c.podTraceMap),
+	}
+
+	// Add performance metrics if available
+	if c.perfAdapter != nil {
+		perfMetrics := c.perfAdapter.GetMetrics()
+		stats["perf_buffer_size"] = perfMetrics.BufferSize
+		stats["perf_buffer_capacity"] = perfMetrics.BufferCapacity
+		stats["perf_buffer_utilization"] = perfMetrics.BufferUtilization
+		stats["perf_batches_processed"] = perfMetrics.BatchesProcessed
+		stats["perf_pool_in_use"] = perfMetrics.PoolInUse
+		stats["perf_events_processed"] = perfMetrics.EventsProcessed
+	}
+
+	return stats
 }
 
 // convertToUnifiedEvent converts RawEvent to UnifiedEvent for NATS
