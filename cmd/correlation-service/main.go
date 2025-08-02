@@ -12,6 +12,8 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"github.com/yairfalse/tapio/pkg/intelligence/nats"
+	"github.com/yairfalse/tapio/pkg/intelligence/storage"
 )
 
 func main() {
@@ -21,6 +23,10 @@ func main() {
 		panic(err)
 	}
 	defer logger.Sync()
+
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Create K8s client
 	config, err := rest.InClusterConfig()
@@ -33,62 +39,51 @@ func main() {
 		logger.Fatal("Failed to create K8s client", zap.Error(err))
 	}
 
-	// Start the real correlation system
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// 1. Create storage
+	storageConfig := storage.DefaultMemoryStorageConfig()
+	memStorage := storage.NewMemoryStorage(logger, storageConfig)
 
-	// 1. Initialize K8s relationship loader
-	k8sLoader := correlation.NewK8sRelationshipLoader(logger, clientset)
-	if err := k8sLoader.Start(ctx); err != nil {
-		logger.Fatal("Failed to start K8s loader", zap.Error(err))
-	}
-
-	// 2. Create the correlation system with all components
-	correlationConfig := correlation.SimpleSystemConfig{
-		EventBufferSize:     1000,
-		MaxConcurrency:      10,
-		EnableK8sNative:     true,
-		EnableTemporal:      true,
-		EnableSequence:      true,
-		ProcessingTimeout:   30 * time.Second,
-		CleanupInterval:     5 * time.Minute,
-	}
-
-	correlationSystem := correlation.NewSimpleCorrelationSystem(logger, correlationConfig, clientset)
-
-	// Start correlation system
-	if err := correlationSystem.Start(); err != nil {
-		logger.Fatal("Failed to start correlation system", zap.Error(err))
-	}
-
-	// 3. Start NATS integration
-	natsConfig := &correlation.NATSIntegrationConfig{
-		NATSURL:           getEnv("NATS_URL", "nats://nats.tapio-system.svc.cluster.local:4222"),
-		StreamName:        getEnv("STREAM_NAME", "TRACES"),
-		ConsumerName:      getEnv("CONSUMER_NAME", "correlation-service"),
-		TraceSubjects:     []string{"traces.>"},
-		CorrelationSystem: correlationSystem,
-		Logger:            logger,
-	}
-
-	natsIntegration, err := correlation.NewNATSCorrelationIntegration(natsConfig)
+	// 2. Create correlation engine
+	engineConfig := correlation.DefaultEngineConfig()
+	engine, err := correlation.NewEngine(logger, engineConfig, clientset, memStorage)
 	if err != nil {
-		logger.Fatal("Failed to create NATS integration", zap.Error(err))
+		logger.Fatal("Failed to create correlation engine", zap.Error(err))
 	}
 
-	// Start NATS processing in background
+	// Start the engine
+	if err := engine.Start(ctx); err != nil {
+		logger.Fatal("Failed to start correlation engine", zap.Error(err))
+	}
+
+	// 3. Create NATS subscriber
+	natsConfig := nats.DefaultConfig()
+	natsConfig.URL = getEnv("NATS_URL", "nats://nats.tapio-system.svc.cluster.local:4222")
+	natsConfig.StreamName = getEnv("STREAM_NAME", "TRACES")
+	natsConfig.ConsumerName = getEnv("CONSUMER_NAME", "correlation-service")
+	natsConfig.Subject = getEnv("SUBJECT", "traces.>")
+
+	subscriber, err := nats.NewSubscriber(logger, natsConfig, engine)
+	if err != nil {
+		logger.Fatal("Failed to create NATS subscriber", zap.Error(err))
+	}
+
+	// 4. Start processing correlation results
+	go handleCorrelationResults(ctx, engine, logger)
+
+	// 5. Start NATS subscriber in background
 	go func() {
-		if err := natsIntegration.Start(ctx); err != nil {
-			logger.Error("NATS integration failed", zap.Error(err))
+		if err := subscriber.Start(ctx); err != nil {
+			logger.Error("NATS subscriber error", zap.Error(err))
 		}
 	}()
 
-	// 4. Start correlation results handler
-	go handleCorrelationResults(ctx, correlationSystem, natsIntegration, logger)
-
 	logger.Info("Correlation service started",
-		zap.String("nats_url", natsConfig.NATSURL),
+		zap.String("nats_url", natsConfig.URL),
 		zap.String("stream", natsConfig.StreamName),
+		zap.String("subject", natsConfig.Subject),
+		zap.Bool("k8s_enabled", engineConfig.EnableK8s),
+		zap.Bool("temporal_enabled", engineConfig.EnableTemporal),
+		zap.Bool("sequence_enabled", engineConfig.EnableSequence),
 	)
 
 	// Wait for shutdown signal
@@ -97,35 +92,47 @@ func main() {
 	<-sigChan
 
 	logger.Info("Shutting down correlation service...")
+
+	// Cancel context to trigger graceful shutdown
 	cancel()
-	time.Sleep(2 * time.Second) // Give time for graceful shutdown
+
+	// Give components time to shut down
+	time.Sleep(2 * time.Second)
+
+	// Stop engine
+	if err := engine.Stop(); err != nil {
+		logger.Error("Failed to stop engine", zap.Error(err))
+	}
+
+	logger.Info("Correlation service stopped")
 }
 
-// handleCorrelationResults processes and publishes correlation results
-func handleCorrelationResults(ctx context.Context, system *correlation.SimpleCorrelationSystem,
-	nats *correlation.NATSCorrelationIntegration, logger *zap.Logger) {
-
-	// This would typically subscribe to correlation results from the system
-	// For now, we'll simulate periodic correlation summaries
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+// handleCorrelationResults processes correlation results from the engine
+func handleCorrelationResults(ctx context.Context, engine *correlation.Engine, logger *zap.Logger) {
+	results := engine.Results()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			// In a real implementation, this would get actual correlation results
-			// from the correlation system's output channel
-			logger.Info("Checking for correlation results...")
+		case result := <-results:
+			// Log significant correlations
+			if result.Confidence >= 0.8 {
+				logger.Info("High confidence correlation detected",
+					zap.String("id", result.ID),
+					zap.String("type", result.Type),
+					zap.Float64("confidence", result.Confidence),
+					zap.String("summary", result.Summary),
+					zap.Int("events", len(result.Events)),
+				)
+			}
 
-			// Example: Get active correlations and publish them
-			// results := system.GetActiveCorrelations()
-			// for _, result := range results {
-			//     if err := nats.PublishCorrelationResult(result); err != nil {
-			//         logger.Error("Failed to publish result", zap.Error(err))
-			//     }
-			// }
+			// Here you could:
+			// - Send to alerting system
+			// - Store in time-series DB
+			// - Publish to NATS for other services
+			// - Update Kubernetes annotations
+			// - Send to UI/dashboard
 		}
 	}
 }

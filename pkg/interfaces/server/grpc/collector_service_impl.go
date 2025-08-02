@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	manager "github.com/yairfalse/tapio/pkg/integrations/collector-manager"
-	"github.com/yairfalse/tapio/pkg/intelligence/pipeline"
+	// manager "github.com/yairfalse/tapio/pkg/integrations/collector-manager"
+	// "github.com/yairfalse/tapio/pkg/intelligence/pipeline"
 	pb "github.com/yairfalse/tapio/proto/gen/tapio/v1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"

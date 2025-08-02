@@ -1,4 +1,4 @@
-package correlation
+package intelligence_v2
 
 import (
 	"context"
@@ -63,7 +63,7 @@ type Storage interface {
 }
 
 // Engine orchestrates all correlators
-type IEngine interface {
+type Engine interface {
 	// Process an event through all correlators
 	Process(ctx context.Context, event *domain.UnifiedEvent) error
 
@@ -74,5 +74,14 @@ type IEngine interface {
 	Start(ctx context.Context) error
 
 	// Stop the engine
+	Stop() error
+}
+
+// NATSSubscriber handles NATS integration
+type NATSSubscriber interface {
+	// Start subscribing to NATS
+	Start(ctx context.Context) error
+
+	// Stop the subscriber
 	Stop() error
 }
