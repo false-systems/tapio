@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
@@ -112,4 +113,11 @@ func extractMessage(raw *collectors.RawEvent) string {
 		return event
 	}
 	return "Event from " + raw.Type
+}
+
+// CollectorHealthStatus represents the health status of a collector
+type CollectorHealthStatus struct {
+	Healthy   bool
+	Error     string
+	LastEvent time.Time
 }
