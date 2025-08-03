@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"go.uber.org/zap"
@@ -174,4 +175,33 @@ func (p *EventPipeline) enrichEvent(raw *collectors.RawEvent) *EnrichedEvent {
 	}
 
 	return enriched
+}
+
+// GetHealthStatus returns the health status of all collectors
+func (p *EventPipeline) GetHealthStatus() map[string]CollectorHealthStatus {
+	status := make(map[string]CollectorHealthStatus)
+	
+	for name, collector := range p.collectors {
+		health := CollectorHealthStatus{
+			Healthy: collector.IsHealthy(),
+		}
+		
+		// Check if collector implements detailed health interface
+		if healthReporter, ok := collector.(interface {
+			Health() (bool, map[string]interface{})
+		}); ok {
+			healthy, details := healthReporter.Health()
+			health.Healthy = healthy
+			if err, ok := details["error"].(string); ok {
+				health.Error = err
+			}
+			if lastEvent, ok := details["last_event"].(time.Time); ok {
+				health.LastEvent = lastEvent
+			}
+		}
+		
+		status[name] = health
+	}
+	
+	return status
 }
