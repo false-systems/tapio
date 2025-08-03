@@ -256,6 +256,42 @@ test-interfaces: ## Test interfaces layer
 	@echo "$(BLUE)🧪 Testing interfaces layer...$(NC)"
 	@find pkg/interfaces -name "go.mod" -execdir go test -v ./... \;
 
+##@ Git Workflow
+
+branch-cleanup: ## Analyze and suggest branch cleanup
+	@echo "$(BLUE)🌿 Branch Cleanup Analysis$(NC)"
+	@bash scripts/branch-cleanup.sh
+
+git-prune: ## Prune deleted remote branches
+	@echo "$(BLUE)🧹 Pruning remote branches...$(NC)"
+	@git remote prune origin
+	@echo "$(GREEN)✅ Remote branches pruned$(NC)"
+
+git-clean-merged: ## Delete local branches merged into main
+	@echo "$(BLUE)🗑️  Cleaning merged branches...$(NC)"
+	@git branch --merged main | grep -v main | xargs -n 1 git branch -d || true
+	@echo "$(GREEN)✅ Merged branches cleaned$(NC)"
+
+git-status: ## Show current git status and branch info
+	@echo "$(BLUE)📊 Git Status$(NC)"
+	@echo "Current branch: $$(git branch --show-current)"
+	@echo "Uncommitted changes:"
+	@git status --short
+	@echo "\nLocal branches:"
+	@git branch
+	@echo "\nRemote branches:"
+	@git branch -r
+
+pre-pr: fmt lint test ## Run all checks before creating PR
+	@echo "$(BLUE)🔍 Pre-PR Checks$(NC)"
+	@echo "Checking formatting..."
+	@if [ "$$(gofmt -l . | grep -v vendor | wc -l)" -ne 0 ]; then \
+		echo "$(RED)❌ Code not formatted! Run: make fmt$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✅ All pre-PR checks passed!$(NC)"
+	@echo "$(YELLOW)Ready to create PR!$(NC)"
+
 ##@ Help
 
 help: ## Show this help
