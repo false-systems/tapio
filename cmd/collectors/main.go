@@ -16,6 +16,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/etcd"
 	etcdBPF "github.com/yairfalse/tapio/pkg/collectors/etcd/bpf"
 	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
+	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
 	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
@@ -29,6 +30,8 @@ var (
 	enableSystemd    = flag.Bool("enable-systemd", true, "Enable systemd collector")
 	enableEtcd       = flag.Bool("enable-etcd", true, "Enable etcd collector")
 	enableCNI        = flag.Bool("enable-cni", true, "Enable CNI collector")
+	enableKubelet    = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
+	kubeletAddress   = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
 	etcdEndpoints    = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
 	logLevel         = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	workerCount      = flag.Int("workers", 4, "Number of pipeline workers")
@@ -166,6 +169,27 @@ func main() {
 				logger.Error("Failed to register cni collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "cni")
+			}
+		}
+	}
+
+	if *enableKubelet {
+		kubeletConfig := kubelet.DefaultConfig()
+		kubeletConfig.Address = *kubeletAddress
+		kubeletConfig.Logger = logger
+		// For local testing, might need insecure mode
+		if *kubeletAddress == "localhost:10250" {
+			kubeletConfig.Insecure = true
+		}
+		
+		kubeletCollector, err := kubelet.NewCollector("kubelet", kubeletConfig)
+		if err != nil {
+			logger.Error("Failed to create kubelet collector", zap.Error(err))
+		} else {
+			if err := eventPipeline.RegisterCollector("kubelet", kubeletCollector); err != nil {
+				logger.Error("Failed to register kubelet collector", zap.Error(err))
+			} else {
+				enabledCollectors = append(enabledCollectors, "kubelet")
 			}
 		}
 	}
