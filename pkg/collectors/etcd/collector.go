@@ -12,21 +12,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// Config holds etcd collector configuration
-type Config struct {
-	Endpoints []string   `json:"endpoints"`
-	Username  string     `json:"username"`
-	Password  string     `json:"password"`
-	TLS       *TLSConfig `json:"tls"`
-}
-
-// TLSConfig holds TLS configuration
-type TLSConfig struct {
-	CertFile string `json:"cert_file"`
-	KeyFile  string `json:"key_file"`
-	CAFile   string `json:"ca_file"`
-}
-
 // Collector implements minimal etcd monitoring
 type Collector struct {
 	name      string
@@ -222,7 +207,7 @@ func (c *Collector) processEtcdEvent(event *clientv3.Event) {
 	rawEvent := c.createEvent(operation, eventData)
 	rawEvent.Metadata["resource_type"] = resourceType
 	rawEvent.Metadata["operation"] = operation
-	
+
 	// Add enhanced K8s metadata - STANDARD for all collectors
 	k8sMetadata := c.extractK8sMetadata(key)
 	for k, v := range k8sMetadata {
@@ -260,20 +245,20 @@ func (c *Collector) extractResourceType(key string) string {
 // extractK8sMetadata extracts full K8s metadata from etcd key
 func (c *Collector) extractK8sMetadata(key string) map[string]string {
 	metadata := make(map[string]string)
-	
+
 	// Expected formats:
 	// /registry/{resource}/{namespace}/{name} (namespaced)
 	// /registry/{resource}/{name} (cluster-scoped)
 	parts := strings.Split(key, "/")
-	
+
 	if len(parts) < 3 || parts[1] != "registry" {
 		return metadata
 	}
-	
+
 	// Extract resource type/kind
 	resourceType := parts[2]
 	metadata["k8s_kind"] = c.normalizeResourceType(resourceType)
-	
+
 	// Check if namespaced or cluster-scoped
 	if len(parts) == 5 {
 		// Namespaced resource: /registry/{resource}/{namespace}/{name}
@@ -283,13 +268,13 @@ func (c *Collector) extractK8sMetadata(key string) map[string]string {
 		// Cluster-scoped resource: /registry/{resource}/{name}
 		metadata["k8s_name"] = parts[3]
 	}
-	
+
 	// Note: Additional K8s metadata would need to be extracted from the value:
 	// - k8s_uid: Parse from the stored K8s object
 	// - k8s_labels: Extract from metadata.labels in the K8s object
 	// - k8s_owner_refs: Extract from metadata.ownerReferences
 	// This would require deserializing the etcd value as a K8s object
-	
+
 	return metadata
 }
 

@@ -12,13 +12,6 @@ type EtcdEvent struct {
 	_         [7]byte // Padding
 }
 
-// CollectorStats tracks collector metrics
-type CollectorStats struct {
-	EventsGenerated uint64
-	EventsDropped   uint64
-	LastEventTime   uint64
-}
-
 // Event types
 const (
 	EventTypeGet uint32 = iota

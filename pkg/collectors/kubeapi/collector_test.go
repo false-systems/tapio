@@ -60,85 +60,87 @@ func TestCollectorStartStop(t *testing.T) {
 }
 
 func TestExtractRelationships(t *testing.T) {
-\tlogger := zap.NewNop()
-\tconfig := DefaultConfig()
-\tcollector, err := New(logger, config)
-\trequire.NoError(t, err)
+	logger := zap.NewNop()
+	config := DefaultConfig()
+	collector, err := New(logger, config)
+	require.NoError(t, err)
 
-\t// Test with nil object
-\trels := collector.extractRelationships(nil)
-\tassert.Empty(t, rels)
+	// Test with nil object
+	rels := collector.extractRelationships(nil)
+	assert.Empty(t, rels)
 
-\t// More comprehensive relationship tests would require mock K8s objects
+	// More comprehensive relationship tests would require mock K8s objects
 }
 
 func TestShouldIgnoreNamespace(t *testing.T) {
-\tlogger := zap.NewNop()
-\t
-\ttests := []struct {
-\t\tname      string
-\t\tconfig    Config
-\t\tnamespace string
-\t\texpected  bool
-\t}{
-\t\t{
-\t\t\tname:      "no filters",
-\t\t\tconfig:    DefaultConfig(),
-\t\t\tnamespace: "default",
-\t\t\texpected:  false,
-\t\t},
-\t\t{
-\t\t\tname: "in watch list",
-\t\t\tconfig: Config{
-\t\t\t\tWatchNamespaces: []string{"default", "kube-system"},
-\t\t\t},
-\t\t\tnamespace: "default",
-\t\t\texpected:  false,
-\t\t},
-\t\t{
-\t\t\tname: "not in watch list",
-\t\t\tconfig: Config{
-\t\t\t\tWatchNamespaces: []string{"default"},
-\t\t\t},
-\t\t\tnamespace: "kube-system",
-\t\t\texpected:  true,
-\t\t},
-\t\t{
-\t\t\tname: "in ignore list",
-\t\t\tconfig: Config{
-\t\t\t\tIgnoreNamespaces: []string{"kube-system"},
-\t\t\t},
-\t\t\tnamespace: "kube-system",
-\t\t\texpected:  true,
-\t\t},
-\t}
+	logger := zap.NewNop()
 
-\tfor _, tt := range tests {
-\t\tt.Run(tt.name, func(t *testing.T) {
-\t\t\tcollector, err := New(logger, tt.config)
-\t\t\trequire.NoError(t, err)
-\t\t\tresult := collector.shouldIgnoreNamespace(tt.namespace)
-\t\t\tassert.Equal(t, tt.expected, result)
-\t\t})
-\t}
+	tests := []struct {
+		name      string
+		config    Config
+		namespace string
+		expected  bool
+	}{
+		{
+			name:      "no filters",
+			config:    DefaultConfig(),
+			namespace: "default",
+			expected:  false,
+		},
+		{
+			name: "in watch list",
+			config: Config{
+				WatchNamespaces: []string{"default", "kube-system"},
+			},
+			namespace: "default",
+			expected:  false,
+		},
+		{
+			name: "not in watch list",
+			config: Config{
+				WatchNamespaces: []string{"default"},
+			},
+			namespace: "kube-system",
+			expected:  true,
+		},
+		{
+			name: "in ignore list",
+			config: Config{
+				IgnoreNamespaces: []string{"kube-system"},
+			},
+			namespace: "kube-system",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector, err := New(logger, tt.config)
+			require.NoError(t, err)
+			result := collector.shouldIgnoreNamespace(tt.namespace)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestResourceEventHandler(t *testing.T) {
-\tlogger := zap.NewNop()
-\tconfig := DefaultConfig()
-\tcollector, err := New(logger, config)
-\trequire.NoError(t, err)
+	logger := zap.NewNop()
+	config := DefaultConfig()
+	collector, err := New(logger, config)
+	require.NoError(t, err)
 
-\t// Get resource event handler
-\thandler := collector.resourceEventHandler("Pod")
-\tassert.NotNil(t, handler)
-\t
-\t// Handler should have OnAdd, OnUpdate, OnDelete methods
-\t_, hasOnAdd := handler.(interface{ OnAdd(obj interface{}) })
-\t_, hasOnUpdate := handler.(interface{ OnUpdate(oldObj, newObj interface{}) })
-\t_, hasOnDelete := handler.(interface{ OnDelete(obj interface{}) })
-\t
-\tassert.True(t, hasOnAdd)
-\tassert.True(t, hasOnUpdate)
-\tassert.True(t, hasOnDelete)
+	// Get resource event handler
+	handler := collector.resourceEventHandler("Pod")
+	assert.NotNil(t, handler)
+
+	// Handler should have OnAdd, OnUpdate, OnDelete methods
+	_, hasOnAdd := handler.(interface{ OnAdd(obj interface{}) })
+	_, hasOnUpdate := handler.(interface {
+		OnUpdate(oldObj, newObj interface{})
+	})
+	_, hasOnDelete := handler.(interface{ OnDelete(obj interface{}) })
+
+	assert.True(t, hasOnAdd)
+	assert.True(t, hasOnUpdate)
+	assert.True(t, hasOnDelete)
 }
