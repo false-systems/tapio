@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crash-loop-app
+  namespace: default
+  labels:
+    test-scenario: crash-loop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crash-loop
+  template:
+    metadata:
+      labels:
+        app: crash-loop
+    spec:
+      containers:
+      - name: crasher
+        image: busybox
+        command: ["/bin/sh", "-c", "echo 'Starting...'; sleep 5; exit 1"]

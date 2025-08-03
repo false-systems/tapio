@@ -29,16 +29,16 @@ type TLSConfig struct {
 
 // Collector implements minimal etcd monitoring
 type Collector struct {
-	name        string
-	config      Config
-	client      *clientv3.Client
-	events      chan collectors.RawEvent
-	ctx         context.Context
-	cancel      context.CancelFunc
-	healthy     bool
-	mu          sync.RWMutex
-	ebpfState   interface{} // Platform-specific eBPF state
-	stats       CollectorStats
+	name      string
+	config    Config
+	client    *clientv3.Client
+	events    chan collectors.RawEvent
+	ctx       context.Context
+	cancel    context.CancelFunc
+	healthy   bool
+	mu        sync.RWMutex
+	ebpfState interface{} // Platform-specific eBPF state
+	stats     CollectorStats
 }
 
 // CollectorStats tracks collector statistics
@@ -222,6 +222,12 @@ func (c *Collector) processEtcdEvent(event *clientv3.Event) {
 	rawEvent := c.createEvent(operation, eventData)
 	rawEvent.Metadata["resource_type"] = resourceType
 	rawEvent.Metadata["operation"] = operation
+	
+	// Add enhanced K8s metadata - STANDARD for all collectors
+	k8sMetadata := c.extractK8sMetadata(key)
+	for k, v := range k8sMetadata {
+		rawEvent.Metadata[k] = v
+	}
 
 	// Send event
 	select {
@@ -249,6 +255,89 @@ func (c *Collector) extractResourceType(key string) string {
 		return parts[2]
 	}
 	return "unknown"
+}
+
+// extractK8sMetadata extracts full K8s metadata from etcd key
+func (c *Collector) extractK8sMetadata(key string) map[string]string {
+	metadata := make(map[string]string)
+	
+	// Expected formats:
+	// /registry/{resource}/{namespace}/{name} (namespaced)
+	// /registry/{resource}/{name} (cluster-scoped)
+	parts := strings.Split(key, "/")
+	
+	if len(parts) < 3 || parts[1] != "registry" {
+		return metadata
+	}
+	
+	// Extract resource type/kind
+	resourceType := parts[2]
+	metadata["k8s_kind"] = c.normalizeResourceType(resourceType)
+	
+	// Check if namespaced or cluster-scoped
+	if len(parts) == 5 {
+		// Namespaced resource: /registry/{resource}/{namespace}/{name}
+		metadata["k8s_namespace"] = parts[3]
+		metadata["k8s_name"] = parts[4]
+	} else if len(parts) == 4 {
+		// Cluster-scoped resource: /registry/{resource}/{name}
+		metadata["k8s_name"] = parts[3]
+	}
+	
+	// Note: Additional K8s metadata would need to be extracted from the value:
+	// - k8s_uid: Parse from the stored K8s object
+	// - k8s_labels: Extract from metadata.labels in the K8s object
+	// - k8s_owner_refs: Extract from metadata.ownerReferences
+	// This would require deserializing the etcd value as a K8s object
+	
+	return metadata
+}
+
+// normalizeResourceType converts etcd resource types to K8s kinds
+func (c *Collector) normalizeResourceType(resourceType string) string {
+	// Map common etcd resource types to K8s kinds
+	switch resourceType {
+	case "pods":
+		return "Pod"
+	case "services":
+		return "Service"
+	case "deployments":
+		return "Deployment"
+	case "replicasets":
+		return "ReplicaSet"
+	case "configmaps":
+		return "ConfigMap"
+	case "secrets":
+		return "Secret"
+	case "namespaces":
+		return "Namespace"
+	case "nodes":
+		return "Node"
+	case "persistentvolumes":
+		return "PersistentVolume"
+	case "persistentvolumeclaims":
+		return "PersistentVolumeClaim"
+	case "statefulsets":
+		return "StatefulSet"
+	case "daemonsets":
+		return "DaemonSet"
+	case "jobs":
+		return "Job"
+	case "cronjobs":
+		return "CronJob"
+	case "ingresses":
+		return "Ingress"
+	case "endpoints":
+		return "Endpoints"
+	case "events":
+		return "Event"
+	default:
+		// Capitalize first letter as convention
+		if len(resourceType) > 0 {
+			return strings.ToUpper(resourceType[:1]) + resourceType[1:]
+		}
+		return resourceType
+	}
 }
 
 // Helper to create an etcd raw event

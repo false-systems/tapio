@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
@@ -570,20 +571,43 @@ func (c *Collector) extractRelationships(event *ResourceEvent, obj interface{}) 
 func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string) collectors.RawEvent {
 	data, _ := json.Marshal(event)
 
+	// Build metadata with enhanced K8s fields
+	metadata := map[string]string{
+		"collector":   "kubeapi",
+		"event_type":  event.EventType,
+		"api_version": event.APIVersion,
+		// Enhanced K8s metadata - STANDARD for all collectors
+		"k8s_namespace": event.Namespace,
+		"k8s_name":      event.Name,
+		"k8s_kind":      event.Kind,
+		"k8s_uid":       string(event.UID),
+	}
+
+	// Add labels if present
+	if len(event.Labels) > 0 {
+		labelPairs := make([]string, 0, len(event.Labels))
+		for k, v := range event.Labels {
+			labelPairs = append(labelPairs, fmt.Sprintf("%s=%s", k, v))
+		}
+		metadata["k8s_labels"] = strings.Join(labelPairs, ",")
+	}
+
+	// Add owner refs if present
+	if len(event.OwnerReferences) > 0 {
+		ownerRefs := make([]string, 0, len(event.OwnerReferences))
+		for _, ref := range event.OwnerReferences {
+			ownerRefs = append(ownerRefs, fmt.Sprintf("%s/%s", ref.Kind, ref.Name))
+		}
+		metadata["k8s_owner_refs"] = strings.Join(ownerRefs, ",")
+	}
+
 	return collectors.RawEvent{
 		Timestamp: event.Timestamp,
 		Type:      "k8s_" + event.EventType,
 		Data:      data,
-		Metadata: map[string]string{
-			"collector":   "kubeapi",
-			"resource":    event.Kind,
-			"name":        event.Name,
-			"namespace":   event.Namespace,
-			"event_type":  event.EventType,
-			"api_version": event.APIVersion,
-		},
-		TraceID: traceID,
-		SpanID:  spanID,
+		Metadata:  metadata,
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 }
 

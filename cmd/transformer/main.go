@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/integrations/transformer"
 )
 
@@ -26,15 +27,17 @@ type TransformerService struct {
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
+	natsConfig  *config.NATSConfig
 }
 
 func NewTransformerService() (*TransformerService, error) {
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = "nats://localhost:4222"
+	// Get NATS config
+	natsConfig := config.DefaultNATSConfig()
+	if url := os.Getenv("NATS_URL"); url != "" {
+		natsConfig.URL = url
 	}
 
-	nc, err := nats.Connect(natsURL,
+	nc, err := nats.Connect(natsConfig.URL,
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(time.Second),
 		nats.Timeout(10*time.Second),
@@ -68,22 +71,23 @@ func NewTransformerService() (*TransformerService, error) {
 		consumers:   make(map[string]jetstream.Consumer),
 		ctx:         ctx,
 		cancel:      cancel,
+		natsConfig:  natsConfig,
 	}, nil
 }
 
 func (s *TransformerService) Start() error {
 	log.Println("Starting Transformer Service...")
 
-	stream, err := s.js.Stream(s.ctx, "RAW_EVENTS")
+	stream, err := s.js.Stream(s.ctx, s.natsConfig.TracesStreamName)
 	if err != nil {
-		return fmt.Errorf("failed to get RAW_EVENTS stream: %w", err)
+		return fmt.Errorf("failed to get %s stream: %w", s.natsConfig.TracesStreamName, err)
 	}
 
 	consumer, err := stream.CreateOrUpdateConsumer(s.ctx, jetstream.ConsumerConfig{
 		Name:          "transformer-consumer",
 		Durable:       "transformer-consumer",
 		AckPolicy:     jetstream.AckExplicitPolicy,
-		FilterSubject: "raw.>",
+		FilterSubject: s.natsConfig.GetTracesSubject(),
 		MaxDeliver:    3,
 		AckWait:       30 * time.Second,
 		MaxAckPending: 1000,

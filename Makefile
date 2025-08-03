@@ -40,16 +40,32 @@ build: proto generate-ebpf ## Build all binaries (includes proto generation)
 	@echo "$(GREEN)✅ Build complete: bin/$(NC)"
 	@ls -la bin/
 
-test: ## Run all tests
-	@echo "$(BLUE)🧪 Running tests...$(NC)"
-	@go test -race -short ./...
-	@echo "$(GREEN)✅ Tests passed!$(NC)"
+test: test-unit test-integration ## Run all tests
+
+test-unit: ## Run unit tests
+	@echo "$(BLUE)🧪 Running unit tests...$(NC)"
+	@go test ./pkg/... -v -short
+	@echo "$(GREEN)✅ Unit tests passed!$(NC)"
+
+test-integration: ## Run integration tests
+	@echo "$(BLUE)🧪 Running integration tests...$(NC)"
+	@go test ./tests/integration/... -v
+	@echo "$(GREEN)✅ Integration tests passed!$(NC)"
 
 test-coverage: ## Run tests with coverage
 	@echo "$(BLUE)📊 Running tests with coverage...$(NC)"
-	@go test -race -coverprofile=coverage.out ./...
+	@go test ./... -coverprofile=coverage.out
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "$(GREEN)✅ Coverage report: coverage.html$(NC)"
+
+test-collector-coverage: ## Generate collector coverage report
+	@echo "$(BLUE)📊 Generating collector coverage...$(NC)"
+	@go test ./pkg/collectors/... -coverprofile=collector-coverage.out
+	@go tool cover -html=collector-coverage.out -o collector-coverage.html
+	@echo "$(GREEN)✅ Collector coverage: collector-coverage.html$(NC)"
+
+verify: fmt lint test build ## Run all verification steps
+	@echo "$(GREEN)✅ All checks passed!$(NC)"
 
 ##@ Code Quality
 

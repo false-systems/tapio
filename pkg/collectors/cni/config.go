@@ -4,7 +4,7 @@ package cni
 type Config struct {
 	// Buffer size for events channel
 	BufferSize int
-	
+
 	// Enable eBPF monitoring
 	EnableEBPF bool
 }

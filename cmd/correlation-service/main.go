@@ -10,7 +10,9 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"github.com/yairfalse/tapio/pkg/intelligence/nats"
 	"github.com/yairfalse/tapio/pkg/intelligence/storage"
@@ -28,13 +30,22 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create K8s client
-	config, err := rest.InClusterConfig()
+	// Create K8s client - try in-cluster first, then kubeconfig
+	k8sConfig, err := rest.InClusterConfig()
 	if err != nil {
-		logger.Fatal("Failed to get in-cluster config", zap.Error(err))
+		logger.Info("Not running in cluster, trying kubeconfig...")
+		// Try kubeconfig for local development
+		kubeconfig := os.Getenv("KUBECONFIG")
+		if kubeconfig == "" {
+			kubeconfig = clientcmd.RecommendedHomeFile
+		}
+		k8sConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			logger.Fatal("Failed to get kubeconfig", zap.Error(err))
+		}
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := kubernetes.NewForConfig(k8sConfig)
 	if err != nil {
 		logger.Fatal("Failed to create K8s client", zap.Error(err))
 	}
@@ -56,11 +67,14 @@ func main() {
 	}
 
 	// 3. Create NATS subscriber
-	natsConfig := nats.DefaultConfig()
-	natsConfig.URL = getEnv("NATS_URL", "nats://nats.tapio-system.svc.cluster.local:4222")
-	natsConfig.StreamName = getEnv("STREAM_NAME", "TRACES")
-	natsConfig.ConsumerName = getEnv("CONSUMER_NAME", "correlation-service")
-	natsConfig.Subject = getEnv("SUBJECT", "traces.>")
+	natsConfig := config.DefaultNATSConfig()
+	// Override with environment variables if set
+	if url := os.Getenv("NATS_URL"); url != "" {
+		natsConfig.URL = url
+	}
+	if consumer := os.Getenv("CONSUMER_NAME"); consumer != "" {
+		natsConfig.ConsumerName = consumer
+	}
 
 	subscriber, err := nats.NewSubscriber(logger, natsConfig, engine)
 	if err != nil {
@@ -79,8 +93,8 @@ func main() {
 
 	logger.Info("Correlation service started",
 		zap.String("nats_url", natsConfig.URL),
-		zap.String("stream", natsConfig.StreamName),
-		zap.String("subject", natsConfig.Subject),
+		zap.String("stream", natsConfig.TracesStreamName),
+		zap.String("subject", natsConfig.GetTracesSubject()),
 		zap.Bool("k8s_enabled", engineConfig.EnableK8s),
 		zap.Bool("temporal_enabled", engineConfig.EnableTemporal),
 		zap.Bool("sequence_enabled", engineConfig.EnableSequence),
@@ -135,11 +149,4 @@ func handleCorrelationResults(ctx context.Context, engine *correlation.Engine, l
 			// - Send to UI/dashboard
 		}
 	}
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }

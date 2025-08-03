@@ -10,11 +10,12 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
+	"github.com/yairfalse/tapio/pkg/config"
 	"go.uber.org/zap"
 )
 
 var (
-	natsURL = flag.String("nats", "nats://localhost:4222", "NATS server URL")
+	natsURL = flag.String("nats", "", "NATS server URL (overrides config)")
 )
 
 func main() {
@@ -28,12 +29,17 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Create NATS config
+	natsConfig := config.DefaultNATSConfig()
+	if *natsURL != "" {
+		natsConfig.URL = *natsURL
+	}
+
 	// Create EventPipeline config
 	pipelineConfig := pipeline.Config{
-		NATSURL:     *natsURL,
-		NATSSubject: "traces",
-		BufferSize:  10000,
-		Workers:     4,
+		NATSConfig: natsConfig,
+		BufferSize: 10000,
+		Workers:    4,
 	}
 
 	// Create EventPipeline
@@ -60,7 +66,7 @@ func main() {
 	}
 
 	logger.Info("Tapio started successfully",
-		zap.String("nats_url", *natsURL),
+		zap.String("nats_url", natsConfig.URL),
 		zap.String("collector", "kubeapi"))
 
 	// Wait for shutdown

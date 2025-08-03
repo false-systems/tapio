@@ -92,6 +92,32 @@ struct mount_info {
     __u8 _pad[7];          // Padding
 } __attribute__((packed));
 
+// DNS query information for service discovery correlation
+struct dns_query_info {
+    char service_name[64]; // K8s service name from DNS
+    char namespace[64];    // K8s namespace
+    __u32 resolved_ip;     // Resolved IP address
+    __u16 port;           // Service port
+    __u8 _pad[2];         // Padding
+} __attribute__((packed));
+
+// Volume mount information for PVC correlation
+struct volume_info {
+    char pvc_name[64];     // PersistentVolumeClaim name
+    char namespace[64];    // K8s namespace
+    char mount_path[128];  // Mount path in container
+    char volume_id[64];    // Cloud volume ID (e.g., AWS EBS vol-xxx)
+} __attribute__((packed));
+
+// Process parent-child relationship for job/cronjob tracking
+struct process_lineage {
+    __u32 pid;             // Process ID
+    __u32 ppid;            // Parent process ID
+    __u32 tgid;            // Thread group ID
+    __u64 start_time;      // Process start time
+    char job_name[64];     // K8s Job/CronJob name if applicable
+} __attribute__((packed));
+
 // Maps
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -136,6 +162,30 @@ struct {
     __type(key, __u64);             // Hash of mount path
     __type(value, struct mount_info); // mount info
 } mount_info_map SEC(".maps");
+
+// Map DNS queries to service endpoints
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u64);             // Hash of DNS query
+    __type(value, struct dns_query_info); // DNS resolution info
+} dns_query_map SEC(".maps");
+
+// Map volume mount paths to PVC info
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 5120);
+    __type(key, __u64);             // Hash of mount path
+    __type(value, struct volume_info); // PVC info
+} volume_info_map SEC(".maps");
+
+// Map process relationships for Job/CronJob tracking
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 20480);
+    __type(key, __u32);             // PID
+    __type(value, struct process_lineage); // Process lineage info
+} process_lineage_map SEC(".maps");
 
 // Helper to check if process is in a container
 static __always_inline bool is_container_process(__u32 pid)

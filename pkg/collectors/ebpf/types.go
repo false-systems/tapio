@@ -1,5 +1,7 @@
 package ebpf
 
+import "time"
+
 // NetworkInfo represents network connection information
 type NetworkInfo struct {
 	SAddr     uint32 // Source IP (IPv4)
@@ -66,11 +68,38 @@ type MountInfo struct {
 	_         [7]byte   // Padding
 }
 
-// CollectorStats tracks collector metrics
+// CollectorStats tracks collector statistics
 type CollectorStats struct {
-	EventsGenerated uint64
+	EventsCollected uint64
 	EventsDropped   uint64
-	LastEventTime   uint64
+	ErrorCount      uint64
+	LastEventTime   time.Time
+}
+
+// DNSQueryInfo represents DNS query information for service discovery
+type DNSQueryInfo struct {
+	ServiceName [64]byte // K8s service name from DNS
+	Namespace   [64]byte // K8s namespace
+	ResolvedIP  uint32   // Resolved IP address
+	Port        uint16   // Service port
+	_           [2]byte  // Padding
+}
+
+// VolumeInfo represents PVC mount information
+type VolumeInfo struct {
+	PVCName    [64]byte  // PersistentVolumeClaim name
+	Namespace  [64]byte  // K8s namespace
+	MountPath  [128]byte // Mount path in container
+	VolumeID   [64]byte  // Cloud volume ID (e.g., AWS EBS vol-xxx)
+}
+
+// ProcessLineage represents process parent-child relationships
+type ProcessLineage struct {
+	PID       uint32    // Process ID
+	PPID      uint32    // Parent process ID
+	TGID      uint32    // Thread group ID
+	StartTime uint64    // Process start time
+	JobName   [64]byte  // K8s Job/CronJob name if applicable
 }
 
 // Event types

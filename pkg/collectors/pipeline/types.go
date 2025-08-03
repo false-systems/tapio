@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -21,19 +22,17 @@ type EventPipeline struct {
 
 // Config holds pipeline configuration
 type Config struct {
-	Workers     int
-	BufferSize  int
-	NATSURL     string
-	NATSSubject string
+	Workers    int
+	BufferSize int
+	NATSConfig *config.NATSConfig
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() Config {
 	return Config{
-		Workers:     4,
-		BufferSize:  10000,
-		NATSURL:     "nats://localhost:4222",
-		NATSSubject: "traces",
+		Workers:    4,
+		BufferSize: 10000,
+		NATSConfig: config.DefaultNATSConfig(),
 	}
 }
 

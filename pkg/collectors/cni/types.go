@@ -19,7 +19,7 @@ type CollectorStats struct {
 
 // Event types
 const (
-	EventTypeNetnsEnter uint32 = 1
+	EventTypeNetnsEnter  uint32 = 1
 	EventTypeNetnsCreate uint32 = 2
-	EventTypeNetnsExit uint32 = 3
+	EventTypeNetnsExit   uint32 = 3
 )

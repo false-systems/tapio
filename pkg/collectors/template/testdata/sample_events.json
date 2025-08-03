@@ -1,0 +1,44 @@
+{
+  "events": [
+    {
+      "timestamp": "2025-01-01T10:00:00Z",
+      "type": "template",
+      "data": {
+        "message": "Pod nginx-7c4ff8b6d5-xyz started",
+        "value": 1
+      },
+      "metadata": {
+        "collector_name": "template",
+        "event_type": "pod_start",
+        "k8s_namespace": "default",
+        "k8s_name": "nginx-7c4ff8b6d5-xyz",
+        "k8s_kind": "Pod",
+        "k8s_uid": "550e8400-e29b-41d4-a716-446655440000",
+        "k8s_labels": "app=nginx,version=1.2",
+        "k8s_owner_refs": "ReplicaSet/nginx-7c4ff8b6d5"
+      },
+      "trace_id": "550e8400-e29b-41d4-a716-446655440001",
+      "span_id": "550e8400-e29b-41d4-a716-446655440002"
+    },
+    {
+      "timestamp": "2025-01-01T10:00:05Z",
+      "type": "template",
+      "data": {
+        "message": "Service nginx-svc endpoint updated",
+        "value": 2
+      },
+      "metadata": {
+        "collector_name": "template",
+        "event_type": "service_update",
+        "k8s_namespace": "default",
+        "k8s_name": "nginx-svc",
+        "k8s_kind": "Service",
+        "k8s_uid": "650e8400-e29b-41d4-a716-446655440000",
+        "k8s_labels": "app=nginx",
+        "k8s_owner_refs": ""
+      },
+      "trace_id": "550e8400-e29b-41d4-a716-446655440001",
+      "span_id": "550e8400-e29b-41d4-a716-446655440003"
+    }
+  ]
+}

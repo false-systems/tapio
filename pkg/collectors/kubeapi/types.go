@@ -75,36 +75,3 @@ func ObjectKey(kind, namespace, name string) string {
 	}
 	return kind + "/" + namespace + "/" + name
 }
-
-// Config holds kubeapi collector configuration
-type Config struct {
-	// What to watch
-	WatchNamespaces  []string // Empty = all namespaces
-	IgnoreNamespaces []string // System namespaces to ignore
-
-	// Performance
-	ResyncPeriod time.Duration
-	BufferSize   int
-
-	// Features
-	TrackCRDs            bool
-	TrackRBAC            bool
-	TrackNetworkPolicies bool
-}
-
-// DefaultConfig returns sensible defaults
-func DefaultConfig() Config {
-	return Config{
-		WatchNamespaces: []string{}, // Watch all
-		IgnoreNamespaces: []string{
-			"kube-system",
-			"kube-public",
-			"kube-node-lease",
-		},
-		ResyncPeriod:         30 * time.Minute,
-		BufferSize:           10000,
-		TrackCRDs:            true,
-		TrackRBAC:            true,
-		TrackNetworkPolicies: true,
-	}
-}

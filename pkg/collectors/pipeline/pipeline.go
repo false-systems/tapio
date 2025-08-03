@@ -19,7 +19,7 @@ func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
 	}
 
 	// Create NATS publisher
-	publisher, err := NewNATSPublisher(logger, config.NATSURL, config.NATSSubject)
+	publisher, err := NewNATSPublisher(logger, config.NATSConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NATS publisher: %w", err)
 	}

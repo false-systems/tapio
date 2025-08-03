@@ -3,33 +3,34 @@ package pipeline
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
 // NATSPublisher publishes events to NATS
 type NATSPublisher struct {
-	logger      *zap.Logger
-	nc          *nats.Conn
-	js          nats.JetStreamContext
-	subjectBase string
+	logger *zap.Logger
+	nc     *nats.Conn
+	js     nats.JetStreamContext
+	config *config.NATSConfig
 }
 
 // NewNATSPublisher creates a new NATS publisher
-func NewNATSPublisher(logger *zap.Logger, url, subjectBase string) (*NATSPublisher, error) {
-	if url == "" {
+func NewNATSPublisher(logger *zap.Logger, natsConfig *config.NATSConfig) (*NATSPublisher, error) {
+	if natsConfig == nil || natsConfig.URL == "" {
 		// Return nil publisher for testing
 		return nil, nil
 	}
 
 	// Connect with retry
-	nc, err := nats.Connect(url,
+	nc, err := nats.Connect(natsConfig.URL,
+		nats.Name(natsConfig.Name),
 		nats.RetryOnFailedConnect(true),
-		nats.MaxReconnects(10),
-		nats.ReconnectWait(time.Second),
+		nats.MaxReconnects(natsConfig.MaxReconnects),
+		nats.ReconnectWait(natsConfig.ReconnectWait),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
@@ -43,15 +44,17 @@ func NewNATSPublisher(logger *zap.Logger, url, subjectBase string) (*NATSPublish
 	}
 
 	// Ensure stream exists
-	streamName := "TRACES"
-	_, err = js.StreamInfo(streamName)
+	_, err = js.StreamInfo(natsConfig.TracesStreamName)
 	if err != nil {
 		// Create stream
 		_, err = js.AddStream(&nats.StreamConfig{
-			Name:     streamName,
-			Subjects: []string{subjectBase + ".>"},
-			Storage:  nats.FileStorage,
-			MaxAge:   24 * time.Hour,
+			Name:       natsConfig.TracesStreamName,
+			Subjects:   natsConfig.TracesSubjects,
+			Storage:    nats.FileStorage,
+			MaxAge:     natsConfig.MaxAge,
+			MaxBytes:   natsConfig.MaxBytes,
+			Duplicates: natsConfig.DuplicateWindow,
+			Replicas:   natsConfig.Replicas,
 		})
 		if err != nil {
 			nc.Close()
@@ -60,10 +63,10 @@ func NewNATSPublisher(logger *zap.Logger, url, subjectBase string) (*NATSPublish
 	}
 
 	return &NATSPublisher{
-		logger:      logger,
-		nc:          nc,
-		js:          js,
-		subjectBase: subjectBase,
+		logger: logger,
+		nc:     nc,
+		js:     js,
+		config: natsConfig,
 	}, nil
 }
 
@@ -107,7 +110,15 @@ func (p *NATSPublisher) generateSubject(event *domain.UnifiedEvent) string {
 	}
 
 	// Subject format: traces.{traceID}.{source}
-	return fmt.Sprintf("%s.%s.%s", p.subjectBase, traceID, event.Source)
+	baseSubject := "traces" // Default from config
+	if len(p.config.TracesSubjects) > 0 {
+		// Use first subject without wildcard
+		baseSubject = p.config.TracesSubjects[0]
+		if len(baseSubject) > 2 && baseSubject[len(baseSubject)-2:] == ".>" {
+			baseSubject = baseSubject[:len(baseSubject)-2]
+		}
+	}
+	return fmt.Sprintf("%s.%s.%s", baseSubject, traceID, event.Source)
 }
 
 // getTraceID extracts trace ID from event

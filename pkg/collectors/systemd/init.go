@@ -12,11 +12,17 @@ func init() {
 // CreateCollector creates a new systemd collector from config
 func CreateCollector(config map[string]interface{}) (collectors.Collector, error) {
 	// Parse configuration
-	collectorConfig := collectors.DefaultCollectorConfig()
+	cfg := DefaultConfig()
 
 	// Override with provided config
 	if bufferSize, ok := config["buffer_size"].(int); ok {
-		collectorConfig.BufferSize = bufferSize
+		cfg.BufferSize = bufferSize
+	}
+	if enableEBPF, ok := config["enable_ebpf"].(bool); ok {
+		cfg.EnableEBPF = enableEBPF
+	}
+	if enableJournal, ok := config["enable_journal"].(bool); ok {
+		cfg.EnableJournal = enableJournal
 	}
 
 	// Use factory function - get name from config or default
@@ -25,5 +31,5 @@ func CreateCollector(config map[string]interface{}) (collectors.Collector, error
 		name = n
 	}
 
-	return NewCollector(name)
+	return NewCollector(name, cfg)
 }

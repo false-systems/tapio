@@ -4,9 +4,10 @@ import "time"
 
 // Config holds configuration for kubeapi collector
 type Config struct {
-	// Namespaces to watch (empty = all namespaces)
-	Namespaces []string
-	
+	// What to watch
+	WatchNamespaces  []string // Empty = all namespaces
+	IgnoreNamespaces []string // System namespaces to ignore
+
 	// Resource types to watch
 	WatchPods         bool
 	WatchServices     bool
@@ -17,32 +18,41 @@ type Config struct {
 	WatchConfigMaps   bool
 	WatchSecrets      bool
 	WatchIngresses    bool
-	
-	// Resync period for informers
+
+	// Performance
 	ResyncPeriod time.Duration
-	
-	// Buffer size for events channel
-	BufferSize int
-	
-	// Enable relationship tracking
-	TrackRelationships bool
+	BufferSize   int
+
+	// Features
+	TrackRelationships   bool
+	TrackCRDs            bool
+	TrackRBAC            bool
+	TrackNetworkPolicies bool
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() Config {
 	return Config{
-		Namespaces:         []string{}, // Watch all namespaces
-		WatchPods:          true,
-		WatchServices:      true,
-		WatchDeployments:   true,
-		WatchStatefulSets:  true,
-		WatchDaemonSets:    true,
-		WatchReplicaSets:   true,
-		WatchConfigMaps:    true,
-		WatchSecrets:       true,
-		WatchIngresses:     true,
-		ResyncPeriod:       10 * time.Minute,
-		BufferSize:         10000,
-		TrackRelationships: true,
+		WatchNamespaces: []string{}, // Watch all
+		IgnoreNamespaces: []string{
+			"kube-system",
+			"kube-public",
+			"kube-node-lease",
+		},
+		WatchPods:            true,
+		WatchServices:        true,
+		WatchDeployments:     true,
+		WatchStatefulSets:    true,
+		WatchDaemonSets:      true,
+		WatchReplicaSets:     true,
+		WatchConfigMaps:      true,
+		WatchSecrets:         true,
+		WatchIngresses:       true,
+		ResyncPeriod:         30 * time.Minute,
+		BufferSize:           10000,
+		TrackRelationships:   true,
+		TrackCRDs:            false,
+		TrackRBAC:            false,
+		TrackNetworkPolicies: false,
 	}
 }

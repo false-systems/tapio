@@ -4,10 +4,10 @@ package etcd
 type Config struct {
 	// Buffer size for events channel
 	BufferSize int
-	
+
 	// Enable eBPF monitoring
 	EnableEBPF bool
-	
+
 	// etcd endpoints for API monitoring (optional)
 	Endpoints []string
 }

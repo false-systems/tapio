@@ -16,72 +16,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// NetworkInfo represents network connection information
-type NetworkInfo struct {
-	SAddr     uint32 // Source IP (IPv4)
-	DAddr     uint32 // Destination IP (IPv4)
-	SPort     uint16 // Source port
-	DPort     uint16 // Destination port
-	Protocol  uint8  // IPPROTO_TCP or IPPROTO_UDP
-	State     uint8  // Connection state
-	Direction uint8  // 0=outgoing, 1=incoming
-	_         uint8  // Padding
-}
-
-// KernelEvent represents a kernel event from eBPF
-type KernelEvent struct {
-	Timestamp uint64
-	PID       uint32
-	TID       uint32
-	EventType uint32
-	Size      uint64
-	Comm      [16]byte
-	CgroupID  uint64   // Add cgroup ID for pod correlation
-	PodUID    [36]byte // Add pod UID
-	Data      [64]byte // Can contain NetworkInfo for network events
-}
-
-// PodInfo represents pod information for correlation
-type PodInfo struct {
-	PodUID    [36]byte
-	Namespace [64]byte
-	PodName   [128]byte
-	CreatedAt uint64
-}
-
-// ContainerInfo represents container information for PID correlation
-type ContainerInfo struct {
-	ContainerID [64]byte  // Docker/containerd ID
-	PodUID      [36]byte  // Associated pod
-	Image       [128]byte // Container image
-	StartedAt   uint64    // Container start time
-}
-
-// ServiceEndpoint represents K8s service endpoint information
-type ServiceEndpoint struct {
-	ServiceName [64]byte // K8s service name
-	Namespace   [64]byte // K8s namespace
-	ClusterIP   [16]byte // Service cluster IP
-	Port        uint16   // Service port
-	_           [2]byte  // Padding
-}
-
-// FileInfo represents file operation information
-type FileInfo struct {
-	Filename [56]byte // File path (truncated)
-	Flags    uint32   // Open flags
-	Mode     uint32   // File mode
-}
-
-// MountInfo represents ConfigMap/Secret mount information
-type MountInfo struct {
-	Name      [64]byte  // ConfigMap/Secret name
-	Namespace [64]byte  // K8s namespace
-	MountPath [128]byte // Mount path in container
-	IsSecret  uint8     // 1 if secret, 0 if configmap
-	_         [7]byte   // Padding
-}
-
 // Collector implements minimal kernel monitoring via eBPF
 type Collector struct {
 	name          string
@@ -93,19 +27,11 @@ type Collector struct {
 	cancel        context.CancelFunc
 	healthy       bool
 	mu            sync.RWMutex
-	podTraceMap   map[string]string                  // Map pod UID to trace ID
-	natsPublisher *NATSPublisher                     // NATS publisher for events
-	// Removed performance adapter - using channels directly
-	stats         CollectorStats
+	podTraceMap   map[string]string // Map pod UID to trace ID
+	natsPublisher *NATSPublisher    // NATS publisher for events
+	stats CollectorStats
 }
 
-// CollectorStats tracks collector statistics
-type CollectorStats struct {
-	EventsCollected uint64
-	EventsDropped   uint64
-	ErrorCount      uint64
-	LastEventTime   time.Time
-}
 
 // NewCollector creates a new minimal eBPF collector
 func NewCollector(name string) (*Collector, error) {
@@ -210,16 +136,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
 
-	// Start performance adapter
-	if err := c.perfAdapter.Start(); err != nil {
-		// Clean up eBPF resources
-		for _, l := range c.links {
-			l.Close()
-		}
-		c.reader.Close()
-		c.objs.Close()
-		return fmt.Errorf("failed to start performance adapter: %w", err)
-	}
+	// No performance adapter - using direct channels
 
 	// Start event processing
 	go c.processEvents()
@@ -257,10 +174,7 @@ func (c *Collector) Stop() error {
 		c.objs.Close()
 	}
 
-	// Stop performance adapter
-	if c.perfAdapter != nil {
-		c.perfAdapter.Stop()
-	}
+	// No performance adapter to stop
 
 	if c.events != nil {
 		close(c.events)
@@ -271,11 +185,7 @@ func (c *Collector) Stop() error {
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan collectors.RawEvent {
-	// Return performance adapter's output channel if available
-	if c.perfAdapter != nil {
-		return c.perfAdapter.Events()
-	}
-	// Fallback to direct channel
+	// Return direct channel
 	return c.events
 }
 
@@ -370,6 +280,17 @@ func (c *Collector) processEvents() {
 			"pod_uid":   c.nullTerminatedString(event.PodUID[:]),
 		}
 
+		// Add enhanced K8s metadata from eBPF maps - STANDARD for all collectors
+		if event.CgroupID != 0 {
+			if podInfo, err := c.GetPodInfo(event.CgroupID); err == nil {
+				metadata["k8s_namespace"] = c.nullTerminatedString(podInfo.Namespace[:])
+				metadata["k8s_name"] = c.nullTerminatedString(podInfo.PodName[:])
+				metadata["k8s_kind"] = "Pod" // eBPF tracks pods
+				metadata["k8s_uid"] = c.nullTerminatedString(podInfo.PodUID[:])
+				// Labels and owner refs would need to be added via UpdatePodInfo
+			}
+		}
+
 		// Add container information if available
 		if containerInfo, err := c.GetContainerInfo(event.PID); err == nil {
 			metadata["container_id"] = c.nullTerminatedString(containerInfo.ContainerID[:])
@@ -432,40 +353,26 @@ func (c *Collector) processEvents() {
 			SpanID:  collectors.GenerateSpanID(),
 		}
 
-		// Submit through performance adapter if available
-		if c.perfAdapter != nil {
-			if err := c.perfAdapter.Submit(&rawEvent); err != nil {
-				c.mu.Lock()
-				c.stats.EventsDropped++
-				c.mu.Unlock()
-			} else {
-				c.mu.Lock()
-				c.stats.EventsCollected++
-				c.stats.LastEventTime = time.Now()
-				c.mu.Unlock()
-			}
-		} else {
-			// Fallback to direct channel send
-			select {
-			case c.events <- rawEvent:
-				c.mu.Lock()
-				c.stats.EventsCollected++
-				c.stats.LastEventTime = time.Now()
-				c.mu.Unlock()
-			case <-c.ctx.Done():
-				return
-			default:
-				// Drop event if buffer full
-				c.mu.Lock()
-				c.stats.EventsDropped++
-				c.mu.Unlock()
-			}
+		// Send through direct channel
+		select {
+		case c.events <- rawEvent:
+			c.mu.Lock()
+			c.stats.EventsCollected++
+			c.stats.LastEventTime = time.Now()
+			c.mu.Unlock()
+		case <-c.ctx.Done():
+			return
+		default:
+			// Drop event if buffer full
+			c.mu.Lock()
+			c.stats.EventsDropped++
+			c.mu.Unlock()
 		}
 
 		// Publish to NATS if publisher available
 		if c.natsPublisher != nil {
 			// Convert to UnifiedEvent for NATS
-			unifiedEvent := c.convertToUnifiedEvent(&rawEvent, event)
+			unifiedEvent := c.convertToUnifiedEvent(&rawEvent, &event)
 			if err := c.natsPublisher.PublishEvent(unifiedEvent); err != nil {
 				// Log error but continue processing
 			}
@@ -786,6 +693,59 @@ func (c *Collector) hashPath(path string) uint64 {
 	return hash
 }
 
+// UpdateDNSQuery updates DNS query information for service discovery correlation
+func (c *Collector) UpdateDNSQuery(query, serviceName, namespace string, resolvedIP uint32, port uint16) error {
+	if c.objs == nil || c.objs.DnsQueryMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	key := c.hashPath(query) // Reuse hash function for DNS queries
+
+	dnsInfo := &DNSQueryInfo{
+		ResolvedIP: resolvedIP,
+		Port:       port,
+	}
+
+	copy(dnsInfo.ServiceName[:], serviceName)
+	copy(dnsInfo.Namespace[:], namespace)
+
+	return c.objs.DnsQueryMap.Put(key, dnsInfo)
+}
+
+// UpdateVolumeInfo updates PVC mount information for volume correlation
+func (c *Collector) UpdateVolumeInfo(mountPath, pvcName, namespace, volumeID string) error {
+	if c.objs == nil || c.objs.VolumeInfoMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	key := c.hashPath(mountPath)
+
+	volumeInfo := &VolumeInfo{}
+	copy(volumeInfo.PVCName[:], pvcName)
+	copy(volumeInfo.Namespace[:], namespace)
+	copy(volumeInfo.MountPath[:], mountPath)
+	copy(volumeInfo.VolumeID[:], volumeID)
+
+	return c.objs.VolumeInfoMap.Put(key, volumeInfo)
+}
+
+// UpdateProcessLineage updates process parent-child relationships for Job tracking
+func (c *Collector) UpdateProcessLineage(pid, ppid, tgid uint32, startTime uint64, jobName string) error {
+	if c.objs == nil || c.objs.ProcessLineageMap == nil {
+		return fmt.Errorf("eBPF maps not initialized")
+	}
+
+	lineage := &ProcessLineage{
+		PID:       pid,
+		PPID:      ppid,
+		TGID:      tgid,
+		StartTime: startTime,
+	}
+	copy(lineage.JobName[:], jobName)
+
+	return c.objs.ProcessLineageMap.Put(pid, lineage)
+}
+
 // Health returns detailed health information
 func (c *Collector) Health() (bool, map[string]interface{}) {
 	c.mu.RLock()
@@ -817,16 +777,7 @@ func (c *Collector) Statistics() map[string]interface{} {
 		"pod_trace_count":  len(c.podTraceMap),
 	}
 
-	// Add performance metrics if available
-	if c.perfAdapter != nil {
-		perfMetrics := c.perfAdapter.GetMetrics()
-		stats["perf_buffer_size"] = perfMetrics.BufferSize
-		stats["perf_buffer_capacity"] = perfMetrics.BufferCapacity
-		stats["perf_buffer_utilization"] = perfMetrics.BufferUtilization
-		stats["perf_batches_processed"] = perfMetrics.BatchesProcessed
-		stats["perf_pool_in_use"] = perfMetrics.PoolInUse
-		stats["perf_events_processed"] = perfMetrics.EventsProcessed
-	}
+	// No performance metrics without adapter
 
 	return stats
 }

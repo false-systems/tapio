@@ -122,40 +122,40 @@ type EntityContext struct {
 
 // KernelData for eBPF/kernel events (enhanced with BPF metadata)
 type KernelData struct {
-	Syscall         string            `json:"syscall,omitempty"`
-	PID             uint32            `json:"pid,omitempty"`
-	TID             uint32            `json:"tid,omitempty"`
-	UID             uint32            `json:"uid,omitempty"`
-	GID             uint32            `json:"gid,omitempty"`
-	Comm            string            `json:"comm,omitempty"` // Process name
-	ReturnCode      int32             `json:"return_code,omitempty"`
-	Args            map[string]string `json:"args,omitempty"` // Syscall arguments
-	StackTrace      []string          `json:"stack_trace,omitempty"`
-	CPUCore         int               `json:"cpu_core,omitempty"`
-	BPFProgram      string            `json:"bpf_program,omitempty"`
-	BPFMapStats     map[string]int    `json:"bpf_map_stats,omitempty"`
+	Syscall     string            `json:"syscall,omitempty"`
+	PID         uint32            `json:"pid,omitempty"`
+	TID         uint32            `json:"tid,omitempty"`
+	UID         uint32            `json:"uid,omitempty"`
+	GID         uint32            `json:"gid,omitempty"`
+	Comm        string            `json:"comm,omitempty"` // Process name
+	ReturnCode  int32             `json:"return_code,omitempty"`
+	Args        map[string]string `json:"args,omitempty"` // Syscall arguments
+	StackTrace  []string          `json:"stack_trace,omitempty"`
+	CPUCore     int               `json:"cpu_core,omitempty"`
+	BPFProgram  string            `json:"bpf_program,omitempty"`
+	BPFMapStats map[string]int    `json:"bpf_map_stats,omitempty"`
 	// Removed kprobe and security details - over-engineered
 }
 
 // NetworkData for network events (enhanced with CNI/network policy context)
 type NetworkData struct {
-	Protocol       string             `json:"protocol,omitempty"` // TCP, UDP, HTTP, gRPC
-	SourceIP       string             `json:"source_ip,omitempty"`
-	SourcePort     uint16             `json:"source_port,omitempty"`
-	DestIP         string             `json:"dest_ip,omitempty"`
-	DestPort       uint16             `json:"dest_port,omitempty"`
-	Direction      string             `json:"direction,omitempty"` // ingress, egress
-	BytesSent      uint64             `json:"bytes_sent,omitempty"`
-	BytesRecv      uint64             `json:"bytes_recv,omitempty"`
-	Latency        int64              `json:"latency_ns,omitempty"`
-	StatusCode     int                `json:"status_code,omitempty"` // HTTP/gRPC status
-	Method         string             `json:"method,omitempty"`      // HTTP/gRPC method
-	Path           string             `json:"path,omitempty"`        // HTTP/gRPC path
-	Headers        map[string]string  `json:"headers,omitempty"`
+	Protocol   string            `json:"protocol,omitempty"` // TCP, UDP, HTTP, gRPC
+	SourceIP   string            `json:"source_ip,omitempty"`
+	SourcePort uint16            `json:"source_port,omitempty"`
+	DestIP     string            `json:"dest_ip,omitempty"`
+	DestPort   uint16            `json:"dest_port,omitempty"`
+	Direction  string            `json:"direction,omitempty"` // ingress, egress
+	BytesSent  uint64            `json:"bytes_sent,omitempty"`
+	BytesRecv  uint64            `json:"bytes_recv,omitempty"`
+	Latency    int64             `json:"latency_ns,omitempty"`
+	StatusCode int               `json:"status_code,omitempty"` // HTTP/gRPC status
+	Method     string            `json:"method,omitempty"`      // HTTP/gRPC method
+	Path       string            `json:"path,omitempty"`        // HTTP/gRPC path
+	Headers    map[string]string `json:"headers,omitempty"`
 	// Removed network policy details - over-engineered
-	ContainerID    string             `json:"container_id,omitempty"`
-	InterfaceName  string             `json:"interface_name,omitempty"`
-	VirtualNetwork string             `json:"virtual_network,omitempty"`
+	ContainerID    string `json:"container_id,omitempty"`
+	InterfaceName  string `json:"interface_name,omitempty"`
+	VirtualNetwork string `json:"virtual_network,omitempty"`
 }
 
 // ApplicationData for application-level events
@@ -173,17 +173,17 @@ type ApplicationData struct {
 
 // KubernetesData for Kubernetes events (enhanced with CRD and admission webhook support)
 type KubernetesData struct {
-	EventType        string              `json:"event_type,omitempty"`  // Normal, Warning
-	Reason           string              `json:"reason,omitempty"`      // BackOff, Killing, etc.
-	Object           string              `json:"object,omitempty"`      // pod/foo, deployment/bar
-	ObjectKind       string              `json:"object_kind,omitempty"` // Pod, Service, etc.
-	Message          string              `json:"message,omitempty"`
-	Action           string              `json:"action,omitempty"` // ADDED, MODIFIED, DELETED
-	APIVersion       string              `json:"api_version,omitempty"`
-	ResourceVersion  string              `json:"resource_version,omitempty"`
-	Labels           map[string]string   `json:"labels,omitempty"`
-	Annotations      map[string]string   `json:"annotations,omitempty"`
-	ClusterName      string              `json:"cluster_name,omitempty"`
+	EventType       string            `json:"event_type,omitempty"`  // Normal, Warning
+	Reason          string            `json:"reason,omitempty"`      // BackOff, Killing, etc.
+	Object          string            `json:"object,omitempty"`      // pod/foo, deployment/bar
+	ObjectKind      string            `json:"object_kind,omitempty"` // Pod, Service, etc.
+	Message         string            `json:"message,omitempty"`
+	Action          string            `json:"action,omitempty"` // ADDED, MODIFIED, DELETED
+	APIVersion      string            `json:"api_version,omitempty"`
+	ResourceVersion string            `json:"resource_version,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+	ClusterName     string            `json:"cluster_name,omitempty"`
 	// Removed CRD and webhook details - over-engineered
 }
 

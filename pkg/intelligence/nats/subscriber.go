@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"go.uber.org/zap"
@@ -27,7 +28,7 @@ type Subscriber struct {
 	engine *correlation.Engine
 
 	// Configuration
-	config Config
+	config *config.NATSConfig
 
 	// State
 	ctx    context.Context
@@ -42,41 +43,14 @@ type Subscriber struct {
 	processingErrors int64
 }
 
-// Config configures the NATS subscriber
-type Config struct {
-	// NATS connection
-	URL          string
-	StreamName   string
-	ConsumerName string
-
-	// Subscription
-	Subject    string        // e.g., "traces.>"
-	QueueGroup string        // For load balancing
-	MaxPending int           // Max unprocessed messages
-	AckWait    time.Duration // Time to process before redelivery
-	MaxDeliver int           // Max delivery attempts
-
-	// Processing
-	WorkerCount int // Concurrent message processors
-}
-
-// DefaultConfig returns production-ready defaults
-func DefaultConfig() Config {
-	return Config{
-		URL:          "nats://localhost:4222",
-		StreamName:   "TRACES",
-		ConsumerName: "correlation-service",
-		Subject:      "traces.>",
-		QueueGroup:   "correlation",
-		MaxPending:   1000,
-		AckWait:      30 * time.Second,
-		MaxDeliver:   3,
-		WorkerCount:  10,
-	}
+// Deprecated: Use config.NATSConfig instead
+// DefaultConfig returns the new centralized config
+func DefaultConfig() *config.NATSConfig {
+	return config.DefaultNATSConfig()
 }
 
 // NewSubscriber creates a new NATS subscriber
-func NewSubscriber(logger *zap.Logger, config Config, engine *correlation.Engine) (*Subscriber, error) {
+func NewSubscriber(logger *zap.Logger, config *config.NATSConfig, engine *correlation.Engine) (*Subscriber, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	sub := &Subscriber{
@@ -106,22 +80,15 @@ func NewSubscriber(logger *zap.Logger, config Config, engine *correlation.Engine
 // Start begins processing messages from NATS
 func (s *Subscriber) Start(ctx context.Context) error {
 	s.logger.Info("Starting NATS subscriber",
-		zap.String("stream", s.config.StreamName),
-		zap.String("subject", s.config.Subject),
+		zap.String("stream", s.config.TracesStreamName),
+		zap.String("subject", s.config.GetTracesSubject()),
 		zap.String("consumer", s.config.ConsumerName),
 	)
 
-	// Subscribe to messages
-	sub, err := s.js.QueueSubscribe(
-		s.config.Subject,
-		s.config.QueueGroup,
-		s.handleMessage,
-		nats.Durable(s.config.ConsumerName),
-		nats.ManualAck(),
-		nats.AckExplicit(),
-		nats.MaxAckPending(s.config.MaxPending),
-		nats.AckWait(s.config.AckWait),
-		nats.MaxDeliver(s.config.MaxDeliver),
+	// Use PullSubscribe since we created a pull consumer
+	sub, err := s.js.PullSubscribe(
+		s.config.GetTracesSubject(),
+		s.config.ConsumerName,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe: %w", err)
@@ -132,6 +99,10 @@ func (s *Subscriber) Start(ctx context.Context) error {
 	// Start metrics reporter
 	s.wg.Add(1)
 	go s.metricsReporter()
+
+	// Start message fetching loop
+	s.wg.Add(1)
+	go s.fetchMessages(ctx)
 
 	// Wait for context cancellation
 	<-ctx.Done()
@@ -174,10 +145,10 @@ func (s *Subscriber) Stop() error {
 // connect establishes NATS connection
 func (s *Subscriber) connect() error {
 	opts := []nats.Option{
-		nats.Name("correlation-service"),
+		nats.Name(s.config.Name),
 		nats.RetryOnFailedConnect(true),
-		nats.MaxReconnects(10),
-		nats.ReconnectWait(time.Second),
+		nats.MaxReconnects(s.config.MaxReconnects),
+		nats.ReconnectWait(s.config.ReconnectWait),
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
 			s.logger.Error("NATS disconnected", zap.Error(err))
 		}),
@@ -209,24 +180,24 @@ func (s *Subscriber) setupJetStream() error {
 
 	// Create or update stream
 	streamConfig := &nats.StreamConfig{
-		Name:       s.config.StreamName,
-		Subjects:   []string{s.config.Subject},
+		Name:       s.config.TracesStreamName,
+		Subjects:   s.config.TracesSubjects,
 		Storage:    nats.FileStorage,
 		Retention:  nats.LimitsPolicy,
-		MaxAge:     24 * time.Hour,
-		MaxBytes:   10 * 1024 * 1024 * 1024, // 10GB
-		Duplicates: 30 * time.Minute,
-		Replicas:   1,
+		MaxAge:     s.config.MaxAge,
+		MaxBytes:   s.config.MaxBytes,
+		Duplicates: s.config.DuplicateWindow,
+		Replicas:   s.config.Replicas,
 	}
 
-	stream, err := js.StreamInfo(s.config.StreamName)
+	stream, err := js.StreamInfo(s.config.TracesStreamName)
 	if err == nats.ErrStreamNotFound {
 		// Create new stream
 		_, err = js.AddStream(streamConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create stream: %w", err)
 		}
-		s.logger.Info("Created JetStream stream", zap.String("name", s.config.StreamName))
+		s.logger.Info("Created JetStream stream", zap.String("name", s.config.TracesStreamName))
 	} else if err != nil {
 		return fmt.Errorf("failed to get stream info: %w", err)
 	} else {
@@ -245,13 +216,13 @@ func (s *Subscriber) setupJetStream() error {
 		AckPolicy:     nats.AckExplicitPolicy,
 		AckWait:       s.config.AckWait,
 		MaxDeliver:    s.config.MaxDeliver,
-		FilterSubject: s.config.Subject,
+		FilterSubject: s.config.GetTracesSubject(),
 		ReplayPolicy:  nats.ReplayInstantPolicy,
 	}
 
-	_, err = js.ConsumerInfo(s.config.StreamName, s.config.ConsumerName)
+	_, err = js.ConsumerInfo(s.config.TracesStreamName, s.config.ConsumerName)
 	if err == nats.ErrConsumerNotFound {
-		_, err = js.AddConsumer(s.config.StreamName, consumerConfig)
+		_, err = js.AddConsumer(s.config.TracesStreamName, consumerConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create consumer: %w", err)
 		}
@@ -261,6 +232,35 @@ func (s *Subscriber) setupJetStream() error {
 	}
 
 	return nil
+}
+
+// fetchMessages continuously fetches messages from the pull subscription
+func (s *Subscriber) fetchMessages(ctx context.Context) {
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Fetch messages in batches
+		msgs, err := s.subscription.Fetch(s.config.BatchSize, nats.MaxWait(s.config.FetchTimeout))
+		if err != nil {
+			if err == nats.ErrTimeout {
+				continue // No messages available, keep polling
+			}
+			s.logger.Error("Failed to fetch messages", zap.Error(err))
+			time.Sleep(time.Second)
+			continue
+		}
+
+		// Process each message
+		for _, msg := range msgs {
+			s.handleMessage(msg)
+		}
+	}
 }
 
 // handleMessage processes a single NATS message

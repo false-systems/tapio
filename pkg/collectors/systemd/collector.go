@@ -35,13 +35,15 @@ type Collector struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	healthy bool
+	config  Config
 }
 
 // NewCollector creates a new minimal systemd collector
-func NewCollector(name string) (*Collector, error) {
+func NewCollector(name string, cfg Config) (*Collector, error) {
 	return &Collector{
 		name:   name,
-		events: make(chan collectors.RawEvent, 1000),
+		config: cfg,
+		events: make(chan collectors.RawEvent, cfg.BufferSize),
 	}, nil
 }
 
@@ -54,43 +56,53 @@ func (c *Collector) Name() string {
 func (c *Collector) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// Load eBPF program
-	spec, err := loadSystemdMonitor()
-	if err != nil {
-		return fmt.Errorf("failed to load eBPF spec: %w", err)
+	// Start journal reader if enabled
+	if c.config.EnableJournal {
+		if err := c.startJournalReader(); err != nil {
+			return fmt.Errorf("failed to start journal reader: %w", err)
+		}
 	}
 
-	c.objs = &systemdMonitorObjects{}
-	if err := spec.LoadAndAssign(c.objs, nil); err != nil {
-		return fmt.Errorf("failed to load eBPF objects: %w", err)
-	}
+	// Start eBPF monitoring if enabled
+	if c.config.EnableEBPF {
+		// Load eBPF program
+		spec, err := loadSystemdMonitor()
+		if err != nil {
+			return fmt.Errorf("failed to load eBPF spec: %w", err)
+		}
 
-	// Populate systemd PIDs
-	if err := c.populateSystemdPIDs(); err != nil {
-		return fmt.Errorf("failed to populate systemd PIDs: %w", err)
-	}
+		c.objs = &systemdMonitorObjects{}
+		if err := spec.LoadAndAssign(c.objs, nil); err != nil {
+			return fmt.Errorf("failed to load eBPF objects: %w", err)
+		}
 
-	// Attach tracepoints
-	execLink, err := link.Tracepoint("syscalls", "sys_enter_execve", c.objs.TraceExec, nil)
-	if err != nil {
-		return fmt.Errorf("failed to attach execve tracepoint: %w", err)
-	}
-	c.links = append(c.links, execLink)
+		// Populate systemd PIDs
+		if err := c.populateSystemdPIDs(); err != nil {
+			return fmt.Errorf("failed to populate systemd PIDs: %w", err)
+		}
 
-	exitLink, err := link.Tracepoint("syscalls", "sys_enter_exit", c.objs.TraceExit, nil)
-	if err != nil {
-		return fmt.Errorf("failed to attach exit tracepoint: %w", err)
-	}
-	c.links = append(c.links, exitLink)
+		// Attach tracepoints
+		execLink, err := link.Tracepoint("syscalls", "sys_enter_execve", c.objs.TraceExec, nil)
+		if err != nil {
+			return fmt.Errorf("failed to attach execve tracepoint: %w", err)
+		}
+		c.links = append(c.links, execLink)
 
-	// Open ring buffer
-	c.reader, err = ringbuf.NewReader(c.objs.Events)
-	if err != nil {
-		return fmt.Errorf("failed to open ring buffer: %w", err)
-	}
+		exitLink, err := link.Tracepoint("syscalls", "sys_enter_exit", c.objs.TraceExit, nil)
+		if err != nil {
+			return fmt.Errorf("failed to attach exit tracepoint: %w", err)
+		}
+		c.links = append(c.links, exitLink)
 
-	// Start event processing
-	go c.processEvents()
+		// Open ring buffer
+		c.reader, err = ringbuf.NewReader(c.objs.Events)
+		if err != nil {
+			return fmt.Errorf("failed to open ring buffer: %w", err)
+		}
+
+		// Start event processing
+		go c.processEvents()
+	}
 
 	c.healthy = true
 	return nil
