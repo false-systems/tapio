@@ -179,12 +179,12 @@ func TestK8sGrapher_UpdateServiceNode(t *testing.T) {
 	mockDriver.On("NewSession", mock.Anything, mock.Anything).Return(mockSession)
 	mockSession.On("Close", mock.Anything).Return(nil)
 	mockSession.On("ExecuteWrite", mock.Anything, mock.Anything).Return(nil, nil)
-	
+
 	// Mock for Consume to return summary
 	mockResult.On("Consume", mock.Anything).Return(mockSummary, nil)
 	mockResult.On("Err").Return(nil)
 	mockResult.On("IsOpen").Return(true)
-	
+
 	// Mock summary methods
 	mockSummary.On("Counters").Return(mockCounters)
 	mockCounters.On("RelationshipsCreated").Return(1)
@@ -318,7 +318,7 @@ func TestK8sGrapher_StartStop(t *testing.T) {
 	// Create a fake kube client with some initial resources
 	service := createTestService("test-service", "default", map[string]string{"app": "test"})
 	pod := createTestPod("test-pod", "default", map[string]string{"app": "test"})
-	
+
 	kubeClient := fake.NewSimpleClientset(service, pod)
 
 	grapher, err := NewK8sGrapher(Config{
@@ -388,7 +388,7 @@ func TestK8sGrapher_UpdateConfigMapNode(t *testing.T) {
 			"key2": "value2",
 		},
 	}
-	
+
 	update := graphUpdate{
 		operation: "create",
 		nodeType:  "ConfigMap",

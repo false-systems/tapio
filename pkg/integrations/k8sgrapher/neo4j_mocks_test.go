@@ -132,7 +132,6 @@ func (m *MockSession) executeQueryWrite(ctx context.Context, query string, param
 
 func (m *MockSession) legacy() {}
 
-
 // MockResult is a comprehensive mock implementation of neo4j.ResultWithContext
 type MockResult struct {
 	mock.Mock

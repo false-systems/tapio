@@ -29,7 +29,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 				instrumentation, _ := telemetry.NewK8sGrapherInstrumentation(logger)
 				mockDriver := &MockNeo4jDriver{}
 				kubeClient := fake.NewSimpleClientset()
-				
+
 				return NewK8sGrapher(Config{
 					KubeClient:      kubeClient,
 					Neo4jDriver:     mockDriver,
@@ -45,7 +45,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 				logger := zap.NewNop()
 				instrumentation, _ := telemetry.NewK8sGrapherInstrumentation(logger)
 				mockDriver := &MockNeo4jDriver{}
-				
+
 				return NewK8sGrapher(Config{
 					Neo4jDriver:     mockDriver,
 					Logger:          logger,
@@ -61,7 +61,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 				logger := zap.NewNop()
 				instrumentation, _ := telemetry.NewK8sGrapherInstrumentation(logger)
 				kubeClient := fake.NewSimpleClientset()
-				
+
 				return NewK8sGrapher(Config{
 					KubeClient:      kubeClient,
 					Logger:          logger,
@@ -77,7 +77,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 				logger := zap.NewNop()
 				mockDriver := &MockNeo4jDriver{}
 				kubeClient := fake.NewSimpleClientset()
-				
+
 				return NewK8sGrapher(Config{
 					KubeClient:  kubeClient,
 					Neo4jDriver: mockDriver,
@@ -94,7 +94,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 				instrumentation, _ := telemetry.NewK8sGrapherInstrumentation(logger)
 				mockDriver := &MockNeo4jDriver{}
 				kubeClient := fake.NewSimpleClientset()
-				
+
 				return NewK8sGrapher(Config{
 					KubeClient:      kubeClient,
 					Neo4jDriver:     mockDriver,
@@ -112,7 +112,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 				instrumentation, _ := telemetry.NewK8sGrapherInstrumentation(logger)
 				mockDriver := &MockNeo4jDriver{}
 				kubeClient := fake.NewSimpleClientset()
-				
+
 				return NewK8sGrapher(Config{
 					KubeClient:      kubeClient,
 					Neo4jDriver:     mockDriver,
@@ -128,7 +128,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			grapher, err := tt.setupFunc()
-			
+
 			if tt.wantError {
 				assert.Error(t, err)
 				if tt.errorMsg != "" {
@@ -138,7 +138,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, grapher)
-				
+
 				// Verify basic initialization
 				if grapher != nil {
 					assert.NotNil(t, grapher.kubeClient)
@@ -148,7 +148,7 @@ func TestNewK8sGrapher_Simple(t *testing.T) {
 					assert.NotNil(t, grapher.informers)
 					assert.NotNil(t, grapher.stopCh)
 					assert.NotNil(t, grapher.graphUpdateChan)
-					
+
 					// Check defaults
 					if grapher.resyncPeriod == 0 {
 						assert.Equal(t, 30*time.Minute, grapher.resyncPeriod)
