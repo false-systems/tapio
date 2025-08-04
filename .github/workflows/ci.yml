@@ -58,7 +58,7 @@ jobs:
         run: go vet $(go list ./... | grep -v '/scripts' | grep -v 'pkg/collectors/ebpf')
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --timeout=5m --verbose
@@ -115,7 +115,7 @@ jobs:
         run: go vet $(go list ./... | grep -v '/scripts' | grep -v 'pkg/collectors/ebpf')
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --timeout=5m --verbose
@@ -308,7 +308,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push ${{ matrix.component.name }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.component.dockerfile }}
