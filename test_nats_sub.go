@@ -34,7 +34,7 @@ func main() {
 	}
 
 	fmt.Println("Waiting for events from NATS...")
-	
+
 	// Fetch messages
 	for i := 0; i < 5; i++ {
 		msgs, err := sub.Fetch(1, nats.MaxWait(5*time.Second))
@@ -64,7 +64,7 @@ func main() {
 			if event.K8sContext != nil {
 				fmt.Printf("K8s: %s/%s (%s)\n", event.K8sContext.Namespace, event.K8sContext.Name, event.K8sContext.Kind)
 			}
-			
+
 			msg.Ack()
 		}
 	}

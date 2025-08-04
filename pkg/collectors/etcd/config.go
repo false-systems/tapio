@@ -17,13 +17,13 @@ type Config struct {
 
 	// etcd endpoints for API monitoring
 	Endpoints []string `json:"endpoints"`
-	
+
 	// Authentication
-	Username  string     `json:"username"`
-	Password  string     `json:"password"`
-	
+	Username string `json:"username"`
+	Password string `json:"password"`
+
 	// TLS configuration
-	TLS       *TLSConfig `json:"tls"`
+	TLS *TLSConfig `json:"tls"`
 }
 
 // DefaultConfig returns default configuration

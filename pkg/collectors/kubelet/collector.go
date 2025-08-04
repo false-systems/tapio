@@ -336,7 +336,7 @@ func (c *Collector) checkCPUThrottling(pod *statsv1alpha1.PodStats, container *s
 	// This is a simplified version
 	metadata := map[string]string{
 		"collector":      "kubelet",
-		"event_type":     "cpu_throttling",
+		"event_type":     "kubelet_cpu_throttling",
 		"k8s_namespace":  pod.PodRef.Namespace,
 		"k8s_name":       pod.PodRef.Name,
 		"k8s_kind":       "Pod",
@@ -377,7 +377,7 @@ func (c *Collector) checkMemoryPressure(pod *statsv1alpha1.PodStats, container *
 
 	metadata := map[string]string{
 		"collector":          "kubelet",
-		"event_type":         "memory_pressure",
+		"event_type":         "kubelet_memory_pressure",
 		"k8s_namespace":      pod.PodRef.Namespace,
 		"k8s_name":           pod.PodRef.Name,
 		"k8s_kind":           "Pod",
@@ -434,7 +434,7 @@ func (c *Collector) checkEphemeralStorage(pod *statsv1alpha1.PodStats) {
 	if usagePercent > 50 {
 		metadata := map[string]string{
 			"collector":               "kubelet",
-			"event_type":              "ephemeral_storage",
+			"event_type":              "kubelet_ephemeral_storage",
 			"k8s_namespace":           pod.PodRef.Namespace,
 			"k8s_name":                pod.PodRef.Name,
 			"k8s_kind":                "Pod",
@@ -551,7 +551,7 @@ func (c *Collector) processPodStatus(pod *v1.Pod) {
 func (c *Collector) sendContainerWaitingEvent(pod *v1.Pod, status *v1.ContainerStatus) {
 	metadata := map[string]string{
 		"collector":       "kubelet",
-		"event_type":      "container_waiting",
+		"event_type":      "kubelet_container_waiting",
 		"k8s_namespace":   pod.Namespace,
 		"k8s_name":        pod.Name,
 		"k8s_kind":        "Pod",
@@ -632,7 +632,7 @@ func (c *Collector) sendCrashLoopEvent(pod *v1.Pod, status *v1.ContainerStatus) 
 	if status.RestartCount > 3 { // Likely in crash loop
 		metadata := map[string]string{
 			"collector":        "kubelet",
-			"event_type":       "crash_loop",
+			"event_type":       "kubelet_crash_loop",
 			"k8s_namespace":    pod.Namespace,
 			"k8s_name":         pod.Name,
 			"k8s_kind":         "Pod",

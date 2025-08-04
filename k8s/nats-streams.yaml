@@ -1,0 +1,61 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-stream-setup
+  namespace: tapio
+data:
+  setup-streams.sh: |
+    #!/bin/sh
+    set -e
+    
+    echo "Setting up NATS streams..."
+    
+    # Wait for NATS to be ready
+    sleep 5
+    
+    # Create TRACES stream for correlation
+    nats stream add TRACES \
+      --subjects="traces.>" \
+      --retention=limits \
+      --max-age=24h \
+      --storage=file \
+      --replicas=1 \
+      --discard=old \
+      --max-msgs=-1 \
+      --max-bytes=10GB \
+      --dupe-window=2m \
+      --defaults || echo "TRACES stream may already exist"
+    
+    echo "TRACES stream configured"
+    
+    # List streams to verify
+    nats stream list
+    
+    echo "NATS streams setup complete!"
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-stream-setup
+  namespace: tapio
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: stream-setup
+        image: natsio/nats-box:latest
+        command: ["/bin/sh", "/scripts/setup-streams.sh"]
+        env:
+        - name: NATS_URL
+          value: "nats://nats.tapio.svc.cluster.local:4222"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+      volumes:
+      - name: scripts
+        configMap:
+          name: nats-stream-setup
+          defaultMode: 0755

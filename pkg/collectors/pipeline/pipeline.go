@@ -180,12 +180,12 @@ func (p *EventPipeline) enrichEvent(raw *collectors.RawEvent) *EnrichedEvent {
 // GetHealthStatus returns the health status of all collectors
 func (p *EventPipeline) GetHealthStatus() map[string]CollectorHealthStatus {
 	status := make(map[string]CollectorHealthStatus)
-	
+
 	for name, collector := range p.collectors {
 		health := CollectorHealthStatus{
 			Healthy: collector.IsHealthy(),
 		}
-		
+
 		// Check if collector implements detailed health interface
 		if healthReporter, ok := collector.(interface {
 			Health() (bool, map[string]interface{})
@@ -199,9 +199,9 @@ func (p *EventPipeline) GetHealthStatus() map[string]CollectorHealthStatus {
 				health.LastEvent = lastEvent
 			}
 		}
-		
+
 		status[name] = health
 	}
-	
+
 	return status
 }

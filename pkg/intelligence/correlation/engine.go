@@ -48,9 +48,11 @@ type EngineConfig struct {
 	ProcessingTimeout time.Duration
 
 	// Features
-	EnableK8s      bool
-	EnableTemporal bool
-	EnableSequence bool
+	EnableK8s         bool
+	EnableTemporal    bool
+	EnableSequence    bool
+	EnablePerformance bool
+	EnableServiceMap  bool
 
 	// Storage
 	StorageCleanupInterval time.Duration
@@ -67,6 +69,8 @@ func DefaultEngineConfig() EngineConfig {
 		EnableK8s:              true,
 		EnableTemporal:         true,
 		EnableSequence:         true,
+		EnablePerformance:      true,
+		EnableServiceMap:       true,
 		StorageCleanupInterval: 5 * time.Minute,
 		StorageRetention:       24 * time.Hour,
 	}
@@ -109,11 +113,23 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient kubernetes.Int
 		engine.correlators = append(engine.correlators, sequenceCorrelator)
 	}
 
+	if config.EnablePerformance {
+		performanceCorrelator := NewPerformanceCorrelator(logger)
+		engine.correlators = append(engine.correlators, performanceCorrelator)
+	}
+
+	if config.EnableServiceMap {
+		serviceMapCorrelator := NewServiceMapCorrelator(logger)
+		engine.correlators = append(engine.correlators, serviceMapCorrelator)
+	}
+
 	logger.Info("Correlation engine created",
 		zap.Int("correlators", len(engine.correlators)),
 		zap.Bool("k8s", config.EnableK8s),
 		zap.Bool("temporal", config.EnableTemporal),
 		zap.Bool("sequence", config.EnableSequence),
+		zap.Bool("performance", config.EnablePerformance),
+		zap.Bool("servicemap", config.EnableServiceMap),
 	)
 
 	return engine, nil

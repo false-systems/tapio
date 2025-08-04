@@ -135,7 +135,7 @@ func (c *Collector) parseK8sFromNetns(netnsPath string) *PodInfo {
 	// 1. /var/run/netns/cni-<uuid>
 	// 2. /proc/<pid>/ns/net where pid belongs to a container
 	// 3. May contain pod UID in the path
-	
+
 	// Try to extract pod UID from CNI netns naming
 	cniPattern := regexp.MustCompile(`cni-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
 	if matches := cniPattern.FindStringSubmatch(netnsPath); len(matches) > 1 {
