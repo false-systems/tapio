@@ -151,7 +151,7 @@ func TestHasField(t *testing.T) {
 			Namespace: "default",
 			Kind:      "Pod",
 			Name:      "test-pod",
-			NodeName: "node-1",
+			NodeName:  "node-1",
 		},
 		Attributes: map[string]interface{}{
 			"container":    "main",
