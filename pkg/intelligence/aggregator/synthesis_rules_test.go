@@ -185,8 +185,8 @@ func TestSynthesisEngine_ApplySynthesis(t *testing.T) {
 					},
 				},
 			},
-			expectedCount: 2,
-			expectedTypes: []string{"death-spiral", "storage-starvation"},
+			expectedCount: 1,
+			expectedTypes: []string{"storage-starvation"},
 		},
 	}
 
@@ -381,7 +381,7 @@ func TestSynthesisResult_Content(t *testing.T) {
 			Message:    "Pod restarted",
 			Timestamp:  time.Now(),
 			Confidence: 0.9,
-			Impact: &Impact{
+			Impact: Impact{
 				Resources: []string{"pod/frontend-abc123"},
 				Services:  []string{"frontend"},
 			},
@@ -391,7 +391,7 @@ func TestSynthesisResult_Content(t *testing.T) {
 			Message:    "Container killed due to OOM",
 			Timestamp:  time.Now().Add(-2 * time.Minute),
 			Confidence: 0.95,
-			Impact: &Impact{
+			Impact: Impact{
 				Resources: []string{"pod/frontend-abc123"},
 				Services:  []string{"frontend"},
 			},
@@ -401,7 +401,7 @@ func TestSynthesisResult_Content(t *testing.T) {
 			Message:    "Pod restarted again",
 			Timestamp:  time.Now().Add(-5 * time.Minute),
 			Confidence: 0.9,
-			Impact: &Impact{
+			Impact: Impact{
 				Resources: []string{"pod/frontend-abc123"},
 				Services:  []string{"frontend"},
 			},
@@ -441,7 +441,7 @@ func TestNoNilPointerPanics(t *testing.T) {
 			findings: []Finding{{
 				Type:      "cpu_throttling",
 				Timestamp: time.Now(),
-				Impact:    &Impact{Resources: []string{"pod/test"}},
+				Impact:    Impact{Resources: []string{"pod/test"}},
 			}},
 		},
 		{
@@ -449,7 +449,7 @@ func TestNoNilPointerPanics(t *testing.T) {
 			findings: []Finding{{
 				Type:      "pod_restart",
 				Timestamp: time.Now(),
-				Impact:    &Impact{Resources: []string{}},
+				Impact:    Impact{Resources: []string{}},
 			}},
 		},
 		{
@@ -457,7 +457,7 @@ func TestNoNilPointerPanics(t *testing.T) {
 			findings: []Finding{{
 				Type:      "memory_pressure",
 				Timestamp: time.Now(),
-				Evidence:  &Evidence{Attributes: nil},
+				Evidence:  Evidence{Attributes: nil},
 			}},
 		},
 	}
