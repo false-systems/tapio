@@ -7,7 +7,7 @@ toolchain go1.24.5
 require (
 	github.com/cilium/ebpf v0.12.3
 	github.com/gorilla/mux v1.8.1
-	github.com/nats-io/nats-server/v2 v2.11.6
+	github.com/nats-io/nats-server/v2 v2.11.7
 	github.com/nats-io/nats.go v1.44.0
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.1
 	github.com/prometheus/client_golang v1.22.0
@@ -96,12 +96,12 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.34.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.7.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
+	golang.org/x/crypto v0.40.0 // indirect
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1 // indirect
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
-	golang.org/x/term v0.32.0 // indirect
+	golang.org/x/term v0.33.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
