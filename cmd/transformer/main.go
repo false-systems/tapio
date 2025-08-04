@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -13,24 +15,32 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
 	"github.com/yairfalse/tapio/pkg/integrations/transformer"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 type TransformerService struct {
-	nc          *nats.Conn
-	js          jetstream.JetStream
-	transformer *transformer.EventTransformer
-	consumers   map[string]jetstream.Consumer
-	mu          sync.RWMutex
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	natsConfig  *config.NATSConfig
+	nc              *nats.Conn
+	js              jetstream.JetStream
+	transformer     *transformer.EventTransformer
+	consumers       map[string]jetstream.Consumer
+	mu              sync.RWMutex
+	wg              sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
+	natsConfig      *config.NATSConfig
+	logger          *zap.Logger
+	instrumentation *telemetry.TransformerInstrumentation
 }
 
-func NewTransformerService() (*TransformerService, error) {
+func NewTransformerService(logger *zap.Logger, instrumentation *telemetry.TransformerInstrumentation) (*TransformerService, error) {
 	// Get NATS config
 	natsConfig := config.DefaultNATSConfig()
 	if url := os.Getenv("NATS_URL"); url != "" {
@@ -65,18 +75,20 @@ func NewTransformerService() (*TransformerService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TransformerService{
-		nc:          nc,
-		js:          js,
-		transformer: transformer,
-		consumers:   make(map[string]jetstream.Consumer),
-		ctx:         ctx,
-		cancel:      cancel,
-		natsConfig:  natsConfig,
+		nc:              nc,
+		js:              js,
+		transformer:     transformer,
+		consumers:       make(map[string]jetstream.Consumer),
+		ctx:             ctx,
+		cancel:          cancel,
+		natsConfig:      natsConfig,
+		logger:          logger,
+		instrumentation: instrumentation,
 	}, nil
 }
 
 func (s *TransformerService) Start() error {
-	log.Println("Starting Transformer Service...")
+	s.logger.Info("Starting Transformer Service...")
 
 	stream, err := s.js.Stream(s.ctx, s.natsConfig.TracesStreamName)
 	if err != nil {
@@ -103,7 +115,7 @@ func (s *TransformerService) Start() error {
 	s.wg.Add(1)
 	go s.consumeMessages(consumer)
 
-	log.Println("Transformer Service started successfully")
+	s.logger.Info("Transformer Service started successfully")
 	return nil
 }
 
@@ -112,17 +124,17 @@ func (s *TransformerService) consumeMessages(consumer jetstream.Consumer) {
 
 	cctx, err := consumer.Consume(func(msg jetstream.Msg) {
 		if err := s.processMessage(msg); err != nil {
-			log.Printf("Error processing message: %v", err)
+			s.logger.Error("Error processing message", zap.Error(err))
 			msg.Nak()
 			return
 		}
 		msg.Ack()
 	}, jetstream.ConsumeErrHandler(func(consumeCtx jetstream.ConsumeContext, err error) {
-		log.Printf("Consume error: %v", err)
+		s.logger.Error("Consume error", zap.Error(err))
 	}))
 
 	if err != nil {
-		log.Printf("Failed to start consuming: %v", err)
+		s.logger.Error("Failed to start consuming", zap.Error(err))
 		return
 	}
 
@@ -131,22 +143,74 @@ func (s *TransformerService) consumeMessages(consumer jetstream.Consumer) {
 }
 
 func (s *TransformerService) processMessage(msg jetstream.Msg) error {
+	// Extract trace context from NATS headers
+	// JetStream messages have Headers() method that returns nats.Header
+	ctx := s.ctx
+	if msg.Headers() != nil {
+		// Create a temporary NATS message for trace extraction
+		tmpMsg := &nats.Msg{Header: msg.Headers()}
+		ctx = telemetry.ExtractTraceContext(ctx, tmpMsg)
+	}
+
+	// Start a new span for message processing
+	ctx, span := s.instrumentation.StartSpan(ctx, "process_message",
+		trace.WithAttributes(
+			attribute.String("nats.subject", msg.Subject()),
+		),
+	)
+	start := time.Now()
+	var err error
+	defer func() {
+		s.instrumentation.EndSpan(span, start, err, "process_message")
+	}()
+
 	metadata, err := msg.Metadata()
 	if err != nil {
 		return fmt.Errorf("failed to get message metadata: %w", err)
 	}
 
-	log.Printf("Processing message from subject: %s, stream: %s, consumer: %s",
-		msg.Subject(), metadata.Stream, metadata.Consumer)
+	s.logger.Debug("Processing message",
+		zap.String("subject", msg.Subject()),
+		zap.String("stream", metadata.Stream),
+		zap.String("consumer", metadata.Consumer))
 
 	var rawEvent collectors.RawEvent
 	if err := json.Unmarshal(msg.Data(), &rawEvent); err != nil {
 		return fmt.Errorf("failed to unmarshal raw event: %w", err)
 	}
 
-	ctx := context.Background()
-	unifiedEvent, err := s.transformer.Transform(ctx, rawEvent)
-	if err != nil {
+	// Transform the event with tracing
+	transformCtx, transformSpan := s.instrumentation.Tracer.Start(ctx, "transform_event",
+		trace.WithAttributes(
+			attribute.String("event.type", rawEvent.Type),
+			attribute.String("collector.name", rawEvent.Type), // Type identifies the collector
+		),
+	)
+	transformStart := time.Now()
+	unifiedEvent, transformErr := s.transformer.Transform(transformCtx, rawEvent)
+	transformDuration := time.Since(transformStart).Seconds()
+
+	if transformErr != nil {
+		transformSpan.RecordError(transformErr)
+		s.instrumentation.TransformationErrors.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "transform_failed"),
+			attribute.String("event_type", rawEvent.Type),
+		))
+	}
+	transformSpan.End()
+
+	// Record transformation metrics
+	s.instrumentation.TransformationTime.Record(ctx, transformDuration, metric.WithAttributes(
+		attribute.String("event_type", rawEvent.Type),
+		attribute.Bool("success", transformErr == nil),
+	))
+	s.instrumentation.EventsTransformed.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("event_type", rawEvent.Type),
+		attribute.Bool("success", transformErr == nil),
+	))
+
+	if transformErr != nil {
+		err = transformErr
 		return fmt.Errorf("failed to transform event: %w", err)
 	}
 
@@ -173,16 +237,36 @@ func (s *TransformerService) processMessage(msg jetstream.Msg) error {
 
 	subject := fmt.Sprintf("unified.%s.%s.%s", entityType, namespace, name)
 
-	if err := s.nc.Publish(subject, data); err != nil {
+	// Create a new NATS message with trace context
+	natsMsg := nats.NewMsg(subject)
+	natsMsg.Data = data
+	telemetry.InjectTraceContext(ctx, natsMsg)
+
+	if err := s.nc.PublishMsg(natsMsg); err != nil {
 		return fmt.Errorf("failed to publish unified event: %w", err)
 	}
 
-	log.Printf("Published unified event to subject: %s", subject)
+	s.logger.Debug("Published unified event",
+		zap.String("subject", subject),
+		zap.String("entity_type", entityType),
+		zap.String("namespace", namespace),
+		zap.String("name", name))
+
+	// Add span event for successful transformation
+	span.AddEvent("event_transformed",
+		trace.WithAttributes(
+			attribute.String("unified.subject", subject),
+			attribute.String("entity.type", entityType),
+			attribute.String("entity.namespace", namespace),
+			attribute.String("entity.name", name),
+		),
+	)
+
 	return nil
 }
 
 func (s *TransformerService) Stop() {
-	log.Println("Stopping Transformer Service...")
+	s.logger.Info("Stopping Transformer Service...")
 
 	s.cancel()
 
@@ -190,30 +274,94 @@ func (s *TransformerService) Stop() {
 
 	s.mu.Lock()
 	for name := range s.consumers {
-		log.Printf("Stopping consumer: %s", name)
+		s.logger.Info("Stopping consumer", zap.String("name", name))
 		// Consumer stops automatically when context is cancelled
 	}
 	s.mu.Unlock()
 
 	s.nc.Close()
-	log.Println("Transformer Service stopped")
+	s.logger.Info("Transformer Service stopped")
 }
 
+var (
+	otlpEndpoint   = flag.String("otlp-endpoint", os.Getenv("OTLP_ENDPOINT"), "OTLP endpoint")
+	prometheusPort = flag.Int("prometheus-port", 9091, "Port for Prometheus metrics")
+	enableTraces   = flag.Bool("enable-traces", true, "Enable OpenTelemetry traces")
+	enableMetrics  = flag.Bool("enable-metrics", true, "Enable OpenTelemetry metrics")
+	logLevel       = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+)
+
 func main() {
-	service, err := NewTransformerService()
+	flag.Parse()
+
+	// Create logger
+	var logger *zap.Logger
+	var err error
+	switch *logLevel {
+	case "debug":
+		logger, err = zap.NewDevelopment()
+	default:
+		logger, err = zap.NewProduction()
+	}
 	if err != nil {
-		log.Fatalf("Failed to create transformer service: %v", err)
+		log.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Sync()
+
+	// Initialize OTEL
+	ctx := context.Background()
+	otelConfig := telemetry.DefaultConfig("transformer-service")
+	otelConfig.OTLPEndpoint = *otlpEndpoint
+	otelConfig.PrometheusPort = *prometheusPort
+	otelConfig.EnableTraces = *enableTraces
+	otelConfig.EnableMetrics = *enableMetrics
+	otelConfig.Logger = logger
+
+	provider, err := telemetry.NewProvider(ctx, otelConfig)
+	if err != nil {
+		logger.Fatal("Failed to create OTEL provider", zap.Error(err))
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := provider.Shutdown(shutdownCtx); err != nil {
+			logger.Error("Failed to shutdown OTEL provider", zap.Error(err))
+		}
+	}()
+
+	// Create transformer instrumentation
+	instrumentation, err := telemetry.NewTransformerInstrumentation(logger)
+	if err != nil {
+		logger.Fatal("Failed to create instrumentation", zap.Error(err))
+	}
+
+	// Start Prometheus metrics endpoint if enabled
+	if *enableMetrics && otelConfig.EnablePrometheus {
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.Handler())
+			addr := fmt.Sprintf(":%d", *prometheusPort)
+			logger.Info("Starting Prometheus metrics endpoint", zap.String("address", addr))
+			if err := http.ListenAndServe(addr, mux); err != nil {
+				logger.Error("Failed to start metrics server", zap.Error(err))
+			}
+		}()
+	}
+
+	service, err := NewTransformerService(logger, instrumentation)
+	if err != nil {
+		logger.Fatal("Failed to create transformer service", zap.Error(err))
 	}
 
 	if err := service.Start(); err != nil {
-		log.Fatalf("Failed to start transformer service: %v", err)
+		logger.Fatal("Failed to start transformer service", zap.Error(err))
 	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	<-sigCh
-	log.Println("Received shutdown signal")
+	logger.Info("Received shutdown signal")
 
 	service.Stop()
 }

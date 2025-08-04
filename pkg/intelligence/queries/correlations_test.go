@@ -94,8 +94,7 @@ func TestCorrelationQuery_WhyDidPodFail(t *testing.T) {
 			mockClient := &mockGraphClient{}
 			query.client = mockClient
 
-			
- main
+			main
 			// Set mock expectations
 			mockClient.On("ExecuteQuery", mock.Anything, mock.Anything, mock.Anything).
 				Return(tt.mockData, nil).Once()

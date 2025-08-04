@@ -24,19 +24,18 @@ import (
 )
 
 var (
-	natsURL          = flag.String("nats", "", "NATS server URL (overrides config)")
-	enableKubeAPI    = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
-	enableEBPF       = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
-	enableSystemd    = flag.Bool("enable-systemd", true, "Enable systemd collector")
-	enableEtcd       = flag.Bool("enable-etcd", true, "Enable etcd collector")
-	enableCNI        = flag.Bool("enable-cni", true, "Enable CNI collector")
-	enableKubelet    = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
-	kubeletAddress   = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
-	etcdEndpoints    = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
-	logLevel         = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-	workerCount      = flag.Int("workers", 4, "Number of pipeline workers")
-	bufferSize       = flag.Int("buffer-size", 10000, "Event buffer size")
-)
+	natsURL        = flag.String("nats", "", "NATS server URL (overrides config)")
+	enableKubeAPI  = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
+	enableEBPF     = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
+	enableSystemd  = flag.Bool("enable-systemd", true, "Enable systemd collector")
+	enableEtcd     = flag.Bool("enable-etcd", true, "Enable etcd collector")
+	enableCNI      = flag.Bool("enable-cni", true, "Enable CNI collector")
+	enableKubelet  = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
+	kubeletAddress = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
+	etcdEndpoints  = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
+	logLevel       = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	workerCount    = flag.Int("workers", 4, "Number of pipeline workers")
+	bufferSize     = flag.Int("buffer-size", 10000, "Event buffer size")
 
 func main() {
 	flag.Parse()
@@ -135,12 +134,12 @@ func main() {
 			Endpoints: []string{*etcdEndpoints},
 			// Add auth if needed
 		}
-		
+
 		// Check if etcd eBPF is available
 		if etcdBPF.IsSupported() {
 			etcdConfig.EnableEBPF = true
 		}
-		
+
 		etcdCollector, err := etcd.NewCollector("etcd", etcdConfig)
 		if err != nil {
 			logger.Error("Failed to create etcd collector", zap.Error(err))
@@ -155,12 +154,12 @@ func main() {
 
 	if *enableCNI {
 		cniConfig := cni.DefaultConfig()
-		
+
 		// Check if CNI eBPF is available
 		if cniBPF.IsSupported() {
 			cniConfig.EnableEBPF = true
 		}
-		
+
 		cniCollector, err := cni.NewCollector("cni")
 		if err != nil {
 			logger.Error("Failed to create cni collector", zap.Error(err))
@@ -181,7 +180,7 @@ func main() {
 		if *kubeletAddress == "localhost:10250" {
 			kubeletConfig.Insecure = true
 		}
-		
+
 		kubeletCollector, err := kubelet.NewCollector("kubelet", kubeletConfig)
 		if err != nil {
 			logger.Error("Failed to create kubelet collector", zap.Error(err))
@@ -234,7 +233,7 @@ func monitorCollectorHealth(ctx context.Context, eventPipeline *pipeline.EventPi
 		case <-ticker.C:
 			// Get health status from all collectors
 			healthStatus := eventPipeline.GetHealthStatus()
-			
+
 			// Log health summary
 			healthy := 0
 			unhealthy := 0
@@ -249,7 +248,7 @@ func monitorCollectorHealth(ctx context.Context, eventPipeline *pipeline.EventPi
 						zap.Time("last_event", status.LastEvent))
 				}
 			}
-			
+
 			logger.Info("Collector health check",
 				zap.Int("healthy", healthy),
 				zap.Int("unhealthy", unhealthy),

@@ -41,7 +41,7 @@ func main() {
 	// Scenario 1: OOM Kill cascade
 	fmt.Println("\n2️⃣ Scenario: Memory pressure causing OOM kills")
 	fmt.Println("------------------------------------------------")
-	
+
 	// Create a deployment
 	deploymentEvent := createEvent("deployment_created", "deployment", "web-app", map[string]interface{}{
 		"replicas": 3,
@@ -89,7 +89,7 @@ func main() {
 			}},
 		},
 	}
-	
+
 	fmt.Println("\n💥 OOM Kill event for web-app-pod-1")
 	err = service.ProcessEvent(ctx, oomEvent)
 	if err != nil {

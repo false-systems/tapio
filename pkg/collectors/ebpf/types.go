@@ -87,19 +87,19 @@ type DNSQueryInfo struct {
 
 // VolumeInfo represents PVC mount information
 type VolumeInfo struct {
-	PVCName    [64]byte  // PersistentVolumeClaim name
-	Namespace  [64]byte  // K8s namespace
-	MountPath  [128]byte // Mount path in container
-	VolumeID   [64]byte  // Cloud volume ID (e.g., AWS EBS vol-xxx)
+	PVCName   [64]byte  // PersistentVolumeClaim name
+	Namespace [64]byte  // K8s namespace
+	MountPath [128]byte // Mount path in container
+	VolumeID  [64]byte  // Cloud volume ID (e.g., AWS EBS vol-xxx)
 }
 
 // ProcessLineage represents process parent-child relationships
 type ProcessLineage struct {
-	PID       uint32    // Process ID
-	PPID      uint32    // Parent process ID
-	TGID      uint32    // Thread group ID
-	StartTime uint64    // Process start time
-	JobName   [64]byte  // K8s Job/CronJob name if applicable
+	PID       uint32   // Process ID
+	PPID      uint32   // Parent process ID
+	TGID      uint32   // Thread group ID
+	StartTime uint64   // Process start time
+	JobName   [64]byte // K8s Job/CronJob name if applicable
 }
 
 // Event types

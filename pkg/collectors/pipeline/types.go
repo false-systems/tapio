@@ -85,6 +85,19 @@ func (e *EnrichedEvent) ConvertToUnified() *domain.UnifiedEvent {
 		}
 	}
 
+	// Copy metadata to attributes, preserving event_type
+	if len(e.Raw.Metadata) > 0 {
+		event.Attributes = make(map[string]interface{})
+		for k, v := range e.Raw.Metadata {
+			event.Attributes[k] = v
+		}
+
+		// Also set specific event type if available
+		if eventType, ok := e.Raw.Metadata["event_type"]; ok {
+			event.Type = domain.EventType(eventType)
+		}
+	}
+
 	return event
 }
 
