@@ -58,7 +58,7 @@ jobs:
         run: go vet $(go list ./... | grep -v '/scripts' | grep -v 'pkg/collectors/ebpf')
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --timeout=5m --verbose
@@ -115,7 +115,7 @@ jobs:
         run: go vet $(go list ./... | grep -v '/scripts' | grep -v 'pkg/collectors/ebpf')
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --timeout=5m --verbose
