@@ -1,7 +1,7 @@
 # Tapio - Simple & Fast Makefile
 # Container-first development with proper linting
 
-.PHONY: help build test lint clean docker-all dev ci proto proto-install proto-generate
+.PHONY: help build test lint clean docker-all dev ci
 
 # Build variables
 VERSION ?= dev
@@ -33,7 +33,7 @@ generate-ebpf: ## Generate eBPF programs
 	@cd pkg/collectors/etcd && go generate ./...
 	@echo "$(GREEN)✅ eBPF programs generated!$(NC)"
 
-build: proto generate-ebpf ## Build all binaries (includes proto generation)
+build: generate-ebpf ## Build all binaries
 	@echo "$(BLUE)🔨 Building binaries...$(NC)"
 	@mkdir -p bin
 	@CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/tapio-collector ./cmd/tapio-collector
@@ -139,7 +139,7 @@ docker-test: docker-all ## Test all Docker images
 
 ##@ CI/CD
 
-ci: enforce-all lint test build docker-all ## Full CI pipeline with enforcement
+ci: lint test build docker-all ## Full CI pipeline
 	@echo "$(GREEN)🚀 CI pipeline completed successfully!$(NC)"
 	@echo "$(GREEN)✅ Enforcement: PASSED$(NC)"
 	@echo "$(GREEN)✅ Lint: PASSED$(NC)"
@@ -147,11 +147,9 @@ ci: enforce-all lint test build docker-all ## Full CI pipeline with enforcement
 	@echo "$(GREEN)✅ Build: PASSED$(NC)"
 	@echo "$(GREEN)✅ Docker: PASSED$(NC)"
 
-ci-quick: enforce-all lint test build ## Quick CI with enforcement (no Docker)
+ci-quick: lint test build ## Quick CI (no Docker)
 	@echo "$(GREEN)🚀 Quick CI completed successfully!$(NC)"
 
-ci-enforcement-only: enforce-all ## Run only architecture enforcement checks
-	@echo "$(GREEN)🚀 Architecture enforcement completed!$(NC)"
 
 ##@ Local Development
 

@@ -81,7 +81,7 @@ func TestNewDependencyCorrelator_Simple(t *testing.T) {
 		logger := createSimpleTestLogger()
 
 		correlator, err := NewDependencyCorrelator(mockDriver, logger)
-		
+
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "dependency-correlator", correlator.Name())
@@ -92,7 +92,7 @@ func TestNewDependencyCorrelator_Simple(t *testing.T) {
 		logger := createSimpleTestLogger()
 
 		correlator, err := NewDependencyCorrelator(nil, logger)
-		
+
 		require.Error(t, err)
 		assert.Nil(t, correlator)
 		assert.Contains(t, err.Error(), "neo4jDriver is required")
@@ -102,7 +102,7 @@ func TestNewDependencyCorrelator_Simple(t *testing.T) {
 		mockDriver := &SimpleMockNeo4jDriver{}
 
 		correlator, err := NewDependencyCorrelator(mockDriver, nil)
-		
+
 		require.Error(t, err)
 		assert.Nil(t, correlator)
 		assert.Contains(t, err.Error(), "logger is required")
@@ -117,17 +117,17 @@ func TestDependencyCorrelator_ValidateEvent_Simple(t *testing.T) {
 
 	t.Run("valid event", func(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "default", "test-pod")
-		
+
 		err := correlator.ValidateEvent(event)
-		
+
 		assert.NoError(t, err)
 	})
 
 	t.Run("unsupported event type", func(t *testing.T) {
 		event := createSimpleTestEvent("unknown_event", "default", "test-pod")
-		
+
 		err := correlator.ValidateEvent(event)
-		
+
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "event type not supported")
 	})
@@ -136,9 +136,9 @@ func TestDependencyCorrelator_ValidateEvent_Simple(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "", "test-pod")
 		event.K8sContext.Namespace = ""
 		event.Entity = nil
-		
+
 		err := correlator.ValidateEvent(event)
-		
+
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "required field missing: namespace")
 	})
@@ -189,16 +189,16 @@ func TestDependencyCorrelator_Capabilities_Simple(t *testing.T) {
 	assert.Contains(t, capabilities.EventTypes, "volume_mount_failed")
 	assert.Contains(t, capabilities.EventTypes, "endpoint_not_ready")
 	assert.Contains(t, capabilities.EventTypes, "container_crash")
-	
+
 	assert.Contains(t, capabilities.RequiredData, "namespace")
 	assert.Contains(t, capabilities.RequiredData, "cluster")
-	
+
 	assert.Contains(t, capabilities.OptionalData, "pod")
 	assert.Contains(t, capabilities.OptionalData, "service")
 	assert.Contains(t, capabilities.OptionalData, "configmap")
 	assert.Contains(t, capabilities.OptionalData, "secret")
 	assert.Contains(t, capabilities.OptionalData, "pvc")
-	
+
 	assert.Equal(t, 24*time.Hour, capabilities.MaxEventAge)
 	assert.False(t, capabilities.BatchSupport)
 	assert.Len(t, capabilities.Dependencies, 1)
@@ -340,10 +340,10 @@ func TestDependencyCorrelator_CorrelationRouting_Simple(t *testing.T) {
 
 	// Test that different event types would route to different handlers
 	// We test this by verifying validation passes for supported events
-	
+
 	supportedEventTypes := []domain.EventType{
 		"service_unavailable",
-		"endpoint_not_ready", 
+		"endpoint_not_ready",
 		"pod_failed",
 		"container_crash",
 		"config_changed",
