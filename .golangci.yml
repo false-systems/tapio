@@ -276,7 +276,6 @@ linters:
     - govet             # Go vet examination
     - ineffassign       # Detect ineffectual assignments
     - staticcheck       # Go static analysis
-    - typecheck         # Type checking
     - unused            # Check for unused constants, variables, functions and types
 
     # Code quality

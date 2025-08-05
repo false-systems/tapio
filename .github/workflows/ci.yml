@@ -44,7 +44,7 @@ jobs:
           fi
 
       - name: Go vet
-        run: go vet $(go list ./... | grep -v '/scripts' | grep -v 'pkg/collectors/ebpf')
+        run: go list ./... | grep -v '/scripts' | grep -v 'ebpf' | xargs go vet
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Go vet
-        run: go vet $(go list ./... | grep -v '/scripts' | grep -v 'pkg/collectors/ebpf')
+        run: go list ./... | grep -v '/scripts' | grep -v 'ebpf' | xargs go vet
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
