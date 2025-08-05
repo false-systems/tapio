@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -176,3 +177,104 @@ type AggregatorConfig struct {
 	MaxFindings        int
 	EnableLearning     bool
 }
+
+// CorrelationQuery defines a query for correlations
+type CorrelationQuery struct {
+	ResourceType string
+	Namespace    string
+	Name         string
+	TimeWindow   time.Duration
+	Filters      map[string]string
+}
+
+// AggregatedResult represents the API response for a correlation query
+type AggregatedResult struct {
+	ID             string
+	Resource       ResourceRef
+	RootCause      *RootCause
+	Impact         *ImpactAnalysis
+	Remediation    *RemediationPlan
+	CausalChain    []CausalLink
+	Timeline       []TimelineEvent
+	Evidence       map[string]Evidence
+	Confidence     float64
+	ProcessingTime time.Duration
+	CreatedAt      time.Time
+	Correlators    []string
+}
+
+// ResourceRef identifies a Kubernetes resource
+type ResourceRef struct {
+	Type      string `json:"type"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	UID       string `json:"uid,omitempty"`
+}
+
+// RootCause describes the primary cause of an issue
+type RootCause struct {
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Confidence  float64  `json:"confidence"`
+	Evidence    Evidence `json:"evidence"`
+}
+
+// ImpactAnalysis describes the impact of an issue
+type ImpactAnalysis struct {
+	Scope        string   `json:"scope"`
+	Affected     []string `json:"affected"`
+	Severity     Severity `json:"severity"`
+	UserImpact   string   `json:"user_impact,omitempty"`
+	BusinessCost string   `json:"business_cost,omitempty"`
+}
+
+// RemediationPlan provides steps to fix the issue
+type RemediationPlan struct {
+	Automatic     bool              `json:"automatic"`
+	Steps         []RemediationStep `json:"steps"`
+	EstimatedTime time.Duration     `json:"estimated_time"`
+	RiskLevel     string            `json:"risk_level"`
+	Alternatives  []RemediationPlan `json:"alternatives,omitempty"`
+}
+
+// RemediationStep is a single step in remediation
+type RemediationStep struct {
+	Order       int    `json:"order"`
+	Description string `json:"description"`
+	Command     string `json:"command,omitempty"`
+	Manual      bool   `json:"manual"`
+	RiskLevel   string `json:"risk_level"`
+}
+
+// CorrelationList is a paginated list of correlations
+type CorrelationList struct {
+	Correlations []CorrelationSummary `json:"correlations"`
+	Total        int                  `json:"total"`
+	Limit        int                  `json:"limit"`
+	Offset       int                  `json:"offset"`
+}
+
+// CorrelationSummary is a summary of a correlation
+type CorrelationSummary struct {
+	ID        string      `json:"id"`
+	Resource  ResourceRef `json:"resource"`
+	RootCause string      `json:"root_cause"`
+	Severity  Severity    `json:"severity"`
+	CreatedAt time.Time   `json:"created_at"`
+}
+
+// CorrelationFeedback represents user feedback on a correlation
+type CorrelationFeedback struct {
+	UserID    string `json:"user_id"`
+	Useful    bool   `json:"useful"`
+	Comment   string `json:"comment,omitempty"`
+	CorrectRC bool   `json:"correct_root_cause"`
+}
+
+// Common errors
+var (
+	ErrNotFound     = fmt.Errorf("correlation not found")
+	ErrInvalidQuery = fmt.Errorf("invalid query parameters")
+	ErrTimeout      = fmt.Errorf("query timeout")
+	ErrNoData       = fmt.Errorf("insufficient data for analysis")
+)

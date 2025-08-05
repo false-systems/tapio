@@ -573,3 +573,91 @@ func (a *CorrelationAggregator) calculateAgreementScore(outputs []*CorrelatorOut
 
 	return float64(agreementCount) / float64(totalFindings)
 }
+
+// QueryCorrelations queries for correlations based on resource criteria
+func (a *CorrelationAggregator) QueryCorrelations(ctx context.Context, query CorrelationQuery) (*AggregatedResult, error) {
+	// TODO: Implement actual correlation query logic
+	// For now, return a mock result
+	result := &AggregatedResult{
+		ID: fmt.Sprintf("corr-%d", time.Now().Unix()),
+		Resource: ResourceRef{
+			Type:      query.ResourceType,
+			Namespace: query.Namespace,
+			Name:      query.Name,
+		},
+		RootCause: &RootCause{
+			Type:        "resource_exhaustion",
+			Description: "Pod exceeded memory limits causing OOMKilled",
+			Confidence:  0.85,
+		},
+		Impact: &ImpactAnalysis{
+			Scope:      "service",
+			Affected:   []string{"frontend-service", "api-gateway"},
+			Severity:   SeverityHigh,
+			UserImpact: "Users experiencing 503 errors",
+		},
+		Remediation: &RemediationPlan{
+			Automatic: false,
+			Steps: []RemediationStep{
+				{
+					Order:       1,
+					Description: "Increase memory limits for the pod",
+					Command:     "kubectl edit deployment frontend -n default",
+					Manual:      true,
+					RiskLevel:   "low",
+				},
+				{
+					Order:       2,
+					Description: "Investigate memory leak in application",
+					Manual:      true,
+					RiskLevel:   "medium",
+				},
+			},
+			EstimatedTime: 15 * time.Minute,
+			RiskLevel:     "medium",
+		},
+		Confidence:     0.85,
+		ProcessingTime: 250 * time.Millisecond,
+		CreatedAt:      time.Now(),
+		Correlators:    []string{"DependencyCorrelator", "ResourceCorrelator"},
+	}
+
+	return result, nil
+}
+
+// ListCorrelations returns a paginated list of correlations
+func (a *CorrelationAggregator) ListCorrelations(ctx context.Context, limit, offset int) (*CorrelationList, error) {
+	// TODO: Implement actual listing logic from storage
+	return &CorrelationList{
+		Correlations: []CorrelationSummary{},
+		Total:        0,
+		Limit:        limit,
+		Offset:       offset,
+	}, nil
+}
+
+// GetCorrelation retrieves a specific correlation by ID
+func (a *CorrelationAggregator) GetCorrelation(ctx context.Context, id string) (*AggregatedResult, error) {
+	// TODO: Implement actual retrieval logic from storage
+	return nil, ErrNotFound
+}
+
+// SubmitFeedback submits user feedback for a correlation
+func (a *CorrelationAggregator) SubmitFeedback(ctx context.Context, id string, feedback CorrelationFeedback) error {
+	// TODO: Implement feedback storage and learning logic
+	a.logger.Info("Received feedback",
+		zap.String("correlation_id", id),
+		zap.Bool("useful", feedback.Useful),
+		zap.Bool("correct_rc", feedback.CorrectRC))
+
+	// Update correlator accuracy based on feedback
+	// This would need to track which correlators contributed to this correlation
+
+	return nil
+}
+
+// Health checks if the aggregator is healthy
+func (a *CorrelationAggregator) Health(ctx context.Context) error {
+	// TODO: Implement actual health check logic
+	return nil
+}
