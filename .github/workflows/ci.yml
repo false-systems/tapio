@@ -10,7 +10,7 @@ on:
     branches: [ main ]
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: '1.24'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -105,19 +105,6 @@ jobs:
     name: Test Components
     runs-on: ubuntu-latest
     needs: [enforcement]
-    strategy:
-      matrix:
-        component:
-          - pkg/domain
-          - pkg/collectors/ebpf
-          - pkg/collectors/k8s  
-          - pkg/collectors/systemd
-          - pkg/collectors/journald
-          - pkg/intelligence/correlation
-          - pkg/integrations/otel
-          - pkg/integrations/prometheus
-          - pkg/interfaces/server
-          - pkg/interfaces/cli
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -132,15 +119,10 @@ jobs:
         run: go mod download
 
 
-      - name: Test ${{ matrix.component }}
+      - name: Run all tests
         run: |
-          if [ -d "${{ matrix.component }}" ]; then
-            cd ${{ matrix.component }}
-            go test -v -race -coverprofile=coverage.out ./...
-            go tool cover -func=coverage.out
-          else
-            echo "Component ${{ matrix.component }} not found, skipping"
-          fi
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
 
   # ===================================
   # BUILD - Docker Images in Parallel
