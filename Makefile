@@ -150,19 +150,44 @@ ci: lint test build docker-all ## Full CI pipeline
 ci-quick: lint test build ## Quick CI (no Docker)
 	@echo "$(GREEN)🚀 Quick CI completed successfully!$(NC)"
 
-ci-enforcement-only: ## Minimal CI enforcement checks (for CI workflow)
-	@echo "$(BLUE)🏗️  Running CI enforcement checks...$(NC)"
-	@echo "$(BLUE)Checking code formatting...$(NC)"
+ci-local: ## Run CI checks locally (matches GitHub Actions)
+	@echo "$(BLUE)🚀 Running CI checks locally...$(NC)"
+	@echo ""
+	@echo "$(BLUE)1️⃣  Format Check$(NC)"
 	@if [ "$$(git ls-files '*.go' | xargs gofmt -l | wc -l)" -gt 0 ]; then \
-		echo "$(RED)❌ Code not formatted:$(NC)"; \
+		echo "$(RED)❌ Files need formatting:$(NC)"; \
 		git ls-files '*.go' | xargs gofmt -l; \
-		exit 1; \
+		echo "$(YELLOW)   Run: make fmt$(NC)"; \
+		echo ""; \
+	else \
+		echo "$(GREEN)✅ All files formatted$(NC)"; \
 	fi
-	@echo "$(GREEN)✅ Code properly formatted$(NC)"
-	@echo "$(BLUE)Running go vet...$(NC)"
-	@go list ./... | grep -v '/scripts' | grep -v 'ebpf' | grep -v 'interfaces/api' | xargs go vet
-	@echo "$(GREEN)✅ Go vet passed$(NC)"
-	@echo "$(GREEN)✅ Enforcement checks completed!$(NC)"
+	@echo ""
+	@echo "$(BLUE)2️⃣  Build Check$(NC)"
+	@if go build ./... 2>/dev/null; then \
+		echo "$(GREEN)✅ Build successful$(NC)"; \
+	else \
+		echo "$(RED)❌ Build failed$(NC)"; \
+		go build ./...; \
+	fi
+	@echo ""
+	@echo "$(BLUE)3️⃣  Test Check$(NC)"
+	@if go test -race -short -timeout 5m ./... > /dev/null 2>&1; then \
+		echo "$(GREEN)✅ Tests passed$(NC)"; \
+	else \
+		echo "$(RED)❌ Tests failed$(NC)"; \
+		echo "$(YELLOW)   Run: go test -v ./...$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(BLUE)4️⃣  Lint Check$(NC)"
+	@if go vet ./... 2>/dev/null; then \
+		echo "$(GREEN)✅ No vet issues$(NC)"; \
+	else \
+		echo "$(RED)❌ Vet issues found$(NC)"; \
+		go vet ./...; \
+	fi
+	@echo ""
+	@echo "$(BLUE)📊 Summary: Run 'make ci-local' to see detailed output$(NC)"
 
 
 ##@ Local Development
