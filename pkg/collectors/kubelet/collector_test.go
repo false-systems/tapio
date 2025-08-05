@@ -306,6 +306,7 @@ func TestCollectorPodLifecycle(t *testing.T) {
 		Address:         server.Listener.Addr().String(),
 		Insecure:        true,
 		MetricsInterval: 100 * time.Millisecond,
+		StatsInterval:   100 * time.Millisecond,
 		Logger:          zap.NewNop(),
 	}
 
