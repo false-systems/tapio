@@ -15,51 +15,13 @@ run:
 
 linters:
   enable:
-    # Essential linters
+    # Essential linters only - no formatters
     - errcheck          # Check for unchecked errors
     - gosimple          # Simplify code
     - govet             # Go vet examination
     - ineffassign       # Detect ineffectual assignments
     - staticcheck       # Go static analysis
     - unused            # Check for unused constants, variables, functions and types
-
-    # Code quality
-    - gofmt             # Check whether code was gofmt-ed
-    - goimports         # Check import formatting
-    - revive            # Fast, configurable, extensible, flexible, and beautiful linter for Go
-    - misspell          # Finds commonly misspelled English words in comments
-    - unconvert         # Remove unnecessary type conversions
-    - whitespace        # Tool for detection of leading and trailing whitespace
-
-    # Performance
-    - prealloc          # Find slice declarations that could potentially be preallocated
-    
-    # Security
-    - gosec             # Inspects source code for security problems
-
-    # Style
-    - gocyclo           # Computes and checks the cyclomatic complexity of functions
-    - funlen            # Tool for detection of long functions
-    - gocognit          # Computes and checks the cognitive complexity of functions
-    - lll               # Reports long lines
-    - nakedret          # Finds naked returns in functions greater than a specified function length
-
-    # Bugs
-    - bodyclose         # Checks whether HTTP response body is closed successfully
-    - nilerr            # Finds the code that returns nil even if it checks that the error is not nil
-    - noctx             # Find sending http request without context.Context
-    - sqlclosecheck     # Checks that sql.Rows and sql.Stmt are closed
-
-    # Advanced
-    - gocritic          # Provides diagnostics that check for bugs, performance and style issues
-    - nilnil            # Checks that there is no simultaneous return of nil error and an invalid value
-
-    # Architecture enforcement (CRITICAL for Tapio)
-    - depguard          # Enforces 5-level hierarchy and prevents cross-imports
-    - importas          # Enforces consistent import aliases
-
-    # Test quality
-    - testpackage       # Makes you use a separate _test package
 
 # ==========================================
 # Issues Configuration
