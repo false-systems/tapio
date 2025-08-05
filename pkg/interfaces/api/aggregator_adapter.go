@@ -87,7 +87,7 @@ func (a *AggregatorAdapter) ProcessEvent(ctx context.Context, event interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid event type: expected *domain.UnifiedEvent")
 	}
-	
+
 	// Run through correlators and aggregate
 	// TODO: Actually run correlators and aggregate results
 	// For now, return empty result
@@ -98,10 +98,10 @@ func (a *AggregatorAdapter) ProcessEvent(ctx context.Context, event interface{})
 		resource.Name = unifiedEvent.K8sContext.Name
 		resource.Namespace = unifiedEvent.K8sContext.Namespace
 	}
-	
+
 	return &aggregator.AggregatedResult{
-		ID:       uuid.New().String(),
-		Resource: resource,
+		ID:             uuid.New().String(),
+		Resource:       resource,
 		RootCause:      nil,
 		Impact:         nil,
 		Remediation:    nil,

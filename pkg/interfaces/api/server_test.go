@@ -48,13 +48,8 @@ func (m *MockAggregator) GetCorrelation(ctx context.Context, id string) (*aggreg
 	return args.Get(0).(*aggregator.AggregatedResult), args.Error(1)
 }
 
-func (m *MockAggregator) SubmitFeedback(ctx context.Context, id string, feedback aggregator.CorrelationFeedback) error {
-	args := m.Called(ctx, id, feedback)
-	return args.Error(0)
-}
-
-func (m *MockAggregator) ProcessEvent(ctx context.Context, event interface{}) error {
-	args := m.Called(ctx, event)
+func (m *MockAggregator) SubmitFeedback(ctx context.Context, feedback aggregator.CorrelationFeedback) error {
+	args := m.Called(ctx, feedback)
 	return args.Error(0)
 }
 
@@ -114,7 +109,7 @@ func TestNewServer(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		agg       aggregator.CorrelationAggregator
+		agg       AggregatorInterface
 		inst      *telemetry.APIInstrumentation
 		logger    *zap.Logger
 		wantError bool
@@ -140,8 +135,7 @@ func TestNewServer(t *testing.T) {
 			agg:       &MockAggregator{},
 			inst:      nil,
 			logger:    logger,
-			wantError: true,
-			errorMsg:  "instrumentation is required",
+			wantError: false, // instrumentation is now optional
 		},
 		{
 			name:      "missing logger",
@@ -299,9 +293,9 @@ func TestHandleListCorrelations(t *testing.T) {
 					Namespace: "default",
 					Name:      "test-pod-1",
 				},
-				RootCauseType: "config_change",
-				Confidence:    0.92,
-				CreatedAt:     time.Now(),
+				RootCause: "config_change",
+				Severity:  aggregator.SeverityHigh,
+				CreatedAt: time.Now(),
 			},
 			{
 				ID: "corr-2",
@@ -310,9 +304,9 @@ func TestHandleListCorrelations(t *testing.T) {
 					Namespace: "prod",
 					Name:      "api-service",
 				},
-				RootCauseType: "resource_failure",
-				Confidence:    0.88,
-				CreatedAt:     time.Now(),
+				RootCause: "resource_failure",
+				Severity:  aggregator.SeverityMedium,
+				CreatedAt: time.Now(),
 			},
 		},
 		Total:  2,
@@ -377,13 +371,13 @@ func TestHandleCorrelationFeedback(t *testing.T) {
 	server, mockAgg := setupTestServer(t)
 
 	feedback := aggregator.CorrelationFeedback{
-		UserID:   "user123",
-		Useful:   true,
-		Accurate: true,
-		Comment:  "Very helpful",
+		UserID:    "user123",
+		Useful:    true,
+		CorrectRC: true,
+		Comment:   "Very helpful",
 	}
 
-	mockAgg.On("SubmitFeedback", mock.Anything, "corr-123", feedback).
+	mockAgg.On("SubmitFeedback", mock.Anything, feedback).
 		Return(nil).Once()
 
 	body, _ := json.Marshal(feedback)

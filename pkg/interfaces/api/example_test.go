@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
@@ -36,8 +37,9 @@ func Example() {
 	config.EnableCORS = true
 	config.AllowedOrigins = []string{"https://app.tapio.io", "http://localhost:3000"}
 
-	// Create server
-	server, err := api.NewServer(agg, instrumentation, logger, config)
+	// Create server with adapter
+	adapter := api.NewAggregatorAdapter(agg)
+	server, err := api.NewServer(adapter, instrumentation, logger, config)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,11 +68,11 @@ func Example_clientUsage() {
 	}
 
 	// Submit feedback
-	feedback := `{"user_id": "user123", "useful": true, "comment": "Helpful!"}`
+	feedbackData := `{"user_id": "user123", "useful": true, "comment": "Helpful!"}`
 	resp2, err := http.Post(
 		"http://localhost:8080/api/v1/correlations/corr-123/feedback",
 		"application/json",
-		nil, // Would use strings.NewReader(feedback) in real code
+		strings.NewReader(feedbackData),
 	)
 	if err != nil {
 		log.Fatal(err)
