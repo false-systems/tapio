@@ -102,35 +102,70 @@ jobs:
     if: always()
     steps:
       - name: Summary
+        env:
+          FORMAT_RESULT: ${{ needs.format.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
         run: |
           echo "## 🚀 CI Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Format | ${{ needs.format.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build | ${{ needs.build.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Test | ${{ needs.test.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Lint | ${{ needs.lint.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # Format status
+          if [[ "$FORMAT_RESULT" == "success" ]]; then
+            echo "| Format | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Format | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Build status
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            echo "| Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Build | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Test status
+          if [[ "$TEST_RESULT" == "success" ]]; then
+            echo "| Test | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Test | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Lint status
+          if [[ "$LINT_RESULT" == "success" ]]; then
+            echo "| Lint | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Lint | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Provide helpful feedback
-          if [[ "${{ needs.format.result }}" == "failure" ]]; then
+          if [[ "$FORMAT_RESULT" == "failure" ]]; then
             echo "### 📝 Format Issues" >> $GITHUB_STEP_SUMMARY
             echo "Run \`gofmt -w .\` locally to fix formatting" >> $GITHUB_STEP_SUMMARY
           fi
           
-          if [[ "${{ needs.build.result }}" == "failure" ]]; then
+          if [[ "$BUILD_RESULT" == "failure" ]]; then
             echo "### 🔨 Build Issues" >> $GITHUB_STEP_SUMMARY
             echo "Check the build logs for compilation errors" >> $GITHUB_STEP_SUMMARY
           fi
           
-          if [[ "${{ needs.test.result }}" == "failure" ]]; then
+          if [[ "$TEST_RESULT" == "failure" ]]; then
             echo "### 🧪 Test Failures" >> $GITHUB_STEP_SUMMARY
             echo "Check the test logs for failing tests" >> $GITHUB_STEP_SUMMARY
           fi
           
+          if [[ "$LINT_RESULT" == "failure" ]]; then
+            echo "### 🔍 Lint Issues" >> $GITHUB_STEP_SUMMARY
+            echo "Check the lint logs for vet errors" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           # Overall status
-          if [[ "${{ needs.format.result }}" == "success" && "${{ needs.build.result }}" == "success" && "${{ needs.test.result }}" == "success" && "${{ needs.lint.result }}" == "success" ]]; then
+          if [[ "$FORMAT_RESULT" == "success" && "$BUILD_RESULT" == "success" && "$TEST_RESULT" == "success" && "$LINT_RESULT" == "success" ]]; then
             echo "### ✅ All checks passed!" >> $GITHUB_STEP_SUMMARY
             exit 0
           else
