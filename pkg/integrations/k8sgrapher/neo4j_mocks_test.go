@@ -15,6 +15,8 @@ import (
 // MockNeo4jDriver is a comprehensive mock implementation of neo4j.DriverWithContext
 type MockNeo4jDriver struct {
 	mock.Mock
+	// Store the session to return directly
+	sessionToReturn neo4j.SessionWithContext
 }
 
 func (m *MockNeo4jDriver) ExecuteQueryBookmarkManager() neo4j.BookmarkManager {
@@ -31,6 +33,11 @@ func (m *MockNeo4jDriver) Target() url.URL {
 }
 
 func (m *MockNeo4jDriver) NewSession(ctx context.Context, config neo4j.SessionConfig) neo4j.SessionWithContext {
+	// If we have a pre-configured session, return it
+	if m.sessionToReturn != nil {
+		return m.sessionToReturn
+	}
+
 	args := m.Called(ctx, config)
 	if args.Get(0) == nil {
 		return nil
@@ -354,4 +361,15 @@ type MockDatabaseInfo struct {
 
 func (m *MockDatabaseInfo) Name() string {
 	return "neo4j"
+}
+
+// Helper function to create a properly configured MockNeo4jDriver with a MockSession
+func NewMockDriverWithSession() (*MockNeo4jDriver, *MockSession) {
+	mockDriver := &MockNeo4jDriver{}
+	mockSession := &MockSession{}
+
+	// The key is to not use type assertion but instead work with the concrete type
+	mockDriver.On("NewSession", mock.Anything, mock.Anything).Return(mockSession)
+
+	return mockDriver, mockSession
 }
