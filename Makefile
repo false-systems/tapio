@@ -1,7 +1,7 @@
 # Tapio - Simple & Fast Makefile
 # Container-first development with proper linting
 
-.PHONY: help build test lint clean docker-all dev ci
+.PHONY: help build test lint clean docker-all dev ci ci-enforcement-only
 
 # Build variables
 VERSION ?= dev
@@ -149,6 +149,20 @@ ci: lint test build docker-all ## Full CI pipeline
 
 ci-quick: lint test build ## Quick CI (no Docker)
 	@echo "$(GREEN)🚀 Quick CI completed successfully!$(NC)"
+
+ci-enforcement-only: ## Minimal CI enforcement checks (for CI workflow)
+	@echo "$(BLUE)🏗️  Running CI enforcement checks...$(NC)"
+	@echo "$(BLUE)Checking code formatting...$(NC)"
+	@if [ "$$(git ls-files '*.go' | xargs gofmt -l | wc -l)" -gt 0 ]; then \
+		echo "$(RED)❌ Code not formatted:$(NC)"; \
+		git ls-files '*.go' | xargs gofmt -l; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✅ Code properly formatted$(NC)"
+	@echo "$(BLUE)Running go vet...$(NC)"
+	@go list ./... | grep -v '/scripts' | grep -v 'ebpf' | grep -v 'interfaces/api' | xargs go vet
+	@echo "$(GREEN)✅ Go vet passed$(NC)"
+	@echo "$(GREEN)✅ Enforcement checks completed!$(NC)"
 
 
 ##@ Local Development

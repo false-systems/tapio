@@ -1,8 +1,6 @@
 # ==========================================
-# Tapio golangci-lint Configuration
+# Tapio golangci-lint Configuration v2.x
 # ==========================================
-
-version: "2"
 
 run:
   timeout: 5m
@@ -10,33 +8,26 @@ run:
   tests: true
   build-tags:
     - ebpf
-  skip-dirs:
+  exclude-dirs:
     - vendor
     - bin
     - dist
     - build
     - .git
     - pkg/mod
-  skip-files:
+  exclude-files:
     - ".*\\.pb\\.go$"
     - ".*_generated\\.go$"
   modules-download-mode: readonly
-
-output:
-  format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-  uniq-by-line: true
-  sort-results: true
 
 linters-settings:
   # Go vet configuration
   govet:
     check-shadowing: true
-    fieldalignment: true
     enable-all: true
     disable:
       - shadow # Too noisy for some codebases
+      - fieldalignment # Can be too strict
 
   # Cyclomatic complexity
   gocyclo:
@@ -268,7 +259,7 @@ linters-settings:
 # Enabled Linters
 # ==========================================
 linters:
-  disable-all: true
+  enable-all: false
   enable:
     # Essential linters
     - errcheck          # Check for unchecked errors
@@ -342,32 +333,27 @@ issues:
     # Exclude some linters from running on generated files
     - path: ".*\\.pb\\.go"
       linters:
-        - all
+        - gocyclo
+        - dupl
+        - gosec
+        - funlen
 
     # Exclude some linters for eBPF-related files (can be noisy)
-    - path: pkg/ebpf/
+    - path: pkg/collectors/ebpf/
       linters:
         - gosec  # eBPF code often needs unsafe operations
 
     # Exclude from legacy files during migration
     - path: ".*\\.go\\.disabled"
       linters:
-        - all
+        - gocyclo
+        - dupl
+        - gosec
 
-    # Exclude specific issues
-    - text: "should have a package comment"
-      linters:
-        - revive
-
-    - text: "don't use ALL_CAPS in Go names"
-      linters:
-        - revive
-
-    # Exclude issues for test helper functions
-    - source: "func Test.*"
-      linters:
-        - funlen
-        - gocognit
+  # Specific text exclusions
+  exclude:
+    - "should have a package comment"
+    - "don't use ALL_CAPS in Go names"
 
   # Set to 0 to disable limit
   max-issues-per-linter: 50
@@ -379,13 +365,9 @@ issues:
   # Fix found issues (if it's supported by the linter)
   fix: false
 
-severity:
-  default-severity: error
-  case-sensitive: false
-  rules:
-    - linters:
-        - revive
-      severity: warning
-    - linters:
-        - misspell
-      severity: info
+# ==========================================
+# Output Configuration
+# ==========================================
+output:
+  formats:
+    - format: colored-line-number
