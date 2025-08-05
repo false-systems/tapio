@@ -1,0 +1,1048 @@
+openapi: 3.0.3
+info:
+  title: Tapio Correlation API
+  description: |
+    Enterprise-grade observability platform API for semantic correlation analysis.
+    
+    This API provides endpoints to query correlations between Kubernetes resources,
+    understand root causes of failures, and provide feedback on correlation accuracy.
+  version: 1.0.0
+  contact:
+    name: Tapio Team
+    url: https://github.com/yairfalse/tapio
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.tapio.io
+    description: Production server
+
+tags:
+  - name: correlations
+    description: Correlation analysis operations
+  - name: analysis
+    description: Deep analysis and pattern detection
+  - name: health
+    description: Health check endpoints
+
+paths:
+  /api/v1/why/{resource_type}/{namespace}/{name}:
+    get:
+      tags:
+        - correlations
+      summary: Analyze why a resource failed
+      description: |
+        Returns correlation analysis explaining why a specific Kubernetes resource
+        is in a failed state, including root causes and affected resources.
+      operationId: analyzeResourceFailure
+      parameters:
+        - name: resource_type
+          in: path
+          required: true
+          description: Type of Kubernetes resource (e.g., pod, service, deployment)
+          schema:
+            type: string
+            enum: [pod, service, deployment, replicaset, statefulset, daemonset, configmap, secret]
+          example: pod
+        - name: namespace
+          in: path
+          required: true
+          description: Kubernetes namespace
+          schema:
+            type: string
+          example: default
+        - name: name
+          in: path
+          required: true
+          description: Resource name
+          schema:
+            type: string
+          example: frontend-pod-abc123
+        - name: time_window
+          in: query
+          required: false
+          description: Time window to analyze (e.g., 1h, 24h, 7d)
+          schema:
+            type: string
+            default: 24h
+          example: 6h
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Unique request identifier for tracing
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Correlation analysis result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrelationResult'
+              example:
+                id: "corr-123456"
+                resource:
+                  type: "pod"
+                  namespace: "default"
+                  name: "frontend-pod-abc123"
+                root_cause:
+                  type: "config_change"
+                  resource:
+                    type: "configmap"
+                    namespace: "default"
+                    name: "frontend-config"
+                  description: "ConfigMap 'frontend-config' was modified 5 minutes before pod failure"
+                  confidence: 0.92
+                findings:
+                  - id: "find-1"
+                    type: "config_mount_failure"
+                    severity: "critical"
+                    message: "Pod failed to start after ConfigMap change"
+                    confidence: 0.95
+                    evidence:
+                      - "ConfigMap modified at 10:15:00"
+                      - "Pod restart initiated at 10:15:30"
+                      - "Container failed with 'CreateContainerConfigError'"
+                affected_resources:
+                  - type: "service"
+                    namespace: "default"
+                    name: "frontend-service"
+                    impact: "Service has no ready endpoints"
+                timeline:
+                  - timestamp: "2024-01-20T10:15:00Z"
+                    event: "ConfigMap 'frontend-config' updated"
+                  - timestamp: "2024-01-20T10:15:30Z"
+                    event: "Pod 'frontend-pod-abc123' restarted"
+                  - timestamp: "2024-01-20T10:15:35Z"
+                    event: "Container failed to start"
+                confidence: 0.92
+                processing_time_ms: 145
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/correlations:
+    get:
+      tags:
+        - correlations
+      summary: List recent correlations
+      description: Returns a paginated list of recent correlation analyses
+      operationId: listCorrelations
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results (1-1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          description: Number of results to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: resource_type
+          in: query
+          required: false
+          description: Filter by resource type
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          required: false
+          description: Filter by namespace
+          schema:
+            type: string
+        - name: severity
+          in: query
+          required: false
+          description: Filter by minimum severity
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+      responses:
+        '200':
+          description: List of correlations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrelationList'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/correlations/{id}:
+    get:
+      tags:
+        - correlations
+      summary: Get correlation details
+      description: Returns detailed information about a specific correlation
+      operationId: getCorrelation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Correlation ID
+          schema:
+            type: string
+          example: corr-123456
+      responses:
+        '200':
+          description: Correlation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrelationResult'
+        '404':
+          description: Correlation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/correlations/{id}/feedback:
+    post:
+      tags:
+        - correlations
+      summary: Submit feedback on correlation
+      description: |
+        Submit user feedback on the accuracy and usefulness of a correlation.
+        This helps improve the correlation engine over time.
+      operationId: submitFeedback
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Correlation ID
+          schema:
+            type: string
+          example: corr-123456
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrelationFeedback'
+            example:
+              user_id: "user123"
+              useful: true
+              accurate: true
+              comment: "This correctly identified the config change as root cause"
+      responses:
+        '200':
+          description: Feedback accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: accepted
+                  id:
+                    type: string
+                    example: corr-123456
+        '400':
+          description: Invalid feedback data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Correlation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /health:
+    get:
+      tags:
+        - health
+      summary: Health check
+      description: Returns the health status of the API service
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+
+  /ready:
+    get:
+      tags:
+        - health
+      summary: Readiness check
+      description: Returns whether the service is ready to accept requests
+      operationId: readinessCheck
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: not_ready
+                  error:
+                    type: string
+                    example: "Aggregator not initialized"
+
+  /api/v1/analysis/event/{event_id}:
+    post:
+      tags:
+        - analysis
+      summary: Analyze an event with correlation findings
+      description: |
+        Performs deep analysis on an event and its correlation findings,
+        detecting patterns, generating insights, and providing recommendations.
+      operationId: analyzeEvent
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          description: Event ID to analyze
+          schema:
+            type: string
+          example: evt-12345
+      requestBody:
+        description: Optional analysis parameters
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisRequest'
+      responses:
+        '200':
+          description: Analysis completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/patterns/detect:
+    get:
+      tags:
+        - analysis
+      summary: Detect patterns in recent events
+      description: |
+        Analyzes recent events to detect known failure patterns such as
+        OOM cascades, configuration drift, or network partitions.
+      operationId: detectPatterns
+      parameters:
+        - name: event_id
+          in: query
+          required: true
+          description: Event ID to use as reference point
+          schema:
+            type: string
+          example: evt-12345
+        - name: time_window
+          in: query
+          required: false
+          description: Time window to analyze (e.g., 30m, 1h, 24h)
+          schema:
+            type: string
+            default: 30m
+          example: 30m
+      responses:
+        '200':
+          description: Patterns detected successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PatternInfo'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/confidence/calculate:
+    post:
+      tags:
+        - analysis
+      summary: Calculate confidence score
+      description: |
+        Calculates a unified confidence score based on various factors
+        such as evidence quality, temporal factors, and pattern matching.
+      operationId: calculateConfidence
+      requestBody:
+        description: Score context for calculation
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfidenceRequest'
+      responses:
+        '200':
+          description: Confidence calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfidenceResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/analysis/history:
+    get:
+      tags:
+        - analysis
+      summary: Get historical analysis results
+      description: |
+        Retrieves historical analysis results for a specific resource
+        within a given timeframe.
+      operationId: getAnalysisHistory
+      parameters:
+        - name: resource
+          in: query
+          required: true
+          description: Resource name to query
+          schema:
+            type: string
+          example: my-pod
+        - name: timeframe
+          in: query
+          required: false
+          description: Timeframe to query (e.g., 1h, 24h, 7d)
+          schema:
+            type: string
+            default: 24h
+          example: 24h
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 100
+          example: 100
+      responses:
+        '200':
+          description: Historical analyses retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnalysisResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    CorrelationResult:
+      type: object
+      required:
+        - id
+        - resource
+        - findings
+        - confidence
+        - processing_time_ms
+      properties:
+        id:
+          type: string
+          description: Unique correlation identifier
+          example: corr-123456
+        resource:
+          $ref: '#/components/schemas/ResourceRef'
+        root_cause:
+          $ref: '#/components/schemas/RootCause'
+        findings:
+          type: array
+          description: List of correlation findings
+          items:
+            $ref: '#/components/schemas/Finding'
+        affected_resources:
+          type: array
+          description: Resources affected by this issue
+          items:
+            $ref: '#/components/schemas/AffectedResource'
+        timeline:
+          type: array
+          description: Timeline of events
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Overall confidence score
+          example: 0.92
+        processing_time_ms:
+          type: integer
+          description: Processing time in milliseconds
+          example: 145
+        created_at:
+          type: string
+          format: date-time
+          description: When the correlation was created
+
+    ResourceRef:
+      type: object
+      required:
+        - type
+        - namespace
+        - name
+      properties:
+        type:
+          type: string
+          description: Kubernetes resource type
+          example: pod
+        namespace:
+          type: string
+          description: Kubernetes namespace
+          example: default
+        name:
+          type: string
+          description: Resource name
+          example: frontend-pod-abc123
+
+    RootCause:
+      type: object
+      required:
+        - type
+        - description
+        - confidence
+      properties:
+        type:
+          type: string
+          description: Type of root cause
+          enum: [config_change, resource_failure, network_issue, storage_issue, unknown]
+          example: config_change
+        resource:
+          $ref: '#/components/schemas/ResourceRef'
+        description:
+          type: string
+          description: Human-readable description
+          example: "ConfigMap 'frontend-config' was modified 5 minutes before pod failure"
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.92
+
+    Finding:
+      type: object
+      required:
+        - id
+        - type
+        - severity
+        - message
+        - confidence
+      properties:
+        id:
+          type: string
+          description: Finding identifier
+          example: find-1
+        type:
+          type: string
+          description: Type of finding
+          example: config_mount_failure
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          example: critical
+        message:
+          type: string
+          description: Human-readable message
+          example: "Pod failed to start after ConfigMap change"
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.95
+        evidence:
+          type: array
+          description: Supporting evidence
+          items:
+            type: string
+          example:
+            - "ConfigMap modified at 10:15:00"
+            - "Pod restart initiated at 10:15:30"
+
+    AffectedResource:
+      type: object
+      required:
+        - type
+        - namespace
+        - name
+        - impact
+      properties:
+        type:
+          type: string
+          example: service
+        namespace:
+          type: string
+          example: default
+        name:
+          type: string
+          example: frontend-service
+        impact:
+          type: string
+          description: Description of impact
+          example: "Service has no ready endpoints"
+
+    TimelineEvent:
+      type: object
+      required:
+        - timestamp
+        - event
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-01-20T10:15:00Z"
+        event:
+          type: string
+          description: Event description
+          example: "ConfigMap 'frontend-config' updated"
+
+    CorrelationList:
+      type: object
+      required:
+        - correlations
+        - total
+        - limit
+        - offset
+      properties:
+        correlations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CorrelationSummary'
+        total:
+          type: integer
+          description: Total number of correlations
+          example: 150
+        limit:
+          type: integer
+          description: Results per page
+          example: 100
+        offset:
+          type: integer
+          description: Results skipped
+          example: 0
+
+    CorrelationSummary:
+      type: object
+      required:
+        - id
+        - resource
+        - root_cause_type
+        - confidence
+        - created_at
+      properties:
+        id:
+          type: string
+          example: corr-123456
+        resource:
+          $ref: '#/components/schemas/ResourceRef'
+        root_cause_type:
+          type: string
+          example: config_change
+        confidence:
+          type: number
+          format: double
+          example: 0.92
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          example: critical
+        created_at:
+          type: string
+          format: date-time
+
+    CorrelationFeedback:
+      type: object
+      required:
+        - user_id
+        - useful
+      properties:
+        user_id:
+          type: string
+          description: User submitting feedback
+          example: user123
+        useful:
+          type: boolean
+          description: Was the correlation useful?
+          example: true
+        accurate:
+          type: boolean
+          description: Was the correlation accurate?
+          example: true
+        comment:
+          type: string
+          description: Additional feedback (max 1000 chars)
+          maxLength: 1000
+          example: "This correctly identified the config change as root cause"
+
+    Health:
+      type: object
+      required:
+        - status
+        - timestamp
+        - version
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+          example: "1.0.0"
+        checks:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              message:
+                type: string
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Resource not found"
+        request_id:
+          type: string
+          description: Request ID for tracing
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        details:
+          type: object
+          description: Additional error details
+
+    AnalysisRequest:
+      type: object
+      properties:
+        event_id:
+          type: string
+          description: Event ID to analyze
+          example: evt-12345
+        findings:
+          type: array
+          description: Optional findings to analyze (if not provided, will fetch from storage)
+          items:
+            $ref: '#/components/schemas/Finding'
+        time_window:
+          type: string
+          description: Time window for analysis
+          example: 30m
+
+    AnalysisResponse:
+      type: object
+      required:
+        - analysis_id
+        - event_id
+        - confidence
+        - quality
+        - summary
+        - timestamp
+      properties:
+        analysis_id:
+          type: string
+          description: Unique analysis ID
+          example: analysis-evt-12345-1234567890
+        event_id:
+          type: string
+          description: Event ID that was analyzed
+          example: evt-12345
+        confidence:
+          type: number
+          format: double
+          description: Overall confidence score (0.0 to 1.0)
+          example: 0.85
+        quality:
+          type: number
+          format: double
+          description: Analysis quality score (0.0 to 1.0)
+          example: 0.75
+        summary:
+          type: string
+          description: Human-readable summary
+          example: OOM Cascade detected with 85% confidence. Memory exhaustion causing pod restarts
+        patterns:
+          type: array
+          description: Detected patterns
+          items:
+            $ref: '#/components/schemas/PatternInfo'
+        insights:
+          type: array
+          description: Generated insights
+          items:
+            $ref: '#/components/schemas/InsightInfo'
+        recommendations:
+          type: array
+          description: Recommendations
+          items:
+            $ref: '#/components/schemas/RecommendationInfo'
+        timestamp:
+          type: string
+          format: date-time
+          description: Analysis timestamp
+          example: 2024-01-20T15:30:00Z
+
+    PatternInfo:
+      type: object
+      required:
+        - name
+        - confidence
+        - description
+      properties:
+        name:
+          type: string
+          description: Pattern name
+          example: OOM Cascade
+        confidence:
+          type: number
+          format: double
+          description: Pattern confidence
+          example: 0.9
+        description:
+          type: string
+          description: Pattern description
+          example: Memory exhaustion causing pod restarts
+
+    InsightInfo:
+      type: object
+      required:
+        - type
+        - severity
+        - title
+        - message
+      properties:
+        type:
+          type: string
+          description: Insight type
+          example: pattern_detected
+        severity:
+          type: string
+          description: Insight severity
+          example: high
+        title:
+          type: string
+          description: Insight title
+          example: OOM Cascade Pattern Detected
+        message:
+          type: string
+          description: Detailed message
+          example: Multiple pods are restarting due to memory exhaustion
+        evidence:
+          type: array
+          description: Supporting evidence
+          items:
+            type: string
+
+    RecommendationInfo:
+      type: object
+      required:
+        - priority
+        - type
+        - title
+        - description
+        - actions
+      properties:
+        priority:
+          type: string
+          description: Priority level
+          example: high
+        type:
+          type: string
+          description: Recommendation type
+          example: resource_adjustment
+        title:
+          type: string
+          description: Title
+          example: Increase Memory Limits
+        description:
+          type: string
+          description: Description
+          example: Pod is experiencing OOM kills. Consider increasing memory limits or optimizing memory usage.
+        actions:
+          type: array
+          description: Action items
+          items:
+            type: string
+
+    ConfidenceRequest:
+      type: object
+      required:
+        - score_context
+      properties:
+        score_context:
+          $ref: '#/components/schemas/ScoreContext'
+
+    ConfidenceResponse:
+      type: object
+      required:
+        - confidence
+      properties:
+        confidence:
+          type: number
+          format: double
+          description: Calculated confidence score (0.0 to 1.0)
+          example: 0.75
+        breakdown:
+          type: object
+          description: Breakdown of confidence factors
+          additionalProperties:
+            type: number
+            format: double
+
+    ScoreContext:
+      type: object
+      properties:
+        direct_evidence:
+          type: integer
+          description: Count of direct evidence
+          example: 5
+        indirect_evidence:
+          type: integer
+          description: Count of indirect evidence
+          example: 2
+        correlated_events:
+          type: integer
+          description: Count of correlated events
+          example: 3
+        data_completeness:
+          type: number
+          format: double
+          description: Data completeness (0.0 to 1.0)
+          example: 0.9
+        matches_known_pattern:
+          type: boolean
+          description: Whether it matches a known pattern
+          example: true
+        pattern_name:
+          type: string
+          description: Name of matched pattern
+          example: oom-cascade
+        has_root_cause:
+          type: boolean
+          description: Whether a root cause was identified
+          example: true
+        causal_depth:
+          type: integer
+          description: Depth of causal chain
+          example: 3
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT authentication token
+
+security:
+  - bearerAuth: []
