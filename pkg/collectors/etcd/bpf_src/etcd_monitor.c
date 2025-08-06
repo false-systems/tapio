@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Minimal etcd eBPF monitor - CO-RE enabled raw syscall monitoring
 
-#include "headers/vmlinux.h"
+#include "../../bpf_common/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
