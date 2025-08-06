@@ -14,7 +14,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 cniMonitor ./bpf/cni_monitor.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 cniMonitor ./bpf_src/cni_monitor.c -- -I../bpf_common
 
 // cniEvent represents a network event from eBPF
 type cniEvent struct {
