@@ -51,33 +51,16 @@ type UnifiedEvent struct {
 	Kubernetes  *KubernetesData  `json:"kubernetes,omitempty"`  // K8s events
 	Metrics     *MetricsData     `json:"metrics,omitempty"`     // Time-series data
 
-	// Enrichment fields (merged from Event type)
+	// Enrichment fields
 	Attributes map[string]interface{} `json:"attributes,omitempty"`
-	AiFeatures map[string]float32     `json:"ai_features,omitempty"`
-
-	// Analysis contexts (merged from OpinionatedEvent)
-	Anomaly    *AnomalyInfo       `json:"anomaly,omitempty"`
-	Behavioral *BehavioralContext `json:"behavioral,omitempty"`
-	Temporal   *TemporalContext   `json:"temporal,omitempty"`
-	State      *StateInfo         `json:"state,omitempty"`
-	Causality  *CausalityContext  `json:"causality,omitempty"`
 
 	// Impact & Correlation (enhanced)
 	Impact           *ImpactContext      `json:"impact,omitempty"`
 	Correlation      *CorrelationContext `json:"correlation,omitempty"`
 	CorrelationHints []string            `json:"correlation_hints,omitempty"`
 
-	// ENHANCED: Rich K8s context and analysis
-	K8sContext         *K8sContext         `json:"k8s_context,omitempty"`
-	ResourceContext    *ResourceContext    `json:"resource_context,omitempty"`
-	OperationalContext *OperationalContext `json:"operational_context,omitempty"`
-
-	// ENHANCED: Analysis results
-	Correlations []CorrelationRef `json:"correlations,omitempty"`
-	Patterns     []PatternMatch   `json:"patterns,omitempty"`
-	Anomalies    []AnomalyRef     `json:"anomalies,omitempty"`
-
-	// Collector metadata removed - was over-engineered
+	// K8s context (restored - needed for correlation)
+	K8sContext *K8sContext `json:"k8s_context,omitempty"`
 
 	// Original raw data (for debugging/replay)
 	RawData []byte `json:"raw_data,omitempty"`
@@ -93,21 +76,13 @@ type TraceContext struct {
 	Sampled      bool              `json:"sampled"`
 }
 
-// SemanticContext describes what this event means (enhanced)
+// SemanticContext describes what this event means
 type SemanticContext struct {
-	Intent           string             `json:"intent"`               // "user-login", "cache-miss", "oom-kill"
-	Category         string             `json:"category"`             // "security", "performance", "availability"
-	Tags             []string           `json:"tags"`                 // ["database", "critical-path", "customer-facing"]
-	Narrative        string             `json:"narrative"`            // Human-readable description
-	Confidence       float64            `json:"confidence"`           // How sure we are about the semantic meaning
-	Domain           string             `json:"domain,omitempty"`     // Business domain
-	Concepts         []string           `json:"concepts,omitempty"`   // Related concepts
-	Embedding        []float32          `json:"embedding,omitempty"`  // Vector embedding for similarity
-	EventType        string             `json:"event_type,omitempty"` // Semantic classification
-	IntentConfidence float32            `json:"intent_confidence,omitempty"`
-	SemanticFeatures map[string]float32 `json:"semantic_features,omitempty"`
-	OntologyTags     []string           `json:"ontology_tags,omitempty"`
-	Description      string             `json:"description,omitempty"`
+	Intent     string   `json:"intent"`     // "user-login", "cache-miss", "oom-kill"
+	Category   string   `json:"category"`   // "security", "performance", "availability"
+	Tags       []string `json:"tags"`       // ["database", "critical-path", "customer-facing"]
+	Narrative  string   `json:"narrative"`  // Human-readable description
+	Confidence float64  `json:"confidence"` // How sure we are about the semantic meaning
 }
 
 // EntityContext identifies what entity this event relates to
@@ -120,42 +95,35 @@ type EntityContext struct {
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
-// KernelData for eBPF/kernel events (enhanced with BPF metadata)
+// KernelData for eBPF/kernel events
 type KernelData struct {
-	Syscall     string            `json:"syscall,omitempty"`
-	PID         uint32            `json:"pid,omitempty"`
-	TID         uint32            `json:"tid,omitempty"`
-	UID         uint32            `json:"uid,omitempty"`
-	GID         uint32            `json:"gid,omitempty"`
-	Comm        string            `json:"comm,omitempty"` // Process name
-	ReturnCode  int32             `json:"return_code,omitempty"`
-	Args        map[string]string `json:"args,omitempty"` // Syscall arguments
-	StackTrace  []string          `json:"stack_trace,omitempty"`
-	CPUCore     int               `json:"cpu_core,omitempty"`
-	BPFProgram  string            `json:"bpf_program,omitempty"`
-	BPFMapStats map[string]int    `json:"bpf_map_stats,omitempty"`
-	// Removed kprobe and security details - over-engineered
+	Syscall    string            `json:"syscall,omitempty"`
+	PID        uint32            `json:"pid,omitempty"`
+	TID        uint32            `json:"tid,omitempty"`
+	UID        uint32            `json:"uid,omitempty"`
+	GID        uint32            `json:"gid,omitempty"`
+	Comm       string            `json:"comm,omitempty"` // Process name
+	ReturnCode int32             `json:"return_code,omitempty"`
+	Args       map[string]string `json:"args,omitempty"` // Syscall arguments
+	StackTrace []string          `json:"stack_trace,omitempty"`
 }
 
-// NetworkData for network events (enhanced with CNI/network policy context)
+// NetworkData for network events
 type NetworkData struct {
-	Protocol   string            `json:"protocol,omitempty"` // TCP, UDP, HTTP, gRPC
-	SourceIP   string            `json:"source_ip,omitempty"`
-	SourcePort uint16            `json:"source_port,omitempty"`
-	DestIP     string            `json:"dest_ip,omitempty"`
-	DestPort   uint16            `json:"dest_port,omitempty"`
-	Direction  string            `json:"direction,omitempty"` // ingress, egress
-	BytesSent  uint64            `json:"bytes_sent,omitempty"`
-	BytesRecv  uint64            `json:"bytes_recv,omitempty"`
-	Latency    int64             `json:"latency_ns,omitempty"`
-	StatusCode int               `json:"status_code,omitempty"` // HTTP/gRPC status
-	Method     string            `json:"method,omitempty"`      // HTTP/gRPC method
-	Path       string            `json:"path,omitempty"`        // HTTP/gRPC path
-	Headers    map[string]string `json:"headers,omitempty"`
-	// Removed network policy details - over-engineered
-	ContainerID    string `json:"container_id,omitempty"`
-	InterfaceName  string `json:"interface_name,omitempty"`
-	VirtualNetwork string `json:"virtual_network,omitempty"`
+	Protocol      string            `json:"protocol,omitempty"` // TCP, UDP, HTTP, gRPC
+	SourceIP      string            `json:"source_ip,omitempty"`
+	SourcePort    uint16            `json:"source_port,omitempty"`
+	DestIP        string            `json:"dest_ip,omitempty"`
+	DestPort      uint16            `json:"dest_port,omitempty"`
+	Direction     string            `json:"direction,omitempty"` // ingress, egress
+	BytesSent     uint64            `json:"bytes_sent,omitempty"`
+	BytesRecv     uint64            `json:"bytes_recv,omitempty"`
+	Latency       int64             `json:"latency_ns,omitempty"`
+	StatusCode    int               `json:"status_code,omitempty"` // HTTP/gRPC status
+	Method        string            `json:"method,omitempty"`      // HTTP/gRPC method
+	Path          string            `json:"path,omitempty"`        // HTTP/gRPC path
+	Headers       map[string]string `json:"headers,omitempty"`
+	InterfaceName string            `json:"interface_name,omitempty"` // Network interface
 }
 
 // ApplicationData for application-level events
@@ -171,7 +139,7 @@ type ApplicationData struct {
 	Custom     map[string]interface{} `json:"custom,omitempty"`
 }
 
-// KubernetesData for Kubernetes events (enhanced with CRD and admission webhook support)
+// KubernetesData for Kubernetes events
 type KubernetesData struct {
 	EventType       string            `json:"event_type,omitempty"`  // Normal, Warning
 	Reason          string            `json:"reason,omitempty"`      // BackOff, Killing, etc.
@@ -184,7 +152,6 @@ type KubernetesData struct {
 	Labels          map[string]string `json:"labels,omitempty"`
 	Annotations     map[string]string `json:"annotations,omitempty"`
 	ClusterName     string            `json:"cluster_name,omitempty"`
-	// Removed CRD and webhook details - over-engineered
 }
 
 // MetricsData for time-series metrics
@@ -386,89 +353,9 @@ func (b *UnifiedEventBuilder) Build() *UnifiedEvent {
 	return b.event
 }
 
-// =============================================================================
-// ANALYSIS CONTEXT TYPES (only the ones not already in types.go)
-// =============================================================================
-
-// BehavioralContext provides behavioral analysis context
-type BehavioralContext struct {
-	Pattern    string                 `json:"pattern"`
-	Frequency  float64                `json:"frequency"`
-	Confidence float64                `json:"confidence"`
-	TimeWindow TimeWindow             `json:"time_window"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// CausalityContext represents causality information for events
+// CausalityContext represents causality information for events (minimal version)
 type CausalityContext struct {
-	RootCause   string                 `json:"root_cause"`
-	CausalChain []string               `json:"causal_chain"`
-	Confidence  float64                `json:"confidence"`
-	Metadata    map[string]interface{} `json:"metadata"`
-}
-
-// AnomalyInfo provides detailed anomaly information for events
-type AnomalyInfo struct {
-	Score              float64             `json:"score"`
-	Type               string              `json:"type"`
-	Description        string              `json:"description"`
-	Confidence         float64             `json:"confidence"`
-	AnomalyScore       float32             `json:"anomaly_score"`
-	Dimensions         *AnomalyDimensions  `json:"dimensions"`
-	BaselineComparison *BaselineComparison `json:"baseline_comparison"`
-}
-
-// BaselineComparison provides comparison with baseline behavior
-type BaselineComparison struct {
-	Deviation    float32 `json:"deviation"`
-	Significance float32 `json:"significance"`
-	Confidence   float32 `json:"confidence"`
-	Percentile   float32 `json:"percentile"`
-	ZScore       float32 `json:"z_score"`
-}
-
-// TemporalContext provides temporal analysis context
-type TemporalContext struct {
-	Period      time.Duration      `json:"period"`
-	Frequency   float64            `json:"frequency"`
-	Patterns    []TemporalPattern  `json:"patterns"`
-	Seasonality map[string]float64 `json:"seasonality"`
-	Duration    time.Duration      `json:"duration"`
-	Periodicity float64            `json:"periodicity"`
-}
-
-// TemporalPattern represents a time-based pattern in events
-type TemporalPattern struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Pattern     []PatternStep `json:"pattern"`
-	Window      time.Duration `json:"window"`
-	Confidence  float64       `json:"confidence"`
-}
-
-// PatternStep represents a step in a temporal pattern
-type PatternStep struct {
-	EventType string        `json:"event_type"`
-	Condition string        `json:"condition"`
-	Delay     time.Duration `json:"delay"`
-	Optional  bool          `json:"optional"`
-}
-
-// StateInfo provides state tracking information
-type StateInfo struct {
-	Current    string            `json:"current"`
-	Previous   string            `json:"previous"`
-	Transition string            `json:"transition"`
-	Duration   time.Duration     `json:"duration"`
-	Metadata   map[string]string `json:"metadata"`
-	TimeSeries *TimeSeriesData   `json:"time_series,omitempty"`
-}
-
-// TimeSeriesData provides time series context
-type TimeSeriesData struct {
-	Values     []float64     `json:"values"`
-	Timestamps []time.Time   `json:"timestamps"`
-	Window     time.Duration `json:"window"`
-	Trend      string        `json:"trend"`
+	RootCause   string   `json:"root_cause,omitempty"`
+	CausalChain []string `json:"causal_chain,omitempty"`
+	Confidence  float64  `json:"confidence,omitempty"`
 }
