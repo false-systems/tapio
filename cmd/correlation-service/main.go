@@ -19,10 +19,10 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/integrations/nats"
+	storageadapters "github.com/yairfalse/tapio/pkg/integrations/storage/correlation"
 	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/nats"
-	"github.com/yairfalse/tapio/pkg/intelligence/storage"
 )
 
 var (
@@ -31,7 +31,21 @@ var (
 	enableTraces   = flag.Bool("enable-traces", true, "Enable OpenTelemetry traces")
 	enableMetrics  = flag.Bool("enable-metrics", true, "Enable OpenTelemetry metrics")
 	serviceVersion = flag.String("service-version", "1.0.0", "Service version")
+
+	// Storage configuration
+	storageType   = flag.String("storage-type", getEnvDefault("STORAGE_TYPE", "memory"), "Storage type: memory or neo4j")
+	neo4jURI      = flag.String("neo4j-uri", getEnvDefault("NEO4J_URI", "bolt://localhost:7687"), "Neo4j URI")
+	neo4jUsername = flag.String("neo4j-username", getEnvDefault("NEO4J_USERNAME", "neo4j"), "Neo4j username")
+	neo4jPassword = flag.String("neo4j-password", os.Getenv("NEO4J_PASSWORD"), "Neo4j password")
+	neo4jDatabase = flag.String("neo4j-database", getEnvDefault("NEO4J_DATABASE", "neo4j"), "Neo4j database")
 )
+
+func getEnvDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 func main() {
 	flag.Parse()
@@ -112,12 +126,38 @@ func main() {
 	}
 
 	// 1. Create storage
-	storageConfig := storage.DefaultMemoryStorageConfig()
-	memStorage := storage.NewMemoryStorage(logger, storageConfig)
+	var storage correlation.Storage
+
+	switch *storageType {
+	case "neo4j":
+		logger.Info("Using Neo4j storage",
+			zap.String("uri", *neo4jURI),
+			zap.String("database", *neo4jDatabase))
+
+		neo4jConfig := storageadapters.Neo4jConfig{
+			URI:      *neo4jURI,
+			Username: *neo4jUsername,
+			Password: *neo4jPassword,
+			Database: *neo4jDatabase,
+		}
+
+		storage, err = storageadapters.NewNeo4jStorage(logger, neo4jConfig)
+		if err != nil {
+			logger.Fatal("Failed to create Neo4j storage", zap.Error(err))
+		}
+
+	case "memory":
+		logger.Info("Using in-memory storage")
+		storageConfig := storageadapters.DefaultMemoryStorageConfig()
+		storage = storageadapters.NewMemoryStorage(logger, storageConfig)
+
+	default:
+		logger.Fatal("Invalid storage type", zap.String("type", *storageType))
+	}
 
 	// 2. Create correlation engine
 	engineConfig := correlation.DefaultEngineConfig()
-	engine, err := correlation.NewEngine(logger, engineConfig, clientset, memStorage)
+	engine, err := correlation.NewEngine(logger, engineConfig, clientset, storage)
 	if err != nil {
 		logger.Fatal("Failed to create correlation engine", zap.Error(err))
 	}

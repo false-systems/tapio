@@ -348,7 +348,7 @@ func TestUnifiedEventBuilder(t *testing.T) {
 
 		require.NotNil(t, event.Impact)
 		assert.Equal(t, "critical", event.Impact.Severity)
-		assert.Equal(t, 0.9, event.Impact.BusinessImpact)
+		assert.Equal(t, 0.9, event.Impact.InfrastructureImpact)
 		assert.Equal(t, "critical", event.GetSeverity())
 	})
 
@@ -456,7 +456,6 @@ func TestUnifiedEvent_StructCompleteness(t *testing.T) {
 			ReturnCode: 0,
 			Args:       map[string]string{"file": "/tmp/test"},
 			StackTrace: []string{"func1", "func2"},
-			CPUCore:    2,
 		},
 
 		Network: &NetworkData{
@@ -510,13 +509,13 @@ func TestUnifiedEvent_StructCompleteness(t *testing.T) {
 		},
 
 		Impact: &ImpactContext{
-			Severity:         "high",
-			BusinessImpact:   0.8,
-			AffectedServices: []string{"service1", "service2"},
-			AffectedUsers:    100,
-			SLOImpact:        true,
-			CustomerFacing:   true,
-			RevenueImpacting: false,
+			Severity:             "high",
+			InfrastructureImpact: 0.8,
+			AffectedServices:     []string{"service1", "service2"},
+			AffectedComponents:   100,
+			SLOImpact:            true,
+			SystemCritical:       true,
+			CascadeRisk:          false,
 		},
 
 		Correlation: &CorrelationContext{

@@ -7,7 +7,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/graph"
+	graph "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"github.com/yairfalse/tapio/pkg/intelligence/patterns"
 	"github.com/yairfalse/tapio/pkg/intelligence/queries"
 	"go.uber.org/zap"
@@ -124,22 +124,14 @@ func (s *Service) ProcessEvent(ctx context.Context, event *domain.UnifiedEvent) 
 
 // WhyDidThisFail performs root cause analysis
 func (s *Service) WhyDidThisFail(ctx context.Context, resourceType, namespace, name string) (*queries.RootCauseAnalysis, error) {
-	switch resourceType {
-	case "pod":
-		return s.queries.WhyDidPodFail(ctx, namespace, name, 1*time.Hour)
-	default:
-		return nil, fmt.Errorf("root cause analysis not implemented for %s", resourceType)
-	}
+	// Use generic root cause analysis that works for all resource types
+	return s.queries.FindRootCause(ctx, resourceType, namespace, name, 1*time.Hour)
 }
 
 // WhatDoesThisImpact performs impact analysis
 func (s *Service) WhatDoesThisImpact(ctx context.Context, resourceType, namespace, name string) (*queries.ImpactAnalysis, error) {
-	switch resourceType {
-	case "service":
-		return s.queries.WhatImpactsService(ctx, namespace, name)
-	default:
-		return nil, fmt.Errorf("impact analysis not implemented for %s", resourceType)
-	}
+	// Use generic impact analysis that works for all resource types
+	return s.queries.FindImpact(ctx, resourceType, namespace, name)
 }
 
 // GetCascadingFailures finds recent cascade patterns
