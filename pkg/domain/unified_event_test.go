@@ -456,7 +456,6 @@ func TestUnifiedEvent_StructCompleteness(t *testing.T) {
 			ReturnCode: 0,
 			Args:       map[string]string{"file": "/tmp/test"},
 			StackTrace: []string{"func1", "func2"},
-			CPUCore:    2,
 		},
 
 		Network: &NetworkData{

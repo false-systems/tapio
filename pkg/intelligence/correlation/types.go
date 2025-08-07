@@ -47,21 +47,6 @@ type Correlator interface {
 	Name() string
 }
 
-// Storage persists and retrieves correlations
-type Storage interface {
-	// Store a correlation result
-	Store(ctx context.Context, result *CorrelationResult) error
-
-	// Get recent correlations
-	GetRecent(ctx context.Context, limit int) ([]*CorrelationResult, error)
-
-	// Get correlations by trace ID
-	GetByTraceID(ctx context.Context, traceID string) ([]*CorrelationResult, error)
-
-	// Clean up old correlations
-	Cleanup(ctx context.Context, olderThan time.Duration) error
-}
-
 // Engine orchestrates all correlators
 type IEngine interface {
 	// Process an event through all correlators
