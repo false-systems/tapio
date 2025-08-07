@@ -15,6 +15,8 @@ import (
 // MockNeo4jDriver is a comprehensive mock implementation of neo4j.DriverWithContext
 type MockNeo4jDriver struct {
 	mock.Mock
+	// Store the session to return directly
+	sessionToReturn neo4j.SessionWithContext
 }
 
 func (m *MockNeo4jDriver) ExecuteQueryBookmarkManager() neo4j.BookmarkManager {
@@ -31,6 +33,11 @@ func (m *MockNeo4jDriver) Target() url.URL {
 }
 
 func (m *MockNeo4jDriver) NewSession(ctx context.Context, config neo4j.SessionConfig) neo4j.SessionWithContext {
+	// If we have a pre-configured session, return it
+	if m.sessionToReturn != nil {
+		return m.sessionToReturn
+	}
+
 	args := m.Called(ctx, config)
 	if args.Get(0) == nil {
 		return nil
@@ -113,25 +120,41 @@ func (m *MockSession) Close(ctx context.Context) error {
 	return args.Error(0)
 }
 
-// Additional methods to implement SessionWithContext
-func (m *MockSession) executeQueryRead(ctx context.Context, query string, params map[string]any, configurers ...func(*neo4j.TransactionConfig)) (neo4j.ResultWithContext, error) {
-	args := m.Called(ctx, query, params, configurers)
+func (m *MockSession) lastBookmark() string {
+	args := m.Called()
+	return args.String(0)
+}
+
+func (m *MockSession) legacy() neo4j.Session {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(neo4j.Session)
+}
+
+func (m *MockSession) getServerInfo(ctx context.Context) (neo4j.ServerInfo, error) {
+	args := m.Called(ctx)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(neo4j.ResultWithContext), args.Error(1)
+	return args.Get(0).(neo4j.ServerInfo), args.Error(1)
 }
 
-func (m *MockSession) executeQueryWrite(ctx context.Context, query string, params map[string]any, configurers ...func(*neo4j.TransactionConfig)) (neo4j.ResultWithContext, error) {
-	args := m.Called(ctx, query, params, configurers)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(neo4j.ResultWithContext), args.Error(1)
+func (m *MockSession) verifyAuthentication(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
 }
 
-func (m *MockSession) legacy() {}
+func (m *MockSession) executeQueryRead(ctx context.Context, work neo4j.ManagedTransactionWork, configurers ...func(*neo4j.TransactionConfig)) (any, error) {
+	args := m.Called(ctx, work, configurers)
+	return args.Get(0), args.Error(1)
+}
 
+func (m *MockSession) executeQueryWrite(ctx context.Context, work neo4j.ManagedTransactionWork, configurers ...func(*neo4j.TransactionConfig)) (any, error) {
+	args := m.Called(ctx, work, configurers)
+	return args.Get(0), args.Error(1)
+}
 
 // MockResult is a comprehensive mock implementation of neo4j.ResultWithContext
 type MockResult struct {
@@ -338,4 +361,15 @@ type MockDatabaseInfo struct {
 
 func (m *MockDatabaseInfo) Name() string {
 	return "neo4j"
+}
+
+// Helper function to create a properly configured MockNeo4jDriver with a MockSession
+func NewMockDriverWithSession() (*MockNeo4jDriver, *MockSession) {
+	mockDriver := &MockNeo4jDriver{}
+	mockSession := &MockSession{}
+
+	// The key is to not use type assertion but instead work with the concrete type
+	mockDriver.On("NewSession", mock.Anything, mock.Anything).Return(mockSession)
+
+	return mockDriver, mockSession
 }

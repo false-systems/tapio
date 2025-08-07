@@ -17,14 +17,14 @@ type ServiceMapCorrelator struct {
 	logger *zap.Logger
 
 	// Service topology tracking
-	serviceGraph   *ServiceGraph
-	graphMu        sync.RWMutex
+	serviceGraph *ServiceGraph
+	graphMu      sync.RWMutex
 
 	// Connection health tracking
-	healthTracker  *ConnectionHealthTracker
-	
+	healthTracker *ConnectionHealthTracker
+
 	// Recent events cache
-	recentEvents   *ServiceEventCache
+	recentEvents *ServiceEventCache
 }
 
 // ServiceGraph represents the service dependency graph
@@ -34,12 +34,12 @@ type ServiceGraph struct {
 }
 
 type ServiceNode struct {
-	Name         string
-	Namespace    string
-	Type         string // deployment, statefulset, daemonset
-	LastSeen     time.Time
-	Endpoints    []string
-	Version      string
+	Name      string
+	Namespace string
+	Type      string // deployment, statefulset, daemonset
+	LastSeen  time.Time
+	Endpoints []string
+	Version   string
 }
 
 type ServiceEdge struct {
@@ -100,13 +100,13 @@ func (s *ServiceMapCorrelator) Name() string {
 func (s *ServiceMapCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
 	// Cache event
 	s.cacheEvent(event)
-	
+
 	// Get event type from metadata
 	eventType := s.getMetadata(event, "event_type")
-	
+
 	// Update service graph based on event
 	s.updateServiceGraph(event)
-	
+
 	// Route to specific handlers
 	switch eventType {
 	case "service_map":
@@ -118,12 +118,12 @@ func (s *ServiceMapCorrelator) Process(ctx context.Context, event *domain.Unifie
 	case "http_request":
 		return s.handleHTTPRequest(ctx, event)
 	}
-	
+
 	// Check for service-level patterns
 	if patterns := s.detectServicePatterns(event); len(patterns) > 0 {
 		return patterns, nil
 	}
-	
+
 	return nil, nil
 }
 
@@ -132,12 +132,12 @@ func (s *ServiceMapCorrelator) handleServiceMapUpdate(ctx context.Context, event
 	// Extract service information
 	serviceName := s.getMetadata(event, "service_name")
 	namespace := s.getMetadata(event, "k8s_namespace")
-	
+
 	// Check for service isolation
 	activeConns, _ := strconv.Atoi(s.getMetadata(event, "active_connections"))
 	incomingConns, _ := strconv.Atoi(s.getMetadata(event, "incoming_connections"))
 	outgoingConns, _ := strconv.Atoi(s.getMetadata(event, "outgoing_connections"))
-	
+
 	if activeConns == 0 && (incomingConns > 0 || outgoingConns > 0) {
 		// Service should have connections but doesn't
 		return []*CorrelationResult{{
@@ -165,7 +165,7 @@ func (s *ServiceMapCorrelator) handleServiceMapUpdate(ctx context.Context, event
 			},
 		}}, nil
 	}
-	
+
 	return nil, nil
 }
 
@@ -173,15 +173,15 @@ func (s *ServiceMapCorrelator) handleServiceMapUpdate(ctx context.Context, event
 func (s *ServiceMapCorrelator) handleNetworkConnection(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
 	srcService := s.getMetadata(event, "src_service")
 	dstService := s.getMetadata(event, "dst_service")
-	
+
 	if srcService == "" || dstService == "" {
 		return nil, nil
 	}
-	
+
 	// Update connection health
 	connKey := fmt.Sprintf("%s->%s", srcService, dstService)
 	s.updateConnectionHealth(connKey, true)
-	
+
 	// Check for connection patterns
 	return s.checkConnectionPatterns(srcService, dstService, event)
 }
@@ -191,25 +191,25 @@ func (s *ServiceMapCorrelator) handleConnectionFailure(ctx context.Context, even
 	srcService := s.getMetadata(event, "src_service")
 	dstService := s.getMetadata(event, "dst_service")
 	errorType := s.getMetadata(event, "error_type")
-	
+
 	if srcService == "" || dstService == "" {
 		return nil, nil
 	}
-	
+
 	connKey := fmt.Sprintf("%s->%s", srcService, dstService)
 	s.updateConnectionHealth(connKey, false)
-	
+
 	// Get connection health
 	health := s.getConnectionHealth(connKey)
 	if health == nil {
 		return nil, nil
 	}
-	
+
 	// Check if this is a persistent failure
 	if health.ConsecutiveFails >= 5 {
 		// Find dependent services
 		dependents := s.findDependentServices(srcService)
-		
+
 		result := &CorrelationResult{
 			ID:         fmt.Sprintf("svcmap-breakdown-%s", event.ID),
 			Type:       "service_communication_failure",
@@ -233,10 +233,10 @@ func (s *ServiceMapCorrelator) handleConnectionFailure(ctx context.Context, even
 				Resources: s.getAffectedResources(srcService, dstService),
 			},
 		}
-		
+
 		return []*CorrelationResult{result}, nil
 	}
-	
+
 	return nil, nil
 }
 
@@ -245,39 +245,39 @@ func (s *ServiceMapCorrelator) handleHTTPRequest(ctx context.Context, event *dom
 	statusCode, _ := strconv.Atoi(s.getMetadata(event, "status_code"))
 	latencyMs, _ := strconv.ParseFloat(s.getMetadata(event, "latency_ms"), 64)
 	endpoint := s.getMetadata(event, "endpoint")
-	
+
 	// Check for error patterns
 	if statusCode >= 500 {
 		return s.handle5xxErrors(event, statusCode, endpoint)
 	}
-	
+
 	// Check for latency issues
 	if latencyMs > 1000 { // 1 second
 		return s.handleHighLatency(event, latencyMs, endpoint)
 	}
-	
+
 	return nil, nil
 }
 
 // detectServicePatterns looks for broader service patterns
 func (s *ServiceMapCorrelator) detectServicePatterns(event *domain.UnifiedEvent) []*CorrelationResult {
 	var results []*CorrelationResult
-	
+
 	// Pattern 1: Cascading service failures
 	if cascade := s.detectCascadeFailure(event); cascade != nil {
 		results = append(results, cascade)
 	}
-	
+
 	// Pattern 2: Service version incompatibility
 	if incompatibility := s.detectVersionIncompatibility(event); incompatibility != nil {
 		results = append(results, incompatibility)
 	}
-	
+
 	// Pattern 3: Circuit breaker patterns
 	if circuitBreaker := s.detectCircuitBreakerPattern(event); circuitBreaker != nil {
 		results = append(results, circuitBreaker)
 	}
-	
+
 	return results
 }
 
@@ -287,13 +287,13 @@ func (s *ServiceMapCorrelator) detectCascadeFailure(event *domain.UnifiedEvent) 
 	if serviceName == "" {
 		return nil
 	}
-	
+
 	// Look for failures in dependent services
 	dependents := s.findDependentServices(serviceName)
 	if len(dependents) == 0 {
 		return nil
 	}
-	
+
 	// Check if dependents are also failing
 	failingDependents := []string{}
 	for _, dep := range dependents {
@@ -301,7 +301,7 @@ func (s *ServiceMapCorrelator) detectCascadeFailure(event *domain.UnifiedEvent) 
 			failingDependents = append(failingDependents, dep)
 		}
 	}
-	
+
 	if len(failingDependents) >= 2 {
 		return &CorrelationResult{
 			ID:         fmt.Sprintf("svcmap-cascade-%s-%d", serviceName, time.Now().Unix()),
@@ -324,7 +324,7 @@ func (s *ServiceMapCorrelator) detectCascadeFailure(event *domain.UnifiedEvent) 
 			},
 		}
 	}
-	
+
 	return nil
 }
 
@@ -333,7 +333,7 @@ func (s *ServiceMapCorrelator) detectCascadeFailure(event *domain.UnifiedEvent) 
 func (s *ServiceMapCorrelator) updateServiceGraph(event *domain.UnifiedEvent) {
 	s.graphMu.Lock()
 	defer s.graphMu.Unlock()
-	
+
 	// Update based on event type
 	if svcName := s.getMetadata(event, "service_name"); svcName != "" {
 		node := s.serviceGraph.nodes[svcName]
@@ -346,13 +346,13 @@ func (s *ServiceMapCorrelator) updateServiceGraph(event *domain.UnifiedEvent) {
 			s.serviceGraph.nodes[svcName] = node
 		}
 		node.LastSeen = time.Now()
-		
+
 		// Update version if available
 		if version := s.getMetadata(event, "version"); version != "" {
 			node.Version = version
 		}
 	}
-	
+
 	// Update edges for connections
 	if src := s.getMetadata(event, "src_service"); src != "" {
 		if dst := s.getMetadata(event, "dst_service"); dst != "" {
@@ -374,7 +374,7 @@ func (s *ServiceMapCorrelator) updateServiceGraph(event *domain.UnifiedEvent) {
 func (s *ServiceMapCorrelator) updateConnectionHealth(connKey string, success bool) {
 	s.healthTracker.mu.Lock()
 	defer s.healthTracker.mu.Unlock()
-	
+
 	health := s.healthTracker.connections[connKey]
 	if health == nil {
 		health = &ConnectionHealth{
@@ -382,7 +382,7 @@ func (s *ServiceMapCorrelator) updateConnectionHealth(connKey string, success bo
 		}
 		s.healthTracker.connections[connKey] = health
 	}
-	
+
 	if success {
 		health.SuccessCount++
 		health.LastSuccess = time.Now()
@@ -392,7 +392,7 @@ func (s *ServiceMapCorrelator) updateConnectionHealth(connKey string, success bo
 		health.FailureCount++
 		health.LastFailure = time.Now()
 		health.ConsecutiveFails++
-		
+
 		if health.ConsecutiveFails >= 5 {
 			health.State = "broken"
 		} else if health.ConsecutiveFails >= 3 {
@@ -410,7 +410,7 @@ func (s *ServiceMapCorrelator) getConnectionHealth(connKey string) *ConnectionHe
 func (s *ServiceMapCorrelator) findDependentServices(serviceName string) []string {
 	s.graphMu.RLock()
 	defer s.graphMu.RUnlock()
-	
+
 	dependents := []string{}
 	for _, edge := range s.serviceGraph.edges {
 		if edge.Destination == serviceName && edge.LastSeen.After(time.Now().Add(-5*time.Minute)) {
@@ -438,10 +438,10 @@ func (s *ServiceMapCorrelator) determineFailureRootCause(errorType string, healt
 
 func (s *ServiceMapCorrelator) handle5xxErrors(event *domain.UnifiedEvent, statusCode int, endpoint string) ([]*CorrelationResult, error) {
 	service := s.getServiceName(event)
-	
+
 	// Look for pattern of 5xx errors
 	recentErrors := s.count5xxErrors(service, 5*time.Minute)
-	
+
 	if recentErrors >= 10 {
 		return []*CorrelationResult{{
 			ID:         fmt.Sprintf("svcmap-5xx-%s", event.ID),
@@ -467,16 +467,16 @@ func (s *ServiceMapCorrelator) handle5xxErrors(event *domain.UnifiedEvent, statu
 			},
 		}}, nil
 	}
-	
+
 	return nil, nil
 }
 
 func (s *ServiceMapCorrelator) handleHighLatency(event *domain.UnifiedEvent, latencyMs float64, endpoint string) ([]*CorrelationResult, error) {
 	service := s.getServiceName(event)
-	
+
 	// Check if this is a pattern
 	avgLatency := s.getAverageLatency(service, endpoint, 5*time.Minute)
-	
+
 	if avgLatency > 500 && latencyMs > avgLatency*2 {
 		return []*CorrelationResult{{
 			ID:         fmt.Sprintf("svcmap-latency-%s", event.ID),
@@ -501,7 +501,7 @@ func (s *ServiceMapCorrelator) handleHighLatency(event *domain.UnifiedEvent, lat
 			},
 		}}, nil
 	}
-	
+
 	return nil, nil
 }
 
@@ -522,12 +522,12 @@ func (s *ServiceMapCorrelator) cacheEvent(event *domain.UnifiedEvent) {
 	if service == "" {
 		return
 	}
-	
+
 	s.recentEvents.mu.Lock()
 	defer s.recentEvents.mu.Unlock()
-	
+
 	s.recentEvents.events[service] = append(s.recentEvents.events[service], event)
-	
+
 	// Cleanup old events
 	cutoff := time.Now().Add(-s.recentEvents.ttl)
 	filtered := make([]*domain.UnifiedEvent, 0)
@@ -552,7 +552,7 @@ func (s *ServiceMapCorrelator) getServiceName(event *domain.UnifiedEvent) string
 func (s *ServiceMapCorrelator) isServiceFailing(serviceName string) bool {
 	s.recentEvents.mu.RLock()
 	defer s.recentEvents.mu.RUnlock()
-	
+
 	errorCount := 0
 	for _, event := range s.recentEvents.events[serviceName] {
 		if event.Timestamp.After(time.Now().Add(-5 * time.Minute)) {
@@ -561,17 +561,17 @@ func (s *ServiceMapCorrelator) isServiceFailing(serviceName string) bool {
 			}
 		}
 	}
-	
+
 	return errorCount >= 5
 }
 
 func (s *ServiceMapCorrelator) count5xxErrors(service string, window time.Duration) int {
 	s.recentEvents.mu.RLock()
 	defer s.recentEvents.mu.RUnlock()
-	
+
 	count := 0
 	cutoff := time.Now().Add(-window)
-	
+
 	for _, event := range s.recentEvents.events[service] {
 		if event.Timestamp.After(cutoff) {
 			if code, _ := strconv.Atoi(s.getMetadata(event, "status_code")); code >= 500 {
@@ -579,18 +579,18 @@ func (s *ServiceMapCorrelator) count5xxErrors(service string, window time.Durati
 			}
 		}
 	}
-	
+
 	return count
 }
 
 func (s *ServiceMapCorrelator) getAverageLatency(service, endpoint string, window time.Duration) float64 {
 	s.recentEvents.mu.RLock()
 	defer s.recentEvents.mu.RUnlock()
-	
+
 	var total float64
 	count := 0
 	cutoff := time.Now().Add(-window)
-	
+
 	for _, event := range s.recentEvents.events[service] {
 		if event.Timestamp.After(cutoff) && s.getMetadata(event, "endpoint") == endpoint {
 			if latency, err := strconv.ParseFloat(s.getMetadata(event, "latency_ms"), 64); err == nil {
@@ -599,7 +599,7 @@ func (s *ServiceMapCorrelator) getAverageLatency(service, endpoint string, windo
 			}
 		}
 	}
-	
+
 	if count == 0 {
 		return 0
 	}
@@ -608,7 +608,7 @@ func (s *ServiceMapCorrelator) getAverageLatency(service, endpoint string, windo
 
 func (s *ServiceMapCorrelator) getAffectedResources(srcService, dstService string) []string {
 	resources := []string{}
-	
+
 	// Add service resources
 	if src := s.serviceGraph.nodes[srcService]; src != nil {
 		resources = append(resources, fmt.Sprintf("Service/%s/%s", src.Namespace, src.Name))
@@ -616,7 +616,7 @@ func (s *ServiceMapCorrelator) getAffectedResources(srcService, dstService strin
 	if dst := s.serviceGraph.nodes[dstService]; dst != nil {
 		resources = append(resources, fmt.Sprintf("Service/%s/%s", dst.Namespace, dst.Name))
 	}
-	
+
 	return resources
 }
 

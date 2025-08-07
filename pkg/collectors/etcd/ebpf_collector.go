@@ -14,7 +14,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang etcdMonitor ./bpf/etcd_monitor.c -- -I./bpf/headers -D__TARGET_ARCH_x86
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang etcdMonitor ./bpf_src/etcd_monitor.c -- -I../bpf_common
 
 // etcdEvent represents a raw event from eBPF
 type etcdEvent struct {

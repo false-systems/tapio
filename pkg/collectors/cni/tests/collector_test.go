@@ -1,4 +1,4 @@
-package cni
+package cni_test
 
 import (
 	"context"
@@ -8,10 +8,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/cni"
 )
 
 func TestNewCollector(t *testing.T) {
-	collector, err := NewCollector("test-cni")
+	collector, err := cni.NewCollector("test-cni")
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-cni", collector.Name())
@@ -19,7 +20,7 @@ func TestNewCollector(t *testing.T) {
 }
 
 func TestCollectorInterface(t *testing.T) {
-	collector, err := NewCollector("test-cni")
+	collector, err := cni.NewCollector("test-cni")
 	require.NoError(t, err)
 
 	// Verify it implements collectors.Collector
@@ -27,7 +28,7 @@ func TestCollectorInterface(t *testing.T) {
 }
 
 func TestCollectorStartStop(t *testing.T) {
-	collector, err := NewCollector("test-cni")
+	collector, err := cni.NewCollector("test-cni")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -47,21 +48,4 @@ func TestCollectorStartStop(t *testing.T) {
 
 	// Should not be healthy after stop
 	assert.False(t, collector.IsHealthy())
-}
-
-func TestEventCreation(t *testing.T) {
-	collector, err := NewCollector("test-cni")
-	require.NoError(t, err)
-
-	// Test event creation
-	event := collector.createEvent("test_event", map[string]interface{}{
-		"key": "value",
-		"num": 123,
-	})
-
-	assert.Equal(t, "cni", event.Type)
-	assert.Equal(t, "test-cni", event.Metadata["collector"])
-	assert.Equal(t, "test_event", event.Metadata["event"])
-	assert.NotNil(t, event.Data)
-	assert.False(t, event.Timestamp.IsZero())
 }

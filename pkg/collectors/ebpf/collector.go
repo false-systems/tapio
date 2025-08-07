@@ -19,7 +19,7 @@ import (
 // Collector implements minimal kernel monitoring via eBPF
 type Collector struct {
 	name          string
-	objs          *kernelMonitorObjects
+	objs          *kernelmonitorObjects
 	links         []link.Link
 	reader        *ringbuf.Reader
 	events        chan collectors.RawEvent
@@ -76,12 +76,12 @@ func (c *Collector) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Load eBPF program
-	spec, err := loadKernelMonitor()
+	spec, err := loadKernelmonitor()
 	if err != nil {
 		return fmt.Errorf("failed to load eBPF spec: %w", err)
 	}
 
-	c.objs = &kernelMonitorObjects{}
+	c.objs = &kernelmonitorObjects{}
 	if err := spec.LoadAndAssign(c.objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}

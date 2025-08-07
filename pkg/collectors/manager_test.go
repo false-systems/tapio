@@ -10,8 +10,8 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// mockCollector implements CollectorInterface for testing
-type mockCollector struct {
+// mockManagerCollector implements CollectorInterface for testing
+type mockManagerCollector struct {
 	name          string
 	collectorType string
 	events        chan domain.UnifiedEvent
@@ -23,8 +23,8 @@ type mockCollector struct {
 	failStop      bool
 }
 
-func newMockCollector(name, collectorType string) *mockCollector {
-	return &mockCollector{
+func newMockManagerCollector(name, collectorType string) *mockManagerCollector {
+	return &mockManagerCollector{
 		name:          name,
 		collectorType: collectorType,
 		events:        make(chan domain.UnifiedEvent, 100),
@@ -38,7 +38,7 @@ func newMockCollector(name, collectorType string) *mockCollector {
 	}
 }
 
-func (m *mockCollector) Start(ctx context.Context) error {
+func (m *mockManagerCollector) Start(ctx context.Context) error {
 	if m.failStart {
 		return assert.AnError
 	}
@@ -46,7 +46,7 @@ func (m *mockCollector) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockCollector) Stop() error {
+func (m *mockManagerCollector) Stop() error {
 	if m.failStop {
 		return assert.AnError
 	}
@@ -55,27 +55,27 @@ func (m *mockCollector) Stop() error {
 	return nil
 }
 
-func (m *mockCollector) Events() <-chan domain.UnifiedEvent {
+func (m *mockManagerCollector) Events() <-chan domain.UnifiedEvent {
 	return m.events
 }
 
-func (m *mockCollector) Health() CollectorHealth {
+func (m *mockManagerCollector) Health() CollectorHealth {
 	return m.health
 }
 
-func (m *mockCollector) Statistics() CollectorStatistics {
+func (m *mockManagerCollector) Statistics() CollectorStatistics {
 	return m.stats
 }
 
-func (m *mockCollector) Name() string {
+func (m *mockManagerCollector) Name() string {
 	return m.name
 }
 
-func (m *mockCollector) Type() string {
+func (m *mockManagerCollector) Type() string {
 	return m.collectorType
 }
 
-func (m *mockCollector) sendEvent(event domain.UnifiedEvent) {
+func (m *mockManagerCollector) sendEvent(event domain.UnifiedEvent) {
 	select {
 	case m.events <- event:
 	default:
@@ -90,8 +90,8 @@ func TestManager_Lifecycle(t *testing.T) {
 		manager := NewManager(config)
 
 		// Register collectors
-		collector1 := newMockCollector("mock1", "test")
-		collector2 := newMockCollector("mock2", "test")
+		collector1 := newMockManagerCollector("mock1", "test")
+		collector2 := newMockManagerCollector("mock2", "test")
 
 		err := manager.Register("mock1", collector1)
 		require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestManager_Lifecycle(t *testing.T) {
 
 	t.Run("cannot register while running", func(t *testing.T) {
 		manager := NewManager(DefaultManagerConfig())
-		collector := newMockCollector("mock", "test")
+		collector := newMockManagerCollector("mock", "test")
 
 		err := manager.Register("mock", collector)
 		require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestManager_Lifecycle(t *testing.T) {
 		defer manager.Stop()
 
 		// Try to register another collector
-		collector2 := newMockCollector("mock2", "test")
+		collector2 := newMockManagerCollector("mock2", "test")
 		err = manager.Register("mock2", collector2)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot register collector while running")
@@ -144,7 +144,7 @@ func TestManager_Lifecycle(t *testing.T) {
 
 	t.Run("cannot start twice", func(t *testing.T) {
 		manager := NewManager(DefaultManagerConfig())
-		collector := newMockCollector("mock", "test")
+		collector := newMockManagerCollector("mock", "test")
 
 		err := manager.Register("mock", collector)
 		require.NoError(t, err)
@@ -162,8 +162,8 @@ func TestManager_Lifecycle(t *testing.T) {
 
 	t.Run("duplicate collector registration", func(t *testing.T) {
 		manager := NewManager(DefaultManagerConfig())
-		collector1 := newMockCollector("mock", "test")
-		collector2 := newMockCollector("mock", "test")
+		collector1 := newMockManagerCollector("mock", "test")
+		collector2 := newMockManagerCollector("mock", "test")
 
 		err := manager.Register("mock", collector1)
 		require.NoError(t, err)
@@ -180,8 +180,8 @@ func TestManager_EventForwarding(t *testing.T) {
 	manager := NewManager(config)
 
 	// Register collectors
-	collector1 := newMockCollector("mock1", "test")
-	collector2 := newMockCollector("mock2", "test")
+	collector1 := newMockManagerCollector("mock1", "test")
+	collector2 := newMockManagerCollector("mock2", "test")
 
 	err := manager.Register("mock1", collector1)
 	require.NoError(t, err)
@@ -239,12 +239,14 @@ func TestManager_Health(t *testing.T) {
 	manager := NewManager(DefaultManagerConfig())
 
 	// Register collectors with different health states
+
 	healthyCollector := newMockCollector("healthy", "test")
 	healthyCollector.health.Status = domain.HealthHealthy
 
 	unhealthyCollector := newMockCollector("unhealthy", "test")
 	unhealthyCollector.health.Status = domain.HealthUnhealthy
-	unhealthyCollector.health.Message = "Something is wrong"
+
+
 
 	err := manager.Register("healthy", healthyCollector)
 	require.NoError(t, err)
@@ -273,7 +275,7 @@ func TestManager_Health(t *testing.T) {
 func TestManager_Statistics(t *testing.T) {
 	manager := NewManager(DefaultManagerConfig())
 
-	collector := newMockCollector("mock", "test")
+	collector := newMockManagerCollector("mock", "test")
 	collector.stats.EventsCollected = 100
 	collector.stats.EventsDropped = 5
 
@@ -304,7 +306,7 @@ func TestManager_Statistics(t *testing.T) {
 func TestManager_GetCollector(t *testing.T) {
 	manager := NewManager(DefaultManagerConfig())
 
-	collector := newMockCollector("mock", "test")
+	collector := newMockManagerCollector("mock", "test")
 	err := manager.Register("mock", collector)
 	require.NoError(t, err)
 
@@ -322,8 +324,8 @@ func TestManager_StartFailure(t *testing.T) {
 	manager := NewManager(DefaultManagerConfig())
 
 	// Register collectors where one fails to start
-	goodCollector := newMockCollector("good", "test")
-	badCollector := newMockCollector("bad", "test")
+	goodCollector := newMockManagerCollector("good", "test")
+	badCollector := newMockManagerCollector("bad", "test")
 	badCollector.failStart = true
 
 	err := manager.Register("good", goodCollector)

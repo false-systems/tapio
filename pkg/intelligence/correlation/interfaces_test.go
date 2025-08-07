@@ -42,7 +42,109 @@ func TestCorrelatorInterface(t *testing.T) {
 		},
 	}
 
+
 	assert.Equal(t, "test-correlator", mock.Name())
+
+	err := base.ValidateEvent(event)
+	assert.NoError(t, err)
+}
+
+func TestValidateEvent_UnsupportedType(t *testing.T) {
+	capabilities := CorrelatorCapabilities{
+		EventTypes: []string{"pod_crash"},
+	}
+
+	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
+
+	event := &domain.UnifiedEvent{
+		Type:      domain.EventType("network_error"),
+		Timestamp: time.Now(),
+	}
+
+	err := base.ValidateEvent(event)
+	require.Error(t, err)
+
+	var corrErr *CorrelatorError
+	assert.True(t, errors.As(err, &corrErr))
+	assert.Equal(t, ErrorTypeUnsupportedEvent, corrErr.Type)
+}
+
+func TestValidateEvent_EventTooOld(t *testing.T) {
+	capabilities := CorrelatorCapabilities{
+		EventTypes:  []string{"pod_crash"},
+		MaxEventAge: 30 * time.Minute,
+	}
+
+	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
+
+	event := &domain.UnifiedEvent{
+		Type:      domain.EventType("pod_crash"),
+		Timestamp: time.Now().Add(-1 * time.Hour),
+	}
+
+	err := base.ValidateEvent(event)
+	require.Error(t, err)
+
+	var corrErr *CorrelatorError
+	assert.True(t, errors.As(err, &corrErr))
+	assert.Equal(t, ErrorTypeEventTooOld, corrErr.Type)
+}
+
+func TestValidateEvent_MissingRequiredData(t *testing.T) {
+	capabilities := CorrelatorCapabilities{
+		EventTypes:   []string{"pod_crash"},
+		RequiredData: []string{"namespace", "pod"},
+	}
+
+	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
+
+	event := &domain.UnifiedEvent{
+		Type:      domain.EventType("pod_crash"),
+		Timestamp: time.Now(),
+		K8sContext: &domain.K8sContext{
+			Namespace: "default", // Missing pod name
+		},
+	}
+
+	err := base.ValidateEvent(event)
+	require.Error(t, err)
+
+	var corrErr *CorrelatorError
+	assert.True(t, errors.As(err, &corrErr))
+	assert.Equal(t, ErrorTypeMissingData, corrErr.Type)
+}
+
+func TestHasField(t *testing.T) {
+	base := NewBaseCorrelator("TestCorrelator", "1.0.0", CorrelatorCapabilities{})
+
+	event := &domain.UnifiedEvent{
+		Severity: domain.EventSeverity("high"),
+		K8sContext: &domain.K8sContext{
+			Namespace: "default",
+			Kind:      "Pod",
+			Name:      "test-pod",
+			NodeName:  "node-1",
+		},
+		Attributes: map[string]interface{}{
+			"container":    "main",
+			"custom_field": "value",
+		},
+	}
+
+	// Test standard fields
+	assert.True(t, base.hasField(event, "cluster"))
+	assert.True(t, base.hasField(event, "namespace"))
+	assert.True(t, base.hasField(event, "pod"))
+	assert.True(t, base.hasField(event, "container"))
+	assert.True(t, base.hasField(event, "node"))
+	assert.True(t, base.hasField(event, "severity"))
+
+	// Test metadata field
+	assert.True(t, base.hasField(event, "custom_field"))
+
+	// Test missing field
+	assert.False(t, base.hasField(event, "missing_field"))
+}
 
 	results, err := mock.Process(context.Background(), &domain.UnifiedEvent{})
 	assert.NoError(t, err)

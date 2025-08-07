@@ -13,7 +13,7 @@ func TestContainerInfoCorrelation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Mock the eBPF objects for testing
-	collector.objs = &kernelmonitorObjects{}
+	collector.objs = &kernelMonitorObjects{}
 
 	// Test UpdateContainerInfo
 	err = collector.UpdateContainerInfo(1234, "container-abc123", "pod-def456", "nginx:1.20")

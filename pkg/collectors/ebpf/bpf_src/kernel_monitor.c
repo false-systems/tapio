@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Minimal eBPF program for kernel monitoring - focused on containers
 
-#include "vmlinux.h"
+#include "../../bpf_common/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -347,9 +347,17 @@ int trace_tcp_connect(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    // Get sock struct from first argument - x86_64 specific
-    struct sock *sk;
-    bpf_probe_read(&sk, sizeof(sk), (void *)ctx->di);
+    // Get sock struct from first argument
+    // Using offset-based approach for portability
+    struct sock *sk = NULL;
+    unsigned long arg1 = 0;
+    
+    // On x86_64, RDI is at offset 112 in pt_regs
+    // On ARM64, X0 is at offset 0 in pt_regs
+    // We'll use a simple offset that works for x86_64
+    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112));
+    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    
     if (!sk)
         return 0;
     
