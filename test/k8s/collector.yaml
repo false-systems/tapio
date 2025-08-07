@@ -23,7 +23,7 @@ spec:
         imagePullPolicy: IfNotPresent
         env:
         - name: NATS_URL
-          value: "nats://nats-0.nats.tapio-system:4222"
+          value: "nats://nats-0.nats.tapio:4222"
         args: ["--nats", "$(NATS_URL)"]
 ---
 apiVersion: v1

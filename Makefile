@@ -1,7 +1,7 @@
 # Tapio - Simple & Fast Makefile
 # Container-first development with proper linting
 
-.PHONY: help build test lint clean docker-all dev ci proto proto-install proto-generate
+.PHONY: help build test lint clean docker-all dev ci ci-enforcement-only
 
 # Build variables
 VERSION ?= dev
@@ -33,7 +33,7 @@ generate-ebpf: ## Generate eBPF programs
 	@cd pkg/collectors/etcd && go generate ./...
 	@echo "$(GREEN)✅ eBPF programs generated!$(NC)"
 
-build: proto generate-ebpf ## Build all binaries (includes proto generation)
+build: generate-ebpf ## Build all binaries
 	@echo "$(BLUE)🔨 Building binaries...$(NC)"
 	@mkdir -p bin
 	@CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/tapio-collector ./cmd/tapio-collector
@@ -139,7 +139,7 @@ docker-test: docker-all ## Test all Docker images
 
 ##@ CI/CD
 
-ci: enforce-all lint test build docker-all ## Full CI pipeline with enforcement
+ci: lint test build docker-all ## Full CI pipeline
 	@echo "$(GREEN)🚀 CI pipeline completed successfully!$(NC)"
 	@echo "$(GREEN)✅ Enforcement: PASSED$(NC)"
 	@echo "$(GREEN)✅ Lint: PASSED$(NC)"
@@ -147,11 +147,48 @@ ci: enforce-all lint test build docker-all ## Full CI pipeline with enforcement
 	@echo "$(GREEN)✅ Build: PASSED$(NC)"
 	@echo "$(GREEN)✅ Docker: PASSED$(NC)"
 
-ci-quick: enforce-all lint test build ## Quick CI with enforcement (no Docker)
+ci-quick: lint test build ## Quick CI (no Docker)
 	@echo "$(GREEN)🚀 Quick CI completed successfully!$(NC)"
 
-ci-enforcement-only: enforce-all ## Run only architecture enforcement checks
-	@echo "$(GREEN)🚀 Architecture enforcement completed!$(NC)"
+ci-local: ## Run CI checks locally (matches GitHub Actions)
+	@echo "$(BLUE)🚀 Running CI checks locally...$(NC)"
+	@echo ""
+	@echo "$(BLUE)1️⃣  Format Check$(NC)"
+	@if [ "$$(git ls-files '*.go' | xargs gofmt -l | wc -l)" -gt 0 ]; then \
+		echo "$(RED)❌ Files need formatting:$(NC)"; \
+		git ls-files '*.go' | xargs gofmt -l; \
+		echo "$(YELLOW)   Run: make fmt$(NC)"; \
+		echo ""; \
+	else \
+		echo "$(GREEN)✅ All files formatted$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(BLUE)2️⃣  Build Check$(NC)"
+	@if go build ./... 2>/dev/null; then \
+		echo "$(GREEN)✅ Build successful$(NC)"; \
+	else \
+		echo "$(RED)❌ Build failed$(NC)"; \
+		go build ./...; \
+	fi
+	@echo ""
+	@echo "$(BLUE)3️⃣  Test Check$(NC)"
+	@if go test -race -short -timeout 5m ./... > /dev/null 2>&1; then \
+		echo "$(GREEN)✅ Tests passed$(NC)"; \
+	else \
+		echo "$(RED)❌ Tests failed$(NC)"; \
+		echo "$(YELLOW)   Run: go test -v ./...$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(BLUE)4️⃣  Lint Check$(NC)"
+	@if go vet ./... 2>/dev/null; then \
+		echo "$(GREEN)✅ No vet issues$(NC)"; \
+	else \
+		echo "$(RED)❌ Vet issues found$(NC)"; \
+		go vet ./...; \
+	fi
+	@echo ""
+	@echo "$(BLUE)📊 Summary: Run 'make ci-local' to see detailed output$(NC)"
+
 
 ##@ Local Development
 

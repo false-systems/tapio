@@ -38,15 +38,6 @@ type Impact struct {
 	Services  []string // Affected services
 }
 
-// Correlator processes events and finds correlations
-type Correlator interface {
-	// Process an event and return any correlations found
-	Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error)
-
-	// Name returns the correlator name
-	Name() string
-}
-
 // Engine orchestrates all correlators
 type IEngine interface {
 	// Process an event through all correlators
@@ -60,4 +51,13 @@ type IEngine interface {
 
 	// Stop the engine
 	Stop() error
+}
+
+// Dependency represents a correlator dependency
+type Dependency struct {
+	Name        string
+	Type        string
+	Description string
+	Required    bool
+	HealthCheck func() error
 }

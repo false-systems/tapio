@@ -129,9 +129,9 @@ func TestCollector_HandleResourceEvent(t *testing.T) {
 	case event := <-collector.events:
 		assert.Equal(t, "k8s_ADDED", event.Type)
 		assert.Equal(t, "kubeapi", event.Metadata["collector"])
-		assert.Equal(t, "Pod", event.Metadata["resource"])
-		assert.Equal(t, "test-pod", event.Metadata["name"])
-		assert.Equal(t, "default", event.Metadata["namespace"])
+		assert.Equal(t, "Pod", event.Metadata["k8s_kind"])
+		assert.Equal(t, "test-pod", event.Metadata["k8s_name"])
+		assert.Equal(t, "default", event.Metadata["k8s_namespace"])
 		assert.NotEmpty(t, event.TraceID)
 		assert.NotEmpty(t, event.SpanID)
 

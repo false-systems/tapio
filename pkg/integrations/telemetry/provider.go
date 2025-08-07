@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,13 +11,18 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
+
+// ErrLoggerRequired is returned when logger is not provided
+var ErrLoggerRequired = errors.New("logger is required")
 
 // Config holds OpenTelemetry configuration
 type Config struct {
@@ -211,4 +217,14 @@ func (p *Provider) PrometheusHandler() interface{} {
 		return p.promExporter
 	}
 	return nil
+}
+
+// GetTracer returns a tracer with the given name
+func GetTracer(name string) trace.Tracer {
+	return otel.Tracer(name)
+}
+
+// GetMeter returns a meter with the given name
+func GetMeter(name string) metric.Meter {
+	return otel.Meter(name)
 }

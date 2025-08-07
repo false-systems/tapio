@@ -59,7 +59,7 @@ func TestEventPipeline(t *testing.T) {
 
 	t.Run("RegisterCollector", func(t *testing.T) {
 		config := DefaultConfig()
-		config.NATSURL = "" // Disable NATS for unit test
+		config.NATSConfig = nil // Disable NATS for unit test
 
 		pipeline, err := New(logger, config)
 		require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestEventPipeline(t *testing.T) {
 
 	t.Run("StartStop", func(t *testing.T) {
 		config := DefaultConfig()
-		config.NATSURL = "" // Disable NATS for unit test
+		config.NATSConfig = nil // Disable NATS for unit test
 
 		pipeline, err := New(logger, config)
 		require.NoError(t, err)

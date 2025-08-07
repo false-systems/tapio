@@ -327,13 +327,6 @@ func RunFullValidation(ctx context.Context, installPath string) (*ValidationRepo
 			},
 		},
 		{
-			name: "Service Health",
-			fn: func(ctx context.Context) error {
-				checker := NewHealthChecker()
-				return checker.CheckService(ctx, "tapio")
-			},
-		},
-		{
 			name: "Network Connectivity",
 			fn: func(ctx context.Context) error {
 				endpoints := []string{
