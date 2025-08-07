@@ -36,6 +36,7 @@ var (
 	logLevel       = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	workerCount    = flag.Int("workers", 4, "Number of pipeline workers")
 	bufferSize     = flag.Int("buffer-size", 10000, "Event buffer size")
+)
 
 func main() {
 	flag.Parse()

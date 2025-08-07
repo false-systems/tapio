@@ -29,7 +29,7 @@ func newMockCollector(name, collectorType string) *mockCollector {
 		collectorType: collectorType,
 		events:        make(chan domain.UnifiedEvent, 100),
 		health: CollectorHealth{
-			Status:  HealthStatusHealthy,
+			Status:  domain.HealthHealthy,
 			Message: "Mock collector is healthy",
 		},
 		stats: CollectorStatistics{
@@ -240,10 +240,10 @@ func TestManager_Health(t *testing.T) {
 
 	// Register collectors with different health states
 	healthyCollector := newMockCollector("healthy", "test")
-	healthyCollector.health.Status = HealthStatusHealthy
+	healthyCollector.health.Status = domain.HealthHealthy
 
 	unhealthyCollector := newMockCollector("unhealthy", "test")
-	unhealthyCollector.health.Status = HealthStatusUnhealthy
+	unhealthyCollector.health.Status = domain.HealthUnhealthy
 	unhealthyCollector.health.Message = "Something is wrong"
 
 	err := manager.Register("healthy", healthyCollector)
@@ -262,12 +262,12 @@ func TestManager_Health(t *testing.T) {
 	assert.Len(t, health, 3) // 2 collectors + manager
 
 	// Check individual collector health
-	assert.Equal(t, HealthStatusHealthy, health["healthy"].Status)
-	assert.Equal(t, HealthStatusUnhealthy, health["unhealthy"].Status)
+	assert.Equal(t, domain.HealthHealthy, health["healthy"].Status)
+	assert.Equal(t, domain.HealthUnhealthy, health["unhealthy"].Status)
 	assert.Equal(t, "Something is wrong", health["unhealthy"].Message)
 
 	// Check manager health (should be degraded due to unhealthy collector)
-	assert.Equal(t, HealthStatusDegraded, health["manager"].Status)
+	assert.Equal(t, domain.HealthDegraded, health["manager"].Status)
 }
 
 func TestManager_Statistics(t *testing.T) {

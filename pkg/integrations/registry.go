@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/integrations/core"
 )
 
@@ -57,18 +58,15 @@ func (r *Registry) List() []string {
 }
 
 // HealthCheck checks health of all integrations
-func (r *Registry) HealthCheck(ctx context.Context) map[string]*core.HealthStatus {
+func (r *Registry) HealthCheck(ctx context.Context) map[string]*domain.HealthStatus {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	results := make(map[string]*core.HealthStatus)
+	results := make(map[string]*domain.HealthStatus)
 	for name, integration := range r.integrations {
 		health, err := integration.Health(ctx)
 		if err != nil {
-			health = &core.HealthStatus{
-				Healthy: false,
-				Message: fmt.Sprintf("health check failed: %v", err),
-			}
+			health = domain.NewUnhealthyStatus(fmt.Sprintf("health check failed: %v", err), err)
 		}
 		results[name] = health
 	}
