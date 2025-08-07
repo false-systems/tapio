@@ -24,7 +24,7 @@ type Integration interface {
 	ProcessCorrelation(ctx context.Context, correlation *domain.Correlation) error
 
 	// Health returns the health status of this integration
-	Health(ctx context.Context) (*HealthStatus, error)
+	Health(ctx context.Context) (*domain.HealthStatus, error)
 
 	// Close cleanly shuts down the integration
 	Close() error
@@ -33,13 +33,6 @@ type Integration interface {
 // Config provides integration configuration
 type Config interface {
 	Validate() error
-}
-
-// HealthStatus represents integration health
-type HealthStatus struct {
-	Healthy bool                   `json:"healthy"`
-	Message string                 `json:"message"`
-	Details map[string]interface{} `json:"details,omitempty"`
 }
 
 // MetricsExporter exports metrics to external systems

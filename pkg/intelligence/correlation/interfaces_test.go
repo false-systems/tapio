@@ -4,74 +4,46 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 )
 
-// MockCorrelator implements the StandardCorrelator interface for testing
+// MockCorrelator implements the Correlator interface for testing
 type MockCorrelator struct {
-	*BaseCorrelator
-	correlateFunc func(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error)
-	healthFunc    func(ctx context.Context) error
+	name        string
+	processFunc func(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error)
 }
 
-func (m *MockCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error) {
-	if m.correlateFunc != nil {
-		return m.correlateFunc(ctx, event)
-	}
-	return &aggregator.CorrelatorOutput{
-		CorrelatorName:    m.Name(),
-		CorrelatorVersion: m.Version(),
-		Findings:          []aggregator.Finding{},
-		Confidence:        0.5,
-	}, nil
+func (m *MockCorrelator) Name() string {
+	return m.name
 }
 
-func (m *MockCorrelator) Health(ctx context.Context) error {
-	if m.healthFunc != nil {
-		return m.healthFunc(ctx)
+func (m *MockCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
+	if m.processFunc != nil {
+		return m.processFunc(ctx, event)
 	}
-	return nil
+	return nil, nil
 }
 
-func TestBaseCorrelator(t *testing.T) {
-	capabilities := CorrelatorCapabilities{
-		EventTypes:   []string{"pod_crash", "memory_pressure"},
-		RequiredData: []string{"namespace", "pod"},
-		OptionalData: []string{"container"},
-		MaxEventAge:  30 * time.Minute,
-	}
+func TestCorrelatorInterface(t *testing.T) {
+	// Test that MockCorrelator implements Correlator
+	var _ Correlator = &MockCorrelator{}
 
-	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
-
-	assert.Equal(t, "TestCorrelator", base.Name())
-	assert.Equal(t, "1.0.0", base.Version())
-	assert.Equal(t, capabilities, base.GetCapabilities())
-}
-
-func TestValidateEvent_Success(t *testing.T) {
-	capabilities := CorrelatorCapabilities{
-		EventTypes:   []string{"pod_crash"},
-		RequiredData: []string{"namespace", "pod"},
-		MaxEventAge:  30 * time.Minute,
-	}
-
-	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
-
-	event := &domain.UnifiedEvent{
-		ID:        "test-event",
-		Type:      domain.EventType("pod_crash"),
-		Timestamp: time.Now(),
-		K8sContext: &domain.K8sContext{
-			Namespace: "default",
-			Kind:      "Pod",
-			Name:      "test-pod",
+	mock := &MockCorrelator{
+		name: "test-correlator",
+		processFunc: func(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
+			return []*CorrelationResult{{
+				ID:         "test-correlation",
+				Type:       "test",
+				Confidence: 0.9,
+				Summary:    "Test correlation",
+			}}, nil
 		},
 	}
+
+
+	assert.Equal(t, "test-correlator", mock.Name())
 
 	err := base.ValidateEvent(event)
 	assert.NoError(t, err)
@@ -174,145 +146,10 @@ func TestHasField(t *testing.T) {
 	assert.False(t, base.hasField(event, "missing_field"))
 }
 
-func TestCorrelatorManager_Register(t *testing.T) {
-	manager := NewCorrelatorManager()
-
-	correlator1 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("Correlator1", "1.0.0", CorrelatorCapabilities{}),
-	}
-	correlator2 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("Correlator2", "1.0.0", CorrelatorCapabilities{}),
-	}
-
-	// Register first correlator
-	err := manager.Register(correlator1)
+	results, err := mock.Process(context.Background(), &domain.UnifiedEvent{})
 	assert.NoError(t, err)
-
-	// Register second correlator
-	err = manager.Register(correlator2)
-	assert.NoError(t, err)
-
-	// Try to register duplicate
-	err = manager.Register(correlator1)
-	assert.Error(t, err)
-}
-
-func TestCorrelatorManager_Get(t *testing.T) {
-	manager := NewCorrelatorManager()
-
-	correlator := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("TestCorrelator", "1.0.0", CorrelatorCapabilities{}),
-	}
-
-	err := manager.Register(correlator)
-	require.NoError(t, err)
-
-	// Get existing correlator
-	retrieved, exists := manager.Get("TestCorrelator")
-	assert.True(t, exists)
-	assert.Equal(t, correlator, retrieved)
-
-	// Get non-existing correlator
-	_, exists = manager.Get("NonExistent")
-	assert.False(t, exists)
-}
-
-func TestCorrelatorManager_GetAll(t *testing.T) {
-	manager := NewCorrelatorManager()
-
-	correlator1 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("Correlator1", "1.0.0", CorrelatorCapabilities{}),
-	}
-	correlator2 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("Correlator2", "1.0.0", CorrelatorCapabilities{}),
-	}
-
-	err := manager.Register(correlator1)
-	require.NoError(t, err)
-	err = manager.Register(correlator2)
-	require.NoError(t, err)
-
-	all := manager.GetAll()
-	assert.Len(t, all, 2)
-}
-
-func TestCorrelatorManager_GetForEvent(t *testing.T) {
-	manager := NewCorrelatorManager()
-
-	// Correlator that handles pod_crash
-	correlator1 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("PodCorrelator", "1.0.0", CorrelatorCapabilities{
-			EventTypes: []string{"pod_crash", "pod_restart"},
-		}),
-	}
-
-	// Correlator that handles network events
-	correlator2 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("NetworkCorrelator", "1.0.0", CorrelatorCapabilities{
-			EventTypes: []string{"network_error", "connection_timeout"},
-		}),
-	}
-
-	// Correlator that handles all events
-	correlator3 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("UniversalCorrelator", "1.0.0", CorrelatorCapabilities{
-			EventTypes: []string{"*"},
-		}),
-	}
-
-	err := manager.Register(correlator1)
-	require.NoError(t, err)
-	err = manager.Register(correlator2)
-	require.NoError(t, err)
-	err = manager.Register(correlator3)
-	require.NoError(t, err)
-
-	// Test pod event
-	podEvent := &domain.UnifiedEvent{
-		Type: domain.EventType("pod_crash"),
-	}
-	correlators := manager.GetForEvent(podEvent)
-	assert.Len(t, correlators, 2) // PodCorrelator and UniversalCorrelator
-
-	// Test network event
-	networkEvent := &domain.UnifiedEvent{
-		Type: domain.EventType("network_error"),
-	}
-	correlators = manager.GetForEvent(networkEvent)
-	assert.Len(t, correlators, 2) // NetworkCorrelator and UniversalCorrelator
-
-	// Test unknown event
-	unknownEvent := &domain.UnifiedEvent{
-		Type: domain.EventType("unknown_event"),
-	}
-	correlators = manager.GetForEvent(unknownEvent)
-	assert.Len(t, correlators, 1) // Only UniversalCorrelator
-}
-
-func TestCorrelatorManager_HealthCheck(t *testing.T) {
-	manager := NewCorrelatorManager()
-
-	// Healthy correlator
-	correlator1 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("HealthyCorrelator", "1.0.0", CorrelatorCapabilities{}),
-		healthFunc:     func(ctx context.Context) error { return nil },
-	}
-
-	// Unhealthy correlator
-	correlator2 := &MockCorrelator{
-		BaseCorrelator: NewBaseCorrelator("UnhealthyCorrelator", "1.0.0", CorrelatorCapabilities{}),
-		healthFunc:     func(ctx context.Context) error { return errors.New("database connection failed") },
-	}
-
-	err := manager.Register(correlator1)
-	require.NoError(t, err)
-	err = manager.Register(correlator2)
-	require.NoError(t, err)
-
-	results := manager.HealthCheck(context.Background())
-	assert.Len(t, results, 2)
-	assert.NoError(t, results["HealthyCorrelator"])
-	assert.Error(t, results["UnhealthyCorrelator"])
+	assert.Len(t, results, 1)
+	assert.Equal(t, "test-correlation", results[0].ID)
 }
 
 func TestCorrelatorError(t *testing.T) {

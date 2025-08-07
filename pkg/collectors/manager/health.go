@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// HealthStatus represents the overall health status
-type HealthStatus struct {
+// CollectorHealthInfo represents the health info for HTTP endpoints
+type CollectorHealthInfo struct {
 	Healthy    bool                       `json:"healthy"`
 	Timestamp  time.Time                  `json:"timestamp"`
 	Collectors map[string]CollectorStatus `json:"collectors"`
@@ -64,7 +64,7 @@ func (m *CollectorManager) StartHealthEndpoint(addr string) error {
 func (m *CollectorManager) handleHealth(w http.ResponseWriter, r *http.Request) {
 	health := m.GetHealth()
 
-	status := HealthStatus{
+	status := CollectorHealthInfo{
 		Healthy:    m.IsHealthy(),
 		Timestamp:  time.Now(),
 		Collectors: make(map[string]CollectorStatus),

@@ -124,14 +124,47 @@ func (s *Service) ProcessEvent(ctx context.Context, event *domain.UnifiedEvent) 
 
 // WhyDidThisFail performs root cause analysis
 func (s *Service) WhyDidThisFail(ctx context.Context, resourceType, namespace, name string) (*queries.RootCauseAnalysis, error) {
-	// Use generic root cause analysis that works for all resource types
-	return s.queries.FindRootCause(ctx, resourceType, namespace, name, 1*time.Hour)
+	// Currently only supports pods, can be extended for other resource types
+	if resourceType == "pod" || resourceType == "Pod" {
+		return s.queries.WhyDidPodFail(ctx, namespace, name, 1*time.Hour)
+	}
+
+	// For other resource types, return a generic "not implemented yet" response
+	return &queries.RootCauseAnalysis{
+		FailedEntity: queries.EntityInfo{
+			Type:      resourceType,
+			Name:      name,
+			Namespace: namespace,
+		},
+		RootCauses:     []queries.CauseInfo{},
+		CausalChain:    []queries.CauseInfo{},
+		RelatedEvents:  []queries.EventInfo{},
+		Recommendation: "Root cause analysis for " + resourceType + " not yet implemented",
+		Confidence:     0.0,
+		Timestamp:      time.Now(),
+	}, nil
 }
 
 // WhatDoesThisImpact performs impact analysis
 func (s *Service) WhatDoesThisImpact(ctx context.Context, resourceType, namespace, name string) (*queries.ImpactAnalysis, error) {
-	// Use generic impact analysis that works for all resource types
-	return s.queries.FindImpact(ctx, resourceType, namespace, name)
+	// Currently only supports services, can be extended for other resource types
+	if resourceType == "service" || resourceType == "Service" {
+		return s.queries.WhatImpactsService(ctx, namespace, name)
+	}
+
+	// For other resource types, return a generic "not implemented yet" response
+	return &queries.ImpactAnalysis{
+		Service: queries.EntityInfo{
+			Type:      resourceType,
+			Name:      name,
+			Namespace: namespace,
+		},
+		AffectedPods:        []queries.EntityInfo{},
+		AffectedDeployments: []queries.EntityInfo{},
+		DependentServices:   []queries.EntityInfo{},
+		EstimatedImpact:     "Impact analysis for " + resourceType + " not yet implemented",
+		Timestamp:           time.Now(),
+	}, nil
 }
 
 // GetCascadingFailures finds recent cascade patterns

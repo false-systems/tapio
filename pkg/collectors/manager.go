@@ -29,24 +29,14 @@ type CollectorInterface interface {
 
 // CollectorHealth represents health status for any collector
 type CollectorHealth struct {
-	Status          HealthStatus       `json:"status"`
-	Message         string             `json:"message"`
-	LastEventTime   time.Time          `json:"last_event_time"`
-	EventsProcessed uint64             `json:"events_processed"`
-	EventsDropped   uint64             `json:"events_dropped"`
-	ErrorCount      uint64             `json:"error_count"`
-	Metrics         map[string]float64 `json:"metrics"`
+	Status          domain.HealthStatusValue `json:"status"`
+	Message         string                   `json:"message"`
+	LastEventTime   time.Time                `json:"last_event_time"`
+	EventsProcessed uint64                   `json:"events_processed"`
+	EventsDropped   uint64                   `json:"events_dropped"`
+	ErrorCount      uint64                   `json:"error_count"`
+	Metrics         map[string]float64       `json:"metrics"`
 }
-
-// HealthStatus represents the health state
-type HealthStatus string
-
-const (
-	HealthStatusHealthy   HealthStatus = "healthy"
-	HealthStatusDegraded  HealthStatus = "degraded"
-	HealthStatusUnhealthy HealthStatus = "unhealthy"
-	HealthStatusUnknown   HealthStatus = "unknown"
-)
 
 // CollectorStatistics represents runtime statistics
 type CollectorStatistics struct {
@@ -222,7 +212,7 @@ func (m *Manager) checkHealth() {
 		health := collector.Health()
 
 		// Log unhealthy collectors
-		if health.Status == HealthStatusUnhealthy {
+		if health.Status == domain.HealthUnhealthy {
 			// In production, this would trigger alerts
 			fmt.Printf("[WARN] Collector %s is unhealthy: %s\n", name, health.Message)
 		}
@@ -264,32 +254,32 @@ func (m *Manager) Health() map[string]CollectorHealth {
 }
 
 // getManagerHealth determines manager's health status
-func (m *Manager) getManagerHealth() HealthStatus {
+func (m *Manager) getManagerHealth() domain.HealthStatusValue {
 	if !m.isRunning {
-		return HealthStatusUnknown
+		return domain.HealthUnknown
 	}
 
 	// Check if any collector is unhealthy
 	unhealthyCount := 0
 	for _, collector := range m.collectors {
-		if collector.Health().Status == HealthStatusUnhealthy {
+		if collector.Health().Status == domain.HealthUnhealthy {
 			unhealthyCount++
 		}
 	}
 
 	if unhealthyCount == len(m.collectors) {
-		return HealthStatusUnhealthy
+		return domain.HealthUnhealthy
 	} else if unhealthyCount > 0 {
-		return HealthStatusDegraded
+		return domain.HealthDegraded
 	}
 
 	// Check event drop rate
 	dropRate := float64(m.droppedEvents) / float64(m.totalEvents+1)
 	if dropRate > 0.1 { // More than 10% drops
-		return HealthStatusDegraded
+		return domain.HealthDegraded
 	}
 
-	return HealthStatusHealthy
+	return domain.HealthHealthy
 }
 
 // Statistics returns aggregated statistics from all collectors
