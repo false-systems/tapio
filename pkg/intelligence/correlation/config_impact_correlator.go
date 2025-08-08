@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
@@ -16,14 +15,15 @@ import (
 // It tracks: ConfigMap/Secret changes → Pod restarts → Service disruptions
 type ConfigImpactCorrelator struct {
 	*BaseCorrelator
-	neo4jDriver neo4j.DriverWithContext
+	graphStore  GraphStore
 	logger      *zap.Logger
+	queryConfig QueryConfig
 }
 
 // NewConfigImpactCorrelator creates a new config impact correlator
-func NewConfigImpactCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.Logger) (*ConfigImpactCorrelator, error) {
-	if neo4jDriver == nil {
-		return nil, fmt.Errorf("neo4jDriver is required")
+func NewConfigImpactCorrelator(graphStore GraphStore, logger *zap.Logger) (*ConfigImpactCorrelator, error) {
+	if graphStore == nil {
+		return nil, fmt.Errorf("graphStore is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
@@ -46,7 +46,7 @@ func NewConfigImpactCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.
 				Type:     "database",
 				Required: true,
 				HealthCheck: func(ctx context.Context) error {
-					return neo4jDriver.VerifyConnectivity(ctx)
+					return graphStore.HealthCheck(ctx)
 				},
 			},
 		},
@@ -58,8 +58,9 @@ func NewConfigImpactCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.
 
 	return &ConfigImpactCorrelator{
 		BaseCorrelator: base,
-		neo4jDriver:    neo4jDriver,
+		graphStore:     graphStore,
 		logger:         logger,
+		queryConfig:    DefaultQueryConfig(),
 	}, nil
 }
 
@@ -144,10 +145,8 @@ func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event 
 		zap.String("type", configType),
 		zap.String("namespace", namespace))
 
-	session := c.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
-	// Query for pods using this config and their recent status
+	// Query for pods using this config and their recent status with LIMIT
+	limit := c.queryConfig.GetLimit("config")
 	query := fmt.Sprintf(`
 		MATCH (cfg:%s {name: $configName, namespace: $namespace})
 		OPTIONAL MATCH (p:Pod)-[:MOUNTS|USES_SECRET]->(cfg)
@@ -157,23 +156,33 @@ func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event 
 		     p.lastRestart as podRestart,
 		     p.ready as podReady,
 		     p.phase as podPhase
+		LIMIT %d
 		RETURN cfg,
 		       collect(DISTINCT {
 		           pod: p,
 		           restart: podRestart,
 		           ready: podReady,
 		           phase: podPhase,
-		           services: collect(DISTINCT svc.name)
-		       }) as affectedPods
-	`, configType)
+		           services: collect(DISTINCT svc.name)[0..%d]
+		       })[0..%d] as affectedPods
+	`, configType, limit*2, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"configName": configName,
-		"namespace":  namespace,
-	})
+	params := &ConfigQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		ConfigName: configName,
+		ConfigType: configType,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := c.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query config impact: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -229,28 +238,35 @@ func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, eve
 		zap.String("pod", podName),
 		zap.String("namespace", namespace))
 
-	session := c.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
 	// Query for recent config changes that might have caused the restart
-	query := `
+	limit := c.queryConfig.GetLimit("config")
+	query := fmt.Sprintf(`
 		MATCH (p:Pod {name: $podName, namespace: $namespace})
 		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
 		WHERE cm.lastModified > datetime() - duration({minutes: 30})
 		OPTIONAL MATCH (p)-[:USES_SECRET]->(s:Secret)
 		WHERE s.lastModified > datetime() - duration({minutes: 30})
 		RETURN p,
-		       collect(DISTINCT {type: 'ConfigMap', name: cm.name, modified: cm.lastModified}) +
-		       collect(DISTINCT {type: 'Secret', name: s.name, modified: s.lastModified}) as recentChanges
-	`
+		       (collect(DISTINCT {type: 'ConfigMap', name: cm.name, modified: cm.lastModified})[0..%d] +
+		        collect(DISTINCT {type: 'Secret', name: s.name, modified: s.lastModified})[0..%d]) as recentChanges
+		LIMIT 1
+	`, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"podName":   podName,
-		"namespace": namespace,
-	})
+	params := &PodQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		PodName: podName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := c.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pod restart cause: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -280,11 +296,9 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 		return nil, fmt.Errorf("deployment name not found in event")
 	}
 
-	session := c.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
 	// Query for deployment's config dependencies
-	query := `
+	limit := c.queryConfig.GetLimit("config")
+	query := fmt.Sprintf(`
 		MATCH (d:Deployment {name: $deploymentName, namespace: $namespace})
 		OPTIONAL MATCH (d)-[:OWNS]->(rs:ReplicaSet)-[:OWNS]->(p:Pod)
 		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
@@ -292,18 +306,27 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 		WITH d, 
 		     count(DISTINCT p) as podCount,
 		     count(DISTINCT CASE WHEN p.ready = true THEN p END) as readyPods,
-		     collect(DISTINCT cm.name) as configMaps,
-		     collect(DISTINCT s.name) as secrets
+		     collect(DISTINCT cm.name)[0..%d] as configMaps,
+		     collect(DISTINCT s.name)[0..%d] as secrets
 		RETURN d, podCount, readyPods, configMaps, secrets
-	`
+		LIMIT 1
+	`, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"deploymentName": deploymentName,
-		"namespace":      namespace,
-	})
+	params := &DeploymentQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		DeploymentName: deploymentName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := c.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query deployment config: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -363,9 +386,20 @@ func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType stri
 
 	for _, podData := range affectedPods {
 		if podMap, ok := podData.(map[string]interface{}); ok {
-			if podNode, ok := podMap["pod"].(neo4j.Node); ok {
-				podName := podNode.Props["name"].(string)
+			// Extract pod properties from the map structure
+			var podName string
+			if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
+				if props, ok := podNode["props"].(map[string]interface{}); ok {
+					if name, ok := props["name"].(string); ok {
+						podName = name
+					}
+				}
+			} else if name, ok := podMap["name"].(string); ok {
+				// Fallback to direct name access
+				podName = name
+			}
 
+			if podName != "" {
 				// Check if pod restarted after config change
 				if restartTime, ok := podMap["restart"].(time.Time); ok {
 					if restartTime.After(event.Timestamp.Add(-10 * time.Minute)) {
@@ -548,14 +582,13 @@ func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Findi
 
 // Health checks if the correlator is healthy
 func (c *ConfigImpactCorrelator) Health(ctx context.Context) error {
-	return c.neo4jDriver.VerifyConnectivity(ctx)
+	return c.graphStore.HealthCheck(ctx)
 }
 
 // SetGraphClient implements GraphCorrelator interface
 func (c *ConfigImpactCorrelator) SetGraphClient(client interface{}) {
-	if driver, ok := client.(neo4j.DriverWithContext); ok {
-		c.neo4jDriver = driver
-	}
+	// This method is no longer needed as we use GraphStore interface
+	// The graphStore is injected via constructor
 }
 
 // PreloadGraph implements GraphCorrelator interface

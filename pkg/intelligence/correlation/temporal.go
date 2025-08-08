@@ -92,6 +92,11 @@ func NewTemporalCorrelator(logger *zap.Logger, config TemporalConfig) *TemporalC
 
 // Process implements the Correlator interface
 func (t *TemporalCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
+	// Validate input
+	if event == nil {
+		return nil, fmt.Errorf("event is nil")
+	}
+
 	// Add event to window
 	t.eventWindow.Add(event)
 

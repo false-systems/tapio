@@ -369,16 +369,44 @@ func (e *Engine) metricsReporter() {
 }
 
 // GetMetrics returns current engine metrics
-func (e *Engine) GetMetrics() map[string]interface{} {
+// Returns a properly typed MetricsData struct instead of map[string]interface{}
+// This complies with CLAUDE.md requirement: "No map[string]interface{} in public APIs"
+func (e *Engine) GetMetrics() MetricsData {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	return map[string]interface{}{
-		"events_processed":   e.eventsProcessed,
-		"correlations_found": e.correlationsFound,
-		"event_queue_size":   len(e.eventChan),
-		"result_queue_size":  len(e.resultChan),
-		"correlators_count":  len(e.correlators),
-		"workers_count":      e.config.WorkerCount,
+	return MetricsData{
+		EventsProcessed:   e.eventsProcessed,
+		CorrelationsFound: e.correlationsFound,
+		EventQueueSize:    len(e.eventChan),
+		ResultQueueSize:   len(e.resultChan),
+		CorrelatorsCount:  len(e.correlators),
+		WorkersCount:      e.config.WorkerCount,
+		LastReportTime:    time.Now(),
+		IsHealthy:         e.ctx.Err() == nil,
+		Status:            "running",
 	}
+}
+
+// GetDetailedMetrics returns comprehensive engine metrics
+// This provides more detailed metrics for monitoring and debugging
+func (e *Engine) GetDetailedMetrics() EngineMetrics {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	metrics := EngineMetrics{
+		MetricsData: MetricsData{
+			EventsProcessed:   e.eventsProcessed,
+			CorrelationsFound: e.correlationsFound,
+			EventQueueSize:    len(e.eventChan),
+			ResultQueueSize:   len(e.resultChan),
+			CorrelatorsCount:  len(e.correlators),
+			WorkersCount:      e.config.WorkerCount,
+			LastReportTime:    time.Now(),
+			IsHealthy:         e.ctx.Err() == nil,
+			Status:            "running",
+		},
+	}
+
+	return metrics
 }

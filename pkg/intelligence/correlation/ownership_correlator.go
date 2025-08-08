@@ -3,10 +3,10 @@ package correlation
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
@@ -16,14 +16,15 @@ import (
 // It tracks: Deployment→ReplicaSet→Pod, StatefulSet→Pod, DaemonSet→Pod chains
 type OwnershipCorrelator struct {
 	*BaseCorrelator
-	neo4jDriver neo4j.DriverWithContext
+	graphStore  GraphStore
 	logger      *zap.Logger
+	queryConfig QueryConfig
 }
 
 // NewOwnershipCorrelator creates a new ownership correlator
-func NewOwnershipCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.Logger) (*OwnershipCorrelator, error) {
-	if neo4jDriver == nil {
-		return nil, fmt.Errorf("neo4jDriver is required")
+func NewOwnershipCorrelator(graphStore GraphStore, logger *zap.Logger) (*OwnershipCorrelator, error) {
+	if graphStore == nil {
+		return nil, fmt.Errorf("graphStore is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
@@ -48,7 +49,7 @@ func NewOwnershipCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.Log
 				Type:     "database",
 				Required: true,
 				HealthCheck: func(ctx context.Context) error {
-					return neo4jDriver.VerifyConnectivity(ctx)
+					return graphStore.HealthCheck(ctx)
 				},
 			},
 		},
@@ -60,8 +61,9 @@ func NewOwnershipCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.Log
 
 	return &OwnershipCorrelator{
 		BaseCorrelator: base,
-		neo4jDriver:    neo4jDriver,
+		graphStore:     graphStore,
 		logger:         logger,
+		queryConfig:    DefaultQueryConfig(),
 	}, nil
 }
 
@@ -145,11 +147,9 @@ func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event 
 		zap.String("deployment", deploymentName),
 		zap.String("namespace", namespace))
 
-	session := o.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
 	// Query for deployment ownership chain
-	query := `
+	limit := o.queryConfig.GetLimit("ownership")
+	query := fmt.Sprintf(`
 		MATCH (d:Deployment {name: $deploymentName, namespace: $namespace})
 		OPTIONAL MATCH (d)-[:OWNS]->(rs:ReplicaSet)
 		OPTIONAL MATCH (rs)-[:OWNS]->(p:Pod)
@@ -159,6 +159,7 @@ func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event 
 		     rs.readyReplicas as rsReady,
 		     p.ready as podReady,
 		     p.phase as podPhase
+		LIMIT %d
 		RETURN d,
 		       collect(DISTINCT {
 		           replicaSet: rs,
@@ -168,17 +169,24 @@ func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event 
 		               pod: p,
 		               ready: podReady,
 		               phase: podPhase
-		           })
-		       }) as replicaSets
-	`
+		           })[0..%d]
+		       })[0..%d] as replicaSets`, limit*2, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"deploymentName": deploymentName,
-		"namespace":      namespace,
-	})
+	params := &DeploymentQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		DeploymentName: deploymentName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := o.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query deployment chain: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -186,9 +194,15 @@ func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event 
 		record := result.Record()
 
 		// Get deployment info
-		deploymentValue, _ := record.Get("d")
-		if deploymentNode, ok := deploymentValue.(neo4j.Node); ok {
-			desiredReplicas, _ := deploymentNode.Props["replicas"].(int64)
+		deploymentNode, err := record.GetNode("d")
+		if err == nil {
+			desiredReplicas := int64(0)
+			if replicasStr, ok := deploymentNode.Properties.Metadata["replicas"]; ok {
+				// Parse replicas from metadata
+				if replicas, err := strconv.ParseInt(replicasStr, 10, 64); err == nil {
+					desiredReplicas = replicas
+				}
+			}
 
 			// Analyze replica sets
 			if replicaSetsValue, found := record.Get("replicaSets"); found {
@@ -215,28 +229,35 @@ func (o *OwnershipCorrelator) analyzeReplicaSetIssues(ctx context.Context, event
 		return nil, fmt.Errorf("replicaset name not found in event")
 	}
 
-	session := o.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
 	// Query for ReplicaSet ownership
-	query := `
+	limit := o.queryConfig.GetLimit("ownership")
+	query := fmt.Sprintf(`
 		MATCH (rs:ReplicaSet {name: $rsName, namespace: $namespace})
 		OPTIONAL MATCH (d:Deployment)-[:OWNS]->(rs)
 		OPTIONAL MATCH (rs)-[:OWNS]->(p:Pod)
 		WITH rs, d, 
 		     rs.replicas as desiredReplicas,
 		     rs.readyReplicas as readyReplicas,
-		     collect(DISTINCT p) as pods
+		     collect(DISTINCT p)[0..%d] as pods
 		RETURN rs, d, desiredReplicas, readyReplicas, pods
-	`
+		LIMIT 1
+	`, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"rsName":    rsName,
-		"namespace": namespace,
-	})
+	params := &ReplicaSetQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		ReplicaSetName: rsName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := o.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query replicaset ownership: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -252,10 +273,8 @@ func (o *OwnershipCorrelator) analyzeReplicaSetIssues(ctx context.Context, event
 		if desired > 0 && ready < desired {
 			// Get deployment name if exists
 			var deploymentName string
-			if deploymentValue, found := record.Get("d"); found {
-				if deploymentNode, ok := deploymentValue.(neo4j.Node); ok {
-					deploymentName, _ = deploymentNode.Props["name"].(string)
-				}
+			if deploymentNode, err := record.GetNode("d"); err == nil && deploymentNode != nil {
+				deploymentName = deploymentNode.Properties.Name
 			}
 
 			// Analyze pods
@@ -283,9 +302,6 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 		return nil, fmt.Errorf("pod name not found in event")
 	}
 
-	session := o.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
 	// Query for pod ownership chain
 	query := `
 		MATCH (p:Pod {name: $podName, namespace: $namespace})
@@ -294,15 +310,24 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 		OPTIONAL MATCH (sts:StatefulSet)-[:OWNS]->(p)
 		OPTIONAL MATCH (ds:DaemonSet)-[:OWNS]->(p)
 		RETURN p, rs, d, sts, ds
+		LIMIT 1
 	`
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"podName":   podName,
-		"namespace": namespace,
-	})
+	params := &PodQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		PodName: podName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := o.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pod ownership: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -315,43 +340,43 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 		var ownerId string
 
 		// Check Deployment→ReplicaSet ownership
-		if deploymentValue, found := record.Get("d"); found && deploymentValue != nil {
-			if deploymentNode, ok := deploymentValue.(neo4j.Node); ok {
-				deploymentName, _ := deploymentNode.Props["name"].(string)
-				ownerChain = append(ownerChain, fmt.Sprintf("Deployment/%s", deploymentName))
-				ownerType = "Deployment"
-				ownerId = deploymentName
-			}
+		if deploymentNode, err := record.GetNode("d"); err == nil && deploymentNode != nil {
+			deploymentName := deploymentNode.Properties.Name
+			ownerChain = append(ownerChain, fmt.Sprintf("Deployment/%s", deploymentName))
+			ownerType = "Deployment"
+			ownerId = deploymentName
 		}
 
 		if rsValue, found := record.Get("rs"); found && rsValue != nil {
-			if rsNode, ok := rsValue.(neo4j.Node); ok {
-				rsName, _ := rsNode.Props["name"].(string)
-				ownerChain = append(ownerChain, fmt.Sprintf("ReplicaSet/%s", rsName))
-				if ownerType == "" {
-					ownerType = "ReplicaSet"
-					ownerId = rsName
+			if rsNode, ok := rsValue.(map[string]interface{}); ok {
+				if props, ok := rsNode["properties"].(map[string]interface{}); ok {
+					rsName, _ := props["name"].(string)
+					ownerChain = append(ownerChain, fmt.Sprintf("ReplicaSet/%s", rsName))
+					if ownerType == "" {
+						ownerType = "ReplicaSet"
+						ownerId = rsName
+					}
 				}
 			}
 		}
 
 		// Check StatefulSet ownership
-		if stsValue, found := record.Get("sts"); found && stsValue != nil {
-			if stsNode, ok := stsValue.(neo4j.Node); ok {
-				stsName, _ := stsNode.Props["name"].(string)
-				ownerChain = []string{fmt.Sprintf("StatefulSet/%s", stsName)}
-				ownerType = "StatefulSet"
-				ownerId = stsName
-			}
+		if stsNode, err := record.GetNode("sts"); err == nil && stsNode != nil {
+			stsName := stsNode.Properties.Name
+			ownerChain = []string{fmt.Sprintf("StatefulSet/%s", stsName)}
+			ownerType = "StatefulSet"
+			ownerId = stsName
 		}
 
 		// Check DaemonSet ownership
 		if dsValue, found := record.Get("ds"); found && dsValue != nil {
-			if dsNode, ok := dsValue.(neo4j.Node); ok {
-				dsName, _ := dsNode.Props["name"].(string)
-				ownerChain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
-				ownerType = "DaemonSet"
-				ownerId = dsName
+			if dsNode, ok := dsValue.(map[string]interface{}); ok {
+				if props, ok := dsNode["properties"].(map[string]interface{}); ok {
+					dsName, _ := props["name"].(string)
+					ownerChain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
+					ownerType = "DaemonSet"
+					ownerId = dsName
+				}
 			}
 		}
 
@@ -396,27 +421,34 @@ func (o *OwnershipCorrelator) analyzeStatefulSetChain(ctx context.Context, event
 		return nil, fmt.Errorf("statefulset name not found in event")
 	}
 
-	session := o.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
 	// Query for StatefulSet pods
-	query := `
+	limit := o.queryConfig.GetLimit("ownership")
+	query := fmt.Sprintf(`
 		MATCH (sts:StatefulSet {name: $stsName, namespace: $namespace})
 		OPTIONAL MATCH (sts)-[:OWNS]->(p:Pod)
 		WITH sts,
 		     sts.replicas as desiredReplicas,
 		     sts.readyReplicas as readyReplicas,
-		     collect(p) as pods
+		     collect(p)[0..%d] as pods
 		RETURN sts, desiredReplicas, readyReplicas, pods
-	`
+		LIMIT 1
+	`, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"stsName":   stsName,
-		"namespace": namespace,
-	})
+	params := &StatefulSetQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		StatefulSetName: stsName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := o.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query statefulset chain: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -455,28 +487,35 @@ func (o *OwnershipCorrelator) analyzeDaemonSetIssues(ctx context.Context, event 
 		return nil, fmt.Errorf("daemonset name not found in event")
 	}
 
-	session := o.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
 	// Query for DaemonSet pods across nodes
-	query := `
+	limit := o.queryConfig.GetLimit("ownership")
+	query := fmt.Sprintf(`
 		MATCH (ds:DaemonSet {name: $dsName, namespace: $namespace})
 		OPTIONAL MATCH (ds)-[:OWNS]->(p:Pod)
 		OPTIONAL MATCH (p)-[:RUNS_ON]->(n:Node)
 		WITH ds,
 		     count(DISTINCT n) as nodeCount,
 		     count(DISTINCT p) as podCount,
-		     collect(DISTINCT {pod: p, node: n.name}) as podNodes
+		     collect(DISTINCT {pod: p, node: n.name})[0..%d] as podNodes
 		RETURN ds, nodeCount, podCount, podNodes
-	`
+		LIMIT 1
+	`, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"dsName":    dsName,
-		"namespace": namespace,
-	})
+	params := &DaemonSetQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		DaemonSetName: dsName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := o.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daemonset issues: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -528,22 +567,28 @@ func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredR
 
 	for _, rsData := range replicaSets {
 		if rsMap, ok := rsData.(map[string]interface{}); ok {
-			if rsNode, ok := rsMap["replicaSet"].(neo4j.Node); ok && rsNode.Props != nil {
-				rsName, _ := rsNode.Props["name"].(string)
+			var rsName string
+			if rsNode, ok := rsMap["replicaSet"].(map[string]interface{}); ok {
+				if props, ok := rsNode["properties"].(map[string]interface{}); ok {
+					rsName, _ = props["name"].(string)
+				}
 
 				// Check if this is the active ReplicaSet
 				if pods, ok := rsMap["pods"].([]interface{}); ok {
 					for _, podData := range pods {
 						if podMap, ok := podData.(map[string]interface{}); ok {
-							if podNode, ok := podMap["pod"].(neo4j.Node); ok && podNode.Props != nil {
-								totalPods++
-								podName, _ := podNode.Props["name"].(string)
-
-								if ready, ok := podMap["ready"].(bool); ok && ready {
-									readyPods++
-								} else {
-									failedPods = append(failedPods, podName)
+							var podName string
+							if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
+								if props, ok := podNode["properties"].(map[string]interface{}); ok {
+									totalPods++
+									podName, _ = props["name"].(string)
 								}
+							}
+
+							if ready, ok := podMap["ready"].(bool); ok && ready {
+								readyPods++
+							} else {
+								failedPods = append(failedPods, podName)
 							}
 						}
 					}
@@ -604,11 +649,14 @@ func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName st
 	notReadyPods := []string{}
 
 	for _, podInterface := range pods {
-		if pod, ok := podInterface.(neo4j.Node); ok {
-			podName, _ := pod.Props["name"].(string)
-			if podReady, exists := pod.Props["ready"]; exists {
-				if !podReady.(bool) {
-					notReadyPods = append(notReadyPods, podName)
+		if pod, ok := podInterface.(map[string]interface{}); ok {
+			var podName string
+			if props, ok := pod["properties"].(map[string]interface{}); ok {
+				podName, _ = props["name"].(string)
+				if podReady, exists := props["ready"]; exists {
+					if !podReady.(bool) {
+						notReadyPods = append(notReadyPods, podName)
+					}
 				}
 			}
 		}
@@ -654,12 +702,14 @@ func (o *OwnershipCorrelator) analyzeStatefulSetPods(stsName string, desired, re
 		found := false
 
 		for _, podInterface := range pods {
-			if pod, ok := podInterface.(neo4j.Node); ok {
-				if name, exists := pod.Props["name"]; exists && name == podName {
-					found = true
-					if podReady, exists := pod.Props["ready"]; exists && !podReady.(bool) {
-						brokenOrdinal = i
-						break
+			if pod, ok := podInterface.(map[string]interface{}); ok {
+				if props, ok := pod["properties"].(map[string]interface{}); ok {
+					if name, exists := props["name"]; exists && name == podName {
+						found = true
+						if podReady, exists := props["ready"]; exists && !podReady.(bool) {
+							brokenOrdinal = i
+							break
+						}
 					}
 				}
 			}
@@ -814,14 +864,13 @@ func (o *OwnershipCorrelator) calculateConfidence(findings []aggregator.Finding)
 
 // Health checks if the correlator is healthy
 func (o *OwnershipCorrelator) Health(ctx context.Context) error {
-	return o.neo4jDriver.VerifyConnectivity(ctx)
+	return o.graphStore.HealthCheck(ctx)
 }
 
 // SetGraphClient implements GraphCorrelator interface
 func (o *OwnershipCorrelator) SetGraphClient(client interface{}) {
-	if driver, ok := client.(neo4j.DriverWithContext); ok {
-		o.neo4jDriver = driver
-	}
+	// This method is no longer needed as we use GraphStore interface
+	// The graphStore is injected via constructor
 }
 
 // PreloadGraph implements GraphCorrelator interface

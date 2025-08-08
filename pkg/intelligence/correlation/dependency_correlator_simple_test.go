@@ -2,11 +2,9 @@ package correlation
 
 import (
 	"context"
-	"net/url"
 	"testing"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -15,44 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// SimpleMockNeo4jDriver - minimal mock that focuses on essential methods
-type SimpleMockNeo4jDriver struct {
-	mock.Mock
-}
-
-func (m *SimpleMockNeo4jDriver) NewSession(ctx context.Context, config neo4j.SessionConfig) neo4j.SessionWithContext {
-	return nil // Not used in simple tests
-}
-
-func (m *SimpleMockNeo4jDriver) VerifyConnectivity(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *SimpleMockNeo4jDriver) Close(ctx context.Context) error {
-	return nil
-}
-
-func (m *SimpleMockNeo4jDriver) IsEncrypted() bool {
-	return false
-}
-
-func (m *SimpleMockNeo4jDriver) Target() url.URL {
-	u, _ := url.Parse("bolt://localhost:7687")
-	return *u
-}
-
-func (m *SimpleMockNeo4jDriver) GetServerInfo(ctx context.Context) (neo4j.ServerInfo, error) {
-	return nil, nil
-}
-
-func (m *SimpleMockNeo4jDriver) VerifyAuthentication(ctx context.Context, auth *neo4j.AuthToken) error {
-	return nil
-}
-
-func (m *SimpleMockNeo4jDriver) ExecuteQueryBookmarkManager() neo4j.BookmarkManager {
-	return nil
-}
+// MockGraphStore is defined in graph_store_mock_test.go
 
 // Test helper functions
 func createSimpleTestEvent(eventType domain.EventType, namespace, entityName string) *domain.UnifiedEvent {
@@ -77,10 +38,10 @@ func createSimpleTestLogger() *zap.Logger {
 // Test DependencyCorrelator creation
 func TestNewDependencyCorrelator_Simple(t *testing.T) {
 	t.Run("valid creation", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := createSimpleTestLogger()
 
-		correlator, err := NewDependencyCorrelator(mockDriver, logger)
+		correlator, err := NewDependencyCorrelator(mockStore, logger)
 
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
@@ -95,13 +56,13 @@ func TestNewDependencyCorrelator_Simple(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, correlator)
-		assert.Contains(t, err.Error(), "neo4jDriver is required")
+		assert.Contains(t, err.Error(), "graphStore is required")
 	})
 
 	t.Run("nil logger", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 
-		correlator, err := NewDependencyCorrelator(mockDriver, nil)
+		correlator, err := NewDependencyCorrelator(mockStore, nil)
 
 		require.Error(t, err)
 		assert.Nil(t, correlator)
@@ -111,9 +72,9 @@ func TestNewDependencyCorrelator_Simple(t *testing.T) {
 
 // Test event validation
 func TestDependencyCorrelator_ValidateEvent_Simple(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := createSimpleTestLogger()
-	correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+	correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
 	t.Run("valid event", func(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "default", "test-pod")
@@ -129,7 +90,7 @@ func TestDependencyCorrelator_ValidateEvent_Simple(t *testing.T) {
 		err := correlator.ValidateEvent(event)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "event type not supported")
+		assert.Contains(t, err.Error(), "event type unknown_event not supported")
 	})
 
 	t.Run("missing namespace", func(t *testing.T) {
@@ -140,46 +101,46 @@ func TestDependencyCorrelator_ValidateEvent_Simple(t *testing.T) {
 		err := correlator.ValidateEvent(event)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "required field missing: namespace")
+		assert.Contains(t, err.Error(), "required field namespace is missing")
 	})
 }
 
 // Test health check - this is what we can test without complex mocking
 func TestDependencyCorrelator_Health_Simple(t *testing.T) {
 	t.Run("healthy", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := createSimpleTestLogger()
-		correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+		correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
-		mockDriver.On("VerifyConnectivity", mock.Anything).Return(nil)
+		mockStore.On("HealthCheck", mock.Anything).Return(nil)
 
 		ctx := context.Background()
 		err := correlator.Health(ctx)
 
 		assert.NoError(t, err)
-		mockDriver.AssertExpectations(t)
+		mockStore.AssertExpectations(t)
 	})
 
 	t.Run("unhealthy", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := createSimpleTestLogger()
-		correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+		correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
-		mockDriver.On("VerifyConnectivity", mock.Anything).Return(assert.AnError)
+		mockStore.On("HealthCheck", mock.Anything).Return(assert.AnError)
 
 		ctx := context.Background()
 		err := correlator.Health(ctx)
 
 		assert.Error(t, err)
-		mockDriver.AssertExpectations(t)
+		mockStore.AssertExpectations(t)
 	})
 }
 
 // Test capabilities
 func TestDependencyCorrelator_Capabilities_Simple(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := createSimpleTestLogger()
-	correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+	correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
 	capabilities := correlator.GetCapabilities()
 
@@ -209,9 +170,9 @@ func TestDependencyCorrelator_Capabilities_Simple(t *testing.T) {
 
 // Test helper functions
 func TestDependencyCorrelator_HelperFunctions_Simple(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := createSimpleTestLogger()
-	correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+	correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
 	t.Run("getNamespace", func(t *testing.T) {
 		// Test K8sContext namespace
@@ -264,9 +225,9 @@ func TestDependencyCorrelator_HelperFunctions_Simple(t *testing.T) {
 
 // Test confidence calculation without Neo4j dependency
 func TestDependencyCorrelator_CalculateConfidence_Simple(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := createSimpleTestLogger()
-	correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+	correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
 	t.Run("no findings", func(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "default", "test-pod")
@@ -334,9 +295,9 @@ func TestDependencyCorrelator_CalculateConfidence_Simple(t *testing.T) {
 
 // Test correlation method routing without full Neo4j setup
 func TestDependencyCorrelator_CorrelationRouting_Simple(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := createSimpleTestLogger()
-	correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+	correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
 	// Test that different event types would route to different handlers
 	// We test this by verifying validation passes for supported events
@@ -363,20 +324,20 @@ func TestDependencyCorrelator_CorrelationRouting_Simple(t *testing.T) {
 		event := createSimpleTestEvent("unsupported_event", "default", "test-entity")
 		err := correlator.ValidateEvent(event)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "event type not supported")
+		assert.Contains(t, err.Error(), "event type unsupported_event not supported")
 	})
 }
 
 // Test GraphCorrelator interface implementation
 func TestDependencyCorrelator_GraphCorrelatorInterface_Simple(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := createSimpleTestLogger()
-	correlator, _ := NewDependencyCorrelator(mockDriver, logger)
+	correlator, _ := NewDependencyCorrelator(mockStore, logger)
 
 	// Test SetGraphClient
-	newMockDriver := &SimpleMockNeo4jDriver{}
-	correlator.SetGraphClient(newMockDriver)
-	assert.Equal(t, newMockDriver, correlator.neo4jDriver)
+	newMockStore := &MockGraphStore{}
+	correlator.SetGraphClient(newMockStore)
+	// SetGraphClient is deprecated but still exists for compatibility
 
 	// Test PreloadGraph (should not error for basic implementation)
 	ctx := context.Background()

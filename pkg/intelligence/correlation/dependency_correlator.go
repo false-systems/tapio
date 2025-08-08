@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
@@ -16,14 +15,15 @@ import (
 // It handles: Service→Pod, Pod→ConfigMap/Secret, Pod→PVC relationships
 type DependencyCorrelator struct {
 	*BaseCorrelator
-	neo4jDriver neo4j.DriverWithContext
+	graphStore  GraphStore
 	logger      *zap.Logger
+	queryConfig QueryConfig
 }
 
 // NewDependencyCorrelator creates a new dependency correlator
-func NewDependencyCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.Logger) (*DependencyCorrelator, error) {
-	if neo4jDriver == nil {
-		return nil, fmt.Errorf("neo4jDriver is required")
+func NewDependencyCorrelator(graphStore GraphStore, logger *zap.Logger) (*DependencyCorrelator, error) {
+	if graphStore == nil {
+		return nil, fmt.Errorf("graphStore is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
@@ -46,7 +46,7 @@ func NewDependencyCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.Lo
 				Type:     "database",
 				Required: true,
 				HealthCheck: func(ctx context.Context) error {
-					return neo4jDriver.VerifyConnectivity(ctx)
+					return graphStore.HealthCheck(ctx)
 				},
 			},
 		},
@@ -58,8 +58,9 @@ func NewDependencyCorrelator(neo4jDriver neo4j.DriverWithContext, logger *zap.Lo
 
 	return &DependencyCorrelator{
 		BaseCorrelator: base,
-		neo4jDriver:    neo4jDriver,
+		graphStore:     graphStore,
 		logger:         logger,
+		queryConfig:    DefaultQueryConfig(),
 	}, nil
 }
 
@@ -142,27 +143,33 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 		zap.String("service", serviceName),
 		zap.String("namespace", namespace))
 
-	session := d.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
-	// Query for service and its pod dependencies
-	query := `
+	// Query for service and its pod dependencies with LIMIT to prevent unbounded results
+	limit := d.queryConfig.GetLimit("service")
+	query := fmt.Sprintf(`
 		MATCH (s:Service {name: $serviceName, namespace: $namespace})
 		OPTIONAL MATCH (s)-[:SELECTS]->(p:Pod)
 		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
 		OPTIONAL MATCH (p)-[:USES_SECRET]->(sec:Secret)
 		OPTIONAL MATCH (p)-[:CLAIMS]->(pvc:PVC)
 		RETURN s, 
-		       collect(DISTINCT p) as pods,
-		       collect(DISTINCT cm) as configmaps,
-		       collect(DISTINCT sec) as secrets,
-		       collect(DISTINCT pvc) as pvcs
-	`
+		       collect(DISTINCT p)[0..%d] as pods,
+		       collect(DISTINCT cm)[0..%d] as configmaps,
+		       collect(DISTINCT sec)[0..%d] as secrets,
+		       collect(DISTINCT pvc)[0..%d] as pvcs
+		LIMIT %d
+	`, limit, limit, limit, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"serviceName": serviceName,
-		"namespace":   namespace,
-	})
+	params := &ServiceQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		ServiceName: serviceName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query service dependencies: %w", err)
 	}
@@ -173,8 +180,8 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 		record := result.Record()
 
 		// Check if service exists
-		serviceNode, found := record.Get("s")
-		if !found || serviceNode == nil {
+		serviceNode, err := record.GetNode("s")
+		if err != nil || serviceNode == nil {
 			findings = append(findings, aggregator.Finding{
 				ID:         fmt.Sprintf("service-not-found-%s", serviceName),
 				Type:       "service_not_found",
@@ -196,9 +203,8 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 		}
 
 		// Check pod availability
-		podsInterface, _ := record.Get("pods")
-		pods, ok := podsInterface.([]interface{})
-		if !ok || len(pods) == 0 {
+		pods, err := record.GetNodes("pods")
+		if err != nil || len(pods) == 0 {
 			findings = append(findings, aggregator.Finding{
 				ID:         fmt.Sprintf("service-no-pods-%s", serviceName),
 				Type:       "service_no_endpoints",
@@ -231,16 +237,11 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 			readyPods := 0
 			failedPods := 0
 
-			for _, podInterface := range pods {
-				if pod, ok := podInterface.(neo4j.Node); ok {
-					props := pod.Props
-					if ready, exists := props["ready"]; exists {
-						if ready == true {
-							readyPods++
-						} else {
-							failedPods++
-						}
-					}
+			for _, pod := range pods {
+				if pod.Properties.Ready {
+					readyPods++
+				} else {
+					failedPods++
 				}
 			}
 
@@ -304,27 +305,33 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 		zap.String("pod", podName),
 		zap.String("namespace", namespace))
 
-	session := d.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
-	// Query for pod and its dependencies
-	query := `
+	// Query for pod and its dependencies with LIMIT to prevent unbounded results
+	limit := d.queryConfig.GetLimit("pod")
+	query := fmt.Sprintf(`
 		MATCH (p:Pod {name: $podName, namespace: $namespace})
 		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
 		OPTIONAL MATCH (p)-[:USES_SECRET]->(sec:Secret)
 		OPTIONAL MATCH (p)-[:CLAIMS]->(pvc:PVC)
 		OPTIONAL MATCH (svc:Service)-[:SELECTS]->(p)
 		RETURN p, 
-		       collect(DISTINCT cm) as configmaps,
-		       collect(DISTINCT sec) as secrets,
-		       collect(DISTINCT pvc) as pvcs,
-		       collect(DISTINCT svc) as services
-	`
+		       collect(DISTINCT cm)[0..%d] as configmaps,
+		       collect(DISTINCT sec)[0..%d] as secrets,
+		       collect(DISTINCT pvc)[0..%d] as pvcs,
+		       collect(DISTINCT svc)[0..%d] as services
+		LIMIT 1
+	`, limit, limit, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"podName":   podName,
-		"namespace": namespace,
-	})
+	params := &PodQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		PodName: podName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pod dependencies: %w", err)
 	}
@@ -335,8 +342,8 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 		record := result.Record()
 
 		// Get pod info
-		podNode, found := record.Get("p")
-		if !found || podNode == nil {
+		podNode, err := record.GetNode("p")
+		if err != nil || podNode == nil {
 			findings = append(findings, aggregator.Finding{
 				ID:         fmt.Sprintf("pod-not-found-%s", podName),
 				Type:       "pod_not_found",
@@ -361,8 +368,8 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 		configmapsInterface, _ := record.Get("configmaps")
 		if configmaps, ok := configmapsInterface.([]interface{}); ok && len(configmaps) > 0 {
 			for _, cmInterface := range configmaps {
-				if cm, ok := cmInterface.(neo4j.Node); ok {
-					props := cm.Props
+				if cm, ok := cmInterface.(map[string]interface{}); ok {
+					props := cm
 					if modified, exists := props["lastModified"]; exists {
 						if modTime, ok := modified.(time.Time); ok {
 							// Check if ConfigMap was modified recently before pod failure
@@ -417,8 +424,8 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 		if services, ok := servicesInterface.([]interface{}); ok && len(services) > 0 {
 			var serviceNames []string
 			for _, svcInterface := range services {
-				if svc, ok := svcInterface.(neo4j.Node); ok {
-					if name, exists := svc.Props["name"]; exists {
+				if svc, ok := svcInterface.(map[string]interface{}); ok {
+					if name, exists := svc["name"]; exists {
 						serviceNames = append(serviceNames, name.(string))
 					}
 				}
@@ -466,23 +473,37 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 		zap.String("config", configName),
 		zap.String("namespace", namespace))
 
-	session := d.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
-	// Query for config and dependent pods
-	query := `
+	// Query for config and dependent pods with LIMIT to prevent unbounded results
+	limit := d.queryConfig.GetLimit("config")
+	query := fmt.Sprintf(`
 		MATCH (cm:ConfigMap {name: $configName, namespace: $namespace})
 		OPTIONAL MATCH (p:Pod)-[:MOUNTS]->(cm)
 		OPTIONAL MATCH (svc:Service)-[:SELECTS]->(p)
 		RETURN cm,
-		       collect(DISTINCT p) as pods,
-		       collect(DISTINCT svc) as services
-	`
+		       collect(DISTINCT p)[0..%d] as pods,
+		       collect(DISTINCT svc)[0..%d] as services
+		LIMIT 1
+	`, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"configName": configName,
-		"namespace":  namespace,
-	})
+	// Create generic query params for config without type
+	// We'll infer type from the entity name
+	configType := "ConfigMap"
+	if strings.Contains(configName, "secret") {
+		configType = "Secret"
+	}
+
+	params := &ConfigQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		ConfigName: configName,
+		ConfigType: configType,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query config dependencies: %w", err)
 	}
@@ -493,26 +514,26 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 		record := result.Record()
 
 		// Get dependent pods
-		podsInterface, _ := record.Get("pods")
-		if pods, ok := podsInterface.([]interface{}); ok && len(pods) > 0 {
+		pods, err := record.GetNodes("pods")
+		if err == nil && len(pods) > 0 {
 			var podNames []string
 			affectedPods := 0
 
-			for _, podInterface := range pods {
-				if pod, ok := podInterface.(neo4j.Node); ok {
-					if name, exists := pod.Props["name"]; exists {
-						podName := name.(string)
-						podNames = append(podNames, podName)
+			for _, pod := range pods {
+				podName := pod.Properties.Name
 
-						// Check if pod restarted after config change
-						if lastRestart, exists := pod.Props["lastRestart"]; exists {
-							if restartTime, ok := lastRestart.(time.Time); ok {
-								if restartTime.After(event.Timestamp) && restartTime.Sub(event.Timestamp) < 10*time.Minute {
-									affectedPods++
-								}
-							}
+				// Check if pod restarted after config change
+				if lastRestartStr, exists := pod.Properties.Metadata["lastRestart"]; exists {
+					// Parse restart time from metadata
+					if restartTime, err := time.Parse(time.RFC3339, lastRestartStr); err == nil {
+						if restartTime.After(event.Timestamp) && restartTime.Sub(event.Timestamp) < 10*time.Minute {
+							affectedPods++
 						}
 					}
+				}
+
+				if podName != "" {
+					podNames = append(podNames, podName)
 				}
 			}
 
@@ -541,9 +562,15 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 			if services, ok := servicesInterface.([]interface{}); ok && len(services) > 0 {
 				var serviceNames []string
 				for _, svcInterface := range services {
-					if svc, ok := svcInterface.(neo4j.Node); ok {
-						if name, exists := svc.Props["name"]; exists {
-							serviceNames = append(serviceNames, name.(string))
+					if svc, ok := svcInterface.(map[string]interface{}); ok {
+						var svcName string
+						if props, ok := svc["properties"].(map[string]interface{}); ok {
+							svcName, _ = props["name"].(string)
+						} else if name, ok := svc["name"].(string); ok {
+							svcName = name
+						}
+						if svcName != "" {
+							serviceNames = append(serviceNames, svcName)
 						}
 					}
 				}
@@ -591,26 +618,33 @@ func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event 
 		zap.String("pod", podName),
 		zap.String("namespace", namespace))
 
-	session := d.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
-	// Query for pod volume dependencies
-	query := `
+	// Query for pod volume dependencies with LIMIT to prevent unbounded results
+	limit := d.queryConfig.GetLimit("pod")
+	query := fmt.Sprintf(`
 		MATCH (p:Pod {name: $podName, namespace: $namespace})
 		OPTIONAL MATCH (p)-[:CLAIMS]->(pvc:PVC)
 		OPTIONAL MATCH (pvc)-[:USES]->(sc:StorageClass)
 		RETURN p,
-		       collect(DISTINCT pvc) as pvcs,
-		       collect(DISTINCT sc) as storage_classes
-	`
+		       collect(DISTINCT pvc)[0..%d] as pvcs,
+		       collect(DISTINCT sc)[0..%d] as storage_classes
+		LIMIT 1
+	`, limit, limit)
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
-		"podName":   podName,
-		"namespace": namespace,
-	})
+	params := &PodQueryParams{
+		BaseQueryParams: BaseQueryParams{
+			Namespace: namespace,
+		},
+		PodName: podName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query volume dependencies: %w", err)
 	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
 
@@ -618,75 +652,72 @@ func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event 
 		record := result.Record()
 
 		// Check PVC availability
-		pvcsInterface, _ := record.Get("pvcs")
-		if pvcs, ok := pvcsInterface.([]interface{}); ok && len(pvcs) > 0 {
-			for _, pvcInterface := range pvcs {
-				if pvc, ok := pvcInterface.(neo4j.Node); ok {
-					props := pvc.Props
-					pvcName := props["name"].(string)
+		pvcs, err := record.GetNodes("pvcs")
+		if err == nil && len(pvcs) > 0 {
+			for _, pvc := range pvcs {
+				pvcName := pvc.Properties.Name
 
-					// Check PVC status
-					if status, exists := props["status"]; exists && status == "Pending" {
-						findings = append(findings, aggregator.Finding{
-							ID:         fmt.Sprintf("pod-pvc-pending-%s-%s", podName, pvcName),
-							Type:       "pod_volume_pending",
-							Severity:   aggregator.SeverityCritical,
-							Confidence: 0.90,
-							Message:    fmt.Sprintf("Pod %s cannot start because PVC %s is pending", podName, pvcName),
-							Evidence: aggregator.Evidence{
-								Events: []domain.UnifiedEvent{*event},
-								GraphPaths: []aggregator.GraphPath{{
-									Nodes: []aggregator.GraphNode{
-										{
-											ID:     podName,
-											Type:   "Pod",
-											Labels: map[string]string{"name": podName, "namespace": namespace},
-										},
-										{
-											ID:     pvcName,
-											Type:   "PVC",
-											Labels: map[string]string{"name": pvcName, "namespace": namespace, "status": "Pending"},
-										},
+				// Check PVC status
+				if pvc.Properties.Phase == "Pending" {
+					findings = append(findings, aggregator.Finding{
+						ID:         fmt.Sprintf("pod-pvc-pending-%s-%s", podName, pvcName),
+						Type:       "pod_volume_pending",
+						Severity:   aggregator.SeverityCritical,
+						Confidence: 0.90,
+						Message:    fmt.Sprintf("Pod %s cannot start because PVC %s is pending", podName, pvcName),
+						Evidence: aggregator.Evidence{
+							Events: []domain.UnifiedEvent{*event},
+							GraphPaths: []aggregator.GraphPath{{
+								Nodes: []aggregator.GraphNode{
+									{
+										ID:     podName,
+										Type:   "Pod",
+										Labels: map[string]string{"name": podName, "namespace": namespace},
 									},
-									Edges: []aggregator.GraphEdge{{
-										From:         podName,
-										To:           pvcName,
-										Relationship: "CLAIMS",
-										Properties:   map[string]string{"type": "volume"},
-									}},
+									{
+										ID:     pvcName,
+										Type:   "PVC",
+										Labels: map[string]string{"name": pvcName, "namespace": namespace, "status": "Pending"},
+									},
+								},
+								Edges: []aggregator.GraphEdge{{
+									From:         podName,
+									To:           pvcName,
+									Relationship: "CLAIMS",
+									Properties:   map[string]string{"type": "volume"},
 								}},
-							},
-							Impact: aggregator.Impact{
-								Scope:       "pod",
-								Resources:   []string{podName, pvcName},
-								UserImpact:  "Pod cannot start due to volume issue",
-								Degradation: "100% - pod stuck pending",
-							},
-							Timestamp: time.Now(),
-						})
-					}
+							}},
+						},
+						Impact: aggregator.Impact{
+							Scope:       "pod",
+							Resources:   []string{podName, pvcName},
+							UserImpact:  "Pod cannot start due to volume issue",
+							Degradation: "100% - pod stuck pending",
+						},
+						Timestamp: time.Now(),
+					})
+				}
 
-					// Check storage class issues
-					storageClassesInterface, _ := record.Get("storage_classes")
-					if scs, ok := storageClassesInterface.([]interface{}); ok && len(scs) == 0 {
-						findings = append(findings, aggregator.Finding{
-							ID:         fmt.Sprintf("pod-pvc-no-storage-class-%s-%s", podName, pvcName),
-							Type:       "pod_volume_no_storage_class",
-							Severity:   aggregator.SeverityHigh,
-							Confidence: 0.80,
-							Message:    fmt.Sprintf("Pod %s PVC %s has no storage class configured", podName, pvcName),
-							Evidence: aggregator.Evidence{
-								Events: []domain.UnifiedEvent{*event},
-							},
-							Impact: aggregator.Impact{
-								Scope:       "pod",
-								Resources:   []string{podName, pvcName},
-								UserImpact:  "Pod cannot get persistent storage",
-								Degradation: "100% - volume provisioning failed",
-							},
-							Timestamp: time.Now(),
-						})
-					}
+				// Check storage class issues
+				storageClassesInterface, _ := record.Get("storage_classes")
+				if scs, ok := storageClassesInterface.([]interface{}); ok && len(scs) == 0 {
+					findings = append(findings, aggregator.Finding{
+						ID:         fmt.Sprintf("pod-pvc-no-storage-class-%s-%s", podName, pvcName),
+						Type:       "pod_volume_no_storage_class",
+						Severity:   aggregator.SeverityHigh,
+						Confidence: 0.80,
+						Message:    fmt.Sprintf("Pod %s PVC %s has no storage class configured", podName, pvcName),
+						Evidence: aggregator.Evidence{
+							Events: []domain.UnifiedEvent{*event},
+						},
+						Impact: aggregator.Impact{
+							Scope:       "pod",
+							Resources:   []string{podName, pvcName},
+							UserImpact:  "Pod cannot get persistent storage",
+							Degradation: "100% - volume provisioning failed",
+						},
+						Timestamp: time.Now(),
+					})
 				}
 			}
 		}
@@ -757,14 +788,13 @@ func (d *DependencyCorrelator) calculateConfidence(findings []aggregator.Finding
 
 // Health checks if the correlator is healthy
 func (d *DependencyCorrelator) Health(ctx context.Context) error {
-	return d.neo4jDriver.VerifyConnectivity(ctx)
+	return d.graphStore.HealthCheck(ctx)
 }
 
 // SetGraphClient implements GraphCorrelator interface
 func (d *DependencyCorrelator) SetGraphClient(client interface{}) {
-	if driver, ok := client.(neo4j.DriverWithContext); ok {
-		d.neo4jDriver = driver
-	}
+	// This method is no longer needed as we use GraphStore interface
+	// The graphStore is injected via constructor
 }
 
 // PreloadGraph implements GraphCorrelator interface
