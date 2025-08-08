@@ -75,7 +75,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		clientConfig.Password = c.config.Password
 	}
 
-	// TODO: Add TLS configuration if needed
+	// TLS configuration can be added via Config struct fields if needed in future
 
 	client, err := clientv3.New(clientConfig)
 	if err != nil {
@@ -337,8 +337,8 @@ func (c *Collector) createEvent(eventType string, data interface{}) collectors.R
 			"collector": c.name,
 			"event":     eventType,
 		},
-		// Generate new trace ID for etcd events
-		// TODO: Extract from gRPC headers when frame parsing is implemented
+		// Generate new trace ID for each etcd event since we cannot extract
+		// trace context from etcd client operations (clientv3 API doesn't expose gRPC headers)
 		TraceID: collectors.GenerateTraceID(),
 		SpanID:  collectors.GenerateSpanID(),
 	}
