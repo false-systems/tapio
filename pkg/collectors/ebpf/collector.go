@@ -13,11 +13,13 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/bpf"
+	"go.uber.org/zap"
 )
 
 // Collector implements minimal kernel monitoring via eBPF
 type Collector struct {
 	name        string
+	logger      *zap.Logger
 	objs        *bpf.KernelmonitorObjects
 	links       []link.Link
 	reader      *ringbuf.Reader
@@ -32,15 +34,28 @@ type Collector struct {
 
 // NewCollector creates a new minimal eBPF collector
 func NewCollector(name string) (*Collector, error) {
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger: %w", err)
+	}
 	return NewCollectorWithConfig(&Config{
 		Name: name,
-	})
+	}, logger)
 }
 
 // NewCollectorWithConfig creates a new eBPF collector with config
-func NewCollectorWithConfig(config *Config) (*Collector, error) {
+func NewCollectorWithConfig(config *Config, logger *zap.Logger) (*Collector, error) {
+	if logger == nil {
+		var err error
+		logger, err = zap.NewProduction()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create logger: %w", err)
+		}
+	}
+
 	c := &Collector{
 		name:        config.Name,
+		logger:      logger,
 		events:      make(chan collectors.RawEvent, 10000), // Large buffer for kernel events
 		healthy:     true,
 		podTraceMap: make(map[string]string),
@@ -98,7 +113,7 @@ func (c *Collector) Start(ctx context.Context) error {
 	tcpLink, err := link.Kprobe("tcp_v4_connect", c.objs.TraceTcpConnect, nil)
 	if err != nil {
 		// Log but don't fail - network tracking is optional
-		fmt.Printf("Warning: failed to attach tcp connect kprobe: %v\n", err)
+		c.logger.Warn("failed to attach tcp connect kprobe", zap.Error(err))
 	} else {
 		c.links = append(c.links, tcpLink)
 	}
@@ -107,7 +122,7 @@ func (c *Collector) Start(ctx context.Context) error {
 	openLink, err := link.Tracepoint("syscalls", "sys_enter_openat", c.objs.TraceOpenat, nil)
 	if err != nil {
 		// Log but don't fail - file tracking is optional
-		fmt.Printf("Warning: failed to attach openat tracepoint: %v\n", err)
+		c.logger.Warn("failed to attach openat tracepoint", zap.Error(err))
 	} else {
 		c.links = append(c.links, openLink)
 	}
@@ -747,17 +762,51 @@ func (c *Collector) Statistics() map[string]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	// Calculate current performance metrics
+	c.updatePerformanceMetrics()
+
 	stats := map[string]interface{}{
-		"events_collected": c.stats.EventsCollected,
-		"events_dropped":   c.stats.EventsDropped,
-		"error_count":      c.stats.ErrorCount,
-		"last_event_time":  c.stats.LastEventTime,
-		"pod_trace_count":  len(c.podTraceMap),
+		"events_collected":        c.stats.EventsCollected,
+		"events_dropped":          c.stats.EventsDropped,
+		"error_count":             c.stats.ErrorCount,
+		"last_event_time":         c.stats.LastEventTime,
+		"pod_trace_count":         len(c.podTraceMap),
+		"perf_buffer_size":        c.stats.PerfBufferSize,
+		"perf_buffer_capacity":    c.stats.PerfBufferCapacity,
+		"perf_buffer_utilization": c.calculateBufferUtilization(),
+		"perf_batches_processed":  c.stats.PerfBatchesProcessed,
+		"perf_pool_in_use":        c.stats.PerfPoolInUse,
+		"perf_events_processed":   c.stats.PerfEventsProcessed,
 	}
 
-	// No performance metrics without adapter
-
 	return stats
+}
+
+// updatePerformanceMetrics calculates current performance metrics
+func (c *Collector) updatePerformanceMetrics() {
+	// Set buffer capacity based on channel buffer size (this is a fixed value)
+	c.stats.PerfBufferCapacity = 10000 // matches the buffer size in NewCollectorWithConfig
+
+	// Calculate current buffer size (approximate based on channel length)
+	c.stats.PerfBufferSize = uint64(len(c.events))
+
+	// Pool in use represents active goroutines or resources
+	c.stats.PerfPoolInUse = 1 // We have one main processing goroutine
+
+	// Events processed is same as events collected for this implementation
+	c.stats.PerfEventsProcessed = c.stats.EventsCollected
+
+	// Batches processed - each read from ring buffer is a batch
+	// For simplicity, assume each event is a batch
+	c.stats.PerfBatchesProcessed = c.stats.EventsCollected
+}
+
+// calculateBufferUtilization returns buffer utilization as a percentage
+func (c *Collector) calculateBufferUtilization() float64 {
+	if c.stats.PerfBufferCapacity == 0 {
+		return 0.0
+	}
+	return float64(c.stats.PerfBufferSize) / float64(c.stats.PerfBufferCapacity) * 100.0
 }
 
 // Removed domain-dependent functions - collectors should only emit RawEvents

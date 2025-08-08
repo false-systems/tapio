@@ -36,6 +36,7 @@ func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
 		collectors: make(map[string]collectors.Collector),
 		enricher:   enricher,
 		publisher:  publisher,
+		logger:     logger,
 		eventsChan: make(chan *collectors.RawEvent, config.BufferSize),
 		workers:    config.Workers,
 	}, nil
@@ -101,7 +102,7 @@ func (p *EventPipeline) Stop() error {
 	for name, collector := range p.collectors {
 		if err := collector.Stop(); err != nil {
 			// Log but continue stopping others
-			fmt.Printf("Error stopping collector %s: %v\n", name, err)
+			p.logger.Warn("error stopping collector", zap.String("collector", name), zap.Error(err))
 		}
 	}
 
@@ -153,7 +154,7 @@ func (p *EventPipeline) worker(wg *sync.WaitGroup) {
 		if p.publisher != nil {
 			if err := p.publisher.Publish(unified); err != nil {
 				// Log error but continue
-				fmt.Printf("Failed to publish event: %v\n", err)
+				p.logger.Error("failed to publish event", zap.Error(err))
 			}
 		}
 	}

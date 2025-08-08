@@ -180,10 +180,10 @@ func (c *Collector) setupWatchers() error {
 	podInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.clientset.CoreV1().Pods("").List(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Pods("").List(c.ctx, listOptions)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.clientset.CoreV1().Pods("").Watch(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Pods("").Watch(c.ctx, listOptions)
 			},
 		},
 		&corev1.Pod{},
@@ -197,10 +197,10 @@ func (c *Collector) setupWatchers() error {
 	deploymentInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.clientset.AppsV1().Deployments("").List(context.TODO(), listOptions)
+				return c.clientset.AppsV1().Deployments("").List(c.ctx, listOptions)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.clientset.AppsV1().Deployments("").Watch(context.TODO(), listOptions)
+				return c.clientset.AppsV1().Deployments("").Watch(c.ctx, listOptions)
 			},
 		},
 		&appsv1.Deployment{},
@@ -214,10 +214,10 @@ func (c *Collector) setupWatchers() error {
 	serviceInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.clientset.CoreV1().Services("").List(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Services("").List(c.ctx, listOptions)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.clientset.CoreV1().Services("").Watch(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Services("").Watch(c.ctx, listOptions)
 			},
 		},
 		&corev1.Service{},
@@ -231,10 +231,10 @@ func (c *Collector) setupWatchers() error {
 	endpointsInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.clientset.CoreV1().Endpoints("").List(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Endpoints("").List(c.ctx, listOptions)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.clientset.CoreV1().Endpoints("").Watch(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Endpoints("").Watch(c.ctx, listOptions)
 			},
 		},
 		&corev1.Endpoints{},
@@ -248,10 +248,10 @@ func (c *Collector) setupWatchers() error {
 	eventInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.clientset.CoreV1().Events("").List(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Events("").List(c.ctx, listOptions)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.clientset.CoreV1().Events("").Watch(context.TODO(), listOptions)
+				return c.clientset.CoreV1().Events("").Watch(c.ctx, listOptions)
 			},
 		},
 		&corev1.Event{},
@@ -265,10 +265,10 @@ func (c *Collector) setupWatchers() error {
 	replicaSetInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.clientset.AppsV1().ReplicaSets("").List(context.TODO(), listOptions)
+				return c.clientset.AppsV1().ReplicaSets("").List(c.ctx, listOptions)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.clientset.AppsV1().ReplicaSets("").Watch(context.TODO(), listOptions)
+				return c.clientset.AppsV1().ReplicaSets("").Watch(c.ctx, listOptions)
 			},
 		},
 		&appsv1.ReplicaSet{},
@@ -282,10 +282,10 @@ func (c *Collector) setupWatchers() error {
 	configMapInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return c.clientset.CoreV1().ConfigMaps("").List(context.TODO(), listOptions)
+				return c.clientset.CoreV1().ConfigMaps("").List(c.ctx, listOptions)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return c.clientset.CoreV1().ConfigMaps("").Watch(context.TODO(), listOptions)
+				return c.clientset.CoreV1().ConfigMaps("").Watch(c.ctx, listOptions)
 			},
 		},
 		&corev1.ConfigMap{},
@@ -301,10 +301,10 @@ func (c *Collector) setupWatchers() error {
 		saInformer := cache.NewSharedIndexInformer(
 			&cache.ListWatch{
 				ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-					return c.clientset.CoreV1().ServiceAccounts("").List(context.TODO(), listOptions)
+					return c.clientset.CoreV1().ServiceAccounts("").List(c.ctx, listOptions)
 				},
 				WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-					return c.clientset.CoreV1().ServiceAccounts("").Watch(context.TODO(), listOptions)
+					return c.clientset.CoreV1().ServiceAccounts("").Watch(c.ctx, listOptions)
 				},
 			},
 			&corev1.ServiceAccount{},
@@ -320,10 +320,10 @@ func (c *Collector) setupWatchers() error {
 		npInformer := cache.NewSharedIndexInformer(
 			&cache.ListWatch{
 				ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-					return c.clientset.NetworkingV1().NetworkPolicies("").List(context.TODO(), listOptions)
+					return c.clientset.NetworkingV1().NetworkPolicies("").List(c.ctx, listOptions)
 				},
 				WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-					return c.clientset.NetworkingV1().NetworkPolicies("").Watch(context.TODO(), listOptions)
+					return c.clientset.NetworkingV1().NetworkPolicies("").Watch(c.ctx, listOptions)
 				},
 			},
 			&networkingv1.NetworkPolicy{},

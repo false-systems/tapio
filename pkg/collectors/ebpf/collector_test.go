@@ -9,10 +9,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestCollectorCreation(t *testing.T) {
-	collector, err := NewCollector("ebpf-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-test"}, logger)
 	require.NoError(t, err)
 
 	assert.Equal(t, "ebpf-test", collector.Name())
@@ -22,7 +24,8 @@ func TestCollectorCreation(t *testing.T) {
 }
 
 func TestCollectorLifecycle(t *testing.T) {
-	collector, err := NewCollector("ebpf-lifecycle")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-lifecycle"}, logger)
 	require.NoError(t, err)
 
 	// Test that events channel is available
@@ -35,7 +38,8 @@ func TestCollectorLifecycle(t *testing.T) {
 }
 
 func TestEventChannelCapacity(t *testing.T) {
-	collector, err := NewCollector("ebpf-events")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-events"}, logger)
 	require.NoError(t, err)
 
 	// Start collector
@@ -58,7 +62,8 @@ func TestEventChannelCapacity(t *testing.T) {
 }
 
 func TestCollectorHealthAndStatistics(t *testing.T) {
-	collector, err := NewCollector("ebpf-stats")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-stats"}, logger)
 	require.NoError(t, err)
 
 	// Test initial health
@@ -79,36 +84,50 @@ func TestCollectorHealthAndStatistics(t *testing.T) {
 	assert.Contains(t, stats, "last_event_time")
 	assert.Contains(t, stats, "pod_trace_count")
 
-	// Performance metrics not yet implemented (TODO: integrate performance adapter)
-	// assert.Contains(t, stats, "perf_buffer_size")
-	// assert.Contains(t, stats, "perf_buffer_capacity")
-	// assert.Contains(t, stats, "perf_buffer_utilization")
-	// assert.Contains(t, stats, "perf_batches_processed")
-	// assert.Contains(t, stats, "perf_pool_in_use")
-	// assert.Contains(t, stats, "perf_events_processed")
+	// Performance metrics now implemented
+	assert.Contains(t, stats, "perf_buffer_size")
+	assert.Contains(t, stats, "perf_buffer_capacity")
+	assert.Contains(t, stats, "perf_buffer_utilization")
+	assert.Contains(t, stats, "perf_batches_processed")
+	assert.Contains(t, stats, "perf_pool_in_use")
+	assert.Contains(t, stats, "perf_events_processed")
+
+	// Verify performance metrics are reasonable values
+	assert.Equal(t, uint64(10000), stats["perf_buffer_capacity"])
+	assert.IsType(t, uint64(0), stats["perf_buffer_size"])
+	assert.IsType(t, float64(0.0), stats["perf_buffer_utilization"])
+	assert.IsType(t, uint64(0), stats["perf_batches_processed"])
+	assert.Equal(t, uint64(1), stats["perf_pool_in_use"])
+	assert.IsType(t, uint64(0), stats["perf_events_processed"])
 }
 
 func TestPerformanceAdapterMetrics(t *testing.T) {
-	collector, err := NewCollector("ebpf-perf")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-perf"}, logger)
 	require.NoError(t, err)
 
 	// Verify performance adapter configuration
 	stats := collector.Statistics()
 
-	// Performance adapter not yet integrated - skip these tests
-	// TODO: Integrate performance adapter and re-enable these tests
-	// assert.Equal(t, uint64(32768), stats["perf_buffer_capacity"])
-	// assert.Equal(t, uint64(0), stats["perf_buffer_size"])
-	// assert.Equal(t, uint64(0), stats["perf_batches_processed"])
-	// assert.Equal(t, uint64(0), stats["perf_events_processed"])
+	// Performance adapter now integrated - verify all metrics
+	assert.Equal(t, uint64(10000), stats["perf_buffer_capacity"])
+	assert.Equal(t, uint64(0), stats["perf_buffer_size"])
+	assert.Equal(t, uint64(0), stats["perf_batches_processed"])
+	assert.Equal(t, uint64(0), stats["perf_events_processed"])
+	assert.Equal(t, uint64(1), stats["perf_pool_in_use"])
+	assert.Equal(t, float64(0.0), stats["perf_buffer_utilization"])
 
-	// For now, just verify basic stats are present
+	// Verify basic stats are still present
 	assert.Contains(t, stats, "events_collected")
 	assert.Contains(t, stats, "events_dropped")
+	assert.Contains(t, stats, "error_count")
+	assert.Contains(t, stats, "last_event_time")
+	assert.Contains(t, stats, "pod_trace_count")
 }
 
 func TestEventTypeToString(t *testing.T) {
-	collector, _ := NewCollector("ebpf-types")
+	logger := zap.NewNop()
+	collector, _ := NewCollectorWithConfig(&Config{Name: "ebpf-types"}, logger)
 
 	testCases := []struct {
 		eventType uint32
@@ -131,7 +150,8 @@ func TestEventTypeToString(t *testing.T) {
 }
 
 func TestNullTerminatedString(t *testing.T) {
-	collector, _ := NewCollector("ebpf-strings")
+	logger := zap.NewNop()
+	collector, _ := NewCollectorWithConfig(&Config{Name: "ebpf-strings"}, logger)
 
 	testCases := []struct {
 		input    []byte
@@ -152,7 +172,8 @@ func TestNullTerminatedString(t *testing.T) {
 }
 
 func TestPodManagement(t *testing.T) {
-	collector, _ := NewCollector("ebpf-pod")
+	logger := zap.NewNop()
+	collector, _ := NewCollectorWithConfig(&Config{Name: "ebpf-pod"}, logger)
 
 	// Test UpdatePodInfo with uninitialized eBPF objects (should fail gracefully)
 	err := collector.UpdatePodInfo(12345, "pod-123", "default", "nginx-pod")
@@ -174,7 +195,8 @@ func TestPodManagement(t *testing.T) {
 }
 
 func TestCgroupIDValidation(t *testing.T) {
-	_, _ = NewCollector("ebpf-cgroup")
+	logger := zap.NewNop()
+	_, _ = NewCollectorWithConfig(&Config{Name: "ebpf-cgroup"}, logger)
 
 	// Test cgroup ID validation - real cgroup IDs should be much larger than PIDs
 	testCases := []struct {
@@ -215,7 +237,8 @@ func TestCgroupIDValidation(t *testing.T) {
 }
 
 func TestCgroupPodCorrelation(t *testing.T) {
-	_, _ = NewCollector("ebpf-correlation")
+	logger := zap.NewNop()
+	_, _ = NewCollectorWithConfig(&Config{Name: "ebpf-correlation"}, logger)
 
 	// Test that correlation metadata includes proper cgroup information
 	metadata := map[string]string{
@@ -237,7 +260,8 @@ func TestCgroupPodCorrelation(t *testing.T) {
 }
 
 func TestContainerPIDValidation(t *testing.T) {
-	collector, _ := NewCollector("ebpf-containers")
+	logger := zap.NewNop()
+	collector, _ := NewCollectorWithConfig(&Config{Name: "ebpf-containers"}, logger)
 
 	// Test container PID detection logic
 	testCases := []struct {
@@ -283,7 +307,8 @@ func (c *Collector) isContainerCgroupPath(cgroupPath string) bool {
 // Memory Safety Tests
 
 func TestParseKernelEventSafely(t *testing.T) {
-	collector, err := NewCollector("ebpf-memory-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-memory-test"}, logger)
 	require.NoError(t, err)
 
 	expectedSize := int(unsafe.Sizeof(KernelEvent{}))
@@ -343,7 +368,8 @@ func TestParseKernelEventSafely(t *testing.T) {
 }
 
 func TestParseNetworkInfoSafely(t *testing.T) {
-	collector, err := NewCollector("ebpf-network-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-network-test"}, logger)
 	require.NoError(t, err)
 
 	expectedSize := int(unsafe.Sizeof(NetworkInfo{}))
@@ -410,7 +436,8 @@ func TestParseNetworkInfoSafely(t *testing.T) {
 }
 
 func TestParseFileInfoSafely(t *testing.T) {
-	collector, err := NewCollector("ebpf-file-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-file-test"}, logger)
 	require.NoError(t, err)
 
 	expectedSize := int(unsafe.Sizeof(FileInfo{}))
@@ -470,7 +497,8 @@ func TestParseFileInfoSafely(t *testing.T) {
 }
 
 func TestMemorySafetyEdgeCases(t *testing.T) {
-	collector, err := NewCollector("ebpf-edge-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-edge-test"}, logger)
 	require.NoError(t, err)
 
 	t.Run("ZeroLengthBuffer", func(t *testing.T) {
@@ -499,7 +527,8 @@ func TestMemorySafetyEdgeCases(t *testing.T) {
 }
 
 func TestAlignmentValidation(t *testing.T) {
-	collector, err := NewCollector("ebpf-alignment-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-alignment-test"}, logger)
 	require.NoError(t, err)
 
 	t.Run("ProperAlignment", func(t *testing.T) {
@@ -533,7 +562,8 @@ func TestAlignmentValidation(t *testing.T) {
 }
 
 func TestConcurrentMemoryAccess(t *testing.T) {
-	collector, err := NewCollector("ebpf-concurrent-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-concurrent-test"}, logger)
 	require.NoError(t, err)
 
 	// Test that concurrent access to memory parsing functions is safe
@@ -578,7 +608,8 @@ func TestConcurrentMemoryAccess(t *testing.T) {
 }
 
 func TestBoundsCheckingExhaustive(t *testing.T) {
-	collector, err := NewCollector("ebpf-bounds-test")
+	logger := zap.NewNop()
+	collector, err := NewCollectorWithConfig(&Config{Name: "ebpf-bounds-test"}, logger)
 	require.NoError(t, err)
 
 	expectedSize := int(unsafe.Sizeof(KernelEvent{}))

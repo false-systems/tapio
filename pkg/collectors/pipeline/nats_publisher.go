@@ -44,10 +44,10 @@ func NewNATSPublisher(logger *zap.Logger, natsConfig *config.NATSConfig) (*NATSP
 	}
 
 	// Ensure stream exists
-	_, err = js.StreamInfo(natsConfig.TracesStreamName)
+	streamInfo, err := js.StreamInfo(natsConfig.TracesStreamName)
 	if err != nil {
 		// Create stream
-		_, err = js.AddStream(&nats.StreamConfig{
+		streamConfig, err := js.AddStream(&nats.StreamConfig{
 			Name:       natsConfig.TracesStreamName,
 			Subjects:   natsConfig.TracesSubjects,
 			Storage:    nats.FileStorage,
@@ -60,6 +60,13 @@ func NewNATSPublisher(logger *zap.Logger, natsConfig *config.NATSConfig) (*NATSP
 			nc.Close()
 			return nil, fmt.Errorf("failed to create stream: %w", err)
 		}
+		logger.Info("Created JetStream stream",
+			zap.String("name", streamConfig.Config.Name),
+			zap.Strings("subjects", streamConfig.Config.Subjects))
+	} else {
+		logger.Info("JetStream stream already exists",
+			zap.String("name", streamInfo.Config.Name),
+			zap.Strings("subjects", streamInfo.Config.Subjects))
 	}
 
 	return &NATSPublisher{
@@ -82,20 +89,22 @@ func (p *NATSPublisher) Publish(event *domain.UnifiedEvent) error {
 	}
 
 	// Publish to JetStream
-	_, err = p.js.Publish(subject, data)
+	pubAck, err := p.js.Publish(subject, data)
 	if err != nil {
 		p.logger.Error("Failed to publish event",
 			zap.String("subject", subject),
 			zap.String("event_id", event.ID),
 			zap.Error(err),
 		)
-		return err
+		return fmt.Errorf("failed to publish event to subject %s: %w", subject, err)
 	}
 
 	p.logger.Debug("Published event",
 		zap.String("subject", subject),
 		zap.String("event_id", event.ID),
 		zap.String("trace_id", p.getTraceID(event)),
+		zap.String("stream", pubAck.Stream),
+		zap.Uint64("sequence", pubAck.Sequence),
 	)
 
 	return nil

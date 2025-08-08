@@ -38,7 +38,11 @@ func createKubeletCollector(config map[string]interface{}) (collectors.Collector
 
 	// Create logger if not provided
 	if cfg.Logger == nil {
-		cfg.Logger, _ = zap.NewProduction()
+		logger, err := zap.NewProduction()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create logger: %w", err)
+		}
+		cfg.Logger = logger
 	}
 
 	name := "kubelet"

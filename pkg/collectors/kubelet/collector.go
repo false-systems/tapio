@@ -78,7 +78,11 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 	}
 
 	if config.Logger == nil {
-		config.Logger, _ = zap.NewProduction()
+		logger, err := zap.NewProduction()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create logger: %w", err)
+		}
+		config.Logger = logger
 	}
 
 	// Create HTTP client with proper TLS config
@@ -212,7 +216,10 @@ func (c *Collector) fetchStats() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("stats request failed: %s - failed to read response body: %w", resp.Status, readErr)
+		}
 		return fmt.Errorf("stats request failed: %s - %s", resp.Status, string(body))
 	}
 
@@ -249,12 +256,16 @@ func (c *Collector) sendNodeCPUEvent(summary *statsv1alpha1.Summary) {
 		"cpu_usage_milli": fmt.Sprintf("%d", *summary.Node.CPU.UsageNanoCores/1000000),
 	}
 
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"node_name":       summary.Node.NodeName,
 		"cpu_usage_nano":  *summary.Node.CPU.UsageNanoCores,
 		"cpu_usage_milli": *summary.Node.CPU.UsageNanoCores / 1000000,
 		"timestamp":       summary.Node.CPU.Time.Time,
 	})
+	if err != nil {
+		c.logger.Error("Failed to marshal node CPU event data", zap.Error(err))
+		return
+	}
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -284,13 +295,17 @@ func (c *Collector) sendNodeMemoryEvent(summary *statsv1alpha1.Summary) {
 		"memory_working_set": fmt.Sprintf("%d", *summary.Node.Memory.WorkingSetBytes),
 	}
 
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"node_name":          summary.Node.NodeName,
 		"memory_usage":       *summary.Node.Memory.UsageBytes,
 		"memory_available":   *summary.Node.Memory.AvailableBytes,
 		"memory_working_set": *summary.Node.Memory.WorkingSetBytes,
 		"timestamp":          summary.Node.Memory.Time.Time,
 	})
+	if err != nil {
+		c.logger.Error("Failed to marshal node memory event data", zap.Error(err))
+		return
+	}
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -345,13 +360,17 @@ func (c *Collector) checkCPUThrottling(pod *statsv1alpha1.PodStats, container *s
 		"cpu_usage_nano": fmt.Sprintf("%d", *container.CPU.UsageNanoCores),
 	}
 
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"namespace":      pod.PodRef.Namespace,
 		"pod":            pod.PodRef.Name,
 		"container":      container.Name,
 		"cpu_usage_nano": *container.CPU.UsageNanoCores,
 		"timestamp":      container.CPU.Time.Time,
 	})
+	if err != nil {
+		c.logger.Error("Failed to marshal CPU throttling event data", zap.Error(err))
+		return
+	}
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -392,7 +411,7 @@ func (c *Collector) checkMemoryPressure(pod *statsv1alpha1.PodStats, container *
 		metadata["memory_rss"] = fmt.Sprintf("%d", *container.Memory.RSSBytes)
 	}
 
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"namespace":          pod.PodRef.Namespace,
 		"pod":                pod.PodRef.Name,
 		"container":          container.Name,
@@ -400,6 +419,10 @@ func (c *Collector) checkMemoryPressure(pod *statsv1alpha1.PodStats, container *
 		"memory_working_set": *container.Memory.WorkingSetBytes,
 		"timestamp":          container.Memory.Time.Time,
 	})
+	if err != nil {
+		c.logger.Error("Failed to marshal memory pressure event data", zap.Error(err))
+		return
+	}
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -444,7 +467,7 @@ func (c *Collector) checkEphemeralStorage(pod *statsv1alpha1.PodStats) {
 			"storage_usage_percent":   fmt.Sprintf("%.2f", usagePercent),
 		}
 
-		data, _ := json.Marshal(map[string]interface{}{
+		data, err := json.Marshal(map[string]interface{}{
 			"namespace":       pod.PodRef.Namespace,
 			"pod":             pod.PodRef.Name,
 			"used_bytes":      usedBytes,
@@ -452,6 +475,10 @@ func (c *Collector) checkEphemeralStorage(pod *statsv1alpha1.PodStats) {
 			"usage_percent":   usagePercent,
 			"timestamp":       pod.EphemeralStorage.Time.Time,
 		})
+		if err != nil {
+			c.logger.Error("Failed to marshal ephemeral storage event data", zap.Error(err))
+			return
+		}
 
 		event := collectors.RawEvent{
 			Timestamp: time.Now(),
@@ -504,7 +531,10 @@ func (c *Collector) fetchPodLifecycle() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("pods request failed: %s - failed to read response body: %w", resp.Status, readErr)
+		}
 		return fmt.Errorf("pods request failed: %s - %s", resp.Status, string(body))
 	}
 
@@ -561,7 +591,7 @@ func (c *Collector) sendContainerWaitingEvent(pod *v1.Pod, status *v1.ContainerS
 		"waiting_message": status.State.Waiting.Message,
 	}
 
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"namespace": pod.Namespace,
 		"pod":       pod.Name,
 		"container": status.Name,
@@ -569,6 +599,10 @@ func (c *Collector) sendContainerWaitingEvent(pod *v1.Pod, status *v1.ContainerS
 		"message":   status.State.Waiting.Message,
 		"timestamp": time.Now(),
 	})
+	if err != nil {
+		c.logger.Error("Failed to marshal container waiting event data", zap.Error(err))
+		return
+	}
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -601,7 +635,7 @@ func (c *Collector) sendContainerTerminatedEvent(pod *v1.Pod, status *v1.Contain
 		"exit_message":   status.State.Terminated.Message,
 	}
 
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"namespace": pod.Namespace,
 		"pod":       pod.Name,
 		"container": status.Name,
@@ -610,6 +644,10 @@ func (c *Collector) sendContainerTerminatedEvent(pod *v1.Pod, status *v1.Contain
 		"message":   status.State.Terminated.Message,
 		"timestamp": status.State.Terminated.FinishedAt.Time,
 	})
+	if err != nil {
+		c.logger.Error("Failed to marshal container terminated event data", zap.Error(err))
+		return
+	}
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
@@ -643,7 +681,7 @@ func (c *Collector) sendCrashLoopEvent(pod *v1.Pod, status *v1.ContainerStatus) 
 			"last_exit_reason": status.LastTerminationState.Terminated.Reason,
 		}
 
-		data, _ := json.Marshal(map[string]interface{}{
+		data, err := json.Marshal(map[string]interface{}{
 			"namespace":      pod.Namespace,
 			"pod":            pod.Name,
 			"container":      status.Name,
@@ -652,6 +690,10 @@ func (c *Collector) sendCrashLoopEvent(pod *v1.Pod, status *v1.ContainerStatus) 
 			"last_reason":    status.LastTerminationState.Terminated.Reason,
 			"timestamp":      time.Now(),
 		})
+		if err != nil {
+			c.logger.Error("Failed to marshal crash loop event data", zap.Error(err))
+			return
+		}
 
 		event := collectors.RawEvent{
 			Timestamp: time.Now(),
@@ -685,7 +727,7 @@ func (c *Collector) sendPodNotReadyEvent(pod *v1.Pod, condition *v1.PodCondition
 		"condition_message": condition.Message,
 	}
 
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"namespace": pod.Namespace,
 		"pod":       pod.Name,
 		"condition": string(condition.Type),
@@ -694,6 +736,10 @@ func (c *Collector) sendPodNotReadyEvent(pod *v1.Pod, condition *v1.PodCondition
 		"message":   condition.Message,
 		"timestamp": condition.LastTransitionTime.Time,
 	})
+	if err != nil {
+		c.logger.Error("Failed to marshal pod not ready event data", zap.Error(err))
+		return
+	}
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),

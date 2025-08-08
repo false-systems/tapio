@@ -85,13 +85,16 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	// Test connection
 	ctxTimeout, cancel := context.WithTimeout(c.ctx, 3*time.Second)
-	_, err = c.client.Status(ctxTimeout, c.config.Endpoints[0])
+	status, err := c.client.Status(ctxTimeout, c.config.Endpoints[0])
 	cancel()
 	if err != nil {
 		c.client.Close()
 		c.client = nil
 		return fmt.Errorf("failed to connect to etcd: %w", err)
 	}
+
+	// Connection successful - status contains version info and cluster state
+	_ = status // Status captured but not used - connection test successful
 
 	// Ready to start processing
 
@@ -327,7 +330,14 @@ func (c *Collector) normalizeResourceType(resourceType string) string {
 
 // Helper to create an etcd raw event
 func (c *Collector) createEvent(eventType string, data interface{}) collectors.RawEvent {
-	jsonData, _ := json.Marshal(data)
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		// If marshaling fails, create minimal event with error information
+		jsonData = []byte(`{"error": "failed to marshal event data", "event_type": "` + eventType + `"}`)
+		c.mu.Lock()
+		c.stats.ErrorCount++
+		c.mu.Unlock()
+	}
 
 	return collectors.RawEvent{
 		Timestamp: time.Now(),

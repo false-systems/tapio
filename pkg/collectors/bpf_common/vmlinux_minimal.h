@@ -208,9 +208,16 @@ struct cgroup_subsys_state {
     unsigned long flags;
 } __attribute__((preserve_access_index));
 
+/* kernfs node structure for cgroup inode extraction */
+struct kernfs_node {
+    __u32 id;
+    __u64 ino;  /* inode number - unique identifier */
+} __attribute__((preserve_access_index));
+
 struct cgroup {
     int id;
-    /* We mainly care about the ID for correlation */
+    struct kernfs_node *kn;  /* kernfs node for this cgroup */
+    /* We mainly care about the kernfs inode for correlation */
 } __attribute__((preserve_access_index));
 
 /* Network sk_buff for packet processing */
