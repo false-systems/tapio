@@ -30,10 +30,12 @@ type Subscriber struct {
 	// Configuration
 	config *config.NATSConfig
 
-	// State
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	// State and lifecycle management
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	shutdownCtx context.Context
+	shutdown    context.CancelFunc
 
 	// Metrics
 	mu               sync.RWMutex
@@ -41,6 +43,10 @@ type Subscriber struct {
 	messagesAcked    int64
 	messagesNacked   int64
 	processingErrors int64
+
+	// Resource cleanup tracking
+	resourcesMu sync.Mutex
+	resources   []func() error // cleanup functions
 }
 
 // Deprecated: Use config.NATSConfig instead
@@ -49,28 +55,34 @@ func DefaultConfig() *config.NATSConfig {
 	return config.DefaultNATSConfig()
 }
 
-// NewSubscriber creates a new NATS subscriber
+// NewSubscriber creates a new NATS subscriber with proper resource management
 func NewSubscriber(logger *zap.Logger, config *config.NATSConfig, engine *correlation.Engine) (*Subscriber, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdown := context.WithCancel(context.Background())
 
 	sub := &Subscriber{
-		logger: logger,
-		engine: engine,
-		config: config,
-		ctx:    ctx,
-		cancel: cancel,
+		logger:      logger,
+		engine:      engine,
+		config:      config,
+		ctx:         ctx,
+		cancel:      cancel,
+		shutdownCtx: shutdownCtx,
+		shutdown:    shutdown,
+		resources:   make([]func() error, 0),
 	}
 
 	// Connect to NATS
 	if err := sub.connect(); err != nil {
 		cancel()
+		shutdown()
 		return nil, err
 	}
 
 	// Setup JetStream
 	if err := sub.setupJetStream(); err != nil {
-		sub.nc.Close()
+		sub.cleanupResources()
 		cancel()
+		shutdown()
 		return nil, err
 	}
 
@@ -110,27 +122,53 @@ func (s *Subscriber) Start(ctx context.Context) error {
 	return s.Stop()
 }
 
-// Stop gracefully shuts down the subscriber
+// Stop gracefully shuts down the subscriber with proper resource cleanup
 func (s *Subscriber) Stop() error {
 	s.logger.Info("Stopping NATS subscriber")
+
+	// Signal shutdown
+	s.shutdown()
 
 	// Cancel internal context
 	s.cancel()
 
-	// Unsubscribe
+	// Create timeout context for cleanup operations
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Unsubscribe with timeout
 	if s.subscription != nil {
-		if err := s.subscription.Unsubscribe(); err != nil {
-			s.logger.Error("Failed to unsubscribe", zap.Error(err))
+		done := make(chan error, 1)
+		go func() {
+			done <- s.subscription.Unsubscribe()
+		}()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				s.logger.Error("Failed to unsubscribe", zap.Error(err))
+			}
+		case <-cleanupCtx.Done():
+			s.logger.Warn("Timeout during unsubscribe operation")
 		}
 	}
 
-	// Wait for goroutines
-	s.wg.Wait()
+	// Wait for goroutines with timeout
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
 
-	// Close NATS connection
-	if s.nc != nil {
-		s.nc.Close()
+	select {
+	case <-done:
+		s.logger.Debug("All goroutines stopped gracefully")
+	case <-cleanupCtx.Done():
+		s.logger.Warn("Timeout waiting for goroutines to stop")
 	}
+
+	// Clean up all resources
+	s.cleanupResources()
 
 	s.logger.Info("NATS subscriber stopped",
 		zap.Int64("messages_received", s.messagesReceived),
@@ -166,6 +204,15 @@ func (s *Subscriber) connect() error {
 	}
 
 	s.nc = nc
+
+	// Add connection cleanup to resource list
+	s.addResource(func() error {
+		if s.nc != nil && s.nc.IsConnected() {
+			s.nc.Close()
+		}
+		return nil
+	})
+
 	return nil
 }
 
@@ -234,52 +281,138 @@ func (s *Subscriber) setupJetStream() error {
 	return nil
 }
 
-// fetchMessages continuously fetches messages from the pull subscription
+// fetchMessages continuously fetches messages from the pull subscription with bounded retry
 func (s *Subscriber) fetchMessages(ctx context.Context) {
 	defer s.wg.Done()
+
+	// Bounded retry configuration
+	const (
+		maxConsecutiveErrors = 10
+		baseBackoffDelay     = time.Second
+		maxBackoffDelay      = 30 * time.Second
+		backoffMultiplier    = 2.0
+	)
+
+	consecutiveErrors := 0
+	backoffDelay := baseBackoffDelay
 
 	for {
 		select {
 		case <-ctx.Done():
+			s.logger.Info("fetchMessages context cancelled, shutting down")
 			return
 		default:
 		}
 
-		// Fetch messages in batches
-		msgs, err := s.subscription.Fetch(s.config.BatchSize, nats.MaxWait(s.config.FetchTimeout))
+		// Check if we've hit the error limit
+		if consecutiveErrors >= maxConsecutiveErrors {
+			s.logger.Error("Too many consecutive fetch errors, backing off",
+				zap.Int("consecutive_errors", consecutiveErrors),
+				zap.Duration("backoff_delay", backoffDelay))
+
+			// Wait with context cancellation support
+			timer := time.NewTimer(backoffDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+				// Continue after backoff
+			}
+
+			// Exponential backoff with jitter
+			backoffDelay = time.Duration(float64(backoffDelay) * backoffMultiplier)
+			if backoffDelay > maxBackoffDelay {
+				backoffDelay = maxBackoffDelay
+			}
+		}
+
+		// Bound batch size to prevent memory exhaustion
+		batchSize := s.config.BatchSize
+		const maxBatchSize = 1000
+		if batchSize > maxBatchSize {
+			batchSize = maxBatchSize
+			s.logger.Warn("Batch size exceeds maximum, capping",
+				zap.Int("requested", s.config.BatchSize),
+				zap.Int("capped_to", maxBatchSize))
+		}
+
+		// Fetch messages in bounded batches
+		msgs, err := s.subscription.Fetch(batchSize, nats.MaxWait(s.config.FetchTimeout))
+
 		if err != nil {
 			if err == nats.ErrTimeout {
+				// Reset error counters on successful timeout (normal operation)
+				consecutiveErrors = 0
+				backoffDelay = baseBackoffDelay
 				continue // No messages available, keep polling
 			}
-			s.logger.Error("Failed to fetch messages", zap.Error(err))
-			time.Sleep(time.Second)
+
+			consecutiveErrors++
+			s.logger.Warn("Failed to fetch messages",
+				zap.Error(err),
+				zap.Int("consecutive_errors", consecutiveErrors))
+
+			// Short delay before retry to avoid tight loop
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+				// Continue after short delay
+			}
 			continue
 		}
 
-		// Process each message
-		for _, msg := range msgs {
-			s.handleMessage(msg)
+		// Reset error counters on successful fetch
+		consecutiveErrors = 0
+		backoffDelay = baseBackoffDelay
+
+		// Process each message with timeout protection
+		for i, msg := range msgs {
+			select {
+			case <-ctx.Done():
+				s.logger.Info("Context cancelled during message processing",
+					zap.Int("processed", i),
+					zap.Int("total", len(msgs)))
+				return
+			default:
+				s.handleMessage(msg)
+			}
 		}
 	}
 }
 
-// handleMessage processes a single NATS message
+// handleMessage processes a single NATS message with timeout protection
 func (s *Subscriber) handleMessage(msg *nats.Msg) {
-	// Update metrics
+	// Update metrics atomically
 	s.mu.Lock()
 	s.messagesReceived++
 	s.mu.Unlock()
 
+	// Create processing context with timeout
+	processCtx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
+	defer cancel()
+
 	// Extract trace ID from subject
 	traceID := s.extractTraceID(msg.Subject)
 
-	// Parse event
+	// Parse event with validation
 	var event domain.UnifiedEvent
 	if err := json.Unmarshal(msg.Data, &event); err != nil {
 		s.logger.Error("Failed to unmarshal event",
 			zap.Error(err),
 			zap.String("subject", msg.Subject),
+			zap.String("trace_id", traceID),
 		)
+		s.nackMessage(msg)
+		return
+	}
+
+	// Validate essential event fields
+	if event.ID == "" {
+		s.logger.Warn("Event missing required ID field",
+			zap.String("subject", msg.Subject),
+			zap.String("trace_id", traceID))
 		s.nackMessage(msg)
 		return
 	}
@@ -293,44 +426,66 @@ func (s *Subscriber) handleMessage(msg *nats.Msg) {
 		event.TraceContext.TraceID = traceID
 	}
 
-	// Process through correlation engine
-	ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
-	defer cancel()
+	// Process through correlation engine with timeout
+	processingDone := make(chan error, 1)
+	go func() {
+		processingDone <- s.engine.Process(processCtx, &event)
+	}()
 
-	if err := s.engine.Process(ctx, &event); err != nil {
-		s.logger.Error("Failed to process event",
-			zap.Error(err),
+	select {
+	case err := <-processingDone:
+		if err != nil {
+			s.logger.Error("Failed to process event",
+				zap.Error(err),
+				zap.String("event_id", event.ID),
+				zap.String("trace_id", traceID),
+			)
+
+			s.mu.Lock()
+			s.processingErrors++
+			s.mu.Unlock()
+
+			// Check if this is the last delivery attempt
+			if metadata, err := msg.Metadata(); err == nil && metadata != nil {
+				if metadata.NumDelivered >= uint64(s.config.MaxDeliver-1) {
+					// Last attempt, acknowledge to avoid infinite redelivery
+					s.logger.Warn("Max delivery attempts reached, acknowledging message",
+						zap.String("event_id", event.ID),
+						zap.Uint64("deliveries", metadata.NumDelivered),
+					)
+					s.ackMessage(msg)
+					return
+				}
+			} else {
+				s.logger.Warn("Failed to get message metadata", zap.Error(err))
+			}
+
+			s.nackMessage(msg)
+			return
+		}
+
+		// Successfully processed
+		s.ackMessage(msg)
+		s.logger.Debug("Event processed successfully",
 			zap.String("event_id", event.ID),
 			zap.String("trace_id", traceID),
+			zap.String("type", string(event.Type)),
 		)
+
+	case <-processCtx.Done():
+		// Processing timeout
+		s.logger.Error("Event processing timeout",
+			zap.String("event_id", event.ID),
+			zap.String("trace_id", traceID),
+			zap.Duration("timeout", 20*time.Second))
 
 		s.mu.Lock()
 		s.processingErrors++
 		s.mu.Unlock()
 
-		// Check if this is the last delivery attempt
-		metadata, _ := msg.Metadata()
-		if metadata != nil && metadata.NumDelivered >= uint64(s.config.MaxDeliver-1) {
-			// Last attempt, acknowledge to avoid infinite redelivery
-			s.logger.Warn("Max delivery attempts reached, acknowledging message",
-				zap.String("event_id", event.ID),
-				zap.Uint64("deliveries", metadata.NumDelivered),
-			)
-			s.ackMessage(msg)
-		} else {
-			s.nackMessage(msg)
-		}
-		return
+		// Nack message for redelivery due to timeout
+		s.nackMessage(msg)
 	}
-
-	// Successfully processed
-	s.ackMessage(msg)
-
-	s.logger.Debug("Event processed successfully",
-		zap.String("event_id", event.ID),
-		zap.String("trace_id", traceID),
-		zap.String("type", string(event.Type)),
-	)
 }
 
 // extractTraceID extracts trace ID from NATS subject
@@ -433,4 +588,25 @@ func (s *Subscriber) GetMetrics() map[string]interface{} {
 		"pending_messages":  pending,
 		"connected":         s.nc.IsConnected(),
 	}
+}
+
+// addResource adds a cleanup function to the resource list
+func (s *Subscriber) addResource(cleanup func() error) {
+	s.resourcesMu.Lock()
+	defer s.resourcesMu.Unlock()
+	s.resources = append(s.resources, cleanup)
+}
+
+// cleanupResources calls all registered cleanup functions
+func (s *Subscriber) cleanupResources() {
+	s.resourcesMu.Lock()
+	defer s.resourcesMu.Unlock()
+
+	for i := len(s.resources) - 1; i >= 0; i-- {
+		if err := s.resources[i](); err != nil {
+			s.logger.Error("Failed to cleanup resource",
+				zap.Int("resource_index", i), zap.Error(err))
+		}
+	}
+	s.resources = nil
 }

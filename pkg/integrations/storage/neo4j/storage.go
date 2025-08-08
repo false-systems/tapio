@@ -7,20 +7,20 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/domain"
+	neo4jclient "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/graph"
 	"go.uber.org/zap"
 )
 
 // Storage implements correlation.Storage using Neo4j
 type Storage struct {
-	client *graph.Client
+	client *neo4jclient.Client
 	logger *zap.Logger
 }
 
 // NewStorage creates a new Neo4j storage implementation
-func NewStorage(config graph.Config, logger *zap.Logger) (*Storage, error) {
-	client, err := graph.NewClient(config, logger)
+func NewStorage(config neo4jclient.Config, logger *zap.Logger) (*Storage, error) {
+	client, err := neo4jclient.NewClient(config, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create graph client: %w", err)
 	}

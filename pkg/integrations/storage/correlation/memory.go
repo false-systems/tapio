@@ -77,7 +77,7 @@ func NewMemoryStorage(logger *zap.Logger, config MemoryStorageConfig) *MemorySto
 	}
 }
 
-// Store saves a correlation result
+// Store saves a correlation result with bounds checking
 func (m *MemoryStorage) Store(ctx context.Context, result *correlation.CorrelationResult) error {
 	if result == nil {
 		return fmt.Errorf("correlation result is nil")
@@ -102,12 +102,24 @@ func (m *MemoryStorage) Store(ctx context.Context, result *correlation.Correlati
 	m.correlations[result.ID] = stored
 	m.stores++
 
-	// Update trace index
+	// Update trace index with bounds checking
 	if result.TraceID != "" {
-		m.byTrace[result.TraceID] = append(m.byTrace[result.TraceID], result.ID)
+		correlationIDs := m.byTrace[result.TraceID]
+		correlationIDs = append(correlationIDs, result.ID)
+
+		// Bound the number of correlations per trace to prevent unbounded growth
+		const maxCorrelationsPerTrace = 1000
+		if len(correlationIDs) > maxCorrelationsPerTrace {
+			// Keep only the most recent correlations
+			correlationIDs = correlationIDs[len(correlationIDs)-maxCorrelationsPerTrace:]
+			m.logger.Debug("Trimmed trace correlations to bounds",
+				zap.String("trace_id", result.TraceID),
+				zap.Int("max_per_trace", maxCorrelationsPerTrace))
+		}
+		m.byTrace[result.TraceID] = correlationIDs
 	}
 
-	// Update time index
+	// Update time index with bounds checking
 	m.byTime.add(result.ID, result.StartTime)
 
 	return nil
@@ -124,13 +136,26 @@ func (m *MemoryStorage) GetRecent(ctx context.Context, limit int) ([]*correlatio
 	entries := m.byTime.getRecent(limit)
 
 	results := make([]*correlation.CorrelationResult, 0, len(entries))
+	accessedIDs := make([]string, 0, len(entries))
+
 	for _, entry := range entries {
 		if stored, exists := m.correlations[entry.id]; exists {
-			stored.accessedAt = time.Now()
-			stored.accessCount++
 			results = append(results, stored.result)
+			accessedIDs = append(accessedIDs, entry.id)
 		}
 	}
+
+	// Asynchronously update access metadata without holding read lock
+	go func(ids []string) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for _, id := range ids {
+			if stored, exists := m.correlations[id]; exists {
+				stored.accessedAt = time.Now()
+				stored.accessCount++
+			}
+		}
+	}(accessedIDs)
 
 	return results, nil
 }
@@ -148,13 +173,26 @@ func (m *MemoryStorage) GetByTraceID(ctx context.Context, traceID string) ([]*co
 	}
 
 	results := make([]*correlation.CorrelationResult, 0, len(correlationIDs))
+	accessedIDs := make([]string, 0, len(correlationIDs))
+
 	for _, id := range correlationIDs {
 		if stored, exists := m.correlations[id]; exists {
-			stored.accessedAt = time.Now()
-			stored.accessCount++
 			results = append(results, stored.result)
+			accessedIDs = append(accessedIDs, id)
 		}
 	}
+
+	// Asynchronously update access metadata without holding read lock
+	go func(ids []string) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for _, id := range ids {
+			if stored, exists := m.correlations[id]; exists {
+				stored.accessedAt = time.Now()
+				stored.accessCount++
+			}
+		}
+	}(accessedIDs)
 
 	return results, nil
 }
@@ -169,20 +207,31 @@ func (m *MemoryStorage) GetByTimeRange(ctx context.Context, start, end time.Time
 	var results []*correlation.CorrelationResult
 	for _, stored := range m.correlations {
 		if stored.result.StartTime.After(start) && stored.result.StartTime.Before(end) {
-			stored.accessedAt = time.Now()
-			stored.accessCount++
-			results = append(results, stored.result)
+			// Race condition fix: Don't modify stored during read lock
+			// Make a copy with updated access info
+			updatedStored := *stored
+			updatedStored.accessedAt = time.Now()
+			updatedStored.accessCount++
+			results = append(results, updatedStored.result)
 		}
 	}
 
-	// Sort by time
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[j].StartTime.After(results[i].StartTime) {
-				results[i], results[j] = results[j], results[i]
+	// Replace O(n²) bubble sort with efficient sort.Slice
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].StartTime.After(results[j].StartTime)
+	})
+
+	// Asynchronously update access metadata without holding lock
+	go func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for _, result := range results {
+			if stored, exists := m.correlations[result.ID]; exists {
+				stored.accessedAt = time.Now()
+				stored.accessCount++
 			}
 		}
-	}
+	}()
 
 	return results, nil
 }
@@ -196,19 +245,31 @@ func (m *MemoryStorage) GetByResource(ctx context.Context, resourceType, namespa
 
 	resourceName := fmt.Sprintf("%s/%s", namespace, name)
 	var results []*correlation.CorrelationResult
+	accessedIDs := make([]string, 0)
 
 	for _, stored := range m.correlations {
 		if stored.result.Impact != nil {
 			for _, res := range stored.result.Impact.Resources {
 				if res == resourceName {
-					stored.accessedAt = time.Now()
-					stored.accessCount++
 					results = append(results, stored.result)
+					accessedIDs = append(accessedIDs, stored.result.ID)
 					break
 				}
 			}
 		}
 	}
+
+	// Asynchronously update access metadata without holding read lock
+	go func(ids []string) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for _, id := range ids {
+			if stored, exists := m.correlations[id]; exists {
+				stored.accessedAt = time.Now()
+				stored.accessCount++
+			}
+		}
+	}(accessedIDs)
 
 	return results, nil
 }
@@ -336,6 +397,14 @@ func (ti *timeIndex) add(id string, timestamp time.Time) {
 	sort.Slice(ti.entries, func(i, j int) bool {
 		return ti.entries[i].timestamp.After(ti.entries[j].timestamp)
 	})
+
+	// Bound the time index to prevent unbounded growth
+	// This should match the maxSize of the main storage
+	const maxTimeEntries = 10000
+	if len(ti.entries) > maxTimeEntries {
+		// Keep only the most recent entries
+		ti.entries = ti.entries[:maxTimeEntries]
+	}
 }
 
 func (ti *timeIndex) remove(id string) {

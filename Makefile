@@ -36,7 +36,8 @@ generate-ebpf: ## Generate eBPF programs
 build: generate-ebpf ## Build all binaries
 	@echo "$(BLUE)🔨 Building binaries...$(NC)"
 	@mkdir -p bin
-	@CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/tapio-collector ./cmd/tapio-collector
+	@CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/tapio ./cmd/tapio
+	@CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/correlation-service ./cmd/correlation-service
 	@echo "$(GREEN)✅ Build complete: bin/$(NC)"
 	@ls -la bin/
 
@@ -120,21 +121,16 @@ enforce-all: check-architecture check-independence check-completeness check-cove
 
 docker-all: ## Build all Docker images
 	@echo "$(BLUE)🐳 Building all Docker images...$(NC)"
-	@make docker-server docker-collector
+	@make docker-correlation-service
 	@echo "$(GREEN)✅ All Docker images built!$(NC)"
 
-docker-server: ## Build server Docker image
-	@echo "$(BLUE)🐳 Building tapio-server image...$(NC)"
-	@docker build -f cmd/tapio-server/Dockerfile -t tapio-server:latest .
-
-docker-collector: ## Build collector Docker image  
-	@echo "$(BLUE)🐳 Building tapio-collector image...$(NC)"
-	@docker build -f cmd/tapio-collector/Dockerfile -t tapio-collector:latest .
+docker-correlation-service: ## Build correlation service Docker image
+	@echo "$(BLUE)🐳 Building correlation-service image...$(NC)"
+	@docker build -f cmd/correlation-service/Dockerfile -t correlation-service:latest .
 
 docker-test: docker-all ## Test all Docker images
 	@echo "$(BLUE)🐳 Testing Docker images...$(NC)"
-	@docker run --rm tapio-server:latest --help || echo "Server image OK"
-	@docker run --rm tapio-collector:latest --help || echo "Collector image OK"
+	@docker run --rm correlation-service:latest --help || echo "Correlation service image OK"
 	@echo "$(GREEN)✅ All Docker images working!$(NC)"
 
 ##@ CI/CD
