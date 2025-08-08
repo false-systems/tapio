@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -278,3 +279,55 @@ var (
 	ErrTimeout      = fmt.Errorf("query timeout")
 	ErrNoData       = fmt.Errorf("insufficient data for analysis")
 )
+
+// CorrelationStorage defines the interface for storing and retrieving correlations
+type CorrelationStorage interface {
+	// Store saves a correlation result
+	Store(ctx context.Context, result *FinalResult) error
+
+	// GetByID retrieves a correlation by its ID
+	GetByID(ctx context.Context, id string) (*StoredCorrelation, error)
+
+	// GetRecent retrieves recent correlations
+	GetRecent(ctx context.Context, limit int) ([]*StoredCorrelation, error)
+
+	// GetByResource retrieves correlations for a specific resource
+	GetByResource(ctx context.Context, resourceType, namespace, name string) ([]*StoredCorrelation, error)
+
+	// StoreFeedback stores user feedback for a correlation
+	StoreFeedback(ctx context.Context, correlationID string, feedback CorrelationFeedback) error
+
+	// HealthCheck verifies the storage is healthy
+	HealthCheck(ctx context.Context) error
+}
+
+// GraphStore defines the interface for graph database operations
+type GraphStore interface {
+	// ExecuteQuery runs a graph query and returns results
+	ExecuteQuery(ctx context.Context, query string, params map[string]interface{}) (interface{}, error)
+
+	// HealthCheck verifies the graph store is healthy
+	HealthCheck(ctx context.Context) error
+}
+
+// StoredCorrelation represents a correlation stored in the backend
+type StoredCorrelation struct {
+	ID           string
+	ResourceType string
+	Namespace    string
+	Name         string
+	RootCause    string
+	Severity     Severity
+	Confidence   float64
+	Timestamp    time.Time
+	Correlators  []string
+	Result       *FinalResult
+}
+
+// CorrelatorInfo contains information about a correlator
+type CorrelatorInfo struct {
+	Name        string
+	Type        string
+	Enabled     bool
+	HealthCheck func(context.Context) error
+}
