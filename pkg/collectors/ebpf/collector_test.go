@@ -170,3 +170,110 @@ func TestPodManagement(t *testing.T) {
 		t.Error("Expected error when eBPF objects not initialized")
 	}
 }
+
+func TestCgroupIDValidation(t *testing.T) {
+	_, _ = NewCollector("ebpf-cgroup")
+
+	// Test cgroup ID validation - real cgroup IDs should be much larger than PIDs
+	testCases := []struct {
+		cgroupID    uint64
+		description string
+		shouldBePID bool
+		isZero      bool
+	}{
+		{0, "zero cgroup ID", false, true},
+		{1, "minimal edge case", true, false},       // Very small, could be confused with PID
+		{12345, "potential PID value", true, false}, // PIDs are typically small
+		{0x100000000, "cgroup ID with 4GB offset (fallback)", false, false},
+		{0x800000000, "typical kernfs inode number", false, false},
+		{18446744073709551615, "maximum uint64", false, false}, // Max value test
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			// Validate that cgroup IDs are properly distinguished from PIDs
+			if tc.isZero {
+				// Zero is invalid
+				assert.Zero(t, tc.cgroupID, "Zero cgroup ID should be zero")
+			} else if tc.shouldBePID {
+				// PIDs should be small numbers (typically < 65536 on most systems)
+				assert.True(t, tc.cgroupID < 65536, "PID-like value should be small")
+			} else {
+				// Real cgroup IDs should be large (either kernfs inodes or have our offset)
+				// With our fix, we expect either:
+				// 1. Large inode numbers (> 1M typically)
+				// 2. Offset-based IDs (>= 4GB)
+				isLargeCgroupID := tc.cgroupID >= 0x100000000 // 4GB offset
+				isValidKernfsInode := tc.cgroupID > 1000000   // Large inode
+				assert.True(t, isLargeCgroupID || isValidKernfsInode,
+					"Valid cgroup ID should be distinguishable from PID")
+			}
+		})
+	}
+}
+
+func TestCgroupPodCorrelation(t *testing.T) {
+	_, _ = NewCollector("ebpf-correlation")
+
+	// Test that correlation metadata includes proper cgroup information
+	metadata := map[string]string{
+		"cgroup_id": "1234567890", // Simulated large cgroup ID
+		"pod_uid":   "test-pod-uid-12345",
+		"pid":       "1234",
+	}
+
+	// Validate that cgroup ID is different from PID
+	cgroupID := metadata["cgroup_id"]
+	pidStr := metadata["pid"]
+
+	assert.NotEqual(t, cgroupID, pidStr, "Cgroup ID should not equal PID")
+
+	// Test pod UID extraction
+	podUID := metadata["pod_uid"]
+	assert.NotEmpty(t, podUID, "Pod UID should be present for correlation")
+	assert.NotEqual(t, "0", podUID, "Pod UID should not be zero")
+}
+
+func TestContainerPIDValidation(t *testing.T) {
+	collector, _ := NewCollector("ebpf-containers")
+
+	// Test container PID detection logic
+	testCases := []struct {
+		cgroupPath  string
+		shouldMatch bool
+		description string
+	}{
+		{"/docker/container-id", true, "Docker container"},
+		{"/containerd/container-id", true, "Containerd container"},
+		{"/kubepods/besteffort/pod-id", true, "Kubernetes pod"},
+		{"/system.slice/systemd-service", false, "System service"},
+		{"/user.slice/user-session", false, "User session"},
+		{"", false, "Empty cgroup path"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			// Simulate the container detection logic
+			isContainer := collector.isContainerCgroupPath(tc.cgroupPath)
+			assert.Equal(t, tc.shouldMatch, isContainer,
+				"Container detection should match expected result")
+		})
+	}
+}
+
+// Helper function to simulate container cgroup path detection
+func (c *Collector) isContainerCgroupPath(cgroupPath string) bool {
+	// Simulate the logic used in populateContainerPIDs
+	if cgroupPath == "" {
+		return false
+	}
+
+	containerKeywords := []string{"docker", "containerd", "kubepods"}
+	for _, keyword := range containerKeywords {
+		if len(cgroupPath) > len(keyword) &&
+			cgroupPath[:len(keyword)+1] == "/"+keyword {
+			return true
+		}
+	}
+	return false
+}

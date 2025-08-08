@@ -12,6 +12,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/ebpf/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
@@ -19,7 +20,7 @@ import (
 // Collector implements minimal kernel monitoring via eBPF
 type Collector struct {
 	name          string
-	objs          *kernelmonitorObjects
+	objs          *bpf.KernelmonitorObjects
 	links         []link.Link
 	reader        *ringbuf.Reader
 	events        chan collectors.RawEvent
@@ -76,12 +77,12 @@ func (c *Collector) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Load eBPF program
-	spec, err := loadKernelmonitor()
+	spec, err := bpf.LoadKernelmonitor()
 	if err != nil {
 		return fmt.Errorf("failed to load eBPF spec: %w", err)
 	}
 
-	c.objs = &kernelmonitorObjects{}
+	c.objs = &bpf.KernelmonitorObjects{}
 	if err := spec.LoadAndAssign(c.objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
@@ -694,21 +695,33 @@ func (c *Collector) hashPath(path string) uint64 {
 
 // UpdateDNSQuery updates DNS query information for service discovery correlation
 func (c *Collector) UpdateDNSQuery(query, serviceName, namespace string, resolvedIP uint32, port uint16) error {
-	if c.objs == nil || c.objs.DnsQueryMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+	if c.objs == nil {
+		return fmt.Errorf("eBPF objects not initialized")
 	}
 
-	key := c.hashPath(query) // Reuse hash function for DNS queries
+	// DNS query correlation is handled through service_endpoints_map
+	// Convert IP and port to combined key format
+	key := (uint64(resolvedIP) << 32) | uint64(port)
 
-	dnsInfo := &DNSQueryInfo{
-		ResolvedIP: resolvedIP,
-		Port:       port,
+	endpoint := ServiceEndpoint{
+		Port: port,
 	}
 
-	copy(dnsInfo.ServiceName[:], serviceName)
-	copy(dnsInfo.Namespace[:], namespace)
+	// Copy service name and namespace to fixed-size arrays
+	serviceBytes := []byte(serviceName)
+	namespaceBytes := []byte(namespace)
 
-	return c.objs.DnsQueryMap.Put(key, dnsInfo)
+	copy(endpoint.ServiceName[:], serviceBytes)
+	copy(endpoint.Namespace[:], namespaceBytes)
+
+	// Store cluster IP in the appropriate field
+	copy(endpoint.ClusterIP[:], []byte(fmt.Sprintf("%d.%d.%d.%d",
+		(resolvedIP>>24)&0xff,
+		(resolvedIP>>16)&0xff,
+		(resolvedIP>>8)&0xff,
+		resolvedIP&0xff)))
+
+	return c.objs.ServiceEndpointsMap.Put(key, endpoint)
 }
 
 // UpdateVolumeInfo updates PVC mount information for volume correlation

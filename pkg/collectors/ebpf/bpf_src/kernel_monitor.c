@@ -92,14 +92,6 @@ struct mount_info {
     __u8 _pad[7];          // Padding
 } __attribute__((packed));
 
-// DNS query information for service discovery correlation
-struct dns_query_info {
-    char service_name[64]; // K8s service name from DNS
-    char namespace[64];    // K8s namespace
-    __u32 resolved_ip;     // Resolved IP address
-    __u16 port;           // Service port
-    __u8 _pad[2];         // Padding
-} __attribute__((packed));
 
 // Volume mount information for PVC correlation
 struct volume_info {
@@ -163,13 +155,6 @@ struct {
     __type(value, struct mount_info); // mount info
 } mount_info_map SEC(".maps");
 
-// Map DNS queries to service endpoints
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 10240);
-    __type(key, __u64);             // Hash of DNS query
-    __type(value, struct dns_query_info); // DNS resolution info
-} dns_query_map SEC(".maps");
 
 // Map volume mount paths to PVC info
 struct {
@@ -197,10 +182,100 @@ static __always_inline bool is_container_process(__u32 pid)
 // Helper to extract cgroup ID from task struct
 static __always_inline __u64 get_cgroup_id(struct task_struct *task)
 {
-    // This is a simplified version - in practice, we'd traverse the cgroup hierarchy
-    // For now, use a hash of the PID as a pseudo-cgroup ID
-    __u32 pid = BPF_CORE_READ(task, pid);
-    return (__u64)pid; // Simplified - would need proper cgroup traversal
+    if (!task) {
+        return 0;
+    }
+
+    // Read cgroups css_set from task with proper error handling
+    struct css_set *css_set_ptr = NULL;
+    int ret = bpf_core_read(&css_set_ptr, sizeof(css_set_ptr), &task->cgroups);
+    if (ret != 0 || !css_set_ptr) {
+        return 0;
+    }
+
+    // Try to find a valid cgroup_subsys_state
+    // For cgroup v2, we use the unified hierarchy (index 0)
+    // For cgroup v1, we check multiple subsystems for compatibility
+    struct cgroup_subsys_state *css = NULL;
+    bool css_found = false;
+    
+    // First, check unified hierarchy (cgroup v2 - most common in modern systems)
+    ret = bpf_core_read(&css, sizeof(css), &css_set_ptr->subsys[0]);
+    if (ret == 0 && css) {
+        css_found = true;
+    } else {
+        // Fallback: try other subsystems for cgroup v1 compatibility
+        // Use unroll to avoid verifier issues with loops
+        #pragma unroll
+        for (int i = 1; i < 8; i++) {  // Check first 8 subsystems
+            ret = bpf_core_read(&css, sizeof(css), &css_set_ptr->subsys[i]);
+            if (ret == 0 && css) {
+                css_found = true;
+                break; // Found a valid subsystem
+            }
+        }
+    }
+
+    if (!css_found || !css) {
+        return 0;
+    }
+
+    // Read the cgroup from the css
+    struct cgroup *cgroup_ptr = NULL;
+    ret = bpf_core_read(&cgroup_ptr, sizeof(cgroup_ptr), &css->cgroup);
+    if (ret != 0 || !cgroup_ptr) {
+        return 0;
+    }
+
+    // Primary method: Extract kernfs inode number (most reliable)
+    struct kernfs_node *kn = NULL;
+    ret = bpf_core_read(&kn, sizeof(kn), &cgroup_ptr->kn);
+    if (ret == 0 && kn) {
+        __u64 ino = 0;
+        ret = bpf_core_read(&ino, sizeof(ino), &kn->ino);
+        if (ret == 0 && ino != 0) {
+            // Success: we have the kernfs inode number
+            // This is the most reliable cgroup identifier
+            return ino;
+        }
+    }
+
+    // Fallback method: Use cgroup ID with large offset
+    // This ensures we get a unique identifier even if kernfs access fails
+    int cgroup_id = 0;
+    ret = bpf_core_read(&cgroup_id, sizeof(cgroup_id), &cgroup_ptr->id);
+    if (ret == 0 && cgroup_id > 0) {
+        // Add 4GB offset to distinguish from PIDs and ensure uniqueness
+        // Modern PIDs can be up to 2^22 (4M) or higher, so 0x100000000 (4GB) is safe
+        // This guarantees separation from any possible PID value (max PID is typically 32-bit)
+        __u64 offset_id = (__u64)cgroup_id + 0x100000000ULL;
+        
+        // Enhanced validation: ensure the result doesn't overflow and is reasonable
+        // cgroup_id should be positive and within reasonable bounds
+        // Additional validation: ensure we don't have collision with typical inode ranges
+        if (cgroup_id > 0 && cgroup_id < 0x7FFFFFFF && 
+            offset_id > 0x100000000ULL && offset_id < 0x200000000ULL) {
+            return offset_id;
+        }
+    }
+
+    // Last resort: return a derived unique ID based on css_set pointer
+    // This should rarely be reached, but provides a fallback
+    if (css_set_ptr) {
+        // Use address hash as unique identifier with different offset
+        __u64 addr = (__u64)css_set_ptr;
+        // Right shift to reduce address size, then add large offset
+        // Use 8GB offset to differentiate from cgroup ID fallback
+        __u64 hash_id = (addr >> 8) + 0x200000000ULL;
+        
+        // Enhanced validation: ensure we have a reasonable hash value
+        // The hash should be in a specific range to avoid collisions
+        if (hash_id > 0x200000000ULL && hash_id < 0x400000000ULL && addr != 0) {
+            return hash_id;
+        }
+    }
+
+    return 0;
 }
 
 // Helper to get pod information for a cgroup ID
