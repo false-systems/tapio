@@ -702,8 +702,18 @@ func (a *CorrelationAggregator) performGraphAnalysis(ctx context.Context, query 
 		return nil, fmt.Errorf("graph query failed: %w", err)
 	}
 
-	// Analyze results to determine root cause
-	_ = graphResults // Process graph results in production implementation
+	// Process graph results - the actual type depends on the implementation
+	// In production, this would need to handle the specific result type from the graph store
+	if graphResults == nil {
+		return nil, fmt.Errorf("no results from graph query")
+	}
+	
+	// Log that we received results for observability
+	a.logger.Debug("Graph query executed successfully",
+		zap.String("resource_type", query.ResourceType),
+		zap.String("namespace", query.Namespace),
+		zap.String("name", query.Name))
+	
 	result := &AggregatedResult{
 		ID: fmt.Sprintf("graph-%d", time.Now().Unix()),
 		Resource: ResourceRef{

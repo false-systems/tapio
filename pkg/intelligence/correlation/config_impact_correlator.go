@@ -336,8 +336,20 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 		podCountValue, _ := record.Get("podCount")
 		readyPodsValue, _ := record.Get("readyPods")
 
-		podCount, _ := podCountValue.(int64)
-		readyPods, _ := readyPodsValue.(int64)
+		podCount, ok := podCountValue.(int64)
+		if !ok {
+			c.logger.Warn("Failed to extract pod count as int64",
+				zap.String("deployment", deploymentName),
+				zap.Any("value", podCountValue))
+			podCount = 0
+		}
+		readyPods, ok := readyPodsValue.(int64)
+		if !ok {
+			c.logger.Warn("Failed to extract ready pods as int64",
+				zap.String("deployment", deploymentName),
+				zap.Any("value", readyPodsValue))
+			readyPods = 0
+		}
 
 		if podCount > 0 && readyPods < podCount {
 			configMapsValue, _ := record.Get("configMaps")

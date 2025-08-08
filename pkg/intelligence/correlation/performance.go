@@ -228,6 +228,19 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 				fmt.Sprintf("Working set: %d MB", workingSet/1024/1024),
 			},
 		}
+	} else if hasPriorThrottling {
+		// Memory pressure after CPU throttling indicates resource cascade
+		result.RootCause = &RootCause{
+			EventID:     event.ID,
+			Confidence:  0.8,
+			Description: "Memory pressure caused by CPU throttling",
+			Evidence: []string{
+				"Prior CPU throttling detected",
+				"Processing backlog leading to memory accumulation",
+				fmt.Sprintf("Usage: %d MB, Working Set: %d MB", usage/1024/1024, workingSet/1024/1024),
+			},
+		}
+		result.Summary = fmt.Sprintf("Memory pressure in %s following CPU throttling", podKey)
 	} else {
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
