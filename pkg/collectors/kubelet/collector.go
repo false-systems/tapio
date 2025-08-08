@@ -11,6 +11,12 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -40,6 +46,97 @@ type Config struct {
 	Logger *zap.Logger
 }
 
+// Event data structures
+
+// NodeCPUEventData holds node CPU event data
+type NodeCPUEventData struct {
+	NodeName      string    `json:"node_name"`
+	CPUUsageNano  uint64    `json:"cpu_usage_nano"`
+	CPUUsageMilli uint64    `json:"cpu_usage_milli"`
+	Timestamp     time.Time `json:"timestamp"`
+}
+
+// NodeMemoryEventData holds node memory event data
+type NodeMemoryEventData struct {
+	NodeName         string    `json:"node_name"`
+	MemoryUsage      uint64    `json:"memory_usage"`
+	MemoryAvailable  uint64    `json:"memory_available"`
+	MemoryWorkingSet uint64    `json:"memory_working_set"`
+	Timestamp        time.Time `json:"timestamp"`
+}
+
+// CPUThrottlingEventData holds CPU throttling event data
+type CPUThrottlingEventData struct {
+	Namespace    string    `json:"namespace"`
+	Pod          string    `json:"pod"`
+	Container    string    `json:"container"`
+	CPUUsageNano uint64    `json:"cpu_usage_nano"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// MemoryPressureEventData holds memory pressure event data
+type MemoryPressureEventData struct {
+	Namespace        string    `json:"namespace"`
+	Pod              string    `json:"pod"`
+	Container        string    `json:"container"`
+	MemoryUsage      uint64    `json:"memory_usage"`
+	MemoryWorkingSet uint64    `json:"memory_working_set"`
+	Timestamp        time.Time `json:"timestamp"`
+}
+
+// EphemeralStorageEventData holds ephemeral storage event data
+type EphemeralStorageEventData struct {
+	Namespace      string    `json:"namespace"`
+	Pod            string    `json:"pod"`
+	UsedBytes      uint64    `json:"used_bytes"`
+	AvailableBytes uint64    `json:"available_bytes"`
+	UsagePercent   float64   `json:"usage_percent"`
+	Timestamp      time.Time `json:"timestamp"`
+}
+
+// ContainerWaitingEventData holds container waiting event data
+type ContainerWaitingEventData struct {
+	Namespace string    `json:"namespace"`
+	Pod       string    `json:"pod"`
+	Container string    `json:"container"`
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// ContainerTerminatedEventData holds container terminated event data
+type ContainerTerminatedEventData struct {
+	Namespace string    `json:"namespace"`
+	Pod       string    `json:"pod"`
+	Container string    `json:"container"`
+	ExitCode  int32     `json:"exit_code"`
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// CrashLoopEventData holds crash loop event data
+type CrashLoopEventData struct {
+	Namespace    string    `json:"namespace"`
+	Pod          string    `json:"pod"`
+	Container    string    `json:"container"`
+	RestartCount int32     `json:"restart_count"`
+	LastExitCode int32     `json:"last_exit_code"`
+	LastReason   string    `json:"last_reason"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// PodNotReadyEventData holds pod not ready event data
+type PodNotReadyEventData struct {
+	Namespace string    `json:"namespace"`
+	Pod       string    `json:"pod"`
+	Condition string    `json:"condition"`
+	Status    string    `json:"status"`
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -50,18 +147,96 @@ func DefaultConfig() *Config {
 	}
 }
 
+// KubeletInstrumentation provides telemetry specifically for kubelet collector
+type KubeletInstrumentation struct {
+	*telemetry.ServiceInstrumentation
+
+	// Kubelet-specific metrics
+	APILatency  metric.Float64Histogram
+	EventsTotal metric.Int64Counter
+	ErrorsTotal metric.Int64Counter
+	PollsActive metric.Int64UpDownCounter
+	APIFailures metric.Int64Counter
+}
+
+// NewKubeletInstrumentation creates instrumentation for kubelet collector
+func NewKubeletInstrumentation(logger *zap.Logger) (*KubeletInstrumentation, error) {
+	base, err := telemetry.NewServiceInstrumentation("kubelet-collector", logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create kubelet-specific metrics using otel.Meter directly
+	meter := otel.Meter("kubelet-collector")
+
+	apiLatency, err := meter.Float64Histogram(
+		"tapio.kubelet.api.latency",
+		metric.WithDescription("Kubelet API call latency in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	eventsTotal, err := meter.Int64Counter(
+		"tapio.kubelet.events.total",
+		metric.WithDescription("Total number of kubelet events collected"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		"tapio.kubelet.errors.total",
+		metric.WithDescription("Total number of kubelet collection errors"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	pollsActive, err := meter.Int64UpDownCounter(
+		"tapio.kubelet.polls.active",
+		metric.WithDescription("Number of active kubelet polling operations"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	apiFailures, err := meter.Int64Counter(
+		"tapio.kubelet.api.failures",
+		metric.WithDescription("Number of kubelet API failures by endpoint"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &KubeletInstrumentation{
+		ServiceInstrumentation: base,
+		APILatency:             apiLatency,
+		EventsTotal:            eventsTotal,
+		ErrorsTotal:            errorsTotal,
+		PollsActive:            pollsActive,
+		APIFailures:            apiFailures,
+	}, nil
+}
+
 // Collector implements the kubelet metrics collector
 type Collector struct {
-	name    string
-	config  *Config
-	client  *http.Client
-	events  chan collectors.RawEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	mu      sync.RWMutex
-	healthy bool
-	logger  *zap.Logger
+	name            string
+	config          *Config
+	client          *http.Client
+	events          chan collectors.RawEvent
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	mu              sync.RWMutex
+	healthy         bool
+	logger          *zap.Logger
+	instrumentation *KubeletInstrumentation
 
 	// Metrics
 	stats struct {
@@ -85,6 +260,12 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		config.Logger = logger
 	}
 
+	// Initialize OTEL instrumentation
+	instrumentation, err := NewKubeletInstrumentation(config.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OTEL instrumentation: %w", err)
+	}
+
 	// Create HTTP client with proper TLS config
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: config.Insecure,
@@ -106,12 +287,13 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 	}
 
 	return &Collector{
-		name:    name,
-		config:  config,
-		client:  client,
-		events:  make(chan collectors.RawEvent, 10000),
-		healthy: true,
-		logger:  config.Logger,
+		name:            name,
+		config:          config,
+		client:          client,
+		events:          make(chan collectors.RawEvent, 10000),
+		healthy:         true,
+		logger:          config.Logger,
+		instrumentation: instrumentation,
 	}, nil
 }
 
@@ -204,135 +386,217 @@ func (c *Collector) collectStats() {
 
 // fetchStats fetches and processes stats from kubelet
 func (c *Collector) fetchStats() error {
+	start := time.Now()
+	ctx, span := c.instrumentation.StartSpan(c.ctx, "kubelet.fetch_stats")
+	defer span.End()
+
+	// Track active poll
+	c.instrumentation.PollsActive.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("operation", "fetch_stats"),
+	))
+	defer c.instrumentation.PollsActive.Add(ctx, -1, metric.WithAttributes(
+		attribute.String("operation", "fetch_stats"),
+	))
+
 	url := fmt.Sprintf("https://%s/stats/summary", c.config.Address)
 	if c.config.Insecure {
 		url = fmt.Sprintf("http://%s/stats/summary", c.config.Address)
 	}
 
+	span.SetAttributes(
+		attribute.String("kubelet.endpoint", "/stats/summary"),
+		attribute.String("kubelet.url", url),
+	)
+
 	resp, err := c.client.Get(url)
 	if err != nil {
+		// Record API failure
+		c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("endpoint", "/stats/summary"),
+			attribute.String("error", "request_failed"),
+		))
+		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "api_request"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to fetch stats")
 		return fmt.Errorf("failed to fetch stats: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// Record API failure
+		c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("endpoint", "/stats/summary"),
+			attribute.String("error", "http_status"),
+			attribute.Int("status_code", resp.StatusCode),
+		))
+		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "api_status"),
+		))
+
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return fmt.Errorf("stats request failed: %s - failed to read response body: %w", resp.Status, readErr)
+			err := fmt.Errorf("stats request failed: %s - failed to read response body: %w", resp.Status, readErr)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return err
 		}
-		return fmt.Errorf("stats request failed: %s - %s", resp.Status, string(body))
+		err := fmt.Errorf("stats request failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	var summary statsv1alpha1.Summary
 	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "decode"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to decode stats")
 		return fmt.Errorf("failed to decode stats: %w", err)
 	}
 
+	// Record API latency
+	duration := time.Since(start)
+	c.instrumentation.APILatency.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		attribute.String("endpoint", "/stats/summary"),
+	))
+
+	span.SetAttributes(
+		attribute.Float64("duration_seconds", duration.Seconds()),
+		attribute.Int("node_stats_count", 1),
+		attribute.Int("pod_stats_count", len(summary.Pods)),
+	)
+
 	// Process node stats
 	if summary.Node.CPU != nil {
-		c.sendNodeCPUEvent(&summary)
+		c.sendNodeCPUEvent(ctx, &summary)
 	}
 
 	if summary.Node.Memory != nil {
-		c.sendNodeMemoryEvent(&summary)
+		c.sendNodeMemoryEvent(ctx, &summary)
 	}
 
 	// Process pod stats
 	for _, pod := range summary.Pods {
-		c.processPodStats(&pod)
+		c.processPodStats(ctx, &pod)
 	}
 
 	return nil
 }
 
 // sendNodeCPUEvent sends node CPU metrics
-func (c *Collector) sendNodeCPUEvent(summary *statsv1alpha1.Summary) {
+func (c *Collector) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1.Summary) {
+	eventData := NodeCPUEventData{
+		NodeName:      summary.Node.NodeName,
+		CPUUsageNano:  *summary.Node.CPU.UsageNanoCores,
+		CPUUsageMilli: *summary.Node.CPU.UsageNanoCores / 1000000,
+		Timestamp:     summary.Node.CPU.Time.Time,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		c.logger.Error("Failed to marshal node CPU event data", zap.Error(err))
+		c.recordError()
+		return
+	}
+
 	metadata := map[string]string{
 		"collector":       "kubelet",
 		"event_type":      "node_cpu",
 		"node_name":       summary.Node.NodeName,
 		"k8s_node":        summary.Node.NodeName,
-		"cpu_usage_nano":  fmt.Sprintf("%d", *summary.Node.CPU.UsageNanoCores),
-		"cpu_usage_milli": fmt.Sprintf("%d", *summary.Node.CPU.UsageNanoCores/1000000),
+		"cpu_usage_nano":  fmt.Sprintf("%d", eventData.CPUUsageNano),
+		"cpu_usage_milli": fmt.Sprintf("%d", eventData.CPUUsageMilli),
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
-		"node_name":       summary.Node.NodeName,
-		"cpu_usage_nano":  *summary.Node.CPU.UsageNanoCores,
-		"cpu_usage_milli": *summary.Node.CPU.UsageNanoCores / 1000000,
-		"timestamp":       summary.Node.CPU.Time.Time,
-	})
-	if err != nil {
-		c.logger.Error("Failed to marshal node CPU event data", zap.Error(err))
-		return
-	}
+	// Extract trace context from current span if available
+	traceID, spanID := c.extractTraceContext(ctx)
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "kubelet_node_cpu",
 		Data:      data,
 		Metadata:  metadata,
-		TraceID:   collectors.GenerateTraceID(),
-		SpanID:    collectors.GenerateSpanID(),
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 
 	select {
 	case c.events <- event:
 		c.recordEvent()
+		// Record OTEL event metric
+		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", "kubelet_node_cpu"),
+			attribute.String("node_name", summary.Node.NodeName),
+		))
 	case <-c.ctx.Done():
 	}
 }
 
 // sendNodeMemoryEvent sends node memory metrics
-func (c *Collector) sendNodeMemoryEvent(summary *statsv1alpha1.Summary) {
+func (c *Collector) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alpha1.Summary) {
+	eventData := NodeMemoryEventData{
+		NodeName:         summary.Node.NodeName,
+		MemoryUsage:      *summary.Node.Memory.UsageBytes,
+		MemoryAvailable:  *summary.Node.Memory.AvailableBytes,
+		MemoryWorkingSet: *summary.Node.Memory.WorkingSetBytes,
+		Timestamp:        summary.Node.Memory.Time.Time,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		c.logger.Error("Failed to marshal node memory event data", zap.Error(err))
+		c.recordError()
+		return
+	}
+
 	metadata := map[string]string{
 		"collector":          "kubelet",
 		"event_type":         "node_memory",
 		"node_name":          summary.Node.NodeName,
 		"k8s_node":           summary.Node.NodeName,
-		"memory_usage_bytes": fmt.Sprintf("%d", *summary.Node.Memory.UsageBytes),
-		"memory_available":   fmt.Sprintf("%d", *summary.Node.Memory.AvailableBytes),
-		"memory_working_set": fmt.Sprintf("%d", *summary.Node.Memory.WorkingSetBytes),
+		"memory_usage_bytes": fmt.Sprintf("%d", eventData.MemoryUsage),
+		"memory_available":   fmt.Sprintf("%d", eventData.MemoryAvailable),
+		"memory_working_set": fmt.Sprintf("%d", eventData.MemoryWorkingSet),
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
-		"node_name":          summary.Node.NodeName,
-		"memory_usage":       *summary.Node.Memory.UsageBytes,
-		"memory_available":   *summary.Node.Memory.AvailableBytes,
-		"memory_working_set": *summary.Node.Memory.WorkingSetBytes,
-		"timestamp":          summary.Node.Memory.Time.Time,
-	})
-	if err != nil {
-		c.logger.Error("Failed to marshal node memory event data", zap.Error(err))
-		return
-	}
+	// Extract trace context from current span if available
+	traceID, spanID := c.extractTraceContext(ctx)
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "kubelet_node_memory",
 		Data:      data,
 		Metadata:  metadata,
-		TraceID:   collectors.GenerateTraceID(),
-		SpanID:    collectors.GenerateSpanID(),
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 
 	select {
 	case c.events <- event:
 		c.recordEvent()
+		// Record OTEL event metric
+		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", "kubelet_node_memory"),
+			attribute.String("node_name", summary.Node.NodeName),
+		))
 	case <-c.ctx.Done():
 	}
 }
 
 // processPodStats processes stats for a single pod
-func (c *Collector) processPodStats(pod *statsv1alpha1.PodStats) {
+func (c *Collector) processPodStats(ctx context.Context, pod *statsv1alpha1.PodStats) {
 	// Check for CPU throttling
 	for _, container := range pod.Containers {
 		if container.CPU != nil && container.CPU.UsageNanoCores != nil {
-			c.checkCPUThrottling(pod, &container)
+			c.checkCPUThrottling(ctx, pod, &container)
 		}
 
 		if container.Memory != nil {
-			c.checkMemoryPressure(pod, &container)
+			c.checkMemoryPressure(ctx, pod, &container)
 		}
 
 		// Note: Restart count is not available in stats API
@@ -341,14 +605,29 @@ func (c *Collector) processPodStats(pod *statsv1alpha1.PodStats) {
 
 	// Check ephemeral storage
 	if pod.EphemeralStorage != nil {
-		c.checkEphemeralStorage(pod)
+		c.checkEphemeralStorage(ctx, pod)
 	}
 }
 
 // checkCPUThrottling detects CPU throttling
-func (c *Collector) checkCPUThrottling(pod *statsv1alpha1.PodStats, container *statsv1alpha1.ContainerStats) {
+func (c *Collector) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.PodStats, container *statsv1alpha1.ContainerStats) {
 	// Note: Real throttling metrics would come from cAdvisor metrics endpoint
 	// This is a simplified version
+	eventData := CPUThrottlingEventData{
+		Namespace:    pod.PodRef.Namespace,
+		Pod:          pod.PodRef.Name,
+		Container:    container.Name,
+		CPUUsageNano: *container.CPU.UsageNanoCores,
+		Timestamp:    container.CPU.Time.Time,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		c.logger.Error("Failed to marshal CPU throttling event data", zap.Error(err))
+		c.recordError()
+		return
+	}
+
 	metadata := map[string]string{
 		"collector":      "kubelet",
 		"event_type":     "kubelet_cpu_throttling",
@@ -357,40 +636,54 @@ func (c *Collector) checkCPUThrottling(pod *statsv1alpha1.PodStats, container *s
 		"k8s_kind":       "Pod",
 		"k8s_uid":        string(pod.PodRef.UID),
 		"container_name": container.Name,
-		"cpu_usage_nano": fmt.Sprintf("%d", *container.CPU.UsageNanoCores),
+		"cpu_usage_nano": fmt.Sprintf("%d", eventData.CPUUsageNano),
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
-		"namespace":      pod.PodRef.Namespace,
-		"pod":            pod.PodRef.Name,
-		"container":      container.Name,
-		"cpu_usage_nano": *container.CPU.UsageNanoCores,
-		"timestamp":      container.CPU.Time.Time,
-	})
-	if err != nil {
-		c.logger.Error("Failed to marshal CPU throttling event data", zap.Error(err))
-		return
-	}
+	// Extract trace context from current span if available
+	traceID, spanID := c.extractTraceContext(ctx)
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "kubelet_cpu_throttling",
 		Data:      data,
 		Metadata:  metadata,
-		TraceID:   c.getOrGenerateTraceID(types.UID(pod.PodRef.UID)),
-		SpanID:    collectors.GenerateSpanID(),
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 
 	select {
 	case c.events <- event:
 		c.recordEvent()
+		// Record OTEL event metric
+		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", "kubelet_cpu_throttling"),
+			attribute.String("namespace", pod.PodRef.Namespace),
+			attribute.String("pod", pod.PodRef.Name),
+			attribute.String("container", container.Name),
+		))
 	case <-c.ctx.Done():
 	}
 }
 
 // checkMemoryPressure detects memory pressure
-func (c *Collector) checkMemoryPressure(pod *statsv1alpha1.PodStats, container *statsv1alpha1.ContainerStats) {
+func (c *Collector) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.PodStats, container *statsv1alpha1.ContainerStats) {
 	if container.Memory.WorkingSetBytes == nil || container.Memory.UsageBytes == nil {
+		return
+	}
+
+	eventData := MemoryPressureEventData{
+		Namespace:        pod.PodRef.Namespace,
+		Pod:              pod.PodRef.Name,
+		Container:        container.Name,
+		MemoryUsage:      *container.Memory.UsageBytes,
+		MemoryWorkingSet: *container.Memory.WorkingSetBytes,
+		Timestamp:        container.Memory.Time.Time,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		c.logger.Error("Failed to marshal memory pressure event data", zap.Error(err))
+		c.recordError()
 		return
 	}
 
@@ -402,8 +695,8 @@ func (c *Collector) checkMemoryPressure(pod *statsv1alpha1.PodStats, container *
 		"k8s_kind":           "Pod",
 		"k8s_uid":            string(pod.PodRef.UID),
 		"container_name":     container.Name,
-		"memory_usage":       fmt.Sprintf("%d", *container.Memory.UsageBytes),
-		"memory_working_set": fmt.Sprintf("%d", *container.Memory.WorkingSetBytes),
+		"memory_usage":       fmt.Sprintf("%d", eventData.MemoryUsage),
+		"memory_working_set": fmt.Sprintf("%d", eventData.MemoryWorkingSet),
 	}
 
 	// Check if RSS is available (indicates memory pressure)
@@ -411,37 +704,34 @@ func (c *Collector) checkMemoryPressure(pod *statsv1alpha1.PodStats, container *
 		metadata["memory_rss"] = fmt.Sprintf("%d", *container.Memory.RSSBytes)
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
-		"namespace":          pod.PodRef.Namespace,
-		"pod":                pod.PodRef.Name,
-		"container":          container.Name,
-		"memory_usage":       *container.Memory.UsageBytes,
-		"memory_working_set": *container.Memory.WorkingSetBytes,
-		"timestamp":          container.Memory.Time.Time,
-	})
-	if err != nil {
-		c.logger.Error("Failed to marshal memory pressure event data", zap.Error(err))
-		return
-	}
+	// Extract trace context from current span if available
+	traceID, spanID := c.extractTraceContext(ctx)
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "kubelet_memory_pressure",
 		Data:      data,
 		Metadata:  metadata,
-		TraceID:   c.getOrGenerateTraceID(types.UID(pod.PodRef.UID)),
-		SpanID:    collectors.GenerateSpanID(),
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 
 	select {
 	case c.events <- event:
 		c.recordEvent()
+		// Record OTEL event metric
+		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", "kubelet_memory_pressure"),
+			attribute.String("namespace", pod.PodRef.Namespace),
+			attribute.String("pod", pod.PodRef.Name),
+			attribute.String("container", container.Name),
+		))
 	case <-c.ctx.Done():
 	}
 }
 
 // checkEphemeralStorage checks ephemeral storage usage
-func (c *Collector) checkEphemeralStorage(pod *statsv1alpha1.PodStats) {
+func (c *Collector) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha1.PodStats) {
 	if pod.EphemeralStorage.UsedBytes == nil || pod.EphemeralStorage.AvailableBytes == nil {
 		return
 	}
@@ -455,6 +745,22 @@ func (c *Collector) checkEphemeralStorage(pod *statsv1alpha1.PodStats) {
 
 	// Only send event if usage is significant (>50%)
 	if usagePercent > 50 {
+		eventData := EphemeralStorageEventData{
+			Namespace:      pod.PodRef.Namespace,
+			Pod:            pod.PodRef.Name,
+			UsedBytes:      usedBytes,
+			AvailableBytes: availableBytes,
+			UsagePercent:   usagePercent,
+			Timestamp:      pod.EphemeralStorage.Time.Time,
+		}
+
+		data, err := json.Marshal(eventData)
+		if err != nil {
+			c.logger.Error("Failed to marshal ephemeral storage event data", zap.Error(err))
+			c.recordError()
+			return
+		}
+
 		metadata := map[string]string{
 			"collector":               "kubelet",
 			"event_type":              "kubelet_ephemeral_storage",
@@ -462,36 +768,32 @@ func (c *Collector) checkEphemeralStorage(pod *statsv1alpha1.PodStats) {
 			"k8s_name":                pod.PodRef.Name,
 			"k8s_kind":                "Pod",
 			"k8s_uid":                 string(pod.PodRef.UID),
-			"storage_used_bytes":      fmt.Sprintf("%d", usedBytes),
-			"storage_available_bytes": fmt.Sprintf("%d", availableBytes),
-			"storage_usage_percent":   fmt.Sprintf("%.2f", usagePercent),
+			"storage_used_bytes":      fmt.Sprintf("%d", eventData.UsedBytes),
+			"storage_available_bytes": fmt.Sprintf("%d", eventData.AvailableBytes),
+			"storage_usage_percent":   fmt.Sprintf("%.2f", eventData.UsagePercent),
 		}
 
-		data, err := json.Marshal(map[string]interface{}{
-			"namespace":       pod.PodRef.Namespace,
-			"pod":             pod.PodRef.Name,
-			"used_bytes":      usedBytes,
-			"available_bytes": availableBytes,
-			"usage_percent":   usagePercent,
-			"timestamp":       pod.EphemeralStorage.Time.Time,
-		})
-		if err != nil {
-			c.logger.Error("Failed to marshal ephemeral storage event data", zap.Error(err))
-			return
-		}
+		// Extract trace context from current span if available
+		traceID, spanID := c.extractTraceContext(ctx)
 
 		event := collectors.RawEvent{
 			Timestamp: time.Now(),
 			Type:      "kubelet_ephemeral_storage",
 			Data:      data,
 			Metadata:  metadata,
-			TraceID:   c.getOrGenerateTraceID(types.UID(pod.PodRef.UID)),
-			SpanID:    collectors.GenerateSpanID(),
+			TraceID:   traceID,
+			SpanID:    spanID,
 		}
 
 		select {
 		case c.events <- event:
 			c.recordEvent()
+			// Record OTEL event metric
+			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", "kubelet_ephemeral_storage"),
+				attribute.String("namespace", pod.PodRef.Namespace),
+				attribute.String("pod", pod.PodRef.Name),
+			))
 		case <-c.ctx.Done():
 		}
 	}
@@ -519,66 +821,141 @@ func (c *Collector) collectPodMetrics() {
 
 // fetchPodLifecycle fetches pod status from kubelet
 func (c *Collector) fetchPodLifecycle() error {
+	start := time.Now()
+	ctx, span := c.instrumentation.StartSpan(c.ctx, "kubelet.fetch_pod_lifecycle")
+	defer span.End()
+
+	// Track active poll
+	c.instrumentation.PollsActive.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("operation", "fetch_pod_lifecycle"),
+	))
+	defer c.instrumentation.PollsActive.Add(ctx, -1, metric.WithAttributes(
+		attribute.String("operation", "fetch_pod_lifecycle"),
+	))
+
 	url := fmt.Sprintf("https://%s/pods", c.config.Address)
 	if c.config.Insecure {
 		url = fmt.Sprintf("http://%s/pods", c.config.Address)
 	}
 
+	span.SetAttributes(
+		attribute.String("kubelet.endpoint", "/pods"),
+		attribute.String("kubelet.url", url),
+	)
+
 	resp, err := c.client.Get(url)
 	if err != nil {
+		// Record API failure
+		c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("endpoint", "/pods"),
+			attribute.String("error", "request_failed"),
+		))
+		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "api_request"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to fetch pods")
 		return fmt.Errorf("failed to fetch pods: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// Record API failure
+		c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("endpoint", "/pods"),
+			attribute.String("error", "http_status"),
+			attribute.Int("status_code", resp.StatusCode),
+		))
+		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "api_status"),
+		))
+
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return fmt.Errorf("pods request failed: %s - failed to read response body: %w", resp.Status, readErr)
+			err := fmt.Errorf("pods request failed: %s - failed to read response body: %w", resp.Status, readErr)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return err
 		}
-		return fmt.Errorf("pods request failed: %s - %s", resp.Status, string(body))
+		err := fmt.Errorf("pods request failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	var podList v1.PodList
 	if err := json.NewDecoder(resp.Body).Decode(&podList); err != nil {
+		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "decode"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to decode pods")
 		return fmt.Errorf("failed to decode pods: %w", err)
 	}
 
+	// Record API latency
+	duration := time.Since(start)
+	c.instrumentation.APILatency.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		attribute.String("endpoint", "/pods"),
+	))
+
+	span.SetAttributes(
+		attribute.Float64("duration_seconds", duration.Seconds()),
+		attribute.Int("pods_count", len(podList.Items)),
+	)
+
 	// Process pod statuses
 	for _, pod := range podList.Items {
-		c.processPodStatus(&pod)
+		c.processPodStatus(ctx, &pod)
 	}
 
 	return nil
 }
 
 // processPodStatus checks for pod issues
-func (c *Collector) processPodStatus(pod *v1.Pod) {
+func (c *Collector) processPodStatus(ctx context.Context, pod *v1.Pod) {
 	// Check container statuses
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.State.Waiting != nil {
-			c.sendContainerWaitingEvent(pod, &status)
+			c.sendContainerWaitingEvent(ctx, pod, &status)
 		}
 
 		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
-			c.sendContainerTerminatedEvent(pod, &status)
+			c.sendContainerTerminatedEvent(ctx, pod, &status)
 		}
 
 		// Check last termination state for crash loops
 		if status.LastTerminationState.Terminated != nil {
-			c.sendCrashLoopEvent(pod, &status)
+			c.sendCrashLoopEvent(ctx, pod, &status)
 		}
 	}
 
 	// Check pod conditions
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == v1.PodReady && condition.Status != v1.ConditionTrue {
-			c.sendPodNotReadyEvent(pod, &condition)
+			c.sendPodNotReadyEvent(ctx, pod, &condition)
 		}
 	}
 }
 
 // sendContainerWaitingEvent sends events for waiting containers
-func (c *Collector) sendContainerWaitingEvent(pod *v1.Pod, status *v1.ContainerStatus) {
+func (c *Collector) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
+	eventData := ContainerWaitingEventData{
+		Namespace: pod.Namespace,
+		Pod:       pod.Name,
+		Container: status.Name,
+		Reason:    status.State.Waiting.Reason,
+		Message:   status.State.Waiting.Message,
+		Timestamp: time.Now(),
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		c.logger.Error("Failed to marshal container waiting event data", zap.Error(err))
+		c.recordError()
+		return
+	}
+
 	metadata := map[string]string{
 		"collector":       "kubelet",
 		"event_type":      "kubelet_container_waiting",
@@ -587,41 +964,56 @@ func (c *Collector) sendContainerWaitingEvent(pod *v1.Pod, status *v1.ContainerS
 		"k8s_kind":        "Pod",
 		"k8s_uid":         string(pod.UID),
 		"container_name":  status.Name,
-		"waiting_reason":  status.State.Waiting.Reason,
-		"waiting_message": status.State.Waiting.Message,
+		"waiting_reason":  eventData.Reason,
+		"waiting_message": eventData.Message,
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
-		"namespace": pod.Namespace,
-		"pod":       pod.Name,
-		"container": status.Name,
-		"reason":    status.State.Waiting.Reason,
-		"message":   status.State.Waiting.Message,
-		"timestamp": time.Now(),
-	})
-	if err != nil {
-		c.logger.Error("Failed to marshal container waiting event data", zap.Error(err))
-		return
-	}
+	// Extract trace context from current span if available
+	traceID, spanID := c.extractTraceContext(ctx)
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "kubelet_container_waiting",
 		Data:      data,
 		Metadata:  metadata,
-		TraceID:   c.getOrGenerateTraceID(pod.UID),
-		SpanID:    collectors.GenerateSpanID(),
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 
 	select {
 	case c.events <- event:
 		c.recordEvent()
+		// Record OTEL event metric
+		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", "kubelet_container_waiting"),
+			attribute.String("namespace", pod.Namespace),
+			attribute.String("pod", pod.Name),
+			attribute.String("container", status.Name),
+			attribute.String("waiting_reason", eventData.Reason),
+		))
 	case <-c.ctx.Done():
 	}
 }
 
 // sendContainerTerminatedEvent sends events for terminated containers
-func (c *Collector) sendContainerTerminatedEvent(pod *v1.Pod, status *v1.ContainerStatus) {
+func (c *Collector) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
+	eventData := ContainerTerminatedEventData{
+		Namespace: pod.Namespace,
+		Pod:       pod.Name,
+		Container: status.Name,
+		ExitCode:  status.State.Terminated.ExitCode,
+		Reason:    status.State.Terminated.Reason,
+		Message:   status.State.Terminated.Message,
+		Timestamp: status.State.Terminated.FinishedAt.Time,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		c.logger.Error("Failed to marshal container terminated event data", zap.Error(err))
+		c.recordError()
+		return
+	}
+
 	metadata := map[string]string{
 		"collector":      "kubelet",
 		"event_type":     "container_terminated",
@@ -630,44 +1022,58 @@ func (c *Collector) sendContainerTerminatedEvent(pod *v1.Pod, status *v1.Contain
 		"k8s_kind":       "Pod",
 		"k8s_uid":        string(pod.UID),
 		"container_name": status.Name,
-		"exit_code":      fmt.Sprintf("%d", status.State.Terminated.ExitCode),
-		"exit_reason":    status.State.Terminated.Reason,
-		"exit_message":   status.State.Terminated.Message,
+		"exit_code":      fmt.Sprintf("%d", eventData.ExitCode),
+		"exit_reason":    eventData.Reason,
+		"exit_message":   eventData.Message,
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
-		"namespace": pod.Namespace,
-		"pod":       pod.Name,
-		"container": status.Name,
-		"exit_code": status.State.Terminated.ExitCode,
-		"reason":    status.State.Terminated.Reason,
-		"message":   status.State.Terminated.Message,
-		"timestamp": status.State.Terminated.FinishedAt.Time,
-	})
-	if err != nil {
-		c.logger.Error("Failed to marshal container terminated event data", zap.Error(err))
-		return
-	}
+	// Extract trace context from current span if available
+	traceID, spanID := c.extractTraceContext(ctx)
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "kubelet_container_terminated",
 		Data:      data,
 		Metadata:  metadata,
-		TraceID:   c.getOrGenerateTraceID(pod.UID),
-		SpanID:    collectors.GenerateSpanID(),
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 
 	select {
 	case c.events <- event:
 		c.recordEvent()
+		// Record OTEL event metric
+		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", "kubelet_container_terminated"),
+			attribute.String("namespace", pod.Namespace),
+			attribute.String("pod", pod.Name),
+			attribute.String("container", status.Name),
+			attribute.Int("exit_code", int(eventData.ExitCode)),
+		))
 	case <-c.ctx.Done():
 	}
 }
 
 // sendCrashLoopEvent detects crash loop patterns
-func (c *Collector) sendCrashLoopEvent(pod *v1.Pod, status *v1.ContainerStatus) {
+func (c *Collector) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
 	if status.RestartCount > 3 { // Likely in crash loop
+		eventData := CrashLoopEventData{
+			Namespace:    pod.Namespace,
+			Pod:          pod.Name,
+			Container:    status.Name,
+			RestartCount: status.RestartCount,
+			LastExitCode: status.LastTerminationState.Terminated.ExitCode,
+			LastReason:   status.LastTerminationState.Terminated.Reason,
+			Timestamp:    time.Now(),
+		}
+
+		data, err := json.Marshal(eventData)
+		if err != nil {
+			c.logger.Error("Failed to marshal crash loop event data", zap.Error(err))
+			c.recordError()
+			return
+		}
+
 		metadata := map[string]string{
 			"collector":        "kubelet",
 			"event_type":       "kubelet_crash_loop",
@@ -676,44 +1082,58 @@ func (c *Collector) sendCrashLoopEvent(pod *v1.Pod, status *v1.ContainerStatus) 
 			"k8s_kind":         "Pod",
 			"k8s_uid":          string(pod.UID),
 			"container_name":   status.Name,
-			"restart_count":    fmt.Sprintf("%d", status.RestartCount),
-			"last_exit_code":   fmt.Sprintf("%d", status.LastTerminationState.Terminated.ExitCode),
-			"last_exit_reason": status.LastTerminationState.Terminated.Reason,
+			"restart_count":    fmt.Sprintf("%d", eventData.RestartCount),
+			"last_exit_code":   fmt.Sprintf("%d", eventData.LastExitCode),
+			"last_exit_reason": eventData.LastReason,
 		}
 
-		data, err := json.Marshal(map[string]interface{}{
-			"namespace":      pod.Namespace,
-			"pod":            pod.Name,
-			"container":      status.Name,
-			"restart_count":  status.RestartCount,
-			"last_exit_code": status.LastTerminationState.Terminated.ExitCode,
-			"last_reason":    status.LastTerminationState.Terminated.Reason,
-			"timestamp":      time.Now(),
-		})
-		if err != nil {
-			c.logger.Error("Failed to marshal crash loop event data", zap.Error(err))
-			return
-		}
+		// Extract trace context from current span if available
+		traceID, spanID := c.extractTraceContext(ctx)
 
 		event := collectors.RawEvent{
 			Timestamp: time.Now(),
 			Type:      "kubelet_crash_loop",
 			Data:      data,
 			Metadata:  metadata,
-			TraceID:   c.getOrGenerateTraceID(pod.UID),
-			SpanID:    collectors.GenerateSpanID(),
+			TraceID:   traceID,
+			SpanID:    spanID,
 		}
 
 		select {
 		case c.events <- event:
 			c.recordEvent()
+			// Record OTEL event metric
+			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", "kubelet_crash_loop"),
+				attribute.String("namespace", pod.Namespace),
+				attribute.String("pod", pod.Name),
+				attribute.String("container", status.Name),
+				attribute.Int("restart_count", int(eventData.RestartCount)),
+			))
 		case <-c.ctx.Done():
 		}
 	}
 }
 
 // sendPodNotReadyEvent sends events for pods not ready
-func (c *Collector) sendPodNotReadyEvent(pod *v1.Pod, condition *v1.PodCondition) {
+func (c *Collector) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condition *v1.PodCondition) {
+	eventData := PodNotReadyEventData{
+		Namespace: pod.Namespace,
+		Pod:       pod.Name,
+		Condition: string(condition.Type),
+		Status:    string(condition.Status),
+		Reason:    condition.Reason,
+		Message:   condition.Message,
+		Timestamp: condition.LastTransitionTime.Time,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		c.logger.Error("Failed to marshal pod not ready event data", zap.Error(err))
+		c.recordError()
+		return
+	}
+
 	metadata := map[string]string{
 		"collector":         "kubelet",
 		"event_type":        "pod_not_ready",
@@ -721,43 +1141,51 @@ func (c *Collector) sendPodNotReadyEvent(pod *v1.Pod, condition *v1.PodCondition
 		"k8s_name":          pod.Name,
 		"k8s_kind":          "Pod",
 		"k8s_uid":           string(pod.UID),
-		"condition_type":    string(condition.Type),
-		"condition_status":  string(condition.Status),
-		"condition_reason":  condition.Reason,
-		"condition_message": condition.Message,
+		"condition_type":    eventData.Condition,
+		"condition_status":  eventData.Status,
+		"condition_reason":  eventData.Reason,
+		"condition_message": eventData.Message,
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
-		"namespace": pod.Namespace,
-		"pod":       pod.Name,
-		"condition": string(condition.Type),
-		"status":    string(condition.Status),
-		"reason":    condition.Reason,
-		"message":   condition.Message,
-		"timestamp": condition.LastTransitionTime.Time,
-	})
-	if err != nil {
-		c.logger.Error("Failed to marshal pod not ready event data", zap.Error(err))
-		return
-	}
+	// Extract trace context from current span if available
+	traceID, spanID := c.extractTraceContext(ctx)
 
 	event := collectors.RawEvent{
 		Timestamp: time.Now(),
 		Type:      "kubelet_pod_not_ready",
 		Data:      data,
 		Metadata:  metadata,
-		TraceID:   c.getOrGenerateTraceID(pod.UID),
-		SpanID:    collectors.GenerateSpanID(),
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 
 	select {
 	case c.events <- event:
 		c.recordEvent()
+		// Record OTEL event metric
+		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", "kubelet_pod_not_ready"),
+			attribute.String("namespace", pod.Namespace),
+			attribute.String("pod", pod.Name),
+			attribute.String("condition_type", eventData.Condition),
+			attribute.String("condition_reason", eventData.Reason),
+		))
 	case <-c.ctx.Done():
 	}
 }
 
 // Helper methods
+
+// extractTraceContext extracts trace and span IDs from context
+func (c *Collector) extractTraceContext(ctx context.Context) (traceID, spanID string) {
+	traceID = collectors.GenerateTraceID()
+	spanID = collectors.GenerateSpanID()
+	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+		traceID = span.SpanContext().TraceID().String()
+		spanID = span.SpanContext().SpanID().String()
+	}
+	return traceID, spanID
+}
 
 // podTraceMap maintains trace IDs per pod
 var podTraceMap = make(map[types.UID]string)
