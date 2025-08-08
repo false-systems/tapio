@@ -59,5 +59,5 @@ type Dependency struct {
 	Type        string
 	Description string
 	Required    bool
-	HealthCheck func() error
+	HealthCheck func(context.Context) error
 }

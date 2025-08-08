@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
+	neo4jclient "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
-	"github.com/yairfalse/tapio/pkg/intelligence/graph"
 	"go.uber.org/zap"
 )
 
@@ -20,7 +20,7 @@ func TestNeo4jStorage(t *testing.T) {
 	}
 
 	logger, _ := zap.NewDevelopment()
-	config := graph.Config{
+	config := neo4jclient.Config{
 		URI:      "bolt://localhost:7687",
 		Username: "neo4j",
 		Password: "password",

@@ -92,6 +92,11 @@ func (b *BaseCorrelator) Version() string {
 	return b.version
 }
 
+// GetCapabilities returns the correlator capabilities
+func (b *BaseCorrelator) GetCapabilities() CorrelatorCapabilities {
+	return b.capabilities
+}
+
 // ValidateEvent checks if an event can be processed
 func (b *BaseCorrelator) ValidateEvent(event *domain.UnifiedEvent) error {
 	// Check event type
@@ -139,6 +144,9 @@ func (b *BaseCorrelator) ValidateEvent(event *domain.UnifiedEvent) error {
 func (b *BaseCorrelator) hasField(event *domain.UnifiedEvent, field string) bool {
 	switch field {
 	case "cluster":
+		if event.K8sContext != nil && event.K8sContext.ClusterName != "" {
+			return true
+		}
 		return event.Attributes["cluster"] != nil && event.Attributes["cluster"] != ""
 	case "namespace":
 		return event.K8sContext != nil && event.K8sContext.Namespace != ""
