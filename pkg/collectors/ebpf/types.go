@@ -70,10 +70,15 @@ type MountInfo struct {
 
 // CollectorStats tracks collector statistics
 type CollectorStats struct {
-	EventsCollected uint64
-	EventsDropped   uint64
-	ErrorCount      uint64
-	LastEventTime   time.Time
+	EventsCollected      uint64
+	EventsDropped        uint64
+	ErrorCount           uint64
+	LastEventTime        time.Time
+	PerfBufferSize       uint64
+	PerfBufferCapacity   uint64
+	PerfBatchesProcessed uint64
+	PerfEventsProcessed  uint64
+	PerfPoolInUse        uint64
 }
 
 // DNSQueryInfo represents DNS query information for service discovery

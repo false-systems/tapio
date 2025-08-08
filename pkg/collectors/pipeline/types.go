@@ -7,6 +7,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.uber.org/zap"
 )
 
 // EventPipeline manages the flow of events from collectors to NATS
@@ -14,6 +15,7 @@ type EventPipeline struct {
 	collectors map[string]collectors.Collector
 	enricher   *K8sEnricher
 	publisher  *NATSPublisher
+	logger     *zap.Logger
 
 	eventsChan chan *collectors.RawEvent
 	workers    int

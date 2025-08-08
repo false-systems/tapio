@@ -138,3 +138,77 @@ func TestResourceEventHandler(t *testing.T) {
 	assert.NotNil(t, handler.UpdateFunc)
 	assert.NotNil(t, handler.DeleteFunc)
 }
+
+func TestContextCancellation(t *testing.T) {
+	logger := zap.NewNop()
+	config := DefaultConfig()
+	collector, err := New(logger, config)
+	require.NoError(t, err)
+
+	// Create a context that we can cancel
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start the collector in a goroutine since it may hang on K8s connection
+	startErr := make(chan error, 1)
+	go func() {
+		startErr <- collector.Start(ctx)
+	}()
+
+	// Give it a moment to try to start
+	select {
+	case err := <-startErr:
+		if err != nil {
+			t.Logf("Collector failed to start (expected in CI/test env): %v", err)
+			// Even if start fails, we can test context propagation
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Collector might be trying to connect, that's OK
+	}
+
+	// Cancel the context
+	cancel()
+
+	// Give it time to process cancellation
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify collector recognizes cancellation
+	assert.False(t, collector.IsHealthy(), "Collector should not be healthy after context cancellation")
+
+	// Stop should complete without error
+	err = collector.Stop()
+	require.NoError(t, err)
+}
+
+func TestContextPropagationToWatchers(t *testing.T) {
+	logger := zap.NewNop()
+	config := DefaultConfig()
+	collector, err := New(logger, config)
+	require.NoError(t, err)
+
+	// Ensure collector has context set up properly
+	ctx, cancel := context.WithCancel(context.Background())
+	collector.ctx, collector.cancel = context.WithCancel(ctx)
+
+	// Verify context is set
+	assert.NotNil(t, collector.ctx, "Collector context should be set")
+
+	// Test that setupWatchers doesn't panic when using the context
+	// Note: This will fail due to no K8s connection, but should not panic
+	err = collector.setupWatchers()
+	if err != nil {
+		t.Logf("setupWatchers failed as expected in test environment: %v", err)
+		// This is expected in test environment without K8s
+	}
+
+	// Cancel context and verify
+	cancel()
+
+	select {
+	case <-collector.ctx.Done():
+		// Context properly cancelled
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Context should have been cancelled")
+	}
+
+	collector.Stop()
+}
