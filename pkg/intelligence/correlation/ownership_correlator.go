@@ -350,11 +350,16 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 		if rsValue, found := record.Get("rs"); found && rsValue != nil {
 			if rsNode, ok := rsValue.(map[string]interface{}); ok {
 				if props, ok := rsNode["properties"].(map[string]interface{}); ok {
-					rsName, _ := props["name"].(string)
-					ownerChain = append(ownerChain, fmt.Sprintf("ReplicaSet/%s", rsName))
-					if ownerType == "" {
-						ownerType = "ReplicaSet"
-						ownerId = rsName
+					if rsName, ok := props["name"].(string); ok {
+						ownerChain = append(ownerChain, fmt.Sprintf("ReplicaSet/%s", rsName))
+						if ownerType == "" {
+							ownerType = "ReplicaSet"
+							ownerId = rsName
+						}
+					} else {
+						o.logger.Warn("Failed to extract ReplicaSet name for ownership chain",
+							zap.String("pod", podName),
+							zap.Any("props", props))
 					}
 				}
 			}
@@ -372,10 +377,15 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 		if dsValue, found := record.Get("ds"); found && dsValue != nil {
 			if dsNode, ok := dsValue.(map[string]interface{}); ok {
 				if props, ok := dsNode["properties"].(map[string]interface{}); ok {
-					dsName, _ := props["name"].(string)
-					ownerChain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
-					ownerType = "DaemonSet"
-					ownerId = dsName
+					if dsName, ok := props["name"].(string); ok {
+						ownerChain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
+						ownerType = "DaemonSet"
+						ownerId = dsName
+					} else {
+						o.logger.Warn("Failed to extract DaemonSet name for ownership chain",
+							zap.String("pod", podName),
+							zap.Any("props", props))
+					}
 				}
 			}
 		}
@@ -570,7 +580,12 @@ func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredR
 			var rsName string
 			if rsNode, ok := rsMap["replicaSet"].(map[string]interface{}); ok {
 				if props, ok := rsNode["properties"].(map[string]interface{}); ok {
-					rsName, _ = props["name"].(string)
+					if name, ok := props["name"].(string); ok {
+						rsName = name
+					} else {
+						o.logger.Warn("Failed to extract ReplicaSet name from properties",
+							zap.Any("props", props))
+					}
 				}
 
 				// Check if this is the active ReplicaSet
@@ -581,7 +596,12 @@ func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredR
 							if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
 								if props, ok := podNode["properties"].(map[string]interface{}); ok {
 									totalPods++
-									podName, _ = props["name"].(string)
+									if name, ok := props["name"].(string); ok {
+										podName = name
+									} else {
+										o.logger.Warn("Failed to extract pod name from properties",
+											zap.Any("props", props))
+									}
 								}
 							}
 
@@ -652,9 +672,15 @@ func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName st
 		if pod, ok := podInterface.(map[string]interface{}); ok {
 			var podName string
 			if props, ok := pod["properties"].(map[string]interface{}); ok {
-				podName, _ = props["name"].(string)
+				if name, ok := props["name"].(string); ok {
+					podName = name
+				} else {
+					o.logger.Warn("Failed to extract pod name in ReplicaSet findings",
+						zap.String("replicaset", rsName),
+						zap.Any("props", props))
+				}
 				if podReady, exists := props["ready"]; exists {
-					if !podReady.(bool) {
+					if ready, ok := podReady.(bool); ok && !ready {
 						notReadyPods = append(notReadyPods, podName)
 					}
 				}
