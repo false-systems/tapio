@@ -12,9 +12,9 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/cni"
 	cniBPF "github.com/yairfalse/tapio/pkg/collectors/cni/bpf"
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf"
 	"github.com/yairfalse/tapio/pkg/collectors/etcd"
 	etcdBPF "github.com/yairfalse/tapio/pkg/collectors/etcd/bpf"
+	"github.com/yairfalse/tapio/pkg/collectors/kernel"
 	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
 	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
@@ -97,20 +97,18 @@ func main() {
 	}
 
 	if *enableEBPF {
-		// Create eBPF collector with NATS config
-		ebpfConfig := &ebpf.Config{
-			Name:    "ebpf",
-			NATSURL: natsConfig.URL,
-			Logger:  logger,
+		// Create kernel collector
+		kernelConfig := &kernel.Config{
+			Name: "kernel",
 		}
-		ebpfCollector, err := ebpf.NewCollectorWithConfig(ebpfConfig)
+		kernelCollector, err := kernel.NewModularCollectorWithConfig(kernelConfig, logger)
 		if err != nil {
-			logger.Error("Failed to create ebpf collector", zap.Error(err))
+			logger.Error("Failed to create kernel collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("ebpf", ebpfCollector); err != nil {
-				logger.Error("Failed to register ebpf collector", zap.Error(err))
+			if err := eventPipeline.RegisterCollector("kernel", kernelCollector); err != nil {
+				logger.Error("Failed to register kernel collector", zap.Error(err))
 			} else {
-				enabledCollectors = append(enabledCollectors, "ebpf")
+				enabledCollectors = append(enabledCollectors, "kernel")
 			}
 		}
 	}

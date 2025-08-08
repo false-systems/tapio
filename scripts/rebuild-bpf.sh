@@ -36,12 +36,12 @@ compile_bpf() {
     local dir=$1
     local name=$2
     echo -e "${YELLOW}Building $name in $dir${NC}"
-    
+
     cd "$dir"
-    
+
     # Clean old generated files
     rm -f *_bpfel.go *_bpfeb.go *.o
-    
+
     # Run go generate to compile BPF
     if go generate ./...; then
         echo -e "${GREEN}✓ $name built successfully${NC}"
@@ -49,7 +49,7 @@ compile_bpf() {
         echo -e "${RED}✗ Failed to build $name${NC}"
         return 1
     fi
-    
+
     cd - > /dev/null
     echo ""
 }
@@ -59,13 +59,18 @@ echo "1. Building CNI Monitor..."
 compile_bpf "pkg/collectors/cni" "CNI Monitor"
 
 echo "2. Building Kernel Monitor..."
-compile_bpf "pkg/collectors/ebpf" "Kernel Monitor"
+compile_bpf "pkg/collectors/kernel" "Kernel Monitor"
 
 echo "3. Building etcd Monitor..."
 compile_bpf "pkg/collectors/etcd" "etcd Monitor"
 
 echo "4. Building SystemD Monitor..."
 compile_bpf "pkg/collectors/systemd" "SystemD Monitor"
+
+echo "5. Building DNS Monitor..."
+compile_bpf "pkg/collectors/dns" "DNS Monitor"
+
+
 
 echo ""
 echo -e "${GREEN}=== BPF Compilation Complete ===${NC}"

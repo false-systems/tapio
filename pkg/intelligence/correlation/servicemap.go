@@ -102,7 +102,7 @@ func (s *ServiceMapCorrelator) Process(ctx context.Context, event *domain.Unifie
 	if event == nil {
 		return nil, fmt.Errorf("event is nil")
 	}
-	
+
 	// Cache event
 	s.cacheEvent(event)
 

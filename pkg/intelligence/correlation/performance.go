@@ -188,10 +188,19 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 	podKey := p.getPodKey(event)
 
 	// Check if there was prior CPU throttling
-	_ = p.findRelatedEvents(podKey, []string{
+	relatedEvents := p.findRelatedEvents(podKey, []string{
 		"kubelet_cpu_throttling",
 		"memory_alloc",
 	}, 5*time.Minute)
+
+	// Use related events for enhanced analysis
+	hasPriorThrottling := false
+	for _, e := range relatedEvents {
+		if p.getMetadata(e, "event_type") == "kubelet_cpu_throttling" {
+			hasPriorThrottling = true
+			break
+		}
+	}
 
 	workingSet, _ := strconv.ParseInt(p.getMetadata(event, "memory_working_set"), 10, 64)
 	usage, _ := strconv.ParseInt(p.getMetadata(event, "memory_usage"), 10, 64)

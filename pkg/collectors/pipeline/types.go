@@ -109,7 +109,7 @@ func mapCollectorTypeToDomain(collectorType string) domain.EventType {
 		return domain.EventTypeKubernetes
 	case "etcd":
 		return domain.EventTypeSystem // etcd is system-level
-	case "ebpf":
+	case "kernel":
 		return domain.EventTypeProcess // kernel events are process-level
 	case "cni":
 		return domain.EventTypeNetwork

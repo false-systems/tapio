@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/yairfalse/tapio/pkg/integrations/neo4j"
+	graph "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"go.uber.org/zap"
 )
 

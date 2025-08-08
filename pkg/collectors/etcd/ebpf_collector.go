@@ -8,10 +8,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang etcdMonitor ./bpf_src/etcd_monitor.c -- -I../bpf_common
@@ -40,14 +46,36 @@ type ebpfState struct {
 
 // startEBPF initializes eBPF monitoring
 func (c *Collector) startEBPF() error {
+	start := time.Now()
+	ctx, span := c.instrumentation.StartSpan(c.ctx, "etcd.start_ebpf")
+	defer span.End()
+	defer c.instrumentation.ActiveRequests.Add(ctx, -1, metric.WithAttributes(
+		attribute.String("operation", "etcd.start_ebpf"),
+	))
+
+	span.SetAttributes(
+		attribute.String("ebpf.target", "etcd"),
+		attribute.StringSlice("ebpf.syscalls", []string{"write", "fsync"}),
+	)
+
 	// Remove memory limit for eBPF
 	if err := rlimit.RemoveMemlock(); err != nil {
+		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "ebpf_memlock"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to remove memlock")
 		return fmt.Errorf("failed to remove memlock: %w", err)
 	}
 
 	// Load eBPF objects
 	objs := &etcdMonitorObjects{}
 	if err := loadEtcdMonitorObjects(objs, nil); err != nil {
+		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "ebpf_load"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "loading eBPF objects failed")
 		return fmt.Errorf("loading eBPF objects: %w", err)
 	}
 
@@ -61,29 +89,64 @@ func (c *Collector) startEBPF() error {
 	l1, err := link.Tracepoint("syscalls", "sys_enter_write", objs.TraceSysEnterWrite, nil)
 	if err != nil {
 		objs.Close()
+		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "ebpf_attach"),
+			attribute.String("syscall", "write"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "attaching write tracepoint failed")
 		return fmt.Errorf("attaching write tracepoint: %w", err)
 	}
 	state.links = append(state.links, l1)
+	span.AddEvent("Attached write tracepoint")
 
 	// Attach to fsync syscalls (etcd WAL syncs)
 	l2, err := link.Tracepoint("syscalls", "sys_enter_fsync", objs.TraceSysEnterFsync, nil)
 	if err != nil {
 		state.cleanup()
+		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "ebpf_attach"),
+			attribute.String("syscall", "fsync"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "attaching fsync tracepoint failed")
 		return fmt.Errorf("attaching fsync tracepoint: %w", err)
 	}
 	state.links = append(state.links, l2)
+	span.AddEvent("Attached fsync tracepoint")
 
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
 		state.cleanup()
+		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "ebpf_ringbuf"),
+		))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "creating ring buffer reader failed")
 		return fmt.Errorf("creating ring buffer reader: %w", err)
 	}
 	state.reader = reader
+	span.AddEvent("Created ring buffer reader")
 
 	// Store state and start reading events
 	c.ebpfState = state
 	go c.readEBPFEvents()
+
+	// Record setup duration
+	duration := time.Since(start)
+	c.instrumentation.RequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		attribute.String("operation", "ebpf_setup"),
+	))
+
+	span.SetAttributes(
+		attribute.Float64("setup_duration_seconds", duration.Seconds()),
+		attribute.Int("tracepoints_attached", len(state.links)),
+	)
+
+	c.logger.Info("eBPF monitoring initialized",
+		zap.Duration("setup_duration", duration),
+		zap.Int("tracepoints", len(state.links)))
 
 	return nil
 }
@@ -111,26 +174,63 @@ func (s *ebpfState) cleanup() {
 
 // readEBPFEvents reads events from eBPF ring buffer
 func (c *Collector) readEBPFEvents() {
+	ctx, span := c.instrumentation.StartSpan(c.ctx, "etcd.read_ebpf_events")
+	defer span.End()
+	defer c.instrumentation.ActiveRequests.Add(ctx, -1, metric.WithAttributes(
+		attribute.String("operation", "etcd.read_ebpf_events"),
+	))
+
 	state, ok := c.ebpfState.(*ebpfState)
 	if !ok || state == nil {
+		span.AddEvent("eBPF state not available")
 		return
 	}
+
+	var eventsProcessed uint64
+	var eventsDropped uint64
+
+	defer func() {
+		span.SetAttributes(
+			attribute.Int64("events_processed", int64(eventsProcessed)),
+			attribute.Int64("events_dropped", int64(eventsDropped)),
+		)
+		c.logger.Info("eBPF event reader stopped",
+			zap.Uint64("events_processed", eventsProcessed),
+			zap.Uint64("events_dropped", eventsDropped))
+	}()
 
 	for {
 		record, err := state.reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
+				span.AddEvent("Ring buffer closed")
 				return
 			}
-			// Log error and continue
+			// Record error but continue
+			c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "ebpf_read"),
+			))
+			span.AddEvent("Ring buffer read error",
+				trace.WithAttributes(attribute.String("error", err.Error())))
 			continue
 		}
+
+		start := time.Now()
 
 		// Parse the raw event
 		var event etcdEvent
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
+			c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "ebpf_parse"),
+			))
 			continue
 		}
+
+		// Track syscall events
+		c.instrumentation.SyscallsTracked.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("syscall_type", fmt.Sprintf("%d", event.EventType)),
+			attribute.Int("pid", int(event.PID)),
+		))
 
 		// Create raw event with NO business logic - just raw data
 		eventData := map[string]interface{}{
@@ -158,14 +258,34 @@ func (c *Collector) readEBPFEvents() {
 			eventData["raw_data"] = event.Data[:event.DataLen]
 		}
 
-		rawEvent := c.createEvent("syscall", eventData)
+		rawEvent := c.createEventWithContext(ctx, "syscall", eventData)
 
 		select {
 		case c.events <- rawEvent:
+			eventsProcessed++
+			// Record event metric
+			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", "ebpf_syscall"),
+				attribute.String("syscall_type", fmt.Sprintf("%d", event.EventType)),
+			))
+
 		case <-c.ctx.Done():
+			span.AddEvent("Context cancelled")
 			return
 		default:
 			// Buffer full, drop event
+			eventsDropped++
+			c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "ebpf_buffer_full"),
+			))
+		}
+
+		// Record processing time if we've processed significant events
+		if eventsProcessed%1000 == 0 && eventsProcessed > 0 {
+			processingTime := time.Since(start)
+			c.instrumentation.RequestDuration.Record(ctx, processingTime.Seconds(), metric.WithAttributes(
+				attribute.String("operation", "ebpf_event_processing"),
+			))
 		}
 	}
 }
