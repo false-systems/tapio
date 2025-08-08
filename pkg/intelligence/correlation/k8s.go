@@ -156,6 +156,11 @@ func (k *K8sCorrelator) Name() string {
 
 // Process analyzes an event and returns K8s-based correlations
 func (k *K8sCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
+	// Validate input
+	if event == nil {
+		return nil, fmt.Errorf("event is nil")
+	}
+
 	// Skip if not K8s event
 	if event.K8sContext == nil {
 		return nil, nil

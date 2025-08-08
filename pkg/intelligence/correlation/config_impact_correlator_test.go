@@ -16,10 +16,10 @@ import (
 // Test ConfigImpactCorrelator creation
 func TestNewConfigImpactCorrelator(t *testing.T) {
 	t.Run("valid creation", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := zap.NewNop()
 
-		correlator, err := NewConfigImpactCorrelator(mockDriver, logger)
+		correlator, err := NewConfigImpactCorrelator(mockStore, logger)
 
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
@@ -27,20 +27,20 @@ func TestNewConfigImpactCorrelator(t *testing.T) {
 		assert.Equal(t, "1.0.0", correlator.Version())
 	})
 
-	t.Run("nil driver", func(t *testing.T) {
+	t.Run("nil store", func(t *testing.T) {
 		logger := zap.NewNop()
 
 		correlator, err := NewConfigImpactCorrelator(nil, logger)
 
 		require.Error(t, err)
 		assert.Nil(t, correlator)
-		assert.Contains(t, err.Error(), "neo4jDriver is required")
+		assert.Contains(t, err.Error(), "graphStore is required")
 	})
 
 	t.Run("nil logger", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 
-		correlator, err := NewConfigImpactCorrelator(mockDriver, nil)
+		correlator, err := NewConfigImpactCorrelator(mockStore, nil)
 
 		require.Error(t, err)
 		assert.Nil(t, correlator)
@@ -50,9 +50,9 @@ func TestNewConfigImpactCorrelator(t *testing.T) {
 
 // Test event validation
 func TestConfigImpactCorrelator_ValidateEvent(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	t.Run("valid config_changed event", func(t *testing.T) {
 		event := &domain.UnifiedEvent{
@@ -120,7 +120,7 @@ func TestConfigImpactCorrelator_ValidateEvent(t *testing.T) {
 		err := correlator.ValidateEvent(event)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "event type not supported")
+		assert.Contains(t, err.Error(), "event type unsupported_event not supported")
 	})
 
 	t.Run("missing namespace", func(t *testing.T) {
@@ -137,15 +137,15 @@ func TestConfigImpactCorrelator_ValidateEvent(t *testing.T) {
 		err := correlator.ValidateEvent(event)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "required field missing: namespace")
+		assert.Contains(t, err.Error(), "required field namespace is missing")
 	})
 }
 
 // Test capabilities
 func TestConfigImpactCorrelator_Capabilities(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	capabilities := correlator.GetCapabilities()
 
@@ -171,39 +171,39 @@ func TestConfigImpactCorrelator_Capabilities(t *testing.T) {
 // Test health check
 func TestConfigImpactCorrelator_Health(t *testing.T) {
 	t.Run("healthy", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := zap.NewNop()
-		correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+		correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
-		mockDriver.On("VerifyConnectivity", mock.Anything).Return(nil)
+		mockStore.On("HealthCheck", mock.Anything).Return(nil)
 
 		ctx := context.Background()
 		err := correlator.Health(ctx)
 
 		assert.NoError(t, err)
-		mockDriver.AssertExpectations(t)
+		mockStore.AssertExpectations(t)
 	})
 
 	t.Run("unhealthy", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := zap.NewNop()
-		correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+		correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
-		mockDriver.On("VerifyConnectivity", mock.Anything).Return(assert.AnError)
+		mockStore.On("HealthCheck", mock.Anything).Return(assert.AnError)
 
 		ctx := context.Background()
 		err := correlator.Health(ctx)
 
 		assert.Error(t, err)
-		mockDriver.AssertExpectations(t)
+		mockStore.AssertExpectations(t)
 	})
 }
 
 // Test helper functions
 func TestConfigImpactCorrelator_HelperFunctions(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	t.Run("getNamespace", func(t *testing.T) {
 		// Test K8sContext namespace
@@ -276,9 +276,9 @@ func TestConfigImpactCorrelator_HelperFunctions(t *testing.T) {
 
 // Test confidence calculation
 func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	t.Run("no findings", func(t *testing.T) {
 		findings := []aggregator.Finding{}
@@ -334,14 +334,14 @@ func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
 
 // Test GraphCorrelator interface
 func TestConfigImpactCorrelator_GraphCorrelatorInterface(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	// Test SetGraphClient
-	newMockDriver := &SimpleMockNeo4jDriver{}
-	correlator.SetGraphClient(newMockDriver)
-	assert.Equal(t, newMockDriver, correlator.neo4jDriver)
+	newMockStore := &MockGraphStore{}
+	correlator.SetGraphClient(newMockStore)
+	assert.Equal(t, newMockStore, correlator.graphStore)
 
 	// Test PreloadGraph
 	ctx := context.Background()
@@ -351,9 +351,9 @@ func TestConfigImpactCorrelator_GraphCorrelatorInterface(t *testing.T) {
 
 // Test event routing
 func TestConfigImpactCorrelator_EventRouting(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewConfigImpactCorrelator(mockDriver, logger)
+	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	supportedEventTypes := []domain.EventType{
 		"config_changed",

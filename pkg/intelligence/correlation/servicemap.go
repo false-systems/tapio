@@ -29,11 +29,11 @@ type ServiceMapCorrelator struct {
 
 // ServiceGraph represents the service dependency graph
 type ServiceGraph struct {
-	nodes map[string]*ServiceNode
+	nodes map[string]*ServiceMapNode
 	edges map[string]*ServiceEdge
 }
 
-type ServiceNode struct {
+type ServiceMapNode struct {
 	Name      string
 	Namespace string
 	Type      string // deployment, statefulset, daemonset
@@ -80,7 +80,7 @@ func NewServiceMapCorrelator(logger *zap.Logger) *ServiceMapCorrelator {
 	return &ServiceMapCorrelator{
 		logger: logger,
 		serviceGraph: &ServiceGraph{
-			nodes: make(map[string]*ServiceNode),
+			nodes: make(map[string]*ServiceMapNode),
 			edges: make(map[string]*ServiceEdge),
 		},
 		healthTracker: &ConnectionHealthTracker{
@@ -98,6 +98,11 @@ func (s *ServiceMapCorrelator) Name() string {
 }
 
 func (s *ServiceMapCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
+	// Validate input
+	if event == nil {
+		return nil, fmt.Errorf("event is nil")
+	}
+	
 	// Cache event
 	s.cacheEvent(event)
 
@@ -338,7 +343,7 @@ func (s *ServiceMapCorrelator) updateServiceGraph(event *domain.UnifiedEvent) {
 	if svcName := s.getMetadata(event, "service_name"); svcName != "" {
 		node := s.serviceGraph.nodes[svcName]
 		if node == nil {
-			node = &ServiceNode{
+			node = &ServiceMapNode{
 				Name:      svcName,
 				Namespace: s.getMetadata(event, "k8s_namespace"),
 				Type:      s.getMetadata(event, "k8s_kind"),

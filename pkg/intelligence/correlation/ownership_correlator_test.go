@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -17,10 +16,10 @@ import (
 // Test OwnershipCorrelator creation
 func TestNewOwnershipCorrelator(t *testing.T) {
 	t.Run("valid creation", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := zap.NewNop()
 
-		correlator, err := NewOwnershipCorrelator(mockDriver, logger)
+		correlator, err := NewOwnershipCorrelator(mockStore, logger)
 
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
@@ -28,20 +27,20 @@ func TestNewOwnershipCorrelator(t *testing.T) {
 		assert.Equal(t, "1.0.0", correlator.Version())
 	})
 
-	t.Run("nil driver", func(t *testing.T) {
+	t.Run("nil graphStore", func(t *testing.T) {
 		logger := zap.NewNop()
 
 		correlator, err := NewOwnershipCorrelator(nil, logger)
 
 		require.Error(t, err)
 		assert.Nil(t, correlator)
-		assert.Contains(t, err.Error(), "neo4jDriver is required")
+		assert.Contains(t, err.Error(), "graphStore is required")
 	})
 
 	t.Run("nil logger", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 
-		correlator, err := NewOwnershipCorrelator(mockDriver, nil)
+		correlator, err := NewOwnershipCorrelator(mockStore, nil)
 
 		require.Error(t, err)
 		assert.Nil(t, correlator)
@@ -51,9 +50,9 @@ func TestNewOwnershipCorrelator(t *testing.T) {
 
 // Test event validation
 func TestOwnershipCorrelator_ValidateEvent(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	t.Run("valid deployment_failed event", func(t *testing.T) {
 		event := &domain.UnifiedEvent{
@@ -121,7 +120,7 @@ func TestOwnershipCorrelator_ValidateEvent(t *testing.T) {
 		err := correlator.ValidateEvent(event)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "event type not supported")
+		assert.Contains(t, err.Error(), "event type unsupported_event not supported")
 	})
 
 	t.Run("missing namespace", func(t *testing.T) {
@@ -138,15 +137,15 @@ func TestOwnershipCorrelator_ValidateEvent(t *testing.T) {
 		err := correlator.ValidateEvent(event)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "required field missing: namespace")
+		assert.Contains(t, err.Error(), "required field namespace is missing")
 	})
 }
 
 // Test capabilities
 func TestOwnershipCorrelator_Capabilities(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	capabilities := correlator.GetCapabilities()
 
@@ -175,39 +174,39 @@ func TestOwnershipCorrelator_Capabilities(t *testing.T) {
 // Test health check
 func TestOwnershipCorrelator_Health(t *testing.T) {
 	t.Run("healthy", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := zap.NewNop()
-		correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+		correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
-		mockDriver.On("VerifyConnectivity", mock.Anything).Return(nil)
+		mockStore.On("HealthCheck", mock.Anything).Return(nil)
 
 		ctx := context.Background()
 		err := correlator.Health(ctx)
 
 		assert.NoError(t, err)
-		mockDriver.AssertExpectations(t)
+		mockStore.AssertExpectations(t)
 	})
 
 	t.Run("unhealthy", func(t *testing.T) {
-		mockDriver := &SimpleMockNeo4jDriver{}
+		mockStore := &MockGraphStore{}
 		logger := zap.NewNop()
-		correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+		correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
-		mockDriver.On("VerifyConnectivity", mock.Anything).Return(assert.AnError)
+		mockStore.On("HealthCheck", mock.Anything).Return(assert.AnError)
 
 		ctx := context.Background()
 		err := correlator.Health(ctx)
 
 		assert.Error(t, err)
-		mockDriver.AssertExpectations(t)
+		mockStore.AssertExpectations(t)
 	})
 }
 
 // Test helper functions
 func TestOwnershipCorrelator_HelperFunctions(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	t.Run("getNamespace", func(t *testing.T) {
 		// Test K8sContext namespace
@@ -260,9 +259,9 @@ func TestOwnershipCorrelator_HelperFunctions(t *testing.T) {
 
 // Test confidence calculation
 func TestOwnershipCorrelator_CalculateConfidence(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	t.Run("no findings", func(t *testing.T) {
 		findings := []aggregator.Finding{}
@@ -318,14 +317,14 @@ func TestOwnershipCorrelator_CalculateConfidence(t *testing.T) {
 
 // Test GraphCorrelator interface
 func TestOwnershipCorrelator_GraphCorrelatorInterface(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
-	// Test SetGraphClient
-	newMockDriver := &SimpleMockNeo4jDriver{}
-	correlator.SetGraphClient(newMockDriver)
-	assert.Equal(t, newMockDriver, correlator.neo4jDriver)
+	// Test SetGraphClient (deprecated but still exists for compatibility)
+	newMockStore2 := &MockGraphStore{}
+	correlator.SetGraphClient(newMockStore2)
+	// SetGraphClient is now a no-op since we use GraphStore interface
 
 	// Test PreloadGraph
 	ctx := context.Background()
@@ -335,9 +334,9 @@ func TestOwnershipCorrelator_GraphCorrelatorInterface(t *testing.T) {
 
 // Test event routing
 func TestOwnershipCorrelator_EventRouting(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	supportedEventTypes := []domain.EventType{
 		"deployment_failed",
@@ -370,9 +369,9 @@ func TestOwnershipCorrelator_EventRouting(t *testing.T) {
 
 // Test ownership chain building helpers
 func TestOwnershipCorrelator_BuildOwnershipHelpers(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	t.Run("buildOwnershipNodes", func(t *testing.T) {
 		podName := "test-pod"
@@ -437,9 +436,9 @@ func TestOwnershipCorrelator_BuildOwnershipHelpers(t *testing.T) {
 
 // Test finding creation helpers
 func TestOwnershipCorrelator_FindingHelpers(t *testing.T) {
-	mockDriver := &SimpleMockNeo4jDriver{}
+	mockStore := &MockGraphStore{}
 	logger := zap.NewNop()
-	correlator, _ := NewOwnershipCorrelator(mockDriver, logger)
+	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	t.Run("analyzeReplicaSets", func(t *testing.T) {
 		event := &domain.UnifiedEvent{
@@ -451,8 +450,8 @@ func TestOwnershipCorrelator_FindingHelpers(t *testing.T) {
 		// Create mock ReplicaSet data
 		replicaSets := []interface{}{
 			map[string]interface{}{
-				"replicaSet": neo4j.Node{
-					Props: map[string]interface{}{
+				"replicaSet": map[string]interface{}{
+					"properties": map[string]interface{}{
 						"name": "test-deployment-abc123",
 					},
 				},
@@ -460,8 +459,8 @@ func TestOwnershipCorrelator_FindingHelpers(t *testing.T) {
 				"ready":    int64(1),
 				"pods": []interface{}{
 					map[string]interface{}{
-						"pod": neo4j.Node{
-							Props: map[string]interface{}{
+						"pod": map[string]interface{}{
+							"properties": map[string]interface{}{
 								"name": "test-pod-1",
 							},
 						},
@@ -494,14 +493,14 @@ func TestOwnershipCorrelator_FindingHelpers(t *testing.T) {
 
 		// Create mock pods with broken ordinal
 		pods := []interface{}{
-			neo4j.Node{
-				Props: map[string]interface{}{
+			map[string]interface{}{
+				"properties": map[string]interface{}{
 					"name":  "test-statefulset-0",
 					"ready": true,
 				},
 			},
-			neo4j.Node{
-				Props: map[string]interface{}{
+			map[string]interface{}{
+				"properties": map[string]interface{}{
 					"name":  "test-statefulset-1",
 					"ready": false, // This breaks the sequence
 				},
