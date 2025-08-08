@@ -13,55 +13,37 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/ebpf/bpf"
-	"github.com/yairfalse/tapio/pkg/domain"
-	"go.uber.org/zap"
 )
 
 // Collector implements minimal kernel monitoring via eBPF
 type Collector struct {
-	name          string
-	objs          *bpf.KernelmonitorObjects
-	links         []link.Link
-	reader        *ringbuf.Reader
-	events        chan collectors.RawEvent
-	ctx           context.Context
-	cancel        context.CancelFunc
-	healthy       bool
-	mu            sync.RWMutex
-	podTraceMap   map[string]string // Map pod UID to trace ID
-	natsPublisher *NATSPublisher    // NATS publisher for events
-	stats         CollectorStats
+	name        string
+	objs        *bpf.KernelmonitorObjects
+	links       []link.Link
+	reader      *ringbuf.Reader
+	events      chan collectors.RawEvent
+	ctx         context.Context
+	cancel      context.CancelFunc
+	healthy     bool
+	mu          sync.RWMutex
+	podTraceMap map[string]string // Map pod UID to trace ID
+	stats       CollectorStats
 }
 
 // NewCollector creates a new minimal eBPF collector
 func NewCollector(name string) (*Collector, error) {
 	return NewCollectorWithConfig(&Config{
-		Name:    name,
-		NATSURL: "",
-		Logger:  nil,
+		Name: name,
 	})
 }
 
 // NewCollectorWithConfig creates a new eBPF collector with config
 func NewCollectorWithConfig(config *Config) (*Collector, error) {
-	// Removed performance adapter - using direct channels is simpler
-
 	c := &Collector{
 		name:        config.Name,
 		events:      make(chan collectors.RawEvent, 10000), // Large buffer for kernel events
 		healthy:     true,
 		podTraceMap: make(map[string]string),
-	}
-
-	// Initialize NATS publisher if URL provided
-	if config.NATSURL != "" && config.Logger != nil {
-		publisher, err := NewNATSPublisher(config.NATSURL, config.Logger)
-		if err != nil {
-			// Log error but don't fail collector creation
-			config.Logger.Error("Failed to create NATS publisher", zap.Error(err))
-		} else {
-			c.natsPublisher = publisher
-		}
 	}
 
 	return c, nil
@@ -154,10 +136,7 @@ func (c *Collector) Stop() error {
 		c.cancel()
 	}
 
-	// Close NATS publisher
-	if c.natsPublisher != nil {
-		c.natsPublisher.Close()
-	}
+	// No external publishers to close - collectors should not have integrations
 
 	// Close links
 	for _, l := range c.links {
@@ -257,17 +236,15 @@ func (c *Collector) processEvents() {
 			continue
 		}
 
-		// Parse event
-		if len(record.RawSample) < int(unsafe.Sizeof(KernelEvent{})) {
+		// Parse event with memory safety checks
+		event, err := c.parseKernelEventSafely(record.RawSample)
+		if err != nil {
+			// Log error and increment error count
+			c.mu.Lock()
+			c.stats.ErrorCount++
+			c.mu.Unlock()
 			continue
 		}
-
-		var event KernelEvent
-		// Simple binary unmarshaling from raw bytes
-		if len(record.RawSample) != int(unsafe.Sizeof(event)) {
-			continue
-		}
-		event = *(*KernelEvent)(unsafe.Pointer(&record.RawSample[0]))
 
 		// Convert to RawEvent - NO BUSINESS LOGIC, just add correlation metadata
 		metadata := map[string]string{
@@ -300,10 +277,8 @@ func (c *Collector) processEvents() {
 
 		// Process network events for service correlation
 		if event.EventType == 5 { // EVENT_TYPE_NETWORK_CONN
-			// Extract network info from event data
-			if len(event.Data) >= int(unsafe.Sizeof(NetworkInfo{})) {
-				netInfo := *(*NetworkInfo)(unsafe.Pointer(&event.Data[0]))
-
+			// Extract network info from event data with memory safety
+			if netInfo, err := c.parseNetworkInfoSafely(event.Data[:]); err == nil {
 				// Add network metadata
 				metadata["src_ip"] = c.ipToString(netInfo.SAddr)
 				metadata["dst_ip"] = c.ipToString(netInfo.DAddr)
@@ -320,10 +295,8 @@ func (c *Collector) processEvents() {
 				}
 			}
 		} else if event.EventType == 8 { // EVENT_TYPE_FILE_OPEN
-			// Extract file info from event data
-			if len(event.Data) >= int(unsafe.Sizeof(FileInfo{})) {
-				fileInfo := *(*FileInfo)(unsafe.Pointer(&event.Data[0]))
-
+			// Extract file info from event data with memory safety
+			if fileInfo, err := c.parseFileInfoSafely(event.Data[:]); err == nil {
 				// Add file metadata
 				filename := c.nullTerminatedString(fileInfo.Filename[:])
 				metadata["filename"] = filename
@@ -349,7 +322,7 @@ func (c *Collector) processEvents() {
 			Data:      record.RawSample, // Raw eBPF event data
 			Metadata:  metadata,
 			// Generate new trace for kernel events, or reuse pod trace if available
-			TraceID: c.getOrGenerateTraceID(event),
+			TraceID: c.getOrGenerateTraceID(*event),
 			SpanID:  collectors.GenerateSpanID(),
 		}
 
@@ -369,14 +342,7 @@ func (c *Collector) processEvents() {
 			c.mu.Unlock()
 		}
 
-		// Publish to NATS if publisher available
-		if c.natsPublisher != nil {
-			// Convert to UnifiedEvent for NATS
-			unifiedEvent := c.convertToUnifiedEvent(&rawEvent, &event)
-			if err := c.natsPublisher.PublishEvent(unifiedEvent); err != nil {
-				// Log error but continue processing
-			}
-		}
+		// Collectors should only emit RawEvents - integrations handle publishing
 	}
 }
 
@@ -794,75 +760,89 @@ func (c *Collector) Statistics() map[string]interface{} {
 	return stats
 }
 
-// convertToUnifiedEvent converts RawEvent to UnifiedEvent for NATS
-func (c *Collector) convertToUnifiedEvent(raw *collectors.RawEvent, kernelEvent *KernelEvent) *domain.UnifiedEvent {
-	// Build UnifiedEvent
-	event := &domain.UnifiedEvent{
-		ID:        domain.GenerateEventID(),
-		Timestamp: raw.Timestamp,
-		Type:      "ebpf",
-		Source:    c.name,
-		Severity:  c.getSeverityForEventType(kernelEvent.EventType),
+// Removed domain-dependent functions - collectors should only emit RawEvents
 
-		// Add trace context
-		TraceContext: &domain.TraceContext{
-			TraceID: raw.TraceID,
-			SpanID:  raw.SpanID,
-			Sampled: true,
-		},
+// parseKernelEventSafely parses a KernelEvent from raw bytes with memory safety checks
+func (c *Collector) parseKernelEventSafely(rawBytes []byte) (*KernelEvent, error) {
+	expectedSize := int(unsafe.Sizeof(KernelEvent{}))
 
-		// Kernel data
-		Kernel: &domain.KernelData{
-			PID:  kernelEvent.PID,
-			TID:  kernelEvent.TID,
-			Comm: c.nullTerminatedString(kernelEvent.Comm[:]),
-		},
-
-		// Copy metadata to attributes
-		Attributes: make(map[string]interface{}),
+	// Validate buffer size
+	if len(rawBytes) < expectedSize {
+		return nil, fmt.Errorf("buffer too small: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
 	}
 
-	// Copy all metadata to attributes
-	for k, v := range raw.Metadata {
-		event.Attributes[k] = v
+	// Check for exact size match (ensures no buffer overrun)
+	if len(rawBytes) != expectedSize {
+		return nil, fmt.Errorf("buffer size mismatch: got %d bytes, expected exactly %d", len(rawBytes), expectedSize)
 	}
 
-	// Add K8s context if we have pod info
-	if podUID := c.nullTerminatedString(kernelEvent.PodUID[:]); podUID != "" {
-		event.K8sContext = &domain.K8sContext{}
-		if podInfo, err := c.GetPodInfo(kernelEvent.CgroupID); err == nil {
-			event.K8sContext.Name = c.nullTerminatedString(podInfo.PodName[:])
-			event.K8sContext.Namespace = c.nullTerminatedString(podInfo.Namespace[:])
-		}
+	// Check alignment - KernelEvent should be aligned to 8 bytes due to uint64 fields
+	if uintptr(unsafe.Pointer(&rawBytes[0]))%8 != 0 {
+		return nil, fmt.Errorf("buffer not properly aligned for KernelEvent")
 	}
 
-	// Add entity context
-	if event.K8sContext != nil && event.K8sContext.Name != "" {
-		event.Entity = &domain.EntityContext{
-			Type:      "pod",
-			Name:      event.K8sContext.Name,
-			Namespace: event.K8sContext.Namespace,
-		}
+	// Safe to cast now
+	event := *(*KernelEvent)(unsafe.Pointer(&rawBytes[0]))
+
+	// Validate event content
+	if event.EventType > 20 { // Sanity check for event type
+		return nil, fmt.Errorf("invalid event type: %d", event.EventType)
 	}
 
-	// Add correlation hints
-	event.CorrelationHints = []string{raw.TraceID}
-
-	return event
+	return &event, nil
 }
 
-// getSeverityForEventType returns severity based on event type
-func (c *Collector) getSeverityForEventType(eventType uint32) domain.EventSeverity {
-	switch eventType {
-	case 1, 2: // memory alloc/free
-		return domain.EventSeverityInfo
-	case 3: // process exec
-		return domain.EventSeverityWarning
-	case 5: // network conn
-		return domain.EventSeverityInfo
-	case 8, 9, 10: // file operations
-		return domain.EventSeverityInfo
-	default:
-		return domain.EventSeverityInfo
+// parseNetworkInfoSafely parses NetworkInfo from raw bytes with memory safety checks
+func (c *Collector) parseNetworkInfoSafely(rawBytes []byte) (*NetworkInfo, error) {
+	expectedSize := int(unsafe.Sizeof(NetworkInfo{}))
+
+	// Validate buffer size
+	if len(rawBytes) < expectedSize {
+		return nil, fmt.Errorf("buffer too small for NetworkInfo: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
 	}
+
+	// Check alignment - NetworkInfo should be aligned to 4 bytes due to uint32 fields
+	if uintptr(unsafe.Pointer(&rawBytes[0]))%4 != 0 {
+		return nil, fmt.Errorf("buffer not properly aligned for NetworkInfo")
+	}
+
+	// Safe to cast
+	netInfo := *(*NetworkInfo)(unsafe.Pointer(&rawBytes[0]))
+
+	// Validate network info content
+	if netInfo.Protocol > 255 || netInfo.Direction > 1 {
+		return nil, fmt.Errorf("invalid network info: protocol=%d, direction=%d", netInfo.Protocol, netInfo.Direction)
+	}
+
+	return &netInfo, nil
+}
+
+// parseFileInfoSafely parses FileInfo from raw bytes with memory safety checks
+func (c *Collector) parseFileInfoSafely(rawBytes []byte) (*FileInfo, error) {
+	expectedSize := int(unsafe.Sizeof(FileInfo{}))
+
+	// Validate buffer size
+	if len(rawBytes) < expectedSize {
+		return nil, fmt.Errorf("buffer too small for FileInfo: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
+	}
+
+	// Check alignment - FileInfo should be aligned to 4 bytes due to uint32 fields
+	if uintptr(unsafe.Pointer(&rawBytes[0]))%4 != 0 {
+		return nil, fmt.Errorf("buffer not properly aligned for FileInfo")
+	}
+
+	// Safe to cast
+	fileInfo := *(*FileInfo)(unsafe.Pointer(&rawBytes[0]))
+
+	// Basic validation - ensure filename doesn't contain invalid characters
+	for i := 0; i < len(fileInfo.Filename); i++ {
+		if fileInfo.Filename[i] == 0 {
+			break // Null terminator found
+		}
+		if fileInfo.Filename[i] < 32 && fileInfo.Filename[i] != 0 { // Non-printable characters (except null)
+			return nil, fmt.Errorf("invalid filename contains non-printable character at position %d", i)
+		}
+	}
+
+	return &fileInfo, nil
 }

@@ -2,8 +2,10 @@ package ebpf
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -276,4 +278,340 @@ func (c *Collector) isContainerCgroupPath(cgroupPath string) bool {
 		}
 	}
 	return false
+}
+
+// Memory Safety Tests
+
+func TestParseKernelEventSafely(t *testing.T) {
+	collector, err := NewCollector("ebpf-memory-test")
+	require.NoError(t, err)
+
+	expectedSize := int(unsafe.Sizeof(KernelEvent{}))
+
+	t.Run("ValidEvent", func(t *testing.T) {
+		// Create properly sized and aligned buffer
+		buffer := make([]byte, expectedSize)
+
+		// Fill with valid event data
+		event := KernelEvent{
+			Timestamp: uint64(time.Now().UnixNano()),
+			PID:       1234,
+			TID:       1234,
+			EventType: 1, // memory_alloc
+			Size:      1024,
+		}
+		// Copy event data to buffer using unsafe
+		*(*KernelEvent)(unsafe.Pointer(&buffer[0])) = event
+
+		parsed, err := collector.parseKernelEventSafely(buffer)
+		assert.NoError(t, err)
+		assert.NotNil(t, parsed)
+		assert.Equal(t, uint32(1234), parsed.PID)
+		assert.Equal(t, uint32(1), parsed.EventType)
+	})
+
+	t.Run("BufferTooSmall", func(t *testing.T) {
+		buffer := make([]byte, expectedSize-1)
+
+		_, err := collector.parseKernelEventSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buffer too small")
+	})
+
+	t.Run("BufferTooLarge", func(t *testing.T) {
+		buffer := make([]byte, expectedSize+10)
+
+		_, err := collector.parseKernelEventSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buffer size mismatch")
+	})
+
+	t.Run("InvalidEventType", func(t *testing.T) {
+		buffer := make([]byte, expectedSize)
+
+		// Create event with invalid type
+		event := KernelEvent{
+			EventType: 99, // Invalid event type
+		}
+		// Copy event data to buffer using unsafe
+		*(*KernelEvent)(unsafe.Pointer(&buffer[0])) = event
+
+		_, err := collector.parseKernelEventSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid event type")
+	})
+}
+
+func TestParseNetworkInfoSafely(t *testing.T) {
+	collector, err := NewCollector("ebpf-network-test")
+	require.NoError(t, err)
+
+	expectedSize := int(unsafe.Sizeof(NetworkInfo{}))
+
+	t.Run("ValidNetworkInfo", func(t *testing.T) {
+		buffer := make([]byte, expectedSize)
+
+		netInfo := NetworkInfo{
+			SAddr:     0xC0A80101, // 192.168.1.1
+			DAddr:     0x08080808, // 8.8.8.8
+			SPort:     12345,
+			DPort:     80,
+			Protocol:  6, // TCP
+			Direction: 0, // outgoing
+		}
+		// Copy network info to buffer using unsafe
+		*(*NetworkInfo)(unsafe.Pointer(&buffer[0])) = netInfo
+
+		parsed, err := collector.parseNetworkInfoSafely(buffer)
+		assert.NoError(t, err)
+		assert.NotNil(t, parsed)
+		assert.Equal(t, uint32(0xC0A80101), parsed.SAddr)
+		assert.Equal(t, uint16(80), parsed.DPort)
+		assert.Equal(t, uint8(6), parsed.Protocol)
+	})
+
+	t.Run("BufferTooSmall", func(t *testing.T) {
+		buffer := make([]byte, expectedSize-1)
+
+		_, err := collector.parseNetworkInfoSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buffer too small for NetworkInfo")
+	})
+
+	t.Run("InvalidProtocol", func(t *testing.T) {
+		buffer := make([]byte, expectedSize)
+
+		netInfo := NetworkInfo{
+			Protocol:  255, // Max valid protocol
+			Direction: 2,   // Invalid direction
+		}
+		// Copy network info to buffer using unsafe
+		*(*NetworkInfo)(unsafe.Pointer(&buffer[0])) = netInfo
+
+		_, err := collector.parseNetworkInfoSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid network info")
+	})
+
+	t.Run("InvalidDirection", func(t *testing.T) {
+		buffer := make([]byte, expectedSize)
+
+		netInfo := NetworkInfo{
+			Protocol:  6,
+			Direction: 2, // Invalid direction (should be 0 or 1)
+		}
+		// Copy network info to buffer using unsafe
+		*(*NetworkInfo)(unsafe.Pointer(&buffer[0])) = netInfo
+
+		_, err := collector.parseNetworkInfoSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid network info")
+	})
+}
+
+func TestParseFileInfoSafely(t *testing.T) {
+	collector, err := NewCollector("ebpf-file-test")
+	require.NoError(t, err)
+
+	expectedSize := int(unsafe.Sizeof(FileInfo{}))
+
+	t.Run("ValidFileInfo", func(t *testing.T) {
+		buffer := make([]byte, expectedSize)
+
+		fileInfo := FileInfo{
+			Flags: 0x0001, // O_RDONLY
+			Mode:  0644,
+		}
+		copy(fileInfo.Filename[:], "/tmp/test.txt\x00") // Null-terminated
+		// Copy file info to buffer using unsafe
+		*(*FileInfo)(unsafe.Pointer(&buffer[0])) = fileInfo
+
+		parsed, err := collector.parseFileInfoSafely(buffer)
+		assert.NoError(t, err)
+		assert.NotNil(t, parsed)
+		assert.Equal(t, uint32(0x0001), parsed.Flags)
+		assert.Equal(t, uint32(0644), parsed.Mode)
+	})
+
+	t.Run("BufferTooSmall", func(t *testing.T) {
+		buffer := make([]byte, expectedSize-1)
+
+		_, err := collector.parseFileInfoSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buffer too small for FileInfo")
+	})
+
+	t.Run("InvalidFilename", func(t *testing.T) {
+		buffer := make([]byte, expectedSize)
+
+		fileInfo := FileInfo{}
+		// Insert invalid characters (non-printable except null)
+		fileInfo.Filename[0] = 0x01 // Non-printable character
+		// Copy file info to buffer using unsafe
+		*(*FileInfo)(unsafe.Pointer(&buffer[0])) = fileInfo
+
+		_, err := collector.parseFileInfoSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid filename contains non-printable character")
+	})
+
+	t.Run("ValidFilenameWithNullTerminator", func(t *testing.T) {
+		buffer := make([]byte, expectedSize)
+
+		fileInfo := FileInfo{}
+		copy(fileInfo.Filename[:], "/valid/path.txt\x00remainder")
+		// Copy file info to buffer using unsafe
+		*(*FileInfo)(unsafe.Pointer(&buffer[0])) = fileInfo
+
+		parsed, err := collector.parseFileInfoSafely(buffer)
+		assert.NoError(t, err)
+		assert.NotNil(t, parsed)
+	})
+}
+
+func TestMemorySafetyEdgeCases(t *testing.T) {
+	collector, err := NewCollector("ebpf-edge-test")
+	require.NoError(t, err)
+
+	t.Run("ZeroLengthBuffer", func(t *testing.T) {
+		buffer := make([]byte, 0)
+
+		_, err := collector.parseKernelEventSafely(buffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buffer too small")
+	})
+
+	t.Run("NilBuffer", func(t *testing.T) {
+		// Test with nil slice (should not panic)
+		_, err := collector.parseKernelEventSafely(nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buffer too small")
+	})
+
+	t.Run("LargeBuffer", func(t *testing.T) {
+		// Test with very large buffer (should detect size mismatch)
+		largeBuffer := make([]byte, 1024*1024) // 1MB
+
+		_, err := collector.parseKernelEventSafely(largeBuffer)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buffer size mismatch")
+	})
+}
+
+func TestAlignmentValidation(t *testing.T) {
+	collector, err := NewCollector("ebpf-alignment-test")
+	require.NoError(t, err)
+
+	t.Run("ProperAlignment", func(t *testing.T) {
+		// Create properly aligned buffer
+		expectedSize := int(unsafe.Sizeof(KernelEvent{}))
+		alignedBuffer := make([]byte, expectedSize+8) // Extra space for alignment
+
+		// Ensure 8-byte alignment
+		offset := uintptr(unsafe.Pointer(&alignedBuffer[0])) % 8
+		if offset != 0 {
+			alignedBuffer = alignedBuffer[8-offset:]
+		}
+
+		// Trim to exact size
+		alignedBuffer = alignedBuffer[:expectedSize]
+
+		// Fill with valid event data
+		event := KernelEvent{
+			Timestamp: uint64(time.Now().UnixNano()),
+			PID:       1234,
+			EventType: 1,
+		}
+		// Copy event data to aligned buffer using unsafe
+		*(*KernelEvent)(unsafe.Pointer(&alignedBuffer[0])) = event
+
+		_, err := collector.parseKernelEventSafely(alignedBuffer)
+		// Error or success depends on actual alignment - test that it doesn't panic
+		// In a real scenario with proper eBPF ring buffer, alignment should be correct
+		t.Logf("Alignment test result: %v", err)
+	})
+}
+
+func TestConcurrentMemoryAccess(t *testing.T) {
+	collector, err := NewCollector("ebpf-concurrent-test")
+	require.NoError(t, err)
+
+	// Test that concurrent access to memory parsing functions is safe
+	const numGoroutines = 10
+	const numIterations = 100
+
+	done := make(chan bool, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer func() { done <- true }()
+
+			expectedSize := int(unsafe.Sizeof(KernelEvent{}))
+
+			for j := 0; j < numIterations; j++ {
+				buffer := make([]byte, expectedSize)
+
+				event := KernelEvent{
+					Timestamp: uint64(time.Now().UnixNano()),
+					PID:       uint32(id*1000 + j),
+					EventType: uint32(j%5 + 1), // Valid event types 1-5
+				}
+				// Copy event data to buffer using unsafe
+				*(*KernelEvent)(unsafe.Pointer(&buffer[0])) = event
+
+				parsed, err := collector.parseKernelEventSafely(buffer)
+				if err == nil {
+					assert.Equal(t, uint32(id*1000+j), parsed.PID)
+				}
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < numGoroutines; i++ {
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Concurrent test timed out")
+		}
+	}
+}
+
+func TestBoundsCheckingExhaustive(t *testing.T) {
+	collector, err := NewCollector("ebpf-bounds-test")
+	require.NoError(t, err)
+
+	expectedSize := int(unsafe.Sizeof(KernelEvent{}))
+
+	// Test all possible invalid sizes around the expected size
+	testSizes := []int{
+		0, 1, 2, 4, 8, 16, 32,
+		expectedSize - 8, expectedSize - 4, expectedSize - 1,
+		expectedSize + 1, expectedSize + 4, expectedSize + 8,
+		expectedSize * 2, expectedSize * 10,
+	}
+
+	for _, size := range testSizes {
+		t.Run(fmt.Sprintf("Size_%d", size), func(t *testing.T) {
+			buffer := make([]byte, size)
+
+			_, err := collector.parseKernelEventSafely(buffer)
+
+			if size == expectedSize {
+				// Only exact size should potentially succeed (may still fail due to content validation)
+				if err != nil {
+					// Content validation errors are acceptable
+					t.Logf("Expected size %d failed with content validation: %v", size, err)
+				}
+			} else {
+				// All other sizes should fail with size validation
+				assert.Error(t, err, "Size %d should fail validation", size)
+				if size < expectedSize {
+					assert.Contains(t, err.Error(), "buffer too small", "Size %d should fail with 'too small'", size)
+				} else {
+					assert.Contains(t, err.Error(), "buffer size mismatch", "Size %d should fail with 'size mismatch'", size)
+				}
+			}
+		})
+	}
 }
