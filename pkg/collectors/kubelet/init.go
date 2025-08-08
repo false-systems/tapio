@@ -2,6 +2,7 @@ package kubelet
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
@@ -12,28 +13,11 @@ func init() {
 	registry.Register("kubelet", createKubeletCollector)
 }
 
-func createKubeletCollector(config map[string]interface{}) (collectors.Collector, error) {
-	// Parse configuration
-	cfg := DefaultConfig()
-
-	if address, ok := config["address"].(string); ok {
-		cfg.Address = address
-	}
-
-	if insecure, ok := config["insecure"].(bool); ok {
-		cfg.Insecure = insecure
-	}
-
-	if clientCert, ok := config["client_cert"].(string); ok {
-		cfg.ClientCert = clientCert
-	}
-
-	if clientKey, ok := config["client_key"].(string); ok {
-		cfg.ClientKey = clientKey
-	}
-
-	if nodeName, ok := config["node_name"].(string); ok {
-		cfg.NodeName = nodeName
+func createKubeletCollector(configMap map[string]interface{}) (collectors.Collector, error) {
+	// Parse configuration from map to proper Config struct
+	cfg, err := parseConfigFromMap(configMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse kubelet configuration: %w", err)
 	}
 
 	// Create logger if not provided
@@ -46,7 +30,7 @@ func createKubeletCollector(config map[string]interface{}) (collectors.Collector
 	}
 
 	name := "kubelet"
-	if n, ok := config["name"].(string); ok {
+	if n, ok := configMap["name"].(string); ok {
 		name = n
 	}
 
@@ -56,4 +40,48 @@ func createKubeletCollector(config map[string]interface{}) (collectors.Collector
 	}
 
 	return collector, nil
+}
+
+// parseConfigFromMap converts map[string]interface{} to proper Config struct
+func parseConfigFromMap(configMap map[string]interface{}) (*Config, error) {
+	cfg := DefaultConfig()
+
+	if address, ok := configMap["address"].(string); ok {
+		cfg.Address = address
+	}
+
+	if insecure, ok := configMap["insecure"].(bool); ok {
+		cfg.Insecure = insecure
+	}
+
+	if clientCert, ok := configMap["client_cert"].(string); ok {
+		cfg.ClientCert = clientCert
+	}
+
+	if clientKey, ok := configMap["client_key"].(string); ok {
+		cfg.ClientKey = clientKey
+	}
+
+	if nodeName, ok := configMap["node_name"].(string); ok {
+		cfg.NodeName = nodeName
+	}
+
+	// Parse duration fields if provided
+	if metricsInterval, ok := configMap["metrics_interval"].(string); ok {
+		duration, err := time.ParseDuration(metricsInterval)
+		if err != nil {
+			return nil, fmt.Errorf("invalid metrics_interval: %w", err)
+		}
+		cfg.MetricsInterval = duration
+	}
+
+	if statsInterval, ok := configMap["stats_interval"].(string); ok {
+		duration, err := time.ParseDuration(statsInterval)
+		if err != nil {
+			return nil, fmt.Errorf("invalid stats_interval: %w", err)
+		}
+		cfg.StatsInterval = duration
+	}
+
+	return cfg, nil
 }
