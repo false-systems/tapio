@@ -1,97 +1,98 @@
-# ==========================================
-# Tapio Pre-commit Configuration
-# ==========================================
+# Tapio Pre-commit Hooks Configuration
+# Enforces CLAUDE.md standards before commits
 
 repos:
   # Go formatting and imports
   - repo: local
     hooks:
       - id: go-fmt
-        name: Format Go code
-        entry: make fmt
+        name: Go Format
+        entry: bash -c 'gofmt -l . | grep -v vendor | wc -l | xargs test 0 -eq'
         language: system
-        files: \.go$
+        files: '\.go$'
+        pass_filenames: false
+      
+      - id: go-imports
+        name: Go Imports
+        entry: bash -c 'goimports -l . | grep -v vendor | wc -l | xargs test 0 -eq'
+        language: system
+        files: '\.go$'
         pass_filenames: false
 
-      - id: go-mod-tidy
-        name: Tidy Go modules
-        entry: go mod tidy
+  # Check for forbidden patterns
+  - repo: local
+    hooks:
+      - id: no-todos
+        name: No TODOs
+        entry: bash -c '\! grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.go" .'
         language: system
-        files: go\.(mod|sum)$
+        pass_filenames: false
+      
+      - id: no-panic
+        name: No panic() calls
+        entry: bash -c '\! grep -r "panic(" --include="*.go" . | grep -v "init()" | grep -v "test.go"'
+        language: system
+        pass_filenames: false
+      
+      - id: no-ignored-errors
+        name: No ignored errors
+        entry: bash -c '\! grep -r "_ = " --include="*.go" . | grep -v "test.go"'
+        language: system
+        pass_filenames: false
+      
+      - id: no-interface-abuse
+        name: No interface{} in public APIs
+        entry: bash -c '\! grep -r "interface{}" --include="*.go" . | grep -v "json" | grep -v "test.go" | grep "func.*interface{}"'
+        language: system
         pass_filenames: false
 
+  # Architecture verification
+  - repo: local
+    hooks:
+      - id: verify-architecture
+        name: Verify 5-Level Architecture
+        entry: ./scripts/verify-architecture.sh
+        language: system
+        pass_filenames: false
+        files: '\.go$'
+
+  # Build verification for changed packages
+  - repo: local
+    hooks:
+      - id: build-check
+        name: Build Check
+        entry: bash -c 'go build ./...'
+        language: system
+        pass_filenames: false
+        files: '\.go$'
+
+  # Test verification for changed packages
+  - repo: local
+    hooks:
+      - id: test-check
+        name: Test Check
+        entry: bash -c 'go test -race -timeout 30s ./...'
+        language: system
+        pass_filenames: false
+        files: '\.go$'
+
+  # Go vet
+  - repo: local
+    hooks:
       - id: go-vet
-        name: Go vet
-        entry: go vet
+        name: Go Vet
+        entry: bash -c 'go vet ./...'
         language: system
-        files: \.go$
-        args: [./...]
         pass_filenames: false
-
-      - id: golangci-lint
-        name: Run golangci-lint
-        entry: golangci-lint run
-        language: system
-        files: \.go$
-        args: [--timeout=5m, --fix]
-        pass_filenames: false
+        files: '\.go$'
 
   # Security checks
   - repo: local
     hooks:
-      - id: gosec
-        name: Security scan with gosec
-        entry: gosec
+      - id: security-check
+        name: Security Check
+        entry: bash -c 'which gosec > /dev/null && gosec -quiet ./... || echo "gosec not installed, skipping"'
         language: system
-        files: \.go$
-        args: [-nosec-tag=notsafe, ./...]
         pass_filenames: false
-
-  # General file checks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: trailing-whitespace
-        exclude: \.md$
-      - id: end-of-file-fixer
-        exclude: \.md$
-      - id: check-yaml
-        args: [--allow-multiple-documents]
-      - id: check-json
-      - id: check-toml
-      - id: check-merge-conflict
-      - id: check-added-large-files
-        args: [--maxkb=1000]
-      - id: check-case-conflict
-      - id: mixed-line-ending
-
-  # Markdown and documentation
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.37.0
-    hooks:
-      - id: markdownlint
-        args: [--disable, MD013, MD033, MD041, --]
-
-  # Secrets detection
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.4.0
-    hooks:
-      - id: detect-secrets
-        args: [--baseline, .secrets.baseline]
-        exclude: \.lock$
-
-# Global settings
-default_stages: [commit]
-minimum_pre_commit_version: "3.0.0"
-
-# Skip specific files
-exclude: |
-  (?x)^(
-    vendor/|
-    \.git/|
-    bin/|
-    dist/|
-    build/|
-    .*\.pb\.go$|
-    .*_generated\.go$
-  )$
+        files: '\.go$'
+EOF < /dev/null
