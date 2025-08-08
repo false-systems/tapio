@@ -66,11 +66,13 @@ func TestCreateOrUpdateNode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test doesn't execute write since no driver, just validates logic
+			// Test expects error since no driver is configured
 			err := client.CreateOrUpdateNode(context.Background(), tt.event)
 
 			if tt.event.Entity == nil {
-				assert.NoError(t, err)
+				assert.NoError(t, err) // Should return early without error
+			} else {
+				assert.Error(t, err) // Should error due to nil driver
 			}
 		})
 	}
@@ -102,7 +104,7 @@ func TestLinkEventTrigger(t *testing.T) {
 	confidence := 0.75
 
 	// Without a driver, this will return an error
-	err := client.LinkEventTrigger(ctx, triggerID, triggeredID, confidence)
+	err := client.LinkEventCausality(ctx, triggeredID, triggerID, confidence)
 	assert.Error(t, err) // Expected since no driver is set
 }
 

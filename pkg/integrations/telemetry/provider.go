@@ -29,21 +29,25 @@ type Config struct {
 	ServiceName      string
 	ServiceVersion   string
 	Environment      string
-	OTLPEndpoint     string // For OTLP exporter (traces & metrics)
-	PrometheusPort   int    // For Prometheus metrics
+	OTLPEndpoint     string            // For OTLP exporter (traces & metrics)
+	OTLPHeaders      map[string]string // Custom headers for OTLP
+	TLSInsecure      bool              // Whether to use insecure TLS (default: false for security)
+	PrometheusPort   int               // For Prometheus metrics
 	EnableTraces     bool
 	EnableMetrics    bool
 	EnablePrometheus bool
 	Logger           *zap.Logger
 }
 
-// DefaultConfig returns default telemetry configuration
+// DefaultConfig returns default telemetry configuration with secure defaults
 func DefaultConfig(serviceName string) *Config {
 	return &Config{
 		ServiceName:      serviceName,
 		ServiceVersion:   "1.0.0",
 		Environment:      "production",
 		OTLPEndpoint:     "", // Empty means disabled
+		OTLPHeaders:      make(map[string]string),
+		TLSInsecure:      false, // Secure by default
 		PrometheusPort:   9090,
 		EnableTraces:     true,
 		EnableMetrics:    true,
@@ -120,11 +124,26 @@ func (p *Provider) initTracing(ctx context.Context, res *resource.Resource) erro
 	var err error
 
 	if p.config.OTLPEndpoint != "" {
-		// Create OTLP trace exporter
-		exporter, err = otlptracegrpc.New(ctx,
+		// Create OTLP trace exporter with secure defaults
+		opts := []otlptracegrpc.Option{
 			otlptracegrpc.WithEndpoint(p.config.OTLPEndpoint),
-			otlptracegrpc.WithInsecure(), // For dev/test
-		)
+		}
+
+		// Add custom headers if provided
+		if len(p.config.OTLPHeaders) > 0 {
+			opts = append(opts, otlptracegrpc.WithHeaders(p.config.OTLPHeaders))
+		}
+
+		// Only use insecure connection if explicitly configured (not recommended for production)
+		if p.config.TLSInsecure {
+			p.logger.Warn("Using insecure TLS connection for OTLP traces - not recommended for production",
+				zap.String("environment", p.config.Environment))
+			opts = append(opts, otlptracegrpc.WithInsecure())
+		} else {
+			p.logger.Info("Using secure TLS connection for OTLP traces")
+		}
+
+		exporter, err = otlptracegrpc.New(ctx, opts...)
 		if err != nil {
 			return fmt.Errorf("failed to create OTLP trace exporter: %w", err)
 		}
@@ -164,10 +183,26 @@ func (p *Provider) initMetrics(ctx context.Context, res *resource.Resource) erro
 
 	// Create OTLP metrics exporter if endpoint is configured
 	if p.config.OTLPEndpoint != "" {
-		exporter, err := otlpmetricgrpc.New(ctx,
+		// Configure OTLP metrics exporter with secure defaults
+		opts := []otlpmetricgrpc.Option{
 			otlpmetricgrpc.WithEndpoint(p.config.OTLPEndpoint),
-			otlpmetricgrpc.WithInsecure(),
-		)
+		}
+
+		// Add custom headers if provided
+		if len(p.config.OTLPHeaders) > 0 {
+			opts = append(opts, otlpmetricgrpc.WithHeaders(p.config.OTLPHeaders))
+		}
+
+		// Only use insecure connection if explicitly configured
+		if p.config.TLSInsecure {
+			p.logger.Warn("Using insecure TLS connection for OTLP metrics - not recommended for production",
+				zap.String("environment", p.config.Environment))
+			opts = append(opts, otlpmetricgrpc.WithInsecure())
+		} else {
+			p.logger.Info("Using secure TLS connection for OTLP metrics")
+		}
+
+		exporter, err := otlpmetricgrpc.New(ctx, opts...)
 		if err != nil {
 			return fmt.Errorf("failed to create OTLP metric exporter: %w", err)
 		}

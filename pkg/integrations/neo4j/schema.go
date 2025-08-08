@@ -3,10 +3,16 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/domain"
+)
+
+var (
+	// validPropertyKeyRegex ensures property keys are safe for Cypher
+	validPropertyKeyRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 )
 
 // NodeType represents different K8s resource types in the graph
@@ -39,13 +45,21 @@ const (
 	RelInNamespace RelationType = "IN_NAMESPACE"
 )
 
-// CreateOrUpdateNode creates or updates a K8s resource node
+// CreateOrUpdateNode creates or updates a K8s resource node with safe parameterized queries
 func (c *Client) CreateOrUpdateNode(ctx context.Context, event *domain.UnifiedEvent) error {
 	if event.Entity == nil {
 		return nil // Skip if no entity
 	}
 
-	query := `
+	nodeType := getNodeType(event.Entity.Type)
+
+	// Use parameterized query with safe node type validation
+	if !isValidNodeType(nodeType) {
+		return fmt.Errorf("invalid node type: %s", nodeType)
+	}
+
+	// Build safe query using validated node type (not user input)
+	query := fmt.Sprintf(`
 		MERGE (n:%s {uid: $uid})
 		SET n.name = $name,
 		    n.namespace = $namespace,
@@ -55,10 +69,7 @@ func (c *Client) CreateOrUpdateNode(ctx context.Context, event *domain.UnifiedEv
 		    n.annotations = $annotations,
 		    n.resourceVersion = $resourceVersion
 		RETURN n
-	`
-
-	nodeType := getNodeType(event.Entity.Type)
-	query = fmt.Sprintf(query, nodeType)
+	`, nodeType)
 
 	params := map[string]interface{}{
 		"uid":             event.Entity.UID,
@@ -121,8 +132,14 @@ func (c *Client) CreateEvent(ctx context.Context, event *domain.UnifiedEvent) er
 	})
 }
 
-// CreateRelationship creates a relationship between nodes
+// CreateRelationship creates a relationship between nodes with safe parameterized queries
 func (c *Client) CreateRelationship(ctx context.Context, fromUID, toUID string, relType RelationType, properties map[string]interface{}) error {
+	// Validate relationship type
+	if !isValidRelationType(relType) {
+		return fmt.Errorf("invalid relationship type: %s", relType)
+	}
+
+	// Build base query with validated relationship type (not user input)
 	query := fmt.Sprintf(`
 		MATCH (from {uid: $fromUID})
 		MATCH (to {uid: $toUID})
@@ -130,10 +147,14 @@ func (c *Client) CreateRelationship(ctx context.Context, fromUID, toUID string, 
 		SET r.timestamp = $timestamp
 	`, relType)
 
-	// Add properties to relationship
+	// Add properties to relationship with safe parameter names
 	if len(properties) > 0 {
 		for key := range properties {
-			query += fmt.Sprintf(", r.%s = $%s", key, key)
+			// Validate property key to prevent injection
+			if !isValidPropertyKey(key) {
+				return fmt.Errorf("invalid property key: %s", key)
+			}
+			query += fmt.Sprintf(", r.%s = $prop_%s", key, key)
 		}
 	}
 
@@ -143,9 +164,12 @@ func (c *Client) CreateRelationship(ctx context.Context, fromUID, toUID string, 
 		"timestamp": time.Now().Unix(),
 	}
 
-	// Merge properties into params
+	// Merge properties into params with safe parameter names
 	for k, v := range properties {
-		params[k] = v
+		if !isValidPropertyKey(k) {
+			return fmt.Errorf("invalid property key: %s", k)
+		}
+		params[fmt.Sprintf("prop_%s", k)] = v
 	}
 
 	return c.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
@@ -154,8 +178,13 @@ func (c *Client) CreateRelationship(ctx context.Context, fromUID, toUID string, 
 	})
 }
 
-// CreateEventRelationship links an event to an entity
+// CreateEventRelationship links an event to an entity with safe parameterized queries
 func (c *Client) CreateEventRelationship(ctx context.Context, eventID string, entityUID string, relType RelationType) error {
+	// Validate relationship type
+	if !isValidRelationType(relType) {
+		return fmt.Errorf("invalid relationship type: %s", relType)
+	}
+
 	query := fmt.Sprintf(`
 		MATCH (e:Event {id: $eventID})
 		MATCH (n {uid: $entityUID})
@@ -230,4 +259,33 @@ func mapToStringArray(m map[string]string) []string {
 		result = append(result, fmt.Sprintf("%s=%s", key, value))
 	}
 	return result
+}
+
+// isValidNodeType validates that the node type is one of the predefined safe values
+func isValidNodeType(nodeType NodeType) bool {
+	switch nodeType {
+	case NodePod, NodeService, NodeDeployment, NodeReplicaSet,
+		NodeConfigMap, NodeSecret, NodeNode, NodeEvent, NodeNamespace:
+		return true
+	default:
+		// Check if it's a valid identifier format for custom types
+		return validPropertyKeyRegex.MatchString(string(nodeType))
+	}
+}
+
+// isValidRelationType validates that the relationship type is one of the predefined safe values
+func isValidRelationType(relType RelationType) bool {
+	switch relType {
+	case RelOwnedBy, RelSelectedBy, RelMounts, RelRunsOn,
+		RelCausedBy, RelTriggeredBy, RelAffects, RelConnectsTo, RelInNamespace:
+		return true
+	default:
+		// Check if it's a valid identifier format for custom types
+		return validPropertyKeyRegex.MatchString(string(relType))
+	}
+}
+
+// isValidPropertyKey validates that a property key is safe for use in Cypher queries
+func isValidPropertyKey(key string) bool {
+	return validPropertyKeyRegex.MatchString(key)
 }

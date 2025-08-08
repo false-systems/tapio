@@ -88,6 +88,10 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, params map[stri
 
 // ExecuteWrite runs a write transaction
 func (c *Client) ExecuteWrite(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
+	if c.driver == nil {
+		return fmt.Errorf("neo4j driver not initialized")
+	}
+
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: c.config.Database,

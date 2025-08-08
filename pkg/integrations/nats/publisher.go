@@ -234,12 +234,21 @@ func (p *EventPublisher) PublishRawEvent(ctx context.Context, event collectors.R
 	msg.Header.Set("Collector-Type", event.Type)
 	msg.Header.Set("Timestamp", event.Timestamp.Format(time.RFC3339Nano))
 
-	// Add trace context if present
-	if event.TraceID != "" {
-		msg.Header.Set("Trace-ID", event.TraceID)
+	// Add trace context if present (check direct fields first, then metadata)
+	traceID := event.TraceID
+	if traceID == "" {
+		traceID = event.Metadata["trace_id"]
 	}
-	if event.SpanID != "" {
-		msg.Header.Set("Span-ID", event.SpanID)
+	if traceID != "" {
+		msg.Header.Set("Trace-ID", traceID)
+	}
+
+	spanID := event.SpanID
+	if spanID == "" {
+		spanID = event.Metadata["span_id"]
+	}
+	if spanID != "" {
+		msg.Header.Set("Span-ID", spanID)
 	}
 
 	// Publish to main subject
