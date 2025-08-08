@@ -12,8 +12,10 @@ type CorrelationResult struct {
 	ID         string
 	Type       string // k8s_ownership, temporal_pattern, sequence_match
 	Confidence float64
-	Events     []string // Event IDs involved
-	TraceID    string   // Trace ID if available
+	Events     []string               // Event IDs involved
+	Related    []*domain.UnifiedEvent // Related events for correlation
+	Message    string                 // Human-readable message about the correlation
+	TraceID    string                 // Trace ID if available
 	RootCause  *RootCause
 	Impact     *Impact
 	Summary    string
@@ -60,4 +62,15 @@ type Dependency struct {
 	Description string
 	Required    bool
 	HealthCheck func(context.Context) error
+}
+
+// Helper function to extract event IDs from unified events
+func getEventIDs(events []*domain.UnifiedEvent) []string {
+	ids := make([]string, 0, len(events))
+	for _, event := range events {
+		if event != nil {
+			ids = append(ids, event.ID)
+		}
+	}
+	return ids
 }

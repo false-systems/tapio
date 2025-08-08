@@ -9,17 +9,12 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 )
 
 // K8sCorrelator finds correlations based on Kubernetes relationships
 type K8sCorrelator struct {
-	logger          *zap.Logger
-	clientset       kubernetes.Interface
-	informerFactory informers.SharedInformerFactory
+	logger    *zap.Logger
+	k8sClient domain.K8sClient // Using domain interface instead of kubernetes.Interface
 
 	// Caches for fast lookup
 	ownerCache    *OwnershipCache
@@ -27,6 +22,11 @@ type K8sCorrelator struct {
 
 	// Event cache for correlation
 	eventCache *EventCache
+
+	// Watch channels
+	podWatcher     <-chan domain.K8sWatchEvent
+	serviceWatcher <-chan domain.K8sWatchEvent
+	cancelFunc     context.CancelFunc
 
 	started bool
 	mu      sync.RWMutex
@@ -53,7 +53,11 @@ type ResourceRef struct {
 // SelectorCache tracks label selectors
 type SelectorCache struct {
 	mu        sync.RWMutex
-	selectors map[string]labels.Selector // key: namespace/kind/name
+	selectors map[string]SelectorInfo // key: namespace/kind/name
+}
+
+type SelectorInfo struct {
+	Labels map[string]string
 }
 
 // EventCache stores recent events for correlation
@@ -68,19 +72,16 @@ type CachedEvent struct {
 	Timestamp time.Time
 }
 
-// NewK8sCorrelator creates a new K8s correlator
-func NewK8sCorrelator(logger *zap.Logger, clientset kubernetes.Interface) *K8sCorrelator {
-	informerFactory := informers.NewSharedInformerFactory(clientset, 30*time.Second)
-
+// NewK8sCorrelator creates a new K8s correlator using domain interfaces
+func NewK8sCorrelator(logger *zap.Logger, k8sClient domain.K8sClient) *K8sCorrelator {
 	return &K8sCorrelator{
-		logger:          logger,
-		clientset:       clientset,
-		informerFactory: informerFactory,
+		logger:    logger,
+		k8sClient: k8sClient,
 		ownerCache: &OwnershipCache{
 			items: make(map[string]*OwnershipInfo),
 		},
 		selectorCache: &SelectorCache{
-			selectors: make(map[string]labels.Selector),
+			selectors: make(map[string]SelectorInfo),
 		},
 		eventCache: &EventCache{
 			events: make(map[string]*CachedEvent),
@@ -89,7 +90,7 @@ func NewK8sCorrelator(logger *zap.Logger, clientset kubernetes.Interface) *K8sCo
 	}
 }
 
-// Start initializes the K8s informers
+// Start initializes the K8s watchers
 func (k *K8sCorrelator) Start(ctx context.Context) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -98,41 +99,64 @@ func (k *K8sCorrelator) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// Set up informers for key resources
-	deployInformer := k.informerFactory.Apps().V1().Deployments().Informer()
-	rsInformer := k.informerFactory.Apps().V1().ReplicaSets().Informer()
-	podInformer := k.informerFactory.Core().V1().Pods().Informer()
-	svcInformer := k.informerFactory.Core().V1().Services().Informer()
+	// Create cancellable context
+	watchCtx, cancel := context.WithCancel(ctx)
+	k.cancelFunc = cancel
 
-	// Add event handlers
-	deployInformer.AddEventHandler(k.createResourceEventHandler("Deployment"))
-	rsInformer.AddEventHandler(k.createResourceEventHandler("ReplicaSet"))
-	podInformer.AddEventHandler(k.createResourceEventHandler("Pod"))
-	svcInformer.AddEventHandler(k.createResourceEventHandler("Service"))
-
-	// Start informers
-	k.informerFactory.Start(ctx.Done())
-
-	// Wait for caches to sync
-	if !cache.WaitForCacheSync(ctx.Done(),
-		deployInformer.HasSynced,
-		rsInformer.HasSynced,
-		podInformer.HasSynced,
-		svcInformer.HasSynced,
-	) {
-		return fmt.Errorf("failed to sync caches")
+	// Start pod watcher
+	podWatcher, err := k.k8sClient.WatchPods(watchCtx, "")
+	if err != nil {
+		return fmt.Errorf("failed to start pod watcher: %w", err)
 	}
+	k.podWatcher = podWatcher
+
+	// Start service watcher
+	serviceWatcher, err := k.k8sClient.WatchServices(watchCtx, "")
+	if err != nil {
+		return fmt.Errorf("failed to start service watcher: %w", err)
+	}
+	k.serviceWatcher = serviceWatcher
+
+	// Start processing watchers
+	go k.processPodEvents(watchCtx)
+	go k.processServiceEvents(watchCtx)
+
+	// Periodically clean up caches
+	go k.cleanupLoop(watchCtx)
 
 	k.started = true
-
-	// Start cleanup routine
-	go k.cleanupRoutine(ctx)
+	k.logger.Info("K8s correlator started")
 
 	return nil
 }
 
-// Process implements the Correlator interface
+// Stop shuts down the K8s correlator
+func (k *K8sCorrelator) Stop() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	if !k.started {
+		return nil
+	}
+
+	if k.cancelFunc != nil {
+		k.cancelFunc()
+	}
+
+	k.started = false
+	k.logger.Info("K8s correlator stopped")
+
+	return nil
+}
+
+// Name returns the correlator name
+func (k *K8sCorrelator) Name() string {
+	return "k8s"
+}
+
+// Process analyzes an event and returns K8s-based correlations
 func (k *K8sCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
+	// Skip if not K8s event
 	if event.K8sContext == nil {
 		return nil, nil
 	}
@@ -142,291 +166,392 @@ func (k *K8sCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent)
 
 	var results []*CorrelationResult
 
-	// Check ownership correlations
-	if ownershipResults := k.findOwnershipCorrelations(event); len(ownershipResults) > 0 {
-		results = append(results, ownershipResults...)
+	// Find owner chain correlations
+	if owners := k.findOwnerChain(event); len(owners) > 0 {
+		results = append(results, &CorrelationResult{
+			Type:       "ownership",
+			Confidence: 0.8,
+			Related:    k.ownersToEvents(owners),
+			Message:    fmt.Sprintf("Found %d owner relationships", len(owners)),
+		})
 	}
 
-	// Check selector-based correlations
-	if selectorResults := k.findSelectorCorrelations(event); len(selectorResults) > 0 {
-		results = append(results, selectorResults...)
+	// Find selector-based correlations
+	if related := k.findSelectorMatches(event); len(related) > 0 {
+		results = append(results, &CorrelationResult{
+			Type:       "selector",
+			Confidence: 0.7,
+			Related:    related,
+			Message:    fmt.Sprintf("Found %d selector matches", len(related)),
+		})
 	}
 
-	// Check cross-resource correlations
-	if crossResults := k.findCrossResourceCorrelations(event); len(crossResults) > 0 {
-		results = append(results, crossResults...)
+	// Find namespace correlations
+	if nsEvents := k.findNamespaceEvents(event); len(nsEvents) > 0 {
+		results = append(results, &CorrelationResult{
+			Type:       "namespace",
+			Confidence: 0.6,
+			Related:    nsEvents,
+			Message:    fmt.Sprintf("Found %d namespace events", len(nsEvents)),
+		})
 	}
 
 	return results, nil
 }
 
-// Name returns the correlator name
-func (k *K8sCorrelator) Name() string {
-	return "k8s_native"
-}
-
-// findOwnershipCorrelations finds parent-child relationships
-func (k *K8sCorrelator) findOwnershipCorrelations(event *domain.UnifiedEvent) []*CorrelationResult {
-	k8sCtx := event.K8sContext
-	key := makeResourceKey(k8sCtx.Namespace, k8sCtx.Kind, k8sCtx.Name)
-
-	k.ownerCache.mu.RLock()
-	ownership, exists := k.ownerCache.items[key]
-	k.ownerCache.mu.RUnlock()
-
-	if !exists || ownership == nil {
-		return nil
-	}
-
-	var results []*CorrelationResult
-
-	// Check for parent events
-	for _, owner := range ownership.Owners {
-		if relatedEvents := k.findEventsForResource(owner); len(relatedEvents) > 0 {
-			result := &CorrelationResult{
-				ID:         fmt.Sprintf("k8s-owner-%s-%d", event.ID, time.Now().UnixNano()),
-				Type:       "k8s_ownership",
-				Confidence: 1.0, // K8s relationships are definitive
-				Events:     append([]string{event.ID}, getEventIDs(relatedEvents)...),
-				Summary:    fmt.Sprintf("%s %s is owned by %s %s", k8sCtx.Kind, k8sCtx.Name, owner.Kind, owner.Name),
-				Details:    fmt.Sprintf("Event in %s/%s is related to its owner %s/%s through Kubernetes ownership", k8sCtx.Kind, k8sCtx.Name, owner.Kind, owner.Name),
-				Evidence:   []string{fmt.Sprintf("OwnerReference: %s/%s", owner.Kind, owner.Name)},
-				StartTime:  event.Timestamp,
-				EndTime:    event.Timestamp,
-			}
-
-			// Determine root cause
-			result.RootCause = k.determineRootCause(event, relatedEvents)
-			result.Impact = k.assessImpact(event, relatedEvents)
-
-			results = append(results, result)
+// processPodEvents processes pod watch events
+func (k *K8sCorrelator) processPodEvents(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-k.podWatcher:
+			k.handlePodEvent(event)
 		}
 	}
-
-	// Check for child events
-	for _, child := range ownership.Children {
-		if relatedEvents := k.findEventsForResource(child); len(relatedEvents) > 0 {
-			result := &CorrelationResult{
-				ID:         fmt.Sprintf("k8s-child-%s-%d", event.ID, time.Now().UnixNano()),
-				Type:       "k8s_ownership",
-				Confidence: 1.0,
-				Events:     append([]string{event.ID}, getEventIDs(relatedEvents)...),
-				Summary:    fmt.Sprintf("%s %s owns %s %s", k8sCtx.Kind, k8sCtx.Name, child.Kind, child.Name),
-				Details:    fmt.Sprintf("Event in %s/%s affects its child %s/%s through Kubernetes ownership", k8sCtx.Kind, k8sCtx.Name, child.Kind, child.Name),
-				Evidence:   []string{fmt.Sprintf("Child resource: %s/%s", child.Kind, child.Name)},
-				StartTime:  event.Timestamp,
-				EndTime:    event.Timestamp,
-			}
-
-			result.RootCause = k.determineRootCause(event, relatedEvents)
-			result.Impact = k.assessImpact(event, relatedEvents)
-
-			results = append(results, result)
-		}
-	}
-
-	return results
 }
 
-// findSelectorCorrelations finds service-pod relationships
-func (k *K8sCorrelator) findSelectorCorrelations(event *domain.UnifiedEvent) []*CorrelationResult {
-	k8sCtx := event.K8sContext
+// processServiceEvents processes service watch events
+func (k *K8sCorrelator) processServiceEvents(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-k.serviceWatcher:
+			k.handleServiceEvent(event)
+		}
+	}
+}
 
-	// Only relevant for Services and Pods
-	if k8sCtx.Kind != "Service" && k8sCtx.Kind != "Pod" {
-		return nil
+// handlePodEvent processes a pod watch event
+func (k *K8sCorrelator) handlePodEvent(event domain.K8sWatchEvent) {
+	pod, ok := event.Object.(*domain.K8sPod)
+	if !ok {
+		return
 	}
 
-	var results []*CorrelationResult
+	// Update ownership cache
+	k.updateOwnershipForPod(pod)
 
-	if k8sCtx.Kind == "Service" {
-		// Find pods matching this service
-		key := makeResourceKey(k8sCtx.Namespace, k8sCtx.Kind, k8sCtx.Name)
+	// Create unified event for the pod change
+	unifiedEvent := k.podToUnifiedEvent(pod, event.Type)
+	if unifiedEvent != nil {
+		k.cacheEvent(unifiedEvent)
+	}
+}
 
-		k.selectorCache.mu.RLock()
-		selector, exists := k.selectorCache.selectors[key]
-		k.selectorCache.mu.RUnlock()
+// handleServiceEvent processes a service watch event
+func (k *K8sCorrelator) handleServiceEvent(event domain.K8sWatchEvent) {
+	service, ok := event.Object.(*domain.K8sService)
+	if !ok {
+		return
+	}
 
-		if exists && selector != nil {
-			// Find pods with matching labels
-			if matchingPods := k.findPodsMatchingSelector(k8sCtx.Namespace, selector); len(matchingPods) > 0 {
-				result := &CorrelationResult{
-					ID:         fmt.Sprintf("k8s-selector-%s-%d", event.ID, time.Now().UnixNano()),
-					Type:       "k8s_selector",
-					Confidence: 1.0,
-					Events:     []string{event.ID},
-					Summary:    fmt.Sprintf("Service %s selects %d pods", k8sCtx.Name, len(matchingPods)),
-					Details:    fmt.Sprintf("Service %s/%s is experiencing issues which affects %d selected pods", k8sCtx.Namespace, k8sCtx.Name, len(matchingPods)),
-					Evidence:   []string{fmt.Sprintf("Selector: %s", selector.String())},
-					StartTime:  event.Timestamp,
-					EndTime:    event.Timestamp,
+	// Update selector cache
+	k.updateSelectorForService(service)
+
+	// Create unified event for the service change
+	unifiedEvent := k.serviceToUnifiedEvent(service, event.Type)
+	if unifiedEvent != nil {
+		k.cacheEvent(unifiedEvent)
+	}
+}
+
+// updateOwnershipForPod updates the ownership cache for a pod
+func (k *K8sCorrelator) updateOwnershipForPod(pod *domain.K8sPod) {
+	k.ownerCache.mu.Lock()
+	defer k.ownerCache.mu.Unlock()
+
+	key := fmt.Sprintf("%s/Pod/%s", pod.Namespace, pod.Name)
+	info := &OwnershipInfo{
+		Owners: make([]ResourceRef, 0),
+	}
+
+	// Add owner references
+	for _, owner := range pod.OwnerReferences {
+		info.Owners = append(info.Owners, ResourceRef{
+			Kind:      owner.Kind,
+			Name:      owner.Name,
+			Namespace: pod.Namespace,
+			UID:       owner.UID,
+		})
+
+		// Update parent's children
+		parentKey := fmt.Sprintf("%s/%s/%s", pod.Namespace, owner.Kind, owner.Name)
+		if parentInfo, exists := k.ownerCache.items[parentKey]; exists {
+			// Check if child already exists
+			childExists := false
+			for _, child := range parentInfo.Children {
+				if child.Name == pod.Name && child.Kind == "Pod" {
+					childExists = true
+					break
 				}
-
-				result.Impact = &Impact{
-					Severity:  event.Severity,
-					Resources: matchingPods,
-					Services:  []string{k8sCtx.Name},
-				}
-
-				results = append(results, result)
+			}
+			if !childExists {
+				parentInfo.Children = append(parentInfo.Children, ResourceRef{
+					Kind:      "Pod",
+					Name:      pod.Name,
+					Namespace: pod.Namespace,
+					UID:       pod.UID,
+				})
+			}
+		} else {
+			k.ownerCache.items[parentKey] = &OwnershipInfo{
+				Children: []ResourceRef{{
+					Kind:      "Pod",
+					Name:      pod.Name,
+					Namespace: pod.Namespace,
+					UID:       pod.UID,
+				}},
 			}
 		}
 	}
 
-	return results
+	k.ownerCache.items[key] = info
 }
 
-// findCrossResourceCorrelations finds correlations across resource types
-func (k *K8sCorrelator) findCrossResourceCorrelations(event *domain.UnifiedEvent) []*CorrelationResult {
-	k8sCtx := event.K8sContext
+// updateSelectorForService updates the selector cache for a service
+func (k *K8sCorrelator) updateSelectorForService(service *domain.K8sService) {
+	k.selectorCache.mu.Lock()
+	defer k.selectorCache.mu.Unlock()
 
-	// Look for related events in the same namespace within time window
-	k.eventCache.mu.RLock()
-	defer k.eventCache.mu.RUnlock()
-
-	var relatedEvents []*domain.UnifiedEvent
-	cutoff := event.Timestamp.Add(-30 * time.Second)
-
-	for _, cached := range k.eventCache.events {
-		if cached.Event.ID == event.ID {
-			continue
-		}
-
-		if cached.Event.K8sContext != nil &&
-			cached.Event.K8sContext.Namespace == k8sCtx.Namespace &&
-			cached.Event.Timestamp.After(cutoff) {
-
-			// Check if resources are related
-			if k.areResourcesRelated(event, cached.Event) {
-				relatedEvents = append(relatedEvents, cached.Event)
-			}
-		}
-	}
-
-	if len(relatedEvents) == 0 {
-		return nil
-	}
-
-	// Group by correlation pattern
-	result := &CorrelationResult{
-		ID:         fmt.Sprintf("k8s-cross-%s-%d", event.ID, time.Now().UnixNano()),
-		Type:       "k8s_cascade",
-		Confidence: 0.85,
-		Events:     append([]string{event.ID}, getEventIDs(relatedEvents)...),
-		Summary:    fmt.Sprintf("Cascade failure detected across %d resources", len(relatedEvents)+1),
-		Details:    k.buildCascadeDescription(event, relatedEvents),
-		Evidence:   k.buildCascadeEvidence(event, relatedEvents),
-		StartTime:  event.Timestamp,
-		EndTime:    event.Timestamp,
-	}
-
-	result.RootCause = k.determineRootCause(event, relatedEvents)
-	result.Impact = k.assessImpact(event, relatedEvents)
-
-	return []*CorrelationResult{result}
-}
-
-// Helper methods
-
-func (k *K8sCorrelator) createResourceEventHandler(kind string) cache.ResourceEventHandler {
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			k.updateCachesFromObject(obj, kind)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			k.updateCachesFromObject(newObj, kind)
-		},
-		DeleteFunc: func(obj interface{}) {
-			k.removeCachesFromObject(obj, kind)
-		},
+	key := fmt.Sprintf("%s/Service/%s", service.Namespace, service.Name)
+	k.selectorCache.selectors[key] = SelectorInfo{
+		Labels: service.Selector,
 	}
 }
 
+// cacheEvent adds an event to the cache
 func (k *K8sCorrelator) cacheEvent(event *domain.UnifiedEvent) {
 	k.eventCache.mu.Lock()
 	defer k.eventCache.mu.Unlock()
 
-	k.eventCache.events[event.ID] = &CachedEvent{
+	key := k.eventKey(event)
+	k.eventCache.events[key] = &CachedEvent{
 		Event:     event,
 		Timestamp: time.Now(),
 	}
 }
 
-func (k *K8sCorrelator) findEventsForResource(ref ResourceRef) []*domain.UnifiedEvent {
+// eventKey generates a cache key for an event
+func (k *K8sCorrelator) eventKey(event *domain.UnifiedEvent) string {
+	if event.K8sContext != nil {
+		return fmt.Sprintf("%s/%s/%s/%s",
+			event.K8sContext.Namespace,
+			event.K8sContext.Kind,
+			event.K8sContext.Name,
+			event.ID)
+	}
+	return event.ID
+}
+
+// findOwnerChain finds the ownership chain for an event
+func (k *K8sCorrelator) findOwnerChain(event *domain.UnifiedEvent) []ResourceRef {
+	if event.K8sContext == nil {
+		return nil
+	}
+
+	k.ownerCache.mu.RLock()
+	defer k.ownerCache.mu.RUnlock()
+
+	var chain []ResourceRef
+	visited := make(map[string]bool)
+
+	// Start from the current resource
+	key := fmt.Sprintf("%s/%s/%s",
+		event.K8sContext.Namespace,
+		event.K8sContext.Kind,
+		event.K8sContext.Name)
+
+	// Traverse up the ownership chain
+	for {
+		if visited[key] {
+			break // Cycle detected
+		}
+		visited[key] = true
+
+		info, exists := k.ownerCache.items[key]
+		if !exists || len(info.Owners) == 0 {
+			break
+		}
+
+		// Add first owner to chain (controllers typically have single owner)
+		owner := info.Owners[0]
+		chain = append(chain, owner)
+
+		// Move to parent
+		key = fmt.Sprintf("%s/%s/%s", owner.Namespace, owner.Kind, owner.Name)
+	}
+
+	return chain
+}
+
+// findSelectorMatches finds resources matching the same selector
+func (k *K8sCorrelator) findSelectorMatches(event *domain.UnifiedEvent) []*domain.UnifiedEvent {
+	if event.K8sContext == nil {
+		return nil
+	}
+
+	k.selectorCache.mu.RLock()
+	defer k.selectorCache.mu.RUnlock()
+
+	k.eventCache.mu.RLock()
+	defer k.eventCache.mu.RUnlock()
+
+	var matches []*domain.UnifiedEvent
+
+	// Get labels from the event
+	var eventLabels map[string]string
+	if event.K8sContext.Labels != nil {
+		eventLabels = event.K8sContext.Labels
+	}
+
+	// Find services that select this resource
+	for key, selector := range k.selectorCache.selectors {
+		if matchesSelector(eventLabels, selector.Labels) {
+			// Find events for this service
+			parts := strings.Split(key, "/")
+			if len(parts) == 3 {
+				for eventKey, cached := range k.eventCache.events {
+					if strings.Contains(eventKey, parts[2]) { // Service name
+						matches = append(matches, cached.Event)
+					}
+				}
+			}
+		}
+	}
+
+	return matches
+}
+
+// findNamespaceEvents finds recent events in the same namespace
+func (k *K8sCorrelator) findNamespaceEvents(event *domain.UnifiedEvent) []*domain.UnifiedEvent {
+	if event.K8sContext == nil || event.K8sContext.Namespace == "" {
+		return nil
+	}
+
+	k.eventCache.mu.RLock()
+	defer k.eventCache.mu.RUnlock()
+
+	var nsEvents []*domain.UnifiedEvent
+	cutoff := time.Now().Add(-k.eventCache.ttl)
+
+	for _, cached := range k.eventCache.events {
+		// Skip if too old
+		if cached.Timestamp.Before(cutoff) {
+			continue
+		}
+
+		// Check namespace match
+		if cached.Event.K8sContext != nil &&
+			cached.Event.K8sContext.Namespace == event.K8sContext.Namespace &&
+			cached.Event.ID != event.ID {
+			nsEvents = append(nsEvents, cached.Event)
+		}
+	}
+
+	return nsEvents
+}
+
+// ownersToEvents converts owner references to unified events
+func (k *K8sCorrelator) ownersToEvents(owners []ResourceRef) []*domain.UnifiedEvent {
 	k.eventCache.mu.RLock()
 	defer k.eventCache.mu.RUnlock()
 
 	var events []*domain.UnifiedEvent
-	for _, cached := range k.eventCache.events {
-		if cached.Event.K8sContext != nil &&
-			cached.Event.K8sContext.Kind == ref.Kind &&
-			cached.Event.K8sContext.Name == ref.Name &&
-			cached.Event.K8sContext.Namespace == ref.Namespace {
-			events = append(events, cached.Event)
+	for _, owner := range owners {
+		key := fmt.Sprintf("%s/%s/%s", owner.Namespace, owner.Kind, owner.Name)
+		for eventKey, cached := range k.eventCache.events {
+			if strings.Contains(eventKey, key) {
+				events = append(events, cached.Event)
+			}
 		}
 	}
 
 	return events
 }
 
-func (k *K8sCorrelator) determineRootCause(current *domain.UnifiedEvent, related []*domain.UnifiedEvent) *RootCause {
-	// Find the earliest event with highest severity
-	rootEvent := current
-	for _, event := range related {
-		if event.Timestamp.Before(rootEvent.Timestamp) ||
-			(event.Timestamp.Equal(rootEvent.Timestamp) && event.Severity > rootEvent.Severity) {
-			rootEvent = event
+// podToUnifiedEvent converts a pod to a unified event
+func (k *K8sCorrelator) podToUnifiedEvent(pod *domain.K8sPod, eventType domain.K8sWatchEventType) *domain.UnifiedEvent {
+	severity := "info"
+	message := fmt.Sprintf("Pod %s/%s %s", pod.Namespace, pod.Name, strings.ToLower(string(eventType)))
+
+	// Determine severity based on pod phase and event type
+	if eventType == domain.K8sWatchDeleted {
+		severity = "warning"
+	} else if pod.Phase == domain.PodFailed {
+		severity = "error"
+	} else if pod.Phase == domain.PodPending && pod.StartTime != nil {
+		// Check if pod has been pending for too long
+		if time.Since(*pod.StartTime) > 5*time.Minute {
+			severity = "warning"
+			message = fmt.Sprintf("Pod %s/%s pending for %v", pod.Namespace, pod.Name, time.Since(*pod.StartTime))
 		}
 	}
 
-	return &RootCause{
-		EventID:     rootEvent.ID,
-		Confidence:  0.9,
-		Description: fmt.Sprintf("%s in %s/%s", rootEvent.Type, rootEvent.K8sContext.Kind, rootEvent.K8sContext.Name),
-		Evidence:    []string{fmt.Sprintf("First occurrence at %s", rootEvent.Timestamp.Format(time.RFC3339))},
+	return &domain.UnifiedEvent{
+		ID:        fmt.Sprintf("k8s-pod-%s-%s-%d", pod.Namespace, pod.Name, time.Now().Unix()),
+		Type:      domain.EventType(fmt.Sprintf("k8s.pod.%s", strings.ToLower(string(eventType)))),
+		Timestamp: time.Now(),
+		Source:    "k8s-correlator",
+		Severity:  domain.EventSeverity(severity),
+		Message:   message,
+		K8sContext: &domain.K8sContext{
+			ClusterName: "", // Would need cluster info from config
+			Namespace:   pod.Namespace,
+			Kind:        "Pod",
+			Name:        pod.Name,
+			UID:         pod.UID,
+			Labels:      pod.Labels,
+			Annotations: pod.Annotations,
+		},
+		Attributes: map[string]interface{}{
+			"phase":          string(pod.Phase),
+			"ready":          pod.Ready,
+			"restartCount":   pod.RestartCount,
+			"nodeName":       pod.NodeName,
+			"podIP":          pod.PodIP,
+			"containerCount": len(pod.Containers),
+		},
 	}
 }
 
-func (k *K8sCorrelator) assessImpact(current *domain.UnifiedEvent, related []*domain.UnifiedEvent) *Impact {
-	impact := &Impact{
-		Severity:  current.Severity,
-		Resources: make([]string, 0),
-		Services:  make([]string, 0),
+// serviceToUnifiedEvent converts a service to a unified event
+func (k *K8sCorrelator) serviceToUnifiedEvent(service *domain.K8sService, eventType domain.K8sWatchEventType) *domain.UnifiedEvent {
+	severity := "info"
+	message := fmt.Sprintf("Service %s/%s %s", service.Namespace, service.Name, strings.ToLower(string(eventType)))
+
+	if eventType == domain.K8sWatchDeleted {
+		severity = "warning"
 	}
 
-	// Collect affected resources
-	resourceMap := make(map[string]bool)
-	serviceMap := make(map[string]bool)
-
-	allEvents := append(related, current)
-	for _, event := range allEvents {
-		if event.K8sContext != nil {
-			resource := fmt.Sprintf("%s/%s/%s", event.K8sContext.Kind, event.K8sContext.Namespace, event.K8sContext.Name)
-			resourceMap[resource] = true
-
-			if event.K8sContext.Kind == "Service" || event.K8sContext.Kind == "Deployment" {
-				serviceMap[event.K8sContext.Name] = true
-			}
-		}
-
-		// Upgrade severity if needed
-		if event.Severity > impact.Severity {
-			impact.Severity = event.Severity
-		}
+	return &domain.UnifiedEvent{
+		ID:        fmt.Sprintf("k8s-service-%s-%s-%d", service.Namespace, service.Name, time.Now().Unix()),
+		Type:      domain.EventType(fmt.Sprintf("k8s.service.%s", strings.ToLower(string(eventType)))),
+		Timestamp: time.Now(),
+		Source:    "k8s-correlator",
+		Severity:  domain.EventSeverity(severity),
+		Message:   message,
+		K8sContext: &domain.K8sContext{
+			ClusterName: "", // Would need cluster info from config
+			Namespace:   service.Namespace,
+			Kind:        "Service",
+			Name:        service.Name,
+			UID:         service.UID,
+			Labels:      service.Labels,
+			Annotations: service.Annotations,
+		},
+		Attributes: map[string]interface{}{
+			"type":      string(service.Type),
+			"clusterIP": service.ClusterIP,
+			"portCount": len(service.Ports),
+			"selector":  service.Selector,
+		},
 	}
-
-	for resource := range resourceMap {
-		impact.Resources = append(impact.Resources, resource)
-	}
-
-	for service := range serviceMap {
-		impact.Services = append(impact.Services, service)
-	}
-
-	return impact
 }
 
-func (k *K8sCorrelator) cleanupRoutine(ctx context.Context) {
+// cleanupLoop periodically cleans up old cache entries
+func (k *K8sCorrelator) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
@@ -435,98 +560,76 @@ func (k *K8sCorrelator) cleanupRoutine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			k.cleanupOldEvents()
+			k.cleanupCache()
 		}
 	}
 }
 
-func (k *K8sCorrelator) cleanupOldEvents() {
+// cleanupCache removes old entries from the event cache
+func (k *K8sCorrelator) cleanupCache() {
 	k.eventCache.mu.Lock()
 	defer k.eventCache.mu.Unlock()
 
 	cutoff := time.Now().Add(-k.eventCache.ttl)
-	for id, cached := range k.eventCache.events {
+	for key, cached := range k.eventCache.events {
 		if cached.Timestamp.Before(cutoff) {
-			delete(k.eventCache.events, id)
+			delete(k.eventCache.events, key)
 		}
 	}
 }
 
-// Utility functions
-
-func makeResourceKey(namespace, kind, name string) string {
-	return fmt.Sprintf("%s/%s/%s", namespace, kind, name)
-}
-
-func getEventIDs(events []*domain.UnifiedEvent) []string {
-	ids := make([]string, len(events))
-	for i, e := range events {
-		ids[i] = e.ID
+// matchesSelector checks if labels match a selector
+func matchesSelector(labels, selector map[string]string) bool {
+	if len(selector) == 0 {
+		return false
 	}
-	return ids
-}
 
-func (k *K8sCorrelator) areResourcesRelated(e1, e2 *domain.UnifiedEvent) bool {
-	// Check if they share common labels
-	if e1.K8sContext.Labels != nil && e2.K8sContext.Labels != nil {
-		for key, val1 := range e1.K8sContext.Labels {
-			if val2, exists := e2.K8sContext.Labels[key]; exists && val1 == val2 {
-				// Skip common labels that don't indicate relationship
-				if key != "kubernetes.io/metadata.name" && !strings.HasPrefix(key, "pod-template-hash") {
-					return true
-				}
-			}
+	for key, value := range selector {
+		if labelValue, exists := labels[key]; !exists || labelValue != value {
+			return false
 		}
 	}
 
-	// Check namespace events affect all resources in namespace
-	if e1.K8sContext.Kind == "Namespace" || e2.K8sContext.Kind == "Namespace" {
-		return true
-	}
-
-	// Check node events affect pods on that node
-	if e1.K8sContext.Kind == "Node" && e2.K8sContext.Kind == "Pod" {
-		return true // Would need node info to be more precise
-	}
-
-	return false
+	return true
 }
 
-func (k *K8sCorrelator) buildCascadeDescription(root *domain.UnifiedEvent, related []*domain.UnifiedEvent) string {
-	return fmt.Sprintf("A cascade of failures started with %s in %s/%s, affecting %d other resources in the namespace",
-		root.Type, root.K8sContext.Kind, root.K8sContext.Name, len(related))
-}
+// GetOwnerChain returns the ownership chain for a resource
+func (k *K8sCorrelator) GetOwnerChain(namespace, kind, name string) []ResourceRef {
+	k.ownerCache.mu.RLock()
+	defer k.ownerCache.mu.RUnlock()
 
-func (k *K8sCorrelator) buildCascadeEvidence(root *domain.UnifiedEvent, related []*domain.UnifiedEvent) []string {
-	evidence := []string{
-		fmt.Sprintf("Root event: %s at %s", root.Type, root.Timestamp.Format(time.RFC3339)),
-		fmt.Sprintf("Affected resources: %d", len(related)),
-	}
+	var chain []ResourceRef
+	visited := make(map[string]bool)
+	key := fmt.Sprintf("%s/%s/%s", namespace, kind, name)
 
-	// Add sample of affected resources
-	for i, event := range related {
-		if i >= 3 {
-			evidence = append(evidence, fmt.Sprintf("... and %d more", len(related)-3))
+	for {
+		if visited[key] {
 			break
 		}
-		evidence = append(evidence, fmt.Sprintf("- %s/%s: %s", event.K8sContext.Kind, event.K8sContext.Name, event.Type))
+		visited[key] = true
+
+		info, exists := k.ownerCache.items[key]
+		if !exists || len(info.Owners) == 0 {
+			break
+		}
+
+		owner := info.Owners[0]
+		chain = append(chain, owner)
+		key = fmt.Sprintf("%s/%s/%s", owner.Namespace, owner.Kind, owner.Name)
 	}
 
-	return evidence
+	return chain
 }
 
-func (k *K8sCorrelator) findPodsMatchingSelector(namespace string, selector labels.Selector) []string {
-	// This would use the pod informer to find matching pods
-	// For now, return empty
-	return []string{}
-}
+// GetChildResources returns child resources for a parent
+func (k *K8sCorrelator) GetChildResources(namespace, kind, name string) []ResourceRef {
+	k.ownerCache.mu.RLock()
+	defer k.ownerCache.mu.RUnlock()
 
-func (k *K8sCorrelator) updateCachesFromObject(obj interface{}, kind string) {
-	// This would extract metadata and update caches
-	// Implementation depends on specific K8s types
-}
+	key := fmt.Sprintf("%s/%s/%s", namespace, kind, name)
+	if info, exists := k.ownerCache.items[key]; exists {
+		return info.Children
+	}
 
-func (k *K8sCorrelator) removeCachesFromObject(obj interface{}, kind string) {
-	// This would remove entries from caches
-	// Implementation depends on specific K8s types
+	return []ResourceRef{}
 }

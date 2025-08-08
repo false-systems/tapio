@@ -8,7 +8,6 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
-	"k8s.io/client-go/kubernetes"
 )
 
 // Engine orchestrates all correlators
@@ -77,7 +76,7 @@ func DefaultEngineConfig() EngineConfig {
 }
 
 // NewEngine creates a new correlation engine
-func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient kubernetes.Interface, storage Storage) (*Engine, error) {
+func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClient, storage Storage) (*Engine, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	engine := &Engine{
