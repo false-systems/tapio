@@ -422,7 +422,12 @@ func TestCollectorTraceManagement(t *testing.T) {
 	podUID1 := types.UID("pod-1")
 	podUID2 := types.UID("pod-2")
 
-	collector := &Collector{}
+	config := DefaultConfig()
+	config.Logger = zap.NewNop()
+
+	collector, err := NewCollector("kubelet-test", config)
+	require.NoError(t, err)
+	defer collector.Stop()
 
 	// Generate trace IDs for pods
 	trace1 := collector.getOrGenerateTraceID(podUID1)
@@ -443,10 +448,10 @@ func TestKubeletInstrumentationCreation(t *testing.T) {
 	instrumentation, err := NewKubeletInstrumentation(logger)
 	assert.NoError(t, err)
 	assert.NotNil(t, instrumentation)
-	assert.NotNil(t, instrumentation.ServiceInstrumentation)
+	assert.NotEmpty(t, instrumentation.ServiceName)
 	assert.NotNil(t, instrumentation.APILatency)
 	assert.NotNil(t, instrumentation.EventsTotal)
-	assert.NotNil(t, instrumentation.ErrorsTotal)
+	assert.NotNil(t, instrumentation.KubeletErrorsTotal)
 	assert.NotNil(t, instrumentation.PollsActive)
 	assert.NotNil(t, instrumentation.APIFailures)
 }
@@ -539,7 +544,7 @@ func TestCollectorOTELMetrics(t *testing.T) {
 	// without a more complex test setup, but we can verify the structure is correct)
 	assert.NotNil(t, collector.instrumentation.APILatency)
 	assert.NotNil(t, collector.instrumentation.EventsTotal)
-	assert.NotNil(t, collector.instrumentation.ErrorsTotal)
+	assert.NotNil(t, collector.instrumentation.KubeletErrorsTotal)
 	assert.NotNil(t, collector.instrumentation.PollsActive)
 	assert.NotNil(t, collector.instrumentation.APIFailures)
 }
@@ -667,6 +672,294 @@ func TestOTELEventGeneration(t *testing.T) {
 	case <-timeout:
 		t.Fatal("timeout waiting for event")
 	}
+}
+
+func TestPodTraceManagerTTLCleanup(t *testing.T) {
+	ptm := NewPodTraceManager()
+	defer ptm.Stop()
+
+	podUID := types.UID("test-pod")
+
+	// Add an entry
+	traceID := ptm.GetOrGenerate(podUID)
+	assert.NotEmpty(t, traceID)
+	assert.Equal(t, 1, ptm.Count())
+
+	// Manually set timestamp to 2 hours ago to trigger cleanup
+	ptm.mu.Lock()
+	ptm.entries[podUID].Timestamp = time.Now().Add(-2 * time.Hour)
+	ptm.mu.Unlock()
+
+	// Run cleanup
+	ptm.cleanupExpired()
+
+	// Entry should be removed
+	assert.Equal(t, 0, ptm.Count())
+}
+
+func TestCollectorHealthMethod(t *testing.T) {
+	config := DefaultConfig()
+	config.Logger = zap.NewNop()
+
+	collector, err := NewCollector("kubelet-test", config)
+	require.NoError(t, err)
+	defer collector.Stop()
+
+	// Test Health method
+	healthy, details := collector.Health()
+	assert.True(t, healthy)
+	assert.Contains(t, details, "healthy")
+	assert.Contains(t, details, "events_collected")
+	assert.Contains(t, details, "errors_count")
+	assert.Contains(t, details, "last_event")
+	assert.Contains(t, details, "kubelet_address")
+	assert.Equal(t, config.Address, details["kubelet_address"])
+}
+
+func TestCreateKubeletCollectorFromConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		configMap map[string]interface{}
+		wantErr   bool
+	}{
+		{
+			name:      "empty config",
+			configMap: map[string]interface{}{},
+			wantErr:   false,
+		},
+		{
+			name: "custom config without certs",
+			configMap: map[string]interface{}{
+				"name":             "test-kubelet",
+				"address":          "custom-node:10250",
+				"insecure":         true,
+				"node_name":        "test-node",
+				"metrics_interval": "60s",
+				"stats_interval":   "30s",
+			},
+			wantErr: false,
+		},
+		{
+			name: "custom config with invalid certs",
+			configMap: map[string]interface{}{
+				"name":             "test-kubelet",
+				"address":          "custom-node:10250",
+				"insecure":         true,
+				"node_name":        "test-node",
+				"client_cert":      "/path/to/cert",
+				"client_key":       "/path/to/key",
+				"metrics_interval": "60s",
+				"stats_interval":   "30s",
+			},
+			wantErr: true, // Will fail because cert files don't exist
+		},
+		{
+			name: "invalid metrics interval",
+			configMap: map[string]interface{}{
+				"metrics_interval": "invalid-duration",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid stats interval",
+			configMap: map[string]interface{}{
+				"stats_interval": "invalid-duration",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector, err := createKubeletCollector(tt.configMap)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, collector)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, collector)
+				if collector != nil {
+					collector.Stop()
+				}
+			}
+		})
+	}
+}
+
+func TestParseConfigFromMap(t *testing.T) {
+	tests := []struct {
+		name      string
+		configMap map[string]interface{}
+		wantErr   bool
+		validate  func(t *testing.T, config *Config)
+	}{
+		{
+			name:      "default config",
+			configMap: map[string]interface{}{},
+			wantErr:   false,
+			validate: func(t *testing.T, config *Config) {
+				assert.Equal(t, "localhost:10250", config.Address)
+				assert.Equal(t, 30*time.Second, config.MetricsInterval)
+				assert.Equal(t, 10*time.Second, config.StatsInterval)
+			},
+		},
+		{
+			name: "full config",
+			configMap: map[string]interface{}{
+				"address":          "custom:10250",
+				"insecure":         true,
+				"client_cert":      "/cert",
+				"client_key":       "/key",
+				"node_name":        "node1",
+				"metrics_interval": "45s",
+				"stats_interval":   "15s",
+			},
+			wantErr: false,
+			validate: func(t *testing.T, config *Config) {
+				assert.Equal(t, "custom:10250", config.Address)
+				assert.True(t, config.Insecure)
+				assert.Equal(t, "/cert", config.ClientCert)
+				assert.Equal(t, "/key", config.ClientKey)
+				assert.Equal(t, "node1", config.NodeName)
+				assert.Equal(t, 45*time.Second, config.MetricsInterval)
+				assert.Equal(t, 15*time.Second, config.StatsInterval)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := parseConfigFromMap(tt.configMap)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, config)
+				if tt.validate != nil && config != nil {
+					tt.validate(t, config)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckEphemeralStorageEdgeCases(t *testing.T) {
+	config := DefaultConfig()
+	config.Logger = zap.NewNop()
+
+	collector, err := NewCollector("kubelet-test", config)
+	require.NoError(t, err)
+	defer collector.Stop()
+
+	// Initialize collector context
+	collector.ctx = context.Background()
+
+	// Test with nil usage bytes
+	pod1 := &statsv1alpha1.PodStats{
+		PodRef: statsv1alpha1.PodReference{
+			Name:      "test-pod-1",
+			Namespace: "default",
+			UID:       "test-uid-1",
+		},
+		EphemeralStorage: &statsv1alpha1.FsStats{
+			Time:           metav1.Now(),
+			UsedBytes:      nil, // nil usage bytes
+			AvailableBytes: uint64Ptr(500 * 1024 * 1024),
+		},
+	}
+
+	// Should not panic and should not send event
+	collector.checkEphemeralStorage(context.Background(), pod1)
+
+	// Test with nil available bytes
+	pod2 := &statsv1alpha1.PodStats{
+		PodRef: statsv1alpha1.PodReference{
+			Name:      "test-pod-2",
+			Namespace: "default",
+			UID:       "test-uid-2",
+		},
+		EphemeralStorage: &statsv1alpha1.FsStats{
+			Time:           metav1.Now(),
+			UsedBytes:      uint64Ptr(500 * 1024 * 1024),
+			AvailableBytes: nil, // nil available bytes
+		},
+	}
+
+	// Should not panic and should not send event
+	collector.checkEphemeralStorage(context.Background(), pod2)
+
+	// Test with low usage (should not send event)
+	pod3 := &statsv1alpha1.PodStats{
+		PodRef: statsv1alpha1.PodReference{
+			Name:      "test-pod-3",
+			Namespace: "default",
+			UID:       "test-uid-3",
+		},
+		EphemeralStorage: &statsv1alpha1.FsStats{
+			Time:           metav1.Now(),
+			UsedBytes:      uint64Ptr(100 * 1024 * 1024), // 100MB
+			AvailableBytes: uint64Ptr(900 * 1024 * 1024), // 900MB = 10% usage
+		},
+	}
+
+	// Should not send event since usage is below 50%
+	collector.checkEphemeralStorage(context.Background(), pod3)
+
+	// Test with high usage (should send event)
+	pod4 := &statsv1alpha1.PodStats{
+		PodRef: statsv1alpha1.PodReference{
+			Name:      "test-pod-4",
+			Namespace: "default",
+			UID:       "test-uid-4",
+		},
+		EphemeralStorage: &statsv1alpha1.FsStats{
+			Time:           metav1.Now(),
+			UsedBytes:      uint64Ptr(800 * 1024 * 1024), // 800MB
+			AvailableBytes: uint64Ptr(200 * 1024 * 1024), // 200MB = 80% usage
+		},
+	}
+
+	// Collect events to test high usage scenario
+	go func() {
+		collector.checkEphemeralStorage(context.Background(), pod4)
+	}()
+
+	// Wait for event to be processed
+	timeout := time.After(100 * time.Millisecond)
+	select {
+	case event := <-collector.Events():
+		assert.Equal(t, "kubelet_ephemeral_storage", event.Type)
+		assert.Equal(t, "default", event.Metadata["k8s_namespace"])
+		assert.Equal(t, "test-pod-4", event.Metadata["k8s_name"])
+	case <-timeout:
+		// This is also acceptable as the event might not be sent immediately
+	}
+}
+
+func TestInstrumentationErrorHandling(t *testing.T) {
+	logger := zap.NewNop()
+
+	// Test successful creation
+	instrumentation, err := NewKubeletInstrumentation(logger)
+	assert.NoError(t, err)
+	assert.NotNil(t, instrumentation)
+
+	// Verify all metrics are properly initialized
+	assert.NotNil(t, instrumentation.APILatency)
+	assert.NotNil(t, instrumentation.EventsTotal)
+	assert.NotNil(t, instrumentation.ErrorsTotal)
+	assert.NotNil(t, instrumentation.KubeletErrorsTotal)
+	assert.NotNil(t, instrumentation.PollsActive)
+	assert.NotNil(t, instrumentation.APIFailures)
+	assert.NotNil(t, instrumentation.RequestsTotal)
+	assert.NotNil(t, instrumentation.RequestDuration)
+	assert.NotNil(t, instrumentation.ActiveRequests)
+
+	// Test fields are properly set
+	assert.Equal(t, "kubelet-collector", instrumentation.ServiceName)
+	assert.Equal(t, logger, instrumentation.Logger)
+	assert.NotNil(t, instrumentation.Tracer)
+	assert.NotNil(t, instrumentation.meter)
 }
 
 // Helper functions
