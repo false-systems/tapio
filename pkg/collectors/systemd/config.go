@@ -2,6 +2,9 @@ package systemd
 
 // Config holds configuration for systemd collector
 type Config struct {
+	// Collector name
+	Name string
+
 	// Buffer size for events channel
 	BufferSize int
 

@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -13,23 +15,67 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/dns/bpf"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
-// Config for DNS collector
+// Config for DNS collector with comprehensive settings
 type Config struct {
+	// Basic settings
+	Name         string
 	BufferSize   int
 	Interface    string
 	EnableEBPF   bool
 	EnableSocket bool
+
+	// DNS specific
+	DNSPort   uint16
+	Protocols []string // ["udp", "tcp"]
+
+	// Rate limiting
+	RateLimitEnabled bool
+	RateLimitRPS     float64
+	RateLimitBurst   int
+
+	// Cache settings
+	CacheEnabled bool
+	CacheSize    int
+	CacheTTL     time.Duration
+
+	// Performance
+	WorkerCount        int
+	BatchSize          int
+	FlushInterval      time.Duration
+	SlowQueryThreshold time.Duration
+
+	// Logging
+	Logger *zap.Logger
 }
 
-// DefaultConfig returns sensible defaults
+// DefaultConfig returns sensible defaults with production settings
 func DefaultConfig() Config {
 	return Config{
-		BufferSize:   1000,
-		Interface:    "eth0",
-		EnableEBPF:   true,
-		EnableSocket: false, // socket filter needs special privileges
+		Name:               "dns",
+		BufferSize:         10000,
+		Interface:          "eth0",
+		EnableEBPF:         true,
+		EnableSocket:       false, // socket filter needs special privileges
+		DNSPort:            53,
+		Protocols:          []string{"udp", "tcp"},
+		RateLimitEnabled:   true,
+		RateLimitRPS:       1000.0, // 1000 queries per second
+		RateLimitBurst:     2000,
+		CacheEnabled:       true,
+		CacheSize:          10000,
+		CacheTTL:           5 * time.Minute,
+		WorkerCount:        4,
+		BatchSize:          100,
+		FlushInterval:      100 * time.Millisecond,
+		SlowQueryThreshold: 100 * time.Millisecond,
 	}
 }
 
@@ -76,18 +122,81 @@ type EnhancedDNSEvent struct {
 	Data      [512]byte // Increased size
 }
 
-// Collector implements DNS monitoring via eBPF
+// DNSCache holds cached DNS responses with TTL
+type DNSCache struct {
+	mu      sync.RWMutex
+	entries map[string]*CacheEntry
+	maxSize int
+	ttl     time.Duration
+}
+
+type CacheEntry struct {
+	Value     interface{}
+	Expires   time.Time
+	HitCount  int64
+	CreatedAt time.Time
+}
+
+// DNSStats holds collector statistics
+type DNSStats struct {
+	QueriesTotal   int64
+	ResponsesTotal int64
+	TimeoutsTotal  int64
+	ErrorsTotal    int64
+	CacheHits      int64
+	CacheMisses    int64
+	ActiveQueries  int64
+	PacketsDropped int64
+	LastQueryTime  time.Time
+	LatencySum     int64 // in nanoseconds
+	LatencyCount   int64
+	SlowQueries    int64 // queries > threshold
+}
+
+// Collector implements DNS monitoring via eBPF with comprehensive observability
 type Collector struct {
+	// Core
 	name    string
-	objs    *bpf.DnsmonitorObjects
-	links   []link.Link
-	reader  *ringbuf.Reader
-	events  chan collectors.RawEvent
+	logger  *zap.Logger
+	config  Config
 	ctx     context.Context
 	cancel  context.CancelFunc
 	healthy bool
 	stopped bool
-	config  Config
+	mu      sync.RWMutex
+
+	// eBPF components
+	objs   *bpf.DnsmonitorObjects
+	links  []link.Link
+	reader *ringbuf.Reader
+
+	// Event processing
+	events   chan collectors.RawEvent
+	workerWg sync.WaitGroup
+
+	// Rate limiting
+	rlimiter *rate.Limiter
+
+	// Cache
+	cache *DNSCache
+
+	// Statistics
+	stats DNSStats
+
+	// Active queries tracking
+	activeQueries sync.Map // queryID -> startTime
+
+	// OpenTelemetry
+	tracer             trace.Tracer
+	meter              metric.Meter
+	queriesTotal       metric.Int64Counter
+	queryLatency       metric.Float64Histogram
+	errorsTotal        metric.Int64Counter
+	activeQueriesGauge metric.Int64UpDownCounter
+	cacheHitsTotal     metric.Int64Counter
+	cacheMissTotal     metric.Int64Counter
+	slowQueriesTotal   metric.Int64Counter
+	packetsDropped     metric.Int64Counter
 }
 
 // NewCollector creates a new DNS collector
