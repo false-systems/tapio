@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -149,25 +148,73 @@ func DefaultConfig() *Config {
 
 // KubeletInstrumentation provides telemetry specifically for kubelet collector
 type KubeletInstrumentation struct {
-	*telemetry.ServiceInstrumentation
+	ServiceName string
+	Logger      *zap.Logger
+
+	// Tracing
+	Tracer trace.Tracer
+
+	// Common metrics
+	RequestsTotal   metric.Int64Counter
+	RequestDuration metric.Float64Histogram
+	ActiveRequests  metric.Int64UpDownCounter
+	ErrorsTotal     metric.Int64Counter
 
 	// Kubelet-specific metrics
-	APILatency  metric.Float64Histogram
-	EventsTotal metric.Int64Counter
-	ErrorsTotal metric.Int64Counter
-	PollsActive metric.Int64UpDownCounter
-	APIFailures metric.Int64Counter
+	APILatency         metric.Float64Histogram
+	EventsTotal        metric.Int64Counter
+	KubeletErrorsTotal metric.Int64Counter
+	PollsActive        metric.Int64UpDownCounter
+	APIFailures        metric.Int64Counter
+
+	// Internal meter
+	meter metric.Meter
 }
 
 // NewKubeletInstrumentation creates instrumentation for kubelet collector
 func NewKubeletInstrumentation(logger *zap.Logger) (*KubeletInstrumentation, error) {
-	base, err := telemetry.NewServiceInstrumentation("kubelet-collector", logger)
+	serviceName := "kubelet-collector"
+	meter := otel.Meter(serviceName)
+	tracer := otel.Tracer(serviceName)
+
+	// Create common metrics
+	requestsTotal, err := meter.Int64Counter(
+		"tapio.requests.total",
+		metric.WithDescription("Total number of requests"),
+		metric.WithUnit("1"),
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create kubelet-specific metrics using otel.Meter directly
-	meter := otel.Meter("kubelet-collector")
+	requestDuration, err := meter.Float64Histogram(
+		"tapio.request.duration",
+		metric.WithDescription("Request duration in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	activeRequests, err := meter.Int64UpDownCounter(
+		"tapio.requests.active",
+		metric.WithDescription("Number of active requests"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		"tapio.errors.total",
+		metric.WithDescription("Total number of errors"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create kubelet-specific metrics
 
 	apiLatency, err := meter.Float64Histogram(
 		"tapio.kubelet.api.latency",
@@ -187,7 +234,7 @@ func NewKubeletInstrumentation(logger *zap.Logger) (*KubeletInstrumentation, err
 		return nil, err
 	}
 
-	errorsTotal, err := meter.Int64Counter(
+	kubeletErrorsTotal, err := meter.Int64Counter(
 		"tapio.kubelet.errors.total",
 		metric.WithDescription("Total number of kubelet collection errors"),
 		metric.WithUnit("1"),
@@ -215,13 +262,29 @@ func NewKubeletInstrumentation(logger *zap.Logger) (*KubeletInstrumentation, err
 	}
 
 	return &KubeletInstrumentation{
-		ServiceInstrumentation: base,
-		APILatency:             apiLatency,
-		EventsTotal:            eventsTotal,
-		ErrorsTotal:            errorsTotal,
-		PollsActive:            pollsActive,
-		APIFailures:            apiFailures,
+		ServiceName:        serviceName,
+		Logger:             logger,
+		Tracer:             tracer,
+		meter:              meter,
+		RequestsTotal:      requestsTotal,
+		RequestDuration:    requestDuration,
+		ActiveRequests:     activeRequests,
+		ErrorsTotal:        errorsTotal,
+		APILatency:         apiLatency,
+		EventsTotal:        eventsTotal,
+		KubeletErrorsTotal: kubeletErrorsTotal,
+		PollsActive:        pollsActive,
+		APIFailures:        apiFailures,
 	}, nil
+}
+
+// StartSpan starts a new span and increments active requests
+func (ki *KubeletInstrumentation) StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	ctx, span := ki.Tracer.Start(ctx, name, opts...)
+	ki.ActiveRequests.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("operation", name),
+	))
+	return ctx, span
 }
 
 // Collector implements the kubelet metrics collector
@@ -237,6 +300,7 @@ type Collector struct {
 	healthy         bool
 	logger          *zap.Logger
 	instrumentation *KubeletInstrumentation
+	podTraceManager *PodTraceManager
 
 	// Metrics
 	stats struct {
@@ -294,6 +358,7 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		healthy:         true,
 		logger:          config.Logger,
 		instrumentation: instrumentation,
+		podTraceManager: NewPodTraceManager(),
 	}, nil
 }
 
@@ -325,8 +390,13 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down the collector
 func (c *Collector) Stop() error {
-	c.cancel()
+	if c.cancel != nil {
+		c.cancel()
+	}
 	c.wg.Wait()
+	if c.podTraceManager != nil {
+		c.podTraceManager.Stop()
+	}
 	close(c.events)
 	c.healthy = false
 	return nil
@@ -415,7 +485,7 @@ func (c *Collector) fetchStats() error {
 			attribute.String("endpoint", "/stats/summary"),
 			attribute.String("error", "request_failed"),
 		))
-		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("error_type", "api_request"),
 		))
 		span.RecordError(err)
@@ -431,7 +501,7 @@ func (c *Collector) fetchStats() error {
 			attribute.String("error", "http_status"),
 			attribute.Int("status_code", resp.StatusCode),
 		))
-		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("error_type", "api_status"),
 		))
 
@@ -450,7 +520,7 @@ func (c *Collector) fetchStats() error {
 
 	var summary statsv1alpha1.Summary
 	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
-		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("error_type", "decode"),
 		))
 		span.RecordError(err)
@@ -850,7 +920,7 @@ func (c *Collector) fetchPodLifecycle() error {
 			attribute.String("endpoint", "/pods"),
 			attribute.String("error", "request_failed"),
 		))
-		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("error_type", "api_request"),
 		))
 		span.RecordError(err)
@@ -866,7 +936,7 @@ func (c *Collector) fetchPodLifecycle() error {
 			attribute.String("error", "http_status"),
 			attribute.Int("status_code", resp.StatusCode),
 		))
-		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("error_type", "api_status"),
 		))
 
@@ -885,7 +955,7 @@ func (c *Collector) fetchPodLifecycle() error {
 
 	var podList v1.PodList
 	if err := json.NewDecoder(resp.Body).Decode(&podList); err != nil {
-		c.instrumentation.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("error_type", "decode"),
 		))
 		span.RecordError(err)
@@ -1187,25 +1257,98 @@ func (c *Collector) extractTraceContext(ctx context.Context) (traceID, spanID st
 	return traceID, spanID
 }
 
-// podTraceMap maintains trace IDs per pod
-var podTraceMap = make(map[types.UID]string)
-var podTraceMu sync.RWMutex
+// PodTraceEntry holds trace ID with timestamp for TTL cleanup
+type PodTraceEntry struct {
+	TraceID   string
+	Timestamp time.Time
+}
 
-func (c *Collector) getOrGenerateTraceID(podUID types.UID) string {
-	podTraceMu.RLock()
-	if traceID, exists := podTraceMap[podUID]; exists {
-		podTraceMu.RUnlock()
-		return traceID
+// PodTraceManager manages trace IDs with TTL cleanup
+type PodTraceManager struct {
+	entries map[types.UID]*PodTraceEntry
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+}
+
+// NewPodTraceManager creates a new pod trace manager with TTL cleanup
+func NewPodTraceManager() *PodTraceManager {
+	ctx, cancel := context.WithCancel(context.Background())
+	ptm := &PodTraceManager{
+		entries: make(map[types.UID]*PodTraceEntry),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
-	podTraceMu.RUnlock()
+
+	// Start cleanup goroutine
+	go ptm.cleanup()
+
+	return ptm
+}
+
+// GetOrGenerate gets existing trace ID or generates new one
+func (ptm *PodTraceManager) GetOrGenerate(podUID types.UID) string {
+	ptm.mu.RLock()
+	if entry, exists := ptm.entries[podUID]; exists {
+		ptm.mu.RUnlock()
+		return entry.TraceID
+	}
+	ptm.mu.RUnlock()
 
 	// Generate new trace ID
-	podTraceMu.Lock()
+	ptm.mu.Lock()
 	traceID := collectors.GenerateTraceID()
-	podTraceMap[podUID] = traceID
-	podTraceMu.Unlock()
+	ptm.entries[podUID] = &PodTraceEntry{
+		TraceID:   traceID,
+		Timestamp: time.Now(),
+	}
+	ptm.mu.Unlock()
 
 	return traceID
+}
+
+// Count returns the number of tracked pod traces
+func (ptm *PodTraceManager) Count() int {
+	ptm.mu.RLock()
+	defer ptm.mu.RUnlock()
+	return len(ptm.entries)
+}
+
+// Stop stops the cleanup goroutine
+func (ptm *PodTraceManager) Stop() {
+	ptm.cancel()
+}
+
+// cleanup runs periodic cleanup of expired entries (every 5 minutes)
+func (ptm *PodTraceManager) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ptm.ctx.Done():
+			return
+		case <-ticker.C:
+			ptm.cleanupExpired()
+		}
+	}
+}
+
+// cleanupExpired removes entries older than 1 hour
+func (ptm *PodTraceManager) cleanupExpired() {
+	ptm.mu.Lock()
+	defer ptm.mu.Unlock()
+
+	expiry := time.Now().Add(-1 * time.Hour)
+	for uid, entry := range ptm.entries {
+		if entry.Timestamp.Before(expiry) {
+			delete(ptm.entries, uid)
+		}
+	}
+}
+
+func (c *Collector) getOrGenerateTraceID(podUID types.UID) string {
+	return c.podTraceManager.GetOrGenerate(podUID)
 }
 
 func (c *Collector) recordEvent() {
@@ -1246,6 +1389,6 @@ func (c *Collector) Statistics() map[string]interface{} {
 		"events_collected": c.stats.eventsCollected,
 		"errors_count":     c.stats.errorsCount,
 		"last_event_time":  c.stats.lastEventTime,
-		"pod_trace_count":  len(podTraceMap),
+		"pod_trace_count":  c.podTraceManager.Count(),
 	}
 }
