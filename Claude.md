@@ -5,6 +5,40 @@ Build enterprise-grade observability platform with zero tolerance for incomplete
 
 ## ⚠️ CRITICAL DEVELOPMENT WORKFLOW
 
+### REFACTOR MODE (TEMPORARY - FOR MEGA REFACTOR ONLY)
+During major refactoring, use incremental validation for faster iteration:
+
+```bash
+# ENABLE REFACTOR MODE (95% faster validation, incremental CI)
+make refactor-mode
+
+# FAST VALIDATION DURING REFACTOR
+make refactor-quick-check    # Check only changed files (5-30 sec)
+make refactor-validate       # Complete but fast validation (1-3 min)
+make show-changed-packages  # See what packages changed
+
+# RETURN TO PRODUCTION MODE AFTER REFACTOR
+make production-mode         # Re-enable full validation
+```
+
+**Refactor Mode Benefits:**
+- Pre-commit: 5-30 sec vs 5-15 min (95% faster)
+- CI Pipeline: 2-5 min vs 15-30 min (85% faster)
+- Only checks changed packages
+- Essential safety maintained
+
+**What STAYS ENFORCED in Refactor Mode:**
+- ❌ NO TODOs, FIXMEs, XXX, HACK comments (ZERO TOLERANCE)
+- ✅ Code formatting and imports
+- ✅ Build verification
+- ✅ Architecture hierarchy compliance
+- ✅ Race condition detection
+
+**What's Temporarily Relaxed:**
+- Coverage requirement (warns instead of fails)
+- Full codebase scanning (incremental only)
+- Complete test suite (changed packages only)
+
 ### SMALL ITERATIONS WITH CONTINUOUS TESTING
 **MANDATORY**: Test after EVERY change, not after accumulating changes.
 

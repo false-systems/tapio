@@ -87,12 +87,9 @@ func (e *EnrichedEvent) ConvertToUnified() *domain.UnifiedEvent {
 		}
 	}
 
-	// Copy metadata to attributes, preserving event_type
+	// Copy metadata to attributes with type safety, preserving event_type
 	if len(e.Raw.Metadata) > 0 {
-		event.Attributes = make(map[string]interface{})
-		for k, v := range e.Raw.Metadata {
-			event.Attributes[k] = v
-		}
+		event.Attributes = convertMetadataToAttributes(e.Raw.Metadata)
 
 		// Also set specific event type if available
 		if eventType, ok := e.Raw.Metadata["event_type"]; ok {
@@ -135,4 +132,17 @@ type CollectorHealthStatus struct {
 	Healthy   bool
 	Error     string
 	LastEvent time.Time
+}
+
+// convertMetadataToAttributes converts string metadata to interface{} attributes safely
+func convertMetadataToAttributes(metadata map[string]string) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+
+	attributes := make(map[string]interface{}, len(metadata))
+	for k, v := range metadata {
+		attributes[k] = v
+	}
+	return attributes
 }

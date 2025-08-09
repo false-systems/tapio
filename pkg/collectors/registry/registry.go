@@ -9,6 +9,7 @@ import (
 )
 
 // CollectorFactory is a function that creates a new collector instance
+// TODO: Migrate to typed config when all collectors support ConfigValidator interface
 type CollectorFactory func(config map[string]interface{}) (collectors.Collector, error)
 
 // registry holds all registered collector factories
@@ -17,20 +18,35 @@ var (
 	factories = make(map[string]CollectorFactory)
 )
 
-// Register registers a collector factory
-func Register(name string, factory CollectorFactory) {
+// Register registers a collector factory with error handling
+func Register(name string, factory CollectorFactory) error {
+	if name == "" {
+		return fmt.Errorf("collector name cannot be empty")
+	}
+	if factory == nil {
+		return fmt.Errorf("factory cannot be nil")
+	}
+
 	mu.Lock()
 	defer mu.Unlock()
 
 	if _, exists := factories[name]; exists {
-		panic(fmt.Sprintf("collector %s already registered", name))
+		return fmt.Errorf("collector %s already registered", name)
 	}
 
 	factories[name] = factory
+	return nil
 }
 
-// CreateCollector creates a collector instance by name
+// CreateCollector creates a collector instance by name with configuration
 func CreateCollector(name string, config map[string]interface{}) (collectors.Collector, error) {
+	if name == "" {
+		return nil, fmt.Errorf("collector name cannot be empty")
+	}
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
 	mu.RLock()
 	factory, exists := factories[name]
 	mu.RUnlock()

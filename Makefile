@@ -236,4 +236,114 @@ check-collector: ## Check specific collector build (use COLLECTOR=cni)
 		$(GO) build -v ./pkg/collectors/$(COLLECTOR); \
 	fi
 
+##@ Refactor Phase (Temporary Lightweight CI)
+
+refactor-mode: ## Switch to lightweight refactor configuration
+	@echo "${YELLOW}🔄 Switching to refactor phase configuration...${NC}"
+	@if [ -f .pre-commit-config.yaml ]; then \
+		cp .pre-commit-config.yaml .pre-commit-config-full.yaml.backup; \
+		echo "  Backed up current config to .pre-commit-config-full.yaml.backup"; \
+	fi
+	@cp .pre-commit-config-refactor.yaml .pre-commit-config.yaml
+	@pre-commit uninstall 2>/dev/null || true
+	@pre-commit install
+	@echo "${GREEN}✅ Switched to refactor mode${NC}"
+	@echo "${YELLOW}💡 Use 'make production-mode' to switch back${NC}"
+
+production-mode: ## Switch back to full production configuration  
+	@echo "${YELLOW}🔄 Switching to production configuration...${NC}"
+	@if [ -f .pre-commit-config-full.yaml.backup ]; then \
+		cp .pre-commit-config-full.yaml.backup .pre-commit-config.yaml; \
+		echo "  Restored production config"; \
+	else \
+		echo "${RED}❌ No backup found - please restore manually${NC}"; \
+		exit 1; \
+	fi
+	@pre-commit uninstall 2>/dev/null || true
+	@pre-commit install
+	@echo "${GREEN}✅ Switched to production mode${NC}"
+
+show-changed-packages: ## Show packages that would be checked in refactor mode
+	@echo "${GREEN}Analyzing changed packages since last commit...${NC}"
+	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
+	if [ -z "$$CHANGED_FILES" ]; then \
+		echo "${YELLOW}No Go files changed since last commit${NC}"; \
+	else \
+		echo "Changed files:"; \
+		echo "$$CHANGED_FILES" | sed 's/^/  - /'; \
+		echo ""; \
+		echo "Affected packages:"; \
+		echo "$$CHANGED_FILES" | xargs dirname | sort -u | sed 's/^/  - .\//'; \
+	fi
+
+refactor-quick-check: ## Quick validation for refactor phase (changed files only)
+	@echo "${GREEN}🚀 Running refactor-phase quick checks...${NC}"
+	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
+	if [ -z "$$CHANGED_FILES" ]; then \
+		echo "${YELLOW}No Go files changed - skipping checks${NC}"; \
+	else \
+		echo "Checking formatting..."; \
+		UNFORMATTED=$$(echo "$$CHANGED_FILES" | xargs $(GOFMT) -l); \
+		if [ -n "$$UNFORMATTED" ]; then \
+			echo "${RED}❌ Unformatted files:${NC}"; \
+			echo "$$UNFORMATTED"; \
+			exit 1; \
+		fi; \
+		echo "Checking imports..."; \
+		UNORGANIZED=$$(echo "$$CHANGED_FILES" | xargs $(GOIMPORTS) -l 2>/dev/null); \
+		if [ -n "$$UNORGANIZED" ]; then \
+			echo "${RED}❌ Unorganized imports:${NC}"; \
+			echo "$$UNORGANIZED"; \
+			exit 1; \
+		fi; \
+		echo "${GREEN}✅ Quick checks passed${NC}"; \
+	fi
+
+refactor-build-changed: ## Build only changed packages
+	@echo "${GREEN}🏗️  Building changed packages...${NC}"
+	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
+	if [ -z "$$CHANGED_FILES" ]; then \
+		echo "${YELLOW}No Go files changed - skipping build${NC}"; \
+	else \
+		CHANGED_PKGS=$$(echo "$$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|'); \
+		echo "Building packages: $$CHANGED_PKGS"; \
+		for pkg in $$CHANGED_PKGS; do \
+			echo "  Building $$pkg..."; \
+			if ! $(GO) build "$$pkg" 2>/dev/null; then \
+				echo "${RED}❌ Build failed for $$pkg${NC}"; \
+				$(GO) build "$$pkg"; \
+				exit 1; \
+			fi; \
+		done; \
+		echo "${GREEN}✅ All changed packages built successfully${NC}"; \
+	fi
+
+refactor-test-changed: ## Test only changed packages
+	@echo "${GREEN}🧪 Testing changed packages...${NC}"
+	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
+	if [ -z "$$CHANGED_FILES" ]; then \
+		echo "${YELLOW}No Go files changed - skipping tests${NC}"; \
+	else \
+		CHANGED_PKGS=$$(echo "$$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|'); \
+		echo "Testing packages: $$CHANGED_PKGS"; \
+		for pkg in $$CHANGED_PKGS; do \
+			echo "  Testing $$pkg..."; \
+			if ! $(GO) test -timeout 15s "$$pkg" 2>/dev/null; then \
+				echo "${RED}❌ Tests failed for $$pkg${NC}"; \
+				$(GO) test "$$pkg"; \
+				exit 1; \
+			fi; \
+		done; \
+		echo "${GREEN}✅ All tests passed for changed packages${NC}"; \
+	fi
+
+refactor-validate: ## Full refactor-phase validation (quick but thorough)
+	@echo "${GREEN}🔍 Running refactor-phase validation...${NC}"
+	@$(MAKE) refactor-quick-check
+	@$(MAKE) refactor-build-changed
+	@$(MAKE) refactor-test-changed
+	@echo "${GREEN}✅ Refactor validation complete${NC}"
+	@echo "${YELLOW}💡 This is lightweight validation for active development${NC}"
+	@echo "${YELLOW}💡 Run 'make ci-local' before merging to main${NC}"
+
 .NOTPARALLEL: verify-architecture verify-todos verify-coverage
