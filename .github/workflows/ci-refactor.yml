@@ -1,0 +1,265 @@
+name: Tapio CI - Refactor Phase
+# Lightweight CI for active development and refactoring
+
+on:
+  push:
+    branches: [fix/*, feat/*, refactor/*, chore/*]
+  pull_request:
+    branches: [main, develop]
+    paths: ['pkg/**/*.go', 'cmd/**/*.go']
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  # Fast validation on changed files only
+  quick-check:
+    name: Quick Validation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Needed for git diff
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      
+      - name: Get changed packages
+        id: changed
+        run: |
+          # Get changed Go files and their packages
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep '\.go$' || echo "")
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Go files changed"
+            echo "changed_pkgs=" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Convert files to package paths
+          CHANGED_PKGS=$(echo "$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|' | tr '\n' ' ')
+          echo "Changed packages: $CHANGED_PKGS"
+          echo "changed_pkgs=$CHANGED_PKGS" >> $GITHUB_OUTPUT
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+      
+      - name: Install tools
+        if: steps.changed.outputs.has_changes == 'true'
+        run: go install golang.org/x/tools/cmd/goimports@latest
+      
+      - name: Check formatting (changed files only)
+        if: steps.changed.outputs.has_changes == 'true'
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep '\.go$' || echo "")
+          if [ -n "$CHANGED_FILES" ]; then
+            UNFORMATTED=$(echo "$CHANGED_FILES" | xargs gofmt -l)
+            if [ -n "$UNFORMATTED" ]; then
+              echo "❌ Unformatted files found:"
+              echo "$UNFORMATTED"
+              exit 1
+            fi
+            echo "✅ All changed files are formatted"
+          fi
+      
+      - name: Check imports (changed files only)
+        if: steps.changed.outputs.has_changes == 'true'
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep '\.go$' || echo "")
+          if [ -n "$CHANGED_FILES" ]; then
+            UNORGANIZED=$(echo "$CHANGED_FILES" | xargs goimports -l)
+            if [ -n "$UNORGANIZED" ]; then
+              echo "❌ Unorganized imports found:"
+              echo "$UNORGANIZED"
+              exit 1
+            fi
+            echo "✅ All changed files have organized imports"
+          fi
+
+  # Build only changed packages
+  incremental-build:
+    name: Build Changed Packages
+    needs: quick-check
+    runs-on: ubuntu-latest
+    if: needs.quick-check.outputs.has_changes == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      
+      - name: Build changed packages with dependencies
+        run: |
+          # Get changed packages
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep '\.go$' || echo "")
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Go files changed, skipping build"
+            exit 0
+          fi
+          
+          CHANGED_PKGS=$(echo "$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|' | tr '\n' ' ')
+          echo "Building changed packages: $CHANGED_PKGS"
+          
+          # Build changed packages (this will also build dependencies)
+          for pkg in $CHANGED_PKGS; do
+            echo "Building $pkg..."
+            if ! go build "$pkg"; then
+              echo "❌ Build failed for $pkg"
+              exit 1
+            fi
+          done
+          echo "✅ All changed packages built successfully"
+
+  # Test only changed packages (no coverage requirement during refactor)
+  incremental-test:
+    name: Test Changed Packages
+    needs: [quick-check, incremental-build]
+    runs-on: ubuntu-latest
+    if: needs.quick-check.outputs.has_changes == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      
+      - name: Test changed packages
+        run: |
+          # Get changed packages
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep '\.go$' || echo "")
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Go files changed, skipping tests"
+            exit 0
+          fi
+          
+          CHANGED_PKGS=$(echo "$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|' | tr '\n' ' ')
+          echo "Testing changed packages: $CHANGED_PKGS"
+          
+          # Run tests for changed packages (reduced timeout for faster feedback)
+          for pkg in $CHANGED_PKGS; do
+            echo "Testing $pkg..."
+            if ! go test -timeout 15s "$pkg"; then
+              echo "❌ Tests failed for $pkg"
+              exit 1
+            fi
+          done
+          echo "✅ All tests passed for changed packages"
+
+  # Architecture check only for changed files
+  architecture-check:
+    name: Architecture Validation
+    needs: quick-check
+    runs-on: ubuntu-latest
+    if: needs.quick-check.outputs.has_changes == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      
+      - name: Check architecture for changed packages
+        run: |
+          # Get changed packages
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep '\.go$' || echo "")
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Go files changed, skipping architecture check"
+            exit 0
+          fi
+          
+          CHANGED_PKGS=$(echo "$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|')
+          
+          echo "Checking architecture for changed packages..."
+          python3 -c "
+import subprocess
+import sys
+
+hierarchy = {
+    'pkg/domain': 0,
+    'pkg/collectors': 1, 
+    'pkg/intelligence': 2,
+    'pkg/integrations': 3,
+    'pkg/interfaces': 4
+}
+
+# Only check changed packages
+changed_pkgs = '''$CHANGED_PKGS'''.strip().split()
+violations = []
+
+for pkg in changed_pkgs:
+    # Get imports for this specific package
+    result = subprocess.run(['go', 'list', '-f', '{{.ImportPath}}: {{.Imports}}', pkg], 
+                           capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        continue
+        
+    for line in result.stdout.strip().split('\n'):
+        if not line.strip():
+            continue
+        parts = line.split(': ')
+        if len(parts) != 2:
+            continue
+        
+        pkg_path = parts[0]
+        imports = parts[1].strip('[]').split()
+        
+        pkg_level = -1
+        for key, level in hierarchy.items():
+            if key in pkg_path:
+                pkg_level = level
+                break
+        
+        if pkg_level == -1:
+            continue
+            
+        for imp in imports:
+            for key, level in hierarchy.items():
+                if key in imp and level > pkg_level:
+                    violations.append(f'{pkg_path} (L{pkg_level}) imports {imp} (L{level})')
+
+if violations:
+    print('❌ Architecture violations found in changed packages:')
+    for v in violations:
+        print(f'  - {v}')
+    sys.exit(1)
+else:
+    print('✅ Architecture check passed for changed packages')
+"
+
+  # Summary job
+  refactor-ci-status:
+    name: Refactor CI Summary
+    needs: [quick-check, incremental-build, incremental-test, architecture-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: CI Summary
+        run: |
+          echo "## 🔄 Refactor Phase CI Summary"
+          echo ""
+          if [ "${{ needs.quick-check.outputs.has_changes }}" != "true" ]; then
+            echo "✅ No Go files changed - CI skipped"
+            exit 0
+          fi
+          
+          if [ "${{ contains(needs.*.result, 'failure') }}" == "true" ]; then
+            echo "❌ Some checks failed - see details above"
+            echo "💡 **Refactor Phase**: Only essential checks are enforced"
+            echo "🚀 **After refactor**: Switch back to full CI pipeline"
+            exit 1
+          else
+            echo "✅ All refactor-phase checks passed!"
+            echo "📦 Changed packages validated successfully"
+          fi
