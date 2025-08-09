@@ -60,23 +60,41 @@ type EventPublisher struct {
 
 // NewEventPublisher creates a new NATS event publisher
 func NewEventPublisher(config *PublisherConfig) (*EventPublisher, error) {
-	// Set defaults
-	if config.ConnectTimeout == 0 {
-		config.ConnectTimeout = 10 * time.Second
-	}
-	if config.MaxPending == 0 {
-		config.MaxPending = 256
-	}
-	if config.ReconnectWait == 0 {
-		config.ReconnectWait = 2 * time.Second
-	}
-	if config.MaxReconnects == 0 {
-		config.MaxReconnects = 60
-	}
-	if config.StreamName == "" {
-		config.StreamName = "TAPIO_EVENTS"
+	if err := validatePublisherConfig(config); err != nil {
+		return nil, err
 	}
 
+	nc, err := createNATSConnection(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return initializeEventPublisher(nc, config)
+}
+
+// validatePublisherConfig validates and sets default values for publisher configuration
+func validatePublisherConfig(config *PublisherConfig) error {
+	// Set defaults
+	if config.ConnectTimeout == 0 {
+		config.ConnectTimeout = DefaultConnectTimeout
+	}
+	if config.MaxPending == 0 {
+		config.MaxPending = DefaultMaxPending
+	}
+	if config.ReconnectWait == 0 {
+		config.ReconnectWait = DefaultReconnectWait
+	}
+	if config.MaxReconnects == 0 {
+		config.MaxReconnects = DefaultMaxReconnects
+	}
+	if config.StreamName == "" {
+		config.StreamName = DefaultStreamName
+	}
+	return nil
+}
+
+// createNATSConnection establishes a connection to NATS with configured options
+func createNATSConnection(config *PublisherConfig) (*natsgo.Conn, error) {
 	// Connection options
 	opts := []natsgo.Option{
 		natsgo.Timeout(config.ConnectTimeout),
@@ -106,6 +124,11 @@ func NewEventPublisher(config *PublisherConfig) (*EventPublisher, error) {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
+	return nc, nil
+}
+
+// initializeEventPublisher creates the EventPublisher with JetStream context and stream
+func initializeEventPublisher(nc *natsgo.Conn, config *PublisherConfig) (*EventPublisher, error) {
 	// Get JetStream context
 	jsOpts := []natsgo.JSOpt{}
 	if config.AsyncPublish && config.MaxPending > 0 {
@@ -136,25 +159,38 @@ func NewEventPublisher(config *PublisherConfig) (*EventPublisher, error) {
 
 // ensureStream creates or updates the JetStream stream
 func (p *EventPublisher) ensureStream() error {
+	streamConfig := p.getOrCreateStreamConfig()
+	cfg := p.buildNATSStreamConfig(streamConfig)
+	return p.createOrUpdateStream(cfg)
+}
+
+// getOrCreateStreamConfig returns the stream configuration, creating defaults if needed
+func (p *EventPublisher) getOrCreateStreamConfig() *StreamConfig {
 	streamConfig := p.config.StreamConfig
-	if streamConfig == nil {
-		// Default stream config - use stream-specific subjects to avoid overlap
-		prefix := "events"
-		if strings.HasPrefix(p.config.StreamName, "TEST_") {
-			// For tests, use unique subject prefix based on stream name
-			prefix = strings.ToLower(strings.ReplaceAll(p.config.StreamName, "_", "."))
-		}
-		streamConfig = &StreamConfig{
-			Subjects:  []string{prefix + ".>"},
-			MaxBytes:  1024 * 1024 * 1024, // 1GB
-			MaxAge:    7 * 24 * time.Hour,
-			MaxMsgs:   10000000,
-			Retention: "limits",
-			Storage:   "file",
-			Replicas:  1,
-		}
+	if streamConfig != nil {
+		return streamConfig
 	}
 
+	// Default stream config - use stream-specific subjects to avoid overlap
+	prefix := DefaultEventsPrefix
+	if strings.HasPrefix(p.config.StreamName, "TEST_") {
+		// For tests, use unique subject prefix based on stream name
+		prefix = strings.ToLower(strings.ReplaceAll(p.config.StreamName, "_", "."))
+	}
+
+	return &StreamConfig{
+		Subjects:  []string{prefix + ".>"},
+		MaxBytes:  DefaultStreamMaxBytes,
+		MaxAge:    DefaultStreamMaxAge,
+		MaxMsgs:   DefaultStreamMaxMessages,
+		Retention: "limits",
+		Storage:   "file",
+		Replicas:  DefaultStreamReplicas,
+	}
+}
+
+// buildNATSStreamConfig converts our StreamConfig to NATS StreamConfig
+func (p *EventPublisher) buildNATSStreamConfig(streamConfig *StreamConfig) *natsgo.StreamConfig {
 	cfg := &natsgo.StreamConfig{
 		Name:         p.config.StreamName,
 		Subjects:     streamConfig.Subjects,
@@ -180,7 +216,11 @@ func (p *EventPublisher) ensureStream() error {
 		cfg.Storage = natsgo.MemoryStorage
 	}
 
-	// Create or update
+	return cfg
+}
+
+// createOrUpdateStream creates a new stream or updates existing one
+func (p *EventPublisher) createOrUpdateStream(cfg *natsgo.StreamConfig) error {
 	info, err := p.js.StreamInfo(p.config.StreamName)
 	if err != nil && err == natsgo.ErrStreamNotFound {
 		// Create stream
@@ -206,20 +246,40 @@ func (p *EventPublisher) ensureStream() error {
 
 // PublishRawEvent publishes a raw collector event
 func (p *EventPublisher) PublishRawEvent(ctx context.Context, event collectors.RawEvent) error {
+	if err := p.checkPublisherState(); err != nil {
+		return err
+	}
+
+	subject := p.generateRawEventSubject(event)
+	data, msg, err := p.serializeRawEvent(event, subject)
+	if err != nil {
+		return err
+	}
+
+	if err := p.publishMessage(ctx, msg); err != nil {
+		return fmt.Errorf("failed to publish event: %w", err)
+	}
+
+	p.publishTraceMessage(ctx, event.TraceID, data, msg.Header)
+	return nil
+}
+
+// checkPublisherState verifies the publisher is not closed
+func (p *EventPublisher) checkPublisherState() error {
 	p.mu.RLock()
+	defer p.mu.RUnlock()
 	if p.closed {
-		p.mu.RUnlock()
 		return fmt.Errorf("publisher is closed")
 	}
-	p.mu.RUnlock()
+	return nil
+}
 
-	// Generate subject
-	subject := p.generateRawEventSubject(event)
-
+// serializeRawEvent serializes a raw event and creates NATS message with headers
+func (p *EventPublisher) serializeRawEvent(event collectors.RawEvent, subject string) ([]byte, *natsgo.Msg, error) {
 	// Serialize event
 	data, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return nil, nil, fmt.Errorf("failed to marshal event: %w", err)
 	}
 
 	// Create message with headers
@@ -251,61 +311,75 @@ func (p *EventPublisher) PublishRawEvent(ctx context.Context, event collectors.R
 		msg.Header.Set("Span-ID", spanID)
 	}
 
-	// Publish to main subject
+	return data, msg, nil
+}
+
+// publishMessage publishes a NATS message using configured async/sync mode
+func (p *EventPublisher) publishMessage(ctx context.Context, msg *natsgo.Msg) error {
 	if p.config.AsyncPublish {
-		_, err = p.js.PublishMsgAsync(msg)
+		_, err := p.js.PublishMsgAsync(msg)
+		return err
+	}
+	_, err := p.js.PublishMsg(msg, natsgo.Context(ctx))
+	return err
+}
+
+// publishTraceMessage optionally publishes to trace subject for correlation
+func (p *EventPublisher) publishTraceMessage(ctx context.Context, traceID string, data []byte, headers natsgo.Header) {
+	if traceID == "" {
+		return
+	}
+
+	traceSubject := p.generateTraceSubject(traceID)
+	traceMsg := &natsgo.Msg{
+		Subject: traceSubject,
+		Data:    data,
+		Header:  headers, // Copy headers
+	}
+
+	// Publish to trace subject (don't fail if this fails)
+	if p.config.AsyncPublish {
+		p.js.PublishMsgAsync(traceMsg)
 	} else {
-		_, err = p.js.PublishMsg(msg, natsgo.Context(ctx))
+		p.js.PublishMsg(traceMsg, natsgo.Context(ctx))
 	}
-
-	if err != nil {
-		return fmt.Errorf("failed to publish event: %w", err)
-	}
-
-	// Also publish to trace subject for correlation if we have a trace ID
-	if event.TraceID != "" {
-		traceSubject := p.generateTraceSubject(event.TraceID)
-		traceMsg := &natsgo.Msg{
-			Subject: traceSubject,
-			Data:    data,
-			Header:  msg.Header, // Copy headers
-		}
-
-		// Publish to trace subject (don't fail if this fails)
-		if p.config.AsyncPublish {
-			p.js.PublishMsgAsync(traceMsg)
-		} else {
-			p.js.PublishMsg(traceMsg, natsgo.Context(ctx))
-		}
-	}
-
-	return nil
 }
 
 // PublishUnifiedEvent publishes a unified domain event
 func (p *EventPublisher) PublishUnifiedEvent(ctx context.Context, event *domain.UnifiedEvent) error {
-	p.mu.RLock()
-	if p.closed {
-		p.mu.RUnlock()
-		return fmt.Errorf("publisher is closed")
+	if err := p.checkPublisherState(); err != nil {
+		return err
 	}
-	p.mu.RUnlock()
 
-	// Generate multi-dimensional subject
 	subjects := p.generateUnifiedEventSubjects(event)
 	if len(subjects) == 0 {
 		return fmt.Errorf("no subjects generated for event")
 	}
 
+	data, msg, err := p.serializeUnifiedEvent(event, subjects[0])
+	if err != nil {
+		return err
+	}
+
+	if err := p.publishMessage(ctx, msg); err != nil {
+		return fmt.Errorf("failed to publish event: %w", err)
+	}
+
+	p.publishUnifiedTraceMessage(ctx, event, data, msg.Header)
+	return nil
+}
+
+// serializeUnifiedEvent serializes a unified event and creates NATS message with headers
+func (p *EventPublisher) serializeUnifiedEvent(event *domain.UnifiedEvent, subject string) ([]byte, *natsgo.Msg, error) {
 	// Serialize event
 	data, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return nil, nil, fmt.Errorf("failed to marshal event: %w", err)
 	}
 
 	// Use primary subject
 	msg := &natsgo.Msg{
-		Subject: subjects[0],
+		Subject: subject,
 		Data:    data,
 		Header:  natsgo.Header{},
 	}
@@ -332,41 +406,34 @@ func (p *EventPublisher) PublishUnifiedEvent(ctx context.Context, event *domain.
 		msg.Header.Set("Semantic-Category", event.Semantic.Category)
 	}
 
-	// Publish to primary subject
+	return data, msg, nil
+}
+
+// publishUnifiedTraceMessage optionally publishes unified event to trace subject
+func (p *EventPublisher) publishUnifiedTraceMessage(ctx context.Context, event *domain.UnifiedEvent, data []byte, headers natsgo.Header) {
+	if event.TraceContext == nil || event.TraceContext.TraceID == "" {
+		return
+	}
+
+	traceSubject := p.generateTraceSubject(event.TraceContext.TraceID)
+	traceMsg := &natsgo.Msg{
+		Subject: traceSubject,
+		Data:    data,
+		Header:  headers, // Copy headers
+	}
+
+	// Publish to trace subject (don't fail if this fails)
 	if p.config.AsyncPublish {
-		_, err = p.js.PublishMsgAsync(msg)
+		p.js.PublishMsgAsync(traceMsg)
 	} else {
-		_, err = p.js.PublishMsg(msg, natsgo.Context(ctx))
+		p.js.PublishMsg(traceMsg, natsgo.Context(ctx))
 	}
-
-	if err != nil {
-		return fmt.Errorf("failed to publish event: %w", err)
-	}
-
-	// Also publish to trace subject for correlation if we have a trace ID
-	if event.TraceContext != nil && event.TraceContext.TraceID != "" {
-		traceSubject := p.generateTraceSubject(event.TraceContext.TraceID)
-		traceMsg := &natsgo.Msg{
-			Subject: traceSubject,
-			Data:    data,
-			Header:  msg.Header, // Copy headers
-		}
-
-		// Publish to trace subject (don't fail if this fails)
-		if p.config.AsyncPublish {
-			p.js.PublishMsgAsync(traceMsg)
-		} else {
-			p.js.PublishMsg(traceMsg, natsgo.Context(ctx))
-		}
-	}
-
-	return nil
 }
 
 // generateRawEventSubject creates subject for raw events
 func (p *EventPublisher) generateRawEventSubject(event collectors.RawEvent) string {
 	// Use appropriate prefix based on stream name
-	prefix := "events"
+	prefix := DefaultEventsPrefix
 	if strings.HasPrefix(p.config.StreamName, "TEST_") {
 		prefix = strings.ToLower(strings.ReplaceAll(p.config.StreamName, "_", "."))
 	}
@@ -388,7 +455,7 @@ func (p *EventPublisher) generateRawEventSubject(event collectors.RawEvent) stri
 
 // generateTraceSubject creates subject for trace-based routing
 func (p *EventPublisher) generateTraceSubject(traceID string) string {
-	prefix := "traces"
+	prefix := DefaultTracesPrefix
 	if strings.HasPrefix(p.config.StreamName, "TEST_") {
 		basePrefix := strings.ToLower(strings.ReplaceAll(p.config.StreamName, "_", "."))
 		prefix = basePrefix + ".traces"
@@ -401,8 +468,8 @@ func (p *EventPublisher) generateUnifiedEventSubjects(event *domain.UnifiedEvent
 	subjects := []string{}
 
 	// Use appropriate prefix based on stream name
-	prefix := "events"
-	tracesPrefix := "traces"
+	prefix := DefaultEventsPrefix
+	tracesPrefix := DefaultTracesPrefix
 	if strings.HasPrefix(p.config.StreamName, "TEST_") {
 		basePrefix := strings.ToLower(strings.ReplaceAll(p.config.StreamName, "_", "."))
 		prefix = basePrefix
@@ -457,7 +524,7 @@ func (p *EventPublisher) Close() error {
 	if p.config.AsyncPublish {
 		select {
 		case <-p.js.PublishAsyncComplete():
-		case <-time.After(5 * time.Second):
+		case <-time.After(AsyncCompleteTimeout):
 			// Timeout waiting for pending publishes
 		}
 	}
