@@ -327,7 +327,29 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 		return nil, fmt.Errorf("pod name not found in event")
 	}
 
-	// Query for pod ownership chain
+	result, err := o.queryPodOwnership(ctx, namespace, podName)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close(ctx)
+
+	var findings []aggregator.Finding
+	for result.Next(ctx) {
+		finding := o.processPodOwnershipRecord(result.Record(), event, podName, namespace)
+		if finding != nil {
+			findings = append(findings, *finding)
+		}
+	}
+
+	if err = result.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating pod ownership results: %w", err)
+	}
+
+	return findings, nil
+}
+
+// queryPodOwnership executes the pod ownership query
+func (o *OwnershipCorrelator) queryPodOwnership(ctx context.Context, namespace, podName string) (ResultIterator, error) {
 	query := `
 		MATCH (p:Pod {name: $podName, namespace: $namespace})
 		OPTIONAL MATCH (rs:ReplicaSet)-[:OWNS]->(p)
@@ -339,10 +361,8 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 	`
 
 	params := &PodQueryParams{
-		BaseQueryParams: BaseQueryParams{
-			Namespace: namespace,
-		},
-		PodName: podName,
+		BaseQueryParams: BaseQueryParams{Namespace: namespace},
+		PodName:         podName,
 	}
 	if err := params.Validate(); err != nil {
 		return nil, err
@@ -352,85 +372,84 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pod ownership: %w", err)
 	}
-	defer result.Close(ctx)
+	return result, nil
+}
 
-	var findings []aggregator.Finding
+// processPodOwnershipRecord processes a single ownership record
+func (o *OwnershipCorrelator) processPodOwnershipRecord(record *GraphRecord, event *domain.UnifiedEvent, podName, namespace string) *aggregator.Finding {
+	ownershipInfo := o.extractOwnershipInfo(record)
+	if len(ownershipInfo.Chain) == 0 {
+		return nil
+	}
 
-	for result.Next(ctx) {
-		record := result.Record()
+	return &aggregator.Finding{
+		ID:         fmt.Sprintf("pod-ownership-%s", podName),
+		Type:       "pod_ownership_chain",
+		Severity:   aggregator.SeverityMedium,
+		Confidence: HighConfidence,
+		Message:    fmt.Sprintf("Pod %s failure traced to %s", podName, strings.Join(ownershipInfo.Chain, " → ")),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+			GraphPaths: []aggregator.GraphPath{{
+				Nodes: o.buildOwnershipNodes(podName, ownershipInfo.Chain, namespace),
+				Edges: o.buildOwnershipEdges(podName, ownershipInfo.Chain),
+			}},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "ownership",
+			Resources:   append(ownershipInfo.Chain, podName),
+			UserImpact:  fmt.Sprintf("Pod controlled by %s %s", ownershipInfo.Type, ownershipInfo.ID),
+			Degradation: "Pod failure affects controller",
+		},
+		Timestamp: time.Now(),
+	}
+}
 
-		// Build ownership chain finding
-		var ownerChain []string
-		var ownerType string
-		var ownerId string
+// PodOwnershipInfo holds extracted ownership information for pods
+type PodOwnershipInfo struct {
+	Chain []string
+	Type  string
+	ID    string
+}
 
-		// Check Deployment→ReplicaSet ownership
-		if deploymentNode, err := record.GetNode("d"); err == nil && deploymentNode != nil {
-			deploymentName := deploymentNode.Properties.Name
-			ownerChain = append(ownerChain, fmt.Sprintf("Deployment/%s", deploymentName))
-			ownerType = "Deployment"
-			ownerId = deploymentName
-		}
+// extractOwnershipInfo extracts ownership chain from record
+func (o *OwnershipCorrelator) extractOwnershipInfo(record *GraphRecord) PodOwnershipInfo {
+	info := PodOwnershipInfo{Chain: []string{}}
 
-		if rsNode, err := record.GetNode("rs"); err == nil && rsNode != nil {
-			rsName := rsNode.Properties.Name
-			if rsName != "" {
-				ownerChain = append(ownerChain, fmt.Sprintf("ReplicaSet/%s", rsName))
-				if ownerType == "" {
-					ownerType = "ReplicaSet"
-					ownerId = rsName
-				}
-			}
-		}
+	// Check Deployment→ReplicaSet ownership
+	if deploymentNode, err := record.GetNode("d"); err == nil && deploymentNode != nil {
+		deploymentName := deploymentNode.Properties.Name
+		info.Chain = append(info.Chain, fmt.Sprintf("Deployment/%s", deploymentName))
+		info.Type = "Deployment"
+		info.ID = deploymentName
+	}
 
-		// Check StatefulSet ownership
-		if stsNode, err := record.GetNode("sts"); err == nil && stsNode != nil {
-			stsName := stsNode.Properties.Name
-			ownerChain = []string{fmt.Sprintf("StatefulSet/%s", stsName)}
-			ownerType = "StatefulSet"
-			ownerId = stsName
-		}
-
-		// Check DaemonSet ownership
-		if dsNode, err := record.GetNode("ds"); err == nil && dsNode != nil {
-			dsName := dsNode.Properties.Name
-			if dsName != "" {
-				ownerChain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
-				ownerType = "DaemonSet"
-				ownerId = dsName
-			}
-		}
-
-		if len(ownerChain) > 0 {
-			findings = append(findings, aggregator.Finding{
-				ID:         fmt.Sprintf("pod-ownership-%s", podName),
-				Type:       "pod_ownership_chain",
-				Severity:   aggregator.SeverityMedium,
-				Confidence: HighConfidence,
-				Message:    fmt.Sprintf("Pod %s failure traced to %s", podName, strings.Join(ownerChain, " → ")),
-				Evidence: aggregator.Evidence{
-					Events: []domain.UnifiedEvent{*event},
-					GraphPaths: []aggregator.GraphPath{{
-						Nodes: o.buildOwnershipNodes(podName, ownerChain, namespace),
-						Edges: o.buildOwnershipEdges(podName, ownerChain),
-					}},
-				},
-				Impact: aggregator.Impact{
-					Scope:       "ownership",
-					Resources:   append(ownerChain, podName),
-					UserImpact:  fmt.Sprintf("Pod controlled by %s %s", ownerType, ownerId),
-					Degradation: "Pod failure affects controller",
-				},
-				Timestamp: time.Now(),
-			})
+	if rsNode, err := record.GetNode("rs"); err == nil && rsNode != nil && rsNode.Properties.Name != "" {
+		rsName := rsNode.Properties.Name
+		info.Chain = append(info.Chain, fmt.Sprintf("ReplicaSet/%s", rsName))
+		if info.Type == "" {
+			info.Type = "ReplicaSet"
+			info.ID = rsName
 		}
 	}
 
-	if err = result.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating pod ownership results: %w", err)
+	// Check StatefulSet ownership (replaces chain)
+	if stsNode, err := record.GetNode("sts"); err == nil && stsNode != nil {
+		stsName := stsNode.Properties.Name
+		info.Chain = []string{fmt.Sprintf("StatefulSet/%s", stsName)}
+		info.Type = "StatefulSet"
+		info.ID = stsName
 	}
 
-	return findings, nil
+	// Check DaemonSet ownership (replaces chain)
+	if dsNode, err := record.GetNode("ds"); err == nil && dsNode != nil && dsNode.Properties.Name != "" {
+		dsName := dsNode.Properties.Name
+		info.Chain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
+		info.Type = "DaemonSet"
+		info.ID = dsName
+	}
+
+	return info
 }
 
 // analyzeStatefulSetChain analyzes StatefulSet→Pod ownership
