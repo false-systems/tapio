@@ -488,6 +488,7 @@ func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlat
 					}
 
 
+
 					corr.RootCause = rootCause
 				}
 			}
