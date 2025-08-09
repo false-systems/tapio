@@ -24,7 +24,7 @@ func testNamespaceEventCorrelation(t *testing.T) {
 
 	event := &domain.UnifiedEvent{
 		ID:        "quota-exceeded",
-		Type:      EventTypeK8s,
+		Type:      "k8s",
 		Timestamp: time.Now(),
 		Severity:  domain.EventSeverityCritical,
 		K8sContext: &domain.K8sContext{
@@ -74,7 +74,7 @@ func testNonK8sEventHandling(t *testing.T) {
 
 	event := &domain.UnifiedEvent{
 		ID:        "non-k8s",
-		Type:      EventTypeSystemd,
+		Type:      "systemd",
 		Timestamp: time.Now(),
 		Message:   "Systemd service restarted",
 	}
@@ -88,7 +88,7 @@ func testNonK8sEventHandling(t *testing.T) {
 func createTestPodEvent(id, namespace, name, message string) *domain.UnifiedEvent {
 	return &domain.UnifiedEvent{
 		ID:        id,
-		Type:      EventTypeK8s,
+		Type:      "k8s",
 		Timestamp: time.Now(),
 		Severity:  domain.EventSeverityError,
 		K8sContext: &domain.K8sContext{
@@ -103,7 +103,7 @@ func createTestPodEvent(id, namespace, name, message string) *domain.UnifiedEven
 func createTestServiceEvent(id, namespace, name, message string) *domain.UnifiedEvent {
 	return &domain.UnifiedEvent{
 		ID:        id,
-		Type:      EventTypeK8s,
+		Type:      "k8s",
 		Timestamp: time.Now(),
 		Severity:  domain.EventSeverityWarning,
 		K8sContext: &domain.K8sContext{
@@ -317,7 +317,7 @@ func TestK8sOwnershipCache(t *testing.T) {
 		// Process event twice
 		event := &domain.UnifiedEvent{
 			ID:        "cache-test-1",
-			Type:      EventTypeK8s,
+			Type:      "k8s",
 			Timestamp: time.Now(),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -389,7 +389,7 @@ func TestK8sEventHistory(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        fmt.Sprintf("history-%d", i),
-				Type:      EventTypeK8s,
+				Type:      "k8s",
 				Timestamp: baseTime.Add(time.Duration(i) * time.Minute),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -432,7 +432,7 @@ func TestK8sEventHistory(t *testing.T) {
 		for i := 0; i < 150; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        fmt.Sprintf("overflow-%d", i),
-				Type:      EventTypeK8s,
+				Type:      "k8s",
 				Timestamp: time.Now(),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -473,7 +473,7 @@ func TestK8sCorrelatorPatterns(t *testing.T) {
 		// CrashLoopBackOff event
 		event := &domain.UnifiedEvent{
 			ID:        "crashloop",
-			Type:      EventTypeK8s,
+			Type:      "k8s",
 			Timestamp: time.Now(),
 			Severity:  domain.EventSeverityError,
 			K8sContext: &domain.K8sContext{
@@ -512,7 +512,7 @@ func TestK8sCorrelatorPatterns(t *testing.T) {
 		// Rollout stuck event
 		event := &domain.UnifiedEvent{
 			ID:        "rollout-stuck",
-			Type:      EventTypeK8s,
+			Type:      "k8s",
 			Timestamp: time.Now(),
 			Severity:  domain.EventSeverityWarning,
 			K8sContext: &domain.K8sContext{
@@ -558,7 +558,7 @@ func TestK8sCorrelatorConcurrency(t *testing.T) {
 			go func(id int) {
 				event := &domain.UnifiedEvent{
 					ID:        fmt.Sprintf("concurrent-%d", id),
-					Type:      EventTypeK8s,
+					Type:      "k8s",
 					Timestamp: time.Now(),
 					K8sContext: &domain.K8sContext{
 						Namespace: "default",
@@ -595,7 +595,7 @@ func BenchmarkK8sCorrelatorProcess(b *testing.B) {
 
 	event := &domain.UnifiedEvent{
 		ID:        "bench-event",
-		Type:      EventTypeK8s,
+		Type:      "k8s",
 		Timestamp: time.Now(),
 		K8sContext: &domain.K8sContext{
 			Namespace: "benchmark",
