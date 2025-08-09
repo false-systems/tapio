@@ -889,3 +889,541 @@ func BenchmarkNullTerminatedString(b *testing.B) {
 		collector.nullTerminatedString(data)
 	}
 }
+
+// Test DNS cache functionality
+func TestDNSCache(t *testing.T) {
+	cache := NewDNSCache(10, 5*time.Second)
+	require.NotNil(t, cache)
+	assert.Equal(t, 10, cache.maxSize)
+	assert.Equal(t, 5*time.Second, cache.ttl)
+	assert.NotNil(t, cache.entries)
+}
+
+func TestCacheOperations(t *testing.T) {
+	config := DefaultConfig()
+	config.CacheEnabled = true
+	config.CacheSize = 5
+	config.CacheTTL = 100 * time.Millisecond
+
+	collector, err := NewCollector("test-cache", config)
+	require.NoError(t, err)
+	require.NotNil(t, collector.cache)
+
+	// Test cache miss
+	value, hit := collector.CacheGet("nonexistent")
+	assert.False(t, hit)
+	assert.Nil(t, value)
+
+	// Test cache set and get
+	collector.CacheSet("test-key", "test-value", 200*time.Millisecond)
+	value, hit = collector.CacheGet("test-key")
+	assert.True(t, hit)
+	assert.Equal(t, "test-value", value)
+
+	// Test cache expiration
+	time.Sleep(150 * time.Millisecond)
+	value, hit = collector.CacheGet("test-key")
+	assert.False(t, hit)
+	assert.Nil(t, value)
+}
+
+func TestCacheEviction(t *testing.T) {
+	config := DefaultConfig()
+	config.CacheEnabled = true
+	config.CacheSize = 2
+	config.CacheTTL = time.Hour
+
+	collector, err := NewCollector("test-eviction", config)
+	require.NoError(t, err)
+
+	// Fill cache to capacity
+	collector.CacheSet("key1", "value1", time.Hour)
+	collector.CacheSet("key2", "value2", time.Hour)
+	
+	// Add one more item to trigger eviction
+	collector.CacheSet("key3", "value3", time.Hour)
+	
+	// Cache should still have 2 items max
+	collector.cache.mu.RLock()
+	assert.LessOrEqual(t, len(collector.cache.entries), 2)
+	collector.cache.mu.RUnlock()
+}
+
+func TestCacheCleanup(t *testing.T) {
+	config := DefaultConfig()
+	config.CacheEnabled = true
+	config.CacheSize = 10
+	config.CacheTTL = 50 * time.Millisecond
+
+	collector, err := NewCollector("test-cleanup", config)
+	require.NoError(t, err)
+
+	// Add some cache entries
+	collector.CacheSet("key1", "value1", 10*time.Millisecond)
+	collector.CacheSet("key2", "value2", 100*time.Millisecond)
+	
+	// Wait for some entries to expire
+	time.Sleep(20 * time.Millisecond)
+	
+	// Run cleanup manually
+	collector.cleanupExpiredCacheEntries()
+	
+	// key1 should be cleaned up, key2 should remain
+	_, hit1 := collector.CacheGet("key1")
+	_, hit2 := collector.CacheGet("key2")
+	assert.False(t, hit1)
+	assert.True(t, hit2)
+}
+
+// Test event statistics tracking
+func TestUpdateEventStatistics(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableEBPF = false
+	config.SlowQueryThreshold = 50 * time.Millisecond
+
+	collector, err := NewCollector("test-stats", config)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Test DNS query event
+	queryEvent := &EnhancedDNSEvent{
+		EventType:  1, // DNS_EVENT_QUERY
+		Protocol:   17, // UDP
+		DNSQtype:   1,  // A record
+		DNSID:      123,
+		PID:        1000,
+		QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+	}
+
+	collector.updateEventStatistics(queryEvent, ctx)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&collector.stats.QueriesTotal))
+	assert.Equal(t, int64(1), atomic.LoadInt64(&collector.stats.ActiveQueries))
+
+	// Test DNS response event
+	responseEvent := &EnhancedDNSEvent{
+		EventType:  2, // DNS_EVENT_RESPONSE
+		Protocol:   17, // UDP
+		DNSQtype:   1,  // A record
+		DNSRcode:   0,  // No error
+		DNSID:      123,
+		PID:        1000,
+		QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+	}
+
+	collector.updateEventStatistics(responseEvent, ctx)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&collector.stats.ResponsesTotal))
+	assert.Equal(t, int64(0), atomic.LoadInt64(&collector.stats.ActiveQueries)) // Should be correlated and decremented
+
+	// Test DNS error response
+	errorEvent := &EnhancedDNSEvent{
+		EventType:  2, // DNS_EVENT_RESPONSE
+		Protocol:   17, // UDP
+		DNSQtype:   1,  // A record
+		DNSRcode:   3,  // NXDOMAIN
+		DNSID:      124,
+		PID:        1001,
+		QueryName:  [128]byte{'b', 'a', 'd', '.', 'c', 'o', 'm', 0},
+	}
+
+	collector.updateEventStatistics(errorEvent, ctx)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&collector.stats.ErrorsTotal))
+
+	// Test DNS timeout event
+	timeoutEvent := &EnhancedDNSEvent{
+		EventType:  3, // DNS_EVENT_TIMEOUT
+		Protocol:   17, // UDP
+		DNSQtype:   1,  // A record
+		DNSID:      125,
+		PID:        1002,
+		QueryName:  [128]byte{'s', 'l', 'o', 'w', '.', 'c', 'o', 'm', 0},
+	}
+
+	collector.updateEventStatistics(timeoutEvent, ctx)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&collector.stats.TimeoutsTotal))
+	assert.Equal(t, int64(2), atomic.LoadInt64(&collector.stats.ErrorsTotal)) // Should increment errors
+}
+
+func TestSlowQueryDetection(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableEBPF = false
+	config.SlowQueryThreshold = 10 * time.Millisecond
+
+	collector, err := NewCollector("test-slow", config)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Add a query to active queries
+	queryKey := fmt.Sprintf("%d-%d", 1000, 123)
+	startTime := time.Now().Add(-50 * time.Millisecond) // Simulate 50ms ago
+	collector.activeQueries.Store(queryKey, startTime)
+
+	// Process response event to trigger slow query detection
+	responseEvent := &EnhancedDNSEvent{
+		EventType:  2, // DNS_EVENT_RESPONSE
+		Protocol:   17, // UDP
+		DNSQtype:   1,  // A record
+		DNSRcode:   0,  // No error
+		DNSID:      123,
+		PID:        1000,
+		QueryName:  [128]byte{'s', 'l', 'o', 'w', '.', 'c', 'o', 'm', 0},
+	}
+
+	collector.updateEventStatistics(responseEvent, ctx)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&collector.stats.SlowQueries))
+}
+
+// Test configuration validation
+func TestConfigValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    Config
+		wantError bool
+	}{
+		{
+			name:      "valid default config",
+			config:    DefaultConfig(),
+			wantError: false,
+		},
+		{
+			name: "zero buffer size",
+			config: Config{
+				BufferSize: 0,
+				EnabledProtocols: []string{"UDP"},
+				CapturePort: 53,
+				WorkerCount: 1,
+				PacketBatchSize: 1,
+				FlushInterval: time.Millisecond,
+			},
+			wantError: true,
+		},
+		{
+			name: "no protocols enabled",
+			config: Config{
+				BufferSize: 1000,
+				EnabledProtocols: []string{},
+				CapturePort: 53,
+				WorkerCount: 1,
+				PacketBatchSize: 1,
+				FlushInterval: time.Millisecond,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid protocol",
+			config: Config{
+				BufferSize: 1000,
+				EnabledProtocols: []string{"INVALID"},
+				CapturePort: 53,
+				WorkerCount: 1,
+				PacketBatchSize: 1,
+				FlushInterval: time.Millisecond,
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestConfigProtocolHelpers(t *testing.T) {
+	config := Config{
+		EnabledProtocols: []string{"UDP", "TCP"},
+		IgnoredDomains:   []string{"example.com", "*.test.com"},
+	}
+
+	// Test protocol checking
+	assert.True(t, config.IsProtocolEnabled("UDP"))
+	assert.True(t, config.IsProtocolEnabled("TCP"))
+	assert.False(t, config.IsProtocolEnabled("ICMP"))
+
+	// Test domain ignoring
+	assert.True(t, config.IsDomainIgnored("example.com"))
+	assert.True(t, config.IsDomainIgnored("sub.test.com"))
+	assert.False(t, config.IsDomainIgnored("google.com"))
+}
+
+// Test rate limiting functionality
+func TestRateLimiting(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableEBPF = false
+	config.RateLimitEnabled = true
+	config.RateLimitRPS = 2.0  // 2 requests per second
+	config.RateLimitBurst = 1  // burst of 1
+
+	collector, err := NewCollector("test-ratelimit", config)
+	require.NoError(t, err)
+	require.NotNil(t, collector.rlimiter)
+
+	// Should allow first request
+	assert.True(t, collector.rlimiter.Allow())
+	
+	// Should not allow immediate second request due to low rate
+	assert.False(t, collector.rlimiter.Allow())
+}
+
+// Test collector with all features enabled
+func TestCollectorFullFeatures(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableEBPF = false // Disable for testing
+	config.CacheEnabled = true
+	config.RateLimitEnabled = true
+	config.WorkerCount = 2
+
+	collector, err := NewCollector("test-full", config)
+	require.NoError(t, err)
+
+	// Verify all components are initialized
+	assert.NotNil(t, collector.cache)
+	assert.NotNil(t, collector.rlimiter)
+	assert.NotNil(t, collector.tracer)
+	assert.NotNil(t, collector.meter)
+	assert.NotNil(t, collector.queriesTotal)
+	assert.NotNil(t, collector.queryLatency)
+	assert.NotNil(t, collector.errorsTotal)
+	assert.NotNil(t, collector.activeQueriesGauge)
+	assert.NotNil(t, collector.cacheHitsTotal)
+
+	ctx := context.Background()
+	err = collector.Start(ctx)
+	require.NoError(t, err)
+	assert.True(t, collector.IsHealthy())
+
+	defer collector.Stop()
+}
+
+// Test worker pool functionality
+func TestProcessEventsWorker(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableEBPF = false
+	config.WorkerCount = 2
+
+	collector, err := NewCollector("test-workers", config)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	collector.ctx = ctx
+	collector.cancel = cancel
+
+	// Test worker startup and shutdown
+	collector.workerWg.Add(1)
+	go collector.processEventsWorker(0)
+
+	// Wait for context to timeout
+	<-ctx.Done()
+	
+	// Wait for worker to finish
+	collector.workerWg.Wait()
+}
+
+// Test cache without cache enabled
+func TestCollectorWithoutCache(t *testing.T) {
+	config := DefaultConfig()
+	config.CacheEnabled = false
+
+	collector, err := NewCollector("test-no-cache", config)
+	require.NoError(t, err)
+	assert.Nil(t, collector.cache)
+
+	// Cache operations should be safe
+	value, hit := collector.CacheGet("test")
+	assert.False(t, hit)
+	assert.Nil(t, value)
+
+	collector.CacheSet("test", "value", time.Hour)
+	// Should not panic
+}
+
+// Test metrics creation errors (simulated)
+func TestNewCollectorWithZeroBufferSize(t *testing.T) {
+	config := DefaultConfig()
+	config.BufferSize = 0 // This should be handled gracefully
+
+	collector, err := NewCollector("test-zero-buffer", config)
+	require.NoError(t, err)
+	
+	// Should use default buffer size
+	assert.Equal(t, config.BufferSize, cap(collector.events))
+}
+
+// Test collector name functionality
+func TestCollectorName(t *testing.T) {
+	testNames := []string{
+		"dns",
+		"dns-collector",
+		"test_dns_123",
+		"",
+	}
+
+	for _, name := range testNames {
+		t.Run(fmt.Sprintf("name_%s", name), func(t *testing.T) {
+			config := DefaultConfig()
+			collector, err := NewCollector(name, config)
+			require.NoError(t, err)
+			assert.Equal(t, name, collector.Name())
+		})
+	}
+}
+
+// Test edge cases for IP conversion functions
+func TestIPConversionEdgeCases(t *testing.T) {
+	collector := &Collector{}
+
+	// Test boundary values for IPv4
+	testCases := []struct {
+		ip       uint32
+		expected string
+	}{
+		{0x00000000, "0.0.0.0"},
+		{0x7f000001, "127.0.0.1"},
+		{0xc0a80001, "192.168.0.1"},
+		{0xffffffff, "255.255.255.255"},
+	}
+
+	for _, tc := range testCases {
+		result := collector.ipv4ToString(tc.ip)
+		assert.Equal(t, tc.expected, result)
+	}
+
+	// Test IPv6 edge cases
+	zeroIPv6 := collector.ipv6ToString([4]uint32{0, 0, 0, 0})
+	assert.Equal(t, "::", zeroIPv6)
+}
+
+// Test null terminated string edge cases
+func TestNullTerminatedStringEdgeCases(t *testing.T) {
+	collector := &Collector{}
+
+	tests := []struct {
+		name     string
+		input    []byte
+		expected string
+	}{
+		{
+			name:     "multiple nulls",
+			input:    []byte{'a', 0, 'b', 0, 'c'},
+			expected: "a",
+		},
+		{
+			name:     "all nulls",
+			input:    []byte{0, 0, 0},
+			expected: "",
+		},
+		{
+			name:     "unicode characters",
+			input:    []byte{0xc3, 0xa9, 0}, // é in UTF-8
+			expected: "é",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := collector.nullTerminatedString(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Benchmark cache operations
+func BenchmarkCacheGet(b *testing.B) {
+	config := DefaultConfig()
+	config.CacheEnabled = true
+	collector, _ := NewCollector("bench-cache", config)
+	
+	collector.CacheSet("test-key", "test-value", time.Hour)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		collector.CacheGet("test-key")
+	}
+}
+
+func BenchmarkCacheSet(b *testing.B) {
+	config := DefaultConfig()
+	config.CacheEnabled = true
+	collector, _ := NewCollector("bench-cache-set", config)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		collector.CacheSet(key, "value", time.Hour)
+	}
+}
+
+// Test statistics aggregation
+func TestStatisticsAggregation(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableEBPF = false
+
+	collector, err := NewCollector("test-stats-agg", config)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Simulate multiple events
+	for i := 0; i < 10; i++ {
+		event := &EnhancedDNSEvent{
+			EventType:  1, // DNS_EVENT_QUERY
+			Protocol:   17, // UDP
+			DNSQtype:   1,  // A record
+			DNSID:      uint16(i),
+			PID:        1000,
+			QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+		}
+		collector.updateEventStatistics(event, ctx)
+	}
+
+	assert.Equal(t, int64(10), atomic.LoadInt64(&collector.stats.QueriesTotal))
+	assert.Equal(t, int64(10), atomic.LoadInt64(&collector.stats.ActiveQueries))
+}
+
+// Test concurrent access to statistics
+func TestConcurrentStatisticsUpdate(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableEBPF = false
+
+	collector, err := NewCollector("test-concurrent-stats", config)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	const numGoroutines = 10
+	const eventsPerGoroutine = 100
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	// Launch multiple goroutines to update statistics
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < eventsPerGoroutine; j++ {
+				event := &EnhancedDNSEvent{
+					EventType:  1, // DNS_EVENT_QUERY
+					Protocol:   17, // UDP
+					DNSQtype:   1,  // A record
+					DNSID:      uint16(goroutineID*1000 + j),
+					PID:        uint32(1000 + goroutineID),
+					QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+				}
+				collector.updateEventStatistics(event, ctx)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	expectedTotal := int64(numGoroutines * eventsPerGoroutine)
+	assert.Equal(t, expectedTotal, atomic.LoadInt64(&collector.stats.QueriesTotal))
+}
