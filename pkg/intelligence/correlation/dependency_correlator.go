@@ -143,145 +143,26 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 		zap.String("service", serviceName),
 		zap.String("namespace", namespace))
 
-	// Query for service and its pod dependencies with LIMIT to prevent unbounded results
-	limit := d.queryConfig.GetLimit("service")
-	query := fmt.Sprintf(`
-		MATCH (s:Service {name: $serviceName, namespace: $namespace})
-		OPTIONAL MATCH (s)-[:SELECTS]->(p:Pod)
-		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
-		OPTIONAL MATCH (p)-[:USES_SECRET]->(sec:Secret)
-		OPTIONAL MATCH (p)-[:CLAIMS]->(pvc:PVC)
-		RETURN s, 
-		       collect(DISTINCT p)[0..%d] as pods,
-		       collect(DISTINCT cm)[0..%d] as configmaps,
-		       collect(DISTINCT sec)[0..%d] as secrets,
-		       collect(DISTINCT pvc)[0..%d] as pvcs
-		LIMIT %d
-	`, limit, limit, limit, limit, limit)
-
-	params := &ServiceQueryParams{
-		BaseQueryParams: BaseQueryParams{
-			Namespace: namespace,
-		},
-		ServiceName: serviceName,
-	}
-	if err := params.Validate(); err != nil {
+	// Query service dependencies
+	result, err := d.queryServiceDependencies(ctx, namespace, serviceName)
+	if err != nil {
 		return nil, err
 	}
-
-	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query service dependencies: %w", err)
-	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
-
 	for result.Next(ctx) {
 		record := result.Record()
 
-		// Check if service exists
-		serviceNode, err := record.GetNode("s")
-		if err != nil || serviceNode == nil {
-			findings = append(findings, aggregator.Finding{
-				ID:         fmt.Sprintf("service-not-found-%s", serviceName),
-				Type:       "service_not_found",
-				Severity:   aggregator.SeverityCritical,
-				Confidence: 0.95,
-				Message:    fmt.Sprintf("Service %s not found in namespace %s", serviceName, namespace),
-				Evidence: aggregator.Evidence{
-					Events: []domain.UnifiedEvent{*event},
-				},
-				Impact: aggregator.Impact{
-					Scope:       "service",
-					Resources:   []string{serviceName},
-					UserImpact:  "Service completely unavailable",
-					Degradation: "100% - service does not exist",
-				},
-				Timestamp: time.Now(),
-			})
+		// Check service existence
+		if serviceFinding := d.checkServiceExistence(record, serviceName, namespace, event); serviceFinding != nil {
+			findings = append(findings, *serviceFinding)
 			continue
 		}
 
-		// Check pod availability
-		pods, err := record.GetNodes("pods")
-		if err != nil || len(pods) == 0 {
-			findings = append(findings, aggregator.Finding{
-				ID:         fmt.Sprintf("service-no-pods-%s", serviceName),
-				Type:       "service_no_endpoints",
-				Severity:   aggregator.SeverityCritical,
-				Confidence: 0.90,
-				Message:    fmt.Sprintf("Service %s has no running pods", serviceName),
-				Evidence: aggregator.Evidence{
-					Events: []domain.UnifiedEvent{*event},
-					GraphPaths: []aggregator.GraphPath{{
-						Nodes: []aggregator.GraphNode{{
-							ID:   serviceName,
-							Type: "Service",
-							Labels: map[string]string{
-								"name":      serviceName,
-								"namespace": namespace,
-							},
-						}},
-					}},
-				},
-				Impact: aggregator.Impact{
-					Scope:       "service",
-					Resources:   []string{serviceName},
-					UserImpact:  "Service has no endpoints",
-					Degradation: "100% - no pods available",
-				},
-				Timestamp: time.Now(),
-			})
-		} else {
-			// Analyze pod health
-			readyPods := 0
-			failedPods := 0
-
-			for _, pod := range pods {
-				if pod.Properties.Ready {
-					readyPods++
-				} else {
-					failedPods++
-				}
-			}
-
-			if readyPods == 0 && failedPods > 0 {
-				findings = append(findings, aggregator.Finding{
-					ID:         fmt.Sprintf("service-pods-failed-%s", serviceName),
-					Type:       "service_endpoints_failed",
-					Severity:   aggregator.SeverityCritical,
-					Confidence: 0.85,
-					Message:    fmt.Sprintf("Service %s has %d failed pods, 0 ready", serviceName, failedPods),
-					Evidence: aggregator.Evidence{
-						Events: []domain.UnifiedEvent{*event},
-					},
-					Impact: aggregator.Impact{
-						Scope:       "service",
-						Resources:   []string{serviceName},
-						UserImpact:  "Service unavailable due to pod failures",
-						Degradation: "100% - all pods failed",
-					},
-					Timestamp: time.Now(),
-				})
-			} else if readyPods < len(pods)/2 {
-				findings = append(findings, aggregator.Finding{
-					ID:         fmt.Sprintf("service-pods-degraded-%s", serviceName),
-					Type:       "service_endpoints_degraded",
-					Severity:   aggregator.SeverityHigh,
-					Confidence: 0.75,
-					Message:    fmt.Sprintf("Service %s has only %d/%d pods ready", serviceName, readyPods, len(pods)),
-					Evidence: aggregator.Evidence{
-						Events: []domain.UnifiedEvent{*event},
-					},
-					Impact: aggregator.Impact{
-						Scope:       "service",
-						Resources:   []string{serviceName},
-						UserImpact:  "Service degraded due to pod failures",
-						Degradation: fmt.Sprintf("%d%% - reduced capacity", (readyPods*100)/len(pods)),
-					},
-					Timestamp: time.Now(),
-				})
-			}
+		// Check pod availability and health
+		if podFindings := d.analyzePodAvailability(record, serviceName, namespace, event); len(podFindings) > 0 {
+			findings = append(findings, podFindings...)
 		}
 	}
 
@@ -305,151 +186,31 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 		zap.String("pod", podName),
 		zap.String("namespace", namespace))
 
-	// Query for pod and its dependencies with LIMIT to prevent unbounded results
-	limit := d.queryConfig.GetLimit("pod")
-	query := fmt.Sprintf(`
-		MATCH (p:Pod {name: $podName, namespace: $namespace})
-		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
-		OPTIONAL MATCH (p)-[:USES_SECRET]->(sec:Secret)
-		OPTIONAL MATCH (p)-[:CLAIMS]->(pvc:PVC)
-		OPTIONAL MATCH (svc:Service)-[:SELECTS]->(p)
-		RETURN p, 
-		       collect(DISTINCT cm)[0..%d] as configmaps,
-		       collect(DISTINCT sec)[0..%d] as secrets,
-		       collect(DISTINCT pvc)[0..%d] as pvcs,
-		       collect(DISTINCT svc)[0..%d] as services
-		LIMIT 1
-	`, limit, limit, limit, limit)
-
-	params := &PodQueryParams{
-		BaseQueryParams: BaseQueryParams{
-			Namespace: namespace,
-		},
-		PodName: podName,
-	}
-	if err := params.Validate(); err != nil {
+	// Query pod dependencies
+	result, err := d.queryPodDependencies(ctx, namespace, podName)
+	if err != nil {
 		return nil, err
 	}
-
-	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query pod dependencies: %w", err)
-	}
+	defer result.Close(ctx)
 
 	var findings []aggregator.Finding
-
 	for result.Next(ctx) {
 		record := result.Record()
 
-		// Get pod info
-		podNode, err := record.GetNode("p")
-		if err != nil || podNode == nil {
-			findings = append(findings, aggregator.Finding{
-				ID:         fmt.Sprintf("pod-not-found-%s", podName),
-				Type:       "pod_not_found",
-				Severity:   aggregator.SeverityHigh,
-				Confidence: 0.95,
-				Message:    fmt.Sprintf("Pod %s not found in namespace %s", podName, namespace),
-				Evidence: aggregator.Evidence{
-					Events: []domain.UnifiedEvent{*event},
-				},
-				Impact: aggregator.Impact{
-					Scope:       "pod",
-					Resources:   []string{podName},
-					UserImpact:  "Pod unavailable",
-					Degradation: "100% - pod does not exist",
-				},
-				Timestamp: time.Now(),
-			})
+		// Check pod existence
+		if podFinding := d.checkPodExistence(record, podName, namespace, event); podFinding != nil {
+			findings = append(findings, *podFinding)
 			continue
 		}
 
 		// Check ConfigMap dependencies
-		configmapsInterface, _ := record.Get("configmaps")
-		if configmaps, ok := configmapsInterface.([]interface{}); ok && len(configmaps) > 0 {
-			for _, cmInterface := range configmaps {
-				if cm, ok := cmInterface.(map[string]interface{}); ok {
-					props := cm
-					if modified, exists := props["lastModified"]; exists {
-						if modTime, ok := modified.(time.Time); ok {
-							// Check if ConfigMap was modified recently before pod failure
-							if event.Timestamp.Sub(modTime) < 30*time.Minute && event.Timestamp.After(modTime) {
-								cmName := props["name"].(string)
-								findings = append(findings, aggregator.Finding{
-									ID:         fmt.Sprintf("pod-config-dependency-%s-%s", podName, cmName),
-									Type:       "pod_config_dependency_failure",
-									Severity:   aggregator.SeverityHigh,
-									Confidence: 0.80,
-									Message:    fmt.Sprintf("Pod %s failed after ConfigMap %s was modified", podName, cmName),
-									Evidence: aggregator.Evidence{
-										Events: []domain.UnifiedEvent{*event},
-										GraphPaths: []aggregator.GraphPath{{
-											Nodes: []aggregator.GraphNode{
-												{
-													ID:     podName,
-													Type:   "Pod",
-													Labels: map[string]string{"name": podName, "namespace": namespace},
-												},
-												{
-													ID:     cmName,
-													Type:   "ConfigMap",
-													Labels: map[string]string{"name": cmName, "namespace": namespace},
-												},
-											},
-											Edges: []aggregator.GraphEdge{{
-												From:         podName,
-												To:           cmName,
-												Relationship: "MOUNTS",
-												Properties:   map[string]string{"type": "configmap"},
-											}},
-										}},
-									},
-									Impact: aggregator.Impact{
-										Scope:       "pod",
-										Resources:   []string{podName, cmName},
-										UserImpact:  "Pod failed due to configuration change",
-										Degradation: "100% - pod crash",
-									},
-									Timestamp: time.Now(),
-								})
-							}
-						}
-					}
-				}
-			}
+		if configFindings := d.analyzeConfigMapDependencies(record, podName, namespace, event); len(configFindings) > 0 {
+			findings = append(findings, configFindings...)
 		}
 
-		// Check Service impact
-		servicesInterface, _ := record.Get("services")
-		if services, ok := servicesInterface.([]interface{}); ok && len(services) > 0 {
-			var serviceNames []string
-			for _, svcInterface := range services {
-				if svc, ok := svcInterface.(map[string]interface{}); ok {
-					if name, exists := svc["name"]; exists {
-						serviceNames = append(serviceNames, name.(string))
-					}
-				}
-			}
-
-			if len(serviceNames) > 0 {
-				findings = append(findings, aggregator.Finding{
-					ID:         fmt.Sprintf("pod-service-impact-%s", podName),
-					Type:       "pod_failure_service_impact",
-					Severity:   aggregator.SeverityMedium,
-					Confidence: 0.70,
-					Message:    fmt.Sprintf("Pod %s failure impacts services: %s", podName, strings.Join(serviceNames, ", ")),
-					Evidence: aggregator.Evidence{
-						Events: []domain.UnifiedEvent{*event},
-					},
-					Impact: aggregator.Impact{
-						Scope:       "service",
-						Resources:   append([]string{podName}, serviceNames...),
-						UserImpact:  "Service availability reduced",
-						Degradation: "Partial - one endpoint lost",
-					},
-					Timestamp: time.Now(),
-				})
-			}
+		// Check service impact
+		if serviceFindings := d.analyzeServiceImpact(record, podName, event); len(serviceFindings) > 0 {
+			findings = append(findings, serviceFindings...)
 		}
 	}
 
@@ -458,6 +219,110 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 	}
 
 	return findings, nil
+}
+
+// checkPodExistence checks if a pod exists and returns appropriate finding
+func (d *DependencyCorrelator) checkPodExistence(record *GraphRecord, podName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
+	podNode, err := record.GetNode("p")
+	if err != nil || podNode == nil {
+		return &aggregator.Finding{
+			ID:         fmt.Sprintf("pod-not-found-%s", podName),
+			Type:       "pod_not_found",
+			Severity:   aggregator.SeverityHigh,
+			Confidence: 0.95,
+			Message:    fmt.Sprintf("Pod %s not found in namespace %s", podName, namespace),
+			Evidence: aggregator.Evidence{
+				Events: []domain.UnifiedEvent{*event},
+			},
+			Impact: aggregator.Impact{
+				Scope:       "pod",
+				Resources:   []string{podName},
+				UserImpact:  "Pod unavailable",
+				Degradation: PodNotExistMsg,
+			},
+			Timestamp: time.Now(),
+		}
+	}
+	return nil
+}
+
+// analyzeConfigMapDependencies analyzes ConfigMap dependencies using typed API
+func (d *DependencyCorrelator) analyzeConfigMapDependencies(record *GraphRecord, podName, namespace string, event *domain.UnifiedEvent) []aggregator.Finding {
+	configmaps, err := record.GetNodes("configmaps")
+	if err != nil || len(configmaps) == 0 {
+		return nil
+	}
+
+	var findings []aggregator.Finding
+	for _, cm := range configmaps {
+		if finding := d.checkConfigMapModificationTiming(cm, podName, namespace, event); finding != nil {
+			findings = append(findings, *finding)
+		}
+	}
+
+	return findings
+}
+
+// checkConfigMapModificationTiming checks if ConfigMap was modified recently before pod failure
+func (d *DependencyCorrelator) checkConfigMapModificationTiming(cm GraphNode, podName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
+	cmName := cm.Properties.Name
+	if cmName == "" {
+		return nil
+	}
+
+	// Check if ConfigMap was modified recently before pod failure
+	lastModifiedStr, exists := cm.Properties.Metadata["lastModified"]
+	if !exists {
+		return nil
+	}
+
+	modTime, err := time.Parse(time.RFC3339, lastModifiedStr)
+	if err != nil {
+		return nil
+	}
+
+	// Check timing - ConfigMap modified recently before pod failure
+	if event.Timestamp.Sub(modTime) >= 30*time.Minute || !event.Timestamp.After(modTime) {
+		return nil
+	}
+
+	return &aggregator.Finding{
+		ID:         fmt.Sprintf("pod-config-dependency-%s-%s", podName, cmName),
+		Type:       "pod_config_dependency_failure",
+		Severity:   aggregator.SeverityHigh,
+		Confidence: 0.80,
+		Message:    fmt.Sprintf("Pod %s failed after ConfigMap %s was modified", podName, cmName),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+			GraphPaths: []aggregator.GraphPath{{
+				Nodes: []aggregator.GraphNode{
+					{
+						ID:     podName,
+						Type:   "Pod",
+						Labels: map[string]string{"name": podName, "namespace": namespace},
+					},
+					{
+						ID:     cmName,
+						Type:   "ConfigMap",
+						Labels: map[string]string{"name": cmName, "namespace": namespace},
+					},
+				},
+				Edges: []aggregator.GraphEdge{{
+					From:         podName,
+					To:           cmName,
+					Relationship: "MOUNTS",
+					Properties:   map[string]string{"type": "configmap"},
+				}},
+			}},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "pod",
+			Resources:   []string{podName, cmName},
+			UserImpact:  "Pod failed due to configuration change",
+			Degradation: "100% - pod crash",
+		},
+		Timestamp: time.Now(),
+	}
 }
 
 // correlateConfigImpact analyzes configuration change impacts
@@ -473,7 +338,28 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 		zap.String("config", configName),
 		zap.String("namespace", namespace))
 
-	// Query for config and dependent pods with LIMIT to prevent unbounded results
+	result, err := d.queryConfigDependencies(ctx, namespace, configName)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close(ctx)
+
+	var findings []aggregator.Finding
+	for result.Next(ctx) {
+		record := result.Record()
+		podFindings := d.analyzeConfigImpactOnPods(record, configName, event)
+		findings = append(findings, podFindings...)
+	}
+
+	if err = result.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating config dependency results: %w", err)
+	}
+
+	return findings, nil
+}
+
+// queryConfigDependencies queries for config and its dependent resources
+func (d *DependencyCorrelator) queryConfigDependencies(ctx context.Context, namespace, configName string) (ResultIterator, error) {
 	limit := d.queryConfig.GetLimit("config")
 	query := fmt.Sprintf(`
 		MATCH (cm:ConfigMap {name: $configName, namespace: $namespace})
@@ -485,19 +371,11 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 		LIMIT 1
 	`, limit, limit)
 
-	// Create generic query params for config without type
-	// We'll infer type from the entity name
-	configType := "ConfigMap"
-	if strings.Contains(configName, "secret") {
-		configType = "Secret"
-	}
-
+	configType := d.inferConfigType(configName)
 	params := &ConfigQueryParams{
-		BaseQueryParams: BaseQueryParams{
-			Namespace: namespace,
-		},
-		ConfigName: configName,
-		ConfigType: configType,
+		BaseQueryParams: BaseQueryParams{Namespace: namespace},
+		ConfigName:      configName,
+		ConfigType:      configType,
 	}
 	if err := params.Validate(); err != nil {
 		return nil, err
@@ -508,107 +386,175 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 		return nil, fmt.Errorf("failed to query config dependencies: %w", err)
 	}
 
+	return result, nil
+}
+
+// inferConfigType determines if config is a ConfigMap or Secret
+func (d *DependencyCorrelator) inferConfigType(configName string) string {
+	if strings.Contains(configName, "secret") {
+		return "Secret"
+	}
+	return "ConfigMap"
+}
+
+// analyzeConfigImpactOnPods analyzes how config changes affect pods
+func (d *DependencyCorrelator) analyzeConfigImpactOnPods(record *GraphRecord, configName string, event *domain.UnifiedEvent) []aggregator.Finding {
 	var findings []aggregator.Finding
 
-	for result.Next(ctx) {
-		record := result.Record()
+	pods, err := record.GetNodes("pods")
+	if err != nil || len(pods) == 0 {
+		return findings
+	}
 
-		// Get dependent pods
-		pods, err := record.GetNodes("pods")
-		if err == nil && len(pods) > 0 {
-			var podNames []string
-			affectedPods := 0
+	podImpact := d.calculatePodImpact(pods, event)
+	if podImpact.affectedCount > 0 {
+		findings = append(findings, d.createPodImpactFinding(configName, podImpact, event))
+	}
 
-			for _, pod := range pods {
-				podName := pod.Properties.Name
+	serviceFindings := d.analyzeServiceImpactFromConfig(record, configName, podImpact.affectedCount, event)
+	findings = append(findings, serviceFindings...)
 
-				// Check if pod restarted after config change
-				if lastRestartStr, exists := pod.Properties.Metadata["lastRestart"]; exists {
-					// Parse restart time from metadata
-					if restartTime, err := time.Parse(time.RFC3339, lastRestartStr); err == nil {
-						if restartTime.After(event.Timestamp) && restartTime.Sub(event.Timestamp) < 10*time.Minute {
-							affectedPods++
-						}
-					}
-				}
+	return findings
+}
 
-				if podName != "" {
-					podNames = append(podNames, podName)
-				}
-			}
+// podImpactInfo holds information about pods affected by config changes
+type podImpactInfo struct {
+	affectedCount int
+	podNames      []string
+}
 
-			if affectedPods > 0 {
-				findings = append(findings, aggregator.Finding{
-					ID:         fmt.Sprintf("config-change-impact-%s", configName),
-					Type:       "config_change_pod_impact",
-					Severity:   aggregator.SeverityHigh,
-					Confidence: 0.85,
-					Message:    fmt.Sprintf("ConfigMap %s change caused %d pods to restart: %s", configName, affectedPods, strings.Join(podNames[:affectedPods], ", ")),
-					Evidence: aggregator.Evidence{
-						Events: []domain.UnifiedEvent{*event},
-					},
-					Impact: aggregator.Impact{
-						Scope:       "config",
-						Resources:   append([]string{configName}, podNames...),
-						UserImpact:  "Application restarts due to config change",
-						Degradation: fmt.Sprintf("%d pods restarted", affectedPods),
-					},
-					Timestamp: time.Now(),
-				})
-			}
+// calculatePodImpact determines which pods were affected by config change
+func (d *DependencyCorrelator) calculatePodImpact(pods []GraphNode, event *domain.UnifiedEvent) podImpactInfo {
+	var podNames []string
+	affectedPods := 0
 
-			// Check service impact
-			servicesInterface, _ := record.Get("services")
-			if services, ok := servicesInterface.([]interface{}); ok && len(services) > 0 {
-				var serviceNames []string
-				for _, svcInterface := range services {
-					if svc, ok := svcInterface.(map[string]interface{}); ok {
-						var svcName string
-						if props, ok := svc["properties"].(map[string]interface{}); ok {
-							if name, ok := props["name"].(string); ok {
-								svcName = name
-							} else {
-								d.logger.Warn("Failed to extract service name from properties",
-									zap.String("config", configName),
-									zap.Any("props", props))
-							}
-						} else if name, ok := svc["name"].(string); ok {
-							svcName = name
-						}
-						if svcName != "" {
-							serviceNames = append(serviceNames, svcName)
-						}
-					}
-				}
+	for _, pod := range pods {
+		podName := pod.Properties.Name
+		if podName != "" {
+			podNames = append(podNames, podName)
+		}
 
-				if len(serviceNames) > 0 && affectedPods > 0 {
-					findings = append(findings, aggregator.Finding{
-						ID:         fmt.Sprintf("config-change-service-impact-%s", configName),
-						Type:       "config_change_service_impact",
-						Severity:   aggregator.SeverityMedium,
-						Confidence: 0.75,
-						Message:    fmt.Sprintf("ConfigMap %s change impacted services: %s", configName, strings.Join(serviceNames, ", ")),
-						Evidence: aggregator.Evidence{
-							Events: []domain.UnifiedEvent{*event},
-						},
-						Impact: aggregator.Impact{
-							Scope:       "service",
-							Resources:   append([]string{configName}, serviceNames...),
-							UserImpact:  "Service interruption during pod restarts",
-							Degradation: "Temporary - rolling restart",
-						},
-						Timestamp: time.Now(),
-					})
-				}
-			}
+		if d.wasPodRestartedAfterEvent(pod, event) {
+			affectedPods++
 		}
 	}
 
-	if err = result.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating config dependency results: %w", err)
+	return podImpactInfo{
+		affectedCount: affectedPods,
+		podNames:      podNames,
+	}
+}
+
+// wasPodRestartedAfterEvent checks if pod restarted after the event
+func (d *DependencyCorrelator) wasPodRestartedAfterEvent(pod GraphNode, event *domain.UnifiedEvent) bool {
+	lastRestartStr, exists := pod.Properties.Metadata["lastRestart"]
+	if !exists {
+		return false
 	}
 
-	return findings, nil
+	restartTime, err := time.Parse(time.RFC3339, lastRestartStr)
+	if err != nil {
+		return false
+	}
+
+	return restartTime.After(event.Timestamp) && restartTime.Sub(event.Timestamp) < 10*time.Minute
+}
+
+// createPodImpactFinding creates a finding for pods affected by config change
+func (d *DependencyCorrelator) createPodImpactFinding(configName string, impact podImpactInfo, event *domain.UnifiedEvent) aggregator.Finding {
+	affectedPodNames := impact.podNames
+	if len(affectedPodNames) > impact.affectedCount {
+		affectedPodNames = affectedPodNames[:impact.affectedCount]
+	}
+
+	return aggregator.Finding{
+		ID:         fmt.Sprintf("config-change-impact-%s", configName),
+		Type:       "config_change_pod_impact",
+		Severity:   aggregator.SeverityHigh,
+		Confidence: 0.85,
+		Message:    fmt.Sprintf("ConfigMap %s change caused %d pods to restart: %s", configName, impact.affectedCount, strings.Join(affectedPodNames, ", ")),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "config",
+			Resources:   append([]string{configName}, impact.podNames...),
+			UserImpact:  "Application restarts due to config change",
+			Degradation: fmt.Sprintf("%d pods restarted", impact.affectedCount),
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// analyzeServiceImpactFromConfig analyzes service impact from config changes
+func (d *DependencyCorrelator) analyzeServiceImpactFromConfig(record *GraphRecord, configName string, affectedPods int, event *domain.UnifiedEvent) []aggregator.Finding {
+	if affectedPods == 0 {
+		return nil
+	}
+
+	serviceNames := d.extractServiceNames(record, configName)
+	if len(serviceNames) == 0 {
+		return nil
+	}
+
+	return []aggregator.Finding{{
+		ID:         fmt.Sprintf("config-change-service-impact-%s", configName),
+		Type:       "config_change_service_impact",
+		Severity:   aggregator.SeverityMedium,
+		Confidence: 0.75,
+		Message:    fmt.Sprintf("ConfigMap %s change impacted services: %s", configName, strings.Join(serviceNames, ", ")),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "service",
+			Resources:   append([]string{configName}, serviceNames...),
+			UserImpact:  "Service interruption during pod restarts",
+			Degradation: "Temporary - rolling restart",
+		},
+		Timestamp: time.Now(),
+	}}
+}
+
+// extractServiceNames extracts service names from record
+func (d *DependencyCorrelator) extractServiceNames(record *GraphRecord, configName string) []string {
+	servicesInterface, _ := record.Get("services")
+	services, ok := servicesInterface.([]interface{})
+	if !ok || len(services) == 0 {
+		return nil
+	}
+
+	var serviceNames []string
+	for _, svcInterface := range services {
+		svcName := d.extractSingleServiceName(svcInterface, configName)
+		if svcName != "" {
+			serviceNames = append(serviceNames, svcName)
+		}
+	}
+	return serviceNames
+}
+
+// extractSingleServiceName extracts a service name from interface
+func (d *DependencyCorrelator) extractSingleServiceName(svcInterface interface{}, configName string) string {
+	svc, ok := svcInterface.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	if props, ok := svc["properties"].(map[string]interface{}); ok {
+		if name, ok := props["name"].(string); ok {
+			return name
+		}
+		d.logger.Warn("Failed to extract service name from properties",
+			zap.String("config", configName),
+			zap.Any("props", props))
+	}
+
+	if name, ok := svc["name"].(string); ok {
+		return name
+	}
+
+	return ""
 }
 
 // correlateVolumeIssues analyzes volume mount failures
@@ -624,7 +570,28 @@ func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event 
 		zap.String("pod", podName),
 		zap.String("namespace", namespace))
 
-	// Query for pod volume dependencies with LIMIT to prevent unbounded results
+	result, err := d.queryVolumeDependencies(ctx, namespace, podName)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close(ctx)
+
+	var findings []aggregator.Finding
+	for result.Next(ctx) {
+		record := result.Record()
+		pvcFindings := d.analyzePVCIssues(record, namespace, podName, event)
+		findings = append(findings, pvcFindings...)
+	}
+
+	if err = result.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating volume dependency results: %w", err)
+	}
+
+	return findings, nil
+}
+
+// queryVolumeDependencies queries for pod volume dependencies
+func (d *DependencyCorrelator) queryVolumeDependencies(ctx context.Context, namespace, podName string) (ResultIterator, error) {
 	limit := d.queryConfig.GetLimit("pod")
 	query := fmt.Sprintf(`
 		MATCH (p:Pod {name: $podName, namespace: $namespace})
@@ -637,10 +604,8 @@ func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event 
 	`, limit, limit)
 
 	params := &PodQueryParams{
-		BaseQueryParams: BaseQueryParams{
-			Namespace: namespace,
-		},
-		PodName: podName,
+		BaseQueryParams: BaseQueryParams{Namespace: namespace},
+		PodName:         podName,
 	}
 	if err := params.Validate(); err != nil {
 		return nil, err
@@ -650,90 +615,103 @@ func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query volume dependencies: %w", err)
 	}
-	defer result.Close(ctx)
+
+	return result, nil
+}
+
+// analyzePVCIssues analyzes PVC-related issues for a pod
+func (d *DependencyCorrelator) analyzePVCIssues(record *GraphRecord, namespace, podName string, event *domain.UnifiedEvent) []aggregator.Finding {
+	pvcs, err := record.GetNodes("pvcs")
+	if err != nil || len(pvcs) == 0 {
+		return nil
+	}
 
 	var findings []aggregator.Finding
+	for _, pvc := range pvcs {
+		pvcName := pvc.Properties.Name
 
-	for result.Next(ctx) {
-		record := result.Record()
+		if pendingFinding := d.checkPendingPVC(pvc, namespace, podName, pvcName, event); pendingFinding != nil {
+			findings = append(findings, *pendingFinding)
+		}
 
-		// Check PVC availability
-		pvcs, err := record.GetNodes("pvcs")
-		if err == nil && len(pvcs) > 0 {
-			for _, pvc := range pvcs {
-				pvcName := pvc.Properties.Name
-
-				// Check PVC status
-				if pvc.Properties.Phase == "Pending" {
-					findings = append(findings, aggregator.Finding{
-						ID:         fmt.Sprintf("pod-pvc-pending-%s-%s", podName, pvcName),
-						Type:       "pod_volume_pending",
-						Severity:   aggregator.SeverityCritical,
-						Confidence: 0.90,
-						Message:    fmt.Sprintf("Pod %s cannot start because PVC %s is pending", podName, pvcName),
-						Evidence: aggregator.Evidence{
-							Events: []domain.UnifiedEvent{*event},
-							GraphPaths: []aggregator.GraphPath{{
-								Nodes: []aggregator.GraphNode{
-									{
-										ID:     podName,
-										Type:   "Pod",
-										Labels: map[string]string{"name": podName, "namespace": namespace},
-									},
-									{
-										ID:     pvcName,
-										Type:   "PVC",
-										Labels: map[string]string{"name": pvcName, "namespace": namespace, "status": "Pending"},
-									},
-								},
-								Edges: []aggregator.GraphEdge{{
-									From:         podName,
-									To:           pvcName,
-									Relationship: "CLAIMS",
-									Properties:   map[string]string{"type": "volume"},
-								}},
-							}},
-						},
-						Impact: aggregator.Impact{
-							Scope:       "pod",
-							Resources:   []string{podName, pvcName},
-							UserImpact:  "Pod cannot start due to volume issue",
-							Degradation: "100% - pod stuck pending",
-						},
-						Timestamp: time.Now(),
-					})
-				}
-
-				// Check storage class issues
-				storageClassesInterface, _ := record.Get("storage_classes")
-				if scs, ok := storageClassesInterface.([]interface{}); ok && len(scs) == 0 {
-					findings = append(findings, aggregator.Finding{
-						ID:         fmt.Sprintf("pod-pvc-no-storage-class-%s-%s", podName, pvcName),
-						Type:       "pod_volume_no_storage_class",
-						Severity:   aggregator.SeverityHigh,
-						Confidence: 0.80,
-						Message:    fmt.Sprintf("Pod %s PVC %s has no storage class configured", podName, pvcName),
-						Evidence: aggregator.Evidence{
-							Events: []domain.UnifiedEvent{*event},
-						},
-						Impact: aggregator.Impact{
-							Scope:       "pod",
-							Resources:   []string{podName, pvcName},
-							UserImpact:  "Pod cannot get persistent storage",
-							Degradation: "100% - volume provisioning failed",
-						},
-						Timestamp: time.Now(),
-					})
-				}
-			}
+		if storageClassFinding := d.checkStorageClass(record, namespace, podName, pvcName, event); storageClassFinding != nil {
+			findings = append(findings, *storageClassFinding)
 		}
 	}
 
-	if err = result.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating volume dependency results: %w", err)
+	return findings
+}
+
+// checkPendingPVC checks if PVC is in pending state
+func (d *DependencyCorrelator) checkPendingPVC(pvc GraphNode, namespace, podName, pvcName string, event *domain.UnifiedEvent) *aggregator.Finding {
+	if pvc.Properties.Phase != "Pending" {
+		return nil
 	}
 
-	return findings, nil
+	return &aggregator.Finding{
+		ID:         fmt.Sprintf("pod-pvc-pending-%s-%s", podName, pvcName),
+		Type:       "pod_volume_pending",
+		Severity:   aggregator.SeverityCritical,
+		Confidence: 0.90,
+		Message:    fmt.Sprintf("Pod %s cannot start because PVC %s is pending", podName, pvcName),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+			GraphPaths: []aggregator.GraphPath{{
+				Nodes: []aggregator.GraphNode{
+					{
+						ID:     podName,
+						Type:   "Pod",
+						Labels: map[string]string{"name": podName, "namespace": namespace},
+					},
+					{
+						ID:     pvcName,
+						Type:   "PVC",
+						Labels: map[string]string{"name": pvcName, "namespace": namespace, "status": "Pending"},
+					},
+				},
+				Edges: []aggregator.GraphEdge{{
+					From:         podName,
+					To:           pvcName,
+					Relationship: "CLAIMS",
+					Properties:   map[string]string{"type": "volume"},
+				}},
+			}},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "pod",
+			Resources:   []string{podName, pvcName},
+			UserImpact:  "Pod cannot start due to volume issue",
+			Degradation: "100% - pod stuck pending",
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// checkStorageClass checks if storage class is configured
+func (d *DependencyCorrelator) checkStorageClass(record *GraphRecord, namespace, podName, pvcName string, event *domain.UnifiedEvent) *aggregator.Finding {
+	storageClassesInterface, _ := record.Get("storage_classes")
+	scs, ok := storageClassesInterface.([]interface{})
+	if !ok || len(scs) > 0 {
+		return nil
+	}
+
+	return &aggregator.Finding{
+		ID:         fmt.Sprintf("pod-pvc-no-storage-class-%s-%s", podName, pvcName),
+		Type:       "pod_volume_no_storage_class",
+		Severity:   aggregator.SeverityHigh,
+		Confidence: 0.80,
+		Message:    fmt.Sprintf("Pod %s PVC %s has no storage class configured", podName, pvcName),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "pod",
+			Resources:   []string{podName, pvcName},
+			UserImpact:  "Pod cannot get persistent storage",
+			Degradation: "100% - volume provisioning failed",
+		},
+		Timestamp: time.Now(),
+	}
 }
 
 // correlateGenericDependencies performs general dependency analysis
@@ -836,4 +814,220 @@ func (d *DependencyCorrelator) getEntityName(event *domain.UnifiedEvent) string 
 		return event.Entity.Name
 	}
 	return ""
+}
+
+// queryPodDependencies executes the pod dependency query
+func (d *DependencyCorrelator) queryPodDependencies(ctx context.Context, namespace, podName string) (ResultIterator, error) {
+	limit := d.queryConfig.GetLimit("pod")
+	query := fmt.Sprintf(`
+		MATCH (p:Pod {name: $podName, namespace: $namespace})
+		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
+		OPTIONAL MATCH (p)-[:USES_SECRET]->(sec:Secret)
+		OPTIONAL MATCH (p)-[:CLAIMS]->(pvc:PVC)
+		OPTIONAL MATCH (svc:Service)-[:SELECTS]->(p)
+		RETURN p, 
+		       collect(DISTINCT cm)[0..%d] as configmaps,
+		       collect(DISTINCT sec)[0..%d] as secrets,
+		       collect(DISTINCT pvc)[0..%d] as pvcs,
+		       collect(DISTINCT svc)[0..%d] as services
+		LIMIT 1
+	`, limit, limit, limit, limit)
+
+	params := &PodQueryParams{
+		BaseQueryParams: BaseQueryParams{Namespace: namespace},
+		PodName:         podName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pod dependencies: %w", err)
+	}
+
+	return result, nil
+}
+
+// analyzeServiceImpact analyzes service impact from pod failures
+func (d *DependencyCorrelator) analyzeServiceImpact(record *GraphRecord, podName string, event *domain.UnifiedEvent) []aggregator.Finding {
+	services, err := record.GetNodes("services")
+	if err != nil || len(services) == 0 {
+		return nil
+	}
+
+	var serviceNames []string
+	for _, service := range services {
+		if service.Properties.Name != "" {
+			serviceNames = append(serviceNames, service.Properties.Name)
+		}
+	}
+
+	if len(serviceNames) == 0 {
+		return nil
+	}
+
+	return []aggregator.Finding{{
+		ID:         fmt.Sprintf("pod-service-impact-%s", podName),
+		Type:       "pod_failure_service_impact",
+		Severity:   aggregator.SeverityMedium,
+		Confidence: 0.70,
+		Message:    fmt.Sprintf("Pod %s failure impacts services: %s", podName, strings.Join(serviceNames, ", ")),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "service",
+			Resources:   append([]string{podName}, serviceNames...),
+			UserImpact:  "Service availability reduced",
+			Degradation: "Partial - one endpoint lost",
+		},
+		Timestamp: time.Now(),
+	}}
+}
+
+// queryServiceDependencies executes the service dependency query
+func (d *DependencyCorrelator) queryServiceDependencies(ctx context.Context, namespace, serviceName string) (ResultIterator, error) {
+	limit := d.queryConfig.GetLimit("service")
+	query := fmt.Sprintf(`
+		MATCH (s:Service {name: $serviceName, namespace: $namespace})
+		OPTIONAL MATCH (s)-[:SELECTS]->(p:Pod)
+		OPTIONAL MATCH (p)-[:MOUNTS]->(cm:ConfigMap)
+		OPTIONAL MATCH (p)-[:USES_SECRET]->(sec:Secret)
+		OPTIONAL MATCH (p)-[:CLAIMS]->(pvc:PVC)
+		RETURN s, 
+		       collect(DISTINCT p)[0..%d] as pods,
+		       collect(DISTINCT cm)[0..%d] as configmaps,
+		       collect(DISTINCT sec)[0..%d] as secrets,
+		       collect(DISTINCT pvc)[0..%d] as pvcs
+		LIMIT %d
+	`, limit, limit, limit, limit, limit)
+
+	params := &ServiceQueryParams{
+		BaseQueryParams: BaseQueryParams{Namespace: namespace},
+		ServiceName:     serviceName,
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query service dependencies: %w", err)
+	}
+
+	return result, nil
+}
+
+// checkServiceExistence checks if a service exists and returns appropriate finding
+func (d *DependencyCorrelator) checkServiceExistence(record *GraphRecord, serviceName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
+	serviceNode, err := record.GetNode("s")
+	if err != nil || serviceNode == nil {
+		return &aggregator.Finding{
+			ID:         fmt.Sprintf("service-not-found-%s", serviceName),
+			Type:       "service_not_found",
+			Severity:   aggregator.SeverityCritical,
+			Confidence: 0.95,
+			Message:    fmt.Sprintf("Service %s not found in namespace %s", serviceName, namespace),
+			Evidence: aggregator.Evidence{
+				Events: []domain.UnifiedEvent{*event},
+			},
+			Impact: aggregator.Impact{
+				Scope:       "service",
+				Resources:   []string{serviceName},
+				UserImpact:  "Service completely unavailable",
+				Degradation: ServiceNotExistMsg,
+			},
+			Timestamp: time.Now(),
+		}
+	}
+	return nil
+}
+
+// analyzePodAvailability analyzes pod availability for a service
+func (d *DependencyCorrelator) analyzePodAvailability(record *GraphRecord, serviceName, namespace string, event *domain.UnifiedEvent) []aggregator.Finding {
+	pods, err := record.GetNodes("pods")
+	if err != nil || len(pods) == 0 {
+		return []aggregator.Finding{{
+			ID:         fmt.Sprintf("service-no-pods-%s", serviceName),
+			Type:       "service_no_endpoints",
+			Severity:   aggregator.SeverityCritical,
+			Confidence: 0.90,
+			Message:    fmt.Sprintf("Service %s has no running pods", serviceName),
+			Evidence: aggregator.Evidence{
+				Events: []domain.UnifiedEvent{*event},
+				GraphPaths: []aggregator.GraphPath{{
+					Nodes: []aggregator.GraphNode{{
+						ID:   serviceName,
+						Type: "Service",
+						Labels: map[string]string{
+							"name":      serviceName,
+							"namespace": namespace,
+						},
+					}},
+				}},
+			},
+			Impact: aggregator.Impact{
+				Scope:       "service",
+				Resources:   []string{serviceName},
+				UserImpact:  "Service has no endpoints",
+				Degradation: NoPodsAvailableMsg,
+			},
+			Timestamp: time.Now(),
+		}}
+	}
+
+	// Analyze pod health
+	readyPods := 0
+	failedPods := 0
+
+	for _, pod := range pods {
+		if pod.Properties.Ready {
+			readyPods++
+		} else {
+			failedPods++
+		}
+	}
+
+	var findings []aggregator.Finding
+
+	if readyPods == 0 && failedPods > 0 {
+		findings = append(findings, aggregator.Finding{
+			ID:         fmt.Sprintf("service-pods-failed-%s", serviceName),
+			Type:       "service_endpoints_failed",
+			Severity:   aggregator.SeverityCritical,
+			Confidence: 0.85,
+			Message:    fmt.Sprintf("Service %s has %d failed pods, 0 ready", serviceName, failedPods),
+			Evidence: aggregator.Evidence{
+				Events: []domain.UnifiedEvent{*event},
+			},
+			Impact: aggregator.Impact{
+				Scope:       "service",
+				Resources:   []string{serviceName},
+				UserImpact:  "Service unavailable due to pod failures",
+				Degradation: AllPodsFailedMsg,
+			},
+			Timestamp: time.Now(),
+		})
+	} else if readyPods < len(pods)/2 {
+		findings = append(findings, aggregator.Finding{
+			ID:         fmt.Sprintf("service-pods-degraded-%s", serviceName),
+			Type:       "service_endpoints_degraded",
+			Severity:   aggregator.SeverityHigh,
+			Confidence: 0.75,
+			Message:    fmt.Sprintf("Service %s has only %d/%d pods ready", serviceName, readyPods, len(pods)),
+			Evidence: aggregator.Evidence{
+				Events: []domain.UnifiedEvent{*event},
+			},
+			Impact: aggregator.Impact{
+				Scope:       "service",
+				Resources:   []string{serviceName},
+				UserImpact:  "Service degraded due to pod failures",
+				Degradation: fmt.Sprintf(ReducedCapacityFmt, (readyPods*100)/len(pods)),
+			},
+			Timestamp: time.Now(),
+		})
+	}
+
+	return findings
 }

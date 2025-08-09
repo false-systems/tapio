@@ -11,6 +11,23 @@ import (
 	"go.uber.org/zap"
 )
 
+// AffectedPodData represents a pod affected by config changes
+type AffectedPodData struct {
+	Pod      GraphNode
+	Name     string
+	Restart  time.Time
+	Ready    bool
+	Phase    string
+	Services []string
+}
+
+// ConfigChangeInfo represents a configuration change info for impact analysis
+type ConfigChangeInfo struct {
+	Type     string // ConfigMap or Secret
+	Name     string
+	Modified time.Time
+}
+
 // ConfigImpactCorrelator analyzes the impact of configuration changes on pods and services
 // It tracks: ConfigMap/Secret changes → Pod restarts → Service disruptions
 type ConfigImpactCorrelator struct {
@@ -191,7 +208,8 @@ func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event 
 
 		// Analyze affected pods
 		if affectedPodsValue, found := record.Get("affectedPods"); found {
-			if affectedPods, ok := affectedPodsValue.([]interface{}); ok {
+			affectedPods := c.parseAffectedPodsFromValue(affectedPodsValue)
+			if len(affectedPods) > 0 {
 				findings = append(findings, c.analyzeAffectedPods(configName, configType, affectedPods, event)...)
 			}
 		}
@@ -274,7 +292,8 @@ func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, eve
 		record := result.Record()
 
 		if changesValue, found := record.Get("recentChanges"); found {
-			if changes, ok := changesValue.([]interface{}); ok && len(changes) > 0 {
+			changes := c.parseConfigChangesFromValue(changesValue)
+			if len(changes) > 0 {
 				findings = append(findings, c.createRestartCauseFindings(podName, changes, event)...)
 			}
 		}
@@ -343,8 +362,8 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 			configMapsValue, _ := record.Get("configMaps")
 			secretsValue, _ := record.Get("secrets")
 
-			configMaps := c.interfaceSliceToStringSlice(configMapsValue)
-			secrets := c.interfaceSliceToStringSlice(secretsValue)
+			configMaps := c.parseStringSliceFromValue(configMapsValue)
+			secrets := c.parseStringSliceFromValue(secretsValue)
 
 			findings = append(findings, aggregator.Finding{
 				ID:         fmt.Sprintf("deployment-config-rollout-%s", deploymentName),
@@ -378,49 +397,26 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 }
 
 // analyzeAffectedPods creates findings for pods affected by config changes
-func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType string, affectedPods []interface{}, event *domain.UnifiedEvent) []aggregator.Finding {
+func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType string, affectedPods []AffectedPodData, event *domain.UnifiedEvent) []aggregator.Finding {
 	var findings []aggregator.Finding
 	restartedPods := []string{}
 	notReadyPods := []string{}
 	affectedServices := map[string]bool{}
 
-	for _, podData := range affectedPods {
-		if podMap, ok := podData.(map[string]interface{}); ok {
-			// Extract pod properties from the map structure
-			var podName string
-			if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
-				if props, ok := podNode["props"].(map[string]interface{}); ok {
-					if name, ok := props["name"].(string); ok {
-						podName = name
-					}
-				}
-			} else if name, ok := podMap["name"].(string); ok {
-				// Fallback to direct name access
-				podName = name
-			}
+	for _, pod := range affectedPods {
+		// Check if pod restarted after config change
+		if pod.Restart.After(event.Timestamp.Add(-10 * time.Minute)) {
+			restartedPods = append(restartedPods, pod.Name)
+		}
 
-			if podName != "" {
-				// Check if pod restarted after config change
-				if restartTime, ok := podMap["restart"].(time.Time); ok {
-					if restartTime.After(event.Timestamp.Add(-10 * time.Minute)) {
-						restartedPods = append(restartedPods, podName)
-					}
-				}
+		// Check if pod is not ready
+		if !pod.Ready {
+			notReadyPods = append(notReadyPods, pod.Name)
+		}
 
-				// Check if pod is not ready
-				if ready, ok := podMap["ready"].(bool); ok && !ready {
-					notReadyPods = append(notReadyPods, podName)
-				}
-
-				// Track affected services
-				if services, ok := podMap["services"].([]interface{}); ok {
-					for _, svc := range services {
-						if svcName, ok := svc.(string); ok {
-							affectedServices[svcName] = true
-						}
-					}
-				}
-			}
+		// Track affected services
+		for _, svcName := range pod.Services {
+			affectedServices[svcName] = true
 		}
 	}
 
@@ -494,16 +490,12 @@ func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType stri
 }
 
 // createRestartCauseFindings creates findings for pod restarts caused by config changes
-func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, changes []interface{}, event *domain.UnifiedEvent) []aggregator.Finding {
+func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, changes []ConfigChangeInfo, event *domain.UnifiedEvent) []aggregator.Finding {
 	var findings []aggregator.Finding
 	configChanges := []string{}
 
 	for _, change := range changes {
-		if changeMap, ok := change.(map[string]interface{}); ok {
-			configType := changeMap["type"].(string)
-			configName := changeMap["name"].(string)
-			configChanges = append(configChanges, fmt.Sprintf("%s/%s", configType, configName))
-		}
+		configChanges = append(configChanges, fmt.Sprintf("%s/%s", change.Type, change.Name))
 	}
 
 	if len(configChanges) > 0 {
@@ -585,12 +577,6 @@ func (c *ConfigImpactCorrelator) Health(ctx context.Context) error {
 	return c.graphStore.HealthCheck(ctx)
 }
 
-// SetGraphClient implements GraphCorrelator interface
-func (c *ConfigImpactCorrelator) SetGraphClient(client interface{}) {
-	// This method is no longer needed as we use GraphStore interface
-	// The graphStore is injected via constructor
-}
-
 // PreloadGraph implements GraphCorrelator interface
 func (c *ConfigImpactCorrelator) PreloadGraph(ctx context.Context) error {
 	// No preloading needed for now
@@ -625,14 +611,110 @@ func (c *ConfigImpactCorrelator) getEntityName(event *domain.UnifiedEvent) strin
 	return ""
 }
 
-func (c *ConfigImpactCorrelator) interfaceSliceToStringSlice(input interface{}) []string {
-	result := []string{}
-	if slice, ok := input.([]interface{}); ok {
+// parseStringSliceFromValue safely parses a string slice from a query result value
+func (c *ConfigImpactCorrelator) parseStringSliceFromValue(value interface{}) []string {
+	var result []string
+	if slice, ok := value.([]string); ok {
+		return slice
+	}
+	// Fallback for interface{} slices from database
+	if slice, ok := value.([]interface{}); ok {
 		for _, item := range slice {
 			if str, ok := item.(string); ok {
 				result = append(result, str)
 			}
 		}
 	}
+	return result
+}
+
+// parseAffectedPodsFromValue safely parses affected pods from a query result value
+func (c *ConfigImpactCorrelator) parseAffectedPodsFromValue(value interface{}) []AffectedPodData {
+	var result []AffectedPodData
+
+	slice, ok := value.([]interface{})
+	if !ok {
+		return result
+	}
+
+	for _, item := range slice {
+		podMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		podData := AffectedPodData{}
+
+		// Parse pod node
+		if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
+			if props, ok := podNode["properties"].(map[string]interface{}); ok {
+				podData.Pod.Properties = parseNodeProperties(props)
+				podData.Name = podData.Pod.Properties.Name
+			}
+		} else if name, ok := podMap["name"].(string); ok {
+			// Fallback to direct name access
+			podData.Name = name
+		}
+
+		// Parse restart time
+		if restartTime, ok := podMap["restart"].(time.Time); ok {
+			podData.Restart = restartTime
+		}
+
+		// Parse ready status
+		if ready, ok := podMap["ready"].(bool); ok {
+			podData.Ready = ready
+		}
+
+		// Parse phase
+		if phase, ok := podMap["phase"].(string); ok {
+			podData.Phase = phase
+		}
+
+		// Parse services
+		if services, ok := podMap["services"].([]interface{}); ok {
+			for _, svc := range services {
+				if svcName, ok := svc.(string); ok {
+					podData.Services = append(podData.Services, svcName)
+				}
+			}
+		}
+
+		result = append(result, podData)
+	}
+
+	return result
+}
+
+// parseConfigChangesFromValue safely parses config changes from a query result value
+func (c *ConfigImpactCorrelator) parseConfigChangesFromValue(value interface{}) []ConfigChangeInfo {
+	var result []ConfigChangeInfo
+
+	slice, ok := value.([]interface{})
+	if !ok {
+		return result
+	}
+
+	for _, item := range slice {
+		changeMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		change := ConfigChangeInfo{}
+
+		if changeType, ok := changeMap["type"].(string); ok {
+			change.Type = changeType
+		}
+		if name, ok := changeMap["name"].(string); ok {
+			change.Name = name
+		}
+		if modified, ok := changeMap["modified"].(time.Time); ok {
+			change.Modified = modified
+		}
+
+		result = append(result, change)
+	}
+
 	return result
 }

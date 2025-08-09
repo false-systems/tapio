@@ -12,6 +12,28 @@ import (
 	"go.uber.org/zap"
 )
 
+// ReplicaSetData represents structured data for a ReplicaSet and its pods
+type ReplicaSetData struct {
+	ReplicaSet    GraphNode
+	Replicas      int64
+	ReadyReplicas int64
+	Pods          []PodData
+}
+
+// PodData represents structured data for a Pod
+type PodData struct {
+	Pod   GraphNode
+	Name  string
+	Ready bool
+	Phase string
+}
+
+// DaemonSetPodData represents a DaemonSet pod and its node
+type DaemonSetPodData struct {
+	Pod      GraphNode
+	NodeName string
+}
+
 // OwnershipCorrelator analyzes K8s ownership chains to find root causes
 // It tracks: Deployment→ReplicaSet→Pod, StatefulSet→Pod, DaemonSet→Pod chains
 type OwnershipCorrelator struct {
@@ -206,7 +228,9 @@ func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event 
 
 			// Analyze replica sets
 			if replicaSetsValue, found := record.Get("replicaSets"); found {
-				if replicaSets, ok := replicaSetsValue.([]interface{}); ok {
+				// Parse replica sets into typed structure
+				replicaSets := o.parseReplicaSetsFromValue(replicaSetsValue)
+				if len(replicaSets) > 0 {
 					findings = append(findings, o.analyzeReplicaSets(deploymentName, desiredReplicas, replicaSets, event)...)
 				}
 			}
@@ -279,7 +303,8 @@ func (o *OwnershipCorrelator) analyzeReplicaSetIssues(ctx context.Context, event
 
 			// Analyze pods
 			if podsValue, found := record.Get("pods"); found {
-				if pods, ok := podsValue.([]interface{}); ok {
+				pods := o.parsePodsFromValue(podsValue)
+				if len(pods) > 0 {
 					findings = append(findings, o.createReplicaSetFindings(rsName, deploymentName, desired, ready, pods, event)...)
 				}
 			}
@@ -347,20 +372,13 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 			ownerId = deploymentName
 		}
 
-		if rsValue, found := record.Get("rs"); found && rsValue != nil {
-			if rsNode, ok := rsValue.(map[string]interface{}); ok {
-				if props, ok := rsNode["properties"].(map[string]interface{}); ok {
-					if rsName, ok := props["name"].(string); ok {
-						ownerChain = append(ownerChain, fmt.Sprintf("ReplicaSet/%s", rsName))
-						if ownerType == "" {
-							ownerType = "ReplicaSet"
-							ownerId = rsName
-						}
-					} else {
-						o.logger.Warn("Failed to extract ReplicaSet name for ownership chain",
-							zap.String("pod", podName),
-							zap.Any("props", props))
-					}
+		if rsNode, err := record.GetNode("rs"); err == nil && rsNode != nil {
+			rsName := rsNode.Properties.Name
+			if rsName != "" {
+				ownerChain = append(ownerChain, fmt.Sprintf("ReplicaSet/%s", rsName))
+				if ownerType == "" {
+					ownerType = "ReplicaSet"
+					ownerId = rsName
 				}
 			}
 		}
@@ -374,19 +392,12 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 		}
 
 		// Check DaemonSet ownership
-		if dsValue, found := record.Get("ds"); found && dsValue != nil {
-			if dsNode, ok := dsValue.(map[string]interface{}); ok {
-				if props, ok := dsNode["properties"].(map[string]interface{}); ok {
-					if dsName, ok := props["name"].(string); ok {
-						ownerChain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
-						ownerType = "DaemonSet"
-						ownerId = dsName
-					} else {
-						o.logger.Warn("Failed to extract DaemonSet name for ownership chain",
-							zap.String("pod", podName),
-							zap.Any("props", props))
-					}
-				}
+		if dsNode, err := record.GetNode("ds"); err == nil && dsNode != nil {
+			dsName := dsNode.Properties.Name
+			if dsName != "" {
+				ownerChain = []string{fmt.Sprintf("DaemonSet/%s", dsName)}
+				ownerType = "DaemonSet"
+				ownerId = dsName
 			}
 		}
 
@@ -473,7 +484,8 @@ func (o *OwnershipCorrelator) analyzeStatefulSetChain(ctx context.Context, event
 
 		if desired > 0 && ready < desired {
 			if podsValue, found := record.Get("pods"); found {
-				if pods, ok := podsValue.([]interface{}); ok {
+				pods := o.parsePodsFromValue(podsValue)
+				if len(pods) > 0 {
 					// Check pod ordering issues (StatefulSets care about order)
 					findings = append(findings, o.analyzeStatefulSetPods(stsName, desired, ready, pods, event)...)
 				}
@@ -569,74 +581,43 @@ func (o *OwnershipCorrelator) analyzeDaemonSetIssues(ctx context.Context, event 
 
 // Helper methods
 
-func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredReplicas int64, replicaSets []interface{}, event *domain.UnifiedEvent) []aggregator.Finding {
+func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredReplicas int64, replicaSets []ReplicaSetData, event *domain.UnifiedEvent) []aggregator.Finding {
 	var findings []aggregator.Finding
 	var totalPods int64
 	var readyPods int64
 	var failedPods []string
 
 	for _, rsData := range replicaSets {
-		if rsMap, ok := rsData.(map[string]interface{}); ok {
-			var rsName string
-			if rsNode, ok := rsMap["replicaSet"].(map[string]interface{}); ok {
-				if props, ok := rsNode["properties"].(map[string]interface{}); ok {
-					if name, ok := props["name"].(string); ok {
-						rsName = name
-					} else {
-						o.logger.Warn("Failed to extract ReplicaSet name from properties",
-							zap.Any("props", props))
-					}
-				}
+		rsName := rsData.ReplicaSet.Properties.Name
+		totalPods += int64(len(rsData.Pods))
 
-				// Check if this is the active ReplicaSet
-				if pods, ok := rsMap["pods"].([]interface{}); ok {
-					for _, podData := range pods {
-						if podMap, ok := podData.(map[string]interface{}); ok {
-							var podName string
-							if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
-								if props, ok := podNode["properties"].(map[string]interface{}); ok {
-									totalPods++
-									if name, ok := props["name"].(string); ok {
-										podName = name
-									} else {
-										o.logger.Warn("Failed to extract pod name from properties",
-											zap.Any("props", props))
-									}
-								}
-							}
-
-							if ready, ok := podMap["ready"].(bool); ok && ready {
-								readyPods++
-							} else {
-								failedPods = append(failedPods, podName)
-							}
-						}
-					}
-				}
-
-				// Create finding if ReplicaSet has issues
-				if rsReplicas, ok := rsMap["replicas"].(int64); ok {
-					if rsReady, ok := rsMap["ready"].(int64); ok && rsReady < rsReplicas {
-						findings = append(findings, aggregator.Finding{
-							ID:         fmt.Sprintf("replicaset-degraded-%s", rsName),
-							Type:       "replicaset_not_ready",
-							Severity:   aggregator.SeverityHigh,
-							Confidence: MediumHighConfidence,
-							Message:    fmt.Sprintf("ReplicaSet %s has %d/%d ready pods", rsName, rsReady, rsReplicas),
-							Evidence: aggregator.Evidence{
-								Events: []domain.UnifiedEvent{*event},
-							},
-							Impact: aggregator.Impact{
-								Scope:       "replicaset",
-								Resources:   []string{deploymentName, rsName},
-								UserImpact:  "Deployment not at full capacity",
-								Degradation: fmt.Sprintf("%d%% capacity", (rsReady*100)/rsReplicas),
-							},
-							Timestamp: time.Now(),
-						})
-					}
-				}
+		for _, pod := range rsData.Pods {
+			if pod.Ready {
+				readyPods++
+			} else {
+				failedPods = append(failedPods, pod.Name)
 			}
+		}
+
+		// Create finding if ReplicaSet has issues
+		if rsData.ReadyReplicas < rsData.Replicas {
+			findings = append(findings, aggregator.Finding{
+				ID:         fmt.Sprintf("replicaset-degraded-%s", rsName),
+				Type:       "replicaset_not_ready",
+				Severity:   aggregator.SeverityHigh,
+				Confidence: MediumHighConfidence,
+				Message:    fmt.Sprintf("ReplicaSet %s has %d/%d ready pods", rsName, rsData.ReadyReplicas, rsData.Replicas),
+				Evidence: aggregator.Evidence{
+					Events: []domain.UnifiedEvent{*event},
+				},
+				Impact: aggregator.Impact{
+					Scope:       "replicaset",
+					Resources:   []string{deploymentName, rsName},
+					UserImpact:  "Deployment not at full capacity",
+					Degradation: fmt.Sprintf("%d%% capacity", (rsData.ReadyReplicas*100)/rsData.Replicas),
+				},
+				Timestamp: time.Now(),
+			})
 		}
 	}
 
@@ -664,27 +645,13 @@ func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredR
 	return findings
 }
 
-func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName string, desired, ready int64, pods []interface{}, event *domain.UnifiedEvent) []aggregator.Finding {
+func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName string, desired, ready int64, pods []PodData, event *domain.UnifiedEvent) []aggregator.Finding {
 	var findings []aggregator.Finding
 	notReadyPods := []string{}
 
-	for _, podInterface := range pods {
-		if pod, ok := podInterface.(map[string]interface{}); ok {
-			var podName string
-			if props, ok := pod["properties"].(map[string]interface{}); ok {
-				if name, ok := props["name"].(string); ok {
-					podName = name
-				} else {
-					o.logger.Warn("Failed to extract pod name in ReplicaSet findings",
-						zap.String("replicaset", rsName),
-						zap.Any("props", props))
-				}
-				if podReady, exists := props["ready"]; exists {
-					if ready, ok := podReady.(bool); ok && !ready {
-						notReadyPods = append(notReadyPods, podName)
-					}
-				}
-			}
+	for _, pod := range pods {
+		if !pod.Ready {
+			notReadyPods = append(notReadyPods, pod.Name)
 		}
 	}
 
@@ -717,7 +684,7 @@ func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName st
 	return findings
 }
 
-func (o *OwnershipCorrelator) analyzeStatefulSetPods(stsName string, desired, ready int64, pods []interface{}, event *domain.UnifiedEvent) []aggregator.Finding {
+func (o *OwnershipCorrelator) analyzeStatefulSetPods(stsName string, desired, ready int64, pods []PodData, event *domain.UnifiedEvent) []aggregator.Finding {
 	var findings []aggregator.Finding
 	var brokenOrdinal int64 = -1
 
@@ -727,16 +694,12 @@ func (o *OwnershipCorrelator) analyzeStatefulSetPods(stsName string, desired, re
 		podName := fmt.Sprintf("%s-%d", stsName, i)
 		found := false
 
-		for _, podInterface := range pods {
-			if pod, ok := podInterface.(map[string]interface{}); ok {
-				if props, ok := pod["properties"].(map[string]interface{}); ok {
-					if name, exists := props["name"]; exists && name == podName {
-						found = true
-						if podReady, exists := props["ready"]; exists && !podReady.(bool) {
-							brokenOrdinal = i
-							break
-						}
-					}
+		for _, pod := range pods {
+			if pod.Name == podName {
+				found = true
+				if !pod.Ready {
+					brokenOrdinal = i
+					break
 				}
 			}
 		}
@@ -931,4 +894,88 @@ func (o *OwnershipCorrelator) getEntityName(event *domain.UnifiedEvent) string {
 		return event.Entity.Name
 	}
 	return ""
+}
+
+// parseReplicaSetsFromValue safely parses replica sets from a query result value
+func (o *OwnershipCorrelator) parseReplicaSetsFromValue(value interface{}) []ReplicaSetData {
+	var result []ReplicaSetData
+
+	// Value should be a slice
+	slice, ok := value.([]interface{})
+	if !ok {
+		o.logger.Warn("Failed to parse replica sets: not a slice")
+		return result
+	}
+
+	for _, item := range slice {
+		rsMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		rsData := ReplicaSetData{}
+
+		// Parse replicaSet node
+		if rsNode, ok := rsMap["replicaSet"].(map[string]interface{}); ok {
+			if props, ok := rsNode["properties"].(map[string]interface{}); ok {
+				rsData.ReplicaSet.Properties = parseNodeProperties(props)
+			}
+		}
+
+		// Parse replicas and readyReplicas
+		if replicas, ok := rsMap["replicas"].(int64); ok {
+			rsData.Replicas = replicas
+		}
+		if ready, ok := rsMap["ready"].(int64); ok {
+			rsData.ReadyReplicas = ready
+		}
+
+		// Parse pods
+		if pods, ok := rsMap["pods"].([]interface{}); ok {
+			rsData.Pods = o.parsePodsFromValue(pods)
+		}
+
+		result = append(result, rsData)
+	}
+
+	return result
+}
+
+// parsePodsFromValue safely parses pods from a query result value
+func (o *OwnershipCorrelator) parsePodsFromValue(value interface{}) []PodData {
+	var result []PodData
+
+	slice, ok := value.([]interface{})
+	if !ok {
+		return result
+	}
+
+	for _, item := range slice {
+		podMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		podData := PodData{}
+
+		// Parse pod node
+		if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
+			if props, ok := podNode["properties"].(map[string]interface{}); ok {
+				podData.Pod.Properties = parseNodeProperties(props)
+				podData.Name = podData.Pod.Properties.Name
+			}
+		}
+
+		// Parse ready and phase
+		if ready, ok := podMap["ready"].(bool); ok {
+			podData.Ready = ready
+		}
+		if phase, ok := podMap["phase"].(string); ok {
+			podData.Phase = phase
+		}
+
+		result = append(result, podData)
+	}
+
+	return result
 }

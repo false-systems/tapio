@@ -46,6 +46,8 @@ const (
 	MaxPatternsTracked     = 1000
 	MaxTemporalItems       = 10000
 	TestTemporalItems      = 100
+	TestCleanupInterval    = 1 * time.Minute
+	TestRetention          = 5 * time.Minute
 
 	// Channel buffer sizes
 	DefaultChannelBuffer   = 256
@@ -109,7 +111,6 @@ const (
 	BoostMultiplier = 0.1
 	BaseWeightRatio = 0.7
 	TimeWeightRatio = 0.3
-
 	// Degradation percentages for calculations
 	FullDegradation      = 100 // 100% - complete failure
 	PercentageMultiplier = 100 // For percentage calculations

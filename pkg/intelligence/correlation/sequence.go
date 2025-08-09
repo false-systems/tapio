@@ -26,23 +26,7 @@ type SequenceCorrelator struct {
 	config SequenceConfig
 }
 
-// SequenceConfig configures the sequence detector
-type SequenceConfig struct {
-	MaxSequenceAge     time.Duration
-	MaxSequenceGap     time.Duration
-	MinSequenceLength  int
-	MaxActiveSequences int
-}
-
-// DefaultSequenceConfig returns sensible defaults
-func DefaultSequenceConfig() SequenceConfig {
-	return SequenceConfig{
-		MaxSequenceAge:     10 * time.Minute,
-		MaxSequenceGap:     2 * time.Minute,
-		MinSequenceLength:  2,
-		MaxActiveSequences: MaxActiveSequences,
-	}
-}
+// SequenceConfig defined in config.go - removing duplicate
 
 // EventSequence represents a sequence of related events
 type EventSequence struct {

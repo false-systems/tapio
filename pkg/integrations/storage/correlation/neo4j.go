@@ -129,12 +129,21 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 		})
 	`
 
+	// Marshal details struct to JSON
+	detailsJSON, detailsErr := json.Marshal(result.Details)
+	if detailsErr != nil {
+		s.logger.Warn("Failed to marshal correlation details",
+			zap.String("correlation_id", result.ID), zap.Error(detailsErr))
+		// Use empty JSON object as fallback
+		detailsJSON = []byte("{}")
+	}
+
 	params := map[string]interface{}{
 		"id":         result.ID,
 		"type":       result.Type,
 		"confidence": result.Confidence,
 		"summary":    result.Summary,
-		"details":    result.Details,
+		"details":    string(detailsJSON),
 		"evidence":   string(evidenceJSON),
 		"startTime":  result.StartTime.Format(time.RFC3339),
 		"endTime":    result.EndTime.Format(time.RFC3339),
@@ -434,7 +443,17 @@ func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlat
 			Type:       corrType,
 			Confidence: confidence,
 			Summary:    summary,
-			Details:    details,
+		}
+
+		// Parse details from JSON string
+		if details != "" {
+			var detailsStruct correlation.CorrelationDetails
+			if err := json.Unmarshal([]byte(details), &detailsStruct); err != nil {
+				s.logger.Warn("Failed to unmarshal correlation details",
+					zap.String("correlation_id", corr.ID), zap.Error(err))
+			} else {
+				corr.Details = detailsStruct
+			}
 		}
 
 		// Parse optional TraceID

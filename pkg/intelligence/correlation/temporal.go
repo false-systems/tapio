@@ -25,23 +25,7 @@ type TemporalCorrelator struct {
 	config TemporalConfig
 }
 
-// TemporalConfig configures the temporal correlator
-type TemporalConfig struct {
-	WindowSize         time.Duration
-	MinOccurrences     int
-	PatternTimeout     time.Duration
-	MaxPatternsTracked int
-}
-
-// DefaultTemporalConfig returns sensible defaults
-func DefaultTemporalConfig() TemporalConfig {
-	return TemporalConfig{
-		WindowSize:         5 * time.Minute,
-		MinOccurrences:     2,
-		PatternTimeout:     24 * time.Hour,
-		MaxPatternsTracked: MaxPatternsTracked,
-	}
-}
+// TemporalConfig defined in config.go - removing duplicate
 
 // TemporalPattern represents a time-based pattern
 type TemporalPattern struct {

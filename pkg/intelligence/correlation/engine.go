@@ -38,42 +38,7 @@ type Engine struct {
 	correlationsFound int64
 }
 
-// EngineConfig configures the correlation engine
-type EngineConfig struct {
-	// Processing
-	EventBufferSize   int
-	ResultBufferSize  int
-	WorkerCount       int
-	ProcessingTimeout time.Duration
-
-	// Features
-	EnableK8s         bool
-	EnableTemporal    bool
-	EnableSequence    bool
-	EnablePerformance bool
-	EnableServiceMap  bool
-
-	// Storage
-	StorageCleanupInterval time.Duration
-	StorageRetention       time.Duration
-}
-
-// DefaultEngineConfig returns production-ready defaults
-func DefaultEngineConfig() EngineConfig {
-	return EngineConfig{
-		EventBufferSize:        DefaultEventBufferSize,
-		ResultBufferSize:       DefaultResultBufferSize,
-		WorkerCount:            4,
-		ProcessingTimeout:      TestProcessingTimeout,
-		EnableK8s:              true,
-		EnableTemporal:         true,
-		EnableSequence:         true,
-		EnablePerformance:      true,
-		EnableServiceMap:       true,
-		StorageCleanupInterval: ServiceMetricsWindow,
-		StorageRetention:       MaxEventAge,
-	}
-}
+// EngineConfig defined in config.go - removing duplicate
 
 // NewEngine creates a new correlation engine
 func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClient, storage Storage) (*Engine, error) {
@@ -91,44 +56,39 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 	}
 
 	// Initialize correlators based on config
-	if config.EnableK8s && k8sClient != nil {
-		k8sCorrelator := NewK8sCorrelator(logger, k8sClient)
-		engine.correlators = append(engine.correlators, k8sCorrelator)
+	for _, name := range config.EnabledCorrelators {
+		switch name {
+		case "k8s":
+			if k8sClient != nil {
+				k8sCorrelator := NewK8sCorrelator(logger, k8sClient)
+				engine.correlators = append(engine.correlators, k8sCorrelator)
 
-		// Start K8s correlator
-		if err := k8sCorrelator.Start(ctx); err != nil {
-			cancel()
-			return nil, fmt.Errorf("failed to start K8s correlator: %w", err)
+				// Start K8s correlator
+				if err := k8sCorrelator.Start(ctx); err != nil {
+					cancel()
+					return nil, fmt.Errorf("failed to start K8s correlator: %w", err)
+				}
+			}
+		case "temporal":
+			temporalCorrelator := NewTemporalCorrelator(logger, *TestTemporalConfig())
+			engine.correlators = append(engine.correlators, temporalCorrelator)
+		case "sequence":
+			sequenceCorrelator := NewSequenceCorrelator(logger, *TestSequenceConfig())
+			engine.correlators = append(engine.correlators, sequenceCorrelator)
+		case "performance":
+			performanceCorrelator := NewPerformanceCorrelator(logger)
+			engine.correlators = append(engine.correlators, performanceCorrelator)
+		case "servicemap":
+			serviceMapCorrelator := NewServiceMapCorrelator(logger)
+			engine.correlators = append(engine.correlators, serviceMapCorrelator)
+		default:
+			logger.Warn("Unknown correlator in config", zap.String("name", name))
 		}
-	}
-
-	if config.EnableTemporal {
-		temporalCorrelator := NewTemporalCorrelator(logger, DefaultTemporalConfig())
-		engine.correlators = append(engine.correlators, temporalCorrelator)
-	}
-
-	if config.EnableSequence {
-		sequenceCorrelator := NewSequenceCorrelator(logger, DefaultSequenceConfig())
-		engine.correlators = append(engine.correlators, sequenceCorrelator)
-	}
-
-	if config.EnablePerformance {
-		performanceCorrelator := NewPerformanceCorrelator(logger)
-		engine.correlators = append(engine.correlators, performanceCorrelator)
-	}
-
-	if config.EnableServiceMap {
-		serviceMapCorrelator := NewServiceMapCorrelator(logger)
-		engine.correlators = append(engine.correlators, serviceMapCorrelator)
 	}
 
 	logger.Info("Correlation engine created",
 		zap.Int("correlators", len(engine.correlators)),
-		zap.Bool("k8s", config.EnableK8s),
-		zap.Bool("temporal", config.EnableTemporal),
-		zap.Bool("sequence", config.EnableSequence),
-		zap.Bool("performance", config.EnablePerformance),
-		zap.Bool("servicemap", config.EnableServiceMap),
+		zap.Strings("enabled", config.EnabledCorrelators),
 	)
 
 	return engine, nil

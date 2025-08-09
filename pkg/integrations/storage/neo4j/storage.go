@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -98,18 +99,24 @@ func (s *Storage) Store(ctx context.Context, result *correlation.CorrelationResu
 			})
 		`
 
+		// Marshal typed structs to JSON for storage
+		detailsJSON, err := json.Marshal(result.Details)
+		if err != nil {
+			return fmt.Errorf("failed to marshal correlation details: %w", err)
+		}
+
 		params := map[string]interface{}{
 			"id":         result.ID,
 			"type":       result.Type,
 			"confidence": result.Confidence,
 			"traceId":    result.TraceID,
 			"summary":    result.Summary,
-			"details":    result.Details,
+			"details":    string(detailsJSON),
 			"startTime":  result.StartTime.Unix(),
 			"endTime":    result.EndTime.Unix(),
 		}
 
-		_, err := tx.Run(ctx, query, params)
+		_, err = tx.Run(ctx, query, params)
 		if err != nil {
 			return fmt.Errorf("failed to create correlation node: %w", err)
 		}
@@ -155,8 +162,13 @@ func (s *Storage) Store(ctx context.Context, result *correlation.CorrelationResu
 				return fmt.Errorf("failed to create root cause: %w", err)
 			}
 
-			// Store evidence
-			if len(result.RootCause.Evidence) > 0 {
+			// Store evidence - check if Evidence has data
+			if result.RootCause.Evidence.EventIDs != nil || result.RootCause.Evidence.ResourceIDs != nil {
+				evidenceJSON, err := json.Marshal(result.RootCause.Evidence)
+				if err != nil {
+					return fmt.Errorf("failed to marshal root cause evidence: %w", err)
+				}
+
 				evidenceQuery := `
 					MATCH (c:Correlation {id: $correlationId})
 					MATCH (rc:RootCause)-[:ROOT_CAUSE_OF]->(c)
@@ -165,7 +177,7 @@ func (s *Storage) Store(ctx context.Context, result *correlation.CorrelationResu
 
 				_, err = tx.Run(ctx, evidenceQuery, map[string]interface{}{
 					"correlationId": result.ID,
-					"evidence":      result.RootCause.Evidence,
+					"evidence":      string(evidenceJSON),
 				})
 				if err != nil {
 					return fmt.Errorf("failed to store evidence: %w", err)
@@ -175,12 +187,21 @@ func (s *Storage) Store(ctx context.Context, result *correlation.CorrelationResu
 
 		// Store impact if present
 		if result.Impact != nil {
+			// Marshal services as JSON since it's a complex type
+			servicesJSON, servicesErr := json.Marshal(result.Impact.Services)
+			if servicesErr != nil {
+				return fmt.Errorf("failed to marshal impact services: %w", servicesErr)
+			}
+
 			impactQuery := `
 				MATCH (c:Correlation {id: $correlationId})
 				CREATE (i:Impact {
 					severity: $severity,
 					resources: $resources,
-					services: $services
+					services: $services,
+					scope: $scope,
+					userImpact: $userImpact,
+					degradation: $degradation
 				})
 				CREATE (i)-[:IMPACT_OF]->(c)
 			`
@@ -189,15 +210,23 @@ func (s *Storage) Store(ctx context.Context, result *correlation.CorrelationResu
 				"correlationId": result.ID,
 				"severity":      string(result.Impact.Severity),
 				"resources":     result.Impact.Resources,
-				"services":      result.Impact.Services,
+				"services":      string(servicesJSON),
+				"scope":         result.Impact.Scope,
+				"userImpact":    result.Impact.UserImpact,
+				"degradation":   result.Impact.Degradation,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create impact: %w", err)
 			}
 		}
 
-		// Store general evidence
-		if len(result.Evidence) > 0 {
+		// Store general evidence - check if Evidence has data
+		if result.Evidence.EventIDs != nil || result.Evidence.ResourceIDs != nil {
+			evidenceJSON, err := json.Marshal(result.Evidence)
+			if err != nil {
+				return fmt.Errorf("failed to marshal correlation evidence: %w", err)
+			}
+
 			evidenceQuery := `
 				MATCH (c:Correlation {id: $correlationId})
 				SET c.evidence = $evidence
@@ -205,7 +234,7 @@ func (s *Storage) Store(ctx context.Context, result *correlation.CorrelationResu
 
 			_, err = tx.Run(ctx, evidenceQuery, map[string]interface{}{
 				"correlationId": result.ID,
-				"evidence":      result.Evidence,
+				"evidence":      string(evidenceJSON),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to store correlation evidence: %w", err)
@@ -314,7 +343,18 @@ func (s *Storage) recordsToResults(records []map[string]interface{}) []*correlat
 				Confidence: getFloat64(cNode.Props, "confidence"),
 				TraceID:    getString(cNode.Props, "traceId"),
 				Summary:    getString(cNode.Props, "summary"),
-				Details:    getString(cNode.Props, "details"),
+			}
+
+			// Parse details from JSON
+			if detailsStr := getString(cNode.Props, "details"); detailsStr != "" {
+				var details correlation.CorrelationDetails
+				if err := json.Unmarshal([]byte(detailsStr), &details); err != nil {
+					s.logger.Warn("Failed to unmarshal correlation details",
+						zap.String("correlation_id", result.ID),
+						zap.Error(err))
+				} else {
+					result.Details = details
+				}
 			}
 
 			// Parse timestamps
@@ -325,9 +365,16 @@ func (s *Storage) recordsToResults(records []map[string]interface{}) []*correlat
 				result.EndTime = time.Unix(endTime, 0)
 			}
 
-			// Parse evidence
-			if evidence, ok := cNode.Props["evidence"].([]interface{}); ok {
-				result.Evidence = interfaceSliceToStringSlice(evidence)
+			// Parse evidence from JSON
+			if evidenceStr, ok := cNode.Props["evidence"].(string); ok && evidenceStr != "" {
+				var evidence correlation.EvidenceData
+				if err := json.Unmarshal([]byte(evidenceStr), &evidence); err != nil {
+					s.logger.Warn("Failed to unmarshal correlation evidence",
+						zap.String("correlation_id", result.ID),
+						zap.Error(err))
+				} else {
+					result.Evidence = evidence
+				}
 			}
 
 			// Parse event IDs
@@ -342,17 +389,39 @@ func (s *Storage) recordsToResults(records []map[string]interface{}) []*correlat
 					Confidence:  getFloat64(rcNode.Props, "confidence"),
 					Description: getString(rcNode.Props, "description"),
 				}
-				if evidence, ok := rcNode.Props["evidence"].([]interface{}); ok {
-					result.RootCause.Evidence = interfaceSliceToStringSlice(evidence)
+				// Parse root cause evidence from JSON
+				if evidenceStr, ok := rcNode.Props["evidence"].(string); ok && evidenceStr != "" {
+					var evidence correlation.EvidenceData
+					if err := json.Unmarshal([]byte(evidenceStr), &evidence); err != nil {
+						s.logger.Warn("Failed to unmarshal root cause evidence",
+							zap.String("correlation_id", result.ID),
+							zap.Error(err))
+					} else {
+						result.RootCause.Evidence = evidence
+					}
 				}
 			}
 
 			// Parse impact
 			if iNode, ok := record["i"].(neo4j.Node); ok {
 				result.Impact = &correlation.Impact{
-					Severity:  domain.EventSeverity(getString(iNode.Props, "severity")),
-					Resources: getStringSlice(iNode.Props, "resources"),
-					Services:  getStringSlice(iNode.Props, "services"),
+					Severity:    domain.EventSeverity(getString(iNode.Props, "severity")),
+					Resources:   getStringSlice(iNode.Props, "resources"),
+					Scope:       getString(iNode.Props, "scope"),
+					UserImpact:  getString(iNode.Props, "userImpact"),
+					Degradation: getString(iNode.Props, "degradation"),
+				}
+
+				// Parse services from JSON
+				if servicesStr := getString(iNode.Props, "services"); servicesStr != "" {
+					var services []correlation.ServiceReference
+					if err := json.Unmarshal([]byte(servicesStr), &services); err != nil {
+						s.logger.Warn("Failed to unmarshal impact services",
+							zap.String("correlation_id", result.ID),
+							zap.Error(err))
+					} else {
+						result.Impact.Services = services
+					}
 				}
 			}
 
