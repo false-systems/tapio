@@ -452,7 +452,10 @@ func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlat
 
 		// Parse evidence
 		if evidenceStr, ok := props["evidence"].(string); ok {
-			json.Unmarshal([]byte(evidenceStr), &corr.Evidence)
+			if err := json.Unmarshal([]byte(evidenceStr), &corr.Evidence); err != nil {
+				s.logger.Warn("Failed to unmarshal correlation evidence",
+					zap.String("correlation_id", corr.ID), zap.Error(err))
+			}
 		}
 
 		// Parse root cause
@@ -472,13 +475,18 @@ func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlat
 						rootCause.Confidence = confidence
 					}
 
+
+			if evidenceStr, ok := rcProps["evidence"].(string); ok {
+				if err := json.Unmarshal([]byte(evidenceStr), &rootCause.Evidence); err != nil {
+					s.logger.Warn("Failed to unmarshal root cause evidence",
+						zap.String("correlation_id", corr.ID),
+						zap.String("event_id", rootCause.EventID), zap.Error(err))
+				}
+			}
 					if description, ok := rcProps["description"].(string); ok {
 						rootCause.Description = description
 					}
 
-					if evidenceStr, ok := rcProps["evidence"].(string); ok {
-						json.Unmarshal([]byte(evidenceStr), &rootCause.Evidence)
-					}
 
 					corr.RootCause = rootCause
 				}
