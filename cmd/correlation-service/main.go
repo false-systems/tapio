@@ -21,8 +21,8 @@ import (
 	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/integrations/nats"
 	storageadapters "github.com/yairfalse/tapio/pkg/integrations/storage/correlation"
-	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	"go.opentelemetry.io/otel"
 )
 
 var (

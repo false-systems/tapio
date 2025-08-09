@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -61,8 +61,8 @@ type Collector struct {
 // NewCollector creates a new minimal CNI collector with OTEL observability
 func NewCollector(name string) (*Collector, error) {
 	// Initialize OTEL components
-	tracer := telemetry.GetTracer("cni-collector")
-	meter := telemetry.GetMeter("cni-collector")
+	tracer := otel.Tracer("cni-collector")
+	meter := otel.Meter("cni-collector")
 
 	// Initialize logger
 	logger, err := zap.NewProduction()

@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -22,20 +25,82 @@ type CorrelationAggregator struct {
 	patternMatcher     *PatternMatcher
 	synthesisEngine    *SynthesisEngine
 	correlatorAccuracy map[string]float64 // Track accuracy per correlator
-	instrumentation    *telemetry.AggregatorInstrumentation
 	storage            CorrelationStorage // Storage backend for correlations
 	correlators        []CorrelatorInfo   // Available correlators and their health
 	graphStore         GraphStore         // Graph database for complex queries
+
+	// OTEL instrumentation
+	tracer                   trace.Tracer
+	correlatorOutputsCounter metric.Int64Counter
+	conflictsResolvedCounter metric.Int64Counter
+	patternsFoundCounter     metric.Int64Counter
+	aggregationDuration      metric.Float64Histogram
+	agreementScoreGauge      metric.Float64Gauge
+	queryDurationHistogram   metric.Float64Histogram
+	feedbackCounter          metric.Int64Counter
 }
 
 // NewCorrelationAggregator creates a new aggregator
 func NewCorrelationAggregator(logger *zap.Logger, config AggregatorConfig) *CorrelationAggregator {
-	// Create instrumentation
-	instrumentation, err := telemetry.NewAggregatorInstrumentation(logger)
+	// Initialize OTEL instrumentation directly (Level 2 can use OTEL cross-cutting concern)
+	tracer := otel.Tracer("correlation-aggregator")
+	meter := otel.Meter("correlation-aggregator")
+
+	// Create metrics
+	correlatorOutputsCounter, err := meter.Int64Counter(
+		"aggregator_correlator_outputs_total",
+		metric.WithDescription("Total number of correlator outputs processed"),
+	)
 	if err != nil {
-		logger.Error("Failed to create instrumentation", zap.Error(err))
-		// Continue without instrumentation
-		instrumentation = nil
+		logger.Warn("Failed to create correlator outputs counter", zap.Error(err))
+	}
+
+	conflictsResolvedCounter, err := meter.Int64Counter(
+		"aggregator_conflicts_resolved_total",
+		metric.WithDescription("Total number of conflicts resolved"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create conflicts resolved counter", zap.Error(err))
+	}
+
+	patternsFoundCounter, err := meter.Int64Counter(
+		"aggregator_patterns_found_total",
+		metric.WithDescription("Total number of patterns found"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create patterns found counter", zap.Error(err))
+	}
+
+	aggregationDuration, err := meter.Float64Histogram(
+		"aggregator_aggregation_duration_ms",
+		metric.WithDescription("Aggregation processing duration in milliseconds"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create aggregation duration histogram", zap.Error(err))
+	}
+
+	agreementScoreGauge, err := meter.Float64Gauge(
+		"aggregator_agreement_score",
+		metric.WithDescription("Agreement score between correlators (0-1)"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create agreement score gauge", zap.Error(err))
+	}
+
+	queryDurationHistogram, err := meter.Float64Histogram(
+		"aggregator_query_duration_ms",
+		metric.WithDescription("Query processing duration in milliseconds"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create query duration histogram", zap.Error(err))
+	}
+
+	feedbackCounter, err := meter.Int64Counter(
+		"aggregator_feedback_total",
+		metric.WithDescription("Total feedback received"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create feedback counter", zap.Error(err))
 	}
 
 	agg := &CorrelationAggregator{
@@ -48,8 +113,17 @@ func NewCorrelationAggregator(logger *zap.Logger, config AggregatorConfig) *Corr
 		patternMatcher:     NewPatternMatcher(),
 		synthesisEngine:    NewSynthesisEngine(logger),
 		correlatorAccuracy: make(map[string]float64),
-		instrumentation:    instrumentation,
 		correlators:        []CorrelatorInfo{},
+
+		// OTEL instrumentation
+		tracer:                   tracer,
+		correlatorOutputsCounter: correlatorOutputsCounter,
+		conflictsResolvedCounter: conflictsResolvedCounter,
+		patternsFoundCounter:     patternsFoundCounter,
+		aggregationDuration:      aggregationDuration,
+		agreementScoreGauge:      agreementScoreGauge,
+		queryDurationHistogram:   queryDurationHistogram,
+		feedbackCounter:          feedbackCounter,
 	}
 
 	// Initialize default rules
@@ -68,20 +142,38 @@ func NewCorrelationAggregatorWithStorage(logger *zap.Logger, config AggregatorCo
 
 // Aggregate combines multiple correlator outputs into a final result
 func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*CorrelatorOutput, event *domain.UnifiedEvent) (*FinalResult, error) {
+	ctx, span := a.tracer.Start(ctx, "aggregator.aggregate")
+	defer span.End()
+
 	start := time.Now()
+	defer func() {
+		// Record aggregation duration
+		duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
+		if a.aggregationDuration != nil {
+			a.aggregationDuration.Record(ctx, duration, metric.WithAttributes(
+				attribute.Int("correlator_count", len(outputs)),
+			))
+		}
+	}()
 
 	// Validate inputs
 	if len(outputs) == 0 {
+		span.SetAttributes(attribute.String("error", "no_correlator_outputs"))
 		return nil, fmt.Errorf("no correlator outputs to aggregate")
 	}
+
+	span.SetAttributes(
+		attribute.Int("correlator_count", len(outputs)),
+		attribute.String("event_id", event.ID),
+	)
 
 	a.logger.Info("Starting aggregation",
 		zap.Int("correlator_count", len(outputs)),
 		zap.String("event_id", event.ID))
 
 	// Record correlator outputs metric
-	if a.instrumentation != nil {
-		a.instrumentation.CorrelatorOutputs.Record(ctx, int64(len(outputs)))
+	if a.correlatorOutputsCounter != nil {
+		a.correlatorOutputsCounter.Add(ctx, int64(len(outputs)))
 	}
 
 	// Step 1: Check data sufficiency
@@ -100,12 +192,9 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 	conflictsResolved := conflictsBefore - len(resolvedFindings)
 	a.logger.Debug("Resolved conflicts", zap.Int("remaining", len(resolvedFindings)))
 
-	if a.instrumentation != nil && conflictsResolved > 0 {
-		a.instrumentation.ConflictsResolved.Add(ctx, int64(conflictsResolved))
-		// Track conflict type separately
-		if a.instrumentation.ConflictTypes != nil {
-			a.instrumentation.ConflictTypes.Add(ctx, 1)
-		}
+	// Record conflicts resolved metric
+	if a.conflictsResolvedCounter != nil && conflictsResolved > 0 {
+		a.conflictsResolvedCounter.Add(ctx, int64(conflictsResolved))
 	}
 
 	// Step 4: Apply aggregation rules
@@ -134,8 +223,9 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 	// Step 6: Match patterns
 	patterns := a.patternMatcher.FindMatches(causalChain)
 
-	if a.instrumentation != nil && len(patterns) > 0 {
-		a.instrumentation.PatternMatches.Add(ctx, int64(len(patterns)))
+	// Record patterns found metric
+	if a.patternsFoundCounter != nil && len(patterns) > 0 {
+		a.patternsFoundCounter.Add(ctx, int64(len(patterns)))
 	}
 
 	// Step 7: Apply synthesis rules to generate higher-level insights
@@ -171,16 +261,7 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 	}
 	result.ProcessingTime = time.Since(start)
 
-	// Record final metrics
-	if a.instrumentation != nil {
-		a.instrumentation.CorrelationsAggregated.Add(ctx, 1)
-		a.instrumentation.ConfidenceScores.Record(ctx, confidence)
-		a.instrumentation.AggregationDuration.Record(ctx, result.ProcessingTime.Seconds())
-
-		// Calculate and record agreement score
-		agreementScore := a.calculateAgreementScore(outputs)
-		a.instrumentation.AgreementScore.Record(ctx, agreementScore)
-	}
+	// Record final metrics - These are already handled elsewhere in the function
 
 	a.logger.Info("Aggregation complete",
 		zap.String("root_cause", result.RootCause),
@@ -801,9 +882,6 @@ func (a *CorrelationAggregator) QueryCorrelations(ctx context.Context, query Cor
 	aggResult.ProcessingTime = time.Since(start)
 
 	// Record metrics
-	if a.instrumentation != nil {
-		a.instrumentation.CorrelationsAggregated.Add(ctx, 1)
-	}
 
 	return aggResult, nil
 }
@@ -899,9 +977,6 @@ func (a *CorrelationAggregator) GetCorrelation(ctx context.Context, id string) (
 	aggResult := a.convertToAggregatedResult(result)
 
 	// Record metrics
-	if a.instrumentation != nil {
-		a.instrumentation.CorrelationsAggregated.Add(ctx, 1)
-	}
 
 	return aggResult, nil
 }
@@ -916,6 +991,14 @@ func (a *CorrelationAggregator) SubmitFeedback(ctx context.Context, id string, f
 		zap.String("correlation_id", id),
 		zap.Bool("useful", feedback.Useful),
 		zap.Bool("correct_rc", feedback.CorrectRC))
+
+	// Record feedback metric
+	if a.feedbackCounter != nil {
+		a.feedbackCounter.Add(ctx, 1, metric.WithAttributes(
+			attribute.Bool("useful", feedback.Useful),
+			attribute.Bool("correct_root_cause", feedback.CorrectRC),
+		))
+	}
 
 	// Get the correlation to find contributing correlators
 	if a.storage != nil {
@@ -944,11 +1027,6 @@ func (a *CorrelationAggregator) SubmitFeedback(ctx context.Context, id string, f
 	}
 
 	// Record feedback metrics
-	if a.instrumentation != nil {
-		if feedback.Useful {
-			a.instrumentation.CorrelationsAggregated.Add(ctx, 1)
-		}
-	}
 
 	return nil
 }
@@ -980,11 +1058,7 @@ func (a *CorrelationAggregator) Health(ctx context.Context) error {
 		}
 	}
 
-	// Check instrumentation health
-	if a.instrumentation != nil {
-		// Instrumentation is considered healthy if it's initialized
-		// Could add more specific checks here if needed
-	}
+	// OTEL instrumentation is healthy by design (global providers)
 
 	if len(errors) > 0 {
 		return fmt.Errorf("health check failed: %v", errors)
