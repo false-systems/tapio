@@ -39,7 +39,7 @@ func DefaultTemporalConfig() TemporalConfig {
 		WindowSize:         5 * time.Minute,
 		MinOccurrences:     2,
 		PatternTimeout:     24 * time.Hour,
-		MaxPatternsTracked: 1000,
+		MaxPatternsTracked: MaxPatternsTracked,
 	}
 }
 
@@ -84,7 +84,7 @@ func NewTemporalCorrelator(logger *zap.Logger, config TemporalConfig) *TemporalC
 		eventWindow: &TimeWindow{
 			events:   make([]*WindowedEvent, 0),
 			size:     config.WindowSize,
-			maxItems: 10000,
+			maxItems: MaxTemporalItems,
 		},
 		config: config,
 	}
@@ -201,7 +201,7 @@ func (t *TemporalCorrelator) createTemporalCorrelation(current *domain.UnifiedEv
 
 	// Calculate pattern confidence based on consistency
 	confidence := t.calculatePatternConfidence(current, group)
-	if confidence < 0.5 {
+	if confidence < MinConfidenceThreshold {
 		return nil
 	}
 
@@ -214,10 +214,23 @@ func (t *TemporalCorrelator) createTemporalCorrelation(current *domain.UnifiedEv
 		Confidence: confidence,
 		Events:     append(getEventIDs(group), current.ID),
 		Summary:    fmt.Sprintf("Temporal pattern detected: %s events occur every ~%s", current.Type, formatDuration(avgTimeDelta)),
-		Details:    t.buildTemporalDescription(current, group, avgTimeDelta),
-		Evidence:   t.buildTemporalEvidence(current, group),
-		StartTime:  getEarliestTime(append(group, current)),
-		EndTime:    current.Timestamp,
+		Details: CorrelationDetails{
+			Pattern:        fmt.Sprintf("%s temporal pattern", current.Type),
+			Algorithm:      "temporal_pattern_detector",
+			ProcessingTime: avgTimeDelta,
+			DataPoints:     len(group) + 1,
+		},
+		Evidence: CreateEvidenceData(
+			append(getEventIDs(group), current.ID),
+			[]string{}, // would extract resource IDs if needed
+			map[string]string{
+				"description":      t.buildTemporalDescription(current, group, avgTimeDelta),
+				"pattern_interval": formatDuration(avgTimeDelta),
+				"event_count":      fmt.Sprintf("%d", len(group)+1),
+			},
+		),
+		StartTime: getEarliestTime(append(group, current)),
+		EndTime:   current.Timestamp,
 	}
 
 	// Identify root cause (usually the first event)
@@ -235,13 +248,22 @@ func (t *TemporalCorrelator) createPatternCorrelation(event *domain.UnifiedEvent
 		Confidence: pattern.Confidence,
 		Events:     []string{event.ID, pattern.LastEvent.ID},
 		Summary:    fmt.Sprintf("Recurring pattern: %s occurs every ~%s", event.Type, formatDuration(pattern.TimeDelta)),
-		Details: fmt.Sprintf("Event type '%s' has occurred %d times with an average interval of %s. This matches a known pattern.",
-			event.Type, pattern.Occurrences+1, formatDuration(pattern.TimeDelta)),
-		Evidence: []string{
-			fmt.Sprintf("Pattern occurrences: %d", pattern.Occurrences),
-			fmt.Sprintf("Average interval: %s", formatDuration(pattern.TimeDelta)),
-			fmt.Sprintf("Pattern confidence: %.2f%%", pattern.Confidence*100),
+		Details: CorrelationDetails{
+			Pattern:        fmt.Sprintf("%s recurrence pattern", event.Type),
+			Algorithm:      "temporal_recurrence_detector",
+			ProcessingTime: pattern.TimeDelta,
+			DataPoints:     int(pattern.Occurrences + 1),
 		},
+		Evidence: CreateEvidenceData(
+			[]string{event.ID, pattern.LastEvent.ID},
+			[]string{},
+			map[string]string{
+				"pattern_occurrences": fmt.Sprintf("%d", pattern.Occurrences),
+				"average_interval":    formatDuration(pattern.TimeDelta),
+				"pattern_confidence":  fmt.Sprintf("%.2f%%", pattern.Confidence*100),
+				"event_type":          string(event.Type),
+			},
+		),
 		StartTime: pattern.FirstEvent.Timestamp,
 		EndTime:   event.Timestamp,
 	}
@@ -297,7 +319,7 @@ func (t *TemporalCorrelator) updatePatterns(event *domain.UnifiedEvent) {
 				},
 				Occurrences: 1,
 				TimeDelta:   0,
-				Confidence:  0.5, // Initial confidence
+				Confidence:  InitialConfidence, // Initial confidence
 				LastSeen:    time.Now(),
 			}
 		}
@@ -313,27 +335,27 @@ func (t *TemporalCorrelator) updatePatterns(event *domain.UnifiedEvent) {
 
 func (t *TemporalCorrelator) calculatePatternConfidence(current *domain.UnifiedEvent, group []*domain.UnifiedEvent) float64 {
 	if len(group) < t.config.MinOccurrences-1 {
-		return 0.0
+		return 0
 	}
 
 	// Base confidence on occurrence count
 	baseConfidence := float64(len(group)) / float64(t.config.MinOccurrences*2)
-	if baseConfidence > 1.0 {
-		baseConfidence = 1.0
+	if baseConfidence > MaxConfidenceValue {
+		baseConfidence = MaxConfidenceValue
 	}
 
 	// Adjust based on time consistency
 	timeConsistency := t.calculateTimeConsistency(append(group, current))
 
 	// Combine factors
-	confidence := baseConfidence*0.7 + timeConsistency*0.3
+	confidence := baseConfidence*BaseWeightRatio + timeConsistency*TimeWeightRatio
 
 	return confidence
 }
 
 func (t *TemporalCorrelator) calculateTimeConsistency(events []*domain.UnifiedEvent) float64 {
 	if len(events) < 2 {
-		return 0.0
+		return 0
 	}
 
 	// Sort events by time
@@ -345,7 +367,7 @@ func (t *TemporalCorrelator) calculateTimeConsistency(events []*domain.UnifiedEv
 	}
 
 	if len(deltas) == 0 {
-		return 0.0
+		return 0
 	}
 
 	// Calculate mean
@@ -427,12 +449,17 @@ func (t *TemporalCorrelator) identifyTemporalRootCause(current *domain.UnifiedEv
 
 	return &RootCause{
 		EventID:     earliest.ID,
-		Confidence:  0.75,
+		Confidence:  MediumLowConfidence,
 		Description: fmt.Sprintf("First occurrence of %s pattern", earliest.Type),
-		Evidence: []string{
-			fmt.Sprintf("Occurred at %s", earliest.Timestamp.Format(time.RFC3339)),
-			"Temporal patterns often indicate scheduled or triggered events",
-		},
+		Evidence: CreateEvidenceData(
+			[]string{earliest.ID},
+			[]string{},
+			map[string]string{
+				"occurred_at":  earliest.Timestamp.Format(time.RFC3339),
+				"pattern_note": "Temporal patterns often indicate scheduled or triggered events",
+				"event_type":   string(earliest.Type),
+			},
+		),
 	}
 }
 
@@ -440,7 +467,7 @@ func (t *TemporalCorrelator) assessTemporalImpact(current *domain.UnifiedEvent, 
 	impact := &Impact{
 		Severity:  current.Severity,
 		Resources: make([]string, 0),
-		Services:  make([]string, 0),
+		Services:  make([]ServiceReference, 0),
 	}
 
 	// Collect affected resources
@@ -475,7 +502,8 @@ func (t *TemporalCorrelator) matchesPattern(event *domain.UnifiedEvent, pattern 
 	if pattern.TimeDelta > 0 {
 		timeSinceLastEvent := event.Timestamp.Sub(pattern.LastEvent.Timestamp)
 		variance := float64(timeSinceLastEvent-pattern.TimeDelta) / float64(pattern.TimeDelta)
-		if variance > 0.2 || variance < -0.2 {
+		varianceThreshold := 0.2
+		if variance > varianceThreshold || variance < -varianceThreshold {
 			return false
 		}
 	}
@@ -490,19 +518,19 @@ func (t *TemporalCorrelator) calculatePatternStability(pattern *TemporalPattern)
 	// 3. Recency
 
 	occurrenceScore := float64(pattern.Occurrences) / float64(t.config.MinOccurrences*5)
-	if occurrenceScore > 1.0 {
-		occurrenceScore = 1.0
+	if occurrenceScore > MaxConfidenceValue {
+		occurrenceScore = MaxConfidenceValue
 	}
 
 	// Recency score (patterns seen recently are more reliable)
-	recencyScore := 1.0
+	recencyScore := MaxConfidenceValue
 	hoursSinceLastSeen := time.Since(pattern.LastSeen).Hours()
 	if hoursSinceLastSeen > 1 {
-		recencyScore = 1.0 / (1.0 + hoursSinceLastSeen/24)
+		recencyScore = MaxConfidenceValue / (MaxConfidenceValue + hoursSinceLastSeen/24)
 	}
 
 	// Combine scores
-	stability := occurrenceScore*0.7 + recencyScore*0.3
+	stability := occurrenceScore*BaseWeightRatio + recencyScore*TimeWeightRatio
 
 	return stability
 }

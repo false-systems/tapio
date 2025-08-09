@@ -6,6 +6,51 @@ import (
 	"time"
 )
 
+// HealthDetails represents structured health details
+type HealthDetails struct {
+	// Resource utilization
+	CPUUsage    float64 `json:"cpu_usage,omitempty"`
+	MemoryUsage int64   `json:"memory_usage,omitempty"`
+	DiskUsage   int64   `json:"disk_usage,omitempty"`
+	NetworkIO   int64   `json:"network_io,omitempty"`
+
+	// Performance metrics
+	Latency     time.Duration `json:"latency,omitempty"`
+	Throughput  float64       `json:"throughput,omitempty"`
+	QueueSize   int           `json:"queue_size,omitempty"`
+	ActiveConns int           `json:"active_connections,omitempty"`
+
+	// Component-specific metrics
+	EventRate   float64 `json:"event_rate,omitempty"`
+	ErrorRate   float64 `json:"error_rate,omitempty"`
+	SuccessRate float64 `json:"success_rate,omitempty"`
+
+	// Health check details
+	Dependencies map[string]string `json:"dependencies,omitempty"`
+	ConfigHash   string            `json:"config_hash,omitempty"`
+	FeatureFlags []string          `json:"feature_flags,omitempty"`
+
+	// Runtime information
+	StartTime    time.Time `json:"start_time,omitempty"`
+	RestartCount int32     `json:"restart_count,omitempty"`
+	PID          int32     `json:"pid,omitempty"`
+
+	// Storage and database health
+	DBConnections int     `json:"db_connections,omitempty"`
+	CacheHitRate  float64 `json:"cache_hit_rate,omitempty"`
+	StorageHealth string  `json:"storage_health,omitempty"`
+
+	// Component statuses (for aggregators)
+	Components   map[string]*HealthStatus `json:"components,omitempty"`
+	ChecksTotal  int                      `json:"checks_total,omitempty"`
+	ChecksPassed int                      `json:"checks_passed,omitempty"`
+	ChecksFailed int                      `json:"checks_failed,omitempty"`
+
+	// Additional structured data
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
 // HealthStatus represents the health status of a component
 type HealthStatus struct {
 	// Core fields
@@ -29,7 +74,7 @@ type HealthStatus struct {
 	ErrorCount    int64 `json:"error_count,omitempty"`
 
 	// Additional details for specific components
-	Details map[string]interface{} `json:"details,omitempty"`
+	Details *HealthDetails `json:"details,omitempty"`
 }
 
 // HealthStatusValue represents the health state
@@ -58,7 +103,7 @@ func NewHealthStatus(status HealthStatusValue, message string) *HealthStatus {
 		Status:    status,
 		Message:   message,
 		Timestamp: time.Now(),
-		Details:   make(map[string]interface{}),
+		Details:   &HealthDetails{},
 	}
 }
 
@@ -91,9 +136,38 @@ func (h *HealthStatus) SetError(err error) {
 // SetDetail adds a detail to the health status
 func (h *HealthStatus) SetDetail(key string, value interface{}) {
 	if h.Details == nil {
-		h.Details = make(map[string]interface{})
+		h.Details = &HealthDetails{}
 	}
-	h.Details[key] = value
+
+	// Set common details based on key
+	switch key {
+	case "components":
+		if components, ok := value.(map[string]*HealthStatus); ok {
+			h.Details.Components = components
+		}
+	case "unhealthy_count":
+		if count, ok := value.(int); ok {
+			h.Details.ChecksFailed = count
+		}
+	case "degraded_count":
+		if count, ok := value.(int); ok {
+			h.Details.ChecksFailed += count // Add to failed count
+		}
+	case "total_components":
+		if count, ok := value.(int); ok {
+			h.Details.ChecksTotal = count
+		}
+	default:
+		// For unknown keys, store in labels
+		if h.Details.Labels == nil {
+			h.Details.Labels = make(map[string]string)
+		}
+		if str, ok := value.(string); ok {
+			h.Details.Labels[key] = str
+		} else {
+			h.Details.Labels[key] = fmt.Sprintf("%v", value)
+		}
+	}
 }
 
 // IsHealthy returns true if the status is healthy

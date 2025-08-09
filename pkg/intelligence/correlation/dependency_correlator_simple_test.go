@@ -46,7 +46,7 @@ func TestNewDependencyCorrelator_Simple(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "dependency-correlator", correlator.Name())
-		assert.Equal(t, "1.0.0", correlator.Version())
+		assert.Equal(t, DefaultCorrelatorVersion, correlator.Version())
 	})
 
 	t.Run("nil driver", func(t *testing.T) {

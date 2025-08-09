@@ -49,16 +49,16 @@ func TestEngineCreation(t *testing.T) {
 
 	t.Run("creation with selective correlators", func(t *testing.T) {
 		config := EngineConfig{
-			EventBufferSize:        100,
-			ResultBufferSize:       100,
+			EventBufferSize:        TestEventBufferSize,
+			ResultBufferSize:       TestResultBufferSize,
 			WorkerCount:            2,
 			EnableTemporal:         true,
 			EnableSequence:         false,
 			EnablePerformance:      true,
 			EnableServiceMap:       false,
 			EnableK8s:              false,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -82,8 +82,8 @@ func TestEngineStartStop(t *testing.T) {
 			ResultBufferSize:       10,
 			WorkerCount:            2,
 			EnableTemporal:         true,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -150,8 +150,8 @@ func TestEngineProcess(t *testing.T) {
 			ResultBufferSize:       10,
 			WorkerCount:            1,
 			ProcessingTimeout:      1 * time.Second,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, mockStorage)
@@ -226,8 +226,8 @@ func TestEngineProcess(t *testing.T) {
 			ResultBufferSize:       1,
 			WorkerCount:            0, // No workers
 			ProcessingTimeout:      50 * time.Millisecond,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -250,8 +250,8 @@ func TestEngineProcess(t *testing.T) {
 		config := EngineConfig{
 			EventBufferSize:        1,
 			ProcessingTimeout:      1 * time.Second,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -289,11 +289,11 @@ func TestEngineWorkers(t *testing.T) {
 		mockStorage := &MockStorage{}
 
 		config := EngineConfig{
-			EventBufferSize:        100,
-			ResultBufferSize:       100,
+			EventBufferSize:        TestEventBufferSize,
+			ResultBufferSize:       TestResultBufferSize,
 			WorkerCount:            4,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, mockStorage)
@@ -346,8 +346,8 @@ func TestEngineWorkers(t *testing.T) {
 			EventBufferSize:        10,
 			ResultBufferSize:       10,
 			WorkerCount:            2,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -518,11 +518,11 @@ func TestEngineConcurrency(t *testing.T) {
 		mockCorrelator := &TestMockCorrelator{}
 
 		config := EngineConfig{
-			EventBufferSize:        100,
-			ResultBufferSize:       100,
+			EventBufferSize:        TestEventBufferSize,
+			ResultBufferSize:       TestResultBufferSize,
 			WorkerCount:            4,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -595,8 +595,8 @@ func BenchmarkEngineProcess(b *testing.B) {
 	)
 
 	config := EngineConfig{
-		EventBufferSize:        1000,
-		ResultBufferSize:       1000,
+		EventBufferSize:        DefaultEventBufferSize,
+		ResultBufferSize:       DefaultResultBufferSize,
 		WorkerCount:            4,
 		StorageCleanupInterval: 5 * time.Minute,
 		StorageRetention:       24 * time.Hour,

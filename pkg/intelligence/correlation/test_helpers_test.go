@@ -1,88 +1,153 @@
 package correlation
 
 import (
-	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// Event type constants for testing - mapping to domain.EventType
-const (
-	EventTypeSystemd = domain.EventTypeSystem
-	EventTypeK8s     = domain.EventTypeKubernetes
-	EventTypeEBPF    = domain.EventTypeNetwork
-	EventTypeKubelet = domain.EventTypeMetric
-)
-
-// TestMockCorrelator for testify-based testing (used in engine_test.go)
-type TestMockCorrelator struct {
-	mock.Mock
+// TestEventData represents structured test event data
+type TestEventData struct {
+	ID        string `json:"id"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
 }
 
-func (m *TestMockCorrelator) Name() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *TestMockCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
-	args := m.Called(ctx, event)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
+// LoadTestData loads test data from testdata directory
+func LoadTestData(filename string) ([]byte, error) {
+	path := filepath.Join(TestDataDir, filename)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load test data from %s: %w", path, err)
 	}
-	return args.Get(0).([]*CorrelationResult), args.Error(1)
+	return data, nil
 }
 
-// MockStorage for testing - implements full Storage interface
-type MockStorage struct {
-	mock.Mock
-}
-
-func (m *MockStorage) Store(ctx context.Context, result *CorrelationResult) error {
-	args := m.Called(ctx, result)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetRecent(ctx context.Context, limit int) ([]*CorrelationResult, error) {
-	args := m.Called(ctx, limit)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
+// LoadTestEvents loads test events from JSON file
+func LoadTestEvents(filename string) (map[string]TestEventData, error) {
+	data, err := LoadTestData(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load test events: %w", err)
 	}
-	return args.Get(0).([]*CorrelationResult), args.Error(1)
-}
 
-func (m *MockStorage) GetByTraceID(ctx context.Context, traceID string) ([]*CorrelationResult, error) {
-	args := m.Called(ctx, traceID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
+	var events map[string]TestEventData
+	if err := json.Unmarshal(data, &events); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal test events: %w", err)
 	}
-	return args.Get(0).([]*CorrelationResult), args.Error(1)
+
+	return events, nil
 }
 
-func (m *MockStorage) GetByTimeRange(ctx context.Context, start, end time.Time) ([]*CorrelationResult, error) {
-	args := m.Called(ctx, start, end)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
+// CreateTestEvent creates a UnifiedEvent from test data for testing purposes
+func CreateTestEvent(eventData TestEventData, eventType domain.EventType, timestamp time.Time) *domain.UnifiedEvent {
+	event := &domain.UnifiedEvent{
+		ID:        eventData.ID,
+		Type:      eventType,
+		Timestamp: timestamp,
+		K8sContext: &domain.K8sContext{
+			Namespace: eventData.Namespace,
+			Name:      eventData.Name,
+			Kind:      eventData.Kind,
+		},
 	}
-	return args.Get(0).([]*CorrelationResult), args.Error(1)
+
+	return event
 }
 
-func (m *MockStorage) GetByResource(ctx context.Context, resourceType, namespace, name string) ([]*CorrelationResult, error) {
-	args := m.Called(ctx, resourceType, namespace, name)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
+// CreateSimpleTestEvent creates a basic test event with minimal data
+func CreateSimpleTestEvent(id, namespace, name string) *domain.UnifiedEvent {
+	return &domain.UnifiedEvent{
+		ID:        id,
+		Type:      domain.EventTypeKubernetes,
+		Timestamp: time.Now(),
+		K8sContext: &domain.K8sContext{
+			Namespace: namespace,
+			Name:      name,
+			Kind:      ResourceTypePod,
+		},
 	}
-	return args.Get(0).([]*CorrelationResult), args.Error(1)
 }
 
-func (m *MockStorage) Cleanup(ctx context.Context, olderThan time.Duration) error {
-	args := m.Called(ctx, olderThan)
-	return args.Error(0)
+// CreateTestPodEvent creates a test Pod event
+func CreateTestPodEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
+	return &domain.UnifiedEvent{
+		ID:        id,
+		Type:      domain.EventTypeKubernetes,
+		Timestamp: timestamp,
+		K8sContext: &domain.K8sContext{
+			Namespace: namespace,
+			Name:      name,
+			Kind:      ResourceTypePod,
+		},
+	}
 }
 
-// Additional K8s domain types for testing
-type K8sNamespace struct {
-	Name   string
-	Labels map[string]string
+// CreateTestServiceEvent creates a test Service event
+func CreateTestServiceEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
+	return &domain.UnifiedEvent{
+		ID:        id,
+		Type:      domain.EventTypeKubernetes,
+		Timestamp: timestamp,
+		K8sContext: &domain.K8sContext{
+			Namespace: namespace,
+			Name:      name,
+			Kind:      ResourceTypeService,
+		},
+	}
+}
+
+// CreateTestConfigMapEvent creates a test ConfigMap event
+func CreateTestConfigMapEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
+	return &domain.UnifiedEvent{
+		ID:        id,
+		Type:      domain.EventTypeKubernetes,
+		Timestamp: timestamp,
+		K8sContext: &domain.K8sContext{
+			Namespace: namespace,
+			Name:      name,
+			Kind:      ResourceTypeConfigMap,
+		},
+	}
+}
+
+// CreateTestDeploymentEvent creates a test Deployment event
+func CreateTestDeploymentEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
+	return &domain.UnifiedEvent{
+		ID:        id,
+		Type:      domain.EventTypeKubernetes,
+		Timestamp: timestamp,
+		K8sContext: &domain.K8sContext{
+			Namespace: namespace,
+			Name:      name,
+			Kind:      ResourceTypeDeployment,
+		},
+	}
+}
+
+// GetTestNamespaces returns common test namespaces
+func GetTestNamespaces() []string {
+	return []string{
+		DefaultNamespace,
+		ProductionNamespace,
+		KubeSystemNamespace,
+	}
+}
+
+// GetTestResourceTypes returns common test resource types
+func GetTestResourceTypes() []string {
+	return []string{
+		ResourceTypePod,
+		ResourceTypeService,
+		ResourceTypeConfigMap,
+		ResourceTypeSecret,
+		ResourceTypeDeployment,
+		ResourceTypeStatefulSet,
+		ResourceTypeDaemonSet,
+		ResourceTypeNode,
+	}
 }

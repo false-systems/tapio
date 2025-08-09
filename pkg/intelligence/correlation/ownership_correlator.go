@@ -57,7 +57,7 @@ func NewOwnershipCorrelator(graphStore GraphStore, logger *zap.Logger) (*Ownersh
 		BatchSupport: false,
 	}
 
-	base := NewBaseCorrelator("ownership-correlator", "1.0.0", capabilities)
+	base := NewBaseCorrelator("ownership-correlator", DefaultCorrelatorVersion, capabilities)
 
 	return &OwnershipCorrelator{
 		BaseCorrelator: base,
@@ -395,7 +395,7 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 				ID:         fmt.Sprintf("pod-ownership-%s", podName),
 				Type:       "pod_ownership_chain",
 				Severity:   aggregator.SeverityMedium,
-				Confidence: 0.90,
+				Confidence: HighConfidence,
 				Message:    fmt.Sprintf("Pod %s failure traced to %s", podName, strings.Join(ownerChain, " → ")),
 				Evidence: aggregator.Evidence{
 					Events: []domain.UnifiedEvent{*event},
@@ -544,7 +544,7 @@ func (o *OwnershipCorrelator) analyzeDaemonSetIssues(ctx context.Context, event 
 				ID:         fmt.Sprintf("daemonset-missing-pods-%s", dsName),
 				Type:       "daemonset_incomplete_coverage",
 				Severity:   aggregator.SeverityHigh,
-				Confidence: 0.95,
+				Confidence: CriticalConfidence,
 				Message:    fmt.Sprintf("DaemonSet %s has %d pods but %d nodes (missing %d)", dsName, podCount, nodeCount, nodeCount-podCount),
 				Evidence: aggregator.Evidence{
 					Events: []domain.UnifiedEvent{*event},
@@ -621,7 +621,7 @@ func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredR
 							ID:         fmt.Sprintf("replicaset-degraded-%s", rsName),
 							Type:       "replicaset_not_ready",
 							Severity:   aggregator.SeverityHigh,
-							Confidence: 0.85,
+							Confidence: MediumHighConfidence,
 							Message:    fmt.Sprintf("ReplicaSet %s has %d/%d ready pods", rsName, rsReady, rsReplicas),
 							Evidence: aggregator.Evidence{
 								Events: []domain.UnifiedEvent{*event},
@@ -646,7 +646,7 @@ func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredR
 			ID:         fmt.Sprintf("deployment-underscaled-%s", deploymentName),
 			Type:       "deployment_insufficient_pods",
 			Severity:   aggregator.SeverityCritical,
-			Confidence: 0.90,
+			Confidence: HighConfidence,
 			Message:    fmt.Sprintf("Deployment %s has %d pods but needs %d", deploymentName, totalPods, desiredReplicas),
 			Evidence: aggregator.Evidence{
 				Events: []domain.UnifiedEvent{*event},
@@ -697,12 +697,12 @@ func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName st
 		ID:         fmt.Sprintf("replicaset-pods-not-ready-%s", rsName),
 		Type:       "replicaset_degraded",
 		Severity:   aggregator.SeverityHigh,
-		Confidence: 0.85,
+		Confidence: MediumHighConfidence,
 		Message:    message,
 		Evidence: aggregator.Evidence{
 			Events: []domain.UnifiedEvent{*event},
-			Attributes: map[string]interface{}{
-				"not_ready_pods": notReadyPods,
+			Attributes: map[string]string{
+				"not_ready_pods": strings.Join(notReadyPods, ","),
 			},
 		},
 		Impact: aggregator.Impact{
@@ -752,12 +752,12 @@ func (o *OwnershipCorrelator) analyzeStatefulSetPods(stsName string, desired, re
 			ID:         fmt.Sprintf("statefulset-broken-ordinal-%s", stsName),
 			Type:       "statefulset_pod_sequence_broken",
 			Severity:   aggregator.SeverityCritical,
-			Confidence: 0.90,
+			Confidence: HighConfidence,
 			Message:    fmt.Sprintf("StatefulSet %s pod sequence broken at ordinal %d", stsName, brokenOrdinal),
 			Evidence: aggregator.Evidence{
 				Events: []domain.UnifiedEvent{*event},
-				Attributes: map[string]interface{}{
-					"broken_ordinal": brokenOrdinal,
+				Attributes: map[string]string{
+					"broken_ordinal": fmt.Sprintf("%d", brokenOrdinal),
 					"pod_name":       fmt.Sprintf("%s-%d", stsName, brokenOrdinal),
 				},
 			},
@@ -849,7 +849,7 @@ func (o *OwnershipCorrelator) buildOwnershipEdges(podName string, ownerChain []s
 // calculateConfidence calculates overall confidence for findings
 func (o *OwnershipCorrelator) calculateConfidence(findings []aggregator.Finding) float64 {
 	if len(findings) == 0 {
-		return 0.0
+		return 0
 	}
 
 	totalWeight := 0.0
@@ -861,13 +861,13 @@ func (o *OwnershipCorrelator) calculateConfidence(findings []aggregator.Finding)
 		case aggregator.SeverityCritical:
 			weight = 1.0
 		case aggregator.SeverityHigh:
-			weight = 0.8
+			weight = HighWeight
 		case aggregator.SeverityMedium:
-			weight = 0.6
+			weight = MediumWeight
 		case aggregator.SeverityLow:
-			weight = 0.4
+			weight = LowWeight
 		default:
-			weight = 0.2
+			weight = VeryLowWeight
 		}
 
 		weightedSum += finding.Confidence * weight
@@ -878,7 +878,7 @@ func (o *OwnershipCorrelator) calculateConfidence(findings []aggregator.Finding)
 
 	// Boost if multiple findings in ownership chain
 	if len(findings) > 1 {
-		confidence += 0.1
+		confidence += BoostMultiplier
 	}
 
 	if confidence > 1.0 {

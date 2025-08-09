@@ -113,8 +113,8 @@ func TestPerformanceCorrelatorProcess(t *testing.T) {
 				"latency_ms":       "500",
 				"packet_loss":      "5",
 				"connection":       "frontend->backend",
-				"src_ip":           "10.0.1.10",
-				"dst_ip":           "10.0.2.20",
+				"src_ip":           TestSrcIP,
+				"dst_ip":           TestDstIP,
 				"connection_count": "100",
 			},
 			Message: "High network latency detected",
@@ -328,8 +328,8 @@ func TestServiceConnectionTracking(t *testing.T) {
 				Attributes: map[string]interface{}{
 					"connection": "frontend->backend",
 					"status":     "failed",
-					"src_ip":     "10.0.1.10",
-					"dst_ip":     "10.0.2.20",
+					"src_ip":     TestSrcIP,
+					"dst_ip":     TestDstIP,
 				},
 				Message: "Connection failed",
 			}

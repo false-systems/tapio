@@ -24,7 +24,7 @@ func TestNewOwnershipCorrelator(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "ownership-correlator", correlator.Name())
-		assert.Equal(t, "1.0.0", correlator.Version())
+		assert.Equal(t, DefaultCorrelatorVersion, correlator.Version())
 	})
 
 	t.Run("nil graphStore", func(t *testing.T) {

@@ -439,8 +439,8 @@ func (c *Collector) populateSystemdPIDs(ctx context.Context) error {
 
 // isValidSystemdProcess validates if a process name is a systemd process
 func (c *Collector) isValidSystemdProcess(comm string) bool {
-	// Input validation
-	if len(comm) == 0 || len(comm) > 15 {
+	// Input validation - Linux comm field is max 16 chars (15 + null terminator)
+	if len(comm) == 0 || len(comm) > 16 {
 		return false
 	}
 
@@ -780,38 +780,152 @@ func (c *Collector) getJournalMetadata(pid uint32) (*journalMetadata, error) {
 }
 
 // extractUnitFromCgroup extracts systemd unit from cgroup information
+// Supports both cgroup v1 and v2 formats, handles various unit types
 func (c *Collector) extractUnitFromCgroup(cgroupData string) string {
+	if cgroupData == "" {
+		return "unknown"
+	}
+
 	lines := strings.Split(cgroupData, "\n")
+
+	// Supported systemd unit types in order of preference (most specific first)
+	unitTypes := []string{".service", ".socket", ".timer", ".mount", ".device", ".target", ".scope", ".slice"}
+
+	var bestMatch string
+	var bestDepth int
+
 	for _, line := range lines {
-		if strings.Contains(line, ":pids:") || strings.Contains(line, ":systemd:") {
-			// Extract unit from systemd cgroup path
-			parts := strings.Split(line, ":")
-			if len(parts) >= 3 {
-				cgroupPath := parts[2]
-				// Look for systemd unit pattern like /system.slice/nginx.service
-				if strings.Contains(cgroupPath, ".service") {
-					pathParts := strings.Split(cgroupPath, "/")
-					for _, part := range pathParts {
-						if strings.HasSuffix(part, ".service") {
-							return part
-						}
-					}
-				}
-				// Look for other unit types (.timer, .socket, etc.)
-				for _, unitType := range []string{".timer", ".socket", ".target", ".mount", ".device"} {
-					if strings.Contains(cgroupPath, unitType) {
-						pathParts := strings.Split(cgroupPath, "/")
-						for _, part := range pathParts {
-							if strings.HasSuffix(part, unitType) {
-								return part
+		// Skip malformed lines
+		if !strings.Contains(line, ":") {
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) < 3 {
+			continue
+		}
+
+		cgroupPath := parts[2]
+
+		// Skip empty or root paths
+		if cgroupPath == "" || cgroupPath == "/" {
+			continue
+		}
+
+		// Clean the path and split into components
+		cgroupPath = strings.TrimPrefix(cgroupPath, "/")
+		pathParts := strings.Split(cgroupPath, "/")
+
+		// Check if path contains suspicious patterns - skip entire path if so
+		if strings.Contains(cgroupPath, "..") {
+			continue
+		}
+
+		// Look for systemd units in the path
+		for i, part := range pathParts {
+			// Check if this part matches any systemd unit type
+			for _, unitType := range unitTypes {
+				if strings.HasSuffix(part, unitType) {
+					// Validate the unit name
+					if c.isValidUnitName(part) {
+						// For containers within services, prefer actual services over scopes
+						// Services are more meaningful for systemd monitoring
+						pathDepth := i
+						unitPriority := c.getUnitTypePriority(part)
+
+						// Select the best match based on business logic:
+						// 1. For paths with both services and containers, prefer services for monitoring
+						// 2. Otherwise, prefer deeper paths (more specific)
+						// 3. If same depth, prefer higher unit type priority
+
+						isCurrentService := strings.HasSuffix(part, ".service")
+						isBestService := strings.HasSuffix(bestMatch, ".service")
+
+						// Check if this is a container hierarchy with a service
+						hasServiceInContainerPath := false
+						isContainerPath := strings.Contains(cgroupPath, "kubepods") ||
+							strings.Contains(cgroupPath, "docker") ||
+							strings.Contains(cgroupPath, "cri-") ||
+							strings.Contains(cgroupPath, "containerd")
+
+						if isContainerPath {
+							for _, pathPart := range pathParts {
+								if strings.HasSuffix(pathPart, ".service") {
+									hasServiceInContainerPath = true
+									break
+								}
 							}
 						}
+
+						if bestMatch == "" ||
+							(hasServiceInContainerPath && isCurrentService && !isBestService) ||
+							(hasServiceInContainerPath && isBestService && isCurrentService && pathDepth > bestDepth) ||
+							(!hasServiceInContainerPath && pathDepth > bestDepth) ||
+							(pathDepth == bestDepth && unitPriority > c.getUnitTypePriority(bestMatch)) {
+							bestMatch = part
+							bestDepth = pathDepth
+						}
 					}
+					break // Found a match for this part, no need to check other unit types
 				}
 			}
 		}
 	}
+
+	if bestMatch != "" {
+		return bestMatch
+	}
+
 	return "unknown"
+}
+
+// isValidUnitName validates that a unit name is well-formed
+func (c *Collector) isValidUnitName(unitName string) bool {
+	// Basic validation
+	if len(unitName) == 0 || len(unitName) > 256 {
+		return false
+	}
+
+	// Must contain a dot (unit type separator)
+	if !strings.Contains(unitName, ".") {
+		return false
+	}
+
+	// Should not contain null bytes
+	if strings.Contains(unitName, "\x00") {
+		return false
+	}
+
+	// Unit name should not be just a file extension
+	if strings.HasPrefix(unitName, ".") {
+		return false
+	}
+
+	return true
+}
+
+// getUnitTypePriority returns priority for unit types (higher = more specific)
+func (c *Collector) getUnitTypePriority(unitName string) int {
+	switch {
+	case strings.HasSuffix(unitName, ".service"):
+		return 8 // Highest priority - actual services
+	case strings.HasSuffix(unitName, ".socket"):
+		return 7
+	case strings.HasSuffix(unitName, ".timer"):
+		return 6
+	case strings.HasSuffix(unitName, ".scope"):
+		return 5 // Container scopes
+	case strings.HasSuffix(unitName, ".mount"):
+		return 4
+	case strings.HasSuffix(unitName, ".device"):
+		return 3
+	case strings.HasSuffix(unitName, ".target"):
+		return 2
+	case strings.HasSuffix(unitName, ".slice"):
+		return 1 // Lowest priority - organizational units
+	default:
+		return 0
+	}
 }
 
 // getMachineID reads the systemd machine ID

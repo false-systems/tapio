@@ -123,7 +123,7 @@ func (p *PerformanceCorrelator) handleCPUThrottling(ctx context.Context, event *
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("perf-cpu-cascade-%s", event.ID),
 		Type:       "resource_exhaustion",
-		Confidence: 0.85,
+		Confidence: MediumHighConfidence,
 		Events:     []string{event.ID},
 		Summary:    fmt.Sprintf("CPU throttling detected in %s", podKey),
 		StartTime:  event.Timestamp,
@@ -133,19 +133,28 @@ func (p *PerformanceCorrelator) handleCPUThrottling(ctx context.Context, event *
 	// Determine the cascade pattern
 	if memoryPressure != nil && crashLoop != nil {
 		// Full cascade: CPU → Memory → Crash
-		result.Confidence = 0.95
+		result.Confidence = CriticalConfidence
 		result.Events = append(result.Events, memoryPressure.ID, crashLoop.ID)
 		result.Summary = "Resource exhaustion cascade: CPU throttling → Memory pressure → Pod crash"
-		result.Details = "CPU throttling prevented timely processing, leading to memory buildup and eventual OOM kill"
+		result.Details = CorrelationDetails{
+			Pattern:        "CPU throttling → Memory pressure → Pod crash",
+			Algorithm:      "performance_cascade_detector",
+			ProcessingTime: time.Since(result.StartTime),
+			DataPoints:     3,
+		}
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.9,
+			Confidence:  HighConfidence,
 			Description: "Insufficient CPU resources for workload",
-			Evidence: []string{
-				fmt.Sprintf("CPU usage: %s nanocores", p.getMetadata(event, "cpu_usage_nano")),
-				fmt.Sprintf("Memory pressure started %v after CPU throttling", memoryPressure.Timestamp.Sub(event.Timestamp)),
-				fmt.Sprintf("Pod crashed with exit code: %s", p.getMetadata(crashLoop, "last_exit_code")),
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID, memoryPressure.ID, crashLoop.ID},
+				[]string{podKey},
+				map[string]string{
+					"cpu_usage_nano":        p.getMetadata(event, "cpu_usage_nano"),
+					"memory_pressure_delay": memoryPressure.Timestamp.Sub(event.Timestamp).String(),
+					"last_exit_code":        p.getMetadata(crashLoop, "last_exit_code"),
+				},
+			),
 		}
 		result.Impact = &Impact{
 			Severity:  domain.EventSeverityCritical,
@@ -153,30 +162,48 @@ func (p *PerformanceCorrelator) handleCPUThrottling(ctx context.Context, event *
 		}
 	} else if memoryPressure != nil {
 		// Partial cascade: CPU → Memory
-		result.Confidence = 0.8
+		result.Confidence = MediumConfidence
 		result.Events = append(result.Events, memoryPressure.ID)
 		result.Summary = "CPU throttling leading to memory pressure"
-		result.Details = "Slow processing due to CPU limits causing memory accumulation"
+		result.Details = CorrelationDetails{
+			Pattern:        "CPU throttling → Memory pressure",
+			Algorithm:      "performance_cascade_detector",
+			ProcessingTime: time.Since(result.StartTime),
+			DataPoints:     2,
+		}
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.75,
+			Confidence:  MediumLowConfidence,
 			Description: "CPU throttling causing processing backlog",
-			Evidence: []string{
-				"CPU at limit for extended period",
-				"Memory usage increasing after CPU throttle",
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID, memoryPressure.ID},
+				[]string{podKey},
+				map[string]string{
+					"pattern": "CPU at limit for extended period",
+					"impact":  "Memory usage increasing after CPU throttle",
+				},
+			),
 		}
 	} else {
 		// Just CPU throttling
-		result.Details = "CPU throttling detected, monitor for cascade effects"
+		result.Details = CorrelationDetails{
+			Pattern:        "CPU throttling",
+			Algorithm:      "performance_cascade_detector",
+			ProcessingTime: time.Since(result.StartTime),
+			DataPoints:     1,
+		}
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.7,
+			Confidence:  LowConfidence,
 			Description: "Pod hitting CPU limits",
-			Evidence: []string{
-				fmt.Sprintf("Container: %s", p.getMetadata(event, "container_name")),
-				"Consider increasing CPU limits",
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{podKey},
+				map[string]string{
+					"container_name": p.getMetadata(event, "container_name"),
+					"recommendation": "Consider increasing CPU limits",
+				},
+			),
 		}
 	}
 
@@ -194,7 +221,7 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 	}, 5*time.Minute)
 
 	// Use related events for enhanced analysis
-	_ = relatedEvents // Placeholder for future enhancement
+	_ = len(relatedEvents) // eventCount not currently used
 
 	workingSet, _ := strconv.ParseInt(p.getMetadata(event, "memory_working_set"), 10, 64)
 	usage, _ := strconv.ParseInt(p.getMetadata(event, "memory_usage"), 10, 64)
@@ -202,34 +229,48 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("perf-mem-%s", event.ID),
 		Type:       "memory_exhaustion",
-		Confidence: 0.9,
+		Confidence: HighConfidence,
 		Events:     []string{event.ID},
 		Summary:    fmt.Sprintf("Memory pressure in %s (usage: %d MB)", podKey, usage/1024/1024),
-		Details:    "Pod approaching memory limits",
-		StartTime:  event.Timestamp,
-		EndTime:    event.Timestamp,
+		Details: CorrelationDetails{
+			Pattern:        "Memory pressure",
+			Algorithm:      "memory_exhaustion_detector",
+			ProcessingTime: time.Since(event.Timestamp),
+			DataPoints:     1,
+		},
+		StartTime: event.Timestamp,
+		EndTime:   event.Timestamp,
 	}
 
 	// Check for memory leak pattern
 	if p.isMemoryLeakPattern(podKey, workingSet) {
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.85,
+			Confidence:  MediumHighConfidence,
 			Description: "Possible memory leak detected",
-			Evidence: []string{
-				"Memory usage continuously increasing",
-				"No corresponding workload increase",
-				fmt.Sprintf("Working set: %d MB", workingSet/1024/1024),
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{podKey},
+				map[string]string{
+					"pattern":         "Memory usage continuously increasing",
+					"workload_status": "No corresponding workload increase",
+					"working_set_mb":  fmt.Sprintf("%d", workingSet/1024/1024),
+				},
+			),
 		}
 	} else {
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.7,
+			Confidence:  LowConfidence,
 			Description: "High memory usage",
-			Evidence: []string{
-				fmt.Sprintf("Usage: %d MB, Working Set: %d MB", usage/1024/1024, workingSet/1024/1024),
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{podKey},
+				map[string]string{
+					"usage_mb":       fmt.Sprintf("%d", usage/1024/1024),
+					"working_set_mb": fmt.Sprintf("%d", workingSet/1024/1024),
+				},
+			),
 		}
 	}
 
@@ -258,7 +299,7 @@ func (p *PerformanceCorrelator) handleCrashLoop(ctx context.Context, event *doma
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("perf-crash-%s", event.ID),
 		Type:       "crash_analysis",
-		Confidence: 0.9,
+		Confidence: HighConfidence,
 		Events:     []string{event.ID},
 		Summary:    fmt.Sprintf("Pod %s crashed %d times (exit: %s)", podKey, restartCount, exitCode),
 		StartTime:  event.Timestamp,
@@ -270,12 +311,17 @@ func (p *PerformanceCorrelator) handleCrashLoop(ctx context.Context, event *doma
 	case "137": // SIGKILL - usually OOM
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.95,
+			Confidence:  CriticalConfidence,
 			Description: "Container killed due to Out Of Memory",
-			Evidence: []string{
-				"Exit code 137 = SIGKILL from OOM killer",
-				"Container exceeded memory limits",
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{p.getPodKey(event)},
+				map[string]string{
+					"exit_code": "137",
+					"signal":    "SIGKILL from OOM killer",
+					"cause":     "Container exceeded memory limits",
+				},
+			),
 		}
 
 	case "1": // General error
@@ -291,33 +337,48 @@ func (p *PerformanceCorrelator) handleCrashLoop(ctx context.Context, event *doma
 		if configAccess != nil {
 			result.RootCause = &RootCause{
 				EventID:     event.ID,
-				Confidence:  0.7,
+				Confidence:  LowConfidence,
 				Description: "Application error, possibly configuration related",
-				Evidence: []string{
-					"Exit code 1 = application error",
-					fmt.Sprintf("Config accessed: %s", p.getMetadata(configAccess, "filename")),
-				},
+				Evidence: CreateEvidenceData(
+					[]string{event.ID, configAccess.ID},
+					[]string{p.getPodKey(event)},
+					map[string]string{
+						"exit_code":   "1",
+						"cause":       "application error",
+						"config_file": p.getMetadata(configAccess, "filename"),
+					},
+				),
 			}
 		} else {
 			result.RootCause = &RootCause{
 				EventID:     event.ID,
-				Confidence:  0.6,
+				Confidence:  VeryLowConfidence,
 				Description: "Application startup or runtime error",
-				Evidence: []string{
-					"Check application logs for specific error",
-				},
+				Evidence: CreateEvidenceData(
+					[]string{event.ID},
+					[]string{p.getPodKey(event)},
+					map[string]string{
+						"exit_code":      "1",
+						"recommendation": "Check application logs for specific error",
+					},
+				),
 			}
 		}
 
 	case "139": // SIGSEGV
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.9,
+			Confidence:  HighConfidence,
 			Description: "Segmentation fault - memory access violation",
-			Evidence: []string{
-				"Exit code 139 = SIGSEGV",
-				"Application bug or corrupted memory",
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{p.getPodKey(event)},
+				map[string]string{
+					"exit_code": "139",
+					"signal":    "SIGSEGV",
+					"cause":     "Application bug or corrupted memory",
+				},
+			),
 		}
 	}
 
@@ -337,37 +398,52 @@ func (p *PerformanceCorrelator) handleContainerWaiting(ctx context.Context, even
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("perf-waiting-%s", event.ID),
 		Type:       "startup_failure",
-		Confidence: 0.95,
+		Confidence: CriticalConfidence,
 		Events:     []string{event.ID},
 		Summary:    fmt.Sprintf("Container cannot start: %s", reason),
-		Details:    message,
-		StartTime:  event.Timestamp,
-		EndTime:    event.Timestamp,
+		Details: CorrelationDetails{
+			Pattern:        "Container startup failure",
+			Algorithm:      "waiting_reason_analyzer",
+			ProcessingTime: time.Since(event.Timestamp),
+			DataPoints:     1,
+		},
+		StartTime: event.Timestamp,
+		EndTime:   event.Timestamp,
 	}
 
 	switch reason {
 	case "ImagePullBackOff", "ErrImagePull":
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.95,
+			Confidence:  CriticalConfidence,
 			Description: "Cannot pull container image",
-			Evidence: []string{
-				message,
-				"Registry may be unreachable",
-				"Image name may be incorrect",
-				"Registry credentials may be missing",
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{p.getPodKey(event)},
+				map[string]string{
+					"waiting_reason":  reason,
+					"waiting_message": message,
+					"check_1":         "Registry may be unreachable",
+					"check_2":         "Image name may be incorrect",
+					"check_3":         "Registry credentials may be missing",
+				},
+			),
 		}
 
 	case "CreateContainerConfigError":
 		result.RootCause = &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.9,
+			Confidence:  HighConfidence,
 			Description: "Container configuration error",
-			Evidence: []string{
-				"ConfigMap or Secret may be missing",
-				"Volume mounts may be invalid",
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{p.getPodKey(event)},
+				map[string]string{
+					"error_type": "CreateContainerConfigError",
+					"check_1":    "ConfigMap or Secret may be missing",
+					"check_2":    "Volume mounts may be invalid",
+				},
+			),
 		}
 	}
 
@@ -412,7 +488,12 @@ func (p *PerformanceCorrelator) handleServiceMapUpdate(ctx context.Context, even
 			Confidence: 0.7,
 			Events:     []string{event.ID},
 			Summary:    "No active service connections detected",
-			Details:    "Services may be isolated or experiencing network issues",
+			Details: CorrelationDetails{
+				Pattern:        "Service isolation detected",
+				Algorithm:      "service_map_analyzer",
+				ProcessingTime: time.Since(event.Timestamp),
+				DataPoints:     1,
+			},
 			Impact: &Impact{
 				Severity: domain.EventSeverityWarning,
 			},
@@ -429,19 +510,28 @@ func (p *PerformanceCorrelator) handleStorageIssue(ctx context.Context, event *d
 	return []*CorrelationResult{{
 		ID:         fmt.Sprintf("perf-storage-%s", event.ID),
 		Type:       "storage_exhaustion",
-		Confidence: 0.9,
+		Confidence: HighConfidence,
 		Events:     []string{event.ID},
 		Summary:    fmt.Sprintf("Ephemeral storage at %.1f%% capacity", usagePercent),
-		Details:    "Pod may be evicted due to storage pressure",
+		Details: CorrelationDetails{
+			Pattern:        "Storage exhaustion",
+			Algorithm:      "storage_pressure_analyzer",
+			ProcessingTime: time.Since(event.Timestamp),
+			DataPoints:     1,
+		},
 		RootCause: &RootCause{
 			EventID:     event.ID,
-			Confidence:  0.85,
+			Confidence:  MediumHighConfidence,
 			Description: "Excessive log output or temp file creation",
-			Evidence: []string{
-				fmt.Sprintf("Storage usage: %.1f%%", usagePercent),
-				"Check for verbose logging",
-				"Look for temp file cleanup issues",
-			},
+			Evidence: CreateEvidenceData(
+				[]string{event.ID},
+				[]string{p.getPodKey(event)},
+				map[string]string{
+					"storage_usage_percent": fmt.Sprintf("%.1f", usagePercent),
+					"check_1":               "Check for verbose logging",
+					"check_2":               "Look for temp file cleanup issues",
+				},
+			),
 		},
 		Impact: &Impact{
 			Severity:  domain.EventSeverityWarning,
@@ -468,7 +558,12 @@ func (p *PerformanceCorrelator) handleFileOperation(ctx context.Context, event *
 			Confidence: 0.6,
 			Events:     []string{event.ID},
 			Summary:    "Configuration file accessed",
-			Details:    fmt.Sprintf("File: %s", filename),
+			Details: CorrelationDetails{
+				Pattern:        "Configuration file access",
+				Algorithm:      "file_access_monitor",
+				ProcessingTime: time.Since(event.Timestamp),
+				DataPoints:     1,
+			},
 		}}, nil
 	}
 

@@ -184,7 +184,9 @@ func (r *GraphRecord) GetRelationship(key string) (*GraphRelationship, error) {
 	}
 
 	rel := &GraphRelationship{
-		Properties: make(map[string]interface{}),
+		Properties: RelationshipProperties{
+			Metadata: make(map[string]string),
+		},
 	}
 
 	if id, ok := relMap["id"].(int64); ok {
@@ -200,7 +202,7 @@ func (r *GraphRecord) GetRelationship(key string) (*GraphRelationship, error) {
 		rel.EndNode = endNode
 	}
 	if props, ok := relMap["properties"].(map[string]interface{}); ok {
-		rel.Properties = props
+		rel.Properties = parseRelationshipProperties(props)
 	}
 
 	return rel, nil
@@ -240,7 +242,9 @@ func (r *GraphRecord) GetPath(key string) (*GraphPath, error) {
 			for _, relData := range relSlice {
 				if relMap, ok := relData.(map[string]interface{}); ok {
 					rel := GraphRelationship{
-						Properties: make(map[string]interface{}),
+						Properties: RelationshipProperties{
+							Metadata: make(map[string]string),
+						},
 					}
 					if id, ok := relMap["id"].(int64); ok {
 						rel.ID = id

@@ -50,11 +50,11 @@ func NewConfigImpactCorrelator(graphStore GraphStore, logger *zap.Logger) (*Conf
 				},
 			},
 		},
-		MaxEventAge:  24 * time.Hour,
+		MaxEventAge:  MaxEventAge,
 		BatchSupport: false,
 	}
 
-	base := NewBaseCorrelator("config-impact-correlator", "1.0.0", capabilities)
+	base := NewBaseCorrelator("config-impact-correlator", DefaultCorrelatorVersion, capabilities)
 
 	return &ConfigImpactCorrelator{
 		BaseCorrelator: base,
@@ -207,7 +207,7 @@ func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event 
 			ID:         fmt.Sprintf("config-change-impact-%s", configName),
 			Type:       "config_change_detected",
 			Severity:   aggregator.SeverityMedium,
-			Confidence: 0.95,
+			Confidence: HighTestConfidence,
 			Message:    fmt.Sprintf("%s %s was changed, analyzing impact on %d findings", configType, configName, len(findings)),
 			Evidence: aggregator.Evidence{
 				Events: []domain.UnifiedEvent{*event},
@@ -350,13 +350,13 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 				ID:         fmt.Sprintf("deployment-config-rollout-%s", deploymentName),
 				Type:       "deployment_config_rollout",
 				Severity:   aggregator.SeverityMedium,
-				Confidence: 0.80,
+				Confidence: MediumConfidence,
 				Message:    fmt.Sprintf("Deployment %s has %d/%d ready pods during rollout", deploymentName, readyPods, podCount),
 				Evidence: aggregator.Evidence{
 					Events: []domain.UnifiedEvent{*event},
-					Attributes: map[string]interface{}{
-						"configMaps": configMaps,
-						"secrets":    secrets,
+					Attributes: map[string]string{
+						"configMaps": strings.Join(configMaps, ","),
+						"secrets":    strings.Join(secrets, ","),
 					},
 				},
 				Impact: aggregator.Impact{
@@ -430,7 +430,7 @@ func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType stri
 			ID:         fmt.Sprintf("config-caused-restarts-%s", configName),
 			Type:       "config_change_pod_restarts",
 			Severity:   aggregator.SeverityHigh,
-			Confidence: 0.85,
+			Confidence: MediumHighConfidence,
 			Message:    fmt.Sprintf("%s %s change caused %d pod restarts: %s", configType, configName, len(restartedPods), strings.Join(restartedPods, ", ")),
 			Evidence: aggregator.Evidence{
 				Events: []domain.UnifiedEvent{*event},
@@ -450,7 +450,7 @@ func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType stri
 			ID:         fmt.Sprintf("config-pods-not-ready-%s", configName),
 			Type:       "config_change_pods_not_ready",
 			Severity:   aggregator.SeverityMedium,
-			Confidence: 0.75,
+			Confidence: MediumLowConfidence,
 			Message:    fmt.Sprintf("%d pods not ready after %s %s change", len(notReadyPods), configType, configName),
 			Evidence: aggregator.Evidence{
 				Events: []domain.UnifiedEvent{*event},
@@ -475,7 +475,7 @@ func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType stri
 			ID:         fmt.Sprintf("config-service-impact-%s", configName),
 			Type:       "config_change_service_impact",
 			Severity:   aggregator.SeverityMedium,
-			Confidence: 0.70,
+			Confidence: LowConfidence,
 			Message:    fmt.Sprintf("Services affected by %s %s change: %s", configType, configName, strings.Join(svcList, ", ")),
 			Evidence: aggregator.Evidence{
 				Events: []domain.UnifiedEvent{*event},
@@ -511,7 +511,7 @@ func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, chan
 			ID:         fmt.Sprintf("pod-restart-config-cause-%s", podName),
 			Type:       "pod_restart_config_cause",
 			Severity:   aggregator.SeverityHigh,
-			Confidence: 0.90,
+			Confidence: HighConfidence,
 			Message:    fmt.Sprintf("Pod %s restart likely caused by config changes: %s", podName, strings.Join(configChanges, ", ")),
 			Evidence: aggregator.Evidence{
 				Events: []domain.UnifiedEvent{*event},
@@ -541,7 +541,7 @@ func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, chan
 // calculateConfidence calculates overall confidence for findings
 func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Finding) float64 {
 	if len(findings) == 0 {
-		return 0.0
+		return 0
 	}
 
 	totalWeight := 0.0
@@ -553,13 +553,13 @@ func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Findi
 		case aggregator.SeverityCritical:
 			weight = 1.0
 		case aggregator.SeverityHigh:
-			weight = 0.8
+			weight = HighWeight
 		case aggregator.SeverityMedium:
-			weight = 0.6
+			weight = MediumWeight
 		case aggregator.SeverityLow:
-			weight = 0.4
+			weight = LowWeight
 		default:
-			weight = 0.2
+			weight = VeryLowWeight
 		}
 
 		weightedSum += finding.Confidence * weight
@@ -570,7 +570,7 @@ func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Findi
 
 	// Boost if multiple findings correlate
 	if len(findings) > 1 {
-		confidence += 0.1
+		confidence += BoostMultiplier
 	}
 
 	if confidence > 1.0 {

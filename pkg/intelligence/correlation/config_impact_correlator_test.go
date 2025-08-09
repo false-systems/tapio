@@ -24,7 +24,7 @@ func TestNewConfigImpactCorrelator(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "config-impact-correlator", correlator.Name())
-		assert.Equal(t, "1.0.0", correlator.Version())
+		assert.Equal(t, DefaultCorrelatorVersion, correlator.Version())
 	})
 
 	t.Run("nil store", func(t *testing.T) {

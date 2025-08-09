@@ -148,24 +148,38 @@ func (s *ServiceMapCorrelator) handleServiceMapUpdate(ctx context.Context, event
 		return []*CorrelationResult{{
 			ID:         fmt.Sprintf("svcmap-isolation-%s", event.ID),
 			Type:       "service_isolation",
-			Confidence: 0.9,
+			Confidence: HighConfidence,
 			Events:     []string{event.ID},
 			Summary:    fmt.Sprintf("Service %s/%s is isolated from network", namespace, serviceName),
-			Details:    "Service has endpoints but no active connections",
+			Details: CorrelationDetails{
+				Pattern:        "Service isolation",
+				Algorithm:      "connection_analyzer",
+				ProcessingTime: time.Since(event.Timestamp),
+				DataPoints:     1,
+			},
 			RootCause: &RootCause{
 				EventID:     event.ID,
-				Confidence:  0.85,
+				Confidence:  MediumHighConfidence,
 				Description: "Network policy or connectivity issue",
-				Evidence: []string{
-					fmt.Sprintf("Expected connections: in=%d, out=%d", incomingConns, outgoingConns),
-					"Active connections: 0",
-					"Check NetworkPolicies",
-					"Verify service endpoints",
-				},
+				Evidence: CreateEvidenceData(
+					[]string{event.ID},
+					[]string{fmt.Sprintf("Service/%s/%s", namespace, serviceName)},
+					map[string]string{
+						"expected_incoming":  fmt.Sprintf("%d", incomingConns),
+						"expected_outgoing":  fmt.Sprintf("%d", outgoingConns),
+						"active_connections": "0",
+						"check_1":            "Check NetworkPolicies",
+						"check_2":            "Verify service endpoints",
+					},
+				),
 			},
 			Impact: &Impact{
-				Severity:  domain.EventSeverityCritical,
-				Services:  []string{serviceName},
+				Severity: domain.EventSeverityCritical,
+				Services: []ServiceReference{{
+					Name:      serviceName,
+					Namespace: namespace,
+					Type:      "service",
+				}},
 				Resources: []string{fmt.Sprintf("Service/%s/%s", namespace, serviceName)},
 			},
 		}}, nil
@@ -218,23 +232,33 @@ func (s *ServiceMapCorrelator) handleConnectionFailure(ctx context.Context, even
 		result := &CorrelationResult{
 			ID:         fmt.Sprintf("svcmap-breakdown-%s", event.ID),
 			Type:       "service_communication_failure",
-			Confidence: 0.95,
+			Confidence: CriticalConfidence,
 			Events:     []string{event.ID},
 			Summary:    fmt.Sprintf("Service communication breakdown: %s → %s", srcService, dstService),
-			Details:    fmt.Sprintf("Persistent connection failures (%d consecutive) with error: %s", health.ConsecutiveFails, errorType),
+			Details: CorrelationDetails{
+				Pattern:        "Connection failure cascade",
+				Algorithm:      "health_degradation_analyzer",
+				ProcessingTime: time.Since(event.Timestamp),
+				DataPoints:     int(health.ConsecutiveFails),
+			},
 			RootCause: &RootCause{
 				EventID:     event.ID,
-				Confidence:  0.9,
+				Confidence:  HighConfidence,
 				Description: s.determineFailureRootCause(errorType, health),
-				Evidence: []string{
-					fmt.Sprintf("Failure rate: %d/%d", health.FailureCount, health.SuccessCount+health.FailureCount),
-					fmt.Sprintf("Last success: %v ago", time.Since(health.LastSuccess)),
-					fmt.Sprintf("Error type: %s", errorType),
-				},
+				Evidence: CreateEvidenceData(
+					[]string{event.ID},
+					[]string{srcService, dstService},
+					map[string]string{
+						"consecutive_fails": fmt.Sprintf("%d", health.ConsecutiveFails),
+						"failure_rate":      fmt.Sprintf("%d/%d", health.FailureCount, health.SuccessCount+health.FailureCount),
+						"last_success":      time.Since(health.LastSuccess).String(),
+						"error_type":        errorType,
+					},
+				),
 			},
 			Impact: &Impact{
 				Severity:  domain.EventSeverityCritical,
-				Services:  append([]string{srcService}, dependents...),
+				Services:  s.convertToServiceReferences(append([]string{srcService}, dependents...)),
 				Resources: s.getAffectedResources(srcService, dstService),
 			},
 		}
@@ -257,7 +281,7 @@ func (s *ServiceMapCorrelator) handleHTTPRequest(ctx context.Context, event *dom
 	}
 
 	// Check for latency issues
-	if latencyMs > 1000 { // 1 second
+	if latencyMs > HighLatencyThresholdMs { // 1 second
 		return s.handleHighLatency(event, latencyMs, endpoint)
 	}
 
@@ -311,21 +335,31 @@ func (s *ServiceMapCorrelator) detectCascadeFailure(event *domain.UnifiedEvent) 
 		return &CorrelationResult{
 			ID:         fmt.Sprintf("svcmap-cascade-%s-%d", serviceName, time.Now().Unix()),
 			Type:       "cascade_failure",
-			Confidence: 0.85,
+			Confidence: MediumHighConfidence,
 			Summary:    fmt.Sprintf("Cascading failure starting from %s", serviceName),
-			Details:    fmt.Sprintf("Service %s failure is affecting %d dependent services", serviceName, len(failingDependents)),
+			Details: CorrelationDetails{
+				Pattern:        "Cascade failure",
+				Algorithm:      "dependency_cascade_analyzer",
+				ProcessingTime: time.Since(event.Timestamp),
+				DataPoints:     len(failingDependents),
+			},
 			RootCause: &RootCause{
 				EventID:     event.ID,
-				Confidence:  0.8,
+				Confidence:  MediumConfidence,
 				Description: fmt.Sprintf("Root service %s failure", serviceName),
-				Evidence: []string{
-					fmt.Sprintf("Affected services: %s", strings.Join(failingDependents, ", ")),
-					"Failure propagation through service dependencies",
-				},
+				Evidence: CreateEvidenceData(
+					[]string{event.ID},
+					[]string{serviceName},
+					map[string]string{
+						"affected_services": strings.Join(failingDependents, ", "),
+						"pattern":           "Failure propagation through service dependencies",
+						"cascade_count":     fmt.Sprintf("%d", len(failingDependents)),
+					},
+				),
 			},
 			Impact: &Impact{
 				Severity: domain.EventSeverityCritical,
-				Services: append([]string{serviceName}, failingDependents...),
+				Services: s.convertToServiceReferences(append([]string{serviceName}, failingDependents...)),
 			},
 		}
 	}
@@ -451,24 +485,34 @@ func (s *ServiceMapCorrelator) handle5xxErrors(event *domain.UnifiedEvent, statu
 		return []*CorrelationResult{{
 			ID:         fmt.Sprintf("svcmap-5xx-%s", event.ID),
 			Type:       "service_error_spike",
-			Confidence: 0.9,
+			Confidence: HighConfidence,
 			Events:     []string{event.ID},
 			Summary:    fmt.Sprintf("Service %s experiencing high error rate", service),
-			Details:    fmt.Sprintf("%d errors in last 5 minutes on endpoint %s", recentErrors, endpoint),
+			Details: CorrelationDetails{
+				Pattern:        "Error spike",
+				Algorithm:      "error_rate_analyzer",
+				ProcessingTime: time.Since(event.Timestamp),
+				DataPoints:     recentErrors,
+			},
 			RootCause: &RootCause{
 				EventID:     event.ID,
-				Confidence:  0.8,
+				Confidence:  MediumConfidence,
 				Description: "Service internal error or resource exhaustion",
-				Evidence: []string{
-					fmt.Sprintf("Status code: %d", statusCode),
-					fmt.Sprintf("Error count: %d", recentErrors),
-					"Check service logs for stack traces",
-					"Verify database connections",
-				},
+				Evidence: CreateEvidenceData(
+					[]string{event.ID},
+					[]string{service},
+					map[string]string{
+						"status_code": fmt.Sprintf("%d", statusCode),
+						"error_count": fmt.Sprintf("%d", recentErrors),
+						"endpoint":    endpoint,
+						"check_1":     "Check service logs for stack traces",
+						"check_2":     "Verify database connections",
+					},
+				),
 			},
 			Impact: &Impact{
 				Severity: domain.EventSeverityCritical,
-				Services: []string{service},
+				Services: s.convertToServiceReferences([]string{service}),
 			},
 		}}, nil
 	}
@@ -486,23 +530,33 @@ func (s *ServiceMapCorrelator) handleHighLatency(event *domain.UnifiedEvent, lat
 		return []*CorrelationResult{{
 			ID:         fmt.Sprintf("svcmap-latency-%s", event.ID),
 			Type:       "service_performance_degradation",
-			Confidence: 0.8,
+			Confidence: MediumConfidence,
 			Events:     []string{event.ID},
 			Summary:    fmt.Sprintf("Service %s experiencing high latency", service),
-			Details:    fmt.Sprintf("Latency %.0fms (avg: %.0fms) on endpoint %s", latencyMs, avgLatency, endpoint),
+			Details: CorrelationDetails{
+				Pattern:        "Performance degradation",
+				Algorithm:      "latency_analyzer",
+				ProcessingTime: time.Since(event.Timestamp),
+				DataPoints:     1,
+			},
 			RootCause: &RootCause{
 				EventID:     event.ID,
-				Confidence:  0.7,
+				Confidence:  LowConfidence,
 				Description: "Service performance bottleneck",
-				Evidence: []string{
-					fmt.Sprintf("Current latency: %.0fms", latencyMs),
-					fmt.Sprintf("Average latency: %.0fms", avgLatency),
-					"Possible causes: CPU throttling, database slowdown, network congestion",
-				},
+				Evidence: CreateEvidenceData(
+					[]string{event.ID},
+					[]string{service},
+					map[string]string{
+						"current_latency_ms": fmt.Sprintf("%.0f", latencyMs),
+						"average_latency_ms": fmt.Sprintf("%.0f", avgLatency),
+						"endpoint":           endpoint,
+						"possible_causes":    "CPU throttling, database slowdown, network congestion",
+					},
+				),
 			},
 			Impact: &Impact{
 				Severity: domain.EventSeverityWarning,
-				Services: []string{service},
+				Services: s.convertToServiceReferences([]string{service}),
 			},
 		}}, nil
 	}
@@ -548,7 +602,7 @@ func (s *ServiceMapCorrelator) getServiceName(event *domain.UnifiedEvent) string
 	if name := s.getMetadata(event, "service_name"); name != "" {
 		return name
 	}
-	if event.K8sContext != nil && event.K8sContext.Kind == "Service" {
+	if event.K8sContext != nil && event.K8sContext.Kind == ResourceTypeService {
 		return event.K8sContext.Name
 	}
 	return ""
@@ -639,4 +693,26 @@ func (s *ServiceMapCorrelator) getMetadata(event *domain.UnifiedEvent, key strin
 		}
 	}
 	return ""
+}
+
+// convertToServiceReferences converts string slice to ServiceReference slice
+func (s *ServiceMapCorrelator) convertToServiceReferences(services []string) []ServiceReference {
+	refs := make([]ServiceReference, 0, len(services))
+	for _, svc := range services {
+		// Parse service name to extract namespace if present
+		parts := strings.Split(svc, "/")
+		name := svc
+		namespace := ""
+		if len(parts) >= 2 {
+			namespace = parts[0]
+			name = parts[1]
+		}
+		refs = append(refs, ServiceReference{
+			Name:      name,
+			Namespace: namespace,
+			Type:      "service",
+			Version:   "",
+		})
+	}
+	return refs
 }

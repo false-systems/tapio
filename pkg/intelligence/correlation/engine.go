@@ -61,17 +61,17 @@ type EngineConfig struct {
 // DefaultEngineConfig returns production-ready defaults
 func DefaultEngineConfig() EngineConfig {
 	return EngineConfig{
-		EventBufferSize:        1000,
-		ResultBufferSize:       1000,
+		EventBufferSize:        DefaultEventBufferSize,
+		ResultBufferSize:       DefaultResultBufferSize,
 		WorkerCount:            4,
-		ProcessingTimeout:      30 * time.Second,
+		ProcessingTimeout:      TestProcessingTimeout,
 		EnableK8s:              true,
 		EnableTemporal:         true,
 		EnableSequence:         true,
 		EnablePerformance:      true,
 		EnableServiceMap:       true,
-		StorageCleanupInterval: 5 * time.Minute,
-		StorageRetention:       24 * time.Hour,
+		StorageCleanupInterval: ServiceMetricsWindow,
+		StorageRetention:       MaxEventAge,
 	}
 }
 
@@ -231,51 +231,71 @@ func (e *Engine) worker(id int) {
 func (e *Engine) processEvent(event *domain.UnifiedEvent) {
 	startTime := time.Now()
 
-	// Update metrics
-	e.mu.Lock()
-	e.eventsProcessed++
-	e.mu.Unlock()
+	// Update processing metrics
+	e.incrementProcessedEvents()
 
 	// Process through each correlator
 	for _, correlator := range e.correlators {
-		// Create a timeout context for each correlator
-		ctx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
+		e.processWithCorrelator(event, correlator)
+	}
 
-		results, err := correlator.Process(ctx, event)
-		cancel()
+	// Monitor processing performance
+	e.checkProcessingPerformance(event.ID, startTime)
+}
 
-		if err != nil {
-			e.logger.Error("Correlator error",
-				zap.String("correlator", correlator.Name()),
-				zap.String("event_id", event.ID),
-				zap.Error(err),
-			)
-			continue
-		}
+// incrementProcessedEvents safely increments the events processed counter
+func (e *Engine) incrementProcessedEvents() {
+	e.mu.Lock()
+	e.eventsProcessed++
+	e.mu.Unlock()
+}
 
-		// Send results
-		for _, result := range results {
-			if result != nil {
-				e.sendResult(result)
+// processWithCorrelator processes an event with a single correlator
+func (e *Engine) processWithCorrelator(event *domain.UnifiedEvent, correlator Correlator) {
+	// Create timeout context for correlator
+	ctx, cancel := context.WithTimeout(e.ctx, DefaultProcessingTimeout)
+	defer cancel()
 
-				// Store result
-				if e.storage != nil {
-					if err := e.storage.Store(e.ctx, result); err != nil {
-						e.logger.Error("Failed to store correlation",
-							zap.String("correlation_id", result.ID),
-							zap.Error(err),
-						)
-					}
-				}
+	// Process event
+	results, err := correlator.Process(ctx, event)
+	if err != nil {
+		e.logCorrelatorError(correlator.Name(), event.ID, err)
+		return
+	}
+
+	// Handle results
+	e.handleCorrelatorResults(results)
+}
+
+// handleCorrelatorResults processes and stores correlation results
+func (e *Engine) handleCorrelatorResults(results []*CorrelationResult) {
+	for _, result := range results {
+		if result != nil {
+			e.sendResult(result)
+
+			// Store result asynchronously
+			if e.storage != nil {
+				e.asyncStoreResult(result)
 			}
 		}
 	}
+}
 
-	// Log processing time if it's slow
+// logCorrelatorError logs an error from a correlator
+func (e *Engine) logCorrelatorError(correlatorName, eventID string, err error) {
+	e.logger.Error("Correlator error",
+		zap.String("correlator", correlatorName),
+		zap.String("event_id", eventID),
+		zap.Error(err),
+	)
+}
+
+// checkProcessingPerformance logs if processing was slow
+func (e *Engine) checkProcessingPerformance(eventID string, startTime time.Time) {
 	duration := time.Since(startTime)
-	if duration > 100*time.Millisecond {
+	if duration > SlowProcessingThreshold {
 		e.logger.Warn("Slow event processing",
-			zap.String("event_id", event.ID),
+			zap.String("event_id", eventID),
 			zap.Duration("duration", duration),
 		)
 	}
@@ -326,11 +346,37 @@ func (e *Engine) storageCleanup() {
 	}
 }
 
+// asyncStoreResult stores a correlation result asynchronously
+func (e *Engine) asyncStoreResult(result *CorrelationResult) {
+	// Create a copy of the result to avoid data races
+	resultCopy := *result
+
+	// Store in a goroutine to avoid blocking event processing
+	go func() {
+		// Use a timeout context for storage operations
+		storeCtx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
+		defer cancel()
+
+		if err := e.storage.Store(storeCtx, &resultCopy); err != nil {
+			// Log error but don't block processing
+			e.logger.Error("Failed to store correlation asynchronously",
+				zap.String("correlation_id", resultCopy.ID),
+				zap.Error(err),
+			)
+
+			// Update error metrics
+			e.mu.Lock()
+			// Note: Add error counter to Engine struct if needed for monitoring
+			e.mu.Unlock()
+		}
+	}()
+}
+
 // metricsReporter periodically logs metrics
 func (e *Engine) metricsReporter() {
 	defer e.wg.Done()
 
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
 	var lastEvents, lastCorrelations int64

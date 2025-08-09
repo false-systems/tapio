@@ -1,0 +1,310 @@
+package correlation
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+)
+
+// CorrelationConfig holds all configuration for correlation engine and correlators
+type CorrelationConfig struct {
+	Engine     EngineConfiguration     `json:"engine"`
+	Temporal   TemporalConfiguration   `json:"temporal"`
+	Sequence   SequenceConfiguration   `json:"sequence"`
+	Memory     MemoryStorageConfig     `json:"memory"`
+	Processing ProcessingConfiguration `json:"processing"`
+}
+
+// EngineConfiguration holds engine-specific configuration
+type EngineConfiguration struct {
+	// Buffer sizes
+	EventBufferSize  int `json:"event_buffer_size"`
+	ResultBufferSize int `json:"result_buffer_size"`
+
+	// Worker configuration
+	WorkerCount       int           `json:"worker_count"`
+	ProcessingTimeout time.Duration `json:"processing_timeout"`
+
+	// Feature flags
+	EnableK8s         bool `json:"enable_k8s"`
+	EnableTemporal    bool `json:"enable_temporal"`
+	EnableSequence    bool `json:"enable_sequence"`
+	EnablePerformance bool `json:"enable_performance"`
+	EnableServiceMap  bool `json:"enable_service_map"`
+
+	// Storage configuration
+	StorageCleanupInterval time.Duration `json:"storage_cleanup_interval"`
+	StorageRetention       time.Duration `json:"storage_retention"`
+}
+
+// TemporalConfiguration holds temporal correlator configuration
+type TemporalConfiguration struct {
+	// Windows and timeouts
+	TimeWindow        time.Duration `json:"time_window"`
+	ConfigWindow      time.Duration `json:"config_window"`
+	RestartWindow     time.Duration `json:"restart_window"`
+	PodStartupWindow  time.Duration `json:"pod_startup_window"`
+	ServiceMetricsWin time.Duration `json:"service_metrics_window"`
+
+	// Pattern timeouts
+	DefaultPatternTimeout  time.Duration `json:"default_pattern_timeout"`
+	LongPatternTimeout     time.Duration `json:"long_pattern_timeout"`
+	ExtendedPatternTimeout time.Duration `json:"extended_pattern_timeout"`
+
+	// Limits
+	MaxTemporalItems   int           `json:"max_temporal_items"`
+	MaxPatternsTracked int           `json:"max_patterns_tracked"`
+	MaxEventAge        time.Duration `json:"max_event_age"`
+}
+
+// SequenceConfiguration holds sequence correlator configuration
+type SequenceConfiguration struct {
+	// Sequence windows
+	MaxSequenceAge    time.Duration `json:"max_sequence_age"`
+	MaxSequenceGap    time.Duration `json:"max_sequence_gap"`
+	MinSequenceLength int           `json:"min_sequence_length"`
+	SequenceWindow    time.Duration `json:"sequence_window"`
+
+	// Limits
+	MaxActiveSequences int `json:"max_active_sequences"`
+}
+
+// ProcessingConfiguration holds processing-related configuration
+type ProcessingConfiguration struct {
+	// Retry configuration
+	DefaultRetryDelay time.Duration `json:"default_retry_delay"`
+	MaxRetryAttempts  int           `json:"max_retry_attempts"`
+	ProcessingDelay   time.Duration `json:"processing_delay"`
+
+	// Performance thresholds
+	SlowProcessingThreshold time.Duration `json:"slow_processing_threshold"`
+	HighLatencyThresholdMs  int64         `json:"high_latency_threshold_ms"`
+	MaxEventsPerCorrelation int           `json:"max_events_per_correlation"`
+
+	// Query limits
+	DefaultQueryLimit   int `json:"default_query_limit"`
+	MaxQueryLimit       int `json:"max_query_limit"`
+	ServiceQueryLimit   int `json:"service_query_limit"`
+	OwnershipQueryLimit int `json:"ownership_query_limit"`
+	PodQueryLimit       int `json:"pod_query_limit"`
+}
+
+// MemoryStorageConfig holds memory storage configuration
+type MemoryStorageConfig struct {
+	// Storage bounds
+	MaxSize                 int           `json:"max_size"`
+	MaxAge                  time.Duration `json:"max_age"`
+	MaxCorrelationsPerTrace int           `json:"max_correlations_per_trace"`
+	MaxTimeEntries          int           `json:"max_time_entries"`
+
+	// Eviction policies
+	EvictionPolicy string `json:"eviction_policy"` // "lru", "lfu", "ttl"
+	MemoryLimit    int64  `json:"memory_limit"`    // bytes
+}
+
+// DefaultCorrelationConfig returns the default configuration with all timeouts and limits
+func DefaultCorrelationConfig() *CorrelationConfig {
+	return &CorrelationConfig{
+		Engine: EngineConfiguration{
+			EventBufferSize:        getEnvInt("CORRELATION_EVENT_BUFFER_SIZE", 1000),
+			ResultBufferSize:       getEnvInt("CORRELATION_RESULT_BUFFER_SIZE", 1000),
+			WorkerCount:            getEnvInt("CORRELATION_WORKER_COUNT", 4),
+			ProcessingTimeout:      getEnvDuration("CORRELATION_PROCESSING_TIMEOUT", 30*time.Second),
+			EnableK8s:              getEnvBool("CORRELATION_ENABLE_K8S", true),
+			EnableTemporal:         getEnvBool("CORRELATION_ENABLE_TEMPORAL", true),
+			EnableSequence:         getEnvBool("CORRELATION_ENABLE_SEQUENCE", true),
+			EnablePerformance:      getEnvBool("CORRELATION_ENABLE_PERFORMANCE", true),
+			EnableServiceMap:       getEnvBool("CORRELATION_ENABLE_SERVICEMAP", true),
+			StorageCleanupInterval: getEnvDuration("CORRELATION_STORAGE_CLEANUP_INTERVAL", 5*time.Minute),
+			StorageRetention:       getEnvDuration("CORRELATION_STORAGE_RETENTION", 24*time.Hour),
+		},
+		Temporal: TemporalConfiguration{
+			TimeWindow:             getEnvDuration("TEMPORAL_TIME_WINDOW", 5*time.Minute),
+			ConfigWindow:           getEnvDuration("TEMPORAL_CONFIG_WINDOW", 30*time.Minute),
+			RestartWindow:          getEnvDuration("TEMPORAL_RESTART_WINDOW", 10*time.Minute),
+			PodStartupWindow:       getEnvDuration("TEMPORAL_POD_STARTUP_WINDOW", 5*time.Minute),
+			ServiceMetricsWin:      getEnvDuration("TEMPORAL_SERVICE_METRICS_WINDOW", 5*time.Minute),
+			DefaultPatternTimeout:  getEnvDuration("TEMPORAL_DEFAULT_PATTERN_TIMEOUT", 2*time.Minute),
+			LongPatternTimeout:     getEnvDuration("TEMPORAL_LONG_PATTERN_TIMEOUT", 5*time.Minute),
+			ExtendedPatternTimeout: getEnvDuration("TEMPORAL_EXTENDED_PATTERN_TIMEOUT", 10*time.Minute),
+			MaxTemporalItems:       getEnvInt("TEMPORAL_MAX_ITEMS", 10000),
+			MaxPatternsTracked:     getEnvInt("TEMPORAL_MAX_PATTERNS", 1000),
+			MaxEventAge:            getEnvDuration("TEMPORAL_MAX_EVENT_AGE", 24*time.Hour),
+		},
+		Sequence: SequenceConfiguration{
+			MaxSequenceAge:     getEnvDuration("SEQUENCE_MAX_AGE", 15*time.Minute),
+			MaxSequenceGap:     getEnvDuration("SEQUENCE_MAX_GAP", 3*time.Minute),
+			MinSequenceLength:  getEnvInt("SEQUENCE_MIN_LENGTH", 3),
+			SequenceWindow:     getEnvDuration("SEQUENCE_WINDOW", 5*time.Second),
+			MaxActiveSequences: getEnvInt("SEQUENCE_MAX_ACTIVE", 1000),
+		},
+		Memory: MemoryStorageConfig{
+			MaxSize: getEnvInt("MEMORY_STORAGE_MAX_SIZE", 10000),
+			MaxAge:  getEnvDuration("MEMORY_STORAGE_MAX_AGE", 24*time.Hour),
+		},
+		Processing: ProcessingConfiguration{
+			DefaultRetryDelay:       getEnvDuration("PROCESSING_RETRY_DELAY", 1*time.Second),
+			MaxRetryAttempts:        getEnvInt("PROCESSING_MAX_RETRIES", 3),
+			ProcessingDelay:         getEnvDuration("PROCESSING_DELAY", 100*time.Millisecond),
+			SlowProcessingThreshold: getEnvDuration("PROCESSING_SLOW_THRESHOLD", 100*time.Millisecond),
+			HighLatencyThresholdMs:  getEnvInt64("PROCESSING_HIGH_LATENCY_MS", 1000),
+			MaxEventsPerCorrelation: getEnvInt("PROCESSING_MAX_EVENTS_PER_CORRELATION", 50),
+			DefaultQueryLimit:       getEnvInt("QUERY_DEFAULT_LIMIT", 100),
+			MaxQueryLimit:           getEnvInt("QUERY_MAX_LIMIT", 1000),
+			ServiceQueryLimit:       getEnvInt("QUERY_SERVICE_LIMIT", 100),
+			OwnershipQueryLimit:     getEnvInt("QUERY_OWNERSHIP_LIMIT", 100),
+			PodQueryLimit:           getEnvInt("QUERY_POD_LIMIT", 100),
+		},
+	}
+}
+
+// Validate validates the configuration
+func (c *CorrelationConfig) Validate() error {
+	if err := c.Engine.Validate(); err != nil {
+		return fmt.Errorf("engine config validation failed: %w", err)
+	}
+	if err := c.Temporal.Validate(); err != nil {
+		return fmt.Errorf("temporal config validation failed: %w", err)
+	}
+	if err := c.Sequence.Validate(); err != nil {
+		return fmt.Errorf("sequence config validation failed: %w", err)
+	}
+	if err := c.Memory.Validate(); err != nil {
+		return fmt.Errorf("memory config validation failed: %w", err)
+	}
+	if err := c.Processing.Validate(); err != nil {
+		return fmt.Errorf("processing config validation failed: %w", err)
+	}
+	return nil
+}
+
+// Validate validates engine configuration
+func (e *EngineConfiguration) Validate() error {
+	if e.EventBufferSize <= 0 {
+		return fmt.Errorf("event buffer size must be positive")
+	}
+	if e.ResultBufferSize <= 0 {
+		return fmt.Errorf("result buffer size must be positive")
+	}
+	if e.WorkerCount <= 0 {
+		return fmt.Errorf("worker count must be positive")
+	}
+	if e.ProcessingTimeout <= 0 {
+		return fmt.Errorf("processing timeout must be positive")
+	}
+	if e.StorageCleanupInterval <= 0 {
+		return fmt.Errorf("storage cleanup interval must be positive")
+	}
+	if e.StorageRetention <= 0 {
+		return fmt.Errorf("storage retention must be positive")
+	}
+	return nil
+}
+
+// Validate validates temporal configuration
+func (t *TemporalConfiguration) Validate() error {
+	if t.TimeWindow <= 0 {
+		return fmt.Errorf("time window must be positive")
+	}
+	if t.MaxTemporalItems <= 0 {
+		return fmt.Errorf("max temporal items must be positive")
+	}
+	if t.MaxPatternsTracked <= 0 {
+		return fmt.Errorf("max patterns tracked must be positive")
+	}
+	if t.MaxEventAge <= 0 {
+		return fmt.Errorf("max event age must be positive")
+	}
+	return nil
+}
+
+// Validate validates sequence configuration
+func (s *SequenceConfiguration) Validate() error {
+	if s.MaxSequenceAge <= 0 {
+		return fmt.Errorf("max sequence age must be positive")
+	}
+	if s.MaxSequenceGap <= 0 {
+		return fmt.Errorf("max sequence gap must be positive")
+	}
+	if s.MinSequenceLength <= 0 {
+		return fmt.Errorf("min sequence length must be positive")
+	}
+	if s.MaxActiveSequences <= 0 {
+		return fmt.Errorf("max active sequences must be positive")
+	}
+	return nil
+}
+
+// Validate validates processing configuration
+func (p *ProcessingConfiguration) Validate() error {
+	if p.MaxRetryAttempts < 0 {
+		return fmt.Errorf("max retry attempts cannot be negative")
+	}
+	if p.DefaultQueryLimit <= 0 {
+		return fmt.Errorf("default query limit must be positive")
+	}
+	if p.MaxQueryLimit <= 0 {
+		return fmt.Errorf("max query limit must be positive")
+	}
+	if p.MaxQueryLimit < p.DefaultQueryLimit {
+		return fmt.Errorf("max query limit must be >= default query limit")
+	}
+	return nil
+}
+
+// Validate validates memory storage configuration
+func (m *MemoryStorageConfig) Validate() error {
+	if m.MaxSize <= 0 {
+		return fmt.Errorf("max size must be positive")
+	}
+	if m.MaxAge <= 0 {
+		return fmt.Errorf("max age must be positive")
+	}
+	return nil
+}
+
+// Helper functions for environment variable parsing
+
+func getEnvInt(key string, defaultValue int) int {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if val := os.Getenv(key); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			return b
+		}
+	}
+	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if val := os.Getenv(key); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			return d
+		}
+	}
+	return defaultValue
+}
+
+func getEnvString(key, defaultValue string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultValue
+}
