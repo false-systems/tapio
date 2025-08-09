@@ -126,34 +126,57 @@ func (s *Subscriber) Start(ctx context.Context) error {
 func (s *Subscriber) Stop() error {
 	s.logger.Info("Stopping NATS subscriber")
 
+	s.signalShutdown()
+	cleanupCtx := s.createCleanupContext()
+	s.unsubscribeWithTimeout(cleanupCtx)
+	s.waitForGoroutinesWithTimeout(cleanupCtx)
+	s.cleanupResources()
+	s.logShutdownStats()
+
+	return nil
+}
+
+// signalShutdown signals shutdown to all goroutines
+func (s *Subscriber) signalShutdown() {
 	// Signal shutdown
 	s.shutdown()
-
 	// Cancel internal context
 	s.cancel()
+}
 
-	// Create timeout context for cleanup operations
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+// createCleanupContext creates a timeout context for cleanup operations
+func (s *Subscriber) createCleanupContext() context.Context {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), CleanupTimeout)
+	go func() {
+		<-cleanupCtx.Done()
+		cancel()
+	}()
+	return cleanupCtx
+}
 
-	// Unsubscribe with timeout
-	if s.subscription != nil {
-		done := make(chan error, 1)
-		go func() {
-			done <- s.subscription.Unsubscribe()
-		}()
-
-		select {
-		case err := <-done:
-			if err != nil {
-				s.logger.Error("Failed to unsubscribe", zap.Error(err))
-			}
-		case <-cleanupCtx.Done():
-			s.logger.Warn("Timeout during unsubscribe operation")
-		}
+// unsubscribeWithTimeout unsubscribes with timeout protection
+func (s *Subscriber) unsubscribeWithTimeout(cleanupCtx context.Context) {
+	if s.subscription == nil {
+		return
 	}
 
-	// Wait for goroutines with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- s.subscription.Unsubscribe()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			s.logger.Error("Failed to unsubscribe", zap.Error(err))
+		}
+	case <-cleanupCtx.Done():
+		s.logger.Warn("Timeout during unsubscribe operation")
+	}
+}
+
+// waitForGoroutinesWithTimeout waits for goroutines with timeout protection
+func (s *Subscriber) waitForGoroutinesWithTimeout(cleanupCtx context.Context) {
 	done := make(chan struct{})
 	go func() {
 		s.wg.Wait()
@@ -166,18 +189,16 @@ func (s *Subscriber) Stop() error {
 	case <-cleanupCtx.Done():
 		s.logger.Warn("Timeout waiting for goroutines to stop")
 	}
+}
 
-	// Clean up all resources
-	s.cleanupResources()
-
+// logShutdownStats logs final statistics
+func (s *Subscriber) logShutdownStats() {
 	s.logger.Info("NATS subscriber stopped",
 		zap.Int64("messages_received", s.messagesReceived),
 		zap.Int64("messages_acked", s.messagesAcked),
 		zap.Int64("messages_nacked", s.messagesNacked),
 		zap.Int64("processing_errors", s.processingErrors),
 	)
-
-	return nil
 }
 
 // connect establishes NATS connection
@@ -222,11 +243,44 @@ func (s *Subscriber) setupJetStream() error {
 	if err != nil {
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
-
 	s.js = js
 
-	// Create or update stream
-	streamConfig := &nats.StreamConfig{
+	if err := s.createOrUpdateStream(); err != nil {
+		return err
+	}
+
+	return s.createOrUpdateConsumer()
+}
+
+// createOrUpdateStream creates or updates the JetStream stream
+func (s *Subscriber) createOrUpdateStream() error {
+	streamConfig := s.buildStreamConfig()
+
+	stream, err := s.js.StreamInfo(s.config.TracesStreamName)
+	if err == nats.ErrStreamNotFound {
+		// Create new stream
+		_, err = s.js.AddStream(streamConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create stream: %w", err)
+		}
+		s.logger.Info("Created JetStream stream", zap.String("name", s.config.TracesStreamName))
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to get stream info: %w", err)
+	}
+
+	// Update existing stream
+	streamConfig.Subjects = stream.Config.Subjects // Preserve existing subjects
+	_, err = s.js.UpdateStream(streamConfig)
+	if err != nil {
+		return fmt.Errorf("failed to update stream: %w", err)
+	}
+	return nil
+}
+
+// buildStreamConfig creates stream configuration from subscriber config
+func (s *Subscriber) buildStreamConfig() *nats.StreamConfig {
+	return &nats.StreamConfig{
 		Name:       s.config.TracesStreamName,
 		Subjects:   s.config.TracesSubjects,
 		Storage:    nats.FileStorage,
@@ -236,27 +290,10 @@ func (s *Subscriber) setupJetStream() error {
 		Duplicates: s.config.DuplicateWindow,
 		Replicas:   s.config.Replicas,
 	}
+}
 
-	stream, err := js.StreamInfo(s.config.TracesStreamName)
-	if err == nats.ErrStreamNotFound {
-		// Create new stream
-		_, err = js.AddStream(streamConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create stream: %w", err)
-		}
-		s.logger.Info("Created JetStream stream", zap.String("name", s.config.TracesStreamName))
-	} else if err != nil {
-		return fmt.Errorf("failed to get stream info: %w", err)
-	} else {
-		// Update existing stream
-		streamConfig.Subjects = stream.Config.Subjects // Preserve existing subjects
-		_, err = js.UpdateStream(streamConfig)
-		if err != nil {
-			return fmt.Errorf("failed to update stream: %w", err)
-		}
-	}
-
-	// Create consumer
+// createOrUpdateConsumer creates or updates the JetStream consumer
+func (s *Subscriber) createOrUpdateConsumer() error {
 	consumerConfig := &nats.ConsumerConfig{
 		Durable:       s.config.ConsumerName,
 		DeliverPolicy: nats.DeliverAllPolicy,
@@ -267,9 +304,9 @@ func (s *Subscriber) setupJetStream() error {
 		ReplayPolicy:  nats.ReplayInstantPolicy,
 	}
 
-	_, err = js.ConsumerInfo(s.config.TracesStreamName, s.config.ConsumerName)
+	_, err := s.js.ConsumerInfo(s.config.TracesStreamName, s.config.ConsumerName)
 	if err == nats.ErrConsumerNotFound {
-		_, err = js.AddConsumer(s.config.TracesStreamName, consumerConfig)
+		_, err = s.js.AddConsumer(s.config.TracesStreamName, consumerConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create consumer: %w", err)
 		}
@@ -285,118 +322,179 @@ func (s *Subscriber) setupJetStream() error {
 func (s *Subscriber) fetchMessages(ctx context.Context) {
 	defer s.wg.Done()
 
-	// Bounded retry configuration
-	const (
-		maxConsecutiveErrors = 10
-		baseBackoffDelay     = time.Second
-		maxBackoffDelay      = 30 * time.Second
-		backoffMultiplier    = 2.0
-	)
-
-	consecutiveErrors := 0
-	backoffDelay := baseBackoffDelay
+	retryState := s.initializeRetryState()
 
 	for {
-		select {
-		case <-ctx.Done():
-			s.logger.Info("fetchMessages context cancelled, shutting down")
+		if s.shouldStopFetching(ctx) {
 			return
-		default:
 		}
 
-		// Check if we've hit the error limit
-		if consecutiveErrors >= maxConsecutiveErrors {
-			s.logger.Error("Too many consecutive fetch errors, backing off",
-				zap.Int("consecutive_errors", consecutiveErrors),
-				zap.Duration("backoff_delay", backoffDelay))
-
-			// Wait with context cancellation support
-			timer := time.NewTimer(backoffDelay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
+		if s.shouldBackoff(retryState) {
+			if s.waitForBackoff(ctx, retryState) {
 				return
-			case <-timer.C:
-				// Continue after backoff
-			}
-
-			// Exponential backoff with jitter
-			backoffDelay = time.Duration(float64(backoffDelay) * backoffMultiplier)
-			if backoffDelay > maxBackoffDelay {
-				backoffDelay = maxBackoffDelay
 			}
 		}
 
-		// Bound batch size to prevent memory exhaustion
-		batchSize := s.config.BatchSize
-		const maxBatchSize = 1000
-		if batchSize > maxBatchSize {
-			batchSize = maxBatchSize
-			s.logger.Warn("Batch size exceeds maximum, capping",
-				zap.Int("requested", s.config.BatchSize),
-				zap.Int("capped_to", maxBatchSize))
-		}
+		batchSize := s.getBoundedBatchSize()
+		msgs, err := s.fetchMessageBatch(batchSize)
 
-		// Fetch messages in bounded batches
-		msgs, err := s.subscription.Fetch(batchSize, nats.MaxWait(s.config.FetchTimeout))
-
-		if err != nil {
-			if err == nats.ErrTimeout {
-				// Reset error counters on successful timeout (normal operation)
-				consecutiveErrors = 0
-				backoffDelay = baseBackoffDelay
-				continue // No messages available, keep polling
-			}
-
-			consecutiveErrors++
-			s.logger.Warn("Failed to fetch messages",
-				zap.Error(err),
-				zap.Int("consecutive_errors", consecutiveErrors))
-
-			// Short delay before retry to avoid tight loop
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Second):
-				// Continue after short delay
-			}
+		if s.handleFetchError(ctx, err, retryState) {
 			continue
 		}
 
 		// Reset error counters on successful fetch
-		consecutiveErrors = 0
-		backoffDelay = baseBackoffDelay
+		s.resetRetryState(retryState)
 
-		// Process each message with timeout protection
-		for i, msg := range msgs {
-			select {
-			case <-ctx.Done():
-				s.logger.Info("Context cancelled during message processing",
-					zap.Int("processed", i),
-					zap.Int("total", len(msgs)))
-				return
-			default:
-				s.handleMessage(msg)
-			}
+		// Process messages with context cancellation support
+		if s.processFetchedMessages(ctx, msgs) {
+			return
 		}
 	}
 }
 
+// retryState manages retry logic state
+type retryState struct {
+	consecutiveErrors int
+	backoffDelay      time.Duration
+}
+
+// initializeRetryState creates initial retry state
+func (s *Subscriber) initializeRetryState() *retryState {
+	return &retryState{
+		consecutiveErrors: 0,
+		backoffDelay:      BaseBackoffDelay,
+	}
+}
+
+// shouldStopFetching checks if context is cancelled
+func (s *Subscriber) shouldStopFetching(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		s.logger.Info("fetchMessages context cancelled, shutting down")
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldBackoff determines if we need to backoff due to errors
+func (s *Subscriber) shouldBackoff(state *retryState) bool {
+	return state.consecutiveErrors >= MaxConsecutiveErrors
+}
+
+// waitForBackoff performs exponential backoff with context support
+func (s *Subscriber) waitForBackoff(ctx context.Context, state *retryState) bool {
+	s.logger.Error("Too many consecutive fetch errors, backing off",
+		zap.Int("consecutive_errors", state.consecutiveErrors),
+		zap.Duration("backoff_delay", state.backoffDelay))
+
+	timer := time.NewTimer(state.backoffDelay)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return true
+	case <-timer.C:
+		// Update backoff delay
+		state.backoffDelay = time.Duration(float64(state.backoffDelay) * BackoffMultiplier)
+		if state.backoffDelay > MaxBackoffDelay {
+			state.backoffDelay = MaxBackoffDelay
+		}
+		return false
+	}
+}
+
+// getBoundedBatchSize returns batch size capped to maximum
+func (s *Subscriber) getBoundedBatchSize() int {
+	batchSize := s.config.BatchSize
+	if batchSize > MaxBatchSize {
+		batchSize = MaxBatchSize
+		s.logger.Warn("Batch size exceeds maximum, capping",
+			zap.Int("requested", s.config.BatchSize),
+			zap.Int("capped_to", MaxBatchSize))
+	}
+	return batchSize
+}
+
+// fetchMessageBatch fetches a batch of messages from subscription
+func (s *Subscriber) fetchMessageBatch(batchSize int) ([]*nats.Msg, error) {
+	return s.subscription.Fetch(batchSize, nats.MaxWait(s.config.FetchTimeout))
+}
+
+// handleFetchError processes fetch errors and updates retry state
+func (s *Subscriber) handleFetchError(ctx context.Context, err error, state *retryState) bool {
+	if err == nil {
+		return false // No error, continue processing
+	}
+
+	if err == nats.ErrTimeout {
+		// Reset error counters on successful timeout (normal operation)
+		s.resetRetryState(state)
+		return true // Continue to next iteration
+	}
+
+	state.consecutiveErrors++
+	s.logger.Warn("Failed to fetch messages",
+		zap.Error(err),
+		zap.Int("consecutive_errors", state.consecutiveErrors))
+
+	// Short delay before retry to avoid tight loop
+	select {
+	case <-ctx.Done():
+		return false // Context cancelled, stop fetching
+	case <-time.After(RetryShortDelay):
+		return true // Continue to next iteration
+	}
+}
+
+// resetRetryState resets retry counters after successful operation
+func (s *Subscriber) resetRetryState(state *retryState) {
+	state.consecutiveErrors = 0
+	state.backoffDelay = BaseBackoffDelay
+}
+
+// processFetchedMessages processes a batch of fetched messages
+func (s *Subscriber) processFetchedMessages(ctx context.Context, msgs []*nats.Msg) bool {
+	for i, msg := range msgs {
+		select {
+		case <-ctx.Done():
+			s.logger.Info("Context cancelled during message processing",
+				zap.Int("processed", i),
+				zap.Int("total", len(msgs)))
+			return true
+		default:
+			s.handleMessage(msg)
+		}
+	}
+	return false
+}
+
 // handleMessage processes a single NATS message with timeout protection
 func (s *Subscriber) handleMessage(msg *nats.Msg) {
-	// Update metrics atomically
+	s.updateMessageMetrics()
+
+	processCtx, cancel := context.WithTimeout(s.ctx, ProcessingTimeout)
+	defer cancel()
+
+	traceID := s.extractTraceID(msg.Subject)
+	event, err := s.parseAndValidateEvent(msg, traceID)
+	if err != nil {
+		s.nackMessage(msg)
+		return
+	}
+
+	s.ensureEventTraceContext(event, traceID)
+	s.processEventWithTimeout(processCtx, msg, event, traceID)
+}
+
+// updateMessageMetrics atomically updates message received metrics
+func (s *Subscriber) updateMessageMetrics() {
 	s.mu.Lock()
 	s.messagesReceived++
 	s.mu.Unlock()
+}
 
-	// Create processing context with timeout
-	processCtx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
-	defer cancel()
-
-	// Extract trace ID from subject
-	traceID := s.extractTraceID(msg.Subject)
-
-	// Parse event with validation
+// parseAndValidateEvent parses and validates the event from message
+func (s *Subscriber) parseAndValidateEvent(msg *nats.Msg, traceID string) (*domain.UnifiedEvent, error) {
 	var event domain.UnifiedEvent
 	if err := json.Unmarshal(msg.Data, &event); err != nil {
 		s.logger.Error("Failed to unmarshal event",
@@ -404,8 +502,7 @@ func (s *Subscriber) handleMessage(msg *nats.Msg) {
 			zap.String("subject", msg.Subject),
 			zap.String("trace_id", traceID),
 		)
-		s.nackMessage(msg)
-		return
+		return nil, err
 	}
 
 	// Validate essential event fields
@@ -413,11 +510,14 @@ func (s *Subscriber) handleMessage(msg *nats.Msg) {
 		s.logger.Warn("Event missing required ID field",
 			zap.String("subject", msg.Subject),
 			zap.String("trace_id", traceID))
-		s.nackMessage(msg)
-		return
+		return nil, fmt.Errorf("event missing required ID field")
 	}
 
-	// Ensure event has trace context
+	return &event, nil
+}
+
+// ensureEventTraceContext ensures event has proper trace context
+func (s *Subscriber) ensureEventTraceContext(event *domain.UnifiedEvent, traceID string) {
 	if event.TraceContext == nil && traceID != "" {
 		event.TraceContext = &domain.TraceContext{
 			TraceID: traceID,
@@ -425,67 +525,87 @@ func (s *Subscriber) handleMessage(msg *nats.Msg) {
 	} else if event.TraceContext != nil && traceID != "" && event.TraceContext.TraceID == "" {
 		event.TraceContext.TraceID = traceID
 	}
+}
 
-	// Process through correlation engine with timeout
+// processEventWithTimeout processes event through correlation engine with timeout
+func (s *Subscriber) processEventWithTimeout(processCtx context.Context, msg *nats.Msg, event *domain.UnifiedEvent, traceID string) {
 	processingDone := make(chan error, 1)
 	go func() {
-		processingDone <- s.engine.Process(processCtx, &event)
+		processingDone <- s.engine.Process(processCtx, event)
 	}()
 
 	select {
 	case err := <-processingDone:
-		if err != nil {
-			s.logger.Error("Failed to process event",
-				zap.Error(err),
-				zap.String("event_id", event.ID),
-				zap.String("trace_id", traceID),
-			)
+		s.handleProcessingResult(msg, event, traceID, err)
+	case <-processCtx.Done():
+		s.handleProcessingTimeout(msg, event, traceID)
+	}
+}
 
-			s.mu.Lock()
-			s.processingErrors++
-			s.mu.Unlock()
+// handleProcessingResult handles the result of event processing
+func (s *Subscriber) handleProcessingResult(msg *nats.Msg, event *domain.UnifiedEvent, traceID string, err error) {
+	if err != nil {
+		s.logger.Error("Failed to process event",
+			zap.Error(err),
+			zap.String("event_id", event.ID),
+			zap.String("trace_id", traceID),
+		)
 
-			// Check if this is the last delivery attempt
-			if metadata, err := msg.Metadata(); err == nil && metadata != nil {
-				if metadata.NumDelivered >= uint64(s.config.MaxDeliver-1) {
-					// Last attempt, acknowledge to avoid infinite redelivery
-					s.logger.Warn("Max delivery attempts reached, acknowledging message",
-						zap.String("event_id", event.ID),
-						zap.Uint64("deliveries", metadata.NumDelivered),
-					)
-					s.ackMessage(msg)
-					return
-				}
-			} else {
-				s.logger.Warn("Failed to get message metadata", zap.Error(err))
-			}
+		s.incrementProcessingErrors()
 
-			s.nackMessage(msg)
+		if s.isLastDeliveryAttempt(msg, event.ID) {
+			s.ackMessage(msg)
 			return
 		}
 
-		// Successfully processed
-		s.ackMessage(msg)
-		s.logger.Debug("Event processed successfully",
-			zap.String("event_id", event.ID),
-			zap.String("trace_id", traceID),
-			zap.String("type", string(event.Type)),
-		)
-
-	case <-processCtx.Done():
-		// Processing timeout
-		s.logger.Error("Event processing timeout",
-			zap.String("event_id", event.ID),
-			zap.String("trace_id", traceID),
-			zap.Duration("timeout", 20*time.Second))
-
-		s.mu.Lock()
-		s.processingErrors++
-		s.mu.Unlock()
-
-		// Nack message for redelivery due to timeout
 		s.nackMessage(msg)
+		return
 	}
+
+	// Successfully processed
+	s.ackMessage(msg)
+	s.logger.Debug("Event processed successfully",
+		zap.String("event_id", event.ID),
+		zap.String("trace_id", traceID),
+		zap.String("type", string(event.Type)),
+	)
+}
+
+// handleProcessingTimeout handles processing timeout
+func (s *Subscriber) handleProcessingTimeout(msg *nats.Msg, event *domain.UnifiedEvent, traceID string) {
+	s.logger.Error("Event processing timeout",
+		zap.String("event_id", event.ID),
+		zap.String("trace_id", traceID),
+		zap.Duration("timeout", ProcessingTimeout))
+
+	s.incrementProcessingErrors()
+	s.nackMessage(msg)
+}
+
+// incrementProcessingErrors atomically increments processing error count
+func (s *Subscriber) incrementProcessingErrors() {
+	s.mu.Lock()
+	s.processingErrors++
+	s.mu.Unlock()
+}
+
+// isLastDeliveryAttempt checks if this is the last delivery attempt
+func (s *Subscriber) isLastDeliveryAttempt(msg *nats.Msg, eventID string) bool {
+	metadata, err := msg.Metadata()
+	if err != nil {
+		s.logger.Warn("Failed to get message metadata", zap.Error(err))
+		return false
+	}
+
+	if metadata != nil && metadata.NumDelivered >= uint64(s.config.MaxDeliver-1) {
+		s.logger.Warn("Max delivery attempts reached, acknowledging message",
+			zap.String("event_id", eventID),
+			zap.Uint64("deliveries", metadata.NumDelivered),
+		)
+		return true
+	}
+
+	return false
 }
 
 // extractTraceID extracts trace ID from NATS subject
@@ -526,7 +646,7 @@ func (s *Subscriber) nackMessage(msg *nats.Msg) {
 func (s *Subscriber) metricsReporter() {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(MetricsReportInterval)
 	defer ticker.Stop()
 
 	var lastReceived, lastAcked, lastNacked int64
@@ -574,19 +694,21 @@ func (s *Subscriber) metricsReporter() {
 }
 
 // GetMetrics returns current subscriber metrics
-func (s *Subscriber) GetMetrics() map[string]interface{} {
+func (s *Subscriber) GetMetrics() SubscriberMetrics {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	pending, _, _ := s.subscription.Pending()
 
-	return map[string]interface{}{
-		"messages_received": s.messagesReceived,
-		"messages_acked":    s.messagesAcked,
-		"messages_nacked":   s.messagesNacked,
-		"processing_errors": s.processingErrors,
-		"pending_messages":  pending,
-		"connected":         s.nc.IsConnected(),
+	return SubscriberMetrics{
+		MessagesReceived: s.messagesReceived,
+		MessagesAcked:    s.messagesAcked,
+		MessagesNacked:   s.messagesNacked,
+		ProcessingErrors: s.processingErrors,
+		PendingMessages:  pending,
+		Connected:        s.nc.IsConnected(),
+		LastActivity:     time.Now(),
+		ConsumerInfo:     s.config.ConsumerName,
 	}
 }
 
