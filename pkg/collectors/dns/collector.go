@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -15,8 +14,6 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/dns/bpf"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"

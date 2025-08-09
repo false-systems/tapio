@@ -2,14 +2,19 @@ package etcd
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
 func init() {
-	// Register the etcd collector factory
-	registry.Register("etcd", NewCollectorFromConfig)
+	// Register the etcd collector factory with error handling
+	if err := registry.Register("etcd", NewCollectorFromConfig); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register ETCD collector: %v", err)
+		log.Printf("ETCD collector will not be available")
+	}
 }
 
 // NewCollectorFromConfig creates a new etcd collector from configuration

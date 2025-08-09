@@ -32,11 +32,21 @@ type cniEvent struct {
 	Data      [64]byte
 }
 
-// eBPF components
+// eBPF components - implements EBPFState interface
 type ebpfState struct {
 	objs   *cniMonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
+}
+
+// IsLoaded returns true if eBPF programs are loaded
+func (s *ebpfState) IsLoaded() bool {
+	return s.objs != nil
+}
+
+// LinkCount returns the number of active eBPF links
+func (s *ebpfState) LinkCount() int {
+	return len(s.links)
 }
 
 // startEBPF initializes eBPF monitoring with comprehensive OTEL instrumentation
@@ -54,20 +64,24 @@ func (c *Collector) startEBPF() error {
 	)
 
 	// Record eBPF load attempt
-	c.ebpfLoadsTotal.Add(ctx, 1,
-		metric.WithAttributes(
-			attribute.String("collector.name", c.name),
-		),
-	)
+	if c.ebpfLoadsTotal != nil {
+		c.ebpfLoadsTotal.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+			),
+		)
+	}
 
 	// Remove memory limit for eBPF
 	if err := rlimit.RemoveMemlock(); err != nil {
-		c.ebpfLoadErrors.Add(ctx, 1,
-			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
-				attribute.String("error.type", "memlock_removal"),
-			),
-		)
+		if c.ebpfLoadErrors != nil {
+			c.ebpfLoadErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("error.type", "memlock_removal"),
+				),
+			)
+		}
 		span.RecordError(err)
 		c.logger.Error("Failed to remove memlock",
 			zap.Error(err),
@@ -79,12 +93,14 @@ func (c *Collector) startEBPF() error {
 	// Load eBPF objects
 	objs := &cniMonitorObjects{}
 	if err := loadCniMonitorObjects(objs, nil); err != nil {
-		c.ebpfLoadErrors.Add(ctx, 1,
-			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
-				attribute.String("error.type", "object_loading"),
-			),
-		)
+		if c.ebpfLoadErrors != nil {
+			c.ebpfLoadErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("error.type", "object_loading"),
+				),
+			)
+		}
 		span.RecordError(err)
 		c.logger.Error("Failed to load eBPF objects",
 			zap.Error(err),
@@ -100,21 +116,25 @@ func (c *Collector) startEBPF() error {
 	}
 
 	// Attach to network namespace operations with metrics
-	c.ebpfAttachTotal.Add(ctx, 1,
-		metric.WithAttributes(
-			attribute.String("collector.name", c.name),
-			attribute.String("tracepoint", "sys_enter_setns"),
-		),
-	)
-	l1, err := link.Tracepoint("syscalls", "sys_enter_setns", objs.TraceSysEnterSetns, nil)
-	if err != nil {
-		c.ebpfAttachErrors.Add(ctx, 1,
+	if c.ebpfAttachTotal != nil {
+		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
 				attribute.String("collector.name", c.name),
 				attribute.String("tracepoint", "sys_enter_setns"),
-				attribute.String("error.type", "attach_failure"),
 			),
 		)
+	}
+	l1, err := link.Tracepoint("syscalls", "sys_enter_setns", objs.TraceSysEnterSetns, nil)
+	if err != nil {
+		if c.ebpfAttachErrors != nil {
+			c.ebpfAttachErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("tracepoint", "sys_enter_setns"),
+					attribute.String("error.type", "attach_failure"),
+				),
+			)
+		}
 		objs.Close()
 		span.RecordError(err)
 		c.logger.Error("Failed to attach setns tracepoint",
@@ -126,21 +146,25 @@ func (c *Collector) startEBPF() error {
 	state.links = append(state.links, l1)
 
 	// Attach to unshare (new network namespace)
-	c.ebpfAttachTotal.Add(ctx, 1,
-		metric.WithAttributes(
-			attribute.String("collector.name", c.name),
-			attribute.String("tracepoint", "sys_enter_unshare"),
-		),
-	)
-	l2, err := link.Tracepoint("syscalls", "sys_enter_unshare", objs.TraceSysEnterUnshare, nil)
-	if err != nil {
-		c.ebpfAttachErrors.Add(ctx, 1,
+	if c.ebpfAttachTotal != nil {
+		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
 				attribute.String("collector.name", c.name),
 				attribute.String("tracepoint", "sys_enter_unshare"),
-				attribute.String("error.type", "attach_failure"),
 			),
 		)
+	}
+	l2, err := link.Tracepoint("syscalls", "sys_enter_unshare", objs.TraceSysEnterUnshare, nil)
+	if err != nil {
+		if c.ebpfAttachErrors != nil {
+			c.ebpfAttachErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("tracepoint", "sys_enter_unshare"),
+					attribute.String("error.type", "attach_failure"),
+				),
+			)
+		}
 		state.cleanup()
 		span.RecordError(err)
 		c.logger.Error("Failed to attach unshare tracepoint",
@@ -154,12 +178,14 @@ func (c *Collector) startEBPF() error {
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
-		c.ebpfLoadErrors.Add(ctx, 1,
-			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
-				attribute.String("error.type", "ringbuf_creation"),
-			),
-		)
+		if c.ebpfLoadErrors != nil {
+			c.ebpfLoadErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("error.type", "ringbuf_creation"),
+				),
+			)
+		}
 		state.cleanup()
 		span.RecordError(err)
 		c.logger.Error("Failed to create ring buffer reader",
@@ -285,12 +311,14 @@ func (c *Collector) readEBPFEvents() {
 		// Try to send event with metrics tracking
 		select {
 		case c.events <- rawEvent:
-			c.eventsProcessed.Add(ctx, 1,
-				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
-					attribute.String("event.type", eventTypeToString(event.EventType)),
-				),
-			)
+			if c.eventsProcessed != nil {
+				c.eventsProcessed.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+						attribute.String("event.type", eventTypeToString(event.EventType)),
+					),
+				)
+			}
 		case <-c.ctx.Done():
 			c.logger.Info("Context cancelled during event processing",
 				zap.String("collector.name", c.name),
@@ -299,12 +327,14 @@ func (c *Collector) readEBPFEvents() {
 			return
 		default:
 			// Buffer full, drop event and record metric
-			c.eventsDropped.Add(ctx, 1,
-				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
-					attribute.String("reason", "buffer_full"),
-				),
-			)
+			if c.eventsDropped != nil {
+				c.eventsDropped.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+						attribute.String("reason", "buffer_full"),
+					),
+				)
+			}
 			c.logger.Warn("Dropped event due to full buffer",
 				zap.String("collector.name", c.name),
 				zap.String("event.type", eventTypeToString(event.EventType)),
@@ -313,13 +343,15 @@ func (c *Collector) readEBPFEvents() {
 		}
 
 		// Record processing latency
-		duration := time.Since(start).Seconds()
-		c.processingLatency.Record(ctx, duration,
-			metric.WithAttributes(
-				attribute.String("operation", "ebpf_event_processing"),
-				attribute.String("event.type", eventTypeToString(event.EventType)),
-			),
-		)
+		if c.processingLatency != nil {
+			duration := time.Since(start).Seconds()
+			c.processingLatency.Record(ctx, duration,
+				metric.WithAttributes(
+					attribute.String("operation", "ebpf_event_processing"),
+					attribute.String("event.type", eventTypeToString(event.EventType)),
+				),
+			)
+		}
 	}
 }
 

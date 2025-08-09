@@ -1,12 +1,19 @@
 package dns
 
 import (
+	"log"
+
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
 func init() {
-	registry.Register("dns", CreateCollector)
+	// Register the DNS collector factory with error handling
+	if err := registry.Register("dns", CreateCollector); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register DNS collector: %v", err)
+		log.Printf("DNS collector will not be available")
+	}
 }
 
 // CreateCollector creates a new DNS collector from config

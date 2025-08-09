@@ -1,13 +1,19 @@
 package kubeapi
 
 import (
+	"log"
+
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
 func init() {
-	// Register the KubeAPI collector factory
-	registry.Register("kubeapi", NewCollectorFromConfig)
+	// Register the KubeAPI collector factory with error handling
+	if err := registry.Register("kubeapi", NewCollectorFromConfig); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register KubeAPI collector: %v", err)
+		log.Printf("KubeAPI collector will not be available")
+	}
 }
 
 // NewCollectorFromConfig creates a new KubeAPI collector from configuration

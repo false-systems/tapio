@@ -2,6 +2,7 @@ package kubelet
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
@@ -10,7 +11,12 @@ import (
 )
 
 func init() {
-	registry.Register("kubelet", createKubeletCollector)
+	// Register the Kubelet collector factory with error handling
+	if err := registry.Register("kubelet", createKubeletCollector); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register Kubelet collector: %v", err)
+		log.Printf("Kubelet collector will not be available")
+	}
 }
 
 func createKubeletCollector(configMap map[string]interface{}) (collectors.Collector, error) {

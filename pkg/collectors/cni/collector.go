@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -25,20 +26,27 @@ type PodInfo struct {
 }
 
 // EBPFState represents platform-specific eBPF state
-type EBPFState struct {
-	Objects interface{} // Generated eBPF objects
-	Links   []interface{}
+// This is a minimal abstraction over the actual eBPF implementation
+type EBPFState interface {
+	// IsLoaded returns true if eBPF programs are loaded
+	IsLoaded() bool
+	// LinkCount returns the number of active eBPF links
+	LinkCount() int
 }
 
 // Collector implements minimal CNI monitoring with comprehensive OTEL observability
 type Collector struct {
 	name      string
+	config    *config.CNIConfig
 	events    chan collectors.RawEvent
 	ctx       context.Context
 	cancel    context.CancelFunc
 	healthy   bool
-	ebpfState *EBPFState
+	ebpfState EBPFState
 	mutex     sync.RWMutex // Protects concurrent access
+
+	// Health tracking with atomic operations
+	healthTracker *collectors.HealthTracker
 
 	// OTEL instrumentation
 	tracer             trace.Tracer
@@ -70,13 +78,14 @@ func NewCollector(name string) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Create metrics
+	// Create metrics with graceful degradation
 	eventsProcessed, err := meter.Int64Counter(
 		"cni_events_processed_total",
 		metric.WithDescription("Total number of CNI events processed"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create events_processed counter: %w", err)
+		logger.Warn("Failed to create events_processed counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	eventsDropped, err := meter.Int64Counter(
@@ -84,7 +93,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of CNI events dropped due to buffer full"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create events_dropped counter: %w", err)
+		logger.Warn("Failed to create events_dropped counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	ebpfLoadsTotal, err := meter.Int64Counter(
@@ -92,7 +102,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of eBPF program load attempts"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ebpf_loads_total counter: %w", err)
+		logger.Warn("Failed to create ebpf_loads_total counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	ebpfLoadErrors, err := meter.Int64Counter(
@@ -100,7 +111,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of eBPF program load errors"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ebpf_load_errors counter: %w", err)
+		logger.Warn("Failed to create ebpf_load_errors counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	ebpfAttachTotal, err := meter.Int64Counter(
@@ -108,7 +120,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of eBPF program attach attempts"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ebpf_attach_total counter: %w", err)
+		logger.Warn("Failed to create ebpf_attach_total counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	ebpfAttachErrors, err := meter.Int64Counter(
@@ -116,7 +129,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of eBPF program attach errors"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ebpf_attach_errors counter: %w", err)
+		logger.Warn("Failed to create ebpf_attach_errors counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	collectorHealth, err := meter.Int64Gauge(
@@ -124,7 +138,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("CNI collector health status (1=healthy, 0=unhealthy)"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create collector_healthy gauge: %w", err)
+		logger.Warn("Failed to create collector_healthy gauge", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	k8sExtractionTotal, err := meter.Int64Counter(
@@ -132,7 +147,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of K8s metadata extraction attempts"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create k8s_extraction_total counter: %w", err)
+		logger.Warn("Failed to create k8s_extraction_total counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	k8sExtractionHits, err := meter.Int64Counter(
@@ -140,7 +156,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of successful K8s metadata extractions"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create k8s_extraction_hits counter: %w", err)
+		logger.Warn("Failed to create k8s_extraction_hits counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	netnsOpsByType, err := meter.Int64Counter(
@@ -148,7 +165,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Total number of network namespace operations by type"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create netns_ops_by_type counter: %w", err)
+		logger.Warn("Failed to create netns_ops_by_type counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	bufferUtilization, err := meter.Float64Gauge(
@@ -156,7 +174,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription("Event buffer utilization ratio (0.0-1.0)"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create buffer_utilization gauge: %w", err)
+		logger.Warn("Failed to create buffer_utilization gauge", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	processingLatency, err := meter.Float64Histogram(
@@ -165,7 +184,8 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithUnit("s"),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create processing_latency histogram: %w", err)
+		logger.Warn("Failed to create processing_latency histogram", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
 	c := &Collector{
@@ -191,6 +211,160 @@ func NewCollector(name string) (*Collector, error) {
 
 	// Record initial health status
 	c.recordHealthStatus()
+
+	return c, nil
+}
+
+// NewCollectorWithConfig creates a new CNI collector with type-safe configuration
+func NewCollectorWithConfig(cfg *config.CNIConfig) (*Collector, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Initialize OTEL components
+	tracer := otel.Tracer("cni-collector")
+	meter := otel.Meter("cni-collector")
+
+	// Initialize logger
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger: %w", err)
+	}
+
+	// Create metrics with graceful degradation
+	eventsProcessed, err := meter.Int64Counter(
+		"cni_events_processed_total",
+		metric.WithDescription("Total number of CNI events processed"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events_processed counter", zap.Error(err))
+	}
+
+	eventsDropped, err := meter.Int64Counter(
+		"cni_events_dropped_total",
+		metric.WithDescription("Total number of CNI events dropped due to buffer full"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events_dropped counter", zap.Error(err))
+	}
+
+	ebpfLoadsTotal, err := meter.Int64Counter(
+		"cni_ebpf_loads_total",
+		metric.WithDescription("Total number of eBPF program loads"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_loads_total counter", zap.Error(err))
+	}
+
+	ebpfLoadErrors, err := meter.Int64Counter(
+		"cni_ebpf_load_errors_total",
+		metric.WithDescription("Total number of eBPF program load errors"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_load_errors counter", zap.Error(err))
+	}
+
+	ebpfAttachTotal, err := meter.Int64Counter(
+		"cni_ebpf_attach_total",
+		metric.WithDescription("Total number of eBPF program attach attempts"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach_total counter", zap.Error(err))
+	}
+
+	ebpfAttachErrors, err := meter.Int64Counter(
+		"cni_ebpf_attach_errors_total",
+		metric.WithDescription("Total number of eBPF program attach errors"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach_errors counter", zap.Error(err))
+	}
+
+	collectorHealth, err := meter.Int64Gauge(
+		"cni_collector_healthy",
+		metric.WithDescription("CNI collector health status (1=healthy, 0=unhealthy)"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create collector_healthy gauge", zap.Error(err))
+	}
+
+	k8sExtractionTotal, err := meter.Int64Counter(
+		"cni_k8s_extraction_attempts_total",
+		metric.WithDescription("Total number of K8s metadata extraction attempts"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction_total counter", zap.Error(err))
+	}
+
+	k8sExtractionHits, err := meter.Int64Counter(
+		"cni_k8s_extraction_hits_total",
+		metric.WithDescription("Total number of successful K8s metadata extractions"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction_hits counter", zap.Error(err))
+	}
+
+	netnsOpsByType, err := meter.Int64Counter(
+		"cni_netns_operations_by_type_total",
+		metric.WithDescription("Total number of network namespace operations by type"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create netns_ops_by_type counter", zap.Error(err))
+	}
+
+	bufferUtilization, err := meter.Float64Gauge(
+		"cni_buffer_utilization_percent",
+		metric.WithDescription("Event buffer utilization as percentage"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create buffer_utilization gauge", zap.Error(err))
+	}
+
+	processingLatency, err := meter.Float64Histogram(
+		"cni_processing_latency_seconds",
+		metric.WithDescription("Event processing latency in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing_latency histogram", zap.Error(err))
+	}
+
+	// Create collector with configuration
+	c := &Collector{
+		name:               cfg.Name,
+		config:             cfg,
+		events:             make(chan collectors.RawEvent, cfg.BufferSize),
+		healthy:            true,
+		healthTracker:      collectors.NewHealthTracker(),
+		tracer:             tracer,
+		meter:              meter,
+		logger:             logger,
+		eventsProcessed:    eventsProcessed,
+		eventsDropped:      eventsDropped,
+		ebpfLoadsTotal:     ebpfLoadsTotal,
+		ebpfLoadErrors:     ebpfLoadErrors,
+		ebpfAttachTotal:    ebpfAttachTotal,
+		ebpfAttachErrors:   ebpfAttachErrors,
+		collectorHealth:    collectorHealth,
+		k8sExtractionTotal: k8sExtractionTotal,
+		k8sExtractionHits:  k8sExtractionHits,
+		netnsOpsByType:     netnsOpsByType,
+		bufferUtilization:  bufferUtilization,
+		processingLatency:  processingLatency,
+	}
+
+	logger.Info("CNI collector created",
+		zap.String("name", cfg.Name),
+		zap.Int("buffer_size", cfg.BufferSize),
+		zap.String("interface_prefix", cfg.InterfacePrefix),
+		zap.Bool("enable_network_policies", cfg.EnableNetworkPolicies),
+		zap.Bool("track_bandwidth", cfg.TrackBandwidth),
+	)
 
 	return c, nil
 }
@@ -299,22 +473,78 @@ func (c *Collector) Events() <-chan collectors.RawEvent {
 
 // IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
+	if c.healthTracker != nil {
+		return c.healthTracker.IsHealthy()
+	}
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return c.healthy
 }
 
+// GetHealthStatus returns structured health information
+func (c *Collector) GetHealthStatus() collectors.HealthStatus {
+	if c.healthTracker != nil {
+		// Create component health map
+		components := map[string]bool{
+			"ebpf_loaded": c.ebpfState != nil && c.ebpfState.IsLoaded(),
+			"metrics":     c.eventsProcessed != nil,
+			"tracer":      c.tracer != nil,
+			"logger":      c.logger != nil,
+		}
+
+		// Calculate resource usage
+		usage := collectors.ResourceUsage{
+			BufferUtilization: c.calculateBufferUtilization(),
+			GoroutineCount:    1, // Main processing goroutine
+		}
+
+		if c.ebpfState != nil {
+			usage.FileDescriptorCount = c.ebpfState.LinkCount()
+		}
+
+		return c.healthTracker.GetHealthStatusWithComponents(components, usage)
+	}
+
+	// Fallback for legacy collectors
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	return collectors.HealthStatus{
+		Healthy:         c.healthy,
+		EventsCollected: 0, // Would need to track this
+		EventsDropped:   0, // Would need to track this
+		ErrorCount:      0, // Would need to track this
+	}
+}
+
+// calculateBufferUtilization calculates current buffer utilization percentage
+func (c *Collector) calculateBufferUtilization() float64 {
+	if c.events == nil {
+		return 0.0
+	}
+
+	capacity := float64(cap(c.events))
+	if capacity == 0 {
+		return 0.0
+	}
+
+	current := float64(len(c.events))
+	return (current / capacity) * 100.0
+}
+
 // recordHealthStatus records the current health status to metrics
 func (c *Collector) recordHealthStatus() {
-	healthValue := int64(0)
-	if c.healthy {
-		healthValue = 1
+	if c.collectorHealth != nil {
+		healthValue := int64(0)
+		if c.healthy {
+			healthValue = 1
+		}
+		c.collectorHealth.Record(context.Background(), healthValue,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+			),
+		)
 	}
-	c.collectorHealth.Record(context.Background(), healthValue,
-		metric.WithAttributes(
-			attribute.String("collector.name", c.name),
-		),
-	)
 }
 
 // monitorBufferUtilization monitors and reports buffer utilization
@@ -327,12 +557,14 @@ func (c *Collector) monitorBufferUtilization() {
 		case <-c.ctx.Done():
 			return
 		case <-ticker.C:
-			utilization := float64(len(c.events)) / float64(cap(c.events))
-			c.bufferUtilization.Record(context.Background(), utilization,
-				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
-				),
-			)
+			if c.bufferUtilization != nil {
+				utilization := float64(len(c.events)) / float64(cap(c.events))
+				c.bufferUtilization.Record(context.Background(), utilization,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+					),
+				)
+			}
 		}
 	}
 }
@@ -348,13 +580,15 @@ func (c *Collector) createEvent(eventType string, data map[string]string) collec
 	)
 	defer span.End()
 	defer func() {
-		duration := time.Since(start).Seconds()
-		c.processingLatency.Record(ctx, duration,
-			metric.WithAttributes(
-				attribute.String("operation", "create_event"),
-				attribute.String("event.type", eventType),
-			),
-		)
+		if c.processingLatency != nil {
+			duration := time.Since(start).Seconds()
+			c.processingLatency.Record(ctx, duration,
+				metric.WithAttributes(
+					attribute.String("operation", "create_event"),
+					attribute.String("event.type", eventType),
+				),
+			)
+		}
 	}()
 
 	jsonData, err := json.Marshal(data)
@@ -364,7 +598,12 @@ func (c *Collector) createEvent(eventType string, data map[string]string) collec
 			"error": err.Error(),
 			"type":  "marshal_error",
 		}
-		jsonData, _ = json.Marshal(errorData)
+		if errorJSON, marshalErr := json.Marshal(errorData); marshalErr != nil {
+			// If we can't marshal error data, use a minimal fallback
+			jsonData = []byte(`{"error":"marshal_failed","type":"marshal_error"}`)
+		} else {
+			jsonData = errorJSON
+		}
 		span.RecordError(err)
 		c.logger.Error("Failed to marshal event data",
 			zap.Error(err),
@@ -380,17 +619,21 @@ func (c *Collector) createEvent(eventType string, data map[string]string) collec
 
 	// Extract K8s metadata from CNI data with metrics
 	if netnsPath, ok := data["netns_path"]; ok {
-		c.k8sExtractionTotal.Add(ctx, 1,
-			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
-			),
-		)
-		if podInfo := c.parseK8sFromNetns(netnsPath); podInfo != nil {
-			c.k8sExtractionHits.Add(ctx, 1,
+		if c.k8sExtractionTotal != nil {
+			c.k8sExtractionTotal.Add(ctx, 1,
 				metric.WithAttributes(
 					attribute.String("collector.name", c.name),
 				),
 			)
+		}
+		if podInfo := c.parseK8sFromNetns(netnsPath); podInfo != nil {
+			if c.k8sExtractionHits != nil {
+				c.k8sExtractionHits.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+					),
+				)
+			}
 			metadata["k8s_kind"] = "Pod"
 			metadata["k8s_uid"] = podInfo.PodUID
 			// Only set if we have values
@@ -411,12 +654,14 @@ func (c *Collector) createEvent(eventType string, data map[string]string) collec
 	}
 
 	// Record network namespace operation by type
-	c.netnsOpsByType.Add(ctx, 1,
-		metric.WithAttributes(
-			attribute.String("operation.type", eventType),
-			attribute.String("collector.name", c.name),
-		),
-	)
+	if c.netnsOpsByType != nil {
+		c.netnsOpsByType.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("operation.type", eventType),
+				attribute.String("collector.name", c.name),
+			),
+		)
+	}
 
 	// Generate event with trace context
 	traceID := span.SpanContext().TraceID().String()
