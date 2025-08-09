@@ -1,6 +1,6 @@
-package ebpf
+package kernel
 
-// Config holds eBPF collector configuration
+// Config holds kernel collector configuration
 type Config struct {
 	Name string
 }
@@ -8,6 +8,6 @@ type Config struct {
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Name: "ebpf-collector",
+		Name: "kernel-collector",
 	}
 }

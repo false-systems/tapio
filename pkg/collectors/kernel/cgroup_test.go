@@ -1,4 +1,4 @@
-package ebpf
+package kernel
 
 import (
 	"context"
@@ -31,7 +31,7 @@ func TestCgroupIDExtraction(t *testing.T) {
 				err = collector.Start(ctx)
 				if err != nil {
 					cancel()
-					t.Skip("eBPF not available in test environment")
+					t.Skip("kernel eBPF not available in test environment")
 				}
 
 				cleanup := func() {
@@ -121,7 +121,7 @@ func TestCgroupIDExtraction(t *testing.T) {
 				err = collector.Start(ctx)
 				if err != nil {
 					cancel()
-					t.Skip("eBPF not available in test environment")
+					t.Skip("kernel eBPF not available in test environment")
 				}
 
 				cleanup := func() {
@@ -228,7 +228,7 @@ func TestCgroupIDCorrelation(t *testing.T) {
 
 	err = collector.Start(ctx)
 	if err != nil {
-		t.Skip("eBPF not available in test environment")
+		t.Skip("kernel eBPF not available in test environment")
 	}
 	defer collector.Stop()
 
@@ -238,7 +238,7 @@ func TestCgroupIDCorrelation(t *testing.T) {
 	testNamespace := "test-namespace"
 	testPodName := "test-pod"
 
-	// Update pod info in eBPF map
+	// Update pod info in kernel eBPF map
 	err = collector.UpdatePodInfo(testCgroupID, testPodUID, testNamespace, testPodName)
 	require.NoError(t, err)
 
@@ -270,7 +270,7 @@ func TestCgroupIDUniqueness(t *testing.T) {
 
 	err = collector.Start(ctx)
 	if err != nil {
-		t.Skip("eBPF not available in test environment")
+		t.Skip("kernel eBPF not available in test environment")
 	}
 	defer collector.Stop()
 
@@ -352,7 +352,7 @@ func BenchmarkCgroupIDExtraction(b *testing.B) {
 
 	err = collector.Start(ctx)
 	if err != nil {
-		b.Skip("eBPF not available")
+		b.Skip("kernel eBPF not available")
 	}
 	defer collector.Stop()
 

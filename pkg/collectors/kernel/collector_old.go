@@ -1,4 +1,4 @@
-package ebpf
+package kernel
 
 import (
 	"context"
@@ -12,11 +12,11 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/ebpf/bpf"
+	"github.com/yairfalse/tapio/pkg/collectors/kernel/bpf"
 	"go.uber.org/zap"
 )
 
-// Collector implements minimal kernel monitoring via eBPF
+// Collector implements kernel monitoring via eBPF
 type Collector struct {
 	name        string
 	logger      *zap.Logger
@@ -32,7 +32,7 @@ type Collector struct {
 	stats       CollectorStats
 }
 
-// NewCollector creates a new minimal eBPF collector
+// NewCollector creates a new kernel collector
 func NewCollector(name string) (*Collector, error) {
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -43,7 +43,7 @@ func NewCollector(name string) (*Collector, error) {
 	}, logger)
 }
 
-// NewCollectorWithConfig creates a new eBPF collector with config
+// NewCollectorWithConfig creates a new kernel collector with config
 func NewCollectorWithConfig(config *Config, logger *zap.Logger) (*Collector, error) {
 	if logger == nil {
 		var err error
@@ -69,7 +69,7 @@ func (c *Collector) Name() string {
 	return c.name
 }
 
-// Start starts the eBPF monitoring
+// Start starts the kernel monitoring
 func (c *Collector) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
@@ -263,7 +263,7 @@ func (c *Collector) processEvents() {
 
 		// Convert to RawEvent - NO BUSINESS LOGIC, just add correlation metadata
 		metadata := map[string]string{
-			"collector": "ebpf",
+			"collector": "kernel",
 			"pid":       fmt.Sprintf("%d", event.PID),
 			"tid":       fmt.Sprintf("%d", event.TID),
 			"comm":      c.nullTerminatedString(event.Comm[:]),
@@ -277,7 +277,7 @@ func (c *Collector) processEvents() {
 			if podInfo, err := c.GetPodInfo(event.CgroupID); err == nil {
 				metadata["k8s_namespace"] = c.nullTerminatedString(podInfo.Namespace[:])
 				metadata["k8s_name"] = c.nullTerminatedString(podInfo.PodName[:])
-				metadata["k8s_kind"] = "Pod" // eBPF tracks pods
+				metadata["k8s_kind"] = "Pod" // Kernel collector tracks pods
 				metadata["k8s_uid"] = c.nullTerminatedString(podInfo.PodUID[:])
 				// Labels and owner refs would need to be added via UpdatePodInfo
 			}
@@ -395,10 +395,10 @@ func (c *Collector) nullTerminatedString(b []byte) string {
 	return string(b)
 }
 
-// UpdatePodInfo updates pod information in the eBPF map for correlation
+// UpdatePodInfo updates pod information in the kernel eBPF map for correlation
 func (c *Collector) UpdatePodInfo(cgroupID uint64, podUID, namespace, podName string) error {
 	if c.objs == nil || c.objs.PodInfoMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	podInfo := PodInfo{
@@ -410,14 +410,14 @@ func (c *Collector) UpdatePodInfo(cgroupID uint64, podUID, namespace, podName st
 	copy(podInfo.Namespace[:], namespace)
 	copy(podInfo.PodName[:], podName)
 
-	// Update the eBPF map
+	// Update the kernel eBPF map
 	return c.objs.PodInfoMap.Put(cgroupID, podInfo)
 }
 
-// RemovePodInfo removes pod information from the eBPF map
+// RemovePodInfo removes pod information from the kernel eBPF map
 func (c *Collector) RemovePodInfo(cgroupID uint64) error {
 	if c.objs == nil || c.objs.PodInfoMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	return c.objs.PodInfoMap.Delete(cgroupID)
@@ -438,10 +438,10 @@ func (c *Collector) GetPodInfo(cgroupID uint64) (*PodInfo, error) {
 	return &podInfo, nil
 }
 
-// UpdateContainerInfo updates container information in the eBPF map for PID correlation
+// UpdateContainerInfo updates container information in the kernel eBPF map for PID correlation
 func (c *Collector) UpdateContainerInfo(pid uint32, containerID, podUID, image string) error {
 	if c.objs == nil || c.objs.ContainerInfoMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	containerInfo := &ContainerInfo{
@@ -453,14 +453,14 @@ func (c *Collector) UpdateContainerInfo(pid uint32, containerID, podUID, image s
 	copy(containerInfo.PodUID[:], podUID)
 	copy(containerInfo.Image[:], image)
 
-	// Update the eBPF map
+	// Update the kernel eBPF map
 	return c.objs.ContainerInfoMap.Put(pid, containerInfo)
 }
 
-// RemoveContainerInfo removes container information from the eBPF map
+// RemoveContainerInfo removes container information from the kernel eBPF map
 func (c *Collector) RemoveContainerInfo(pid uint32) error {
 	if c.objs == nil || c.objs.ContainerInfoMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	return c.objs.ContainerInfoMap.Delete(pid)
@@ -503,7 +503,7 @@ func (c *Collector) getOrGenerateTraceID(event KernelEvent) string {
 // UpdateServiceEndpoint updates service endpoint information for network correlation
 func (c *Collector) UpdateServiceEndpoint(ip string, port uint16, serviceName, namespace, clusterIP string) error {
 	if c.objs == nil || c.objs.ServiceEndpointsMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	// Convert IP string to uint32
@@ -524,14 +524,14 @@ func (c *Collector) UpdateServiceEndpoint(ip string, port uint16, serviceName, n
 	copy(serviceEndpoint.Namespace[:], namespace)
 	copy(serviceEndpoint.ClusterIP[:], clusterIP)
 
-	// Update the eBPF map
+	// Update the kernel eBPF map
 	return c.objs.ServiceEndpointsMap.Put(key, serviceEndpoint)
 }
 
 // RemoveServiceEndpoint removes service endpoint information
 func (c *Collector) RemoveServiceEndpoint(ip string, port uint16) error {
 	if c.objs == nil || c.objs.ServiceEndpointsMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	// Convert IP string to uint32
@@ -613,7 +613,7 @@ func (c *Collector) directionToString(dir uint8) string {
 // UpdateMountInfo updates mount information for ConfigMap/Secret correlation
 func (c *Collector) UpdateMountInfo(mountPath, name, namespace string, isSecret bool) error {
 	if c.objs == nil || c.objs.MountInfoMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	// Create mount key from path hash
@@ -631,14 +631,14 @@ func (c *Collector) UpdateMountInfo(mountPath, name, namespace string, isSecret 
 	copy(mountInfo.Namespace[:], namespace)
 	copy(mountInfo.MountPath[:], mountPath)
 
-	// Update the eBPF map
+	// Update the kernel eBPF map
 	return c.objs.MountInfoMap.Put(key, mountInfo)
 }
 
 // RemoveMountInfo removes mount information
 func (c *Collector) RemoveMountInfo(mountPath string) error {
 	if c.objs == nil || c.objs.MountInfoMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	// Create mount key from path hash
@@ -677,7 +677,7 @@ func (c *Collector) hashPath(path string) uint64 {
 // UpdateDNSQuery updates DNS query information for service discovery correlation
 func (c *Collector) UpdateDNSQuery(query, serviceName, namespace string, resolvedIP uint32, port uint16) error {
 	if c.objs == nil {
-		return fmt.Errorf("eBPF objects not initialized")
+		return fmt.Errorf("kernel eBPF objects not initialized")
 	}
 
 	// DNS query correlation is handled through service_endpoints_map
@@ -708,7 +708,7 @@ func (c *Collector) UpdateDNSQuery(query, serviceName, namespace string, resolve
 // UpdateVolumeInfo updates PVC mount information for volume correlation
 func (c *Collector) UpdateVolumeInfo(mountPath, pvcName, namespace, volumeID string) error {
 	if c.objs == nil || c.objs.VolumeInfoMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	key := c.hashPath(mountPath)
@@ -725,7 +725,7 @@ func (c *Collector) UpdateVolumeInfo(mountPath, pvcName, namespace, volumeID str
 // UpdateProcessLineage updates process parent-child relationships for Job tracking
 func (c *Collector) UpdateProcessLineage(pid, ppid, tgid uint32, startTime uint64, jobName string) error {
 	if c.objs == nil || c.objs.ProcessLineageMap == nil {
-		return fmt.Errorf("eBPF maps not initialized")
+		return fmt.Errorf("kernel eBPF maps not initialized")
 	}
 
 	lineage := &ProcessLineage{
@@ -745,13 +745,13 @@ func (c *Collector) Health() (bool, map[string]interface{}) {
 	defer c.mu.RUnlock()
 
 	health := map[string]interface{}{
-		"healthy":          c.healthy,
-		"events_collected": c.stats.EventsCollected,
-		"events_dropped":   c.stats.EventsDropped,
-		"error_count":      c.stats.ErrorCount,
-		"last_event":       c.stats.LastEventTime,
-		"ebpf_loaded":      c.objs != nil,
-		"links_count":      len(c.links),
+		"healthy":            c.healthy,
+		"events_collected":   c.stats.EventsCollected,
+		"events_dropped":     c.stats.EventsDropped,
+		"error_count":        c.stats.ErrorCount,
+		"last_event":         c.stats.LastEventTime,
+		"kernel_ebpf_loaded": c.objs != nil,
+		"links_count":        len(c.links),
 	}
 
 	return c.healthy, health

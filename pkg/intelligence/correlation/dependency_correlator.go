@@ -565,7 +565,13 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 					if svc, ok := svcInterface.(map[string]interface{}); ok {
 						var svcName string
 						if props, ok := svc["properties"].(map[string]interface{}); ok {
-							svcName, _ = props["name"].(string)
+							if name, ok := props["name"].(string); ok {
+								svcName = name
+							} else {
+								d.logger.Warn("Failed to extract service name from properties",
+									zap.String("config", configName),
+									zap.Any("props", props))
+							}
 						} else if name, ok := svc["name"].(string); ok {
 							svcName = name
 						}

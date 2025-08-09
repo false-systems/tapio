@@ -157,7 +157,7 @@ func TestMapCollectorTypeToDomain(t *testing.T) {
 	}{
 		{"kubeapi", "kubernetes"},
 		{"etcd", "system"},
-		{"ebpf", "process"},
+		{"kernel", "process"},
 		{"cni", "network"},
 		{"systemd", "system"},
 		{"unknown", "system"},
