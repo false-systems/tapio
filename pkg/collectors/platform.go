@@ -49,7 +49,7 @@ func GetSupportedCollectors() []string {
 
 	// Platform-specific collectors
 	if platform.HasEBPF {
-		supported = append(supported, "ebpf", "memory", "network")
+		supported = append(supported, "kernel", "memory", "network")
 	}
 
 	if platform.HasJournald {
@@ -78,11 +78,11 @@ func GetPlatformMessage(collectorType string) string {
 	platform := GetCurrentPlatform()
 
 	switch collectorType {
-	case "ebpf":
+	case "kernel":
 		if platform.HasEBPF {
-			return "eBPF collector is supported on this Linux system"
+			return "Kernel collector is supported on this Linux system"
 		}
-		return "eBPF collector is only supported on Linux (stub implementation active)"
+		return "Kernel collector is only supported on Linux (stub implementation active)"
 	case "journald":
 		if platform.HasJournald {
 			return "Journald collector is supported on this Linux system"

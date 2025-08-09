@@ -1,4 +1,4 @@
-package ebpf
+package kernel
 
 import (
 	"encoding/json"
@@ -215,7 +215,7 @@ func (sm *ServiceMap) CreateServiceMapEvent() collectors.RawEvent {
 		Type:      "service_map",
 		Data:      data,
 		Metadata: map[string]string{
-			"collector":          "ebpf",
+			"collector":          "kernel",
 			"total_connections":  fmt.Sprintf("%d", sm.totalConnections),
 			"active_connections": fmt.Sprintf("%d", len(sm.connections)),
 			"tracked_services":   fmt.Sprintf("%d", len(sm.activeServices)),

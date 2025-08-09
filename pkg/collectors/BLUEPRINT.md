@@ -299,7 +299,7 @@ func TestCollector(t *testing.T) {
 registry := collectors.NewRegistry()
 
 // Register all collectors
-registry.Register("ebpf", ebpf.NewUnifiedCollector(config))
+registry.Register("kernel", kernel.NewUnifiedCollector(config))
 registry.Register("k8s", k8s.NewCollector(config))
 registry.Register("systemd", systemd.NewCollector(config))
 registry.Register("cni", cni.NewCollector(config))
