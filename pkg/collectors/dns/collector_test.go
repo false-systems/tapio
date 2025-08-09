@@ -939,10 +939,10 @@ func TestCacheEviction(t *testing.T) {
 	// Fill cache to capacity
 	collector.CacheSet("key1", "value1", time.Hour)
 	collector.CacheSet("key2", "value2", time.Hour)
-	
+
 	// Add one more item to trigger eviction
 	collector.CacheSet("key3", "value3", time.Hour)
-	
+
 	// Cache should still have 2 items max
 	collector.cache.mu.RLock()
 	assert.LessOrEqual(t, len(collector.cache.entries), 2)
@@ -961,13 +961,13 @@ func TestCacheCleanup(t *testing.T) {
 	// Add some cache entries
 	collector.CacheSet("key1", "value1", 10*time.Millisecond)
 	collector.CacheSet("key2", "value2", 100*time.Millisecond)
-	
+
 	// Wait for some entries to expire
 	time.Sleep(20 * time.Millisecond)
-	
+
 	// Run cleanup manually
 	collector.cleanupExpiredCacheEntries()
-	
+
 	// key1 should be cleaned up, key2 should remain
 	_, hit1 := collector.CacheGet("key1")
 	_, hit2 := collector.CacheGet("key2")
@@ -988,12 +988,12 @@ func TestUpdateEventStatistics(t *testing.T) {
 
 	// Test DNS query event
 	queryEvent := &EnhancedDNSEvent{
-		EventType:  1, // DNS_EVENT_QUERY
-		Protocol:   17, // UDP
-		DNSQtype:   1,  // A record
-		DNSID:      123,
-		PID:        1000,
-		QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+		EventType: 1,  // DNS_EVENT_QUERY
+		Protocol:  17, // UDP
+		DNSQtype:  1,  // A record
+		DNSID:     123,
+		PID:       1000,
+		QueryName: [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
 	}
 
 	collector.updateEventStatistics(queryEvent, ctx)
@@ -1002,13 +1002,13 @@ func TestUpdateEventStatistics(t *testing.T) {
 
 	// Test DNS response event
 	responseEvent := &EnhancedDNSEvent{
-		EventType:  2, // DNS_EVENT_RESPONSE
-		Protocol:   17, // UDP
-		DNSQtype:   1,  // A record
-		DNSRcode:   0,  // No error
-		DNSID:      123,
-		PID:        1000,
-		QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+		EventType: 2,  // DNS_EVENT_RESPONSE
+		Protocol:  17, // UDP
+		DNSQtype:  1,  // A record
+		DNSRcode:  0,  // No error
+		DNSID:     123,
+		PID:       1000,
+		QueryName: [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
 	}
 
 	collector.updateEventStatistics(responseEvent, ctx)
@@ -1017,13 +1017,13 @@ func TestUpdateEventStatistics(t *testing.T) {
 
 	// Test DNS error response
 	errorEvent := &EnhancedDNSEvent{
-		EventType:  2, // DNS_EVENT_RESPONSE
-		Protocol:   17, // UDP
-		DNSQtype:   1,  // A record
-		DNSRcode:   3,  // NXDOMAIN
-		DNSID:      124,
-		PID:        1001,
-		QueryName:  [128]byte{'b', 'a', 'd', '.', 'c', 'o', 'm', 0},
+		EventType: 2,  // DNS_EVENT_RESPONSE
+		Protocol:  17, // UDP
+		DNSQtype:  1,  // A record
+		DNSRcode:  3,  // NXDOMAIN
+		DNSID:     124,
+		PID:       1001,
+		QueryName: [128]byte{'b', 'a', 'd', '.', 'c', 'o', 'm', 0},
 	}
 
 	collector.updateEventStatistics(errorEvent, ctx)
@@ -1031,12 +1031,12 @@ func TestUpdateEventStatistics(t *testing.T) {
 
 	// Test DNS timeout event
 	timeoutEvent := &EnhancedDNSEvent{
-		EventType:  3, // DNS_EVENT_TIMEOUT
-		Protocol:   17, // UDP
-		DNSQtype:   1,  // A record
-		DNSID:      125,
-		PID:        1002,
-		QueryName:  [128]byte{'s', 'l', 'o', 'w', '.', 'c', 'o', 'm', 0},
+		EventType: 3,  // DNS_EVENT_TIMEOUT
+		Protocol:  17, // UDP
+		DNSQtype:  1,  // A record
+		DNSID:     125,
+		PID:       1002,
+		QueryName: [128]byte{'s', 'l', 'o', 'w', '.', 'c', 'o', 'm', 0},
 	}
 
 	collector.updateEventStatistics(timeoutEvent, ctx)
@@ -1061,13 +1061,13 @@ func TestSlowQueryDetection(t *testing.T) {
 
 	// Process response event to trigger slow query detection
 	responseEvent := &EnhancedDNSEvent{
-		EventType:  2, // DNS_EVENT_RESPONSE
-		Protocol:   17, // UDP
-		DNSQtype:   1,  // A record
-		DNSRcode:   0,  // No error
-		DNSID:      123,
-		PID:        1000,
-		QueryName:  [128]byte{'s', 'l', 'o', 'w', '.', 'c', 'o', 'm', 0},
+		EventType: 2,  // DNS_EVENT_RESPONSE
+		Protocol:  17, // UDP
+		DNSQtype:  1,  // A record
+		DNSRcode:  0,  // No error
+		DNSID:     123,
+		PID:       1000,
+		QueryName: [128]byte{'s', 'l', 'o', 'w', '.', 'c', 'o', 'm', 0},
 	}
 
 	collector.updateEventStatistics(responseEvent, ctx)
@@ -1089,36 +1089,36 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name: "zero buffer size",
 			config: Config{
-				BufferSize: 0,
+				BufferSize:       0,
 				EnabledProtocols: []string{"UDP"},
-				CapturePort: 53,
-				WorkerCount: 1,
-				PacketBatchSize: 1,
-				FlushInterval: time.Millisecond,
+				CapturePort:      53,
+				WorkerCount:      1,
+				PacketBatchSize:  1,
+				FlushInterval:    time.Millisecond,
 			},
 			wantError: true,
 		},
 		{
 			name: "no protocols enabled",
 			config: Config{
-				BufferSize: 1000,
+				BufferSize:       1000,
 				EnabledProtocols: []string{},
-				CapturePort: 53,
-				WorkerCount: 1,
-				PacketBatchSize: 1,
-				FlushInterval: time.Millisecond,
+				CapturePort:      53,
+				WorkerCount:      1,
+				PacketBatchSize:  1,
+				FlushInterval:    time.Millisecond,
 			},
 			wantError: true,
 		},
 		{
 			name: "invalid protocol",
 			config: Config{
-				BufferSize: 1000,
+				BufferSize:       1000,
 				EnabledProtocols: []string{"INVALID"},
-				CapturePort: 53,
-				WorkerCount: 1,
-				PacketBatchSize: 1,
-				FlushInterval: time.Millisecond,
+				CapturePort:      53,
+				WorkerCount:      1,
+				PacketBatchSize:  1,
+				FlushInterval:    time.Millisecond,
 			},
 			wantError: true,
 		},
@@ -1158,8 +1158,8 @@ func TestRateLimiting(t *testing.T) {
 	config := DefaultConfig()
 	config.EnableEBPF = false
 	config.RateLimitEnabled = true
-	config.RateLimitRPS = 2.0  // 2 requests per second
-	config.RateLimitBurst = 1  // burst of 1
+	config.RateLimitRPS = 2.0 // 2 requests per second
+	config.RateLimitBurst = 1 // burst of 1
 
 	collector, err := NewCollector("test-ratelimit", config)
 	require.NoError(t, err)
@@ -1167,7 +1167,7 @@ func TestRateLimiting(t *testing.T) {
 
 	// Should allow first request
 	assert.True(t, collector.rlimiter.Allow())
-	
+
 	// Should not allow immediate second request due to low rate
 	assert.False(t, collector.rlimiter.Allow())
 }
@@ -1223,7 +1223,7 @@ func TestProcessEventsWorker(t *testing.T) {
 
 	// Wait for context to timeout
 	<-ctx.Done()
-	
+
 	// Wait for worker to finish
 	collector.workerWg.Wait()
 }
@@ -1253,7 +1253,7 @@ func TestNewCollectorWithZeroBufferSize(t *testing.T) {
 
 	collector, err := NewCollector("test-zero-buffer", config)
 	require.NoError(t, err)
-	
+
 	// Should use default buffer size
 	assert.Equal(t, config.BufferSize, cap(collector.events))
 }
@@ -1341,9 +1341,9 @@ func BenchmarkCacheGet(b *testing.B) {
 	config := DefaultConfig()
 	config.CacheEnabled = true
 	collector, _ := NewCollector("bench-cache", config)
-	
+
 	collector.CacheSet("test-key", "test-value", time.Hour)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		collector.CacheGet("test-key")
@@ -1354,7 +1354,7 @@ func BenchmarkCacheSet(b *testing.B) {
 	config := DefaultConfig()
 	config.CacheEnabled = true
 	collector, _ := NewCollector("bench-cache-set", config)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := fmt.Sprintf("key-%d", i)
@@ -1375,12 +1375,12 @@ func TestStatisticsAggregation(t *testing.T) {
 	// Simulate multiple events
 	for i := 0; i < 10; i++ {
 		event := &EnhancedDNSEvent{
-			EventType:  1, // DNS_EVENT_QUERY
-			Protocol:   17, // UDP
-			DNSQtype:   1,  // A record
-			DNSID:      uint16(i),
-			PID:        1000,
-			QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+			EventType: 1,  // DNS_EVENT_QUERY
+			Protocol:  17, // UDP
+			DNSQtype:  1,  // A record
+			DNSID:     uint16(i),
+			PID:       1000,
+			QueryName: [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
 		}
 		collector.updateEventStatistics(event, ctx)
 	}
@@ -1410,12 +1410,12 @@ func TestConcurrentStatisticsUpdate(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < eventsPerGoroutine; j++ {
 				event := &EnhancedDNSEvent{
-					EventType:  1, // DNS_EVENT_QUERY
-					Protocol:   17, // UDP
-					DNSQtype:   1,  // A record
-					DNSID:      uint16(goroutineID*1000 + j),
-					PID:        uint32(1000 + goroutineID),
-					QueryName:  [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
+					EventType: 1,  // DNS_EVENT_QUERY
+					Protocol:  17, // UDP
+					DNSQtype:  1,  // A record
+					DNSID:     uint16(goroutineID*1000 + j),
+					PID:       uint32(1000 + goroutineID),
+					QueryName: [128]byte{'t', 'e', 's', 't', '.', 'c', 'o', 'm', 0},
 				}
 				collector.updateEventStatistics(event, ctx)
 			}

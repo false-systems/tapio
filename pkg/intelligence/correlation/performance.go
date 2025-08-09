@@ -194,13 +194,7 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 	}, 5*time.Minute)
 
 	// Use related events for enhanced analysis
-	hasPriorThrottling := false
-	for _, e := range relatedEvents {
-		if p.getMetadata(e, "event_type") == "kubelet_cpu_throttling" {
-			hasPriorThrottling = true
-			break
-		}
-	}
+	_ = relatedEvents // Placeholder for future enhancement
 
 	workingSet, _ := strconv.ParseInt(p.getMetadata(event, "memory_working_set"), 10, 64)
 	usage, _ := strconv.ParseInt(p.getMetadata(event, "memory_usage"), 10, 64)
