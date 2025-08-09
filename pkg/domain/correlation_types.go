@@ -51,7 +51,7 @@ type EnhancedCorrelation struct {
 	RootEvents  []CorrelationEventRef   `json:"root_events,omitempty"`
 	ImpactScope *CorrelationImpactScope `json:"impact_scope,omitempty"`
 
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata *CorrelationMetadata `json:"metadata,omitempty"`
 }
 
 // Additional correlation types not in types.go
@@ -141,13 +141,35 @@ type BehavioralPatternSignature struct {
 	RequiredContext []ContextCriteria `json:"required_context"`
 }
 
+// EventCriteriaConditions represents event matching conditions
+type EventCriteriaConditions struct {
+	// Field-based conditions
+	FieldEquals   map[string]string  `json:"field_equals,omitempty"`
+	FieldContains map[string]string  `json:"field_contains,omitempty"`
+	FieldGreater  map[string]float64 `json:"field_greater,omitempty"`
+	FieldLess     map[string]float64 `json:"field_less,omitempty"`
+	FieldExists   []string           `json:"field_exists,omitempty"`
+	FieldRegex    map[string]string  `json:"field_regex,omitempty"`
+
+	// Label-based conditions
+	LabelsMatch map[string]string `json:"labels_match,omitempty"`
+	LabelsExist []string          `json:"labels_exist,omitempty"`
+
+	// Complex conditions
+	LogicOperator    string   `json:"logic_operator,omitempty"` // "AND", "OR", "NOT"
+	NestedConditions []string `json:"nested_conditions,omitempty"`
+
+	// Additional flexible matching
+	CustomMatch interface{} `json:"custom_match,omitempty"`
+}
+
 // EventCriteria defines criteria for matching events
 type EventCriteria struct {
-	Type       string                 `json:"type,omitempty"`
-	Source     string                 `json:"source,omitempty"`
-	Severity   string                 `json:"severity,omitempty"`
-	Conditions map[string]interface{} `json:"conditions,omitempty"`
-	MinOccur   int                    `json:"min_occur,omitempty"`
+	Type       string                   `json:"type,omitempty"`
+	Source     string                   `json:"source,omitempty"`
+	Severity   string                   `json:"severity,omitempty"`
+	Conditions *EventCriteriaConditions `json:"conditions,omitempty"`
+	MinOccur   int                      `json:"min_occur,omitempty"`
 }
 
 // TimeConstraint defines temporal constraints
