@@ -483,7 +483,11 @@ func TestUnifiedEvent_StructCompleteness(t *testing.T) {
 			UserID:     "user123",
 			SessionID:  "session456",
 			RequestID:  "req789",
-			Custom:     map[string]interface{}{"custom_field": "value"},
+			Custom: &ApplicationCustomData{
+				HTTPMethod: "POST",
+				Tags:       []string{"test"},
+				Payload:    map[string]interface{}{"custom_field": "value"},
+			},
 		},
 
 		Kubernetes: &KubernetesData{

@@ -126,6 +126,42 @@ type NetworkData struct {
 	InterfaceName string            `json:"interface_name,omitempty"` // Network interface
 }
 
+// ApplicationCustomData represents custom application data
+type ApplicationCustomData struct {
+	// Request/Response data
+	HTTPMethod     string            `json:"http_method,omitempty"`
+	HTTPStatusCode int               `json:"http_status_code,omitempty"`
+	HTTPPath       string            `json:"http_path,omitempty"`
+	HTTPHeaders    map[string]string `json:"http_headers,omitempty"`
+	RequestSize    int64             `json:"request_size,omitempty"`
+	ResponseSize   int64             `json:"response_size,omitempty"`
+
+	// Business context
+	BusinessUnit string `json:"business_unit,omitempty"`
+	FeatureFlag  string `json:"feature_flag,omitempty"`
+	Experiment   string `json:"experiment,omitempty"`
+	Cohort       string `json:"cohort,omitempty"`
+
+	// Performance data
+	DatabaseQueries int `json:"database_queries,omitempty"`
+	CacheHits       int `json:"cache_hits,omitempty"`
+	CacheMisses     int `json:"cache_misses,omitempty"`
+	ExternalCalls   int `json:"external_calls,omitempty"`
+
+	// Error context
+	ErrorCategory  string `json:"error_category,omitempty"`
+	ErrorRetryable bool   `json:"error_retryable,omitempty"`
+	ErrorRecovery  string `json:"error_recovery,omitempty"`
+
+	// Additional fields
+	Tags    []string           `json:"tags,omitempty"`
+	Labels  map[string]string  `json:"labels,omitempty"`
+	Metrics map[string]float64 `json:"metrics,omitempty"`
+
+	// Flexible data for specific use cases
+	Payload interface{} `json:"payload,omitempty"`
+}
+
 // ApplicationData for application-level events
 type ApplicationData struct {
 	Level      string                 `json:"level,omitempty"` // error, warn, info, debug
@@ -136,7 +172,7 @@ type ApplicationData struct {
 	UserID     string                 `json:"user_id,omitempty"`
 	SessionID  string                 `json:"session_id,omitempty"`
 	RequestID  string                 `json:"request_id,omitempty"`
-	Custom     map[string]interface{} `json:"custom,omitempty"`
+	Custom     *ApplicationCustomData `json:"custom,omitempty"`
 }
 
 // KubernetesData for Kubernetes events
