@@ -23,9 +23,13 @@ graph TD
         K[Kernel/eBPF Collector]
         S[Systemd Collector]
         DNS[DNS Collector]
+        CNI[CNI Collector]
+        CRI[CRI Collector]
+
         K --> D
         S --> D
         DNS --> D
+        CNI --> D
     end
     
     subgraph "Level 2: Intelligence"
