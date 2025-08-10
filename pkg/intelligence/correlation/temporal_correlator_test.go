@@ -17,11 +17,11 @@ func TestTemporalCorrelatorCreation(t *testing.T) {
 
 	t.Run("with default config", func(t *testing.T) {
 		config := DefaultTemporalConfig()
-		correlator := NewTemporalCorrelator(logger, config)
+		correlator := NewTemporalCorrelator(logger, *config)
 
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "temporal", correlator.Name())
-		assert.Equal(t, config, correlator.config)
+		assert.Equal(t, *config, correlator.config)
 		assert.NotNil(t, correlator.patterns)
 		assert.NotNil(t, correlator.eventWindow)
 	})
@@ -58,7 +58,7 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 
 		event1 := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: baseTime,
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -71,7 +71,7 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 
 		event2 := &domain.UnifiedEvent{
 			ID:        "event-2",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: baseTime.Add(1 * time.Minute),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -113,7 +113,7 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 
 		event1 := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: baseTime,
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -124,7 +124,7 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 		// Event outside window
 		event2 := &domain.UnifiedEvent{
 			ID:        "event-2",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: baseTime.Add(2 * time.Minute),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -143,14 +143,14 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 
 	t.Run("different event types", func(t *testing.T) {
 		config := DefaultTemporalConfig()
-		correlator := NewTemporalCorrelator(logger, config)
+		correlator := NewTemporalCorrelator(logger, *config)
 		ctx := context.Background()
 
 		baseTime := time.Now()
 
 		event1 := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: baseTime,
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -160,7 +160,7 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 
 		event2 := &domain.UnifiedEvent{
 			ID:        "event-2",
-			Type:      EventTypeEBPF, // Different type
+			Type:      domain.EventTypeNetwork, // Different type
 			Timestamp: baseTime.Add(30 * time.Second),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -181,7 +181,7 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 
 	t.Run("nil event handling", func(t *testing.T) {
 		config := DefaultTemporalConfig()
-		correlator := NewTemporalCorrelator(logger, config)
+		correlator := NewTemporalCorrelator(logger, *config)
 		ctx := context.Background()
 
 		results, err := correlator.Process(ctx, nil)
@@ -191,14 +191,14 @@ func TestTemporalCorrelatorProcess(t *testing.T) {
 
 	t.Run("context cancellation", func(t *testing.T) {
 		config := DefaultTemporalConfig()
-		correlator := NewTemporalCorrelator(logger, config)
+		correlator := NewTemporalCorrelator(logger, *config)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
 		event := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: time.Now(),
 		}
 
@@ -231,7 +231,7 @@ func TestTemporalPatternDetection(t *testing.T) {
 		events := []*domain.UnifiedEvent{
 			{
 				ID:        "event-1",
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime,
 				K8sContext: &domain.K8sContext{
 					Namespace: namespace,
@@ -241,7 +241,7 @@ func TestTemporalPatternDetection(t *testing.T) {
 			},
 			{
 				ID:        "event-2",
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime.Add(1 * time.Minute),
 				K8sContext: &domain.K8sContext{
 					Namespace: namespace,
@@ -251,7 +251,7 @@ func TestTemporalPatternDetection(t *testing.T) {
 			},
 			{
 				ID:        "event-3",
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime.Add(2 * time.Minute),
 				K8sContext: &domain.K8sContext{
 					Namespace: namespace,
@@ -292,7 +292,7 @@ func TestTemporalPatternDetection(t *testing.T) {
 
 		event1 := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: time.Now().Add(-200 * time.Millisecond), // Old event
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -310,7 +310,7 @@ func TestTemporalPatternDetection(t *testing.T) {
 		// Process new event - old pattern should be cleaned up
 		event2 := &domain.UnifiedEvent{
 			ID:        "event-2",
-			Type:      EventTypeSystemd,
+			Type:      domain.EventTypeSystem,
 			Timestamp: time.Now(),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -329,7 +329,7 @@ func TestTemporalCorrelatorConcurrency(t *testing.T) {
 
 	t.Run("concurrent event processing", func(t *testing.T) {
 		config := DefaultTemporalConfig()
-		correlator := NewTemporalCorrelator(logger, config)
+		correlator := NewTemporalCorrelator(logger, *config)
 		ctx := context.Background()
 
 		// Process multiple events concurrently
@@ -340,7 +340,7 @@ func TestTemporalCorrelatorConcurrency(t *testing.T) {
 			go func(id int) {
 				event := &domain.UnifiedEvent{
 					ID:        fmt.Sprintf("event-%d", id),
-					Type:      EventTypeSystemd,
+					Type:      domain.EventTypeSystem,
 					Timestamp: time.Now(),
 					K8sContext: &domain.K8sContext{
 						Namespace: "default",
@@ -482,7 +482,7 @@ func TestTemporalPatternMatching(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        fmt.Sprintf("event-%d", i),
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime.Add(time.Duration(i) * interval),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -519,7 +519,7 @@ func TestTemporalPatternMatching(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        fmt.Sprintf("burst-%d", i),
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -546,12 +546,12 @@ func TestTemporalPatternMatching(t *testing.T) {
 func BenchmarkTemporalCorrelatorProcess(b *testing.B) {
 	logger := zaptest.NewLogger(b).Sugar().Desugar()
 	config := DefaultTemporalConfig()
-	correlator := NewTemporalCorrelator(logger, config)
+	correlator := NewTemporalCorrelator(logger, *config)
 	ctx := context.Background()
 
 	event := &domain.UnifiedEvent{
 		ID:        "bench-event",
-		Type:      EventTypeSystemd,
+		Type:      domain.EventTypeSystem,
 		Timestamp: time.Now(),
 		K8sContext: &domain.K8sContext{
 			Namespace: "default",

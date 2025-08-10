@@ -55,35 +55,9 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 		cancel:      cancel,
 	}
 
-	// Initialize correlators based on config
-	for _, name := range config.EnabledCorrelators {
-		switch name {
-		case "k8s":
-			if k8sClient != nil {
-				k8sCorrelator := NewK8sCorrelator(logger, k8sClient)
-				engine.correlators = append(engine.correlators, k8sCorrelator)
-
-				// Start K8s correlator
-				if err := k8sCorrelator.Start(ctx); err != nil {
-					cancel()
-					return nil, fmt.Errorf("failed to start K8s correlator: %w", err)
-				}
-			}
-		case "temporal":
-			temporalCorrelator := NewTemporalCorrelator(logger, *TestTemporalConfig())
-			engine.correlators = append(engine.correlators, temporalCorrelator)
-		case "sequence":
-			sequenceCorrelator := NewSequenceCorrelator(logger, *TestSequenceConfig())
-			engine.correlators = append(engine.correlators, sequenceCorrelator)
-		case "performance":
-			performanceCorrelator := NewPerformanceCorrelator(logger)
-			engine.correlators = append(engine.correlators, performanceCorrelator)
-		case "servicemap":
-			serviceMapCorrelator := NewServiceMapCorrelator(logger)
-			engine.correlators = append(engine.correlators, serviceMapCorrelator)
-		default:
-			logger.Warn("Unknown correlator in config", zap.String("name", name))
-		}
+	if err := engine.initializeCorrelators(ctx, logger, k8sClient, config); err != nil {
+		cancel()
+		return nil, err
 	}
 
 	logger.Info("Correlation engine created",
@@ -92,6 +66,50 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 	)
 
 	return engine, nil
+}
+
+// initializeCorrelators sets up all enabled correlators
+func (e *Engine) initializeCorrelators(ctx context.Context, logger *zap.Logger, k8sClient domain.K8sClient, config EngineConfig) error {
+	for _, name := range config.EnabledCorrelators {
+		if err := e.addCorrelator(ctx, name, logger, k8sClient); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addCorrelator creates and adds a specific correlator type
+func (e *Engine) addCorrelator(ctx context.Context, name string, logger *zap.Logger, k8sClient domain.K8sClient) error {
+	switch name {
+	case "k8s":
+		return e.addK8sCorrelator(ctx, logger, k8sClient)
+	case "temporal":
+		e.correlators = append(e.correlators, NewTemporalCorrelator(logger, *TestTemporalConfig()))
+	case "sequence":
+		e.correlators = append(e.correlators, NewSequenceCorrelator(logger, *TestSequenceConfig()))
+	case "performance":
+		e.correlators = append(e.correlators, NewPerformanceCorrelator(logger))
+	case "servicemap":
+		e.correlators = append(e.correlators, NewServiceMapCorrelator(logger))
+	default:
+		logger.Warn("Unknown correlator in config", zap.String("name", name))
+	}
+	return nil
+}
+
+// addK8sCorrelator adds and starts a K8s correlator
+func (e *Engine) addK8sCorrelator(ctx context.Context, logger *zap.Logger, k8sClient domain.K8sClient) error {
+	if k8sClient == nil {
+		return nil
+	}
+
+	k8sCorrelator := NewK8sCorrelator(logger, k8sClient)
+	e.correlators = append(e.correlators, k8sCorrelator)
+
+	if err := k8sCorrelator.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start K8s correlator: %w", err)
+	}
+	return nil
 }
 
 // Start begins processing events
