@@ -39,16 +39,29 @@ struct {
 } systemd_pids SEC(".maps");
 
 // Helper to check if PID is systemd-related
-static inline int is_systemd_process(__u32 pid) {
-    return bpf_map_lookup_elem(&systemd_pids, &pid) != 0;
+static __always_inline int is_systemd_process(__u32 pid) {
+    return bpf_map_lookup_elem(&systemd_pids, &pid) != NULL;
 }
 
-// Track process execution
+// Track process execution with improved CO-RE
 SEC("tracepoint/syscalls/sys_enter_execve")
 int trace_exec(void *ctx) {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task) {
+        return 0;
+    }
+    
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u32 ppid = BPF_CORE_READ(task, real_parent, tgid);
+    
+    // Use CO-RE to safely read parent PID
+    __u32 ppid = 0;
+    if (bpf_core_field_exists(task->real_parent) && 
+        bpf_core_field_exists(((struct task_struct *)0)->tgid)) {
+        struct task_struct *parent;
+        if (BPF_CORE_READ_INTO(&parent, task, real_parent) == 0 && parent) {
+            BPF_CORE_READ_INTO(&ppid, parent, tgid);
+        }
+    }
 
     // Only track if parent is systemd or child of systemd
     if (!is_systemd_process(pid) && !is_systemd_process(ppid)) {
@@ -68,7 +81,7 @@ int trace_exec(void *ctx) {
 
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Try to get filename from execve args (simplified)
+    // Initialize filename (would need proper execve arg parsing for real impl)
     __builtin_memset(event->filename, 0, sizeof(event->filename));
     
     bpf_ringbuf_submit(event, 0);
@@ -102,4 +115,4 @@ int trace_exit(void *ctx) {
     return 0;
 }
 
-char _license[] SEC("license") = "GPL";
+char LICENSE[] SEC("license") = "GPL";
