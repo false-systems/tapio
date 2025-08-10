@@ -871,3 +871,71 @@ func (c *Collector) nullTerminatedString(b []byte) string {
 	}
 	return string(b)
 }
+
+// NewDNSCache creates a new DNS cache with specified size and TTL
+func NewDNSCache(maxSize int, ttl time.Duration) *DNSCache {
+	return &DNSCache{
+		entries: make(map[string]*CacheEntry),
+		maxSize: maxSize,
+		ttl:     ttl,
+	}
+}
+
+// CacheGet retrieves a value from the cache
+func (c *Collector) CacheGet(key string) (interface{}, bool) {
+	if c.cache == nil {
+		return nil, false
+	}
+
+	c.cache.mu.RLock()
+	defer c.cache.mu.RUnlock()
+
+	entry, exists := c.cache.entries[key]
+	if !exists {
+		c.cacheMissTotal.Add(context.Background(), 1)
+		return nil, false
+	}
+
+	// Check if expired
+	if time.Now().After(entry.Expires) {
+		c.cacheMissTotal.Add(context.Background(), 1)
+		return nil, false
+	}
+
+	entry.HitCount++
+	c.cacheHitsTotal.Add(context.Background(), 1)
+	return entry.Value, true
+}
+
+// CacheSet stores a value in the cache with the specified TTL
+func (c *Collector) CacheSet(key string, value interface{}, ttl time.Duration) {
+	if c.cache == nil {
+		return
+	}
+
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+
+	// Check if we need to evict entries
+	if len(c.cache.entries) >= c.cache.maxSize {
+		// Simple eviction: remove the oldest entry
+		var oldestKey string
+		var oldestTime time.Time
+		for k, v := range c.cache.entries {
+			if oldestKey == "" || v.CreatedAt.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = v.CreatedAt
+			}
+		}
+		if oldestKey != "" {
+			delete(c.cache.entries, oldestKey)
+		}
+	}
+
+	c.cache.entries[key] = &CacheEntry{
+		Value:     value,
+		Expires:   time.Now().Add(ttl),
+		HitCount:  0,
+		CreatedAt: time.Now(),
+	}
+}
