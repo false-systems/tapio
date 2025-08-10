@@ -40,8 +40,25 @@ typedef long ssize_t;
 #ifndef BPF_MAP_TYPE_HASH
 #define BPF_MAP_TYPE_HASH 1
 #endif
+#ifndef BPF_MAP_TYPE_ARRAY
+#define BPF_MAP_TYPE_ARRAY 2
+#endif
+#ifndef BPF_MAP_TYPE_PERCPU_ARRAY
+#define BPF_MAP_TYPE_PERCPU_ARRAY 6
+#endif
 #ifndef BPF_MAP_TYPE_RINGBUF
 #define BPF_MAP_TYPE_RINGBUF 27
+#endif
+
+/* BPF map update flags */
+#ifndef BPF_ANY
+#define BPF_ANY 0
+#endif
+#ifndef BPF_NOEXIST
+#define BPF_NOEXIST 1
+#endif
+#ifndef BPF_EXIST
+#define BPF_EXIST 2
 #endif
 
 /* Common types */
@@ -218,6 +235,42 @@ struct cgroup {
     int id;
     struct kernfs_node *kn;  /* kernfs node for this cgroup */
     /* We mainly care about the kernfs inode for correlation */
+} __attribute__((preserve_access_index));
+
+/* Network structures */
+
+/* IPv4 address structure */
+struct in_addr {
+    __u32 s_addr;
+} __attribute__((preserve_access_index));
+
+/* IPv6 address structure */
+struct in6_addr {
+    union {
+        __u8 u6_addr8[16];
+        __u32 u6_addr32[4];
+    } in6_u;
+} __attribute__((preserve_access_index));
+
+/* Socket address structures */
+struct sockaddr {
+    __u16 sa_family;
+    char sa_data[14];
+} __attribute__((preserve_access_index));
+
+struct sockaddr_in {
+    __u16 sin_family;
+    __u16 sin_port;
+    struct in_addr sin_addr;
+    char sin_zero[8];
+} __attribute__((preserve_access_index));
+
+struct sockaddr_in6 {
+    __u16 sin6_family;
+    __u16 sin6_port;
+    __u32 sin6_flowinfo;
+    struct in6_addr sin6_addr;
+    __u32 sin6_scope_id;
 } __attribute__((preserve_access_index));
 
 /* Network sk_buff for packet processing */

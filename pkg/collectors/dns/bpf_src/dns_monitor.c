@@ -2,6 +2,7 @@
 // Production DNS monitoring via eBPF with IPv4/IPv6 and UDP/TCP support
 
 #include "../../bpf_common/vmlinux_minimal.h"
+#include "../../bpf_common/helpers.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 
@@ -160,6 +161,26 @@ struct {
     __type(value, __u8); // container flag
 } container_cgroups SEC(".maps");
 
+// Per-CPU scratch buffer for DNS packet processing
+// Eliminates stack overflow issues with large buffers
+struct dns_scratch_buffer {
+    char data[MAX_DNS_DATA];  // 512 bytes for DNS packet data
+    char name_buf[MAX_DNS_NAME_LEN];  // 128 bytes for domain name extraction
+    union {
+        struct sockaddr_in addr4;
+        struct sockaddr_in6 addr6;
+    } addr_buf;  // Reusable buffer for address structures
+    __u8 pad[356];  // Padding to align to cache line (28 bytes used by addr6)
+};
+
+// Per-CPU map for scratch buffers - one per CPU for lock-free access
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);  // Single entry per CPU
+    __type(key, __u32);
+    __type(value, struct dns_scratch_buffer);
+} dns_scratch SEC(".maps");
+
 // Helper to check if process is DNS-related (CO-RE enabled)
 static __always_inline bool is_dns_process(struct task_struct *task)
 {
@@ -192,33 +213,49 @@ static __always_inline bool is_dns_process(struct task_struct *task)
     return false;
 }
 
-// Helper to get socket address family safely
+// Helper to get socket address family safely using CO-RE
 static __always_inline int get_sock_family(struct sock *sk) 
 {
     if (!sk)
         return -1;
+    
+    // Check if socket common structure exists
+    if (!bpf_core_field_exists(sk->__sk_common) || 
+        !bpf_core_field_exists(sk->__sk_common.skc_family)) {
+        return -1;
+    }
         
     // Use CO-RE to read socket family
     __u16 family;
-    if (bpf_core_read(&family, sizeof(family), &sk->__sk_common.skc_family) != 0)
+    if (BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family) != 0)
         return -1;
     
     return (int)family;
 }
 
-// Helper to extract IPv4 address from sockaddr
+// Helper to extract IPv4 address from sockaddr using CO-RE
 static __always_inline void extract_ipv4_addr(const struct sockaddr_in *addr, struct ipv4_addr *dst)
 {
-    if (addr && dst) {
-        bpf_core_read(&dst->addr, sizeof(dst->addr), &addr->sin_addr.s_addr);
+    if (!addr || !dst) {
+        return;
+    }
+    
+    // Use safer probe_read_user for userspace addresses
+    if (bpf_probe_read_user(&dst->addr, sizeof(dst->addr), &addr->sin_addr.s_addr) != 0) {
+        dst->addr = 0;
     }
 }
 
-// Helper to extract IPv6 address from sockaddr
+// Helper to extract IPv6 address from sockaddr using safe userspace reads
 static __always_inline void extract_ipv6_addr(const struct sockaddr_in6 *addr, struct ipv6_addr *dst)
 {
-    if (addr && dst) {
-        bpf_core_read(dst->addr, sizeof(dst->addr), &addr->sin6_addr.in6_u.u6_addr32);
+    if (!addr || !dst) {
+        return;
+    }
+    
+    // Use safer probe_read_user for userspace addresses
+    if (bpf_probe_read_user(dst->addr, sizeof(dst->addr), &addr->sin6_addr.in6_u.u6_addr32) != 0) {
+        __builtin_memset(dst->addr, 0, sizeof(dst->addr));
     }
 }
 
@@ -228,18 +265,57 @@ static __always_inline bool is_dns_port(__u16 port)
     return bpf_ntohs(port) == DNS_PORT;
 }
 
-// Helper to get current cgroup ID
+// Helper to get current cgroup ID using proper CO-RE
 static __always_inline __u64 get_current_cgroup_id(void)
 {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    __u64 cgroup_id = 0;
-    
-    // Use CO-RE to read cgroup ID - this is kernel version dependent
-    if (task) {
-        bpf_core_read(&cgroup_id, sizeof(cgroup_id), &task->cgroups);
+    if (!task) {
+        return 0;
     }
     
-    return cgroup_id;
+    // Check if cgroups field exists (kernel compatibility)
+    if (!bpf_core_field_exists(task->cgroups)) {
+        return 0;
+    }
+    
+    // Read css_set pointer using CO-RE
+    struct css_set *css_set_ptr;
+    if (BPF_CORE_READ_INTO(&css_set_ptr, task, cgroups) != 0 || !css_set_ptr) {
+        return 0;
+    }
+    
+    // Get first valid cgroup subsystem state
+    struct cgroup_subsys_state *css;
+    if (BPF_CORE_READ_INTO(&css, css_set_ptr, subsys[0]) != 0 || !css) {
+        return 0;
+    }
+    
+    // Read cgroup pointer
+    struct cgroup *cgroup_ptr;
+    if (BPF_CORE_READ_INTO(&cgroup_ptr, css, cgroup) != 0 || !cgroup_ptr) {
+        return 0;
+    }
+    
+    // Get kernfs inode number if available
+    if (bpf_core_field_exists(cgroup_ptr->kn)) {
+        struct kernfs_node *kn;
+        if (BPF_CORE_READ_INTO(&kn, cgroup_ptr, kn) == 0 && kn) {
+            __u64 ino;
+            if (BPF_CORE_READ_INTO(&ino, kn, ino) == 0) {
+                return ino;
+            }
+        }
+    }
+    
+    // Fallback to cgroup ID
+    if (bpf_core_field_exists(cgroup_ptr->id)) {
+        int cgroup_id;
+        if (BPF_CORE_READ_INTO(&cgroup_id, cgroup_ptr, id) == 0 && cgroup_id > 0) {
+            return (__u64)cgroup_id + 0x100000000ULL;
+        }
+    }
+    
+    return 0;
 }
 
 // Enhanced DNS query name extraction with compression support
@@ -289,11 +365,18 @@ static __always_inline int extract_query_name(void *dns_data, void *data_end, ch
             name[pos++] = '.';
         
         // Copy label characters with bounds checking
+        // Manual byte-by-byte copy to avoid compiler generating memmove
         #pragma unroll
-        for (int j = 0; j < 63 && j < label_len && pos < max_len - 1; j++) {
+        for (int j = 0; j < 63; j++) {
+            if (j >= label_len || pos >= max_len - 1)
+                break;
             if (qname >= (char *)data_end) 
                 break;
-            name[pos++] = *qname++;
+            // Use volatile to prevent compiler optimization
+            volatile char c = *qname;
+            name[pos] = c;
+            pos++;
+            qname++;
         }
     }
     
@@ -423,6 +506,14 @@ int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
         }
     }
     
+    // Get per-CPU scratch buffer for address structures
+    __u32 zero = 0;
+    struct dns_scratch_buffer *scratch = bpf_map_lookup_elem(&dns_scratch, &zero);
+    if (!scratch) {
+        bpf_ringbuf_discard(event, 0);
+        return 0;
+    }
+    
     // Extract network information from destination address
     if (dest_addr) {
         __u16 family;
@@ -430,18 +521,16 @@ int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
             if (family == AF_INET) {
                 event->ip_version = 4;
                 event->protocol = IPPROTO_UDP; // Assume UDP for now
-                struct sockaddr_in addr4;
-                if (bpf_probe_read_user(&addr4, sizeof(addr4), dest_addr) == 0) {
-                    event->dst_addr.ipv4_dst.addr = addr4.sin_addr.s_addr;
-                    event->dst_port = addr4.sin_port;
+                if (bpf_probe_read_user(&scratch->addr_buf.addr4, sizeof(scratch->addr_buf.addr4), dest_addr) == 0) {
+                    event->dst_addr.ipv4_dst.addr = scratch->addr_buf.addr4.sin_addr.s_addr;
+                    event->dst_port = scratch->addr_buf.addr4.sin_port;
                 }
             } else if (family == AF_INET6) {
                 event->ip_version = 6;
                 event->protocol = IPPROTO_UDP; // Assume UDP for now
-                struct sockaddr_in6 addr6;
-                if (bpf_probe_read_user(&addr6, sizeof(addr6), dest_addr) == 0) {
-                    __builtin_memcpy(event->dst_addr.ipv6_dst.addr, addr6.sin6_addr.in6_u.u6_addr32, 16);
-                    event->dst_port = addr6.sin6_port;
+                if (bpf_probe_read_user(&scratch->addr_buf.addr6, sizeof(scratch->addr_buf.addr6), dest_addr) == 0) {
+                    __builtin_memcpy(event->dst_addr.ipv6_dst.addr, scratch->addr_buf.addr6.sin6_addr.in6_u.u6_addr32, 16);
+                    event->dst_port = scratch->addr_buf.addr6.sin6_port;
                 }
             }
         }
@@ -591,6 +680,12 @@ int trace_tcp_send(struct trace_event_raw_sys_enter *ctx) {
     if (len < sizeof(struct dnshdr) + 2 || len > 65535)
         return 0;
     
+    // Get per-CPU scratch buffer to avoid stack overflow
+    __u32 zero = 0;
+    struct dns_scratch_buffer *scratch = bpf_map_lookup_elem(&dns_scratch, &zero);
+    if (!scratch)
+        return 0;
+    
     // Create DNS event for TCP query
     struct dns_event *event = bpf_ringbuf_reserve(&dns_events, sizeof(*event), 0);
     if (!event)
@@ -604,19 +699,22 @@ int trace_tcp_send(struct trace_event_raw_sys_enter *ctx) {
     event->protocol = IPPROTO_TCP;
     event->data_len = (__u32)len;
     
-    // Read TCP DNS data (skip 2-byte length prefix)
-    char tcp_buf[MAX_DNS_DATA];
+    // Read TCP DNS data into per-CPU buffer (skip 2-byte length prefix)
     __u32 copy_len = len > MAX_DNS_DATA ? MAX_DNS_DATA : (__u32)len;
     
-    if (bpf_probe_read_user(tcp_buf, copy_len, buf) == 0 && copy_len >= 2) {
+    if (bpf_probe_read_user(scratch->data, copy_len, buf) == 0 && copy_len >= 2) {
         // Skip 2-byte length prefix for TCP DNS
         __u32 dns_len = copy_len - 2;
-        __builtin_memcpy(event->data, tcp_buf + 2, dns_len);
+        // Use explicit copy loop instead of memcpy for BPF compatibility
+        #pragma unroll
+        for (int i = 0; i < MAX_DNS_DATA && i < dns_len; i++) {
+            event->data[i] = scratch->data[i + 2];
+        }
         event->data_len = dns_len;
         
         // Extract DNS header from TCP payload
         if (dns_len >= sizeof(struct dnshdr)) {
-            struct dnshdr *dns_hdr = (struct dnshdr *)(tcp_buf + 2);
+            struct dnshdr *dns_hdr = (struct dnshdr *)(scratch->data + 2);
             event->dns_id = bpf_ntohs(dns_hdr->id);
             event->dns_flags = bpf_ntohs(dns_hdr->flags);
             event->dns_opcode = (event->dns_flags >> 11) & 0x0F;
