@@ -2,7 +2,7 @@
 
 Tapio is a correlation engine for observability data. It collects system events from multiple sources, identifies relationships between them, and stores correlations in Neo4j for graph-based analysis.
 
-## What It Actually Does
+## What It Does
 
 **Core Mission: Kubernetes Observability Intelligence**
 - Provides complete visibility into Kubernetes cluster behavior and dependencies
