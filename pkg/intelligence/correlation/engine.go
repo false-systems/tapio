@@ -7,12 +7,25 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
 // Engine orchestrates all correlators
 type Engine struct {
 	logger *zap.Logger
+
+	// OTEL instrumentation - REQUIRED fields
+	tracer               trace.Tracer
+	eventsProcessedCtr   metric.Int64Counter
+	errorsTotalCtr       metric.Int64Counter
+	processingTimeHist   metric.Float64Histogram
+	correlationsFoundCtr metric.Int64Counter
+	queueDepthGauge      metric.Int64UpDownCounter
+	activeWorkersGauge   metric.Int64UpDownCounter
 
 	// Correlators
 	correlators []Correlator
@@ -44,15 +57,75 @@ type Engine struct {
 func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClient, storage Storage) (*Engine, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Initialize OTEL components - MANDATORY pattern
+	tracer := otel.Tracer("correlation-engine")
+	meter := otel.Meter("correlation-engine")
+
+	// Create metrics with descriptive names and descriptions
+	eventsProcessedCtr, err := meter.Int64Counter(
+		"correlation_events_processed_total",
+		metric.WithDescription("Total events processed by correlation engine"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events counter", zap.Error(err))
+	}
+
+	errorsTotalCtr, err := meter.Int64Counter(
+		"correlation_errors_total",
+		metric.WithDescription("Total errors in correlation engine"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	processingTimeHist, err := meter.Float64Histogram(
+		"correlation_processing_duration_ms",
+		metric.WithDescription("Processing duration for correlation engine in milliseconds"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	correlationsFoundCtr, err := meter.Int64Counter(
+		"correlation_correlations_found_total",
+		metric.WithDescription("Total correlations found by correlation engine"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create correlations found counter", zap.Error(err))
+	}
+
+	queueDepthGauge, err := meter.Int64UpDownCounter(
+		"correlation_queue_depth",
+		metric.WithDescription("Current depth of event processing queue"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create queue depth gauge", zap.Error(err))
+	}
+
+	activeWorkersGauge, err := meter.Int64UpDownCounter(
+		"correlation_active_workers",
+		metric.WithDescription("Number of active correlation workers"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create active workers gauge", zap.Error(err))
+	}
+
 	engine := &Engine{
-		logger:      logger,
-		correlators: make([]Correlator, 0),
-		storage:     storage,
-		eventChan:   make(chan *domain.UnifiedEvent, config.EventBufferSize),
-		resultChan:  make(chan *CorrelationResult, config.ResultBufferSize),
-		config:      config,
-		ctx:         ctx,
-		cancel:      cancel,
+		logger:               logger,
+		tracer:               tracer,
+		eventsProcessedCtr:   eventsProcessedCtr,
+		errorsTotalCtr:       errorsTotalCtr,
+		processingTimeHist:   processingTimeHist,
+		correlationsFoundCtr: correlationsFoundCtr,
+		queueDepthGauge:      queueDepthGauge,
+		activeWorkersGauge:   activeWorkersGauge,
+		correlators:          make([]Correlator, 0),
+		storage:              storage,
+		eventChan:            make(chan *domain.UnifiedEvent, config.EventBufferSize),
+		resultChan:           make(chan *CorrelationResult, config.ResultBufferSize),
+		config:               config,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 
 	if err := engine.initializeCorrelators(ctx, logger, k8sClient, config); err != nil {
@@ -114,6 +187,18 @@ func (e *Engine) addK8sCorrelator(ctx context.Context, logger *zap.Logger, k8sCl
 
 // Start begins processing events
 func (e *Engine) Start(ctx context.Context) error {
+	// Always start spans for operations
+	ctx, span := e.tracer.Start(ctx, "correlation.engine.start")
+	defer span.End()
+
+	// Set span attributes for debugging
+	span.SetAttributes(
+		attribute.String("component", "correlation-engine"),
+		attribute.String("operation", "start"),
+		attribute.Int("workers", e.config.WorkerCount),
+		attribute.Int("event_buffer", e.config.EventBufferSize),
+	)
+
 	e.logger.Info("Starting correlation engine",
 		zap.Int("workers", e.config.WorkerCount),
 		zap.Int("event_buffer", e.config.EventBufferSize),
@@ -123,6 +208,10 @@ func (e *Engine) Start(ctx context.Context) error {
 	for i := 0; i < e.config.WorkerCount; i++ {
 		e.wg.Add(1)
 		go e.worker(i)
+		// Update active workers metric
+		if e.activeWorkersGauge != nil {
+			e.activeWorkersGauge.Add(ctx, 1)
+		}
 	}
 
 	// Start storage cleanup routine
@@ -138,6 +227,10 @@ func (e *Engine) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down the engine
 func (e *Engine) Stop() error {
+	// Always start spans for operations
+	ctx, span := e.tracer.Start(context.Background(), "correlation.engine.stop")
+	defer span.End()
+
 	e.logger.Info("Stopping correlation engine")
 
 	// Cancel context to signal shutdown
@@ -149,8 +242,19 @@ func (e *Engine) Stop() error {
 	// Wait for workers to finish
 	e.wg.Wait()
 
+	// Reset active workers metric
+	if e.activeWorkersGauge != nil {
+		e.activeWorkersGauge.Add(ctx, -int64(e.config.WorkerCount))
+	}
+
 	// Close output channel
 	close(e.resultChan)
+
+	// Set final metrics in span
+	span.SetAttributes(
+		attribute.Int64("events.processed", e.eventsProcessed),
+		attribute.Int64("correlations.found", e.correlationsFound),
+	)
 
 	e.logger.Info("Correlation engine stopped",
 		zap.Int64("events_processed", e.eventsProcessed),
@@ -162,8 +266,34 @@ func (e *Engine) Stop() error {
 
 // Process submits an event for correlation processing
 func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error {
+	// Always start spans for operations
+	ctx, span := e.tracer.Start(ctx, "correlation.engine.process")
+	defer span.End()
+
 	if event == nil {
-		return fmt.Errorf("event is nil")
+		err := fmt.Errorf("event is nil")
+		span.SetAttributes(attribute.String("error", err.Error()))
+		// Record error metrics
+		if e.errorsTotalCtr != nil {
+			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "nil_event"),
+			))
+		}
+		return err
+	}
+
+	// Set span attributes for debugging
+	span.SetAttributes(
+		attribute.String("component", "correlation-engine"),
+		attribute.String("operation", "process_event"),
+		attribute.String("event.type", string(event.Type)),
+		attribute.String("event.id", event.ID),
+	)
+
+	// Record queue depth
+	if e.queueDepthGauge != nil {
+		e.queueDepthGauge.Add(ctx, 1)
+		defer e.queueDepthGauge.Add(ctx, -1)
 	}
 
 	// Use a timeout to prevent indefinite blocking
@@ -174,10 +304,24 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
 	case e.eventChan <- event:
 		return nil
 	case <-timer.C:
-		return fmt.Errorf("timeout sending event to processing queue")
+		err := fmt.Errorf("timeout sending event to processing queue")
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "queue_timeout"),
+		)
+		// Record error metrics
+		if e.errorsTotalCtr != nil {
+			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "queue_timeout"),
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
+		return err
 	case <-ctx.Done():
+		span.SetAttributes(attribute.String("error", "context_cancelled"))
 		return ctx.Err()
 	case <-e.ctx.Done():
+		span.SetAttributes(attribute.String("error", "engine_shutdown"))
 		return fmt.Errorf("engine is shutting down")
 	}
 }
@@ -190,6 +334,12 @@ func (e *Engine) Results() <-chan *CorrelationResult {
 // worker processes events from the queue
 func (e *Engine) worker(id int) {
 	defer e.wg.Done()
+	defer func() {
+		// Decrement active workers on exit
+		if e.activeWorkersGauge != nil {
+			e.activeWorkersGauge.Add(context.Background(), -1)
+		}
+	}()
 
 	e.logger.Debug("Correlation worker started", zap.Int("worker_id", id))
 
@@ -207,14 +357,34 @@ func (e *Engine) worker(id int) {
 
 // processEvent runs an event through all correlators
 func (e *Engine) processEvent(event *domain.UnifiedEvent) {
+	// Create span for event processing
+	ctx, span := e.tracer.Start(context.Background(), "correlation.engine.process_event")
+	defer span.End()
+
 	startTime := time.Now()
+	defer func() {
+		// Record processing time
+		duration := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
+		if e.processingTimeHist != nil {
+			e.processingTimeHist.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
+	}()
+
+	// Set span attributes
+	span.SetAttributes(
+		attribute.String("event.type", string(event.Type)),
+		attribute.String("event.id", event.ID),
+		attribute.Int("correlators.count", len(e.correlators)),
+	)
 
 	// Update processing metrics
-	e.incrementProcessedEvents()
+	e.incrementProcessedEvents(ctx)
 
 	// Process through each correlator
 	for _, correlator := range e.correlators {
-		e.processWithCorrelator(event, correlator)
+		e.processWithCorrelator(ctx, event, correlator)
 	}
 
 	// Monitor processing performance
@@ -222,38 +392,71 @@ func (e *Engine) processEvent(event *domain.UnifiedEvent) {
 }
 
 // incrementProcessedEvents safely increments the events processed counter
-func (e *Engine) incrementProcessedEvents() {
+func (e *Engine) incrementProcessedEvents(ctx context.Context) {
 	e.mu.Lock()
 	e.eventsProcessed++
 	e.mu.Unlock()
+
+	// Record success metrics
+	if e.eventsProcessedCtr != nil {
+		e.eventsProcessedCtr.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("status", "success"),
+		))
+	}
 }
 
 // processWithCorrelator processes an event with a single correlator
-func (e *Engine) processWithCorrelator(event *domain.UnifiedEvent, correlator Correlator) {
+func (e *Engine) processWithCorrelator(parentCtx context.Context, event *domain.UnifiedEvent, correlator Correlator) {
+	// Create span for correlator processing
+	ctx, span := e.tracer.Start(parentCtx, fmt.Sprintf("correlation.%s.process", correlator.Name()))
+	defer span.End()
+
+	// Set span attributes
+	span.SetAttributes(
+		attribute.String("correlator", correlator.Name()),
+		attribute.String("event.id", event.ID),
+	)
+
 	// Create timeout context for correlator
-	ctx, cancel := context.WithTimeout(e.ctx, DefaultProcessingTimeout)
+	ctx, cancel := context.WithTimeout(ctx, DefaultProcessingTimeout)
 	defer cancel()
 
 	// Process event
 	results, err := correlator.Process(ctx, event)
 	if err != nil {
+		// Record error in span
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "correlator_failed"),
+		)
+		// Record error metrics
+		if e.errorsTotalCtr != nil {
+			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "correlator_failed"),
+				attribute.String("correlator", correlator.Name()),
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
 		e.logCorrelatorError(correlator.Name(), event.ID, err)
 		return
 	}
 
+	// Set result count in span
+	span.SetAttributes(attribute.Int("results.count", len(results)))
+
 	// Handle results
-	e.handleCorrelatorResults(results)
+	e.handleCorrelatorResults(ctx, results)
 }
 
 // handleCorrelatorResults processes and stores correlation results
-func (e *Engine) handleCorrelatorResults(results []*CorrelationResult) {
+func (e *Engine) handleCorrelatorResults(ctx context.Context, results []*CorrelationResult) {
 	for _, result := range results {
 		if result != nil {
-			e.sendResult(result)
+			e.sendResult(ctx, result)
 
 			// Store result asynchronously
 			if e.storage != nil {
-				e.asyncStoreResult(result)
+				e.asyncStoreResult(ctx, result)
 			}
 		}
 	}
@@ -280,11 +483,19 @@ func (e *Engine) checkProcessingPerformance(eventID string, startTime time.Time)
 }
 
 // sendResult sends a correlation result to the output channel
-func (e *Engine) sendResult(result *CorrelationResult) {
+func (e *Engine) sendResult(ctx context.Context, result *CorrelationResult) {
 	// Update metrics
 	e.mu.Lock()
 	e.correlationsFound++
 	e.mu.Unlock()
+
+	// Record correlation found metric
+	if e.correlationsFoundCtr != nil {
+		e.correlationsFoundCtr.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("correlation_type", result.Type),
+			attribute.Float64("confidence", result.Confidence),
+		))
+	}
 
 	// Try to send, but don't block
 	select {
@@ -298,6 +509,13 @@ func (e *Engine) sendResult(result *CorrelationResult) {
 			zap.String("correlation_id", result.ID),
 			zap.String("type", result.Type),
 		)
+		// Record dropped correlation
+		if e.errorsTotalCtr != nil {
+			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "result_dropped"),
+				attribute.String("correlation_type", result.Type),
+			))
+		}
 	}
 }
 
@@ -325,27 +543,44 @@ func (e *Engine) storageCleanup() {
 }
 
 // asyncStoreResult stores a correlation result asynchronously
-func (e *Engine) asyncStoreResult(result *CorrelationResult) {
+func (e *Engine) asyncStoreResult(parentCtx context.Context, result *CorrelationResult) {
 	// Create a copy of the result to avoid data races
 	resultCopy := *result
 
 	// Store in a goroutine to avoid blocking event processing
 	go func() {
+		// Create span for storage operation
+		ctx, span := e.tracer.Start(context.Background(), "correlation.storage.store")
+		defer span.End()
+
+		// Set span attributes
+		span.SetAttributes(
+			attribute.String("correlation.id", resultCopy.ID),
+			attribute.String("correlation.type", resultCopy.Type),
+		)
+
 		// Use a timeout context for storage operations
-		storeCtx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
+		storeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
 		if err := e.storage.Store(storeCtx, &resultCopy); err != nil {
+			// Record error in span
+			span.SetAttributes(
+				attribute.String("error", err.Error()),
+				attribute.String("error.type", "storage_failed"),
+			)
+			// Record error metrics
+			if e.errorsTotalCtr != nil {
+				e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "storage_failed"),
+					attribute.String("operation", "store_correlation"),
+				))
+			}
 			// Log error but don't block processing
 			e.logger.Error("Failed to store correlation asynchronously",
 				zap.String("correlation_id", resultCopy.ID),
 				zap.Error(err),
 			)
-
-			// Update error metrics
-			e.mu.Lock()
-			// Note: Add error counter to Engine struct if needed for monitoring
-			e.mu.Unlock()
 		}
 	}()
 }

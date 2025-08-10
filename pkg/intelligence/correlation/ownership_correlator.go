@@ -9,6 +9,10 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +45,14 @@ type OwnershipCorrelator struct {
 	graphStore  GraphStore
 	logger      *zap.Logger
 	queryConfig QueryConfig
+
+	// OTEL instrumentation - REQUIRED fields
+	tracer             trace.Tracer
+	eventsProcessedCtr metric.Int64Counter
+	errorsTotalCtr     metric.Int64Counter
+	processingTimeHist metric.Float64Histogram
+	findingsFoundCtr   metric.Int64Counter
+	queryDurationHist  metric.Float64Histogram
 }
 
 // NewOwnershipCorrelator creates a new ownership correlator
@@ -50,6 +62,51 @@ func NewOwnershipCorrelator(graphStore GraphStore, logger *zap.Logger) (*Ownersh
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
+	}
+
+	// Initialize OTEL components - MANDATORY pattern
+	tracer := otel.Tracer("ownership-correlator")
+	meter := otel.Meter("ownership-correlator")
+
+	// Create metrics with descriptive names and descriptions
+	eventsProcessedCtr, err := meter.Int64Counter(
+		"ownership_events_processed_total",
+		metric.WithDescription("Total events processed by ownership correlator"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events counter", zap.Error(err))
+	}
+
+	errorsTotalCtr, err := meter.Int64Counter(
+		"ownership_errors_total",
+		metric.WithDescription("Total errors in ownership correlator"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	processingTimeHist, err := meter.Float64Histogram(
+		"ownership_processing_duration_ms",
+		metric.WithDescription("Processing duration for ownership correlator in milliseconds"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	findingsFoundCtr, err := meter.Int64Counter(
+		"ownership_findings_found_total",
+		metric.WithDescription("Total findings found by ownership correlator"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create findings counter", zap.Error(err))
+	}
+
+	queryDurationHist, err := meter.Float64Histogram(
+		"ownership_query_duration_ms",
+		metric.WithDescription("Graph query duration for ownership correlator in milliseconds"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create query duration histogram", zap.Error(err))
 	}
 
 	capabilities := CorrelatorCapabilities{
@@ -82,20 +139,68 @@ func NewOwnershipCorrelator(graphStore GraphStore, logger *zap.Logger) (*Ownersh
 	base := NewBaseCorrelator("ownership-correlator", DefaultCorrelatorVersion, capabilities)
 
 	return &OwnershipCorrelator{
-		BaseCorrelator: base,
-		graphStore:     graphStore,
-		logger:         logger,
-		queryConfig:    DefaultQueryConfig(),
+		BaseCorrelator:     base,
+		graphStore:         graphStore,
+		logger:             logger,
+		queryConfig:        DefaultQueryConfig(),
+		tracer:             tracer,
+		eventsProcessedCtr: eventsProcessedCtr,
+		errorsTotalCtr:     errorsTotalCtr,
+		processingTimeHist: processingTimeHist,
+		findingsFoundCtr:   findingsFoundCtr,
+		queryDurationHist:  queryDurationHist,
 	}, nil
 }
 
 // Correlate analyzes ownership chain issues
 func (o *OwnershipCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error) {
+	// Always start spans for operations
+	ctx, span := o.tracer.Start(ctx, "correlation.ownership.analyze")
+	defer span.End()
+
 	startTime := time.Now()
+	defer func() {
+		// Record processing time
+		duration := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
+		if o.processingTimeHist != nil {
+			o.processingTimeHist.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
+	}()
+
+	// Set span attributes for debugging
+	span.SetAttributes(
+		attribute.String("component", "ownership-correlator"),
+		attribute.String("operation", "correlate"),
+		attribute.String("event.type", string(event.Type)),
+		attribute.String("event.id", event.ID),
+		attribute.String("namespace", o.getNamespace(event)),
+		attribute.String("entity", o.getEntityName(event)),
+	)
 
 	// Validate event can be processed
 	if err := o.ValidateEvent(event); err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "validation_failed"),
+		)
+		// Record error metrics
+		if o.errorsTotalCtr != nil {
+			o.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "validation_failed"),
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
 		return nil, err
+	}
+
+	// Record event processed
+	if o.eventsProcessedCtr != nil {
+		o.eventsProcessedCtr.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", string(event.Type)),
+			attribute.String("status", "processing"),
+		))
 	}
 
 	o.logCorrelationStart(event)
@@ -103,13 +208,35 @@ func (o *OwnershipCorrelator) Correlate(ctx context.Context, event *domain.Unifi
 	// Route to appropriate analysis
 	findings, err := o.routeEventToAnalysis(ctx, event)
 	if err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "analysis_failed"),
+		)
+		// Record error metrics
+		if o.errorsTotalCtr != nil {
+			o.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "analysis_failed"),
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
 		o.logCorrelationFailure(event, err)
 		return nil, fmt.Errorf("ownership correlation failed: %w", err)
+	}
+
+	// Record findings count
+	span.SetAttributes(attribute.Int("findings.count", len(findings)))
+	if o.findingsFoundCtr != nil && len(findings) > 0 {
+		o.findingsFoundCtr.Add(ctx, int64(len(findings)), metric.WithAttributes(
+			attribute.String("event_type", string(event.Type)),
+		))
 	}
 
 	// Calculate overall confidence and build context
 	confidence := o.calculateConfidence(findings)
 	contextMap := o.buildCorrelationContext(event)
+
+	// Set final attributes
+	span.SetAttributes(attribute.Float64("confidence", confidence))
 
 	return &aggregator.CorrelatorOutput{
 		CorrelatorName:    o.Name(),
@@ -124,11 +251,27 @@ func (o *OwnershipCorrelator) Correlate(ctx context.Context, event *domain.Unifi
 
 // analyzeDeploymentChain analyzes Deployment→ReplicaSet→Pod ownership chain
 func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+	// Create span for analysis operation
+	ctx, span := o.tracer.Start(ctx, "correlation.ownership.analyze_deployment")
+	defer span.End()
+
 	namespace := o.getNamespace(event)
 	deploymentName := o.getEntityName(event)
 
+	// Set span attributes
+	span.SetAttributes(
+		attribute.String("analysis.type", "deployment_chain"),
+		attribute.String("deployment", deploymentName),
+		attribute.String("namespace", namespace),
+	)
+
 	if deploymentName == "" {
-		return nil, fmt.Errorf("deployment name not found in event")
+		err := fmt.Errorf("deployment name not found in event")
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "missing_deployment_name"),
+		)
+		return nil, err
 	}
 
 	o.logger.Debug("Analyzing deployment ownership chain",
@@ -137,11 +280,27 @@ func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event 
 
 	result, err := o.queryDeploymentChain(ctx, namespace, deploymentName)
 	if err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "query_failed"),
+		)
 		return nil, err
 	}
 	defer result.Close(ctx)
 
-	return o.processDeploymentChainResults(ctx, result, deploymentName, event)
+	findings, err := o.processDeploymentChainResults(ctx, result, deploymentName, event)
+	if err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "processing_failed"),
+		)
+		return nil, err
+	}
+
+	// Record findings count in span
+	span.SetAttributes(attribute.Int("findings.count", len(findings)))
+
+	return findings, nil
 }
 
 // analyzeReplicaSetIssues analyzes ReplicaSet→Pod ownership issues
@@ -648,6 +807,28 @@ func (o *OwnershipCorrelator) parsePodsFromValue(value interface{}) []PodData {
 
 // queryDeploymentChain executes the deployment ownership chain query
 func (o *OwnershipCorrelator) queryDeploymentChain(ctx context.Context, namespace, deploymentName string) (ResultIterator, error) {
+	// Create span for query operation
+	ctx, span := o.tracer.Start(ctx, "correlation.ownership.query_deployment")
+	defer span.End()
+
+	queryStart := time.Now()
+	defer func() {
+		// Record query duration
+		duration := time.Since(queryStart).Seconds() * 1000 // Convert to milliseconds
+		if o.queryDurationHist != nil {
+			o.queryDurationHist.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("query_type", "deployment_chain"),
+			))
+		}
+	}()
+
+	// Set span attributes
+	span.SetAttributes(
+		attribute.String("query.type", "deployment_chain"),
+		attribute.String("deployment", deploymentName),
+		attribute.String("namespace", namespace),
+	)
+
 	limit := o.queryConfig.GetLimit("ownership")
 	query := fmt.Sprintf(`
 		MATCH (d:Deployment {name: $deploymentName, namespace: $namespace})
@@ -679,11 +860,26 @@ func (o *OwnershipCorrelator) queryDeploymentChain(ctx context.Context, namespac
 		DeploymentName: deploymentName,
 	}
 	if err := params.Validate(); err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "validation_failed"),
+		)
 		return nil, err
 	}
 
 	result, err := o.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "query_failed"),
+		)
+		// Record error metrics
+		if o.errorsTotalCtr != nil {
+			o.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "query_failed"),
+				attribute.String("query_type", "deployment_chain"),
+			))
+		}
 		return nil, fmt.Errorf("failed to query deployment chain: %w", err)
 	}
 	return result, nil

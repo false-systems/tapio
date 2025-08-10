@@ -8,6 +8,10 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -18,6 +22,14 @@ type DependencyCorrelator struct {
 	graphStore  GraphStore
 	logger      *zap.Logger
 	queryConfig QueryConfig
+
+	// OTEL instrumentation - REQUIRED fields
+	tracer             trace.Tracer
+	eventsProcessedCtr metric.Int64Counter
+	errorsTotalCtr     metric.Int64Counter
+	processingTimeHist metric.Float64Histogram
+	findingsFoundCtr   metric.Int64Counter
+	queryDurationHist  metric.Float64Histogram
 }
 
 // NewDependencyCorrelator creates a new dependency correlator
@@ -27,6 +39,51 @@ func NewDependencyCorrelator(graphStore GraphStore, logger *zap.Logger) (*Depend
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
+	}
+
+	// Initialize OTEL components - MANDATORY pattern
+	tracer := otel.Tracer("dependency-correlator")
+	meter := otel.Meter("dependency-correlator")
+
+	// Create metrics with descriptive names and descriptions
+	eventsProcessedCtr, err := meter.Int64Counter(
+		"dependency_events_processed_total",
+		metric.WithDescription("Total events processed by dependency correlator"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events counter", zap.Error(err))
+	}
+
+	errorsTotalCtr, err := meter.Int64Counter(
+		"dependency_errors_total",
+		metric.WithDescription("Total errors in dependency correlator"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	processingTimeHist, err := meter.Float64Histogram(
+		"dependency_processing_duration_ms",
+		metric.WithDescription("Processing duration for dependency correlator in milliseconds"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	findingsFoundCtr, err := meter.Int64Counter(
+		"dependency_findings_found_total",
+		metric.WithDescription("Total findings found by dependency correlator"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create findings counter", zap.Error(err))
+	}
+
+	queryDurationHist, err := meter.Float64Histogram(
+		"dependency_query_duration_ms",
+		metric.WithDescription("Graph query duration for dependency correlator in milliseconds"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create query duration histogram", zap.Error(err))
 	}
 
 	capabilities := CorrelatorCapabilities{
@@ -57,20 +114,68 @@ func NewDependencyCorrelator(graphStore GraphStore, logger *zap.Logger) (*Depend
 	base := NewBaseCorrelator("dependency-correlator", "1.0.0", capabilities)
 
 	return &DependencyCorrelator{
-		BaseCorrelator: base,
-		graphStore:     graphStore,
-		logger:         logger,
-		queryConfig:    DefaultQueryConfig(),
+		BaseCorrelator:     base,
+		graphStore:         graphStore,
+		logger:             logger,
+		queryConfig:        DefaultQueryConfig(),
+		tracer:             tracer,
+		eventsProcessedCtr: eventsProcessedCtr,
+		errorsTotalCtr:     errorsTotalCtr,
+		processingTimeHist: processingTimeHist,
+		findingsFoundCtr:   findingsFoundCtr,
+		queryDurationHist:  queryDurationHist,
 	}, nil
 }
 
 // Correlate processes an event and finds dependency-related root causes
 func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error) {
+	// Always start spans for operations
+	ctx, span := d.tracer.Start(ctx, "correlation.dependency.analyze")
+	defer span.End()
+
 	startTime := time.Now()
+	defer func() {
+		// Record processing time
+		duration := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
+		if d.processingTimeHist != nil {
+			d.processingTimeHist.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
+	}()
+
+	// Set span attributes for debugging
+	span.SetAttributes(
+		attribute.String("component", "dependency-correlator"),
+		attribute.String("operation", "correlate"),
+		attribute.String("event.type", string(event.Type)),
+		attribute.String("event.id", event.ID),
+		attribute.String("namespace", d.getNamespace(event)),
+		attribute.String("entity", d.getEntityName(event)),
+	)
 
 	// Validate event can be processed
 	if err := d.ValidateEvent(event); err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "validation_failed"),
+		)
+		// Record error metrics
+		if d.errorsTotalCtr != nil {
+			d.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "validation_failed"),
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
 		return nil, err
+	}
+
+	// Record event processed
+	if d.eventsProcessedCtr != nil {
+		d.eventsProcessedCtr.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", string(event.Type)),
+			attribute.String("status", "processing"),
+		))
 	}
 
 	d.logCorrelationStart(event)
@@ -78,15 +183,37 @@ func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.Unif
 	// Route to appropriate correlation handler
 	findings, err := d.routeEventToHandler(ctx, event)
 	if err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "handler_failed"),
+		)
+		// Record error metrics
+		if d.errorsTotalCtr != nil {
+			d.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "handler_failed"),
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
 		d.logger.Error("Dependency correlation failed",
 			zap.String("event_id", event.ID),
 			zap.Error(err))
 		return nil, fmt.Errorf("dependency correlation failed: %w", err)
 	}
 
+	// Record findings count
+	span.SetAttributes(attribute.Int("findings.count", len(findings)))
+	if d.findingsFoundCtr != nil && len(findings) > 0 {
+		d.findingsFoundCtr.Add(ctx, int64(len(findings)), metric.WithAttributes(
+			attribute.String("event_type", string(event.Type)),
+		))
+	}
+
 	// Calculate overall confidence and build output
 	confidence := d.calculateConfidence(findings, event)
 	contextMap := d.buildContextMap(event)
+
+	// Set final attributes
+	span.SetAttributes(attribute.Float64("confidence", confidence))
 
 	return &aggregator.CorrelatorOutput{
 		CorrelatorName:    d.Name(),
@@ -142,11 +269,27 @@ func (d *DependencyCorrelator) buildContextMap(event *domain.UnifiedEvent) map[s
 
 // correlateServiceIssues analyzes service availability problems
 func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+	// Create span for service correlation
+	ctx, span := d.tracer.Start(ctx, "correlation.dependency.service_issues")
+	defer span.End()
+
 	namespace := d.getNamespace(event)
 	serviceName := d.getEntityName(event)
 
+	// Set span attributes
+	span.SetAttributes(
+		attribute.String("correlation.type", "service_issues"),
+		attribute.String("service", serviceName),
+		attribute.String("namespace", namespace),
+	)
+
 	if serviceName == "" {
-		return nil, fmt.Errorf("service name not found in event")
+		err := fmt.Errorf("service name not found in event")
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "missing_service_name"),
+		)
+		return nil, err
 	}
 
 	d.logger.Debug("Correlating service issues",
@@ -156,6 +299,10 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 	// Query service dependencies
 	result, err := d.queryServiceDependencies(ctx, namespace, serviceName)
 	if err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "query_failed"),
+		)
 		return nil, err
 	}
 	defer result.Close(ctx)
@@ -177,8 +324,15 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 	}
 
 	if err = result.Err(); err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "iteration_failed"),
+		)
 		return nil, fmt.Errorf("error iterating service dependency results: %w", err)
 	}
+
+	// Record findings count in span
+	span.SetAttributes(attribute.Int("findings.count", len(findings)))
 
 	return findings, nil
 }
@@ -918,6 +1072,28 @@ func (d *DependencyCorrelator) analyzeServiceImpact(record *GraphRecord, podName
 
 // queryServiceDependencies executes the service dependency query
 func (d *DependencyCorrelator) queryServiceDependencies(ctx context.Context, namespace, serviceName string) (ResultIterator, error) {
+	// Create span for query operation
+	ctx, span := d.tracer.Start(ctx, "correlation.dependency.query_service")
+	defer span.End()
+
+	queryStart := time.Now()
+	defer func() {
+		// Record query duration
+		duration := time.Since(queryStart).Seconds() * 1000 // Convert to milliseconds
+		if d.queryDurationHist != nil {
+			d.queryDurationHist.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("query_type", "service_dependencies"),
+			))
+		}
+	}()
+
+	// Set span attributes
+	span.SetAttributes(
+		attribute.String("query.type", "service_dependencies"),
+		attribute.String("service", serviceName),
+		attribute.String("namespace", namespace),
+	)
+
 	limit := d.queryConfig.GetLimit("service")
 	query := fmt.Sprintf(`
 		MATCH (s:Service {name: $serviceName, namespace: $namespace})
@@ -938,11 +1114,26 @@ func (d *DependencyCorrelator) queryServiceDependencies(ctx context.Context, nam
 		ServiceName:     serviceName,
 	}
 	if err := params.Validate(); err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "validation_failed"),
+		)
 		return nil, err
 	}
 
 	result, err := d.graphStore.ExecuteQuery(ctx, query, params)
 	if err != nil {
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.type", "query_failed"),
+		)
+		// Record error metrics
+		if d.errorsTotalCtr != nil {
+			d.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "query_failed"),
+				attribute.String("query_type", "service_dependencies"),
+			))
+		}
 		return nil, fmt.Errorf("failed to query service dependencies: %w", err)
 	}
 
