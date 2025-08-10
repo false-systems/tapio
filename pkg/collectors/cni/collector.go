@@ -45,9 +45,6 @@ type Collector struct {
 	ebpfState EBPFState
 	mutex     sync.RWMutex // Protects concurrent access
 
-	// Health tracking with atomic operations
-	healthTracker *collectors.HealthTracker
-
 	// OTEL instrumentation
 	tracer             trace.Tracer
 	meter              metric.Meter
@@ -78,10 +75,11 @@ func NewCollector(name string) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Create metrics with graceful degradation
+	// Create metrics with OTEL standard naming - MANDATORY pattern
+	metricName := "cni"
 	eventsProcessed, err := meter.Int64Counter(
-		"cni_events_processed_total",
-		metric.WithDescription("Total number of CNI events processed"),
+		fmt.Sprintf("%s_events_processed_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create events_processed counter", zap.Error(err))
@@ -89,8 +87,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	eventsDropped, err := meter.Int64Counter(
-		"cni_events_dropped_total",
-		metric.WithDescription("Total number of CNI events dropped due to buffer full"),
+		fmt.Sprintf("%s_events_dropped_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create events_dropped counter", zap.Error(err))
@@ -98,8 +96,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	ebpfLoadsTotal, err := meter.Int64Counter(
-		"cni_ebpf_loads_total",
-		metric.WithDescription("Total number of eBPF program load attempts"),
+		fmt.Sprintf("%s_ebpf_operations_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total eBPF operations in %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create ebpf_loads_total counter", zap.Error(err))
@@ -107,8 +105,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	ebpfLoadErrors, err := meter.Int64Counter(
-		"cni_ebpf_load_errors_total",
-		metric.WithDescription("Total number of eBPF program load errors"),
+		fmt.Sprintf("%s_errors_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create ebpf_load_errors counter", zap.Error(err))
@@ -116,8 +114,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	ebpfAttachTotal, err := meter.Int64Counter(
-		"cni_ebpf_attach_total",
-		metric.WithDescription("Total number of eBPF program attach attempts"),
+		fmt.Sprintf("%s_ebpf_attach_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total eBPF attach attempts in %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create ebpf_attach_total counter", zap.Error(err))
@@ -125,8 +123,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	ebpfAttachErrors, err := meter.Int64Counter(
-		"cni_ebpf_attach_errors_total",
-		metric.WithDescription("Total number of eBPF program attach errors"),
+		fmt.Sprintf("%s_ebpf_attach_errors_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total eBPF attach errors in %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create ebpf_attach_errors counter", zap.Error(err))
@@ -134,8 +132,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	collectorHealth, err := meter.Int64Gauge(
-		"cni_collector_healthy",
-		metric.WithDescription("CNI collector health status (1=healthy, 0=unhealthy)"),
+		fmt.Sprintf("%s_collector_healthy", metricName),
+		metric.WithDescription(fmt.Sprintf("%s collector health status (1=healthy, 0=unhealthy)", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create collector_healthy gauge", zap.Error(err))
@@ -143,8 +141,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	k8sExtractionTotal, err := meter.Int64Counter(
-		"cni_k8s_extraction_attempts_total",
-		metric.WithDescription("Total number of K8s metadata extraction attempts"),
+		fmt.Sprintf("%s_k8s_extraction_attempts_total", metricName),
+		metric.WithDescription(fmt.Sprintf("K8s metadata extraction attempts in %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create k8s_extraction_total counter", zap.Error(err))
@@ -152,8 +150,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	k8sExtractionHits, err := meter.Int64Counter(
-		"cni_k8s_extraction_hits_total",
-		metric.WithDescription("Total number of successful K8s metadata extractions"),
+		fmt.Sprintf("%s_k8s_extraction_hits_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Successful K8s metadata extractions in %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create k8s_extraction_hits counter", zap.Error(err))
@@ -161,8 +159,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	netnsOpsByType, err := meter.Int64Counter(
-		"cni_netns_operations_total",
-		metric.WithDescription("Total number of network namespace operations by type"),
+		fmt.Sprintf("%s_netns_operations_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Network namespace operations in %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create netns_ops_by_type counter", zap.Error(err))
@@ -170,8 +168,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	bufferUtilization, err := meter.Float64Gauge(
-		"cni_buffer_utilization_ratio",
-		metric.WithDescription("Event buffer utilization ratio (0.0-1.0)"),
+		fmt.Sprintf("%s_buffer_utilization_ratio", metricName),
+		metric.WithDescription(fmt.Sprintf("Buffer utilization ratio for %s", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create buffer_utilization gauge", zap.Error(err))
@@ -179,9 +177,8 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	processingLatency, err := meter.Float64Histogram(
-		"cni_event_processing_duration_seconds",
-		metric.WithDescription("Time spent processing CNI events"),
-		metric.WithUnit("s"),
+		fmt.Sprintf("%s_processing_duration_ms", metricName),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", metricName)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create processing_latency histogram", zap.Error(err))
@@ -340,7 +337,6 @@ func NewCollectorWithConfig(cfg *config.CNIConfig) (*Collector, error) {
 		config:             cfg,
 		events:             make(chan collectors.RawEvent, cfg.BufferSize),
 		healthy:            true,
-		healthTracker:      collectors.NewHealthTracker(),
 		tracer:             tracer,
 		meter:              meter,
 		logger:             logger,
@@ -361,9 +357,7 @@ func NewCollectorWithConfig(cfg *config.CNIConfig) (*Collector, error) {
 	logger.Info("CNI collector created",
 		zap.String("name", cfg.Name),
 		zap.Int("buffer_size", cfg.BufferSize),
-		zap.String("interface_prefix", cfg.InterfacePrefix),
-		zap.Bool("enable_network_policies", cfg.EnableNetworkPolicies),
-		zap.Bool("track_bandwidth", cfg.TrackBandwidth),
+		zap.Bool("enable_ebpf", cfg.EnableEBPF),
 	)
 
 	return c, nil
@@ -473,49 +467,11 @@ func (c *Collector) Events() <-chan collectors.RawEvent {
 
 // IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
-	if c.healthTracker != nil {
-		return c.healthTracker.IsHealthy()
-	}
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return c.healthy
 }
 
-// GetHealthStatus returns structured health information
-func (c *Collector) GetHealthStatus() collectors.HealthStatus {
-	if c.healthTracker != nil {
-		// Create component health map
-		components := map[string]bool{
-			"ebpf_loaded": c.ebpfState != nil && c.ebpfState.IsLoaded(),
-			"metrics":     c.eventsProcessed != nil,
-			"tracer":      c.tracer != nil,
-			"logger":      c.logger != nil,
-		}
-
-		// Calculate resource usage
-		usage := collectors.ResourceUsage{
-			BufferUtilization: c.calculateBufferUtilization(),
-			GoroutineCount:    1, // Main processing goroutine
-		}
-
-		if c.ebpfState != nil {
-			usage.FileDescriptorCount = c.ebpfState.LinkCount()
-		}
-
-		return c.healthTracker.GetHealthStatusWithComponents(components, usage)
-	}
-
-	// Fallback for legacy collectors
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
-	return collectors.HealthStatus{
-		Healthy:         c.healthy,
-		EventsCollected: 0, // Would need to track this
-		EventsDropped:   0, // Would need to track this
-		ErrorCount:      0, // Would need to track this
-	}
-}
 
 // calculateBufferUtilization calculates current buffer utilization percentage
 func (c *Collector) calculateBufferUtilization() float64 {

@@ -22,15 +22,6 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 cniMonitor ./bpf_src/cni_monitor.c -- -I../bpf_common
 
-// cniEvent represents a network event from eBPF
-type cniEvent struct {
-	Timestamp uint64
-	PID       uint32
-	Netns     uint32
-	EventType uint32
-	Comm      [16]byte
-	Data      [64]byte
-}
 
 // eBPF components - implements EBPFState interface
 type ebpfState struct {

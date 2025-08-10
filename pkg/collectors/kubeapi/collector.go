@@ -9,6 +9,11 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +44,15 @@ type Collector struct {
 
 	// Informers
 	informers []cache.SharedIndexInformer
+
+	// OTEL instrumentation - REQUIRED fields
+	tracer          trace.Tracer
+	eventsProcessed metric.Int64Counter
+	errorsTotal     metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	eventsDropped   metric.Int64Counter
+	watcherCount    metric.Int64UpDownCounter
+	cacheSyncs      metric.Int64Counter
 }
 
 // New creates a new kubeapi collector
@@ -55,13 +69,74 @@ func New(logger *zap.Logger, config Config) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create clientset: %w", err)
 	}
 
+	// Initialize OTEL components - MANDATORY pattern
+	name := "kubeapi"
+	tracer := otel.Tracer(name)
+	meter := otel.Meter(name)
+
+	// Create metrics with descriptive names and descriptions
+	eventsProcessed, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events counter", zap.Error(err))
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	processingTime, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	eventsDropped, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_dropped_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events dropped counter", zap.Error(err))
+	}
+
+	watcherCount, err := meter.Int64UpDownCounter(
+		fmt.Sprintf("%s_active_watchers", name),
+		metric.WithDescription(fmt.Sprintf("Active watchers in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create watcher count gauge", zap.Error(err))
+	}
+
+	cacheSyncs, err := meter.Int64Counter(
+		fmt.Sprintf("%s_cache_syncs_total", name),
+		metric.WithDescription(fmt.Sprintf("Total cache syncs in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create cache syncs counter", zap.Error(err))
+	}
+
 	return &Collector{
-		logger:       logger,
-		config:       config,
-		clientset:    clientset,
-		traceManager: NewTraceManager(),
-		events:       make(chan collectors.RawEvent, config.BufferSize),
-		informers:    make([]cache.SharedIndexInformer, 0),
+		logger:          logger,
+		config:          config,
+		clientset:       clientset,
+		traceManager:    NewTraceManager(),
+		events:          make(chan collectors.RawEvent, config.BufferSize),
+		informers:       make([]cache.SharedIndexInformer, 0),
+		tracer:          tracer,
+		eventsProcessed: eventsProcessed,
+		errorsTotal:     errorsTotal,
+		processingTime:  processingTime,
+		eventsDropped:   eventsDropped,
+		watcherCount:    watcherCount,
+		cacheSyncs:      cacheSyncs,
 	}, nil
 }
 
@@ -70,13 +145,55 @@ func NewCollector(name string) (*Collector, error) {
 	logger := zap.NewNop()
 	config := DefaultConfig()
 
+	// Initialize OTEL components even for minimal collector
+	tracer := otel.Tracer(name)
+	meter := otel.Meter(name)
+
+	// Create metrics with graceful degradation for test scenarios
+	eventsProcessed, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
+	)
+
+	errorsTotal, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+	)
+
+	processingTime, _ := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+
+	eventsDropped, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_events_dropped_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	)
+
+	watcherCount, _ := meter.Int64UpDownCounter(
+		fmt.Sprintf("%s_active_watchers", name),
+		metric.WithDescription(fmt.Sprintf("Active watchers in %s", name)),
+	)
+
+	cacheSyncs, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_cache_syncs_total", name),
+		metric.WithDescription(fmt.Sprintf("Total cache syncs in %s", name)),
+	)
+
 	// For tests, create a minimal collector without K8s connection
 	return &Collector{
-		logger:       logger,
-		config:       config,
-		traceManager: NewTraceManager(),
-		events:       make(chan collectors.RawEvent, config.BufferSize),
-		informers:    make([]cache.SharedIndexInformer, 0),
+		logger:          logger,
+		config:          config,
+		traceManager:    NewTraceManager(),
+		events:          make(chan collectors.RawEvent, config.BufferSize),
+		informers:       make([]cache.SharedIndexInformer, 0),
+		tracer:          tracer,
+		eventsProcessed: eventsProcessed,
+		errorsTotal:     errorsTotal,
+		processingTime:  processingTime,
+		eventsDropped:   eventsDropped,
+		watcherCount:    watcherCount,
+		cacheSyncs:      cacheSyncs,
 	}, nil
 }
 
@@ -94,7 +211,12 @@ func (c *Collector) Name() string {
 
 // Start begins collecting K8s events
 func (c *Collector) Start(ctx context.Context) error {
+	// Create span for startup
+	ctx, span := c.tracer.Start(ctx, "kubeapi.start")
+	defer span.End()
+
 	if c.ctx != nil {
+		span.SetStatus(codes.Error, "collector already started")
 		return fmt.Errorf("collector already started")
 	}
 
@@ -102,6 +224,13 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	// Set up watchers
 	if err := c.setupWatchers(); err != nil {
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "watcher_setup_failed"),
+			))
+		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to setup watchers: %w", err)
 	}
 
@@ -110,13 +239,35 @@ func (c *Collector) Start(ctx context.Context) error {
 		go informer.Run(c.ctx.Done())
 	}
 
+	// Update watcher count metric
+	if c.watcherCount != nil {
+		c.watcherCount.Add(ctx, int64(len(c.informers)), metric.WithAttributes(
+			attribute.String("component", "kubeapi"),
+		))
+	}
+
 	// Wait for initial sync
 	c.logger.Info("Waiting for initial K8s cache sync...")
 	for _, informer := range c.informers {
 		if !cache.WaitForCacheSync(c.ctx.Done(), informer.HasSynced) {
+			if c.errorsTotal != nil {
+				c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "cache_sync_failed"),
+				))
+			}
+			span.SetStatus(codes.Error, "failed to sync cache")
 			return fmt.Errorf("failed to sync cache")
 		}
+		if c.cacheSyncs != nil {
+			c.cacheSyncs.Add(ctx, 1)
+		}
 	}
+
+	span.SetStatus(codes.Ok, "K8s API collector started successfully")
+	span.SetAttributes(
+		attribute.Int("watchers", len(c.informers)),
+		attribute.StringSlice("namespaces", c.config.WatchNamespaces),
+	)
 
 	c.logger.Info("K8s API collector started",
 		zap.Int("watchers", len(c.informers)),
@@ -354,9 +505,23 @@ func (c *Collector) resourceEventHandler(kind string) cache.ResourceEventHandler
 
 // handleResourceEvent processes resource changes
 func (c *Collector) handleResourceEvent(eventType, kind string, obj, oldObj interface{}) {
+	// Create span for event handling
+	ctx, span := c.tracer.Start(c.ctx, "kubeapi.handle_event")
+	defer span.End()
+
+	start := time.Now()
+
 	// Extract metadata
 	meta, err := getObjectMeta(obj)
 	if err != nil {
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "metadata_extraction_failed"),
+				attribute.String("kind", kind),
+			))
+		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		c.logger.Error("Failed to get object meta",
 			zap.String("kind", kind),
 			zap.Error(err))
@@ -365,8 +530,19 @@ func (c *Collector) handleResourceEvent(eventType, kind string, obj, oldObj inte
 
 	// Skip ignored namespaces
 	if c.shouldIgnoreNamespace(meta.GetNamespace()) {
+		span.SetAttributes(attribute.String("skipped", "ignored_namespace"))
 		return
 	}
+
+	// Set span attributes
+	span.SetAttributes(
+		attribute.String("component", "kubeapi"),
+		attribute.String("operation", "handle_event"),
+		attribute.String("event.type", eventType),
+		attribute.String("event.kind", kind),
+		attribute.String("event.name", meta.GetName()),
+		attribute.String("event.namespace", meta.GetNamespace()),
+	)
 
 	// Get or create trace
 	traceID := c.traceManager.GetOrCreateTrace(obj.(runtime.Object))
@@ -421,9 +597,35 @@ func (c *Collector) handleResourceEvent(eventType, kind string, obj, oldObj inte
 	// Send event
 	select {
 	case c.events <- rawEvent:
+		// Record success metrics
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", eventType),
+				attribute.String("resource_kind", kind),
+			))
+		}
+
+		// Record processing time
+		duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
+		if c.processingTime != nil {
+			c.processingTime.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("event_type", eventType),
+				attribute.String("resource_kind", kind),
+			))
+		}
+
+		span.SetStatus(codes.Ok, "")
 	case <-c.ctx.Done():
 		return
 	default:
+		if c.eventsDropped != nil {
+			c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("reason", "buffer_full"),
+				attribute.String("resource_kind", kind),
+			))
+		}
+		span.SetAttributes(attribute.String("dropped", "buffer_full"))
+		span.SetStatus(codes.Error, "event dropped - buffer full")
 		c.logger.Warn("Event buffer full, dropping event",
 			zap.String("kind", kind),
 			zap.String("name", meta.GetName()))
