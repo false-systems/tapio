@@ -25,11 +25,15 @@ graph TD
         DNS[DNS Collector]
         CNI[CNI Collector]
         CRI[CRI Collector]
-
+        Kubelet [Kubelete Collector]
+        Kubeapi [Kubeapi Collector]
         K --> D
         S --> D
         DNS --> D
         CNI --> D
+        CRI --> D
+        Kubeapi --> D
+        Kubelet --> D
     end
     
     subgraph "Level 2: Intelligence"
@@ -53,6 +57,7 @@ graph TD
     subgraph "Data Flow"
         K -.->|syscalls| eBPF
         S -.->|journal| systemd
+        Kubelet -.->|Kubelet| Kubelet
         DNS -.->|packets| network
         NEO -.->|queries| Graph
     end
