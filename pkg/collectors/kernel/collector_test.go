@@ -326,7 +326,7 @@ func TestParseKernelEventSafely(t *testing.T) {
 			EventType: 1, // memory_alloc
 			Size:      1024,
 		}
-		
+
 		// Create properly sized and aligned buffer using safe parsing
 		safeParser := collectors.NewSafeParser()
 		buffer, err := safeParser.MarshalStruct(event)
@@ -361,7 +361,7 @@ func TestParseKernelEventSafely(t *testing.T) {
 		event := KernelEvent{
 			EventType: 99, // Invalid event type
 		}
-		
+
 		// Create buffer using safe parsing
 		safeParser := collectors.NewSafeParser()
 		buffer, err := safeParser.MarshalStruct(event)
@@ -389,7 +389,7 @@ func TestParseNetworkInfoSafely(t *testing.T) {
 			Protocol:  6, // TCP
 			Direction: 0, // outgoing
 		}
-		
+
 		// Create buffer using safe parsing
 		safeParser := collectors.NewSafeParser()
 		buffer, err := safeParser.MarshalStruct(netInfo)
@@ -418,7 +418,7 @@ func TestParseNetworkInfoSafely(t *testing.T) {
 			Protocol:  255, // Max valid protocol
 			Direction: 2,   // Invalid direction
 		}
-		
+
 		// Create buffer using safe parsing
 		safeParser := collectors.NewSafeParser()
 		buffer, err := safeParser.MarshalStruct(netInfo)
@@ -434,7 +434,7 @@ func TestParseNetworkInfoSafely(t *testing.T) {
 			Protocol:  6,
 			Direction: 2, // Invalid direction (should be 0 or 1)
 		}
-		
+
 		// Create buffer using safe parsing
 		safeParser := collectors.NewSafeParser()
 		buffer, err := safeParser.MarshalStruct(netInfo)
@@ -461,7 +461,7 @@ func TestParseFileInfoSafely(t *testing.T) {
 			Mode:  0644,
 		}
 		copy(fileInfo.Filename[:], "/tmp/test.txt\x00") // Null-terminated
-		
+
 		// Create buffer using safe parsing
 		safeParser := collectors.NewSafeParser()
 		buffer, err := safeParser.MarshalStruct(fileInfo)
@@ -488,7 +488,7 @@ func TestParseFileInfoSafely(t *testing.T) {
 		fileInfo := FileInfo{}
 		// Insert invalid characters (non-printable except null)
 		fileInfo.Filename[0] = 0x01 // Non-printable character
-		
+
 		// Create buffer using safe parsing
 		safeParser := collectors.NewSafeParser()
 		buffer, err := safeParser.MarshalStruct(fileInfo)
@@ -505,7 +505,9 @@ func TestParseFileInfoSafely(t *testing.T) {
 		fileInfo := FileInfo{}
 		copy(fileInfo.Filename[:], "/valid/path.txt\x00remainder")
 		// Copy file info to buffer using unsafe
-		safeParser := collectors.NewSafeParser(); buffer, err := safeParser.MarshalStruct(fileInfo); require.NoError(t, err)
+		safeParser := collectors.NewSafeParser()
+		buffer, err := safeParser.MarshalStruct(fileInfo)
+		require.NoError(t, err)
 
 		parsed, err := collector.parseFileInfoSafely(buffer)
 		assert.NoError(t, err)
@@ -569,7 +571,9 @@ func TestAlignmentValidation(t *testing.T) {
 			EventType: 1,
 		}
 		// Copy event data to aligned buffer using unsafe
-		safeParser := collectors.NewSafeParser(); buffer, err := safeParser.MarshalStruct(event); require.NoError(t, err)
+		safeParser := collectors.NewSafeParser()
+		buffer, err := safeParser.MarshalStruct(event)
+		require.NoError(t, err)
 
 		_, err := collector.parseKernelEventSafely(alignedBuffer)
 		// Error or success depends on actual alignment - test that it doesn't panic
@@ -604,7 +608,9 @@ func TestConcurrentMemoryAccess(t *testing.T) {
 					EventType: uint32(j%5 + 1), // Valid event types 1-5
 				}
 				// Copy event data to buffer using unsafe
-				safeParser := collectors.NewSafeParser(); buffer, err := safeParser.MarshalStruct(event); require.NoError(t, err)
+				safeParser := collectors.NewSafeParser()
+				buffer, err := safeParser.MarshalStruct(event)
+				require.NoError(t, err)
 
 				parsed, err := collector.parseKernelEventSafely(buffer)
 				if err == nil {

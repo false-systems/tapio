@@ -96,24 +96,24 @@ func CreateCollector(name string, config map[string]interface{}) (collectors.Col
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse config for collector %s: %w", name, err)
 		}
-		
+
 		// Validate the parsed config
 		if err := typedFactory.ValidateConfig(typedConfig); err != nil {
 			return nil, fmt.Errorf("config validation failed for collector %s: %w", name, err)
 		}
-		
+
 		// Create collector and convert to proper type
 		collectorInterface, err := typedFactory.CreateCollector(context.Background(), typedConfig)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Type assert to collectors.Collector
 		collector, ok := collectorInterface.(collectors.Collector)
 		if !ok {
 			return nil, fmt.Errorf("factory returned invalid collector type for %s", name)
 		}
-		
+
 		return collector, nil
 	}
 
@@ -151,13 +151,13 @@ func CreateTypedCollector(ctx context.Context, collectorType string, config conf
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Type assert to collectors.Collector
 	collector, ok := collectorInterface.(collectors.Collector)
 	if !ok {
 		return nil, fmt.Errorf("factory returned invalid collector type")
 	}
-	
+
 	return collector, nil
 }
 
@@ -229,4 +229,3 @@ func GetTypedFactory(name string) (TypedCollectorFactory, error) {
 
 	return factory, nil
 }
-

@@ -93,7 +93,9 @@ func TestCgroupIDExtraction(t *testing.T) {
 						if rawEvent.Metadata["pid"] == fmt.Sprintf("%d", currentPID) {
 							// Parse the kernel event from raw data
 							if len(rawEvent.Data) >= int(unsafe.Sizeof(KernelEvent{})) {
-								safeParser := collectors.NewSafeParser(); event, err := collectors.SafeCast[KernelEvent](safeParser, rawEvent.Data); require.NoError(t, err)
+								safeParser := collectors.NewSafeParser()
+								event, err := collectors.SafeCast[KernelEvent](safeParser, rawEvent.Data)
+								require.NoError(t, err)
 								events = append(events, event)
 							}
 						}

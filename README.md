@@ -41,6 +41,8 @@ flowchart TD
             Etcd[Etcd Collector]
         end
         
+        NATS[NATS Streaming]
+        
         K -->|raw events| NATS
         S -->|raw events| NATS
         DNS -->|raw events| NATS
