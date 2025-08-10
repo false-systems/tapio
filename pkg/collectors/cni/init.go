@@ -5,43 +5,45 @@ import (
 	"log"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/config"
+	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
-// CNIFactory creates CNI collectors from type-safe configuration
-type CNIFactory struct {
-	*collectors.BaseCollectorFactory
-}
-
-// NewCNIFactory creates a new CNI collector factory
-func NewCNIFactory() *CNIFactory {
-	return &CNIFactory{
-		BaseCollectorFactory: collectors.NewBaseCollectorFactory("CNI", "cni"),
-	}
-}
-
-// CreateCollector creates a new CNI collector from configuration
-func (f *CNIFactory) CreateCollector(cfg config.CollectorConfig) (collectors.Collector, error) {
-	cniConfig, ok := cfg.(*config.CNIConfig)
-	if !ok {
-		return nil, fmt.Errorf("invalid config type for CNI collector, expected *config.CNIConfig")
-	}
-
-	collector, err := NewCollectorWithConfig(cniConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create CNI collector: %w", err)
-	}
-
-	return collector, nil
-}
 
 func init() {
-	// Register the CNI collector factory with proper error handling
+	// Register the CNI collector typed factory with error handling
 	factory := NewCNIFactory()
-	if err := collectors.RegisterCollectorFactory("cni", factory); err != nil {
+	if err := registry.RegisterTypedFactory("cni", factory); err != nil {
 		// Log error but don't panic - this allows the application to continue
-		// In production, this would use structured logging
-		log.Printf("WARNING: failed to register CNI collector factory: %v", err)
+		log.Printf("WARNING: failed to register CNI typed factory: %v", err)
 		log.Printf("CNI collector will not be available")
+	}
+
+	// Also register legacy factory for backward compatibility
+	if err := registry.Register("cni", CreateLegacyCollector); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register CNI legacy factory: %v", err)
+	}
+}
+
+// CreateLegacyCollector creates a new CNI collector from map config
+// DEPRECATED: This is for backward compatibility. Use the typed factory instead.
+func CreateLegacyCollector(config map[string]interface{}) (collectors.Collector, error) {
+	// Get name from config or use default
+	name := "cni"
+	if n, ok := config["name"].(string); ok {
+		name = n
+	}
+
+	// For legacy support, just use the simple NewCollector function
+	// which uses default configuration
+	return NewCollector(name)
+}
+
+// DefaultConfig returns default CNI configuration
+// DEPRECATED: Use config.NewCNIConfig instead
+func DefaultConfig() Config {
+	return Config{
+		BufferSize: 10000,
+		EnableEBPF: true,
 	}
 }

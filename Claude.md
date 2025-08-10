@@ -1,8 +1,3 @@
-# TAPIO DEVELOPMENT STANDARDS - PRODUCTION GRADE ONLY
-
-## 🎯 MISSION
-Build enterprise-grade observability platform with zero tolerance for incomplete code. Every line must be production-ready, tested, and performant.
-
 ## ⚠️ CRITICAL DEVELOPMENT WORKFLOW
 
 ### REFACTOR MODE (TEMPORARY - FOR MEGA REFACTOR ONLY)
@@ -48,7 +43,7 @@ Write collector.go (500 lines) → Test → 20 failures → Debug nightmare
 
 # RIGHT - Incremental development
 Write function signature → Build → Pass
-Add validation → Test → Pass  
+Add validation → Test → Pass
 Add core logic (10 lines) → Test → Pass
 Add error handling → Test → Pass
 Add cleanup → Test → Pass
@@ -99,7 +94,7 @@ Level 4: pkg/interfaces/   # All above
 package intelligence
 import "github.com/yairfalse/tapio/pkg/domain"
 
-// BAD - Higher level import  
+// BAD - Higher level import
 package domain
 import "github.com/yairfalse/tapio/pkg/collectors" // REJECTED
 ```
@@ -153,7 +148,7 @@ func Process() error {
         return fmt.Errorf("failed to get connection: %w", err)
     }
     defer conn.Close()
-    
+
     return doWork(conn)
 }
 ```
@@ -170,7 +165,7 @@ func Start(ctx context.Context) {
     go func() {
         ticker := time.NewTicker(interval)
         defer ticker.Stop()
-        
+
         for {
             select {
             case <-ctx.Done():
@@ -247,15 +242,15 @@ func TestCollectorLifecycle(t *testing.T) {
     collector, err := NewCollector("test")
     require.NoError(t, err)
     require.NotNil(t, collector)
-    
+
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
-    
+
     err = collector.Start(ctx)
     require.NoError(t, err)
-    
+
     assert.True(t, collector.IsHealthy())
-    
+
     err = collector.Stop()
     require.NoError(t, err)
 }
@@ -342,7 +337,7 @@ instrumentation.RecordMetric(ctx, "events", 1)
 import (
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/attribute"
-    "go.opentelemetry.io/otel/metric" 
+    "go.opentelemetry.io/otel/metric"
     "go.opentelemetry.io/otel/trace"
 )
 
@@ -358,7 +353,7 @@ package collector
 
 import (
     "context"
-    
+
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/attribute"
     "go.opentelemetry.io/otel/metric"
@@ -368,7 +363,7 @@ import (
 
 type Collector struct {
     logger *zap.Logger
-    
+
     // OTEL instrumentation - REQUIRED fields
     tracer          trace.Tracer
     eventsProcessed metric.Int64Counter
@@ -380,7 +375,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
     // Initialize OTEL components - MANDATORY pattern
     tracer := otel.Tracer(name)
     meter := otel.Meter(name)
-    
+
     // Create metrics with descriptive names and descriptions
     eventsProcessed, err := meter.Int64Counter(
         fmt.Sprintf("%s_events_processed_total", name),
@@ -389,7 +384,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
     if err != nil {
         logger.Warn("Failed to create events counter", zap.Error(err))
     }
-    
+
     errorsTotal, err := meter.Int64Counter(
         fmt.Sprintf("%s_errors_total", name),
         metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
@@ -397,7 +392,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
     if err != nil {
         logger.Warn("Failed to create errors counter", zap.Error(err))
     }
-    
+
     processingTime, err := meter.Float64Histogram(
         fmt.Sprintf("%s_processing_duration_ms", name),
         metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
@@ -405,7 +400,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
     if err != nil {
         logger.Warn("Failed to create processing time histogram", zap.Error(err))
     }
-    
+
     return &Collector{
         logger:          logger,
         tracer:          tracer,
@@ -419,7 +414,7 @@ func (c *Collector) ProcessEvent(ctx context.Context, event Event) error {
     // Always start spans for operations
     ctx, span := c.tracer.Start(ctx, "collector.process_event")
     defer span.End()
-    
+
     start := time.Now()
     defer func() {
         // Record processing time
@@ -430,13 +425,13 @@ func (c *Collector) ProcessEvent(ctx context.Context, event Event) error {
             ))
         }
     }()
-    
+
     // Set span attributes for debugging
     span.SetAttributes(
         attribute.String("event.type", event.Type),
         attribute.String("event.id", event.ID),
     )
-    
+
     // Your business logic here
     if err := c.processBusinessLogic(ctx, event); err != nil {
         // Record error metrics
@@ -446,12 +441,12 @@ func (c *Collector) ProcessEvent(ctx context.Context, event Event) error {
                 attribute.String("event_type", event.Type),
             ))
         }
-        
+
         // Record error in span
         span.SetAttributes(attribute.String("error", err.Error()))
         return fmt.Errorf("failed to process event: %w", err)
     }
-    
+
     // Record success metrics
     if c.eventsProcessed != nil {
         c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
@@ -459,7 +454,7 @@ func (c *Collector) ProcessEvent(ctx context.Context, event Event) error {
             attribute.String("status", "success"),
         ))
     }
-    
+
     return nil
 }
 ```
@@ -470,7 +465,7 @@ All metrics MUST follow these naming conventions:
 ```go
 // Counters - Always end with _total
 eventsProcessedCounter := "component_events_processed_total"
-errorsCounter := "component_errors_total" 
+errorsCounter := "component_errors_total"
 requestsCounter := "component_requests_total"
 
 // Histograms - Include unit in name
@@ -492,7 +487,7 @@ span := tracer.Start(ctx, "handler")
 
 // GOOD - Descriptive hierarchical names
 span := tracer.Start(ctx, "collector.process_event")
-span := tracer.Start(ctx, "aggregator.resolve_conflicts") 
+span := tracer.Start(ctx, "aggregator.resolve_conflicts")
 span := tracer.Start(ctx, "storage.write_correlation")
 span := tracer.Start(ctx, "ebpf.parse_kernel_event")
 ```
@@ -569,19 +564,19 @@ func TestCollectorMetrics(t *testing.T) {
     reader := sdkmetric.NewManualReader()
     provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
     otel.SetMeterProvider(provider)
-    
+
     collector, err := NewCollector("test", logger)
     require.NoError(t, err)
-    
+
     // Process test event
     err = collector.ProcessEvent(ctx, testEvent)
     require.NoError(t, err)
-    
+
     // Verify metrics were recorded
     metrics := &metricdata.ResourceMetrics{}
     err = reader.Collect(ctx, metrics)
     require.NoError(t, err)
-    
+
     // Verify specific metrics exist
     assert.Contains(t, getMetricNames(metrics), "test_events_processed_total")
 }
@@ -662,16 +657,16 @@ for line in sys.stdin:
         continue
     pkg = parts[0]
     imports = parts[1].strip('[]').split()
-    
+
     pkg_level = -1
     for key, level in hierarchy.items():
         if key in pkg:
             pkg_level = level
             break
-    
+
     if pkg_level == -1:
         continue
-        
+
     for imp in imports:
         for key, level in hierarchy.items():
             if key in imp and level > pkg_level:
@@ -737,7 +732,7 @@ configPath := os.Getenv("CONFIG_PATH")
 // NEVER DO THIS - from pkg/intelligence/correlation/dependency_correlator.go
 svcName, _ = props["name"].(string)  // REJECTED - IGNORED TYPE ASSERTION
 
-// NEVER DO THIS - from pkg/intelligence/service_test.go  
+// NEVER DO THIS - from pkg/intelligence/service_test.go
 _ = service.ProcessEvent(ctx, event)  // REJECTED - IGNORED ERROR
 
 // NEVER DO THIS - from pkg/collectors/ebpf/collector_test.go
@@ -793,7 +788,7 @@ type Registry struct {
 func (r *Registry) Register(name string, factory CollectorFactory) error {
     r.mu.Lock()
     defer r.mu.Unlock()
-    
+
     if _, exists := r.factories[name]; exists {
         return fmt.Errorf("collector %s already registered", name)
     }
@@ -874,29 +869,29 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
     if event == nil {
         return fmt.Errorf("cannot process nil event")
     }
-    
+
     span, ctx := e.tracer.Start(ctx, "correlation.engine.process")
     defer span.End()
-    
+
     results := make([]*CorrelationResult, 0, len(e.correlators))
-    
+
     for _, correlator := range e.correlators {
         select {
         case <-ctx.Done():
             return fmt.Errorf("context cancelled during correlation: %w", ctx.Err())
         default:
         }
-        
+
         corResults, err := correlator.Process(ctx, event)
         if err != nil {
             span.RecordError(err)
             e.metrics.RecordError(correlator.Name(), err)
             continue // Don't fail entire pipeline
         }
-        
+
         results = append(results, corResults...)
     }
-    
+
     return e.persistResults(ctx, results)
 }
 ```
@@ -904,7 +899,7 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
 ### BAD: Interface{} Abuse (NEVER DO THIS)
 ```go
 // From old implementation - REJECTED
-type EventData map[string]interface{}  
+type EventData map[string]interface{}
 
 func (e *Event) GetData(key string) interface{} {
     return e.Data[key]  // Type information lost
@@ -915,26 +910,26 @@ func (e *Event) GetData(key string) interface{} {
 ```go
 func (c *Collector) parseKernelEventSafely(buffer []byte) (*KernelEvent, error) {
     expectedSize := int(unsafe.Sizeof(KernelEvent{}))
-    
+
     if len(buffer) < expectedSize {
         return nil, fmt.Errorf("buffer too small: got %d, need %d", len(buffer), expectedSize)
     }
-    
+
     if len(buffer) != expectedSize {
         return nil, fmt.Errorf("buffer size mismatch: got %d, expected %d", len(buffer), expectedSize)
     }
-    
+
     event := (*KernelEvent)(unsafe.Pointer(&buffer[0]))
-    
+
     // Validate event fields
     if event.EventType == 0 || event.EventType > 10 {
         return nil, fmt.Errorf("invalid event type: %d", event.EventType)
     }
-    
+
     if event.PID == 0 {
         return nil, fmt.Errorf("invalid PID: 0")
     }
-    
+
     return event, nil
 }
 ```
@@ -1047,7 +1042,7 @@ hierarchy = {
     'pkg/interfaces': 4
 }
 
-result = subprocess.run(['go', 'list', '-f', '{{.ImportPath}}: {{.Imports}}', './...'], 
+result = subprocess.run(['go', 'list', '-f', '{{.ImportPath}}: {{.Imports}}', './...'],
                        capture_output=True, text=True)
 
 violations = []
@@ -1057,19 +1052,19 @@ for line in result.stdout.split('\n'):
     parts = line.split(': ')
     if len(parts) != 2:
         continue
-    
+
     pkg = parts[0]
     imports = parts[1].strip('[]').split()
-    
+
     pkg_level = -1
     for key, level in hierarchy.items():
         if key in pkg:
             pkg_level = level
             break
-    
+
     if pkg_level == -1:
         continue
-        
+
     for imp in imports:
         for key, level in hierarchy.items():
             if key in imp and level > pkg_level:

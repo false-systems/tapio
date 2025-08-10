@@ -2,21 +2,30 @@ package dns
 
 import (
 	"log"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
 func init() {
-	// Register the DNS collector factory with error handling
+	// Register the DNS collector typed factory with error handling
+	factory := NewDNSFactory()
+	if err := registry.RegisterTypedFactory("dns", factory); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register DNS typed factory: %v", err)
+		log.Printf("DNS collector will not be available")
+	}
+
+	// Also register legacy factory for backward compatibility
 	if err := registry.Register("dns", CreateCollector); err != nil {
 		// Log error but don't panic - this allows the application to continue
-		log.Printf("WARNING: failed to register DNS collector: %v", err)
-		log.Printf("DNS collector will not be available")
+		log.Printf("WARNING: failed to register DNS legacy factory: %v", err)
 	}
 }
 
 // CreateCollector creates a new DNS collector from config
+// DEPRECATED: This is for backward compatibility. Use the typed factory instead.
 func CreateCollector(config map[string]interface{}) (collectors.Collector, error) {
 	// Parse configuration
 	cfg := DefaultConfig()
@@ -42,4 +51,17 @@ func CreateCollector(config map[string]interface{}) (collectors.Collector, error
 	}
 
 	return NewCollector(name, cfg)
+}
+
+// DefaultConfig returns default DNS configuration
+// DEPRECATED: Use config.NewDNSConfig instead
+func DefaultConfig() Config {
+	return Config{
+		BufferSize:   10000,
+		Interface:    "", // Auto-detect
+		EnableEBPF:   true,
+		EnableSocket: false,
+		DNSPort:      53,
+		Protocols:    []string{"udp", "tcp"},
+	}
 }

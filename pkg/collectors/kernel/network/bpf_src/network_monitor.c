@@ -2,6 +2,7 @@
 // Network monitoring eBPF program - connections, DNS, service mapping
 
 #include "../../../bpf_common/vmlinux_minimal.h"
+#include "../../../bpf_common/helpers.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -191,12 +192,8 @@ int trace_network_tcp_connect(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    // Get sock struct from first argument
-    struct sock *sk = NULL;
-    unsigned long arg1 = 0;
-    
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI
-    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    // Get sock struct from first argument using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
     
     if (!sk)
         return 0;
@@ -298,11 +295,8 @@ int trace_network_tcp_close(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    struct sock *sk = NULL;
-    unsigned long arg1 = 0;
-    
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI
-    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    // Get sock struct using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
     
     if (!sk)
         return 0;
@@ -360,11 +354,8 @@ int trace_network_udp_send(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    struct sock *sk = NULL;
-    unsigned long arg1 = 0;
-    
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI
-    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    // Get sock struct using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
     
     if (!sk)
         return 0;

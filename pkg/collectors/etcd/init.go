@@ -9,15 +9,23 @@ import (
 )
 
 func init() {
-	// Register the etcd collector factory with error handling
+	// Register the ETCD collector typed factory with error handling
+	factory := NewETCDFactory()
+	if err := registry.RegisterTypedFactory("etcd", factory); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register ETCD typed factory: %v", err)
+		log.Printf("ETCD collector will not be available")
+	}
+
+	// Also register legacy factory for backward compatibility
 	if err := registry.Register("etcd", NewCollectorFromConfig); err != nil {
 		// Log error but don't panic - this allows the application to continue
-		log.Printf("WARNING: failed to register ETCD collector: %v", err)
-		log.Printf("ETCD collector will not be available")
+		log.Printf("WARNING: failed to register ETCD legacy factory: %v", err)
 	}
 }
 
 // NewCollectorFromConfig creates a new etcd collector from configuration
+// DEPRECATED: This is for backward compatibility. Use the typed factory instead.
 func NewCollectorFromConfig(config map[string]interface{}) (collectors.Collector, error) {
 	// Get name from config or use default
 	name := "etcd"

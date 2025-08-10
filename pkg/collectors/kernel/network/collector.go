@@ -40,19 +40,21 @@ type NetworkInfo struct {
 
 // Collector implements network monitoring
 type Collector struct {
-	logger *zap.Logger
-	events chan collectors.RawEvent
-	ctx    context.Context
-	cancel context.CancelFunc
-	reader *ringbuf.Reader
-	links  []link.Link
+	logger     *zap.Logger
+	events     chan collectors.RawEvent
+	ctx        context.Context
+	cancel     context.CancelFunc
+	reader     *ringbuf.Reader
+	links      []link.Link
+	safeParser *collectors.SafeParser
 }
 
 // NewNetworkCollector creates a new network collector
 func NewNetworkCollector(logger *zap.Logger) *Collector {
 	return &Collector{
-		logger: logger,
-		events: make(chan collectors.RawEvent, 3000),
+		logger:     logger,
+		events:     make(chan collectors.RawEvent, 3000),
+		safeParser: collectors.NewSafeParser(),
 	}
 }
 
@@ -167,21 +169,49 @@ func (c *Collector) processEvents() {
 	}
 }
 
-// parseNetworkEvent parses a NetworkEvent from raw bytes
+// parseNetworkEvent parses a NetworkEvent from raw bytes with memory safety
 func (c *Collector) parseNetworkEvent(rawBytes []byte) (*NetworkEvent, error) {
-	expectedSize := int(unsafe.Sizeof(NetworkEvent{}))
-
-	if len(rawBytes) < expectedSize {
-		return nil, fmt.Errorf("buffer too small: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
+	// Use safe parsing with comprehensive validation
+	event, err := collectors.SafeCast[NetworkEvent](c.safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse NetworkEvent: %w", err)
 	}
 
-	event := *(*NetworkEvent)(unsafe.Pointer(&rawBytes[0]))
-
-	if event.EventType < 5 || event.EventType > 20 {
-		return nil, fmt.Errorf("invalid network event type: %d", event.EventType)
+	// Validate network event type range (5-20)
+	if err := c.safeParser.ValidateEventType(event.EventType, 5, 20); err != nil {
+		return nil, fmt.Errorf("invalid network event type: %w", err)
 	}
 
-	return &event, nil
+	// Validate string fields for corruption detection
+	if err := c.safeParser.ValidateStringField(event.Comm[:], "comm"); err != nil {
+		return nil, fmt.Errorf("invalid comm field: %w", err)
+	}
+
+	if err := c.safeParser.ValidateStringField(event.PodUID[:], "pod_uid"); err != nil {
+		return nil, fmt.Errorf("invalid pod_uid field: %w", err)
+	}
+
+	// Validate network-specific data
+	if err := c.safeParser.ValidateNetworkData(event.NetInfo.Protocol, event.NetInfo.Direction); err != nil {
+		return nil, fmt.Errorf("invalid network data: %w", err)
+	}
+
+	// Additional network-specific validation
+	if event.PID == 0 && event.EventType != 19 && event.EventType != 20 { // PID 0 only valid for DNS events
+		return nil, fmt.Errorf("invalid PID 0 for network event type %d", event.EventType)
+	}
+
+	// Validate port ranges (0 is valid for some cases like ICMP)
+	if event.NetInfo.SPort > 65535 || event.NetInfo.DPort > 65535 {
+		return nil, fmt.Errorf("invalid port values: src=%d, dst=%d", event.NetInfo.SPort, event.NetInfo.DPort)
+	}
+
+	// Validate DataLen field
+	if event.DataLen > uint32(len(event.Data)) {
+		return nil, fmt.Errorf("invalid data length: %d exceeds buffer size %d", event.DataLen, len(event.Data))
+	}
+
+	return event, nil
 }
 
 // eventTypeToString converts network event type to string
@@ -231,12 +261,7 @@ func (c *Collector) directionToString(dir uint8) string {
 	return "incoming"
 }
 
-// nullTerminatedString converts null-terminated byte array to string
+// nullTerminatedString safely converts null-terminated byte array to string
 func (c *Collector) nullTerminatedString(b []byte) string {
-	for i, v := range b {
-		if v == 0 {
-			return string(b[:i])
-		}
-	}
-	return string(b)
+	return c.safeParser.StringFromByteArray(b)
 }
