@@ -784,9 +784,18 @@ func (a *CorrelationAggregator) performGraphAnalysis(ctx context.Context, query 
 	}
 
 	// Analyze results to determine root cause
-	_ = graphResults // Process graph results in production implementation
+	// Graph results processing will be enhanced in future iterations
+	resultCount := 0
+	if graphResults != nil {
+		// Try to determine result count safely
+		if resultsSlice, ok := graphResults.([]interface{}); ok {
+			resultCount = len(resultsSlice)
+		} else if resultsMap, ok := graphResults.(map[string]interface{}); ok {
+			resultCount = len(resultsMap)
+		}
+	}
 	result := &AggregatedResult{
-		ID: fmt.Sprintf("graph-%d", time.Now().Unix()),
+		ID: fmt.Sprintf("graph-%d-%d", time.Now().Unix(), resultCount),
 		Resource: ResourceRef{
 			Type:      query.ResourceType,
 			Namespace: query.Namespace,

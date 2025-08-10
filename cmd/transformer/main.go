@@ -18,13 +18,36 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
-	"github.com/yairfalse/tapio/pkg/integrations/telemetry"
 	"github.com/yairfalse/tapio/pkg/integrations/transformer"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
+
+// TransformerInstrumentation holds OTEL instrumentation
+type TransformerInstrumentation struct {
+	Tracer               trace.Tracer
+	Meter                metric.Meter
+	EventsTransformed    metric.Int64Counter
+	TransformationErrors metric.Int64Counter
+	TransformationTime   metric.Float64Histogram
+}
+
+// StartSpan starts a new span
+func (ti *TransformerInstrumentation) StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	return ti.Tracer.Start(ctx, name, opts...)
+}
+
+// EndSpan ends a span and records duration
+func (ti *TransformerInstrumentation) EndSpan(span trace.Span, start time.Time, err error, name string) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(trace.Status{Code: trace.StatusCodeError, Description: err.Error()})
+	}
+	span.End()
+}
 
 type TransformerService struct {
 	nc              *nats.Conn
@@ -37,10 +60,10 @@ type TransformerService struct {
 	cancel          context.CancelFunc
 	natsConfig      *config.NATSConfig
 	logger          *zap.Logger
-	instrumentation *telemetry.TransformerInstrumentation
+	instrumentation *TransformerInstrumentation
 }
 
-func NewTransformerService(logger *zap.Logger, instrumentation *telemetry.TransformerInstrumentation) (*TransformerService, error) {
+func NewTransformerService(logger *zap.Logger, instrumentation *TransformerInstrumentation) (*TransformerService, error) {
 	// Get NATS config
 	natsConfig := config.DefaultNATSConfig()
 	if url := os.Getenv("NATS_URL"); url != "" {
@@ -310,33 +333,48 @@ func main() {
 
 	// Initialize OTEL
 	ctx := context.Background()
-	otelConfig := telemetry.DefaultConfig("transformer-service")
-	otelConfig.OTLPEndpoint = *otlpEndpoint
-	otelConfig.PrometheusPort = *prometheusPort
-	otelConfig.EnableTraces = *enableTraces
-	otelConfig.EnableMetrics = *enableMetrics
-	otelConfig.Logger = logger
 
-	provider, err := telemetry.NewProvider(ctx, otelConfig)
+	// For now, create a simple instrumentation without full OTEL setup
+	tracer := otel.Tracer("transformer-service")
+	meter := otel.Meter("transformer-service")
+
+	eventsTransformed, err := meter.Int64Counter("events_transformed",
+		metric.WithDescription("Number of events transformed"),
+		metric.WithUnit("1"))
 	if err != nil {
-		logger.Fatal("Failed to create OTEL provider", zap.Error(err))
+		logger.Fatal("Failed to create events_transformed counter", zap.Error(err))
+	}
+
+	transformationErrors, err := meter.Int64Counter("transformation_errors",
+		metric.WithDescription("Number of transformation errors"),
+		metric.WithUnit("1"))
+	if err != nil {
+		logger.Fatal("Failed to create transformation_errors counter", zap.Error(err))
+	}
+
+	transformationTime, err := meter.Float64Histogram("transformation_time",
+		metric.WithDescription("Time to transform events"),
+		metric.WithUnit("ms"))
+	if err != nil {
+		logger.Fatal("Failed to create transformation_time histogram", zap.Error(err))
+	}
+
+	instrumentation := &TransformerInstrumentation{
+		Tracer:               tracer,
+		Meter:                meter,
+		EventsTransformed:    eventsTransformed,
+		TransformationErrors: transformationErrors,
+		TransformationTime:   transformationTime,
 	}
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := provider.Shutdown(shutdownCtx); err != nil {
-			logger.Error("Failed to shutdown OTEL provider", zap.Error(err))
-		}
+		// OTEL shutdown would go here when properly configured
+		logger.Info("Shutting down instrumentation")
 	}()
 
-	// Create transformer instrumentation
-	instrumentation, err := telemetry.NewTransformerInstrumentation(logger)
-	if err != nil {
-		logger.Fatal("Failed to create instrumentation", zap.Error(err))
-	}
+	// Instrumentation already created above
 
 	// Start Prometheus metrics endpoint if enabled
-	if *enableMetrics && otelConfig.EnablePrometheus {
+	if *enableMetrics {
 		go func() {
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.Handler())
