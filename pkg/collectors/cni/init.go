@@ -7,7 +7,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
-
 func init() {
 	// Register the CNI collector typed factory with error handling
 	factory := NewCNIFactory()

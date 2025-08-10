@@ -96,7 +96,10 @@ func TestCgroupIDExtraction(t *testing.T) {
 								safeParser := collectors.NewSafeParser()
 								event, err := collectors.SafeCast[KernelEvent](safeParser, rawEvent.Data)
 								require.NoError(t, err)
+
 								events = append(events, *event)
+
+
 							}
 						}
 					case <-timeout:

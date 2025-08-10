@@ -36,7 +36,7 @@ func TestPerformanceCorrelatorProcess(t *testing.T) {
 		// High CPU event
 		event := &domain.UnifiedEvent{
 			ID:        "cpu-event-1",
-			Type:      EventTypeKubelet,
+			Type:      "kubelet",
 			Timestamp: time.Now(),
 			Severity:  domain.EventSeverityWarning,
 			K8sContext: &domain.K8sContext{
@@ -70,7 +70,7 @@ func TestPerformanceCorrelatorProcess(t *testing.T) {
 
 		event := &domain.UnifiedEvent{
 			ID:        "mem-event-1",
-			Type:      EventTypeKubelet,
+			Type:      "kubelet",
 			Timestamp: time.Now(),
 			Severity:  domain.EventSeverityError,
 			K8sContext: &domain.K8sContext{
@@ -103,7 +103,7 @@ func TestPerformanceCorrelatorProcess(t *testing.T) {
 		// Network latency event
 		event := &domain.UnifiedEvent{
 			ID:        "net-event-1",
-			Type:      EventTypeEBPF,
+			Type:      "ebpf",
 			Timestamp: time.Now(),
 			K8sContext: &domain.K8sContext{
 				Namespace: "production",
@@ -139,7 +139,7 @@ func TestPerformanceCorrelatorProcess(t *testing.T) {
 		// First event - high CPU
 		event1 := &domain.UnifiedEvent{
 			ID:        "perf-1",
-			Type:      EventTypeKubelet,
+			Type:      "kubelet",
 			Timestamp: baseTime,
 			K8sContext: &domain.K8sContext{
 				Namespace: "production",
@@ -154,7 +154,7 @@ func TestPerformanceCorrelatorProcess(t *testing.T) {
 		// Second event - high memory for same pod
 		event2 := &domain.UnifiedEvent{
 			ID:        "perf-2",
-			Type:      EventTypeKubelet,
+			Type:      "kubelet",
 			Timestamp: baseTime.Add(30 * time.Second),
 			K8sContext: &domain.K8sContext{
 				Namespace: "production",
@@ -198,7 +198,7 @@ func TestPerformanceCorrelatorProcess(t *testing.T) {
 		// Event without performance metrics
 		event := &domain.UnifiedEvent{
 			ID:        "non-perf",
-			Type:      EventTypeK8s,
+			Type:      "k8s",
 			Timestamp: time.Now(),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -236,7 +236,7 @@ func TestPerformanceThresholds(t *testing.T) {
 		for _, tc := range testCases {
 			event := &domain.UnifiedEvent{
 				ID:        "cpu-test-" + tc.cpuUsage,
-				Type:      EventTypeKubelet,
+				Type:      "kubelet",
 				Timestamp: time.Now(),
 				K8sContext: &domain.K8sContext{
 					Namespace: "test",
@@ -280,7 +280,7 @@ func TestPerformanceThresholds(t *testing.T) {
 		for _, tc := range testCases {
 			event := &domain.UnifiedEvent{
 				ID:        "mem-test-" + tc.memUsage,
-				Type:      EventTypeKubelet,
+				Type:      "kubelet",
 				Timestamp: time.Now(),
 				K8sContext: &domain.K8sContext{
 					Namespace: "test",
@@ -319,7 +319,7 @@ func TestServiceConnectionTracking(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        "conn-fail-" + strconv.Itoa(i),
-				Type:      EventTypeEBPF,
+				Type:      "ebpf",
 				Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -353,7 +353,7 @@ func TestServiceConnectionTracking(t *testing.T) {
 		// Successful connection
 		successEvent := &domain.UnifiedEvent{
 			ID:        "conn-success",
-			Type:      EventTypeEBPF,
+			Type:      "ebpf",
 			Timestamp: time.Now(),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -486,7 +486,7 @@ func TestPerformanceCorrelatorConcurrency(t *testing.T) {
 			go func(id int) {
 				event := &domain.UnifiedEvent{
 					ID:        "concurrent-" + strconv.Itoa(id),
-					Type:      EventTypeKubelet,
+					Type:      "kubelet",
 					Timestamp: time.Now(),
 					K8sContext: &domain.K8sContext{
 						Namespace: "test",
@@ -524,7 +524,7 @@ func TestPerformancePatternDetection(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        "exhaustion-" + strconv.Itoa(i),
-				Type:      EventTypeKubelet,
+				Type:      "kubelet",
 				Timestamp: baseTime.Add(time.Duration(i) * time.Minute),
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -560,7 +560,7 @@ func TestPerformancePatternDetection(t *testing.T) {
 		// Database performance issue
 		dbEvent := &domain.UnifiedEvent{
 			ID:        "cascade-1",
-			Type:      EventTypeKubelet,
+			Type:      "kubelet",
 			Timestamp: baseTime,
 			K8sContext: &domain.K8sContext{
 				Namespace: "production",
@@ -577,7 +577,7 @@ func TestPerformancePatternDetection(t *testing.T) {
 		// API performance issue (caused by DB)
 		apiEvent := &domain.UnifiedEvent{
 			ID:        "cascade-2",
-			Type:      EventTypeKubelet,
+			Type:      "kubelet",
 			Timestamp: baseTime.Add(10 * time.Second),
 			K8sContext: &domain.K8sContext{
 				Namespace: "production",
@@ -593,7 +593,7 @@ func TestPerformancePatternDetection(t *testing.T) {
 		// Frontend timeout (caused by API)
 		frontendEvent := &domain.UnifiedEvent{
 			ID:        "cascade-3",
-			Type:      EventTypeEBPF,
+			Type:      "ebpf",
 			Timestamp: baseTime.Add(20 * time.Second),
 			K8sContext: &domain.K8sContext{
 				Namespace: "production",
@@ -635,7 +635,7 @@ func BenchmarkPerformanceCorrelatorProcess(b *testing.B) {
 
 	event := &domain.UnifiedEvent{
 		ID:        "bench-event",
-		Type:      EventTypeKubelet,
+		Type:      "kubelet",
 		Timestamp: time.Now(),
 		K8sContext: &domain.K8sContext{
 			Namespace: "benchmark",
