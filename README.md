@@ -76,7 +76,7 @@ flowchart TD
     DC --> NEO
     OC --> NEO
     PC --> NEO
-
+```
 
 ## Architecture Rules
 
