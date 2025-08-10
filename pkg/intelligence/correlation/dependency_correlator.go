@@ -73,30 +73,10 @@ func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.Unif
 		return nil, err
 	}
 
-	d.logger.Debug("Processing dependency correlation",
-		zap.String("event_id", event.ID),
-		zap.String("event_type", string(event.Type)),
-		zap.String("namespace", d.getNamespace(event)),
-		zap.String("entity", d.getEntityName(event)))
+	d.logCorrelationStart(event)
 
 	// Route to appropriate correlation handler
-	var findings []aggregator.Finding
-	var err error
-
-	switch event.Type {
-	case "service_unavailable", "endpoint_not_ready":
-		findings, err = d.correlateServiceIssues(ctx, event)
-	case "pod_failed", "container_crash":
-		findings, err = d.correlatePodIssues(ctx, event)
-	case "config_changed":
-		findings, err = d.correlateConfigImpact(ctx, event)
-	case "volume_mount_failed":
-		findings, err = d.correlateVolumeIssues(ctx, event)
-	default:
-		// Generic dependency analysis
-		findings, err = d.correlateGenericDependencies(ctx, event)
-	}
-
+	findings, err := d.routeEventToHandler(ctx, event)
 	if err != nil {
 		d.logger.Error("Dependency correlation failed",
 			zap.String("event_id", event.ID),
@@ -104,11 +84,49 @@ func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.Unif
 		return nil, fmt.Errorf("dependency correlation failed: %w", err)
 	}
 
-	// Calculate overall confidence
+	// Calculate overall confidence and build output
 	confidence := d.calculateConfidence(findings, event)
+	contextMap := d.buildContextMap(event)
 
-	// Build context
-	context_map := map[string]string{
+	return &aggregator.CorrelatorOutput{
+		CorrelatorName:    d.Name(),
+		CorrelatorVersion: d.Version(),
+		Findings:          findings,
+		Context:           contextMap,
+		Confidence:        confidence,
+		ProcessingTime:    time.Since(startTime),
+		Timestamp:         time.Now(),
+	}, nil
+}
+
+// logCorrelationStart logs the start of correlation processing
+func (d *DependencyCorrelator) logCorrelationStart(event *domain.UnifiedEvent) {
+	d.logger.Debug("Processing dependency correlation",
+		zap.String("event_id", event.ID),
+		zap.String("event_type", string(event.Type)),
+		zap.String("namespace", d.getNamespace(event)),
+		zap.String("entity", d.getEntityName(event)))
+}
+
+// routeEventToHandler routes events to appropriate correlation handlers
+func (d *DependencyCorrelator) routeEventToHandler(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+	switch event.Type {
+	case "service_unavailable", "endpoint_not_ready":
+		return d.correlateServiceIssues(ctx, event)
+	case "pod_failed", "container_crash":
+		return d.correlatePodIssues(ctx, event)
+	case "config_changed":
+		return d.correlateConfigImpact(ctx, event)
+	case "volume_mount_failed":
+		return d.correlateVolumeIssues(ctx, event)
+	default:
+		return d.correlateGenericDependencies(ctx, event)
+	}
+}
+
+// buildContextMap builds the context map for correlation output
+func (d *DependencyCorrelator) buildContextMap(event *domain.UnifiedEvent) map[string]string {
+	contextMap := map[string]string{
 		"namespace":        d.getNamespace(event),
 		"cluster":          d.getCluster(event),
 		"correlation_type": "dependency",
@@ -116,18 +134,10 @@ func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.Unif
 	}
 
 	if entity := d.getEntityName(event); entity != "" {
-		context_map["entity"] = entity
+		contextMap["entity"] = entity
 	}
 
-	return &aggregator.CorrelatorOutput{
-		CorrelatorName:    d.Name(),
-		CorrelatorVersion: d.Version(),
-		Findings:          findings,
-		Context:           context_map,
-		Confidence:        confidence,
-		ProcessingTime:    time.Since(startTime),
-		Timestamp:         time.Now(),
-	}, nil
+	return contextMap
 }
 
 // correlateServiceIssues analyzes service availability problems
@@ -270,51 +280,44 @@ func (d *DependencyCorrelator) checkConfigMapModificationTiming(cm GraphNode, po
 		return nil
 	}
 
-	// Check if ConfigMap was modified recently before pod failure
+	// Check if ConfigMap was modified recently
+	_, valid := d.extractAndValidateModificationTime(cm, event)
+	if !valid {
+		return nil
+	}
+
+	return d.createConfigMapTimingFinding(podName, cmName, namespace, event)
+}
+
+// extractAndValidateModificationTime extracts and validates ConfigMap modification time
+func (d *DependencyCorrelator) extractAndValidateModificationTime(cm GraphNode, event *domain.UnifiedEvent) (time.Time, bool) {
 	lastModifiedStr, exists := cm.Properties.Metadata["lastModified"]
 	if !exists {
-		return nil
+		return time.Time{}, false
 	}
 
 	modTime, err := time.Parse(time.RFC3339, lastModifiedStr)
 	if err != nil {
-		return nil
+		return time.Time{}, false
 	}
 
 	// Check timing - ConfigMap modified recently before pod failure
 	if event.Timestamp.Sub(modTime) >= 30*time.Minute || !event.Timestamp.After(modTime) {
-		return nil
+		return time.Time{}, false
 	}
 
+	return modTime, true
+}
+
+// createConfigMapTimingFinding creates a finding for ConfigMap timing correlation
+func (d *DependencyCorrelator) createConfigMapTimingFinding(podName, cmName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
 	return &aggregator.Finding{
 		ID:         fmt.Sprintf("pod-config-dependency-%s-%s", podName, cmName),
 		Type:       "pod_config_dependency_failure",
 		Severity:   aggregator.SeverityHigh,
 		Confidence: 0.80,
 		Message:    fmt.Sprintf("Pod %s failed after ConfigMap %s was modified", podName, cmName),
-		Evidence: aggregator.Evidence{
-			Events: []domain.UnifiedEvent{*event},
-			GraphPaths: []aggregator.GraphPath{{
-				Nodes: []aggregator.GraphNode{
-					{
-						ID:     podName,
-						Type:   "Pod",
-						Labels: map[string]string{"name": podName, "namespace": namespace},
-					},
-					{
-						ID:     cmName,
-						Type:   "ConfigMap",
-						Labels: map[string]string{"name": cmName, "namespace": namespace},
-					},
-				},
-				Edges: []aggregator.GraphEdge{{
-					From:         podName,
-					To:           cmName,
-					Relationship: "MOUNTS",
-					Properties:   map[string]string{"type": "configmap"},
-				}},
-			}},
-		},
+		Evidence:   d.buildConfigMapEvidence(podName, cmName, namespace, event),
 		Impact: aggregator.Impact{
 			Scope:       "pod",
 			Resources:   []string{podName, cmName},
@@ -322,6 +325,33 @@ func (d *DependencyCorrelator) checkConfigMapModificationTiming(cm GraphNode, po
 			Degradation: "100% - pod crash",
 		},
 		Timestamp: time.Now(),
+	}
+}
+
+// buildConfigMapEvidence builds evidence for ConfigMap correlation
+func (d *DependencyCorrelator) buildConfigMapEvidence(podName, cmName, namespace string, event *domain.UnifiedEvent) aggregator.Evidence {
+	return aggregator.Evidence{
+		Events: []domain.UnifiedEvent{*event},
+		GraphPaths: []aggregator.GraphPath{{
+			Nodes: []aggregator.GraphNode{
+				{
+					ID:     podName,
+					Type:   "Pod",
+					Labels: map[string]string{"name": podName, "namespace": namespace},
+				},
+				{
+					ID:     cmName,
+					Type:   "ConfigMap",
+					Labels: map[string]string{"name": cmName, "namespace": namespace},
+				},
+			},
+			Edges: []aggregator.GraphEdge{{
+				From:         podName,
+				To:           cmName,
+				Relationship: "MOUNTS",
+				Properties:   map[string]string{"type": "configmap"},
+			}},
+		}},
 	}
 }
 
@@ -948,39 +978,54 @@ func (d *DependencyCorrelator) checkServiceExistence(record *GraphRecord, servic
 func (d *DependencyCorrelator) analyzePodAvailability(record *GraphRecord, serviceName, namespace string, event *domain.UnifiedEvent) []aggregator.Finding {
 	pods, err := record.GetNodes("pods")
 	if err != nil || len(pods) == 0 {
-		return []aggregator.Finding{{
-			ID:         fmt.Sprintf("service-no-pods-%s", serviceName),
-			Type:       "service_no_endpoints",
-			Severity:   aggregator.SeverityCritical,
-			Confidence: 0.90,
-			Message:    fmt.Sprintf("Service %s has no running pods", serviceName),
-			Evidence: aggregator.Evidence{
-				Events: []domain.UnifiedEvent{*event},
-				GraphPaths: []aggregator.GraphPath{{
-					Nodes: []aggregator.GraphNode{{
-						ID:   serviceName,
-						Type: "Service",
-						Labels: map[string]string{
-							"name":      serviceName,
-							"namespace": namespace,
-						},
-					}},
-				}},
-			},
-			Impact: aggregator.Impact{
-				Scope:       "service",
-				Resources:   []string{serviceName},
-				UserImpact:  "Service has no endpoints",
-				Degradation: NoPodsAvailableMsg,
-			},
-			Timestamp: time.Now(),
-		}}
+		return []aggregator.Finding{d.createNoPodsAvailableFinding(serviceName, namespace, event)}
 	}
 
-	// Analyze pod health
-	readyPods := 0
-	failedPods := 0
+	// Analyze pod health metrics
+	readyPods, failedPods := d.calculatePodHealth(pods)
 
+	// Generate findings based on pod health
+	return d.createPodHealthFindings(serviceName, readyPods, failedPods, len(pods), event)
+}
+
+// createNoPodsAvailableFinding creates finding when no pods are available
+func (d *DependencyCorrelator) createNoPodsAvailableFinding(serviceName, namespace string, event *domain.UnifiedEvent) aggregator.Finding {
+	return aggregator.Finding{
+		ID:         fmt.Sprintf("service-no-pods-%s", serviceName),
+		Type:       "service_no_endpoints",
+		Severity:   aggregator.SeverityCritical,
+		Confidence: 0.90,
+		Message:    fmt.Sprintf("Service %s has no running pods", serviceName),
+		Evidence:   d.createServiceEvidence(serviceName, namespace, event),
+		Impact: aggregator.Impact{
+			Scope:       "service",
+			Resources:   []string{serviceName},
+			UserImpact:  "Service has no endpoints",
+			Degradation: NoPodsAvailableMsg,
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// createServiceEvidence creates evidence for service-related findings
+func (d *DependencyCorrelator) createServiceEvidence(serviceName, namespace string, event *domain.UnifiedEvent) aggregator.Evidence {
+	return aggregator.Evidence{
+		Events: []domain.UnifiedEvent{*event},
+		GraphPaths: []aggregator.GraphPath{{
+			Nodes: []aggregator.GraphNode{{
+				ID:   serviceName,
+				Type: "Service",
+				Labels: map[string]string{
+					"name":      serviceName,
+					"namespace": namespace,
+				},
+			}},
+		}},
+	}
+}
+
+// calculatePodHealth calculates ready and failed pod counts
+func (d *DependencyCorrelator) calculatePodHealth(pods []GraphNode) (readyPods, failedPods int) {
 	for _, pod := range pods {
 		if pod.Properties.Ready {
 			readyPods++
@@ -988,46 +1033,60 @@ func (d *DependencyCorrelator) analyzePodAvailability(record *GraphRecord, servi
 			failedPods++
 		}
 	}
+	return readyPods, failedPods
+}
 
+// createPodHealthFindings creates findings based on pod health status
+func (d *DependencyCorrelator) createPodHealthFindings(serviceName string, readyPods, failedPods, totalPods int, event *domain.UnifiedEvent) []aggregator.Finding {
 	var findings []aggregator.Finding
 
 	if readyPods == 0 && failedPods > 0 {
-		findings = append(findings, aggregator.Finding{
-			ID:         fmt.Sprintf("service-pods-failed-%s", serviceName),
-			Type:       "service_endpoints_failed",
-			Severity:   aggregator.SeverityCritical,
-			Confidence: 0.85,
-			Message:    fmt.Sprintf("Service %s has %d failed pods, 0 ready", serviceName, failedPods),
-			Evidence: aggregator.Evidence{
-				Events: []domain.UnifiedEvent{*event},
-			},
-			Impact: aggregator.Impact{
-				Scope:       "service",
-				Resources:   []string{serviceName},
-				UserImpact:  "Service unavailable due to pod failures",
-				Degradation: AllPodsFailedMsg,
-			},
-			Timestamp: time.Now(),
-		})
-	} else if readyPods < len(pods)/2 {
-		findings = append(findings, aggregator.Finding{
-			ID:         fmt.Sprintf("service-pods-degraded-%s", serviceName),
-			Type:       "service_endpoints_degraded",
-			Severity:   aggregator.SeverityHigh,
-			Confidence: 0.75,
-			Message:    fmt.Sprintf("Service %s has only %d/%d pods ready", serviceName, readyPods, len(pods)),
-			Evidence: aggregator.Evidence{
-				Events: []domain.UnifiedEvent{*event},
-			},
-			Impact: aggregator.Impact{
-				Scope:       "service",
-				Resources:   []string{serviceName},
-				UserImpact:  "Service degraded due to pod failures",
-				Degradation: fmt.Sprintf(ReducedCapacityFmt, (readyPods*100)/len(pods)),
-			},
-			Timestamp: time.Now(),
-		})
+		findings = append(findings, d.createAllPodsFailedFinding(serviceName, failedPods, event))
+	} else if readyPods < totalPods/2 {
+		findings = append(findings, d.createDegradedServiceFinding(serviceName, readyPods, totalPods, event))
 	}
 
 	return findings
+}
+
+// createAllPodsFailedFinding creates finding when all pods have failed
+func (d *DependencyCorrelator) createAllPodsFailedFinding(serviceName string, failedPods int, event *domain.UnifiedEvent) aggregator.Finding {
+	return aggregator.Finding{
+		ID:         fmt.Sprintf("service-pods-failed-%s", serviceName),
+		Type:       "service_endpoints_failed",
+		Severity:   aggregator.SeverityCritical,
+		Confidence: 0.85,
+		Message:    fmt.Sprintf("Service %s has %d failed pods, 0 ready", serviceName, failedPods),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "service",
+			Resources:   []string{serviceName},
+			UserImpact:  "Service unavailable due to pod failures",
+			Degradation: AllPodsFailedMsg,
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// createDegradedServiceFinding creates finding when service is degraded
+func (d *DependencyCorrelator) createDegradedServiceFinding(serviceName string, readyPods, totalPods int, event *domain.UnifiedEvent) aggregator.Finding {
+	return aggregator.Finding{
+		ID:         fmt.Sprintf("service-pods-degraded-%s", serviceName),
+		Type:       "service_endpoints_degraded",
+		Severity:   aggregator.SeverityHigh,
+		Confidence: 0.75,
+		Message:    fmt.Sprintf("Service %s has only %d/%d pods ready", serviceName, readyPods, totalPods),
+		Evidence: aggregator.Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: aggregator.Impact{
+			Scope:       "service",
+			Resources:   []string{serviceName},
+			UserImpact:  "Service degraded due to pod failures",
+			Degradation: fmt.Sprintf(ReducedCapacityFmt, (readyPods*100)/totalPods),
+		},
+		Timestamp: time.Now(),
+	}
 }

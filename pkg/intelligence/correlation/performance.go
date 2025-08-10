@@ -235,28 +235,37 @@ func (p *PerformanceCorrelator) enrichCPUOnlyResult(result *CorrelationResult, e
 // Memory pressure correlation
 func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
 	podKey := p.getPodKey(event)
-
-	// Check if there was prior CPU throttling
 	relatedEvents := p.findRelatedEvents(podKey, []string{
 		"kubelet_cpu_throttling",
 		"memory_alloc",
 	}, 5*time.Minute)
 
-	// Use related events for enhanced analysis
-	relatedEventCount := len(relatedEvents)
-	// Enhanced analysis based on event count could be added here
+	workingSet, usage := p.extractMemoryMetrics(event)
+	result := p.buildMemoryPressureResult(event, podKey, len(relatedEvents), usage)
+	p.setMemoryRootCause(result, event, podKey, workingSet, usage)
+	p.setMemoryImpact(result, podKey)
 
+	return []*CorrelationResult{result}, nil
+}
+
+// extractMemoryMetrics extracts memory working set and usage from event
+func (p *PerformanceCorrelator) extractMemoryMetrics(event *domain.UnifiedEvent) (workingSet, usage int64) {
 	workingSet, workingSetErr := strconv.ParseInt(p.getMetadata(event, "memory_working_set"), 10, 64)
 	if workingSetErr != nil {
-		workingSet = 0 // Default to 0 if parsing fails
+		workingSet = 0
 	}
 
 	usage, usageErr := strconv.ParseInt(p.getMetadata(event, "memory_usage"), 10, 64)
 	if usageErr != nil {
-		usage = 0 // Default to 0 if parsing fails
+		usage = 0
 	}
 
-	result := &CorrelationResult{
+	return workingSet, usage
+}
+
+// buildMemoryPressureResult creates the base memory pressure correlation result
+func (p *PerformanceCorrelator) buildMemoryPressureResult(event *domain.UnifiedEvent, podKey string, relatedEventCount int, usage int64) *CorrelationResult {
+	return &CorrelationResult{
 		ID:         fmt.Sprintf("perf-mem-%s", event.ID),
 		Type:       "memory_exhaustion",
 		Confidence: HighConfidence,
@@ -266,50 +275,63 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 			Pattern:        "Memory pressure",
 			Algorithm:      "memory_exhaustion_detector",
 			ProcessingTime: time.Since(event.Timestamp),
-			DataPoints:     1 + relatedEventCount, // Include related events in analysis
+			DataPoints:     1 + relatedEventCount,
 		},
 		StartTime: event.Timestamp,
 		EndTime:   event.Timestamp,
 	}
+}
 
-	// Check for memory leak pattern
+// setMemoryRootCause determines and sets the root cause for memory pressure
+func (p *PerformanceCorrelator) setMemoryRootCause(result *CorrelationResult, event *domain.UnifiedEvent, podKey string, workingSet, usage int64) {
 	if p.isMemoryLeakPattern(podKey, workingSet) {
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  MediumHighConfidence,
-			Description: "Possible memory leak detected",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID},
-				[]string{podKey},
-				map[string]string{
-					"pattern":         "Memory usage continuously increasing",
-					"workload_status": "No corresponding workload increase",
-					"working_set_mb":  fmt.Sprintf("%d", workingSet/1024/1024),
-				},
-			),
-		}
+		result.RootCause = p.buildMemoryLeakRootCause(event, podKey, workingSet)
 	} else {
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  LowConfidence,
-			Description: "High memory usage",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID},
-				[]string{podKey},
-				map[string]string{
-					"usage_mb":       fmt.Sprintf("%d", usage/1024/1024),
-					"working_set_mb": fmt.Sprintf("%d", workingSet/1024/1024),
-				},
-			),
-		}
+		result.RootCause = p.buildHighMemoryUsageRootCause(event, podKey, workingSet, usage)
 	}
+}
 
+// buildMemoryLeakRootCause creates root cause for memory leak pattern
+func (p *PerformanceCorrelator) buildMemoryLeakRootCause(event *domain.UnifiedEvent, podKey string, workingSet int64) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  MediumHighConfidence,
+		Description: "Possible memory leak detected",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{podKey},
+			map[string]string{
+				"pattern":         "Memory usage continuously increasing",
+				"workload_status": "No corresponding workload increase",
+				"working_set_mb":  fmt.Sprintf("%d", workingSet/1024/1024),
+			},
+		),
+	}
+}
+
+// buildHighMemoryUsageRootCause creates root cause for high memory usage
+func (p *PerformanceCorrelator) buildHighMemoryUsageRootCause(event *domain.UnifiedEvent, podKey string, workingSet, usage int64) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  LowConfidence,
+		Description: "High memory usage",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{podKey},
+			map[string]string{
+				"usage_mb":       fmt.Sprintf("%d", usage/1024/1024),
+				"working_set_mb": fmt.Sprintf("%d", workingSet/1024/1024),
+			},
+		),
+	}
+}
+
+// setMemoryImpact sets the impact information for memory pressure
+func (p *PerformanceCorrelator) setMemoryImpact(result *CorrelationResult, podKey string) {
 	result.Impact = &Impact{
 		Severity:  domain.EventSeverityWarning,
 		Resources: []string{podKey},
 	}
-
-	return []*CorrelationResult{result}, nil
 }
 
 // Crash loop analysis
@@ -483,7 +505,16 @@ func (p *PerformanceCorrelator) handleContainerWaiting(ctx context.Context, even
 	reason := p.getMetadata(event, "waiting_reason")
 	message := p.getMetadata(event, "waiting_message")
 
-	result := &CorrelationResult{
+	result := p.buildContainerWaitingResult(event, reason)
+	p.setContainerWaitingRootCause(result, event, reason, message)
+	p.setContainerWaitingImpact(result, event)
+
+	return []*CorrelationResult{result}, nil
+}
+
+// buildContainerWaitingResult creates the base container waiting correlation result
+func (p *PerformanceCorrelator) buildContainerWaitingResult(event *domain.UnifiedEvent, reason string) *CorrelationResult {
+	return &CorrelationResult{
 		ID:         fmt.Sprintf("perf-waiting-%s", event.ID),
 		Type:       "startup_failure",
 		Confidence: CriticalConfidence,
@@ -498,49 +529,62 @@ func (p *PerformanceCorrelator) handleContainerWaiting(ctx context.Context, even
 		StartTime: event.Timestamp,
 		EndTime:   event.Timestamp,
 	}
+}
 
+// setContainerWaitingRootCause determines and sets root cause based on waiting reason
+func (p *PerformanceCorrelator) setContainerWaitingRootCause(result *CorrelationResult, event *domain.UnifiedEvent, reason, message string) {
 	switch reason {
 	case "ImagePullBackOff", "ErrImagePull":
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  CriticalConfidence,
-			Description: "Cannot pull container image",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID},
-				[]string{p.getPodKey(event)},
-				map[string]string{
-					"waiting_reason":  reason,
-					"waiting_message": message,
-					"check_1":         "Registry may be unreachable",
-					"check_2":         "Image name may be incorrect",
-					"check_3":         "Registry credentials may be missing",
-				},
-			),
-		}
-
+		result.RootCause = p.buildImagePullRootCause(event, reason, message)
 	case "CreateContainerConfigError":
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  HighConfidence,
-			Description: "Container configuration error",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID},
-				[]string{p.getPodKey(event)},
-				map[string]string{
-					"error_type": "CreateContainerConfigError",
-					"check_1":    "ConfigMap or Secret may be missing",
-					"check_2":    "Volume mounts may be invalid",
-				},
-			),
-		}
+		result.RootCause = p.buildContainerConfigRootCause(event)
 	}
+}
 
+// buildImagePullRootCause creates root cause for image pull failures
+func (p *PerformanceCorrelator) buildImagePullRootCause(event *domain.UnifiedEvent, reason, message string) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  CriticalConfidence,
+		Description: "Cannot pull container image",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{p.getPodKey(event)},
+			map[string]string{
+				"waiting_reason":  reason,
+				"waiting_message": message,
+				"check_1":         "Registry may be unreachable",
+				"check_2":         "Image name may be incorrect",
+				"check_3":         "Registry credentials may be missing",
+			},
+		),
+	}
+}
+
+// buildContainerConfigRootCause creates root cause for container config errors
+func (p *PerformanceCorrelator) buildContainerConfigRootCause(event *domain.UnifiedEvent) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  HighConfidence,
+		Description: "Container configuration error",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{p.getPodKey(event)},
+			map[string]string{
+				"error_type": "CreateContainerConfigError",
+				"check_1":    "ConfigMap or Secret may be missing",
+				"check_2":    "Volume mounts may be invalid",
+			},
+		),
+	}
+}
+
+// setContainerWaitingImpact sets the impact information for container waiting
+func (p *PerformanceCorrelator) setContainerWaitingImpact(result *CorrelationResult, event *domain.UnifiedEvent) {
 	result.Impact = &Impact{
 		Severity:  domain.EventSeverityCritical,
 		Resources: []string{p.getPodKey(event)},
 	}
-
-	return []*CorrelationResult{result}, nil
 }
 
 // Network connection tracking

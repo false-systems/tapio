@@ -267,12 +267,25 @@ func (k *K8sCorrelator) updateOwnershipForPod(pod *domain.K8sPod) {
 	k.ownerCache.mu.Lock()
 	defer k.ownerCache.mu.Unlock()
 
-	key := fmt.Sprintf("%s/Pod/%s", pod.Namespace, pod.Name)
+	podKey := k.generatePodKey(pod)
+	ownershipInfo := k.createPodOwnershipInfo(pod)
+	k.ownerCache.items[podKey] = ownershipInfo
+
+	// Update parent-child relationships
+	k.updateParentChildRelationships(pod)
+}
+
+// generatePodKey creates a cache key for the pod
+func (k *K8sCorrelator) generatePodKey(pod *domain.K8sPod) string {
+	return fmt.Sprintf("%s/Pod/%s", pod.Namespace, pod.Name)
+}
+
+// createPodOwnershipInfo creates ownership information for a pod
+func (k *K8sCorrelator) createPodOwnershipInfo(pod *domain.K8sPod) *OwnershipInfo {
 	info := &OwnershipInfo{
-		Owners: make([]ResourceRef, 0),
+		Owners: make([]ResourceRef, 0, len(pod.OwnerReferences)),
 	}
 
-	// Add owner references
 	for _, owner := range pod.OwnerReferences {
 		info.Owners = append(info.Owners, ResourceRef{
 			Kind:      owner.Kind,
@@ -280,39 +293,47 @@ func (k *K8sCorrelator) updateOwnershipForPod(pod *domain.K8sPod) {
 			Namespace: pod.Namespace,
 			UID:       owner.UID,
 		})
-
-		// Update parent's children
-		parentKey := fmt.Sprintf("%s/%s/%s", pod.Namespace, owner.Kind, owner.Name)
-		if parentInfo, exists := k.ownerCache.items[parentKey]; exists {
-			// Check if child already exists
-			childExists := false
-			for _, child := range parentInfo.Children {
-				if child.Name == pod.Name && child.Kind == ResourceTypePod {
-					childExists = true
-					break
-				}
-			}
-			if !childExists {
-				parentInfo.Children = append(parentInfo.Children, ResourceRef{
-					Kind:      ResourceTypePod,
-					Name:      pod.Name,
-					Namespace: pod.Namespace,
-					UID:       pod.UID,
-				})
-			}
-		} else {
-			k.ownerCache.items[parentKey] = &OwnershipInfo{
-				Children: []ResourceRef{{
-					Kind:      ResourceTypePod,
-					Name:      pod.Name,
-					Namespace: pod.Namespace,
-					UID:       pod.UID,
-				}},
-			}
-		}
 	}
 
-	k.ownerCache.items[key] = info
+	return info
+}
+
+// updateParentChildRelationships updates the parent-child relationships in the cache
+func (k *K8sCorrelator) updateParentChildRelationships(pod *domain.K8sPod) {
+	for _, owner := range pod.OwnerReferences {
+		parentKey := fmt.Sprintf("%s/%s/%s", pod.Namespace, owner.Kind, owner.Name)
+		k.addChildToParent(parentKey, pod)
+	}
+}
+
+// addChildToParent adds a pod as a child to its parent in the ownership cache
+func (k *K8sCorrelator) addChildToParent(parentKey string, pod *domain.K8sPod) {
+	childRef := ResourceRef{
+		Kind:      ResourceTypePod,
+		Name:      pod.Name,
+		Namespace: pod.Namespace,
+		UID:       pod.UID,
+	}
+
+	if parentInfo, exists := k.ownerCache.items[parentKey]; exists {
+		if !k.childExists(parentInfo.Children, pod.Name) {
+			parentInfo.Children = append(parentInfo.Children, childRef)
+		}
+	} else {
+		k.ownerCache.items[parentKey] = &OwnershipInfo{
+			Children: []ResourceRef{childRef},
+		}
+	}
+}
+
+// childExists checks if a child already exists in the parent's children list
+func (k *K8sCorrelator) childExists(children []ResourceRef, podName string) bool {
+	for _, child := range children {
+		if child.Name == podName && child.Kind == ResourceTypePod {
+			return true
+		}
+	}
+	return false
 }
 
 // updateSelectorForService updates the selector cache for a service
