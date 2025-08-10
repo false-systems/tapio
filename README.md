@@ -25,57 +25,57 @@ Tapio is a correlation engine for observability data. It collects system events 
 
 ```mermaid
 flowchart TD
-    subgraph Cluster["Kubernetes Cluster"]
-        subgraph Level0["Level 0: Domain"]
-            D[domain.UnifiedEvent]
-        end
-        
-        subgraph Level1["Level 1: Collectors"]
-            K[Kernel eBPF Collector]
-            S[Systemd Collector] 
-            DNS[DNS Collector]
-            CNI[CNI Collector]
-            CRI[CRI Collector]
-            Kubelet[Kubelet Collector]
-            Kubeapi[Kubeapi Collector]
-            Etcd[Etcd Collector]
-        end
-        
-        NATS[NATS Streaming]
-        
-        K -->|raw events| NATS
-        S -->|raw events| NATS
-        DNS -->|raw events| NATS
-        CNI -->|raw events| NATS
-        CRI -->|raw events| NATS
-        Kubelet -->|raw events| NATS
-        Kubeapi -->|raw events| NATS
-        Etcd -->|raw events| NATS
-        
-        NATS -->|transform| D
-        
-        subgraph Level2["Level 2: Intelligence"]
-            CE[Correlation Engine]
-            TC[Temporal Correlator]
-            SC[Sequence Correlator] 
-            DC[Dependency Correlator]
-            OC[Ownership Correlator]
-            PC[Performance Correlator]
-        end
-        
-        D --> CE
-        CE --> TC
-        CE --> SC
-        CE --> DC
-        CE --> OC
-        CE --> PC
-        
-        subgraph Level3["Level 3: Integrations"]
-            NEO[Neo4j Storage]
-        end
-        
-        CE --> NEO
-    end
+    %% Collectors (Level 1)
+    K[Kernel eBPF]
+    S[Systemd]
+    DNS[DNS]
+    CNI[CNI]
+    CRI[CRI]
+    Kubelet[Kubelet]
+    Kubeapi[KubeAPI]
+    Etcd[Etcd]
+    
+    %% Message Bus
+    NATS[NATS Streaming]
+    
+    %% Domain (Level 0)
+    D[Unified Event]
+    
+    %% Intelligence (Level 2)
+    CE[Correlation Engine]
+    TC[Temporal]
+    SC[Sequence]
+    DC[Dependency]
+    OC[Ownership]
+    PC[Performance]
+    
+    %% Storage (Level 3)
+    NEO[Neo4j Graph DB]
+    
+    %% Flow
+    K --> NATS
+    S --> NATS
+    DNS --> NATS
+    CNI --> NATS
+    CRI --> NATS
+    Kubelet --> NATS
+    Kubeapi --> NATS
+    Etcd --> NATS
+    
+    NATS --> D
+    D --> CE
+    
+    CE --> TC
+    CE --> SC
+    CE --> DC
+    CE --> OC
+    CE --> PC
+    
+    TC --> NEO
+    SC --> NEO
+    DC --> NEO
+    OC --> NEO
+    PC --> NEO
 
 ## Architecture Rules
 
