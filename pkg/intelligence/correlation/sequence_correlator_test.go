@@ -17,11 +17,11 @@ func TestSequenceCorrelatorCreation(t *testing.T) {
 
 	t.Run("with default config", func(t *testing.T) {
 		config := DefaultSequenceConfig()
-		correlator := NewSequenceCorrelator(logger, config)
+		correlator := NewSequenceCorrelator(logger, *config)
 
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "sequence", correlator.Name())
-		assert.Equal(t, config, correlator.config)
+		assert.Equal(t, *config, correlator.config)
 		assert.NotNil(t, correlator.sequences)
 		assert.NotNil(t, correlator.patterns)
 	})
@@ -60,7 +60,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 		events := []*domain.UnifiedEvent{
 			{
 				ID:        "event-1",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime,
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -71,7 +71,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 			},
 			{
 				ID:        "event-2",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime.Add(10 * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -82,7 +82,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 			},
 			{
 				ID:        "event-3",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime.Add(20 * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -125,7 +125,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 
 	t.Run("detect error cascade sequence", func(t *testing.T) {
 		config := DefaultSequenceConfig()
-		correlator := NewSequenceCorrelator(logger, config)
+		correlator := NewSequenceCorrelator(logger, *config)
 		ctx := context.Background()
 
 		baseTime := time.Now()
@@ -134,7 +134,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 		events := []*domain.UnifiedEvent{
 			{
 				ID:        "error-1",
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime,
 				Severity:  domain.EventSeverityError,
 				K8sContext: &domain.K8sContext{
@@ -145,7 +145,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 			},
 			{
 				ID:        "error-2",
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime.Add(5 * time.Second),
 				Severity:  domain.EventSeverityError,
 				K8sContext: &domain.K8sContext{
@@ -156,7 +156,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 			},
 			{
 				ID:        "error-3",
-				Type:      EventTypeSystemd,
+				Type:      domain.EventTypeSystem,
 				Timestamp: baseTime.Add(10 * time.Second),
 				Severity:  domain.EventSeverityError,
 				K8sContext: &domain.K8sContext{
@@ -196,7 +196,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 
 		event1 := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeK8s,
+			Type:      domain.EventTypeKubernetes,
 			Timestamp: baseTime,
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -207,7 +207,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 		// Event with gap larger than MaxSequenceGap
 		event2 := &domain.UnifiedEvent{
 			ID:        "event-2",
-			Type:      EventTypeK8s,
+			Type:      domain.EventTypeKubernetes,
 			Timestamp: baseTime.Add(1 * time.Minute), // Gap too large
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -226,7 +226,7 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 
 	t.Run("nil event handling", func(t *testing.T) {
 		config := DefaultSequenceConfig()
-		correlator := NewSequenceCorrelator(logger, config)
+		correlator := NewSequenceCorrelator(logger, *config)
 		ctx := context.Background()
 
 		results, err := correlator.Process(ctx, nil)
@@ -236,14 +236,14 @@ func TestSequenceCorrelatorProcess(t *testing.T) {
 
 	t.Run("context cancellation", func(t *testing.T) {
 		config := DefaultSequenceConfig()
-		correlator := NewSequenceCorrelator(logger, config)
+		correlator := NewSequenceCorrelator(logger, *config)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
 		event := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeK8s,
+			Type:      domain.EventTypeKubernetes,
 			Timestamp: time.Now(),
 		}
 
@@ -260,16 +260,16 @@ func TestSequencePatternMatching(t *testing.T) {
 
 	t.Run("restart sequence pattern", func(t *testing.T) {
 		config := DefaultSequenceConfig()
-		correlator := NewSequenceCorrelator(logger, config)
+		correlator := NewSequenceCorrelator(logger, *config)
 		ctx := context.Background()
 
 		// Add restart pattern
 		correlator.patterns = append(correlator.patterns, &SequencePattern{
 			Name: "pod_restart",
 			Steps: []PatternStep{
-				{EventType: EventTypeK8s, Conditions: []string{"terminating"}},
-				{EventType: EventTypeK8s, Conditions: []string{"creating"}},
-				{EventType: EventTypeK8s, Conditions: []string{"running"}},
+				{EventType: domain.EventTypeKubernetes, Conditions: []string{"terminating"}},
+				{EventType: domain.EventTypeKubernetes, Conditions: []string{"creating"}},
+				{EventType: domain.EventTypeKubernetes, Conditions: []string{"running"}},
 			},
 		})
 
@@ -278,7 +278,7 @@ func TestSequencePatternMatching(t *testing.T) {
 		events := []*domain.UnifiedEvent{
 			{
 				ID:        "restart-1",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime,
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -288,7 +288,7 @@ func TestSequencePatternMatching(t *testing.T) {
 			},
 			{
 				ID:        "restart-2",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime.Add(5 * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -298,7 +298,7 @@ func TestSequencePatternMatching(t *testing.T) {
 			},
 			{
 				ID:        "restart-3",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime.Add(10 * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -324,7 +324,7 @@ func TestSequencePatternMatching(t *testing.T) {
 
 	t.Run("scaling sequence pattern", func(t *testing.T) {
 		config := DefaultSequenceConfig()
-		correlator := NewSequenceCorrelator(logger, config)
+		correlator := NewSequenceCorrelator(logger, *config)
 		ctx := context.Background()
 
 		baseTime := time.Now()
@@ -333,7 +333,7 @@ func TestSequencePatternMatching(t *testing.T) {
 		events := []*domain.UnifiedEvent{
 			{
 				ID:        "scale-1",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime,
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -344,7 +344,7 @@ func TestSequencePatternMatching(t *testing.T) {
 			},
 			{
 				ID:        "scale-2",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime.Add(2 * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -355,7 +355,7 @@ func TestSequencePatternMatching(t *testing.T) {
 			},
 			{
 				ID:        "scale-3",
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: baseTime.Add(5 * time.Second),
 				K8sContext: &domain.K8sContext{
 					Namespace: "production",
@@ -386,7 +386,7 @@ func TestSequenceCorrelatorConcurrency(t *testing.T) {
 
 	t.Run("concurrent sequence processing", func(t *testing.T) {
 		config := DefaultSequenceConfig()
-		correlator := NewSequenceCorrelator(logger, config)
+		correlator := NewSequenceCorrelator(logger, *config)
 		ctx := context.Background()
 
 		// Create multiple concurrent sequences
@@ -403,7 +403,7 @@ func TestSequenceCorrelatorConcurrency(t *testing.T) {
 				for i := 0; i < eventsPerSequence; i++ {
 					event := &domain.UnifiedEvent{
 						ID:        fmt.Sprintf("seq-%d-event-%d", seqID, i),
-						Type:      EventTypeK8s,
+						Type:      domain.EventTypeKubernetes,
 						Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 						K8sContext: &domain.K8sContext{
 							Namespace: namespace,
@@ -442,7 +442,7 @@ func TestSequenceCleanup(t *testing.T) {
 		// Create an old event
 		oldEvent := &domain.UnifiedEvent{
 			ID:        "old-event",
-			Type:      EventTypeK8s,
+			Type:      domain.EventTypeKubernetes,
 			Timestamp: time.Now().Add(-200 * time.Millisecond),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -459,7 +459,7 @@ func TestSequenceCleanup(t *testing.T) {
 		// Process new event to trigger cleanup
 		newEvent := &domain.UnifiedEvent{
 			ID:        "new-event",
-			Type:      EventTypeK8s,
+			Type:      domain.EventTypeKubernetes,
 			Timestamp: time.Now(),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -491,7 +491,7 @@ func TestSequenceCleanup(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        fmt.Sprintf("event-%d", i),
-				Type:      EventTypeK8s,
+				Type:      domain.EventTypeKubernetes,
 				Timestamp: time.Now(),
 				K8sContext: &domain.K8sContext{
 					Namespace: fmt.Sprintf("namespace-%d", i),
@@ -522,13 +522,13 @@ func TestEventSequence(t *testing.T) {
 
 		event1 := &domain.UnifiedEvent{
 			ID:        "event-1",
-			Type:      EventTypeK8s,
+			Type:      domain.EventTypeKubernetes,
 			Timestamp: time.Now(),
 		}
 
 		event2 := &domain.UnifiedEvent{
 			ID:        "event-2",
-			Type:      EventTypeK8s,
+			Type:      domain.EventTypeKubernetes,
 			Timestamp: time.Now().Add(1 * time.Second),
 		}
 
@@ -555,12 +555,12 @@ func TestEventSequence(t *testing.T) {
 func BenchmarkSequenceCorrelatorProcess(b *testing.B) {
 	logger := zaptest.NewLogger(b).Sugar().Desugar()
 	config := DefaultSequenceConfig()
-	correlator := NewSequenceCorrelator(logger, config)
+	correlator := NewSequenceCorrelator(logger, *config)
 	ctx := context.Background()
 
 	event := &domain.UnifiedEvent{
 		ID:        "bench-event",
-		Type:      EventTypeK8s,
+		Type:      domain.EventTypeKubernetes,
 		Timestamp: time.Now(),
 		K8sContext: &domain.K8sContext{
 			Namespace: "benchmark",

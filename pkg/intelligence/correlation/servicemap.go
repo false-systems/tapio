@@ -218,55 +218,70 @@ func (s *ServiceMapCorrelator) handleConnectionFailure(ctx context.Context, even
 	connKey := fmt.Sprintf("%s->%s", srcService, dstService)
 	s.updateConnectionHealth(connKey, false)
 
-	// Get connection health
+	// Get connection health and check for persistent failure
 	health := s.getConnectionHealth(connKey)
-	if health == nil {
+	if health == nil || health.ConsecutiveFails < 5 {
 		return nil, nil
 	}
 
-	// Check if this is a persistent failure
-	if health.ConsecutiveFails >= 5 {
-		// Find dependent services
-		dependents := s.findDependentServices(srcService)
+	// Create breakdown correlation result
+	result := s.createConnectionBreakdownResult(event, srcService, dstService, errorType, health)
+	return []*CorrelationResult{result}, nil
+}
 
-		result := &CorrelationResult{
-			ID:         fmt.Sprintf("svcmap-breakdown-%s", event.ID),
-			Type:       "service_communication_failure",
-			Confidence: CriticalConfidence,
-			Events:     []string{event.ID},
-			Summary:    fmt.Sprintf("Service communication breakdown: %s → %s", srcService, dstService),
-			Details: CorrelationDetails{
-				Pattern:        "Connection failure cascade",
-				Algorithm:      "health_degradation_analyzer",
-				ProcessingTime: time.Since(event.Timestamp),
-				DataPoints:     int(health.ConsecutiveFails),
-			},
-			RootCause: &RootCause{
-				EventID:     event.ID,
-				Confidence:  HighConfidence,
-				Description: s.determineFailureRootCause(errorType, health),
-				Evidence: CreateEvidenceData(
-					[]string{event.ID},
-					[]string{srcService, dstService},
-					map[string]string{
-						"consecutive_fails": fmt.Sprintf("%d", health.ConsecutiveFails),
-						"failure_rate":      fmt.Sprintf("%d/%d", health.FailureCount, health.SuccessCount+health.FailureCount),
-						"last_success":      time.Since(health.LastSuccess).String(),
-						"error_type":        errorType,
-					},
-				),
-			},
-			Impact: &Impact{
-				Severity:  domain.EventSeverityCritical,
-				Services:  s.convertToServiceReferences(append([]string{srcService}, dependents...)),
-				Resources: s.getAffectedResources(srcService, dstService),
-			},
-		}
+// createConnectionBreakdownResult creates correlation result for connection breakdown
+func (s *ServiceMapCorrelator) createConnectionBreakdownResult(event *domain.UnifiedEvent, srcService, dstService, errorType string, health *ConnectionHealth) *CorrelationResult {
+	// Find dependent services
+	dependents := s.findDependentServices(srcService)
 
-		return []*CorrelationResult{result}, nil
+	return &CorrelationResult{
+		ID:         fmt.Sprintf("svcmap-breakdown-%s", event.ID),
+		Type:       "service_communication_failure",
+		Confidence: CriticalConfidence,
+		Events:     []string{event.ID},
+		Summary:    fmt.Sprintf("Service communication breakdown: %s → %s", srcService, dstService),
+		Details:    s.createBreakdownDetails(event, health),
+		RootCause:  s.createBreakdownRootCause(event, srcService, dstService, errorType, health),
+		Impact:     s.createBreakdownImpact(srcService, dstService, dependents),
 	}
+}
 
-	return nil, nil
+// createBreakdownDetails creates correlation details for connection breakdown
+func (s *ServiceMapCorrelator) createBreakdownDetails(event *domain.UnifiedEvent, health *ConnectionHealth) CorrelationDetails {
+	return CorrelationDetails{
+		Pattern:        "Connection failure cascade",
+		Algorithm:      "health_degradation_analyzer",
+		ProcessingTime: time.Since(event.Timestamp),
+		DataPoints:     int(health.ConsecutiveFails),
+	}
+}
+
+// createBreakdownRootCause creates root cause analysis for connection breakdown
+func (s *ServiceMapCorrelator) createBreakdownRootCause(event *domain.UnifiedEvent, srcService, dstService, errorType string, health *ConnectionHealth) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  HighConfidence,
+		Description: s.determineFailureRootCause(errorType, health),
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{srcService, dstService},
+			map[string]string{
+				"consecutive_fails": fmt.Sprintf("%d", health.ConsecutiveFails),
+				"failure_rate":      fmt.Sprintf("%d/%d", health.FailureCount, health.SuccessCount+health.FailureCount),
+				"last_success":      time.Since(health.LastSuccess).String(),
+				"error_type":        errorType,
+			},
+		),
+	}
+}
+
+// createBreakdownImpact creates impact analysis for connection breakdown
+func (s *ServiceMapCorrelator) createBreakdownImpact(srcService, dstService string, dependents []string) *Impact {
+	return &Impact{
+		Severity:  domain.EventSeverityCritical,
+		Services:  s.convertToServiceReferences(append([]string{srcService}, dependents...)),
+		Resources: s.getAffectedResources(srcService, dstService),
+	}
 }
 
 // handleHTTPRequest analyzes HTTP request patterns

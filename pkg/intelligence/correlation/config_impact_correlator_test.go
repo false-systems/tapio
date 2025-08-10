@@ -253,25 +253,8 @@ func TestConfigImpactCorrelator_HelperFunctions(t *testing.T) {
 		assert.Equal(t, "", correlator.getEntityName(event))
 	})
 
-	t.Run("interfaceSliceToStringSlice", func(t *testing.T) {
-		// Test normal conversion
-		input := []interface{}{"one", "two", "three"}
-		result := correlator.interfaceSliceToStringSlice(input)
-		assert.Equal(t, []string{"one", "two", "three"}, result)
-
-		// Test mixed types (only strings extracted)
-		input = []interface{}{"one", 2, "three", true}
-		result = correlator.interfaceSliceToStringSlice(input)
-		assert.Equal(t, []string{"one", "three"}, result)
-
-		// Test nil input
-		result = correlator.interfaceSliceToStringSlice(nil)
-		assert.Empty(t, result)
-
-		// Test non-slice input
-		result = correlator.interfaceSliceToStringSlice("not a slice")
-		assert.Empty(t, result)
-	})
+	// Skipping interfaceSliceToStringSlice test - method removed during refactoring
+	// This functionality is now handled internally
 }
 
 // Test confidence calculation
@@ -338,10 +321,8 @@ func TestConfigImpactCorrelator_GraphCorrelatorInterface(t *testing.T) {
 	logger := zap.NewNop()
 	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
-	// Test SetGraphClient
-	newMockStore := &MockGraphStore{}
-	correlator.SetGraphClient(newMockStore)
-	assert.Equal(t, newMockStore, correlator.graphStore)
+	// SetGraphClient no longer needed - graphStore is injected via constructor
+	// The graphStore field is now immutable after construction
 
 	// Test PreloadGraph
 	ctx := context.Background()

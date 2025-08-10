@@ -97,29 +97,40 @@ func (p *PerformanceCorrelator) Process(ctx context.Context, event *domain.Unifi
 // CPU Throttling often leads to cascade failures
 func (p *PerformanceCorrelator) handleCPUThrottling(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
 	podKey := p.getPodKey(event)
+	cascadeEvents := p.detectCPUCascade(podKey)
+	result := p.buildCPUThrottlingResult(event, podKey, cascadeEvents)
+	return []*CorrelationResult{result}, nil
+}
 
-	// Look for related events in the same pod
+// CPUCascadeEvents holds detected cascade events
+type CPUCascadeEvents struct {
+	MemoryPressure *domain.UnifiedEvent
+	CrashLoop      *domain.UnifiedEvent
+}
+
+// detectCPUCascade detects cascade failure patterns from CPU throttling
+func (p *PerformanceCorrelator) detectCPUCascade(podKey string) CPUCascadeEvents {
 	relatedEvents := p.findRelatedEvents(podKey, []string{
 		"kubelet_memory_pressure",
 		"kubelet_crash_loop",
 		"network_conn",
 	}, 2*time.Minute)
 
-	// Check if this is leading to memory issues
-	var memoryPressure *domain.UnifiedEvent
-	var crashLoop *domain.UnifiedEvent
-
+	var cascade CPUCascadeEvents
 	for _, e := range relatedEvents {
 		eventType := p.getMetadata(e, "event_type")
 		switch eventType {
 		case "kubelet_memory_pressure":
-			memoryPressure = e
+			cascade.MemoryPressure = e
 		case "kubelet_crash_loop":
-			crashLoop = e
+			cascade.CrashLoop = e
 		}
 	}
+	return cascade
+}
 
-	// Build correlation result
+// buildCPUThrottlingResult builds the correlation result for CPU throttling
+func (p *PerformanceCorrelator) buildCPUThrottlingResult(event *domain.UnifiedEvent, podKey string, cascade CPUCascadeEvents) *CorrelationResult {
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("perf-cpu-cascade-%s", event.ID),
 		Type:       "resource_exhaustion",
@@ -130,84 +141,95 @@ func (p *PerformanceCorrelator) handleCPUThrottling(ctx context.Context, event *
 		EndTime:    event.Timestamp,
 	}
 
-	// Determine the cascade pattern
-	if memoryPressure != nil && crashLoop != nil {
-		// Full cascade: CPU → Memory → Crash
-		result.Confidence = CriticalConfidence
-		result.Events = append(result.Events, memoryPressure.ID, crashLoop.ID)
-		result.Summary = "Resource exhaustion cascade: CPU throttling → Memory pressure → Pod crash"
-		result.Details = CorrelationDetails{
-			Pattern:        "CPU throttling → Memory pressure → Pod crash",
-			Algorithm:      "performance_cascade_detector",
-			ProcessingTime: time.Since(result.StartTime),
-			DataPoints:     3,
-		}
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  HighConfidence,
-			Description: "Insufficient CPU resources for workload",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID, memoryPressure.ID, crashLoop.ID},
-				[]string{podKey},
-				map[string]string{
-					"cpu_usage_nano":        p.getMetadata(event, "cpu_usage_nano"),
-					"memory_pressure_delay": memoryPressure.Timestamp.Sub(event.Timestamp).String(),
-					"last_exit_code":        p.getMetadata(crashLoop, "last_exit_code"),
-				},
-			),
-		}
-		result.Impact = &Impact{
-			Severity:  domain.EventSeverityCritical,
-			Resources: []string{podKey},
-		}
-	} else if memoryPressure != nil {
-		// Partial cascade: CPU → Memory
-		result.Confidence = MediumConfidence
-		result.Events = append(result.Events, memoryPressure.ID)
-		result.Summary = "CPU throttling leading to memory pressure"
-		result.Details = CorrelationDetails{
-			Pattern:        "CPU throttling → Memory pressure",
-			Algorithm:      "performance_cascade_detector",
-			ProcessingTime: time.Since(result.StartTime),
-			DataPoints:     2,
-		}
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  MediumLowConfidence,
-			Description: "CPU throttling causing processing backlog",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID, memoryPressure.ID},
-				[]string{podKey},
-				map[string]string{
-					"pattern": "CPU at limit for extended period",
-					"impact":  "Memory usage increasing after CPU throttle",
-				},
-			),
-		}
+	if cascade.MemoryPressure != nil && cascade.CrashLoop != nil {
+		p.enrichFullCascade(result, event, podKey, cascade)
+	} else if cascade.MemoryPressure != nil {
+		p.enrichPartialCascade(result, event, podKey, cascade.MemoryPressure)
 	} else {
-		// Just CPU throttling
-		result.Details = CorrelationDetails{
-			Pattern:        "CPU throttling",
-			Algorithm:      "performance_cascade_detector",
-			ProcessingTime: time.Since(result.StartTime),
-			DataPoints:     1,
-		}
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  LowConfidence,
-			Description: "Pod hitting CPU limits",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID},
-				[]string{podKey},
-				map[string]string{
-					"container_name": p.getMetadata(event, "container_name"),
-					"recommendation": "Consider increasing CPU limits",
-				},
-			),
-		}
+		p.enrichCPUOnlyResult(result, event, podKey)
 	}
 
-	return []*CorrelationResult{result}, nil
+	return result
+}
+
+// enrichFullCascade enriches result for full CPU->Memory->Crash cascade
+func (p *PerformanceCorrelator) enrichFullCascade(result *CorrelationResult, event *domain.UnifiedEvent, podKey string, cascade CPUCascadeEvents) {
+	result.Confidence = CriticalConfidence
+	result.Events = append(result.Events, cascade.MemoryPressure.ID, cascade.CrashLoop.ID)
+	result.Summary = "Resource exhaustion cascade: CPU throttling → Memory pressure → Pod crash"
+	result.Details = CorrelationDetails{
+		Pattern:        "CPU throttling → Memory pressure → Pod crash",
+		Algorithm:      "performance_cascade_detector",
+		ProcessingTime: time.Since(result.StartTime),
+		DataPoints:     3,
+	}
+	result.RootCause = &RootCause{
+		EventID:     event.ID,
+		Confidence:  HighConfidence,
+		Description: "Insufficient CPU resources for workload",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID, cascade.MemoryPressure.ID, cascade.CrashLoop.ID},
+			[]string{podKey},
+			map[string]string{
+				"cpu_usage_nano":        p.getMetadata(event, "cpu_usage_nano"),
+				"memory_pressure_delay": cascade.MemoryPressure.Timestamp.Sub(event.Timestamp).String(),
+				"last_exit_code":        p.getMetadata(cascade.CrashLoop, "last_exit_code"),
+			},
+		),
+	}
+	result.Impact = &Impact{
+		Severity:  domain.EventSeverityCritical,
+		Resources: []string{podKey},
+	}
+}
+
+// enrichPartialCascade enriches result for CPU->Memory cascade
+func (p *PerformanceCorrelator) enrichPartialCascade(result *CorrelationResult, event *domain.UnifiedEvent, podKey string, memoryPressure *domain.UnifiedEvent) {
+	result.Confidence = MediumConfidence
+	result.Events = append(result.Events, memoryPressure.ID)
+	result.Summary = "CPU throttling leading to memory pressure"
+	result.Details = CorrelationDetails{
+		Pattern:        "CPU throttling → Memory pressure",
+		Algorithm:      "performance_cascade_detector",
+		ProcessingTime: time.Since(result.StartTime),
+		DataPoints:     2,
+	}
+	result.RootCause = &RootCause{
+		EventID:     event.ID,
+		Confidence:  MediumLowConfidence,
+		Description: "CPU throttling causing processing backlog",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID, memoryPressure.ID},
+			[]string{podKey},
+			map[string]string{
+				"pattern": "CPU at limit for extended period",
+				"impact":  "Memory usage increasing after CPU throttle",
+			},
+		),
+	}
+}
+
+// enrichCPUOnlyResult enriches result for CPU-only throttling
+func (p *PerformanceCorrelator) enrichCPUOnlyResult(result *CorrelationResult, event *domain.UnifiedEvent, podKey string) {
+	result.Details = CorrelationDetails{
+		Pattern:        "CPU throttling",
+		Algorithm:      "performance_cascade_detector",
+		ProcessingTime: time.Since(result.StartTime),
+		DataPoints:     1,
+	}
+	result.RootCause = &RootCause{
+		EventID:     event.ID,
+		Confidence:  LowConfidence,
+		Description: "Pod hitting CPU limits",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{podKey},
+			map[string]string{
+				"container_name": p.getMetadata(event, "container_name"),
+				"recommendation": "Consider increasing CPU limits",
+			},
+		),
+	}
 }
 
 // Memory pressure correlation
@@ -221,10 +243,18 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 	}, 5*time.Minute)
 
 	// Use related events for enhanced analysis
-	_ = len(relatedEvents) // eventCount not currently used
+	relatedEventCount := len(relatedEvents)
+	// Enhanced analysis based on event count could be added here
 
-	workingSet, _ := strconv.ParseInt(p.getMetadata(event, "memory_working_set"), 10, 64)
-	usage, _ := strconv.ParseInt(p.getMetadata(event, "memory_usage"), 10, 64)
+	workingSet, workingSetErr := strconv.ParseInt(p.getMetadata(event, "memory_working_set"), 10, 64)
+	if workingSetErr != nil {
+		workingSet = 0 // Default to 0 if parsing fails
+	}
+
+	usage, usageErr := strconv.ParseInt(p.getMetadata(event, "memory_usage"), 10, 64)
+	if usageErr != nil {
+		usage = 0 // Default to 0 if parsing fails
+	}
 
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("perf-mem-%s", event.ID),
@@ -236,7 +266,7 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 			Pattern:        "Memory pressure",
 			Algorithm:      "memory_exhaustion_detector",
 			ProcessingTime: time.Since(event.Timestamp),
-			DataPoints:     1,
+			DataPoints:     1 + relatedEventCount, // Include related events in analysis
 		},
 		StartTime: event.Timestamp,
 		EndTime:   event.Timestamp,
@@ -284,110 +314,168 @@ func (p *PerformanceCorrelator) handleMemoryPressure(ctx context.Context, event 
 
 // Crash loop analysis
 func (p *PerformanceCorrelator) handleCrashLoop(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
-	exitCode := p.getMetadata(event, "last_exit_code")
-	restartCount, _ := strconv.Atoi(p.getMetadata(event, "restart_count"))
-	podKey := p.getPodKey(event)
+	crashInfo := p.extractCrashInfo(event)
+	recentEvents := p.findCrashRelatedEvents(crashInfo.PodKey)
+	result := p.buildCrashLoopResult(event, crashInfo, recentEvents)
+	return []*CorrelationResult{result}, nil
+}
 
-	// Look for recent events that might explain the crash
-	recentEvents := p.findRelatedEvents(podKey, []string{
+// CrashInfo holds crash loop information
+type CrashInfo struct {
+	ExitCode     string
+	RestartCount int
+	PodKey       string
+}
+
+// extractCrashInfo extracts crash information from event
+func (p *PerformanceCorrelator) extractCrashInfo(event *domain.UnifiedEvent) CrashInfo {
+	restartCount, _ := strconv.Atoi(p.getMetadata(event, "restart_count"))
+	return CrashInfo{
+		ExitCode:     p.getMetadata(event, "last_exit_code"),
+		RestartCount: restartCount,
+		PodKey:       p.getPodKey(event),
+	}
+}
+
+// findCrashRelatedEvents finds events that might explain the crash
+func (p *PerformanceCorrelator) findCrashRelatedEvents(podKey string) []*domain.UnifiedEvent {
+	return p.findRelatedEvents(podKey, []string{
 		"kubelet_memory_pressure",
 		"kubelet_cpu_throttling",
 		"file_open",
 		"kubelet_container_waiting",
 	}, 10*time.Minute)
+}
 
+// buildCrashLoopResult builds the crash loop correlation result
+func (p *PerformanceCorrelator) buildCrashLoopResult(event *domain.UnifiedEvent, info CrashInfo, recentEvents []*domain.UnifiedEvent) *CorrelationResult {
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("perf-crash-%s", event.ID),
 		Type:       "crash_analysis",
 		Confidence: HighConfidence,
 		Events:     []string{event.ID},
-		Summary:    fmt.Sprintf("Pod %s crashed %d times (exit: %s)", podKey, restartCount, exitCode),
+		Summary:    fmt.Sprintf("Pod %s crashed %d times (exit: %s)", info.PodKey, info.RestartCount, info.ExitCode),
 		StartTime:  event.Timestamp,
 		EndTime:    event.Timestamp,
 	}
 
-	// Analyze based on exit code
-	switch exitCode {
-	case "137": // SIGKILL - usually OOM
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  CriticalConfidence,
-			Description: "Container killed due to Out Of Memory",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID},
-				[]string{p.getPodKey(event)},
-				map[string]string{
-					"exit_code": "137",
-					"signal":    "SIGKILL from OOM killer",
-					"cause":     "Container exceeded memory limits",
-				},
-			),
-		}
-
-	case "1": // General error
-		// Check if config related
-		var configAccess *domain.UnifiedEvent
-		for _, e := range recentEvents {
-			if p.getMetadata(e, "event_type") == "file_open" && strings.Contains(p.getMetadata(e, "filename"), "config") {
-				configAccess = e
-				break
-			}
-		}
-
-		if configAccess != nil {
-			result.RootCause = &RootCause{
-				EventID:     event.ID,
-				Confidence:  LowConfidence,
-				Description: "Application error, possibly configuration related",
-				Evidence: CreateEvidenceData(
-					[]string{event.ID, configAccess.ID},
-					[]string{p.getPodKey(event)},
-					map[string]string{
-						"exit_code":   "1",
-						"cause":       "application error",
-						"config_file": p.getMetadata(configAccess, "filename"),
-					},
-				),
-			}
-		} else {
-			result.RootCause = &RootCause{
-				EventID:     event.ID,
-				Confidence:  VeryLowConfidence,
-				Description: "Application startup or runtime error",
-				Evidence: CreateEvidenceData(
-					[]string{event.ID},
-					[]string{p.getPodKey(event)},
-					map[string]string{
-						"exit_code":      "1",
-						"recommendation": "Check application logs for specific error",
-					},
-				),
-			}
-		}
-
-	case "139": // SIGSEGV
-		result.RootCause = &RootCause{
-			EventID:     event.ID,
-			Confidence:  HighConfidence,
-			Description: "Segmentation fault - memory access violation",
-			Evidence: CreateEvidenceData(
-				[]string{event.ID},
-				[]string{p.getPodKey(event)},
-				map[string]string{
-					"exit_code": "139",
-					"signal":    "SIGSEGV",
-					"cause":     "Application bug or corrupted memory",
-				},
-			),
-		}
-	}
-
+	result.RootCause = p.analyzeCrashExitCode(event, info, recentEvents)
 	result.Impact = &Impact{
 		Severity:  domain.EventSeverityCritical,
-		Resources: []string{podKey},
+		Resources: []string{info.PodKey},
 	}
 
-	return []*CorrelationResult{result}, nil
+	return result
+}
+
+// analyzeCrashExitCode analyzes the exit code to determine root cause
+func (p *PerformanceCorrelator) analyzeCrashExitCode(event *domain.UnifiedEvent, info CrashInfo, recentEvents []*domain.UnifiedEvent) *RootCause {
+	switch info.ExitCode {
+	case "137": // SIGKILL - usually OOM
+		return p.buildOOMRootCause(event, info.PodKey)
+	case "1": // General error
+		return p.buildGeneralErrorRootCause(event, info.PodKey, recentEvents)
+	case "139": // SIGSEGV
+		return p.buildSegfaultRootCause(event, info.PodKey)
+	default:
+		return p.buildUnknownRootCause(event, info)
+	}
+}
+
+// buildOOMRootCause builds root cause for OOM kill
+func (p *PerformanceCorrelator) buildOOMRootCause(event *domain.UnifiedEvent, podKey string) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  CriticalConfidence,
+		Description: "Container killed due to Out Of Memory",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{podKey},
+			map[string]string{
+				"exit_code": "137",
+				"signal":    "SIGKILL from OOM killer",
+				"cause":     "Container exceeded memory limits",
+			},
+		),
+	}
+}
+
+// buildGeneralErrorRootCause builds root cause for general application errors
+func (p *PerformanceCorrelator) buildGeneralErrorRootCause(event *domain.UnifiedEvent, podKey string, recentEvents []*domain.UnifiedEvent) *RootCause {
+	// Check if config related
+	var configAccess *domain.UnifiedEvent
+	for _, e := range recentEvents {
+		if p.getMetadata(e, "event_type") == "file_open" && strings.Contains(p.getMetadata(e, "filename"), "config") {
+			configAccess = e
+			break
+		}
+	}
+
+	if configAccess != nil {
+		return &RootCause{
+			EventID:     event.ID,
+			Confidence:  LowConfidence,
+			Description: "Application error, possibly configuration related",
+			Evidence: CreateEvidenceData(
+				[]string{event.ID, configAccess.ID},
+				[]string{podKey},
+				map[string]string{
+					"exit_code":   "1",
+					"cause":       "application error",
+					"config_file": p.getMetadata(configAccess, "filename"),
+				},
+			),
+		}
+	}
+
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  VeryLowConfidence,
+		Description: "Application startup or runtime error",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{podKey},
+			map[string]string{
+				"exit_code":      "1",
+				"recommendation": "Check application logs for specific error",
+			},
+		),
+	}
+}
+
+// buildSegfaultRootCause builds root cause for segmentation fault
+func (p *PerformanceCorrelator) buildSegfaultRootCause(event *domain.UnifiedEvent, podKey string) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  HighConfidence,
+		Description: "Segmentation fault - memory access violation",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{podKey},
+			map[string]string{
+				"exit_code": "139",
+				"signal":    "SIGSEGV",
+				"cause":     "Application bug or corrupted memory",
+			},
+		),
+	}
+}
+
+// buildUnknownRootCause builds root cause for unknown exit codes
+func (p *PerformanceCorrelator) buildUnknownRootCause(event *domain.UnifiedEvent, info CrashInfo) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  VeryLowConfidence,
+		Description: fmt.Sprintf("Unknown exit code: %s", info.ExitCode),
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{info.PodKey},
+			map[string]string{
+				"exit_code":      info.ExitCode,
+				"recommendation": "Check application logs for details",
+			},
+		),
+	}
 }
 
 // Container waiting (image pull, etc)
