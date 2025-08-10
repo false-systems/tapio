@@ -2,7 +2,6 @@ package dns
 
 import (
 	"log"
-	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
@@ -53,15 +52,3 @@ func CreateCollector(config map[string]interface{}) (collectors.Collector, error
 	return NewCollector(name, cfg)
 }
 
-// DefaultConfig returns default DNS configuration
-// DEPRECATED: Use config.NewDNSConfig instead
-func DefaultConfig() Config {
-	return Config{
-		BufferSize:   10000,
-		Interface:    "", // Auto-detect
-		EnableEBPF:   true,
-		EnableSocket: false,
-		DNSPort:      53,
-		Protocols:    []string{"udp", "tcp"},
-	}
-}

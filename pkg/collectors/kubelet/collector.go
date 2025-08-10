@@ -163,157 +163,6 @@ type Statistics struct {
 	PodTraceCount   int       `json:"pod_trace_count"`
 }
 
-// KubeletInstrumentation provides telemetry specifically for kubelet collector
-type KubeletInstrumentation struct {
-	ServiceName string
-	Logger      *zap.Logger
-
-	// Tracing
-	Tracer trace.Tracer
-
-	// Common metrics
-	RequestsTotal   metric.Int64Counter
-	RequestDuration metric.Float64Histogram
-	ActiveRequests  metric.Int64UpDownCounter
-	ErrorsTotal     metric.Int64Counter
-
-	// Kubelet-specific metrics
-	APILatency         metric.Float64Histogram
-	EventsTotal        metric.Int64Counter
-	KubeletErrorsTotal metric.Int64Counter
-	PollsActive        metric.Int64UpDownCounter
-	APIFailures        metric.Int64Counter
-
-	// Internal meter
-	meter metric.Meter
-}
-
-// NewKubeletInstrumentation creates instrumentation for kubelet collector
-func NewKubeletInstrumentation(logger *zap.Logger) (*KubeletInstrumentation, error) {
-	serviceName := "kubelet-collector"
-	meter := otel.Meter(serviceName)
-	tracer := otel.Tracer(serviceName)
-
-	// Create common metrics with graceful degradation
-	requestsTotal, err := meter.Int64Counter(
-		"tapio.requests.total",
-		metric.WithDescription("Total number of requests"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create requests_total counter", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	requestDuration, err := meter.Float64Histogram(
-		"tapio.request.duration",
-		metric.WithDescription("Request duration in seconds"),
-		metric.WithUnit("s"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create request_duration histogram", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	activeRequests, err := meter.Int64UpDownCounter(
-		"tapio.requests.active",
-		metric.WithDescription("Number of active requests"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create active_requests counter", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		"tapio.errors.total",
-		metric.WithDescription("Total number of errors"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create errors_total counter", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	// Create kubelet-specific metrics with graceful degradation
-
-	apiLatency, err := meter.Float64Histogram(
-		"tapio.kubelet.api.latency",
-		metric.WithDescription("Kubelet API call latency in seconds"),
-		metric.WithUnit("s"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create api_latency histogram", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	eventsTotal, err := meter.Int64Counter(
-		"tapio.kubelet.events.total",
-		metric.WithDescription("Total number of kubelet events collected"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create events_total counter", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	kubeletErrorsTotal, err := meter.Int64Counter(
-		"tapio.kubelet.errors.total",
-		metric.WithDescription("Total number of kubelet collection errors"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create kubelet_errors_total counter", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	pollsActive, err := meter.Int64UpDownCounter(
-		"tapio.kubelet.polls.active",
-		metric.WithDescription("Number of active kubelet polling operations"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create polls_active counter", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	apiFailures, err := meter.Int64Counter(
-		"tapio.kubelet.api.failures",
-		metric.WithDescription("Number of kubelet API failures by endpoint"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create api_failures counter", zap.Error(err))
-		// Continue with nil metric - graceful degradation
-	}
-
-	return &KubeletInstrumentation{
-		ServiceName:        serviceName,
-		Logger:             logger,
-		Tracer:             tracer,
-		meter:              meter,
-		RequestsTotal:      requestsTotal,
-		RequestDuration:    requestDuration,
-		ActiveRequests:     activeRequests,
-		ErrorsTotal:        errorsTotal,
-		APILatency:         apiLatency,
-		EventsTotal:        eventsTotal,
-		KubeletErrorsTotal: kubeletErrorsTotal,
-		PollsActive:        pollsActive,
-		APIFailures:        apiFailures,
-	}, nil
-}
-
-// StartSpan starts a new span and increments active requests
-func (ki *KubeletInstrumentation) StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	ctx, span := ki.Tracer.Start(ctx, name, opts...)
-	if ki.ActiveRequests != nil {
-		ki.ActiveRequests.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("operation", name),
-		))
-	}
-	return ctx, span
-}
 
 // Collector implements the kubelet metrics collector
 type Collector struct {
@@ -327,7 +176,6 @@ type Collector struct {
 	mu              sync.RWMutex
 	healthy         bool
 	logger          *zap.Logger
-	instrumentation *KubeletInstrumentation
 	podTraceManager *PodTraceManager
 
 	// Metrics
@@ -336,6 +184,15 @@ type Collector struct {
 		errorsCount     int64
 		lastEventTime   time.Time
 	}
+
+	// OTEL instrumentation - REQUIRED fields
+	tracer          trace.Tracer
+	eventsProcessed metric.Int64Counter
+	errorsTotal     metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	apiLatency      metric.Float64Histogram
+	pollsActive     metric.Int64UpDownCounter
+	apiFailures     metric.Int64Counter
 }
 
 // NewCollector creates a new kubelet collector
@@ -352,10 +209,57 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		config.Logger = logger
 	}
 
-	// Initialize OTEL instrumentation
-	instrumentation, err := NewKubeletInstrumentation(config.Logger)
+	// Initialize OTEL components - MANDATORY pattern
+	tracer := otel.Tracer(name)
+	meter := otel.Meter(name)
+
+	// Create metrics with descriptive names and descriptions
+	eventsProcessed, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OTEL instrumentation: %w", err)
+		config.Logger.Warn("Failed to create events counter", zap.Error(err))
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+	)
+	if err != nil {
+		config.Logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	processingTime, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+	if err != nil {
+		config.Logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	apiLatency, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_api_latency_ms", name),
+		metric.WithDescription(fmt.Sprintf("API call latency for %s in milliseconds", name)),
+	)
+	if err != nil {
+		config.Logger.Warn("Failed to create API latency histogram", zap.Error(err))
+	}
+
+	pollsActive, err := meter.Int64UpDownCounter(
+		fmt.Sprintf("%s_active_polls", name),
+		metric.WithDescription(fmt.Sprintf("Active polling operations in %s", name)),
+	)
+	if err != nil {
+		config.Logger.Warn("Failed to create polls active gauge", zap.Error(err))
+	}
+
+	apiFailures, err := meter.Int64Counter(
+		fmt.Sprintf("%s_api_failures_total", name),
+		metric.WithDescription(fmt.Sprintf("API failures in %s", name)),
+	)
+	if err != nil {
+		config.Logger.Warn("Failed to create API failures counter", zap.Error(err))
 	}
 
 	// Create HTTP client with proper TLS config
@@ -385,8 +289,14 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		events:          make(chan collectors.RawEvent, 10000),
 		healthy:         true,
 		logger:          config.Logger,
-		instrumentation: instrumentation,
 		podTraceManager: NewPodTraceManager(),
+		tracer:          tracer,
+		eventsProcessed: eventsProcessed,
+		errorsTotal:     errorsTotal,
+		processingTime:  processingTime,
+		apiLatency:      apiLatency,
+		pollsActive:     pollsActive,
+		apiFailures:     apiFailures,
 	}, nil
 }
 
@@ -485,15 +395,15 @@ func (c *Collector) collectStats() {
 // fetchStats fetches and processes stats from kubelet
 func (c *Collector) fetchStats() error {
 	start := time.Now()
-	ctx, span := c.instrumentation.StartSpan(c.ctx, "kubelet.fetch_stats")
+	ctx, span := c.tracer.Start(c.ctx, "kubelet.fetch_stats")
 	defer span.End()
 
 	// Track active poll
-	if c.instrumentation.PollsActive != nil {
-		c.instrumentation.PollsActive.Add(ctx, 1, metric.WithAttributes(
+	if c.pollsActive != nil {
+		c.pollsActive.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("operation", "fetch_stats"),
 		))
-		defer c.instrumentation.PollsActive.Add(ctx, -1, metric.WithAttributes(
+		defer c.pollsActive.Add(ctx, -1, metric.WithAttributes(
 			attribute.String("operation", "fetch_stats"),
 		))
 	}
@@ -511,14 +421,14 @@ func (c *Collector) fetchStats() error {
 	resp, err := c.client.Get(url)
 	if err != nil {
 		// Record API failure
-		if c.instrumentation.APIFailures != nil {
-			c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+		if c.apiFailures != nil {
+			c.apiFailures.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("endpoint", "/stats/summary"),
 				attribute.String("error", "request_failed"),
 			))
 		}
-		if c.instrumentation.KubeletErrorsTotal != nil {
-			c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "api_request"),
 			))
 		}
@@ -530,15 +440,15 @@ func (c *Collector) fetchStats() error {
 
 	if resp.StatusCode != http.StatusOK {
 		// Record API failure
-		if c.instrumentation.APIFailures != nil {
-			c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+		if c.apiFailures != nil {
+			c.apiFailures.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("endpoint", "/stats/summary"),
 				attribute.String("error", "http_status"),
 				attribute.Int("status_code", resp.StatusCode),
 			))
 		}
-		if c.instrumentation.KubeletErrorsTotal != nil {
-			c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "api_status"),
 			))
 		}
@@ -558,8 +468,8 @@ func (c *Collector) fetchStats() error {
 
 	var summary statsv1alpha1.Summary
 	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
-		if c.instrumentation.KubeletErrorsTotal != nil {
-			c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "decode"),
 			))
 		}
@@ -570,8 +480,8 @@ func (c *Collector) fetchStats() error {
 
 	// Record API latency
 	duration := time.Since(start)
-	if c.instrumentation.APILatency != nil {
-		c.instrumentation.APILatency.Record(ctx, duration.Seconds(), metric.WithAttributes(
+	if c.apiLatency != nil {
+		c.apiLatency.Record(ctx, duration.Seconds()*1000, metric.WithAttributes(
 			attribute.String("endpoint", "/stats/summary"),
 		))
 	}
@@ -640,8 +550,8 @@ func (c *Collector) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1
 	case c.events <- event:
 		c.recordEvent()
 		// Record OTEL event metric
-		if c.instrumentation.EventsTotal != nil {
-			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("event_type", "kubelet_node_cpu"),
 				attribute.String("node_name", summary.Node.NodeName),
 			))
@@ -693,8 +603,8 @@ func (c *Collector) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alp
 	case c.events <- event:
 		c.recordEvent()
 		// Record OTEL event metric
-		if c.instrumentation.EventsTotal != nil {
-			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("event_type", "kubelet_node_memory"),
 				attribute.String("node_name", summary.Node.NodeName),
 			))
@@ -771,8 +681,8 @@ func (c *Collector) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.P
 	case c.events <- event:
 		c.recordEvent()
 		// Record OTEL event metric
-		if c.instrumentation.EventsTotal != nil {
-			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("event_type", "kubelet_cpu_throttling"),
 				attribute.String("namespace", pod.PodRef.Namespace),
 				attribute.String("pod", pod.PodRef.Name),
@@ -838,8 +748,8 @@ func (c *Collector) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.
 	case c.events <- event:
 		c.recordEvent()
 		// Record OTEL event metric
-		if c.instrumentation.EventsTotal != nil {
-			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("event_type", "kubelet_memory_pressure"),
 				attribute.String("namespace", pod.PodRef.Namespace),
 				attribute.String("pod", pod.PodRef.Name),
@@ -909,8 +819,8 @@ func (c *Collector) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha
 		case c.events <- event:
 			c.recordEvent()
 			// Record OTEL event metric
-			if c.instrumentation.EventsTotal != nil {
-				c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			if c.eventsProcessed != nil {
+				c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("event_type", "kubelet_ephemeral_storage"),
 					attribute.String("namespace", pod.PodRef.Namespace),
 					attribute.String("pod", pod.PodRef.Name),
@@ -944,15 +854,15 @@ func (c *Collector) collectPodMetrics() {
 // fetchPodLifecycle fetches pod status from kubelet
 func (c *Collector) fetchPodLifecycle() error {
 	start := time.Now()
-	ctx, span := c.instrumentation.StartSpan(c.ctx, "kubelet.fetch_pod_lifecycle")
+	ctx, span := c.tracer.Start(c.ctx, "kubelet.fetch_pod_lifecycle")
 	defer span.End()
 
 	// Track active poll
-	if c.instrumentation.PollsActive != nil {
-		c.instrumentation.PollsActive.Add(ctx, 1, metric.WithAttributes(
+	if c.pollsActive != nil {
+		c.pollsActive.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("operation", "fetch_pod_lifecycle"),
 		))
-		defer c.instrumentation.PollsActive.Add(ctx, -1, metric.WithAttributes(
+		defer c.pollsActive.Add(ctx, -1, metric.WithAttributes(
 			attribute.String("operation", "fetch_pod_lifecycle"),
 		))
 	}
@@ -970,14 +880,14 @@ func (c *Collector) fetchPodLifecycle() error {
 	resp, err := c.client.Get(url)
 	if err != nil {
 		// Record API failure
-		if c.instrumentation.APIFailures != nil {
-			c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+		if c.apiFailures != nil {
+			c.apiFailures.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("endpoint", "/pods"),
 				attribute.String("error", "request_failed"),
 			))
 		}
-		if c.instrumentation.KubeletErrorsTotal != nil {
-			c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "api_request"),
 			))
 		}
@@ -989,15 +899,15 @@ func (c *Collector) fetchPodLifecycle() error {
 
 	if resp.StatusCode != http.StatusOK {
 		// Record API failure
-		if c.instrumentation.APIFailures != nil {
-			c.instrumentation.APIFailures.Add(ctx, 1, metric.WithAttributes(
+		if c.apiFailures != nil {
+			c.apiFailures.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("endpoint", "/pods"),
 				attribute.String("error", "http_status"),
 				attribute.Int("status_code", resp.StatusCode),
 			))
 		}
-		if c.instrumentation.KubeletErrorsTotal != nil {
-			c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "api_status"),
 			))
 		}
@@ -1017,8 +927,8 @@ func (c *Collector) fetchPodLifecycle() error {
 
 	var podList v1.PodList
 	if err := json.NewDecoder(resp.Body).Decode(&podList); err != nil {
-		if c.instrumentation.KubeletErrorsTotal != nil {
-			c.instrumentation.KubeletErrorsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "decode"),
 			))
 		}
@@ -1029,8 +939,8 @@ func (c *Collector) fetchPodLifecycle() error {
 
 	// Record API latency
 	duration := time.Since(start)
-	if c.instrumentation.APILatency != nil {
-		c.instrumentation.APILatency.Record(ctx, duration.Seconds(), metric.WithAttributes(
+	if c.apiLatency != nil {
+		c.apiLatency.Record(ctx, duration.Seconds()*1000, metric.WithAttributes(
 			attribute.String("endpoint", "/pods"),
 		))
 	}
@@ -1120,8 +1030,8 @@ func (c *Collector) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, 
 	case c.events <- event:
 		c.recordEvent()
 		// Record OTEL event metric
-		if c.instrumentation.EventsTotal != nil {
-			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("event_type", "kubelet_container_waiting"),
 				attribute.String("namespace", pod.Namespace),
 				attribute.String("pod", pod.Name),
@@ -1181,8 +1091,8 @@ func (c *Collector) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Po
 	case c.events <- event:
 		c.recordEvent()
 		// Record OTEL event metric
-		if c.instrumentation.EventsTotal != nil {
-			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("event_type", "kubelet_container_terminated"),
 				attribute.String("namespace", pod.Namespace),
 				attribute.String("pod", pod.Name),
@@ -1243,8 +1153,8 @@ func (c *Collector) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status 
 		case c.events <- event:
 			c.recordEvent()
 			// Record OTEL event metric
-			if c.instrumentation.EventsTotal != nil {
-				c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+			if c.eventsProcessed != nil {
+				c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("event_type", "kubelet_crash_loop"),
 					attribute.String("namespace", pod.Namespace),
 					attribute.String("pod", pod.Name),
@@ -1305,8 +1215,8 @@ func (c *Collector) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condi
 	case c.events <- event:
 		c.recordEvent()
 		// Record OTEL event metric
-		if c.instrumentation.EventsTotal != nil {
-			c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("event_type", "kubelet_pod_not_ready"),
 				attribute.String("namespace", pod.Namespace),
 				attribute.String("pod", pod.Name),

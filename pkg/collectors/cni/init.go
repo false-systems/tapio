@@ -1,7 +1,6 @@
 package cni
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
@@ -39,11 +38,3 @@ func CreateLegacyCollector(config map[string]interface{}) (collectors.Collector,
 	return NewCollector(name)
 }
 
-// DefaultConfig returns default CNI configuration
-// DEPRECATED: Use config.NewCNIConfig instead
-func DefaultConfig() Config {
-	return Config{
-		BufferSize: 10000,
-		EnableEBPF: true,
-	}
-}

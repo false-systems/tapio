@@ -16,6 +16,11 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/kernel/network"
 	"github.com/yairfalse/tapio/pkg/collectors/kernel/process"
 	"github.com/yairfalse/tapio/pkg/collectors/kernel/security"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -39,6 +44,15 @@ type ModularCollector struct {
 	processCollector  *process.Collector
 	networkCollector  *network.Collector
 	k8sIntegration    *K8sIntegration
+
+	// OTEL instrumentation - REQUIRED fields
+	tracer          trace.Tracer
+	eventsProcessed metric.Int64Counter
+	errorsTotal     metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	eventsDropped   metric.Int64Counter
+	ebpfOperations  metric.Int64Counter
+	activeModules   metric.Int64UpDownCounter
 }
 
 // NewModularCollector creates a new modular kernel collector
@@ -62,12 +76,73 @@ func NewModularCollectorWithConfig(config *Config, logger *zap.Logger) (*Modular
 		}
 	}
 
+	// Initialize OTEL components - MANDATORY pattern
+	name := config.Name
+	tracer := otel.Tracer(name)
+	meter := otel.Meter(name)
+
+	// Create metrics with descriptive names and descriptions
+	eventsProcessed, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events counter", zap.Error(err))
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	processingTime, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	eventsDropped, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_dropped_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events dropped counter", zap.Error(err))
+	}
+
+	ebpfOperations, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_operations_total", name),
+		metric.WithDescription(fmt.Sprintf("Total eBPF operations in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf operations counter", zap.Error(err))
+	}
+
+	activeModules, err := meter.Int64UpDownCounter(
+		fmt.Sprintf("%s_active_modules", name),
+		metric.WithDescription(fmt.Sprintf("Active modules in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create active modules gauge", zap.Error(err))
+	}
+
 	c := &ModularCollector{
-		name:        config.Name,
-		logger:      logger,
-		events:      make(chan collectors.RawEvent, 15000), // Larger buffer for all modules
-		healthy:     true,
-		podTraceMap: make(map[string]string),
+		name:            config.Name,
+		logger:          logger,
+		events:          make(chan collectors.RawEvent, 15000), // Larger buffer for all modules
+		healthy:         true,
+		podTraceMap:     make(map[string]string),
+		tracer:          tracer,
+		eventsProcessed: eventsProcessed,
+		errorsTotal:     errorsTotal,
+		processingTime:  processingTime,
+		eventsDropped:   eventsDropped,
+		ebpfOperations:  ebpfOperations,
+		activeModules:   activeModules,
 	}
 
 	// Initialize modular components
@@ -76,7 +151,6 @@ func NewModularCollectorWithConfig(config *Config, logger *zap.Logger) (*Modular
 	c.networkCollector = network.NewNetworkCollector(logger.Named("network"))
 
 	// Initialize K8s integration
-	var err error
 	c.k8sIntegration, err = NewK8sIntegration(c, logger.Named("k8s"))
 	if err != nil {
 		logger.Warn("Failed to initialize Kubernetes integration", zap.Error(err))
@@ -93,11 +167,28 @@ func (c *ModularCollector) Name() string {
 
 // Start starts the modular kernel monitoring
 func (c *ModularCollector) Start(ctx context.Context) error {
+	// Create span for startup
+	ctx, span := c.tracer.Start(ctx, "kernel.start")
+	defer span.End()
+
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Load main eBPF program
+	if c.ebpfOperations != nil {
+		c.ebpfOperations.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("operation", "load"),
+		))
+	}
+
 	spec, err := bpf.LoadKernelmonitor()
 	if err != nil {
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "ebpf_load_failed"),
+			))
+		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to load eBPF spec: %w", err)
 	}
 
@@ -112,19 +203,32 @@ func (c *ModularCollector) Start(ctx context.Context) error {
 	}
 
 	// Start modular components
+	moduleCount := 0
 	if err := c.securityCollector.Start(c.ctx); err != nil {
 		c.logger.Error("Failed to start security collector", zap.Error(err))
 		// Continue - security is optional
+	} else {
+		moduleCount++
 	}
 
 	if err := c.processCollector.Start(c.ctx); err != nil {
 		c.logger.Error("Failed to start process collector", zap.Error(err))
 		// Continue - process monitoring is optional
+	} else {
+		moduleCount++
 	}
 
 	if err := c.networkCollector.Start(c.ctx); err != nil {
 		c.logger.Error("Failed to start network collector", zap.Error(err))
 		// Continue - network monitoring is optional
+	} else {
+		moduleCount++
+	}
+
+	if c.activeModules != nil {
+		c.activeModules.Add(ctx, int64(moduleCount), metric.WithAttributes(
+			attribute.String("component", c.name),
+		))
 	}
 
 	// Start K8s integration if available
@@ -150,7 +254,15 @@ func (c *ModularCollector) Start(ctx context.Context) error {
 	go c.aggregateModularEvents()
 
 	c.healthy = true
-	c.logger.Info("Modular kernel collector started")
+	span.SetStatus(codes.Ok, "Kernel collector started successfully")
+	span.SetAttributes(
+		attribute.Int("modules_active", moduleCount),
+		attribute.Int("links_attached", len(c.links)),
+	)
+	c.logger.Info("Modular kernel collector started",
+		zap.Int("active_modules", moduleCount),
+		zap.Int("ebpf_links", len(c.links)),
+	)
 	return nil
 }
 
@@ -270,12 +382,29 @@ func (c *ModularCollector) aggregateModularEvents() {
 
 // forwardEvent forwards events from modular components
 func (c *ModularCollector) forwardEvent(event collectors.RawEvent) {
+	// Create span for forwarding
+	ctx, span := c.tracer.Start(c.ctx, "kernel.forward_event")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("event.type", event.Type),
+		attribute.String("source_module", event.Metadata["module"]),
+	)
+
 	select {
 	case c.events <- event:
 		c.mu.Lock()
 		c.stats.EventsCollected++
 		c.stats.LastEventTime = time.Now()
 		c.mu.Unlock()
+
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", event.Type),
+				attribute.String("module", event.Metadata["module"]),
+			))
+		}
+		span.SetStatus(codes.Ok, "")
 	case <-c.ctx.Done():
 		return
 	default:
@@ -283,6 +412,13 @@ func (c *ModularCollector) forwardEvent(event collectors.RawEvent) {
 		c.mu.Lock()
 		c.stats.EventsDropped++
 		c.mu.Unlock()
+		if c.eventsDropped != nil {
+			c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("reason", "buffer_full"),
+				attribute.String("module", event.Metadata["module"]),
+			))
+		}
+		span.SetStatus(codes.Error, "event dropped - buffer full")
 	}
 }
 
@@ -300,8 +436,17 @@ func (c *ModularCollector) processEvents() {
 			if c.ctx.Err() != nil {
 				return
 			}
+			if c.errorsTotal != nil {
+				c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "read_error"),
+				))
+			}
 			continue
 		}
+
+		// Create span for event processing
+		ctx, span := c.tracer.Start(c.ctx, "kernel.process_event")
+		start := time.Now()
 
 		// Parse event with memory safety checks
 		event, err := c.parseKernelEventSafely(record.RawSample)
@@ -309,6 +454,14 @@ func (c *ModularCollector) processEvents() {
 			c.mu.Lock()
 			c.stats.ErrorCount++
 			c.mu.Unlock()
+			if c.errorsTotal != nil {
+				c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "parse_error"),
+				))
+			}
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			span.End()
 			c.logger.Debug("Failed to parse kernel event", 
 				zap.Error(err),
 				zap.Int("buffer_size", len(record.RawSample)),
@@ -401,19 +554,57 @@ func (c *ModularCollector) processEvents() {
 			SpanID:    collectors.GenerateSpanID(),
 		}
 
+		// Set span attributes
+		span.SetAttributes(
+			attribute.String("component", c.name),
+			attribute.String("operation", "process_event"),
+			attribute.String("event.type", rawEvent.Type),
+			attribute.String("event.id", rawEvent.SpanID),
+			attribute.Int("event.pid", int(event.PID)),
+		)
+
 		select {
 		case c.events <- rawEvent:
 			c.mu.Lock()
 			c.stats.EventsCollected++
 			c.stats.LastEventTime = time.Now()
 			c.mu.Unlock()
+
+			// Record success metrics
+			if c.eventsProcessed != nil {
+				c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("event_type", rawEvent.Type),
+					attribute.String("module", "legacy"),
+				))
+			}
+
+			// Record processing time
+			duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
+			if c.processingTime != nil {
+				c.processingTime.Record(ctx, duration, metric.WithAttributes(
+					attribute.String("event_type", rawEvent.Type),
+				))
+			}
+
+			span.SetStatus(codes.Ok, "")
 		case <-c.ctx.Done():
+			span.End()
 			return
 		default:
 			c.mu.Lock()
 			c.stats.EventsDropped++
 			c.mu.Unlock()
+			if c.eventsDropped != nil {
+				c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("reason", "buffer_full"),
+					attribute.String("event_type", rawEvent.Type),
+				))
+			}
+			span.SetAttributes(attribute.String("dropped", "buffer_full"))
+			span.SetStatus(codes.Error, "event dropped - buffer full")
 		}
+
+		span.End()
 	}
 }
 
@@ -795,8 +986,8 @@ func (c *ModularCollector) parseKernelEventSafely(rawBytes []byte) (*KernelEvent
 	}
 
 	// Use the new SafeCast method for comprehensive validation
-	safeParser := NewSafeParser()
-	event, err := SafeCast[KernelEvent](safeParser, rawBytes)
+	safeParser := collectors.NewSafeParser()
+	event, err := collectors.SafeCast[KernelEvent](safeParser, rawBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to safely parse KernelEvent: %w", err)
 	}
@@ -812,8 +1003,8 @@ func (c *ModularCollector) parseKernelEventSafely(rawBytes []byte) (*KernelEvent
 // parseNetworkInfoSafely parses NetworkInfo from raw bytes with memory safety checks
 func (c *ModularCollector) parseNetworkInfoSafely(rawBytes []byte) (*NetworkInfo, error) {
 	// Use the new SafeCast method for comprehensive validation
-	safeParser := NewSafeParser()
-	netInfo, err := SafeCast[NetworkInfo](safeParser, rawBytes)
+	safeParser := collectors.NewSafeParser()
+	netInfo, err := collectors.SafeCast[NetworkInfo](safeParser, rawBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to safely parse NetworkInfo: %w", err)
 	}
@@ -829,8 +1020,8 @@ func (c *ModularCollector) parseNetworkInfoSafely(rawBytes []byte) (*NetworkInfo
 // parseFileInfoSafely parses FileInfo from raw bytes with memory safety checks
 func (c *ModularCollector) parseFileInfoSafely(rawBytes []byte) (*FileInfo, error) {
 	// Use the new SafeCast method for comprehensive validation
-	safeParser := NewSafeParser()
-	fileInfo, err := SafeCast[FileInfo](safeParser, rawBytes)
+	safeParser := collectors.NewSafeParser()
+	fileInfo, err := collectors.SafeCast[FileInfo](safeParser, rawBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to safely parse FileInfo: %w", err)
 	}
