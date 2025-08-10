@@ -134,58 +134,111 @@ func (s *ServiceMapCorrelator) Process(ctx context.Context, event *domain.Unifie
 
 // handleServiceMapUpdate processes service topology updates
 func (s *ServiceMapCorrelator) handleServiceMapUpdate(ctx context.Context, event *domain.UnifiedEvent) ([]*CorrelationResult, error) {
-	// Extract service information
-	serviceName := s.getMetadata(event, "service_name")
-	namespace := s.getMetadata(event, "k8s_namespace")
+	serviceInfo := s.extractServiceInfo(event)
+	connectionStats := s.extractConnectionStats(event)
 
-	// Check for service isolation
+	if s.isServiceIsolated(connectionStats) {
+		isolationResult := s.createServiceIsolationResult(event, serviceInfo, connectionStats)
+		return []*CorrelationResult{isolationResult}, nil
+	}
+
+	return nil, nil
+}
+
+// ServiceInfo holds basic service information
+type ServiceInfo struct {
+	Name      string
+	Namespace string
+}
+
+// ConnectionStats holds connection statistics
+type ConnectionStats struct {
+	Active   int
+	Incoming int
+	Outgoing int
+}
+
+// extractServiceInfo extracts service information from event
+func (s *ServiceMapCorrelator) extractServiceInfo(event *domain.UnifiedEvent) ServiceInfo {
+	return ServiceInfo{
+		Name:      s.getMetadata(event, "service_name"),
+		Namespace: s.getMetadata(event, "k8s_namespace"),
+	}
+}
+
+// extractConnectionStats extracts connection statistics from event
+func (s *ServiceMapCorrelator) extractConnectionStats(event *domain.UnifiedEvent) ConnectionStats {
 	activeConns, _ := strconv.Atoi(s.getMetadata(event, "active_connections"))
 	incomingConns, _ := strconv.Atoi(s.getMetadata(event, "incoming_connections"))
 	outgoingConns, _ := strconv.Atoi(s.getMetadata(event, "outgoing_connections"))
 
-	if activeConns == 0 && (incomingConns > 0 || outgoingConns > 0) {
-		// Service should have connections but doesn't
-		return []*CorrelationResult{{
-			ID:         fmt.Sprintf("svcmap-isolation-%s", event.ID),
-			Type:       "service_isolation",
-			Confidence: HighConfidence,
-			Events:     []string{event.ID},
-			Summary:    fmt.Sprintf("Service %s/%s is isolated from network", namespace, serviceName),
-			Details: CorrelationDetails{
-				Pattern:        "Service isolation",
-				Algorithm:      "connection_analyzer",
-				ProcessingTime: time.Since(event.Timestamp),
-				DataPoints:     1,
-			},
-			RootCause: &RootCause{
-				EventID:     event.ID,
-				Confidence:  MediumHighConfidence,
-				Description: "Network policy or connectivity issue",
-				Evidence: CreateEvidenceData(
-					[]string{event.ID},
-					[]string{fmt.Sprintf("Service/%s/%s", namespace, serviceName)},
-					map[string]string{
-						"expected_incoming":  fmt.Sprintf("%d", incomingConns),
-						"expected_outgoing":  fmt.Sprintf("%d", outgoingConns),
-						"active_connections": "0",
-						"check_1":            "Check NetworkPolicies",
-						"check_2":            "Verify service endpoints",
-					},
-				),
-			},
-			Impact: &Impact{
-				Severity: domain.EventSeverityCritical,
-				Services: []ServiceReference{{
-					Name:      serviceName,
-					Namespace: namespace,
-					Type:      "service",
-				}},
-				Resources: []string{fmt.Sprintf("Service/%s/%s", namespace, serviceName)},
-			},
-		}}, nil
+	return ConnectionStats{
+		Active:   activeConns,
+		Incoming: incomingConns,
+		Outgoing: outgoingConns,
 	}
+}
 
-	return nil, nil
+// isServiceIsolated determines if a service is isolated from the network
+func (s *ServiceMapCorrelator) isServiceIsolated(stats ConnectionStats) bool {
+	return stats.Active == 0 && (stats.Incoming > 0 || stats.Outgoing > 0)
+}
+
+// createServiceIsolationResult creates correlation result for service isolation
+func (s *ServiceMapCorrelator) createServiceIsolationResult(event *domain.UnifiedEvent, serviceInfo ServiceInfo, stats ConnectionStats) *CorrelationResult {
+	return &CorrelationResult{
+		ID:         fmt.Sprintf("svcmap-isolation-%s", event.ID),
+		Type:       "service_isolation",
+		Confidence: HighConfidence,
+		Events:     []string{event.ID},
+		Summary:    fmt.Sprintf("Service %s/%s is isolated from network", serviceInfo.Namespace, serviceInfo.Name),
+		Details:    s.createIsolationDetails(event),
+		RootCause:  s.createIsolationRootCause(event, serviceInfo, stats),
+		Impact:     s.createIsolationImpact(serviceInfo),
+	}
+}
+
+// createIsolationDetails creates correlation details for service isolation
+func (s *ServiceMapCorrelator) createIsolationDetails(event *domain.UnifiedEvent) CorrelationDetails {
+	return CorrelationDetails{
+		Pattern:        "Service isolation",
+		Algorithm:      "connection_analyzer",
+		ProcessingTime: time.Since(event.Timestamp),
+		DataPoints:     1,
+	}
+}
+
+// createIsolationRootCause creates root cause analysis for service isolation
+func (s *ServiceMapCorrelator) createIsolationRootCause(event *domain.UnifiedEvent, serviceInfo ServiceInfo, stats ConnectionStats) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  MediumHighConfidence,
+		Description: "Network policy or connectivity issue",
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{fmt.Sprintf("Service/%s/%s", serviceInfo.Namespace, serviceInfo.Name)},
+			map[string]string{
+				"expected_incoming":  fmt.Sprintf("%d", stats.Incoming),
+				"expected_outgoing":  fmt.Sprintf("%d", stats.Outgoing),
+				"active_connections": "0",
+				"check_1":            "Check NetworkPolicies",
+				"check_2":            "Verify service endpoints",
+			},
+		),
+	}
+}
+
+// createIsolationImpact creates impact analysis for service isolation
+func (s *ServiceMapCorrelator) createIsolationImpact(serviceInfo ServiceInfo) *Impact {
+	return &Impact{
+		Severity: domain.EventSeverityCritical,
+		Services: []ServiceReference{{
+			Name:      serviceInfo.Name,
+			Namespace: serviceInfo.Namespace,
+			Type:      "service",
+		}},
+		Resources: []string{fmt.Sprintf("Service/%s/%s", serviceInfo.Namespace, serviceInfo.Name)},
+	}
 }
 
 // handleNetworkConnection tracks service connections
@@ -332,54 +385,78 @@ func (s *ServiceMapCorrelator) detectCascadeFailure(event *domain.UnifiedEvent) 
 		return nil
 	}
 
-	// Look for failures in dependent services
+	failingDependents := s.findFailingDependents(serviceName)
+	if len(failingDependents) < 2 {
+		return nil
+	}
+
+	return s.createCascadeFailureResult(event, serviceName, failingDependents)
+}
+
+// findFailingDependents finds dependent services that are currently failing
+func (s *ServiceMapCorrelator) findFailingDependents(serviceName string) []string {
 	dependents := s.findDependentServices(serviceName)
 	if len(dependents) == 0 {
 		return nil
 	}
 
-	// Check if dependents are also failing
-	failingDependents := []string{}
+	var failingDependents []string
 	for _, dep := range dependents {
 		if s.isServiceFailing(dep) {
 			failingDependents = append(failingDependents, dep)
 		}
 	}
+	return failingDependents
+}
 
-	if len(failingDependents) >= 2 {
-		return &CorrelationResult{
-			ID:         fmt.Sprintf("svcmap-cascade-%s-%d", serviceName, time.Now().Unix()),
-			Type:       "cascade_failure",
-			Confidence: MediumHighConfidence,
-			Summary:    fmt.Sprintf("Cascading failure starting from %s", serviceName),
-			Details: CorrelationDetails{
-				Pattern:        "Cascade failure",
-				Algorithm:      "dependency_cascade_analyzer",
-				ProcessingTime: time.Since(event.Timestamp),
-				DataPoints:     len(failingDependents),
-			},
-			RootCause: &RootCause{
-				EventID:     event.ID,
-				Confidence:  MediumConfidence,
-				Description: fmt.Sprintf("Root service %s failure", serviceName),
-				Evidence: CreateEvidenceData(
-					[]string{event.ID},
-					[]string{serviceName},
-					map[string]string{
-						"affected_services": strings.Join(failingDependents, ", "),
-						"pattern":           "Failure propagation through service dependencies",
-						"cascade_count":     fmt.Sprintf("%d", len(failingDependents)),
-					},
-				),
-			},
-			Impact: &Impact{
-				Severity: domain.EventSeverityCritical,
-				Services: s.convertToServiceReferences(append([]string{serviceName}, failingDependents...)),
-			},
-		}
+// createCascadeFailureResult creates correlation result for cascade failure
+func (s *ServiceMapCorrelator) createCascadeFailureResult(event *domain.UnifiedEvent, serviceName string, failingDependents []string) *CorrelationResult {
+	return &CorrelationResult{
+		ID:         fmt.Sprintf("svcmap-cascade-%s-%d", serviceName, time.Now().Unix()),
+		Type:       "cascade_failure",
+		Confidence: MediumHighConfidence,
+		Summary:    fmt.Sprintf("Cascading failure starting from %s", serviceName),
+		Details:    s.createCascadeDetails(event, failingDependents),
+		RootCause:  s.createCascadeRootCause(event, serviceName, failingDependents),
+		Impact:     s.createCascadeImpact(serviceName, failingDependents),
 	}
+}
 
-	return nil
+// createCascadeDetails creates correlation details for cascade failure
+func (s *ServiceMapCorrelator) createCascadeDetails(event *domain.UnifiedEvent, failingDependents []string) CorrelationDetails {
+	return CorrelationDetails{
+		Pattern:        "Cascade failure",
+		Algorithm:      "dependency_cascade_analyzer",
+		ProcessingTime: time.Since(event.Timestamp),
+		DataPoints:     len(failingDependents),
+	}
+}
+
+// createCascadeRootCause creates root cause analysis for cascade failure
+func (s *ServiceMapCorrelator) createCascadeRootCause(event *domain.UnifiedEvent, serviceName string, failingDependents []string) *RootCause {
+	return &RootCause{
+		EventID:     event.ID,
+		Confidence:  MediumConfidence,
+		Description: fmt.Sprintf("Root service %s failure", serviceName),
+		Evidence: CreateEvidenceData(
+			[]string{event.ID},
+			[]string{serviceName},
+			map[string]string{
+				"affected_services": strings.Join(failingDependents, ", "),
+				"pattern":           "Failure propagation through service dependencies",
+				"cascade_count":     fmt.Sprintf("%d", len(failingDependents)),
+			},
+		),
+	}
+}
+
+// createCascadeImpact creates impact analysis for cascade failure
+func (s *ServiceMapCorrelator) createCascadeImpact(serviceName string, failingDependents []string) *Impact {
+	allAffectedServices := append([]string{serviceName}, failingDependents...)
+	return &Impact{
+		Severity: domain.EventSeverityCritical,
+		Services: s.convertToServiceReferences(allAffectedServices),
+	}
 }
 
 // Helper methods
