@@ -309,7 +309,7 @@ func (c *ModularCollector) processEvents() {
 			c.mu.Lock()
 			c.stats.ErrorCount++
 			c.mu.Unlock()
-			c.logger.Debug("Failed to parse kernel event", 
+			c.logger.Debug("Failed to parse kernel event",
 				zap.Error(err),
 				zap.Int("buffer_size", len(record.RawSample)),
 				zap.String("error_type", "parse_failure"))
@@ -362,7 +362,7 @@ func (c *ModularCollector) processEvents() {
 					metadata["service_cluster_ip"] = c.nullTerminatedString(serviceEndpoint.ClusterIP[:])
 				}
 			} else {
-				c.logger.Debug("Failed to parse network info for network event", 
+				c.logger.Debug("Failed to parse network info for network event",
 					zap.Error(err),
 					zap.Uint32("event_type", event.EventType),
 					zap.Int("data_size", len(event.Data)))
@@ -385,7 +385,7 @@ func (c *ModularCollector) processEvents() {
 					}
 				}
 			} else {
-				c.logger.Debug("Failed to parse file info for file open event", 
+				c.logger.Debug("Failed to parse file info for file open event",
 					zap.Error(err),
 					zap.Uint32("event_type", event.EventType),
 					zap.Int("data_size", len(event.Data)))

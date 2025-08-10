@@ -1,13 +1,11 @@
 package cni
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
-
 
 func init() {
 	// Register the CNI collector typed factory with error handling
