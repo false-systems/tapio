@@ -8,15 +8,23 @@ import (
 )
 
 func init() {
-	// Register the SystemD collector factory with error handling
+	// Register the Systemd collector typed factory with error handling
+	factory := NewSystemdFactory()
+	if err := registry.RegisterTypedFactory("systemd", factory); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register Systemd typed factory: %v", err)
+		log.Printf("Systemd collector will not be available")
+	}
+
+	// Also register legacy factory for backward compatibility
 	if err := registry.Register("systemd", CreateCollector); err != nil {
 		// Log error but don't panic - this allows the application to continue
-		log.Printf("WARNING: failed to register SystemD collector: %v", err)
-		log.Printf("SystemD collector will not be available")
+		log.Printf("WARNING: failed to register Systemd legacy factory: %v", err)
 	}
 }
 
 // CreateCollector creates a new systemd collector from config
+// DEPRECATED: This is for backward compatibility. Use the typed factory instead.
 func CreateCollector(config map[string]interface{}) (collectors.Collector, error) {
 	// Parse configuration
 	cfg := DefaultConfig()

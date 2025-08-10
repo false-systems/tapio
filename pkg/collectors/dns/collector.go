@@ -153,14 +153,15 @@ type DNSStats struct {
 // Collector implements DNS monitoring via eBPF with comprehensive observability
 type Collector struct {
 	// Core
-	name    string
-	logger  *zap.Logger
-	config  Config
-	ctx     context.Context
-	cancel  context.CancelFunc
-	healthy bool
-	stopped bool
-	mu      sync.RWMutex
+	name       string
+	logger     *zap.Logger
+	config     Config
+	ctx        context.Context
+	cancel     context.CancelFunc
+	healthy    bool
+	stopped    bool
+	mu         sync.RWMutex
+	safeParser *collectors.SafeParser
 
 	// eBPF components
 	objs   *bpf.DnsmonitorObjects
@@ -199,9 +200,10 @@ type Collector struct {
 // NewCollector creates a new DNS collector
 func NewCollector(name string, cfg Config) (*Collector, error) {
 	return &Collector{
-		name:   name,
-		config: cfg,
-		events: make(chan collectors.RawEvent, cfg.BufferSize),
+		name:       name,
+		config:     cfg,
+		events:     make(chan collectors.RawEvent, cfg.BufferSize),
+		safeParser: collectors.NewSafeParser(),
 	}, nil
 }
 
@@ -372,18 +374,12 @@ func (c *Collector) processEvents() {
 			continue
 		}
 
-		// Parse enhanced event - safe binary unmarshaling
-		expectedSize := int(unsafe.Sizeof(EnhancedDNSEvent{}))
-		if len(record.RawSample) < expectedSize {
+		// Parse enhanced event with memory safety
+		event, err := c.parseDNSEventSafely(record.RawSample)
+		if err != nil {
+			c.logger.Warn("Failed to parse DNS event", zap.Error(err))
 			continue
 		}
-
-		var event EnhancedDNSEvent
-		// Safe binary unmarshaling with exact size check
-		if len(record.RawSample) != expectedSize {
-			continue
-		}
-		event = *(*EnhancedDNSEvent)(unsafe.Pointer(&record.RawSample[0]))
 
 		// Convert to RawEvent with enhanced metadata - NO BUSINESS LOGIC
 		rawEvent := collectors.RawEvent{
@@ -487,6 +483,67 @@ func (c *Collector) eventTypeToString(eventType uint32) string {
 	default:
 		return "dns_unknown"
 	}
+}
+
+// parseDNSEventSafely parses an EnhancedDNSEvent from raw bytes with memory safety
+func (c *Collector) parseDNSEventSafely(rawBytes []byte) (*EnhancedDNSEvent, error) {
+	// Use safe parsing with comprehensive validation
+	event, err := collectors.SafeCast[EnhancedDNSEvent](c.safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse EnhancedDNSEvent: %w", err)
+	}
+
+	// Validate DNS event type - DNS events are typically 19-20
+	if event.EventType < 1 || event.EventType > 30 {
+		return nil, fmt.Errorf("invalid DNS event type: %d", event.EventType)
+	}
+
+	// Validate DNS-specific fields
+	if event.Protocol != 6 && event.Protocol != 17 { // TCP or UDP only
+		return nil, fmt.Errorf("invalid protocol for DNS: %d", event.Protocol)
+	}
+
+	if event.IPVersion != 4 && event.IPVersion != 6 {
+		return nil, fmt.Errorf("invalid IP version: %d", event.IPVersion)
+	}
+
+	// Validate port ranges
+	if event.SrcPort > 65535 || event.DstPort > 65535 {
+		return nil, fmt.Errorf("invalid port values: src=%d, dst=%d", event.SrcPort, event.DstPort)
+	}
+
+	// Validate DNS ID (0 is valid for some cases)
+	if event.DNSID > 65535 {
+		return nil, fmt.Errorf("invalid DNS ID: %d", event.DNSID)
+	}
+
+	// Validate DNS opcode (0-15 are valid)
+	if event.DNSOpcode > 15 {
+		return nil, fmt.Errorf("invalid DNS opcode: %d", event.DNSOpcode)
+	}
+
+	// Validate DNS rcode (0-15 are standard, but some extensions go higher)
+	if event.DNSRcode > 255 {
+		return nil, fmt.Errorf("invalid DNS rcode: %d", event.DNSRcode)
+	}
+
+	// Validate data length
+	if event.DataLen > uint32(len(event.Data)) {
+		return nil, fmt.Errorf("invalid data length: %d exceeds buffer size %d", event.DataLen, len(event.Data))
+	}
+
+	// Validate query name field for corruption
+	if err := c.safeParser.ValidateStringField(event.QueryName[:], "query_name"); err != nil {
+		return nil, fmt.Errorf("invalid query_name field: %w", err)
+	}
+
+	// Additional DNS-specific validation - query name should not be empty for most events
+	queryName := c.safeParser.StringFromByteArray(event.QueryName[:])
+	if len(queryName) == 0 && (event.EventType == 19 || event.EventType == 20) { // DNS request/response
+		return nil, fmt.Errorf("empty query name for DNS request/response event")
+	}
+
+	return event, nil
 }
 
 // protocolToString converts protocol number to string

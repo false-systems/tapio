@@ -309,6 +309,10 @@ func (c *ModularCollector) processEvents() {
 			c.mu.Lock()
 			c.stats.ErrorCount++
 			c.mu.Unlock()
+			c.logger.Debug("Failed to parse kernel event", 
+				zap.Error(err),
+				zap.Int("buffer_size", len(record.RawSample)),
+				zap.String("error_type", "parse_failure"))
 			continue
 		}
 
@@ -357,6 +361,11 @@ func (c *ModularCollector) processEvents() {
 					metadata["service_namespace"] = c.nullTerminatedString(serviceEndpoint.Namespace[:])
 					metadata["service_cluster_ip"] = c.nullTerminatedString(serviceEndpoint.ClusterIP[:])
 				}
+			} else {
+				c.logger.Debug("Failed to parse network info for network event", 
+					zap.Error(err),
+					zap.Uint32("event_type", event.EventType),
+					zap.Int("data_size", len(event.Data)))
 			}
 		} else if event.EventType == 8 { // EVENT_TYPE_FILE_OPEN
 			if fileInfo, err := c.parseFileInfoSafely(event.Data[:]); err == nil {
@@ -375,6 +384,11 @@ func (c *ModularCollector) processEvents() {
 						metadata["mount_type"] = "configmap"
 					}
 				}
+			} else {
+				c.logger.Debug("Failed to parse file info for file open event", 
+					zap.Error(err),
+					zap.Uint32("event_type", event.EventType),
+					zap.Int("data_size", len(event.Data)))
 			}
 		}
 
@@ -780,75 +794,53 @@ func (c *ModularCollector) parseKernelEventSafely(rawBytes []byte) (*KernelEvent
 		return nil, fmt.Errorf("buffer size mismatch: got %d bytes, expected exactly %d", len(rawBytes), expectedSize)
 	}
 
-	// Check alignment - KernelEvent should be aligned to 8 bytes due to uint64 fields
-	if uintptr(unsafe.Pointer(&rawBytes[0]))%8 != 0 {
-		return nil, fmt.Errorf("buffer not properly aligned for KernelEvent")
+	// Use the new SafeCast method for comprehensive validation
+	safeParser := NewSafeParser()
+	event, err := SafeCast[KernelEvent](safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse KernelEvent: %w", err)
 	}
 
-	// Safe to cast now
-	event := *(*KernelEvent)(unsafe.Pointer(&rawBytes[0]))
-
-	// Validate event content
-	if event.EventType > 20 { // Sanity check for event type
-		return nil, fmt.Errorf("invalid event type: %d", event.EventType)
+	// Additional validation using safe parser methods
+	if err := safeParser.ValidateEventType(event.EventType, 1, 20); err != nil {
+		return nil, fmt.Errorf("invalid kernel event: %w", err)
 	}
 
-	return &event, nil
+	return event, nil
 }
 
 // parseNetworkInfoSafely parses NetworkInfo from raw bytes with memory safety checks
 func (c *ModularCollector) parseNetworkInfoSafely(rawBytes []byte) (*NetworkInfo, error) {
-	expectedSize := int(unsafe.Sizeof(NetworkInfo{}))
-
-	// Validate buffer size
-	if len(rawBytes) < expectedSize {
-		return nil, fmt.Errorf("buffer too small for NetworkInfo: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
+	// Use the new SafeCast method for comprehensive validation
+	safeParser := NewSafeParser()
+	netInfo, err := SafeCast[NetworkInfo](safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse NetworkInfo: %w", err)
 	}
 
-	// Check alignment - NetworkInfo should be aligned to 4 bytes due to uint32 fields
-	if uintptr(unsafe.Pointer(&rawBytes[0]))%4 != 0 {
-		return nil, fmt.Errorf("buffer not properly aligned for NetworkInfo")
+	// Validate network info content using safe parser methods
+	if err := safeParser.ValidateNetworkData(netInfo.Protocol, netInfo.Direction); err != nil {
+		return nil, fmt.Errorf("invalid network info: %w", err)
 	}
 
-	// Safe to cast
-	netInfo := *(*NetworkInfo)(unsafe.Pointer(&rawBytes[0]))
-
-	// Validate network info content
-	if netInfo.Protocol > 255 || netInfo.Direction > 1 {
-		return nil, fmt.Errorf("invalid network info: protocol=%d, direction=%d", netInfo.Protocol, netInfo.Direction)
-	}
-
-	return &netInfo, nil
+	return netInfo, nil
 }
 
 // parseFileInfoSafely parses FileInfo from raw bytes with memory safety checks
 func (c *ModularCollector) parseFileInfoSafely(rawBytes []byte) (*FileInfo, error) {
-	expectedSize := int(unsafe.Sizeof(FileInfo{}))
-
-	// Validate buffer size
-	if len(rawBytes) < expectedSize {
-		return nil, fmt.Errorf("buffer too small for FileInfo: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
+	// Use the new SafeCast method for comprehensive validation
+	safeParser := NewSafeParser()
+	fileInfo, err := SafeCast[FileInfo](safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse FileInfo: %w", err)
 	}
 
-	// Check alignment - FileInfo should be aligned to 4 bytes due to uint32 fields
-	if uintptr(unsafe.Pointer(&rawBytes[0]))%4 != 0 {
-		return nil, fmt.Errorf("buffer not properly aligned for FileInfo")
+	// Validate filename field using safe parser methods
+	if err := safeParser.ValidateStringField(fileInfo.Filename[:], "filename"); err != nil {
+		return nil, fmt.Errorf("invalid filename field: %w", err)
 	}
 
-	// Safe to cast
-	fileInfo := *(*FileInfo)(unsafe.Pointer(&rawBytes[0]))
-
-	// Basic validation - ensure filename doesn't contain invalid characters
-	for i := 0; i < len(fileInfo.Filename); i++ {
-		if fileInfo.Filename[i] == 0 {
-			break // Null terminator found
-		}
-		if fileInfo.Filename[i] < 32 && fileInfo.Filename[i] != 0 { // Non-printable characters (except null)
-			return nil, fmt.Errorf("invalid filename contains non-printable character at position %d", i)
-		}
-	}
-
-	return &fileInfo, nil
+	return fileInfo, nil
 }
 
 // Statistics returns collector statistics

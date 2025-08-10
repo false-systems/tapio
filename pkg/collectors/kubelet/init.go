@@ -11,14 +11,23 @@ import (
 )
 
 func init() {
-	// Register the Kubelet collector factory with error handling
+	// Register the Kubelet collector typed factory with error handling
+	factory := NewKubeletFactory()
+	if err := registry.RegisterTypedFactory("kubelet", factory); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register Kubelet typed factory: %v", err)
+		log.Printf("Kubelet collector will not be available")
+	}
+
+	// Also register legacy factory for backward compatibility
 	if err := registry.Register("kubelet", createKubeletCollector); err != nil {
 		// Log error but don't panic - this allows the application to continue
-		log.Printf("WARNING: failed to register Kubelet collector: %v", err)
-		log.Printf("Kubelet collector will not be available")
+		log.Printf("WARNING: failed to register Kubelet legacy factory: %v", err)
 	}
 }
 
+// createKubeletCollector is the legacy factory function
+// DEPRECATED: This is for backward compatibility. Use the typed factory instead.
 func createKubeletCollector(configMap map[string]interface{}) (collectors.Collector, error) {
 	// Parse configuration from map to proper Config struct
 	cfg, err := parseConfigFromMap(configMap)

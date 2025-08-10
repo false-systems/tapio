@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
 func TestCgroupIDExtraction(t *testing.T) {
@@ -92,7 +93,7 @@ func TestCgroupIDExtraction(t *testing.T) {
 						if rawEvent.Metadata["pid"] == fmt.Sprintf("%d", currentPID) {
 							// Parse the kernel event from raw data
 							if len(rawEvent.Data) >= int(unsafe.Sizeof(KernelEvent{})) {
-								event := *(*KernelEvent)(unsafe.Pointer(&rawEvent.Data[0]))
+								safeParser := collectors.NewSafeParser(); event, err := collectors.SafeCast[KernelEvent](safeParser, rawEvent.Data); require.NoError(t, err)
 								events = append(events, event)
 							}
 						}

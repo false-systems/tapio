@@ -8,15 +8,23 @@ import (
 )
 
 func init() {
-	// Register the KubeAPI collector factory with error handling
+	// Register the KubeAPI collector typed factory with error handling
+	factory := NewKubeAPIFactory()
+	if err := registry.RegisterTypedFactory("kubeapi", factory); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register KubeAPI typed factory: %v", err)
+		log.Printf("KubeAPI collector will not be available")
+	}
+
+	// Also register legacy factory for backward compatibility
 	if err := registry.Register("kubeapi", NewCollectorFromConfig); err != nil {
 		// Log error but don't panic - this allows the application to continue
-		log.Printf("WARNING: failed to register KubeAPI collector: %v", err)
-		log.Printf("KubeAPI collector will not be available")
+		log.Printf("WARNING: failed to register KubeAPI legacy factory: %v", err)
 	}
 }
 
 // NewCollectorFromConfig creates a new KubeAPI collector from configuration
+// DEPRECATED: This is for backward compatibility. Use the typed factory instead.
 func NewCollectorFromConfig(config map[string]interface{}) (collectors.Collector, error) {
 	// Extract name from config, default to "kubeapi"
 	name := "kubeapi"
