@@ -77,6 +77,7 @@ flowchart TD
     OC --> NEO
     PC --> NEO
 
+
 ## Architecture Rules
 
 **5-Level Hierarchy (STRICTLY ENFORCED):**

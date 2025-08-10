@@ -57,12 +57,14 @@ type Collector struct {
 	journalReadTime  int64
 	correlationHits  int64
 
-	// OTEL Metrics
+	// OTEL Metrics - REQUIRED fields
 	meter              metric.Meter
 	eventsProcessedCtr metric.Int64Counter
 	eventsDroppedCtr   metric.Int64Counter
+	errorsTotal        metric.Int64Counter
+	processingTime     metric.Float64Histogram
 	ebpfOperationsCtr  metric.Int64Counter
-	journalPerfHist    metric.Int64Histogram
+	journalPerfHist    metric.Float64Histogram
 	correlationCtr     metric.Int64Counter
 }
 
@@ -78,10 +80,10 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 	tracer := otel.Tracer("systemd-collector")
 	meter := otel.Meter("systemd-collector")
 
-	// Create metrics with graceful degradation
+	// Create metrics with OTEL standard naming - MANDATORY pattern
 	eventsProcessedCtr, err := meter.Int64Counter(
-		"systemd_events_processed_total",
-		metric.WithDescription("Total number of systemd events processed"),
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create events processed counter", zap.Error(err))
@@ -89,26 +91,44 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 	}
 
 	eventsDroppedCtr, err := meter.Int64Counter(
-		"systemd_events_dropped_total",
-		metric.WithDescription("Total number of systemd events dropped"),
+		fmt.Sprintf("%s_events_dropped_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create events dropped counter", zap.Error(err))
 		// Continue with nil metric - graceful degradation
 	}
 
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	processingTime, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
 	ebpfOperationsCtr, err := meter.Int64Counter(
-		"systemd_ebpf_operations_total",
-		metric.WithDescription("Total number of eBPF operations"),
+		fmt.Sprintf("%s_ebpf_operations_total", name),
+		metric.WithDescription(fmt.Sprintf("Total eBPF operations in %s", name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create eBPF operations counter", zap.Error(err))
 		// Continue with nil metric - graceful degradation
 	}
 
-	journalPerfHist, err := meter.Int64Histogram(
-		"systemd_journal_read_duration_ms",
-		metric.WithDescription("Journal read performance in milliseconds"),
+	journalPerfHist, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_journal_read_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Journal read duration for %s in milliseconds", name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create journal performance histogram", zap.Error(err))
@@ -116,8 +136,8 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 	}
 
 	correlationCtr, err := meter.Int64Counter(
-		"systemd_correlation_hits_total",
-		metric.WithDescription("Total number of systemd unit correlation hits"),
+		fmt.Sprintf("%s_correlation_hits_total", name),
+		metric.WithDescription(fmt.Sprintf("Correlation hits in %s", name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create correlation counter", zap.Error(err))
@@ -134,6 +154,8 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		meter:              meter,
 		eventsProcessedCtr: eventsProcessedCtr,
 		eventsDroppedCtr:   eventsDroppedCtr,
+		errorsTotal:        errorsTotal,
+		processingTime:     processingTime,
 		ebpfOperationsCtr:  ebpfOperationsCtr,
 		journalPerfHist:    journalPerfHist,
 		correlationCtr:     correlationCtr,

@@ -388,7 +388,7 @@ func TestCollectorErrorHandling(t *testing.T) {
 
 	// Check statistics
 	stats := collector.Statistics()
-	assert.Greater(t, stats["errors_count"].(int64), int64(0))
+	assert.Greater(t, stats.ErrorsCount, int64(0))
 
 	err = collector.Stop()
 	assert.NoError(t, err)
@@ -442,19 +442,7 @@ func TestCollectorTraceManagement(t *testing.T) {
 	assert.Equal(t, trace1, trace1Again)
 }
 
-func TestKubeletInstrumentationCreation(t *testing.T) {
-	logger := zap.NewNop()
-
-	instrumentation, err := NewKubeletInstrumentation(logger)
-	assert.NoError(t, err)
-	assert.NotNil(t, instrumentation)
-	assert.NotEmpty(t, instrumentation.ServiceName)
-	assert.NotNil(t, instrumentation.APILatency)
-	assert.NotNil(t, instrumentation.EventsTotal)
-	assert.NotNil(t, instrumentation.KubeletErrorsTotal)
-	assert.NotNil(t, instrumentation.PollsActive)
-	assert.NotNil(t, instrumentation.APIFailures)
-}
+// TestKubeletInstrumentationCreation is removed as we no longer use instrumentation wrappers
 
 func TestCollectorOTELMetrics(t *testing.T) {
 	// Mock kubelet stats response
@@ -525,8 +513,10 @@ func TestCollectorOTELMetrics(t *testing.T) {
 	collector, err := NewCollector("kubelet-test", config)
 	require.NoError(t, err)
 
-	// Verify instrumentation was initialized
-	assert.NotNil(t, collector.instrumentation)
+	// Verify OTEL fields were initialized
+	assert.NotNil(t, collector.tracer)
+	assert.NotNil(t, collector.eventsProcessed)
+	assert.NotNil(t, collector.errorsTotal)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -542,11 +532,11 @@ func TestCollectorOTELMetrics(t *testing.T) {
 
 	// Verify metrics were initialized (we can't easily verify the actual metric values
 	// without a more complex test setup, but we can verify the structure is correct)
-	assert.NotNil(t, collector.instrumentation.APILatency)
-	assert.NotNil(t, collector.instrumentation.EventsTotal)
-	assert.NotNil(t, collector.instrumentation.KubeletErrorsTotal)
-	assert.NotNil(t, collector.instrumentation.PollsActive)
-	assert.NotNil(t, collector.instrumentation.APIFailures)
+	assert.NotNil(t, collector.apiLatency)
+	assert.NotNil(t, collector.eventsProcessed)
+	assert.NotNil(t, collector.errorsTotal)
+	assert.NotNil(t, collector.pollsActive)
+	assert.NotNil(t, collector.apiFailures)
 }
 
 func TestCollectorOTELErrorMetrics(t *testing.T) {
@@ -589,7 +579,7 @@ func TestCollectorOTELErrorMetrics(t *testing.T) {
 
 	// Verify error metrics are being tracked
 	stats := collector.Statistics()
-	assert.Greater(t, stats["errors_count"].(int64), int64(0))
+	assert.Greater(t, stats.ErrorsCount, int64(0))
 
 	err = collector.Stop()
 	assert.NoError(t, err)
@@ -708,12 +698,11 @@ func TestCollectorHealthMethod(t *testing.T) {
 	// Test Health method
 	healthy, details := collector.Health()
 	assert.True(t, healthy)
-	assert.Contains(t, details, "healthy")
-	assert.Contains(t, details, "events_collected")
-	assert.Contains(t, details, "errors_count")
-	assert.Contains(t, details, "last_event")
-	assert.Contains(t, details, "kubelet_address")
-	assert.Equal(t, config.Address, details["kubelet_address"])
+	assert.NotNil(t, details)
+	assert.True(t, details.Healthy)
+	assert.GreaterOrEqual(t, details.EventsCollected, int64(0))
+	assert.GreaterOrEqual(t, details.ErrorsCount, int64(0))
+	assert.Equal(t, config.Address, details.KubeletAddress)
 }
 
 func TestCreateKubeletCollectorFromConfig(t *testing.T) {
@@ -936,31 +925,7 @@ func TestCheckEphemeralStorageEdgeCases(t *testing.T) {
 	}
 }
 
-func TestInstrumentationErrorHandling(t *testing.T) {
-	logger := zap.NewNop()
-
-	// Test successful creation
-	instrumentation, err := NewKubeletInstrumentation(logger)
-	assert.NoError(t, err)
-	assert.NotNil(t, instrumentation)
-
-	// Verify all metrics are properly initialized
-	assert.NotNil(t, instrumentation.APILatency)
-	assert.NotNil(t, instrumentation.EventsTotal)
-	assert.NotNil(t, instrumentation.ErrorsTotal)
-	assert.NotNil(t, instrumentation.KubeletErrorsTotal)
-	assert.NotNil(t, instrumentation.PollsActive)
-	assert.NotNil(t, instrumentation.APIFailures)
-	assert.NotNil(t, instrumentation.RequestsTotal)
-	assert.NotNil(t, instrumentation.RequestDuration)
-	assert.NotNil(t, instrumentation.ActiveRequests)
-
-	// Test fields are properly set
-	assert.Equal(t, "kubelet-collector", instrumentation.ServiceName)
-	assert.Equal(t, logger, instrumentation.Logger)
-	assert.NotNil(t, instrumentation.Tracer)
-	assert.NotNil(t, instrumentation.meter)
-}
+// TestInstrumentationErrorHandling is removed as we no longer use instrumentation wrappers
 
 // Helper functions
 func uint64Ptr(v uint64) *uint64 {
