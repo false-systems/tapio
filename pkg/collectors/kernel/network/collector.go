@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -46,6 +47,8 @@ type Collector struct {
 	reader     *ringbuf.Reader
 	links      []link.Link
 	safeParser *collectors.SafeParser
+	stopped    bool
+	mu         sync.RWMutex
 }
 
 // NewNetworkCollector creates a new network collector
@@ -78,6 +81,13 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops network monitoring
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	if c.stopped {
+		return nil
+	}
+	
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -94,6 +104,7 @@ func (c *Collector) Stop() error {
 		close(c.events)
 	}
 
+	c.stopped = true
 	c.logger.Info("Network collector stopped")
 	return nil
 }

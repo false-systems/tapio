@@ -4,20 +4,20 @@ import (
 	"log"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	factoryregistry "github.com/yairfalse/tapio/pkg/collectors/factory"
 )
 
 func init() {
 	// Register the DNS collector typed factory with error handling
 	factory := NewDNSFactory()
-	if err := registry.RegisterTypedFactory("dns", factory); err != nil {
+	if err := factoryregistry.RegisterTypedFactory("dns", factory); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register DNS typed factory: %v", err)
 		log.Printf("DNS collector will not be available")
 	}
 
 	// Also register legacy factory for backward compatibility
-	if err := registry.Register("dns", CreateCollector); err != nil {
+	if err := factoryregistry.Register("dns", CreateCollector); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register DNS legacy factory: %v", err)
 	}
