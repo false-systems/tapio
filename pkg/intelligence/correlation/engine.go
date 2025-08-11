@@ -899,3 +899,190 @@ func (e *Engine) GetDetailedMetrics() EngineMetrics {
 
 	return metrics
 }
+
+// HealthCheck performs comprehensive health check of the correlation engine
+// Returns error if any critical component is unhealthy
+func (e *Engine) HealthCheck(ctx context.Context) error {
+	// Always start spans for operations
+	ctx, span := e.tracer.Start(ctx, "correlation.engine.health_check")
+	defer span.End()
+
+	// Check engine state
+	if e.ctx.Err() != nil {
+		err := fmt.Errorf("engine is not running: %w", e.ctx.Err())
+		span.SetAttributes(attribute.String("error", err.Error()))
+		return err
+	}
+
+	// Check storage health if available
+	if e.storage != nil {
+		if healthChecker, ok := e.storage.(interface{ HealthCheck(context.Context) error }); ok {
+			if err := healthChecker.HealthCheck(ctx); err != nil {
+				span.SetAttributes(
+					attribute.String("error", err.Error()),
+					attribute.String("error.component", "storage"),
+				)
+				return fmt.Errorf("storage health check failed: %w", err)
+			}
+		}
+	}
+
+	// Check correlator health
+	for _, correlator := range e.correlators {
+		if healthChecker, ok := correlator.(interface{ Health(context.Context) error }); ok {
+			if err := healthChecker.Health(ctx); err != nil {
+				span.SetAttributes(
+					attribute.String("error", err.Error()),
+					attribute.String("error.component", "correlator"),
+					attribute.String("correlator.name", correlator.Name()),
+				)
+				return fmt.Errorf("correlator %s health check failed: %w", correlator.Name(), err)
+			}
+		}
+	}
+
+	// Check queue health
+	e.mu.RLock()
+	eventQueueLen := len(e.eventChan)
+	resultQueueLen := len(e.resultChan)
+	storageQueueLen := 0
+	if e.storageJobChan != nil {
+		storageQueueLen = len(e.storageJobChan)
+	}
+	e.mu.RUnlock()
+
+	// Check for queue overflow conditions
+	eventQueueCap := cap(e.eventChan)
+	if eventQueueCap > 0 && float64(eventQueueLen)/float64(eventQueueCap) > 0.9 {
+		err := fmt.Errorf("event queue near capacity: %d/%d (%.1f%%)",
+			eventQueueLen, eventQueueCap, float64(eventQueueLen)/float64(eventQueueCap)*100)
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.component", "event_queue"),
+		)
+		return err
+	}
+
+	resultQueueCap := cap(e.resultChan)
+	if resultQueueCap > 0 && float64(resultQueueLen)/float64(resultQueueCap) > 0.9 {
+		err := fmt.Errorf("result queue near capacity: %d/%d (%.1f%%)",
+			resultQueueLen, resultQueueCap, float64(resultQueueLen)/float64(resultQueueCap)*100)
+		span.SetAttributes(
+			attribute.String("error", err.Error()),
+			attribute.String("error.component", "result_queue"),
+		)
+		return err
+	}
+
+	if e.storageJobChan != nil {
+		storageQueueCap := cap(e.storageJobChan)
+		if storageQueueCap > 0 && float64(storageQueueLen)/float64(storageQueueCap) > 0.9 {
+			err := fmt.Errorf("storage queue near capacity: %d/%d (%.1f%%)",
+				storageQueueLen, storageQueueCap, float64(storageQueueLen)/float64(storageQueueCap)*100)
+			span.SetAttributes(
+				attribute.String("error", err.Error()),
+				attribute.String("error.component", "storage_queue"),
+			)
+			return err
+		}
+	}
+
+	// Set health check success attributes
+	span.SetAttributes(
+		attribute.String("health.status", "healthy"),
+		attribute.Int("health.correlators", len(e.correlators)),
+		attribute.Int("health.event_queue_size", eventQueueLen),
+		attribute.Int("health.result_queue_size", resultQueueLen),
+		attribute.Int("health.storage_queue_size", storageQueueLen),
+	)
+
+	return nil
+}
+
+// IsHealthy returns a quick health status without deep checks
+func (e *Engine) IsHealthy() bool {
+	return e.ctx.Err() == nil
+}
+
+// GetHealthStatus returns detailed health information
+func (e *Engine) GetHealthStatus(ctx context.Context) HealthStatus {
+	status := HealthStatus{
+		Timestamp:    time.Now(),
+		IsHealthy:    e.IsHealthy(),
+		Component:    "correlation-engine",
+		Version:      "1.0.0",
+		Dependencies: make(map[string]DependencyHealth),
+	}
+
+	// Check storage dependency
+	if e.storage != nil {
+		status.Dependencies["storage"] = DependencyHealth{
+			Name:      "correlation-storage",
+			IsHealthy: true,
+			Message:   "Connected",
+		}
+		if healthChecker, ok := e.storage.(interface{ HealthCheck(context.Context) error }); ok {
+			if err := healthChecker.HealthCheck(ctx); err != nil {
+				status.Dependencies["storage"] = DependencyHealth{
+					Name:      "correlation-storage",
+					IsHealthy: false,
+					Message:   err.Error(),
+				}
+				status.IsHealthy = false
+			}
+		}
+	}
+
+	// Check correlators
+	for _, correlator := range e.correlators {
+		depName := fmt.Sprintf("correlator-%s", correlator.Name())
+		status.Dependencies[depName] = DependencyHealth{
+			Name:      correlator.Name(),
+			IsHealthy: true,
+			Message:   "Running",
+		}
+		if healthChecker, ok := correlator.(interface{ Health(context.Context) error }); ok {
+			if err := healthChecker.Health(ctx); err != nil {
+				status.Dependencies[depName] = DependencyHealth{
+					Name:      correlator.Name(),
+					IsHealthy: false,
+					Message:   err.Error(),
+				}
+				status.IsHealthy = false
+			}
+		}
+	}
+
+	// Add queue health
+	e.mu.RLock()
+	eventQueueLen := len(e.eventChan)
+	resultQueueLen := len(e.resultChan)
+	storageQueueLen := 0
+	if e.storageJobChan != nil {
+		storageQueueLen = len(e.storageJobChan)
+	}
+	e.mu.RUnlock()
+
+	status.QueueHealth = QueueHealth{
+		EventQueue: QueueStatus{
+			Size:     eventQueueLen,
+			Capacity: cap(e.eventChan),
+			Usage:    float64(eventQueueLen) / float64(cap(e.eventChan)) * 100,
+		},
+		ResultQueue: QueueStatus{
+			Size:     resultQueueLen,
+			Capacity: cap(e.resultChan),
+			Usage:    float64(resultQueueLen) / float64(cap(e.resultChan)) * 100,
+		},
+	}
+
+	if e.storageJobChan != nil {
+		status.QueueHealth.StorageQueue = &QueueStatus{
+			Size:     storageQueueLen,
+			Capacity: cap(e.storageJobChan),
+			Usage:    float64(storageQueueLen) / float64(cap(e.storageJobChan)) * 100,
+		}
+	}
+
+	return status
+}

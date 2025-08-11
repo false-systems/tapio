@@ -60,3 +60,34 @@ type CorrelatorMetrics struct {
 	AverageLatency    time.Duration `json:"average_latency"`
 	LastProcessedTime time.Time     `json:"last_processed_time,omitempty"`
 }
+
+// HealthStatus represents comprehensive health information
+type HealthStatus struct {
+	Timestamp    time.Time                  `json:"timestamp"`
+	IsHealthy    bool                       `json:"is_healthy"`
+	Component    string                     `json:"component"`
+	Version      string                     `json:"version"`
+	Dependencies map[string]DependencyHealth `json:"dependencies"`
+	QueueHealth  QueueHealth                 `json:"queue_health"`
+}
+
+// DependencyHealth represents the health of a dependency
+type DependencyHealth struct {
+	Name      string `json:"name"`
+	IsHealthy bool   `json:"is_healthy"`
+	Message   string `json:"message,omitempty"`
+}
+
+// QueueHealth represents the health of processing queues
+type QueueHealth struct {
+	EventQueue   QueueStatus  `json:"event_queue"`
+	ResultQueue  QueueStatus  `json:"result_queue"`
+	StorageQueue *QueueStatus `json:"storage_queue,omitempty"`
+}
+
+// QueueStatus represents the status of a specific queue
+type QueueStatus struct {
+	Size     int     `json:"size"`
+	Capacity int     `json:"capacity"`
+	Usage    float64 `json:"usage_percent"`
+}
