@@ -1,0 +1,549 @@
+---
+# Collector Configuration ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tapio-collector-config
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-collector
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: tapio
+data:
+  config.yaml: |
+    # Tapio Collector Configuration
+    cluster:
+      name: "production-cluster"
+      region: "us-west-2"
+      environment: "production"
+    
+    node:
+      name: "${NODE_NAME}"
+      ip: "${HOST_IP}"
+    
+    pod:
+      name: "${POD_NAME}"
+      namespace: "${POD_NAMESPACE}"
+      ip: "${POD_IP}"
+    
+    # eBPF Program Configuration
+    ebpf:
+      programs:
+        network:
+          enabled: true
+          sampling_rate: 0.1
+          ring_buffer_size: 4194304  # 4MB
+          max_entries: 65536
+        
+        process:
+          enabled: true
+          sampling_rate: 0.05
+          ring_buffer_size: 2097152  # 2MB
+          max_entries: 32768
+        
+        security:
+          enabled: true
+          sampling_rate: 1.0
+          ring_buffer_size: 8388608  # 8MB
+          max_entries: 131072
+        
+        dns:
+          enabled: true
+          sampling_rate: 0.5
+          ring_buffer_size: 1048576  # 1MB
+          max_entries: 16384
+        
+        filesystem:
+          enabled: true
+          sampling_rate: 0.01
+          ring_buffer_size: 1048576  # 1MB
+          max_entries: 16384
+      
+      # Kernel compatibility
+      kernel:
+        min_version: "4.18"
+        fallback_enabled: true
+        compatibility_mode: "auto"
+        btf_enabled: true
+        co_re_enabled: true
+      
+      # Resource limits
+      resources:
+        max_memory_mb: 768
+        max_cpu_percent: 5
+        max_events_per_sec: 50000
+        enable_circuit_breaker: true
+        circuit_breaker_threshold: 75000
+    
+    # Container Runtime Configuration
+    runtime:
+      auto_detect: true
+      priority:
+        - containerd
+        - crio
+        - docker
+      
+      containerd:
+        socket: "/run/containerd/containerd.sock"
+        namespace: "k8s.io"
+      
+      crio:
+        socket: "/run/crio/crio.sock"
+      
+      docker:
+        socket: "/var/run/docker.sock"
+    
+    # Kubernetes API Configuration
+    kubernetes:
+      in_cluster: true
+      qps: 50.0
+      burst: 100
+      timeout: "30s"
+      retry_max: 3
+      retry_backoff: "1s"
+    
+    # Data Collection Configuration
+    collectors:
+      kubeapi:
+        enabled: true
+        resources:
+          - pods
+          - services
+          - deployments
+          - replicasets
+          - daemonsets
+          - statefulsets
+          - nodes
+          - namespaces
+          - events
+        rate_limit: 100
+        batch_size: 50
+      
+      systemd:
+        enabled: true
+        units:
+          - kubelet.service
+          - containerd.service
+          - docker.service
+          - kube-proxy.service
+        journal_path: "/var/log/journal"
+        max_entries: 1000
+      
+      etcd:
+        enabled: false  # Enable only on control plane nodes
+        endpoints: []
+        cert_file: ""
+        key_file: ""
+        ca_file: ""
+      
+      cni:
+        enabled: true
+        plugin_paths:
+          - "/opt/cni/bin"
+          - "/usr/libexec/cni"
+        config_paths:
+          - "/etc/cni/net.d"
+      
+      kubelet:
+        enabled: true
+        endpoint: "https://localhost:10250"
+        ca_file: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        token_file: "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    
+    # Filtering Configuration
+    filters:
+      exclude_namespaces:
+        - kube-system
+        - kube-public
+        - kube-node-lease
+        - tapio-system
+      
+      exclude_pod_labels:
+        monitoring: "false"
+        tapio.io/exclude: "true"
+      
+      include_pod_labels:
+        app: "*"
+      
+      exclude_events:
+        - "Normal/Pulling"
+        - "Normal/Pulled"
+        - "Normal/Created"
+        - "Normal/Started"
+    
+    # Export Configuration
+    export:
+      # OTEL Configuration
+      otel:
+        enabled: true
+        endpoint: "http://localhost:4317"
+        insecure: true
+        compression: "gzip"
+        timeout: "10s"
+        retry:
+          enabled: true
+          max_elapsed_time: "1m"
+          initial_interval: "5s"
+          max_interval: "30s"
+          multiplier: 1.5
+        
+        # Resource attributes
+        resource_attributes:
+          service.name: "tapio-collector"
+          service.version: "1.0.0"
+          service.namespace: "tapio-system"
+          deployment.environment: "production"
+          k8s.cluster.name: "${CLUSTER_NAME}"
+          k8s.node.name: "${NODE_NAME}"
+          k8s.namespace.name: "${POD_NAMESPACE}"
+          k8s.pod.name: "${POD_NAME}"
+        
+        # Batching configuration
+        batch:
+          timeout: "5s"
+          send_batch_size: 1000
+          send_batch_max_size: 1500
+      
+      # NATS Configuration
+      nats:
+        enabled: true
+        url: "nats://tapio-nats:4222"
+        subject_prefix: "raw"
+        stream: "tapio-events"
+        max_reconnects: 10
+        reconnect_wait: "5s"
+        timeout: "10s"
+        
+        # JetStream configuration
+        jetstream:
+          enabled: true
+          domain: "tapio"
+          max_age: "24h"
+          max_bytes: "10GB"
+          replicas: 3
+    
+    # Health and Metrics Configuration
+    health:
+      addr: "0.0.0.0:8080"
+      path: "/healthz"
+      ready_path: "/readyz"
+      live_path: "/livez"
+    
+    metrics:
+      addr: "0.0.0.0:9090"
+      path: "/metrics"
+      enable_pprof: false
+      pprof_addr: "0.0.0.0:6060"
+    
+    # Logging Configuration
+    logging:
+      level: "info"
+      format: "json"
+      output: "stdout"
+      
+      # Structured logging fields
+      fields:
+        service: "tapio-collector"
+        version: "1.0.0"
+        cluster: "${CLUSTER_NAME}"
+        node: "${NODE_NAME}"
+    
+    # Performance Tuning
+    performance:
+      worker_count: 4
+      buffer_size: 10000
+      batch_timeout: "1s"
+      max_batch_size: 100
+      memory_limit_mb: 512
+      gc_percent: 50
+---
+# Node-level OTEL Collector Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tapio-otel-node-config
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-otel-node
+    app.kubernetes.io/component: otel-collector
+    app.kubernetes.io/part-of: tapio
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      
+      prometheus:
+        config:
+          scrape_configs:
+          - job_name: 'tapio-collector'
+            static_configs:
+            - targets: ['localhost:9090']
+            scrape_interval: 30s
+            metrics_path: /metrics
+    
+    processors:
+      # Memory limiter to prevent OOM
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
+        spike_limit_mib: 100
+      
+      # Batch processor for efficiency
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+      
+      # Add node-level resource attributes
+      resource:
+        attributes:
+        - key: k8s.node.name
+          value: "${NODE_NAME}"
+          action: upsert
+        - key: k8s.pod.name
+          value: "${POD_NAME}"
+          action: upsert
+        - key: k8s.namespace.name
+          value: "${POD_NAMESPACE}"
+          action: upsert
+        - key: deployment.environment
+          value: "production"
+          action: upsert
+    
+    exporters:
+      # Forward to centralized OTEL collector
+      otlp/centralized:
+        endpoint: tapio-otel-collector.tapio-system.svc.cluster.local:4317
+        tls:
+          insecure: true
+        compression: gzip
+        timeout: 30s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        sending_queue:
+          enabled: true
+          num_consumers: 2
+          queue_size: 1000
+      
+      # Local logging for debugging
+      logging:
+        loglevel: warn
+    
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: "/"
+      
+      pprof:
+        endpoint: 0.0.0.0:1777
+        block_profile_fraction: 0
+        mutex_profile_fraction: 0
+      
+      zpages:
+        endpoint: 0.0.0.0:55679
+    
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/centralized]
+        
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/centralized]
+        
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/centralized]
+      
+      telemetry:
+        logs:
+          level: "warn"
+        metrics:
+          address: 0.0.0.0:8888
+---
+# Centralized OTEL Collector Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tapio-otel-collector-config
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-otel-collector
+    app.kubernetes.io/component: otel-collector
+    app.kubernetes.io/part-of: tapio
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      
+      # Jaeger receiver for compatibility
+      jaeger:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:14250
+          thrift_http:
+            endpoint: 0.0.0.0:14268
+      
+      # Zipkin receiver for compatibility
+      zipkin:
+        endpoint: 0.0.0.0:9411
+    
+    processors:
+      # Memory limiter
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 3072
+        spike_limit_mib: 512
+      
+      # Batch processor
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+      
+      # K8s attributes processor
+      k8sattributes:
+        auth_type: "serviceAccount"
+        passthrough: false
+        filter:
+          node_from_env_var: NODE_NAME
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.daemonset.name
+            - k8s.replicaset.name
+            - k8s.job.name
+            - k8s.cronjob.name
+            - k8s.node.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.pod.start_time
+        pod_association:
+          - sources:
+            - from: resource_attribute
+              name: k8s.pod.ip
+          - sources:
+            - from: resource_attribute
+              name: k8s.pod.uid
+          - sources:
+            - from: connection
+      
+      # Resource processor for global attributes
+      resource:
+        attributes:
+        - key: cluster.name
+          value: "production-cluster"
+          action: upsert
+        - key: cloud.region
+          value: "us-west-2"
+          action: upsert
+        - key: deployment.environment
+          value: "production"
+          action: upsert
+        - key: service.namespace
+          value: "tapio-system"
+          action: upsert
+      
+      # Sampling processor for traces
+      probabilistic_sampler:
+        sampling_percentage: 10.0
+      
+      # Span processor for custom attributes
+      span:
+        name:
+          to_attributes:
+            rules:
+              - "^/api/v1/(?P<version>.*?)/(?P<operation>.*?)$"
+              - "service_name: (?P<service_name>.*)"
+    
+    exporters:
+      # File exporter for metrics testing
+      file/metrics:
+        path: "/tmp/tapio-metrics.jsonl"
+        format: json
+      
+      # OTLP exporter for traces (replaces deprecated Jaeger exporter)
+      otlp/traces:
+        endpoint: jaeger-collector.monitoring.svc.cluster.local:14250
+        tls:
+          insecure: true
+        timeout: 30s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+      
+      # Debug logging for testing
+      logging/debug:
+        loglevel: info
+        sampling_initial: 2
+        sampling_thereafter: 500
+      
+      # File exporter for testing
+      file/logs:
+        path: "/tmp/tapio-logs.jsonl"
+        format: json
+      
+      # Debug logging
+      logging:
+        loglevel: warn
+        sampling_initial: 2
+        sampling_thereafter: 500
+    
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: "/"
+      
+      pprof:
+        endpoint: 0.0.0.0:1777
+        block_profile_fraction: 0
+        mutex_profile_fraction: 0
+      
+      zpages:
+        endpoint: 0.0.0.0:55679
+    
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        traces:
+          receivers: [otlp, jaeger, zipkin]
+          processors: [memory_limiter, k8sattributes, resource, span, probabilistic_sampler, batch]
+          exporters: [otlp/traces, logging, logging/debug]
+        
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, batch]
+          exporters: [file/metrics, logging]
+        
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, batch]
+          exporters: [file/logs, logging]
+      
+      telemetry:
+        logs:
+          level: "warn"
+        metrics:
+          address: 0.0.0.0:8888
