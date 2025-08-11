@@ -41,7 +41,6 @@ func NewCorrelationAggregator(logger *zap.Logger) *CorrelationAggregator {
 	}
 }
 
-
 // Aggregate combines multiple correlator outputs into a final result
 func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*CorrelatorOutput, event *domain.UnifiedEvent) (*FinalResult, error) {
 	ctx, span := a.tracer.Start(ctx, "aggregator.aggregate")
@@ -63,7 +62,13 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 	a.logger.Info("Starting aggregation", zap.String("event_id", event.ID))
 
 	// Step 1: Extract all findings
-	allFindings := []Finding{}
+	// Pre-allocate slice with total capacity to avoid reallocation
+	totalFindings := 0
+	for _, output := range outputs {
+		totalFindings += len(output.Findings)
+	}
+
+	allFindings := make([]Finding, 0, totalFindings)
 	for _, output := range outputs {
 		allFindings = append(allFindings, output.Findings...)
 	}
@@ -88,12 +93,12 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 
 	// Step 3: Build simple result
 	result := &FinalResult{
-		ID:              fmt.Sprintf("agg-%d", time.Now().Unix()),
-		Summary:         bestFinding.Message,
-		RootCause:       bestFinding.Message,
-		Confidence:      bestFinding.Confidence,
-		Timestamp:       time.Now(),
-		ProcessingTime:  time.Since(start),
+		ID:             fmt.Sprintf("agg-%d", time.Now().Unix()),
+		Summary:        bestFinding.Message,
+		RootCause:      bestFinding.Message,
+		Confidence:     bestFinding.Confidence,
+		Timestamp:      time.Now(),
+		ProcessingTime: time.Since(start),
 		Remediation: Remediation{
 			Automatic: false,
 			Steps:     []string{"Log: " + bestFinding.Message},
@@ -103,27 +108,3 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 	a.logger.Info("Aggregation complete", zap.String("root_cause", result.RootCause))
 	return result, nil
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
