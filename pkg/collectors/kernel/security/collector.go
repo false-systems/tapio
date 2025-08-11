@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -16,10 +17,13 @@ import (
 type SecurityEvent struct {
 	Timestamp uint64
 	PID       uint32
+	UID       uint32
 	TID       uint32
 	EventType uint32
+	Severity  uint8
 	TargetPID uint32
 	Comm      [16]byte
+	FilePath  [256]byte
 	CgroupID  uint64
 	PodUID    [36]byte
 	Data      [96]byte
@@ -35,13 +39,15 @@ type Collector struct {
 	links      []link.Link
 	objs       *bpf.SecuritymonitorObjects
 	safeParser *collectors.SafeParser
+	stopped    bool
+	mu         sync.RWMutex
 }
 
 // NewSecurityCollector creates a new security collector
 func NewSecurityCollector(logger *zap.Logger) *Collector {
 	return &Collector{
 		logger:     logger,
-		events:     make(chan collectors.RawEvent, 1000),
+		events:     make(chan collectors.RawEvent, 5000), // Larger buffer for security events
 		safeParser: collectors.NewSafeParser(),
 	}
 }
@@ -114,12 +120,20 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops security monitoring
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	if c.stopped {
+		return nil
+	}
+	
 	if c.cancel != nil {
 		c.cancel()
 	}
 
 	c.cleanup()
 
+	c.stopped = true
 	c.logger.Info("Security collector stopped")
 	return nil
 }

@@ -6,21 +6,21 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	factoryregistry "github.com/yairfalse/tapio/pkg/collectors/factory"
 	"go.uber.org/zap"
 )
 
 func init() {
 	// Register the Kubelet collector typed factory with error handling
 	factory := NewKubeletFactory()
-	if err := registry.RegisterTypedFactory("kubelet", factory); err != nil {
+	if err := factoryregistry.RegisterTypedFactory("kubelet", factory); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register Kubelet typed factory: %v", err)
 		log.Printf("Kubelet collector will not be available")
 	}
 
 	// Also register legacy factory for backward compatibility
-	if err := registry.Register("kubelet", createKubeletCollector); err != nil {
+	if err := factoryregistry.Register("kubelet", createKubeletCollector); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register Kubelet legacy factory: %v", err)
 	}

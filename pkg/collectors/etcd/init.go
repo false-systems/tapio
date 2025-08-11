@@ -5,20 +5,20 @@ import (
 	"log"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	factoryregistry "github.com/yairfalse/tapio/pkg/collectors/factory"
 )
 
 func init() {
 	// Register the ETCD collector typed factory with error handling
 	factory := NewETCDFactory()
-	if err := registry.RegisterTypedFactory("etcd", factory); err != nil {
+	if err := factoryregistry.RegisterTypedFactory("etcd", factory); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register ETCD typed factory: %v", err)
 		log.Printf("ETCD collector will not be available")
 	}
 
 	// Also register legacy factory for backward compatibility
-	if err := registry.Register("etcd", NewCollectorFromConfig); err != nil {
+	if err := factoryregistry.Register("etcd", NewCollectorFromConfig); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register ETCD legacy factory: %v", err)
 	}
