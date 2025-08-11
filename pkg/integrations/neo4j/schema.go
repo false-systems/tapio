@@ -71,25 +71,25 @@ func (c *Client) CreateOrUpdateNode(ctx context.Context, event *domain.UnifiedEv
 		RETURN n
 	`, nodeType)
 
-	params := map[string]interface{}{
-		"uid":             event.Entity.UID,
-		"name":            event.Entity.Name,
-		"namespace":       event.Entity.Namespace,
-		"kind":            event.Entity.Type,
-		"timestamp":       event.Timestamp.Unix(),
-		"labels":          mapToStringArray(event.Entity.Labels),
-		"annotations":     []string{}, // EntityContext doesn't have annotations
-		"resourceVersion": "",         // EntityContext doesn't have resourceVersion
+	params := NodeCreationParams{
+		UID:             event.Entity.UID,
+		Name:            event.Entity.Name,
+		Namespace:       event.Entity.Namespace,
+		Kind:            event.Entity.Type,
+		Timestamp:       event.Timestamp.Unix(),
+		Labels:          mapToStringArray(event.Entity.Labels),
+		Annotations:     []string{}, // EntityContext doesn't have annotations
+		ResourceVersion: "",         // EntityContext doesn't have resourceVersion
 	}
 
 	// If we have K8s context, use those values
 	if event.K8sContext != nil {
-		params["annotations"] = mapToStringArray(event.K8sContext.Annotations)
-		params["resourceVersion"] = event.K8sContext.ResourceVersion
+		params.Annotations = mapToStringArray(event.K8sContext.Annotations)
+		params.ResourceVersion = event.K8sContext.ResourceVersion
 	}
 
 	return c.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
-		_, err := tx.Run(ctx, query, params)
+		_, err := tx.Run(ctx, query, params.ToMap())
 		return err
 	})
 }
@@ -110,30 +110,30 @@ func (c *Client) CreateEvent(ctx context.Context, event *domain.UnifiedEvent) er
 		RETURN e
 	`
 
-	params := map[string]interface{}{
-		"id":        event.ID,
-		"timestamp": event.Timestamp.Unix(),
-		"type":      event.Type,
-		"severity":  string(event.Severity),
-		"message":   event.Message,
-		"source":    event.Source,
-		"traceId":   "",
-		"spanId":    "",
+	params := EventCreationParams{
+		ID:        event.ID,
+		Timestamp: event.Timestamp.Unix(),
+		Type:      string(event.Type),
+		Severity:  string(event.Severity),
+		Message:   event.Message,
+		Source:    event.Source,
+		TraceID:   "",
+		SpanID:    "",
 	}
 
 	if event.TraceContext != nil {
-		params["traceId"] = event.TraceContext.TraceID
-		params["spanId"] = event.TraceContext.SpanID
+		params.TraceID = event.TraceContext.TraceID
+		params.SpanID = event.TraceContext.SpanID
 	}
 
 	return c.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
-		_, err := tx.Run(ctx, query, params)
+		_, err := tx.Run(ctx, query, params.ToMap())
 		return err
 	})
 }
 
 // CreateRelationship creates a relationship between nodes with safe parameterized queries
-func (c *Client) CreateRelationship(ctx context.Context, fromUID, toUID string, relType RelationType, properties map[string]interface{}) error {
+func (c *Client) CreateRelationship(ctx context.Context, fromUID, toUID string, relType RelationType, properties map[string]PropertyValue) error {
 	// Validate relationship type
 	if !isValidRelationType(relType) {
 		return fmt.Errorf("invalid relationship type: %s", relType)
@@ -158,22 +158,22 @@ func (c *Client) CreateRelationship(ctx context.Context, fromUID, toUID string, 
 		}
 	}
 
-	params := map[string]interface{}{
-		"fromUID":   fromUID,
-		"toUID":     toUID,
-		"timestamp": time.Now().Unix(),
-	}
-
-	// Merge properties into params with safe parameter names
-	for k, v := range properties {
+	// Validate property keys
+	for k := range properties {
 		if !isValidPropertyKey(k) {
 			return fmt.Errorf("invalid property key: %s", k)
 		}
-		params[fmt.Sprintf("prop_%s", k)] = v
+	}
+
+	params := RelationshipCreationParams{
+		FromUID:    fromUID,
+		ToUID:      toUID,
+		Timestamp:  time.Now().Unix(),
+		Properties: properties,
 	}
 
 	return c.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
-		_, err := tx.Run(ctx, query, params)
+		_, err := tx.Run(ctx, query, params.ToMap())
 		return err
 	})
 }
@@ -191,13 +191,13 @@ func (c *Client) CreateEventRelationship(ctx context.Context, eventID string, en
 		CREATE (e)-[:%s]->(n)
 	`, relType)
 
-	params := map[string]interface{}{
-		"eventID":   eventID,
-		"entityUID": entityUID,
+	params := EventRelationshipParams{
+		EventID:   eventID,
+		EntityUID: entityUID,
 	}
 
 	return c.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
-		_, err := tx.Run(ctx, query, params)
+		_, err := tx.Run(ctx, query, params.ToMap())
 		return err
 	})
 }
@@ -210,15 +210,15 @@ func (c *Client) LinkEventCausality(ctx context.Context, effectEventID, causeEve
 		CREATE (effect)-[:CAUSED_BY {confidence: $confidence, timestamp: $timestamp}]->(cause)
 	`
 
-	params := map[string]interface{}{
-		"effectID":   effectEventID,
-		"causeID":    causeEventID,
-		"confidence": confidence,
-		"timestamp":  time.Now().Unix(),
+	params := CausalityParams{
+		EffectID:   effectEventID,
+		CauseID:    causeEventID,
+		Confidence: confidence,
+		Timestamp:  time.Now().Unix(),
 	}
 
 	return c.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
-		_, err := tx.Run(ctx, query, params)
+		_, err := tx.Run(ctx, query, params.ToMap())
 		return err
 	})
 }

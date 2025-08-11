@@ -58,12 +58,18 @@ const (
 	StatusCodeError
 )
 
+// WebhookBody represents the body of a webhook request
+type WebhookBody struct {
+	ContentType string `json:"content_type"` // e.g., "application/json", "text/plain"
+	Data        []byte `json:"data"`         // Raw body data
+}
+
 // Webhook represents a webhook payload
 type Webhook struct {
 	URL     string            `json:"url"`
 	Method  string            `json:"method"`
 	Headers map[string]string `json:"headers"`
-	Body    interface{}       `json:"body"`
+	Body    WebhookBody       `json:"body"`
 	Timeout time.Duration     `json:"timeout"`
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
+	neo4jTypes "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"go.uber.org/zap"
 )
 
@@ -138,19 +139,23 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 		detailsJSON = []byte("{}")
 	}
 
-	params := map[string]interface{}{
-		"id":         result.ID,
-		"type":       result.Type,
-		"confidence": result.Confidence,
-		"summary":    result.Summary,
-		"details":    string(detailsJSON),
-		"evidence":   string(evidenceJSON),
-		"startTime":  result.StartTime.Format(time.RFC3339),
-		"endTime":    result.EndTime.Format(time.RFC3339),
-		"traceId":    result.TraceID,
+	params := neo4jTypes.QueryParams{
+		StringParams: map[string]string{
+			"id":        result.ID,
+			"type":      result.Type,
+			"summary":   result.Summary,
+			"details":   string(detailsJSON),
+			"evidence":  string(evidenceJSON),
+			"startTime": result.StartTime.Format(time.RFC3339),
+			"endTime":   result.EndTime.Format(time.RFC3339),
+			"traceId":   result.TraceID,
+		},
+		FloatParams: map[string]float64{
+			"confidence": result.Confidence,
+		},
 	}
 
-	if _, err := tx.Run(ctx, query, params); err != nil {
+	if _, err := tx.Run(ctx, query, params.ToMap()); err != nil {
 		return fmt.Errorf("failed to create correlation node: %w", err)
 	}
 
@@ -174,15 +179,19 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 			// Use empty JSON object as fallback
 			evidenceJSON = []byte("{}")
 		}
-		params := map[string]interface{}{
-			"correlationId": result.ID,
-			"eventId":       result.RootCause.EventID,
-			"confidence":    result.RootCause.Confidence,
-			"description":   result.RootCause.Description,
-			"evidence":      string(evidenceJSON),
+		params := neo4jTypes.QueryParams{
+			StringParams: map[string]string{
+				"correlationId": result.ID,
+				"eventId":       result.RootCause.EventID,
+				"description":   result.RootCause.Description,
+				"evidence":      string(evidenceJSON),
+			},
+			FloatParams: map[string]float64{
+				"confidence": result.RootCause.Confidence,
+			},
 		}
 
-		if _, err := tx.Run(ctx, rootCauseQuery, params); err != nil {
+		if _, err := tx.Run(ctx, rootCauseQuery, params.ToMap()); err != nil {
 			return fmt.Errorf("failed to create root cause: %w", err)
 		}
 	}
@@ -199,14 +208,16 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 					CREATE (c)-[:AFFECTS {severity: $severity}]->(r)
 				`
 
-				params := map[string]interface{}{
-					"correlationId": result.ID,
-					"name":          name,
-					"namespace":     namespace,
-					"severity":      string(result.Impact.Severity),
+				params := neo4jTypes.QueryParams{
+					StringParams: map[string]string{
+						"correlationId": result.ID,
+						"name":          name,
+						"namespace":     namespace,
+						"severity":      string(result.Impact.Severity),
+					},
 				}
 
-				if _, err := tx.Run(ctx, resourceQuery, params); err != nil {
+				if _, err := tx.Run(ctx, resourceQuery, params.ToMap()); err != nil {
 					s.logger.Warn("Failed to create resource relationship",
 						zap.String("resource", resourceName),
 						zap.Error(err))
@@ -256,12 +267,12 @@ func (s *Neo4jStorage) GetRecent(ctx context.Context, limit int) ([]*correlation
 		LIMIT $limit
 	`
 
-	result, err := session.Run(ctx, query, map[string]interface{}{"limit": limit})
+	result, err := session.Run(ctx, query, map[string]any{"limit": limit})
 	if err != nil {
 		return nil, fmt.Errorf("failed to query correlations: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // GetByTraceID retrieves correlations for a specific trace
@@ -286,7 +297,7 @@ func (s *Neo4jStorage) GetByTraceID(ctx context.Context, traceID string) ([]*cor
 		return nil, fmt.Errorf("failed to query by trace ID: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // GetByTimeRange retrieves correlations within a time range
@@ -317,7 +328,7 @@ func (s *Neo4jStorage) GetByTimeRange(ctx context.Context, start, end time.Time)
 		return nil, fmt.Errorf("failed to query by time range: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // GetByResource retrieves correlations affecting a specific resource
@@ -348,7 +359,7 @@ func (s *Neo4jStorage) GetByResource(ctx context.Context, resourceType, namespac
 		return nil, fmt.Errorf("failed to query by resource: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // Cleanup removes old correlations
@@ -388,11 +399,11 @@ func (s *Neo4jStorage) Cleanup(ctx context.Context, olderThan time.Duration) err
 }
 
 // parseResults converts Neo4j results to correlation results
-func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlation.CorrelationResult, error) {
+func (s *Neo4jStorage) parseResults(ctx context.Context, result neo4j.ResultWithContext) ([]*correlation.CorrelationResult, error) {
 	var correlations []*correlation.CorrelationResult
 
 	// Use a derived context with timeout for result parsing
-	parseCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	parseCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	for result.Next(parseCtx) {

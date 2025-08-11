@@ -10,12 +10,18 @@ type MetricsData struct {
 	CorrelationsFound int64 `json:"correlations_found"`
 
 	// Queue metrics
-	EventQueueSize  int `json:"event_queue_size"`
-	ResultQueueSize int `json:"result_queue_size"`
+	EventQueueSize   int `json:"event_queue_size"`
+	ResultQueueSize  int `json:"result_queue_size"`
+	StorageQueueSize int `json:"storage_queue_size"`
+
+	// Storage metrics
+	StorageProcessed int64 `json:"storage_processed"`
+	StorageRejected  int64 `json:"storage_rejected"`
 
 	// Configuration metrics
 	CorrelatorsCount int `json:"correlators_count"`
 	WorkersCount     int `json:"workers_count"`
+	StorageWorkers   int `json:"storage_workers"`
 
 	// Timing metrics
 	LastReportTime time.Time `json:"last_report_time,omitempty"`

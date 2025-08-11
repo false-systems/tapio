@@ -33,6 +33,14 @@ const (
 	TestEventBufferSize     = 100
 	TestResultBufferSize    = 100
 
+	// Storage worker pool defaults
+	DefaultStorageWorkerCount = 10
+	DefaultStorageQueueSize   = 100
+	TestStorageWorkerCount    = 2
+	TestStorageQueueSize      = 20
+	MaxStorageWorkerCount     = 100
+	MaxStorageQueueSize       = 10000
+
 	// Query limits
 	DefaultQueryLimit   = 100
 	MaxQueryLimit       = 1000
@@ -58,6 +66,10 @@ const (
 	MaxEventsPerCorrelation = 50
 	HighLatencyThresholdMs  = 1000
 	SlowProcessingThreshold = 100 * time.Millisecond
+
+	// Storage operation timeouts
+	DefaultStorageTimeout = 5 * time.Second
+	StorageRetryDelay     = 100 * time.Millisecond
 )
 
 // Kubernetes Constants

@@ -29,6 +29,10 @@ type EngineConfiguration struct {
 	CorrelationWindow time.Duration `json:"correlation_window"`
 	PatternTimeout    time.Duration `json:"pattern_timeout"`
 
+	// Storage worker pool configuration
+	StorageWorkerCount int `json:"storage_worker_count"`
+	StorageQueueSize   int `json:"storage_queue_size"`
+
 	// Feature flags
 	EnableK8s         bool `json:"enable_k8s"`
 	EnableTemporal    bool `json:"enable_temporal"`
@@ -123,6 +127,8 @@ func buildEngineConfig() EngineConfiguration {
 		EventBufferSize:        getEnvInt("CORRELATION_EVENT_BUFFER_SIZE", 1000),
 		ResultBufferSize:       getEnvInt("CORRELATION_RESULT_BUFFER_SIZE", 1000),
 		WorkerCount:            getEnvInt("CORRELATION_WORKER_COUNT", 4),
+		StorageWorkerCount:     getEnvInt("CORRELATION_STORAGE_WORKER_COUNT", 10),
+		StorageQueueSize:       getEnvInt("CORRELATION_STORAGE_QUEUE_SIZE", 100),
 		ProcessingTimeout:      getEnvDuration("CORRELATION_PROCESSING_TIMEOUT", 30*time.Second),
 		EnableK8s:              getEnvBool("CORRELATION_ENABLE_K8S", true),
 		EnableTemporal:         getEnvBool("CORRELATION_ENABLE_TEMPORAL", true),
@@ -217,6 +223,18 @@ func (e *EngineConfiguration) Validate() error {
 	}
 	if e.WorkerCount <= 0 {
 		return fmt.Errorf("worker count must be positive")
+	}
+	if e.StorageWorkerCount < 0 {
+		return fmt.Errorf("storage worker count cannot be negative")
+	}
+	if e.StorageWorkerCount > 100 {
+		return fmt.Errorf("storage worker count must be <= 100 to prevent resource exhaustion")
+	}
+	if e.StorageQueueSize < 0 {
+		return fmt.Errorf("storage queue size cannot be negative")
+	}
+	if e.StorageQueueSize > 10000 {
+		return fmt.Errorf("storage queue size must be <= 10000 to prevent memory exhaustion")
 	}
 	if e.ProcessingTimeout <= 0 {
 		return fmt.Errorf("processing timeout must be positive")
@@ -350,7 +368,9 @@ type EngineConfig struct {
 	ChannelBufferSize int `json:"channel_buffer_size"`
 
 	// Worker configuration
-	WorkerCount int `json:"worker_count"`
+	WorkerCount        int `json:"worker_count"`
+	StorageWorkerCount int `json:"storage_worker_count"`
+	StorageQueueSize   int `json:"storage_queue_size"`
 
 	// Storage configuration
 	StorageCleanupInterval time.Duration `json:"storage_cleanup_interval"`
@@ -400,6 +420,8 @@ func setEngineBuffers(config *EngineConfig) {
 	config.ResultBufferSize = DefaultResultBufferSize
 	config.ChannelBufferSize = DefaultChannelBuffer
 	config.WorkerCount = 4
+	config.StorageWorkerCount = 10
+	config.StorageQueueSize = 100
 }
 
 // setEngineQueryLimits configures query limits
@@ -438,6 +460,8 @@ func TestEngineConfig() *EngineConfig {
 		ResultBufferSize:       TestResultBufferSize,
 		ChannelBufferSize:      TestChannelBuffer,
 		WorkerCount:            2,
+		StorageWorkerCount:     2,
+		StorageQueueSize:       20,
 		StorageCleanupInterval: TestCleanupInterval,
 		StorageRetention:       TestRetention,
 		DefaultQueryLimit:      DefaultQueryLimit,
@@ -495,6 +519,18 @@ func (c *EngineConfig) validateBuffers() error {
 	}
 	if c.ResultBufferSize <= 0 {
 		return fmt.Errorf("result buffer size must be positive, got: %d", c.ResultBufferSize)
+	}
+	if c.StorageWorkerCount < 0 {
+		return fmt.Errorf("storage worker count cannot be negative, got: %d", c.StorageWorkerCount)
+	}
+	if c.StorageWorkerCount > 100 {
+		return fmt.Errorf("storage worker count must be <= 100, got: %d", c.StorageWorkerCount)
+	}
+	if c.StorageQueueSize < 0 {
+		return fmt.Errorf("storage queue size cannot be negative, got: %d", c.StorageQueueSize)
+	}
+	if c.StorageQueueSize > 10000 {
+		return fmt.Errorf("storage queue size must be <= 10000, got: %d", c.StorageQueueSize)
 	}
 	return nil
 }
