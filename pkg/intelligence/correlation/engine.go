@@ -28,11 +28,11 @@ type Engine struct {
 	activeWorkersGauge   metric.Int64UpDownCounter
 
 	// Storage worker pool metrics
-	storageQueueDepthGauge   metric.Int64UpDownCounter
-	storageWorkersGauge      metric.Int64UpDownCounter
-	storageProcessedCtr      metric.Int64Counter
-	storageRejectedCtr       metric.Int64Counter
-	storageLatencyHist       metric.Float64Histogram
+	storageQueueDepthGauge metric.Int64UpDownCounter
+	storageWorkersGauge    metric.Int64UpDownCounter
+	storageProcessedCtr    metric.Int64Counter
+	storageRejectedCtr     metric.Int64Counter
+	storageLatencyHist     metric.Float64Histogram
 
 	// Correlators
 	correlators []Correlator

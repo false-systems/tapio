@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -153,7 +152,7 @@ func NewOwnershipCorrelator(graphStore GraphStore, logger *zap.Logger) (*Ownersh
 }
 
 // Correlate analyzes ownership chain issues
-func (o *OwnershipCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error) {
+func (o *OwnershipCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*CorrelatorOutput, error) {
 	// Always start spans for operations
 	ctx, span := o.tracer.Start(ctx, "correlation.ownership.analyze")
 	defer span.End()
@@ -238,7 +237,7 @@ func (o *OwnershipCorrelator) Correlate(ctx context.Context, event *domain.Unifi
 	// Set final attributes
 	span.SetAttributes(attribute.Float64("confidence", confidence))
 
-	return &aggregator.CorrelatorOutput{
+	return &CorrelatorOutput{
 		CorrelatorName:    o.Name(),
 		CorrelatorVersion: o.Version(),
 		Findings:          findings,
@@ -250,7 +249,7 @@ func (o *OwnershipCorrelator) Correlate(ctx context.Context, event *domain.Unifi
 }
 
 // analyzeDeploymentChain analyzes Deployment→ReplicaSet→Pod ownership chain
-func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	// Create span for analysis operation
 	ctx, span := o.tracer.Start(ctx, "correlation.ownership.analyze_deployment")
 	defer span.End()
@@ -304,7 +303,7 @@ func (o *OwnershipCorrelator) analyzeDeploymentChain(ctx context.Context, event 
 }
 
 // analyzeReplicaSetIssues analyzes ReplicaSet→Pod ownership issues
-func (o *OwnershipCorrelator) analyzeReplicaSetIssues(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (o *OwnershipCorrelator) analyzeReplicaSetIssues(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := o.getNamespace(event)
 	rsName := o.getEntityName(event)
 
@@ -322,7 +321,7 @@ func (o *OwnershipCorrelator) analyzeReplicaSetIssues(ctx context.Context, event
 }
 
 // analyzePodOwnership traces pod ownership up the chain
-func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := o.getNamespace(event)
 	podName := o.getEntityName(event)
 
@@ -336,7 +335,7 @@ func (o *OwnershipCorrelator) analyzePodOwnership(ctx context.Context, event *do
 	}
 	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	for result.Next(ctx) {
 		finding := o.processPodOwnershipRecord(result.Record(), event, podName, namespace)
 		if finding != nil {
@@ -379,26 +378,26 @@ func (o *OwnershipCorrelator) queryPodOwnership(ctx context.Context, namespace, 
 }
 
 // processPodOwnershipRecord processes a single ownership record
-func (o *OwnershipCorrelator) processPodOwnershipRecord(record *GraphRecord, event *domain.UnifiedEvent, podName, namespace string) *aggregator.Finding {
+func (o *OwnershipCorrelator) processPodOwnershipRecord(record *GraphRecord, event *domain.UnifiedEvent, podName, namespace string) *Finding {
 	ownershipInfo := o.extractOwnershipInfo(record)
 	if len(ownershipInfo.Chain) == 0 {
 		return nil
 	}
 
-	return &aggregator.Finding{
+	return &Finding{
 		ID:         fmt.Sprintf("pod-ownership-%s", podName),
 		Type:       "pod_ownership_chain",
-		Severity:   aggregator.SeverityMedium,
+		Severity:   SeverityMedium,
 		Confidence: HighConfidence,
 		Message:    fmt.Sprintf("Pod %s failure traced to %s", podName, strings.Join(ownershipInfo.Chain, " → ")),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
-			GraphPaths: []aggregator.GraphPath{{
+			GraphPaths: []EvidenceGraphPath{{
 				Nodes: o.buildOwnershipNodes(podName, ownershipInfo.Chain, namespace),
 				Edges: o.buildOwnershipEdges(podName, ownershipInfo.Chain),
 			}},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "ownership",
 			Resources:   append(ownershipInfo.Chain, podName),
 			UserImpact:  fmt.Sprintf("Pod controlled by %s %s", ownershipInfo.Type, ownershipInfo.ID),
@@ -456,7 +455,7 @@ func (o *OwnershipCorrelator) extractOwnershipInfo(record *GraphRecord) PodOwner
 }
 
 // analyzeStatefulSetChain analyzes StatefulSet→Pod ownership
-func (o *OwnershipCorrelator) analyzeStatefulSetChain(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (o *OwnershipCorrelator) analyzeStatefulSetChain(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := o.getNamespace(event)
 	stsName := o.getEntityName(event)
 
@@ -474,7 +473,7 @@ func (o *OwnershipCorrelator) analyzeStatefulSetChain(ctx context.Context, event
 }
 
 // analyzeDaemonSetIssues analyzes DaemonSet→Pod issues
-func (o *OwnershipCorrelator) analyzeDaemonSetIssues(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (o *OwnershipCorrelator) analyzeDaemonSetIssues(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := o.getNamespace(event)
 	dsName := o.getEntityName(event)
 
@@ -493,8 +492,8 @@ func (o *OwnershipCorrelator) analyzeDaemonSetIssues(ctx context.Context, event 
 
 // Helper methods
 
-func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredReplicas int64, replicaSets []ReplicaSetData, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
+func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredReplicas int64, replicaSets []ReplicaSetData, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
 	totalPods, _, failedPods := o.countReplicaSetPods(replicaSets)
 
 	// Check each replica set for issues
@@ -512,8 +511,8 @@ func (o *OwnershipCorrelator) analyzeReplicaSets(deploymentName string, desiredR
 	return findings
 }
 
-func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName string, desired, ready int64, pods []PodData, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
+func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName string, desired, ready int64, pods []PodData, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
 	notReadyPods := []string{}
 
 	for _, pod := range pods {
@@ -527,19 +526,19 @@ func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName st
 		message = fmt.Sprintf("ReplicaSet %s (owned by Deployment %s) has %d/%d ready pods", rsName, deploymentName, ready, desired)
 	}
 
-	findings = append(findings, aggregator.Finding{
+	findings = append(findings, Finding{
 		ID:         fmt.Sprintf("replicaset-pods-not-ready-%s", rsName),
 		Type:       "replicaset_degraded",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: MediumHighConfidence,
 		Message:    message,
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 			Attributes: map[string]string{
 				"not_ready_pods": strings.Join(notReadyPods, ","),
 			},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "replicaset",
 			Resources:   append([]string{rsName}, notReadyPods...),
 			UserImpact:  "Service capacity reduced",
@@ -551,22 +550,22 @@ func (o *OwnershipCorrelator) createReplicaSetFindings(rsName, deploymentName st
 	return findings
 }
 
-func (o *OwnershipCorrelator) analyzeStatefulSetPods(stsName string, desired, ready int64, pods []PodData, event *domain.UnifiedEvent) []aggregator.Finding {
+func (o *OwnershipCorrelator) analyzeStatefulSetPods(stsName string, desired, ready int64, pods []PodData, event *domain.UnifiedEvent) []Finding {
 	brokenOrdinal := o.findBrokenStatefulSetOrdinal(stsName, desired, pods)
 	if brokenOrdinal < 0 {
-		return []aggregator.Finding{}
+		return []Finding{}
 	}
 
-	return []aggregator.Finding{
+	return []Finding{
 		o.createStatefulSetBrokenSequenceFinding(stsName, brokenOrdinal, desired, event),
 	}
 }
 
-func (o *OwnershipCorrelator) buildOwnershipNodes(podName string, ownerChain []string, namespace string) []aggregator.GraphNode {
-	nodes := []aggregator.GraphNode{}
+func (o *OwnershipCorrelator) buildOwnershipNodes(podName string, ownerChain []string, namespace string) []EvidenceGraphNode {
+	nodes := []EvidenceGraphNode{}
 
 	// Add pod node
-	nodes = append(nodes, aggregator.GraphNode{
+	nodes = append(nodes, EvidenceGraphNode{
 		ID:   podName,
 		Type: "Pod",
 		Labels: map[string]string{
@@ -579,7 +578,7 @@ func (o *OwnershipCorrelator) buildOwnershipNodes(podName string, ownerChain []s
 	for _, owner := range ownerChain {
 		parts := strings.Split(owner, "/")
 		if len(parts) == 2 {
-			nodes = append(nodes, aggregator.GraphNode{
+			nodes = append(nodes, EvidenceGraphNode{
 				ID:   parts[1],
 				Type: parts[0],
 				Labels: map[string]string{
@@ -593,8 +592,8 @@ func (o *OwnershipCorrelator) buildOwnershipNodes(podName string, ownerChain []s
 	return nodes
 }
 
-func (o *OwnershipCorrelator) buildOwnershipEdges(podName string, ownerChain []string) []aggregator.GraphEdge {
-	edges := []aggregator.GraphEdge{}
+func (o *OwnershipCorrelator) buildOwnershipEdges(podName string, ownerChain []string) []GraphEdge {
+	edges := []GraphEdge{}
 
 	// Build edges in reverse order (owner → owned)
 	if len(ownerChain) >= 2 {
@@ -603,30 +602,27 @@ func (o *OwnershipCorrelator) buildOwnershipEdges(podName string, ownerChain []s
 		rsParts := strings.Split(ownerChain[1], "/")
 
 		if len(deploymentParts) == 2 && len(rsParts) == 2 {
-			edges = append(edges, aggregator.GraphEdge{
+			edges = append(edges, GraphEdge{
 				From:         deploymentParts[1],
 				To:           rsParts[1],
 				Relationship: "OWNS",
-				Properties:   map[string]string{"type": "deployment_replicaset"},
 			})
 
 			// ReplicaSet → Pod
-			edges = append(edges, aggregator.GraphEdge{
+			edges = append(edges, GraphEdge{
 				From:         rsParts[1],
 				To:           podName,
 				Relationship: "OWNS",
-				Properties:   map[string]string{"type": "replicaset_pod"},
 			})
 		}
 	} else if len(ownerChain) == 1 {
 		// Direct ownership (StatefulSet/DaemonSet → Pod)
 		ownerParts := strings.Split(ownerChain[0], "/")
 		if len(ownerParts) == 2 {
-			edges = append(edges, aggregator.GraphEdge{
+			edges = append(edges, GraphEdge{
 				From:         ownerParts[1],
 				To:           podName,
 				Relationship: "OWNS",
-				Properties:   map[string]string{"type": strings.ToLower(ownerParts[0]) + "_pod"},
 			})
 		}
 	}
@@ -635,7 +631,7 @@ func (o *OwnershipCorrelator) buildOwnershipEdges(podName string, ownerChain []s
 }
 
 // calculateConfidence calculates overall confidence for findings
-func (o *OwnershipCorrelator) calculateConfidence(findings []aggregator.Finding) float64 {
+func (o *OwnershipCorrelator) calculateConfidence(findings []Finding) float64 {
 	if len(findings) == 0 {
 		return 0
 	}
@@ -646,13 +642,13 @@ func (o *OwnershipCorrelator) calculateConfidence(findings []aggregator.Finding)
 	for _, finding := range findings {
 		var weight float64
 		switch finding.Severity {
-		case aggregator.SeverityCritical:
+		case SeverityCritical:
 			weight = 1.0
-		case aggregator.SeverityHigh:
+		case SeverityHigh:
 			weight = HighWeight
-		case aggregator.SeverityMedium:
+		case SeverityMedium:
 			weight = MediumWeight
-		case aggregator.SeverityLow:
+		case SeverityLow:
 			weight = LowWeight
 		default:
 			weight = VeryLowWeight
@@ -886,8 +882,8 @@ func (o *OwnershipCorrelator) queryDeploymentChain(ctx context.Context, namespac
 }
 
 // processDeploymentChainResults processes deployment chain query results
-func (o *OwnershipCorrelator) processDeploymentChainResults(ctx context.Context, result ResultIterator, deploymentName string, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
-	var findings []aggregator.Finding
+func (o *OwnershipCorrelator) processDeploymentChainResults(ctx context.Context, result ResultIterator, deploymentName string, event *domain.UnifiedEvent) ([]Finding, error) {
+	var findings []Finding
 
 	for result.Next(ctx) {
 		record := result.Record()
@@ -958,8 +954,8 @@ func (o *OwnershipCorrelator) queryReplicaSetOwnership(ctx context.Context, name
 }
 
 // processReplicaSetResults processes replicaset query results
-func (o *OwnershipCorrelator) processReplicaSetResults(ctx context.Context, result ResultIterator, rsName string, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
-	var findings []aggregator.Finding
+func (o *OwnershipCorrelator) processReplicaSetResults(ctx context.Context, result ResultIterator, rsName string, event *domain.UnifiedEvent) ([]Finding, error) {
+	var findings []Finding
 
 	for result.Next(ctx) {
 		record := result.Record()
@@ -1029,8 +1025,8 @@ func (o *OwnershipCorrelator) queryStatefulSetChain(ctx context.Context, namespa
 }
 
 // processStatefulSetResults processes statefulset query results
-func (o *OwnershipCorrelator) processStatefulSetResults(ctx context.Context, result ResultIterator, stsName string, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
-	var findings []aggregator.Finding
+func (o *OwnershipCorrelator) processStatefulSetResults(ctx context.Context, result ResultIterator, stsName string, event *domain.UnifiedEvent) ([]Finding, error) {
+	var findings []Finding
 
 	for result.Next(ctx) {
 		record := result.Record()
@@ -1091,8 +1087,8 @@ func (o *OwnershipCorrelator) queryDaemonSetIssues(ctx context.Context, namespac
 }
 
 // processDaemonSetResults processes daemonset query results
-func (o *OwnershipCorrelator) processDaemonSetResults(ctx context.Context, result ResultIterator, dsName string, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
-	var findings []aggregator.Finding
+func (o *OwnershipCorrelator) processDaemonSetResults(ctx context.Context, result ResultIterator, dsName string, event *domain.UnifiedEvent) ([]Finding, error) {
+	var findings []Finding
 
 	for result.Next(ctx) {
 		record := result.Record()
@@ -1116,17 +1112,17 @@ func (o *OwnershipCorrelator) processDaemonSetResults(ctx context.Context, resul
 }
 
 // createDaemonSetFinding creates a daemonset incomplete coverage finding
-func (o *OwnershipCorrelator) createDaemonSetFinding(dsName string, nodeCount, podCount int64, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (o *OwnershipCorrelator) createDaemonSetFinding(dsName string, nodeCount, podCount int64, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("daemonset-missing-pods-%s", dsName),
 		Type:       "daemonset_incomplete_coverage",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: CriticalConfidence,
 		Message:    fmt.Sprintf("DaemonSet %s has %d pods but %d nodes (missing %d)", dsName, podCount, nodeCount, nodeCount-podCount),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "daemonset",
 			Resources:   []string{dsName},
 			UserImpact:  "Some nodes not running required daemon",
@@ -1157,18 +1153,18 @@ func (o *OwnershipCorrelator) countReplicaSetPods(replicaSets []ReplicaSetData) 
 }
 
 // createReplicaSetNotReadyFinding creates a finding for a replica set with unready pods
-func (o *OwnershipCorrelator) createReplicaSetNotReadyFinding(rsData ReplicaSetData, deploymentName string, event *domain.UnifiedEvent) aggregator.Finding {
+func (o *OwnershipCorrelator) createReplicaSetNotReadyFinding(rsData ReplicaSetData, deploymentName string, event *domain.UnifiedEvent) Finding {
 	rsName := rsData.ReplicaSet.Properties.Name
-	return aggregator.Finding{
+	return Finding{
 		ID:         fmt.Sprintf("replicaset-degraded-%s", rsName),
 		Type:       "replicaset_not_ready",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: MediumHighConfidence,
 		Message:    fmt.Sprintf("ReplicaSet %s has %d/%d ready pods", rsName, rsData.ReadyReplicas, rsData.Replicas),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "replicaset",
 			Resources:   []string{deploymentName, rsName},
 			UserImpact:  "Deployment not at full capacity",
@@ -1179,17 +1175,17 @@ func (o *OwnershipCorrelator) createReplicaSetNotReadyFinding(rsData ReplicaSetD
 }
 
 // createDeploymentUnderscaledFinding creates a finding for underscaled deployment
-func (o *OwnershipCorrelator) createDeploymentUnderscaledFinding(deploymentName string, totalPods, desiredReplicas int64, failedPods []string, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (o *OwnershipCorrelator) createDeploymentUnderscaledFinding(deploymentName string, totalPods, desiredReplicas int64, failedPods []string, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("deployment-underscaled-%s", deploymentName),
 		Type:       "deployment_insufficient_pods",
-		Severity:   aggregator.SeverityCritical,
+		Severity:   SeverityCritical,
 		Confidence: HighConfidence,
 		Message:    fmt.Sprintf("Deployment %s has %d pods but needs %d", deploymentName, totalPods, desiredReplicas),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "deployment",
 			Resources:   append([]string{deploymentName}, failedPods...),
 			UserImpact:  "Service running below desired capacity",
@@ -1224,21 +1220,21 @@ func (o *OwnershipCorrelator) findBrokenStatefulSetOrdinal(stsName string, desir
 }
 
 // createStatefulSetBrokenSequenceFinding creates a finding for broken StatefulSet pod sequence
-func (o *OwnershipCorrelator) createStatefulSetBrokenSequenceFinding(stsName string, brokenOrdinal, desired int64, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (o *OwnershipCorrelator) createStatefulSetBrokenSequenceFinding(stsName string, brokenOrdinal, desired int64, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("statefulset-broken-ordinal-%s", stsName),
 		Type:       "statefulset_pod_sequence_broken",
-		Severity:   aggregator.SeverityCritical,
+		Severity:   SeverityCritical,
 		Confidence: HighConfidence,
 		Message:    fmt.Sprintf("StatefulSet %s pod sequence broken at ordinal %d", stsName, brokenOrdinal),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 			Attributes: map[string]string{
 				"broken_ordinal": fmt.Sprintf("%d", brokenOrdinal),
 				"pod_name":       fmt.Sprintf("%s-%d", stsName, brokenOrdinal),
 			},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "statefulset",
 			Resources:   []string{stsName, fmt.Sprintf("%s-%d", stsName, brokenOrdinal)},
 			UserImpact:  "StatefulSet cannot progress past broken pod",
@@ -1258,7 +1254,7 @@ func (o *OwnershipCorrelator) logCorrelationStart(event *domain.UnifiedEvent) {
 }
 
 // routeEventToAnalysis routes event to appropriate analysis function
-func (o *OwnershipCorrelator) routeEventToAnalysis(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (o *OwnershipCorrelator) routeEventToAnalysis(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	switch event.Type {
 	case "deployment_failed", "rollout_stuck":
 		return o.analyzeDeploymentChain(ctx, event)
@@ -1271,7 +1267,7 @@ func (o *OwnershipCorrelator) routeEventToAnalysis(ctx context.Context, event *d
 	case "daemonset_failed":
 		return o.analyzeDaemonSetIssues(ctx, event)
 	default:
-		return []aggregator.Finding{}, nil
+		return []Finding{}, nil
 	}
 }
 

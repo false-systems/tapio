@@ -63,10 +63,10 @@ type CorrelatorMetrics struct {
 
 // HealthStatus represents comprehensive health information
 type HealthStatus struct {
-	Timestamp    time.Time                  `json:"timestamp"`
-	IsHealthy    bool                       `json:"is_healthy"`
-	Component    string                     `json:"component"`
-	Version      string                     `json:"version"`
+	Timestamp    time.Time                   `json:"timestamp"`
+	IsHealthy    bool                        `json:"is_healthy"`
+	Component    string                      `json:"component"`
+	Version      string                      `json:"version"`
 	Dependencies map[string]DependencyHealth `json:"dependencies"`
 	QueueHealth  QueueHealth                 `json:"queue_health"`
 }

@@ -15,7 +15,7 @@ import (
 // TestStorageJobProcessing tests the core storage job processing without dependencies
 func TestStorageJobProcessing(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	
+
 	t.Run("storage_job_creation", func(t *testing.T) {
 		result := &CorrelationResult{
 			ID:         "test-1",
@@ -25,22 +25,22 @@ func TestStorageJobProcessing(t *testing.T) {
 			StartTime:  time.Now(),
 			EndTime:    time.Now(),
 		}
-		
+
 		job := &storageJob{
 			result:    result,
 			timestamp: time.Now(),
 		}
-		
+
 		assert.NotNil(t, job)
 		assert.Equal(t, "test-1", job.result.ID)
 		assert.Equal(t, "test", job.result.Type)
 		assert.True(t, job.timestamp.Before(time.Now().Add(time.Second)))
 	})
-	
+
 	t.Run("engine_metrics_with_storage", func(t *testing.T) {
 		// Mock storage that counts operations
 		storage := &mockStorage{}
-		
+
 		config := &EngineConfig{
 			EventBufferSize:        100,
 			ResultBufferSize:       100,
@@ -52,22 +52,22 @@ func TestStorageJobProcessing(t *testing.T) {
 			StorageRetention:       24 * time.Hour,
 			EnabledCorrelators:     []string{}, // No correlators to avoid dependencies
 		}
-		
+
 		engine, err := NewEngine(logger, *config, nil, storage)
 		require.NoError(t, err)
-		
+
 		// Check initial metrics
 		metrics := engine.GetMetrics()
 		assert.Equal(t, 5, metrics.StorageWorkers)
 		assert.Equal(t, int64(0), metrics.StorageProcessed)
 		assert.Equal(t, int64(0), metrics.StorageRejected)
 		assert.Equal(t, 0, metrics.StorageQueueSize)
-		
+
 		ctx := context.Background()
 		err = engine.Start(ctx)
 		require.NoError(t, err)
 		defer engine.Stop()
-		
+
 		// Submit some storage operations directly
 		for i := 0; i < 10; i++ {
 			result := &CorrelationResult{
@@ -77,21 +77,21 @@ func TestStorageJobProcessing(t *testing.T) {
 			}
 			engine.asyncStoreResult(ctx, result)
 		}
-		
+
 		// Wait for processing
 		time.Sleep(100 * time.Millisecond)
-		
+
 		// Check final metrics
 		finalMetrics := engine.GetMetrics()
 		assert.True(t, finalMetrics.StorageProcessed > 0)
 		assert.Equal(t, int32(10), atomic.LoadInt32(&storage.storeCallCount))
 	})
-	
+
 	t.Run("storage_worker_backpressure", func(t *testing.T) {
 		storage := &mockStorage{
 			storeDelay: 50 * time.Millisecond, // Slow storage
 		}
-		
+
 		config := &EngineConfig{
 			EventBufferSize:        10,
 			ResultBufferSize:       10,
@@ -103,15 +103,15 @@ func TestStorageJobProcessing(t *testing.T) {
 			StorageRetention:       24 * time.Hour,
 			EnabledCorrelators:     []string{}, // No correlators
 		}
-		
+
 		engine, err := NewEngine(logger, *config, nil, storage)
 		require.NoError(t, err)
-		
+
 		ctx := context.Background()
 		err = engine.Start(ctx)
 		require.NoError(t, err)
 		defer engine.Stop()
-		
+
 		// Fill up the queue rapidly
 		for i := 0; i < 15; i++ {
 			result := &CorrelationResult{
@@ -120,15 +120,15 @@ func TestStorageJobProcessing(t *testing.T) {
 			}
 			engine.asyncStoreResult(ctx, result)
 		}
-		
+
 		// Some operations should be rejected due to backpressure
 		metrics := engine.GetMetrics()
 		assert.True(t, metrics.StorageRejected > 0, "Expected rejections due to queue full")
 	})
-	
+
 	t.Run("concurrent_storage_operations", func(t *testing.T) {
 		storage := &mockStorage{}
-		
+
 		config := &EngineConfig{
 			EventBufferSize:        100,
 			ResultBufferSize:       100,
@@ -140,20 +140,20 @@ func TestStorageJobProcessing(t *testing.T) {
 			StorageRetention:       24 * time.Hour,
 			EnabledCorrelators:     []string{}, // No correlators
 		}
-		
+
 		engine, err := NewEngine(logger, *config, nil, storage)
 		require.NoError(t, err)
-		
+
 		ctx := context.Background()
 		err = engine.Start(ctx)
 		require.NoError(t, err)
 		defer engine.Stop()
-		
+
 		// Submit operations from multiple goroutines
 		var wg sync.WaitGroup
 		numGoroutines := 10
 		opsPerGoroutine := 20
-		
+
 		for g := 0; g < numGoroutines; g++ {
 			wg.Add(1)
 			go func(goroutineID int) {
@@ -167,12 +167,12 @@ func TestStorageJobProcessing(t *testing.T) {
 				}
 			}(g)
 		}
-		
+
 		wg.Wait()
-		
+
 		// Wait for all operations to complete
 		time.Sleep(200 * time.Millisecond)
-		
+
 		// Verify all operations were processed
 		totalExpected := numGoroutines * opsPerGoroutine
 		assert.Equal(t, int32(totalExpected), atomic.LoadInt32(&storage.storeCallCount))
@@ -183,7 +183,7 @@ func TestStorageJobProcessing(t *testing.T) {
 func TestEngineLifecycle(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	storage := &mockStorage{}
-	
+
 	config := &EngineConfig{
 		EventBufferSize:        50,
 		ResultBufferSize:       50,
@@ -195,22 +195,22 @@ func TestEngineLifecycle(t *testing.T) {
 		StorageRetention:       24 * time.Hour,
 		EnabledCorrelators:     []string{}, // No correlators to avoid dependencies
 	}
-	
+
 	engine, err := NewEngine(logger, *config, nil, storage)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
-	
+
 	// Start engine
 	err = engine.Start(ctx)
 	require.NoError(t, err)
-	
+
 	// Verify workers are running
 	metrics := engine.GetMetrics()
 	assert.Equal(t, 3, metrics.WorkersCount)
 	assert.Equal(t, 5, metrics.StorageWorkers)
 	assert.True(t, metrics.IsHealthy)
-	
+
 	// Submit some work
 	for i := 0; i < 10; i++ {
 		result := &CorrelationResult{
@@ -219,15 +219,15 @@ func TestEngineLifecycle(t *testing.T) {
 		}
 		engine.asyncStoreResult(ctx, result)
 	}
-	
+
 	// Stop engine gracefully
 	err = engine.Stop()
 	require.NoError(t, err)
-	
+
 	// Verify clean shutdown
 	finalMetrics := engine.GetMetrics()
 	assert.False(t, finalMetrics.IsHealthy)
-	
+
 	// Verify all submitted work was processed
 	assert.Equal(t, int32(10), atomic.LoadInt32(&storage.storeCallCount))
 }
@@ -236,7 +236,7 @@ func TestEngineLifecycle(t *testing.T) {
 func BenchmarkStorageWorkerPoolOverhead(b *testing.B) {
 	logger := zaptest.NewLogger(b)
 	storage := &mockStorage{}
-	
+
 	config := &EngineConfig{
 		EventBufferSize:        1000,
 		ResultBufferSize:       1000,
@@ -248,18 +248,18 @@ func BenchmarkStorageWorkerPoolOverhead(b *testing.B) {
 		StorageRetention:       24 * time.Hour,
 		EnabledCorrelators:     []string{}, // No correlators
 	}
-	
+
 	engine, err := NewEngine(logger, *config, nil, storage)
 	require.NoError(b, err)
-	
+
 	ctx := context.Background()
 	err = engine.Start(ctx)
 	require.NoError(b, err)
 	defer engine.Stop()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {

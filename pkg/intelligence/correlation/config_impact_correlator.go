@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
 )
 
@@ -82,7 +81,7 @@ func NewConfigImpactCorrelator(graphStore GraphStore, logger *zap.Logger) (*Conf
 }
 
 // Correlate analyzes config change impacts
-func (c *ConfigImpactCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error) {
+func (c *ConfigImpactCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*CorrelatorOutput, error) {
 	startTime := time.Now()
 
 	// Validate event can be processed
@@ -120,7 +119,7 @@ func (c *ConfigImpactCorrelator) logCorrelationError(event *domain.UnifiedEvent,
 }
 
 // routeEventAnalysis routes events to appropriate analysis methods
-func (c *ConfigImpactCorrelator) routeEventAnalysis(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) routeEventAnalysis(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	switch event.Type {
 	case "config_changed", "secret_changed":
 		return c.analyzeConfigChange(ctx, event)
@@ -129,16 +128,16 @@ func (c *ConfigImpactCorrelator) routeEventAnalysis(ctx context.Context, event *
 	case "deployment_rollout":
 		return c.analyzeDeploymentConfig(ctx, event)
 	default:
-		return []aggregator.Finding{}, nil
+		return []Finding{}, nil
 	}
 }
 
 // buildCorrelatorOutput builds the final correlator output
-func (c *ConfigImpactCorrelator) buildCorrelatorOutput(findings []aggregator.Finding, event *domain.UnifiedEvent, processingTime time.Duration) *aggregator.CorrelatorOutput {
+func (c *ConfigImpactCorrelator) buildCorrelatorOutput(findings []Finding, event *domain.UnifiedEvent, processingTime time.Duration) *CorrelatorOutput {
 	confidence := c.calculateConfidence(findings)
 	contextMap := c.buildContextMap(event)
 
-	return &aggregator.CorrelatorOutput{
+	return &CorrelatorOutput{
 		CorrelatorName:    c.Name(),
 		CorrelatorVersion: c.Version(),
 		Findings:          findings,
@@ -166,7 +165,7 @@ func (c *ConfigImpactCorrelator) buildContextMap(event *domain.UnifiedEvent) map
 }
 
 // analyzeConfigChange checks what pods/services are affected by a config change
-func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := c.getNamespace(event)
 	configName := c.getEntityName(event)
 	configType := c.determineConfigType(event)
@@ -189,7 +188,7 @@ func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event 
 	// Add immediate impact finding if pods are affected
 	if len(findings) > 0 {
 		immediateFinding := c.createImmediateImpactFinding(configName, configType, len(findings), event)
-		findings = append([]aggregator.Finding{immediateFinding}, findings...)
+		findings = append([]Finding{immediateFinding}, findings...)
 	}
 
 	return findings, nil
@@ -274,8 +273,8 @@ func (c *ConfigImpactCorrelator) extractAffectedPodsFromResult(ctx context.Conte
 }
 
 // generateConfigChangeFindings generates findings from affected pods
-func (c *ConfigImpactCorrelator) generateConfigChangeFindings(configName, configType string, affectedPods []AffectedPodData, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
+func (c *ConfigImpactCorrelator) generateConfigChangeFindings(configName, configType string, affectedPods []AffectedPodData, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
 	for _, pods := range [][]AffectedPodData{affectedPods} {
 		if len(pods) > 0 {
 			findings = append(findings, c.analyzeAffectedPods(configName, configType, pods, event)...)
@@ -285,17 +284,17 @@ func (c *ConfigImpactCorrelator) generateConfigChangeFindings(configName, config
 }
 
 // createImmediateImpactFinding creates immediate impact finding for config changes
-func (c *ConfigImpactCorrelator) createImmediateImpactFinding(configName, configType string, findingsCount int, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (c *ConfigImpactCorrelator) createImmediateImpactFinding(configName, configType string, findingsCount int, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("config-change-impact-%s", configName),
 		Type:       "config_change_detected",
-		Severity:   aggregator.SeverityMedium,
+		Severity:   SeverityMedium,
 		Confidence: HighTestConfidence,
 		Message:    fmt.Sprintf("%s %s was changed, analyzing impact on %d findings", configType, configName, findingsCount),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "config",
 			Resources:   []string{configName},
 			UserImpact:  "Configuration change may cause pod restarts",
@@ -306,7 +305,7 @@ func (c *ConfigImpactCorrelator) createImmediateImpactFinding(configName, config
 }
 
 // analyzePodRestartCause checks if a pod restart was caused by config changes
-func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := c.getNamespace(event)
 	podName := c.getEntityName(event)
 
@@ -387,8 +386,8 @@ func (c *ConfigImpactCorrelator) extractConfigChangesFromResult(ctx context.Cont
 }
 
 // generateRestartCauseFindings generates findings from config changes
-func (c *ConfigImpactCorrelator) generateRestartCauseFindings(podName string, changes []ConfigChangeInfo, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
+func (c *ConfigImpactCorrelator) generateRestartCauseFindings(podName string, changes []ConfigChangeInfo, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
 	if len(changes) > 0 {
 		findings = append(findings, c.createRestartCauseFindings(podName, changes, event)...)
 	}
@@ -396,7 +395,7 @@ func (c *ConfigImpactCorrelator) generateRestartCauseFindings(podName string, ch
 }
 
 // analyzeDeploymentConfig checks deployment configuration issues
-func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := c.getNamespace(event)
 	deploymentName := c.getEntityName(event)
 
@@ -460,9 +459,9 @@ func (c *ConfigImpactCorrelator) queryDeploymentConfigData(ctx context.Context, 
 }
 
 // processDeploymentConfigResults processes deployment query results and creates findings
-func (c *ConfigImpactCorrelator) processDeploymentConfigResults(ctx context.Context, data *DeploymentConfigData, deploymentName string, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) processDeploymentConfigResults(ctx context.Context, data *DeploymentConfigData, deploymentName string, event *domain.UnifiedEvent) ([]Finding, error) {
 	defer data.Result.Close(ctx)
-	var findings []aggregator.Finding
+	var findings []Finding
 
 	for data.Result.Next(ctx) {
 		record := data.Result.Record()
@@ -480,7 +479,7 @@ func (c *ConfigImpactCorrelator) processDeploymentConfigResults(ctx context.Cont
 }
 
 // createDeploymentFinding creates a deployment rollout finding if needed
-func (c *ConfigImpactCorrelator) createDeploymentFinding(record *GraphRecord, deploymentName string, event *domain.UnifiedEvent) *aggregator.Finding {
+func (c *ConfigImpactCorrelator) createDeploymentFinding(record *GraphRecord, deploymentName string, event *domain.UnifiedEvent) *Finding {
 	podCountValue, _ := record.Get("podCount")
 	readyPodsValue, _ := record.Get("readyPods")
 
@@ -497,20 +496,20 @@ func (c *ConfigImpactCorrelator) createDeploymentFinding(record *GraphRecord, de
 	configMaps := c.parseStringSliceFromValue(configMapsValue)
 	secrets := c.parseStringSliceFromValue(secretsValue)
 
-	finding := aggregator.Finding{
+	finding := Finding{
 		ID:         fmt.Sprintf("deployment-config-rollout-%s", deploymentName),
 		Type:       "deployment_config_rollout",
-		Severity:   aggregator.SeverityMedium,
+		Severity:   SeverityMedium,
 		Confidence: MediumConfidence,
 		Message:    fmt.Sprintf("Deployment %s has %d/%d ready pods during rollout", deploymentName, readyPods, podCount),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 			Attributes: map[string]string{
 				"configMaps": strings.Join(configMaps, ","),
 				"secrets":    strings.Join(secrets, ","),
 			},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "deployment",
 			Resources:   append([]string{deploymentName}, append(configMaps, secrets...)...),
 			UserImpact:  "Service may be degraded during rollout",
@@ -523,10 +522,10 @@ func (c *ConfigImpactCorrelator) createDeploymentFinding(record *GraphRecord, de
 }
 
 // analyzeAffectedPods creates findings for pods affected by config changes
-func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType string, affectedPods []AffectedPodData, event *domain.UnifiedEvent) []aggregator.Finding {
+func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType string, affectedPods []AffectedPodData, event *domain.UnifiedEvent) []Finding {
 	restartedPods, notReadyPods, affectedServices := c.categorizeAffectedPods(affectedPods, event)
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	if len(restartedPods) > 0 {
 		findings = append(findings, c.createRestartedPodsFindings(configName, configType, restartedPods, event))
 	}
@@ -573,17 +572,17 @@ func (c *ConfigImpactCorrelator) categorizeAffectedPods(affectedPods []AffectedP
 }
 
 // createRestartedPodsFindings creates findings for restarted pods
-func (c *ConfigImpactCorrelator) createRestartedPodsFindings(configName, configType string, restartedPods []string, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (c *ConfigImpactCorrelator) createRestartedPodsFindings(configName, configType string, restartedPods []string, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("config-caused-restarts-%s", configName),
 		Type:       "config_change_pod_restarts",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: MediumHighConfidence,
 		Message:    fmt.Sprintf("%s %s change caused %d pod restarts: %s", configType, configName, len(restartedPods), strings.Join(restartedPods, ", ")),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "pods",
 			Resources:   append([]string{configName}, restartedPods...),
 			UserImpact:  "Service disruption during pod restarts",
@@ -594,17 +593,17 @@ func (c *ConfigImpactCorrelator) createRestartedPodsFindings(configName, configT
 }
 
 // createNotReadyPodsFindings creates findings for not ready pods
-func (c *ConfigImpactCorrelator) createNotReadyPodsFindings(configName, configType string, notReadyPods []string, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (c *ConfigImpactCorrelator) createNotReadyPodsFindings(configName, configType string, notReadyPods []string, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("config-pods-not-ready-%s", configName),
 		Type:       "config_change_pods_not_ready",
-		Severity:   aggregator.SeverityMedium,
+		Severity:   SeverityMedium,
 		Confidence: MediumLowConfidence,
 		Message:    fmt.Sprintf("%d pods not ready after %s %s change", len(notReadyPods), configType, configName),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "pods",
 			Resources:   append([]string{configName}, notReadyPods...),
 			UserImpact:  "Pods still initializing with new configuration",
@@ -615,17 +614,17 @@ func (c *ConfigImpactCorrelator) createNotReadyPodsFindings(configName, configTy
 }
 
 // createAffectedServicesFindings creates findings for affected services
-func (c *ConfigImpactCorrelator) createAffectedServicesFindings(configName, configType string, affectedServices []string, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (c *ConfigImpactCorrelator) createAffectedServicesFindings(configName, configType string, affectedServices []string, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("config-service-impact-%s", configName),
 		Type:       "config_change_service_impact",
-		Severity:   aggregator.SeverityMedium,
+		Severity:   SeverityMedium,
 		Confidence: LowConfidence,
 		Message:    fmt.Sprintf("Services affected by %s %s change: %s", configType, configName, strings.Join(affectedServices, ", ")),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "services",
 			Resources:   append([]string{configName}, affectedServices...),
 			UserImpact:  "Service endpoints changing due to pod restarts",
@@ -636,8 +635,8 @@ func (c *ConfigImpactCorrelator) createAffectedServicesFindings(configName, conf
 }
 
 // createRestartCauseFindings creates findings for pod restarts caused by config changes
-func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, changes []ConfigChangeInfo, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
+func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, changes []ConfigChangeInfo, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
 	configChanges := []string{}
 
 	for _, change := range changes {
@@ -645,16 +644,16 @@ func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, chan
 	}
 
 	if len(configChanges) > 0 {
-		findings = append(findings, aggregator.Finding{
+		findings = append(findings, Finding{
 			ID:         fmt.Sprintf("pod-restart-config-cause-%s", podName),
 			Type:       "pod_restart_config_cause",
-			Severity:   aggregator.SeverityHigh,
+			Severity:   SeverityHigh,
 			Confidence: HighConfidence,
 			Message:    fmt.Sprintf("Pod %s restart likely caused by config changes: %s", podName, strings.Join(configChanges, ", ")),
-			Evidence: aggregator.Evidence{
+			Evidence: Evidence{
 				Events: []domain.UnifiedEvent{*event},
-				GraphPaths: []aggregator.GraphPath{{
-					Nodes: []aggregator.GraphNode{
+				GraphPaths: []EvidenceGraphPath{{
+					Nodes: []EvidenceGraphNode{
 						{
 							ID:     podName,
 							Type:   "Pod",
@@ -663,7 +662,7 @@ func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, chan
 					},
 				}},
 			},
-			Impact: aggregator.Impact{
+			Impact: Impact{
 				Scope:       "pod",
 				Resources:   append([]string{podName}, configChanges...),
 				UserImpact:  "Pod restarted due to configuration change",
@@ -677,7 +676,7 @@ func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, chan
 }
 
 // calculateConfidence calculates overall confidence for findings
-func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Finding) float64 {
+func (c *ConfigImpactCorrelator) calculateConfidence(findings []Finding) float64 {
 	if len(findings) == 0 {
 		return 0
 	}
@@ -688,13 +687,13 @@ func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Findi
 	for _, finding := range findings {
 		var weight float64
 		switch finding.Severity {
-		case aggregator.SeverityCritical:
+		case SeverityCritical:
 			weight = 1.0
-		case aggregator.SeverityHigh:
+		case SeverityHigh:
 			weight = HighWeight
-		case aggregator.SeverityMedium:
+		case SeverityMedium:
 			weight = MediumWeight
-		case aggregator.SeverityLow:
+		case SeverityLow:
 			weight = LowWeight
 		default:
 			weight = VeryLowWeight

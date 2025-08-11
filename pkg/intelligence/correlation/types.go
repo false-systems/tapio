@@ -246,3 +246,61 @@ func CreateEvidenceData(eventIDs, resourceIDs []string, attrs map[string]string)
 		Attributes:  attrs,
 	}
 }
+
+// Finding represents a correlation finding with evidence and impact
+type Finding struct {
+	ID         string               `json:"id"`
+	Type       string               `json:"type"`
+	Severity   domain.EventSeverity `json:"severity"`
+	Confidence float64              `json:"confidence"`
+	Message    string               `json:"message"`
+	Evidence   Evidence             `json:"evidence"`
+	Impact     Impact               `json:"impact"`
+	Timestamp  time.Time            `json:"timestamp"`
+}
+
+// Evidence represents evidence supporting a finding
+type Evidence struct {
+	Events     []domain.UnifiedEvent `json:"events"`
+	Attributes map[string]string     `json:"attributes"`
+	GraphPaths []EvidenceGraphPath   `json:"graph_paths,omitempty"`
+}
+
+// EvidenceGraphPath represents a simplified graph path for evidence
+type EvidenceGraphPath struct {
+	Nodes []EvidenceGraphNode `json:"nodes"`
+	Edges []GraphEdge         `json:"edges,omitempty"`
+}
+
+// EvidenceGraphNode represents a simplified graph node for evidence
+type EvidenceGraphNode struct {
+	ID     string            `json:"id"`
+	Type   string            `json:"type"`
+	Labels map[string]string `json:"labels"`
+}
+
+// GraphEdge represents an edge in the resource graph (for Evidence GraphPaths)
+type GraphEdge struct {
+	From         string `json:"from"`
+	To           string `json:"to"`
+	Relationship string `json:"relationship"`
+}
+
+// CorrelatorOutput represents the output from a correlator
+type CorrelatorOutput struct {
+	CorrelatorName    string            `json:"correlator_name"`
+	CorrelatorVersion string            `json:"correlator_version"`
+	Findings          []Finding         `json:"findings"`
+	Context           map[string]string `json:"context"`
+	Confidence        float64           `json:"confidence"`
+	ProcessingTime    time.Duration     `json:"processing_time"`
+	Timestamp         time.Time         `json:"timestamp"`
+}
+
+// Severity constants for findings
+const (
+	SeverityLow      = domain.EventSeverityLow
+	SeverityMedium   = domain.EventSeverityMedium
+	SeverityHigh     = domain.EventSeverityHigh
+	SeverityCritical = domain.EventSeverityCritical
+)

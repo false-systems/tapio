@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -128,7 +127,7 @@ func NewDependencyCorrelator(graphStore GraphStore, logger *zap.Logger) (*Depend
 }
 
 // Correlate processes an event and finds dependency-related root causes
-func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error) {
+func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*CorrelatorOutput, error) {
 	// Always start spans for operations
 	ctx, span := d.tracer.Start(ctx, "correlation.dependency.analyze")
 	defer span.End()
@@ -215,7 +214,7 @@ func (d *DependencyCorrelator) Correlate(ctx context.Context, event *domain.Unif
 	// Set final attributes
 	span.SetAttributes(attribute.Float64("confidence", confidence))
 
-	return &aggregator.CorrelatorOutput{
+	return &CorrelatorOutput{
 		CorrelatorName:    d.Name(),
 		CorrelatorVersion: d.Version(),
 		Findings:          findings,
@@ -236,7 +235,7 @@ func (d *DependencyCorrelator) logCorrelationStart(event *domain.UnifiedEvent) {
 }
 
 // routeEventToHandler routes events to appropriate correlation handlers
-func (d *DependencyCorrelator) routeEventToHandler(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (d *DependencyCorrelator) routeEventToHandler(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	switch event.Type {
 	case "service_unavailable", "endpoint_not_ready":
 		return d.correlateServiceIssues(ctx, event)
@@ -268,7 +267,7 @@ func (d *DependencyCorrelator) buildContextMap(event *domain.UnifiedEvent) map[s
 }
 
 // correlateServiceIssues analyzes service availability problems
-func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	// Create span for service correlation
 	ctx, span := d.tracer.Start(ctx, "correlation.dependency.service_issues")
 	defer span.End()
@@ -307,7 +306,7 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 	}
 	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	for result.Next(ctx) {
 		record := result.Record()
 
@@ -338,7 +337,7 @@ func (d *DependencyCorrelator) correlateServiceIssues(ctx context.Context, event
 }
 
 // correlatePodIssues analyzes pod failure dependencies
-func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := d.getNamespace(event)
 	podName := d.getEntityName(event)
 
@@ -357,7 +356,7 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 	}
 	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	for result.Next(ctx) {
 		record := result.Record()
 
@@ -386,19 +385,19 @@ func (d *DependencyCorrelator) correlatePodIssues(ctx context.Context, event *do
 }
 
 // checkPodExistence checks if a pod exists and returns appropriate finding
-func (d *DependencyCorrelator) checkPodExistence(record *GraphRecord, podName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
+func (d *DependencyCorrelator) checkPodExistence(record *GraphRecord, podName, namespace string, event *domain.UnifiedEvent) *Finding {
 	podNode, err := record.GetNode("p")
 	if err != nil || podNode == nil {
-		return &aggregator.Finding{
+		return &Finding{
 			ID:         fmt.Sprintf("pod-not-found-%s", podName),
 			Type:       "pod_not_found",
-			Severity:   aggregator.SeverityHigh,
+			Severity:   SeverityHigh,
 			Confidence: 0.95,
 			Message:    fmt.Sprintf("Pod %s not found in namespace %s", podName, namespace),
-			Evidence: aggregator.Evidence{
+			Evidence: Evidence{
 				Events: []domain.UnifiedEvent{*event},
 			},
-			Impact: aggregator.Impact{
+			Impact: Impact{
 				Scope:       "pod",
 				Resources:   []string{podName},
 				UserImpact:  "Pod unavailable",
@@ -411,13 +410,13 @@ func (d *DependencyCorrelator) checkPodExistence(record *GraphRecord, podName, n
 }
 
 // analyzeConfigMapDependencies analyzes ConfigMap dependencies using typed API
-func (d *DependencyCorrelator) analyzeConfigMapDependencies(record *GraphRecord, podName, namespace string, event *domain.UnifiedEvent) []aggregator.Finding {
+func (d *DependencyCorrelator) analyzeConfigMapDependencies(record *GraphRecord, podName, namespace string, event *domain.UnifiedEvent) []Finding {
 	configmaps, err := record.GetNodes("configmaps")
 	if err != nil || len(configmaps) == 0 {
 		return nil
 	}
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	for _, cm := range configmaps {
 		if finding := d.checkConfigMapModificationTiming(cm, podName, namespace, event); finding != nil {
 			findings = append(findings, *finding)
@@ -428,7 +427,7 @@ func (d *DependencyCorrelator) analyzeConfigMapDependencies(record *GraphRecord,
 }
 
 // checkConfigMapModificationTiming checks if ConfigMap was modified recently before pod failure
-func (d *DependencyCorrelator) checkConfigMapModificationTiming(cm GraphNode, podName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
+func (d *DependencyCorrelator) checkConfigMapModificationTiming(cm GraphNode, podName, namespace string, event *domain.UnifiedEvent) *Finding {
 	cmName := cm.Properties.Name
 	if cmName == "" {
 		return nil
@@ -464,15 +463,15 @@ func (d *DependencyCorrelator) extractAndValidateModificationTime(cm GraphNode, 
 }
 
 // createConfigMapTimingFinding creates a finding for ConfigMap timing correlation
-func (d *DependencyCorrelator) createConfigMapTimingFinding(podName, cmName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
-	return &aggregator.Finding{
+func (d *DependencyCorrelator) createConfigMapTimingFinding(podName, cmName, namespace string, event *domain.UnifiedEvent) *Finding {
+	return &Finding{
 		ID:         fmt.Sprintf("pod-config-dependency-%s-%s", podName, cmName),
 		Type:       "pod_config_dependency_failure",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: 0.80,
 		Message:    fmt.Sprintf("Pod %s failed after ConfigMap %s was modified", podName, cmName),
 		Evidence:   d.buildConfigMapEvidence(podName, cmName, namespace, event),
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "pod",
 			Resources:   []string{podName, cmName},
 			UserImpact:  "Pod failed due to configuration change",
@@ -483,11 +482,11 @@ func (d *DependencyCorrelator) createConfigMapTimingFinding(podName, cmName, nam
 }
 
 // buildConfigMapEvidence builds evidence for ConfigMap correlation
-func (d *DependencyCorrelator) buildConfigMapEvidence(podName, cmName, namespace string, event *domain.UnifiedEvent) aggregator.Evidence {
-	return aggregator.Evidence{
+func (d *DependencyCorrelator) buildConfigMapEvidence(podName, cmName, namespace string, event *domain.UnifiedEvent) Evidence {
+	return Evidence{
 		Events: []domain.UnifiedEvent{*event},
-		GraphPaths: []aggregator.GraphPath{{
-			Nodes: []aggregator.GraphNode{
+		GraphPaths: []EvidenceGraphPath{{
+			Nodes: []EvidenceGraphNode{
 				{
 					ID:     podName,
 					Type:   "Pod",
@@ -499,18 +498,17 @@ func (d *DependencyCorrelator) buildConfigMapEvidence(podName, cmName, namespace
 					Labels: map[string]string{"name": cmName, "namespace": namespace},
 				},
 			},
-			Edges: []aggregator.GraphEdge{{
+			Edges: []GraphEdge{{
 				From:         podName,
 				To:           cmName,
 				Relationship: "MOUNTS",
-				Properties:   map[string]string{"type": "configmap"},
 			}},
 		}},
 	}
 }
 
 // correlateConfigImpact analyzes configuration change impacts
-func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := d.getNamespace(event)
 	configName := d.getEntityName(event)
 
@@ -528,7 +526,7 @@ func (d *DependencyCorrelator) correlateConfigImpact(ctx context.Context, event 
 	}
 	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	for result.Next(ctx) {
 		record := result.Record()
 		podFindings := d.analyzeConfigImpactOnPods(record, configName, event)
@@ -582,8 +580,8 @@ func (d *DependencyCorrelator) inferConfigType(configName string) string {
 }
 
 // analyzeConfigImpactOnPods analyzes how config changes affect pods
-func (d *DependencyCorrelator) analyzeConfigImpactOnPods(record *GraphRecord, configName string, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
+func (d *DependencyCorrelator) analyzeConfigImpactOnPods(record *GraphRecord, configName string, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
 
 	pods, err := record.GetNodes("pods")
 	if err != nil || len(pods) == 0 {
@@ -645,22 +643,22 @@ func (d *DependencyCorrelator) wasPodRestartedAfterEvent(pod GraphNode, event *d
 }
 
 // createPodImpactFinding creates a finding for pods affected by config change
-func (d *DependencyCorrelator) createPodImpactFinding(configName string, impact podImpactInfo, event *domain.UnifiedEvent) aggregator.Finding {
+func (d *DependencyCorrelator) createPodImpactFinding(configName string, impact podImpactInfo, event *domain.UnifiedEvent) Finding {
 	affectedPodNames := impact.podNames
 	if len(affectedPodNames) > impact.affectedCount {
 		affectedPodNames = affectedPodNames[:impact.affectedCount]
 	}
 
-	return aggregator.Finding{
+	return Finding{
 		ID:         fmt.Sprintf("config-change-impact-%s", configName),
 		Type:       "config_change_pod_impact",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: 0.85,
 		Message:    fmt.Sprintf("ConfigMap %s change caused %d pods to restart: %s", configName, impact.affectedCount, strings.Join(affectedPodNames, ", ")),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "config",
 			Resources:   append([]string{configName}, impact.podNames...),
 			UserImpact:  "Application restarts due to config change",
@@ -671,7 +669,7 @@ func (d *DependencyCorrelator) createPodImpactFinding(configName string, impact 
 }
 
 // analyzeServiceImpactFromConfig analyzes service impact from config changes
-func (d *DependencyCorrelator) analyzeServiceImpactFromConfig(record *GraphRecord, configName string, affectedPods int, event *domain.UnifiedEvent) []aggregator.Finding {
+func (d *DependencyCorrelator) analyzeServiceImpactFromConfig(record *GraphRecord, configName string, affectedPods int, event *domain.UnifiedEvent) []Finding {
 	if affectedPods == 0 {
 		return nil
 	}
@@ -681,16 +679,16 @@ func (d *DependencyCorrelator) analyzeServiceImpactFromConfig(record *GraphRecor
 		return nil
 	}
 
-	return []aggregator.Finding{{
+	return []Finding{{
 		ID:         fmt.Sprintf("config-change-service-impact-%s", configName),
 		Type:       "config_change_service_impact",
-		Severity:   aggregator.SeverityMedium,
+		Severity:   SeverityMedium,
 		Confidence: 0.75,
 		Message:    fmt.Sprintf("ConfigMap %s change impacted services: %s", configName, strings.Join(serviceNames, ", ")),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "service",
 			Resources:   append([]string{configName}, serviceNames...),
 			UserImpact:  "Service interruption during pod restarts",
@@ -742,7 +740,7 @@ func (d *DependencyCorrelator) extractSingleServiceName(svcInterface interface{}
 }
 
 // correlateVolumeIssues analyzes volume mount failures
-func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := d.getNamespace(event)
 	podName := d.getEntityName(event)
 
@@ -760,7 +758,7 @@ func (d *DependencyCorrelator) correlateVolumeIssues(ctx context.Context, event 
 	}
 	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	for result.Next(ctx) {
 		record := result.Record()
 		pvcFindings := d.analyzePVCIssues(record, namespace, podName, event)
@@ -804,13 +802,13 @@ func (d *DependencyCorrelator) queryVolumeDependencies(ctx context.Context, name
 }
 
 // analyzePVCIssues analyzes PVC-related issues for a pod
-func (d *DependencyCorrelator) analyzePVCIssues(record *GraphRecord, namespace, podName string, event *domain.UnifiedEvent) []aggregator.Finding {
+func (d *DependencyCorrelator) analyzePVCIssues(record *GraphRecord, namespace, podName string, event *domain.UnifiedEvent) []Finding {
 	pvcs, err := record.GetNodes("pvcs")
 	if err != nil || len(pvcs) == 0 {
 		return nil
 	}
 
-	var findings []aggregator.Finding
+	var findings []Finding
 	for _, pvc := range pvcs {
 		pvcName := pvc.Properties.Name
 
@@ -827,21 +825,21 @@ func (d *DependencyCorrelator) analyzePVCIssues(record *GraphRecord, namespace, 
 }
 
 // checkPendingPVC checks if PVC is in pending state
-func (d *DependencyCorrelator) checkPendingPVC(pvc GraphNode, namespace, podName, pvcName string, event *domain.UnifiedEvent) *aggregator.Finding {
+func (d *DependencyCorrelator) checkPendingPVC(pvc GraphNode, namespace, podName, pvcName string, event *domain.UnifiedEvent) *Finding {
 	if pvc.Properties.Phase != "Pending" {
 		return nil
 	}
 
-	return &aggregator.Finding{
+	return &Finding{
 		ID:         fmt.Sprintf("pod-pvc-pending-%s-%s", podName, pvcName),
 		Type:       "pod_volume_pending",
-		Severity:   aggregator.SeverityCritical,
+		Severity:   SeverityCritical,
 		Confidence: 0.90,
 		Message:    fmt.Sprintf("Pod %s cannot start because PVC %s is pending", podName, pvcName),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
-			GraphPaths: []aggregator.GraphPath{{
-				Nodes: []aggregator.GraphNode{
+			GraphPaths: []EvidenceGraphPath{{
+				Nodes: []EvidenceGraphNode{
 					{
 						ID:     podName,
 						Type:   "Pod",
@@ -853,15 +851,14 @@ func (d *DependencyCorrelator) checkPendingPVC(pvc GraphNode, namespace, podName
 						Labels: map[string]string{"name": pvcName, "namespace": namespace, "status": "Pending"},
 					},
 				},
-				Edges: []aggregator.GraphEdge{{
+				Edges: []GraphEdge{{
 					From:         podName,
 					To:           pvcName,
 					Relationship: "CLAIMS",
-					Properties:   map[string]string{"type": "volume"},
 				}},
 			}},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "pod",
 			Resources:   []string{podName, pvcName},
 			UserImpact:  "Pod cannot start due to volume issue",
@@ -872,23 +869,23 @@ func (d *DependencyCorrelator) checkPendingPVC(pvc GraphNode, namespace, podName
 }
 
 // checkStorageClass checks if storage class is configured
-func (d *DependencyCorrelator) checkStorageClass(record *GraphRecord, namespace, podName, pvcName string, event *domain.UnifiedEvent) *aggregator.Finding {
+func (d *DependencyCorrelator) checkStorageClass(record *GraphRecord, namespace, podName, pvcName string, event *domain.UnifiedEvent) *Finding {
 	storageClassesInterface, _ := record.Get("storage_classes")
 	scs, ok := storageClassesInterface.([]interface{})
 	if !ok || len(scs) > 0 {
 		return nil
 	}
 
-	return &aggregator.Finding{
+	return &Finding{
 		ID:         fmt.Sprintf("pod-pvc-no-storage-class-%s-%s", podName, pvcName),
 		Type:       "pod_volume_no_storage_class",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: 0.80,
 		Message:    fmt.Sprintf("Pod %s PVC %s has no storage class configured", podName, pvcName),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "pod",
 			Resources:   []string{podName, pvcName},
 			UserImpact:  "Pod cannot get persistent storage",
@@ -899,18 +896,18 @@ func (d *DependencyCorrelator) checkStorageClass(record *GraphRecord, namespace,
 }
 
 // correlateGenericDependencies performs general dependency analysis
-func (d *DependencyCorrelator) correlateGenericDependencies(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (d *DependencyCorrelator) correlateGenericDependencies(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	// For now, return empty findings for unknown event types
 	// This can be extended later for generic dependency patterns
 	d.logger.Debug("Generic dependency correlation",
 		zap.String("event_type", string(event.Type)),
 		zap.String("event_id", event.ID))
 
-	return []aggregator.Finding{}, nil
+	return []Finding{}, nil
 }
 
 // calculateConfidence determines overall confidence based on findings
-func (d *DependencyCorrelator) calculateConfidence(findings []aggregator.Finding, event *domain.UnifiedEvent) float64 {
+func (d *DependencyCorrelator) calculateConfidence(findings []Finding, event *domain.UnifiedEvent) float64 {
 	if len(findings) == 0 {
 		return 0.0
 	}
@@ -923,13 +920,13 @@ func (d *DependencyCorrelator) calculateConfidence(findings []aggregator.Finding
 		// Weight by severity
 		var weight float64
 		switch finding.Severity {
-		case aggregator.SeverityCritical:
+		case SeverityCritical:
 			weight = 1.0
-		case aggregator.SeverityHigh:
+		case SeverityHigh:
 			weight = 0.8
-		case aggregator.SeverityMedium:
+		case SeverityMedium:
 			weight = 0.6
-		case aggregator.SeverityLow:
+		case SeverityLow:
 			weight = 0.4
 		default:
 			weight = 0.2
@@ -1034,7 +1031,7 @@ func (d *DependencyCorrelator) queryPodDependencies(ctx context.Context, namespa
 }
 
 // analyzeServiceImpact analyzes service impact from pod failures
-func (d *DependencyCorrelator) analyzeServiceImpact(record *GraphRecord, podName string, event *domain.UnifiedEvent) []aggregator.Finding {
+func (d *DependencyCorrelator) analyzeServiceImpact(record *GraphRecord, podName string, event *domain.UnifiedEvent) []Finding {
 	services, err := record.GetNodes("services")
 	if err != nil || len(services) == 0 {
 		return nil
@@ -1051,16 +1048,16 @@ func (d *DependencyCorrelator) analyzeServiceImpact(record *GraphRecord, podName
 		return nil
 	}
 
-	return []aggregator.Finding{{
+	return []Finding{{
 		ID:         fmt.Sprintf("pod-service-impact-%s", podName),
 		Type:       "pod_failure_service_impact",
-		Severity:   aggregator.SeverityMedium,
+		Severity:   SeverityMedium,
 		Confidence: 0.70,
 		Message:    fmt.Sprintf("Pod %s failure impacts services: %s", podName, strings.Join(serviceNames, ", ")),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "service",
 			Resources:   append([]string{podName}, serviceNames...),
 			UserImpact:  "Service availability reduced",
@@ -1141,19 +1138,19 @@ func (d *DependencyCorrelator) queryServiceDependencies(ctx context.Context, nam
 }
 
 // checkServiceExistence checks if a service exists and returns appropriate finding
-func (d *DependencyCorrelator) checkServiceExistence(record *GraphRecord, serviceName, namespace string, event *domain.UnifiedEvent) *aggregator.Finding {
+func (d *DependencyCorrelator) checkServiceExistence(record *GraphRecord, serviceName, namespace string, event *domain.UnifiedEvent) *Finding {
 	serviceNode, err := record.GetNode("s")
 	if err != nil || serviceNode == nil {
-		return &aggregator.Finding{
+		return &Finding{
 			ID:         fmt.Sprintf("service-not-found-%s", serviceName),
 			Type:       "service_not_found",
-			Severity:   aggregator.SeverityCritical,
+			Severity:   SeverityCritical,
 			Confidence: 0.95,
 			Message:    fmt.Sprintf("Service %s not found in namespace %s", serviceName, namespace),
-			Evidence: aggregator.Evidence{
+			Evidence: Evidence{
 				Events: []domain.UnifiedEvent{*event},
 			},
-			Impact: aggregator.Impact{
+			Impact: Impact{
 				Scope:       "service",
 				Resources:   []string{serviceName},
 				UserImpact:  "Service completely unavailable",
@@ -1166,10 +1163,10 @@ func (d *DependencyCorrelator) checkServiceExistence(record *GraphRecord, servic
 }
 
 // analyzePodAvailability analyzes pod availability for a service
-func (d *DependencyCorrelator) analyzePodAvailability(record *GraphRecord, serviceName, namespace string, event *domain.UnifiedEvent) []aggregator.Finding {
+func (d *DependencyCorrelator) analyzePodAvailability(record *GraphRecord, serviceName, namespace string, event *domain.UnifiedEvent) []Finding {
 	pods, err := record.GetNodes("pods")
 	if err != nil || len(pods) == 0 {
-		return []aggregator.Finding{d.createNoPodsAvailableFinding(serviceName, namespace, event)}
+		return []Finding{d.createNoPodsAvailableFinding(serviceName, namespace, event)}
 	}
 
 	// Analyze pod health metrics
@@ -1180,15 +1177,15 @@ func (d *DependencyCorrelator) analyzePodAvailability(record *GraphRecord, servi
 }
 
 // createNoPodsAvailableFinding creates finding when no pods are available
-func (d *DependencyCorrelator) createNoPodsAvailableFinding(serviceName, namespace string, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (d *DependencyCorrelator) createNoPodsAvailableFinding(serviceName, namespace string, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("service-no-pods-%s", serviceName),
 		Type:       "service_no_endpoints",
-		Severity:   aggregator.SeverityCritical,
+		Severity:   SeverityCritical,
 		Confidence: 0.90,
 		Message:    fmt.Sprintf("Service %s has no running pods", serviceName),
 		Evidence:   d.createServiceEvidence(serviceName, namespace, event),
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "service",
 			Resources:   []string{serviceName},
 			UserImpact:  "Service has no endpoints",
@@ -1199,11 +1196,11 @@ func (d *DependencyCorrelator) createNoPodsAvailableFinding(serviceName, namespa
 }
 
 // createServiceEvidence creates evidence for service-related findings
-func (d *DependencyCorrelator) createServiceEvidence(serviceName, namespace string, event *domain.UnifiedEvent) aggregator.Evidence {
-	return aggregator.Evidence{
+func (d *DependencyCorrelator) createServiceEvidence(serviceName, namespace string, event *domain.UnifiedEvent) Evidence {
+	return Evidence{
 		Events: []domain.UnifiedEvent{*event},
-		GraphPaths: []aggregator.GraphPath{{
-			Nodes: []aggregator.GraphNode{{
+		GraphPaths: []EvidenceGraphPath{{
+			Nodes: []EvidenceGraphNode{{
 				ID:   serviceName,
 				Type: "Service",
 				Labels: map[string]string{
@@ -1228,8 +1225,8 @@ func (d *DependencyCorrelator) calculatePodHealth(pods []GraphNode) (readyPods, 
 }
 
 // createPodHealthFindings creates findings based on pod health status
-func (d *DependencyCorrelator) createPodHealthFindings(serviceName string, readyPods, failedPods, totalPods int, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
+func (d *DependencyCorrelator) createPodHealthFindings(serviceName string, readyPods, failedPods, totalPods int, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
 
 	if readyPods == 0 && failedPods > 0 {
 		findings = append(findings, d.createAllPodsFailedFinding(serviceName, failedPods, event))
@@ -1241,17 +1238,17 @@ func (d *DependencyCorrelator) createPodHealthFindings(serviceName string, ready
 }
 
 // createAllPodsFailedFinding creates finding when all pods have failed
-func (d *DependencyCorrelator) createAllPodsFailedFinding(serviceName string, failedPods int, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (d *DependencyCorrelator) createAllPodsFailedFinding(serviceName string, failedPods int, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("service-pods-failed-%s", serviceName),
 		Type:       "service_endpoints_failed",
-		Severity:   aggregator.SeverityCritical,
+		Severity:   SeverityCritical,
 		Confidence: 0.85,
 		Message:    fmt.Sprintf("Service %s has %d failed pods, 0 ready", serviceName, failedPods),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "service",
 			Resources:   []string{serviceName},
 			UserImpact:  "Service unavailable due to pod failures",
@@ -1262,17 +1259,17 @@ func (d *DependencyCorrelator) createAllPodsFailedFinding(serviceName string, fa
 }
 
 // createDegradedServiceFinding creates finding when service is degraded
-func (d *DependencyCorrelator) createDegradedServiceFinding(serviceName string, readyPods, totalPods int, event *domain.UnifiedEvent) aggregator.Finding {
-	return aggregator.Finding{
+func (d *DependencyCorrelator) createDegradedServiceFinding(serviceName string, readyPods, totalPods int, event *domain.UnifiedEvent) Finding {
+	return Finding{
 		ID:         fmt.Sprintf("service-pods-degraded-%s", serviceName),
 		Type:       "service_endpoints_degraded",
-		Severity:   aggregator.SeverityHigh,
+		Severity:   SeverityHigh,
 		Confidence: 0.75,
 		Message:    fmt.Sprintf("Service %s has only %d/%d pods ready", serviceName, readyPods, totalPods),
-		Evidence: aggregator.Evidence{
+		Evidence: Evidence{
 			Events: []domain.UnifiedEvent{*event},
 		},
-		Impact: aggregator.Impact{
+		Impact: Impact{
 			Scope:       "service",
 			Resources:   []string{serviceName},
 			UserImpact:  "Service degraded due to pod failures",

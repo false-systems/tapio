@@ -285,14 +285,14 @@ func (q QueryParams) ToMap() map[string]any {
 
 // NodeCreationParams parameters for creating/updating nodes
 type NodeCreationParams struct {
-	UID             string            `json:"uid"`
-	Name            string            `json:"name"`
-	Namespace       string            `json:"namespace"`
-	Kind            string            `json:"kind"`
-	Timestamp       int64             `json:"timestamp"`
-	Labels          []string          `json:"labels"`
-	Annotations     []string          `json:"annotations"`
-	ResourceVersion string            `json:"resource_version"`
+	UID             string   `json:"uid"`
+	Name            string   `json:"name"`
+	Namespace       string   `json:"namespace"`
+	Kind            string   `json:"kind"`
+	Timestamp       int64    `json:"timestamp"`
+	Labels          []string `json:"labels"`
+	Annotations     []string `json:"annotations"`
+	ResourceVersion string   `json:"resource_version"`
 }
 
 // ToMap converts NodeCreationParams to map for Neo4j driver
@@ -337,9 +337,9 @@ func (p EventCreationParams) ToMap() map[string]any {
 
 // RelationshipCreationParams parameters for creating relationships
 type RelationshipCreationParams struct {
-	FromUID    string                 `json:"from_uid"`
-	ToUID      string                 `json:"to_uid"`
-	Timestamp  int64                  `json:"timestamp"`
+	FromUID    string                   `json:"from_uid"`
+	ToUID      string                   `json:"to_uid"`
+	Timestamp  int64                    `json:"timestamp"`
 	Properties map[string]PropertyValue `json:"properties"`
 }
 
