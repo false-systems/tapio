@@ -11,6 +11,10 @@
 #define IPPROTO_TCP 6
 #define IPPROTO_UDP 17
 
+// Address family constants
+#define AF_INET 2
+#define AF_INET6 10
+
 // Event types
 #define EVENT_TYPE_MEMORY_ALLOC 1
 #define EVENT_TYPE_MEMORY_FREE  2
@@ -409,11 +413,25 @@ int trace_tcp_connect(struct pt_regs *ctx)
     // Fill network info from socket using CO-RE
     __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
     
-    // Use CO-RE to read socket addresses safely
-    BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
-    BPF_CORE_READ_INTO(&event->net_info.saddr, sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&event->net_info.daddr, sk, __sk_common.skc_daddr);
+    // Check socket family for IPv4/IPv6
+    __u16 family = 0;
+    BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family);
+    
+    if (family == AF_INET) {
+        event->net_info.ip_version = 4;
+        // Use CO-RE to read IPv4 socket addresses safely
+        BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
+        BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+        BPF_CORE_READ_INTO(&event->net_info.saddr_v4, sk, __sk_common.skc_rcv_saddr);
+        BPF_CORE_READ_INTO(&event->net_info.daddr_v4, sk, __sk_common.skc_daddr);
+    } else if (family == AF_INET6) {
+        event->net_info.ip_version = 6;
+        // Read IPv6 addresses
+        BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
+        BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+        BPF_CORE_READ_INTO(&event->net_info.saddr_v6, sk, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
+        BPF_CORE_READ_INTO(&event->net_info.daddr_v6, sk, __sk_common.skc_v6_daddr.in6_u.u6_addr32);
+    }
     
     // Convert network byte order to host byte order for port
     event->net_info.dport = __builtin_bswap16(event->net_info.dport);
