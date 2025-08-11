@@ -10,45 +10,16 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/config"
 )
 
-// LegacyCollectorFactory is a function that creates a new collector instance from map[string]interface{}
-// DEPRECATED: Use TypedCollectorFactory instead. This exists only for backward compatibility.
-type LegacyCollectorFactory func(config map[string]interface{}) (collectors.Collector, error)
-
 // TypedCollectorFactory creates collectors from typed configurations
 type TypedCollectorFactory = config.CollectorFactory
 
 // registry holds all registered collector factories
 var (
-	mu              sync.RWMutex
-	legacyFactories = make(map[string]LegacyCollectorFactory)
-	typedFactories  = make(map[string]TypedCollectorFactory)
-	configParser    = config.NewConfigParser()
+	mu             sync.RWMutex
+	typedFactories = make(map[string]TypedCollectorFactory)
+	configParser   = config.NewConfigParser()
 )
 
-// Register registers a legacy collector factory with error handling
-// DEPRECATED: Use RegisterTypedFactory instead. This exists only for backward compatibility.
-func Register(name string, factory LegacyCollectorFactory) error {
-	if name == "" {
-		return fmt.Errorf("collector name cannot be empty")
-	}
-	if factory == nil {
-		return fmt.Errorf("factory cannot be nil")
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Check if already registered in either registry
-	if _, exists := legacyFactories[name]; exists {
-		return fmt.Errorf("collector %s already registered in legacy registry", name)
-	}
-	if _, exists := typedFactories[name]; exists {
-		return fmt.Errorf("collector %s already registered in typed registry", name)
-	}
-
-	legacyFactories[name] = factory
-	return nil
-}
 
 // RegisterTypedFactory registers a typed collector factory
 func RegisterTypedFactory(name string, factory TypedCollectorFactory) error {
@@ -62,12 +33,9 @@ func RegisterTypedFactory(name string, factory TypedCollectorFactory) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Check if already registered in either registry
-	if _, exists := legacyFactories[name]; exists {
-		return fmt.Errorf("collector %s already registered in legacy registry", name)
-	}
+	// Check if already registered
 	if _, exists := typedFactories[name]; exists {
-		return fmt.Errorf("collector %s already registered in typed registry", name)
+		return fmt.Errorf("collector %s already registered", name)
 	}
 
 	typedFactories[name] = factory
@@ -75,7 +43,7 @@ func RegisterTypedFactory(name string, factory TypedCollectorFactory) error {
 }
 
 // CreateCollector creates a collector instance by name with map[string]interface{} configuration
-// This method provides backward compatibility by parsing the map into typed configurations
+// This method parses the map into typed configurations and uses typed factories
 func CreateCollector(name string, config map[string]interface{}) (collectors.Collector, error) {
 	if name == "" {
 		return nil, fmt.Errorf("collector name cannot be empty")
@@ -85,43 +53,37 @@ func CreateCollector(name string, config map[string]interface{}) (collectors.Col
 	}
 
 	mu.RLock()
-	legacyFactory, legacyExists := legacyFactories[name]
-	typedFactory, typedExists := typedFactories[name]
+	typedFactory, exists := typedFactories[name]
 	mu.RUnlock()
 
-	// Prefer typed factory over legacy
-	if typedExists {
-		// Parse map config to typed config
-		typedConfig, err := configParser.ParseFromMap(name, config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse config for collector %s: %w", name, err)
-		}
-
-		// Validate the parsed config
-		if err := typedFactory.ValidateConfig(typedConfig); err != nil {
-			return nil, fmt.Errorf("config validation failed for collector %s: %w", name, err)
-		}
-
-		// Create collector and convert to proper type
-		collectorInterface, err := typedFactory.CreateCollector(context.Background(), typedConfig)
-		if err != nil {
-			return nil, err
-		}
-
-		// Type assert to collectors.Collector
-		collector, ok := collectorInterface.(collectors.Collector)
-		if !ok {
-			return nil, fmt.Errorf("factory returned invalid collector type for %s", name)
-		}
-
-		return collector, nil
+	if !exists {
+		return nil, fmt.Errorf("unknown collector type: %s", name)
 	}
 
-	if legacyExists {
-		return legacyFactory(config)
+	// Parse map config to typed config
+	typedConfig, err := configParser.ParseFromMap(name, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse config for collector %s: %w", name, err)
 	}
 
-	return nil, fmt.Errorf("unknown collector type: %s", name)
+	// Validate the parsed config
+	if err := typedFactory.ValidateConfig(typedConfig); err != nil {
+		return nil, fmt.Errorf("config validation failed for collector %s: %w", name, err)
+	}
+
+	// Create collector and convert to proper type
+	collectorInterface, err := typedFactory.CreateCollector(context.Background(), typedConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// Type assert to collectors.Collector
+	collector, ok := collectorInterface.(collectors.Collector)
+	if !ok {
+		return nil, fmt.Errorf("factory returned invalid collector type for %s", name)
+	}
+
+	return collector, nil
 }
 
 // CreateTypedCollector creates a collector instance using typed configuration
@@ -166,17 +128,8 @@ func ListCollectors() []string {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	// Combine both legacy and typed factory names
-	nameSet := make(map[string]bool)
-	for name := range legacyFactories {
-		nameSet[name] = true
-	}
+	names := make([]string, 0, len(typedFactories))
 	for name := range typedFactories {
-		nameSet[name] = true
-	}
-
-	names := make([]string, 0, len(nameSet))
-	for name := range nameSet {
 		names = append(names, name)
 	}
 
@@ -198,14 +151,13 @@ func ListTypedCollectors() []string {
 	return names
 }
 
-// IsRegistered checks if a collector type is registered (legacy or typed)
+// IsRegistered checks if a collector type is registered
 func IsRegistered(name string) bool {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	_, legacyExists := legacyFactories[name]
-	_, typedExists := typedFactories[name]
-	return legacyExists || typedExists
+	_, exists := typedFactories[name]
+	return exists
 }
 
 // IsTypedRegistered checks if a collector type is registered with typed factory

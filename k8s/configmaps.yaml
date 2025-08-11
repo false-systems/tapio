@@ -482,9 +482,9 @@ data:
         path: "/tmp/tapio-metrics.jsonl"
         format: json
       
-      # OTLP exporter for traces (replaces deprecated Jaeger exporter)
+      # OTLP exporter for traces to Jaeger
       otlp/traces:
-        endpoint: jaeger-collector.monitoring.svc.cluster.local:14250
+        endpoint: jaeger-collector.monitoring.svc.cluster.local:4317
         tls:
           insecure: true
         timeout: 30s
