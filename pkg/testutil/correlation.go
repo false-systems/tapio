@@ -1,4 +1,4 @@
-package correlation
+package testutil
 
 import (
 	"encoding/json"
@@ -17,6 +17,28 @@ type TestEventData struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 }
+
+// Kubernetes resource type constants for testing
+const (
+	ResourceTypePod         = "Pod"
+	ResourceTypeService     = "Service"
+	ResourceTypeConfigMap   = "ConfigMap"
+	ResourceTypeSecret      = "Secret"
+	ResourceTypeDeployment  = "Deployment"
+	ResourceTypeStatefulSet = "StatefulSet"
+	ResourceTypeDaemonSet   = "DaemonSet"
+	ResourceTypeNode        = "Node"
+)
+
+// Common test namespaces
+const (
+	DefaultNamespace    = "default"
+	KubeSystemNamespace = "kube-system"
+	ProductionNamespace = "production"
+)
+
+// TestDataDir is the base directory for test data files
+const TestDataDir = "testdata"
 
 // LoadTestData loads test data from testdata directory
 func LoadTestData(filename string) ([]byte, error) {

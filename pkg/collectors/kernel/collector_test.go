@@ -414,7 +414,7 @@ func TestParseNetworkInfoSafely(t *testing.T) {
 
 		_, err = collector.parseNetworkInfoSafely(buffer)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer too small for NetworkInfo")
+		assert.Contains(t, err.Error(), "buffer size mismatch")
 	})
 
 	t.Run("InvalidProtocol", func(t *testing.T) {
@@ -485,7 +485,7 @@ func TestParseFileInfoSafely(t *testing.T) {
 
 		_, err = collector.parseFileInfoSafely(buffer)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer too small for FileInfo")
+		assert.Contains(t, err.Error(), "buffer size mismatch")
 	})
 
 	t.Run("InvalidFilename", func(t *testing.T) {
@@ -502,7 +502,7 @@ func TestParseFileInfoSafely(t *testing.T) {
 
 		_, err = collector.parseFileInfoSafely(buffer)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid filename contains non-printable character")
+		assert.Contains(t, err.Error(), "non-printable character")
 	})
 
 	t.Run("ValidFilenameWithNullTerminator", func(t *testing.T) {

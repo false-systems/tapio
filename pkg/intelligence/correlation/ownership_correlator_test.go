@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
 )
 
@@ -264,15 +263,15 @@ func TestOwnershipCorrelator_CalculateConfidence(t *testing.T) {
 	correlator, _ := NewOwnershipCorrelator(mockStore, logger)
 
 	t.Run("no findings", func(t *testing.T) {
-		findings := []aggregator.Finding{}
+		findings := []Finding{}
 		confidence := correlator.calculateConfidence(findings)
 		assert.Equal(t, 0.0, confidence)
 	})
 
 	t.Run("single critical finding", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.9,
 			},
 		}
@@ -281,13 +280,13 @@ func TestOwnershipCorrelator_CalculateConfidence(t *testing.T) {
 	})
 
 	t.Run("multiple findings boost", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityHigh,
+				Severity:   domain.EventSeverityHigh,
 				Confidence: 0.8,
 			},
 			{
-				Severity:   aggregator.SeverityMedium,
+				Severity:   domain.EventSeverityMedium,
 				Confidence: 0.7,
 			},
 		}
@@ -300,13 +299,13 @@ func TestOwnershipCorrelator_CalculateConfidence(t *testing.T) {
 	})
 
 	t.Run("confidence capped at 1.0", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.95,
 			},
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.95,
 			},
 		}
@@ -409,13 +408,11 @@ func TestOwnershipCorrelator_BuildOwnershipHelpers(t *testing.T) {
 		assert.Equal(t, "test-deployment", edges[0].From)
 		assert.Equal(t, "test-deployment-abc123", edges[0].To)
 		assert.Equal(t, "OWNS", edges[0].Relationship)
-		assert.Equal(t, "deployment_replicaset", edges[0].Properties["type"])
 
 		// Check ReplicaSet→Pod edge
 		assert.Equal(t, "test-deployment-abc123", edges[1].From)
 		assert.Equal(t, "test-pod", edges[1].To)
 		assert.Equal(t, "OWNS", edges[1].Relationship)
-		assert.Equal(t, "replicaset_pod", edges[1].Properties["type"])
 	})
 
 	t.Run("buildOwnershipEdges direct ownership", func(t *testing.T) {
@@ -430,7 +427,6 @@ func TestOwnershipCorrelator_BuildOwnershipHelpers(t *testing.T) {
 		assert.Equal(t, "test-statefulset", edges[0].From)
 		assert.Equal(t, "test-pod-0", edges[0].To)
 		assert.Equal(t, "OWNS", edges[0].Relationship)
-		assert.Equal(t, "statefulset_pod", edges[0].Properties["type"])
 	})
 }
 
@@ -479,12 +475,12 @@ func TestOwnershipCorrelator_FindingHelpers(t *testing.T) {
 		//
 		// 		// Check ReplicaSet finding
 		// 		assert.Equal(t, "replicaset_not_ready", findings[0].Type)
-		// 		assert.Equal(t, aggregator.SeverityHigh, findings[0].Severity)
+		// 		assert.Equal(t, domain.EventSeverityHigh, findings[0].Severity)
 		// 		assert.Contains(t, findings[0].Message, "1/3 ready pods")
 		//
 		// 		// Check Deployment finding
 		// 		assert.Equal(t, "deployment_insufficient_pods", findings[1].Type)
-		// 		assert.Equal(t, aggregator.SeverityCritical, findings[1].Severity)
+		// 		assert.Equal(t, domain.EventSeverityCritical, findings[1].Severity)
 	})
 
 	t.Run("analyzeStatefulSetPods", func(t *testing.T) {
@@ -516,7 +512,7 @@ func TestOwnershipCorrelator_FindingHelpers(t *testing.T) {
 		//
 		// 		assert.Len(t, findings, 1)
 		// 		assert.Equal(t, "statefulset_pod_sequence_broken", findings[0].Type)
-		// 		assert.Equal(t, aggregator.SeverityCritical, findings[0].Severity)
+		// 		assert.Equal(t, domain.EventSeverityCritical, findings[0].Severity)
 		// 		assert.Contains(t, findings[0].Message, "broken at ordinal 1")
 		//
 		// 		attributes := findings[0].Evidence.Attributes

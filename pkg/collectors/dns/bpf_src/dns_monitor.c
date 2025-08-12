@@ -326,6 +326,7 @@ static __always_inline int extract_query_name(void *dns_data, void *data_end, ch
     char *qname = (char *)dns_data + sizeof(struct dnshdr);
     int pos = 0;
     int jumps = 0; // Prevent infinite loops in compression
+    __u32 max_offset = (char *)data_end - (char *)dns_data;  // Calculate actual DNS packet size
     
     // Safely parse DNS labels with compression support
     #pragma unroll
@@ -343,8 +344,8 @@ static __always_inline int extract_query_name(void *dns_data, void *data_end, ch
                 
             __u16 offset = ((__u16)(label_len & 0x3F) << 8) | (__u16)(*(qname + 1));
             
-            // Validate offset to prevent out-of-bounds access
-            if (offset >= (char *)data_end - (char *)dns_data)
+            // Validate offset to prevent out-of-bounds access - must be within DNS packet
+            if (offset >= max_offset || offset < sizeof(struct dnshdr))
                 break;
                 
             qname = (char *)dns_data + offset;
@@ -510,7 +511,8 @@ int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
     __u32 zero = 0;
     struct dns_scratch_buffer *scratch = bpf_map_lookup_elem(&dns_scratch, &zero);
     if (!scratch) {
-        bpf_ringbuf_discard(event, 0);
+        // Fallback: still submit event without address parsing
+        bpf_ringbuf_submit(event, 0);
         return 0;
     }
     
@@ -559,7 +561,43 @@ int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
     return 0;
 }
 
-// Enhanced DNS recvfrom monitoring with response correlation
+// Store recvfrom args for response correlation
+struct recvfrom_args {
+    void *buf;
+    size_t len;
+    struct sockaddr *src_addr;
+};
+
+// Map to store recvfrom arguments by PID
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u32);  // PID
+    __type(value, struct recvfrom_args);
+} recvfrom_args_map SEC(".maps");
+
+// Capture recvfrom entry to save buffer pointer
+SEC("tracepoint/syscalls/sys_enter_recvfrom")
+int trace_dns_recvfrom_enter(struct trace_event_raw_sys_enter *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
+    
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u8 *val = bpf_map_lookup_elem(&dns_pids, &pid);
+    if (!val && !is_dns_process(task))
+        return 0;
+    
+    struct recvfrom_args args = {
+        .buf = (void *)ctx->args[1],
+        .len = (size_t)ctx->args[2],
+        .src_addr = (struct sockaddr *)ctx->args[4]
+    };
+    
+    bpf_map_update_elem(&recvfrom_args_map, &pid, &args, BPF_ANY);
+    return 0;
+}
+
+// Enhanced DNS recvfrom monitoring with actual response data
 SEC("tracepoint/syscalls/sys_exit_recvfrom") 
 int trace_dns_recvfrom(struct trace_event_raw_sys_exit *ctx) {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
@@ -582,10 +620,17 @@ int trace_dns_recvfrom(struct trace_event_raw_sys_exit *ctx) {
     if (ret <= 0 || ret > 1500) // DNS response size limit
         return 0;
     
+    // Get saved args
+    struct recvfrom_args *args = bpf_map_lookup_elem(&recvfrom_args_map, &pid);
+    if (!args)
+        return 0;
+    
     // Reserve enhanced DNS response event
     struct dns_event *event = bpf_ringbuf_reserve(&dns_events, sizeof(*event), 0);
-    if (!event)
+    if (!event) {
+        bpf_map_delete_elem(&recvfrom_args_map, &pid);
         return 0;
+    }
     
     // Initialize response event
     __builtin_memset(event, 0, sizeof(*event));
@@ -599,12 +644,34 @@ int trace_dns_recvfrom(struct trace_event_raw_sys_exit *ctx) {
     event->event_type = DNS_EVENT_RESPONSE;
     event->data_len = (__u32)ret;
     
-    // For responses, we need to read the response data to get DNS ID for correlation
-    // This is tricky since we're in the exit of recvfrom and don't have direct access to the buffer
-    // We'll emit a basic response event and let userspace correlate based on timing
-    event->protocol = IPPROTO_UDP; // Most DNS responses use UDP
-    event->ip_version = 4; // Default assumption
+    // Read DNS response data to get ID for correlation
+    __u32 copy_len = ret > MAX_DNS_DATA ? MAX_DNS_DATA : (__u32)ret;
+    if (args->buf && bpf_probe_read_user(event->data, copy_len, args->buf) == 0) {
+        if (copy_len >= sizeof(struct dnshdr)) {
+            struct dnshdr *dns_hdr = (struct dnshdr *)event->data;
+            event->dns_id = bpf_ntohs(dns_hdr->id);
+            event->dns_flags = bpf_ntohs(dns_hdr->flags);
+            event->dns_rcode = event->dns_flags & 0x000F;
+            
+            // Look up pending query for latency calculation
+            struct query_context *qctx = bpf_map_lookup_elem(&pending_queries, &event->dns_id);
+            if (qctx) {
+                event->latency_ns = current_time - qctx->start_timestamp;
+                bpf_map_delete_elem(&pending_queries, &event->dns_id);
+            }
+        }
+    }
     
+    // Parse source address if available
+    if (args->src_addr) {
+        __u16 family;
+        if (bpf_probe_read_user(&family, sizeof(family), &args->src_addr->sa_family) == 0) {
+            event->ip_version = (family == AF_INET) ? 4 : 6;
+            event->protocol = IPPROTO_UDP;
+        }
+    }
+    
+    bpf_map_delete_elem(&recvfrom_args_map, &pid);
     bpf_ringbuf_submit(event, 0);
     return 0;
 }

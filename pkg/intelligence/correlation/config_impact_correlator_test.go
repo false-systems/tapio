@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
 )
 
@@ -264,15 +263,15 @@ func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
 	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	t.Run("no findings", func(t *testing.T) {
-		findings := []aggregator.Finding{}
+		findings := []Finding{}
 		confidence := correlator.calculateConfidence(findings)
 		assert.Equal(t, 0.0, confidence)
 	})
 
 	t.Run("single critical finding", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.9,
 			},
 		}
@@ -281,13 +280,13 @@ func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
 	})
 
 	t.Run("multiple findings boost", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityHigh,
+				Severity:   domain.EventSeverityHigh,
 				Confidence: 0.8,
 			},
 			{
-				Severity:   aggregator.SeverityMedium,
+				Severity:   domain.EventSeverityMedium,
 				Confidence: 0.7,
 			},
 		}
@@ -300,13 +299,13 @@ func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
 	})
 
 	t.Run("confidence capped at 1.0", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.95,
 			},
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.95,
 			},
 		}

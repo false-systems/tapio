@@ -147,11 +147,29 @@ func (t *EventTransformer) parseSystemdData(event *domain.UnifiedEvent, data []b
 		event.Application = &domain.ApplicationData{
 			Level:   string(event.Severity),
 			Message: event.Message,
-			Custom:  make(map[string]interface{}),
+			Custom: &domain.ApplicationCustomData{
+				Tags:    []string{},
+				Labels:  make(map[string]string),
+				Metrics: make(map[string]float64),
+			},
 		}
 
+		// Map common JSON fields to structured data
+		if method, ok := jsonData["method"].(string); ok {
+			event.Application.Custom.HTTPMethod = method
+		}
+		if path, ok := jsonData["path"].(string); ok {
+			event.Application.Custom.HTTPPath = path
+		}
+		if status, ok := jsonData["status"].(float64); ok {
+			event.Application.Custom.HTTPStatusCode = int(status)
+		}
+
+		// Store remaining fields as labels
 		for k, v := range jsonData {
-			event.Application.Custom[k] = v
+			if k != "method" && k != "path" && k != "status" {
+				event.Application.Custom.Labels[k] = fmt.Sprintf("%v", v)
+			}
 		}
 	} else {
 		// Raw log line

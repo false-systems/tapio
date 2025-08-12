@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	factoryregistry "github.com/yairfalse/tapio/pkg/collectors/factory"
 	"github.com/yairfalse/tapio/pkg/config"
 )
 
@@ -66,7 +66,7 @@ func (m *CollectorManager) Start(ctx context.Context) error {
 	collectorConfig := m.config.Collectors.ToCollectorConfig()
 
 	for _, name := range m.config.Collectors.Enabled {
-		collector, err := registry.CreateCollector(name, collectorConfig)
+		collector, err := factoryregistry.CreateCollector(name, collectorConfig)
 		if err != nil {
 			// Log error but continue with other collectors
 			continue
@@ -187,7 +187,7 @@ func (m *CollectorManager) RestartCollector(name string) error {
 
 	// Create and start new instance
 	collectorConfig := m.config.Collectors.ToCollectorConfig()
-	collector, err := registry.CreateCollector(name, collectorConfig)
+	collector, err := factoryregistry.CreateCollector(name, collectorConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}

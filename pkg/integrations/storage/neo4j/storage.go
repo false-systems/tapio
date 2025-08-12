@@ -258,8 +258,8 @@ func (s *Storage) GetRecent(ctx context.Context, limit int) ([]*correlation.Corr
 		LIMIT $limit
 	`
 
-	params := map[string]interface{}{
-		"limit": limit,
+	params := neo4jclient.QueryParams{
+		Limit: limit,
 	}
 
 	records, err := s.client.ExecuteQuery(ctx, query, params)
@@ -267,7 +267,7 @@ func (s *Storage) GetRecent(ctx context.Context, limit int) ([]*correlation.Corr
 		return nil, err
 	}
 
-	return s.recordsToResults(records), nil
+	return s.queryResultToCorrelations(records), nil
 }
 
 // GetByTraceID retrieves correlations by trace ID
@@ -282,8 +282,10 @@ func (s *Storage) GetByTraceID(ctx context.Context, traceID string) ([]*correlat
 		ORDER BY c.startTime DESC
 	`
 
-	params := map[string]interface{}{
-		"traceId": traceID,
+	params := neo4jclient.QueryParams{
+		StringParams: map[string]string{
+			"traceId": traceID,
+		},
 	}
 
 	records, err := s.client.ExecuteQuery(ctx, query, params)
@@ -291,7 +293,7 @@ func (s *Storage) GetByTraceID(ctx context.Context, traceID string) ([]*correlat
 		return nil, err
 	}
 
-	return s.recordsToResults(records), nil
+	return s.queryResultToCorrelations(records), nil
 }
 
 // Cleanup removes old correlations
@@ -332,7 +334,54 @@ func (s *Storage) Close(ctx context.Context) error {
 }
 
 // recordsToResults converts Neo4j records to CorrelationResult structs
-func (s *Storage) recordsToResults(records []map[string]interface{}) []*correlation.CorrelationResult {
+// queryResultToCorrelations converts QueryResult to correlation results
+func (s *Storage) queryResultToCorrelations(result *neo4jclient.QueryResult) []*correlation.CorrelationResult {
+	if result == nil || len(result.Records) == 0 {
+		return nil
+	}
+
+	correlations := make([]*correlation.CorrelationResult, 0, len(result.Records))
+	for _, record := range result.Records {
+		if record.Correlation != nil {
+			corr := s.nodeToCorrelation(record.Correlation)
+			if corr != nil {
+				correlations = append(correlations, corr)
+			}
+		}
+	}
+	return correlations
+}
+
+// nodeToCorrelation converts a CorrelationNode to CorrelationResult
+func (s *Storage) nodeToCorrelation(node *neo4jclient.CorrelationNode) *correlation.CorrelationResult {
+	if node == nil {
+		return nil
+	}
+
+	return &correlation.CorrelationResult{
+		ID:         node.ID,
+		Type:       node.Type,
+		Confidence: node.Confidence,
+		StartTime:  node.StartTime,
+		EndTime:    node.EndTime,
+		TraceID:    node.TraceID,
+		Summary:    node.Summary,
+		Message:    node.Summary, // Use summary as message
+		Events:     []string{},   // Would need additional query for related events
+		Details: correlation.CorrelationDetails{
+			Pattern:   node.Type,
+			Algorithm: "neo4j_correlation",
+		},
+		Evidence: correlation.EvidenceData{
+			EventIDs:    []string{},
+			ResourceIDs: []string{},
+			Attributes:  make(map[string]string),
+			Metrics:     make(map[string]correlation.MetricValue),
+		},
+	}
+}
+
+func (s *Storage) recordsToResults(records []map[string]any) []*correlation.CorrelationResult {
 	var results []*correlation.CorrelationResult
 
 	for _, record := range records {
@@ -433,35 +482,35 @@ func (s *Storage) recordsToResults(records []map[string]interface{}) []*correlat
 }
 
 // Helper functions
-func getString(props map[string]interface{}, key string) string {
+func getString(props map[string]any, key string) string {
 	if val, ok := props[key].(string); ok {
 		return val
 	}
 	return ""
 }
 
-func getFloat64(props map[string]interface{}, key string) float64 {
+func getFloat64(props map[string]any, key string) float64 {
 	if val, ok := props[key].(float64); ok {
 		return val
 	}
 	return 0
 }
 
-func getInt64(props map[string]interface{}, key string) int64 {
+func getInt64(props map[string]any, key string) int64 {
 	if val, ok := props[key].(int64); ok {
 		return val
 	}
 	return 0
 }
 
-func getStringSlice(props map[string]interface{}, key string) []string {
-	if val, ok := props[key].([]interface{}); ok {
+func getStringSlice(props map[string]any, key string) []string {
+	if val, ok := props[key].([]any); ok {
 		return interfaceSliceToStringSlice(val)
 	}
 	return nil
 }
 
-func interfaceSliceToStringSlice(slice []interface{}) []string {
+func interfaceSliceToStringSlice(slice []any) []string {
 	result := make([]string, 0, len(slice))
 	for _, v := range slice {
 		if str, ok := v.(string); ok {

@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -15,8 +16,12 @@ import (
 type ProcessEvent struct {
 	Timestamp uint64
 	PID       uint32
+	PPID      uint32  // Parent PID
 	TID       uint32
+	UID       uint32
+	GID       uint32
 	EventType uint32
+	ExitCode  int32
 	Size      uint64
 	Comm      [16]byte
 	CgroupID  uint64
@@ -33,13 +38,15 @@ type Collector struct {
 	reader     *ringbuf.Reader
 	links      []link.Link
 	safeParser *collectors.SafeParser
+	stopped    bool
+	mu         sync.RWMutex
 }
 
 // NewProcessCollector creates a new process collector
 func NewProcessCollector(logger *zap.Logger) *Collector {
 	return &Collector{
 		logger:     logger,
-		events:     make(chan collectors.RawEvent, 2000),
+		events:     make(chan collectors.RawEvent, 3000),
 		safeParser: collectors.NewSafeParser(),
 	}
 }
@@ -65,6 +72,13 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops process monitoring
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	if c.stopped {
+		return nil
+	}
+	
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -81,6 +95,7 @@ func (c *Collector) Stop() error {
 		close(c.events)
 	}
 
+	c.stopped = true
 	c.logger.Info("Process collector stopped")
 	return nil
 }

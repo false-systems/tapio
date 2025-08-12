@@ -29,6 +29,10 @@ type EngineConfiguration struct {
 	CorrelationWindow time.Duration `json:"correlation_window"`
 	PatternTimeout    time.Duration `json:"pattern_timeout"`
 
+	// Storage worker pool configuration
+	StorageWorkerCount int `json:"storage_worker_count"`
+	StorageQueueSize   int `json:"storage_queue_size"`
+
 	// Feature flags
 	EnableK8s         bool `json:"enable_k8s"`
 	EnableTemporal    bool `json:"enable_temporal"`
@@ -109,56 +113,83 @@ type MemoryStorageConfig struct {
 // DefaultCorrelationConfig returns the default configuration with all timeouts and limits
 func DefaultCorrelationConfig() *CorrelationConfig {
 	return &CorrelationConfig{
-		Engine: EngineConfiguration{
-			EventBufferSize:        getEnvInt("CORRELATION_EVENT_BUFFER_SIZE", 1000),
-			ResultBufferSize:       getEnvInt("CORRELATION_RESULT_BUFFER_SIZE", 1000),
-			WorkerCount:            getEnvInt("CORRELATION_WORKER_COUNT", 4),
-			ProcessingTimeout:      getEnvDuration("CORRELATION_PROCESSING_TIMEOUT", 30*time.Second),
-			EnableK8s:              getEnvBool("CORRELATION_ENABLE_K8S", true),
-			EnableTemporal:         getEnvBool("CORRELATION_ENABLE_TEMPORAL", true),
-			EnableSequence:         getEnvBool("CORRELATION_ENABLE_SEQUENCE", true),
-			EnablePerformance:      getEnvBool("CORRELATION_ENABLE_PERFORMANCE", true),
-			EnableServiceMap:       getEnvBool("CORRELATION_ENABLE_SERVICEMAP", true),
-			StorageCleanupInterval: getEnvDuration("CORRELATION_STORAGE_CLEANUP_INTERVAL", 5*time.Minute),
-			StorageRetention:       getEnvDuration("CORRELATION_STORAGE_RETENTION", 24*time.Hour),
-		},
-		Temporal: TemporalConfiguration{
-			TimeWindow:             getEnvDuration("TEMPORAL_TIME_WINDOW", 5*time.Minute),
-			ConfigWindow:           getEnvDuration("TEMPORAL_CONFIG_WINDOW", 30*time.Minute),
-			RestartWindow:          getEnvDuration("TEMPORAL_RESTART_WINDOW", 10*time.Minute),
-			PodStartupWindow:       getEnvDuration("TEMPORAL_POD_STARTUP_WINDOW", 5*time.Minute),
-			ServiceMetricsWin:      getEnvDuration("TEMPORAL_SERVICE_METRICS_WINDOW", 5*time.Minute),
-			DefaultPatternTimeout:  getEnvDuration("TEMPORAL_DEFAULT_PATTERN_TIMEOUT", 2*time.Minute),
-			LongPatternTimeout:     getEnvDuration("TEMPORAL_LONG_PATTERN_TIMEOUT", 5*time.Minute),
-			ExtendedPatternTimeout: getEnvDuration("TEMPORAL_EXTENDED_PATTERN_TIMEOUT", 10*time.Minute),
-			MaxTemporalItems:       getEnvInt("TEMPORAL_MAX_ITEMS", 10000),
-			MaxPatternsTracked:     getEnvInt("TEMPORAL_MAX_PATTERNS", 1000),
-			MaxEventAge:            getEnvDuration("TEMPORAL_MAX_EVENT_AGE", 24*time.Hour),
-		},
-		Sequence: SequenceConfiguration{
-			MaxSequenceAge:     getEnvDuration("SEQUENCE_MAX_AGE", 15*time.Minute),
-			MaxSequenceGap:     getEnvDuration("SEQUENCE_MAX_GAP", 3*time.Minute),
-			MinSequenceLength:  getEnvInt("SEQUENCE_MIN_LENGTH", 3),
-			SequenceWindow:     getEnvDuration("SEQUENCE_WINDOW", 5*time.Second),
-			MaxActiveSequences: getEnvInt("SEQUENCE_MAX_ACTIVE", 1000),
-		},
-		Memory: MemoryStorageConfig{
-			MaxSize: getEnvInt("MEMORY_STORAGE_MAX_SIZE", 10000),
-			MaxAge:  getEnvDuration("MEMORY_STORAGE_MAX_AGE", 24*time.Hour),
-		},
-		Processing: ProcessingConfiguration{
-			DefaultRetryDelay:       getEnvDuration("PROCESSING_RETRY_DELAY", 1*time.Second),
-			MaxRetryAttempts:        getEnvInt("PROCESSING_MAX_RETRIES", 3),
-			ProcessingDelay:         getEnvDuration("PROCESSING_DELAY", 100*time.Millisecond),
-			SlowProcessingThreshold: getEnvDuration("PROCESSING_SLOW_THRESHOLD", 100*time.Millisecond),
-			HighLatencyThresholdMs:  getEnvInt64("PROCESSING_HIGH_LATENCY_MS", 1000),
-			MaxEventsPerCorrelation: getEnvInt("PROCESSING_MAX_EVENTS_PER_CORRELATION", 50),
-			DefaultQueryLimit:       getEnvInt("QUERY_DEFAULT_LIMIT", 100),
-			MaxQueryLimit:           getEnvInt("QUERY_MAX_LIMIT", 1000),
-			ServiceQueryLimit:       getEnvInt("QUERY_SERVICE_LIMIT", 100),
-			OwnershipQueryLimit:     getEnvInt("QUERY_OWNERSHIP_LIMIT", 100),
-			PodQueryLimit:           getEnvInt("QUERY_POD_LIMIT", 100),
-		},
+		Engine:     buildEngineConfig(),
+		Temporal:   buildTemporalConfig(),
+		Sequence:   buildSequenceConfig(),
+		Memory:     buildMemoryConfig(),
+		Processing: buildProcessingConfig(),
+	}
+}
+
+// buildEngineConfig creates default engine configuration
+func buildEngineConfig() EngineConfiguration {
+	return EngineConfiguration{
+		EventBufferSize:        getEnvInt("CORRELATION_EVENT_BUFFER_SIZE", 1000),
+		ResultBufferSize:       getEnvInt("CORRELATION_RESULT_BUFFER_SIZE", 1000),
+		WorkerCount:            getEnvInt("CORRELATION_WORKER_COUNT", 4),
+		StorageWorkerCount:     getEnvInt("CORRELATION_STORAGE_WORKER_COUNT", 10),
+		StorageQueueSize:       getEnvInt("CORRELATION_STORAGE_QUEUE_SIZE", 100),
+		ProcessingTimeout:      getEnvDuration("CORRELATION_PROCESSING_TIMEOUT", 30*time.Second),
+		EnableK8s:              getEnvBool("CORRELATION_ENABLE_K8S", true),
+		EnableTemporal:         getEnvBool("CORRELATION_ENABLE_TEMPORAL", true),
+		EnableSequence:         getEnvBool("CORRELATION_ENABLE_SEQUENCE", true),
+		EnablePerformance:      getEnvBool("CORRELATION_ENABLE_PERFORMANCE", true),
+		EnableServiceMap:       getEnvBool("CORRELATION_ENABLE_SERVICEMAP", true),
+		StorageCleanupInterval: getEnvDuration("CORRELATION_STORAGE_CLEANUP_INTERVAL", 5*time.Minute),
+		StorageRetention:       getEnvDuration("CORRELATION_STORAGE_RETENTION", 24*time.Hour),
+	}
+}
+
+// buildTemporalConfig creates default temporal configuration
+func buildTemporalConfig() TemporalConfiguration {
+	return TemporalConfiguration{
+		TimeWindow:             getEnvDuration("TEMPORAL_TIME_WINDOW", 5*time.Minute),
+		ConfigWindow:           getEnvDuration("TEMPORAL_CONFIG_WINDOW", 30*time.Minute),
+		RestartWindow:          getEnvDuration("TEMPORAL_RESTART_WINDOW", 10*time.Minute),
+		PodStartupWindow:       getEnvDuration("TEMPORAL_POD_STARTUP_WINDOW", 5*time.Minute),
+		ServiceMetricsWin:      getEnvDuration("TEMPORAL_SERVICE_METRICS_WINDOW", 5*time.Minute),
+		DefaultPatternTimeout:  getEnvDuration("TEMPORAL_DEFAULT_PATTERN_TIMEOUT", 2*time.Minute),
+		LongPatternTimeout:     getEnvDuration("TEMPORAL_LONG_PATTERN_TIMEOUT", 5*time.Minute),
+		ExtendedPatternTimeout: getEnvDuration("TEMPORAL_EXTENDED_PATTERN_TIMEOUT", 10*time.Minute),
+		MaxTemporalItems:       getEnvInt("TEMPORAL_MAX_ITEMS", 10000),
+		MaxPatternsTracked:     getEnvInt("TEMPORAL_MAX_PATTERNS", 1000),
+		MaxEventAge:            getEnvDuration("TEMPORAL_MAX_EVENT_AGE", 24*time.Hour),
+	}
+}
+
+// buildSequenceConfig creates default sequence configuration
+func buildSequenceConfig() SequenceConfiguration {
+	return SequenceConfiguration{
+		MaxSequenceAge:     getEnvDuration("SEQUENCE_MAX_AGE", 15*time.Minute),
+		MaxSequenceGap:     getEnvDuration("SEQUENCE_MAX_GAP", 3*time.Minute),
+		MinSequenceLength:  getEnvInt("SEQUENCE_MIN_LENGTH", 3),
+		SequenceWindow:     getEnvDuration("SEQUENCE_WINDOW", 5*time.Second),
+		MaxActiveSequences: getEnvInt("SEQUENCE_MAX_ACTIVE", 1000),
+	}
+}
+
+// buildMemoryConfig creates default memory configuration
+func buildMemoryConfig() MemoryStorageConfig {
+	return MemoryStorageConfig{
+		MaxSize: getEnvInt("MEMORY_STORAGE_MAX_SIZE", 10000),
+		MaxAge:  getEnvDuration("MEMORY_STORAGE_MAX_AGE", 24*time.Hour),
+	}
+}
+
+// buildProcessingConfig creates default processing configuration
+func buildProcessingConfig() ProcessingConfiguration {
+	return ProcessingConfiguration{
+		DefaultRetryDelay:       getEnvDuration("PROCESSING_RETRY_DELAY", 1*time.Second),
+		MaxRetryAttempts:        getEnvInt("PROCESSING_MAX_RETRIES", 3),
+		ProcessingDelay:         getEnvDuration("PROCESSING_DELAY", 100*time.Millisecond),
+		SlowProcessingThreshold: getEnvDuration("PROCESSING_SLOW_THRESHOLD", 100*time.Millisecond),
+		HighLatencyThresholdMs:  getEnvInt64("PROCESSING_HIGH_LATENCY_MS", 1000),
+		MaxEventsPerCorrelation: getEnvInt("PROCESSING_MAX_EVENTS_PER_CORRELATION", 50),
+		DefaultQueryLimit:       getEnvInt("QUERY_DEFAULT_LIMIT", 100),
+		MaxQueryLimit:           getEnvInt("QUERY_MAX_LIMIT", 1000),
+		ServiceQueryLimit:       getEnvInt("QUERY_SERVICE_LIMIT", 100),
+		OwnershipQueryLimit:     getEnvInt("QUERY_OWNERSHIP_LIMIT", 100),
+		PodQueryLimit:           getEnvInt("QUERY_POD_LIMIT", 100),
 	}
 }
 
@@ -192,6 +223,18 @@ func (e *EngineConfiguration) Validate() error {
 	}
 	if e.WorkerCount <= 0 {
 		return fmt.Errorf("worker count must be positive")
+	}
+	if e.StorageWorkerCount < 0 {
+		return fmt.Errorf("storage worker count cannot be negative")
+	}
+	if e.StorageWorkerCount > 100 {
+		return fmt.Errorf("storage worker count must be <= 100 to prevent resource exhaustion")
+	}
+	if e.StorageQueueSize < 0 {
+		return fmt.Errorf("storage queue size cannot be negative")
+	}
+	if e.StorageQueueSize > 10000 {
+		return fmt.Errorf("storage queue size must be <= 10000 to prevent memory exhaustion")
 	}
 	if e.ProcessingTimeout <= 0 {
 		return fmt.Errorf("processing timeout must be positive")
@@ -325,7 +368,9 @@ type EngineConfig struct {
 	ChannelBufferSize int `json:"channel_buffer_size"`
 
 	// Worker configuration
-	WorkerCount int `json:"worker_count"`
+	WorkerCount        int `json:"worker_count"`
+	StorageWorkerCount int `json:"storage_worker_count"`
+	StorageQueueSize   int `json:"storage_queue_size"`
 
 	// Storage configuration
 	StorageCleanupInterval time.Duration `json:"storage_cleanup_interval"`
@@ -351,27 +396,57 @@ type EngineConfig struct {
 
 // DefaultEngineConfig returns production-ready defaults
 func DefaultEngineConfig() *EngineConfig {
-	return &EngineConfig{
-		ProcessingTimeout:      DefaultProcessingTimeout,
-		CorrelationWindow:      DefaultPatternTimeout,
-		PatternTimeout:         DefaultPatternTimeout,
-		EventBufferSize:        DefaultEventBufferSize,
-		ResultBufferSize:       DefaultResultBufferSize,
-		ChannelBufferSize:      DefaultChannelBuffer,
-		WorkerCount:            4,
-		StorageCleanupInterval: ServiceMetricsWindow,
-		StorageRetention:       MaxEventAge,
-		DefaultQueryLimit:      DefaultQueryLimit,
-		MaxQueryLimit:          MaxQueryLimit,
-		ServiceQueryLimit:      ServiceQueryLimit,
-		OwnershipQueryLimit:    OwnershipQueryLimit,
-		PodQueryLimit:          PodQueryLimit,
-		MinConfidence:          MinConfidenceThreshold,
-		MaxActiveSequences:     MaxActiveSequences,
-		MaxPatternsTracked:     MaxPatternsTracked,
-		MaxEventsPerCorr:       MaxEventsPerCorrelation,
-		KubernetesNamespace:    DefaultNamespace,
-		EnabledCorrelators:     []string{"dependency", "temporal", "ownership", "config-impact", "k8s", "sequence", "servicemap"},
+	config := &EngineConfig{}
+	setEngineTimeouts(config)
+	setEngineBuffers(config)
+	setEngineQueryLimits(config)
+	setEngineCorrelationSettings(config)
+	setEngineDefaults(config)
+	return config
+}
+
+// setEngineTimeouts configures timeout settings
+func setEngineTimeouts(config *EngineConfig) {
+	config.ProcessingTimeout = DefaultProcessingTimeout
+	config.CorrelationWindow = DefaultPatternTimeout
+	config.PatternTimeout = DefaultPatternTimeout
+	config.StorageCleanupInterval = ServiceMetricsWindow
+	config.StorageRetention = MaxEventAge
+}
+
+// setEngineBuffers configures buffer sizes
+func setEngineBuffers(config *EngineConfig) {
+	config.EventBufferSize = DefaultEventBufferSize
+	config.ResultBufferSize = DefaultResultBufferSize
+	config.ChannelBufferSize = DefaultChannelBuffer
+	config.WorkerCount = 4
+	config.StorageWorkerCount = 10
+	config.StorageQueueSize = 100
+}
+
+// setEngineQueryLimits configures query limits
+func setEngineQueryLimits(config *EngineConfig) {
+	config.DefaultQueryLimit = DefaultQueryLimit
+	config.MaxQueryLimit = MaxQueryLimit
+	config.ServiceQueryLimit = ServiceQueryLimit
+	config.OwnershipQueryLimit = OwnershipQueryLimit
+	config.PodQueryLimit = PodQueryLimit
+}
+
+// setEngineCorrelationSettings configures correlation parameters
+func setEngineCorrelationSettings(config *EngineConfig) {
+	config.MinConfidence = MinConfidenceThreshold
+	config.MaxActiveSequences = MaxActiveSequences
+	config.MaxPatternsTracked = MaxPatternsTracked
+	config.MaxEventsPerCorr = MaxEventsPerCorrelation
+}
+
+// setEngineDefaults configures default settings
+func setEngineDefaults(config *EngineConfig) {
+	config.KubernetesNamespace = DefaultNamespace
+	config.EnabledCorrelators = []string{
+		"dependency", "temporal", "ownership", "config-impact",
+		"k8s", "sequence", "servicemap",
 	}
 }
 
@@ -385,6 +460,8 @@ func TestEngineConfig() *EngineConfig {
 		ResultBufferSize:       TestResultBufferSize,
 		ChannelBufferSize:      TestChannelBuffer,
 		WorkerCount:            2,
+		StorageWorkerCount:     2,
+		StorageQueueSize:       20,
 		StorageCleanupInterval: TestCleanupInterval,
 		StorageRetention:       TestRetention,
 		DefaultQueryLimit:      DefaultQueryLimit,
@@ -403,54 +480,94 @@ func TestEngineConfig() *EngineConfig {
 
 // Validate checks if engine configuration is valid according to CLAUDE.md standards
 func (c *EngineConfig) Validate() error {
+	if err := c.validateTimeouts(); err != nil {
+		return fmt.Errorf("timeout validation failed: %w", err)
+	}
+	if err := c.validateBuffers(); err != nil {
+		return fmt.Errorf("buffer validation failed: %w", err)
+	}
+	if err := c.validateQueryLimits(); err != nil {
+		return fmt.Errorf("query limit validation failed: %w", err)
+	}
+	if err := c.validateCorrelationSettings(); err != nil {
+		return fmt.Errorf("correlation settings validation failed: %w", err)
+	}
+	if err := c.validateCorrelators(); err != nil {
+		return fmt.Errorf("correlator validation failed: %w", err)
+	}
+	return nil
+}
+
+// validateTimeouts validates timeout configuration
+func (c *EngineConfig) validateTimeouts() error {
 	if c.ProcessingTimeout <= 0 {
 		return fmt.Errorf("processing timeout must be positive, got: %v", c.ProcessingTimeout)
 	}
-
 	if c.CorrelationWindow <= 0 {
 		return fmt.Errorf("correlation window must be positive, got: %v", c.CorrelationWindow)
 	}
-
 	if c.PatternTimeout <= 0 {
 		return fmt.Errorf("pattern timeout must be positive, got: %v", c.PatternTimeout)
 	}
+	return nil
+}
 
+// validateBuffers validates buffer size configuration
+func (c *EngineConfig) validateBuffers() error {
 	if c.EventBufferSize <= 0 {
 		return fmt.Errorf("event buffer size must be positive, got: %d", c.EventBufferSize)
 	}
-
 	if c.ResultBufferSize <= 0 {
 		return fmt.Errorf("result buffer size must be positive, got: %d", c.ResultBufferSize)
 	}
+	if c.StorageWorkerCount < 0 {
+		return fmt.Errorf("storage worker count cannot be negative, got: %d", c.StorageWorkerCount)
+	}
+	if c.StorageWorkerCount > 100 {
+		return fmt.Errorf("storage worker count must be <= 100, got: %d", c.StorageWorkerCount)
+	}
+	if c.StorageQueueSize < 0 {
+		return fmt.Errorf("storage queue size cannot be negative, got: %d", c.StorageQueueSize)
+	}
+	if c.StorageQueueSize > 10000 {
+		return fmt.Errorf("storage queue size must be <= 10000, got: %d", c.StorageQueueSize)
+	}
+	return nil
+}
 
+// validateQueryLimits validates query limit configuration
+func (c *EngineConfig) validateQueryLimits() error {
 	if c.DefaultQueryLimit <= 0 {
 		return fmt.Errorf("default query limit must be positive, got: %d", c.DefaultQueryLimit)
 	}
-
 	if c.MaxQueryLimit < c.DefaultQueryLimit {
 		return fmt.Errorf("max query limit (%d) must be >= default query limit (%d)", c.MaxQueryLimit, c.DefaultQueryLimit)
 	}
+	return nil
+}
 
+// validateCorrelationSettings validates correlation parameters
+func (c *EngineConfig) validateCorrelationSettings() error {
 	if c.MinConfidence < 0 || c.MinConfidence > MaxConfidenceValue {
 		return fmt.Errorf("min confidence must be between 0 and %.1f, got: %.2f", MaxConfidenceValue, c.MinConfidence)
 	}
-
 	if c.MaxActiveSequences <= 0 {
 		return fmt.Errorf("max active sequences must be positive, got: %d", c.MaxActiveSequences)
 	}
-
 	if c.MaxPatternsTracked <= 0 {
 		return fmt.Errorf("max patterns tracked must be positive, got: %d", c.MaxPatternsTracked)
 	}
-
 	if c.MaxEventsPerCorr <= 0 {
 		return fmt.Errorf("max events per correlation must be positive, got: %d", c.MaxEventsPerCorr)
 	}
+	return nil
+}
 
+// validateCorrelators validates correlator configuration
+func (c *EngineConfig) validateCorrelators() error {
 	if len(c.EnabledCorrelators) == 0 {
 		return fmt.Errorf("at least one correlator must be enabled")
 	}
-
 	return nil
 }
 
