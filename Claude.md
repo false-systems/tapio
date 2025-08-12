@@ -3,6 +3,80 @@
 ### REFACTOR MODE (TEMPORARY - FOR MEGA REFACTOR ONLY)
 During major refactoring, use incremental validation for faster iteration:
 
+RULE: Components can only import from lower levels. NO exceptions.
+
+Module Structure (MANDATORY)
+
+We use one go.mod file.
+Must build standalone: cd pkg/X && go build ./...
+Must test standalone: cd pkg/X && go test ./...
+We Never Git -a: We only add our changes per work.
+
+⚡ Agent Instructions (BRUTAL)
+
+Build Requirements
+MUST FORMAT: make fmt before any commit
+MUST COMPILE: go build ./... must pass
+MUST TEST: go test ./... must pass
+NO STUBS: No "TODO", "not implemented", empty functions
+SHOW PROOF: Paste build/test output or FAIL
+NO PUSH TO MAIN:  We work with branches and PR.
+SMALL BATCHES: We code small parts, run gofmt, linter, vet and commit
+
+Quality Standards
+80% test coverage minimum
+you must create unit testing to your code full coverge.
+No map[string]interface{} in public APIs
+No interface{} abuse
+Proper error handling with context
+NO Stubs, no shortcuts
+YOU work on a dedicated branch
+Code must be readble
+
+Verification (MANDATORY)
+# You MUST show this output:
+make fmt                 # Format code first
+gofmt -l . | grep -v vendor | wc -l    # MUST return 0
+go build ./...
+go test ./...
+go mod verify
+
+🔧 Current Priorities
+Getting the whole thing to work
+Success Metrics
+All collectors building independently ✅
+Semantic correlation working ✅
+CI/CD enforcement active ✅
+Revenue features ready
+
+Core Mission
+Root Cause Analysis: Every correlation must identify WHY, not just WHAT happened
+Best Practices: No shortcuts, no stubs, no endless loops of "fixing/thinking/asking" - deliver working solutions
+
+🚫 Failure Conditions
+Instant Task Reassignment If
+Code not formatted (gofmt failures)
+Build errors
+Test failures
+Architectural violations
+Missing verification output
+Stub functions or TODOs
+work on dedicated branchs, PR only your code!
+
+No Excuses For
+"Forgot to format" - Always run make fmt
+"Complex existing code" - Use what exists
+"Need to refactor first" - Follow requirements
+"Just one small TODO" - Zero tolerance
+"Can't find interfaces" - Ask for help
+"fast solutions"- ask for advice
+
+📋 Task Template
+Every task must include:
+
+## Verification Results
+
+### Code Formatting:
 ```bash
 # ENABLE REFACTOR MODE (95% faster validation, incremental CI)
 make refactor-mode
