@@ -717,7 +717,7 @@ func (p *PerformanceCorrelator) cacheEvent(event *domain.UnifiedEvent) {
 
 	// Keep only recent events
 	cutoff := time.Now().Add(-p.recentEvents.ttl)
-	filtered := make([]*domain.UnifiedEvent, 0)
+	filtered := make([]*domain.UnifiedEvent, 0, len(p.recentEvents.events[key]))
 	for _, e := range p.recentEvents.events[key] {
 		if e.Timestamp.After(cutoff) {
 			filtered = append(filtered, e)
@@ -730,7 +730,9 @@ func (p *PerformanceCorrelator) findRelatedEvents(podKey string, eventTypes []st
 	p.recentEvents.mu.RLock()
 	defer p.recentEvents.mu.RUnlock()
 
-	related := make([]*domain.UnifiedEvent, 0)
+	// Pre-allocate with capacity for better performance
+	eventsForKey := p.recentEvents.events[podKey]
+	related := make([]*domain.UnifiedEvent, 0, len(eventsForKey))
 	cutoff := time.Now().Add(-window)
 
 	for _, event := range p.recentEvents.events[podKey] {

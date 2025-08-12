@@ -76,13 +76,25 @@ func (pm *PatternMatcher) matchesPattern(findingTypes []string, chain []CausalLi
 		return false
 	}
 
-	// Check required types
+	// Create index of finding types for O(1) lookup
+	typeIndex := make(map[string]bool, len(findingTypes))
+	for _, fType := range findingTypes {
+		typeIndex[fType] = true
+	}
+
+	// Check required types using index
 	for _, required := range sig.RequiredTypes {
 		found := false
-		for _, fType := range findingTypes {
-			if strings.Contains(fType, required) {
-				found = true
-				break
+		// Check exact match first
+		if typeIndex[required] {
+			found = true
+		} else {
+			// Only do substring search if exact match fails
+			for fType := range typeIndex {
+				if strings.Contains(fType, required) {
+					found = true
+					break
+				}
 			}
 		}
 		if !found {
