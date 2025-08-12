@@ -163,7 +163,6 @@ type Statistics struct {
 	PodTraceCount   int       `json:"pod_trace_count"`
 }
 
-
 // Collector implements the kubelet metrics collector
 type Collector struct {
 	name            string

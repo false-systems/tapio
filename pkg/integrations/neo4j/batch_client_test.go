@@ -17,32 +17,32 @@ import (
 
 // mockClient provides a mock implementation of the Client for testing
 type mockClient struct {
-	executeWriteFunc func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error
-	parseRecordFunc  func(keys []string, values []any) Record
+	executeWriteFunc   func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error
+	parseRecordFunc    func(keys []string, values []any) Record
 	extractSummaryFunc func(result neo4j.ResultWithContext) Summary
-	callCount        int64
-	operationDelay   time.Duration
-	returnError      error
-	mu               sync.RWMutex
-	executedQueries  []string
-	executedParams   []map[string]interface{}
+	callCount          int64
+	operationDelay     time.Duration
+	returnError        error
+	mu                 sync.RWMutex
+	executedQueries    []string
+	executedParams     []map[string]interface{}
 }
 
 func (m *mockClient) ExecuteWrite(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 	atomic.AddInt64(&m.callCount, 1)
-	
+
 	if m.operationDelay > 0 {
 		time.Sleep(m.operationDelay)
 	}
-	
+
 	if m.returnError != nil {
 		return m.returnError
 	}
-	
+
 	if m.executeWriteFunc != nil {
 		return m.executeWriteFunc(ctx, fn)
 	}
-	
+
 	return nil
 }
 
@@ -50,7 +50,7 @@ func (m *mockClient) parseRecord(keys []string, values []any) Record {
 	if m.parseRecordFunc != nil {
 		return m.parseRecordFunc(keys, values)
 	}
-	
+
 	return Record{
 		StringValues: make(map[string]string),
 		IntValues:    make(map[string]int64),
@@ -63,7 +63,7 @@ func (m *mockClient) extractSummary(result neo4j.ResultWithContext) Summary {
 	if m.extractSummaryFunc != nil {
 		return m.extractSummaryFunc(result)
 	}
-	
+
 	return Summary{}
 }
 
@@ -110,7 +110,7 @@ func (m *mockTransaction) Run(ctx context.Context, query string, params map[stri
 	m.queries = append(m.queries, query)
 	m.params = append(m.params, params)
 	m.mu.Unlock()
-	
+
 	return &mockResult{
 		records: [][]any{{"test_value"}},
 		keys:    []string{"test_key"},
@@ -149,7 +149,7 @@ func (m *mockResult) Record() *neo4j.Record {
 	if m.index <= 0 || m.index > len(m.records) {
 		return nil
 	}
-	
+
 	return &neo4j.Record{
 		Values: m.records[m.index-1],
 		Keys:   m.keys,
@@ -224,7 +224,7 @@ func TestBatchClient_ExecuteQueryBatch(t *testing.T) {
 	t.Run("single query execution", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
@@ -258,7 +258,7 @@ func TestBatchClient_ExecuteQueryBatch(t *testing.T) {
 	t.Run("batch size trigger", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
@@ -279,7 +279,7 @@ func TestBatchClient_ExecuteQueryBatch(t *testing.T) {
 			query := fmt.Sprintf("MATCH (n) WHERE n.id = %d RETURN n", i)
 			params := QueryParams{}
 			params.AddInt("id", int64(i))
-			
+
 			var err error
 			results[i], err = bc.ExecuteQueryBatch(ctx, query, params)
 			require.NoError(t, err)
@@ -302,13 +302,13 @@ func TestBatchClient_ExecuteQueryBatch(t *testing.T) {
 	t.Run("timeout trigger", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
 
 		config := BatchConfig{
-			BatchSize:    10, // Large batch size
+			BatchSize:    10,                    // Large batch size
 			BatchTimeout: 50 * time.Millisecond, // Short timeout
 		}
 
@@ -320,7 +320,7 @@ func TestBatchClient_ExecuteQueryBatch(t *testing.T) {
 		// Execute fewer operations than batch size
 		query := "MATCH (n) RETURN n"
 		params := QueryParams{}
-		
+
 		result, err := bc.ExecuteQueryBatch(ctx, query, params)
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -363,7 +363,7 @@ func TestBatchClient_ExecuteWriteBatch(t *testing.T) {
 	t.Run("direct batch execution", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
@@ -416,7 +416,7 @@ func TestBatchClient_CreateNodesBatch(t *testing.T) {
 	t.Run("single node type batch", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
@@ -456,7 +456,7 @@ func TestBatchClient_CreateNodesBatch(t *testing.T) {
 	t.Run("mixed node types", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
@@ -487,7 +487,7 @@ func TestBatchClient_CreateNodesBatch(t *testing.T) {
 		// Verify separate queries for different node types
 		queries := mockTx.GetQueries()
 		assert.Len(t, queries, 2) // One query per node type
-		
+
 		foundPodQuery := false
 		foundServiceQuery := false
 		for _, query := range queries {
@@ -522,7 +522,7 @@ func TestBatchClient_CreateRelationshipsBatch(t *testing.T) {
 	t.Run("batch relationship creation", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
@@ -533,7 +533,7 @@ func TestBatchClient_CreateRelationshipsBatch(t *testing.T) {
 
 		stringVal := "test"
 		intVal := int64(42)
-		
+
 		relationships := []RelationshipCreationParams{
 			{
 				FromUID:   "pod-1",
@@ -652,13 +652,13 @@ func TestBatchClient_FlushAndClose(t *testing.T) {
 	t.Run("flush pending operations", func(t *testing.T) {
 		mockClient := &mockClient{}
 		mockTx := newMockTransaction()
-		
+
 		mockClient.executeWriteFunc = func(ctx context.Context, fn func(tx neo4j.ManagedTransaction) error) error {
 			return fn(mockTx)
 		}
 
 		config := BatchConfig{
-			BatchSize:    10, // Large batch size
+			BatchSize:    10,        // Large batch size
 			BatchTimeout: time.Hour, // Long timeout to prevent auto-execution
 		}
 
@@ -673,7 +673,7 @@ func TestBatchClient_FlushAndClose(t *testing.T) {
 
 		// Execute operation asynchronously (don't wait for result)
 		go bc.ExecuteQueryBatch(ctx, query, params)
-		
+
 		// Give some time for operation to be added to batch
 		time.Sleep(50 * time.Millisecond)
 
@@ -714,7 +714,7 @@ func TestBatchClient_FlushAndClose(t *testing.T) {
 func TestBatchClient_Stats(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	mockClient := &mockClient{}
-	
+
 	config := BatchConfig{
 		BatchSize:    50,
 		BatchTimeout: 200 * time.Millisecond,
@@ -724,7 +724,7 @@ func TestBatchClient_Stats(t *testing.T) {
 	require.NoError(t, err)
 
 	stats := bc.Stats()
-	
+
 	assert.Equal(t, 0, stats["pending_operations"].(int))
 	assert.Equal(t, 50, stats["batch_size"].(int))
 	assert.Equal(t, int64(200), stats["batch_timeout_ms"].(int64))

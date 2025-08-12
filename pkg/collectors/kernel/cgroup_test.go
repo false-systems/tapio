@@ -99,7 +99,6 @@ func TestCgroupIDExtraction(t *testing.T) {
 
 								events = append(events, *event)
 
-
 							}
 						}
 					case <-timeout:
