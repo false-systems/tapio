@@ -963,8 +963,20 @@ func (o *OwnershipCorrelator) processReplicaSetResults(ctx context.Context, resu
 		desiredValue, _ := record.Get("desiredReplicas")
 		readyValue, _ := record.Get("readyReplicas")
 
-		desired, _ := desiredValue.(int64)
-		ready, _ := readyValue.(int64)
+		desired, ok := desiredValue.(int64)
+		if !ok {
+			o.logger.Warn("Failed to extract desired replicas as int64",
+				zap.String("replicaset", rsName),
+				zap.Any("value", desiredValue))
+			desired = 0
+		}
+		ready, ok := readyValue.(int64)
+		if !ok {
+			o.logger.Warn("Failed to extract ready replicas as int64",
+				zap.String("replicaset", rsName),
+				zap.Any("value", readyValue))
+			ready = 0
+		}
 
 		if desired > 0 && ready < desired {
 			deploymentName := o.extractDeploymentName(record)
@@ -1034,8 +1046,20 @@ func (o *OwnershipCorrelator) processStatefulSetResults(ctx context.Context, res
 		desiredValue, _ := record.Get("desiredReplicas")
 		readyValue, _ := record.Get("readyReplicas")
 
-		desired, _ := desiredValue.(int64)
-		ready, _ := readyValue.(int64)
+		desired, ok := desiredValue.(int64)
+		if !ok {
+			o.logger.Warn("Failed to extract desired replicas as int64",
+				zap.String("statefulset", stsName),
+				zap.Any("value", desiredValue))
+			desired = 0
+		}
+		ready, ok := readyValue.(int64)
+		if !ok {
+			o.logger.Warn("Failed to extract ready replicas as int64",
+				zap.String("statefulset", stsName),
+				zap.Any("value", readyValue))
+			ready = 0
+		}
 
 		if desired > 0 && ready < desired {
 			if podsValue, found := record.Get("pods"); found {
@@ -1096,8 +1120,20 @@ func (o *OwnershipCorrelator) processDaemonSetResults(ctx context.Context, resul
 		nodeCountValue, _ := record.Get("nodeCount")
 		podCountValue, _ := record.Get("podCount")
 
-		nodeCount, _ := nodeCountValue.(int64)
-		podCount, _ := podCountValue.(int64)
+		nodeCount, ok := nodeCountValue.(int64)
+		if !ok {
+			o.logger.Warn("Failed to extract node count as int64",
+				zap.String("daemonset", dsName),
+				zap.Any("value", nodeCountValue))
+			nodeCount = 0
+		}
+		podCount, ok := podCountValue.(int64)
+		if !ok {
+			o.logger.Warn("Failed to extract pod count as int64",
+				zap.String("daemonset", dsName),
+				zap.Any("value", podCountValue))
+			podCount = 0
+		}
 
 		if nodeCount > podCount {
 			findings = append(findings, o.createDaemonSetFinding(dsName, nodeCount, podCount, event))
