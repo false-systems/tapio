@@ -19,23 +19,12 @@ type Engine struct {
 	logger *zap.Logger
 
 	// OTEL instrumentation - REQUIRED fields
-	tracer               trace.Tracer
-	eventsProcessedCtr   metric.Int64Counter
-	errorsTotalCtr       metric.Int64Counter
-	processingTimeHist   metric.Float64Histogram
-	correlationsFoundCtr metric.Int64Counter
-	queueDepthGauge      metric.Int64UpDownCounter
-	activeWorkersGauge   metric.Int64UpDownCounter
-
-	// Storage worker pool metrics
-	storageQueueDepthGauge metric.Int64UpDownCounter
-	storageWorkersGauge    metric.Int64UpDownCounter
-	storageProcessedCtr    metric.Int64Counter
-	storageRejectedCtr     metric.Int64Counter
-	storageLatencyHist     metric.Float64Histogram
+	tracer  trace.Tracer
+	metrics *EngineOTELMetrics
 
 	// Correlators
 	correlators []Correlator
+	registry    *CorrelatorRegistry
 
 	// Storage
 	storage Storage
@@ -78,96 +67,13 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 
 	// Initialize OTEL components - MANDATORY pattern
 	tracer := otel.Tracer("correlation-engine")
-	meter := otel.Meter("correlation-engine")
 
-	// Create metrics with descriptive names and descriptions
-	eventsProcessedCtr, err := meter.Int64Counter(
-		"correlation_events_processed_total",
-		metric.WithDescription("Total events processed by correlation engine"),
-	)
+	// Create metrics using factory pattern - reduces complexity from 150+ lines to ~20 lines
+	metricFactory := NewMetricFactory("correlation-engine", logger)
+	engineMetrics, err := metricFactory.CreateEngineMetrics()
 	if err != nil {
-		logger.Warn("Failed to create events counter", zap.Error(err))
-	}
-
-	errorsTotalCtr, err := meter.Int64Counter(
-		"correlation_errors_total",
-		metric.WithDescription("Total errors in correlation engine"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create errors counter", zap.Error(err))
-	}
-
-	processingTimeHist, err := meter.Float64Histogram(
-		"correlation_processing_duration_ms",
-		metric.WithDescription("Processing duration for correlation engine in milliseconds"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create processing time histogram", zap.Error(err))
-	}
-
-	correlationsFoundCtr, err := meter.Int64Counter(
-		"correlation_correlations_found_total",
-		metric.WithDescription("Total correlations found by correlation engine"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create correlations found counter", zap.Error(err))
-	}
-
-	queueDepthGauge, err := meter.Int64UpDownCounter(
-		"correlation_queue_depth",
-		metric.WithDescription("Current depth of event processing queue"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create queue depth gauge", zap.Error(err))
-	}
-
-	activeWorkersGauge, err := meter.Int64UpDownCounter(
-		"correlation_active_workers",
-		metric.WithDescription("Number of active correlation workers"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create active workers gauge", zap.Error(err))
-	}
-
-	// Storage worker pool metrics
-	storageQueueDepthGauge, err := meter.Int64UpDownCounter(
-		"correlation_storage_queue_depth",
-		metric.WithDescription("Current depth of storage job queue"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create storage queue depth gauge", zap.Error(err))
-	}
-
-	storageWorkersGauge, err := meter.Int64UpDownCounter(
-		"correlation_storage_workers",
-		metric.WithDescription("Number of active storage workers"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create storage workers gauge", zap.Error(err))
-	}
-
-	storageProcessedCtr, err := meter.Int64Counter(
-		"correlation_storage_processed_total",
-		metric.WithDescription("Total storage operations processed"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create storage processed counter", zap.Error(err))
-	}
-
-	storageRejectedCtr, err := meter.Int64Counter(
-		"correlation_storage_rejected_total",
-		metric.WithDescription("Total storage operations rejected due to queue full"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create storage rejected counter", zap.Error(err))
-	}
-
-	storageLatencyHist, err := meter.Float64Histogram(
-		"correlation_storage_latency_ms",
-		metric.WithDescription("Storage operation latency in milliseconds"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create storage latency histogram", zap.Error(err))
+		cancel()
+		return nil, fmt.Errorf("failed to create engine metrics: %w", err)
 	}
 
 	// Determine storage worker count (default to 10 if not specified)
@@ -185,29 +91,23 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 		storageQueueSize = config.StorageQueueSize
 	}
 
+	// Create correlator registry
+	registry := NewCorrelatorRegistry(logger)
+
 	engine := &Engine{
-		logger:                 logger,
-		tracer:                 tracer,
-		eventsProcessedCtr:     eventsProcessedCtr,
-		errorsTotalCtr:         errorsTotalCtr,
-		processingTimeHist:     processingTimeHist,
-		correlationsFoundCtr:   correlationsFoundCtr,
-		queueDepthGauge:        queueDepthGauge,
-		activeWorkersGauge:     activeWorkersGauge,
-		storageQueueDepthGauge: storageQueueDepthGauge,
-		storageWorkersGauge:    storageWorkersGauge,
-		storageProcessedCtr:    storageProcessedCtr,
-		storageRejectedCtr:     storageRejectedCtr,
-		storageLatencyHist:     storageLatencyHist,
-		correlators:            make([]Correlator, 0),
-		storage:                storage,
-		eventChan:              make(chan *domain.UnifiedEvent, config.EventBufferSize),
-		resultChan:             make(chan *CorrelationResult, config.ResultBufferSize),
-		storageJobChan:         make(chan *storageJob, storageQueueSize),
-		storageWorkers:         storageWorkers,
-		config:                 config,
-		ctx:                    ctx,
-		cancel:                 cancel,
+		logger:         logger,
+		tracer:         tracer,
+		metrics:        engineMetrics,
+		correlators:    make([]Correlator, 0),
+		registry:       registry,
+		storage:        storage,
+		eventChan:      make(chan *domain.UnifiedEvent, config.EventBufferSize),
+		resultChan:     make(chan *CorrelationResult, config.ResultBufferSize),
+		storageJobChan: make(chan *storageJob, storageQueueSize),
+		storageWorkers: storageWorkers,
+		config:         config,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	if err := engine.initializeCorrelators(ctx, logger, k8sClient, config); err != nil {
@@ -223,46 +123,21 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 	return engine, nil
 }
 
-// initializeCorrelators sets up all enabled correlators
+// initializeCorrelators sets up all enabled correlators using the registry
 func (e *Engine) initializeCorrelators(ctx context.Context, logger *zap.Logger, k8sClient domain.K8sClient, config EngineConfig) error {
 	for _, name := range config.EnabledCorrelators {
-		if err := e.addCorrelator(ctx, name, logger, k8sClient); err != nil {
-			return err
+		correlator, err := e.registry.Create(ctx, name, logger, k8sClient)
+		if err != nil {
+			logger.Warn("Failed to create correlator, skipping",
+				zap.String("name", name),
+				zap.Error(err))
+			continue
 		}
-	}
-	return nil
-}
 
-// addCorrelator creates and adds a specific correlator type
-func (e *Engine) addCorrelator(ctx context.Context, name string, logger *zap.Logger, k8sClient domain.K8sClient) error {
-	switch name {
-	case "k8s":
-		return e.addK8sCorrelator(ctx, logger, k8sClient)
-	case "temporal":
-		e.correlators = append(e.correlators, NewTemporalCorrelator(logger, *TestTemporalConfig()))
-	case "sequence":
-		e.correlators = append(e.correlators, NewSequenceCorrelator(logger, *TestSequenceConfig()))
-	case "performance":
-		e.correlators = append(e.correlators, NewPerformanceCorrelator(logger))
-	case "servicemap":
-		e.correlators = append(e.correlators, NewServiceMapCorrelator(logger))
-	default:
-		logger.Warn("Unknown correlator in config", zap.String("name", name))
-	}
-	return nil
-}
-
-// addK8sCorrelator adds and starts a K8s correlator
-func (e *Engine) addK8sCorrelator(ctx context.Context, logger *zap.Logger, k8sClient domain.K8sClient) error {
-	if k8sClient == nil {
-		return nil
-	}
-
-	k8sCorrelator := NewK8sCorrelator(logger, k8sClient)
-	e.correlators = append(e.correlators, k8sCorrelator)
-
-	if err := k8sCorrelator.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start K8s correlator: %w", err)
+		e.correlators = append(e.correlators, correlator)
+		logger.Debug("Correlator initialized",
+			zap.String("name", name),
+			zap.String("type", fmt.Sprintf("%T", correlator)))
 	}
 	return nil
 }
@@ -291,8 +166,8 @@ func (e *Engine) Start(ctx context.Context) error {
 		e.wg.Add(1)
 		go e.worker(i)
 		// Update active workers metric
-		if e.activeWorkersGauge != nil {
-			e.activeWorkersGauge.Add(ctx, 1)
+		if e.metrics.ActiveWorkersGauge != nil {
+			e.metrics.ActiveWorkersGauge.Add(ctx, 1)
 		}
 	}
 
@@ -302,8 +177,8 @@ func (e *Engine) Start(ctx context.Context) error {
 			e.wg.Add(1)
 			go e.storageWorker(i)
 			// Update storage workers metric
-			if e.storageWorkersGauge != nil {
-				e.storageWorkersGauge.Add(ctx, 1)
+			if e.metrics.StorageWorkersGauge != nil {
+				e.metrics.StorageWorkersGauge.Add(ctx, 1)
 			}
 		}
 	}
@@ -342,13 +217,13 @@ func (e *Engine) Stop() error {
 	e.wg.Wait()
 
 	// Reset active workers metric
-	if e.activeWorkersGauge != nil {
-		e.activeWorkersGauge.Add(ctx, -int64(e.config.WorkerCount))
+	if e.metrics.ActiveWorkersGauge != nil {
+		e.metrics.ActiveWorkersGauge.Add(ctx, -int64(e.config.WorkerCount))
 	}
 
 	// Reset storage workers metric
-	if e.storageWorkersGauge != nil && e.storage != nil {
-		e.storageWorkersGauge.Add(ctx, -int64(e.storageWorkers))
+	if e.metrics.StorageWorkersGauge != nil && e.storage != nil {
+		e.metrics.StorageWorkersGauge.Add(ctx, -int64(e.storageWorkers))
 	}
 
 	// Close output channel
@@ -378,8 +253,8 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
 		err := fmt.Errorf("event is nil")
 		span.SetAttributes(attribute.String("error", err.Error()))
 		// Record error metrics
-		if e.errorsTotalCtr != nil {
-			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+		if e.metrics.ErrorsTotalCtr != nil {
+			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "nil_event"),
 			))
 		}
@@ -395,9 +270,9 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
 	)
 
 	// Record queue depth
-	if e.queueDepthGauge != nil {
-		e.queueDepthGauge.Add(ctx, 1)
-		defer e.queueDepthGauge.Add(ctx, -1)
+	if e.metrics.QueueDepthGauge != nil {
+		e.metrics.QueueDepthGauge.Add(ctx, 1)
+		defer e.metrics.QueueDepthGauge.Add(ctx, -1)
 	}
 
 	// Use a timeout to prevent indefinite blocking
@@ -414,8 +289,8 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
 			attribute.String("error.type", "queue_timeout"),
 		)
 		// Record error metrics
-		if e.errorsTotalCtr != nil {
-			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+		if e.metrics.ErrorsTotalCtr != nil {
+			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "queue_timeout"),
 				attribute.String("event_type", string(event.Type)),
 			))
@@ -440,8 +315,8 @@ func (e *Engine) worker(id int) {
 	defer e.wg.Done()
 	defer func() {
 		// Decrement active workers on exit
-		if e.activeWorkersGauge != nil {
-			e.activeWorkersGauge.Add(context.Background(), -1)
+		if e.metrics.ActiveWorkersGauge != nil {
+			e.metrics.ActiveWorkersGauge.Add(context.Background(), -1)
 		}
 	}()
 
@@ -469,8 +344,8 @@ func (e *Engine) processEvent(event *domain.UnifiedEvent) {
 	defer func() {
 		// Record processing time
 		duration := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
-		if e.processingTimeHist != nil {
-			e.processingTimeHist.Record(ctx, duration, metric.WithAttributes(
+		if e.metrics.ProcessingTimeHist != nil {
+			e.metrics.ProcessingTimeHist.Record(ctx, duration, metric.WithAttributes(
 				attribute.String("event_type", string(event.Type)),
 			))
 		}
@@ -502,8 +377,8 @@ func (e *Engine) incrementProcessedEvents(ctx context.Context) {
 	e.mu.Unlock()
 
 	// Record success metrics
-	if e.eventsProcessedCtr != nil {
-		e.eventsProcessedCtr.Add(ctx, 1, metric.WithAttributes(
+	if e.metrics.EventsProcessedCtr != nil {
+		e.metrics.EventsProcessedCtr.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("status", "success"),
 		))
 	}
@@ -534,8 +409,8 @@ func (e *Engine) processWithCorrelator(parentCtx context.Context, event *domain.
 			attribute.String("error.type", "correlator_failed"),
 		)
 		// Record error metrics
-		if e.errorsTotalCtr != nil {
-			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+		if e.metrics.ErrorsTotalCtr != nil {
+			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "correlator_failed"),
 				attribute.String("correlator", correlator.Name()),
 				attribute.String("event_type", string(event.Type)),
@@ -594,8 +469,8 @@ func (e *Engine) sendResult(ctx context.Context, result *CorrelationResult) {
 	e.mu.Unlock()
 
 	// Record correlation found metric
-	if e.correlationsFoundCtr != nil {
-		e.correlationsFoundCtr.Add(ctx, 1, metric.WithAttributes(
+	if e.metrics.CorrelationsFoundCtr != nil {
+		e.metrics.CorrelationsFoundCtr.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("correlation_type", result.Type),
 			attribute.Float64("confidence", result.Confidence),
 		))
@@ -614,8 +489,8 @@ func (e *Engine) sendResult(ctx context.Context, result *CorrelationResult) {
 			zap.String("type", result.Type),
 		)
 		// Record dropped correlation
-		if e.errorsTotalCtr != nil {
-			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+		if e.metrics.ErrorsTotalCtr != nil {
+			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "result_dropped"),
 				attribute.String("correlation_type", result.Type),
 			))
@@ -658,8 +533,8 @@ func (e *Engine) asyncStoreResult(ctx context.Context, result *CorrelationResult
 	}
 
 	// Update queue depth metric
-	if e.storageQueueDepthGauge != nil {
-		e.storageQueueDepthGauge.Add(ctx, 1)
+	if e.metrics.StorageQueueDepthGauge != nil {
+		e.metrics.StorageQueueDepthGauge.Add(ctx, 1)
 	}
 
 	// Try to submit job to storage worker pool
@@ -668,8 +543,8 @@ func (e *Engine) asyncStoreResult(ctx context.Context, result *CorrelationResult
 		// Job accepted
 	case <-e.ctx.Done():
 		// Engine shutting down
-		if e.storageQueueDepthGauge != nil {
-			e.storageQueueDepthGauge.Add(ctx, -1)
+		if e.metrics.StorageQueueDepthGauge != nil {
+			e.metrics.StorageQueueDepthGauge.Add(ctx, -1)
 		}
 	default:
 		// Queue full, record rejection
@@ -677,15 +552,15 @@ func (e *Engine) asyncStoreResult(ctx context.Context, result *CorrelationResult
 		e.storageRejected++
 		e.mu.Unlock()
 
-		if e.storageRejectedCtr != nil {
-			e.storageRejectedCtr.Add(ctx, 1, metric.WithAttributes(
+		if e.metrics.StorageRejectedCtr != nil {
+			e.metrics.StorageRejectedCtr.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("correlation_type", result.Type),
 				attribute.String("reason", "queue_full"),
 			))
 		}
 
-		if e.storageQueueDepthGauge != nil {
-			e.storageQueueDepthGauge.Add(ctx, -1)
+		if e.metrics.StorageQueueDepthGauge != nil {
+			e.metrics.StorageQueueDepthGauge.Add(ctx, -1)
 		}
 
 		e.logger.Warn("Storage queue full, dropping correlation",
@@ -702,8 +577,8 @@ func (e *Engine) storageWorker(id int) {
 	defer e.wg.Done()
 	defer func() {
 		// Decrement storage workers on exit
-		if e.storageWorkersGauge != nil {
-			e.storageWorkersGauge.Add(context.Background(), -1)
+		if e.metrics.StorageWorkersGauge != nil {
+			e.metrics.StorageWorkersGauge.Add(context.Background(), -1)
 		}
 	}()
 
@@ -714,8 +589,8 @@ func (e *Engine) storageWorker(id int) {
 		e.processStorageJob(job)
 
 		// Update queue depth metric
-		if e.storageQueueDepthGauge != nil {
-			e.storageQueueDepthGauge.Add(context.Background(), -1)
+		if e.metrics.StorageQueueDepthGauge != nil {
+			e.metrics.StorageQueueDepthGauge.Add(context.Background(), -1)
 		}
 	}
 
@@ -749,8 +624,8 @@ func (e *Engine) processStorageJob(job *storageJob) {
 			attribute.String("error.type", "storage_failed"),
 		)
 		// Record error metrics
-		if e.errorsTotalCtr != nil {
-			e.errorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+		if e.metrics.ErrorsTotalCtr != nil {
+			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "storage_failed"),
 				attribute.String("operation", "store_correlation"),
 			))
@@ -766,8 +641,8 @@ func (e *Engine) processStorageJob(job *storageJob) {
 		e.storageProcessed++
 		e.mu.Unlock()
 
-		if e.storageProcessedCtr != nil {
-			e.storageProcessedCtr.Add(ctx, 1, metric.WithAttributes(
+		if e.metrics.StorageProcessedCtr != nil {
+			e.metrics.StorageProcessedCtr.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("correlation_type", job.result.Type),
 				attribute.String("status", "success"),
 			))
@@ -776,8 +651,8 @@ func (e *Engine) processStorageJob(job *storageJob) {
 
 	// Record storage latency
 	storageLatency := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
-	if e.storageLatencyHist != nil {
-		e.storageLatencyHist.Record(ctx, storageLatency, metric.WithAttributes(
+	if e.metrics.StorageLatencyHist != nil {
+		e.metrics.StorageLatencyHist.Record(ctx, storageLatency, metric.WithAttributes(
 			attribute.String("correlation_type", job.result.Type),
 			attribute.Float64("queue_latency_ms", queueLatency),
 		))

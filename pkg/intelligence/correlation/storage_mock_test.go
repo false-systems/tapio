@@ -59,3 +59,9 @@ func (m *MockStorage) Cleanup(ctx context.Context, olderThan time.Duration) erro
 	args := m.Called(ctx, olderThan)
 	return args.Error(0)
 }
+
+// HealthCheck checks the storage health
+func (m *MockStorage) HealthCheck(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
