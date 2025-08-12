@@ -323,7 +323,10 @@ func TestEventPublisher_Resilience(t *testing.T) {
 	assert.Error(t, err)
 
 	// Restart server
-	ns, _ = startTestNATSServer(t)
+	var newURL string
+	ns, newURL = startTestNATSServer(t)
+	require.NotNil(t, ns, "test NATS server should restart successfully")
+	require.NotEmpty(t, newURL, "test NATS server URL should not be empty")
 	defer ns.Shutdown()
 
 	// Wait for reconnection

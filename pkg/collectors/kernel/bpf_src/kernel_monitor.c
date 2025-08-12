@@ -2,6 +2,7 @@
 // Minimal eBPF program for kernel monitoring - focused on containers
 
 #include "../../bpf_common/vmlinux_minimal.h"
+#include "../../bpf_common/helpers.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -9,6 +10,10 @@
 // Network protocol constants
 #define IPPROTO_TCP 6
 #define IPPROTO_UDP 17
+
+// Address family constants
+#define AF_INET 2
+#define AF_INET6 10
 
 // Event types
 #define EVENT_TYPE_MEMORY_ALLOC 1
@@ -179,103 +184,64 @@ static __always_inline bool is_container_process(__u32 pid)
     return flag != 0;
 }
 
-// Helper to extract cgroup ID from task struct
+// Helper to extract cgroup ID from task struct using proper CO-RE patterns
 static __always_inline __u64 get_cgroup_id(struct task_struct *task)
 {
     if (!task) {
         return 0;
     }
 
-    // Read cgroups css_set from task with proper error handling
-    struct css_set *css_set_ptr = NULL;
-    int ret = bpf_core_read(&css_set_ptr, sizeof(css_set_ptr), &task->cgroups);
-    if (ret != 0 || !css_set_ptr) {
+    // Check if task has cgroups field (kernel version compatibility)
+    if (!bpf_core_field_exists(task->cgroups)) {
         return 0;
     }
 
-    // Try to find a valid cgroup_subsys_state
-    // For cgroup v2, we use the unified hierarchy (index 0)
-    // For cgroup v1, we check multiple subsystems for compatibility
-    struct cgroup_subsys_state *css = NULL;
-    bool css_found = false;
-    
-    // First, check unified hierarchy (cgroup v2 - most common in modern systems)
-    ret = bpf_core_read(&css, sizeof(css), &css_set_ptr->subsys[0]);
-    if (ret == 0 && css) {
-        css_found = true;
-    } else {
-        // Fallback: try other subsystems for cgroup v1 compatibility
-        // Use unroll to avoid verifier issues with loops
-        #pragma unroll
-        for (int i = 1; i < 8; i++) {  // Check first 8 subsystems
-            ret = bpf_core_read(&css, sizeof(css), &css_set_ptr->subsys[i]);
-            if (ret == 0 && css) {
-                css_found = true;
-                break; // Found a valid subsystem
-            }
+    // Read cgroups css_set from task using CO-RE
+    struct css_set *css_set_ptr;
+    if (BPF_CORE_READ_INTO(&css_set_ptr, task, cgroups) != 0 || !css_set_ptr) {
+        return 0;
+    }
+
+    // For cgroup v2 (unified hierarchy), use subsys[0]
+    struct cgroup_subsys_state *css;
+    if (BPF_CORE_READ_INTO(&css, css_set_ptr, subsys[0]) != 0 || !css) {
+        // Fallback to other subsystems for cgroup v1 compatibility
+        // Check memory subsystem (commonly available)
+        if (BPF_CORE_READ_INTO(&css, css_set_ptr, subsys[1]) != 0 || !css) {
+            return 0;
         }
     }
 
-    if (!css_found || !css) {
-        return 0;
-    }
-
-    // Read the cgroup from the css
-    struct cgroup *cgroup_ptr = NULL;
-    ret = bpf_core_read(&cgroup_ptr, sizeof(cgroup_ptr), &css->cgroup);
-    if (ret != 0 || !cgroup_ptr) {
+    // Read the cgroup from the css using CO-RE
+    struct cgroup *cgroup_ptr;
+    if (BPF_CORE_READ_INTO(&cgroup_ptr, css, cgroup) != 0 || !cgroup_ptr) {
         return 0;
     }
 
     // Primary method: Extract kernfs inode number (most reliable)
-    struct kernfs_node *kn = NULL;
-    ret = bpf_core_read(&kn, sizeof(kn), &cgroup_ptr->kn);
-    if (ret == 0 && kn) {
-        __u64 ino = 0;
-        ret = bpf_core_read(&ino, sizeof(ino), &kn->ino);
-        if (ret == 0 && ino != 0) {
-            // Success: we have the kernfs inode number
-            // This is the most reliable cgroup identifier
-            return ino;
+    if (bpf_core_field_exists(cgroup_ptr->kn)) {
+        struct kernfs_node *kn;
+        if (BPF_CORE_READ_INTO(&kn, cgroup_ptr, kn) == 0 && kn) {
+            __u64 ino;
+            if (BPF_CORE_READ_INTO(&ino, kn, ino) == 0 && ino != 0) {
+                // Success: we have the kernfs inode number
+                return ino;
+            }
         }
     }
 
-    // Fallback method: Use cgroup ID with large offset
-    // This ensures we get a unique identifier even if kernfs access fails
-    int cgroup_id = 0;
-    ret = bpf_core_read(&cgroup_id, sizeof(cgroup_id), &cgroup_ptr->id);
-    if (ret == 0 && cgroup_id > 0) {
-        // Add 4GB offset to distinguish from PIDs and ensure uniqueness
-        // Modern PIDs can be up to 2^22 (4M) or higher, so 0x100000000 (4GB) is safe
-        // This guarantees separation from any possible PID value (max PID is typically 32-bit)
-        __u64 offset_id = (__u64)cgroup_id + 0x100000000ULL;
-        
-        // Enhanced validation: ensure the result doesn't overflow and is reasonable
-        // cgroup_id should be positive and within reasonable bounds
-        // Additional validation: ensure we don't have collision with typical inode ranges
-        if (cgroup_id > 0 && cgroup_id < 0x7FFFFFFF && 
-            offset_id > 0x100000000ULL && offset_id < 0x200000000ULL) {
-            return offset_id;
+    // Fallback method: Use cgroup ID with offset for uniqueness
+    if (bpf_core_field_exists(cgroup_ptr->id)) {
+        int cgroup_id;
+        if (BPF_CORE_READ_INTO(&cgroup_id, cgroup_ptr, id) == 0 && cgroup_id > 0) {
+            // Add offset to distinguish from PIDs and ensure uniqueness
+            return (__u64)cgroup_id + 0x100000000ULL;
         }
     }
 
-    // Last resort: return a derived unique ID based on css_set pointer
-    // This should rarely be reached, but provides a fallback
-    if (css_set_ptr) {
-        // Use address hash as unique identifier with different offset
-        __u64 addr = (__u64)css_set_ptr;
-        // Right shift to reduce address size, then add large offset
-        // Use 8GB offset to differentiate from cgroup ID fallback
-        __u64 hash_id = (addr >> 8) + 0x200000000ULL;
-        
-        // Enhanced validation: ensure we have a reasonable hash value
-        // The hash should be in a specific range to avoid collisions
-        if (hash_id > 0x200000000ULL && hash_id < 0x400000000ULL && addr != 0) {
-            return hash_id;
-        }
-    }
-
-    return 0;
+    // Last resort: use a hash of the css_set pointer
+    __u64 addr = (__u64)css_set_ptr;
+    return (addr >> 8) + 0x200000000ULL;
 }
 
 // Helper to get pod information for a cgroup ID
@@ -411,7 +377,7 @@ int trace_exec(void *ctx)
     return 0;
 }
 
-// Network connection tracing - track tcp connections
+// Network connection tracing - track tcp connections using CO-RE
 SEC("kprobe/tcp_v4_connect")
 int trace_tcp_connect(struct pt_regs *ctx)
 {
@@ -422,16 +388,8 @@ int trace_tcp_connect(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    // Get sock struct from first argument
-    // Using offset-based approach for portability
-    struct sock *sk = NULL;
-    unsigned long arg1 = 0;
-    
-    // On x86_64, RDI is at offset 112 in pt_regs
-    // On ARM64, X0 is at offset 0 in pt_regs
-    // We'll use a simple offset that works for x86_64
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112));
-    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    // Get sock struct from first argument using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
     
     if (!sk)
         return 0;
@@ -452,18 +410,32 @@ int trace_tcp_connect(struct pt_regs *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Fill network info from socket
+    // Fill network info from socket using CO-RE
     __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
     
-    // Read socket addresses from sock struct
-    struct sock_common sk_common = {};
-    bpf_probe_read_kernel(&sk_common, sizeof(sk_common), &sk->__sk_common);
+    // Check socket family for IPv4/IPv6
+    __u16 family = 0;
+    BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family);
     
-    // Extract addresses and ports
-    event->net_info.sport = sk_common.skc_num;
-    event->net_info.dport = __builtin_bswap16(sk_common.skc_dport);
-    event->net_info.saddr = sk_common.skc_rcv_saddr;
-    event->net_info.daddr = sk_common.skc_daddr;
+    if (family == AF_INET) {
+        event->net_info.ip_version = 4;
+        // Use CO-RE to read IPv4 socket addresses safely
+        BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
+        BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+        BPF_CORE_READ_INTO(&event->net_info.saddr_v4, sk, __sk_common.skc_rcv_saddr);
+        BPF_CORE_READ_INTO(&event->net_info.daddr_v4, sk, __sk_common.skc_daddr);
+    } else if (family == AF_INET6) {
+        event->net_info.ip_version = 6;
+        // Read IPv6 addresses
+        BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
+        BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+        BPF_CORE_READ_INTO(&event->net_info.saddr_v6, sk, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
+        BPF_CORE_READ_INTO(&event->net_info.daddr_v6, sk, __sk_common.skc_v6_daddr.in6_u.u6_addr32);
+    }
+    
+    // Convert network byte order to host byte order for port
+    event->net_info.dport = __builtin_bswap16(event->net_info.dport);
+    
     event->net_info.protocol = IPPROTO_TCP;
     event->net_info.direction = 0; // Outgoing
     event->net_info.state = 1; // Connecting

@@ -70,6 +70,9 @@ compile_bpf "pkg/collectors/systemd" "SystemD Monitor"
 echo "5. Building DNS Monitor..."
 compile_bpf "pkg/collectors/dns" "DNS Monitor"
 
+echo "6. Building CRI Monitor..."
+compile_bpf "pkg/collectors/cri" "CRI Monitor"
+
 
 
 echo ""

@@ -24,7 +24,7 @@ func TestServiceMapCorrelatorBasic(t *testing.T) {
 		ctx := context.Background()
 		event := &domain.UnifiedEvent{
 			ID:        "test-event",
-			Type:      EventTypeEBPF,
+			Type:      domain.EventTypeNetwork,
 			Timestamp: time.Now(),
 			Attributes: map[string]interface{}{
 				"src_service": "frontend",

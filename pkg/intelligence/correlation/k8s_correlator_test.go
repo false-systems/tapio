@@ -16,6 +16,117 @@ import (
 
 // MockK8sClient moved to k8s_mocks_test.go
 
+func testNamespaceEventCorrelation(t *testing.T) {
+	logger := zaptest.NewLogger(t).Sugar().Desugar()
+	mockClient := &MockK8sClient{}
+	correlator := NewK8sCorrelator(logger, mockClient)
+	ctx := context.Background()
+
+	event := &domain.UnifiedEvent{
+		ID:        "quota-exceeded",
+		Type:      "k8s",
+		Timestamp: time.Now(),
+		Severity:  domain.EventSeverityCritical,
+		K8sContext: &domain.K8sContext{
+			Namespace: "production",
+			Kind:      "Namespace",
+		},
+		Message: "Namespace resource quota exceeded",
+	}
+
+	results, err := correlator.Process(ctx, event)
+	require.NoError(t, err)
+	assert.NotNil(t, results)
+}
+
+func testAPIErrorHandling(t *testing.T) {
+	logger := zaptest.NewLogger(t).Sugar().Desugar()
+	mockClient := &MockK8sClient{}
+	correlator := NewK8sCorrelator(logger, mockClient)
+	ctx := context.Background()
+
+	mockClient.On("GetPod", ctx, "default", "missing-pod").Return(
+		(*domain.K8sPod)(nil), errors.New("pod not found"))
+
+	event := createTestPodEvent("api-error-event", "default", "missing-pod", "Pod event")
+
+	results, err := correlator.Process(ctx, event)
+	require.NoError(t, err)
+	assert.Len(t, results, 0)
+}
+
+func testNilEventHandling(t *testing.T) {
+	logger := zaptest.NewLogger(t).Sugar().Desugar()
+	mockClient := &MockK8sClient{}
+	correlator := NewK8sCorrelator(logger, mockClient)
+	ctx := context.Background()
+
+	results, err := correlator.Process(ctx, nil)
+	assert.Error(t, err)
+	assert.Nil(t, results)
+}
+
+func testNonK8sEventHandling(t *testing.T) {
+	logger := zaptest.NewLogger(t).Sugar().Desugar()
+	mockClient := &MockK8sClient{}
+	correlator := NewK8sCorrelator(logger, mockClient)
+	ctx := context.Background()
+
+	event := &domain.UnifiedEvent{
+		ID:        "non-k8s",
+		Type:      "systemd",
+		Timestamp: time.Now(),
+		Message:   "Systemd service restarted",
+	}
+
+	results, err := correlator.Process(ctx, event)
+	require.NoError(t, err)
+	assert.Len(t, results, 0)
+}
+
+// Test helper functions
+func createTestPodEvent(id, namespace, name, message string) *domain.UnifiedEvent {
+	return &domain.UnifiedEvent{
+		ID:        id,
+		Type:      "k8s",
+		Timestamp: time.Now(),
+		Severity:  domain.EventSeverityError,
+		K8sContext: &domain.K8sContext{
+			Namespace: namespace,
+			Name:      name,
+			Kind:      "Pod",
+		},
+		Message: message,
+	}
+}
+
+func createTestServiceEvent(id, namespace, name, message string) *domain.UnifiedEvent {
+	return &domain.UnifiedEvent{
+		ID:        id,
+		Type:      "k8s",
+		Timestamp: time.Now(),
+		Severity:  domain.EventSeverityWarning,
+		K8sContext: &domain.K8sContext{
+			Namespace: namespace,
+			Name:      name,
+			Kind:      "Service",
+		},
+		Message: message,
+	}
+}
+
+func createTestPods(namespace string, names []string, labels map[string]string) []*domain.K8sPod {
+	pods := make([]*domain.K8sPod, len(names))
+	for i, name := range names {
+		pods[i] = &domain.K8sPod{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		}
+	}
+	return pods
+}
+
 func TestK8sCorrelatorCreation(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar().Desugar()
 
@@ -39,205 +150,82 @@ func TestK8sCorrelatorCreation(t *testing.T) {
 }
 
 func TestK8sCorrelatorProcess(t *testing.T) {
+	t.Run("correlate pod events with deployment", testPodEventCorrelation)
+	t.Run("correlate service events", testServiceEventCorrelation)
+	t.Run("correlate namespace events", testNamespaceEventCorrelation)
+	t.Run("handle API errors gracefully", testAPIErrorHandling)
+	t.Run("nil event handling", testNilEventHandling)
+	t.Run("non-K8s event", testNonK8sEventHandling)
+}
+
+func testPodEventCorrelation(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar().Desugar()
+	mockClient := &MockK8sClient{}
+	correlator := NewK8sCorrelator(logger, mockClient)
+	ctx := context.Background()
 
-	t.Run("correlate pod events with deployment", func(t *testing.T) {
-		mockClient := &MockK8sClient{}
-		correlator := NewK8sCorrelator(logger, mockClient)
-		ctx := context.Background()
+	// Setup mock responses
+	pod := &domain.K8sPod{
+		Name:      "api-pod-xyz",
+		Namespace: "production",
+		Labels: map[string]string{
+			"app": "api",
+		},
+		OwnerReferences: []domain.K8sOwnerReference{
+			{Kind: "ReplicaSet", Name: "api-rs-123"},
+		},
+	}
 
-		// Setup mock responses
-		pod := &domain.K8sPod{
-			Name:      "api-pod-xyz",
-			Namespace: "production",
-			Labels: map[string]string{
-				"app": "api",
-			},
-			OwnerReferences: []domain.K8sOwnerReference{
-				{
-					Kind: "ReplicaSet",
-					Name: "api-rs-123",
-				},
-			},
-		}
+	deployment := &domain.K8sDeployment{
+		Name:      "api-deployment",
+		Namespace: "production",
+		Labels:    map[string]string{"app": "api"},
+	}
 
-		deployment := &domain.K8sDeployment{
-			Name:      "api-deployment",
-			Namespace: "production",
-			Labels: map[string]string{
-				"app": "api",
-			},
-		}
+	mockClient.On("GetPod", ctx, "production", "api-pod-xyz").Return(pod, nil)
+	mockClient.On("GetDeployment", ctx, "production", mock.Anything).Return(deployment, nil)
 
-		mockClient.On("GetPod", ctx, "production", "api-pod-xyz").Return(pod, nil)
-		mockClient.On("GetDeployment", ctx, "production", mock.Anything).Return(deployment, nil)
+	// Pod crash event
+	event := createTestPodEvent("pod-crash-1", "production", "api-pod-xyz", "Pod crashed with OOMKilled")
 
-		// Pod crash event
-		event := &domain.UnifiedEvent{
-			ID:        "pod-crash-1",
-			Type:      EventTypeK8s,
-			Timestamp: time.Now(),
-			Severity:  domain.EventSeverityError,
-			K8sContext: &domain.K8sContext{
-				Namespace: "production",
-				Name:      "api-pod-xyz",
-				Kind:      "Pod",
-			},
-			Message: "Pod crashed with OOMKilled",
-		}
+	results, err := correlator.Process(ctx, event)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
 
-		results, err := correlator.Process(ctx, event)
-		require.NoError(t, err)
+	result := results[0]
+	assert.Equal(t, "k8s_ownership", result.Type)
+	assert.Contains(t, result.Message, "deployment")
+	assert.Contains(t, result.Impact.Resources, "production/api-deployment")
+}
 
-		// Should correlate with deployment
-		require.Len(t, results, 1)
-		result := results[0]
-		assert.Equal(t, "k8s_ownership", result.Type)
-		assert.Contains(t, result.Message, "deployment")
-		assert.Contains(t, result.Impact.Resources, "production/api-deployment")
-	})
+func testServiceEventCorrelation(t *testing.T) {
+	logger := zaptest.NewLogger(t).Sugar().Desugar()
+	mockClient := &MockK8sClient{}
+	correlator := NewK8sCorrelator(logger, mockClient)
+	ctx := context.Background()
 
-	t.Run("correlate service events", func(t *testing.T) {
-		mockClient := &MockK8sClient{}
-		correlator := NewK8sCorrelator(logger, mockClient)
-		ctx := context.Background()
+	// Setup service and related pods
+	service := &domain.K8sService{
+		Name:      "api-service",
+		Namespace: "production",
+		Selector:  map[string]string{"app": "api"},
+	}
 
-		// Setup service and related pods
-		service := &domain.K8sService{
-			Name:      "api-service",
-			Namespace: "production",
-			Selector: map[string]string{
-				"app": "api",
-			},
-		}
+	pods := createTestPods("production", []string{"api-pod-1", "api-pod-2"}, map[string]string{"app": "api"})
 
-		pods := []*domain.K8sPod{
-			{
-				Name:      "api-pod-1",
-				Namespace: "production",
-				Labels: map[string]string{
-					"app": "api",
-				},
-			},
-			{
-				Name:      "api-pod-2",
-				Namespace: "production",
-				Labels: map[string]string{
-					"app": "api",
-				},
-			},
-		}
+	mockClient.On("GetService", ctx, "production", "api-service").Return(service, nil)
+	mockClient.On("ListPods", ctx, "production", service.Selector).Return(pods, nil)
 
-		mockClient.On("GetService", ctx, "production", "api-service").Return(service, nil)
-		mockClient.On("ListPods", ctx, "production", service.Selector).Return(pods, nil)
+	event := createTestServiceEvent("service-disruption", "production", "api-service", "Service endpoints not ready")
 
-		// Service disruption event
-		event := &domain.UnifiedEvent{
-			ID:        "service-disruption",
-			Type:      EventTypeK8s,
-			Timestamp: time.Now(),
-			Severity:  domain.EventSeverityWarning,
-			K8sContext: &domain.K8sContext{
-				Namespace: "production",
-				Name:      "api-service",
-				Kind:      "Service",
-			},
-			Message: "Service endpoints not ready",
-		}
+	results, err := correlator.Process(ctx, event)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
 
-		results, err := correlator.Process(ctx, event)
-		require.NoError(t, err)
-
-		// Should find affected pods
-		require.Len(t, results, 1)
-		result := results[0]
-		assert.Equal(t, "k8s_ownership", result.Type)
-		assert.Contains(t, result.Impact.Resources, "production/api-pod-1")
-		assert.Contains(t, result.Impact.Resources, "production/api-pod-2")
-	})
-
-	t.Run("correlate namespace events", func(t *testing.T) {
-		mockClient := &MockK8sClient{}
-		correlator := NewK8sCorrelator(logger, mockClient)
-		ctx := context.Background()
-
-		// Namespace quota exceeded event
-		event := &domain.UnifiedEvent{
-			ID:        "quota-exceeded",
-			Type:      EventTypeK8s,
-			Timestamp: time.Now(),
-			Severity:  domain.EventSeverityCritical,
-			K8sContext: &domain.K8sContext{
-				Namespace: "production",
-				Kind:      "Namespace",
-			},
-			Message: "Namespace resource quota exceeded",
-		}
-
-		results, err := correlator.Process(ctx, event)
-		require.NoError(t, err)
-
-		// Should identify namespace-wide impact (may or may not generate correlations)
-		// Namespace events are processed but may not always generate correlations
-		assert.NotNil(t, results)
-	})
-
-	t.Run("handle API errors gracefully", func(t *testing.T) {
-		mockClient := &MockK8sClient{}
-		correlator := NewK8sCorrelator(logger, mockClient)
-		ctx := context.Background()
-
-		// API returns error
-		mockClient.On("GetPod", ctx, "default", "missing-pod").Return(
-			(*domain.K8sPod)(nil),
-			errors.New("pod not found"),
-		)
-
-		event := &domain.UnifiedEvent{
-			ID:        "api-error-event",
-			Type:      EventTypeK8s,
-			Timestamp: time.Now(),
-			K8sContext: &domain.K8sContext{
-				Namespace: "default",
-				Name:      "missing-pod",
-				Kind:      "Pod",
-			},
-			Message: "Pod event",
-		}
-
-		results, err := correlator.Process(ctx, event)
-		// Should handle error gracefully
-		require.NoError(t, err)
-		assert.Len(t, results, 0)
-	})
-
-	t.Run("nil event handling", func(t *testing.T) {
-		mockClient := &MockK8sClient{}
-		correlator := NewK8sCorrelator(logger, mockClient)
-		ctx := context.Background()
-
-		results, err := correlator.Process(ctx, nil)
-		assert.Error(t, err)
-		assert.Nil(t, results)
-	})
-
-	t.Run("non-K8s event", func(t *testing.T) {
-		mockClient := &MockK8sClient{}
-		correlator := NewK8sCorrelator(logger, mockClient)
-		ctx := context.Background()
-
-		// Event without K8s context
-		event := &domain.UnifiedEvent{
-			ID:        "non-k8s",
-			Type:      EventTypeSystemd,
-			Timestamp: time.Now(),
-			Message:   "Systemd service restarted",
-		}
-
-		results, err := correlator.Process(ctx, event)
-		require.NoError(t, err)
-		assert.Len(t, results, 0) // No K8s correlation
-	})
+	result := results[0]
+	assert.Equal(t, "k8s_ownership", result.Type)
+	assert.Contains(t, result.Impact.Resources, "production/api-pod-1")
+	assert.Contains(t, result.Impact.Resources, "production/api-pod-2")
 }
 
 func TestK8sCorrelatorStart(t *testing.T) {
@@ -329,7 +317,7 @@ func TestK8sOwnershipCache(t *testing.T) {
 		// Process event twice
 		event := &domain.UnifiedEvent{
 			ID:        "cache-test-1",
-			Type:      EventTypeK8s,
+			Type:      "k8s",
 			Timestamp: time.Now(),
 			K8sContext: &domain.K8sContext{
 				Namespace: "default",
@@ -401,7 +389,7 @@ func TestK8sEventHistory(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        fmt.Sprintf("history-%d", i),
-				Type:      EventTypeK8s,
+				Type:      "k8s",
 				Timestamp: baseTime.Add(time.Duration(i) * time.Minute),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -444,7 +432,7 @@ func TestK8sEventHistory(t *testing.T) {
 		for i := 0; i < 150; i++ {
 			event := &domain.UnifiedEvent{
 				ID:        fmt.Sprintf("overflow-%d", i),
-				Type:      EventTypeK8s,
+				Type:      "k8s",
 				Timestamp: time.Now(),
 				K8sContext: &domain.K8sContext{
 					Namespace: "default",
@@ -485,7 +473,7 @@ func TestK8sCorrelatorPatterns(t *testing.T) {
 		// CrashLoopBackOff event
 		event := &domain.UnifiedEvent{
 			ID:        "crashloop",
-			Type:      EventTypeK8s,
+			Type:      "k8s",
 			Timestamp: time.Now(),
 			Severity:  domain.EventSeverityError,
 			K8sContext: &domain.K8sContext{
@@ -524,7 +512,7 @@ func TestK8sCorrelatorPatterns(t *testing.T) {
 		// Rollout stuck event
 		event := &domain.UnifiedEvent{
 			ID:        "rollout-stuck",
-			Type:      EventTypeK8s,
+			Type:      "k8s",
 			Timestamp: time.Now(),
 			Severity:  domain.EventSeverityWarning,
 			K8sContext: &domain.K8sContext{
@@ -570,7 +558,7 @@ func TestK8sCorrelatorConcurrency(t *testing.T) {
 			go func(id int) {
 				event := &domain.UnifiedEvent{
 					ID:        fmt.Sprintf("concurrent-%d", id),
-					Type:      EventTypeK8s,
+					Type:      "k8s",
 					Timestamp: time.Now(),
 					K8sContext: &domain.K8sContext{
 						Namespace: "default",
@@ -607,7 +595,7 @@ func BenchmarkK8sCorrelatorProcess(b *testing.B) {
 
 	event := &domain.UnifiedEvent{
 		ID:        "bench-event",
-		Type:      EventTypeK8s,
+		Type:      "k8s",
 		Timestamp: time.Now(),
 		K8sContext: &domain.K8sContext{
 			Namespace: "benchmark",

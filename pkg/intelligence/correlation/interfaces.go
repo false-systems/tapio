@@ -147,14 +147,16 @@ func (b *BaseCorrelator) hasField(event *domain.UnifiedEvent, field string) bool
 		if event.K8sContext != nil && event.K8sContext.ClusterName != "" {
 			return true
 		}
-		return event.Attributes["cluster"] != nil && event.Attributes["cluster"] != ""
+		return event.Attributes != nil && event.Attributes["cluster"] != nil && event.Attributes["cluster"] != ""
 	case "namespace":
 		return event.K8sContext != nil && event.K8sContext.Namespace != ""
 	case "pod":
 		return event.K8sContext != nil && event.K8sContext.Name != ""
 	case "container":
-		if val, ok := event.Attributes["container"]; ok && val != "" {
-			return true
+		if event.Attributes != nil {
+			if val, ok := event.Attributes["container"]; ok && val != "" {
+				return true
+			}
 		}
 		return false
 	case "node":
@@ -163,8 +165,10 @@ func (b *BaseCorrelator) hasField(event *domain.UnifiedEvent, field string) bool
 		return event.Severity != ""
 	default:
 		// Check in attributes
-		if val, ok := event.Attributes[field]; ok && val != nil {
-			return true
+		if event.Attributes != nil {
+			if val, ok := event.Attributes[field]; ok && val != nil {
+				return true
+			}
 		}
 		return false
 	}

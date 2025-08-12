@@ -18,160 +18,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// EtcdInstrumentation provides telemetry specifically for etcd collector
-type EtcdInstrumentation struct {
-	ServiceName string
-	Logger      *zap.Logger
-
-	// Tracing
-	Tracer trace.Tracer
-
-	// Common metrics
-	RequestsTotal   metric.Int64Counter
-	RequestDuration metric.Float64Histogram
-	ActiveRequests  metric.Int64UpDownCounter
-	ErrorsTotal     metric.Int64Counter
-
-	// Etcd-specific metrics
-	EventsTotal     metric.Int64Counter
-	APILatency      metric.Float64Histogram
-	PollsActive     metric.Int64UpDownCounter
-	SyscallsTracked metric.Int64Counter
-	EtcdErrorsTotal metric.Int64Counter
-
-	// Internal meter
-	meter metric.Meter
-}
-
-// NewEtcdInstrumentation creates instrumentation for etcd collector
-func NewEtcdInstrumentation(logger *zap.Logger) (*EtcdInstrumentation, error) {
-	serviceName := "etcd-collector"
-	meter := otel.Meter(serviceName)
-	tracer := otel.Tracer(serviceName)
-
-	// Create common metrics
-	requestsTotal, err := meter.Int64Counter(
-		"tapio.requests.total",
-		metric.WithDescription("Total number of requests"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	requestDuration, err := meter.Float64Histogram(
-		"tapio.request.duration",
-		metric.WithDescription("Request duration in seconds"),
-		metric.WithUnit("s"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	activeRequests, err := meter.Int64UpDownCounter(
-		"tapio.requests.active",
-		metric.WithDescription("Number of active requests"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		"tapio.errors.total",
-		metric.WithDescription("Total number of errors"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create etcd-specific metrics
-	eventsTotal, err := meter.Int64Counter(
-		"tapio.etcd.events.total",
-		metric.WithDescription("Total number of etcd events collected"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	apiLatency, err := meter.Float64Histogram(
-		"tapio.etcd.api.latency",
-		metric.WithDescription("Etcd API call latency in seconds"),
-		metric.WithUnit("s"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	pollsActive, err := meter.Int64UpDownCounter(
-		"tapio.etcd.polls.active",
-		metric.WithDescription("Number of active etcd watch operations"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	syscallsTracked, err := meter.Int64Counter(
-		"tapio.etcd.syscalls.tracked",
-		metric.WithDescription("Number of eBPF syscalls monitored for etcd"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	etcdErrorsTotal, err := meter.Int64Counter(
-		"tapio.etcd.errors.total",
-		metric.WithDescription("Total number of etcd collection errors"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &EtcdInstrumentation{
-		ServiceName:     serviceName,
-		Logger:          logger,
-		Tracer:          tracer,
-		meter:           meter,
-		RequestsTotal:   requestsTotal,
-		RequestDuration: requestDuration,
-		ActiveRequests:  activeRequests,
-		ErrorsTotal:     errorsTotal,
-		EventsTotal:     eventsTotal,
-		APILatency:      apiLatency,
-		PollsActive:     pollsActive,
-		SyscallsTracked: syscallsTracked,
-		EtcdErrorsTotal: etcdErrorsTotal,
-	}, nil
-}
-
-// StartSpan starts a new span and increments active requests
-func (ei *EtcdInstrumentation) StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	ctx, span := ei.Tracer.Start(ctx, name, opts...)
-	ei.ActiveRequests.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("operation", name),
-	))
-	return ctx, span
-}
-
 // Collector implements minimal etcd monitoring
 type Collector struct {
-	name            string
-	config          Config
-	client          *clientv3.Client
-	events          chan collectors.RawEvent
-	ctx             context.Context
-	cancel          context.CancelFunc
-	healthy         bool
-	mu              sync.RWMutex
-	ebpfState       interface{} // Platform-specific eBPF state
-	stats           CollectorStats
-	logger          *zap.Logger
-	instrumentation *EtcdInstrumentation
+	name      string
+	config    Config
+	client    *clientv3.Client
+	events    chan collectors.RawEvent
+	ctx       context.Context
+	cancel    context.CancelFunc
+	healthy   bool
+	mu        sync.RWMutex
+	ebpfState interface{} // Platform-specific eBPF state
+	stats     CollectorStats
+	logger    *zap.Logger
+
+	// OTEL instrumentation - REQUIRED fields
+	tracer          trace.Tracer
+	eventsProcessed metric.Int64Counter
+	errorsTotal     metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	watchOperations metric.Int64UpDownCounter
+	apiLatency      metric.Float64Histogram
 }
 
 // CollectorStats tracks collector statistics
@@ -194,10 +61,49 @@ func NewCollector(name string, config Config) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Initialize OTEL instrumentation
-	instrumentation, err := NewEtcdInstrumentation(logger)
+	// Initialize OTEL components - MANDATORY pattern
+	tracer := otel.Tracer(name)
+	meter := otel.Meter(name)
+
+	// Create metrics with descriptive names and descriptions
+	eventsProcessed, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OTEL instrumentation: %w", err)
+		logger.Warn("Failed to create events counter", zap.Error(err))
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	processingTime, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	watchOperations, err := meter.Int64UpDownCounter(
+		fmt.Sprintf("%s_active_watches", name),
+		metric.WithDescription(fmt.Sprintf("Active watch operations in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create watch operations gauge", zap.Error(err))
+	}
+
+	apiLatency, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_api_latency_ms", name),
+		metric.WithDescription(fmt.Sprintf("API call latency for %s in milliseconds", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create API latency histogram", zap.Error(err))
 	}
 
 	return &Collector{
@@ -206,7 +112,12 @@ func NewCollector(name string, config Config) (*Collector, error) {
 		events:          make(chan collectors.RawEvent, 10000), // Large buffer
 		healthy:         true,
 		logger:          logger,
-		instrumentation: instrumentation,
+		tracer:          tracer,
+		eventsProcessed: eventsProcessed,
+		errorsTotal:     errorsTotal,
+		processingTime:  processingTime,
+		watchOperations: watchOperations,
+		apiLatency:      apiLatency,
 	}, nil
 }
 
@@ -217,12 +128,11 @@ func (c *Collector) Name() string {
 
 // Start begins collection
 func (c *Collector) Start(ctx context.Context) error {
-	start := time.Now()
-	ctx, span := c.instrumentation.StartSpan(ctx, "etcd.start")
+	// Create span for startup
+	ctx, span := c.tracer.Start(ctx, "etcd.start")
 	defer span.End()
-	defer c.instrumentation.ActiveRequests.Add(ctx, -1, metric.WithAttributes(
-		attribute.String("operation", "etcd.start"),
-	))
+
+	start := time.Now()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -257,9 +167,11 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	client, err := clientv3.New(clientConfig)
 	if err != nil {
-		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("error_type", "client_creation"),
-		))
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "client_creation"),
+			))
+		}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to create etcd client")
 		return fmt.Errorf("failed to create etcd client: %w", err)
@@ -273,17 +185,21 @@ func (c *Collector) Start(ctx context.Context) error {
 	cancel()
 
 	// Record API latency for connection test
-	c.instrumentation.APILatency.Record(ctx, time.Since(connStart).Seconds(), metric.WithAttributes(
-		attribute.String("endpoint", "/status"),
-		attribute.String("operation", "connection_test"),
-	))
+	if c.apiLatency != nil {
+		c.apiLatency.Record(ctx, time.Since(connStart).Seconds()*1000, metric.WithAttributes(
+			attribute.String("endpoint", "/status"),
+			attribute.String("operation", "connection_test"),
+		))
+	}
 
 	if err != nil {
 		c.client.Close()
 		c.client = nil
-		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("error_type", "connectivity"),
-		))
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "connectivity"),
+			))
+		}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to connect to etcd")
 		return fmt.Errorf("failed to connect to etcd: %w", err)
@@ -303,9 +219,11 @@ func (c *Collector) Start(ctx context.Context) error {
 	// Start eBPF monitoring if available
 	if err := c.startEBPF(); err != nil {
 		// Log but don't fail - eBPF is optional
-		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("error_type", "ebpf_setup"),
-		))
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "ebpf_setup"),
+			))
+		}
 		span.AddEvent("eBPF setup failed, continuing without eBPF monitoring",
 			trace.WithAttributes(attribute.String("error", err.Error())))
 		c.logger.Warn("eBPF monitoring setup failed", zap.Error(err))
@@ -313,9 +231,11 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	// Record startup duration
 	duration := time.Since(start)
-	c.instrumentation.RequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
-		attribute.String("operation", "startup"),
-	))
+	if c.processingTime != nil {
+		c.processingTime.Record(ctx, duration.Seconds()*1000, metric.WithAttributes(
+			attribute.String("operation", "startup"),
+		))
+	}
 
 	span.SetAttributes(
 		attribute.Float64("startup_duration_seconds", duration.Seconds()),
@@ -332,12 +252,11 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down
 func (c *Collector) Stop() error {
-	start := time.Now()
-	ctx, span := c.instrumentation.StartSpan(context.Background(), "etcd.stop")
+	// Create span for shutdown
+	ctx, span := c.tracer.Start(context.Background(), "etcd.stop")
 	defer span.End()
-	defer c.instrumentation.ActiveRequests.Add(ctx, -1, metric.WithAttributes(
-		attribute.String("operation", "etcd.stop"),
-	))
+
+	start := time.Now()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -372,12 +291,14 @@ func (c *Collector) Stop() error {
 
 	// Record shutdown duration
 	duration := time.Since(start)
-	c.instrumentation.RequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
-		attribute.String("operation", "shutdown"),
-	))
+	if c.processingTime != nil {
+		c.processingTime.Record(ctx, duration.Seconds()*1000, metric.WithAttributes(
+			attribute.String("operation", "shutdown"),
+		))
+	}
 
 	span.SetAttributes(
-		attribute.Float64("shutdown_duration_seconds", duration.Seconds()),
+		attribute.Float64("shutdown_duration_ms", duration.Seconds()*1000),
 	)
 
 	c.logger.Info("etcd collector stopped",
@@ -399,19 +320,18 @@ func (c *Collector) IsHealthy() bool {
 
 // watchRegistry watches the K8s registry prefix in etcd
 func (c *Collector) watchRegistry() {
-	ctx, span := c.instrumentation.StartSpan(c.ctx, "etcd.watch_registry")
+	ctx, span := c.tracer.Start(c.ctx, "etcd.watch_registry")
 	defer span.End()
-	defer c.instrumentation.ActiveRequests.Add(ctx, -1, metric.WithAttributes(
-		attribute.String("operation", "etcd.watch_registry"),
-	))
 
 	// Track active watch operation
-	c.instrumentation.PollsActive.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("operation", "watch_registry"),
-	))
-	defer c.instrumentation.PollsActive.Add(ctx, -1, metric.WithAttributes(
-		attribute.String("operation", "watch_registry"),
-	))
+	if c.watchOperations != nil {
+		c.watchOperations.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("operation", "watch_registry"),
+		))
+		defer c.watchOperations.Add(ctx, -1, metric.WithAttributes(
+			attribute.String("operation", "watch_registry"),
+		))
+	}
 
 	span.SetAttributes(
 		attribute.String("etcd.watch_prefix", "/registry/"),
@@ -436,9 +356,11 @@ func (c *Collector) watchRegistry() {
 				c.mu.Lock()
 				c.stats.ErrorCount++
 				c.mu.Unlock()
-				c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
-					attribute.String("error_type", "watch_response"),
-				))
+				if c.errorsTotal != nil {
+					c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+						attribute.String("error_type", "watch_response"),
+					))
+				}
 				span.RecordError(watchResp.Err())
 				span.AddEvent("Watch response error", trace.WithAttributes(
 					attribute.String("error", watchResp.Err().Error()),
@@ -463,11 +385,8 @@ func (c *Collector) watchRegistry() {
 // processEtcdEvent processes an etcd watch event
 func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event) {
 	start := time.Now()
-	ctx, span := c.instrumentation.StartSpan(ctx, "etcd.process_event")
+	ctx, span := c.tracer.Start(ctx, "etcd.process_event")
 	defer span.End()
-	defer c.instrumentation.ActiveRequests.Add(ctx, -1, metric.WithAttributes(
-		attribute.String("operation", "etcd.process_event"),
-	))
 
 	// Extract resource type from key
 	key := string(event.Kv.Key)
@@ -523,11 +442,13 @@ func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event)
 		c.mu.Unlock()
 
 		// Record OTEL event metric
-		c.instrumentation.EventsTotal.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("event_type", "etcd"),
-			attribute.String("operation", operation),
-			attribute.String("resource_type", resourceType),
-		))
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", "etcd"),
+				attribute.String("operation", operation),
+				attribute.String("resource_type", resourceType),
+			))
+		}
 
 		duration := time.Since(start)
 		span.SetAttributes(
@@ -543,9 +464,11 @@ func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event)
 		c.stats.EventsDropped++
 		c.mu.Unlock()
 
-		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("error_type", "buffer_full"),
-		))
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "buffer_full"),
+			))
+		}
 		span.AddEvent("Event dropped - buffer full", trace.WithAttributes(
 			attribute.String("key", key),
 			attribute.String("operation", operation),
@@ -656,9 +579,11 @@ func (c *Collector) createEventWithContext(ctx context.Context, eventType string
 		c.mu.Lock()
 		c.stats.ErrorCount++
 		c.mu.Unlock()
-		c.instrumentation.EtcdErrorsTotal.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("error_type", "marshal"),
-		))
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "marshal"),
+			))
+		}
 	}
 
 	// Extract trace context from current span if available
@@ -706,7 +631,7 @@ func (c *Collector) Health() (bool, map[string]interface{}) {
 		"last_event":       c.stats.LastEventTime,
 		"client_connected": c.client != nil,
 		"ebpf_active":      c.ebpfState != nil,
-		"instrumentation":  c.instrumentation.ServiceName,
+		"instrumentation":  "etcd",
 		"endpoints":        c.config.Endpoints,
 		"buffer_size":      cap(c.events),
 		"buffer_available": cap(c.events) - len(c.events),
@@ -726,7 +651,7 @@ func (c *Collector) Statistics() map[string]interface{} {
 		"error_count":         c.stats.ErrorCount,
 		"last_event_time":     c.stats.LastEventTime,
 		"collector_name":      c.name,
-		"service_name":        c.instrumentation.ServiceName,
+		"service_name":        "etcd",
 		"config_endpoints":    c.config.Endpoints,
 		"buffer_capacity":     cap(c.events),
 		"buffer_current_size": len(c.events),

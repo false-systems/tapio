@@ -7,9 +7,25 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
 )
+
+// AffectedPodData represents a pod affected by config changes
+type AffectedPodData struct {
+	Pod      GraphNode
+	Name     string
+	Restart  time.Time
+	Ready    bool
+	Phase    string
+	Services []string
+}
+
+// ConfigChangeInfo represents a configuration change info for impact analysis
+type ConfigChangeInfo struct {
+	Type     string // ConfigMap or Secret
+	Name     string
+	Modified time.Time
+}
 
 // ConfigImpactCorrelator analyzes the impact of configuration changes on pods and services
 // It tracks: ConfigMap/Secret changes → Pod restarts → Service disruptions
@@ -50,11 +66,11 @@ func NewConfigImpactCorrelator(graphStore GraphStore, logger *zap.Logger) (*Conf
 				},
 			},
 		},
-		MaxEventAge:  24 * time.Hour,
+		MaxEventAge:  MaxEventAge,
 		BatchSupport: false,
 	}
 
-	base := NewBaseCorrelator("config-impact-correlator", "1.0.0", capabilities)
+	base := NewBaseCorrelator("config-impact-correlator", DefaultCorrelatorVersion, capabilities)
 
 	return &ConfigImpactCorrelator{
 		BaseCorrelator: base,
@@ -65,7 +81,7 @@ func NewConfigImpactCorrelator(graphStore GraphStore, logger *zap.Logger) (*Conf
 }
 
 // Correlate analyzes config change impacts
-func (c *ConfigImpactCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*aggregator.CorrelatorOutput, error) {
+func (c *ConfigImpactCorrelator) Correlate(ctx context.Context, event *domain.UnifiedEvent) (*CorrelatorOutput, error) {
 	startTime := time.Now()
 
 	// Validate event can be processed
@@ -73,39 +89,68 @@ func (c *ConfigImpactCorrelator) Correlate(ctx context.Context, event *domain.Un
 		return nil, err
 	}
 
+	c.logCorrelationStart(event)
+
+	// Route to appropriate analysis
+	findings, err := c.routeEventAnalysis(ctx, event)
+	if err != nil {
+		c.logCorrelationError(event, err)
+		return nil, fmt.Errorf("config impact correlation failed: %w", err)
+	}
+
+	// Build and return correlator output
+	return c.buildCorrelatorOutput(findings, event, time.Since(startTime)), nil
+}
+
+// logCorrelationStart logs the start of correlation processing
+func (c *ConfigImpactCorrelator) logCorrelationStart(event *domain.UnifiedEvent) {
 	c.logger.Debug("Processing config impact correlation",
 		zap.String("event_id", event.ID),
 		zap.String("event_type", string(event.Type)),
 		zap.String("namespace", c.getNamespace(event)),
 		zap.String("entity", c.getEntityName(event)))
+}
 
-	// Route to appropriate analysis
-	var findings []aggregator.Finding
-	var err error
+// logCorrelationError logs correlation processing errors
+func (c *ConfigImpactCorrelator) logCorrelationError(event *domain.UnifiedEvent, err error) {
+	c.logger.Error("Config impact correlation failed",
+		zap.String("event_id", event.ID),
+		zap.Error(err))
+}
 
+// routeEventAnalysis routes events to appropriate analysis methods
+func (c *ConfigImpactCorrelator) routeEventAnalysis(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	switch event.Type {
 	case "config_changed", "secret_changed":
-		findings, err = c.analyzeConfigChange(ctx, event)
+		return c.analyzeConfigChange(ctx, event)
 	case "pod_restart", "pod_crash", "container_restart":
-		findings, err = c.analyzePodRestartCause(ctx, event)
+		return c.analyzePodRestartCause(ctx, event)
 	case "deployment_rollout":
-		findings, err = c.analyzeDeploymentConfig(ctx, event)
+		return c.analyzeDeploymentConfig(ctx, event)
 	default:
-		findings = []aggregator.Finding{}
+		return []Finding{}, nil
 	}
+}
 
-	if err != nil {
-		c.logger.Error("Config impact correlation failed",
-			zap.String("event_id", event.ID),
-			zap.Error(err))
-		return nil, fmt.Errorf("config impact correlation failed: %w", err)
-	}
-
-	// Calculate overall confidence
+// buildCorrelatorOutput builds the final correlator output
+func (c *ConfigImpactCorrelator) buildCorrelatorOutput(findings []Finding, event *domain.UnifiedEvent, processingTime time.Duration) *CorrelatorOutput {
 	confidence := c.calculateConfidence(findings)
+	contextMap := c.buildContextMap(event)
 
-	// Build context
-	context_map := map[string]string{
+	return &CorrelatorOutput{
+		CorrelatorName:    c.Name(),
+		CorrelatorVersion: c.Version(),
+		Findings:          findings,
+		Context:           contextMap,
+		Confidence:        confidence,
+		ProcessingTime:    processingTime,
+		Timestamp:         time.Now(),
+	}
+}
+
+// buildContextMap builds the correlation context map
+func (c *ConfigImpactCorrelator) buildContextMap(event *domain.UnifiedEvent) map[string]string {
+	contextMap := map[string]string{
 		"namespace":        c.getNamespace(event),
 		"cluster":          c.getCluster(event),
 		"correlation_type": "config_impact",
@@ -113,39 +158,60 @@ func (c *ConfigImpactCorrelator) Correlate(ctx context.Context, event *domain.Un
 	}
 
 	if entity := c.getEntityName(event); entity != "" {
-		context_map["entity"] = entity
+		contextMap["entity"] = entity
 	}
 
-	return &aggregator.CorrelatorOutput{
-		CorrelatorName:    c.Name(),
-		CorrelatorVersion: c.Version(),
-		Findings:          findings,
-		Context:           context_map,
-		Confidence:        confidence,
-		ProcessingTime:    time.Since(startTime),
-		Timestamp:         time.Now(),
-	}, nil
+	return contextMap
 }
 
 // analyzeConfigChange checks what pods/services are affected by a config change
-func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := c.getNamespace(event)
 	configName := c.getEntityName(event)
-	configType := "ConfigMap"
-	if event.Type == "secret_changed" {
-		configType = "Secret"
-	}
+	configType := c.determineConfigType(event)
 
 	if configName == "" {
 		return nil, fmt.Errorf("%s name not found in event", configType)
 	}
 
+	c.logConfigAnalysis(configName, configType, namespace)
+
+	// Query for affected pods
+	affectedPods, err := c.queryConfigImpactPods(ctx, namespace, configName, configType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate findings from affected pods
+	findings := c.generateConfigChangeFindings(configName, configType, affectedPods, event)
+
+	// Add immediate impact finding if pods are affected
+	if len(findings) > 0 {
+		immediateFinding := c.createImmediateImpactFinding(configName, configType, len(findings), event)
+		findings = append([]Finding{immediateFinding}, findings...)
+	}
+
+	return findings, nil
+}
+
+// determineConfigType determines if the event is for ConfigMap or Secret
+func (c *ConfigImpactCorrelator) determineConfigType(event *domain.UnifiedEvent) string {
+	if event.Type == "secret_changed" {
+		return "Secret"
+	}
+	return "ConfigMap"
+}
+
+// logConfigAnalysis logs config change analysis details
+func (c *ConfigImpactCorrelator) logConfigAnalysis(configName, configType, namespace string) {
 	c.logger.Debug("Analyzing config change impact",
 		zap.String("config", configName),
 		zap.String("type", configType),
 		zap.String("namespace", namespace))
+}
 
-	// Query for pods using this config and their recent status with LIMIT
+// queryConfigImpactPods queries for pods affected by config changes
+func (c *ConfigImpactCorrelator) queryConfigImpactPods(ctx context.Context, namespace, configName, configType string) ([]AffectedPodData, error) {
 	limit := c.queryConfig.GetLimit("config")
 	query := fmt.Sprintf(`
 		MATCH (cfg:%s {name: $configName, namespace: $namespace})
@@ -184,49 +250,62 @@ func (c *ConfigImpactCorrelator) analyzeConfigChange(ctx context.Context, event 
 	}
 	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	return c.extractAffectedPodsFromResult(ctx, result)
+}
+
+// extractAffectedPodsFromResult extracts affected pods from query result
+func (c *ConfigImpactCorrelator) extractAffectedPodsFromResult(ctx context.Context, result ResultIterator) ([]AffectedPodData, error) {
+	var allAffectedPods []AffectedPodData
 
 	for result.Next(ctx) {
 		record := result.Record()
-
-		// Analyze affected pods
 		if affectedPodsValue, found := record.Get("affectedPods"); found {
-			if affectedPods, ok := affectedPodsValue.([]interface{}); ok {
-				findings = append(findings, c.analyzeAffectedPods(configName, configType, affectedPods, event)...)
-			}
+			affectedPods := c.parseAffectedPodsFromValue(affectedPodsValue)
+			allAffectedPods = append(allAffectedPods, affectedPods...)
 		}
 	}
 
-	if err = result.Err(); err != nil {
+	if err := result.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating config impact results: %w", err)
 	}
 
-	// Add immediate impact finding if pods are affected
-	if len(findings) > 0 {
-		findings = append([]aggregator.Finding{{
-			ID:         fmt.Sprintf("config-change-impact-%s", configName),
-			Type:       "config_change_detected",
-			Severity:   aggregator.SeverityMedium,
-			Confidence: 0.95,
-			Message:    fmt.Sprintf("%s %s was changed, analyzing impact on %d findings", configType, configName, len(findings)),
-			Evidence: aggregator.Evidence{
-				Events: []domain.UnifiedEvent{*event},
-			},
-			Impact: aggregator.Impact{
-				Scope:       "config",
-				Resources:   []string{configName},
-				UserImpact:  "Configuration change may cause pod restarts",
-				Degradation: "Temporary during rollout",
-			},
-			Timestamp: time.Now(),
-		}}, findings...)
-	}
+	return allAffectedPods, nil
+}
 
-	return findings, nil
+// generateConfigChangeFindings generates findings from affected pods
+func (c *ConfigImpactCorrelator) generateConfigChangeFindings(configName, configType string, affectedPods []AffectedPodData, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
+	for _, pods := range [][]AffectedPodData{affectedPods} {
+		if len(pods) > 0 {
+			findings = append(findings, c.analyzeAffectedPods(configName, configType, pods, event)...)
+		}
+	}
+	return findings
+}
+
+// createImmediateImpactFinding creates immediate impact finding for config changes
+func (c *ConfigImpactCorrelator) createImmediateImpactFinding(configName, configType string, findingsCount int, event *domain.UnifiedEvent) Finding {
+	return Finding{
+		ID:         fmt.Sprintf("config-change-impact-%s", configName),
+		Type:       "config_change_detected",
+		Severity:   SeverityMedium,
+		Confidence: HighTestConfidence,
+		Message:    fmt.Sprintf("%s %s was changed, analyzing impact on %d findings", configType, configName, findingsCount),
+		Evidence: Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: Impact{
+			Scope:       "config",
+			Resources:   []string{configName},
+			UserImpact:  "Configuration change may cause pod restarts",
+			Degradation: "Temporary during rollout",
+		},
+		Timestamp: time.Now(),
+	}
 }
 
 // analyzePodRestartCause checks if a pod restart was caused by config changes
-func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := c.getNamespace(event)
 	podName := c.getEntityName(event)
 
@@ -234,11 +313,27 @@ func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, eve
 		return nil, fmt.Errorf("pod name not found in event")
 	}
 
+	c.logPodRestartAnalysis(podName, namespace)
+
+	// Query for recent config changes
+	changes, err := c.queryRecentConfigChanges(ctx, namespace, podName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate findings from config changes
+	return c.generateRestartCauseFindings(podName, changes, event), nil
+}
+
+// logPodRestartAnalysis logs pod restart cause analysis
+func (c *ConfigImpactCorrelator) logPodRestartAnalysis(podName, namespace string) {
 	c.logger.Debug("Analyzing pod restart cause",
 		zap.String("pod", podName),
 		zap.String("namespace", namespace))
+}
 
-	// Query for recent config changes that might have caused the restart
+// queryRecentConfigChanges queries for recent config changes that might have caused restart
+func (c *ConfigImpactCorrelator) queryRecentConfigChanges(ctx context.Context, namespace, podName string) ([]ConfigChangeInfo, error) {
 	limit := c.queryConfig.GetLimit("config")
 	query := fmt.Sprintf(`
 		MATCH (p:Pod {name: $podName, namespace: $namespace})
@@ -268,27 +363,39 @@ func (c *ConfigImpactCorrelator) analyzePodRestartCause(ctx context.Context, eve
 	}
 	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	return c.extractConfigChangesFromResult(ctx, result)
+}
+
+// extractConfigChangesFromResult extracts config changes from query result
+func (c *ConfigImpactCorrelator) extractConfigChangesFromResult(ctx context.Context, result ResultIterator) ([]ConfigChangeInfo, error) {
+	var allChanges []ConfigChangeInfo
 
 	for result.Next(ctx) {
 		record := result.Record()
-
 		if changesValue, found := record.Get("recentChanges"); found {
-			if changes, ok := changesValue.([]interface{}); ok && len(changes) > 0 {
-				findings = append(findings, c.createRestartCauseFindings(podName, changes, event)...)
-			}
+			changes := c.parseConfigChangesFromValue(changesValue)
+			allChanges = append(allChanges, changes...)
 		}
 	}
 
-	if err = result.Err(); err != nil {
+	if err := result.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating pod restart cause results: %w", err)
 	}
 
-	return findings, nil
+	return allChanges, nil
+}
+
+// generateRestartCauseFindings generates findings from config changes
+func (c *ConfigImpactCorrelator) generateRestartCauseFindings(podName string, changes []ConfigChangeInfo, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
+	if len(changes) > 0 {
+		findings = append(findings, c.createRestartCauseFindings(podName, changes, event)...)
+	}
+	return findings
 }
 
 // analyzeDeploymentConfig checks deployment configuration issues
-func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, event *domain.UnifiedEvent) ([]aggregator.Finding, error) {
+func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, event *domain.UnifiedEvent) ([]Finding, error) {
 	namespace := c.getNamespace(event)
 	deploymentName := c.getEntityName(event)
 
@@ -296,7 +403,28 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 		return nil, fmt.Errorf("deployment name not found in event")
 	}
 
-	// Query for deployment's config dependencies
+	// Query deployment config dependencies
+	deploymentData, err := c.queryDeploymentConfigData(ctx, namespace, deploymentName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process query results
+	findings, err := c.processDeploymentConfigResults(ctx, deploymentData, deploymentName, event)
+	if err != nil {
+		return nil, err
+	}
+
+	return findings, nil
+}
+
+// DeploymentConfigData holds deployment configuration analysis data
+type DeploymentConfigData struct {
+	Result ResultIterator
+}
+
+// queryDeploymentConfigData queries deployment configuration dependencies
+func (c *ConfigImpactCorrelator) queryDeploymentConfigData(ctx context.Context, namespace, deploymentName string) (*DeploymentConfigData, error) {
 	limit := c.queryConfig.GetLimit("config")
 	query := fmt.Sprintf(`
 		MATCH (d:Deployment {name: $deploymentName, namespace: $namespace})
@@ -326,209 +454,218 @@ func (c *ConfigImpactCorrelator) analyzeDeploymentConfig(ctx context.Context, ev
 	if err != nil {
 		return nil, fmt.Errorf("failed to query deployment config: %w", err)
 	}
-	defer result.Close(ctx)
 
-	var findings []aggregator.Finding
+	return &DeploymentConfigData{Result: result}, nil
+}
 
-	for result.Next(ctx) {
-		record := result.Record()
+// processDeploymentConfigResults processes deployment query results and creates findings
+func (c *ConfigImpactCorrelator) processDeploymentConfigResults(ctx context.Context, data *DeploymentConfigData, deploymentName string, event *domain.UnifiedEvent) ([]Finding, error) {
+	defer data.Result.Close(ctx)
+	var findings []Finding
 
-		podCountValue, _ := record.Get("podCount")
-		readyPodsValue, _ := record.Get("readyPods")
-
-		podCount, ok := podCountValue.(int64)
-		if !ok {
-			c.logger.Warn("Failed to extract pod count as int64",
-				zap.String("deployment", deploymentName),
-				zap.Any("value", podCountValue))
-			podCount = 0
-		}
-		readyPods, ok := readyPodsValue.(int64)
-		if !ok {
-			c.logger.Warn("Failed to extract ready pods as int64",
-				zap.String("deployment", deploymentName),
-				zap.Any("value", readyPodsValue))
-			readyPods = 0
-		}
-
-		if podCount > 0 && readyPods < podCount {
-			configMapsValue, _ := record.Get("configMaps")
-			secretsValue, _ := record.Get("secrets")
-
-			configMaps := c.interfaceSliceToStringSlice(configMapsValue)
-			secrets := c.interfaceSliceToStringSlice(secretsValue)
-
-			findings = append(findings, aggregator.Finding{
-				ID:         fmt.Sprintf("deployment-config-rollout-%s", deploymentName),
-				Type:       "deployment_config_rollout",
-				Severity:   aggregator.SeverityMedium,
-				Confidence: 0.80,
-				Message:    fmt.Sprintf("Deployment %s has %d/%d ready pods during rollout", deploymentName, readyPods, podCount),
-				Evidence: aggregator.Evidence{
-					Events: []domain.UnifiedEvent{*event},
-					Attributes: map[string]interface{}{
-						"configMaps": configMaps,
-						"secrets":    secrets,
-					},
-				},
-				Impact: aggregator.Impact{
-					Scope:       "deployment",
-					Resources:   append([]string{deploymentName}, append(configMaps, secrets...)...),
-					UserImpact:  "Service may be degraded during rollout",
-					Degradation: fmt.Sprintf("%d%% capacity", (readyPods*100)/podCount),
-				},
-				Timestamp: time.Now(),
-			})
+	for data.Result.Next(ctx) {
+		record := data.Result.Record()
+		finding := c.createDeploymentFinding(record, deploymentName, event)
+		if finding != nil {
+			findings = append(findings, *finding)
 		}
 	}
 
-	if err = result.Err(); err != nil {
+	if err := data.Result.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating deployment config results: %w", err)
 	}
 
 	return findings, nil
 }
 
+// createDeploymentFinding creates a deployment rollout finding if needed
+func (c *ConfigImpactCorrelator) createDeploymentFinding(record *GraphRecord, deploymentName string, event *domain.UnifiedEvent) *Finding {
+	podCountValue, _ := record.Get("podCount")
+	readyPodsValue, _ := record.Get("readyPods")
+
+	podCount, ok := podCountValue.(int64)
+	if !ok {
+		c.logger.Warn("Failed to extract pod count as int64",
+			zap.String("deployment", deploymentName),
+			zap.Any("value", podCountValue))
+		podCount = 0
+	}
+	readyPods, ok := readyPodsValue.(int64)
+	if !ok {
+		c.logger.Warn("Failed to extract ready pods as int64",
+			zap.String("deployment", deploymentName),
+			zap.Any("value", readyPodsValue))
+		readyPods = 0
+	}
+
+	if podCount == 0 || readyPods >= podCount {
+		return nil
+	}
+
+	configMapsValue, _ := record.Get("configMaps")
+	secretsValue, _ := record.Get("secrets")
+
+	configMaps := c.parseStringSliceFromValue(configMapsValue)
+	secrets := c.parseStringSliceFromValue(secretsValue)
+
+	finding := Finding{
+		ID:         fmt.Sprintf("deployment-config-rollout-%s", deploymentName),
+		Type:       "deployment_config_rollout",
+		Severity:   SeverityMedium,
+		Confidence: MediumConfidence,
+		Message:    fmt.Sprintf("Deployment %s has %d/%d ready pods during rollout", deploymentName, readyPods, podCount),
+		Evidence: Evidence{
+			Events: []domain.UnifiedEvent{*event},
+			Attributes: map[string]string{
+				"configMaps": strings.Join(configMaps, ","),
+				"secrets":    strings.Join(secrets, ","),
+			},
+		},
+		Impact: Impact{
+			Scope:       "deployment",
+			Resources:   append([]string{deploymentName}, append(configMaps, secrets...)...),
+			UserImpact:  "Service may be degraded during rollout",
+			Degradation: fmt.Sprintf("%d%% capacity", (readyPods*100)/podCount),
+		},
+		Timestamp: time.Now(),
+	}
+
+	return &finding
+}
+
 // analyzeAffectedPods creates findings for pods affected by config changes
-func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType string, affectedPods []interface{}, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
-	restartedPods := []string{}
-	notReadyPods := []string{}
-	affectedServices := map[string]bool{}
+func (c *ConfigImpactCorrelator) analyzeAffectedPods(configName, configType string, affectedPods []AffectedPodData, event *domain.UnifiedEvent) []Finding {
+	restartedPods, notReadyPods, affectedServices := c.categorizeAffectedPods(affectedPods, event)
 
-	for _, podData := range affectedPods {
-		if podMap, ok := podData.(map[string]interface{}); ok {
-			// Extract pod properties from the map structure
-			var podName string
-			if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
-				if props, ok := podNode["props"].(map[string]interface{}); ok {
-					if name, ok := props["name"].(string); ok {
-						podName = name
-					}
-				}
-			} else if name, ok := podMap["name"].(string); ok {
-				// Fallback to direct name access
-				podName = name
-			}
-
-			if podName != "" {
-				// Check if pod restarted after config change
-				if restartTime, ok := podMap["restart"].(time.Time); ok {
-					if restartTime.After(event.Timestamp.Add(-10 * time.Minute)) {
-						restartedPods = append(restartedPods, podName)
-					}
-				}
-
-				// Check if pod is not ready
-				if ready, ok := podMap["ready"].(bool); ok && !ready {
-					notReadyPods = append(notReadyPods, podName)
-				}
-
-				// Track affected services
-				if services, ok := podMap["services"].([]interface{}); ok {
-					for _, svc := range services {
-						if svcName, ok := svc.(string); ok {
-							affectedServices[svcName] = true
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Create findings based on impact
+	var findings []Finding
 	if len(restartedPods) > 0 {
-		findings = append(findings, aggregator.Finding{
-			ID:         fmt.Sprintf("config-caused-restarts-%s", configName),
-			Type:       "config_change_pod_restarts",
-			Severity:   aggregator.SeverityHigh,
-			Confidence: 0.85,
-			Message:    fmt.Sprintf("%s %s change caused %d pod restarts: %s", configType, configName, len(restartedPods), strings.Join(restartedPods, ", ")),
-			Evidence: aggregator.Evidence{
-				Events: []domain.UnifiedEvent{*event},
-			},
-			Impact: aggregator.Impact{
-				Scope:       "pods",
-				Resources:   append([]string{configName}, restartedPods...),
-				UserImpact:  "Service disruption during pod restarts",
-				Degradation: fmt.Sprintf("%d pods restarted", len(restartedPods)),
-			},
-			Timestamp: time.Now(),
-		})
+		findings = append(findings, c.createRestartedPodsFindings(configName, configType, restartedPods, event))
 	}
-
 	if len(notReadyPods) > 0 {
-		findings = append(findings, aggregator.Finding{
-			ID:         fmt.Sprintf("config-pods-not-ready-%s", configName),
-			Type:       "config_change_pods_not_ready",
-			Severity:   aggregator.SeverityMedium,
-			Confidence: 0.75,
-			Message:    fmt.Sprintf("%d pods not ready after %s %s change", len(notReadyPods), configType, configName),
-			Evidence: aggregator.Evidence{
-				Events: []domain.UnifiedEvent{*event},
-			},
-			Impact: aggregator.Impact{
-				Scope:       "pods",
-				Resources:   append([]string{configName}, notReadyPods...),
-				UserImpact:  "Pods still initializing with new configuration",
-				Degradation: fmt.Sprintf("%d pods not ready", len(notReadyPods)),
-			},
-			Timestamp: time.Now(),
-		})
+		findings = append(findings, c.createNotReadyPodsFindings(configName, configType, notReadyPods, event))
 	}
-
 	if len(affectedServices) > 0 {
-		svcList := []string{}
-		for svc := range affectedServices {
-			svcList = append(svcList, svc)
-		}
-
-		findings = append(findings, aggregator.Finding{
-			ID:         fmt.Sprintf("config-service-impact-%s", configName),
-			Type:       "config_change_service_impact",
-			Severity:   aggregator.SeverityMedium,
-			Confidence: 0.70,
-			Message:    fmt.Sprintf("Services affected by %s %s change: %s", configType, configName, strings.Join(svcList, ", ")),
-			Evidence: aggregator.Evidence{
-				Events: []domain.UnifiedEvent{*event},
-			},
-			Impact: aggregator.Impact{
-				Scope:       "services",
-				Resources:   append([]string{configName}, svcList...),
-				UserImpact:  "Service endpoints changing due to pod restarts",
-				Degradation: "Temporary - rolling update",
-			},
-			Timestamp: time.Now(),
-		})
+		findings = append(findings, c.createAffectedServicesFindings(configName, configType, affectedServices, event))
 	}
 
 	return findings
 }
 
-// createRestartCauseFindings creates findings for pod restarts caused by config changes
-func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, changes []interface{}, event *domain.UnifiedEvent) []aggregator.Finding {
-	var findings []aggregator.Finding
-	configChanges := []string{}
+// categorizeAffectedPods categorizes pods into restarted, not ready, and affected services
+func (c *ConfigImpactCorrelator) categorizeAffectedPods(affectedPods []AffectedPodData, event *domain.UnifiedEvent) ([]string, []string, []string) {
+	restartedPods := []string{}
+	notReadyPods := []string{}
+	affectedServices := map[string]bool{}
 
-	for _, change := range changes {
-		if changeMap, ok := change.(map[string]interface{}); ok {
-			configType := changeMap["type"].(string)
-			configName := changeMap["name"].(string)
-			configChanges = append(configChanges, fmt.Sprintf("%s/%s", configType, configName))
+	for _, pod := range affectedPods {
+		// Check if pod restarted after config change
+		if pod.Restart.After(event.Timestamp.Add(-10 * time.Minute)) {
+			restartedPods = append(restartedPods, pod.Name)
+		}
+
+		// Check if pod is not ready
+		if !pod.Ready {
+			notReadyPods = append(notReadyPods, pod.Name)
+		}
+
+		// Track affected services
+		for _, svcName := range pod.Services {
+			affectedServices[svcName] = true
 		}
 	}
 
+	// Convert services map to slice
+	svcList := []string{}
+	for svc := range affectedServices {
+		svcList = append(svcList, svc)
+	}
+
+	return restartedPods, notReadyPods, svcList
+}
+
+// createRestartedPodsFindings creates findings for restarted pods
+func (c *ConfigImpactCorrelator) createRestartedPodsFindings(configName, configType string, restartedPods []string, event *domain.UnifiedEvent) Finding {
+	return Finding{
+		ID:         fmt.Sprintf("config-caused-restarts-%s", configName),
+		Type:       "config_change_pod_restarts",
+		Severity:   SeverityHigh,
+		Confidence: MediumHighConfidence,
+		Message:    fmt.Sprintf("%s %s change caused %d pod restarts: %s", configType, configName, len(restartedPods), strings.Join(restartedPods, ", ")),
+		Evidence: Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: Impact{
+			Scope:       "pods",
+			Resources:   append([]string{configName}, restartedPods...),
+			UserImpact:  "Service disruption during pod restarts",
+			Degradation: fmt.Sprintf("%d pods restarted", len(restartedPods)),
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// createNotReadyPodsFindings creates findings for not ready pods
+func (c *ConfigImpactCorrelator) createNotReadyPodsFindings(configName, configType string, notReadyPods []string, event *domain.UnifiedEvent) Finding {
+	return Finding{
+		ID:         fmt.Sprintf("config-pods-not-ready-%s", configName),
+		Type:       "config_change_pods_not_ready",
+		Severity:   SeverityMedium,
+		Confidence: MediumLowConfidence,
+		Message:    fmt.Sprintf("%d pods not ready after %s %s change", len(notReadyPods), configType, configName),
+		Evidence: Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: Impact{
+			Scope:       "pods",
+			Resources:   append([]string{configName}, notReadyPods...),
+			UserImpact:  "Pods still initializing with new configuration",
+			Degradation: fmt.Sprintf("%d pods not ready", len(notReadyPods)),
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// createAffectedServicesFindings creates findings for affected services
+func (c *ConfigImpactCorrelator) createAffectedServicesFindings(configName, configType string, affectedServices []string, event *domain.UnifiedEvent) Finding {
+	return Finding{
+		ID:         fmt.Sprintf("config-service-impact-%s", configName),
+		Type:       "config_change_service_impact",
+		Severity:   SeverityMedium,
+		Confidence: LowConfidence,
+		Message:    fmt.Sprintf("Services affected by %s %s change: %s", configType, configName, strings.Join(affectedServices, ", ")),
+		Evidence: Evidence{
+			Events: []domain.UnifiedEvent{*event},
+		},
+		Impact: Impact{
+			Scope:       "services",
+			Resources:   append([]string{configName}, affectedServices...),
+			UserImpact:  "Service endpoints changing due to pod restarts",
+			Degradation: "Temporary - rolling update",
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+// createRestartCauseFindings creates findings for pod restarts caused by config changes
+func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, changes []ConfigChangeInfo, event *domain.UnifiedEvent) []Finding {
+	var findings []Finding
+	configChanges := []string{}
+
+	for _, change := range changes {
+		configChanges = append(configChanges, fmt.Sprintf("%s/%s", change.Type, change.Name))
+	}
+
 	if len(configChanges) > 0 {
-		findings = append(findings, aggregator.Finding{
+		findings = append(findings, Finding{
 			ID:         fmt.Sprintf("pod-restart-config-cause-%s", podName),
 			Type:       "pod_restart_config_cause",
-			Severity:   aggregator.SeverityHigh,
-			Confidence: 0.90,
+			Severity:   SeverityHigh,
+			Confidence: HighConfidence,
 			Message:    fmt.Sprintf("Pod %s restart likely caused by config changes: %s", podName, strings.Join(configChanges, ", ")),
-			Evidence: aggregator.Evidence{
+			Evidence: Evidence{
 				Events: []domain.UnifiedEvent{*event},
-				GraphPaths: []aggregator.GraphPath{{
-					Nodes: []aggregator.GraphNode{
+				GraphPaths: []EvidenceGraphPath{{
+					Nodes: []EvidenceGraphNode{
 						{
 							ID:     podName,
 							Type:   "Pod",
@@ -537,7 +674,7 @@ func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, chan
 					},
 				}},
 			},
-			Impact: aggregator.Impact{
+			Impact: Impact{
 				Scope:       "pod",
 				Resources:   append([]string{podName}, configChanges...),
 				UserImpact:  "Pod restarted due to configuration change",
@@ -551,9 +688,9 @@ func (c *ConfigImpactCorrelator) createRestartCauseFindings(podName string, chan
 }
 
 // calculateConfidence calculates overall confidence for findings
-func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Finding) float64 {
+func (c *ConfigImpactCorrelator) calculateConfidence(findings []Finding) float64 {
 	if len(findings) == 0 {
-		return 0.0
+		return 0
 	}
 
 	totalWeight := 0.0
@@ -562,16 +699,16 @@ func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Findi
 	for _, finding := range findings {
 		var weight float64
 		switch finding.Severity {
-		case aggregator.SeverityCritical:
+		case SeverityCritical:
 			weight = 1.0
-		case aggregator.SeverityHigh:
-			weight = 0.8
-		case aggregator.SeverityMedium:
-			weight = 0.6
-		case aggregator.SeverityLow:
-			weight = 0.4
+		case SeverityHigh:
+			weight = HighWeight
+		case SeverityMedium:
+			weight = MediumWeight
+		case SeverityLow:
+			weight = LowWeight
 		default:
-			weight = 0.2
+			weight = VeryLowWeight
 		}
 
 		weightedSum += finding.Confidence * weight
@@ -582,7 +719,7 @@ func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Findi
 
 	// Boost if multiple findings correlate
 	if len(findings) > 1 {
-		confidence += 0.1
+		confidence += BoostMultiplier
 	}
 
 	if confidence > 1.0 {
@@ -595,12 +732,6 @@ func (c *ConfigImpactCorrelator) calculateConfidence(findings []aggregator.Findi
 // Health checks if the correlator is healthy
 func (c *ConfigImpactCorrelator) Health(ctx context.Context) error {
 	return c.graphStore.HealthCheck(ctx)
-}
-
-// SetGraphClient implements GraphCorrelator interface
-func (c *ConfigImpactCorrelator) SetGraphClient(client interface{}) {
-	// This method is no longer needed as we use GraphStore interface
-	// The graphStore is injected via constructor
 }
 
 // PreloadGraph implements GraphCorrelator interface
@@ -637,14 +768,129 @@ func (c *ConfigImpactCorrelator) getEntityName(event *domain.UnifiedEvent) strin
 	return ""
 }
 
-func (c *ConfigImpactCorrelator) interfaceSliceToStringSlice(input interface{}) []string {
-	result := []string{}
-	if slice, ok := input.([]interface{}); ok {
+// parseStringSliceFromValue safely parses a string slice from a query result value
+func (c *ConfigImpactCorrelator) parseStringSliceFromValue(value interface{}) []string {
+	var result []string
+	if slice, ok := value.([]string); ok {
+		return slice
+	}
+	// Fallback for interface{} slices from database
+	if slice, ok := value.([]interface{}); ok {
 		for _, item := range slice {
 			if str, ok := item.(string); ok {
 				result = append(result, str)
 			}
 		}
 	}
+	return result
+}
+
+// parseAffectedPodsFromValue safely parses affected pods from a query result value
+func (c *ConfigImpactCorrelator) parseAffectedPodsFromValue(value interface{}) []AffectedPodData {
+	slice, ok := value.([]interface{})
+	if !ok {
+		return []AffectedPodData{}
+	}
+
+	var result []AffectedPodData
+	for _, item := range slice {
+		podData := c.parseAffectedPodItem(item)
+		if podData != nil {
+			result = append(result, *podData)
+		}
+	}
+
+	return result
+}
+
+// parseAffectedPodItem parses a single affected pod item from query result
+func (c *ConfigImpactCorrelator) parseAffectedPodItem(item interface{}) *AffectedPodData {
+	podMap, ok := item.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	podData := &AffectedPodData{}
+	c.parsePodIdentity(podMap, podData)
+	c.parsePodStatus(podMap, podData)
+	c.parsePodServices(podMap, podData)
+
+	return podData
+}
+
+// parsePodIdentity parses pod identity information
+func (c *ConfigImpactCorrelator) parsePodIdentity(podMap map[string]interface{}, podData *AffectedPodData) {
+	// Parse pod node
+	if podNode, ok := podMap["pod"].(map[string]interface{}); ok {
+		if props, ok := podNode["properties"].(map[string]interface{}); ok {
+			podData.Pod.Properties = parseNodeProperties(props)
+			podData.Name = podData.Pod.Properties.Name
+		}
+	} else if name, ok := podMap["name"].(string); ok {
+		// Fallback to direct name access
+		podData.Name = name
+	}
+}
+
+// parsePodStatus parses pod status information
+func (c *ConfigImpactCorrelator) parsePodStatus(podMap map[string]interface{}, podData *AffectedPodData) {
+	// Parse restart time
+	if restartTime, ok := podMap["restart"].(time.Time); ok {
+		podData.Restart = restartTime
+	}
+
+	// Parse ready status
+	if ready, ok := podMap["ready"].(bool); ok {
+		podData.Ready = ready
+	}
+
+	// Parse phase
+	if phase, ok := podMap["phase"].(string); ok {
+		podData.Phase = phase
+	}
+}
+
+// parsePodServices parses pod services information
+func (c *ConfigImpactCorrelator) parsePodServices(podMap map[string]interface{}, podData *AffectedPodData) {
+	// Parse services
+	if services, ok := podMap["services"].([]interface{}); ok {
+		for _, svc := range services {
+			if svcName, ok := svc.(string); ok {
+				podData.Services = append(podData.Services, svcName)
+			}
+		}
+	}
+}
+
+// parseConfigChangesFromValue safely parses config changes from a query result value
+func (c *ConfigImpactCorrelator) parseConfigChangesFromValue(value interface{}) []ConfigChangeInfo {
+	var result []ConfigChangeInfo
+
+	slice, ok := value.([]interface{})
+	if !ok {
+		return result
+	}
+
+	for _, item := range slice {
+		changeMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		change := ConfigChangeInfo{}
+
+		if changeType, ok := changeMap["type"].(string); ok {
+			change.Type = changeType
+		}
+		if name, ok := changeMap["name"].(string); ok {
+			change.Name = name
+		}
+		if modified, ok := changeMap["modified"].(time.Time); ok {
+			change.Modified = modified
+		}
+
+		result = append(result, change)
+	}
+
 	return result
 }

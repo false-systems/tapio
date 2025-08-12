@@ -29,13 +29,13 @@ type Pattern interface {
 
 // Detection represents a detected pattern
 type Detection struct {
-	PatternName string                 `json:"pattern_name"`
-	Confidence  float64                `json:"confidence"`
-	Severity    domain.EventSeverity   `json:"severity"`
-	Message     string                 `json:"message"`
-	Evidence    []string               `json:"evidence"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	DetectedAt  time.Time              `json:"detected_at"`
+	PatternName string               `json:"pattern_name"`
+	Confidence  float64              `json:"confidence"`
+	Severity    domain.EventSeverity `json:"severity"`
+	Message     string               `json:"message"`
+	Evidence    []string             `json:"evidence"`
+	Metadata    *DetectionMetadata   `json:"metadata"`
+	DetectedAt  time.Time            `json:"detected_at"`
 }
 
 // NewDetector creates a new pattern detector
@@ -152,10 +152,10 @@ func (p *OOMKillPattern) Detect(ctx context.Context, event *domain.UnifiedEvent,
 			fmt.Sprintf("Service has %d total pods", totalPods),
 			fmt.Sprintf("Recent restarts: %d", recentRestarts),
 		},
-		Metadata: map[string]interface{}{
-			"service":         serviceName,
-			"total_pods":      totalPods,
-			"recent_restarts": recentRestarts,
+		Metadata: &DetectionMetadata{
+			Service:        serviceName,
+			TotalPods:      totalPods,
+			RecentRestarts: recentRestarts,
 		},
 		DetectedAt: time.Now(),
 	}, nil
@@ -232,9 +232,9 @@ func (p *ConfigMapChangePattern) Detect(ctx context.Context, event *domain.Unifi
 			fmt.Sprintf("Affected pods: %d", affectedPods),
 			fmt.Sprintf("Triggered restarts: %d", restarts),
 		},
-		Metadata: map[string]interface{}{
-			"affected_pods": affectedPods,
-			"restarts":      restarts,
+		Metadata: &DetectionMetadata{
+			AffectedPods: affectedPods,
+			Restarts:     restarts,
 		},
 		DetectedAt: time.Now(),
 	}, nil
@@ -304,10 +304,10 @@ func (p *NodePressurePattern) Detect(ctx context.Context, event *domain.UnifiedE
 						fmt.Sprintf("Pressure events: %d", pressureEvents),
 						fmt.Sprintf("Total evictions: %d", evictions),
 					},
-					Metadata: map[string]interface{}{
-						"node":            nodeName,
-						"pressure_events": pressureEvents,
-						"evictions":       evictions,
+					Metadata: &DetectionMetadata{
+						Node:           nodeName,
+						PressureEvents: pressureEvents,
+						Evictions:      evictions,
 					},
 					DetectedAt: time.Now(),
 				}, nil
@@ -375,8 +375,8 @@ func (p *CrashLoopPattern) Detect(ctx context.Context, event *domain.UnifiedEven
 			fmt.Sprintf("Restart count in 10 minutes: %d", restartCount),
 			"Pod continuously failing to start",
 		},
-		Metadata: map[string]interface{}{
-			"restart_count": restartCount,
+		Metadata: &DetectionMetadata{
+			RestartCount: restartCount,
 		},
 		DetectedAt: time.Now(),
 	}, nil
@@ -454,10 +454,10 @@ func (p *ServiceDisruptionPattern) Detect(ctx context.Context, event *domain.Uni
 				"Endpoints likely empty",
 				"Service is completely down",
 			},
-			Metadata: map[string]interface{}{
-				"service":      serviceName,
-				"total_pods":   0,
-				"running_pods": 0,
+			Metadata: &DetectionMetadata{
+				Service:     serviceName,
+				TotalPods:   0,
+				RunningPods: 0,
 			},
 			DetectedAt: time.Now(),
 		}, nil
@@ -484,12 +484,12 @@ func (p *ServiceDisruptionPattern) Detect(ctx context.Context, event *domain.Uni
 				fmt.Sprintf("Recent pod issues: %d", podIssues),
 				fmt.Sprintf("Service health: %.0f%%", healthRatio*100),
 			},
-			Metadata: map[string]interface{}{
-				"service":      serviceName,
-				"total_pods":   totalPods,
-				"running_pods": runningPods,
-				"health_ratio": healthRatio,
-				"pod_issues":   podIssues,
+			Metadata: &DetectionMetadata{
+				Service:     serviceName,
+				TotalPods:   totalPods,
+				RunningPods: runningPods,
+				HealthRatio: healthRatio,
+				PodIssues:   podIssues,
 			},
 			DetectedAt: time.Now(),
 		}, nil
@@ -595,12 +595,12 @@ func (p *RollingUpdateFailurePattern) Detect(ctx context.Context, event *domain.
 							fmt.Sprintf("Failed pods in new ReplicaSet: %d", failedPods),
 							"New pods failing to become ready",
 						},
-						Metadata: map[string]interface{}{
-							"deployment":         deploymentName,
-							"desired_replicas":   desiredReplicas,
-							"updated_replicas":   updatedReplicas,
-							"available_replicas": availableReplicas,
-							"failed_pods":        failedPods,
+						Metadata: &DetectionMetadata{
+							Deployment:        deploymentName,
+							DesiredReplicas:   desiredReplicas,
+							UpdatedReplicas:   updatedReplicas,
+							AvailableReplicas: availableReplicas,
+							FailedPods:        failedPods,
 						},
 						DetectedAt: time.Now(),
 					}, nil
@@ -623,11 +623,11 @@ func (p *RollingUpdateFailurePattern) Detect(ctx context.Context, event *domain.
 					fmt.Sprintf("Updated: %d/%d replicas", updatedReplicas, desiredReplicas),
 					"Update may be stuck or throttled",
 				},
-				Metadata: map[string]interface{}{
-					"deployment":       deploymentName,
-					"progress_ratio":   progressRatio,
-					"updated_replicas": updatedReplicas,
-					"desired_replicas": desiredReplicas,
+				Metadata: &DetectionMetadata{
+					Deployment:      deploymentName,
+					ProgressRatio:   progressRatio,
+					UpdatedReplicas: updatedReplicas,
+					DesiredReplicas: desiredReplicas,
 				},
 				DetectedAt: time.Now(),
 			}, nil

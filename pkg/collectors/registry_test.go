@@ -6,32 +6,39 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 func TestRegistryRegister(t *testing.T) {
-	registry := NewRegistry()
+	logger := zaptest.NewLogger(t)
+	registry, err := NewRegistry(logger)
+	if err != nil {
+		t.Fatalf("failed to create registry: %v", err)
+	}
+	ctx := context.Background()
 
 	// Test successful registration
 	collector1 := newMockCollector("collector1", 100)
-	if err := registry.Register("collector1", collector1); err != nil {
+	if err := registry.Register(ctx, "collector1", collector1); err != nil {
 		t.Fatalf("failed to register collector1: %v", err)
 	}
 
 	// Test duplicate registration
 	collector2 := newMockCollector("collector2", 100)
-	if err := registry.Register("collector1", collector2); err == nil {
+	if err := registry.Register(ctx, "collector1", collector2); err == nil {
 		t.Error("expected error for duplicate registration")
 	}
 
 	// Test registration after start
-	ctx := context.Background()
 	if err := registry.Start(ctx); err != nil {
 		t.Fatalf("failed to start registry: %v", err)
 	}
 	defer registry.Stop()
 
 	collector3 := newMockCollector("collector3", 100)
-	if err := registry.Register("collector3", collector3); err == nil {
+	if err := registry.Register(ctx, "collector3", collector3); err == nil {
 		t.Error("expected error for registration after start")
 	}
 }

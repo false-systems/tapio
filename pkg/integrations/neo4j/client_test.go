@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
@@ -98,8 +100,10 @@ func TestClient_CreateIndexes(t *testing.T) {
 	}
 
 	// In real implementation, test with embedded Neo4j or testcontainers
-	_ = client
-	_ = ctx
+	// Verify client configuration
+	require.NotNil(t, client, "client should not be nil")
+	require.NotNil(t, ctx, "context should not be nil")
+	assert.Equal(t, "neo4j", client.config.Database)
 }
 
 func TestClient_CreateOrUpdateNode(t *testing.T) {
@@ -148,6 +152,12 @@ func BenchmarkExecuteQuery(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Execute query
-		_, _ = client.ExecuteQuery(context.Background(), query, params)
+		result, err := client.ExecuteQuery(context.Background(), query, params)
+		if err != nil {
+			b.Fatalf("failed to execute query in benchmark: %v", err)
+		}
+		if result == nil {
+			b.Fatal("query result should not be nil")
+		}
 	}
 }

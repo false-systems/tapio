@@ -18,7 +18,7 @@ import (
 )
 
 // Use mocks from test_helpers_test.go
-// MockCorrelator is now TestMockCorrelator
+// MockCorrelator is now MockCorrelator
 // MockStorage is defined in test_helpers_test.go
 
 func TestEngineCreation(t *testing.T) {
@@ -29,7 +29,7 @@ func TestEngineCreation(t *testing.T) {
 		storage := &MockStorage{}
 
 		// Create engine without K8s client
-		engine, err := NewEngine(logger, config, nil, storage)
+		engine, err := NewEngine(logger, *config, nil, storage)
 		require.NoError(t, err)
 		require.NotNil(t, engine)
 
@@ -49,16 +49,11 @@ func TestEngineCreation(t *testing.T) {
 
 	t.Run("creation with selective correlators", func(t *testing.T) {
 		config := EngineConfig{
-			EventBufferSize:        100,
-			ResultBufferSize:       100,
+			EventBufferSize:        TestEventBufferSize,
+			ResultBufferSize:       TestResultBufferSize,
 			WorkerCount:            2,
-			EnableTemporal:         true,
-			EnableSequence:         false,
-			EnablePerformance:      true,
-			EnableServiceMap:       false,
-			EnableK8s:              false,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -81,9 +76,8 @@ func TestEngineStartStop(t *testing.T) {
 			EventBufferSize:        10,
 			ResultBufferSize:       10,
 			WorkerCount:            2,
-			EnableTemporal:         true,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -112,7 +106,7 @@ func TestEngineStartStop(t *testing.T) {
 
 	t.Run("multiple stop calls", func(t *testing.T) {
 		config := DefaultEngineConfig()
-		engine, err := NewEngine(logger, config, nil, nil)
+		engine, err := NewEngine(logger, *config, nil, nil)
 		require.NoError(t, err)
 
 		err = engine.Start(context.Background())
@@ -142,7 +136,7 @@ func TestEngineProcess(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar().Desugar()
 
 	t.Run("successful event processing", func(t *testing.T) {
-		mockCorrelator := &TestMockCorrelator{}
+		mockCorrelator := &TestifyMockCorrelator{}
 		mockStorage := &MockStorage{}
 
 		config := EngineConfig{
@@ -150,8 +144,8 @@ func TestEngineProcess(t *testing.T) {
 			ResultBufferSize:       10,
 			WorkerCount:            1,
 			ProcessingTimeout:      1 * time.Second,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, mockStorage)
@@ -163,7 +157,7 @@ func TestEngineProcess(t *testing.T) {
 		// Setup expectations
 		event := &domain.UnifiedEvent{
 			ID:        "test-event-1",
-			Type:      EventTypeSystemd,
+			Type:      "systemd",
 			Timestamp: time.Now(),
 		}
 
@@ -210,7 +204,7 @@ func TestEngineProcess(t *testing.T) {
 
 	t.Run("nil event handling", func(t *testing.T) {
 		config := DefaultEngineConfig()
-		engine, err := NewEngine(logger, config, nil, nil)
+		engine, err := NewEngine(logger, *config, nil, nil)
 		require.NoError(t, err)
 
 		err = engine.Process(context.Background(), nil)
@@ -226,8 +220,8 @@ func TestEngineProcess(t *testing.T) {
 			ResultBufferSize:       1,
 			WorkerCount:            0, // No workers
 			ProcessingTimeout:      50 * time.Millisecond,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -250,8 +244,8 @@ func TestEngineProcess(t *testing.T) {
 		config := EngineConfig{
 			EventBufferSize:        1,
 			ProcessingTimeout:      1 * time.Second,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -285,15 +279,15 @@ func TestEngineWorkers(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar().Desugar()
 
 	t.Run("multiple workers processing", func(t *testing.T) {
-		mockCorrelator := &TestMockCorrelator{}
+		mockCorrelator := &TestifyMockCorrelator{}
 		mockStorage := &MockStorage{}
 
 		config := EngineConfig{
-			EventBufferSize:        100,
-			ResultBufferSize:       100,
+			EventBufferSize:        TestEventBufferSize,
+			ResultBufferSize:       TestResultBufferSize,
 			WorkerCount:            4,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, mockStorage)
@@ -340,14 +334,14 @@ func TestEngineWorkers(t *testing.T) {
 	})
 
 	t.Run("worker error handling", func(t *testing.T) {
-		mockCorrelator := &TestMockCorrelator{}
+		mockCorrelator := &TestifyMockCorrelator{}
 
 		config := EngineConfig{
 			EventBufferSize:        10,
 			ResultBufferSize:       10,
 			WorkerCount:            2,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -383,10 +377,10 @@ func TestEngineMetrics(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar().Desugar()
 
 	t.Run("metrics tracking", func(t *testing.T) {
-		mockCorrelator := &TestMockCorrelator{}
+		mockCorrelator := &TestifyMockCorrelator{}
 
 		config := DefaultEngineConfig()
-		engine, err := NewEngine(logger, config, nil, nil)
+		engine, err := NewEngine(logger, *config, nil, nil)
 		require.NoError(t, err)
 
 		engine.correlators = []Correlator{mockCorrelator}
@@ -515,14 +509,14 @@ func TestEngineConcurrency(t *testing.T) {
 	logger := zaptest.NewLogger(t).Sugar().Desugar()
 
 	t.Run("concurrent event processing", func(t *testing.T) {
-		mockCorrelator := &TestMockCorrelator{}
+		mockCorrelator := &TestifyMockCorrelator{}
 
 		config := EngineConfig{
-			EventBufferSize:        100,
-			ResultBufferSize:       100,
+			EventBufferSize:        TestEventBufferSize,
+			ResultBufferSize:       TestResultBufferSize,
 			WorkerCount:            4,
-			StorageCleanupInterval: 5 * time.Minute,
-			StorageRetention:       24 * time.Hour,
+			StorageCleanupInterval: ServiceMetricsWindow,
+			StorageRetention:       MaxEventAge,
 		}
 
 		engine, err := NewEngine(logger, config, nil, nil)
@@ -587,7 +581,7 @@ func TestEngineConcurrency(t *testing.T) {
 func BenchmarkEngineProcess(b *testing.B) {
 	logger := zap.NewNop()
 
-	mockCorrelator := &TestMockCorrelator{}
+	mockCorrelator := &TestifyMockCorrelator{}
 	mockCorrelator.On("Name").Return("bench-correlator")
 	mockCorrelator.On("Process", mock.Anything, mock.Anything).Return(
 		[]*CorrelationResult{{ID: "correlation", Type: "bench"}},
@@ -595,8 +589,8 @@ func BenchmarkEngineProcess(b *testing.B) {
 	)
 
 	config := EngineConfig{
-		EventBufferSize:        1000,
-		ResultBufferSize:       1000,
+		EventBufferSize:        DefaultEventBufferSize,
+		ResultBufferSize:       DefaultResultBufferSize,
 		WorkerCount:            4,
 		StorageCleanupInterval: 5 * time.Minute,
 		StorageRetention:       24 * time.Hour,
@@ -614,7 +608,7 @@ func BenchmarkEngineProcess(b *testing.B) {
 
 	event := &domain.UnifiedEvent{
 		ID:        "bench-event",
-		Type:      EventTypeSystemd,
+		Type:      "systemd",
 		Timestamp: time.Now(),
 	}
 

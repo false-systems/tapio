@@ -1,30 +1,17 @@
 package cni
 
 import (
-	"fmt"
+	"log"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	"github.com/yairfalse/tapio/pkg/collectors/factory"
 )
 
 func init() {
-	// Register the CNI collector factory
-	registry.Register("cni", NewCollectorFromConfig)
-}
-
-// NewCollectorFromConfig creates a new CNI collector from configuration
-func NewCollectorFromConfig(config map[string]interface{}) (collectors.Collector, error) {
-	// Get name from config or use default
-	name := "cni"
-	if n, ok := config["name"].(string); ok {
-		name = n
+	// Register the CNI collector typed factory with error handling
+	factoryInstance := NewCNIFactory()
+	if err := factory.RegisterTypedFactory("cni", factoryInstance); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register CNI typed factory: %v", err)
+		log.Printf("CNI collector will not be available")
 	}
-
-	// Create minimal CNI collector
-	collector, err := NewCollector(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create CNI collector: %w", err)
-	}
-
-	return collector, nil
 }

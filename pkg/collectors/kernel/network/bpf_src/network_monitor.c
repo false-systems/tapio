@@ -2,6 +2,7 @@
 // Network monitoring eBPF program - connections, DNS, service mapping
 
 #include "../../../bpf_common/vmlinux_minimal.h"
+#include "../../../bpf_common/helpers.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -191,12 +192,8 @@ int trace_network_tcp_connect(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    // Get sock struct from first argument
-    struct sock *sk = NULL;
-    unsigned long arg1 = 0;
-    
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI
-    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    // Get sock struct from first argument using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
     
     if (!sk)
         return 0;
@@ -216,16 +213,22 @@ int trace_network_tcp_connect(struct pt_regs *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Fill network info from socket
+    // Fill network info from socket using CO-RE
     __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
     
-    struct sock_common sk_common = {};
-    bpf_probe_read_kernel(&sk_common, sizeof(sk_common), &sk->__sk_common);
+    // Use CO-RE for portable socket field access
+    __u16 sport = 0, dport = 0;
+    __u32 saddr = 0, daddr = 0;
     
-    event->net_info.sport = sk_common.skc_num;
-    event->net_info.dport = __builtin_bswap16(sk_common.skc_dport);
-    event->net_info.saddr = sk_common.skc_rcv_saddr;
-    event->net_info.daddr = sk_common.skc_daddr;
+    BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+    BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+    
+    event->net_info.sport = sport;
+    event->net_info.dport = __builtin_bswap16(dport);
+    event->net_info.saddr = saddr;
+    event->net_info.daddr = daddr;
     event->net_info.protocol = IPPROTO_TCP;
     event->net_info.direction = 0; // Outgoing
     event->net_info.state = 1; // Connecting
@@ -298,11 +301,8 @@ int trace_network_tcp_close(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    struct sock *sk = NULL;
-    unsigned long arg1 = 0;
-    
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI
-    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    // Get sock struct using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
     
     if (!sk)
         return 0;
@@ -322,16 +322,22 @@ int trace_network_tcp_close(struct pt_regs *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Fill network info from socket
+    // Fill network info from socket using CO-RE
     __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
     
-    struct sock_common sk_common = {};
-    bpf_probe_read_kernel(&sk_common, sizeof(sk_common), &sk->__sk_common);
+    // Use CO-RE for portable socket field access
+    __u16 sport = 0, dport = 0;
+    __u32 saddr = 0, daddr = 0;
     
-    event->net_info.sport = sk_common.skc_num;
-    event->net_info.dport = __builtin_bswap16(sk_common.skc_dport);
-    event->net_info.saddr = sk_common.skc_rcv_saddr;
-    event->net_info.daddr = sk_common.skc_daddr;
+    BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+    BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+    
+    event->net_info.sport = sport;
+    event->net_info.dport = __builtin_bswap16(dport);
+    event->net_info.saddr = saddr;
+    event->net_info.daddr = daddr;
     event->net_info.protocol = IPPROTO_TCP;
     event->net_info.state = 3; // Closing
     
@@ -360,11 +366,8 @@ int trace_network_udp_send(struct pt_regs *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    struct sock *sk = NULL;
-    unsigned long arg1 = 0;
-    
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI
-    bpf_probe_read(&sk, sizeof(sk), (void *)arg1);
+    // Get sock struct using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
     
     if (!sk)
         return 0;
@@ -398,13 +401,19 @@ int trace_network_udp_send(struct pt_regs *ctx)
     event->net_info.direction = 0; // Outgoing
     event->net_info.state = 0; // Stateless
     
-    // Check for DNS (port 53)
+    // Check for DNS (port 53) - both source and destination
     if (event->net_info.dport == 53) {
         event->event_type = EVENT_TYPE_DNS_REQUEST;
         // DNS query parsing would be implemented here
         __builtin_memcpy(event->dns_request.query_name, "unknown.domain", 14);
         event->dns_request.query_type = 1; // A record
         event->dns_request.query_class = 1; // IN
+    } else if (event->net_info.sport == 53) {
+        // DNS response from server
+        event->event_type = EVENT_TYPE_DNS_RESPONSE;
+        __builtin_memcpy(event->dns_response.response_name, "unknown.domain", 14);
+        event->dns_response.response_type = 1; // A record
+        event->dns_response.resolved_ip = event->net_info.saddr; // Server IP
     }
     
     char *pod_uid = bpf_map_lookup_elem(&pod_uid_map, &cgroup_id);

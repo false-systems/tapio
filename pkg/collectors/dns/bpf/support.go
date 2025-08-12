@@ -1,10 +1,10 @@
 package bpf
 
 // Export generated types for DNS monitoring
-type DnsmonitorObjects = dnsMonitorObjects
-type DnsmonitorMaps = dnsMonitorMaps
-type DnsmonitorPrograms = dnsMonitorPrograms
+type DnsmonitorObjects = dnsmonitorObjects
+type DnsmonitorMaps = dnsmonitorMaps
+type DnsmonitorPrograms = dnsmonitorPrograms
 
 // Export the generated loader functions
-var LoadDnsmonitor = loadDnsMonitor
-var LoadDnsmonitorObjects = loadDnsMonitorObjects
+var LoadDnsmonitor = loadDnsmonitor
+var LoadDnsmonitorObjects = loadDnsmonitorObjects

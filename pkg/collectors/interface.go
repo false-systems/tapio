@@ -69,3 +69,5 @@ func DefaultCollectorConfig() CollectorConfig {
 		Labels:         make(map[string]string),
 	}
 }
+
+// These will be defined by importing config package in each collector's factory

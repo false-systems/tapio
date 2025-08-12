@@ -1,9 +1,38 @@
-# TAPIO DEVELOPMENT STANDARDS - PRODUCTION GRADE ONLY
-
-## 🎯 MISSION
-Build enterprise-grade observability platform with zero tolerance for incomplete code. Every line must be production-ready, tested, and performant.
-
 ## ⚠️ CRITICAL DEVELOPMENT WORKFLOW
+
+### REFACTOR MODE (TEMPORARY - FOR MEGA REFACTOR ONLY)
+During major refactoring, use incremental validation for faster iteration:
+
+```bash
+# ENABLE REFACTOR MODE (95% faster validation, incremental CI)
+make refactor-mode
+
+# FAST VALIDATION DURING REFACTOR
+make refactor-quick-check    # Check only changed files (5-30 sec)
+make refactor-validate       # Complete but fast validation (1-3 min)
+make show-changed-packages  # See what packages changed
+
+# RETURN TO PRODUCTION MODE AFTER REFACTOR
+make production-mode         # Re-enable full validation
+```
+
+**Refactor Mode Benefits:**
+- Pre-commit: 5-30 sec vs 5-15 min (95% faster)
+- CI Pipeline: 2-5 min vs 15-30 min (85% faster)
+- Only checks changed packages
+- Essential safety maintained
+
+**What STAYS ENFORCED in Refactor Mode:**
+- ❌ NO TODOs, FIXMEs, XXX, HACK comments (ZERO TOLERANCE)
+- ✅ Code formatting and imports
+- ✅ Build verification
+- ✅ Architecture hierarchy compliance
+- ✅ Race condition detection
+
+**What's Temporarily Relaxed:**
+- Coverage requirement (warns instead of fails)
+- Full codebase scanning (incremental only)
+- Complete test suite (changed packages only)
 
 ### SMALL ITERATIONS WITH CONTINUOUS TESTING
 **MANDATORY**: Test after EVERY change, not after accumulating changes.
@@ -14,7 +43,7 @@ Write collector.go (500 lines) → Test → 20 failures → Debug nightmare
 
 # RIGHT - Incremental development
 Write function signature → Build → Pass
-Add validation → Test → Pass  
+Add validation → Test → Pass
 Add core logic (10 lines) → Test → Pass
 Add error handling → Test → Pass
 Add cleanup → Test → Pass
@@ -65,7 +94,7 @@ Level 4: pkg/interfaces/   # All above
 package intelligence
 import "github.com/yairfalse/tapio/pkg/domain"
 
-// BAD - Higher level import  
+// BAD - Higher level import
 package domain
 import "github.com/yairfalse/tapio/pkg/collectors" // REJECTED
 ```
@@ -119,7 +148,7 @@ func Process() error {
         return fmt.Errorf("failed to get connection: %w", err)
     }
     defer conn.Close()
-    
+
     return doWork(conn)
 }
 ```
@@ -136,7 +165,7 @@ func Start(ctx context.Context) {
     go func() {
         ticker := time.NewTicker(interval)
         defer ticker.Stop()
-        
+
         for {
             select {
             case <-ctx.Done():
@@ -213,15 +242,15 @@ func TestCollectorLifecycle(t *testing.T) {
     collector, err := NewCollector("test")
     require.NoError(t, err)
     require.NotNil(t, collector)
-    
+
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
-    
+
     err = collector.Start(ctx)
     require.NoError(t, err)
-    
+
     assert.True(t, collector.IsHealthy())
-    
+
     err = collector.Stop()
     require.NoError(t, err)
 }
@@ -290,6 +319,267 @@ if err := tx.Execute(query2, params2); err != nil {
 }
 
 return tx.Commit()
+```
+
+## 🔭 OPENTELEMETRY STANDARDS (MANDATORY)
+
+### NO CUSTOM TELEMETRY WRAPPERS ALLOWED
+All components MUST use OpenTelemetry directly. Custom telemetry packages are **FORBIDDEN**.
+
+```go
+// BAD - Custom telemetry wrappers (ARCHITECTURE VIOLATION)
+import "github.com/yairfalse/tapio/pkg/integrations/telemetry"
+
+instrumentation, err := telemetry.NewInstrumentation(logger)
+instrumentation.RecordMetric(ctx, "events", 1)
+
+// GOOD - Direct OpenTelemetry usage
+import (
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/metric"
+    "go.opentelemetry.io/otel/trace"
+)
+
+tracer := otel.Tracer("component-name")
+meter := otel.Meter("component-name")
+```
+
+### OTEL Pattern for ALL Components
+Every component must implement this exact pattern:
+
+```go
+package collector
+
+import (
+    "context"
+
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/metric"
+    "go.opentelemetry.io/otel/trace"
+    "go.uber.org/zap"
+)
+
+type Collector struct {
+    logger *zap.Logger
+
+    // OTEL instrumentation - REQUIRED fields
+    tracer          trace.Tracer
+    eventsProcessed metric.Int64Counter
+    errorsTotal     metric.Int64Counter
+    processingTime  metric.Float64Histogram
+}
+
+func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
+    // Initialize OTEL components - MANDATORY pattern
+    tracer := otel.Tracer(name)
+    meter := otel.Meter(name)
+
+    // Create metrics with descriptive names and descriptions
+    eventsProcessed, err := meter.Int64Counter(
+        fmt.Sprintf("%s_events_processed_total", name),
+        metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
+    )
+    if err != nil {
+        logger.Warn("Failed to create events counter", zap.Error(err))
+    }
+
+    errorsTotal, err := meter.Int64Counter(
+        fmt.Sprintf("%s_errors_total", name),
+        metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+    )
+    if err != nil {
+        logger.Warn("Failed to create errors counter", zap.Error(err))
+    }
+
+    processingTime, err := meter.Float64Histogram(
+        fmt.Sprintf("%s_processing_duration_ms", name),
+        metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+    )
+    if err != nil {
+        logger.Warn("Failed to create processing time histogram", zap.Error(err))
+    }
+
+    return &Collector{
+        logger:          logger,
+        tracer:          tracer,
+        eventsProcessed: eventsProcessed,
+        errorsTotal:     errorsTotal,
+        processingTime:  processingTime,
+    }, nil
+}
+
+func (c *Collector) ProcessEvent(ctx context.Context, event Event) error {
+    // Always start spans for operations
+    ctx, span := c.tracer.Start(ctx, "collector.process_event")
+    defer span.End()
+
+    start := time.Now()
+    defer func() {
+        // Record processing time
+        duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
+        if c.processingTime != nil {
+            c.processingTime.Record(ctx, duration, metric.WithAttributes(
+                attribute.String("event_type", event.Type),
+            ))
+        }
+    }()
+
+    // Set span attributes for debugging
+    span.SetAttributes(
+        attribute.String("event.type", event.Type),
+        attribute.String("event.id", event.ID),
+    )
+
+    // Your business logic here
+    if err := c.processBusinessLogic(ctx, event); err != nil {
+        // Record error metrics
+        if c.errorsTotal != nil {
+            c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+                attribute.String("error_type", "processing_failed"),
+                attribute.String("event_type", event.Type),
+            ))
+        }
+
+        // Record error in span
+        span.SetAttributes(attribute.String("error", err.Error()))
+        return fmt.Errorf("failed to process event: %w", err)
+    }
+
+    // Record success metrics
+    if c.eventsProcessed != nil {
+        c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+            attribute.String("event_type", event.Type),
+            attribute.String("status", "success"),
+        ))
+    }
+
+    return nil
+}
+```
+
+### Metric Naming Standards
+All metrics MUST follow these naming conventions:
+
+```go
+// Counters - Always end with _total
+eventsProcessedCounter := "component_events_processed_total"
+errorsCounter := "component_errors_total"
+requestsCounter := "component_requests_total"
+
+// Histograms - Include unit in name
+durationHistogram := "component_processing_duration_ms"     // milliseconds
+sizeHistogram := "component_payload_size_bytes"             // bytes
+latencyHistogram := "component_request_latency_seconds"     // seconds
+
+// Gauges - Describe current state
+activeConnectionsGauge := "component_active_connections"
+bufferUtilizationGauge := "component_buffer_utilization_ratio"
+queueSizeGauge := "component_queue_size"
+```
+
+### Span Naming Standards
+```go
+// BAD - Generic span names
+span := tracer.Start(ctx, "process")
+span := tracer.Start(ctx, "handler")
+
+// GOOD - Descriptive hierarchical names
+span := tracer.Start(ctx, "collector.process_event")
+span := tracer.Start(ctx, "aggregator.resolve_conflicts")
+span := tracer.Start(ctx, "storage.write_correlation")
+span := tracer.Start(ctx, "ebpf.parse_kernel_event")
+```
+
+### Required Attributes for Spans
+Every span MUST include these attributes where applicable:
+
+```go
+span.SetAttributes(
+    attribute.String("component", "collector-name"),
+    attribute.String("operation", "process_event"),
+    attribute.String("event.type", event.Type),
+    attribute.String("event.id", event.ID),
+    attribute.Int("batch.size", len(events)),
+)
+
+// For errors - ALWAYS record error details
+span.SetAttributes(
+    attribute.String("error", err.Error()),
+    attribute.String("error.type", "validation_failed"),
+)
+```
+
+### Metric Collection Rules
+1. **ALL operations must be measured**
+2. **ALL errors must be counted with context**
+3. **ALL durations must be recorded in appropriate units**
+4. **Check for nil before recording metrics** (graceful degradation)
+
+```go
+// GOOD - Safe metric recording with nil checks
+func (c *Collector) recordMetric(ctx context.Context, value int64) {
+    if c.eventsProcessed != nil {
+        c.eventsProcessed.Add(ctx, value, metric.WithAttributes(
+            attribute.String("component", c.name),
+        ))
+    }
+}
+```
+
+### Cross-Cutting Concern Exception
+OpenTelemetry is considered a **cross-cutting concern** and is exempt from the 5-level hierarchy:
+
+```go
+// ALLOWED - All levels can import OpenTelemetry directly
+// Level 0 (domain): Can use OTEL for domain events
+// Level 1 (collectors): Can use OTEL for collection metrics
+// Level 2 (intelligence): Can use OTEL for aggregation metrics
+// Level 3 (integrations): Can use OTEL for integration metrics
+// Level 4 (interfaces): Can use OTEL for API metrics
+```
+
+### FORBIDDEN Patterns
+```go
+// FORBIDDEN - Custom telemetry wrapper
+import "github.com/yairfalse/tapio/pkg/integrations/telemetry"
+
+// FORBIDDEN - Non-descriptive metric names
+meter.Int64Counter("count")
+meter.Float64Histogram("time")
+meter.Float64Gauge("value")
+
+// FORBIDDEN - Missing error attributes
+span.SetAttributes(attribute.String("error", "failed"))  // Too generic
+
+// FORBIDDEN - No nil checks
+c.counter.Add(ctx, 1)  // Could panic if counter creation failed
+```
+
+### Testing OpenTelemetry Integration
+```go
+func TestCollectorMetrics(t *testing.T) {
+    // Use test metric reader to verify metrics are recorded
+    reader := sdkmetric.NewManualReader()
+    provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+    otel.SetMeterProvider(provider)
+
+    collector, err := NewCollector("test", logger)
+    require.NoError(t, err)
+
+    // Process test event
+    err = collector.ProcessEvent(ctx, testEvent)
+    require.NoError(t, err)
+
+    // Verify metrics were recorded
+    metrics := &metricdata.ResourceMetrics{}
+    err = reader.Collect(ctx, metrics)
+    require.NoError(t, err)
+
+    // Verify specific metrics exist
+    assert.Contains(t, getMetricNames(metrics), "test_events_processed_total")
+}
 ```
 
 ## ⚡ PERFORMANCE STANDARDS
@@ -367,16 +657,16 @@ for line in sys.stdin:
         continue
     pkg = parts[0]
     imports = parts[1].strip('[]').split()
-    
+
     pkg_level = -1
     for key, level in hierarchy.items():
         if key in pkg:
             pkg_level = level
             break
-    
+
     if pkg_level == -1:
         continue
-        
+
     for imp in imports:
         for key, level in hierarchy.items():
             if key in imp and level > pkg_level:
@@ -442,7 +732,7 @@ configPath := os.Getenv("CONFIG_PATH")
 // NEVER DO THIS - from pkg/intelligence/correlation/dependency_correlator.go
 svcName, _ = props["name"].(string)  // REJECTED - IGNORED TYPE ASSERTION
 
-// NEVER DO THIS - from pkg/intelligence/service_test.go  
+// NEVER DO THIS - from pkg/intelligence/service_test.go
 _ = service.ProcessEvent(ctx, event)  // REJECTED - IGNORED ERROR
 
 // NEVER DO THIS - from pkg/collectors/ebpf/collector_test.go
@@ -498,7 +788,7 @@ type Registry struct {
 func (r *Registry) Register(name string, factory CollectorFactory) error {
     r.mu.Lock()
     defer r.mu.Unlock()
-    
+
     if _, exists := r.factories[name]; exists {
         return fmt.Errorf("collector %s already registered", name)
     }
@@ -579,29 +869,29 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
     if event == nil {
         return fmt.Errorf("cannot process nil event")
     }
-    
+
     span, ctx := e.tracer.Start(ctx, "correlation.engine.process")
     defer span.End()
-    
+
     results := make([]*CorrelationResult, 0, len(e.correlators))
-    
+
     for _, correlator := range e.correlators {
         select {
         case <-ctx.Done():
             return fmt.Errorf("context cancelled during correlation: %w", ctx.Err())
         default:
         }
-        
+
         corResults, err := correlator.Process(ctx, event)
         if err != nil {
             span.RecordError(err)
             e.metrics.RecordError(correlator.Name(), err)
             continue // Don't fail entire pipeline
         }
-        
+
         results = append(results, corResults...)
     }
-    
+
     return e.persistResults(ctx, results)
 }
 ```
@@ -609,7 +899,7 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
 ### BAD: Interface{} Abuse (NEVER DO THIS)
 ```go
 // From old implementation - REJECTED
-type EventData map[string]interface{}  
+type EventData map[string]interface{}
 
 func (e *Event) GetData(key string) interface{} {
     return e.Data[key]  // Type information lost
@@ -620,26 +910,26 @@ func (e *Event) GetData(key string) interface{} {
 ```go
 func (c *Collector) parseKernelEventSafely(buffer []byte) (*KernelEvent, error) {
     expectedSize := int(unsafe.Sizeof(KernelEvent{}))
-    
+
     if len(buffer) < expectedSize {
         return nil, fmt.Errorf("buffer too small: got %d, need %d", len(buffer), expectedSize)
     }
-    
+
     if len(buffer) != expectedSize {
         return nil, fmt.Errorf("buffer size mismatch: got %d, expected %d", len(buffer), expectedSize)
     }
-    
+
     event := (*KernelEvent)(unsafe.Pointer(&buffer[0]))
-    
+
     // Validate event fields
     if event.EventType == 0 || event.EventType > 10 {
         return nil, fmt.Errorf("invalid event type: %d", event.EventType)
     }
-    
+
     if event.PID == 0 {
         return nil, fmt.Errorf("invalid PID: 0")
     }
-    
+
     return event, nil
 }
 ```
@@ -752,7 +1042,7 @@ hierarchy = {
     'pkg/interfaces': 4
 }
 
-result = subprocess.run(['go', 'list', '-f', '{{.ImportPath}}: {{.Imports}}', './...'], 
+result = subprocess.run(['go', 'list', '-f', '{{.ImportPath}}: {{.Imports}}', './...'],
                        capture_output=True, text=True)
 
 violations = []
@@ -762,19 +1052,19 @@ for line in result.stdout.split('\n'):
     parts = line.split(': ')
     if len(parts) != 2:
         continue
-    
+
     pkg = parts[0]
     imports = parts[1].strip('[]').split()
-    
+
     pkg_level = -1
     for key, level in hierarchy.items():
         if key in pkg:
             pkg_level = level
             break
-    
+
     if pkg_level == -1:
         continue
-        
+
     for imp in imports:
         for key, level in hierarchy.items():
             if key in imp and level > pkg_level:

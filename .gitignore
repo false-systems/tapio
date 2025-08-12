@@ -90,3 +90,10 @@ ebpf-tests*
 /dist/
 *.test
 
+
+# Binaries
+cmd/transformer/transformer
+test/cni-test-main
+collectors
+*.o
+*.test

@@ -6,30 +6,75 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/dns/bpf"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
-// Config for DNS collector
+// Config for DNS collector with comprehensive settings
 type Config struct {
+	// Basic settings
+	Name         string
 	BufferSize   int
 	Interface    string
 	EnableEBPF   bool
 	EnableSocket bool
+
+	// DNS specific
+	DNSPort   uint16
+	Protocols []string // ["udp", "tcp"]
+
+	// Rate limiting
+	RateLimitEnabled bool
+	RateLimitRPS     float64
+	RateLimitBurst   int
+
+	// Cache settings
+	CacheEnabled bool
+	CacheSize    int
+	CacheTTL     time.Duration
+
+	// Performance
+	WorkerCount        int
+	BatchSize          int
+	FlushInterval      time.Duration
+	SlowQueryThreshold time.Duration
+
+	// Logging
+	Logger *zap.Logger
 }
 
-// DefaultConfig returns sensible defaults
+// DefaultConfig returns sensible defaults with production settings
 func DefaultConfig() Config {
 	return Config{
-		BufferSize:   1000,
-		Interface:    "eth0",
-		EnableEBPF:   true,
-		EnableSocket: false, // socket filter needs special privileges
+		Name:               "dns",
+		BufferSize:         10000,
+		Interface:          "eth0",
+		EnableEBPF:         true,
+		EnableSocket:       false, // socket filter needs special privileges
+		DNSPort:            53,
+		Protocols:          []string{"udp", "tcp"},
+		RateLimitEnabled:   true,
+		RateLimitRPS:       1000.0, // 1000 queries per second
+		RateLimitBurst:     2000,
+		CacheEnabled:       true,
+		CacheSize:          10000,
+		CacheTTL:           5 * time.Minute,
+		WorkerCount:        4,
+		BatchSize:          100,
+		FlushInterval:      100 * time.Millisecond,
+		SlowQueryThreshold: 100 * time.Millisecond,
 	}
 }
 
@@ -76,26 +121,199 @@ type EnhancedDNSEvent struct {
 	Data      [512]byte // Increased size
 }
 
-// Collector implements DNS monitoring via eBPF
+// DNSCache holds cached DNS responses with TTL
+type DNSCache struct {
+	mu      sync.RWMutex
+	entries map[string]*CacheEntry
+	maxSize int
+	ttl     time.Duration
+}
+
+type CacheEntry struct {
+	Value     interface{}
+	Expires   time.Time
+	HitCount  int64
+	CreatedAt time.Time
+}
+
+// DNSStats holds collector statistics
+type DNSStats struct {
+	QueriesTotal   int64
+	ResponsesTotal int64
+	TimeoutsTotal  int64
+	ErrorsTotal    int64
+	CacheHits      int64
+	CacheMisses    int64
+	ActiveQueries  int64
+	PacketsDropped int64
+	LastQueryTime  time.Time
+	LatencySum     int64 // in nanoseconds
+	LatencyCount   int64
+	SlowQueries    int64 // queries > threshold
+}
+
+// Collector implements DNS monitoring via eBPF with comprehensive observability
 type Collector struct {
-	name    string
-	objs    *bpf.DnsmonitorObjects
-	links   []link.Link
-	reader  *ringbuf.Reader
-	events  chan collectors.RawEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	healthy bool
-	stopped bool
-	config  Config
+	// Core
+	name       string
+	logger     *zap.Logger
+	config     Config
+	ctx        context.Context
+	cancel     context.CancelFunc
+	healthy    bool
+	stopped    bool
+	mu         sync.RWMutex
+	safeParser *collectors.SafeParser
+
+	// eBPF components
+	objs   *bpf.DnsmonitorObjects
+	links  []link.Link
+	reader *ringbuf.Reader
+
+	// Event processing
+	events   chan collectors.RawEvent
+	workerWg sync.WaitGroup
+
+	// Rate limiting
+	rlimiter *rate.Limiter
+
+	// Cache
+	cache *DNSCache
+
+	// Statistics
+	stats DNSStats
+
+	// Active queries tracking
+	activeQueries sync.Map // queryID -> startTime
+
+	// OpenTelemetry
+	tracer             trace.Tracer
+	meter              metric.Meter
+	queriesTotal       metric.Int64Counter
+	queryLatency       metric.Float64Histogram
+	errorsTotal        metric.Int64Counter
+	activeQueriesGauge metric.Int64UpDownCounter
+	cacheHitsTotal     metric.Int64Counter
+	cacheMissTotal     metric.Int64Counter
+	slowQueriesTotal   metric.Int64Counter
+	packetsDropped     metric.Int64Counter
 }
 
 // NewCollector creates a new DNS collector
 func NewCollector(name string, cfg Config) (*Collector, error) {
+	// Initialize logger if not provided
+	logger := cfg.Logger
+	if logger == nil {
+		var err error
+		logger, err = zap.NewProduction()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create logger: %w", err)
+		}
+	}
+
+	// Initialize OTEL components - MANDATORY pattern
+	tracer := otel.Tracer(name)
+	meter := otel.Meter(name)
+
+	// Create metrics with descriptive names and descriptions
+	queriesTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription(fmt.Sprintf("Total DNS queries processed by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create queries counter", zap.Error(err))
+	}
+
+	queryLatency, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create latency histogram", zap.Error(err))
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	activeQueriesGauge, err := meter.Int64UpDownCounter(
+		fmt.Sprintf("%s_active_connections", name),
+		metric.WithDescription(fmt.Sprintf("Active DNS queries in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create active queries gauge", zap.Error(err))
+	}
+
+	cacheHitsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_cache_hits_total", name),
+		metric.WithDescription(fmt.Sprintf("Total cache hits in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create cache hits counter", zap.Error(err))
+	}
+
+	cacheMissTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_cache_misses_total", name),
+		metric.WithDescription(fmt.Sprintf("Total cache misses in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create cache miss counter", zap.Error(err))
+	}
+
+	slowQueriesTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_slow_queries_total", name),
+		metric.WithDescription(fmt.Sprintf("Total slow queries in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create slow queries counter", zap.Error(err))
+	}
+
+	packetsDropped, err := meter.Int64Counter(
+		fmt.Sprintf("%s_packets_dropped_total", name),
+		metric.WithDescription(fmt.Sprintf("Total packets dropped in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create packets dropped counter", zap.Error(err))
+	}
+
+	// Initialize rate limiter if enabled
+	var rlimiter *rate.Limiter
+	if cfg.RateLimitEnabled {
+		rlimiter = rate.NewLimiter(rate.Limit(cfg.RateLimitRPS), cfg.RateLimitBurst)
+	}
+
+	// Initialize cache if enabled
+	var cache *DNSCache
+	if cfg.CacheEnabled {
+		cache = &DNSCache{
+			entries: make(map[string]*CacheEntry),
+			maxSize: cfg.CacheSize,
+			ttl:     cfg.CacheTTL,
+		}
+	}
+
 	return &Collector{
-		name:   name,
-		config: cfg,
-		events: make(chan collectors.RawEvent, cfg.BufferSize),
+		name:               name,
+		logger:             logger,
+		config:             cfg,
+		events:             make(chan collectors.RawEvent, cfg.BufferSize),
+		safeParser:         collectors.NewSafeParser(),
+		rlimiter:           rlimiter,
+		cache:              cache,
+		tracer:             tracer,
+		meter:              meter,
+		queriesTotal:       queriesTotal,
+		queryLatency:       queryLatency,
+		errorsTotal:        errorsTotal,
+		activeQueriesGauge: activeQueriesGauge,
+		cacheHitsTotal:     cacheHitsTotal,
+		cacheMissTotal:     cacheMissTotal,
+		slowQueriesTotal:   slowQueriesTotal,
+		packetsDropped:     packetsDropped,
 	}, nil
 }
 
@@ -106,16 +324,28 @@ func (c *Collector) Name() string {
 
 // Start starts the eBPF monitoring
 func (c *Collector) Start(ctx context.Context) error {
+	// Create span for startup
+	ctx, span := c.tracer.Start(ctx, "dns.start")
+	defer span.End()
+
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	if !c.config.EnableEBPF {
 		c.healthy = true
+		span.SetStatus(codes.Ok, "started without eBPF")
 		return nil
 	}
 
 	// Load eBPF program
 	spec, err := bpf.LoadDnsmonitor()
 	if err != nil {
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "ebpf_load_failed"),
+			))
+		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to load eBPF spec: %w", err)
 	}
 
@@ -131,21 +361,21 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	// Attach tracepoints for DNS monitoring using available programs
 	// Monitor DNS queries
-	queryLink, err := link.Tracepoint("syscalls", "sys_enter_sendto", c.objs.TraceDnsQuery, nil)
+	queryLink, err := link.Tracepoint("syscalls", "sys_enter_sendto", c.objs.TraceDnsSendto, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach DNS query tracepoint: %w", err)
 	}
 	c.links = append(c.links, queryLink)
 
 	// Monitor DNS responses
-	responseLink, err := link.Tracepoint("syscalls", "sys_exit_recvfrom", c.objs.TraceDnsResponse, nil)
+	responseLink, err := link.Tracepoint("syscalls", "sys_exit_recvfrom", c.objs.TraceDnsRecvfrom, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach DNS response tracepoint: %w", err)
 	}
 	c.links = append(c.links, responseLink)
 
 	// Open ring buffer - use available map name
-	c.reader, err = ringbuf.NewReader(c.objs.Events)
+	c.reader, err = ringbuf.NewReader(c.objs.DnsEvents)
 	if err != nil {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
@@ -154,6 +384,12 @@ func (c *Collector) Start(ctx context.Context) error {
 	go c.processEvents()
 
 	c.healthy = true
+	span.SetStatus(codes.Ok, "DNS collector started successfully")
+	c.logger.Info("DNS collector started",
+		zap.String("name", c.name),
+		zap.Bool("ebpf_enabled", c.config.EnableEBPF),
+		zap.Int("buffer_size", c.config.BufferSize),
+	)
 	return nil
 }
 
@@ -236,7 +472,7 @@ func (c *Collector) populateDNSPIDs() error {
 		commStr := strings.TrimSpace(string(comm))
 		for _, dnsProc := range dnsProcesses {
 			if strings.Contains(commStr, dnsProc) {
-				if err := c.objs.DnsQueries.Put(uint32(pid), value); err != nil {
+				if err := c.objs.DnsPids.Put(uint32(pid), value); err != nil {
 					// Log but don't fail - just skip this PID
 					continue
 				}
@@ -262,22 +498,34 @@ func (c *Collector) processEvents() {
 			if c.ctx.Err() != nil {
 				return
 			}
+			// Record error metric
+			if c.errorsTotal != nil {
+				c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "read_error"),
+				))
+			}
 			// Log error but continue processing - production requirement
 			continue
 		}
 
-		// Parse enhanced event - safe binary unmarshaling
-		expectedSize := int(unsafe.Sizeof(EnhancedDNSEvent{}))
-		if len(record.RawSample) < expectedSize {
-			continue
-		}
+		// Create span for event processing
+		ctx, span := c.tracer.Start(c.ctx, "dns.process_event")
+		start := time.Now()
 
-		var event EnhancedDNSEvent
-		// Safe binary unmarshaling with exact size check
-		if len(record.RawSample) != expectedSize {
+		// Parse enhanced event with memory safety
+		event, err := c.parseDNSEventSafely(record.RawSample)
+		if err != nil {
+			if c.errorsTotal != nil {
+				c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "parse_error"),
+				))
+			}
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			span.End()
+			c.logger.Warn("Failed to parse DNS event", zap.Error(err))
 			continue
 		}
-		event = *(*EnhancedDNSEvent)(unsafe.Pointer(&record.RawSample[0]))
 
 		// Convert to RawEvent with enhanced metadata - NO BUSINESS LOGIC
 		rawEvent := collectors.RawEvent{
@@ -359,13 +607,58 @@ func (c *Collector) processEvents() {
 			rawEvent.Metadata["response_code"] = c.responseCodeToString(event.DNSRcode)
 		}
 
+		// Set span attributes
+		span.SetAttributes(
+			attribute.String("component", c.name),
+			attribute.String("operation", "process_event"),
+			attribute.String("event.type", rawEvent.Type),
+			attribute.String("event.id", fmt.Sprintf("%d", event.DNSID)),
+			attribute.String("query.name", queryName),
+		)
+
 		select {
 		case c.events <- rawEvent:
+			// Record success metrics
+			if c.queriesTotal != nil {
+				c.queriesTotal.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("query_type", c.queryTypeToString(event.DNSQtype)),
+					attribute.String("status", "success"),
+				))
+			}
+
+			// Record processing time
+			duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
+			if c.queryLatency != nil {
+				c.queryLatency.Record(ctx, duration, metric.WithAttributes(
+					attribute.String("query_type", c.queryTypeToString(event.DNSQtype)),
+				))
+			}
+
+			// Check for slow queries
+			if duration > float64(c.config.SlowQueryThreshold.Milliseconds()) {
+				if c.slowQueriesTotal != nil {
+					c.slowQueriesTotal.Add(ctx, 1, metric.WithAttributes(
+						attribute.String("query_name", queryName),
+					))
+				}
+			}
+
+			span.SetStatus(codes.Ok, "")
 		case <-c.ctx.Done():
+			span.End()
 			return
 		default:
 			// Drop event if buffer full - production requirement
+			if c.packetsDropped != nil {
+				c.packetsDropped.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("reason", "buffer_full"),
+				))
+			}
+			span.SetAttributes(attribute.String("dropped", "buffer_full"))
+			span.SetStatus(codes.Error, "event dropped - buffer full")
 		}
+
+		span.End()
 	}
 }
 
@@ -381,6 +674,67 @@ func (c *Collector) eventTypeToString(eventType uint32) string {
 	default:
 		return "dns_unknown"
 	}
+}
+
+// parseDNSEventSafely parses an EnhancedDNSEvent from raw bytes with memory safety
+func (c *Collector) parseDNSEventSafely(rawBytes []byte) (*EnhancedDNSEvent, error) {
+	// Use safe parsing with comprehensive validation
+	event, err := collectors.SafeCast[EnhancedDNSEvent](c.safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse EnhancedDNSEvent: %w", err)
+	}
+
+	// Validate DNS event type - DNS events are typically 19-20
+	if event.EventType < 1 || event.EventType > 30 {
+		return nil, fmt.Errorf("invalid DNS event type: %d", event.EventType)
+	}
+
+	// Validate DNS-specific fields
+	if event.Protocol != 6 && event.Protocol != 17 { // TCP or UDP only
+		return nil, fmt.Errorf("invalid protocol for DNS: %d", event.Protocol)
+	}
+
+	if event.IPVersion != 4 && event.IPVersion != 6 {
+		return nil, fmt.Errorf("invalid IP version: %d", event.IPVersion)
+	}
+
+	// Validate port ranges
+	if event.SrcPort > 65535 || event.DstPort > 65535 {
+		return nil, fmt.Errorf("invalid port values: src=%d, dst=%d", event.SrcPort, event.DstPort)
+	}
+
+	// Validate DNS ID (0 is valid for some cases)
+	if event.DNSID > 65535 {
+		return nil, fmt.Errorf("invalid DNS ID: %d", event.DNSID)
+	}
+
+	// Validate DNS opcode (0-15 are valid)
+	if event.DNSOpcode > 15 {
+		return nil, fmt.Errorf("invalid DNS opcode: %d", event.DNSOpcode)
+	}
+
+	// Validate DNS rcode (0-15 are standard, but some extensions go higher)
+	if event.DNSRcode > 255 {
+		return nil, fmt.Errorf("invalid DNS rcode: %d", event.DNSRcode)
+	}
+
+	// Validate data length
+	if event.DataLen > uint32(len(event.Data)) {
+		return nil, fmt.Errorf("invalid data length: %d exceeds buffer size %d", event.DataLen, len(event.Data))
+	}
+
+	// Validate query name field for corruption
+	if err := c.safeParser.ValidateStringField(event.QueryName[:], "query_name"); err != nil {
+		return nil, fmt.Errorf("invalid query_name field: %w", err)
+	}
+
+	// Additional DNS-specific validation - query name should not be empty for most events
+	queryName := c.safeParser.StringFromByteArray(event.QueryName[:])
+	if len(queryName) == 0 && (event.EventType == 19 || event.EventType == 20) { // DNS request/response
+		return nil, fmt.Errorf("empty query name for DNS request/response event")
+	}
+
+	return event, nil
 }
 
 // protocolToString converts protocol number to string
@@ -516,4 +870,72 @@ func (c *Collector) nullTerminatedString(b []byte) string {
 		}
 	}
 	return string(b)
+}
+
+// NewDNSCache creates a new DNS cache with specified size and TTL
+func NewDNSCache(maxSize int, ttl time.Duration) *DNSCache {
+	return &DNSCache{
+		entries: make(map[string]*CacheEntry),
+		maxSize: maxSize,
+		ttl:     ttl,
+	}
+}
+
+// CacheGet retrieves a value from the cache
+func (c *Collector) CacheGet(key string) (interface{}, bool) {
+	if c.cache == nil {
+		return nil, false
+	}
+
+	c.cache.mu.RLock()
+	defer c.cache.mu.RUnlock()
+
+	entry, exists := c.cache.entries[key]
+	if !exists {
+		c.cacheMissTotal.Add(context.Background(), 1)
+		return nil, false
+	}
+
+	// Check if expired
+	if time.Now().After(entry.Expires) {
+		c.cacheMissTotal.Add(context.Background(), 1)
+		return nil, false
+	}
+
+	entry.HitCount++
+	c.cacheHitsTotal.Add(context.Background(), 1)
+	return entry.Value, true
+}
+
+// CacheSet stores a value in the cache with the specified TTL
+func (c *Collector) CacheSet(key string, value interface{}, ttl time.Duration) {
+	if c.cache == nil {
+		return
+	}
+
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+
+	// Check if we need to evict entries
+	if len(c.cache.entries) >= c.cache.maxSize {
+		// Simple eviction: remove the oldest entry
+		var oldestKey string
+		var oldestTime time.Time
+		for k, v := range c.cache.entries {
+			if oldestKey == "" || v.CreatedAt.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = v.CreatedAt
+			}
+		}
+		if oldestKey != "" {
+			delete(c.cache.entries, oldestKey)
+		}
+	}
+
+	c.cache.entries[key] = &CacheEntry{
+		Value:     value,
+		Expires:   time.Now().Add(ttl),
+		HitCount:  0,
+		CreatedAt: time.Now(),
+	}
 }

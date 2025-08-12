@@ -38,7 +38,7 @@ type Evidence struct {
 	Logs       []LogEntry
 	Traces     []TraceSpan
 	GraphPaths []GraphPath
-	Attributes map[string]interface{} // Additional attributes for synthesis rules
+	Attributes map[string]string // Additional attributes for synthesis rules (strongly typed)
 }
 
 // MetricPoint represents a metric data point

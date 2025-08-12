@@ -1,190 +1,227 @@
-# Tapio: Modular Kubernetes Observability
+# Tapio - Observability Correlation Platform
 
-<div align="center">
+Tapio is a correlation engine for observability data. It collects system events from multiple sources, identifies relationships between them, and stores correlations in Neo4j for graph-based analysis.
 
-![Status](https://img.shields.io/badge/Status-Early%20Development-orange?style=for-the-badge)
+## What It Does
 
-**A modular observability platform exploring intelligent correlation of Kubernetes events**
+**Core Mission: Kubernetes Observability Intelligence**
+- Provides complete visibility into Kubernetes cluster behavior and dependencies
+- Correlates events across all layers: kernel, container runtime, kubelet, API server
+- Identifies cascading failures and resource exhaustion patterns
+- Maps service dependencies and performance bottlenecks
+- Delivers actionable insights for K8s troubleshooting and optimization
 
-[![Go Version](https://img.shields.io/badge/Go-1.24-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+**Key Capabilities:**
+- Collects kernel events via eBPF (process, network, file operations)
+- Monitors systemd services and journals
+- Tracks DNS queries and responses
+- Observes Kubernetes API server events and etcd operations
+- Monitors kubelet, container runtime (CRI), and networking (CNI)
+- Correlates events to find patterns and dependencies
+- Stores correlation results in Neo4j graph database
+- Streams events through NATS for real-time processing
 
-[What We're Building](#-what-were-building) • [Current Status](#-current-status) • [Architecture](#-architecture) • [Contributing](#-contributing)
+## Architecture Flow
 
-</div>
-
-## 🎯 What We're Building
-
-Tapio is an **experimental** platform for Kubernetes observability that attempts to correlate events across different infrastructure layers. We're exploring whether we can:
-
-- Connect related events (pod failures → node issues → network problems)
-- Detect common failure patterns automatically  
-- Store event relationships in a graph database
-- Answer "why did this fail?" questions
-
-**This is early-stage research.** We make no promises about production readiness, performance, or reliability.
-
-## 📍 Current Status
-
-**What actually works today:**
-
-✅ **Event Collection**: Multiple collectors (K8s API, eBPF, etcd, systemd, CNI)  
-✅ **Event Pipeline**: NATS-based event streaming with correlation IDs  
-✅ **Intelligence Engine**: Neo4j-based pattern detection with 6 basic patterns  
-✅ **Graph Storage**: Stores K8s relationships and events in Neo4j  
-✅ **Pattern Detection**: Basic failure pattern recognition (OOM kills, crash loops, etc.)  
-✅ **Modular Architecture**: Clean separation between collectors, intelligence, and integrations  
-
-**What we're experimenting with:**
-
-🔬 **Semantic Correlation**: Attempting to automatically link related events  
-🔬 **Root Cause Analysis**: Exploring graph-based "why did this fail" queries  
-🔬 **Pattern Library**: Building detection for common K8s failure scenarios  
-
-**What doesn't exist yet:**
-
-❌ Production deployment guides  
-❌ Performance guarantees  
-❌ Backward compatibility promises  
-❌ Enterprise features  
-❌ SLA or support  
-
-## 🏗️ Architecture
-
-Tapio follows a 5-level modular architecture:
-
+```mermaid
+flowchart TD
+    %% Collectors (Level 1)
+    K[Kernel eBPF]
+    S[Systemd]
+    DNS[DNS]
+    CNI[CNI]
+    CRI[CRI]
+    Kubelet[Kubelet]
+    Kubeapi[KubeAPI]
+    Etcd[Etcd]
+    
+    %% Message Bus
+    NATS[NATS Streaming]
+    
+    %% Domain (Level 0)
+    D[Unified Event]
+    
+    %% Intelligence (Level 2)
+    CE[Correlation Engine]
+    TC[Temporal]
+    SC[Sequence]
+    DC[Dependency]
+    OC[Ownership]
+    PC[Performance]
+    
+    %% Storage (Level 3)
+    NEO[Neo4j Graph DB]
+    
+    %% Flow
+    K --> NATS
+    S --> NATS
+    DNS --> NATS
+    CNI --> NATS
+    CRI --> NATS
+    Kubelet --> NATS
+    Kubeapi --> NATS
+    Etcd --> NATS
+    
+    NATS --> D
+    D --> CE
+    
+    CE --> TC
+    CE --> SC
+    CE --> DC
+    CE --> OC
+    CE --> PC
+    
+    TC --> NEO
+    SC --> NEO
+    DC --> NEO
+    OC --> NEO
+    PC --> NEO
 ```
-Level 0: pkg/domain/          # Core data structures (UnifiedEvent, etc.)
-Level 1: pkg/collectors/      # Data collection (K8s, eBPF, etcd, CNI, systemd)
-Level 2: pkg/intelligence/    # Pattern detection and correlation
-Level 3: pkg/integrations/    # External system connectors
-Level 4: pkg/interfaces/      # APIs and user interfaces
+
+## Architecture Rules
+
+**5-Level Hierarchy (STRICTLY ENFORCED):**
+```
+Level 0: pkg/domain/          # Zero dependencies
+Level 1: pkg/collectors/      # Domain only  
+Level 2: pkg/intelligence/    # Domain + L1
+Level 3: pkg/integrations/    # Domain + L1 + L2
+Level 4: pkg/interfaces/      # All above
 ```
 
-### Core Components
+Components can ONLY import from lower levels. No exceptions.
 
-- **UnifiedEvent**: Standard event format with K8s context and trace correlation
-- **Collectors**: Modular event collection from different sources
-- **Intelligence Engine**: Neo4j-based correlation and pattern detection
-- **Event Pipeline**: NATS streaming for event distribution
+## Implemented Components
 
-[Detailed Architecture →](docs/ARCHITECTURE.md)
+### Collectors (All Available)
+- **kernel**: eBPF programs for syscall monitoring (process exec, network, file ops)
+- **systemd**: Journal reader for service events  
+- **dns**: eBPF-based DNS query/response capture
+- **kubeapi**: Kubernetes API server event monitoring
+- **kubelet**: Node-level container lifecycle monitoring
+- **cri**: Container runtime interface monitoring
+- **cni**: Container network interface plugin tracking
+- **etcd**: Kubernetes datastore operation monitoring
 
-## 🚀 Quick Start
+### Correlation Engine
+Processes events and finds relationships:
+- **Temporal**: Events occurring in time patterns and recurring behaviors
+- **Sequence**: Event chains (A→B→C patterns) and causal relationships
+- **Dependency**: Service/pod dependencies and infrastructure correlations (requires Neo4j)
+- **Ownership**: Kubernetes ownership chain analysis (Deployment→ReplicaSet→Pod)
+- **Performance**: Resource exhaustion cascades and bottleneck detection
 
-**Prerequisites**: Go 1.24+, Minikube, Neo4j
+### Storage
+- **Neo4j**: Stores correlations as graph relationships
+- **Memory**: In-memory correlation cache
+
+## Building
 
 ```bash
-# Clone and build
-git clone https://github.com/yairfalse/tapio.git
-cd tapio
-go build ./...
+# Prerequisites
+# - Go 1.21+
+# - Linux kernel 4.14+ (for eBPF)
+# - clang/llvm (for eBPF compilation)
 
-# Start Neo4j (using provided manifests)
-kubectl apply -f k8s/neo4j.yaml
+# Build everything
+make build
 
-# Run intelligence demo
-go run cmd/intelligence-demo/main.go
+# Format code (MANDATORY before commit)
+make fmt
+
+# Run tests
+make test
+
+# Generate eBPF programs
+make bpf-generate
 ```
 
-### Individual Collectors
+## Configuration
+
+```yaml
+# config/tapio.yaml
+collectors:
+  kernel:
+    enabled: true
+    buffer_size: 8192
+  systemd:
+    enabled: true
+    unit_filter: ["*.service"]
+  dns:
+    enabled: true
+
+correlation:
+  engine:
+    worker_count: 4
+    event_buffer_size: 1000
+  
+integrations:
+  neo4j:
+    uri: "bolt://localhost:7687"
+    username: "neo4j"
+    password: "password"
+  nats:
+    url: "nats://localhost:4222"
+    stream: "events"
+```
+
+## Running
 
 ```bash
-# K8s events collector
-go run cmd/collectors/kubeapi/main.go
+# Start with default config
+./bin/tapio
 
-# eBPF kernel events (requires root)
-sudo go run cmd/collectors/ebpf/main.go
+# With custom config
+./bin/tapio -config config/tapio.yaml
 
-# systemd service events
-go run cmd/collectors/systemd/main.go
+# Collectors only mode
+./bin/tapio -mode collectors
+
+# Correlation only mode  
+./bin/tapio -mode correlation
 ```
 
-## 🧪 Intelligence Engine Demo
+## Example Correlations It Can Find
 
-The intelligence engine can detect basic failure patterns:
+### 1. Service Restart Cascade
+When systemd restarts a service, the correlation engine can identify:
+- Related pod terminations
+- Dependent service impacts
+- Configuration changes that triggered it
 
-```bash
-$ go run cmd/intelligence-demo/main.go
+### 2. Memory Pressure Events
+Kernel OOM killer events are correlated with:
+- Process memory allocations
+- Container memory limits
+- Service degradation
 
-🧠 Tapio Intelligence Engine Test Drive
-=====================================
+### 3. DNS Resolution Failures
+DNS failures are correlated with:
+- Service connection errors
+- Pod networking issues
+- Network policy changes
 
-1️⃣ Connecting to Neo4j...
-✅ Connected and indexes created!
+## Development Standards
 
-2️⃣ Scenario: Memory pressure causing OOM kills
-💥 OOM Kill event for web-app-pod-1
+From `CLAUDE.md` - these are enforced:
+- **80% test coverage minimum**
+- **No stubs, no TODOs** - only working code
+- **Must compile**: `go build ./...` must pass
+- **Must format**: `make fmt` before any commit
+- **No `map[string]interface{}`** in public APIs
+- **Follow 5-level architecture** - no exceptions
 
-🔍 Querying: Why did web-app-pod-1 fail?
-📊 Root Cause Analysis: [Shows detected patterns]
+## Current Limitations
 
-✅ Test drive complete!
-```
+- Graph correlations require Neo4j to be running
+- eBPF collectors require root/CAP_BPF privileges  
+- Only works on Linux (eBPF dependency)
+- Some collectors may need additional configuration for specific environments
 
-The demo creates synthetic scenarios and shows pattern detection working.
+## Project Status
 
-## 🔧 Development
+This is an active correlation engine with working eBPF collectors and basic correlation capabilities. The architecture is solid and enforced. More collectors and correlators can be added following the established patterns.
 
-### Building
+## License
 
-```bash
-# Format code (required)
-gofmt -w .
-
-# Build all modules
-go build ./...
-
-# Test individual modules
-go test ./pkg/intelligence/...
-go test ./pkg/collectors/...
-```
-
-### Module Structure
-
-Each module builds independently:
-```bash
-cd pkg/collectors && go build ./...
-cd pkg/intelligence && go build ./...
-cd pkg/integrations && go build ./...
-```
-
-## 🤝 Contributing
-
-We welcome experiments and improvements! See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Good first contributions:**
-- Add new failure patterns to `pkg/intelligence/patterns/`
-- Improve collector reliability
-- Add integration tests
-- Document failure scenarios
-
-## ⚠️ Important Notes
-
-- **Early Development**: APIs will change, data formats may break
-- **Experimental**: We're exploring what's possible, not shipping a product
-- **No Warranties**: Use at your own risk in non-production environments
-- **Research Focus**: We prioritize learning over stability
-
-## 📖 Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Architecture](docs/ARCHITECTURE.md) | Modular system design |
-| [UnifiedEvent](docs/UNIFIED_EVENT_DESIGN.md) | Core event format |
-| [Intelligence](docs/INTELLIGENCE.md) | Pattern detection approach |
-| [Collectors](docs/COLLECTORS.md) | Building data collectors |
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-<div align="center">
-
-**An experiment in infrastructure observability**
-
-[Repository](https://github.com/yairfalse/tapio) • [Issues](https://github.com/yairfalse/tapio/issues)
-
-</div>
+Apache 2.0

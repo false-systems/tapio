@@ -1,23 +1,17 @@
 package kubeapi
 
 import (
-	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	"log"
+
+	"github.com/yairfalse/tapio/pkg/collectors/factory"
 )
 
 func init() {
-	// Register the KubeAPI collector factory
-	registry.Register("kubeapi", NewCollectorFromConfig)
-}
-
-// NewCollectorFromConfig creates a new KubeAPI collector from configuration
-func NewCollectorFromConfig(config map[string]interface{}) (collectors.Collector, error) {
-	// Extract name from config, default to "kubeapi"
-	name := "kubeapi"
-	if n, ok := config["name"].(string); ok {
-		name = n
+	// Register the KubeAPI collector typed factory with error handling
+	factoryInstance := NewKubeAPIFactory()
+	if err := factory.RegisterTypedFactory("kubeapi", factoryInstance); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register KubeAPI typed factory: %v", err)
+		log.Printf("KubeAPI collector will not be available")
 	}
-
-	// Create minimal KubeAPI collector
-	return NewCollector(name)
 }

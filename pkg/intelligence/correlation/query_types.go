@@ -9,7 +9,9 @@ type QueryParams interface {
 	// Validate ensures the parameters are valid
 	Validate() error
 	// ToMap converts the parameters to a map for the underlying query engine
-	// This is only used internally by the GraphStore implementation
+	// This is only used internally by the GraphStore implementation for database queries.
+	// NOTE: interface{} usage is acceptable here for database interoperability (similar to JSON marshaling)
+	// as this is not a public API and is constrained to database parameter types (string, int64, bool, time)
 	ToMap() map[string]interface{}
 }
 

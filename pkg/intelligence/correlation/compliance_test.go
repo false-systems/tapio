@@ -18,7 +18,7 @@ func TestCLAUDECompliance(t *testing.T) {
 		// Storage can be nil for this test
 		var storage Storage
 
-		engine, err := NewEngine(logger, config, nil, storage)
+		engine, err := NewEngine(logger, *config, nil, storage)
 		require.NoError(t, err)
 
 		// This should compile - GetMetrics returns MetricsData

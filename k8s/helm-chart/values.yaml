@@ -1,0 +1,569 @@
+# Tapio eBPF Observability Platform - Production Helm Values
+# This configuration is optimized for large-scale Kubernetes clusters
+
+global:
+  # Cluster identification
+  clusterName: "production-cluster"
+  region: "us-west-2"
+  environment: "production"
+  
+  # Image configuration
+  imageRegistry: "registry.example.com"
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: tapio-regcred
+  
+  # Security context defaults
+  securityContext:
+    runAsNonRoot: false  # Required for eBPF
+    runAsUser: 0         # Required for kernel access
+    fsGroup: 0
+
+# Namespace configuration
+namespace:
+  create: true
+  name: tapio-system
+  labels:
+    name: tapio-system
+    kubernetes.io/metadata.name: tapio-system
+  annotations: {}
+
+# eBPF Collector DaemonSet Configuration
+collector:
+  enabled: true
+  name: tapio-collector
+  
+  image:
+    repository: tapio/collector
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  
+  # Replica configuration for DaemonSet
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  
+  # Node selection
+  nodeSelector:
+    kubernetes.io/os: linux
+  
+  # Tolerations for system nodes
+  tolerations:
+    - key: node-role.kubernetes.io/master
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/control-plane
+      effect: NoSchedule
+    - key: CriticalAddonsOnly
+      operator: Exists
+    - key: node.kubernetes.io/not-ready
+      effect: NoExecute
+      tolerationSeconds: 30
+    - key: node.kubernetes.io/unreachable
+      effect: NoExecute
+      tolerationSeconds: 30
+  
+  # Affinity rules
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/os
+            operator: In
+            values: ["linux"]
+          - key: kubernetes.io/arch
+            operator: In
+            values: ["amd64", "arm64"]
+  
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+  
+  # Security context for eBPF
+  securityContext:
+    privileged: true
+    runAsUser: 0
+    runAsGroup: 0
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: true
+    capabilities:
+      add:
+        - SYS_ADMIN
+        - SYS_RESOURCE
+        - NET_ADMIN
+        - SYS_PTRACE
+        - DAC_OVERRIDE
+        - IPC_LOCK
+        - BPF
+  
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 3
+    successThreshold: 1
+    failureThreshold: 3
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    clusterIP: None  # Headless service
+    ports:
+      metrics: 9090
+      health: 8080
+      otlpGrpc: 4317
+      otlpHttp: 4318
+  
+  # Configuration
+  config:
+    # eBPF programs to load
+    programs:
+      network:
+        enabled: true
+        samplingRate: 0.1
+        ringBufferSize: 4194304  # 4MB
+      process:
+        enabled: true
+        samplingRate: 0.05
+        ringBufferSize: 2097152  # 2MB
+      security:
+        enabled: true
+        samplingRate: 1.0
+        ringBufferSize: 8388608  # 8MB
+      dns:
+        enabled: true
+        samplingRate: 0.5
+        ringBufferSize: 1048576  # 1MB
+      filesystem:
+        enabled: true
+        samplingRate: 0.01
+        ringBufferSize: 1048576  # 1MB
+    
+    # Resource limits
+    resources:
+      maxMemoryMB: 768
+      maxCPUPercent: 5
+      maxEventsPerSec: 50000
+      enableCircuitBreaker: true
+      circuitBreakerThreshold: 75000
+    
+    # Kernel compatibility
+    kernel:
+      minVersion: "4.18"
+      fallbackEnabled: true
+      compatibilityMode: "auto"
+      btfEnabled: true
+      coreEnabled: true
+    
+    # Container runtime detection
+    runtime:
+      autoDetect: true
+      priority:
+        - containerd
+        - crio
+        - docker
+    
+    # Filtering
+    filters:
+      excludeNamespaces:
+        - kube-system
+        - kube-public
+        - kube-node-lease
+        - tapio-system
+      excludePodLabels:
+        monitoring: "false"
+        "tapio.io/exclude": "true"
+      includePodLabels:
+        app: "*"
+    
+    # Export configuration
+    export:
+      otel:
+        enabled: true
+        endpoint: "http://localhost:4317"
+        insecure: true
+        compression: "gzip"
+        timeout: "10s"
+        batch:
+          timeout: "5s"
+          sendBatchSize: 1000
+          sendBatchMaxSize: 1500
+      
+      nats:
+        enabled: true
+        url: "nats://tapio-nats:4222"
+        subjectPrefix: "raw"
+        stream: "tapio-events"
+
+# OTEL Collector Configuration
+otelCollector:
+  enabled: true
+  
+  # Node-level collectors (sidecar in DaemonSet)
+  node:
+    enabled: true
+    resources:
+      limits:
+        cpu: 200m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+  
+  # Centralized collector (Deployment)
+  centralized:
+    enabled: true
+    name: tapio-otel-collector
+    
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.96.0"
+    
+    mode: deployment
+    replicas: 3
+    
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+    
+    # Autoscaling
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+    
+    # Anti-affinity
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["tapio-otel-collector"]
+            topologyKey: kubernetes.io/hostname
+    
+    # Service
+    service:
+      type: ClusterIP
+      ports:
+        otlpGrpc: 4317
+        otlpHttp: 4318
+        jaegerGrpc: 14250
+        jaegerThrift: 14268
+        zipkin: 9411
+        metrics: 8888
+        pprof: 1777
+        healthCheck: 13133
+    
+    # Configuration
+    config:
+      # Pipeline configuration
+      pipelines:
+        traces:
+          exporters:
+            - jaeger
+            - nats
+            - logging
+          samplingPercentage: 10.0
+        
+        metrics:
+          exporters:
+            - prometheusremotewrite
+        
+        logs:
+          exporters:
+            - elasticsearch
+            - logging
+      
+      # Export endpoints
+      exporters:
+        jaeger:
+          endpoint: "jaeger-collector.monitoring.svc.cluster.local:14250"
+        
+        prometheusremotewrite:
+          endpoint: "http://prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
+        
+        elasticsearch:
+          endpoint: "http://elasticsearch.logging.svc.cluster.local:9200"
+          index: "tapio-logs-%Y.%m.%d"
+        
+        nats:
+          endpoint: "nats://tapio-nats:4222"
+          subject: "otel.traces"
+
+# RBAC Configuration
+rbac:
+  create: true
+  
+  # Service accounts
+  serviceAccounts:
+    collector:
+      create: true
+      name: tapio-collector
+      annotations: {}
+    
+    otelCollector:
+      create: true
+      name: tapio-otel-collector
+      annotations: {}
+    
+    ebpfPrivileged:
+      create: true
+      name: tapio-ebpf-privileged
+      annotations: {}
+
+# Security Configuration
+security:
+  # Pod Security Standards
+  podSecurityStandards:
+    enabled: true
+    enforce: "baseline"  # baseline, restricted, privileged
+    audit: "restricted"
+    warn: "restricted"
+  
+  # Network Policies
+  networkPolicies:
+    enabled: true
+    
+    # Default deny all
+    defaultDenyAll: true
+    
+    # Allow DNS
+    allowDNS: true
+    
+    # Allow monitoring scraping
+    allowMonitoringScraping: true
+    
+    # Allow internal communication
+    allowInternalCommunication: true
+
+# Priority Classes
+priorityClasses:
+  enabled: true
+  
+  highPriority:
+    create: true
+    name: tapio-high-priority
+    value: 1000000
+    description: "High priority class for Tapio eBPF collectors"
+  
+  normalPriority:
+    create: true
+    name: tapio-normal-priority
+    value: 100000
+    description: "Normal priority class for Tapio services"
+
+# Pod Disruption Budgets
+podDisruptionBudgets:
+  enabled: true
+  
+  otelCollector:
+    minAvailable: 2
+  
+  collector:
+    maxUnavailable: "10%"
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  
+  # ServiceMonitors
+  serviceMonitors:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      prometheus: kube-prometheus
+  
+  # PrometheusRules
+  prometheusRules:
+    enabled: true
+    labels:
+      prometheus: kube-prometheus
+  
+  # Grafana Dashboards
+  dashboards:
+    enabled: true
+    labels:
+      grafana_dashboard: "1"
+
+# Persistence Configuration
+persistence:
+  # For Neo4j and other stateful components
+  enabled: true
+  
+  # Storage class
+  storageClass: "fast-ssd"
+  
+  # Neo4j storage
+  neo4j:
+    size: "100Gi"
+    accessMode: ReadWriteOnce
+  
+  # NATS JetStream storage
+  nats:
+    size: "50Gi"
+    accessMode: ReadWriteOnce
+
+# Dependencies Configuration
+nats:
+  enabled: true
+  
+  # JetStream configuration
+  nats:
+    jetstream:
+      enabled: true
+      fileStore:
+        pvc:
+          size: "50Gi"
+          storageClassName: "fast-ssd"
+  
+  # Cluster configuration
+  cluster:
+    enabled: true
+    replicas: 3
+  
+  # Resources
+  resources:
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+
+neo4j:
+  enabled: true
+  
+  # Core configuration
+  neo4j:
+    edition: "community"
+    acceptLicenseAgreement: "yes"
+    
+    # Memory configuration
+    memory:
+      heap:
+        initial_size: "2G"
+        max_size: "4G"
+      page_cache:
+        size: "2G"
+  
+  # Persistence
+  volumes:
+    data:
+      mode: "volume"
+      volume:
+        persistentVolumeClaim:
+          storageClassName: "fast-ssd"
+          resources:
+            requests:
+              storage: "100Gi"
+  
+  # Resources
+  resources:
+    limits:
+      cpu: "2"
+      memory: "6Gi"
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+
+# Testing Configuration
+testing:
+  enabled: false
+  
+  # Chaos engineering
+  chaosEngineering:
+    enabled: false
+    experiments:
+      cpuStress:
+        enabled: false
+        schedule: "0 */6 * * *"
+      
+      memoryStress:
+        enabled: false
+        schedule: "0 */12 * * *"
+      
+      networkLatency:
+        enabled: false
+        schedule: "0 */8 * * *"
+  
+  # Load testing
+  loadTesting:
+    enabled: false
+    eventRate: 10000  # events per second
+    duration: "10m"
+
+# Cleanup Configuration
+cleanup:
+  # Retention policies
+  retention:
+    rawEvents: "24h"
+    processedEvents: "7d"
+    correlations: "30d"
+    traces: "7d"
+    logs: "3d"
+  
+  # Cleanup jobs
+  jobs:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    
+    # Job resources
+    resources:
+      limits:
+        cpu: "100m"
+        memory: "256Mi"
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+
+# Extra configuration for custom deployments
+extra:
+  # Additional labels for all resources
+  labels: {}
+  
+  # Additional annotations for all resources
+  annotations: {}
+  
+  # Additional environment variables
+  env: {}
+  
+  # Additional volumes
+  volumes: []
+  
+  # Additional volume mounts
+  volumeMounts: []
+  
+  # Additional init containers
+  initContainers: []
+  
+  # Additional containers
+  containers: []

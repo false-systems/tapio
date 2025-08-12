@@ -1,12 +1,17 @@
 package kernel
 
 import (
-	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/registry"
+	"log"
+
+	"github.com/yairfalse/tapio/pkg/collectors/factory"
 )
 
 func init() {
-	registry.Register("kernel", func(config map[string]interface{}) (collectors.Collector, error) {
-		return NewModularCollector("kernel")
-	})
+	// Register the Kernel collector typed factory with error handling
+	factoryInstance := NewKernelFactory()
+	if err := factory.RegisterTypedFactory("kernel", factoryInstance); err != nil {
+		// Log error but don't panic - this allows the application to continue
+		log.Printf("WARNING: failed to register Kernel typed factory: %v", err)
+		log.Printf("Kernel collector will not be available")
+	}
 }

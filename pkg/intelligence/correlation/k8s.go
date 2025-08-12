@@ -85,7 +85,7 @@ func NewK8sCorrelator(logger *zap.Logger, k8sClient domain.K8sClient) *K8sCorrel
 		},
 		eventCache: &EventCache{
 			events: make(map[string]*CachedEvent),
-			ttl:    5 * time.Minute,
+			ttl:    ServiceMetricsWindow,
 		},
 	}
 }
@@ -175,7 +175,7 @@ func (k *K8sCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent)
 	if owners := k.findOwnerChain(event); len(owners) > 0 {
 		results = append(results, &CorrelationResult{
 			Type:       "ownership",
-			Confidence: 0.8,
+			Confidence: MediumConfidence,
 			Related:    k.ownersToEvents(owners),
 			Message:    fmt.Sprintf("Found %d owner relationships", len(owners)),
 		})
@@ -185,7 +185,7 @@ func (k *K8sCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent)
 	if related := k.findSelectorMatches(event); len(related) > 0 {
 		results = append(results, &CorrelationResult{
 			Type:       "selector",
-			Confidence: 0.7,
+			Confidence: LowConfidence,
 			Related:    related,
 			Message:    fmt.Sprintf("Found %d selector matches", len(related)),
 		})
@@ -195,7 +195,7 @@ func (k *K8sCorrelator) Process(ctx context.Context, event *domain.UnifiedEvent)
 	if nsEvents := k.findNamespaceEvents(event); len(nsEvents) > 0 {
 		results = append(results, &CorrelationResult{
 			Type:       "namespace",
-			Confidence: 0.6,
+			Confidence: VeryLowConfidence,
 			Related:    nsEvents,
 			Message:    fmt.Sprintf("Found %d namespace events", len(nsEvents)),
 		})
@@ -267,12 +267,25 @@ func (k *K8sCorrelator) updateOwnershipForPod(pod *domain.K8sPod) {
 	k.ownerCache.mu.Lock()
 	defer k.ownerCache.mu.Unlock()
 
-	key := fmt.Sprintf("%s/Pod/%s", pod.Namespace, pod.Name)
+	podKey := k.generatePodKey(pod)
+	ownershipInfo := k.createPodOwnershipInfo(pod)
+	k.ownerCache.items[podKey] = ownershipInfo
+
+	// Update parent-child relationships
+	k.updateParentChildRelationships(pod)
+}
+
+// generatePodKey creates a cache key for the pod
+func (k *K8sCorrelator) generatePodKey(pod *domain.K8sPod) string {
+	return fmt.Sprintf("%s/Pod/%s", pod.Namespace, pod.Name)
+}
+
+// createPodOwnershipInfo creates ownership information for a pod
+func (k *K8sCorrelator) createPodOwnershipInfo(pod *domain.K8sPod) *OwnershipInfo {
 	info := &OwnershipInfo{
-		Owners: make([]ResourceRef, 0),
+		Owners: make([]ResourceRef, 0, len(pod.OwnerReferences)),
 	}
 
-	// Add owner references
 	for _, owner := range pod.OwnerReferences {
 		info.Owners = append(info.Owners, ResourceRef{
 			Kind:      owner.Kind,
@@ -280,39 +293,47 @@ func (k *K8sCorrelator) updateOwnershipForPod(pod *domain.K8sPod) {
 			Namespace: pod.Namespace,
 			UID:       owner.UID,
 		})
-
-		// Update parent's children
-		parentKey := fmt.Sprintf("%s/%s/%s", pod.Namespace, owner.Kind, owner.Name)
-		if parentInfo, exists := k.ownerCache.items[parentKey]; exists {
-			// Check if child already exists
-			childExists := false
-			for _, child := range parentInfo.Children {
-				if child.Name == pod.Name && child.Kind == "Pod" {
-					childExists = true
-					break
-				}
-			}
-			if !childExists {
-				parentInfo.Children = append(parentInfo.Children, ResourceRef{
-					Kind:      "Pod",
-					Name:      pod.Name,
-					Namespace: pod.Namespace,
-					UID:       pod.UID,
-				})
-			}
-		} else {
-			k.ownerCache.items[parentKey] = &OwnershipInfo{
-				Children: []ResourceRef{{
-					Kind:      "Pod",
-					Name:      pod.Name,
-					Namespace: pod.Namespace,
-					UID:       pod.UID,
-				}},
-			}
-		}
 	}
 
-	k.ownerCache.items[key] = info
+	return info
+}
+
+// updateParentChildRelationships updates the parent-child relationships in the cache
+func (k *K8sCorrelator) updateParentChildRelationships(pod *domain.K8sPod) {
+	for _, owner := range pod.OwnerReferences {
+		parentKey := fmt.Sprintf("%s/%s/%s", pod.Namespace, owner.Kind, owner.Name)
+		k.addChildToParent(parentKey, pod)
+	}
+}
+
+// addChildToParent adds a pod as a child to its parent in the ownership cache
+func (k *K8sCorrelator) addChildToParent(parentKey string, pod *domain.K8sPod) {
+	childRef := ResourceRef{
+		Kind:      ResourceTypePod,
+		Name:      pod.Name,
+		Namespace: pod.Namespace,
+		UID:       pod.UID,
+	}
+
+	if parentInfo, exists := k.ownerCache.items[parentKey]; exists {
+		if !k.childExists(parentInfo.Children, pod.Name) {
+			parentInfo.Children = append(parentInfo.Children, childRef)
+		}
+	} else {
+		k.ownerCache.items[parentKey] = &OwnershipInfo{
+			Children: []ResourceRef{childRef},
+		}
+	}
+}
+
+// childExists checks if a child already exists in the parent's children list
+func (k *K8sCorrelator) childExists(children []ResourceRef, podName string) bool {
+	for _, child := range children {
+		if child.Name == podName && child.Kind == ResourceTypePod {
+			return true
+		}
+	}
+	return false
 }
 
 // updateSelectorForService updates the selector cache for a service
@@ -320,7 +341,7 @@ func (k *K8sCorrelator) updateSelectorForService(service *domain.K8sService) {
 	k.selectorCache.mu.Lock()
 	defer k.selectorCache.mu.Unlock()
 
-	key := fmt.Sprintf("%s/Service/%s", service.Namespace, service.Name)
+	key := fmt.Sprintf("%s/%s/%s", service.Namespace, ResourceTypeService, service.Name)
 	k.selectorCache.selectors[key] = SelectorInfo{
 		Labels: service.Selector,
 	}
@@ -488,7 +509,7 @@ func (k *K8sCorrelator) podToUnifiedEvent(pod *domain.K8sPod, eventType domain.K
 		severity = "error"
 	} else if pod.Phase == domain.PodPending && pod.StartTime != nil {
 		// Check if pod has been pending for too long
-		if time.Since(*pod.StartTime) > 5*time.Minute {
+		if time.Since(*pod.StartTime) > PodStartupWindow {
 			severity = "warning"
 			message = fmt.Sprintf("Pod %s/%s pending for %v", pod.Namespace, pod.Name, time.Since(*pod.StartTime))
 		}
@@ -504,7 +525,7 @@ func (k *K8sCorrelator) podToUnifiedEvent(pod *domain.K8sPod, eventType domain.K
 		K8sContext: &domain.K8sContext{
 			ClusterName: "", // Would need cluster info from config
 			Namespace:   pod.Namespace,
-			Kind:        "Pod",
+			Kind:        ResourceTypePod,
 			Name:        pod.Name,
 			UID:         pod.UID,
 			Labels:      pod.Labels,
@@ -540,7 +561,7 @@ func (k *K8sCorrelator) serviceToUnifiedEvent(service *domain.K8sService, eventT
 		K8sContext: &domain.K8sContext{
 			ClusterName: "", // Would need cluster info from config
 			Namespace:   service.Namespace,
-			Kind:        "Service",
+			Kind:        ResourceTypeService,
 			Name:        service.Name,
 			UID:         service.UID,
 			Labels:      service.Labels,
@@ -557,7 +578,7 @@ func (k *K8sCorrelator) serviceToUnifiedEvent(service *domain.K8sService, eventT
 
 // cleanupLoop periodically cleans up old cache entries
 func (k *K8sCorrelator) cleanupLoop(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
 	for {

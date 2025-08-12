@@ -26,23 +26,7 @@ type SequenceCorrelator struct {
 	config SequenceConfig
 }
 
-// SequenceConfig configures the sequence detector
-type SequenceConfig struct {
-	MaxSequenceAge     time.Duration
-	MaxSequenceGap     time.Duration
-	MinSequenceLength  int
-	MaxActiveSequences int
-}
-
-// DefaultSequenceConfig returns sensible defaults
-func DefaultSequenceConfig() SequenceConfig {
-	return SequenceConfig{
-		MaxSequenceAge:     10 * time.Minute,
-		MaxSequenceGap:     2 * time.Minute,
-		MinSequenceLength:  2,
-		MaxActiveSequences: 1000,
-	}
-}
+// SequenceConfig defined in config.go - removing duplicate
 
 // EventSequence represents a sequence of related events
 type EventSequence struct {
@@ -91,7 +75,7 @@ func initializePatterns() []*SequencePattern {
 				{EventType: domain.EventTypeKubernetes, Conditions: []string{"Pod", "created", "scheduled"}},
 				{EventType: domain.EventTypeKubernetes, Conditions: []string{"Pod", "ready", "running"}},
 			},
-			Confidence: 0.9,
+			Confidence: HighConfidence,
 		},
 		{
 			Name:        "pod_crash_loop",
@@ -102,7 +86,7 @@ func initializePatterns() []*SequencePattern {
 				{EventType: domain.EventTypeKubernetes, Conditions: []string{"Pod", "backoff"}},
 				{EventType: domain.EventTypeKubernetes, Conditions: []string{"Pod", "restarting"}},
 			},
-			Confidence: 0.95,
+			Confidence: CriticalConfidence,
 		},
 		{
 			Name:        "service_disruption",
@@ -112,7 +96,7 @@ func initializePatterns() []*SequencePattern {
 				{EventType: domain.EventTypeKubernetes, Conditions: []string{"Pod", "terminating"}},
 				{EventType: domain.EventTypeNetwork, Conditions: []string{"connection refused", "timeout"}},
 			},
-			Confidence: 0.85,
+			Confidence: MediumHighConfidence,
 		},
 		{
 			Name:        "resource_pressure",
@@ -122,7 +106,7 @@ func initializePatterns() []*SequencePattern {
 				{EventType: domain.EventTypeKubernetes, Conditions: []string{"Pod", "evicted"}},
 				{EventType: domain.EventTypeKubernetes, Conditions: []string{"Pod", "failed", "insufficient resources"}},
 			},
-			Confidence: 0.88,
+			Confidence: MediumHighConfidence,
 		},
 	}
 }
@@ -382,21 +366,38 @@ func (s *SequenceCorrelator) createSequenceCorrelation(seq *EventSequence, patte
 		Confidence: confidence,
 		Events:     getEventIDs(seq.Events),
 		Summary:    fmt.Sprintf("Detected %s: %s", pattern.Name, pattern.Description),
-		Details:    s.buildSequenceDescription(seq, pattern),
-		Evidence:   s.buildSequenceEvidence(seq, pattern),
-		StartTime:  seq.StartTime,
-		EndTime:    seq.Events[len(seq.Events)-1].Timestamp,
+		Details: CorrelationDetails{
+			Pattern:        pattern.Name,
+			Algorithm:      "sequence_pattern_matcher",
+			ProcessingTime: time.Since(seq.StartTime),
+			DataPoints:     len(seq.Events),
+		},
+		Evidence: CreateEvidenceData(
+			getEventIDs(seq.Events),
+			[]string{}, // resource IDs would be extracted from events if needed
+			map[string]string{
+				"pattern_name": pattern.Name,
+				"description":  s.buildSequenceDescription(seq, pattern),
+				"sequence_id":  seq.ID,
+			},
+		),
+		StartTime: seq.StartTime,
+		EndTime:   seq.Events[len(seq.Events)-1].Timestamp,
 	}
 
 	// Identify root cause (first event in sequence)
 	result.RootCause = &RootCause{
 		EventID:     seq.Events[0].ID,
-		Confidence:  0.8,
+		Confidence:  MediumConfidence,
 		Description: fmt.Sprintf("Sequence started with %s", seq.Events[0].Type),
-		Evidence: []string{
-			fmt.Sprintf("First event at %s", seq.Events[0].Timestamp.Format(time.RFC3339)),
-			fmt.Sprintf("Pattern: %s", pattern.Name),
-		},
+		Evidence: CreateEvidenceData(
+			[]string{seq.Events[0].ID},
+			[]string{},
+			map[string]string{
+				"first_event_time": seq.Events[0].Timestamp.Format(time.RFC3339),
+				"pattern_name":     pattern.Name,
+			},
+		),
 	}
 
 	// Assess impact
@@ -416,12 +417,24 @@ func (s *SequenceCorrelator) createGenericSequenceCorrelation(seq *EventSequence
 	result := &CorrelationResult{
 		ID:         fmt.Sprintf("sequence-generic-%s", seq.ID),
 		Type:       "sequence_generic",
-		Confidence: 0.7,
+		Confidence: LowConfidence,
 		Events:     getEventIDs(seq.Events),
 		Summary:    fmt.Sprintf("Event sequence detected: %s", strings.Join(eventTypes, " → ")),
-		Details: fmt.Sprintf("A sequence of %d related events was detected over %s",
-			len(seq.Events), seq.Events[len(seq.Events)-1].Timestamp.Sub(seq.StartTime).String()),
-		Evidence:  s.buildGenericEvidence(seq),
+		Details: CorrelationDetails{
+			Pattern:        "Generic event sequence",
+			Algorithm:      "generic_sequence_detector",
+			ProcessingTime: seq.Events[len(seq.Events)-1].Timestamp.Sub(seq.StartTime),
+			DataPoints:     len(seq.Events),
+		},
+		Evidence: CreateEvidenceData(
+			getEventIDs(seq.Events),
+			[]string{},
+			map[string]string{
+				"event_types":       strings.Join(eventTypes, " → "),
+				"sequence_duration": seq.Events[len(seq.Events)-1].Timestamp.Sub(seq.StartTime).String(),
+				"event_count":       fmt.Sprintf("%d", len(seq.Events)),
+			},
+		),
 		StartTime: seq.StartTime,
 		EndTime:   seq.Events[len(seq.Events)-1].Timestamp,
 	}
@@ -497,12 +510,16 @@ func (s *SequenceCorrelator) findSequenceRootCause(seq *EventSequence) *RootCaus
 
 	return &RootCause{
 		EventID:     rootEvent.ID,
-		Confidence:  0.7,
+		Confidence:  LowConfidence,
 		Description: fmt.Sprintf("%s: %s", rootEvent.Type, rootEvent.Message),
-		Evidence: []string{
-			fmt.Sprintf("Severity: %s", rootEvent.Severity),
-			fmt.Sprintf("Occurred at position %d in sequence", s.getEventPosition(rootEvent, seq)),
-		},
+		Evidence: CreateEvidenceData(
+			[]string{rootEvent.ID},
+			[]string{},
+			map[string]string{
+				"severity": string(rootEvent.Severity),
+				"position": fmt.Sprintf("%d", s.getEventPosition(rootEvent, seq)),
+			},
+		),
 	}
 }
 
@@ -519,7 +536,7 @@ func (s *SequenceCorrelator) assessSequenceImpact(seq *EventSequence) *Impact {
 	impact := &Impact{
 		Severity:  domain.EventSeverityLow,
 		Resources: make([]string, 0),
-		Services:  make([]string, 0),
+		Services:  make([]ServiceReference, 0),
 	}
 
 	// Find highest severity
@@ -536,7 +553,12 @@ func (s *SequenceCorrelator) assessSequenceImpact(seq *EventSequence) *Impact {
 		// Extract service names
 		parts := strings.Split(resource, "/")
 		if len(parts) >= 3 && (parts[0] == "Service" || parts[0] == "Deployment") {
-			impact.Services = append(impact.Services, parts[2])
+			impact.Services = append(impact.Services, ServiceReference{
+				Name:      parts[2],
+				Namespace: "", // Would need to be extracted from resource context
+				Type:      strings.ToLower(parts[0]),
+				Version:   "", // Not available from resource string
+			})
 		}
 	}
 

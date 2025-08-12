@@ -286,7 +286,7 @@ func (e *SynthesisEngine) initializeDefaultRules() {
 						nodes := make(map[string]bool)
 						for _, f := range findings {
 							if node, ok := f.Evidence.Attributes["node"]; ok {
-								nodes[node.(string)] = true
+								nodes[node] = true
 							}
 						}
 						return len(nodes) == 1
@@ -304,7 +304,7 @@ func (e *SynthesisEngine) initializeDefaultRules() {
 						}
 					}
 					if node, ok := f.Evidence.Attributes["node"]; ok {
-						nodeName = node.(string)
+						nodeName = node
 					}
 				}
 

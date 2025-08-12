@@ -1,15 +1,25 @@
 package correlation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	neo4jTypes "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"go.uber.org/zap"
 )
+
+// jsonBufferPool reduces JSON marshaling allocations
+var jsonBufferPool = sync.Pool{
+	New: func() interface{} {
+		return &bytes.Buffer{}
+	},
+}
 
 // Neo4jStorage implements correlation.Storage using Neo4j
 type Neo4jStorage struct {
@@ -90,6 +100,37 @@ func (s *Neo4jStorage) createIndexes(ctx context.Context) error {
 	return nil
 }
 
+// StoreBatch saves multiple correlation results in a single transaction
+func (s *Neo4jStorage) StoreBatch(ctx context.Context, results []*correlation.CorrelationResult) error {
+	if len(results) == 0 {
+		return nil
+	}
+
+	session := s.driver.NewSession(ctx, neo4j.SessionConfig{
+		AccessMode:   neo4j.AccessModeWrite,
+		DatabaseName: s.config.Database,
+	})
+	defer session.Close(ctx)
+
+	tx, err := session.BeginTransaction(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Process all results in a single transaction
+	for _, result := range results {
+		if err := s.storeInTransaction(ctx, tx, result); err != nil {
+			s.logger.Error("Failed to store correlation in batch",
+				zap.String("correlation_id", result.ID),
+				zap.Error(err))
+			// Continue with other results
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
 // Store saves a correlation result
 func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.CorrelationResult) error {
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{
@@ -98,20 +139,46 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 	})
 	defer session.Close(ctx)
 
-	// Serialize evidence and details for storage
-	evidenceJSON, err := json.Marshal(result.Evidence)
-	if err != nil {
-		s.logger.Warn("Failed to marshal correlation evidence",
-			zap.String("correlation_id", result.ID), zap.Error(err))
-		// Use empty JSON object as fallback
-		evidenceJSON = []byte("{}")
-	}
-
 	tx, err := session.BeginTransaction(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	if err := s.storeInTransaction(ctx, tx, result); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// marshalToString efficiently marshals data to JSON string using buffer pool
+func (s *Neo4jStorage) marshalToString(data interface{}, fallback string, logContext string, correlationID string) string {
+	buf := jsonBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer jsonBufferPool.Put(buf)
+
+	encoder := json.NewEncoder(buf)
+	if err := encoder.Encode(data); err != nil {
+		s.logger.Warn("Failed to marshal "+logContext,
+			zap.String("correlation_id", correlationID), zap.Error(err))
+		return fallback
+	}
+
+	// Remove trailing newline from Encoder
+	jsonBytes := buf.Bytes()
+	if len(jsonBytes) > 0 && jsonBytes[len(jsonBytes)-1] == '\n' {
+		jsonBytes = jsonBytes[:len(jsonBytes)-1]
+	}
+	
+	return string(jsonBytes)
+}
+
+// storeInTransaction stores a correlation result within an existing transaction
+func (s *Neo4jStorage) storeInTransaction(ctx context.Context, tx neo4j.ExplicitTransaction, result *correlation.CorrelationResult) error {
+	// Use pooled JSON marshaling for better performance
+	evidenceJSON := s.marshalToString(result.Evidence, "{}", "correlation evidence", result.ID)
+	detailsJSON := s.marshalToString(result.Details, "{}", "correlation details", result.ID)
 
 	// Create the correlation node
 	query := `
@@ -129,19 +196,23 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 		})
 	`
 
-	params := map[string]interface{}{
-		"id":         result.ID,
-		"type":       result.Type,
-		"confidence": result.Confidence,
-		"summary":    result.Summary,
-		"details":    result.Details,
-		"evidence":   string(evidenceJSON),
-		"startTime":  result.StartTime.Format(time.RFC3339),
-		"endTime":    result.EndTime.Format(time.RFC3339),
-		"traceId":    result.TraceID,
+	params := neo4jTypes.QueryParams{
+		StringParams: map[string]string{
+			"id":        result.ID,
+			"type":      result.Type,
+			"summary":   result.Summary,
+			"details":   detailsJSON,
+			"evidence":  evidenceJSON,
+			"startTime": result.StartTime.Format(time.RFC3339),
+			"endTime":   result.EndTime.Format(time.RFC3339),
+			"traceId":   result.TraceID,
+		},
+		FloatParams: map[string]float64{
+			"confidence": result.Confidence,
+		},
 	}
 
-	if _, err := tx.Run(ctx, query, params); err != nil {
+	if _, err := tx.Run(ctx, query, params.ToMap()); err != nil {
 		return fmt.Errorf("failed to create correlation node: %w", err)
 	}
 
@@ -158,22 +229,21 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 			CREATE (c)-[:HAS_ROOT_CAUSE]->(rc)
 		`
 
-		evidenceJSON, err := json.Marshal(result.RootCause.Evidence)
-		if err != nil {
-			s.logger.Warn("Failed to marshal root cause evidence",
-				zap.String("correlation_id", result.ID), zap.Error(err))
-			// Use empty JSON object as fallback
-			evidenceJSON = []byte("{}")
-		}
-		params := map[string]interface{}{
-			"correlationId": result.ID,
-			"eventId":       result.RootCause.EventID,
-			"confidence":    result.RootCause.Confidence,
-			"description":   result.RootCause.Description,
-			"evidence":      string(evidenceJSON),
+		evidenceJSON := s.marshalToString(result.RootCause.Evidence, "{}", "root cause evidence", result.ID)
+		
+		params := neo4jTypes.QueryParams{
+			StringParams: map[string]string{
+				"correlationId": result.ID,
+				"eventId":       result.RootCause.EventID,
+				"description":   result.RootCause.Description,
+				"evidence":      evidenceJSON,
+			},
+			FloatParams: map[string]float64{
+				"confidence": result.RootCause.Confidence,
+			},
 		}
 
-		if _, err := tx.Run(ctx, rootCauseQuery, params); err != nil {
+		if _, err := tx.Run(ctx, rootCauseQuery, params.ToMap()); err != nil {
 			return fmt.Errorf("failed to create root cause: %w", err)
 		}
 	}
@@ -190,14 +260,16 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 					CREATE (c)-[:AFFECTS {severity: $severity}]->(r)
 				`
 
-				params := map[string]interface{}{
-					"correlationId": result.ID,
-					"name":          name,
-					"namespace":     namespace,
-					"severity":      string(result.Impact.Severity),
+				params := neo4jTypes.QueryParams{
+					StringParams: map[string]string{
+						"correlationId": result.ID,
+						"name":          name,
+						"namespace":     namespace,
+						"severity":      string(result.Impact.Severity),
+					},
 				}
 
-				if _, err := tx.Run(ctx, resourceQuery, params); err != nil {
+				if _, err := tx.Run(ctx, resourceQuery, params.ToMap()); err != nil {
 					s.logger.Warn("Failed to create resource relationship",
 						zap.String("resource", resourceName),
 						zap.Error(err))
@@ -226,7 +298,7 @@ func (s *Neo4jStorage) Store(ctx context.Context, result *correlation.Correlatio
 		}
 	}
 
-	return tx.Commit(ctx)
+	return nil
 }
 
 // GetRecent retrieves recent correlations
@@ -247,12 +319,12 @@ func (s *Neo4jStorage) GetRecent(ctx context.Context, limit int) ([]*correlation
 		LIMIT $limit
 	`
 
-	result, err := session.Run(ctx, query, map[string]interface{}{"limit": limit})
+	result, err := session.Run(ctx, query, map[string]any{"limit": limit})
 	if err != nil {
 		return nil, fmt.Errorf("failed to query correlations: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // GetByTraceID retrieves correlations for a specific trace
@@ -277,7 +349,7 @@ func (s *Neo4jStorage) GetByTraceID(ctx context.Context, traceID string) ([]*cor
 		return nil, fmt.Errorf("failed to query by trace ID: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // GetByTimeRange retrieves correlations within a time range
@@ -308,7 +380,7 @@ func (s *Neo4jStorage) GetByTimeRange(ctx context.Context, start, end time.Time)
 		return nil, fmt.Errorf("failed to query by time range: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // GetByResource retrieves correlations affecting a specific resource
@@ -339,7 +411,7 @@ func (s *Neo4jStorage) GetByResource(ctx context.Context, resourceType, namespac
 		return nil, fmt.Errorf("failed to query by resource: %w", err)
 	}
 
-	return s.parseResults(result)
+	return s.parseResults(ctx, result)
 }
 
 // Cleanup removes old correlations
@@ -379,11 +451,11 @@ func (s *Neo4jStorage) Cleanup(ctx context.Context, olderThan time.Duration) err
 }
 
 // parseResults converts Neo4j results to correlation results
-func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlation.CorrelationResult, error) {
+func (s *Neo4jStorage) parseResults(ctx context.Context, result neo4j.ResultWithContext) ([]*correlation.CorrelationResult, error) {
 	var correlations []*correlation.CorrelationResult
 
 	// Use a derived context with timeout for result parsing
-	parseCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	parseCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	for result.Next(parseCtx) {
@@ -434,7 +506,17 @@ func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlat
 			Type:       corrType,
 			Confidence: confidence,
 			Summary:    summary,
-			Details:    details,
+		}
+
+		// Parse details from JSON string
+		if details != "" {
+			var detailsStruct correlation.CorrelationDetails
+			if err := json.Unmarshal([]byte(details), &detailsStruct); err != nil {
+				s.logger.Warn("Failed to unmarshal correlation details",
+					zap.String("correlation_id", corr.ID), zap.Error(err))
+			} else {
+				corr.Details = detailsStruct
+			}
 		}
 
 		// Parse optional TraceID
@@ -452,7 +534,10 @@ func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlat
 
 		// Parse evidence
 		if evidenceStr, ok := props["evidence"].(string); ok {
-			json.Unmarshal([]byte(evidenceStr), &corr.Evidence)
+			if err := json.Unmarshal([]byte(evidenceStr), &corr.Evidence); err != nil {
+				s.logger.Warn("Failed to unmarshal correlation evidence",
+					zap.String("correlation_id", corr.ID), zap.Error(err))
+			}
 		}
 
 		// Parse root cause
@@ -472,12 +557,15 @@ func (s *Neo4jStorage) parseResults(result neo4j.ResultWithContext) ([]*correlat
 						rootCause.Confidence = confidence
 					}
 
+					if evidenceStr, ok := rcProps["evidence"].(string); ok {
+						if err := json.Unmarshal([]byte(evidenceStr), &rootCause.Evidence); err != nil {
+							s.logger.Warn("Failed to unmarshal root cause evidence",
+								zap.String("correlation_id", corr.ID),
+								zap.String("event_id", rootCause.EventID), zap.Error(err))
+						}
+					}
 					if description, ok := rcProps["description"].(string); ok {
 						rootCause.Description = description
-					}
-
-					if evidenceStr, ok := rcProps["evidence"].(string); ok {
-						json.Unmarshal([]byte(evidenceStr), &rootCause.Evidence)
 					}
 
 					corr.RootCause = rootCause

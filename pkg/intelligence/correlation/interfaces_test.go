@@ -58,7 +58,7 @@ func TestValidateEvent_UnsupportedType(t *testing.T) {
 		EventTypes: []string{"pod_crash"},
 	}
 
-	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
+	base := NewBaseCorrelator("TestCorrelator", DefaultCorrelatorVersion, capabilities)
 
 	event := &domain.UnifiedEvent{
 		Type:      domain.EventType("network_error"),
@@ -79,7 +79,7 @@ func TestValidateEvent_EventTooOld(t *testing.T) {
 		MaxEventAge: 30 * time.Minute,
 	}
 
-	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
+	base := NewBaseCorrelator("TestCorrelator", DefaultCorrelatorVersion, capabilities)
 
 	event := &domain.UnifiedEvent{
 		Type:      domain.EventType("pod_crash"),
@@ -100,7 +100,7 @@ func TestValidateEvent_MissingRequiredData(t *testing.T) {
 		RequiredData: []string{"namespace", "pod"},
 	}
 
-	base := NewBaseCorrelator("TestCorrelator", "1.0.0", capabilities)
+	base := NewBaseCorrelator("TestCorrelator", DefaultCorrelatorVersion, capabilities)
 
 	event := &domain.UnifiedEvent{
 		Type:      domain.EventType("pod_crash"),

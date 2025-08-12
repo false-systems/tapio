@@ -184,7 +184,9 @@ func (r *GraphRecord) GetRelationship(key string) (*GraphRelationship, error) {
 	}
 
 	rel := &GraphRelationship{
-		Properties: make(map[string]interface{}),
+		Properties: RelationshipProperties{
+			Metadata: make(map[string]string),
+		},
 	}
 
 	if id, ok := relMap["id"].(int64); ok {
@@ -200,7 +202,7 @@ func (r *GraphRecord) GetRelationship(key string) (*GraphRelationship, error) {
 		rel.EndNode = endNode
 	}
 	if props, ok := relMap["properties"].(map[string]interface{}); ok {
-		rel.Properties = props
+		rel.Properties = parseRelationshipProperties(props)
 	}
 
 	return rel, nil
@@ -208,6 +210,21 @@ func (r *GraphRecord) GetRelationship(key string) (*GraphRelationship, error) {
 
 // GetPath retrieves a path from the record
 func (r *GraphRecord) GetPath(key string) (*GraphPath, error) {
+	pathMap, err := r.extractPathMap(key)
+	if err != nil {
+		return nil, err
+	}
+
+	path := &GraphPath{}
+	path.Nodes = r.parsePathNodes(pathMap)
+	path.Relationships = r.parsePathRelationships(pathMap)
+	path.Length = len(path.Nodes)
+
+	return path, nil
+}
+
+// extractPathMap extracts and validates the path map from the record
+func (r *GraphRecord) extractPathMap(key string) (map[string]interface{}, error) {
 	val, ok := r.Get(key)
 	if !ok {
 		return nil, ErrNodeNotFound("GraphPath", key)
@@ -218,44 +235,75 @@ func (r *GraphRecord) GetPath(key string) (*GraphPath, error) {
 		return nil, ErrParsingFailed("GraphPath", nil)
 	}
 
-	path := &GraphPath{}
+	return pathMap, nil
+}
 
-	// Parse nodes
-	if nodesVal, ok := pathMap["nodes"]; ok {
-		if nodeSlice, ok := nodesVal.([]interface{}); ok {
-			for _, nodeData := range nodeSlice {
-				if nodeMap, ok := nodeData.(map[string]interface{}); ok {
-					node, err := ParseNodeFromRecord(map[string]interface{}{"node": nodeMap}, "node")
-					if err == nil && node != nil {
-						path.Nodes = append(path.Nodes, *node)
-					}
-				}
+// parsePathNodes parses nodes from the path map
+func (r *GraphRecord) parsePathNodes(pathMap map[string]interface{}) []GraphNode {
+	var nodes []GraphNode
+
+	nodesVal, ok := pathMap["nodes"]
+	if !ok {
+		return nodes
+	}
+
+	nodeSlice, ok := nodesVal.([]interface{})
+	if !ok {
+		return nodes
+	}
+
+	for _, nodeData := range nodeSlice {
+		if nodeMap, ok := nodeData.(map[string]interface{}); ok {
+			node, err := ParseNodeFromRecord(map[string]interface{}{"node": nodeMap}, "node")
+			if err == nil && node != nil {
+				nodes = append(nodes, *node)
 			}
 		}
 	}
 
-	// Parse relationships
-	if relsVal, ok := pathMap["relationships"]; ok {
-		if relSlice, ok := relsVal.([]interface{}); ok {
-			for _, relData := range relSlice {
-				if relMap, ok := relData.(map[string]interface{}); ok {
-					rel := GraphRelationship{
-						Properties: make(map[string]interface{}),
-					}
-					if id, ok := relMap["id"].(int64); ok {
-						rel.ID = id
-					}
-					if relType, ok := relMap["type"].(string); ok {
-						rel.Type = RelationshipType(relType)
-					}
-					path.Relationships = append(path.Relationships, rel)
-				}
-			}
+	return nodes
+}
+
+// parsePathRelationships parses relationships from the path map
+func (r *GraphRecord) parsePathRelationships(pathMap map[string]interface{}) []GraphRelationship {
+	var relationships []GraphRelationship
+
+	relsVal, ok := pathMap["relationships"]
+	if !ok {
+		return relationships
+	}
+
+	relSlice, ok := relsVal.([]interface{})
+	if !ok {
+		return relationships
+	}
+
+	for _, relData := range relSlice {
+		if relMap, ok := relData.(map[string]interface{}); ok {
+			rel := r.createGraphRelationship(relMap)
+			relationships = append(relationships, rel)
 		}
 	}
 
-	path.Length = len(path.Nodes)
-	return path, nil
+	return relationships
+}
+
+// createGraphRelationship creates a GraphRelationship from a map
+func (r *GraphRecord) createGraphRelationship(relMap map[string]interface{}) GraphRelationship {
+	rel := GraphRelationship{
+		Properties: RelationshipProperties{
+			Metadata: make(map[string]string),
+		},
+	}
+
+	if id, ok := relMap["id"].(int64); ok {
+		rel.ID = id
+	}
+	if relType, ok := relMap["type"].(string); ok {
+		rel.Type = RelationshipType(relType)
+	}
+
+	return rel
 }
 
 // RawData returns the underlying raw data for backward compatibility

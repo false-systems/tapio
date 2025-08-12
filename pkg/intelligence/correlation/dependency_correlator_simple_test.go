@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
 )
 
@@ -46,7 +45,7 @@ func TestNewDependencyCorrelator_Simple(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "dependency-correlator", correlator.Name())
-		assert.Equal(t, "1.0.0", correlator.Version())
+		assert.Equal(t, DefaultCorrelatorVersion, correlator.Version())
 	})
 
 	t.Run("nil driver", func(t *testing.T) {
@@ -231,7 +230,7 @@ func TestDependencyCorrelator_CalculateConfidence_Simple(t *testing.T) {
 
 	t.Run("no findings", func(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "default", "test-pod")
-		findings := []aggregator.Finding{}
+		findings := []Finding{}
 
 		confidence := correlator.calculateConfidence(findings, event)
 
@@ -240,9 +239,9 @@ func TestDependencyCorrelator_CalculateConfidence_Simple(t *testing.T) {
 
 	t.Run("single critical finding", func(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "default", "test-pod")
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.9,
 			},
 		}
@@ -254,13 +253,13 @@ func TestDependencyCorrelator_CalculateConfidence_Simple(t *testing.T) {
 
 	t.Run("multiple findings boost confidence", func(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "default", "test-pod")
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.8,
 			},
 			{
-				Severity:   aggregator.SeverityHigh,
+				Severity:   domain.EventSeverityHigh,
 				Confidence: 0.7,
 			},
 		}
@@ -276,13 +275,13 @@ func TestDependencyCorrelator_CalculateConfidence_Simple(t *testing.T) {
 
 	t.Run("confidence capped at 1.0", func(t *testing.T) {
 		event := createSimpleTestEvent("pod_failed", "default", "test-pod")
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 1.0,
 			},
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.95,
 			},
 		}

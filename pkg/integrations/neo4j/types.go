@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -26,8 +27,11 @@ type Record struct {
 	Count      int64    `json:"count,omitempty"`
 	StringList []string `json:"string_list,omitempty"`
 
-	// Raw values for backward compatibility during migration
-	Values map[string]interface{} `json:"values,omitempty"`
+	// Strongly typed values
+	StringValues map[string]string  `json:"string_values,omitempty"`
+	IntValues    map[string]int64   `json:"int_values,omitempty"`
+	FloatValues  map[string]float64 `json:"float_values,omitempty"`
+	BoolValues   map[string]bool    `json:"bool_values,omitempty"`
 }
 
 // Summary contains query execution metadata
@@ -128,26 +132,24 @@ type Relationship struct {
 	Properties RelationshipProperties `json:"properties"`
 }
 
-// Additional relationship types not in schema.go
-type RelationshipType string
-
+// Additional relationship types not in schema.go - extend RelationType from schema.go
 const (
 	// Additional resource relationships
-	RelOwns      RelationshipType = "OWNS"
-	RelSelects   RelationshipType = "SELECTS"
-	RelUses      RelationshipType = "USES"
-	RelExposedBy RelationshipType = "EXPOSED_BY"
+	RelOwns      RelationType = "OWNS"
+	RelSelects   RelationType = "SELECTS"
+	RelUses      RelationType = "USES"
+	RelExposedBy RelationType = "EXPOSED_BY"
 
 	// Additional event relationships
-	RelPartOf RelationshipType = "PART_OF"
+	RelPartOf RelationType = "PART_OF"
 
 	// Correlation relationships
-	RelCorrelatedWith RelationshipType = "CORRELATED_WITH"
-	RelRootCauseOf    RelationshipType = "ROOT_CAUSE_OF"
-	RelImpactOf       RelationshipType = "IMPACT_OF"
+	RelCorrelatedWith RelationType = "CORRELATED_WITH"
+	RelRootCauseOf    RelationType = "ROOT_CAUSE_OF"
+	RelImpactOf       RelationType = "IMPACT_OF"
 
 	// Additional network relationships
-	RelRoutesTo RelationshipType = "ROUTES_TO"
+	RelRoutesTo RelationType = "ROUTES_TO"
 )
 
 // RelationshipProperties contains properties for relationships
@@ -172,17 +174,30 @@ type RelationshipProperties struct {
 }
 
 // NodeProperties is a generic container for node properties
-// Used during migration from map[string]interface{}
+// NodeProperty represents a strongly typed node property
+type NodeProperty struct {
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	ValueType string `json:"value_type"` // "string", "int", "float", "bool", "time"
+}
+
+// Used during migration from strongly typed properties
 type NodeProperties struct {
-	Type       string                 `json:"type"`
-	Properties map[string]interface{} `json:"properties"`
+	Type       string         `json:"type"`
+	Properties []NodeProperty `json:"properties"`
+}
+
+// WriteNode represents a node for write operations
+type WriteNode struct {
+	Labels     []string       `json:"labels"`
+	Properties []NodeProperty `json:"properties"`
 }
 
 // WriteParams contains parameters for write operations
 type WriteParams struct {
-	Node         interface{}            `json:"node,omitempty"`
-	Relationship *Relationship          `json:"relationship,omitempty"`
-	Properties   map[string]interface{} `json:"properties,omitempty"`
+	Node         *WriteNode     `json:"node,omitempty"`
+	Relationship *Relationship  `json:"relationship,omitempty"`
+	Properties   []NodeProperty `json:"properties,omitempty"`
 }
 
 // QueryParams wraps query parameters with type safety
@@ -202,13 +217,24 @@ type QueryParams struct {
 	Limit  int `json:"limit,omitempty"`
 	Offset int `json:"offset,omitempty"`
 
-	// Generic parameters for complex queries
-	Custom map[string]interface{} `json:"custom,omitempty"`
+	// Strongly typed custom parameters
+	StringParams map[string]string  `json:"string_params,omitempty"`
+	IntParams    map[string]int64   `json:"int_params,omitempty"`
+	FloatParams  map[string]float64 `json:"float_params,omitempty"`
+	BoolParams   map[string]bool    `json:"bool_params,omitempty"`
+}
+
+// ParameterValue represents a strongly typed query parameter
+type ParameterValue struct {
+	StringVal *string  `json:"string_val,omitempty"`
+	IntVal    *int64   `json:"int_val,omitempty"`
+	FloatVal  *float64 `json:"float_val,omitempty"`
+	BoolVal   *bool    `json:"bool_val,omitempty"`
 }
 
 // ToMap converts QueryParams to map for Neo4j driver
-func (q QueryParams) ToMap() map[string]interface{} {
-	params := make(map[string]interface{})
+func (q QueryParams) ToMap() map[string]any {
+	params := make(map[string]any)
 
 	if q.ResourceType != "" {
 		params["resourceType"] = q.ResourceType
@@ -240,10 +266,145 @@ func (q QueryParams) ToMap() map[string]interface{} {
 		params["offset"] = q.Offset
 	}
 
-	// Add custom parameters
-	for k, v := range q.Custom {
+	// Add strongly typed custom parameters
+	for k, v := range q.StringParams {
+		params[k] = v
+	}
+	for k, v := range q.IntParams {
+		params[k] = v
+	}
+	for k, v := range q.FloatParams {
+		params[k] = v
+	}
+	for k, v := range q.BoolParams {
 		params[k] = v
 	}
 
 	return params
+}
+
+// NodeCreationParams parameters for creating/updating nodes
+type NodeCreationParams struct {
+	UID             string   `json:"uid"`
+	Name            string   `json:"name"`
+	Namespace       string   `json:"namespace"`
+	Kind            string   `json:"kind"`
+	Timestamp       int64    `json:"timestamp"`
+	Labels          []string `json:"labels"`
+	Annotations     []string `json:"annotations"`
+	ResourceVersion string   `json:"resource_version"`
+}
+
+// ToMap converts NodeCreationParams to map for Neo4j driver
+func (p NodeCreationParams) ToMap() map[string]any {
+	return map[string]any{
+		"uid":             p.UID,
+		"name":            p.Name,
+		"namespace":       p.Namespace,
+		"kind":            p.Kind,
+		"timestamp":       p.Timestamp,
+		"labels":          p.Labels,
+		"annotations":     p.Annotations,
+		"resourceVersion": p.ResourceVersion,
+	}
+}
+
+// EventCreationParams parameters for creating events
+type EventCreationParams struct {
+	ID        string `json:"id"`
+	Timestamp int64  `json:"timestamp"`
+	Type      string `json:"type"`
+	Severity  string `json:"severity"`
+	Message   string `json:"message"`
+	Source    string `json:"source"`
+	TraceID   string `json:"trace_id"`
+	SpanID    string `json:"span_id"`
+}
+
+// ToMap converts EventCreationParams to map for Neo4j driver
+func (p EventCreationParams) ToMap() map[string]any {
+	return map[string]any{
+		"id":        p.ID,
+		"timestamp": p.Timestamp,
+		"type":      p.Type,
+		"severity":  p.Severity,
+		"message":   p.Message,
+		"source":    p.Source,
+		"traceId":   p.TraceID,
+		"spanId":    p.SpanID,
+	}
+}
+
+// RelationshipCreationParams parameters for creating relationships
+type RelationshipCreationParams struct {
+	FromUID    string                   `json:"from_uid"`
+	ToUID      string                   `json:"to_uid"`
+	Timestamp  int64                    `json:"timestamp"`
+	Properties map[string]PropertyValue `json:"properties"`
+}
+
+// PropertyValue represents a strongly typed property value
+type PropertyValue struct {
+	StringVal *string  `json:"string_val,omitempty"`
+	IntVal    *int64   `json:"int_val,omitempty"`
+	FloatVal  *float64 `json:"float_val,omitempty"`
+	BoolVal   *bool    `json:"bool_val,omitempty"`
+}
+
+// ToMap converts RelationshipCreationParams to map for Neo4j driver
+func (p RelationshipCreationParams) ToMap() map[string]any {
+	params := map[string]any{
+		"fromUID":   p.FromUID,
+		"toUID":     p.ToUID,
+		"timestamp": p.Timestamp,
+	}
+
+	// Add typed properties with safe parameter names
+	for k, v := range p.Properties {
+		key := fmt.Sprintf("prop_%s", k)
+		switch {
+		case v.StringVal != nil:
+			params[key] = *v.StringVal
+		case v.IntVal != nil:
+			params[key] = *v.IntVal
+		case v.FloatVal != nil:
+			params[key] = *v.FloatVal
+		case v.BoolVal != nil:
+			params[key] = *v.BoolVal
+		}
+	}
+
+	return params
+}
+
+// EventRelationshipParams parameters for creating event relationships
+type EventRelationshipParams struct {
+	EventID   string `json:"event_id"`
+	EntityUID string `json:"entity_uid"`
+}
+
+// ToMap converts EventRelationshipParams to map for Neo4j driver
+func (p EventRelationshipParams) ToMap() map[string]any {
+	return map[string]any{
+		"eventID":   p.EventID,
+		"entityUID": p.EntityUID,
+	}
+}
+
+// CausalityParams parameters for linking event causality
+type CausalityParams struct {
+	EffectID   string  `json:"effect_id"`
+	CauseID    string  `json:"cause_id"`
+	Confidence float64 `json:"confidence"`
+	Timestamp  int64   `json:"timestamp"`
+}
+
+// ToMap converts CausalityParams to map for Neo4j driver
+func (p CausalityParams) ToMap() map[string]any {
+	return map[string]any{
+		"effectID":   p.EffectID,
+		"causeID":    p.CauseID,
+		"confidence": p.Confidence,
+		"timestamp":  p.Timestamp,
+	}
 }

@@ -47,16 +47,37 @@ func TestNeo4jStorage(t *testing.T) {
 				EventID:     "event-1",
 				Confidence:  0.9,
 				Description: "Pod OOMKilled due to memory limit",
-				Evidence:    []string{"Memory usage exceeded limit", "Container terminated"},
+				Evidence: correlation.EvidenceData{
+					EventIDs:    []string{"event-1"},
+					ResourceIDs: []string{"pod/api-service-xxx"},
+					Attributes: map[string]string{
+						"reason": "Memory usage exceeded limit",
+						"status": "Container terminated",
+					},
+				},
 			},
 			Impact: &correlation.Impact{
 				Severity:  domain.EventSeverityHigh,
 				Resources: []string{"deployment/api-service", "pod/api-service-xxx"},
-				Services:  []string{"api-service", "frontend"},
+				Services: []correlation.ServiceReference{
+					{Name: "api-service", Namespace: "default", Type: "deployment"},
+					{Name: "frontend", Namespace: "default", Type: "service"},
+				},
 			},
-			Summary:   "OOMKilled pod causing service disruption",
-			Details:   "The api-service pod was killed due to memory constraints",
-			Evidence:  []string{"High memory usage pattern", "Multiple restarts"},
+			Summary: "OOMKilled pod causing service disruption",
+			Details: correlation.CorrelationDetails{
+				Pattern:    "memory_limit_exceeded",
+				Algorithm:  "threshold_detection",
+				DataPoints: 3,
+			},
+			Evidence: correlation.EvidenceData{
+				EventIDs:    []string{"event-1", "event-2", "event-3"},
+				ResourceIDs: []string{"pod/api-service-xxx"},
+				Attributes: map[string]string{
+					"pattern":  "High memory usage pattern",
+					"restarts": "Multiple restarts",
+				},
+			},
 			StartTime: time.Now().Add(-10 * time.Minute),
 			EndTime:   time.Now(),
 		}
@@ -99,8 +120,16 @@ func TestNeo4jStorage(t *testing.T) {
 				Confidence: 0.8 + float64(i)*0.02,
 				Events:     []string{fmt.Sprintf("event-%d", i)},
 				Summary:    fmt.Sprintf("Test correlation %d", i),
-				StartTime:  time.Now().Add(time.Duration(-i) * time.Minute),
-				EndTime:    time.Now(),
+				Details: correlation.CorrelationDetails{
+					Pattern:    "temporal",
+					Algorithm:  "pattern_matching",
+					DataPoints: i + 1,
+				},
+				Evidence: correlation.EvidenceData{
+					EventIDs: []string{fmt.Sprintf("event-%d", i)},
+				},
+				StartTime: time.Now().Add(time.Duration(-i) * time.Minute),
+				EndTime:   time.Now(),
 			}
 			err := storage.Store(ctx, result)
 			require.NoError(t, err)
@@ -125,8 +154,16 @@ func TestNeo4jStorage(t *testing.T) {
 			Confidence: 0.75,
 			Events:     []string{"old-event-1"},
 			Summary:    "Old test correlation",
-			StartTime:  time.Now().Add(-2 * time.Hour),
-			EndTime:    time.Now().Add(-2 * time.Hour),
+			Details: correlation.CorrelationDetails{
+				Pattern:    "sequence",
+				Algorithm:  "sequence_matching",
+				DataPoints: 1,
+			},
+			Evidence: correlation.EvidenceData{
+				EventIDs: []string{"old-event-1"},
+			},
+			StartTime: time.Now().Add(-2 * time.Hour),
+			EndTime:   time.Now().Add(-2 * time.Hour),
 		}
 		err := storage.Store(ctx, oldResult)
 		require.NoError(t, err)
@@ -138,8 +175,16 @@ func TestNeo4jStorage(t *testing.T) {
 			Confidence: 0.85,
 			Events:     []string{"recent-event-1"},
 			Summary:    "Recent test correlation",
-			StartTime:  time.Now().Add(-5 * time.Minute),
-			EndTime:    time.Now(),
+			Details: correlation.CorrelationDetails{
+				Pattern:    "ownership",
+				Algorithm:  "k8s_metadata",
+				DataPoints: 1,
+			},
+			Evidence: correlation.EvidenceData{
+				EventIDs: []string{"recent-event-1"},
+			},
+			StartTime: time.Now().Add(-5 * time.Minute),
+			EndTime:   time.Now(),
 		}
 		err = storage.Store(ctx, recentResult)
 		require.NoError(t, err)
@@ -185,23 +230,44 @@ func TestNeo4jStorage(t *testing.T) {
 				EventID:     "e1",
 				Confidence:  0.88,
 				Description: "Database connection pool exhausted",
-				Evidence: []string{
-					"Connection timeout errors",
-					"Pool size at maximum",
-					"Slow query detected",
+				Evidence: correlation.EvidenceData{
+					EventIDs:    []string{"e1", "e2", "e3"},
+					ResourceIDs: []string{"statefulset/database"},
+					Attributes: map[string]string{
+						"error_type":  "Connection timeout errors",
+						"pool_status": "Pool size at maximum",
+						"query_type":  "Slow query detected",
+					},
 				},
 			},
 			Impact: &correlation.Impact{
 				Severity:  domain.EventSeverityCritical,
 				Resources: []string{"statefulset/database", "pvc/database-data"},
-				Services:  []string{"api", "auth", "billing", "notifications"},
+				Services: []correlation.ServiceReference{
+					{Name: "api", Namespace: "default", Type: "deployment"},
+					{Name: "auth", Namespace: "default", Type: "deployment"},
+					{Name: "billing", Namespace: "default", Type: "deployment"},
+					{Name: "notifications", Namespace: "default", Type: "deployment"},
+				},
+				Scope:       "platform-wide",
+				UserImpact:  "All users experiencing delays",
+				Degradation: "Response times increased 10x",
 			},
 			Summary: "Database connection exhaustion causing platform-wide impact",
-			Details: "A slow query caused connection pool exhaustion, affecting multiple services",
-			Evidence: []string{
-				"Spike in connection wait time",
-				"Multiple service timeouts",
-				"Customer complaints increased",
+			Details: correlation.CorrelationDetails{
+				Pattern:        "connection_exhaustion",
+				Algorithm:      "multi_factor_analysis",
+				DataPoints:     5,
+				ProcessingTime: 250 * time.Millisecond,
+			},
+			Evidence: correlation.EvidenceData{
+				EventIDs:    []string{"e1", "e2", "e3", "e4", "e5"},
+				ResourceIDs: []string{"statefulset/database", "pvc/database-data"},
+				Attributes: map[string]string{
+					"metric_spike":    "Spike in connection wait time",
+					"service_impact":  "Multiple service timeouts",
+					"user_complaints": "Customer complaints increased",
+				},
 			},
 			StartTime: time.Now().Add(-30 * time.Minute),
 			EndTime:   time.Now().Add(-5 * time.Minute),
@@ -218,8 +284,10 @@ func TestNeo4jStorage(t *testing.T) {
 		retrieved := results[0]
 		assert.Equal(t, result.ID, retrieved.ID)
 		assert.Len(t, retrieved.Events, 5)
-		assert.Len(t, retrieved.Evidence, 3)
-		assert.Len(t, retrieved.RootCause.Evidence, 3)
+		assert.Len(t, retrieved.Evidence.EventIDs, 5)
+		assert.Len(t, retrieved.Evidence.Attributes, 3)
+		assert.Len(t, retrieved.RootCause.Evidence.EventIDs, 3)
+		assert.Len(t, retrieved.RootCause.Evidence.Attributes, 3)
 		assert.Len(t, retrieved.Impact.Services, 4)
 	})
 }

@@ -184,13 +184,20 @@ const (
 	RelTypeImpacted    RelationshipType = "IMPACTED"
 )
 
+// RelationshipProperties represents the properties of a graph relationship
+type RelationshipProperties struct {
+	Type     string            `json:"type"`
+	Weight   float64           `json:"weight,omitempty"`
+	Metadata map[string]string `json:"metadata"`
+}
+
 // GraphRelationship represents a relationship between two nodes
 type GraphRelationship struct {
 	ID         int64                  `json:"id"`
 	Type       RelationshipType       `json:"type"`
 	StartNode  int64                  `json:"start_node"`
 	EndNode    int64                  `json:"end_node"`
-	Properties map[string]interface{} `json:"properties"`
+	Properties RelationshipProperties `json:"properties"`
 	CreatedAt  time.Time              `json:"created_at"`
 }
 
@@ -297,6 +304,36 @@ func parseNodeProperties(props map[string]interface{}) NodeProperties {
 	}
 
 	return np
+}
+
+// parseRelationshipProperties converts map[string]interface{} to RelationshipProperties
+func parseRelationshipProperties(props map[string]interface{}) RelationshipProperties {
+	rp := RelationshipProperties{
+		Metadata: make(map[string]string),
+	}
+
+	if typeStr, ok := props["type"].(string); ok {
+		rp.Type = typeStr
+	}
+	if weight, ok := props["weight"].(float64); ok {
+		rp.Weight = weight
+	}
+
+	// Collect remaining properties as metadata
+	for k, v := range props {
+		switch k {
+		case "type", "weight":
+			// Already processed
+		default:
+			if str, ok := v.(string); ok {
+				rp.Metadata[k] = str
+			} else {
+				rp.Metadata[k] = fmt.Sprintf("%v", v)
+			}
+		}
+	}
+
+	return rp
 }
 
 // ParsePodFromNode converts a GraphNode to a PodNode

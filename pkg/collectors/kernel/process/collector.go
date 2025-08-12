@@ -3,8 +3,8 @@ package process
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -16,8 +16,12 @@ import (
 type ProcessEvent struct {
 	Timestamp uint64
 	PID       uint32
+	PPID      uint32 // Parent PID
 	TID       uint32
+	UID       uint32
+	GID       uint32
 	EventType uint32
+	ExitCode  int32
 	Size      uint64
 	Comm      [16]byte
 	CgroupID  uint64
@@ -27,19 +31,23 @@ type ProcessEvent struct {
 
 // Collector implements process monitoring
 type Collector struct {
-	logger *zap.Logger
-	events chan collectors.RawEvent
-	ctx    context.Context
-	cancel context.CancelFunc
-	reader *ringbuf.Reader
-	links  []link.Link
+	logger     *zap.Logger
+	events     chan collectors.RawEvent
+	ctx        context.Context
+	cancel     context.CancelFunc
+	reader     *ringbuf.Reader
+	links      []link.Link
+	safeParser *collectors.SafeParser
+	stopped    bool
+	mu         sync.RWMutex
 }
 
 // NewProcessCollector creates a new process collector
 func NewProcessCollector(logger *zap.Logger) *Collector {
 	return &Collector{
-		logger: logger,
-		events: make(chan collectors.RawEvent, 2000),
+		logger:     logger,
+		events:     make(chan collectors.RawEvent, 3000),
+		safeParser: collectors.NewSafeParser(),
 	}
 }
 
@@ -64,6 +72,13 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops process monitoring
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.stopped {
+		return nil
+	}
+
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -80,6 +95,7 @@ func (c *Collector) Stop() error {
 		close(c.events)
 	}
 
+	c.stopped = true
 	c.logger.Info("Process collector stopped")
 	return nil
 }
@@ -148,21 +164,38 @@ func (c *Collector) processEvents() {
 	}
 }
 
-// parseProcessEvent parses a ProcessEvent from raw bytes
+// parseProcessEvent parses a ProcessEvent from raw bytes with memory safety
 func (c *Collector) parseProcessEvent(rawBytes []byte) (*ProcessEvent, error) {
-	expectedSize := int(unsafe.Sizeof(ProcessEvent{}))
-
-	if len(rawBytes) < expectedSize {
-		return nil, fmt.Errorf("buffer too small: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
+	// Use safe parsing with comprehensive validation
+	event, err := collectors.SafeCast[ProcessEvent](c.safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse ProcessEvent: %w", err)
 	}
 
-	event := *(*ProcessEvent)(unsafe.Pointer(&rawBytes[0]))
-
-	if event.EventType > 20 { // Basic sanity check
-		return nil, fmt.Errorf("invalid process event type: %d", event.EventType)
+	// Validate event type range for process events
+	if err := c.safeParser.ValidateEventType(event.EventType, 1, 20); err != nil {
+		return nil, fmt.Errorf("invalid process event type: %w", err)
 	}
 
-	return &event, nil
+	// Validate string fields for corruption detection
+	if err := c.safeParser.ValidateStringField(event.Comm[:], "comm"); err != nil {
+		return nil, fmt.Errorf("invalid comm field: %w", err)
+	}
+
+	if err := c.safeParser.ValidateStringField(event.PodUID[:], "pod_uid"); err != nil {
+		return nil, fmt.Errorf("invalid pod_uid field: %w", err)
+	}
+
+	// Additional process-specific validation
+	if event.PID == 0 && event.EventType != 1 { // PID 0 only valid for certain events
+		return nil, fmt.Errorf("invalid PID 0 for event type %d", event.EventType)
+	}
+
+	if event.Size > 1024*1024 { // Sanity check for size field (1MB max)
+		return nil, fmt.Errorf("unrealistic size field: %d bytes", event.Size)
+	}
+
+	return event, nil
 }
 
 // eventTypeToString converts process event type to string
@@ -183,12 +216,7 @@ func (c *Collector) eventTypeToString(eventType uint32) string {
 	}
 }
 
-// nullTerminatedString converts null-terminated byte array to string
+// nullTerminatedString safely converts null-terminated byte array to string
 func (c *Collector) nullTerminatedString(b []byte) string {
-	for i, v := range b {
-		if v == 0 {
-			return string(b[:i])
-		}
-	}
-	return string(b)
+	return c.safeParser.StringFromByteArray(b)
 }

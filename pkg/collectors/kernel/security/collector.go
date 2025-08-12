@@ -3,8 +3,8 @@ package security
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -17,10 +17,13 @@ import (
 type SecurityEvent struct {
 	Timestamp uint64
 	PID       uint32
+	UID       uint32
 	TID       uint32
 	EventType uint32
+	Severity  uint8
 	TargetPID uint32
 	Comm      [16]byte
+	FilePath  [256]byte
 	CgroupID  uint64
 	PodUID    [36]byte
 	Data      [96]byte
@@ -28,20 +31,24 @@ type SecurityEvent struct {
 
 // Collector implements security monitoring
 type Collector struct {
-	logger *zap.Logger
-	events chan collectors.RawEvent
-	ctx    context.Context
-	cancel context.CancelFunc
-	reader *ringbuf.Reader
-	links  []link.Link
-	objs   *bpf.SecuritymonitorObjects
+	logger     *zap.Logger
+	events     chan collectors.RawEvent
+	ctx        context.Context
+	cancel     context.CancelFunc
+	reader     *ringbuf.Reader
+	links      []link.Link
+	objs       *bpf.SecuritymonitorObjects
+	safeParser *collectors.SafeParser
+	stopped    bool
+	mu         sync.RWMutex
 }
 
 // NewSecurityCollector creates a new security collector
 func NewSecurityCollector(logger *zap.Logger) *Collector {
 	return &Collector{
-		logger: logger,
-		events: make(chan collectors.RawEvent, 1000),
+		logger:     logger,
+		events:     make(chan collectors.RawEvent, 5000), // Larger buffer for security events
+		safeParser: collectors.NewSafeParser(),
 	}
 }
 
@@ -113,12 +120,20 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops security monitoring
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.stopped {
+		return nil
+	}
+
 	if c.cancel != nil {
 		c.cancel()
 	}
 
 	c.cleanup()
 
+	c.stopped = true
 	c.logger.Info("Security collector stopped")
 	return nil
 }
@@ -206,21 +221,39 @@ func (c *Collector) processEvents() {
 	}
 }
 
-// parseSecurityEvent parses a SecurityEvent from raw bytes
+// parseSecurityEvent parses a SecurityEvent from raw bytes with memory safety
 func (c *Collector) parseSecurityEvent(rawBytes []byte) (*SecurityEvent, error) {
-	expectedSize := int(unsafe.Sizeof(SecurityEvent{}))
-
-	if len(rawBytes) < expectedSize {
-		return nil, fmt.Errorf("buffer too small: got %d bytes, expected at least %d", len(rawBytes), expectedSize)
+	// Use safe parsing with comprehensive validation
+	event, err := collectors.SafeCast[SecurityEvent](c.safeParser, rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to safely parse SecurityEvent: %w", err)
 	}
 
-	event := *(*SecurityEvent)(unsafe.Pointer(&rawBytes[0]))
-
-	if event.EventType < 11 || event.EventType > 16 {
-		return nil, fmt.Errorf("invalid security event type: %d", event.EventType)
+	// Validate security event type range (11-16)
+	if err := c.safeParser.ValidateEventType(event.EventType, 11, 16); err != nil {
+		return nil, fmt.Errorf("invalid security event type: %w", err)
 	}
 
-	return &event, nil
+	// Validate string fields for corruption detection
+	if err := c.safeParser.ValidateStringField(event.Comm[:], "comm"); err != nil {
+		return nil, fmt.Errorf("invalid comm field: %w", err)
+	}
+
+	if err := c.safeParser.ValidateStringField(event.PodUID[:], "pod_uid"); err != nil {
+		return nil, fmt.Errorf("invalid pod_uid field: %w", err)
+	}
+
+	// Additional security-specific validation
+	if event.PID == 0 && event.EventType != 12 { // PID 0 only valid for kernel module events
+		return nil, fmt.Errorf("invalid PID 0 for security event type %d", event.EventType)
+	}
+
+	// Validate TargetPID for events that should have one
+	if (event.EventType == 14 || event.EventType == 16) && event.TargetPID == 0 {
+		return nil, fmt.Errorf("security event type %d requires valid TargetPID", event.EventType)
+	}
+
+	return event, nil
 }
 
 // eventTypeToString converts security event type to string
@@ -243,12 +276,7 @@ func (c *Collector) eventTypeToString(eventType uint32) string {
 	}
 }
 
-// nullTerminatedString converts null-terminated byte array to string
+// nullTerminatedString safely converts null-terminated byte array to string
 func (c *Collector) nullTerminatedString(b []byte) string {
-	for i, v := range b {
-		if v == 0 {
-			return string(b[:i])
-		}
-	}
-	return string(b)
+	return c.safeParser.StringFromByteArray(b)
 }

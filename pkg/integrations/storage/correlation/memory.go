@@ -3,7 +3,9 @@ package correlation
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,7 +22,8 @@ type MemoryStorage struct {
 	byTrace      map[string][]string // traceID -> correlation IDs
 	byTime       *timeIndex          // time-based index
 
-	// Bounds
+	// Configuration
+	config  MemoryStorageConfig
 	maxSize int
 	maxAge  time.Duration
 
@@ -40,10 +43,11 @@ type storedCorrelation struct {
 	accessCount int
 }
 
-// timeIndex maintains correlations ordered by time
+// timeIndex maintains correlations ordered by time with bounds
 type timeIndex struct {
-	entries []timeEntry
-	mu      sync.RWMutex
+	entries    []timeEntry
+	maxEntries int
+	mu         sync.RWMutex
 }
 
 type timeEntry struct {
@@ -53,28 +57,62 @@ type timeEntry struct {
 
 // MemoryStorageConfig configures the memory storage
 type MemoryStorageConfig struct {
-	MaxSize int           // Maximum number of correlations to store
-	MaxAge  time.Duration // Maximum age of correlations
+	MaxSize                 int           // Maximum number of correlations to store
+	MaxAge                  time.Duration // Maximum age of correlations
+	MaxCorrelationsPerTrace int           // Maximum correlations per trace ID
+	MaxTimeEntries          int           // Maximum entries in time index
+	EvictionPolicy          string        // "lru" (default), "lfu", "ttl"
+	MemoryPressureThreshold float64       // Memory pressure threshold (0.0 to 1.0)
 }
 
 // DefaultMemoryStorageConfig returns sensible defaults
 func DefaultMemoryStorageConfig() MemoryStorageConfig {
 	return MemoryStorageConfig{
-		MaxSize: 10000,
-		MaxAge:  24 * time.Hour,
+		MaxSize:                 getConfigInt("MEMORY_STORAGE_MAX_SIZE", 10000),
+		MaxAge:                  getConfigDuration("MEMORY_STORAGE_MAX_AGE", 24*time.Hour),
+		MaxCorrelationsPerTrace: getConfigInt("MEMORY_STORAGE_MAX_PER_TRACE", 1000),
+		MaxTimeEntries:          getConfigInt("MEMORY_STORAGE_MAX_TIME_ENTRIES", 10000),
+		EvictionPolicy:          getConfigString("MEMORY_STORAGE_EVICTION_POLICY", "lru"),
+		MemoryPressureThreshold: getConfigFloat("MEMORY_STORAGE_PRESSURE_THRESHOLD", 0.8),
 	}
 }
 
 // NewMemoryStorage creates a new bounded memory storage
 func NewMemoryStorage(logger *zap.Logger, config MemoryStorageConfig) *MemoryStorage {
-	return &MemoryStorage{
+	// Validate and apply defaults
+	if config.MaxSize <= 0 {
+		config.MaxSize = 10000
+	}
+	if config.MaxAge <= 0 {
+		config.MaxAge = 24 * time.Hour
+	}
+	if config.MaxCorrelationsPerTrace <= 0 {
+		config.MaxCorrelationsPerTrace = 1000
+	}
+	if config.MaxTimeEntries <= 0 {
+		config.MaxTimeEntries = config.MaxSize
+	}
+	if config.EvictionPolicy == "" {
+		config.EvictionPolicy = "lru"
+	}
+	if config.MemoryPressureThreshold <= 0 || config.MemoryPressureThreshold > 1 {
+		config.MemoryPressureThreshold = 0.8
+	}
+
+	storage := &MemoryStorage{
 		logger:       logger,
 		correlations: make(map[string]*storedCorrelation),
 		byTrace:      make(map[string][]string),
-		byTime:       &timeIndex{entries: make([]timeEntry, 0)},
+		byTime:       &timeIndex{entries: make([]timeEntry, 0), maxEntries: config.MaxTimeEntries},
+		config:       config,
 		maxSize:      config.MaxSize,
 		maxAge:       config.MaxAge,
 	}
+
+	// Start memory pressure monitoring
+	go storage.monitorMemoryPressure(config.MemoryPressureThreshold)
+
+	return storage
 }
 
 // Store saves a correlation result with bounds checking
@@ -102,19 +140,19 @@ func (m *MemoryStorage) Store(ctx context.Context, result *correlation.Correlati
 	m.correlations[result.ID] = stored
 	m.stores++
 
-	// Update trace index with bounds checking
+	// Update trace index with configurable bounds
 	if result.TraceID != "" {
 		correlationIDs := m.byTrace[result.TraceID]
 		correlationIDs = append(correlationIDs, result.ID)
 
-		// Bound the number of correlations per trace to prevent unbounded growth
-		const maxCorrelationsPerTrace = 1000
-		if len(correlationIDs) > maxCorrelationsPerTrace {
+		// Use configurable limit from storage config
+		maxPerTrace := m.getMaxCorrelationsPerTrace()
+		if len(correlationIDs) > maxPerTrace {
 			// Keep only the most recent correlations
-			correlationIDs = correlationIDs[len(correlationIDs)-maxCorrelationsPerTrace:]
+			correlationIDs = correlationIDs[len(correlationIDs)-maxPerTrace:]
 			m.logger.Debug("Trimmed trace correlations to bounds",
 				zap.String("trace_id", result.TraceID),
-				zap.Int("max_per_trace", maxCorrelationsPerTrace))
+				zap.Int("max_per_trace", maxPerTrace))
 		}
 		m.byTrace[result.TraceID] = correlationIDs
 	}
@@ -306,9 +344,20 @@ func (m *MemoryStorage) Cleanup(ctx context.Context, olderThan time.Duration) er
 	return nil
 }
 
-// evictOldest removes the oldest correlation (LRU)
+// evictOldest removes correlations based on configured eviction policy
 func (m *MemoryStorage) evictOldest() {
-	// Find least recently accessed
+	switch m.getEvictionPolicy() {
+	case "lfu":
+		m.evictLeastFrequent()
+	case "ttl":
+		m.evictByTTL()
+	default: // "lru"
+		m.evictLeastRecent()
+	}
+}
+
+// evictLeastRecent removes the least recently accessed correlation (LRU)
+func (m *MemoryStorage) evictLeastRecent() {
 	var oldestID string
 	var oldestAccess time.Time
 
@@ -322,6 +371,46 @@ func (m *MemoryStorage) evictOldest() {
 	if oldestID != "" {
 		m.removeCorrelation(oldestID)
 		m.evictions++
+	}
+}
+
+// evictLeastFrequent removes the least frequently accessed correlation (LFU)
+func (m *MemoryStorage) evictLeastFrequent() {
+	var leastID string
+	var leastCount int = -1
+
+	for id, stored := range m.correlations {
+		if leastCount == -1 || stored.accessCount < leastCount {
+			leastID = id
+			leastCount = stored.accessCount
+		}
+	}
+
+	if leastID != "" {
+		m.removeCorrelation(leastID)
+		m.evictions++
+	}
+}
+
+// evictByTTL removes correlations older than MaxAge
+func (m *MemoryStorage) evictByTTL() {
+	cutoff := time.Now().Add(-m.maxAge)
+	toRemove := []string{}
+
+	for id, stored := range m.correlations {
+		if stored.storedAt.Before(cutoff) {
+			toRemove = append(toRemove, id)
+		}
+	}
+
+	for _, id := range toRemove {
+		m.removeCorrelation(id)
+		m.evictions++
+	}
+
+	// If nothing was removed by TTL, fall back to LRU
+	if len(toRemove) == 0 {
+		m.evictLeastRecent()
 	}
 }
 
@@ -366,19 +455,35 @@ func (m *MemoryStorage) removeFromTraceIndex(traceID, correlationID string) {
 	}
 }
 
+// StorageMetrics provides typed metrics for memory storage
+type StorageMetrics struct {
+	CorrelationsStored int     `json:"correlations_stored"`
+	TracesIndexed      int     `json:"traces_indexed"`
+	TotalStores        int64   `json:"total_stores"`
+	TotalRetrievals    int64   `json:"total_retrievals"`
+	TotalEvictions     int64   `json:"total_evictions"`
+	Capacity           int     `json:"capacity"`
+	Utilization        float64 `json:"utilization"`
+}
+
 // GetMetrics returns storage metrics
-func (m *MemoryStorage) GetMetrics() map[string]interface{} {
+func (m *MemoryStorage) GetMetrics() StorageMetrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return map[string]interface{}{
-		"correlations_stored": len(m.correlations),
-		"traces_indexed":      len(m.byTrace),
-		"total_stores":        m.stores,
-		"total_retrievals":    m.retrievals,
-		"total_evictions":     m.evictions,
-		"capacity":            m.maxSize,
-		"utilization":         float64(len(m.correlations)) / float64(m.maxSize) * 100,
+	utilization := float64(0)
+	if m.maxSize > 0 {
+		utilization = float64(len(m.correlations)) / float64(m.maxSize) * 100
+	}
+
+	return StorageMetrics{
+		CorrelationsStored: len(m.correlations),
+		TracesIndexed:      len(m.byTrace),
+		TotalStores:        m.stores,
+		TotalRetrievals:    m.retrievals,
+		TotalEvictions:     m.evictions,
+		Capacity:           m.maxSize,
+		Utilization:        utilization,
 	}
 }
 
@@ -398,12 +503,10 @@ func (ti *timeIndex) add(id string, timestamp time.Time) {
 		return ti.entries[i].timestamp.After(ti.entries[j].timestamp)
 	})
 
-	// Bound the time index to prevent unbounded growth
-	// This should match the maxSize of the main storage
-	const maxTimeEntries = 10000
-	if len(ti.entries) > maxTimeEntries {
+	// Use configured max entries
+	if ti.maxEntries > 0 && len(ti.entries) > ti.maxEntries {
 		// Keep only the most recent entries
-		ti.entries = ti.entries[:maxTimeEntries]
+		ti.entries = ti.entries[:ti.maxEntries]
 	}
 }
 
@@ -431,4 +534,93 @@ func (ti *timeIndex) getRecent(limit int) []timeEntry {
 	result := make([]timeEntry, limit)
 	copy(result, ti.entries[:limit])
 	return result
+}
+
+// Configuration helper methods
+
+func (m *MemoryStorage) getMaxCorrelationsPerTrace() int {
+	if m.config.MaxCorrelationsPerTrace > 0 {
+		return m.config.MaxCorrelationsPerTrace
+	}
+	return 1000 // Default
+}
+
+func (m *MemoryStorage) getEvictionPolicy() string {
+	if m.config.EvictionPolicy != "" {
+		return m.config.EvictionPolicy
+	}
+	return "lru" // Default
+}
+
+// monitorMemoryPressure monitors system memory and triggers eviction if needed
+func (m *MemoryStorage) monitorMemoryPressure(threshold float64) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Check memory pressure
+		if m.isUnderMemoryPressure(threshold) {
+			m.mu.Lock()
+			// Evict 10% of entries when under pressure
+			evictCount := len(m.correlations) / 10
+			if evictCount < 1 {
+				evictCount = 1
+			}
+
+			for i := 0; i < evictCount; i++ {
+				m.evictOldest()
+			}
+
+			m.logger.Warn("Memory pressure detected, evicted correlations",
+				zap.Int("evicted", evictCount),
+				zap.Int("remaining", len(m.correlations)))
+			m.mu.Unlock()
+		}
+	}
+}
+
+// isUnderMemoryPressure checks if storage is using too much memory
+func (m *MemoryStorage) isUnderMemoryPressure(threshold float64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Simple heuristic: check if we're using more than threshold of max capacity
+	utilization := float64(len(m.correlations)) / float64(m.maxSize)
+	return utilization > threshold
+}
+
+// Helper functions for configuration
+
+func getConfigInt(key string, defaultValue int) int {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
+func getConfigDuration(key string, defaultValue time.Duration) time.Duration {
+	if val := os.Getenv(key); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			return d
+		}
+	}
+	return defaultValue
+}
+
+func getConfigString(key, defaultValue string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultValue
+}
+
+func getConfigFloat(key string, defaultValue float64) float64 {
+	if val := os.Getenv(key); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
+	}
+	return defaultValue
 }

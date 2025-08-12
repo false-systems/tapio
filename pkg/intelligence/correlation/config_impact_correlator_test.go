@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/aggregator"
 	"go.uber.org/zap"
 )
 
@@ -24,7 +23,7 @@ func TestNewConfigImpactCorrelator(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, correlator)
 		assert.Equal(t, "config-impact-correlator", correlator.Name())
-		assert.Equal(t, "1.0.0", correlator.Version())
+		assert.Equal(t, DefaultCorrelatorVersion, correlator.Version())
 	})
 
 	t.Run("nil store", func(t *testing.T) {
@@ -253,25 +252,8 @@ func TestConfigImpactCorrelator_HelperFunctions(t *testing.T) {
 		assert.Equal(t, "", correlator.getEntityName(event))
 	})
 
-	t.Run("interfaceSliceToStringSlice", func(t *testing.T) {
-		// Test normal conversion
-		input := []interface{}{"one", "two", "three"}
-		result := correlator.interfaceSliceToStringSlice(input)
-		assert.Equal(t, []string{"one", "two", "three"}, result)
-
-		// Test mixed types (only strings extracted)
-		input = []interface{}{"one", 2, "three", true}
-		result = correlator.interfaceSliceToStringSlice(input)
-		assert.Equal(t, []string{"one", "three"}, result)
-
-		// Test nil input
-		result = correlator.interfaceSliceToStringSlice(nil)
-		assert.Empty(t, result)
-
-		// Test non-slice input
-		result = correlator.interfaceSliceToStringSlice("not a slice")
-		assert.Empty(t, result)
-	})
+	// Skipping interfaceSliceToStringSlice test - method removed during refactoring
+	// This functionality is now handled internally
 }
 
 // Test confidence calculation
@@ -281,15 +263,15 @@ func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
 	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
 	t.Run("no findings", func(t *testing.T) {
-		findings := []aggregator.Finding{}
+		findings := []Finding{}
 		confidence := correlator.calculateConfidence(findings)
 		assert.Equal(t, 0.0, confidence)
 	})
 
 	t.Run("single critical finding", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.9,
 			},
 		}
@@ -298,13 +280,13 @@ func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
 	})
 
 	t.Run("multiple findings boost", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityHigh,
+				Severity:   domain.EventSeverityHigh,
 				Confidence: 0.8,
 			},
 			{
-				Severity:   aggregator.SeverityMedium,
+				Severity:   domain.EventSeverityMedium,
 				Confidence: 0.7,
 			},
 		}
@@ -317,13 +299,13 @@ func TestConfigImpactCorrelator_CalculateConfidence(t *testing.T) {
 	})
 
 	t.Run("confidence capped at 1.0", func(t *testing.T) {
-		findings := []aggregator.Finding{
+		findings := []Finding{
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.95,
 			},
 			{
-				Severity:   aggregator.SeverityCritical,
+				Severity:   domain.EventSeverityCritical,
 				Confidence: 0.95,
 			},
 		}
@@ -338,10 +320,8 @@ func TestConfigImpactCorrelator_GraphCorrelatorInterface(t *testing.T) {
 	logger := zap.NewNop()
 	correlator, _ := NewConfigImpactCorrelator(mockStore, logger)
 
-	// Test SetGraphClient
-	newMockStore := &MockGraphStore{}
-	correlator.SetGraphClient(newMockStore)
-	assert.Equal(t, newMockStore, correlator.graphStore)
+	// SetGraphClient no longer needed - graphStore is injected via constructor
+	// The graphStore field is now immutable after construction
 
 	// Test PreloadGraph
 	ctx := context.Background()

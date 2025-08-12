@@ -2,6 +2,7 @@
 // Security monitoring eBPF program - privilege escalation, kernel modules, process injection
 
 #include "../../../bpf_common/vmlinux_minimal.h"
+#include "../../../bpf_common/helpers.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -208,17 +209,18 @@ int trace_commit_creds(struct pt_regs *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Try to read new credentials from first argument
-    struct cred *new_creds = NULL;
-    unsigned long arg1 = 0;
-    bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI
-    bpf_probe_read(&new_creds, sizeof(new_creds), (void *)arg1);
+    // Try to read new credentials from first argument using correct helper
+    void *cred_ptr = (void *)get_kprobe_func_arg(ctx, 0);
     
-    if (new_creds) {
-        bpf_probe_read(&event->privilege_change.new_uid, sizeof(__u32), &new_creds->uid);
-        bpf_probe_read(&event->privilege_change.new_gid, sizeof(__u32), &new_creds->gid);
-        // Read capabilities if available
-        // event->privilege_change.capabilities = new_creds->cap_effective;
+    if (cred_ptr) {
+        struct cred *new_creds = NULL;
+        bpf_probe_read_kernel(&new_creds, sizeof(new_creds), &cred_ptr);
+        if (new_creds) {
+            BPF_CORE_READ_INTO(&event->privilege_change.new_uid, new_creds, uid.val);
+            BPF_CORE_READ_INTO(&event->privilege_change.new_gid, new_creds, gid.val);
+            // Read capabilities if available
+            // BPF_CORE_READ_INTO(&event->privilege_change.capabilities, new_creds, cap_effective);
+        }
     }
     
     __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
@@ -311,18 +313,19 @@ int trace_ptrace_attach(struct pt_regs *ctx)
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
     // Extract target task from ptrace_attach first argument using architecture-independent method
-    struct task_struct *target_task = NULL;
-    unsigned long arg1 = 0;
+    // Read target task pointer from first argument using correct helper
+    void *task_ptr = (void *)get_kprobe_func_arg(ctx, 0);
     
-    // Read first argument from registers (works across architectures)
-    int ret = bpf_probe_read_kernel(&arg1, sizeof(arg1), (void *)((char *)ctx + 112)); // x86_64 RDI offset
-    if (ret == 0) {
-        bpf_probe_read_kernel(&target_task, sizeof(target_task), (void *)arg1);
-    }
-    
-    if (target_task) {
-        event->target_pid = BPF_CORE_READ(target_task, pid);
-        bpf_core_read_str(event->injection_info.target_comm, sizeof(event->injection_info.target_comm), &target_task->comm);
+    if (task_ptr) {
+        struct task_struct *target_task = NULL;
+        bpf_probe_read_kernel(&target_task, sizeof(target_task), &task_ptr);
+        if (target_task) {
+            BPF_CORE_READ_INTO(&event->target_pid, target_task, pid);
+            bpf_core_read_str(event->injection_info.target_comm, sizeof(event->injection_info.target_comm), &target_task->comm);
+        } else {
+            event->target_pid = 0;
+            __builtin_memcpy(event->injection_info.target_comm, "unknown", 7);
+        }
     } else {
         event->target_pid = 0;
         __builtin_memcpy(event->injection_info.target_comm, "unknown", 7);

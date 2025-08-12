@@ -13,18 +13,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
 func TestCgroupIDExtraction(t *testing.T) {
 	tests := []struct {
 		name         string
-		setupFunc    func(t *testing.T) (*Collector, func())
-		validateFunc func(t *testing.T, collector *Collector, cgroupID uint64)
+		setupFunc    func(t *testing.T) (*ModularCollector, func())
+		validateFunc func(t *testing.T, collector *ModularCollector, cgroupID uint64)
 	}{
 		{
 			name: "Real container cgroup ID extraction",
-			setupFunc: func(t *testing.T) (*Collector, func()) {
-				collector, err := NewCollector("test-cgroup")
+			setupFunc: func(t *testing.T) (*ModularCollector, func()) {
+				collector, err := NewModularCollector("test-cgroup")
 				require.NoError(t, err)
 
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -41,7 +42,7 @@ func TestCgroupIDExtraction(t *testing.T) {
 
 				return collector, cleanup
 			},
-			validateFunc: func(t *testing.T, collector *Collector, cgroupID uint64) {
+			validateFunc: func(t *testing.T, collector *ModularCollector, cgroupID uint64) {
 				// Validate that cgroup ID is not zero and not a PID
 				assert.NotZero(t, cgroupID, "Cgroup ID should not be zero")
 
@@ -92,8 +93,12 @@ func TestCgroupIDExtraction(t *testing.T) {
 						if rawEvent.Metadata["pid"] == fmt.Sprintf("%d", currentPID) {
 							// Parse the kernel event from raw data
 							if len(rawEvent.Data) >= int(unsafe.Sizeof(KernelEvent{})) {
-								event := *(*KernelEvent)(unsafe.Pointer(&rawEvent.Data[0]))
-								events = append(events, event)
+								safeParser := collectors.NewSafeParser()
+								event, err := collectors.SafeCast[KernelEvent](safeParser, rawEvent.Data)
+								require.NoError(t, err)
+
+								events = append(events, *event)
+
 							}
 						}
 					case <-timeout:
@@ -113,8 +118,8 @@ func TestCgroupIDExtraction(t *testing.T) {
 		},
 		{
 			name: "Cgroup ID vs PID validation",
-			setupFunc: func(t *testing.T) (*Collector, func()) {
-				collector, err := NewCollector("test-pid-validation")
+			setupFunc: func(t *testing.T) (*ModularCollector, func()) {
+				collector, err := NewModularCollector("test-pid-validation")
 				require.NoError(t, err)
 
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -131,7 +136,7 @@ func TestCgroupIDExtraction(t *testing.T) {
 
 				return collector, cleanup
 			},
-			validateFunc: func(t *testing.T, collector *Collector, cgroupID uint64) {
+			validateFunc: func(t *testing.T, collector *ModularCollector, cgroupID uint64) {
 				// Get current process cgroup information from /proc
 				currentPID := os.Getpid()
 				cgroupPath := fmt.Sprintf("/proc/%d/cgroup", currentPID)
@@ -220,7 +225,7 @@ func TestCgroupIDExtraction(t *testing.T) {
 }
 
 func TestCgroupIDCorrelation(t *testing.T) {
-	collector, err := NewCollector("test-correlation")
+	collector, err := NewModularCollector("test-correlation")
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -262,7 +267,7 @@ func TestCgroupIDCorrelation(t *testing.T) {
 }
 
 func TestCgroupIDUniqueness(t *testing.T) {
-	collector, err := NewCollector("test-uniqueness")
+	collector, err := NewModularCollector("test-uniqueness")
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -342,7 +347,7 @@ func TestCgroupIDUniqueness(t *testing.T) {
 }
 
 func BenchmarkCgroupIDExtraction(b *testing.B) {
-	collector, err := NewCollector("bench-cgroup")
+	collector, err := NewModularCollector("bench-cgroup")
 	if err != nil {
 		b.Skip("Cannot create collector")
 	}
