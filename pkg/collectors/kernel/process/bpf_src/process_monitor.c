@@ -264,9 +264,13 @@ int trace_process_exec(void *ctx)
     // Fill exec info
     __builtin_memset(&event->exec_info, 0, sizeof(event->exec_info));
     
-    // Get parent PID and TGID
-    bpf_core_read(&event->exec_info.ppid, sizeof(__u32), &task->parent);
-    bpf_core_read(&event->exec_info.tgid, sizeof(__u32), &task->tgid);
+    // Get parent PID and TGID correctly
+    struct task_struct *parent = NULL;
+    BPF_CORE_READ_INTO(&parent, task, real_parent);
+    if (parent) {
+        BPF_CORE_READ_INTO(&event->exec_info.ppid, parent, tgid);
+    }
+    BPF_CORE_READ_INTO(&event->exec_info.tgid, task, tgid);
     
     // Get process start time
     event->exec_info.start_time = event->timestamp;

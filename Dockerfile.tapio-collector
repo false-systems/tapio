@@ -1,0 +1,205 @@
+# Production Dockerfile for Tapio Collector with eBPF Support
+# Multi-stage build for optimized production image with all eBPF dependencies
+
+ARG GO_VERSION=1.24
+ARG KERNEL_VERSION=6.8
+
+# =====================================================
+# Stage 1: eBPF Development Environment with Kernel Headers
+# =====================================================
+FROM ubuntu:24.04 AS ebpf-builder
+
+# Install eBPF development dependencies
+RUN apt-get update && apt-get install -y \
+    # Core build tools
+    build-essential \
+    clang \
+    llvm \
+    # eBPF toolchain
+    libbpf-dev \
+    bpftool \
+    # Linux kernel headers (multiple versions for compatibility)
+    linux-headers-generic \
+    linux-headers-$(uname -r) || true \
+    linux-libc-dev \
+    # Additional build dependencies  
+    pkg-config \
+    libelf-dev \
+    zlib1g-dev \
+    # Git for go generate
+    git \
+    # Cleanup cache
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify eBPF toolchain
+RUN clang --version && llvm-config --version && bpftool version
+
+# Set up build environment variables
+ENV BPF_CLANG=clang
+ENV BPF_CFLAGS="-O2 -g -Wall -Werror"
+
+WORKDIR /build
+
+# =====================================================
+# Stage 2: Go Build Environment with eBPF Compilation
+# =====================================================
+FROM ebpf-builder AS go-builder
+
+# Install Go
+ARG GO_VERSION
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
+# Verify Go installation
+RUN go version
+
+# Set Go environment
+ENV GO111MODULE=on
+ENV CGO_ENABLED=1
+ENV GOOS=linux
+
+# Copy Go modules first for better caching
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Generate eBPF bytecode for all collectors
+# This compiles the C eBPF programs into Go-embedded bytecode
+RUN echo "Generating eBPF programs..." && \
+    find pkg/collectors -name "generate.go" -exec dirname {} \; | sort -u | while read dir; do \
+        echo "Generating eBPF for $dir"; \
+        cd "$dir" && go generate -v .; \
+        cd /build; \
+    done
+
+# Verify eBPF object files were generated
+RUN echo "Verifying eBPF object files:" && \
+    find pkg/collectors -name "*.o" -exec ls -la {} \; | head -10
+
+# Build the tapio-collector binary
+RUN echo "Building tapio-collector binary..." && \
+    go build -v \
+        -ldflags="-w -s -X 'github.com/yairfalse/tapio/pkg/version.Version=v1.0.0-production' \
+                  -X 'github.com/yairfalse/tapio/pkg/version.GitCommit=$(git rev-parse --short HEAD || echo unknown)' \
+                  -X 'github.com/yairfalse/tapio/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+        -o bin/tapio-collector \
+        ./cmd/tapio-collector
+
+# Verify the binary was built successfully
+RUN ls -la bin/tapio-collector && file bin/tapio-collector
+
+# Test binary execution (version check)
+RUN ./bin/tapio-collector --version || echo "Note: Binary may require runtime dependencies"
+
+# =====================================================
+# Stage 3: Minimal Runtime Image with eBPF Support
+# =====================================================
+FROM ubuntu:24.04 AS runtime
+
+# Install minimal runtime dependencies for eBPF
+RUN apt-get update && apt-get install -y \
+    # Core utilities
+    ca-certificates \
+    curl \
+    # eBPF runtime libraries
+    libbpf1 \
+    libelf1 \
+    # Kernel tracing support
+    bpftool \
+    # Network utilities for debugging
+    iproute2 \
+    iputils-ping \
+    # Process utilities
+    procps \
+    # Clean up
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security (will be overridden in K8s with privileged mode)
+RUN groupadd -g 65532 tapio && \
+    useradd -u 65532 -g tapio -s /bin/bash -d /home/tapio tapio
+
+# Create directories
+RUN mkdir -p /app /etc/tapio /var/log/tapio && \
+    chown -R tapio:tapio /app /etc/tapio /var/log/tapio
+
+WORKDIR /app
+
+# Copy the compiled binary from builder stage
+COPY --from=go-builder /build/bin/tapio-collector ./tapio-collector
+
+# Make binary executable
+RUN chmod +x tapio-collector
+
+# Copy configuration templates
+COPY --from=go-builder /build/config/ /etc/tapio/
+
+# Verify binary works
+RUN ./tapio-collector --version
+
+# Create entrypoint script
+RUN cat > entrypoint.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Starting Tapio Collector"
+echo "Version: $(./tapio-collector --version)"
+echo "Node: ${NODE_NAME:-unknown}"
+echo "Pod: ${POD_NAME:-unknown}"
+echo "Namespace: ${POD_NAMESPACE:-unknown}"
+
+# Check eBPF filesystem
+if [ -d "/sys/fs/bpf" ]; then
+    echo "BPF filesystem mounted at /sys/fs/bpf"
+else
+    echo "WARNING: BPF filesystem not mounted"
+fi
+
+# Check for required capabilities (in privileged mode these should be available)
+echo "Checking capabilities..."
+if [ -r "/proc/self/status" ]; then
+    grep "Cap" /proc/self/status || true
+fi
+
+# List available collectors
+echo "Available collectors:"
+./tapio-collector --list-collectors || true
+
+# Start the collector with provided arguments or default config
+echo "Starting collector with args: $@"
+exec ./tapio-collector "$@"
+EOF
+
+RUN chmod +x entrypoint.sh
+
+# Security hardening
+RUN chown -R tapio:tapio /app
+
+# Health check script
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+# Default user (will be overridden in K8s DaemonSet with root for eBPF)
+USER tapio
+
+# Expose ports
+EXPOSE 8080 9090
+
+# Default configuration path
+ENV TAPIO_CONFIG_FILE=/etc/tapio/config.yaml
+
+# Default entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
+
+# Default command
+CMD ["--config", "/etc/tapio/config.yaml", "--log-level", "info"]
+
+# Metadata
+LABEL maintainer="Tapio Team"
+LABEL version="v1.0.0-production"
+LABEL description="Tapio eBPF-based Kubernetes observability collector"
+LABEL org.opencontainers.image.source="https://github.com/yairfalse/tapio"
+LABEL org.opencontainers.image.description="Production-ready eBPF collector for Kubernetes monitoring"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
