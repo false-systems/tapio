@@ -1,271 +1,126 @@
-//go:build integration
-// +build integration
-
 package cni
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
-// Integration tests that require file system access
-// Run with: go test -tags=integration ./pkg/collectors/cni/...
-
-func TestCollectorFileWatching(t *testing.T) {
-	// Create temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "cni-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Create test CNI config directory
-	cniDir := filepath.Join(tempDir, "cni", "net.d")
-	err = os.MkdirAll(cniDir, 0755)
-	require.NoError(t, err)
-
-	config := collectors.DefaultCollectorConfig()
-	collector, err := NewCollector(config)
-	require.NoError(t, err)
-
-	// Override the strategy to watch our test directory
-	c := collector.(*Collector)
-	c.detectedCNI = "test"
-	c.strategy = &testStrategy{watchPath: cniDir}
-
-	ctx := context.Background()
-	err = collector.Start(ctx)
-	require.NoError(t, err)
-	defer collector.Stop()
-
-	// Create a test file
-	testFile := filepath.Join(cniDir, "10-test.conf")
-	err = os.WriteFile(testFile, []byte(`{"cniVersion": "0.4.0", "name": "test"}`), 0644)
-	require.NoError(t, err)
-
-	// Should receive file creation event
-	timeout := time.After(2 * time.Second)
-	eventReceived := false
-
-	for !eventReceived {
-		select {
-		case event := <-collector.Events():
-			var data map[string]interface{}
-			err := json.Unmarshal(event.Data, &data)
-			require.NoError(t, err)
-
-			if data["file"] != nil && data["op"] != nil {
-				eventReceived = true
-				assert.Equal(t, "cni", event.Type)
-				assert.Equal(t, "file_watch", event.Metadata["source"])
-				assert.Contains(t, data["file"].(string), "10-test.conf")
-			}
-		case <-timeout:
-			t.Fatal("timeout waiting for file event")
-		}
-	}
-}
-
-func TestCollectorWithRealCNIDetection(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping K8s integration test in CI")
-	}
-
-	config := collectors.DefaultCollectorConfig()
-	collector, err := NewCollector(config)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	err = collector.Start(ctx)
-
-	// If we can't connect to K8s, skip the test
-	if err != nil && contains(err.Error(), "failed to detect CNI") {
-		t.Skip("Cannot connect to Kubernetes cluster")
-	}
-	require.NoError(t, err)
-	defer collector.Stop()
-
-	// Check what CNI was detected
-	c := collector.(*Collector)
-	t.Logf("Detected CNI: %s", c.detectedCNI)
-
-	// Should receive at least heartbeat events
-	select {
-	case event := <-collector.Events():
-		assert.Equal(t, "cni", event.Type)
-		assert.Equal(t, c.detectedCNI, event.Metadata["cni_plugin"])
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for event")
-	}
-}
-
-func TestCollectorLogMonitoring(t *testing.T) {
-	// Create temporary log directory
-	tempDir, err := os.MkdirTemp("", "cni-logs-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	logFile := filepath.Join(tempDir, "cni.log")
-
-	config := collectors.DefaultCollectorConfig()
-	collector, err := NewCollector(config)
-	require.NoError(t, err)
-
-	// Override strategy to watch our test log
-	c := collector.(*Collector)
-	c.detectedCNI = "test"
-	c.strategy = &testStrategy{
-		logPath:   logFile,
-		watchPath: tempDir,
-	}
-
-	ctx := context.Background()
-	err = collector.Start(ctx)
-	require.NoError(t, err)
-	defer collector.Stop()
-
-	// Write to log file
-	err = os.WriteFile(logFile, []byte("CNI ADD operation completed\n"), 0644)
-	require.NoError(t, err)
-
-	// Should detect log file creation
-	timeout := time.After(2 * time.Second)
-	select {
-	case event := <-collector.Events():
-		assert.Equal(t, "cni", event.Type)
-		// Event could be either file watch or log related
-		assert.Contains(t, []string{"file_watch", "heartbeat"}, event.Metadata["source"])
-	case <-timeout:
-		// It's ok if we just get heartbeats in this timeframe
-		t.Log("No file events received, only heartbeats expected")
-	}
-}
-
-// Test helper strategy
-type testStrategy struct {
-	logPath   string
-	watchPath string
-}
-
-func (s *testStrategy) GetName() string {
-	return "test"
-}
-
-func (s *testStrategy) GetLogPaths() []string {
-	if s.logPath != "" {
-		return []string{s.logPath}
-	}
-	return []string{"/tmp/test-cni.log"}
-}
-
-func (s *testStrategy) GetWatchPaths() []string {
-	if s.watchPath != "" {
-		return []string{s.watchPath}
-	}
-	return []string{"/tmp/test-cni/"}
-}
-
-// Stress test with rapid file changes
-func TestCollectorStressFileChanges(t *testing.T) {
+func TestCollectorIntegration(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping stress test in short mode")
+		t.Skip("Skipping integration test in short mode")
 	}
 
-	tempDir, err := os.MkdirTemp("", "cni-stress-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	setupOTELForTesting(t)
 
-	config := collectors.DefaultCollectorConfig()
-	config.BufferSize = 1000
-	collector, err := NewCollector(config)
-	require.NoError(t, err)
-
-	c := collector.(*Collector)
-	c.detectedCNI = "stress-test"
-	c.strategy = &testStrategy{watchPath: tempDir}
-
-	ctx := context.Background()
-	err = collector.Start(ctx)
-	require.NoError(t, err)
-	defer collector.Stop()
-
-	// Create many files rapidly
-	fileCount := 100
-	for i := 0; i < fileCount; i++ {
-		filename := filepath.Join(tempDir, fmt.Sprintf("test-%d.conf", i))
-		err := os.WriteFile(filename, []byte(fmt.Sprintf(`{"id": %d}`, i)), 0644)
-		require.NoError(t, err)
-
-		// Small delay to avoid overwhelming the watcher
-		if i%10 == 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
+	collector, err := NewCollector("integration-cni")
+	if err != nil {
+		t.Fatalf("Failed to create collector: %v", err)
 	}
 
-	// Consume events
-	eventCount := 0
-	timeout := time.After(5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-consumeLoop:
-	for {
-		select {
-		case event := <-collector.Events():
-			if event.Metadata["source"] == "file_watch" {
-				eventCount++
-			}
-			// Don't require all events - some may be dropped
-			if eventCount >= fileCount/2 {
-				break consumeLoop
-			}
-		case <-timeout:
-			break consumeLoop
-		}
+	if err := collector.Start(ctx); err != nil {
+		t.Fatalf("Failed to start collector: %v", err)
 	}
 
-	t.Logf("Received %d file events out of %d files created", eventCount, fileCount)
-	assert.Greater(t, eventCount, 0, "Should receive some file events")
-}
+	// Let it run for a short time
+	time.Sleep(100 * time.Millisecond)
 
-// Test collector behavior with invalid watcher paths
-func TestCollectorInvalidPaths(t *testing.T) {
-	config := collectors.DefaultCollectorConfig()
-	collector, err := NewCollector(config)
-	require.NoError(t, err)
-
-	c := collector.(*Collector)
-	c.detectedCNI = "invalid-test"
-	c.strategy = &testStrategy{
-		watchPath: "/this/path/does/not/exist/at/all",
-		logPath:   "/another/invalid/path/log.txt",
+	if !collector.IsHealthy() {
+		t.Error("Collector should be healthy during operation")
 	}
 
-	ctx := context.Background()
-	// Should start successfully even with invalid paths
-	err = collector.Start(ctx)
-	require.NoError(t, err)
-	defer collector.Stop()
+	// Test graceful shutdown
+	if err := collector.Stop(); err != nil {
+		t.Fatalf("Failed to stop collector: %v", err)
+	}
 
-	// Should still be healthy
-	assert.True(t, collector.IsHealthy())
-
-	// Should still emit heartbeat events
+	// Verify channel is closed
 	select {
-	case event := <-collector.Events():
-		assert.Equal(t, "cni", event.Type)
-		assert.Equal(t, "heartbeat", event.Metadata["source"])
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for heartbeat")
+	case _, ok := <-collector.Events():
+		if ok {
+			t.Error("Events channel should be closed after stop")
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Channel might already be drained
 	}
 }
 
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr
+func TestCollectorEventGeneration(t *testing.T) {
+	setupOTELForTesting(t)
+
+	collector, err := NewCollector("event-test")
+	if err != nil {
+		t.Fatalf("Failed to create collector: %v", err)
+	}
+
+	// Test various event types
+	eventTypes := []string{
+		"netns_create",
+		"netns_enter",
+		"netns_exit",
+	}
+
+	for _, eventType := range eventTypes {
+		data := map[string]string{
+			"pid":        "1234",
+			"comm":       "test-process",
+			"netns_path": "/var/run/netns/test",
+		}
+
+		event := collector.createEvent(eventType, data)
+
+		if event.Type != "cni" {
+			t.Errorf("Expected event type 'cni', got '%s'", event.Type)
+		}
+
+		if event.Metadata["event"] != eventType {
+			t.Errorf("Expected event metadata '%s', got '%s'", eventType, event.Metadata["event"])
+		}
+
+		if event.TraceID == "" || event.SpanID == "" {
+			t.Error("Event should have trace and span IDs")
+		}
+	}
+}
+
+func TestCollectorEdgeCases(t *testing.T) {
+	setupOTELForTesting(t)
+
+	collector, err := NewCollector("edge-test")
+	if err != nil {
+		t.Fatalf("Failed to create collector: %v", err)
+	}
+
+	// Test with empty data
+	event := collector.createEvent("test", map[string]string{})
+	if len(event.Data) == 0 {
+		t.Error("Event should have data even when empty")
+	}
+
+	// Test with nil context
+	if err := collector.Start(nil); err == nil {
+		t.Error("Should fail with nil context")
+	}
+
+	// Test double start - start it first time successfully
+	ctx := context.Background()
+	if err := collector.Start(ctx); err != nil {
+		t.Fatalf("Failed to start collector: %v", err)
+	}
+
+	// Test double start - should fail on second start
+	if err := collector.Start(ctx); err == nil {
+		t.Error("Should fail when starting already started collector")
+	}
+
+	if err := collector.Stop(); err != nil {
+		t.Fatalf("Failed first stop: %v", err)
+	}
+
+	if err := collector.Stop(); err != nil {
+		t.Fatalf("Failed second stop: %v", err)
+	}
 }

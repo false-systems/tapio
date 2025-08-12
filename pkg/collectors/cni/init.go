@@ -15,3 +15,4 @@ func init() {
 		log.Printf("CNI collector will not be available")
 	}
 }
+

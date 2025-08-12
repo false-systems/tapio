@@ -1,0 +1,55 @@
+# Test deployment for kubeapi collector
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeapi-collector
+  namespace: tapio-system
+  labels:
+    app: kubeapi-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeapi-collector
+  template:
+    metadata:
+      labels:
+        app: kubeapi-collector
+    spec:
+      serviceAccountName: kubeapi-collector
+      containers:
+      - name: collector
+        image: tapio/collector:test
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: NATS_URL
+          value: "nats://nats-0.nats.tapio:4222"
+        args: ["--nats", "$(NATS_URL)"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubeapi-collector
+  namespace: tapio-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeapi-collector
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeapi-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubeapi-collector
+subjects:
+- kind: ServiceAccount
+  name: kubeapi-collector
+  namespace: tapio-system

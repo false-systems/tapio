@@ -3,172 +3,459 @@ package cni
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/yairfalse/tapio/pkg/collectors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
+	"github.com/yairfalse/tapio/pkg/collectors/config"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
-// Collector implements minimal CNI collection with auto-detection
+// PodInfo contains extracted K8s pod information
+type PodInfo struct {
+	Namespace string
+	PodName   string
+	PodUID    string
+}
+
+// EBPFState represents platform-specific eBPF state
+// This is a minimal abstraction over the actual eBPF implementation
+type EBPFState interface {
+	// IsLoaded returns true if eBPF programs are loaded
+	IsLoaded() bool
+	// LinkCount returns the number of active eBPF links
+	LinkCount() int
+}
+
+// Collector implements minimal CNI monitoring with comprehensive OTEL observability
 type Collector struct {
-	config collectors.CollectorConfig
-	events chan collectors.RawEvent
+	name      string
+	config    *config.CNIConfig
+	events    chan collectors.RawEvent
+	ctx       context.Context
+	cancel    context.CancelFunc
+	healthy   bool
+	ebpfState EBPFState
+	mutex     sync.RWMutex // Protects concurrent access
 
-	// CNI detection
-	detectedCNI string
-	strategy    CNIStrategy
-
-	// K8s client for detection
-	k8sClient *kubernetes.Clientset
-
-	// File watchers
-	watcher *fsnotify.Watcher
-
-	// eBPF support (linux only)
-	ebpfEnabled bool
-	ebpfColl    interface{}   // *ebpf.Collection on linux
-	ebpfReader  interface{}   // *perf.Reader on linux
-	ebpfLinks   []interface{} // []link.Link on linux
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
-	mu      sync.RWMutex
-	healthy bool
+	// OTEL instrumentation
+	tracer             trace.Tracer
+	meter              metric.Meter
+	logger             *zap.Logger
+	eventsProcessed    metric.Int64Counter
+	eventsDropped      metric.Int64Counter
+	ebpfLoadsTotal     metric.Int64Counter
+	ebpfLoadErrors     metric.Int64Counter
+	ebpfAttachTotal    metric.Int64Counter
+	ebpfAttachErrors   metric.Int64Counter
+	collectorHealth    metric.Int64Gauge
+	k8sExtractionTotal metric.Int64Counter
+	k8sExtractionHits  metric.Int64Counter
+	netnsOpsByType     metric.Int64Counter
+	bufferUtilization  metric.Float64Gauge
+	processingLatency  metric.Float64Histogram
 }
 
-// CNIStrategy defines how to collect for specific CNI plugins
-type CNIStrategy interface {
-	GetLogPaths() []string
-	GetWatchPaths() []string
-	GetName() string
-}
+// NewCollector creates a new minimal CNI collector with OTEL observability
+func NewCollector(name string) (*Collector, error) {
+	// Initialize OTEL components
+	tracer := otel.Tracer("cni-collector")
+	meter := otel.Meter("cni-collector")
 
-// NewCollector creates a new CNI collector
-func NewCollector(config collectors.CollectorConfig) (*Collector, error) {
-	// Initialize K8s client for CNI detection
-	k8sConfig, err := rest.InClusterConfig()
+	// Initialize logger
+	logger, err := zap.NewProduction()
 	if err != nil {
-		// Try out-of-cluster config for development
-		kubeconfig := clientcmd.NewDefaultClientConfigLoadingRules().GetDefaultFilename()
-		k8sConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create k8s config: %w", err)
-		}
+		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	k8sClient, err := kubernetes.NewForConfig(k8sConfig)
+	// Create metrics with OTEL standard naming - MANDATORY pattern
+	metricName := "cni"
+	eventsProcessed, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", metricName)),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create k8s client: %w", err)
+		logger.Warn("Failed to create events_processed counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
 	}
 
-	return &Collector{
-		config:    config,
-		events:    make(chan collectors.RawEvent, config.BufferSize),
-		k8sClient: k8sClient,
-		healthy:   true,
-	}, nil
+	eventsDropped, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_dropped_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events_dropped counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	ebpfLoadsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_operations_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total eBPF operations in %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_loads_total counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	ebpfLoadErrors, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_load_errors counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	ebpfAttachTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_attach_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total eBPF attach attempts in %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach_total counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	ebpfAttachErrors, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_attach_errors_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Total eBPF attach errors in %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach_errors counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	collectorHealth, err := meter.Int64Gauge(
+		fmt.Sprintf("%s_collector_healthy", metricName),
+		metric.WithDescription(fmt.Sprintf("%s collector health status (1=healthy, 0=unhealthy)", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create collector_healthy gauge", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	k8sExtractionTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_k8s_extraction_attempts_total", metricName),
+		metric.WithDescription(fmt.Sprintf("K8s metadata extraction attempts in %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction_total counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	k8sExtractionHits, err := meter.Int64Counter(
+		fmt.Sprintf("%s_k8s_extraction_hits_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Successful K8s metadata extractions in %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction_hits counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	netnsOpsByType, err := meter.Int64Counter(
+		fmt.Sprintf("%s_netns_operations_total", metricName),
+		metric.WithDescription(fmt.Sprintf("Network namespace operations in %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create netns_ops_by_type counter", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	bufferUtilization, err := meter.Float64Gauge(
+		fmt.Sprintf("%s_buffer_utilization_ratio", metricName),
+		metric.WithDescription(fmt.Sprintf("Buffer utilization ratio for %s", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create buffer_utilization gauge", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	processingLatency, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", metricName),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", metricName)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing_latency histogram", zap.Error(err))
+		// Continue with nil metric - graceful degradation
+	}
+
+	c := &Collector{
+		name:               name,
+		events:             make(chan collectors.RawEvent, 1000),
+		healthy:            true,
+		tracer:             tracer,
+		meter:              meter,
+		logger:             logger,
+		eventsProcessed:    eventsProcessed,
+		eventsDropped:      eventsDropped,
+		ebpfLoadsTotal:     ebpfLoadsTotal,
+		ebpfLoadErrors:     ebpfLoadErrors,
+		ebpfAttachTotal:    ebpfAttachTotal,
+		ebpfAttachErrors:   ebpfAttachErrors,
+		collectorHealth:    collectorHealth,
+		k8sExtractionTotal: k8sExtractionTotal,
+		k8sExtractionHits:  k8sExtractionHits,
+		netnsOpsByType:     netnsOpsByType,
+		bufferUtilization:  bufferUtilization,
+		processingLatency:  processingLatency,
+	}
+
+	// Record initial health status
+	c.recordHealthStatus()
+
+	return c, nil
 }
 
-// Name returns the collector name
+// NewCollectorWithConfig creates a new CNI collector with type-safe configuration
+func NewCollectorWithConfig(cfg *config.CNIConfig) (*Collector, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Initialize OTEL components
+	tracer := otel.Tracer("cni-collector")
+	meter := otel.Meter("cni-collector")
+
+	// Initialize logger
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger: %w", err)
+	}
+
+	// Create metrics with graceful degradation
+	eventsProcessed, err := meter.Int64Counter(
+		"cni_events_processed_total",
+		metric.WithDescription("Total number of CNI events processed"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events_processed counter", zap.Error(err))
+	}
+
+	eventsDropped, err := meter.Int64Counter(
+		"cni_events_dropped_total",
+		metric.WithDescription("Total number of CNI events dropped due to buffer full"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events_dropped counter", zap.Error(err))
+	}
+
+	ebpfLoadsTotal, err := meter.Int64Counter(
+		"cni_ebpf_loads_total",
+		metric.WithDescription("Total number of eBPF program loads"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_loads_total counter", zap.Error(err))
+	}
+
+	ebpfLoadErrors, err := meter.Int64Counter(
+		"cni_ebpf_load_errors_total",
+		metric.WithDescription("Total number of eBPF program load errors"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_load_errors counter", zap.Error(err))
+	}
+
+	ebpfAttachTotal, err := meter.Int64Counter(
+		"cni_ebpf_attach_total",
+		metric.WithDescription("Total number of eBPF program attach attempts"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach_total counter", zap.Error(err))
+	}
+
+	ebpfAttachErrors, err := meter.Int64Counter(
+		"cni_ebpf_attach_errors_total",
+		metric.WithDescription("Total number of eBPF program attach errors"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach_errors counter", zap.Error(err))
+	}
+
+	collectorHealth, err := meter.Int64Gauge(
+		"cni_collector_healthy",
+		metric.WithDescription("CNI collector health status (1=healthy, 0=unhealthy)"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create collector_healthy gauge", zap.Error(err))
+	}
+
+	k8sExtractionTotal, err := meter.Int64Counter(
+		"cni_k8s_extraction_attempts_total",
+		metric.WithDescription("Total number of K8s metadata extraction attempts"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction_total counter", zap.Error(err))
+	}
+
+	k8sExtractionHits, err := meter.Int64Counter(
+		"cni_k8s_extraction_hits_total",
+		metric.WithDescription("Total number of successful K8s metadata extractions"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction_hits counter", zap.Error(err))
+	}
+
+	netnsOpsByType, err := meter.Int64Counter(
+		"cni_netns_operations_by_type_total",
+		metric.WithDescription("Total number of network namespace operations by type"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create netns_ops_by_type counter", zap.Error(err))
+	}
+
+	bufferUtilization, err := meter.Float64Gauge(
+		"cni_buffer_utilization_percent",
+		metric.WithDescription("Event buffer utilization as percentage"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create buffer_utilization gauge", zap.Error(err))
+	}
+
+	processingLatency, err := meter.Float64Histogram(
+		"cni_processing_latency_seconds",
+		metric.WithDescription("Event processing latency in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing_latency histogram", zap.Error(err))
+	}
+
+	// Create collector with configuration
+	c := &Collector{
+		name:               cfg.Name,
+		config:             cfg,
+		events:             make(chan collectors.RawEvent, cfg.BufferSize),
+		healthy:            true,
+		tracer:             tracer,
+		meter:              meter,
+		logger:             logger,
+		eventsProcessed:    eventsProcessed,
+		eventsDropped:      eventsDropped,
+		ebpfLoadsTotal:     ebpfLoadsTotal,
+		ebpfLoadErrors:     ebpfLoadErrors,
+		ebpfAttachTotal:    ebpfAttachTotal,
+		ebpfAttachErrors:   ebpfAttachErrors,
+		collectorHealth:    collectorHealth,
+		k8sExtractionTotal: k8sExtractionTotal,
+		k8sExtractionHits:  k8sExtractionHits,
+		netnsOpsByType:     netnsOpsByType,
+		bufferUtilization:  bufferUtilization,
+		processingLatency:  processingLatency,
+	}
+
+	logger.Info("CNI collector created",
+		zap.String("name", cfg.Name),
+		zap.Int("buffer_size", cfg.BufferSize),
+		zap.Bool("enable_ebpf", cfg.EnableEBPF),
+	)
+
+	return c, nil
+}
+
+// Name returns collector name
 func (c *Collector) Name() string {
-	return "cni"
+	return c.name
 }
 
-// Start begins collection
+// Start begins collection with OTEL tracing
 func (c *Collector) Start(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+
+	ctx, span := c.tracer.Start(ctx, "cni.collector.start",
+		trace.WithAttributes(
+			attribute.String("collector.name", c.name),
+		),
+	)
+	defer span.End()
 
 	if c.ctx != nil {
-		return errors.New("collector already started")
+		err := fmt.Errorf("collector already started")
+		span.RecordError(err)
+		return err
 	}
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// Detect CNI type
-	if err := c.detectCNI(); err != nil {
-		return fmt.Errorf("failed to detect CNI: %w", err)
+	c.logger.Info("Starting CNI collector",
+		zap.String("collector.name", c.name),
+		zap.String("trace.id", span.SpanContext().TraceID().String()),
+	)
+
+	// Start eBPF monitoring if available
+	if err := c.startEBPF(); err != nil {
+		// Log but don't fail - eBPF is optional
+		c.logger.Warn("Failed to start eBPF monitoring, continuing without it",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		span.AddEvent("ebpf_start_failed", trace.WithAttributes(
+			attribute.String("error", err.Error()),
+		))
 	}
 
-	// Initialize file watcher
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("failed to create watcher: %w", err)
-	}
-	c.watcher = watcher
+	// Start buffer utilization monitoring
+	go c.monitorBufferUtilization()
 
-	// Add paths to watch based on strategy
-	for _, path := range c.strategy.GetWatchPaths() {
-		if err := c.watcher.Add(path); err != nil {
-			// Log but don't fail - path might not exist yet
-			continue
-		}
-	}
-
-	// Try to initialize eBPF (only works on Linux)
-	if err := c.initEBPF(); err != nil {
-		// eBPF is optional enhancement - continue without it
-	}
-
-	// Start collection goroutines
-	goroutineCount := 2
-	if c.ebpfEnabled {
-		goroutineCount = 3
-	}
-
-	c.wg.Add(goroutineCount)
-	go c.watchFiles()
-	go c.watchLogs()
-
-	if c.ebpfEnabled {
-		go c.readEBPFEvents()
-	}
+	span.SetAttributes(attribute.Bool("collector.started", true))
+	c.logger.Info("CNI collector started successfully",
+		zap.String("collector.name", c.name),
+		zap.String("trace.id", span.SpanContext().TraceID().String()),
+	)
 
 	return nil
 }
 
-// Stop gracefully shuts down
+// Stop gracefully shuts down with OTEL tracing
 func (c *Collector) Stop() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	_, span := c.tracer.Start(context.Background(), "cni.collector.stop",
+		trace.WithAttributes(
+			attribute.String("collector.name", c.name),
+		),
+	)
+	defer span.End()
 
-	// Check if already stopped
-	if c.ctx == nil {
-		return nil
-	}
+	c.logger.Info("Stopping CNI collector",
+		zap.String("collector.name", c.name),
+		zap.String("trace.id", span.SpanContext().TraceID().String()),
+	)
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
 	if c.cancel != nil {
 		c.cancel()
 		c.cancel = nil
 	}
 
-	if c.watcher != nil {
-		c.watcher.Close()
-		c.watcher = nil
-	}
+	// Stop eBPF if running
+	c.stopEBPF()
 
-	// Cleanup eBPF resources
-	c.cleanupEBPF()
-
-	c.wg.Wait()
-	
-	// Only close events channel once
+	// Close events channel
 	if c.events != nil {
 		close(c.events)
 		c.events = nil
 	}
 
-	c.ctx = nil
+	c.healthy = false
+	c.recordHealthStatus()
+
+	c.logger.Info("CNI collector stopped",
+		zap.String("collector.name", c.name),
+		zap.String("trace.id", span.SpanContext().TraceID().String()),
+	)
 
 	return nil
 }
@@ -180,213 +467,209 @@ func (c *Collector) Events() <-chan collectors.RawEvent {
 
 // IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return c.healthy
 }
 
-// detectCNI detects the CNI plugin from K8s DaemonSets
-func (c *Collector) detectCNI() error {
-	// Check DaemonSets in kube-system namespace
-	daemonsets, err := c.k8sClient.AppsV1().DaemonSets("kube-system").List(c.ctx, metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list daemonsets: %w", err)
+
+// calculateBufferUtilization calculates current buffer utilization percentage
+func (c *Collector) calculateBufferUtilization() float64 {
+	if c.events == nil {
+		return 0.0
 	}
 
-	// Check for known CNI DaemonSets
-	for _, ds := range daemonsets.Items {
-		name := strings.ToLower(ds.Name)
-
-		// Check containers for CNI images
-		for _, container := range ds.Spec.Template.Spec.Containers {
-			image := strings.ToLower(container.Image)
-
-			// Calico detection
-			if strings.Contains(name, "calico") || strings.Contains(image, "calico") {
-				c.detectedCNI = "calico"
-				c.strategy = &CalicoStrategy{}
-				return nil
-			}
-
-			// Cilium detection
-			if strings.Contains(name, "cilium") || strings.Contains(image, "cilium") {
-				c.detectedCNI = "cilium"
-				c.strategy = &CiliumStrategy{}
-				return nil
-			}
-
-			// Flannel detection
-			if strings.Contains(name, "flannel") || strings.Contains(image, "flannel") {
-				c.detectedCNI = "flannel"
-				c.strategy = &FlannelStrategy{}
-				return nil
-			}
-		}
+	capacity := float64(cap(c.events))
+	if capacity == 0 {
+		return 0.0
 	}
 
-	// Default to generic strategy
-	c.detectedCNI = "generic"
-	c.strategy = &GenericStrategy{}
-	return nil
+	current := float64(len(c.events))
+	return (current / capacity) * 100.0
 }
 
-// watchFiles monitors CNI-related files
-func (c *Collector) watchFiles() {
-	defer c.wg.Done()
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-
-		case event, ok := <-c.watcher.Events:
-			if !ok {
-				return
-			}
-
-			// Create raw event for file changes
-			data, _ := json.Marshal(map[string]interface{}{
-				"event": event.String(),
-				"file":  event.Name,
-				"op":    event.Op.String(),
-			})
-
-			rawEvent := collectors.RawEvent{
-				Timestamp: time.Now(),
-				Type:      "cni",
-				Data:      data,
-				Metadata: map[string]string{
-					"source":     "file_watch",
-					"cni_plugin": c.detectedCNI,
-					"file":       event.Name,
-				},
-			}
-
-			select {
-			case c.events <- rawEvent:
-			case <-c.ctx.Done():
-				return
-			default:
-				// Buffer full, drop event
-			}
+// recordHealthStatus records the current health status to metrics
+func (c *Collector) recordHealthStatus() {
+	if c.collectorHealth != nil {
+		healthValue := int64(0)
+		if c.healthy {
+			healthValue = 1
 		}
+		c.collectorHealth.Record(context.Background(), healthValue,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+			),
+		)
 	}
 }
 
-// watchLogs monitors CNI logs
-func (c *Collector) watchLogs() {
-	defer c.wg.Done()
-
-	// Simple log monitoring - in production would use tail or journal
-	ticker := time.NewTicker(5 * time.Second)
+// monitorBufferUtilization monitors and reports buffer utilization
+func (c *Collector) monitorBufferUtilization() {
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
-
 		case <-ticker.C:
-			// Emit heartbeat event
-			data, _ := json.Marshal(map[string]interface{}{
-				"type":       "heartbeat",
-				"cni_plugin": c.detectedCNI,
-				"timestamp":  time.Now().Unix(),
-			})
-
-			rawEvent := collectors.RawEvent{
-				Timestamp: time.Now(),
-				Type:      "cni",
-				Data:      data,
-				Metadata: map[string]string{
-					"source":     "heartbeat",
-					"cni_plugin": c.detectedCNI,
-				},
-			}
-
-			select {
-			case c.events <- rawEvent:
-			case <-c.ctx.Done():
-				return
-			default:
-				// Buffer full, drop event
+			if c.bufferUtilization != nil {
+				utilization := float64(len(c.events)) / float64(cap(c.events))
+				c.bufferUtilization.Record(context.Background(), utilization,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+					),
+				)
 			}
 		}
 	}
 }
 
-// CNI Strategy implementations
+// createEvent creates a CNI raw event from structured data with OTEL tracing
+func (c *Collector) createEvent(eventType string, data map[string]string) collectors.RawEvent {
+	start := time.Now()
+	ctx, span := c.tracer.Start(context.Background(), "cni.event.create",
+		trace.WithAttributes(
+			attribute.String("event.type", eventType),
+			attribute.String("collector.name", c.name),
+		),
+	)
+	defer span.End()
+	defer func() {
+		if c.processingLatency != nil {
+			duration := time.Since(start).Seconds()
+			c.processingLatency.Record(ctx, duration,
+				metric.WithAttributes(
+					attribute.String("operation", "create_event"),
+					attribute.String("event.type", eventType),
+				),
+			)
+		}
+	}()
 
-// CalicoStrategy for Calico CNI
-type CalicoStrategy struct{}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		// Create error event if marshaling fails
+		errorData := map[string]string{
+			"error": err.Error(),
+			"type":  "marshal_error",
+		}
+		if errorJSON, marshalErr := json.Marshal(errorData); marshalErr != nil {
+			// If we can't marshal error data, use a minimal fallback
+			jsonData = []byte(`{"error":"marshal_failed","type":"marshal_error"}`)
+		} else {
+			jsonData = errorJSON
+		}
+		span.RecordError(err)
+		c.logger.Error("Failed to marshal event data",
+			zap.Error(err),
+			zap.String("event.type", eventType),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+	}
 
-func (s *CalicoStrategy) GetName() string { return "calico" }
+	metadata := map[string]string{
+		"collector": c.name,
+		"event":     eventType,
+	}
 
-func (s *CalicoStrategy) GetLogPaths() []string {
-	return []string{
-		"/var/log/calico/cni/",
-		"/var/log/calico/felix.log",
+	// Extract K8s metadata from CNI data with metrics
+	if netnsPath, ok := data["netns_path"]; ok {
+		if c.k8sExtractionTotal != nil {
+			c.k8sExtractionTotal.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+				),
+			)
+		}
+		if podInfo := c.parseK8sFromNetns(netnsPath); podInfo != nil {
+			if c.k8sExtractionHits != nil {
+				c.k8sExtractionHits.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+					),
+				)
+			}
+			metadata["k8s_kind"] = "Pod"
+			metadata["k8s_uid"] = podInfo.PodUID
+			// Only set if we have values
+			if podInfo.Namespace != "" {
+				metadata["k8s_namespace"] = podInfo.Namespace
+			}
+			if podInfo.PodName != "" {
+				metadata["k8s_name"] = podInfo.PodName
+			}
+			span.SetAttributes(
+				attribute.String("k8s.pod.uid", podInfo.PodUID),
+				attribute.String("k8s.namespace.name", podInfo.Namespace),
+				attribute.String("k8s.pod.name", podInfo.PodName),
+			)
+			// Note: Full pod details would need to be resolved via K8s API
+			// or from a shared pod info cache maintained by other collectors
+		}
+	}
+
+	// Record network namespace operation by type
+	if c.netnsOpsByType != nil {
+		c.netnsOpsByType.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("operation.type", eventType),
+				attribute.String("collector.name", c.name),
+			),
+		)
+	}
+
+	// Generate event with trace context
+	traceID := span.SpanContext().TraceID().String()
+	spanID := span.SpanContext().SpanID().String()
+	if traceID == "00000000000000000000000000000000" {
+		traceID = collectors.GenerateTraceID()
+	}
+	if spanID == "0000000000000000" {
+		spanID = collectors.GenerateSpanID()
+	}
+
+	return collectors.RawEvent{
+		Timestamp: time.Now(),
+		Type:      "cni",
+		Data:      jsonData,
+		Metadata:  metadata,
+		TraceID:   traceID,
+		SpanID:    spanID,
 	}
 }
 
-func (s *CalicoStrategy) GetWatchPaths() []string {
-	return []string{
-		"/etc/cni/net.d/",
-		"/var/lib/calico/",
+// parseK8sFromNetns extracts K8s pod information from network namespace path
+func (c *Collector) parseK8sFromNetns(netnsPath string) *PodInfo {
+	// Common patterns for K8s network namespaces:
+	// 1. /var/run/netns/cni-<uuid>
+	// 2. /proc/<pid>/ns/net where pid belongs to a container
+	// 3. May contain pod UID in the path
+
+	// Try to extract pod UID from CNI netns naming
+	cniPattern := regexp.MustCompile(`cni-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
+	if matches := cniPattern.FindStringSubmatch(netnsPath); len(matches) > 1 {
+		return &PodInfo{
+			PodUID: matches[1],
+			// Namespace and pod name would need to be resolved via K8s API
+			// or from additional context (e.g., eBPF maps)
+		}
 	}
-}
 
-// CiliumStrategy for Cilium CNI
-type CiliumStrategy struct{}
-
-func (s *CiliumStrategy) GetName() string { return "cilium" }
-
-func (s *CiliumStrategy) GetLogPaths() []string {
-	return []string{
-		"/var/run/cilium/cilium.log",
-		"/var/log/cilium-cni.log",
+	// Try to extract from containerd/docker paths
+	if strings.Contains(netnsPath, "kubepods") {
+		// Extract pod UID from cgroup path pattern
+		// /kubepods/besteffort/pod<UID>/...
+		podPattern := regexp.MustCompile(`pod([0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12})`)
+		if matches := podPattern.FindStringSubmatch(netnsPath); len(matches) > 1 {
+			// Convert underscore format to hyphen format
+			podUID := strings.ReplaceAll(matches[1], "_", "-")
+			return &PodInfo{
+				PodUID: podUID,
+			}
+		}
 	}
-}
 
-func (s *CiliumStrategy) GetWatchPaths() []string {
-	return []string{
-		"/etc/cni/net.d/",
-		"/var/run/cilium/",
-	}
-}
-
-// FlannelStrategy for Flannel CNI
-type FlannelStrategy struct{}
-
-func (s *FlannelStrategy) GetName() string { return "flannel" }
-
-func (s *FlannelStrategy) GetLogPaths() []string {
-	return []string{
-		"/var/log/flanneld.log",
-	}
-}
-
-func (s *FlannelStrategy) GetWatchPaths() []string {
-	return []string{
-		"/etc/cni/net.d/",
-		"/run/flannel/",
-	}
-}
-
-// GenericStrategy for unknown CNIs
-type GenericStrategy struct{}
-
-func (s *GenericStrategy) GetName() string { return "generic" }
-
-func (s *GenericStrategy) GetLogPaths() []string {
-	return []string{
-		"/var/log/cni/",
-	}
-}
-
-func (s *GenericStrategy) GetWatchPaths() []string {
-	return []string{
-		"/etc/cni/net.d/",
-		"/var/lib/cni/",
-	}
+	// If we can't parse pod info, return nil
+	return nil
 }

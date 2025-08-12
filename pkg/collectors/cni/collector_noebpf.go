@@ -1,19 +1,21 @@
 //go:build !linux
+// +build !linux
 
 package cni
 
-// Stub implementations for non-Linux systems (macOS with Colima, etc)
+import "fmt"
 
-func (c *Collector) initEBPF() error {
-	c.ebpfEnabled = false
-	return nil
+// startEBPF is a no-op on non-Linux platforms
+func (c *Collector) startEBPF() error {
+	return fmt.Errorf("eBPF monitoring not supported on this platform")
 }
 
+// stopEBPF is a no-op on non-Linux platforms
+func (c *Collector) stopEBPF() {
+	// No-op
+}
+
+// readEBPFEvents is not used on non-Linux platforms
 func (c *Collector) readEBPFEvents() {
-	// No-op on non-Linux
-	c.wg.Done()
-}
-
-func (c *Collector) cleanupEBPF() {
-	// No-op on non-Linux
+	// No-op
 }

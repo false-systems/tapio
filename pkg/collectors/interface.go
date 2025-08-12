@@ -19,6 +19,14 @@ type RawEvent struct {
 
 	// Metadata provides basic context without business logic
 	Metadata map[string]string
+
+	// TraceID is the OpenTelemetry trace identifier for distributed tracing
+	// Format: 32-character lowercase hex string (128-bit value)
+	TraceID string
+
+	// SpanID is the OpenTelemetry span identifier for this specific operation
+	// Format: 16-character lowercase hex string (64-bit value)
+	SpanID string
 }
 
 // Collector defines the minimal interface that all collectors must implement
@@ -61,3 +69,5 @@ func DefaultCollectorConfig() CollectorConfig {
 		Labels:         make(map[string]string),
 	}
 }
+
+// These will be defined by importing config package in each collector's factory

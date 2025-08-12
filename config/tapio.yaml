@@ -1,0 +1,27 @@
+# Tapio Configuration File
+
+# Pipeline service configuration
+pipeline:
+  endpoint: "localhost:50051"
+  timeout: 30
+  retries: 3
+
+# Collectors configuration - applies to ALL collectors
+collectors:
+  # Which collectors to enable
+  enabled:
+    - cni
+    - etcd
+    - kubeapi
+    - systemd
+    - ebpf
+  
+  # Common configuration for all collectors
+  buffer_size: 2000
+  metrics_enabled: true
+  
+  # Labels added to all events
+  labels:
+    cluster: "production"
+    region: "us-west-2"
+    environment: "prod"

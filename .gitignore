@@ -11,6 +11,9 @@ tapio-*
 !tapio-*.go
 server-example
 pattern-tester
+correlation-service
+transformer
+collectors
 
 # Test binary, built with `go test -c`
 *.test
@@ -40,6 +43,7 @@ dist/
 *~
 .vscode/
 *.iml
+.claude/
 
 # OS specific files
 .DS_Store
@@ -72,6 +76,8 @@ proto/gen/
 *bpfel*.o
 *bpfeb*.go
 *bpfeb*.o
+kernelmonitor_bpfel_*.go
+kernelmonitor_bpfel_*.o
 *.o
 
 # Test binaries
@@ -84,3 +90,10 @@ ebpf-tests*
 /dist/
 *.test
 
+
+# Binaries
+cmd/transformer/transformer
+test/cni-test-main
+collectors
+*.o
+*.test

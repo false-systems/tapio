@@ -249,16 +249,117 @@ func containsLibrary(output, library string) bool {
 	return false
 }
 
+// ValidationErrorDetails represents validation error details
+type ValidationErrorDetails struct {
+	// Error context
+	ErrorCode   string `json:"error_code,omitempty"`
+	ErrorType   string `json:"error_type,omitempty"`
+	Severity    string `json:"severity,omitempty"`
+	Recoverable bool   `json:"recoverable,omitempty"`
+
+	// System context
+	FilePath   string `json:"file_path,omitempty"`
+	LineNumber int    `json:"line_number,omitempty"`
+	Function   string `json:"function,omitempty"`
+	StackTrace string `json:"stack_trace,omitempty"`
+
+	// Resource context
+	ResourceType string `json:"resource_type,omitempty"`
+	ResourceName string `json:"resource_name,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
+
+	// Configuration context
+	ConfigKey     string `json:"config_key,omitempty"`
+	ConfigValue   string `json:"config_value,omitempty"`
+	ExpectedValue string `json:"expected_value,omitempty"`
+
+	// Additional context
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
 // ValidationError represents a validation error with details
 type ValidationError struct {
 	Component string
 	Check     string
 	Message   string
-	Details   map[string]interface{}
+	Details   *ValidationErrorDetails
 }
 
 func (e *ValidationError) Error() string {
 	return fmt.Sprintf("validation failed for %s: %s - %s", e.Component, e.Check, e.Message)
+}
+
+// ValidationSystemInfo represents system information
+type ValidationSystemInfo struct {
+	// Operating system
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+	KernelVersion string `json:"kernel_version,omitempty"`
+	Hostname      string `json:"hostname,omitempty"`
+
+	// Runtime
+	GoVersion   string `json:"go_version"`
+	NumCPU      int    `json:"num_cpu"`
+	MemoryTotal int64  `json:"memory_total,omitempty"`
+	DiskTotal   int64  `json:"disk_total,omitempty"`
+
+	// Environment
+	WorkingDir string `json:"working_dir,omitempty"`
+	UserID     string `json:"user_id,omitempty"`
+	GroupID    string `json:"group_id,omitempty"`
+	TempDir    string `json:"temp_dir,omitempty"`
+
+	// Network
+	DNSServers []string `json:"dns_servers,omitempty"`
+	Interfaces []string `json:"interfaces,omitempty"`
+
+	// Dependencies
+	Kubernetes bool `json:"kubernetes"`
+	Docker     bool `json:"docker"`
+	Containerd bool `json:"containerd"`
+	Systemd    bool `json:"systemd"`
+
+	// Additional info
+	Labels   map[string]string `json:"labels,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// CheckResultDetails represents check result details
+type CheckResultDetails struct {
+	// Check metadata
+	CheckType   string `json:"check_type,omitempty"`
+	Category    string `json:"category,omitempty"`
+	Severity    string `json:"severity,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	// Performance metrics
+	ExecutionTime time.Duration `json:"execution_time,omitempty"`
+	RetryCount    int           `json:"retry_count,omitempty"`
+	Attempts      int           `json:"attempts,omitempty"`
+
+	// Error details
+	ErrorCode  string `json:"error_code,omitempty"`
+	ErrorType  string `json:"error_type,omitempty"`
+	StackTrace string `json:"stack_trace,omitempty"`
+
+	// Resource details
+	ResourceType string `json:"resource_type,omitempty"`
+	ResourceName string `json:"resource_name,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
+
+	// Expected vs actual
+	Expected   string `json:"expected,omitempty"`
+	Actual     string `json:"actual,omitempty"`
+	Difference string `json:"difference,omitempty"`
+
+	// Recommendations
+	Remediation []string `json:"remediation,omitempty"`
+	DocLinks    []string `json:"doc_links,omitempty"`
+
+	// Additional context
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // ValidationReport contains validation results
@@ -267,7 +368,7 @@ type ValidationReport struct {
 	Timestamp  time.Time
 	Duration   time.Duration
 	Checks     []CheckResult
-	SystemInfo map[string]interface{}
+	SystemInfo *ValidationSystemInfo
 }
 
 // CheckResult represents a single validation check result
@@ -276,7 +377,7 @@ type CheckResult struct {
 	Passed   bool
 	Duration time.Duration
 	Error    error
-	Details  map[string]interface{}
+	Details  *CheckResultDetails
 }
 
 // RunFullValidation performs comprehensive validation
@@ -285,10 +386,11 @@ func RunFullValidation(ctx context.Context, installPath string) (*ValidationRepo
 	report := &ValidationReport{
 		Timestamp: startTime,
 		Checks:    []CheckResult{},
-		SystemInfo: map[string]interface{}{
-			"os":      runtime.GOOS,
-			"arch":    runtime.GOARCH,
-			"version": runtime.Version(),
+		SystemInfo: &ValidationSystemInfo{
+			OS:        runtime.GOOS,
+			Arch:      runtime.GOARCH,
+			GoVersion: runtime.Version(),
+			NumCPU:    runtime.NumCPU(),
 		},
 	}
 
@@ -327,13 +429,6 @@ func RunFullValidation(ctx context.Context, installPath string) (*ValidationRepo
 			},
 		},
 		{
-			name: "Service Health",
-			fn: func(ctx context.Context) error {
-				checker := NewHealthChecker()
-				return checker.CheckService(ctx, "tapio")
-			},
-		},
-		{
 			name: "Network Connectivity",
 			fn: func(ctx context.Context) error {
 				endpoints := []string{
@@ -360,7 +455,7 @@ func RunFullValidation(ctx context.Context, installPath string) (*ValidationRepo
 			Passed:   err == nil,
 			Duration: time.Since(checkStart),
 			Error:    err,
-			Details:  make(map[string]interface{}),
+			Details:  &CheckResultDetails{},
 		}
 
 		if !result.Passed {

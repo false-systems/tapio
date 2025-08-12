@@ -1,0 +1,65 @@
+nats:
+  # Connection settings
+  url: "nats://localhost:4222"
+  cluster_url: "nats://nats.tapio.svc.cluster.local:4222"
+  
+  # JetStream configuration
+  jetstream:
+    enabled: true
+    
+    # Streams configuration
+    streams:
+      traces:
+        name: "TRACES"
+        subjects: ["traces.>"]
+        retention: "limits"
+        max_age: "24h"
+        storage: "file"
+        replicas: 1
+        max_bytes: "10GB"
+        duplicate_window: "2m"
+      
+      raw_events:
+        name: "RAW_EVENTS" 
+        subjects: ["raw.>"]
+        retention: "limits"
+        max_age: "12h"
+        storage: "file"
+        replicas: 1
+        max_bytes: "5GB"
+        duplicate_window: "1m"
+    
+    # Consumers configuration
+    consumers:
+      correlation_service:
+        name: "correlation-service"
+        stream: "TRACES"
+        durable: true
+        ack_policy: "explicit"
+        deliver_policy: "all"
+        max_deliver: 3
+        ack_wait: "30s"
+        replay_policy: "instant"
+      
+      intelligence_service:
+        name: "intelligence-service"
+        stream: "TRACES"
+        durable: true
+        ack_policy: "explicit"
+        deliver_policy: "all"
+        max_deliver: 3
+        ack_wait: "30s"
+        replay_policy: "instant"
+
+  # Publisher settings
+  publisher:
+    max_pending: 1000
+    max_pub_acks_inflight: 100
+    publish_timeout: "10s"
+    
+  # Subscriber settings  
+  subscriber:
+    max_pending: 1000
+    max_ack_pending: 100
+    pull_max_waiting: 10
+    batch_size: 50

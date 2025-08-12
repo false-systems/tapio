@@ -1,252 +1,371 @@
 //go:build linux
+// +build linux
 
 package cni
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
-	"unsafe"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
-// cniEvent matches the C structure
-type cniEvent struct {
-	PID       uint32
-	TGID      uint32
-	Timestamp uint64
-	Type      uint8
-	_         [7]byte // padding
-	Comm      [16]byte
-	Data      [64]byte
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 cniMonitor ./bpf_src/cni_monitor.c -- -I../bpf_common
+
+
+// eBPF components - implements EBPFState interface
+type ebpfState struct {
+	objs   *cniMonitorObjects
+	links  []link.Link
+	reader *ringbuf.Reader
 }
 
-// initEBPF initializes eBPF programs for CNI syscall tracing
-func (c *Collector) initEBPF() error {
+// IsLoaded returns true if eBPF programs are loaded
+func (s *ebpfState) IsLoaded() bool {
+	return s.objs != nil
+}
+
+// LinkCount returns the number of active eBPF links
+func (s *ebpfState) LinkCount() int {
+	return len(s.links)
+}
+
+// startEBPF initializes eBPF monitoring with comprehensive OTEL instrumentation
+func (c *Collector) startEBPF() error {
+	ctx, span := c.tracer.Start(context.Background(), "cni.ebpf.start",
+		trace.WithAttributes(
+			attribute.String("collector.name", c.name),
+		),
+	)
+	defer span.End()
+
+	c.logger.Info("Starting eBPF monitoring",
+		zap.String("collector.name", c.name),
+		zap.String("trace.id", span.SpanContext().TraceID().String()),
+	)
+
+	// Record eBPF load attempt
+	if c.ebpfLoadsTotal != nil {
+		c.ebpfLoadsTotal.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+			),
+		)
+	}
+
 	// Remove memory limit for eBPF
 	if err := rlimit.RemoveMemlock(); err != nil {
+		if c.ebpfLoadErrors != nil {
+			c.ebpfLoadErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("error.type", "memlock_removal"),
+				),
+			)
+		}
+		span.RecordError(err)
+		c.logger.Error("Failed to remove memlock",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
 		return fmt.Errorf("failed to remove memlock: %w", err)
 	}
 
-	// Parse eBPF program
-	spec, err := ebpf.LoadCollectionSpecFromReader(strings.NewReader(cniTraceProgramSource))
+	// Load eBPF objects
+	objs := &cniMonitorObjects{}
+	if err := loadCniMonitorObjects(objs, nil); err != nil {
+		if c.ebpfLoadErrors != nil {
+			c.ebpfLoadErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("error.type", "object_loading"),
+				),
+			)
+		}
+		span.RecordError(err)
+		c.logger.Error("Failed to load eBPF objects",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		return fmt.Errorf("loading eBPF objects: %w", err)
+	}
+
+	// Create eBPF state
+	state := &ebpfState{
+		objs:  objs,
+		links: make([]link.Link, 0),
+	}
+
+	// Attach to network namespace operations with metrics
+	if c.ebpfAttachTotal != nil {
+		c.ebpfAttachTotal.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+				attribute.String("tracepoint", "sys_enter_setns"),
+			),
+		)
+	}
+	l1, err := link.Tracepoint("syscalls", "sys_enter_setns", objs.TraceSysEnterSetns, nil)
 	if err != nil {
-		// If eBPF not supported, continue without it
-		c.ebpfEnabled = false
-		return nil
+		if c.ebpfAttachErrors != nil {
+			c.ebpfAttachErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("tracepoint", "sys_enter_setns"),
+					attribute.String("error.type", "attach_failure"),
+				),
+			)
+		}
+		objs.Close()
+		span.RecordError(err)
+		c.logger.Error("Failed to attach setns tracepoint",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		return fmt.Errorf("attaching setns tracepoint: %w", err)
 	}
+	state.links = append(state.links, l1)
 
-	// Load collection
-	coll, err := ebpf.NewCollection(spec)
+	// Attach to unshare (new network namespace)
+	if c.ebpfAttachTotal != nil {
+		c.ebpfAttachTotal.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+				attribute.String("tracepoint", "sys_enter_unshare"),
+			),
+		)
+	}
+	l2, err := link.Tracepoint("syscalls", "sys_enter_unshare", objs.TraceSysEnterUnshare, nil)
 	if err != nil {
-		c.ebpfEnabled = false
-		return nil
+		if c.ebpfAttachErrors != nil {
+			c.ebpfAttachErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("tracepoint", "sys_enter_unshare"),
+					attribute.String("error.type", "attach_failure"),
+				),
+			)
+		}
+		state.cleanup()
+		span.RecordError(err)
+		c.logger.Error("Failed to attach unshare tracepoint",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		return fmt.Errorf("attaching unshare tracepoint: %w", err)
 	}
-	c.ebpfColl = coll
+	state.links = append(state.links, l2)
 
-	// Get events map
-	eventsMap, ok := coll.Maps["events"]
-	if !ok {
-		c.ebpfColl.Close()
-		return errors.New("events map not found")
-	}
-
-	// Create perf reader
-	reader, err := perf.NewReader(eventsMap, 4096)
+	// Create ring buffer reader
+	reader, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
-		c.ebpfColl.Close()
-		return fmt.Errorf("failed to create perf reader: %w", err)
+		if c.ebpfLoadErrors != nil {
+			c.ebpfLoadErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("error.type", "ringbuf_creation"),
+				),
+			)
+		}
+		state.cleanup()
+		span.RecordError(err)
+		c.logger.Error("Failed to create ring buffer reader",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		return fmt.Errorf("creating ring buffer reader: %w", err)
 	}
-	c.ebpfReader = reader
+	state.reader = reader
 
-	// Attach programs
-	if err := c.attachEBPFPrograms(coll); err != nil {
-		reader.Close()
-		coll.Close()
-		return err
-	}
+	// Store state and start reading events
+	c.ebpfState = state
+	go c.readEBPFEvents()
 
-	c.ebpfEnabled = true
+	span.SetAttributes(attribute.Bool("ebpf.started", true))
+	c.logger.Info("eBPF monitoring started successfully",
+		zap.String("collector.name", c.name),
+		zap.Int("attached_links", len(state.links)),
+		zap.String("trace.id", span.SpanContext().TraceID().String()),
+	)
+
 	return nil
 }
 
-// attachEBPFPrograms attaches the eBPF programs to their hooks
-func (c *Collector) attachEBPFPrograms(coll *ebpf.Collection) error {
-	// Attach execve tracer
-	if prog, ok := coll.Programs["trace_cni_exec"]; ok {
-		l, err := link.Tracepoint("syscalls", "sys_enter_execve", prog, nil)
-		if err != nil {
-			return fmt.Errorf("failed to attach execve tracer: %w", err)
-		}
-		c.ebpfLinks = append(c.ebpfLinks, l)
+// stopEBPF cleans up eBPF resources
+func (c *Collector) stopEBPF() {
+	if state, ok := c.ebpfState.(*ebpfState); ok && state != nil {
+		state.cleanup()
+		c.ebpfState = nil
 	}
-
-	// Attach clone tracer
-	if prog, ok := coll.Programs["trace_netns_create"]; ok {
-		l, err := link.Tracepoint("syscalls", "sys_enter_clone", prog, nil)
-		if err != nil {
-			return fmt.Errorf("failed to attach clone tracer: %w", err)
-		}
-		c.ebpfLinks = append(c.ebpfLinks, l)
-	}
-
-	// Attach setns tracer
-	if prog, ok := coll.Programs["trace_netns_enter"]; ok {
-		l, err := link.Tracepoint("syscalls", "sys_enter_setns", prog, nil)
-		if err != nil {
-			return fmt.Errorf("failed to attach setns tracer: %w", err)
-		}
-		c.ebpfLinks = append(c.ebpfLinks, l)
-	}
-
-	return nil
 }
 
-// readEBPFEvents reads events from eBPF programs
+// cleanup releases all eBPF resources
+func (s *ebpfState) cleanup() {
+	if s.reader != nil {
+		s.reader.Close()
+	}
+	for _, l := range s.links {
+		l.Close()
+	}
+	if s.objs != nil {
+		s.objs.Close()
+	}
+}
+
+// readEBPFEvents reads events from eBPF ring buffer with comprehensive OTEL tracing
 func (c *Collector) readEBPFEvents() {
-	defer c.wg.Done()
+	ctx, span := c.tracer.Start(context.Background(), "cni.ebpf.read_events",
+		trace.WithAttributes(
+			attribute.String("collector.name", c.name),
+		),
+	)
+	defer span.End()
+
+	c.logger.Info("Starting eBPF event reading loop",
+		zap.String("collector.name", c.name),
+		zap.String("trace.id", span.SpanContext().TraceID().String()),
+	)
+
+	state, ok := c.ebpfState.(*ebpfState)
+	if !ok || state == nil {
+		c.logger.Error("Invalid eBPF state",
+			zap.String("collector.name", c.name),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		span.RecordError(fmt.Errorf("invalid eBPF state"))
+		return
+	}
 
 	for {
 		select {
 		case <-c.ctx.Done():
+			c.logger.Info("eBPF event reading loop stopped due to context cancellation",
+				zap.String("collector.name", c.name),
+				zap.String("trace.id", span.SpanContext().TraceID().String()),
+			)
 			return
 		default:
-			record, err := c.ebpfReader.Read()
-			if err != nil {
-				if errors.Is(err, perf.ErrClosed) {
-					return
-				}
-				continue
-			}
+		}
 
-			// Parse event
-			if len(record.RawSample) < int(unsafe.Sizeof(cniEvent{})) {
-				continue
-			}
-
-			var event cniEvent
-			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
-				continue
-			}
-
-			// Convert to JSON
-			eventType := c.getEventTypeName(event.Type)
-			comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
-			data := string(bytes.TrimRight(event.Data[:], "\x00"))
-
-			// Only process CNI-related events
-			if !c.isCNIRelated(eventType, data, comm) {
-				continue
-			}
-
-			jsonData, _ := json.Marshal(map[string]interface{}{
-				"type":      "syscall",
-				"syscall":   eventType,
-				"pid":       event.PID,
-				"process":   comm,
-				"details":   data,
-				"timestamp": event.Timestamp,
-			})
-
-			rawEvent := collectors.RawEvent{
-				Timestamp: time.Now(),
-				Type:      "cni",
-				Data:      jsonData,
-				Metadata: map[string]string{
-					"source":     "ebpf",
-					"cni_plugin": c.detectedCNI,
-					"syscall":    eventType,
-				},
-			}
-
-			select {
-			case c.events <- rawEvent:
-			case <-c.ctx.Done():
+		start := time.Now()
+		record, err := state.reader.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				c.logger.Info("Ring buffer closed, stopping event reading",
+					zap.String("collector.name", c.name),
+					zap.String("trace.id", span.SpanContext().TraceID().String()),
+				)
 				return
-			default:
-				// Buffer full, drop
 			}
+			c.logger.Debug("Error reading from ring buffer",
+				zap.Error(err),
+				zap.String("collector.name", c.name),
+				zap.String("trace.id", span.SpanContext().TraceID().String()),
+			)
+			continue
+		}
+
+		// Parse the event with error handling
+		var event cniEvent
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
+			c.logger.Debug("Failed to parse eBPF event",
+				zap.Error(err),
+				zap.String("collector.name", c.name),
+				zap.String("trace.id", span.SpanContext().TraceID().String()),
+			)
+			continue
+		}
+
+		// Create event data with type conversion
+		eventData := map[string]string{
+			"timestamp": fmt.Sprintf("%d", event.Timestamp),
+			"pid":       fmt.Sprintf("%d", event.PID),
+			"netns":     fmt.Sprintf("%d", event.Netns),
+			"type":      eventTypeToString(event.EventType),
+			"comm":      nullTerminatedString(event.Comm[:]),
+			"data":      nullTerminatedString(event.Data[:]),
+		}
+
+		// Create event with tracing context
+		rawEvent := c.createEvent("network_namespace", eventData)
+
+		// Try to send event with metrics tracking
+		select {
+		case c.events <- rawEvent:
+			if c.eventsProcessed != nil {
+				c.eventsProcessed.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+						attribute.String("event.type", eventTypeToString(event.EventType)),
+					),
+				)
+			}
+		case <-c.ctx.Done():
+			c.logger.Info("Context cancelled during event processing",
+				zap.String("collector.name", c.name),
+				zap.String("trace.id", span.SpanContext().TraceID().String()),
+			)
+			return
+		default:
+			// Buffer full, drop event and record metric
+			if c.eventsDropped != nil {
+				c.eventsDropped.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.name),
+						attribute.String("reason", "buffer_full"),
+					),
+				)
+			}
+			c.logger.Warn("Dropped event due to full buffer",
+				zap.String("collector.name", c.name),
+				zap.String("event.type", eventTypeToString(event.EventType)),
+				zap.String("trace.id", span.SpanContext().TraceID().String()),
+			)
+		}
+
+		// Record processing latency
+		if c.processingLatency != nil {
+			duration := time.Since(start).Seconds()
+			c.processingLatency.Record(ctx, duration,
+				metric.WithAttributes(
+					attribute.String("operation", "ebpf_event_processing"),
+					attribute.String("event.type", eventTypeToString(event.EventType)),
+				),
+			)
 		}
 	}
 }
 
-// getEventTypeName converts event type to readable name
-func (c *Collector) getEventTypeName(eventType uint8) string {
-	switch eventType {
-	case 0:
-		return "exec"
+// Helper to convert event type to string
+func eventTypeToString(t uint32) string {
+	switch t {
 	case 1:
-		return "netns"
+		return "netns_enter"
 	case 2:
-		return "veth"
+		return "netns_create"
 	case 3:
-		return "route"
+		return "netns_exit"
 	default:
-		return "unknown"
+		return fmt.Sprintf("unknown_%d", t)
 	}
 }
 
-// isCNIRelated checks if the event is CNI-related
-func (c *Collector) isCNIRelated(eventType, data, comm string) bool {
-	// Check if exec contains CNI path
-	if eventType == "exec" && strings.Contains(data, "cni") {
-		return true
-	}
-
-	// Check if process name suggests CNI operation
-	cniProcesses := []string{"calico", "cilium", "flannel", "weave", "cni", "bridge", "host-device"}
-	lowerComm := strings.ToLower(comm)
-	for _, proc := range cniProcesses {
-		if strings.Contains(lowerComm, proc) {
-			return true
+// Helper to convert null-terminated byte array to string
+func nullTerminatedString(b []byte) string {
+	for i, v := range b {
+		if v == 0 {
+			return string(b[:i])
 		}
 	}
-
-	// Network namespace operations from CNI-related processes
-	if eventType == "netns" && c.isLikelyCNIProcess(comm) {
-		return true
-	}
-
-	return false
-}
-
-// isLikelyCNIProcess checks if process is likely CNI-related
-func (c *Collector) isLikelyCNIProcess(comm string) bool {
-	// Common CNI-related processes
-	patterns := []string{
-		"kube", "docker", "containerd", "crio",
-		"calico", "cilium", "flannel", "weave",
-	}
-
-	lower := strings.ToLower(comm)
-	for _, pattern := range patterns {
-		if strings.Contains(lower, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-// cleanupEBPF cleans up eBPF resources
-func (c *Collector) cleanupEBPF() {
-	if c.ebpfReader != nil {
-		c.ebpfReader.Close()
-	}
-
-	for _, l := range c.ebpfLinks {
-		l.Close()
-	}
-
-	if c.ebpfColl != nil {
-		c.ebpfColl.Close()
-	}
+	return string(b)
 }
