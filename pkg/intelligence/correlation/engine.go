@@ -29,6 +29,9 @@ type Engine struct {
 	correlators []Correlator
 	registry    *CorrelatorRegistry
 
+	// Correlation pipeline
+	pipeline *CorrelationPipeline
+
 	// Storage
 	storage Storage
 
@@ -128,6 +131,12 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 		return nil, err
 	}
 
+	// Create correlation pipeline with result handler and error aggregator
+	if err := engine.createCorrelationPipeline(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create correlation pipeline: %w", err)
+	}
+
 	logger.Info("Correlation engine created",
 		zap.Int("correlators", len(engine.correlators)),
 		zap.Strings("enabled", config.EnabledCorrelators),
@@ -152,6 +161,44 @@ func (e *Engine) initializeCorrelators(ctx context.Context, logger *zap.Logger, 
 			zap.String("name", name),
 			zap.String("type", fmt.Sprintf("%T", correlator)))
 	}
+	return nil
+}
+
+// createCorrelationPipeline creates and configures the correlation pipeline
+func (e *Engine) createCorrelationPipeline() error {
+	if len(e.correlators) == 0 {
+		// No correlators available - create a no-op pipeline that just logs
+		e.pipeline = nil
+		e.logger.Warn("No correlators available - pipeline processing disabled")
+		return nil
+	}
+
+	// Create result handler that uses the existing result processing logic
+	resultHandler := NewDefaultResultHandler(e.resultChan, e.logger)
+
+	// Create error aggregator for collecting correlator errors
+	errorAggregator := NewSimpleErrorAggregator(e.logger)
+
+	// Configure pipeline for sequential processing (can be made configurable later)
+	pipelineConfig := &PipelineConfig{
+		Mode:               PipelineModeSequential, // Start with sequential for consistency
+		MaxConcurrency:     len(e.correlators),     // Allow all correlators to run concurrently in parallel mode
+		TimeoutCoordinator: e.timeoutCoordinator,
+		ResultHandler:      resultHandler,
+		ErrorAggregator:    errorAggregator,
+	}
+
+	var err error
+	e.pipeline, err = NewCorrelationPipeline(e.correlators, pipelineConfig, e.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create correlation pipeline: %w", err)
+	}
+
+	e.logger.Debug("Correlation pipeline created",
+		zap.Int("correlators", len(e.correlators)),
+		zap.String("mode", "sequential"),
+	)
+
 	return nil
 }
 
@@ -380,9 +427,28 @@ func (e *Engine) processEvent(event *domain.UnifiedEvent) {
 	// Update processing metrics
 	e.incrementProcessedEvents(ctx)
 
-	// Process through each correlator
-	for _, correlator := range e.correlators {
-		e.processWithCorrelator(ctx, event, correlator)
+	// Process event through correlation pipeline (if available)
+	if e.pipeline != nil {
+		if err := e.pipeline.Process(ctx, event); err != nil {
+			// Log pipeline error but don't stop processing
+			e.logger.Error("Pipeline processing failed",
+				zap.String("event_id", event.ID),
+				zap.Error(err),
+			)
+
+			// Record pipeline error in metrics
+			if e.metrics.ErrorsTotalCtr != nil {
+				e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "pipeline_failed"),
+					attribute.String("event_type", string(event.Type)),
+				))
+			}
+		}
+	} else {
+		// No pipeline available - log and skip processing
+		e.logger.Debug("No correlation pipeline available, skipping event processing",
+			zap.String("event_id", event.ID),
+		)
 	}
 
 	// Monitor processing performance
@@ -401,87 +467,6 @@ func (e *Engine) incrementProcessedEvents(ctx context.Context) {
 			attribute.String("status", "success"),
 		))
 	}
-}
-
-// processWithCorrelator processes an event with a single correlator
-func (e *Engine) processWithCorrelator(parentCtx context.Context, event *domain.UnifiedEvent, correlator Correlator) {
-	// Create span for correlator processing
-	ctx, span := e.tracer.Start(parentCtx, fmt.Sprintf("correlation.%s.process", correlator.Name()))
-	defer span.End()
-
-	// Set span attributes
-	span.SetAttributes(
-		attribute.String("correlator", correlator.Name()),
-		attribute.String("event.id", event.ID),
-	)
-
-	// Use timeout coordinator for correlator processing
-	var results []*CorrelationResult
-	var err error
-
-	correlatorOperation := func() error {
-		timeoutCtx := e.timeoutCoordinator.CreateCorrelatorContext(ctx, correlator.Name())
-		defer timeoutCtx.Cancel()
-
-		results, err = correlator.Process(timeoutCtx.Context, event)
-		return err
-	}
-
-	processErr := e.timeoutCoordinator.WaitWithTimeout(ctx, e.ctx, CorrelatorLevel, correlatorOperation)
-	if processErr != nil {
-		// Determine error type based on timeout coordinator analysis
-		errorType := "correlator_failed"
-		if e.timeoutCoordinator.IsTimeoutError(processErr) {
-			errorType = "correlator_timeout"
-		} else if processErr.Error() == "engine is shutting down" {
-			errorType = "engine_shutdown"
-		}
-
-		// Record error in span
-		span.SetAttributes(
-			attribute.String("error", processErr.Error()),
-			attribute.String("error.type", errorType),
-		)
-		// Record error metrics
-		if e.metrics.ErrorsTotalCtr != nil {
-			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", errorType),
-				attribute.String("correlator", correlator.Name()),
-				attribute.String("event_type", string(event.Type)),
-			))
-		}
-		e.logCorrelatorError(correlator.Name(), event.ID, processErr)
-		return
-	}
-
-	// Set result count in span
-	span.SetAttributes(attribute.Int("results.count", len(results)))
-
-	// Handle results
-	e.handleCorrelatorResults(ctx, results)
-}
-
-// handleCorrelatorResults processes and stores correlation results
-func (e *Engine) handleCorrelatorResults(ctx context.Context, results []*CorrelationResult) {
-	for _, result := range results {
-		if result != nil {
-			e.sendResult(ctx, result)
-
-			// Store result asynchronously
-			if e.storage != nil {
-				e.asyncStoreResult(ctx, result)
-			}
-		}
-	}
-}
-
-// logCorrelatorError logs an error from a correlator
-func (e *Engine) logCorrelatorError(correlatorName, eventID string, err error) {
-	e.logger.Error("Correlator error",
-		zap.String("correlator", correlatorName),
-		zap.String("event_id", eventID),
-		zap.Error(err),
-	)
 }
 
 // checkProcessingPerformance logs if processing was slow
