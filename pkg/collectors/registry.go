@@ -27,15 +27,15 @@ type Registry struct {
 	started bool
 
 	// OTEL instrumentation
-	tracer                   trace.Tracer
-	activeCollectorsGauge    metric.Int64ObservableGauge
-	eventsProcessedCounter   metric.Int64Counter
-	eventQueueDepthGauge     metric.Int64ObservableGauge
-	processingLatencyHist    metric.Float64Histogram
-	collectorHealthGauge     metric.Int64ObservableGauge
-	registrationCounter      metric.Int64Counter
-	unregistrationCounter    metric.Int64Counter
-	startStopDurationHist    metric.Float64Histogram
+	tracer                 trace.Tracer
+	activeCollectorsGauge  metric.Int64ObservableGauge
+	eventsProcessedCounter metric.Int64Counter
+	eventQueueDepthGauge   metric.Int64ObservableGauge
+	processingLatencyHist  metric.Float64Histogram
+	collectorHealthGauge   metric.Int64ObservableGauge
+	registrationCounter    metric.Int64Counter
+	unregistrationCounter  metric.Int64Counter
+	startStopDurationHist  metric.Float64Histogram
 
 	// Metrics state for observables
 	eventsProcessedByCollector map[string]int64
@@ -46,10 +46,10 @@ type Registry struct {
 // NewRegistry creates a new collector registry
 func NewRegistry() *Registry {
 	r := &Registry{
-		collectors:                  make(map[string]Collector),
-		events:                      make(chan RawEvent, 10000), // Large buffer for aggregated events
-		eventsProcessedByCollector:  make(map[string]int64),
-		eventProcessingTimes:        make([]float64, 0, 1000),
+		collectors:                 make(map[string]Collector),
+		events:                     make(chan RawEvent, 10000), // Large buffer for aggregated events
+		eventsProcessedByCollector: make(map[string]int64),
+		eventProcessingTimes:       make([]float64, 0, 1000),
 	}
 
 	// Initialize OTEL instrumentation

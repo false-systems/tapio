@@ -22,7 +22,6 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 cniMonitor ./bpf_src/cni_monitor.c -- -I../bpf_common
 
-
 // eBPF components - implements EBPFState interface
 type ebpfState struct {
 	objs   *cniMonitorObjects

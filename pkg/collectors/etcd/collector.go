@@ -18,7 +18,6 @@ import (
 	"go.uber.org/zap"
 )
 
-
 // Collector implements minimal etcd monitoring
 type Collector struct {
 	name      string
