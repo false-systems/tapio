@@ -30,7 +30,7 @@ func BenchmarkCollectorEventThroughput(b *testing.B) {
 
 	logger := zap.NewNop()
 	collector := newBenchmarkCollector("throughput-test", logger)
-	
+
 	ctx := context.Background()
 	err := collector.Start(ctx)
 	require.NoError(b, err)
@@ -54,7 +54,7 @@ func BenchmarkCollectorEventThroughput(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	// Sequential event processing
 	for i := 0; i < b.N; i++ {
 		select {
@@ -79,7 +79,7 @@ func BenchmarkCollectorConcurrentEventThroughput(b *testing.B) {
 
 	logger := zap.NewNop()
 	collector := newBenchmarkCollector("concurrent-test", logger)
-	
+
 	ctx := context.Background()
 	err := collector.Start(ctx)
 	require.NoError(b, err)
@@ -87,7 +87,7 @@ func BenchmarkCollectorConcurrentEventThroughput(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		eventIndex := 0
 		for pb.Next() {
@@ -102,7 +102,7 @@ func BenchmarkCollectorConcurrentEventThroughput(b *testing.B) {
 				},
 				Data: []byte(fmt.Sprintf(`{"concurrent_index":%d}`, eventIndex)),
 			}
-			
+
 			select {
 			case collector.(*benchmarkCollector).events <- event:
 			default:
@@ -116,7 +116,7 @@ func BenchmarkCollectorConcurrentEventThroughput(b *testing.B) {
 // BenchmarkEventSerialization benchmarks event serialization performance
 func BenchmarkEventSerialization(b *testing.B) {
 	serializer := NewEventSerializer()
-	
+
 	event := RawEvent{
 		Type:      "serialization_test",
 		Timestamp: time.Now(),
@@ -133,7 +133,7 @@ func BenchmarkEventSerialization(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := serializer.SerializeEvent(event)
 		if err != nil {
@@ -142,10 +142,10 @@ func BenchmarkEventSerialization(b *testing.B) {
 	}
 }
 
-// BenchmarkEventDeserialization benchmarks event deserialization performance  
+// BenchmarkEventDeserialization benchmarks event deserialization performance
 func BenchmarkEventDeserialization(b *testing.B) {
 	serializer := NewEventSerializer()
-	
+
 	originalEvent := RawEvent{
 		Type:      "deserialization_test",
 		Timestamp: time.Now(),
@@ -156,13 +156,13 @@ func BenchmarkEventDeserialization(b *testing.B) {
 		},
 		Data: []byte(`{"benchmark":true}`),
 	}
-	
+
 	serializedEvent, err := serializer.SerializeEvent(originalEvent)
 	require.NoError(b, err)
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, err := serializer.DeserializeEvent(serializedEvent)
 		if err != nil {
@@ -178,7 +178,7 @@ func BenchmarkCollectorHealthCheck(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			collector.IsHealthy()
@@ -193,7 +193,7 @@ func BenchmarkCollectorStatistics(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			stats := collector.Statistics()
@@ -207,7 +207,7 @@ func BenchmarkCollectorStatistics(b *testing.B) {
 // BenchmarkMemoryUsage benchmarks memory usage patterns
 func BenchmarkMemoryUsage(b *testing.B) {
 	logger := zap.NewNop()
-	
+
 	b.Run("CollectorCreation", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -215,7 +215,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			_ = collector // Use collector to prevent optimization
 		}
 	})
-	
+
 	b.Run("EventAllocation", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -232,16 +232,16 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			_ = event // Use event to prevent optimization
 		}
 	})
-	
+
 	b.Run("LargeEventData", func(b *testing.B) {
 		largeData := make([]byte, 10*1024) // 10KB
 		for i := range largeData {
 			largeData[i] = byte(i % 256)
 		}
-		
+
 		b.ReportAllocs()
 		b.ResetTimer()
-		
+
 		for i := 0; i < b.N; i++ {
 			event := RawEvent{
 				Type:      "large_memory_test",
@@ -263,10 +263,10 @@ func BenchmarkStringOperations(b *testing.B) {
 	b.Run("NullTerminatedString", func(b *testing.B) {
 		testData := []byte("benchmark-test-string\\x00extra-data-here")
 		parser := &stringParser{}
-		
+
 		b.ResetTimer()
 		b.ReportAllocs()
-		
+
 		for i := 0; i < b.N; i++ {
 			result := parser.nullTerminatedString(testData)
 			if result == "" {
@@ -274,14 +274,14 @@ func BenchmarkStringOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("StringValidation", func(b *testing.B) {
 		testString := "valid-benchmark-string-with-numbers-123"
 		validator := &stringValidator{}
-		
+
 		b.ResetTimer()
 		b.ReportAllocs()
-		
+
 		for i := 0; i < b.N; i++ {
 			valid := validator.isValidString(testString)
 			if !valid {
@@ -295,7 +295,7 @@ func BenchmarkStringOperations(b *testing.B) {
 func BenchmarkConcurrentCollectorOperations(b *testing.B) {
 	logger := zap.NewNop()
 	numCollectors := runtime.NumCPU()
-	
+
 	// Create multiple collectors
 	collectors := make([]*benchmarkCollector, numCollectors)
 	for i := 0; i < numCollectors; i++ {
@@ -308,14 +308,14 @@ func BenchmarkConcurrentCollectorOperations(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		collectorIndex := 0
 		eventIndex := 0
-		
+
 		for pb.Next() {
 			collector := collectors[collectorIndex%numCollectors]
-			
+
 			// Mix of operations
 			switch eventIndex % 4 {
 			case 0:
@@ -339,7 +339,7 @@ func BenchmarkConcurrentCollectorOperations(b *testing.B) {
 			case 3:
 				collector.Health()
 			}
-			
+
 			collectorIndex++
 			eventIndex++
 		}
@@ -350,7 +350,7 @@ func BenchmarkConcurrentCollectorOperations(b *testing.B) {
 func BenchmarkRegistryOperations(b *testing.B) {
 	logger := zap.NewNop()
 	registry := NewBenchmarkRegistry(logger)
-	
+
 	// Pre-register collectors
 	numCollectors := 100
 	for i := 0; i < numCollectors; i++ {
@@ -360,7 +360,7 @@ func BenchmarkRegistryOperations(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.Run("GetCollector", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			collectorIndex := 0
@@ -374,7 +374,7 @@ func BenchmarkRegistryOperations(b *testing.B) {
 			}
 		})
 	})
-	
+
 	b.Run("ListCollectors", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			collectors := registry.ListCollectors()
@@ -383,7 +383,7 @@ func BenchmarkRegistryOperations(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("Health", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			health := registry.Health()
@@ -408,7 +408,7 @@ func BenchmarkEventPipelineLatency(b *testing.B) {
 
 	logger := zap.NewNop()
 	collector := newBenchmarkCollector("latency-test", logger)
-	
+
 	ctx := context.Background()
 	err := collector.Start(ctx)
 	require.NoError(b, err)
@@ -417,7 +417,7 @@ func BenchmarkEventPipelineLatency(b *testing.B) {
 	// Measure latency from event creation to consumption
 	latencies := make([]time.Duration, 0, b.N)
 	var latencyMu sync.Mutex
-	
+
 	// Consumer goroutine
 	go func() {
 		for {
@@ -440,7 +440,7 @@ func BenchmarkEventPipelineLatency(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		startTime := time.Now()
 		event := RawEvent{
@@ -454,24 +454,24 @@ func BenchmarkEventPipelineLatency(b *testing.B) {
 			},
 			Data: []byte(fmt.Sprintf(`{"latency_test":%d}`, i)),
 		}
-		
+
 		select {
 		case collector.events <- event:
 		default:
 			b.Fatal("Event channel full")
 		}
 	}
-	
+
 	// Wait for events to be processed
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Report latency statistics
 	latencyMu.Lock()
 	if len(latencies) > 0 {
 		var total time.Duration
 		min := latencies[0]
 		max := latencies[0]
-		
+
 		for _, lat := range latencies {
 			total += lat
 			if lat < min {
@@ -481,9 +481,9 @@ func BenchmarkEventPipelineLatency(b *testing.B) {
 				max = lat
 			}
 		}
-		
+
 		avg := total / time.Duration(len(latencies))
-		b.Logf("Processed %d events, Latency - Min: %v, Max: %v, Avg: %v", 
+		b.Logf("Processed %d events, Latency - Min: %v, Max: %v, Avg: %v",
 			len(latencies), min, max, avg)
 	}
 	latencyMu.Unlock()
@@ -521,7 +521,7 @@ func (bc *benchmarkCollector) Start(ctx context.Context) error {
 	bc.mu.Lock()
 	bc.healthy = true
 	bc.mu.Unlock()
-	
+
 	// Start event consumer to prevent channel blocking
 	go func() {
 		for {
@@ -533,7 +533,7 @@ func (bc *benchmarkCollector) Start(ctx context.Context) error {
 			}
 		}
 	}()
-	
+
 	return nil
 }
 
@@ -549,19 +549,19 @@ func (bc *benchmarkCollector) Events() <-chan RawEvent { return bc.events }
 func (bc *benchmarkCollector) Health() (bool, map[string]interface{}) {
 	healthy := bc.IsHealthy()
 	received := atomic.LoadInt64(&bc.eventsReceived)
-	
+
 	return healthy, map[string]interface{}{
-		"healthy":           healthy,
-		"events_received":   received,
-		"events_collected":  received,
-		"events_dropped":    int64(0),
-		"error_count":       int64(0),
+		"healthy":          healthy,
+		"events_received":  received,
+		"events_collected": received,
+		"events_dropped":   int64(0),
+		"error_count":      int64(0),
 	}
 }
 
 func (bc *benchmarkCollector) Statistics() map[string]interface{} {
 	received := atomic.LoadInt64(&bc.eventsReceived)
-	
+
 	return map[string]interface{}{
 		"events_received":  received,
 		"events_collected": received,
@@ -579,7 +579,7 @@ func NewEventSerializer() *EventSerializer {
 
 func (s *EventSerializer) SerializeEvent(event RawEvent) ([]byte, error) {
 	// Simple serialization - in practice this might use protobuf, msgpack, etc.
-	data := fmt.Sprintf("Type=%s,TraceID=%s,SpanID=%s,Data=%s", 
+	data := fmt.Sprintf("Type=%s,TraceID=%s,SpanID=%s,Data=%s",
 		event.Type, event.TraceID, event.SpanID, string(event.Data))
 	return []byte(data), nil
 }
@@ -647,7 +647,7 @@ func (br *BenchmarkRegistry) GetCollector(name string) Collector {
 func (br *BenchmarkRegistry) ListCollectors() []string {
 	br.mu.RLock()
 	defer br.mu.RUnlock()
-	
+
 	names := make([]string, 0, len(br.collectors))
 	for name := range br.collectors {
 		names = append(names, name)
@@ -658,20 +658,20 @@ func (br *BenchmarkRegistry) ListCollectors() []string {
 func (br *BenchmarkRegistry) Health() RegistryHealth {
 	br.mu.RLock()
 	defer br.mu.RUnlock()
-	
+
 	healthy := 0
 	for _, collector := range br.collectors {
 		if collector.IsHealthy() {
 			healthy++
 		}
 	}
-	
+
 	return RegistryHealth{
-		Healthy:                true,
-		CollectorsRegistered:   len(br.collectors),
-		CollectorsHealthy:      healthy,
-		TotalEventsProcessed:   int64(1000),
-		EventsDroppedRatio:     0.01,
+		Healthy:              true,
+		CollectorsRegistered: len(br.collectors),
+		CollectorsHealthy:    healthy,
+		TotalEventsProcessed: int64(1000),
+		EventsDroppedRatio:   0.01,
 	}
 }
 
@@ -706,7 +706,7 @@ func BenchmarkHighVolumeEventProcessing(b *testing.B) {
 		wg.Add(1)
 		go func(collectorIndex int, c *benchmarkCollector) {
 			defer wg.Done()
-			
+
 			for j := 0; j < eventsPerCollector; j++ {
 				event := RawEvent{
 					Type:      "high_volume",
@@ -719,7 +719,7 @@ func BenchmarkHighVolumeEventProcessing(b *testing.B) {
 					},
 					Data: []byte(fmt.Sprintf(`{"volume_test":true,"collector":%d,"event":%d}`, collectorIndex, j)),
 				}
-				
+
 				select {
 				case c.events <- event:
 				default:
@@ -735,8 +735,8 @@ func BenchmarkHighVolumeEventProcessing(b *testing.B) {
 	// Calculate and report throughput
 	totalEvents := int64(b.N)
 	eventsPerSecond := float64(totalEvents) / duration.Seconds()
-	
-	b.Logf("High volume test: %d events in %v (%.0f events/sec)", 
+
+	b.Logf("High volume test: %d events in %v (%.0f events/sec)",
 		totalEvents, duration, eventsPerSecond)
 
 	// Verify all collectors are still healthy
@@ -750,21 +750,21 @@ func BenchmarkHighVolumeEventProcessing(b *testing.B) {
 // BenchmarkMemoryEfficiency tests memory usage efficiency
 func BenchmarkMemoryEfficiency(b *testing.B) {
 	var m1, m2 runtime.MemStats
-	
+
 	// Measure baseline memory
 	runtime.GC()
 	runtime.ReadMemStats(&m1)
-	
+
 	logger := zap.NewNop()
 	collectors := make([]*benchmarkCollector, 100)
-	
+
 	b.ResetTimer()
-	
+
 	// Create collectors
 	for i := 0; i < 100; i++ {
 		collectors[i] = newBenchmarkCollector(fmt.Sprintf("memory-test-%d", i), logger)
 	}
-	
+
 	// Process events
 	for i := 0; i < b.N; i++ {
 		collector := collectors[i%100]
@@ -776,23 +776,23 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 			Metadata:  map[string]string{"test": "memory"},
 			Data:      []byte(fmt.Sprintf(`{"memory_test":%d}`, i)),
 		}
-		
+
 		select {
 		case collector.events <- event:
 		default:
 			// Channel full
 		}
 	}
-	
+
 	runtime.GC()
 	runtime.ReadMemStats(&m2)
-	
+
 	// Report memory usage
 	allocatedBytes := m2.TotalAlloc - m1.TotalAlloc
 	bytesPerEvent := float64(allocatedBytes) / float64(b.N)
-	
-	b.Logf("Memory efficiency: %d bytes total, %.2f bytes/event", 
+
+	b.Logf("Memory efficiency: %d bytes total, %.2f bytes/event",
 		allocatedBytes, bytesPerEvent)
-	
+
 	b.ReportMetric(bytesPerEvent, "bytes/event")
 }

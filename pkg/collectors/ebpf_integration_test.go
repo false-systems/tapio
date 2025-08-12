@@ -159,10 +159,10 @@ func TestEBPFMapOperations(t *testing.T) {
 
 	// Test different map types
 	mapTypes := []struct {
-		name     string
-		mapType  string
-		keySize  int
-		valueSize int
+		name       string
+		mapType    string
+		keySize    int
+		valueSize  int
 		maxEntries int
 	}{
 		{"hash", "hash", 4, 8, 1000},
@@ -199,7 +199,7 @@ func TestEBPFMapOperations(t *testing.T) {
 				// Test key/value operations
 				key := make([]byte, mt.keySize)
 				value := make([]byte, mt.valueSize)
-				
+
 				// Set test data
 				for i := range key {
 					key[i] = byte(i)
@@ -314,8 +314,8 @@ func TestEBPFEventProcessing(t *testing.T) {
 		assert.Greater(t, event.Timestamp, uint64(0))
 		assert.Greater(t, event.PID, uint32(0))
 		assert.NotEmpty(t, event.Type)
-		
-		t.Logf("Sample event: PID=%d, Type=%s, Timestamp=%d", 
+
+		t.Logf("Sample event: PID=%d, Type=%s, Timestamp=%d",
 			event.PID, event.Type, event.Timestamp)
 
 		// Verify events are properly formatted
@@ -331,7 +331,7 @@ func TestEBPFEventProcessing(t *testing.T) {
 	assert.Contains(t, stats, "events_processed")
 	assert.Contains(t, stats, "events_dropped")
 	assert.Contains(t, stats, "ring_buffer_utilization")
-	
+
 	t.Logf("Processor statistics: %+v", stats)
 }
 
@@ -543,10 +543,10 @@ func TestEBPFKernelVersionCompatibility(t *testing.T) {
 
 	// Test feature availability by kernel version
 	features := []struct {
-		name           string
-		minMajor       int
-		minMinor       int
-		checkFunction  func() (bool, error)
+		name          string
+		minMajor      int
+		minMinor      int
+		checkFunction func() (bool, error)
 	}{
 		{"Basic eBPF", 3, 18, detector.CheckBasicEBPFSupport},
 		{"Maps", 3, 19, detector.CheckMapSupport},
@@ -725,6 +725,7 @@ func (d *EBPFFeatureDetector) CheckMapSupport() (bool, error) {
 // Mock implementations for completeness
 
 type EBPFLoader struct{ logger *zap.Logger }
+
 func NewEBPFLoader(logger *zap.Logger) *EBPFLoader { return &EBPFLoader{logger} }
 func (l *EBPFLoader) LoadTestProgram(progType string) (interface{}, error) {
 	if progType == "kprobe" || progType == "tracepoint" {
@@ -742,7 +743,10 @@ type mockProgram struct{ name string }
 type ProgramInfo struct{ Name, Type string }
 
 type EBPFMapManager struct{ logger *zap.Logger }
-type EBPFMapSpec struct{ Name, Type string; KeySize, ValueSize, MaxEntries int }
+type EBPFMapSpec struct {
+	Name, Type                     string
+	KeySize, ValueSize, MaxEntries int
+}
 type mockMap struct{ spec EBPFMapSpec }
 type MapInfo struct{ Name, Type string }
 
@@ -761,25 +765,33 @@ func (m *EBPFMapManager) GetMapInfo(mp interface{}) (*MapInfo, error) {
 }
 func (m *EBPFMapManager) CloseMap(mp interface{}) error { return nil }
 
-type EBPFEvent struct{ Timestamp uint64; PID uint32; Type string }
-type EBPFEventProcessor struct{ logger *zap.Logger; events chan EBPFEvent }
+type EBPFEvent struct {
+	Timestamp uint64
+	PID       uint32
+	Type      string
+}
+type EBPFEventProcessor struct {
+	logger *zap.Logger
+	events chan EBPFEvent
+}
 
 func NewEBPFEventProcessor(logger *zap.Logger) *EBPFEventProcessor {
 	return &EBPFEventProcessor{logger, make(chan EBPFEvent, 1000)}
 }
 func (p *EBPFEventProcessor) Start(ctx context.Context) error { return nil }
-func (p *EBPFEventProcessor) Stop() error { return nil }
-func (p *EBPFEventProcessor) Events() <-chan EBPFEvent { return p.events }
+func (p *EBPFEventProcessor) Stop() error                     { return nil }
+func (p *EBPFEventProcessor) Events() <-chan EBPFEvent        { return p.events }
 func (p *EBPFEventProcessor) Statistics() map[string]interface{} {
 	return map[string]interface{}{
-		"events_processed": int64(0),
-		"events_dropped": int64(0),
+		"events_processed":        int64(0),
+		"events_dropped":          int64(0),
 		"ring_buffer_utilization": 0.0,
 	}
 }
 
 // More mock implementations...
 type SafeParser struct{}
+
 func NewSafeParser() *SafeParser { return &SafeParser{} }
 func (p *SafeParser) MarshalStruct(s interface{}) ([]byte, error) {
 	size := int(unsafe.Sizeof(s))
@@ -794,6 +806,7 @@ func (p *SafeParser) UnmarshalStruct(data []byte, s interface{}) error {
 }
 
 type BoundsChecker struct{}
+
 func NewBoundsChecker() *BoundsChecker { return &BoundsChecker{} }
 func (c *BoundsChecker) CheckBounds(buffer []byte, offset, length int) error {
 	if offset < 0 || length < 0 || offset >= len(buffer) || offset+length > len(buffer) {
@@ -803,6 +816,7 @@ func (c *BoundsChecker) CheckBounds(buffer []byte, offset, length int) error {
 }
 
 type StringValidator struct{}
+
 func NewStringValidator() *StringValidator { return &StringValidator{} }
 func (v *StringValidator) SafeString(data []byte) (string, error) {
 	for i, b := range data {
@@ -817,26 +831,30 @@ func (v *StringValidator) SafeString(data []byte) (string, error) {
 }
 
 type EBPFPerformanceMonitor struct{ logger *zap.Logger }
+
 func NewEBPFPerformanceMonitor(logger *zap.Logger) *EBPFPerformanceMonitor {
 	return &EBPFPerformanceMonitor{logger}
 }
 func (m *EBPFPerformanceMonitor) Start(ctx context.Context) error { return nil }
-func (m *EBPFPerformanceMonitor) Stop() error { return nil }
+func (m *EBPFPerformanceMonitor) Stop() error                     { return nil }
 func (m *EBPFPerformanceMonitor) GetPerformanceStats() map[string]interface{} {
 	return map[string]interface{}{
-		"events_per_second": 1000.0,
-		"cpu_usage_percent": 5.0,
-		"memory_usage_bytes": int64(1024 * 1024),
+		"events_per_second":       1000.0,
+		"cpu_usage_percent":       5.0,
+		"memory_usage_bytes":      int64(1024 * 1024),
 		"ring_buffer_utilization": 0.1,
-		"map_lookup_latency_ns": int64(1000),
+		"map_lookup_latency_ns":   int64(1000),
 	}
 }
 
 type KernelVersionChecker struct{ detector *EBPFFeatureDetector }
+
 func NewKernelVersionChecker(detector *EBPFFeatureDetector) *KernelVersionChecker {
 	return &KernelVersionChecker{detector}
 }
-func (c *KernelVersionChecker) GetKernelVersion() (string, error) { return c.detector.GetKernelVersion() }
+func (c *KernelVersionChecker) GetKernelVersion() (string, error) {
+	return c.detector.GetKernelVersion()
+}
 func (c *KernelVersionChecker) ParseVersion(version string) (int, int, int, error) {
 	// Simplified version parsing
 	return 5, 4, 0, nil
@@ -846,11 +864,11 @@ func (c *KernelVersionChecker) ShouldSupportFeature(major, minor, reqMajor, reqM
 }
 func (c *KernelVersionChecker) GenerateCompatibilityReport() map[string]interface{} {
 	return map[string]interface{}{
-		"kernel_version": "5.4.0",
-		"compatibility_score": 0.8,
-		"supported_features": []string{"basic_ebpf", "maps", "kprobes"},
+		"kernel_version":       "5.4.0",
+		"compatibility_score":  0.8,
+		"supported_features":   []string{"basic_ebpf", "maps", "kprobes"},
 		"unsupported_features": []string{"btf", "core", "ringbuf"},
-		"recommendations": []string{"upgrade_kernel", "enable_btf"},
+		"recommendations":      []string{"upgrade_kernel", "enable_btf"},
 	}
 }
 
@@ -861,7 +879,7 @@ func NewEBPFResourceManager(logger *zap.Logger) *EBPFResourceManager {
 	return &EBPFResourceManager{logger}
 }
 func (m *EBPFResourceManager) AllocateResources(ctx context.Context) error { return nil }
-func (m *EBPFResourceManager) CleanupResources() error { return nil }
+func (m *EBPFResourceManager) CleanupResources() error                     { return nil }
 func (m *EBPFResourceManager) GetResourceStats() ResourceStats {
 	return ResourceStats{AllocatedMaps: 2, AllocatedPrograms: 3}
 }
