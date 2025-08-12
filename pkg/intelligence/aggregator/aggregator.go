@@ -61,8 +61,12 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 
 	a.logger.Info("Starting aggregation", zap.String("event_id", event.ID))
 
-	// Step 1: Extract all findings
-	allFindings := []Finding{}
+	// Step 1: Extract all findings with pre-allocated capacity
+	totalFindings := 0
+	for _, output := range outputs {
+		totalFindings += len(output.Findings)
+	}
+	allFindings := make([]Finding, 0, totalFindings)
 	for _, output := range outputs {
 		allFindings = append(allFindings, output.Findings...)
 	}
