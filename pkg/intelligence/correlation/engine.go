@@ -22,6 +22,9 @@ type Engine struct {
 	tracer  trace.Tracer
 	metrics *EngineOTELMetrics
 
+	// Timeout coordination
+	timeoutCoordinator *TimeoutCoordinator
+
 	// Correlators
 	correlators []Correlator
 	registry    *CorrelatorRegistry
@@ -94,20 +97,30 @@ func NewEngine(logger *zap.Logger, config EngineConfig, k8sClient domain.K8sClie
 	// Create correlator registry
 	registry := NewCorrelatorRegistry(logger)
 
+	// Create timeout coordinator with configuration
+	timeoutConfig := TimeoutConfig{
+		ProcessingTimeout: config.ProcessingTimeout,
+		CorrelatorTimeout: config.ProcessingTimeout,
+		StorageTimeout:    DefaultStorageTimeout,
+		QueueTimeout:      config.ProcessingTimeout,
+	}
+	timeoutCoordinator := NewTimeoutCoordinator(logger, tracer, timeoutConfig)
+
 	engine := &Engine{
-		logger:         logger,
-		tracer:         tracer,
-		metrics:        engineMetrics,
-		correlators:    make([]Correlator, 0),
-		registry:       registry,
-		storage:        storage,
-		eventChan:      make(chan *domain.UnifiedEvent, config.EventBufferSize),
-		resultChan:     make(chan *CorrelationResult, config.ResultBufferSize),
-		storageJobChan: make(chan *storageJob, storageQueueSize),
-		storageWorkers: storageWorkers,
-		config:         config,
-		ctx:            ctx,
-		cancel:         cancel,
+		logger:             logger,
+		tracer:             tracer,
+		metrics:            engineMetrics,
+		timeoutCoordinator: timeoutCoordinator,
+		correlators:        make([]Correlator, 0),
+		registry:           registry,
+		storage:            storage,
+		eventChan:          make(chan *domain.UnifiedEvent, config.EventBufferSize),
+		resultChan:         make(chan *CorrelationResult, config.ResultBufferSize),
+		storageJobChan:     make(chan *storageJob, storageQueueSize),
+		storageWorkers:     storageWorkers,
+		config:             config,
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 
 	if err := engine.initializeCorrelators(ctx, logger, k8sClient, config); err != nil {
@@ -275,34 +288,40 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) error 
 		defer e.metrics.QueueDepthGauge.Add(ctx, -1)
 	}
 
-	// Use a timeout to prevent indefinite blocking
-	timer := time.NewTimer(e.config.ProcessingTimeout)
-	defer timer.Stop()
+	// Use timeout coordinator for queue operation
+	queueOperation := func() error {
+		select {
+		case e.eventChan <- event:
+			return nil
+		default:
+			return fmt.Errorf("queue is full")
+		}
+	}
 
-	select {
-	case e.eventChan <- event:
-		return nil
-	case <-timer.C:
-		err := fmt.Errorf("timeout sending event to processing queue")
-		span.SetAttributes(
-			attribute.String("error", err.Error()),
-			attribute.String("error.type", "queue_timeout"),
-		)
-		// Record error metrics
-		if e.metrics.ErrorsTotalCtr != nil {
-			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "queue_timeout"),
-				attribute.String("event_type", string(event.Type)),
-			))
+	err := e.timeoutCoordinator.WaitWithTimeout(ctx, e.ctx, QueueLevel, queueOperation)
+	if err != nil {
+		// Set span attributes based on error type
+		if e.timeoutCoordinator.IsTimeoutError(err) {
+			span.SetAttributes(
+				attribute.String("error", err.Error()),
+				attribute.String("error.type", "queue_timeout"),
+			)
+			// Record timeout metrics
+			if e.metrics.ErrorsTotalCtr != nil {
+				e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("error_type", "queue_timeout"),
+					attribute.String("event_type", string(event.Type)),
+				))
+			}
+		} else if err.Error() == "engine is shutting down" {
+			span.SetAttributes(attribute.String("error", "engine_shutdown"))
+		} else {
+			span.SetAttributes(attribute.String("error", "context_cancelled"))
 		}
 		return err
-	case <-ctx.Done():
-		span.SetAttributes(attribute.String("error", "context_cancelled"))
-		return ctx.Err()
-	case <-e.ctx.Done():
-		span.SetAttributes(attribute.String("error", "engine_shutdown"))
-		return fmt.Errorf("engine is shutting down")
 	}
+
+	return nil
 }
 
 // Results returns the channel of correlation results
@@ -396,27 +415,42 @@ func (e *Engine) processWithCorrelator(parentCtx context.Context, event *domain.
 		attribute.String("event.id", event.ID),
 	)
 
-	// Create timeout context for correlator
-	ctx, cancel := context.WithTimeout(ctx, DefaultProcessingTimeout)
-	defer cancel()
+	// Use timeout coordinator for correlator processing
+	var results []*CorrelationResult
+	var err error
 
-	// Process event
-	results, err := correlator.Process(ctx, event)
-	if err != nil {
+	correlatorOperation := func() error {
+		timeoutCtx := e.timeoutCoordinator.CreateCorrelatorContext(ctx, correlator.Name())
+		defer timeoutCtx.Cancel()
+
+		results, err = correlator.Process(timeoutCtx.Context, event)
+		return err
+	}
+
+	processErr := e.timeoutCoordinator.WaitWithTimeout(ctx, e.ctx, CorrelatorLevel, correlatorOperation)
+	if processErr != nil {
+		// Determine error type based on timeout coordinator analysis
+		errorType := "correlator_failed"
+		if e.timeoutCoordinator.IsTimeoutError(processErr) {
+			errorType = "correlator_timeout"
+		} else if processErr.Error() == "engine is shutting down" {
+			errorType = "engine_shutdown"
+		}
+
 		// Record error in span
 		span.SetAttributes(
-			attribute.String("error", err.Error()),
-			attribute.String("error.type", "correlator_failed"),
+			attribute.String("error", processErr.Error()),
+			attribute.String("error.type", errorType),
 		)
 		// Record error metrics
 		if e.metrics.ErrorsTotalCtr != nil {
 			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "correlator_failed"),
+				attribute.String("error_type", errorType),
 				attribute.String("correlator", correlator.Name()),
 				attribute.String("event_type", string(event.Type)),
 			))
 		}
-		e.logCorrelatorError(correlator.Name(), event.ID, err)
+		e.logCorrelatorError(correlator.Name(), event.ID, processErr)
 		return
 	}
 
@@ -613,20 +647,31 @@ func (e *Engine) processStorageJob(job *storageJob) {
 		attribute.Float64("queue.latency_ms", queueLatency),
 	)
 
-	// Use a timeout context for storage operations
-	storeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	// Use timeout coordinator for storage operations
+	storageOperation := func() error {
+		storageCtx := e.timeoutCoordinator.CreateStorageContext(ctx)
+		defer storageCtx.Cancel()
 
-	if err := e.storage.Store(storeCtx, job.result); err != nil {
+		return e.storage.Store(storageCtx.Context, job.result)
+	}
+
+	err := e.timeoutCoordinator.WaitWithTimeout(ctx, e.ctx, StorageLevel, storageOperation)
+	if err != nil {
+		// Determine error type
+		errorType := "storage_failed"
+		if e.timeoutCoordinator.IsTimeoutError(err) {
+			errorType = "storage_timeout"
+		}
+
 		// Record error in span
 		span.SetAttributes(
 			attribute.String("error", err.Error()),
-			attribute.String("error.type", "storage_failed"),
+			attribute.String("error.type", errorType),
 		)
 		// Record error metrics
 		if e.metrics.ErrorsTotalCtr != nil {
 			e.metrics.ErrorsTotalCtr.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "storage_failed"),
+				attribute.String("error_type", errorType),
 				attribute.String("operation", "store_correlation"),
 			))
 		}
