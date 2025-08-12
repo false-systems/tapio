@@ -33,10 +33,10 @@ type BatchOperation struct {
 
 // BatchResult represents the result of a batched operation
 type BatchResult struct {
-	ID      string       `json:"id"`
-	Records []Record     `json:"records"`
-	Summary Summary      `json:"summary"`
-	Error   error        `json:"error"`
+	ID      string   `json:"id"`
+	Records []Record `json:"records"`
+	Summary Summary  `json:"summary"`
+	Error   error    `json:"error"`
 }
 
 // BatchConfig configures batch operation behavior
@@ -52,21 +52,21 @@ type BatchClient struct {
 	logger *zap.Logger
 
 	// Batching infrastructure
-	mu          sync.RWMutex
-	operations  []BatchOperation
-	results     map[string]chan BatchResult
-	batchTimer  *time.Timer
-	processing  bool
-	closed      bool
+	mu         sync.RWMutex
+	operations []BatchOperation
+	results    map[string]chan BatchResult
+	batchTimer *time.Timer
+	processing bool
+	closed     bool
 
 	// OpenTelemetry instrumentation
-	tracer               trace.Tracer
-	batchesExecuted      metric.Int64Counter
-	operationsPerBatch   metric.Float64Histogram
-	batchExecutionTime   metric.Float64Histogram
-	pendingOperations    metric.Int64Gauge
-	batchErrors          metric.Int64Counter
-	operationsProcessed  metric.Int64Counter
+	tracer              trace.Tracer
+	batchesExecuted     metric.Int64Counter
+	operationsPerBatch  metric.Float64Histogram
+	batchExecutionTime  metric.Float64Histogram
+	pendingOperations   metric.Int64Gauge
+	batchErrors         metric.Int64Counter
+	operationsProcessed metric.Int64Counter
 }
 
 // NewBatchClient creates a new batch-enabled Neo4j client
@@ -136,19 +136,19 @@ func NewBatchClient(client *Client, config BatchConfig, logger *zap.Logger) (*Ba
 	}
 
 	return &BatchClient{
-		client:               client,
-		config:               config,
-		logger:               logger,
-		operations:           make([]BatchOperation, 0, config.BatchSize),
-		results:              make(map[string]chan BatchResult),
-		batchTimer:           time.NewTimer(config.BatchTimeout),
-		tracer:               tracer,
-		batchesExecuted:      batchesExecuted,
-		operationsPerBatch:   operationsPerBatch,
-		batchExecutionTime:   batchExecutionTime,
-		pendingOperations:    pendingOperations,
-		batchErrors:          batchErrors,
-		operationsProcessed:  operationsProcessed,
+		client:              client,
+		config:              config,
+		logger:              logger,
+		operations:          make([]BatchOperation, 0, config.BatchSize),
+		results:             make(map[string]chan BatchResult),
+		batchTimer:          time.NewTimer(config.BatchTimeout),
+		tracer:              tracer,
+		batchesExecuted:     batchesExecuted,
+		operationsPerBatch:  operationsPerBatch,
+		batchExecutionTime:  batchExecutionTime,
+		pendingOperations:   pendingOperations,
+		batchErrors:         batchErrors,
+		operationsProcessed: operationsProcessed,
 	}, nil
 }
 
@@ -242,7 +242,7 @@ func (bc *BatchClient) addToBatch(ctx context.Context, operation BatchOperation,
 			}
 		}
 		bc.batchTimer.Reset(bc.config.BatchTimeout)
-		
+
 		// Execute batch in background
 		go bc.executeBatch(ctx, "batch_full")
 	} else if len(bc.operations) == 1 && !bc.processing {
@@ -273,27 +273,27 @@ func (bc *BatchClient) waitForTimeout(ctx context.Context) {
 // executeBatch executes the current batch of operations
 func (bc *BatchClient) executeBatch(ctx context.Context, reason string) {
 	bc.mu.Lock()
-	
+
 	if bc.processing || len(bc.operations) == 0 {
 		bc.mu.Unlock()
 		return
 	}
 
 	bc.processing = true
-	
+
 	// Copy operations and results for execution
 	operationsCopy := make([]BatchOperation, len(bc.operations))
 	copy(operationsCopy, bc.operations)
-	
+
 	resultsCopy := make(map[string]chan BatchResult)
 	for id, ch := range bc.results {
 		resultsCopy[id] = ch
 	}
-	
+
 	// Clear for next batch
 	bc.operations = bc.operations[:0]
 	bc.results = make(map[string]chan BatchResult)
-	
+
 	bc.mu.Unlock()
 
 	// Execute batch with instrumentation
@@ -411,7 +411,7 @@ func (bc *BatchClient) executeBatchTransaction(ctx context.Context, operations [
 	if err != nil {
 		// Transaction failed entirely, mark all operations as failed
 		bc.logger.Error("Batch transaction failed", zap.Error(err))
-		
+
 		if bc.batchErrors != nil {
 			bc.batchErrors.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "transaction_failed"),
@@ -522,7 +522,7 @@ func (bc *BatchClient) CreateNodesBatch(ctx context.Context, nodes []NodeCreatio
 
 	// Build batch CREATE operations
 	operations := make([]BatchOperation, 0, len(nodes))
-	
+
 	// Use UNWIND for efficient bulk creation
 	query := `
 		UNWIND $nodes AS node
@@ -534,7 +534,7 @@ func (bc *BatchClient) CreateNodesBatch(ctx context.Context, nodes []NodeCreatio
 
 	// Group nodes by label type for efficient processing
 	nodeGroups := bc.groupNodesByType(nodes)
-	
+
 	for nodeType, nodeGroup := range nodeGroups {
 		// Convert nodes to map format
 		nodeData := make([]map[string]interface{}, 0, len(nodeGroup))
@@ -564,8 +564,8 @@ func (bc *BatchClient) CreateNodesBatch(ctx context.Context, nodes []NodeCreatio
 	// Check for individual operation errors
 	for _, result := range results {
 		if result.Error != nil {
-			bc.logger.Warn("Node creation failed in batch", 
-				zap.String("operation_id", result.ID), 
+			bc.logger.Warn("Node creation failed in batch",
+				zap.String("operation_id", result.ID),
 				zap.Error(result.Error))
 		}
 	}
@@ -576,17 +576,17 @@ func (bc *BatchClient) CreateNodesBatch(ctx context.Context, nodes []NodeCreatio
 // groupNodesByType groups nodes by their primary label for efficient batch processing
 func (bc *BatchClient) groupNodesByType(nodes []NodeCreationParams) map[string][]NodeCreationParams {
 	groups := make(map[string][]NodeCreationParams)
-	
+
 	for _, node := range nodes {
 		// Use Kind as the primary label, default to "Resource"
 		nodeType := node.Kind
 		if nodeType == "" {
 			nodeType = "Resource"
 		}
-		
+
 		groups[nodeType] = append(groups[nodeType], node)
 	}
-	
+
 	return groups
 }
 
@@ -644,7 +644,7 @@ func (bc *BatchClient) CreateRelationshipsBatch(ctx context.Context, relationshi
 // convertPropertyValues converts PropertyValue struct to raw values for Neo4j
 func (bc *BatchClient) convertPropertyValues(properties map[string]PropertyValue) map[string]interface{} {
 	result := make(map[string]interface{})
-	
+
 	for key, prop := range properties {
 		if prop.StringVal != nil {
 			result[key] = *prop.StringVal
@@ -654,7 +654,7 @@ func (bc *BatchClient) convertPropertyValues(properties map[string]PropertyValue
 			result[key] = *prop.FloatVal
 		}
 	}
-	
+
 	return result
 }
 
@@ -669,19 +669,19 @@ func (bc *BatchClient) Flush(ctx context.Context) error {
 
 	// Execute remaining operations
 	bc.executeBatch(ctx, "flush")
-	
+
 	// Wait for processing to complete
 	for {
 		bc.mu.RLock()
 		processing := bc.processing
 		bc.mu.RUnlock()
-		
+
 		if !processing {
 			break
 		}
 		time.Sleep(time.Millisecond)
 	}
-	
+
 	return nil
 }
 

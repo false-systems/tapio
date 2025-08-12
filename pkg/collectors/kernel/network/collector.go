@@ -83,11 +83,11 @@ func (c *Collector) Start(ctx context.Context) error {
 func (c *Collector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if c.stopped {
 		return nil
 	}
-	
+
 	if c.cancel != nil {
 		c.cancel()
 	}

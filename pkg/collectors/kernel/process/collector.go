@@ -16,7 +16,7 @@ import (
 type ProcessEvent struct {
 	Timestamp uint64
 	PID       uint32
-	PPID      uint32  // Parent PID
+	PPID      uint32 // Parent PID
 	TID       uint32
 	UID       uint32
 	GID       uint32
@@ -74,11 +74,11 @@ func (c *Collector) Start(ctx context.Context) error {
 func (c *Collector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if c.stopped {
 		return nil
 	}
-	
+
 	if c.cancel != nil {
 		c.cancel()
 	}

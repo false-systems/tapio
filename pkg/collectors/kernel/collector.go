@@ -454,7 +454,7 @@ func (c *ModularCollector) processEvents() {
 			c.mu.Lock()
 			c.stats.ErrorCount++
 			c.mu.Unlock()
-      
+
 			if c.errorsTotal != nil {
 				c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("error_type", "parse_error"),
@@ -463,8 +463,8 @@ func (c *ModularCollector) processEvents() {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			span.End()
-			c.logger.Debug("Failed to parse kernel event", 
-			
+			c.logger.Debug("Failed to parse kernel event",
+
 				zap.Error(err),
 				zap.Int("buffer_size", len(record.RawSample)),
 				zap.String("error_type", "parse_failure"))

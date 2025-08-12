@@ -51,4 +51,3 @@ func CreateCollector(config map[string]interface{}) (collectors.Collector, error
 
 	return NewCollector(name, cfg)
 }
-

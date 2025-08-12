@@ -10,13 +10,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.uber.org/zap"
-	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
 func TestCollectorCreation(t *testing.T) {
@@ -583,7 +583,6 @@ func TestAlignmentValidation(t *testing.T) {
 
 		_ = buffer // Use buffer to avoid unused variable error
 
-
 		_, err = collector.parseKernelEventSafely(alignedBuffer)
 		// Error or success depends on actual alignment - test that it doesn't panic
 		// In a real scenario with proper eBPF ring buffer, alignment should be correct
@@ -685,23 +684,23 @@ func TestKernelCollectorOTEL(t *testing.T) {
 	reader := metric.NewManualReader()
 	provider := metric.NewMeterProvider(metric.WithReader(reader))
 	otel.SetMeterProvider(provider)
-	
+
 	// Setup trace exporter
 	traceExporter := tracetest.NewInMemoryExporter()
 	tp := trace.NewTracerProvider(trace.WithSyncer(traceExporter))
 	otel.SetTracerProvider(tp)
-	
+
 	defer func() {
 		_ = provider.Shutdown(context.Background())
 		_ = tp.Shutdown(context.Background())
 	}()
-	
+
 	logger := zap.NewNop()
 	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-otel"}, logger)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
-	
+
 	// Note: Start will likely fail in test environment due to eBPF requirements
 	err = collector.Start(ctx)
 	if err != nil {
@@ -709,20 +708,20 @@ func TestKernelCollectorOTEL(t *testing.T) {
 	} else {
 		defer collector.Stop()
 	}
-	
+
 	// Wait for metrics to be recorded
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Verify metrics
 	metrics := &metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, metrics)
 	require.NoError(t, err)
-	
+
 	metricNames := getKernelMetricNames(metrics)
 	// The actual metric names depend on what the collector creates
 	// Let's check for any metrics being created
 	t.Logf("Actual metrics: %v", metricNames)
-	
+
 	if len(metricNames) > 0 {
 		// If we have metrics, check for expected patterns
 		hasEBPFMetrics := false
@@ -736,11 +735,11 @@ func TestKernelCollectorOTEL(t *testing.T) {
 	} else {
 		t.Log("No metrics found (expected in test environment without eBPF)")
 	}
-	
+
 	// Verify spans
 	spans := traceExporter.GetSpans()
 	t.Logf("Found %d spans", len(spans))
-	
+
 	if len(spans) > 0 {
 		// Check for kernel-specific span attributes
 		foundKernelSpan := false

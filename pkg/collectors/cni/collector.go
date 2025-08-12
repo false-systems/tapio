@@ -472,7 +472,6 @@ func (c *Collector) IsHealthy() bool {
 	return c.healthy
 }
 
-
 // calculateBufferUtilization calculates current buffer utilization percentage
 func (c *Collector) calculateBufferUtilization() float64 {
 	if c.events == nil {

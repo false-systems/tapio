@@ -36,4 +36,3 @@ func CreateLegacyCollector(config map[string]interface{}) (collectors.Collector,
 	// which uses default configuration
 	return NewCollector(name)
 }
-
