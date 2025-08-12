@@ -163,9 +163,9 @@ func TestCollectorRegistryE2E(t *testing.T) {
 	for _, name := range collectorNames {
 		generated := atomic.LoadInt64(eventCounts[name])
 		collected := len(collectedEvents[name])
-		
+
 		t.Logf("Collector %s: Generated=%d, Collected=%d", name, generated, collected)
-		
+
 		totalEventsGenerated += generated
 		totalEventsCollected += collected
 
@@ -229,9 +229,9 @@ func TestCollectorFailureRecovery(t *testing.T) {
 
 	// Create collectors with different failure modes
 	collectors := map[string]Collector{
-		"stable":   newTestCollector("stable", logger),
-		"flaky":    newFlakyCollector("flaky", logger),
-		"failing":  newFailingCollector("failing", logger),
+		"stable":  newTestCollector("stable", logger),
+		"flaky":   newFlakyCollector("flaky", logger),
+		"failing": newFailingCollector("failing", logger),
 	}
 
 	for name, collector := range collectors {
@@ -332,13 +332,13 @@ func TestCollectorPipelinePerformance(t *testing.T) {
 				processed := atomic.LoadInt64(&eventsProcessed)
 				generated := atomic.LoadInt64(&eventsGenerated)
 				duration := time.Since(startTime)
-				
+
 				processedRate := float64(processed) / duration.Seconds()
 				generatedRate := float64(generated) / duration.Seconds()
-				
-				t.Logf("Performance: Generated=%.0f/s, Processed=%.0f/s", 
+
+				t.Logf("Performance: Generated=%.0f/s, Processed=%.0f/s",
 					generatedRate, processedRate)
-				
+
 			case <-ctx.Done():
 				return
 			}
@@ -391,7 +391,7 @@ func TestCollectorPipelinePerformance(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -421,7 +421,7 @@ func TestCollectorPipelinePerformance(t *testing.T) {
 	processedRate := float64(finalProcessed) / duration.Seconds()
 	generatedRate := float64(finalGenerated) / duration.Seconds()
 
-	t.Logf("Final performance: Generated=%d (%.0f/s), Processed=%d (%.0f/s)", 
+	t.Logf("Final performance: Generated=%d (%.0f/s), Processed=%d (%.0f/s)",
 		finalGenerated, generatedRate, finalProcessed, processedRate)
 
 	// Performance assertions
@@ -496,7 +496,7 @@ func TestCollectorResourceManagement(t *testing.T) {
 
 		// Verify cleanup
 		assert.Len(t, registry.ListCollectors(), 0)
-		
+
 		// Brief pause between cycles
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -551,10 +551,10 @@ func (tc *testCollector) Events() <-chan RawEvent { return tc.events }
 func (tc *testCollector) Health() (bool, map[string]interface{}) {
 	healthy := tc.IsHealthy()
 	return healthy, map[string]interface{}{
-		"healthy":           healthy,
-		"events_collected":  int64(0),
-		"events_dropped":    int64(0),
-		"error_count":       int64(0),
+		"healthy":          healthy,
+		"events_collected": int64(0),
+		"events_dropped":   int64(0),
+		"error_count":      int64(0),
 	}
 }
 
@@ -682,7 +682,7 @@ func (r *Registry) ListCollectors() []string {
 func (r *Registry) Start(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	for _, collector := range r.collectors {
 		if err := collector.Start(ctx); err != nil {
 			r.logger.Warn("Failed to start collector", zap.String("collector", collector.Name()), zap.Error(err))
@@ -695,7 +695,7 @@ func (r *Registry) Start(ctx context.Context) error {
 func (r *Registry) Stop() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	for _, collector := range r.collectors {
 		if err := collector.Stop(); err != nil {
 			r.logger.Warn("Failed to stop collector", zap.String("collector", collector.Name()), zap.Error(err))
@@ -706,32 +706,32 @@ func (r *Registry) Stop() error {
 }
 
 type RegistryHealth struct {
-	Healthy                bool
-	CollectorsRegistered   int
-	CollectorsHealthy      int
-	TotalEventsProcessed   int64
-	EventsDroppedRatio     float64
+	Healthy              bool
+	CollectorsRegistered int
+	CollectorsHealthy    int
+	TotalEventsProcessed int64
+	EventsDroppedRatio   float64
 }
 
 func (r *Registry) Health() RegistryHealth {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	health := RegistryHealth{
 		CollectorsRegistered: len(r.collectors),
 		TotalEventsProcessed: int64(1000), // Mock value
 		EventsDroppedRatio:   0.1,         // Mock value
 	}
-	
+
 	healthy := 0
 	for _, collector := range r.collectors {
 		if collector.IsHealthy() {
 			healthy++
 		}
 	}
-	
+
 	health.CollectorsHealthy = healthy
 	health.Healthy = healthy > 0
-	
+
 	return health
 }

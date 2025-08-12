@@ -24,7 +24,7 @@ func TestSystemdCollectorStress(t *testing.T) {
 		t.Skip("Skipping stress test in short mode")
 	}
 
-	// Setup OTEL test infrastructure  
+	// Setup OTEL test infrastructure
 	reader := metric.NewManualReader()
 	provider := metric.NewMeterProvider(metric.WithReader(reader))
 	otel.SetMeterProvider(provider)
@@ -105,11 +105,11 @@ func TestSystemdCollectorStress(t *testing.T) {
 	totalEvents := numGoroutines * eventsPerGoroutine
 	eventsPerSecond := float64(totalEvents) / duration.Seconds()
 
-	t.Logf("Stress test completed: %d events in %v (%.2f events/sec)", 
+	t.Logf("Stress test completed: %d events in %v (%.2f events/sec)",
 		totalEvents, duration, eventsPerSecond)
 
 	// Should handle at least 10k events per second
-	assert.Greater(t, eventsPerSecond, float64(10000), 
+	assert.Greater(t, eventsPerSecond, float64(10000),
 		"SystemD collector should handle at least 10k events/sec")
 
 	// Collector should still be healthy
@@ -146,10 +146,10 @@ func TestSystemdCollectorMemoryPressure(t *testing.T) {
 	const numEvents = 100000
 	for i := 0; i < numEvents; i++ {
 		data := map[string]interface{}{
-			"pid":      i,
-			"comm":     fmt.Sprintf("memory-test-process-%d", i),
-			"unit":     fmt.Sprintf("memory-test-%d.service", i),
-			"filename": fmt.Sprintf("/usr/bin/memory-test-%d", i),
+			"pid":        i,
+			"comm":       fmt.Sprintf("memory-test-process-%d", i),
+			"unit":       fmt.Sprintf("memory-test-%d.service", i),
+			"filename":   fmt.Sprintf("/usr/bin/memory-test-%d", i),
 			"large_data": make([]byte, 1024), // 1KB per event
 		}
 
@@ -172,7 +172,7 @@ func TestSystemdCollectorMemoryPressure(t *testing.T) {
 
 	// Memory usage should be reasonable
 	memoryIncrease := memAfter.Alloc - memBefore.Alloc
-	t.Logf("Memory increase: %d bytes (%.2f MB)", 
+	t.Logf("Memory increase: %d bytes (%.2f MB)",
 		memoryIncrease, float64(memoryIncrease)/(1024*1024))
 
 	// Should not leak excessive memory (allow 100MB increase max)
@@ -297,7 +297,7 @@ func TestSystemdCollectorResourceExhaustion(t *testing.T) {
 	// Don't consume events to exhaust buffer
 	const numEvents = 1000
 	eventsCreated := 0
-	
+
 	for i := 0; i < numEvents; i++ {
 		data := map[string]interface{}{
 			"pid":  i,
@@ -311,7 +311,7 @@ func TestSystemdCollectorResourceExhaustion(t *testing.T) {
 
 		// After buffer exhaustion, collector should remain functional
 		if i%50 == 0 {
-			assert.True(t, collector.IsHealthy(), 
+			assert.True(t, collector.IsHealthy(),
 				"Collector should remain healthy during resource exhaustion")
 		}
 	}
@@ -324,7 +324,7 @@ func TestSystemdCollectorResourceExhaustion(t *testing.T) {
 	// Collector should still be responsive
 	stats := collector.Statistics()
 	assert.NotNil(t, stats)
-	assert.Greater(t, stats["events_dropped"], int64(0), 
+	assert.Greater(t, stats["events_dropped"], int64(0),
 		"Should have dropped events due to exhaustion")
 }
 
@@ -418,11 +418,11 @@ finished:
 	// Verify statistics progression
 	mu.Lock()
 	require.Greater(t, len(statsHistory), 10, "Should have collected statistics")
-	
+
 	// Check that events are being processed over time
 	firstStats := statsHistory[0]
 	lastStats := statsHistory[len(statsHistory)-1]
-	
+
 	eventsGrowth := lastStats["events_collected"].(int64) - firstStats["events_collected"].(int64)
 	assert.Greater(t, eventsGrowth, int64(500), "Should show event processing growth")
 	mu.Unlock()
@@ -439,7 +439,7 @@ func BenchmarkSystemdEventCreation(b *testing.B) {
 	data := map[string]interface{}{
 		"pid":      1234,
 		"comm":     "systemd",
-		"unit":     "test.service", 
+		"unit":     "test.service",
 		"filename": "/usr/bin/test",
 	}
 
@@ -457,7 +457,7 @@ func BenchmarkSystemdEventCreation(b *testing.B) {
 // BenchmarkSystemdStringParsing benchmarks string parsing performance
 func BenchmarkSystemdStringParsing(b *testing.B) {
 	collector := &Collector{}
-	
+
 	// Various test strings
 	testStrings := [][]byte{
 		[]byte("systemd\x00"),
@@ -475,7 +475,7 @@ func BenchmarkSystemdStringParsing(b *testing.B) {
 	}
 }
 
-// BenchmarkSystemdHealthCheck benchmarks health check performance  
+// BenchmarkSystemdHealthCheck benchmarks health check performance
 func BenchmarkSystemdHealthCheck(b *testing.B) {
 	config := DefaultConfig()
 	config.EnableEBPF = false

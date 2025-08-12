@@ -63,7 +63,7 @@ func TestCollectorErrorRecovery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			collector := newErrorRecoveryCollector(tt.name, tt.errorType, tt.recoveryTime, logger)
-			
+
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
@@ -94,7 +94,7 @@ func TestCollectorErrorRecovery(t *testing.T) {
 				}
 
 				assert.True(t, recovered, "Collector should recover from %s", tt.errorType)
-				
+
 				// Verify collector functionality after recovery
 				stats := collector.Statistics()
 				assert.Contains(t, stats, "error_count")
@@ -106,7 +106,7 @@ func TestCollectorErrorRecovery(t *testing.T) {
 				// For non-recoverable errors, should remain unhealthy
 				time.Sleep(tt.recoveryTime + 1*time.Second)
 				assert.False(t, collector.IsHealthy(), "Collector should not recover from %s", tt.errorType)
-				
+
 				stats := collector.Statistics()
 				assert.Greater(t, stats["error_count"].(int64), int64(0))
 				assert.Equal(t, int64(0), stats["recovery_count"].(int64), "Should not have recovered")
@@ -121,7 +121,7 @@ func TestCollectorGracefulDegradation(t *testing.T) {
 
 	// Create collector with degradation support
 	collector := newDegradationCollector("degradation-test", logger)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -159,7 +159,7 @@ func TestCollectorGracefulDegradation(t *testing.T) {
 	}
 
 	assert.Greater(t, len(events), 0, "Should still produce events in degraded mode")
-	
+
 	// Verify event metadata indicates degraded mode
 	if len(events) > 0 {
 		assert.Equal(t, "userspace", events[0].Metadata["mode"])
@@ -192,7 +192,7 @@ func TestCollectorErrorPropagation(t *testing.T) {
 	// Create parent collector with child collectors
 	parentCollector := newHierarchicalCollector("parent", logger)
 	childCollectors := make([]*hierarchicalCollector, 3)
-	
+
 	for i := 0; i < 3; i++ {
 		child := newHierarchicalCollector(fmt.Sprintf("child-%d", i), logger)
 		childCollectors[i] = child
@@ -219,7 +219,7 @@ func TestCollectorErrorPropagation(t *testing.T) {
 	// Parent should detect child error but remain functional
 	assert.True(t, parentCollector.IsHealthy(), "Parent should remain healthy")
 	assert.False(t, childCollectors[1].IsHealthy(), "Failing child should be unhealthy")
-	
+
 	// Other children should remain healthy
 	assert.True(t, childCollectors[0].IsHealthy(), "Other children should remain healthy")
 	assert.True(t, childCollectors[2].IsHealthy(), "Other children should remain healthy")
@@ -240,7 +240,7 @@ func TestCollectorErrorPropagation(t *testing.T) {
 
 	// Parent should remain healthy but in degraded mode
 	assert.True(t, parentCollector.IsHealthy(), "Parent should remain healthy in degraded mode")
-	
+
 	// Simulate recovery of one child
 	childCollectors[0].recover()
 	time.Sleep(200 * time.Millisecond)
@@ -255,7 +255,7 @@ func TestCollectorCircuitBreaker(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	collector := newCircuitBreakerCollector("circuit-test", logger)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -276,7 +276,7 @@ func TestCollectorCircuitBreaker(t *testing.T) {
 
 	// Circuit should now be open (blocking operations)
 	assert.Equal(t, "open", collector.GetCircuitState())
-	
+
 	// Collector may still be healthy but in protection mode
 	stats := collector.Statistics()
 	assert.Greater(t, stats["circuit_breaker_trips"].(int64), int64(0))
@@ -310,46 +310,46 @@ func TestCollectorRetryMechanisms(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	tests := []struct {
-		name           string
-		retryStrategy  string
-		maxRetries     int
-		expectedTime   time.Duration
-		shouldSucceed  bool
+		name          string
+		retryStrategy string
+		maxRetries    int
+		expectedTime  time.Duration
+		shouldSucceed bool
 	}{
 		{
-			name:           "exponential backoff",
-			retryStrategy:  "exponential",
-			maxRetries:     3,
-			expectedTime:   7 * time.Second, // 1 + 2 + 4 seconds
-			shouldSucceed:  true,
+			name:          "exponential backoff",
+			retryStrategy: "exponential",
+			maxRetries:    3,
+			expectedTime:  7 * time.Second, // 1 + 2 + 4 seconds
+			shouldSucceed: true,
 		},
 		{
-			name:           "linear backoff",
-			retryStrategy:  "linear",
-			maxRetries:     3,
-			expectedTime:   6 * time.Second, // 1 + 2 + 3 seconds
-			shouldSucceed:  true,
+			name:          "linear backoff",
+			retryStrategy: "linear",
+			maxRetries:    3,
+			expectedTime:  6 * time.Second, // 1 + 2 + 3 seconds
+			shouldSucceed: true,
 		},
 		{
-			name:           "fixed backoff",
-			retryStrategy:  "fixed",
-			maxRetries:     2,
-			expectedTime:   2 * time.Second, // 1 + 1 seconds
-			shouldSucceed:  true,
+			name:          "fixed backoff",
+			retryStrategy: "fixed",
+			maxRetries:    2,
+			expectedTime:  2 * time.Second, // 1 + 1 seconds
+			shouldSucceed: true,
 		},
 		{
-			name:           "no retry exhaustion",
-			retryStrategy:  "exponential",
-			maxRetries:     1,
-			expectedTime:   1 * time.Second,
-			shouldSucceed:  false,
+			name:          "no retry exhaustion",
+			retryStrategy: "exponential",
+			maxRetries:    1,
+			expectedTime:  1 * time.Second,
+			shouldSucceed: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			collector := newRetryCollector(tt.name, tt.retryStrategy, tt.maxRetries, logger)
-			
+
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
@@ -367,10 +367,10 @@ func TestCollectorRetryMechanisms(t *testing.T) {
 			if tt.shouldSucceed {
 				assert.NoError(t, err, "Start should succeed after retries")
 				assert.True(t, collector.IsHealthy())
-				
+
 				// Verify timing is approximately correct (allow 1s variance)
-				assert.True(t, duration >= tt.expectedTime-time.Second && 
-					       duration <= tt.expectedTime+time.Second,
+				assert.True(t, duration >= tt.expectedTime-time.Second &&
+					duration <= tt.expectedTime+time.Second,
 					"Duration %v should be approximately %v", duration, tt.expectedTime)
 			} else {
 				assert.Error(t, err, "Start should fail after exhausting retries")
@@ -381,7 +381,7 @@ func TestCollectorRetryMechanisms(t *testing.T) {
 			assert.Contains(t, stats, "retry_attempts")
 			assert.Contains(t, stats, "retry_strategy")
 			assert.Equal(t, tt.retryStrategy, stats["retry_strategy"])
-			
+
 			if tt.shouldSucceed {
 				assert.Equal(t, int64(tt.maxRetries), stats["retry_attempts"].(int64))
 			} else {
@@ -398,7 +398,7 @@ func TestCollectorBulkheadIsolation(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	collector := newBulkheadCollector("bulkhead-test", logger)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -408,7 +408,7 @@ func TestCollectorBulkheadIsolation(t *testing.T) {
 
 	// Test that different subsystems are isolated
 	subsystems := []string{"ebpf", "userspace", "network", "process", "kernel"}
-	
+
 	// Simulate failure in one subsystem
 	collector.simulateSubsystemFailure("ebpf")
 	time.Sleep(200 * time.Millisecond)
@@ -438,7 +438,7 @@ func TestCollectorBulkheadIsolation(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	assert.True(t, collector.isSubsystemHealthy("ebpf"), "Recovered subsystem should be healthy")
-	
+
 	finalStats := collector.Statistics()
 	assert.Equal(t, int64(0), finalStats["isolated_subsystems"].(int64))
 	assert.Greater(t, finalStats["recovery_events"].(int64), int64(0))
@@ -450,9 +450,9 @@ func TestCollectorResourceLimiting(t *testing.T) {
 
 	collector := newResourceLimitedCollector("resource-test", logger)
 	collector.setMemoryLimit(10 * 1024 * 1024) // 10MB limit
-	collector.setCPULimit(50.0)                 // 50% CPU limit
+	collector.setCPULimit(50.0)                // 50% CPU limit
 	collector.setEventRateLimit(1000)          // 1000 events/second
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -487,17 +487,17 @@ func TestCollectorResourceLimiting(t *testing.T) {
 		// Generate events at high rate
 		eventCount := 2000 // Exceed 1000/second limit
 		startTime := time.Now()
-		
+
 		for i := 0; i < eventCount; i++ {
 			collector.generateEvent(fmt.Sprintf("rate-test-%d", i))
 		}
-		
+
 		duration := time.Since(startTime)
 		effectiveRate := float64(eventCount) / duration.Seconds()
-		
+
 		// Should be limited to approximately 1000/second
 		assert.Less(t, effectiveRate, 1200.0, "Event rate should be limited")
-		
+
 		stats := collector.Statistics()
 		assert.Greater(t, stats["rate_limit_events"].(int64), int64(0))
 	})
@@ -511,7 +511,7 @@ func TestCollectorResourceLimiting(t *testing.T) {
 
 		assert.False(t, collector.isResourceThrottled("memory"), "Memory throttling should be released")
 		assert.False(t, collector.isResourceThrottled("cpu"), "CPU throttling should be released")
-		
+
 		stats := collector.Statistics()
 		assert.Greater(t, stats["resource_recovery_events"].(int64), int64(0))
 	})
@@ -520,14 +520,14 @@ func TestCollectorResourceLimiting(t *testing.T) {
 // Helper collector implementations for error testing
 
 type errorRecoveryCollector struct {
-	name         string
-	errorType    string
-	recoveryTime time.Duration
-	logger       *zap.Logger
-	healthy      bool
-	errorCount   int64
+	name          string
+	errorType     string
+	recoveryTime  time.Duration
+	logger        *zap.Logger
+	healthy       bool
+	errorCount    int64
 	recoveryCount int64
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 }
 
 func newErrorRecoveryCollector(name, errorType string, recoveryTime time.Duration, logger *zap.Logger) *errorRecoveryCollector {
@@ -569,7 +569,7 @@ func (c *errorRecoveryCollector) Events() <-chan RawEvent {
 func (c *errorRecoveryCollector) Health() (bool, map[string]interface{}) {
 	healthy := c.IsHealthy()
 	return healthy, map[string]interface{}{
-		"healthy": healthy,
+		"healthy":    healthy,
 		"error_type": c.errorType,
 	}
 }
@@ -586,7 +586,7 @@ func (c *errorRecoveryCollector) Statistics() map[string]interface{} {
 
 func (c *errorRecoveryCollector) triggerError() {
 	atomic.AddInt64(&c.errorCount, 1)
-	
+
 	c.mu.Lock()
 	c.healthy = false
 	c.mu.Unlock()
@@ -610,13 +610,13 @@ func (c *errorRecoveryCollector) recover() {
 // Additional helper collector types...
 
 type degradationCollector struct {
-	name        string
-	logger      *zap.Logger
-	mode        string
-	healthy     bool
-	events      chan RawEvent
-	stats       map[string]int64
-	mu          sync.RWMutex
+	name    string
+	logger  *zap.Logger
+	mode    string
+	healthy bool
+	events  chan RawEvent
+	stats   map[string]int64
+	mu      sync.RWMutex
 }
 
 func newDegradationCollector(name string, logger *zap.Logger) *degradationCollector {
@@ -732,8 +732,8 @@ func (c *circuitBreakerCollector) IsHealthy() bool {
 	return c.healthy
 }
 func (c *circuitBreakerCollector) Start(ctx context.Context) error { return nil }
-func (c *circuitBreakerCollector) Stop() error { return nil }
-func (c *circuitBreakerCollector) Events() <-chan RawEvent { return make(chan RawEvent) }
+func (c *circuitBreakerCollector) Stop() error                     { return nil }
+func (c *circuitBreakerCollector) Events() <-chan RawEvent         { return make(chan RawEvent) }
 func (c *circuitBreakerCollector) Health() (bool, map[string]interface{}) {
 	return c.IsHealthy(), map[string]interface{}{"circuit_state": c.GetCircuitState()}
 }
@@ -804,8 +804,8 @@ func (c *hierarchicalCollector) IsHealthy() bool {
 	return c.healthy
 }
 func (c *hierarchicalCollector) Start(ctx context.Context) error { return nil }
-func (c *hierarchicalCollector) Stop() error { return nil }
-func (c *hierarchicalCollector) Events() <-chan RawEvent { return make(chan RawEvent) }
+func (c *hierarchicalCollector) Stop() error                     { return nil }
+func (c *hierarchicalCollector) Events() <-chan RawEvent         { return make(chan RawEvent) }
 func (c *hierarchicalCollector) Health() (bool, map[string]interface{}) {
 	return c.IsHealthy(), map[string]interface{}{"children": len(c.children)}
 }
@@ -820,7 +820,7 @@ func (c *hierarchicalCollector) Statistics() map[string]interface{} {
 		}
 	}
 	return map[string]interface{}{
-		"total_children":    int64(len(c.children)),
+		"total_children":     int64(len(c.children)),
 		"unhealthy_children": unhealthy,
 	}
 }
@@ -862,13 +862,13 @@ func newRetryCollector(name, strategy string, maxRetries int, logger *zap.Logger
 	}
 }
 
-func (c *retryCollector) Name() string { return c.name }
-func (c *retryCollector) IsHealthy() bool { return true }
-func (c *retryCollector) Events() <-chan RawEvent { return make(chan RawEvent) }
+func (c *retryCollector) Name() string                           { return c.name }
+func (c *retryCollector) IsHealthy() bool                        { return true }
+func (c *retryCollector) Events() <-chan RawEvent                { return make(chan RawEvent) }
 func (c *retryCollector) Health() (bool, map[string]interface{}) { return true, c.stats }
-func (c *retryCollector) Statistics() map[string]interface{} { return c.stats }
-func (c *retryCollector) Stop() error { return nil }
-func (c *retryCollector) setFailureCount(count int) { c.failureCount = count }
+func (c *retryCollector) Statistics() map[string]interface{}     { return c.stats }
+func (c *retryCollector) Stop() error                            { return nil }
+func (c *retryCollector) setFailureCount(count int)              { c.failureCount = count }
 
 func (c *retryCollector) Start(ctx context.Context) error {
 	attempts := int64(0)
@@ -876,7 +876,7 @@ func (c *retryCollector) Start(ctx context.Context) error {
 		attempts++
 		if c.failureCount > 0 {
 			c.failureCount--
-			
+
 			// Calculate backoff time
 			var backoffTime time.Duration
 			switch c.retryStrategy {
@@ -887,7 +887,7 @@ func (c *retryCollector) Start(ctx context.Context) error {
 			case "fixed":
 				backoffTime = 1 * time.Second
 			}
-			
+
 			time.Sleep(backoffTime)
 		} else {
 			c.stats["retry_attempts"] = attempts
@@ -919,11 +919,11 @@ func newBulkheadCollector(name string, logger *zap.Logger) *bulkheadCollector {
 	}
 }
 
-func (c *bulkheadCollector) Name() string { return c.name }
-func (c *bulkheadCollector) IsHealthy() bool { return true }
-func (c *bulkheadCollector) Start(ctx context.Context) error { return nil }
-func (c *bulkheadCollector) Stop() error { return nil }
-func (c *bulkheadCollector) Events() <-chan RawEvent { return make(chan RawEvent) }
+func (c *bulkheadCollector) Name() string                           { return c.name }
+func (c *bulkheadCollector) IsHealthy() bool                        { return true }
+func (c *bulkheadCollector) Start(ctx context.Context) error        { return nil }
+func (c *bulkheadCollector) Stop() error                            { return nil }
+func (c *bulkheadCollector) Events() <-chan RawEvent                { return make(chan RawEvent) }
 func (c *bulkheadCollector) Health() (bool, map[string]interface{}) { return true, nil }
 func (c *bulkheadCollector) Statistics() map[string]interface{} {
 	c.mu.RLock()
@@ -979,11 +979,11 @@ func newResourceLimitedCollector(name string, logger *zap.Logger) *resourceLimit
 	}
 }
 
-func (c *resourceLimitedCollector) Name() string { return c.name }
-func (c *resourceLimitedCollector) IsHealthy() bool { return true }
-func (c *resourceLimitedCollector) Start(ctx context.Context) error { return nil }
-func (c *resourceLimitedCollector) Stop() error { return nil }
-func (c *resourceLimitedCollector) Events() <-chan RawEvent { return c.events }
+func (c *resourceLimitedCollector) Name() string                           { return c.name }
+func (c *resourceLimitedCollector) IsHealthy() bool                        { return true }
+func (c *resourceLimitedCollector) Start(ctx context.Context) error        { return nil }
+func (c *resourceLimitedCollector) Stop() error                            { return nil }
+func (c *resourceLimitedCollector) Events() <-chan RawEvent                { return c.events }
 func (c *resourceLimitedCollector) Health() (bool, map[string]interface{}) { return true, nil }
 func (c *resourceLimitedCollector) Statistics() map[string]interface{} {
 	c.mu.RLock()
@@ -996,7 +996,7 @@ func (c *resourceLimitedCollector) Statistics() map[string]interface{} {
 }
 
 func (c *resourceLimitedCollector) setMemoryLimit(limit uint64) { c.memoryLimit = limit }
-func (c *resourceLimitedCollector) setCPULimit(limit float64) { c.cpuLimit = limit }
+func (c *resourceLimitedCollector) setCPULimit(limit float64)   { c.cpuLimit = limit }
 func (c *resourceLimitedCollector) setEventRateLimit(limit int) { c.rateLimit = limit }
 
 func (c *resourceLimitedCollector) simulateMemoryUsage(usage uint64) {
@@ -1034,16 +1034,16 @@ func (c *resourceLimitedCollector) generateEvent(eventID string) {
 	c.mu.Lock()
 	c.stats["rate_limit_events"]++
 	c.mu.Unlock()
-	
+
 	event := RawEvent{
 		Type:      "resource_test",
 		Timestamp: time.Now(),
 		TraceID:   "resource-trace",
-		SpanID:    "resource-span", 
+		SpanID:    "resource-span",
 		Metadata:  map[string]string{"event_id": eventID},
 		Data:      []byte(fmt.Sprintf(`{"event_id":"%s"}`, eventID)),
 	}
-	
+
 	select {
 	case c.events <- event:
 	default:

@@ -61,7 +61,6 @@ func (a *CorrelationAggregator) Aggregate(ctx context.Context, outputs []*Correl
 
 	a.logger.Info("Starting aggregation", zap.String("event_id", event.ID))
 
-
 	// Step 1: Extract all findings
 	// Pre-allocate slice with total capacity to avoid reallocation
 

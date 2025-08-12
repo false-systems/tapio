@@ -10,11 +10,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/zap"
-	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
 // TestSystemdCollectorEBPFIntegration tests eBPF program loading and event handling
@@ -53,7 +53,7 @@ func TestSystemdCollectorEBPFIntegration(t *testing.T) {
 	err = collector.Start(ctx)
 	if err != nil {
 		t.Logf("eBPF start failed (expected in test environment): %v", err)
-		
+
 		// Verify error is handled gracefully
 		assert.Contains(t, err.Error(), "failed to load eBPF program")
 		assert.False(t, collector.IsHealthy())
@@ -69,7 +69,7 @@ func TestSystemdCollectorEBPFIntegration(t *testing.T) {
 	// Collect events for a short period
 	eventCollected := false
 	timeout := time.After(5 * time.Second)
-	
+
 	for !eventCollected {
 		select {
 		case event := <-collector.Events():
@@ -113,7 +113,7 @@ func TestSystemdCollectorEBPFFailure(t *testing.T) {
 	// Verify failure metrics are recorded
 	stats := collector.Statistics()
 	assert.Contains(t, stats, "ebpf_load_failures")
-	
+
 	// Stop should succeed even after failed start
 	err = collector.Stop()
 	assert.NoError(t, err)
@@ -186,24 +186,24 @@ func TestSystemdCollectorJournalIntegration(t *testing.T) {
 func TestSystemdEventStructCompatibility(t *testing.T) {
 	// Test that Go struct matches expected C struct layout
 	event := SystemdEvent{}
-	
+
 	// Check struct size and alignment
 	structSize := unsafe.Sizeof(event)
 	t.Logf("SystemdEvent struct size: %d bytes", structSize)
-	
+
 	// SystemdEvent should be reasonably sized
 	minExpectedSize := uintptr(24 + 16 + 256) // Timestamp+PID+PPID+EventType+ExitCode + Comm + Filename
 	assert.GreaterOrEqual(t, structSize, minExpectedSize)
-	
+
 	// Test field offsets for C compatibility
 	timestampOffset := unsafe.Offsetof(event.Timestamp)
 	pidOffset := unsafe.Offsetof(event.PID)
 	commOffset := unsafe.Offsetof(event.Comm)
 	filenameOffset := unsafe.Offsetof(event.Filename)
-	
+
 	t.Logf("Field offsets - Timestamp: %d, PID: %d, Comm: %d, Filename: %d",
 		timestampOffset, pidOffset, commOffset, filenameOffset)
-	
+
 	// Offsets should be reasonable for C struct packing
 	assert.Equal(t, uintptr(0), timestampOffset)
 	assert.Greater(t, pidOffset, timestampOffset)
@@ -230,17 +230,17 @@ func TestSystemdCollectorEventParsingSafety(t *testing.T) {
 
 	// Convert to bytes safely
 	eventBytes := (*[unsafe.Sizeof(validEvent)]byte)(unsafe.Pointer(&validEvent))[:]
-	
+
 	// This would be the eBPF event parsing (simulated)
 	parsedEvent := (*SystemdEvent)(unsafe.Pointer(&eventBytes[0]))
-	
+
 	assert.Equal(t, validEvent.PID, parsedEvent.PID)
 	assert.Equal(t, validEvent.EventType, parsedEvent.EventType)
-	
+
 	// Test string parsing safety
 	comm := collector.nullTerminatedString(parsedEvent.Comm[:])
 	filename := collector.nullTerminatedString(parsedEvent.Filename[:])
-	
+
 	assert.Equal(t, "systemd", comm)
 	assert.Equal(t, "/usr/lib/systemd/systemd", filename)
 }
@@ -277,7 +277,7 @@ func TestSystemdCollectorFullPipeline(t *testing.T) {
 
 	// Simulate event processing through the pipeline
 	var eventsCollected []collectors.RawEvent
-	
+
 	// Generate test events
 	go func() {
 		for i := 0; i < 10; i++ {
@@ -298,7 +298,7 @@ func TestSystemdCollectorFullPipeline(t *testing.T) {
 					// Channel full
 				}
 			}
-			
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -309,7 +309,7 @@ func TestSystemdCollectorFullPipeline(t *testing.T) {
 		select {
 		case event := <-collector.Events():
 			eventsCollected = append(eventsCollected, event)
-			
+
 		case <-timeout:
 			break
 		}
@@ -331,11 +331,11 @@ func TestSystemdCollectorFullPipeline(t *testing.T) {
 	metrics := &metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, metrics)
 	require.NoError(t, err)
-	
+
 	// Check for systemd-specific metrics
 	metricNames := getSystemdMetricNames(metrics)
 	t.Logf("Collected metrics: %v", metricNames)
-	
+
 	// Should have some systemd collector metrics
 	hasSystemdMetrics := false
 	for _, name := range metricNames {
@@ -366,23 +366,23 @@ func TestSystemdCollectorErrorRecovery(t *testing.T) {
 
 	// Simulate various error conditions
 	initialStats := collector.Statistics()
-	
+
 	// Test invalid event type handling
 	collector.eventTypeToString(999)
 	collector.eventTypeToString(0)
-	
+
 	// Test malformed string handling
 	malformedData := make([]byte, 256)
 	for i := range malformedData {
 		malformedData[i] = byte(i % 256) // Include non-printable characters
 	}
 	malformedData[255] = 0 // Null terminate
-	
+
 	result := collector.nullTerminatedString(malformedData)
 	assert.NotPanics(t, func() {
 		t.Logf("Parsed malformed string: %q", result)
 	})
-	
+
 	// Test rapid event creation (potential memory pressure)
 	for i := 0; i < 1000; i++ {
 		data := map[string]interface{}{
@@ -391,12 +391,12 @@ func TestSystemdCollectorErrorRecovery(t *testing.T) {
 		event := collector.createEvent("stress_test", data)
 		assert.NotNil(t, event)
 	}
-	
+
 	// Collector should remain healthy after errors
 	assert.True(t, collector.IsHealthy())
-	
+
 	finalStats := collector.Statistics()
-	
+
 	// Error count may have increased, but should be handled gracefully
 	if finalStats["error_count"].(int64) > initialStats["error_count"].(int64) {
 		t.Logf("Error count increased as expected: %d -> %d",
@@ -419,20 +419,20 @@ func TestSystemdCollectorContextCancellation(t *testing.T) {
 
 	err = collector.Start(ctx)
 	require.NoError(t, err)
-	
+
 	// Verify collector is running
 	assert.True(t, collector.IsHealthy())
-	
+
 	// Cancel context
 	cancel()
-	
+
 	// Give some time for cancellation to propagate
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Collector should handle cancellation gracefully
 	// (Implementation details may vary, but shouldn't panic)
 	collector.Statistics() // Should not panic
-	
+
 	err = collector.Stop()
 	assert.NoError(t, err)
 }
@@ -450,9 +450,9 @@ func getSystemdMetricNames(rm *metricdata.ResourceMetrics) []string {
 }
 
 func contains(str, substr string) bool {
-	return len(str) >= len(substr) && 
-		(str == substr || (len(str) > len(substr) && 
-		(str[:len(substr)] == substr || str[len(str)-len(substr):] == substr)))
+	return len(str) >= len(substr) &&
+		(str == substr || (len(str) > len(substr) &&
+			(str[:len(substr)] == substr || str[len(str)-len(substr):] == substr)))
 }
 
 // TestSystemdCollectorResourceCleanup tests proper resource cleanup
@@ -468,21 +468,21 @@ func TestSystemdCollectorResourceCleanup(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		
+
 		err = collector.Start(ctx)
 		require.NoError(t, err)
-		
+
 		// Generate some activity
 		data := map[string]interface{}{"test": i}
 		event := collector.createEvent("cleanup_test", data)
 		assert.NotNil(t, event)
-		
+
 		// Stop collector
 		err = collector.Stop()
 		assert.NoError(t, err)
-		
+
 		cancel()
-		
+
 		// Ensure collector is properly cleaned up
 		assert.False(t, collector.IsHealthy())
 	}

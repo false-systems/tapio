@@ -170,7 +170,7 @@ func (s *Neo4jStorage) marshalToString(data interface{}, fallback string, logCon
 	if len(jsonBytes) > 0 && jsonBytes[len(jsonBytes)-1] == '\n' {
 		jsonBytes = jsonBytes[:len(jsonBytes)-1]
 	}
-	
+
 	return string(jsonBytes)
 }
 
@@ -230,7 +230,7 @@ func (s *Neo4jStorage) storeInTransaction(ctx context.Context, tx neo4j.Explicit
 		`
 
 		evidenceJSON := s.marshalToString(result.RootCause.Evidence, "{}", "root cause evidence", result.ID)
-		
+
 		params := neo4jTypes.QueryParams{
 			StringParams: map[string]string{
 				"correlationId": result.ID,
