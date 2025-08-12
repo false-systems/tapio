@@ -4,20 +4,20 @@ import (
 	"log"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	factoryregistry "github.com/yairfalse/tapio/pkg/collectors/factory"
+	"github.com/yairfalse/tapio/pkg/collectors/registry"
 )
 
 func init() {
 	// Register the CNI collector typed factory with error handling
 	factory := NewCNIFactory()
-	if err := factoryregistry.RegisterTypedFactory("cni", factory); err != nil {
+	if err := registry.RegisterTypedFactory("cni", factory); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register CNI typed factory: %v", err)
 		log.Printf("CNI collector will not be available")
 	}
 
 	// Also register legacy factory for backward compatibility
-	if err := factoryregistry.Register("cni", CreateLegacyCollector); err != nil {
+	if err := registry.Register("cni", CreateLegacyCollector); err != nil {
 		// Log error but don't panic - this allows the application to continue
 		log.Printf("WARNING: failed to register CNI legacy factory: %v", err)
 	}
