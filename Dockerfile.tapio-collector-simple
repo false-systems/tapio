@@ -1,0 +1,105 @@
+# Simplified Production Dockerfile for Tapio Collector
+# This version builds without full eBPF compilation but includes runtime eBPF support
+
+ARG GO_VERSION=1.24
+
+# =====================================================
+# Stage 1: Go Build Environment
+# =====================================================
+FROM golang:${GO_VERSION}-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    gcc \
+    musl-dev \
+    linux-headers
+
+WORKDIR /build
+
+# Copy Go modules first for better caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the tapio-collector binary (without problematic eBPF modules)
+RUN CGO_ENABLED=1 GOOS=linux go build -v \
+    -ldflags="-w -s \
+              -X 'github.com/yairfalse/tapio/pkg/version.Version=v1.0.0' \
+              -X 'github.com/yairfalse/tapio/pkg/version.GitCommit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)' \
+              -X 'github.com/yairfalse/tapio/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+    -o tapio-collector \
+    ./cmd/tapio-collector
+
+# =====================================================
+# Stage 2: Runtime Image
+# =====================================================
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    curl \
+    bash
+
+# Create directories and user
+RUN addgroup -g 65532 -S tapio && \
+    adduser -u 65532 -S tapio -G tapio && \
+    mkdir -p /app /etc/tapio /var/log/tapio && \
+    chown -R tapio:tapio /app /etc/tapio /var/log/tapio
+
+WORKDIR /app
+
+# Copy the compiled binary
+COPY --from=builder /build/tapio-collector ./
+
+# Copy configuration files (create basic config if none exist)
+RUN echo 'cluster:\n  name: "default"\nlogging:\n  level: "info"' > /etc/tapio/config.yaml
+
+# Make binary executable
+RUN chmod +x tapio-collector
+
+# Create entrypoint script
+RUN cat > entrypoint.sh << 'EOF' && chmod +x entrypoint.sh
+#!/bin/bash
+set -e
+
+echo "Starting Tapio Collector"
+echo "Version: $(./tapio-collector --version 2>&1 | head -1)"
+echo "Node: ${NODE_NAME:-unknown}"
+echo "Pod: ${POD_NAME:-unknown}" 
+echo "Namespace: ${POD_NAMESPACE:-unknown}"
+
+# Check BPF filesystem (will only be available with privileged containers)
+if [ -d "/sys/fs/bpf" ]; then
+    echo "BPF filesystem available at /sys/fs/bpf"
+else
+    echo "BPF filesystem not mounted (expected in non-privileged containers)"
+fi
+
+echo "Starting collector with args: $@"
+exec ./tapio-collector "$@"
+EOF
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+# Default user (will be overridden in DaemonSet)
+USER tapio
+
+# Expose ports
+EXPOSE 8080 9090
+
+# Default configuration
+ENV TAPIO_CONFIG_FILE=/etc/tapio/config.yaml
+
+# Labels
+LABEL maintainer="Tapio Team"
+LABEL version="v1.0.0"
+LABEL description="Tapio Kubernetes observability collector"
+
+ENTRYPOINT ["./entrypoint.sh"]
+CMD ["--config", "/etc/tapio/config.yaml", "--log-level", "info"]

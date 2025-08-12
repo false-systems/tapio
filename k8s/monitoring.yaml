@@ -1,0 +1,499 @@
+---
+# ServiceMonitor for Tapio Collector metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tapio-collector
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-collector
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: tapio
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tapio-collector
+      app.kubernetes.io/component: collector
+  endpoints:
+  - port: metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'go_.*'
+      action: drop
+    - sourceLabels: [__name__]
+      regex: 'promhttp_.*'
+      action: drop
+---
+# ServiceMonitor for OTEL Collector metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tapio-otel-collector
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-otel-collector
+    app.kubernetes.io/component: otel-collector
+    app.kubernetes.io/part-of: tapio
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tapio-otel-collector
+      app.kubernetes.io/component: otel-collector
+  endpoints:
+  - port: metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+---
+# PrometheusRule for Tapio alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tapio-alerts
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-alerts
+    app.kubernetes.io/part-of: tapio
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: tapio-collector
+    interval: 30s
+    rules:
+    # Collector availability
+    - alert: TapioCollectorDown
+      expr: up{job="tapio-collector"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        component: collector
+        service: tapio
+      annotations:
+        summary: "Tapio collector is down"
+        description: "Tapio collector on node {{ $labels.node }} has been down for more than 2 minutes."
+        runbook_url: "https://docs.tapio.io/runbooks/collector-down"
+    
+    # High event drop rate
+    - alert: TapioHighEventDropRate
+      expr: rate(tapio_events_dropped_total[5m]) > 1000
+      for: 5m
+      labels:
+        severity: warning
+        component: collector
+        service: tapio
+      annotations:
+        summary: "High event drop rate in Tapio collector"
+        description: "Tapio collector on node {{ $labels.node }} is dropping {{ $value }} events per second."
+        runbook_url: "https://docs.tapio.io/runbooks/high-drop-rate"
+    
+    # High memory usage
+    - alert: TapioCollectorHighMemoryUsage
+      expr: container_memory_usage_bytes{pod=~"tapio-collector-.*"} / container_spec_memory_limit_bytes{pod=~"tapio-collector-.*"} > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: collector
+        service: tapio
+      annotations:
+        summary: "High memory usage in Tapio collector"
+        description: "Tapio collector {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit."
+        runbook_url: "https://docs.tapio.io/runbooks/high-memory-usage"
+    
+    # High CPU usage
+    - alert: TapioCollectorHighCPUUsage
+      expr: rate(container_cpu_usage_seconds_total{pod=~"tapio-collector-.*"}[5m]) > 0.8
+      for: 10m
+      labels:
+        severity: warning
+        component: collector
+        service: tapio
+      annotations:
+        summary: "High CPU usage in Tapio collector"
+        description: "Tapio collector {{ $labels.pod }} is using {{ $value | humanizePercentage }} CPU."
+        runbook_url: "https://docs.tapio.io/runbooks/high-cpu-usage"
+    
+    # eBPF program loading failures
+    - alert: TapioEBPFLoadFailures
+      expr: rate(tapio_ebpf_load_failures_total[10m]) > 0
+      for: 2m
+      labels:
+        severity: critical
+        component: ebpf
+        service: tapio
+      annotations:
+        summary: "eBPF program loading failures"
+        description: "Tapio collector on node {{ $labels.node }} is failing to load eBPF programs: {{ $labels.program }}."
+        runbook_url: "https://docs.tapio.io/runbooks/ebpf-load-failures"
+    
+    # Ring buffer overruns
+    - alert: TapioRingBufferOverruns
+      expr: rate(tapio_ring_buffer_overruns_total[5m]) > 100
+      for: 5m
+      labels:
+        severity: warning
+        component: ebpf
+        service: tapio
+      annotations:
+        summary: "eBPF ring buffer overruns"
+        description: "Tapio collector on node {{ $labels.node }} is experiencing ring buffer overruns at {{ $value }} per second."
+        runbook_url: "https://docs.tapio.io/runbooks/ring-buffer-overruns"
+    
+    # Kernel compatibility issues
+    - alert: TapioKernelCompatibilityIssue
+      expr: tapio_kernel_compatibility == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: kernel
+        service: tapio
+      annotations:
+        summary: "Kernel compatibility issue"
+        description: "Tapio collector on node {{ $labels.node }} detected kernel compatibility issues."
+        runbook_url: "https://docs.tapio.io/runbooks/kernel-compatibility"
+
+  - name: tapio-otel-collector
+    interval: 30s
+    rules:
+    # OTEL collector availability
+    - alert: TapioOTELCollectorDown
+      expr: up{job="tapio-otel-collector"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        component: otel-collector
+        service: tapio
+      annotations:
+        summary: "Tapio OTEL collector is down"
+        description: "Tapio OTEL collector {{ $labels.pod }} has been down for more than 2 minutes."
+        runbook_url: "https://docs.tapio.io/runbooks/otel-collector-down"
+    
+    # High span drop rate
+    - alert: TapioOTELHighSpanDropRate
+      expr: rate(otelcol_processor_dropped_spans_total[5m]) > 100
+      for: 5m
+      labels:
+        severity: warning
+        component: otel-collector
+        service: tapio
+      annotations:
+        summary: "High span drop rate in OTEL collector"
+        description: "Tapio OTEL collector is dropping {{ $value }} spans per second in processor {{ $labels.processor }}."
+        runbook_url: "https://docs.tapio.io/runbooks/otel-high-drop-rate"
+    
+    # Export failures
+    - alert: TapioOTELExportFailures
+      expr: rate(otelcol_exporter_send_failed_spans_total[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+        component: otel-collector
+        service: tapio
+      annotations:
+        summary: "OTEL export failures"
+        description: "Tapio OTEL collector is failing to export spans to {{ $labels.exporter }} at {{ $value }} failures per second."
+        runbook_url: "https://docs.tapio.io/runbooks/otel-export-failures"
+    
+    # Queue size growing
+    - alert: TapioOTELQueueSizeGrowing
+      expr: otelcol_exporter_queue_size > 5000
+      for: 10m
+      labels:
+        severity: warning
+        component: otel-collector
+        service: tapio
+      annotations:
+        summary: "OTEL exporter queue size growing"
+        description: "Tapio OTEL collector exporter {{ $labels.exporter }} queue size is {{ $value }}."
+        runbook_url: "https://docs.tapio.io/runbooks/otel-queue-growing"
+
+  - name: tapio-system
+    interval: 30s
+    rules:
+    # Namespace resource quotas
+    - alert: TapioNamespaceResourceQuotaExceeded
+      expr: kube_resourcequota{namespace="tapio-system", type="used"} / kube_resourcequota{namespace="tapio-system", type="hard"} > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: system
+        service: tapio
+      annotations:
+        summary: "Tapio namespace resource quota exceeded"
+        description: "Tapio namespace is using {{ $value | humanizePercentage }} of {{ $labels.resource }} quota."
+        runbook_url: "https://docs.tapio.io/runbooks/resource-quota-exceeded"
+    
+    # Pod restart rate
+    - alert: TapioPodRestartRate
+      expr: rate(kube_pod_container_status_restarts_total{namespace="tapio-system"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+        component: pod
+        service: tapio
+      annotations:
+        summary: "High pod restart rate"
+        description: "Pod {{ $labels.pod }} in tapio-system namespace is restarting at {{ $value }} restarts per second."
+        runbook_url: "https://docs.tapio.io/runbooks/pod-restarts"
+    
+    # Storage usage
+    - alert: TapioPVCStorageUsage
+      expr: kubelet_volume_stats_used_bytes{namespace="tapio-system"} / kubelet_volume_stats_capacity_bytes{namespace="tapio-system"} > 0.85
+      for: 10m
+      labels:
+        severity: warning
+        component: storage
+        service: tapio
+      annotations:
+        summary: "High PVC storage usage"
+        description: "PVC {{ $labels.persistentvolumeclaim }} in tapio-system is {{ $value | humanizePercentage }} full."
+        runbook_url: "https://docs.tapio.io/runbooks/storage-usage"
+
+  - name: tapio-performance
+    interval: 60s
+    rules:
+    # Event processing latency
+    - alert: TapioHighEventProcessingLatency
+      expr: histogram_quantile(0.95, rate(tapio_event_processing_duration_seconds_bucket[10m])) > 5
+      for: 10m
+      labels:
+        severity: warning
+        component: performance
+        service: tapio
+      annotations:
+        summary: "High event processing latency"
+        description: "95th percentile event processing latency is {{ $value }}s in collector {{ $labels.collector_type }}."
+        runbook_url: "https://docs.tapio.io/runbooks/high-latency"
+    
+    # Low event rate (potential issue)
+    - alert: TapioLowEventRate
+      expr: rate(tapio_events_processed_total[10m]) < 10
+      for: 15m
+      labels:
+        severity: warning
+        component: performance
+        service: tapio
+      annotations:
+        summary: "Low event processing rate"
+        description: "Event processing rate is {{ $value }} events per second on node {{ $labels.node }}, which may indicate an issue."
+        runbook_url: "https://docs.tapio.io/runbooks/low-event-rate"
+    
+    # Circuit breaker triggered
+    - alert: TapioCircuitBreakerTriggered
+      expr: tapio_circuit_breaker_state == 1
+      for: 2m
+      labels:
+        severity: critical
+        component: protection
+        service: tapio
+      annotations:
+        summary: "Circuit breaker triggered"
+        description: "Circuit breaker is open in {{ $labels.collector_type }} collector on node {{ $labels.node }}."
+        runbook_url: "https://docs.tapio.io/runbooks/circuit-breaker"
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tapio-grafana-dashboard
+  namespace: tapio-system
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: tapio-dashboard
+    app.kubernetes.io/part-of: tapio
+data:
+  tapio-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Tapio eBPF Collectors Overview",
+        "tags": ["tapio", "ebpf", "kubernetes"],
+        "style": "dark",
+        "timezone": "browser",
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Collector Availability",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(up{job=\"tapio-collector\"})",
+                "legendFormat": "Active Collectors"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": null},
+                    {"color": "yellow", "value": 1},
+                    {"color": "green", "value": 3}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Event Processing Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(tapio_events_processed_total[5m])) by (collector_type)",
+                "legendFormat": "{{collector_type}}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Events/sec",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Memory Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "container_memory_usage_bytes{pod=~\"tapio-collector-.*\"} / 1024 / 1024",
+                "legendFormat": "{{pod}}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "MB",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "eBPF Program Status",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "tapio_ebpf_program_loaded",
+                "format": "table",
+                "instant": true
+              }
+            ],
+            "transformations": [
+              {
+                "id": "organize",
+                "options": {
+                  "excludeByName": {"Time": true},
+                  "includeByName": {},
+                  "indexByName": {},
+                  "renameByName": {
+                    "node": "Node",
+                    "program": "Program",
+                    "Value": "Status"
+                  }
+                }
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Event Drop Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(tapio_events_dropped_total[5m])",
+                "legendFormat": "{{node}} - {{reason}}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Dropped Events/sec",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          },
+          {
+            "id": 6,
+            "title": "OTEL Collector Pipeline",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(otelcol_receiver_accepted_spans_total[5m])",
+                "legendFormat": "Received - {{receiver}}"
+              },
+              {
+                "expr": "rate(otelcol_exporter_sent_spans_total[5m])",
+                "legendFormat": "Sent - {{exporter}}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Spans/sec",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+          }
+        ]
+      }
+    }
+---
+# PodMonitor for node-level OTEL collector metrics
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: tapio-otel-node
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-otel-node
+    app.kubernetes.io/component: otel-collector
+    app.kubernetes.io/part-of: tapio
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tapio-collector
+      app.kubernetes.io/component: collector
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace

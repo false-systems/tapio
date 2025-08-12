@@ -1,0 +1,1020 @@
+---
+# Enhanced Simulator ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tapio-simulator-config
+  namespace: tapio-system
+  labels:
+    app.kubernetes.io/name: tapio-collector
+    app.kubernetes.io/component: simulator
+    app.kubernetes.io/part-of: tapio
+data:
+  tapio_collector_simulator.py: |
+    #!/usr/bin/env python3
+    """
+    Tapio Collector Enhanced Simulator
+
+    Generates realistic eBPF-like monitoring events including:
+    - Process monitoring (exec, exit, container context)
+    - Network monitoring (TCP/UDP connections, HTTP, DNS)
+    - Security events (file access, syscalls, privilege escalation)
+    - Kubernetes metadata enrichment
+    - OTLP traces, metrics, and logs
+
+    This simulates what the real eBPF collector would capture from kernel events.
+    """
+
+    import asyncio
+    import json
+    import logging
+    import os
+    import random
+    import socket
+    import threading
+    import time
+    import uuid
+    from datetime import datetime, timedelta
+    from pathlib import Path
+    from typing import Dict, List, Optional, Any
+    import http.server
+    import socketserver
+    from dataclasses import dataclass, asdict
+
+    # OTLP and observability imports
+    try:
+        from opentelemetry import trace, metrics, _logs
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter  
+        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.semconv.resource import ResourceAttributes
+        from opentelemetry.trace import Status, StatusCode
+        
+        OTEL_AVAILABLE = True
+    except ImportError as e:
+        print(f"OTLP libraries not available: {e}")
+        print("Run: pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc")
+        OTEL_AVAILABLE = False
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+
+    # Kubernetes environment variables
+    NODE_NAME = os.getenv("NODE_NAME", "minikube")
+    POD_NAME = os.getenv("POD_NAME", "tapio-collector-simulator")
+    POD_NAMESPACE = os.getenv("POD_NAMESPACE", "tapio-system")
+    POD_IP = os.getenv("POD_IP", "10.244.0.100")
+    HOST_IP = os.getenv("HOST_IP", "192.168.49.2")
+    CLUSTER_NAME = os.getenv("CLUSTER_NAME", "production-cluster")
+
+    # OTLP configuration
+    OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "tapio-collector")
+    SERVICE_VERSION = os.getenv("OTEL_SERVICE_VERSION", "1.0.0-simulator")
+
+    @dataclass
+    class ProcessEvent:
+        """Process monitoring event (exec, exit, fork)"""
+        event_type: str  # exec, exit, fork
+        pid: int
+        ppid: int
+        tid: int
+        uid: int
+        gid: int
+        comm: str
+        exe_path: str
+        args: List[str]
+        cwd: str
+        container_id: str
+        container_name: str
+        pod_name: str
+        pod_namespace: str
+        cgroup_path: str
+        timestamp: str
+        exit_code: Optional[int] = None
+
+    @dataclass
+    class NetworkEvent:
+        """Network monitoring event (connect, accept, close)"""
+        event_type: str  # connect, accept, close, send, recv
+        pid: int
+        tid: int
+        comm: str
+        protocol: str  # TCP, UDP
+        local_addr: str
+        local_port: int
+        remote_addr: str
+        remote_port: int
+        bytes_sent: int
+        bytes_recv: int
+        duration_ms: int
+        container_id: str
+        pod_name: str
+        pod_namespace: str
+        service_name: str
+        timestamp: str
+
+    @dataclass
+    class DNSEvent:
+        """DNS monitoring event"""
+        event_type: str  # query, response
+        pid: int
+        tid: int
+        comm: str
+        query_name: str
+        query_type: str  # A, AAAA, CNAME, SRV
+        response_code: int  # 0=NOERROR, 3=NXDOMAIN
+        response_ips: List[str]
+        latency_ms: int
+        container_id: str
+        pod_name: str
+        pod_namespace: str
+        timestamp: str
+
+    @dataclass
+    class SecurityEvent:
+        """Security monitoring event"""
+        event_type: str  # file_open, file_write, syscall, capability_use
+        pid: int
+        tid: int
+        uid: int
+        gid: int
+        comm: str
+        syscall_name: str
+        file_path: str
+        file_mode: str
+        file_flags: str
+        capability: str
+        result: int  # 0=success, negative=error
+        container_id: str
+        pod_name: str
+        pod_namespace: str
+        security_context: Dict[str, Any]
+        timestamp: str
+
+    @dataclass
+    class HTTPEvent:
+        """HTTP monitoring event"""
+        event_type: str  # request, response
+        pid: int
+        tid: int
+        comm: str
+        method: str
+        url: str
+        status_code: int
+        request_size: int
+        response_size: int
+        latency_ms: int
+        headers: Dict[str, str]
+        user_agent: str
+        container_id: str
+        pod_name: str
+        pod_namespace: str
+        service_name: str
+        timestamp: str
+
+    class KubernetesContext:
+        """Simulates realistic Kubernetes context and metadata"""
+        
+        def __init__(self):
+            self.pods = self._generate_realistic_pods()
+            self.services = self._generate_realistic_services()
+            self.containers = self._generate_realistic_containers()
+            
+        def _generate_realistic_pods(self) -> List[Dict[str, Any]]:
+            """Generate realistic pod metadata"""
+            namespaces = ["default", "frontend", "backend", "database", "monitoring", "ingress"]
+            apps = ["nginx", "redis", "postgres", "prometheus", "grafana", "api-server", 
+                    "user-service", "payment-service", "inventory-service", "auth-service"]
+            
+            pods = []
+            for i in range(20):
+                namespace = random.choice(namespaces)
+                app = random.choice(apps)
+                pod_name = f"{app}-{random.randint(100, 999)}-{''.join(random.choices('abcdef', k=5))}"
+                
+                pods.append({
+                    "name": pod_name,
+                    "namespace": namespace,
+                    "labels": {
+                        "app": app,
+                        "version": random.choice(["v1.0", "v1.1", "v2.0"]),
+                        "environment": random.choice(["production", "staging"]),
+                    },
+                    "ip": f"10.244.{random.randint(0, 255)}.{random.randint(1, 255)}",
+                    "node": NODE_NAME,
+                    "container_ids": [f"containerd://{uuid.uuid4().hex[:12]}" for _ in range(random.randint(1, 3))]
+                })
+            return pods
+        
+        def _generate_realistic_services(self) -> List[Dict[str, Any]]:
+            """Generate realistic service metadata"""
+            return [
+                {"name": "nginx-service", "namespace": "frontend", "cluster_ip": "10.96.1.100", "ports": [80, 443]},
+                {"name": "redis-service", "namespace": "backend", "cluster_ip": "10.96.1.101", "ports": [6379]},
+                {"name": "postgres-service", "namespace": "database", "cluster_ip": "10.96.1.102", "ports": [5432]},
+                {"name": "api-service", "namespace": "backend", "cluster_ip": "10.96.1.103", "ports": [8080, 8443]},
+                {"name": "prometheus-service", "namespace": "monitoring", "cluster_ip": "10.96.1.104", "ports": [9090]},
+                {"name": "kubernetes", "namespace": "default", "cluster_ip": "10.96.0.1", "ports": [443]},
+            ]
+        
+        def _generate_realistic_containers(self) -> List[Dict[str, Any]]:
+            """Generate realistic container metadata"""
+            containers = []
+            for pod in self.pods:
+                for container_id in pod["container_ids"]:
+                    containers.append({
+                        "id": container_id.split("://")[1],
+                        "full_id": container_id,
+                        "name": f"{pod['labels']['app']}-container",
+                        "image": f"docker.io/library/{pod['labels']['app']}:{pod['labels']['version']}",
+                        "pod_name": pod["name"],
+                        "pod_namespace": pod["namespace"],
+                        "cgroup_path": f"/sys/fs/cgroup/system.slice/containerd.service/kubepods-burstable-pod{uuid.uuid4().hex[:8]}.slice"
+                    })
+            return containers
+        
+        def get_random_pod(self) -> Dict[str, Any]:
+            """Get a random pod for event generation"""
+            return random.choice(self.pods)
+        
+        def get_random_container(self) -> Dict[str, Any]:
+            """Get a random container for event generation"""
+            return random.choice(self.containers)
+        
+        def get_service_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+            """Get service by name"""
+            for service in self.services:
+                if service["name"] == name:
+                    return service
+            return None
+
+    class EventGenerator:
+        """Generates realistic eBPF-like monitoring events"""
+        
+        def __init__(self, k8s_context: KubernetesContext):
+            self.k8s = k8s_context
+            self.active_processes = {}  # pid -> ProcessEvent
+            self.active_connections = {}  # (local_port, remote_port) -> NetworkEvent
+            self.pid_counter = 1000
+            
+            # Common file paths and commands for realism
+            self.common_commands = [
+                "/bin/bash", "/bin/sh", "/usr/bin/python3", "/usr/bin/node", 
+                "/usr/bin/java", "/usr/bin/nginx", "/usr/bin/redis-server",
+                "/usr/bin/postgres", "/usr/bin/curl", "/usr/bin/wget",
+                "/bin/ls", "/bin/cat", "/bin/grep", "/usr/bin/awk"
+            ]
+            
+            self.common_paths = [
+                "/etc/nginx/nginx.conf", "/etc/passwd", "/etc/hosts",
+                "/var/log/app.log", "/tmp/temp.txt", "/home/app/config.json",
+                "/usr/share/zoneinfo/UTC", "/proc/meminfo", "/sys/fs/cgroup/memory.stat"
+            ]
+            
+            self.common_domains = [
+                "api.internal.local", "database.backend.svc.cluster.local",
+                "redis.backend.svc.cluster.local", "prometheus.monitoring.svc.cluster.local",
+                "kubernetes.default.svc.cluster.local", "google.com", "github.com"
+            ]
+            
+            self.user_agents = [
+                "kube-probe/1.25", "Go-http-client/1.1", "curl/7.68.0",
+                "Mozilla/5.0 (compatible; monitoring/1.0)", "Prometheus/2.40.0"
+            ]
+
+        def generate_process_event(self) -> ProcessEvent:
+            """Generate a realistic process monitoring event"""
+            container = self.k8s.get_random_container()
+            event_type = random.choice(["exec", "exit", "fork"])
+            
+            if event_type == "exec":
+                pid = self.pid_counter
+                self.pid_counter += 1
+                ppid = random.randint(1, 100)
+                
+                comm = random.choice(self.common_commands).split("/")[-1]
+                exe_path = random.choice(self.common_commands)
+                
+                # Generate realistic command arguments
+                if comm == "nginx":
+                    args = [exe_path, "-g", "daemon off;"]
+                elif comm == "python3":
+                    args = [exe_path, "/app/main.py", "--port", "8080"]
+                elif comm == "java":
+                    args = [exe_path, "-jar", "/app/app.jar", "--spring.profiles.active=prod"]
+                elif comm in ["curl", "wget"]:
+                    domain = random.choice(self.common_domains)
+                    args = [exe_path, f"http://{domain}/health"]
+                else:
+                    args = [exe_path]
+                
+                event = ProcessEvent(
+                    event_type=event_type,
+                    pid=pid,
+                    ppid=ppid,
+                    tid=pid,
+                    uid=random.choice([0, 1000, 1001]),
+                    gid=random.choice([0, 1000, 1001]),
+                    comm=comm,
+                    exe_path=exe_path,
+                    args=args,
+                    cwd="/app" if comm in ["python3", "java", "node"] else "/",
+                    container_id=container["id"],
+                    container_name=container["name"],
+                    pod_name=container["pod_name"],
+                    pod_namespace=container["pod_namespace"],
+                    cgroup_path=container["cgroup_path"],
+                    timestamp=datetime.utcnow().isoformat() + "Z"
+                )
+                
+                self.active_processes[pid] = event
+                
+            else:  # exit or fork
+                if not self.active_processes:
+                    # Create a process first
+                    return self.generate_process_event()
+                
+                pid = random.choice(list(self.active_processes.keys()))
+                base_proc = self.active_processes[pid]
+                
+                if event_type == "exit":
+                    exit_code = random.choice([0, 0, 0, 1, 2, 130])  # 0 is most common
+                    event = ProcessEvent(
+                        event_type=event_type,
+                        pid=pid,
+                        ppid=base_proc.ppid,
+                        tid=base_proc.tid,
+                        uid=base_proc.uid,
+                        gid=base_proc.gid,
+                        comm=base_proc.comm,
+                        exe_path=base_proc.exe_path,
+                        args=base_proc.args,
+                        cwd=base_proc.cwd,
+                        container_id=base_proc.container_id,
+                        container_name=base_proc.container_name,
+                        pod_name=base_proc.pod_name,
+                        pod_namespace=base_proc.pod_namespace,
+                        cgroup_path=base_proc.cgroup_path,
+                        timestamp=datetime.utcnow().isoformat() + "Z",
+                        exit_code=exit_code
+                    )
+                    del self.active_processes[pid]
+                    
+                else:  # fork
+                    new_pid = self.pid_counter
+                    self.pid_counter += 1
+                    
+                    event = ProcessEvent(
+                        event_type=event_type,
+                        pid=new_pid,
+                        ppid=pid,
+                        tid=new_pid,
+                        uid=base_proc.uid,
+                        gid=base_proc.gid,
+                        comm=base_proc.comm,
+                        exe_path=base_proc.exe_path,
+                        args=base_proc.args,
+                        cwd=base_proc.cwd,
+                        container_id=base_proc.container_id,
+                        container_name=base_proc.container_name,
+                        pod_name=base_proc.pod_name,
+                        pod_namespace=base_proc.pod_namespace,
+                        cgroup_path=base_proc.cgroup_path,
+                        timestamp=datetime.utcnow().isoformat() + "Z"
+                    )
+                    
+                    self.active_processes[new_pid] = event
+            
+            return event
+
+        def generate_network_event(self) -> NetworkEvent:
+            """Generate a realistic network monitoring event"""
+            container = self.k8s.get_random_container()
+            event_type = random.choice(["connect", "accept", "close", "send", "recv"])
+            
+            # Select realistic ports and services
+            service_ports = {
+                80: "http", 443: "https", 8080: "http-alt", 8443: "https-alt",
+                3306: "mysql", 5432: "postgres", 6379: "redis", 27017: "mongodb",
+                9090: "prometheus", 3000: "grafana", 9200: "elasticsearch"
+            }
+            
+            local_port = random.choice([random.randint(30000, 65535), random.choice(list(service_ports.keys()))])
+            remote_port = random.choice(list(service_ports.keys()))
+            
+            # Generate realistic IP addresses
+            if random.random() < 0.7:  # 70% internal cluster communication
+                remote_addr = f"10.96.{random.randint(0, 255)}.{random.randint(1, 255)}"  # Service IP
+            else:  # External communication
+                remote_addr = f"{random.randint(1, 223)}.{random.randint(1, 255)}.{random.randint(1, 255)}.{random.randint(1, 255)}"
+            
+            local_addr = container["pod_name"].replace("pod", "10.244.0.") + str(random.randint(1, 255))
+            
+            protocol = "TCP" if remote_port in [80, 443, 8080, 3306, 5432] else random.choice(["TCP", "UDP"])
+            
+            # Determine service name based on port
+            service_name = service_ports.get(remote_port, "unknown")
+            
+            pid = random.choice(list(self.active_processes.keys())) if self.active_processes else random.randint(1000, 9999)
+            comm = self.active_processes.get(pid, ProcessEvent("", 0, 0, 0, 0, 0, "unknown", "", [], "", "", "", "", "", "", "")).comm or "unknown"
+            
+            event = NetworkEvent(
+                event_type=event_type,
+                pid=pid,
+                tid=pid,
+                comm=comm,
+                protocol=protocol,
+                local_addr=local_addr,
+                local_port=local_port,
+                remote_addr=remote_addr,
+                remote_port=remote_port,
+                bytes_sent=random.randint(64, 4096) if event_type in ["send", "connect"] else 0,
+                bytes_recv=random.randint(64, 8192) if event_type in ["recv", "accept"] else 0,
+                duration_ms=random.randint(1, 1000) if event_type == "close" else 0,
+                container_id=container["id"],
+                pod_name=container["pod_name"],
+                pod_namespace=container["pod_namespace"],
+                service_name=service_name,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+            
+            return event
+
+        def generate_dns_event(self) -> DNSEvent:
+            """Generate a realistic DNS monitoring event"""
+            container = self.k8s.get_random_container()
+            event_type = random.choice(["query", "response"])
+            
+            # Generate realistic DNS queries
+            if random.random() < 0.6:  # 60% internal Kubernetes DNS
+                service = random.choice(self.k8s.services)
+                query_name = f"{service['name']}.{service['namespace']}.svc.cluster.local"
+                response_ips = [service['cluster_ip']]
+                response_code = 0  # NOERROR
+            else:  # External DNS
+                query_name = random.choice(self.common_domains)
+                if random.random() < 0.9:  # 90% success rate
+                    response_ips = [f"{random.randint(1, 223)}.{random.randint(1, 255)}.{random.randint(1, 255)}.{random.randint(1, 255)}"]
+                    response_code = 0  # NOERROR
+                else:
+                    response_ips = []
+                    response_code = 3  # NXDOMAIN
+            
+            query_type = random.choice(["A", "AAAA", "CNAME", "SRV"]) if "svc.cluster.local" in query_name else "A"
+            
+            pid = random.choice(list(self.active_processes.keys())) if self.active_processes else random.randint(1000, 9999)
+            comm = self.active_processes.get(pid, ProcessEvent("", 0, 0, 0, 0, 0, "unknown", "", [], "", "", "", "", "", "", "")).comm or "curl"
+            
+            event = DNSEvent(
+                event_type=event_type,
+                pid=pid,
+                tid=pid,
+                comm=comm,
+                query_name=query_name,
+                query_type=query_type,
+                response_code=response_code,
+                response_ips=response_ips,
+                latency_ms=random.randint(1, 50) if "cluster.local" in query_name else random.randint(10, 200),
+                container_id=container["id"],
+                pod_name=container["pod_name"],
+                pod_namespace=container["pod_namespace"],
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+            
+            return event
+
+        def generate_security_event(self) -> SecurityEvent:
+            """Generate a realistic security monitoring event"""
+            container = self.k8s.get_random_container()
+            event_type = random.choice(["file_open", "file_write", "syscall", "capability_use"])
+            
+            pid = random.choice(list(self.active_processes.keys())) if self.active_processes else random.randint(1000, 9999)
+            base_proc = self.active_processes.get(pid)
+            
+            if base_proc:
+                comm = base_proc.comm
+                uid = base_proc.uid
+                gid = base_proc.gid
+            else:
+                comm = random.choice(["nginx", "python3", "java", "node"])
+                uid = random.choice([0, 1000, 1001])
+                gid = random.choice([0, 1000, 1001])
+            
+            if event_type in ["file_open", "file_write"]:
+                file_path = random.choice(self.common_paths)
+                syscall_name = "openat" if event_type == "file_open" else "write"
+                file_mode = "r" if event_type == "file_open" else "w"
+                file_flags = "O_RDONLY" if event_type == "file_open" else "O_WRONLY|O_CREAT"
+                capability = ""
+            else:  # syscall or capability_use
+                syscall_name = random.choice(["execve", "connect", "bind", "setuid", "setgid", "ptrace"])
+                file_path = ""
+                file_mode = ""
+                file_flags = ""
+                capability = random.choice(["CAP_NET_ADMIN", "CAP_SYS_ADMIN", "CAP_SETUID", "CAP_SETGID"]) if event_type == "capability_use" else ""
+            
+            # Simulate mostly successful operations with occasional failures
+            result = 0 if random.random() < 0.95 else random.choice([-1, -2, -13])  # Success or EPERM, ENOENT, EACCES
+            
+            security_context = {
+                "selinux_context": f"system_u:system_r:container_t:s0:c{random.randint(100, 999)},c{random.randint(100, 999)}",
+                "apparmor_profile": "docker-default" if uid != 0 else "unconfined",
+                "seccomp_mode": "filter",
+                "no_new_privs": uid != 0
+            }
+            
+            event = SecurityEvent(
+                event_type=event_type,
+                pid=pid,
+                tid=pid,
+                uid=uid,
+                gid=gid,
+                comm=comm,
+                syscall_name=syscall_name,
+                file_path=file_path,
+                file_mode=file_mode,
+                file_flags=file_flags,
+                capability=capability,
+                result=result,
+                container_id=container["id"],
+                pod_name=container["pod_name"],
+                pod_namespace=container["pod_namespace"],
+                security_context=security_context,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+            
+            return event
+
+        def generate_http_event(self) -> HTTPEvent:
+            """Generate a realistic HTTP monitoring event"""
+            container = self.k8s.get_random_container()
+            event_type = random.choice(["request", "response"])
+            
+            # Generate realistic HTTP traffic
+            methods = ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"]
+            method = random.choice(methods)
+            
+            # Realistic URL patterns
+            if random.random() < 0.4:  # Health checks and monitoring
+                urls = ["/health", "/ready", "/metrics", "/status", "/ping"]
+                url = random.choice(urls)
+                status_code = 200
+            elif random.random() < 0.7:  # API endpoints
+                apis = ["/api/v1/users", "/api/v1/orders", "/api/v2/products", "/graphql", "/api/auth/login"]
+                url = random.choice(apis)
+                if random.randint(1, 100) <= 5:  # 5% errors
+                    status_code = random.choice([400, 401, 403, 404, 500, 502])
+                else:
+                    status_code = random.choice([200, 201, 204])
+            else:  # Static content
+                url = random.choice(["/", "/index.html", "/static/app.js", "/static/style.css", "/favicon.ico"])
+                status_code = random.choice([200, 304, 404])
+            
+            pid = random.choice(list(self.active_processes.keys())) if self.active_processes else random.randint(1000, 9999)
+            comm = self.active_processes.get(pid, ProcessEvent("", 0, 0, 0, 0, 0, "nginx", "", [], "", "", "", "", "", "", "")).comm or "nginx"
+            
+            # Service name based on namespace and container
+            service_name = f"{container['pod_namespace']}-{container['name'].split('-')[0]}"
+            
+            event = HTTPEvent(
+                event_type=event_type,
+                pid=pid,
+                tid=pid,
+                comm=comm,
+                method=method,
+                url=url,
+                status_code=status_code,
+                request_size=random.randint(200, 2048),
+                response_size=random.randint(500, 10240),
+                latency_ms=random.randint(1, 500) if status_code < 400 else random.randint(100, 2000),
+                headers={
+                    "Content-Type": "application/json" if "/api/" in url else "text/html",
+                    "User-Agent": random.choice(self.user_agents),
+                    "X-Request-ID": str(uuid.uuid4()),
+                    "X-Forwarded-For": f"{random.randint(1, 223)}.{random.randint(1, 255)}.{random.randint(1, 255)}.{random.randint(1, 255)}"
+                },
+                user_agent=random.choice(self.user_agents),
+                container_id=container["id"],
+                pod_name=container["pod_name"],
+                pod_namespace=container["pod_namespace"],
+                service_name=service_name,
+                timestamp=datetime.utcnow().isoformat() + "Z"
+            )
+            
+            return event
+
+    class OTLPExporter:
+        """Handles exporting events as OTLP traces, metrics, and logs"""
+        
+        def __init__(self):
+            if not OTEL_AVAILABLE:
+                logger.warning("OTLP libraries not available - events will only be logged")
+                return
+                
+            # Create resource with Kubernetes context
+            resource = Resource.create({
+                ResourceAttributes.SERVICE_NAME: SERVICE_NAME,
+                ResourceAttributes.SERVICE_VERSION: SERVICE_VERSION,
+                ResourceAttributes.DEPLOYMENT_ENVIRONMENT: "production",
+                "k8s.cluster.name": CLUSTER_NAME,
+                "k8s.node.name": NODE_NAME,
+                "k8s.namespace.name": POD_NAMESPACE,
+                "k8s.pod.name": POD_NAME,
+                "k8s.pod.ip": POD_IP,
+                "host.ip": HOST_IP,
+            })
+            
+            # Initialize OTLP exporters
+            try:
+                trace_exporter = OTLPSpanExporter(endpoint=OTEL_ENDPOINT, insecure=True)
+                metric_exporter = OTLPMetricExporter(endpoint=OTEL_ENDPOINT, insecure=True)
+                log_exporter = OTLPLogExporter(endpoint=OTEL_ENDPOINT, insecure=True)
+                
+                # Setup trace provider
+                trace.set_tracer_provider(TracerProvider(resource=resource))
+                trace.get_tracer_provider().add_span_processor(
+                    BatchSpanProcessor(trace_exporter)
+                )
+                self.tracer = trace.get_tracer(__name__)
+                
+                # Setup metrics provider
+                metric_reader = PeriodicExportingMetricReader(metric_exporter, export_interval_millis=10000)
+                metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
+                self.meter = metrics.get_meter(__name__)
+                
+                # Setup logging provider
+                _logs.set_logger_provider(LoggerProvider(resource=resource))
+                _logs.get_logger_provider().add_log_record_processor(
+                    BatchLogRecordProcessor(log_exporter)
+                )
+                self.log_handler = LoggingHandler(level=logging.INFO, logger_provider=_logs.get_logger_provider())
+                
+                # Create metrics
+                self.event_counter = self.meter.create_counter(
+                    name="tapio_events_total",
+                    description="Total number of eBPF events generated",
+                    unit="1"
+                )
+                
+                self.process_gauge = self.meter.create_up_down_counter(
+                    name="tapio_active_processes",
+                    description="Number of active processes being monitored",
+                    unit="1"
+                )
+                
+                self.network_connections = self.meter.create_up_down_counter(
+                    name="tapio_network_connections",
+                    description="Number of active network connections",
+                    unit="1"
+                )
+                
+                logger.info(f"OTLP exporter initialized with endpoint: {OTEL_ENDPOINT}")
+                
+            except Exception as e:
+                logger.error(f"Failed to initialize OTLP exporters: {e}")
+                self.tracer = None
+                
+        def export_process_event(self, event: ProcessEvent):
+            """Export process event as OTLP trace and metrics"""
+            if not OTEL_AVAILABLE or not self.tracer:
+                logger.info(f"Process Event: {event.event_type} - PID:{event.pid} - {event.comm} - Pod:{event.pod_name}")
+                return
+                
+            # Create trace span
+            with self.tracer.start_as_current_span(f"process.{event.event_type}") as span:
+                span.set_attributes({
+                    "process.pid": event.pid,
+                    "process.ppid": event.ppid,
+                    "process.command": event.comm,
+                    "process.executable.path": event.exe_path,
+                    "process.working_directory": event.cwd,
+                    "container.id": event.container_id,
+                    "k8s.pod.name": event.pod_name,
+                    "k8s.namespace.name": event.pod_namespace,
+                    "event.type": event.event_type,
+                })
+                
+                if event.exit_code is not None:
+                    span.set_attributes({"process.exit_code": event.exit_code})
+                    if event.exit_code != 0:
+                        span.set_status(Status(StatusCode.ERROR, f"Process exited with code {event.exit_code}"))
+                
+                # Update metrics
+                self.event_counter.add(1, {"event_type": "process", "event_subtype": event.event_type})
+                
+                if event.event_type == "exec":
+                    self.process_gauge.add(1, {"container_id": event.container_id})
+                elif event.event_type == "exit":
+                    self.process_gauge.add(-1, {"container_id": event.container_id})
+
+        def export_network_event(self, event: NetworkEvent):
+            """Export network event as OTLP trace and metrics"""
+            if not OTEL_AVAILABLE or not self.tracer:
+                logger.info(f"Network Event: {event.event_type} - {event.protocol} {event.local_addr}:{event.local_port} -> {event.remote_addr}:{event.remote_port}")
+                return
+                
+            # Create trace span
+            with self.tracer.start_as_current_span(f"network.{event.event_type}") as span:
+                span.set_attributes({
+                    "network.protocol.name": event.protocol.lower(),
+                    "network.peer.address": event.remote_addr,
+                    "network.peer.port": event.remote_port,
+                    "network.local.address": event.local_addr,
+                    "network.local.port": event.local_port,
+                    "process.pid": event.pid,
+                    "process.command": event.comm,
+                    "container.id": event.container_id,
+                    "k8s.pod.name": event.pod_name,
+                    "k8s.namespace.name": event.pod_namespace,
+                    "service.name": event.service_name,
+                    "event.type": event.event_type,
+                })
+                
+                if event.bytes_sent > 0:
+                    span.set_attributes({"network.io.bytes.sent": event.bytes_sent})
+                if event.bytes_recv > 0:
+                    span.set_attributes({"network.io.bytes.received": event.bytes_recv})
+                if event.duration_ms > 0:
+                    span.set_attributes({"network.connection.duration_ms": event.duration_ms})
+                
+                # Update metrics
+                self.event_counter.add(1, {"event_type": "network", "event_subtype": event.event_type})
+                
+                if event.event_type in ["connect", "accept"]:
+                    self.network_connections.add(1, {"protocol": event.protocol})
+                elif event.event_type == "close":
+                    self.network_connections.add(-1, {"protocol": event.protocol})
+
+        def export_dns_event(self, event: DNSEvent):
+            """Export DNS event as OTLP trace"""
+            if not OTEL_AVAILABLE or not self.tracer:
+                logger.info(f"DNS Event: {event.event_type} - {event.query_name} ({event.query_type}) - Code:{event.response_code}")
+                return
+                
+            # Create trace span
+            with self.tracer.start_as_current_span(f"dns.{event.event_type}") as span:
+                span.set_attributes({
+                    "dns.query.name": event.query_name,
+                    "dns.query.type": event.query_type,
+                    "dns.response.code": event.response_code,
+                    "dns.lookup.duration_ms": event.latency_ms,
+                    "process.pid": event.pid,
+                    "process.command": event.comm,
+                    "container.id": event.container_id,
+                    "k8s.pod.name": event.pod_name,
+                    "k8s.namespace.name": event.pod_namespace,
+                    "event.type": event.event_type,
+                })
+                
+                if event.response_ips:
+                    span.set_attributes({"dns.response.ips": ",".join(event.response_ips)})
+                
+                if event.response_code != 0:
+                    span.set_status(Status(StatusCode.ERROR, f"DNS query failed with code {event.response_code}"))
+                
+                # Update metrics
+                self.event_counter.add(1, {"event_type": "dns", "event_subtype": event.event_type})
+
+        def export_security_event(self, event: SecurityEvent):
+            """Export security event as OTLP trace and log"""
+            if not OTEL_AVAILABLE or not self.tracer:
+                logger.info(f"Security Event: {event.event_type} - {event.syscall_name} - Result:{event.result}")
+                return
+                
+            # Create trace span
+            with self.tracer.start_as_current_span(f"security.{event.event_type}") as span:
+                span.set_attributes({
+                    "system.call.name": event.syscall_name,
+                    "file.path": event.file_path,
+                    "process.pid": event.pid,
+                    "process.command": event.comm,
+                    "process.user.id": event.uid,
+                    "process.group.id": event.gid,
+                    "container.id": event.container_id,
+                    "k8s.pod.name": event.pod_name,
+                    "k8s.namespace.name": event.pod_namespace,
+                    "event.type": event.event_type,
+                    "security.result": event.result,
+                })
+                
+                if event.capability:
+                    span.set_attributes({"security.capability": event.capability})
+                
+                if event.result != 0:
+                    span.set_status(Status(StatusCode.ERROR, f"Security event failed with result {event.result}"))
+                
+                # Update metrics
+                self.event_counter.add(1, {"event_type": "security", "event_subtype": event.event_type})
+
+        def export_http_event(self, event: HTTPEvent):
+            """Export HTTP event as OTLP trace"""
+            if not OTEL_AVAILABLE or not self.tracer:
+                logger.info(f"HTTP Event: {event.method} {event.url} - Status:{event.status_code} - Latency:{event.latency_ms}ms")
+                return
+                
+            # Create trace span
+            with self.tracer.start_as_current_span(f"http.{event.event_type}") as span:
+                span.set_attributes({
+                    "http.request.method": event.method,
+                    "url.path": event.url,
+                    "http.response.status_code": event.status_code,
+                    "http.request.body.size": event.request_size,
+                    "http.response.body.size": event.response_size,
+                    "http.request.duration_ms": event.latency_ms,
+                    "user_agent.original": event.user_agent,
+                    "process.pid": event.pid,
+                    "process.command": event.comm,
+                    "container.id": event.container_id,
+                    "k8s.pod.name": event.pod_name,
+                    "k8s.namespace.name": event.pod_namespace,
+                    "service.name": event.service_name,
+                    "event.type": event.event_type,
+                })
+                
+                # Add headers as span attributes
+                for key, value in event.headers.items():
+                    span.set_attributes({f"http.header.{key.lower()}": value})
+                
+                if event.status_code >= 400:
+                    span.set_status(Status(StatusCode.ERROR, f"HTTP {event.status_code}"))
+                
+                # Update metrics
+                self.event_counter.add(1, {"event_type": "http", "event_subtype": event.event_type})
+
+    class HealthHandler(http.server.BaseHTTPRequestHandler):
+        """HTTP handler for health endpoints and metrics"""
+        
+        def __init__(self, simulator_stats, *args, **kwargs):
+            self.simulator_stats = simulator_stats
+            super().__init__(*args, **kwargs)
+        
+        def do_GET(self):
+            if self.path == '/healthz':
+                self._send_response(200, 'OK')
+            elif self.path == '/readyz':
+                self._send_response(200, 'Ready')
+            elif self.path == '/metrics':
+                metrics_text = self._generate_prometheus_metrics()
+                self._send_response(200, metrics_text, 'text/plain')
+            elif self.path == '/stats':
+                stats_json = json.dumps(self.simulator_stats, indent=2)
+                self._send_response(200, stats_json, 'application/json')
+            else:
+                self._send_response(404, 'Not Found')
+        
+        def _send_response(self, status_code, content, content_type='text/plain'):
+            self.send_response(status_code)
+            self.send_header('Content-type', content_type)
+            self.end_headers()
+            self.wfile.write(content.encode('utf-8'))
+        
+        def _generate_prometheus_metrics(self):
+            """Generate Prometheus format metrics"""
+            metrics = []
+            
+            # Add simulator-specific metrics
+            metrics.append('# HELP tapio_simulator_events_generated_total Total events generated by simulator')
+            metrics.append('# TYPE tapio_simulator_events_generated_total counter')
+            
+            for event_type, count in self.simulator_stats.get('event_counts', {}).items():
+                metrics.append(f'tapio_simulator_events_generated_total{{type="{event_type}"}} {count}')
+            
+            metrics.append('# HELP tapio_simulator_uptime_seconds Simulator uptime in seconds')
+            metrics.append('# TYPE tapio_simulator_uptime_seconds counter')
+            metrics.append(f'tapio_simulator_uptime_seconds {self.simulator_stats.get("uptime_seconds", 0)}')
+            
+            metrics.append('# HELP tapio_simulator_active_processes Current number of active processes')
+            metrics.append('# TYPE tapio_simulator_active_processes gauge')
+            metrics.append(f'tapio_simulator_active_processes {self.simulator_stats.get("active_processes", 0)}')
+            
+            return '\n'.join(metrics) + '\n'
+        
+        def log_message(self, format, *args):
+            pass  # Suppress HTTP server logs
+
+    class TapioCollectorSimulator:
+        """Main simulator class that orchestrates event generation"""
+        
+        def __init__(self):
+            self.k8s_context = KubernetesContext()
+            self.event_generator = EventGenerator(self.k8s_context)
+            self.otlp_exporter = OTLPExporter()
+            
+            self.stats = {
+                'start_time': time.time(),
+                'event_counts': {},
+                'active_processes': 0,
+                'total_events': 0
+            }
+            
+            # Event generation rates (events per minute)
+            self.event_rates = {
+                'process': 30,      # 30 process events per minute
+                'network': 60,      # 60 network events per minute  
+                'dns': 20,          # 20 DNS events per minute
+                'security': 25,     # 25 security events per minute
+                'http': 40,         # 40 HTTP events per minute
+            }
+            
+            logger.info("Tapio Collector Simulator initialized")
+            logger.info(f"Kubernetes context: Node={NODE_NAME}, Pod={POD_NAME}, Namespace={POD_NAMESPACE}")
+            logger.info(f"OTLP endpoint: {OTEL_ENDPOINT}")
+        
+        def start_health_server(self, port=8080):
+            """Start health check and metrics server"""
+            def create_handler(*args, **kwargs):
+                return HealthHandler(self.stats, *args, **kwargs)
+            
+            with socketserver.TCPServer(("", port), create_handler) as httpd:
+                logger.info(f"Health server started on port {port}")
+                httpd.serve_forever()
+        
+        async def generate_events(self):
+            """Generate events at realistic rates"""
+            logger.info("Starting event generation...")
+            
+            while True:
+                try:
+                    # Calculate intervals based on rates (convert per-minute to per-second)
+                    for event_type, rate_per_minute in self.event_rates.items():
+                        rate_per_second = rate_per_minute / 60.0
+                        
+                        # Use Poisson distribution for realistic timing
+                        if random.random() < rate_per_second:
+                            await self._generate_single_event(event_type)
+                    
+                    # Update stats
+                    self.stats['uptime_seconds'] = int(time.time() - self.stats['start_time'])
+                    self.stats['active_processes'] = len(self.event_generator.active_processes)
+                    
+                    # Sleep for 1 second
+                    await asyncio.sleep(1)
+                    
+                except KeyboardInterrupt:
+                    logger.info("Event generation stopped by user")
+                    break
+                except Exception as e:
+                    logger.error(f"Error generating events: {e}")
+                    await asyncio.sleep(5)
+        
+        async def _generate_single_event(self, event_type: str):
+            """Generate a single event of the specified type"""
+            try:
+                if event_type == 'process':
+                    event = self.event_generator.generate_process_event()
+                    self.otlp_exporter.export_process_event(event)
+                elif event_type == 'network':
+                    event = self.event_generator.generate_network_event()
+                    self.otlp_exporter.export_network_event(event)
+                elif event_type == 'dns':
+                    event = self.event_generator.generate_dns_event()
+                    self.otlp_exporter.export_dns_event(event)
+                elif event_type == 'security':
+                    event = self.event_generator.generate_security_event()
+                    self.otlp_exporter.export_security_event(event)
+                elif event_type == 'http':
+                    event = self.event_generator.generate_http_event()
+                    self.otlp_exporter.export_http_event(event)
+                
+                # Update statistics
+                self.stats['event_counts'][event_type] = self.stats['event_counts'].get(event_type, 0) + 1
+                self.stats['total_events'] += 1
+                
+            except Exception as e:
+                logger.error(f"Error generating {event_type} event: {e}")
+        
+        def run(self):
+            """Run the simulator"""
+            logger.info("Starting Tapio Collector Enhanced Simulator")
+            
+            # Start health server in background thread
+            health_thread = threading.Thread(target=self.start_health_server, daemon=True)
+            health_thread.start()
+            
+            # Start metrics server in background thread  
+            metrics_thread = threading.Thread(target=self.start_health_server, args=(9090,), daemon=True)
+            metrics_thread.start()
+            
+            # Run event generation
+            try:
+                asyncio.run(self.generate_events())
+            except KeyboardInterrupt:
+                logger.info("Simulator stopped by user")
+            except Exception as e:
+                logger.error(f"Simulator failed: {e}")
+
+    if __name__ == "__main__":
+        simulator = TapioCollectorSimulator()
+        simulator.run()
