@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	neo4jTypes "github.com/yairfalse/tapio/pkg/integrations/neo4j"
+	"github.com/yairfalse/tapio/pkg/intelligence/correlation"
 	"go.uber.org/zap"
 )
 

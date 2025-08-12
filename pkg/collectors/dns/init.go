@@ -15,4 +15,3 @@ func init() {
 		log.Printf("DNS collector will not be available")
 	}
 }
-

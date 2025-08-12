@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -18,7 +19,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
-	"github.com/yairfalse/tapio/pkg/collectors"
 )
 
 func TestNewCollector(t *testing.T) {
@@ -1425,11 +1425,11 @@ func TestConcurrentStatisticsUpdate(t *testing.T) {
 			for j := 0; j < eventsPerGoroutine; j++ {
 				key := fmt.Sprintf("key-%d-%d", goroutineID, j)
 				value := fmt.Sprintf("value-%d-%d", goroutineID, j)
-				
+
 				// Test concurrent cache operations
 				collector.CacheSet(key, value, time.Second)
 				_, _ = collector.CacheGet(key)
-				
+
 				// Update stats atomically
 				atomic.AddInt64(&collector.stats.QueriesTotal, 1)
 			}
@@ -1449,50 +1449,50 @@ func TestCollectorOTELIntegration(t *testing.T) {
 	reader := metric.NewManualReader()
 	provider := metric.NewMeterProvider(metric.WithReader(reader))
 	otel.SetMeterProvider(provider)
-	
+
 	// Setup trace exporter
 	traceExporter := tracetest.NewInMemoryExporter()
 	tp := trace.NewTracerProvider(trace.WithSyncer(traceExporter))
 	otel.SetTracerProvider(tp)
-	
+
 	defer func() {
 		_ = provider.Shutdown(context.Background())
 		_ = tp.Shutdown(context.Background())
 	}()
-	
+
 	config := DefaultConfig()
 	config.EnableEBPF = false
 	config.Logger = zaptest.NewLogger(t)
-	
+
 	collector, err := NewCollector("test-otel", config)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
 	err = collector.Start(ctx)
 	require.NoError(t, err)
 	defer collector.Stop()
-	
+
 	// Simulate some activity
 	collector.CacheSet("test-key", "test-value", time.Second)
 	_, _ = collector.CacheGet("test-key")
-	
+
 	// Wait for metrics to be recorded
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Verify metrics
 	metrics := &metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, metrics)
 	require.NoError(t, err)
-	
+
 	metricNames := getMetricNames(metrics)
 	assert.Contains(t, metricNames, "dns_events_processed_total")
 	assert.Contains(t, metricNames, "dns_errors_total")
 	assert.Contains(t, metricNames, "dns_processing_time")
-	
+
 	// Verify spans
 	spans := traceExporter.GetSpans()
 	assert.NotEmpty(t, spans)
-	
+
 	// Check for DNS-specific span attributes
 	foundDNSSpan := false
 	for _, span := range spans {
@@ -1511,23 +1511,23 @@ func TestCollectorStressHighLoad(t *testing.T) {
 	config.BufferSize = 10000
 	config.WorkerCount = 8
 	config.Logger = zaptest.NewLogger(t)
-	
+
 	collector, err := NewCollector("test-stress", config)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
 	err = collector.Start(ctx)
 	require.NoError(t, err)
 	defer collector.Stop()
-	
+
 	const numGoroutines = 100
 	const eventsPerGoroutine = 1000
-	
+
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
-	
+
 	startTime := time.Now()
-	
+
 	// Generate high load
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
@@ -1535,10 +1535,10 @@ func TestCollectorStressHighLoad(t *testing.T) {
 			for j := 0; j < eventsPerGoroutine; j++ {
 				key := fmt.Sprintf("stress-key-%d-%d", id, j)
 				value := fmt.Sprintf("stress-value-%d-%d", id, j)
-				
+
 				// Perform cache operations under stress
 				collector.CacheSet(key, value, time.Second)
-				
+
 				// Randomly perform gets
 				if j%10 == 0 {
 					_, _ = collector.CacheGet(key)
@@ -1546,18 +1546,18 @@ func TestCollectorStressHighLoad(t *testing.T) {
 			}
 		}(i)
 	}
-	
+
 	wg.Wait()
 	duration := time.Since(startTime)
-	
+
 	// Verify collector is still healthy
 	assert.True(t, collector.IsHealthy())
-	
+
 	// Check performance metrics
 	totalOps := numGoroutines * eventsPerGoroutine
 	opsPerSecond := float64(totalOps) / duration.Seconds()
 	t.Logf("Stress test completed: %d operations in %v (%.2f ops/sec)", totalOps, duration, opsPerSecond)
-	
+
 	// Ensure reasonable performance
 	assert.Greater(t, opsPerSecond, float64(1000), "Should handle at least 1000 ops/sec")
 }
@@ -1592,7 +1592,7 @@ func TestCollectorErrorHandling(t *testing.T) {
 			testFunc: func(t *testing.T, c *Collector) {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel() // Cancel immediately
-				
+
 				err := c.Start(ctx)
 				// Should handle cancelled context gracefully
 				assert.NoError(t, err) // Start might succeed but will stop immediately
@@ -1600,20 +1600,20 @@ func TestCollectorErrorHandling(t *testing.T) {
 			expectError: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := DefaultConfig()
 			config.EnableEBPF = false
 			config.Logger = zaptest.NewLogger(t)
-			
+
 			collector, err := NewCollector("test-errors", config)
 			require.NoError(t, err)
-			
+
 			if tt.setupFunc != nil {
 				tt.setupFunc(collector)
 			}
-			
+
 			tt.testFunc(t, collector)
 		})
 	}
@@ -1625,34 +1625,34 @@ func TestCollectorSystemIntegration(t *testing.T) {
 	reader := metric.NewManualReader()
 	provider := metric.NewMeterProvider(metric.WithReader(reader))
 	otel.SetMeterProvider(provider)
-	
+
 	traceExporter := tracetest.NewInMemoryExporter()
 	tp := trace.NewTracerProvider(trace.WithSyncer(traceExporter))
 	otel.SetTracerProvider(tp)
-	
+
 	defer func() {
 		_ = provider.Shutdown(context.Background())
 		_ = tp.Shutdown(context.Background())
 	}()
-	
+
 	config := DefaultConfig()
 	config.EnableEBPF = false
 	config.Logger = zaptest.NewLogger(t)
-	
+
 	collector, err := NewCollector("test-system", config)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
 	err = collector.Start(ctx)
 	require.NoError(t, err)
-	
+
 	// Get the events channel
 	eventsChan := collector.Events()
-	
+
 	// Collector to gather events
 	var receivedEvents []collectors.RawEvent
 	var mu sync.Mutex
-	
+
 	// Start event consumer
 	done := make(chan struct{})
 	go func() {
@@ -1672,7 +1672,7 @@ func TestCollectorSystemIntegration(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	// Simulate DNS activity
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("integration-key-%d", i)
@@ -1680,29 +1680,29 @@ func TestCollectorSystemIntegration(t *testing.T) {
 		collector.CacheSet(key, value, time.Second)
 		_, _ = collector.CacheGet(key)
 	}
-	
+
 	// Wait for events to be processed
 	time.Sleep(500 * time.Millisecond)
-	
+
 	// Stop collector
 	err = collector.Stop()
 	require.NoError(t, err)
-	
+
 	// Wait for consumer to finish
 	<-done
-	
+
 	// Verify metrics
 	metrics := &metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, metrics)
 	require.NoError(t, err)
-	
+
 	metricNames := getMetricNames(metrics)
 	assert.NotEmpty(t, metricNames, "Should have recorded metrics")
-	
+
 	// Verify traces
 	spans := traceExporter.GetSpans()
 	assert.NotEmpty(t, spans, "Should have recorded spans")
-	
+
 	// Verify collector health
 	assert.False(t, collector.IsHealthy(), "Should not be healthy after stop")
 }
@@ -1715,33 +1715,33 @@ func TestCollectorRateLimiting(t *testing.T) {
 	config.RateLimitRPS = 10 // 10 requests per second
 	config.RateLimitBurst = 20
 	config.Logger = zaptest.NewLogger(t)
-	
+
 	collector, err := NewCollector("test-ratelimit", config)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
 	err = collector.Start(ctx)
 	require.NoError(t, err)
 	defer collector.Stop()
-	
+
 	// Test that rate limiting works
 	startTime := time.Now()
 	allowed := 0
-	
+
 	// Try to process many events quickly
 	for i := 0; i < 100; i++ {
 		if collector.rlimiter.Allow() {
 			allowed++
 		}
 	}
-	
+
 	duration := time.Since(startTime)
-	
+
 	// Should allow burst + some based on rate
 	expectedMax := config.RateLimitBurst + int(config.RateLimitRPS*duration.Seconds())
 	assert.LessOrEqual(t, allowed, expectedMax+5, "Rate limiting should restrict requests")
 	assert.GreaterOrEqual(t, allowed, config.RateLimitBurst, "Should allow at least burst size")
-	
+
 	t.Logf("Rate limiting: allowed %d out of 100 in %v", allowed, duration)
 }
 
@@ -1750,16 +1750,16 @@ func BenchmarkCollectorThroughput(b *testing.B) {
 	config := DefaultConfig()
 	config.EnableEBPF = false
 	config.Logger = zap.NewNop()
-	
+
 	collector, err := NewCollector("bench-throughput", config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	ctx := context.Background()
 	_ = collector.Start(ctx)
 	defer collector.Stop()
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
