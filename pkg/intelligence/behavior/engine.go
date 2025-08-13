@@ -118,11 +118,9 @@ func NewEngine(logger *zap.Logger) (*Engine, error) {
 	}
 
 	// Initialize pattern loader
-	// Try multiple paths to find patterns
+	// Single source of truth for patterns
 	patternDirs := []string{
-		"configs/patterns/builtin",
 		"patterns/behavior",
-		"pkg/intelligence/behavior/patterns",
 	}
 
 	var validDirs []string
