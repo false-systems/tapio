@@ -1,0 +1,82 @@
+id: network-partition
+name: Network Partition Risk
+category: networking
+severity: high
+description: Detects patterns indicating potential network partitioning
+enabled: true
+min_confidence: 0.7
+time_window: 3m
+
+conditions:
+  - event_type: NetworkTimeout
+    match:
+      type: threshold
+      threshold: 10
+      operator: ">="
+    aggregation:
+      type: count
+      window: 1m
+      
+  - event_type: ServiceUnavailable
+    match:
+      type: threshold
+      threshold: 5
+      operator: ">="
+    aggregation:
+      type: count
+      window: 2m
+      group_by: service
+      
+  - event_type: DNSResolutionFailed
+    match:
+      type: exists
+      field: hostname
+    required: false
+    
+  - event_type: ConnectionRefused
+    match:
+      type: threshold
+      threshold: 15
+      operator: ">="
+    aggregation:
+      type: count
+      window: 1m
+
+relationships:
+  - type: temporal
+    constraint: "NetworkTimeout OVERLAPS ServiceUnavailable"
+    window: 30s
+    
+  - type: causal
+    from: NetworkTimeout
+    to: ServiceUnavailable
+    confidence: 0.75
+    
+  - type: spatial
+    constraint: "CROSS namespace"
+    description: "Network issues affecting multiple namespaces"
+
+prediction_template:
+  potential_impacts:
+    - Complete service isolation and data inconsistency
+    - Split-brain scenarios in distributed systems
+    - Failed health checks leading to unnecessary restarts
+    - Customer-facing service outages
+    - Data synchronization failures
+    
+  recommended_actions:
+    - Check network policies and firewall rules
+    - Verify CNI plugin health and configuration
+    - Review service mesh configuration if applicable
+    - Implement circuit breakers for network calls
+    - Add retry logic with exponential backoff
+    - Consider implementing offline-first architecture
+
+metadata:
+  tags:
+    - networking
+    - availability
+    - distributed-systems
+  references:
+    - https://kubernetes.io/docs/concepts/services-networking/network-policies/
+    - https://kubernetes.io/docs/concepts/cluster-administration/networking/

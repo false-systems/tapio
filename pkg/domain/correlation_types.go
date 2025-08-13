@@ -14,12 +14,14 @@ type CorrelationRef struct {
 
 // PatternMatch represents a matched pattern
 type PatternMatch struct {
-	PatternID   string    `json:"pattern_id"`
-	PatternName string    `json:"pattern_name"`
-	Type        string    `json:"type"`
-	Confidence  float64   `json:"confidence"`
-	MatchTime   time.Time `json:"match_time"`
-	Evidence    []string  `json:"evidence,omitempty"`
+	PatternID   string           `json:"pattern_id"`
+	PatternName string           `json:"pattern_name"`
+	Type        string           `json:"type"`
+	Confidence  float64          `json:"confidence"`
+	MatchTime   time.Time        `json:"match_time"`
+	Timestamp   time.Time        `json:"timestamp"`
+	Evidence    []string         `json:"evidence,omitempty"`
+	Conditions  []ConditionMatch `json:"conditions,omitempty"`
 }
 
 // AnomalyRef references an anomaly detection

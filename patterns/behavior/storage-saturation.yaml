@@ -1,0 +1,76 @@
+id: storage-saturation
+name: Storage Saturation Risk
+category: storage
+severity: high
+description: Detects patterns indicating imminent storage exhaustion
+enabled: true
+min_confidence: 0.8
+time_window: 15m
+
+conditions:
+  - event_type: VolumeUsageHigh
+    match:
+      type: threshold
+      field: usage_percent
+      threshold: 85
+      operator: ">="
+    aggregation:
+      type: avg
+      window: 5m
+      
+  - event_type: DiskWriteFailed
+    match:
+      type: contains
+      field: error
+      value: "no space"
+    required: false
+    
+  - event_type: LogRotationFailed
+    match:
+      type: exists
+      field: volume
+    required: false
+    
+  - event_type: PVCResizeFailed
+    match:
+      type: exists
+      field: pvc_name
+    required: false
+
+relationships:
+  - type: temporal
+    constraint: "VolumeUsageHigh BEFORE DiskWriteFailed"
+    window: 5m
+    
+  - type: progression
+    stages:
+      - VolumeUsageHigh
+      - LogRotationFailed
+      - DiskWriteFailed
+    confidence: 0.85
+
+prediction_template:
+  potential_impacts:
+    - Application crashes due to inability to write data
+    - Database corruption from incomplete transactions
+    - Loss of monitoring and audit logs
+    - Pod evictions and scheduling failures
+    - Complete service outage if critical volumes affected
+    
+  recommended_actions:
+    - Implement automated log rotation and cleanup
+    - Configure volume auto-expansion if supported
+    - Set up storage usage alerts at 70%, 80%, and 90%
+    - Review and adjust PVC size requests
+    - Implement data retention policies
+    - Consider using object storage for large files
+    - Archive old data to cheaper storage tiers
+
+metadata:
+  tags:
+    - storage
+    - capacity
+    - reliability
+  references:
+    - https://kubernetes.io/docs/concepts/storage/persistent-volumes/
+    - https://kubernetes.io/docs/concepts/storage/volume-expansion/

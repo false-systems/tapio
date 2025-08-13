@@ -1,0 +1,68 @@
+id: oom-cascade
+name: OOM Killer Cascade
+category: resource-exhaustion
+severity: critical
+description: Detects cascading OOM kills that may lead to service degradation
+enabled: true
+min_confidence: 0.75
+time_window: 5m
+
+conditions:
+  - event_type: OOMKill
+    match:
+      type: threshold
+      threshold: 3
+      operator: ">="
+    aggregation:
+      type: count
+      window: 2m
+      group_by: namespace
+      
+  - event_type: PodRestart
+    match:
+      type: threshold
+      threshold: 5
+      operator: ">="
+    aggregation:
+      type: count
+      window: 5m
+      
+  - event_type: ResourcePressure
+    match:
+      type: exact
+      field: resource_type
+      value: memory
+    required: false
+
+relationships:
+  - type: temporal
+    constraint: "OOMKill BEFORE PodRestart"
+    window: 30s
+    
+  - type: causal
+    from: OOMKill
+    to: PodRestart
+    confidence: 0.8
+
+prediction_template:
+  potential_impacts:
+    - Service degradation due to repeated container restarts
+    - Complete node failure if memory pressure continues
+    - Cascading failures to dependent services
+    - Data loss if applications don't handle termination gracefully
+    
+  recommended_actions:
+    - Review memory limits and requests for affected pods
+    - Enable horizontal pod autoscaling if not already configured
+    - Consider implementing memory-efficient data structures
+    - Add memory monitoring and alerting thresholds
+    - Implement graceful degradation in applications
+
+metadata:
+  tags:
+    - memory
+    - reliability
+    - performance
+  references:
+    - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    - https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/

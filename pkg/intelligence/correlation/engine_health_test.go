@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 )
@@ -44,7 +45,7 @@ func TestEngine_HealthCheck(t *testing.T) {
 
 		// Create mock storage that fails health check
 		mockStorage := &MockStorage{}
-		mockStorage.On("HealthCheck", context.Background()).Return(fmt.Errorf("storage connection failed"))
+		mockStorage.On("HealthCheck", mock.Anything).Return(fmt.Errorf("storage connection failed"))
 
 		engine, err := NewEngine(logger, config, nil, mockStorage)
 		require.NoError(t, err)
@@ -203,7 +204,7 @@ func TestEngine_GetHealthStatus_WithFailures(t *testing.T) {
 
 	// Create mock storage that fails health check
 	mockStorage := &MockStorage{}
-	mockStorage.On("HealthCheck", context.Background()).Return(fmt.Errorf("connection lost"))
+	mockStorage.On("HealthCheck", mock.Anything).Return(fmt.Errorf("connection lost"))
 
 	engine, err := NewEngine(logger, config, nil, mockStorage)
 	require.NoError(t, err)
