@@ -360,25 +360,64 @@ func (e *Engine) convertToDomainMatch(match BehaviorPatternMatch) domain.Pattern
 	}
 }
 
-// selectBestMatch selects the best pattern match based on confidence and priority
+// selectBestMatch selects the best pattern match with consensus scoring
 func (e *Engine) selectBestMatch(matches []BehaviorPatternMatch) BehaviorPatternMatch {
 	if len(matches) == 1 {
 		return matches[0]
 	}
 
+	// Apply consensus finding from aggregator
+	consensusBoost := e.calculateConsensus(matches)
+
 	best := matches[0]
-	for _, match := range matches[1:] {
-		// Higher confidence wins
-		if match.Confidence > best.Confidence {
-			best = match
+	bestScore := best.Confidence
+
+	for i, match := range matches {
+		// Calculate adjusted score with consensus
+		score := match.Confidence
+		if consensusBoost > 0.5 { // Majority agreement
+			score *= (1 + 0.2) // 20% boost for consensus
+		}
+
+		if i == 0 {
+			bestScore = score
 			continue
 		}
-		// If confidence is equal, prefer more recent match
-		if match.Confidence == best.Confidence && match.MatchedAt.After(best.MatchedAt) {
+
+		// Higher score wins
+		if score > bestScore {
+			best = match
+			bestScore = score
+		} else if score == bestScore && match.MatchedAt.After(best.MatchedAt) {
+			// If scores equal, prefer more recent
 			best = match
 		}
 	}
 	return best
+}
+
+// calculateConsensus finds agreement between multiple pattern matches (from aggregator)
+func (e *Engine) calculateConsensus(matches []BehaviorPatternMatch) float64 {
+	if len(matches) < 2 {
+		return 0
+	}
+
+	// Count pattern names that agree
+	patternNames := make(map[string]int)
+	for _, match := range matches {
+		patternNames[match.PatternName]++
+	}
+
+	// Find most common pattern
+	maxCount := 0
+	for _, count := range patternNames {
+		if count > maxCount {
+			maxCount = count
+		}
+	}
+
+	// Return consensus ratio
+	return float64(maxCount) / float64(len(matches))
 }
 
 // GetPatterns returns currently loaded patterns

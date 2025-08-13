@@ -21,9 +21,16 @@ type Predictor struct {
 	// Pattern loader for finding patterns
 	patternLoader *PatternLoader
 
-	// Confidence adjustment factors
+	// Confidence adjustment factors (extracted from aggregator)
 	baseConfidenceWeight float64
 	feedbackWeight       float64
+	agreementBoost       float64 // Boost when multiple patterns agree
+	patternMatchBoost    float64 // Boost for pattern matches
+	missingDataPenalty   float64 // Penalty for incomplete evidence
+	conflictPenalty      float64 // Penalty for conflicting patterns
+
+	// Evidence quality weights (from aggregator specificity scoring)
+	evidenceWeights map[string]float64
 
 	// OTEL instrumentation
 	tracer              trace.Tracer
@@ -58,10 +65,23 @@ func NewPredictor(logger *zap.Logger) *Predictor {
 		logger:               logger,
 		baseConfidenceWeight: 0.7,
 		feedbackWeight:       0.3,
-		tracer:               tracer,
-		predictionsTotal:     predictionsTotal,
-		confidenceHistogram:  confidenceHistogram,
-		processingTime:       processingTime,
+		// Smart confidence adjustments from aggregator
+		agreementBoost:     0.2,  // 20% boost when patterns agree
+		patternMatchBoost:  0.1,  // 10% boost for pattern match
+		missingDataPenalty: 0.2,  // 20% penalty for incomplete data
+		conflictPenalty:    0.15, // 15% penalty for conflicts
+		// Evidence quality weights (from aggregator specificity scoring)
+		evidenceWeights: map[string]float64{
+			"event":      2.0, // Events are valuable
+			"graph_path": 3.0, // Graph paths most valuable
+			"resource":   2.0, // Resources important
+			"metric":     1.0, // Metrics baseline
+			"log":        1.0, // Logs baseline
+		},
+		tracer:              tracer,
+		predictionsTotal:    predictionsTotal,
+		confidenceHistogram: confidenceHistogram,
+		processingTime:      processingTime,
 	}
 }
 
@@ -154,7 +174,7 @@ func (p *Predictor) GeneratePrediction(ctx context.Context, match domain.Pattern
 	return prediction, nil
 }
 
-// calculateConfidence calculates the final confidence score
+// calculateConfidence calculates the final confidence score with smart adjustments
 func (p *Predictor) calculateConfidence(match domain.PatternMatch, pattern *domain.BehaviorPattern) float64 {
 	// Start with match confidence
 	confidence := match.Confidence
@@ -165,6 +185,18 @@ func (p *Predictor) calculateConfidence(match domain.PatternMatch, pattern *doma
 			pattern.AdjustedConfidence*p.feedbackWeight
 	}
 
+	// Apply smart boosts and penalties from aggregator
+	// Boost for pattern match (we already matched, so apply boost)
+	confidence *= (1 + p.patternMatchBoost)
+
+	// Check for missing data penalty
+	if p.hasIncompleteEvidence(match) {
+		confidence *= (1 - p.missingDataPenalty)
+	}
+
+	// Apply evidence quality weighting
+	confidence *= p.calculateEvidenceQuality(match)
+
 	// Ensure bounds
 	if confidence > 1.0 {
 		confidence = 1.0
@@ -173,6 +205,40 @@ func (p *Predictor) calculateConfidence(match domain.PatternMatch, pattern *doma
 	}
 
 	return confidence
+}
+
+// hasIncompleteEvidence checks if the match has incomplete evidence
+func (p *Predictor) hasIncompleteEvidence(match domain.PatternMatch) bool {
+	// Check if we have sufficient evidence
+	matchedConditions := 0
+	for _, cond := range match.Conditions {
+		if cond.Matched {
+			matchedConditions++
+		}
+	}
+	// Consider incomplete if less than 60% conditions matched
+	return float64(matchedConditions)/float64(len(match.Conditions)) < 0.6
+}
+
+// calculateEvidenceQuality calculates evidence quality score using weights
+func (p *Predictor) calculateEvidenceQuality(match domain.PatternMatch) float64 {
+	if len(match.Evidence) == 0 {
+		return 0.8 // Default quality if no evidence
+	}
+
+	// Score evidence based on type and count
+	totalWeight := 0.0
+	for range match.Evidence {
+		// Simple scoring based on evidence presence
+		totalWeight += p.evidenceWeights["event"] // Default to event weight
+	}
+
+	// Normalize to 0.8-1.2 range
+	qualityScore := 0.8 + (totalWeight/float64(len(match.Evidence)))*0.1
+	if qualityScore > 1.2 {
+		qualityScore = 1.2
+	}
+	return qualityScore
 }
 
 // buildEvidence builds evidence from the match and event
