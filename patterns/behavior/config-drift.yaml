@@ -1,0 +1,65 @@
+id: config-drift
+name: Configuration Drift Detection
+category: configuration
+severity: warning
+description: Detects when configuration changes lead to deployment issues
+enabled: true
+min_confidence: 0.65
+time_window: 10m
+
+conditions:
+  - event_type: ConfigMapUpdate
+    match:
+      type: exists
+      field: name
+    aggregation:
+      type: count
+      window: 5m
+      
+  - event_type: DeploymentFailed
+    match:
+      type: contains
+      field: reason
+      value: "config"
+    aggregation:
+      type: count
+      window: 10m
+      threshold: 2
+      
+  - event_type: PodError
+    match:
+      type: regex
+      field: message
+      value: "(config|configuration|env|environment|setting)"
+    required: false
+
+relationships:
+  - type: temporal
+    constraint: "ConfigMapUpdate BEFORE DeploymentFailed"
+    window: 2m
+    
+  - type: spatial
+    constraint: "SAME namespace"
+
+prediction_template:
+  potential_impacts:
+    - Deployment failures due to misconfiguration
+    - Application errors from invalid configuration values
+    - Service disruptions during configuration rollback
+    - Inconsistent behavior across pod replicas
+    
+  recommended_actions:
+    - Validate configuration changes before applying
+    - Implement configuration validation in CI/CD pipeline
+    - Use configuration management tools like Helm
+    - Consider using GitOps for configuration tracking
+    - Add configuration validation to application startup
+
+metadata:
+  tags:
+    - configuration
+    - deployment
+    - gitops
+  references:
+    - https://kubernetes.io/docs/concepts/configuration/configmap/
+    - https://www.weave.works/technologies/gitops/

@@ -1,0 +1,64 @@
+id: config-drift-detection
+name: Configuration Drift Pattern
+category: configuration
+severity: medium
+description: Detects when configuration changes lead to deployment issues
+
+conditions:
+  - event_type: configmap.updated
+    match:
+      type: exists
+      field: data
+    aggregation:
+      type: count
+      window: 10m
+      threshold: 1
+
+  - event_type: pod.crash_loop_backoff
+    match:
+      type: contains
+      field: reason
+      value: "ConfigError"
+    aggregation:
+      type: count
+      window: 5m
+      threshold: 1
+
+  - event_type: deployment.rollback
+    match:
+      type: exists
+      field: rollback_reason
+    correlation_window: 15m
+
+correlation:
+  time_window: 15m
+  min_events: 2
+  require_all: false
+  sequence_order: true
+
+prediction_template:
+  potential_impacts:
+    - "Failed deployments due to configuration errors"
+    - "Service unavailability during rollback"
+    - "Inconsistent application behavior across replicas"
+    - "Potential data corruption from misconfiguration"
+  
+  recommended_actions:
+    - "Validate configuration changes before applying"
+    - "Implement configuration validation webhooks"
+    - "Use GitOps for configuration management"
+    - "Enable configuration versioning and rollback"
+    - "Set up configuration drift alerts"
+
+time_window: 20m
+min_confidence: 0.65
+metadata:
+  related_patterns:
+    - deployment-failure
+    - rollback-storm
+  references:
+    - https://kubernetes.io/docs/concepts/configuration/configmap/
+  tags:
+    - configuration
+    - deployment
+    - drift

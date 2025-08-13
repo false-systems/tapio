@@ -1,0 +1,63 @@
+id: oom-cascade-risk
+name: OOMKilled Cascade Risk Pattern
+category: stability
+severity: high
+description: Detects patterns that may lead to cascading OOMKilled events across pods
+
+conditions:
+  - event_type: pod.oom_killed
+    match:
+      type: threshold
+      threshold: 2
+    aggregation:
+      type: count
+      window: 5m
+      group_by: namespace
+
+  - event_type: pod.restart
+    match:
+      type: threshold
+      threshold: 3
+    aggregation:
+      type: count
+      window: 5m
+      group_by: namespace
+
+  - event_type: metrics.memory_pressure
+    match:
+      type: threshold
+      field: memory_usage_percent
+      value: "85"
+      threshold: 1
+
+correlation:
+  time_window: 5m
+  min_events: 2
+  require_all: false
+
+prediction_template:
+  potential_impacts:
+    - "Service degradation due to repeated pod restarts"
+    - "Complete service outage if all replicas are OOMKilled"
+    - "Increased latency from constant pod recycling"
+    - "Data loss if stateful pods are killed during write operations"
+  
+  recommended_actions:
+    - "Increase memory limits for affected pods"
+    - "Implement horizontal pod autoscaling (HPA)"
+    - "Review application memory usage patterns"
+    - "Consider implementing circuit breakers in dependent services"
+    - "Enable memory-based autoscaling triggers"
+
+time_window: 10m
+min_confidence: 0.75
+metadata:
+  related_patterns:
+    - memory-leak-detection
+    - resource-exhaustion
+  references:
+    - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+  tags:
+    - reliability
+    - memory
+    - cascade-failure
