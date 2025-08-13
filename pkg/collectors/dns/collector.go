@@ -9,10 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/dns/bpf"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -165,10 +162,8 @@ type Collector struct {
 	mu         sync.RWMutex
 	safeParser *collectors.SafeParser
 
-	// eBPF components
-	objs   *bpf.DnsmonitorObjects
-	links  []link.Link
-	reader *ringbuf.Reader
+	// eBPF components (platform-specific)
+	ebpfState interface{}
 
 	// Event processing
 	events   chan collectors.RawEvent
