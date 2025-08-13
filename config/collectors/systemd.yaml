@@ -1,0 +1,472 @@
+# SystemD Collector Metrics Configuration
+# Monitors systemd service lifecycle, journal events, and unit states
+
+collector: "systemd"
+version: "1.0.0"
+
+defaults:
+  export:
+    prometheus:
+      enabled: true
+      namespace: "tapio"
+      subsystem: "systemd"
+    opentelemetry:
+      enabled: true
+      meter_name: "tapio.systemd"
+      version: "1.0.0"
+  performance:
+    sample_rate: 1.0
+    collect_every: "10s"  # SystemD events are less frequent
+    cache_metrics: true
+    batch_size: 100
+  labels:
+    collector: "systemd"
+    node: "${NODE_NAME:-unknown}"
+    systemd_version: "${SYSTEMD_VERSION:-unknown}"
+
+# Decoder definitions for systemd-specific data
+decoders:
+  unit_state:
+    type: "enum"
+    description: "SystemD unit states"
+    config:
+      values:
+        "0": "inactive"
+        "1": "active"
+        "2": "activating"
+        "3": "deactivating"
+        "4": "failed"
+        "5": "reloading"
+        "6": "maintenance"
+      default: "unknown"
+
+  unit_substate:
+    type: "enum"
+    description: "SystemD unit substates"
+    config:
+      values:
+        # Service substates
+        "0": "dead"
+        "1": "start-pre"
+        "2": "start"
+        "3": "start-post"
+        "4": "running"
+        "5": "exited"
+        "6": "reload"
+        "7": "stop"
+        "8": "stop-sigabrt"
+        "9": "stop-sigterm"
+        "10": "stop-sigkill"
+        "11": "stop-post"
+        "12": "final-sigterm"
+        "13": "final-sigkill"
+        "14": "failed"
+        "15": "auto-restart"
+        "16": "cleaning"
+      default: "unknown"
+
+  unit_type:
+    type: "enum"
+    description: "SystemD unit types"
+    config:
+      values:
+        "1": "service"
+        "2": "socket"
+        "3": "target"
+        "4": "device"
+        "5": "mount"
+        "6": "automount"
+        "7": "timer"
+        "8": "swap"
+        "9": "path"
+        "10": "slice"
+        "11": "scope"
+      default: "unknown"
+
+  journal_priority:
+    type: "enum"
+    description: "Syslog priority levels"
+    config:
+      values:
+        "0": "emerg"
+        "1": "alert"
+        "2": "crit"
+        "3": "err"
+        "4": "warning"
+        "5": "notice"
+        "6": "info"
+        "7": "debug"
+      default: "unknown"
+
+  service_result:
+    type: "enum"
+    description: "Service execution results"
+    config:
+      values:
+        "0": "success"
+        "1": "protocol"
+        "2": "timeout"
+        "3": "exit-code"
+        "4": "signal"
+        "5": "core-dump"
+        "6": "watchdog"
+        "7": "start-limit"
+        "8": "resources"
+      default: "unknown"
+
+  restart_reason:
+    type: "enum"
+    description: "Service restart reasons"
+    config:
+      values:
+        "0": "no"
+        "1": "on-success"
+        "2": "on-failure"
+        "3": "on-abnormal"
+        "4": "on-watchdog"
+        "5": "on-abort"
+        "6": "always"
+      default: "unknown"
+
+# Metric definitions
+metrics:
+  # Unit State Metrics
+  - name: "unit_state"
+    type: "gauge"
+    help: "Current state of systemd units (1=active, 0=inactive)"
+    table: "unit_states"
+    value_field: "state_value"
+    labels:
+      - "unit_name"
+      - "unit_type"
+      - "state"
+      - "substate"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      unit_type:
+        field: "unit_type"
+        decoder:
+          type: "unit_type"
+      state:
+        field: "active_state"
+        decoder:
+          type: "unit_state"
+      substate:
+        field: "sub_state"
+        decoder:
+          type: "unit_substate"
+
+  - name: "unit_start_time_seconds"
+    type: "gauge"
+    help: "Unix timestamp when the unit was started"
+    table: "unit_start_times"
+    value_field: "start_timestamp"
+    labels:
+      - "unit_name"
+      - "unit_type"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      unit_type:
+        field: "unit_type"
+        decoder:
+          type: "unit_type"
+
+  # Service Lifecycle Events
+  - name: "service_events_total"
+    type: "counter"
+    help: "Total systemd service events"
+    table: "service_events"
+    value_field: "count"
+    labels:
+      - "unit_name"
+      - "event_type"
+      - "result"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      event_type:
+        field: "event_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "start"
+              "2": "stop"
+              "3": "reload"
+              "4": "restart"
+              "5": "enable"
+              "6": "disable"
+              "7": "mask"
+              "8": "unmask"
+            default: "unknown"
+      result:
+        field: "result"
+        decoder:
+          type: "service_result"
+
+  - name: "service_restarts_total"
+    type: "counter"
+    help: "Total service restarts"
+    table: "service_restarts"
+    value_field: "restart_count"
+    labels:
+      - "unit_name"
+      - "restart_reason"
+      - "exit_code"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      restart_reason:
+        field: "restart_reason"
+        decoder:
+          type: "restart_reason"
+      exit_code:
+        field: "exit_code"
+        format: "%d"
+        default: "0"
+
+  # Service Performance Metrics
+  - name: "service_start_duration_seconds"
+    type: "histogram"
+    help: "Time taken for services to start"
+    table: "service_start_times"
+    value_field: "start_duration_us"
+    labels:
+      - "unit_name"
+      - "result"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      result:
+        field: "result"
+        decoder:
+          type: "service_result"
+    histogram:
+      strategy: "exp2"
+      min: 0.1      # 100ms
+      max: 300.0    # 5 minutes
+      count: 15
+
+  - name: "service_memory_current_bytes"
+    type: "gauge"
+    help: "Current memory usage of services"
+    table: "service_memory"
+    value_field: "memory_current"
+    labels:
+      - "unit_name"
+      - "memory_type"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      memory_type:
+        field: "memory_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "rss"
+              "2": "swap"
+              "3": "cache"
+            default: "total"
+
+  - name: "service_cpu_usage_seconds_total"
+    type: "counter"
+    help: "Total CPU time consumed by services"
+    table: "service_cpu"
+    value_field: "cpu_usage_us"
+    labels:
+      - "unit_name"
+      - "cpu_type"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      cpu_type:
+        field: "cpu_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "user"
+              "2": "system"
+            default: "total"
+
+  # Journal Metrics
+  - name: "journal_entries_total"
+    type: "counter"
+    help: "Total journal entries"
+    table: "journal_events"
+    value_field: "count"
+    labels:
+      - "priority"
+      - "unit_name"
+      - "syslog_identifier"
+    label_fields:
+      priority:
+        field: "priority"
+        decoder:
+          type: "journal_priority"
+      unit_name:
+        field: "unit_name"
+        default: "system"
+      syslog_identifier:
+        field: "syslog_identifier"
+        default: "unknown"
+
+  - name: "journal_errors_total"
+    type: "counter"
+    help: "Total journal error messages"
+    table: "journal_errors"
+    value_field: "error_count"
+    labels:
+      - "unit_name"
+      - "error_pattern"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      error_pattern:
+        field: "error_pattern"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "oom_killer"
+              "2": "segfault"
+              "3": "assertion_failed"
+              "4": "timeout"
+              "5": "permission_denied"
+            default: "generic"
+
+  # System Metrics
+  - name: "system_boot_time_seconds"
+    type: "gauge"
+    help: "System boot time in seconds since epoch"
+    table: "system_info"
+    value_field: "boot_timestamp"
+    const_labels:
+      metric_type: "boot_time"
+
+  - name: "failed_units_total"
+    type: "gauge"
+    help: "Number of failed systemd units"
+    table: "failed_units"
+    value_field: "failed_count"
+    labels:
+      - "unit_type"
+    label_fields:
+      unit_type:
+        field: "unit_type"
+        decoder:
+          type: "unit_type"
+
+  # Socket Metrics
+  - name: "socket_connections_total"
+    type: "counter"
+    help: "Total socket connections handled by systemd"
+    table: "socket_events"
+    value_field: "connection_count"
+    labels:
+      - "socket_name"
+      - "connection_type"
+    label_fields:
+      socket_name:
+        field: "socket_name"
+        default: "unknown"
+      connection_type:
+        field: "connection_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "accepted"
+              "2": "refused"
+              "3": "timeout"
+            default: "unknown"
+
+  # Timer Metrics
+  - name: "timer_events_total"
+    type: "counter"
+    help: "Total timer events"
+    table: "timer_events"
+    value_field: "trigger_count"
+    labels:
+      - "timer_name"
+      - "trigger_type"
+    label_fields:
+      timer_name:
+        field: "timer_name"
+        default: "unknown"
+      trigger_type:
+        field: "trigger_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "calendar"
+              "2": "monotonic"
+              "3": "realtime"
+            default: "unknown"
+
+  - name: "timer_last_trigger_seconds"
+    type: "gauge"
+    help: "Unix timestamp of last timer trigger"
+    table: "timer_last_trigger"
+    value_field: "last_trigger_timestamp"
+    labels:
+      - "timer_name"
+    label_fields:
+      timer_name:
+        field: "timer_name"
+        default: "unknown"
+
+  # Resource Limit Metrics
+  - name: "service_resource_limit_hits_total"
+    type: "counter"
+    help: "Total resource limit violations"
+    table: "resource_limits"
+    value_field: "violation_count"
+    labels:
+      - "unit_name"
+      - "resource_type"
+      - "limit_type"
+    label_fields:
+      unit_name:
+        field: "unit_name"
+        default: "unknown"
+      resource_type:
+        field: "resource_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "memory"
+              "2": "cpu"
+              "3": "tasks"
+              "4": "files"
+              "5": "network"
+            default: "unknown"
+      limit_type:
+        field: "limit_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "soft"
+              "2": "hard"
+            default: "unknown"
+
+# Resource limits
+limits:
+  max_metrics: 1500
+  max_label_values: 15000
+  max_memory_mb: 120
+  collection_timeout: "45s"
