@@ -17,6 +17,15 @@
 *.dylib
 *.test
 
+# Compiled Go binaries in root (not directories)
+# These are executables without extension
+/collectors
+/tapio
+/loader
+/simple-loader
+/cmd/*/main
+/cmd/*/*/main
+
 # Go build output directories
 /bin/
 /build/
@@ -395,4 +404,4 @@ perf.data.old
 
 # =============================================================================
 # END OF GITIGNORE - KEEP THIS FILE CLEAN AND ORGANIZED
-# =============================================================================
+# =============================================================================collectors
