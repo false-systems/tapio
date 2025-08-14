@@ -19,8 +19,14 @@ func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
 		config.BufferSize = DefaultConfig().BufferSize
 	}
 
-	// Create NATS publisher
-	publisher, err := NewNATSPublisher(logger, config.NATSConfig)
+	// Create NATS publisher (enhanced version for production)
+	var publisher NATSPublisherInterface
+	var err error
+	if config.UseEnhancedNATS {
+		publisher, err = NewEnhancedNATSPublisher(logger, config.NATSConfig)
+	} else {
+		publisher, err = NewNATSPublisher(logger, config.NATSConfig)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NATS publisher: %w", err)
 	}
@@ -70,92 +76,239 @@ func (p *EventPipeline) Start(ctx context.Context) error {
 		}
 	}
 
+	// Use WaitGroup to track all goroutines
+	p.wg = &sync.WaitGroup{}
+
 	// Start collector consumers
 	for name, collector := range p.collectors {
+		p.wg.Add(1)
 		go p.consumeCollector(name, collector)
 	}
 
 	// Start workers
-	var wg sync.WaitGroup
 	for i := 0; i < p.workers; i++ {
-		wg.Add(1)
-		go p.worker(&wg)
+		p.wg.Add(1)
+		go p.worker()
 	}
-
-	// Wait for shutdown
-	go func() {
-		<-p.ctx.Done()
-		close(p.eventsChan)
-		wg.Wait()
-	}()
 
 	return nil
 }
 
 // Stop gracefully shuts down the pipeline
 func (p *EventPipeline) Stop() error {
-	if p.cancel != nil {
-		p.cancel()
+	p.logger.Info("Stopping event pipeline")
+
+	// Prevent multiple shutdown attempts
+	if p.cancel == nil {
+		p.logger.Warn("Pipeline already stopped or not started")
+		return nil
 	}
 
-	// Stop all collectors
+	// Step 1: Signal shutdown to all components first
+	p.cancel()
+
+	// Step 2: Stop all collectors to prevent new events
+	// This must be done BEFORE waiting for goroutines to prevent new events
 	for name, collector := range p.collectors {
 		if err := collector.Stop(); err != nil {
 			// Log but continue stopping others
-			p.logger.Warn("error stopping collector", zap.String("collector", name), zap.Error(err))
+			p.logger.Warn("Error stopping collector",
+				zap.String("collector", name),
+				zap.Error(err))
 		}
 	}
 
-	// Close publisher
-	if p.publisher != nil {
-		p.publisher.Close()
+	// Step 3: Wait for all goroutines to finish with timeout
+	// This ensures all collector consumers and workers have stopped before closing channels
+	done := make(chan struct{})
+	go func() {
+		if p.wg != nil {
+			p.wg.Wait()
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		p.logger.Info("All workers stopped gracefully")
+	case <-time.After(10 * time.Second):
+		p.logger.Error("Timeout waiting for workers to stop")
+		// Continue with shutdown even after timeout
 	}
 
+	// Step 4: Close event channel safely after all goroutines have stopped
+	// Use a safe close pattern to prevent panic if already closed
+	if p.eventsChan != nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					p.logger.Debug("Channel already closed during shutdown")
+				}
+			}()
+			// Only close if not already closed
+			select {
+			case event, ok := <-p.eventsChan:
+				if !ok {
+					// Channel already closed
+					return
+				}
+				// Put the value back if we read one
+				select {
+				case p.eventsChan <- event:
+				default:
+					// Channel full, just close it
+				}
+				close(p.eventsChan)
+			default:
+				// No data available, safe to close
+				close(p.eventsChan)
+			}
+		}()
+	}
+
+	// Step 5: Close publisher with graceful shutdown
+	if p.publisher != nil {
+		publisherDone := make(chan bool, 1)
+		go func() {
+			p.publisher.Close()
+			publisherDone <- true
+		}()
+
+		select {
+		case <-publisherDone:
+			p.logger.Info("Publisher closed gracefully")
+		case <-time.After(5 * time.Second):
+			p.logger.Warn("Timeout closing publisher")
+		}
+	}
+
+	// Reset cancel to prevent multiple shutdowns
+	p.cancel = nil
+
+	p.logger.Info("Event pipeline stopped")
 	return nil
 }
 
 // consumeCollector reads events from a collector and forwards to processing
 func (p *EventPipeline) consumeCollector(name string, collector collectors.Collector) {
+	defer p.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Error("Panic in collector consumer",
+				zap.String("collector", name),
+				zap.Any("panic", r),
+			)
+		}
+	}()
+
+	p.logger.Debug("Starting collector consumer", zap.String("collector", name))
+
 	for {
 		select {
+		case <-p.ctx.Done():
+			p.logger.Info("Collector consumer stopping due to context cancellation",
+				zap.String("collector", name))
+			return
 		case event, ok := <-collector.Events():
 			if !ok {
+				p.logger.Info("Collector channel closed", zap.String("collector", name))
 				return
 			}
+
 			// Add collector name to metadata
 			if event.Metadata == nil {
 				event.Metadata = make(map[string]string)
 			}
 			event.Metadata["collector_name"] = name
 
+			// Try to send event with safe channel writing
+			// Use a non-blocking select to avoid race conditions during shutdown
 			select {
-			case p.eventsChan <- &event:
 			case <-p.ctx.Done():
+				// Pipeline is shutting down, drop event
+				p.logger.Debug("Dropping event due to shutdown",
+					zap.String("collector", name),
+					zap.String("event_type", event.Type))
 				return
+			case p.eventsChan <- &event:
+				// Successfully sent event
+			default:
+				// Channel full or closed, use timeout with graceful handling
+				select {
+				case <-p.ctx.Done():
+					return
+				case p.eventsChan <- &event:
+					// Successfully sent after retry
+				case <-time.After(100 * time.Millisecond):
+					// Drop event if channel is blocked
+					p.logger.Debug("Dropping event due to channel backpressure",
+						zap.String("collector", name),
+						zap.String("event_type", event.Type))
+				}
 			}
-		case <-p.ctx.Done():
-			return
 		}
 	}
 }
 
 // worker processes events
-func (p *EventPipeline) worker(wg *sync.WaitGroup) {
-	defer wg.Done()
+func (p *EventPipeline) worker() {
+	defer p.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Error("Panic in pipeline worker",
+				zap.Any("panic", r),
+			)
+		}
+	}()
 
-	for event := range p.eventsChan {
-		// Enrich event
-		enriched := p.enrichEvent(event)
-
-		// Convert to unified event
-		unified := enriched.ConvertToUnified()
-
-		// Publish to NATS
-		if p.publisher != nil {
-			if err := p.publisher.Publish(unified); err != nil {
-				// Log error but continue
-				p.logger.Error("failed to publish event", zap.Error(err))
+	for {
+		select {
+		case event, ok := <-p.eventsChan:
+			if !ok {
+				return
 			}
+			func() {
+				// Wrap individual event processing in recovery
+				defer func() {
+					if r := recover(); r != nil {
+						p.logger.Error("Panic processing event",
+							zap.Any("panic", r),
+							zap.String("event_type", event.Type),
+						)
+					}
+				}()
+
+				// Enrich event
+				enriched := p.enrichEvent(event)
+
+				// Convert to unified event
+				unified := enriched.ConvertToUnified()
+
+				// Publish to NATS with retry logic
+				if p.publisher != nil {
+					retries := 3
+					for i := 0; i < retries; i++ {
+						err := p.publisher.Publish(unified)
+						if err == nil {
+							break
+						}
+
+						if i == retries-1 {
+							// Final retry failed
+							p.logger.Error("Failed to publish event after retries",
+								zap.Error(err),
+								zap.String("event_id", unified.ID),
+								zap.Int("retries", retries),
+							)
+						} else {
+							// Wait before retry
+							time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+						}
+					}
+				}
+			}()
+		case <-p.ctx.Done():
+			return
 		}
 	}
 }
@@ -187,18 +340,14 @@ func (p *EventPipeline) GetHealthStatus() map[string]CollectorHealthStatus {
 			Healthy: collector.IsHealthy(),
 		}
 
-		// Check if collector implements detailed health interface
+		// Check if collector implements structured health interface
 		if healthReporter, ok := collector.(interface {
-			Health() (bool, map[string]interface{})
+			Health() HealthDetails
 		}); ok {
-			healthy, details := healthReporter.Health()
-			health.Healthy = healthy
-			if err, ok := details["error"].(string); ok {
-				health.Error = err
-			}
-			if lastEvent, ok := details["last_event"].(time.Time); ok {
-				health.LastEvent = lastEvent
-			}
+			details := healthReporter.Health()
+			health.Healthy = details.Healthy
+			health.Error = details.Error
+			health.LastEvent = details.LastEvent
 		}
 
 		status[name] = health

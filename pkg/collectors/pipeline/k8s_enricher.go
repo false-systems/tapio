@@ -60,68 +60,53 @@ func (e *K8sEnricher) GetObjectInfo(event *collectors.RawEvent) *K8sObjectInfo {
 	return nil
 }
 
-// parseEventData attempts to extract K8s info from event data
+// K8sObject represents a structured Kubernetes object for safe parsing
+type K8sObject struct {
+	Kind       string            `json:"kind"`
+	APIVersion string            `json:"apiVersion"`
+	Metadata   K8sObjectMetadata `json:"metadata"`
+}
+
+type K8sObjectMetadata struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	UID       string            `json:"uid"`
+	Labels    map[string]string `json:"labels"`
+}
+
+// parseEventData attempts to extract K8s info from event data using structured types
 func (e *K8sEnricher) parseEventData(event *collectors.RawEvent) *K8sObjectInfo {
-	// Try to unmarshal as JSON
-	var data map[string]interface{}
-	if err := json.Unmarshal(event.Data, &data); err != nil {
+	// Try to unmarshal as structured K8s object
+	var k8sObj K8sObject
+	if err := json.Unmarshal(event.Data, &k8sObj); err != nil {
+		e.logger.Debug("Failed to parse event data as K8s object",
+			zap.Error(err),
+			zap.String("event_type", event.Type))
 		return nil
 	}
 
-	// Look for K8s object patterns
+	// Only return if we found useful K8s data
+	if k8sObj.Kind == "" && k8sObj.Metadata.Name == "" {
+		return nil
+	}
+
+	// Create K8s object info from structured data
 	info := &K8sObjectInfo{
-		Labels: make(map[string]string),
+		Kind:      k8sObj.Kind,
+		Name:      k8sObj.Metadata.Name,
+		Namespace: k8sObj.Metadata.Namespace,
+		UID:       k8sObj.Metadata.UID,
+		Labels:    make(map[string]string),
 	}
 
-	// Extract common K8s fields
-	if kind, ok := getString(data, "kind"); ok {
-		info.Kind = kind
-	}
-	if name, ok := getString(data, "name"); ok {
-		info.Name = name
-	}
-	if ns, ok := getString(data, "namespace"); ok {
-		info.Namespace = ns
-	}
-	if uid, ok := getString(data, "uid"); ok {
-		info.UID = uid
-	}
-
-	// Try metadata.name pattern
-	if metadata, ok := data["metadata"].(map[string]interface{}); ok {
-		if name, ok := getString(metadata, "name"); ok {
-			info.Name = name
-		}
-		if ns, ok := getString(metadata, "namespace"); ok {
-			info.Namespace = ns
-		}
-		if uid, ok := getString(metadata, "uid"); ok {
-			info.UID = uid
-		}
-		if labels, ok := metadata["labels"].(map[string]interface{}); ok {
-			for k, v := range labels {
-				if str, ok := v.(string); ok {
-					info.Labels[k] = str
-				}
-			}
+	// Copy labels safely
+	if k8sObj.Metadata.Labels != nil {
+		for k, v := range k8sObj.Metadata.Labels {
+			info.Labels[k] = v
 		}
 	}
 
-	// Only return if we found something useful
-	if info.Kind != "" || info.Name != "" {
-		return info
-	}
-
-	return nil
-}
-
-func getString(data map[string]interface{}, key string) (string, bool) {
-	if val, ok := data[key]; ok {
-		if str, ok := val.(string); ok {
-			return str, true
-		}
-	}
-	return "", false
+	return info
 }
 
 func extractLabels(metadata map[string]string) map[string]string {

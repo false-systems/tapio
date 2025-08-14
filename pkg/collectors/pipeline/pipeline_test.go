@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,33 +13,50 @@ import (
 	"go.uber.org/zap"
 )
 
-// MockCollector implements a test collector
+// MockCollector implements a test collector with race-safe operations
 type MockCollector struct {
-	name   string
-	events chan collectors.RawEvent
-	ctx    context.Context
-	cancel context.CancelFunc
+	name     string
+	events   chan collectors.RawEvent
+	ctx      context.Context
+	cancel   context.CancelFunc
+	stopOnce sync.Once
+	mu       sync.RWMutex
+	stopped  bool
 }
 
 func NewMockCollector(name string) *MockCollector {
 	return &MockCollector{
 		name:   name,
-		events: make(chan collectors.RawEvent, 10),
+		events: make(chan collectors.RawEvent, 100), // Larger buffer for stress testing
 	}
 }
 
 func (m *MockCollector) Name() string { return m.name }
 
 func (m *MockCollector) Start(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.ctx, m.cancel = context.WithCancel(ctx)
+	m.stopped = false
 	return nil
 }
 
 func (m *MockCollector) Stop() error {
-	if m.cancel != nil {
-		m.cancel()
-	}
-	close(m.events)
+	m.stopOnce.Do(func() {
+		m.mu.Lock()
+		m.stopped = true
+		if m.cancel != nil {
+			m.cancel()
+		}
+		m.mu.Unlock()
+
+		// Give a moment for any in-flight sends to complete
+		time.Sleep(1 * time.Millisecond)
+
+		// Close events channel to signal no more events
+		close(m.events)
+	})
 	return nil
 }
 
@@ -45,12 +64,28 @@ func (m *MockCollector) Events() <-chan collectors.RawEvent {
 	return m.events
 }
 
-func (m *MockCollector) IsHealthy() bool { return true }
+func (m *MockCollector) IsHealthy() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return !m.stopped
+}
 
 func (m *MockCollector) SendEvent(event collectors.RawEvent) {
+	m.mu.RLock()
+	if m.stopped {
+		m.mu.RUnlock()
+		return
+	}
+
+	// Try to send with timeout to prevent blocking
 	select {
 	case m.events <- event:
+		m.mu.RUnlock()
 	case <-m.ctx.Done():
+		m.mu.RUnlock()
+	case <-time.After(10 * time.Millisecond):
+		// Drop event if we can't send quickly
+		m.mu.RUnlock()
 	}
 }
 
@@ -76,6 +111,7 @@ func TestEventPipeline(t *testing.T) {
 	t.Run("StartStop", func(t *testing.T) {
 		config := DefaultConfig()
 		config.NATSConfig = nil // Disable NATS for unit test
+		config.Workers = 1      // Use single worker for predictable testing
 
 		pipeline, err := New(logger, config)
 		require.NoError(t, err)
@@ -84,7 +120,7 @@ func TestEventPipeline(t *testing.T) {
 		err = pipeline.RegisterCollector("test", collector)
 		require.NoError(t, err)
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		err = pipeline.Start(ctx)
@@ -95,18 +131,141 @@ func TestEventPipeline(t *testing.T) {
 		assert.Error(t, err)
 
 		// Send test event
-		collector.SendEvent(collectors.RawEvent{
+		testEvent := collectors.RawEvent{
 			Timestamp: time.Now(),
 			Type:      "test",
 			Data:      []byte("test data"),
 			Metadata:  map[string]string{"key": "value"},
 			TraceID:   collectors.GenerateTraceID(),
 			SpanID:    collectors.GenerateSpanID(),
-		})
+		}
+		collector.SendEvent(testEvent)
 
-		// Give time to process
+		// Give time to process event
+		time.Sleep(50 * time.Millisecond)
+
+		// Graceful shutdown
+		err = pipeline.Stop()
+		assert.NoError(t, err)
+
+		// Should be able to call Stop() multiple times safely
+		err = pipeline.Stop()
+		assert.NoError(t, err)
+	})
+
+	t.Run("RaceConditionStressTest", func(t *testing.T) {
+		config := DefaultConfig()
+		config.NATSConfig = nil // Disable NATS for unit test
+		config.Workers = 4      // Multiple workers for race testing
+		config.BufferSize = 100 // Smaller buffer to trigger backpressure
+
+		pipeline, err := New(logger, config)
+		require.NoError(t, err)
+
+		// Create multiple collectors
+		testCollectors := make([]*MockCollector, 3)
+		for i := 0; i < 3; i++ {
+			testCollectors[i] = NewMockCollector(fmt.Sprintf("test-%d", i))
+			err = pipeline.RegisterCollector(fmt.Sprintf("test-%d", i), testCollectors[i])
+			require.NoError(t, err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err = pipeline.Start(ctx)
+		require.NoError(t, err)
+
+		// Start sending events from multiple goroutines
+		eventCount := 200
+		var wg sync.WaitGroup
+
+		for i, collector := range testCollectors {
+			wg.Add(1)
+			go func(collectorIdx int, c *MockCollector) {
+				defer wg.Done()
+				for j := 0; j < eventCount; j++ {
+					event := collectors.RawEvent{
+						Timestamp: time.Now(),
+						Type:      fmt.Sprintf("test-%d", collectorIdx),
+						Data:      []byte(fmt.Sprintf("test data %d-%d", collectorIdx, j)),
+						Metadata:  map[string]string{"idx": fmt.Sprintf("%d-%d", collectorIdx, j)},
+						TraceID:   collectors.GenerateTraceID(),
+						SpanID:    collectors.GenerateSpanID(),
+					}
+					c.SendEvent(event)
+
+					// Add some randomness to trigger race conditions
+					if j%50 == 0 {
+						time.Sleep(time.Millisecond)
+					}
+				}
+			}(i, collector)
+		}
+
+		// Let events flow for a bit
 		time.Sleep(100 * time.Millisecond)
 
+		// Start shutdown while events are still being sent
+		shutdownDone := make(chan bool)
+		go func() {
+			err := pipeline.Stop()
+			assert.NoError(t, err)
+			shutdownDone <- true
+		}()
+
+		// Wait for all event senders to finish
+		wg.Wait()
+
+		// Wait for shutdown to complete
+		select {
+		case <-shutdownDone:
+			// Success
+		case <-time.After(15 * time.Second):
+			t.Fatal("Pipeline shutdown timed out")
+		}
+
+		// Verify pipeline can be stopped multiple times
+		err = pipeline.Stop()
+		assert.NoError(t, err)
+	})
+
+	t.Run("ChannelClosureRaceTest", func(t *testing.T) {
+		config := DefaultConfig()
+		config.NATSConfig = nil // Disable NATS for unit test
+		config.Workers = 2
+		config.BufferSize = 10 // Very small buffer
+
+		pipeline, err := New(logger, config)
+		require.NoError(t, err)
+
+		collector := NewMockCollector("test")
+		err = pipeline.RegisterCollector("test", collector)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err = pipeline.Start(ctx)
+		require.NoError(t, err)
+
+		// Send events in rapid succession
+		go func() {
+			for i := 0; i < 50; i++ {
+				event := collectors.RawEvent{
+					Timestamp: time.Now(),
+					Type:      "test",
+					Data:      []byte(fmt.Sprintf("rapid event %d", i)),
+					Metadata:  map[string]string{"rapid": fmt.Sprintf("%d", i)},
+					TraceID:   collectors.GenerateTraceID(),
+					SpanID:    collectors.GenerateSpanID(),
+				}
+				collector.SendEvent(event)
+			}
+		}()
+
+		// Stop almost immediately to test channel closure races
+		time.Sleep(5 * time.Millisecond)
 		err = pipeline.Stop()
 		assert.NoError(t, err)
 	})
