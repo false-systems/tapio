@@ -132,10 +132,13 @@ func (p *EventPool) Put(event *KernelEvent) {
 
 // clearEvent clears sensitive data from the event
 func (p *EventPool) clearEvent(event *KernelEvent) {
-	// Clear string fields
-	event.Comm = ""
-	event.PodUID = ""
-	event.ContainerID = ""
+	// Clear byte array fields
+	for i := range event.Comm {
+		event.Comm[i] = 0
+	}
+	for i := range event.PodUID {
+		event.PodUID[i] = 0
+	}
 	
 	// Clear union data
 	for i := range event.Data {
@@ -215,19 +218,6 @@ type PoolStats struct {
 	MaxSize     int64 `json:"max_size"`
 }
 
-// KernelEvent represents a kernel event (simplified structure for pool)
-type KernelEvent struct {
-	Timestamp   uint64 `json:"timestamp"`
-	PID         uint32 `json:"pid"`
-	TID         uint32 `json:"tid"`
-	EventType   uint32 `json:"event_type"`
-	Size        uint64 `json:"size"`
-	Comm        string `json:"comm"`
-	CgroupID    uint64 `json:"cgroup_id"`
-	PodUID      string `json:"pod_uid"`
-	ContainerID string `json:"container_id"`
-	Data        [64]byte `json:"data"`
-}
 
 // CircuitBreaker implements circuit breaker pattern for overload protection
 type CircuitBreaker struct {

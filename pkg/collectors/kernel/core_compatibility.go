@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 )

@@ -22,12 +22,14 @@ type ResourceLimits struct {
 
 // BackpressureConfig defines backpressure handling
 type BackpressureConfig struct {
-	Enabled              bool          `json:"enabled" yaml:"enabled"`
-	HighWatermark        float64       `json:"high_watermark" yaml:"high_watermark"`
-	LowWatermark         float64       `json:"low_watermark" yaml:"low_watermark"`
-	DropThreshold        float64       `json:"drop_threshold" yaml:"drop_threshold"`
-	RecoveryDelay        time.Duration `json:"recovery_delay" yaml:"recovery_delay"`
-	SamplingReduction    float64       `json:"sampling_reduction" yaml:"sampling_reduction"`
+	Enabled            bool          `json:"enabled" yaml:"enabled"`
+	HighWatermark      float64       `json:"high_watermark" yaml:"high_watermark"`
+	LowWatermark       float64       `json:"low_watermark" yaml:"low_watermark"`
+	DropThreshold      float64       `json:"drop_threshold" yaml:"drop_threshold"`
+	RecoveryDelay      time.Duration `json:"recovery_delay" yaml:"recovery_delay"`
+	SamplingReduction  float64       `json:"sampling_reduction" yaml:"sampling_reduction"`
+	MaxEventsPerSec    int           `json:"max_events_per_sec" yaml:"max_events_per_sec"`
+	MemoryThresholdMB  int           `json:"memory_threshold_mb" yaml:"memory_threshold_mb"`
 }
 
 // HealthConfig defines health check configuration
@@ -77,6 +79,8 @@ func DefaultConfig() *Config {
 			DropThreshold:     0.95,           // 95% - start dropping
 			RecoveryDelay:     5 * time.Second,
 			SamplingReduction: 0.5,            // Reduce to 50% sampling
+			MaxEventsPerSec:   10000,          // 10K events/sec max
+			MemoryThresholdMB: 80,             // 80MB memory threshold
 		},
 		Health: HealthConfig{
 			Enabled:             true,

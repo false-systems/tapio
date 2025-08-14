@@ -184,7 +184,7 @@ func NewCgroupManager() *CgroupManager {
 // detectCgroupPaths detects cgroup paths for memory and CPU
 func (cm *CgroupManager) detectCgroupPaths() {
 	// Try cgroup v2 first
-	if _, err := unix.Stat("/sys/fs/cgroup/memory.max"); err == nil {
+	if err := unix.Stat("/sys/fs/cgroup/memory.max", &unix.Stat_t{}); err == nil {
 		cm.memoryPath = "/sys/fs/cgroup"
 		cm.cpuPath = "/sys/fs/cgroup"
 		cm.enabled = true
@@ -192,7 +192,7 @@ func (cm *CgroupManager) detectCgroupPaths() {
 	}
 	
 	// Try cgroup v1
-	if _, err := unix.Stat("/sys/fs/cgroup/memory/memory.limit_in_bytes"); err == nil {
+	if err := unix.Stat("/sys/fs/cgroup/memory/memory.limit_in_bytes", &unix.Stat_t{}); err == nil {
 		cm.memoryPath = "/sys/fs/cgroup/memory"
 		cm.cpuPath = "/sys/fs/cgroup/cpu"
 		cm.enabled = true

@@ -435,14 +435,3 @@ type BackpressureStats struct {
 	BufferUsage   map[string]float64 `json:"buffer_usage"`
 }
 
-// Extension to BackpressureConfig to include additional fields
-type BackpressureConfig struct {
-	Enabled            bool          `json:"enabled" yaml:"enabled"`
-	HighWatermark      float64       `json:"high_watermark" yaml:"high_watermark"`
-	LowWatermark       float64       `json:"low_watermark" yaml:"low_watermark"`
-	DropThreshold      float64       `json:"drop_threshold" yaml:"drop_threshold"`
-	RecoveryDelay      time.Duration `json:"recovery_delay" yaml:"recovery_delay"`
-	SamplingReduction  float64       `json:"sampling_reduction" yaml:"sampling_reduction"`
-	MaxEventsPerSec    int           `json:"max_events_per_sec" yaml:"max_events_per_sec"`
-	MemoryThresholdMB  int           `json:"memory_threshold_mb" yaml:"memory_threshold_mb"`
-}
