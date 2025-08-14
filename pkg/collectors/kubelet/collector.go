@@ -22,28 +22,7 @@ import (
 	statsv1alpha1 "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 )
 
-// Config holds kubelet collector configuration
-type Config struct {
-	// Node name to collect from (defaults to current node)
-	NodeName string
-
-	// Kubelet address (defaults to localhost:10250)
-	Address string
-
-	// Use insecure connection (for testing)
-	Insecure bool
-
-	// Client certificate for authentication
-	ClientCert string
-	ClientKey  string
-
-	// Collection intervals
-	MetricsInterval time.Duration
-	StatsInterval   time.Duration
-
-	// Logger
-	Logger *zap.Logger
-}
+// (Config defined in config.go)
 
 // Event data structures
 
@@ -136,15 +115,7 @@ type PodNotReadyEventData struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// DefaultConfig returns default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		Address:         "localhost:10250",
-		MetricsInterval: 30 * time.Second,
-		StatsInterval:   10 * time.Second,
-		Insecure:        false,
-	}
-}
+// (DefaultConfig defined in config.go)
 
 // HealthStatus represents kubelet collector health status
 type HealthStatus struct {

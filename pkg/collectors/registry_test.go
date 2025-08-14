@@ -368,7 +368,7 @@ func TestRegistryCollectorFailure(t *testing.T) {
 	}
 
 	// Register a collector that fails to start
-	badCollector := &failingCollector{name: "bad"}
+	badCollector := &registryFailingCollector{name: "bad"}
 	if err := registry.Register("bad", badCollector); err != nil {
 		t.Fatalf("failed to register bad collector: %v", err)
 	}
@@ -390,13 +390,13 @@ func TestRegistryCollectorFailure(t *testing.T) {
 	}
 }
 
-// failingCollector always fails to start
-type failingCollector struct {
+// registryFailingCollector always fails to start (renamed to avoid conflict)
+type registryFailingCollector struct {
 	name string
 }
 
-func (f *failingCollector) Name() string                    { return f.name }
-func (f *failingCollector) Start(ctx context.Context) error { return fmt.Errorf("start failed") }
-func (f *failingCollector) Stop() error                     { return nil }
-func (f *failingCollector) Events() <-chan RawEvent         { return nil }
-func (f *failingCollector) IsHealthy() bool                 { return false }
+func (f *registryFailingCollector) Name() string                    { return f.name }
+func (f *registryFailingCollector) Start(ctx context.Context) error { return fmt.Errorf("start failed") }
+func (f *registryFailingCollector) Stop() error                     { return nil }
+func (f *registryFailingCollector) Events() <-chan RawEvent         { return nil }
+func (f *registryFailingCollector) IsHealthy() bool                 { return false }

@@ -118,7 +118,7 @@ struct process_lineage {
 // Maps
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 4 * 1024 * 1024); // 4MB buffer
+    __uint(max_entries, 512 * 1024); // 512KB buffer - production optimized
 } events SEC(".maps");
 
 struct {

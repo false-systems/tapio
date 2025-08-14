@@ -22,9 +22,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+
+	"github.com/yairfalse/tapio/pkg/collectors/cri/bpf"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags $BPF_CFLAGS -target native crimonitor bpf_src/cri_monitor.c -- -I../bpf_common
 
 // ContainerExitEvent represents the eBPF event structure
 type ContainerExitEvent struct {
@@ -140,7 +141,7 @@ func (c *EBPFCollector) initEBPF(ctx context.Context) error {
 	c.ebpfLoadsTotal.Add(ctx, 1)
 
 	// Load eBPF spec
-	spec, err := LoadCrimonitor()
+	spec, err := bpf.LoadCrimonitor()
 	if err != nil {
 		c.ebpfLoadErrors.Add(ctx, 1,
 			metric.WithAttributes(
@@ -226,7 +227,7 @@ func (c *EBPFCollector) attachPrograms(ctx context.Context) error {
 			),
 		)
 
-		l, err := link.Kprobe("oom_kill_process", prog)
+		l, err := link.Kprobe("oom_kill_process", prog, nil)
 		if err != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
@@ -252,7 +253,7 @@ func (c *EBPFCollector) attachPrograms(ctx context.Context) error {
 			),
 		)
 
-		l, err := link.Tracepoint("sched", "sched_process_exit", prog)
+		l, err := link.Tracepoint("sched", "sched_process_exit", prog, nil)
 		if err != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
@@ -278,7 +279,7 @@ func (c *EBPFCollector) attachPrograms(ctx context.Context) error {
 			),
 		)
 
-		l, err := link.Tracepoint("sched", "sched_process_fork", prog)
+		l, err := link.Tracepoint("sched", "sched_process_fork", prog, nil)
 		if err != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
@@ -309,7 +310,7 @@ func (c *EBPFCollector) attachPrograms(ctx context.Context) error {
 			),
 		)
 
-		l, err := link.Kprobe("mem_cgroup_out_of_memory", prog)
+		l, err := link.Kprobe("mem_cgroup_out_of_memory", prog, nil)
 		if err != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(

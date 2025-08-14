@@ -80,7 +80,7 @@ struct service_endpoint {
 // Maps for network monitoring
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 4 * 1024 * 1024); // 4MB buffer for network events
+    __uint(max_entries, 512 * 1024); // 512KB - production optimized
 } network_events SEC(".maps");
 
 // Track container processes

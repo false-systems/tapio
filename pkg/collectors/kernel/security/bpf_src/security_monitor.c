@@ -50,7 +50,7 @@ struct security_event {
 // Maps for security monitoring
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 2 * 1024 * 1024); // 2MB buffer for security events
+    __uint(max_entries, 256 * 1024); // 256KB - production optimized
 } security_events SEC(".maps");
 
 // Track container processes

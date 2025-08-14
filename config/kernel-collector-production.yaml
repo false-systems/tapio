@@ -1,0 +1,292 @@
+# Production Configuration for Tapio Kernel Collector
+# Optimized for enterprise-grade reliability and performance
+
+kernel_collector:
+  name: "kernel-collector"
+  enabled: true
+  debug_mode: false
+  sampling_enabled: true
+  sampling_rate: 100  # Sample 1 in 100 events for high-volume environments
+
+  # eBPF Buffer Configuration - Production Optimized
+  buffer_config:
+    kernel_events_buffer: 512    # 512KB - reduced from 4MB for production
+    process_events_buffer: 256   # 256KB - reduced from 2MB for production  
+    network_events_buffer: 512   # 512KB - reduced from 4MB for production
+    security_events_buffer: 256  # 256KB - reduced from 2MB for production
+
+  # Resource Limits - Enterprise Grade
+  resource_limits:
+    max_memory_mb: 200           # 200MB memory limit per collector
+    max_cpu_percent: 25          # 25% CPU limit to prevent system impact
+    event_queue_size: 50000      # 50K events in memory queue
+    batch_timeout: 100ms         # Batch processing timeout
+    max_events_per_sec: 25000    # 25K events/sec rate limit
+
+  # Backpressure Configuration - Prevent System Overload
+  backpressure:
+    enabled: true
+    high_watermark: 0.8          # Start throttling at 80% buffer usage
+    low_watermark: 0.6           # Stop throttling at 60% buffer usage
+    drop_threshold: 0.95         # Drop events at 95% buffer usage
+    recovery_delay: 5s           # Wait 5s before attempting recovery
+    sampling_reduction: 0.5      # Reduce sampling to 50% under pressure
+    max_events_per_sec: 25000    # Rate limiting
+    memory_threshold_mb: 180     # Memory pressure threshold (90% of limit)
+
+  # Health Monitoring - Proactive Health Management
+  health:
+    enabled: true
+    interval: 30s                # Health check every 30 seconds
+    max_failures: 3              # Restart after 3 consecutive failures
+    restart_on_failure: true     # Automatically restart on health failures
+    memory_check_interval: 10s   # Check memory usage every 10 seconds
+
+# Production Monitoring Configuration
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+    
+  alerts:
+    enabled: true
+    evaluation_interval: 30s
+    
+    # Alert Channels
+    channels:
+      - name: "ops-webhook"
+        type: "webhook"
+        enabled: true
+        config:
+          url: "https://ops.company.com/alerts/webhook"
+          timeout: "10s"
+          
+      - name: "pagerduty-critical"
+        type: "pagerduty"
+        enabled: true
+        config:
+          integration_key: "${PAGERDUTY_INTEGRATION_KEY}"
+          severity: "critical"
+          
+      - name: "slack-alerts"
+        type: "slack"
+        enabled: true
+        config:
+          webhook_url: "${SLACK_WEBHOOK_URL}"
+          channel: "#ops-alerts"
+    
+    # Alert Rules - Production Ready
+    rules:
+      - name: "KernelCollectorDown"
+        description: "Kernel collector is not running"
+        severity: "critical"
+        query: "tapio_kernel_collector_status < 1"
+        duration: "1m"
+        enabled: true
+        
+      - name: "HighMemoryUsage"
+        description: "Memory usage above 90% of limit"
+        severity: "warning"
+        query: "tapio_kernel_collector_memory_bytes > 180*1024*1024"  # 180MB
+        duration: "5m"
+        enabled: true
+        
+      - name: "CriticalMemoryUsage"
+        description: "Memory usage above 95% of limit"
+        severity: "critical"
+        query: "tapio_kernel_collector_memory_bytes > 190*1024*1024"  # 190MB
+        duration: "2m"
+        enabled: true
+        
+      - name: "HighCPUUsage"
+        description: "CPU usage above 80% of limit"
+        severity: "warning"
+        query: "tapio_kernel_collector_cpu_percent > 20"  # 80% of 25% limit
+        duration: "5m"
+        enabled: true
+        
+      - name: "CriticalErrorRate"
+        description: "High error rate detected"
+        severity: "critical"
+        query: "rate(tapio_kernel_collector_errors_total[5m]) > 50"  # 50 errors/sec
+        duration: "2m"
+        enabled: true
+        
+      - name: "EBPFProgramFailure"
+        description: "eBPF program failed to load"
+        severity: "critical"
+        query: "tapio_kernel_collector_ebpf_program_status < 1"
+        duration: "30s"
+        enabled: true
+        
+      - name: "BufferOverflow"
+        description: "Ring buffer usage critically high"
+        severity: "critical"
+        query: "tapio_kernel_collector_buffer_usage_percent > 95"
+        duration: "1m"
+        enabled: true
+        
+      - name: "BackpressureActive"
+        description: "Backpressure mechanisms activated"
+        severity: "warning"
+        query: "tapio_kernel_collector_throttling > 0"
+        duration: "3m"
+        enabled: true
+        
+      - name: "HealthCheckFailure"
+        description: "Health check failing"
+        severity: "warning"
+        query: "tapio_kernel_collector_health_check_status < 1"
+        duration: "3m"
+        enabled: true
+        
+      - name: "EventLatencyHigh"
+        description: "Event processing latency too high"
+        severity: "warning"
+        query: "histogram_quantile(0.95, tapio_kernel_collector_event_latency_seconds) > 0.1"
+        duration: "5m"
+        enabled: true
+
+# Logging Configuration - Structured Logging
+logging:
+  level: "info"                  # info level for production
+  format: "json"                 # JSON format for log aggregation
+  output: "stdout"               # Output to stdout for container environments
+  
+  # Log sampling to prevent log flood
+  sampling:
+    enabled: true
+    initial: 100                 # Log first 100 of each type
+    thereafter: 100              # Then 1 in 100
+
+# Security Configuration
+security:
+  # Enable only necessary eBPF programs
+  ebpf_programs:
+    kernel_monitor: true
+    process_monitor: true
+    network_monitor: true
+    security_monitor: true
+    
+  # Privilege settings
+  drop_privileges: true          # Drop root privileges after eBPF load
+  user: "tapio"                 # Run as tapio user
+  group: "tapio"                # Run as tapio group
+  
+  # Capability requirements (minimal set)
+  required_capabilities:
+    - "CAP_BPF"                 # eBPF operations
+    - "CAP_SYS_RESOURCE"        # Memory limits
+    - "CAP_PERFMON"             # Performance monitoring
+
+# Container/Kubernetes Configuration
+container:
+  resources:
+    requests:
+      memory: "128Mi"            # Minimum memory request
+      cpu: "100m"                # Minimum CPU request (0.1 core)
+    limits:
+      memory: "256Mi"            # Maximum memory (matches config)
+      cpu: "500m"                # Maximum CPU (0.5 core)
+  
+  # Liveness and Readiness Probes
+  probes:
+    liveness:
+      enabled: true
+      path: "/health"
+      port: 8080
+      initial_delay: 30
+      period: 30
+      timeout: 10
+      failure_threshold: 3
+      
+    readiness:
+      enabled: true
+      path: "/ready"
+      port: 8080
+      initial_delay: 10
+      period: 10
+      timeout: 5
+      failure_threshold: 3
+
+# Integration Configuration
+integrations:
+  # NATS for event publishing
+  nats:
+    enabled: true
+    urls: ["nats://nats:4222"]
+    subject: "tapio.events.kernel"
+    max_reconnect: 10
+    reconnect_wait: 2s
+    
+  # OpenTelemetry for distributed tracing
+  otel:
+    enabled: true
+    endpoint: "http://jaeger:14268/api/traces"
+    service_name: "tapio-kernel-collector"
+    
+  # Neo4j for graph storage
+  neo4j:
+    enabled: false             # Disabled by default for security
+    uri: "bolt://neo4j:7687"
+    database: "tapio"
+
+# Environment-specific overrides
+# These can be overridden via environment variables or ConfigMaps
+environment:
+  # Cluster identification
+  cluster_name: "${CLUSTER_NAME:-production}"
+  cluster_region: "${CLUSTER_REGION:-us-west-2}"
+  
+  # Node identification
+  node_name: "${NODE_NAME}"
+  node_ip: "${NODE_IP}"
+  
+  # Namespace
+  namespace: "${NAMESPACE:-tapio-system}"
+
+# Performance Tuning for Production
+performance:
+  # Go runtime settings
+  gomaxprocs: 0                 # Use all available CPUs
+  gogc: 200                     # Less aggressive GC (default 100)
+  
+  # Memory optimization
+  enable_memory_pooling: true   # Enable object pooling
+  pool_size: 10000             # Pool size for events
+  
+  # Batch processing
+  batch_size: 1000             # Events per batch
+  batch_timeout: 100ms         # Maximum batch wait time
+  
+  # Ring buffer settings
+  ring_buffer_pages: 64        # 64 pages per ring buffer
+  
+  # Sampling optimization
+  adaptive_sampling: true      # Adjust sampling based on load
+  min_sampling_rate: 10        # Minimum 1:10 sampling
+  max_sampling_rate: 1000      # Maximum 1:1000 sampling
+
+# Observability Dashboard Configuration
+dashboard:
+  grafana:
+    enabled: true
+    dashboards:
+      - name: "Tapio Kernel Collector"
+        path: "/etc/grafana/dashboards/kernel-collector.json"
+        
+  # Metrics to expose
+  metrics:
+    # High cardinality metrics (be careful in production)
+    include_pod_metrics: false   # Disable pod-level metrics to reduce cardinality
+    include_container_metrics: true
+    
+    # Metric retention
+    retention_hours: 24          # Keep metrics for 24 hours
+    
+    # Custom labels
+    labels:
+      environment: "production"
+      team: "platform"
+      component: "kernel-collector"

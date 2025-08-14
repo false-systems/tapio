@@ -42,7 +42,7 @@ func TestCollectorRegistryE2E(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	// Create registry
-	registry := NewRegistry(logger)
+	registry := NewRegistry()
 	require.NotNil(t, registry)
 
 	// Create multiple test collectors
@@ -52,7 +52,8 @@ func TestCollectorRegistryE2E(t *testing.T) {
 	for _, name := range collectorNames {
 		collector := newTestCollector(name, logger)
 		collectors[name] = collector
-		registry.Register(name, collector)
+		err := registry.Register(name, collector)
+		require.NoError(t, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -64,11 +65,12 @@ func TestCollectorRegistryE2E(t *testing.T) {
 	defer registry.Stop()
 
 	// Verify all collectors are running
-	registeredCollectors := registry.ListCollectors()
+	registeredCollectors := registry.List()
 	assert.Len(t, registeredCollectors, 3)
 
 	for _, name := range collectorNames {
-		collector := registry.GetCollector(name)
+		collector, exists := registry.Get(name)
+		assert.True(t, exists)
 		assert.NotNil(t, collector)
 		assert.True(t, collector.IsHealthy())
 	}
@@ -212,10 +214,10 @@ func TestCollectorRegistryE2E(t *testing.T) {
 
 	// Verify registry health
 	registryHealth := registry.Health()
-	assert.True(t, registryHealth.Healthy)
-	assert.Equal(t, 3, registryHealth.CollectorsRegistered)
-	assert.Equal(t, 3, registryHealth.CollectorsHealthy)
-	assert.Greater(t, registryHealth.TotalEventsProcessed, int64(60))
+	assert.Len(t, registryHealth, 3)
+	for name, healthy := range registryHealth {
+		assert.True(t, healthy, "Collector %s should be healthy", name)
+	}
 }
 
 // TestCollectorFailureRecovery tests collector failure and recovery scenarios
@@ -225,7 +227,7 @@ func TestCollectorFailureRecovery(t *testing.T) {
 	}
 
 	logger := zaptest.NewLogger(t)
-	registry := NewRegistry(logger)
+	registry := NewRegistry()
 
 	// Create collectors with different failure modes
 	collectors := map[string]Collector{
@@ -277,9 +279,16 @@ func TestCollectorFailureRecovery(t *testing.T) {
 
 	// Registry should still function with some failing collectors
 	health := registry.Health()
-	assert.True(t, health.Healthy, "Registry should remain healthy with some failing collectors")
-	assert.Equal(t, 3, health.CollectorsRegistered)
-	assert.GreaterOrEqual(t, health.CollectorsHealthy, 1, "At least stable collector should be healthy")
+	assert.Len(t, health, 3, "Should have 3 collectors registered")
+	
+	// Count healthy collectors
+	healthyCount := 0
+	for _, healthy := range health {
+		if healthy {
+			healthyCount++
+		}
+	}
+	assert.GreaterOrEqual(t, healthyCount, 1, "At least stable collector should be healthy")
 }
 
 // TestCollectorPipelinePerformance tests performance characteristics of the full pipeline
@@ -297,11 +306,11 @@ func TestCollectorPipelinePerformance(t *testing.T) {
 	}()
 
 	logger := zap.NewNop() // Use no-op logger for performance
-	registry := NewRegistry(logger)
+	registry := NewRegistry()
 
 	// Create high-throughput test collectors
-	numCollectors := 10
-	for i := 0; i < numCollectors; i++ {
+	collectorCount := 10
+	for i := 0; i < collectorCount; i++ {
 		name := fmt.Sprintf("perf-collector-%d", i)
 		collector := newHighThroughputCollector(name, logger)
 		registry.Register(name, collector)
@@ -346,12 +355,14 @@ func TestCollectorPipelinePerformance(t *testing.T) {
 	}()
 
 	// High-throughput event generation
-	for i := 0; i < numCollectors; i++ {
+	for i := 0; i < collectorCount; i++ {
 		wg.Add(1)
 		go func(collectorIndex int) {
 			defer wg.Done()
 			collectorName := fmt.Sprintf("perf-collector-%d", collectorIndex)
-			collector := registry.GetCollector(collectorName).(*highThroughputCollector)
+			collectorInterface, exists := registry.Get(collectorName)
+			assert.True(t, exists, "Collector should exist")
+			collector := collectorInterface.(*highThroughputCollector)
 
 			eventIndex := 0
 			ticker := time.NewTicker(1 * time.Millisecond)
@@ -397,9 +408,13 @@ func TestCollectorPipelinePerformance(t *testing.T) {
 			case <-ctx.Done():
 				return
 			default:
-				collectorNames := registry.ListCollectors()
+				collectorNames := registry.List()
 				for _, name := range collectorNames {
-					collector := registry.GetCollector(name)
+					collectorInterface, exists := registry.Get(name)
+					if !exists {
+						continue
+					}
+					collector := collectorInterface
 					select {
 					case <-collector.Events():
 						atomic.AddInt64(&eventsProcessed, 1)
@@ -432,15 +447,22 @@ func TestCollectorPipelinePerformance(t *testing.T) {
 
 	// Verify registry performance metrics
 	health := registry.Health()
-	assert.True(t, health.Healthy)
-	assert.Greater(t, health.TotalEventsProcessed, int64(25000))
-	assert.Less(t, health.EventsDroppedRatio, 0.5, "Drop rate should be reasonable")
+	assert.Len(t, health, collectorCount, "Should have all collectors registered")
+	
+	// Count healthy collectors
+	healthyCount := 0
+	for _, healthy := range health {
+		if healthy {
+			healthyCount++
+		}
+	}
+	assert.Greater(t, healthyCount, collectorCount/2, "Most collectors should be healthy under load")
 }
 
 // TestCollectorResourceManagement tests resource usage and cleanup
 func TestCollectorResourceManagement(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	registry := NewRegistry(logger)
+	registry := NewRegistry()
 
 	// Test resource cleanup across multiple start/stop cycles
 	for cycle := 0; cycle < 5; cycle++ {
@@ -495,7 +517,7 @@ func TestCollectorResourceManagement(t *testing.T) {
 		cancel()
 
 		// Verify cleanup
-		assert.Len(t, registry.ListCollectors(), 0)
+		assert.Len(t, registry.List(), 0)
 
 		// Brief pause between cycles
 		time.Sleep(100 * time.Millisecond)
@@ -636,102 +658,11 @@ func contains(str, substr string) bool {
 			(str[:len(substr)] == substr || str[len(str)-len(substr):] == substr)))
 }
 
-// Mock registry for testing (simplified)
-type Registry struct {
-	logger     *zap.Logger
-	collectors map[string]Collector
-	mu         sync.RWMutex
-	running    bool
-}
-
-func NewRegistry(logger *zap.Logger) *Registry {
-	return &Registry{
-		logger:     logger,
-		collectors: make(map[string]Collector),
-	}
-}
-
-func (r *Registry) Register(name string, collector Collector) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.collectors[name] = collector
-}
-
-func (r *Registry) Unregister(name string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.collectors, name)
-}
-
-func (r *Registry) GetCollector(name string) Collector {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.collectors[name]
-}
-
-func (r *Registry) ListCollectors() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var names []string
-	for name := range r.collectors {
-		names = append(names, name)
-	}
-	return names
-}
-
-func (r *Registry) Start(ctx context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	for _, collector := range r.collectors {
-		if err := collector.Start(ctx); err != nil {
-			r.logger.Warn("Failed to start collector", zap.String("collector", collector.Name()), zap.Error(err))
-		}
-	}
-	r.running = true
-	return nil
-}
-
-func (r *Registry) Stop() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	for _, collector := range r.collectors {
-		if err := collector.Stop(); err != nil {
-			r.logger.Warn("Failed to stop collector", zap.String("collector", collector.Name()), zap.Error(err))
-		}
-	}
-	r.running = false
-	return nil
-}
-
+// Mock registry health for testing
 type RegistryHealth struct {
 	Healthy              bool
 	CollectorsRegistered int
 	CollectorsHealthy    int
 	TotalEventsProcessed int64
 	EventsDroppedRatio   float64
-}
-
-func (r *Registry) Health() RegistryHealth {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	health := RegistryHealth{
-		CollectorsRegistered: len(r.collectors),
-		TotalEventsProcessed: int64(1000), // Mock value
-		EventsDroppedRatio:   0.1,         // Mock value
-	}
-
-	healthy := 0
-	for _, collector := range r.collectors {
-		if collector.IsHealthy() {
-			healthy++
-		}
-	}
-
-	health.CollectorsHealthy = healthy
-	health.Healthy = healthy > 0
-
-	return health
 }

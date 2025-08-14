@@ -115,6 +115,9 @@ func (c *BaseConfig) SetDefaults() {
 type CNIConfig struct {
 	*BaseConfig `json:",inline" yaml:",inline"`
 
+	// EnableEBPF determines if eBPF monitoring should be used (default: true)
+	EnableEBPF bool `json:"enable_ebpf" yaml:"enable_ebpf"`
+
 	// PodCIDR for filtering CNI events (optional)
 	PodCIDR string `json:"pod_cidr" yaml:"pod_cidr"`
 
@@ -141,6 +144,8 @@ func NewCNIConfig(name string) *CNIConfig {
 // SetDefaults applies CNI-specific defaults
 func (c *CNIConfig) SetDefaults() {
 	c.BaseConfig.SetDefaults()
+
+	c.EnableEBPF = true // Default to eBPF enabled
 
 	if c.InterfacePrefix == "" {
 		c.InterfacePrefix = "eth"
@@ -260,6 +265,11 @@ type KernelConfig struct {
 
 	// PerfBufferSize for eBPF ring buffer (default: 64 pages)
 	PerfBufferSize int `json:"perf_buffer_size" yaml:"perf_buffer_size"`
+
+	// Aliases for compatibility
+	EnableNetworking bool `json:"enable_networking" yaml:"enable_networking"`
+	EnableProcess    bool `json:"enable_process" yaml:"enable_process"`
+	EnableSecurity   bool `json:"enable_security" yaml:"enable_security"`
 }
 
 // NewKernelConfig creates a new kernel configuration with defaults
@@ -281,9 +291,24 @@ func (c *KernelConfig) SetDefaults() {
 	c.EnableNetworkTracking = true
 	c.EnableFileTracking = false // High overhead by default
 
+	// Set compatibility aliases
+	c.EnableNetworking = c.EnableNetworkTracking
+	c.EnableProcess = c.EnableProcessTracking
+	c.EnableSecurity = false // No security tracking by default
+
 	if c.PerfBufferSize == 0 {
 		c.PerfBufferSize = 64 // pages
 	}
+}
+
+// GetName returns the collector name
+func (c *KernelConfig) GetName() string {
+	return c.BaseConfig.Name
+}
+
+// GetBufferSize returns the buffer size
+func (c *KernelConfig) GetBufferSize() int {
+	return c.BaseConfig.BufferSize
 }
 
 // Validate performs kernel-specific validation
@@ -347,4 +372,135 @@ func ParseConfig(configType string, data []byte) (CollectorConfig, error) {
 	default:
 		return nil, fmt.Errorf("unknown collector type: %s", configType)
 	}
+}
+
+// DNSConfig holds configuration specific to the DNS collector
+type DNSConfig struct {
+	*BaseConfig `json:",inline" yaml:",inline"`
+
+	// EnableEBPF determines if eBPF monitoring should be used (default: true)
+	EnableEBPF bool `json:"enable_ebpf" yaml:"enable_ebpf"`
+
+	// Interface to monitor (default: auto-detect)
+	Interface string `json:"interface" yaml:"interface"`
+
+	// EnableSocket determines if socket-based monitoring should be used (default: false)
+	EnableSocket bool `json:"enable_socket" yaml:"enable_socket"`
+}
+
+// NewDNSConfig creates a new DNS configuration with defaults
+func NewDNSConfig(name string) *DNSConfig {
+	config := &DNSConfig{
+		BaseConfig: DefaultBaseConfig(),
+	}
+	config.Name = name
+	config.SetDefaults()
+	return config
+}
+
+// SetDefaults applies DNS-specific defaults
+func (c *DNSConfig) SetDefaults() {
+	c.BaseConfig.SetDefaults()
+
+	c.EnableEBPF = true // Default to eBPF enabled
+	c.EnableSocket = false // Default to socket monitoring disabled
+}
+
+// GetName returns the collector name
+func (c *DNSConfig) GetName() string {
+	return c.BaseConfig.Name
+}
+
+// GetBufferSize returns the buffer size
+func (c *DNSConfig) GetBufferSize() int {
+	return c.BaseConfig.BufferSize
+}
+
+// Validate performs DNS-specific validation
+func (c *DNSConfig) Validate() error {
+	if err := c.BaseConfig.Validate(); err != nil {
+		return fmt.Errorf("base config validation failed: %w", err)
+	}
+
+	// At least one monitoring method must be enabled
+	if !c.EnableEBPF && !c.EnableSocket {
+		return fmt.Errorf("at least one of EnableEBPF or EnableSocket must be true")
+	}
+
+	return nil
+}
+
+// ETCDConfig holds configuration specific to the ETCD collector
+type ETCDConfig struct {
+	*BaseConfig `json:",inline" yaml:",inline"`
+
+	// EnableEBPF determines if eBPF monitoring should be used (default: true)
+	EnableEBPF bool `json:"enable_ebpf" yaml:"enable_ebpf"`
+
+	// Endpoints for API monitoring
+	Endpoints []string `json:"endpoints" yaml:"endpoints"`
+
+	// Authentication
+	Username string `json:"username" yaml:"username"`
+	Password string `json:"password" yaml:"password"`
+
+	// TLS configuration
+	TLS *ETCDTLSConfig `json:"tls" yaml:"tls"`
+}
+
+// ETCDTLSConfig holds TLS configuration for ETCD
+type ETCDTLSConfig struct {
+	CertFile string `json:"cert_file" yaml:"cert_file"`
+	KeyFile  string `json:"key_file" yaml:"key_file"`
+	CAFile   string `json:"ca_file" yaml:"ca_file"`
+}
+
+// NewETCDConfig creates a new ETCD configuration with defaults
+func NewETCDConfig(name string) *ETCDConfig {
+	config := &ETCDConfig{
+		BaseConfig: DefaultBaseConfig(),
+	}
+	config.Name = name
+	config.SetDefaults()
+	return config
+}
+
+// SetDefaults applies ETCD-specific defaults
+func (c *ETCDConfig) SetDefaults() {
+	c.BaseConfig.SetDefaults()
+
+	c.EnableEBPF = true // Default to eBPF enabled
+
+	if len(c.Endpoints) == 0 {
+		c.Endpoints = []string{"localhost:2379"} // Default etcd endpoint
+	}
+}
+
+// GetName returns the collector name
+func (c *ETCDConfig) GetName() string {
+	return c.BaseConfig.Name
+}
+
+// GetBufferSize returns the buffer size
+func (c *ETCDConfig) GetBufferSize() int {
+	return c.BaseConfig.BufferSize
+}
+
+// Validate performs ETCD-specific validation
+func (c *ETCDConfig) Validate() error {
+	if err := c.BaseConfig.Validate(); err != nil {
+		return fmt.Errorf("base config validation failed: %w", err)
+	}
+
+	// Validate TLS configuration if present
+	if c.TLS != nil {
+		if c.TLS.CertFile != "" && c.TLS.KeyFile == "" {
+			return fmt.Errorf("cert file specified but key file is missing")
+		}
+		if c.TLS.KeyFile != "" && c.TLS.CertFile == "" {
+			return fmt.Errorf("key file specified but cert file is missing")
+		}
+	}
+
+	return nil
 }

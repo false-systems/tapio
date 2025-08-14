@@ -9,10 +9,10 @@ func IsSupported() bool {
 }
 
 // Export generated types for systemd monitoring
-type SystemdmonitorObjects = systemdMonitorObjects
-type SystemdmonitorMaps = systemdMonitorMaps
-type SystemdmonitorPrograms = systemdMonitorPrograms
+type SystemdMonitorObjects = systemdMonitorObjects
+type SystemdMonitorMaps = systemdMonitorMaps
+type SystemdMonitorPrograms = systemdMonitorPrograms
 
 // Export the generated loader functions
-var LoadSystemdmonitor = loadSystemdMonitor
-var LoadSystemdmonitorObjects = loadSystemdMonitorObjects
+var LoadSystemdMonitor = loadSystemdMonitor
+var LoadSystemdMonitorObjects = loadSystemdMonitorObjects

@@ -111,7 +111,7 @@ struct dns_event {
 // Ring buffer for events - increased size for production
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1024 * 1024); // 1MB ring buffer
+    __uint(max_entries, 128 * 1024); // 128KB - production optimized
 } dns_events SEC(".maps");
 
 // Map to track DNS-related processes and containers

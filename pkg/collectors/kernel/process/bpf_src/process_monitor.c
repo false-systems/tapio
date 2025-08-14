@@ -67,7 +67,7 @@ struct process_lineage {
 // Maps for process monitoring
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 2 * 1024 * 1024); // 2MB buffer for process events
+    __uint(max_entries, 256 * 1024); // 256KB - production optimized
 } process_events SEC(".maps");
 
 // Track container processes

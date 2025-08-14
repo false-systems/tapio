@@ -790,20 +790,7 @@ func (p *EBPFEventProcessor) Statistics() map[string]interface{} {
 }
 
 // More mock implementations...
-type SafeParser struct{}
-
-func NewSafeParser() *SafeParser { return &SafeParser{} }
-func (p *SafeParser) MarshalStruct(s interface{}) ([]byte, error) {
-	size := int(unsafe.Sizeof(s))
-	return make([]byte, size), nil
-}
-func (p *SafeParser) UnmarshalStruct(data []byte, s interface{}) error {
-	expectedSize := int(unsafe.Sizeof(s))
-	if len(data) != expectedSize {
-		return fmt.Errorf("buffer size mismatch: got %d, expected %d", len(data), expectedSize)
-	}
-	return nil
-}
+// Note: Using the existing SafeParser from unsafe_parser.go
 
 type BoundsChecker struct{}
 

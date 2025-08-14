@@ -38,7 +38,7 @@ type Collector struct {
 	name         string
 	logger       *zap.Logger
 	tracer       trace.Tracer
-	objs         *bpf.SystemdmonitorObjects
+	objs         *bpf.SystemdMonitorObjects
 	links        []link.Link
 	reader       *ringbuf.Reader
 	events       chan collectors.RawEvent
@@ -204,8 +204,8 @@ func (c *Collector) Start(ctx context.Context) error {
 		c.logger.Info("Starting eBPF monitoring")
 
 		// Load eBPF objects directly
-		c.objs = &bpf.SystemdmonitorObjects{}
-		if err := bpf.LoadSystemdmonitorObjects(c.objs, nil); err != nil {
+		c.objs = &bpf.SystemdMonitorObjects{}
+		if err := bpf.LoadSystemdMonitorObjects(c.objs, nil); err != nil {
 			c.logger.Error("Failed to load and assign eBPF objects", zap.Error(err))
 			atomic.AddInt64(&c.ebpfLoadFailures, 1)
 			if c.ebpfOperationsCtr != nil {
