@@ -337,24 +337,6 @@ func BenchmarkFilteringPerformance(b *testing.B) {
 	}
 }
 
-func BenchmarkUnifiedEventConversion(b *testing.B) {
-	event := createOOMEvent("bench-container-123", "bench-pod", "benchmark")
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		unifiedEvent := event.ToUnifiedEvent()
-
-		// Access fields to prevent optimization
-		_ = unifiedEvent.ID
-		_ = unifiedEvent.Type
-		_ = unifiedEvent.Severity
-		_ = unifiedEvent.Message
-		_ = len(unifiedEvent.Attributes)
-	}
-}
-
 // Benchmark helper functions
 
 func setupBenchmarkCollector(b *testing.B) *Collector {

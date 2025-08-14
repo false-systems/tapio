@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
-	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
+	"strings"
 )
 
 // Ensure NATSPublisher implements NATSPublisherInterface
@@ -80,28 +81,41 @@ func NewNATSPublisher(logger *zap.Logger, natsConfig *config.NATSConfig) (*NATSP
 
 	pub.js = js
 
-	// Ensure stream exists
-	streamInfo, err := js.StreamInfo(natsConfig.TracesStreamName)
+	// Ensure OBSERVATIONS stream exists
+	streamName := "OBSERVATIONS"
+	observationSubjects := []string{
+		"observations.kernel",
+		"observations.kubeapi",
+		"observations.dns",
+		"observations.etcd",
+		"observations.cni",
+		"observations.systemd",
+	}
+
+	streamInfo, err := js.StreamInfo(streamName)
 	if err != nil {
-		// Create stream
+		// Create OBSERVATIONS stream with production configuration
 		streamConfig, err := js.AddStream(&nats.StreamConfig{
-			Name:       natsConfig.TracesStreamName,
-			Subjects:   natsConfig.TracesSubjects,
-			Storage:    nats.FileStorage,
-			MaxAge:     natsConfig.MaxAge,
-			MaxBytes:   natsConfig.MaxBytes,
-			Duplicates: natsConfig.DuplicateWindow,
-			Replicas:   natsConfig.Replicas,
+			Name:        streamName,
+			Subjects:    observationSubjects,
+			Storage:     nats.FileStorage,
+			Retention:   nats.LimitsPolicy,
+			MaxAge:      natsConfig.MaxAge,
+			MaxBytes:    natsConfig.MaxBytes,
+			Duplicates:  natsConfig.DuplicateWindow,
+			Replicas:    natsConfig.Replicas,
+			Compression: nats.S2Compression, // Enable compression for efficiency
+			Discard:     nats.DiscardOld,    // Discard old messages when limits reached
 		})
 		if err != nil {
 			pub.Close()
-			return nil, fmt.Errorf("failed to create stream: %w", err)
+			return nil, fmt.Errorf("failed to create OBSERVATIONS stream: %w", err)
 		}
-		logger.Info("Created JetStream stream",
+		logger.Info("Created OBSERVATIONS JetStream stream",
 			zap.String("name", streamConfig.Config.Name),
 			zap.Strings("subjects", streamConfig.Config.Subjects))
 	} else {
-		logger.Info("JetStream stream already exists",
+		logger.Info("OBSERVATIONS JetStream stream already exists",
 			zap.String("name", streamInfo.Config.Name),
 			zap.Strings("subjects", streamInfo.Config.Subjects))
 	}
@@ -112,11 +126,11 @@ func NewNATSPublisher(logger *zap.Logger, natsConfig *config.NATSConfig) (*NATSP
 	return pub, nil
 }
 
-// Publish sends unified event to NATS with connection resilience
-func (p *NATSPublisher) Publish(event *domain.UnifiedEvent) error {
+// Publish publishes a raw event to NATS with connection resilience
+func (p *NATSPublisher) Publish(event collectors.RawEvent) error {
 	// Check for nil safety first
-	if p == nil || event == nil {
-		return fmt.Errorf("publisher or event is nil")
+	if p == nil {
+		return fmt.Errorf("publisher is nil")
 	}
 
 	// Check if publisher context is cancelled
@@ -145,13 +159,13 @@ func (p *NATSPublisher) Publish(event *domain.UnifiedEvent) error {
 		return fmt.Errorf("JetStream context not initialized")
 	}
 
-	// Generate subject based on trace ID and source
-	subject := p.generateSubject(event)
+	// Generate subject based on event source for observations stream
+	subject := p.generateObservationSubject(&event)
 
-	// Marshal event
+	// Marshal raw event directly for NATS publishing
 	data, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return fmt.Errorf("failed to marshal raw event: %w", err)
 	}
 
 	// Publish to JetStream with timeout and retry logic
@@ -162,9 +176,10 @@ func (p *NATSPublisher) Publish(event *domain.UnifiedEvent) error {
 	pubAck, err := p.js.Publish(subject, data, nats.Context(ctx))
 	if err != nil {
 		// Log error and check if it's a connection issue
-		p.logger.Warn("Failed to publish event, connection may be unstable",
+		p.logger.Warn("Failed to publish raw event, connection may be unstable",
 			zap.String("subject", subject),
-			zap.String("event_id", event.ID),
+			zap.String("event_type", event.Type),
+			zap.String("trace_id", event.TraceID),
 			zap.Error(err),
 		)
 
@@ -175,13 +190,13 @@ func (p *NATSPublisher) Publish(event *domain.UnifiedEvent) error {
 		default:
 		}
 
-		return fmt.Errorf("failed to publish event to subject %s: %w", subject, err)
+		return fmt.Errorf("failed to publish raw event to subject %s: %w", subject, err)
 	}
 
-	p.logger.Debug("Published event",
+	p.logger.Debug("Published observation event",
 		zap.String("subject", subject),
-		zap.String("event_id", event.ID),
-		zap.String("trace_id", p.getTraceID(event)),
+		zap.String("event_type", event.Type),
+		zap.String("trace_id", event.TraceID),
 		zap.String("stream", pubAck.Stream),
 		zap.Uint64("sequence", pubAck.Sequence),
 	)
@@ -189,40 +204,18 @@ func (p *NATSPublisher) Publish(event *domain.UnifiedEvent) error {
 	return nil
 }
 
-// generateSubject creates NATS subject for event
-func (p *NATSPublisher) generateSubject(event *domain.UnifiedEvent) string {
-	traceID := p.getTraceID(event)
-	if traceID == "" {
-		// No trace ID, use event ID
-		traceID = event.ID
+// generateObservationSubject creates NATS subject for observation event
+// Subject format: observations.{source}
+// Examples: observations.kernel, observations.kubeapi, observations.dns
+func (p *NATSPublisher) generateObservationSubject(event *collectors.RawEvent) string {
+	// Get collector name from metadata, fallback to event type in lowercase
+	source := strings.ToLower(event.Type)
+	if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {
+		source = strings.ToLower(collectorName)
 	}
 
-	// Subject format: traces.{traceID}.{source}
-	baseSubject := "traces" // Default from config
-	if len(p.config.TracesSubjects) > 0 {
-		// Use first subject without wildcard
-		baseSubject = p.config.TracesSubjects[0]
-		if len(baseSubject) > 2 && baseSubject[len(baseSubject)-2:] == ".>" {
-			baseSubject = baseSubject[:len(baseSubject)-2]
-		}
-	}
-	return fmt.Sprintf("%s.%s.%s", baseSubject, traceID, event.Source)
-}
-
-// getTraceID extracts trace ID from event
-func (p *NATSPublisher) getTraceID(event *domain.UnifiedEvent) string {
-	if event.TraceContext != nil && event.TraceContext.TraceID != "" {
-		return event.TraceContext.TraceID
-	}
-
-	// Check correlation hints
-	for _, hint := range event.CorrelationHints {
-		if len(hint) > 8 { // Basic trace ID validation
-			return hint
-		}
-	}
-
-	return ""
+	// Subject format: observations.{source}
+	return fmt.Sprintf("observations.%s", source)
 }
 
 // Close closes the NATS connection gracefully

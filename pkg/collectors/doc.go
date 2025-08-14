@@ -33,7 +33,8 @@
 //	                    │
 //	                    ▼
 //	            ┌──────────────┐
-//	            │UnifiedEvent  │
+//	            │RawEvent +    │
+//	            │K8s Context   │
 //	            └──────────────┘
 //
 // Example usage:

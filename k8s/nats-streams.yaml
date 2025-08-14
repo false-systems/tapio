@@ -14,9 +14,9 @@ data:
     # Wait for NATS to be ready
     sleep 5
     
-    # Create TRACES stream for correlation
-    nats stream add TRACES \
-      --subjects="traces.>" \
+    # Create OBSERVATIONS stream for observability data
+    nats stream add OBSERVATIONS \
+      --subjects="observations.>" \
       --retention=limits \
       --max-age=24h \
       --storage=file \
@@ -25,9 +25,10 @@ data:
       --max-msgs=-1 \
       --max-bytes=10GB \
       --dupe-window=2m \
-      --defaults || echo "TRACES stream may already exist"
+      --compression=s2 \
+      --defaults || echo "OBSERVATIONS stream may already exist"
     
-    echo "TRACES stream configured"
+    echo "OBSERVATIONS stream configured"
     
     # List streams to verify
     nats stream list
