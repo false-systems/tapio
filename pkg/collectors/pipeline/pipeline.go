@@ -278,26 +278,30 @@ func (p *EventPipeline) worker() {
 					}
 				}()
 
-				// Enrich event
+				// Enrich event with K8s context while keeping raw event structure
 				enriched := p.enrichEvent(event)
 
-				// Convert to unified event
-				unified := enriched.ConvertToUnified()
-
-				// Publish to NATS with retry logic
+				// Publish raw event directly to NATS with retry logic
+				// This is the key change: we publish the raw event instead of unified event
 				if p.publisher != nil {
 					retries := 3
 					for i := 0; i < retries; i++ {
-						err := p.publisher.Publish(unified)
+						err := p.publisher.Publish(*enriched.Raw)
 						if err == nil {
 							break
 						}
 
 						if i == retries-1 {
-							// Final retry failed
-							p.logger.Error("Failed to publish event after retries",
+							// Final retry failed - use raw event fields for logging
+							eventID := fmt.Sprintf("%s-%d", enriched.Raw.Type, enriched.Raw.Timestamp.UnixNano())
+							if enriched.Raw.TraceID != "" {
+								eventID = enriched.Raw.TraceID
+							}
+							p.logger.Error("Failed to publish raw event after retries",
 								zap.Error(err),
-								zap.String("event_id", unified.ID),
+								zap.String("event_id", eventID),
+								zap.String("event_type", enriched.Raw.Type),
+								zap.String("trace_id", enriched.Raw.TraceID),
 								zap.Int("retries", retries),
 							)
 						} else {

@@ -604,25 +604,6 @@ func BenchmarkEventPool(b *testing.B) {
 	})
 }
 
-func BenchmarkEventConversion(b *testing.B) {
-	event := &Event{
-		Type:      EventOOM,
-		ExitCode:  137,
-		OOMKilled: 1,
-		PodName:   "test-pod",
-		Namespace: "default",
-		Timestamp: time.Now().UnixNano(),
-	}
-	event.SetContainerID("test-container-123")
-	event.SetPodUID("pod-uid-123")
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		unifiedEvent := event.ToUnifiedEvent()
-		_ = unifiedEvent // Prevent optimization
-	}
-}
-
 func BenchmarkContainerFiltering(b *testing.B) {
 	config := Config{
 		KubernetesOnly:          true,

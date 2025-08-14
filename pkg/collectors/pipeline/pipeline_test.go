@@ -297,35 +297,12 @@ func TestEnrichedEvent(t *testing.T) {
 		},
 	}
 
-	unified := enriched.ConvertToUnified()
-
-	assert.NotEmpty(t, unified.ID)
-	assert.Equal(t, raw.Timestamp, unified.Timestamp)
-	assert.Equal(t, "kubeapi", unified.Source)
-	assert.NotNil(t, unified.K8sContext)
-	assert.Equal(t, "Pod", unified.K8sContext.Kind)
-	assert.Equal(t, "test-pod", unified.K8sContext.Name)
-	assert.NotNil(t, unified.TraceContext)
-	assert.Equal(t, raw.TraceID, unified.TraceContext.TraceID)
-}
-
-func TestMapCollectorTypeToDomain(t *testing.T) {
-	tests := []struct {
-		collector string
-		expected  string
-	}{
-		{"kubeapi", "kubernetes"},
-		{"etcd", "system"},
-		{"kernel", "process"},
-		{"cni", "network"},
-		{"systemd", "system"},
-		{"unknown", "system"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.collector, func(t *testing.T) {
-			result := mapCollectorTypeToDomain(tt.collector)
-			assert.Equal(t, tt.expected, string(result))
-		})
-	}
+	// Test that enriched event preserves raw event data
+	assert.Equal(t, raw.Timestamp, enriched.Raw.Timestamp)
+	assert.Equal(t, "kubeapi", enriched.Raw.Type)
+	assert.Equal(t, raw.TraceID, enriched.TraceID)
+	assert.Equal(t, raw.SpanID, enriched.SpanID)
+	assert.NotNil(t, enriched.K8sObject)
+	assert.Equal(t, "Pod", enriched.K8sObject.Kind)
+	assert.Equal(t, "test-pod", enriched.K8sObject.Name)
 }

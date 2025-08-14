@@ -10,7 +10,6 @@ import (
 	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/domain"
 	cri "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -313,77 +312,6 @@ func (e *Event) ToRawEvent() collectors.RawEvent {
 		Data:      data,
 		Metadata:  metadata,
 	}
-}
-
-// ToUnifiedEvent converts CRI event to unified event for correlation
-func (e *Event) ToUnifiedEvent() *domain.UnifiedEvent {
-	severity := domain.EventSeverityInfo
-
-	// Escalate severity based on event type
-	if e.OOMKilled == 1 {
-		severity = domain.EventSeverityCritical
-	} else if e.ExitCode != 0 {
-		severity = domain.EventSeverityWarning
-	}
-
-	// Map to proper domain event type
-	eventType := domain.EventTypeSystem
-	if e.Type == EventOOM {
-		eventType = domain.EventTypeMemory
-	} else if e.ExitCode != 0 {
-		eventType = domain.EventTypeProcess
-	}
-
-	return &domain.UnifiedEvent{
-		ID:        fmt.Sprintf("cri-%s-%d", e.GetContainerID()[:12], e.Timestamp),
-		Type:      eventType,
-		Source:    CollectorName,
-		Severity:  severity,
-		Timestamp: time.Unix(0, e.Timestamp),
-		Message:   formatEventMessage(e),
-
-		// Entity context for correlation
-		Entity: &domain.EntityContext{
-			Type:      "container",
-			Name:      e.PodName,
-			Namespace: e.Namespace,
-			UID:       e.GetPodUID(),
-		},
-
-		// Kubernetes context
-		Kubernetes: &domain.KubernetesData{
-			Object:     fmt.Sprintf("container/%s", e.GetContainerID()[:12]),
-			ObjectKind: "Container",
-			Reason:     e.Reason,
-			Message:    e.Message,
-		},
-
-		// Structured attributes for correlation
-		Attributes: map[string]interface{}{
-			"container_id":  e.GetContainerID(),
-			"pod_uid":       e.GetPodUID(),
-			"exit_code":     e.ExitCode,
-			"oom_killed":    e.OOMKilled == 1,
-			"memory_usage":  e.MemoryUsage,
-			"memory_limit":  e.MemoryLimit,
-			"cpu_throttled": e.CPUThrottled,
-			"started_at":    e.StartedAt,
-			"finished_at":   e.FinishedAt,
-		},
-	}
-}
-
-// formatEventMessage creates human-readable message for event
-func formatEventMessage(e *Event) string {
-	if e.OOMKilled == 1 {
-		return fmt.Sprintf("Container OOMKilled: used %s of %s memory limit",
-			formatBytes(e.MemoryUsage), formatBytes(e.MemoryLimit))
-	}
-	if e.ExitCode != 0 {
-		return fmt.Sprintf("Container exited with code %d: %s",
-			e.ExitCode, e.Reason)
-	}
-	return fmt.Sprintf("Container %s", e.Type.String())
 }
 
 // formatBytes formats bytes in human readable format

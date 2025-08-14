@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
-	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -161,7 +162,7 @@ type EnhancedNATSPublisher struct {
 }
 
 type publishRequest struct {
-	event     *domain.UnifiedEvent
+	event     *collectors.RawEvent
 	subject   string
 	data      []byte
 	timestamp time.Time
@@ -315,12 +316,23 @@ func (p *EnhancedNATSPublisher) initInstrumentation() error {
 }
 
 func (p *EnhancedNATSPublisher) ensureStream() error {
-	streamInfo, err := p.js.StreamInfo(p.config.TracesStreamName)
+	// Use OBSERVATIONS stream configuration
+	streamName := "OBSERVATIONS"
+	observationSubjects := []string{
+		"observations.kernel",
+		"observations.kubeapi",
+		"observations.dns",
+		"observations.etcd",
+		"observations.cni",
+		"observations.systemd",
+	}
+
+	streamInfo, err := p.js.StreamInfo(streamName)
 	if err != nil {
-		// Create stream with production configuration
+		// Create OBSERVATIONS stream with production configuration
 		streamConfig := &nats.StreamConfig{
-			Name:       p.config.TracesStreamName,
-			Subjects:   p.config.TracesSubjects,
+			Name:       streamName,
+			Subjects:   observationSubjects,
 			Storage:    nats.FileStorage,
 			MaxAge:     p.config.MaxAge,
 			MaxBytes:   p.config.MaxBytes,
@@ -336,16 +348,16 @@ func (p *EnhancedNATSPublisher) ensureStream() error {
 
 		_, err := p.js.AddStream(streamConfig)
 		if err != nil {
-			return fmt.Errorf("failed to create stream: %w", err)
+			return fmt.Errorf("failed to create OBSERVATIONS stream: %w", err)
 		}
 
-		p.logger.Info("Created JetStream stream",
+		p.logger.Info("Created OBSERVATIONS JetStream stream",
 			zap.String("name", streamConfig.Name),
 			zap.Strings("subjects", streamConfig.Subjects),
 			zap.Duration("max_age", streamConfig.MaxAge),
 			zap.Int64("max_bytes", streamConfig.MaxBytes))
 	} else {
-		p.logger.Info("JetStream stream already exists",
+		p.logger.Info("OBSERVATIONS JetStream stream already exists",
 			zap.String("name", streamInfo.Config.Name),
 			zap.Strings("subjects", streamInfo.Config.Subjects))
 	}
@@ -363,109 +375,30 @@ func (p *EnhancedNATSPublisher) startBackgroundWorkers() {
 	go p.healthMonitor()
 }
 
-// PublishAsync publishes event asynchronously with backpressure handling
-func (p *EnhancedNATSPublisher) PublishAsync(event *domain.UnifiedEvent) error {
-	// Check if publisher is healthy
-	if atomic.LoadInt32(&p.isConnected) == 0 {
-		if p.errorCounter != nil {
-			p.errorCounter.Add(p.ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "not_connected"),
-			))
-		}
-		return fmt.Errorf("publisher not connected to NATS")
-	}
-
-	// Check circuit breaker
-	if p.circuitBreaker.IsOpen() {
-		if p.errorCounter != nil {
-			p.errorCounter.Add(p.ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "circuit_breaker_open"),
-			))
-		}
-		return fmt.Errorf("circuit breaker is open")
-	}
-
-	// Backpressure control
-	pending := atomic.LoadInt32(&p.pendingSends)
-	if pending >= p.maxPending {
-		if p.errorCounter != nil {
-			p.errorCounter.Add(p.ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "backpressure"),
-			))
-		}
-		return fmt.Errorf("too many pending publishes: %d", pending)
-	}
-
-	// Marshal event
-	data, err := json.Marshal(event)
-	if err != nil {
-		if p.errorCounter != nil {
-			p.errorCounter.Add(p.ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "marshal_failed"),
-			))
-		}
-		return fmt.Errorf("failed to marshal event: %w", err)
-	}
-
-	// Create publish request
-	req := &publishRequest{
-		event:     event,
-		subject:   p.generateSubject(event),
-		data:      data,
-		timestamp: time.Now(),
-		done:      make(chan error, 1),
-	}
-
-	// Send to async worker with timeout
-	select {
-	case p.publishChan <- req:
-		atomic.AddInt32(&p.pendingSends, 1)
-		// Wait for result asynchronously
-		go func() {
-			select {
-			case err := <-req.done:
-				atomic.AddInt32(&p.pendingSends, -1)
-				if err != nil && p.errorCounter != nil {
-					p.errorCounter.Add(p.ctx, 1, metric.WithAttributes(
-						attribute.String("error_type", "async_publish_failed"),
-					))
-				}
-			case <-time.After(30 * time.Second):
-				atomic.AddInt32(&p.pendingSends, -1)
-				if p.errorCounter != nil {
-					p.errorCounter.Add(p.ctx, 1, metric.WithAttributes(
-						attribute.String("error_type", "async_publish_timeout"),
-					))
-				}
-			}
-		}()
-		return nil
-	case <-p.ctx.Done():
-		return fmt.Errorf("publisher shutting down")
-	case <-time.After(1 * time.Second):
-		return fmt.Errorf("async publish channel full")
-	}
-}
-
 // Publish publishes event synchronously (compatible with existing interface)
-func (p *EnhancedNATSPublisher) Publish(event *domain.UnifiedEvent) error {
+func (p *EnhancedNATSPublisher) Publish(event collectors.RawEvent) error {
 	if p == nil || p.js == nil {
 		return fmt.Errorf("publisher not initialized")
 	}
 
 	start := time.Now()
-	ctx, span := p.tracer.Start(p.ctx, "nats.publish")
+	ctx, span := p.tracer.Start(p.ctx, "nats.publish_observation")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("event.id", event.ID),
-		attribute.String("event.source", event.Source),
-		attribute.String("event.type", string(event.Type)),
+		attribute.String("event.type", event.Type),
+		attribute.String("event.trace_id", event.TraceID),
+		attribute.String("event.source", func() string {
+			if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {
+				return collectorName
+			}
+			return event.Type
+		}()),
 	)
 
-	// Use circuit breaker for sync publishes too
+	// Use circuit breaker for sync publishes
 	err := p.circuitBreaker.Call(func() error {
-		return p.publishSync(ctx, event)
+		return p.publishObservationSync(ctx, &event)
 	})
 
 	// Record metrics
@@ -478,6 +411,7 @@ func (p *EnhancedNATSPublisher) Publish(event *domain.UnifiedEvent) error {
 				}
 				return "success"
 			}()),
+			attribute.String("event_type", "observation"),
 		))
 	}
 
@@ -485,7 +419,7 @@ func (p *EnhancedNATSPublisher) Publish(event *domain.UnifiedEvent) error {
 		span.SetAttributes(attribute.String("error", err.Error()))
 		if p.errorCounter != nil {
 			p.errorCounter.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "sync_publish_failed"),
+				attribute.String("error_type", "observation_publish_failed"),
 			))
 		}
 		return err
@@ -493,46 +427,113 @@ func (p *EnhancedNATSPublisher) Publish(event *domain.UnifiedEvent) error {
 
 	if p.publishedCounter != nil {
 		p.publishedCounter.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("publish_type", "sync"),
+			attribute.String("publish_type", "observation_sync"),
 		))
 	}
 
 	return nil
 }
 
-func (p *EnhancedNATSPublisher) publishSync(ctx context.Context, event *domain.UnifiedEvent) error {
-	subject := p.generateSubject(event)
+// PublishAsync publishes observation event asynchronously with backpressure handling
+func (p *EnhancedNATSPublisher) PublishAsync(event *collectors.RawEvent) error {
+	if p == nil || p.js == nil {
+		return fmt.Errorf("publisher not initialized")
+	}
 
-	// Marshal event
+	start := time.Now()
+	ctx, span := p.tracer.Start(p.ctx, "nats.publish_raw_event")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("event.type", event.Type),
+		attribute.String("event.trace_id", event.TraceID),
+		attribute.String("event.source", func() string {
+			if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {
+				return collectorName
+			}
+			return event.Type
+		}()),
+	)
+
+	// Use circuit breaker for async observation publishing
+	err := p.circuitBreaker.Call(func() error {
+		return p.publishObservationSync(ctx, event)
+	})
+
+	// Record metrics
+	duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
+	if p.publishLatency != nil {
+		p.publishLatency.Record(ctx, duration, metric.WithAttributes(
+			attribute.String("result", func() string {
+				if err != nil {
+					return "error"
+				}
+				return "success"
+			}()),
+			attribute.String("event_type", "raw"),
+		))
+	}
+
+	if err != nil {
+		span.SetAttributes(attribute.String("error", err.Error()))
+		if p.errorCounter != nil {
+			p.errorCounter.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "async_observation_publish_failed"),
+			))
+		}
+		return err
+	}
+
+	if p.publishedCounter != nil {
+		p.publishedCounter.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("publish_type", "observation_async"),
+		))
+	}
+
+	return nil
+}
+
+func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, event *collectors.RawEvent) error {
+	subject := p.generateObservationSubject(event)
+
+	// Marshal raw event directly
 	data, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return fmt.Errorf("failed to marshal raw event: %w", err)
 	}
 
 	// Publish with timeout
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	publishCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Add message deduplication header
-	msgID := fmt.Sprintf("%s-%s", event.ID, event.Source)
-
-	pubAck, err := p.js.Publish(subject, data,
-		nats.Context(ctx),
-		nats.MsgId(msgID), // Enable deduplication
-	)
+	ack, err := p.js.Publish(subject, data, nats.Context(publishCtx))
 	if err != nil {
-		return fmt.Errorf("failed to publish event to subject %s: %w", subject, err)
+		return fmt.Errorf("failed to publish raw event to subject %s: %w", subject, err)
 	}
 
-	p.logger.Debug("Published event synchronously",
+	p.logger.Debug("Published observation event",
 		zap.String("subject", subject),
-		zap.String("event_id", event.ID),
-		zap.String("trace_id", p.getTraceID(event)),
-		zap.String("stream", pubAck.Stream),
-		zap.Uint64("sequence", pubAck.Sequence),
+		zap.String("event_type", event.Type),
+		zap.String("trace_id", event.TraceID),
+		zap.String("stream", ack.Stream),
+		zap.Uint64("sequence", ack.Sequence),
 	)
 
 	return nil
+}
+
+// generateObservationSubject creates NATS subject for observation event
+// Subject format: observations.{source}
+// Examples: observations.kernel, observations.kubeapi, observations.dns
+func (p *EnhancedNATSPublisher) generateObservationSubject(event *collectors.RawEvent) string {
+	// Get collector name from metadata, fallback to event type in lowercase
+	source := strings.ToLower(event.Type)
+	if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {
+		source = strings.ToLower(collectorName)
+	}
+
+	// Subject format: observations.{source}
+	return fmt.Sprintf("observations.%s", source)
 }
 
 func (p *EnhancedNATSPublisher) asyncPublishWorker() {
@@ -578,15 +579,18 @@ func (p *EnhancedNATSPublisher) publishAsyncRequest(req *publishRequest) error {
 	ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
 	defer cancel()
 
-	// Add message deduplication header
-	msgID := fmt.Sprintf("%s-%s", req.event.ID, req.event.Source)
+	// Add message deduplication header using timestamp and trace ID
+	msgID := fmt.Sprintf("%s-%d", req.event.TraceID, req.event.Timestamp.UnixNano())
+	if msgID == "-" || req.event.TraceID == "" {
+		msgID = fmt.Sprintf("obs-%d", req.event.Timestamp.UnixNano())
+	}
 
 	// Publish asynchronously
 	pubAck, err := p.js.PublishAsync(req.subject, req.data,
 		nats.MsgId(msgID), // Enable deduplication
 	)
 	if err != nil {
-		return fmt.Errorf("failed to publish async event to subject %s: %w", req.subject, err)
+		return fmt.Errorf("failed to publish async observation event to subject %s: %w", req.subject, err)
 	}
 
 	// Wait for acknowledgment with timeout
@@ -594,14 +598,14 @@ func (p *EnhancedNATSPublisher) publishAsyncRequest(req *publishRequest) error {
 	case <-pubAck.Ok():
 		if p.publishedCounter != nil {
 			p.publishedCounter.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("publish_type", "async"),
+				attribute.String("publish_type", "async_observation"),
 			))
 		}
 
-		p.logger.Debug("Published event asynchronously",
+		p.logger.Debug("Published observation event asynchronously",
 			zap.String("subject", req.subject),
-			zap.String("event_id", req.event.ID),
-			zap.String("trace_id", p.getTraceID(req.event)),
+			zap.String("event_type", req.event.Type),
+			zap.String("trace_id", req.event.TraceID),
 		)
 		return nil
 	case err := <-pubAck.Err():
@@ -609,38 +613,6 @@ func (p *EnhancedNATSPublisher) publishAsyncRequest(req *publishRequest) error {
 	case <-ctx.Done():
 		return fmt.Errorf("async publish timeout")
 	}
-}
-
-// generateSubject creates NATS subject for event (same as original)
-func (p *EnhancedNATSPublisher) generateSubject(event *domain.UnifiedEvent) string {
-	traceID := p.getTraceID(event)
-	if traceID == "" {
-		traceID = event.ID
-	}
-
-	baseSubject := "traces"
-	if len(p.config.TracesSubjects) > 0 {
-		baseSubject = p.config.TracesSubjects[0]
-		if len(baseSubject) > 2 && baseSubject[len(baseSubject)-2:] == ".>" {
-			baseSubject = baseSubject[:len(baseSubject)-2]
-		}
-	}
-	return fmt.Sprintf("%s.%s.%s", baseSubject, traceID, event.Source)
-}
-
-// getTraceID extracts trace ID from event (same as original)
-func (p *EnhancedNATSPublisher) getTraceID(event *domain.UnifiedEvent) string {
-	if event.TraceContext != nil && event.TraceContext.TraceID != "" {
-		return event.TraceContext.TraceID
-	}
-
-	for _, hint := range event.CorrelationHints {
-		if len(hint) > 8 {
-			return hint
-		}
-	}
-
-	return ""
 }
 
 func (p *EnhancedNATSPublisher) healthMonitor() {

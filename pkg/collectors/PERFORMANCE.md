@@ -98,9 +98,9 @@ func (c *YourCollector) Stop() error {
 
 Replace your event channel with the performance adapter's channel:
 ```go
-func (c *YourCollector) Events() <-chan domain.UnifiedEvent {
-    // Return the performance adapter's output channel for zero-copy operation
-    return c.perfAdapter.Events()
+func (c *YourCollector) Events() <-chan collectors.RawEvent {
+    // Return the collector's raw event channel
+    return c.events
 }
 ```
 
@@ -240,13 +240,13 @@ func (c *MyCollector) Stop() error {
     return c.perfAdapter.Stop()
 }
 
-func (c *MyCollector) Events() <-chan domain.UnifiedEvent {
-    return c.perfAdapter.Events()
+func (c *MyCollector) Events() <-chan collectors.RawEvent {
+    return c.events
 }
 
 func (c *MyCollector) processRawEvent(raw RawEvent) {
-    // Convert to UnifiedEvent
-    event := c.convertToUnified(raw)
+    // Convert to RawEvent
+    event := c.convertToRaw(raw)
     
     // Submit through performance adapter
     if err := c.perfAdapter.Submit(event); err != nil {

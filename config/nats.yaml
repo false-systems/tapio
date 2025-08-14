@@ -9,15 +9,16 @@ nats:
     
     # Streams configuration
     streams:
-      traces:
-        name: "TRACES"
-        subjects: ["traces.>"]
+      observations:
+        name: "OBSERVATIONS"
+        subjects: ["observations.>"]
         retention: "limits"
         max_age: "24h"
         storage: "file"
         replicas: 1
         max_bytes: "10GB"
         duplicate_window: "2m"
+        compression: "s2"
       
       raw_events:
         name: "RAW_EVENTS" 
@@ -33,7 +34,7 @@ nats:
     consumers:
       correlation_service:
         name: "correlation-service"
-        stream: "TRACES"
+        stream: "OBSERVATIONS"
         durable: true
         ack_policy: "explicit"
         deliver_policy: "all"
@@ -43,7 +44,7 @@ nats:
       
       intelligence_service:
         name: "intelligence-service"
-        stream: "TRACES"
+        stream: "OBSERVATIONS"
         durable: true
         ack_policy: "explicit"
         deliver_policy: "all"
