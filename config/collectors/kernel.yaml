@@ -1,0 +1,513 @@
+# Kernel Collector Metrics Configuration
+# Monitors kernel-level events, processes, network, and security
+
+collector: "kernel"
+version: "1.0.0"
+
+defaults:
+  export:
+    prometheus:
+      enabled: true
+      namespace: "tapio"
+      subsystem: "kernel"
+    opentelemetry:
+      enabled: true
+      meter_name: "tapio.kernel"
+      version: "1.0.0"
+  performance:
+    sample_rate: 0.8  # Sample 80% due to high volume
+    collect_every: "5s"
+    cache_metrics: true
+    batch_size: 500
+  labels:
+    collector: "kernel"
+    node: "${NODE_NAME:-unknown}"
+    kernel_version: "${KERNEL_VERSION:-unknown}"
+
+# Decoder definitions for kernel-specific data
+decoders:
+  syscall_names:
+    type: "enum"
+    description: "System call names"
+    config:
+      values:
+        "0": "read"
+        "1": "write"
+        "2": "open"
+        "3": "close"
+        "4": "stat"
+        "5": "fstat"
+        "9": "mmap"
+        "11": "munmap"
+        "39": "getpid"
+        "57": "fork"
+        "59": "execve"
+        "60": "exit"
+        "102": "getuid"
+        "158": "arch_prctl"
+        "231": "exit_group"
+        "257": "openat"
+        "318": "getrandom"
+      default: "unknown"
+
+  signal_names:
+    type: "enum"
+    description: "Signal names"
+    config:
+      values:
+        "1": "SIGHUP"
+        "2": "SIGINT"
+        "3": "SIGQUIT"
+        "4": "SIGILL"
+        "6": "SIGABRT"
+        "8": "SIGFPE"
+        "9": "SIGKILL"
+        "11": "SIGSEGV"
+        "13": "SIGPIPE"
+        "14": "SIGALRM"
+        "15": "SIGTERM"
+        "17": "SIGCHLD"
+        "18": "SIGCONT"
+        "19": "SIGSTOP"
+      default: "unknown"
+
+  process_state:
+    type: "enum"
+    description: "Process states"
+    config:
+      values:
+        "0": "RUNNING"
+        "1": "INTERRUPTIBLE"
+        "2": "UNINTERRUPTIBLE"
+        "4": "STOPPED"
+        "8": "TRACED"
+        "16": "ZOMBIE"
+        "32": "DEAD"
+      default: "unknown"
+
+  file_flags:
+    type: "flags"
+    description: "File open flags"
+    config:
+      flags:
+        "0x0000": "O_RDONLY"
+        "0x0001": "O_WRONLY"
+        "0x0002": "O_RDWR"
+        "0x0040": "O_CREAT"
+        "0x0080": "O_EXCL"
+        "0x0200": "O_TRUNC"
+        "0x0400": "O_APPEND"
+        "0x0800": "O_NONBLOCK"
+
+  ip_protocol:
+    type: "enum"
+    description: "IP protocols"
+    config:
+      values:
+        "1": "ICMP"
+        "6": "TCP"
+        "17": "UDP"
+        "58": "ICMPv6"
+        "132": "SCTP"
+      default: "unknown"
+
+  tcp_state:
+    type: "enum"
+    description: "TCP connection states"
+    config:
+      values:
+        "1": "ESTABLISHED"
+        "2": "SYN_SENT"
+        "3": "SYN_RECV"
+        "4": "FIN_WAIT1"
+        "5": "FIN_WAIT2"
+        "6": "TIME_WAIT"
+        "7": "CLOSE"
+        "8": "CLOSE_WAIT"
+        "9": "LAST_ACK"
+        "10": "LISTEN"
+        "11": "CLOSING"
+      default: "unknown"
+
+  error_codes:
+    type: "errno"
+    description: "System error codes"
+
+  source_ip:
+    type: "ip"
+    description: "Source IP address"
+    config:
+      format: "decimal"
+
+  dest_ip:
+    type: "ip"
+    description: "Destination IP address"
+    config:
+      format: "decimal"
+
+# Metric definitions
+metrics:
+  # System Call Metrics
+  - name: "syscalls_total"
+    type: "counter"
+    help: "Total number of system calls"
+    table: "syscall_events"
+    value_field: "count"
+    labels:
+      - "syscall"
+      - "pid"
+      - "comm"
+      - "result"
+    label_fields:
+      syscall:
+        field: "syscall_nr"
+        decoder:
+          type: "syscall_names"
+      pid:
+        field: "pid"
+        format: "%d"
+      comm:
+        field: "comm"
+        default: "unknown"
+      result:
+        field: "ret"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "0": "success"
+            default: "error"
+    performance:
+      sample_rate: 0.1  # High volume, sample heavily
+
+  - name: "syscall_duration_seconds"
+    type: "histogram"
+    help: "System call execution time"
+    table: "syscall_latency"
+    value_field: "duration_ns"
+    labels:
+      - "syscall"
+      - "result"
+    label_fields:
+      syscall:
+        field: "syscall_nr"
+        decoder:
+          type: "syscall_names"
+      result:
+        field: "ret"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "0": "success"
+            default: "error"
+    histogram:
+      strategy: "exp2"
+      min: 0.000001  # 1μs
+      max: 1.0       # 1s
+      count: 20
+    performance:
+      sample_rate: 0.05  # Heavy sampling for latency
+
+  # Process Metrics
+  - name: "process_events_total"
+    type: "counter"
+    help: "Total process lifecycle events"
+    table: "process_events"
+    value_field: "count"
+    labels:
+      - "event_type"
+      - "comm"
+      - "parent_comm"
+    label_fields:
+      event_type:
+        field: "event_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "fork"
+              "2": "exec"
+              "3": "exit"
+              "4": "clone"
+            default: "unknown"
+      comm:
+        field: "comm"
+        default: "unknown"
+      parent_comm:
+        field: "parent_comm"
+        default: "unknown"
+
+  - name: "process_runtime_seconds_total"
+    type: "counter"
+    help: "Total process runtime in seconds"
+    table: "process_runtime"
+    value_field: "runtime_ns"
+    labels:
+      - "comm"
+      - "pid"
+    label_fields:
+      comm:
+        field: "comm"
+        default: "unknown"
+      pid:
+        field: "pid"
+        format: "%d"
+
+  # Network Metrics
+  - name: "network_connections_total"
+    type: "counter"
+    help: "Total network connections"
+    table: "network_events"
+    value_field: "count"
+    labels:
+      - "protocol"
+      - "direction"
+      - "local_port"
+      - "remote_port"
+    label_fields:
+      protocol:
+        field: "protocol"
+        decoder:
+          type: "ip_protocol"
+      direction:
+        field: "direction"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "0": "inbound"
+              "1": "outbound"
+            default: "unknown"
+      local_port:
+        field: "local_port"
+        format: "%d"
+      remote_port:
+        field: "remote_port"
+        format: "%d"
+
+  - name: "tcp_connection_state_changes_total"
+    type: "counter"
+    help: "TCP connection state changes"
+    table: "tcp_state_events"
+    value_field: "count"
+    labels:
+      - "old_state"
+      - "new_state"
+      - "local_port"
+    label_fields:
+      old_state:
+        field: "old_state"
+        decoder:
+          type: "tcp_state"
+      new_state:
+        field: "new_state"
+        decoder:
+          type: "tcp_state"
+      local_port:
+        field: "local_port"
+        format: "%d"
+
+  - name: "network_bytes_total"
+    type: "counter"
+    help: "Total network bytes transferred"
+    table: "network_traffic"
+    value_field: "bytes"
+    labels:
+      - "direction"
+      - "protocol"
+      - "interface"
+    label_fields:
+      direction:
+        field: "direction"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "0": "rx"
+              "1": "tx"
+            default: "unknown"
+      protocol:
+        field: "protocol"
+        decoder:
+          type: "ip_protocol"
+      interface:
+        field: "interface"
+        default: "unknown"
+
+  # Security Events
+  - name: "security_events_total"
+    type: "counter"
+    help: "Total security-related events"
+    table: "security_events"
+    value_field: "count"
+    labels:
+      - "event_type"
+      - "action"
+      - "comm"
+      - "result"
+    label_fields:
+      event_type:
+        field: "event_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "file_access"
+              "2": "capability_check"
+              "3": "ptrace"
+              "4": "module_load"
+              "5": "setuid"
+              "6": "mount"
+            default: "unknown"
+      action:
+        field: "action"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "0": "denied"
+              "1": "allowed"
+            default: "unknown"
+      comm:
+        field: "comm"
+        default: "unknown"
+      result:
+        field: "result"
+        decoder:
+          type: "error_codes"
+
+  # File System Metrics
+  - name: "file_operations_total"
+    type: "counter"
+    help: "Total file operations"
+    table: "file_events"
+    value_field: "count"
+    labels:
+      - "operation"
+      - "file_type"
+      - "flags"
+    label_fields:
+      operation:
+        field: "operation"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "open"
+              "2": "close"
+              "3": "read"
+              "4": "write"
+              "5": "unlink"
+              "6": "rename"
+            default: "unknown"
+      file_type:
+        field: "file_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "regular"
+              "2": "directory"
+              "3": "symlink"
+              "4": "device"
+              "5": "fifo"
+              "6": "socket"
+            default: "unknown"
+      flags:
+        field: "flags"
+        decoder:
+          type: "file_flags"
+
+  # Memory Metrics
+  - name: "memory_allocations_total"
+    type: "counter"
+    help: "Total memory allocations"
+    table: "memory_events"
+    value_field: "count"
+    labels:
+      - "allocation_type"
+      - "size_class"
+      - "comm"
+    label_fields:
+      allocation_type:
+        field: "alloc_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "mmap"
+              "2": "brk"
+              "3": "malloc"
+              "4": "free"
+            default: "unknown"
+      size_class:
+        field: "size"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "0": "small"    # < 4KB
+              "1": "medium"   # 4KB - 1MB
+              "2": "large"    # > 1MB
+            default: "unknown"
+      comm:
+        field: "comm"
+        default: "unknown"
+
+  - name: "memory_allocation_bytes"
+    type: "histogram"
+    help: "Memory allocation size distribution"
+    table: "memory_alloc_sizes"
+    value_field: "size"
+    labels:
+      - "allocation_type"
+      - "comm"
+    label_fields:
+      allocation_type:
+        field: "alloc_type"
+        decoder:
+          type: "enum"
+          config:
+            values:
+              "1": "mmap"
+              "2": "brk"
+              "3": "malloc"
+            default: "unknown"
+      comm:
+        field: "comm"
+        default: "unknown"
+    histogram:
+      strategy: "exp2"
+      min: 1024       # 1KB
+      max: 1073741824 # 1GB
+      count: 20
+
+  # Signal Metrics
+  - name: "signals_total"
+    type: "counter"
+    help: "Total signals sent"
+    table: "signal_events"
+    value_field: "count"
+    labels:
+      - "signal"
+      - "sender_comm"
+      - "target_comm"
+    label_fields:
+      signal:
+        field: "signal_nr"
+        decoder:
+          type: "signal_names"
+      sender_comm:
+        field: "sender_comm"
+        default: "kernel"
+      target_comm:
+        field: "target_comm"
+        default: "unknown"
+
+# Resource limits
+limits:
+  max_metrics: 5000
+  max_label_values: 50000
+  max_memory_mb: 300
+  collection_timeout: "60s"

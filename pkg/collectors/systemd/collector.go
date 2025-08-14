@@ -38,7 +38,7 @@ type Collector struct {
 	name         string
 	logger       *zap.Logger
 	tracer       trace.Tracer
-	objs         *bpf.SystemdMonitorObjects
+	objs         *bpf.SystemdmonitorObjects
 	links        []link.Link
 	reader       *ringbuf.Reader
 	events       chan collectors.RawEvent
@@ -203,23 +203,9 @@ func (c *Collector) Start(ctx context.Context) error {
 	if c.config.EnableEBPF {
 		c.logger.Info("Starting eBPF monitoring")
 
-		// Load eBPF program
-		spec, err := bpf.LoadSystemdMonitor()
-		if err != nil {
-			c.logger.Error("Failed to load eBPF spec", zap.Error(err))
-			atomic.AddInt64(&c.ebpfLoadFailures, 1)
-			if c.ebpfOperationsCtr != nil {
-				c.ebpfOperationsCtr.Add(ctx, 1, metric.WithAttributes(
-					attribute.String("operation", "load_spec"),
-					attribute.String("status", "failed"),
-				))
-			}
-			span.SetAttributes(attribute.String("error", "ebpf_spec_load_failed"))
-			return fmt.Errorf("failed to load eBPF spec: %w", err)
-		}
-
-		c.objs = &bpf.SystemdMonitorObjects{}
-		if err := spec.LoadAndAssign(c.objs, nil); err != nil {
+		// Load eBPF objects directly
+		c.objs = &bpf.SystemdmonitorObjects{}
+		if err := bpf.LoadSystemdmonitorObjects(c.objs, nil); err != nil {
 			c.logger.Error("Failed to load and assign eBPF objects", zap.Error(err))
 			atomic.AddInt64(&c.ebpfLoadFailures, 1)
 			if c.ebpfOperationsCtr != nil {
