@@ -142,8 +142,8 @@ int trace_setuid(struct trace_event_raw_sys_enter *ctx)
     const struct cred *cred = NULL;
     bpf_core_read(&cred, sizeof(cred), &task->cred);
     if (cred) {
-        bpf_core_read(&event->privilege_change.old_uid, sizeof(__u32), &cred->uid);
-        bpf_core_read(&event->privilege_change.old_gid, sizeof(__u32), &cred->gid);
+        BPF_CORE_READ_INTO(&event->privilege_change.old_uid, cred, uid);
+        BPF_CORE_READ_INTO(&event->privilege_change.old_gid, cred, gid);
         // Extract new UID from syscall args (first argument to setuid)
         event->privilege_change.new_uid = (__u32)BPF_CORE_READ(ctx, args[0]);
         event->privilege_change.new_gid = 0; // setuid doesn't change GID
@@ -216,8 +216,8 @@ int trace_commit_creds(struct pt_regs *ctx)
         struct cred *new_creds = NULL;
         bpf_probe_read_kernel(&new_creds, sizeof(new_creds), &cred_ptr);
         if (new_creds) {
-            BPF_CORE_READ_INTO(&event->privilege_change.new_uid, new_creds, uid.val);
-            BPF_CORE_READ_INTO(&event->privilege_change.new_gid, new_creds, gid.val);
+            BPF_CORE_READ_INTO(&event->privilege_change.new_uid, new_creds, uid);
+            BPF_CORE_READ_INTO(&event->privilege_change.new_gid, new_creds, gid);
             // Read capabilities if available
             // BPF_CORE_READ_INTO(&event->privilege_change.capabilities, new_creds, cap_effective);
         }

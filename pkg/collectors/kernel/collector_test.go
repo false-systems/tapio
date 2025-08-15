@@ -388,8 +388,9 @@ func TestParseNetworkInfoSafely(t *testing.T) {
 
 	t.Run("ValidNetworkInfo", func(t *testing.T) {
 		netInfo := NetworkInfo{
-			SAddr:     0xC0A80101, // 192.168.1.1
-			DAddr:     0x08080808, // 8.8.8.8
+			IPVersion: 4,
+			SAddrV4:   0xC0A80101, // 192.168.1.1
+			DAddrV4:   0x08080808, // 8.8.8.8
 			SPort:     12345,
 			DPort:     80,
 			Protocol:  6, // TCP
@@ -404,7 +405,7 @@ func TestParseNetworkInfoSafely(t *testing.T) {
 		parsed, err := collector.parseNetworkInfoSafely(buffer)
 		assert.NoError(t, err)
 		assert.NotNil(t, parsed)
-		assert.Equal(t, uint32(0xC0A80101), parsed.SAddr)
+		assert.Equal(t, uint32(0xC0A80101), parsed.SAddrV4)
 		assert.Equal(t, uint16(80), parsed.DPort)
 		assert.Equal(t, uint8(6), parsed.Protocol)
 	})

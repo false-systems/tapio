@@ -56,6 +56,9 @@ typedef __s64 s64;
 #ifndef BPF_MAP_TYPE_PERCPU_ARRAY
 #define BPF_MAP_TYPE_PERCPU_ARRAY 6
 #endif
+#ifndef BPF_MAP_TYPE_LRU_HASH
+#define BPF_MAP_TYPE_LRU_HASH 9
+#endif
 #ifndef BPF_MAP_TYPE_RINGBUF
 #define BPF_MAP_TYPE_RINGBUF 27
 #endif
