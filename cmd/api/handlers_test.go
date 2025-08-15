@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,13 +10,26 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 )
 
 func TestAPIServer_HandleHealth_NoDriver(t *testing.T) {
+	// Create test logger
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	server := &APIServer{
 		router: mux.NewRouter(),
+		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
+		tracer: otel.Tracer("test"),
 	}
-	server.setupRoutes()
+	server.setupRouter()
 
 	req := httptest.NewRequest("GET", "/api/v1/health", nil)
 	w := httptest.NewRecorder()
@@ -25,18 +39,29 @@ func TestAPIServer_HandleHealth_NoDriver(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var response HealthResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
+	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	assert.Equal(t, "degraded", response.Status)
+	assert.Equal(t, "unhealthy", response.Status)
 	assert.Equal(t, "unhealthy", response.Services["neo4j"])
 }
 
 func TestAPIServer_HandleWhy_MissingPod(t *testing.T) {
+	// Create test logger
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	server := &APIServer{
 		router: mux.NewRouter(),
+		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
+		tracer: otel.Tracer("test"),
 	}
-	server.setupRoutes()
+	server.setupRouter()
 
 	req := httptest.NewRequest("GET", "/api/v1/why", nil)
 	w := httptest.NewRecorder()
@@ -48,10 +73,21 @@ func TestAPIServer_HandleWhy_MissingPod(t *testing.T) {
 }
 
 func TestAPIServer_HandleImpact_MissingService(t *testing.T) {
+	// Create test logger
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	server := &APIServer{
 		router: mux.NewRouter(),
+		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
+		tracer: otel.Tracer("test"),
 	}
-	server.setupRoutes()
+	server.setupRouter()
 
 	req := httptest.NewRequest("GET", "/api/v1/impact", nil)
 	w := httptest.NewRecorder()
@@ -63,12 +99,23 @@ func TestAPIServer_HandleImpact_MissingService(t *testing.T) {
 }
 
 func TestAPIServer_CORSMiddleware(t *testing.T) {
+	// Create test logger
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	router := mux.NewRouter()
 	router.Use(corsMiddleware)
 	server := &APIServer{
 		router: router,
+		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
+		tracer: otel.Tracer("test"),
 	}
-	server.setupRoutes()
+	server.setupRouter()
 
 	req := httptest.NewRequest("OPTIONS", "/api/v1/health", nil)
 	w := httptest.NewRecorder()
@@ -77,6 +124,6 @@ func TestAPIServer_CORSMiddleware(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
-	assert.Equal(t, "GET, OPTIONS", w.Header().Get("Access-Control-Allow-Methods"))
-	assert.Equal(t, "Content-Type", w.Header().Get("Access-Control-Allow-Headers"))
+	assert.Equal(t, "GET, POST, PUT, DELETE, OPTIONS", w.Header().Get("Access-Control-Allow-Methods"))
+	assert.Equal(t, "Content-Type, Authorization", w.Header().Get("Access-Control-Allow-Headers"))
 }
