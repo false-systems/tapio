@@ -7,7 +7,7 @@
 
 Tapio is a month-old observability platform that learns Kubernetes behavior patterns through eBPF-based event collection and graph correlation analysis. It captures low-level system events, enriches them with Kubernetes context, and stores correlations in Neo4j to identify patterns and root causes of issues.
 
-## What Tapio Actually Does
+## What Tapio Does
 
 Tapio observes your Kubernetes cluster at the kernel level using eBPF, then correlates events across different layers to understand behavior patterns. Instead of just showing you metrics, it builds a graph of relationships between events to answer "why did this happen?" rather than just "what happened?"
 
@@ -18,7 +18,6 @@ Tapio observes your Kubernetes cluster at the kernel level using eBPF, then corr
 - Publishes to NATS JetStream for async processing
 - Converts events to correlation-optimized format (ObservationEvent)
 - Batch loads to Neo4j for graph analysis
-- Identifies temporal, causal, and dependency patterns
 
 ## Architecture
 
@@ -277,11 +276,7 @@ make bpf-generate
 - [ ] Event replay capability
 - [ ] Custom correlation rules DSL
 
-### Future
-- [ ] Windows container support (non-eBPF)
-- [ ] Cloud provider integrations (AWS, GCP, Azure)
-- [ ] Service mesh observability (Istio, Linkerd)
-- [ ] GitOps integration for correlation rules
+
 
 ## Contributing
 
@@ -297,14 +292,7 @@ Requirements:
 - Run `make fmt` and `make test`
 - No stubs or TODOs
 
-## Performance
 
-Current benchmarks on a 4-core machine:
-- Event ingestion: ~50,000 events/sec
-- NATS publishing: ~30,000 events/sec
-- Neo4j batch loading: ~10,000 events/sec
-- Memory usage: ~500MB for collectors
-- CPU usage: <5% idle, 20-30% under load
 
 ## License
 
