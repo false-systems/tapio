@@ -3,6 +3,9 @@
 
 #include "../../bpf_common/vmlinux_minimal.h"
 #include "../../bpf_common/helpers.h"
+#include "../../bpf_common/bpf_stats.h"
+#include "../../bpf_common/bpf_filters.h"
+#include "../../bpf_common/bpf_batch.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 
@@ -180,6 +183,19 @@ struct {
     __type(key, __u32);
     __type(value, struct dns_scratch_buffer);
 } dns_scratch SEC(".maps");
+
+// Statistics tracking maps
+DEFINE_BPF_STATS_MAP(dns_stats, 2); // 2 probes: sendmsg, recvmsg
+DEFINE_GLOBAL_STATS_MAP(dns_global_stats);
+
+// Dynamic filtering maps
+DEFINE_PID_FILTER_MAP(dns_pid_filter);
+DEFINE_NS_FILTER_MAP(dns_ns_filter);
+DEFINE_NET_FILTER_MAP(dns_net_filter);
+DEFINE_FILTER_CONFIG_MAP(dns_filter_config);
+
+// Batch processing map
+DEFINE_BATCH_MAP(dns_batch_buffer);
 
 // Helper to check if process is DNS-related (CO-RE enabled)
 static __always_inline bool is_dns_process(struct task_struct *task)
@@ -406,6 +422,9 @@ static __always_inline __u16 extract_query_type(void *dns_data, void *data_end, 
 // Enhanced DNS sendto monitoring with IPv4/IPv6 and protocol detection
 SEC("tracepoint/syscalls/sys_enter_sendto")
 int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
+    // Record probe hit in statistics
+    BPF_STATS_ENTER(&dns_stats, 0);
+    
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     
     // Get process info
@@ -416,10 +435,36 @@ int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
     __u32 uid = uid_gid & 0xFFFFFFFF;
     __u32 gid = uid_gid >> 32;
     
-    // Filter - check DNS-related processes or monitored PIDs
-    __u8 *val = bpf_map_lookup_elem(&dns_pids, &pid);
-    if (!val && !is_dns_process(task))
-        return 0;
+    // Get filter configuration
+    struct filter_config *filter_cfg = BPF_FILTER_INIT(&dns_filter_config);
+    
+    // Apply dynamic filtering
+    __u64 ns_id = bpf_get_current_ns_id();
+    
+    // Check PID and namespace filters first
+    if (filter_cfg) {
+        if (!bpf_filter_check_pid(&dns_pid_filter, filter_cfg, pid)) {
+            BPF_STATS_EXIT_ERROR(&dns_stats, 0, STATS_EVENT_FILTERED);
+            return 0;
+        }
+        if (!bpf_filter_check_namespace(&dns_ns_filter, filter_cfg, ns_id)) {
+            BPF_STATS_EXIT_ERROR(&dns_stats, 0, STATS_EVENT_FILTERED);
+            return 0;
+        }
+        
+        // Check sampling
+        if (!bpf_filter_should_sample(filter_cfg)) {
+            BPF_STATS_EXIT_ERROR(&dns_stats, 0, STATS_EVENT_SAMPLED);
+            return 0;
+        }
+    } else {
+        // Fall back to old filtering - check DNS-related processes or monitored PIDs
+        __u8 *val = bpf_map_lookup_elem(&dns_pids, &pid);
+        if (!val && !is_dns_process(task)) {
+            BPF_STATS_EXIT_ERROR(&dns_stats, 0, STATS_EVENT_FILTERED);
+            return 0;
+        }
+    }
     
     // Get syscall arguments
     int sockfd = (int)ctx->args[0];
@@ -563,9 +608,9 @@ int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
 
 // Store recvfrom args for response correlation
 struct recvfrom_args {
-    void *buf;
-    size_t len;
-    struct sockaddr *src_addr;
+    __u64 buf_addr;          // Use __u64 instead of void* for eBPF compatibility
+    __u64 len;               // Size_t as __u64
+    __u64 src_addr_addr;     // Use __u64 instead of struct sockaddr* for eBPF compatibility
 };
 
 // Map to store recvfrom arguments by PID
@@ -588,9 +633,9 @@ int trace_dns_recvfrom_enter(struct trace_event_raw_sys_enter *ctx) {
         return 0;
     
     struct recvfrom_args args = {
-        .buf = (void *)ctx->args[1],
-        .len = (size_t)ctx->args[2],
-        .src_addr = (struct sockaddr *)ctx->args[4]
+        .buf_addr = (__u64)ctx->args[1],
+        .len = (__u64)ctx->args[2],
+        .src_addr_addr = (__u64)ctx->args[4]
     };
     
     bpf_map_update_elem(&recvfrom_args_map, &pid, &args, BPF_ANY);
@@ -646,7 +691,7 @@ int trace_dns_recvfrom(struct trace_event_raw_sys_exit *ctx) {
     
     // Read DNS response data to get ID for correlation
     __u32 copy_len = ret > MAX_DNS_DATA ? MAX_DNS_DATA : (__u32)ret;
-    if (args->buf && bpf_probe_read_user(event->data, copy_len, args->buf) == 0) {
+    if (args->buf_addr && bpf_probe_read_user(event->data, copy_len, (void *)args->buf_addr) == 0) {
         if (copy_len >= sizeof(struct dnshdr)) {
             struct dnshdr *dns_hdr = (struct dnshdr *)event->data;
             event->dns_id = bpf_ntohs(dns_hdr->id);
@@ -663,9 +708,9 @@ int trace_dns_recvfrom(struct trace_event_raw_sys_exit *ctx) {
     }
     
     // Parse source address if available
-    if (args->src_addr) {
+    if (args->src_addr_addr) {
         __u16 family;
-        if (bpf_probe_read_user(&family, sizeof(family), &args->src_addr->sa_family) == 0) {
+        if (bpf_probe_read_user(&family, sizeof(family), (void *)args->src_addr_addr) == 0) {
             event->ip_version = (family == AF_INET) ? 4 : 6;
             event->protocol = IPPROTO_UDP;
         }

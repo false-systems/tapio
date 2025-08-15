@@ -66,16 +66,16 @@ func (sm *ServiceMap) RecordConnection(netInfo NetworkInfo, srcPod, dstPod strin
 
 	// Create connection key
 	key := fmt.Sprintf("%s:%d->%s:%d",
-		intToIP(netInfo.SAddr), netInfo.SPort,
-		intToIP(netInfo.DAddr), netInfo.DPort)
+		intToIP(netInfo.SAddrV4), netInfo.SPort,
+		intToIP(netInfo.DAddrV4), netInfo.DPort)
 
 	// Get or create connection
 	conn, exists := sm.connections[key]
 	if !exists {
 		conn = &ServiceConnection{
-			SrcIP:    intToIP(netInfo.SAddr),
+			SrcIP:    intToIP(netInfo.SAddrV4),
 			SrcPort:  netInfo.SPort,
-			DstIP:    intToIP(netInfo.DAddr),
+			DstIP:    intToIP(netInfo.DAddrV4),
 			DstPort:  netInfo.DPort,
 			Protocol: protocolToString(netInfo.Protocol),
 		}

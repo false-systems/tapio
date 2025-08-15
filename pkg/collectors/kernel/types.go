@@ -4,14 +4,16 @@ import "time"
 
 // NetworkInfo represents network connection information
 type NetworkInfo struct {
-	SAddr     uint32 // Source IP (IPv4)
-	DAddr     uint32 // Destination IP (IPv4)
-	SPort     uint16 // Source port
-	DPort     uint16 // Destination port
-	Protocol  uint8  // IPPROTO_TCP or IPPROTO_UDP
-	State     uint8  // Connection state
-	Direction uint8  // 0=outgoing, 1=incoming
-	_         uint8  // Padding
+	IPVersion uint8     // 4 for IPv4, 6 for IPv6
+	Protocol  uint8     // IPPROTO_TCP or IPPROTO_UDP
+	State     uint8     // Connection state
+	Direction uint8     // 0=outgoing, 1=incoming
+	SPort     uint16    // Source port
+	DPort     uint16    // Destination port
+	SAddrV4   uint32    // Source IP (IPv4)
+	DAddrV4   uint32    // Destination IP (IPv4)
+	SAddrV6   [4]uint32 // Source IP (IPv6)
+	DAddrV6   [4]uint32 // Destination IP (IPv6)
 }
 
 // KernelEvent represents a kernel event from eBPF

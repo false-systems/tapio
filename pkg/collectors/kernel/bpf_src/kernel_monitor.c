@@ -29,14 +29,16 @@
 
 // Network connection information
 struct network_info {
-    __u32 saddr;    // Source IP (IPv4)
-    __u32 daddr;    // Destination IP (IPv4)
-    __u16 sport;    // Source port
-    __u16 dport;    // Destination port
-    __u8 protocol;  // IPPROTO_TCP or IPPROTO_UDP
-    __u8 state;     // Connection state
-    __u8 direction; // 0=outgoing, 1=incoming
-    __u8 _pad;      // Padding
+    __u8 ip_version;  // 4 for IPv4, 6 for IPv6
+    __u8 protocol;    // IPPROTO_TCP or IPPROTO_UDP
+    __u8 state;       // Connection state
+    __u8 direction;   // 0=outgoing, 1=incoming
+    __u16 sport;      // Source port
+    __u16 dport;      // Destination port
+    __u32 saddr_v4;   // Source IP (IPv4)
+    __u32 daddr_v4;   // Destination IP (IPv4)
+    __u32 saddr_v6[4]; // Source IP (IPv6)
+    __u32 daddr_v6[4]; // Destination IP (IPv6)
 } __attribute__((packed));
 
 // File operation information
@@ -426,11 +428,15 @@ int trace_tcp_connect(struct pt_regs *ctx)
         BPF_CORE_READ_INTO(&event->net_info.daddr_v4, sk, __sk_common.skc_daddr);
     } else if (family == AF_INET6) {
         event->net_info.ip_version = 6;
-        // Read IPv6 addresses
+        // Read IPv6 port information (addresses require full vmlinux)
         BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
         BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
-        BPF_CORE_READ_INTO(&event->net_info.saddr_v6, sk, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
-        BPF_CORE_READ_INTO(&event->net_info.daddr_v6, sk, __sk_common.skc_v6_daddr.in6_u.u6_addr32);
+        
+        // IPv6 addresses are not available in minimal vmlinux.h
+        // In production, use full BTF-enabled vmlinux.h for IPv6 support
+        // For now, zero out IPv6 addresses
+        __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
+        __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
     }
     
     // Convert network byte order to host byte order for port

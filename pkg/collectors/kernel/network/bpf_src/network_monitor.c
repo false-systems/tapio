@@ -3,6 +3,9 @@
 
 #include "../../../bpf_common/vmlinux_minimal.h"
 #include "../../../bpf_common/helpers.h"
+#include "../../../bpf_common/bpf_stats.h"
+#include "../../../bpf_common/bpf_filters.h"
+#include "../../../bpf_common/bpf_batch.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -115,11 +118,64 @@ struct {
     __type(value, struct network_info); // Connection info
 } connection_tracker SEC(".maps");
 
+// Statistics tracking maps
+DEFINE_BPF_STATS_MAP(network_stats, 4); // 4 probes: connect, accept, close, dns
+DEFINE_GLOBAL_STATS_MAP(network_global_stats);
+
+// Dynamic filtering maps
+DEFINE_PID_FILTER_MAP(network_pid_filter);
+DEFINE_NS_FILTER_MAP(network_ns_filter);
+DEFINE_NET_FILTER_MAP(network_net_filter);
+DEFINE_FILTER_CONFIG_MAP(network_filter_config);
+
+// Batch processing map
+DEFINE_BATCH_MAP(network_batch_buffer);
+
+// Sampling configuration
+struct sampling_config {
+    __u32 sample_rate;     // Sampling rate (0-100%)
+    __u32 sample_interval; // Sample every N events
+    __u64 event_counter;   // Event counter for interval sampling
+    __u8 enabled;          // Sampling enabled flag
+    __u8 pad[3];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct sampling_config);
+} sampling_config_map SEC(".maps");
+
 // Helper functions
 static __always_inline bool is_container_process(__u32 pid)
 {
     __u8 *flag = bpf_map_lookup_elem(&container_pids, &pid);
     return flag != 0;
+}
+
+// eBPF-based sampling using random number generation
+static __always_inline bool should_sample_event_ebpf(void)
+{
+    __u32 key = 0;
+    struct sampling_config *config = bpf_map_lookup_elem(&sampling_config_map, &key);
+    
+    if (!config || !config->enabled)
+        return true; // Sample all if not configured
+    
+    // Probabilistic sampling using BPF random
+    if (config->sample_rate > 0 && config->sample_rate < 100) {
+        __u32 random = bpf_get_prandom_u32();
+        return (random % 100) < config->sample_rate;
+    }
+    
+    // Interval-based sampling
+    if (config->sample_interval > 1) {
+        __u64 current = __sync_fetch_and_add(&config->event_counter, 1);
+        return (current % config->sample_interval) == 0;
+    }
+    
+    return config->sample_rate >= 100; // Always sample if rate is 100%
 }
 
 static __always_inline __u64 get_cgroup_id(struct task_struct *task)
@@ -186,21 +242,52 @@ static __always_inline __u64 make_connection_key(struct network_info *net)
 SEC("kprobe/tcp_v4_connect")
 int trace_network_tcp_connect(struct pt_regs *ctx)
 {
+    // Record probe hit in statistics
+    BPF_STATS_ENTER(&network_stats, 0);
+    
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
     
-    if (!is_container_process(pid))
+    // Get filter configuration
+    struct filter_config *filter_cfg = BPF_FILTER_INIT(&network_filter_config);
+    
+    // Apply dynamic filtering
+    __u64 ns_id = bpf_get_current_ns_id();
+    
+    if (filter_cfg) {
+        // Check PID and namespace filters
+        if (!bpf_filter_check_pid(&network_pid_filter, filter_cfg, pid)) {
+            BPF_STATS_EXIT_ERROR(&network_stats, 0, STATS_EVENT_FILTERED);
+            return 0;
+        }
+        if (!bpf_filter_check_namespace(&network_ns_filter, filter_cfg, ns_id)) {
+            BPF_STATS_EXIT_ERROR(&network_stats, 0, STATS_EVENT_FILTERED);
+            return 0;
+        }
+    } else {
+        // Fall back to container process check
+        if (!is_container_process(pid)) {
+            BPF_STATS_EXIT_ERROR(&network_stats, 0, STATS_EVENT_FILTERED);
+            return 0;
+        }
+    }
+    
+    // Apply eBPF-based sampling
+    if (!should_sample_event_ebpf()) {
+        BPF_STATS_EXIT_ERROR(&network_stats, 0, STATS_EVENT_SAMPLED);
         return 0;
+    }
     
     // Get sock struct from first argument using CO-RE helper
     struct sock *sk = read_sock_from_kprobe(ctx);
     
-    if (!sk)
+    if (!sk) {
+        BPF_STATS_EXIT_ERROR(&network_stats, 0, STATS_EVENT_ERROR);
         return 0;
+    }
     
-    struct network_event *event = bpf_ringbuf_reserve(&network_events, sizeof(*event), 0);
-    if (!event)
-        return 0;
+    // Create event
+    struct network_event event = {};
     
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     __u64 cgroup_id = get_cgroup_id(task);

@@ -198,8 +198,9 @@ func TestEventSerialization(t *testing.T) {
 		DataLen:   64,
 		CgroupID:  9999,
 		NetInfo: NetworkInfo{
-			SAddr:     0x7f000001, // 127.0.0.1
-			DAddr:     0x08080808, // 8.8.8.8
+			IPVersion: 4,
+			SAddrV4:   0x7f000001, // 127.0.0.1
+			DAddrV4:   0x08080808, // 8.8.8.8
 			SPort:     12345,
 			DPort:     443,
 			Protocol:  6, // TCP
