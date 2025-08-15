@@ -36,8 +36,8 @@ func (m *PatternMatcher) UpdatePatterns(patterns []domain.BehaviorPattern) {
 	m.regexCache = make(map[string]*regexp.Regexp)
 }
 
-// Match matches an event against all patterns
-func (m *PatternMatcher) Match(ctx context.Context, event *domain.UnifiedEvent) ([]BehaviorPatternMatch, error) {
+// Match matches an observation event against all patterns
+func (m *PatternMatcher) Match(ctx context.Context, event *domain.ObservationEvent) ([]BehaviorPatternMatch, error) {
 	if event == nil {
 		return nil, fmt.Errorf("event cannot be nil")
 	}
@@ -66,8 +66,8 @@ func (m *PatternMatcher) Match(ctx context.Context, event *domain.UnifiedEvent) 
 	return matches, nil
 }
 
-// matchPattern matches a single pattern against an event
-func (m *PatternMatcher) matchPattern(ctx context.Context, event *domain.UnifiedEvent, pattern domain.BehaviorPattern) (*BehaviorPatternMatch, error) {
+// matchPattern matches a single pattern against an observation event
+func (m *PatternMatcher) matchPattern(ctx context.Context, event *domain.ObservationEvent, pattern domain.BehaviorPattern) (*BehaviorPatternMatch, error) {
 	conditionMatches := make([]BehaviorConditionMatch, 0, len(pattern.Conditions))
 	allRequired := true
 	anyMatched := false
@@ -111,7 +111,7 @@ func (m *PatternMatcher) matchPattern(ctx context.Context, event *domain.Unified
 		MatchedAt:   time.Now(),
 		Conditions:  conditionMatches,
 		Context: map[string]interface{}{
-			"event_type": string(event.Type),
+			"event_type": event.Type,
 			"source":     event.Source,
 		},
 	}
@@ -125,10 +125,10 @@ func (m *PatternMatcher) matchPattern(ctx context.Context, event *domain.Unified
 	return match, nil
 }
 
-// evaluateCondition evaluates a single condition against an event
-func (m *PatternMatcher) evaluateCondition(event *domain.UnifiedEvent, condition domain.Condition) (bool, interface{}) {
+// evaluateCondition evaluates a single condition against an observation event
+func (m *PatternMatcher) evaluateCondition(event *domain.ObservationEvent, condition domain.Condition) (bool, interface{}) {
 	// Check event type first
-	if condition.EventType != "" && condition.EventType != string(event.Type) {
+	if condition.EventType != "" && condition.EventType != event.Type {
 		return false, nil
 	}
 
@@ -163,56 +163,80 @@ func (m *PatternMatcher) evaluateCondition(event *domain.UnifiedEvent, condition
 	}
 }
 
-// getFieldValue extracts a field value from an event
-func (m *PatternMatcher) getFieldValue(event *domain.UnifiedEvent, field string) interface{} {
-	// Parse field path (e.g., "semantic.intent", "k8s_context.namespace")
+// getFieldValue extracts a field value from an observation event
+func (m *PatternMatcher) getFieldValue(event *domain.ObservationEvent, field string) interface{} {
+	// Parse field path (e.g., "action", "data.hostname")
 	parts := strings.Split(field, ".")
 
 	switch parts[0] {
 	case "type":
-		return string(event.Type)
+		return event.Type
 	case "source":
 		return event.Source
-	case "severity":
-		return event.Severity
-	case "message":
-		return event.Message
-	case "semantic":
-		if event.Semantic != nil && len(parts) > 1 {
-			switch parts[1] {
-			case "intent":
-				return event.Semantic.Intent
-			case "category":
-				return event.Semantic.Category
-			case "confidence":
-				return event.Semantic.Confidence
-			}
+	case "pid":
+		if event.PID != nil {
+			return *event.PID
 		}
-	case "k8s_context":
-		if event.K8sContext != nil && len(parts) > 1 {
-			switch parts[1] {
-			case "kind":
-				return event.K8sContext.Kind
-			case "name":
-				return event.K8sContext.Name
-			case "namespace":
-				return event.K8sContext.Namespace
-			}
+	case "container_id":
+		if event.ContainerID != nil {
+			return *event.ContainerID
 		}
-	case "kernel":
-		if event.Kernel != nil && len(parts) > 1 {
-			switch parts[1] {
-			case "syscall":
-				return event.Kernel.Syscall
-			case "pid":
-				return event.Kernel.PID
-			case "comm":
-				return event.Kernel.Comm
-			}
+	case "pod_name":
+		if event.PodName != nil {
+			return *event.PodName
 		}
-	case "attributes":
-		if event.Attributes != nil && len(parts) > 1 {
-			return event.Attributes[parts[1]]
+	case "namespace":
+		if event.Namespace != nil {
+			return *event.Namespace
+		}
+	case "service_name":
+		if event.ServiceName != nil {
+			return *event.ServiceName
+		}
+	case "node_name":
+		if event.NodeName != nil {
+			return *event.NodeName
+		}
+	case "action":
+		if event.Action != nil {
+			return *event.Action
+		}
+	case "target":
+		if event.Target != nil {
+			return *event.Target
+		}
+	case "result":
+		if event.Result != nil {
+			return *event.Result
+		}
+	case "reason":
+		if event.Reason != nil {
+			return *event.Reason
+		}
+	case "duration":
+		if event.Duration != nil {
+			return *event.Duration
+		}
+	case "size":
+		if event.Size != nil {
+			return *event.Size
+		}
+	case "count":
+		if event.Count != nil {
+			return *event.Count
+		}
+	case "data":
+		if len(parts) > 1 {
+			return event.Data[parts[1]]
+		}
+		return event.Data
+	case "caused_by":
+		if event.CausedBy != nil {
+			return *event.CausedBy
+		}
+	case "parent_id":
+		if event.ParentID != nil {
+			return *event.ParentID
 		}
 	}
 

@@ -203,8 +203,8 @@ func (e *Engine) ReloadPatterns() error {
 	return nil
 }
 
-// Process processes an event through the behavior engine
-func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) (*domain.PredictionResult, error) {
+// Process processes an observation event through the behavior engine
+func (e *Engine) Process(ctx context.Context, event *domain.ObservationEvent) (*domain.PredictionResult, error) {
 	// Validate input
 	if event == nil {
 		return nil, fmt.Errorf("event cannot be nil")
@@ -242,7 +242,8 @@ func (e *Engine) Process(ctx context.Context, event *domain.UnifiedEvent) (*doma
 		// Set span attributes
 		span.SetAttributes(
 			attribute.String("event.id", event.ID),
-			attribute.String("event.type", string(event.Type)),
+			attribute.String("event.type", event.Type),
+			attribute.String("event.source", event.Source),
 		)
 
 		// Get result from pool

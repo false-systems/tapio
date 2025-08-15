@@ -3,6 +3,7 @@ package behavior
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -86,7 +87,7 @@ func NewPredictor(logger *zap.Logger) *Predictor {
 }
 
 // GeneratePrediction generates a prediction from a pattern match
-func (p *Predictor) GeneratePrediction(ctx context.Context, match domain.PatternMatch, event *domain.UnifiedEvent) (*domain.Prediction, error) {
+func (p *Predictor) GeneratePrediction(ctx context.Context, match domain.PatternMatch, event *domain.ObservationEvent) (*domain.Prediction, error) {
 	ctx, span := p.tracer.Start(ctx, "predictor.generate")
 	defer span.End()
 
@@ -241,8 +242,8 @@ func (p *Predictor) calculateEvidenceQuality(match domain.PatternMatch) float64 
 	return qualityScore
 }
 
-// buildEvidence builds evidence from the match and event
-func (p *Predictor) buildEvidence(match domain.PatternMatch, event *domain.UnifiedEvent) []domain.Evidence {
+// buildEvidence builds evidence from the match and observation event
+func (p *Predictor) buildEvidence(match domain.PatternMatch, event *domain.ObservationEvent) []domain.Evidence {
 	evidence := make([]domain.Evidence, 0)
 
 	// Add matched conditions as evidence
@@ -262,42 +263,82 @@ func (p *Predictor) buildEvidence(match domain.PatternMatch, event *domain.Unifi
 		}
 	}
 
-	// Add event details as evidence
-	if event.Semantic != nil {
-		evidence = append(evidence, domain.Evidence{
-			Type:        "semantic",
-			Source:      "event",
-			Description: event.Semantic.Narrative,
-			Data: &domain.EvidenceData{
-				Metrics: map[string]float64{
-					"confidence": event.Semantic.Confidence,
-				},
+	// Add observation event details as evidence
+	evidence = append(evidence, domain.Evidence{
+		Type:        "observation",
+		Source:      event.Source,
+		Description: fmt.Sprintf("Observation: %s %s", event.Type, getEventDescription(event)),
+		Data: &domain.EvidenceData{
+			Metrics: map[string]float64{
+				"confidence": 0.9, // High confidence for direct observations
 			},
-			Timestamp: event.Timestamp,
-		})
-	}
+		},
+		Timestamp: event.Timestamp,
+	})
 
 	return evidence
 }
 
-// extractResources extracts affected resources from the event
-func (p *Predictor) extractResources(event *domain.UnifiedEvent) []domain.ResourceRef {
-	resources := make([]domain.ResourceRef, 0)
+// getEventDescription creates a human-readable description of the observation event
+func getEventDescription(event *domain.ObservationEvent) string {
+	parts := []string{}
 
-	if event.K8sContext != nil {
-		resources = append(resources, domain.ResourceRef{
-			Kind:      event.K8sContext.Kind,
-			Name:      event.K8sContext.Name,
-			Namespace: event.K8sContext.Namespace,
-		})
+	if event.Action != nil {
+		parts = append(parts, fmt.Sprintf("action=%s", *event.Action))
+	}
+	if event.Target != nil {
+		parts = append(parts, fmt.Sprintf("target=%s", *event.Target))
+	}
+	if event.Result != nil {
+		parts = append(parts, fmt.Sprintf("result=%s", *event.Result))
+	}
+	if event.PodName != nil {
+		parts = append(parts, fmt.Sprintf("pod=%s", *event.PodName))
+	}
+	if event.ServiceName != nil {
+		parts = append(parts, fmt.Sprintf("service=%s", *event.ServiceName))
 	}
 
-	// Extract from entity context if available
-	if event.Entity != nil {
+	if len(parts) == 0 {
+		return "event occurred"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// extractResources extracts affected resources from the observation event
+func (p *Predictor) extractResources(event *domain.ObservationEvent) []domain.ResourceRef {
+	resources := make([]domain.ResourceRef, 0)
+
+	// Extract Pod resource if present
+	if event.PodName != nil {
+		resource := domain.ResourceRef{
+			Kind: "Pod",
+			Name: *event.PodName,
+		}
+		if event.Namespace != nil {
+			resource.Namespace = *event.Namespace
+		}
+		resources = append(resources, resource)
+	}
+
+	// Extract Service resource if present
+	if event.ServiceName != nil {
+		resource := domain.ResourceRef{
+			Kind: "Service",
+			Name: *event.ServiceName,
+		}
+		if event.Namespace != nil {
+			resource.Namespace = *event.Namespace
+		}
+		resources = append(resources, resource)
+	}
+
+	// Extract Node resource if present
+	if event.NodeName != nil {
 		resources = append(resources, domain.ResourceRef{
-			Kind:      event.Entity.Type,
-			Name:      event.Entity.Name,
-			Namespace: event.Entity.Namespace,
+			Kind: "Node",
+			Name: *event.NodeName,
+			// Nodes don't have namespaces
 		})
 	}
 
