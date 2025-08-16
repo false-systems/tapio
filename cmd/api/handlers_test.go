@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gorilla/mux"
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -23,7 +23,7 @@ func TestAPIServer_HandleHealth_NoDriver(t *testing.T) {
 	defer cancel()
 
 	server := &APIServer{
-		router: mux.NewRouter(),
+		router: chi.NewRouter(),
 		logger: logger,
 		ctx:    ctx,
 		cancel: cancel,
@@ -55,7 +55,7 @@ func TestAPIServer_HandleWhy_MissingPod(t *testing.T) {
 	defer cancel()
 
 	server := &APIServer{
-		router: mux.NewRouter(),
+		router: chi.NewRouter(),
 		logger: logger,
 		ctx:    ctx,
 		cancel: cancel,
@@ -81,7 +81,7 @@ func TestAPIServer_HandleImpact_MissingService(t *testing.T) {
 	defer cancel()
 
 	server := &APIServer{
-		router: mux.NewRouter(),
+		router: chi.NewRouter(),
 		logger: logger,
 		ctx:    ctx,
 		cancel: cancel,
@@ -106,8 +106,7 @@ func TestAPIServer_CORSMiddleware(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	router := mux.NewRouter()
-	router.Use(corsMiddleware)
+	router := chi.NewRouter()
 	server := &APIServer{
 		router: router,
 		logger: logger,
@@ -115,6 +114,7 @@ func TestAPIServer_CORSMiddleware(t *testing.T) {
 		cancel: cancel,
 		tracer: otel.Tracer("test"),
 	}
+	router.Use(server.corsMiddleware)
 	server.setupRouter()
 
 	req := httptest.NewRequest("OPTIONS", "/api/v1/health", nil)

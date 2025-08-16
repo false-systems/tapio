@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gorilla/mux"
+	"github.com/go-chi/chi/v5"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence/behavior"
 	neo4jint "github.com/yairfalse/tapio/pkg/integrations/neo4j"
+	"github.com/yairfalse/tapio/pkg/intelligence/behavior"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -39,17 +39,17 @@ type APIServer struct {
 	behaviorEngine *behavior.Engine
 
 	// HTTP components
-	router *mux.Router
+	router *chi.Mux
 	server *http.Server
 
 	// OTEL instrumentation - REQUIRED fields per CLAUDE.md
-	tracer               trace.Tracer
-	requestsTotal        metric.Int64Counter
-	requestDuration      metric.Float64Histogram
-	queriesTotal         metric.Int64Counter
-	queriesErrors        metric.Int64Counter
-	correlationsTotal    metric.Int64Counter
-	activeConnections    metric.Int64UpDownCounter
+	tracer            trace.Tracer
+	requestsTotal     metric.Int64Counter
+	requestDuration   metric.Float64Histogram
+	queriesTotal      metric.Int64Counter
+	queriesErrors     metric.Int64Counter
+	correlationsTotal metric.Int64Counter
+	activeConnections metric.Int64UpDownCounter
 
 	// Lifecycle
 	ctx    context.Context
@@ -81,16 +81,16 @@ type TimeRange struct {
 // ObservationQueryResponse contains query results
 type ObservationQueryResponse struct {
 	Observations []*domain.ObservationEvent `json:"observations"`
-	Total        int                         `json:"total"`
-	Query        *ObservationQueryRequest    `json:"query"`
-	Duration     string                      `json:"duration"`
+	Total        int                        `json:"total"`
+	Query        *ObservationQueryRequest   `json:"query"`
+	Duration     string                     `json:"duration"`
 }
 
 // CorrelationRequest requests behavior analysis
 type CorrelationRequest struct {
-	ObservationID string                    `json:"observation_id,omitempty"`
-	Observation   *domain.ObservationEvent  `json:"observation,omitempty"`
-	TimeWindow    string                    `json:"time_window,omitempty"`
+	ObservationID string                   `json:"observation_id,omitempty"`
+	Observation   *domain.ObservationEvent `json:"observation,omitempty"`
+	TimeWindow    string                   `json:"time_window,omitempty"`
 }
 
 // CorrelationResponse contains correlation analysis results
@@ -287,33 +287,50 @@ func (s *APIServer) initBehaviorEngine() error {
 
 // setupRouter configures HTTP router and middleware
 func (s *APIServer) setupRouter() {
-	s.router = mux.NewRouter()
+	s.router = chi.NewRouter()
 
 	// Apply middleware with OTEL integration
 	s.router.Use(s.loggingMiddleware)
 	s.router.Use(s.metricsMiddleware)
-	s.router.Use(corsMiddleware)
+	s.router.Use(s.corsMiddleware)
 
 	// API v1 routes - ObservationEvent focused
-	api := s.router.PathPrefix("/api/v1").Subrouter()
+	s.router.Route("/api/v1", func(api chi.Router) {
+		// Observation query endpoints
+		api.Post("/observations/query", s.handleObservationQuery)
+		api.Options("/observations/query", s.handleOptions)
+		api.Get("/observations/{id}", s.handleObservationGet)
+		api.Options("/observations/{id}", s.handleOptions)
+		api.Get("/observations", s.handleObservationsList)
+		api.Options("/observations", s.handleOptions)
 
-	// Observation query endpoints
-	api.HandleFunc("/observations/query", s.handleObservationQuery).Methods("POST", "OPTIONS")
-	api.HandleFunc("/observations/{id}", s.handleObservationGet).Methods("GET", "OPTIONS")
-	api.HandleFunc("/observations", s.handleObservationsList).Methods("GET", "OPTIONS")
+		// Correlation and behavior analysis endpoints
+		api.Post("/correlations/analyze", s.handleCorrelationAnalyze)
+		api.Options("/correlations/analyze", s.handleOptions)
+		api.Get("/correlations/patterns", s.handlePatternsList)
+		api.Options("/correlations/patterns", s.handleOptions)
 
-	// Correlation and behavior analysis endpoints
-	api.HandleFunc("/correlations/analyze", s.handleCorrelationAnalyze).Methods("POST", "OPTIONS")
-	api.HandleFunc("/correlations/patterns", s.handlePatternsList).Methods("GET", "OPTIONS")
+		// Legacy endpoints for backward compatibility
+		api.Get("/why", s.handleWhy)
+		api.Options("/why", s.handleOptions)
+		api.Get("/impact", s.handleImpact)
+		api.Options("/impact", s.handleOptions)
 
-	// Legacy endpoints for backward compatibility
-	api.HandleFunc("/why", s.handleWhy).Methods("GET", "OPTIONS")
-	api.HandleFunc("/impact", s.handleImpact).Methods("GET", "OPTIONS")
+		// System endpoints
+		api.Get("/health", s.handleHealth)
+		api.Options("/health", s.handleOptions)
+		api.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			promhttp.Handler().ServeHTTP(w, r)
+		})
+		api.Get("/version", s.handleVersion)
+		api.Options("/version", s.handleOptions)
+	})
+}
 
-	// System endpoints
-	api.HandleFunc("/health", s.handleHealth).Methods("GET", "OPTIONS")
-	api.HandleFunc("/metrics", promhttp.Handler().ServeHTTP).Methods("GET")
-	api.HandleFunc("/version", s.handleVersion).Methods("GET", "OPTIONS")
+// handleOptions handles CORS preflight requests
+func (s *APIServer) handleOptions(w http.ResponseWriter, r *http.Request) {
+	// CORS headers are already set by corsMiddleware
+	w.WriteHeader(http.StatusOK)
 }
 
 // handleObservationQuery handles complex observation queries
@@ -393,8 +410,7 @@ func (s *APIServer) handleObservationGet(w http.ResponseWriter, r *http.Request)
 	ctx, span := s.tracer.Start(r.Context(), "api.handle_observation_get")
 	defer span.End()
 
-	vars := mux.Vars(r)
-	id := vars["id"]
+	id := chi.URLParam(r, "id")
 
 	if id == "" {
 		span.SetStatus(codes.Error, "Missing observation ID")
@@ -586,12 +602,12 @@ func (s *APIServer) handleCorrelationAnalyze(w http.ResponseWriter, r *http.Requ
 	if result != nil && result.Prediction != nil {
 		// Convert domain.Prediction to domain.BehaviorPrediction for response
 		behaviorPrediction := &domain.BehaviorPrediction{
-			ID:          result.Prediction.ID,
-			PatternID:   result.Prediction.PatternID,
-			PatternName: result.Prediction.PatternName,
-			GeneratedAt: result.Prediction.CreatedAt,
-			Confidence:  result.Prediction.Confidence,
-			TimeHorizon: result.Prediction.TimeHorizon,
+			ID:               result.Prediction.ID,
+			PatternID:        result.Prediction.PatternID,
+			PatternName:      result.Prediction.PatternName,
+			GeneratedAt:      result.Prediction.CreatedAt,
+			Confidence:       result.Prediction.Confidence,
+			TimeHorizon:      result.Prediction.TimeHorizon,
 			PotentialImpacts: []string{result.Prediction.Impact},
 			RecommendedActions: func() []string {
 				if result.Prediction.Remediation != nil {
@@ -654,7 +670,7 @@ func (s *APIServer) handlePatternsList(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"version":    "1.0.0",
+		"version":     "1.0.0",
 		"api_version": "v1",
 		"timestamp":   time.Now(),
 	})
@@ -805,7 +821,7 @@ func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Create span for the request
 		ctx, span := s.tracer.Start(r.Context(), "http.request")
 		span.SetAttributes(
@@ -863,7 +879,7 @@ func (s *APIServer) metricsMiddleware(next http.Handler) http.Handler {
 }
 
 // corsMiddleware handles CORS headers
-func corsMiddleware(next http.Handler) http.Handler {
+func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -1234,7 +1250,7 @@ func (s *APIServer) queryWhyPodFailedModern(ctx context.Context, pod, namespace 
 		if obs.Reason != nil {
 			details += ": " + *obs.Reason
 		}
-		
+
 		timeline = append(timeline, TimelineEvent{
 			Timestamp: obs.Timestamp,
 			Event:     obs.Type,
@@ -1319,7 +1335,7 @@ func (s *APIServer) queryServiceImpactModern(ctx context.Context, service, names
 		if obs.PodName != nil {
 			affectedPods[*obs.PodName] = true
 		}
-		
+
 		// Determine severity based on observation types
 		switch obs.Type {
 		case "service_unavailable", "pod_failed":
