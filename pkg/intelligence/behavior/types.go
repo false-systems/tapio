@@ -1,9 +1,11 @@
 package behavior
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // BehaviorPatternMatch represents a successful pattern match in the behavior engine
@@ -15,75 +17,83 @@ type BehaviorPatternMatch struct {
 	Confidence    float64                    `json:"confidence"`
 	MatchedAt     time.Time                  `json:"matched_at"`
 	Conditions    []BehaviorConditionMatch   `json:"conditions"`
-	Context       map[string]interface{}     `json:"context"`
+	Context       *intelligence.EventContext `json:"context"`
 	MatchedEvents []*domain.ObservationEvent `json:"-"` // Events that contributed to match
 }
 
 // BehaviorConditionMatch represents a matched condition in the behavior engine
 // This is specific to behavior matching and doesn't conflict with domain.ConditionMatch
 type BehaviorConditionMatch struct {
-	Condition   domain.Condition `json:"condition"`
-	Matched     bool             `json:"matched"`
-	ActualValue interface{}      `json:"actual_value"`
-	Message     string           `json:"message"`
+	Condition   domain.Condition             `json:"condition"`
+	Matched     bool                         `json:"matched"`
+	ActualValue *intelligence.ConditionValue `json:"actual_value"`
+	Message     string                       `json:"message"`
 }
 
 // extractContext extracts context from an observation event for pattern matching
-func extractContext(event *domain.ObservationEvent) map[string]interface{} {
-	context := make(map[string]interface{})
-
+func extractContext(event *domain.ObservationEvent) *intelligence.EventContext {
 	if event == nil {
-		return context
+		return intelligence.NewEventContextFromEvent("", "", "")
 	}
 
-	context["source"] = event.Source
-	context["type"] = event.Type
+	context := intelligence.NewEventContextFromEvent(event.Type, event.Source, event.ID)
 
 	// Add correlation keys if present
 	if event.PID != nil {
-		context["pid"] = *event.PID
+		context.SetPID(uint32(*event.PID))
 	}
 	if event.ContainerID != nil {
-		context["container_id"] = *event.ContainerID
+		context.SetContainerID(*event.ContainerID)
 	}
 	if event.PodName != nil {
-		context["pod_name"] = *event.PodName
+		context.SetPodName(*event.PodName)
 	}
 	if event.Namespace != nil {
-		context["namespace"] = *event.Namespace
+		context.SetNamespace(*event.Namespace)
 	}
 	if event.ServiceName != nil {
-		context["service_name"] = *event.ServiceName
+		context.SetServiceName(*event.ServiceName)
 	}
 	if event.NodeName != nil {
-		context["node_name"] = *event.NodeName
+		context.SetNodeName(*event.NodeName)
 	}
 
 	// Add event data
 	if event.Action != nil {
-		context["action"] = *event.Action
+		context.SetAction(*event.Action)
 	}
 	if event.Target != nil {
-		context["target"] = *event.Target
+		context.SetTarget(*event.Target)
 	}
 	if event.Result != nil {
-		context["result"] = *event.Result
+		context.SetResult(*event.Result)
+	}
+	if event.Reason != nil {
+		context.SetReason(*event.Reason)
 	}
 
 	// Add metrics if present
 	if event.Duration != nil {
-		context["duration_ms"] = *event.Duration
+		context.SetDuration(uint64(*event.Duration))
 	}
 	if event.Size != nil {
-		context["size_bytes"] = *event.Size
+		context.SetSize(uint64(*event.Size))
 	}
 	if event.Count != nil {
-		context["count"] = *event.Count
+		context.SetCount(uint64(*event.Count))
 	}
 
-	// Add custom data
+	// Add correlation context
+	if event.CausedBy != nil {
+		context.SetCausedBy(*event.CausedBy)
+	}
+	if event.ParentID != nil {
+		context.SetParentID(*event.ParentID)
+	}
+
+	// Add custom data as string values
 	for k, v := range event.Data {
-		context["data."+k] = v
+		context.AddCustomData(k, fmt.Sprintf("%v", v))
 	}
 
 	return context

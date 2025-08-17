@@ -1,6 +1,8 @@
 package domain
 
-import "time"
+import (
+	"time"
+)
 
 // BehaviorPrediction represents a prediction about future system behavior
 // Generated when a behavior pattern is matched
@@ -24,7 +26,7 @@ type BehaviorPrediction struct {
 
 // PredictionResult represents the result of behavior processing
 type PredictionResult struct {
-	Prediction    *Prediction            `json:"prediction,omitempty"`
-	Context       map[string]interface{} `json:"context,omitempty"`
-	RelatedEvents []string               `json:"related_events,omitempty"`
+	Prediction    *Prediction       `json:"prediction,omitempty"`
+	Context       PredictionContext `json:"context,omitempty"`
+	RelatedEvents []string          `json:"related_events,omitempty"`
 }

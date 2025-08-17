@@ -441,6 +441,6 @@ func TestGetStats(t *testing.T) {
 
 	stats := processor.GetStats()
 	assert.NotNil(t, stats)
-	assert.Equal(t, 0, stats["channel_size"])
-	assert.Equal(t, 1000, stats["channel_cap"])
+	assert.Equal(t, 0, stats.ChannelSize)
+	assert.Equal(t, 1000, stats.ChannelCapacity)
 }
