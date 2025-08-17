@@ -53,8 +53,8 @@ func TestObservationEventIntegration(t *testing.T) {
 
 		// Additional data
 		Data: map[string]string{
-			"syscall": "connect",
-			"family":  "AF_INET",
+			"syscall":  "connect",
+			"family":   "AF_INET",
 			"protocol": "tcp",
 		},
 	}
@@ -72,38 +72,38 @@ func TestObservationEventIntegration(t *testing.T) {
 	assert.Equal(t, "test-service", correlationKeys["service_name"])
 	assert.Equal(t, "worker-node-1", correlationKeys["node_name"])
 
-	// Test context extraction 
+	// Test context extraction
 	context := extractContext(observationEvent)
-	assert.NotEmpty(t, context, "Should extract context from observation event")
-	assert.Equal(t, "kernel", context["source"])
-	assert.Equal(t, "syscall", context["type"])
-	assert.Equal(t, pid, context["pid"])
-	assert.Equal(t, podName, context["pod_name"])
-	assert.Equal(t, namespace, context["namespace"])
-	assert.Equal(t, serviceName, context["service_name"])
-	assert.Equal(t, nodeName, context["node_name"])
-	assert.Equal(t, action, context["action"])
-	assert.Equal(t, target, context["target"])
-	assert.Equal(t, result, context["result"])
-	assert.Equal(t, duration, context["duration_ms"])
+	assert.NotNil(t, context, "Should extract context from observation event")
+	assert.Equal(t, "kernel", context.GetSource())
+	assert.Equal(t, "syscall", context.GetEventType())
+	assert.Equal(t, uint32(pid), *context.PID)
+	assert.Equal(t, podName, *context.PodName)
+	assert.Equal(t, namespace, *context.Namespace)
+	assert.Equal(t, serviceName, *context.ServiceName)
+	assert.Equal(t, nodeName, *context.NodeName)
+	assert.Equal(t, action, *context.Action)
+	assert.Equal(t, target, *context.Target)
+	assert.Equal(t, result, *context.Result)
+	assert.Equal(t, uint64(duration), *context.DurationMS)
 
 	// Test pattern matcher field extraction
 	matcher := NewPatternMatcher(logger)
-	
+
 	// Test various field extractions
-	assert.Equal(t, "syscall", matcher.getFieldValue(observationEvent, "type"))
-	assert.Equal(t, "kernel", matcher.getFieldValue(observationEvent, "source"))
-	assert.Equal(t, pid, matcher.getFieldValue(observationEvent, "pid"))
-	assert.Equal(t, podName, matcher.getFieldValue(observationEvent, "pod_name"))
-	assert.Equal(t, namespace, matcher.getFieldValue(observationEvent, "namespace"))
-	assert.Equal(t, serviceName, matcher.getFieldValue(observationEvent, "service_name"))
-	assert.Equal(t, nodeName, matcher.getFieldValue(observationEvent, "node_name"))
-	assert.Equal(t, action, matcher.getFieldValue(observationEvent, "action"))
-	assert.Equal(t, target, matcher.getFieldValue(observationEvent, "target"))
-	assert.Equal(t, result, matcher.getFieldValue(observationEvent, "result"))
-	assert.Equal(t, duration, matcher.getFieldValue(observationEvent, "duration"))
-	assert.Equal(t, "connect", matcher.getFieldValue(observationEvent, "data.syscall"))
-	assert.Equal(t, "AF_INET", matcher.getFieldValue(observationEvent, "data.family"))
+	assert.Equal(t, "syscall", matcher.getFieldValue(observationEvent, "type").ToInterface())
+	assert.Equal(t, "kernel", matcher.getFieldValue(observationEvent, "source").ToInterface())
+	assert.Equal(t, int64(pid), matcher.getFieldValue(observationEvent, "pid").ToInterface())
+	assert.Equal(t, podName, matcher.getFieldValue(observationEvent, "pod_name").ToInterface())
+	assert.Equal(t, namespace, matcher.getFieldValue(observationEvent, "namespace").ToInterface())
+	assert.Equal(t, serviceName, matcher.getFieldValue(observationEvent, "service_name").ToInterface())
+	assert.Equal(t, nodeName, matcher.getFieldValue(observationEvent, "node_name").ToInterface())
+	assert.Equal(t, action, matcher.getFieldValue(observationEvent, "action").ToInterface())
+	assert.Equal(t, target, matcher.getFieldValue(observationEvent, "target").ToInterface())
+	assert.Equal(t, result, matcher.getFieldValue(observationEvent, "result").ToInterface())
+	assert.Equal(t, uint64(duration), matcher.getFieldValue(observationEvent, "duration").ToInterface())
+	assert.Equal(t, "connect", matcher.getFieldValue(observationEvent, "data.syscall").ToInterface())
+	assert.Equal(t, "AF_INET", matcher.getFieldValue(observationEvent, "data.family").ToInterface())
 
 	// Test processing through engine (without actual patterns)
 	predictionResult, err := engine.Process(ctx, observationEvent)
@@ -115,16 +115,16 @@ func TestObservationEventIntegration(t *testing.T) {
 	// Test health check
 	healthy, details := engine.Health(ctx)
 	assert.True(t, healthy, "Engine should be healthy")
-	assert.NotEmpty(t, details, "Should have health details")
-	assert.Contains(t, details, "patterns_loaded")
-	assert.Contains(t, details, "circuit_breaker")
-	assert.Contains(t, details, "queue_usage")
+	assert.NotNil(t, details, "Should have health details")
+	assert.Equal(t, 0, details.PatternsLoaded, "Should have 0 patterns loaded")
+	assert.Equal(t, "closed", details.CircuitBreaker, "Circuit breaker should be closed")
+	assert.Equal(t, float64(0), details.QueueUsage, "Queue usage should be 0")
 
 	t.Logf("✅ Successfully tested ObservationEvent integration")
 	t.Logf("✅ ObservationEvent ID: %s", observationEvent.ID)
 	t.Logf("✅ Correlation keys: %v", correlationKeys)
-	t.Logf("✅ Context extraction: source=%s, type=%s, pod=%s", 
-		context["source"], context["type"], context["pod_name"])
+	t.Logf("✅ Context extraction: source=%s, type=%s, pod=%s",
+		context.GetSource(), context.GetEventType(), *context.PodName)
 }
 
 // TestObservationEventProcessingPipeline tests the complete processing pipeline
@@ -153,16 +153,16 @@ func TestObservationEventProcessingPipeline(t *testing.T) {
 		},
 		// DNS event
 		{
-			ID:        "obs-dns-001",
-			Timestamp: time.Now(),
-			Source:    "dns",
-			Type:      "dns_query",
-			PodName:   stringPtr("web-app"),
-			Namespace: stringPtr("production"),
+			ID:          "obs-dns-001",
+			Timestamp:   time.Now(),
+			Source:      "dns",
+			Type:        "dns_query",
+			PodName:     stringPtr("web-app"),
+			Namespace:   stringPtr("production"),
 			ServiceName: stringPtr("web-service"),
-			Action:    stringPtr("query"),
-			Target:    stringPtr("malicious.domain.com"),
-			Result:    stringPtr("resolved"),
+			Action:      stringPtr("query"),
+			Target:      stringPtr("malicious.domain.com"),
+			Result:      stringPtr("resolved"),
 		},
 		// Kubernetes event
 		{
@@ -231,9 +231,9 @@ func TestObservationEventFieldMapping(t *testing.T) {
 
 		// Custom data (previously in attributes or custom fields)
 		Data: map[string]string{
-			"command":   "/bin/bash -c 'ls -la'",
+			"command":    "/bin/bash -c 'ls -la'",
 			"parent_pid": "1",
-			"user":      "root",
+			"user":       "root",
 		},
 	}
 
@@ -243,11 +243,11 @@ func TestObservationEventFieldMapping(t *testing.T) {
 	// Verify all the key fields can be extracted
 	tests := []struct {
 		field    string
-		expected interface{}
+		expected any
 	}{
 		{"type", "process_exec"},
 		{"source", "kernel"},
-		{"pid", int32(9999)},
+		{"pid", int64(9999)}, // Note: FieldValue converts int32 to int64
 		{"container_id", "container-abc123"},
 		{"pod_name", "migrated-pod"},
 		{"namespace", "migration-test"},
@@ -263,8 +263,13 @@ func TestObservationEventFieldMapping(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.field, func(t *testing.T) {
-			value := matcher.getFieldValue(observationEvent, test.field)
-			assert.Equal(t, test.expected, value, "Field %s should have expected value", test.field)
+			fieldValue := matcher.getFieldValue(observationEvent, test.field)
+			require.NotNil(t, fieldValue, "Field value should not be nil")
+			assert.False(t, fieldValue.IsNil, "Field should not be nil")
+
+			// Convert to interface for comparison
+			actualValue := fieldValue.ToInterface()
+			assert.Equal(t, test.expected, actualValue, "Field %s should have expected value", test.field)
 		})
 	}
 

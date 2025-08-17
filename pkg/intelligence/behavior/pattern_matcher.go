@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"go.uber.org/zap"
 )
 
@@ -85,8 +86,8 @@ func (m *PatternMatcher) matchPattern(ctx context.Context, event *domain.Observa
 			anyMatched = true
 			conditionMatch.Message = fmt.Sprintf("Condition met: %s %s %v", condition.Match.Field, condition.Match.Type, condition.Match.Value)
 		} else {
-			conditionMatch.Message = fmt.Sprintf("Condition not met: %s %s %v (actual: %v)",
-				condition.Match.Field, condition.Match.Type, condition.Match.Value, actualValue)
+			conditionMatch.Message = fmt.Sprintf("Condition not met: %s %s %v (actual: %s)",
+				condition.Match.Field, condition.Match.Type, condition.Match.Value, actualValue.ToString())
 			if condition.Required {
 				allRequired = false
 			}
@@ -110,10 +111,7 @@ func (m *PatternMatcher) matchPattern(ctx context.Context, event *domain.Observa
 		Confidence:  confidence,
 		MatchedAt:   time.Now(),
 		Conditions:  conditionMatches,
-		Context: map[string]interface{}{
-			"event_type": event.Type,
-			"source":     event.Source,
-		},
+		Context:     extractContext(event),
 	}
 
 	m.logger.Debug("Pattern matched",
@@ -126,214 +124,166 @@ func (m *PatternMatcher) matchPattern(ctx context.Context, event *domain.Observa
 }
 
 // evaluateCondition evaluates a single condition against an observation event
-func (m *PatternMatcher) evaluateCondition(event *domain.ObservationEvent, condition domain.Condition) (bool, interface{}) {
+func (m *PatternMatcher) evaluateCondition(event *domain.ObservationEvent, condition domain.Condition) (bool, *intelligence.ConditionValue) {
 	// Check event type first
 	if condition.EventType != "" && condition.EventType != event.Type {
-		return false, nil
+		return false, intelligence.NewConditionValue(nil)
 	}
 
 	// Get the field value from the event if specified
-	var value interface{}
+	var actualValue *intelligence.ConditionValue
 	if condition.Match.Field != "" {
-		value = m.getFieldValue(event, condition.Match.Field)
-		if value == nil && condition.Match.Type != "exists" {
-			return false, nil
+		fieldValue := m.getFieldValue(event, condition.Match.Field)
+		if fieldValue.IsNil && condition.Match.Type != "exists" {
+			actualValue = intelligence.NewNilConditionValue()
+			return false, actualValue
 		}
+		actualValue = intelligence.NewConditionValue(fieldValue.ToInterface())
+	} else {
+		actualValue = intelligence.NewNilConditionValue()
 	}
 
-	// Evaluate based on match type
+	// Evaluate based on match type using strongly-typed comparison
+	expectedValue := intelligence.NewConditionValue(condition.Match.Value)
+
 	switch condition.Match.Type {
 	case "exact":
-		return m.compareEquals(value, condition.Match.Value), value
+		return m.compareEqualsTyped(actualValue, expectedValue), actualValue
 	case "regex":
-		return m.compareRegex(value, condition.Match.Value), value
+		return m.compareRegexTyped(actualValue, expectedValue), actualValue
 	case "contains":
-		return m.compareContains(value, condition.Match.Value), value
+		return m.compareContainsTyped(actualValue, expectedValue), actualValue
 	case "threshold":
 		// For threshold, we need to handle aggregation
 		if condition.Aggregation != nil {
 			// This would require event history, simplified for now
-			return m.compareThreshold(value, condition.Match.Threshold, condition.Match.Operator), value
+			return m.compareThresholdTyped(actualValue, condition.Match.Threshold, condition.Match.Operator), actualValue
 		}
-		return false, value
+		return false, actualValue
 	case "exists":
-		return value != nil, value
+		return !actualValue.IsNil(), actualValue
 	default:
-		return false, value
+		return false, actualValue
 	}
 }
 
+// FieldValue represents a strongly-typed field value extracted from an event
+type FieldValue struct {
+	StringValue *string
+	IntValue    *int64
+	UintValue   *uint64
+	MapValue    map[string]string
+	IsNil       bool
+}
+
+// ToInterface returns the underlying value as an interface{} for compatibility
+func (fv *FieldValue) ToInterface() any {
+	if fv.IsNil {
+		return nil
+	}
+	if fv.StringValue != nil {
+		return *fv.StringValue
+	}
+	if fv.IntValue != nil {
+		return *fv.IntValue
+	}
+	if fv.UintValue != nil {
+		return *fv.UintValue
+	}
+	if fv.MapValue != nil {
+		return fv.MapValue
+	}
+	return nil
+}
+
 // getFieldValue extracts a field value from an observation event
-func (m *PatternMatcher) getFieldValue(event *domain.ObservationEvent, field string) interface{} {
+func (m *PatternMatcher) getFieldValue(event *domain.ObservationEvent, field string) *FieldValue {
 	// Parse field path (e.g., "action", "data.hostname")
 	parts := strings.Split(field, ".")
 
 	switch parts[0] {
 	case "type":
-		return event.Type
+		return &FieldValue{StringValue: &event.Type}
 	case "source":
-		return event.Source
+		return &FieldValue{StringValue: &event.Source}
 	case "pid":
 		if event.PID != nil {
-			return *event.PID
+			val := int64(*event.PID)
+			return &FieldValue{IntValue: &val}
 		}
 	case "container_id":
 		if event.ContainerID != nil {
-			return *event.ContainerID
+			return &FieldValue{StringValue: event.ContainerID}
 		}
 	case "pod_name":
 		if event.PodName != nil {
-			return *event.PodName
+			return &FieldValue{StringValue: event.PodName}
 		}
 	case "namespace":
 		if event.Namespace != nil {
-			return *event.Namespace
+			return &FieldValue{StringValue: event.Namespace}
 		}
 	case "service_name":
 		if event.ServiceName != nil {
-			return *event.ServiceName
+			return &FieldValue{StringValue: event.ServiceName}
 		}
 	case "node_name":
 		if event.NodeName != nil {
-			return *event.NodeName
+			return &FieldValue{StringValue: event.NodeName}
 		}
 	case "action":
 		if event.Action != nil {
-			return *event.Action
+			return &FieldValue{StringValue: event.Action}
 		}
 	case "target":
 		if event.Target != nil {
-			return *event.Target
+			return &FieldValue{StringValue: event.Target}
 		}
 	case "result":
 		if event.Result != nil {
-			return *event.Result
+			return &FieldValue{StringValue: event.Result}
 		}
 	case "reason":
 		if event.Reason != nil {
-			return *event.Reason
+			return &FieldValue{StringValue: event.Reason}
 		}
 	case "duration":
 		if event.Duration != nil {
-			return *event.Duration
+			val := uint64(*event.Duration)
+			return &FieldValue{UintValue: &val}
 		}
 	case "size":
 		if event.Size != nil {
-			return *event.Size
+			val := uint64(*event.Size)
+			return &FieldValue{UintValue: &val}
 		}
 	case "count":
 		if event.Count != nil {
-			return *event.Count
+			val := uint64(*event.Count)
+			return &FieldValue{UintValue: &val}
 		}
 	case "data":
 		if len(parts) > 1 {
-			return event.Data[parts[1]]
+			if value, exists := event.Data[parts[1]]; exists {
+				return &FieldValue{StringValue: &value}
+			}
+		} else {
+			return &FieldValue{MapValue: event.Data}
 		}
-		return event.Data
 	case "caused_by":
 		if event.CausedBy != nil {
-			return *event.CausedBy
+			return &FieldValue{StringValue: event.CausedBy}
 		}
 	case "parent_id":
 		if event.ParentID != nil {
-			return *event.ParentID
+			return &FieldValue{StringValue: event.ParentID}
 		}
 	}
 
-	return nil
+	return &FieldValue{IsNil: true}
 }
 
-// Comparison functions
-
-func (m *PatternMatcher) compareEquals(value, expected interface{}) bool {
-	return fmt.Sprintf("%v", value) == fmt.Sprintf("%v", expected)
-}
-
-func (m *PatternMatcher) compareGreater(value, expected interface{}) bool {
-	// Try to convert to float64 for comparison
-	valFloat, valOk := toFloat64(value)
-	expFloat, expOk := toFloat64(expected)
-	if valOk && expOk {
-		return valFloat > expFloat
-	}
-	return false
-}
-
-func (m *PatternMatcher) compareLess(value, expected interface{}) bool {
-	valFloat, valOk := toFloat64(value)
-	expFloat, expOk := toFloat64(expected)
-	if valOk && expOk {
-		return valFloat < expFloat
-	}
-	return false
-}
-
-func (m *PatternMatcher) compareContains(value, expected interface{}) bool {
-	valStr := fmt.Sprintf("%v", value)
-	expStr := fmt.Sprintf("%v", expected)
-	return strings.Contains(valStr, expStr)
-}
-
-func (m *PatternMatcher) compareRegex(value, expected interface{}) bool {
-	valStr := fmt.Sprintf("%v", value)
-	expStr := fmt.Sprintf("%v", expected)
-
-	// Check cache
-	regex, ok := m.regexCache[expStr]
-	if !ok {
-		var err error
-		regex, err = regexp.Compile(expStr)
-		if err != nil {
-			m.logger.Warn("Invalid regex pattern", zap.String("pattern", expStr), zap.Error(err))
-			return false
-		}
-		m.regexCache[expStr] = regex
-	}
-
-	return regex.MatchString(valStr)
-}
-
-func (m *PatternMatcher) compareThreshold(value interface{}, threshold float64, operator string) bool {
-	val, ok := toFloat64(value)
-	if !ok {
-		return false
-	}
-
-	switch operator {
-	case ">=":
-		return val >= threshold
-	case ">":
-		return val > threshold
-	case "<=":
-		return val <= threshold
-	case "<":
-		return val < threshold
-	case "==":
-		return val == threshold
-	default:
-		return false
-	}
-}
-
-func (m *PatternMatcher) compareIn(value, expected interface{}) bool {
-	// Expected should be a slice
-	switch exp := expected.(type) {
-	case []interface{}:
-		for _, item := range exp {
-			if m.compareEquals(value, item) {
-				return true
-			}
-		}
-	case []string:
-		valStr := fmt.Sprintf("%v", value)
-		for _, item := range exp {
-			if valStr == item {
-				return true
-			}
-		}
-	}
-	return false
-}
+// Legacy comparison functions removed - use strongly-typed versions below
 
 // calculateConfidence calculates the confidence score for a pattern match
 func (m *PatternMatcher) calculateConfidence(pattern domain.BehaviorPattern, matches []BehaviorConditionMatch) float64 {
@@ -368,29 +318,73 @@ func (m *PatternMatcher) calculateConfidence(pattern domain.BehaviorPattern, mat
 	return confidence
 }
 
-// Helper function to convert interface to float64
-func toFloat64(val interface{}) (float64, bool) {
-	switch v := val.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case uint32:
-		return float64(v), true
-	case uint64:
-		return float64(v), true
-	case string:
+// Helper function to convert FieldValue to float64
+func (fv *FieldValue) ToFloat64() (float64, bool) {
+	if fv.IsNil {
+		return 0, false
+	}
+	if fv.IntValue != nil {
+		return float64(*fv.IntValue), true
+	}
+	if fv.UintValue != nil {
+		return float64(*fv.UintValue), true
+	}
+	if fv.StringValue != nil {
 		// Try to parse string as float
 		var f float64
-		_, err := fmt.Sscanf(v, "%f", &f)
+		_, err := fmt.Sscanf(*fv.StringValue, "%f", &f)
 		return f, err == nil
+	}
+	return 0, false
+}
+
+// Strongly-typed comparison methods
+
+func (m *PatternMatcher) compareEqualsTyped(actual, expected *intelligence.ConditionValue) bool {
+	return actual.Equals(expected)
+}
+
+func (m *PatternMatcher) compareContainsTyped(actual, expected *intelligence.ConditionValue) bool {
+	return actual.Contains(expected)
+}
+
+func (m *PatternMatcher) compareRegexTyped(actual, expected *intelligence.ConditionValue) bool {
+	actualStr := actual.ToString()
+	expectedStr := expected.ToString()
+
+	// Check cache
+	regex, ok := m.regexCache[expectedStr]
+	if !ok {
+		var err error
+		regex, err = regexp.Compile(expectedStr)
+		if err != nil {
+			m.logger.Warn("Invalid regex pattern", zap.String("pattern", expectedStr), zap.Error(err))
+			return false
+		}
+		m.regexCache[expectedStr] = regex
+	}
+
+	return regex.MatchString(actualStr)
+}
+
+func (m *PatternMatcher) compareThresholdTyped(actual *intelligence.ConditionValue, threshold float64, operator string) bool {
+	val, ok := actual.ToFloat64()
+	if !ok {
+		return false
+	}
+
+	switch operator {
+	case ">=":
+		return val >= threshold
+	case ">":
+		return val > threshold
+	case "<=":
+		return val <= threshold
+	case "<":
+		return val < threshold
+	case "==":
+		return val == threshold
 	default:
-		return 0, false
+		return false
 	}
 }

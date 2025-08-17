@@ -8,12 +8,21 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
+
+// PredictionResultInternal is used internally for pooling to avoid domain type modifications
+// This temporary type bridges the gap while we maintain backward compatibility
+type PredictionResultInternal struct {
+	Prediction    *domain.Prediction         `json:"prediction,omitempty"`
+	Context       *intelligence.EventContext `json:"context,omitempty"`
+	RelatedEvents []string                   `json:"related_events,omitempty"`
+}
 
 // Engine is the main behavior correlation engine
 // Level 2 - Can only import from domain (Level 0)
@@ -98,9 +107,9 @@ func NewEngine(logger *zap.Logger) (*Engine, error) {
 
 	// Initialize result pool for GC pressure reduction
 	resultPool := &sync.Pool{
-		New: func() interface{} {
-			return &domain.PredictionResult{
-				Context:       make(map[string]interface{}, 10),
+		New: func() any {
+			return &PredictionResultInternal{
+				Context:       intelligence.NewEventContextFromEvent("", "", ""),
 				RelatedEvents: make([]string, 0, 10),
 			}
 		},
@@ -247,14 +256,13 @@ func (e *Engine) Process(ctx context.Context, event *domain.ObservationEvent) (*
 		)
 
 		// Get result from pool
-		result := e.resultPool.Get().(*domain.PredictionResult)
+		result := e.resultPool.Get().(*PredictionResultInternal)
 		defer func() {
 			// Clear and return to pool
 			result.Prediction = nil
 			result.RelatedEvents = result.RelatedEvents[:0]
-			for k := range result.Context {
-				delete(result.Context, k)
-			}
+			// Reset context to empty state
+			result.Context = intelligence.NewEventContextFromEvent("", "", "")
 			e.resultPool.Put(result)
 		}()
 
@@ -301,10 +309,11 @@ func (e *Engine) Process(ctx context.Context, event *domain.ObservationEvent) (*
 			))
 		}
 
-		// Build result
+		// Build result and convert to domain type
+		eventContext := intelligence.NewEventContextFromEvent(event.Type, event.Source, event.ID)
 		finalResult := &domain.PredictionResult{
 			Prediction:    prediction,
-			Context:       make(map[string]interface{}),
+			Context:       eventContext, // EventContext implements domain.PredictionContext
 			RelatedEvents: []string{event.ID},
 		}
 
@@ -452,15 +461,16 @@ func (e *Engine) UpdatePatternConfidence(patternID string, adjustment float64) e
 }
 
 // Health returns the health status of the engine
-func (e *Engine) Health(ctx context.Context) (bool, map[string]interface{}) {
-	details := map[string]interface{}{
-		"patterns_loaded": len(e.patternLoader.GetAllPatterns()),
-		"circuit_breaker": e.circuitBreaker.State(),
-		"queue_usage":     e.backpressure.Usage(),
+func (e *Engine) Health(ctx context.Context) (bool, *intelligence.HealthDetails) {
+	details := &intelligence.HealthDetails{
+		PatternsLoaded:  len(e.patternLoader.GetAllPatterns()),
+		CircuitBreaker:  e.circuitBreaker.State(),
+		QueueUsage:      e.backpressure.Usage(),
+		ComponentStatus: "behavior-engine",
+		LastHealthCheck: time.Now(),
 	}
 
-	healthy := e.circuitBreaker.State() != "open" &&
-		e.backpressure.Usage() < 0.9 // Less than 90% full
+	healthy := details.IsHealthy()
 
 	return healthy, details
 }

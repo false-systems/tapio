@@ -18,6 +18,26 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
+// ProcessorStats provides strongly-typed processor statistics
+// Replaces typed structs stats
+type ProcessorStats struct {
+	ChannelSize     int     `json:"channel_size"`
+	ChannelCapacity int     `json:"channel_capacity"`
+	ChannelUsage    float64 `json:"channel_usage"`
+	ProcessedTotal  int64   `json:"processed_total,omitempty"`
+	ErrorsTotal     int64   `json:"errors_total,omitempty"`
+	AvgProcessingMS float64 `json:"avg_processing_ms,omitempty"`
+}
+
+// CalculateUsage calculates channel usage percentage
+func (s *ProcessorStats) CalculateUsage() float64 {
+	if s.ChannelCapacity == 0 {
+		return 0.0
+	}
+	s.ChannelUsage = float64(s.ChannelSize) / float64(s.ChannelCapacity)
+	return s.ChannelUsage
+}
+
 // DeploymentProcessor processes Kubernetes deployment events
 type DeploymentProcessor struct {
 	logger *zap.Logger
@@ -263,9 +283,11 @@ func (p *DeploymentProcessor) Start(ctx context.Context, rawEvents <-chan collec
 }
 
 // GetStats returns processor statistics
-func (p *DeploymentProcessor) GetStats() map[string]interface{} {
-	return map[string]interface{}{
-		"channel_size": len(p.deploymentEvents),
-		"channel_cap":  cap(p.deploymentEvents),
+func (p *DeploymentProcessor) GetStats() *ProcessorStats {
+	stats := &ProcessorStats{
+		ChannelSize:     len(p.deploymentEvents),
+		ChannelCapacity: cap(p.deploymentEvents),
 	}
+	stats.CalculateUsage()
+	return stats
 }
