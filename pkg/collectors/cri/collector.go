@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -600,45 +601,59 @@ func (c *Collector) IsHealthy() bool {
 }
 
 // Health returns detailed collector health status
-func (c *Collector) Health() (bool, map[string]interface{}) {
+func (c *Collector) Health() *domain.HealthStatus {
 	if !c.isRunning.Load() {
-		return false, map[string]interface{}{
-			"status": "stopped",
-		}
+		return domain.NewUnhealthyStatus("collector stopped", nil)
 	}
 
 	// Test CRI connection
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	healthy := true
-	status := "healthy"
+	status := domain.NewHealthyStatus("CRI collector healthy")
+	status.Component = c.name
 
 	if _, err := c.client.Version(ctx, &cri.VersionRequest{}); err != nil {
-		healthy = false
-		status = fmt.Sprintf("CRI connection error: %v", err)
+		status = domain.NewUnhealthyStatus(fmt.Sprintf("CRI connection error: %v", err), err)
 	}
 
-	metrics := c.metrics.GetMetrics()
-	metrics["status"] = status
-	metrics["socket"] = c.socket
-	metrics["buffer_usage"] = c.ringBuffer.Usage()
+	// Add detailed health information
+	if status.Details == nil {
+		status.Details = &domain.HealthDetails{}
+	}
+	status.Details.Labels = map[string]string{
+		"socket":       c.socket,
+		"buffer_usage": fmt.Sprintf("%.2f", c.ringBuffer.Usage()),
+	}
 
-	return healthy, metrics
+	// Add metrics
+	stats := c.metrics.GetStats()
+	status.EventsEmitted = stats.EventsProcessed
+	status.ErrorCount = stats.ErrorCount
+
+	// Add container count
+	c.lastSeenMu.RLock()
+	status.Details.Labels["tracked_containers"] = fmt.Sprintf("%d", len(c.lastSeen))
+	c.lastSeenMu.RUnlock()
+
+	return status
 }
 
 // Statistics returns collector statistics
-func (c *Collector) Statistics() map[string]interface{} {
-	stats := c.metrics.GetMetrics()
+func (c *Collector) Statistics() *domain.CollectorStats {
+	stats := c.metrics.GetStats()
 
-	// Add runtime info
-	stats["socket"] = c.socket
-	stats["running"] = c.isRunning.Load()
-	stats["buffer_usage"] = c.ringBuffer.Usage()
+	// Add runtime info to custom metrics
+	if stats.CustomMetrics == nil {
+		stats.CustomMetrics = make(map[string]string)
+	}
+	stats.CustomMetrics["socket"] = c.socket
+	stats.CustomMetrics["running"] = fmt.Sprintf("%t", c.isRunning.Load())
+	stats.CustomMetrics["buffer_usage"] = fmt.Sprintf("%.2f", c.ringBuffer.Usage())
 
 	// Container count
 	c.lastSeenMu.RLock()
-	stats["tracked_containers"] = len(c.lastSeen)
+	stats.CustomMetrics["tracked_containers"] = fmt.Sprintf("%d", len(c.lastSeen))
 	c.lastSeenMu.RUnlock()
 
 	return stats

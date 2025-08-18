@@ -9,37 +9,38 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
 // BatchConfig holds configuration for batch processing
 type BatchConfig struct {
 	// Batch size limits
-	MaxBatchSize     int           `json:"max_batch_size"`
-	MinBatchSize     int           `json:"min_batch_size"`
-	MaxBatchBytes    int           `json:"max_batch_bytes"`
-	
+	MaxBatchSize  int `json:"max_batch_size"`
+	MinBatchSize  int `json:"min_batch_size"`
+	MaxBatchBytes int `json:"max_batch_bytes"`
+
 	// Timing configuration
-	MaxBatchAge      time.Duration `json:"max_batch_age"`
-	FlushInterval    time.Duration `json:"flush_interval"`
-	ShutdownTimeout  time.Duration `json:"shutdown_timeout"`
-	
+	MaxBatchAge     time.Duration `json:"max_batch_age"`
+	FlushInterval   time.Duration `json:"flush_interval"`
+	ShutdownTimeout time.Duration `json:"shutdown_timeout"`
+
 	// Performance tuning
-	WorkerCount      int           `json:"worker_count"`
-	BufferSize       int           `json:"buffer_size"`
-	CompressionLevel int           `json:"compression_level"` // 0=none, 1-9=gzip levels
-	
+	WorkerCount      int `json:"worker_count"`
+	BufferSize       int `json:"buffer_size"`
+	CompressionLevel int `json:"compression_level"` // 0=none, 1-9=gzip levels
+
 	// Adaptive batching
-	EnableAdaptive       bool    `json:"enable_adaptive"`
-	TargetLatencyMs      int     `json:"target_latency_ms"`
-	LatencyPercentile    float64 `json:"latency_percentile"` // e.g., 0.95 for P95
+	EnableAdaptive        bool    `json:"enable_adaptive"`
+	TargetLatencyMs       int     `json:"target_latency_ms"`
+	LatencyPercentile     float64 `json:"latency_percentile"` // e.g., 0.95 for P95
 	AdaptiveAdjustmentPct float64 `json:"adaptive_adjustment_pct"`
-	
+
 	// Reliability
-	MaxRetries       int           `json:"max_retries"`
-	RetryBackoff     time.Duration `json:"retry_backoff"`
-	EnablePersistence bool         `json:"enable_persistence"`
-	PersistenceDir   string        `json:"persistence_dir"`
+	MaxRetries        int           `json:"max_retries"`
+	RetryBackoff      time.Duration `json:"retry_backoff"`
+	EnablePersistence bool          `json:"enable_persistence"`
+	PersistenceDir    string        `json:"persistence_dir"`
 }
 
 // DefaultBatchConfig returns sensible defaults for batch processing
@@ -75,17 +76,17 @@ type BatchedEvent struct {
 
 // EventBatch represents a batch of events ready for processing
 type EventBatch struct {
-	ID            string          `json:"id"`
-	Events        []*BatchedEvent `json:"events"`
-	CreatedAt     time.Time       `json:"created_at"`
-	ClosedAt      time.Time       `json:"closed_at"`
-	Size          int             `json:"size"`
-	ByteSize      int             `json:"byte_size"`
-	Compressed    bool            `json:"compressed"`
-	CompressionSize int           `json:"compression_size,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata"`
-	Priority      int             `json:"priority"`
-	
+	ID              string                `json:"id"`
+	Events          []*BatchedEvent       `json:"events"`
+	CreatedAt       time.Time             `json:"created_at"`
+	ClosedAt        time.Time             `json:"closed_at"`
+	Size            int                   `json:"size"`
+	ByteSize        int                   `json:"byte_size"`
+	Compressed      bool                  `json:"compressed"`
+	CompressionSize int                   `json:"compression_size,omitempty"`
+	Metadata        *domain.BatchMetadata `json:"metadata"`
+	Priority        int                   `json:"priority"`
+
 	// Processing tracking
 	ProcessingStarted time.Time `json:"processing_started"`
 	ProcessingEnded   time.Time `json:"processing_ended"`
@@ -95,77 +96,77 @@ type EventBatch struct {
 
 // BatchProcessor manages high-volume event batching with adaptive sizing
 type BatchProcessor struct {
-	mu              sync.RWMutex
-	logger          *zap.Logger
-	config          *BatchConfig
-	ctx             context.Context
-	cancel          context.CancelFunc
-	
+	mu     sync.RWMutex
+	logger *zap.Logger
+	config *BatchConfig
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// Input/output channels
-	input           chan *BatchedEvent
-	output          chan *EventBatch
-	
+	input  chan *BatchedEvent
+	output chan *EventBatch
+
 	// Current batch being built
-	currentBatch    *EventBatch
-	batchMu         sync.Mutex
-	
+	currentBatch *EventBatch
+	batchMu      sync.Mutex
+
 	// Worker management
-	workers         []*batchWorker
-	workerWg        sync.WaitGroup
-	
+	workers  []*batchWorker
+	workerWg sync.WaitGroup
+
 	// Statistics and metrics
-	stats           *BatchProcessorStats
-	statsCollector  *BPFStatsCollector
-	
+	stats          *BatchProcessorStats
+	statsCollector *BPFStatsCollector
+
 	// Adaptive sizing
-	latencyHistory  *LatencyTracker
-	adaptiveConfig  *AdaptiveConfig
-	
+	latencyHistory *LatencyTracker
+	adaptiveConfig *AdaptiveConfig
+
 	// Persistence
 	persistenceEngine *BatchPersistence
-	
+
 	// Shutdown coordination
-	shutdownOnce    sync.Once
+	shutdownOnce sync.Once
 }
 
 // BatchProcessorStats tracks batch processing metrics
 type BatchProcessorStats struct {
-	EventsReceived      uint64    `json:"events_received"`
-	EventsProcessed     uint64    `json:"events_processed"`
-	EventsDropped       uint64    `json:"events_dropped"`
-	BatchesCreated      uint64    `json:"batches_created"`
-	BatchesSent         uint64    `json:"batches_sent"`
-	BatchesFailed       uint64    `json:"batches_failed"`
-	BytesProcessed      uint64    `json:"bytes_processed"`
-	CompressionSavings  uint64    `json:"compression_savings"`
-	AverageBatchSize    float64   `json:"average_batch_size"`
-	AverageLatencyMs    float64   `json:"average_latency_ms"`
-	P95LatencyMs        float64   `json:"p95_latency_ms"`
-	P99LatencyMs        float64   `json:"p99_latency_ms"`
-	LastBatchAt         time.Time `json:"last_batch_at"`
-	StartTime           time.Time `json:"start_time"`
-	CurrentBatchSize    int       `json:"current_batch_size"`
-	CurrentBatchAge     time.Duration `json:"current_batch_age"`
+	EventsReceived     uint64        `json:"events_received"`
+	EventsProcessed    uint64        `json:"events_processed"`
+	EventsDropped      uint64        `json:"events_dropped"`
+	BatchesCreated     uint64        `json:"batches_created"`
+	BatchesSent        uint64        `json:"batches_sent"`
+	BatchesFailed      uint64        `json:"batches_failed"`
+	BytesProcessed     uint64        `json:"bytes_processed"`
+	CompressionSavings uint64        `json:"compression_savings"`
+	AverageBatchSize   float64       `json:"average_batch_size"`
+	AverageLatencyMs   float64       `json:"average_latency_ms"`
+	P95LatencyMs       float64       `json:"p95_latency_ms"`
+	P99LatencyMs       float64       `json:"p99_latency_ms"`
+	LastBatchAt        time.Time     `json:"last_batch_at"`
+	StartTime          time.Time     `json:"start_time"`
+	CurrentBatchSize   int           `json:"current_batch_size"`
+	CurrentBatchAge    time.Duration `json:"current_batch_age"`
 }
 
 // AdaptiveConfig manages adaptive batch sizing parameters
 type AdaptiveConfig struct {
-	CurrentBatchSize    int
-	CurrentMaxAge       time.Duration
-	LastAdjustment      time.Time
-	AdjustmentCount     int
-	PerformanceScore    float64
-	TargetLatency       time.Duration
-	ToleranceRange      time.Duration
+	CurrentBatchSize int
+	CurrentMaxAge    time.Duration
+	LastAdjustment   time.Time
+	AdjustmentCount  int
+	PerformanceScore float64
+	TargetLatency    time.Duration
+	ToleranceRange   time.Duration
 }
 
 // LatencyTracker maintains latency statistics for adaptive sizing
 type LatencyTracker struct {
-	mu        sync.RWMutex
-	samples   []time.Duration
+	mu         sync.RWMutex
+	samples    []time.Duration
 	maxSamples int
-	index     int
-	full      bool
+	index      int
+	full       bool
 }
 
 // NewBatchProcessor creates a new batch processor
@@ -173,7 +174,7 @@ func NewBatchProcessor(config *BatchConfig, statsCollector *BPFStatsCollector, l
 	if config == nil {
 		config = DefaultBatchConfig()
 	}
-	
+
 	if logger == nil {
 		var err error
 		logger, err = zap.NewProduction()
@@ -181,7 +182,7 @@ func NewBatchProcessor(config *BatchConfig, statsCollector *BPFStatsCollector, l
 			return nil, fmt.Errorf("failed to create logger: %w", err)
 		}
 	}
-	
+
 	// Validate configuration
 	if config.MaxBatchSize <= 0 {
 		return nil, fmt.Errorf("max_batch_size must be positive")
@@ -195,7 +196,7 @@ func NewBatchProcessor(config *BatchConfig, statsCollector *BPFStatsCollector, l
 	if config.WorkerCount <= 0 {
 		config.WorkerCount = 1
 	}
-	
+
 	bp := &BatchProcessor{
 		logger:         logger,
 		config:         config,
@@ -216,7 +217,7 @@ func NewBatchProcessor(config *BatchConfig, statsCollector *BPFStatsCollector, l
 			ToleranceRange:   time.Duration(config.TargetLatencyMs/10) * time.Millisecond,
 		},
 	}
-	
+
 	// Initialize persistence if enabled
 	if config.EnablePersistence {
 		persistence, err := NewBatchPersistence(config.PersistenceDir, logger)
@@ -225,7 +226,7 @@ func NewBatchProcessor(config *BatchConfig, statsCollector *BPFStatsCollector, l
 		}
 		bp.persistenceEngine = persistence
 	}
-	
+
 	return bp, nil
 }
 
@@ -233,20 +234,20 @@ func NewBatchProcessor(config *BatchConfig, statsCollector *BPFStatsCollector, l
 func (bp *BatchProcessor) Start(ctx context.Context) error {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
-	
+
 	if bp.ctx != nil {
 		return fmt.Errorf("batch processor already started")
 	}
-	
+
 	bp.ctx, bp.cancel = context.WithCancel(ctx)
-	
+
 	// Start persistence engine if enabled
 	if bp.persistenceEngine != nil {
 		if err := bp.persistenceEngine.Start(bp.ctx); err != nil {
 			return fmt.Errorf("failed to start persistence engine: %w", err)
 		}
 	}
-	
+
 	// Start workers
 	for i := 0; i < bp.config.WorkerCount; i++ {
 		worker := &batchWorker{
@@ -258,18 +259,18 @@ func (bp *BatchProcessor) Start(ctx context.Context) error {
 		bp.workerWg.Add(1)
 		go worker.run()
 	}
-	
+
 	// Start batch builder
 	go bp.batchBuilder()
-	
+
 	// Start statistics updater
 	go bp.statsUpdater()
-	
+
 	// Start adaptive sizing if enabled
 	if bp.config.EnableAdaptive {
 		go bp.adaptiveSizer()
 	}
-	
+
 	bp.logger.Info("Batch processor started",
 		zap.Int("worker_count", bp.config.WorkerCount),
 		zap.Int("max_batch_size", bp.config.MaxBatchSize),
@@ -277,7 +278,7 @@ func (bp *BatchProcessor) Start(ctx context.Context) error {
 		zap.Bool("adaptive", bp.config.EnableAdaptive),
 		zap.Bool("persistence", bp.config.EnablePersistence),
 	)
-	
+
 	return nil
 }
 
@@ -286,35 +287,35 @@ func (bp *BatchProcessor) Stop() error {
 	var stopErr error
 	bp.shutdownOnce.Do(func() {
 		bp.logger.Info("Stopping batch processor...")
-		
+
 		// Cancel context to signal shutdown
 		if bp.cancel != nil {
 			bp.cancel()
 		}
-		
+
 		// Close input channel to stop accepting new events
 		close(bp.input)
-		
+
 		// Flush current batch
 		bp.flushCurrentBatch()
-		
+
 		// Wait for workers to finish with timeout
 		done := make(chan struct{})
 		go func() {
 			bp.workerWg.Wait()
 			close(done)
 		}()
-		
+
 		select {
 		case <-done:
 			bp.logger.Info("All batch workers stopped gracefully")
 		case <-time.After(bp.config.ShutdownTimeout):
 			bp.logger.Warn("Timeout waiting for batch workers to stop")
 		}
-		
+
 		// Close output channel
 		close(bp.output)
-		
+
 		// Stop persistence engine
 		if bp.persistenceEngine != nil {
 			if err := bp.persistenceEngine.Stop(); err != nil {
@@ -322,13 +323,13 @@ func (bp *BatchProcessor) Stop() error {
 				stopErr = err
 			}
 		}
-		
+
 		bp.logger.Info("Batch processor stopped",
 			zap.Uint64("events_processed", bp.stats.EventsProcessed),
 			zap.Uint64("batches_sent", bp.stats.BatchesSent),
 		)
 	})
-	
+
 	return stopErr
 }
 
@@ -349,14 +350,14 @@ func (bp *BatchProcessor) AddEvent(event collectors.RawEvent) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal event data: %w", err)
 	}
-	
+
 	batchedEvent := &BatchedEvent{
 		Event:     event,
 		Size:      len(eventBytes) + len(event.Metadata)*20, // Rough estimate
 		Timestamp: time.Now(),
 		Attempts:  0,
 	}
-	
+
 	// Try to send to input channel (non-blocking)
 	select {
 	case bp.input <- batchedEvent:
@@ -372,9 +373,9 @@ func (bp *BatchProcessor) AddEvent(event collectors.RawEvent) error {
 func (bp *BatchProcessor) GetStats() *BatchProcessorStats {
 	bp.mu.RLock()
 	defer bp.mu.RUnlock()
-	
+
 	stats := *bp.stats // Copy struct
-	
+
 	// Update current batch info
 	bp.batchMu.Lock()
 	if bp.currentBatch != nil {
@@ -382,18 +383,18 @@ func (bp *BatchProcessor) GetStats() *BatchProcessorStats {
 		stats.CurrentBatchAge = time.Since(bp.currentBatch.CreatedAt)
 	}
 	bp.batchMu.Unlock()
-	
+
 	// Calculate averages
 	if stats.BatchesSent > 0 {
 		stats.AverageBatchSize = float64(stats.EventsProcessed) / float64(stats.BatchesSent)
 	}
-	
+
 	// Get latency statistics
 	avgLatency, p95Latency, p99Latency := bp.latencyHistory.GetStats()
 	stats.AverageLatencyMs = avgLatency.Seconds() * 1000
 	stats.P95LatencyMs = p95Latency.Seconds() * 1000
 	stats.P99LatencyMs = p99Latency.Seconds() * 1000
-	
+
 	return &stats
 }
 
@@ -401,20 +402,20 @@ func (bp *BatchProcessor) GetStats() *BatchProcessorStats {
 func (bp *BatchProcessor) batchBuilder() {
 	ticker := time.NewTicker(bp.config.FlushInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-bp.ctx.Done():
 			bp.flushCurrentBatch()
 			return
-			
+
 		case event, ok := <-bp.input:
 			if !ok {
 				bp.flushCurrentBatch()
 				return
 			}
 			bp.addEventToBatch(event)
-			
+
 		case <-ticker.C:
 			bp.checkBatchTimeout()
 		}
@@ -425,33 +426,33 @@ func (bp *BatchProcessor) batchBuilder() {
 func (bp *BatchProcessor) addEventToBatch(event *BatchedEvent) {
 	bp.batchMu.Lock()
 	defer bp.batchMu.Unlock()
-	
+
 	// Create new batch if needed
 	if bp.currentBatch == nil {
 		bp.createNewBatch()
 	}
-	
+
 	// Check if adding this event would exceed limits
 	wouldExceedSize := len(bp.currentBatch.Events) >= bp.adaptiveConfig.CurrentBatchSize
-	wouldExceedBytes := bp.currentBatch.ByteSize + event.Size > bp.config.MaxBatchBytes
+	wouldExceedBytes := bp.currentBatch.ByteSize+event.Size > bp.config.MaxBatchBytes
 	wouldExceedAge := time.Since(bp.currentBatch.CreatedAt) >= bp.adaptiveConfig.CurrentMaxAge
-	
+
 	if wouldExceedSize || wouldExceedBytes || wouldExceedAge {
 		// Send current batch and create new one
 		bp.sendCurrentBatch()
 		bp.createNewBatch()
 	}
-	
+
 	// Add event to current batch
 	bp.currentBatch.Events = append(bp.currentBatch.Events, event)
 	bp.currentBatch.Size++
 	bp.currentBatch.ByteSize += event.Size
-	
+
 	// Check if batch is now ready to send
 	if len(bp.currentBatch.Events) >= bp.config.MinBatchSize &&
 		(len(bp.currentBatch.Events) >= bp.adaptiveConfig.CurrentBatchSize ||
-		 bp.currentBatch.ByteSize >= bp.config.MaxBatchBytes ||
-		 time.Since(bp.currentBatch.CreatedAt) >= bp.adaptiveConfig.CurrentMaxAge) {
+			bp.currentBatch.ByteSize >= bp.config.MaxBatchBytes ||
+			time.Since(bp.currentBatch.CreatedAt) >= bp.adaptiveConfig.CurrentMaxAge) {
 		bp.sendCurrentBatch()
 	}
 }
@@ -462,10 +463,16 @@ func (bp *BatchProcessor) createNewBatch() {
 		ID:        bp.generateBatchID(),
 		Events:    make([]*BatchedEvent, 0, bp.adaptiveConfig.CurrentBatchSize),
 		CreatedAt: time.Now(),
-		Metadata:  make(map[string]interface{}),
-		Priority:  1, // Default priority
+		Metadata: &domain.BatchMetadata{
+			BatchID:        bp.generateBatchID(),
+			ProcessingTime: 0, // Will be set when processing starts
+			EventCount:     0, // Will be updated as events are added
+			Source:         "bpf_common",
+			Labels:         map[string]string{"collector": "bpf_common"},
+		},
+		Priority: 1, // Default priority
 	}
-	
+
 	atomic.AddUint64(&bp.stats.BatchesCreated, 1)
 }
 
@@ -474,21 +481,21 @@ func (bp *BatchProcessor) sendCurrentBatch() {
 	if bp.currentBatch == nil || len(bp.currentBatch.Events) == 0 {
 		return
 	}
-	
+
 	bp.currentBatch.ClosedAt = time.Now()
-	
+
 	// Apply compression if enabled
 	if bp.config.CompressionLevel > 0 {
 		bp.compressBatch(bp.currentBatch)
 	}
-	
+
 	// Persist if enabled
 	if bp.persistenceEngine != nil {
 		if err := bp.persistenceEngine.Persist(bp.currentBatch); err != nil {
 			bp.logger.Warn("Failed to persist batch", zap.String("batch_id", bp.currentBatch.ID), zap.Error(err))
 		}
 	}
-	
+
 	// Send to workers
 	select {
 	case bp.output <- bp.currentBatch:
@@ -496,17 +503,17 @@ func (bp *BatchProcessor) sendCurrentBatch() {
 		atomic.AddUint64(&bp.stats.EventsProcessed, uint64(bp.currentBatch.Size))
 		atomic.AddUint64(&bp.stats.BytesProcessed, uint64(bp.currentBatch.ByteSize))
 		bp.stats.LastBatchAt = time.Now()
-		
+
 		// Record batch size for stats collection
 		if bp.statsCollector != nil {
 			bp.statsCollector.IncrementEventCounter("batch_processor", CounterEventsBatched, uint64(bp.currentBatch.Size))
 		}
-		
+
 	default:
 		atomic.AddUint64(&bp.stats.BatchesFailed, 1)
 		bp.logger.Warn("Failed to send batch - output buffer full", zap.String("batch_id", bp.currentBatch.ID))
 	}
-	
+
 	bp.currentBatch = nil
 }
 
@@ -514,10 +521,10 @@ func (bp *BatchProcessor) sendCurrentBatch() {
 func (bp *BatchProcessor) checkBatchTimeout() {
 	bp.batchMu.Lock()
 	defer bp.batchMu.Unlock()
-	
-	if bp.currentBatch != nil && 
-	   len(bp.currentBatch.Events) >= bp.config.MinBatchSize &&
-	   time.Since(bp.currentBatch.CreatedAt) >= bp.adaptiveConfig.CurrentMaxAge {
+
+	if bp.currentBatch != nil &&
+		len(bp.currentBatch.Events) >= bp.config.MinBatchSize &&
+		time.Since(bp.currentBatch.CreatedAt) >= bp.adaptiveConfig.CurrentMaxAge {
 		bp.sendCurrentBatch()
 	}
 }
@@ -526,7 +533,7 @@ func (bp *BatchProcessor) checkBatchTimeout() {
 func (bp *BatchProcessor) flushCurrentBatch() {
 	bp.batchMu.Lock()
 	defer bp.batchMu.Unlock()
-	
+
 	if bp.currentBatch != nil && len(bp.currentBatch.Events) > 0 {
 		bp.sendCurrentBatch()
 	}
@@ -539,7 +546,7 @@ func (bp *BatchProcessor) compressBatch(batch *EventBatch) {
 	originalSize := batch.ByteSize
 	batch.Compressed = true
 	batch.CompressionSize = int(float64(originalSize) * 0.7) // Assume 30% compression
-	atomic.AddUint64(&bp.stats.CompressionSavings, uint64(originalSize - batch.CompressionSize))
+	atomic.AddUint64(&bp.stats.CompressionSavings, uint64(originalSize-batch.CompressionSize))
 }
 
 // generateBatchID generates a unique batch ID
@@ -551,7 +558,7 @@ func (bp *BatchProcessor) generateBatchID() string {
 func (bp *BatchProcessor) statsUpdater() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-bp.ctx.Done():
@@ -580,7 +587,7 @@ func (bp *BatchProcessor) updateStatistics() {
 func (bp *BatchProcessor) adaptiveSizer() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-bp.ctx.Done():
@@ -594,21 +601,21 @@ func (bp *BatchProcessor) adaptiveSizer() {
 // adjustBatchSizing implements adaptive batch sizing logic
 func (bp *BatchProcessor) adjustBatchSizing() {
 	avgLatency, p95Latency, _ := bp.latencyHistory.GetStats()
-	
+
 	// Use P95 latency for decisions if configured
 	targetMetric := avgLatency
 	if bp.config.LatencyPercentile >= 0.95 {
 		targetMetric = p95Latency
 	}
-	
+
 	targetLatency := bp.adaptiveConfig.TargetLatency
 	tolerance := bp.adaptiveConfig.ToleranceRange
-	
+
 	// Skip adjustment if we don't have enough data
 	if targetMetric == 0 {
 		return
 	}
-	
+
 	// Calculate adjustment
 	var adjustment float64
 	if targetMetric > targetLatency+tolerance {
@@ -621,11 +628,11 @@ func (bp *BatchProcessor) adjustBatchSizing() {
 		// Within tolerance - no adjustment needed
 		return
 	}
-	
+
 	// Apply adjustment to batch size
 	currentSize := float64(bp.adaptiveConfig.CurrentBatchSize)
 	newSize := int(currentSize * (1.0 + adjustment))
-	
+
 	// Ensure within bounds
 	if newSize < bp.config.MinBatchSize {
 		newSize = bp.config.MinBatchSize
@@ -633,11 +640,11 @@ func (bp *BatchProcessor) adjustBatchSizing() {
 	if newSize > bp.config.MaxBatchSize {
 		newSize = bp.config.MaxBatchSize
 	}
-	
+
 	// Apply adjustment to max age
 	currentAge := bp.adaptiveConfig.CurrentMaxAge
 	newAge := time.Duration(float64(currentAge) * (1.0 + adjustment))
-	
+
 	// Ensure within bounds
 	minAge := bp.config.FlushInterval * 2
 	maxAge := bp.config.MaxBatchAge
@@ -647,13 +654,13 @@ func (bp *BatchProcessor) adjustBatchSizing() {
 	if newAge > maxAge {
 		newAge = maxAge
 	}
-	
+
 	// Update adaptive config
 	bp.adaptiveConfig.CurrentBatchSize = newSize
 	bp.adaptiveConfig.CurrentMaxAge = newAge
 	bp.adaptiveConfig.LastAdjustment = time.Now()
 	bp.adaptiveConfig.AdjustmentCount++
-	
+
 	bp.logger.Debug("Adjusted batch sizing",
 		zap.Int("old_size", int(currentSize)),
 		zap.Int("new_size", newSize),
@@ -674,7 +681,7 @@ type batchWorker struct {
 // run is the main worker loop
 func (w *batchWorker) run() {
 	defer w.processor.workerWg.Done()
-	
+
 	for {
 		select {
 		case <-w.processor.ctx.Done():
@@ -692,15 +699,15 @@ func (w *batchWorker) run() {
 func (w *batchWorker) processBatch(batch *EventBatch) {
 	startTime := time.Now()
 	batch.ProcessingStarted = startTime
-	
+
 	// Update stats collector
 	if w.processor.statsCollector != nil {
 		w.processor.statsCollector.RecordProcessingTime("batch_processor", time.Since(startTime))
 	}
-	
+
 	// Record latency for adaptive sizing
 	w.processor.latencyHistory.Record(time.Since(startTime))
-	
+
 	batch.ProcessingEnded = time.Now()
 	w.logger.Debug("Processed batch",
 		zap.String("batch_id", batch.ID),
@@ -715,7 +722,7 @@ func (w *batchWorker) processBatch(batch *EventBatch) {
 func (lt *LatencyTracker) Record(latency time.Duration) {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
-	
+
 	lt.samples[lt.index] = latency
 	lt.index = (lt.index + 1) % lt.maxSamples
 	if lt.index == 0 {
@@ -727,7 +734,7 @@ func (lt *LatencyTracker) Record(latency time.Duration) {
 func (lt *LatencyTracker) GetStats() (avg, p95, p99 time.Duration) {
 	lt.mu.RLock()
 	defer lt.mu.RUnlock()
-	
+
 	var validSamples []time.Duration
 	if lt.full {
 		validSamples = make([]time.Duration, lt.maxSamples)
@@ -738,7 +745,7 @@ func (lt *LatencyTracker) GetStats() (avg, p95, p99 time.Duration) {
 	} else {
 		return 0, 0, 0
 	}
-	
+
 	// Sort samples for percentile calculations
 	for i := 0; i < len(validSamples); i++ {
 		for j := i + 1; j < len(validSamples); j++ {
@@ -747,14 +754,14 @@ func (lt *LatencyTracker) GetStats() (avg, p95, p99 time.Duration) {
 			}
 		}
 	}
-	
+
 	// Calculate average
 	var total time.Duration
 	for _, sample := range validSamples {
 		total += sample
 	}
 	avg = total / time.Duration(len(validSamples))
-	
+
 	// Calculate percentiles
 	if len(validSamples) > 0 {
 		p95Index := int(float64(len(validSamples)) * 0.95)
@@ -762,14 +769,14 @@ func (lt *LatencyTracker) GetStats() (avg, p95, p99 time.Duration) {
 			p95Index = len(validSamples) - 1
 		}
 		p95 = validSamples[p95Index]
-		
+
 		p99Index := int(float64(len(validSamples)) * 0.99)
 		if p99Index >= len(validSamples) {
 			p99Index = len(validSamples) - 1
 		}
 		p99 = validSamples[p99Index]
 	}
-	
+
 	return avg, p95, p99
 }
 

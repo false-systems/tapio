@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Logger provides structured logging with production features
@@ -45,11 +47,11 @@ type Config struct {
 	IncludeCaller bool    `yaml:"include_caller"`
 
 	// Context settings
-	TraceIDField  string                 `yaml:"trace_id_field"`
-	SpanIDField   string                 `yaml:"span_id_field"`
-	ServiceName   string                 `yaml:"service_name"`
-	Environment   string                 `yaml:"environment"`
-	DefaultFields map[string]interface{} `yaml:"default_fields"`
+	TraceIDField  string            `yaml:"trace_id_field"`
+	SpanIDField   string            `yaml:"span_id_field"`
+	ServiceName   string            `yaml:"service_name"`
+	Environment   string            `yaml:"environment"`
+	DefaultFields *domain.LogFields `yaml:"default_fields"`
 }
 
 // NewLogger creates a new production-ready logger
@@ -116,8 +118,32 @@ func NewLogger(cfg *Config) *Logger {
 		slog.String("environment", cfg.Environment),
 	}
 
-	for k, v := range cfg.DefaultFields {
-		attrs = append(attrs, slog.Any(k, v))
+	if cfg.DefaultFields != nil {
+		if cfg.DefaultFields.StringFields != nil {
+			for k, v := range cfg.DefaultFields.StringFields {
+				attrs = append(attrs, slog.String(k, v))
+			}
+		}
+		if cfg.DefaultFields.IntFields != nil {
+			for k, v := range cfg.DefaultFields.IntFields {
+				attrs = append(attrs, slog.Int64(k, v))
+			}
+		}
+		if cfg.DefaultFields.FloatFields != nil {
+			for k, v := range cfg.DefaultFields.FloatFields {
+				attrs = append(attrs, slog.Float64(k, v))
+			}
+		}
+		if cfg.DefaultFields.BoolFields != nil {
+			for k, v := range cfg.DefaultFields.BoolFields {
+				attrs = append(attrs, slog.Bool(k, v))
+			}
+		}
+		if cfg.DefaultFields.TimeFields != nil {
+			for k, v := range cfg.DefaultFields.TimeFields {
+				attrs = append(attrs, slog.Time(k, v))
+			}
+		}
 	}
 
 	logger = logger.With(slogAttrToAny(attrs)...)
@@ -147,7 +173,7 @@ func DefaultConfig() *Config {
 		SpanIDField:   "span_id",
 		ServiceName:   "tapio",
 		Environment:   "production",
-		DefaultFields: make(map[string]interface{}),
+		DefaultFields: domain.NewLogFields(),
 	}
 }
 
@@ -187,11 +213,39 @@ func (l *Logger) With(args ...interface{}) *Logger {
 }
 
 // WithFields creates a child logger with additional fields
-func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
-	attrs := make([]slog.Attr, 0, len(fields))
-	for k, v := range fields {
-		attrs = append(attrs, slog.Any(k, v))
+func (l *Logger) WithFields(fields *domain.LogFields) *Logger {
+	if fields == nil {
+		return l
 	}
+
+	attrs := make([]slog.Attr, 0)
+
+	if fields.StringFields != nil {
+		for k, v := range fields.StringFields {
+			attrs = append(attrs, slog.String(k, v))
+		}
+	}
+	if fields.IntFields != nil {
+		for k, v := range fields.IntFields {
+			attrs = append(attrs, slog.Int64(k, v))
+		}
+	}
+	if fields.FloatFields != nil {
+		for k, v := range fields.FloatFields {
+			attrs = append(attrs, slog.Float64(k, v))
+		}
+	}
+	if fields.BoolFields != nil {
+		for k, v := range fields.BoolFields {
+			attrs = append(attrs, slog.Bool(k, v))
+		}
+	}
+	if fields.TimeFields != nil {
+		for k, v := range fields.TimeFields {
+			attrs = append(attrs, slog.Time(k, v))
+		}
+	}
+
 	return l.With(slogAttrToAny(attrs)...)
 }
 

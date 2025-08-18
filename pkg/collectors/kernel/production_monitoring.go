@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -18,59 +20,59 @@ import (
 // ProductionMonitoring provides comprehensive monitoring for production environments
 type ProductionMonitoring struct {
 	config *Config
-	
+
 	// Prometheus metrics
-	promRegistry     *prometheus.Registry
-	httpServer       *http.Server
-	
+	promRegistry *prometheus.Registry
+	httpServer   *http.Server
+
 	// OpenTelemetry
-	tracer           trace.Tracer
-	meter            metric.Meter
-	
+	tracer trace.Tracer
+	meter  metric.Meter
+
 	// Core metrics
-	collectorStatus          prometheus.Gauge
-	eventsTotalCounter       *prometheus.CounterVec
-	eventsProcessedDuration  *prometheus.HistogramVec
-	memoryUsageGauge         prometheus.Gauge
-	cpuUsageGauge            prometheus.Gauge
-	bufferUsageGauge         *prometheus.GaugeVec
-	errorCounter             *prometheus.CounterVec
-	alertCounter             *prometheus.CounterVec
-	
+	collectorStatus         prometheus.Gauge
+	eventsTotalCounter      *prometheus.CounterVec
+	eventsProcessedDuration *prometheus.HistogramVec
+	memoryUsageGauge        prometheus.Gauge
+	cpuUsageGauge           prometheus.Gauge
+	bufferUsageGauge        *prometheus.GaugeVec
+	errorCounter            *prometheus.CounterVec
+	alertCounter            *prometheus.CounterVec
+
 	// eBPF specific metrics
-	ebpfProgramStatus        *prometheus.GaugeVec
-	ebpfMapUsage             *prometheus.GaugeVec
-	ebpfVerifierErrors       prometheus.Counter
-	ebpfLoadTime             *prometheus.HistogramVec
-	
+	ebpfProgramStatus  *prometheus.GaugeVec
+	ebpfMapUsage       *prometheus.GaugeVec
+	ebpfVerifierErrors prometheus.Counter
+	ebpfLoadTime       *prometheus.HistogramVec
+
 	// Health metrics
-	healthCheckStatus        *prometheus.GaugeVec
-	lastHealthCheck          prometheus.Gauge
-	consecutiveFailures      prometheus.Gauge
-	uptimeGauge              prometheus.Gauge
-	
+	healthCheckStatus   *prometheus.GaugeVec
+	lastHealthCheck     prometheus.Gauge
+	consecutiveFailures prometheus.Gauge
+	uptimeGauge         prometheus.Gauge
+
 	// Performance metrics
-	eventLatency             *prometheus.HistogramVec
-	throughputGauge          *prometheus.GaugeVec
-	backpressureEvents       prometheus.Counter
-	samplingRateGauge        prometheus.Gauge
-	
+	eventLatency       *prometheus.HistogramVec
+	throughputGauge    *prometheus.GaugeVec
+	backpressureEvents prometheus.Counter
+	samplingRateGauge  prometheus.Gauge
+
 	// Alert manager
 	alertManager *AlertManager
-	
+
 	// State
-	startTime    time.Time
-	mu           sync.RWMutex
-	ctx          context.Context
-	cancel       context.CancelFunc
+	startTime time.Time
+	mu        sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // AlertManager manages alerts and notifications
 type AlertManager struct {
-	rules      []AlertRule
-	channels   []AlertChannel
-	fired      map[string]time.Time
-	mu         sync.RWMutex
+	rules    []AlertRule
+	channels []AlertChannel
+	fired    map[string]time.Time
+	mu       sync.RWMutex
 }
 
 // AlertRule defines an alerting rule
@@ -116,7 +118,7 @@ type Alert struct {
 // NewProductionMonitoring creates a new production monitoring instance
 func NewProductionMonitoring(config *Config) *ProductionMonitoring {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	pm := &ProductionMonitoring{
 		config:       config,
 		promRegistry: prometheus.NewRegistry(),
@@ -127,10 +129,10 @@ func NewProductionMonitoring(config *Config) *ProductionMonitoring {
 		meter:        otel.Meter("tapio/collectors/kernel"),
 		alertManager: NewAlertManager(),
 	}
-	
+
 	pm.initializeMetrics()
 	pm.setupDefaultAlerts()
-	
+
 	return pm
 }
 
@@ -150,14 +152,14 @@ func (pm *ProductionMonitoring) initializeMetrics() {
 		Name:      "status",
 		Help:      "Status of kernel collector (1=running, 0=stopped)",
 	})
-	
+
 	pm.eventsTotalCounter = promauto.With(pm.promRegistry).NewCounterVec(prometheus.CounterOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "events_total",
 		Help:      "Total number of events processed by type",
 	}, []string{"event_type", "source"})
-	
+
 	pm.eventsProcessedDuration = promauto.With(pm.promRegistry).NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
@@ -165,42 +167,42 @@ func (pm *ProductionMonitoring) initializeMetrics() {
 		Help:      "Time spent processing events",
 		Buckets:   prometheus.ExponentialBuckets(0.000001, 2, 20), // 1μs to ~1s
 	}, []string{"event_type"})
-	
+
 	pm.memoryUsageGauge = promauto.With(pm.promRegistry).NewGauge(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "memory_bytes",
 		Help:      "Current memory usage in bytes",
 	})
-	
+
 	pm.cpuUsageGauge = promauto.With(pm.promRegistry).NewGauge(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "cpu_percent",
 		Help:      "Current CPU usage percentage",
 	})
-	
+
 	pm.bufferUsageGauge = promauto.With(pm.promRegistry).NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "buffer_usage_percent",
 		Help:      "Buffer usage percentage by buffer type",
 	}, []string{"buffer_type"})
-	
+
 	pm.errorCounter = promauto.With(pm.promRegistry).NewCounterVec(prometheus.CounterOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "errors_total",
 		Help:      "Total number of errors by type",
 	}, []string{"error_type"})
-	
+
 	pm.alertCounter = promauto.With(pm.promRegistry).NewCounterVec(prometheus.CounterOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "alerts_total",
 		Help:      "Total number of fired alerts by severity",
 	}, []string{"severity"})
-	
+
 	// eBPF specific metrics
 	pm.ebpfProgramStatus = promauto.With(pm.promRegistry).NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "tapio",
@@ -208,21 +210,21 @@ func (pm *ProductionMonitoring) initializeMetrics() {
 		Name:      "ebpf_program_status",
 		Help:      "Status of eBPF programs (1=loaded, 0=not loaded)",
 	}, []string{"program_name"})
-	
+
 	pm.ebpfMapUsage = promauto.With(pm.promRegistry).NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "ebpf_map_usage_percent",
 		Help:      "eBPF map usage percentage",
 	}, []string{"map_name"})
-	
+
 	pm.ebpfVerifierErrors = promauto.With(pm.promRegistry).NewCounter(prometheus.CounterOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "ebpf_verifier_errors_total",
 		Help:      "Total number of eBPF verifier errors",
 	})
-	
+
 	pm.ebpfLoadTime = promauto.With(pm.promRegistry).NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
@@ -230,7 +232,7 @@ func (pm *ProductionMonitoring) initializeMetrics() {
 		Help:      "Time spent loading eBPF programs",
 		Buckets:   prometheus.DefBuckets,
 	}, []string{"program_name"})
-	
+
 	// Health metrics
 	pm.healthCheckStatus = promauto.With(pm.promRegistry).NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "tapio",
@@ -238,28 +240,28 @@ func (pm *ProductionMonitoring) initializeMetrics() {
 		Name:      "health_check_status",
 		Help:      "Health check status (1=healthy, 0=unhealthy)",
 	}, []string{"component"})
-	
+
 	pm.lastHealthCheck = promauto.With(pm.promRegistry).NewGauge(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "last_health_check_timestamp",
 		Help:      "Timestamp of last health check",
 	})
-	
+
 	pm.consecutiveFailures = promauto.With(pm.promRegistry).NewGauge(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "consecutive_failures",
 		Help:      "Number of consecutive health check failures",
 	})
-	
+
 	pm.uptimeGauge = promauto.With(pm.promRegistry).NewGauge(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "uptime_seconds",
 		Help:      "Collector uptime in seconds",
 	})
-	
+
 	// Performance metrics
 	pm.eventLatency = promauto.With(pm.promRegistry).NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "tapio",
@@ -268,21 +270,21 @@ func (pm *ProductionMonitoring) initializeMetrics() {
 		Help:      "Event processing latency from kernel to output",
 		Buckets:   prometheus.ExponentialBuckets(0.000001, 2, 20),
 	}, []string{"event_type"})
-	
+
 	pm.throughputGauge = promauto.With(pm.promRegistry).NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "throughput_events_per_second",
 		Help:      "Current event throughput per second",
 	}, []string{"event_type"})
-	
+
 	pm.backpressureEvents = promauto.With(pm.promRegistry).NewCounter(prometheus.CounterOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
 		Name:      "backpressure_events_total",
 		Help:      "Total number of backpressure events",
 	})
-	
+
 	pm.samplingRateGauge = promauto.With(pm.promRegistry).NewGauge(prometheus.GaugeOpts{
 		Namespace: "tapio",
 		Subsystem: "kernel_collector",
@@ -305,10 +307,10 @@ func (pm *ProductionMonitoring) setupDefaultAlerts() {
 			Enabled:     true,
 		},
 		{
-			Name:        "HighMemoryUsage", 
+			Name:        "HighMemoryUsage",
 			Description: "Kernel collector memory usage is high",
 			Query:       "tapio_kernel_collector_memory_bytes",
-			Threshold:   float64(pm.config.ResourceLimits.MaxMemoryMB * 1024 * 1024) * 0.9, // 90% of limit
+			Threshold:   float64(pm.config.ResourceLimits.MaxMemoryMB*1024*1024) * 0.9, // 90% of limit
 			Duration:    5 * time.Minute,
 			Severity:    SeverityWarning,
 			Labels:      map[string]string{"component": "memory"},
@@ -316,7 +318,7 @@ func (pm *ProductionMonitoring) setupDefaultAlerts() {
 		},
 		{
 			Name:        "HighCPUUsage",
-			Description: "Kernel collector CPU usage is high", 
+			Description: "Kernel collector CPU usage is high",
 			Query:       "tapio_kernel_collector_cpu_percent",
 			Threshold:   float64(pm.config.ResourceLimits.MaxCPUPercent) * 0.9, // 90% of limit
 			Duration:    5 * time.Minute,
@@ -375,7 +377,7 @@ func (pm *ProductionMonitoring) setupDefaultAlerts() {
 			Enabled:     true,
 		},
 	}
-	
+
 	pm.alertManager.SetRules(rules)
 }
 
@@ -383,29 +385,29 @@ func (pm *ProductionMonitoring) setupDefaultAlerts() {
 func (pm *ProductionMonitoring) Start(port int) error {
 	// Set initial status
 	pm.collectorStatus.Set(1)
-	
+
 	// Start metrics HTTP server
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(pm.promRegistry, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/health", pm.healthHandler)
 	mux.HandleFunc("/status", pm.statusHandler)
 	mux.HandleFunc("/alerts", pm.alertsHandler)
-	
+
 	pm.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
 	}
-	
+
 	go func() {
 		if err := pm.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			// Log error
 		}
 	}()
-	
+
 	// Start background monitoring
 	go pm.monitoringLoop()
 	go pm.alertingLoop()
-	
+
 	return nil
 }
 
@@ -413,7 +415,7 @@ func (pm *ProductionMonitoring) Start(port int) error {
 func (pm *ProductionMonitoring) monitoringLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -428,7 +430,7 @@ func (pm *ProductionMonitoring) monitoringLoop() {
 func (pm *ProductionMonitoring) alertingLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -444,7 +446,7 @@ func (pm *ProductionMonitoring) updateMetrics() {
 	// Update uptime
 	uptime := time.Since(pm.startTime).Seconds()
 	pm.uptimeGauge.Set(uptime)
-	
+
 	// Update last health check time
 	pm.lastHealthCheck.Set(float64(time.Now().Unix()))
 }
@@ -453,19 +455,19 @@ func (pm *ProductionMonitoring) updateMetrics() {
 func (pm *ProductionMonitoring) evaluateAlerts() {
 	// This is a simplified implementation
 	// In production, you'd integrate with a proper metrics backend like Prometheus
-	
+
 	pm.alertManager.mu.RLock()
 	rules := pm.alertManager.rules
 	pm.alertManager.mu.RUnlock()
-	
+
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
 		}
-		
+
 		// Simulate metric evaluation (in real implementation, query metrics backend)
 		value := pm.evaluateMetricQuery(rule.Query)
-		
+
 		if pm.shouldFireAlert(rule, value) {
 			alert := Alert{
 				Name:        rule.Name,
@@ -476,7 +478,7 @@ func (pm *ProductionMonitoring) evaluateAlerts() {
 				Labels:      rule.Labels,
 				FiredAt:     time.Now(),
 			}
-			
+
 			pm.fireAlert(alert)
 		}
 	}
@@ -506,19 +508,19 @@ func (pm *ProductionMonitoring) shouldFireAlert(rule AlertRule, value float64) b
 func (pm *ProductionMonitoring) fireAlert(alert Alert) {
 	pm.alertManager.mu.Lock()
 	defer pm.alertManager.mu.Unlock()
-	
+
 	// Check if already fired recently
 	if lastFired, exists := pm.alertManager.fired[alert.Name]; exists {
 		if time.Since(lastFired) < 5*time.Minute { // 5 minute cooldown
 			return
 		}
 	}
-	
+
 	pm.alertManager.fired[alert.Name] = alert.FiredAt
-	
+
 	// Update alert counter metric
 	pm.alertCounter.WithLabelValues(string(alert.Severity)).Inc()
-	
+
 	// Send alert through channels
 	for _, channel := range pm.alertManager.channels {
 		if channel.Enabled {
@@ -563,26 +565,32 @@ func (pm *ProductionMonitoring) healthHandler(w http.ResponseWriter, r *http.Req
 func (pm *ProductionMonitoring) statusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
-	status := map[string]interface{}{
-		"status":    "running",
-		"uptime":    time.Since(pm.startTime).Seconds(),
-		"started_at": pm.startTime,
+
+	status := &domain.MonitoringStatus{
+		Component: "kernel_monitoring",
+		Status:    "running",
+		Timestamp: time.Now(),
+		Uptime:    time.Since(pm.startTime),
+		Details: map[string]string{
+			"started_at": pm.startTime.Format(time.RFC3339),
+		},
 	}
-	
-	// Convert to JSON (simplified)
-	fmt.Fprintf(w, `{"status": "%v", "uptime": %f, "started_at": "%v"}`, 
-		status["status"], status["uptime"], status["started_at"])
+
+	// Convert to JSON
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode status: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (pm *ProductionMonitoring) alertsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
+
 	pm.alertManager.mu.RLock()
 	fired := pm.alertManager.fired
 	pm.alertManager.mu.RUnlock()
-	
+
 	fmt.Fprintf(w, `{"active_alerts": %d}`, len(fired))
 }
 
@@ -676,9 +684,9 @@ func (am *AlertManager) AddChannel(channel AlertChannel) {
 // Stop stops the production monitoring
 func (pm *ProductionMonitoring) Stop() {
 	pm.cancel()
-	
+
 	pm.collectorStatus.Set(0)
-	
+
 	if pm.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

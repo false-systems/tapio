@@ -239,30 +239,30 @@ func (c *Collector) readEBPFEvents() {
 		// Track syscall events as part of events processed
 		// (syscall tracking is now counted as regular events)
 
-		// Create raw event with NO business logic - just raw data
-		eventData := map[string]interface{}{
-			"timestamp": event.Timestamp,
-			"pid":       event.PID,
-			"tid":       event.TID,
-			"type":      event.EventType, // Raw type, no interpretation
-			"data_len":  event.DataLen,
+		// Create strongly-typed eBPF event data
+		eventData := EBPFEventData{
+			Timestamp: event.Timestamp,
+			PID:       event.PID,
+			TID:       event.TID,
+			Type:      event.EventType, // Raw type, no interpretation
+			DataLen:   event.DataLen,
 		}
 
 		// Add network info if present
 		if event.SrcIP != 0 || event.DstIP != 0 {
-			eventData["src_ip"] = fmt.Sprintf("%d.%d.%d.%d",
+			eventData.SrcIP = fmt.Sprintf("%d.%d.%d.%d",
 				byte(event.SrcIP), byte(event.SrcIP>>8),
 				byte(event.SrcIP>>16), byte(event.SrcIP>>24))
-			eventData["dst_ip"] = fmt.Sprintf("%d.%d.%d.%d",
+			eventData.DstIP = fmt.Sprintf("%d.%d.%d.%d",
 				byte(event.DstIP), byte(event.DstIP>>8),
 				byte(event.DstIP>>16), byte(event.DstIP>>24))
-			eventData["src_port"] = event.SrcPort
-			eventData["dst_port"] = event.DstPort
+			eventData.SrcPort = event.SrcPort
+			eventData.DstPort = event.DstPort
 		}
 
 		// Include raw data if present
 		if event.DataLen > 0 && event.DataLen <= 256 {
-			eventData["raw_data"] = event.Data[:event.DataLen]
+			eventData.RawData = event.Data[:event.DataLen]
 		}
 
 		rawEvent := c.createEventWithContext(ctx, "syscall", eventData)

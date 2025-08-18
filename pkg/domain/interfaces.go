@@ -27,5 +27,14 @@ type Collector interface {
 // EventProcessor processes events
 type EventProcessor interface {
 	// Process handles an event
-	Process(ctx context.Context, event *UnifiedEvent) error
+	Process(ctx context.Context, event *ObservationEvent) error
+}
+
+// CollectorWithStats extends Collector with statistics
+type CollectorWithStats interface {
+	Collector
+	// Statistics returns TYPED stats - NO map[string]interface{}
+	Statistics() *CollectorStats
+	// Health returns TYPED health - NO map[string]interface{}
+	Health() *HealthStatus
 }
