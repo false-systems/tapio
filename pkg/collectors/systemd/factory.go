@@ -19,12 +19,12 @@ func (f *Factory) Create(name string, config Config) (collectors.Collector, erro
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid systemd config: %w", err)
 	}
-	
+
 	collector, err := NewCollector(name, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create systemd collector: %w", err)
 	}
-	
+
 	return collector, nil
 }
 

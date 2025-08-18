@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	collectorconfig "github.com/yairfalse/tapio/pkg/collectors/config"
 	factoryregistry "github.com/yairfalse/tapio/pkg/collectors/factory"
 	"github.com/yairfalse/tapio/pkg/config"
 )
@@ -63,9 +64,14 @@ func (m *CollectorManager) Start(ctx context.Context) error {
 	m.ctx, m.cancel = context.WithCancel(ctx)
 
 	// Start each configured collector
-	collectorConfig := m.config.Collectors.ToCollectorConfig()
-
 	for _, name := range m.config.Collectors.Enabled {
+		// Create specific config for this collector type
+		collectorConfig, err := m.createCollectorConfig(name)
+		if err != nil {
+			// Log error but continue with other collectors
+			continue
+		}
+
 		collector, err := factoryregistry.CreateCollector(name, collectorConfig)
 		if err != nil {
 			// Log error but continue with other collectors
@@ -186,7 +192,11 @@ func (m *CollectorManager) RestartCollector(name string) error {
 	}
 
 	// Create and start new instance
-	collectorConfig := m.config.Collectors.ToCollectorConfig()
+	collectorConfig, err := m.createCollectorConfig(name)
+	if err != nil {
+		return fmt.Errorf("failed to create config: %w", err)
+	}
+
 	collector, err := factoryregistry.CreateCollector(name, collectorConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
@@ -280,5 +290,41 @@ func (m *CollectorManager) checkHealth() {
 				h.Healthy = false
 			}
 		}
+	}
+}
+
+// createCollectorConfig creates a typed config for a specific collector
+func (m *CollectorManager) createCollectorConfig(collectorType string) (collectorconfig.CollectorConfig, error) {
+	switch collectorType {
+	case "cni":
+		config := collectorconfig.NewCNIConfig(collectorType)
+		config.BufferSize = m.config.Collectors.BufferSize
+		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
+		config.Labels = m.config.Collectors.Labels
+		return config, nil
+
+	case "cri":
+		config := collectorconfig.NewCRIConfig(collectorType)
+		config.BufferSize = m.config.Collectors.BufferSize
+		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
+		config.Labels = m.config.Collectors.Labels
+		return config, nil
+
+	case "kernel":
+		config := collectorconfig.NewKernelConfig(collectorType)
+		config.BufferSize = m.config.Collectors.BufferSize
+		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
+		config.Labels = m.config.Collectors.Labels
+		return config, nil
+
+	case "dns":
+		config := collectorconfig.NewDNSConfig(collectorType)
+		config.BufferSize = m.config.Collectors.BufferSize
+		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
+		config.Labels = m.config.Collectors.Labels
+		return config, nil
+
+	default:
+		return nil, fmt.Errorf("unknown collector type: %s", collectorType)
 	}
 }

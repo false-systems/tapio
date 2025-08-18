@@ -68,3 +68,30 @@ func (c *SimplePredictionContext) AddData(key, value string) {
 	}
 	c.Data[key] = value
 }
+
+// CausalityContext represents the causal relationships and context for an event
+type CausalityContext struct {
+	// CauseID is the ID of the event that caused this event
+	CauseID string `json:"cause_id,omitempty"`
+
+	// EffectIDs are the IDs of events caused by this event
+	EffectIDs []string `json:"effect_ids,omitempty"`
+
+	// ChainID identifies the causal chain this event belongs to
+	ChainID string `json:"chain_id,omitempty"`
+
+	// ChainDepth indicates how deep this event is in the causal chain
+	ChainDepth int `json:"chain_depth,omitempty"`
+
+	// RootCause is the ID of the root cause event in the chain
+	RootCause string `json:"root_cause,omitempty"`
+
+	// RelatedEvents are events that are related but not causally linked
+	RelatedEvents []string `json:"related_events,omitempty"`
+
+	// Confidence indicates the confidence level of the causal relationship (0-1)
+	Confidence float64 `json:"confidence,omitempty"`
+
+	// Type indicates the type of causal relationship
+	Type string `json:"type,omitempty"`
+}

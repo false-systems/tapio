@@ -1,26 +1,26 @@
 package etcd
 
 import (
-	"context"
 	"fmt"
 
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/config"
 )
 
 // ETCDFactory creates ETCD collectors from type-safe configuration
 type ETCDFactory struct {
-	*config.BaseCollectorFactory
+	*collectors.BaseCollectorFactory
 }
 
 // NewETCDFactory creates a new ETCD collector factory
 func NewETCDFactory() *ETCDFactory {
 	return &ETCDFactory{
-		BaseCollectorFactory: config.NewBaseCollectorFactory("ETCD", "etcd"),
+		BaseCollectorFactory: collectors.NewBaseCollectorFactory("ETCD", "etcd"),
 	}
 }
 
 // CreateCollector creates a new ETCD collector from configuration
-func (f *ETCDFactory) CreateCollector(ctx context.Context, cfg config.CollectorConfig) (config.Collector, error) {
+func (f *ETCDFactory) CreateCollector(cfg config.CollectorConfig) (collectors.Collector, error) {
 	etcdConfig, ok := cfg.(*config.ETCDConfig)
 	if !ok {
 		return nil, fmt.Errorf("invalid config type for ETCD collector, expected *config.ETCDConfig, got %T", cfg)

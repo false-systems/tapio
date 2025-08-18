@@ -1,27 +1,27 @@
 package dns
 
 import (
-	"context"
 	"fmt"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/config"
 )
 
 // DNSFactory creates DNS collectors from type-safe configuration
 type DNSFactory struct {
-	*config.BaseCollectorFactory
+	*collectors.BaseCollectorFactory
 }
 
 // NewDNSFactory creates a new DNS collector factory
 func NewDNSFactory() *DNSFactory {
 	return &DNSFactory{
-		BaseCollectorFactory: config.NewBaseCollectorFactory("DNS", "dns"),
+		BaseCollectorFactory: collectors.NewBaseCollectorFactory("DNS", "dns"),
 	}
 }
 
 // CreateCollector creates a new DNS collector from configuration
-func (f *DNSFactory) CreateCollector(ctx context.Context, cfg config.CollectorConfig) (config.Collector, error) {
+func (f *DNSFactory) CreateCollector(cfg config.CollectorConfig) (collectors.Collector, error) {
 	dnsConfig, ok := cfg.(*config.DNSConfig)
 	if !ok {
 		return nil, fmt.Errorf("invalid config type for DNS collector, expected *config.DNSConfig, got %T", cfg)
@@ -64,10 +64,15 @@ func (f *DNSFactory) CreateCollector(ctx context.Context, cfg config.CollectorCo
 	return collector, nil
 }
 
+// SupportedTypes returns the collector types this factory supports
+func (f *DNSFactory) SupportedTypes() []string {
+	return f.BaseCollectorFactory.SupportedTypes()
+}
+
 // ValidateConfig validates that the provided config is compatible with this factory
 func (f *DNSFactory) ValidateConfig(cfg config.CollectorConfig) error {
 	// First run base validation
-	if err := f.BaseCollectorFactory.ValidateConfig(cfg); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 

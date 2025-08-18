@@ -1,26 +1,26 @@
 package cni
 
 import (
-	"context"
 	"fmt"
 
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/config"
 )
 
 // CNIFactory creates CNI collectors from type-safe configuration
 type CNIFactory struct {
-	*config.BaseCollectorFactory
+	*collectors.BaseCollectorFactory
 }
 
 // NewCNIFactory creates a new CNI collector factory
 func NewCNIFactory() *CNIFactory {
 	return &CNIFactory{
-		BaseCollectorFactory: config.NewBaseCollectorFactory("CNI", "cni"),
+		BaseCollectorFactory: collectors.NewBaseCollectorFactory("CNI", "cni"),
 	}
 }
 
 // CreateCollector creates a new CNI collector from configuration
-func (f *CNIFactory) CreateCollector(ctx context.Context, cfg config.CollectorConfig) (config.Collector, error) {
+func (f *CNIFactory) CreateCollector(cfg config.CollectorConfig) (collectors.Collector, error) {
 	cniConfig, ok := cfg.(*config.CNIConfig)
 	if !ok {
 		return nil, fmt.Errorf("invalid config type for CNI collector, expected *config.CNIConfig, got %T", cfg)
@@ -35,10 +35,15 @@ func (f *CNIFactory) CreateCollector(ctx context.Context, cfg config.CollectorCo
 	return collector, nil
 }
 
+// SupportedTypes returns the collector types this factory supports
+func (f *CNIFactory) SupportedTypes() []string {
+	return f.BaseCollectorFactory.SupportedTypes()
+}
+
 // ValidateConfig validates that the provided config is compatible with this factory
 func (f *CNIFactory) ValidateConfig(cfg config.CollectorConfig) error {
 	// First run base validation
-	if err := f.BaseCollectorFactory.ValidateConfig(cfg); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
