@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -107,16 +108,24 @@ func (c *Collector) handleK8sEvent(eventType, resourceType string, obj interface
 	annotations := unstructuredObj.GetAnnotations()
 	traceID, spanID := collectors.ExtractTraceIDFromAnnotations(annotations)
 
-	// Create raw event with just the data - NO enrichment or correlation
-	eventData := map[string]interface{}{
-		"api_version": unstructuredObj.GetAPIVersion(),
-		"kind":        unstructuredObj.GetKind(),
-		"name":        unstructuredObj.GetName(),
-		"namespace":   unstructuredObj.GetNamespace(),
-		"uid":         string(unstructuredObj.GetUID()),
-		"resource":    resourceType,
-		"action":      eventType,
-		"object":      unstructuredObj.Object, // Raw K8s object
+	// Create typed event data
+	eventData := &domain.K8sEventData{
+		Type:      eventType,
+		Timestamp: time.Now(),
+		Source:    "kubeapi",
+		Labels: map[string]string{
+			"resource": resourceType,
+			"action":   eventType,
+		},
+		Object: &domain.ObjectData{
+			Kind:        unstructuredObj.GetKind(),
+			APIVersion:  unstructuredObj.GetAPIVersion(),
+			Name:        unstructuredObj.GetName(),
+			Namespace:   unstructuredObj.GetNamespace(),
+			UID:         string(unstructuredObj.GetUID()),
+			Labels:      unstructuredObj.GetLabels(),
+			Annotations: unstructuredObj.GetAnnotations(),
+		},
 	}
 
 	rawEvent := c.createEvent("api_event", eventData, traceID, spanID)

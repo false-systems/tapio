@@ -30,6 +30,7 @@ type Collector struct {
 	mu        sync.RWMutex
 	ebpfState interface{} // Platform-specific eBPF state
 	stats     CollectorStats
+	startTime time.Time
 	logger    *zap.Logger
 
 	// OTEL instrumentation - REQUIRED fields
@@ -41,12 +42,45 @@ type Collector struct {
 	apiLatency      metric.Float64Histogram
 }
 
-// CollectorStats tracks collector statistics
+// EtcdEventData represents strongly-typed etcd event data
+type EtcdEventData struct {
+	Key            string `json:"key"`
+	Value          string `json:"value"`
+	ModRevision    int64  `json:"mod_revision"`
+	CreateRevision int64  `json:"create_revision"`
+	Version        int64  `json:"version"`
+	ResourceType   string `json:"resource_type"`
+}
+
+// CollectorStats represents strongly-typed collector statistics
 type CollectorStats struct {
-	EventsCollected uint64
-	EventsDropped   uint64
-	ErrorCount      uint64
-	LastEventTime   time.Time
+	EventsProcessed int64             `json:"events_processed"`
+	ErrorCount      int64             `json:"error_count"`
+	LastEventTime   time.Time         `json:"last_event_time"`
+	Uptime          time.Duration     `json:"uptime"`
+	CustomMetrics   map[string]string `json:"custom_metrics,omitempty"`
+}
+
+// HealthStatus represents strongly-typed health status
+type HealthStatus struct {
+	Healthy       bool              `json:"healthy"`
+	Message       string            `json:"message"`
+	LastCheck     time.Time         `json:"last_check"`
+	ComponentInfo map[string]string `json:"component_info,omitempty"`
+}
+
+// EBPFEventData represents strongly-typed eBPF event data
+type EBPFEventData struct {
+	Timestamp uint64 `json:"timestamp"`
+	PID       uint32 `json:"pid"`
+	TID       uint32 `json:"tid"`
+	Type      uint32 `json:"type"`
+	DataLen   uint32 `json:"data_len"`
+	SrcIP     string `json:"src_ip,omitempty"`
+	DstIP     string `json:"dst_ip,omitempty"`
+	SrcPort   uint16 `json:"src_port,omitempty"`
+	DstPort   uint16 `json:"dst_port,omitempty"`
+	RawData   []byte `json:"raw_data,omitempty"`
 }
 
 // NewCollector creates a new minimal etcd collector
@@ -111,6 +145,7 @@ func NewCollector(name string, config Config) (*Collector, error) {
 		config:          config,
 		events:          make(chan collectors.RawEvent, 10000), // Large buffer
 		healthy:         true,
+		startTime:       time.Now(),
 		logger:          logger,
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -413,14 +448,14 @@ func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event)
 		attribute.Int("etcd.value_size", len(event.Kv.Value)),
 	)
 
-	// Create event data with raw etcd information
-	eventData := map[string]interface{}{
-		"key":             key,
-		"value":           string(event.Kv.Value),
-		"mod_revision":    event.Kv.ModRevision,
-		"create_revision": event.Kv.CreateRevision,
-		"version":         event.Kv.Version,
-		"resource_type":   resourceType,
+	// Create strongly-typed event data
+	eventData := EtcdEventData{
+		Key:            key,
+		Value:          string(event.Kv.Value),
+		ModRevision:    event.Kv.ModRevision,
+		CreateRevision: event.Kv.CreateRevision,
+		Version:        event.Kv.Version,
+		ResourceType:   resourceType,
 	}
 
 	rawEvent := c.createEventWithContext(ctx, operation, eventData)
@@ -437,7 +472,7 @@ func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event)
 	select {
 	case c.events <- rawEvent:
 		c.mu.Lock()
-		c.stats.EventsCollected++
+		c.stats.EventsProcessed++
 		c.stats.LastEventTime = time.Now()
 		c.mu.Unlock()
 
@@ -461,7 +496,7 @@ func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event)
 	default:
 		// Buffer full, drop event
 		c.mu.Lock()
-		c.stats.EventsDropped++
+		c.stats.ErrorCount++
 		c.mu.Unlock()
 
 		if c.errorsTotal != nil {
@@ -618,47 +653,56 @@ func (c *Collector) extractTraceContext(ctx context.Context) (traceID, spanID st
 	return traceID, spanID
 }
 
-// Health returns detailed health information
-func (c *Collector) Health() (bool, map[string]interface{}) {
+// Health returns strongly-typed health information
+func (c *Collector) Health() *HealthStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	health := map[string]interface{}{
-		"healthy":          c.healthy,
-		"events_collected": c.stats.EventsCollected,
-		"events_dropped":   c.stats.EventsDropped,
-		"error_count":      c.stats.ErrorCount,
-		"last_event":       c.stats.LastEventTime,
-		"client_connected": c.client != nil,
-		"ebpf_active":      c.ebpfState != nil,
-		"instrumentation":  "etcd",
-		"endpoints":        c.config.Endpoints,
-		"buffer_size":      cap(c.events),
-		"buffer_available": cap(c.events) - len(c.events),
+	message := "Collector running normally"
+	if !c.healthy {
+		message = "Collector is unhealthy"
 	}
 
-	return c.healthy, health
+	// Build component info map
+	componentInfo := make(map[string]string)
+	componentInfo["client_connected"] = fmt.Sprintf("%t", c.client != nil)
+	componentInfo["ebpf_active"] = fmt.Sprintf("%t", c.ebpfState != nil)
+	componentInfo["instrumentation"] = "etcd"
+	componentInfo["endpoints"] = strings.Join(c.config.Endpoints, ",")
+	componentInfo["buffer_size"] = fmt.Sprintf("%d", cap(c.events))
+	componentInfo["buffer_available"] = fmt.Sprintf("%d", cap(c.events)-len(c.events))
+	componentInfo["events_processed"] = fmt.Sprintf("%d", c.stats.EventsProcessed)
+	componentInfo["error_count"] = fmt.Sprintf("%d", c.stats.ErrorCount)
+
+	return &HealthStatus{
+		Healthy:       c.healthy,
+		Message:       message,
+		LastCheck:     time.Now(),
+		ComponentInfo: componentInfo,
+	}
 }
 
-// Statistics returns collector statistics
-func (c *Collector) Statistics() map[string]interface{} {
+// Statistics returns strongly-typed collector statistics
+func (c *Collector) Statistics() *CollectorStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	stats := map[string]interface{}{
-		"events_collected":    c.stats.EventsCollected,
-		"events_dropped":      c.stats.EventsDropped,
-		"error_count":         c.stats.ErrorCount,
-		"last_event_time":     c.stats.LastEventTime,
-		"collector_name":      c.name,
-		"service_name":        "etcd",
-		"config_endpoints":    c.config.Endpoints,
-		"buffer_capacity":     cap(c.events),
-		"buffer_current_size": len(c.events),
-		"buffer_utilization":  float64(len(c.events)) / float64(cap(c.events)),
-		"ebpf_enabled":        c.ebpfState != nil,
-		"auth_enabled":        c.config.Username != "",
-	}
+	// Build custom metrics map
+	customMetrics := make(map[string]string)
+	customMetrics["collector_name"] = c.name
+	customMetrics["service_name"] = "etcd"
+	customMetrics["config_endpoints"] = strings.Join(c.config.Endpoints, ",")
+	customMetrics["buffer_capacity"] = fmt.Sprintf("%d", cap(c.events))
+	customMetrics["buffer_current_size"] = fmt.Sprintf("%d", len(c.events))
+	customMetrics["buffer_utilization"] = fmt.Sprintf("%.2f", float64(len(c.events))/float64(cap(c.events)))
+	customMetrics["ebpf_enabled"] = fmt.Sprintf("%t", c.ebpfState != nil)
+	customMetrics["auth_enabled"] = fmt.Sprintf("%t", c.config.Username != "")
 
-	return stats
+	return &CollectorStats{
+		EventsProcessed: c.stats.EventsProcessed,
+		ErrorCount:      c.stats.ErrorCount,
+		LastEventTime:   c.stats.LastEventTime,
+		Uptime:          time.Since(c.startTime),
+		CustomMetrics:   customMetrics,
+	}
 }
