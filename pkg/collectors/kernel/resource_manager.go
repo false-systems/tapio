@@ -17,32 +17,32 @@ import (
 // ResourceManager manages system resources for the kernel collector
 type ResourceManager struct {
 	config *ResourceLimits
-	
+
 	// Resource tracking
-	memoryUsage   int64 // Current memory usage in bytes (atomic)
+	memoryUsage   int64   // Current memory usage in bytes (atomic)
 	cpuUsage      float64 // Current CPU usage percentage
-	eventQueueLen int64 // Current event queue length (atomic)
-	
+	eventQueueLen int64   // Current event queue length (atomic)
+
 	// Throttling state
 	memoryThrottled int32 // 1 if memory throttled, 0 if not (atomic)
 	cpuThrottled    int32 // 1 if CPU throttled, 0 if not (atomic)
 	queueThrottled  int32 // 1 if queue throttled, 0 if not (atomic)
-	
+
 	// Resource monitors
 	memoryMonitor *MemoryMonitor
 	cpuMonitor    *CPUMonitor
 	queueMonitor  *QueueMonitor
-	
+
 	// Cgroup integration
 	cgroupManager *CgroupManager
-	
+
 	// Metrics
-	memoryGauge      metric.Int64Gauge
-	cpuGauge         metric.Float64Gauge
-	queueGauge       metric.Int64Gauge
-	throttleCounter  metric.Int64Counter
-	limitGauge       metric.Int64Gauge
-	
+	memoryGauge     metric.Int64Gauge
+	cpuGauge        metric.Float64Gauge
+	queueGauge      metric.Int64Gauge
+	throttleCounter metric.Int64Counter
+	limitGauge      metric.Int64Gauge
+
 	// Control
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -63,24 +63,24 @@ type MemoryMonitor struct {
 
 // CPUMonitor tracks CPU usage and enforces limits
 type CPUMonitor struct {
-	limit         float64
-	currentUsage  float64
-	peakUsage     float64
-	samples       []float64
-	sampleIndex   int
-	lastMeasure   time.Time
-	mu            sync.RWMutex
+	limit        float64
+	currentUsage float64
+	peakUsage    float64
+	samples      []float64
+	sampleIndex  int
+	lastMeasure  time.Time
+	mu           sync.RWMutex
 }
 
 // QueueMonitor tracks event queue usage and enforces limits
 type QueueMonitor struct {
-	limit         int64
-	currentSize   int64
-	peakSize      int64
-	enqueued      int64
-	dequeued      int64
-	dropped       int64
-	mu            sync.RWMutex
+	limit       int64
+	currentSize int64
+	peakSize    int64
+	enqueued    int64
+	dequeued    int64
+	dropped     int64
+	mu          sync.RWMutex
 }
 
 // CgroupManager manages cgroup resource limits
@@ -95,7 +95,7 @@ type CgroupManager struct {
 func NewResourceManager(config *ResourceLimits) *ResourceManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	meter := otel.Meter("tapio/collectors/kernel")
-	
+
 	rm := &ResourceManager{
 		config:        config,
 		ctx:           ctx,
@@ -105,7 +105,7 @@ func NewResourceManager(config *ResourceLimits) *ResourceManager {
 		queueMonitor:  NewQueueMonitor(int64(config.EventQueueSize)),
 		cgroupManager: NewCgroupManager(),
 	}
-	
+
 	// Initialize metrics
 	var err error
 	rm.memoryGauge, err = meter.Int64Gauge(
@@ -115,7 +115,7 @@ func NewResourceManager(config *ResourceLimits) *ResourceManager {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	rm.cpuGauge, err = meter.Float64Gauge(
 		"kernel_collector_cpu_percent",
 		metric.WithDescription("Current CPU usage percentage"),
@@ -123,7 +123,7 @@ func NewResourceManager(config *ResourceLimits) *ResourceManager {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	rm.queueGauge, err = meter.Int64Gauge(
 		"kernel_collector_queue_size",
 		metric.WithDescription("Current event queue size"),
@@ -131,7 +131,7 @@ func NewResourceManager(config *ResourceLimits) *ResourceManager {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	rm.throttleCounter, err = meter.Int64Counter(
 		"kernel_collector_throttle_total",
 		metric.WithDescription("Total number of throttle events by type"),
@@ -139,7 +139,7 @@ func NewResourceManager(config *ResourceLimits) *ResourceManager {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	rm.limitGauge, err = meter.Int64Gauge(
 		"kernel_collector_limits",
 		metric.WithDescription("Configured resource limits"),
@@ -147,7 +147,7 @@ func NewResourceManager(config *ResourceLimits) *ResourceManager {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	return rm
 }
 
@@ -190,7 +190,7 @@ func (cm *CgroupManager) detectCgroupPaths() {
 		cm.enabled = true
 		return
 	}
-	
+
 	// Try cgroup v1
 	if err := unix.Stat("/sys/fs/cgroup/memory/memory.limit_in_bytes", &unix.Stat_t{}); err == nil {
 		cm.memoryPath = "/sys/fs/cgroup/memory"
@@ -203,22 +203,22 @@ func (cm *CgroupManager) detectCgroupPaths() {
 func (rm *ResourceManager) Start() error {
 	// Start monitoring goroutines
 	rm.wg.Add(3)
-	
+
 	go func() {
 		defer rm.wg.Done()
 		rm.monitorMemory()
 	}()
-	
+
 	go func() {
 		defer rm.wg.Done()
 		rm.monitorCPU()
 	}()
-	
+
 	go func() {
 		defer rm.wg.Done()
 		rm.monitorQueue()
 	}()
-	
+
 	// Update limit metrics
 	if rm.limitGauge != nil {
 		rm.limitGauge.Record(rm.ctx, int64(rm.config.MaxMemoryMB),
@@ -228,7 +228,7 @@ func (rm *ResourceManager) Start() error {
 		rm.limitGauge.Record(rm.ctx, int64(rm.config.EventQueueSize),
 			metric.WithAttributes(attribute.String("type", "queue_size")))
 	}
-	
+
 	return nil
 }
 
@@ -236,7 +236,7 @@ func (rm *ResourceManager) Start() error {
 func (rm *ResourceManager) monitorMemory() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -251,7 +251,7 @@ func (rm *ResourceManager) monitorMemory() {
 func (rm *ResourceManager) monitorCPU() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -266,7 +266,7 @@ func (rm *ResourceManager) monitorCPU() {
 func (rm *ResourceManager) monitorQueue() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -281,10 +281,10 @@ func (rm *ResourceManager) monitorQueue() {
 func (rm *ResourceManager) updateMemoryUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	currentUsage := int64(m.Alloc)
 	atomic.StoreInt64(&rm.memoryUsage, currentUsage)
-	
+
 	rm.memoryMonitor.mu.Lock()
 	rm.memoryMonitor.currentUsage = currentUsage
 	if currentUsage > rm.memoryMonitor.peakUsage {
@@ -294,7 +294,7 @@ func (rm *ResourceManager) updateMemoryUsage() {
 	rm.memoryMonitor.deallocations = int64(m.Frees)
 	rm.memoryMonitor.gcCount = m.NumGC
 	rm.memoryMonitor.mu.Unlock()
-	
+
 	// Check if we need to throttle
 	if currentUsage > rm.memoryMonitor.limit {
 		if atomic.CompareAndSwapInt32(&rm.memoryThrottled, 0, 1) {
@@ -303,7 +303,7 @@ func (rm *ResourceManager) updateMemoryUsage() {
 				rm.throttleCounter.Add(rm.ctx, 1,
 					metric.WithAttributes(attribute.String("type", "memory")))
 			}
-			
+
 			// Force garbage collection
 			runtime.GC()
 		}
@@ -311,7 +311,7 @@ func (rm *ResourceManager) updateMemoryUsage() {
 		// Stop throttling if we're below 80% of limit
 		atomic.StoreInt32(&rm.memoryThrottled, 0)
 	}
-	
+
 	// Update metrics
 	if rm.memoryGauge != nil {
 		rm.memoryGauge.Record(rm.ctx, currentUsage)
@@ -322,31 +322,31 @@ func (rm *ResourceManager) updateMemoryUsage() {
 func (rm *ResourceManager) updateCPUUsage() {
 	now := time.Now()
 	elapsed := now.Sub(rm.cpuMonitor.lastMeasure)
-	
+
 	// Get CPU times (simplified - would use more accurate measurement in production)
 	var rusage unix.Rusage
 	if err := unix.Getrusage(unix.RUSAGE_SELF, &rusage); err == nil {
 		userTime := time.Duration(rusage.Utime.Sec)*time.Second + time.Duration(rusage.Utime.Usec)*time.Microsecond
 		sysTime := time.Duration(rusage.Stime.Sec)*time.Second + time.Duration(rusage.Stime.Usec)*time.Microsecond
 		totalCPUTime := userTime + sysTime
-		
+
 		// Calculate CPU percentage (simplified)
 		cpuPercent := float64(totalCPUTime) / float64(elapsed) * 100
 		if cpuPercent > 100 {
 			cpuPercent = 100 // Cap at 100%
 		}
-		
+
 		rm.cpuMonitor.mu.Lock()
 		rm.cpuMonitor.currentUsage = cpuPercent
 		if cpuPercent > rm.cpuMonitor.peakUsage {
 			rm.cpuMonitor.peakUsage = cpuPercent
 		}
-		
+
 		// Update moving average
 		rm.cpuMonitor.samples[rm.cpuMonitor.sampleIndex] = cpuPercent
 		rm.cpuMonitor.sampleIndex = (rm.cpuMonitor.sampleIndex + 1) % len(rm.cpuMonitor.samples)
 		rm.cpuMonitor.lastMeasure = now
-		
+
 		// Calculate average
 		var sum float64
 		for _, sample := range rm.cpuMonitor.samples {
@@ -354,7 +354,7 @@ func (rm *ResourceManager) updateCPUUsage() {
 		}
 		avgCPU := sum / float64(len(rm.cpuMonitor.samples))
 		rm.cpuMonitor.mu.Unlock()
-		
+
 		// Check if we need to throttle
 		if avgCPU > rm.cpuMonitor.limit {
 			if atomic.CompareAndSwapInt32(&rm.cpuThrottled, 0, 1) {
@@ -366,7 +366,7 @@ func (rm *ResourceManager) updateCPUUsage() {
 		} else if avgCPU < rm.cpuMonitor.limit*0.8 {
 			atomic.StoreInt32(&rm.cpuThrottled, 0)
 		}
-		
+
 		// Update metrics
 		if rm.cpuGauge != nil {
 			rm.cpuGauge.Record(rm.ctx, avgCPU)
@@ -377,14 +377,14 @@ func (rm *ResourceManager) updateCPUUsage() {
 // updateQueueUsage updates queue usage metrics
 func (rm *ResourceManager) updateQueueUsage() {
 	currentSize := atomic.LoadInt64(&rm.eventQueueLen)
-	
+
 	rm.queueMonitor.mu.Lock()
 	rm.queueMonitor.currentSize = currentSize
 	if currentSize > rm.queueMonitor.peakSize {
 		rm.queueMonitor.peakSize = currentSize
 	}
 	rm.queueMonitor.mu.Unlock()
-	
+
 	// Check if we need to throttle
 	if currentSize > rm.queueMonitor.limit {
 		if atomic.CompareAndSwapInt32(&rm.queueThrottled, 0, 1) {
@@ -396,7 +396,7 @@ func (rm *ResourceManager) updateQueueUsage() {
 	} else if currentSize < int64(float64(rm.queueMonitor.limit)*0.8) {
 		atomic.StoreInt32(&rm.queueThrottled, 0)
 	}
-	
+
 	// Update metrics
 	if rm.queueGauge != nil {
 		rm.queueGauge.Record(rm.ctx, currentSize)
@@ -409,14 +409,14 @@ func (rm *ResourceManager) CanProcessEvent() bool {
 	memThrottled := atomic.LoadInt32(&rm.memoryThrottled) == 1
 	cpuThrottled := atomic.LoadInt32(&rm.cpuThrottled) == 1
 	queueThrottled := atomic.LoadInt32(&rm.queueThrottled) == 1
-	
+
 	return !memThrottled && !cpuThrottled && !queueThrottled
 }
 
 // RecordEventEnqueue records an event being added to the queue
 func (rm *ResourceManager) RecordEventEnqueue() {
 	atomic.AddInt64(&rm.eventQueueLen, 1)
-	
+
 	rm.queueMonitor.mu.Lock()
 	rm.queueMonitor.enqueued++
 	rm.queueMonitor.mu.Unlock()
@@ -425,7 +425,7 @@ func (rm *ResourceManager) RecordEventEnqueue() {
 // RecordEventDequeue records an event being removed from the queue
 func (rm *ResourceManager) RecordEventDequeue() {
 	atomic.AddInt64(&rm.eventQueueLen, -1)
-	
+
 	rm.queueMonitor.mu.Lock()
 	rm.queueMonitor.dequeued++
 	rm.queueMonitor.mu.Unlock()
@@ -474,7 +474,7 @@ func (rm *ResourceManager) IsQueueThrottled() bool {
 func (rm *ResourceManager) ForceGC() {
 	currentUsage := atomic.LoadInt64(&rm.memoryUsage)
 	threshold := int64(float64(rm.memoryMonitor.limit) * 0.9) // 90% of limit
-	
+
 	if currentUsage > threshold {
 		runtime.GC()
 		runtime.GC() // Double GC for more aggressive cleanup
@@ -486,13 +486,13 @@ func (rm *ResourceManager) ApplyCgroupLimits() error {
 	if !rm.cgroupManager.enabled {
 		return fmt.Errorf("cgroups not available")
 	}
-	
+
 	rm.cgroupManager.mu.Lock()
 	defer rm.cgroupManager.mu.Unlock()
-	
+
 	// This would write to cgroup files to set limits
 	// Implementation depends on cgroup version and container runtime
-	
+
 	return nil
 }
 
@@ -508,7 +508,7 @@ func (rm *ResourceManager) GetStats() ResourceStats {
 		GCCount:       rm.memoryMonitor.gcCount,
 	}
 	rm.memoryMonitor.mu.RUnlock()
-	
+
 	rm.cpuMonitor.mu.RLock()
 	cpuStats := CPUStats{
 		Current: rm.cpuMonitor.currentUsage,
@@ -516,7 +516,7 @@ func (rm *ResourceManager) GetStats() ResourceStats {
 		Limit:   rm.cpuMonitor.limit,
 	}
 	rm.cpuMonitor.mu.RUnlock()
-	
+
 	rm.queueMonitor.mu.RLock()
 	queueStats := QueueStats{
 		Current:  rm.queueMonitor.currentSize,
@@ -527,14 +527,14 @@ func (rm *ResourceManager) GetStats() ResourceStats {
 		Dropped:  rm.queueMonitor.dropped,
 	}
 	rm.queueMonitor.mu.RUnlock()
-	
+
 	return ResourceStats{
-		Memory:           memStats,
-		CPU:              cpuStats,
-		Queue:            queueStats,
-		MemoryThrottled:  rm.IsMemoryThrottled(),
-		CPUThrottled:     rm.IsCPUThrottled(),
-		QueueThrottled:   rm.IsQueueThrottled(),
+		Memory:          memStats,
+		CPU:             cpuStats,
+		Queue:           queueStats,
+		MemoryThrottled: rm.IsMemoryThrottled(),
+		CPUThrottled:    rm.IsCPUThrottled(),
+		QueueThrottled:  rm.IsQueueThrottled(),
 	}
 }
 

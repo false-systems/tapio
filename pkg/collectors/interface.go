@@ -2,32 +2,9 @@ package collectors
 
 import (
 	"context"
-	"time"
+
+	"github.com/yairfalse/tapio/pkg/domain"
 )
-
-// RawEvent represents raw data collected from any source
-type RawEvent struct {
-	// Timestamp when the event was collected
-	Timestamp time.Time
-
-	// Type identifies the collector that generated this event
-	Type string
-
-	// Data contains the raw bytes from the collector
-	// This will be interpreted by the pipeline based on Type
-	Data []byte
-
-	// Metadata provides basic context without business logic
-	Metadata map[string]string
-
-	// TraceID is the OpenTelemetry trace identifier for distributed tracing
-	// Format: 32-character lowercase hex string (128-bit value)
-	TraceID string
-
-	// SpanID is the OpenTelemetry span identifier for this specific operation
-	// Format: 16-character lowercase hex string (64-bit value)
-	SpanID string
-}
 
 // Collector defines the minimal interface that all collectors must implement
 type Collector interface {
@@ -43,7 +20,7 @@ type Collector interface {
 
 	// Events returns a channel of raw events
 	// The channel is closed when the collector stops
-	Events() <-chan RawEvent
+	Events() <-chan domain.RawEvent
 
 	// IsHealthy returns true if the collector is functioning properly
 	IsHealthy() bool
@@ -69,5 +46,3 @@ func DefaultCollectorConfig() CollectorConfig {
 		Labels:         make(map[string]string),
 	}
 }
-
-// These will be defined by importing config package in each collector's factory

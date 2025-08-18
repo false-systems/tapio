@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -139,7 +140,7 @@ type Collector struct {
 	name            string
 	config          *Config
 	client          *http.Client
-	events          chan collectors.RawEvent
+	events          chan domain.RawEvent
 	ctx             context.Context
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
@@ -256,7 +257,7 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		name:            name,
 		config:          config,
 		client:          client,
-		events:          make(chan collectors.RawEvent, 10000),
+		events:          make(chan domain.RawEvent, 10000),
 		healthy:         true,
 		logger:          config.Logger,
 		podTraceManager: NewPodTraceManager(),
@@ -311,7 +312,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
@@ -495,25 +496,10 @@ func (c *Collector) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1
 		return
 	}
 
-	metadata := map[string]string{
-		"collector":       "kubelet",
-		"event_type":      "node_cpu",
-		"node_name":       summary.Node.NodeName,
-		"k8s_node":        summary.Node.NodeName,
-		"cpu_usage_nano":  fmt.Sprintf("%d", eventData.CPUUsageNano),
-		"cpu_usage_milli": fmt.Sprintf("%d", eventData.CPUUsageMilli),
-	}
-
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
-
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubelet_node_cpu",
+		Source:    "kubelet_node_cpu",
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 
 	select {
@@ -547,26 +533,10 @@ func (c *Collector) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alp
 		return
 	}
 
-	metadata := map[string]string{
-		"collector":          "kubelet",
-		"event_type":         "node_memory",
-		"node_name":          summary.Node.NodeName,
-		"k8s_node":           summary.Node.NodeName,
-		"memory_usage_bytes": fmt.Sprintf("%d", eventData.MemoryUsage),
-		"memory_available":   fmt.Sprintf("%d", eventData.MemoryAvailable),
-		"memory_working_set": fmt.Sprintf("%d", eventData.MemoryWorkingSet),
-	}
-
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
-
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubelet_node_memory",
+		Source:    "kubelet_node_memory",
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 
 	select {
@@ -624,27 +594,10 @@ func (c *Collector) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.P
 		return
 	}
 
-	metadata := map[string]string{
-		"collector":      "kubelet",
-		"event_type":     "kubelet_cpu_throttling",
-		"k8s_namespace":  pod.PodRef.Namespace,
-		"k8s_name":       pod.PodRef.Name,
-		"k8s_kind":       "Pod",
-		"k8s_uid":        string(pod.PodRef.UID),
-		"container_name": container.Name,
-		"cpu_usage_nano": fmt.Sprintf("%d", eventData.CPUUsageNano),
-	}
-
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
-
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubelet_cpu_throttling",
+		Source:    "kubelet_cpu_throttling",
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 
 	select {
@@ -685,33 +638,14 @@ func (c *Collector) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.
 		return
 	}
 
-	metadata := map[string]string{
-		"collector":          "kubelet",
-		"event_type":         "kubelet_memory_pressure",
-		"k8s_namespace":      pod.PodRef.Namespace,
-		"k8s_name":           pod.PodRef.Name,
-		"k8s_kind":           "Pod",
-		"k8s_uid":            string(pod.PodRef.UID),
-		"container_name":     container.Name,
-		"memory_usage":       fmt.Sprintf("%d", eventData.MemoryUsage),
-		"memory_working_set": fmt.Sprintf("%d", eventData.MemoryWorkingSet),
-	}
-
 	// Check if RSS is available (indicates memory pressure)
 	if container.Memory.RSSBytes != nil {
-		metadata["memory_rss"] = fmt.Sprintf("%d", *container.Memory.RSSBytes)
 	}
 
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
-
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubelet_memory_pressure",
+		Source:    "kubelet_memory_pressure",
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 
 	select {
@@ -761,28 +695,10 @@ func (c *Collector) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha
 			return
 		}
 
-		metadata := map[string]string{
-			"collector":               "kubelet",
-			"event_type":              "kubelet_ephemeral_storage",
-			"k8s_namespace":           pod.PodRef.Namespace,
-			"k8s_name":                pod.PodRef.Name,
-			"k8s_kind":                "Pod",
-			"k8s_uid":                 string(pod.PodRef.UID),
-			"storage_used_bytes":      fmt.Sprintf("%d", eventData.UsedBytes),
-			"storage_available_bytes": fmt.Sprintf("%d", eventData.AvailableBytes),
-			"storage_usage_percent":   fmt.Sprintf("%.2f", eventData.UsagePercent),
-		}
-
-		// Extract trace context from current span if available
-		traceID, spanID := c.extractTraceContext(ctx)
-
-		event := collectors.RawEvent{
+		event := domain.RawEvent{
 			Timestamp: time.Now(),
-			Type:      "kubelet_ephemeral_storage",
+			Source:    "kubelet_ephemeral_storage",
 			Data:      data,
-			Metadata:  metadata,
-			TraceID:   traceID,
-			SpanID:    spanID,
 		}
 
 		select {
@@ -972,28 +888,10 @@ func (c *Collector) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, 
 		return
 	}
 
-	metadata := map[string]string{
-		"collector":       "kubelet",
-		"event_type":      "kubelet_container_waiting",
-		"k8s_namespace":   pod.Namespace,
-		"k8s_name":        pod.Name,
-		"k8s_kind":        "Pod",
-		"k8s_uid":         string(pod.UID),
-		"container_name":  status.Name,
-		"waiting_reason":  eventData.Reason,
-		"waiting_message": eventData.Message,
-	}
-
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
-
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubelet_container_waiting",
+		Source:    "kubelet_container_waiting",
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 
 	select {
@@ -1032,29 +930,10 @@ func (c *Collector) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Po
 		return
 	}
 
-	metadata := map[string]string{
-		"collector":      "kubelet",
-		"event_type":     "container_terminated",
-		"k8s_namespace":  pod.Namespace,
-		"k8s_name":       pod.Name,
-		"k8s_kind":       "Pod",
-		"k8s_uid":        string(pod.UID),
-		"container_name": status.Name,
-		"exit_code":      fmt.Sprintf("%d", eventData.ExitCode),
-		"exit_reason":    eventData.Reason,
-		"exit_message":   eventData.Message,
-	}
-
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
-
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubelet_container_terminated",
+		Source:    "kubelet_container_terminated",
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 
 	select {
@@ -1094,29 +973,10 @@ func (c *Collector) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status 
 			return
 		}
 
-		metadata := map[string]string{
-			"collector":        "kubelet",
-			"event_type":       "kubelet_crash_loop",
-			"k8s_namespace":    pod.Namespace,
-			"k8s_name":         pod.Name,
-			"k8s_kind":         "Pod",
-			"k8s_uid":          string(pod.UID),
-			"container_name":   status.Name,
-			"restart_count":    fmt.Sprintf("%d", eventData.RestartCount),
-			"last_exit_code":   fmt.Sprintf("%d", eventData.LastExitCode),
-			"last_exit_reason": eventData.LastReason,
-		}
-
-		// Extract trace context from current span if available
-		traceID, spanID := c.extractTraceContext(ctx)
-
-		event := collectors.RawEvent{
+		event := domain.RawEvent{
 			Timestamp: time.Now(),
-			Type:      "kubelet_crash_loop",
+			Source:    "kubelet_crash_loop",
 			Data:      data,
-			Metadata:  metadata,
-			TraceID:   traceID,
-			SpanID:    spanID,
 		}
 
 		select {
@@ -1156,29 +1016,10 @@ func (c *Collector) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condi
 		return
 	}
 
-	metadata := map[string]string{
-		"collector":         "kubelet",
-		"event_type":        "pod_not_ready",
-		"k8s_namespace":     pod.Namespace,
-		"k8s_name":          pod.Name,
-		"k8s_kind":          "Pod",
-		"k8s_uid":           string(pod.UID),
-		"condition_type":    eventData.Condition,
-		"condition_status":  eventData.Status,
-		"condition_reason":  eventData.Reason,
-		"condition_message": eventData.Message,
-	}
-
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
-
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubelet_pod_not_ready",
+		Source:    "kubelet_pod_not_ready",
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 
 	select {
@@ -1253,7 +1094,6 @@ func (ptm *PodTraceManager) GetOrGenerate(podUID types.UID) string {
 	ptm.mu.Lock()
 	traceID := collectors.GenerateTraceID()
 	ptm.entries[podUID] = &PodTraceEntry{
-		TraceID:   traceID,
 		Timestamp: time.Now(),
 	}
 	ptm.mu.Unlock()

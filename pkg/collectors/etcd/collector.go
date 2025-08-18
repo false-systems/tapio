@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -23,7 +24,7 @@ type Collector struct {
 	name      string
 	config    Config
 	client    *clientv3.Client
-	events    chan collectors.RawEvent
+	events    chan domain.RawEvent
 	ctx       context.Context
 	cancel    context.CancelFunc
 	healthy   bool
@@ -143,7 +144,7 @@ func NewCollector(name string, config Config) (*Collector, error) {
 	return &Collector{
 		name:            name,
 		config:          config,
-		events:          make(chan collectors.RawEvent, 10000), // Large buffer
+		events:          make(chan domain.RawEvent, 10000), // Large buffer
 		healthy:         true,
 		startTime:       time.Now(),
 		logger:          logger,
@@ -344,7 +345,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
@@ -458,15 +459,21 @@ func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event)
 		ResourceType:   resourceType,
 	}
 
-	rawEvent := c.createEventWithContext(ctx, operation, eventData)
-	rawEvent.Metadata["resource_type"] = resourceType
-	rawEvent.Metadata["operation"] = operation
-
 	// Add enhanced K8s metadata - STANDARD for all collectors
 	k8sMetadata := c.extractK8sMetadata(key)
-	for k, v := range k8sMetadata {
-		rawEvent.Metadata[k] = v
+
+	// Create complete event with metadata
+	completeEvent := struct {
+		Operation   string            `json:"operation"`
+		EventData   EtcdEventData     `json:"event_data"`
+		K8sMetadata map[string]string `json:"k8s_metadata"`
+	}{
+		Operation:   operation,
+		EventData:   eventData,
+		K8sMetadata: k8sMetadata,
 	}
+
+	rawEvent := c.createEventWithContext(ctx, operation, completeEvent)
 
 	// Send event
 	select {
@@ -606,7 +613,7 @@ func (c *Collector) normalizeResourceType(resourceType string) string {
 }
 
 // Helper to create an etcd raw event with trace context
-func (c *Collector) createEventWithContext(ctx context.Context, eventType string, data interface{}) collectors.RawEvent {
+func (c *Collector) createEventWithContext(ctx context.Context, eventType string, data interface{}) domain.RawEvent {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		// If marshaling fails, create minimal event with error information
@@ -621,24 +628,17 @@ func (c *Collector) createEventWithContext(ctx context.Context, eventType string
 		}
 	}
 
-	// Extract trace context from current span if available
-	traceID, spanID := c.extractTraceContext(ctx)
+	// No need to extract trace context - it's handled at a higher level
 
-	return collectors.RawEvent{
+	return domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "etcd",
+		Source:    "etcd",
 		Data:      jsonData,
-		Metadata: map[string]string{
-			"collector": c.name,
-			"event":     eventType,
-		},
-		TraceID: traceID,
-		SpanID:  spanID,
 	}
 }
 
 // Helper to create an etcd raw event (backward compatibility)
-func (c *Collector) createEvent(eventType string, data interface{}) collectors.RawEvent {
+func (c *Collector) createEvent(eventType string, data interface{}) domain.RawEvent {
 	return c.createEventWithContext(context.Background(), eventType, data)
 }
 
