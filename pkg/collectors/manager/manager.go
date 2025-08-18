@@ -7,21 +7,30 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	collectorconfig "github.com/yairfalse/tapio/pkg/collectors/config"
-	factoryregistry "github.com/yairfalse/tapio/pkg/collectors/factory"
+	"github.com/yairfalse/tapio/pkg/collectors/cni"
+	"github.com/yairfalse/tapio/pkg/collectors/cri"
+	"github.com/yairfalse/tapio/pkg/collectors/dns"
+	"github.com/yairfalse/tapio/pkg/collectors/etcd"
+	"github.com/yairfalse/tapio/pkg/collectors/kernel"
+	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
+	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
+	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/domain"
+	"go.uber.org/zap"
 )
 
 // CollectorManager manages the lifecycle of multiple collectors
 type CollectorManager struct {
 	config *config.Config
+	logger *zap.Logger
 
 	// Collectors
 	collectors map[string]collectors.Collector
 	mu         sync.RWMutex
 
 	// Event aggregation
-	eventsChan chan collectors.RawEvent
+	eventsChan chan domain.RawEvent
 
 	// Lifecycle
 	ctx    context.Context
@@ -43,11 +52,22 @@ type CollectorHealth struct {
 }
 
 // NewManager creates a new collector manager
-func NewManager(cfg *config.Config) *CollectorManager {
+func NewManager(cfg *config.Config, logger *zap.Logger) *CollectorManager {
+	if logger == nil {
+		var err error
+		logger, err = zap.NewProduction()
+		if err != nil {
+			// Fall back to a no-op logger if production logger fails
+			// This ensures the manager can still function
+			logger = zap.NewNop()
+		}
+	}
+
 	return &CollectorManager{
 		config:     cfg,
+		logger:     logger,
 		collectors: make(map[string]collectors.Collector),
-		eventsChan: make(chan collectors.RawEvent, cfg.Collectors.BufferSize*len(cfg.Collectors.Enabled)),
+		eventsChan: make(chan domain.RawEvent, cfg.Collectors.BufferSize*len(cfg.Collectors.Enabled)),
 		health:     make(map[string]*CollectorHealth),
 	}
 }
@@ -65,16 +85,11 @@ func (m *CollectorManager) Start(ctx context.Context) error {
 
 	// Start each configured collector
 	for _, name := range m.config.Collectors.Enabled {
-		// Create specific config for this collector type
-		collectorConfig, err := m.createCollectorConfig(name)
+		collector, err := m.createCollector(name)
 		if err != nil {
-			// Log error but continue with other collectors
-			continue
-		}
-
-		collector, err := factoryregistry.CreateCollector(name, collectorConfig)
-		if err != nil {
-			// Log error but continue with other collectors
+			m.logger.Error("Failed to create collector",
+				zap.String("collector", name),
+				zap.Error(err))
 			continue
 		}
 
@@ -145,7 +160,7 @@ func (m *CollectorManager) Stop() error {
 }
 
 // Events returns the aggregated event channel
-func (m *CollectorManager) Events() <-chan collectors.RawEvent {
+func (m *CollectorManager) Events() <-chan domain.RawEvent {
 	return m.eventsChan
 }
 
@@ -192,12 +207,7 @@ func (m *CollectorManager) RestartCollector(name string) error {
 	}
 
 	// Create and start new instance
-	collectorConfig, err := m.createCollectorConfig(name)
-	if err != nil {
-		return fmt.Errorf("failed to create config: %w", err)
-	}
-
-	collector, err := factoryregistry.CreateCollector(name, collectorConfig)
+	collector, err := m.createCollector(name)
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}
@@ -293,36 +303,59 @@ func (m *CollectorManager) checkHealth() {
 	}
 }
 
-// createCollectorConfig creates a typed config for a specific collector
-func (m *CollectorManager) createCollectorConfig(collectorType string) (collectorconfig.CollectorConfig, error) {
+// createCollector creates a collector directly without factory pattern
+func (m *CollectorManager) createCollector(collectorType string) (collectors.Collector, error) {
 	switch collectorType {
 	case "cni":
-		config := collectorconfig.NewCNIConfig(collectorType)
-		config.BufferSize = m.config.Collectors.BufferSize
-		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
-		config.Labels = m.config.Collectors.Labels
-		return config, nil
+		return cni.NewCollector(collectorType)
 
 	case "cri":
-		config := collectorconfig.NewCRIConfig(collectorType)
-		config.BufferSize = m.config.Collectors.BufferSize
-		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
-		config.Labels = m.config.Collectors.Labels
-		return config, nil
+		config := cri.Config{
+			Name:            collectorType,
+			SocketPath:      "unix:///var/run/containerd/containerd.sock",
+			EventBufferSize: m.config.Collectors.BufferSize,
+			PollInterval:    time.Second * 5,
+			BatchSize:       100,
+			FlushInterval:   time.Second,
+		}
+		return cri.NewCollector(collectorType, config)
 
 	case "kernel":
-		config := collectorconfig.NewKernelConfig(collectorType)
-		config.BufferSize = m.config.Collectors.BufferSize
-		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
-		config.Labels = m.config.Collectors.Labels
-		return config, nil
+		config := kernel.DefaultConfig()
+		config.Name = collectorType
+		return kernel.NewCollectorWithConfig(config, m.logger)
 
 	case "dns":
-		config := collectorconfig.NewDNSConfig(collectorType)
-		config.BufferSize = m.config.Collectors.BufferSize
-		config.MetricsEnabled = m.config.Collectors.MetricsEnabled
-		config.Labels = m.config.Collectors.Labels
-		return config, nil
+		config := dns.Config{
+			Name:       collectorType,
+			BufferSize: m.config.Collectors.BufferSize,
+			EnableEBPF: true,
+		}
+		return dns.NewCollector(collectorType, config)
+
+	case "etcd":
+		config := etcd.Config{
+			BufferSize: m.config.Collectors.BufferSize,
+			EnableEBPF: true,
+		}
+		return etcd.NewCollector(collectorType, config)
+
+	case "kubeapi":
+		return kubeapi.NewCollector(collectorType)
+
+	case "kubelet":
+		config := &kubelet.Config{
+			NodeName: "", // Auto-detect
+			Address:  "localhost:10250",
+		}
+		return kubelet.NewCollector(collectorType, config)
+
+	case "systemd":
+		config := systemd.Config{
+			Name:       collectorType,
+			BufferSize: m.config.Collectors.BufferSize,
+		}
+		return systemd.NewCollector(collectorType, config)
 
 	default:
 		return nil, fmt.Errorf("unknown collector type: %s", collectorType)

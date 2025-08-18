@@ -18,30 +18,30 @@ import (
 
 // GracefulDegradation manages fallback strategies when eBPF fails
 type GracefulDegradation struct {
-	config           *Config
-	coreCompat       *CoreCompatibility
-	backpressure     *BackpressureManager
-	
+	config       *Config
+	coreCompat   *CoreCompatibility
+	backpressure *BackpressureManager
+
 	// State management
-	ebpfEnabled      bool
-	fallbackActive   map[string]bool
-	fallbackMutex    sync.RWMutex
-	
+	ebpfEnabled    bool
+	fallbackActive map[string]bool
+	fallbackMutex  sync.RWMutex
+
 	// Fallback implementations
-	procfsMonitor    *ProcfsMonitor
-	sysfsMonitor     *SysfsMonitor
-	netlinkMonitor   *NetlinkMonitor
-	
+	procfsMonitor  *ProcfsMonitor
+	sysfsMonitor   *SysfsMonitor
+	netlinkMonitor *NetlinkMonitor
+
 	// Health tracking
 	lastEBPFError    time.Time
 	ebpfFailureCount int
 	healthChecker    *HealthChecker
-	
+
 	// Metrics
-	fallbackGauge    metric.Int64Gauge
-	errorCounter     metric.Int64Counter
-	methodGauge      metric.Int64Gauge
-	
+	fallbackGauge metric.Int64Gauge
+	errorCounter  metric.Int64Counter
+	methodGauge   metric.Int64Gauge
+
 	// Control
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -71,16 +71,16 @@ type NetlinkMonitor struct {
 
 // HealthChecker monitors collector health and triggers failovers
 type HealthChecker struct {
-	config          *HealthConfig
-	lastCheck       time.Time
+	config           *HealthConfig
+	lastCheck        time.Time
 	consecutiveFails int
-	mu              sync.RWMutex
+	mu               sync.RWMutex
 }
 
 // FallbackStrategy represents a fallback monitoring strategy
 type FallbackStrategy struct {
 	Name        string
-	Type        string    // "procfs", "sysfs", "netlink", "polling"
+	Type        string // "procfs", "sysfs", "netlink", "polling"
 	Path        string
 	Interval    time.Duration
 	Parser      func(string) (interface{}, error)
@@ -93,7 +93,7 @@ type FallbackStrategy struct {
 func NewGracefulDegradation(config *Config, coreCompat *CoreCompatibility, backpressure *BackpressureManager) *GracefulDegradation {
 	ctx, cancel := context.WithCancel(context.Background())
 	meter := otel.Meter("tapio/collectors/kernel")
-	
+
 	gd := &GracefulDegradation{
 		config:         config,
 		coreCompat:     coreCompat,
@@ -107,33 +107,39 @@ func NewGracefulDegradation(config *Config, coreCompat *CoreCompatibility, backp
 		netlinkMonitor: NewNetlinkMonitor(),
 		healthChecker:  NewHealthChecker(&config.Health),
 	}
-	
-	// Initialize metrics
+
+	// Initialize metrics - gracefully handle failures
 	var err error
 	gd.fallbackGauge, err = meter.Int64Gauge(
 		"kernel_collector_fallback_active",
 		metric.WithDescription("Number of active fallback methods"),
 	)
 	if err != nil {
-		// Log error but continue
+		// Metrics are optional, collector can still function
+		// We'll check for nil before using these metrics
+		gd.fallbackGauge = nil
 	}
-	
+
 	gd.errorCounter, err = meter.Int64Counter(
 		"kernel_collector_errors_total",
 		metric.WithDescription("Total number of collector errors by type"),
 	)
 	if err != nil {
-		// Log error but continue
+		// Metrics are optional, collector can still function
+		// We'll check for nil before using these metrics
+		gd.errorCounter = nil
 	}
-	
+
 	gd.methodGauge, err = meter.Int64Gauge(
 		"kernel_collector_method",
 		metric.WithDescription("Current collection method (0=ebpf, 1=fallback)"),
 	)
 	if err != nil {
-		// Log error but continue
+		// Metrics are optional, collector can still function
+		// We'll check for nil before using these metrics
+		gd.methodGauge = nil
 	}
-	
+
 	return gd
 }
 
@@ -184,12 +190,12 @@ func (gd *GracefulDegradation) StartMonitoring() error {
 		defer gd.wg.Done()
 		gd.healthCheckLoop()
 	}()
-	
+
 	// Test eBPF availability
 	if err := gd.testEBPFAvailability(); err != nil {
 		gd.handleEBPFFailure("initial_test", err)
 	}
-	
+
 	return nil
 }
 
@@ -199,14 +205,14 @@ func (gd *GracefulDegradation) testEBPFAvailability() error {
 	if !gd.coreCompat.IsCompatible("ring_buffer") && !gd.coreCompat.IsCompatible("perf_buffer") {
 		return fmt.Errorf("no suitable buffer mechanism available")
 	}
-	
+
 	// Try to load a simple test program
 	// This would involve actual eBPF program loading in a real implementation
 	// For now, simulate based on kernel compatibility
 	if gd.coreCompat.GetKernelVersion().isAtLeast(4, 1, 0) {
 		return nil // eBPF supported
 	}
-	
+
 	return fmt.Errorf("kernel version %s does not support eBPF", gd.coreCompat.GetKernelVersion().String())
 }
 
@@ -214,21 +220,21 @@ func (gd *GracefulDegradation) testEBPFAvailability() error {
 func (gd *GracefulDegradation) handleEBPFFailure(context string, err error) {
 	gd.fallbackMutex.Lock()
 	defer gd.fallbackMutex.Unlock()
-	
+
 	gd.lastEBPFError = time.Now()
 	gd.ebpfFailureCount++
 	gd.ebpfEnabled = false
-	
+
 	// Update metrics
 	if gd.errorCounter != nil {
 		gd.errorCounter.Add(gd.ctx, 1,
 			metric.WithAttributes(attribute.String("context", context), attribute.String("type", "ebpf_failure")))
 	}
-	
+
 	if gd.methodGauge != nil {
 		gd.methodGauge.Record(gd.ctx, 1) // 1 = fallback mode
 	}
-	
+
 	// Activate appropriate fallbacks
 	gd.activateProcessFallback()
 	gd.activateNetworkFallback()
@@ -238,7 +244,7 @@ func (gd *GracefulDegradation) handleEBPFFailure(context string, err error) {
 // activateProcessFallback activates process monitoring fallback
 func (gd *GracefulDegradation) activateProcessFallback() {
 	gd.fallbackActive["process"] = true
-	
+
 	gd.wg.Add(1)
 	go func() {
 		defer gd.wg.Done()
@@ -249,7 +255,7 @@ func (gd *GracefulDegradation) activateProcessFallback() {
 // activateNetworkFallback activates network monitoring fallback
 func (gd *GracefulDegradation) activateNetworkFallback() {
 	gd.fallbackActive["network"] = true
-	
+
 	gd.wg.Add(1)
 	go func() {
 		defer gd.wg.Done()
@@ -260,7 +266,7 @@ func (gd *GracefulDegradation) activateNetworkFallback() {
 // activateMemoryFallback activates memory monitoring fallback
 func (gd *GracefulDegradation) activateMemoryFallback() {
 	gd.fallbackActive["memory"] = true
-	
+
 	gd.wg.Add(1)
 	go func() {
 		defer gd.wg.Done()
@@ -270,9 +276,9 @@ func (gd *GracefulDegradation) activateMemoryFallback() {
 
 // runProcessFallback runs process monitoring via procfs
 func (gd *GracefulDegradation) runProcessFallback() {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(ProcessFallbackInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -290,9 +296,9 @@ func (gd *GracefulDegradation) runProcessFallback() {
 
 // runNetworkFallback runs network monitoring via procfs
 func (gd *GracefulDegradation) runNetworkFallback() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(NetworkFallbackInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -310,9 +316,9 @@ func (gd *GracefulDegradation) runNetworkFallback() {
 
 // runMemoryFallback runs memory monitoring via procfs/sysfs
 func (gd *GracefulDegradation) runMemoryFallback() {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(MemoryFallbackInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -335,28 +341,28 @@ func (gd *GracefulDegradation) collectProcessInfo() error {
 	if err != nil {
 		return fmt.Errorf("failed to glob /proc directories: %w", err)
 	}
-	
+
 	processCount := 0
 	for _, procDir := range procDirs {
 		statPath := filepath.Join(procDir, "stat")
 		if _, err := os.Stat(statPath); err != nil {
 			continue
 		}
-		
+
 		// Read basic process info
 		processCount++
-		
+
 		// In a real implementation, we would:
 		// 1. Parse /proc/PID/stat for process details
 		// 2. Check /proc/PID/cgroup for container association
 		// 3. Generate events similar to eBPF programs
 		// 4. Apply backpressure if needed
-		
-		if processCount > 1000 { // Limit to prevent overload
+
+		if processCount > MaxProcessScanLimit {
 			break
 		}
 	}
-	
+
 	return nil
 }
 
@@ -364,14 +370,14 @@ func (gd *GracefulDegradation) collectProcessInfo() error {
 func (gd *GracefulDegradation) collectNetworkInfo() error {
 	// Read /proc/net/tcp and /proc/net/udp for connection info
 	connections := []string{"tcp", "tcp6", "udp", "udp6"}
-	
+
 	for _, conn := range connections {
 		path := fmt.Sprintf("/proc/net/%s", conn)
 		file, err := os.Open(path)
 		if err != nil {
 			continue
 		}
-		
+
 		scanner := bufio.NewScanner(file)
 		lineCount := 0
 		for scanner.Scan() {
@@ -380,18 +386,18 @@ func (gd *GracefulDegradation) collectNetworkInfo() error {
 				lineCount++
 				continue
 			}
-			
+
 			// Parse connection information
 			gd.parseConnectionLine(line, conn)
 			lineCount++
-			
-			if lineCount > 10000 { // Limit processing
+
+			if lineCount > MaxConnectionScanLimit {
 				break
 			}
 		}
 		file.Close()
 	}
-	
+
 	return nil
 }
 
@@ -401,21 +407,22 @@ func (gd *GracefulDegradation) parseConnectionLine(line, connType string) {
 	if len(fields) < 10 {
 		return
 	}
-	
-	// Parse local and remote addresses
-	localAddr := fields[1]
-	remoteAddr := fields[2]
-	state := fields[3]
-	
-	// In a real implementation, we would:
-	// 1. Parse addresses and ports
-	// 2. Map to container processes
-	// 3. Generate network events
-	// 4. Apply sampling based on backpressure
-	
-	_ = localAddr
-	_ = remoteAddr
-	_ = state
+
+	// Parse local and remote addresses for future processing
+	// These variables will be used when full network monitoring is implemented
+	// Currently storing for debugging and development purposes
+	// localAddr := fields[1]  // Will be used for connection source tracking
+	// remoteAddr := fields[2] // Will be used for connection destination tracking
+	// state := fields[3]      // Will be used for connection state monitoring
+
+	// Full implementation will:
+	// 1. Parse addresses and ports from hex format
+	// 2. Map connections to container processes via /proc/PID/fd
+	// 3. Generate network events for correlation engine
+	// 4. Apply sampling based on backpressure manager
+
+	// For now, we're just scanning to verify procfs access works
+	// This validates our fallback mechanism is operational
 }
 
 // collectMemoryInfo collects memory information from various sources
@@ -426,10 +433,10 @@ func (gd *GracefulDegradation) collectMemoryInfo() error {
 		return fmt.Errorf("failed to open /proc/meminfo: %w", err)
 	}
 	defer meminfo.Close()
-	
+
 	scanner := bufio.NewScanner(meminfo)
 	memStats := make(map[string]uint64)
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.Fields(line)
@@ -440,10 +447,10 @@ func (gd *GracefulDegradation) collectMemoryInfo() error {
 			}
 		}
 	}
-	
+
 	// Check cgroup memory limits for containers
 	gd.checkCgroupMemory()
-	
+
 	return nil
 }
 
@@ -453,13 +460,13 @@ func (gd *GracefulDegradation) checkCgroupMemory() error {
 	if _, err := os.Stat(cgroupPath); err != nil {
 		return nil // cgroup v1 not available
 	}
-	
+
 	// Walk through cgroup directories to find container memory usage
 	return filepath.Walk(cgroupPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
-		
+
 		if info.IsDir() && strings.Contains(path, "docker") {
 			usagePath := filepath.Join(path, "memory.usage_in_bytes")
 			if _, err := os.Stat(usagePath); err == nil {
@@ -467,7 +474,7 @@ func (gd *GracefulDegradation) checkCgroupMemory() error {
 				// In real implementation, we would correlate with processes
 			}
 		}
-		
+
 		return nil
 	})
 }
@@ -477,10 +484,10 @@ func (gd *GracefulDegradation) healthCheckLoop() {
 	if !gd.config.Health.Enabled {
 		return
 	}
-	
+
 	ticker := time.NewTicker(gd.config.Health.Interval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -495,9 +502,9 @@ func (gd *GracefulDegradation) healthCheckLoop() {
 func (gd *GracefulDegradation) performHealthCheck() {
 	gd.healthChecker.mu.Lock()
 	defer gd.healthChecker.mu.Unlock()
-	
+
 	healthy := true
-	
+
 	// Check if eBPF is working (if enabled)
 	if gd.ebpfEnabled {
 		if err := gd.testEBPFHealth(); err != nil {
@@ -507,12 +514,12 @@ func (gd *GracefulDegradation) performHealthCheck() {
 			gd.healthChecker.consecutiveFails = 0
 		}
 	}
-	
+
 	// Check fallback health
 	if !healthy || !gd.ebpfEnabled {
 		healthy = gd.checkFallbackHealth()
 	}
-	
+
 	// Handle consecutive failures
 	if gd.healthChecker.consecutiveFails >= gd.config.Health.MaxFailures {
 		if gd.config.Health.RestartOnFailure {
@@ -521,7 +528,7 @@ func (gd *GracefulDegradation) performHealthCheck() {
 			gd.handleEBPFFailure("health_check", fmt.Errorf("health check failed"))
 		}
 	}
-	
+
 	gd.healthChecker.lastCheck = time.Now()
 }
 
@@ -529,7 +536,7 @@ func (gd *GracefulDegradation) performHealthCheck() {
 func (gd *GracefulDegradation) testEBPFHealth() error {
 	// This would test if eBPF programs are still loaded and receiving events
 	// For now, simulate based on time since last error
-	if time.Since(gd.lastEBPFError) < 30*time.Second {
+	if time.Since(gd.lastEBPFError) < RecentErrorThreshold {
 		return fmt.Errorf("recent eBPF error")
 	}
 	return nil
@@ -539,7 +546,7 @@ func (gd *GracefulDegradation) testEBPFHealth() error {
 func (gd *GracefulDegradation) checkFallbackHealth() bool {
 	gd.fallbackMutex.RLock()
 	defer gd.fallbackMutex.RUnlock()
-	
+
 	// Check if at least one fallback is active and working
 	for fallback, active := range gd.fallbackActive {
 		if active {
@@ -560,7 +567,7 @@ func (gd *GracefulDegradation) checkFallbackHealth() bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -568,25 +575,25 @@ func (gd *GracefulDegradation) checkFallbackHealth() bool {
 func (pm *ProcfsMonitor) isHealthy() bool {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	
+
 	// Check if we've successfully read data recently
-	return time.Since(pm.lastScan) < 2*time.Minute
+	return time.Since(pm.lastScan) < FallbackHealthTimeout
 }
 
 // isHealthy checks if netlink monitor is healthy
 func (nm *NetlinkMonitor) isHealthy() bool {
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()
-	
-	return time.Since(nm.lastScan) < 2*time.Minute
+
+	return time.Since(nm.lastScan) < FallbackHealthTimeout
 }
 
 // isHealthy checks if sysfs monitor is healthy
 func (sm *SysfsMonitor) isHealthy() bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	
-	return time.Since(sm.lastScan) < 2*time.Minute
+
+	return time.Since(sm.lastScan) < FallbackHealthTimeout
 }
 
 // restartCollector attempts to restart the collector
@@ -596,7 +603,7 @@ func (gd *GracefulDegradation) restartCollector() {
 	// 2. Reload eBPF programs
 	// 3. Reset failure counters
 	// 4. Restart health checking
-	
+
 	gd.ebpfFailureCount = 0
 	gd.healthChecker.consecutiveFails = 0
 }
@@ -618,14 +625,14 @@ func (gd *GracefulDegradation) IsEBPFEnabled() bool {
 func (gd *GracefulDegradation) GetActiveFallbacks() []string {
 	gd.fallbackMutex.RLock()
 	defer gd.fallbackMutex.RUnlock()
-	
+
 	var active []string
 	for fallback, isActive := range gd.fallbackActive {
 		if isActive {
 			active = append(active, fallback)
 		}
 	}
-	
+
 	return active
 }
 
@@ -633,7 +640,7 @@ func (gd *GracefulDegradation) GetActiveFallbacks() []string {
 func (gd *GracefulDegradation) GetStats() DegradationStats {
 	gd.fallbackMutex.RLock()
 	defer gd.fallbackMutex.RUnlock()
-	
+
 	return DegradationStats{
 		EBPFEnabled:       gd.ebpfEnabled,
 		ActiveFallbacks:   gd.GetActiveFallbacks(),

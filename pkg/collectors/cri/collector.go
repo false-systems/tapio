@@ -39,7 +39,7 @@ type Collector struct {
 	metrics    *Metrics    // Atomic counters
 
 	// Channels
-	events chan collectors.RawEvent
+	events chan domain.RawEvent
 	stopCh chan struct{}
 
 	// State tracking for efficient change detection
@@ -109,7 +109,7 @@ func NewCollector(name string, config Config) (*Collector, error) {
 		eventPool:  NewEventPool(),
 		batch:      make([]*Event, 0, EventBatchSize),
 		metrics:    &Metrics{},
-		events:     make(chan collectors.RawEvent, config.EventBufferSize),
+		events:     make(chan domain.RawEvent, config.EventBufferSize),
 		stopCh:     make(chan struct{}),
 		lastSeen:   make(map[string]*cri.ContainerStatus, 1000), // Pre-allocate
 		tracer:     tracer,
@@ -314,6 +314,11 @@ func (c *Collector) Stop() error {
 
 	c.logger.Info("CRI collector stopped")
 	return nil
+}
+
+// Metrics returns the collector's metrics instance
+func (c *Collector) Metrics() *Metrics {
+	return c.metrics
 }
 
 // initializeState initializes the container state map
@@ -579,7 +584,7 @@ func (c *Collector) processBatch() {
 }
 
 // Events returns the events channel for consumption
-func (c *Collector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
