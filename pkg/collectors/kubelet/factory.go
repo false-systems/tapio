@@ -19,12 +19,12 @@ func (f *Factory) Create(name string, config *Config) (collectors.Collector, err
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid kubelet config: %w", err)
 	}
-	
+
 	collector, err := NewCollector(name, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kubelet collector: %w", err)
 	}
-	
+
 	return collector, nil
 }
 

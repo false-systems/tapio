@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	cri "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -209,7 +210,22 @@ type Metrics struct {
 	CRIErrors        atomic.Uint64
 }
 
-// GetMetrics returns current metrics as map
+// GetStats returns current metrics as typed structure
+func (m *Metrics) GetStats() *domain.CollectorStats {
+	return &domain.CollectorStats{
+		EventsProcessed: int64(m.EventsProcessed.Load()),
+		ErrorCount:      int64(m.CRIErrors.Load()),
+		CustomMetrics: map[string]string{
+			"events_dropped":     fmt.Sprintf("%d", m.EventsDropped.Load()),
+			"oom_kills_detected": fmt.Sprintf("%d", m.OOMKillsDetected.Load()),
+			"processing_time_ns": fmt.Sprintf("%d", m.ProcessingTimeNs.Load()),
+			"batches_sent":       fmt.Sprintf("%d", m.BatchesSent.Load()),
+		},
+	}
+}
+
+// DEPRECATED: GetMetrics - use GetStats instead
+// This method exists for backwards compatibility only
 func (m *Metrics) GetMetrics() map[string]interface{} {
 	return map[string]interface{}{
 		"events_processed":   m.EventsProcessed.Load(),
