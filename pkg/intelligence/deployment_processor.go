@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 	appsv1 "k8s.io/api/apps/v1"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -92,7 +90,7 @@ func NewDeploymentProcessor(logger *zap.Logger) (*DeploymentProcessor, error) {
 }
 
 // ProcessRawEvent processes a raw event from the kubeapi collector
-func (p *DeploymentProcessor) ProcessRawEvent(ctx context.Context, event collectors.RawEvent) error {
+func (p *DeploymentProcessor) ProcessRawEvent(ctx context.Context, event domain.RawEvent) error {
 	ctx, span := p.tracer.Start(ctx, "deployment_processor.process_raw_event")
 	defer span.End()
 
@@ -110,7 +108,7 @@ func (p *DeploymentProcessor) ProcessRawEvent(ctx context.Context, event collect
 	}
 
 	// Parse the ResourceEvent from raw data
-	var resourceEvent kubeapi.ResourceEvent
+	var resourceEvent domain.ResourceEvent
 	if err := json.Unmarshal(event.Data, &resourceEvent); err != nil {
 		span.SetAttributes(attribute.String("error", err.Error()))
 		return fmt.Errorf("failed to unmarshal resource event: %w", err)
@@ -156,7 +154,7 @@ func (p *DeploymentProcessor) ProcessRawEvent(ctx context.Context, event collect
 }
 
 // convertToDeploymentEvent converts a ResourceEvent to a DeploymentEvent
-func (p *DeploymentProcessor) convertToDeploymentEvent(ctx context.Context, event *kubeapi.ResourceEvent) (*domain.DeploymentEvent, error) {
+func (p *DeploymentProcessor) convertToDeploymentEvent(ctx context.Context, event *domain.ResourceEvent) (*domain.DeploymentEvent, error) {
 	ctx, span := p.tracer.Start(ctx, "deployment_processor.convert_event")
 	defer span.End()
 
@@ -259,7 +257,7 @@ func (p *DeploymentProcessor) Events() <-chan *domain.DeploymentEvent {
 }
 
 // Start begins processing events from a raw event channel
-func (p *DeploymentProcessor) Start(ctx context.Context, rawEvents <-chan collectors.RawEvent) {
+func (p *DeploymentProcessor) Start(ctx context.Context, rawEvents <-chan domain.RawEvent) {
 	go func() {
 		for {
 			select {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/yairfalse/tapio/pkg/domain"
 	neo4jint "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"go.opentelemetry.io/otel"
@@ -34,9 +33,6 @@ type Loader struct {
 
 	// Neo4j client
 	neo4jClient *neo4jint.Client
-
-	// Event parser
-	eventParser *domain.EventParser
 
 	// OTEL instrumentation - REQUIRED fields
 	tracer            trace.Tracer
@@ -102,14 +98,6 @@ func NewLoader(logger *zap.Logger, config *Config) (*Loader, error) {
 
 	// Initialize worker pool and channels
 	loader.initWorkerPool()
-
-	// Create event parser
-	eventParser, err := domain.NewEventParser(logger)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create event parser: %w", err)
-	}
-	loader.eventParser = eventParser
 
 	// Initialize metrics
 	loader.initMetrics()
@@ -445,7 +433,8 @@ func (l *Loader) setupNeo4jSchema(ctx context.Context) error {
 	}
 
 	for _, index := range indexes {
-		if err := l.neo4jClient.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
+		if err := l.neo4jClient.ExecuteTypedWrite(ctx, func(ctx context.Context, tx *neo4jint.TypedTransaction) error {
+			// No parameters needed for DDL statements
 			_, err := tx.Run(ctx, index, nil)
 			return err
 		}); err != nil {
@@ -463,7 +452,8 @@ func (l *Loader) setupNeo4jSchema(ctx context.Context) error {
 	}
 
 	for _, constraint := range constraints {
-		if err := l.neo4jClient.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
+		if err := l.neo4jClient.ExecuteTypedWrite(ctx, func(ctx context.Context, tx *neo4jint.TypedTransaction) error {
+			// No parameters needed for DDL statements
 			_, err := tx.Run(ctx, constraint, nil)
 			return err
 		}); err != nil {
@@ -595,4 +585,92 @@ func (l *Loader) GetHealthStatus() HealthStatus {
 	status.Details["backlog_size"] = fmt.Sprintf("%d", metrics.BacklogSize)
 
 	return status
+}
+
+// storeObservationEvents stores a batch of observation events in Neo4j
+func (l *Loader) storeObservationEvents(ctx context.Context, events []*domain.ObservationEvent) (*StorageStats, error) {
+	if len(events) == 0 {
+		return &StorageStats{}, nil
+	}
+
+	startTime := time.Now()
+	stats := &StorageStats{
+		BatchSize: len(events),
+	}
+
+	// Use Neo4j client to store events
+	if l.neo4jClient == nil {
+		return nil, fmt.Errorf("neo4j client not initialized")
+	}
+
+	// Use ExecuteTypedWrite for transaction management with type-safe parameters
+	err := l.neo4jClient.ExecuteTypedWrite(ctx, func(ctx context.Context, tx *neo4jint.TypedTransaction) error {
+		// Store each event as a node
+		for _, event := range events {
+			if event == nil {
+				continue
+			}
+
+			// Create node for observation event using type-safe parameters
+			query := `
+				CREATE (e:ObservationEvent {
+					id: $id,
+					timestamp: $timestamp,
+					source: $source,
+					type: $type
+				})
+				RETURN id(e) as nodeId
+			`
+
+			// Build type-safe parameters
+			params := neo4jint.NewQueryParams().
+				SetString("id", event.ID).
+				SetTime("timestamp", event.Timestamp).
+				SetString("source", event.Source).
+				SetString("type", event.Type)
+
+			result, err := tx.Run(ctx, query, params)
+			if err != nil {
+				return fmt.Errorf("failed to create node: %w", err)
+			}
+
+			// Consume the result
+			if result.Next(ctx) {
+				stats.NodesCreated++
+			}
+
+			// Create relationships based on correlation keys
+			if event.PodName != nil && *event.PodName != "" {
+				relQuery := `
+					MERGE (p:Pod {name: $podName, namespace: $namespace})
+					WITH p
+					MATCH (e:ObservationEvent {id: $eventId})
+					CREATE (e)-[:OBSERVED_IN]->(p)
+				`
+
+				namespace := ""
+				if event.Namespace != nil {
+					namespace = *event.Namespace
+				}
+
+				// Build type-safe relationship parameters
+				relParams := neo4jint.NewQueryParams().
+					SetString("eventId", event.ID).
+					SetString("podName", *event.PodName).
+					SetString("namespace", namespace)
+
+				_, err = tx.Run(ctx, relQuery, relParams)
+				if err == nil {
+					stats.RelationshipsCreated++
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to store events: %w", err)
+	}
+
+	stats.StorageTime = time.Since(startTime)
+	return stats, nil
 }

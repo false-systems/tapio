@@ -65,16 +65,20 @@ func LoadTestEvents(filename string) (map[string]TestEventData, error) {
 	return events, nil
 }
 
-// CreateTestEvent creates a UnifiedEvent from test data for testing purposes
-func CreateTestEvent(eventData TestEventData, eventType domain.EventType, timestamp time.Time) *domain.UnifiedEvent {
-	event := &domain.UnifiedEvent{
+// CreateTestEvent creates an ObservationEvent from test data for testing purposes
+func CreateTestEvent(eventData TestEventData, eventType string, timestamp time.Time) *domain.ObservationEvent {
+	namespace := eventData.Namespace
+	name := eventData.Name
+
+	event := &domain.ObservationEvent{
 		ID:        eventData.ID,
 		Type:      eventType,
 		Timestamp: timestamp,
-		K8sContext: &domain.K8sContext{
-			Namespace: eventData.Namespace,
-			Name:      eventData.Name,
-			Kind:      eventData.Kind,
+		Source:    "test",
+		Namespace: &namespace,
+		PodName:   &name,
+		Data: map[string]string{
+			"kind": eventData.Kind,
 		},
 	}
 
@@ -82,71 +86,79 @@ func CreateTestEvent(eventData TestEventData, eventType domain.EventType, timest
 }
 
 // CreateSimpleTestEvent creates a basic test event with minimal data
-func CreateSimpleTestEvent(id, namespace, name string) *domain.UnifiedEvent {
-	return &domain.UnifiedEvent{
+func CreateSimpleTestEvent(id, namespace, name string) *domain.ObservationEvent {
+	return &domain.ObservationEvent{
 		ID:        id,
-		Type:      domain.EventTypeKubernetes,
+		Type:      "kubernetes",
 		Timestamp: time.Now(),
-		K8sContext: &domain.K8sContext{
-			Namespace: namespace,
-			Name:      name,
-			Kind:      ResourceTypePod,
+		Source:    "test",
+		Namespace: &namespace,
+		PodName:   &name,
+		Data: map[string]string{
+			"kind": ResourceTypePod,
 		},
 	}
 }
 
 // CreateTestPodEvent creates a test Pod event
-func CreateTestPodEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
-	return &domain.UnifiedEvent{
+func CreateTestPodEvent(id, namespace, name string, timestamp time.Time) *domain.ObservationEvent {
+	return &domain.ObservationEvent{
 		ID:        id,
-		Type:      domain.EventTypeKubernetes,
+		Type:      "pod",
 		Timestamp: timestamp,
-		K8sContext: &domain.K8sContext{
-			Namespace: namespace,
-			Name:      name,
-			Kind:      ResourceTypePod,
+		Source:    "kubernetes",
+		Namespace: &namespace,
+		PodName:   &name,
+		Data: map[string]string{
+			"kind": ResourceTypePod,
 		},
 	}
 }
 
 // CreateTestServiceEvent creates a test Service event
-func CreateTestServiceEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
-	return &domain.UnifiedEvent{
-		ID:        id,
-		Type:      domain.EventTypeKubernetes,
-		Timestamp: timestamp,
-		K8sContext: &domain.K8sContext{
-			Namespace: namespace,
-			Name:      name,
-			Kind:      ResourceTypeService,
+func CreateTestServiceEvent(id, namespace, name string, timestamp time.Time) *domain.ObservationEvent {
+	serviceName := name
+	return &domain.ObservationEvent{
+		ID:          id,
+		Type:        "service",
+		Timestamp:   timestamp,
+		Source:      "kubernetes",
+		Namespace:   &namespace,
+		ServiceName: &serviceName,
+		Data: map[string]string{
+			"kind": ResourceTypeService,
 		},
 	}
 }
 
 // CreateTestConfigMapEvent creates a test ConfigMap event
-func CreateTestConfigMapEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
-	return &domain.UnifiedEvent{
+func CreateTestConfigMapEvent(id, namespace, name string, timestamp time.Time) *domain.ObservationEvent {
+	resourceName := name
+	return &domain.ObservationEvent{
 		ID:        id,
-		Type:      domain.EventTypeKubernetes,
+		Type:      "configmap",
 		Timestamp: timestamp,
-		K8sContext: &domain.K8sContext{
-			Namespace: namespace,
-			Name:      name,
-			Kind:      ResourceTypeConfigMap,
+		Source:    "kubernetes",
+		Namespace: &namespace,
+		Data: map[string]string{
+			"kind": ResourceTypeConfigMap,
+			"name": resourceName,
 		},
 	}
 }
 
 // CreateTestDeploymentEvent creates a test Deployment event
-func CreateTestDeploymentEvent(id, namespace, name string, timestamp time.Time) *domain.UnifiedEvent {
-	return &domain.UnifiedEvent{
+func CreateTestDeploymentEvent(id, namespace, name string, timestamp time.Time) *domain.ObservationEvent {
+	deploymentName := name
+	return &domain.ObservationEvent{
 		ID:        id,
-		Type:      domain.EventTypeKubernetes,
+		Type:      "deployment",
 		Timestamp: timestamp,
-		K8sContext: &domain.K8sContext{
-			Namespace: namespace,
-			Name:      name,
-			Kind:      ResourceTypeDeployment,
+		Source:    "kubernetes",
+		Namespace: &namespace,
+		Data: map[string]string{
+			"kind": ResourceTypeDeployment,
+			"name": deploymentName,
 		},
 	}
 }
