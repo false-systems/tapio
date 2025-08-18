@@ -35,54 +35,54 @@ const (
 type SamplingConfig struct {
 	// Base sampling rate (0.0 to 1.0)
 	BaseRate float64 `json:"base_rate"`
-	
+
 	// Strategy to use
 	Strategy SamplingStrategy `json:"strategy"`
-	
+
 	// Adaptive sampling parameters
-	AdaptiveMinRate     float64       `json:"adaptive_min_rate"`
-	AdaptiveMaxRate     float64       `json:"adaptive_max_rate"`
-	AdaptiveTargetEPS   uint64        `json:"adaptive_target_eps"`  // Target events per second
-	AdaptiveWindowSize  time.Duration `json:"adaptive_window_size"`
-	AdaptiveAdjustRate  float64       `json:"adaptive_adjust_rate"`
-	
+	AdaptiveMinRate    float64       `json:"adaptive_min_rate"`
+	AdaptiveMaxRate    float64       `json:"adaptive_max_rate"`
+	AdaptiveTargetEPS  uint64        `json:"adaptive_target_eps"` // Target events per second
+	AdaptiveWindowSize time.Duration `json:"adaptive_window_size"`
+	AdaptiveAdjustRate float64       `json:"adaptive_adjust_rate"`
+
 	// Reservoir sampling parameters
-	ReservoirSize       uint32        `json:"reservoir_size"`
-	ReservoirWindowMs   uint64        `json:"reservoir_window_ms"`
-	
+	ReservoirSize     uint32 `json:"reservoir_size"`
+	ReservoirWindowMs uint64 `json:"reservoir_window_ms"`
+
 	// Tail-based sampling parameters
-	TailLatencyThresholdMs uint64     `json:"tail_latency_threshold_ms"`
-	TailErrorSampleRate    float64    `json:"tail_error_sample_rate"`
-	TailSlowSampleRate     float64    `json:"tail_slow_sample_rate"`
-	
+	TailLatencyThresholdMs uint64  `json:"tail_latency_threshold_ms"`
+	TailErrorSampleRate    float64 `json:"tail_error_sample_rate"`
+	TailSlowSampleRate     float64 `json:"tail_slow_sample_rate"`
+
 	// Priority sampling parameters
-	PriorityThreshold   uint32        `json:"priority_threshold"`
-	PriorityBoostRate   float64       `json:"priority_boost_rate"`
-	
+	PriorityThreshold uint32  `json:"priority_threshold"`
+	PriorityBoostRate float64 `json:"priority_boost_rate"`
+
 	// Per-event-type sampling rates
-	EventTypeRates      map[string]float64 `json:"event_type_rates"`
-	
+	EventTypeRates map[string]float64 `json:"event_type_rates"`
+
 	// Statistical guarantees
-	ConfidenceLevel     float64       `json:"confidence_level"`     // e.g., 0.95 for 95%
-	MarginOfError       float64       `json:"margin_of_error"`      // e.g., 0.05 for 5%
-	MinSampleSize       uint32        `json:"min_sample_size"`
+	ConfidenceLevel float64 `json:"confidence_level"` // e.g., 0.95 for 95%
+	MarginOfError   float64 `json:"margin_of_error"`  // e.g., 0.05 for 5%
+	MinSampleSize   uint32  `json:"min_sample_size"`
 }
 
 // DefaultSamplingConfig returns a default sampling configuration
 func DefaultSamplingConfig() *SamplingConfig {
 	return &SamplingConfig{
-		BaseRate:               0.1,  // 10% sampling by default
+		BaseRate:               0.1, // 10% sampling by default
 		Strategy:               SamplingStrategyAdaptive,
-		AdaptiveMinRate:        0.01, // 1% minimum
-		AdaptiveMaxRate:        1.0,  // 100% maximum
+		AdaptiveMinRate:        0.01,  // 1% minimum
+		AdaptiveMaxRate:        1.0,   // 100% maximum
 		AdaptiveTargetEPS:      10000, // Target 10K events/sec
 		AdaptiveWindowSize:     5 * time.Second,
 		AdaptiveAdjustRate:     0.1,
 		ReservoirSize:          1000,
 		ReservoirWindowMs:      1000,
 		TailLatencyThresholdMs: 100,
-		TailErrorSampleRate:    1.0,  // Sample all errors
-		TailSlowSampleRate:     0.5,  // Sample 50% of slow requests
+		TailErrorSampleRate:    1.0, // Sample all errors
+		TailSlowSampleRate:     0.5, // Sample 50% of slow requests
 		PriorityThreshold:      5,
 		PriorityBoostRate:      2.0,
 		EventTypeRates:         make(map[string]float64),
@@ -94,37 +94,37 @@ func DefaultSamplingConfig() *SamplingConfig {
 
 // SamplingManager manages eBPF-based sampling
 type SamplingManager struct {
-	mu              sync.RWMutex
-	logger          *zap.Logger
-	config          *SamplingConfig
-	
+	mu     sync.RWMutex
+	logger *zap.Logger
+	config *SamplingConfig
+
 	// OTEL instrumentation
-	meter           metric.Meter
-	sampledEvents   metric.Int64Counter
-	droppedEvents   metric.Int64Counter
-	samplingRate    metric.Float64Gauge
-	
+	meter         metric.Meter
+	sampledEvents metric.Int64Counter
+	droppedEvents metric.Int64Counter
+	samplingRate  metric.Float64Gauge
+
 	// eBPF maps
-	configMap       *ebpf.Map
-	reservoirMap    *ebpf.Map
-	statsMap        *ebpf.Map
-	
+	configMap    *ebpf.Map
+	reservoirMap *ebpf.Map
+	statsMap     *ebpf.Map
+
 	// Runtime state
-	currentRate     float64
-	eventCount      uint64
-	sampledCount    uint64
-	windowStart     time.Time
-	
+	currentRate  float64
+	eventCount   uint64
+	sampledCount uint64
+	windowStart  time.Time
+
 	// Adaptive sampling state
 	adaptiveHistory []uint64
 	adaptiveIndex   int
-	
+
 	// Reservoir state
-	reservoir       []interface{}
-	reservoirCount  uint64
-	
+	reservoir      []interface{}
+	reservoirCount uint64
+
 	// Statistics
-	stats           *SamplingStatistics
+	stats *SamplingStatistics
 }
 
 // SamplingStatistics tracks sampling performance
@@ -138,18 +138,18 @@ type SamplingStatistics struct {
 	BytesPerSecond      uint64    `json:"bytes_per_second"`
 	LastAdjustment      time.Time `json:"last_adjustment"`
 	AdjustmentCount     uint64    `json:"adjustment_count"`
-	
+
 	// Per-strategy statistics
-	AdaptiveWindowEPS   float64   `json:"adaptive_window_eps"`
-	ReservoirFillRatio  float64   `json:"reservoir_fill_ratio"`
-	TailSlowEvents      uint64    `json:"tail_slow_events"`
-	TailErrorEvents     uint64    `json:"tail_error_events"`
-	PriorityHighEvents  uint64    `json:"priority_high_events"`
-	
+	AdaptiveWindowEPS  float64 `json:"adaptive_window_eps"`
+	ReservoirFillRatio float64 `json:"reservoir_fill_ratio"`
+	TailSlowEvents     uint64  `json:"tail_slow_events"`
+	TailErrorEvents    uint64  `json:"tail_error_events"`
+	PriorityHighEvents uint64  `json:"priority_high_events"`
+
 	// Statistical measures
-	SampleVariance      float64   `json:"sample_variance"`
-	StandardError       float64   `json:"standard_error"`
-	ConfidenceInterval  [2]float64 `json:"confidence_interval"`
+	SampleVariance     float64    `json:"sample_variance"`
+	StandardError      float64    `json:"standard_error"`
+	ConfidenceInterval [2]float64 `json:"confidence_interval"`
 }
 
 // NewSamplingManager creates a new sampling manager
@@ -161,18 +161,18 @@ func NewSamplingManager(logger *zap.Logger, config *SamplingConfig, configMap, r
 			return nil, fmt.Errorf("failed to create logger: %w", err)
 		}
 	}
-	
+
 	if config == nil {
 		config = DefaultSamplingConfig()
 	}
-	
+
 	// Validate configuration
 	if config.BaseRate < 0 || config.BaseRate > 1 {
 		return nil, fmt.Errorf("base_rate must be between 0.0 and 1.0")
 	}
-	
+
 	meter := otel.Meter("tapio.bpf.sampling")
-	
+
 	sampledEvents, err := meter.Int64Counter(
 		"bpf_sampled_events_total",
 		metric.WithDescription("Total sampled events"),
@@ -180,7 +180,7 @@ func NewSamplingManager(logger *zap.Logger, config *SamplingConfig, configMap, r
 	if err != nil {
 		logger.Warn("Failed to create sampled_events metric", zap.Error(err))
 	}
-	
+
 	droppedEvents, err := meter.Int64Counter(
 		"bpf_dropped_events_total",
 		metric.WithDescription("Total dropped events due to sampling"),
@@ -188,7 +188,7 @@ func NewSamplingManager(logger *zap.Logger, config *SamplingConfig, configMap, r
 	if err != nil {
 		logger.Warn("Failed to create dropped_events metric", zap.Error(err))
 	}
-	
+
 	samplingRate, err := meter.Float64Gauge(
 		"bpf_sampling_rate",
 		metric.WithDescription("Current sampling rate"),
@@ -196,7 +196,7 @@ func NewSamplingManager(logger *zap.Logger, config *SamplingConfig, configMap, r
 	if err != nil {
 		logger.Warn("Failed to create sampling_rate metric", zap.Error(err))
 	}
-	
+
 	sm := &SamplingManager{
 		logger:          logger,
 		config:          config,
@@ -213,12 +213,12 @@ func NewSamplingManager(logger *zap.Logger, config *SamplingConfig, configMap, r
 		reservoir:       make([]interface{}, 0, config.ReservoirSize),
 		stats:           &SamplingStatistics{},
 	}
-	
+
 	// Initialize eBPF map with configuration
 	if err := sm.updateBPFConfig(); err != nil {
 		return nil, fmt.Errorf("failed to update BPF config: %w", err)
 	}
-	
+
 	return sm, nil
 }
 
@@ -227,7 +227,7 @@ func (sm *SamplingManager) updateBPFConfig() error {
 	if sm.configMap == nil {
 		return nil
 	}
-	
+
 	// Convert Go config to eBPF-compatible structure
 	bpfConfig := struct {
 		SampleRate        uint32
@@ -244,12 +244,12 @@ func (sm *SamplingManager) updateBPFConfig() error {
 		LatencyThreshold:  sm.config.TailLatencyThresholdMs,
 		PriorityThreshold: sm.config.PriorityThreshold,
 	}
-	
+
 	key := uint32(0)
 	if err := sm.configMap.Update(key, &bpfConfig, ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("failed to update sampling config: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -259,15 +259,15 @@ func (sm *SamplingManager) Start(ctx context.Context) error {
 	if sm.config.Strategy == SamplingStrategyAdaptive {
 		go sm.adaptiveRateAdjuster(ctx)
 	}
-	
+
 	// Start statistics updater
 	go sm.statsUpdater(ctx)
-	
+
 	sm.logger.Info("Sampling manager started",
 		zap.String("strategy", sm.strategyName()),
 		zap.Float64("base_rate", sm.config.BaseRate),
 	)
-	
+
 	return nil
 }
 
@@ -275,38 +275,38 @@ func (sm *SamplingManager) Start(ctx context.Context) error {
 func (sm *SamplingManager) ShouldSample(eventType string, priority uint32, latencyMs uint64, hasError bool) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	atomic.AddUint64(&sm.eventCount, 1)
-	
+
 	sampled := false
-	
+
 	switch sm.config.Strategy {
 	case SamplingStrategyUniform:
 		sampled = sm.uniformSample()
-		
+
 	case SamplingStrategyAdaptive:
 		sampled = sm.adaptiveSample()
-		
+
 	case SamplingStrategyReservoir:
 		sampled = sm.reservoirSample()
-		
+
 	case SamplingStrategyTailBased:
 		sampled = sm.tailBasedSample(latencyMs, hasError)
-		
+
 	case SamplingStrategyPriority:
 		sampled = sm.prioritySample(priority)
-		
+
 	default:
 		sampled = sm.uniformSample()
 	}
-	
+
 	// Check event-type specific rate
 	if !sampled && sm.config.EventTypeRates != nil {
 		if rate, exists := sm.config.EventTypeRates[eventType]; exists {
 			sampled = sm.randomSample(rate)
 		}
 	}
-	
+
 	// Update counters
 	if sampled {
 		atomic.AddUint64(&sm.sampledCount, 1)
@@ -325,7 +325,7 @@ func (sm *SamplingManager) ShouldSample(eventType string, priority uint32, laten
 			))
 		}
 	}
-	
+
 	return sampled
 }
 
@@ -343,12 +343,12 @@ func (sm *SamplingManager) adaptiveSample() bool {
 // reservoirSample implements reservoir sampling
 func (sm *SamplingManager) reservoirSample() bool {
 	sm.reservoirCount++
-	
+
 	if uint32(len(sm.reservoir)) < sm.config.ReservoirSize {
 		// Reservoir not full, always sample
 		return true
 	}
-	
+
 	// Reservoir full, use probability
 	probability := float64(sm.config.ReservoirSize) / float64(sm.reservoirCount)
 	return sm.randomSample(probability)
@@ -361,13 +361,13 @@ func (sm *SamplingManager) tailBasedSample(latencyMs uint64, hasError bool) bool
 		atomic.AddUint64(&sm.stats.TailErrorEvents, 1)
 		return sm.randomSample(sm.config.TailErrorSampleRate)
 	}
-	
+
 	// Sample slow requests
 	if latencyMs > sm.config.TailLatencyThresholdMs {
 		atomic.AddUint64(&sm.stats.TailSlowEvents, 1)
 		return sm.randomSample(sm.config.TailSlowSampleRate)
 	}
-	
+
 	// Otherwise use base rate
 	return sm.randomSample(sm.currentRate)
 }
@@ -379,7 +379,7 @@ func (sm *SamplingManager) prioritySample(priority uint32) bool {
 		// Boost sampling rate for high priority events
 		return sm.randomSample(math.Min(sm.currentRate*sm.config.PriorityBoostRate, 1.0))
 	}
-	
+
 	return sm.randomSample(sm.currentRate)
 }
 
@@ -387,14 +387,14 @@ func (sm *SamplingManager) prioritySample(priority uint32) bool {
 func (sm *SamplingManager) randomSample(rate float64) bool {
 	// Simple random sampling
 	// In production, use a better random source
-	return (uint64(time.Now().UnixNano())%100) < uint64(rate*100)
+	return (uint64(time.Now().UnixNano()) % 100) < uint64(rate*100)
 }
 
 // adaptiveRateAdjuster adjusts sampling rate based on load
 func (sm *SamplingManager) adaptiveRateAdjuster(ctx context.Context) {
 	ticker := time.NewTicker(sm.config.AdaptiveWindowSize)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -409,20 +409,20 @@ func (sm *SamplingManager) adaptiveRateAdjuster(ctx context.Context) {
 func (sm *SamplingManager) adjustAdaptiveRate() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	// Calculate events per second in window
 	windowDuration := time.Since(sm.windowStart)
 	if windowDuration == 0 {
 		return
 	}
-	
+
 	eps := float64(sm.eventCount) / windowDuration.Seconds()
 	sm.stats.AdaptiveWindowEPS = eps
-	
+
 	// Store in history
 	sm.adaptiveHistory[sm.adaptiveIndex] = uint64(eps)
 	sm.adaptiveIndex = (sm.adaptiveIndex + 1) % len(sm.adaptiveHistory)
-	
+
 	// Calculate average EPS from history
 	var totalEPS uint64
 	var count int
@@ -432,16 +432,16 @@ func (sm *SamplingManager) adjustAdaptiveRate() {
 			count++
 		}
 	}
-	
+
 	if count == 0 {
 		return
 	}
-	
+
 	avgEPS := float64(totalEPS) / float64(count)
-	
+
 	// Adjust rate based on target EPS
 	targetEPS := float64(sm.config.AdaptiveTargetEPS)
-	
+
 	if avgEPS > targetEPS {
 		// Too many events, reduce sampling rate
 		reductionFactor := targetEPS / avgEPS
@@ -451,7 +451,7 @@ func (sm *SamplingManager) adjustAdaptiveRate() {
 		increaseFactor := 1.0 + sm.config.AdaptiveAdjustRate
 		sm.currentRate *= increaseFactor
 	}
-	
+
 	// Enforce bounds
 	if sm.currentRate < sm.config.AdaptiveMinRate {
 		sm.currentRate = sm.config.AdaptiveMinRate
@@ -459,31 +459,31 @@ func (sm *SamplingManager) adjustAdaptiveRate() {
 	if sm.currentRate > sm.config.AdaptiveMaxRate {
 		sm.currentRate = sm.config.AdaptiveMaxRate
 	}
-	
+
 	// Update BPF config
 	sm.updateBPFConfig()
-	
+
 	// Update metrics
 	if sm.samplingRate != nil {
 		sm.samplingRate.Record(context.Background(), sm.currentRate, metric.WithAttributes(
 			attribute.String("strategy", "adaptive"),
 		))
 	}
-	
+
 	// Reset counters
 	sm.eventCount = 0
 	sm.sampledCount = 0
 	sm.windowStart = time.Now()
 	sm.stats.LastAdjustment = time.Now()
 	sm.stats.AdjustmentCount++
-	
+
 	sm.logger.Debug("Adjusted adaptive sampling rate",
 		zap.Float64("old_rate", sm.stats.CurrentSampleRate),
 		zap.Float64("new_rate", sm.currentRate),
 		zap.Float64("avg_eps", avgEPS),
 		zap.Float64("target_eps", targetEPS),
 	)
-	
+
 	sm.stats.CurrentSampleRate = sm.currentRate
 }
 
@@ -491,7 +491,7 @@ func (sm *SamplingManager) adjustAdaptiveRate() {
 func (sm *SamplingManager) statsUpdater(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -506,17 +506,17 @@ func (sm *SamplingManager) statsUpdater(ctx context.Context) {
 func (sm *SamplingManager) updateStatistics() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.stats.TotalEvents = sm.eventCount
 	sm.stats.SampledEvents = sm.sampledCount
-	
+
 	if sm.eventCount > 0 {
 		sm.stats.EffectiveSampleRate = float64(sm.sampledCount) / float64(sm.eventCount)
 	}
-	
+
 	// Calculate statistical measures
 	sm.calculateStatisticalMeasures()
-	
+
 	// Update reservoir fill ratio
 	if sm.config.Strategy == SamplingStrategyReservoir {
 		sm.stats.ReservoirFillRatio = float64(len(sm.reservoir)) / float64(sm.config.ReservoirSize)
@@ -529,29 +529,29 @@ func (sm *SamplingManager) calculateStatisticalMeasures() {
 	if n < float64(sm.config.MinSampleSize) {
 		return
 	}
-	
+
 	// Estimate population size (if known)
 	N := float64(sm.eventCount)
-	
+
 	// Sample proportion
 	p := sm.stats.EffectiveSampleRate
-	
+
 	// Sample variance for proportion
 	variance := p * (1 - p) / n
-	
+
 	// Finite population correction
 	if N > 0 {
 		fpc := (N - n) / (N - 1)
 		variance *= fpc
 	}
-	
+
 	sm.stats.SampleVariance = variance
 	sm.stats.StandardError = math.Sqrt(variance)
-	
+
 	// Calculate confidence interval (using normal approximation)
 	zScore := sm.getZScore(sm.config.ConfidenceLevel)
 	margin := zScore * sm.stats.StandardError
-	
+
 	sm.stats.ConfidenceInterval[0] = math.Max(0, p-margin)
 	sm.stats.ConfidenceInterval[1] = math.Min(1, p+margin)
 }
@@ -575,10 +575,10 @@ func (sm *SamplingManager) getZScore(confidenceLevel float64) float64 {
 func (sm *SamplingManager) GetStatistics() *SamplingStatistics {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	
+
 	stats := *sm.stats
 	stats.CurrentSampleRate = sm.currentRate
-	
+
 	return &stats
 }
 
@@ -587,29 +587,29 @@ func (sm *SamplingManager) SetSamplingRate(rate float64) error {
 	if rate < 0 || rate > 1 {
 		return fmt.Errorf("sampling rate must be between 0.0 and 1.0")
 	}
-	
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.currentRate = rate
 	sm.config.BaseRate = rate
-	
+
 	// Update BPF config
 	if err := sm.updateBPFConfig(); err != nil {
 		return fmt.Errorf("failed to update BPF config: %w", err)
 	}
-	
+
 	// Update metric
 	if sm.samplingRate != nil {
 		sm.samplingRate.Record(context.Background(), rate, metric.WithAttributes(
 			attribute.String("strategy", sm.strategyName()),
 		))
 	}
-	
+
 	sm.logger.Info("Sampling rate updated",
 		zap.Float64("new_rate", rate),
 	)
-	
+
 	return nil
 }
 
@@ -617,9 +617,9 @@ func (sm *SamplingManager) SetSamplingRate(rate float64) error {
 func (sm *SamplingManager) SetStrategy(strategy SamplingStrategy) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.config.Strategy = strategy
-	
+
 	// Reset strategy-specific state
 	switch strategy {
 	case SamplingStrategyReservoir:
@@ -629,16 +629,16 @@ func (sm *SamplingManager) SetStrategy(strategy SamplingStrategy) error {
 		sm.adaptiveHistory = make([]uint64, 10)
 		sm.adaptiveIndex = 0
 	}
-	
+
 	// Update BPF config
 	if err := sm.updateBPFConfig(); err != nil {
 		return fmt.Errorf("failed to update BPF config: %w", err)
 	}
-	
+
 	sm.logger.Info("Sampling strategy updated",
 		zap.String("new_strategy", sm.strategyName()),
 	)
-	
+
 	return nil
 }
 
@@ -647,21 +647,21 @@ func (sm *SamplingManager) SetEventTypeRate(eventType string, rate float64) erro
 	if rate < 0 || rate > 1 {
 		return fmt.Errorf("sampling rate must be between 0.0 and 1.0")
 	}
-	
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if sm.config.EventTypeRates == nil {
 		sm.config.EventTypeRates = make(map[string]float64)
 	}
-	
+
 	sm.config.EventTypeRates[eventType] = rate
-	
+
 	sm.logger.Info("Event type sampling rate updated",
 		zap.String("event_type", eventType),
 		zap.Float64("rate", rate),
 	)
-	
+
 	return nil
 }
 
@@ -671,21 +671,21 @@ func (sm *SamplingManager) CalculateRequiredSampleSize(populationSize uint64) ui
 	z := sm.getZScore(sm.config.ConfidenceLevel)
 	e := sm.config.MarginOfError
 	p := 0.5 // Use 0.5 for maximum sample size
-	
+
 	// n = (z^2 * p * (1-p)) / e^2
 	n := (z * z * p * (1 - p)) / (e * e)
-	
+
 	// Apply finite population correction if population is known
 	if populationSize > 0 {
 		N := float64(populationSize)
 		n = n / (1 + (n-1)/N)
 	}
-	
+
 	// Ensure minimum sample size
 	if n < float64(sm.config.MinSampleSize) {
 		n = float64(sm.config.MinSampleSize)
 	}
-	
+
 	return uint64(math.Ceil(n))
 }
 

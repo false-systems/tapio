@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // EventPool provides efficient event object pooling to reduce GC pressure
@@ -29,7 +29,7 @@ func NewEventPool() *EventPool {
 	ep.pool = sync.Pool{
 		New: func() interface{} {
 			atomic.AddUint64(&ep.metrics.Creates, 1)
-			return &collectors.RawEvent{
+			return &domain.RawEvent{
 				Metadata: make(map[string]string, 8), // Pre-allocate common metadata size
 			}
 		},
@@ -38,11 +38,11 @@ func NewEventPool() *EventPool {
 }
 
 // Get retrieves an event from the pool
-func (p *EventPool) Get() *collectors.RawEvent {
+func (p *EventPool) Get() *domain.RawEvent {
 	atomic.AddUint64(&p.metrics.Gets, 1)
 	atomic.AddInt64(&p.metrics.InUse, 1)
 
-	event := p.pool.Get().(*collectors.RawEvent)
+	event := p.pool.Get().(*domain.RawEvent)
 
 	// Reset the event to clean state
 	event.Timestamp = time.Time{}
@@ -60,7 +60,7 @@ func (p *EventPool) Get() *collectors.RawEvent {
 }
 
 // Put returns an event to the pool
-func (p *EventPool) Put(event *collectors.RawEvent) {
+func (p *EventPool) Put(event *domain.RawEvent) {
 	if event == nil {
 		return
 	}
@@ -96,12 +96,12 @@ func (p *EventPool) GetMetrics() PoolMetrics {
 var globalEventPool = NewEventPool()
 
 // GetEvent retrieves an event from the global pool
-func GetEvent() *collectors.RawEvent {
+func GetEvent() *domain.RawEvent {
 	return globalEventPool.Get()
 }
 
 // PutEvent returns an event to the global pool
-func PutEvent(event *collectors.RawEvent) {
+func PutEvent(event *domain.RawEvent) {
 	globalEventPool.Put(event)
 }
 

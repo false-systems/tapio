@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -36,7 +37,7 @@ type Collector struct {
 	traceManager *TraceManager
 
 	// Event channel
-	events chan collectors.RawEvent
+	events chan domain.RawEvent
 
 	// Lifecycle
 	ctx    context.Context
@@ -128,7 +129,7 @@ func New(logger *zap.Logger, config Config) (*Collector, error) {
 		config:          config,
 		clientset:       clientset,
 		traceManager:    NewTraceManager(),
-		events:          make(chan collectors.RawEvent, config.BufferSize),
+		events:          make(chan domain.RawEvent, config.BufferSize),
 		informers:       make([]cache.SharedIndexInformer, 0),
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -185,7 +186,7 @@ func NewCollector(name string) (*Collector, error) {
 		logger:          logger,
 		config:          config,
 		traceManager:    NewTraceManager(),
-		events:          make(chan collectors.RawEvent, config.BufferSize),
+		events:          make(chan domain.RawEvent, config.BufferSize),
 		informers:       make([]cache.SharedIndexInformer, 0),
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -295,7 +296,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
@@ -770,7 +771,7 @@ func (c *Collector) extractRelationships(event *ResourceEvent, obj interface{}) 
 }
 
 // createRawEvent converts ResourceEvent to RawEvent
-func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string) collectors.RawEvent {
+func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string) domain.RawEvent {
 	data, _ := json.Marshal(event)
 
 	// Build metadata with enhanced K8s fields
@@ -803,18 +804,15 @@ func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string)
 		metadata["k8s_owner_refs"] = strings.Join(ownerRefs, ",")
 	}
 
-	return collectors.RawEvent{
+	return domain.RawEvent{
 		Timestamp: event.Timestamp,
-		Type:      "k8s_" + event.EventType,
+		Source:    "k8s_" + event.EventType,
 		Data:      data,
-		Metadata:  metadata,
-		TraceID:   traceID,
-		SpanID:    spanID,
 	}
 }
 
 // createEvent creates a simple event (backward compatibility)
-func (c *Collector) createEvent(eventType string, data interface{}, traceID, spanID string) collectors.RawEvent {
+func (c *Collector) createEvent(eventType string, data interface{}, traceID, spanID string) domain.RawEvent {
 	jsonData, _ := json.Marshal(data)
 
 	// Generate new span ID if not provided
@@ -827,16 +825,10 @@ func (c *Collector) createEvent(eventType string, data interface{}, traceID, spa
 		traceID = collectors.GenerateTraceID()
 	}
 
-	return collectors.RawEvent{
+	return domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubeapi",
+		Source:    "kubeapi",
 		Data:      jsonData,
-		Metadata: map[string]string{
-			"collector": c.Name(),
-			"event":     eventType,
-		},
-		TraceID: traceID,
-		SpanID:  spanID,
 	}
 }
 

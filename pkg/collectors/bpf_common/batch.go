@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
@@ -67,11 +66,11 @@ func DefaultBatchConfig() *BatchConfig {
 
 // BatchedEvent represents a single event in a batch
 type BatchedEvent struct {
-	Event     collectors.RawEvent `json:"event"`
-	Size      int                 `json:"size"`
-	Timestamp time.Time           `json:"timestamp"`
-	Attempts  int                 `json:"attempts"`
-	LastError string              `json:"last_error,omitempty"`
+	Event     domain.RawEvent `json:"event"`
+	Size      int             `json:"size"`
+	Timestamp time.Time       `json:"timestamp"`
+	Attempts  int             `json:"attempts"`
+	LastError string          `json:"last_error,omitempty"`
 }
 
 // EventBatch represents a batch of events ready for processing
@@ -344,7 +343,7 @@ func (bp *BatchProcessor) Output() <-chan *EventBatch {
 }
 
 // AddEvent adds a single event to the batch processor
-func (bp *BatchProcessor) AddEvent(event collectors.RawEvent) error {
+func (bp *BatchProcessor) AddEvent(event domain.RawEvent) error {
 	// Convert to batched event
 	eventBytes, err := json.Marshal(event.Data)
 	if err != nil {
@@ -353,7 +352,7 @@ func (bp *BatchProcessor) AddEvent(event collectors.RawEvent) error {
 
 	batchedEvent := &BatchedEvent{
 		Event:     event,
-		Size:      len(eventBytes) + len(event.Metadata)*20, // Rough estimate
+		Size:      len(eventBytes), // Size of the serialized event
 		Timestamp: time.Now(),
 		Attempts:  0,
 	}

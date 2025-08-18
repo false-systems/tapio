@@ -3,22 +3,19 @@
 
 package kernel
 
-import (
-	"fmt"
-	"runtime"
-)
-
-// startEBPF returns an error on non-Linux platforms
-func (c *ModularCollector) startEBPF() error {
-	return fmt.Errorf("eBPF not supported on %s", runtime.GOOS)
+// startEBPF stub for non-Linux platforms
+func (c *Collector) startEBPF() error {
+	c.logger.Warn("eBPF not supported on this platform")
+	return nil
 }
 
-// stopEBPF is a no-op on non-Linux platforms
-func (c *ModularCollector) stopEBPF() {
-	// No-op
+// stopEBPF stub for non-Linux platforms
+func (c *Collector) stopEBPF() {
+	// No-op on non-Linux platforms
 }
 
-// readEBPFEvents is a no-op on non-Linux platforms
-func (c *ModularCollector) readEBPFEvents() {
-	// No-op
+// readEBPFEvents stub for non-Linux platforms
+func (c *Collector) readEBPFEvents() {
+	// No-op on non-Linux platforms
+	<-c.ctx.Done()
 }

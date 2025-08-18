@@ -16,19 +16,19 @@ import (
 // EventPool provides an object pool for kernel events to reduce GC pressure
 type EventPool struct {
 	pool sync.Pool
-	
+
 	// Metrics
 	allocationsTotal metric.Int64Counter
 	recycledTotal    metric.Int64Counter
 	poolSize         metric.Int64Gauge
 	gcPressure       metric.Float64Gauge
-	
+
 	// Configuration
 	maxPoolSize int64
 	currentSize int64
-	
+
 	// GC monitoring
-	lastGCRuns     uint32
+	lastGCRuns      uint32
 	gcMonitorTicker *time.Ticker
 	gcMonitorDone   chan struct{}
 }
@@ -36,7 +36,7 @@ type EventPool struct {
 // NewEventPool creates a new event pool with monitoring
 func NewEventPool(maxPoolSize int) *EventPool {
 	meter := otel.Meter("tapio/collectors/kernel")
-	
+
 	pool := &EventPool{
 		maxPoolSize: int64(maxPoolSize),
 		pool: sync.Pool{
@@ -46,7 +46,7 @@ func NewEventPool(maxPoolSize int) *EventPool {
 		},
 		gcMonitorDone: make(chan struct{}),
 	}
-	
+
 	// Initialize metrics
 	var err error
 	pool.allocationsTotal, err = meter.Int64Counter(
@@ -56,15 +56,15 @@ func NewEventPool(maxPoolSize int) *EventPool {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	pool.recycledTotal, err = meter.Int64Counter(
-		"kernel_pool_recycled_total", 
+		"kernel_pool_recycled_total",
 		metric.WithDescription("Total number of recycled objects"),
 	)
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	pool.poolSize, err = meter.Int64Gauge(
 		"kernel_pool_size",
 		metric.WithDescription("Current pool size"),
@@ -72,7 +72,7 @@ func NewEventPool(maxPoolSize int) *EventPool {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	pool.gcPressure, err = meter.Float64Gauge(
 		"kernel_pool_gc_pressure",
 		metric.WithDescription("GC pressure indicator (GCs per second)"),
@@ -80,25 +80,25 @@ func NewEventPool(maxPoolSize int) *EventPool {
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	// Start GC monitoring
 	pool.startGCMonitoring()
-	
+
 	return pool
 }
 
 // Get retrieves an event from the pool
 func (p *EventPool) Get() *KernelEvent {
 	event := p.pool.Get().(*KernelEvent)
-	
+
 	// Reset the event
 	*event = KernelEvent{}
-	
+
 	// Update metrics
 	if p.allocationsTotal != nil {
 		p.allocationsTotal.Add(context.Background(), 1)
 	}
-	
+
 	return event
 }
 
@@ -107,20 +107,20 @@ func (p *EventPool) Put(event *KernelEvent) {
 	if event == nil {
 		return
 	}
-	
+
 	// Check pool size limit
 	currentSize := atomic.LoadInt64(&p.currentSize)
 	if currentSize >= p.maxPoolSize {
 		// Pool is full, let GC handle it
 		return
 	}
-	
+
 	// Clear sensitive data before pooling
 	p.clearEvent(event)
-	
+
 	p.pool.Put(event)
 	atomic.AddInt64(&p.currentSize, 1)
-	
+
 	// Update metrics
 	if p.recycledTotal != nil {
 		p.recycledTotal.Add(context.Background(), 1)
@@ -139,12 +139,12 @@ func (p *EventPool) clearEvent(event *KernelEvent) {
 	for i := range event.PodUID {
 		event.PodUID[i] = 0
 	}
-	
+
 	// Clear union data
 	for i := range event.Data {
 		event.Data[i] = 0
 	}
-	
+
 	// Reset all numeric fields
 	event.Timestamp = 0
 	event.PID = 0
@@ -158,37 +158,37 @@ func (p *EventPool) clearEvent(event *KernelEvent) {
 func (p *EventPool) startGCMonitoring() {
 	var lastNumGC uint32
 	var lastTime = time.Now()
-	
+
 	p.gcMonitorTicker = time.NewTicker(10 * time.Second)
-	
+
 	go func() {
 		defer p.gcMonitorTicker.Stop()
-		
+
 		for {
 			select {
 			case <-p.gcMonitorTicker.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				
+
 				now := time.Now()
 				duration := now.Sub(lastTime).Seconds()
-				
+
 				gcRuns := m.NumGC - lastNumGC
 				gcPressure := float64(gcRuns) / duration
-				
+
 				if p.gcPressure != nil {
 					p.gcPressure.Record(context.Background(), gcPressure,
 						metric.WithAttributes(attribute.String("pool", "kernel_events")))
 				}
-				
+
 				lastNumGC = m.NumGC
 				lastTime = now
-				
+
 				// Log high GC pressure
 				if gcPressure > 2.0 { // More than 2 GCs per second
 					// Consider reducing pool size or increasing maxPoolSize
 				}
-				
+
 			case <-p.gcMonitorDone:
 				return
 			}
@@ -218,20 +218,19 @@ type PoolStats struct {
 	MaxSize     int64 `json:"max_size"`
 }
 
-
 // CircuitBreaker implements circuit breaker pattern for overload protection
 type CircuitBreaker struct {
-	mu            sync.RWMutex
-	state         CircuitState
-	failureCount  uint64
-	successCount  uint64
-	nextAttempt   time.Time
-	
+	mu           sync.RWMutex
+	state        CircuitState
+	failureCount uint64
+	successCount uint64
+	nextAttempt  time.Time
+
 	// Configuration
 	failureThreshold uint64
 	resetTimeout     time.Duration
 	halfOpenMaxCalls uint64
-	
+
 	// Metrics
 	stateGauge     metric.Int64Gauge
 	failureCounter metric.Int64Counter
@@ -249,14 +248,14 @@ const (
 // NewCircuitBreaker creates a new circuit breaker
 func NewCircuitBreaker(failureThreshold uint64, resetTimeout time.Duration) *CircuitBreaker {
 	meter := otel.Meter("tapio/collectors/kernel")
-	
+
 	cb := &CircuitBreaker{
 		state:            CircuitStateClosed,
 		failureThreshold: failureThreshold,
 		resetTimeout:     resetTimeout,
 		halfOpenMaxCalls: 5,
 	}
-	
+
 	// Initialize metrics
 	var err error
 	cb.stateGauge, err = meter.Int64Gauge(
@@ -266,7 +265,7 @@ func NewCircuitBreaker(failureThreshold uint64, resetTimeout time.Duration) *Cir
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	cb.failureCounter, err = meter.Int64Counter(
 		"kernel_circuit_breaker_failures_total",
 		metric.WithDescription("Total circuit breaker failures"),
@@ -274,15 +273,15 @@ func NewCircuitBreaker(failureThreshold uint64, resetTimeout time.Duration) *Cir
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	cb.successCounter, err = meter.Int64Counter(
-		"kernel_circuit_breaker_successes_total", 
+		"kernel_circuit_breaker_successes_total",
 		metric.WithDescription("Total circuit breaker successes"),
 	)
 	if err != nil {
 		// Log error but continue
 	}
-	
+
 	return cb
 }
 
@@ -291,7 +290,7 @@ func (cb *CircuitBreaker) Call(fn func() error) error {
 	if !cb.allowRequest() {
 		return ErrCircuitBreakerOpen
 	}
-	
+
 	err := fn()
 	cb.recordResult(err)
 	return err
@@ -301,7 +300,7 @@ func (cb *CircuitBreaker) Call(fn func() error) error {
 func (cb *CircuitBreaker) allowRequest() bool {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
-	
+
 	switch cb.state {
 	case CircuitStateClosed:
 		return true
@@ -318,13 +317,13 @@ func (cb *CircuitBreaker) allowRequest() bool {
 func (cb *CircuitBreaker) recordResult(err error) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	if err != nil {
 		cb.failureCount++
 		if cb.failureCounter != nil {
 			cb.failureCounter.Add(context.Background(), 1)
 		}
-		
+
 		if cb.state == CircuitStateHalfOpen || cb.failureCount >= cb.failureThreshold {
 			cb.setState(CircuitStateOpen)
 		}
@@ -333,7 +332,7 @@ func (cb *CircuitBreaker) recordResult(err error) {
 		if cb.successCounter != nil {
 			cb.successCounter.Add(context.Background(), 1)
 		}
-		
+
 		if cb.state == CircuitStateHalfOpen && cb.successCount >= cb.halfOpenMaxCalls {
 			cb.setState(CircuitStateClosed)
 		}
@@ -344,7 +343,7 @@ func (cb *CircuitBreaker) recordResult(err error) {
 func (cb *CircuitBreaker) setState(state CircuitState) {
 	cb.state = state
 	cb.nextAttempt = time.Now().Add(cb.resetTimeout)
-	
+
 	switch state {
 	case CircuitStateClosed:
 		cb.failureCount = 0
@@ -355,7 +354,7 @@ func (cb *CircuitBreaker) setState(state CircuitState) {
 	case CircuitStateHalfOpen:
 		cb.successCount = 0
 	}
-	
+
 	if cb.stateGauge != nil {
 		cb.stateGauge.Record(context.Background(), int64(state))
 	}
@@ -372,4 +371,3 @@ func (cb *CircuitBreaker) State() CircuitState {
 var (
 	ErrCircuitBreakerOpen = fmt.Errorf("circuit breaker is open")
 )
-

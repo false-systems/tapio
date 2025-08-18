@@ -2,12 +2,14 @@ package bpf_common
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
@@ -18,16 +20,16 @@ type FrameworkConfig struct {
 	EnableFiltering  bool `json:"enable_filtering"`
 	EnableBatching   bool `json:"enable_batching"`
 	EnableSampling   bool `json:"enable_sampling"`
-	
+
 	// Component configurations
 	StatisticsConfig *BPFStatsCollector `json:"statistics_config,omitempty"`
-	FilterConfig     *FilterConfig   `json:"filter_config,omitempty"`
+	FilterConfig     *FilterConfig      `json:"filter_config,omitempty"`
 	BatchConfig      *BatchConfig       `json:"batch_config,omitempty"`
 	SamplingConfig   *SamplingConfig    `json:"sampling_config,omitempty"`
-	
+
 	// Integration settings
-	UpdateInterval   time.Duration `json:"update_interval"`
-	ShutdownTimeout  time.Duration `json:"shutdown_timeout"`
+	UpdateInterval  time.Duration `json:"update_interval"`
+	ShutdownTimeout time.Duration `json:"shutdown_timeout"`
 }
 
 // DefaultFrameworkConfig returns sensible defaults for the unified framework
@@ -37,90 +39,90 @@ func DefaultFrameworkConfig() *FrameworkConfig {
 		EnableFiltering:  true,
 		EnableBatching:   true,
 		EnableSampling:   true,
-		FilterConfig:     &FilterConfig{
+		FilterConfig: &FilterConfig{
 			SampleRate: 10,
-			BatchSize: 100,
+			BatchSize:  100,
 		},
-		BatchConfig:      DefaultBatchConfig(),
-		SamplingConfig:   DefaultSamplingConfig(),
-		UpdateInterval:   5 * time.Second,
-		ShutdownTimeout:  30 * time.Second,
+		BatchConfig:     DefaultBatchConfig(),
+		SamplingConfig:  DefaultSamplingConfig(),
+		UpdateInterval:  5 * time.Second,
+		ShutdownTimeout: 30 * time.Second,
 	}
 }
 
 // UnifiedEBPFFramework provides integrated eBPF functionality for all collectors
 type UnifiedEBPFFramework struct {
-	mu              sync.RWMutex
-	logger          *zap.Logger
-	config          *FrameworkConfig
-	ctx             context.Context
-	cancel          context.CancelFunc
-	
+	mu     sync.RWMutex
+	logger *zap.Logger
+	config *FrameworkConfig
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// Core components
 	statsCollector  *BPFStatsCollector
 	filterManager   *FilterManager
 	batchProcessor  *BatchProcessor
 	samplingManager *SamplingManager
-	
+
 	// Registered programs
-	programs        map[string]*ProgramRegistration
-	
+	programs map[string]*ProgramRegistration
+
 	// Event flow coordination
-	eventPipeline   *EventPipeline
+	eventPipeline *EventPipeline
 }
 
 // ProgramRegistration holds information about a registered eBPF program
 type ProgramRegistration struct {
-	Name            string
-	ProgramType     string
-	ProgramID       uint32
-	BPFMaps         map[string]*ebpf.Map
-	EventTypes      []string
-	LastActivity    time.Time
-	Active          bool
-	
+	Name         string
+	ProgramType  string
+	ProgramID    uint32
+	BPFMaps      map[string]*ebpf.Map
+	EventTypes   []string
+	LastActivity time.Time
+	Active       bool
+
 	// Component integrations
-	HasStatistics   bool
-	HasFiltering    bool
-	HasBatching     bool
-	HasSampling     bool
+	HasStatistics bool
+	HasFiltering  bool
+	HasBatching   bool
+	HasSampling   bool
 }
 
 // EventPipeline coordinates event processing through all framework components
 type EventPipeline struct {
-	mu              sync.RWMutex
-	framework       *UnifiedEBPFFramework
-	logger          *zap.Logger
-	
+	mu        sync.RWMutex
+	framework *UnifiedEBPFFramework
+	logger    *zap.Logger
+
 	// Pipeline stages
-	inputChannel    chan *RawEBPFEvent
-	filterChannel   chan *RawEBPFEvent
-	sampleChannel   chan *RawEBPFEvent
-	batchChannel    chan *BatchedEvent
-	outputChannel   chan collectors.RawEvent
-	
+	inputChannel  chan *RawEBPFEvent
+	filterChannel chan *RawEBPFEvent
+	sampleChannel chan *RawEBPFEvent
+	batchChannel  chan *BatchedEvent
+	outputChannel chan domain.RawEvent
+
 	// Worker management
-	workers         []*PipelineWorker
-	workerWg        sync.WaitGroup
-	workerCount     int
+	workers     []*PipelineWorker
+	workerWg    sync.WaitGroup
+	workerCount int
 }
 
 // RawEBPFEvent represents an event before framework processing
 type RawEBPFEvent struct {
-	ProgramName     string
-	EventType       string
-	Data            []byte
-	Metadata        map[string]string
-	Timestamp       time.Time
-	ConsistencyKey  uint64
-	Priority        int
+	ProgramName    string
+	EventType      string
+	Data           []byte
+	Metadata       map[string]string
+	Timestamp      time.Time
+	ConsistencyKey uint64
+	Priority       int
 }
 
 // PipelineWorker processes events through the pipeline
 type PipelineWorker struct {
-	id              int
-	pipeline        *EventPipeline
-	logger          *zap.Logger
+	id       int
+	pipeline *EventPipeline
+	logger   *zap.Logger
 }
 
 // NewUnifiedEBPFFramework creates a new unified eBPF framework
@@ -128,7 +130,7 @@ func NewUnifiedEBPFFramework(config *FrameworkConfig, logger *zap.Logger) (*Unif
 	if config == nil {
 		config = DefaultFrameworkConfig()
 	}
-	
+
 	if logger == nil {
 		var err error
 		logger, err = zap.NewProduction()
@@ -136,13 +138,13 @@ func NewUnifiedEBPFFramework(config *FrameworkConfig, logger *zap.Logger) (*Unif
 			return nil, fmt.Errorf("failed to create logger: %w", err)
 		}
 	}
-	
+
 	framework := &UnifiedEBPFFramework{
 		logger:   logger,
 		config:   config,
 		programs: make(map[string]*ProgramRegistration),
 	}
-	
+
 	// Initialize components based on configuration
 	if config.EnableStatistics {
 		statsCollector, err := NewBPFStatsCollector(logger.Named("stats"), config.UpdateInterval)
@@ -151,7 +153,7 @@ func NewUnifiedEBPFFramework(config *FrameworkConfig, logger *zap.Logger) (*Unif
 		}
 		framework.statsCollector = statsCollector
 	}
-	
+
 	if config.EnableFiltering {
 		filterManager, err := NewFilterManager(logger.Named("filter"), nil, nil, nil, nil)
 		if err != nil {
@@ -159,7 +161,7 @@ func NewUnifiedEBPFFramework(config *FrameworkConfig, logger *zap.Logger) (*Unif
 		}
 		framework.filterManager = filterManager
 	}
-	
+
 	if config.EnableBatching {
 		batchProcessor, err := NewBatchProcessor(config.BatchConfig, framework.statsCollector, logger.Named("batch"))
 		if err != nil {
@@ -167,7 +169,7 @@ func NewUnifiedEBPFFramework(config *FrameworkConfig, logger *zap.Logger) (*Unif
 		}
 		framework.batchProcessor = batchProcessor
 	}
-	
+
 	if config.EnableSampling {
 		samplingManager, err := NewSamplingManager(logger.Named("sampler"), config.SamplingConfig, nil, nil, nil)
 		if err != nil {
@@ -175,14 +177,14 @@ func NewUnifiedEBPFFramework(config *FrameworkConfig, logger *zap.Logger) (*Unif
 		}
 		framework.samplingManager = samplingManager
 	}
-	
+
 	// Create event pipeline
 	eventPipeline, err := NewEventPipeline(framework, logger.Named("pipeline"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event pipeline: %w", err)
 	}
 	framework.eventPipeline = eventPipeline
-	
+
 	return framework, nil
 }
 
@@ -190,48 +192,48 @@ func NewUnifiedEBPFFramework(config *FrameworkConfig, logger *zap.Logger) (*Unif
 func (f *UnifiedEBPFFramework) Start(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	if f.ctx != nil {
 		return fmt.Errorf("framework already started")
 	}
-	
+
 	f.ctx, f.cancel = context.WithCancel(ctx)
-	
+
 	// Start components
 	if f.statsCollector != nil {
 		if err := f.statsCollector.Start(f.ctx); err != nil {
 			return fmt.Errorf("failed to start stats collector: %w", err)
 		}
 	}
-	
+
 	if f.filterManager != nil {
 		// Filter manager doesn't need explicit start
 	}
-	
+
 	if f.batchProcessor != nil {
 		if err := f.batchProcessor.Start(f.ctx); err != nil {
 			return fmt.Errorf("failed to start batch processor: %w", err)
 		}
 	}
-	
+
 	if f.samplingManager != nil {
 		if err := f.samplingManager.Start(f.ctx); err != nil {
 			return fmt.Errorf("failed to start sampler: %w", err)
 		}
 	}
-	
+
 	// Start event pipeline
 	if err := f.eventPipeline.Start(f.ctx); err != nil {
 		return fmt.Errorf("failed to start event pipeline: %w", err)
 	}
-	
+
 	f.logger.Info("Unified eBPF framework started",
 		zap.Bool("statistics", f.config.EnableStatistics),
 		zap.Bool("filtering", f.config.EnableFiltering),
 		zap.Bool("batching", f.config.EnableBatching),
 		zap.Bool("sampling", f.config.EnableSampling),
 	)
-	
+
 	return nil
 }
 
@@ -239,47 +241,47 @@ func (f *UnifiedEBPFFramework) Start(ctx context.Context) error {
 func (f *UnifiedEBPFFramework) Stop() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	if f.cancel != nil {
 		f.cancel()
 	}
-	
+
 	var errors []error
-	
+
 	// Stop event pipeline first
 	if f.eventPipeline != nil {
 		if err := f.eventPipeline.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("event pipeline stop error: %w", err))
 		}
 	}
-	
+
 	// Stop components
 	if f.batchProcessor != nil {
 		if err := f.batchProcessor.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("batch processor stop error: %w", err))
 		}
 	}
-	
+
 	if f.samplingManager != nil {
 		// Sampling manager doesn't have explicit stop
 	}
-	
+
 	if f.filterManager != nil {
 		// Filter manager doesn't have explicit stop
 	}
-	
+
 	if f.statsCollector != nil {
 		if err := f.statsCollector.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("stats collector stop error: %w", err))
 		}
 	}
-	
+
 	f.logger.Info("Unified eBPF framework stopped")
-	
+
 	if len(errors) > 0 {
 		return fmt.Errorf("errors during shutdown: %v", errors)
 	}
-	
+
 	return nil
 }
 
@@ -287,35 +289,35 @@ func (f *UnifiedEBPFFramework) Stop() error {
 func (f *UnifiedEBPFFramework) RegisterProgram(name, programType string, programID uint32, eventTypes []string) *ProgramRegistration {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	registration := &ProgramRegistration{
-		Name:         name,
-		ProgramType:  programType,
-		ProgramID:    programID,
-		BPFMaps:      make(map[string]*ebpf.Map),
-		EventTypes:   eventTypes,
-		LastActivity: time.Now(),
-		Active:       true,
+		Name:          name,
+		ProgramType:   programType,
+		ProgramID:     programID,
+		BPFMaps:       make(map[string]*ebpf.Map),
+		EventTypes:    eventTypes,
+		LastActivity:  time.Now(),
+		Active:        true,
 		HasStatistics: f.config.EnableStatistics,
-		HasFiltering: f.config.EnableFiltering,
-		HasBatching:  f.config.EnableBatching,
-		HasSampling:  f.config.EnableSampling,
+		HasFiltering:  f.config.EnableFiltering,
+		HasBatching:   f.config.EnableBatching,
+		HasSampling:   f.config.EnableSampling,
 	}
-	
+
 	f.programs[name] = registration
-	
+
 	// Register with components
 	if f.statsCollector != nil {
 		f.statsCollector.RegisterProgram(name, programType, programID)
 	}
-	
+
 	f.logger.Info("Registered eBPF program with framework",
 		zap.String("name", name),
 		zap.String("type", programType),
 		zap.Uint32("program_id", programID),
 		zap.Strings("event_types", eventTypes),
 	)
-	
+
 	return registration
 }
 
@@ -323,31 +325,31 @@ func (f *UnifiedEBPFFramework) RegisterProgram(name, programType string, program
 func (f *UnifiedEBPFFramework) UnregisterProgram(name string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	registration, exists := f.programs[name]
 	if !exists {
 		return
 	}
-	
+
 	// Unregister from components
 	if f.statsCollector != nil {
 		f.statsCollector.UnregisterProgram(name)
 	}
-	
+
 	if f.filterManager != nil {
 		// Unregister namespace filter map
 		// Unregister network filter map
 		// Unregister cgroup filter map
 	}
-	
+
 	if f.samplingManager != nil {
 		// Unregister sampler map
 	}
-	
+
 	// Mark as inactive
 	registration.Active = false
 	delete(f.programs, name)
-	
+
 	f.logger.Info("Unregistered eBPF program from framework",
 		zap.String("name", name),
 	)
@@ -357,14 +359,14 @@ func (f *UnifiedEBPFFramework) UnregisterProgram(name string) {
 func (f *UnifiedEBPFFramework) RegisterBPFMap(programName, mapName string, bpfMap *ebpf.Map, purpose string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	registration, exists := f.programs[programName]
 	if !exists {
 		return fmt.Errorf("program %s not registered", programName)
 	}
-	
+
 	registration.BPFMaps[mapName] = bpfMap
-	
+
 	// Register with appropriate components based on purpose
 	switch purpose {
 	case "filter_namespace":
@@ -399,7 +401,7 @@ func (f *UnifiedEBPFFramework) RegisterBPFMap(programName, mapName string, bpfMa
 			zap.String("purpose", purpose),
 		)
 	}
-	
+
 	return nil
 }
 
@@ -408,12 +410,12 @@ func (f *UnifiedEBPFFramework) ProcessEvent(event *RawEBPFEvent) error {
 	if f.eventPipeline == nil {
 		return fmt.Errorf("event pipeline not initialized")
 	}
-	
+
 	return f.eventPipeline.ProcessEvent(event)
 }
 
 // GetOutputChannel returns the channel for receiving processed events
-func (f *UnifiedEBPFFramework) GetOutputChannel() <-chan collectors.RawEvent {
+func (f *UnifiedEBPFFramework) GetOutputChannel() <-chan domain.RawEvent {
 	if f.eventPipeline == nil {
 		return nil
 	}
@@ -421,47 +423,47 @@ func (f *UnifiedEBPFFramework) GetOutputChannel() <-chan collectors.RawEvent {
 }
 
 // GetStatistics returns comprehensive framework statistics
-func (f *UnifiedEBPFFramework) GetStatistics() map[string]interface{} {
+func (f *UnifiedEBPFFramework) GetStatistics() *FrameworkStatistics {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
-	stats := make(map[string]interface{})
-	
+
+	stats := &FrameworkStatistics{
+		Programs: make(map[string]*ProgramStatistics),
+	}
+
 	// Program statistics
-	programStats := make(map[string]interface{})
 	for name, registration := range f.programs {
-		programStats[name] = map[string]interface{}{
-			"type":         registration.ProgramType,
-			"program_id":   registration.ProgramID,
-			"event_types":  registration.EventTypes,
-			"active":       registration.Active,
-			"last_activity": registration.LastActivity,
-			"maps_count":   len(registration.BPFMaps),
+		stats.Programs[name] = &ProgramStatistics{
+			Type:         registration.ProgramType,
+			ProgramID:    registration.ProgramID,
+			EventTypes:   registration.EventTypes,
+			Active:       registration.Active,
+			LastActivity: registration.LastActivity,
+			MapsCount:    len(registration.BPFMaps),
 		}
 	}
-	stats["programs"] = programStats
-	
+
 	// Component statistics
 	if f.statsCollector != nil {
-		stats["bpf_statistics"] = f.statsCollector.GetAllStats()
+		stats.BPFStatistics = f.statsCollector.GetAllStats()
 	}
-	
+
 	if f.filterManager != nil {
-		stats["filtering"] = f.filterManager.GetStatistics()
+		stats.Filtering = f.filterManager.GetStatistics()
 	}
-	
+
 	if f.batchProcessor != nil {
-		stats["batching"] = f.batchProcessor.GetStats()
+		stats.Batching = f.batchProcessor.GetStats()
 	}
-	
+
 	if f.samplingManager != nil {
-		stats["sampling"] = f.samplingManager.GetStatistics()
+		stats.Sampling = f.samplingManager.GetStatistics()
 	}
-	
+
 	if f.eventPipeline != nil {
-		stats["pipeline"] = f.eventPipeline.GetStatistics()
+		stats.Pipeline = f.eventPipeline.GetStatistics()
 	}
-	
+
 	return stats
 }
 
@@ -470,7 +472,7 @@ func (f *UnifiedEBPFFramework) UpdateSampleRate(eventType string, sampleRate flo
 	if f.samplingManager == nil {
 		return fmt.Errorf("sampling not enabled")
 	}
-	
+
 	return f.samplingManager.SetEventTypeRate(eventType, sampleRate)
 }
 
@@ -479,7 +481,7 @@ func (f *UnifiedEBPFFramework) AddPIDFilter(pid uint32, allow bool) error {
 	if f.filterManager == nil {
 		return fmt.Errorf("filtering not enabled")
 	}
-	
+
 	return f.filterManager.AddPIDFilter(pid, allow)
 }
 
@@ -487,14 +489,14 @@ func (f *UnifiedEBPFFramework) AddPIDFilter(pid uint32, allow bool) error {
 func (f *UnifiedEBPFFramework) GetActivePrograms() []string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
+
 	var activePrograms []string
 	for name, registration := range f.programs {
 		if registration.Active {
 			activePrograms = append(activePrograms, name)
 		}
 	}
-	
+
 	return activePrograms
 }
 
@@ -507,10 +509,10 @@ func NewEventPipeline(framework *UnifiedEBPFFramework, logger *zap.Logger) (*Eve
 		filterChannel: make(chan *RawEBPFEvent, 10000),
 		sampleChannel: make(chan *RawEBPFEvent, 10000),
 		batchChannel:  make(chan *BatchedEvent, 10000),
-		outputChannel: make(chan collectors.RawEvent, 10000),
+		outputChannel: make(chan domain.RawEvent, 10000),
 		workerCount:   4,
 	}
-	
+
 	pipeline.workers = make([]*PipelineWorker, pipeline.workerCount)
 	for i := 0; i < pipeline.workerCount; i++ {
 		pipeline.workers[i] = &PipelineWorker{
@@ -519,7 +521,7 @@ func NewEventPipeline(framework *UnifiedEBPFFramework, logger *zap.Logger) (*Eve
 			logger:   logger.With(zap.Int("worker_id", i)),
 		}
 	}
-	
+
 	return pipeline, nil
 }
 
@@ -527,17 +529,17 @@ func NewEventPipeline(framework *UnifiedEBPFFramework, logger *zap.Logger) (*Eve
 func (p *EventPipeline) Start(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	// Start workers
 	for _, worker := range p.workers {
 		p.workerWg.Add(1)
 		go worker.run(ctx)
 	}
-	
+
 	p.logger.Info("Event pipeline started",
 		zap.Int("worker_count", p.workerCount),
 	)
-	
+
 	return nil
 }
 
@@ -545,19 +547,19 @@ func (p *EventPipeline) Start(ctx context.Context) error {
 func (p *EventPipeline) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	// Close input channel to signal shutdown
 	close(p.inputChannel)
-	
+
 	// Wait for workers to finish
 	p.workerWg.Wait()
-	
+
 	// Close other channels
 	close(p.filterChannel)
 	close(p.sampleChannel)
 	close(p.batchChannel)
 	close(p.outputChannel)
-	
+
 	p.logger.Info("Event pipeline stopped")
 	return nil
 }
@@ -573,26 +575,26 @@ func (p *EventPipeline) ProcessEvent(event *RawEBPFEvent) error {
 }
 
 // GetOutputChannel returns the output channel for processed events
-func (p *EventPipeline) GetOutputChannel() <-chan collectors.RawEvent {
+func (p *EventPipeline) GetOutputChannel() <-chan domain.RawEvent {
 	return p.outputChannel
 }
 
 // GetStatistics returns pipeline processing statistics
-func (p *EventPipeline) GetStatistics() map[string]interface{} {
-	return map[string]interface{}{
-		"input_buffer_size":  cap(p.inputChannel),
-		"filter_buffer_size": cap(p.filterChannel),
-		"sample_buffer_size": cap(p.sampleChannel),
-		"batch_buffer_size":  cap(p.batchChannel),
-		"output_buffer_size": cap(p.outputChannel),
-		"worker_count":       p.workerCount,
+func (p *EventPipeline) GetStatistics() *PipelineStatistics {
+	return &PipelineStatistics{
+		InputBufferSize:  cap(p.inputChannel),
+		FilterBufferSize: cap(p.filterChannel),
+		SampleBufferSize: cap(p.sampleChannel),
+		BatchBufferSize:  cap(p.batchChannel),
+		OutputBufferSize: cap(p.outputChannel),
+		WorkerCount:      p.workerCount,
 	}
 }
 
 // run is the main worker processing loop
 func (w *PipelineWorker) run(ctx context.Context) {
 	defer w.pipeline.workerWg.Done()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -606,10 +608,40 @@ func (w *PipelineWorker) run(ctx context.Context) {
 	}
 }
 
+// FrameworkStatistics contains all framework statistics
+type FrameworkStatistics struct {
+	Programs      map[string]*ProgramStatistics `json:"programs"`
+	BPFStatistics map[string]*BPFStatistics     `json:"bpf_statistics,omitempty"`
+	Filtering     *FilterStatistics             `json:"filtering,omitempty"`
+	Batching      *BatchProcessorStats          `json:"batching,omitempty"`
+	Sampling      *SamplingStatistics           `json:"sampling,omitempty"`
+	Pipeline      *PipelineStatistics           `json:"pipeline,omitempty"`
+}
+
+// ProgramStatistics contains statistics for a single program
+type ProgramStatistics struct {
+	Type         string    `json:"type"`
+	ProgramID    uint32    `json:"program_id"`
+	EventTypes   []string  `json:"event_types"`
+	Active       bool      `json:"active"`
+	LastActivity time.Time `json:"last_activity"`
+	MapsCount    int       `json:"maps_count"`
+}
+
+// PipelineStatistics contains pipeline processing statistics
+type PipelineStatistics struct {
+	InputBufferSize  int `json:"input_buffer_size"`
+	FilterBufferSize int `json:"filter_buffer_size"`
+	SampleBufferSize int `json:"sample_buffer_size"`
+	BatchBufferSize  int `json:"batch_buffer_size"`
+	OutputBufferSize int `json:"output_buffer_size"`
+	WorkerCount      int `json:"worker_count"`
+}
+
 // processEvent processes a single event through the pipeline stages
 func (w *PipelineWorker) processEvent(event *RawEBPFEvent) {
 	framework := w.pipeline.framework
-	
+
 	// Stage 1: Filtering
 	if framework.filterManager != nil {
 		// For now, all events pass through (filtering logic would go here)
@@ -618,7 +650,7 @@ func (w *PipelineWorker) processEvent(event *RawEBPFEvent) {
 	} else {
 		w.pipeline.sampleChannel <- event
 	}
-	
+
 	// Stage 2: Sampling
 	select {
 	case filteredEvent := <-w.pipeline.filterChannel:
@@ -632,36 +664,64 @@ func (w *PipelineWorker) processEvent(event *RawEBPFEvent) {
 		}
 	default:
 	}
-	
+
 	// Stage 3: Batching
 	select {
 	case sampledEvent := <-w.pipeline.sampleChannel:
 		if framework.batchProcessor != nil {
-			// Convert to collectors.RawEvent
-			rawEvent := collectors.RawEvent{
-				Timestamp: sampledEvent.Timestamp,
-				Type:      sampledEvent.EventType,
-				Data:      sampledEvent.Data,
-				Metadata:  sampledEvent.Metadata,
-				TraceID:   collectors.GenerateTraceID(),
-				SpanID:    collectors.GenerateSpanID(),
+			// Package all event data for JSON marshaling
+			eventData := struct {
+				Type     string            `json:"type"`
+				Metadata map[string]string `json:"metadata"`
+				TraceID  string            `json:"trace_id"`
+				SpanID   string            `json:"span_id"`
+				RawData  []byte            `json:"raw_data"`
+			}{
+				Type:     sampledEvent.EventType,
+				Metadata: sampledEvent.Metadata,
+				TraceID:  collectors.GenerateTraceID(),
+				SpanID:   collectors.GenerateSpanID(),
+				RawData:  sampledEvent.Data,
 			}
-			
+
+			jsonData, _ := json.Marshal(eventData)
+
+			// Convert to domain.RawEvent
+			rawEvent := domain.RawEvent{
+				Timestamp: sampledEvent.Timestamp,
+				Source:    sampledEvent.ProgramName,
+				Data:      jsonData,
+			}
+
 			// Add to batch processor
 			if err := framework.batchProcessor.AddEvent(rawEvent); err != nil {
 				w.logger.Warn("Failed to add event to batch processor", zap.Error(err))
 			}
 		} else {
-			// Direct output
-			rawEvent := collectors.RawEvent{
-				Timestamp: sampledEvent.Timestamp,
-				Type:      sampledEvent.EventType,
-				Data:      sampledEvent.Data,
-				Metadata:  sampledEvent.Metadata,
-				TraceID:   collectors.GenerateTraceID(),
-				SpanID:    collectors.GenerateSpanID(),
+			// Package all event data for JSON marshaling
+			eventData := struct {
+				Type     string            `json:"type"`
+				Metadata map[string]string `json:"metadata"`
+				TraceID  string            `json:"trace_id"`
+				SpanID   string            `json:"span_id"`
+				RawData  []byte            `json:"raw_data"`
+			}{
+				Type:     sampledEvent.EventType,
+				Metadata: sampledEvent.Metadata,
+				TraceID:  collectors.GenerateTraceID(),
+				SpanID:   collectors.GenerateSpanID(),
+				RawData:  sampledEvent.Data,
 			}
-			
+
+			jsonData, _ := json.Marshal(eventData)
+
+			// Direct output
+			rawEvent := domain.RawEvent{
+				Timestamp: sampledEvent.Timestamp,
+				Source:    sampledEvent.ProgramName,
+				Data:      jsonData,
+			}
+
 			select {
 			case w.pipeline.outputChannel <- rawEvent:
 			default:
@@ -670,7 +730,7 @@ func (w *PipelineWorker) processEvent(event *RawEBPFEvent) {
 		}
 	default:
 	}
-	
+
 	// Stage 4: Batch Output Processing
 	if framework.batchProcessor != nil {
 		select {

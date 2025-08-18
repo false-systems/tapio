@@ -8,18 +8,20 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/bpf_common"
 	"github.com/yairfalse/tapio/pkg/collectors/kernel/bpf"
-	"go.opentelemetry.io/otel/attribute"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -32,13 +34,21 @@ type ebpfState struct {
 	reader *ringbuf.Reader
 }
 
+// Container patterns for extracting container IDs from cgroup paths
+var (
+	// Docker pattern: /docker/[container_id]
+	dockerPattern = regexp.MustCompile(`/docker/([a-f0-9]{64})`)
+	// containerd pattern: /containerd.service/[container_id]
+	containerdPattern = regexp.MustCompile(`/containerd[^/]*/([a-f0-9]{64})`)
+	// cri-o pattern: /crio-[container_id].scope
+	crioPattern = regexp.MustCompile(`/crio-([a-f0-9]{64})\.scope`)
+	// Kubernetes pod UID pattern from cgroup
+	podUIDPattern = regexp.MustCompile(`/pod([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})`)
+)
+
 // startEBPF initializes eBPF monitoring - Linux only
-func (c *ModularCollector) startEBPF() error {
-	ctx, span := c.tracer.Start(context.Background(), "kernel.ebpf.start",
-		trace.WithAttributes(
-			attribute.String("collector.name", c.name),
-		),
-	)
+func (c *Collector) startEBPF() error {
+	ctx, span := c.tracer.Start(context.Background(), "kernel.ebpf.start")
 	defer span.End()
 
 	// Check if eBPF is supported
@@ -52,11 +62,7 @@ func (c *ModularCollector) startEBPF() error {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to remove memory limit")
 		if c.errorsTotal != nil {
-			c.errorsTotal.Add(ctx, 1,
-				metric.WithAttributes(
-					attribute.String("error_type", "memlock_removal_failed"),
-				),
-			)
+			c.errorsTotal.Add(ctx, 1)
 		}
 		return fmt.Errorf("removing memory limit: %w", err)
 	}
@@ -67,23 +73,28 @@ func (c *ModularCollector) startEBPF() error {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to load eBPF objects")
 		if c.errorsTotal != nil {
-			c.errorsTotal.Add(ctx, 1,
-				metric.WithAttributes(
-					attribute.String("error_type", "ebpf_load_failed"),
-				),
-			)
+			c.errorsTotal.Add(ctx, 1)
 		}
 		return fmt.Errorf("loading eBPF objects: %w", err)
 	}
 
 	c.ebpfState = &ebpfState{objs: &objs}
 
-	// Attach eBPF programs to tracepoints
+	// Attach eBPF programs to tracepoints with retry logic
 	// Monitor process events
-	processLink, err := link.Tracepoint("syscalls", "sys_enter_execve", objs.TraceExec, nil)
+	var processLink link.Link
+	retryConfig := bpf_common.DefaultRetryConfig()
+	retryConfig.MaxAttempts = DefaultMaxRetryAttempts
+	retryConfig.InitialDelay = DefaultRetryInitialDelay
+
+	err = bpf_common.RetryWithBackoff(ctx, retryConfig, func(ctx context.Context) error {
+		var attachErr error
+		processLink, attachErr = link.Tracepoint("syscalls", "sys_enter_execve", objs.TraceExec, nil)
+		return attachErr
+	})
 	if err != nil {
 		objs.Close()
-		return fmt.Errorf("attaching execve tracepoint: %w", err)
+		return fmt.Errorf("attaching execve tracepoint after %d retries: %w", retryConfig.MaxAttempts, err)
 	}
 
 	// Monitor file operations
@@ -94,19 +105,24 @@ func (c *ModularCollector) startEBPF() error {
 		return fmt.Errorf("attaching openat tracepoint: %w", err)
 	}
 
+	// Ensure cleanup on any error from this point
+	cleanupLinks := func() {
+		if fileLink != nil {
+			fileLink.Close()
+		}
+		if processLink != nil {
+			processLink.Close()
+		}
+		objs.Close()
+	}
+
 	c.ebpfState.(*ebpfState).reader, err = ringbuf.NewReader(objs.Events)
 	if err != nil {
-		processLink.Close()
-		fileLink.Close()
-		objs.Close()
+		cleanupLinks()
 		return fmt.Errorf("creating ring buffer reader: %w", err)
 	}
 
 	c.ebpfState.(*ebpfState).links = []link.Link{processLink, fileLink}
-
-	span.SetAttributes(
-		attribute.Int("link_count", len(c.ebpfState.(*ebpfState).links)),
-	)
 
 	c.logger.Info("eBPF monitoring started successfully",
 		zap.String("collector", c.name),
@@ -117,7 +133,7 @@ func (c *ModularCollector) startEBPF() error {
 }
 
 // stopEBPF cleans up eBPF resources - Linux only
-func (c *ModularCollector) stopEBPF() {
+func (c *Collector) stopEBPF() {
 	if c.ebpfState == nil {
 		return
 	}
@@ -145,7 +161,7 @@ func (c *ModularCollector) stopEBPF() {
 }
 
 // readEBPFEvents processes eBPF ring buffer events - Linux only
-func (c *ModularCollector) readEBPFEvents() {
+func (c *Collector) readEBPFEvents() {
 	if c.ebpfState == nil {
 		return
 	}
@@ -167,24 +183,17 @@ func (c *ModularCollector) readEBPFEvents() {
 					return
 				}
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(ctx, 1,
-						metric.WithAttributes(
-							attribute.String("error_type", "ringbuf_read_failed"),
-						),
-					)
+					c.errorsTotal.Add(ctx, 1)
 				}
 				c.logger.Error("Failed to read from ring buffer", zap.Error(err))
 				continue
 			}
 
-			// Parse the event
+			// Parse the event with timing
+			startTime := time.Now()
 			if len(record.RawSample) < int(unsafe.Sizeof(KernelEvent{})) {
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(ctx, 1,
-						metric.WithAttributes(
-							attribute.String("error_type", "invalid_event_size"),
-						),
-					)
+					c.errorsTotal.Add(ctx, 1)
 				}
 				continue
 			}
@@ -192,100 +201,186 @@ func (c *ModularCollector) readEBPFEvents() {
 			var event KernelEvent
 			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(ctx, 1,
-						metric.WithAttributes(
-							attribute.String("error_type", "event_parse_failed"),
-						),
-					)
+					c.errorsTotal.Add(ctx, 1)
 				}
 				c.logger.Error("Failed to parse kernel event", zap.Error(err))
 				continue
 			}
 
-			// Convert to unified event
-			unifiedEvent := c.convertToUnifiedEvent(event)
+			// Enrich event with container/pod information
+			c.enrichEventWithContainerInfo(&event)
+
+			// Convert to raw event - simple and efficient
+			rawEvent := c.convertToRawEvent(event)
+
+			// Record processing time
+			if c.processingTime != nil {
+				duration := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
+				c.processingTime.Record(ctx, duration)
+			}
+
+			// Update buffer usage gauge
+			if c.bufferUsage != nil {
+				c.bufferUsage.Record(ctx, int64(len(c.events)))
+			}
 
 			// Send to event channel
 			select {
-			case c.events <- unifiedEvent:
+			case c.events <- rawEvent:
 				if c.eventsProcessed != nil {
-					c.eventsProcessed.Add(ctx, 1,
-						metric.WithAttributes(
-							attribute.String("event_type", unifiedEvent.Type),
-						),
-					)
+					c.eventsProcessed.Add(ctx, 1)
 				}
 			case <-ctx.Done():
 				return
 			default:
+				// Buffer full, drop event
+				if c.droppedEvents != nil {
+					c.droppedEvents.Add(ctx, 1)
+				}
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(ctx, 1,
-						metric.WithAttributes(
-							attribute.String("error_type", "channel_full"),
-						),
-					)
+					c.errorsTotal.Add(ctx, 1)
 				}
 			}
 		}
 	}
 }
 
-// convertToUnifiedEvent converts eBPF event to unified event format - Linux only
-func (c *ModularCollector) convertToUnifiedEvent(event KernelEvent) collectors.RawEvent {
+// enrichEventWithContainerInfo enriches the kernel event with container and pod information
+func (c *Collector) enrichEventWithContainerInfo(event *KernelEvent) {
+	// If we already have pod UID, skip enrichment
+	if event.PodUID[0] != 0 {
+		return
+	}
+
+	// Try to get container info from cgroup ID
+	if event.CgroupID != 0 {
+		// Try to read cgroup path from /proc/PID/cgroup
+		cgroupPath := c.getCgroupPath(event.PID)
+		if cgroupPath != "" {
+			// Extract container ID
+			containerID := c.extractContainerID(cgroupPath)
+			if containerID != "" {
+				c.logger.Debug("Found container ID for PID",
+					zap.Uint32("pid", event.PID),
+					zap.String("container_id", containerID),
+					zap.Uint64("cgroup_id", event.CgroupID),
+				)
+
+				// Store container ID in event data for later processing
+				// We'll use the first 12 chars of container ID as a marker
+				if len(containerID) >= 12 {
+					copy(event.Data[:12], containerID[:12])
+				}
+			}
+
+			// Extract pod UID
+			podUID := c.extractPodUID(cgroupPath)
+			if podUID != "" {
+				c.logger.Debug("Found pod UID for PID",
+					zap.Uint32("pid", event.PID),
+					zap.String("pod_uid", podUID),
+				)
+				copy(event.PodUID[:], podUID)
+			}
+		}
+	}
+}
+
+// getCgroupPath reads the cgroup path for a given PID
+func (c *Collector) getCgroupPath(pid uint32) string {
+	cgroupFile := fmt.Sprintf("/proc/%d/cgroup", pid)
+	data, err := ioutil.ReadFile(cgroupFile)
+	if err != nil {
+		return ""
+	}
+
+	// Parse cgroup file content
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		// Look for the systemd or unified cgroup path
+		if strings.Contains(line, "::") {
+			parts := strings.SplitN(line, "::", 2)
+			if len(parts) == 2 {
+				return parts[1]
+			}
+		}
+	}
+	return ""
+}
+
+// extractContainerID extracts container ID from cgroup path
+func (c *Collector) extractContainerID(cgroupPath string) string {
+	// Try Docker pattern
+	if matches := dockerPattern.FindStringSubmatch(cgroupPath); len(matches) > 1 {
+		return matches[1]
+	}
+
+	// Try containerd pattern
+	if matches := containerdPattern.FindStringSubmatch(cgroupPath); len(matches) > 1 {
+		return matches[1]
+	}
+
+	// Try cri-o pattern
+	if matches := crioPattern.FindStringSubmatch(cgroupPath); len(matches) > 1 {
+		return matches[1]
+	}
+
+	return ""
+}
+
+// extractPodUID extracts Kubernetes pod UID from cgroup path
+func (c *Collector) extractPodUID(cgroupPath string) string {
+	if matches := podUIDPattern.FindStringSubmatch(cgroupPath); len(matches) > 1 {
+		return matches[1]
+	}
+
+	// Alternative: check for kubepods in path and extract UID
+	if strings.Contains(cgroupPath, "kubepods") {
+		// Try to extract pod UID from various formats
+		// Format: /kubepods/besteffort/pod[uid]/[container_id]
+		// or: /kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod[uid].slice
+		if matches := regexp.MustCompile(`pod([a-f0-9]{8}_[a-f0-9]{4}_[a-f0-9]{4}_[a-f0-9]{4}_[a-f0-9]{12})`).FindStringSubmatch(cgroupPath); len(matches) > 1 {
+			// Convert underscores to hyphens
+			return strings.ReplaceAll(matches[1], "_", "-")
+		}
+	}
+
+	return ""
+}
+
+// getContainerRuntime tries to detect the container runtime
+func (c *Collector) getContainerRuntime() string {
+	// Check for Docker
+	if _, err := filepath.Glob("/var/run/docker.sock"); err == nil {
+		return "docker"
+	}
+
+	// Check for containerd
+	if _, err := filepath.Glob("/run/containerd/containerd.sock"); err == nil {
+		return "containerd"
+	}
+
+	// Check for cri-o
+	if _, err := filepath.Glob("/var/run/crio/crio.sock"); err == nil {
+		return "crio"
+	}
+
+	return "unknown"
+}
+
+// convertToRawEvent converts eBPF event to raw event format - Linux only
+func (c *Collector) convertToRawEvent(event KernelEvent) domain.RawEvent {
 	// Convert timestamp to time.Time format expected by RawEvent
 	timestamp := time.Unix(0, int64(event.Timestamp))
-	
-	// Create metadata map with proper string conversion
-	metadata := map[string]string{
-		"collector":  c.name,
-		"pid":        fmt.Sprintf("%d", event.PID),
-		"tid":        fmt.Sprintf("%d", event.TID),
-		"event_type": fmt.Sprintf("%d", event.EventType),
-		"size":       fmt.Sprintf("%d", event.Size),
-		"cgroup_id":  fmt.Sprintf("%d", event.CgroupID),
-	}
-	
-	// Convert comm from byte array to string
-	comm := ""
-	for i, b := range event.Comm {
-		if b == 0 {
-			comm = string(event.Comm[:i])
-			break
-		}
-	}
-	if comm != "" {
-		metadata["comm"] = comm
-	}
-	
-	// Convert pod UID from byte array to string
-	podUID := ""
-	for i, b := range event.PodUID {
-		if b == 0 {
-			podUID = string(event.PodUID[:i])
-			break
-		}
-	}
-	if podUID != "" {
-		metadata["pod_uid"] = podUID
-	}
-	
-	// Determine event type
-	eventType := "kernel_event"
-	switch event.EventType {
-	case 1:
-		eventType = "process_exec"
-	case 2:
-		eventType = "file_open"
-	case 3:
-		eventType = "network_connect"
-	}
-	
-	return collectors.RawEvent{
+
+	// Convert the raw eBPF event to bytes for the Data field
+	eventBytes := (*[unsafe.Sizeof(event)]byte)(unsafe.Pointer(&event))[:]
+	dataCopy := make([]byte, len(eventBytes))
+	copy(dataCopy, eventBytes)
+
+	return domain.RawEvent{
 		Timestamp: timestamp,
-		Type:      eventType,
-		Data:      nil, // Raw event data would go here if needed
-		Metadata:  metadata,
-		TraceID:   collectors.GenerateTraceID(),
-		SpanID:    collectors.GenerateSpanID(),
+		Source:    c.name,   // kernel collector name
+		Data:      dataCopy, // Raw eBPF event data
 	}
 }

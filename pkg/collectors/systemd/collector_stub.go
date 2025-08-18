@@ -1,7 +1,7 @@
 //go:build !linux
 // +build !linux
 
-package dns
+package systemd
 
 // startEBPF stub for non-Linux platforms
 func (c *Collector) startEBPF() error {
@@ -14,8 +14,8 @@ func (c *Collector) stopEBPF() {
 	// No-op on non-Linux platforms
 }
 
-// readEBPFEvents stub for non-Linux platforms
-func (c *Collector) readEBPFEvents() {
+// processEvents stub for non-Linux platforms
+func (c *Collector) processEvents() {
 	// No-op on non-Linux platforms
 	<-c.ctx.Done()
 }

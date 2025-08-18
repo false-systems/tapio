@@ -384,6 +384,6 @@ func (cc *CoreCompatibility) ValidateEBPFProgram(programType string) (bool, stri
 			return false, "ring buffer requires kernel 5.8+, falling back to perf buffer"
 		}
 	}
-	
+
 	return true, "compatible"
 }

@@ -101,7 +101,7 @@ func main() {
 		kernelConfig := &kernel.Config{
 			Name: "kernel",
 		}
-		kernelCollector, err := kernel.NewModularCollectorWithConfig(kernelConfig, logger)
+		kernelCollector, err := kernel.NewCollectorWithConfig(kernelConfig, logger)
 		if err != nil {
 			logger.Error("Failed to create kernel collector", zap.Error(err))
 		} else {

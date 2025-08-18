@@ -22,12 +22,12 @@ type BPFStatistics struct {
 	ProgramType string
 
 	// Event counters
-	EventsReceived    uint64 `json:"events_received"`
-	EventsProcessed   uint64 `json:"events_processed"`
-	EventsDropped     uint64 `json:"events_dropped"`
-	EventsFiltered    uint64 `json:"events_filtered"`
-	EventsSampled     uint64 `json:"events_sampled"`
-	EventsBatched     uint64 `json:"events_batched"`
+	EventsReceived  uint64 `json:"events_received"`
+	EventsProcessed uint64 `json:"events_processed"`
+	EventsDropped   uint64 `json:"events_dropped"`
+	EventsFiltered  uint64 `json:"events_filtered"`
+	EventsSampled   uint64 `json:"events_sampled"`
+	EventsBatched   uint64 `json:"events_batched"`
 
 	// Performance metrics
 	ProcessingTimeNs  uint64 `json:"processing_time_ns"`
@@ -36,73 +36,73 @@ type BPFStatistics struct {
 	Peak5MinLatencyNs uint64 `json:"peak_5min_latency_ns"`
 
 	// eBPF-specific metrics
-	RingBufferSize       uint64 `json:"ring_buffer_size"`
-	RingBufferUsed       uint64 `json:"ring_buffer_used"`
+	RingBufferSize        uint64  `json:"ring_buffer_size"`
+	RingBufferUsed        uint64  `json:"ring_buffer_used"`
 	RingBufferUtilization float64 `json:"ring_buffer_utilization"`
-	MapMemoryUsage       uint64 `json:"map_memory_usage"`
-	InstructionCount     uint64 `json:"instruction_count"`
-	VerifierLogSize      uint32 `json:"verifier_log_size"`
+	MapMemoryUsage        uint64  `json:"map_memory_usage"`
+	InstructionCount      uint64  `json:"instruction_count"`
+	VerifierLogSize       uint32  `json:"verifier_log_size"`
 
 	// Health indicators
 	ProgramErrors        uint64 `json:"program_errors"`
 	VerificationFailures uint64 `json:"verification_failures"`
 	AttachFailures       uint64 `json:"attach_failures"`
 	DetachEvents         uint64 `json:"detach_events"`
-	
+
 	// Filter statistics
 	NamespaceFilters uint64 `json:"namespace_filters"`
 	ProcessFilters   uint64 `json:"process_filters"`
 	NetworkFilters   uint64 `json:"network_filters"`
-	
+
 	// Sampling statistics
-	SamplingRate       float64 `json:"sampling_rate"`
-	SamplingActive     bool    `json:"sampling_active"`
-	SampledEventTypes  map[string]uint64 `json:"sampled_event_types"`
-	
+	SamplingRate      float64           `json:"sampling_rate"`
+	SamplingActive    bool              `json:"sampling_active"`
+	SampledEventTypes map[string]uint64 `json:"sampled_event_types"`
+
 	// Batch processing
-	BatchesSent        uint64 `json:"batches_sent"`
+	BatchesSent        uint64  `json:"batches_sent"`
 	AverageBatchSize   float64 `json:"average_batch_size"`
-	BatchFullEvents    uint64 `json:"batch_full_events"`
-	BatchTimeoutEvents uint64 `json:"batch_timeout_events"`
+	BatchFullEvents    uint64  `json:"batch_full_events"`
+	BatchTimeoutEvents uint64  `json:"batch_timeout_events"`
 
 	// Timing
-	LastUpdate     time.Time `json:"last_update"`
-	StartTime      time.Time `json:"start_time"`
-	UptimeSeconds  uint64    `json:"uptime_seconds"`
+	LastUpdate    time.Time `json:"last_update"`
+	StartTime     time.Time `json:"start_time"`
+	UptimeSeconds uint64    `json:"uptime_seconds"`
 }
 
 // BPFStatsCollector manages statistics collection for eBPF programs
 type BPFStatsCollector struct {
-	mu            sync.RWMutex
-	logger        *zap.Logger
-	ctx           context.Context
-	cancel        context.CancelFunc
-	
+	mu     sync.RWMutex
+	logger *zap.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// OTEL instrumentation
-	meter              metric.Meter
-	
+	meter metric.Meter
+
 	// Statistics storage
-	programs           map[string]*BPFStatistics
-	updateInterval     time.Duration
-	
+	programs       map[string]*BPFStatistics
+	updateInterval time.Duration
+
 	// Metrics
-	programsActive           metric.Int64UpDownCounter
-	eventsReceivedTotal      metric.Int64Counter
-	eventsProcessedTotal     metric.Int64Counter
-	eventsDroppedTotal       metric.Int64Counter
-	eventsFilteredTotal      metric.Int64Counter
-	eventsSampledTotal       metric.Int64Counter
-	eventsBatchedTotal       metric.Int64Counter
-	processingDuration       metric.Float64Histogram
-	ringBufferUtilization    metric.Float64Gauge
-	mapMemoryUsage           metric.Int64UpDownCounter
-	programErrors            metric.Int64Counter
-	verificationFailures     metric.Int64Counter
-	attachFailures           metric.Int64Counter
-	batchesSentTotal         metric.Int64Counter
-	averageBatchSize         metric.Float64Gauge
-	samplingRateGauge        metric.Float64Gauge
-	filterHitsTotal          metric.Int64Counter
+	programsActive        metric.Int64UpDownCounter
+	eventsReceivedTotal   metric.Int64Counter
+	eventsProcessedTotal  metric.Int64Counter
+	eventsDroppedTotal    metric.Int64Counter
+	eventsFilteredTotal   metric.Int64Counter
+	eventsSampledTotal    metric.Int64Counter
+	eventsBatchedTotal    metric.Int64Counter
+	processingDuration    metric.Float64Histogram
+	ringBufferUtilization metric.Float64Gauge
+	mapMemoryUsage        metric.Int64UpDownCounter
+	programErrors         metric.Int64Counter
+	verificationFailures  metric.Int64Counter
+	attachFailures        metric.Int64Counter
+	batchesSentTotal      metric.Int64Counter
+	averageBatchSize      metric.Float64Gauge
+	samplingRateGauge     metric.Float64Gauge
+	filterHitsTotal       metric.Int64Counter
 }
 
 // NewBPFStatsCollector creates a new eBPF statistics collector
@@ -114,13 +114,13 @@ func NewBPFStatsCollector(logger *zap.Logger, updateInterval time.Duration) (*BP
 			return nil, fmt.Errorf("failed to create logger: %w", err)
 		}
 	}
-	
+
 	if updateInterval <= 0 {
 		updateInterval = 5 * time.Second
 	}
 
 	meter := otel.Meter("tapio.bpf.stats")
-	
+
 	// Create OTEL metrics
 	programsActive, err := meter.Int64UpDownCounter(
 		"bpf_programs_active",
@@ -259,27 +259,27 @@ func NewBPFStatsCollector(logger *zap.Logger, updateInterval time.Duration) (*BP
 	}
 
 	return &BPFStatsCollector{
-		logger:                   logger,
-		programs:                make(map[string]*BPFStatistics),
-		updateInterval:          updateInterval,
-		meter:                   meter,
-		programsActive:          programsActive,
-		eventsReceivedTotal:     eventsReceivedTotal,
-		eventsProcessedTotal:    eventsProcessedTotal,
-		eventsDroppedTotal:      eventsDroppedTotal,
-		eventsFilteredTotal:     eventsFilteredTotal,
-		eventsSampledTotal:      eventsSampledTotal,
-		eventsBatchedTotal:      eventsBatchedTotal,
-		processingDuration:      processingDuration,
-		ringBufferUtilization:   ringBufferUtilization,
-		mapMemoryUsage:          mapMemoryUsage,
-		programErrors:           programErrors,
-		verificationFailures:    verificationFailures,
-		attachFailures:          attachFailures,
-		batchesSentTotal:        batchesSentTotal,
-		averageBatchSize:        averageBatchSize,
-		samplingRateGauge:       samplingRateGauge,
-		filterHitsTotal:         filterHitsTotal,
+		logger:                logger,
+		programs:              make(map[string]*BPFStatistics),
+		updateInterval:        updateInterval,
+		meter:                 meter,
+		programsActive:        programsActive,
+		eventsReceivedTotal:   eventsReceivedTotal,
+		eventsProcessedTotal:  eventsProcessedTotal,
+		eventsDroppedTotal:    eventsDroppedTotal,
+		eventsFilteredTotal:   eventsFilteredTotal,
+		eventsSampledTotal:    eventsSampledTotal,
+		eventsBatchedTotal:    eventsBatchedTotal,
+		processingDuration:    processingDuration,
+		ringBufferUtilization: ringBufferUtilization,
+		mapMemoryUsage:        mapMemoryUsage,
+		programErrors:         programErrors,
+		verificationFailures:  verificationFailures,
+		attachFailures:        attachFailures,
+		batchesSentTotal:      batchesSentTotal,
+		averageBatchSize:      averageBatchSize,
+		samplingRateGauge:     samplingRateGauge,
+		filterHitsTotal:       filterHitsTotal,
 	}, nil
 }
 
@@ -287,20 +287,20 @@ func NewBPFStatsCollector(logger *zap.Logger, updateInterval time.Duration) (*BP
 func (c *BPFStatsCollector) Start(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if c.ctx != nil {
 		return fmt.Errorf("stats collector already started")
 	}
-	
+
 	c.ctx, c.cancel = context.WithCancel(ctx)
-	
+
 	// Start metrics update loop
 	go c.metricsUpdateLoop()
-	
+
 	c.logger.Info("BPF statistics collector started",
 		zap.Duration("update_interval", c.updateInterval),
 	)
-	
+
 	return nil
 }
 
@@ -308,12 +308,12 @@ func (c *BPFStatsCollector) Start(ctx context.Context) error {
 func (c *BPFStatsCollector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if c.cancel != nil {
 		c.cancel()
 		c.cancel = nil
 	}
-	
+
 	c.logger.Info("BPF statistics collector stopped")
 	return nil
 }
@@ -322,7 +322,7 @@ func (c *BPFStatsCollector) Stop() error {
 func (c *BPFStatsCollector) RegisterProgram(name, programType string, programID uint32) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	stats := &BPFStatistics{
 		ProgramName:       name,
 		ProgramID:         programID,
@@ -331,9 +331,9 @@ func (c *BPFStatsCollector) RegisterProgram(name, programType string, programID 
 		LastUpdate:        time.Now(),
 		SampledEventTypes: make(map[string]uint64),
 	}
-	
+
 	c.programs[name] = stats
-	
+
 	// Update active programs metric
 	if c.programsActive != nil {
 		c.programsActive.Add(c.ctx, 1, metric.WithAttributes(
@@ -341,7 +341,7 @@ func (c *BPFStatsCollector) RegisterProgram(name, programType string, programID 
 			attribute.String("program_type", programType),
 		))
 	}
-	
+
 	c.logger.Info("Registered eBPF program for monitoring",
 		zap.String("name", name),
 		zap.String("type", programType),
@@ -353,10 +353,10 @@ func (c *BPFStatsCollector) RegisterProgram(name, programType string, programID 
 func (c *BPFStatsCollector) UnregisterProgram(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if stats, exists := c.programs[name]; exists {
 		delete(c.programs, name)
-		
+
 		// Update active programs metric
 		if c.programsActive != nil {
 			c.programsActive.Add(c.ctx, -1, metric.WithAttributes(
@@ -364,7 +364,7 @@ func (c *BPFStatsCollector) UnregisterProgram(name string) {
 				attribute.String("program_type", stats.ProgramType),
 			))
 		}
-		
+
 		c.logger.Info("Unregistered eBPF program from monitoring",
 			zap.String("name", name),
 		)
@@ -375,17 +375,17 @@ func (c *BPFStatsCollector) UnregisterProgram(name string) {
 func (c *BPFStatsCollector) UpdateStats(name string, update func(*BPFStatistics)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if stats, exists := c.programs[name]; exists {
 		update(stats)
 		stats.LastUpdate = time.Now()
 		stats.UptimeSeconds = uint64(time.Since(stats.StartTime).Seconds())
-		
+
 		// Update ring buffer utilization
 		if stats.RingBufferSize > 0 {
 			stats.RingBufferUtilization = float64(stats.RingBufferUsed) / float64(stats.RingBufferSize)
 		}
-		
+
 		// Update average batch size
 		if stats.BatchesSent > 0 {
 			stats.AverageBatchSize = float64(stats.EventsBatched) / float64(stats.BatchesSent)
@@ -397,7 +397,7 @@ func (c *BPFStatsCollector) UpdateStats(name string, update func(*BPFStatistics)
 func (c *BPFStatsCollector) GetStats(name string) (*BPFStatistics, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	if stats, exists := c.programs[name]; exists {
 		// Create a deep copy
 		copy := *stats
@@ -407,7 +407,7 @@ func (c *BPFStatsCollector) GetStats(name string) (*BPFStatistics, bool) {
 		}
 		return &copy, true
 	}
-	
+
 	return nil, false
 }
 
@@ -415,7 +415,7 @@ func (c *BPFStatsCollector) GetStats(name string) (*BPFStatistics, bool) {
 func (c *BPFStatsCollector) GetAllStats() map[string]*BPFStatistics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	result := make(map[string]*BPFStatistics)
 	for name, stats := range c.programs {
 		copy := *stats
@@ -425,7 +425,7 @@ func (c *BPFStatsCollector) GetAllStats() map[string]*BPFStatistics {
 		}
 		result[name] = &copy
 	}
-	
+
 	return result
 }
 
@@ -433,12 +433,12 @@ func (c *BPFStatsCollector) GetAllStats() map[string]*BPFStatistics {
 func (c *BPFStatsCollector) IncrementEventCounter(programName string, counterType CounterType, delta uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	stats, exists := c.programs[programName]
 	if !exists {
 		return
 	}
-	
+
 	switch counterType {
 	case CounterEventsReceived:
 		atomic.AddUint64(&stats.EventsReceived, delta)
@@ -496,21 +496,21 @@ func (c *BPFStatsCollector) IncrementEventCounter(programName string, counterTyp
 func (c *BPFStatsCollector) RecordProcessingTime(programName string, duration time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	stats, exists := c.programs[programName]
 	if !exists {
 		return
 	}
-	
+
 	durationNs := uint64(duration.Nanoseconds())
 	atomic.AddUint64(&stats.ProcessingTimeNs, durationNs)
-	
+
 	// Update average latency
 	totalEvents := atomic.LoadUint64(&stats.EventsProcessed)
 	if totalEvents > 0 {
 		stats.AverageLatencyNs = atomic.LoadUint64(&stats.ProcessingTimeNs) / totalEvents
 	}
-	
+
 	// Update peak latencies (simplified approach)
 	if durationNs > stats.Peak1MinLatencyNs {
 		stats.Peak1MinLatencyNs = durationNs
@@ -518,7 +518,7 @@ func (c *BPFStatsCollector) RecordProcessingTime(programName string, duration ti
 	if durationNs > stats.Peak5MinLatencyNs {
 		stats.Peak5MinLatencyNs = durationNs
 	}
-	
+
 	// Record OTEL metric
 	if c.processingDuration != nil {
 		durationMs := float64(duration.Nanoseconds()) / 1e6
@@ -532,18 +532,18 @@ func (c *BPFStatsCollector) RecordProcessingTime(programName string, duration ti
 func (c *BPFStatsCollector) UpdateRingBufferStats(programName string, size, used uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	stats, exists := c.programs[programName]
 	if !exists {
 		return
 	}
-	
+
 	stats.RingBufferSize = size
 	stats.RingBufferUsed = used
-	
+
 	if size > 0 {
 		stats.RingBufferUtilization = float64(used) / float64(size)
-		
+
 		if c.ringBufferUtilization != nil {
 			c.ringBufferUtilization.Record(c.ctx, stats.RingBufferUtilization, metric.WithAttributes(
 				attribute.String("program_name", programName),
@@ -556,7 +556,7 @@ func (c *BPFStatsCollector) UpdateRingBufferStats(programName string, size, used
 func (c *BPFStatsCollector) metricsUpdateLoop() {
 	ticker := time.NewTicker(c.updateInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -571,23 +571,23 @@ func (c *BPFStatsCollector) metricsUpdateLoop() {
 func (c *BPFStatsCollector) updateMetrics() {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	for name, stats := range c.programs {
 		attrs := metric.WithAttributes(attribute.String("program_name", name))
-		
+
 		// Update gauge metrics
 		if c.ringBufferUtilization != nil {
 			c.ringBufferUtilization.Record(c.ctx, stats.RingBufferUtilization, attrs)
 		}
-		
+
 		if c.mapMemoryUsage != nil {
 			c.mapMemoryUsage.Add(c.ctx, int64(stats.MapMemoryUsage), attrs)
 		}
-		
+
 		if c.averageBatchSize != nil {
 			c.averageBatchSize.Record(c.ctx, stats.AverageBatchSize, attrs)
 		}
-		
+
 		if c.samplingRateGauge != nil {
 			c.samplingRateGauge.Record(c.ctx, stats.SamplingRate, attrs)
 		}

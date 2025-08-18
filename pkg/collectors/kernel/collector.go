@@ -5,51 +5,48 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
-// ModularCollector implements modular kernel monitoring via eBPF
-type ModularCollector struct {
-	name        string
-	logger      *zap.Logger
-	events      chan collectors.RawEvent
-	ctx         context.Context
-	cancel      context.CancelFunc
-	healthy     bool
-	mu          sync.RWMutex
-	config      *Config
+// Collector implements efficient kernel monitoring via eBPF
+type Collector struct {
+	name    string
+	logger  *zap.Logger
+	events  chan domain.RawEvent
+	ctx     context.Context
+	cancel  context.CancelFunc
+	healthy bool
+	mu      sync.RWMutex
 
 	// eBPF components (platform-specific)
 	ebpfState interface{}
 
-	// OTEL instrumentation - REQUIRED fields
+	// Minimal OTEL instrumentation
 	tracer          trace.Tracer
 	eventsProcessed metric.Int64Counter
 	errorsTotal     metric.Int64Counter
 	processingTime  metric.Float64Histogram
-	eventsDropped   metric.Int64Counter
-	ebpfOperations  metric.Int64Counter
-	activeModules   metric.Int64UpDownCounter
+	bufferUsage     metric.Int64Gauge
+	droppedEvents   metric.Int64Counter
 }
 
-// NewModularCollector creates a new modular kernel collector
-func NewModularCollector(name string) (*ModularCollector, error) {
+// NewCollector creates a new kernel collector
+func NewCollector(name string) (*Collector, error) {
 	logger, err := zap.NewProduction()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 	config := &Config{Name: name}
-	return NewModularCollectorWithConfig(config, logger)
+	return NewCollectorWithConfig(config, logger)
 }
 
-// NewModularCollectorWithConfig creates a new modular kernel collector with config
-func NewModularCollectorWithConfig(config *Config, logger *zap.Logger) (*ModularCollector, error) {
+// NewCollectorWithLogger creates a new kernel collector with logger
+func NewCollectorWithConfig(config *Config, logger *zap.Logger) (*Collector, error) {
 	if logger == nil {
 		var err error
 		logger, err = zap.NewProduction()
@@ -58,92 +55,80 @@ func NewModularCollectorWithConfig(config *Config, logger *zap.Logger) (*Modular
 		}
 	}
 
-	// Initialize OTEL components - MANDATORY pattern
-	name := config.Name
-	tracer := otel.Tracer(name)
-	meter := otel.Meter(name)
+	// Initialize minimal OTEL components
+	tracer := otel.Tracer(config.Name)
+	meter := otel.Meter(config.Name)
 
-	// Create metrics with descriptive names and descriptions
+	// Only essential metrics
 	eventsProcessed, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_processed_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
+		fmt.Sprintf("%s_events_processed_total", config.Name),
+		metric.WithDescription(fmt.Sprintf("Total events processed by %s", config.Name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create events counter", zap.Error(err))
 	}
 
 	errorsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_errors_total", name),
-		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
+		fmt.Sprintf("%s_errors_total", config.Name),
+		metric.WithDescription(fmt.Sprintf("Total errors in %s", config.Name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create errors counter", zap.Error(err))
 	}
 
 	processingTime, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_processing_duration_ms", name),
-		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+		fmt.Sprintf("%s_processing_duration_ms", config.Name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", config.Name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create processing time histogram", zap.Error(err))
 	}
 
-	eventsDropped, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_dropped_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	bufferUsage, err := meter.Int64Gauge(
+		fmt.Sprintf("%s_buffer_usage", config.Name),
+		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", config.Name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create events dropped counter", zap.Error(err))
+		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
 	}
 
-	ebpfOperations, err := meter.Int64Counter(
-		fmt.Sprintf("%s_ebpf_operations_total", name),
-		metric.WithDescription(fmt.Sprintf("Total eBPF operations in %s", name)),
+	droppedEvents, err := meter.Int64Counter(
+		fmt.Sprintf("%s_dropped_events_total", config.Name),
+		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", config.Name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create ebpf operations counter", zap.Error(err))
+		logger.Warn("Failed to create dropped events counter", zap.Error(err))
 	}
 
-	activeModules, err := meter.Int64UpDownCounter(
-		fmt.Sprintf("%s_active_modules", name),
-		metric.WithDescription(fmt.Sprintf("Active modules in %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create active modules gauge", zap.Error(err))
-	}
-
-	c := &ModularCollector{
+	c := &Collector{
 		name:            config.Name,
 		logger:          logger,
-		config:          config,
-		events:          make(chan collectors.RawEvent, 15000), // Larger buffer for all modules
+		events:          make(chan domain.RawEvent, DefaultEventBufferSize),
 		healthy:         true,
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
-		eventsDropped:   eventsDropped,
-		ebpfOperations:  ebpfOperations,
-		activeModules:   activeModules,
+		bufferUsage:     bufferUsage,
+		droppedEvents:   droppedEvents,
 	}
 
 	return c, nil
 }
 
 // Name returns collector name
-func (c *ModularCollector) Name() string {
+func (c *Collector) Name() string {
 	return c.name
 }
 
-// Start starts the modular kernel monitoring
-func (c *ModularCollector) Start(ctx context.Context) error {
-	// Create span for startup
+// Start starts the kernel monitoring
+func (c *Collector) Start(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "kernel.start")
 	defer span.End()
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// Start eBPF monitoring using platform-specific implementation
+	// Start eBPF monitoring
 	if err := c.startEBPF(); err != nil {
 		if c.errorsTotal != nil {
 			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
@@ -151,7 +136,6 @@ func (c *ModularCollector) Start(ctx context.Context) error {
 			))
 		}
 		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to start eBPF: %w", err)
 	}
 
@@ -159,15 +143,12 @@ func (c *ModularCollector) Start(ctx context.Context) error {
 	go c.readEBPFEvents()
 
 	c.healthy = true
-	span.SetStatus(codes.Ok, "Kernel collector started successfully")
-	c.logger.Info("Kernel collector started",
-		zap.String("name", c.name),
-	)
+	c.logger.Info("Kernel collector started", zap.String("name", c.name))
 	return nil
 }
 
-// Stop stops the modular collector
-func (c *ModularCollector) Stop() error {
+// Stop stops the collector
+func (c *Collector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -188,12 +169,11 @@ func (c *ModularCollector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *ModularCollector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
 // IsHealthy returns health status
-func (c *ModularCollector) IsHealthy() bool {
+func (c *Collector) IsHealthy() bool {
 	return c.healthy
 }
-
