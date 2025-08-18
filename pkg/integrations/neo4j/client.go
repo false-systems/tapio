@@ -39,13 +39,13 @@ func NewClient(config Config, logger *zap.Logger) (*Client, error) {
 
 	// Create driver
 	auth := neo4j.BasicAuth(config.Username, config.Password, "")
-	
+
 	driverConfig := func(c *neo4j.Config) {
 		c.MaxConnectionPoolSize = config.MaxConnections
 		c.ConnectionAcquisitionTimeout = config.ConnectionTimeout
 		c.MaxTransactionRetryTime = config.MaxTransactionRetryTime
 		c.FetchSize = config.FetchSize
-		
+
 		if config.EnableConnectionLogging {
 			c.Log = neo4j.ConsoleLogger(neo4j.INFO)
 		}
@@ -165,6 +165,14 @@ func (c *Client) ExecuteWrite(ctx context.Context, work func(tx neo4j.ManagedTra
 	return nil
 }
 
+// ExecuteTypedWrite executes a write transaction with type-safe parameters
+func (c *Client) ExecuteTypedWrite(ctx context.Context, work TransactionWork) error {
+	return c.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) error {
+		typedTx := wrapTransaction(tx)
+		return work(ctx, typedTx)
+	})
+}
+
 // ExecuteRead executes a read transaction
 func (c *Client) ExecuteRead(ctx context.Context, work func(tx neo4j.ManagedTransaction) (interface{}, error)) (interface{}, error) {
 	ctx, span := c.tracer.Start(ctx, "neo4j.execute_read")
@@ -207,6 +215,17 @@ func (c *Client) ExecuteRead(ctx context.Context, work func(tx neo4j.ManagedTran
 
 	span.SetStatus(codes.Ok, "Read transaction completed")
 	return result, nil
+}
+
+// TypedReadWork represents a read transaction with type-safe parameters
+type TypedReadWork func(ctx context.Context, tx *TypedTransaction) (interface{}, error)
+
+// ExecuteTypedRead executes a read transaction with type-safe parameters
+func (c *Client) ExecuteTypedRead(ctx context.Context, work TypedReadWork) (interface{}, error) {
+	return c.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		typedTx := wrapTransaction(tx)
+		return work(ctx, typedTx)
+	})
 }
 
 // VerifyConnectivity checks if the connection to Neo4j is working

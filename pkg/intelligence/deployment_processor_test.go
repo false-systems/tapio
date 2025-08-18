@@ -13,10 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -34,7 +31,7 @@ func TestProcessRawEvent_NonKubeAPIEvent(t *testing.T) {
 	processor, err := NewDeploymentProcessor(logger)
 	require.NoError(t, err)
 
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Type:      "other-collector",
 		Timestamp: time.Now(),
 		Data:      []byte("some data"),
@@ -57,7 +54,7 @@ func TestProcessRawEvent_NonDeploymentResource(t *testing.T) {
 	processor, err := NewDeploymentProcessor(logger)
 	require.NoError(t, err)
 
-	resourceEvent := kubeapi.ResourceEvent{
+	resourceEvent := domain.ResourceEvent{
 		EventType: "ADDED",
 		Timestamp: time.Now(),
 		Kind:      "Pod",
@@ -68,7 +65,7 @@ func TestProcessRawEvent_NonDeploymentResource(t *testing.T) {
 	data, err := json.Marshal(resourceEvent)
 	require.NoError(t, err)
 
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Type:      "kubeapi",
 		Timestamp: time.Now(),
 		Data:      data,
@@ -128,13 +125,13 @@ func TestProcessRawEvent_DeploymentCreated(t *testing.T) {
 		},
 	}
 
-	resourceEvent := kubeapi.ResourceEvent{
+	resourceEvent := domain.ResourceEvent{
 		EventType: "ADDED",
 		Timestamp: time.Now(),
 		Kind:      "Deployment",
 		Name:      "test-deployment",
 		Namespace: "default",
-		UID:       types.UID("12345"),
+		UID:       "12345",
 		Object:    deployment,
 		Labels:    deployment.Labels,
 	}
@@ -142,7 +139,7 @@ func TestProcessRawEvent_DeploymentCreated(t *testing.T) {
 	data, err := json.Marshal(resourceEvent)
 	require.NoError(t, err)
 
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Type:      "kubeapi",
 		Timestamp: time.Now(),
 		Data:      data,
@@ -220,13 +217,13 @@ func TestProcessRawEvent_DeploymentUpdatedWithImageChange(t *testing.T) {
 		},
 	}
 
-	resourceEvent := kubeapi.ResourceEvent{
+	resourceEvent := domain.ResourceEvent{
 		EventType: "MODIFIED",
 		Timestamp: time.Now(),
 		Kind:      "Deployment",
 		Name:      "test-deployment",
 		Namespace: "default",
-		UID:       types.UID("12345"),
+		UID:       "12345",
 		Object:    newDeployment,
 		OldObject: oldDeployment,
 	}
@@ -234,7 +231,7 @@ func TestProcessRawEvent_DeploymentUpdatedWithImageChange(t *testing.T) {
 	data, err := json.Marshal(resourceEvent)
 	require.NoError(t, err)
 
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Type:      "kubeapi",
 		Timestamp: time.Now(),
 		Data:      data,
@@ -308,13 +305,13 @@ func TestProcessRawEvent_DeploymentScaled(t *testing.T) {
 		},
 	}
 
-	resourceEvent := kubeapi.ResourceEvent{
+	resourceEvent := domain.ResourceEvent{
 		EventType: "MODIFIED",
 		Timestamp: time.Now(),
 		Kind:      "Deployment",
 		Name:      "test-deployment",
 		Namespace: "default",
-		UID:       types.UID("12345"),
+		UID:       "12345",
 		Object:    newDeployment,
 		OldObject: oldDeployment,
 	}
@@ -322,7 +319,7 @@ func TestProcessRawEvent_DeploymentScaled(t *testing.T) {
 	data, err := json.Marshal(resourceEvent)
 	require.NoError(t, err)
 
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Type:      "kubeapi",
 		Timestamp: time.Now(),
 		Data:      data,
@@ -350,19 +347,19 @@ func TestProcessRawEvent_DeploymentDeleted(t *testing.T) {
 	processor, err := NewDeploymentProcessor(logger)
 	require.NoError(t, err)
 
-	resourceEvent := kubeapi.ResourceEvent{
+	resourceEvent := domain.ResourceEvent{
 		EventType: "DELETED",
 		Timestamp: time.Now(),
 		Kind:      "Deployment",
 		Name:      "test-deployment",
 		Namespace: "default",
-		UID:       types.UID("12345"),
+		UID:       "12345",
 	}
 
 	data, err := json.Marshal(resourceEvent)
 	require.NoError(t, err)
 
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Type:      "kubeapi",
 		Timestamp: time.Now(),
 		Data:      data,
@@ -389,7 +386,7 @@ func TestStart_ProcessesMultipleEvents(t *testing.T) {
 	processor, err := NewDeploymentProcessor(logger)
 	require.NoError(t, err)
 
-	rawEvents := make(chan collectors.RawEvent, 10)
+	rawEvents := make(chan domain.RawEvent, 10)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -397,19 +394,19 @@ func TestStart_ProcessesMultipleEvents(t *testing.T) {
 
 	// Send multiple events
 	for i := 0; i < 3; i++ {
-		resourceEvent := kubeapi.ResourceEvent{
+		resourceEvent := domain.ResourceEvent{
 			EventType: "ADDED",
 			Timestamp: time.Now(),
 			Kind:      "Deployment",
 			Name:      fmt.Sprintf("deployment-%d", i),
 			Namespace: "default",
-			UID:       types.UID(fmt.Sprintf("uid-%d", i)),
+			UID:       fmt.Sprintf("uid-%d", i),
 		}
 
 		data, err := json.Marshal(resourceEvent)
 		require.NoError(t, err)
 
-		rawEvents <- collectors.RawEvent{
+		rawEvents <- domain.RawEvent{
 			Type:      "kubeapi",
 			Timestamp: time.Now(),
 			Data:      data,

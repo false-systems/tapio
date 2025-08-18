@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	neo4jint "github.com/yairfalse/tapio/pkg/integrations/neo4j"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
@@ -118,9 +118,10 @@ func (l *Loader) checkNeo4jHealth(ctx context.Context) bool {
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Try a simple query to verify connectivity
-	err := l.neo4jClient.ExecuteWrite(healthCtx, func(tx neo4j.ManagedTransaction) error {
-		_, err := tx.Run(healthCtx, "RETURN 1", nil)
+	// Try a simple query to verify connectivity using typed transaction
+	err := l.neo4jClient.ExecuteTypedWrite(healthCtx, func(ctx context.Context, tx *neo4jint.TypedTransaction) error {
+		// No parameters needed for simple health check
+		_, err := tx.Run(ctx, "RETURN 1", nil)
 		return err
 	})
 

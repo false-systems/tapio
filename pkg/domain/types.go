@@ -167,7 +167,7 @@ type PerformanceInfo struct {
 }
 
 // Event represents a comprehensive system event supporting multiple use cases
-// DEPRECATED: Use UnifiedEvent instead. This type will be removed in a future version.
+// DEPRECATED: Use ObservationEvent instead. This type will be removed in a future version.
 type Event struct {
 	// Core fields (backward compatible)
 	ID        EventID    `json:"id"`
