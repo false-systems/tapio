@@ -10,6 +10,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // RingBufferReader provides a high-level interface for reading from eBPF ring buffers
@@ -29,8 +30,8 @@ type RingBufferReader struct {
 
 // EventProcessor defines the interface for processing parsed events
 type EventProcessor interface {
-	ProcessEvent(event *collectors.RawEvent) error
-	ProcessBatch(events []collectors.RawEvent) error
+	ProcessEvent(event *domain.RawEvent) error
+	ProcessBatch(events []domain.RawEvent) error
 }
 
 // ReaderMetrics tracks ring buffer reader performance
@@ -115,7 +116,7 @@ func (r *RingBufferReader) GetMetrics() ReaderMetrics {
 
 // readLoop is the main reading loop
 func (r *RingBufferReader) readLoop() {
-	batch := make([]collectors.RawEvent, 0, r.batchSize)
+	batch := make([]domain.RawEvent, 0, r.batchSize)
 	ticker := time.NewTicker(r.pollTimeout)
 	defer ticker.Stop()
 
@@ -179,7 +180,7 @@ func (r *RingBufferReader) readLoop() {
 }
 
 // processBatch processes a batch of events
-func (r *RingBufferReader) processBatch(batch []collectors.RawEvent) {
+func (r *RingBufferReader) processBatch(batch []domain.RawEvent) {
 	if len(batch) == 0 {
 		return
 	}
@@ -265,26 +266,26 @@ var MemHelper = &MemoryMapHelper{}
 
 // SimpleEventProcessor provides a basic implementation of EventProcessor
 type SimpleEventProcessor struct {
-	eventChan chan<- collectors.RawEvent
-	batchChan chan<- []collectors.RawEvent
+	eventChan chan<- domain.RawEvent
+	batchChan chan<- []domain.RawEvent
 }
 
 // NewSimpleEventProcessor creates a simple event processor
-func NewSimpleEventProcessor(eventChan chan<- collectors.RawEvent) *SimpleEventProcessor {
+func NewSimpleEventProcessor(eventChan chan<- domain.RawEvent) *SimpleEventProcessor {
 	return &SimpleEventProcessor{
 		eventChan: eventChan,
 	}
 }
 
 // NewBatchEventProcessor creates a simple batch event processor
-func NewBatchEventProcessor(batchChan chan<- []collectors.RawEvent) *SimpleEventProcessor {
+func NewBatchEventProcessor(batchChan chan<- []domain.RawEvent) *SimpleEventProcessor {
 	return &SimpleEventProcessor{
 		batchChan: batchChan,
 	}
 }
 
 // ProcessEvent sends individual events to the channel
-func (p *SimpleEventProcessor) ProcessEvent(event *collectors.RawEvent) error {
+func (p *SimpleEventProcessor) ProcessEvent(event *domain.RawEvent) error {
 	if p.eventChan == nil {
 		return fmt.Errorf("event channel not configured")
 	}
@@ -298,7 +299,7 @@ func (p *SimpleEventProcessor) ProcessEvent(event *collectors.RawEvent) error {
 }
 
 // ProcessBatch sends batched events to the channel
-func (p *SimpleEventProcessor) ProcessBatch(events []collectors.RawEvent) error {
+func (p *SimpleEventProcessor) ProcessBatch(events []domain.RawEvent) error {
 	if p.batchChan != nil {
 		// Send as batch if batch channel is available
 		select {
