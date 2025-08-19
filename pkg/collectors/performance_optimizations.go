@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // PerformanceOptimizations contains system-wide performance enhancements
@@ -108,10 +110,10 @@ func (rb *LockFreeRingBuffer) Pop() unsafe.Pointer {
 type BatchProcessor struct {
 	batchSize     int
 	flushInterval time.Duration
-	processor     func([]RawEvent)
+	processor     func([]domain.RawEvent)
 
 	mu        sync.Mutex
-	batch     []RawEvent
+	batch     []domain.RawEvent
 	lastFlush time.Time
 
 	// Zero-copy optimization
@@ -120,19 +122,19 @@ type BatchProcessor struct {
 }
 
 // NewBatchProcessor creates a new batch processor
-func NewBatchProcessor(batchSize int, flushInterval time.Duration, processor func([]RawEvent)) *BatchProcessor {
+func NewBatchProcessor(batchSize int, flushInterval time.Duration, processor func([]domain.RawEvent)) *BatchProcessor {
 	return &BatchProcessor{
 		batchSize:     batchSize,
 		flushInterval: flushInterval,
 		processor:     processor,
-		batch:         make([]RawEvent, 0, batchSize),
+		batch:         make([]domain.RawEvent, 0, batchSize),
 		lastFlush:     time.Now(),
 		directBuffer:  make([]byte, 1<<20), // 1MB direct buffer
 	}
 }
 
 // Add adds an event to the batch
-func (bp *BatchProcessor) Add(event RawEvent) {
+func (bp *BatchProcessor) Add(event domain.RawEvent) {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
 
@@ -171,32 +173,24 @@ func NewEventPool() *EventPool {
 	return &EventPool{
 		pool: &sync.Pool{
 			New: func() interface{} {
-				return &RawEvent{
-					Metadata: make(map[string]string, 16), // Pre-allocate reasonable size
-				}
+				return &domain.RawEvent{}
 			},
 		},
 	}
 }
 
 // Get retrieves an event from the pool
-func (ep *EventPool) Get() *RawEvent {
-	event := ep.pool.Get().(*RawEvent)
-	// Reset event but keep allocated map
+func (ep *EventPool) Get() *domain.RawEvent {
+	event := ep.pool.Get().(*domain.RawEvent)
+	// Reset event fields
 	event.Timestamp = time.Time{}
-	event.Type = ""
+	event.Source = ""
 	event.Data = event.Data[:0] // Reset slice but keep capacity
-	event.TraceID = ""
-	event.SpanID = ""
-	// Clear map entries but keep allocated map
-	for k := range event.Metadata {
-		delete(event.Metadata, k)
-	}
 	return event
 }
 
 // Put returns an event to the pool
-func (ep *EventPool) Put(event *RawEvent) {
+func (ep *EventPool) Put(event *domain.RawEvent) {
 	// Don't pool events with huge data buffers
 	if cap(event.Data) > 64*1024 {
 		return
@@ -294,7 +288,7 @@ type ParallelEventProcessor struct {
 type worker struct {
 	id        int
 	queue     *LockFreeRingBuffer
-	processor func(RawEvent)
+	processor func(domain.RawEvent)
 	stats     workerStats
 }
 
@@ -305,7 +299,7 @@ type workerStats struct {
 }
 
 // NewParallelEventProcessor creates a new parallel processor
-func NewParallelEventProcessor(numWorkers int, processor func(RawEvent)) *ParallelEventProcessor {
+func NewParallelEventProcessor(numWorkers int, processor func(domain.RawEvent)) *ParallelEventProcessor {
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
 	}
@@ -348,9 +342,9 @@ func (p *ParallelEventProcessor) Stop() {
 }
 
 // Submit submits an event for processing
-func (p *ParallelEventProcessor) Submit(event RawEvent) bool {
+func (p *ParallelEventProcessor) Submit(event domain.RawEvent) bool {
 	// Hash-based distribution for better cache locality
-	workerID := hashToWorker(event.TraceID, p.numWorkers)
+	workerID := hashToWorker(event.Source, p.numWorkers)
 
 	// Try primary queue first
 	eventPtr := unsafe.Pointer(&event)
@@ -381,7 +375,7 @@ func (p *ParallelEventProcessor) runWorker(w *worker) {
 
 		// Process from own queue first
 		if eventPtr := w.queue.Pop(); eventPtr != nil {
-			event := *(*RawEvent)(eventPtr)
+			event := *(*domain.RawEvent)(eventPtr)
 			w.processor(event)
 			w.stats.processed.Add(1)
 			continue
@@ -394,7 +388,7 @@ func (p *ParallelEventProcessor) runWorker(w *worker) {
 				continue
 			}
 			if eventPtr := p.queues[i].Pop(); eventPtr != nil {
-				event := *(*RawEvent)(eventPtr)
+				event := *(*domain.RawEvent)(eventPtr)
 				w.processor(event)
 				w.stats.stolen.Add(1)
 				stolen = true

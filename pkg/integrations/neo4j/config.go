@@ -14,8 +14,8 @@ type Config struct {
 	Database string `json:"database"`
 
 	// Connection pool settings
-	MaxConnections    int           `json:"max_connections"`
-	ConnectionTimeout time.Duration `json:"connection_timeout"`
+	MaxConnections          int           `json:"max_connections"`
+	ConnectionTimeout       time.Duration `json:"connection_timeout"`
 	MaxTransactionRetryTime time.Duration `json:"max_transaction_retry_time"`
 
 	// Performance settings
@@ -32,8 +32,8 @@ func DefaultConfig() Config {
 		Password: "password",
 		Database: "neo4j",
 
-		MaxConnections:    50,
-		ConnectionTimeout: 30 * time.Second,
+		MaxConnections:          50,
+		ConnectionTimeout:       30 * time.Second,
 		MaxTransactionRetryTime: 15 * time.Second,
 
 		FetchSize:               1000,

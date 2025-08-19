@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"gopkg.in/yaml.v3"
 )
 
@@ -96,18 +98,26 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// ToCollectorConfig converts to the standard collector config format
-func (c *CollectorsConfig) ToCollectorConfig() map[string]interface{} {
-	config := make(map[string]interface{})
-	config["buffer_size"] = c.BufferSize
-	config["metrics_enabled"] = c.MetricsEnabled
-
-	// Convert labels to interface map
-	labels := make(map[string]interface{})
-	for k, v := range c.Labels {
-		labels[k] = v
+// ToCollectorConfig converts to the typed collector config format
+func (c *CollectorsConfig) ToCollectorConfig(name string, collectorType string) *domain.CollectorConfig {
+	return &domain.CollectorConfig{
+		Name:      name,
+		Type:      collectorType,
+		Enabled:   true,
+		Interval:  time.Second * 10, // Default interval
+		BatchSize: c.BufferSize,
+		Labels:    c.Labels,
 	}
-	config["labels"] = labels
+}
 
-	return config
+// ToGenericCollectorConfig provides a basic typed configuration
+func (c *CollectorsConfig) ToGenericCollectorConfig() *domain.CollectorConfig {
+	return &domain.CollectorConfig{
+		Name:      "generic",
+		Type:      "generic",
+		Enabled:   true,
+		Interval:  time.Second * 10,
+		BatchSize: c.BufferSize,
+		Labels:    c.Labels,
+	}
 }

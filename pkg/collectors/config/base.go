@@ -402,7 +402,7 @@ func NewDNSConfig(name string) *DNSConfig {
 func (c *DNSConfig) SetDefaults() {
 	c.BaseConfig.SetDefaults()
 
-	c.EnableEBPF = true // Default to eBPF enabled
+	c.EnableEBPF = true    // Default to eBPF enabled
 	c.EnableSocket = false // Default to socket monitoring disabled
 }
 

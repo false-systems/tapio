@@ -205,11 +205,11 @@ func TestObservationEventProcessingPipeline(t *testing.T) {
 	t.Logf("✅ Engine health after processing: %v", details)
 }
 
-// TestObservationEventFieldMapping verifies field mapping between UnifiedEvent and ObservationEvent
+// TestObservationEventFieldMapping verifies field mapping for ObservationEvent
 func TestObservationEventFieldMapping(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
-	// Test that we can map common fields that existed in UnifiedEvent
+	// Test that we can map common fields for correlation
 	observationEvent := &domain.ObservationEvent{
 		ID:        "obs-mapping-test",
 		Timestamp: time.Now(),

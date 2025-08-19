@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -304,7 +304,7 @@ func TestCollectorWithMockCNI(t *testing.T) {
 		data      map[string]string
 	}{
 		{
-			eventType: "netns_create",
+			eventSource: "netns_create",
 			data: map[string]string{
 				"pid":        "1234",
 				"comm":       "containerd",
@@ -312,7 +312,7 @@ func TestCollectorWithMockCNI(t *testing.T) {
 			},
 		},
 		{
-			eventType: "netns_enter",
+			eventSource: "netns_enter",
 			data: map[string]string{
 				"pid":        "5678",
 				"comm":       "runc",
@@ -320,7 +320,7 @@ func TestCollectorWithMockCNI(t *testing.T) {
 			},
 		},
 		{
-			eventType: "netns_exit",
+			eventSource: "netns_exit",
 			data: map[string]string{
 				"pid":        "5678",
 				"comm":       "runc",
@@ -512,16 +512,16 @@ func TestRawEventOTELCompliance(t *testing.T) {
 		name      string
 		eventType string
 		data      map[string]string
-		validate  func(t *testing.T, event collectors.RawEvent)
+		validate  func(t *testing.T, event domain.RawEvent)
 	}{
 		{
-			name:      "BasicEvent",
-			eventType: "netns_create",
+			name:        "BasicEvent",
+			eventSource: "netns_create",
 			data: map[string]string{
 				"pid":  "1234",
 				"comm": "test",
 			},
-			validate: func(t *testing.T, event collectors.RawEvent) {
+			validate: func(t *testing.T, event domain.RawEvent) {
 				// Verify basic OTEL fields
 				assert.Equal(t, "cni", event.Type)
 				assert.NotEmpty(t, event.TraceID)
@@ -530,29 +530,29 @@ func TestRawEventOTELCompliance(t *testing.T) {
 			},
 		},
 		{
-			name:      "EventWithK8sMetadata",
-			eventType: "netns_enter",
+			name:        "EventWithK8sMetadata",
+			eventSource: "netns_enter",
 			data: map[string]string{
 				"pid":        "5678",
 				"comm":       "kubelet",
 				"netns_path": "/var/run/netns/cni-550e8400-e29b-41d4-a716-446655440000",
 			},
-			validate: func(t *testing.T, event collectors.RawEvent) {
+			validate: func(t *testing.T, event domain.RawEvent) {
 				// Verify K8s metadata extraction
 				assert.Equal(t, "Pod", event.Metadata["k8s_kind"])
 				assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", event.Metadata["k8s_uid"])
 			},
 		},
 		{
-			name:      "EventWithComplexData",
-			eventType: "netns_exit",
+			name:        "EventWithComplexData",
+			eventSource: "netns_exit",
 			data: map[string]string{
 				"pid":        "9999",
 				"comm":       "containerd-shim",
 				"netns_path": "/proc/9999/ns/net",
 				"cgroup":     "/kubepods/besteffort/pod550e8400_e29b_41d4_a716_446655440000",
 			},
-			validate: func(t *testing.T, event collectors.RawEvent) {
+			validate: func(t *testing.T, event domain.RawEvent) {
 				// Verify data serialization
 				var deserializedData map[string]string
 				err := json.Unmarshal(event.Data, &deserializedData)

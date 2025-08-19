@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,7 +63,7 @@ func TestCollector_HandleResourceEvent(t *testing.T) {
 		config:       config,
 		clientset:    fake.NewSimpleClientset(),
 		traceManager: NewTraceManager(),
-		events:       make(chan collectors.RawEvent, 10),
+		events:       make(chan domain.RawEvent, 10),
 		ctx:          context.Background(),
 	}
 

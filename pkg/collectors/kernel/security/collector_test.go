@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -78,11 +78,11 @@ func TestSecurityEventDetection(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			event := MockSecurityEvent{
-				Timestamp: uint64(time.Now().UnixNano()),
-				EventType: tc.eventType,
-				Severity:  tc.severity,
-				PID:       1234,
-				UID:       1000,
+				Timestamp:   uint64(time.Now().UnixNano()),
+				EventSource: tc.eventType,
+				Severity:    tc.severity,
+				PID:         1234,
+				UID:         1000,
 			}
 
 			data, err := json.Marshal(event)
@@ -158,12 +158,12 @@ func TestOTELSecurityMetrics(t *testing.T) {
 // TestRawEventWithSecurity tests RawEvent structure for security events
 func TestRawEventWithSecurity(t *testing.T) {
 	secEvent := SecurityEvent{
-		Timestamp: uint64(time.Now().UnixNano()),
-		PID:       9876,
-		UID:       0, // root
-		EventType: EventTypePrivilegeEscalation,
-		Severity:  9,
-		CgroupID:  1234,
+		Timestamp:   uint64(time.Now().UnixNano()),
+		PID:         9876,
+		UID:         0, // root
+		EventSource: EventTypePrivilegeEscalation,
+		Severity:    9,
+		CgroupID:    1234,
 	}
 	copy(secEvent.Comm[:], "suspicious")
 	copy(secEvent.FilePath[:], "/etc/passwd")
@@ -172,23 +172,15 @@ func TestRawEventWithSecurity(t *testing.T) {
 	data, err := json.Marshal(secEvent)
 	require.NoError(t, err)
 
-	rawEvent := collectors.RawEvent{
+	rawEvent := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "security",
+		Source:    "security",
 		Data:      data,
-		Metadata: map[string]string{
-			"source":   "ebpf",
-			"severity": "high",
-			"action":   "alert",
-		},
-		TraceID: "fedcba9876543210fedcba9876543210",
-		SpanID:  "fedcba9876543210",
 	}
 
 	// Verify structure
-	assert.Equal(t, "security", rawEvent.Type)
-	assert.Contains(t, rawEvent.Metadata, "severity")
-	assert.Equal(t, "high", rawEvent.Metadata["severity"])
+	assert.Equal(t, "security", rawEvent.Source)
+	assert.NotNil(t, rawEvent.Data)
 }
 
 // TestSecurityCollectorLifecycle tests start/stop with security focus
@@ -326,9 +318,9 @@ func TestSecurityEventCorrelation(t *testing.T) {
 	// Add related events
 	baseTime := uint64(time.Now().UnixNano())
 	events := []MockSecurityEvent{
-		{Timestamp: baseTime, PID: 1234, EventType: EventTypeFileOpen},
-		{Timestamp: baseTime + 1000, PID: 1234, EventType: EventTypeFileWrite},
-		{Timestamp: baseTime + 2000, PID: 1234, EventType: EventTypeProcessExec},
+		{Timestamp: baseTime, PID: 1234, EventSource: EventTypeFileOpen},
+		{Timestamp: baseTime + 1000, PID: 1234, EventSource: EventTypeFileWrite},
+		{Timestamp: baseTime + 2000, PID: 1234, EventSource: EventTypeProcessExec},
 	}
 
 	// Correlate by PID
@@ -467,10 +459,10 @@ func BenchmarkSecurityEventProcessing(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			event := MockSecurityEvent{
-				Timestamp: uint64(time.Now().UnixNano()),
-				PID:       uint32(b.N),
-				EventType: EventTypeFileWrite,
-				Severity:  5,
+				Timestamp:   uint64(time.Now().UnixNano()),
+				PID:         uint32(b.N),
+				EventSource: EventTypeFileWrite,
+				Severity:    5,
 			}
 
 			// Simulate processing
