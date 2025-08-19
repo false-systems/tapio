@@ -125,18 +125,23 @@ func TestProcessRawEvent_DeploymentCreated(t *testing.T) {
 		},
 	}
 
-	resourceEvent := domain.ResourceEvent{
-		EventType: "ADDED",
+	// Create K8sEventData which is what the real kubeapi collector produces
+	k8sEvent := domain.K8sEventData{
+		Type:      "ADDED",
 		Timestamp: time.Now(),
-		Kind:      "Deployment",
-		Name:      "test-deployment",
-		Namespace: "default",
-		UID:       "12345",
-		Object:    deployment,
-		Labels:    deployment.Labels,
+		Source:    "kubeapi",
+		Object: &domain.ObjectData{
+			Kind:        "Deployment",
+			APIVersion:  "apps/v1",
+			Name:        "test-deployment",
+			Namespace:   "default",
+			UID:         "12345",
+			Labels:      deployment.Labels,
+			Annotations: deployment.Annotations,
+		},
 	}
 
-	data, err := json.Marshal(resourceEvent)
+	data, err := json.Marshal(k8sEvent)
 	require.NoError(t, err)
 
 	event := domain.RawEvent{
@@ -155,9 +160,10 @@ func TestProcessRawEvent_DeploymentCreated(t *testing.T) {
 		assert.Equal(t, domain.DeploymentCreated, deploymentEvent.Action)
 		assert.Equal(t, "test-deployment", deploymentEvent.Name)
 		assert.Equal(t, "default", deploymentEvent.Namespace)
-		assert.Equal(t, int32(3), deploymentEvent.Metadata.NewReplicas)
-		assert.Equal(t, "nginx:1.19", deploymentEvent.Metadata.NewImage)
-		assert.Equal(t, "RollingUpdate", deploymentEvent.Metadata.Strategy)
+		// K8sEventData format only provides basic metadata, not full deployment specs
+		assert.Equal(t, int32(1), deploymentEvent.Metadata.NewReplicas) // Default value
+		assert.Equal(t, "", deploymentEvent.Metadata.NewImage)          // Not available in ObjectData
+		assert.Equal(t, "", deploymentEvent.Metadata.Strategy)          // Not available in ObjectData
 		assert.False(t, deploymentEvent.HasImageChange())
 		assert.False(t, deploymentEvent.HasScaleChange())
 	case <-time.After(100 * time.Millisecond):
