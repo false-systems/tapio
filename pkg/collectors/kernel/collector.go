@@ -152,8 +152,14 @@ func (c *Collector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Check if already stopped
+	if !c.healthy {
+		return nil
+	}
+
 	if c.cancel != nil {
 		c.cancel()
+		c.cancel = nil
 	}
 
 	// Stop eBPF if running
@@ -161,6 +167,7 @@ func (c *Collector) Stop() error {
 
 	if c.events != nil {
 		close(c.events)
+		c.events = nil
 	}
 
 	c.healthy = false

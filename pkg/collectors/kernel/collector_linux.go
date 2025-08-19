@@ -105,8 +105,38 @@ func (c *Collector) startEBPF() error {
 		return fmt.Errorf("attaching openat tracepoint: %w", err)
 	}
 
+	// Monitor TCP IPv4 connections
+	tcpV4Link, err := link.Kprobe("tcp_v4_connect", objs.TraceTcpV4Connect, nil)
+	if err != nil {
+		c.logger.Warn("Failed to attach TCP v4 kprobe, continuing without network monitoring", zap.Error(err))
+		tcpV4Link = nil
+	}
+
+	// Monitor TCP IPv6 connections
+	tcpV6Link, err := link.Kprobe("tcp_v6_connect", objs.TraceTcpV6Connect, nil)
+	if err != nil {
+		c.logger.Warn("Failed to attach TCP v6 kprobe, continuing without IPv6 monitoring", zap.Error(err))
+		tcpV6Link = nil
+	}
+
+	// Monitor UDP connections (both IPv4 and IPv6)
+	udpLink, err := link.Kprobe("udp_sendmsg", objs.TraceUdpSend, nil)
+	if err != nil {
+		c.logger.Warn("Failed to attach UDP kprobe, continuing without UDP monitoring", zap.Error(err))
+		udpLink = nil
+	}
+
 	// Ensure cleanup on any error from this point
 	cleanupLinks := func() {
+		if udpLink != nil {
+			udpLink.Close()
+		}
+		if tcpV6Link != nil {
+			tcpV6Link.Close()
+		}
+		if tcpV4Link != nil {
+			tcpV4Link.Close()
+		}
 		if fileLink != nil {
 			fileLink.Close()
 		}
@@ -122,11 +152,27 @@ func (c *Collector) startEBPF() error {
 		return fmt.Errorf("creating ring buffer reader: %w", err)
 	}
 
-	c.ebpfState.(*ebpfState).links = []link.Link{processLink, fileLink}
+	// Collect all valid links
+	var allLinks []link.Link
+	allLinks = append(allLinks, processLink, fileLink)
+	if tcpV4Link != nil {
+		allLinks = append(allLinks, tcpV4Link)
+	}
+	if tcpV6Link != nil {
+		allLinks = append(allLinks, tcpV6Link)
+	}
+	if udpLink != nil {
+		allLinks = append(allLinks, udpLink)
+	}
+
+	c.ebpfState.(*ebpfState).links = allLinks
 
 	c.logger.Info("eBPF monitoring started successfully",
 		zap.String("collector", c.name),
 		zap.Int("links", len(c.ebpfState.(*ebpfState).links)),
+		zap.Bool("tcp_v4_enabled", tcpV4Link != nil),
+		zap.Bool("tcp_v6_enabled", tcpV6Link != nil),
+		zap.Bool("udp_enabled", udpLink != nil),
 	)
 
 	return nil

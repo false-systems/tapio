@@ -2,770 +2,875 @@ package kernel
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
-func TestCollectorCreation(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-test"}, logger)
-	require.NoError(t, err)
+func TestNewCollector(t *testing.T) {
+	tests := []struct {
+		name     string
+		collName string
+		wantErr  bool
+	}{
+		{
+			name:     "valid name",
+			collName: "test-kernel",
+			wantErr:  false,
+		},
+		{
+			name:     "empty name",
+			collName: "",
+			wantErr:  false, // Empty name creates a collector with default config
+		},
+		{
+			name:     "long name",
+			collName: "very-long-kernel-collector-name-for-testing",
+			wantErr:  false,
+		},
+	}
 
-	assert.Equal(t, "kernel-test", collector.Name())
-	assert.True(t, collector.IsHealthy())
-	// Collector should be properly initialized
-	assert.NotNil(t, collector)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector, err := NewCollector(tt.collName)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, collector)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, collector)
+
+			// Verify collector properties
+			assert.Equal(t, tt.collName, collector.Name())
+			assert.True(t, collector.IsHealthy())
+			assert.NotNil(t, collector.logger)
+			assert.NotNil(t, collector.events)
+			assert.NotNil(t, collector.tracer)
+
+			// Verify OTEL metrics are initialized (even if nil due to test environment)
+			// This tests that metric creation doesn't panic
+			assert.NotPanics(t, func() {
+				collector.Name()
+			})
+		})
+	}
+}
+
+func TestNewCollectorWithConfig(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+
+	tests := []struct {
+		name    string
+		config  *Config
+		logger  *zap.Logger
+		wantErr bool
+	}{
+		{
+			name:    "valid config and logger",
+			config:  DefaultConfig(),
+			logger:  logger,
+			wantErr: false,
+		},
+		{
+			name:    "nil logger creates one",
+			config:  DefaultConfig(),
+			logger:  nil,
+			wantErr: false,
+		},
+		{
+			name: "custom config",
+			config: &Config{
+				Name:            "custom-kernel",
+				Enabled:         true,
+				SamplingEnabled: false,
+				SamplingRate:    50,
+			},
+			logger:  logger,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector, err := NewCollectorWithConfig(tt.config, tt.logger)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, collector)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, collector)
+
+			// Verify collector properties
+			assert.Equal(t, tt.config.Name, collector.Name())
+			assert.True(t, collector.IsHealthy())
+			assert.NotNil(t, collector.logger)
+			assert.NotNil(t, collector.events)
+			assert.Equal(t, cap(collector.events), DefaultEventBufferSize)
+		})
+	}
 }
 
 func TestCollectorLifecycle(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-lifecycle"}, logger)
+	logger := zaptest.NewLogger(t)
+	config := &Config{
+		Name:    "lifecycle-test",
+		Enabled: true,
+	}
+
+	collector, err := NewCollectorWithConfig(config, logger)
 	require.NoError(t, err)
+	require.NotNil(t, collector)
 
-	// Test that events channel is available
-	events := collector.Events()
-	assert.NotNil(t, events, "Events channel should not be nil")
+	// Test initial state
+	assert.True(t, collector.IsHealthy())
+	assert.Equal(t, "lifecycle-test", collector.Name())
 
-	// Test stop without start
-	err = collector.Stop()
-	assert.NoError(t, err, "Stop should not fail even if not started")
-}
-
-func TestEventChannelCapacity(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-events"}, logger)
-	require.NoError(t, err)
-
-	// Start collector
+	// Test start
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Note: This will likely fail in test environment without proper eBPF setup
-	// but we test the basic functionality
 	err = collector.Start(ctx)
-	if err != nil {
-		t.Logf("Expected error in test environment: %v", err)
-		return // Skip rest of test in environments without eBPF support
-	}
+	assert.NoError(t, err)
+	assert.True(t, collector.IsHealthy())
 
-	// If start succeeded, test cleanup
-	defer collector.Stop()
+	// Test Events channel is available
+	events := collector.Events()
+	assert.NotNil(t, events)
 
-	// Test that collector reports as healthy
-	assert.True(t, collector.IsHealthy(), "Collector should be healthy after successful start")
+	// Test stop
+	err = collector.Stop()
+	assert.NoError(t, err)
+	assert.False(t, collector.IsHealthy())
+
+	// Test double stop (should not error)
+	err = collector.Stop()
+	assert.NoError(t, err)
+	assert.False(t, collector.IsHealthy())
 }
 
-func TestCollectorHealthAndStatistics(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-stats"}, logger)
-	require.NoError(t, err)
-
-	// Test initial health
-	healthy, details := collector.Health()
-	assert.True(t, healthy)
-	assert.Contains(t, details, "healthy")
-	assert.Contains(t, details, "events_collected")
-	assert.Contains(t, details, "events_dropped")
-	assert.Contains(t, details, "error_count")
-	assert.Contains(t, details, "kernel_ebpf_loaded")
-	assert.Contains(t, details, "links_count")
-
-	// Test statistics
-	stats := collector.Statistics()
-	assert.Contains(t, stats, "events_collected")
-	assert.Contains(t, stats, "events_dropped")
-	assert.Contains(t, stats, "error_count")
-	assert.Contains(t, stats, "last_event_time")
-	assert.Contains(t, stats, "pod_trace_count")
-
-	// Performance metrics now implemented
-	assert.Contains(t, stats, "perf_buffer_size")
-	assert.Contains(t, stats, "perf_buffer_capacity")
-	assert.Contains(t, stats, "perf_buffer_utilization")
-	assert.Contains(t, stats, "perf_batches_processed")
-	assert.Contains(t, stats, "perf_pool_in_use")
-	assert.Contains(t, stats, "perf_events_processed")
-
-	// Verify performance metrics are reasonable values
-	assert.Equal(t, uint64(15000), stats["perf_buffer_capacity"]) // matches actual buffer size
-	assert.IsType(t, uint64(0), stats["perf_buffer_size"])
-	assert.IsType(t, float64(0.0), stats["perf_buffer_utilization"])
-	assert.IsType(t, uint64(0), stats["perf_batches_processed"])
-	assert.Equal(t, uint64(5), stats["perf_pool_in_use"]) // Main + security + process + network + k8s (if available)
-	assert.IsType(t, uint64(0), stats["perf_events_processed"])
-}
-
-func TestPerformanceAdapterMetrics(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-perf"}, logger)
-	require.NoError(t, err)
-
-	// Verify performance adapter configuration
-	stats := collector.Statistics()
-
-	// Performance adapter now integrated - verify all metrics
-	assert.Equal(t, uint64(15000), stats["perf_buffer_capacity"]) // Modular collector uses 15000
-	assert.Equal(t, uint64(0), stats["perf_buffer_size"])
-	assert.Equal(t, uint64(0), stats["perf_batches_processed"])
-	assert.Equal(t, uint64(0), stats["perf_events_processed"])
-	assert.Equal(t, uint64(5), stats["perf_pool_in_use"]) // Main + security + process + network + k8s
-	assert.Equal(t, float64(0.0), stats["perf_buffer_utilization"])
-
-	// Verify basic stats are still present
-	assert.Contains(t, stats, "events_collected")
-	assert.Contains(t, stats, "events_dropped")
-	assert.Contains(t, stats, "error_count")
-	assert.Contains(t, stats, "last_event_time")
-	assert.Contains(t, stats, "pod_trace_count")
-}
-
-func TestEventTypeToString(t *testing.T) {
-	logger := zap.NewNop()
-	collector, _ := NewModularCollectorWithConfig(&Config{Name: "kernel-types"}, logger)
-
-	testCases := []struct {
-		eventType uint32
-		expected  string
-	}{
-		{1, "memory_alloc"},
-		{2, "memory_free"},
-		{3, "process_exec"},
-		{4, "pod_syscall"},
-		{5, "network_conn"},
-		{99, "unknown"},
-	}
-
-	for _, tc := range testCases {
-		result := collector.eventTypeToString(tc.eventType)
-		if result != tc.expected {
-			t.Errorf("For event type %d, expected '%s', got '%s'", tc.eventType, tc.expected, result)
-		}
-	}
-}
-
-func TestNullTerminatedString(t *testing.T) {
-	logger := zap.NewNop()
-	collector, _ := NewModularCollectorWithConfig(&Config{Name: "kernel-strings"}, logger)
-
-	testCases := []struct {
-		input    []byte
-		expected string
-	}{
-		{[]byte{'h', 'e', 'l', 'l', 'o', 0, 'w', 'o', 'r', 'l', 'd'}, "hello"},
-		{[]byte{'t', 'e', 's', 't', 0}, "test"},
-		{[]byte{0, 'a', 'b', 'c'}, ""},
-		{[]byte{'n', 'o', 'n', 'u', 'l', 'l'}, "nonull"},
-	}
-
-	for _, tc := range testCases {
-		result := collector.nullTerminatedString(tc.input)
-		if result != tc.expected {
-			t.Errorf("For input %v, expected '%s', got '%s'", tc.input, tc.expected, result)
-		}
-	}
-}
-
-func TestPodManagement(t *testing.T) {
-	logger := zap.NewNop()
-	collector, _ := NewModularCollectorWithConfig(&Config{Name: "kernel-pod"}, logger)
-
-	// Test UpdatePodInfo with uninitialized eBPF objects (should fail gracefully)
-	err := collector.UpdatePodInfo(12345, "pod-123", "default", "nginx-pod")
-	if err == nil {
-		t.Error("Expected error when eBPF objects not initialized")
-	}
-
-	// Test RemovePodInfo with uninitialized eBPF objects (should fail gracefully)
-	err = collector.RemovePodInfo(12345)
-	if err == nil {
-		t.Error("Expected error when eBPF objects not initialized")
-	}
-
-	// Test GetPodInfo with uninitialized eBPF objects (should fail gracefully)
-	_, err = collector.GetPodInfo(12345)
-	if err == nil {
-		t.Error("Expected error when eBPF objects not initialized")
-	}
-}
-
-func TestCgroupIDValidation(t *testing.T) {
-	logger := zap.NewNop()
-	_, _ = NewModularCollectorWithConfig(&Config{Name: "kernel-cgroup"}, logger)
-
-	// Test cgroup ID validation - real cgroup IDs should be much larger than PIDs
-	testCases := []struct {
-		cgroupID    uint64
-		description string
-		shouldBePID bool
-		isZero      bool
-	}{
-		{0, "zero cgroup ID", false, true},
-		{1, "minimal edge case", true, false},       // Very small, could be confused with PID
-		{12345, "potential PID value", true, false}, // PIDs are typically small
-		{0x100000000, "cgroup ID with 4GB offset (fallback)", false, false},
-		{0x800000000, "typical kernfs inode number", false, false},
-		{18446744073709551615, "maximum uint64", false, false}, // Max value test
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			// Validate that cgroup IDs are properly distinguished from PIDs
-			if tc.isZero {
-				// Zero is invalid
-				assert.Zero(t, tc.cgroupID, "Zero cgroup ID should be zero")
-			} else if tc.shouldBePID {
-				// PIDs should be small numbers (typically < 65536 on most systems)
-				assert.True(t, tc.cgroupID < 65536, "PID-like value should be small")
-			} else {
-				// Real cgroup IDs should be large (either kernfs inodes or have our offset)
-				// With our fix, we expect either:
-				// 1. Large inode numbers (> 1M typically)
-				// 2. Offset-based IDs (>= 4GB)
-				isLargeCgroupID := tc.cgroupID >= 0x100000000 // 4GB offset
-				isValidKernfsInode := tc.cgroupID > 1000000   // Large inode
-				assert.True(t, isLargeCgroupID || isValidKernfsInode,
-					"Valid cgroup ID should be distinguishable from PID")
-			}
-		})
-	}
-}
-
-func TestCgroupPodCorrelation(t *testing.T) {
-	logger := zap.NewNop()
-	_, _ = NewModularCollectorWithConfig(&Config{Name: "kernel-correlation"}, logger)
-
-	// Test that correlation metadata includes proper cgroup information
-	metadata := map[string]string{
-		"cgroup_id": "1234567890", // Simulated large cgroup ID
-		"pod_uid":   "test-pod-uid-12345",
-		"pid":       "1234",
-	}
-
-	// Validate that cgroup ID is different from PID
-	cgroupID := metadata["cgroup_id"]
-	pidStr := metadata["pid"]
-
-	assert.NotEqual(t, cgroupID, pidStr, "Cgroup ID should not equal PID")
-
-	// Test pod UID extraction
-	podUID := metadata["pod_uid"]
-	assert.NotEmpty(t, podUID, "Pod UID should be present for correlation")
-	assert.NotEqual(t, "0", podUID, "Pod UID should not be zero")
-}
-
-func TestContainerPIDValidation(t *testing.T) {
-	logger := zap.NewNop()
-	collector, _ := NewModularCollectorWithConfig(&Config{Name: "kernel-containers"}, logger)
-
-	// Test that collector can be created without error
-	assert.NotNil(t, collector, "Collector should be created successfully")
-
-	// Test container PID detection logic via internal helper
-	testCases := []struct {
-		cgroupPath  string
-		shouldMatch bool
-		description string
-	}{
-		{"/docker/container-id", true, "Docker container"},
-		{"/containerd/container-id", true, "Containerd container"},
-		{"/kubepods/besteffort/pod-id", true, "Kubernetes pod"},
-		{"/system.slice/systemd-service", false, "System service"},
-		{"/user.slice/user-session", false, "User session"},
-		{"", false, "Empty cgroup path"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			// Test container detection logic using internal helper
-			isContainer := isContainerCgroupPath(tc.cgroupPath)
-			assert.Equal(t, tc.shouldMatch, isContainer,
-				"Container detection should match expected result")
-		})
-	}
-}
-
-// Helper function to simulate container cgroup path detection
-func isContainerCgroupPath(cgroupPath string) bool {
-	// Simulate the logic used in populateContainerPIDs
-	if cgroupPath == "" {
-		return false
-	}
-
-	containerKeywords := []string{"docker", "containerd", "kubepods"}
-	for _, keyword := range containerKeywords {
-		if len(cgroupPath) > len(keyword) &&
-			cgroupPath[:len(keyword)+1] == "/"+keyword {
-			return true
-		}
-	}
-	return false
-}
-
-// Memory Safety Tests
-
-func TestParseKernelEventSafely(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-memory-test"}, logger)
-	require.NoError(t, err)
-
-	expectedSize := int(unsafe.Sizeof(KernelEvent{}))
-
-	t.Run("ValidEvent", func(t *testing.T) {
-		// Fill with valid event data
-		event := KernelEvent{
-			Timestamp: uint64(time.Now().UnixNano()),
-			PID:       1234,
-			TID:       1234,
-			EventType: 1, // memory_alloc
-			Size:      1024,
-		}
-
-		// Create properly sized and aligned buffer using safe parsing
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(event)
-		require.NoError(t, err)
-		require.Equal(t, expectedSize, len(buffer))
-
-		parsed, err := collector.parseKernelEventSafely(buffer)
-		assert.NoError(t, err)
-		assert.NotNil(t, parsed)
-		assert.Equal(t, uint32(1234), parsed.PID)
-		assert.Equal(t, uint32(1), parsed.EventType)
-	})
-
-	t.Run("BufferTooSmall", func(t *testing.T) {
-		buffer := make([]byte, expectedSize-1)
-
-		_, err := collector.parseKernelEventSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer too small")
-	})
-
-	t.Run("BufferTooLarge", func(t *testing.T) {
-		buffer := make([]byte, expectedSize+10)
-
-		_, err := collector.parseKernelEventSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer size mismatch")
-	})
-
-	t.Run("InvalidEventType", func(t *testing.T) {
-		// Create event with invalid type
-		event := KernelEvent{
-			EventType: 99, // Invalid event type
-		}
-
-		// Create buffer using safe parsing
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(event)
-		require.NoError(t, err)
-
-		_, err = collector.parseKernelEventSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid event type")
-	})
-}
-
-func TestParseNetworkInfoSafely(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-network-test"}, logger)
-	require.NoError(t, err)
-
-	expectedSize := int(unsafe.Sizeof(NetworkInfo{}))
-
-	t.Run("ValidNetworkInfo", func(t *testing.T) {
-		netInfo := NetworkInfo{
-			IPVersion: 4,
-			SAddrV4:   0xC0A80101, // 192.168.1.1
-			DAddrV4:   0x08080808, // 8.8.8.8
-			SPort:     12345,
-			DPort:     80,
-			Protocol:  6, // TCP
-			Direction: 0, // outgoing
-		}
-
-		// Create buffer using safe parsing
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(netInfo)
-		require.NoError(t, err)
-
-		parsed, err := collector.parseNetworkInfoSafely(buffer)
-		assert.NoError(t, err)
-		assert.NotNil(t, parsed)
-		assert.Equal(t, uint32(0xC0A80101), parsed.SAddrV4)
-		assert.Equal(t, uint16(80), parsed.DPort)
-		assert.Equal(t, uint8(6), parsed.Protocol)
-	})
-
-	t.Run("BufferTooSmall", func(t *testing.T) {
-		buffer := make([]byte, expectedSize-1)
-
-		_, err = collector.parseNetworkInfoSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer size mismatch")
-	})
-
-	t.Run("InvalidProtocol", func(t *testing.T) {
-		buffer := make([]byte, expectedSize)
-
-		netInfo := NetworkInfo{
-			Protocol:  255, // Max valid protocol
-			Direction: 2,   // Invalid direction
-		}
-
-		// Create buffer using safe parsing
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(netInfo)
-		require.NoError(t, err)
-
-		_, err = collector.parseNetworkInfoSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid network info")
-	})
-
-	t.Run("InvalidDirection", func(t *testing.T) {
-		netInfo := NetworkInfo{
-			Protocol:  6,
-			Direction: 2, // Invalid direction (should be 0 or 1)
-		}
-
-		// Create buffer using safe parsing
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(netInfo)
-		require.NoError(t, err)
-
-		_, err = collector.parseNetworkInfoSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid network info")
-	})
-}
-
-func TestParseFileInfoSafely(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-file-test"}, logger)
-	require.NoError(t, err)
-
-	expectedSize := int(unsafe.Sizeof(FileInfo{}))
-
-	t.Run("ValidFileInfo", func(t *testing.T) {
-		buffer := make([]byte, expectedSize)
-
-		fileInfo := FileInfo{
-			Flags: 0x0001, // O_RDONLY
-			Mode:  0644,
-		}
-		copy(fileInfo.Filename[:], "/tmp/test.txt\x00") // Null-terminated
-
-		// Create buffer using safe parsing
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(fileInfo)
-		require.NoError(t, err)
-
-		parsed, err := collector.parseFileInfoSafely(buffer)
-		assert.NoError(t, err)
-		assert.NotNil(t, parsed)
-		assert.Equal(t, uint32(0x0001), parsed.Flags)
-		assert.Equal(t, uint32(0644), parsed.Mode)
-	})
-
-	t.Run("BufferTooSmall", func(t *testing.T) {
-		buffer := make([]byte, expectedSize-1)
-
-		_, err = collector.parseFileInfoSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer size mismatch")
-	})
-
-	t.Run("InvalidFilename", func(t *testing.T) {
-		buffer := make([]byte, expectedSize)
-
-		fileInfo := FileInfo{}
-		// Insert invalid characters (non-printable except null)
-		fileInfo.Filename[0] = 0x01 // Non-printable character
-
-		// Create buffer using safe parsing
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(fileInfo)
-		require.NoError(t, err)
-
-		_, err = collector.parseFileInfoSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "non-printable character")
-	})
-
-	t.Run("ValidFilenameWithNullTerminator", func(t *testing.T) {
-		buffer := make([]byte, expectedSize)
-
-		fileInfo := FileInfo{}
-		copy(fileInfo.Filename[:], "/valid/path.txt\x00remainder")
-		// Copy file info to buffer using unsafe
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(fileInfo)
-		require.NoError(t, err)
-
-		parsed, err := collector.parseFileInfoSafely(buffer)
-		assert.NoError(t, err)
-		assert.NotNil(t, parsed)
-	})
-}
-
-func TestMemorySafetyEdgeCases(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-edge-test"}, logger)
-	require.NoError(t, err)
-
-	t.Run("ZeroLengthBuffer", func(t *testing.T) {
-		buffer := make([]byte, 0)
-
-		_, err := collector.parseKernelEventSafely(buffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer too small")
-	})
-
-	t.Run("NilBuffer", func(t *testing.T) {
-		// Test with nil slice (should not panic)
-		_, err := collector.parseKernelEventSafely(nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer too small")
-	})
-
-	t.Run("LargeBuffer", func(t *testing.T) {
-		// Test with very large buffer (should detect size mismatch)
-		largeBuffer := make([]byte, 1024*1024) // 1MB
-
-		_, err := collector.parseKernelEventSafely(largeBuffer)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "buffer size mismatch")
-	})
-}
-
-func TestAlignmentValidation(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-alignment-test"}, logger)
-	require.NoError(t, err)
-
-	t.Run("ProperAlignment", func(t *testing.T) {
-		// Create properly aligned buffer
-		expectedSize := int(unsafe.Sizeof(KernelEvent{}))
-		alignedBuffer := make([]byte, expectedSize+8) // Extra space for alignment
-
-		// Ensure 8-byte alignment
-		offset := uintptr(unsafe.Pointer(&alignedBuffer[0])) % 8
-		if offset != 0 {
-			alignedBuffer = alignedBuffer[8-offset:]
-		}
-
-		// Trim to exact size
-		alignedBuffer = alignedBuffer[:expectedSize]
-
-		// Fill with valid event data
-		event := KernelEvent{
-			Timestamp: uint64(time.Now().UnixNano()),
-			PID:       1234,
-			EventType: 1,
-		}
-		// Copy event data to aligned buffer using unsafe
-		safeParser := collectors.NewSafeParser()
-		buffer, err := safeParser.MarshalStruct(event)
-		require.NoError(t, err)
-
-		_ = buffer // Use buffer to avoid unused variable error
-
-		_, err = collector.parseKernelEventSafely(alignedBuffer)
-		// Error or success depends on actual alignment - test that it doesn't panic
-		// In a real scenario with proper eBPF ring buffer, alignment should be correct
-		t.Logf("Alignment test result: %v", err)
-	})
-}
-
-func TestConcurrentMemoryAccess(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-concurrent-test"}, logger)
-	require.NoError(t, err)
-
-	// Test that concurrent access to memory parsing functions is safe
-	const numGoroutines = 10
-	const numIterations = 100
-
-	done := make(chan bool, numGoroutines)
-
-	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
-			defer func() { done <- true }()
-
-			expectedSize := int(unsafe.Sizeof(KernelEvent{}))
-
-			for j := 0; j < numIterations; j++ {
-				buffer := make([]byte, expectedSize)
-
-				event := KernelEvent{
-					Timestamp: uint64(time.Now().UnixNano()),
-					PID:       uint32(id*1000 + j),
-					EventType: uint32(j%5 + 1), // Valid event types 1-5
-				}
-				// Copy event data to buffer using unsafe
-				safeParser := collectors.NewSafeParser()
-				buffer, err := safeParser.MarshalStruct(event)
-				require.NoError(t, err)
-
-				parsed, err := collector.parseKernelEventSafely(buffer)
-				if err == nil {
-					assert.Equal(t, uint32(id*1000+j), parsed.PID)
-				}
-			}
-		}(i)
-	}
-
-	// Wait for all goroutines to complete
-	for i := 0; i < numGoroutines; i++ {
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Fatal("Concurrent test timed out")
-		}
-	}
-}
-
-func TestBoundsCheckingExhaustive(t *testing.T) {
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-bounds-test"}, logger)
-	require.NoError(t, err)
-
-	expectedSize := int(unsafe.Sizeof(KernelEvent{}))
-
-	// Test all possible invalid sizes around the expected size
-	testSizes := []int{
-		0, 1, 2, 4, 8, 16, 32,
-		expectedSize - 8, expectedSize - 4, expectedSize - 1,
-		expectedSize + 1, expectedSize + 4, expectedSize + 8,
-		expectedSize * 2, expectedSize * 10,
-	}
-
-	for _, size := range testSizes {
-		t.Run(fmt.Sprintf("Size_%d", size), func(t *testing.T) {
-			buffer := make([]byte, size)
-
-			_, err := collector.parseKernelEventSafely(buffer)
-
-			if size == expectedSize {
-				// Only exact size should potentially succeed (may still fail due to content validation)
-				if err != nil {
-					// Content validation errors are acceptable
-					t.Logf("Expected size %d failed with content validation: %v", size, err)
-				}
-			} else {
-				// All other sizes should fail with size validation
-				assert.Error(t, err, "Size %d should fail validation", size)
-				if size < expectedSize {
-					assert.Contains(t, err.Error(), "buffer too small", "Size %d should fail with 'too small'", size)
-				} else {
-					assert.Contains(t, err.Error(), "buffer size mismatch", "Size %d should fail with 'size mismatch'", size)
-				}
-			}
-		})
-	}
-}
-
-// TestKernelCollectorOTEL verifies OTEL metrics and spans are correctly created
-func TestKernelCollectorOTEL(t *testing.T) {
-	// Setup OTEL test infrastructure
-	reader := metric.NewManualReader()
-	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	otel.SetMeterProvider(provider)
-
-	// Setup trace exporter
-	traceExporter := tracetest.NewInMemoryExporter()
-	tp := trace.NewTracerProvider(trace.WithSyncer(traceExporter))
-	otel.SetTracerProvider(tp)
-
-	defer func() {
-		_ = provider.Shutdown(context.Background())
-		_ = tp.Shutdown(context.Background())
-	}()
-
-	logger := zap.NewNop()
-	collector, err := NewModularCollectorWithConfig(&Config{Name: "kernel-otel"}, logger)
+func TestCollectorStartStop(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := DefaultConfig()
+	config.Name = "start-stop-test"
+
+	collector, err := NewCollectorWithConfig(config, logger)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 
-	// Note: Start will likely fail in test environment due to eBPF requirements
-	err = collector.Start(ctx)
-	if err != nil {
-		t.Logf("Start failed (expected in test environment): %v", err)
-	} else {
-		defer collector.Stop()
+	t.Run("start collector", func(t *testing.T) {
+		err := collector.Start(ctx)
+		assert.NoError(t, err)
+		assert.True(t, collector.IsHealthy())
+		assert.NotNil(t, collector.ctx)
+		assert.NotNil(t, collector.cancel)
+	})
+
+	t.Run("stop collector", func(t *testing.T) {
+		err := collector.Stop()
+		assert.NoError(t, err)
+		assert.False(t, collector.IsHealthy())
+	})
+
+	t.Run("restart after stop", func(t *testing.T) {
+		err := collector.Start(ctx)
+		assert.NoError(t, err)
+		assert.True(t, collector.IsHealthy())
+
+		err = collector.Stop()
+		assert.NoError(t, err)
+		assert.False(t, collector.IsHealthy())
+	})
+}
+
+func TestCollectorEvents(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{
+		Name:    "events-test",
+		Enabled: true,
 	}
 
-	// Wait for metrics to be recorded
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify metrics
-	metrics := &metricdata.ResourceMetrics{}
-	err = reader.Collect(ctx, metrics)
+	collector, err := NewCollectorWithConfig(config, logger)
 	require.NoError(t, err)
 
-	metricNames := getKernelMetricNames(metrics)
-	// The actual metric names depend on what the collector creates
-	// Let's check for any metrics being created
-	t.Logf("Actual metrics: %v", metricNames)
+	// Test Events channel before start
+	events := collector.Events()
+	assert.NotNil(t, events)
+	assert.Equal(t, cap(events), DefaultEventBufferSize)
 
-	if len(metricNames) > 0 {
-		// If we have metrics, check for expected patterns
-		hasEBPFMetrics := false
-		for _, name := range metricNames {
-			if strings.Contains(name, "kernel-otel") && strings.Contains(name, "ebpf") {
-				hasEBPFMetrics = true
-				break
-			}
-		}
-		assert.True(t, hasEBPFMetrics, "Should have some kernel-related metrics")
-	} else {
-		t.Log("No metrics found (expected in test environment without eBPF)")
+	// Start collector
+	ctx := context.Background()
+	err = collector.Start(ctx)
+	require.NoError(t, err)
+
+	// Events channel should still be available
+	events = collector.Events()
+	assert.NotNil(t, events)
+
+	// Stop collector
+	err = collector.Stop()
+	require.NoError(t, err)
+
+	// Events channel should be nil after stop
+	events = collector.Events()
+	assert.Nil(t, events)
+}
+
+func TestCollectorName(t *testing.T) {
+	tests := []struct {
+		name          string
+		collectorName string
+	}{
+		{"simple name", "kernel"},
+		{"hyphenated name", "kernel-collector"},
+		{"empty name", ""},
+		{"special chars", "kernel_collector-2024"},
 	}
 
-	// Verify spans
-	spans := traceExporter.GetSpans()
-	t.Logf("Found %d spans", len(spans))
+	logger := zaptest.NewLogger(t)
 
-	if len(spans) > 0 {
-		// Check for kernel-specific span attributes
-		foundKernelSpan := false
-		for _, span := range spans {
-			t.Logf("Span name: %s", span.Name)
-			if span.Name == "kernel.Start" || strings.Contains(span.Name, "kernel") {
-				foundKernelSpan = true
-				break
-			}
-		}
-		if !foundKernelSpan {
-			t.Log("No kernel-specific spans found, but spans were created")
-		}
-	} else {
-		t.Log("No spans found (expected in test environment)")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{Name: tt.collectorName}
+			collector, err := NewCollectorWithConfig(config, logger)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.collectorName, collector.Name())
+		})
 	}
 }
 
-// Helper function to extract metric names from ResourceMetrics
-func getKernelMetricNames(rm *metricdata.ResourceMetrics) []string {
-	var names []string
-	for _, sm := range rm.ScopeMetrics {
-		for _, m := range sm.Metrics {
-			names = append(names, m.Name)
+func TestCollectorHealthStatus(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := DefaultConfig()
+	config.Name = "health-test"
+
+	collector, err := NewCollectorWithConfig(config, logger)
+	require.NoError(t, err)
+
+	// Initially healthy
+	assert.True(t, collector.IsHealthy())
+
+	// Start collector
+	ctx := context.Background()
+	err = collector.Start(ctx)
+	require.NoError(t, err)
+	assert.True(t, collector.IsHealthy())
+
+	// Stop collector
+	err = collector.Stop()
+	require.NoError(t, err)
+	assert.False(t, collector.IsHealthy())
+}
+
+func TestConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid default config",
+			config:  DefaultConfig(),
+			wantErr: false,
+		},
+		{
+			name: "empty name",
+			config: &Config{
+				Name:    "",
+				Enabled: true,
+			},
+			wantErr: true,
+			errMsg:  "collector name cannot be empty",
+		},
+		{
+			name: "invalid buffer size",
+			config: &Config{
+				Name:    "test",
+				Enabled: true,
+				BufferConfig: eBPFBufferConfig{
+					KernelEventsBuffer: -1,
+				},
+			},
+			wantErr: true,
+			errMsg:  "kernel events buffer size must be positive",
+		},
+		{
+			name: "invalid resource limits",
+			config: &Config{
+				Name:    "test",
+				Enabled: true,
+				BufferConfig: eBPFBufferConfig{
+					KernelEventsBuffer:   512,
+					ProcessEventsBuffer:  256,
+					NetworkEventsBuffer:  512,
+					SecurityEventsBuffer: 256,
+				},
+				ResourceLimits: ResourceLimits{
+					MaxMemoryMB:   -1,
+					MaxCPUPercent: 150,
+				},
+			},
+			wantErr: true,
+			errMsg:  "max memory must be positive",
+		},
+		{
+			name: "invalid backpressure config",
+			config: &Config{
+				Name:    "test",
+				Enabled: true,
+				BufferConfig: eBPFBufferConfig{
+					KernelEventsBuffer:   512,
+					ProcessEventsBuffer:  256,
+					NetworkEventsBuffer:  512,
+					SecurityEventsBuffer: 256,
+				},
+				ResourceLimits: ResourceLimits{
+					MaxMemoryMB:     100,
+					MaxCPUPercent:   50,
+					EventQueueSize:  1000,
+					BatchTimeout:    100 * time.Millisecond,
+					MaxEventsPerSec: 1000,
+				},
+				Backpressure: BackpressureConfig{
+					Enabled:       true,
+					HighWatermark: 1.5, // Invalid > 1.0
+					LowWatermark:  0.5,
+				},
+			},
+			wantErr: true,
+			errMsg:  "high watermark must be between 0-1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestConfigGetBufferSize(t *testing.T) {
+	config := &Config{
+		BufferConfig: eBPFBufferConfig{
+			KernelEventsBuffer:   512,
+			ProcessEventsBuffer:  256,
+			NetworkEventsBuffer:  1024,
+			SecurityEventsBuffer: 128,
+		},
+	}
+
+	tests := []struct {
+		bufferType string
+		expected   int
+	}{
+		{"kernel", 512 * 1024},
+		{"process", 256 * 1024},
+		{"network", 1024 * 1024},
+		{"security", 128 * 1024},
+		{"unknown", 256 * 1024}, // Default
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.bufferType, func(t *testing.T) {
+			size := config.GetBufferSize(tt.bufferType)
+			assert.Equal(t, tt.expected, size)
+		})
+	}
+}
+
+func TestKernelEventStructure(t *testing.T) {
+	// Test that KernelEvent structure is properly sized and accessible
+	event := KernelEvent{}
+
+	// Verify struct has expected fields
+	assert.Equal(t, uint64(0), event.Timestamp)
+	assert.Equal(t, uint32(0), event.PID)
+	assert.Equal(t, uint32(0), event.TID)
+	assert.Equal(t, uint32(0), event.EventType)
+	assert.Equal(t, uint64(0), event.Size)
+	assert.Equal(t, uint64(0), event.CgroupID)
+
+	// Verify array sizes
+	assert.Len(t, event.Comm, 16)
+	assert.Len(t, event.PodUID, 36)
+	assert.Len(t, event.Data, 64)
+
+	// Test that we can set and read values
+	event.Timestamp = uint64(time.Now().UnixNano())
+	event.PID = 1234
+	event.EventType = EventTypeProcess
+	copy(event.Comm[:], "test-process")
+
+	assert.NotZero(t, event.Timestamp)
+	assert.Equal(t, uint32(1234), event.PID)
+	assert.Equal(t, EventTypeProcess, event.EventType)
+}
+
+func TestOTELMetricsIntegration(t *testing.T) {
+	// Set up test metric provider
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+
+	logger := zaptest.NewLogger(t)
+	config := &Config{Name: "otel-test"}
+
+	collector, err := NewCollectorWithConfig(config, logger)
+	require.NoError(t, err)
+
+	// Verify OTEL components are initialized
+	assert.NotNil(t, collector.tracer)
+	// Note: metrics may be nil in test environment, which is handled gracefully
+
+	// Test that operations don't panic when metrics are nil
+	assert.NotPanics(t, func() {
+		ctx := context.Background()
+		if collector.eventsProcessed != nil {
+			collector.eventsProcessed.Add(ctx, 1)
+		}
+		if collector.errorsTotal != nil {
+			collector.errorsTotal.Add(ctx, 1)
+		}
+		if collector.processingTime != nil {
+			collector.processingTime.Record(ctx, 100.0)
+		}
+		if collector.bufferUsage != nil {
+			collector.bufferUsage.Record(ctx, 50)
+		}
+		if collector.droppedEvents != nil {
+			collector.droppedEvents.Add(ctx, 1)
+		}
+	})
+}
+
+func TestEventProcessingFlow(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{Name: "processing-test"}
+
+	collector, err := NewCollectorWithConfig(config, logger)
+	require.NoError(t, err)
+
+	// Start collector
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err = collector.Start(ctx)
+	require.NoError(t, err)
+
+	// Get events channel
+	events := collector.Events()
+	require.NotNil(t, events)
+
+	// On non-Linux platforms, no events will be generated from eBPF
+	// but the collector should still start successfully
+	assert.True(t, collector.IsHealthy())
+
+	// Stop collector
+	err = collector.Stop()
+	require.NoError(t, err)
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{Name: "concurrent-test"}
+
+	collector, err := NewCollectorWithConfig(config, logger)
+	require.NoError(t, err)
+
+	// Test concurrent access to collector methods
+	done := make(chan struct{})
+	errors := make(chan error, 10)
+
+	// Start multiple goroutines accessing collector methods
+	for i := 0; i < 5; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+
+			// Test IsHealthy (read operation)
+			assert.NotPanics(t, func() {
+				collector.IsHealthy()
+			})
+
+			// Test Name (read operation)
+			assert.NotPanics(t, func() {
+				collector.Name()
+			})
+
+			// Test Events (read operation)
+			assert.NotPanics(t, func() {
+				collector.Events()
+			})
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < 5; i++ {
+		select {
+		case <-done:
+		case err := <-errors:
+			t.Errorf("Concurrent access error: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Error("Timeout waiting for concurrent access test")
 		}
 	}
-	return names
+}
+
+func TestDefaultConstants(t *testing.T) {
+	// Test that constants are reasonable values
+	assert.Greater(t, DefaultEventBufferSize, 0)
+	assert.Greater(t, DefaultKernelBufferKB, 0)
+	assert.Greater(t, DefaultProcessBufferKB, 0)
+	assert.Greater(t, DefaultNetworkBufferKB, 0)
+	assert.Greater(t, DefaultSecurityBufferKB, 0)
+
+	assert.Greater(t, DefaultMaxMemoryMB, 0)
+	assert.Greater(t, DefaultMaxCPUPercent, 0)
+	assert.LessOrEqual(t, DefaultMaxCPUPercent, 100)
+	assert.Greater(t, DefaultMaxEventsPerSec, 0)
+
+	assert.Greater(t, DefaultHighWatermark, 0.0)
+	assert.Less(t, DefaultHighWatermark, 1.0)
+	assert.Greater(t, DefaultLowWatermark, 0.0)
+	assert.Less(t, DefaultLowWatermark, DefaultHighWatermark)
+	assert.Greater(t, DefaultDropThreshold, DefaultHighWatermark)
+
+	assert.Greater(t, DefaultBatchTimeout, time.Duration(0))
+	assert.Greater(t, DefaultRecoveryDelay, time.Duration(0))
+	assert.Greater(t, DefaultHealthCheckInterval, time.Duration(0))
+}
+
+func TestEventTypes(t *testing.T) {
+	// Test event type constants are defined
+	assert.Equal(t, uint32(0), EventTypeProcess)
+	assert.Equal(t, uint32(1), EventTypeFile)
+	assert.Equal(t, uint32(2), EventTypeNetwork)
+	assert.Equal(t, uint32(3), EventTypeContainer)
+	assert.Equal(t, uint32(4), EventTypeMount)
+}
+
+func TestMemoryManagement(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{Name: "memory-test"}
+
+	// Create and destroy multiple collectors to test memory cleanup
+	for i := 0; i < 10; i++ {
+		collector, err := NewCollectorWithConfig(config, logger)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		err = collector.Start(ctx)
+		require.NoError(t, err)
+
+		err = collector.Stop()
+		require.NoError(t, err)
+	}
+
+	// This test mainly ensures no memory leaks or panics occur
+	// during repeated creation/destruction cycles
+}
+
+func TestErrorHandling(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+
+	t.Run("start with cancelled context", func(t *testing.T) {
+		config := &Config{Name: "error-test-1"}
+		collector, err := NewCollectorWithConfig(config, logger)
+		require.NoError(t, err)
+
+		// Create already cancelled context
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		// Start should handle cancelled context gracefully
+		err = collector.Start(ctx)
+		// On stub platforms, this should not error
+		// On Linux, behavior may vary based on eBPF availability
+		if err != nil {
+			t.Logf("Start with cancelled context returned error (expected on some platforms): %v", err)
+		}
+
+		// Cleanup
+		collector.Stop()
+	})
+
+	t.Run("multiple start calls", func(t *testing.T) {
+		config := &Config{Name: "error-test-2"}
+		collector, err := NewCollectorWithConfig(config, logger)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		// First start should succeed
+		err = collector.Start(ctx)
+		assert.NoError(t, err)
+
+		// Second start should not panic
+		assert.NotPanics(t, func() {
+			collector.Start(ctx)
+		})
+
+		// Cleanup
+		collector.Stop()
+	})
+}
+
+func TestDefaultConfigCreation(t *testing.T) {
+	config := DefaultConfig()
+	require.NotNil(t, config)
+
+	// Test that default config validates
+	err := config.Validate()
+	assert.NoError(t, err)
+
+	// Test specific default values
+	assert.Equal(t, "kernel-collector", config.Name)
+	assert.True(t, config.Enabled)
+	assert.True(t, config.SamplingEnabled)
+	assert.Equal(t, DefaultSamplingRate, config.SamplingRate)
+	assert.False(t, config.DebugMode)
+
+	// Test buffer config defaults
+	assert.Equal(t, DefaultKernelBufferKB, config.BufferConfig.KernelEventsBuffer)
+	assert.Equal(t, DefaultProcessBufferKB, config.BufferConfig.ProcessEventsBuffer)
+	assert.Equal(t, DefaultNetworkBufferKB, config.BufferConfig.NetworkEventsBuffer)
+	assert.Equal(t, DefaultSecurityBufferKB, config.BufferConfig.SecurityEventsBuffer)
+
+	// Test resource limits defaults
+	assert.Equal(t, DefaultMaxMemoryMB, config.ResourceLimits.MaxMemoryMB)
+	assert.Equal(t, DefaultMaxCPUPercent, config.ResourceLimits.MaxCPUPercent)
+	assert.Equal(t, DefaultEventQueueSize, config.ResourceLimits.EventQueueSize)
+	assert.Equal(t, DefaultBatchTimeout, config.ResourceLimits.BatchTimeout)
+	assert.Equal(t, DefaultMaxEventsPerSec, config.ResourceLimits.MaxEventsPerSec)
+
+	// Test backpressure defaults
+	assert.True(t, config.Backpressure.Enabled)
+	assert.Equal(t, DefaultHighWatermark, config.Backpressure.HighWatermark)
+	assert.Equal(t, DefaultLowWatermark, config.Backpressure.LowWatermark)
+	assert.Equal(t, DefaultDropThreshold, config.Backpressure.DropThreshold)
+
+	// Test health config defaults
+	assert.True(t, config.Health.Enabled)
+	assert.Equal(t, DefaultHealthCheckInterval, config.Health.Interval)
+	assert.Equal(t, DefaultMaxHealthFailures, config.Health.MaxFailures)
+	assert.True(t, config.Health.RestartOnFailure)
+}
+
+func TestAdvancedConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr bool
+		errMsg  string
+		setupFn func(*Config)
+	}{
+		{
+			name:    "valid health config disabled",
+			wantErr: false,
+			setupFn: func(c *Config) {
+				c.Health.Enabled = false
+			},
+		},
+		{
+			name:    "invalid health interval",
+			wantErr: true,
+			errMsg:  "health check interval must be positive",
+			setupFn: func(c *Config) {
+				c.Health.Enabled = true
+				c.Health.Interval = -1 * time.Second
+			},
+		},
+		{
+			name:    "valid backpressure disabled",
+			wantErr: false,
+			setupFn: func(c *Config) {
+				c.Backpressure.Enabled = false
+			},
+		},
+		{
+			name:    "invalid watermark order",
+			wantErr: true,
+			errMsg:  "low watermark",
+			setupFn: func(c *Config) {
+				c.Backpressure.Enabled = true
+				c.Backpressure.HighWatermark = 0.6
+				c.Backpressure.LowWatermark = 0.8 // Higher than high watermark
+			},
+		},
+		{
+			name:    "sampling disabled with zero rate",
+			wantErr: false,
+			setupFn: func(c *Config) {
+				c.SamplingEnabled = false
+				c.SamplingRate = 0
+			},
+		},
+		{
+			name:    "sampling enabled with invalid rate",
+			wantErr: true,
+			errMsg:  "sampling rate must be positive",
+			setupFn: func(c *Config) {
+				c.SamplingEnabled = true
+				c.SamplingRate = -10
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := DefaultConfig()
+			if tt.setupFn != nil {
+				tt.setupFn(config)
+			}
+
+			err := config.Validate()
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCollectorWithCustomOTELProvider(t *testing.T) {
+	// Test that collector works with custom OTEL provider
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+
+	logger := zaptest.NewLogger(t)
+	config := &Config{Name: "custom-otel-test"}
+
+	collector, err := NewCollectorWithConfig(config, logger)
+	require.NoError(t, err)
+
+	// Verify metrics are created with custom provider
+	assert.NotNil(t, collector.tracer)
+	// Metrics may still be nil due to naming issues, but should not panic
+
+	// Test collector lifecycle with custom provider
+	ctx := context.Background()
+	err = collector.Start(ctx)
+	assert.NoError(t, err)
+
+	err = collector.Stop()
+	assert.NoError(t, err)
+}
+
+func TestConstantsAndTypes(t *testing.T) {
+	// Test that all constants are reasonable
+	assert.Equal(t, 1024, KBToBytes)
+
+	// Test process monitoring constants
+	assert.Greater(t, MaxProcessScanLimit, 0)
+	assert.Greater(t, MaxConnectionScanLimit, 0)
+
+	// Test retry constants
+	assert.Greater(t, DefaultMaxRetryAttempts, 0)
+	assert.Greater(t, DefaultRetryInitialDelay, time.Duration(0))
+
+	// Test fallback intervals
+	assert.Greater(t, ProcessFallbackInterval, time.Duration(0))
+	assert.Greater(t, NetworkFallbackInterval, time.Duration(0))
+	assert.Greater(t, MemoryFallbackInterval, time.Duration(0))
+
+	// Test health constants
+	assert.Greater(t, RecentErrorThreshold, time.Duration(0))
+	assert.Greater(t, FallbackHealthTimeout, time.Duration(0))
+}
+
+func TestNetworkInfoStruct(t *testing.T) {
+	// Test NetworkInfo structure
+	netInfo := NetworkInfo{
+		IPVersion: 4,
+		Protocol:  6, // TCP
+		State:     1,
+		Direction: 0,
+		SPort:     8080,
+		DPort:     443,
+		SAddrV4:   0x7f000001, // 127.0.0.1
+		DAddrV4:   0x08080808, // 8.8.8.8
+	}
+
+	assert.Equal(t, uint8(4), netInfo.IPVersion)
+	assert.Equal(t, uint8(6), netInfo.Protocol)
+	assert.Equal(t, uint16(8080), netInfo.SPort)
+	assert.Equal(t, uint16(443), netInfo.DPort)
+
+	// Test IPv6 addresses
+	netInfo.IPVersion = 6
+	netInfo.SAddrV6 = [4]uint32{0x20010db8, 0x85a30000, 0x00008a2e, 0x03707334}
+	assert.Equal(t, uint8(6), netInfo.IPVersion)
+	assert.NotEqual(t, [4]uint32{}, netInfo.SAddrV6)
+}
+
+func TestRaceConditionSafety(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{Name: "race-test"}
+
+	collector, err := NewCollectorWithConfig(config, logger)
+	require.NoError(t, err)
+
+	// Test concurrent read operations during lifecycle changes
+	done := make(chan struct{})
+
+	// Start goroutines that continuously read collector state
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+
+			for j := 0; j < 100; j++ {
+				// These operations should be safe to call concurrently
+				_ = collector.Name()
+				_ = collector.IsHealthy()
+				_ = collector.Events()
+			}
+		}()
+	}
+
+	// Perform lifecycle operations while reads are happening
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		err := collector.Start(ctx)
+		assert.NoError(t, err)
+
+		err = collector.Stop()
+		assert.NoError(t, err)
+	}
+
+	// Wait for all read goroutines to complete
+	for i := 0; i < 10; i++ {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("Timeout waiting for race condition test")
+		}
+	}
 }

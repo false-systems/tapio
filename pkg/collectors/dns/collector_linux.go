@@ -230,8 +230,26 @@ func (c *Collector) readEBPFEvents() {
 				continue
 			}
 
-			// Convert BPF event to DNS event
+			// Extract and validate DNS query information
+			queryName := c.extractQueryName(bpfEvent.QueryName[:])
+			if queryName == "" {
+				// Skip empty queries
+				continue
+			}
+
+			// Convert BPF event to DNS event with query name
 			event := c.convertBPFEventToDNSEvent(&bpfEvent)
+			event.QueryName = queryName
+
+			// Log interesting DNS queries for debugging
+			if c.logger.Core().Enabled(zap.DebugLevel) {
+				c.logger.Debug("DNS query captured",
+					zap.String("query", queryName),
+					zap.Uint16("qtype", bpfEvent.QType),
+					zap.String("protocol", c.getProtocolName(bpfEvent.Protocol)),
+					zap.Uint32("pid", bpfEvent.PID),
+				)
+			}
 
 			// Convert to raw event
 			rawEvent := c.convertToRawEvent(event)

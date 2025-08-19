@@ -67,5 +67,7 @@ func (c *Collector) stopEBPF() {
 // readEBPFEvents stub for non-Linux platforms
 func (c *Collector) readEBPFEvents() {
 	// No-op on non-Linux platforms
-	<-c.ctx.Done()
+	if c.ctx != nil {
+		<-c.ctx.Done()
+	}
 }
