@@ -13,15 +13,21 @@ import (
 	"go.uber.org/zap"
 )
 
-// SystemdEvent represents a systemd event from eBPF
+// SystemdEvent represents a systemd event from eBPF - must match C struct
 type SystemdEvent struct {
-	Timestamp uint64
-	PID       uint32
-	PPID      uint32
-	EventType uint32
-	ExitCode  uint32
-	Comm      [16]byte
-	Filename  [256]byte
+	Timestamp   uint64
+	PID         uint32
+	PPID        uint32
+	UID         uint32
+	GID         uint32
+	CgroupID    uint64
+	EventType   uint8
+	Pad         [3]uint8
+	Comm        [16]byte
+	ServiceName [64]byte
+	CgroupPath  [256]byte
+	ExitCode    uint32
+	Signal      uint32
 }
 
 // Collector implements simple systemd monitoring via eBPF
