@@ -30,11 +30,23 @@ type Collector struct {
 	// eBPF components (platform-specific)
 	ebpfState interface{}
 
-	// Minimal OTEL instrumentation
-	tracer          trace.Tracer
-	logger          *zap.Logger
-	eventsProcessed metric.Int64Counter
-	errorsTotal     metric.Int64Counter
+	// OTEL instrumentation
+	tracer             trace.Tracer
+	meter              metric.Meter
+	logger             *zap.Logger
+	eventsProcessed    metric.Int64Counter
+	errorsTotal        metric.Int64Counter
+	eventsDropped      metric.Int64Counter
+	ebpfLoadsTotal     metric.Int64Counter
+	ebpfLoadErrors     metric.Int64Counter
+	ebpfAttachTotal    metric.Int64Counter
+	ebpfAttachErrors   metric.Int64Counter
+	collectorHealth    metric.Float64Gauge
+	k8sExtractionTotal metric.Int64Counter
+	k8sExtractionHits  metric.Int64Counter
+	netnsOpsByType     metric.Int64Counter
+	bufferUtilization  metric.Float64Gauge
+	processingLatency  metric.Float64Histogram
 }
 
 // NewCollector creates a new simple CNI collector
@@ -49,9 +61,9 @@ func NewCollector(name string) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Only essential metrics
+	// Initialize all metrics
 	eventsProcessed, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_processed_total", name),
+		"cni_events_processed_total",
 		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
 	)
 	if err != nil {
@@ -66,6 +78,94 @@ func NewCollector(name string) (*Collector, error) {
 		logger.Warn("Failed to create errors counter", zap.Error(err))
 	}
 
+	eventsDropped, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_dropped_total", name),
+		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events_dropped counter", zap.Error(err))
+	}
+
+	ebpfLoadsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_loads_total", name),
+		metric.WithDescription(fmt.Sprintf("Total eBPF loads attempted by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_loads counter", zap.Error(err))
+	}
+
+	ebpfLoadErrors, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_load_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total eBPF load errors in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_load_errors counter", zap.Error(err))
+	}
+
+	ebpfAttachTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_attach_total", name),
+		metric.WithDescription(fmt.Sprintf("Total eBPF attach attempts by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach counter", zap.Error(err))
+	}
+
+	ebpfAttachErrors, err := meter.Int64Counter(
+		fmt.Sprintf("%s_ebpf_attach_errors_total", name),
+		metric.WithDescription(fmt.Sprintf("Total eBPF attach errors in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create ebpf_attach_errors counter", zap.Error(err))
+	}
+
+	collectorHealth, err := meter.Float64Gauge(
+		"cni_collector_healthy",
+		metric.WithDescription(fmt.Sprintf("Health status of %s collector", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create health gauge", zap.Error(err))
+	}
+
+	k8sExtractionTotal, err := meter.Int64Counter(
+		"cni_k8s_extraction_attempts_total",
+		metric.WithDescription(fmt.Sprintf("Total K8s metadata extraction attempts by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction counter", zap.Error(err))
+	}
+
+	k8sExtractionHits, err := meter.Int64Counter(
+		fmt.Sprintf("%s_k8s_extraction_hits_total", name),
+		metric.WithDescription(fmt.Sprintf("Total K8s metadata extraction hits by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create k8s_extraction_hits counter", zap.Error(err))
+	}
+
+	netnsOpsByType, err := meter.Int64Counter(
+		"cni_netns_operations_total",
+		metric.WithDescription(fmt.Sprintf("Total network namespace operations by type in %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create netns_ops counter", zap.Error(err))
+	}
+
+	bufferUtilization, err := meter.Float64Gauge(
+		fmt.Sprintf("%s_buffer_utilization_ratio", name),
+		metric.WithDescription(fmt.Sprintf("Buffer utilization ratio for %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create buffer_utilization gauge", zap.Error(err))
+	}
+
+	processingLatency, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing_latency histogram", zap.Error(err))
+	}
+
 	// Default config
 	cfg := &config.CNIConfig{
 		BaseConfig: &config.BaseConfig{
@@ -76,13 +176,26 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	c := &Collector{
-		name:            name,
-		config:          cfg,
-		events:          make(chan domain.RawEvent, cfg.BaseConfig.BufferSize),
-		tracer:          tracer,
-		logger:          logger.Named(name),
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
+		name:               name,
+		config:             cfg,
+		events:             make(chan domain.RawEvent, cfg.BaseConfig.BufferSize),
+		healthy:            true,
+		tracer:             tracer,
+		meter:              meter,
+		logger:             logger.Named(name),
+		eventsProcessed:    eventsProcessed,
+		errorsTotal:        errorsTotal,
+		eventsDropped:      eventsDropped,
+		ebpfLoadsTotal:     ebpfLoadsTotal,
+		ebpfLoadErrors:     ebpfLoadErrors,
+		ebpfAttachTotal:    ebpfAttachTotal,
+		ebpfAttachErrors:   ebpfAttachErrors,
+		collectorHealth:    collectorHealth,
+		k8sExtractionTotal: k8sExtractionTotal,
+		k8sExtractionHits:  k8sExtractionHits,
+		netnsOpsByType:     netnsOpsByType,
+		bufferUtilization:  bufferUtilization,
+		processingLatency:  processingLatency,
 	}
 
 	c.logger.Info("CNI collector created", zap.String("name", name))
@@ -96,7 +209,19 @@ func (c *Collector) Name() string {
 
 // Start starts the CNI monitoring
 func (c *Collector) Start(ctx context.Context) error {
-	ctx, span := c.tracer.Start(ctx, "cni.start")
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// Check if already started
+	if c.ctx != nil {
+		return fmt.Errorf("collector already started")
+	}
+
+	ctx, span := c.tracer.Start(ctx, "cni.collector.start")
 	defer span.End()
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
@@ -110,6 +235,8 @@ func (c *Collector) Start(ctx context.Context) error {
 				))
 			}
 			span.RecordError(err)
+			c.ctx = nil
+			c.cancel = nil
 			return fmt.Errorf("failed to start eBPF: %w", err)
 		}
 
@@ -127,20 +254,33 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
+	// Add tracing for stop operation
+	_, span := c.tracer.Start(context.Background(), "cni.collector.stop")
+	defer span.End()
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	// Check if already stopped
+	if c.ctx == nil {
+		return nil // Already stopped, no error
+	}
+
 	if c.cancel != nil {
 		c.cancel()
+		c.cancel = nil
 	}
 
 	// Stop eBPF if running
 	c.stopEBPF()
 
+	// Close events channel only once
 	if c.events != nil {
 		close(c.events)
+		c.events = nil
 	}
 
+	c.ctx = nil
 	c.healthy = false
 	c.logger.Info("CNI collector stopped")
 	return nil
@@ -162,7 +302,7 @@ func (c *Collector) IsHealthy() bool {
 func (c *Collector) createEvent(eventType string, data map[string]string) domain.RawEvent {
 	// Generate trace context
 	ctx := context.Background()
-	ctx, span := c.tracer.Start(ctx, "cni.create_event")
+	ctx, span := c.tracer.Start(ctx, "cni.event.create")
 	defer span.End()
 
 	spanCtx := span.SpanContext()
@@ -194,13 +334,20 @@ func (c *Collector) createEvent(eventType string, data map[string]string) domain
 		}
 	}
 
-	// Create structured data for the event
-	eventData := struct {
-		Type     string            `json:"type"`
-		Metadata map[string]string `json:"metadata"`
-	}{
-		Type:     eventType,
-		Metadata: metadata,
+	// Create data containing the original data fields plus any extracted metadata
+	eventData := make(map[string]string)
+
+	// Copy all original data
+	for k, v := range data {
+		eventData[k] = v
+	}
+
+	// Add extracted metadata to the data (for backward compatibility)
+	if uid := metadata["k8s_uid"]; uid != "" {
+		eventData["k8s_uid"] = uid
+	}
+	if kind := metadata["k8s_kind"]; kind != "" {
+		eventData["k8s_kind"] = kind
 	}
 
 	// Convert to bytes
@@ -226,4 +373,56 @@ func parseK8sUIDFromNetns(path string) string {
 		return strings.TrimSpace(parts[1])
 	}
 	return ""
+}
+
+// parseK8sFromNetns extracts Kubernetes pod information from network namespace path
+func (c *Collector) parseK8sFromNetns(netnsPath string) *PodInfo {
+	if netnsPath == "" {
+		return nil
+	}
+
+	// Count extraction attempts
+	if c.k8sExtractionTotal != nil {
+		c.k8sExtractionTotal.Add(context.Background(), 1)
+	}
+
+	// Pattern 1: CNI format - /var/run/netns/cni-<uuid>
+	if strings.Contains(netnsPath, "cni-") {
+		parts := strings.Split(netnsPath, "cni-")
+		if len(parts) == 2 {
+			uid := strings.TrimSpace(parts[1])
+			if uid != "" {
+				if c.k8sExtractionHits != nil {
+					c.k8sExtractionHits.Add(context.Background(), 1)
+				}
+				return &PodInfo{
+					PodUID: uid,
+				}
+			}
+		}
+	}
+
+	// Pattern 2: Kubepods cgroup format - contains kubepods and pod<uuid_with_underscores>
+	if strings.Contains(netnsPath, "kubepods") && strings.Contains(netnsPath, "pod") {
+		// Look for pod<uuid> pattern
+		parts := strings.Split(netnsPath, "pod")
+		for _, part := range parts {
+			if len(part) > 32 { // UUID length with underscores
+				// Extract potential UUID part (first 36+ chars)
+				potential := strings.Split(part, "/")[0]
+				if len(potential) >= 36 { // UUID with underscores is at least 36 chars (32 hex + 4 underscores)
+					// Take exactly 36 characters and convert underscores to hyphens for standard UUID format
+					uid := strings.ReplaceAll(potential[:36], "_", "-")
+					if c.k8sExtractionHits != nil {
+						c.k8sExtractionHits.Add(context.Background(), 1)
+					}
+					return &PodInfo{
+						PodUID: uid,
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }

@@ -23,3 +23,10 @@ const (
 	EventTypeNetnsCreate uint32 = 2
 	EventTypeNetnsExit   uint32 = 3
 )
+
+// PodInfo contains Kubernetes pod metadata extracted from network namespace paths
+type PodInfo struct {
+	PodUID    string `json:"pod_uid"`
+	PodName   string `json:"pod_name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+}

@@ -304,7 +304,7 @@ func TestCollectorWithMockCNI(t *testing.T) {
 		data      map[string]string
 	}{
 		{
-			eventSource: "netns_create",
+			eventType: "netns_create",
 			data: map[string]string{
 				"pid":        "1234",
 				"comm":       "containerd",
@@ -312,7 +312,7 @@ func TestCollectorWithMockCNI(t *testing.T) {
 			},
 		},
 		{
-			eventSource: "netns_enter",
+			eventType: "netns_enter",
 			data: map[string]string{
 				"pid":        "5678",
 				"comm":       "runc",
@@ -320,7 +320,7 @@ func TestCollectorWithMockCNI(t *testing.T) {
 			},
 		},
 		{
-			eventSource: "netns_exit",
+			eventType: "netns_exit",
 			data: map[string]string{
 				"pid":        "5678",
 				"comm":       "runc",
@@ -515,8 +515,8 @@ func TestRawEventOTELCompliance(t *testing.T) {
 		validate  func(t *testing.T, event domain.RawEvent)
 	}{
 		{
-			name:        "BasicEvent",
-			eventSource: "netns_create",
+			name:      "BasicEvent",
+			eventType: "netns_create",
 			data: map[string]string{
 				"pid":  "1234",
 				"comm": "test",
@@ -530,8 +530,8 @@ func TestRawEventOTELCompliance(t *testing.T) {
 			},
 		},
 		{
-			name:        "EventWithK8sMetadata",
-			eventSource: "netns_enter",
+			name:      "EventWithK8sMetadata",
+			eventType: "netns_enter",
 			data: map[string]string{
 				"pid":        "5678",
 				"comm":       "kubelet",
@@ -544,8 +544,8 @@ func TestRawEventOTELCompliance(t *testing.T) {
 			},
 		},
 		{
-			name:        "EventWithComplexData",
-			eventSource: "netns_exit",
+			name:      "EventWithComplexData",
+			eventType: "netns_exit",
 			data: map[string]string{
 				"pid":        "9999",
 				"comm":       "containerd-shim",
