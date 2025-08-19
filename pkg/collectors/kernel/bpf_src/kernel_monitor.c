@@ -381,7 +381,151 @@ int trace_exec(void *ctx)
 
 // Network connection tracing - track tcp connections using CO-RE
 SEC("kprobe/tcp_v4_connect")
-int trace_tcp_connect(struct pt_regs *ctx)
+int trace_tcp_v4_connect(struct pt_regs *ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
+    
+    // Only track container processes
+    if (!is_container_process(pid))
+        return 0;
+    
+    // Get sock struct from first argument using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
+    
+    if (!sk)
+        return 0;
+    
+    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    if (!event)
+        return 0;
+    
+    // Get current task for cgroup info
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 cgroup_id = get_cgroup_id(task);
+    
+    event->timestamp = bpf_ktime_get_ns();
+    event->pid = pid;
+    event->tid = (__u32)pid_tgid;
+    event->event_type = EVENT_TYPE_NETWORK_CONN;
+    event->size = 0;
+    event->cgroup_id = cgroup_id;
+    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    
+    // Fill network info from socket using CO-RE
+    __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
+    
+    event->net_info.ip_version = 4;
+    // Use CO-RE to read IPv4 socket addresses safely
+    BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+    BPF_CORE_READ_INTO(&event->net_info.saddr_v4, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&event->net_info.daddr_v4, sk, __sk_common.skc_daddr);
+    
+    // Convert network byte order to host byte order for port
+    event->net_info.dport = __builtin_bswap16(event->net_info.dport);
+    
+    event->net_info.protocol = IPPROTO_TCP;
+    event->net_info.direction = 0; // Outgoing
+    event->net_info.state = 1; // Connecting
+    
+    // Try to get pod information
+    struct pod_info *pod = get_pod_info(cgroup_id);
+    if (pod) {
+        __builtin_memcpy(event->pod_uid, pod->pod_uid, sizeof(event->pod_uid));
+    } else {
+        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
+    }
+    
+    bpf_ringbuf_submit(event, 0);
+    return 0;
+}
+
+// IPv6 TCP connection tracing - dedicated function for IPv6
+SEC("kprobe/tcp_v6_connect")
+int trace_tcp_v6_connect(struct pt_regs *ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
+    
+    // Only track container processes
+    if (!is_container_process(pid))
+        return 0;
+    
+    // Get sock struct from first argument using CO-RE helper
+    struct sock *sk = read_sock_from_kprobe(ctx);
+    
+    if (!sk)
+        return 0;
+    
+    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    if (!event)
+        return 0;
+    
+    // Get current task for cgroup info
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 cgroup_id = get_cgroup_id(task);
+    
+    event->timestamp = bpf_ktime_get_ns();
+    event->pid = pid;
+    event->tid = (__u32)pid_tgid;
+    event->event_type = EVENT_TYPE_NETWORK_CONN;
+    event->size = 0;
+    event->cgroup_id = cgroup_id;
+    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    
+    // Fill network info from socket using CO-RE
+    __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
+    
+    event->net_info.ip_version = 6;
+    
+    // Read IPv6 port information
+    BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+    
+    // For IPv6 addresses, we need to use the full socket structure
+    // Check if sk_v6_rcv_saddr and sk_v6_daddr fields exist using CO-RE
+    if (bpf_core_field_exists(sk->sk_v6_rcv_saddr)) {
+        // Read source IPv6 address
+        struct in6_addr src_addr;
+        if (BPF_CORE_READ_INTO(&src_addr, sk, sk_v6_rcv_saddr) == 0) {
+            __builtin_memcpy(event->net_info.saddr_v6, &src_addr, 16);
+        }
+        
+        // Read destination IPv6 address
+        struct in6_addr dst_addr;
+        if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
+            __builtin_memcpy(event->net_info.daddr_v6, &dst_addr, 16);
+        }
+    } else {
+        // Fallback: try to read from __sk_common (might not have full IPv6 addrs)
+        // This is a limitation of minimal vmlinux.h
+        __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
+        __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
+    }
+    
+    // Convert network byte order to host byte order for port
+    event->net_info.dport = __builtin_bswap16(event->net_info.dport);
+    
+    event->net_info.protocol = IPPROTO_TCP;
+    event->net_info.direction = 0; // Outgoing
+    event->net_info.state = 1; // Connecting
+    
+    // Try to get pod information
+    struct pod_info *pod = get_pod_info(cgroup_id);
+    if (pod) {
+        __builtin_memcpy(event->pod_uid, pod->pod_uid, sizeof(event->pod_uid));
+    } else {
+        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
+    }
+    
+    bpf_ringbuf_submit(event, 0);
+    return 0;
+}
+
+// UDP socket tracing for both IPv4 and IPv6
+SEC("kprobe/udp_sendmsg")
+int trace_udp_send(struct pt_regs *ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
@@ -428,23 +572,34 @@ int trace_tcp_connect(struct pt_regs *ctx)
         BPF_CORE_READ_INTO(&event->net_info.daddr_v4, sk, __sk_common.skc_daddr);
     } else if (family == AF_INET6) {
         event->net_info.ip_version = 6;
-        // Read IPv6 port information (addresses require full vmlinux)
+        // Read IPv6 port information
         BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
         BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
         
-        // IPv6 addresses are not available in minimal vmlinux.h
-        // In production, use full BTF-enabled vmlinux.h for IPv6 support
-        // For now, zero out IPv6 addresses
-        __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
-        __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
+        // For IPv6 addresses, use full socket structure if available
+        if (bpf_core_field_exists(sk->sk_v6_rcv_saddr)) {
+            struct in6_addr src_addr;
+            if (BPF_CORE_READ_INTO(&src_addr, sk, sk_v6_rcv_saddr) == 0) {
+                __builtin_memcpy(event->net_info.saddr_v6, &src_addr, 16);
+            }
+            
+            struct in6_addr dst_addr;
+            if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
+                __builtin_memcpy(event->net_info.daddr_v6, &dst_addr, 16);
+            }
+        } else {
+            // Fallback for minimal vmlinux.h
+            __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
+            __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
+        }
     }
     
     // Convert network byte order to host byte order for port
     event->net_info.dport = __builtin_bswap16(event->net_info.dport);
     
-    event->net_info.protocol = IPPROTO_TCP;
+    event->net_info.protocol = IPPROTO_UDP;
     event->net_info.direction = 0; // Outgoing
-    event->net_info.state = 1; // Connecting
+    event->net_info.state = 0; // Stateless (UDP)
     
     // Try to get pod information
     struct pod_info *pod = get_pod_info(cgroup_id);
