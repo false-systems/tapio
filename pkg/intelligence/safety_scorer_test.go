@@ -180,8 +180,8 @@ func TestCalculateScore_ScaleChangeRisk(t *testing.T) {
 
 			// Check risk level
 			if tt.newReplicas == 0 {
-				// Scaling to zero should always be high risk
-				assert.True(t, score.GetRiskLevel() >= domain.RiskLevelMedium)
+				// Scaling to zero should always be high risk (>= medium means >= 0.4)
+				assert.True(t, score.Value >= 0.4, "Scaling to zero should have score >= 0.4 (medium risk), got %f", score.Value)
 			}
 		})
 	}
