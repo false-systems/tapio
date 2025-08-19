@@ -402,25 +402,20 @@ func (p *DeploymentProcessor) extractDeployment(obj interface{}) (*appsv1.Deploy
 		return deployment, nil
 	}
 
-	// If that fails, it might be a dynamic map from JSON unmarshaling
-	// Try to re-marshal and unmarshal as a proper Deployment
-	if objMap, ok := obj.(map[string]any); ok {
-		// Re-marshal the map to JSON
-		jsonData, err := json.Marshal(objMap)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal object map: %w", err)
-		}
-
-		// Unmarshal into a proper Deployment
-		var deployment appsv1.Deployment
-		if err := json.Unmarshal(jsonData, &deployment); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal as Deployment: %w", err)
-		}
-
-		return &deployment, nil
+	// If that fails, try to re-marshal and unmarshal as a proper Deployment
+	// This handles dynamic objects from JSON unmarshaling
+	jsonData, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal object: %w", err)
 	}
 
-	return nil, fmt.Errorf("object is not a Deployment or dynamic map, got %T", obj)
+	// Unmarshal into a proper Deployment
+	var deployment appsv1.Deployment
+	if err := json.Unmarshal(jsonData, &deployment); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal as Deployment: %w", err)
+	}
+
+	return &deployment, nil
 }
 
 // Events returns the channel of processed deployment events
