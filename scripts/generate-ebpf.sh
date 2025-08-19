@@ -66,10 +66,12 @@ check_dependencies() {
         die "Go version ${REQUIRED_GO_VERSION} or higher required, found ${go_version}"
     fi
     
-    # Check bpf2go
-    if ! command -v bpf2go &> /dev/null; then
-        log "Installing bpf2go..."
-        go install "github.com/cilium/ebpf/cmd/bpf2go@${BPF2GO_VERSION}"
+    # Check bpf2go - always reinstall in CI to avoid architecture mismatches
+    if [[ "${CI:-false}" == "true" ]] || ! command -v bpf2go &> /dev/null; then
+        log "Installing bpf2go for current architecture..."
+        # Clear any cached version to avoid exec format errors
+        rm -f "$(go env GOPATH)/bin/bpf2go" 2>/dev/null || true
+        CGO_ENABLED=0 go install "github.com/cilium/ebpf/cmd/bpf2go@${BPF2GO_VERSION}"
     fi
     
     # Check clang (Linux only)
