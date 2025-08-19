@@ -26,7 +26,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/cri/bpf"
 )
 
-
 // ContainerExitEvent represents the eBPF event structure
 type ContainerExitEvent struct {
 	Timestamp   uint64

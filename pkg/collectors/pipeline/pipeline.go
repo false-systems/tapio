@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
@@ -19,31 +20,17 @@ func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
 		config.BufferSize = DefaultConfig().BufferSize
 	}
 
-	// Create NATS publisher (enhanced version for production)
-	var publisher NATSPublisherInterface
-	var err error
-	if config.UseEnhancedNATS {
-		publisher, err = NewEnhancedNATSPublisher(logger, config.NATSConfig)
-	} else {
-		publisher, err = NewNATSPublisher(logger, config.NATSConfig)
-	}
+	// Create enhanced NATS publisher (production-ready with backpressure)
+	publisher, err := NewEnhancedNATSPublisher(logger, config.NATSConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NATS publisher: %w", err)
 	}
 
-	// Create K8s enricher
-	enricher, err := NewK8sEnricher(logger)
-	if err != nil {
-		// Log but don't fail - K8s enrichment is optional
-		logger.Warn("Failed to create K8s enricher, running without enrichment", zap.Error(err))
-	}
-
 	return &EventPipeline{
 		collectors: make(map[string]collectors.Collector),
-		enricher:   enricher,
 		publisher:  publisher,
 		logger:     logger,
-		eventsChan: make(chan *collectors.RawEvent, config.BufferSize),
+		eventsChan: make(chan domain.RawEvent, config.BufferSize),
 		workers:    config.Workers,
 	}, nil
 }
@@ -230,14 +217,14 @@ func (p *EventPipeline) consumeCollector(name string, collector collectors.Colle
 					zap.String("collector", name),
 					zap.String("event_type", event.Type))
 				return
-			case p.eventsChan <- &event:
+			case p.eventsChan <- event:
 				// Successfully sent event
 			default:
 				// Channel full or closed, use timeout with graceful handling
 				select {
 				case <-p.ctx.Done():
 					return
-				case p.eventsChan <- &event:
+				case p.eventsChan <- event:
 					// Successfully sent after retry
 				case <-time.After(100 * time.Millisecond):
 					// Drop event if channel is blocked
@@ -278,30 +265,26 @@ func (p *EventPipeline) worker() {
 					}
 				}()
 
-				// Enrich event with K8s context while keeping raw event structure
-				enriched := p.enrichEvent(event)
-
 				// Publish raw event directly to NATS with retry logic
-				// This is the key change: we publish the raw event instead of unified event
 				if p.publisher != nil {
 					retries := 3
 					for i := 0; i < retries; i++ {
-						err := p.publisher.Publish(*enriched.Raw)
+						err := p.publisher.Publish(event)
 						if err == nil {
 							break
 						}
 
 						if i == retries-1 {
 							// Final retry failed - use raw event fields for logging
-							eventID := fmt.Sprintf("%s-%d", enriched.Raw.Type, enriched.Raw.Timestamp.UnixNano())
-							if enriched.Raw.TraceID != "" {
-								eventID = enriched.Raw.TraceID
+							eventID := fmt.Sprintf("%s-%d", event.Type, event.Timestamp.UnixNano())
+							if event.TraceID != "" {
+								eventID = event.TraceID
 							}
 							p.logger.Error("Failed to publish raw event after retries",
 								zap.Error(err),
 								zap.String("event_id", eventID),
-								zap.String("event_type", enriched.Raw.Type),
-								zap.String("trace_id", enriched.Raw.TraceID),
+								zap.String("event_type", event.Type),
+								zap.String("trace_id", event.TraceID),
 								zap.Int("retries", retries),
 							)
 						} else {
@@ -315,24 +298,6 @@ func (p *EventPipeline) worker() {
 			return
 		}
 	}
-}
-
-// enrichEvent adds context to raw event
-func (p *EventPipeline) enrichEvent(raw *collectors.RawEvent) *EnrichedEvent {
-	enriched := &EnrichedEvent{
-		Raw:     raw,
-		TraceID: raw.TraceID,
-		SpanID:  raw.SpanID,
-	}
-
-	// Add K8s context if enricher available
-	if p.enricher != nil {
-		if k8sInfo := p.enricher.GetObjectInfo(raw); k8sInfo != nil {
-			enriched.K8sObject = k8sInfo
-		}
-	}
-
-	return enriched
 }
 
 // GetHealthStatus returns the health status of all collectors

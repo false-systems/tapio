@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/integrations/loader"
 	"go.uber.org/zap"
@@ -17,21 +18,15 @@ func main() {
 	defer logger.Sync()
 
 	// Configuration
-	config := &loader.Config{
-		NATSURL:       "nats://localhost:4222",
-		Neo4jURL:      "bolt://localhost:7687",
-		Neo4jUser:     "neo4j",
-		Neo4jPassword: "password",
-		BatchSize:     10,
-		BatchTimeout:  "5s",
-		WorkerCount:   2,
-		Subjects: []string{
-			"observations.kernel",
-			"observations.kubeapi",
-			"observations.dns",
-			"observations.etcd",
-		},
-	}
+	config := loader.DefaultConfig()
+
+	// Override with custom values
+	config.NATS.URL = "nats://localhost:4222"
+	config.Neo4j.URI = "bolt://localhost:7687"
+	config.Neo4j.Username = "neo4j"
+	config.Neo4j.Password = "password"
+	config.BatchSize = 10
+	config.BatchTimeout = 5 * time.Second
 
 	// Validate config
 	if err := config.Validate(); err != nil {
@@ -39,7 +34,7 @@ func main() {
 	}
 
 	// Create loader
-	ldr, err := loader.New(logger, config)
+	ldr, err := loader.NewLoader(logger, config)
 	if err != nil {
 		log.Fatalf("Failed to create loader: %v", err)
 	}
@@ -60,9 +55,9 @@ func main() {
 
 	// Start the loader
 	logger.Info("Starting observation loader...",
-		zap.String("nats", config.NATSURL),
-		zap.String("neo4j", config.Neo4jURL),
-		zap.Int("workers", config.WorkerCount),
+		zap.String("nats", config.NATS.URL),
+		zap.String("neo4j", config.Neo4j.URI),
+		zap.Int("batch_size", config.BatchSize),
 	)
 
 	if err := ldr.Start(ctx); err != nil {

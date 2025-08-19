@@ -9,14 +9,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
 // MockCollector implements a test collector with race-safe operations
 type MockCollector struct {
 	name     string
-	events   chan collectors.RawEvent
+	events   chan domain.RawEvent
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopOnce sync.Once
@@ -27,7 +27,7 @@ type MockCollector struct {
 func NewMockCollector(name string) *MockCollector {
 	return &MockCollector{
 		name:   name,
-		events: make(chan collectors.RawEvent, 100), // Larger buffer for stress testing
+		events: make(chan domain.RawEvent, 100), // Larger buffer for stress testing
 	}
 }
 
@@ -60,7 +60,7 @@ func (m *MockCollector) Stop() error {
 	return nil
 }
 
-func (m *MockCollector) Events() <-chan collectors.RawEvent {
+func (m *MockCollector) Events() <-chan domain.RawEvent {
 	return m.events
 }
 
@@ -70,7 +70,7 @@ func (m *MockCollector) IsHealthy() bool {
 	return !m.stopped
 }
 
-func (m *MockCollector) SendEvent(event collectors.RawEvent) {
+func (m *MockCollector) SendEvent(event domain.RawEvent) {
 	m.mu.RLock()
 	if m.stopped {
 		m.mu.RUnlock()
@@ -131,13 +131,10 @@ func TestEventPipeline(t *testing.T) {
 		assert.Error(t, err)
 
 		// Send test event
-		testEvent := collectors.RawEvent{
+		testEvent := domain.RawEvent{
 			Timestamp: time.Now(),
-			Type:      "test",
+			Source:    "test",
 			Data:      []byte("test data"),
-			Metadata:  map[string]string{"key": "value"},
-			TraceID:   collectors.GenerateTraceID(),
-			SpanID:    collectors.GenerateSpanID(),
 		}
 		collector.SendEvent(testEvent)
 
@@ -185,13 +182,10 @@ func TestEventPipeline(t *testing.T) {
 			go func(collectorIdx int, c *MockCollector) {
 				defer wg.Done()
 				for j := 0; j < eventCount; j++ {
-					event := collectors.RawEvent{
+					event := domain.RawEvent{
 						Timestamp: time.Now(),
-						Type:      fmt.Sprintf("test-%d", collectorIdx),
+						Source:    fmt.Sprintf("test-%d", collectorIdx),
 						Data:      []byte(fmt.Sprintf("test data %d-%d", collectorIdx, j)),
-						Metadata:  map[string]string{"idx": fmt.Sprintf("%d-%d", collectorIdx, j)},
-						TraceID:   collectors.GenerateTraceID(),
-						SpanID:    collectors.GenerateSpanID(),
 					}
 					c.SendEvent(event)
 
@@ -252,13 +246,10 @@ func TestEventPipeline(t *testing.T) {
 		// Send events in rapid succession
 		go func() {
 			for i := 0; i < 50; i++ {
-				event := collectors.RawEvent{
+				event := domain.RawEvent{
 					Timestamp: time.Now(),
-					Type:      "test",
+					Source:    "test",
 					Data:      []byte(fmt.Sprintf("rapid event %d", i)),
-					Metadata:  map[string]string{"rapid": fmt.Sprintf("%d", i)},
-					TraceID:   collectors.GenerateTraceID(),
-					SpanID:    collectors.GenerateSpanID(),
 				}
 				collector.SendEvent(event)
 			}
@@ -272,22 +263,14 @@ func TestEventPipeline(t *testing.T) {
 }
 
 func TestEnrichedEvent(t *testing.T) {
-	raw := &collectors.RawEvent{
+	raw := &domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "kubeapi",
+		Source:    "kubeapi",
 		Data:      []byte(`{"kind":"Pod","name":"test-pod"}`),
-		Metadata: map[string]string{
-			"collector": "kubeapi",
-			"event":     "pod_created",
-		},
-		TraceID: collectors.GenerateTraceID(),
-		SpanID:  collectors.GenerateSpanID(),
 	}
 
 	enriched := &EnrichedEvent{
-		Raw:     raw,
-		TraceID: raw.TraceID,
-		SpanID:  raw.SpanID,
+		Raw: raw,
 		K8sObject: &K8sObjectInfo{
 			Kind:      "Pod",
 			Name:      "test-pod",
@@ -299,9 +282,7 @@ func TestEnrichedEvent(t *testing.T) {
 
 	// Test that enriched event preserves raw event data
 	assert.Equal(t, raw.Timestamp, enriched.Raw.Timestamp)
-	assert.Equal(t, "kubeapi", enriched.Raw.Type)
-	assert.Equal(t, raw.TraceID, enriched.TraceID)
-	assert.Equal(t, raw.SpanID, enriched.SpanID)
+	assert.Equal(t, "kubeapi", enriched.Raw.Source)
 	assert.NotNil(t, enriched.K8sObject)
 	assert.Equal(t, "Pod", enriched.K8sObject.Kind)
 	assert.Equal(t, "test-pod", enriched.K8sObject.Name)

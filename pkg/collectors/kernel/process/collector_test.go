@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -105,14 +105,14 @@ func TestOTELMetrics(t *testing.T) {
 // TestProcessEvent tests process event structure
 func TestProcessEvent(t *testing.T) {
 	event := ProcessEvent{
-		Timestamp: uint64(time.Now().UnixNano()),
-		PID:       1234,
-		PPID:      1,
-		UID:       1000,
-		GID:       1000,
-		EventType: 1, // FORK
-		ExitCode:  0,
-		CgroupID:  5678,
+		Timestamp:   uint64(time.Now().UnixNano()),
+		PID:         1234,
+		PPID:        1,
+		UID:         1000,
+		GID:         1000,
+		EventSource: 1, // FORK
+		ExitCode:    0,
+		CgroupID:    5678,
 	}
 	copy(event.Comm[:], "test-process")
 
@@ -132,24 +132,15 @@ func TestProcessEvent(t *testing.T) {
 
 // TestRawEventCompliance tests RawEvent structure compliance
 func TestRawEventCompliance(t *testing.T) {
-	event := collectors.RawEvent{
+	event := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "process",
+		Source:    "process",
 		Data:      []byte(`{"pid": 1234, "event": "fork"}`),
-		Metadata: map[string]string{
-			"source":    "ebpf",
-			"subsystem": "kernel",
-		},
-		TraceID: "0123456789abcdef0123456789abcdef",
-		SpanID:  "0123456789abcdef",
 	}
 
 	// Verify structure
-	assert.Equal(t, "process", event.Type)
+	assert.Equal(t, "process", event.Source)
 	assert.NotNil(t, event.Data)
-	assert.NotEmpty(t, event.Metadata)
-	assert.Len(t, event.TraceID, 32)
-	assert.Len(t, event.SpanID, 16)
 }
 
 // TestConcurrentAccess tests thread-safe operations

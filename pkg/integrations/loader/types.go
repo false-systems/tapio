@@ -59,15 +59,15 @@ type NodeCreationRequest struct {
 	ObservationID string                   `json:"observation_id"`
 	Event         *domain.ObservationEvent `json:"event"`
 	Labels        []string                 `json:"labels"`
-	Properties    map[string]interface{}   `json:"properties"`
+	Properties    *domain.LoaderProperties `json:"properties"`
 }
 
 // RelationshipCreationRequest represents a request to create a relationship in Neo4j
 type RelationshipCreationRequest struct {
-	FromObservationID string                 `json:"from_observation_id"`
-	ToObservationID   string                 `json:"to_observation_id"`
-	RelationType      string                 `json:"relationship_type"`
-	Properties        map[string]interface{} `json:"properties"`
+	FromObservationID string                   `json:"from_observation_id"`
+	ToObservationID   string                   `json:"to_observation_id"`
+	RelationType      string                   `json:"relationship_type"`
+	Properties        *domain.LoaderProperties `json:"properties"`
 }
 
 // StorageStats contains statistics about storage operations

@@ -9,6 +9,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,7 @@ type ProcessEvent struct {
 // Collector implements process monitoring
 type Collector struct {
 	logger     *zap.Logger
-	events     chan collectors.RawEvent
+	events     chan domain.RawEvent
 	ctx        context.Context
 	cancel     context.CancelFunc
 	reader     *ringbuf.Reader
@@ -46,7 +47,7 @@ type Collector struct {
 func NewProcessCollector(logger *zap.Logger) *Collector {
 	return &Collector{
 		logger:     logger,
-		events:     make(chan collectors.RawEvent, 3000),
+		events:     make(chan domain.RawEvent, 3000),
 		safeParser: collectors.NewSafeParser(),
 	}
 }
@@ -101,7 +102,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
@@ -135,23 +136,10 @@ func (c *Collector) processEvents() {
 		}
 
 		// Convert to RawEvent
-		metadata := map[string]string{
-			"collector": "kernel-process",
-			"pid":       fmt.Sprintf("%d", event.PID),
-			"tid":       fmt.Sprintf("%d", event.TID),
-			"comm":      c.nullTerminatedString(event.Comm[:]),
-			"size":      fmt.Sprintf("%d", event.Size),
-			"cgroup_id": fmt.Sprintf("%d", event.CgroupID),
-			"pod_uid":   c.nullTerminatedString(event.PodUID[:]),
-		}
-
-		rawEvent := collectors.RawEvent{
+		rawEvent := domain.RawEvent{
 			Timestamp: time.Unix(0, int64(event.Timestamp)),
-			Type:      c.eventTypeToString(event.EventType),
+			Source:    "process",
 			Data:      record.RawSample,
-			Metadata:  metadata,
-			TraceID:   collectors.GenerateTraceID(),
-			SpanID:    collectors.GenerateSpanID(),
 		}
 
 		select {

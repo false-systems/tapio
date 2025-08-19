@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -191,12 +191,12 @@ func TestOTELIntegration(t *testing.T) {
 
 func TestEventSerialization(t *testing.T) {
 	event := NetworkEvent{
-		Timestamp: uint64(time.Now().UnixNano()),
-		PID:       1234,
-		TID:       5678,
-		EventType: 1, // TCP_CONNECT
-		DataLen:   64,
-		CgroupID:  9999,
+		Timestamp:   uint64(time.Now().UnixNano()),
+		PID:         1234,
+		TID:         5678,
+		EventSource: 1, // TCP_CONNECT
+		DataLen:     64,
+		CgroupID:    9999,
 		NetInfo: NetworkInfo{
 			IPVersion: 4,
 			SAddrV4:   0x7f000001, // 127.0.0.1
@@ -406,23 +406,14 @@ func BenchmarkEventProcessing(b *testing.B) {
 
 // TestRawEventStructure verifies the RawEvent structure compliance
 func TestRawEventStructure(t *testing.T) {
-	rawEvent := collectors.RawEvent{
+	rawEvent := domain.RawEvent{
 		Timestamp: time.Now(),
-		Type:      "network",
+		Source:    "network",
 		Data:      []byte(`{"event": "tcp_connect"}`),
-		Metadata: map[string]string{
-			"source": "ebpf",
-			"kernel": "5.15.0",
-		},
-		TraceID: "0123456789abcdef0123456789abcdef",
-		SpanID:  "0123456789abcdef",
 	}
 
 	// Verify required fields
 	assert.NotZero(t, rawEvent.Timestamp)
-	assert.Equal(t, "network", rawEvent.Type)
+	assert.Equal(t, "network", rawEvent.Source)
 	assert.NotNil(t, rawEvent.Data)
-	assert.NotNil(t, rawEvent.Metadata)
-	assert.Len(t, rawEvent.TraceID, 32)
-	assert.Len(t, rawEvent.SpanID, 16)
 }

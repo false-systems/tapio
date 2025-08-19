@@ -89,18 +89,25 @@ build-cmd: build-interfaces ## Build command binaries
 
 ##@ BPF Management
 
-bpf-generate: ## Generate BPF Go bindings for all collectors
-	@echo "${GREEN}Generating BPF bindings...${NC}"
-	@for target in $(BPF_TARGETS); do \
-		if [ -f "$(BPF_DIR)/$$target/bpf/generate.go" ]; then \
-			echo "  Generating $$target BPF..."; \
-			cd $(BPF_DIR)/$$target/bpf && $(GO) generate ./... || echo "    ${YELLOW}Warning: $$target BPF generation failed${NC}"; \
-		fi; \
-	done
+bpf-generate: ## Generate BPF Go bindings for all collectors (local dev)
+	@echo "${GREEN}Generating BPF bindings for local development...${NC}"
+	@./scripts/generate-ebpf.sh generate
 
-bpf-clean: ## Clean BPF generated files
-	@echo "${GREEN}Cleaning BPF files...${NC}"
-	@find $(BPF_DIR) -name "*_bpfel_*.go" -o -name "*_bpfel_*.o" | xargs rm -f
+bpf-generate-ci: ## Generate BPF Go bindings in CI environment
+	@echo "${GREEN}Generating BPF bindings for CI...${NC}"
+	@./scripts/generate-ebpf.sh generate $(GOARCH)
+
+bpf-download: ## Download pre-built BPF artifacts
+	@echo "${GREEN}Downloading pre-built BPF artifacts...${NC}"
+	@./scripts/generate-ebpf.sh download $(ARCH)
+
+bpf-verify: ## Verify build with current BPF files
+	@echo "${GREEN}Verifying BPF build...${NC}"
+	@./scripts/generate-ebpf.sh verify
+
+bpf-clean: ## Clean generated BPF files
+	@echo "${GREEN}Cleaning BPF generated files...${NC}"
+	@./scripts/generate-ebpf.sh clean
 
 ##@ Testing
 
@@ -145,7 +152,7 @@ vet: ## Run go vet
 	@echo "${GREEN}Running go vet...${NC}"
 	@$(GO) vet ./...
 
-verify: verify-format verify-imports verify-architecture verify-todos ## Run all verifications
+verify: verify-format verify-imports verify-architecture verify-todos verify-interface ## Run all verifications
 
 verify-format: ## Check code formatting
 	@echo "${GREEN}Checking formatting...${NC}"
@@ -162,6 +169,10 @@ verify-architecture: ## Verify 5-level architecture
 verify-todos: ## Check for TODOs and FIXMEs
 	@echo "${GREEN}Checking for TODOs...${NC}"
 	@! grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.go" . 2>/dev/null || (echo "${RED}TODOs found in code${NC}" && exit 1)
+
+verify-interface: ## Check for interface{} abuse
+	@echo "${GREEN}Checking for interface{} abuse...${NC}"
+	@$(PROJECT_ROOT)/scripts/verify-no-interface-abuse.sh || (echo "${RED}Interface abuse violations found${NC}" && exit 1)
 
 verify-coverage: ## Verify minimum coverage (80%)
 	@echo "${GREEN}Verifying coverage...${NC}"

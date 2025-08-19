@@ -1,3 +1,45 @@
+## 🚨 ZERO TOLERANCE ENFORCEMENT - READ THIS FIRST
+
+### ⚠️ CRITICAL: 82 map[string]interface{} VIOLATIONS - DO NOT ADD MORE!
+**We just deleted 124 violations! Down from 206 → 82. Adding even ONE new violation = INSTANT REJECTION**
+
+### AUTOMATED REJECTION SYSTEM ACTIVE
+**Your code WILL BE AUTOMATICALLY REJECTED if it contains:**
+- `map[string]interface{}` - **BANNED - USE TYPED STRUCTS ONLY**
+- `interface{}` in public APIs
+- `TODO`, `FIXME`, `XXX`, `HACK` comments
+- Ignored errors (`_ = someFunc()`)
+- Missing tests or <80% coverage
+
+### PRE-COMMIT HOOKS WILL BLOCK YOU
+```bash
+# These checks run AUTOMATICALLY on every commit:
+./scripts/verify-no-interface-abuse.sh  # Blocks map[string]interface{}
+make verify-interface                    # Blocks interface{} abuse
+make verify-todos                        # Blocks TODOs
+make verify                             # Blocks ALL violations
+```
+
+**YOU CANNOT COMMIT CODE WITH VIOLATIONS - THE SYSTEM WILL STOP YOU**
+
+### CURRENT VIOLATION COUNT: 82 map[string]interface{} - GOING TO ZERO
+**Worst Remaining Offenders (DO NOT COPY FROM THESE):**
+- `pkg/domain/event_converter.go` - 11 violations (DOMAIN LAYER!)
+- `pkg/domain/event_parser.go` - 7 violations (DOMAIN LAYER!)
+- `pkg/collectors/bpf_common/framework.go` - 6 violations
+
+**If you add even ONE map[string]interface{}, your PR is INSTANTLY REJECTED**
+
+### WHAT HAPPENS WHEN YOU VIOLATE:
+```bash
+$ git commit -m "feat: add new feature"
+🔍 Running pre-commit checks...
+Checking staged Go files for violations...
+❌ ERROR: pkg/collectors/new_collector.go contains map[string]interface{}
+Replace with strongly-typed structs!
+# COMMIT BLOCKED - YOU CANNOT PROCEED
+```
+
 ## ⚠️ CRITICAL DEVELOPMENT WORKFLOW
 
 ### REFACTOR MODE (TEMPORARY - FOR MEGA REFACTOR ONLY)
@@ -26,8 +68,8 @@ SMALL BATCHES: We code small parts, run gofmt, linter, vet and commit
 Quality Standards
 80% test coverage minimum
 you must create unit testing to your code full coverge.
-No map[string]interface{} in public APIs
-No interface{} abuse
+No map[string]interface{} ANYWHERE (206 violations being fixed)
+No interface{} abuse (use generics or concrete types)
 Proper error handling with context
 NO Stubs, no shortcuts
 YOU work on a dedicated branch
@@ -171,6 +213,44 @@ import "github.com/yairfalse/tapio/pkg/domain"
 // BAD - Higher level import
 package domain
 import "github.com/yairfalse/tapio/pkg/collectors" // REJECTED
+```
+
+## ⛔ BANNED PATTERNS - AUTOMATIC REJECTION
+
+### map[string]interface{} IS BANNED - USE THESE INSTEAD:
+
+```go
+// ❌ BANNED - NEVER USE THIS
+func Process(data map[string]interface{}) error  // REJECTED
+config := map[string]interface{}{"timeout": 30}  // REJECTED
+
+// ✅ MANDATORY - USE TYPED STRUCTS
+type ProcessConfig struct {
+    Timeout   time.Duration `json:"timeout"`
+    BatchSize int          `json:"batch_size"`
+}
+func Process(config ProcessConfig) error  // ACCEPTED
+
+// ❌ BANNED - Factory with map[string]interface{}
+func CreateCollector(cfg map[string]interface{}) (Collector, error)  // REJECTED
+
+// ✅ MANDATORY - Typed factory
+func CreateCollector(cfg *CollectorConfig) (Collector, error)  // ACCEPTED
+
+// ❌ BANNED - JSON unmarshaling to map
+var data map[string]interface{}
+json.Unmarshal(raw, &data)  // REJECTED
+
+// ✅ MANDATORY - JSON to struct
+var config CollectorConfig
+json.Unmarshal(raw, &config)  // ACCEPTED
+```
+
+### VERIFICATION BEFORE EVERY COMMIT:
+```bash
+# RUN THIS OR YOUR COMMIT WILL BE BLOCKED:
+make verify-interface
+# Current violations: 82 (down from 206!) - MUST BE ZERO for new code
 ```
 
 ## 💀 GO CODE STANDARDS

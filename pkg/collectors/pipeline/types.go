@@ -7,24 +7,17 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
-
-// NATSPublisherInterface defines the interface for NATS publishers
-type NATSPublisherInterface interface {
-	Publish(event collectors.RawEvent) error // Unified method for publishing RawEvent
-	Close()
-	IsHealthy() bool
-}
 
 // EventPipeline manages the flow of events from collectors to NATS
 type EventPipeline struct {
 	collectors map[string]collectors.Collector
-	enricher   *K8sEnricher
-	publisher  NATSPublisherInterface
+	publisher  *EnhancedNATSPublisher
 	logger     *zap.Logger
 
-	eventsChan chan *collectors.RawEvent
+	eventsChan chan domain.RawEvent
 	workers    int
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -33,38 +26,18 @@ type EventPipeline struct {
 
 // Config holds pipeline configuration
 type Config struct {
-	Workers         int
-	BufferSize      int
-	NATSConfig      *config.NATSConfig
-	UseEnhancedNATS bool // Use enhanced NATS publisher with backpressure
+	Workers    int
+	BufferSize int
+	NATSConfig *config.NATSConfig
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() Config {
 	return Config{
-		Workers:         4,
-		BufferSize:      10000,
-		NATSConfig:      config.DefaultNATSConfig(),
-		UseEnhancedNATS: true, // Default to enhanced NATS for production
+		Workers:    4,
+		BufferSize: 10000,
+		NATSConfig: config.DefaultNATSConfig(),
 	}
-}
-
-// EnrichedEvent represents an event with added context
-type EnrichedEvent struct {
-	Raw       *collectors.RawEvent
-	K8sObject *K8sObjectInfo
-	TraceID   string
-	SpanID    string
-	ParentID  string
-}
-
-// K8sObjectInfo contains Kubernetes object information
-type K8sObjectInfo struct {
-	Kind      string
-	Name      string
-	Namespace string
-	UID       string
-	Labels    map[string]string
 }
 
 // CollectorHealthStatus represents the health status of a collector

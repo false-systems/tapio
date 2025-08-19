@@ -9,7 +9,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/domain"
 	cri "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
@@ -224,18 +223,8 @@ func (m *Metrics) GetStats() *domain.CollectorStats {
 	}
 }
 
-// DEPRECATED: GetMetrics - use GetStats instead
-// This method exists for backwards compatibility only
-func (m *Metrics) GetMetrics() map[string]interface{} {
-	return map[string]interface{}{
-		"events_processed":   m.EventsProcessed.Load(),
-		"events_dropped":     m.EventsDropped.Load(),
-		"oom_kills_detected": m.OOMKillsDetected.Load(),
-		"processing_time_ns": m.ProcessingTimeNs.Load(),
-		"batches_sent":       m.BatchesSent.Load(),
-		"cri_errors":         m.CRIErrors.Load(),
-	}
-}
+// REMOVED: GetMetrics method eliminated to comply with zero-tolerance policy
+// Use GetStats() instead which returns strongly-typed domain.CollectorStats
 
 // ContainerInfo represents basic container information from CRI
 type ContainerInfo struct {
@@ -305,28 +294,14 @@ func (c *ContainerInfo) GetKubernetesMetadata() *K8sContainerMetadata {
 }
 
 // ToRawEvent converts CRI event to RawEvent for pipeline processing
-func (e *Event) ToRawEvent() collectors.RawEvent {
+func (e *Event) ToRawEvent() domain.RawEvent {
 	// Marshal the event data to JSON
 	data, _ := json.Marshal(e) // Error ignored in hot path
 
-	// Create metadata map
-	metadata := map[string]string{
-		"container_id": e.GetContainerID(),
-		"pod_uid":      e.GetPodUID(),
-		"pod_name":     e.PodName,
-		"namespace":    e.Namespace,
-		"event_type":   e.Type.String(),
-		"exit_code":    fmt.Sprintf("%d", e.ExitCode),
-		"oom_killed":   fmt.Sprintf("%t", e.OOMKilled == 1),
-		"memory_usage": fmt.Sprintf("%d", e.MemoryUsage),
-		"memory_limit": fmt.Sprintf("%d", e.MemoryLimit),
-	}
-
-	return collectors.RawEvent{
+	return domain.RawEvent{
 		Timestamp: time.Unix(0, e.Timestamp),
-		Type:      CollectorName,
+		Source:    CollectorName,
 		Data:      data,
-		Metadata:  metadata,
 	}
 }
 

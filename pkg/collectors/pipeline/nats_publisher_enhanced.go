@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -122,9 +122,6 @@ func (cb *CircuitBreaker) IsOpen() bool {
 	return CircuitBreakerState(atomic.LoadInt32(&cb.state)) == CircuitBreakerOpen
 }
 
-// Ensure EnhancedNATSPublisher implements NATSPublisherInterface
-var _ NATSPublisherInterface = (*EnhancedNATSPublisher)(nil)
-
 // EnhancedNATSPublisher provides production-ready NATS publishing with backpressure and flow control
 type EnhancedNATSPublisher struct {
 	logger *zap.Logger
@@ -162,7 +159,7 @@ type EnhancedNATSPublisher struct {
 }
 
 type publishRequest struct {
-	event     *collectors.RawEvent
+	event     *domain.RawEvent
 	subject   string
 	data      []byte
 	timestamp time.Time
@@ -376,7 +373,7 @@ func (p *EnhancedNATSPublisher) startBackgroundWorkers() {
 }
 
 // Publish publishes event synchronously (compatible with existing interface)
-func (p *EnhancedNATSPublisher) Publish(event collectors.RawEvent) error {
+func (p *EnhancedNATSPublisher) Publish(event domain.RawEvent) error {
 	if p == nil || p.js == nil {
 		return fmt.Errorf("publisher not initialized")
 	}
@@ -435,7 +432,7 @@ func (p *EnhancedNATSPublisher) Publish(event collectors.RawEvent) error {
 }
 
 // PublishAsync publishes observation event asynchronously with backpressure handling
-func (p *EnhancedNATSPublisher) PublishAsync(event *collectors.RawEvent) error {
+func (p *EnhancedNATSPublisher) PublishAsync(event *domain.RawEvent) error {
 	if p == nil || p.js == nil {
 		return fmt.Errorf("publisher not initialized")
 	}
@@ -493,7 +490,7 @@ func (p *EnhancedNATSPublisher) PublishAsync(event *collectors.RawEvent) error {
 	return nil
 }
 
-func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, event *collectors.RawEvent) error {
+func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, event *domain.RawEvent) error {
 	subject := p.generateObservationSubject(event)
 
 	// Marshal raw event directly
@@ -525,7 +522,7 @@ func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, even
 // generateObservationSubject creates NATS subject for observation event
 // Subject format: observations.{source}
 // Examples: observations.kernel, observations.kubeapi, observations.dns
-func (p *EnhancedNATSPublisher) generateObservationSubject(event *collectors.RawEvent) string {
+func (p *EnhancedNATSPublisher) generateObservationSubject(event *domain.RawEvent) string {
 	// Get collector name from metadata, fallback to event type in lowercase
 	source := strings.ToLower(event.Type)
 	if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {

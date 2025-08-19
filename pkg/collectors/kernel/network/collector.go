@@ -9,6 +9,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +44,7 @@ type NetworkInfo struct {
 // Collector implements network monitoring
 type Collector struct {
 	logger     *zap.Logger
-	events     chan collectors.RawEvent
+	events     chan domain.RawEvent
 	ctx        context.Context
 	cancel     context.CancelFunc
 	reader     *ringbuf.Reader
@@ -57,7 +58,7 @@ type Collector struct {
 func NewNetworkCollector(logger *zap.Logger) *Collector {
 	return &Collector{
 		logger:     logger,
-		events:     make(chan collectors.RawEvent, 3000),
+		events:     make(chan domain.RawEvent, 3000),
 		safeParser: collectors.NewSafeParser(),
 	}
 }
@@ -112,7 +113,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
@@ -145,30 +146,11 @@ func (c *Collector) processEvents() {
 			continue
 		}
 
-		// Convert to RawEvent with network-specific metadata
-		metadata := map[string]string{
-			"collector": "kernel-network",
-			"pid":       fmt.Sprintf("%d", event.PID),
-			"tid":       fmt.Sprintf("%d", event.TID),
-			"comm":      c.nullTerminatedString(event.Comm[:]),
-			"cgroup_id": fmt.Sprintf("%d", event.CgroupID),
-			"pod_uid":   c.nullTerminatedString(event.PodUID[:]),
-			"src_ip":    c.ipToString(event.NetInfo.SAddrV4),
-			"dst_ip":    c.ipToString(event.NetInfo.DAddrV4),
-			"src_port":  fmt.Sprintf("%d", event.NetInfo.SPort),
-			"dst_port":  fmt.Sprintf("%d", event.NetInfo.DPort),
-			"protocol":  c.protocolToString(event.NetInfo.Protocol),
-			"direction": c.directionToString(event.NetInfo.Direction),
-			"state":     fmt.Sprintf("%d", event.NetInfo.State),
-		}
-
-		rawEvent := collectors.RawEvent{
+		// Convert to RawEvent
+		rawEvent := domain.RawEvent{
 			Timestamp: time.Unix(0, int64(event.Timestamp)),
-			Type:      c.eventTypeToString(event.EventType),
+			Source:    "network",
 			Data:      record.RawSample,
-			Metadata:  metadata,
-			TraceID:   collectors.GenerateTraceID(),
-			SpanID:    collectors.GenerateSpanID(),
 		}
 
 		select {

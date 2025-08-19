@@ -10,6 +10,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/collectors/kernel/security/bpf"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,7 @@ type SecurityEvent struct {
 // Collector implements security monitoring
 type Collector struct {
 	logger     *zap.Logger
-	events     chan collectors.RawEvent
+	events     chan domain.RawEvent
 	ctx        context.Context
 	cancel     context.CancelFunc
 	reader     *ringbuf.Reader
@@ -47,7 +48,7 @@ type Collector struct {
 func NewSecurityCollector(logger *zap.Logger) *Collector {
 	return &Collector{
 		logger:     logger,
-		events:     make(chan collectors.RawEvent, 5000), // Larger buffer for security events
+		events:     make(chan domain.RawEvent, 5000), // Larger buffer for security events
 		safeParser: collectors.NewSafeParser(),
 	}
 }
@@ -158,7 +159,7 @@ func (c *Collector) cleanup() {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan collectors.RawEvent {
+func (c *Collector) Events() <-chan domain.RawEvent {
 	return c.events
 }
 
@@ -192,23 +193,10 @@ func (c *Collector) processEvents() {
 		}
 
 		// Convert to RawEvent
-		metadata := map[string]string{
-			"collector":  "kernel-security",
-			"pid":        fmt.Sprintf("%d", event.PID),
-			"tid":        fmt.Sprintf("%d", event.TID),
-			"target_pid": fmt.Sprintf("%d", event.TargetPID),
-			"comm":       c.nullTerminatedString(event.Comm[:]),
-			"cgroup_id":  fmt.Sprintf("%d", event.CgroupID),
-			"pod_uid":    c.nullTerminatedString(event.PodUID[:]),
-		}
-
-		rawEvent := collectors.RawEvent{
+		rawEvent := domain.RawEvent{
 			Timestamp: time.Unix(0, int64(event.Timestamp)),
-			Type:      c.eventTypeToString(event.EventType),
+			Source:    "security",
 			Data:      record.RawSample,
-			Metadata:  metadata,
-			TraceID:   collectors.GenerateTraceID(),
-			SpanID:    collectors.GenerateSpanID(),
 		}
 
 		select {
