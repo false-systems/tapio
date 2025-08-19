@@ -1,0 +1,49 @@
+name: eBPF Bytecode Generation
+on:
+  push:
+    paths:
+      - 'pkg/collectors/*/bpf_src/*.c'
+      - 'pkg/collectors/bpf_common/*.h'
+      - 'pkg/collectors/*/bpf/generate.go'
+  workflow_dispatch:
+
+jobs:
+  generate-ebpf:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
+    - name: Install eBPF dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang llvm libbpf-dev
+        go install github.com/cilium/ebpf/cmd/bpf2go@latest
+        
+    - name: Generate eBPF bytecode
+      run: |
+        export GOARCH=${{ matrix.arch }}
+        make bpf-generate-ci
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ebpf-bytecode-${{ matrix.arch }}
+        path: |
+          pkg/collectors/**/bpf/*.o
+          pkg/collectors/**/*_bpfel_*.go
+        retention-days: 90
+        
+    - name: Verify build
+      run: |
+        export GOARCH=${{ matrix.arch }}
+        go build -tags=linux ./pkg/collectors/...
