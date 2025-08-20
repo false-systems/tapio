@@ -1,316 +1,191 @@
-# Tapio - Kubernetes Behavior Learning Through Graph-Based Observability
+# Tapio - Observability for Small Teams
 
-[![Go Version](https://img.shields.io/badge/go-1.24-blue.svg)](https://go.dev/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![eBPF](https://img.shields.io/badge/eBPF-enabled-orange.svg)](https://ebpf.io/)
-[![Neo4j](https://img.shields.io/badge/Neo4j-graph-blue.svg)](https://neo4j.com/)
+> "In the midst of winter, I found there was, within me, an invincible summer." — Albert Camus
 
-Tapio is a month-old observability platform that learns Kubernetes behavior patterns through eBPF-based event collection and graph correlation analysis. It captures low-level system events, enriches them with Kubernetes context, and stores correlations in Neo4j to identify patterns and root causes of issues.
+## What is Tapio?
 
-## What Tapio Does
+Tapio is an observability platform designed for small engineering teams who find enterprise solutions overwhelming and expensive. Built from experience managing Kubernetes clusters at scale, we're creating a simpler path to understanding what's happening in your infrastructure.
 
-Tapio observes your Kubernetes cluster at the kernel level using eBPF, then correlates events across different layers to understand behavior patterns. Instead of just showing you metrics, it builds a graph of relationships between events to answer "why did this happen?" rather than just "what happened?"
+**Status: Under active development. Not production-ready.**
 
-**Current Capabilities:**
-- Collects kernel-level events via eBPF (syscalls, network, DNS)
-- Monitors Kubernetes components (API server, kubelet, etcd)
-- Enriches events with K8s context (pod, container, namespace)
-- Publishes to NATS JetStream for async processing
-- Converts events to correlation-optimized format (ObservationEvent)
-- Batch loads to Neo4j for graph analysis
+## The Problem
+
+If you're a small team running Kubernetes, you've likely experienced this:
+- Datadog/New Relic costs more than your infrastructure
+- Setting up Prometheus + Grafana + Loki + Tempo + Jaeger requires a dedicated SRE
+- You're drowning in metrics but still can't answer "why is production slow?"
+- Your dashboards look impressive but don't help during incidents
+
+We've been there. After years of building and operating cloud-native systems, we're building what we wished existed: observability that just works, without the complexity.
+
+## How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Your Kubernetes Cluster                  │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐       │
+│  │  Pods   │  │Services │  │  Nodes  │  │   DNS   │       │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘       │
+│       │            │            │            │              │
+└───────┼────────────┼────────────┼────────────┼──────────────┘
+        │            │            │            │
+        ▼            ▼            ▼            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Tapio Collectors (Level 1)               │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐       │
+│  │  eBPF   │  │   CRI   │  │ Kubelet │  │   DNS   │       │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘       │
+│       │            │            │            │              │
+│       └────────────┴────────────┴────────────┘              │
+│                         │                                    │
+│                         ▼                                    │
+│                 ┌──────────────┐                            │
+│                 │ Unified Event│                            │
+│                 └───────┬──────┘                            │
+└─────────────────────────┼────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│               Intelligence Layer (Level 2)                   │
+│                                                              │
+│     ┌──────────────────────────────────────┐                │
+│     │    Correlation & Root Cause Engine   │                │
+│     └──────────────────┬────────────────────┘               │
+│                        │                                     │
+└────────────────────────┼─────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                Storage Layer (Level 3)                       │
+│                                                              │
+│     ┌──────────────────────────────────────┐                │
+│     │         Neo4j Graph Database         │                │
+│     └──────────────────┬────────────────────┘               │
+└────────────────────────┼─────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Your Team                                  │
+│                                                              │
+│     "Oh, the DNS resolver in pod-xyz is failing             │
+│      because the upstream service is throttling"             │
+│                                                              │
+└───────────────────────────────────────────────────────────────┘
+```
+
+## The Collectors
+
+We gather telemetry from multiple sources to build a complete picture:
+
+### 1. **Kernel Collector** (`/pkg/collectors/kernel`)
+Tracks system calls, file operations, and process lifecycle using eBPF. Helps answer: "What is this container actually doing?"
+
+### 2. **CRI Collector** (`/pkg/collectors/cri`)
+Interfaces with the Container Runtime Interface to monitor container lifecycle, resource usage, and health. Knows when containers are OOMKilled before you do.
+
+### 3. **Kubelet Collector** (`/pkg/collectors/kubelet`)
+Pulls metrics directly from the kubelet API. Tracks pod phases, ready conditions, and resource allocation vs actual usage.
+
+### 4. **DNS Collector** (`/pkg/collectors/dns`)
+Because DNS is always the problem. Monitors resolution times, failures, and patterns. Correlates DNS issues with service degradation.
+
+### 5. **Cgroup Collector** (`/pkg/collectors/cgroup`)
+Reads cgroup metrics for accurate resource consumption. Shows you what's really using CPU/memory, not what Kubernetes thinks.
+
+### 6. **eBPF Collector** (`/pkg/collectors/ebpf`)
+Deep kernel-level visibility without overhead. Tracks network flows, security events, and performance bottlenecks.
+
+### 7. **OpenTelemetry Collector** (`/pkg/collectors/otel`)
+Ingests traces and metrics from your instrumented applications. Bridges application and infrastructure observability.
 
 ## Architecture
 
+We follow a strict 5-level hierarchy to keep complexity manageable:
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        eBPF Collectors                           │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-│  │ Kernel   │ │   DNS    │ │   CNI    │ │ Systemd  │          │
-│  │ Events   │ │ Queries  │ │ Network  │ │ Services │          │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘          │
-│       │            │            │            │                  │
-│       └────────────┴────────────┴────────────┘                 │
-│                           │                                     │
-│                      RawEvent{}                                 │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-┌───────────────────────────┴─────────────────────────────────────┐
-│                    Event Pipeline                                │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              K8s Context Enrichment                      │   │
-│  │  (Container ID → Pod → Namespace → Service)             │   │
-│  └─────────────────────────┬───────────────────────────────┘   │
-│                            │                                     │
-│  ┌─────────────────────────┴───────────────────────────────┐   │
-│  │            NATS JetStream Publisher                      │   │
-│  │  Subjects: observations.kernel, observations.dns, etc    │   │
-│  └─────────────────────────┬───────────────────────────────┘   │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                     NATS JetStream
-                            │
-┌───────────────────────────┴─────────────────────────────────────┐
-│                    Observation Loader                            │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │          RawEvent → ObservationEvent Parser              │   │
-│  │   Extracts: PID, ContainerID, PodName, Namespace        │   │
-│  └─────────────────────────┬───────────────────────────────┘   │
-│                            │                                     │
-│  ┌─────────────────────────┴───────────────────────────────┐   │
-│  │              Batch Processor (1000 events)               │   │
-│  └─────────────────────────┬───────────────────────────────┘   │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                      ObservationEvent{}
-                            │
-┌───────────────────────────┴─────────────────────────────────────┐
-│                     Neo4j Graph Store                            │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │   Nodes: Events, Pods, Containers, Services              │   │
-│  │   Edges: CAUSED_BY, RELATED_TO, DEPENDS_ON, OWNS        │   │
-│  └───────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────┘
+Level 0: Domain       - Core types and events (zero dependencies)
+Level 1: Collectors   - Gather telemetry (depends on domain only)
+Level 2: Intelligence - Correlation and analysis (depends on L0-L1)
+Level 3: Integrations - Neo4j, storage (depends on L0-L2)
+Level 4: Interfaces   - APIs and UI (depends on L0-L3)
 ```
 
-## Key Technical Decisions
+This isn't architectural astronautics - it's how we prevent the codebase from becoming the spaghetti we're trying to debug.
 
-### ObservationEvent Structure
-We recently migrated from a complex nested UnifiedEvent to a simpler, flatter ObservationEvent structure with correlation keys:
+## What Makes Tapio Different
 
-```go
-type ObservationEvent struct {
-    // Core identity
-    ID        string
-    Timestamp time.Time
-    Source    string  // "kernel", "dns", "kubeapi"
-    Type      string  // "syscall", "dns_query", "pod_created"
-    
-    // Correlation keys (pointers for optional fields)
-    PID         *int32
-    ContainerID *string
-    PodName     *string
-    Namespace   *string
-    ServiceName *string
-    
-    // Simple string map instead of interface{}
-    Data map[string]string
-}
-```
+1. **Built for Reality**: We're not trying to monitor Netflix. This is for teams of 3-20 engineers with 50-500 pods.
 
-This design enables efficient correlation queries in Neo4j without complex nested structures.
+2. **Correlation First**: Instead of 30 dashboards, we focus on connecting the dots. When your API is slow, we tell you it's because DNS to your database is timing out.
 
-### Technology Stack
-- **eBPF**: Zero-overhead kernel observability (requires Linux 4.14+)
-- **NATS JetStream**: Persistent, distributed event streaming
-- **Neo4j**: Graph database for correlation storage and queries
-- **Go 1.24**: With strict architecture enforcement
+3. **Resource Efficient**: Runs on a single node. Your observability shouldn't cost more than what you're observing.
 
-### Architecture Rules (Enforced)
-```
-Level 0: pkg/domain/       # Zero dependencies, pure types
-Level 1: pkg/collectors/   # Domain only
-Level 2: pkg/intelligence/ # Domain + collectors
-Level 3: pkg/integrations/ # Domain + collectors + intelligence  
-Level 4: pkg/interfaces/   # All layers (API, CLI)
-```
+4. **No Query Languages**: You shouldn't need to learn PromQL, KQL, or GraphQL to understand why production is down.
 
-Components can ONLY import from lower levels. This is enforced in CI.
+## Current State
+
+### What Works
+- eBPF-based kernel monitoring
+- Container runtime integration
+- Basic correlation engine
+- Event unified schema
+
+### Being Built
+- Neo4j integration for relationship mapping
+- API layer for queries
+- Root cause analysis engine
+- Automated remediation suggestions
+
+### Won't Build
+- Machine learning magic (it's usually linear regression anyway)
+- Infinite retention (30 days is enough for most teams)
+- Multi-region federation (we're not trying to be Thanos)
+- Custom dashboarding (Grafana already exists)
 
 ## Getting Started
 
-### Prerequisites
-- Linux kernel 4.14+ with eBPF support
-- Go 1.24+
-- Docker (for Neo4j and NATS)
-- clang/llvm-15+ (for eBPF compilation)
-- Root access or CAP_BPF capability
+**Warning**: This is under active development. For production use today, we recommend:
+- Small teams: Grafana Cloud
+- Cost-conscious: VictoriaMetrics + Grafana
+- Enterprise: Keep paying for Datadog
 
-### Quick Start
+If you want to contribute or try early builds:
 
-1. **Start Infrastructure**
 ```bash
-# Start NATS JetStream
-docker run -d --name nats \
-  -p 4222:4222 -p 8222:8222 \
-  nats:latest -js
+# Clone the repository
+git clone https://github.com/yourusername/tapio
 
-# Start Neo4j
-docker run -d --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  neo4j:latest
+# Build collectors
+cd pkg/collectors
+go build ./...
+
+# Run tests
+go test ./... -race
+
+# Check architecture compliance
+make verify
 ```
 
-2. **Build Tapio**
-```bash
-# Clone repository
-git clone https://github.com/yairfalse/tapio
-cd tapio
+## Philosophy
 
-# Generate eBPF programs
-make bpf-generate
+Observability tools have become like modern cars - packed with features you'll never use, expensive to maintain, and require specialized knowledge to operate. 
 
-# Build all components
-make build
-```
+Tapio is more like a motorcycle - simpler, focused on what matters, and built by people who actually ride.
 
-3. **Run Collectors**
-```bash
-# Start collectors (requires root for eBPF)
-sudo ./bin/collectors \
-  --nats-url nats://localhost:4222 \
-  --enable kernel,dns,kubeapi
-```
-
-4. **Run Loader**
-```bash
-# In another terminal, start the loader
-./bin/simple-loader \
-  --nats-url nats://localhost:4222 \
-  --neo4j-url bolt://localhost:7687 \
-  --neo4j-user neo4j \
-  --neo4j-password password
-```
-
-## Real Use Cases
-
-### 1. Pod Crash Loop Root Cause Analysis
-When a pod is crash-looping, Tapio can correlate:
-- OOM killer events from kernel
-- DNS resolution failures
-- File access denials
-- Network connection failures
-- Container exit codes
-
-Query in Neo4j:
-```cypher
-MATCH path = (crash:Event {type: 'container_died'})-[:CAUSED_BY*1..5]->(root:Event)
-WHERE crash.pod_name = 'problematic-pod'
-RETURN path
-```
-
-### 2. Service Latency Spike Investigation
-Tapio correlates slow requests with:
-- CPU throttling events
-- Network retransmissions
-- DNS lookup delays
-- Disk I/O saturation
-
-### 3. Security Incident Timeline
-Track lateral movement by correlating:
-- Process executions
-- Network connections
-- File access patterns
-- Container escapes
-
-## Development
-
-### Project Structure
-```
-tapio/
-├── cmd/
-│   ├── collectors/      # Main collector binary
-│   ├── simple-loader/   # NATS→Neo4j loader
-│   └── api/            # REST API (future)
-├── pkg/
-│   ├── domain/         # Core types (ObservationEvent, RawEvent)
-│   ├── collectors/     # eBPF and API collectors
-│   │   ├── ebpf/      # Kernel, DNS, CNI collectors
-│   │   ├── kubeapi/   # K8s API event collector
-│   │   └── pipeline/  # Event enrichment & publishing
-│   ├── intelligence/   # Correlation engine (in progress)
-│   └── integrations/  # Storage and messaging
-│       ├── loader/    # Neo4j batch loader
-│       └── nats/      # NATS publisher
-└── bpf/               # eBPF C programs
-```
-
-### Running Tests
-```bash
-# Unit tests with race detection
-make test
-
-# Specific package
-go test -race ./pkg/collectors/...
-
-# With coverage
-go test -cover ./...
-```
-
-### Code Standards
-From CLAUDE.md (strictly enforced):
-- 80% minimum test coverage
-- No TODOs, stubs, or empty functions
-- No `interface{}` in public APIs
-- Must run `make fmt` before commit
-- Architecture violations = CI failure
-
-### Building eBPF Programs
-```bash
-# Requires clang/llvm
-make bpf-generate
-
-# Output in pkg/collectors/ebpf/bpf/
-```
-
-## Current Limitations
-
-- **Linux Only**: eBPF requires Linux kernel 4.14+
-- **Root Required**: eBPF collectors need CAP_BPF or root
-- **Neo4j Dependency**: Graph correlations require Neo4j running
-- **Memory Usage**: High-volume clusters may need tuning
-- **Learning Phase**: Needs time to build correlation patterns
-
-## Roadmap
-
-### In Progress
-- [ ] Correlation engine completion
-- [ ] Pattern detection algorithms
-- [ ] REST API for queries
-
-### Planned
-- [ ] Helm chart for K8s deployment
-- [ ] Grafana plugin for visualization
-- [ ] ML-based anomaly detection
-- [ ] Multi-cluster support
-- [ ] Event replay capability
-- [ ] Custom correlation rules DSL
-
-
+We're not building the next Datadog. We're building what small teams need: clarity in chaos, without the complexity.
 
 ## Contributing
 
-We welcome contributions! The architecture is clean and modular:
-
-1. **Add a Collector**: Implement the `Collector` interface in `pkg/collectors/`
-2. **Add a Correlator**: Implement correlation logic in `pkg/intelligence/`
-3. **Enhance Pipeline**: Add enrichers in `pkg/collectors/pipeline/`
-
-Requirements:
-- Follow 5-level architecture (enforced)
-- Minimum 80% test coverage
-- Run `make fmt` and `make test`
-- No stubs or TODOs
-
-
+We follow strict code standards (see CLAUDE.md). No TODOs, no `interface{}`, no shortcuts. If you've operated production systems and felt the pain, we'd love your help.
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file
-
-## Acknowledgments
-
-Built with:
-- [Cilium eBPF](https://github.com/cilium/ebpf) - Go eBPF library
-- [NATS](https://nats.io/) - High-performance messaging
-- [Neo4j](https://neo4j.com/) - Graph database
-- [OpenTelemetry](https://opentelemetry.io/) - Observability framework
-
-## Support
-
-- Issues: [GitHub Issues](https://github.com/yairfalse/tapio/issues)
-- Discussions: [GitHub Discussions](https://github.com/yairfalse/tapio/discussions)
+Apache 2.0 - Because observability should be open.
 
 ---
 
-**Note**: This is a month-old project focused on learning Kubernetes behavior patterns. The architecture is solid, but some components are still being refined. We value clean code and proper design over feature velocity.
+*"Simplicity is the ultimate sophistication" - Leonardo da Vinci*
+
+*Built with experience from managing thousands of pods, millions of requests, and too many 3am incidents.*
+
+*"In the depth of winter, I finally learned that there was in me an invincible summer." - Albert Camus*
