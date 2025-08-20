@@ -99,9 +99,11 @@ func main() {
 	if *enableEBPF {
 		// Create kernel collector
 		kernelConfig := &kernel.Config{
-			Name: "kernel",
+			Name:       "kernel",
+			BufferSize: 10000,
+			EnableEBPF: true,
 		}
-		kernelCollector, err := kernel.NewCollectorWithConfig(kernelConfig, logger)
+		kernelCollector, err := kernel.NewCollector("kernel", kernelConfig)
 		if err != nil {
 			logger.Error("Failed to create kernel collector", zap.Error(err))
 		} else {
