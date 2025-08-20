@@ -191,12 +191,12 @@ func TestOTELIntegration(t *testing.T) {
 
 func TestEventSerialization(t *testing.T) {
 	event := NetworkEvent{
-		Timestamp:   uint64(time.Now().UnixNano()),
-		PID:         1234,
-		TID:         5678,
-		EventSource: 1, // TCP_CONNECT
-		DataLen:     64,
-		CgroupID:    9999,
+		Timestamp: uint64(time.Now().UnixNano()),
+		PID:       1234,
+		TID:       5678,
+		EventType: 1, // TCP_CONNECT
+		DataLen:   64,
+		CgroupID:  9999,
 		NetInfo: NetworkInfo{
 			IPVersion: 4,
 			SAddrV4:   0x7f000001, // 127.0.0.1
