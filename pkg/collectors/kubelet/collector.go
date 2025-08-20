@@ -156,14 +156,18 @@ type Collector struct {
 		lastEventTime   time.Time
 	}
 
-	// OTEL instrumentation - REQUIRED fields
+	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
 	eventsProcessed metric.Int64Counter
 	errorsTotal     metric.Int64Counter
 	processingTime  metric.Float64Histogram
-	apiLatency      metric.Float64Histogram
-	pollsActive     metric.Int64UpDownCounter
-	apiFailures     metric.Int64Counter
+	droppedEvents   metric.Int64Counter
+	bufferUsage     metric.Int64Gauge
+
+	// kubelet-specific metrics (optional)
+	apiLatency  metric.Float64Histogram
+	pollsActive metric.Int64UpDownCounter
+	apiFailures metric.Int64Counter
 }
 
 // NewCollector creates a new kubelet collector
@@ -207,6 +211,22 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 	)
 	if err != nil {
 		config.Logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	droppedEvents, err := meter.Int64Counter(
+		fmt.Sprintf("%s_dropped_events_total", name),
+		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", name)),
+	)
+	if err != nil {
+		config.Logger.Warn("Failed to create dropped events counter", zap.Error(err))
+	}
+
+	bufferUsage, err := meter.Int64Gauge(
+		fmt.Sprintf("%s_buffer_usage", name),
+		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", name)),
+	)
+	if err != nil {
+		config.Logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
 	}
 
 	apiLatency, err := meter.Float64Histogram(
@@ -265,6 +285,8 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
+		droppedEvents:   droppedEvents,
+		bufferUsage:     bufferUsage,
 		apiLatency:      apiLatency,
 		pollsActive:     pollsActive,
 		apiFailures:     apiFailures,

@@ -46,14 +46,17 @@ type Collector struct {
 	// Informers
 	informers []cache.SharedIndexInformer
 
-	// OTEL instrumentation - REQUIRED fields
+	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
 	eventsProcessed metric.Int64Counter
 	errorsTotal     metric.Int64Counter
 	processingTime  metric.Float64Histogram
-	eventsDropped   metric.Int64Counter
-	watcherCount    metric.Int64UpDownCounter
-	cacheSyncs      metric.Int64Counter
+	droppedEvents   metric.Int64Counter
+	bufferUsage     metric.Int64Gauge
+
+	// kubeapi-specific metrics (optional)
+	watcherCount metric.Int64UpDownCounter
+	cacheSyncs   metric.Int64Counter
 }
 
 // New creates a new kubeapi collector
@@ -100,12 +103,20 @@ func New(logger *zap.Logger, config Config) (*Collector, error) {
 		logger.Warn("Failed to create processing time histogram", zap.Error(err))
 	}
 
-	eventsDropped, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_dropped_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	droppedEvents, err := meter.Int64Counter(
+		fmt.Sprintf("%s_dropped_events_total", name),
+		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create events dropped counter", zap.Error(err))
+		logger.Warn("Failed to create dropped events counter", zap.Error(err))
+	}
+
+	bufferUsage, err := meter.Int64Gauge(
+		fmt.Sprintf("%s_buffer_usage", name),
+		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
 	}
 
 	watcherCount, err := meter.Int64UpDownCounter(
@@ -135,7 +146,8 @@ func New(logger *zap.Logger, config Config) (*Collector, error) {
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
-		eventsDropped:   eventsDropped,
+		droppedEvents:   droppedEvents,
+		bufferUsage:     bufferUsage,
 		watcherCount:    watcherCount,
 		cacheSyncs:      cacheSyncs,
 	}, nil
@@ -166,9 +178,14 @@ func NewCollector(name string) (*Collector, error) {
 		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
 	)
 
-	eventsDropped, _ := meter.Int64Counter(
-		fmt.Sprintf("%s_events_dropped_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	droppedEvents, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_dropped_events_total", name),
+		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", name)),
+	)
+
+	bufferUsage, _ := meter.Int64Gauge(
+		fmt.Sprintf("%s_buffer_usage", name),
+		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", name)),
 	)
 
 	watcherCount, _ := meter.Int64UpDownCounter(
@@ -192,7 +209,8 @@ func NewCollector(name string) (*Collector, error) {
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
-		eventsDropped:   eventsDropped,
+		droppedEvents:   droppedEvents,
+		bufferUsage:     bufferUsage,
 		watcherCount:    watcherCount,
 		cacheSyncs:      cacheSyncs,
 	}, nil
@@ -619,8 +637,8 @@ func (c *Collector) handleResourceEvent(eventType, kind string, obj, oldObj inte
 	case <-c.ctx.Done():
 		return
 	default:
-		if c.eventsDropped != nil {
-			c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
+		if c.droppedEvents != nil {
+			c.droppedEvents.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("reason", "buffer_full"),
 				attribute.String("resource_kind", kind),
 			))

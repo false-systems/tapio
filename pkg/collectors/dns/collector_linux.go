@@ -254,6 +254,11 @@ func (c *Collector) readEBPFEvents() {
 			// Convert to raw event
 			rawEvent := c.convertToRawEvent(event)
 
+			// Update buffer usage gauge
+			if c.bufferUsage != nil {
+				c.bufferUsage.Record(ctx, int64(len(c.events)))
+			}
+
 			// Send to event channel
 			select {
 			case c.events <- rawEvent:
@@ -263,6 +268,10 @@ func (c *Collector) readEBPFEvents() {
 			case <-ctx.Done():
 				return
 			default:
+				// Buffer full, drop event
+				if c.droppedEvents != nil {
+					c.droppedEvents.Add(ctx, 1)
+				}
 				if c.errorsTotal != nil {
 					c.errorsTotal.Add(ctx, 1)
 				}

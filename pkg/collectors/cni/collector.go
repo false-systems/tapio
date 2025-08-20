@@ -31,12 +31,18 @@ type Collector struct {
 	ebpfState interface{}
 
 	// OTEL instrumentation
-	tracer             trace.Tracer
-	meter              metric.Meter
-	logger             *zap.Logger
-	eventsProcessed    metric.Int64Counter
-	errorsTotal        metric.Int64Counter
-	eventsDropped      metric.Int64Counter
+	tracer trace.Tracer
+	meter  metric.Meter
+	logger *zap.Logger
+
+	// 5 Core Metrics (MANDATORY - same for all collectors)
+	eventsProcessed metric.Int64Counter
+	errorsTotal     metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	droppedEvents   metric.Int64Counter
+	bufferUsage     metric.Int64Gauge
+
+	// CNI-specific metrics (optional)
 	ebpfLoadsTotal     metric.Int64Counter
 	ebpfLoadErrors     metric.Int64Counter
 	ebpfAttachTotal    metric.Int64Counter
@@ -45,8 +51,6 @@ type Collector struct {
 	k8sExtractionTotal metric.Int64Counter
 	k8sExtractionHits  metric.Int64Counter
 	netnsOpsByType     metric.Int64Counter
-	bufferUtilization  metric.Float64Gauge
-	processingLatency  metric.Float64Histogram
 }
 
 // NewCollector creates a new simple CNI collector
@@ -78,12 +82,28 @@ func NewCollector(name string) (*Collector, error) {
 		logger.Warn("Failed to create errors counter", zap.Error(err))
 	}
 
-	eventsDropped, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_dropped_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
+	processingTime, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_duration_ms", name),
+		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create events_dropped counter", zap.Error(err))
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	droppedEvents, err := meter.Int64Counter(
+		fmt.Sprintf("%s_dropped_events_total", name),
+		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create dropped events counter", zap.Error(err))
+	}
+
+	bufferUsage, err := meter.Int64Gauge(
+		fmt.Sprintf("%s_buffer_usage", name),
+		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
 	}
 
 	ebpfLoadsTotal, err := meter.Int64Counter(
@@ -150,22 +170,6 @@ func NewCollector(name string) (*Collector, error) {
 		logger.Warn("Failed to create netns_ops counter", zap.Error(err))
 	}
 
-	bufferUtilization, err := meter.Float64Gauge(
-		fmt.Sprintf("%s_buffer_utilization_ratio", name),
-		metric.WithDescription(fmt.Sprintf("Buffer utilization ratio for %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create buffer_utilization gauge", zap.Error(err))
-	}
-
-	processingLatency, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_processing_duration_ms", name),
-		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create processing_latency histogram", zap.Error(err))
-	}
-
 	// Default config
 	cfg := &config.CNIConfig{
 		BaseConfig: &config.BaseConfig{
@@ -176,16 +180,20 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	c := &Collector{
-		name:               name,
-		config:             cfg,
-		events:             make(chan domain.RawEvent, cfg.BaseConfig.BufferSize),
-		healthy:            true,
-		tracer:             tracer,
-		meter:              meter,
-		logger:             logger.Named(name),
-		eventsProcessed:    eventsProcessed,
-		errorsTotal:        errorsTotal,
-		eventsDropped:      eventsDropped,
+		name:    name,
+		config:  cfg,
+		events:  make(chan domain.RawEvent, cfg.BaseConfig.BufferSize),
+		healthy: true,
+		tracer:  tracer,
+		meter:   meter,
+		logger:  logger.Named(name),
+		// Core metrics
+		eventsProcessed: eventsProcessed,
+		errorsTotal:     errorsTotal,
+		processingTime:  processingTime,
+		droppedEvents:   droppedEvents,
+		bufferUsage:     bufferUsage,
+		// CNI-specific metrics
 		ebpfLoadsTotal:     ebpfLoadsTotal,
 		ebpfLoadErrors:     ebpfLoadErrors,
 		ebpfAttachTotal:    ebpfAttachTotal,
@@ -194,8 +202,6 @@ func NewCollector(name string) (*Collector, error) {
 		k8sExtractionTotal: k8sExtractionTotal,
 		k8sExtractionHits:  k8sExtractionHits,
 		netnsOpsByType:     netnsOpsByType,
-		bufferUtilization:  bufferUtilization,
-		processingLatency:  processingLatency,
 	}
 
 	c.logger.Info("CNI collector created", zap.String("name", name))

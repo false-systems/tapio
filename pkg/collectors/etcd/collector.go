@@ -34,11 +34,15 @@ type Collector struct {
 	startTime time.Time
 	logger    *zap.Logger
 
-	// OTEL instrumentation - REQUIRED fields
+	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
 	eventsProcessed metric.Int64Counter
 	errorsTotal     metric.Int64Counter
 	processingTime  metric.Float64Histogram
+	droppedEvents   metric.Int64Counter
+	bufferUsage     metric.Int64Gauge
+
+	// etcd-specific metrics (optional)
 	watchOperations metric.Int64UpDownCounter
 	apiLatency      metric.Float64Histogram
 }
@@ -125,6 +129,22 @@ func NewCollector(name string, config Config) (*Collector, error) {
 		logger.Warn("Failed to create processing time histogram", zap.Error(err))
 	}
 
+	droppedEvents, err := meter.Int64Counter(
+		fmt.Sprintf("%s_dropped_events_total", name),
+		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create dropped events counter", zap.Error(err))
+	}
+
+	bufferUsage, err := meter.Int64Gauge(
+		fmt.Sprintf("%s_buffer_usage", name),
+		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
+	}
+
 	watchOperations, err := meter.Int64UpDownCounter(
 		fmt.Sprintf("%s_active_watches", name),
 		metric.WithDescription(fmt.Sprintf("Active watch operations in %s", name)),
@@ -152,6 +172,8 @@ func NewCollector(name string, config Config) (*Collector, error) {
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
+		droppedEvents:   droppedEvents,
+		bufferUsage:     bufferUsage,
 		watchOperations: watchOperations,
 		apiLatency:      apiLatency,
 	}, nil
