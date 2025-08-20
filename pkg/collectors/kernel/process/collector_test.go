@@ -105,14 +105,14 @@ func TestOTELMetrics(t *testing.T) {
 // TestProcessEvent tests process event structure
 func TestProcessEvent(t *testing.T) {
 	event := ProcessEvent{
-		Timestamp:   uint64(time.Now().UnixNano()),
-		PID:         1234,
-		PPID:        1,
-		UID:         1000,
-		GID:         1000,
-		EventSource: 1, // FORK
-		ExitCode:    0,
-		CgroupID:    5678,
+		Timestamp: uint64(time.Now().UnixNano()),
+		PID:       1234,
+		PPID:      1,
+		UID:       1000,
+		GID:       1000,
+		EventType: 1, // FORK
+		ExitCode:  0,
+		CgroupID:  5678,
 	}
 	copy(event.Comm[:], "test-process")
 

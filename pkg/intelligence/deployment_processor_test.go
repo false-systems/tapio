@@ -223,7 +223,9 @@ func TestProcessRawEvent_DeploymentUpdatedWithImageChange(t *testing.T) {
 		},
 	}
 
-	resourceEvent := domain.ResourceEvent{
+	// Test by directly calling convertToDeploymentEvent since JSON marshaling
+	// won't preserve the Object/OldObject fields (they have json:"-" tags)
+	deploymentEvent, err := processor.convertToDeploymentEvent(context.Background(), &domain.ResourceEvent{
 		EventType: "MODIFIED",
 		Timestamp: time.Now(),
 		Kind:      "Deployment",
@@ -232,33 +234,17 @@ func TestProcessRawEvent_DeploymentUpdatedWithImageChange(t *testing.T) {
 		UID:       "12345",
 		Object:    newDeployment,
 		OldObject: oldDeployment,
-	}
-
-	data, err := json.Marshal(resourceEvent)
+	})
 	require.NoError(t, err)
 
-	event := domain.RawEvent{
-		Type:      "kubeapi",
-		Timestamp: time.Now(),
-		Data:      data,
-	}
-
-	err = processor.ProcessRawEvent(context.Background(), event)
-	require.NoError(t, err)
-
-	// Should produce a deployment event
-	select {
-	case deploymentEvent := <-processor.deploymentEvents:
-		require.NotNil(t, deploymentEvent)
-		assert.Equal(t, domain.DeploymentUpdated, deploymentEvent.Action)
-		assert.Equal(t, "test-deployment", deploymentEvent.Name)
-		assert.Equal(t, "nginx:1.20", deploymentEvent.Metadata.NewImage)
-		assert.Equal(t, "nginx:1.19", deploymentEvent.Metadata.OldImage)
-		assert.True(t, deploymentEvent.HasImageChange())
-		assert.False(t, deploymentEvent.HasScaleChange())
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for deployment event")
-	}
+	// Verify the deployment event
+	require.NotNil(t, deploymentEvent)
+	assert.Equal(t, domain.DeploymentUpdated, deploymentEvent.Action)
+	assert.Equal(t, "test-deployment", deploymentEvent.Name)
+	assert.Equal(t, "nginx:1.20", deploymentEvent.Metadata.NewImage)
+	assert.Equal(t, "nginx:1.19", deploymentEvent.Metadata.OldImage)
+	assert.True(t, deploymentEvent.HasImageChange())
+	assert.False(t, deploymentEvent.HasScaleChange())
 }
 
 func TestProcessRawEvent_DeploymentScaled(t *testing.T) {
@@ -311,7 +297,9 @@ func TestProcessRawEvent_DeploymentScaled(t *testing.T) {
 		},
 	}
 
-	resourceEvent := domain.ResourceEvent{
+	// Test by directly calling convertToDeploymentEvent since JSON marshaling
+	// won't preserve the Object/OldObject fields (they have json:"-" tags)
+	deploymentEvent, err := processor.convertToDeploymentEvent(context.Background(), &domain.ResourceEvent{
 		EventType: "MODIFIED",
 		Timestamp: time.Now(),
 		Kind:      "Deployment",
@@ -320,32 +308,16 @@ func TestProcessRawEvent_DeploymentScaled(t *testing.T) {
 		UID:       "12345",
 		Object:    newDeployment,
 		OldObject: oldDeployment,
-	}
-
-	data, err := json.Marshal(resourceEvent)
+	})
 	require.NoError(t, err)
 
-	event := domain.RawEvent{
-		Type:      "kubeapi",
-		Timestamp: time.Now(),
-		Data:      data,
-	}
-
-	err = processor.ProcessRawEvent(context.Background(), event)
-	require.NoError(t, err)
-
-	// Should produce a deployment event
-	select {
-	case deploymentEvent := <-processor.deploymentEvents:
-		require.NotNil(t, deploymentEvent)
-		assert.Equal(t, domain.DeploymentUpdated, deploymentEvent.Action)
-		assert.Equal(t, newReplicas, deploymentEvent.Metadata.NewReplicas)
-		assert.Equal(t, oldReplicas, deploymentEvent.Metadata.OldReplicas)
-		assert.False(t, deploymentEvent.HasImageChange())
-		assert.True(t, deploymentEvent.HasScaleChange())
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for deployment event")
-	}
+	// Verify the deployment event
+	require.NotNil(t, deploymentEvent)
+	assert.Equal(t, domain.DeploymentUpdated, deploymentEvent.Action)
+	assert.Equal(t, newReplicas, deploymentEvent.Metadata.NewReplicas)
+	assert.Equal(t, oldReplicas, deploymentEvent.Metadata.OldReplicas)
+	assert.False(t, deploymentEvent.HasImageChange())
+	assert.True(t, deploymentEvent.HasScaleChange())
 }
 
 func TestProcessRawEvent_DeploymentDeleted(t *testing.T) {

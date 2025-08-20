@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -78,11 +79,11 @@ func TestSecurityEventDetection(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			event := MockSecurityEvent{
-				Timestamp:   uint64(time.Now().UnixNano()),
-				EventSource: tc.eventType,
-				Severity:    tc.severity,
-				PID:         1234,
-				UID:         1000,
+				Timestamp: uint64(time.Now().UnixNano()),
+				EventType: uint32(tc.severity), // Use severity as event type for test
+				Severity:  tc.severity,
+				PID:       1234,
+				UID:       1000,
 			}
 
 			data, err := json.Marshal(event)
@@ -158,12 +159,12 @@ func TestOTELSecurityMetrics(t *testing.T) {
 // TestRawEventWithSecurity tests RawEvent structure for security events
 func TestRawEventWithSecurity(t *testing.T) {
 	secEvent := SecurityEvent{
-		Timestamp:   uint64(time.Now().UnixNano()),
-		PID:         9876,
-		UID:         0, // root
-		EventSource: EventTypePrivilegeEscalation,
-		Severity:    9,
-		CgroupID:    1234,
+		Timestamp: uint64(time.Now().UnixNano()),
+		PID:       9876,
+		UID:       0, // root
+		EventType: EventTypePrivilegeEscalation,
+		Severity:  9,
+		CgroupID:  1234,
 	}
 	copy(secEvent.Comm[:], "suspicious")
 	copy(secEvent.FilePath[:], "/etc/passwd")
@@ -318,14 +319,14 @@ func TestSecurityEventCorrelation(t *testing.T) {
 	// Add related events
 	baseTime := uint64(time.Now().UnixNano())
 	events := []MockSecurityEvent{
-		{Timestamp: baseTime, PID: 1234, EventSource: EventTypeFileOpen},
-		{Timestamp: baseTime + 1000, PID: 1234, EventSource: EventTypeFileWrite},
-		{Timestamp: baseTime + 2000, PID: 1234, EventSource: EventTypeProcessExec},
+		{Timestamp: baseTime, PID: 1234, EventType: EventTypeFileOpen},
+		{Timestamp: baseTime + 1000, PID: 1234, EventType: EventTypeFileWrite},
+		{Timestamp: baseTime + 2000, PID: 1234, EventType: EventTypeProcessExec},
 	}
 
 	// Correlate by PID
 	for _, event := range events {
-		key := string(event.PID)
+		key := fmt.Sprintf("%d", event.PID)
 		correlation.mu.Lock()
 		correlation.patterns[key] = append(correlation.patterns[key], event)
 		correlation.mu.Unlock()
@@ -337,8 +338,8 @@ func TestSecurityEventCorrelation(t *testing.T) {
 	correlation.mu.RUnlock()
 
 	assert.Len(t, relatedEvents, 3)
-	assert.Equal(t, EventTypeFileOpen, relatedEvents[0].EventType)
-	assert.Equal(t, EventTypeProcessExec, relatedEvents[2].EventType)
+	assert.Equal(t, uint32(EventTypeFileOpen), relatedEvents[0].EventType)
+	assert.Equal(t, uint32(EventTypeProcessExec), relatedEvents[2].EventType)
 }
 
 // TestSecurityCircuitBreaker tests circuit breaker for security monitoring
@@ -459,10 +460,10 @@ func BenchmarkSecurityEventProcessing(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			event := MockSecurityEvent{
-				Timestamp:   uint64(time.Now().UnixNano()),
-				PID:         uint32(b.N),
-				EventSource: EventTypeFileWrite,
-				Severity:    5,
+				Timestamp: uint64(time.Now().UnixNano()),
+				PID:       uint32(b.N),
+				EventType: EventTypeFileWrite,
+				Severity:  5,
 			}
 
 			// Simulate processing

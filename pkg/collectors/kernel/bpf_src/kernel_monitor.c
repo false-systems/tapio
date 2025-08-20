@@ -2,10 +2,16 @@
 // Minimal eBPF program for kernel monitoring - focused on containers
 
 #include "../../bpf_common/vmlinux_minimal.h"
-#include "../../bpf_common/helpers.h"
+
+// For macOS development, conditionally include based on availability
+#ifdef __BPF_HELPERS_H__
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
+#else
+// Include our helpers which have the necessary definitions
+#include "../../bpf_common/helpers.h"
+#endif
 
 // Network protocol constants
 #define IPPROTO_TCP 6
@@ -193,48 +199,83 @@ static __always_inline __u64 get_cgroup_id(struct task_struct *task)
         return 0;
     }
 
-    // Check if task has cgroups field (kernel version compatibility)
-    if (!bpf_core_field_exists(task->cgroups)) {
-        return 0;
-    }
-
-    // Read cgroups css_set from task using CO-RE
-    struct css_set *css_set_ptr;
-    if (BPF_CORE_READ_INTO(&css_set_ptr, task, cgroups) != 0 || !css_set_ptr) {
-        return 0;
-    }
-
-    // For cgroup v2 (unified hierarchy), use subsys[0]
-    struct cgroup_subsys_state *css;
-    if (BPF_CORE_READ_INTO(&css, css_set_ptr, subsys[0]) != 0 || !css) {
-        // Fallback to other subsystems for cgroup v1 compatibility
-        // Check memory subsystem (commonly available)
-        if (BPF_CORE_READ_INTO(&css, css_set_ptr, subsys[1]) != 0 || !css) {
+    // Use proper CO-RE field existence check with validation
+    struct css_set *css_set_ptr = NULL;
+    
+    // Validate task->cgroups field exists before accessing
+    if (bpf_core_field_exists(task->cgroups)) {
+        // Safe read with bounds checking
+        if (BPF_CORE_READ_INTO(&css_set_ptr, task, cgroups) != 0) {
             return 0;
         }
+    } else {
+        return 0;
+    }
+    
+    // Validate pointer before use
+    if (!css_set_ptr) {
+        return 0;
     }
 
-    // Read the cgroup from the css using CO-RE
-    struct cgroup *cgroup_ptr;
-    if (BPF_CORE_READ_INTO(&cgroup_ptr, css, cgroup) != 0 || !cgroup_ptr) {
+    // For cgroup v2 (unified hierarchy), try subsys[0]
+    struct cgroup_subsys_state *css = NULL;
+    
+    // Check if subsys array exists and is accessible
+    if (bpf_core_field_exists(css_set_ptr->subsys)) {
+        // Safely read subsys[0] with bounds validation
+        // Use proper field existence check
+        if (bpf_core_field_exists(css_set_ptr->subsys[0])) {
+            if (BPF_CORE_READ_INTO(&css, css_set_ptr, subsys[0]) != 0) {
+                css = NULL;
+            }
+        }
+        
+        // Fallback to subsys[1] for cgroup v1 compatibility if needed
+        if (!css && bpf_core_field_exists(css_set_ptr->subsys[1])) {
+            if (BPF_CORE_READ_INTO(&css, css_set_ptr, subsys[1]) != 0) {
+                css = NULL;
+            }
+        }
+    }
+    
+    // Validate CSS pointer
+    if (!css) {
+        return 0;
+    }
+
+    // Read the cgroup from the css using CO-RE with proper validation
+    struct cgroup *cgroup_ptr = NULL;
+    if (bpf_core_field_exists(css->cgroup)) {
+        if (BPF_CORE_READ_INTO(&cgroup_ptr, css, cgroup) != 0) {
+            return 0;
+        }
+    } else {
+        return 0;
+    }
+    
+    // Validate cgroup pointer
+    if (!cgroup_ptr) {
         return 0;
     }
 
     // Primary method: Extract kernfs inode number (most reliable)
     if (bpf_core_field_exists(cgroup_ptr->kn)) {
-        struct kernfs_node *kn;
+        struct kernfs_node *kn = NULL;
         if (BPF_CORE_READ_INTO(&kn, cgroup_ptr, kn) == 0 && kn) {
-            __u64 ino;
-            if (BPF_CORE_READ_INTO(&ino, kn, ino) == 0 && ino != 0) {
-                // Success: we have the kernfs inode number
-                return ino;
+            // Validate kn has ino field before accessing
+            if (bpf_core_field_exists(kn->ino)) {
+                __u64 ino = 0;
+                if (BPF_CORE_READ_INTO(&ino, kn, ino) == 0 && ino != 0) {
+                    // Success: we have the kernfs inode number
+                    return ino;
+                }
             }
         }
     }
 
     // Fallback method: Use cgroup ID with offset for uniqueness
     if (bpf_core_field_exists(cgroup_ptr->id)) {
-        int cgroup_id;
+        int cgroup_id = 0;
         if (BPF_CORE_READ_INTO(&cgroup_id, cgroup_ptr, id) == 0 && cgroup_id > 0) {
             // Add offset to distinguish from PIDs and ensure uniqueness
             return (__u64)cgroup_id + 0x100000000ULL;
@@ -242,6 +283,7 @@ static __always_inline __u64 get_cgroup_id(struct task_struct *task)
     }
 
     // Last resort: use a hash of the css_set pointer
+    // This is safe as we've already validated css_set_ptr is not NULL
     __u64 addr = (__u64)css_set_ptr;
     return (addr >> 8) + 0x200000000ULL;
 }
@@ -249,12 +291,36 @@ static __always_inline __u64 get_cgroup_id(struct task_struct *task)
 // Helper to get pod information for a cgroup ID
 static __always_inline struct pod_info *get_pod_info(__u64 cgroup_id)
 {
+    if (cgroup_id == 0) {
+        return NULL;
+    }
     return bpf_map_lookup_elem(&pod_info_map, &cgroup_id);
+}
+
+// Helper to safely copy pod UID with bounds checking
+static __always_inline void safe_copy_pod_uid(char *dest, struct pod_info *pod)
+{
+    if (!dest || !pod) {
+        if (dest) {
+            __builtin_memset(dest, 0, 36);
+        }
+        return;
+    }
+    
+    // Use bpf_probe_read_kernel_str for safe string copy with null termination
+    // This ensures we don't read beyond bounds and properly null-terminate
+    if (bpf_probe_read_kernel_str(dest, 36, pod->pod_uid) < 0) {
+        // On error, clear the destination
+        __builtin_memset(dest, 0, 36);
+    }
 }
 
 // Helper to get container information for a PID
 static __always_inline struct container_info *get_container_info(__u32 pid)
 {
+    if (pid == 0) {
+        return NULL;
+    }
     return bpf_map_lookup_elem(&container_info_map, &pid);
 }
 
@@ -271,22 +337,60 @@ static __always_inline struct service_endpoint *get_service_endpoint(__u32 ip, _
     return bpf_map_lookup_elem(&service_endpoints_map, &key);
 }
 
-// Helper to hash a string (simple DJB2 hash)
+// Helper to hash a string (simple DJB2 hash) with safe memory access
 static __always_inline __u64 hash_path(const char *path, int len)
 {
     __u64 hash = 5381;
-    #pragma unroll
-    for (int i = 0; i < 64 && i < len; i++) {
-        if (path[i] == 0) break;
-        hash = ((hash << 5) + hash) + path[i];
+    char ch;
+    
+    // Validate input parameters
+    if (!path || len <= 0) {
+        return 0;
     }
+    
+    // Ensure len is bounded for verifier (maximum 64 characters)
+    if (len > 64) {
+        len = 64;
+    }
+    
+    // Use bounded loop with explicit unroll for verifier
+    #pragma unroll
+    for (int i = 0; i < 64; i++) {
+        // Double check bounds
+        if (i >= len) {
+            break;
+        }
+        
+        // Use safe memory read for each character with error checking
+        if (bpf_probe_read_kernel(&ch, sizeof(ch), &path[i]) != 0) {
+            // Error reading memory, stop hashing
+            break;
+        }
+        
+        // Check for null terminator
+        if (ch == '\0') {
+            break;
+        }
+        
+        // Update hash value
+        hash = ((hash << 5) + hash) + (__u8)ch;
+    }
+    
     return hash;
 }
 
 // Helper to get mount info for a path
 static __always_inline struct mount_info *get_mount_info(const char *path)
 {
+    if (!path) {
+        return NULL;
+    }
+    
     __u64 key = hash_path(path, 64);
+    if (key == 0) {
+        return NULL;
+    }
+    
     return bpf_map_lookup_elem(&mount_info_map, &key);
 }
 
@@ -317,13 +421,9 @@ int trace_malloc(void *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Try to get pod information
+    // Try to get pod information and safely copy UID
     struct pod_info *pod = get_pod_info(cgroup_id);
-    if (pod) {
-        __builtin_memcpy(event->pod_uid, pod->pod_uid, sizeof(event->pod_uid));
-    } else {
-        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
-    }
+    safe_copy_pod_uid(event->pod_uid, pod);
     
     bpf_ringbuf_submit(event, 0);
     return 0;
@@ -412,30 +512,48 @@ int trace_tcp_v4_connect(struct pt_regs *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Fill network info from socket using CO-RE
+    // Fill network info from socket using CO-RE with field validation
     __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
     
     event->net_info.ip_version = 4;
-    // Use CO-RE to read IPv4 socket addresses safely
-    BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
-    BPF_CORE_READ_INTO(&event->net_info.saddr_v4, sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&event->net_info.daddr_v4, sk, __sk_common.skc_daddr);
     
-    // Convert network byte order to host byte order for port
-    event->net_info.dport = __builtin_bswap16(event->net_info.dport);
+    // Validate socket fields exist and read safely with error checking
+    if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
+        __u16 sport = 0;
+        if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
+            event->net_info.sport = sport;
+        }
+    }
+    
+    if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
+        __u16 dport = 0;
+        if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
+            // Convert network byte order to host byte order for port
+            event->net_info.dport = __builtin_bswap16(dport);
+        }
+    }
+    
+    if (bpf_core_field_exists(sk->__sk_common.skc_rcv_saddr)) {
+        __u32 saddr = 0;
+        if (BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr) == 0) {
+            event->net_info.saddr_v4 = saddr;
+        }
+    }
+    
+    if (bpf_core_field_exists(sk->__sk_common.skc_daddr)) {
+        __u32 daddr = 0;
+        if (BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr) == 0) {
+            event->net_info.daddr_v4 = daddr;
+        }
+    }
     
     event->net_info.protocol = IPPROTO_TCP;
     event->net_info.direction = 0; // Outgoing
     event->net_info.state = 1; // Connecting
     
-    // Try to get pod information
+    // Try to get pod information and safely copy UID
     struct pod_info *pod = get_pod_info(cgroup_id);
-    if (pod) {
-        __builtin_memcpy(event->pod_uid, pod->pod_uid, sizeof(event->pod_uid));
-    } else {
-        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
-    }
+    safe_copy_pod_uid(event->pod_uid, pod);
     
     bpf_ringbuf_submit(event, 0);
     return 0;
@@ -474,50 +592,75 @@ int trace_tcp_v6_connect(struct pt_regs *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Fill network info from socket using CO-RE
+    // Fill network info from socket using CO-RE with field validation
     __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
     
     event->net_info.ip_version = 6;
     
-    // Read IPv6 port information
-    BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+    // Read IPv6 port information with field validation
+    if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
+        __u16 sport = 0;
+        if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
+            event->net_info.sport = sport;
+        }
+    }
+    
+    if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
+        __u16 dport = 0;
+        if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
+            // Convert network byte order to host byte order for port
+            event->net_info.dport = __builtin_bswap16(dport);
+        }
+    }
     
     // For IPv6 addresses, we need to use the full socket structure
     // Check if sk_v6_rcv_saddr and sk_v6_daddr fields exist using CO-RE
     if (bpf_core_field_exists(sk->sk_v6_rcv_saddr)) {
-        // Read source IPv6 address
+        // Read source IPv6 address with safe memory copy and bounds checking
         struct in6_addr src_addr;
         if (BPF_CORE_READ_INTO(&src_addr, sk, sk_v6_rcv_saddr) == 0) {
-            __builtin_memcpy(event->net_info.saddr_v6, &src_addr, 16);
+            // Use safe bounded memory copy for the address data
+            int ret = bpf_probe_read_kernel(event->net_info.saddr_v6, 
+                                           sizeof(event->net_info.saddr_v6), 
+                                           &src_addr);
+            if (ret != 0) {
+                __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
+            }
+        } else {
+            __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
         }
         
-        // Read destination IPv6 address
-        struct in6_addr dst_addr;
-        if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
-            __builtin_memcpy(event->net_info.daddr_v6, &dst_addr, 16);
+        // Read destination IPv6 address with safe memory copy
+        if (bpf_core_field_exists(sk->sk_v6_daddr)) {
+            struct in6_addr dst_addr;
+            if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
+                // Use safe bounded memory copy for the address data
+                int ret = bpf_probe_read_kernel(event->net_info.daddr_v6, 
+                                               sizeof(event->net_info.daddr_v6), 
+                                               &dst_addr);
+                if (ret != 0) {
+                    __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
+                }
+            } else {
+                __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
+            }
+        } else {
+            // Field doesn't exist, clear destination
+            __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
         }
     } else {
-        // Fallback: try to read from __sk_common (might not have full IPv6 addrs)
-        // This is a limitation of minimal vmlinux.h
+        // Fallback: fields not available in this kernel version
         __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
         __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
     }
-    
-    // Convert network byte order to host byte order for port
-    event->net_info.dport = __builtin_bswap16(event->net_info.dport);
     
     event->net_info.protocol = IPPROTO_TCP;
     event->net_info.direction = 0; // Outgoing
     event->net_info.state = 1; // Connecting
     
-    // Try to get pod information
+    // Try to get pod information and safely copy UID
     struct pod_info *pod = get_pod_info(cgroup_id);
-    if (pod) {
-        __builtin_memcpy(event->pod_uid, pod->pod_uid, sizeof(event->pod_uid));
-    } else {
-        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
-    }
+    safe_copy_pod_uid(event->pod_uid, pod);
     
     bpf_ringbuf_submit(event, 0);
     return 0;
@@ -556,36 +699,98 @@ int trace_udp_send(struct pt_regs *ctx)
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Fill network info from socket using CO-RE
+    // Fill network info from socket using CO-RE with field validation
     __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
     
-    // Check socket family for IPv4/IPv6
+    // Check socket family for IPv4/IPv6 with field validation
     __u16 family = 0;
-    BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family);
+    if (bpf_core_field_exists(sk->__sk_common.skc_family)) {
+        if (BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family) != 0) {
+            family = 0;
+        }
+    }
     
     if (family == AF_INET) {
         event->net_info.ip_version = 4;
-        // Use CO-RE to read IPv4 socket addresses safely
-        BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
-        BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
-        BPF_CORE_READ_INTO(&event->net_info.saddr_v4, sk, __sk_common.skc_rcv_saddr);
-        BPF_CORE_READ_INTO(&event->net_info.daddr_v4, sk, __sk_common.skc_daddr);
+        
+        // Use CO-RE to read IPv4 socket addresses safely with field validation
+        if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
+            __u16 sport = 0;
+            if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
+                event->net_info.sport = sport;
+            }
+        }
+        
+        if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
+            __u16 dport = 0;
+            if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
+                // Convert network byte order to host byte order for port
+                event->net_info.dport = __builtin_bswap16(dport);
+            }
+        }
+        
+        if (bpf_core_field_exists(sk->__sk_common.skc_rcv_saddr)) {
+            __u32 saddr = 0;
+            if (BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr) == 0) {
+                event->net_info.saddr_v4 = saddr;
+            }
+        }
+        
+        if (bpf_core_field_exists(sk->__sk_common.skc_daddr)) {
+            __u32 daddr = 0;
+            if (BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr) == 0) {
+                event->net_info.daddr_v4 = daddr;
+            }
+        }
     } else if (family == AF_INET6) {
         event->net_info.ip_version = 6;
-        // Read IPv6 port information
-        BPF_CORE_READ_INTO(&event->net_info.sport, sk, __sk_common.skc_num);
-        BPF_CORE_READ_INTO(&event->net_info.dport, sk, __sk_common.skc_dport);
+        
+        // Read IPv6 port information with field validation
+        if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
+            __u16 sport = 0;
+            if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
+                event->net_info.sport = sport;
+            }
+        }
+        
+        if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
+            __u16 dport = 0;
+            if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
+                // Convert network byte order to host byte order for port
+                event->net_info.dport = __builtin_bswap16(dport);
+            }
+        }
         
         // For IPv6 addresses, use full socket structure if available
         if (bpf_core_field_exists(sk->sk_v6_rcv_saddr)) {
             struct in6_addr src_addr;
             if (BPF_CORE_READ_INTO(&src_addr, sk, sk_v6_rcv_saddr) == 0) {
-                __builtin_memcpy(event->net_info.saddr_v6, &src_addr, 16);
+                // Use safe bounded memory copy for the address data
+                int ret = bpf_probe_read_kernel(event->net_info.saddr_v6, 
+                                               sizeof(event->net_info.saddr_v6), 
+                                               &src_addr);
+                if (ret != 0) {
+                    __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
+                }
+            } else {
+                __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
             }
             
-            struct in6_addr dst_addr;
-            if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
-                __builtin_memcpy(event->net_info.daddr_v6, &dst_addr, 16);
+            if (bpf_core_field_exists(sk->sk_v6_daddr)) {
+                struct in6_addr dst_addr;
+                if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
+                    // Use safe bounded memory copy for the address data
+                    int ret = bpf_probe_read_kernel(event->net_info.daddr_v6, 
+                                                   sizeof(event->net_info.daddr_v6), 
+                                                   &dst_addr);
+                    if (ret != 0) {
+                        __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
+                    }
+                } else {
+                    __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
+                }
+            } else {
+                __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
             }
         } else {
             // Fallback for minimal vmlinux.h
@@ -594,20 +799,13 @@ int trace_udp_send(struct pt_regs *ctx)
         }
     }
     
-    // Convert network byte order to host byte order for port
-    event->net_info.dport = __builtin_bswap16(event->net_info.dport);
-    
     event->net_info.protocol = IPPROTO_UDP;
     event->net_info.direction = 0; // Outgoing
     event->net_info.state = 0; // Stateless (UDP)
     
-    // Try to get pod information
+    // Try to get pod information and safely copy UID
     struct pod_info *pod = get_pod_info(cgroup_id);
-    if (pod) {
-        __builtin_memcpy(event->pod_uid, pod->pod_uid, sizeof(event->pod_uid));
-    } else {
-        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
-    }
+    safe_copy_pod_uid(event->pod_uid, pod);
     
     bpf_ringbuf_submit(event, 0);
     return 0;
@@ -652,13 +850,9 @@ int trace_openat(void *ctx)
     // For now, just track that a file operation occurred
     __builtin_memcpy(event->file_info.filename, "configmap/secret", 16);
     
-    // Try to get pod information
+    // Try to get pod information and safely copy UID
     struct pod_info *pod = get_pod_info(cgroup_id);
-    if (pod) {
-        __builtin_memcpy(event->pod_uid, pod->pod_uid, sizeof(event->pod_uid));
-    } else {
-        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
-    }
+    safe_copy_pod_uid(event->pod_uid, pod);
     
     bpf_ringbuf_submit(event, 0);
     return 0;
