@@ -7,11 +7,11 @@ toolchain go1.24.5
 require (
 	github.com/cilium/ebpf v0.12.3
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/go-chi/chi/v5 v5.2.0
+	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-playground/validator/v10 v10.27.0
 	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats.go v1.44.0
-	github.com/neo4j/neo4j-go-driver/v5 v5.28.1
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.2
 	github.com/prometheus/client_golang v1.23.0
 	github.com/stretchr/testify v1.10.0
 	go.etcd.io/etcd/client/v3 v3.6.4
@@ -21,15 +21,15 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.37.0
 	go.opentelemetry.io/otel/trace v1.37.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/sys v0.34.0
+	golang.org/x/sys v0.35.0
 	golang.org/x/time v0.12.0
-	google.golang.org/grpc v1.73.0
+	google.golang.org/grpc v1.74.2
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.33.4
 	k8s.io/apimachinery v0.33.4
 	k8s.io/client-go v0.33.4
-	k8s.io/cri-api v0.33.3
-	k8s.io/kubelet v0.33.3
+	k8s.io/cri-api v0.33.4
+	k8s.io/kubelet v0.33.4
 )
 
 require (
