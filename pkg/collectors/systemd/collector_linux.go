@@ -151,7 +151,8 @@ func (c *Collector) processEvents() {
 			continue
 		}
 
-		// Parse event safely
+		// Parse event safely with timing
+		startTime := time.Now()
 		if len(record.RawSample) < int(unsafe.Sizeof(SystemdEvent{})) {
 			if c.errorsTotal != nil {
 				c.errorsTotal.Add(ctx, 1)
@@ -168,6 +169,12 @@ func (c *Collector) processEvents() {
 			continue
 		}
 
+		// Record processing time
+		if c.processingTime != nil {
+			duration := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
+			c.processingTime.Record(ctx, duration)
+		}
+
 		// Convert to RawEvent - NO BUSINESS LOGIC
 		rawEvent := domain.RawEvent{
 			Timestamp: time.Unix(0, int64(event.Timestamp)),
@@ -175,18 +182,24 @@ func (c *Collector) processEvents() {
 			Data:      record.RawSample, // Raw eBPF event data
 		}
 
-		// Track processed events
-		if c.eventsProcessed != nil {
-			c.eventsProcessed.Add(ctx, 1)
+		// Update buffer usage gauge
+		if c.bufferUsage != nil {
+			c.bufferUsage.Record(ctx, int64(len(c.events)))
 		}
 
 		select {
 		case c.events <- rawEvent:
 			// Event sent successfully
+			if c.eventsProcessed != nil {
+				c.eventsProcessed.Add(ctx, 1)
+			}
 		case <-c.ctx.Done():
 			return
 		default:
-			// Drop event if buffer full
+			// Buffer full - drop event
+			if c.droppedEvents != nil {
+				c.droppedEvents.Add(ctx, 1)
+			}
 			if c.errorsTotal != nil {
 				c.errorsTotal.Add(ctx, 1)
 			}

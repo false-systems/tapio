@@ -298,6 +298,15 @@ func (c *Collector) readEBPFEvents() {
 		// Create event with tracing context
 		rawEvent := c.createEvent("network_namespace", eventData)
 
+		// Update buffer usage gauge
+		if c.bufferUsage != nil {
+			c.bufferUsage.Record(ctx, int64(len(c.events)),
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+				),
+			)
+		}
+
 		// Try to send event with metrics tracking
 		select {
 		case c.events <- rawEvent:
@@ -317,8 +326,8 @@ func (c *Collector) readEBPFEvents() {
 			return
 		default:
 			// Buffer full, drop event and record metric
-			if c.eventsDropped != nil {
-				c.eventsDropped.Add(ctx, 1,
+			if c.droppedEvents != nil {
+				c.droppedEvents.Add(ctx, 1,
 					metric.WithAttributes(
 						attribute.String("collector.name", c.name),
 						attribute.String("reason", "buffer_full"),
@@ -333,9 +342,9 @@ func (c *Collector) readEBPFEvents() {
 		}
 
 		// Record processing latency
-		if c.processingLatency != nil {
-			duration := time.Since(start).Seconds()
-			c.processingLatency.Record(ctx, duration,
+		if c.processingTime != nil {
+			duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
+			c.processingTime.Record(ctx, duration,
 				metric.WithAttributes(
 					attribute.String("operation", "ebpf_event_processing"),
 					attribute.String("event.type", eventTypeToString(event.EventType)),

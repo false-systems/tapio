@@ -3,19 +3,19 @@
 
 package kernel
 
-// startEBPF stub for non-Linux platforms
+// startEBPF is a stub for non-Linux platforms
 func (c *Collector) startEBPF() error {
-	c.logger.Warn("eBPF not supported on this platform")
+	c.logger.Warn("eBPF monitoring not supported on this platform")
 	return nil
 }
 
-// stopEBPF stub for non-Linux platforms
+// stopEBPF is a stub for non-Linux platforms
 func (c *Collector) stopEBPF() {
 	// No-op on non-Linux platforms
 }
 
-// readEBPFEvents stub for non-Linux platforms
-func (c *Collector) readEBPFEvents() {
-	// No-op on non-Linux platforms
+// processEvents is a stub for non-Linux platforms
+func (c *Collector) processEvents() {
+	c.logger.Warn("eBPF event processing not supported on this platform")
 	<-c.ctx.Done()
 }

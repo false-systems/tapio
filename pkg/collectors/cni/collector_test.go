@@ -349,7 +349,10 @@ func TestCollectorOTELMetrics(t *testing.T) {
 		metric interface{}
 	}{
 		{"eventsProcessed", collector.eventsProcessed},
-		{"eventsDropped", collector.eventsDropped},
+		{"errorsTotal", collector.errorsTotal},
+		{"processingTime", collector.processingTime},
+		{"droppedEvents", collector.droppedEvents},
+		{"bufferUsage", collector.bufferUsage},
 		{"ebpfLoadsTotal", collector.ebpfLoadsTotal},
 		{"ebpfLoadErrors", collector.ebpfLoadErrors},
 		{"ebpfAttachTotal", collector.ebpfAttachTotal},
@@ -358,8 +361,6 @@ func TestCollectorOTELMetrics(t *testing.T) {
 		{"k8sExtractionTotal", collector.k8sExtractionTotal},
 		{"k8sExtractionHits", collector.k8sExtractionHits},
 		{"netnsOpsByType", collector.netnsOpsByType},
-		{"bufferUtilization", collector.bufferUtilization},
-		{"processingLatency", collector.processingLatency},
 	}
 
 	for _, test := range metricTests {

@@ -239,10 +239,10 @@ func TestCalculateScore_FrequencyRisk(t *testing.T) {
 	for _, factor := range score2.Factors {
 		if factor.Name == "deployment_frequency" {
 			assert.True(t, factor.Impact > 0.5) // High frequency risk
-			return // Test passes if we find the factor
+			return                              // Test passes if we find the factor
 		}
 	}
-	
+
 	// If we reach here, the frequency factor wasn't found
 	// This is acceptable as frequency detection depends on timing
 }

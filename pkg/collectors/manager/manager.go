@@ -311,19 +311,20 @@ func (m *CollectorManager) createCollector(collectorType string) (collectors.Col
 
 	case "cri":
 		config := cri.Config{
-			Name:            collectorType,
-			SocketPath:      "unix:///var/run/containerd/containerd.sock",
-			EventBufferSize: m.config.Collectors.BufferSize,
-			PollInterval:    time.Second * 5,
-			BatchSize:       100,
-			FlushInterval:   time.Second,
+			Name:         collectorType,
+			SocketPath:   "unix:///var/run/containerd/containerd.sock",
+			BufferSize:   m.config.Collectors.BufferSize,
+			PollInterval: time.Second * 5,
 		}
-		return cri.NewCollector(collectorType, config)
+		return cri.NewCollector(collectorType, &config)
 
 	case "kernel":
-		config := kernel.DefaultConfig()
-		config.Name = collectorType
-		return kernel.NewCollectorWithConfig(config, m.logger)
+		config := kernel.Config{
+			Name:       collectorType,
+			BufferSize: m.config.Collectors.BufferSize,
+			EnableEBPF: true,
+		}
+		return kernel.NewCollector(collectorType, &config)
 
 	case "dns":
 		config := dns.Config{
