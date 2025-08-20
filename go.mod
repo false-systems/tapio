@@ -7,7 +7,7 @@ toolchain go1.24.5
 require (
 	github.com/cilium/ebpf v0.12.3
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/go-chi/chi/v5 v5.2.0
+	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-playground/validator/v10 v10.27.0
 	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats.go v1.44.0
