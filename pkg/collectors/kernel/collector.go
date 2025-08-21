@@ -38,6 +38,11 @@ type Collector struct {
 
 // NewCollector creates a new simple kernel collector
 func NewCollector(name string, cfg *Config) (*Collector, error) {
+	// Use default config if nil
+	if cfg == nil {
+		cfg = NewDefaultConfig(name)
+	}
+
 	// Create logger
 	logger, err := zap.NewProduction()
 	if err != nil {

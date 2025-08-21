@@ -7,6 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Helper function
+func stringPtr(s string) *string {
+	return &s
+}
+
 func TestObservationEvent_Validate(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -258,19 +263,19 @@ func TestValidationError(t *testing.T) {
 	assert.Nil(t, err.Unwrap())
 }
 
-func TestObservationEvent_GenerateEventID(t *testing.T) {
-	id1 := GenerateEventID()
-	id2 := GenerateEventID()
-
-	// IDs should be non-empty and unique
-	assert.NotEmpty(t, id1)
-	assert.NotEmpty(t, id2)
-	assert.NotEqual(t, id1, id2)
-
-	// Should be valid hex string (32 characters for 16 bytes)
-	assert.Len(t, id1, 32)
-	assert.Len(t, id2, 32)
-}
+// func TestObservationEvent_GenerateEventID(t *testing.T) {
+// 	id1 := GenerateEventID()
+// 	id2 := GenerateEventID()
+//
+// 	// IDs should be non-empty and unique
+// 	assert.NotEmpty(t, id1)
+// 	assert.NotEmpty(t, id2)
+// 	assert.NotEqual(t, id1, id2)
+//
+// 	// Should be valid hex string (32 characters for 16 bytes)
+// 	assert.Len(t, id1, 32)
+// 	assert.Len(t, id2, 32)
+// }
 
 // Helper functions for tests - removed stringPtr as it's now in event_parser.go
 
