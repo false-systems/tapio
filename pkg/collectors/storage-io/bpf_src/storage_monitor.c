@@ -4,14 +4,106 @@
  * Focuses on critical I/O operations: read, write, fsync, iterate_dir
  */
 
-#include "vmlinux_minimal.h"
+/* Basic type definitions for eBPF */
+typedef unsigned char __u8;
+typedef unsigned short __u16;
+typedef unsigned int __u32;
+typedef unsigned long long __u64;
+typedef signed char __s8;
+typedef signed short __s16;
+typedef signed int __s32;
+typedef signed long long __s64;
+
+/* Boolean type */
+typedef _Bool bool;
+#define true 1
+#define false 0
+
+/* Network byte order types */
+typedef __u16 __be16;
+typedef __u32 __be32;
+typedef __u32 __wsum;
+
+/* Size types */
+typedef __u64 size_t;
+typedef __s64 loff_t;
+typedef __u32 dev_t;
+
+/* BPF map types */
+enum bpf_map_type {
+    BPF_MAP_TYPE_UNSPEC = 0,
+    BPF_MAP_TYPE_HASH = 1,
+    BPF_MAP_TYPE_ARRAY = 2,
+    BPF_MAP_TYPE_PROG_ARRAY = 3,
+    BPF_MAP_TYPE_PERF_EVENT_ARRAY = 4,
+    BPF_MAP_TYPE_PERCPU_HASH = 5,
+    BPF_MAP_TYPE_PERCPU_ARRAY = 6,
+    BPF_MAP_TYPE_STACK_TRACE = 7,
+    BPF_MAP_TYPE_CGROUP_ARRAY = 8,
+    BPF_MAP_TYPE_LRU_HASH = 9,
+    BPF_MAP_TYPE_LRU_PERCPU_HASH = 10,
+    BPF_MAP_TYPE_LPM_TRIE = 11,
+    BPF_MAP_TYPE_ARRAY_OF_MAPS = 12,
+    BPF_MAP_TYPE_HASH_OF_MAPS = 13,
+    BPF_MAP_TYPE_DEVMAP = 14,
+    BPF_MAP_TYPE_SOCKMAP = 15,
+    BPF_MAP_TYPE_CPUMAP = 16,
+    BPF_MAP_TYPE_XSKMAP = 17,
+    BPF_MAP_TYPE_SOCKHASH = 18,
+    BPF_MAP_TYPE_CGROUP_STORAGE = 19,
+    BPF_MAP_TYPE_REUSEPORT_SOCKARRAY = 20,
+    BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE = 21,
+    BPF_MAP_TYPE_QUEUE = 22,
+    BPF_MAP_TYPE_STACK = 23,
+    BPF_MAP_TYPE_SK_STORAGE = 24,
+    BPF_MAP_TYPE_DEVMAP_HASH = 25,
+    BPF_MAP_TYPE_STRUCT_OPS = 26,
+    BPF_MAP_TYPE_RINGBUF = 27,
+};
+
+/* BPF update flags */
+#define BPF_ANY 0
+
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
-#include <bpf/bpf_tracing.h>
-#include "helpers.h"
-#include "bpf_stats.h"
+
+/* Kernel structure definitions needed for storage I/O */
+struct qstr {
+    const unsigned char *name;
+    unsigned int len;
+};
+
+struct path {
+    void *mnt;
+    struct dentry *dentry;
+};
+
+struct dentry {
+    struct qstr d_name;
+    /* Other fields we don't need */
+} __attribute__((preserve_access_index));
+
+struct file {
+    struct path f_path;
+    struct inode *f_inode;
+    /* Other fields we don't need */
+} __attribute__((preserve_access_index));
+
+struct inode {
+    unsigned long i_ino;
+    dev_t i_rdev;
+    /* Other fields we don't need */
+} __attribute__((preserve_access_index));
 
 char LICENSE[] SEC("license") = "GPL";
+
+/* Device macros */
+#ifndef MAJOR
+#define MAJOR(dev) ((unsigned int) ((dev) >> 8))
+#endif
+#ifndef MINOR
+#define MINOR(dev) ((unsigned int) ((dev) & 0xff))
+#endif
 
 /* Configuration constants */
 #define MAX_PATH_LEN 256
@@ -88,7 +180,12 @@ struct {
 } active_events SEC(".maps");
 
 /* Statistics map for performance monitoring */
-DEFINE_BPF_STATS_MAP(stats, 32);
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 32);
+    __type(key, __u32);
+    __type(value, __u64);
+} stats SEC(".maps");
 
 /* Configuration map */
 struct {
@@ -198,11 +295,8 @@ static __always_inline void get_file_device(struct file *file, __u32 *major, __u
         return;
         
     if (bpf_core_read(&dev, sizeof(dev), &inode->i_rdev) != 0) {
-        /* Try i_sb->s_dev if i_rdev is not available */
-        struct super_block *sb;
-        if (bpf_core_read(&sb, sizeof(sb), &inode->i_sb) == 0 && sb) {
-            bpf_core_read(&dev, sizeof(dev), &sb->s_dev);
-        }
+        /* If i_rdev is not available, use a default */
+        dev = 0;
     }
     
     *major = MAJOR(dev);
@@ -245,8 +339,18 @@ static __always_inline bool should_monitor_path(const char *path)
         "/var/lib/etcd/"
     };
     
+    /* Check each K8s path prefix */
+    #pragma unroll
     for (int i = 0; i < 6; i++) {
-        if (bpf_strncmp(path, k8s_paths[i], bpf_strlen(k8s_paths[i])) == 0)
+        bool match = true;
+        #pragma unroll
+        for (int j = 0; j < 18 && k8s_paths[i][j]; j++) { /* Max /var/lib/kubelet/ = 18 chars */
+            if (path[j] != k8s_paths[i][j]) {
+                match = false;
+                break;
+            }
+        }
+        if (match)
             return true;
     }
     
@@ -305,14 +409,18 @@ int trace_vfs_read_entry(struct pt_regs *ctx)
     if (should_filter_process())
         return 0;
     
-    BPF_STATS_ENTER(&stats, VFS_PROBE_READ);
+    /* Update stats */
+    __u32 stat_key = VFS_PROBE_READ;
+    __u64 *stat_val = bpf_map_lookup_elem(&stats, &stat_key);
+    if (stat_val)
+        __sync_fetch_and_add(stat_val, 1);
     
     __u64 pid_tgid = get_current_pid_tgid_key();
     struct active_event active = {};
     
     /* Get function arguments */
     struct file *file = (struct file *)PT_REGS_PARM1(ctx);
-    char __user *buf = (char __user *)PT_REGS_PARM2(ctx);
+    char *buf = (char *)PT_REGS_PARM2(ctx);
     size_t count = (size_t)PT_REGS_PARM3(ctx);
     loff_t *pos = (loff_t *)PT_REGS_PARM4(ctx);
     
@@ -377,7 +485,11 @@ int trace_vfs_write_entry(struct pt_regs *ctx)
     if (should_filter_process())
         return 0;
     
-    BPF_STATS_ENTER(&stats, VFS_PROBE_WRITE);
+    /* Update stats */
+    __u32 stat_key = VFS_PROBE_WRITE;
+    __u64 *stat_val = bpf_map_lookup_elem(&stats, &stat_key);
+    if (stat_val)
+        __sync_fetch_and_add(stat_val, 1);
     
     __u64 pid_tgid = get_current_pid_tgid_key();
     struct active_event active = {};
@@ -448,7 +560,11 @@ int trace_vfs_fsync_entry(struct pt_regs *ctx)
     if (should_filter_process())
         return 0;
     
-    BPF_STATS_ENTER(&stats, VFS_PROBE_FSYNC);
+    /* Update stats */
+    __u32 stat_key = VFS_PROBE_FSYNC;
+    __u64 *stat_val = bpf_map_lookup_elem(&stats, &stat_key);
+    if (stat_val)
+        __sync_fetch_and_add(stat_val, 1);
     
     __u64 pid_tgid = get_current_pid_tgid_key();
     struct active_event active = {};
