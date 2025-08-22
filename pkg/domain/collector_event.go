@@ -359,9 +359,9 @@ type SystemdData struct {
 	RestartCount int32   `json:"restart_count,omitempty"` // service restart count
 
 	// Additional journal fields for debugging
-	SyslogID     string            `json:"syslog_id,omitempty"`
-	Fields       map[string]string `json:"fields,omitempty"`
-	ExtraFields  map[string]string `json:"extra_fields,omitempty"`
+	SyslogID    string            `json:"syslog_id,omitempty"`
+	Fields      map[string]string `json:"fields,omitempty"`
+	ExtraFields map[string]string `json:"extra_fields,omitempty"`
 }
 
 // RawData holds raw binary/unknown data (fallback only)
