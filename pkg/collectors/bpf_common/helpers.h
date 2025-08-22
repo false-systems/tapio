@@ -411,4 +411,6 @@ static __always_inline int handle_core_error(int error_code, const char *context
     return error_code;
 }
 
+/* Note: Statistics macros and functions are now in bpf_stats.h */
+
 #endif /* __BPF_CORE_HELPERS_H__ */

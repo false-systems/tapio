@@ -11,10 +11,10 @@ Tapio is an observability platform designed for small engineering teams who find
 ## The Problem
 
 If you're a small team running Kubernetes, you've likely experienced this:
-- Datadog/New Relic costs more than your infrastructure
+- Datadog/New Relic costs are expensive.
 - Setting up Prometheus + Grafana + Loki + Tempo + Jaeger requires a dedicated SRE
 - You're drowning in metrics but still can't answer "why is production slow?"
-- Your dashboards look impressive but don't help during incidents
+- Your dashboards look impressive, but they don't help during incidents
 
 We've been there. After years of building and operating cloud-native systems, we're building what we wished existed: observability that just works, without the complexity.
 
@@ -22,81 +22,89 @@ We've been there. After years of building and operating cloud-native systems, we
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Your Kubernetes Cluster                  │
+│                   Your Kubernetes Cluster                   │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐       │
-│  │  Pods   │  │Services │  │  Nodes  │  │   DNS   │       │
+│  │  Pods   │  │Services │  │ Nodes   │  │  etcd   │       │
 │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘       │
 │       │            │            │            │              │
 └───────┼────────────┼────────────┼────────────┼──────────────┘
         │            │            │            │
         ▼            ▼            ▼            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Tapio Collectors (Level 1)               │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐       │
-│  │  eBPF   │  │   CRI   │  │ Kubelet │  │   DNS   │       │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘       │
-│       │            │            │            │              │
-│       └────────────┴────────────┴────────────┘              │
-│                         │                                    │
-│                         ▼                                    │
-│                 ┌──────────────┐                            │
-│                 │ Unified Event│                            │
-│                 └───────┬──────┘                            │
-└─────────────────────────┼────────────────────────────────────┘
+│                 Tapio Collectors (Level 1)                 │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │   eBPF   │ │   CRI    │ │ Kubelet  │ │   DNS    │      │
+│  │ Kernel   │ │Container │ │   API    │ │ Monitor  │      │
+│  └─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘      │
+│        │            │            │            │             │
+│        └────────────┴────────────┴────────────┘             │
+│                           │                                 │
+│                           ▼                                 │
+│                 ┌──────────────────┐                       │
+│                 │  Unified Events  │                       │
+│                 └────────┬─────────┘                       │
+└──────────────────────────┼─────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│             Intelligence Layer (Level 2)                   │
+│                                                             │
+│     ┌─────────────────────────────────────────┐            │
+│     │      Correlation & Root Cause Engine    │            │
+│     │   "DNS → etcd → CRI → Pod restart"      │            │
+│     └───────────────────┬─────────────────────┘            │
+│                         │                                   │
+└─────────────────────────┼───────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│               Intelligence Layer (Level 2)                   │
-│                                                              │
-│     ┌──────────────────────────────────────┐                │
-│     │    Correlation & Root Cause Engine   │                │
-│     └──────────────────┬────────────────────┘               │
-│                        │                                     │
-└────────────────────────┼─────────────────────────────────────┘
-                         │
-                         ▼
+│                Storage Layer (Level 3)                     │
+│                                                             │
+│     ┌─────────────────────────────────────────┐            │
+│     │        Neo4j Graph Database             │            │
+│     │    "Everything is connected"            │            │
+│     └───────────────────┬─────────────────────┘            │
+└─────────────────────────┼───────────────────────────────────┘
+                          │
+                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                Storage Layer (Level 3)                       │
-│                                                              │
-│     ┌──────────────────────────────────────┐                │
-│     │         Neo4j Graph Database         │                │
-│     └──────────────────┬────────────────────┘               │
-└────────────────────────┼─────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Your Team                                  │
-│                                                              │
-│     "Oh, the DNS resolver in pod-xyz is failing             │
-│      because the upstream service is throttling"             │
-│                                                              │
-└───────────────────────────────────────────────────────────────┘
+│                     Your Team                               │
+│                                                             │
+│     "Oh, the DNS resolver in pod-xyz is failing            │
+│      because etcd is under pressure from CRI events"       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## The Collectors
 
 We gather telemetry from multiple sources to build a complete picture:
 
-### 1. **Kernel Collector** (`/pkg/collectors/kernel`)
-Tracks system calls, file operations, and process lifecycle using eBPF. Helps answer: "What is this container actually doing?"
+### **Kernel & System Level**
+- **Kernel Collector** (`/pkg/collectors/kernel`) - eBPF-based system call, file operations, and process lifecycle tracking
+- **Storage I/O Collector** (`/pkg/collectors/storage-io`) - VFS-level storage operations, latency, and performance bottlenecks  
+- **CNI Collector** (`/pkg/collectors/cni`) - Container networking interface monitoring with eBPF
 
-### 2. **CRI Collector** (`/pkg/collectors/cri`)
-Interfaces with the Container Runtime Interface to monitor container lifecycle, resource usage, and health. Knows when containers are OOMKilled before you do.
+### **Container Runtime**  
+- **CRI Collector** (`/pkg/collectors/cri`) - Container Runtime Interface for lifecycle and resource monitoring
+- **CRI-eBPF Collector** (`/pkg/collectors/cri-ebpf`) - Deep container runtime visibility using eBPF probes
 
-### 3. **Kubelet Collector** (`/pkg/collectors/kubelet`)
-Pulls metrics directly from the kubelet API. Tracks pod phases, ready conditions, and resource allocation vs actual usage.
+### **Kubernetes & Orchestration**
+- **Kubelet Collector** (`/pkg/collectors/kubelet`) - Pod phases, conditions, and resource allocation vs usage
+- **KubeAPI Collector** (`/pkg/collectors/kubeapi`) - Kubernetes API server events and cluster state changes
 
-### 4. **DNS Collector** (`/pkg/collectors/dns`)
-Because DNS is always the problem. Monitors resolution times, failures, and patterns. Correlates DNS issues with service degradation.
+### **Service Discovery & Communication**
+- **DNS Collector** (`/pkg/collectors/dns`) - Because DNS is always the problem. Resolution times, failures, and patterns
+- **etcd Collector** (`/pkg/collectors/etcd`) - Key-value store operations and cluster coordination
+- **etcd-API Collector** (`/pkg/collectors/etcd-api`) - etcd API-level monitoring  
+- **etcd-eBPF Collector** (`/pkg/collectors/etcd-ebpf`) - Deep etcd performance monitoring with eBPF
 
-### 5. **Cgroup Collector** (`/pkg/collectors/cgroup`)
-Reads cgroup metrics for accurate resource consumption. Shows you what's really using CPU/memory, not what Kubernetes thinks.
+### **System Services**
+- **Systemd Collector** (`/pkg/collectors/systemd`) - eBPF-based systemd service monitoring and journal analysis
+- **Systemd-API Collector** (`/pkg/collectors/systemd-api`) - Systemd D-Bus API monitoring for service lifecycle
 
-### 6. **eBPF Collector** (`/pkg/collectors/ebpf`)
-Deep kernel-level visibility without overhead. Tracks network flows, security events, and performance bottlenecks.
-
-### 7. **OpenTelemetry Collector** (`/pkg/collectors/otel`)
-Ingests traces and metrics from your instrumented applications. Bridges application and infrastructure observability.
+Each collector implements the same interface and outputs unified events that flow into our correlation engine. No vendor lock-in, no complex configuration - just plug and observe.
 
 ## Architecture
 
@@ -122,25 +130,47 @@ This isn't architectural astronautics - it's how we prevent the codebase from be
 
 4. **No Query Languages**: You shouldn't need to learn PromQL, KQL, or GraphQL to understand why production is down.
 
+5. **eBPF Native**: Deep visibility without overhead. We see everything from kernel syscalls to Kubernetes API calls.
+
+## Our Philosophy
+
+### Motorcycle vs. Car
+
+Observability tools have become like modern cars - packed with features you'll never use, expensive to maintain, and requiring specialized knowledge to operate.
+
+Tapio is more like a motorcycle:
+- **Simpler**: One engine (correlation), not twelve different systems
+- **Focused**: Built for the journey, not the parking lot
+- **Built by riders**: We've been on-call at 3am debugging production issues
+
+### Small Teams, Big Problems
+
+We're not building the next Datadog. We're building what small teams need:
+- **Clarity in chaos** - When everything is broken, show us the one thing to fix first
+- **Context over metrics** - Don't show us CPU graphs, tell us why the CPU is high
+- **Speed over features** - Get to root cause in seconds, not hours
+
+### Real-World Engineering
+
+- **No TODOs in production code** - If it's not done, it's not shipped
+- **No `interface{}` abuse** - Type safety prevents midnight debugging sessions  
+- **No magic** - eBPF and graph databases, not "AI-powered insights"
+- **No vendor lock-in** - Standard protocols, open interfaces
+
 ## Current State
 
 ### What Works
-- eBPF-based kernel monitoring
-- Container runtime integration
-- Basic correlation engine
-- Event unified schema
+- All 12 collectors compile and run ✅
+- eBPF-based kernel, container, and network monitoring ✅
+- Unified event schema across all telemetry sources ✅
+- Basic correlation engine for root cause analysis ✅
 
 ### Being Built
 - Neo4j integration for relationship mapping
-- API layer for queries
-- Root cause analysis engine
-- Automated remediation suggestions
+- API layer for queries and insights
+- Advanced correlation algorithms
+- Web UI for investigation workflows
 
-### Won't Build
-- Machine learning magic (it's usually linear regression anyway)
-- Infinite retention (30 days is enough for most teams)
-- Multi-region federation (we're not trying to be Thanos)
-- Custom dashboarding (Grafana already exists)
 
 ## Getting Started
 
@@ -153,9 +183,9 @@ If you want to contribute or try early builds:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/tapio
+git clone https://github.com/yairfalse/tapio
 
-# Build collectors
+# Build all collectors
 cd pkg/collectors
 go build ./...
 
@@ -164,19 +194,20 @@ go test ./... -race
 
 # Check architecture compliance
 make verify
+
+# Generate eBPF programs (Linux only)
+go generate ./...
 ```
-
-## Philosophy
-
-Observability tools have become like modern cars - packed with features you'll never use, expensive to maintain, and require specialized knowledge to operate. 
-
-Tapio is more like a motorcycle - simpler, focused on what matters, and built by people who actually ride.
-
-We're not building the next Datadog. We're building what small teams need: clarity in chaos, without the complexity.
 
 ## Contributing
 
-We follow strict code standards (see CLAUDE.md). No TODOs, no `interface{}`, no shortcuts. If you've operated production systems and felt the pain, we'd love your help.
+We follow strict code standards (see CLAUDE.md):
+- No TODOs, no `interface{}`, no shortcuts
+- 80% test coverage minimum
+- Architecture hierarchy compliance
+- All eBPF programs must compile on multiple kernel versions
+
+If you've operated production systems and felt the pain, we'd love your help.
 
 ## License
 

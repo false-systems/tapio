@@ -1,101 +1,141 @@
 package domain
 
 import (
+	"context"
+	"fmt"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
-// CollectorEvent is the unified event type emitted by all collectors
-// This replaces RawEvent to avoid multiple parsers and provide type safety
-type CollectorEvent struct {
-	// Core event identification
-	EventID   string    `json:"event_id"`
-	Timestamp time.Time `json:"timestamp"`
-	Source    string    `json:"source"` // collector name: "kernel", "storage-io", "kube-api", etc.
-
-	// Event classification
-	Type     CollectorEventType `json:"type"`
-	Severity EventSeverity      `json:"severity"`
-
-	// Structured data based on collector type
-	EventData EventDataContainer `json:"event_data"`
-
-	// Metadata for correlation and enrichment
-	Metadata EventMetadata `json:"metadata"`
-}
-
-// CollectorEventType defines the type of event
+// CollectorEventType represents the type of event collected
 type CollectorEventType string
 
 const (
-	// Kernel events
+	// System Events
+	EventTypeKernelSyscall CollectorEventType = "kernel.syscall"
 	EventTypeKernelProcess CollectorEventType = "kernel.process"
 	EventTypeKernelNetwork CollectorEventType = "kernel.network"
 	EventTypeKernelCgroup  CollectorEventType = "kernel.cgroup"
-	EventTypeKernelSyscall CollectorEventType = "kernel.syscall"
+	EventTypeKernelFS      CollectorEventType = "kernel.filesystem"
 
-	// Storage I/O events
+	// Container Events
+	EventTypeContainerCreate  CollectorEventType = "container.create"
+	EventTypeContainerStart   CollectorEventType = "container.start"
+	EventTypeContainerStop    CollectorEventType = "container.stop"
+	EventTypeContainerDestroy CollectorEventType = "container.destroy"
+	EventTypeContainerOOM     CollectorEventType = "container.oom"
+	EventTypeContainerExit    CollectorEventType = "container.exit"
+	EventTypeMemoryPressure   CollectorEventType = "container.memory_pressure"
+
+	// Kubernetes Events
+	EventTypeK8sPod        CollectorEventType = "k8s.pod"
+	EventTypeK8sService    CollectorEventType = "k8s.service"
+	EventTypeK8sDeployment CollectorEventType = "k8s.deployment"
+	EventTypeK8sConfigMap  CollectorEventType = "k8s.configmap"
+	EventTypeK8sSecret     CollectorEventType = "k8s.secret"
+	EventTypeK8sNode       CollectorEventType = "k8s.node"
+	EventTypeK8sEvent      CollectorEventType = "k8s.event"
+
+	// Network Events
+	EventTypeDNS         CollectorEventType = "network.dns"
+	EventTypeDNSQuery    CollectorEventType = "dns.query"
+	EventTypeDNSResponse CollectorEventType = "dns.response"
+	EventTypeDNSTimeout  CollectorEventType = "dns.timeout"
+	EventTypeTCP         CollectorEventType = "network.tcp"
+	EventTypeHTTP        CollectorEventType = "network.http"
+	EventTypeGRPC        CollectorEventType = "network.grpc"
+
+	// Storage Events
+	EventTypeETCD           CollectorEventType = "storage.etcd"
+	EventTypeETCDOperation  CollectorEventType = "etcd.operation"
+	EventTypeETCDWatch      CollectorEventType = "etcd.watch"
+	EventTypeVolume         CollectorEventType = "storage.volume"
+	EventTypeConfigStorage  CollectorEventType = "storage.config"
+	EventTypeStorageIO      CollectorEventType = "storage.io"
 	EventTypeStorageIORead  CollectorEventType = "storage.io.read"
 	EventTypeStorageIOWrite CollectorEventType = "storage.io.write"
 	EventTypeStorageIOFsync CollectorEventType = "storage.io.fsync"
 	EventTypeStorageIOSlow  CollectorEventType = "storage.io.slow"
-
-	// Kubernetes API events
-	EventTypeK8sPod        CollectorEventType = "k8s.pod"
-	EventTypeK8sDeployment CollectorEventType = "k8s.deployment"
-	EventTypeK8sService    CollectorEventType = "k8s.service"
-	EventTypeK8sNode       CollectorEventType = "k8s.node"
-	EventTypeK8sEvent      CollectorEventType = "k8s.event"
-
-	// DNS events
-	EventTypeDNSQuery    CollectorEventType = "dns.query"
-	EventTypeDNSResponse CollectorEventType = "dns.response"
-	EventTypeDNSTimeout  CollectorEventType = "dns.timeout"
 
 	// CRI events
 	EventTypeCRIContainer CollectorEventType = "cri.container"
 	EventTypeCRIPod       CollectorEventType = "cri.pod"
 	EventTypeCRIImage     CollectorEventType = "cri.image"
 
-	// ETCD events
-	EventTypeETCDOperation CollectorEventType = "etcd.operation"
-	EventTypeETCDWatch     CollectorEventType = "etcd.watch"
-
-	// Systemd events
+	// Systemd Events
 	EventTypeSystemdService CollectorEventType = "systemd.service"
+	EventTypeSystemdUnit    CollectorEventType = "systemd.unit"
 	EventTypeSystemdJournal CollectorEventType = "systemd.journal"
+	EventTypeSystemdSystem  CollectorEventType = "systemd.system"
 )
 
-// EventSeverity is already defined in types.go
+// CollectorEvent represents a fully contextualized event from any collector
+// This replaces RawEvent with a type-safe, context-rich structure
+type CollectorEvent struct {
+	// Core Identity - REQUIRED
+	EventID   string             `json:"event_id"`
+	Timestamp time.Time          `json:"timestamp"`
+	Type      CollectorEventType `json:"type"`
+	Source    string             `json:"source"` // collector name
+	Severity  EventSeverity      `json:"severity"`
 
-// EventDataContainer holds the actual event data
-// Only one field should be populated based on the event source
+	// Structured Event Data - Type-safe replacement for []byte Data
+	EventData EventDataContainer `json:"event_data"`
+
+	// Rich Context for Correlation
+	Metadata         EventMetadata     `json:"metadata"`
+	CorrelationHints *CorrelationHints `json:"correlation_hints,omitempty"`
+	K8sContext       *K8sContext       `json:"k8s_context,omitempty"`
+	TraceContext     *TraceContext     `json:"trace_context,omitempty"`
+
+	// Causality Chain
+	CausalityContext *CausalityContext `json:"causality_context,omitempty"`
+
+	// Collection Context
+	CollectionContext *CollectionContext `json:"collection_context,omitempty"`
+}
+
+// EventDataContainer holds type-safe event data instead of raw bytes
+// This eliminates map[string]interface{} abuse
 type EventDataContainer struct {
-	// Kernel collector data
-	Kernel *KernelData `json:"kernel,omitempty"`
+	// System-level data
+	SystemCall *SystemCallData `json:"syscall,omitempty"`
+	Process    *ProcessData    `json:"process,omitempty"`
+	Network    *NetworkData    `json:"network,omitempty"`
+	Container  *ContainerData  `json:"container,omitempty"`
+	FileSystem *FileSystemData `json:"filesystem,omitempty"`
+	Kernel     *KernelData     `json:"kernel,omitempty"`
 
-	// Storage I/O collector data
+	// Kubernetes data
+	KubernetesResource *K8sResourceData `json:"k8s_resource,omitempty"`
+	KubernetesEvent    *K8sAPIEventData `json:"k8s_event,omitempty"`
+	K8sResource        *K8sResourceData `json:"k8s_resource_compat,omitempty"` // Compatibility
+
+	// Application data
+	DNS  *DNSData  `json:"dns,omitempty"`
+	HTTP *HTTPData `json:"http,omitempty"`
+	GRPC *GRPCData `json:"grpc,omitempty"`
+
+	// Storage data
+	ETCD      *ETCDData      `json:"etcd,omitempty"`
+	Volume    *VolumeData    `json:"volume,omitempty"`
 	StorageIO *StorageIOData `json:"storage_io,omitempty"`
 
-	// Kubernetes API collector data
-	K8sResource *K8sResourceData `json:"k8s_resource,omitempty"`
-
-	// DNS collector data
-	DNS *DNSData `json:"dns,omitempty"`
-
-	// CRI collector data
+	// Container runtime data
 	CRI *CRIData `json:"cri,omitempty"`
 
-	// ETCD collector data
-	ETCD *ETCDData `json:"etcd,omitempty"`
-
-	// Systemd collector data
+	// Systemd data
 	Systemd *SystemdData `json:"systemd,omitempty"`
 
 	// Generic data for custom collectors (string key-value pairs only)
 	Custom map[string]string `json:"custom,omitempty"`
+
+	// Raw data for unknown/binary formats (last resort)
+	RawData *RawData `json:"raw_data,omitempty"`
 }
 
-// EventMetadata contains metadata for correlation and enrichment
+// EventMetadata contains event metadata for correlation
 type EventMetadata struct {
 	// Correlation IDs
 	TraceID      string `json:"trace_id,omitempty"`
@@ -118,12 +158,26 @@ type EventMetadata struct {
 	CgroupID uint64 `json:"cgroup_id,omitempty"`
 	Command  string `json:"command,omitempty"`
 
-	// Additional labels
-	Labels map[string]string `json:"labels,omitempty"`
+	// Additional metadata
+	Priority      EventPriority     `json:"priority,omitempty"`
+	Tags          []string          `json:"tags,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Attributes    map[string]string `json:"attributes,omitempty"`
+	SchemaVersion string            `json:"schema_version,omitempty"`
 
 	// Correlation hints
 	CorrelationHints []string `json:"correlation_hints,omitempty"`
 }
+
+// EventPriority represents event priority levels
+type EventPriority string
+
+const (
+	PriorityLow      EventPriority = "low"
+	PriorityNormal   EventPriority = "normal"
+	PriorityHigh     EventPriority = "high"
+	PriorityCritical EventPriority = "critical"
+)
 
 // KernelData represents kernel-level event data
 type KernelData struct {
@@ -192,6 +246,103 @@ type StorageIOData struct {
 	ErrorMessage string `json:"error_message,omitempty"`
 }
 
+// SystemCallData represents system call information
+type SystemCallData struct {
+	Number    int64             `json:"number"`
+	Name      string            `json:"name"`
+	PID       int32             `json:"pid"`
+	TID       int32             `json:"tid"`
+	UID       int32             `json:"uid"`
+	GID       int32             `json:"gid"`
+	Arguments []SystemCallArg   `json:"arguments,omitempty"`
+	RetValue  int64             `json:"return_value"`
+	Duration  time.Duration     `json:"duration"`
+	ErrorCode int32             `json:"error_code,omitempty"`
+	Flags     map[string]string `json:"flags,omitempty"`
+}
+
+// SystemCallArg represents a system call argument
+type SystemCallArg struct {
+	Index int64  `json:"index"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
+	Size  int64  `json:"size,omitempty"`
+}
+
+// ProcessData represents process information
+type ProcessData struct {
+	PID         int32             `json:"pid"`
+	PPID        int32             `json:"ppid"`
+	TID         int32             `json:"tid"`
+	Command     string            `json:"command"`
+	Arguments   []string          `json:"arguments,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+	WorkingDir  string            `json:"working_dir,omitempty"`
+	Executable  string            `json:"executable"`
+	StartTime   time.Time         `json:"start_time"`
+	UID         int32             `json:"uid"`
+	GID         int32             `json:"gid"`
+	CgroupPath  string            `json:"cgroup_path,omitempty"`
+	ContainerID string            `json:"container_id,omitempty"`
+}
+
+// NetworkData represents network activity
+type NetworkData struct {
+	Protocol    string        `json:"protocol"`  // tcp, udp, icmp
+	Direction   string        `json:"direction"` // inbound, outbound
+	SourceIP    string        `json:"source_ip"`
+	SourcePort  int32         `json:"source_port"`
+	DestIP      string        `json:"dest_ip"`
+	DestPort    int32         `json:"dest_port"`
+	BytesSent   int64         `json:"bytes_sent"`
+	BytesRecv   int64         `json:"bytes_recv"`
+	PacketsSent int64         `json:"packets_sent"`
+	PacketsRecv int64         `json:"packets_recv"`
+	Latency     time.Duration `json:"latency,omitempty"`
+	TCPFlags    []string      `json:"tcp_flags,omitempty"`
+	Interface   string        `json:"interface,omitempty"`
+}
+
+// ContainerData represents container runtime events
+type ContainerData struct {
+	ContainerID string            `json:"container_id"`
+	ImageID     string            `json:"image_id"`
+	ImageName   string            `json:"image_name"`
+	Runtime     string            `json:"runtime"` // docker, containerd, cri-o
+	State       string            `json:"state"`   // created, running, stopped
+	Action      string            `json:"action"`  // create, start, stop, destroy
+	ExitCode    *int32            `json:"exit_code,omitempty"`
+	Signal      *int32            `json:"signal,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+	Mounts      []MountInfo       `json:"mounts,omitempty"`
+	NetworkMode string            `json:"network_mode,omitempty"`
+	PID         int32             `json:"pid,omitempty"`
+}
+
+// MountInfo represents mount information
+type MountInfo struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Type        string `json:"type"`
+	Options     string `json:"options,omitempty"`
+	ReadOnly    bool   `json:"read_only"`
+}
+
+// FileSystemData represents filesystem operations
+type FileSystemData struct {
+	Operation string        `json:"operation"` // read, write, open, close, create, delete
+	Path      string        `json:"path"`
+	Mode      string        `json:"mode,omitempty"`
+	Size      int64         `json:"size,omitempty"`
+	Offset    int64         `json:"offset,omitempty"`
+	Duration  time.Duration `json:"duration,omitempty"`
+	ErrorCode int32         `json:"error_code,omitempty"`
+	Inode     uint64        `json:"inode,omitempty"`
+	Device    string        `json:"device,omitempty"`
+	Flags     []string      `json:"flags,omitempty"`
+}
+
 // K8sResourceData represents Kubernetes resource data
 type K8sResourceData struct {
 	APIVersion string `json:"api_version"`
@@ -205,24 +356,47 @@ type K8sResourceData struct {
 
 	// Resource version for ordering
 	ResourceVersion string `json:"resource_version"`
+	Generation      int64  `json:"generation,omitempty"`
 
 	// Owner references
-	OwnerKind string `json:"owner_kind,omitempty"`
-	OwnerName string `json:"owner_name,omitempty"`
-	OwnerUID  string `json:"owner_uid,omitempty"`
+	OwnerKind       string           `json:"owner_kind,omitempty"`
+	OwnerName       string           `json:"owner_name,omitempty"`
+	OwnerUID        string           `json:"owner_uid,omitempty"`
+	OwnerReferences []OwnerReference `json:"owner_references,omitempty"`
 
 	// Status info
 	Phase      string   `json:"phase,omitempty"`
 	Conditions []string `json:"conditions,omitempty"`
 	Message    string   `json:"message,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
+	Finalizers []string `json:"finalizers,omitempty"`
 
 	// Labels and annotations
-	Labels      map[string]string `json:"labels,omitempty"`
-	Annotations map[string]string `json:"annotations,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	DeletionTimestamp *time.Time        `json:"deletion_timestamp,omitempty"`
 
 	// Raw object (for complex processing)
 	Object interface{} `json:"object,omitempty"`
+}
+
+// K8sAPIEventData represents Kubernetes API events
+type K8sAPIEventData struct {
+	Action         string          `json:"action"` // ADDED, MODIFIED, DELETED
+	Reason         string          `json:"reason"`
+	Message        string          `json:"message"`
+	Type           string          `json:"type"` // Normal, Warning
+	Count          int32           `json:"count"`
+	FirstTime      time.Time       `json:"first_time"`
+	LastTime       time.Time       `json:"last_time"`
+	InvolvedObject K8sResourceData `json:"involved_object"`
+	Source         EventSource     `json:"source"`
+}
+
+// EventSource represents the source of a K8s event
+type EventSource struct {
+	Component string `json:"component"`
+	Host      string `json:"host,omitempty"`
 }
 
 // DNSData represents DNS event data
@@ -242,6 +416,44 @@ type DNSData struct {
 	// Error info
 	Error        bool   `json:"error"`
 	ErrorMessage string `json:"error_message,omitempty"`
+
+	// Extended DNS fields from main
+	Authorities []DNSAnswer `json:"authorities,omitempty"`
+	Additional  []DNSAnswer `json:"additional,omitempty"`
+	Cached      bool        `json:"cached,omitempty"`
+}
+
+// DNSAnswer represents a DNS answer record
+type DNSAnswer struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Class string `json:"class"`
+	TTL   int32  `json:"ttl"`
+	Data  string `json:"data"`
+}
+
+// HTTPData represents HTTP request/response data
+type HTTPData struct {
+	Method       string            `json:"method"`
+	URL          string            `json:"url"`
+	StatusCode   int32             `json:"status_code"`
+	RequestSize  int64             `json:"request_size"`
+	ResponseSize int64             `json:"response_size"`
+	Duration     time.Duration     `json:"duration"`
+	UserAgent    string            `json:"user_agent,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	ContentType  string            `json:"content_type,omitempty"`
+}
+
+// GRPCData represents gRPC call data
+type GRPCData struct {
+	Service      string            `json:"service"`
+	Method       string            `json:"method"`
+	StatusCode   int32             `json:"status_code"`
+	Duration     time.Duration     `json:"duration"`
+	RequestSize  int64             `json:"request_size"`
+	ResponseSize int64             `json:"response_size"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
 // CRIData represents container runtime event data
@@ -292,6 +504,18 @@ type ETCDData struct {
 	Namespace    string `json:"namespace,omitempty"`
 }
 
+// VolumeData represents volume operation data
+type VolumeData struct {
+	Operation  string        `json:"operation"` // mount, unmount, create, delete
+	VolumeName string        `json:"volume_name"`
+	VolumeType string        `json:"volume_type"` // pvc, configmap, secret, hostpath
+	MountPath  string        `json:"mount_path,omitempty"`
+	ReadOnly   bool          `json:"read_only"`
+	Size       int64         `json:"size,omitempty"`
+	Duration   time.Duration `json:"duration,omitempty"`
+	ErrorCode  int32         `json:"error_code,omitempty"`
+}
+
 // SystemdData represents systemd event data
 type SystemdData struct {
 	Unit     string `json:"unit"`
@@ -317,7 +541,301 @@ type SystemdData struct {
 	BootID    string `json:"boot_id,omitempty"`
 }
 
-// Helper methods for type-safe access
+// RawData holds raw binary/unknown data (fallback only)
+type RawData struct {
+	Format      string `json:"format"` // "protobuf", "json", "binary"
+	ContentType string `json:"content_type,omitempty"`
+	Data        []byte `json:"data"`
+	Size        int64  `json:"size"`
+}
+
+// CorrelationHints provides hints for correlation algorithms
+type CorrelationHints struct {
+	// Resource correlation keys
+	PodUID      string `json:"pod_uid,omitempty"`
+	ContainerID string `json:"container_id,omitempty"`
+	ProcessID   int32  `json:"process_id,omitempty"`
+	CgroupPath  string `json:"cgroup_path,omitempty"`
+	NodeName    string `json:"node_name,omitempty"`
+
+	// Network correlation keys
+	ConnectionID string `json:"connection_id,omitempty"`
+	FlowID       string `json:"flow_id,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+
+	// Application correlation keys
+	RequestID     string `json:"request_id,omitempty"`
+	TransactionID string `json:"transaction_id,omitempty"`
+	UserID        string `json:"user_id,omitempty"`
+
+	// Temporal correlation hints
+	WindowStart   time.Time     `json:"window_start,omitempty"`
+	WindowEnd     time.Time     `json:"window_end,omitempty"`
+	ExpectedDelay time.Duration `json:"expected_delay,omitempty"`
+
+	// Custom correlation dimensions
+	CorrelationTags map[string]string `json:"correlation_tags,omitempty"`
+}
+
+// TraceContext contains distributed tracing context
+type TraceContext struct {
+	TraceID    trace.TraceID     `json:"trace_id"`
+	SpanID     trace.SpanID      `json:"span_id"`
+	TraceFlags trace.TraceFlags  `json:"trace_flags"`
+	TraceState trace.TraceState  `json:"trace_state,omitempty"`
+	Baggage    map[string]string `json:"baggage,omitempty"`
+}
+
+// CollectionContext contains context about the collection process
+type CollectionContext struct {
+	CollectorVersion string           `json:"collector_version"`
+	HostInfo         HostInfo         `json:"host_info"`
+	CollectionConfig CollectionConfig `json:"collection_config"`
+	BufferStats      BufferStats      `json:"buffer_stats"`
+}
+
+// HostInfo contains information about the collection host
+type HostInfo struct {
+	Hostname         string `json:"hostname"`
+	KernelVersion    string `json:"kernel_version"`
+	OSVersion        string `json:"os_version"`
+	Architecture     string `json:"architecture"`
+	ContainerRuntime string `json:"container_runtime,omitempty"`
+	K8sVersion       string `json:"k8s_version,omitempty"`
+}
+
+// CollectionConfig contains collection configuration
+type CollectionConfig struct {
+	SamplingRate    float64           `json:"sampling_rate"`
+	BufferSize      int               `json:"buffer_size"`
+	FlushInterval   time.Duration     `json:"flush_interval"`
+	EnabledFeatures []string          `json:"enabled_features"`
+	FilterRules     map[string]string `json:"filter_rules,omitempty"`
+}
+
+// BufferStats contains buffer utilization statistics
+type BufferStats struct {
+	TotalCapacity   int64   `json:"total_capacity"`
+	CurrentUsage    int64   `json:"current_usage"`
+	UtilizationRate float64 `json:"utilization_rate"`
+	DroppedEvents   int64   `json:"dropped_events"`
+	ProcessedEvents int64   `json:"processed_events"`
+}
+
+// CollectorEventProcessor processes CollectorEvents (replaces RawEventProcessor)
+type CollectorEventProcessor interface {
+	ProcessCollectorEvent(ctx context.Context, event *CollectorEvent) error
+}
+
+// CollectorEventParser parses raw data into CollectorEvents
+type CollectorEventParser interface {
+	Parse(rawData []byte, source string) (*CollectorEvent, error)
+	Source() string
+	SupportedTypes() []CollectorEventType
+}
+
+// Validation methods
+
+// Validate performs comprehensive validation of the CollectorEvent
+func (e *CollectorEvent) Validate() error {
+	if e.EventID == "" {
+		return fmt.Errorf("event_id is required")
+	}
+
+	if e.Timestamp.IsZero() {
+		return fmt.Errorf("timestamp is required")
+	}
+
+	if e.Type == "" {
+		return fmt.Errorf("event type is required")
+	}
+
+	if e.Source == "" {
+		return fmt.Errorf("source is required")
+	}
+
+	if err := e.EventData.Validate(); err != nil {
+		return fmt.Errorf("event data validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// Validate validates EventDataContainer
+func (edc *EventDataContainer) Validate() error {
+	// Check if at least one data field is present
+	if edc.SystemCall == nil &&
+		edc.Process == nil &&
+		edc.Network == nil &&
+		edc.Container == nil &&
+		edc.FileSystem == nil &&
+		edc.Kernel == nil &&
+		edc.KubernetesResource == nil &&
+		edc.KubernetesEvent == nil &&
+		edc.K8sResource == nil &&
+		edc.DNS == nil &&
+		edc.HTTP == nil &&
+		edc.GRPC == nil &&
+		edc.ETCD == nil &&
+		edc.Volume == nil &&
+		edc.StorageIO == nil &&
+		edc.CRI == nil &&
+		edc.Systemd == nil &&
+		edc.RawData == nil {
+		return fmt.Errorf("at least one event data field must be present")
+	}
+
+	return nil
+}
+
+// Helper methods for type-safe data extraction
+
+// GetSystemCallData safely extracts system call data
+func (e *CollectorEvent) GetSystemCallData() (*SystemCallData, bool) {
+	if e.EventData.SystemCall != nil {
+		return e.EventData.SystemCall, true
+	}
+	return nil, false
+}
+
+// GetProcessData safely extracts process data
+func (e *CollectorEvent) GetProcessData() (*ProcessData, bool) {
+	if e.EventData.Process != nil {
+		return e.EventData.Process, true
+	}
+	return nil, false
+}
+
+// GetNetworkData safely extracts network data
+func (e *CollectorEvent) GetNetworkData() (*NetworkData, bool) {
+	if e.EventData.Network != nil {
+		return e.EventData.Network, true
+	}
+	return nil, false
+}
+
+// GetContainerData safely extracts container data
+func (e *CollectorEvent) GetContainerData() (*ContainerData, bool) {
+	if e.EventData.Container != nil {
+		return e.EventData.Container, true
+	}
+	return nil, false
+}
+
+// GetK8sResourceData safely extracts Kubernetes resource data
+func (e *CollectorEvent) GetK8sResourceData() (*K8sResourceData, bool) {
+	if e.EventData.KubernetesResource != nil {
+		return e.EventData.KubernetesResource, true
+	}
+	// Fallback for compatibility
+	if e.EventData.K8sResource != nil {
+		return e.EventData.K8sResource, true
+	}
+	return nil, false
+}
+
+// GetDNSData safely extracts DNS data
+func (e *CollectorEvent) GetDNSData() (*DNSData, bool) {
+	if e.EventData.DNS != nil {
+		return e.EventData.DNS, true
+	}
+	return nil, false
+}
+
+// GetSystemdData safely extracts systemd data
+func (e *CollectorEvent) GetSystemdData() (*SystemdData, bool) {
+	if e.EventData.Systemd != nil {
+		return e.EventData.Systemd, true
+	}
+	return nil, false
+}
+
+// GetStorageIOData safely extracts storage I/O data
+func (e *CollectorEvent) GetStorageIOData() (*StorageIOData, bool) {
+	if e.EventData.StorageIO != nil {
+		return e.EventData.StorageIO, true
+	}
+	return nil, false
+}
+
+// GetETCDData safely extracts ETCD data
+func (e *CollectorEvent) GetETCDData() (*ETCDData, bool) {
+	if e.EventData.ETCD != nil {
+		return e.EventData.ETCD, true
+	}
+	return nil, false
+}
+
+// GetCRIData safely extracts CRI data
+func (e *CollectorEvent) GetCRIData() (*CRIData, bool) {
+	if e.EventData.CRI != nil {
+		return e.EventData.CRI, true
+	}
+	return nil, false
+}
+
+// HasTraceContext checks if trace context is available
+func (e *CollectorEvent) HasTraceContext() bool {
+	return e.TraceContext != nil && e.TraceContext.TraceID.IsValid()
+}
+
+// GetCorrelationKey generates a correlation key for grouping related events
+func (e *CollectorEvent) GetCorrelationKey() string {
+	if e.CorrelationHints == nil {
+		return fmt.Sprintf("source:%s", e.Source)
+	}
+
+	hints := e.CorrelationHints
+
+	// Prioritize container-level correlation
+	if hints.ContainerID != "" {
+		return fmt.Sprintf("container:%s", hints.ContainerID)
+	}
+
+	// Pod-level correlation
+	if hints.PodUID != "" {
+		return fmt.Sprintf("pod:%s", hints.PodUID)
+	}
+
+	// Process-level correlation
+	if hints.ProcessID != 0 {
+		return fmt.Sprintf("process:%d", hints.ProcessID)
+	}
+
+	// Node-level correlation
+	if hints.NodeName != "" {
+		return fmt.Sprintf("node:%s", hints.NodeName)
+	}
+
+	// Fallback to source
+	return fmt.Sprintf("source:%s", e.Source)
+}
+
+// IsHighPriority checks if the event is high priority
+func (e *CollectorEvent) IsHighPriority() bool {
+	return e.Metadata.Priority == PriorityHigh || e.Metadata.Priority == PriorityCritical
+}
+
+// AddCorrelationTag adds a correlation tag
+func (e *CollectorEvent) AddCorrelationTag(key, value string) {
+	if e.CorrelationHints == nil {
+		e.CorrelationHints = &CorrelationHints{}
+	}
+	if e.CorrelationHints.CorrelationTags == nil {
+		e.CorrelationHints.CorrelationTags = make(map[string]string)
+	}
+	e.CorrelationHints.CorrelationTags[key] = value
+}
+
+// AddMetadataLabel adds a metadata label
+func (e *CollectorEvent) AddMetadataLabel(key, value string) {
+	if e.Metadata.Labels == nil {
+		e.Metadata.Labels = make(map[string]string)
+	}
+	e.Metadata.Labels[key] = value
+}
+
+// Helper methods for EventDataContainer type-safe access
 
 // GetKernelData returns kernel data if present
 func (e *EventDataContainer) GetKernelData() (*KernelData, bool) {
@@ -337,6 +855,10 @@ func (e *EventDataContainer) GetStorageIOData() (*StorageIOData, bool) {
 
 // GetK8sResourceData returns K8s resource data if present
 func (e *EventDataContainer) GetK8sResourceData() (*K8sResourceData, bool) {
+	if e.KubernetesResource != nil {
+		return e.KubernetesResource, true
+	}
+	// Fallback for compatibility
 	if e.K8sResource != nil {
 		return e.K8sResource, true
 	}

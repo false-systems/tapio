@@ -100,6 +100,50 @@ struct net {
     struct ns_common ns;
 } __attribute__((preserve_access_index));
 
+/* PID namespace structure */
+struct pid_namespace {
+    struct ns_common ns;
+    void *idr;
+    void *rcu;
+    unsigned int pid_allocated;
+    struct task_struct *child_reaper;
+    void *pid_cachep;
+    unsigned int level;
+    struct pid_namespace *parent;
+} __attribute__((preserve_access_index));
+
+/* IPC namespace structure */
+struct ipc_namespace {
+    struct ns_common ns;
+} __attribute__((preserve_access_index));
+
+/* UTS namespace structure */
+struct uts_namespace {
+    struct ns_common ns;
+} __attribute__((preserve_access_index));
+
+/* Mount namespace structure */
+struct mnt_namespace {
+    struct ns_common ns;
+} __attribute__((preserve_access_index));
+
+/* Kernfs node structure for cgroup path extraction */
+struct kernfs_node {
+    void *count;
+    void *active;
+    struct kernfs_node *parent;
+    const char *name;
+    void *rb;
+    const void *ns;
+    unsigned int hash;
+    void *priv;
+    u64 id;
+    unsigned short flags;
+    umode_t mode;
+    unsigned int ino;
+    void *iattr;
+} __attribute__((preserve_access_index));
+
 struct nsproxy {
     struct uts_namespace *uts_ns;
     struct ipc_namespace *ipc_ns;
@@ -145,6 +189,21 @@ struct cred {
     gid_t egid;
 } __attribute__((preserve_access_index));
 
+/* Network address structures - needed for socket definitions */
+
+/* IPv4 address structure */
+struct in_addr {
+    __u32 s_addr;
+} __attribute__((preserve_access_index));
+
+/* IPv6 address structure */
+struct in6_addr {
+    union {
+        __u8 u6_addr8[16];
+        __u32 u6_addr32[4];
+    } in6_u;
+} __attribute__((preserve_access_index));
+
 /* Socket structures */
 struct sock_common {
     union {
@@ -179,6 +238,14 @@ struct sock {
     /* Socket queues - using pointers instead of embedded structs */
     void *sk_receive_queue;
     void *sk_write_queue;
+    
+    /* IPv6-specific fields for CO-RE compatibility
+     * These fields may not exist on all kernel versions or configurations.
+     * Always use bpf_core_field_exists() before accessing them.
+     * The actual offset and presence depends on kernel CONFIG_IPV6.
+     */
+    struct in6_addr sk_v6_rcv_saddr;  /* IPv6 source address */
+    struct in6_addr sk_v6_daddr;      /* IPv6 destination address */
 } __attribute__((preserve_access_index));
 
 /* Path structures */
@@ -238,11 +305,7 @@ struct cgroup_subsys_state {
     unsigned long flags;
 } __attribute__((preserve_access_index));
 
-/* kernfs node structure for cgroup inode extraction */
-struct kernfs_node {
-    __u32 id;
-    __u64 ino;  /* inode number - unique identifier */
-} __attribute__((preserve_access_index));
+/* Note: kernfs_node is already defined above with name field */
 
 struct cgroup {
     int id;
@@ -251,19 +314,6 @@ struct cgroup {
 } __attribute__((preserve_access_index));
 
 /* Network structures */
-
-/* IPv4 address structure */
-struct in_addr {
-    __u32 s_addr;
-} __attribute__((preserve_access_index));
-
-/* IPv6 address structure */
-struct in6_addr {
-    union {
-        __u8 u6_addr8[16];
-        __u32 u6_addr32[4];
-    } in6_u;
-} __attribute__((preserve_access_index));
 
 /* Socket address structures */
 struct sockaddr {
@@ -307,6 +357,36 @@ struct trace_event_raw_sys_enter {
 
 struct trace_event_raw_sys_exit {
     long ret;
+} __attribute__((preserve_access_index));
+
+/* Systemd-specific trace events */
+struct trace_event_raw_cgroup_mkdir {
+    __u64 common_field;
+    __u32 root;
+    __u32 ssid;
+    char path[256];
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_cgroup_rmdir {
+    __u64 common_field;
+    __u32 root;
+    __u32 ssid;
+    char path[256];
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_sched_process_template {
+    __u64 common_field;
+    char comm[16];
+    __u32 pid;
+    __u32 prio;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_signal_generate {
+    __u64 common_field;
+    __u32 pid;
+    __u32 sig;
+    char comm[16];
+    struct task_struct *task;
 } __attribute__((preserve_access_index));
 
 /* PT_REGS for different architectures */

@@ -212,7 +212,10 @@ int trace_exit(struct trace_event_raw_sched_process_template *ctx) {
         event->restart_count = state->restart_count;
     }
 
-    bpf_probe_read_kernel_str(&event->comm, sizeof(event->comm), ctx->comm);
+    // Get comm from the trace event context 
+    if (ctx->comm) {
+        bpf_probe_read_kernel_str(&event->comm, sizeof(event->comm), ctx->comm);
+    }
     
     // Clean up tracking maps
     bpf_map_delete_elem(&systemd_pids, &pid);
@@ -270,7 +273,10 @@ int trace_signal(struct trace_event_raw_signal_generate *ctx) {
         event->restart_count = state->restart_count;
     }
 
-    bpf_probe_read_kernel_str(&event->comm, sizeof(event->comm), ctx->comm);
+    // Get comm from task struct
+    if (ctx->task) {
+        bpf_probe_read_kernel_str(&event->comm, sizeof(event->comm), ctx->task->comm);
+    }
     
     bpf_ringbuf_submit(event, 0);
     return 0;
