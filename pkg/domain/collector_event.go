@@ -45,6 +45,7 @@ const (
 	EventTypeETCD          CollectorEventType = "storage.etcd"
 	EventTypeVolume        CollectorEventType = "storage.volume"
 	EventTypeConfigStorage CollectorEventType = "storage.config"
+	EventTypeStorageIO     CollectorEventType = "storage.io"
 
 	// Systemd Events
 	EventTypeSystemdService CollectorEventType = "systemd.service"
@@ -98,8 +99,9 @@ type EventDataContainer struct {
 	GRPC *GRPCData `json:"grpc,omitempty"`
 
 	// Storage data
-	ETCD   *ETCDData   `json:"etcd,omitempty"`
-	Volume *VolumeData `json:"volume,omitempty"`
+	ETCD      *ETCDData      `json:"etcd,omitempty"`
+	Volume    *VolumeData    `json:"volume,omitempty"`
+	StorageIO *StorageIOData `json:"storage_io,omitempty"`
 
 	// Systemd data
 	Systemd *SystemdData `json:"systemd,omitempty"`
@@ -310,6 +312,53 @@ type VolumeData struct {
 	ErrorCode  int32         `json:"error_code,omitempty"`
 }
 
+// StorageIOData represents low-level storage I/O operations from VFS layer
+type StorageIOData struct {
+	// Core operation details
+	Operation string `json:"operation"` // read, write, fsync, iterate_dir
+	Path      string `json:"path"`      // file/directory path
+
+	// I/O metrics
+	Size     int64         `json:"size"`             // bytes read/written
+	Offset   int64         `json:"offset,omitempty"` // file offset
+	Duration time.Duration `json:"duration"`         // operation latency
+
+	// Performance classification
+	SlowIO    bool `json:"slow_io"`    // >10ms threshold
+	BlockedIO bool `json:"blocked_io"` // blocked operation
+
+	// File system details
+	Device     string `json:"device"`      // block device
+	Inode      uint64 `json:"inode"`       // inode number
+	FileSystem string `json:"filesystem"`  // fs type (ext4, xfs, etc.)
+	MountPoint string `json:"mount_point"` // mount point
+
+	// Kubernetes correlation
+	K8sPath     string `json:"k8s_path,omitempty"`     // K8s-specific path type
+	VolumeType  string `json:"volume_type,omitempty"`  // pvc, configmap, secret, hostpath
+	ContainerID string `json:"container_id,omitempty"` // container correlation
+	PodUID      string `json:"pod_uid,omitempty"`      // pod correlation
+
+	// Process context
+	PID      int32  `json:"pid"`                 // process ID
+	Command  string `json:"command"`             // process command
+	CgroupID uint64 `json:"cgroup_id,omitempty"` // cgroup correlation
+
+	// Error information
+	ErrorCode    int32  `json:"error_code,omitempty"`    // syscall error code
+	ErrorMessage string `json:"error_message,omitempty"` // error description
+
+	// VFS operation details
+	VFSLayer string `json:"vfs_layer"`       // vfs_read, vfs_write, vfs_fsync
+	Flags    uint32 `json:"flags,omitempty"` // operation flags
+	Mode     uint32 `json:"mode,omitempty"`  // file mode
+
+	// Performance impact
+	CPUTime   time.Duration `json:"cpu_time,omitempty"`   // CPU time consumed
+	QueueTime time.Duration `json:"queue_time,omitempty"` // time in I/O queue
+	BlockTime time.Duration `json:"block_time,omitempty"` // time blocked
+}
+
 // SystemdData represents systemd journal and service data
 type SystemdData struct {
 	// Event classification
@@ -518,6 +567,7 @@ func (edc *EventDataContainer) Validate() error {
 		edc.GRPC == nil &&
 		edc.ETCD == nil &&
 		edc.Volume == nil &&
+		edc.StorageIO == nil &&
 		edc.Systemd == nil &&
 		edc.RawData == nil {
 		return fmt.Errorf("at least one event data field must be present")
@@ -580,6 +630,14 @@ func (e *CollectorEvent) GetDNSData() (*DNSData, bool) {
 func (e *CollectorEvent) GetSystemdData() (*SystemdData, bool) {
 	if e.EventData.Systemd != nil {
 		return e.EventData.Systemd, true
+	}
+	return nil, false
+}
+
+// GetStorageIOData safely extracts storage I/O data
+func (e *CollectorEvent) GetStorageIOData() (*StorageIOData, bool) {
+	if e.EventData.StorageIO != nil {
+		return e.EventData.StorageIO, true
 	}
 	return nil, false
 }

@@ -62,6 +62,42 @@ struct {
     __type(value, __u64); // Last activity timestamp
 } service_tracker SEC(".maps");
 
+// BPF-safe string search implementation
+static __always_inline int bpf_strstr_offset(const char *haystack, const char *needle, int max_len)
+{
+    int needle_len = 0;
+    
+    // Calculate needle length (bounded)
+    #pragma unroll
+    for (int i = 0; i < 32; i++) {  // Max needle length of 32
+        if (needle[i] == '\0')
+            break;
+        needle_len++;
+    }
+    
+    if (needle_len == 0)
+        return -1;
+    
+    // Search for needle in haystack
+    #pragma unroll
+    for (int i = 0; i < max_len - needle_len + 1 && i < MAX_CGROUP_PATH - 32; i++) {
+        bool match = true;
+        
+        #pragma unroll
+        for (int j = 0; j < needle_len && j < 32; j++) {
+            if (haystack[i + j] != needle[j]) {
+                match = false;
+                break;
+            }
+        }
+        
+        if (match)
+            return i;
+    }
+    
+    return -1;
+}
+
 // Helper to check if process is systemd-related
 static __always_inline bool is_systemd_process(struct task_struct *task)
 {
@@ -91,32 +127,32 @@ static __always_inline void extract_service_name(const char *cgroup_path, char *
     }
     
     // Look for systemd service pattern: /system.slice/service_name.service
-    char *service_start = bpf_strstr(temp_path, ".service");
-    if (!service_start) {
+    int service_pos = bpf_strstr_offset(temp_path, ".service", len);
+    if (service_pos < 0) {
         service_name[0] = '\0';
         return;
     }
     
-    // Find the start of service name (after last slash)
-    char *name_start = temp_path;
-    for (int i = 0; i < len && i < MAX_CGROUP_PATH - 1; i++) {
+    // Find the start of service name (after last slash before .service)
+    int name_start_pos = 0;
+    #pragma unroll
+    for (int i = 0; i < service_pos && i < MAX_CGROUP_PATH - 1; i++) {
         if (temp_path[i] == '/') {
-            name_start = &temp_path[i + 1];
-        }
-        if (temp_path[i] == '.' && 
-            i + 8 < len && 
-            __builtin_memcmp(&temp_path[i], ".service", 8) == 0) {
-            // Copy service name
-            int name_len = &temp_path[i] - name_start;
-            if (name_len > 0 && name_len < MAX_SERVICE_NAME - 1) {
-                __builtin_memcpy(service_name, name_start, name_len);
-                service_name[name_len] = '\0';
-                return;
-            }
+            name_start_pos = i + 1;
         }
     }
     
-    service_name[0] = '\0';
+    // Copy service name
+    int name_len = service_pos - name_start_pos;
+    if (name_len > 0 && name_len < MAX_SERVICE_NAME - 1) {
+        #pragma unroll
+        for (int i = 0; i < name_len && i < MAX_SERVICE_NAME - 1; i++) {
+            service_name[i] = temp_path[name_start_pos + i];
+        }
+        service_name[name_len] = '\0';
+    } else {
+        service_name[0] = '\0';
+    }
 }
 
 // Helper to create and send event
@@ -143,13 +179,17 @@ static __always_inline void send_systemd_event(struct task_struct *task, __u8 ev
     // Get cgroup ID and path for service correlation
     struct cgroup *cgrp = BPF_CORE_READ(task, cgroups, subsys[0], cgroup);
     if (cgrp) {
-        event->cgroup_id = BPF_CORE_READ(cgrp, kn, id);
-        
-        // Try to get cgroup path for service name extraction
-        char *cgroup_path = BPF_CORE_READ(cgrp, kn, name);
-        if (cgroup_path) {
-            bpf_probe_read_kernel_str(event->cgroup_path, sizeof(event->cgroup_path), cgroup_path);
-            extract_service_name(event->cgroup_path, event->service_name);
+        struct kernfs_node *kn = BPF_CORE_READ(cgrp, kn);
+        if (kn) {
+            event->cgroup_id = BPF_CORE_READ(kn, id);
+            
+            // Try to get cgroup path for service name extraction
+            // The name field exists in kernfs_node structure
+            const char *kn_name = BPF_CORE_READ(kn, name);
+            if (kn_name) {
+                bpf_probe_read_kernel_str(event->cgroup_path, sizeof(event->cgroup_path), kn_name);
+                extract_service_name(event->cgroup_path, event->service_name);
+            }
         }
     }
     
