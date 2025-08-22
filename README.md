@@ -11,10 +11,10 @@ Tapio is an observability platform designed for small engineering teams who find
 ## The Problem
 
 If you're a small team running Kubernetes, you've likely experienced this:
-- Datadog/New Relic costs more than your infrastructure
+- Datadog/New Relic costs are expensive.
 - Setting up Prometheus + Grafana + Loki + Tempo + Jaeger requires a dedicated SRE
 - You're drowning in metrics but still can't answer "why is production slow?"
-- Your dashboards look impressive but don't help during incidents
+- Your dashboards look impressive, but they don't help during incidents
 
 We've been there. After years of building and operating cloud-native systems, we're building what we wished existed: observability that just works, without the complexity.
 
@@ -171,11 +171,6 @@ We're not building the next Datadog. We're building what small teams need:
 - Advanced correlation algorithms
 - Web UI for investigation workflows
 
-### Won't Build
-- Machine learning magic (it's usually linear regression anyway)
-- Infinite retention (30 days is enough for most teams)
-- Multi-region federation (we're not trying to be Thanos)
-- Custom dashboarding (Grafana already exists)
 
 ## Getting Started
 
