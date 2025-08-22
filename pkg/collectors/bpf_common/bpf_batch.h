@@ -148,6 +148,15 @@ static __always_inline int batch_flush(void *ringbuf_map, struct batch_buffer *b
     return 0;
 }
 
+// Macro to define batch buffer map
+#define DEFINE_BATCH_MAP(name) \
+struct { \
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY); \
+    __uint(max_entries, 1); \
+    __type(key, __u32); \
+    __type(value, struct batch_buffer); \
+} name SEC(".maps")
+
 // Helper macro for batch processing
 #define BATCH_PROCESS_EVENT(ringbuf_map, event_data, event_size) \
     ({ \
