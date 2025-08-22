@@ -18,9 +18,9 @@ type Collector interface {
 	// Stop gracefully shuts down the collector
 	Stop() error
 
-	// Events returns a channel of raw events
+	// Events returns a channel of collector events
 	// The channel is closed when the collector stops
-	Events() <-chan domain.RawEvent
+	Events() <-chan *domain.CollectorEvent
 
 	// IsHealthy returns true if the collector is functioning properly
 	IsHealthy() bool
