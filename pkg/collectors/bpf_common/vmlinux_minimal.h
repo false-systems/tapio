@@ -389,6 +389,29 @@ struct trace_event_raw_signal_generate {
     struct task_struct *task;
 } __attribute__((preserve_access_index));
 
+/* OOM-related trace events */
+struct trace_event_raw_oom_kill_process {
+    __u64 common_field;
+    struct task_struct *task;
+    __s32 oom_score_adj;
+    __u32 gfp_mask;
+    __u32 order;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_mm_page_alloc_extfrag {
+    __u64 common_field;
+    __u32 alloc_order;
+    __u32 fallback_order;
+    __u32 alloc_migratetype;
+    __u32 fallback_migratetype;
+    __u32 change_ownership;
+} __attribute__((preserve_access_index));
+
+/* Raw tracepoint args structure */
+struct bpf_raw_tracepoint_args {
+    __u64 args[0];
+} __attribute__((preserve_access_index));
+
 /* PT_REGS for different architectures */
 struct pt_regs {
 #ifdef __x86_64__
