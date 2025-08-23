@@ -160,7 +160,7 @@ func TestNetworkMonitoringIntegration(t *testing.T) {
 
 	// Monitor for network events
 	eventsCh := collector.Events()
-	var networkEvents []*domain.RawEvent
+	var networkEvents []*domain.CollectorEvent
 
 	done := make(chan bool)
 	go func() {
@@ -302,7 +302,7 @@ func TestEventProcessingIntegration(t *testing.T) {
 
 	// Test event flow and conversion
 	eventsCh := collector.Events()
-	var processedEvents []*domain.RawEvent
+	var processedEvents []*domain.CollectorEvent
 
 	done := make(chan bool)
 	go func() {
@@ -556,7 +556,7 @@ func generateNetworkActivity(t *testing.T) {
 }
 
 // isNetworkEvent checks if a RawEvent contains network-related data
-func isNetworkEvent(event domain.RawEvent) bool {
+func isNetworkEvent(event *domain.CollectorEvent) bool {
 	// In a real implementation, you would parse the event data
 	// and check if it contains network information
 	// For now, we'll use a simple heuristic based on data size and content
