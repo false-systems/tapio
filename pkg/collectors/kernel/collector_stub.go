@@ -19,3 +19,9 @@ func (c *Collector) processEvents() {
 	c.logger.Warn("eBPF event processing not supported on this platform")
 	<-c.ctx.Done()
 }
+
+// readEBPFEvents is a stub for non-Linux platforms
+func (c *Collector) readEBPFEvents() {
+	c.logger.Debug("eBPF event reading not supported on this platform")
+	<-c.ctx.Done()
+}

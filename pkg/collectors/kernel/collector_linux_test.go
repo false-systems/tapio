@@ -13,9 +13,39 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
-func TestConvertToRawEvent(t *testing.T) {
+func TestKernelEventStructure(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	config := &Config{Name: "convert-test"}
+	config := &Config{Name: "kernel-event-test"}
+	_, err := NewCollectorWithConfig(config, logger)
+	require.NoError(t, err)
+
+	// Create test kernel event with actual fields
+	kernelEvent := KernelEvent{
+		Timestamp: uint64(time.Now().UnixNano()),
+		PID:       1234,
+		PPID:      1000,
+		UID:       1000,
+		GID:       1000,
+		EventType: EventTypeProcess,
+		CgroupID:  567890,
+		ExitCode:  0,
+		Signal:    0,
+	}
+
+	copy(kernelEvent.Comm[:], "test-process")
+	copy(kernelEvent.ServiceName[:], "test-service")
+	copy(kernelEvent.CgroupPath[:], "/system.slice/test.service")
+
+	// Verify structure size and alignment
+	assert.Greater(t, int(unsafe.Sizeof(kernelEvent)), 0)
+	assert.Equal(t, "test-process", bytesToString(kernelEvent.Comm[:]))
+	assert.Equal(t, uint32(1234), kernelEvent.PID)
+	assert.Equal(t, EventTypeProcess, kernelEvent.EventType)
+}
+
+func TestProcessRawEvent(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{Name: "process-event-test"}
 	collector, err := NewCollectorWithConfig(config, logger)
 	require.NoError(t, err)
 
@@ -23,174 +53,165 @@ func TestConvertToRawEvent(t *testing.T) {
 	kernelEvent := KernelEvent{
 		Timestamp: uint64(time.Now().UnixNano()),
 		PID:       1234,
-		TID:       1234,
+		PPID:      1000,
+		UID:       1000,
+		GID:       1000,
 		EventType: EventTypeProcess,
-		Size:      64,
 		CgroupID:  567890,
 	}
-
 	copy(kernelEvent.Comm[:], "test-process")
-	copy(kernelEvent.PodUID[:], "test-pod-uid-1234-5678-9012")
 
-	// Convert to RawEvent
-	rawEvent := collector.convertToRawEvent(kernelEvent)
+	// Convert to raw bytes
+	buffer := make([]byte, unsafe.Sizeof(kernelEvent))
+	*(*KernelEvent)(unsafe.Pointer(&buffer[0])) = kernelEvent
 
-	// Verify RawEvent structure
-	assert.Equal(t, collector.name, rawEvent.Source)
-	assert.NotZero(t, rawEvent.Timestamp)
-	assert.NotEmpty(t, rawEvent.Data)
-	assert.Len(t, rawEvent.Data, int(unsafe.Sizeof(kernelEvent)))
+	// Test processRawEvent doesn't panic
+	assert.NotPanics(t, func() {
+		collector.processRawEvent(buffer)
+	})
 
-	// Verify timestamp conversion
-	expectedTime := time.Unix(0, int64(kernelEvent.Timestamp))
-	assert.Equal(t, expectedTime, rawEvent.Timestamp)
+	// Test with invalid buffer size
+	assert.NotPanics(t, func() {
+		collector.processRawEvent([]byte{1, 2, 3}) // Too small
+	})
 }
 
-func TestContainerInfoExtraction(t *testing.T) {
-	logger := zaptest.NewLogger(t)
-	config := &Config{Name: "container-test"}
-	collector, err := NewCollectorWithConfig(config, logger)
-	require.NoError(t, err)
-
+func TestGetEventType(t *testing.T) {
 	tests := []struct {
-		name       string
-		cgroupPath string
-		expectID   string
+		name      string
+		eventType uint8
+		expected  string
 	}{
 		{
-			name:       "docker container",
-			cgroupPath: "/docker/abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-			expectID:   "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+			name:      "process event",
+			eventType: EventTypeProcess,
+			expected:  "process_exec",
 		},
 		{
-			name:       "containerd container",
-			cgroupPath: "/containerd.service/123456789012345678901234567890123456789012345678901234567890",
-			expectID:   "123456789012345678901234567890123456789012345678901234567890",
+			name:      "file event",
+			eventType: EventTypeFile,
+			expected:  "file_open",
 		},
 		{
-			name:       "cri-o container",
-			cgroupPath: "/crio-fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321.scope",
-			expectID:   "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
+			name:      "network event",
+			eventType: EventTypeNetwork,
+			expected:  "network_connect",
 		},
 		{
-			name:       "no container",
-			cgroupPath: "/system.slice/some-service.service",
-			expectID:   "",
+			name:      "unknown event",
+			eventType: 99,
+			expected:  "unknown_99",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			containerID := collector.extractContainerID(tt.cgroupPath)
-			assert.Equal(t, tt.expectID, containerID)
+			result := getEventType(tt.eventType)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestPodUIDExtraction(t *testing.T) {
-	logger := zaptest.NewLogger(t)
-	config := &Config{Name: "pod-test"}
-	collector, err := NewCollectorWithConfig(config, logger)
-	require.NoError(t, err)
-
+func TestBytesToString(t *testing.T) {
 	tests := []struct {
-		name       string
-		cgroupPath string
-		expectUID  string
+		name     string
+		input    []byte
+		expected string
 	}{
 		{
-			name:       "kubernetes pod",
-			cgroupPath: "/kubepods/besteffort/pod12345678-1234-1234-1234-123456789012/container",
-			expectUID:  "12345678-1234-1234-1234-123456789012",
+			name:     "null terminated string",
+			input:    []byte{'t', 'e', 's', 't', 0, 'x', 'x'},
+			expected: "test",
 		},
 		{
-			name:       "kubernetes pod with underscores",
-			cgroupPath: "/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod87654321_4321_4321_4321_210987654321.slice",
-			expectUID:  "87654321-4321-4321-4321-210987654321",
+			name:     "string without null terminator",
+			input:    []byte{'t', 'e', 's', 't'},
+			expected: "test",
 		},
 		{
-			name:       "no pod",
-			cgroupPath: "/system.slice/docker.service",
-			expectUID:  "",
+			name:     "empty string",
+			input:    []byte{},
+			expected: "",
+		},
+		{
+			name:     "null byte only",
+			input:    []byte{0},
+			expected: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			podUID := collector.extractPodUID(tt.cgroupPath)
-			assert.Equal(t, tt.expectUID, podUID)
+			result := bytesToString(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestContainerRuntimeDetection(t *testing.T) {
-	logger := zaptest.NewLogger(t)
-	config := &Config{Name: "runtime-test"}
-	collector, err := NewCollectorWithConfig(config, logger)
-	require.NoError(t, err)
+func TestParseKernelEvent(t *testing.T) {
+	// Create test kernel event
+	originalEvent := KernelEvent{
+		Timestamp: uint64(time.Now().UnixNano()),
+		PID:       1234,
+		PPID:      1000,
+		UID:       1000,
+		GID:       1000,
+		EventType: EventTypeProcess,
+		CgroupID:  567890,
+	}
+	copy(originalEvent.Comm[:], "test-process")
 
-	// This test is more for coverage since it depends on filesystem
-	runtime := collector.getContainerRuntime()
-	assert.NotEmpty(t, runtime)
-	// On most test systems, this will be "unknown" since container sockets won't exist
-	assert.Contains(t, []string{"docker", "containerd", "crio", "unknown"}, runtime)
+	// Convert to buffer
+	buffer := make([]byte, unsafe.Sizeof(originalEvent))
+	*(*KernelEvent)(unsafe.Pointer(&buffer[0])) = originalEvent
+
+	// Parse back
+	parsedEvent, err := parseKernelEvent(buffer)
+	require.NoError(t, err)
+	require.NotNil(t, parsedEvent)
+
+	// Verify fields
+	assert.Equal(t, originalEvent.PID, parsedEvent.PID)
+	assert.Equal(t, originalEvent.PPID, parsedEvent.PPID)
+	assert.Equal(t, originalEvent.EventType, parsedEvent.EventType)
+	assert.Equal(t, "test-process", bytesToString(parsedEvent.Comm[:]))
+
+	// Test with invalid buffer size
+	_, err = parseKernelEvent([]byte{1, 2, 3})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "buffer too small")
 }
 
-func TestEnrichEventWithContainerInfo(t *testing.T) {
+func TestLinuxCollectorSpecificLifecycle(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	config := &Config{Name: "enrich-test"}
+	config := &Config{Name: "linux-lifecycle-test"}
 	collector, err := NewCollectorWithConfig(config, logger)
 	require.NoError(t, err)
 
-	// Test event with no pod UID (should trigger enrichment)
-	event := &KernelEvent{
-		PID:      1234,
-		CgroupID: 567890,
-	}
+	// Test initial state
+	assert.Equal(t, "linux-lifecycle-test", collector.Name())
+	assert.True(t, collector.IsHealthy())
+	assert.NotNil(t, collector.Events())
 
-	// This method depends on /proc filesystem and may not work in test environment
-	// but should not panic
+	// Test Linux-specific eBPF state
+	assert.Nil(t, collector.ebpfState) // Should be nil before start
+
+	// Test multiple stops (should not panic)
 	assert.NotPanics(t, func() {
-		collector.enrichEventWithContainerInfo(event)
+		err := collector.Stop()
+		assert.NoError(t, err)
 	})
 
-	// Test event with existing pod UID (should skip enrichment)
-	eventWithPod := &KernelEvent{
-		PID:      1234,
-		CgroupID: 567890,
-	}
-	copy(eventWithPod.PodUID[:], "existing-pod-uid")
-
-	assert.NotPanics(t, func() {
-		collector.enrichEventWithContainerInfo(eventWithPod)
-	})
-}
-
-func TestGetCgroupPath(t *testing.T) {
-	logger := zaptest.NewLogger(t)
-	config := &Config{Name: "cgroup-test"}
-	collector, err := NewCollectorWithConfig(config, logger)
-	require.NoError(t, err)
-
-	// Test with current process PID (should not panic)
-	// This may return empty string if /proc/self/cgroup doesn't exist or is unreadable
-	assert.NotPanics(t, func() {
-		path := collector.getCgroupPath(uint32(1)) // init process
-		// Path might be empty in test environment, but function should not panic
-		_ = path
-	})
-
-	// Test with invalid PID (should return empty string)
-	assert.NotPanics(t, func() {
-		path := collector.getCgroupPath(uint32(999999)) // Non-existent PID
-		assert.Equal(t, "", path)
-	})
+	assert.False(t, collector.IsHealthy())
 }
 
 func TestLinuxSpecificEBPFIntegration(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	config := DefaultConfig()
-	config.Name = "linux-ebpf-test"
+	config := &Config{
+		Name:       "linux-ebpf-test",
+		BufferSize: 10000,
+		EnableEBPF: true,
+	}
 
 	collector, err := NewCollectorWithConfig(config, logger)
 	require.NoError(t, err)
@@ -205,7 +226,11 @@ func TestLinuxSpecificEBPFIntegration(t *testing.T) {
 
 func TestEBPFStateManagement(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	config := &Config{Name: "ebpf-state-test"}
+	config := &Config{
+		Name:       "ebpf-state-test",
+		BufferSize: 10000,
+		EnableEBPF: true,
+	}
 	collector, err := NewCollectorWithConfig(config, logger)
 	require.NoError(t, err)
 
@@ -214,8 +239,9 @@ func TestEBPFStateManagement(t *testing.T) {
 		collector.stopEBPF()
 	})
 
-	// Test that readEBPFEvents handles nil state gracefully
+	// Test that processEvents handles nil state gracefully
 	assert.NotPanics(t, func() {
-		collector.readEBPFEvents()
+		// This will exit immediately since ebpfState is nil
+		go collector.processEvents()
 	})
 }

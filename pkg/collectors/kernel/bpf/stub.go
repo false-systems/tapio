@@ -9,30 +9,31 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-// Stub types for non-Linux platforms
+// Stub types and functions for non-Linux platforms
+// Note: The specific struct types are defined in the generated files on Linux platforms
 
-type kernelmonitorObjects struct {
-	kernelmonitorPrograms
-	kernelmonitorMaps
+// KernelmonitorObjects contains the eBPF objects (stub for non-Linux)
+type KernelmonitorObjects struct {
+	KernelmonitorPrograms
+	KernelmonitorMaps
 }
 
-func (o *kernelmonitorObjects) Close() error {
+func (o *KernelmonitorObjects) Close() error {
 	return nil
 }
 
-type kernelmonitorPrograms struct {
-	TraceExec       *ebpf.Program
-	TraceFree       *ebpf.Program
-	TraceMalloc     *ebpf.Program
-	TraceOpenat     *ebpf.Program
-	TraceTcpConnect *ebpf.Program
+// KernelmonitorPrograms contains the eBPF programs (stub for non-Linux)
+type KernelmonitorPrograms struct {
+	TraceConfigAccess *ebpf.Program
+	TracePodSyscalls  *ebpf.Program
 }
 
-func (p *kernelmonitorPrograms) Close() error {
+func (p *KernelmonitorPrograms) Close() error {
 	return nil
 }
 
-type kernelmonitorMaps struct {
+// KernelmonitorMaps contains the eBPF maps (stub for non-Linux)
+type KernelmonitorMaps struct {
 	ContainerInfoMap    *ebpf.Map
 	ContainerPids       *ebpf.Map
 	Events              *ebpf.Map
@@ -43,16 +44,14 @@ type kernelmonitorMaps struct {
 	VolumeInfoMap       *ebpf.Map
 }
 
-func (m *kernelmonitorMaps) Close() error {
+func (m *KernelmonitorMaps) Close() error {
 	return nil
 }
 
-// Stub functions for non-Linux platforms
-
-func loadKernelmonitor() (*ebpf.CollectionSpec, error) {
+func LoadKernelmonitor() (*ebpf.CollectionSpec, error) {
 	return nil, fmt.Errorf("eBPF not supported on this platform")
 }
 
-func loadKernelmonitorObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func LoadKernelmonitorObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 	return fmt.Errorf("eBPF not supported on this platform")
 }

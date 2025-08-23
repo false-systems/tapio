@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Minimal eBPF program for kernel monitoring - focused on containers
+// Focused kernel monitoring eBPF program - ConfigMap/Secret access and pod correlation only
 
 #include "../../bpf_common/vmlinux_minimal.h"
 
@@ -13,46 +13,10 @@
 #include "../../bpf_common/helpers.h"
 #endif
 
-// Network protocol constants
-#define IPPROTO_TCP 6
-#define IPPROTO_UDP 17
-
-// Address family constants
-#define AF_INET 2
-#define AF_INET6 10
-
-// Event types
-#define EVENT_TYPE_MEMORY_ALLOC 1
-#define EVENT_TYPE_MEMORY_FREE  2
-#define EVENT_TYPE_PROCESS_EXEC 3
-#define EVENT_TYPE_POD_SYSCALL  4
-#define EVENT_TYPE_NETWORK_CONN 5
-#define EVENT_TYPE_NETWORK_ACCEPT 6
-#define EVENT_TYPE_NETWORK_CLOSE 7
-#define EVENT_TYPE_FILE_OPEN 8
-#define EVENT_TYPE_FILE_READ 9
-#define EVENT_TYPE_FILE_WRITE 10
-
-// Network connection information
-struct network_info {
-    __u8 ip_version;  // 4 for IPv4, 6 for IPv6
-    __u8 protocol;    // IPPROTO_TCP or IPPROTO_UDP
-    __u8 state;       // Connection state
-    __u8 direction;   // 0=outgoing, 1=incoming
-    __u16 sport;      // Source port
-    __u16 dport;      // Destination port
-    __u32 saddr_v4;   // Source IP (IPv4)
-    __u32 daddr_v4;   // Destination IP (IPv4)
-    __u32 saddr_v6[4]; // Source IP (IPv6)
-    __u32 daddr_v6[4]; // Destination IP (IPv6)
-} __attribute__((packed));
-
-// File operation information
-struct file_info {
-    char filename[56];  // File path (truncated)
-    __u32 flags;        // Open flags
-    __u32 mode;         // File mode
-} __attribute__((packed));
+// Event types - focused on unique kernel monitoring
+#define EVENT_TYPE_CONFIGMAP_ACCESS   1
+#define EVENT_TYPE_SECRET_ACCESS      2
+#define EVENT_TYPE_POD_SYSCALL        3
 
 // Kernel event structure (must match Go struct)
 struct kernel_event {
@@ -66,8 +30,9 @@ struct kernel_event {
     char pod_uid[36]; // Add pod UID
     union {
         __u8 data[64];
-        struct network_info net_info; // Network info for connection events
-        struct file_info file_info;   // File info for file operations
+        struct {
+            char mount_path[64];    // ConfigMap/Secret mount path
+        } config_info;
     };
 } __attribute__((packed));
 
@@ -105,7 +70,6 @@ struct mount_info {
     __u8 _pad[7];          // Padding
 } __attribute__((packed));
 
-
 // Volume mount information for PVC correlation
 struct volume_info {
     char pvc_name[64];     // PersistentVolumeClaim name
@@ -126,7 +90,7 @@ struct process_lineage {
 // Maps
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 512 * 1024); // 512KB buffer - production optimized
+    __uint(max_entries, 256 * 1024); // 256KB buffer - reduced from 512KB
 } events SEC(".maps");
 
 struct {
@@ -167,7 +131,6 @@ struct {
     __type(key, __u64);             // Hash of mount path
     __type(value, struct mount_info); // mount info
 } mount_info_map SEC(".maps");
-
 
 // Map volume mount paths to PVC info
 struct {
@@ -394,426 +357,61 @@ static __always_inline struct mount_info *get_mount_info(const char *path)
     return bpf_map_lookup_elem(&mount_info_map, &key);
 }
 
-// Memory allocation tracing - using generic tracepoint
-SEC("tracepoint/kmem/kmalloc")
-int trace_malloc(void *ctx)
+// Helper to check if path is ConfigMap/Secret related
+static __always_inline bool is_config_path(const char *path, int max_len)
 {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 pid = pid_tgid >> 32;
+    if (!path || max_len <= 0) {
+        return false;
+    }
     
-    // Only track container processes
-    if (!is_container_process(pid))
-        return 0;
+    // Common ConfigMap/Secret path patterns
+    const char configmap_pattern[] = "/var/lib/kubelet/pods/";
+    const char secret_pattern[] = "kubernetes.io~secret";
+    const char cm_pattern[] = "kubernetes.io~configmap";
     
-    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
-        return 0;
+    // Check for kubelet pod path prefix (bounded loop for verifier)
+    bool has_kubelet_prefix = true;
+    #pragma unroll
+    for (int i = 0; i < 24 && i < max_len; i++) {
+        char expected = (i < 23) ? configmap_pattern[i] : '\0';
+        char actual;
+        
+        if (bpf_probe_read_kernel(&actual, 1, &path[i]) != 0) {
+            has_kubelet_prefix = false;
+            break;
+        }
+        
+        if (expected == '\0' || actual != expected) {
+            if (expected == '\0') {
+                break; // Successfully matched prefix
+            }
+            has_kubelet_prefix = false;
+            break;
+        }
+    }
     
-    // Get current task for cgroup info
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    __u64 cgroup_id = get_cgroup_id(task);
+    if (!has_kubelet_prefix) {
+        return false;
+    }
     
-    event->timestamp = bpf_ktime_get_ns();
-    event->pid = pid;
-    event->tid = (__u32)pid_tgid;
-    event->event_type = EVENT_TYPE_MEMORY_ALLOC;
-    event->size = 0; // Can't easily get size from generic tracepoint
-    event->cgroup_id = cgroup_id;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    // Look for secret or configmap pattern in the rest of the path
+    // This is a simplified check - in production, we'd use more sophisticated pattern matching
+    char buffer[32];
+    int start_offset = 24; // After "/var/lib/kubelet/pods/"
     
-    // Try to get pod information and safely copy UID
-    struct pod_info *pod = get_pod_info(cgroup_id);
-    safe_copy_pod_uid(event->pod_uid, pod);
+    // Safely read a portion of the path to check for patterns
+    if (bpf_probe_read_kernel(buffer, sizeof(buffer), &path[start_offset]) != 0) {
+        return false;
+    }
     
-    bpf_ringbuf_submit(event, 0);
-    return 0;
+    // Simple pattern matching for secret/configmap indicators
+    // In a real implementation, this would be more comprehensive
+    return true; // For now, assume any path under kubelet pods is relevant
 }
 
-// Memory free tracing
-SEC("tracepoint/kmem/kfree")
-int trace_free(void *ctx)
-{
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 pid = pid_tgid >> 32;
-    
-    if (!is_container_process(pid))
-        return 0;
-    
-    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
-        return 0;
-    
-    event->timestamp = bpf_ktime_get_ns();
-    event->pid = pid;
-    event->tid = (__u32)pid_tgid;
-    event->event_type = EVENT_TYPE_MEMORY_FREE;
-    event->size = 0;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
-    
-    bpf_ringbuf_submit(event, 0);
-    return 0;
-}
-
-// Process execution tracing
-SEC("tracepoint/sched/sched_process_exec")  
-int trace_exec(void *ctx)
-{
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 pid = pid_tgid >> 32;
-    
-    if (!is_container_process(pid))
-        return 0;
-    
-    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
-        return 0;
-    
-    event->timestamp = bpf_ktime_get_ns();
-    event->pid = pid;
-    event->tid = (__u32)pid_tgid;
-    event->event_type = EVENT_TYPE_PROCESS_EXEC;
-    event->size = 0;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
-    
-    bpf_ringbuf_submit(event, 0);
-    return 0;
-}
-
-// Network connection tracing - track tcp connections using CO-RE
-SEC("kprobe/tcp_v4_connect")
-int trace_tcp_v4_connect(struct pt_regs *ctx)
-{
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 pid = pid_tgid >> 32;
-    
-    // Only track container processes
-    if (!is_container_process(pid))
-        return 0;
-    
-    // Get sock struct from first argument using CO-RE helper
-    struct sock *sk = read_sock_from_kprobe(ctx);
-    
-    if (!sk)
-        return 0;
-    
-    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
-        return 0;
-    
-    // Get current task for cgroup info
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    __u64 cgroup_id = get_cgroup_id(task);
-    
-    event->timestamp = bpf_ktime_get_ns();
-    event->pid = pid;
-    event->tid = (__u32)pid_tgid;
-    event->event_type = EVENT_TYPE_NETWORK_CONN;
-    event->size = 0;
-    event->cgroup_id = cgroup_id;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
-    
-    // Fill network info from socket using CO-RE with field validation
-    __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
-    
-    event->net_info.ip_version = 4;
-    
-    // Validate socket fields exist and read safely with error checking
-    if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
-        __u16 sport = 0;
-        if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
-            event->net_info.sport = sport;
-        }
-    }
-    
-    if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
-        __u16 dport = 0;
-        if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
-            // Convert network byte order to host byte order for port
-            event->net_info.dport = __builtin_bswap16(dport);
-        }
-    }
-    
-    if (bpf_core_field_exists(sk->__sk_common.skc_rcv_saddr)) {
-        __u32 saddr = 0;
-        if (BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr) == 0) {
-            event->net_info.saddr_v4 = saddr;
-        }
-    }
-    
-    if (bpf_core_field_exists(sk->__sk_common.skc_daddr)) {
-        __u32 daddr = 0;
-        if (BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr) == 0) {
-            event->net_info.daddr_v4 = daddr;
-        }
-    }
-    
-    event->net_info.protocol = IPPROTO_TCP;
-    event->net_info.direction = 0; // Outgoing
-    event->net_info.state = 1; // Connecting
-    
-    // Try to get pod information and safely copy UID
-    struct pod_info *pod = get_pod_info(cgroup_id);
-    safe_copy_pod_uid(event->pod_uid, pod);
-    
-    bpf_ringbuf_submit(event, 0);
-    return 0;
-}
-
-// IPv6 TCP connection tracing - dedicated function for IPv6
-SEC("kprobe/tcp_v6_connect")
-int trace_tcp_v6_connect(struct pt_regs *ctx)
-{
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 pid = pid_tgid >> 32;
-    
-    // Only track container processes
-    if (!is_container_process(pid))
-        return 0;
-    
-    // Get sock struct from first argument using CO-RE helper
-    struct sock *sk = read_sock_from_kprobe(ctx);
-    
-    if (!sk)
-        return 0;
-    
-    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
-        return 0;
-    
-    // Get current task for cgroup info
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    __u64 cgroup_id = get_cgroup_id(task);
-    
-    event->timestamp = bpf_ktime_get_ns();
-    event->pid = pid;
-    event->tid = (__u32)pid_tgid;
-    event->event_type = EVENT_TYPE_NETWORK_CONN;
-    event->size = 0;
-    event->cgroup_id = cgroup_id;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
-    
-    // Fill network info from socket using CO-RE with field validation
-    __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
-    
-    event->net_info.ip_version = 6;
-    
-    // Read IPv6 port information with field validation
-    if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
-        __u16 sport = 0;
-        if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
-            event->net_info.sport = sport;
-        }
-    }
-    
-    if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
-        __u16 dport = 0;
-        if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
-            // Convert network byte order to host byte order for port
-            event->net_info.dport = __builtin_bswap16(dport);
-        }
-    }
-    
-    // For IPv6 addresses, we need to use the full socket structure
-    // Check if sk_v6_rcv_saddr and sk_v6_daddr fields exist using CO-RE
-    if (bpf_core_field_exists(sk->sk_v6_rcv_saddr)) {
-        // Read source IPv6 address with safe memory copy and bounds checking
-        struct in6_addr src_addr;
-        if (BPF_CORE_READ_INTO(&src_addr, sk, sk_v6_rcv_saddr) == 0) {
-            // Use safe bounded memory copy for the address data
-            int ret = bpf_probe_read_kernel(event->net_info.saddr_v6, 
-                                           sizeof(event->net_info.saddr_v6), 
-                                           &src_addr);
-            if (ret != 0) {
-                __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
-            }
-        } else {
-            __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
-        }
-        
-        // Read destination IPv6 address with safe memory copy
-        if (bpf_core_field_exists(sk->sk_v6_daddr)) {
-            struct in6_addr dst_addr;
-            if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
-                // Use safe bounded memory copy for the address data
-                int ret = bpf_probe_read_kernel(event->net_info.daddr_v6, 
-                                               sizeof(event->net_info.daddr_v6), 
-                                               &dst_addr);
-                if (ret != 0) {
-                    __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-                }
-            } else {
-                __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-            }
-        } else {
-            // Field doesn't exist, clear destination
-            __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-        }
-    } else {
-        // Fallback: fields not available in this kernel version
-        __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
-        __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-    }
-    
-    event->net_info.protocol = IPPROTO_TCP;
-    event->net_info.direction = 0; // Outgoing
-    event->net_info.state = 1; // Connecting
-    
-    // Try to get pod information and safely copy UID
-    struct pod_info *pod = get_pod_info(cgroup_id);
-    safe_copy_pod_uid(event->pod_uid, pod);
-    
-    bpf_ringbuf_submit(event, 0);
-    return 0;
-}
-
-// UDP socket tracing for both IPv4 and IPv6
-SEC("kprobe/udp_sendmsg")
-int trace_udp_send(struct pt_regs *ctx)
-{
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 pid = pid_tgid >> 32;
-    
-    // Only track container processes
-    if (!is_container_process(pid))
-        return 0;
-    
-    // Get sock struct from first argument using CO-RE helper
-    struct sock *sk = read_sock_from_kprobe(ctx);
-    
-    if (!sk)
-        return 0;
-    
-    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
-        return 0;
-    
-    // Get current task for cgroup info
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    __u64 cgroup_id = get_cgroup_id(task);
-    
-    event->timestamp = bpf_ktime_get_ns();
-    event->pid = pid;
-    event->tid = (__u32)pid_tgid;
-    event->event_type = EVENT_TYPE_NETWORK_CONN;
-    event->size = 0;
-    event->cgroup_id = cgroup_id;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
-    
-    // Fill network info from socket using CO-RE with field validation
-    __builtin_memset(&event->net_info, 0, sizeof(event->net_info));
-    
-    // Check socket family for IPv4/IPv6 with field validation
-    __u16 family = 0;
-    if (bpf_core_field_exists(sk->__sk_common.skc_family)) {
-        if (BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family) != 0) {
-            family = 0;
-        }
-    }
-    
-    if (family == AF_INET) {
-        event->net_info.ip_version = 4;
-        
-        // Use CO-RE to read IPv4 socket addresses safely with field validation
-        if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
-            __u16 sport = 0;
-            if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
-                event->net_info.sport = sport;
-            }
-        }
-        
-        if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
-            __u16 dport = 0;
-            if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
-                // Convert network byte order to host byte order for port
-                event->net_info.dport = __builtin_bswap16(dport);
-            }
-        }
-        
-        if (bpf_core_field_exists(sk->__sk_common.skc_rcv_saddr)) {
-            __u32 saddr = 0;
-            if (BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr) == 0) {
-                event->net_info.saddr_v4 = saddr;
-            }
-        }
-        
-        if (bpf_core_field_exists(sk->__sk_common.skc_daddr)) {
-            __u32 daddr = 0;
-            if (BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr) == 0) {
-                event->net_info.daddr_v4 = daddr;
-            }
-        }
-    } else if (family == AF_INET6) {
-        event->net_info.ip_version = 6;
-        
-        // Read IPv6 port information with field validation
-        if (bpf_core_field_exists(sk->__sk_common.skc_num)) {
-            __u16 sport = 0;
-            if (BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num) == 0) {
-                event->net_info.sport = sport;
-            }
-        }
-        
-        if (bpf_core_field_exists(sk->__sk_common.skc_dport)) {
-            __u16 dport = 0;
-            if (BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport) == 0) {
-                // Convert network byte order to host byte order for port
-                event->net_info.dport = __builtin_bswap16(dport);
-            }
-        }
-        
-        // For IPv6 addresses, use full socket structure if available
-        if (bpf_core_field_exists(sk->sk_v6_rcv_saddr)) {
-            struct in6_addr src_addr;
-            if (BPF_CORE_READ_INTO(&src_addr, sk, sk_v6_rcv_saddr) == 0) {
-                // Use safe bounded memory copy for the address data
-                int ret = bpf_probe_read_kernel(event->net_info.saddr_v6, 
-                                               sizeof(event->net_info.saddr_v6), 
-                                               &src_addr);
-                if (ret != 0) {
-                    __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
-                }
-            } else {
-                __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
-            }
-            
-            if (bpf_core_field_exists(sk->sk_v6_daddr)) {
-                struct in6_addr dst_addr;
-                if (BPF_CORE_READ_INTO(&dst_addr, sk, sk_v6_daddr) == 0) {
-                    // Use safe bounded memory copy for the address data
-                    int ret = bpf_probe_read_kernel(event->net_info.daddr_v6, 
-                                                   sizeof(event->net_info.daddr_v6), 
-                                                   &dst_addr);
-                    if (ret != 0) {
-                        __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-                    }
-                } else {
-                    __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-                }
-            } else {
-                __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-            }
-        } else {
-            // Fallback for minimal vmlinux.h
-            __builtin_memset(event->net_info.saddr_v6, 0, sizeof(event->net_info.saddr_v6));
-            __builtin_memset(event->net_info.daddr_v6, 0, sizeof(event->net_info.daddr_v6));
-        }
-    }
-    
-    event->net_info.protocol = IPPROTO_UDP;
-    event->net_info.direction = 0; // Outgoing
-    event->net_info.state = 0; // Stateless (UDP)
-    
-    // Try to get pod information and safely copy UID
-    struct pod_info *pod = get_pod_info(cgroup_id);
-    safe_copy_pod_uid(event->pod_uid, pod);
-    
-    bpf_ringbuf_submit(event, 0);
-    return 0;
-}
-
-// File open tracing - track access to ConfigMaps/Secrets
+// ConfigMap/Secret file access tracing
 SEC("tracepoint/syscalls/sys_enter_openat")
-int trace_openat(void *ctx)
+int trace_config_access(void *ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
@@ -822,7 +420,8 @@ int trace_openat(void *ctx)
     if (!is_container_process(pid))
         return 0;
     
-    // Get the filename being opened (simplified - would need proper arg parsing)
+    // Get the filename being opened (simplified - would need proper arg parsing in production)
+    // For now, we'll capture the event and process the path in userspace
     struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (!event)
         return 0;
@@ -834,21 +433,67 @@ int trace_openat(void *ctx)
     event->timestamp = bpf_ktime_get_ns();
     event->pid = pid;
     event->tid = (__u32)pid_tgid;
-    event->event_type = EVENT_TYPE_FILE_OPEN;
+    event->event_type = EVENT_TYPE_CONFIGMAP_ACCESS; // Will be refined based on actual path
     event->size = 0;
     event->cgroup_id = cgroup_id;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
-    // Initialize file info
-    __builtin_memset(&event->file_info, 0, sizeof(event->file_info));
+    // Initialize config info
+    __builtin_memset(&event->config_info, 0, sizeof(event->config_info));
     
     // In a real implementation, we would:
-    // 1. Read the filename from syscall args
+    // 1. Read the filename from syscall args using proper tracepoint context
     // 2. Check if it matches known ConfigMap/Secret mount paths
-    // 3. Look up mount info to identify the ConfigMap/Secret
+    // 3. Look up mount info to identify the ConfigMap/Secret name
+    // 4. Set appropriate event type (CONFIGMAP_ACCESS vs SECRET_ACCESS)
     
-    // For now, just track that a file operation occurred
-    __builtin_memcpy(event->file_info.filename, "configmap/secret", 16);
+    // For now, mark as potential config access for userspace processing
+    __builtin_memcpy(event->config_info.mount_path, "/var/lib/kubelet/", 17);
+    
+    // Try to get pod information and safely copy UID
+    struct pod_info *pod = get_pod_info(cgroup_id);
+    safe_copy_pod_uid(event->pod_uid, pod);
+    
+    bpf_ringbuf_submit(event, 0);
+    return 0;
+}
+
+// Generic pod syscall tracking for correlation purposes
+SEC("tracepoint/raw_syscalls/sys_enter")
+int trace_pod_syscalls(void *ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
+    
+    // Only track container processes
+    if (!is_container_process(pid))
+        return 0;
+    
+    // Sample syscalls for correlation (not all syscalls are interesting)
+    // Use a simple sampling approach
+    static __u64 call_counter = 0;
+    call_counter++;
+    
+    // Sample 1 in 100 syscalls to reduce overhead
+    if (call_counter % 100 != 0) {
+        return 0;
+    }
+    
+    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    if (!event)
+        return 0;
+    
+    // Get current task for cgroup info
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 cgroup_id = get_cgroup_id(task);
+    
+    event->timestamp = bpf_ktime_get_ns();
+    event->pid = pid;
+    event->tid = (__u32)pid_tgid;
+    event->event_type = EVENT_TYPE_POD_SYSCALL;
+    event->size = 0;
+    event->cgroup_id = cgroup_id;
+    bpf_get_current_comm(&event->comm, sizeof(event->comm));
     
     // Try to get pod information and safely copy UID
     struct pod_info *pod = get_pod_info(cgroup_id);
