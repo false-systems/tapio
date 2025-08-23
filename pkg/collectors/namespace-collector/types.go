@@ -1,4 +1,4 @@
-package cni
+package namespace_collector
 
 // cniEvent represents a network event from eBPF
 type cniEvent struct {

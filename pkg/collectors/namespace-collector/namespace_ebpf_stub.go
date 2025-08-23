@@ -1,7 +1,7 @@
 //go:build !linux
 // +build !linux
 
-package cni
+package namespace_collector
 
 import (
 	"fmt"
@@ -11,43 +11,43 @@ import (
 
 // Stub types for non-Linux platforms
 
-type cniMonitorSpecs struct {
-	cniMonitorProgramSpecs
-	cniMonitorMapSpecs
+type namespaceMonitorSpecs struct {
+	namespaceMonitorProgramSpecs
+	namespaceMonitorMapSpecs
 }
 
-type cniMonitorProgramSpecs struct{}
+type namespaceMonitorProgramSpecs struct{}
 
-type cniMonitorMapSpecs struct{}
+type namespaceMonitorMapSpecs struct{}
 
-type cniMonitorObjects struct {
-	cniMonitorPrograms
-	cniMonitorMaps
+type namespaceMonitorObjects struct {
+	namespaceMonitorPrograms
+	namespaceMonitorMaps
 }
 
-func (o *cniMonitorObjects) Close() error {
+func (o *namespaceMonitorObjects) Close() error {
 	return nil
 }
 
-type cniMonitorMaps struct{}
+type namespaceMonitorMaps struct{}
 
-func (m *cniMonitorMaps) Close() error {
+func (m *namespaceMonitorMaps) Close() error {
 	return nil
 }
 
-type cniMonitorPrograms struct{}
+type namespaceMonitorPrograms struct{}
 
-func (p *cniMonitorPrograms) Close() error {
+func (p *namespaceMonitorPrograms) Close() error {
 	return nil
 }
 
 // Stub functions for non-Linux platforms
 
-func loadCniMonitor() (*ebpf.CollectionSpec, error) {
+func loadNamespaceMonitor() (*ebpf.CollectionSpec, error) {
 	return nil, fmt.Errorf("eBPF not supported on this platform")
 }
 
-func loadCniMonitorObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadNamespaceMonitorObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 	return fmt.Errorf("eBPF not supported on this platform")
 }
 

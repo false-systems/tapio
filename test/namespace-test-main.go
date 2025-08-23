@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/cni"
+	namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
 )
 
 func main() {
-	fmt.Println("🚀 Starting CNI eBPF Collector Test")
+	fmt.Println("🚀 Starting Namespace eBPF Collector Test")
 	fmt.Println("===================================")
 
 	// Create collector config
@@ -26,13 +26,13 @@ func main() {
 		},
 	}
 
-	// Create CNI collector
-	collector, err := cni.NewCollector(config)
+	// Create namespace collector
+	collector, err := namespace_collector.NewCollector(config)
 	if err != nil {
-		log.Fatalf("Failed to create CNI collector: %v", err)
+		log.Fatalf("Failed to create namespace collector: %v", err)
 	}
 
-	fmt.Printf("✅ CNI Collector created: %s\n", collector.Name())
+	fmt.Printf("✅ Namespace Collector created: %s\n", collector.Name())
 	fmt.Printf("✅ Health status: %v\n", collector.IsHealthy())
 
 	// Start collector
@@ -45,10 +45,10 @@ func main() {
 	defer collector.Stop()
 
 	fmt.Println("✅ Collector started successfully")
-	fmt.Println("📊 Monitoring CNI events...")
-	fmt.Println("   - execve syscalls for CNI binaries")
-	fmt.Println("   - Network namespace creation/changes")
-	fmt.Println("   - Network policy enforcement")
+	fmt.Println("📊 Monitoring namespace events...")
+	fmt.Println("   - Network namespace creation (unshare)")
+	fmt.Println("   - Network namespace entry (setns)")
+	fmt.Println("   - Network namespace changes")
 	fmt.Println("")
 
 	// Handle shutdown gracefully

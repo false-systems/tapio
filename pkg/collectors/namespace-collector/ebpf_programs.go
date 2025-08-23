@@ -1,6 +1,6 @@
 //go:build linux
 
-package cni
+package namespace_collector
 
 // Minimal eBPF programs for CNI syscall tracing
 // These are the actual eBPF C programs as strings

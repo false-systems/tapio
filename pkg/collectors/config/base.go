@@ -111,14 +111,14 @@ func (c *BaseConfig) SetDefaults() {
 	}
 }
 
-// CNIConfig holds configuration specific to the CNI collector
-type CNIConfig struct {
+// NamespaceConfig holds configuration specific to the namespace collector
+type NamespaceConfig struct {
 	*BaseConfig `json:",inline" yaml:",inline"`
 
 	// EnableEBPF determines if eBPF monitoring should be used (default: true)
 	EnableEBPF bool `json:"enable_ebpf" yaml:"enable_ebpf"`
 
-	// PodCIDR for filtering CNI events (optional)
+	// PodCIDR for filtering namespace events (optional)
 	PodCIDR string `json:"pod_cidr" yaml:"pod_cidr"`
 
 	// InterfacePrefix to monitor (default: "eth")
@@ -131,9 +131,9 @@ type CNIConfig struct {
 	TrackBandwidth bool `json:"track_bandwidth" yaml:"track_bandwidth"`
 }
 
-// NewCNIConfig creates a new CNI configuration with defaults
-func NewCNIConfig(name string) *CNIConfig {
-	config := &CNIConfig{
+// NewNamespaceConfig creates a new namespace configuration with defaults
+func NewNamespaceConfig(name string) *NamespaceConfig {
+	config := &NamespaceConfig{
 		BaseConfig: DefaultBaseConfig(),
 	}
 	config.Name = name
@@ -141,8 +141,8 @@ func NewCNIConfig(name string) *CNIConfig {
 	return config
 }
 
-// SetDefaults applies CNI-specific defaults
-func (c *CNIConfig) SetDefaults() {
+// SetDefaults applies namespace-specific defaults
+func (c *NamespaceConfig) SetDefaults() {
 	c.BaseConfig.SetDefaults()
 
 	c.EnableEBPF = true // Default to eBPF enabled
@@ -156,8 +156,8 @@ func (c *CNIConfig) SetDefaults() {
 	}
 }
 
-// Validate performs CNI-specific validation
-func (c *CNIConfig) Validate() error {
+// Validate performs namespace-specific validation
+func (c *NamespaceConfig) Validate() error {
 	if err := c.BaseConfig.Validate(); err != nil {
 		return fmt.Errorf("base config validation failed: %w", err)
 	}
@@ -336,14 +336,14 @@ func (c *KernelConfig) Validate() error {
 // ParseConfig parses JSON configuration into the appropriate config type
 func ParseConfig(configType string, data []byte) (CollectorConfig, error) {
 	switch configType {
-	case "cni":
-		var config CNIConfig
+	case "namespace":
+		var config NamespaceConfig
 		if err := json.Unmarshal(data, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse CNI config: %w", err)
+			return nil, fmt.Errorf("failed to parse namespace config: %w", err)
 		}
 		config.SetDefaults()
 		if err := config.Validate(); err != nil {
-			return nil, fmt.Errorf("CNI config validation failed: %w", err)
+			return nil, fmt.Errorf("namespace config validation failed: %w", err)
 		}
 		return &config, nil
 

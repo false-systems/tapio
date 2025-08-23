@@ -1,4 +1,4 @@
-package cni
+package namespace_collector
 
 import (
 	"context"
@@ -17,10 +17,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// Collector implements simple CNI monitoring via eBPF
+// Collector implements simple namespace monitoring via eBPF
 type Collector struct {
 	name    string
-	config  *config.CNIConfig
+	config  *config.NamespaceConfig
 	events  chan domain.RawEvent
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -42,7 +42,7 @@ type Collector struct {
 	droppedEvents   metric.Int64Counter
 	bufferUsage     metric.Int64Gauge
 
-	// CNI-specific metrics (optional)
+	// Namespace-specific metrics (optional)
 	ebpfLoadsTotal     metric.Int64Counter
 	ebpfLoadErrors     metric.Int64Counter
 	ebpfAttachTotal    metric.Int64Counter
@@ -53,11 +53,11 @@ type Collector struct {
 	netnsOpsByType     metric.Int64Counter
 }
 
-// NewCollector creates a new simple CNI collector
+// NewCollector creates a new simple namespace collector
 func NewCollector(name string) (*Collector, error) {
 	// Initialize OTEL components
-	tracer := otel.Tracer("cni-collector")
-	meter := otel.Meter("cni-collector")
+	tracer := otel.Tracer("namespace-collector")
+	meter := otel.Meter("namespace-collector")
 
 	// Initialize logger
 	logger, err := zap.NewProduction()
@@ -67,7 +67,7 @@ func NewCollector(name string) (*Collector, error) {
 
 	// Initialize all metrics
 	eventsProcessed, err := meter.Int64Counter(
-		"cni_events_processed_total",
+		"namespace_events_processed_total",
 		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
 	)
 	if err != nil {
@@ -139,7 +139,7 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	collectorHealth, err := meter.Float64Gauge(
-		"cni_collector_healthy",
+		"namespace_collector_healthy",
 		metric.WithDescription(fmt.Sprintf("Health status of %s collector", name)),
 	)
 	if err != nil {
@@ -147,7 +147,7 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	k8sExtractionTotal, err := meter.Int64Counter(
-		"cni_k8s_extraction_attempts_total",
+		"namespace_k8s_extraction_attempts_total",
 		metric.WithDescription(fmt.Sprintf("Total K8s metadata extraction attempts by %s", name)),
 	)
 	if err != nil {
@@ -163,7 +163,7 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	netnsOpsByType, err := meter.Int64Counter(
-		"cni_netns_operations_total",
+		"namespace_netns_operations_total",
 		metric.WithDescription(fmt.Sprintf("Total network namespace operations by type in %s", name)),
 	)
 	if err != nil {
@@ -171,7 +171,7 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	// Default config
-	cfg := &config.CNIConfig{
+	cfg := &config.NamespaceConfig{
 		BaseConfig: &config.BaseConfig{
 			Name:       name,
 			BufferSize: 10000,
@@ -193,7 +193,7 @@ func NewCollector(name string) (*Collector, error) {
 		processingTime:  processingTime,
 		droppedEvents:   droppedEvents,
 		bufferUsage:     bufferUsage,
-		// CNI-specific metrics
+		// Namespace-specific metrics
 		ebpfLoadsTotal:     ebpfLoadsTotal,
 		ebpfLoadErrors:     ebpfLoadErrors,
 		ebpfAttachTotal:    ebpfAttachTotal,
