@@ -1,8 +1,8 @@
-package cni
+package namespace_collector
 
 import "fmt"
 
-// Config holds configuration for CNI collector
+// Config holds configuration for namespace collector
 type Config struct {
 	// Buffer size for events channel
 	BufferSize int

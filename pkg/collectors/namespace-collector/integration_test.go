@@ -1,4 +1,4 @@
-package cni
+package namespace_collector
 
 import (
 	"context"

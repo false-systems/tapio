@@ -1,11 +1,11 @@
-# CNI Collector
+# Namespace Collector
 
-Minimal Container Network Interface (CNI) collector using eBPF to monitor network namespace operations with zero business logic.
+Minimal network namespace collector using eBPF to monitor namespace operations with zero business logic.
 
 ## Architecture
 
 ```
-pkg/collectors/cni/
+pkg/collectors/namespace-collector/
 ├── collector.go              # Minimal collector implementation
 ├── collector_ebpf.go         # Linux eBPF implementation
 ├── collector_noebpf.go       # Non-Linux stub
@@ -13,9 +13,9 @@ pkg/collectors/cni/
 ├── generate.go              # bpf2go generation
 ├── init.go                  # Registry integration
 ├── bpf/                     # eBPF programs
-│   ├── cni_monitor.c        # Network namespace monitoring
+│   ├── namespace_monitor.c   # Network namespace monitoring
 │   └── vmlinux.h            # Kernel headers
-└── cnimonitor_*.go/o        # Generated eBPF objects
+└── namespacemonitor_*.go/o  # Generated eBPF objects
 ```
 
 ## Features
@@ -24,15 +24,15 @@ pkg/collectors/cni/
 - **eBPF-Based**: Monitors network namespace operations (setns, unshare)
 - **Network Focus**: Tracks container network creation and changes
 - **Low Overhead**: Efficient kernel-level monitoring
-- **K8s Aware**: Designed for Kubernetes CNI monitoring
+- **K8s Aware**: Designed for Kubernetes namespace monitoring
 
 ## Usage
 
 ```go
-import "github.com/yairfalse/tapio/pkg/collectors/cni"
+import namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
 
 // Create minimal collector
-collector, err := cni.NewCollector("cni")
+collector, err := namespace_collector.NewCollector("namespace")
 if err != nil {
     log.Fatal(err)
 }
@@ -47,7 +47,7 @@ defer collector.Stop()
 // Process raw events
 for event := range collector.Events() {
     // Raw network namespace events in event.Data
-    fmt.Printf("CNI Event: %s\n", event.Type)
+    fmt.Printf("Namespace Event: %s\n", event.Type)
 }
 ```
 

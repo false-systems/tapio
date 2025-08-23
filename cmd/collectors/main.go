@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/cni"
-	cniBPF "github.com/yairfalse/tapio/pkg/collectors/cni/bpf"
 	"github.com/yairfalse/tapio/pkg/collectors/etcd"
 	etcdBPF "github.com/yairfalse/tapio/pkg/collectors/etcd/bpf"
 	"github.com/yairfalse/tapio/pkg/collectors/kernel"
 	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
+	namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
+	namespaceBPF "github.com/yairfalse/tapio/pkg/collectors/namespace-collector/bpf"
 	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
@@ -24,18 +24,18 @@ import (
 )
 
 var (
-	natsURL        = flag.String("nats", "", "NATS server URL (overrides config)")
-	enableKubeAPI  = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
-	enableEBPF     = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
-	enableSystemd  = flag.Bool("enable-systemd", true, "Enable systemd collector")
-	enableEtcd     = flag.Bool("enable-etcd", true, "Enable etcd collector")
-	enableCNI      = flag.Bool("enable-cni", true, "Enable CNI collector")
-	enableKubelet  = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
-	kubeletAddress = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
-	etcdEndpoints  = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
-	logLevel       = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-	workerCount    = flag.Int("workers", 4, "Number of pipeline workers")
-	bufferSize     = flag.Int("buffer-size", 10000, "Event buffer size")
+	natsURL         = flag.String("nats", "", "NATS server URL (overrides config)")
+	enableKubeAPI   = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
+	enableEBPF      = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
+	enableSystemd   = flag.Bool("enable-systemd", true, "Enable systemd collector")
+	enableEtcd      = flag.Bool("enable-etcd", true, "Enable etcd collector")
+	enableNamespace = flag.Bool("enable-namespace", true, "Enable namespace collector")
+	enableKubelet   = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
+	kubeletAddress  = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
+	etcdEndpoints   = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
+	logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	workerCount     = flag.Int("workers", 4, "Number of pipeline workers")
+	bufferSize      = flag.Int("buffer-size", 10000, "Event buffer size")
 )
 
 func main() {
@@ -153,22 +153,22 @@ func main() {
 		}
 	}
 
-	if *enableCNI {
-		cniConfig := cni.DefaultConfig()
+	if *enableNamespace {
+		namespaceConfig := namespace_collector.DefaultConfig()
 
-		// Check if CNI eBPF is available
-		if cniBPF.IsSupported() {
-			cniConfig.EnableEBPF = true
+		// Check if namespace eBPF is available
+		if namespaceBPF.IsSupported() {
+			namespaceConfig.EnableEBPF = true
 		}
 
-		cniCollector, err := cni.NewCollector("cni")
+		namespaceCollector, err := namespace_collector.NewCollector("namespace")
 		if err != nil {
-			logger.Error("Failed to create cni collector", zap.Error(err))
+			logger.Error("Failed to create namespace collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("cni", cniCollector); err != nil {
-				logger.Error("Failed to register cni collector", zap.Error(err))
+			if err := eventPipeline.RegisterCollector("namespace", namespaceCollector); err != nil {
+				logger.Error("Failed to register namespace collector", zap.Error(err))
 			} else {
-				enabledCollectors = append(enabledCollectors, "cni")
+				enabledCollectors = append(enabledCollectors, "namespace")
 			}
 		}
 	}

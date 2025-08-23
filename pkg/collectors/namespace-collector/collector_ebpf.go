@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package cni
+package namespace_collector
 
 import (
 	"bytes"
@@ -20,11 +20,11 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 cniMonitor ./bpf_src/cni_monitor.c -- -I../bpf_common
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 namespaceMonitor ./bpf_src/namespace_monitor.c -- -I../bpf_common
 
 // eBPF components - implements EBPFState interface
 type ebpfState struct {
-	objs   *cniMonitorObjects
+	objs   *namespaceMonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
 }
@@ -41,7 +41,7 @@ func (s *ebpfState) LinkCount() int {
 
 // startEBPF initializes eBPF monitoring with comprehensive OTEL instrumentation
 func (c *Collector) startEBPF() error {
-	ctx, span := c.tracer.Start(context.Background(), "cni.ebpf.start",
+	ctx, span := c.tracer.Start(context.Background(), "namespace.ebpf.start",
 		trace.WithAttributes(
 			attribute.String("collector.name", c.name),
 		),
@@ -81,8 +81,8 @@ func (c *Collector) startEBPF() error {
 	}
 
 	// Load eBPF objects
-	objs := &cniMonitorObjects{}
-	if err := loadCniMonitorObjects(objs, nil); err != nil {
+	objs := &namespaceMonitorObjects{}
+	if err := loadNamespaceMonitorObjects(objs, nil); err != nil {
 		if c.ebpfLoadErrors != nil {
 			c.ebpfLoadErrors.Add(ctx, 1,
 				metric.WithAttributes(
