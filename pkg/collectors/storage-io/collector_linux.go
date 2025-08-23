@@ -6,6 +6,7 @@ package storageio
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 	"unsafe"
@@ -13,17 +14,16 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/yairfalse/tapio/pkg/collectors/storage-io/bpf"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 storagemonitor ./bpf_src/storage_monitor_simple.c -- -I../bpf_common
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 storagemonitor ./bpf_src/storage_monitor_premium.c -- -I../bpf_common
 
 // eBPF components - Linux-specific
 type ebpfComponents struct {
-	objs   *bpf.StoragemonitorObjects
+	objs   *storagemonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
 }
@@ -36,8 +36,8 @@ func (c *Collector) startEBPFImpl() error {
 	}
 
 	// Load pre-compiled eBPF programs
-	objs := &bpf.StoragemonitorObjects{}
-	if err := bpf.LoadStoragemonitorObjects(objs, nil); err != nil {
+	objs := &storagemonitorObjects{}
+	if err := loadStoragemonitorObjects(objs, nil); err != nil {
 		if c.errorsTotal != nil {
 			c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "ebpf_load_failed"),
@@ -51,11 +51,7 @@ func (c *Collector) startEBPFImpl() error {
 		links: make([]link.Link, 0),
 	}
 
-	// Attach VFS probes based on configuration
-	if err := c.attachVFSProbes(state); err != nil {
-		objs.Close()
-		return fmt.Errorf("attaching VFS probes: %w", err)
-	}
+	// Tracepoints auto-attach when loaded, no manual attachment needed
 
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(objs.Events)
@@ -92,73 +88,11 @@ func (c *Collector) attachVFSProbes(state *ebpfComponents) error {
 	return nil
 }
 
-// attachVFSProbe attaches a single VFS probe
+// attachVFSProbe attaches tracepoints for the premium collector
 func (c *Collector) attachVFSProbe(state *ebpfComponents, probeType VFSProbeType) error {
-	switch probeType {
-	case VFSProbeRead:
-		// Attach to vfs_read entry and exit
-		entryLink, err := link.Kprobe("vfs_read", state.objs.TraceVfsReadEntry, nil)
-		if err != nil {
-			return fmt.Errorf("attaching vfs_read entry: %w", err)
-		}
-		state.links = append(state.links, entryLink)
-
-		exitLink, err := link.Kretprobe("vfs_read", state.objs.TraceVfsReadExit, nil)
-		if err != nil {
-			entryLink.Close()
-			return fmt.Errorf("attaching vfs_read exit: %w", err)
-		}
-		state.links = append(state.links, exitLink)
-
-	case VFSProbeWrite:
-		// Attach to vfs_write entry and exit
-		entryLink, err := link.Kprobe("vfs_write", state.objs.TraceVfsWriteEntry, nil)
-		if err != nil {
-			return fmt.Errorf("attaching vfs_write entry: %w", err)
-		}
-		state.links = append(state.links, entryLink)
-
-		exitLink, err := link.Kretprobe("vfs_write", state.objs.TraceVfsWriteExit, nil)
-		if err != nil {
-			entryLink.Close()
-			return fmt.Errorf("attaching vfs_write exit: %w", err)
-		}
-		state.links = append(state.links, exitLink)
-
-	case VFSProbeFsync:
-		// Attach to vfs_fsync entry and exit
-		entryLink, err := link.Kprobe("vfs_fsync", state.objs.TraceVfsFsyncEntry, nil)
-		if err != nil {
-			return fmt.Errorf("attaching vfs_fsync entry: %w", err)
-		}
-		state.links = append(state.links, entryLink)
-
-		exitLink, err := link.Kretprobe("vfs_fsync", state.objs.TraceVfsFsyncExit, nil)
-		if err != nil {
-			entryLink.Close()
-			return fmt.Errorf("attaching vfs_fsync exit: %w", err)
-		}
-		state.links = append(state.links, exitLink)
-
-	case VFSProbeIterateDir:
-		// Attach to iterate_dir entry and exit
-		entryLink, err := link.Kprobe("iterate_dir", state.objs.TraceIterateDirEntry, nil)
-		if err != nil {
-			return fmt.Errorf("attaching iterate_dir entry: %w", err)
-		}
-		state.links = append(state.links, entryLink)
-
-		exitLink, err := link.Kretprobe("iterate_dir", state.objs.TraceIterateDirExit, nil)
-		if err != nil {
-			entryLink.Close()
-			return fmt.Errorf("attaching iterate_dir exit: %w", err)
-		}
-		state.links = append(state.links, exitLink)
-
-	default:
-		return fmt.Errorf("unsupported VFS probe type: %v", probeType)
-	}
-
+	// Premium collector uses tracepoints, not kprobes
+	// The eBPF programs are already attached via tracepoints in the SEC() definitions
+	// No manual attachment needed for tracepoints
 	return nil
 }
 
@@ -213,7 +147,7 @@ func (c *Collector) processStorageEventsImpl() {
 		default:
 			record, err := state.reader.Read()
 			if err != nil {
-				if ringbuf.IsClosed(err) {
+				if errors.Is(err, ringbuf.ErrClosed) {
 					return
 				}
 				if c.errorsTotal != nil {

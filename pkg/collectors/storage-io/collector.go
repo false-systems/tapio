@@ -591,22 +591,8 @@ func (c *Collector) convertToCollectorEvent(event *StorageIOEvent) (*domain.Coll
 		LatencyMS:    float64(event.Duration.Nanoseconds()) / 1e6,
 	}
 
-	// Determine event type based on operation
-	var eventType domain.CollectorEventType
-	switch event.Operation {
-	case "read":
-		eventType = domain.EventTypeStorageIORead
-	case "write":
-		eventType = domain.EventTypeStorageIOWrite
-	case "fsync":
-		eventType = domain.EventTypeStorageIOFsync
-	default:
-		if event.Duration > time.Duration(c.config.SlowIOThresholdMs)*time.Millisecond {
-			eventType = domain.EventTypeStorageIOSlow
-		} else {
-			eventType = domain.EventTypeStorageIORead // default
-		}
-	}
+	// Use generic storage IO type for all events
+	eventType := domain.EventTypeStorageIO
 
 	// Determine severity based on duration
 	var severity domain.EventSeverity
@@ -643,6 +629,12 @@ func (c *Collector) convertToCollectorEvent(event *StorageIOEvent) (*domain.Coll
 			Command:  event.Command,
 			CgroupID: event.CgroupID,
 
+			// Priority based on slow I/O
+			Priority: c.determinePriority(event),
+
+			// Tags for categorization
+			Tags: c.generateTags(event),
+
 			// Correlation hints
 			CorrelationHints: []string{
 				fmt.Sprintf("cgroup:%d", event.CgroupID),
@@ -655,20 +647,58 @@ func (c *Collector) convertToCollectorEvent(event *StorageIOEvent) (*domain.Coll
 	return collectorEvent, nil
 }
 
-// Helper methods for event processing
+// determinePriority determines event priority based on characteristics
+func (c *Collector) determinePriority(event *StorageIOEvent) domain.EventPriority {
+	// Critical: Very slow I/O or errors
+	if event.Duration > time.Duration(c.config.SlowIOThresholdMs*10)*time.Millisecond || event.ErrorCode != 0 {
+		return domain.PriorityCritical
+	}
 
-func (c *Collector) determinePriority(event *StorageIOEvent) domain.EventSeverity {
-	if event.ErrorCode != 0 {
-		return domain.EventSeverityCritical
+	// High: Slow I/O or blocked operations
+	if event.SlowIO || event.BlockedIO {
+		return domain.PriorityHigh
 	}
-	if event.Duration > time.Duration(c.config.SlowIOThresholdMs)*time.Millisecond {
-		return domain.EventSeverityWarning
+
+	// Normal: Kubernetes critical paths
+	if isK8sCriticalPath(event.Path) {
+		return domain.PriorityNormal
 	}
-	if event.K8sVolumeType != "" {
-		return domain.EventSeverityInfo
-	}
-	return domain.EventSeverityDebug
+
+	// Low: Everything else
+	return domain.PriorityLow
 }
+
+// generateTags generates tags for the event
+func (c *Collector) generateTags(event *StorageIOEvent) []string {
+	tags := []string{"storage-io"}
+
+	// Add operation tag
+	tags = append(tags, event.Operation)
+
+	// Add slow-io tag if applicable
+	if event.SlowIO {
+		tags = append(tags, "slow-io")
+	}
+
+	// Add blocked-io tag if applicable
+	if event.BlockedIO {
+		tags = append(tags, "blocked-io")
+	}
+
+	// Add kubernetes tag if it's a K8s path
+	if isK8sCriticalPath(event.Path) {
+		tags = append(tags, "kubernetes")
+	}
+
+	// Add volume type tag if available
+	if event.K8sVolumeType != "" {
+		tags = append(tags, fmt.Sprintf("volume:%s", event.K8sVolumeType))
+	}
+
+	return tags
+}
+
+// Helper methods for event processing
 
 func (c *Collector) trackSlowIOEvent(event *StorageIOEvent) {
 	c.slowIOCacheMu.Lock()
