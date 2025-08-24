@@ -17,6 +17,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
 	namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
 	namespaceBPF "github.com/yairfalse/tapio/pkg/collectors/namespace-collector/bpf"
+	"github.com/yairfalse/tapio/pkg/collectors/network/pkg/collectors/network"
 	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
@@ -31,6 +32,7 @@ var (
 	enableEtcd      = flag.Bool("enable-etcd", true, "Enable etcd collector")
 	enableNamespace = flag.Bool("enable-namespace", true, "Enable namespace collector")
 	enableKubelet   = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
+	enableNetwork   = flag.Bool("enable-network", true, "Enable network collector")
 	kubeletAddress  = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
 	etcdEndpoints   = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
 	logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
@@ -190,6 +192,20 @@ func main() {
 				logger.Error("Failed to register kubelet collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "kubelet")
+			}
+		}
+	}
+
+	if *enableNetwork {
+		networkConfig := network.DefaultIntelligenceConfig()
+		networkCollector, err := network.NewIntelligenceCollector("network", networkConfig, logger)
+		if err != nil {
+			logger.Error("Failed to create network collector", zap.Error(err))
+		} else {
+			if err := eventPipeline.RegisterCollector("network", networkCollector); err != nil {
+				logger.Error("Failed to register network collector", zap.Error(err))
+			} else {
+				enabledCollectors = append(enabledCollectors, "network")
 			}
 		}
 	}

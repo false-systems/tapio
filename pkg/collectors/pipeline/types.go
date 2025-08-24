@@ -17,7 +17,7 @@ type EventPipeline struct {
 	publisher  *EnhancedNATSPublisher
 	logger     *zap.Logger
 
-	eventsChan chan domain.RawEvent
+	eventsChan chan *domain.CollectorEvent
 	workers    int
 	ctx        context.Context
 	cancel     context.CancelFunc

@@ -30,7 +30,7 @@ func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
 		collectors: make(map[string]collectors.Collector),
 		publisher:  publisher,
 		logger:     logger,
-		eventsChan: make(chan domain.RawEvent, config.BufferSize),
+		eventsChan: make(chan *domain.CollectorEvent, config.BufferSize),
 		workers:    config.Workers,
 	}, nil
 }
@@ -275,16 +275,16 @@ func (p *EventPipeline) worker() {
 						}
 
 						if i == retries-1 {
-							// Final retry failed - use raw event fields for logging
-							eventID := fmt.Sprintf("%s-%d", event.Type, event.Timestamp.UnixNano())
-							if event.TraceID != "" {
-								eventID = event.TraceID
+							// Final retry failed - use CollectorEvent fields for logging
+							eventID := fmt.Sprintf("%s-%d", string(event.Type), event.Timestamp.UnixNano())
+							if event.Metadata.TraceID != "" {
+								eventID = event.Metadata.TraceID
 							}
-							p.logger.Error("Failed to publish raw event after retries",
+							p.logger.Error("Failed to publish event after retries",
 								zap.Error(err),
 								zap.String("event_id", eventID),
-								zap.String("event_type", event.Type),
-								zap.String("trace_id", event.TraceID),
+								zap.String("event_type", string(event.Type)),
+								zap.String("trace_id", event.Metadata.TraceID),
 								zap.Int("retries", retries),
 							)
 						} else {
