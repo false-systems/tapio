@@ -126,6 +126,7 @@ type EventDataContainer struct {
 	KubernetesResource *K8sResourceData `json:"k8s_resource,omitempty"`
 	KubernetesEvent    *K8sAPIEventData `json:"k8s_event,omitempty"`
 	K8sResource        *K8sResourceData `json:"k8s_resource_compat,omitempty"` // Compatibility
+	Kubelet            *KubeletData     `json:"kubelet,omitempty"`
 
 	// Application data
 	DNS  *DNSData  `json:"dns,omitempty"`
@@ -989,4 +990,70 @@ type OTELMetricData struct {
 	ServiceName  string `json:"service_name,omitempty"`
 	K8sPodName   string `json:"k8s_pod_name,omitempty"`
 	K8sNamespace string `json:"k8s_namespace,omitempty"`
+}
+
+// KubeletData holds kubelet-specific event data
+type KubeletData struct {
+	EventType        string                   `json:"event_type"`
+	NodeMetrics      *KubeletNodeMetrics      `json:"node_metrics,omitempty"`
+	ContainerMetrics *KubeletContainerMetrics `json:"container_metrics,omitempty"`
+	PodLifecycle     *KubeletPodLifecycle     `json:"pod_lifecycle,omitempty"`
+	StorageEvent     *KubeletStorageEvent     `json:"storage_event,omitempty"`
+}
+
+// KubeletNodeMetrics holds node-level metrics from kubelet
+type KubeletNodeMetrics struct {
+	NodeName         string    `json:"node_name"`
+	CPUUsageNano     uint64    `json:"cpu_usage_nano"`
+	CPUUsageMilli    uint64    `json:"cpu_usage_milli"`
+	MemoryUsage      uint64    `json:"memory_usage,omitempty"`
+	MemoryAvailable  uint64    `json:"memory_available,omitempty"`
+	MemoryWorkingSet uint64    `json:"memory_working_set,omitempty"`
+	Timestamp        time.Time `json:"timestamp"`
+}
+
+// KubeletContainerMetrics holds container-level metrics from kubelet
+type KubeletContainerMetrics struct {
+	Namespace        string    `json:"namespace"`
+	Pod              string    `json:"pod"`
+	Container        string    `json:"container"`
+	CPUUsageNano     uint64    `json:"cpu_usage_nano,omitempty"`
+	MemoryUsage      uint64    `json:"memory_usage,omitempty"`
+	MemoryWorkingSet uint64    `json:"memory_working_set,omitempty"`
+	MemoryRSS        uint64    `json:"memory_rss,omitempty"`
+	Timestamp        time.Time `json:"timestamp"`
+}
+
+// KubeletPodLifecycle holds pod/container lifecycle events
+type KubeletPodLifecycle struct {
+	Namespace    string    `json:"namespace"`
+	Pod          string    `json:"pod"`
+	Container    string    `json:"container,omitempty"`
+	Condition    string    `json:"condition,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
+	Message      string    `json:"message,omitempty"`
+	ExitCode     int32     `json:"exit_code,omitempty"`
+	RestartCount int32     `json:"restart_count,omitempty"`
+	LastExitCode int32     `json:"last_exit_code,omitempty"`
+	LastReason   string    `json:"last_reason,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// KubeletStorageEvent holds storage-related events
+type KubeletStorageEvent struct {
+	Namespace      string    `json:"namespace"`
+	Pod            string    `json:"pod"`
+	UsedBytes      uint64    `json:"used_bytes"`
+	AvailableBytes uint64    `json:"available_bytes"`
+	UsagePercent   float64   `json:"usage_percent"`
+	Timestamp      time.Time `json:"timestamp"`
+}
+
+// GetKubeletData returns kubelet data from the event if present
+func (e *CollectorEvent) GetKubeletData() (*KubeletData, bool) {
+	if e.EventData.Kubelet != nil {
+		return e.EventData.Kubelet, true
+	}
+	return nil, false
 }

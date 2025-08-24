@@ -120,32 +120,42 @@ func TestCreateEvent(t *testing.T) {
 
 	event := collector.createEvent("netns_create", data)
 
-	if event.Type != "cni" {
-		t.Errorf("Expected event type 'cni', got '%s'", event.Type)
+	if event.Source != "test-cni" {
+		t.Errorf("Expected event source 'test-cni', got '%s'", event.Source)
 	}
 
-	if event.TraceID == "" {
-		t.Error("Event should have a trace ID")
+	if event.TraceContext == nil || !event.TraceContext.TraceID.IsValid() {
+		t.Error("Event should have a valid trace context")
 	}
 
-	if event.SpanID == "" {
-		t.Error("Event should have a span ID")
+	if event.TraceContext == nil || !event.TraceContext.SpanID.IsValid() {
+		t.Error("Event should have a valid span ID")
 	}
 
-	if event.Metadata["collector"] != "test-cni" {
-		t.Errorf("Expected collector metadata 'test-cni', got '%s'", event.Metadata["collector"])
+	if event.Metadata.Labels["event_type"] != "netns_create" {
+		t.Errorf("Expected event type 'netns_create', got '%s'", event.Metadata.Labels["event_type"])
 	}
 
-	if event.Metadata["event"] != "netns_create" {
-		t.Errorf("Expected event metadata 'netns_create', got '%s'", event.Metadata["event"])
+	// Check if K8s context was extracted
+	if event.K8sContext == nil {
+		t.Error("Event should have K8s context")
+	} else {
+		if event.K8sContext.UID != "550e8400-e29b-41d4-a716-446655440000" {
+			t.Errorf("Expected k8s_uid '550e8400-e29b-41d4-a716-446655440000', got '%s'", event.K8sContext.UID)
+		}
 	}
 
-	if event.Metadata["k8s_kind"] != "Pod" {
-		t.Errorf("Expected k8s_kind 'Pod', got '%s'", event.Metadata["k8s_kind"])
-	}
-
-	if event.Metadata["k8s_uid"] != "550e8400-e29b-41d4-a716-446655440000" {
-		t.Errorf("Expected k8s_uid '550e8400-e29b-41d4-a716-446655440000', got '%s'", event.Metadata["k8s_uid"])
+	// Check process data was extracted
+	processData, hasProcess := event.GetProcessData()
+	if !hasProcess {
+		t.Error("Event should have process data")
+	} else {
+		if processData.PID != 1234 {
+			t.Errorf("Expected PID 1234, got %d", processData.PID)
+		}
+		if processData.Command != "test-process" {
+			t.Errorf("Expected command 'test-process', got '%s'", processData.Command)
+		}
 	}
 }
 
@@ -166,13 +176,14 @@ func TestCreateEventWithMarshalError(t *testing.T) {
 
 	event := collector.createEvent("test", data)
 
-	if event.Type != "cni" {
-		t.Errorf("Expected event type 'cni', got '%s'", event.Type)
+	// Check that event type was set (the exact type depends on the eventType parameter)
+	if event.Type == "" {
+		t.Error("Event type should not be empty")
 	}
 
 	// Event should be created successfully
-	if len(event.Data) == 0 {
-		t.Error("Event data should not be empty")
+	if event.EventData.RawData == nil || len(event.EventData.RawData.Data) == 0 {
+		t.Error("Event raw data should not be empty")
 	}
 }
 
@@ -394,10 +405,10 @@ func TestCollectorOTELTracing(t *testing.T) {
 	}
 
 	event := collector.createEvent("netns_create", data)
-	if event.TraceID == "" {
+	if event.TraceContext == nil || !event.TraceContext.TraceID.IsValid() {
 		t.Error("Event should have trace ID from context")
 	}
-	if event.SpanID == "" {
+	if event.TraceContext == nil || !event.TraceContext.SpanID.IsValid() {
 		t.Error("Event should have span ID from context")
 	}
 
@@ -507,11 +518,11 @@ func TestK8sMetadataExtraction(t *testing.T) {
 			event := collector.createEvent("test_event", tt.data)
 
 			if tt.hasK8sUID {
-				if event.Metadata["k8s_uid"] == "" {
+				if event.K8sContext == nil || event.K8sContext.UID == "" {
 					t.Error("Expected k8s_uid to be extracted")
 				}
 			} else {
-				if event.Metadata["k8s_uid"] != "" {
+				if event.K8sContext != nil && event.K8sContext.UID != "" {
 					t.Error("Did not expect k8s_uid to be extracted")
 				}
 			}

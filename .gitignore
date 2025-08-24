@@ -404,18 +404,4 @@ perf.data.old
 
 # =============================================================================
 # END OF GITIGNORE - KEEP THIS FILE CLEAN AND ORGANIZED
-# =============================================================================collectors
-
-# Test binaries
-*.test
-behavior.test
-
-# Build artifacts
-build/loader
-build/simple-loader
-bin/tapio
-
-# Binary files
-collectors
-correlation-service
-tapio
+# =============================================================================
