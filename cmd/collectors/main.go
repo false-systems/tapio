@@ -17,6 +17,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
 	namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
 	namespaceBPF "github.com/yairfalse/tapio/pkg/collectors/namespace-collector/bpf"
+	"github.com/yairfalse/tapio/pkg/collectors/network/pkg/collectors/network"
 	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
@@ -31,10 +32,11 @@ var (
 	enableEtcd      = flag.Bool("enable-etcd", true, "Enable etcd collector")
 	enableNamespace = flag.Bool("enable-namespace", true, "Enable namespace collector")
 	enableKubelet   = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
+	enableNetwork   = flag.Bool("enable-network", true, "Enable network collector")
 	kubeletAddress  = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
 	etcdEndpoints   = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
 	logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-	workerCount     = flag.Int("workers", 4, "Number of pipeline workers")
+	workerCount     = flag.Int("workers", 4, "Number of orchestrator workers")
 	bufferSize      = flag.Int("buffer-size", 10000, "Event buffer size")
 )
 
@@ -65,17 +67,17 @@ func main() {
 		natsConfig.URL = *natsURL
 	}
 
-	// Create EventPipeline config
-	pipelineConfig := pipeline.Config{
+	// Create CollectorOrchestrator config
+	orchestratorConfig := pipeline.Config{
 		NATSConfig: natsConfig,
 		BufferSize: *bufferSize,
 		Workers:    *workerCount,
 	}
 
-	// Create EventPipeline
-	eventPipeline, err := pipeline.New(logger, pipelineConfig)
+	// Create CollectorOrchestrator
+	collectorOrchestrator, err := pipeline.New(logger, orchestratorConfig)
 	if err != nil {
-		log.Fatalf("Failed to create event pipeline: %v", err)
+		log.Fatalf("Failed to create collector orchestrator: %v", err)
 	}
 
 	// Track enabled collectors
@@ -88,7 +90,7 @@ func main() {
 		if err != nil {
 			logger.Error("Failed to create kubeapi collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("kubeapi", kubeapiCollector); err != nil {
+			if err := collectorOrchestrator.RegisterCollector("kubeapi", kubeapiCollector); err != nil {
 				logger.Error("Failed to register kubeapi collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "kubeapi")
@@ -107,7 +109,7 @@ func main() {
 		if err != nil {
 			logger.Error("Failed to create kernel collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("kernel", kernelCollector); err != nil {
+			if err := collectorOrchestrator.RegisterCollector("kernel", kernelCollector); err != nil {
 				logger.Error("Failed to register kernel collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "kernel")
@@ -122,7 +124,7 @@ func main() {
 		if err != nil {
 			logger.Error("Failed to create systemd collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("systemd", systemdCollector); err != nil {
+			if err := collectorOrchestrator.RegisterCollector("systemd", systemdCollector); err != nil {
 				logger.Error("Failed to register systemd collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "systemd")
@@ -145,7 +147,7 @@ func main() {
 		if err != nil {
 			logger.Error("Failed to create etcd collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("etcd", etcdCollector); err != nil {
+			if err := collectorOrchestrator.RegisterCollector("etcd", etcdCollector); err != nil {
 				logger.Error("Failed to register etcd collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "etcd")
@@ -165,7 +167,7 @@ func main() {
 		if err != nil {
 			logger.Error("Failed to create namespace collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("namespace", namespaceCollector); err != nil {
+			if err := collectorOrchestrator.RegisterCollector("namespace", namespaceCollector); err != nil {
 				logger.Error("Failed to register namespace collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "namespace")
@@ -186,10 +188,24 @@ func main() {
 		if err != nil {
 			logger.Error("Failed to create kubelet collector", zap.Error(err))
 		} else {
-			if err := eventPipeline.RegisterCollector("kubelet", kubeletCollector); err != nil {
+			if err := collectorOrchestrator.RegisterCollector("kubelet", kubeletCollector); err != nil {
 				logger.Error("Failed to register kubelet collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "kubelet")
+			}
+		}
+	}
+
+	if *enableNetwork {
+		networkConfig := network.DefaultIntelligenceConfig()
+		networkCollector, err := network.NewIntelligenceCollector("network", networkConfig, logger)
+		if err != nil {
+			logger.Error("Failed to create network collector", zap.Error(err))
+		} else {
+			if err := collectorOrchestrator.RegisterCollector("network", networkCollector); err != nil {
+				logger.Error("Failed to register network collector", zap.Error(err))
+			} else {
+				enabledCollectors = append(enabledCollectors, "network")
 			}
 		}
 	}
@@ -200,8 +216,8 @@ func main() {
 	}
 
 	// Start pipeline
-	if err := eventPipeline.Start(ctx); err != nil {
-		log.Fatalf("Failed to start event pipeline: %v", err)
+	if err := collectorOrchestrator.Start(ctx); err != nil {
+		log.Fatalf("Failed to start collector orchestrator: %v", err)
 	}
 
 	logger.Info("Tapio collectors started successfully",
@@ -211,7 +227,7 @@ func main() {
 		zap.Int("buffer_size", *bufferSize))
 
 	// Start health monitoring
-	go monitorCollectorHealth(ctx, eventPipeline, logger)
+	go monitorCollectorHealth(ctx, collectorOrchestrator, logger)
 
 	// Wait for shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -219,11 +235,11 @@ func main() {
 	<-sigChan
 
 	logger.Info("Shutting down collectors...")
-	eventPipeline.Stop()
+	collectorOrchestrator.Stop()
 }
 
 // monitorCollectorHealth periodically checks collector health
-func monitorCollectorHealth(ctx context.Context, eventPipeline *pipeline.EventPipeline, logger *zap.Logger) {
+func monitorCollectorHealth(ctx context.Context, orchestrator *pipeline.CollectorOrchestrator, logger *zap.Logger) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
