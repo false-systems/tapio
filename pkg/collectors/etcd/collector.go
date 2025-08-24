@@ -24,7 +24,7 @@ type Collector struct {
 	name      string
 	config    Config
 	client    *clientv3.Client
-	events    chan domain.RawEvent
+	events    chan *domain.CollectorEvent
 	ctx       context.Context
 	cancel    context.CancelFunc
 	healthy   bool
@@ -164,7 +164,7 @@ func NewCollector(name string, config Config) (*Collector, error) {
 	return &Collector{
 		name:            name,
 		config:          config,
-		events:          make(chan domain.RawEvent, 10000), // Large buffer
+		events:          make(chan *domain.CollectorEvent, 10000), // Large buffer
 		healthy:         true,
 		startTime:       time.Now(),
 		logger:          logger,
@@ -367,7 +367,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
@@ -484,22 +484,13 @@ func (c *Collector) processEtcdEvent(ctx context.Context, event *clientv3.Event)
 	// Add enhanced K8s metadata - STANDARD for all collectors
 	k8sMetadata := c.extractK8sMetadata(key)
 
-	// Create complete event with metadata
-	completeEvent := struct {
-		Operation   string            `json:"operation"`
-		EventData   EtcdEventData     `json:"event_data"`
-		K8sMetadata map[string]string `json:"k8s_metadata"`
-	}{
-		Operation:   operation,
-		EventData:   eventData,
-		K8sMetadata: k8sMetadata,
-	}
+	// Event data will be used directly in the collector event creation
 
-	rawEvent := c.createEventWithContext(ctx, operation, completeEvent)
+	collectorEvent := c.createETCDCollectorEvent(ctx, operation, &eventData, k8sMetadata)
 
 	// Send event
 	select {
-	case c.events <- rawEvent:
+	case c.events <- collectorEvent:
 		c.mu.Lock()
 		c.stats.EventsProcessed++
 		c.stats.LastEventTime = time.Now()
@@ -634,34 +625,124 @@ func (c *Collector) normalizeResourceType(resourceType string) string {
 	}
 }
 
-// Helper to create an etcd raw event with trace context
-func (c *Collector) createEventWithContext(ctx context.Context, eventType string, data interface{}) domain.RawEvent {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		// If marshaling fails, create minimal event with error information
-		jsonData = []byte(`{"error": "failed to marshal event data", "event_type": "` + eventType + `"}`)
-		c.mu.Lock()
-		c.stats.ErrorCount++
-		c.mu.Unlock()
-		if c.errorsTotal != nil {
-			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "marshal"),
-			))
+// createETCDCollectorEvent creates a properly structured CollectorEvent from ETCD data
+func (c *Collector) createETCDCollectorEvent(ctx context.Context, operation string, eventData *EtcdEventData, k8sMetadata map[string]string) *domain.CollectorEvent {
+	eventID := fmt.Sprintf("etcd-%s-%d", operation, time.Now().UnixNano())
+
+	// Determine event type based on ETCD operation and resource
+	var eventType domain.CollectorEventType
+	if eventData.ResourceType != "" && eventData.ResourceType != "unknown" {
+		// This is a K8s resource operation
+		switch operation {
+		case "PUT":
+			eventType = domain.EventTypeK8sEvent
+		case "DELETE":
+			eventType = domain.EventTypeK8sEvent
+		default:
+			eventType = domain.EventTypeETCDOperation
+		}
+	} else {
+		// Generic ETCD operation
+		eventType = domain.EventTypeETCDOperation
+	}
+
+	// Build ETCD data structure
+	etcdData := &domain.ETCDData{
+		Operation:    operation,
+		Key:          eventData.Key,
+		Value:        eventData.Value,
+		Revision:     eventData.ModRevision,
+		Duration:     0,   // Would need to track operation duration
+		ResponseCode: 200, // Assume success, error handling would set differently
+		ResourceType: eventData.ResourceType,
+	}
+
+	// Add K8s context if we have K8s metadata
+	if resourceName, ok := k8sMetadata["k8s_name"]; ok {
+		etcdData.ResourceName = resourceName
+	}
+	if namespace, ok := k8sMetadata["k8s_namespace"]; ok {
+		etcdData.Namespace = namespace
+	}
+
+	// Build K8s resource data if this is a K8s resource
+	var k8sResourceData *domain.K8sResourceData
+	if eventData.ResourceType != "" && eventData.ResourceType != "unknown" {
+		k8sResourceData = &domain.K8sResourceData{
+			Kind: k8sMetadata["k8s_kind"],
+			Name: k8sMetadata["k8s_name"],
+			UID:  "", // Would need to parse from value
+		}
+
+		if namespace, ok := k8sMetadata["k8s_namespace"]; ok {
+			k8sResourceData.Namespace = namespace
+		}
+
+		// Determine operation type
+		switch operation {
+		case "PUT":
+			k8sResourceData.Operation = "update" // Could be create or update
+		case "DELETE":
+			k8sResourceData.Operation = "delete"
+		default:
+			k8sResourceData.Operation = strings.ToLower(operation)
 		}
 	}
 
-	// No need to extract trace context - it's handled at a higher level
-
-	return domain.RawEvent{
-		Timestamp: time.Now(),
-		Source:    "etcd",
-		Data:      jsonData,
+	// Convert complete event data to JSON for raw storage
+	completeEventData := struct {
+		Operation   string            `json:"operation"`
+		EventData   *EtcdEventData    `json:"event_data"`
+		K8sMetadata map[string]string `json:"k8s_metadata"`
+	}{
+		Operation:   operation,
+		EventData:   eventData,
+		K8sMetadata: k8sMetadata,
 	}
-}
+	rawDataBytes, _ := json.Marshal(completeEventData)
 
-// Helper to create an etcd raw event (backward compatibility)
-func (c *Collector) createEvent(eventType string, data interface{}) domain.RawEvent {
-	return c.createEventWithContext(context.Background(), eventType, data)
+	collectorEvent := &domain.CollectorEvent{
+		EventID:   eventID,
+		Timestamp: time.Now(),
+		Type:      eventType,
+		Source:    c.name,
+		Severity:  domain.EventSeverityInfo,
+
+		EventData: domain.EventDataContainer{
+			ETCD:        etcdData,
+			K8sResource: k8sResourceData,
+			RawData: &domain.RawData{
+				Format:      "json",
+				ContentType: "application/json",
+				Data:        rawDataBytes,
+				Size:        int64(len(rawDataBytes)),
+			},
+		},
+
+		Metadata: domain.EventMetadata{
+			Priority: domain.PriorityNormal,
+			Tags:     []string{"etcd", "storage"},
+			Labels: map[string]string{
+				"operation":     operation,
+				"resource_type": eventData.ResourceType,
+			},
+		},
+
+		CorrelationHints: &domain.CorrelationHints{},
+	}
+
+	// Add K8s context if this is a K8s resource
+	if k8sResourceData != nil {
+		collectorEvent.K8sContext = &domain.K8sContext{
+			Name: k8sResourceData.Name,
+			Kind: k8sResourceData.Kind,
+		}
+		if k8sResourceData.Namespace != "" {
+			collectorEvent.K8sContext.Namespace = k8sResourceData.Namespace
+		}
+	}
+
+	return collectorEvent
 }
 
 // extractTraceContext extracts trace and span IDs from context

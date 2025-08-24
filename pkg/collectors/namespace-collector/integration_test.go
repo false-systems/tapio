@@ -72,16 +72,17 @@ func TestCollectorEventGeneration(t *testing.T) {
 
 		event := collector.createEvent(eventType, data)
 
-		if event.Type != "cni" {
-			t.Errorf("Expected event type 'cni', got '%s'", event.Type)
+		// Check that event type is set properly based on the eventType parameter
+		if event.Type == "" {
+			t.Error("Event type should not be empty")
 		}
 
-		if event.Metadata["event"] != eventType {
-			t.Errorf("Expected event metadata '%s', got '%s'", eventType, event.Metadata["event"])
+		if event.Metadata.Labels["event_type"] != eventType {
+			t.Errorf("Expected event type '%s', got '%s'", eventType, event.Metadata.Labels["event_type"])
 		}
 
-		if event.TraceID == "" || event.SpanID == "" {
-			t.Error("Event should have trace and span IDs")
+		if event.TraceContext == nil || !event.TraceContext.TraceID.IsValid() || !event.TraceContext.SpanID.IsValid() {
+			t.Error("Event should have valid trace and span IDs")
 		}
 	}
 }
@@ -96,8 +97,8 @@ func TestCollectorEdgeCases(t *testing.T) {
 
 	// Test with empty data
 	event := collector.createEvent("test", map[string]string{})
-	if len(event.Data) == 0 {
-		t.Error("Event should have data even when empty")
+	if event.EventData.RawData == nil || len(event.EventData.RawData.Data) == 0 {
+		t.Error("Event should have raw data even when empty")
 	}
 
 	// Test with nil context

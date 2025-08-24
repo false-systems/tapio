@@ -11,8 +11,34 @@ import (
 	"go.uber.org/zap"
 )
 
-// EventPipeline manages the flow of events from collectors to NATS
-type EventPipeline struct {
+// CollectorOrchestrator is the central orchestration engine for all collectors in Tapio.
+//
+// RESPONSIBILITIES:
+// 1. COLLECTOR REGISTRY: Maintains registry of all active collectors
+// 2. LIFECYCLE MANAGEMENT: Coordinates start/stop operations across all collectors
+// 3. EVENT AGGREGATION: Collects events from all collector channels into unified stream
+// 4. WORKER POOL: Manages configurable worker goroutines for parallel processing
+// 5. NATS PUBLISHING: Publishes aggregated events to NATS messaging system
+// 6. HEALTH MONITORING: Tracks health status of all registered collectors
+// 7. GRACEFUL SHUTDOWN: Ensures clean shutdown with proper resource cleanup
+//
+// ARCHITECTURE:
+// - Multiple collectors (KubeAPI, Network, DNS, eBPF, etc.) register with orchestrator
+// - Each collector runs independently and emits events to their own channels
+// - Orchestrator spawns consumer goroutines to read from each collector's event channel
+// - All events flow into a central aggregation channel (eventsChan)
+// - Worker pool (default 4 workers) processes events from aggregation channel
+// - Workers publish events to NATS with retry logic and backpressure handling
+//
+// CONCURRENCY DESIGN:
+// - 1 consumer goroutine per registered collector
+// - N worker goroutines for NATS publishing (configurable)
+// - Proper coordination with WaitGroup and context cancellation
+// - Safe channel operations with panic recovery
+//
+// This design provides scalability, fault isolation, and graceful degradation
+// while maintaining a clean separation between collectors and downstream systems.
+type CollectorOrchestrator struct {
 	collectors map[string]collectors.Collector
 	publisher  *EnhancedNATSPublisher
 	logger     *zap.Logger
@@ -24,10 +50,31 @@ type EventPipeline struct {
 	wg         *sync.WaitGroup
 }
 
-// Config holds pipeline configuration
+// Config holds orchestrator configuration
 type Config struct {
-	Workers    int
+	// Workers specifies the number of goroutines processing events from the aggregation channel
+	// Higher values increase throughput but consume more resources
+	// Valid range: 1-64 workers
+	// Default: 4 workers
+	// Recommendations:
+	//   - Low load (< 1K events/sec): 2-4 workers
+	//   - Medium load (1K-10K events/sec): 4-8 workers
+	//   - High load (> 10K events/sec): 8-16 workers
+	//   - Very high load: 16+ workers (monitor CPU usage)
+	Workers int
+
+	// BufferSize sets the capacity of the central event aggregation channel
+	// Larger buffers provide better burst handling but use more memory
+	// Valid range: 100-100,000 events
+	// Default: 10,000 events
+	// Memory usage: ~1KB per event in buffer
+	// Recommendations:
+	//   - Low latency requirements: 1,000-5,000
+	//   - High throughput: 10,000-50,000
+	//   - Burst handling: 25,000-100,000
 	BufferSize int
+
+	// NATSConfig contains NATS connection and publishing settings
 	NATSConfig *config.NATSConfig
 }
 
@@ -38,6 +85,35 @@ func DefaultConfig() Config {
 		BufferSize: 10000,
 		NATSConfig: config.DefaultNATSConfig(),
 	}
+}
+
+// RecommendedWorkerCount suggests optimal worker count based on collector count and expected load
+func RecommendedWorkerCount(collectorCount int, expectedEventsPerSecond int) int {
+	// Base recommendation: 1 worker per 2 collectors, minimum 2
+	baseWorkers := max(2, collectorCount/2+1)
+
+	// Adjust for expected load
+	if expectedEventsPerSecond > 10000 {
+		return min(64, baseWorkers*4) // High load
+	} else if expectedEventsPerSecond > 1000 {
+		return min(32, baseWorkers*2) // Medium load
+	}
+
+	return min(16, baseWorkers) // Low load
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // CollectorHealthStatus represents the health status of a collector

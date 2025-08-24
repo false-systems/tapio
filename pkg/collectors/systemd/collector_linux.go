@@ -118,6 +118,99 @@ func (c *Collector) stopEBPF() {
 	c.logger.Info("Systemd eBPF monitoring stopped", zap.String("collector", c.name))
 }
 
+// createSystemdCollectorEvent creates a properly structured CollectorEvent from systemd eBPF data
+func (c *Collector) createSystemdCollectorEvent(ctx context.Context, event *SystemdEvent, rawData []byte) *domain.CollectorEvent {
+	eventID := fmt.Sprintf("systemd-%d-%d", event.Timestamp, event.PID)
+	timestamp := time.Unix(0, int64(event.Timestamp))
+
+	// Extract command name from fixed-size array
+	comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
+	serviceName := string(bytes.TrimRight(event.ServiceName[:], "\x00"))
+	cgroupPath := string(bytes.TrimRight(event.CgroupPath[:], "\x00"))
+
+	// Determine event type based on systemd event data
+	var eventType domain.CollectorEventType
+	var systemdMessage string
+
+	switch event.EventType {
+	case 1: // Service start
+		eventType = domain.EventTypeSystemdService
+		systemdMessage = fmt.Sprintf("Service %s started", serviceName)
+	case 2: // Service stop
+		eventType = domain.EventTypeSystemdService
+		systemdMessage = fmt.Sprintf("Service %s stopped", serviceName)
+	case 3: // Process exec
+		eventType = domain.EventTypeKernelProcess
+		systemdMessage = fmt.Sprintf("Process %s executed", comm)
+	case 4: // Process exit
+		eventType = domain.EventTypeKernelProcess
+		systemdMessage = fmt.Sprintf("Process %s exited with code %d", comm, event.ExitCode)
+	default:
+		eventType = domain.EventTypeSystemdSystem
+		systemdMessage = fmt.Sprintf("Systemd event type %d", event.EventType)
+	}
+
+	// Build SystemdData structure
+	systemdData := &domain.SystemdData{
+		Unit:     serviceName,
+		Message:  systemdMessage,
+		Priority: "info",
+		MainPID:  int32(event.PID),
+	}
+
+	// Build Process data for correlation
+	processData := &domain.ProcessData{
+		PID:        int32(event.PID),
+		PPID:       int32(event.PPID),
+		Command:    comm,
+		UID:        int32(event.UID),
+		GID:        int32(event.GID),
+		CgroupPath: cgroupPath,
+	}
+
+	// Create CollectorEvent
+	collectorEvent := &domain.CollectorEvent{
+		EventID:   eventID,
+		Timestamp: timestamp,
+		Type:      eventType,
+		Source:    c.name,
+		Severity:  domain.EventSeverityInfo,
+
+		EventData: domain.EventDataContainer{
+			Systemd: systemdData,
+			Process: processData,
+			RawData: &domain.RawData{
+				Format:      "ebpf_binary",
+				ContentType: "application/octet-stream",
+				Data:        rawData,
+				Size:        int64(len(rawData)),
+			},
+		},
+
+		Metadata: domain.EventMetadata{
+			PID:      int32(event.PID),
+			PPID:     int32(event.PPID),
+			UID:      int32(event.UID),
+			GID:      int32(event.GID),
+			CgroupID: event.CgroupID,
+			Command:  comm,
+			Priority: domain.PriorityNormal,
+			Tags:     []string{"systemd", "ebpf"},
+			Labels: map[string]string{
+				"service_name": serviceName,
+				"cgroup_path":  cgroupPath,
+			},
+		},
+
+		CorrelationHints: &domain.CorrelationHints{
+			ProcessID:  int32(event.PID),
+			CgroupPath: cgroupPath,
+		},
+	}
+
+	return collectorEvent
+}
+
 // processEvents processes events from the ring buffer - simple version
 func (c *Collector) processEvents() {
 	ctx, span := c.tracer.Start(context.Background(), "systemd.collector.process_events")
@@ -175,12 +268,8 @@ func (c *Collector) processEvents() {
 			c.processingTime.Record(ctx, duration)
 		}
 
-		// Convert to RawEvent - NO BUSINESS LOGIC
-		rawEvent := domain.RawEvent{
-			Timestamp: time.Unix(0, int64(event.Timestamp)),
-			Source:    "systemd",
-			Data:      record.RawSample, // Raw eBPF event data
-		}
+		// Convert to CollectorEvent with proper systemd data structure
+		collectorEvent := c.createSystemdCollectorEvent(ctx, &event, record.RawSample)
 
 		// Update buffer usage gauge
 		if c.bufferUsage != nil {
@@ -188,7 +277,7 @@ func (c *Collector) processEvents() {
 		}
 
 		select {
-		case c.events <- rawEvent:
+		case c.events <- collectorEvent:
 			// Event sent successfully
 			if c.eventsProcessed != nil {
 				c.eventsProcessed.Add(ctx, 1)
