@@ -1,0 +1,165 @@
+# Tapio Collectors Configuration
+# This file configures the collector orchestrator and all available collectors
+
+orchestrator:
+  # Number of worker goroutines for event processing
+  workers: 4
+  
+  # Size of the event buffer channel
+  buffer_size: 10000
+  
+  # Log level: debug, info, warn, error
+  log_level: info
+  
+  # NATS configuration for event publishing
+  nats:
+    url: "${NATS_URL:-nats://localhost:4222}"
+    subject: "tapio.events"
+    max_reconnects: 5
+    auth_enabled: false
+    # username: "${NATS_USER}"
+    # password: "${NATS_PASS}"
+    # token: "${NATS_TOKEN}"
+
+# Collector configurations
+collectors:
+  # Kernel collector - ConfigMap/Secret access monitoring
+  kernel:
+    enabled: true
+    config:
+      buffer_size: 10000
+      enable_ebpf: true
+      monitor_configmaps: true
+      monitor_secrets: true
+      enable_pod_correlation: true
+      syscall_sampling_rate: 100
+
+  # Kubelet collector - Node and pod metrics
+  kubelet:
+    enabled: true
+    config:
+      address: "${KUBELET_ADDRESS:-localhost:10250}"
+      insecure: true
+      poll_interval: "30s"
+      enable_pod_lifecycle: true
+      enable_resource_metrics: true
+      enable_storage_monitoring: true
+
+  # DNS collector - DNS query/response tracking
+  dns:
+    enabled: true
+    config:
+      buffer_size: 5000
+      enable_ebpf: true
+      cache_analysis: true
+      query_timeout: "5s"
+      enable_correlation: true
+
+  # Network collector - L3-L4-L7 intelligence
+  network:
+    enabled: true
+    config:
+      enable_l7: true
+      intelligence_mode: true
+      noise_reduction: 0.95
+      enable_grpc: true
+      enable_http: true
+      grpc_ports: [50051, 9090, 8080]
+      http_ports: [80, 8080, 3000]
+      https_ports: [443, 8443]
+
+  # Namespace collector - Network namespace operations
+  namespace-collector:
+    enabled: false
+    config:
+      enable_ebpf: true
+      monitor_network_namespaces: true
+      monitor_pid_namespaces: false
+
+  # CRI-eBPF collector - Container runtime monitoring
+  cri-ebpf:
+    enabled: true
+    config:
+      buffer_size: 5000
+      enable_oom_kill: true
+      enable_memory_pressure: true
+      enable_process_exit: true
+      enable_process_fork: false
+      memory_threshold: 0.9
+
+  # KubeAPI collector - Kubernetes API events
+  kubeapi:
+    enabled: false
+    config:
+      enable_audit_logs: true
+      resource_types:
+        - pods
+        - services
+        - deployments
+        - configmaps
+        - secrets
+      namespaces:
+        - default
+        - kube-system
+
+  # Systemd collector - Service lifecycle
+  systemd:
+    enabled: false
+    config:
+      enable_journal: true
+      units:
+        - kubelet.service
+        - docker.service
+        - containerd.service
+      priority: "warning"
+
+  # Storage I/O collector - Disk I/O monitoring
+  storage-io:
+    enabled: false
+    config:
+      enable_ebpf: true
+      monitor_paths:
+        - /var/lib/docker
+        - /var/lib/kubelet
+        - /var/lib/etcd
+      latency_threshold_ms: 100
+
+  # OOM collector - Out of memory events
+  oom:
+    enabled: true
+    config:
+      enable_ebpf: true
+      track_containers: true
+      track_processes: false
+
+  # Syscall errors collector - Failed system calls
+  syscall-errors:
+    enabled: false
+    config:
+      enable_ebpf: true
+      error_codes:
+        - EACCES
+        - ENOENT
+        - EPERM
+        - EIO
+      sampling_rate: 100
+
+  # ETCD collector - etcd operations
+  etcd:
+    enabled: false
+    config:
+      endpoints: ["${ETCD_ENDPOINTS:-localhost:2379}"]
+      enable_watch: true
+      # cert_file: "/path/to/cert"
+      # key_file: "/path/to/key"
+      # ca_file: "/path/to/ca"
+
+  # OTEL collector - OpenTelemetry metrics
+  otel:
+    enabled: true
+    config:
+      endpoint: "${OTEL_ENDPOINT:-localhost:4317}"
+      protocol: "grpc"
+      insecure: true
+      # headers:
+      #   Authorization: "Bearer ${OTEL_TOKEN}"
