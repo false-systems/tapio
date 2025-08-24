@@ -54,11 +54,13 @@ type Collector struct {
 }
 
 // NewCollector creates a new simple systemd collector
-func NewCollector(name string, cfg Config) (*Collector, error) {
-	// Create logger
-	logger, err := zap.NewProduction()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create logger: %w", err)
+func NewCollector(name string, cfg Config, logger *zap.Logger) (*Collector, error) {
+	if logger == nil {
+		var err error
+		logger, err = zap.NewProduction()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create logger: %w", err)
+		}
 	}
 
 	// Initialize minimal OTEL components
@@ -158,8 +160,15 @@ func (c *Collector) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the collector
+// Stop stops the collector idempotently
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.healthy {
+		return nil // Already stopped
+	}
+
 	c.logger.Info("Stopping systemd collector")
 
 	if c.cancel != nil {
@@ -183,5 +192,7 @@ func (c *Collector) Events() <-chan domain.RawEvent {
 
 // IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.healthy
 }

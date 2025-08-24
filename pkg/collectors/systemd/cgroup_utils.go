@@ -19,14 +19,23 @@ func (c *Collector) extractUnitFromCgroup(cgroupData string) string {
 			continue
 		}
 
+		// Security: Skip lines containing null bytes
+		if strings.Contains(line, "\x00") {
+			continue
+		}
+
 		// Parse cgroup line format: "hierarchy:controller:path"
-		// Use SplitN to handle paths with colons (e.g., dbus services)
 		parts := strings.SplitN(line, ":", 3)
 		if len(parts) != 3 {
 			continue
 		}
 
 		path := parts[2]
+
+		// Security: Check for path traversal attempts
+		if strings.Contains(path, "..") {
+			continue
+		}
 
 		// Skip non-systemd paths
 		if !strings.Contains(path, ".slice") && !strings.Contains(path, ".service") &&
@@ -40,6 +49,11 @@ func (c *Collector) extractUnitFromCgroup(cgroupData string) string {
 		segments := strings.Split(path, "/")
 		for i := len(segments) - 1; i >= 0; i-- {
 			segment := segments[i]
+
+			// Security: Validate segment doesn't contain null bytes or traversal
+			if strings.Contains(segment, "\x00") || strings.Contains(segment, "..") {
+				continue
+			}
 
 			// Check for systemd unit patterns
 			if strings.HasSuffix(segment, ".service") ||
@@ -93,27 +107,18 @@ func getUnitPriority(unit string) int {
 
 // isValidSystemdProcess checks if a process name is systemd-related
 func (c *Collector) isValidSystemdProcess(comm string) bool {
-	if comm == "" || len(comm) >= 100 {
+	if comm == "" || len(comm) > 30 {
 		return false
 	}
 
-	// Check for systemd-related process names
-	systemdProcesses := []string{
-		"systemd",
-		"systemd-logind",
-		"systemd-resolve",
-		"systemd-networkd",
-		"systemd-journal",
-		"systemd-udevd",
-		"systemd-timesyncd",
-		"systemd-machined",
-		"systemd-hostnamed",
+	// Check for exact systemd process matches and valid prefixes
+	if comm == "systemd" || comm == "systemctl" {
+		return true
 	}
 
-	for _, proc := range systemdProcesses {
-		if comm == proc || strings.HasPrefix(comm, proc) {
-			return true
-		}
+	// Check for systemd- prefix but reject overly long names
+	if strings.HasPrefix(comm, "systemd-") && len(comm) <= 20 {
+		return true
 	}
 
 	return false
