@@ -373,7 +373,7 @@ func (p *EnhancedNATSPublisher) startBackgroundWorkers() {
 }
 
 // Publish publishes event synchronously (compatible with existing interface)
-func (p *EnhancedNATSPublisher) Publish(event domain.RawEvent) error {
+func (p *EnhancedNATSPublisher) Publish(event *domain.CollectorEvent) error {
 	if p == nil || p.js == nil {
 		return fmt.Errorf("publisher not initialized")
 	}
@@ -383,19 +383,19 @@ func (p *EnhancedNATSPublisher) Publish(event domain.RawEvent) error {
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("event.type", event.Type),
-		attribute.String("event.trace_id", event.TraceID),
+		attribute.String("event.type", string(event.Type)),
+		attribute.String("event.trace_id", event.Metadata.TraceID),
 		attribute.String("event.source", func() string {
-			if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {
+			if collectorName, ok := event.Metadata.Attributes["collector_name"]; ok && collectorName != "" {
 				return collectorName
 			}
-			return event.Type
+			return string(event.Type)
 		}()),
 	)
 
 	// Use circuit breaker for sync publishes
 	err := p.circuitBreaker.Call(func() error {
-		return p.publishObservationSync(ctx, &event)
+		return p.publishObservationSync(ctx, event)
 	})
 
 	// Record metrics
@@ -432,7 +432,7 @@ func (p *EnhancedNATSPublisher) Publish(event domain.RawEvent) error {
 }
 
 // PublishAsync publishes observation event asynchronously with backpressure handling
-func (p *EnhancedNATSPublisher) PublishAsync(event *domain.RawEvent) error {
+func (p *EnhancedNATSPublisher) PublishAsync(event *domain.CollectorEvent) error {
 	if p == nil || p.js == nil {
 		return fmt.Errorf("publisher not initialized")
 	}
@@ -442,13 +442,13 @@ func (p *EnhancedNATSPublisher) PublishAsync(event *domain.RawEvent) error {
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("event.type", event.Type),
-		attribute.String("event.trace_id", event.TraceID),
+		attribute.String("event.type", string(event.Type)),
+		attribute.String("event.trace_id", event.Metadata.TraceID),
 		attribute.String("event.source", func() string {
-			if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {
+			if collectorName, ok := event.Metadata.Attributes["collector_name"]; ok && collectorName != "" {
 				return collectorName
 			}
-			return event.Type
+			return string(event.Type)
 		}()),
 	)
 
@@ -490,7 +490,7 @@ func (p *EnhancedNATSPublisher) PublishAsync(event *domain.RawEvent) error {
 	return nil
 }
 
-func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, event *domain.RawEvent) error {
+func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, event *domain.CollectorEvent) error {
 	subject := p.generateObservationSubject(event)
 
 	// Marshal raw event directly
@@ -510,8 +510,8 @@ func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, even
 
 	p.logger.Debug("Published observation event",
 		zap.String("subject", subject),
-		zap.String("event_type", event.Type),
-		zap.String("trace_id", event.TraceID),
+		zap.String("event_type", string(event.Type)),
+		zap.String("trace_id", event.Metadata.TraceID),
 		zap.String("stream", ack.Stream),
 		zap.Uint64("sequence", ack.Sequence),
 	)
@@ -522,10 +522,10 @@ func (p *EnhancedNATSPublisher) publishObservationSync(ctx context.Context, even
 // generateObservationSubject creates NATS subject for observation event
 // Subject format: observations.{source}
 // Examples: observations.kernel, observations.kubeapi, observations.dns
-func (p *EnhancedNATSPublisher) generateObservationSubject(event *domain.RawEvent) string {
+func (p *EnhancedNATSPublisher) generateObservationSubject(event *domain.CollectorEvent) string {
 	// Get collector name from metadata, fallback to event type in lowercase
-	source := strings.ToLower(event.Type)
-	if collectorName, ok := event.Metadata["collector_name"]; ok && collectorName != "" {
+	source := strings.ToLower(string(event.Type))
+	if collectorName, ok := event.Metadata.Attributes["collector_name"]; ok && collectorName != "" {
 		source = strings.ToLower(collectorName)
 	}
 

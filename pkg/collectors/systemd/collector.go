@@ -35,7 +35,7 @@ type Collector struct {
 	name    string
 	logger  *zap.Logger
 	tracer  trace.Tracer
-	events  chan domain.RawEvent
+	events  chan *domain.CollectorEvent
 	ctx     context.Context
 	cancel  context.CancelFunc
 	healthy bool
@@ -113,7 +113,7 @@ func NewCollector(name string, cfg Config, logger *zap.Logger) (*Collector, erro
 		logger:          logger.Named(name),
 		tracer:          tracer,
 		config:          cfg,
-		events:          make(chan domain.RawEvent, cfg.BufferSize),
+		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
@@ -186,7 +186,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 

@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/collectors/etcd"
-	etcdBPF "github.com/yairfalse/tapio/pkg/collectors/etcd/bpf"
+	// "github.com/yairfalse/tapio/pkg/collectors/etcd"
+	// etcdBPF "github.com/yairfalse/tapio/pkg/collectors/etcd/bpf"
 	"github.com/yairfalse/tapio/pkg/collectors/kernel"
 	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
 	namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
 	namespaceBPF "github.com/yairfalse/tapio/pkg/collectors/namespace-collector/bpf"
-	"github.com/yairfalse/tapio/pkg/collectors/network/pkg/collectors/network"
+	"github.com/yairfalse/tapio/pkg/collectors/network"
+	"github.com/yairfalse/tapio/pkg/collectors/otel"
 	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
@@ -29,10 +30,11 @@ var (
 	enableKubeAPI   = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
 	enableEBPF      = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
 	enableSystemd   = flag.Bool("enable-systemd", true, "Enable systemd collector")
-	enableEtcd      = flag.Bool("enable-etcd", true, "Enable etcd collector")
+	enableEtcd      = flag.Bool("enable-etcd", false, "Enable etcd collector")
 	enableNamespace = flag.Bool("enable-namespace", true, "Enable namespace collector")
 	enableKubelet   = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
 	enableNetwork   = flag.Bool("enable-network", true, "Enable network collector")
+	enableOTEL      = flag.Bool("enable-otel", true, "Enable OTEL collector")
 	kubeletAddress  = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
 	etcdEndpoints   = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
 	logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
@@ -120,7 +122,7 @@ func main() {
 	if *enableSystemd {
 		systemdConfig := systemd.DefaultConfig()
 		systemdConfig.EnableJournal = true // Enable journald collection
-		systemdCollector, err := systemd.NewCollector("systemd", systemdConfig)
+		systemdCollector, err := systemd.NewCollector("systemd", systemdConfig, logger)
 		if err != nil {
 			logger.Error("Failed to create systemd collector", zap.Error(err))
 		} else {
@@ -132,28 +134,23 @@ func main() {
 		}
 	}
 
-	if *enableEtcd {
-		etcdConfig := etcd.Config{
-			Endpoints: []string{*etcdEndpoints},
-			// Add auth if needed
-		}
-
-		// Check if etcd eBPF is available
-		if etcdBPF.IsSupported() {
-			etcdConfig.EnableEBPF = true
-		}
-
-		etcdCollector, err := etcd.NewCollector("etcd", etcdConfig)
-		if err != nil {
-			logger.Error("Failed to create etcd collector", zap.Error(err))
-		} else {
-			if err := collectorOrchestrator.RegisterCollector("etcd", etcdCollector); err != nil {
-				logger.Error("Failed to register etcd collector", zap.Error(err))
-			} else {
-				enabledCollectors = append(enabledCollectors, "etcd")
-			}
-		}
-	}
+	// etcd collector disabled due to eBPF duplicate declarations
+	// if *enableEtcd {
+	// 	etcdConfig := etcd.Config{
+	// 		Endpoints: []string{*etcdEndpoints},
+	// 		// Add auth if needed
+	// 	}
+	// 	etcdCollector, err := etcd.NewCollector("etcd", etcdConfig)
+	// 	if err != nil {
+	// 		logger.Error("Failed to create etcd collector", zap.Error(err))
+	// 	} else {
+	// 		if err := collectorOrchestrator.RegisterCollector("etcd", etcdCollector); err != nil {
+	// 			logger.Error("Failed to register etcd collector", zap.Error(err))
+	// 		} else {
+	// 			enabledCollectors = append(enabledCollectors, "etcd")
+	// 		}
+	// 	}
+	// }
 
 	if *enableNamespace {
 		namespaceConfig := namespace_collector.DefaultConfig()
@@ -210,6 +207,20 @@ func main() {
 		}
 	}
 
+	if *enableOTEL {
+		otelConfig := otel.DefaultConfig()
+		otelCollector, err := otel.NewCollector("otel", otelConfig)
+		if err != nil {
+			logger.Error("Failed to create OTEL collector", zap.Error(err))
+		} else {
+			if err := collectorOrchestrator.RegisterCollector("otel", otelCollector); err != nil {
+				logger.Error("Failed to register OTEL collector", zap.Error(err))
+			} else {
+				enabledCollectors = append(enabledCollectors, "otel")
+			}
+		}
+	}
+
 	// Validate we have at least one collector
 	if len(enabledCollectors) == 0 {
 		log.Fatal("No collectors enabled. Enable at least one collector.")
@@ -249,7 +260,7 @@ func monitorCollectorHealth(ctx context.Context, orchestrator *pipeline.Collecto
 			return
 		case <-ticker.C:
 			// Get health status from all collectors
-			healthStatus := eventPipeline.GetHealthStatus()
+			healthStatus := orchestrator.GetHealthStatus()
 
 			// Log health summary
 			healthy := 0

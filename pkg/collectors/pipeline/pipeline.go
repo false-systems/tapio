@@ -11,14 +11,33 @@ import (
 	"go.uber.org/zap"
 )
 
-// New creates a new event pipeline
-func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
+// New creates a new collector orchestrator
+func New(logger *zap.Logger, config Config) (*CollectorOrchestrator, error) {
+	// Validate and set defaults for worker count
 	if config.Workers <= 0 {
+		logger.Warn("Invalid worker count, using default", zap.Int("provided", config.Workers), zap.Int("default", 4))
 		config.Workers = DefaultConfig().Workers
+	} else if config.Workers > 64 {
+		logger.Warn("Worker count too high, capping at maximum", zap.Int("provided", config.Workers), zap.Int("maximum", 64))
+		config.Workers = 64
 	}
+
+	// Validate and set defaults for buffer size
 	if config.BufferSize <= 0 {
+		logger.Warn("Invalid buffer size, using default", zap.Int("provided", config.BufferSize), zap.Int("default", 10000))
 		config.BufferSize = DefaultConfig().BufferSize
+	} else if config.BufferSize < 100 {
+		logger.Warn("Buffer size too small, using minimum", zap.Int("provided", config.BufferSize), zap.Int("minimum", 100))
+		config.BufferSize = 100
+	} else if config.BufferSize > 100000 {
+		logger.Warn("Buffer size too large, capping at maximum", zap.Int("provided", config.BufferSize), zap.Int("maximum", 100000))
+		config.BufferSize = 100000
 	}
+
+	logger.Info("Creating collector orchestrator",
+		zap.Int("workers", config.Workers),
+		zap.Int("buffer_size", config.BufferSize),
+		zap.String("nats_url", config.NATSConfig.URL))
 
 	// Create enhanced NATS publisher (production-ready with backpressure)
 	publisher, err := NewEnhancedNATSPublisher(logger, config.NATSConfig)
@@ -26,7 +45,7 @@ func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
 		return nil, fmt.Errorf("failed to create NATS publisher: %w", err)
 	}
 
-	return &EventPipeline{
+	return &CollectorOrchestrator{
 		collectors: make(map[string]collectors.Collector),
 		publisher:  publisher,
 		logger:     logger,
@@ -35,10 +54,10 @@ func New(logger *zap.Logger, config Config) (*EventPipeline, error) {
 	}, nil
 }
 
-// RegisterCollector adds a collector to the pipeline
-func (p *EventPipeline) RegisterCollector(name string, collector collectors.Collector) error {
+// RegisterCollector adds a collector to the orchestrator
+func (p *CollectorOrchestrator) RegisterCollector(name string, collector collectors.Collector) error {
 	if p.ctx != nil {
-		return fmt.Errorf("cannot register collector after pipeline started")
+		return fmt.Errorf("cannot register collector after orchestrator started")
 	}
 	if _, exists := p.collectors[name]; exists {
 		return fmt.Errorf("collector %s already registered", name)
@@ -48,9 +67,9 @@ func (p *EventPipeline) RegisterCollector(name string, collector collectors.Coll
 }
 
 // Start begins processing events
-func (p *EventPipeline) Start(ctx context.Context) error {
+func (p *CollectorOrchestrator) Start(ctx context.Context) error {
 	if p.ctx != nil {
-		return fmt.Errorf("pipeline already started")
+		return fmt.Errorf("orchestrator already started")
 	}
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
@@ -81,13 +100,13 @@ func (p *EventPipeline) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop gracefully shuts down the pipeline
-func (p *EventPipeline) Stop() error {
-	p.logger.Info("Stopping event pipeline")
+// Stop gracefully shuts down the orchestrator
+func (p *CollectorOrchestrator) Stop() error {
+	p.logger.Info("Stopping collector orchestrator")
 
 	// Prevent multiple shutdown attempts
 	if p.cancel == nil {
-		p.logger.Warn("Pipeline already stopped or not started")
+		p.logger.Warn("Orchestrator already stopped or not started")
 		return nil
 	}
 
@@ -172,12 +191,12 @@ func (p *EventPipeline) Stop() error {
 	// Reset cancel to prevent multiple shutdowns
 	p.cancel = nil
 
-	p.logger.Info("Event pipeline stopped")
+	p.logger.Info("Collector orchestrator stopped")
 	return nil
 }
 
 // consumeCollector reads events from a collector and forwards to processing
-func (p *EventPipeline) consumeCollector(name string, collector collectors.Collector) {
+func (p *CollectorOrchestrator) consumeCollector(name string, collector collectors.Collector) {
 	defer p.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
@@ -202,20 +221,20 @@ func (p *EventPipeline) consumeCollector(name string, collector collectors.Colle
 				return
 			}
 
-			// Add collector name to metadata
-			if event.Metadata == nil {
-				event.Metadata = make(map[string]string)
+			// Add collector name to metadata attributes
+			if event.Metadata.Attributes == nil {
+				event.Metadata.Attributes = make(map[string]string)
 			}
-			event.Metadata["collector_name"] = name
+			event.Metadata.Attributes["collector_name"] = name
 
 			// Try to send event with safe channel writing
 			// Use a non-blocking select to avoid race conditions during shutdown
 			select {
 			case <-p.ctx.Done():
-				// Pipeline is shutting down, drop event
+				// Orchestrator is shutting down, drop event
 				p.logger.Debug("Dropping event due to shutdown",
 					zap.String("collector", name),
-					zap.String("event_type", event.Type))
+					zap.String("event_type", string(event.Type)))
 				return
 			case p.eventsChan <- event:
 				// Successfully sent event
@@ -230,7 +249,7 @@ func (p *EventPipeline) consumeCollector(name string, collector collectors.Colle
 					// Drop event if channel is blocked
 					p.logger.Debug("Dropping event due to channel backpressure",
 						zap.String("collector", name),
-						zap.String("event_type", event.Type))
+						zap.String("event_type", string(event.Type)))
 				}
 			}
 		}
@@ -238,11 +257,11 @@ func (p *EventPipeline) consumeCollector(name string, collector collectors.Colle
 }
 
 // worker processes events
-func (p *EventPipeline) worker() {
+func (p *CollectorOrchestrator) worker() {
 	defer p.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
-			p.logger.Error("Panic in pipeline worker",
+			p.logger.Error("Panic in orchestrator worker",
 				zap.Any("panic", r),
 			)
 		}
@@ -260,7 +279,7 @@ func (p *EventPipeline) worker() {
 					if r := recover(); r != nil {
 						p.logger.Error("Panic processing event",
 							zap.Any("panic", r),
-							zap.String("event_type", event.Type),
+							zap.String("event_type", string(event.Type)),
 						)
 					}
 				}()
@@ -301,7 +320,7 @@ func (p *EventPipeline) worker() {
 }
 
 // GetHealthStatus returns the health status of all collectors
-func (p *EventPipeline) GetHealthStatus() map[string]CollectorHealthStatus {
+func (p *CollectorOrchestrator) GetHealthStatus() map[string]CollectorHealthStatus {
 	status := make(map[string]CollectorHealthStatus)
 
 	for name, collector := range p.collectors {
