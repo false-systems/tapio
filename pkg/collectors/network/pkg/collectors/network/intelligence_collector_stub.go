@@ -58,20 +58,34 @@ func (c *IntelligenceCollector) IsHealthy() bool {
 	return false
 }
 
+// StubHealthInfo represents health information for stub implementation
+type StubHealthInfo struct {
+	Status    string `json:"status"`
+	Platform  string `json:"platform"`
+	Supported bool   `json:"supported"`
+}
+
+// StubStatistics represents statistics for stub implementation
+type StubStatistics struct {
+	EventsProcessed int64  `json:"events_processed"`
+	Platform        string `json:"platform"`
+	Supported       bool   `json:"supported"`
+}
+
 // Health returns stub health information
 func (c *IntelligenceCollector) Health() interface{} {
-	return map[string]interface{}{
-		"status":    "unsupported",
-		"platform":  "non-linux",
-		"supported": false,
+	return &StubHealthInfo{
+		Status:    "unsupported",
+		Platform:  "non-linux",
+		Supported: false,
 	}
 }
 
 // Statistics returns empty stats for stub
 func (c *IntelligenceCollector) Statistics() interface{} {
-	return map[string]interface{}{
-		"events_processed": 0,
-		"platform":         "non-linux",
-		"supported":        false,
+	return &StubStatistics{
+		EventsProcessed: 0,
+		Platform:        "non-linux",
+		Supported:       false,
 	}
 }
