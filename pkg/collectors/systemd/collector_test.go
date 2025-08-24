@@ -13,32 +13,32 @@ import (
 
 func TestNewCollector(t *testing.T) {
 	tests := []struct {
-		name        string
+		name          string
 		collectorName string
-		config      Config
-		logger      *zap.Logger
-		expectError bool
+		config        Config
+		logger        *zap.Logger
+		expectError   bool
 	}{
 		{
-			name:        "valid collector with provided logger",
+			name:          "valid collector with provided logger",
 			collectorName: "test-systemd",
-			config:      Config{BufferSize: 100, EnableEBPF: false},
-			logger:      zaptest.NewLogger(t),
-			expectError: false,
+			config:        Config{BufferSize: 100, EnableEBPF: false},
+			logger:        zaptest.NewLogger(t),
+			expectError:   false,
 		},
 		{
-			name:        "valid collector with nil logger",
+			name:          "valid collector with nil logger",
 			collectorName: "test-systemd-nil",
-			config:      Config{BufferSize: 100, EnableEBPF: false},
-			logger:      nil,
-			expectError: false,
+			config:        Config{BufferSize: 100, EnableEBPF: false},
+			logger:        nil,
+			expectError:   false,
 		},
 		{
-			name:        "collector with eBPF enabled",
+			name:          "collector with eBPF enabled",
 			collectorName: "test-systemd-ebpf",
-			config:      Config{BufferSize: 100, EnableEBPF: true},
-			logger:      zaptest.NewLogger(t),
-			expectError: false,
+			config:        Config{BufferSize: 100, EnableEBPF: true},
+			logger:        zaptest.NewLogger(t),
+			expectError:   false,
 		},
 	}
 
@@ -64,7 +64,7 @@ func TestNewCollector(t *testing.T) {
 func TestCollectorLifecycle(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 10, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-lifecycle", config, logger)
 	require.NoError(t, err)
 	require.NotNil(t, collector)
@@ -98,7 +98,7 @@ func TestCollectorLifecycle(t *testing.T) {
 func TestCollectorStartStop(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 10, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-startstop", config, logger)
 	require.NoError(t, err)
 
@@ -127,13 +127,13 @@ func TestCollectorStartStop(t *testing.T) {
 func TestCollectorStartWithCancellation(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 10, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-cancel", config, logger)
 	require.NoError(t, err)
 
 	// Create a context that will be cancelled
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	err = collector.Start(ctx)
 	assert.NoError(t, err)
 	assert.True(t, collector.IsHealthy())
@@ -150,7 +150,7 @@ func TestCollectorStartWithCancellation(t *testing.T) {
 func TestCollectorEventsChannel(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 5, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-events", config, logger)
 	require.NoError(t, err)
 
@@ -185,7 +185,7 @@ func TestCollectorEventsChannel(t *testing.T) {
 func TestCollectorName(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 10, EnableEBPF: false}
-	
+
 	testNames := []string{
 		"simple",
 		"systemd-collector",
@@ -205,7 +205,7 @@ func TestCollectorName(t *testing.T) {
 func TestCollectorHealthStatus(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 10, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-health", config, logger)
 	require.NoError(t, err)
 
@@ -228,7 +228,7 @@ func TestCollectorHealthStatus(t *testing.T) {
 func TestSystemdEventProcessing(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 100, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-events", config, logger)
 	require.NoError(t, err)
 
@@ -245,11 +245,11 @@ func TestSystemdEventProcessing(t *testing.T) {
 
 func TestCollectorConfigValidation(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	
+
 	tests := []struct {
-		name    string
-		config  Config
-		valid   bool
+		name   string
+		config Config
+		valid  bool
 	}{
 		{
 			name:   "valid config with eBPF disabled",
@@ -289,12 +289,12 @@ func TestCollectorConfigValidation(t *testing.T) {
 func TestCollectorConcurrentOperations(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 100, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-concurrent", config, logger)
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	
+
 	// Start collector
 	err = collector.Start(ctx)
 	require.NoError(t, err)
@@ -326,7 +326,7 @@ func TestCollectorConcurrentOperations(t *testing.T) {
 func TestCollectorMetricsInitialization(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 10, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-metrics", config, logger)
 	require.NoError(t, err)
 
@@ -339,23 +339,23 @@ func TestCollectorMetricsInitialization(t *testing.T) {
 func TestCollectorErrorHandling(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := Config{BufferSize: 10, EnableEBPF: false}
-	
+
 	collector, err := NewCollector("test-errors", config, logger)
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	
+
 	// Test starting collector multiple times
 	err1 := collector.Start(ctx)
 	assert.NoError(t, err1)
-	
+
 	err2 := collector.Start(ctx)
 	assert.NoError(t, err2) // Should not error on multiple starts
 
 	// Test context cancellation
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
-	
+
 	err3 := collector.Start(cancelCtx)
 	assert.NoError(t, err3) // Start should still work with cancelled context
 
@@ -434,12 +434,12 @@ func TestConfigValidation(t *testing.T) {
 
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
-	
+
 	assert.Equal(t, 10000, config.BufferSize)
 	assert.True(t, config.EnableEBPF)
 	assert.True(t, config.EnableJournal)
 	assert.Empty(t, config.ServicePatterns)
-	
+
 	// Default config should be valid
 	err := config.Validate()
 	assert.NoError(t, err)
