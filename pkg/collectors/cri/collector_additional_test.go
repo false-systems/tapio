@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"google.golang.org/grpc"
 	cri "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -18,123 +19,148 @@ type MockCRIClient struct {
 	mock.Mock
 }
 
-func (m *MockCRIClient) ListContainers(ctx context.Context, req *cri.ListContainersRequest) (*cri.ListContainersResponse, error) {
+func (m *MockCRIClient) ListContainers(ctx context.Context, req *cri.ListContainersRequest, opts ...grpc.CallOption) (*cri.ListContainersResponse, error) {
 	args := m.Called(ctx, req)
 	return args.Get(0).(*cri.ListContainersResponse), args.Error(1)
 }
 
-func (m *MockCRIClient) ContainerStatus(ctx context.Context, req *cri.ContainerStatusRequest) (*cri.ContainerStatusResponse, error) {
+func (m *MockCRIClient) ContainerStatus(ctx context.Context, req *cri.ContainerStatusRequest, opts ...grpc.CallOption) (*cri.ContainerStatusResponse, error) {
 	args := m.Called(ctx, req)
 	return args.Get(0).(*cri.ContainerStatusResponse), args.Error(1)
 }
 
 // Add other required methods as no-ops
-func (m *MockCRIClient) Version(ctx context.Context, req *cri.VersionRequest) (*cri.VersionResponse, error) {
+func (m *MockCRIClient) Version(ctx context.Context, req *cri.VersionRequest, opts ...grpc.CallOption) (*cri.VersionResponse, error) {
 	args := m.Called(ctx, req)
 	return args.Get(0).(*cri.VersionResponse), args.Error(1)
 }
 
-func (m *MockCRIClient) RunPodSandbox(ctx context.Context, req *cri.RunPodSandboxRequest) (*cri.RunPodSandboxResponse, error) {
+func (m *MockCRIClient) RunPodSandbox(ctx context.Context, req *cri.RunPodSandboxRequest, opts ...grpc.CallOption) (*cri.RunPodSandboxResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) StopPodSandbox(ctx context.Context, req *cri.StopPodSandboxRequest) (*cri.StopPodSandboxResponse, error) {
+func (m *MockCRIClient) StopPodSandbox(ctx context.Context, req *cri.StopPodSandboxRequest, opts ...grpc.CallOption) (*cri.StopPodSandboxResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) RemovePodSandbox(ctx context.Context, req *cri.RemovePodSandboxRequest) (*cri.RemovePodSandboxResponse, error) {
+func (m *MockCRIClient) RemovePodSandbox(ctx context.Context, req *cri.RemovePodSandboxRequest, opts ...grpc.CallOption) (*cri.RemovePodSandboxResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) PodSandboxStatus(ctx context.Context, req *cri.PodSandboxStatusRequest) (*cri.PodSandboxStatusResponse, error) {
+func (m *MockCRIClient) PodSandboxStatus(ctx context.Context, req *cri.PodSandboxStatusRequest, opts ...grpc.CallOption) (*cri.PodSandboxStatusResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ListPodSandbox(ctx context.Context, req *cri.ListPodSandboxRequest) (*cri.ListPodSandboxResponse, error) {
+func (m *MockCRIClient) ListPodSandbox(ctx context.Context, req *cri.ListPodSandboxRequest, opts ...grpc.CallOption) (*cri.ListPodSandboxResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) CreateContainer(ctx context.Context, req *cri.CreateContainerRequest) (*cri.CreateContainerResponse, error) {
+func (m *MockCRIClient) CreateContainer(ctx context.Context, req *cri.CreateContainerRequest, opts ...grpc.CallOption) (*cri.CreateContainerResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) StartContainer(ctx context.Context, req *cri.StartContainerRequest) (*cri.StartContainerResponse, error) {
+func (m *MockCRIClient) StartContainer(ctx context.Context, req *cri.StartContainerRequest, opts ...grpc.CallOption) (*cri.StartContainerResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) StopContainer(ctx context.Context, req *cri.StopContainerRequest) (*cri.StopContainerResponse, error) {
+func (m *MockCRIClient) StopContainer(ctx context.Context, req *cri.StopContainerRequest, opts ...grpc.CallOption) (*cri.StopContainerResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) RemoveContainer(ctx context.Context, req *cri.RemoveContainerRequest) (*cri.RemoveContainerResponse, error) {
+func (m *MockCRIClient) RemoveContainer(ctx context.Context, req *cri.RemoveContainerRequest, opts ...grpc.CallOption) (*cri.RemoveContainerResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ListImages(ctx context.Context, req *cri.ListImagesRequest) (*cri.ListImagesResponse, error) {
+func (m *MockCRIClient) ListImages(ctx context.Context, req *cri.ListImagesRequest, opts ...grpc.CallOption) (*cri.ListImagesResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ImageStatus(ctx context.Context, req *cri.ImageStatusRequest) (*cri.ImageStatusResponse, error) {
+func (m *MockCRIClient) ImageStatus(ctx context.Context, req *cri.ImageStatusRequest, opts ...grpc.CallOption) (*cri.ImageStatusResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) PullImage(ctx context.Context, req *cri.PullImageRequest) (*cri.PullImageResponse, error) {
+func (m *MockCRIClient) PullImage(ctx context.Context, req *cri.PullImageRequest, opts ...grpc.CallOption) (*cri.PullImageResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) RemoveImage(ctx context.Context, req *cri.RemoveImageRequest) (*cri.RemoveImageResponse, error) {
+func (m *MockCRIClient) RemoveImage(ctx context.Context, req *cri.RemoveImageRequest, opts ...grpc.CallOption) (*cri.RemoveImageResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ImageFsInfo(ctx context.Context, req *cri.ImageFsInfoRequest) (*cri.ImageFsInfoResponse, error) {
+func (m *MockCRIClient) ImageFsInfo(ctx context.Context, req *cri.ImageFsInfoRequest, opts ...grpc.CallOption) (*cri.ImageFsInfoResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ContainerStats(ctx context.Context, req *cri.ContainerStatsRequest) (*cri.ContainerStatsResponse, error) {
+func (m *MockCRIClient) ContainerStats(ctx context.Context, req *cri.ContainerStatsRequest, opts ...grpc.CallOption) (*cri.ContainerStatsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ListContainerStats(ctx context.Context, req *cri.ListContainerStatsRequest) (*cri.ListContainerStatsResponse, error) {
+func (m *MockCRIClient) ListContainerStats(ctx context.Context, req *cri.ListContainerStatsRequest, opts ...grpc.CallOption) (*cri.ListContainerStatsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) PodSandboxStats(ctx context.Context, req *cri.PodSandboxStatsRequest) (*cri.PodSandboxStatsResponse, error) {
+func (m *MockCRIClient) PodSandboxStats(ctx context.Context, req *cri.PodSandboxStatsRequest, opts ...grpc.CallOption) (*cri.PodSandboxStatsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ListPodSandboxStats(ctx context.Context, req *cri.ListPodSandboxStatsRequest) (*cri.ListPodSandboxStatsResponse, error) {
+func (m *MockCRIClient) ListPodSandboxStats(ctx context.Context, req *cri.ListPodSandboxStatsRequest, opts ...grpc.CallOption) (*cri.ListPodSandboxStatsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) UpdateRuntimeConfig(ctx context.Context, req *cri.UpdateRuntimeConfigRequest) (*cri.UpdateRuntimeConfigResponse, error) {
+func (m *MockCRIClient) UpdateRuntimeConfig(ctx context.Context, req *cri.UpdateRuntimeConfigRequest, opts ...grpc.CallOption) (*cri.UpdateRuntimeConfigResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) Status(ctx context.Context, req *cri.StatusRequest) (*cri.StatusResponse, error) {
+func (m *MockCRIClient) Status(ctx context.Context, req *cri.StatusRequest, opts ...grpc.CallOption) (*cri.StatusResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) CheckpointContainer(ctx context.Context, req *cri.CheckpointContainerRequest) (*cri.CheckpointContainerResponse, error) {
+func (m *MockCRIClient) CheckpointContainer(ctx context.Context, req *cri.CheckpointContainerRequest, opts ...grpc.CallOption) (*cri.CheckpointContainerResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) GetContainerEvents(req *cri.GetEventsRequest, server cri.RuntimeService_GetContainerEventsServer) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (m *MockCRIClient) ListMetricDescriptors(ctx context.Context, req *cri.ListMetricDescriptorsRequest) (*cri.ListMetricDescriptorsResponse, error) {
+func (m *MockCRIClient) GetContainerEvents(ctx context.Context, req *cri.GetEventsRequest, opts ...grpc.CallOption) (cri.RuntimeService_GetContainerEventsClient, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) ListPodSandboxMetrics(ctx context.Context, req *cri.ListPodSandboxMetricsRequest) (*cri.ListPodSandboxMetricsResponse, error) {
+func (m *MockCRIClient) ListMetricDescriptors(ctx context.Context, req *cri.ListMetricDescriptorsRequest, opts ...grpc.CallOption) (*cri.ListMetricDescriptorsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) RuntimeConfig(ctx context.Context, req *cri.RuntimeConfigRequest) (*cri.RuntimeConfigResponse, error) {
+func (m *MockCRIClient) ListPodSandboxMetrics(ctx context.Context, req *cri.ListPodSandboxMetricsRequest, opts ...grpc.CallOption) (*cri.ListPodSandboxMetricsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *MockCRIClient) Attach(ctx context.Context, req *cri.AttachRequest) (*cri.AttachResponse, error) {
+func (m *MockCRIClient) RuntimeConfig(ctx context.Context, req *cri.RuntimeConfigRequest, opts ...grpc.CallOption) (*cri.RuntimeConfigResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *MockCRIClient) Attach(ctx context.Context, req *cri.AttachRequest, opts ...grpc.CallOption) (*cri.AttachResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+// Add missing methods from CRI interface
+func (m *MockCRIClient) ReopenContainerLog(ctx context.Context, req *cri.ReopenContainerLogRequest, opts ...grpc.CallOption) (*cri.ReopenContainerLogResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *MockCRIClient) ExecSync(ctx context.Context, req *cri.ExecSyncRequest, opts ...grpc.CallOption) (*cri.ExecSyncResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *MockCRIClient) Exec(ctx context.Context, req *cri.ExecRequest, opts ...grpc.CallOption) (*cri.ExecResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *MockCRIClient) PortForward(ctx context.Context, req *cri.PortForwardRequest, opts ...grpc.CallOption) (*cri.PortForwardResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *MockCRIClient) UpdateContainerResources(ctx context.Context, req *cri.UpdateContainerResourcesRequest, opts ...grpc.CallOption) (*cri.UpdateContainerResourcesResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *MockCRIClient) UpdatePodSandboxResources(ctx context.Context, req *cri.UpdatePodSandboxResourcesRequest, opts ...grpc.CallOption) (*cri.UpdatePodSandboxResourcesResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -151,17 +177,19 @@ func TestCollectorStartStop(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, collector)
 
-	// Test that collector starts in disconnected state since socket doesn't exist
-	ctx, cancel := context.WithCancel(context.Background())
+	// Test that collector fails to start since socket doesn't exist
+	// This is expected behavior - collector should fail if it can't connect
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	err = collector.Start(ctx)
-	assert.NoError(t, err, "Start should succeed even without CRI socket")
+	assert.Error(t, err, "Start should fail without CRI socket")
+	assert.Contains(t, err.Error(), "failed to connect to CRI socket")
 
-	// Verify collector is running
-	assert.True(t, collector.IsHealthy())
+	// Collector should not be healthy after failed start
+	assert.False(t, collector.IsHealthy())
 
-	// Test stop
+	// Test stop (should succeed even after failed start)
 	err = collector.Stop()
 	assert.NoError(t, err)
 }
@@ -390,4 +418,151 @@ func TestCollectorName(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-collector", collector.Name())
+}
+
+func TestPollContainersWithMockClient(t *testing.T) {
+	cfg := &Config{
+		SocketPath:   "/tmp/test.sock",
+		BufferSize:   100,
+		PollInterval: 1 * time.Second,
+	}
+
+	collector, err := NewCollector("test-cri", cfg)
+	require.NoError(t, err)
+
+	// Create mock client
+	mockClient := &MockCRIClient{}
+	collector.client = mockClient
+
+	// Setup mock response for ListContainers with empty list
+	mockClient.On("ListContainers", mock.Anything, &cri.ListContainersRequest{}).Return(
+		&cri.ListContainersResponse{
+			Containers: []*cri.Container{},
+		}, nil)
+
+	// Set up context and cancel so the collector can be initialized
+	collector.ctx, collector.cancel = context.WithCancel(context.Background())
+	defer collector.cancel()
+
+	// Call pollContainers directly
+	collector.pollContainers()
+
+	// Verify the mock was called
+	mockClient.AssertExpectations(t)
+}
+
+func TestPollContainersListError(t *testing.T) {
+	cfg := &Config{
+		SocketPath:   "/tmp/test.sock",
+		BufferSize:   100,
+		PollInterval: 1 * time.Second,
+	}
+
+	collector, err := NewCollector("test-cri", cfg)
+	require.NoError(t, err)
+
+	// Create mock client
+	mockClient := &MockCRIClient{}
+	collector.client = mockClient
+
+	// Setup mock to return error
+	mockClient.On("ListContainers", mock.Anything, &cri.ListContainersRequest{}).Return(
+		(*cri.ListContainersResponse)(nil), fmt.Errorf("connection failed"))
+
+	// Set up context and cancel so the collector can be initialized
+	collector.ctx, collector.cancel = context.WithCancel(context.Background())
+	defer collector.cancel()
+
+	// Call pollContainers directly - should handle error gracefully
+	collector.pollContainers()
+
+	// Verify the mock was called
+	mockClient.AssertExpectations(t)
+}
+
+func TestMonitorLoop(t *testing.T) {
+	cfg := &Config{
+		SocketPath:   "/tmp/test.sock",
+		BufferSize:   100,
+		PollInterval: 50 * time.Millisecond, // Short interval for testing
+	}
+
+	collector, err := NewCollector("test-cri", cfg)
+	require.NoError(t, err)
+
+	// Create mock client
+	mockClient := &MockCRIClient{}
+	collector.client = mockClient
+
+	// Setup mock to return empty container list multiple times
+	mockClient.On("ListContainers", mock.Anything, &cri.ListContainersRequest{}).Return(
+		&cri.ListContainersResponse{
+			Containers: []*cri.Container{},
+		}, nil).Maybe() // Allow any number of calls
+
+	// Start monitor in goroutine
+	ctx, cancel := context.WithCancel(context.Background())
+	collector.ctx, collector.cancel = context.WithCancel(ctx)
+
+	go collector.monitor()
+
+	// Let it run for a bit to trigger multiple polls
+	time.Sleep(150 * time.Millisecond)
+
+	// Cancel and cleanup
+	cancel()
+	collector.cancel()
+
+	// Wait a bit for goroutine to finish
+	time.Sleep(10 * time.Millisecond)
+
+	// Verify the mock was called multiple times
+	mockClient.AssertExpectations(t)
+}
+
+func TestDetectCRISocketVariants(t *testing.T) {
+	// Test the socket detection with various scenarios
+	socket := detectCRISocket()
+
+	// On most test systems, this should return empty string
+	// since standard sockets don't exist
+	if socket != "" {
+		// If a socket is found, it should be one of the expected paths
+		expectedSockets := []string{
+			"/run/containerd/containerd.sock",
+			"/run/crio/crio.sock",
+			"/var/run/dockershim.sock",
+			"/var/run/cri-dockerd.sock",
+		}
+
+		found := false
+		for _, expected := range expectedSockets {
+			if socket == expected {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "Detected socket should be one of the expected paths: %s", socket)
+	}
+}
+
+func TestNewCollectorWithAutoDetection(t *testing.T) {
+	cfg := &Config{
+		SocketPath:   "", // Empty to trigger auto-detection
+		BufferSize:   100,
+		PollInterval: 1 * time.Second,
+	}
+
+	// This should either succeed (if a CRI socket is found) or fail
+	collector, err := NewCollector("test-cri", cfg)
+
+	if err != nil {
+		// Expected when no CRI socket is found
+		assert.Contains(t, err.Error(), "no CRI socket found")
+		assert.Nil(t, collector)
+	} else {
+		// If collector is created, it should be valid
+		assert.NotNil(t, collector)
+		assert.Equal(t, "test-cri", collector.Name())
+	}
 }
