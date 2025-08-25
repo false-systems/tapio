@@ -136,19 +136,19 @@ func TestStartWithEBPFEnabled(t *testing.T) {
 		BufferSize: 100,
 		EnableEBPF: true, // Enable eBPF - uses stub on non-Linux platforms
 	}
-	
+
 	collector, err := NewCollector("test", cfg)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
-	
+
 	// Should succeed with eBPF stub on non-Linux platforms
 	err = collector.Start(ctx)
 	assert.NoError(t, err, "eBPF stub should succeed on non-Linux platforms")
-	
+
 	// Verify collector is marked as healthy
 	assert.True(t, collector.IsHealthy())
-	
+
 	// Clean up
 	err = collector.Stop()
 	assert.NoError(t, err)

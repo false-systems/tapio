@@ -453,7 +453,7 @@ func TestRealProcMountsIfAvailable(t *testing.T) {
 
 		for _, mount := range mounts {
 			assert.NotEmpty(t, mount.Path)
-			assert.False(t, mount.CreatedAt.IsZero())
+			// MountInfo doesn't have CreatedAt field
 		}
 	}
 }

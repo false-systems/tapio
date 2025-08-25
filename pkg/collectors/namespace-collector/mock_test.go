@@ -2,7 +2,6 @@ package namespace_collector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -561,7 +560,7 @@ func TestRawEventOTELCompliance(t *testing.T) {
 			validate: func(t *testing.T, event *domain.CollectorEvent) {
 				// Verify data serialization
 				var deserializedData map[string]string
-				// Data is now in EventData.Custom  
+				// Data is now in EventData.Custom
 				if event.EventData.Custom != nil {
 					deserializedData = event.EventData.Custom
 				} else {
