@@ -580,6 +580,8 @@ func (c *Collector) convertToCollectorEvent(event *StorageIOEvent) (*domain.Coll
 		MountPoint:   event.MountPoint,
 		K8sPath:      event.K8sPath,
 		VolumeType:   event.K8sVolumeType,
+		PVCName:      event.PVCName,
+		StorageClass: event.StorageClass,
 		ErrorCode:    event.ErrorCode,
 		ErrorMessage: event.ErrorMessage,
 		VFSLayer:     event.VFSLayer,
