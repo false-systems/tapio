@@ -2,7 +2,6 @@ package cri
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -24,7 +23,7 @@ type Collector struct {
 	name    string
 	logger  *zap.Logger
 	tracer  trace.Tracer
-	events  chan domain.RawEvent
+	events  chan *domain.CollectorEvent
 	ctx     context.Context
 	cancel  context.CancelFunc
 	healthy bool
@@ -112,7 +111,7 @@ func NewCollector(name string, cfg *Config) (*Collector, error) {
 		tracer:          tracer,
 		config:          cfg,
 		socket:          socket,
-		events:          make(chan domain.RawEvent, cfg.BufferSize),
+		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
@@ -184,7 +183,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
@@ -271,32 +270,45 @@ func (c *Collector) processContainer(ctx context.Context, container *cri.Contain
 		return
 	}
 
-	// Create event from container status
-	eventData := ContainerEventData{
-		ContainerID: container.Id,
-		Name:        status.Metadata.Name,
-		State:       status.State.String(),
-		Image:       container.Image.Image,
-		Labels:      container.Labels,
-		CreatedAt:   time.Unix(0, status.CreatedAt),
+	// Extract Kubernetes context from labels if available
+	k8sContext := &domain.K8sContext{}
+	if podName, ok := container.Labels["io.kubernetes.pod.name"]; ok {
+		k8sContext.Name = podName
+	}
+	if podNamespace, ok := container.Labels["io.kubernetes.pod.namespace"]; ok {
+		k8sContext.Namespace = podNamespace
+	}
+	if podUID, ok := container.Labels["io.kubernetes.pod.uid"]; ok {
+		k8sContext.UID = podUID
 	}
 
-	// Marshal event data to bytes
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		if c.errorsTotal != nil {
-			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "marshal_failed"),
-			))
-		}
-		return
-	}
-
-	event := domain.RawEvent{
+	// Create proper CollectorEvent with structured data
+	event := &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("%s-%s-%d", c.name, container.Id[:12], time.Now().UnixNano()),
 		Timestamp: time.Now(),
 		Source:    c.name,
 		Type:      getContainerEventType(status.State),
-		Data:      data,
+		Severity:  domain.SeverityInfo,
+
+		EventData: domain.EventDataContainer{
+			Container: &domain.ContainerData{
+				ContainerID: container.Id,
+				ImageID:     container.ImageRef,
+				ImageName:   container.Image.Image,
+				Runtime:     "cri", // Generic CRI runtime
+				State:       status.State.String(),
+				Action:      getContainerAction(status.State),
+				Labels:      container.Labels,
+				// Note: CRI API doesn't expose PID in container info
+			},
+		},
+
+		K8sContext: k8sContext,
+
+		CorrelationHints: &domain.CorrelationHints{
+			ContainerID: container.Id,
+			// Note: CRI API doesn't expose PID in container info
+		},
 	}
 
 	// Send event
@@ -304,7 +316,7 @@ func (c *Collector) processContainer(ctx context.Context, container *cri.Contain
 	case c.events <- event:
 		if c.eventsProcessed != nil {
 			c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", event.Type),
+				attribute.String("event_type", string(event.Type)),
 				attribute.String("container_state", status.State.String()),
 			))
 		}
@@ -319,16 +331,30 @@ func (c *Collector) processContainer(ctx context.Context, container *cri.Contain
 }
 
 // getContainerEventType returns event type based on container state
-func getContainerEventType(state cri.ContainerState) string {
+func getContainerEventType(state cri.ContainerState) domain.CollectorEventType {
 	switch state {
 	case cri.ContainerState_CONTAINER_CREATED:
-		return "container_created"
+		return domain.EventTypeContainerCreate
 	case cri.ContainerState_CONTAINER_RUNNING:
-		return "container_running"
+		return domain.EventTypeContainerStart
 	case cri.ContainerState_CONTAINER_EXITED:
-		return "container_exited"
+		return domain.EventTypeContainerStop
 	default:
-		return "container_unknown"
+		return domain.EventTypeContainerStop // Default to stop for unknown states
+	}
+}
+
+// getContainerAction returns the action based on container state
+func getContainerAction(state cri.ContainerState) string {
+	switch state {
+	case cri.ContainerState_CONTAINER_CREATED:
+		return "create"
+	case cri.ContainerState_CONTAINER_RUNNING:
+		return "start"
+	case cri.ContainerState_CONTAINER_EXITED:
+		return "stop"
+	default:
+		return "unknown"
 	}
 }
 

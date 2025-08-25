@@ -21,6 +21,11 @@ type IntelligenceCollector struct {
 
 // NewIntelligenceCollector creates a stub collector for non-Linux platforms
 func NewIntelligenceCollector(name string, config *IntelligenceCollectorConfig, logger *zap.Logger) (*IntelligenceCollector, error) {
+	// Handle nil config case
+	if config == nil {
+		config = DefaultIntelligenceConfig()
+	}
+
 	// Create base collector
 	baseCollector, err := NewCollector(name, config.NetworkCollectorConfig, logger)
 	if err != nil {

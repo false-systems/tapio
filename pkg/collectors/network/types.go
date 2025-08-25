@@ -150,9 +150,10 @@ type IntelligenceEvent struct {
 	AnalysisContext map[string]string     `json:"analysis_context"`
 
 	// Specific event data
-	ErrorPattern   *ErrorPattern   `json:"error_pattern,omitempty"`
-	LatencyAnomaly *LatencyAnomaly `json:"latency_anomaly,omitempty"`
-	DNSFailure     *DNSFailure     `json:"dns_failure,omitempty"`
+	ErrorPattern    *ErrorPattern    `json:"error_pattern,omitempty"`
+	LatencyAnomaly  *LatencyAnomaly  `json:"latency_anomaly,omitempty"`
+	DNSFailure      *DNSFailure      `json:"dns_failure,omitempty"`
+	SecurityConcern *SecurityConcern `json:"security_concern,omitempty"`
 }
 
 // ServiceDependency represents a discovered service dependency
@@ -190,11 +191,62 @@ type LatencyAnomaly struct {
 
 // DNSFailure represents DNS resolution failures
 type DNSFailure struct {
-	Domain       string `json:"domain"`
-	ResponseCode uint16 `json:"response_code"`
-	ResponseText string `json:"response_text"`
-	RetryCount   int32  `json:"retry_count"`
+	Domain        string `json:"domain"`
+	ResponseCode  uint16 `json:"response_code"`
+	ResponseText  string `json:"response_text"`
+	RetryCount    int32  `json:"retry_count"`
+	SourceService string `json:"source_service"`
 }
+
+// SecurityConcern represents detected security threats and suspicious activities
+type SecurityConcern struct {
+	SourceService  string    `json:"source_service"`
+	DestService    string    `json:"dest_service,omitempty"`
+	SourceIP       string    `json:"source_ip"`
+	DestIP         string    `json:"dest_ip,omitempty"`
+	ConcernType    string    `json:"concern_type"`
+	Description    string    `json:"description"`
+	Severity       string    `json:"severity"`
+	Confidence     float64   `json:"confidence"`
+	Evidence       []string  `json:"evidence,omitempty"`
+	RiskLevel      string    `json:"risk_level"`
+	Timestamp      time.Time `json:"timestamp"`
+	Recommendation string    `json:"recommendation,omitempty"`
+	Blocked        bool      `json:"blocked"`
+	AttackerUA     string    `json:"attacker_ua,omitempty"`
+	TargetEndpoint string    `json:"target_endpoint,omitempty"`
+	RequestCount   int32     `json:"request_count"`
+}
+
+// SecurityConcernType constants for structured threat classification
+const (
+	SecurityConcernPortScan         = "port_scan"
+	SecurityConcernSQLInjection     = "sql_injection"
+	SecurityConcernBruteForce       = "brute_force"
+	SecurityConcernSuspiciousUA     = "suspicious_user_agent"
+	SecurityConcernPathTraversal    = "path_traversal"
+	SecurityConcernXSSAttempt       = "xss_attempt"
+	SecurityConcernUnauthorized     = "unauthorized_access"
+	SecurityConcernRateLimitHit     = "rate_limit_exceeded"
+	SecurityConcernMaliciousIP      = "malicious_ip"
+	SecurityConcernDataExfiltration = "data_exfiltration"
+)
+
+// SecuritySeverity constants for threat severity levels
+const (
+	SecuritySeverityLow      = "low"
+	SecuritySeverityMedium   = "medium"
+	SecuritySeverityHigh     = "high"
+	SecuritySeverityCritical = "critical"
+)
+
+// SecurityRiskLevel constants for risk assessment
+const (
+	SecurityRiskLow      = "low"
+	SecurityRiskMedium   = "medium"
+	SecurityRiskHigh     = "high"
+	SecurityRiskCritical = "critical"
+)
 
 // DefaultIntelligenceConfig returns a default intelligence collector configuration
 func DefaultIntelligenceConfig() *IntelligenceCollectorConfig {
