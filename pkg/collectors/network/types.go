@@ -150,9 +150,10 @@ type IntelligenceEvent struct {
 	AnalysisContext map[string]string     `json:"analysis_context"`
 
 	// Specific event data
-	ErrorPattern   *ErrorPattern   `json:"error_pattern,omitempty"`
-	LatencyAnomaly *LatencyAnomaly `json:"latency_anomaly,omitempty"`
-	DNSFailure     *DNSFailure     `json:"dns_failure,omitempty"`
+	ErrorPattern    *ErrorPattern    `json:"error_pattern,omitempty"`
+	LatencyAnomaly  *LatencyAnomaly  `json:"latency_anomaly,omitempty"`
+	DNSFailure      *DNSFailure      `json:"dns_failure,omitempty"`
+	SecurityConcern *SecurityConcern `json:"security_concern,omitempty"`
 }
 
 // ServiceDependency represents a discovered service dependency

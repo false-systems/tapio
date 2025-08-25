@@ -279,12 +279,12 @@ func (c *Collector) processContainer(ctx context.Context, container *cri.Contain
 		k8sContext.Namespace = podNamespace
 	}
 	if podUID, ok := container.Labels["io.kubernetes.pod.uid"]; ok {
-		k8sContext.PodUID = podUID
+		k8sContext.UID = podUID
 	}
 
 	// Create proper CollectorEvent with structured data
 	event := &domain.CollectorEvent{
-		ID:        fmt.Sprintf("%s-%s-%d", c.name, container.Id[:12], time.Now().UnixNano()),
+		EventID:   fmt.Sprintf("%s-%s-%d", c.name, container.Id[:12], time.Now().UnixNano()),
 		Timestamp: time.Now(),
 		Source:    c.name,
 		Type:      getContainerEventType(status.State),
