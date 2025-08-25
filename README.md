@@ -101,7 +101,6 @@ We gather telemetry from multiple sources to build a complete picture:
 - **Network Collector** (`/pkg/collectors/network`) - L3/L4/L7 network intelligence with eBPF-based traffic analysis
 
 ### **Service Discovery & Coordination**
-- **etcd Collector** (`/pkg/collectors/etcd`) - Key-value store operations and cluster coordination
 - **etcd-API Collector** (`/pkg/collectors/etcd-api`) - etcd API-level monitoring  
 - **etcd-eBPF Collector** (`/pkg/collectors/etcd-ebpf`) - Deep etcd performance monitoring with eBPF
 
