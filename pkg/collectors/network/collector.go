@@ -29,12 +29,13 @@ type IntelligenceCollector struct {
 	errorCascadeTracker map[string]*ErrorCascade
 
 	// OpenTelemetry for intelligence metrics
-	intelTracer          trace.Tracer
-	serviceDepsCounter   metric.Int64Counter
-	errorPatternsCounter metric.Int64Counter
-	anomaliesCounter     metric.Int64Counter
-	dnsFailuresCounter   metric.Int64Counter
-	filteringRatio       metric.Float64Gauge
+	intelTracer            trace.Tracer
+	serviceDepsCounter     metric.Int64Counter
+	errorPatternsCounter   metric.Int64Counter
+	anomaliesCounter       metric.Int64Counter
+	dnsFailuresCounter     metric.Int64Counter
+	securityConcernCounter metric.Int64Counter
+	filteringRatio         metric.Float64Gauge
 }
 
 // LatencyBaseline tracks latency patterns for anomaly detection
@@ -100,6 +101,14 @@ func NewIntelligenceCollector(name string, config *IntelligenceCollectorConfig, 
 	)
 	if err != nil {
 		logger.Warn("Failed to create DNS failures counter", zap.Error(err))
+	}
+
+	securityConcernCounter, err := meter.Int64Counter(
+		fmt.Sprintf("%s_security_concerns_detected_total", name),
+		metric.WithDescription("Total security concerns detected"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create security concerns counter", zap.Error(err))
 	}
 
 	filteringRatio, err := meter.Float64Gauge(

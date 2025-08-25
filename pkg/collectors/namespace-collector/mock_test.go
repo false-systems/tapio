@@ -529,8 +529,8 @@ func TestRawEventOTELCompliance(t *testing.T) {
 			validate: func(t *testing.T, event *domain.CollectorEvent) {
 				// Verify basic OTEL fields
 				assert.Equal(t, "cni", event.Type)
-				assert.NotEmpty(t, event.TraceID)
-				assert.NotEmpty(t, event.SpanID)
+				assert.NotEmpty(t, event.Metadata.TraceID)
+				assert.NotEmpty(t, event.Metadata.SpanID)
 				assert.NotZero(t, event.Timestamp)
 			},
 		},
@@ -567,7 +567,6 @@ func TestRawEventOTELCompliance(t *testing.T) {
 					t.Skip("EventData.Custom is nil")
 					return
 				}
-				assert.NoError(t, err)
 				assert.Equal(t, "9999", deserializedData["pid"])
 				assert.Equal(t, "containerd-shim", deserializedData["comm"])
 			},

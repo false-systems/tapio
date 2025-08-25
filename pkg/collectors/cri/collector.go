@@ -290,22 +290,24 @@ func (c *Collector) processContainer(ctx context.Context, container *cri.Contain
 		Type:      getContainerEventType(status.State),
 		Severity:  domain.SeverityInfo,
 
-		ContainerData: &domain.ContainerData{
-			ContainerID: container.Id,
-			ImageID:     container.ImageRef,
-			ImageName:   container.Image.Image,
-			Runtime:     "cri", // Generic CRI runtime
-			State:       status.State.String(),
-			Action:      getContainerAction(status.State),
-			Labels:      container.Labels,
-			PID:         int32(status.Pid),
+		EventData: domain.EventDataContainer{
+			Container: &domain.ContainerData{
+				ContainerID: container.Id,
+				ImageID:     container.ImageRef,
+				ImageName:   container.Image.Image,
+				Runtime:     "cri", // Generic CRI runtime
+				State:       status.State.String(),
+				Action:      getContainerAction(status.State),
+				Labels:      container.Labels,
+				// Note: CRI API doesn't expose PID in container info
+			},
 		},
 
 		K8sContext: k8sContext,
 
 		CorrelationHints: &domain.CorrelationHints{
 			ContainerID: container.Id,
-			ProcessID:   int32(status.Pid),
+			// Note: CRI API doesn't expose PID in container info
 		},
 	}
 
