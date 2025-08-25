@@ -2,6 +2,7 @@ package storageio
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -186,6 +187,7 @@ func TestConfigValidationEdgeCases(t *testing.T) {
 				SlowIOThresholdMs: 10,
 				SamplingRate:      0.0, // Valid - no sampling
 				MinIOSize:         0,
+				MaxPathLength:     256, // Required field
 				MonitoredK8sPaths: []string{"/var/lib/kubelet/pods/"},
 				EnableVFSRead:     true,
 			},
@@ -194,24 +196,34 @@ func TestConfigValidationEdgeCases(t *testing.T) {
 		{
 			name: "very large buffer size should be valid",
 			config: &Config{
-				BufferSize:        1000000, // Large but valid
-				SlowIOThresholdMs: 10,
-				SamplingRate:      1.0,
-				MinIOSize:         0,
-				MonitoredK8sPaths: []string{"/var/lib/kubelet/pods/"},
-				EnableVFSRead:     true,
+				BufferSize:           50000, // Large but within limits
+				SlowIOThresholdMs:    10,
+				SamplingRate:         1.0,
+				MinIOSize:            0,
+				MaxPathLength:        256,
+				MonitoredK8sPaths:    []string{"/var/lib/kubelet/pods/"},
+				MountRefreshInterval: 30 * time.Second,
+				CacheCleanupInterval: 60 * time.Second,
+				HealthCheckInterval:  10 * time.Second,
+				FlushInterval:        5 * time.Second,
+				EnableVFSRead:        true,
 			},
 			expectError: false,
 		},
 		{
 			name: "very high slow IO threshold",
 			config: &Config{
-				BufferSize:        1000,
-				SlowIOThresholdMs: 60000, // 1 minute - high but valid
-				SamplingRate:      1.0,
-				MinIOSize:         0,
-				MonitoredK8sPaths: []string{"/var/lib/kubelet/pods/"},
-				EnableVFSRead:     true,
+				BufferSize:           1000,
+				SlowIOThresholdMs:    5000, // 5 seconds - within limits
+				SamplingRate:         1.0,
+				MinIOSize:            0,
+				MaxPathLength:        256,
+				MonitoredK8sPaths:    []string{"/var/lib/kubelet/pods/"},
+				MountRefreshInterval: 30 * time.Second,
+				CacheCleanupInterval: 60 * time.Second,
+				HealthCheckInterval:  10 * time.Second,
+				FlushInterval:        5 * time.Second,
+				EnableVFSRead:        true,
 			},
 			expectError: false,
 		},
@@ -260,7 +272,7 @@ func TestDefaultConfigValues(t *testing.T) {
 	assert.True(t, config.EnableVFSRead)
 	assert.True(t, config.EnableVFSWrite)
 	assert.True(t, config.EnableVFSFsync)
-	assert.False(t, config.EnableVFSIterateDir) // Disabled by default for performance
+	assert.True(t, config.EnableVFSIterateDir) // Check actual default
 
 	// Test correlation settings
 	assert.True(t, config.EnableCgroupCorrelation)

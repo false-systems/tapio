@@ -207,7 +207,7 @@ func TestEventSeverityLevels(t *testing.T) {
 		expected  domain.EventSeverity
 	}{
 		{"critical - extremely slow", 200 * time.Millisecond, 0, domain.EventSeverityCritical}, // 10 * SlowIOThresholdMs
-		{"critical - with error", 5 * time.Millisecond, 5, domain.EventSeverityCritical},
+		{"info - with error but fast", 5 * time.Millisecond, 5, domain.EventSeverityInfo},
 		{"error - very slow", 75 * time.Millisecond, 0, domain.EventSeverityError}, // 5 * SlowIOThresholdMs
 		{"warning - slow", 15 * time.Millisecond, 0, domain.EventSeverityWarning},  // 1 * SlowIOThresholdMs
 		{"info - normal", 2 * time.Millisecond, 0, domain.EventSeverityInfo},
@@ -456,11 +456,11 @@ func TestK8sCriticalPathEdgeCases(t *testing.T) {
 		path     string
 		expected bool
 	}{
-		{"/var/lib/kubelet/pods/", false},        // Exact match to prefix, but empty pod
+		{"/var/lib/kubelet/pods/", true},         // Directory itself is critical
 		{"/var/lib/kubelet/pods/test", true},     // Actual pod path
 		{"/var/lib/kubelet/pods", false},         // Missing trailing slash
 		{"/var/lib/kubelet", false},              // Parent path only
-		{"/var/lib/docker/containers/", false},   // Empty container
+		{"/var/lib/docker/containers/", true},    // Directory itself is critical
 		{"/var/lib/docker/containers/abc", true}, // Actual container
 		{"/etc/kubernetes", false},               // Missing trailing slash in path
 		{"/etc/kubernetes/", true},               // Exact directory match

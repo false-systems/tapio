@@ -120,19 +120,20 @@ func NewIntelligenceCollector(name string, config *IntelligenceCollectorConfig, 
 	}
 
 	ic := &IntelligenceCollector{
-		Collector:            baseCollector,
-		intelConfig:          config,
-		intelStats:           &IntelligenceCollectorStats{},
-		intelligenceEvents:   make(chan *IntelligenceEvent, config.BufferSize),
-		serviceDependencies:  make(map[string]*ServiceDependency),
-		latencyBaselines:     make(map[string]*LatencyBaseline),
-		errorCascadeTracker:  make(map[string]*ErrorCascade),
-		intelTracer:          tracer,
-		serviceDepsCounter:   serviceDepsCounter,
-		errorPatternsCounter: errorPatternsCounter,
-		anomaliesCounter:     anomaliesCounter,
-		dnsFailuresCounter:   dnsFailuresCounter,
-		filteringRatio:       filteringRatio,
+		Collector:              baseCollector,
+		intelConfig:            config,
+		intelStats:             &IntelligenceCollectorStats{},
+		intelligenceEvents:     make(chan *IntelligenceEvent, config.BufferSize),
+		serviceDependencies:    make(map[string]*ServiceDependency),
+		latencyBaselines:       make(map[string]*LatencyBaseline),
+		errorCascadeTracker:    make(map[string]*ErrorCascade),
+		intelTracer:            tracer,
+		serviceDepsCounter:     serviceDepsCounter,
+		errorPatternsCounter:   errorPatternsCounter,
+		anomaliesCounter:       anomaliesCounter,
+		dnsFailuresCounter:     dnsFailuresCounter,
+		securityConcernCounter: securityConcernCounter,
+		filteringRatio:         filteringRatio,
 	}
 
 	return ic, nil
@@ -467,12 +468,40 @@ func (ic *IntelligenceCollector) handleSecurityConcern(ctx context.Context, even
 	ic.intelStats.SecurityConcerns++
 	ic.intelStats.IntelligentEventsEmitted++
 
-	ic.logger.Warn("Security concern detected",
+	// Record security concern metrics
+	if ic.securityConcernCounter != nil {
+		ic.securityConcernCounter.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("concern_type", concern.ConcernType),
+			attribute.String("severity", concern.Severity),
+			attribute.String("risk_level", concern.RiskLevel),
+			attribute.String("source_service", concern.SourceService),
+			attribute.Float64("confidence", concern.Confidence),
+			attribute.Bool("blocked", concern.Blocked),
+		))
+	}
+
+	// Log security concern with comprehensive context
+	logLevel := zap.WarnLevel
+	if concern.Severity == SecuritySeverityCritical {
+		logLevel = zap.ErrorLevel
+	}
+
+	ic.logger.Log(logLevel, "Security concern detected",
 		zap.String("source", concern.SourceService),
+		zap.String("source_ip", concern.SourceIP),
 		zap.String("destination", concern.DestService),
+		zap.String("dest_ip", concern.DestIP),
 		zap.String("type", concern.ConcernType),
 		zap.String("description", concern.Description),
 		zap.String("severity", concern.Severity),
+		zap.String("risk_level", concern.RiskLevel),
+		zap.Float64("confidence", concern.Confidence),
+		zap.Strings("evidence", concern.Evidence),
+		zap.String("recommendation", concern.Recommendation),
+		zap.Bool("blocked", concern.Blocked),
+		zap.String("attacker_ua", concern.AttackerUA),
+		zap.String("target_endpoint", concern.TargetEndpoint),
+		zap.Int32("request_count", concern.RequestCount),
 	)
 }
 
