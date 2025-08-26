@@ -544,8 +544,11 @@ func TestRawEventOTELCompliance(t *testing.T) {
 			},
 			validate: func(t *testing.T, event *domain.CollectorEvent) {
 				// Verify K8s metadata extraction
-				assert.Equal(t, "Pod", event.Metadata["k8s_kind"])
-				assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", event.Metadata["k8s_uid"])
+				// K8s metadata is now in event.K8sContext
+				if event.K8sContext != nil {
+					assert.Equal(t, "Pod", event.K8sContext.Kind)
+					assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", event.K8sContext.UID)
+				}
 			},
 		},
 		{

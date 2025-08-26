@@ -288,7 +288,7 @@ func (c *Collector) processContainer(ctx context.Context, container *cri.Contain
 		Timestamp: time.Now(),
 		Source:    c.name,
 		Type:      getContainerEventType(status.State),
-		Severity:  domain.SeverityInfo,
+		Severity:  domain.EventSeverityInfo,
 
 		EventData: domain.EventDataContainer{
 			Container: &domain.ContainerData{

@@ -16,7 +16,7 @@ import (
 // MockCollector implements a test collector with race-safe operations
 type MockCollector struct {
 	name     string
-	events   chan domain.RawEvent
+	events   chan *domain.CollectorEvent
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopOnce sync.Once
@@ -27,7 +27,7 @@ type MockCollector struct {
 func NewMockCollector(name string) *MockCollector {
 	return &MockCollector{
 		name:   name,
-		events: make(chan domain.RawEvent, 100), // Larger buffer for stress testing
+		events: make(chan *domain.CollectorEvent, 100), // Larger buffer for stress testing
 	}
 }
 
@@ -60,7 +60,7 @@ func (m *MockCollector) Stop() error {
 	return nil
 }
 
-func (m *MockCollector) Events() <-chan domain.RawEvent {
+func (m *MockCollector) Events() <-chan *domain.CollectorEvent {
 	return m.events
 }
 
@@ -269,9 +269,14 @@ func TestEnrichedEvent(t *testing.T) {
 		Data:      []byte(`{"kind":"Pod","name":"test-pod"}`),
 	}
 
-	enriched := &EnrichedEvent{
-		Raw: raw,
-		K8sObject: &K8sObjectInfo{
+	// EnrichedEvent and K8sObjectInfo are now part of domain.CollectorEvent
+	// Create a CollectorEvent with K8s context
+	enriched := &domain.CollectorEvent{
+		EventID:   "enriched-test",
+		Timestamp: time.Now(),
+		Type:      domain.EventTypeK8sPod,
+		Source:    "test",
+		K8sContext: &domain.K8sContext{
 			Kind:      "Pod",
 			Name:      "test-pod",
 			Namespace: "default",

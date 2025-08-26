@@ -2,6 +2,7 @@ package oom
 
 import (
 	"fmt"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -38,11 +39,12 @@ func (c *Config) Validate() error {
 
 // Factory function for use with collector registry
 func CreateCollector(config *Config, logger *zap.Logger) (collectors.Collector, error) {
-	if config == nil {
-		config = NewConfig()
-	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger cannot be nil")
+	}
+
+	if config == nil {
+		config = NewConfig()
 	}
 
 	return NewOOMCollector(config.OOMConfig, logger)
@@ -55,6 +57,9 @@ func GetDefaultConfig() *Config {
 
 // ConfigFromMap creates configuration from a map (for generic factory usage)
 // This avoids the forbidden map[string]interface{} pattern by using typed conversion
+// Expected keys: enable_prediction, prediction_threshold_percent, ring_buffer_size,
+// high_pressure_threshold_percent, event_batch_size, max_events_per_second,
+// collect_cmdline, collect_environment, collect_memory_details, exclude_system_processes
 func ConfigFromMap(configMap map[string]string) (*Config, error) {
 	config := NewConfig()
 
@@ -74,11 +79,43 @@ func setConfigValue(config *Config, key, value string) error {
 	case "enable_prediction":
 		config.EnablePrediction = value == "true"
 	case "prediction_threshold_percent":
-		// Would parse uint32 from string
-		// config.PredictionThresholdPct = parsed value
+		v, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing prediction_threshold_percent: %w", err)
+		}
+		config.PredictionThresholdPct = uint32(v)
 	case "ring_buffer_size":
-		// Would parse uint32 from string
-		// config.RingBufferSize = parsed value
+		v, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing ring_buffer_size: %w", err)
+		}
+		config.RingBufferSize = uint32(v)
+	case "high_pressure_threshold_percent":
+		v, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing high_pressure_threshold_percent: %w", err)
+		}
+		config.HighPressureThresholdPct = uint32(v)
+	case "event_batch_size":
+		v, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing event_batch_size: %w", err)
+		}
+		config.EventBatchSize = uint32(v)
+	case "max_events_per_second":
+		v, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing max_events_per_second: %w", err)
+		}
+		config.MaxEventsPerSecond = uint32(v)
+	case "collect_cmdline":
+		config.CollectCmdline = value == "true"
+	case "collect_environment":
+		config.CollectEnvironment = value == "true"
+	case "collect_memory_details":
+		config.CollectMemoryDetails = value == "true"
+	case "exclude_system_processes":
+		config.ExcludeSystemProcesses = value == "true"
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}

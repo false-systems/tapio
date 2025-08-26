@@ -188,7 +188,8 @@ func ValidateYAMLConfig(config *YAMLConfig) error {
 			break
 		}
 		// Check for common misconfigurations
-		if cfg.Config == nil && cfg.Enabled {
+		// Config is a struct, not a pointer, so check if it has meaningful values
+		if cfg.Config.BufferSize == 0 && cfg.Enabled {
 			return fmt.Errorf("collector %s is enabled but has no config", name)
 		}
 	}
@@ -215,16 +216,9 @@ func (c *YAMLConfig) toNATSConfig() *config.NATSConfig {
 		URL:           c.Orchestrator.NATS.URL,
 		Subject:       c.Orchestrator.NATS.Subject,
 		MaxReconnects: c.Orchestrator.NATS.MaxReconnects,
-	}
-
-	// Handle authentication
-	if c.Orchestrator.NATS.AuthEnabled {
-		if c.Orchestrator.NATS.Token != "" {
-			natsConfig.Token = c.Orchestrator.NATS.Token
-		} else if c.Orchestrator.NATS.Username != "" {
-			natsConfig.Username = c.Orchestrator.NATS.Username
-			natsConfig.Password = c.Orchestrator.NATS.Password
-		}
+		Username:      c.Orchestrator.NATS.Username,
+		Password:      c.Orchestrator.NATS.Password,
+		Token:         c.Orchestrator.NATS.Token,
 	}
 
 	return natsConfig
