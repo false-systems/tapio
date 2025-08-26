@@ -1,3 +1,5 @@
+//go:build linux
+
 package kernel
 
 // Buffer size constants

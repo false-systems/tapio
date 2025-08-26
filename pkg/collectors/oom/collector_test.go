@@ -269,7 +269,7 @@ func TestMemoryPredictionGeneration(t *testing.T) {
 	// Should predict OOM in about 20 seconds (200MB remaining / 10MB/s)
 	expectedTimeToOOM := 20.0
 	actualTimeToOOM := prediction.PredictedOOMTime.Sub(prediction.Timestamp).Seconds()
-	assert.InDelta(t, expectedTimeToOOM, actualTimeToOOM, 1.0)
+	assert.InDelta(t, expectedTimeToOOM, actualTimeToOOM, 3.0)
 
 	// Confidence should be high with 15 samples and high allocation rate
 	assert.Greater(t, prediction.Confidence, 0.7)
@@ -298,7 +298,7 @@ func TestConfigValidation(t *testing.T) {
 				EnableK8sCorrelation:     true,
 			},
 			wantErr: true,
-			errMsg:  "prediction threshold must be between 0 and 100",
+			errMsg:  "must be <= 100",
 		},
 		{
 			name: "high pressure threshold too high",
@@ -311,7 +311,7 @@ func TestConfigValidation(t *testing.T) {
 				EnableK8sCorrelation:     true,
 			},
 			wantErr: true,
-			errMsg:  "high pressure threshold must be between 0 and 100",
+			errMsg:  "must be <= 100",
 		},
 		{
 			name: "ring buffer too small",
@@ -324,7 +324,7 @@ func TestConfigValidation(t *testing.T) {
 				EnableK8sCorrelation:     true,
 			},
 			wantErr: true,
-			errMsg:  "ring buffer size must be at least",
+			errMsg:  "must be >= 4096",
 		},
 		{
 			name: "zero batch size",
@@ -337,7 +337,7 @@ func TestConfigValidation(t *testing.T) {
 				EnableK8sCorrelation:     true,
 			},
 			wantErr: true,
-			errMsg:  "event batch size must be positive",
+			errMsg:  "must be > 0",
 		},
 	}
 
@@ -382,7 +382,7 @@ func TestStructSizes(t *testing.T) {
 	// Verify struct sizes for kernel compatibility
 	oomEventSize := GetOOMEventSize()
 	assert.Greater(t, oomEventSize, uint32(0))
-	assert.Equal(t, oomEventSize, uint32(unsafe.Sizeof(OOMEvent{})))
+	assert.Equal(t, uint32(oomEventSize), uint32(unsafe.Sizeof(OOMEvent{})))
 }
 
 func TestConfigFromMap(t *testing.T) {

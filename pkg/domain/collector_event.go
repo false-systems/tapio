@@ -40,6 +40,7 @@ const (
 	// Network Events
 	EventTypeDNS         CollectorEventType = "network.dns"
 	EventTypeDNSQuery    CollectorEventType = "dns.query"
+	EventTypeCNI         CollectorEventType = "cni"
 	EventTypeDNSResponse CollectorEventType = "dns.response"
 	EventTypeDNSTimeout  CollectorEventType = "dns.timeout"
 	EventTypeTCP         CollectorEventType = "network.tcp"

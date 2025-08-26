@@ -401,7 +401,7 @@ func (c *Collector) createCollectorEvent(ctx context.Context, ebpfEvent *etcdEve
 		fd := int32(ebpfEvent.Data[0]) | int32(ebpfEvent.Data[1])<<8 |
 			int32(ebpfEvent.Data[2])<<16 | int32(ebpfEvent.Data[3])<<24
 		syscallData.Arguments = append(syscallData.Arguments, domain.SystemCallArg{
-			Name:  "fd",
+			Index: 0,
 			Type:  "int",
 			Value: fmt.Sprintf("%d", fd),
 		})
@@ -411,11 +411,10 @@ func (c *Collector) createCollectorEvent(ctx context.Context, ebpfEvent *etcdEve
 	var processData *domain.ProcessData
 	if processInfo != nil {
 		processData = &domain.ProcessData{
-			PID:         ebpfEvent.PID,
-			PPID:        uint32(processInfo.PPID),
-			Command:     processInfo.Comm,
-			CommandLine: processInfo.Cmdline,
-			StartTime:   processInfo.StartTime,
+			PID:       int32(ebpfEvent.PID),
+			PPID:      int32(processInfo.PPID),
+			Command:   processInfo.Comm,
+			StartTime: processInfo.StartTime,
 		}
 	}
 
@@ -447,23 +446,25 @@ func (c *Collector) createCollectorEvent(ctx context.Context, ebpfEvent *etcdEve
 			SchemaVersion: "1.0",
 		},
 
-		CorrelationHints:  correlationHints,
-		K8sContext:        k8sContext,
-		TraceContext:      traceContext,
-		CollectionContext: c.buildCollectionContext(),
+		CorrelationHints: &correlationHints,
+		K8sContext:       k8sContext,
+		TraceContext:     traceContext,
+		CollectionContext: func() *domain.CollectionContext {
+			ctx := c.buildCollectionContext()
+			return &ctx
+		}(),
 	}
 }
 
 // buildCorrelationHints builds correlation hints from eBPF event data
 func (c *Collector) buildCorrelationHints(event *etcdEvent, processInfo *EtcdProcessInfo) domain.CorrelationHints {
 	hints := domain.CorrelationHints{
-		ProcessID: event.PID,
-		NodeName:  c.config.NodeName,
+		ProcessID: int32(event.PID),
+		NodeName:  "", // NodeName not available in config
 	}
 
-	if processInfo != nil {
-		hints.ParentPID = uint32(processInfo.PPID)
-	}
+	// ParentPID field doesn't exist in domain.CorrelationHints
+	// This info is already in ProcessData
 
 	// Try to extract container ID from cgroup (will be enhanced later)
 	if cgroupID := c.extractCgroupID(event.PID); cgroupID != "" {
@@ -496,9 +497,11 @@ func (c *Collector) extractTraceContextFromSpan(ctx context.Context) *domain.Tra
 	}
 
 	return &domain.TraceContext{
-		TraceID: span.SpanContext().TraceID().String(),
-		SpanID:  span.SpanContext().SpanID().String(),
-		Baggage: make(map[string]string),
+		TraceID:    span.SpanContext().TraceID(),
+		SpanID:     span.SpanContext().SpanID(),
+		TraceFlags: span.SpanContext().TraceFlags(),
+		TraceState: span.SpanContext().TraceState(),
+		Baggage:    make(map[string]string),
 	}
 }
 
@@ -507,12 +510,24 @@ func (c *Collector) buildCollectionContext() domain.CollectionContext {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	hostname, _ := os.Hostname()
+
 	return domain.CollectionContext{
-		CollectorName:    c.name,
 		CollectorVersion: "1.0.0",
-		CollectionTime:   time.Now(),
-		NodeName:         c.config.NodeName,
-		ClusterName:      c.config.ClusterName,
+		HostInfo: domain.HostInfo{
+			Hostname: hostname,
+		},
+		CollectionConfig: domain.CollectionConfig{
+			FlushInterval:   time.Second,
+			BufferSize:      100,
+			SamplingRate:    1.0,
+			EnabledFeatures: []string{"etcd"},
+		},
+		BufferStats: domain.BufferStats{
+			EventsQueued:  int64(len(c.events)),
+			EventsDropped: c.stats.EventsDropped,
+			BufferSize:    int64(cap(c.events)),
+		},
 	}
 }
 

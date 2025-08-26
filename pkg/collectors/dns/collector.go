@@ -59,7 +59,7 @@ type Collector struct {
 	stats *DNSStats
 
 	// eBPF components (platform-specific)
-	ebpfState interface{}
+	ebpfState ebpfState
 
 	// Event processing
 	events chan *domain.CollectorEvent
