@@ -248,36 +248,4 @@ const (
 	SecurityRiskCritical = "critical"
 )
 
-// DefaultIntelligenceConfig returns a default intelligence collector configuration
-func DefaultIntelligenceConfig() *IntelligenceCollectorConfig {
-	return &IntelligenceCollectorConfig{
-		NetworkCollectorConfig: &NetworkCollectorConfig{
-			BufferSize:         1000,
-			FlushInterval:      time.Second,
-			EnableIPv4:         true,
-			EnableTCP:          true,
-			EnableUDP:          true,
-			EnableHTTP:         true,
-			EnableHTTPS:        true,
-			HTTPPorts:          []int{80, 8080, 3000},
-			HTTPSPorts:         []int{443, 8443},
-			MaxEventsPerSecond: 5000, // Lower than regular collector
-			SamplingRate:       1.0,
-		},
-		EnableIntelligenceMode:   true,
-		SlowRequestThresholdMs:   1000,
-		ErrorStatusThreshold:     400,
-		LatencyDeviationFactor:   3.0,
-		DependencyCacheTTLMs:     300000, // 5 minutes
-		IntelligenceSamplingRate: 1.0,
-		ErrorCascadeWindowMs:     30000, // 30 seconds
-		ServiceDiscoveryEnabled:  true,
-		SecurityAnalysisEnabled:  true,
-		HTTPIntelligenceEnabled:  true,
-		GRPCIntelligenceEnabled:  true,
-		DNSIntelligenceEnabled:   true,
-		SuspiciousUserAgents:     []string{"masscan", "nmap", "sqlmap", "nikto"},
-		SuspiciousEndpoints:      []string{"/.env", "/admin", "/wp-admin", "/.git"},
-		KnownGoodServices:        []string{"kubernetes", "istio-proxy", "envoy"},
-	}
-}
+// DefaultIntelligenceConfig is now defined in collector.go to avoid duplication
