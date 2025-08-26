@@ -3,7 +3,9 @@ package dns
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
@@ -53,11 +55,14 @@ type Collector struct {
 	healthy bool
 	mu      sync.RWMutex
 
+	// Statistics
+	stats *DNSStats
+
 	// eBPF components (platform-specific)
 	ebpfState interface{}
 
 	// Event processing
-	events chan domain.RawEvent
+	events chan *domain.CollectorEvent
 
 	// Minimal OpenTelemetry
 	tracer          trace.Tracer
@@ -125,7 +130,8 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		name:            name,
 		logger:          logger,
 		config:          cfg,
-		events:          make(chan domain.RawEvent, cfg.BufferSize),
+		stats:           &DNSStats{},
+		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
@@ -194,11 +200,155 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
 // IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
 	return c.healthy
+}
+
+// Health returns domain-compatible health status
+func (c *Collector) Health() *domain.HealthStatus {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	status := domain.HealthUnhealthy
+	message := "DNS collector not running"
+
+	if c.healthy {
+		bufferUsage := float64(len(c.events)) / float64(cap(c.events))
+		if bufferUsage >= 0.9 {
+			status = domain.HealthDegraded
+			message = "DNS collector healthy but high buffer utilization"
+		} else {
+			status = domain.HealthHealthy
+			message = "DNS collector actively monitoring"
+		}
+	}
+
+	return &domain.HealthStatus{
+		Status:    status,
+		Message:   message,
+		Component: c.name,
+		Timestamp: time.Now(),
+	}
+}
+
+// Statistics returns domain-compatible statistics
+func (c *Collector) Statistics() *domain.CollectorStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return &domain.CollectorStats{
+		EventsProcessed: c.stats.EventsProcessed,
+		ErrorCount:      c.stats.ErrorCount,
+		LastEventTime:   c.stats.LastEventTime,
+		Uptime:          time.Since(c.stats.LastEventTime),
+		CustomMetrics: map[string]string{
+			"events_dropped":     fmt.Sprintf("%d", c.stats.EventsDropped),
+			"buffer_utilization": fmt.Sprintf("%.2f", c.stats.BufferUtilization),
+			"ebpf_attached":      fmt.Sprintf("%t", c.stats.EBPFAttached),
+		},
+	}
+}
+
+// GetDNSStats returns DNS-specific statistics
+func (c *Collector) GetDNSStats() *DNSStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Return a copy to avoid race conditions
+	return &DNSStats{
+		EventsProcessed:   c.stats.EventsProcessed,
+		EventsDropped:     c.stats.EventsDropped,
+		ErrorCount:        c.stats.ErrorCount,
+		BufferUtilization: c.stats.BufferUtilization,
+		EBPFAttached:      c.stats.EBPFAttached,
+		LastEventTime:     c.stats.LastEventTime,
+	}
+}
+
+// updateStats updates internal statistics
+func (c *Collector) updateStats(eventsProcessed, eventsDropped, errorCount int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.stats.EventsProcessed += eventsProcessed
+	c.stats.EventsDropped += eventsDropped
+	c.stats.ErrorCount += errorCount
+	c.stats.BufferUtilization = float64(len(c.events)) / float64(cap(c.events))
+	c.stats.LastEventTime = time.Now()
+}
+
+// Platform-agnostic stubs for testing
+
+// extractContainerID extracts container ID from cgroup ID (stub)
+func (c *Collector) extractContainerID(cgroupID uint64) string {
+	if cgroupID == 0 {
+		return ""
+	}
+	// Stub implementation - would be replaced by platform-specific version
+	cgroupPath := c.getCgroupPath(cgroupID)
+	return c.parseContainerIDFromPath(cgroupPath)
+}
+
+// getCgroupPath gets cgroup path for a given cgroup ID (stub)
+func (c *Collector) getCgroupPath(cgroupID uint64) string {
+	if cgroupID == 0 {
+		return ""
+	}
+	// Stub implementation for non-Linux or testing
+	return fmt.Sprintf("/proc/cgroup/%d", cgroupID)
+}
+
+// parseContainerIDFromPath parses container ID from cgroup path (stub)
+func (c *Collector) parseContainerIDFromPath(path string) string {
+	// Placeholder implementation for testing
+	return ""
+}
+
+// extractPodUID extracts pod UID from cgroup path (stub)
+func (c *Collector) extractPodUID(cgroupPath string) string {
+	if cgroupPath == "" {
+		return ""
+	}
+
+	// Look for pod UID pattern in path: /kubepods/pod12345678_1234_1234_1234_123456789012/container
+	// We need to find "pod" that's NOT part of "kubepods"
+	parts := strings.Split(cgroupPath, "/")
+
+	for _, part := range parts {
+		if strings.HasPrefix(part, "pod") && len(part) > 3 {
+			podUID := part[3:] // Remove "pod" prefix
+
+			// Validate it looks like a UID (has underscores and is reasonable length)
+			if strings.Contains(podUID, "_") && len(podUID) >= 32 {
+				// Convert underscores to hyphens for Kubernetes UID format
+				return strings.ReplaceAll(podUID, "_", "-")
+			}
+		}
+	}
+
+	return ""
+}
+
+// calculateEventPriority calculates event priority (stub)
+func (c *Collector) calculateEventPriority(bpfEvent *BPFDNSEvent) domain.EventPriority {
+	if bpfEvent == nil {
+		return domain.PriorityNormal
+	}
+
+	// Check for DNS failures
+	if bpfEvent.Rcode != 0 {
+		return domain.PriorityHigh
+	}
+
+	// Check for slow queries (>100ms)
+	if bpfEvent.LatencyNs > 100*1000*1000 {
+		return domain.PriorityHigh
+	}
+
+	return domain.PriorityNormal
 }

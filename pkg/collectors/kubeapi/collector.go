@@ -2,7 +2,6 @@ package kubeapi
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -37,7 +36,7 @@ type Collector struct {
 	traceManager *TraceManager
 
 	// Event channel
-	events chan domain.RawEvent
+	events chan *domain.CollectorEvent
 
 	// Lifecycle
 	ctx    context.Context
@@ -140,7 +139,7 @@ func New(logger *zap.Logger, config Config) (*Collector, error) {
 		config:          config,
 		clientset:       clientset,
 		traceManager:    NewTraceManager(),
-		events:          make(chan domain.RawEvent, config.BufferSize),
+		events:          make(chan *domain.CollectorEvent, config.BufferSize),
 		informers:       make([]cache.SharedIndexInformer, 0),
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -203,7 +202,7 @@ func NewCollector(name string) (*Collector, error) {
 		logger:          logger,
 		config:          config,
 		traceManager:    NewTraceManager(),
-		events:          make(chan domain.RawEvent, config.BufferSize),
+		events:          make(chan *domain.CollectorEvent, config.BufferSize),
 		informers:       make([]cache.SharedIndexInformer, 0),
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -314,7 +313,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
@@ -788,51 +787,103 @@ func (c *Collector) extractRelationships(event *ResourceEvent, obj interface{}) 
 	}
 }
 
-// createRawEvent converts ResourceEvent to RawEvent
-func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string) domain.RawEvent {
-	data, _ := json.Marshal(event)
+// createRawEvent converts ResourceEvent to CollectorEvent
+func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string) *domain.CollectorEvent {
+	// Generate event ID
+	eventID := fmt.Sprintf("k8s-%s-%s-%s", event.Kind, event.EventType, string(event.UID))
 
-	// Build metadata with enhanced K8s fields
-	metadata := map[string]string{
-		"collector":   "kubeapi",
-		"event_type":  event.EventType,
-		"api_version": event.APIVersion,
-		// Enhanced K8s metadata - STANDARD for all collectors
-		"k8s_namespace": event.Namespace,
-		"k8s_name":      event.Name,
-		"k8s_kind":      event.Kind,
-		"k8s_uid":       string(event.UID),
+	// Map event type to domain event type
+	var eventType domain.CollectorEventType
+	switch event.EventType {
+	case "ADDED":
+		eventType = domain.EventTypeK8sEvent
+	case "MODIFIED":
+		eventType = domain.EventTypeK8sEvent
+	case "DELETED":
+		eventType = domain.EventTypeK8sEvent
+	default:
+		eventType = domain.EventTypeK8sEvent
 	}
 
-	// Add labels if present
+	// Determine severity based on event type
+	var severity domain.EventSeverity
+	if event.EventType == "DELETED" {
+		severity = domain.EventSeverityWarning
+	} else {
+		severity = domain.EventSeverityInfo
+	}
+
+	// Build K8s context - simplified for now
+	k8sContext := &domain.K8sContext{
+		Namespace: event.Namespace,
+	}
+
+	// Build metadata
+	metadata := domain.EventMetadata{
+		TraceID:      traceID,
+		SpanID:       spanID,
+		PodName:      event.Name,
+		PodNamespace: event.Namespace,
+		PodUID:       string(event.UID),
+		Attributes: map[string]string{
+			"collector":        "kubeapi",
+			"event_type":       event.EventType,
+			"api_version":      event.APIVersion,
+			"k8s_kind":         event.Kind,
+			"resource_version": event.ResourceVersion,
+		},
+	}
+
+	// Add labels to attributes
 	if len(event.Labels) > 0 {
 		labelPairs := make([]string, 0, len(event.Labels))
 		for k, v := range event.Labels {
 			labelPairs = append(labelPairs, fmt.Sprintf("%s=%s", k, v))
 		}
-		metadata["k8s_labels"] = strings.Join(labelPairs, ",")
+		metadata.Attributes["k8s_labels"] = strings.Join(labelPairs, ",")
 	}
 
-	// Add owner refs if present
-	if len(event.OwnerReferences) > 0 {
-		ownerRefs := make([]string, 0, len(event.OwnerReferences))
-		for _, ref := range event.OwnerReferences {
-			ownerRefs = append(ownerRefs, fmt.Sprintf("%s/%s", ref.Kind, ref.Name))
-		}
-		metadata["k8s_owner_refs"] = strings.Join(ownerRefs, ",")
-	}
-
-	return domain.RawEvent{
+	return &domain.CollectorEvent{
+		EventID:   eventID,
 		Timestamp: event.Timestamp,
-		Source:    "k8s_" + event.EventType,
-		Data:      data,
+		Type:      eventType,
+		Source:    "kubeapi",
+		Severity:  severity,
+		EventData: domain.EventDataContainer{
+			KubernetesResource: &domain.K8sResourceData{
+				APIVersion: event.APIVersion,
+				Kind:       event.Kind,
+				Name:       event.Name,
+				Namespace:  event.Namespace,
+				UID:        string(event.UID),
+				Operation:  event.EventType,
+			},
+		},
+		Metadata:   metadata,
+		K8sContext: k8sContext,
 	}
 }
 
-// createEvent creates a simple event (backward compatibility)
-func (c *Collector) createEvent(eventType string, data interface{}, traceID, spanID string) domain.RawEvent {
-	jsonData, _ := json.Marshal(data)
+// Helper function to convert OwnerRef to domain OwnerReference
+func convertOwnerRefs(refs []OwnerRef) []domain.OwnerReference {
+	if len(refs) == 0 {
+		return nil
+	}
 
+	domainRefs := make([]domain.OwnerReference, len(refs))
+	for i, ref := range refs {
+		domainRefs[i] = domain.OwnerReference{
+			APIVersion: ref.APIVersion,
+			Kind:       ref.Kind,
+			Name:       ref.Name,
+			UID:        string(ref.UID),
+		}
+	}
+	return domainRefs
+}
+
+// createEvent creates a simple CollectorEvent
+func (c *Collector) createEvent(eventType string, data interface{}, traceID, spanID string) *domain.CollectorEvent {
 	// Generate new span ID if not provided
 	if spanID == "" {
 		spanID = collectors.GenerateSpanID()
@@ -843,10 +894,32 @@ func (c *Collector) createEvent(eventType string, data interface{}, traceID, spa
 		traceID = collectors.GenerateTraceID()
 	}
 
-	return domain.RawEvent{
+	// Generate event ID
+	eventID := fmt.Sprintf("kubeapi-%s-%d", eventType, time.Now().UnixNano())
+
+	return &domain.CollectorEvent{
+		EventID:   eventID,
 		Timestamp: time.Now(),
+		Type:      domain.EventTypeK8sEvent,
 		Source:    "kubeapi",
-		Data:      jsonData,
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			KubernetesEvent: &domain.K8sAPIEventData{
+				Action:    eventType,
+				Type:      "Normal",
+				Count:     1,
+				FirstTime: time.Now(),
+				LastTime:  time.Now(),
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+			Attributes: map[string]string{
+				"collector":  "kubeapi",
+				"event_type": eventType,
+			},
+		},
 	}
 }
 

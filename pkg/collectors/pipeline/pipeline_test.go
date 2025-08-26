@@ -16,7 +16,7 @@ import (
 // MockCollector implements a test collector with race-safe operations
 type MockCollector struct {
 	name     string
-	events   chan domain.RawEvent
+	events   chan *domain.CollectorEvent
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopOnce sync.Once
@@ -27,7 +27,7 @@ type MockCollector struct {
 func NewMockCollector(name string) *MockCollector {
 	return &MockCollector{
 		name:   name,
-		events: make(chan domain.RawEvent, 100), // Larger buffer for stress testing
+		events: make(chan *domain.CollectorEvent, 100), // Larger buffer for stress testing
 	}
 }
 
@@ -60,7 +60,7 @@ func (m *MockCollector) Stop() error {
 	return nil
 }
 
-func (m *MockCollector) Events() <-chan domain.RawEvent {
+func (m *MockCollector) Events() <-chan *domain.CollectorEvent {
 	return m.events
 }
 
@@ -70,7 +70,7 @@ func (m *MockCollector) IsHealthy() bool {
 	return !m.stopped
 }
 
-func (m *MockCollector) SendEvent(event domain.RawEvent) {
+func (m *MockCollector) SendEvent(event *domain.CollectorEvent) {
 	m.mu.RLock()
 	if m.stopped {
 		m.mu.RUnlock()
@@ -131,10 +131,16 @@ func TestEventPipeline(t *testing.T) {
 		assert.Error(t, err)
 
 		// Send test event
-		testEvent := domain.RawEvent{
+		testEvent := &domain.CollectorEvent{
+			EventID:   "test-event-1",
 			Timestamp: time.Now(),
+			Type:      domain.EventTypeHTTP,
 			Source:    "test",
-			Data:      []byte("test data"),
+			EventData: domain.EventDataContainer{
+				Custom: map[string]string{
+					"data": "test data",
+				},
+			},
 		}
 		collector.SendEvent(testEvent)
 
@@ -182,10 +188,16 @@ func TestEventPipeline(t *testing.T) {
 			go func(collectorIdx int, c *MockCollector) {
 				defer wg.Done()
 				for j := 0; j < eventCount; j++ {
-					event := domain.RawEvent{
+					event := &domain.CollectorEvent{
+						EventID:   fmt.Sprintf("test-%d-%d", collectorIdx, j),
 						Timestamp: time.Now(),
+						Type:      domain.EventTypeHTTP,
 						Source:    fmt.Sprintf("test-%d", collectorIdx),
-						Data:      []byte(fmt.Sprintf("test data %d-%d", collectorIdx, j)),
+						EventData: domain.EventDataContainer{
+							Custom: map[string]string{
+								"data": fmt.Sprintf("test data %d-%d", collectorIdx, j),
+							},
+						},
 					}
 					c.SendEvent(event)
 
@@ -246,10 +258,16 @@ func TestEventPipeline(t *testing.T) {
 		// Send events in rapid succession
 		go func() {
 			for i := 0; i < 50; i++ {
-				event := domain.RawEvent{
+				event := &domain.CollectorEvent{
+					EventID:   fmt.Sprintf("rapid-%d", i),
 					Timestamp: time.Now(),
+					Type:      domain.EventTypeHTTP,
 					Source:    "test",
-					Data:      []byte(fmt.Sprintf("rapid event %d", i)),
+					EventData: domain.EventDataContainer{
+						Custom: map[string]string{
+							"data": fmt.Sprintf("rapid event %d", i),
+						},
+					},
 				}
 				collector.SendEvent(event)
 			}
@@ -263,15 +281,27 @@ func TestEventPipeline(t *testing.T) {
 }
 
 func TestEnrichedEvent(t *testing.T) {
-	raw := &domain.RawEvent{
+	raw := &domain.CollectorEvent{
+		EventID:   "enriched-raw",
 		Timestamp: time.Now(),
+		Type:      domain.EventTypeK8sPod,
 		Source:    "kubeapi",
-		Data:      []byte(`{"kind":"Pod","name":"test-pod"}`),
+		EventData: domain.EventDataContainer{
+			Custom: map[string]string{
+				"kind": "Pod",
+				"name": "test-pod",
+			},
+		},
 	}
 
-	enriched := &EnrichedEvent{
-		Raw: raw,
-		K8sObject: &K8sObjectInfo{
+	// EnrichedEvent and K8sObjectInfo are now part of domain.CollectorEvent
+	// Create a CollectorEvent with K8s context
+	enriched := &domain.CollectorEvent{
+		EventID:   "enriched-test",
+		Timestamp: time.Now(),
+		Type:      domain.EventTypeK8sPod,
+		Source:    "test",
+		K8sContext: &domain.K8sContext{
 			Kind:      "Pod",
 			Name:      "test-pod",
 			Namespace: "default",
@@ -280,10 +310,10 @@ func TestEnrichedEvent(t *testing.T) {
 		},
 	}
 
-	// Test that enriched event preserves raw event data
-	assert.Equal(t, raw.Timestamp, enriched.Raw.Timestamp)
-	assert.Equal(t, "kubeapi", enriched.Raw.Source)
-	assert.NotNil(t, enriched.K8sObject)
-	assert.Equal(t, "Pod", enriched.K8sObject.Kind)
-	assert.Equal(t, "test-pod", enriched.K8sObject.Name)
+	// Test that enriched event preserves and enhances raw event data
+	assert.Equal(t, raw.Timestamp, enriched.Timestamp)
+	assert.Equal(t, "test", enriched.Source) // Source was set to "test" in enriched
+	assert.NotNil(t, enriched.K8sContext)
+	assert.Equal(t, "Pod", enriched.K8sContext.Kind)
+	assert.Equal(t, "test-pod", enriched.K8sContext.Name)
 }

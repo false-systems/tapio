@@ -68,6 +68,21 @@ const (
 	EventTypeSystemdUnit    CollectorEventType = "systemd.unit"
 	EventTypeSystemdJournal CollectorEventType = "systemd.journal"
 	EventTypeSystemdSystem  CollectorEventType = "systemd.system"
+
+	// OpenTelemetry Events
+	EventTypeOTELSpan   CollectorEventType = "otel.span"   // Application traces
+	EventTypeOTELMetric CollectorEventType = "otel.metric" // Application metrics
+
+	// Kubelet Events
+	EventTypeKubeletNodeCPU             CollectorEventType = "kubelet.node.cpu"
+	EventTypeKubeletNodeMemory          CollectorEventType = "kubelet.node.memory"
+	EventTypeKubeletCPUThrottling       CollectorEventType = "kubelet.cpu.throttling"
+	EventTypeKubeletMemoryPressure      CollectorEventType = "kubelet.memory.pressure"
+	EventTypeKubeletEphemeralStorage    CollectorEventType = "kubelet.ephemeral.storage"
+	EventTypeKubeletContainerWaiting    CollectorEventType = "kubelet.container.waiting"
+	EventTypeKubeletContainerTerminated CollectorEventType = "kubelet.container.terminated"
+	EventTypeKubeletCrashLoop           CollectorEventType = "kubelet.container.crash_loop"
+	EventTypeKubeletPodNotReady         CollectorEventType = "kubelet.pod.not_ready"
 )
 
 // CollectorEvent represents a fully contextualized event from any collector
@@ -111,6 +126,7 @@ type EventDataContainer struct {
 	KubernetesResource *K8sResourceData `json:"k8s_resource,omitempty"`
 	KubernetesEvent    *K8sAPIEventData `json:"k8s_event,omitempty"`
 	K8sResource        *K8sResourceData `json:"k8s_resource_compat,omitempty"` // Compatibility
+	Kubelet            *KubeletData     `json:"kubelet,omitempty"`
 
 	// Application data
 	DNS  *DNSData  `json:"dns,omitempty"`
@@ -127,6 +143,10 @@ type EventDataContainer struct {
 
 	// Systemd data
 	Systemd *SystemdData `json:"systemd,omitempty"`
+
+	// OpenTelemetry data
+	OTELSpan   *OTELSpanData   `json:"otel_span,omitempty"`
+	OTELMetric *OTELMetricData `json:"otel_metric,omitempty"`
 
 	// Generic data for custom collectors (string key-value pairs only)
 	Custom map[string]string `json:"custom,omitempty"`
@@ -893,6 +913,147 @@ func (e *EventDataContainer) GetETCDData() (*ETCDData, bool) {
 func (e *EventDataContainer) GetSystemdData() (*SystemdData, bool) {
 	if e.Systemd != nil {
 		return e.Systemd, true
+	}
+	return nil, false
+}
+
+// OTELSpanData represents OpenTelemetry span/trace data
+// This is the core of APM - shows what the application is doing
+type OTELSpanData struct {
+	// Identity
+	TraceID      string `json:"trace_id"`
+	SpanID       string `json:"span_id"`
+	ParentSpanID string `json:"parent_span_id,omitempty"`
+
+	// Span details
+	Name          string    `json:"name"`         // Operation name e.g. "GET /api/users"
+	Kind          string    `json:"kind"`         // SERVER, CLIENT, PRODUCER, CONSUMER
+	ServiceName   string    `json:"service_name"` // Service that generated this span
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
+	DurationNanos int64     `json:"duration_nanos"` // Nanoseconds for precision
+
+	// Status
+	StatusCode    string `json:"status_code"` // OK, ERROR, UNSET
+	StatusMessage string `json:"status_message,omitempty"`
+
+	// Key attributes that help correlation
+	HTTPMethod     string `json:"http_method,omitempty"`
+	HTTPStatusCode int    `json:"http_status_code,omitempty"`
+	HTTPURL        string `json:"http_url,omitempty"`
+	DBStatement    string `json:"db_statement,omitempty"`
+	DBSystem       string `json:"db_system,omitempty"`
+	RPCService     string `json:"rpc_service,omitempty"`
+	RPCMethod      string `json:"rpc_method,omitempty"`
+
+	// Resource attributes (where this ran)
+	K8sPodName    string `json:"k8s_pod_name,omitempty"`
+	K8sNamespace  string `json:"k8s_namespace,omitempty"`
+	K8sDeployment string `json:"k8s_deployment,omitempty"`
+	ContainerName string `json:"container_name,omitempty"`
+	ProcessPID    int32  `json:"process_pid,omitempty"`
+
+	// Custom attributes (limited set for important data)
+	Attributes map[string]string `json:"attributes,omitempty"`
+
+	// Events that occurred during the span
+	Events []OTELSpanEvent `json:"events,omitempty"`
+}
+
+// OTELSpanEvent represents an event that occurred during a span
+type OTELSpanEvent struct {
+	Timestamp  time.Time         `json:"timestamp"`
+	Name       string            `json:"name"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+// OTELMetricData represents OpenTelemetry metric data
+type OTELMetricData struct {
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Unit        string    `json:"unit,omitempty"`
+	Type        string    `json:"type"` // GAUGE, COUNTER, HISTOGRAM
+	Timestamp   time.Time `json:"timestamp"`
+
+	// Metric value (use appropriate field based on type)
+	GaugeValue   float64 `json:"gauge_value,omitempty"`
+	CounterValue int64   `json:"counter_value,omitempty"`
+	Sum          float64 `json:"sum,omitempty"`
+	Count        uint64  `json:"count,omitempty"`
+	Min          float64 `json:"min,omitempty"`
+	Max          float64 `json:"max,omitempty"`
+
+	// Labels/attributes
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Resource context
+	ServiceName  string `json:"service_name,omitempty"`
+	K8sPodName   string `json:"k8s_pod_name,omitempty"`
+	K8sNamespace string `json:"k8s_namespace,omitempty"`
+}
+
+// KubeletData holds kubelet-specific event data
+type KubeletData struct {
+	EventType        string                   `json:"event_type"`
+	NodeMetrics      *KubeletNodeMetrics      `json:"node_metrics,omitempty"`
+	ContainerMetrics *KubeletContainerMetrics `json:"container_metrics,omitempty"`
+	PodLifecycle     *KubeletPodLifecycle     `json:"pod_lifecycle,omitempty"`
+	StorageEvent     *KubeletStorageEvent     `json:"storage_event,omitempty"`
+}
+
+// KubeletNodeMetrics holds node-level metrics from kubelet
+type KubeletNodeMetrics struct {
+	NodeName         string    `json:"node_name"`
+	CPUUsageNano     uint64    `json:"cpu_usage_nano"`
+	CPUUsageMilli    uint64    `json:"cpu_usage_milli"`
+	MemoryUsage      uint64    `json:"memory_usage,omitempty"`
+	MemoryAvailable  uint64    `json:"memory_available,omitempty"`
+	MemoryWorkingSet uint64    `json:"memory_working_set,omitempty"`
+	Timestamp        time.Time `json:"timestamp"`
+}
+
+// KubeletContainerMetrics holds container-level metrics from kubelet
+type KubeletContainerMetrics struct {
+	Namespace        string    `json:"namespace"`
+	Pod              string    `json:"pod"`
+	Container        string    `json:"container"`
+	CPUUsageNano     uint64    `json:"cpu_usage_nano,omitempty"`
+	MemoryUsage      uint64    `json:"memory_usage,omitempty"`
+	MemoryWorkingSet uint64    `json:"memory_working_set,omitempty"`
+	MemoryRSS        uint64    `json:"memory_rss,omitempty"`
+	Timestamp        time.Time `json:"timestamp"`
+}
+
+// KubeletPodLifecycle holds pod/container lifecycle events
+type KubeletPodLifecycle struct {
+	Namespace    string    `json:"namespace"`
+	Pod          string    `json:"pod"`
+	Container    string    `json:"container,omitempty"`
+	Condition    string    `json:"condition,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
+	Message      string    `json:"message,omitempty"`
+	ExitCode     int32     `json:"exit_code,omitempty"`
+	RestartCount int32     `json:"restart_count,omitempty"`
+	LastExitCode int32     `json:"last_exit_code,omitempty"`
+	LastReason   string    `json:"last_reason,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// KubeletStorageEvent holds storage-related events
+type KubeletStorageEvent struct {
+	Namespace      string    `json:"namespace"`
+	Pod            string    `json:"pod"`
+	UsedBytes      uint64    `json:"used_bytes"`
+	AvailableBytes uint64    `json:"available_bytes"`
+	UsagePercent   float64   `json:"usage_percent"`
+	Timestamp      time.Time `json:"timestamp"`
+}
+
+// GetKubeletData returns kubelet data from the event if present
+func (e *CollectorEvent) GetKubeletData() (*KubeletData, bool) {
+	if e.EventData.Kubelet != nil {
+		return e.EventData.Kubelet, true
 	}
 	return nil, false
 }

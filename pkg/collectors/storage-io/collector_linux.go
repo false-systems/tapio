@@ -280,6 +280,9 @@ func (c *Collector) convertRawToStorageEvent(rawEvent *StorageIOEventRaw) (*Stor
 		Mode:      rawEvent.Mode,
 	}
 
+	// Enrich with PVC information
+	EnrichEventWithPVCInfo(event, path)
+
 	// Set error message if there's an error code
 	if rawEvent.ErrorCode != 0 {
 		event.ErrorMessage = c.getErrorMessage(rawEvent.ErrorCode)

@@ -29,6 +29,8 @@ type StorageIOEvent struct {
 	// Kubernetes correlation
 	K8sPath       string `json:"k8s_path,omitempty"`        // K8s-specific path type
 	K8sVolumeType string `json:"k8s_volume_type,omitempty"` // pvc, configmap, secret, hostpath
+	PVCName       string `json:"pvc_name,omitempty"`        // Human-readable PVC name
+	StorageClass  string `json:"storage_class,omitempty"`   // Storage class (gp3, pd-ssd, etc.)
 	ContainerID   string `json:"container_id,omitempty"`    // container correlation
 	PodUID        string `json:"pod_uid,omitempty"`         // pod correlation
 

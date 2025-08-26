@@ -35,7 +35,7 @@ type Collector struct {
 	name    string
 	logger  *zap.Logger
 	tracer  trace.Tracer
-	events  chan domain.RawEvent
+	events  chan *domain.CollectorEvent
 	ctx     context.Context
 	cancel  context.CancelFunc
 	healthy bool
@@ -54,11 +54,13 @@ type Collector struct {
 }
 
 // NewCollector creates a new simple systemd collector
-func NewCollector(name string, cfg Config) (*Collector, error) {
-	// Create logger
-	logger, err := zap.NewProduction()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create logger: %w", err)
+func NewCollector(name string, cfg Config, logger *zap.Logger) (*Collector, error) {
+	if logger == nil {
+		var err error
+		logger, err = zap.NewProduction()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create logger: %w", err)
+		}
 	}
 
 	// Initialize minimal OTEL components
@@ -111,7 +113,7 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		logger:          logger.Named(name),
 		tracer:          tracer,
 		config:          cfg,
-		events:          make(chan domain.RawEvent, cfg.BufferSize),
+		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
 		eventsProcessed: eventsProcessed,
 		errorsTotal:     errorsTotal,
 		processingTime:  processingTime,
@@ -158,8 +160,15 @@ func (c *Collector) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the collector
+// Stop stops the collector idempotently
 func (c *Collector) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.healthy {
+		return nil // Already stopped
+	}
+
 	c.logger.Info("Stopping systemd collector")
 
 	if c.cancel != nil {
@@ -177,11 +186,13 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
 // IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.healthy
 }

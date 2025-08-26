@@ -2,7 +2,9 @@ package kubelet
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,96 +27,17 @@ import (
 
 // (Config defined in config.go)
 
+// generateEventID creates a unique event ID for kubelet events
+func generateEventID(eventType, source string) string {
+	timestamp := time.Now().UnixNano()
+	data := fmt.Sprintf("%s-%s-%d", eventType, source, timestamp)
+	hash := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("kubelet-%s", hex.EncodeToString(hash[:])[:16])
+}
+
 // Event data structures
 
-// NodeCPUEventData holds node CPU event data
-type NodeCPUEventData struct {
-	NodeName      string    `json:"node_name"`
-	CPUUsageNano  uint64    `json:"cpu_usage_nano"`
-	CPUUsageMilli uint64    `json:"cpu_usage_milli"`
-	Timestamp     time.Time `json:"timestamp"`
-}
-
-// NodeMemoryEventData holds node memory event data
-type NodeMemoryEventData struct {
-	NodeName         string    `json:"node_name"`
-	MemoryUsage      uint64    `json:"memory_usage"`
-	MemoryAvailable  uint64    `json:"memory_available"`
-	MemoryWorkingSet uint64    `json:"memory_working_set"`
-	Timestamp        time.Time `json:"timestamp"`
-}
-
-// CPUThrottlingEventData holds CPU throttling event data
-type CPUThrottlingEventData struct {
-	Namespace    string    `json:"namespace"`
-	Pod          string    `json:"pod"`
-	Container    string    `json:"container"`
-	CPUUsageNano uint64    `json:"cpu_usage_nano"`
-	Timestamp    time.Time `json:"timestamp"`
-}
-
-// MemoryPressureEventData holds memory pressure event data
-type MemoryPressureEventData struct {
-	Namespace        string    `json:"namespace"`
-	Pod              string    `json:"pod"`
-	Container        string    `json:"container"`
-	MemoryUsage      uint64    `json:"memory_usage"`
-	MemoryWorkingSet uint64    `json:"memory_working_set"`
-	Timestamp        time.Time `json:"timestamp"`
-}
-
-// EphemeralStorageEventData holds ephemeral storage event data
-type EphemeralStorageEventData struct {
-	Namespace      string    `json:"namespace"`
-	Pod            string    `json:"pod"`
-	UsedBytes      uint64    `json:"used_bytes"`
-	AvailableBytes uint64    `json:"available_bytes"`
-	UsagePercent   float64   `json:"usage_percent"`
-	Timestamp      time.Time `json:"timestamp"`
-}
-
-// ContainerWaitingEventData holds container waiting event data
-type ContainerWaitingEventData struct {
-	Namespace string    `json:"namespace"`
-	Pod       string    `json:"pod"`
-	Container string    `json:"container"`
-	Reason    string    `json:"reason"`
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// ContainerTerminatedEventData holds container terminated event data
-type ContainerTerminatedEventData struct {
-	Namespace string    `json:"namespace"`
-	Pod       string    `json:"pod"`
-	Container string    `json:"container"`
-	ExitCode  int32     `json:"exit_code"`
-	Reason    string    `json:"reason"`
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// CrashLoopEventData holds crash loop event data
-type CrashLoopEventData struct {
-	Namespace    string    `json:"namespace"`
-	Pod          string    `json:"pod"`
-	Container    string    `json:"container"`
-	RestartCount int32     `json:"restart_count"`
-	LastExitCode int32     `json:"last_exit_code"`
-	LastReason   string    `json:"last_reason"`
-	Timestamp    time.Time `json:"timestamp"`
-}
-
-// PodNotReadyEventData holds pod not ready event data
-type PodNotReadyEventData struct {
-	Namespace string    `json:"namespace"`
-	Pod       string    `json:"pod"`
-	Condition string    `json:"condition"`
-	Status    string    `json:"status"`
-	Reason    string    `json:"reason"`
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
-}
+// Old data structures removed - now using typed domain structures
 
 // (DefaultConfig defined in config.go)
 
@@ -140,7 +63,7 @@ type Collector struct {
 	name            string
 	config          *Config
 	client          *http.Client
-	events          chan domain.RawEvent
+	events          chan *domain.CollectorEvent
 	ctx             context.Context
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
@@ -277,7 +200,7 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		name:            name,
 		config:          config,
 		client:          client,
-		events:          make(chan domain.RawEvent, 10000),
+		events:          make(chan *domain.CollectorEvent, 10000),
 		healthy:         true,
 		logger:          config.Logger,
 		podTraceManager: NewPodTraceManager(),
@@ -334,7 +257,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
@@ -504,24 +427,29 @@ func (c *Collector) fetchStats() error {
 
 // sendNodeCPUEvent sends node CPU metrics
 func (c *Collector) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1.Summary) {
-	eventData := NodeCPUEventData{
-		NodeName:      summary.Node.NodeName,
-		CPUUsageNano:  *summary.Node.CPU.UsageNanoCores,
-		CPUUsageMilli: *summary.Node.CPU.UsageNanoCores / 1000000,
-		Timestamp:     summary.Node.CPU.Time.Time,
-	}
+	traceID, spanID := c.extractTraceContext(ctx)
 
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		c.logger.Error("Failed to marshal node CPU event data", zap.Error(err))
-		c.recordError()
-		return
-	}
-
-	event := domain.RawEvent{
+	event := &domain.CollectorEvent{
+		EventID:   generateEventID("node_cpu", c.name),
 		Timestamp: time.Now(),
-		Source:    "kubelet_node_cpu",
-		Data:      data,
+		Source:    c.name,
+		Type:      domain.EventTypeKubeletNodeCPU,
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Kubelet: &domain.KubeletData{
+				EventType: "node_cpu",
+				NodeMetrics: &domain.KubeletNodeMetrics{
+					NodeName:      summary.Node.NodeName,
+					CPUUsageNano:  *summary.Node.CPU.UsageNanoCores,
+					CPUUsageMilli: *summary.Node.CPU.UsageNanoCores / 1000000,
+					Timestamp:     summary.Node.CPU.Time.Time,
+				},
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+		},
 	}
 
 	select {
@@ -540,25 +468,30 @@ func (c *Collector) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1
 
 // sendNodeMemoryEvent sends node memory metrics
 func (c *Collector) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alpha1.Summary) {
-	eventData := NodeMemoryEventData{
-		NodeName:         summary.Node.NodeName,
-		MemoryUsage:      *summary.Node.Memory.UsageBytes,
-		MemoryAvailable:  *summary.Node.Memory.AvailableBytes,
-		MemoryWorkingSet: *summary.Node.Memory.WorkingSetBytes,
-		Timestamp:        summary.Node.Memory.Time.Time,
-	}
+	traceID, spanID := c.extractTraceContext(ctx)
 
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		c.logger.Error("Failed to marshal node memory event data", zap.Error(err))
-		c.recordError()
-		return
-	}
-
-	event := domain.RawEvent{
+	event := &domain.CollectorEvent{
+		EventID:   generateEventID("node_memory", c.name),
 		Timestamp: time.Now(),
-		Source:    "kubelet_node_memory",
-		Data:      data,
+		Source:    c.name,
+		Type:      domain.EventTypeKubeletNodeMemory,
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Kubelet: &domain.KubeletData{
+				EventType: "node_memory",
+				NodeMetrics: &domain.KubeletNodeMetrics{
+					NodeName:         summary.Node.NodeName,
+					MemoryUsage:      *summary.Node.Memory.UsageBytes,
+					MemoryAvailable:  *summary.Node.Memory.AvailableBytes,
+					MemoryWorkingSet: *summary.Node.Memory.WorkingSetBytes,
+					Timestamp:        summary.Node.Memory.Time.Time,
+				},
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+		},
 	}
 
 	select {
@@ -601,25 +534,30 @@ func (c *Collector) processPodStats(ctx context.Context, pod *statsv1alpha1.PodS
 func (c *Collector) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.PodStats, container *statsv1alpha1.ContainerStats) {
 	// Note: Real throttling metrics would come from cAdvisor metrics endpoint
 	// This is a simplified version
-	eventData := CPUThrottlingEventData{
-		Namespace:    pod.PodRef.Namespace,
-		Pod:          pod.PodRef.Name,
-		Container:    container.Name,
-		CPUUsageNano: *container.CPU.UsageNanoCores,
-		Timestamp:    container.CPU.Time.Time,
-	}
+	traceID, spanID := c.extractTraceContext(ctx)
 
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		c.logger.Error("Failed to marshal CPU throttling event data", zap.Error(err))
-		c.recordError()
-		return
-	}
-
-	event := domain.RawEvent{
+	event := &domain.CollectorEvent{
+		EventID:   generateEventID("cpu_throttling", c.name),
 		Timestamp: time.Now(),
-		Source:    "kubelet_cpu_throttling",
-		Data:      data,
+		Source:    c.name,
+		Type:      domain.EventTypeKubeletCPUThrottling,
+		Severity:  domain.EventSeverityWarning,
+		EventData: domain.EventDataContainer{
+			Kubelet: &domain.KubeletData{
+				EventType: "cpu_throttling",
+				ContainerMetrics: &domain.KubeletContainerMetrics{
+					Namespace:    pod.PodRef.Namespace,
+					Pod:          pod.PodRef.Name,
+					Container:    container.Name,
+					CPUUsageNano: *container.CPU.UsageNanoCores,
+					Timestamp:    container.CPU.Time.Time,
+				},
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+		},
 	}
 
 	select {
@@ -644,7 +582,9 @@ func (c *Collector) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.
 		return
 	}
 
-	eventData := MemoryPressureEventData{
+	traceID, spanID := c.extractTraceContext(ctx)
+
+	containerMetrics := &domain.KubeletContainerMetrics{
 		Namespace:        pod.PodRef.Namespace,
 		Pod:              pod.PodRef.Name,
 		Container:        container.Name,
@@ -653,21 +593,27 @@ func (c *Collector) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.
 		Timestamp:        container.Memory.Time.Time,
 	}
 
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		c.logger.Error("Failed to marshal memory pressure event data", zap.Error(err))
-		c.recordError()
-		return
-	}
-
 	// Check if RSS is available (indicates memory pressure)
 	if container.Memory.RSSBytes != nil {
+		containerMetrics.MemoryRSS = *container.Memory.RSSBytes
 	}
 
-	event := domain.RawEvent{
+	event := &domain.CollectorEvent{
+		EventID:   generateEventID("memory_pressure", c.name),
 		Timestamp: time.Now(),
-		Source:    "kubelet_memory_pressure",
-		Data:      data,
+		Source:    c.name,
+		Type:      domain.EventTypeKubeletMemoryPressure,
+		Severity:  domain.EventSeverityWarning,
+		EventData: domain.EventDataContainer{
+			Kubelet: &domain.KubeletData{
+				EventType:        "memory_pressure",
+				ContainerMetrics: containerMetrics,
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+		},
 	}
 
 	select {
@@ -701,26 +647,31 @@ func (c *Collector) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha
 
 	// Only send event if usage is significant (>50%)
 	if usagePercent > 50 {
-		eventData := EphemeralStorageEventData{
-			Namespace:      pod.PodRef.Namespace,
-			Pod:            pod.PodRef.Name,
-			UsedBytes:      usedBytes,
-			AvailableBytes: availableBytes,
-			UsagePercent:   usagePercent,
-			Timestamp:      pod.EphemeralStorage.Time.Time,
-		}
+		traceID, spanID := c.extractTraceContext(ctx)
 
-		data, err := json.Marshal(eventData)
-		if err != nil {
-			c.logger.Error("Failed to marshal ephemeral storage event data", zap.Error(err))
-			c.recordError()
-			return
-		}
-
-		event := domain.RawEvent{
+		event := &domain.CollectorEvent{
+			EventID:   generateEventID("ephemeral_storage", c.name),
 			Timestamp: time.Now(),
-			Source:    "kubelet_ephemeral_storage",
-			Data:      data,
+			Source:    c.name,
+			Type:      domain.EventTypeKubeletEphemeralStorage,
+			Severity:  domain.EventSeverityWarning,
+			EventData: domain.EventDataContainer{
+				Kubelet: &domain.KubeletData{
+					EventType: "ephemeral_storage",
+					StorageEvent: &domain.KubeletStorageEvent{
+						Namespace:      pod.PodRef.Namespace,
+						Pod:            pod.PodRef.Name,
+						UsedBytes:      usedBytes,
+						AvailableBytes: availableBytes,
+						UsagePercent:   usagePercent,
+						Timestamp:      pod.EphemeralStorage.Time.Time,
+					},
+				},
+			},
+			Metadata: domain.EventMetadata{
+				TraceID: traceID,
+				SpanID:  spanID,
+			},
 		}
 
 		select {
@@ -894,26 +845,31 @@ func (c *Collector) processPodStatus(ctx context.Context, pod *v1.Pod) {
 
 // sendContainerWaitingEvent sends events for waiting containers
 func (c *Collector) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
-	eventData := ContainerWaitingEventData{
-		Namespace: pod.Namespace,
-		Pod:       pod.Name,
-		Container: status.Name,
-		Reason:    status.State.Waiting.Reason,
-		Message:   status.State.Waiting.Message,
-		Timestamp: time.Now(),
-	}
+	traceID, spanID := c.extractTraceContext(ctx)
 
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		c.logger.Error("Failed to marshal container waiting event data", zap.Error(err))
-		c.recordError()
-		return
-	}
-
-	event := domain.RawEvent{
+	event := &domain.CollectorEvent{
+		EventID:   generateEventID("container_waiting", c.name),
 		Timestamp: time.Now(),
-		Source:    "kubelet_container_waiting",
-		Data:      data,
+		Source:    c.name,
+		Type:      domain.EventTypeKubeletContainerWaiting,
+		Severity:  domain.EventSeverityWarning,
+		EventData: domain.EventDataContainer{
+			Kubelet: &domain.KubeletData{
+				EventType: "container_waiting",
+				PodLifecycle: &domain.KubeletPodLifecycle{
+					Namespace: pod.Namespace,
+					Pod:       pod.Name,
+					Container: status.Name,
+					Reason:    status.State.Waiting.Reason,
+					Message:   status.State.Waiting.Message,
+					Timestamp: time.Now(),
+				},
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+		},
 	}
 
 	select {
@@ -926,7 +882,7 @@ func (c *Collector) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, 
 				attribute.String("namespace", pod.Namespace),
 				attribute.String("pod", pod.Name),
 				attribute.String("container", status.Name),
-				attribute.String("waiting_reason", eventData.Reason),
+				attribute.String("waiting_reason", status.State.Waiting.Reason),
 			))
 		}
 	case <-c.ctx.Done():
@@ -935,27 +891,32 @@ func (c *Collector) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, 
 
 // sendContainerTerminatedEvent sends events for terminated containers
 func (c *Collector) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
-	eventData := ContainerTerminatedEventData{
-		Namespace: pod.Namespace,
-		Pod:       pod.Name,
-		Container: status.Name,
-		ExitCode:  status.State.Terminated.ExitCode,
-		Reason:    status.State.Terminated.Reason,
-		Message:   status.State.Terminated.Message,
-		Timestamp: status.State.Terminated.FinishedAt.Time,
-	}
+	traceID, spanID := c.extractTraceContext(ctx)
 
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		c.logger.Error("Failed to marshal container terminated event data", zap.Error(err))
-		c.recordError()
-		return
-	}
-
-	event := domain.RawEvent{
+	event := &domain.CollectorEvent{
+		EventID:   generateEventID("container_terminated", c.name),
 		Timestamp: time.Now(),
-		Source:    "kubelet_container_terminated",
-		Data:      data,
+		Source:    c.name,
+		Type:      domain.EventTypeKubeletContainerTerminated,
+		Severity:  domain.EventSeverityError,
+		EventData: domain.EventDataContainer{
+			Kubelet: &domain.KubeletData{
+				EventType: "container_terminated",
+				PodLifecycle: &domain.KubeletPodLifecycle{
+					Namespace: pod.Namespace,
+					Pod:       pod.Name,
+					Container: status.Name,
+					ExitCode:  status.State.Terminated.ExitCode,
+					Reason:    status.State.Terminated.Reason,
+					Message:   status.State.Terminated.Message,
+					Timestamp: status.State.Terminated.FinishedAt.Time,
+				},
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+		},
 	}
 
 	select {
@@ -968,7 +929,7 @@ func (c *Collector) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Po
 				attribute.String("namespace", pod.Namespace),
 				attribute.String("pod", pod.Name),
 				attribute.String("container", status.Name),
-				attribute.Int("exit_code", int(eventData.ExitCode)),
+				attribute.Int("exit_code", int(status.State.Terminated.ExitCode)),
 			))
 		}
 	case <-c.ctx.Done():
@@ -978,27 +939,32 @@ func (c *Collector) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Po
 // sendCrashLoopEvent detects crash loop patterns
 func (c *Collector) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
 	if status.RestartCount > 3 { // Likely in crash loop
-		eventData := CrashLoopEventData{
-			Namespace:    pod.Namespace,
-			Pod:          pod.Name,
-			Container:    status.Name,
-			RestartCount: status.RestartCount,
-			LastExitCode: status.LastTerminationState.Terminated.ExitCode,
-			LastReason:   status.LastTerminationState.Terminated.Reason,
-			Timestamp:    time.Now(),
-		}
+		traceID, spanID := c.extractTraceContext(ctx)
 
-		data, err := json.Marshal(eventData)
-		if err != nil {
-			c.logger.Error("Failed to marshal crash loop event data", zap.Error(err))
-			c.recordError()
-			return
-		}
-
-		event := domain.RawEvent{
+		event := &domain.CollectorEvent{
+			EventID:   generateEventID("crash_loop", c.name),
 			Timestamp: time.Now(),
-			Source:    "kubelet_crash_loop",
-			Data:      data,
+			Source:    c.name,
+			Type:      domain.EventTypeKubeletCrashLoop,
+			Severity:  domain.EventSeverityCritical,
+			EventData: domain.EventDataContainer{
+				Kubelet: &domain.KubeletData{
+					EventType: "crash_loop",
+					PodLifecycle: &domain.KubeletPodLifecycle{
+						Namespace:    pod.Namespace,
+						Pod:          pod.Name,
+						Container:    status.Name,
+						RestartCount: status.RestartCount,
+						LastExitCode: status.LastTerminationState.Terminated.ExitCode,
+						LastReason:   status.LastTerminationState.Terminated.Reason,
+						Timestamp:    time.Now(),
+					},
+				},
+			},
+			Metadata: domain.EventMetadata{
+				TraceID: traceID,
+				SpanID:  spanID,
+			},
 		}
 
 		select {
@@ -1011,7 +977,7 @@ func (c *Collector) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status 
 					attribute.String("namespace", pod.Namespace),
 					attribute.String("pod", pod.Name),
 					attribute.String("container", status.Name),
-					attribute.Int("restart_count", int(eventData.RestartCount)),
+					attribute.Int("restart_count", int(status.RestartCount)),
 				))
 			}
 		case <-c.ctx.Done():
@@ -1021,27 +987,32 @@ func (c *Collector) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status 
 
 // sendPodNotReadyEvent sends events for pods not ready
 func (c *Collector) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condition *v1.PodCondition) {
-	eventData := PodNotReadyEventData{
-		Namespace: pod.Namespace,
-		Pod:       pod.Name,
-		Condition: string(condition.Type),
-		Status:    string(condition.Status),
-		Reason:    condition.Reason,
-		Message:   condition.Message,
-		Timestamp: condition.LastTransitionTime.Time,
-	}
+	traceID, spanID := c.extractTraceContext(ctx)
 
-	data, err := json.Marshal(eventData)
-	if err != nil {
-		c.logger.Error("Failed to marshal pod not ready event data", zap.Error(err))
-		c.recordError()
-		return
-	}
-
-	event := domain.RawEvent{
+	event := &domain.CollectorEvent{
+		EventID:   generateEventID("pod_not_ready", c.name),
 		Timestamp: time.Now(),
-		Source:    "kubelet_pod_not_ready",
-		Data:      data,
+		Source:    c.name,
+		Type:      domain.EventTypeKubeletPodNotReady,
+		Severity:  domain.EventSeverityWarning,
+		EventData: domain.EventDataContainer{
+			Kubelet: &domain.KubeletData{
+				EventType: "pod_not_ready",
+				PodLifecycle: &domain.KubeletPodLifecycle{
+					Namespace: pod.Namespace,
+					Pod:       pod.Name,
+					Condition: string(condition.Type),
+					Status:    string(condition.Status),
+					Reason:    condition.Reason,
+					Message:   condition.Message,
+					Timestamp: condition.LastTransitionTime.Time,
+				},
+			},
+		},
+		Metadata: domain.EventMetadata{
+			TraceID: traceID,
+			SpanID:  spanID,
+		},
 	}
 
 	select {
@@ -1053,8 +1024,8 @@ func (c *Collector) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condi
 				attribute.String("event_type", "kubelet_pod_not_ready"),
 				attribute.String("namespace", pod.Namespace),
 				attribute.String("pod", pod.Name),
-				attribute.String("condition_type", eventData.Condition),
-				attribute.String("condition_reason", eventData.Reason),
+				attribute.String("condition_type", string(condition.Type)),
+				attribute.String("condition_reason", condition.Reason),
 			))
 		}
 	case <-c.ctx.Done():

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +22,7 @@ import (
 type Collector struct {
 	name    string
 	config  *config.NamespaceConfig
-	events  chan domain.RawEvent
+	events  chan *domain.CollectorEvent
 	ctx     context.Context
 	cancel  context.CancelFunc
 	healthy bool
@@ -182,7 +183,7 @@ func NewCollector(name string) (*Collector, error) {
 	c := &Collector{
 		name:    name,
 		config:  cfg,
-		events:  make(chan domain.RawEvent, cfg.BaseConfig.BufferSize),
+		events:  make(chan *domain.CollectorEvent, cfg.BaseConfig.BufferSize),
 		healthy: true,
 		tracer:  tracer,
 		meter:   meter,
@@ -293,7 +294,7 @@ func (c *Collector) Stop() error {
 }
 
 // Events returns the event channel
-func (c *Collector) Events() <-chan domain.RawEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
@@ -304,70 +305,127 @@ func (c *Collector) IsHealthy() bool {
 	return c.healthy
 }
 
-// createEvent creates a domain.RawEvent from CNI event data
-func (c *Collector) createEvent(eventType string, data map[string]string) domain.RawEvent {
+// createEvent creates a domain.CollectorEvent from CNI event data
+func (c *Collector) createEvent(eventType string, data map[string]string) *domain.CollectorEvent {
 	// Generate trace context
 	ctx := context.Background()
 	ctx, span := c.tracer.Start(ctx, "cni.event.create")
 	defer span.End()
 
 	spanCtx := span.SpanContext()
-
-	// Build metadata
-	metadata := map[string]string{
-		"collector":  c.name,
-		"event":      eventType,
-		"event_type": "cni",
-	}
+	eventID := fmt.Sprintf("namespace-%s-%d", eventType, time.Now().UnixNano())
 
 	// Parse namespace path to extract k8s metadata
+	var podInfo *PodInfo
 	if netnsPath, ok := data["netns_path"]; ok {
-		// Extract UID from path like /var/run/netns/cni-550e8400-e29b-41d4-a716-446655440000
-		if uid := parseK8sUIDFromNetns(netnsPath); uid != "" {
-			metadata["k8s_uid"] = uid
-			metadata["k8s_kind"] = "Pod"
+		podInfo = c.parseK8sFromNetns(netnsPath)
+	}
 
-			// Attempt to resolve namespace and pod name
-			// This would normally query k8s API or cached data
-			// For now, we store what we have
+	// Build network data from the namespace event
+	networkData := &domain.NetworkData{
+		Protocol:  "tcp", // Default, could be extracted from data if available
+		Direction: "outbound",
+	}
+
+	// Build container data if we have container info
+	var containerData *domain.ContainerData
+	if containerID, ok := data["container_id"]; ok {
+		containerData = &domain.ContainerData{
+			ContainerID: containerID,
+			Runtime:     "containerd", // Default, could be detected
+			State:       "running",
 		}
 	}
 
-	// Copy over relevant data fields
-	for k, v := range data {
-		if k == "pid" || k == "comm" || k == "namespace" || k == "pod_name" {
-			metadata[k] = v
+	// Build process data if available
+	var processData *domain.ProcessData
+	if pidStr, ok := data["pid"]; ok {
+		if pid, err := strconv.ParseInt(pidStr, 10, 32); err == nil {
+			processData = &domain.ProcessData{
+				PID: int32(pid),
+			}
+			if comm, ok := data["comm"]; ok {
+				processData.Command = comm
+			}
 		}
 	}
 
-	// Create data containing the original data fields plus any extracted metadata
-	eventData := make(map[string]string)
-
-	// Copy all original data
-	for k, v := range data {
-		eventData[k] = v
+	// Create CollectorEvent with proper type
+	var collectorEventType domain.CollectorEventType
+	switch eventType {
+	case "namespace_create":
+		collectorEventType = domain.EventTypeContainerCreate
+	case "namespace_delete":
+		collectorEventType = domain.EventTypeContainerDestroy
+	default:
+		collectorEventType = domain.EventTypeKernelNetwork
 	}
 
-	// Add extracted metadata to the data (for backward compatibility)
-	if uid := metadata["k8s_uid"]; uid != "" {
-		eventData["k8s_uid"] = uid
-	}
-	if kind := metadata["k8s_kind"]; kind != "" {
-		eventData["k8s_kind"] = kind
-	}
+	// Convert data to JSON for raw storage
+	dataBytes, _ := json.Marshal(data)
 
-	// Convert to bytes
-	dataBytes, _ := json.Marshal(eventData)
-
-	return domain.RawEvent{
+	collectorEvent := &domain.CollectorEvent{
+		EventID:   eventID,
 		Timestamp: time.Now(),
-		Type:      "cni",
+		Type:      collectorEventType,
 		Source:    c.name,
-		TraceID:   spanCtx.TraceID().String(),
-		SpanID:    spanCtx.SpanID().String(),
-		Metadata:  metadata,
-		Data:      dataBytes,
+		Severity:  domain.EventSeverityInfo,
+
+		EventData: domain.EventDataContainer{
+			Network:   networkData,
+			Container: containerData,
+			Process:   processData,
+			RawData: &domain.RawData{
+				Format:      "json",
+				ContentType: "application/json",
+				Data:        dataBytes,
+				Size:        int64(len(dataBytes)),
+			},
+		},
+
+		Metadata: domain.EventMetadata{
+			Priority: domain.PriorityNormal,
+			Tags:     []string{"namespace", "cni"},
+			Labels: map[string]string{
+				"event_type": eventType,
+			},
+		},
+
+		TraceContext: &domain.TraceContext{
+			TraceID: spanCtx.TraceID(),
+			SpanID:  spanCtx.SpanID(),
+		},
 	}
+
+	// Add K8s context if we have pod info
+	if podInfo != nil {
+		collectorEvent.K8sContext = &domain.K8sContext{
+			UID: podInfo.PodUID,
+		}
+
+		if podInfo.PodName != "" {
+			collectorEvent.K8sContext.Name = podInfo.PodName
+		}
+		if podInfo.Namespace != "" {
+			collectorEvent.K8sContext.Namespace = podInfo.Namespace
+		}
+
+		collectorEvent.CorrelationHints = &domain.CorrelationHints{
+			PodUID: podInfo.PodUID,
+		}
+	}
+
+	// Add process correlation if available
+	if processData != nil {
+		if collectorEvent.CorrelationHints == nil {
+			collectorEvent.CorrelationHints = &domain.CorrelationHints{}
+		}
+		collectorEvent.CorrelationHints.ProcessID = processData.PID
+		collectorEvent.Metadata.PID = processData.PID
+		collectorEvent.Metadata.Command = processData.Command
+	}
+
+	return collectorEvent
 }
 
 // parseK8sUIDFromNetns extracts Kubernetes UID from network namespace path

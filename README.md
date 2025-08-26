@@ -84,25 +84,32 @@ We gather telemetry from multiple sources to build a complete picture:
 ### **Kernel & System Level**
 - **Kernel Collector** (`/pkg/collectors/kernel`) - eBPF-based system call, file operations, and process lifecycle tracking
 - **Storage I/O Collector** (`/pkg/collectors/storage-io`) - VFS-level storage operations, latency, and performance bottlenecks  
-- **CNI Collector** (`/pkg/collectors/cni`) - Container networking interface monitoring with eBPF
+- **Syscall Errors Collector** (`/pkg/collectors/syscall-errors`) - System call error tracking and failure analysis
+- **OOM Collector** (`/pkg/collectors/oom`) - Out-of-memory events and memory pressure detection
 
-### **Container Runtime**  
+### **Container & Namespace**  
 - **CRI Collector** (`/pkg/collectors/cri`) - Container Runtime Interface for lifecycle and resource monitoring
 - **CRI-eBPF Collector** (`/pkg/collectors/cri-ebpf`) - Deep container runtime visibility using eBPF probes
+- **Namespace Collector** (`/pkg/collectors/namespace-collector`) - Network namespace monitoring and container networking
 
 ### **Kubernetes & Orchestration**
 - **Kubelet Collector** (`/pkg/collectors/kubelet`) - Pod phases, conditions, and resource allocation vs usage
 - **KubeAPI Collector** (`/pkg/collectors/kubeapi`) - Kubernetes API server events and cluster state changes
 
-### **Service Discovery & Communication**
+### **Networking**
 - **DNS Collector** (`/pkg/collectors/dns`) - Because DNS is always the problem. Resolution times, failures, and patterns
-- **etcd Collector** (`/pkg/collectors/etcd`) - Key-value store operations and cluster coordination
+- **Network Collector** (`/pkg/collectors/network`) - L3/L4/L7 network intelligence with eBPF-based traffic analysis
+
+### **Service Discovery & Coordination**
 - **etcd-API Collector** (`/pkg/collectors/etcd-api`) - etcd API-level monitoring  
 - **etcd-eBPF Collector** (`/pkg/collectors/etcd-ebpf`) - Deep etcd performance monitoring with eBPF
 
 ### **System Services**
 - **Systemd Collector** (`/pkg/collectors/systemd`) - eBPF-based systemd service monitoring and journal analysis
 - **Systemd-API Collector** (`/pkg/collectors/systemd-api`) - Systemd D-Bus API monitoring for service lifecycle
+
+### **Observability**
+- **OTEL Collector** (`/pkg/collectors/otel`) - OpenTelemetry integration for metrics, traces, and logs
 
 Each collector implements the same interface and outputs unified events that flow into our correlation engine. No vendor lock-in, no complex configuration - just plug and observe.
 
@@ -160,10 +167,12 @@ We're not building the next Datadog. We're building what small teams need:
 ## Current State
 
 ### What Works
-- All 12 collectors compile and run ✅
+- All 18 collectors compile and run ✅
 - eBPF-based kernel, container, and network monitoring ✅
 - Unified event schema across all telemetry sources ✅
 - Basic correlation engine for root cause analysis ✅
+- Type-safe CollectorEvent architecture (zero map[string]interface{}) ✅
+- Direct OpenTelemetry instrumentation (no wrappers) ✅
 
 ### Being Built
 - Neo4j integration for relationship mapping

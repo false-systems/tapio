@@ -6,7 +6,10 @@ package kernel
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -52,25 +55,37 @@ func (c *Collector) startEBPF() error {
 		links: make([]link.Link, 0),
 	}
 
-	// Attach to process events
-	processLink, err := link.Tracepoint("syscalls", "sys_enter_execve", objs.TraceExec, nil)
+	// Attach to ConfigMap/Secret access events
+	configLink, err := link.Tracepoint("syscalls", "sys_enter_openat", objs.TraceConfigAccess, nil)
 	if err != nil {
 		objs.Close()
-		return fmt.Errorf("attaching execve tracepoint: %w", err)
+		return fmt.Errorf("attaching openat tracepoint: %w", err)
 	}
-	state.links = append(state.links, processLink)
+	state.links = append(state.links, configLink)
+
+	// Attach to generic pod syscall events for correlation
+	syscallLink, err := link.Tracepoint("raw_syscalls", "sys_enter", objs.TracePodSyscalls, nil)
+	if err != nil {
+		c.logger.Warn("Failed to attach syscall tracepoint, continuing without correlation", zap.Error(err))
+		// Don't fail completely - ConfigMap/Secret access is the primary function
+	} else {
+		state.links = append(state.links, syscallLink)
+	}
 
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
-		processLink.Close()
+		for _, l := range state.links {
+			l.Close()
+		}
 		objs.Close()
 		return fmt.Errorf("creating ring buffer reader: %w", err)
 	}
 	state.reader = reader
 
 	c.ebpfState = state
-	c.logger.Info("eBPF programs loaded and attached successfully")
+	c.logger.Info("eBPF programs loaded and attached successfully",
+		zap.Int("attached_programs", len(state.links)))
 	return nil
 }
 
@@ -127,7 +142,7 @@ func (c *Collector) processEvents() {
 		default:
 			record, err := state.reader.Read()
 			if err != nil {
-				if ringbuf.IsClosed(err) {
+				if errors.Is(err, ringbuf.ErrClosed) {
 					return
 				}
 				if c.errorsTotal != nil {
@@ -162,19 +177,71 @@ func (c *Collector) processRawEvent(data []byte) {
 	// Convert raw bytes to KernelEvent
 	event := (*KernelEvent)(unsafe.Pointer(&data[0]))
 
+	// Create structured event data
+	eventData := KernelEventData{
+		PID:       event.PID,
+		TID:       event.TID,
+		CgroupID:  event.CgroupID,
+		EventType: event.EventType,
+		Comm:      bytesToString(event.Comm[:]),
+		PodUID:    bytesToString(event.PodUID[:]),
+	}
+
+	// Process specific event types
+	switch event.EventType {
+	case uint32(EventTypeConfigMapAccess):
+		eventData.ConfigType = "configmap"
+		eventData.MountPath = c.extractMountPath(event.Data[:])
+		c.enrichConfigMapEvent(&eventData)
+
+	case uint32(EventTypeSecretAccess):
+		eventData.ConfigType = "secret"
+		eventData.MountPath = c.extractMountPath(event.Data[:])
+		c.enrichSecretEvent(&eventData)
+
+	case uint32(EventTypePodSyscall):
+		// This is for correlation only - minimal processing
+		eventData.ConfigType = "syscall"
+	}
+
+	// Marshal event data to JSON bytes
+	jsonData, err := json.Marshal(eventData)
+	if err != nil {
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "json_marshal_failed"),
+			))
+		}
+		c.logger.Error("Failed to marshal event data", zap.Error(err))
+		return
+	}
+
 	// Create domain event
-	domainEvent := domain.RawEvent{
-		Timestamp:   time.Unix(0, int64(event.Timestamp)),
-		CollectorID: c.name,
-		Type:        getEventType(event.EventType),
-		Data: KernelEventData{
-			PID:       event.PID,
-			PPID:      event.PPID,
-			UID:       event.UID,
-			GID:       event.GID,
-			CgroupID:  event.CgroupID,
-			EventType: event.EventType,
-			Comm:      bytesToString(event.Comm[:]),
+	domainEvent := &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("%s-%d-%d", c.name, event.Timestamp, event.PID),
+		Timestamp: time.Unix(0, int64(event.Timestamp)),
+		Source:    c.name,
+		Type:      domain.CollectorEventType(c.getEventType(event.EventType)),
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Kernel: &domain.KernelData{
+				EventType: c.getEventType(event.EventType),
+				PID:       int32(event.PID),
+				UID:       0, // Not captured in current implementation
+				GID:       0, // Not captured in current implementation
+				Command:   eventData.Comm,
+				CgroupID:  event.CgroupID,
+			},
+			Custom: map[string]string{
+				"config_type": eventData.ConfigType,
+				"config_name": eventData.ConfigName,
+				"mount_path":  eventData.MountPath,
+				"tid":         fmt.Sprintf("%d", event.TID),
+			},
+		},
+		Metadata: domain.EventMetadata{
+			PodUID:       eventData.PodUID,
+			PodNamespace: eventData.Namespace,
 		},
 	}
 
@@ -183,7 +250,8 @@ func (c *Collector) processRawEvent(data []byte) {
 	case c.events <- domainEvent:
 		if c.eventsProcessed != nil {
 			c.eventsProcessed.Add(c.ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", domainEvent.Type),
+				attribute.String("event_type", string(domainEvent.Type)),
+				attribute.String("config_type", eventData.ConfigType),
 			))
 		}
 	default:
@@ -212,17 +280,68 @@ func (c *Collector) processRawEvent(data []byte) {
 	}
 }
 
+// extractMountPath extracts mount path from event data
+func (c *Collector) extractMountPath(data []byte) string {
+	if len(data) < 64 {
+		return ""
+	}
+
+	// The first 64 bytes should contain the mount_path from config_info struct
+	return bytesToString(data[:64])
+}
+
+// enrichConfigMapEvent adds ConfigMap-specific enrichment
+func (c *Collector) enrichConfigMapEvent(eventData *KernelEventData) {
+	// Parse ConfigMap information from mount path
+	// Example path: /var/lib/kubelet/pods/{pod-uid}/volumes/kubernetes.io~configmap/{configmap-name}
+	if strings.Contains(eventData.MountPath, "kubernetes.io~configmap") {
+		parts := strings.Split(eventData.MountPath, "/")
+		for i, part := range parts {
+			if part == "kubernetes.io~configmap" && i+1 < len(parts) {
+				eventData.ConfigName = parts[i+1]
+				break
+			}
+		}
+	}
+
+	// Extract namespace from pod UID correlation if available
+	// This would typically be done through additional map lookups in production
+	if eventData.PodUID != "" {
+		// In production, we'd look up the pod info from our maps
+		eventData.Namespace = "default" // Placeholder
+	}
+}
+
+// enrichSecretEvent adds Secret-specific enrichment
+func (c *Collector) enrichSecretEvent(eventData *KernelEventData) {
+	// Parse Secret information from mount path
+	// Example path: /var/lib/kubelet/pods/{pod-uid}/volumes/kubernetes.io~secret/{secret-name}
+	if strings.Contains(eventData.MountPath, "kubernetes.io~secret") {
+		parts := strings.Split(eventData.MountPath, "/")
+		for i, part := range parts {
+			if part == "kubernetes.io~secret" && i+1 < len(parts) {
+				eventData.ConfigName = parts[i+1]
+				break
+			}
+		}
+	}
+
+	// Extract namespace from pod UID correlation if available
+	if eventData.PodUID != "" {
+		// In production, we'd look up the pod info from our maps
+		eventData.Namespace = "default" // Placeholder
+	}
+}
+
 // getEventType converts numeric event type to string
-func getEventType(eventType uint8) string {
+func (c *Collector) getEventType(eventType uint32) string {
 	switch eventType {
-	case 1:
-		return "process_exec"
-	case 2:
-		return "process_exit"
-	case 3:
-		return "file_open"
-	case 4:
-		return "network_connect"
+	case uint32(EventTypeConfigMapAccess):
+		return "configmap_access"
+	case uint32(EventTypeSecretAccess):
+		return "secret_access"
+	case uint32(EventTypePodSyscall):
+		return "pod_syscall"
 	default:
 		return fmt.Sprintf("unknown_%d", eventType)
 	}
@@ -250,4 +369,108 @@ func parseKernelEvent(buffer []byte) (*KernelEvent, error) {
 	}
 
 	return &event, nil
+}
+
+// AddContainerPID adds a PID to the container tracking map
+func (c *Collector) AddContainerPID(pid uint32) error {
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state, ok := c.ebpfState.(*ebpfComponents)
+	if !ok || state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	flag := uint8(1)
+	if err := state.objs.ContainerPids.Put(pid, flag); err != nil {
+		return fmt.Errorf("failed to add container PID %d: %w", pid, err)
+	}
+
+	return nil
+}
+
+// RemoveContainerPID removes a PID from the container tracking map
+func (c *Collector) RemoveContainerPID(pid uint32) error {
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state, ok := c.ebpfState.(*ebpfComponents)
+	if !ok || state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	if err := state.objs.ContainerPids.Delete(pid); err != nil {
+		return fmt.Errorf("failed to remove container PID %d: %w", pid, err)
+	}
+
+	return nil
+}
+
+// AddPodInfo adds pod information to the correlation map
+func (c *Collector) AddPodInfo(cgroupID uint64, podInfo PodInfo) error {
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state, ok := c.ebpfState.(*ebpfComponents)
+	if !ok || state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	// Convert Go struct to C-compatible format
+	var cPodInfo [248]byte // Size of C struct pod_info
+
+	// Copy pod UID (36 bytes)
+	copy(cPodInfo[0:36], podInfo.PodUID)
+	// Copy namespace (64 bytes)
+	copy(cPodInfo[36:100], podInfo.Namespace)
+	// Copy pod name (128 bytes)
+	copy(cPodInfo[100:228], podInfo.PodName)
+	// Copy created_at (8 bytes)
+	createdAt := uint64(podInfo.CreatedAt)
+	for i := 0; i < 8; i++ {
+		cPodInfo[228+i] = byte(createdAt >> (i * 8))
+	}
+
+	if err := state.objs.PodInfoMap.Put(cgroupID, cPodInfo); err != nil {
+		return fmt.Errorf("failed to add pod info for cgroup %d: %w", cgroupID, err)
+	}
+
+	return nil
+}
+
+// AddMountInfo adds ConfigMap/Secret mount information
+func (c *Collector) AddMountInfo(pathHash uint64, mountInfo MountInfo) error {
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state, ok := c.ebpfState.(*ebpfComponents)
+	if !ok || state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	// Convert Go struct to C-compatible format
+	var cMountInfo [200]byte // Size of C struct mount_info
+
+	// Copy name (64 bytes)
+	copy(cMountInfo[0:64], mountInfo.Name)
+	// Copy namespace (64 bytes)
+	copy(cMountInfo[64:128], mountInfo.Namespace)
+	// Copy mount path (128 bytes)
+	copy(cMountInfo[128:256], mountInfo.MountPath)
+	// Set is_secret flag
+	if mountInfo.IsSecret {
+		cMountInfo[256] = 1
+	} else {
+		cMountInfo[256] = 0
+	}
+
+	if err := state.objs.MountInfoMap.Put(pathHash, cMountInfo); err != nil {
+		return fmt.Errorf("failed to add mount info for path hash %d: %w", pathHash, err)
+	}
+
+	return nil
 }

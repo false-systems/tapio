@@ -200,3 +200,49 @@ func (r DNSResponseCode) String() string {
 		return "UNKNOWN"
 	}
 }
+
+// DNSStats tracks DNS collector statistics
+type DNSStats struct {
+	EventsProcessed   int64     `json:"events_processed"`
+	EventsDropped     int64     `json:"events_dropped"`
+	ErrorCount        int64     `json:"error_count"`
+	BufferUtilization float64   `json:"buffer_utilization"`
+	EBPFAttached      bool      `json:"ebpf_attached"`
+	LastEventTime     time.Time `json:"last_event_time"`
+}
+
+// BPFDNSEvent represents eBPF DNS event (stub for testing)
+type BPFDNSEvent struct {
+	Timestamp uint64
+	PID       uint32
+	TID       uint32
+	UID       uint32
+	GID       uint32
+	CgroupID  uint64
+	EventType uint8
+	Protocol  uint8
+	IPVersion uint8
+	SrcIP     [16]uint8
+	DstIP     [16]uint8
+	SrcPort   uint16
+	DstPort   uint16
+	QueryID   uint16
+	QueryType uint16
+	Rcode     uint8
+	LatencyNs uint64
+	QueryName [256]uint8
+}
+
+// isHexString checks if a string contains only hexadecimal characters
+func isHexString(s string) bool {
+	if len(s) == 0 {
+		return true
+	}
+
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}

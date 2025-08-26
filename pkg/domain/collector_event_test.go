@@ -34,7 +34,7 @@ func TestCollectorEvent_Validate(t *testing.T) {
 					Priority:      PriorityNormal,
 					SchemaVersion: "1.0.0",
 				},
-				CorrelationHints: CorrelationHints{
+				CorrelationHints: &CorrelationHints{
 					ProcessID: 1234,
 				},
 			},
@@ -271,8 +271,8 @@ func TestCollectorEvent_TraceContext(t *testing.T) {
 			},
 		}
 
-		// Note: The method checks !TraceID.IsValid(), so this should return false for valid trace
-		assert.False(t, event.HasTraceContext())
+		// Should return true for valid trace context
+		assert.True(t, event.HasTraceContext())
 	})
 
 	t.Run("HasTraceContext - without trace context", func(t *testing.T) {
@@ -333,7 +333,7 @@ func TestCollectorEvent_CorrelationKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			event := &CollectorEvent{
 				Source:           tt.source,
-				CorrelationHints: tt.hints,
+				CorrelationHints: &tt.hints,
 			}
 			assert.Equal(t, tt.expected, event.GetCorrelationKey())
 		})
@@ -386,7 +386,7 @@ func TestCollectorEvent_AddCorrelationTag(t *testing.T) {
 		Timestamp:        time.Now(),
 		Type:             EventTypeKernelSyscall,
 		Source:           "test-collector",
-		CorrelationHints: CorrelationHints{},
+		CorrelationHints: &CorrelationHints{},
 	}
 
 	// Test adding tags to empty map
@@ -525,7 +525,8 @@ func TestDNSData(t *testing.T) {
 		QueryType:    "A",
 		QueryName:    "example.com",
 		ResponseCode: 0,
-		Answers: []DNSAnswer{
+		Answers:      []string{"192.0.2.1"},
+		Authorities: []DNSAnswer{
 			{
 				Name:  "example.com",
 				Type:  "A",
@@ -542,9 +543,11 @@ func TestDNSData(t *testing.T) {
 
 	assert.Equal(t, "A", dnsData.QueryType)
 	assert.Equal(t, "example.com", dnsData.QueryName)
-	assert.Equal(t, int32(0), dnsData.ResponseCode)
+	assert.Equal(t, 0, dnsData.ResponseCode)
 	assert.Len(t, dnsData.Answers, 1)
-	assert.Equal(t, "192.0.2.1", dnsData.Answers[0].Data)
+	assert.Equal(t, "192.0.2.1", dnsData.Answers[0])
+	assert.Len(t, dnsData.Authorities, 1)
+	assert.Equal(t, "192.0.2.1", dnsData.Authorities[0].Data)
 }
 
 func TestCollectorEventTypes(t *testing.T) {
@@ -625,7 +628,7 @@ func TestCompleteCollectorEvent(t *testing.T) {
 			Attributes:    map[string]string{"source": "ebpf"},
 			SchemaVersion: "1.0.0",
 		},
-		CorrelationHints: CorrelationHints{
+		CorrelationHints: &CorrelationHints{
 			PodUID:      "pod-uid-123",
 			ContainerID: "container-abc-456",
 			ProcessID:   1234,
@@ -663,7 +666,7 @@ func TestCompleteCollectorEvent(t *testing.T) {
 			Confidence: 0.95,
 			Type:       "direct",
 		},
-		CollectionContext: CollectionContext{
+		CollectionContext: &CollectionContext{
 			CollectorVersion: "v1.0.0",
 			HostInfo: HostInfo{
 				Hostname:         "worker-node-1",
@@ -766,7 +769,7 @@ func BenchmarkCollectorEvent_Validate(b *testing.B) {
 func BenchmarkCollectorEvent_GetCorrelationKey(b *testing.B) {
 	event := &CollectorEvent{
 		Source: "kernel-collector",
-		CorrelationHints: CorrelationHints{
+		CorrelationHints: &CorrelationHints{
 			ContainerID: "container-123",
 			PodUID:      "pod-456",
 			ProcessID:   789,

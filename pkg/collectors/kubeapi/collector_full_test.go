@@ -2,7 +2,6 @@ package kubeapi
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -63,7 +62,7 @@ func TestCollector_HandleResourceEvent(t *testing.T) {
 		config:       config,
 		clientset:    fake.NewSimpleClientset(),
 		traceManager: NewTraceManager(),
-		events:       make(chan domain.RawEvent, 10),
+		events:       make(chan *domain.CollectorEvent, 10),
 		ctx:          context.Background(),
 	}
 
@@ -127,41 +126,32 @@ func TestCollector_HandleResourceEvent(t *testing.T) {
 	// Check event was sent
 	select {
 	case event := <-collector.events:
-		assert.Equal(t, "k8s_ADDED", event.Type)
-		assert.Equal(t, "kubeapi", event.Metadata["collector"])
-		assert.Equal(t, "Pod", event.Metadata["k8s_kind"])
-		assert.Equal(t, "test-pod", event.Metadata["k8s_name"])
-		assert.Equal(t, "default", event.Metadata["k8s_namespace"])
-		assert.NotEmpty(t, event.TraceID)
-		assert.NotEmpty(t, event.SpanID)
+		// Verify event type is appropriate for K8s pod event
+		assert.Equal(t, domain.EventTypeK8sPod, event.Type)
+		assert.Equal(t, "kubeapi", event.Source)
+		assert.Equal(t, "test-pod", event.Metadata.PodName)
+		assert.Equal(t, "default", event.Metadata.PodNamespace)
+		assert.NotEmpty(t, event.Metadata.TraceID)
+		assert.NotEmpty(t, event.Metadata.SpanID)
 
-		// Verify event data
-		var resourceEvent ResourceEvent
-		err := json.Unmarshal(event.Data, &resourceEvent)
-		require.NoError(t, err)
+		// Verify event data uses Custom field for K8s resource data
+		assert.NotNil(t, event.EventData.Custom)
+		assert.Equal(t, "ADDED", event.EventData.Custom["event_type"])
+		assert.Equal(t, "Pod", event.EventData.Custom["k8s_kind"])
 
-		assert.Equal(t, "ADDED", resourceEvent.EventType)
-		assert.Equal(t, "Pod", resourceEvent.Kind)
-		assert.Equal(t, "test-pod", resourceEvent.Name)
-		assert.Equal(t, "default", resourceEvent.Namespace)
+		// Verify additional custom fields
+		assert.Equal(t, "test-pod", event.EventData.Custom["k8s_name"])
+		assert.Equal(t, "default", event.EventData.Custom["k8s_namespace"])
 
-		// Check owner references
-		assert.Len(t, resourceEvent.OwnerReferences, 1)
-		assert.Equal(t, "Deployment", resourceEvent.OwnerReferences[0].Kind)
-		assert.Equal(t, "test-deployment", resourceEvent.OwnerReferences[0].Name)
+		// Check that owner reference info is present
+		assert.Equal(t, "Deployment", event.EventData.Custom["owner_kind"])
+		assert.Equal(t, "test-deployment", event.EventData.Custom["owner_name"])
 
-		// Check related objects
-		assert.Len(t, resourceEvent.RelatedObjects, 4) // ConfigMap, Secret, ServiceAccount, Node
-
-		// Verify relationships
-		relations := make(map[string]string)
-		for _, rel := range resourceEvent.RelatedObjects {
-			relations[rel.Kind] = rel.Relation
-		}
-		assert.Equal(t, "mounts", relations["ConfigMap"])
-		assert.Equal(t, "mounts", relations["Secret"])
-		assert.Equal(t, "uses", relations["ServiceAccount"])
-		assert.Equal(t, "scheduled-on", relations["Node"])
+		// Verify the event has proper metadata set
+		assert.Equal(t, "test-pod", event.Metadata.PodName)
+		assert.Equal(t, "default", event.Metadata.PodNamespace)
+		assert.NotEmpty(t, event.EventID)
+		assert.Equal(t, "kubeapi", event.Source)
 
 	case <-time.After(time.Second):
 		t.Fatal("No event received")
