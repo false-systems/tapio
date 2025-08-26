@@ -1,6 +1,6 @@
 //go:build !linux
 
-package criebpf
+package etcdebpf
 
 import (
 	"context"
@@ -10,16 +10,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// Collector monitors CRI events via eBPF (Linux only)
+// Collector monitors etcd operations via eBPF (Linux only)
 type Collector struct {
 	name   string
 	logger *zap.Logger
 	events chan *domain.CollectorEvent
 }
 
-// NewCollector creates a new CRI eBPF collector (stub for non-Linux)
+// NewCollector creates a new etcd eBPF collector (stub for non-Linux)
 func NewCollector(name string, cfg collectors.CollectorConfig, logger *zap.Logger) (collectors.Collector, error) {
-	logger.Warn("CRI eBPF collector is only supported on Linux, returning stub implementation")
+	logger.Warn("etcd eBPF collector is only supported on Linux, returning stub implementation")
 	return &Collector{
 		name:   name,
 		logger: logger,
@@ -32,7 +32,7 @@ func (c *Collector) Name() string {
 }
 
 func (c *Collector) Start(ctx context.Context) error {
-	c.logger.Warn("CRI eBPF collector not supported on this platform")
+	c.logger.Warn("etcd eBPF collector not supported on this platform")
 	return nil
 }
 
@@ -48,16 +48,23 @@ func (c *Collector) IsHealthy() bool {
 	return false
 }
 
-// Config represents CRI eBPF collector configuration (stub)
+// Config represents etcd eBPF collector configuration (stub)
 type Config struct {
-	EnableMemcgOOM    bool `json:"enable_memcg_oom"`
-	EnableOOMKill     bool `json:"enable_oom_kill"`
-	EnableProcessExit bool `json:"enable_process_exit"`
-	EnableProcessFork bool `json:"enable_process_fork"`
+	EtcdPort           int                `json:"etcd_port"`
+	EnableWatchEvents  bool               `json:"enable_watch_events"`
+	EnableRangeQueries bool               `json:"enable_range_queries"`
+	EnableTransactions bool               `json:"enable_transactions"`
+	TrackedKeys        []string           `json:"tracked_keys"`
+	RateLimiting       RateLimitingConfig `json:"rate_limiting"`
+}
+
+type RateLimitingConfig struct {
+	Enabled         bool `json:"enabled"`
+	EventsPerSecond int  `json:"events_per_second"`
 }
 
 // CreateCollector is the factory function for registry
 func CreateCollector(config *Config) (collectors.Collector, error) {
 	logger := zap.NewNop()
-	return NewCollector("cri-ebpf", collectors.CollectorConfig{}, logger)
+	return NewCollector("etcd-ebpf", collectors.CollectorConfig{}, logger)
 }

@@ -11,36 +11,44 @@ import (
 	"go.uber.org/zap"
 )
 
-// Collector stub for non-Linux systems
+// Config holds collector configuration
+type Config struct {
+	RingBufferSize    int
+	EventChannelSize  int
+	RateLimitMs       int
+	EnabledCategories map[string]bool
+	RequireAllMetrics bool
+}
+
+// DefaultConfig returns default configuration
+func DefaultConfig() *Config {
+	return &Config{
+		RingBufferSize:   8 * 1024 * 1024, // 8MB
+		EventChannelSize: 10000,
+		RateLimitMs:      100,
+		EnabledCategories: map[string]bool{
+			"file":    true,
+			"network": true,
+			"memory":  true,
+		},
+		RequireAllMetrics: false,
+	}
+}
+
+// Collector implements a stub syscall error collector for non-Linux systems
 type Collector struct {
 	name      string
 	logger    *zap.Logger
 	eventChan chan *domain.ObservationEvent
 }
 
-// Config holds collector configuration
-type Config struct {
-	RingBufferSize    int
-	EventChannelSize  int
-	RateLimitMs       int
-	EnabledCategories []string
-}
-
-// DefaultConfig returns default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		RingBufferSize:    8 * 1024 * 1024,
-		EventChannelSize:  10000,
-		RateLimitMs:       100,
-		EnabledCategories: []string{"file", "network", "memory"},
-	}
-}
-
-// NewCollector creates a stub collector for non-Linux systems
+// NewCollector creates a new syscall error collector (stub for non-Linux)
 func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 	if config == nil {
 		config = DefaultConfig()
 	}
+
+	logger.Warn("Syscall error collector is not supported on this platform")
 
 	return &Collector{
 		name:      "syscall-errors",
@@ -49,13 +57,13 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 	}, nil
 }
 
-// Start is a no-op on non-Linux systems
+// Start begins collecting (no-op on non-Linux)
 func (c *Collector) Start(ctx context.Context) error {
-	c.logger.Warn("Syscall error collector is only supported on Linux")
-	return fmt.Errorf("syscall error collector requires Linux with eBPF support")
+	c.logger.Warn("Syscall error collector Start() called on non-Linux platform")
+	return fmt.Errorf("syscall error collector is only supported on Linux")
 }
 
-// Stop is a no-op on non-Linux systems
+// Stop stops the collector
 func (c *Collector) Stop() error {
 	close(c.eventChan)
 	return nil
@@ -71,7 +79,7 @@ func (c *Collector) GetName() string {
 	return c.name
 }
 
-// IsHealthy always returns false on non-Linux systems
+// IsHealthy checks if the collector is healthy
 func (c *Collector) IsHealthy() bool {
-	return false
+	return false // Always unhealthy on non-Linux
 }

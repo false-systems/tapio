@@ -1,3 +1,5 @@
+//go:build linux
+
 package namespace_collector
 
 // cniEvent represents a network event from eBPF

@@ -214,11 +214,10 @@ func (c *YAMLConfig) ToOrchestratorConfig() Config {
 func (c *YAMLConfig) toNATSConfig() *config.NATSConfig {
 	natsConfig := &config.NATSConfig{
 		URL:           c.Orchestrator.NATS.URL,
-		Subject:       c.Orchestrator.NATS.Subject,
 		MaxReconnects: c.Orchestrator.NATS.MaxReconnects,
-		Username:      c.Orchestrator.NATS.Username,
-		Password:      c.Orchestrator.NATS.Password,
-		Token:         c.Orchestrator.NATS.Token,
+		// Note: Subject, Username, Password, and Token are stored in the YAML config
+		// but not used in the internal config.NATSConfig struct.
+		// These could be used for authentication setup if needed.
 	}
 
 	return natsConfig

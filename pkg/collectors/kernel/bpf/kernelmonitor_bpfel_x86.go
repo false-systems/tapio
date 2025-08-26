@@ -12,51 +12,6 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-type kernelmonitorContainerInfo struct {
-	ContainerId [64]int8
-	PodUid      [36]int8
-	Image       [128]int8
-	StartedAt   uint64
-}
-
-type kernelmonitorMountInfo struct {
-	Name      [64]int8
-	Namespace [64]int8
-	MountPath [128]int8
-	IsSecret  uint8
-	Pad       [7]uint8
-}
-
-type kernelmonitorPodInfo struct {
-	PodUid    [36]int8
-	Namespace [64]int8
-	PodName   [128]int8
-	CreatedAt uint64
-}
-
-type kernelmonitorProcessLineage struct {
-	Pid       uint32
-	Ppid      uint32
-	Tgid      uint32
-	StartTime uint64
-	JobName   [64]int8
-}
-
-type kernelmonitorServiceEndpoint struct {
-	ServiceName [64]int8
-	Namespace   [64]int8
-	ClusterIp   [16]int8
-	Port        uint16
-	Pad         [2]uint8
-}
-
-type kernelmonitorVolumeInfo struct {
-	PvcName   [64]int8
-	Namespace [64]int8
-	MountPath [128]int8
-	VolumeId  [64]int8
-}
-
 // loadKernelmonitor returns the embedded CollectionSpec for kernelmonitor.
 func loadKernelmonitor() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_KernelmonitorBytes)
@@ -98,27 +53,14 @@ type kernelmonitorSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type kernelmonitorProgramSpecs struct {
-	TraceExec         *ebpf.ProgramSpec `ebpf:"trace_exec"`
-	TraceFree         *ebpf.ProgramSpec `ebpf:"trace_free"`
-	TraceMalloc       *ebpf.ProgramSpec `ebpf:"trace_malloc"`
-	TraceOpenat       *ebpf.ProgramSpec `ebpf:"trace_openat"`
-	TraceTcpV4Connect *ebpf.ProgramSpec `ebpf:"trace_tcp_v4_connect"`
-	TraceTcpV6Connect *ebpf.ProgramSpec `ebpf:"trace_tcp_v6_connect"`
-	TraceUdpSend      *ebpf.ProgramSpec `ebpf:"trace_udp_send"`
+	TraceOpenat *ebpf.ProgramSpec `ebpf:"trace_openat"`
 }
 
 // kernelmonitorMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type kernelmonitorMapSpecs struct {
-	ContainerInfoMap    *ebpf.MapSpec `ebpf:"container_info_map"`
-	ContainerPids       *ebpf.MapSpec `ebpf:"container_pids"`
-	Events              *ebpf.MapSpec `ebpf:"events"`
-	MountInfoMap        *ebpf.MapSpec `ebpf:"mount_info_map"`
-	PodInfoMap          *ebpf.MapSpec `ebpf:"pod_info_map"`
-	ProcessLineageMap   *ebpf.MapSpec `ebpf:"process_lineage_map"`
-	ServiceEndpointsMap *ebpf.MapSpec `ebpf:"service_endpoints_map"`
-	VolumeInfoMap       *ebpf.MapSpec `ebpf:"volume_info_map"`
+	Events *ebpf.MapSpec `ebpf:"events"`
 }
 
 // kernelmonitorObjects contains all objects after they have been loaded into the kernel.
@@ -140,26 +82,12 @@ func (o *kernelmonitorObjects) Close() error {
 //
 // It can be passed to loadKernelmonitorObjects or ebpf.CollectionSpec.LoadAndAssign.
 type kernelmonitorMaps struct {
-	ContainerInfoMap    *ebpf.Map `ebpf:"container_info_map"`
-	ContainerPids       *ebpf.Map `ebpf:"container_pids"`
-	Events              *ebpf.Map `ebpf:"events"`
-	MountInfoMap        *ebpf.Map `ebpf:"mount_info_map"`
-	PodInfoMap          *ebpf.Map `ebpf:"pod_info_map"`
-	ProcessLineageMap   *ebpf.Map `ebpf:"process_lineage_map"`
-	ServiceEndpointsMap *ebpf.Map `ebpf:"service_endpoints_map"`
-	VolumeInfoMap       *ebpf.Map `ebpf:"volume_info_map"`
+	Events *ebpf.Map `ebpf:"events"`
 }
 
 func (m *kernelmonitorMaps) Close() error {
 	return _KernelmonitorClose(
-		m.ContainerInfoMap,
-		m.ContainerPids,
 		m.Events,
-		m.MountInfoMap,
-		m.PodInfoMap,
-		m.ProcessLineageMap,
-		m.ServiceEndpointsMap,
-		m.VolumeInfoMap,
 	)
 }
 
@@ -167,24 +95,12 @@ func (m *kernelmonitorMaps) Close() error {
 //
 // It can be passed to loadKernelmonitorObjects or ebpf.CollectionSpec.LoadAndAssign.
 type kernelmonitorPrograms struct {
-	TraceExec         *ebpf.Program `ebpf:"trace_exec"`
-	TraceFree         *ebpf.Program `ebpf:"trace_free"`
-	TraceMalloc       *ebpf.Program `ebpf:"trace_malloc"`
-	TraceOpenat       *ebpf.Program `ebpf:"trace_openat"`
-	TraceTcpV4Connect *ebpf.Program `ebpf:"trace_tcp_v4_connect"`
-	TraceTcpV6Connect *ebpf.Program `ebpf:"trace_tcp_v6_connect"`
-	TraceUdpSend      *ebpf.Program `ebpf:"trace_udp_send"`
+	TraceOpenat *ebpf.Program `ebpf:"trace_openat"`
 }
 
 func (p *kernelmonitorPrograms) Close() error {
 	return _KernelmonitorClose(
-		p.TraceExec,
-		p.TraceFree,
-		p.TraceMalloc,
 		p.TraceOpenat,
-		p.TraceTcpV4Connect,
-		p.TraceTcpV6Connect,
-		p.TraceUdpSend,
 	)
 }
 

@@ -14,6 +14,7 @@
 // Event types - ONLY what we actually monitor
 #define EVENT_TYPE_CONFIGMAP_ACCESS   1
 #define EVENT_TYPE_SECRET_ACCESS      2
+#define EVENT_TYPE_POD_SYSCALL        3  // For correlation purposes
 
 // Kernel event structure (must match Go struct)
 struct kernel_event {
@@ -87,18 +88,9 @@ static __always_inline int is_secret_path(const char *path) {
 
 // Helper to get cgroup ID for container correlation
 static __always_inline __u64 get_cgroup_id() {
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    __u64 cgroup_id = 0;
-    
-    // Try to read cgroup ID using BPF helper
-    struct cgroup *cgrp;
-    if (bpf_core_field_exists(task->cgroups)) {
-        bpf_probe_read_kernel(&cgrp, sizeof(cgrp), &task->cgroups->dfl_cgrp);
-        if (cgrp) {
-            bpf_probe_read_kernel(&cgroup_id, sizeof(cgroup_id), &cgrp->kn->id);
-        }
-    }
-    
+    // Use the BPF helper function to get current cgroup ID
+    // This is more portable across kernel versions
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
     return cgroup_id;
 }
 
