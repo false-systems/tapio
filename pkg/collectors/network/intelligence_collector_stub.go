@@ -23,7 +23,16 @@ type IntelligenceCollector struct {
 func NewIntelligenceCollector(name string, config *IntelligenceCollectorConfig, logger *zap.Logger) (*IntelligenceCollector, error) {
 	// Handle nil config case
 	if config == nil {
-		config = DefaultIntelligenceConfig()
+		// Create default config inline for stub
+		config = &IntelligenceCollectorConfig{
+			NetworkCollectorConfig: &NetworkCollectorConfig{
+				BufferSize: 1000,
+				EnableIPv4: true,
+				EnableTCP:  true,
+				EnableUDP:  true,
+			},
+			EnableIntelligenceMode: false,
+		}
 	}
 
 	// Create base collector

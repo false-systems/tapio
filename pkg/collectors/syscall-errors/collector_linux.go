@@ -88,9 +88,15 @@ type Collector struct {
 	enospcErrors    metric.Int64Counter
 	enomemErrors    metric.Int64Counter
 	econnrefErrors  metric.Int64Counter
+	eventsDropped   metric.Int64Counter
 
 	// Configuration
 	config *Config
+
+	// Error tracking for rate limiting
+	lastErrorLogTime  time.Time
+	errorLogInterval  time.Duration
+	consecutiveErrors int
 }
 
 // Config holds collector configuration
@@ -98,16 +104,22 @@ type Config struct {
 	RingBufferSize    int
 	EventChannelSize  int
 	RateLimitMs       int
-	EnabledCategories []string
+	EnabledCategories map[string]bool // Map for O(1) lookup
+	RequireAllMetrics bool            // If true, fail startup when metrics can't be created
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		RingBufferSize:    8 * 1024 * 1024, // 8MB
-		EventChannelSize:  10000,
-		RateLimitMs:       100,
-		EnabledCategories: []string{"file", "network", "memory"},
+		RingBufferSize:   8 * 1024 * 1024, // 8MB
+		EventChannelSize: 10000,
+		RateLimitMs:      100,
+		EnabledCategories: map[string]bool{
+			"file":    true,
+			"network": true,
+			"memory":  true,
+		},
+		RequireAllMetrics: false, // Default to graceful degradation
 	}
 }
 
@@ -171,20 +183,40 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		logger.Warn("Failed to create ECONNREFUSED counter", zap.Error(err))
 	}
 
+	eventsDropped, err := meter.Int64Counter(
+		"syscall_errors_events_dropped_total",
+		metric.WithDescription("Total events dropped due to channel overflow"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events dropped counter", zap.Error(err))
+	}
+
+	// Check if all required metrics were created
+	if config.RequireAllMetrics {
+		if eventsProcessed == nil || errorsTotal == nil || processingTime == nil {
+			return nil, fmt.Errorf("failed to create required metrics, aborting startup")
+		}
+		logger.Info("All required metrics initialized successfully")
+	}
+
 	return &Collector{
-		name:            "syscall-errors",
-		logger:          logger,
-		ctx:             ctx,
-		cancel:          cancel,
-		eventChan:       make(chan *domain.ObservationEvent, config.EventChannelSize),
-		tracer:          tracer,
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		enospcErrors:    enospcErrors,
-		enomemErrors:    enomemErrors,
-		econnrefErrors:  econnrefErrors,
-		config:          config,
+		name:              "syscall-errors",
+		logger:            logger,
+		ctx:               ctx,
+		cancel:            cancel,
+		eventChan:         make(chan *domain.ObservationEvent, config.EventChannelSize),
+		tracer:            tracer,
+		eventsProcessed:   eventsProcessed,
+		errorsTotal:       errorsTotal,
+		processingTime:    processingTime,
+		enospcErrors:      enospcErrors,
+		enomemErrors:      enomemErrors,
+		econnrefErrors:    econnrefErrors,
+		eventsDropped:     eventsDropped,
+		config:            config,
+		errorLogInterval:  time.Minute, // Log errors at most once per minute
+		lastErrorLogTime:  time.Time{},
+		consecutiveErrors: 0,
 	}, nil
 }
 
@@ -274,9 +306,25 @@ func (c *Collector) processEvents() {
 						attribute.String("error_type", "ring_buffer_read"),
 					))
 				}
-				c.logger.Error("Failed to read from ring buffer", zap.Error(err))
+
+				// Rate-limited error logging to prevent log spam
+				c.consecutiveErrors++
+				now := time.Now()
+				if now.Sub(c.lastErrorLogTime) > c.errorLogInterval {
+					c.logger.Error("Failed to read from ring buffer",
+						zap.Error(err),
+						zap.Int("consecutive_errors", c.consecutiveErrors))
+					c.lastErrorLogTime = now
+					c.consecutiveErrors = 0
+				}
+
+				// Add a small delay to avoid busy-waiting on persistent errors
+				time.Sleep(50 * time.Millisecond)
 				continue
 			}
+
+			// Reset error counter on successful read
+			c.consecutiveErrors = 0
 
 			// Process the event
 			if err := c.processRawEvent(record.RawSample); err != nil {
@@ -305,14 +353,28 @@ func (c *Collector) processRawEvent(data []byte) error {
 	}()
 
 	// Parse the event
-	if len(data) < int(unsafe.Sizeof(SyscallErrorEvent{})) {
-		return fmt.Errorf("event data too small: got %d bytes", len(data))
+	expectedSize := int(unsafe.Sizeof(SyscallErrorEvent{}))
+	if len(data) < expectedSize {
+		return fmt.Errorf("event data too small: got %d bytes, expected %d", len(data), expectedSize)
+	}
+
+	// Validate exact size match to ensure struct alignment
+	if len(data) != expectedSize {
+		c.logger.Warn("Event size mismatch, potential struct alignment issue",
+			zap.Int("got_size", len(data)),
+			zap.Int("expected_size", expectedSize))
 	}
 
 	var event SyscallErrorEvent
-	reader := bytes.NewReader(data)
+	reader := bytes.NewReader(data[:expectedSize]) // Only read expected bytes
 	if err := binary.Read(reader, binary.LittleEndian, &event); err != nil {
 		return fmt.Errorf("failed to parse event: %w", err)
+	}
+
+	// Filter by category if enabled
+	if !c.isCategoryEnabled(event.Category) {
+		// Silently drop events from disabled categories
+		return nil
 	}
 
 	// Convert to ObservationEvent
@@ -341,10 +403,26 @@ func (c *Collector) processRawEvent(data []byte) error {
 		return nil
 	default:
 		// Channel full, drop event
+		if c.eventsDropped != nil {
+			c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("category", c.getCategoryName(event.Category)),
+				attribute.String("syscall", c.getSyscallName(event.SyscallNr)),
+			))
+		}
 		if c.errorsTotal != nil {
 			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "channel_full"),
 			))
+		}
+
+		// Log warning with rate limiting
+		now := time.Now()
+		if now.Sub(c.lastErrorLogTime) > c.errorLogInterval {
+			c.logger.Warn("Event channel full, dropping events",
+				zap.String("syscall", c.getSyscallName(event.SyscallNr)),
+				zap.String("error", c.getErrorName(event.ErrorCode)),
+				zap.Int("pid", int(event.PID)))
+			c.lastErrorLogTime = now
 		}
 	}
 
@@ -440,28 +518,80 @@ func (c *Collector) getSeverityForError(errorCode int32) domain.EventSeverity {
 
 // getErrorName returns human-readable error name
 func (c *Collector) getErrorName(errorCode int32) string {
-	switch -errorCode {
-	case 1:
-		return "EPERM"
-	case 2:
-		return "ENOENT"
-	case 5:
-		return "EIO"
-	case 11:
-		return "EAGAIN"
-	case 12:
-		return "ENOMEM"
-	case 13:
-		return "EACCES"
-	case 28:
-		return "ENOSPC"
-	case 110:
-		return "ETIMEDOUT"
-	case 111:
-		return "ECONNREFUSED"
-	default:
-		return fmt.Sprintf("ERROR_%d", -errorCode)
+	// Comprehensive mapping of Linux error codes
+	errorNames := map[int32]string{
+		1:   "EPERM",
+		2:   "ENOENT",
+		3:   "ESRCH",
+		4:   "EINTR",
+		5:   "EIO",
+		6:   "ENXIO",
+		7:   "E2BIG",
+		8:   "ENOEXEC",
+		9:   "EBADF",
+		10:  "ECHILD",
+		11:  "EAGAIN",
+		12:  "ENOMEM",
+		13:  "EACCES",
+		14:  "EFAULT",
+		15:  "ENOTBLK",
+		16:  "EBUSY",
+		17:  "EEXIST",
+		18:  "EXDEV",
+		19:  "ENODEV",
+		20:  "ENOTDIR",
+		21:  "EISDIR",
+		22:  "EINVAL",
+		23:  "ENFILE",
+		24:  "EMFILE",
+		25:  "ENOTTY",
+		26:  "ETXTBSY",
+		27:  "EFBIG",
+		28:  "ENOSPC",
+		29:  "ESPIPE",
+		30:  "EROFS",
+		31:  "EMLINK",
+		32:  "EPIPE",
+		33:  "EDOM",
+		34:  "ERANGE",
+		35:  "EDEADLK",
+		36:  "ENAMETOOLONG",
+		37:  "ENOLCK",
+		38:  "ENOSYS",
+		39:  "ENOTEMPTY",
+		40:  "ELOOP",
+		42:  "ENOMSG",
+		43:  "EIDRM",
+		61:  "ENODATA",
+		62:  "ETIME",
+		63:  "ENOSR",
+		71:  "EPROTO",
+		95:  "EOPNOTSUPP",
+		98:  "EADDRINUSE",
+		99:  "EADDRNOTAVAIL",
+		100: "ENETDOWN",
+		101: "ENETUNREACH",
+		102: "ENETRESET",
+		103: "ECONNABORTED",
+		104: "ECONNRESET",
+		105: "ENOBUFS",
+		106: "EISCONN",
+		107: "ENOTCONN",
+		108: "ESHUTDOWN",
+		110: "ETIMEDOUT",
+		111: "ECONNREFUSED",
+		112: "EHOSTDOWN",
+		113: "EHOSTUNREACH",
+		114: "EALREADY",
+		115: "EINPROGRESS",
+		116: "ESTALE",
+		122: "EDQUOT",
 	}
+
+	if name, ok := errorNames[-errorCode]; ok {
+		return name
+	}
+	return fmt.Sprintf("ERROR_%d", -errorCode)
 }
 
 // getCategoryName returns category name
@@ -480,28 +610,128 @@ func (c *Collector) getCategoryName(category uint8) string {
 	}
 }
 
-// getSyscallName returns syscall name (simplified for key syscalls)
+// getSyscallName returns syscall name
 func (c *Collector) getSyscallName(syscallNr int32) string {
-	switch syscallNr {
-	case 0:
-		return "read"
-	case 1:
-		return "write"
-	case 2:
-		return "open"
-	case 3:
-		return "close"
-	case 41:
-		return "socket"
-	case 42:
-		return "connect"
-	case 43:
-		return "accept"
-	case 257:
-		return "openat"
-	default:
-		return fmt.Sprintf("syscall_%d", syscallNr)
+	// Comprehensive mapping of x86_64 syscall numbers
+	syscallNames := map[int32]string{
+		0:   "read",
+		1:   "write",
+		2:   "open",
+		3:   "close",
+		4:   "stat",
+		5:   "fstat",
+		6:   "lstat",
+		7:   "poll",
+		8:   "lseek",
+		9:   "mmap",
+		10:  "mprotect",
+		11:  "munmap",
+		12:  "brk",
+		13:  "rt_sigaction",
+		14:  "rt_sigprocmask",
+		16:  "ioctl",
+		17:  "pread64",
+		18:  "pwrite64",
+		19:  "readv",
+		20:  "writev",
+		21:  "access",
+		22:  "pipe",
+		23:  "select",
+		24:  "sched_yield",
+		25:  "mremap",
+		26:  "msync",
+		27:  "mincore",
+		28:  "madvise",
+		32:  "dup",
+		33:  "dup2",
+		35:  "nanosleep",
+		39:  "getpid",
+		40:  "sendfile",
+		41:  "socket",
+		42:  "connect",
+		43:  "accept",
+		44:  "sendto",
+		45:  "recvfrom",
+		46:  "sendmsg",
+		47:  "recvmsg",
+		48:  "shutdown",
+		49:  "bind",
+		50:  "listen",
+		51:  "getsockname",
+		52:  "getpeername",
+		53:  "socketpair",
+		54:  "setsockopt",
+		55:  "getsockopt",
+		56:  "clone",
+		57:  "fork",
+		59:  "execve",
+		60:  "exit",
+		61:  "wait4",
+		62:  "kill",
+		72:  "fcntl",
+		73:  "flock",
+		74:  "fsync",
+		75:  "fdatasync",
+		76:  "truncate",
+		77:  "ftruncate",
+		78:  "getdents",
+		79:  "getcwd",
+		80:  "chdir",
+		81:  "fchdir",
+		82:  "rename",
+		83:  "mkdir",
+		84:  "rmdir",
+		85:  "creat",
+		86:  "link",
+		87:  "unlink",
+		88:  "symlink",
+		89:  "readlink",
+		90:  "chmod",
+		91:  "fchmod",
+		92:  "chown",
+		93:  "fchown",
+		94:  "lchown",
+		102: "getuid",
+		104: "getgid",
+		107: "geteuid",
+		108: "getegid",
+		110: "getppid",
+		111: "getpgrp",
+		112: "setsid",
+		186: "gettid",
+		217: "getdents64",
+		231: "exit_group",
+		232: "epoll_wait",
+		233: "epoll_ctl",
+		257: "openat",
+		258: "mkdirat",
+		259: "mknodat",
+		260: "fchownat",
+		261: "futimesat",
+		262: "newfstatat",
+		263: "unlinkat",
+		264: "renameat",
+		265: "linkat",
+		266: "symlinkat",
+		267: "readlinkat",
+		268: "fchmodat",
+		269: "faccessat",
+		270: "pselect6",
+		271: "ppoll",
+		281: "epoll_pwait",
+		288: "accept4",
+		293: "pipe2",
+		295: "preadv",
+		296: "pwritev",
+		302: "prlimit64",
+		318: "getrandom",
+		332: "statx",
 	}
+
+	if name, ok := syscallNames[syscallNr]; ok {
+		return name
+	}
+	return fmt.Sprintf("syscall_%d", syscallNr)
 }
 
 // Stop stops the collector
@@ -578,9 +808,11 @@ func (c *Collector) GetStats() (*CollectorStats, error) {
 		return nil, fmt.Errorf("failed to lookup stats: %w", err)
 	}
 
-	// values is []CollectorStats for per-CPU map
-	if cpuStats, ok := values.([]CollectorStats); ok {
-		for _, cpuStat := range cpuStats {
+	// Type assertion with safety check
+	switch v := values.(type) {
+	case []CollectorStats:
+		// Expected type for per-CPU map
+		for _, cpuStat := range v {
 			stats.TotalErrors += cpuStat.TotalErrors
 			stats.ENOSPCCount += cpuStat.ENOSPCCount
 			stats.ENOMEMCount += cpuStat.ENOMEMCount
@@ -589,12 +821,30 @@ func (c *Collector) GetStats() (*CollectorStats, error) {
 			stats.EventsSent += cpuStat.EventsSent
 			stats.EventsDropped += cpuStat.EventsDropped
 		}
+	case CollectorStats:
+		// Single value (non per-CPU map)
+		stats = v
+	default:
+		return nil, fmt.Errorf("unexpected type from Stats map: %T", values)
 	}
 
 	return &stats, nil
 }
 
 // bytesToString converts null-terminated byte array to string
+// isCategoryEnabled checks if a category is enabled for collection
+func (c *Collector) isCategoryEnabled(category uint8) bool {
+	categoryName := c.getCategoryName(category)
+
+	// If no categories specified, enable all
+	if len(c.config.EnabledCategories) == 0 {
+		return true
+	}
+
+	// Check if category is in enabled map
+	return c.config.EnabledCategories[categoryName]
+}
+
 func bytesToString(data []byte) string {
 	n := bytes.IndexByte(data, 0)
 	if n == -1 {

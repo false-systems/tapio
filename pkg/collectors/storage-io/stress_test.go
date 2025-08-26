@@ -26,7 +26,7 @@ func TestStressEventProcessing(t *testing.T) {
 
 	logger := zaptest.NewLogger(t)
 
-	config := DefaultConfig()
+	config := NewDefaultConfig()
 	config.BufferSize = 50000 // Large buffer for stress test
 	config.SlowIOThresholdMs = 10
 
@@ -143,7 +143,7 @@ func TestConcurrentRawEventProcessing(t *testing.T) {
 		t.Skip("Skipping concurrent test in short mode")
 	}
 
-	collector, err := NewCollector("concurrent-test", DefaultConfig())
+	collector, err := NewCollector("concurrent-test", NewDefaultConfig())
 	require.NoError(t, err)
 
 	collector.logger = zaptest.NewLogger(t)
@@ -233,7 +233,7 @@ func TestMemoryUsageUnderLoad(t *testing.T) {
 		t.Skip("Skipping memory test in short mode")
 	}
 
-	config := DefaultConfig()
+	config := NewDefaultConfig()
 	config.BufferSize = 10000
 
 	collector, err := NewCollector("memory-test", config)
@@ -245,7 +245,6 @@ func TestMemoryUsageUnderLoad(t *testing.T) {
 	collector.cancel = cancel
 
 	// Start background loops like in real usage
-	collector.wg = &sync.WaitGroup{}
 	collector.wg.Add(3)
 	go collector.refreshMountPointsLoop()
 	go collector.healthMonitorLoop()
@@ -306,8 +305,8 @@ func TestMemoryUsageUnderLoad(t *testing.T) {
 }
 
 // BenchmarkEventProcessing benchmarks the core event processing pipeline
-func BenchmarkEventProcessing(b *testing.B) {
-	collector, err := NewCollector("benchmark", DefaultConfig())
+func BenchmarkEventProcessingStress(b *testing.B) {
+	collector, err := NewCollector("benchmark", NewDefaultConfig())
 	require.NoError(b, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -348,7 +347,7 @@ func BenchmarkEventProcessing(b *testing.B) {
 
 // BenchmarkRawEventParsing benchmarks raw eBPF event parsing
 func BenchmarkRawEventParsing(b *testing.B) {
-	collector, err := NewCollector("benchmark-raw", DefaultConfig())
+	collector, err := NewCollector("benchmark-raw", NewDefaultConfig())
 	require.NoError(b, err)
 
 	// Generate test raw event data

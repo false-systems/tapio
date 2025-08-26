@@ -64,6 +64,8 @@ NO STUBS: No "TODO", "not implemented", empty functions
 SHOW PROOF: Paste build/test output or FAIL
 NO PUSH TO MAIN:  We work with branches and PR.
 SMALL BATCHES: We code small parts, run gofmt, linter, vet and commit
+We NEVER HARDCODED VALUES
+
 
 Quality Standards
 80% test coverage minimum
