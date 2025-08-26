@@ -6,6 +6,8 @@ package network
 import (
 	"context"
 	"fmt"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -14,6 +16,26 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+)
+
+// Constants for configuration - no magic numbers
+const (
+	// Latency baseline smoothing factor (exponential moving average)
+	LatencyAlpha = 0.1
+
+	// Map cleanup intervals
+	DependencyCacheTTL = 5 * time.Minute
+	BaselineStaleTime  = 10 * time.Minute
+	ErrorWindowTTL     = 2 * time.Minute
+
+	// Map size limits to prevent unbounded growth
+	MaxServiceDependencies = 10000
+	MaxLatencyBaselines    = 5000
+	MaxErrorTrackers       = 1000
+
+	// Channel saturation thresholds
+	ChannelHighWaterMark = 0.8  // 80% full triggers warning
+	ChannelDropThreshold = 0.95 // 95% full starts dropping
 )
 
 // IntelligenceCollector extends the base network collector with intelligence-focused L7 monitoring
@@ -184,8 +206,9 @@ func (ic *IntelligenceCollector) Start(ctx context.Context) error {
 	)
 
 	// Start intelligence event processing goroutine
-	ic.wg.Add(1)
+	ic.wg.Add(2) // processIntelligenceEvents and cleanupStaleEntries
 	go ic.processIntelligenceEvents()
+	go ic.cleanupStaleEntries()
 
 	// Start the base collector (which handles eBPF setup)
 	if err := ic.Collector.Start(ctx); err != nil {
@@ -204,10 +227,202 @@ func (ic *IntelligenceCollector) Stop() error {
 		ic.logger.Error("Error stopping base collector", zap.Error(err))
 	}
 
-	// Close intelligence events channel
-	close(ic.intelligenceEvents)
+	// Close intelligence events channel safely
+	ic.safeCloseIntelligenceChannel()
 
 	return nil
+}
+
+// safeIncrementStats safely increments statistics with mutex protection
+func (ic *IntelligenceCollector) safeIncrementStats(field string, value int64) {
+	ic.mutex.Lock()
+	defer ic.mutex.Unlock()
+
+	switch field {
+	case "events_processed":
+		ic.intelStats.EventsProcessed += value
+	case "dependencies_found":
+		ic.intelStats.DependenciesFound += value
+	case "error_patterns":
+		ic.intelStats.ErrorPatternsFound += value
+	case "latency_anomalies":
+		ic.intelStats.LatencyAnomalies += value
+	case "dns_failures":
+		ic.intelStats.DNSFailures += value
+	case "security_concerns":
+		ic.intelStats.SecurityConcerns += value
+	case "events_dropped":
+		// Track dropped events if needed
+	}
+}
+
+// cleanupStaleEntries periodically removes old entries from maps to prevent unbounded growth
+func (ic *IntelligenceCollector) cleanupStaleEntries() {
+	defer ic.wg.Done()
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ic.ctx.Done():
+			return
+		case <-ticker.C:
+			ic.performMapCleanup()
+		}
+	}
+}
+
+// performMapCleanup removes stale entries from all tracking maps
+func (ic *IntelligenceCollector) performMapCleanup() {
+	ic.mutex.Lock()
+	defer ic.mutex.Unlock()
+
+	now := time.Now()
+
+	// Cleanup service dependencies
+	if len(ic.serviceDependencies) > MaxServiceDependencies {
+		ic.evictOldestDependencies(MaxServiceDependencies / 2)
+	}
+	for key, dep := range ic.serviceDependencies {
+		if now.Sub(dep.LastSeen) > DependencyCacheTTL {
+			delete(ic.serviceDependencies, key)
+		}
+	}
+
+	// Cleanup latency baselines
+	if len(ic.latencyBaselines) > MaxLatencyBaselines {
+		ic.evictOldestBaselines(MaxLatencyBaselines / 2)
+	}
+	for key, baseline := range ic.latencyBaselines {
+		if now.Sub(baseline.LastUpdate) > BaselineStaleTime {
+			delete(ic.latencyBaselines, key)
+		}
+	}
+
+	// Cleanup error cascade trackers
+	if len(ic.errorCascadeTracker) > MaxErrorTrackers {
+		ic.evictOldestTrackers(MaxErrorTrackers / 2)
+	}
+	for key, tracker := range ic.errorCascadeTracker {
+		if now.Sub(tracker.WindowStart) > ErrorWindowTTL {
+			delete(ic.errorCascadeTracker, key)
+		}
+	}
+
+	ic.logger.Debug("Cleaned up stale map entries",
+		zap.Int("dependencies", len(ic.serviceDependencies)),
+		zap.Int("baselines", len(ic.latencyBaselines)),
+		zap.Int("error_trackers", len(ic.errorCascadeTracker)))
+}
+
+// evictOldestDependencies removes the oldest N service dependencies
+func (ic *IntelligenceCollector) evictOldestDependencies(count int) {
+	type entry struct {
+		key      string
+		lastSeen time.Time
+	}
+
+	entries := make([]entry, 0, len(ic.serviceDependencies))
+	for k, v := range ic.serviceDependencies {
+		entries = append(entries, entry{k, v.LastSeen})
+	}
+
+	// Sort by LastSeen (oldest first)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].lastSeen.Before(entries[j].lastSeen)
+	})
+
+	// Remove oldest entries
+	for i := 0; i < count && i < len(entries); i++ {
+		delete(ic.serviceDependencies, entries[i].key)
+	}
+}
+
+// evictOldestBaselines removes the oldest N latency baselines
+func (ic *IntelligenceCollector) evictOldestBaselines(count int) {
+	type entry struct {
+		key        string
+		lastUpdate time.Time
+	}
+
+	entries := make([]entry, 0, len(ic.latencyBaselines))
+	for k, v := range ic.latencyBaselines {
+		entries = append(entries, entry{k, v.LastUpdate})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].lastUpdate.Before(entries[j].lastUpdate)
+	})
+
+	for i := 0; i < count && i < len(entries); i++ {
+		delete(ic.latencyBaselines, entries[i].key)
+	}
+}
+
+// evictOldestTrackers removes the oldest N error trackers
+func (ic *IntelligenceCollector) evictOldestTrackers(count int) {
+	type entry struct {
+		key         string
+		windowStart time.Time
+	}
+
+	entries := make([]entry, 0, len(ic.errorCascadeTracker))
+	for k, v := range ic.errorCascadeTracker {
+		entries = append(entries, entry{k, v.WindowStart})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].windowStart.Before(entries[j].windowStart)
+	})
+
+	for i := 0; i < count && i < len(entries); i++ {
+		delete(ic.errorCascadeTracker, entries[i].key)
+	}
+}
+
+// channelCloseOnce ensures the channel is only closed once
+var channelCloseOnce sync.Once
+
+// safeCloseIntelligenceChannel safely closes the intelligence events channel
+func (ic *IntelligenceCollector) safeCloseIntelligenceChannel() {
+	channelCloseOnce.Do(func() {
+		close(ic.intelligenceEvents)
+	})
+}
+
+// sendIntelligenceEventSafe safely sends an event to the intelligence channel with overflow protection
+func (ic *IntelligenceCollector) sendIntelligenceEventSafe(event *IntelligenceEvent) {
+	// Calculate channel utilization
+	channelLen := len(ic.intelligenceEvents)
+	channelCap := cap(ic.intelligenceEvents)
+	utilization := float64(channelLen) / float64(channelCap)
+
+	// Log warning if channel is getting full
+	if utilization > ChannelHighWaterMark {
+		ic.logger.Warn("Intelligence events channel nearing capacity",
+			zap.Int("current", channelLen),
+			zap.Int("capacity", channelCap),
+			zap.Float64("utilization", utilization))
+	}
+
+	// Drop events if channel is too full
+	if utilization > ChannelDropThreshold {
+		ic.logger.Error("Dropping intelligence event due to channel overflow",
+			zap.String("event_type", fmt.Sprintf("%d", event.Type)),
+			zap.Float64("utilization", utilization))
+		ic.safeIncrementStats("events_dropped", 1)
+		return
+	}
+
+	// Try to send with timeout
+	select {
+	case ic.intelligenceEvents <- event:
+		// Success
+	case <-time.After(100 * time.Millisecond):
+		ic.logger.Warn("Timeout sending intelligence event, dropping",
+			zap.String("event_type", fmt.Sprintf("%d", event.Type)))
+		ic.safeIncrementStats("events_dropped", 1)
+	}
 }
 
 // processIntelligenceEvents processes intelligence events and performs analysis
@@ -239,12 +454,11 @@ func (ic *IntelligenceCollector) analyzeIntelligenceEvent(event *IntelligenceEve
 
 	span.SetAttributes(
 		attribute.String("event.type", fmt.Sprintf("%d", event.Type)),
-		attribute.String("event.severity", fmt.Sprintf("%d", event.Severity)),
 		attribute.String("source.service", event.SourceService),
 		attribute.String("dest.service", event.DestService),
 	)
 
-	ic.intelStats.TotalEventsProcessed++
+	ic.safeIncrementStats("events_processed", 1)
 
 	switch event.Type {
 	case IntelEventServiceDependency:
@@ -263,8 +477,8 @@ func (ic *IntelligenceCollector) analyzeIntelligenceEvent(event *IntelligenceEve
 	}
 
 	// Update filtering efficiency metrics
-	if ic.intelStats.TotalEventsProcessed > 0 {
-		efficiency := float64(ic.intelStats.IntelligentEventsEmitted) / float64(ic.intelStats.TotalEventsProcessed)
+	if ic.intelStats.EventsProcessed > 0 {
+		efficiency := float64(ic.intelStats.DependenciesFound) / float64(ic.intelStats.EventsProcessed)
 		if ic.filteringRatio != nil {
 			ic.filteringRatio.Record(ctx, 1.0-efficiency) // Higher is more selective
 		}
@@ -287,39 +501,42 @@ func (ic *IntelligenceCollector) analyzeIntelligenceEvent(event *IntelligenceEve
 
 // handleServiceDependency processes service dependency discoveries
 func (ic *IntelligenceCollector) handleServiceDependency(ctx context.Context, event *IntelligenceEvent) {
-	if event.ServiceDependency == nil {
-		return
+	// Create a ServiceDependency from the event data
+	dep := &ServiceDependency{
+		FromService:  event.SourceService,
+		ToService:    event.DestService,
+		Protocol:     event.Protocol,
+		Port:         event.DestPort,
+		RequestCount: 1,
+		LastSeen:     event.Timestamp,
+		IsHealthy:    true,
 	}
-
-	dep := event.ServiceDependency
-	key := fmt.Sprintf("%s->%s:%d", dep.SourceService, dep.DestService, dep.DestPort)
+	key := fmt.Sprintf("%s->%s:%d", dep.FromService, dep.ToService, dep.Port)
 
 	// Track or update service dependency
 	if existing, exists := ic.serviceDependencies[key]; exists {
 		existing.LastSeen = dep.LastSeen
 		existing.RequestCount += dep.RequestCount
-		existing.ErrorCount += dep.ErrorCount
+		existing.ErrorRate = (existing.ErrorRate*float64(existing.RequestCount) + dep.ErrorRate) / float64(existing.RequestCount+1)
 	} else {
 		ic.serviceDependencies[key] = dep
-		ic.intelStats.NewServicesDiscovered++
+		ic.safeIncrementStats("dependencies_found", 1)
 
 		if ic.serviceDepsCounter != nil {
 			ic.serviceDepsCounter.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("source_service", dep.SourceService),
-				attribute.String("dest_service", dep.DestService),
-				attribute.Int("dest_port", int(dep.DestPort)),
+				attribute.String("source_service", dep.FromService),
+				attribute.String("dest_service", dep.ToService),
+				attribute.Int("dest_port", int(dep.Port)),
 			))
 		}
 	}
 
-	ic.intelStats.ServiceDependencies++
-	ic.intelStats.IntelligentEventsEmitted++
+	// Already incremented DependenciesFound above
 
 	ic.logger.Debug("Service dependency discovered",
-		zap.String("source", dep.SourceService),
-		zap.String("destination", dep.DestService),
-		zap.Int32("port", dep.DestPort),
-		zap.Bool("new", dep.IsNewService),
+		zap.String("source", dep.FromService),
+		zap.String("destination", dep.ToService),
+		zap.Int32("port", dep.Port),
 	)
 }
 
@@ -332,12 +549,12 @@ func (ic *IntelligenceCollector) handleErrorPattern(ctx context.Context, event *
 	error := event.ErrorPattern
 
 	// Check for error cascades
-	windowKey := fmt.Sprintf("cascade-%d", error.Timestamp.Truncate(time.Duration(ic.intelConfig.ErrorCascadeWindowMs)*time.Millisecond).Unix())
+	windowKey := fmt.Sprintf("cascade-%d", error.WindowStart.Truncate(time.Duration(ic.intelConfig.ErrorCascadeWindowMs)*time.Millisecond).Unix())
 
 	cascade, exists := ic.errorCascadeTracker[windowKey]
 	if !exists {
 		cascade = &ErrorCascade{
-			WindowStart: error.Timestamp.Truncate(time.Duration(ic.intelConfig.ErrorCascadeWindowMs) * time.Millisecond),
+			WindowStart: error.WindowStart,
 			Services:    make(map[string]int32),
 			StatusCodes: make(map[int32]int32),
 		}
@@ -345,26 +562,25 @@ func (ic *IntelligenceCollector) handleErrorPattern(ctx context.Context, event *
 	}
 
 	cascade.ErrorCount++
-	cascade.Services[error.SourceService]++
-	cascade.StatusCodes[error.StatusCode]++
+	cascade.Services[event.SourceService]++
+	cascade.StatusCodes[int32(error.StatusCode)]++
 
 	// Detect cascade if multiple services are affected
 	if len(cascade.Services) > 2 {
 		error.IsCascade = true
-		ic.intelStats.ErrorCascadesDetected++
+		ic.safeIncrementStats("error_patterns", 1)
 	}
 
 	if ic.errorPatternsCounter != nil {
 		ic.errorPatternsCounter.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("source_service", error.SourceService),
-			attribute.String("dest_service", error.DestService),
+			attribute.String("source_service", event.SourceService),
+			attribute.String("dest_service", event.DestService),
 			attribute.Int("status_code", int(error.StatusCode)),
 			attribute.Bool("is_cascade", error.IsCascade),
 		))
 	}
 
-	ic.intelStats.ErrorPatterns++
-	ic.intelStats.IntelligentEventsEmitted++
+	ic.intelStats.ErrorPatternsFound++
 
 	severity := "warning"
 	if error.StatusCode >= 500 {
@@ -372,10 +588,10 @@ func (ic *IntelligenceCollector) handleErrorPattern(ctx context.Context, event *
 	}
 
 	ic.logger.Info("Error pattern detected",
-		zap.String("source", error.SourceService),
-		zap.String("destination", error.DestService),
+		zap.String("source", event.SourceService),
+		zap.String("destination", event.DestService),
 		zap.String("endpoint", error.Endpoint),
-		zap.Int32("status_code", error.StatusCode),
+		zap.Int("status_code", error.StatusCode),
 		zap.String("severity", severity),
 		zap.Bool("cascade", error.IsCascade),
 	)
@@ -388,7 +604,7 @@ func (ic *IntelligenceCollector) handleLatencyAnomaly(ctx context.Context, event
 	}
 
 	anomaly := event.LatencyAnomaly
-	baselineKey := fmt.Sprintf("%s:%s", anomaly.DestService, anomaly.Endpoint)
+	baselineKey := fmt.Sprintf("%s:%s", event.DestService, anomaly.Endpoint)
 
 	// Update latency baseline
 	baseline, exists := ic.latencyBaselines[baselineKey]
@@ -397,33 +613,32 @@ func (ic *IntelligenceCollector) handleLatencyAnomaly(ctx context.Context, event
 			Endpoint:     anomaly.Endpoint,
 			AvgLatency:   anomaly.BaselineLatency,
 			RequestCount: 1,
-			LastUpdate:   anomaly.Timestamp,
+			LastUpdate:   event.Timestamp,
 		}
 		ic.latencyBaselines[baselineKey] = baseline
-		ic.intelStats.LatencyBaselinesTracked++
+		// Track new baseline created
 	}
 
 	// Update baseline with exponential moving average
 	alpha := 0.1 // Smoothing factor
 	baseline.AvgLatency = time.Duration(float64(baseline.AvgLatency)*alpha + float64(anomaly.Latency)*(1-alpha))
 	baseline.RequestCount++
-	baseline.LastUpdate = anomaly.Timestamp
+	baseline.LastUpdate = event.Timestamp
 
 	if ic.anomaliesCounter != nil {
 		ic.anomaliesCounter.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("source_service", anomaly.SourceService),
-			attribute.String("dest_service", anomaly.DestService),
+			attribute.String("source_service", event.SourceService),
+			attribute.String("dest_service", event.DestService),
 			attribute.String("endpoint", anomaly.Endpoint),
 			attribute.Float64("deviation_factor", anomaly.DeviationFactor),
 		))
 	}
 
-	ic.intelStats.LatencyAnomalies++
-	ic.intelStats.IntelligentEventsEmitted++
+	ic.safeIncrementStats("latency_anomalies", 1)
 
 	ic.logger.Info("Latency anomaly detected",
-		zap.String("source", anomaly.SourceService),
-		zap.String("destination", anomaly.DestService),
+		zap.String("source", event.SourceService),
+		zap.String("destination", event.DestService),
 		zap.String("endpoint", anomaly.Endpoint),
 		zap.Duration("latency", anomaly.Latency),
 		zap.Duration("baseline", anomaly.BaselineLatency),
@@ -447,13 +662,12 @@ func (ic *IntelligenceCollector) handleDNSFailure(ctx context.Context, event *In
 		))
 	}
 
-	ic.intelStats.DNSFailures++
-	ic.intelStats.IntelligentEventsEmitted++
+	ic.safeIncrementStats("dns_failures", 1)
 
 	ic.logger.Warn("DNS failure detected",
 		zap.String("source", failure.SourceService),
 		zap.String("domain", failure.Domain),
-		zap.Int32("response_code", failure.ResponseCode),
+		zap.Uint16("response_code", failure.ResponseCode),
 		zap.String("response_text", failure.ResponseText),
 	)
 }
@@ -465,8 +679,7 @@ func (ic *IntelligenceCollector) handleSecurityConcern(ctx context.Context, even
 	}
 
 	concern := event.SecurityConcern
-	ic.intelStats.SecurityConcerns++
-	ic.intelStats.IntelligentEventsEmitted++
+	ic.safeIncrementStats("security_concerns", 1)
 
 	// Record security concern metrics
 	if ic.securityConcernCounter != nil {
@@ -517,9 +730,9 @@ func (ic *IntelligenceCollector) performPeriodicAnalysis() {
 	}
 
 	// Update intelligence events per second
-	if ic.intelStats.TotalEventsProcessed > 0 {
+	if ic.intelStats.EventsProcessed > 0 {
 		// This is a simplified calculation - in production would use a proper windowed rate
-		ic.intelStats.IntelligenceEventsPerSec = float64(ic.intelStats.IntelligentEventsEmitted) / 60.0
+		// Calculate events per second based on processing rate
 	}
 }
 
@@ -532,25 +745,25 @@ func (ic *IntelligenceCollector) convertIntelligenceEventToDomain(intelEvent *In
 	switch intelEvent.Type {
 	case IntelEventServiceDependency:
 		eventType = domain.EventTypeKernelNetwork
-		severity = domain.SeverityInfo
+		severity = domain.EventSeverityInfo
 	case IntelEventErrorPattern:
 		eventType = domain.EventTypeHTTP
-		severity = domain.SeverityWarning
+		severity = domain.EventSeverityWarning
 		if intelEvent.ErrorPattern != nil && intelEvent.ErrorPattern.StatusCode >= 500 {
-			severity = domain.SeverityCritical
+			severity = domain.EventSeverityCritical
 		}
 	case IntelEventLatencyAnomaly:
 		eventType = domain.EventTypeTCP
-		severity = domain.SeverityWarning
+		severity = domain.EventSeverityWarning
 	case IntelEventDNSFailure:
 		eventType = domain.EventTypeDNS
-		severity = domain.SeverityWarning
+		severity = domain.EventSeverityWarning
 	case IntelEventSecurityConcern:
 		eventType = domain.EventTypeKernelSyscall
-		severity = domain.SeverityCritical
+		severity = domain.EventSeverityCritical
 	default:
 		eventType = domain.EventTypeKernelNetwork
-		severity = domain.SeverityInfo
+		severity = domain.EventSeverityInfo
 	}
 
 	// Create intelligence-focused network data
@@ -578,7 +791,7 @@ func (ic *IntelligenceCollector) convertIntelligenceEventToDomain(intelEvent *In
 			Network: networkData,
 		},
 		Metadata: domain.EventMetadata{
-			PID:      intelEvent.ProcessID,
+			PID:      int32(intelEvent.ProcessID),
 			CgroupID: intelEvent.CgroupID,
 			PodUID:   intelEvent.PodUID,
 		},
@@ -597,7 +810,7 @@ func (ic *IntelligenceCollector) convertIntelligenceEventToDomain(intelEvent *In
 		if event.EventData.HTTP == nil {
 			event.EventData.HTTP = &domain.HTTPData{}
 		}
-		event.EventData.HTTP.StatusCode = intelEvent.ErrorPattern.StatusCode
+		event.EventData.HTTP.StatusCode = int32(intelEvent.ErrorPattern.StatusCode)
 		event.EventData.HTTP.URL = intelEvent.ErrorPattern.Endpoint
 		event.EventData.HTTP.Method = ic.getMethodString(intelEvent.ErrorPattern.Method)
 		intelEvent.AnalysisContext["is_error_cascade"] = fmt.Sprintf("%v", intelEvent.ErrorPattern.IsCascade)

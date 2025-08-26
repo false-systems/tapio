@@ -382,12 +382,7 @@ func (ic *IntelligenceCollector) analyzeNetworkEventForSecurity(event *Intellige
 			SecurityConcern: concern,
 		}
 
-		// Send to intelligence events channel
-		select {
-		case ic.intelligenceEvents <- securityEvent:
-			ic.intelStats.SecurityConcerns++
-		default:
-			ic.logger.Warn("Intelligence events channel full, dropping security event")
-		}
+		// Send to intelligence events channel safely
+		ic.sendIntelligenceEventSafe(securityEvent)
 	}
 }
