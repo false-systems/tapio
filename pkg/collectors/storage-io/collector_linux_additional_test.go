@@ -87,7 +87,7 @@ func TestShouldFilterEventLinux(t *testing.T) {
 }
 
 // Test convertRawToStorageEvent function
-func TestConvertRawToStorageEvent(t *testing.T) {
+func TestConvertRawToStorageEventAdditional(t *testing.T) {
 	collector, err := NewCollector("test-convert-raw", NewDefaultConfig())
 	require.NoError(t, err)
 
@@ -141,7 +141,7 @@ func TestConvertRawToStorageEvent(t *testing.T) {
 }
 
 // Test convertEventType function
-func TestConvertEventType(t *testing.T) {
+func TestConvertEventTypeAdditional(t *testing.T) {
 	collector, err := NewCollector("test-event-type", NewDefaultConfig())
 	require.NoError(t, err)
 
@@ -167,7 +167,7 @@ func TestConvertEventType(t *testing.T) {
 }
 
 // Test validateRawEvent function
-func TestValidateRawEvent(t *testing.T) {
+func TestValidateRawEventAdditional(t *testing.T) {
 	collector, err := NewCollector("test-validate", NewDefaultConfig())
 	require.NoError(t, err)
 
@@ -251,7 +251,7 @@ func TestValidateRawEvent(t *testing.T) {
 }
 
 // Test parseStorageEventRaw function
-func TestParseStorageEventRaw(t *testing.T) {
+func TestParseStorageEventRawAdditional(t *testing.T) {
 	collector, err := NewCollector("test-parse", NewDefaultConfig())
 	require.NoError(t, err)
 
@@ -324,7 +324,7 @@ func writeRawEventToBuf(buf *bytes.Buffer, event *StorageIOEventRaw) error {
 }
 
 // Test parseStorageEventRaw with too small data
-func TestParseStorageEventRawTooSmall(t *testing.T) {
+func TestParseStorageEventRawTooSmallAdditional(t *testing.T) {
 	collector, err := NewCollector("test-parse-small", NewDefaultConfig())
 	require.NoError(t, err)
 
@@ -337,7 +337,7 @@ func TestParseStorageEventRawTooSmall(t *testing.T) {
 }
 
 // Test getErrorMessage function
-func TestGetErrorMessage(t *testing.T) {
+func TestGetErrorMessageAdditional(t *testing.T) {
 	collector, err := NewCollector("test-errors", NewDefaultConfig())
 	require.NoError(t, err)
 
@@ -363,7 +363,7 @@ func TestGetErrorMessage(t *testing.T) {
 }
 
 // Test processRawStorageEvent function - the full pipeline
-func TestProcessRawStorageEvent(t *testing.T) {
+func TestProcessRawStorageEventAdditional(t *testing.T) {
 	collector, err := NewCollector("test-pipeline", NewDefaultConfig())
 	require.NoError(t, err)
 
@@ -425,7 +425,7 @@ func TestProcessRawStorageEvent(t *testing.T) {
 }
 
 // Test bytesToString function
-func TestBytesToString(t *testing.T) {
+func TestBytesToStringAdditional(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    []byte

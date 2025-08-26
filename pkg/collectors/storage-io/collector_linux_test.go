@@ -15,7 +15,7 @@ import (
 )
 
 func TestConvertRawToStorageEvent(t *testing.T) {
-	collector, err := NewCollector("test-convert-raw", DefaultConfig())
+	collector, err := NewCollector("test-convert-raw", NewDefaultConfig())
 	require.NoError(t, err)
 
 	collector.logger = zaptest.NewLogger(t)
@@ -68,7 +68,7 @@ func TestConvertRawToStorageEvent(t *testing.T) {
 }
 
 func TestConvertRawToStorageEventSlowIO(t *testing.T) {
-	config := DefaultConfig()
+	config := NewDefaultConfig()
 	config.SlowIOThresholdMs = 10
 
 	collector, err := NewCollector("test-slow", config)
@@ -101,7 +101,7 @@ func TestConvertRawToStorageEventSlowIO(t *testing.T) {
 }
 
 func TestConvertEventType(t *testing.T) {
-	collector, err := NewCollector("test-event-type", DefaultConfig())
+	collector, err := NewCollector("test-event-type", NewDefaultConfig())
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -126,7 +126,7 @@ func TestConvertEventType(t *testing.T) {
 }
 
 func TestValidateRawEvent(t *testing.T) {
-	collector, err := NewCollector("test-validate", DefaultConfig())
+	collector, err := NewCollector("test-validate", NewDefaultConfig())
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -209,7 +209,7 @@ func TestValidateRawEvent(t *testing.T) {
 }
 
 func TestParseStorageEventRaw(t *testing.T) {
-	collector, err := NewCollector("test-parse", DefaultConfig())
+	collector, err := NewCollector("test-parse", NewDefaultConfig())
 	require.NoError(t, err)
 
 	// Create a valid raw event in binary format
@@ -270,7 +270,7 @@ func TestParseStorageEventRaw(t *testing.T) {
 }
 
 func TestParseStorageEventRawTooSmall(t *testing.T) {
-	collector, err := NewCollector("test-parse-small", DefaultConfig())
+	collector, err := NewCollector("test-parse-small", NewDefaultConfig())
 	require.NoError(t, err)
 
 	// Data too small
@@ -282,7 +282,7 @@ func TestParseStorageEventRawTooSmall(t *testing.T) {
 }
 
 func TestGetErrorMessage(t *testing.T) {
-	collector, err := NewCollector("test-errors", DefaultConfig())
+	collector, err := NewCollector("test-errors", NewDefaultConfig())
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -343,7 +343,7 @@ func TestBytesToString(t *testing.T) {
 }
 
 func TestShouldFilterEvent(t *testing.T) {
-	config := DefaultConfig()
+	config := NewDefaultConfig()
 	config.MinIOSize = 1024
 	config.ExcludedPaths = []string{"/tmp", "/var/tmp"}
 	config.ExcludedProcesses = []string{"systemd", "kthreadd"}
@@ -414,7 +414,7 @@ func TestShouldFilterEvent(t *testing.T) {
 
 // TestProcessRawStorageEvent tests the full pipeline from raw bytes to processed event
 func TestProcessRawStorageEvent(t *testing.T) {
-	collector, err := NewCollector("test-pipeline", DefaultConfig())
+	collector, err := NewCollector("test-pipeline", NewDefaultConfig())
 	require.NoError(t, err)
 
 	collector.logger = zaptest.NewLogger(t)
