@@ -1,4 +1,4 @@
-package namespace_collector
+package runtime_signals
 
 import (
 	"context"
@@ -548,9 +548,9 @@ func TestEventProcessingLatency(t *testing.T) {
 		}
 		event := collector.createEvent("test_event", data)
 		// Event type is now based on the actual event type passed
-		// Runtime collector uses EventTypeKernelNetwork for unknown events
-		if event.Type != domain.EventTypeKernelNetwork {
-			t.Errorf("Expected event type '%s', got '%s'", domain.EventTypeKernelNetwork, event.Type)
+		// Runtime collector uses EventTypeCNI for unknown/generic events
+		if event.Type != domain.EventTypeCNI {
+			t.Errorf("Expected event type '%s', got '%s'", domain.EventTypeCNI, event.Type)
 		}
 	}
 }

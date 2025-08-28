@@ -1,7 +1,7 @@
 //go:build !linux
 // +build !linux
 
-package namespace_collector
+package runtime_signals
 
 import (
 	"fmt"

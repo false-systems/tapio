@@ -1,6 +1,4 @@
-//go:build linux
-
-package namespace_collector
+package runtime_signals
 
 import (
 	"context"
@@ -59,8 +57,8 @@ type Collector struct {
 // NewCollector creates a new simple namespace collector
 func NewCollector(name string) (*Collector, error) {
 	// Initialize OTEL components
-	tracer := otel.Tracer("namespace-collector")
-	meter := otel.Meter("namespace-collector")
+	tracer := otel.Tracer("runtime-signals")
+	meter := otel.Meter("runtime-signals")
 
 	// Initialize logger
 	logger, err := zap.NewProduction()
@@ -70,7 +68,7 @@ func NewCollector(name string) (*Collector, error) {
 
 	// Initialize all metrics
 	eventsProcessed, err := meter.Int64Counter(
-		"namespace_events_processed_total",
+		"runtime_signals_events_processed_total",
 		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
 	)
 	if err != nil {
@@ -142,7 +140,7 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	collectorHealth, err := meter.Float64Gauge(
-		"namespace_collector_healthy",
+		"runtime_signals_collector_healthy",
 		metric.WithDescription(fmt.Sprintf("Health status of %s collector", name)),
 	)
 	if err != nil {
@@ -150,7 +148,7 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	k8sExtractionTotal, err := meter.Int64Counter(
-		"namespace_k8s_extraction_attempts_total",
+		"runtime_signals_k8s_extraction_attempts_total",
 		metric.WithDescription(fmt.Sprintf("Total K8s metadata extraction attempts by %s", name)),
 	)
 	if err != nil {
@@ -166,7 +164,7 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	netnsOpsByType, err := meter.Int64Counter(
-		"namespace_netns_operations_total",
+		"runtime_signals_process_operations_total",
 		metric.WithDescription(fmt.Sprintf("Total network namespace operations by type in %s", name)),
 	)
 	if err != nil {
@@ -207,7 +205,7 @@ func NewCollector(name string) (*Collector, error) {
 		netnsOpsByType:     netnsOpsByType,
 	}
 
-	c.logger.Info("CNI collector created", zap.String("name", name))
+	c.logger.Info("Runtime signals collector created", zap.String("name", name))
 	return c, nil
 }
 
@@ -230,7 +228,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("collector already started")
 	}
 
-	ctx, span := c.tracer.Start(ctx, "cni.collector.start")
+	ctx, span := c.tracer.Start(ctx, "runtime_signals.collector.start")
 	defer span.End()
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
@@ -254,7 +252,7 @@ func (c *Collector) Start(ctx context.Context) error {
 	}
 
 	c.healthy = true
-	c.logger.Info("CNI collector started",
+	c.logger.Info("Runtime signals collector started",
 		zap.String("name", c.name),
 		zap.Bool("ebpf_enabled", c.config.EnableEBPF),
 	)
@@ -264,7 +262,7 @@ func (c *Collector) Start(ctx context.Context) error {
 // Stop stops the collector
 func (c *Collector) Stop() error {
 	// Add tracing for stop operation
-	_, span := c.tracer.Start(context.Background(), "cni.collector.stop")
+	_, span := c.tracer.Start(context.Background(), "runtime_signals.collector.stop")
 	defer span.End()
 
 	c.mutex.Lock()
@@ -291,7 +289,7 @@ func (c *Collector) Stop() error {
 
 	c.ctx = nil
 	c.healthy = false
-	c.logger.Info("CNI collector stopped")
+	c.logger.Info("Runtime signals collector stopped")
 	return nil
 }
 
@@ -311,7 +309,7 @@ func (c *Collector) IsHealthy() bool {
 func (c *Collector) createEvent(eventType string, data map[string]string) *domain.CollectorEvent {
 	// Generate trace context
 	ctx := context.Background()
-	ctx, span := c.tracer.Start(ctx, "cni.event.create")
+	ctx, span := c.tracer.Start(ctx, "runtime_signals.event.create")
 	defer span.End()
 
 	spanCtx := span.SpanContext()
