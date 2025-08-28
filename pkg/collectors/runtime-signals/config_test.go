@@ -1,4 +1,4 @@
-package namespace_collector
+package runtime_signals
 
 import (
 	"testing"

@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package namespace_collector
+package runtime_signals
 
 import (
 	"bytes"
@@ -20,7 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 runtimeMonitor ./bpf_src/runtime_monitor.c -- -I../bpf_common
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -tags linux -target amd64,arm64 runtimeMonitor ./bpf_src/runtime_monitor.c -- -I../bpf_common
 
 // eBPF components - implements EBPFState interface
 type ebpfState struct {

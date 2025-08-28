@@ -14,29 +14,29 @@ import (
 	"github.com/yairfalse/tapio/pkg/collectors/kernel"
 	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
-	namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
 	"github.com/yairfalse/tapio/pkg/collectors/network"
 	"github.com/yairfalse/tapio/pkg/collectors/orchestrator"
 	"github.com/yairfalse/tapio/pkg/collectors/otel"
+	runtime_signals "github.com/yairfalse/tapio/pkg/collectors/runtime-signals"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
 	"go.uber.org/zap"
 )
 
 var (
-	natsURL         = flag.String("nats", "", "NATS server URL (overrides config)")
-	enableKubeAPI   = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
-	enableEBPF      = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
-	enableDNS       = flag.Bool("enable-dns", true, "Enable intelligent DNS collector")
-	enableSystemd   = flag.Bool("enable-systemd", true, "Enable systemd collector")
-	enableNamespace = flag.Bool("enable-namespace", true, "Enable namespace collector")
-	enableKubelet   = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
-	enableNetwork   = flag.Bool("enable-network", true, "Enable network collector")
-	enableOTEL      = flag.Bool("enable-otel", true, "Enable OTEL collector")
-	kubeletAddress  = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
-	logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-	workerCount     = flag.Int("workers", 4, "Number of orchestrator workers")
-	bufferSize      = flag.Int("buffer-size", 10000, "Event buffer size")
+	natsURL        = flag.String("nats", "", "NATS server URL (overrides config)")
+	enableKubeAPI  = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
+	enableEBPF     = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
+	enableDNS      = flag.Bool("enable-dns", true, "Enable intelligent DNS collector")
+	enableSystemd  = flag.Bool("enable-systemd", true, "Enable systemd collector")
+	enableRuntime  = flag.Bool("enable-runtime", true, "Enable runtime signals collector")
+	enableKubelet  = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
+	enableNetwork  = flag.Bool("enable-network", true, "Enable network collector")
+	enableOTEL     = flag.Bool("enable-otel", true, "Enable OTEL collector")
+	kubeletAddress = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
+	logLevel       = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	workerCount    = flag.Int("workers", 4, "Number of orchestrator workers")
+	bufferSize     = flag.Int("buffer-size", 10000, "Event buffer size")
 )
 
 func main() {
@@ -131,16 +131,16 @@ func main() {
 		}
 	}
 
-	if *enableNamespace {
+	if *enableRuntime {
 		// Create runtime signals collector (transformed from namespace collector)
-		runtimeCollector, err := namespace_collector.NewCollector("runtime-signals")
+		runtimeCollector, err := runtime_signals.NewCollector("runtime-signals")
 		if err != nil {
-			logger.Error("Failed to create namespace collector", zap.Error(err))
+			logger.Error("Failed to create runtime signals collector", zap.Error(err))
 		} else {
 			if err := collectorOrchestrator.RegisterCollector("runtime-signals", runtimeCollector); err != nil {
-				logger.Error("Failed to register namespace collector", zap.Error(err))
+				logger.Error("Failed to register runtime signals collector", zap.Error(err))
 			} else {
-				enabledCollectors = append(enabledCollectors, "namespace")
+				enabledCollectors = append(enabledCollectors, "runtime-signals")
 			}
 		}
 	}

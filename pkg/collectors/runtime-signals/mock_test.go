@@ -1,4 +1,4 @@
-package namespace_collector
+package runtime_signals
 
 import (
 	"context"
@@ -506,9 +506,9 @@ func TestOTELTracingWithMocking(t *testing.T) {
 
 	// Verify expected spans exist
 	expectedSpans := []string{
-		"cni.collector.start",
-		"cni.collector.stop",
-		"cni.event.create",
+		"runtime_signals.collector.start",
+		"runtime_signals.collector.stop",
+		"runtime_signals.event.create",
 	}
 
 	for _, spanName := range expectedSpans {
