@@ -1,3 +1,5 @@
+//go:build linux
+
 package systemd
 
 import (
@@ -37,6 +39,13 @@ func TestNewCollector(t *testing.T) {
 			name:          "collector with eBPF enabled",
 			collectorName: "test-systemd-ebpf",
 			config:        Config{BufferSize: 100, EnableEBPF: true},
+			logger:        zaptest.NewLogger(t),
+			expectError:   false,
+		},
+		{
+			name:          "collector with large buffer",
+			collectorName: "test-systemd-large",
+			config:        Config{BufferSize: 10000, EnableEBPF: false},
 			logger:        zaptest.NewLogger(t),
 			expectError:   false,
 		},
@@ -299,14 +308,28 @@ func TestCollectorConcurrentOperations(t *testing.T) {
 	err = collector.Start(ctx)
 	require.NoError(t, err)
 
-	// Test concurrent health checks
+	// Test concurrent health checks and state changes
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+
+	// Mix of operations to test race conditions
+	for i := 0; i < 5; i++ {
 		go func() {
 			for j := 0; j < 100; j++ {
 				collector.IsHealthy()
 				collector.Name()
 				collector.Events()
+			}
+			done <- true
+		}()
+	}
+
+	// Concurrent health status writes (via Start/Stop)
+	for i := 0; i < 5; i++ {
+		go func() {
+			for j := 0; j < 10; j++ {
+				collector.Start(ctx) // Should be safe to call multiple times
+				time.Sleep(time.Microsecond)
+				collector.IsHealthy()
 			}
 			done <- true
 		}()
@@ -320,6 +343,46 @@ func TestCollectorConcurrentOperations(t *testing.T) {
 	// Stop collector
 	err = collector.Stop()
 	require.NoError(t, err)
+	assert.False(t, collector.IsHealthy())
+}
+
+func TestCollectorRaceCondition(t *testing.T) {
+	// This test specifically checks for race conditions
+	// Run with: go test -race
+	logger := zaptest.NewLogger(t)
+	config := Config{BufferSize: 100, EnableEBPF: false}
+
+	collector, err := NewCollector("test-race", config, logger)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+
+	// Concurrent Start calls
+	wg.Add(3)
+	for i := 0; i < 3; i++ {
+		go func() {
+			defer wg.Done()
+			collector.Start(ctx)
+		}()
+	}
+	wg.Wait()
+
+	// Concurrent IsHealthy calls while stopping
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			collector.IsHealthy()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		time.Sleep(10 * time.Millisecond)
+		collector.Stop()
+	}()
+	wg.Wait()
+
 	assert.False(t, collector.IsHealthy())
 }
 
