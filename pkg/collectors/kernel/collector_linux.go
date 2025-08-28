@@ -6,7 +6,6 @@ package kernel
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -207,17 +206,8 @@ func (c *Collector) processRawEvent(data []byte) {
 		eventData.ConfigType = "syscall"
 	}
 
-	// Marshal event data to JSON bytes
-	jsonData, err := json.Marshal(eventData)
-	if err != nil {
-		if c.errorsTotal != nil {
-			c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "json_marshal_failed"),
-			))
-		}
-		c.logger.Error("Failed to marshal event data", zap.Error(err))
-		return
-	}
+	// Note: We're not marshaling to JSON for the domain event anymore
+	// The eventData is already structured properly
 
 	// Create domain event
 	domainEvent := &domain.CollectorEvent{
@@ -255,7 +245,7 @@ func (c *Collector) processRawEvent(data []byte) {
 	case c.events <- domainEvent:
 		if c.eventsProcessed != nil {
 			c.eventsProcessed.Add(c.ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", string(domainEvent.Type)),
+				attribute.String("event_type", domainEvent.Type),
 				attribute.String("config_type", eventData.ConfigType),
 			))
 		}

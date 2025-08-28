@@ -1,3 +1,5 @@
+//go:build linux
+
 package namespace_collector
 
 import (
@@ -364,7 +366,7 @@ func (c *Collector) createEvent(eventType string, data map[string]string) *domai
 	case "namespace_delete":
 		collectorEventType = domain.EventTypeContainerDestroy
 	default:
-		collectorEventType = domain.EventTypeKernelNetwork
+		collectorEventType = domain.EventTypeCNI
 	}
 
 	// Convert data to JSON for raw storage

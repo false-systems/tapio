@@ -106,7 +106,12 @@ func (c *Collector) handleK8sEvent(eventType, resourceType string, obj interface
 
 	// Extract trace IDs from annotations if available
 	annotations := unstructuredObj.GetAnnotations()
-	traceID, spanID := collectors.ExtractTraceIDFromAnnotations(annotations)
+	traceID, found := collectors.ExtractTraceIDFromAnnotations(annotations)
+	var spanID string
+	if !found {
+		traceID = collectors.GenerateTraceID()
+	}
+	spanID = collectors.GenerateSpanID()
 
 	// Create typed event data
 	eventData := &domain.K8sEventData{

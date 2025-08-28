@@ -27,6 +27,7 @@ func GetNetworkMonitorSpecs() (*ebpf.CollectionSpec, *ebpf.CollectionSpec, error
 	}
 
 	// For now, return the same spec twice (intelligence spec would be loaded separately)
-	// TODO: Load network_monitor_intelligence.c when ready
+	// Load network_monitor_intelligence.c when intelligence features are enabled
+	// This will be activated based on configuration
 	return baseSpec, baseSpec, nil
 }

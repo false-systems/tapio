@@ -4,71 +4,52 @@ package oom
 
 import (
 	"context"
-	"fmt"
-
-	"go.uber.org/zap"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.uber.org/zap"
 )
 
-// Interface verification
-var _ collectors.Collector = (*StubCollector)(nil)
-
-// StubCollector is a no-op collector for non-Linux platforms
-type StubCollector struct {
+// Collector monitors OOM events (Linux only)
+type Collector struct {
 	name   string
 	logger *zap.Logger
 	events chan *domain.CollectorEvent
 }
 
-// NewCollector creates a stub collector for non-Linux platforms
-func NewCollector(name string, config *OOMConfig, logger *zap.Logger) (*StubCollector, error) {
-	if logger == nil {
-		return nil, fmt.Errorf("logger cannot be nil")
-	}
-
-	collector := &StubCollector{
+// NewCollector creates a new OOM collector (stub for non-Linux)
+func NewCollector(name string, cfg collectors.CollectorConfig, logger *zap.Logger) (collectors.Collector, error) {
+	logger.Warn("OOM collector is only supported on Linux, returning stub implementation")
+	return &Collector{
 		name:   name,
 		logger: logger,
 		events: make(chan *domain.CollectorEvent),
-	}
-
-	// Close the channel immediately since we won't send any events
-	close(collector.events)
-
-	logger.Warn("OOM collector is not supported on this platform",
-		zap.String("collector", name),
-		zap.String("platform", "non-linux"))
-
-	return collector, nil
+	}, nil
 }
 
-// Name returns the collector name
-func (c *StubCollector) Name() string {
+func (c *Collector) Name() string {
 	return c.name
 }
 
-// Start does nothing on non-Linux platforms
-func (c *StubCollector) Start(ctx context.Context) error {
-	c.logger.Info("OOM collector stub started (no-op)",
-		zap.String("collector", c.name))
+func (c *Collector) Start(ctx context.Context) error {
+	c.logger.Warn("OOM collector not supported on this platform")
 	return nil
 }
 
-// Stop does nothing on non-Linux platforms
-func (c *StubCollector) Stop() error {
-	c.logger.Info("OOM collector stub stopped",
-		zap.String("collector", c.name))
+func (c *Collector) Stop() error {
 	return nil
 }
 
-// Events returns the closed events channel
-func (c *StubCollector) Events() <-chan *domain.CollectorEvent {
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
-// IsHealthy always returns true for stub collector
-func (c *StubCollector) IsHealthy() bool {
-	return true
+func (c *Collector) IsHealthy() bool {
+	return false
+}
+
+// CreateCollector is the factory function for registry
+func CreateCollector(config collectors.CollectorConfig) (collectors.Collector, error) {
+	logger := zap.NewNop()
+	return NewCollector("oom", config, logger)
 }

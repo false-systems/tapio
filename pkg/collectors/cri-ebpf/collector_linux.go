@@ -16,7 +16,6 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/google/uuid"
-	"github.com/yairfalse/tapio/pkg/collectors/cri-ebpf/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -41,7 +40,7 @@ type Collector struct {
 	mu      sync.RWMutex
 
 	// eBPF components
-	objs   *bpf.CrimonitorObjects
+	objs   *bpf.crimonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
 
@@ -260,8 +259,8 @@ func (c *Collector) IsHealthy() bool {
 
 // loadEBPFPrograms loads the compiled eBPF programs
 func (c *Collector) loadEBPFPrograms() error {
-	objs := &bpf.CrimonitorObjects{}
-	if err := bpf.LoadCrimonitorObjects(objs, nil); err != nil {
+	objs := &bpf.crimonitorObjects{}
+	if err := bpf.loadCrimonitorObjects(objs, nil); err != nil {
 		return fmt.Errorf("loading eBPF objects: %w", err)
 	}
 
@@ -276,10 +275,7 @@ func (c *Collector) attachPrograms() error {
 
 	// Attach OOM kill kprobe if enabled
 	if c.config.EnableOOMKill {
-		oomLink, err := link.Kprobe(link.KprobeOptions{
-			Symbol:  "oom_kill_process",
-			Program: c.objs.TraceOomKill,
-		})
+		oomLink, err := link.Kprobe("oom_kill_process", c.objs.TraceOomKill, nil)
 		if err != nil {
 			return fmt.Errorf("attaching OOM kill kprobe: %w", err)
 		}
@@ -289,10 +285,7 @@ func (c *Collector) attachPrograms() error {
 
 	// Attach memory cgroup OOM kprobe if enabled
 	if c.config.EnableMemoryPressure {
-		memcgOomLink, err := link.Kprobe(link.KprobeOptions{
-			Symbol:  "mem_cgroup_out_of_memory",
-			Program: c.objs.TraceMemcgOom,
-		})
+		memcgOomLink, err := link.Kprobe("mem_cgroup_out_of_memory", c.objs.TraceMemcgOom, nil)
 		if err != nil {
 			// This is optional - some kernels might not have this symbol
 			c.logger.Warn("Failed to attach memory cgroup OOM kprobe", zap.Error(err))
@@ -304,11 +297,7 @@ func (c *Collector) attachPrograms() error {
 
 	// Attach process exit tracepoint if enabled
 	if c.config.EnableProcessExit {
-		exitLink, err := link.Tracepoint(link.TracepointOptions{
-			Group:   "sched",
-			Name:    "sched_process_exit",
-			Program: c.objs.TraceProcessExit,
-		})
+		exitLink, err := link.Tracepoint("sched", "sched_process_exit", c.objs.TraceProcessExit, nil)
 		if err != nil {
 			return fmt.Errorf("attaching process exit tracepoint: %w", err)
 		}
@@ -318,11 +307,7 @@ func (c *Collector) attachPrograms() error {
 
 	// Attach process fork tracepoint if enabled
 	if c.config.EnableProcessFork {
-		forkLink, err := link.Tracepoint(link.TracepointOptions{
-			Group:   "sched",
-			Name:    "sched_process_fork",
-			Program: c.objs.TraceProcessFork,
-		})
+		forkLink, err := link.Tracepoint("sched", "sched_process_fork", c.objs.TraceProcessFork, nil)
 		if err != nil {
 			return fmt.Errorf("attaching process fork tracepoint: %w", err)
 		}

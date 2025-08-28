@@ -441,8 +441,8 @@ func (c *Collector) convertToObservationEvent(event *SyscallErrorEvent) *domain.
 	comm := bytesToString(event.Comm[:])
 	path := bytesToString(event.Path[:])
 
-	// Build context map
-	context := domain.ObservationContext{
+	// Build custom data map
+	customData := map[string]string{
 		"pid":         fmt.Sprintf("%d", event.PID),
 		"ppid":        fmt.Sprintf("%d", event.PPID),
 		"tid":         fmt.Sprintf("%d", event.TID),
@@ -455,34 +455,53 @@ func (c *Collector) convertToObservationEvent(event *SyscallErrorEvent) *domain.
 		"error_name":  c.getErrorName(event.ErrorCode),
 		"category":    c.getCategoryName(event.Category),
 		"error_count": fmt.Sprintf("%d", event.ErrorCount),
+		"description": fmt.Sprintf("Syscall %s failed with %s",
+			c.getSyscallName(event.SyscallNr),
+			c.getErrorName(event.ErrorCode)),
 	}
 
 	// Add path if present
 	if path != "" {
-		context["path"] = path
+		customData["path"] = path
 	}
 
 	// Determine severity based on error type
 	severity := c.getSeverityForError(event.ErrorCode)
 
-	// Create observation event
-	return &domain.ObservationEvent{
-		Type:      domain.EventTypeSyscallError,
-		Severity:  severity,
+	// Create collector event
+	return &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("syscall-error-%d-%d", timestamp.UnixNano(), event.PID),
+		Type:      domain.EventTypeKernelSyscall,
 		Timestamp: timestamp,
-		Source: domain.EventSource{
-			Component: "syscall-errors",
-			Host:      "", // Will be filled by the collector framework
+		Source:    "syscall-errors",
+		Severity:  severity,
+		EventData: domain.EventDataContainer{
+			Kernel: &domain.KernelData{
+				EventType:    "syscall_error",
+				PID:          int32(event.PID),
+				PPID:         int32(event.PPID),
+				UID:          int32(event.UID),
+				GID:          int32(event.GID),
+				Command:      comm,
+				CgroupID:     event.CgroupID,
+				Syscall:      c.getSyscallName(event.SyscallNr),
+				ReturnCode:   event.ErrorCode,
+				ErrorMessage: c.getErrorName(event.ErrorCode),
+			},
+			SystemCall: &domain.SystemCallData{
+				Number:    int64(event.SyscallNr),
+				Name:      c.getSyscallName(event.SyscallNr),
+				PID:       int32(event.PID),
+				TID:       int32(event.TID),
+				UID:       int32(event.UID),
+				GID:       int32(event.GID),
+				Arguments: []domain.SystemCallArg{},
+				RetValue:  int64(event.ErrorCode),
+				ErrorCode: event.ErrorCode,
+			},
+			Custom: customData,
 		},
-		Resource: domain.ResourceIdentifier{
-			Type: "process",
-			ID:   fmt.Sprintf("%d", event.PID),
-			Name: comm,
-		},
-		Description: fmt.Sprintf("Syscall %s failed with %s",
-			c.getSyscallName(event.SyscallNr),
-			c.getErrorName(event.ErrorCode)),
-		Context: context,
+		Metadata: domain.EventMetadata{},
 	}
 }
 
@@ -508,15 +527,15 @@ func (c *Collector) updateErrorMetrics(ctx context.Context, errorCode int32) {
 func (c *Collector) getSeverityForError(errorCode int32) domain.EventSeverity {
 	switch -errorCode {
 	case 28, 12: // ENOSPC, ENOMEM - critical resource exhaustion
-		return domain.SeverityCritical
+		return domain.EventSeverityCritical
 	case 111, 110: // ECONNREFUSED, ETIMEDOUT - service connectivity issues
-		return domain.SeverityHigh
+		return domain.EventSeverityHigh
 	case 5: // EIO - I/O errors
-		return domain.SeverityHigh
+		return domain.EventSeverityHigh
 	case 13, 1: // EACCES, EPERM - permission issues
-		return domain.SeverityMedium
+		return domain.EventSeverityMedium
 	default:
-		return domain.SeverityLow
+		return domain.EventSeverityLow
 	}
 }
 

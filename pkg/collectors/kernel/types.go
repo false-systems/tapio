@@ -1,3 +1,5 @@
+//go:build linux
+
 package kernel
 
 // Event type constants - must match C definitions
@@ -9,9 +11,9 @@ const (
 
 	// Legacy event types - kept for test compatibility only
 	// These are no longer monitored but tests still reference them
-	EventTypeProcess = uint8(10) // Deprecated - use syscall-errors collector
-	EventTypeFile    = uint8(11) // Deprecated - covered by ConfigMap/Secret access
-	EventTypeNetwork = uint8(12) // Deprecated - use network collector
+	EventTypeProcess = uint32(10) // Deprecated - use syscall-errors collector
+	EventTypeFile    = uint32(11) // Deprecated - covered by ConfigMap/Secret access
+	EventTypeNetwork = uint32(12) // Deprecated - use network collector
 )
 
 // KernelEvent represents a kernel event from eBPF - must match C struct kernel_event

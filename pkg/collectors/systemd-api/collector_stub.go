@@ -1,6 +1,6 @@
 //go:build !linux
 
-package criebpf
+package systemdapi
 
 import (
 	"context"
@@ -10,18 +10,29 @@ import (
 	"go.uber.org/zap"
 )
 
-// Collector monitors CRI events via eBPF (Linux only)
+// Collector monitors systemd via journal API (Linux only)
 type Collector struct {
 	name   string
 	logger *zap.Logger
 	events chan *domain.CollectorEvent
+	config *Config
 }
 
-// NewCollector creates a new CRI eBPF collector (stub for non-Linux)
-func NewCollector(name string, cfg collectors.CollectorConfig, logger *zap.Logger) (collectors.Collector, error) {
-	logger.Warn("CRI eBPF collector is only supported on Linux, returning stub implementation")
+// Config represents systemd API collector configuration
+type Config struct {
+	ServiceFilter  []string `json:"service_filter"`
+	PriorityFilter []string `json:"priority_filter"`
+	EnableMetrics  bool     `json:"enable_metrics"`
+	BufferSize     int      `json:"buffer_size"`
+	FollowMode     bool     `json:"follow_mode"`
+}
+
+// NewCollector creates a new systemd API collector (stub for non-Linux)
+func NewCollector(name string, config *Config, logger *zap.Logger) (*Collector, error) {
+	logger.Warn("systemd API collector is only supported on Linux, returning stub implementation")
 	return &Collector{
 		name:   name,
+		config: config,
 		logger: logger,
 		events: make(chan *domain.CollectorEvent),
 	}, nil
@@ -32,7 +43,7 @@ func (c *Collector) Name() string {
 }
 
 func (c *Collector) Start(ctx context.Context) error {
-	c.logger.Warn("CRI eBPF collector not supported on this platform")
+	c.logger.Warn("systemd API collector not supported on this platform")
 	return nil
 }
 
@@ -48,16 +59,8 @@ func (c *Collector) IsHealthy() bool {
 	return false
 }
 
-// Config represents CRI eBPF collector configuration (stub)
-type Config struct {
-	EnableMemcgOOM    bool `json:"enable_memcg_oom"`
-	EnableOOMKill     bool `json:"enable_oom_kill"`
-	EnableProcessExit bool `json:"enable_process_exit"`
-	EnableProcessFork bool `json:"enable_process_fork"`
-}
-
 // CreateCollector is the factory function for registry
 func CreateCollector(config *Config) (collectors.Collector, error) {
 	logger := zap.NewNop()
-	return NewCollector("cri-ebpf", collectors.CollectorConfig{}, logger)
+	return NewCollector("systemd-api", config, logger)
 }
