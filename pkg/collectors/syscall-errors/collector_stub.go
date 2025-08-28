@@ -16,6 +16,7 @@ type Collector struct {
 	name      string
 	logger    *zap.Logger
 	eventChan chan *domain.ObservationEvent
+	stopped   bool
 }
 
 // Config holds collector configuration
@@ -23,16 +24,22 @@ type Config struct {
 	RingBufferSize    int
 	EventChannelSize  int
 	RateLimitMs       int
-	EnabledCategories []string
+	EnabledCategories map[string]bool // Map for O(1) lookup
+	RequireAllMetrics bool            // If true, fail startup when metrics can't be created
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		RingBufferSize:    8 * 1024 * 1024,
-		EventChannelSize:  10000,
-		RateLimitMs:       100,
-		EnabledCategories: []string{"file", "network", "memory"},
+		RingBufferSize:   8 * 1024 * 1024,
+		EventChannelSize: 10000,
+		RateLimitMs:      100,
+		EnabledCategories: map[string]bool{
+			"file":    true,
+			"network": true,
+			"memory":  true,
+		},
+		RequireAllMetrics: false,
 	}
 }
 
@@ -57,7 +64,10 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop is a no-op on non-Linux systems
 func (c *Collector) Stop() error {
-	close(c.eventChan)
+	if !c.stopped {
+		close(c.eventChan)
+		c.stopped = true
+	}
 	return nil
 }
 
@@ -73,5 +83,5 @@ func (c *Collector) GetName() string {
 
 // IsHealthy always returns false on non-Linux systems
 func (c *Collector) IsHealthy() bool {
-	return false
+	return !c.stopped
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -546,8 +547,10 @@ func TestEventProcessingLatency(t *testing.T) {
 			"iteration":  fmt.Sprintf("%d", i),
 		}
 		event := collector.createEvent("test_event", data)
-		if event.Type != "cni" {
-			t.Errorf("Expected event type 'cni', got '%s'", event.Type)
+		// Event type is now based on the actual event type passed
+		// Runtime collector uses EventTypeKernelNetwork for unknown events
+		if event.Type != domain.EventTypeKernelNetwork {
+			t.Errorf("Expected event type '%s', got '%s'", domain.EventTypeKernelNetwork, event.Type)
 		}
 	}
 }

@@ -11,43 +11,51 @@ import (
 
 // Stub types for non-Linux platforms
 
-type namespaceMonitorSpecs struct {
-	namespaceMonitorProgramSpecs
-	namespaceMonitorMapSpecs
+type runtimeMonitorSpecs struct {
+	runtimeMonitorProgramSpecs
+	runtimeMonitorMapSpecs
 }
 
-type namespaceMonitorProgramSpecs struct{}
+type runtimeMonitorProgramSpecs struct{}
 
-type namespaceMonitorMapSpecs struct{}
+type runtimeMonitorMapSpecs struct{}
 
-type namespaceMonitorObjects struct {
-	namespaceMonitorPrograms
-	namespaceMonitorMaps
+type runtimeMonitorObjects struct {
+	runtimeMonitorPrograms
+	runtimeMonitorMaps
 }
 
-func (o *namespaceMonitorObjects) Close() error {
+func (o *runtimeMonitorObjects) Close() error {
 	return nil
 }
 
-type namespaceMonitorMaps struct{}
+type runtimeMonitorMaps struct {
+	Events *ebpf.Map
+}
 
-func (m *namespaceMonitorMaps) Close() error {
+func (m *runtimeMonitorMaps) Close() error {
 	return nil
 }
 
-type namespaceMonitorPrograms struct{}
+type runtimeMonitorPrograms struct {
+	TraceProcessExec    *ebpf.Program
+	TraceProcessExit    *ebpf.Program
+	TraceSignalGenerate *ebpf.Program
+	TraceSignalDeliver  *ebpf.Program
+	TraceOomKill        *ebpf.Program
+}
 
-func (p *namespaceMonitorPrograms) Close() error {
+func (p *runtimeMonitorPrograms) Close() error {
 	return nil
 }
 
 // Stub functions for non-Linux platforms
 
-func loadNamespaceMonitor() (*ebpf.CollectionSpec, error) {
+func loadRuntimeMonitor() (*ebpf.CollectionSpec, error) {
 	return nil, fmt.Errorf("eBPF not supported on this platform")
 }
 
-func loadNamespaceMonitorObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadRuntimeMonitorObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 	return fmt.Errorf("eBPF not supported on this platform")
 }
 

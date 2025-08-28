@@ -3,6 +3,9 @@
 
 package kernel
 
+// ebpfComponents is a stub type for non-Linux platforms
+type ebpfComponents struct{}
+
 // startEBPF is a stub for non-Linux platforms
 func (c *Collector) startEBPF() error {
 	c.logger.Warn("eBPF monitoring not supported on this platform")

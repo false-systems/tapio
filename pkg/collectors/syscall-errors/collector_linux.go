@@ -88,6 +88,8 @@ type Collector struct {
 	enospcErrors    metric.Int64Counter
 	enomemErrors    metric.Int64Counter
 	econnrefErrors  metric.Int64Counter
+	emfileErrors    metric.Int64Counter
+	edquotErrors    metric.Int64Counter
 	eventsDropped   metric.Int64Counter
 
 	// Configuration
@@ -212,6 +214,8 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		enospcErrors:      enospcErrors,
 		enomemErrors:      enomemErrors,
 		econnrefErrors:    econnrefErrors,
+		emfileErrors:      emfileErrors,
+		edquotErrors:      edquotErrors,
 		eventsDropped:     eventsDropped,
 		config:            config,
 		errorLogInterval:  time.Minute, // Log errors at most once per minute

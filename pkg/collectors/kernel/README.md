@@ -64,6 +64,17 @@ After identifying that network, storage I/O, process lifecycle, and memory monit
 - **Secret Name Extraction**: Parse Secret name from mount path
 - **Security Attribution**: Link access to pod for audit trails
 
+### Failed Configuration Access Events (NEW)
+- **Failed Access Detection**: Captures `openat()` failures with errno
+- **Error Code Tracking**: Records specific error codes (ENOENT, EACCES, EIO)
+- **Root Cause Analysis**: Identifies why pods can't read their configurations
+- **Common Failure Scenarios**:
+  - `ENOENT (2)`: ConfigMap/Secret not mounted or file missing
+  - `EACCES (13)`: Permission denied due to SecurityContext
+  - `EIO (5)`: Storage layer I/O errors
+  - `ENOSPC (28)`: No space left on device
+  - `EROFS (30)`: Read-only file system
+
 ### Pod Correlation Services
 - **Cgroup ID Extraction**: Advanced multi-method cgroup ID extraction
 - **Container PID Tracking**: Maintain PID-to-container mapping
@@ -140,6 +151,7 @@ int trace_pod_syscalls(void *ctx)
 
 ### ConfigMap Access Monitoring
 ```json
+// Successful access
 {
   "event_type": "configmap_access",
   "timestamp": "2024-01-21T10:30:45Z",
@@ -151,7 +163,25 @@ int trace_pod_syscalls(void *ctx)
     "pid": 1234,
     "command": "nginx",
     "cgroup_id": 567890
-  }
+  },
+  "error_code": 0
+}
+
+// Failed access - ConfigMap not mounted
+{
+  "event_type": "config_access_failed",
+  "timestamp": "2024-01-21T10:30:46Z",
+  "pod_uid": "abc-123-def",
+  "namespace": "production",
+  "config_type": "failed",
+  "mount_path": "/var/lib/kubelet/pods/abc-123-def/volumes/kubernetes.io~configmap/missing-config",
+  "process": {
+    "pid": 1234,
+    "command": "nginx",
+    "cgroup_id": 567890
+  },
+  "error_code": 2,
+  "error_desc": "No such file or directory"
 }
 ```
 
