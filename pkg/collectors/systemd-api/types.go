@@ -414,8 +414,10 @@ func timeToString(t int64) string {
 	return result
 }
 
-func mustMarshalJSON(v interface{}) []byte {
-	// Use proper JSON marshaling
+// mustMarshalJSON marshals any type to JSON, returning empty object on error
+// Uses generics instead of interface{} for type safety
+func mustMarshalJSON[T any](v T) []byte {
+	// Use proper JSON marshaling with generic type
 	data, err := json.Marshal(v)
 	if err != nil {
 		// Fallback to empty object on error

@@ -21,11 +21,11 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 systemdMonitor ./bpf_src/systemd_monitor.c -- -I../bpf_common
 
-// eBPF components - Linux-specific
-type ebpfState struct {
-	objs   *bpf.SystemdMonitorObjects
-	links  []link.Link
-	reader *ringbuf.Reader
+// eBPFState holds the Linux-specific eBPF state with proper types
+type eBPFState struct {
+	objs   *bpf.SystemdMonitorObjects // Generated BPF objects
+	links  []link.Link                // Attached BPF program links
+	reader *ringbuf.Reader            // Ring buffer for events
 }
 
 // startEBPF initializes eBPF monitoring - Linux only
@@ -48,43 +48,81 @@ func (c *Collector) startEBPF() error {
 	}
 
 	// Load pre-compiled eBPF programs
-	objs := bpf.SystemdMonitorObjects{}
-	if err := bpf.LoadSystemdMonitorObjects(&objs, nil); err != nil {
+	objs := &bpf.SystemdMonitorObjects{}
+	if err := bpf.LoadSystemdMonitorObjects(objs, nil); err != nil {
 		if c.errorsTotal != nil {
 			c.errorsTotal.Add(ctx, 1)
 		}
 		return fmt.Errorf("loading eBPF objects: %w", err)
 	}
 
-	c.ebpfState = &ebpfState{objs: &objs}
+	c.ebpfState = &eBPFState{objs: objs}
 
-	// Attach tracepoints for systemd monitoring
-	execLink, err := link.Tracepoint("syscalls", "sys_enter_execve", objs.TraceExec, nil)
-	if err != nil {
-		objs.Close()
-		return fmt.Errorf("attaching execve tracepoint: %w", err)
+	var attachedLinks []link.Link
+
+	// Attach execve tracepoint
+	if objs.TraceExec != nil {
+		execLink, err := link.AttachTracepoint(link.TracepointOptions{
+			Group:   "syscalls",
+			Name:    "sys_enter_execve",
+			Program: objs.TraceExec,
+		})
+		if err != nil {
+			c.logger.Warn("Failed to attach execve tracepoint", zap.Error(err))
+		} else {
+			attachedLinks = append(attachedLinks, execLink)
+		}
 	}
 
-	exitLink, err := link.Tracepoint("syscalls", "sys_enter_exit", objs.TraceExit, nil)
-	if err != nil {
-		execLink.Close()
-		objs.Close()
-		return fmt.Errorf("attaching exit tracepoint: %w", err)
+	// Attach exit tracepoint
+	if objs.TraceExit != nil {
+		exitLink, err := link.AttachTracepoint(link.TracepointOptions{
+			Group:   "syscalls",
+			Name:    "sys_enter_exit",
+			Program: objs.TraceExit,
+		})
+		if err != nil {
+			c.logger.Warn("Failed to attach exit tracepoint", zap.Error(err))
+		} else {
+			attachedLinks = append(attachedLinks, exitLink)
+		}
 	}
 
-	c.ebpfState.(*ebpfState).reader, err = ringbuf.NewReader(objs.Events)
-	if err != nil {
-		execLink.Close()
-		exitLink.Close()
-		objs.Close()
-		return fmt.Errorf("creating ring buffer reader: %w", err)
+	// Attach signal tracepoint for tracking SIGKILL, SIGTERM, etc.
+	if objs.TraceSignal != nil {
+		signalLink, err := link.AttachTracepoint(link.TracepointOptions{
+			Group:   "signal",
+			Name:    "signal_deliver",
+			Program: objs.TraceSignal,
+		})
+		if err != nil {
+			c.logger.Warn("Failed to attach signal tracepoint", zap.Error(err))
+		} else {
+			attachedLinks = append(attachedLinks, signalLink)
+		}
 	}
 
-	c.ebpfState.(*ebpfState).links = []link.Link{execLink, exitLink}
+	// Create ring buffer reader
+	if objs.Events != nil {
+		reader, err := ringbuf.NewReader(objs.Events)
+		if err != nil {
+			for _, l := range attachedLinks {
+				l.Close()
+			}
+			objs.Close()
+			return fmt.Errorf("creating ring buffer reader: %w", err)
+		}
+		c.ebpfState.reader = reader
+	} else {
+		return fmt.Errorf("events ring buffer not found in BPF objects")
+	}
+
+	c.ebpfState.links = attachedLinks
 
 	c.logger.Info("Systemd eBPF monitoring started successfully",
 		zap.String("collector", c.name),
-		zap.Int("links", len(c.ebpfState.(*ebpfState).links)),
+		zap.Int("attached_programs", len(c.ebpfState.links)),
+		zap.Bool("signal_tracking", objs.TraceSignal != nil),
 	)
 
 	return nil
@@ -96,23 +134,21 @@ func (c *Collector) stopEBPF() {
 		return
 	}
 
-	state := c.ebpfState.(*ebpfState)
-
 	// Close reader
-	if state.reader != nil {
-		state.reader.Close()
+	if c.ebpfState.reader != nil {
+		c.ebpfState.reader.Close()
 	}
 
 	// Close all links
-	for _, link := range state.links {
-		if err := link.Close(); err != nil {
+	for _, l := range c.ebpfState.links {
+		if err := l.Close(); err != nil {
 			c.logger.Error("Failed to close eBPF link", zap.Error(err))
 		}
 	}
 
 	// Close eBPF objects
-	if state.objs != nil {
-		state.objs.Close()
+	if c.ebpfState.objs != nil {
+		c.ebpfState.objs.Close()
 	}
 
 	c.logger.Info("Systemd eBPF monitoring stopped", zap.String("collector", c.name))
@@ -139,12 +175,21 @@ func (c *Collector) createSystemdCollectorEvent(ctx context.Context, event *Syst
 	case 2: // Service stop
 		eventType = domain.EventTypeSystemdService
 		systemdMessage = fmt.Sprintf("Service %s stopped", serviceName)
-	case 3: // Process exec
+	case 3: // Service restart
+		eventType = domain.EventTypeSystemdService
+		systemdMessage = fmt.Sprintf("Service %s restarted", serviceName)
+	case 4: // Service failed
+		eventType = domain.EventTypeSystemdService
+		systemdMessage = fmt.Sprintf("Service %s failed (signal %d)", serviceName, event.Signal)
+	case 5: // Process exec
 		eventType = domain.EventTypeKernelProcess
 		systemdMessage = fmt.Sprintf("Process %s executed", comm)
-	case 4: // Process exit
+	case 6: // Process exit
 		eventType = domain.EventTypeKernelProcess
 		systemdMessage = fmt.Sprintf("Process %s exited with code %d", comm, event.ExitCode)
+	case 7: // Signal event
+		eventType = domain.EventTypeKernelProcess
+		systemdMessage = fmt.Sprintf("Process %s received signal %d", comm, event.Signal)
 	default:
 		eventType = domain.EventTypeSystemdSystem
 		systemdMessage = fmt.Sprintf("Systemd event type %d", event.EventType)
@@ -213,17 +258,17 @@ func (c *Collector) createSystemdCollectorEvent(ctx context.Context, event *Syst
 
 // processEvents processes events from the ring buffer - simple version
 func (c *Collector) processEvents() {
+	c.wg.Add(1)
+	defer c.wg.Done()
+
 	ctx, span := c.tracer.Start(context.Background(), "systemd.collector.process_events")
 	defer span.End()
 
-	if c.ebpfState == nil {
+	if c.ebpfState == nil || c.ebpfState.reader == nil {
 		return
 	}
 
-	state := c.ebpfState.(*ebpfState)
-	if state.reader == nil {
-		return
-	}
+	reader := c.ebpfState.reader
 
 	c.logger.Info("Starting systemd event processing loop")
 
@@ -235,10 +280,13 @@ func (c *Collector) processEvents() {
 		default:
 		}
 
-		record, err := state.reader.Read()
+		record, err := reader.Read()
 		if err != nil {
 			if c.ctx.Err() != nil {
 				return
+			}
+			if c.errorsTotal != nil {
+				c.errorsTotal.Add(ctx, 1)
 			}
 			c.logger.Debug("Failed to read from ring buffer", zap.Error(err))
 			continue
@@ -262,7 +310,7 @@ func (c *Collector) processEvents() {
 			continue
 		}
 
-		// Record processing time
+		// Record processing time (with nil check)
 		if c.processingTime != nil {
 			duration := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
 			c.processingTime.Record(ctx, duration)
@@ -271,9 +319,15 @@ func (c *Collector) processEvents() {
 		// Convert to CollectorEvent with proper systemd data structure
 		collectorEvent := c.createSystemdCollectorEvent(ctx, &event, record.RawSample)
 
-		// Update buffer usage gauge
+		// Update buffer usage gauge based on channel capacity
 		if c.bufferUsage != nil {
-			c.bufferUsage.Record(ctx, int64(len(c.events)))
+			bufferUsed := int64(len(c.events))
+			bufferCapacity := int64(cap(c.events))
+			usagePercent := int64(0)
+			if bufferCapacity > 0 {
+				usagePercent = (bufferUsed * 100) / bufferCapacity
+			}
+			c.bufferUsage.Record(ctx, usagePercent)
 		}
 
 		select {
