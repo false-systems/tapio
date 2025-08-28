@@ -21,10 +21,14 @@ func TestCollectorLinux(t *testing.T) {
 
 	logger := zaptest.NewLogger(t)
 	config := &Config{
-		RingBufferSize:    8 * 1024 * 1024,
-		EventChannelSize:  1000,
-		RateLimitMs:       100,
-		EnabledCategories: []string{"file", "network", "memory"},
+		RingBufferSize:   8 * 1024 * 1024,
+		EventChannelSize: 1000,
+		RateLimitMs:      100,
+		EnabledCategories: map[string]bool{
+			"file":    true,
+			"network": true,
+			"memory":  true,
+		},
 	}
 
 	collector, err := NewCollector(logger, config)

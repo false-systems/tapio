@@ -4,9 +4,10 @@ package kernel
 
 // Event type constants - must match C definitions
 const (
-	EventTypeConfigMapAccess = uint32(1) // ConfigMap access events
-	EventTypeSecretAccess    = uint32(2) // Secret access events
-	EventTypePodSyscall      = uint32(3) // Pod syscall events for correlation
+	EventTypeConfigMapAccess    = uint8(1) // ConfigMap access events
+	EventTypeSecretAccess       = uint8(2) // Secret access events
+	EventTypePodSyscall         = uint8(3) // Pod syscall events for correlation
+	EventTypeConfigAccessFailed = uint8(4) // Failed config access with errno
 
 	// Legacy event types - kept for test compatibility only
 	// These are no longer monitored but tests still reference them
@@ -31,7 +32,8 @@ type KernelEvent struct {
 
 // ConfigInfo represents ConfigMap/Secret access information
 type ConfigInfo struct {
-	MountPath [64]byte // Mount path in container
+	MountPath [60]byte // Mount path in container (reduced to fit error_code)
+	ErrorCode int32    // Error code for failed access (0 = success, positive = errno)
 }
 
 // KernelEventData represents processed kernel event data for domain layer
@@ -43,9 +45,11 @@ type KernelEventData struct {
 	Comm       string `json:"comm"`
 	PodUID     string `json:"pod_uid,omitempty"`
 	MountPath  string `json:"mount_path,omitempty"`
-	ConfigType string `json:"config_type,omitempty"` // "configmap" or "secret"
+	ConfigType string `json:"config_type,omitempty"` // "configmap", "secret", or "failed"
 	ConfigName string `json:"config_name,omitempty"`
 	Namespace  string `json:"namespace,omitempty"`
+	ErrorCode  int32  `json:"error_code,omitempty"` // Error code for failed access (ENOENT, EACCES, etc.)
+	ErrorDesc  string `json:"error_desc,omitempty"` // Human-readable error description
 }
 
 // PodInfo represents pod information for correlation

@@ -519,3 +519,151 @@ func TestLoggerCreationError(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, collector)
 }
+
+// TestHandleReadError tests the rate-limited error logging
+func TestHandleReadError(t *testing.T) {
+	cfg := Config{
+		Name:       "test-dns",
+		BufferSize: 100,
+		EnableEBPF: false,
+	}
+
+	collector, err := NewCollector("test", cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Test first error - should update counter
+	collector.handleReadError(ctx, fmt.Errorf("test error"))
+	assert.Equal(t, 1, collector.consecutiveErrors)
+
+	// Test multiple errors - should increment counter
+	for i := 0; i < 15; i++ {
+		collector.handleReadError(ctx, fmt.Errorf("test error"))
+	}
+	assert.Equal(t, 16, collector.consecutiveErrors)
+
+	// Reset error counter
+	collector.resetErrorCounter()
+	assert.Equal(t, 0, collector.consecutiveErrors)
+}
+
+// TestHandleDroppedEvent tests dropped event handling
+func TestHandleDroppedEvent(t *testing.T) {
+	cfg := Config{
+		Name:       "test-dns",
+		BufferSize: 100,
+		EnableEBPF: false,
+	}
+
+	collector, err := NewCollector("test", cfg)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Record initial stats
+	initialDropped := collector.stats.EventsDropped
+
+	// Handle dropped event
+	collector.handleDroppedEvent(ctx, "example.com")
+
+	// Verify stats were updated
+	assert.Equal(t, initialDropped+1, collector.stats.EventsDropped)
+}
+
+// TestGetEventChannel tests the GetEventChannel method
+func TestGetEventChannel(t *testing.T) {
+	cfg := Config{
+		Name:       "test-dns",
+		BufferSize: 100,
+		EnableEBPF: false,
+	}
+
+	collector, err := NewCollector("test", cfg)
+	require.NoError(t, err)
+
+	// Get event channel
+	channel := collector.GetEventChannel()
+	assert.NotNil(t, channel)
+
+	// Test that we can send to the internal channel and receive from GetEventChannel
+	testEvent := &domain.CollectorEvent{
+		EventID:   "test-123",
+		Timestamp: time.Now(),
+		Source:    "test",
+		Type:      domain.EventTypeDNS,
+	}
+
+	go func() {
+		collector.events <- testEvent
+	}()
+
+	// Read from the channel returned by GetEventChannel
+	select {
+	case receivedEvent := <-channel:
+		assert.Equal(t, testEvent.EventID, receivedEvent.EventID)
+	case <-time.After(time.Second):
+		t.Fatal("Timeout waiting for event from GetEventChannel")
+	}
+}
+
+// TestExtractQueryName tests DNS query name extraction
+func TestExtractQueryName(t *testing.T) {
+	cfg := Config{
+		Name:       "test-dns",
+		BufferSize: 100,
+		EnableEBPF: false,
+	}
+
+	collector, err := NewCollector("test", cfg)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		input    []byte
+		expected string
+	}{
+		{
+			name:     "valid domain",
+			input:    []byte("example.com\x00"),
+			expected: "example.com",
+		},
+		{
+			name:     "domain without null terminator",
+			input:    []byte("google.com"),
+			expected: "google.com",
+		},
+		{
+			name:     "empty domain",
+			input:    []byte("\x00"),
+			expected: "",
+		},
+		{
+			name:     "no dots in name",
+			input:    []byte("localhost\x00"),
+			expected: "",
+		},
+		{
+			name:     "domain with spaces",
+			input:    []byte("  test.com  \x00"),
+			expected: "test.com",
+		},
+		{
+			name:     "all null bytes",
+			input:    make([]byte, 128),
+			expected: "",
+		},
+		{
+			name:     "subdomain",
+			input:    []byte("api.example.com\x00"),
+			expected: "api.example.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := collector.extractQueryName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

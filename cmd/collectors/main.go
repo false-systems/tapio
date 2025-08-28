@@ -10,16 +10,14 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
-	// "github.com/yairfalse/tapio/pkg/collectors/etcd"
-	// etcdBPF "github.com/yairfalse/tapio/pkg/collectors/etcd/bpf"
+	"github.com/yairfalse/tapio/pkg/collectors/dns"
 	"github.com/yairfalse/tapio/pkg/collectors/kernel"
 	"github.com/yairfalse/tapio/pkg/collectors/kubeapi"
 	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
 	namespace_collector "github.com/yairfalse/tapio/pkg/collectors/namespace-collector"
-	namespaceBPF "github.com/yairfalse/tapio/pkg/collectors/namespace-collector/bpf"
 	"github.com/yairfalse/tapio/pkg/collectors/network"
+	"github.com/yairfalse/tapio/pkg/collectors/orchestrator"
 	"github.com/yairfalse/tapio/pkg/collectors/otel"
-	"github.com/yairfalse/tapio/pkg/collectors/pipeline"
 	"github.com/yairfalse/tapio/pkg/collectors/systemd"
 	"github.com/yairfalse/tapio/pkg/config"
 	"go.uber.org/zap"
@@ -29,14 +27,13 @@ var (
 	natsURL         = flag.String("nats", "", "NATS server URL (overrides config)")
 	enableKubeAPI   = flag.Bool("enable-kubeapi", true, "Enable KubeAPI collector")
 	enableEBPF      = flag.Bool("enable-ebpf", true, "Enable eBPF collector")
+	enableDNS       = flag.Bool("enable-dns", true, "Enable intelligent DNS collector")
 	enableSystemd   = flag.Bool("enable-systemd", true, "Enable systemd collector")
-	enableEtcd      = flag.Bool("enable-etcd", false, "Enable etcd collector")
 	enableNamespace = flag.Bool("enable-namespace", true, "Enable namespace collector")
 	enableKubelet   = flag.Bool("enable-kubelet", true, "Enable kubelet collector")
 	enableNetwork   = flag.Bool("enable-network", true, "Enable network collector")
 	enableOTEL      = flag.Bool("enable-otel", true, "Enable OTEL collector")
 	kubeletAddress  = flag.String("kubelet-address", "localhost:10250", "Kubelet address")
-	etcdEndpoints   = flag.String("etcd-endpoints", "localhost:2379", "Etcd endpoints (comma-separated)")
 	logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	workerCount     = flag.Int("workers", 4, "Number of orchestrator workers")
 	bufferSize      = flag.Int("buffer-size", 10000, "Event buffer size")
@@ -70,14 +67,14 @@ func main() {
 	}
 
 	// Create CollectorOrchestrator config
-	orchestratorConfig := pipeline.Config{
+	orchestratorConfig := orchestrator.Config{
 		NATSConfig: natsConfig,
 		BufferSize: *bufferSize,
 		Workers:    *workerCount,
 	}
 
 	// Create CollectorOrchestrator
-	collectorOrchestrator, err := pipeline.New(logger, orchestratorConfig)
+	collectorOrchestrator, err := orchestrator.New(logger, orchestratorConfig)
 	if err != nil {
 		log.Fatalf("Failed to create collector orchestrator: %v", err)
 	}
@@ -134,37 +131,13 @@ func main() {
 		}
 	}
 
-	// etcd collector disabled due to eBPF duplicate declarations
-	// if *enableEtcd {
-	// 	etcdConfig := etcd.Config{
-	// 		Endpoints: []string{*etcdEndpoints},
-	// 		// Add auth if needed
-	// 	}
-	// 	etcdCollector, err := etcd.NewCollector("etcd", etcdConfig)
-	// 	if err != nil {
-	// 		logger.Error("Failed to create etcd collector", zap.Error(err))
-	// 	} else {
-	// 		if err := collectorOrchestrator.RegisterCollector("etcd", etcdCollector); err != nil {
-	// 			logger.Error("Failed to register etcd collector", zap.Error(err))
-	// 		} else {
-	// 			enabledCollectors = append(enabledCollectors, "etcd")
-	// 		}
-	// 	}
-	// }
-
 	if *enableNamespace {
-		namespaceConfig := namespace_collector.DefaultConfig()
-
-		// Check if namespace eBPF is available
-		if namespaceBPF.IsSupported() {
-			namespaceConfig.EnableEBPF = true
-		}
-
-		namespaceCollector, err := namespace_collector.NewCollector("namespace")
+		// Create runtime signals collector (transformed from namespace collector)
+		runtimeCollector, err := namespace_collector.NewCollector("runtime-signals")
 		if err != nil {
 			logger.Error("Failed to create namespace collector", zap.Error(err))
 		} else {
-			if err := collectorOrchestrator.RegisterCollector("namespace", namespaceCollector); err != nil {
+			if err := collectorOrchestrator.RegisterCollector("runtime-signals", runtimeCollector); err != nil {
 				logger.Error("Failed to register namespace collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "namespace")
@@ -203,6 +176,29 @@ func main() {
 				logger.Error("Failed to register network collector", zap.Error(err))
 			} else {
 				enabledCollectors = append(enabledCollectors, "network")
+			}
+		}
+	}
+
+	if *enableDNS {
+		dnsConfig := dns.DefaultConfig()
+		// Enable intelligence features by default
+		dnsConfig.EnableIntelligence = true
+		dnsConfig.ContainerIDExtraction = true
+		dnsConfig.ParseAnswers = true
+
+		dnsCollector, err := dns.NewCollector("dns", dnsConfig)
+		if err != nil {
+			logger.Error("Failed to create DNS collector", zap.Error(err))
+		} else {
+			if err := collectorOrchestrator.RegisterCollector("dns", dnsCollector); err != nil {
+				logger.Error("Failed to register DNS collector", zap.Error(err))
+			} else {
+				enabledCollectors = append(enabledCollectors, "dns")
+				logger.Info("DNS collector registered with intelligent features",
+					zap.String("filtering_mode", dnsConfig.SmartFilterConfig.Mode.String()),
+					zap.Bool("learning_enabled", dnsConfig.LearningConfig.Enabled),
+					zap.Bool("circuit_breaker_enabled", dnsConfig.CircuitBreakerConfig.Enabled))
 			}
 		}
 	}
@@ -250,7 +246,7 @@ func main() {
 }
 
 // monitorCollectorHealth periodically checks collector health
-func monitorCollectorHealth(ctx context.Context, orchestrator *pipeline.CollectorOrchestrator, logger *zap.Logger) {
+func monitorCollectorHealth(ctx context.Context, orchestrator *orchestrator.CollectorOrchestrator, logger *zap.Logger) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

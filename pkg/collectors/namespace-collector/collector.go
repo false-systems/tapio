@@ -315,7 +315,7 @@ func (c *Collector) createEvent(eventType string, data map[string]string) *domai
 	defer span.End()
 
 	spanCtx := span.SpanContext()
-	eventID := fmt.Sprintf("namespace-%s-%d", eventType, time.Now().UnixNano())
+	eventID := fmt.Sprintf("runtime-%s-%d", eventType, time.Now().UnixNano())
 
 	// Parse namespace path to extract k8s metadata
 	var podInfo *PodInfo
@@ -355,6 +355,12 @@ func (c *Collector) createEvent(eventType string, data map[string]string) *domai
 	// Create CollectorEvent with proper type
 	var collectorEventType domain.CollectorEventType
 	switch eventType {
+	case "process_exec", "process_exit":
+		collectorEventType = domain.EventTypeKernelProcess
+	case "signal_sent", "signal_received":
+		collectorEventType = domain.EventTypeKernelProcess
+	case "oom_kill":
+		collectorEventType = domain.EventTypeContainerOOM
 	case "namespace_create":
 		collectorEventType = domain.EventTypeContainerCreate
 	case "namespace_delete":
@@ -387,7 +393,7 @@ func (c *Collector) createEvent(eventType string, data map[string]string) *domai
 
 		Metadata: domain.EventMetadata{
 			Priority: domain.PriorityNormal,
-			Tags:     []string{"namespace", "cni"},
+			Tags:     []string{"runtime", "signals"},
 			Labels: map[string]string{
 				"event_type": eventType,
 			},

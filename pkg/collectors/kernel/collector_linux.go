@@ -54,13 +54,22 @@ func (c *Collector) startEBPF() error {
 		links: make([]link.Link, 0),
 	}
 
-	// Attach to ConfigMap/Secret access events
+	// Attach to ConfigMap/Secret access events (entry point)
 	configLink, err := link.Tracepoint("syscalls", "sys_enter_openat", objs.TraceOpenat, nil)
 	if err != nil {
 		objs.Close()
-		return fmt.Errorf("attaching openat tracepoint: %w", err)
+		return fmt.Errorf("attaching openat enter tracepoint: %w", err)
 	}
 	state.links = append(state.links, configLink)
+
+	// Attach to ConfigMap/Secret access events (exit point for error capture)
+	configExitLink, err := link.Tracepoint("syscalls", "sys_exit_openat", objs.TraceOpenatExit, nil)
+	if err != nil {
+		c.logger.Warn("Failed to attach openat exit tracepoint, continuing without error tracking", zap.Error(err))
+		// Don't fail completely - we can still capture enter events
+	} else {
+		state.links = append(state.links, configExitLink)
+	}
 
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(objs.Events)
@@ -85,10 +94,7 @@ func (c *Collector) stopEBPF() {
 		return
 	}
 
-	state, ok := c.ebpfState.(*ebpfComponents)
-	if !ok {
-		return
-	}
+	state := c.ebpfState
 
 	// Close reader first
 	if state.reader != nil {
@@ -117,8 +123,8 @@ func (c *Collector) processEvents() {
 		return
 	}
 
-	state, ok := c.ebpfState.(*ebpfComponents)
-	if !ok || state.reader == nil {
+	state := c.ebpfState
+	if state.reader == nil {
 		return
 	}
 
@@ -181,13 +187,19 @@ func (c *Collector) processRawEvent(data []byte) {
 	switch event.EventType {
 	case uint32(EventTypeConfigMapAccess):
 		eventData.ConfigType = "configmap"
-		eventData.MountPath = c.extractMountPath(event.Data[:])
+		eventData.MountPath, eventData.ErrorCode = c.extractMountPathAndError(event.Data[:])
 		c.enrichConfigMapEvent(&eventData)
 
 	case uint32(EventTypeSecretAccess):
 		eventData.ConfigType = "secret"
-		eventData.MountPath = c.extractMountPath(event.Data[:])
+		eventData.MountPath, eventData.ErrorCode = c.extractMountPathAndError(event.Data[:])
 		c.enrichSecretEvent(&eventData)
+
+	case uint32(EventTypeConfigAccessFailed):
+		eventData.ConfigType = "failed"
+		eventData.MountPath, eventData.ErrorCode = c.extractMountPathAndError(event.Data[:])
+		eventData.ErrorDesc = getErrorDescription(eventData.ErrorCode)
+		c.enrichFailedAccessEvent(&eventData)
 
 	case uint32(EventTypePodSyscall):
 		// This is for correlation only - minimal processing
@@ -218,6 +230,8 @@ func (c *Collector) processRawEvent(data []byte) {
 				"config_name": eventData.ConfigName,
 				"mount_path":  eventData.MountPath,
 				"tid":         fmt.Sprintf("%d", event.TID),
+				"error_code":  fmt.Sprintf("%d", eventData.ErrorCode),
+				"error_desc":  eventData.ErrorDesc,
 			},
 		},
 		Metadata: domain.EventMetadata{
@@ -261,14 +275,22 @@ func (c *Collector) processRawEvent(data []byte) {
 	}
 }
 
-// extractMountPath extracts mount path from event data
-func (c *Collector) extractMountPath(data []byte) string {
+// extractMountPathAndError extracts mount path and error code from event data
+func (c *Collector) extractMountPathAndError(data []byte) (string, int32) {
 	if len(data) < 64 {
-		return ""
+		return "", 0
 	}
 
-	// The first 64 bytes should contain the mount_path from config_info struct
-	return bytesToString(data[:64])
+	// The first 60 bytes contain the mount_path from config_info struct
+	mountPath := bytesToString(data[:60])
+
+	// The last 4 bytes contain the error code (int32)
+	var errorCode int32
+	if len(data) >= 64 {
+		errorCode = int32(binary.LittleEndian.Uint32(data[60:64]))
+	}
+
+	return mountPath, errorCode
 }
 
 // enrichConfigMapEvent adds ConfigMap-specific enrichment
@@ -314,6 +336,45 @@ func (c *Collector) enrichSecretEvent(eventData *KernelEventData) {
 	}
 }
 
+// enrichFailedAccessEvent adds failed access-specific enrichment
+func (c *Collector) enrichFailedAccessEvent(eventData *KernelEventData) {
+	// Determine if it was a ConfigMap or Secret access attempt
+	if strings.Contains(eventData.MountPath, "kubernetes.io~configmap") {
+		eventData.ConfigType = "configmap-failed"
+		parts := strings.Split(eventData.MountPath, "/")
+		for i, part := range parts {
+			if part == "kubernetes.io~configmap" && i+1 < len(parts) {
+				eventData.ConfigName = parts[i+1]
+				break
+			}
+		}
+	} else if strings.Contains(eventData.MountPath, "kubernetes.io~secret") {
+		eventData.ConfigType = "secret-failed"
+		parts := strings.Split(eventData.MountPath, "/")
+		for i, part := range parts {
+			if part == "kubernetes.io~secret" && i+1 < len(parts) {
+				eventData.ConfigName = parts[i+1]
+				break
+			}
+		}
+	}
+
+	// Extract namespace from pod UID correlation if available
+	if eventData.PodUID != "" {
+		// In production, we'd look up the pod info from our maps
+		eventData.Namespace = "default" // Placeholder
+	}
+
+	// Record the failed access metric
+	if c.errorsTotal != nil {
+		c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
+			attribute.String("error_type", "config_access_failed"),
+			attribute.String("config_type", eventData.ConfigType),
+			attribute.Int("error_code", int(eventData.ErrorCode)),
+		))
+	}
+}
+
 // getEventType converts numeric event type to string
 func (c *Collector) getEventType(eventType uint32) string {
 	switch eventType {
@@ -321,10 +382,36 @@ func (c *Collector) getEventType(eventType uint32) string {
 		return "configmap_access"
 	case uint32(EventTypeSecretAccess):
 		return "secret_access"
+	case uint32(EventTypeConfigAccessFailed):
+		return "config_access_failed"
 	case uint32(EventTypePodSyscall):
 		return "pod_syscall"
 	default:
 		return fmt.Sprintf("unknown_%d", eventType)
+	}
+}
+
+// getErrorDescription returns human-readable error description for errno
+func getErrorDescription(errorCode int32) string {
+	switch errorCode {
+	case 0:
+		return "Success"
+	case 2: // ENOENT
+		return "No such file or directory"
+	case 13: // EACCES
+		return "Permission denied"
+	case 5: // EIO
+		return "Input/output error"
+	case 14: // EFAULT
+		return "Bad address"
+	case 22: // EINVAL
+		return "Invalid argument"
+	case 28: // ENOSPC
+		return "No space left on device"
+	case 30: // EROFS
+		return "Read-only file system"
+	default:
+		return fmt.Sprintf("Error code %d", errorCode)
 	}
 }
 
@@ -354,26 +441,104 @@ func parseKernelEvent(buffer []byte) (*KernelEvent, error) {
 
 // AddContainerPID adds a PID to the container tracking map
 func (c *Collector) AddContainerPID(pid uint32) error {
-	// Container PID tracking not implemented in current BPF program
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state := c.ebpfState
+	if state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	flag := uint8(1)
+	if err := state.objs.ContainerPids.Put(pid, flag); err != nil {
+		return fmt.Errorf("failed to add container PID %d: %w", pid, err)
+	}
+
 	return nil
 }
 
 // RemoveContainerPID removes a PID from the container tracking map
 func (c *Collector) RemoveContainerPID(pid uint32) error {
-	// Container PID tracking not implemented in current BPF program
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state := c.ebpfState
+	if state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	if err := state.objs.ContainerPids.Delete(pid); err != nil {
+		return fmt.Errorf("failed to remove container PID %d: %w", pid, err)
+	}
+
 	return nil
 }
 
 // AddPodInfo adds pod information to the correlation map
 func (c *Collector) AddPodInfo(cgroupID uint64, podInfo PodInfo) error {
-	// PodInfoMap not available in current BPF program
-	// Pod correlation happens at userspace level
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state := c.ebpfState
+	if state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	// Convert Go struct to C-compatible format
+	var cPodInfo [248]byte // Size of C struct pod_info
+
+	// Copy pod UID (36 bytes)
+	copy(cPodInfo[0:36], podInfo.PodUID)
+	// Copy namespace (64 bytes)
+	copy(cPodInfo[36:100], podInfo.Namespace)
+	// Copy pod name (128 bytes)
+	copy(cPodInfo[100:228], podInfo.PodName)
+	// Copy created_at (8 bytes)
+	createdAt := uint64(podInfo.CreatedAt)
+	for i := 0; i < 8; i++ {
+		cPodInfo[228+i] = byte(createdAt >> (i * 8))
+	}
+
+	if err := state.objs.PodInfoMap.Put(cgroupID, cPodInfo); err != nil {
+		return fmt.Errorf("failed to add pod info for cgroup %d: %w", cgroupID, err)
+	}
+
 	return nil
 }
 
 // AddMountInfo adds ConfigMap/Secret mount information
 func (c *Collector) AddMountInfo(pathHash uint64, mountInfo MountInfo) error {
-	// MountInfoMap not available in current BPF program
-	// Mount info correlation happens at userspace level
+	if c.ebpfState == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
+
+	state := c.ebpfState
+	if state.objs == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	// Convert Go struct to C-compatible format
+	var cMountInfo [200]byte // Size of C struct mount_info
+
+	// Copy name (64 bytes)
+	copy(cMountInfo[0:64], mountInfo.Name)
+	// Copy namespace (64 bytes)
+	copy(cMountInfo[64:128], mountInfo.Namespace)
+	// Copy mount path (128 bytes)
+	copy(cMountInfo[128:256], mountInfo.MountPath)
+	// Set is_secret flag
+	if mountInfo.IsSecret {
+		cMountInfo[256] = 1
+	} else {
+		cMountInfo[256] = 0
+	}
+
+	if err := state.objs.MountInfoMap.Put(pathHash, cMountInfo); err != nil {
+		return fmt.Errorf("failed to add mount info for path hash %d: %w", pathHash, err)
+	}
+
 	return nil
 }

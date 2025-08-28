@@ -20,11 +20,11 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 namespaceMonitor ./bpf_src/namespace_monitor.c -- -I../bpf_common
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 runtimeMonitor ./bpf_src/runtime_monitor.c -- -I../bpf_common
 
 // eBPF components - implements EBPFState interface
 type ebpfState struct {
-	objs   *namespaceMonitorObjects
+	objs   *runtimeMonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
 }
@@ -81,8 +81,8 @@ func (c *Collector) startEBPF() error {
 	}
 
 	// Load eBPF objects
-	objs := &namespaceMonitorObjects{}
-	if err := loadNamespaceMonitorObjects(objs, nil); err != nil {
+	objs := &runtimeMonitorObjects{}
+	if err := loadRuntimeMonitorObjects(objs, nil); err != nil {
 		if c.ebpfLoadErrors != nil {
 			c.ebpfLoadErrors.Add(ctx, 1,
 				metric.WithAttributes(
@@ -105,65 +105,145 @@ func (c *Collector) startEBPF() error {
 		links: make([]link.Link, 0),
 	}
 
-	// Attach to network namespace operations with metrics
+	// Attach to process exec tracepoint
 	if c.ebpfAttachTotal != nil {
 		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
 				attribute.String("collector.name", c.name),
-				attribute.String("tracepoint", "sys_enter_setns"),
+				attribute.String("tracepoint", "sched_process_exec"),
 			),
 		)
 	}
-	l1, err := link.Tracepoint("syscalls", "sys_enter_setns", objs.TraceSysEnterSetns, nil)
+	l1, err := link.Tracepoint("sched", "sched_process_exec", objs.TraceProcessExec, nil)
 	if err != nil {
 		if c.ebpfAttachErrors != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
 					attribute.String("collector.name", c.name),
-					attribute.String("tracepoint", "sys_enter_setns"),
+					attribute.String("tracepoint", "sched_process_exec"),
 					attribute.String("error.type", "attach_failure"),
 				),
 			)
 		}
 		objs.Close()
 		span.RecordError(err)
-		c.logger.Error("Failed to attach setns tracepoint",
+		c.logger.Error("Failed to attach process exec tracepoint",
 			zap.Error(err),
 			zap.String("trace.id", span.SpanContext().TraceID().String()),
 		)
-		return fmt.Errorf("attaching setns tracepoint: %w", err)
+		return fmt.Errorf("attaching process exec tracepoint: %w", err)
 	}
 	state.links = append(state.links, l1)
 
-	// Attach to unshare (new network namespace)
+	// Attach to process exit tracepoint
 	if c.ebpfAttachTotal != nil {
 		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
 				attribute.String("collector.name", c.name),
-				attribute.String("tracepoint", "sys_enter_unshare"),
+				attribute.String("tracepoint", "sched_process_exit"),
 			),
 		)
 	}
-	l2, err := link.Tracepoint("syscalls", "sys_enter_unshare", objs.TraceSysEnterUnshare, nil)
+	l2, err := link.Tracepoint("sched", "sched_process_exit", objs.TraceProcessExit, nil)
 	if err != nil {
 		if c.ebpfAttachErrors != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
 					attribute.String("collector.name", c.name),
-					attribute.String("tracepoint", "sys_enter_unshare"),
+					attribute.String("tracepoint", "sched_process_exit"),
 					attribute.String("error.type", "attach_failure"),
 				),
 			)
 		}
 		state.cleanup()
 		span.RecordError(err)
-		c.logger.Error("Failed to attach unshare tracepoint",
+		c.logger.Error("Failed to attach process exit tracepoint",
 			zap.Error(err),
 			zap.String("trace.id", span.SpanContext().TraceID().String()),
 		)
-		return fmt.Errorf("attaching unshare tracepoint: %w", err)
+		return fmt.Errorf("attaching process exit tracepoint: %w", err)
 	}
 	state.links = append(state.links, l2)
+
+	// Attach to signal generation tracepoint
+	if c.ebpfAttachTotal != nil {
+		c.ebpfAttachTotal.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+				attribute.String("tracepoint", "signal_generate"),
+			),
+		)
+	}
+	l3, err := link.Tracepoint("signal", "signal_generate", objs.TraceSignalGenerate, nil)
+	if err != nil {
+		if c.ebpfAttachErrors != nil {
+			c.ebpfAttachErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("tracepoint", "signal_generate"),
+					attribute.String("error.type", "attach_failure"),
+				),
+			)
+		}
+		state.cleanup()
+		span.RecordError(err)
+		c.logger.Error("Failed to attach signal generate tracepoint",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		return fmt.Errorf("attaching signal generate tracepoint: %w", err)
+	}
+	state.links = append(state.links, l3)
+
+	// Attach to signal delivery tracepoint
+	if c.ebpfAttachTotal != nil {
+		c.ebpfAttachTotal.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+				attribute.String("tracepoint", "signal_deliver"),
+			),
+		)
+	}
+	l4, err := link.Tracepoint("signal", "signal_deliver", objs.TraceSignalDeliver, nil)
+	if err != nil {
+		if c.ebpfAttachErrors != nil {
+			c.ebpfAttachErrors.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("tracepoint", "signal_deliver"),
+					attribute.String("error.type", "attach_failure"),
+				),
+			)
+		}
+		state.cleanup()
+		span.RecordError(err)
+		c.logger.Error("Failed to attach signal deliver tracepoint",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+		return fmt.Errorf("attaching signal deliver tracepoint: %w", err)
+	}
+	state.links = append(state.links, l4)
+
+	// Attach to OOM killer kprobe
+	if c.ebpfAttachTotal != nil {
+		c.ebpfAttachTotal.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+				attribute.String("kprobe", "oom_kill_process"),
+			),
+		)
+	}
+	l5, err := link.Kprobe("oom_kill_process", objs.TraceOomKill, nil)
+	if err != nil {
+		// OOM killer hook is optional (may not exist on all kernels)
+		c.logger.Warn("Failed to attach OOM killer kprobe (optional)",
+			zap.Error(err),
+			zap.String("trace.id", span.SpanContext().TraceID().String()),
+		)
+	} else {
+		state.links = append(state.links, l5)
+	}
 
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(objs.Events)
@@ -275,7 +355,7 @@ func (c *Collector) readEBPFEvents() {
 		}
 
 		// Parse the event with error handling
-		var event cniEvent
+		var event runtimeEvent
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
 			c.logger.Debug("Failed to parse eBPF event",
 				zap.Error(err),
@@ -285,61 +365,8 @@ func (c *Collector) readEBPFEvents() {
 			continue
 		}
 
-		// Create event data with type conversion
-		eventData := map[string]string{
-			"timestamp": fmt.Sprintf("%d", event.Timestamp),
-			"pid":       fmt.Sprintf("%d", event.PID),
-			"netns":     fmt.Sprintf("%d", event.Netns),
-			"type":      eventTypeToString(event.EventType),
-			"comm":      nullTerminatedString(event.Comm[:]),
-			"data":      nullTerminatedString(event.Data[:]),
-		}
-
-		// Create event with tracing context
-		rawEvent := c.createEvent("network_namespace", eventData)
-
-		// Update buffer usage gauge
-		if c.bufferUsage != nil {
-			c.bufferUsage.Record(ctx, int64(len(c.events)),
-				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
-				),
-			)
-		}
-
-		// Try to send event with metrics tracking
-		select {
-		case c.events <- rawEvent:
-			if c.eventsProcessed != nil {
-				c.eventsProcessed.Add(ctx, 1,
-					metric.WithAttributes(
-						attribute.String("collector.name", c.name),
-						attribute.String("event.type", eventTypeToString(event.EventType)),
-					),
-				)
-			}
-		case <-c.ctx.Done():
-			c.logger.Info("Context cancelled during event processing",
-				zap.String("collector.name", c.name),
-				zap.String("trace.id", span.SpanContext().TraceID().String()),
-			)
-			return
-		default:
-			// Buffer full, drop event and record metric
-			if c.droppedEvents != nil {
-				c.droppedEvents.Add(ctx, 1,
-					metric.WithAttributes(
-						attribute.String("collector.name", c.name),
-						attribute.String("reason", "buffer_full"),
-					),
-				)
-			}
-			c.logger.Warn("Dropped event due to full buffer",
-				zap.String("collector.name", c.name),
-				zap.String("event.type", eventTypeToString(event.EventType)),
-				zap.String("trace.id", span.SpanContext().TraceID().String()),
-			)
-		}
+		// Process the runtime event
+		c.processRuntimeEvent(ctx, &event)
 
 		// Record processing latency
 		if c.processingTime != nil {
@@ -347,22 +374,134 @@ func (c *Collector) readEBPFEvents() {
 			c.processingTime.Record(ctx, duration,
 				metric.WithAttributes(
 					attribute.String("operation", "ebpf_event_processing"),
-					attribute.String("event.type", eventTypeToString(event.EventType)),
+					attribute.String("event.type", runtimeEventTypeToString(event.EventType)),
 				),
 			)
 		}
 	}
 }
 
-// Helper to convert event type to string
-func eventTypeToString(t uint32) string {
+// processRuntimeEvent processes a runtime event from eBPF
+func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent) {
+	// Convert to domain event
+	runtimeEvt := &RuntimeSignalEvent{
+		Timestamp: event.Timestamp,
+		EventType: runtimeEventTypeToString(event.EventType),
+		PID:       event.PID,
+		TGID:      event.TGID,
+		PPID:      event.PPID,
+		Command:   nullTerminatedString(event.Comm[:]),
+	}
+
+	// Handle different event types
+	switch event.EventType {
+	case EventTypeProcessExec:
+		runtimeEvt.UID = event.ExecInfo.UID
+		runtimeEvt.GID = event.ExecInfo.GID
+	case EventTypeProcessExit:
+		runtimeEvt.ExitInfo = DecodeExitCode(event.ExitCode)
+	case EventTypeSignalGenerate, EventTypeSignalDeliver:
+		runtimeEvt.SignalInfo = &SignalInfo{
+			Number:      int(event.Signal),
+			Name:        GetSignalName(int(event.Signal)),
+			Description: GetSignalDescription(int(event.Signal)),
+			IsFatal:     IsSignalFatal(int(event.Signal)),
+		}
+		runtimeEvt.SenderPID = event.SenderPID
+	case EventTypeOOMKill:
+		runtimeEvt.IsOOMKill = true
+		runtimeEvt.SignalInfo = &SignalInfo{
+			Number:      SIGKILL,
+			Name:        "SIGKILL",
+			Description: "OOM Killer",
+			IsFatal:     true,
+		}
+		runtimeEvt.SenderPID = event.SenderPID
+	}
+
+	// Create domain event
+	eventData := map[string]string{
+		"event_type": runtimeEvt.EventType,
+		"pid":        fmt.Sprintf("%d", runtimeEvt.PID),
+		"tgid":       fmt.Sprintf("%d", runtimeEvt.TGID),
+		"ppid":       fmt.Sprintf("%d", runtimeEvt.PPID),
+		"command":    runtimeEvt.Command,
+	}
+
+	if runtimeEvt.ExitInfo != nil {
+		eventData["exit_code"] = fmt.Sprintf("%d", runtimeEvt.ExitInfo.Code)
+		eventData["exit_signal"] = fmt.Sprintf("%d", runtimeEvt.ExitInfo.Signal)
+		eventData["exit_description"] = runtimeEvt.ExitInfo.Description
+	}
+
+	if runtimeEvt.SignalInfo != nil {
+		eventData["signal_number"] = fmt.Sprintf("%d", runtimeEvt.SignalInfo.Number)
+		eventData["signal_name"] = runtimeEvt.SignalInfo.Name
+		eventData["signal_description"] = runtimeEvt.SignalInfo.Description
+		if event.SenderPID > 0 {
+			eventData["sender_pid"] = fmt.Sprintf("%d", event.SenderPID)
+		}
+	}
+
+	domainEvent := c.createEvent(runtimeEvt.EventType, eventData)
+
+	// Update buffer usage gauge
+	if c.bufferUsage != nil {
+		c.bufferUsage.Record(ctx, int64(len(c.events)),
+			metric.WithAttributes(
+				attribute.String("collector.name", c.name),
+			),
+		)
+	}
+
+	// Try to send event with metrics tracking
+	select {
+	case c.events <- domainEvent:
+		if c.eventsProcessed != nil {
+			c.eventsProcessed.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("event.type", runtimeEvt.EventType),
+				),
+			)
+		}
+	case <-c.ctx.Done():
+		c.logger.Info("Context cancelled during event processing",
+			zap.String("collector.name", c.name),
+		)
+		return
+	default:
+		// Buffer full, drop event and record metric
+		if c.droppedEvents != nil {
+			c.droppedEvents.Add(ctx, 1,
+				metric.WithAttributes(
+					attribute.String("collector.name", c.name),
+					attribute.String("reason", "buffer_full"),
+				),
+			)
+		}
+		c.logger.Warn("Dropped event due to full buffer",
+			zap.String("collector.name", c.name),
+			zap.String("event.type", runtimeEvt.EventType),
+		)
+	}
+}
+
+// Helper to convert runtime event type to string
+func runtimeEventTypeToString(t uint32) string {
 	switch t {
-	case 1:
-		return "netns_enter"
-	case 2:
-		return "netns_create"
-	case 3:
-		return "netns_exit"
+	case EventTypeProcessExec:
+		return "process_exec"
+	case EventTypeProcessExit:
+		return "process_exit"
+	case EventTypeSignalGenerate:
+		return "signal_sent"
+	case EventTypeSignalDeliver:
+		return "signal_received"
+	case EventTypeOOMKill:
+		return "oom_kill"
+	case EventTypeCoreDump:
+		return "core_dump"
 	default:
 		return fmt.Sprintf("unknown_%d", t)
 	}

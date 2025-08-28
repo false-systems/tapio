@@ -15,6 +15,7 @@
 #define EVENT_TYPE_CONFIGMAP_ACCESS   1
 #define EVENT_TYPE_SECRET_ACCESS      2
 #define EVENT_TYPE_POD_SYSCALL        3  // For correlation purposes
+#define EVENT_TYPE_CONFIG_ACCESS_FAILED 4  // Failed access with errno
 
 // Kernel event structure (must match Go struct)
 struct kernel_event {
@@ -29,7 +30,8 @@ struct kernel_event {
     union {
         __u8 data[64];
         struct {
-            char mount_path[64];  // ConfigMap/Secret mount path
+            char mount_path[60];  // ConfigMap/Secret mount path
+            __s32 error_code;     // Error code for failed access
         } config_info;
     };
 } __attribute__((packed));
@@ -94,6 +96,14 @@ static __always_inline __u64 get_cgroup_id() {
     return cgroup_id;
 }
 
+// Track pending openat operations for error correlation
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u64);   // TID
+    __type(value, __u64); // Filename pointer
+} pending_openat SEC(".maps");
+
 // Main tracepoint for openat syscall - catches ConfigMap/Secret access
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_openat(struct trace_event_raw_sys_enter *ctx) {
@@ -111,33 +121,94 @@ int trace_openat(struct trace_event_raw_sys_enter *ctx) {
         return 0;  // Not interested in other files
     }
     
-    // Allocate event
-    struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event) {
-        return 0;
+    // Store filename pointer for error tracking in sys_exit
+    __u64 tid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
+    __u64 filename_ptr = (__u64)filename;
+    bpf_map_update_elem(&pending_openat, &tid, &filename_ptr, BPF_ANY);
+    
+    return 0;
+}
+
+// Exit tracepoint for openat syscall - captures success or failure
+SEC("tracepoint/syscalls/sys_exit_openat")
+int trace_openat_exit(struct trace_event_raw_sys_exit *ctx) {
+    __u64 tid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
+    
+    // Check if we tracked this openat
+    __u64 *filename_ptr = bpf_map_lookup_elem(&pending_openat, &tid);
+    if (!filename_ptr) {
+        return 0;  // Not a tracked operation
     }
     
-    // Fill basic event info
-    event->timestamp = bpf_ktime_get_ns();
-    event->pid = bpf_get_current_pid_tgid() >> 32;
-    event->tid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
-    event->event_type = is_secret ? EVENT_TYPE_SECRET_ACCESS : EVENT_TYPE_CONFIGMAP_ACCESS;
-    event->size = 0;
-    event->cgroup_id = get_cgroup_id();
+    const char *filename = (const char *)*filename_ptr;
+    __s64 ret = ctx->ret;
     
-    // Get process name
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    // Remove from pending map
+    bpf_map_delete_elem(&pending_openat, &tid);
     
-    // Copy mount path
-    bpf_probe_read_user_str(&event->config_info.mount_path, 
-                            sizeof(event->config_info.mount_path), 
-                            filename);
-    
-    // Clear pod_uid for now (would need additional correlation)
-    __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
-    
-    // Submit event
-    bpf_ringbuf_submit(event, 0);
+    // Only report failures (ret < 0 means error)
+    if (ret >= 0) {
+        // Success - report normal config access event
+        struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+        if (!event) {
+            return 0;
+        }
+        
+        // Determine if it's a secret or configmap
+        int is_secret = is_secret_path(filename);
+        
+        // Fill event info
+        event->timestamp = bpf_ktime_get_ns();
+        event->pid = bpf_get_current_pid_tgid() >> 32;
+        event->tid = tid;
+        event->event_type = is_secret ? EVENT_TYPE_SECRET_ACCESS : EVENT_TYPE_CONFIGMAP_ACCESS;
+        event->size = 0;
+        event->cgroup_id = get_cgroup_id();
+        event->config_info.error_code = 0;  // Success
+        
+        // Get process name
+        bpf_get_current_comm(&event->comm, sizeof(event->comm));
+        
+        // Copy mount path
+        bpf_probe_read_user_str(&event->config_info.mount_path, 
+                                sizeof(event->config_info.mount_path), 
+                                filename);
+        
+        // Clear pod_uid for now
+        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
+        
+        // Submit event
+        bpf_ringbuf_submit(event, 0);
+    } else {
+        // Failure - report failed access event
+        struct kernel_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+        if (!event) {
+            return 0;
+        }
+        
+        // Fill event info for failure
+        event->timestamp = bpf_ktime_get_ns();
+        event->pid = bpf_get_current_pid_tgid() >> 32;
+        event->tid = tid;
+        event->event_type = EVENT_TYPE_CONFIG_ACCESS_FAILED;
+        event->size = 0;
+        event->cgroup_id = get_cgroup_id();
+        event->config_info.error_code = -ret;  // Convert negative errno to positive
+        
+        // Get process name
+        bpf_get_current_comm(&event->comm, sizeof(event->comm));
+        
+        // Copy mount path (the path that failed)
+        bpf_probe_read_user_str(&event->config_info.mount_path, 
+                                sizeof(event->config_info.mount_path), 
+                                filename);
+        
+        // Clear pod_uid for now
+        __builtin_memset(event->pod_uid, 0, sizeof(event->pod_uid));
+        
+        // Submit event
+        bpf_ringbuf_submit(event, 0);
+    }
     
     return 0;
 }

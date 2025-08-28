@@ -28,7 +28,7 @@ type Collector struct {
 	mu      sync.RWMutex
 
 	// eBPF components (platform-specific)
-	ebpfState interface{}
+	ebpfState *ebpfComponents
 
 	// Essential OTEL Metrics (5 core metrics)
 	eventsProcessed metric.Int64Counter

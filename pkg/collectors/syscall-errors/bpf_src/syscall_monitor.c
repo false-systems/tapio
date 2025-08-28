@@ -27,6 +27,8 @@ char LICENSE[] SEC("license") = "GPL";
 #define ENOENT 2      /* No such file or directory */
 #define EAGAIN 11     /* Try again */
 #define ETIMEDOUT 110 /* Connection timed out */
+#define EMFILE 24     /* Too many open files */
+#define EDQUOT 122    /* Disk quota exceeded */
 
 /* Syscall categories */
 #define SYSCALL_CAT_FILE 1
@@ -104,6 +106,8 @@ struct collector_stats {
     __u64 enomem_count;
     __u64 econnrefused_count;
     __u64 eio_count;
+    __u64 emfile_count;
+    __u64 edquot_count;
     __u64 events_sent;
     __u64 events_dropped;
 };
@@ -152,6 +156,8 @@ static __always_inline int should_track_error(__s64 error_code)
     case EACCES:
     case EPERM:
     case ETIMEDOUT:
+    case EMFILE:
+    case EDQUOT:
         return 1;
     default:
         return 0;
@@ -402,6 +408,12 @@ int trace_sys_exit(struct trace_event_raw_sys_exit *ctx)
             break;
         case EIO:
             __sync_fetch_and_add(&st->eio_count, 1);
+            break;
+        case EMFILE:
+            __sync_fetch_and_add(&st->emfile_count, 1);
+            break;
+        case EDQUOT:
+            __sync_fetch_and_add(&st->edquot_count, 1);
             break;
         }
     }

@@ -40,9 +40,34 @@ type Collector struct {
 	name      string
 	logger    *zap.Logger
 	eventChan chan *domain.ObservationEvent
+	stopped   bool
 }
 
-// NewCollector creates a new syscall error collector (stub for non-Linux)
+// Config holds collector configuration
+type Config struct {
+	RingBufferSize    int
+	EventChannelSize  int
+	RateLimitMs       int
+	EnabledCategories map[string]bool // Map for O(1) lookup
+	RequireAllMetrics bool            // If true, fail startup when metrics can't be created
+}
+
+// DefaultConfig returns default configuration
+func DefaultConfig() *Config {
+	return &Config{
+		RingBufferSize:   8 * 1024 * 1024,
+		EventChannelSize: 10000,
+		RateLimitMs:      100,
+		EnabledCategories: map[string]bool{
+			"file":    true,
+			"network": true,
+			"memory":  true,
+		},
+		RequireAllMetrics: false,
+	}
+}
+
+// NewCollector creates a stub collector for non-Linux systems
 func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 	if config == nil {
 		config = DefaultConfig()
@@ -65,7 +90,10 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
-	close(c.eventChan)
+	if !c.stopped {
+		close(c.eventChan)
+		c.stopped = true
+	}
 	return nil
 }
 
@@ -81,5 +109,5 @@ func (c *Collector) GetName() string {
 
 // IsHealthy checks if the collector is healthy
 func (c *Collector) IsHealthy() bool {
-	return false // Always unhealthy on non-Linux
+	return !c.stopped
 }

@@ -444,8 +444,9 @@ func TestPollContainersWithMockClient(t *testing.T) {
 	collector.ctx, collector.cancel = context.WithCancel(context.Background())
 	defer collector.cancel()
 
-	// Call pollContainers directly
-	collector.pollContainers()
+	// Load initial state
+	err = collector.loadInitialState(context.Background())
+	require.NoError(t, err)
 
 	// Verify the mock was called
 	mockClient.AssertExpectations(t)
@@ -473,18 +474,19 @@ func TestPollContainersListError(t *testing.T) {
 	collector.ctx, collector.cancel = context.WithCancel(context.Background())
 	defer collector.cancel()
 
-	// Call pollContainers directly - should handle error gracefully
-	collector.pollContainers()
+	// Load initial state - should handle error
+	err = collector.loadInitialState(context.Background())
+	require.Error(t, err)
 
 	// Verify the mock was called
 	mockClient.AssertExpectations(t)
 }
 
-func TestMonitorLoop(t *testing.T) {
+func TestStreamMonitorReconnect(t *testing.T) {
 	cfg := &Config{
 		SocketPath:   "/tmp/test.sock",
 		BufferSize:   100,
-		PollInterval: 50 * time.Millisecond, // Short interval for testing
+		PollInterval: 50 * time.Millisecond, // Not used in streaming
 	}
 
 	collector, err := NewCollector("test-cri", cfg)
@@ -494,17 +496,15 @@ func TestMonitorLoop(t *testing.T) {
 	mockClient := &MockCRIClient{}
 	collector.client = mockClient
 
-	// Setup mock to return empty container list multiple times
-	mockClient.On("ListContainers", mock.Anything, &cri.ListContainersRequest{}).Return(
-		&cri.ListContainersResponse{
-			Containers: []*cri.Container{},
-		}, nil).Maybe() // Allow any number of calls
+	// Setup mock to return event stream
+	mockClient.On("GetContainerEvents", mock.Anything, &cri.GetEventsRequest{}).Return(
+		nil, fmt.Errorf("stream error")).Maybe()
 
-	// Start monitor in goroutine
+	// Start stream monitor in goroutine
 	ctx, cancel := context.WithCancel(context.Background())
 	collector.ctx, collector.cancel = context.WithCancel(ctx)
 
-	go collector.monitor()
+	go collector.streamMonitor()
 
 	// Let it run for a bit to trigger multiple polls
 	time.Sleep(150 * time.Millisecond)

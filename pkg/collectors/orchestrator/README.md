@@ -13,10 +13,8 @@ We renamed the package from `pipeline` to `orchestrator` to better reflect its a
 
 ### Migration Path
 ```bash
-# Old import
-import "github.com/yairfalse/tapio/pkg/collectors/pipeline"
-
-# New import  
+# Import
+import "github.com/yairfalse/tapio/pkg/collectors/orchestrator"  
 import "github.com/yairfalse/tapio/pkg/collectors/orchestrator"
 ```
 
@@ -205,10 +203,7 @@ The orchestrator exposes OpenTelemetry metrics:
 
 1. **Update imports**:
 ```go
-// Old
-import "github.com/yairfalse/tapio/pkg/collectors/pipeline"
-
-// New
+// Import
 import "github.com/yairfalse/tapio/pkg/collectors/orchestrator"
 ```
 

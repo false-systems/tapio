@@ -87,6 +87,7 @@ func TestDefaultConfig(t *testing.T) {
 		"network": true,
 		"memory":  true,
 	}, config.EnabledCategories)
+	assert.False(t, config.RequireAllMetrics)
 }
 
 // Linux-specific tests are in collector_linux_test.go
