@@ -14,6 +14,12 @@ type LinuxCollector struct {
 	*Collector
 }
 
+type CollectorStats struct {
+	Platform      string `json:"platform"`
+	EBPFEnabled   bool   `json:"ebpf_enabled"`
+	LinksAttached int    `json:"links_attached"`
+}
+
 func NewLinuxCollector(config *Config, logger *zap.Logger) (*LinuxCollector, error) {
 	baseCollector, err := NewCollector(config, logger)
 	if err != nil {
@@ -35,10 +41,10 @@ func (c *LinuxCollector) Stop() error {
 	return nil
 }
 
-func (c *LinuxCollector) GetStats() map[string]interface{} {
-	return map[string]interface{}{
-		"platform":     "non-linux",
-		"ebpf_enabled": false,
-		"supported":    false,
+func (c *LinuxCollector) GetStats() CollectorStats {
+	return CollectorStats{
+		Platform:      "non-linux",
+		EBPFEnabled:   false,
+		LinksAttached: 0,
 	}
 }

@@ -317,10 +317,16 @@ func (c *LinuxCollector) cleanup() {
 	c.logger.Debug("eBPF resources cleaned up")
 }
 
-func (c *LinuxCollector) GetStats() map[string]interface{} {
-	stats := make(map[string]interface{})
-	stats["platform"] = "linux"
-	stats["ebpf_enabled"] = c.bpfObjs != nil
-	stats["links_attached"] = len(c.links)
-	return stats
+type CollectorStats struct {
+	Platform      string `json:"platform"`
+	EBPFEnabled   bool   `json:"ebpf_enabled"`
+	LinksAttached int    `json:"links_attached"`
+}
+
+func (c *LinuxCollector) GetStats() CollectorStats {
+	return CollectorStats{
+		Platform:      "linux",
+		EBPFEnabled:   c.bpfObjs != nil,
+		LinksAttached: len(c.links),
+	}
 }
