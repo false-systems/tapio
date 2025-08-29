@@ -666,5 +666,3 @@ func (c *Collector) extractKubernetesContext(cgroupID uint64, containerID string
 	// Placeholder - in production you'd maintain a service->pod mapping
 	return namespace, serviceName
 }
-
-

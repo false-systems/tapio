@@ -329,7 +329,6 @@ func (c *Collector) GetDNSStats() *DNSStats {
 	}
 }
 
-
 // updateStats updates internal statistics
 func (c *Collector) updateStats(eventsProcessed, eventsDropped, errorCount int64) {
 	c.mu.Lock()

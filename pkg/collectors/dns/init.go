@@ -19,7 +19,7 @@ func RegisterDNSCollector() {
 	factory := func(name string, config *orchestrator.CollectorConfigData, logger *zap.Logger) (collectors.Collector, error) {
 		// Convert YAML config to DNS-specific config
 		dnsConfig := DefaultConfig()
-		
+
 		// Apply configuration from YAML
 		if config != nil {
 			if config.BufferSize > 0 {
@@ -27,7 +27,7 @@ func RegisterDNSCollector() {
 			}
 			dnsConfig.EnableEBPF = config.EnableEBPF
 			dnsConfig.ContainerIDExtraction = true // Enable for operational monitoring
-			dnsConfig.ParseAnswers = true // Enable for operational monitoring
+			dnsConfig.ParseAnswers = true          // Enable for operational monitoring
 		}
 
 		// Create the DNS collector
@@ -46,13 +46,13 @@ func RegisterDNSCollector() {
 // CreateDNSCollector creates a new DNS collector with the given configuration
 func CreateDNSCollector(config *collectors.CollectorConfig) (collectors.Collector, error) {
 	dnsConfig := DefaultConfig()
-	
+
 	if config != nil {
 		dnsConfig.BufferSize = config.BufferSize
 		if config.Labels != nil {
 			dnsConfig.Labels = config.Labels
 		}
 	}
-	
+
 	return NewCollector("dns", dnsConfig)
 }

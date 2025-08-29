@@ -22,7 +22,7 @@ func main() {
 
 	// Create DNS collector config with fallback mode
 	config := dns.DefaultConfig()
-	config.EnableEBPF = false  // Disable eBPF due to kernel compatibility issues
+	config.EnableEBPF = false // Disable eBPF due to kernel compatibility issues
 	config.BufferSize = 1000
 
 	logger.Info("Starting DNS collector test",
