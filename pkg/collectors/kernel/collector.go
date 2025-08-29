@@ -1,9 +1,15 @@
+//go:build linux
+// +build linux
+
 package kernel
 
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
@@ -24,6 +30,9 @@ type Collector struct {
 	healthy bool
 	config  *Config
 	mu      sync.RWMutex
+
+	// Mock mode for development
+	mockMode bool
 
 	// eBPF components (platform-specific)
 	ebpfState interface{}
@@ -47,6 +56,12 @@ func NewCollector(name string, cfg *Config) (*Collector, error) {
 	logger, err := zap.NewProduction()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
+	}
+
+	// Check for mock mode
+	mockMode := os.Getenv("TAPIO_MOCK_MODE") == "true"
+	if mockMode {
+		logger.Info("Kernel collector running in MOCK MODE", zap.String("name", name))
 	}
 
 	// Initialize minimal OTEL components
@@ -99,6 +114,7 @@ func NewCollector(name string, cfg *Config) (*Collector, error) {
 		logger:          logger.Named(name),
 		tracer:          tracer,
 		config:          cfg,
+		mockMode:        mockMode,
 		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
 		healthy:         true, // Start as healthy - will be updated when Start() is called
 		eventsProcessed: eventsProcessed,
@@ -212,7 +228,17 @@ func (c *Collector) Start(ctx context.Context) error {
 	defer span.End()
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
-	c.logger.Info("Starting kernel collector", zap.Bool("enable_ebpf", c.config.EnableEBPF))
+	c.logger.Info("Starting kernel collector",
+		zap.Bool("enable_ebpf", c.config.EnableEBPF),
+		zap.Bool("mock_mode", c.mockMode))
+
+	// Check if we're in mock mode
+	if c.mockMode {
+		c.logger.Info("Starting kernel collector in mock mode")
+		go c.generateMockEvents()
+		c.healthy = true
+		return nil
+	}
 
 	// Start eBPF monitoring if enabled
 	if c.config.EnableEBPF {
@@ -275,4 +301,88 @@ func (c *Collector) IsHealthy() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.healthy
+}
+
+// generateMockEvents generates fake kernel events for development/testing
+func (c *Collector) generateMockEvents() {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	syscalls := []string{
+		"open", "read", "write", "close", "mmap", "munmap",
+		"socket", "connect", "accept", "sendto", "recvfrom",
+		"fork", "execve", "exit", "kill", "ptrace",
+	}
+
+	processes := []string{
+		"nginx", "redis", "postgres", "kubelet", "containerd",
+		"dockerd", "systemd", "sshd", "etcd", "kube-apiserver",
+	}
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			// Generate random kernel event
+			eventType := rand.Intn(3)
+
+			// Create mock kernel event with proper types
+			mockEvent := &KernelEvent{
+				Timestamp: uint64(time.Now().UnixNano()),
+				PID:       uint32(1000 + rand.Intn(10000)),
+				TID:       uint32(1000 + rand.Intn(10000)),
+				UID:       uint32(rand.Intn(1000)),
+				GID:       uint32(rand.Intn(1000)),
+			}
+
+			// Set process name
+			comm := processes[rand.Intn(len(processes))]
+			copy(mockEvent.Comm[:], comm)
+
+			switch eventType {
+			case 0: // Syscall event
+				mockEvent.EventType = 1                    // KERNEL_EVENT_SYSCALL
+				mockEvent.Syscall = uint32(rand.Intn(400)) // Random syscall number
+				mockEvent.Retval = int64(rand.Intn(2) - 1) // -1 or 0
+
+			case 1: // Process event
+				mockEvent.EventType = 2 // KERNEL_EVENT_PROCESS
+				mockEvent.PPID = uint32(1 + rand.Intn(1000))
+
+			case 2: // Security event
+				mockEvent.EventType = 3                // KERNEL_EVENT_SECURITY
+				mockEvent.Retval = int64(rand.Intn(3)) // Security violation type
+			}
+
+			// Convert to CollectorEvent
+			collectorEvent := &domain.CollectorEvent{
+				Type:      domain.EventTypeKernel,
+				Timestamp: time.Now(),
+				Source:    c.name,
+				Priority:  domain.PriorityNormal,
+				Data:      mockEvent,
+				Metadata: domain.EventMetadata{
+					Component: c.name,
+					Host:      "mock-host",
+					Attributes: map[string]string{
+						"mock":       "true",
+						"event_type": fmt.Sprintf("%d", mockEvent.EventType),
+						"pid":        fmt.Sprintf("%d", mockEvent.PID),
+					},
+				},
+			}
+
+			// Send event
+			select {
+			case c.events <- collectorEvent:
+				if c.eventsProcessed != nil {
+					c.eventsProcessed.Add(c.ctx, 1)
+				}
+				c.logger.Debug("Generated mock kernel event")
+			case <-c.ctx.Done():
+				return
+			}
+		}
+	}
 }

@@ -42,6 +42,69 @@ Replace with strongly-typed structs!
 
 ## ⚠️ CRITICAL DEVELOPMENT WORKFLOW
 
+### PLATFORM REALITY: LINUX-ONLY WITH MOCK MODE
+
+**Tapio is a Linux-native eBPF observability platform. Period.**
+
+#### Development Setup:
+1. **Production**: Linux with eBPF (all collectors working)
+2. **Development on Mac**: Use `TAPIO_MOCK_MODE=true` for local iteration
+3. **Real Testing**: Use Colima VM or Ubuntu machine
+
+#### Mock Mode for Mac Development:
+```bash
+# Run with mock data on Mac
+export TAPIO_MOCK_MODE=true
+go run ./cmd/collectors -config config.yaml
+```
+
+#### Colima for Real eBPF Testing:
+```bash
+# Mount repo and test with real eBPF
+colima start --mount $HOME/projects/tapio:w
+colima ssh
+cd /Users/yair/projects/tapio
+sudo go run ./cmd/collectors -config config.yaml
+```
+
+### COLLECTOR ARCHITECTURE (NEW - NO MORE STUBS!)
+
+**All collectors follow this pattern:**
+- `collector.go` - Main implementation with `//go:build linux` tag
+- Mock mode support via `TAPIO_MOCK_MODE=true` environment variable
+- NO `collector_stub.go` files (deleted)
+- NO `collector_linux.go` files (merged into main)
+
+#### Example Collector Structure:
+```go
+//go:build linux
+// +build linux
+
+package dns
+
+func NewCollector(name string, cfg Config) (*Collector, error) {
+    // Check for mock mode
+    mockMode := os.Getenv("TAPIO_MOCK_MODE") == "true"
+    if mockMode {
+        logger.Info("Running in MOCK MODE")
+    }
+    // ...
+}
+
+func (c *Collector) Start(ctx context.Context) error {
+    if c.mockMode {
+        go c.generateMockEvents()
+        return nil
+    }
+    // Real eBPF code here
+    return c.startEBPF()
+}
+
+func (c *Collector) generateMockEvents() {
+    // Generate realistic fake events for testing
+}
+```
+
 ### REFACTOR MODE (TEMPORARY - FOR MEGA REFACTOR ONLY)
 During major refactoring, use incremental validation for faster iteration:
 

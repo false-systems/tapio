@@ -213,12 +213,12 @@ func (c *YAMLConfig) ToOrchestratorConfig() Config {
 // toNATSConfig converts YAML NATS config to internal NATS config
 func (c *YAMLConfig) toNATSConfig() *config.NATSConfig {
 	natsConfig := &config.NATSConfig{
-		URL:           c.Orchestrator.NATS.URL,
-		Subject:       c.Orchestrator.NATS.Subject,
-		MaxReconnects: c.Orchestrator.NATS.MaxReconnects,
-		Username:      c.Orchestrator.NATS.Username,
-		Password:      c.Orchestrator.NATS.Password,
-		Token:         c.Orchestrator.NATS.Token,
+		URL:              c.Orchestrator.NATS.URL,
+		Name:             "tapio-orchestrator",
+		MaxReconnects:    c.Orchestrator.NATS.MaxReconnects,
+		JetStreamEnabled: true,
+		// Map subject to stream subjects
+		RawEventsSubjects: []string{c.Orchestrator.NATS.Subject},
 	}
 
 	return natsConfig
