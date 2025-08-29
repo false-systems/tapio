@@ -7,13 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // TestCollectorBasicFunctionality tests basic collector functionality
 func TestCollectorBasicFunctionality(t *testing.T) {
 	config := DefaultConfig()
-	config.EnableIntelligence = true
 
 	collector, err := NewCollector("test-dns", config)
 	require.NoError(t, err)
@@ -29,12 +27,8 @@ func TestCollectorBasicFunctionality(t *testing.T) {
 	// Verify collector is healthy
 	assert.True(t, collector.IsHealthy())
 
-	// Verify intelligence components are initialized
-	if config.EnableIntelligence {
-		assert.NotNil(t, collector.smartFilter)
-		assert.NotNil(t, collector.learningEngine)
-		assert.NotNil(t, collector.circuitBreaker)
-	}
+	// Verify circuit breaker is initialized
+	assert.NotNil(t, collector.circuitBreaker)
 
 	// Stop collector
 	err = collector.Stop()
@@ -48,36 +42,17 @@ func TestCollectorConfigDefaults(t *testing.T) {
 	assert.Equal(t, "dns", config.Name)
 	assert.Equal(t, 10000, config.BufferSize)
 	assert.True(t, config.EnableEBPF)
-	assert.True(t, config.EnableIntelligence)
 	assert.True(t, config.ContainerIDExtraction)
-	assert.True(t, config.EnableDNSCacheMetrics)
 	assert.True(t, config.ParseAnswers)
-
-	// Check learning config defaults
-	assert.True(t, config.LearningConfig.Enabled)
-	assert.Equal(t, 24*time.Hour, config.LearningConfig.BaselinePeriod)
-	assert.Equal(t, 3.0, config.LearningConfig.AnomalyThreshold)
 
 	// Check circuit breaker defaults
 	assert.True(t, config.CircuitBreakerConfig.Enabled)
 	assert.Equal(t, 10, config.CircuitBreakerConfig.FailureThreshold)
-
-	// Check smart filter defaults
-	assert.Equal(t, FilteringModeBaseline, config.SmartFilterConfig.Mode)
-	assert.Equal(t, 0.1, config.SmartFilterConfig.SamplingRate)
-	assert.True(t, config.SmartFilterConfig.AdaptiveSampling)
+	assert.Equal(t, 30*time.Second, config.CircuitBreakerConfig.RecoveryTimeout)
 }
 
-// TestIntelligenceComponents tests individual intelligence components
-func TestIntelligenceComponents(t *testing.T) {
-	// Test Learning Engine
-	learningConfig := DefaultLearningConfig()
-	learningEngine := NewDNSLearningEngine(learningConfig, nil)
-	assert.NotNil(t, learningEngine)
-
-	stats := learningEngine.GetLearningStats()
-	assert.NotNil(t, stats)
-
+// TestCircuitBreakerComponent tests circuit breaker component
+func TestCircuitBreakerComponent(t *testing.T) {
 	// Test Circuit Breaker
 	cbConfig := DefaultCircuitBreakerConfig()
 	circuitBreaker := NewCircuitBreaker(cbConfig, nil)
@@ -85,13 +60,11 @@ func TestIntelligenceComponents(t *testing.T) {
 	assert.True(t, circuitBreaker.AllowRequest())
 	assert.Equal(t, CircuitClosed, circuitBreaker.GetState())
 
-	// Test Smart Filter
-	smartConfig := DefaultSmartFilterConfig()
-	smartFilter := NewSmartFilter(smartConfig, learningEngine, circuitBreaker, nil)
-	assert.NotNil(t, smartFilter)
-
-	stats = smartFilter.GetStats()
+	// Test circuit breaker stats
+	stats := circuitBreaker.GetStats()
 	assert.NotNil(t, stats)
+	assert.Equal(t, "closed", stats.State)
+	assert.True(t, stats.Enabled)
 }
 
 // TestDNSEventProcessing tests basic DNS event processing
@@ -100,32 +73,17 @@ func TestDNSEventProcessing(t *testing.T) {
 	collector, err := NewCollector("test", config)
 	require.NoError(t, err)
 
-	// Create a test DNS event
-	event := &domain.CollectorEvent{
-		EventID:   "test-1",
-		Type:      domain.EventTypeDNS,
-		Timestamp: time.Now(),
-		Source:    "test",
-		Severity:  domain.EventSeverityInfo,
-		EventData: domain.EventDataContainer{
-			DNS: &domain.DNSData{
-				QueryName:    "test.com",
-				QueryType:    "A",
-				ResponseCode: 0,
-				Duration:     30 * time.Millisecond,
-			},
-		},
-		Metadata: domain.EventMetadata{
-			Attributes: make(map[string]string),
-		},
-	}
+	// Test that collector can process basic DNS events via its event channel
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
 
-	// Test event conversion
-	dnsEvent := collector.convertToLearningEvent(event)
-	assert.NotNil(t, dnsEvent)
-	assert.Equal(t, "test.com", dnsEvent.QueryName)
-	assert.Equal(t, DNSQueryTypeA, dnsEvent.QueryType)
-	assert.Equal(t, uint32(30), dnsEvent.LatencyMs)
+	err = collector.Start(ctx)
+	require.NoError(t, err)
+	defer collector.Stop()
+
+	// Verify events channel is available
+	eventsChan := collector.Events()
+	assert.NotNil(t, eventsChan)
 }
 
 // TestContainerIDExtractionBasic tests container ID extraction logic
@@ -155,22 +113,6 @@ func TestContainerIDExtractionBasic(t *testing.T) {
 			result := collector.extractContainerID(tc.cgroupID)
 			assert.Equal(t, tc.expected, result)
 		})
-	}
-}
-
-// TestFilteringModes tests different filtering modes
-func TestFilteringModes(t *testing.T) {
-	modes := []FilteringMode{
-		FilteringModePassthrough,
-		FilteringModeBaseline,
-		FilteringModeIntelligent,
-		FilteringModeEmergency,
-	}
-
-	expectedStrings := []string{"passthrough", "baseline", "intelligent", "emergency"}
-
-	for i, mode := range modes {
-		assert.Equal(t, expectedStrings[i], mode.String())
 	}
 }
 

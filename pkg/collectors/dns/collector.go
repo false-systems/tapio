@@ -15,34 +15,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// Config for DNS collector with intelligent features
+// Config for DNS collector focused on operational monitoring
 type Config struct {
 	Name                  string               `json:"name"`
 	BufferSize            int                  `json:"buffer_size"`
 	EnableEBPF            bool                 `json:"enable_ebpf"`
 	XDPInterfaces         []string             `json:"xdp_interfaces,omitempty"` // Specific interfaces for XDP
-	EnableIntelligence    bool                 `json:"enable_intelligence"`      // Enable smart filtering and learning
-	LearningConfig        DNSLearningConfig    `json:"learning_config"`
 	CircuitBreakerConfig  CircuitBreakerConfig `json:"circuit_breaker_config"`
-	SmartFilterConfig     SmartFilterConfig    `json:"smart_filter_config"`
 	ContainerIDExtraction bool                 `json:"container_id_extraction"` // Enable container ID parsing
-	EnableDNSCacheMetrics bool                 `json:"enable_dns_cache_metrics"`
-	ParseAnswers          bool                 `json:"parse_answers"` // Parse DNS answers for resolved IPs
+	ParseAnswers          bool                 `json:"parse_answers"`           // Parse DNS answers for resolved IPs
+	Labels                map[string]string    `json:"labels,omitempty"`        // Labels to add to all events
 }
 
-// DefaultConfig returns sensible defaults with intelligence enabled
+// DefaultConfig returns sensible defaults for operational monitoring
 func DefaultConfig() Config {
 	return Config{
 		Name:                  "dns",
 		BufferSize:            10000,
 		EnableEBPF:            true,
 		XDPInterfaces:         nil, // Auto-detect if nil
-		EnableIntelligence:    true,
-		LearningConfig:        DefaultLearningConfig(),
 		CircuitBreakerConfig:  DefaultCircuitBreakerConfig(),
-		SmartFilterConfig:     DefaultSmartFilterConfig(),
 		ContainerIDExtraction: true,
-		EnableDNSCacheMetrics: true,
 		ParseAnswers:          true,
 	}
 }
@@ -60,7 +53,7 @@ type RawDNSEvent struct {
 	Data      [512]byte
 }
 
-// Collector implements intelligent DNS monitoring via eBPF with learning and filtering
+// Collector implements DNS monitoring via eBPF with operational focus
 type Collector struct {
 	// Core
 	name    string
@@ -75,7 +68,7 @@ type Collector struct {
 	stats *DNSStats
 
 	// eBPF components (platform-specific)
-	ebpfStateLinux *eBPFState // Linux-specific eBPF state
+	ebpfState *eBPFState // Linux-specific eBPF state
 
 	// Error handling
 	consecutiveErrors int
@@ -84,31 +77,23 @@ type Collector struct {
 	// Event processing
 	events chan *domain.CollectorEvent
 
-	// Intelligence components
-	learningEngine *DNSLearningEngine
+	// Fault tolerance
 	circuitBreaker *CircuitBreaker
-	smartFilter    *SmartFilter
 
 	// Container tracking
 	containerCache map[uint64]string // cgroup_id -> container_id
 	cacheMutex     sync.RWMutex      // Separate mutex for cache
 
-	// DNS cache effectiveness tracking
-	dnsCacheMetrics map[string]*DNSCache
-
-	// OpenTelemetry metrics (enhanced)
-	tracer                 trace.Tracer
-	eventsProcessed        metric.Int64Counter
-	errorsTotal            metric.Int64Counter
-	processingTime         metric.Float64Histogram
-	bufferUsage            metric.Int64Gauge
-	droppedEvents          metric.Int64Counter
-	anomaliesDetected      metric.Int64Counter
-	learningModeGauge      metric.Int64Gauge
-	circuitBreakerState    metric.Int64Gauge
-	filteringEffectiveness metric.Float64Gauge
-	cacheHitRate           metric.Float64Gauge
-	intelligenceEnabled    metric.Int64Gauge
+	// OpenTelemetry metrics - focused on operational metrics
+	tracer             trace.Tracer
+	eventsProcessed    metric.Int64Counter
+	errorsTotal        metric.Int64Counter
+	processingTime     metric.Float64Histogram
+	bufferUsage        metric.Int64Gauge
+	droppedEvents      metric.Int64Counter
+	dnsLatency         metric.Float64Histogram
+	dnsFailures        metric.Int64Counter
+	circuitBreakerHits metric.Int64Counter
 }
 
 // NewCollector creates a new DNS collector
@@ -119,11 +104,11 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Initialize minimal OTEL components
+	// Initialize OTEL components for operational metrics
 	tracer := otel.Tracer(name)
 	meter := otel.Meter(name)
 
-	// Only essential metrics
+	// Essential operational metrics
 	eventsProcessed, err := meter.Int64Counter(
 		fmt.Sprintf("%s_events_processed_total", name),
 		metric.WithDescription(fmt.Sprintf("Total DNS events processed by %s", name)),
@@ -164,111 +149,51 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		logger.Warn("Failed to create dropped events counter", zap.Error(err))
 	}
 
-	// Enhanced metrics for intelligence features
-	anomaliesDetected, err := meter.Int64Counter(
-		fmt.Sprintf("%s_anomalies_detected_total", name),
-		metric.WithDescription(fmt.Sprintf("Total DNS anomalies detected by %s", name)),
+	// DNS-specific operational metrics
+	dnsLatency, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_dns_latency_ms", name),
+		metric.WithDescription(fmt.Sprintf("DNS query latency in milliseconds for %s", name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create anomalies counter", zap.Error(err))
+		logger.Warn("Failed to create DNS latency histogram", zap.Error(err))
 	}
 
-	learningModeGauge, err := meter.Int64Gauge(
-		fmt.Sprintf("%s_learning_mode", name),
-		metric.WithDescription(fmt.Sprintf("Current learning mode for %s (0=passthrough, 1=baseline, 2=intelligent, 3=emergency)", name)),
+	dnsFailures, err := meter.Int64Counter(
+		fmt.Sprintf("%s_dns_failures_total", name),
+		metric.WithDescription(fmt.Sprintf("Total DNS failures for %s", name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create learning mode gauge", zap.Error(err))
+		logger.Warn("Failed to create DNS failures counter", zap.Error(err))
 	}
 
-	circuitBreakerState, err := meter.Int64Gauge(
-		fmt.Sprintf("%s_circuit_breaker_state", name),
-		metric.WithDescription(fmt.Sprintf("Circuit breaker state for %s (0=closed, 1=open, 2=half-open)", name)),
+	circuitBreakerHits, err := meter.Int64Counter(
+		fmt.Sprintf("%s_circuit_breaker_hits_total", name),
+		metric.WithDescription(fmt.Sprintf("Total circuit breaker hits for %s", name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create circuit breaker state gauge", zap.Error(err))
+		logger.Warn("Failed to create circuit breaker hits counter", zap.Error(err))
 	}
 
-	filteringEffectiveness, err := meter.Float64Gauge(
-		fmt.Sprintf("%s_filtering_effectiveness", name),
-		metric.WithDescription(fmt.Sprintf("Filtering effectiveness ratio for %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create filtering effectiveness gauge", zap.Error(err))
-	}
-
-	cacheHitRate, err := meter.Float64Gauge(
-		fmt.Sprintf("%s_cache_hit_rate", name),
-		metric.WithDescription(fmt.Sprintf("DNS cache hit rate for %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create cache hit rate gauge", zap.Error(err))
-	}
-
-	intelligenceEnabled, err := meter.Int64Gauge(
-		fmt.Sprintf("%s_intelligence_enabled", name),
-		metric.WithDescription(fmt.Sprintf("Intelligence features enabled for %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create intelligence enabled gauge", zap.Error(err))
-	}
-
-	// Initialize intelligence components if enabled
-	var learningEngine *DNSLearningEngine
-	var circuitBreaker *CircuitBreaker
-	var smartFilter *SmartFilter
-
-	if cfg.EnableIntelligence {
-		learningEngine = NewDNSLearningEngine(cfg.LearningConfig, logger)
-		circuitBreaker = NewCircuitBreaker(cfg.CircuitBreakerConfig, logger)
-		smartFilter = NewSmartFilter(cfg.SmartFilterConfig, learningEngine, circuitBreaker, logger)
-
-		logger.Info("DNS intelligence features enabled",
-			zap.String("filtering_mode", cfg.SmartFilterConfig.Mode.String()),
-			zap.Duration("baseline_period", cfg.LearningConfig.BaselinePeriod),
-			zap.Float64("anomaly_threshold", cfg.LearningConfig.AnomalyThreshold))
-	}
+	// Initialize circuit breaker for fault tolerance
+	circuitBreaker := NewCircuitBreaker(cfg.CircuitBreakerConfig, logger)
 
 	collector := &Collector{
-		name:                   name,
-		logger:                 logger,
-		config:                 cfg,
-		stats:                  &DNSStats{},
-		events:                 make(chan *domain.CollectorEvent, cfg.BufferSize),
-		learningEngine:         learningEngine,
-		circuitBreaker:         circuitBreaker,
-		smartFilter:            smartFilter,
-		containerCache:         make(map[uint64]string),
-		dnsCacheMetrics:        make(map[string]*DNSCache),
-		tracer:                 tracer,
-		eventsProcessed:        eventsProcessed,
-		errorsTotal:            errorsTotal,
-		processingTime:         processingTime,
-		bufferUsage:            bufferUsage,
-		droppedEvents:          droppedEvents,
-		anomaliesDetected:      anomaliesDetected,
-		learningModeGauge:      learningModeGauge,
-		circuitBreakerState:    circuitBreakerState,
-		filteringEffectiveness: filteringEffectiveness,
-		cacheHitRate:           cacheHitRate,
-		intelligenceEnabled:    intelligenceEnabled,
-	}
-
-	// Set initial metric values
-	if intelligenceEnabled != nil {
-		if cfg.EnableIntelligence {
-			intelligenceEnabled.Record(context.Background(), 1)
-		} else {
-			intelligenceEnabled.Record(context.Background(), 0)
-		}
-	}
-
-	if learningModeGauge != nil && cfg.EnableIntelligence {
-		learningModeGauge.Record(context.Background(), int64(cfg.SmartFilterConfig.Mode))
-	}
-
-	if circuitBreakerState != nil && cfg.EnableIntelligence {
-		circuitBreakerState.Record(context.Background(), int64(CircuitClosed))
+		name:               name,
+		logger:             logger,
+		config:             cfg,
+		stats:              &DNSStats{},
+		events:             make(chan *domain.CollectorEvent, cfg.BufferSize),
+		circuitBreaker:     circuitBreaker,
+		containerCache:     make(map[uint64]string),
+		tracer:             tracer,
+		eventsProcessed:    eventsProcessed,
+		errorsTotal:        errorsTotal,
+		processingTime:     processingTime,
+		bufferUsage:        bufferUsage,
+		droppedEvents:      droppedEvents,
+		dnsLatency:         dnsLatency,
+		dnsFailures:        dnsFailures,
+		circuitBreakerHits: circuitBreakerHits,
 	}
 
 	return collector, nil
@@ -289,6 +214,7 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	if !c.config.EnableEBPF {
 		c.healthy = true
+		c.logger.Info("eBPF disabled, collector running without event generation")
 		return nil
 	}
 
@@ -332,203 +258,9 @@ func (c *Collector) Stop() error {
 	return nil
 }
 
-// Events returns the event channel with intelligent processing
+// Events returns the event channel
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	if c.config.EnableIntelligence && c.smartFilter != nil {
-		return c.getIntelligentEvents()
-	}
 	return c.events
-}
-
-// getIntelligentEvents processes events through the intelligent pipeline
-func (c *Collector) getIntelligentEvents() <-chan *domain.CollectorEvent {
-	intelligentEvents := make(chan *domain.CollectorEvent, c.config.BufferSize)
-
-	go func() {
-		defer close(intelligentEvents)
-
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case event, ok := <-c.events:
-				if !ok {
-					return
-				}
-
-				// Process through intelligent filter
-				ctx, span := c.tracer.Start(c.ctx, "dns.intelligent_processing")
-				filteredEvent, shouldEmit, err := c.smartFilter.FilterEvent(ctx, event)
-				if err != nil {
-					c.logger.Debug("Error in intelligent filtering",
-						zap.Error(err),
-						zap.String("query", event.EventData.DNS.QueryName))
-					span.RecordError(err)
-
-					// Fallback: emit original event
-					select {
-					case intelligentEvents <- event:
-					case <-c.ctx.Done():
-						span.End()
-						return
-					}
-					span.End()
-					continue
-				}
-
-				if shouldEmit {
-					// Use filtered event if available, otherwise original
-					emitEvent := event
-					if filteredEvent != nil && filteredEvent.Event != nil {
-						emitEvent = filteredEvent.Event
-						// Add filtering metadata
-						if emitEvent.Metadata.Attributes == nil {
-							emitEvent.Metadata.Attributes = make(map[string]string)
-						}
-						emitEvent.Metadata.Attributes["filter_importance"] = filteredEvent.Importance.String()
-						emitEvent.Metadata.Attributes["filter_score"] = fmt.Sprintf("%.2f", filteredEvent.Score)
-						emitEvent.Metadata.Attributes["filter_reason"] = filteredEvent.Reason
-					}
-
-					// Record anomaly if detected
-					if c.learningEngine != nil {
-						if anomaly, err := c.learningEngine.ProcessEvent(ctx, c.convertToLearningEvent(event)); err == nil && anomaly != nil {
-							if c.anomaliesDetected != nil {
-								c.anomaliesDetected.Add(ctx, 1, metric.WithAttributes(
-									attribute.String("anomaly_type", anomaly.AnomalyType),
-									attribute.String("severity", string(anomaly.Severity)),
-								))
-							}
-
-							// Add anomaly metadata
-							emitEvent.Metadata.Attributes["anomaly_detected"] = "true"
-							emitEvent.Metadata.Attributes["anomaly_type"] = anomaly.AnomalyType
-							emitEvent.Metadata.Attributes["anomaly_severity"] = string(anomaly.Severity)
-							emitEvent.Metadata.Attributes["baseline_deviation"] = fmt.Sprintf("%.2f", anomaly.BaselineDeviation)
-
-							// Upgrade severity if anomaly is severe
-							if anomaly.Severity == domain.EventSeverityHigh {
-								emitEvent.Severity = domain.EventSeverityHigh
-							}
-						}
-					}
-
-					select {
-					case intelligentEvents <- emitEvent:
-						// Update filtering effectiveness metrics
-						if c.filteringEffectiveness != nil {
-							stats := c.smartFilter.GetStats()
-							if effectiveness, ok := stats["filtering_effectiveness"].(float64); ok {
-								c.filteringEffectiveness.Record(ctx, effectiveness)
-							}
-						}
-					case <-c.ctx.Done():
-						span.End()
-						return
-					}
-				} else {
-					// Event was filtered out, update dropped events metric
-					if c.droppedEvents != nil {
-						c.droppedEvents.Add(ctx, 1, metric.WithAttributes(
-							attribute.String("reason", "intelligent_filter"),
-						))
-					}
-				}
-				span.End()
-
-				// Update learning mode metrics
-				if c.learningModeGauge != nil && c.learningEngine != nil {
-					stats := c.learningEngine.GetLearningStats()
-					if mode, ok := stats["mode"].(string); ok {
-						var modeValue int64
-						switch mode {
-						case "passthrough":
-							modeValue = 0
-						case "baseline":
-							modeValue = 1
-						case "intelligent":
-							modeValue = 2
-						case "emergency":
-							modeValue = 3
-						}
-						c.learningModeGauge.Record(ctx, modeValue)
-					}
-				}
-
-				// Update circuit breaker metrics
-				if c.circuitBreakerState != nil && c.circuitBreaker != nil {
-					state := c.circuitBreaker.GetState()
-					c.circuitBreakerState.Record(ctx, int64(state))
-				}
-			}
-		}
-	}()
-
-	return intelligentEvents
-}
-
-// convertToLearningEvent converts domain event to learning engine format
-func (c *Collector) convertToLearningEvent(event *domain.CollectorEvent) *DNSEvent {
-	if event.EventData.DNS == nil {
-		return nil
-	}
-
-	dns := event.EventData.DNS
-	process := event.EventData.Process
-	container := event.EventData.Container
-
-	dnsEvent := &DNSEvent{
-		Timestamp:    event.Timestamp,
-		EventType:    DNSEventTypeQuery,
-		QueryName:    dns.QueryName,
-		QueryType:    DNSQueryType(dns.QueryType),
-		ClientIP:     dns.ClientIP,
-		ServerIP:     dns.ServerIP,
-		Success:      dns.ResponseCode == 0,
-		Protocol:     DNSProtocolUDP, // Default to UDP
-		LatencyMs:    uint32(dns.Duration.Nanoseconds() / 1000000),
-		ResponseCode: DNSResponseCode(dns.ResponseCode),
-		ResolvedIP:   "",
-	}
-
-	// Determine event type from context
-	if dns.ResponseCode >= 0 {
-		dnsEvent.EventType = DNSEventTypeResponse
-	}
-	if dns.Duration > 5*time.Second { // 5 second timeout
-		dnsEvent.EventType = DNSEventTypeTimeout
-	}
-	if dns.ResponseCode > 0 {
-		dnsEvent.EventType = DNSEventTypeError
-	}
-
-	// Add process and container context
-	if process != nil {
-		dnsEvent.PID = uint32(process.PID)
-		dnsEvent.ContainerID = process.ContainerID
-	}
-
-	if container != nil {
-		// Extract from container labels if available
-		if container.Labels != nil {
-			if namespace, ok := container.Labels["io.kubernetes.pod.namespace"]; ok {
-				dnsEvent.Namespace = namespace
-			}
-			if serviceName, ok := container.Labels["io.kubernetes.container.name"]; ok {
-				dnsEvent.ServiceName = serviceName
-			}
-		}
-		if dnsEvent.ContainerID == "" {
-			dnsEvent.ContainerID = container.ContainerID
-		}
-	}
-
-	// Extract first resolved IP if available
-	if len(dns.Answers) > 0 {
-		dnsEvent.ResolvedIP = dns.Answers[0]
-	}
-
-	return dnsEvent
 }
 
 // IsHealthy returns health status
@@ -597,6 +329,7 @@ func (c *Collector) GetDNSStats() *DNSStats {
 	}
 }
 
+
 // updateStats updates internal statistics
 func (c *Collector) updateStats(eventsProcessed, eventsDropped, errorCount int64) {
 	c.mu.Lock()
@@ -631,6 +364,9 @@ func (c *Collector) extractContainerID(cgroupID uint64) string {
 
 	// Cache the result
 	c.cacheMutex.Lock()
+	if c.containerCache == nil {
+		c.containerCache = make(map[uint64]string)
+	}
 	c.containerCache[cgroupID] = containerID
 	// Prevent cache from growing too large
 	if len(c.containerCache) > 10000 {
@@ -970,30 +706,4 @@ func (c *Collector) handleDroppedEvent(ctx context.Context, queryName string) {
 // GetEventChannel returns the event channel for reading events
 func (c *Collector) GetEventChannel() <-chan *domain.CollectorEvent {
 	return c.events
-}
-
-// extractQueryName safely extracts DNS query name from byte array
-func (c *Collector) extractQueryName(queryName []byte) string {
-	// Find null terminator or use full length
-	var nameLen int
-	for i, b := range queryName {
-		if b == 0 {
-			nameLen = i
-			break
-		}
-	}
-	if nameLen == 0 {
-		nameLen = len(queryName)
-	}
-
-	// Convert to string and validate
-	name := string(queryName[:nameLen])
-	name = strings.TrimSpace(name)
-
-	// Basic validation - ensure it looks like a domain name
-	if name == "" || !strings.Contains(name, ".") {
-		return ""
-	}
-
-	return name
 }
