@@ -81,14 +81,14 @@ type CollectorStats struct {
 
 // ProcessMemoryInfo contains memory statistics for a process
 type ProcessMemoryInfo struct {
-	PID              uint32 `json:"pid"`
-	ProcessName      string `json:"process_name"`
-	RSSPages         uint64 `json:"rss_pages"`
-	RSSBytes         uint64 `json:"rss_bytes"`
+	PID               uint32 `json:"pid"`
+	ProcessName       string `json:"process_name"`
+	RSSPages          uint64 `json:"rss_pages"`
+	RSSBytes          uint64 `json:"rss_bytes"`
 	ActiveAllocations uint32 `json:"active_allocations"`
-	TotalAllocated   uint64 `json:"total_allocated"`
-	TotalFreed       uint64 `json:"total_freed"`
-	NetAllocated     int64  `json:"net_allocated"` // allocated - freed
-	Container        string `json:"container,omitempty"`
-	CGroupID         uint64 `json:"cgroup_id"`
+	TotalAllocated    uint64 `json:"total_allocated"`
+	TotalFreed        uint64 `json:"total_freed"`
+	NetAllocated      int64  `json:"net_allocated"` // allocated - freed
+	Container         string `json:"container,omitempty"`
+	CGroupID          uint64 `json:"cgroup_id"`
 }

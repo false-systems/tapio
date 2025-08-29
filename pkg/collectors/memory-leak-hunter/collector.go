@@ -45,11 +45,11 @@ type Collector struct {
 	rssGrowthDetected    metric.Int64Counter
 	unfreedMemoryBytes   metric.Int64Gauge
 	largestAllocation    metric.Int64Gauge
-	
+
 	// Pre-processing state (lean filtering)
-	recentStacks     map[uint64]time.Time  // Simple dedup
-	stackMutex       sync.RWMutex
-	lastCleanup      time.Time
+	recentStacks map[uint64]time.Time // Simple dedup
+	stackMutex   sync.RWMutex
+	lastCleanup  time.Time
 }
 
 // NewCollector creates a new memory leak hunter
@@ -350,12 +350,12 @@ func (c *Collector) createDomainEvent(event *MemoryEvent) *domain.CollectorEvent
 
 	// Additional memory-specific data in Custom
 	customData := map[string]string{
-		"operation":   event.EventType.String(),
-		"address":     fmt.Sprintf("0x%x", event.Address),
-		"size_bytes":  fmt.Sprintf("%d", event.Size),
-		"caller_ip":   fmt.Sprintf("0x%x", event.CallerIP),
-		"rss_pages":   fmt.Sprintf("%d", event.RSSPages),
-		"rss_growth":  fmt.Sprintf("%d", event.RSSGrowth),
+		"operation":  event.EventType.String(),
+		"address":    fmt.Sprintf("0x%x", event.Address),
+		"size_bytes": fmt.Sprintf("%d", event.Size),
+		"caller_ip":  fmt.Sprintf("0x%x", event.CallerIP),
+		"rss_pages":  fmt.Sprintf("%d", event.RSSPages),
+		"rss_growth": fmt.Sprintf("%d", event.RSSGrowth),
 	}
 
 	return &domain.CollectorEvent{

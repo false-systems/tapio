@@ -26,17 +26,17 @@ type Config struct {
 
 	// Pre-processing filters (lean logic in collector)
 	MinAllocationSize int64         `json:"min_allocation_size"` // Ignore allocations smaller than this
-	MinUnfreedAge     time.Duration `json:"min_unfreed_age"`      // Only report if unfreed for this long
-	SamplingRate      int           `json:"sampling_rate"`        // 1 in N allocations tracked
-	MaxEventsPerSec   int           `json:"max_events_per_sec"`   // Rate limiting
+	MinUnfreedAge     time.Duration `json:"min_unfreed_age"`     // Only report if unfreed for this long
+	SamplingRate      int           `json:"sampling_rate"`       // 1 in N allocations tracked
+	MaxEventsPerSec   int           `json:"max_events_per_sec"`  // Rate limiting
 
 	// Stack deduplication
 	StackDedupWindow time.Duration `json:"stack_dedup_window"` // Dedup same stacks within window
 
 	// Targeted mode settings
-	TargetPID       int32         `json:"target_pid"`       // Specific PID to track (0 = all)
-	TargetDuration  time.Duration `json:"target_duration"`  // How long to track in targeted mode
-	TargetCGroupID  uint64        `json:"target_cgroup_id"` // Target specific container
+	TargetPID      int32         `json:"target_pid"`       // Specific PID to track (0 = all)
+	TargetDuration time.Duration `json:"target_duration"`  // How long to track in targeted mode
+	TargetCGroupID uint64        `json:"target_cgroup_id"` // Target specific container
 
 	// RSS growth detection
 	RSSGrowthThreshold int64         `json:"rss_growth_threshold"` // Report if RSS grows by this much (pages)
@@ -85,16 +85,16 @@ func DefaultConfig() *Config {
 		Mode: ModeGrowthDetection,
 
 		// Realistic pre-processing
-		MinAllocationSize: 10240,        // 10KB minimum
+		MinAllocationSize: 10240, // 10KB minimum
 		MinUnfreedAge:     30 * time.Second,
-		SamplingRate:      10,            // 1 in 10 for medium allocations
+		SamplingRate:      10, // 1 in 10 for medium allocations
 		MaxEventsPerSec:   1000,
 
 		// Deduplication
 		StackDedupWindow: 10 * time.Second,
 
 		// RSS monitoring
-		RSSGrowthThreshold: 256,            // 1MB in 4KB pages
+		RSSGrowthThreshold: 256, // 1MB in 4KB pages
 		RSSCheckInterval:   30 * time.Second,
 
 		// Targeted mode (disabled by default)

@@ -4,6 +4,7 @@ package systemd
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 

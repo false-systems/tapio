@@ -1,4 +1,5 @@
 //go:build linux
+// +build linux
 
 package systemd
 
@@ -6,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
@@ -28,13 +28,10 @@ type SystemdEvent struct {
 	Pad         [3]uint8
 	Comm        [16]byte
 	ServiceName [64]byte
-	CgroupPath  [64]byte  // Reduced from 256 to fit BPF stack limit
+	CgroupPath  [256]byte
 	ExitCode    uint32
 	Signal      uint32
 }
-
-// eBPFState is defined in collector_linux.go for Linux builds
-// and as an empty struct for non-Linux builds to maintain compatibility
 
 // Collector implements simple systemd monitoring via eBPF
 type Collector struct {
@@ -47,10 +44,9 @@ type Collector struct {
 	healthy bool
 	config  Config
 	mu      sync.RWMutex
-	wg      sync.WaitGroup // For graceful shutdown
 
-	// eBPF components (platform-specific) - properly typed
-	ebpfState *eBPFState
+	// eBPF components (platform-specific)
+	ebpfState interface{}
 
 	// Essential OTEL Metrics (5 core metrics)
 	eventsProcessed metric.Int64Counter
@@ -161,10 +157,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		go c.processEvents()
 	}
 
-	c.mu.Lock()
 	c.healthy = true
-	c.mu.Unlock()
-
 	c.logger.Info("Systemd collector started successfully")
 	span.SetAttributes(attribute.Bool("success", true))
 	return nil
@@ -173,63 +166,34 @@ func (c *Collector) Start(ctx context.Context) error {
 // Stop stops the collector idempotently
 func (c *Collector) Stop() error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if !c.healthy {
-		c.mu.Unlock()
 		return nil // Already stopped
 	}
-	c.healthy = false
-	c.mu.Unlock()
 
 	c.logger.Info("Stopping systemd collector")
 
-	// Signal shutdown
 	if c.cancel != nil {
 		c.cancel()
-	}
-
-	// Wait for goroutines to finish with timeout
-	done := make(chan struct{})
-	go func() {
-		c.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		c.logger.Info("All goroutines stopped gracefully")
-	case <-time.After(5 * time.Second):
-		c.logger.Warn("Timeout waiting for goroutines to stop")
 	}
 
 	// Stop eBPF if running
 	c.stopEBPF()
 
-	// Drain remaining events before closing channel
-	drained := 0
-	for {
-		select {
-		case <-c.events:
-			drained++
-		default:
-			goto done
-		}
-	}
-done:
-	if drained > 0 {
-		c.logger.Info("Drained remaining events", zap.Int("count", drained))
-	}
-
 	close(c.events)
+	c.healthy = false
 
 	c.logger.Info("Systemd collector stopped successfully")
 	return nil
+}
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
-// IsHealthy returns health status (thread-safe)
+// IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

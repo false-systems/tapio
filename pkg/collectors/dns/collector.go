@@ -1,12 +1,25 @@
+//go:build linux
+// +build linux
+
 package dns
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/ringbuf"
+	"github.com/cilium/ebpf/rlimit"
+	"github.com/yairfalse/tapio/pkg/collectors/dns/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -14,6 +27,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
+
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 dnsMonitor ./bpf_src/dns_monitor.c -- -I../bpf_common
 
 // Config for DNS collector focused on operational monitoring
 type Config struct {
@@ -40,20 +55,51 @@ func DefaultConfig() Config {
 	}
 }
 
-// RawDNSEvent represents the DNS event from eBPF - must match C struct exactly
-type RawDNSEvent struct {
+// BPFDNSEvent matches the C struct dns_event exactly for proper memory alignment
+type BPFDNSEvent struct {
 	Timestamp uint64
 	PID       uint32
 	TID       uint32
+	UID       uint32
+	GID       uint32
+	CgroupID  uint64
+
 	EventType uint8
 	Protocol  uint8
-	SrcPort   uint16
-	DstPort   uint16
-	QueryName [128]byte
-	Data      [512]byte
+	IPVersion uint8
+	Pad1      uint8
+
+	// Source address (IPv4 or IPv6)
+	SrcAddr [16]byte // Union of IPv4 (4 bytes) and IPv6 (16 bytes)
+
+	// Destination address (IPv4 or IPv6)
+	DstAddr [16]byte // Union of IPv4 (4 bytes) and IPv6 (16 bytes)
+
+	SrcPort uint16
+	DstPort uint16
+
+	// DNS info
+	DNSID    uint16
+	DNSFlags uint16
+	Opcode   uint8
+	Rcode    uint8
+	QType    uint16
+
+	DataLen   uint32
+	LatencyNs uint32
+
+	QueryName [128]byte // MAX_DNS_NAME_LEN from C
+	Data      [512]byte // MAX_DNS_DATA from C
 }
 
-// Collector implements DNS monitoring via eBPF with operational focus
+// eBPF components
+type ebpfState struct {
+	objs   *bpf.DnsMonitorObjects
+	links  []link.Link
+	reader *ringbuf.Reader
+}
+
+// Collector implements DNS monitoring via eBPF with mock mode support
 type Collector struct {
 	// Core
 	name    string
@@ -67,8 +113,11 @@ type Collector struct {
 	// Statistics
 	stats *DNSStats
 
-	// eBPF components (platform-specific)
-	ebpfState *eBPFState // Linux-specific eBPF state
+	// eBPF components (nil in mock mode)
+	ebpfState *ebpfState
+
+	// Mock mode
+	mockMode bool
 
 	// Error handling
 	consecutiveErrors int
@@ -98,17 +147,22 @@ type Collector struct {
 
 // NewCollector creates a new DNS collector
 func NewCollector(name string, cfg Config) (*Collector, error) {
-	// Initialize logger if not provided
 	logger, err := zap.NewProduction()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Initialize OTEL components for operational metrics
+	// Check for mock mode
+	mockMode := os.Getenv("TAPIO_MOCK_MODE") == "true"
+	if mockMode {
+		logger.Info("DNS collector running in MOCK MODE", zap.String("name", name))
+	}
+
+	// Initialize OTEL components
 	tracer := otel.Tracer(name)
 	meter := otel.Meter(name)
 
-	// Essential operational metrics
+	// Create metrics
 	eventsProcessed, err := meter.Int64Counter(
 		fmt.Sprintf("%s_events_processed_total", name),
 		metric.WithDescription(fmt.Sprintf("Total DNS events processed by %s", name)),
@@ -149,7 +203,6 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		logger.Warn("Failed to create dropped events counter", zap.Error(err))
 	}
 
-	// DNS-specific operational metrics
 	dnsLatency, err := meter.Float64Histogram(
 		fmt.Sprintf("%s_dns_latency_ms", name),
 		metric.WithDescription(fmt.Sprintf("DNS query latency in milliseconds for %s", name)),
@@ -160,7 +213,7 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 
 	dnsFailures, err := meter.Int64Counter(
 		fmt.Sprintf("%s_dns_failures_total", name),
-		metric.WithDescription(fmt.Sprintf("Total DNS failures for %s", name)),
+		metric.WithDescription(fmt.Sprintf("Total DNS failures by %s", name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create DNS failures counter", zap.Error(err))
@@ -168,22 +221,20 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 
 	circuitBreakerHits, err := meter.Int64Counter(
 		fmt.Sprintf("%s_circuit_breaker_hits_total", name),
-		metric.WithDescription(fmt.Sprintf("Total circuit breaker hits for %s", name)),
+		metric.WithDescription(fmt.Sprintf("Circuit breaker activations for %s", name)),
 	)
 	if err != nil {
 		logger.Warn("Failed to create circuit breaker hits counter", zap.Error(err))
 	}
 
-	// Initialize circuit breaker for fault tolerance
-	circuitBreaker := NewCircuitBreaker(cfg.CircuitBreakerConfig, logger)
-
-	collector := &Collector{
+	return &Collector{
 		name:               name,
 		logger:             logger,
 		config:             cfg,
+		mockMode:           mockMode,
 		stats:              &DNSStats{},
 		events:             make(chan *domain.CollectorEvent, cfg.BufferSize),
-		circuitBreaker:     circuitBreaker,
+		circuitBreaker:     NewCircuitBreaker(cfg.CircuitBreakerConfig),
 		containerCache:     make(map[uint64]string),
 		tracer:             tracer,
 		eventsProcessed:    eventsProcessed,
@@ -194,9 +245,7 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		dnsLatency:         dnsLatency,
 		dnsFailures:        dnsFailures,
 		circuitBreakerHits: circuitBreakerHits,
-	}
-
-	return collector, nil
+	}, nil
 }
 
 // Name returns collector name
@@ -204,9 +253,8 @@ func (c *Collector) Name() string {
 	return c.name
 }
 
-// Start starts the eBPF monitoring
+// Start starts the DNS monitoring
 func (c *Collector) Start(ctx context.Context) error {
-	// Create span for startup
 	ctx, span := c.tracer.Start(ctx, "dns.start")
 	defer span.End()
 
@@ -214,11 +262,18 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	if !c.config.EnableEBPF {
 		c.healthy = true
-		c.logger.Info("eBPF disabled, collector running without event generation")
 		return nil
 	}
 
-	// Start eBPF monitoring using platform-specific implementation
+	// Check if we're in mock mode
+	if c.mockMode {
+		c.logger.Info("Starting DNS collector in mock mode")
+		go c.generateMockEvents()
+		c.healthy = true
+		return nil
+	}
+
+	// Start real eBPF monitoring
 	if err := c.startEBPF(); err != nil {
 		if c.errorsTotal != nil {
 			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
@@ -236,6 +291,7 @@ func (c *Collector) Start(ctx context.Context) error {
 	c.logger.Info("DNS collector started",
 		zap.String("name", c.name),
 		zap.Bool("ebpf_enabled", c.config.EnableEBPF),
+		zap.Bool("mock_mode", c.mockMode),
 		zap.Int("buffer_size", c.config.BufferSize),
 	)
 	return nil
@@ -248,7 +304,9 @@ func (c *Collector) Stop() error {
 	}
 
 	// Stop eBPF if running
-	c.stopEBPF()
+	if !c.mockMode && c.ebpfState != nil {
+		c.stopEBPF()
+	}
 
 	// Close events channel
 	if c.events != nil {
@@ -283,7 +341,11 @@ func (c *Collector) Health() *domain.HealthStatus {
 			message = "DNS collector healthy but high buffer utilization"
 		} else {
 			status = domain.HealthHealthy
-			message = "DNS collector actively monitoring"
+			if c.mockMode {
+				message = "DNS collector running in mock mode"
+			} else {
+				message = "DNS collector actively monitoring"
+			}
 		}
 	}
 
@@ -309,340 +371,443 @@ func (c *Collector) Statistics() *domain.CollectorStats {
 			"events_dropped":     fmt.Sprintf("%d", c.stats.EventsDropped),
 			"buffer_utilization": fmt.Sprintf("%.2f", c.stats.BufferUtilization),
 			"ebpf_attached":      fmt.Sprintf("%t", c.stats.EBPFAttached),
+			"mock_mode":          fmt.Sprintf("%t", c.mockMode),
 		},
 	}
 }
 
-// GetDNSStats returns DNS-specific statistics
-func (c *Collector) GetDNSStats() *DNSStats {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+// generateMockEvents generates fake DNS events for development/testing
+func (c *Collector) generateMockEvents() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
-	// Return a copy to avoid race conditions
-	return &DNSStats{
-		EventsProcessed:   c.stats.EventsProcessed,
-		EventsDropped:     c.stats.EventsDropped,
-		ErrorCount:        c.stats.ErrorCount,
-		BufferUtilization: c.stats.BufferUtilization,
-		EBPFAttached:      c.stats.EBPFAttached,
-		LastEventTime:     c.stats.LastEventTime,
+	domains := []string{
+		"api.kubernetes.io",
+		"etcd.kube-system.svc.cluster.local",
+		"prometheus.monitoring.svc.cluster.local",
+		"grafana.monitoring.svc.cluster.local",
+		"example.com",
+		"google.com",
+		"github.com",
+		"invalid-domain-12345.local",
+	}
+
+	queryTypes := []DNSQueryType{
+		DNSQueryTypeA,
+		DNSQueryTypeAAAA,
+		DNSQueryTypeCNAME,
+		DNSQueryTypeMX,
+		DNSQueryTypeSRV,
+	}
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			// Generate a random DNS event
+			domain := domains[rand.Intn(len(domains))]
+			queryType := queryTypes[rand.Intn(len(queryTypes))]
+			success := rand.Float32() > 0.1 // 90% success rate
+
+			event := &DNSEvent{
+				Timestamp:    time.Now(),
+				EventType:    DNSEventTypeQuery,
+				QueryName:    domain,
+				QueryType:    queryType,
+				QueryID:      uint32(rand.Intn(65535)),
+				ClientIP:     fmt.Sprintf("10.0.0.%d", rand.Intn(255)),
+				ServerIP:     "8.8.8.8",
+				ClientPort:   uint16(30000 + rand.Intn(10000)),
+				ServerPort:   53,
+				Protocol:     DNSProtocolUDP,
+				Success:      success,
+				ResponseCode: DNSResponseCodeNoError,
+				LatencyMs:    uint32(rand.Intn(100)),
+				PID:          uint32(1000 + rand.Intn(1000)),
+				TID:          uint32(1000 + rand.Intn(1000)),
+				ContainerID:  fmt.Sprintf("mock-container-%d", rand.Intn(10)),
+				PodUID:       fmt.Sprintf("mock-pod-%d", rand.Intn(10)),
+			}
+
+			if !success {
+				event.ResponseCode = DNSResponseCodeNXDomain
+				event.EventType = DNSEventTypeError
+			}
+
+			// Convert to CollectorEvent
+			collectorEvent := &domain.CollectorEvent{
+				Type:      domain.EventTypeDNS,
+				Timestamp: event.Timestamp,
+				Source:    c.name,
+				Priority:  domain.PriorityNormal,
+				Data:      event,
+				Metadata: domain.EventMetadata{
+					Component: c.name,
+					Host:      "mock-host",
+					Attributes: map[string]string{
+						"mock":  "true",
+						"query": domain,
+					},
+				},
+			}
+
+			// Send event
+			select {
+			case c.events <- collectorEvent:
+				if c.eventsProcessed != nil {
+					c.eventsProcessed.Add(c.ctx, 1)
+				}
+				c.updateStats(1, 0, 0)
+				c.logger.Debug("Generated mock DNS event",
+					zap.String("query", domain),
+					zap.String("type", string(queryType)),
+				)
+			case <-c.ctx.Done():
+				return
+			}
+		}
 	}
 }
 
-// updateStats updates internal statistics
-func (c *Collector) updateStats(eventsProcessed, eventsDropped, errorCount int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// startEBPF initializes eBPF monitoring
+func (c *Collector) startEBPF() error {
+	ctx, span := c.tracer.Start(context.Background(), "dns.ebpf.start")
+	defer span.End()
 
-	c.stats.EventsProcessed += eventsProcessed
-	c.stats.EventsDropped += eventsDropped
-	c.stats.ErrorCount += errorCount
-	c.stats.BufferUtilization = float64(len(c.events)) / float64(cap(c.events))
-	c.stats.LastEventTime = time.Now()
+	// Check if eBPF is supported
+	if !bpf.IsSupported() {
+		c.logger.Warn("eBPF not supported on this platform")
+		return nil
+	}
+
+	// Remove memory limit for eBPF
+	if err := rlimit.RemoveMemlock(); err != nil {
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1)
+		}
+		return fmt.Errorf("removing memory limit: %w", err)
+	}
+
+	// Load pre-compiled eBPF programs
+	objs := &bpf.DnsMonitorObjects{}
+	if err := bpf.LoadDnsMonitorObjects(objs, nil); err != nil {
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1)
+		}
+		return fmt.Errorf("loading eBPF objects: %w", err)
+	}
+
+	c.ebpfState = &ebpfState{objs: objs}
+
+	// Dynamically detect network interfaces and attach XDP
+	interfaces, err := c.getActiveNetworkInterfaces()
+	if err != nil {
+		c.logger.Warn("Failed to get network interfaces, trying defaults",
+			zap.Error(err))
+		interfaces = []string{"eth0", "ens33", "enp0s3", "wlan0", "docker0", "br0"}
+	}
+
+	var attachedLinks []link.Link
+	var attachedInterfaces []string
+
+	for _, iface := range interfaces {
+		iface_obj, err := net.InterfaceByName(iface)
+		if err != nil {
+			c.logger.Debug("Failed to get interface object",
+				zap.String("interface", iface),
+				zap.Error(err))
+			continue
+		}
+
+		xdpLink, err := link.AttachXDP(link.XDPOptions{
+			Interface: iface_obj.Index,
+			Program:   objs.XdpDnsMonitor,
+			Flags:     0,
+		})
+		if err != nil {
+			c.logger.Debug("Failed to attach XDP to interface",
+				zap.String("interface", iface),
+				zap.Error(err))
+			continue
+		}
+		attachedLinks = append(attachedLinks, xdpLink)
+		attachedInterfaces = append(attachedInterfaces, iface)
+	}
+
+	if len(attachedLinks) == 0 {
+		objs.Close()
+		return fmt.Errorf("failed to attach XDP DNS monitor to any interface")
+	}
+
+	c.ebpfState.reader, err = ringbuf.NewReader(objs.Events)
+	if err != nil {
+		for _, l := range attachedLinks {
+			l.Close()
+		}
+		objs.Close()
+		return fmt.Errorf("creating ring buffer reader: %w", err)
+	}
+
+	c.ebpfState.links = attachedLinks
+	c.stats.EBPFAttached = true
+
+	c.logger.Info("DNS eBPF monitoring started successfully",
+		zap.String("collector", c.name),
+		zap.Int("links", len(attachedLinks)),
+		zap.Strings("interfaces", attachedInterfaces),
+	)
+
+	return nil
 }
 
-// Platform-agnostic stubs for testing
-
-// extractContainerID extracts container ID from cgroup ID with caching
-func (c *Collector) extractContainerID(cgroupID uint64) string {
-	if cgroupID == 0 {
-		return ""
+// stopEBPF cleans up eBPF resources
+func (c *Collector) stopEBPF() {
+	if c.ebpfState == nil {
+		return
 	}
 
-	// Check cache first
-	c.cacheMutex.RLock()
-	if containerID, exists := c.containerCache[cgroupID]; exists {
-		c.cacheMutex.RUnlock()
-		return containerID
+	// Close reader
+	if c.ebpfState.reader != nil {
+		c.ebpfState.reader.Close()
 	}
-	c.cacheMutex.RUnlock()
 
-	// Extract from cgroup path
-	cgroupPath := c.getCgroupPath(cgroupID)
-	containerID := c.parseContainerIDFromPath(cgroupPath)
-
-	// Cache the result
-	c.cacheMutex.Lock()
-	if c.containerCache == nil {
-		c.containerCache = make(map[uint64]string)
+	// Close all links
+	for _, link := range c.ebpfState.links {
+		if err := link.Close(); err != nil {
+			c.logger.Error("Failed to close eBPF link", zap.Error(err))
+		}
 	}
-	c.containerCache[cgroupID] = containerID
-	// Prevent cache from growing too large
-	if len(c.containerCache) > 10000 {
-		c.cleanupContainerCache()
-	}
-	c.cacheMutex.Unlock()
 
-	return containerID
+	// Close eBPF objects
+	if c.ebpfState.objs != nil {
+		c.ebpfState.objs.Close()
+	}
+
+	c.logger.Info("DNS eBPF monitoring stopped", zap.String("collector", c.name))
 }
 
-// getCgroupPath gets cgroup path for a given cgroup ID
-func (c *Collector) getCgroupPath(cgroupID uint64) string {
-	if cgroupID == 0 {
-		return ""
+// readEBPFEvents processes eBPF ring buffer events
+func (c *Collector) readEBPFEvents() {
+	if c.ebpfState == nil || c.ebpfState.reader == nil {
+		return
 	}
 
-	// Try to read cgroup path from procfs
-	// This would be implemented differently on different platforms
-	// For now, construct a likely path based on cgroup ID
-	return fmt.Sprintf("/sys/fs/cgroup/unified/%d", cgroupID)
-}
-
-// parseContainerIDFromPath parses container ID from cgroup path
-func (c *Collector) parseContainerIDFromPath(path string) string {
-	if path == "" {
-		return ""
-	}
-
-	// Try different container runtime patterns
-	containerID := c.parseDockerContainerID(path)
-	if containerID != "" {
-		return containerID
-	}
-
-	containerID = c.parseContainerdContainerID(path)
-	if containerID != "" {
-		return containerID
-	}
-
-	containerID = c.parseCRIOContainerID(path)
-	if containerID != "" {
-		return containerID
-	}
-
-	return ""
-}
-
-// parseDockerContainerID extracts Docker container ID from cgroup path
-func (c *Collector) parseDockerContainerID(path string) string {
-	// Docker pattern: /docker/CONTAINERID or /system.slice/docker-CONTAINERID.scope
-	patterns := []string{
-		"/docker/",
-		"docker-",
-		"/docker.service/",
-	}
-
-	for _, pattern := range patterns {
-		if idx := strings.Index(path, pattern); idx != -1 {
-			start := idx + len(pattern)
-			if start >= len(path) {
+	ctx := c.ctx
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			record, err := c.ebpfState.reader.Read()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				if c.errorsTotal != nil {
+					c.errorsTotal.Add(ctx, 1)
+				}
+				c.logger.Error("Failed to read from ring buffer", zap.Error(err))
 				continue
 			}
 
-			// Extract container ID (typically 64 hex characters)
-			end := start
-			for end < len(path) && (isHexChar(path[end]) || path[end] == '-') {
-				end++
-			}
-
-			if containerID := path[start:end]; len(containerID) >= 12 {
-				// Remove any trailing suffixes like .scope
-				if idx := strings.Index(containerID, "."); idx != -1 {
-					containerID = containerID[:idx]
+			// Parse the eBPF event
+			if len(record.RawSample) < int(unsafe.Sizeof(BPFDNSEvent{})) {
+				if c.errorsTotal != nil {
+					c.errorsTotal.Add(ctx, 1)
 				}
-				// Docker container IDs are usually 64 characters, but accept 12+
-				if len(containerID) >= 12 && isValidContainerID(containerID) {
-					return containerID
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// parseContainerdContainerID extracts containerd container ID from cgroup path
-func (c *Collector) parseContainerdContainerID(path string) string {
-	// containerd pattern: /system.slice/containerd-CONTAINERID.scope
-	patterns := []string{
-		"containerd-",
-		"/containerd/",
-		"containerd.service/",
-	}
-
-	for _, pattern := range patterns {
-		if idx := strings.Index(path, pattern); idx != -1 {
-			start := idx + len(pattern)
-			if start >= len(path) {
 				continue
 			}
 
-			// Extract container ID
-			end := start
-			for end < len(path) && isHexChar(path[end]) {
-				end++
-			}
-
-			if containerID := path[start:end]; len(containerID) >= 12 && isValidContainerID(containerID) {
-				return containerID
-			}
-		}
-	}
-	return ""
-}
-
-// parseCRIOContainerID extracts CRI-O container ID from cgroup path
-func (c *Collector) parseCRIOContainerID(path string) string {
-	// CRI-O pattern: /machine.slice/libpod-CONTAINERID.scope or /crio-CONTAINERID.scope
-	patterns := []string{
-		"libpod-",
-		"crio-",
-		"/crio/",
-	}
-
-	for _, pattern := range patterns {
-		if idx := strings.Index(path, pattern); idx != -1 {
-			start := idx + len(pattern)
-			if start >= len(path) {
+			var bpfEvent BPFDNSEvent
+			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &bpfEvent); err != nil {
+				if c.errorsTotal != nil {
+					c.errorsTotal.Add(ctx, 1)
+				}
+				c.logger.Error("Failed to parse BPF DNS event", zap.Error(err))
 				continue
 			}
 
-			// Extract container ID
-			end := start
-			for end < len(path) && (isHexChar(path[end]) || path[end] == '-') {
-				end++
+			// Extract and validate DNS query information
+			queryName := c.extractQueryName(bpfEvent.QueryName[:])
+			if queryName == "" {
+				continue
 			}
 
-			if containerID := path[start:end]; len(containerID) >= 12 {
-				// Remove any trailing suffixes
-				if idx := strings.Index(containerID, "."); idx != -1 {
-					containerID = containerID[:idx]
+			// Convert BPF event to DNS event
+			event := c.convertBPFEventToDNSEvent(&bpfEvent)
+			event.QueryName = queryName
+
+			// Log interesting DNS queries for debugging
+			if c.logger.Core().Enabled(zap.DebugLevel) {
+				c.logger.Debug("DNS query captured",
+					zap.String("query", queryName),
+					zap.Uint16("qtype", bpfEvent.QType),
+					zap.String("protocol", c.getProtocolName(bpfEvent.Protocol)),
+					zap.Uint32("pid", bpfEvent.PID),
+				)
+			}
+
+			// Convert to CollectorEvent
+			collectorEvent := &domain.CollectorEvent{
+				Type:      domain.EventTypeDNS,
+				Timestamp: event.Timestamp,
+				Source:    c.name,
+				Priority:  c.calculateEventPriority(&bpfEvent),
+				Data:      event,
+				Metadata: domain.EventMetadata{
+					Component: c.name,
+					Host:      c.getHostname(),
+					Attributes: map[string]string{
+						"query":        queryName,
+						"query_type":   string(event.QueryType),
+						"container_id": event.ContainerID,
+						"pod_uid":      event.PodUID,
+					},
+				},
+			}
+
+			// Update buffer usage gauge
+			if c.bufferUsage != nil {
+				c.bufferUsage.Record(ctx, int64(len(c.events)))
+			}
+
+			// Send to event channel
+			select {
+			case c.events <- collectorEvent:
+				if c.eventsProcessed != nil {
+					c.eventsProcessed.Add(ctx, 1)
 				}
-				if len(containerID) >= 12 && isValidContainerID(containerID) {
-					return containerID
+				c.updateStats(1, 0, 0)
+			case <-ctx.Done():
+				return
+			default:
+				// Buffer full, drop event
+				if c.droppedEvents != nil {
+					c.droppedEvents.Add(ctx, 1)
 				}
-			}
-		}
-	}
-	return ""
-}
-
-// isHexChar checks if a character is a valid hexadecimal character
-func isHexChar(c byte) bool {
-	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
-}
-
-// isValidContainerID validates that a string looks like a valid container ID
-func isValidContainerID(id string) bool {
-	if len(id) < 12 || len(id) > 64 {
-		return false
-	}
-
-	// Container IDs are typically hexadecimal
-	for _, c := range id {
-		if !isHexChar(byte(c)) && c != '-' {
-			return false
-		}
-	}
-
-	return true
-}
-
-// cleanupContainerCache removes old entries to prevent memory growth
-func (c *Collector) cleanupContainerCache() {
-	// Remove half of the cache entries
-	// In production, you'd want a more sophisticated LRU eviction
-	count := 0
-	target := len(c.containerCache) / 2
-	for cgroupID := range c.containerCache {
-		if count >= target {
-			break
-		}
-		delete(c.containerCache, cgroupID)
-		count++
-	}
-}
-
-// extractPodUID extracts pod UID from cgroup path with enhanced parsing
-func (c *Collector) extractPodUID(cgroupPath string) string {
-	if cgroupPath == "" {
-		return ""
-	}
-
-	// Kubernetes cgroup patterns:
-	// - /kubepods/burstable/pod12345678-1234-1234-1234-123456789012
-	// - /kubepods/besteffort/pod12345678_1234_1234_1234_123456789012
-	// - /kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod12345678_1234_1234_1234_123456789012.slice
-	parts := strings.Split(cgroupPath, "/")
-
-	for _, part := range parts {
-		// Look for pod UID patterns
-		if podUID := c.extractPodUIDFromPart(part); podUID != "" {
-			return podUID
-		}
-	}
-
-	return ""
-}
-
-// extractPodUIDFromPart extracts pod UID from a single path component
-func (c *Collector) extractPodUIDFromPart(part string) string {
-	// Pattern 1: pod12345678-1234-1234-1234-123456789012
-	if strings.HasPrefix(part, "pod") && len(part) > 39 {
-		podUID := part[3:] // Remove "pod" prefix
-		if c.isValidKubernetesUID(podUID) {
-			return podUID
-		}
-	}
-
-	// Pattern 2: kubepods-burstable-pod12345678_1234_1234_1234_123456789012.slice
-	if strings.Contains(part, "pod") {
-		if idx := strings.Index(part, "pod"); idx != -1 {
-			start := idx + 3 // Skip "pod"
-			end := len(part)
-
-			// Find end of UID (before .slice or other suffix)
-			for _, suffix := range []string{".slice", ".scope"} {
-				if suffixIdx := strings.Index(part[start:], suffix); suffixIdx != -1 {
-					end = start + suffixIdx
-					break
+				if c.errorsTotal != nil {
+					c.errorsTotal.Add(ctx, 1)
 				}
-			}
-
-			if end > start {
-				podUID := part[start:end]
-				// Convert underscores to hyphens for standard Kubernetes format
-				podUID = strings.ReplaceAll(podUID, "_", "-")
-				if c.isValidKubernetesUID(podUID) {
-					return podUID
-				}
+				c.updateStats(0, 1, 0)
 			}
 		}
 	}
-
-	return ""
 }
 
-// isValidKubernetesUID validates that a string looks like a valid Kubernetes UID
-func (c *Collector) isValidKubernetesUID(uid string) bool {
-	if len(uid) != 36 {
-		return false
+// getActiveNetworkInterfaces returns a list of active network interfaces
+func (c *Collector) getActiveNetworkInterfaces() ([]string, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("getting network interfaces: %w", err)
 	}
 
-	// Kubernetes UIDs follow UUID format: 8-4-4-4-12 hex digits separated by hyphens
-	// Example: 12345678-1234-1234-1234-123456789012
-	parts := strings.Split(uid, "-")
-	if len(parts) != 5 {
-		return false
-	}
-
-	// Check lengths: 8, 4, 4, 4, 12
-	expectedLengths := []int{8, 4, 4, 4, 12}
-	for i, part := range parts {
-		if len(part) != expectedLengths[i] {
-			return false
+	var activeInterfaces []string
+	for _, iface := range ifaces {
+		// Skip loopback and down interfaces
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
 		}
-		// Check that each part is hexadecimal
-		for _, c := range part {
-			if !isHexChar(byte(c)) {
-				return false
-			}
+
+		// Check if interface has any addresses
+		addrs, err := iface.Addrs()
+		if err != nil || len(addrs) == 0 {
+			continue
 		}
+
+		activeInterfaces = append(activeInterfaces, iface.Name)
 	}
 
-	return true
+	return activeInterfaces, nil
 }
 
-// calculateEventPriority calculates event priority (stub)
+// convertBPFEventToDNSEvent converts BPF event structure to DNSEvent
+func (c *Collector) convertBPFEventToDNSEvent(bpfEvent *BPFDNSEvent) *DNSEvent {
+	event := &DNSEvent{
+		Timestamp:  time.Unix(0, int64(bpfEvent.Timestamp)),
+		QueryID:    uint32(bpfEvent.DNSID),
+		PID:        bpfEvent.PID,
+		TID:        bpfEvent.TID,
+		CgroupID:   bpfEvent.CgroupID,
+		ClientPort: bpfEvent.SrcPort,
+		ServerPort: bpfEvent.DstPort,
+		LatencyMs:  bpfEvent.LatencyNs / 1000000, // Convert ns to ms
+	}
+
+	// Parse event type
+	switch bpfEvent.EventType {
+	case 1: // DNS_EVENT_QUERY
+		event.EventType = DNSEventTypeQuery
+	case 2: // DNS_EVENT_RESPONSE
+		event.EventType = DNSEventTypeResponse
+		event.ResponseCode = DNSResponseCode(bpfEvent.Rcode)
+		event.Success = bpfEvent.Rcode == 0
+	case 3: // DNS_EVENT_TIMEOUT
+		event.EventType = DNSEventTypeTimeout
+	case 4: // DNS_EVENT_ERROR
+		event.EventType = DNSEventTypeError
+	}
+
+	// Parse protocol
+	if bpfEvent.Protocol == 17 { // IPPROTO_UDP
+		event.Protocol = DNSProtocolUDP
+	} else if bpfEvent.Protocol == 6 { // IPPROTO_TCP
+		event.Protocol = DNSProtocolTCP
+	}
+
+	// Parse query type
+	event.QueryType = c.parseQueryType(bpfEvent.QType)
+
+	// Parse IP addresses based on version
+	if bpfEvent.IPVersion == 4 {
+		srcIP := net.IP(bpfEvent.SrcAddr[:4])
+		dstIP := net.IP(bpfEvent.DstAddr[:4])
+		event.ClientIP = srcIP.String()
+		event.ServerIP = dstIP.String()
+	} else if bpfEvent.IPVersion == 6 {
+		srcIP := net.IP(bpfEvent.SrcAddr[:])
+		dstIP := net.IP(bpfEvent.DstAddr[:])
+		event.ClientIP = srcIP.String()
+		event.ServerIP = dstIP.String()
+	}
+
+	// Extract container ID from cgroup ID
+	if bpfEvent.CgroupID != 0 {
+		event.ContainerID = c.extractContainerID(bpfEvent.CgroupID)
+		cgroupPath := c.getCgroupPath(bpfEvent.CgroupID)
+		event.PodUID = c.extractPodUID(cgroupPath)
+	}
+
+	return event
+}
+
+// parseQueryType converts numeric query type to enum
+func (c *Collector) parseQueryType(qtype uint16) DNSQueryType {
+	switch qtype {
+	case 1:
+		return DNSQueryTypeA
+	case 28:
+		return DNSQueryTypeAAAA
+	case 5:
+		return DNSQueryTypeCNAME
+	case 15:
+		return DNSQueryTypeMX
+	case 2:
+		return DNSQueryTypeNS
+	case 12:
+		return DNSQueryTypePTR
+	case 6:
+		return DNSQueryTypeSOA
+	case 16:
+		return DNSQueryTypeTXT
+	case 33:
+		return DNSQueryTypeSRV
+	default:
+		return DNSQueryTypeOther
+	}
+}
+
+// calculateEventPriority calculates event priority
 func (c *Collector) calculateEventPriority(bpfEvent *BPFDNSEvent) domain.EventPriority {
 	if bpfEvent == nil {
 		return domain.PriorityNormal
@@ -661,48 +826,100 @@ func (c *Collector) calculateEventPriority(bpfEvent *BPFDNSEvent) domain.EventPr
 	return domain.PriorityNormal
 }
 
-// handleReadError handles ring buffer read errors with rate limiting
-func (c *Collector) handleReadError(ctx context.Context, err error) {
+// getHostname returns the current hostname
+func (c *Collector) getHostname() string {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		return "unknown"
+	}
+	return hostname
+}
+
+// updateStats updates internal statistics
+func (c *Collector) updateStats(eventsProcessed, eventsDropped, errorCount int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.consecutiveErrors++
+	c.stats.EventsProcessed += eventsProcessed
+	c.stats.EventsDropped += eventsDropped
+	c.stats.ErrorCount += errorCount
+	c.stats.BufferUtilization = float64(len(c.events)) / float64(cap(c.events))
+	c.stats.LastEventTime = time.Now()
+}
 
-	// Rate limit error logging - log every 10 errors or every minute
-	if c.consecutiveErrors%10 == 0 || time.Since(c.errorLogInterval) > time.Minute {
-		c.logger.Error("Failed to read from ring buffer",
-			zap.Error(err),
-			zap.Int("consecutive_errors", c.consecutiveErrors),
-		)
-		c.errorLogInterval = time.Now()
+// GetDNSStats returns DNS-specific statistics
+func (c *Collector) GetDNSStats() *DNSStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Return a copy to avoid race conditions
+	return &DNSStats{
+		EventsProcessed:   c.stats.EventsProcessed,
+		EventsDropped:     c.stats.EventsDropped,
+		ErrorCount:        c.stats.ErrorCount,
+		BufferUtilization: c.stats.BufferUtilization,
+		EBPFAttached:      c.stats.EBPFAttached,
+		LastEventTime:     c.stats.LastEventTime,
+	}
+}
+
+// Helper methods for cgroup/container extraction
+
+// extractContainerID extracts container ID from cgroup ID
+func (c *Collector) extractContainerID(cgroupID uint64) string {
+	if cgroupID == 0 {
+		return ""
+	}
+	cgroupPath := c.getCgroupPath(cgroupID)
+	return c.parseContainerIDFromPath(cgroupPath)
+}
+
+// getCgroupPath gets cgroup path for a given cgroup ID
+func (c *Collector) getCgroupPath(cgroupID uint64) string {
+	if cgroupID == 0 {
+		return ""
+	}
+	// In real implementation, this would read from /proc/self/mountinfo
+	// and resolve the actual cgroup path
+	return fmt.Sprintf("/sys/fs/cgroup/unified/%d", cgroupID)
+}
+
+// parseContainerIDFromPath parses container ID from cgroup path
+func (c *Collector) parseContainerIDFromPath(path string) string {
+	// Look for Docker or containerd patterns in path
+	// Example: /docker/abc123def456.../
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if part == "docker" && i+1 < len(parts) {
+			containerID := parts[i+1]
+			if len(containerID) >= 12 {
+				return containerID[:12] // Return first 12 chars
+			}
+		}
+	}
+	return ""
+}
+
+// extractPodUID extracts pod UID from cgroup path
+func (c *Collector) extractPodUID(cgroupPath string) string {
+	if cgroupPath == "" {
+		return ""
 	}
 
-	if c.errorsTotal != nil {
-		c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("error_type", "ring_buffer_read"),
-		))
+	// Look for pod UID pattern in path: /kubepods/pod12345678_1234_1234_1234_123456789012/
+	parts := strings.Split(cgroupPath, "/")
+
+	for _, part := range parts {
+		if strings.HasPrefix(part, "pod") && len(part) > 3 {
+			podUID := part[3:] // Remove "pod" prefix
+
+			// Validate it looks like a UID
+			if strings.Contains(podUID, "_") && len(podUID) >= 32 {
+				// Convert underscores to hyphens for Kubernetes UID format
+				return strings.ReplaceAll(podUID, "_", "-")
+			}
+		}
 	}
-}
 
-// resetErrorCounter resets the consecutive error counter
-func (c *Collector) resetErrorCounter() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.consecutiveErrors = 0
-}
-
-// handleDroppedEvent handles dropped events due to buffer full
-func (c *Collector) handleDroppedEvent(ctx context.Context, queryName string) {
-	c.logger.Warn("Event dropped due to full buffer",
-		zap.String("query_name", queryName),
-		zap.Int("buffer_len", len(c.events)),
-		zap.Int("buffer_cap", cap(c.events)),
-	)
-
-	c.updateStats(0, 1, 0)
-}
-
-// GetEventChannel returns the event channel for reading events
-func (c *Collector) GetEventChannel() <-chan *domain.CollectorEvent {
-	return c.events
+	return ""
 }

@@ -9,10 +9,28 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors/kernel"
-	"github.com/yairfalse/tapio/pkg/collectors/kubelet"
 	"github.com/yairfalse/tapio/pkg/collectors/orchestrator"
 	"go.uber.org/zap"
+
+	// Import ALL collectors - they all register via init()
+	// Tapio is a Linux-native observability platform using eBPF
+	_ "github.com/yairfalse/tapio/pkg/collectors/cri"
+	_ "github.com/yairfalse/tapio/pkg/collectors/cri-ebpf"
+	_ "github.com/yairfalse/tapio/pkg/collectors/dns"
+	_ "github.com/yairfalse/tapio/pkg/collectors/etcd-api"
+	_ "github.com/yairfalse/tapio/pkg/collectors/etcd-ebpf"
+	_ "github.com/yairfalse/tapio/pkg/collectors/etcd-metrics"
+	_ "github.com/yairfalse/tapio/pkg/collectors/kernel"
+	_ "github.com/yairfalse/tapio/pkg/collectors/kubeapi"
+	_ "github.com/yairfalse/tapio/pkg/collectors/kubelet"
+	_ "github.com/yairfalse/tapio/pkg/collectors/memory-leak-hunter"
+	_ "github.com/yairfalse/tapio/pkg/collectors/network"
+	_ "github.com/yairfalse/tapio/pkg/collectors/otel"
+	_ "github.com/yairfalse/tapio/pkg/collectors/runtime-signals"
+	_ "github.com/yairfalse/tapio/pkg/collectors/storage-io"
+	_ "github.com/yairfalse/tapio/pkg/collectors/syscall-errors"
+	_ "github.com/yairfalse/tapio/pkg/collectors/systemd"
+	_ "github.com/yairfalse/tapio/pkg/collectors/systemd-api"
 )
 
 var (
@@ -70,17 +88,9 @@ func main() {
 		log.Fatalf("Failed to create collector orchestrator: %v", err)
 	}
 
-	// Track enabled collectors
-	enabledCollectors := []string{}
-
-	// Register collectors based on YAML config
-	if err := registerCollectors(collectorOrchestrator, config, logger, &enabledCollectors); err != nil {
-		log.Fatalf("Failed to register collectors: %v", err)
-	}
-
-	// Validate we have at least one collector
-	if len(enabledCollectors) == 0 {
-		log.Fatal("No collectors enabled. Enable at least one collector in the config file.")
+	// Register collectors automatically from YAML config
+	if err := collectorOrchestrator.RegisterCollectorsFromYAML(config, logger); err != nil {
+		log.Fatalf("Failed to register collectors from YAML: %v", err)
 	}
 
 	// Start orchestrator
@@ -90,7 +100,6 @@ func main() {
 
 	logger.Info("Tapio collectors started successfully",
 		zap.String("config_file", *configFile),
-		zap.Strings("collectors", enabledCollectors),
 		zap.Int("workers", orchestratorConfig.Workers),
 		zap.Int("buffer_size", orchestratorConfig.BufferSize))
 
@@ -104,58 +113,6 @@ func main() {
 
 	logger.Info("Shutting down collectors...")
 	collectorOrchestrator.Stop()
-}
-
-// registerCollectors registers all enabled collectors from config
-func registerCollectors(orch *orchestrator.CollectorOrchestrator, config *orchestrator.YAMLConfig, logger *zap.Logger, enabled *[]string) error {
-	// Kernel collector
-	if config.IsCollectorEnabled("kernel") {
-		cfg, _ := config.GetCollectorConfig("kernel")
-		kernelConfig := &kernel.Config{
-			Name:       "kernel",
-			BufferSize: getIntOrDefault(cfg.BufferSize, 10000),
-			EnableEBPF: cfg.EnableEBPF,
-		}
-
-		collector, err := kernel.NewCollector("kernel", kernelConfig)
-		if err != nil {
-			logger.Error("Failed to create kernel collector", zap.Error(err))
-		} else {
-			if err := orch.RegisterCollector("kernel", collector); err != nil {
-				logger.Error("Failed to register kernel collector", zap.Error(err))
-			} else {
-				*enabled = append(*enabled, "kernel")
-			}
-		}
-	}
-
-	// Kubelet collector
-	if config.IsCollectorEnabled("kubelet") {
-		cfg, _ := config.GetCollectorConfig("kubelet")
-		kubeletConfig := kubelet.DefaultConfig()
-
-		if cfg.Address != "" {
-			kubeletConfig.Address = cfg.Address
-		}
-		kubeletConfig.Insecure = cfg.Insecure
-		kubeletConfig.Logger = logger
-
-		collector, err := kubelet.NewCollector("kubelet", kubeletConfig)
-		if err != nil {
-			logger.Error("Failed to create kubelet collector", zap.Error(err))
-		} else {
-			if err := orch.RegisterCollector("kubelet", collector); err != nil {
-				logger.Error("Failed to register kubelet collector", zap.Error(err))
-			} else {
-				*enabled = append(*enabled, "kubelet")
-			}
-		}
-	}
-
-	// Add more collectors here following the same pattern...
-	// DNS, Network, CRI-eBPF, etc.
-
-	return nil
 }
 
 // monitorCollectorHealth periodically checks collector health
@@ -190,12 +147,4 @@ func monitorCollectorHealth(ctx context.Context, orchestrator *orchestrator.Coll
 				zap.Int("total", len(healthStatus)))
 		}
 	}
-}
-
-// Helper function for default values
-func getIntOrDefault(value, defaultVal int) int {
-	if value == 0 {
-		return defaultVal
-	}
-	return value
 }
