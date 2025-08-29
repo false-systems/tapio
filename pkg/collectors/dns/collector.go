@@ -30,19 +30,28 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 dnsMonitor ./bpf_src/dns_monitor.c -- -I../bpf_common
 
-// Config for DNS collector
+// Config for DNS collector focused on operational monitoring
 type Config struct {
-	Name       string
-	BufferSize int
-	EnableEBPF bool
+	Name                  string               `json:"name"`
+	BufferSize            int                  `json:"buffer_size"`
+	EnableEBPF            bool                 `json:"enable_ebpf"`
+	XDPInterfaces         []string             `json:"xdp_interfaces,omitempty"` // Specific interfaces for XDP
+	CircuitBreakerConfig  CircuitBreakerConfig `json:"circuit_breaker_config"`
+	ContainerIDExtraction bool                 `json:"container_id_extraction"` // Enable container ID parsing
+	ParseAnswers          bool                 `json:"parse_answers"`           // Parse DNS answers for resolved IPs
+	Labels                map[string]string    `json:"labels,omitempty"`        // Labels to add to all events
 }
 
-// DefaultConfig returns sensible defaults
+// DefaultConfig returns sensible defaults for operational monitoring
 func DefaultConfig() Config {
 	return Config{
-		Name:       "dns",
-		BufferSize: 10000,
-		EnableEBPF: true,
+		Name:                  "dns",
+		BufferSize:            10000,
+		EnableEBPF:            true,
+		XDPInterfaces:         nil, // Auto-detect if nil
+		CircuitBreakerConfig:  DefaultCircuitBreakerConfig(),
+		ContainerIDExtraction: true,
+		ParseAnswers:          true,
 	}
 }
 
@@ -110,16 +119,30 @@ type Collector struct {
 	// Mock mode
 	mockMode bool
 
+	// Error handling
+	consecutiveErrors int
+	errorLogInterval  time.Time
+
 	// Event processing
 	events chan *domain.CollectorEvent
 
-	// OpenTelemetry
-	tracer          trace.Tracer
-	eventsProcessed metric.Int64Counter
-	errorsTotal     metric.Int64Counter
-	processingTime  metric.Float64Histogram
-	bufferUsage     metric.Int64Gauge
-	droppedEvents   metric.Int64Counter
+	// Fault tolerance
+	circuitBreaker *CircuitBreaker
+
+	// Container tracking
+	containerCache map[uint64]string // cgroup_id -> container_id
+	cacheMutex     sync.RWMutex      // Separate mutex for cache
+
+	// OpenTelemetry metrics - focused on operational metrics
+	tracer             trace.Tracer
+	eventsProcessed    metric.Int64Counter
+	errorsTotal        metric.Int64Counter
+	processingTime     metric.Float64Histogram
+	bufferUsage        metric.Int64Gauge
+	droppedEvents      metric.Int64Counter
+	dnsLatency         metric.Float64Histogram
+	dnsFailures        metric.Int64Counter
+	circuitBreakerHits metric.Int64Counter
 }
 
 // NewCollector creates a new DNS collector
@@ -180,19 +203,48 @@ func NewCollector(name string, cfg Config) (*Collector, error) {
 		logger.Warn("Failed to create dropped events counter", zap.Error(err))
 	}
 
+	dnsLatency, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_dns_latency_ms", name),
+		metric.WithDescription(fmt.Sprintf("DNS query latency in milliseconds for %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create DNS latency histogram", zap.Error(err))
+	}
+
+	dnsFailures, err := meter.Int64Counter(
+		fmt.Sprintf("%s_dns_failures_total", name),
+		metric.WithDescription(fmt.Sprintf("Total DNS failures by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create DNS failures counter", zap.Error(err))
+	}
+
+	circuitBreakerHits, err := meter.Int64Counter(
+		fmt.Sprintf("%s_circuit_breaker_hits_total", name),
+		metric.WithDescription(fmt.Sprintf("Circuit breaker activations for %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create circuit breaker hits counter", zap.Error(err))
+	}
+
 	return &Collector{
-		name:            name,
-		logger:          logger,
-		config:          cfg,
-		mockMode:        mockMode,
-		stats:           &DNSStats{},
-		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
-		tracer:          tracer,
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		bufferUsage:     bufferUsage,
-		droppedEvents:   droppedEvents,
+		name:               name,
+		logger:             logger,
+		config:             cfg,
+		mockMode:           mockMode,
+		stats:              &DNSStats{},
+		events:             make(chan *domain.CollectorEvent, cfg.BufferSize),
+		circuitBreaker:     NewCircuitBreaker(cfg.CircuitBreakerConfig),
+		containerCache:     make(map[uint64]string),
+		tracer:             tracer,
+		eventsProcessed:    eventsProcessed,
+		errorsTotal:        errorsTotal,
+		processingTime:     processingTime,
+		bufferUsage:        bufferUsage,
+		droppedEvents:      droppedEvents,
+		dnsLatency:         dnsLatency,
+		dnsFailures:        dnsFailures,
+		circuitBreakerHits: circuitBreakerHits,
 	}, nil
 }
 

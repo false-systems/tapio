@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"sync"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -211,26 +212,68 @@ type DNSStats struct {
 	LastEventTime     time.Time `json:"last_event_time"`
 }
 
-// BPFDNSEvent represents eBPF DNS event (stub for testing)
-type BPFDNSEvent struct {
-	Timestamp uint64
-	PID       uint32
-	TID       uint32
-	UID       uint32
-	GID       uint32
-	CgroupID  uint64
-	EventType uint8
-	Protocol  uint8
-	IPVersion uint8
-	SrcIP     [16]uint8
-	DstIP     [16]uint8
-	SrcPort   uint16
-	DstPort   uint16
-	QueryID   uint16
-	QueryType uint16
-	Rcode     uint8
-	LatencyNs uint64
-	QueryName [256]uint8
+// Circuit breaker types for fault tolerance
+
+// CircuitBreakerState represents the state of fault tolerance circuit breaker
+type CircuitBreakerState int
+
+const (
+	CircuitClosed   CircuitBreakerState = iota // Normal operation
+	CircuitOpen                                // Fault detected, stop processing
+	CircuitHalfOpen                            // Testing if fault recovered
+)
+
+func (c CircuitBreakerState) String() string {
+	switch c {
+	case CircuitClosed:
+		return "closed"
+	case CircuitOpen:
+		return "open"
+	case CircuitHalfOpen:
+		return "half-open"
+	default:
+		return "unknown"
+	}
+}
+
+// CircuitBreakerConfig holds configuration for fault tolerance
+type CircuitBreakerConfig struct {
+	Enabled               bool          `json:"enabled"`
+	FailureThreshold      int           `json:"failure_threshold"`       // Number of failures before opening
+	RecoveryTimeout       time.Duration `json:"recovery_timeout"`        // Time to wait before testing recovery
+	SuccessThreshold      int           `json:"success_threshold"`       // Successes needed to close circuit
+	MaxErrorRate          float64       `json:"max_error_rate"`          // Maximum error rate before opening
+	TimeWindow            time.Duration `json:"time_window"`             // Time window for error rate calculation
+	MaxConcurrentRequests int           `json:"max_concurrent_requests"` // Rate limiting
+}
+
+// DefaultCircuitBreakerConfig returns sensible defaults
+func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
+	return CircuitBreakerConfig{
+		Enabled:               true,
+		FailureThreshold:      10,               // Open after 10 failures
+		RecoveryTimeout:       30 * time.Second, // Test recovery after 30s
+		SuccessThreshold:      3,                // Close after 3 successes
+		MaxErrorRate:          0.5,              // Open if >50% error rate
+		TimeWindow:            1 * time.Minute,  // Calculate error rate per minute
+		MaxConcurrentRequests: 1000,             // Limit concurrent processing
+	}
+}
+
+// CircuitBreaker implements fault tolerance for DNS monitoring
+type CircuitBreaker struct {
+	mu                 sync.RWMutex
+	config             CircuitBreakerConfig
+	state              CircuitBreakerState
+	failureCount       int
+	successCount       int
+	lastFailureTime    time.Time
+	lastSuccessTime    time.Time
+	recentErrors       []time.Time // Rolling window of recent errors
+	concurrentRequests int64       // Current concurrent processing
+	totalRequests      int64
+	totalFailures      int64
+	totalSuccesses     int64
 }
 
 // isHexString checks if a string contains only hexadecimal characters

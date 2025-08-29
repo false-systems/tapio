@@ -90,6 +90,8 @@ struct cred;
 struct vfsmount;
 struct file_operations;
 struct net_device;
+struct siginfo;
+struct k_sigaction;
 
 /* Namespace structures */
 struct ns_common {
@@ -381,12 +383,34 @@ struct trace_event_raw_sched_process_template {
     __u32 prio;
 } __attribute__((preserve_access_index));
 
+/* Scheduler process exec/exit tracepoint structures */
+struct trace_event_raw_sched_process_exec {
+    __u64 common_field;
+    char comm[16];
+    __u32 pid;
+    __u32 old_pid;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_sched_process_exit {
+    __u64 common_field;
+    char comm[16];
+    __u32 pid;
+    __u32 prio;
+} __attribute__((preserve_access_index));
+
 struct trace_event_raw_signal_generate {
     __u64 common_field;
     __u32 pid;
     __u32 sig;
     char comm[16];
     struct task_struct *task;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_signal_deliver {
+    __u64 common_field;
+    __u32 sig;
+    struct siginfo *info;
+    struct k_sigaction *ka;
 } __attribute__((preserve_access_index));
 
 /* OOM-related trace events */

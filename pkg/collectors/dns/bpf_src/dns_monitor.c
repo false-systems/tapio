@@ -69,7 +69,7 @@ struct dns_question {
     __u16 qclass;
 } __attribute__((packed));
 
-// Enhanced DNS event for userspace with IPv4/IPv6 support
+// Enhanced DNS event for userspace with IPv4/IPv6 support and answer parsing
 struct dns_event {
     __u64 timestamp;
     __u32 pid;
@@ -107,7 +107,13 @@ struct dns_event {
     __u32 data_len;
     __u32 latency_ns;  // For response correlation
     
+    // Answer information for responses
+    __u16 answer_count;
+    __u16 authority_count;
+    __u32 ttl;  // TTL from first answer
+    
     char query_name[MAX_DNS_NAME_LEN];
+    char resolved_ips[256];  // Comma-separated resolved IPs
     char data[MAX_DNS_DATA];
 } __attribute__((packed));
 
@@ -550,6 +556,12 @@ int trace_dns_sendto(struct trace_event_raw_sys_enter *ctx) {
             int wire_name_len = name_len + 2; // +1 for final null, +1 for estimation
             event->dns_qtype = extract_query_type(event->data, event->data + copy_len, wire_name_len);
         }
+        
+        // Clear response fields for queries
+        event->answer_count = 0;
+        event->authority_count = 0;
+        event->ttl = 0;
+        __builtin_memset(event->resolved_ips, 0, sizeof(event->resolved_ips));
     }
     
     // Get per-CPU scratch buffer for address structures
@@ -698,11 +710,29 @@ int trace_dns_recvfrom(struct trace_event_raw_sys_exit *ctx) {
             event->dns_flags = bpf_ntohs(dns_hdr->flags);
             event->dns_rcode = event->dns_flags & 0x000F;
             
+            // Extract DNS header info
+            event->answer_count = bpf_ntohs(dns_hdr->ancount);
+            event->authority_count = bpf_ntohs(dns_hdr->nscount);
+            
             // Look up pending query for latency calculation
             struct query_context *qctx = bpf_map_lookup_elem(&pending_queries, &event->dns_id);
             if (qctx) {
                 event->latency_ns = current_time - qctx->start_timestamp;
                 bpf_map_delete_elem(&pending_queries, &event->dns_id);
+            }
+            
+            // Initialize resolved_ips
+            __builtin_memset(event->resolved_ips, 0, sizeof(event->resolved_ips));
+            
+            // Parse DNS answers to extract resolved IPs (simplified for eBPF)
+            if (event->answer_count > 0 && event->dns_rcode == DNS_RCODE_NOERROR) {
+                // For now, just mark that answers exist - full parsing is complex in eBPF
+                // The userspace code will do the actual parsing
+                const char marker[] = "[ANSWERS]";
+                #pragma unroll
+                for (int i = 0; i < 9 && i < sizeof(event->resolved_ips) - 1; i++) {
+                    event->resolved_ips[i] = marker[i];
+                }
             }
         }
     }

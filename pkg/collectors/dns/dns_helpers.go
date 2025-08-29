@@ -5,7 +5,6 @@ package dns
 
 import (
 	"strings"
-	"unsafe"
 )
 
 // extractQueryName extracts the DNS query name from the BPF event data
@@ -111,18 +110,6 @@ func (c *Collector) isValidDNSLabel(label string) bool {
 	return true
 }
 
-// getProtocolName returns the protocol name string
-func (c *Collector) getProtocolName(protocol uint8) string {
-	switch protocol {
-	case 17: // IPPROTO_UDP
-		return "UDP"
-	case 6: // IPPROTO_TCP
-		return "TCP"
-	default:
-		return "unknown"
-	}
-}
-
 // getDNSTypeName returns the DNS query type name
 func (c *Collector) getDNSTypeName(qtype uint16) string {
 	switch qtype {
@@ -168,12 +155,3 @@ func (c *Collector) getDNSRcodeName(rcode uint8) string {
 		return "unknown"
 	}
 }
-
-// Compile-time check that the helper functions don't allocate unnecessarily
-var _ = [0]func(){
-	func() { _ = (*Collector)(nil).extractQueryName(nil) },
-	func() { _ = (*Collector)(nil).getProtocolName(0) },
-}
-
-// Size check to ensure our structures are reasonable
-var _ = [512 - unsafe.Sizeof(BPFDNSEvent{})]byte // Ensure BPFDNSEvent fits in reasonable size

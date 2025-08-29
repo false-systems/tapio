@@ -24,10 +24,13 @@ func TestNewCollector(t *testing.T) {
 		{
 			name: "custom config",
 			config: &Config{
-				RingBufferSize:    16 * 1024 * 1024,
-				EventChannelSize:  5000,
-				RateLimitMs:       200,
-				EnabledCategories: []string{"file", "network"},
+				RingBufferSize:   16 * 1024 * 1024,
+				EventChannelSize: 5000,
+				RateLimitMs:      200,
+				EnabledCategories: map[string]bool{
+					"file":    true,
+					"network": true,
+				},
 			},
 			wantErr: false,
 		},
@@ -79,7 +82,12 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 8*1024*1024, config.RingBufferSize)
 	assert.Equal(t, 10000, config.EventChannelSize)
 	assert.Equal(t, 100, config.RateLimitMs)
-	assert.Equal(t, []string{"file", "network", "memory"}, config.EnabledCategories)
+	assert.Equal(t, map[string]bool{
+		"file":    true,
+		"network": true,
+		"memory":  true,
+	}, config.EnabledCategories)
+	assert.False(t, config.RequireAllMetrics)
 }
 
 // Linux-specific tests are in collector_linux_test.go

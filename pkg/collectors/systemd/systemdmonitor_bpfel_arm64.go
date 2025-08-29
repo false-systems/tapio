@@ -23,20 +23,12 @@ type systemdMonitorBpfStatistics struct {
 	FilterMisses   uint64
 }
 
-type systemdMonitorSystemdEvent struct {
+type systemdMonitorProcessCacheEntry struct {
 	Timestamp   uint64
 	Pid         uint32
-	Ppid        uint32
-	Uid         uint32
-	Gid         uint32
-	CgroupId    uint64
-	EventType   uint8
-	Pad         [3]uint8
 	Comm        [16]int8
 	ServiceName [64]int8
-	CgroupPath  [256]int8
-	ExitCode    uint32
-	Signal      uint32
+	_           [4]byte
 }
 
 // loadSystemdMonitor returns the embedded CollectionSpec for systemdMonitor.
@@ -82,9 +74,9 @@ type systemdMonitorSpecs struct {
 type systemdMonitorProgramSpecs struct {
 	TraceCgroupMkdir *ebpf.ProgramSpec `ebpf:"trace_cgroup_mkdir"`
 	TraceCgroupRmdir *ebpf.ProgramSpec `ebpf:"trace_cgroup_rmdir"`
-	TraceDbusSignal  *ebpf.ProgramSpec `ebpf:"trace_dbus_signal"`
 	TraceExec        *ebpf.ProgramSpec `ebpf:"trace_exec"`
 	TraceExit        *ebpf.ProgramSpec `ebpf:"trace_exit"`
+	TraceSignal      *ebpf.ProgramSpec `ebpf:"trace_signal"`
 }
 
 // systemdMonitorMapSpecs contains maps before they are loaded into the kernel.
@@ -95,6 +87,7 @@ type systemdMonitorMapSpecs struct {
 	ProbeStats     *ebpf.MapSpec `ebpf:"probe_stats"`
 	ProcessCache   *ebpf.MapSpec `ebpf:"process_cache"`
 	ServiceTracker *ebpf.MapSpec `ebpf:"service_tracker"`
+	SystemdStats   *ebpf.MapSpec `ebpf:"systemd_stats"`
 }
 
 // systemdMonitorObjects contains all objects after they have been loaded into the kernel.
@@ -120,6 +113,7 @@ type systemdMonitorMaps struct {
 	ProbeStats     *ebpf.Map `ebpf:"probe_stats"`
 	ProcessCache   *ebpf.Map `ebpf:"process_cache"`
 	ServiceTracker *ebpf.Map `ebpf:"service_tracker"`
+	SystemdStats   *ebpf.Map `ebpf:"systemd_stats"`
 }
 
 func (m *systemdMonitorMaps) Close() error {
@@ -128,6 +122,7 @@ func (m *systemdMonitorMaps) Close() error {
 		m.ProbeStats,
 		m.ProcessCache,
 		m.ServiceTracker,
+		m.SystemdStats,
 	)
 }
 
@@ -137,18 +132,18 @@ func (m *systemdMonitorMaps) Close() error {
 type systemdMonitorPrograms struct {
 	TraceCgroupMkdir *ebpf.Program `ebpf:"trace_cgroup_mkdir"`
 	TraceCgroupRmdir *ebpf.Program `ebpf:"trace_cgroup_rmdir"`
-	TraceDbusSignal  *ebpf.Program `ebpf:"trace_dbus_signal"`
 	TraceExec        *ebpf.Program `ebpf:"trace_exec"`
 	TraceExit        *ebpf.Program `ebpf:"trace_exit"`
+	TraceSignal      *ebpf.Program `ebpf:"trace_signal"`
 }
 
 func (p *systemdMonitorPrograms) Close() error {
 	return _SystemdMonitorClose(
 		p.TraceCgroupMkdir,
 		p.TraceCgroupRmdir,
-		p.TraceDbusSignal,
 		p.TraceExec,
 		p.TraceExit,
+		p.TraceSignal,
 	)
 }
 
