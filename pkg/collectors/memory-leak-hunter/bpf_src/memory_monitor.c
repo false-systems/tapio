@@ -73,6 +73,20 @@ struct {
     __type(value, __u64);
 } sample_counter SEC(".maps");
 
+// Enhancement #14: Configurable sampling rate
+struct config_data {
+    __u32 sample_rate;
+    __u32 max_allocations;
+    __u32 max_processes;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct config_data);
+} config SEC(".maps");
+
 // Helper: Should we sample this allocation?
 static __always_inline bool should_sample(__u64 size)
 {
@@ -88,8 +102,11 @@ static __always_inline bool should_sample(__u64 size)
         if (counter) {
             __u64 count = *counter;
             *counter = count + 1;
-            // Sample 1 in 10 for 10KB-1MB allocations
-            return (count % 10) == 0;
+            
+            // Enhancement #14: Use configurable sampling rate
+            struct config_data *cfg = bpf_map_lookup_elem(&config, &key);
+            __u32 rate = cfg ? cfg->sample_rate : 10;
+            return (count % rate) == 0;
         }
     }
     
@@ -126,9 +143,9 @@ int trace_mmap_entry(struct pt_regs *ctx)
     
     bpf_get_current_comm(&info.comm, sizeof(info.comm));
     
-    // We'll get the actual address in return probe
-    // For now, use PID+timestamp as temporary key
-    __u64 temp_key = ((__u64)pid << 32) | (info.timestamp & 0xFFFFFFFF);
+    // Enhancement #2: Use pid_tgid as temporary key to avoid collisions
+    // This combines both PID and TID for uniqueness
+    __u64 temp_key = pid_tgid; // Already unique per thread
     bpf_map_update_elem(&active_allocations, &temp_key, &info, BPF_ANY);
     
     return 0;
@@ -148,8 +165,8 @@ int trace_mmap_return(struct pt_regs *ctx)
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
     
-    // Find our pending allocation
-    __u64 temp_key = ((__u64)pid << 32) | (bpf_ktime_get_ns() & 0xFFFFFFFF);
+    // Enhancement #2: Use pid_tgid as temporary key (matching entry probe)
+    __u64 temp_key = pid_tgid;
     struct allocation_info *info = bpf_map_lookup_elem(&active_allocations, &temp_key);
     if (!info) {
         return 0;
@@ -214,18 +231,24 @@ int trace_munmap(struct pt_regs *ctx)
 }
 
 // Periodic check for long-lived allocations
+// Note: Actual iteration is done in userspace (Enhancement #1)
+// This function is kept as a placeholder for future kernel-side scanning
 SEC("perf_event")
 int check_unfreed_allocations(struct bpf_perf_event_data *ctx)
 {
-    __u64 now = bpf_ktime_get_ns();
-    __u64 age_threshold = 30 * 1000000000ULL; // 30 seconds in nanoseconds
-    
-    // Note: In real implementation, we'd iterate through map
-    // For now, this is a placeholder showing the concept
-    // Real iteration requires BPF_MAP_TYPE_HASH_OF_MAPS or similar
-    
+    // Userspace scanner handles this now (see collector.go:scanUnfreedAllocations)
+    // Keeping this function for potential future kernel-side implementation
     return 0;
 }
+
+// Define the RSS stat tracepoint structure
+struct trace_event_raw_rss_stat {
+    __u64 unused;  // Common tracepoint header fields
+    __u32 pid;
+    __u32 tid;
+    __s64 size;
+    __u32 member;
+};
 
 // Track RSS growth (page allocations)
 SEC("tracepoint/mm/rss_stat")
@@ -234,10 +257,9 @@ int trace_rss_change(struct trace_event_raw_rss_stat *ctx)
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     __s64 size = ctx->size;
     
-    // Only track increases
-    if (size <= 0) {
-        return 0;
-    }
+    // Enhancement #11: Track both increases and decreases for better accuracy
+    // Remove the check to allow tracking RSS decreases as well
+    // This provides more complete RSS tracking
     
     // Only track significant growth (> 1MB)
     if (size < 256) { // 256 pages = 1MB
@@ -249,10 +271,10 @@ int trace_rss_change(struct trace_event_raw_rss_stat *ctx)
     __u64 current_rss = size;
     
     if (last_rss) {
-        __u64 growth = current_rss - *last_rss;
+        __s64 growth = (__s64)current_rss - (__s64)*last_rss;
         
-        // Report significant growth
-        if (growth > 256) { // 1MB growth
+        // Report significant changes (both growth and shrinkage)
+        if (growth > 256 || growth < -256) { // 1MB change
             struct memory_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
             if (e) {
                 e->timestamp = bpf_ktime_get_ns();

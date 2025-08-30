@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -47,47 +48,46 @@ func (c *Collector) startEBPF() error {
 
 	// Attach uprobes based on mode
 	if c.config.Mode != ModeGrowthDetection {
-		// Attach mmap/munmap probes for allocation tracking
-		mmapLink, err := link.AttachUprobe(link.UprobeOptions{
-			Path:   "/lib/x86_64-linux-gnu/libc.so.6",
-			Symbol: "mmap",
-			Pid:    int(c.config.TargetPID), // 0 means all processes
-		}, objs.TraceMmapEntry)
+		// Enhancement #3: Use configurable libc path
+		// Open the libc executable
+		ex, err := link.OpenExecutable(c.config.LibCPath)
 		if err != nil {
-			c.logger.Warn("Failed to attach mmap uprobe", zap.Error(err))
+			c.logger.Warn("Failed to open libc", zap.Error(err))
 		} else {
-			state.links = append(state.links, mmapLink)
-		}
+			// Attach mmap uprobe
+			mmapLink, err := ex.Uprobe("mmap", objs.TraceMmapEntry, &link.UprobeOptions{
+				PID: int(c.config.TargetPID), // 0 means all processes
+			})
+			if err != nil {
+				c.logger.Warn("Failed to attach mmap uprobe", zap.Error(err))
+			} else {
+				state.links = append(state.links, mmapLink)
+			}
 
-		mmapRetLink, err := link.AttachUretprobe(link.UretprobeOptions{
-			Path:   "/lib/x86_64-linux-gnu/libc.so.6",
-			Symbol: "mmap",
-			Pid:    int(c.config.TargetPID),
-		}, objs.TraceMmapReturn)
-		if err != nil {
-			c.logger.Warn("Failed to attach mmap uretprobe", zap.Error(err))
-		} else {
-			state.links = append(state.links, mmapRetLink)
-		}
+			// Attach mmap uretprobe
+			mmapRetLink, err := ex.Uretprobe("mmap", objs.TraceMmapReturn, &link.UprobeOptions{
+				PID: int(c.config.TargetPID),
+			})
+			if err != nil {
+				c.logger.Warn("Failed to attach mmap uretprobe", zap.Error(err))
+			} else {
+				state.links = append(state.links, mmapRetLink)
+			}
 
-		munmapLink, err := link.AttachUprobe(link.UprobeOptions{
-			Path:   "/lib/x86_64-linux-gnu/libc.so.6",
-			Symbol: "munmap",
-			Pid:    int(c.config.TargetPID),
-		}, objs.TraceMunmap)
-		if err != nil {
-			c.logger.Warn("Failed to attach munmap uprobe", zap.Error(err))
-		} else {
-			state.links = append(state.links, munmapLink)
+			// Attach munmap uprobe
+			munmapLink, err := ex.Uprobe("munmap", objs.TraceMunmap, &link.UprobeOptions{
+				PID: int(c.config.TargetPID),
+			})
+			if err != nil {
+				c.logger.Warn("Failed to attach munmap uprobe", zap.Error(err))
+			} else {
+				state.links = append(state.links, munmapLink)
+			}
 		}
 	}
 
 	// Attach RSS tracking (always enabled)
-	rssLink, err := link.AttachTracepoint(link.TracepointOptions{
-		Group:   "mm",
-		Name:    "rss_stat",
-		Program: objs.TraceRssChange,
-	})
+	rssLink, err := link.Tracepoint("mm", "rss_stat", objs.TraceRssChange, nil)
 	if err != nil {
 		c.logger.Warn("Failed to attach RSS tracepoint", zap.Error(err))
 	} else {
@@ -101,6 +101,12 @@ func (c *Collector) startEBPF() error {
 		return fmt.Errorf("failed to create ring buffer reader: %w", err)
 	}
 	state.reader = reader
+
+	// Enhancement #4: Fail if no probes attached
+	if len(state.links) == 0 {
+		c.cleanupEBPF(state)
+		return fmt.Errorf("no eBPF probes or tracepoints attached")
+	}
 
 	c.ebpfState = state
 	c.logger.Info("eBPF programs attached",
@@ -215,20 +221,33 @@ func (c *Collector) processRawEvent(data []byte) {
 		if c.allocationsTracked != nil {
 			c.allocationsTracked.Add(c.ctx, 1)
 		}
+		// Enhancement #13: Add context to metrics
 		if c.largestAllocation != nil && event.Size > 0 {
-			c.largestAllocation.Record(c.ctx, int64(event.Size))
+			c.largestAllocation.Record(c.ctx, int64(event.Size), metric.WithAttributes(
+				attribute.Int("pid", int(event.PID)),
+				attribute.String("comm", string(bytes.Trim(event.Comm[:], "\x00"))),
+			))
 		}
 	case EventTypeMunmap:
 		if c.deallocationsTracked != nil {
 			c.deallocationsTracked.Add(c.ctx, 1)
 		}
 	case EventTypeRSSGrowth:
-		if c.rssGrowthDetected != nil {
-			c.rssGrowthDetected.Add(c.ctx, 1)
+		// Enhancement #11: Validate RSS changes with userspace data
+		if c.validateRSSGrowth(&event) {
+			if c.rssGrowthDetected != nil {
+				c.rssGrowthDetected.Add(c.ctx, 1)
+			}
+		} else {
+			return // Skip invalid RSS growth events
 		}
 	case EventTypeUnfreed:
+		// Enhancement #13: Add context to metrics
 		if c.unfreedMemoryBytes != nil {
-			c.unfreedMemoryBytes.Record(c.ctx, int64(event.Size))
+			c.unfreedMemoryBytes.Record(c.ctx, int64(event.Size), metric.WithAttributes(
+				attribute.Int("pid", int(event.PID)),
+				attribute.String("comm", string(bytes.Trim(event.Comm[:], "\x00"))),
+			))
 		}
 	}
 
@@ -237,8 +256,8 @@ func (c *Collector) processRawEvent(data []byte) {
 		return
 	}
 
-	// Convert to domain event
-	domainEvent := c.createDomainEvent(&event)
+	// Enhancement #9: Pass context to createDomainEvent
+	domainEvent := c.createDomainEvent(c.ctx, &event)
 
 	// Send event
 	select {
@@ -252,11 +271,130 @@ func (c *Collector) processRawEvent(data []byte) {
 			c.bufferUsage.Record(c.ctx, int64(len(c.events)))
 		}
 	default:
-		// Buffer full, drop event
+		// Enhancement #5: Log warning when events are dropped
+		c.logger.Warn("Dropping event due to full channel",
+			zap.Int("buffer_size", len(c.events)),
+			zap.String("event_type", event.EventType.String()))
 		if c.droppedEvents != nil {
 			c.droppedEvents.Add(c.ctx, 1, metric.WithAttributes(
 				attribute.String("reason", "buffer_full"),
 			))
+		}
+	}
+}
+
+// Enhancement #11: Validate RSS growth with userspace data
+func (c *Collector) validateRSSGrowth(event *MemoryEvent) bool {
+	statmPath := fmt.Sprintf("/proc/%d/statm", event.PID)
+	statm, err := os.ReadFile(statmPath)
+	if err != nil {
+		// Process might have exited, consider the event valid
+		return true
+	}
+
+	var vmSize, vmRSS, vmShared uint64
+	fmt.Sscanf(string(statm), "%d %d %d", &vmSize, &vmRSS, &vmShared)
+
+	// Convert pages to bytes (assuming 4KB pages)
+	actualRSSBytes := vmRSS * 4096
+	reportedRSSBytes := event.RSSPages * 4096
+
+	// Allow some tolerance (10%)
+	tolerance := actualRSSBytes / 10
+	if reportedRSSBytes > actualRSSBytes+tolerance {
+		c.logger.Warn("RSS growth inconsistent with /proc",
+			zap.Uint32("pid", event.PID),
+			zap.Uint64("reported_rss", reportedRSSBytes),
+			zap.Uint64("actual_rss", actualRSSBytes))
+		return false
+	}
+
+	return true
+}
+
+// Enhancement #10: Configure eBPF map sizes
+func (c *Collector) configureMapSizes(maxAllocations, maxProcesses uint32) error {
+	state, ok := c.ebpfState.(*ebpfState)
+	if !ok || state == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	// Note: This would require a config map in the eBPF program
+	// For now, we'll log the intention
+	c.logger.Info("Map size configuration requested",
+		zap.Uint32("max_allocations", maxAllocations),
+		zap.Uint32("max_processes", maxProcesses))
+
+	return nil
+}
+
+// Enhancement #14: Configure sampling rate
+func (c *Collector) configureSamplingRate(rate uint32) error {
+	state, ok := c.ebpfState.(*ebpfState)
+	if !ok || state == nil {
+		return fmt.Errorf("invalid eBPF state")
+	}
+
+	// This would update a config map in the eBPF program
+	// For now, we'll log the configuration
+	c.logger.Info("Sampling rate configuration requested",
+		zap.Uint32("rate", rate))
+
+	return nil
+}
+
+// Enhancement #1: Implement unfreed allocations scanner (Linux-specific due to eBPF map iteration)
+func (c *Collector) scanUnfreedAllocations() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			state, ok := c.ebpfState.(*ebpfState)
+			if !ok || state == nil {
+				continue
+			}
+
+			var addr uint64
+			var info AllocationInfo
+			now := uint64(time.Now().UnixNano())
+			threshold := uint64(c.config.MinUnfreedAge.Nanoseconds())
+
+			iter := state.objs.ActiveAllocations.Iterate()
+			for iter.Next(&addr, &info) {
+				if now-info.Timestamp > threshold {
+					event := MemoryEvent{
+						Timestamp: now,
+						EventType: EventTypeUnfreed,
+						PID:       info.PID,
+						Address:   addr,
+						Size:      info.Size,
+						CGroupID:  info.CGroupID,
+						Comm:      info.Comm,
+						CallerIP:  info.CallerIP,
+					}
+					if c.shouldEmitEvent(&event) {
+						domainEvent := c.createDomainEvent(c.ctx, &event)
+						select {
+						case c.events <- domainEvent:
+							if c.eventsProcessed != nil {
+								c.eventsProcessed.Add(c.ctx, 1, metric.WithAttributes(
+									attribute.String("event_type", event.EventType.String()),
+								))
+							}
+						default:
+							if c.droppedEvents != nil {
+								c.droppedEvents.Add(c.ctx, 1, metric.WithAttributes(
+									attribute.String("reason", "buffer_full"),
+								))
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 }

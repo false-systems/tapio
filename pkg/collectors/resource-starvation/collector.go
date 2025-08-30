@@ -243,38 +243,34 @@ func (c *Collector) convertToCollectorEvent(event *StarvationEvent) *domain.Coll
 		Severity:  severity,
 
 		EventData: domain.EventDataContainer{
-			ResourceStarvation: &domain.ResourceStarvationData{
-				StarvationType: EventType(event.EventType).String(),
-				WaitTimeMS:     waitTimeMS,
-				RunTimeMS:      runTimeMS,
-				CPUCore:        event.CPUCore,
-
-				VictimPID:      event.VictimPID,
-				VictimTGID:     event.VictimTGID,
-				VictimCommand:  c.bytesToString(event.VictimComm[:]),
-				VictimPriority: event.VictimPrio,
-				VictimPolicy:   GetSchedulingPolicy(event.VictimPolicy),
-
-				CulpritPID:     event.CulpritPID,
-				CulpritTGID:    event.CulpritTGID,
-				CulpritCommand: c.bytesToString(event.CulpritComm[:]),
-				CulpritRuntime: float64(event.CulpritRuntime) / 1_000_000,
-
-				ThrottleTimeMS:   throttleTimeMS,
-				PercentThrottled: c.calculateThrottlePercentage(event),
-				ThrottleCount:    event.NrThrottled,
-
-				SeverityLevel:      GetSeverity(event.WaitTimeNS),
-				EstimatedLatencyMS: estimatedLatencyMS,
-				WaitToRunRatio:     waitToRunRatio,
-
-				PatternType:        pattern,
-				PatternDescription: c.getPatternDescription(pattern),
-				PatternConfidence:  0.8,
-				IsRecurring:        false,
-
-				VictimCgroupID:  event.VictimCgroupID,
-				CulpritCgroupID: event.CulpritCgroupID,
+			// Using Custom field to store resource starvation data
+			Custom: map[string]string{
+				"starvation_type":      EventType(event.EventType).String(),
+				"wait_time_ms":         fmt.Sprintf("%.2f", waitTimeMS),
+				"run_time_ms":          fmt.Sprintf("%.2f", runTimeMS),
+				"cpu_core":             fmt.Sprintf("%d", event.CPUCore),
+				"victim_pid":           fmt.Sprintf("%d", event.VictimPID),
+				"victim_tgid":          fmt.Sprintf("%d", event.VictimTGID),
+				"victim_command":       c.bytesToString(event.VictimComm[:]),
+				"victim_priority":      fmt.Sprintf("%d", event.VictimPrio),
+				"victim_policy":        GetSchedulingPolicy(event.VictimPolicy),
+				"culprit_pid":          fmt.Sprintf("%d", event.CulpritPID),
+				"culprit_tgid":         fmt.Sprintf("%d", event.CulpritTGID),
+				"culprit_command":      c.bytesToString(event.CulpritComm[:]),
+				"culprit_runtime":      fmt.Sprintf("%.2f", float64(event.CulpritRuntime)/1_000_000),
+				"throttle_time_ms":     fmt.Sprintf("%.2f", throttleTimeMS),
+				"percent_throttled":    fmt.Sprintf("%.2f", c.calculateThrottlePercentage(event)),
+				"throttle_count":       fmt.Sprintf("%d", event.NrThrottled),
+				"severity_level":       GetSeverity(event.WaitTimeNS),
+				"estimated_latency_ms": fmt.Sprintf("%.2f", estimatedLatencyMS),
+				"wait_to_run_ratio":    fmt.Sprintf("%.2f", waitToRunRatio),
+				"pattern_type":         pattern,
+				"pattern_description":  c.getPatternDescription(pattern),
+				"pattern_confidence":   "0.8",
+				"is_recurring":         "false",
+				"victim_cgroup_id":     fmt.Sprintf("%d", event.VictimCgroupID),
+				"culprit_cgroup_id":    fmt.Sprintf("%d", event.CulpritCgroupID),
+				"stack_id":             fmt.Sprintf("%d", event.StackID),
 			},
 		},
 
@@ -290,20 +286,30 @@ func (c *Collector) convertToCollectorEvent(event *StarvationEvent) *domain.Coll
 	}
 }
 
+// Define resource starvation event types as domain constants
+const (
+	EventTypeSchedulingDelay    domain.CollectorEventType = "resource.scheduling_delay"
+	EventTypeCFSThrottle        domain.CollectorEventType = "resource.cfs_throttle"
+	EventTypePriorityInversion  domain.CollectorEventType = "resource.priority_inversion"
+	EventTypeCoreMigration      domain.CollectorEventType = "resource.core_migration"
+	EventTypeNoisyNeighbor      domain.CollectorEventType = "resource.noisy_neighbor"
+	EventTypeResourceStarvation domain.CollectorEventType = "resource.starvation"
+)
+
 func (c *Collector) mapEventType(et EventType) domain.CollectorEventType {
 	switch et {
 	case EventSchedWait:
-		return domain.EventTypeSchedulingDelay
+		return EventTypeSchedulingDelay
 	case EventCFSThrottle:
-		return domain.EventTypeCFSThrottle
+		return EventTypeCFSThrottle
 	case EventPriorityInvert:
-		return domain.EventTypePriorityInversion
+		return EventTypePriorityInversion
 	case EventCoreMigrate:
-		return domain.EventTypeCoreMigration
+		return EventTypeCoreMigration
 	case EventNoisyNeighbor:
-		return domain.EventTypeNoisyNeighbor
+		return EventTypeNoisyNeighbor
 	default:
-		return domain.EventTypeResourceStarvation
+		return EventTypeResourceStarvation
 	}
 }
 

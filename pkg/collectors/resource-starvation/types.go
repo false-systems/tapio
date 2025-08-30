@@ -73,6 +73,9 @@ type StarvationEvent struct {
 	VictimPrio   int32  `json:"victim_prio"`
 	CulpritPrio  int32  `json:"culprit_prio"`
 	VictimPolicy uint32 `json:"victim_policy"`
+
+	// Stack trace ID for debugging
+	StackID int64 `json:"stack_id"`
 }
 
 // ProcessedEvent is the enriched event with Kubernetes context

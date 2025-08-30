@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package memoryleakhunter
+package memory_leak_hunter
 
 import (
 	"fmt"
