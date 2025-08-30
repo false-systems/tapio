@@ -3,8 +3,6 @@ package resourcestarvation
 import (
 	"context"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -13,10 +11,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 type Collector struct {
+	*base.BaseCollector
+	*base.EventChannelManager
+	*base.LifecycleManager
+
 	config *Config
 	logger *zap.Logger
 
@@ -31,11 +34,6 @@ type Collector struct {
 	noiseScore         metric.Float64Gauge
 	waitRatio          metric.Float64Gauge
 	throttlePercentage metric.Float64Gauge
-
-	// Interface implementation
-	eventCh   chan *domain.CollectorEvent
-	isHealthy atomic.Bool
-	mu        sync.RWMutex
 }
 
 func NewCollector(config *Config, logger *zap.Logger) (*Collector, error) {
@@ -102,20 +100,22 @@ func NewCollector(config *Config, logger *zap.Logger) (*Collector, error) {
 	}
 
 	collector := &Collector{
-		config:             config,
-		logger:             logger,
-		tracer:             tracer,
-		meter:              meter,
-		schedDelayHist:     schedDelayHist,
-		throttleTimeHist:   throttleTimeHist,
-		starvationEvents:   starvationEvents,
-		noiseScore:         noiseScore,
-		waitRatio:          waitRatio,
-		throttlePercentage: throttlePercentage,
-		eventCh:            make(chan *domain.CollectorEvent, config.EventChannelSize),
+		BaseCollector:       base.NewBaseCollector(config.Name, 5*time.Minute),
+		EventChannelManager: base.NewEventChannelManager(config.EventChannelSize, config.Name, logger),
+		LifecycleManager:    base.NewLifecycleManager(context.Background(), logger),
+		config:              config,
+		logger:              logger,
+		tracer:              tracer,
+		meter:               meter,
+		schedDelayHist:      schedDelayHist,
+		throttleTimeHist:    throttleTimeHist,
+		starvationEvents:    starvationEvents,
+		noiseScore:          noiseScore,
+		waitRatio:           waitRatio,
+		throttlePercentage:  throttlePercentage,
 	}
 
-	collector.isHealthy.Store(true)
+	collector.SetHealthy(true)
 	return collector, nil
 }
 
@@ -125,20 +125,27 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	c.logger.Info("Starting resource starvation collector", zap.String("config", c.config.String()))
 
+	// Start any background goroutines here using LifecycleManager
+	// Example:
+	// c.LifecycleManager.Start("event-processor", func() {
+	//     c.processEvents()
+	// })
+
 	return nil
 }
 
 func (c *Collector) Stop() error {
 	c.logger.Info("Stopping resource starvation collector")
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
-	if c.eventCh != nil {
-		close(c.eventCh)
-		c.eventCh = nil
+	// Stop lifecycle manager with 30 second timeout
+	if err := c.LifecycleManager.Stop(30 * time.Second); err != nil {
+		c.logger.Warn("Error during shutdown", zap.Error(err))
 	}
 
-	c.isHealthy.Store(false)
+	// Close event channel
+	c.EventChannelManager.Close()
+
+	c.SetHealthy(false)
 	return nil
 }
 
@@ -149,14 +156,12 @@ func (c *Collector) Name() string {
 
 // Events returns a channel of collector events
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.eventCh
+	return c.GetChannel()
 }
 
 // IsHealthy returns true if the collector is functioning properly
 func (c *Collector) IsHealthy() bool {
-	return c.isHealthy.Load()
+	return c.BaseCollector.IsHealthy()
 }
 
 func (c *Collector) ProcessEvent(ctx context.Context, event *StarvationEvent) error {
@@ -197,7 +202,13 @@ func (c *Collector) ProcessEvent(ctx context.Context, event *StarvationEvent) er
 
 	// Convert to domain CollectorEvent and emit
 	collectorEvent := c.convertToCollectorEvent(event)
-	c.emitEvent(collectorEvent)
+	if c.SendEvent(collectorEvent) {
+		c.RecordEvent() // Track successful event
+	} else {
+		c.RecordDrop() // Track dropped event
+		c.logger.Warn("Event dropped, channel full",
+			zap.String("event_id", collectorEvent.EventID))
+	}
 
 	return nil
 }
@@ -243,67 +254,56 @@ func (c *Collector) convertToCollectorEvent(event *StarvationEvent) *domain.Coll
 		Severity:  severity,
 
 		EventData: domain.EventDataContainer{
-			ResourceStarvation: &domain.ResourceStarvationData{
-				StarvationType: EventType(event.EventType).String(),
-				WaitTimeMS:     waitTimeMS,
-				RunTimeMS:      runTimeMS,
-				CPUCore:        event.CPUCore,
-
-				VictimPID:      event.VictimPID,
-				VictimTGID:     event.VictimTGID,
-				VictimCommand:  c.bytesToString(event.VictimComm[:]),
-				VictimPriority: event.VictimPrio,
-				VictimPolicy:   GetSchedulingPolicy(event.VictimPolicy),
-
-				CulpritPID:     event.CulpritPID,
-				CulpritTGID:    event.CulpritTGID,
-				CulpritCommand: c.bytesToString(event.CulpritComm[:]),
-				CulpritRuntime: float64(event.CulpritRuntime) / 1_000_000,
-
-				ThrottleTimeMS:   throttleTimeMS,
-				PercentThrottled: c.calculateThrottlePercentage(event),
-				ThrottleCount:    event.NrThrottled,
-
-				SeverityLevel:      GetSeverity(event.WaitTimeNS),
-				EstimatedLatencyMS: estimatedLatencyMS,
-				WaitToRunRatio:     waitToRunRatio,
-
-				PatternType:        pattern,
-				PatternDescription: c.getPatternDescription(pattern),
-				PatternConfidence:  0.8,
-				IsRecurring:        false,
-
-				VictimCgroupID:  event.VictimCgroupID,
-				CulpritCgroupID: event.CulpritCgroupID,
+			// Use Kernel data for resource starvation events
+			Kernel: &domain.KernelData{
+				EventType:    EventType(event.EventType).String(),
+				PID:          int32(event.VictimPID),
+				PPID:         0, // Not available in our event
+				UID:          0, // Not available in our event
+				GID:          0, // Not available in our event
+				Command:      c.bytesToString(event.VictimComm[:]),
+				CgroupID:     event.VictimCgroupID,
+				ErrorMessage: c.getPatternDescription(pattern),
 			},
 		},
 
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
-				"collector":    c.config.Name,
-				"event_type":   EventType(event.EventType).String(),
-				"severity":     GetSeverity(event.WaitTimeNS),
-				"cpu_core":     fmt.Sprintf("%d", event.CPUCore),
-				"pattern_type": pattern,
+				"collector":             c.config.Name,
+				"event_type":            EventType(event.EventType).String(),
+				"severity":              GetSeverity(event.WaitTimeNS),
+				"cpu_core":              fmt.Sprintf("%d", event.CPUCore),
+				"pattern_type":          pattern,
+				"wait_time_ms":          fmt.Sprintf("%.2f", waitTimeMS),
+				"run_time_ms":           fmt.Sprintf("%.2f", runTimeMS),
+				"throttle_time_ms":      fmt.Sprintf("%.2f", throttleTimeMS),
+				"wait_to_run_ratio":     fmt.Sprintf("%.2f", waitToRunRatio),
+				"culprit_pid":           fmt.Sprintf("%d", event.CulpritPID),
+				"culprit_command":       c.bytesToString(event.CulpritComm[:]),
+				"victim_priority":       fmt.Sprintf("%d", event.VictimPrio),
+				"victim_policy":         GetSchedulingPolicy(event.VictimPolicy),
+				"percent_throttled":     fmt.Sprintf("%.1f", c.calculateThrottlePercentage(event)),
+				"estimated_latency_ms":  fmt.Sprintf("%.2f", estimatedLatencyMS),
 			},
 		},
 	}
 }
 
 func (c *Collector) mapEventType(et EventType) domain.CollectorEventType {
+	// Map to generic kernel event types
 	switch et {
 	case EventSchedWait:
-		return domain.EventTypeSchedulingDelay
+		return domain.EventTypeKernelCgroup // Scheduling delays often related to cgroups
 	case EventCFSThrottle:
-		return domain.EventTypeCFSThrottle
+		return domain.EventTypeKernelCgroup // CFS throttling is cgroup-related
 	case EventPriorityInvert:
-		return domain.EventTypePriorityInversion
+		return domain.EventTypeKernelProcess // Priority inversion is process-related
 	case EventCoreMigrate:
-		return domain.EventTypeCoreMigration
+		return domain.EventTypeKernelProcess // Core migration is process-related
 	case EventNoisyNeighbor:
-		return domain.EventTypeNoisyNeighbor
+		return domain.EventTypeKernelCgroup // Noisy neighbor affects cgroups
 	default:
-		return domain.EventTypeResourceStarvation
+		return domain.EventTypeKernelProcess // Default to process event
 	}
 }
 
@@ -357,20 +357,3 @@ func (c *Collector) getPatternDescription(pattern string) string {
 	}
 }
 
-func (c *Collector) emitEvent(event *domain.CollectorEvent) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if c.eventCh != nil {
-		select {
-		case c.eventCh <- event:
-			// Event sent successfully
-		default:
-			// Channel is full, drop event and log warning
-			c.logger.Warn("Event channel full, dropping event",
-				zap.String("event_id", event.EventID),
-				zap.String("event_type", string(event.Type)),
-			)
-		}
-	}
-}

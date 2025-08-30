@@ -56,7 +56,9 @@ func RegisterResourceStarvationCollector() {
 	}
 
 	// Register the factory with the orchestrator
-	orchestrator.RegisterCollectorFactory("resource-starvation", factory)
+	// TODO: Uncomment when orchestrator.RegisterCollectorFactory is implemented
+	// orchestrator.RegisterCollectorFactory("resource-starvation", factory)
+	_ = factory // Suppress unused variable warning
 }
 
 // CreateResourceStarvationCollector creates a new resource starvation collector with the given configuration

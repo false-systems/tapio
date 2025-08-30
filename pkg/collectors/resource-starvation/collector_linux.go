@@ -100,9 +100,14 @@ func (c *LinuxCollector) Stop() error {
 func (c *LinuxCollector) loadeBPFProgram() error {
 	c.logger.Debug("Loading eBPF program")
 
-	objs, err := bpf.LoadStarvationmonitor()
+	spec, err := bpf.LoadStarvationmonitor()
 	if err != nil {
-		return fmt.Errorf("failed to load starvation monitor: %w", err)
+		return fmt.Errorf("failed to load starvation monitor spec: %w", err)
+	}
+
+	objs := &bpf.StarvationmonitorObjects{}
+	if err := spec.LoadAndAssign(objs, nil); err != nil {
+		return fmt.Errorf("failed to load starvation monitor objects: %w", err)
 	}
 
 	c.bpfObjs = objs
@@ -114,44 +119,28 @@ func (c *LinuxCollector) attachTracepoints() error {
 	c.logger.Debug("Attaching to kernel tracepoints")
 
 	// Attach to sched_stat_wait (scheduling delays)
-	schedWaitLink, err := link.Tracepoint(link.TracepointOptions{
-		Group:   "sched",
-		Name:    "sched_stat_wait",
-		Program: c.bpfObjs.TraceSchedWait,
-	})
+	schedWaitLink, err := link.Tracepoint("sched", "sched_stat_wait", c.bpfObjs.TraceSchedWait, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_stat_wait: %w", err)
 	}
 	c.links = append(c.links, schedWaitLink)
 
 	// Attach to sched_stat_runtime (runtime tracking)
-	runtimeLink, err := link.Tracepoint(link.TracepointOptions{
-		Group:   "sched",
-		Name:    "sched_stat_runtime",
-		Program: c.bpfObjs.TraceThrottle,
-	})
+	runtimeLink, err := link.Tracepoint("sched", "sched_stat_runtime", c.bpfObjs.TraceThrottle, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_stat_runtime: %w", err)
 	}
 	c.links = append(c.links, runtimeLink)
 
 	// Attach to sched_migrate_task (CPU migrations)
-	migrateLink, err := link.Tracepoint(link.TracepointOptions{
-		Group:   "sched",
-		Name:    "sched_migrate_task",
-		Program: c.bpfObjs.TraceMigrate,
-	})
+	migrateLink, err := link.Tracepoint("sched", "sched_migrate_task", c.bpfObjs.TraceMigrate, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_migrate_task: %w", err)
 	}
 	c.links = append(c.links, migrateLink)
 
 	// Attach to sched_switch (context switches)
-	switchLink, err := link.Tracepoint(link.TracepointOptions{
-		Group:   "sched",
-		Name:    "sched_switch",
-		Program: c.bpfObjs.TraceSchedSwitch,
-	})
+	switchLink, err := link.Tracepoint("sched", "sched_switch", c.bpfObjs.TraceSchedSwitch, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_switch: %w", err)
 	}
