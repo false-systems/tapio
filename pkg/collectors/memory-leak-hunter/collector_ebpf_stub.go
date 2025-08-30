@@ -18,3 +18,8 @@ func (c *Collector) stopEBPF() {
 func (c *Collector) readEBPFEvents() {
 	c.logger.Info("eBPF event reading not available on this platform")
 }
+
+// scanUnfreedAllocations is a stub for non-Linux platforms
+func (c *Collector) scanUnfreedAllocations() {
+	c.logger.Debug("Unfreed allocation scanning not available on this platform")
+}
