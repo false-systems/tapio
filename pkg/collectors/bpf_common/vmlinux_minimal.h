@@ -158,6 +158,55 @@ struct nsproxy {
     struct net *net_ns;
 } __attribute__((preserve_access_index));
 
+/* Scheduling entity - for CFS throttling detection */
+struct sched_entity {
+    /* Load weight */
+    struct load_weight {
+        unsigned long weight;
+        u32 inv_weight;
+    } load;
+    
+    /* Runtime and vruntime tracking */
+    u64 exec_start;
+    u64 sum_exec_runtime;
+    u64 vruntime;
+    u64 prev_sum_exec_runtime;
+    
+    /* Statistics - location varies by kernel config */
+    struct sched_statistics {
+        u64 wait_start;
+        u64 wait_max;
+        u64 wait_count;
+        u64 wait_sum;
+        u64 sleep_start;
+        u64 sleep_max;
+        u64 block_start;
+        u64 block_max;
+        u64 exec_max;
+        u64 slice_max;
+        u64 nr_migrations_cold;
+        u64 nr_failed_migrations_affine;
+        u64 nr_failed_migrations_running;
+        u64 nr_failed_migrations_hot;
+        u64 nr_forced_migrations;
+        u64 nr_wakeups;
+        u64 nr_wakeups_sync;
+        u64 nr_wakeups_migrate;
+        u64 nr_wakeups_local;
+        u64 nr_wakeups_remote;
+        u64 nr_wakeups_affine;
+        u64 nr_wakeups_affine_attempts;
+        u64 nr_wakeups_passive;
+        u64 nr_wakeups_idle;
+    } statistics;
+    
+    /* CFS throttling fields - only in CONFIG_CFS_BANDWIDTH kernels */
+    int throttled;
+    int throttle_count;
+    u64 throttled_clock;
+    u64 throttled_clock_task;
+} __attribute__((preserve_access_index));
+
 /* Task structure - only fields we actually use */
 struct task_struct {
     /* Task credentials */
@@ -184,6 +233,9 @@ struct task_struct {
     int static_prio;
     int normal_prio;
     unsigned int policy;
+    
+    /* CFS scheduler entity - CO-RE will find the actual offset */
+    struct sched_entity se;
     
     /* Namespaces and cgroups */
     struct nsproxy *nsproxy;

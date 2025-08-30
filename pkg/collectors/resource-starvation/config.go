@@ -52,6 +52,7 @@ type Config struct {
 	MaxTrackedProcesses int           `json:"max_tracked_processes" yaml:"max_tracked_processes"`
 	ProcessTrackingTTL  time.Duration `json:"process_tracking_ttl" yaml:"process_tracking_ttl"`
 	EnableVerifierLogs  bool          `json:"enable_verifier_logs" yaml:"enable_verifier_logs"`
+	FilterPIDs          []uint32      `json:"filter_pids" yaml:"filter_pids"` // Optional PID filtering
 
 	// Event processing
 	EventChannelSize int           `json:"event_channel_size" yaml:"event_channel_size"`
