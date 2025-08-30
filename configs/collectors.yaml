@@ -69,12 +69,13 @@ collectors:
       https_ports: [443, 8443]
 
   # Namespace collector - Network namespace operations
-  namespace-collector:
-    enabled: false
-    config:
-      enable_ebpf: true
-      monitor_network_namespaces: true
-      monitor_pid_namespaces: false
+  # NOTE: This collector is not implemented yet
+  # namespace-collector:
+  #   enabled: false
+  #   config:
+  #     enable_ebpf: true
+  #     monitor_network_namespaces: true
+  #     monitor_pid_namespaces: false
 
   # CRI-eBPF collector - Container runtime monitoring
   cri-ebpf:
@@ -124,8 +125,8 @@ collectors:
         - /var/lib/etcd
       latency_threshold_ms: 100
 
-  # OOM collector - Out of memory events
-  oom:
+  # Resource Starvation collector - Out of memory and resource starvation events
+  resource-starvation:
     enabled: true
     config:
       enable_ebpf: true
@@ -144,8 +145,8 @@ collectors:
         - EIO
       sampling_rate: 100
 
-  # ETCD collector - etcd operations
-  etcd:
+  # ETCD Metrics collector - etcd metrics collection
+  etcd-metrics:
     enabled: false
     config:
       endpoints: ["${ETCD_ENDPOINTS:-localhost:2379}"]
@@ -163,3 +164,32 @@ collectors:
       insecure: true
       # headers:
       #   Authorization: "Bearer ${OTEL_TOKEN}"
+  
+  # CRI collector - Container Runtime Interface monitoring
+  cri:
+    enabled: false
+    config:
+      buffer_size: 5000
+      enable_ebpf: false
+  
+  # Memory Leak Hunter collector - Detect memory leaks
+  memory-leak-hunter:
+    enabled: false
+    config:
+      enable_ebpf: true
+      buffer_size: 5000
+      sampling_rate: 100
+  
+  # Runtime Signals collector - Runtime signal monitoring
+  runtime-signals:
+    enabled: false
+    config:
+      enable_ebpf: true
+      buffer_size: 5000
+  
+  # Systemd API collector - Systemd API monitoring
+  systemd-api:
+    enabled: false
+    config:
+      enable_journal: true
+      priority: "info"

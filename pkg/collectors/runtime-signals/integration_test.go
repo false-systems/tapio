@@ -1,4 +1,4 @@
-package runtime_signals
+package runtimesignals
 
 import (
 	"context"

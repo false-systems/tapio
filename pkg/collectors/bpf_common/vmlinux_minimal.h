@@ -35,6 +35,7 @@ typedef unsigned int fmode_t;
 typedef unsigned short umode_t;
 typedef unsigned long size_t;
 typedef long ssize_t;
+typedef __u32 gfp_t;
 
 /* Short type aliases commonly used in eBPF programs */
 typedef __u8 u8;
@@ -61,6 +62,9 @@ typedef __s64 s64;
 #endif
 #ifndef BPF_MAP_TYPE_RINGBUF
 #define BPF_MAP_TYPE_RINGBUF 27
+#endif
+#ifndef BPF_MAP_TYPE_BLOOM_FILTER
+#define BPF_MAP_TYPE_BLOOM_FILTER 30
 #endif
 
 /* BPF map update flags */
@@ -174,6 +178,12 @@ struct task_struct {
     
     /* Process name */
     char comm[16];
+    
+    /* Scheduling fields */
+    int prio;
+    int static_prio;
+    int normal_prio;
+    unsigned int policy;
     
     /* Namespaces and cgroups */
     struct nsproxy *nsproxy;
@@ -352,6 +362,69 @@ struct sk_buff {
     unsigned int data_len;
 } __attribute__((preserve_access_index));
 
+/* Message header structure for socket operations */
+struct iovec {
+    void *iov_base;
+    size_t iov_len;
+} __attribute__((preserve_access_index));
+
+struct iov_iter {
+    __u8 iter_type;
+    bool data_source;
+    size_t count;
+    union {
+        const struct iovec *iov;
+        const void *kvec;
+    };
+    unsigned long nr_segs;
+} __attribute__((preserve_access_index));
+
+struct msghdr {
+    void *msg_name;
+    int msg_namelen;
+    struct iov_iter msg_iter;
+    void *msg_control;
+    __u32 msg_controllen;
+    unsigned int msg_flags;
+} __attribute__((preserve_access_index));
+
+/* Slab flags type */
+typedef __u32 slab_flags_t;
+
+/* Memory management structures */
+struct kmem_cache {
+    unsigned int object_size;
+    unsigned int size;
+    const char *name;
+    unsigned int align;
+    slab_flags_t flags;
+} __attribute__((preserve_access_index));
+
+/* Scheduler policy constants */
+#ifndef SCHED_NORMAL
+#define SCHED_NORMAL 0
+#endif
+#ifndef SCHED_FIFO
+#define SCHED_FIFO 1
+#endif
+#ifndef SCHED_RR
+#define SCHED_RR 2
+#endif
+#ifndef SCHED_BATCH
+#define SCHED_BATCH 3
+#endif
+#ifndef SCHED_IDLE
+#define SCHED_IDLE 5
+#endif
+#ifndef SCHED_DEADLINE
+#define SCHED_DEADLINE 6
+#endif
+
+/* Event priority flags */
+#ifndef EVENT_PRIORITY_LOW
+#define EVENT_PRIORITY_LOW (1 << 29)
+#endif
+
 /* Tracepoint context structures */
 struct trace_event_raw_sys_enter {
     __u64 args[6];
@@ -398,6 +471,45 @@ struct trace_event_raw_sched_process_exit {
     __u32 prio;
 } __attribute__((preserve_access_index));
 
+/* Scheduler statistics tracepoint structures */
+struct trace_event_raw_sched_stat_wait {
+    __u64 common_field;
+    char comm[16];
+    __u32 pid;
+    __u32 tgid;
+    __u64 delay;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_sched_stat_runtime {
+    __u64 common_field;
+    char comm[16];
+    __u32 pid;
+    __u32 tgid;
+    __u64 runtime;
+    __u64 vruntime;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_sched_migrate_task {
+    __u64 common_field;
+    char comm[16];
+    __u32 pid;
+    __u32 tgid;
+    __u32 prio;
+    __u32 orig_cpu;
+    __u32 dest_cpu;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_sched_switch {
+    __u64 common_field;
+    char prev_comm[16];
+    __u32 prev_pid;
+    __u32 prev_prio;
+    long prev_state;
+    char next_comm[16];
+    __u32 next_pid;
+    __u32 next_prio;
+} __attribute__((preserve_access_index));
+
 struct trace_event_raw_signal_generate {
     __u64 common_field;
     __u32 pid;
@@ -436,36 +548,46 @@ struct bpf_raw_tracepoint_args {
     __u64 args[0];
 } __attribute__((preserve_access_index));
 
-/* PT_REGS for different architectures */
+/* PT_REGS structure for kprobe/uprobe parameter access - matches kernel layout */
 struct pt_regs {
-#ifdef __x86_64__
+#ifdef __TARGET_ARCH_x86
     unsigned long r15;
     unsigned long r14;
     unsigned long r13;
     unsigned long r12;
-    unsigned long bp;
-    unsigned long bx;
+    unsigned long rbp;
+    unsigned long rbx;
     unsigned long r11;
     unsigned long r10;
     unsigned long r9;
     unsigned long r8;
-    unsigned long ax;
-    unsigned long cx;
-    unsigned long dx;
-    unsigned long si;
-    unsigned long di;
-    unsigned long orig_ax;
-    unsigned long ip;
+    unsigned long rax;
+    unsigned long rcx;
+    unsigned long rdx;
+    unsigned long rsi;
+    unsigned long rdi;
+    unsigned long orig_rax;
+    unsigned long rip;
     unsigned long cs;
-    unsigned long flags;
-    unsigned long sp;
+    unsigned long eflags;
+    unsigned long rsp;
     unsigned long ss;
-#elif defined(__aarch64__)
+#elif defined(__TARGET_ARCH_arm64)
     __u64 regs[31];
     __u64 sp;
     __u64 pc;
     __u64 pstate;
 #endif
 } __attribute__((preserve_access_index));
+
+/* ARM64 also needs user_pt_regs for PT_REGS macros */
+#ifdef __TARGET_ARCH_arm64
+struct user_pt_regs {
+    __u64 regs[31];
+    __u64 sp;
+    __u64 pc;
+    __u64 pstate;
+} __attribute__((preserve_access_index));
+#endif
 
 #endif /* __VMLINUX_MINIMAL_H__ */

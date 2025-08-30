@@ -54,7 +54,7 @@
 #define HTTP_METHOD_OPTIONS 7
 
 // Maximum data sizes for efficient packet processing
-#define MAX_L7_DATA_SIZE    256
+#define MAX_L7_DATA_SIZE    255  // Must fit in __u8 (l7_data_len field)
 #define MAX_COMM_SIZE       16
 #define MAX_POD_UID_SIZE    40
 #define MAX_FLOW_KEY_SIZE   24
@@ -289,6 +289,7 @@ static __always_inline __u8 parse_http_method(const char *data, __u32 size)
 }
 
 // Parse HTTP response status code
+__attribute__((unused))
 static __always_inline __u16 parse_http_status(const char *data, __u32 size)
 {
     if (size < 12) return 0; // "HTTP/1.1 200"
@@ -724,6 +725,7 @@ int trace_tcp_v6_connect(struct pt_regs *ctx)
 }
 
 // Network statistics update
+__attribute__((unused))
 static __always_inline void update_stats(__u32 stat_type)
 {
     __u64 *count = bpf_map_lookup_elem(&stats, &stat_type);

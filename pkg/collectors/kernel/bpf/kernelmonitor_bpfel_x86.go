@@ -53,14 +53,16 @@ type kernelmonitorSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type kernelmonitorProgramSpecs struct {
-	TraceOpenat *ebpf.ProgramSpec `ebpf:"trace_openat"`
+	TraceOpenat     *ebpf.ProgramSpec `ebpf:"trace_openat"`
+	TraceOpenatExit *ebpf.ProgramSpec `ebpf:"trace_openat_exit"`
 }
 
 // kernelmonitorMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type kernelmonitorMapSpecs struct {
-	Events *ebpf.MapSpec `ebpf:"events"`
+	Events        *ebpf.MapSpec `ebpf:"events"`
+	PendingOpenat *ebpf.MapSpec `ebpf:"pending_openat"`
 }
 
 // kernelmonitorObjects contains all objects after they have been loaded into the kernel.
@@ -82,12 +84,14 @@ func (o *kernelmonitorObjects) Close() error {
 //
 // It can be passed to loadKernelmonitorObjects or ebpf.CollectionSpec.LoadAndAssign.
 type kernelmonitorMaps struct {
-	Events *ebpf.Map `ebpf:"events"`
+	Events        *ebpf.Map `ebpf:"events"`
+	PendingOpenat *ebpf.Map `ebpf:"pending_openat"`
 }
 
 func (m *kernelmonitorMaps) Close() error {
 	return _KernelmonitorClose(
 		m.Events,
+		m.PendingOpenat,
 	)
 }
 
@@ -95,12 +99,14 @@ func (m *kernelmonitorMaps) Close() error {
 //
 // It can be passed to loadKernelmonitorObjects or ebpf.CollectionSpec.LoadAndAssign.
 type kernelmonitorPrograms struct {
-	TraceOpenat *ebpf.Program `ebpf:"trace_openat"`
+	TraceOpenat     *ebpf.Program `ebpf:"trace_openat"`
+	TraceOpenatExit *ebpf.Program `ebpf:"trace_openat_exit"`
 }
 
 func (p *kernelmonitorPrograms) Close() error {
 	return _KernelmonitorClose(
 		p.TraceOpenat,
+		p.TraceOpenatExit,
 	)
 }
 
