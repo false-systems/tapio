@@ -24,7 +24,7 @@ type Collector struct {
 	healthy bool
 	mutex   sync.RWMutex
 
-	// eBPF components (platform-specific)
+	// eBPF components (Linux-only)
 	ebpfState interface{}
 
 	// OTEL instrumentation - MANDATORY pattern from CLAUDE.md

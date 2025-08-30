@@ -168,11 +168,35 @@ Works with Tapio's intelligence layer for:
 }
 ```
 
+## 🏗️ Platform Architecture
+
+### Cross-Platform Development Support
+
+The collector uses a clean separation between platform-specific and platform-agnostic code:
+
+```
+memory-leak-hunter/
+├── collector.go           # Core logic (platform-agnostic)
+├── collector_ebpf.go      # Linux eBPF implementation (//go:build linux)
+├── collector_fallback.go  # Non-Linux fallback (//go:build !linux)
+└── bpf_src/              # eBPF C programs
+```
+
+- **Production**: Runs on Linux with full eBPF capabilities in Kubernetes
+- **Development**: Compiles on Mac/Windows with graceful fallback
+- **Testing**: Unit tests run on any platform, eBPF tests require Linux
+
+This architecture ensures:
+1. Clean compilation on all platforms for development
+2. Full functionality on Linux production environments
+3. Clear separation of concerns without complex abstractions
+4. Easy local development and testing on Mac/Windows
+
 ## 🚨 Important Notes
 
 1. **Not a Memory Profiler**: Detects leaks, doesn't profile all memory usage
 2. **Large Allocations Only**: Focuses on allocations >10KB by default
-3. **Requires Linux**: eBPF is Linux-specific
+3. **Requires Linux**: eBPF is Linux-specific for production
 4. **Go Limitations**: Can't track small Go allocations directly
 
 ## 🎯 Success Metrics
