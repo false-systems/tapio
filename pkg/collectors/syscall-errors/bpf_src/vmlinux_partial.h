@@ -101,6 +101,69 @@ struct llist_node {
     struct llist_node *next;
 };
 
+/* Namespace structure */
+struct ns_common {
+    unsigned int inum;
+    /* Other fields we don't need */
+};
+
+/* PID namespace */
+struct pid_namespace {
+    struct ns_common ns;
+    /* Other fields we don't need */
+};
+
+/* Mount namespace */
+struct mnt_namespace {
+    struct ns_common ns;
+    /* Other fields we don't need */
+};
+
+/* Network namespace */
+struct net {
+    struct ns_common ns;
+    /* Other fields we don't need */
+};
+
+/* UTS namespace */
+struct uts_namespace {
+    struct ns_common ns;
+    /* Other fields we don't need */
+};
+
+/* IPC namespace */
+struct ipc_namespace {
+    struct ns_common ns;
+    /* Other fields we don't need */
+};
+
+/* Namespace proxy */
+struct nsproxy {
+    struct uts_namespace *uts_ns;
+    struct ipc_namespace *ipc_ns;
+    struct mnt_namespace *mnt_ns;
+    struct pid_namespace *pid_ns_for_children;
+    struct net *net_ns;
+    /* Other fields we don't need */
+};
+
+/* Socket address structures */
+struct sockaddr {
+    __u16 sa_family;
+    char sa_data[14];
+};
+
+struct in_addr {
+    __u32 s_addr;
+};
+
+struct sockaddr_in {
+    __u16 sin_family;
+    __u16 sin_port;
+    struct in_addr sin_addr;
+    __u8 sin_zero[8];
+};
+
 /* Minimal task_struct definition - only fields we need */
 struct task_struct {
     /* These fields are at stable offsets in most kernel versions */
@@ -124,6 +187,7 @@ struct task_struct {
     pid_t pid;
     pid_t tgid;
     struct task_struct *parent;
+    struct nsproxy *nsproxy;  /* Namespace proxy */
     
     /* Add padding to ensure we don't read beyond struct bounds */
     char _padding[4096];

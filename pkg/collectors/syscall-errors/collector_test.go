@@ -45,26 +45,26 @@ func TestNewCollector(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.NotNil(t, collector)
-			assert.Equal(t, "syscall-errors", collector.GetName())
-			assert.NotNil(t, collector.GetEventChannel())
+			assert.Equal(t, "syscall-errors", collector.Name())
+			assert.NotNil(t, collector.Events())
 		})
 	}
 }
 
-func TestCollectorGetName(t *testing.T) {
+func TestCollectorName(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	collector, err := NewCollector(logger, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, "syscall-errors", collector.GetName())
+	assert.Equal(t, "syscall-errors", collector.Name())
 }
 
-func TestCollectorGetEventChannel(t *testing.T) {
+func TestCollectorEvents(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	collector, err := NewCollector(logger, nil)
 	require.NoError(t, err)
 
-	ch := collector.GetEventChannel()
+	ch := collector.Events()
 	assert.NotNil(t, ch)
 
 	// Channel should be readable

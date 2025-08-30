@@ -26,13 +26,10 @@ func RegisterSyscallErrorsCollector() {
 		// Apply configuration from YAML
 		if config != nil {
 			if config.BufferSize > 0 {
-				syscallConfig.BufferSize = config.BufferSize
+				syscallConfig.EventChannelSize = config.BufferSize
 			}
-			if config.SamplingRate > 0 {
-				syscallConfig.SamplingRate = config.SamplingRate
-			}
-			if len(config.ErrorCodes) > 0 {
-				// Map error codes if needed
+			if config.SyscallSamplingRate > 0 {
+				syscallConfig.RateLimitMs = config.SyscallSamplingRate
 			}
 		}
 

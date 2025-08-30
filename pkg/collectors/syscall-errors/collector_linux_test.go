@@ -66,25 +66,25 @@ func TestConvertToObservationEvent(t *testing.T) {
 	// Set path
 	copy(event.Path[:], []byte("/var/log/test.log"))
 
-	obsEvent := collector.convertToObservationEvent(event)
+	collectorEvent := collector.convertToCollectorEvent(event)
 
-	assert.NotNil(t, obsEvent)
-	assert.Equal(t, domain.EventTypeSyscallError, obsEvent.Type)
-	assert.Equal(t, domain.SeverityCritical, obsEvent.Severity) // ENOSPC is critical
-	assert.Equal(t, "syscall-errors", obsEvent.Source.Component)
-	assert.Equal(t, "process", obsEvent.Resource.Type)
-	assert.Equal(t, "1234", obsEvent.Resource.ID)
-	assert.Equal(t, "testapp", obsEvent.Resource.Name)
-	assert.Contains(t, obsEvent.Description, "open")
-	assert.Contains(t, obsEvent.Description, "ENOSPC")
+	assert.NotNil(t, collectorEvent)
+	assert.Equal(t, domain.EventTypeKernelSyscall, collectorEvent.Type)
+	assert.Equal(t, domain.EventSeverity("critical"), collectorEvent.Severity) // ENOSPC is critical
+	assert.Equal(t, "syscall-errors", collectorEvent.Source)
+	assert.NotNil(t, collectorEvent.EventData.Kernel)
+	assert.Equal(t, int32(1234), collectorEvent.EventData.Kernel.PID)
+	assert.Equal(t, "testapp", collectorEvent.EventData.Kernel.Command)
+	assert.Contains(t, collectorEvent.EventData.Kernel.Syscall, "open")
+	assert.Contains(t, collectorEvent.EventData.Kernel.ErrorMessage, "ENOSPC")
 
-	// Check context
-	assert.Equal(t, "1234", obsEvent.Context["pid"])
-	assert.Equal(t, "1", obsEvent.Context["ppid"])
-	assert.Equal(t, "testapp", obsEvent.Context["command"])
-	assert.Equal(t, "/var/log/test.log", obsEvent.Context["path"])
-	assert.Equal(t, "ENOSPC", obsEvent.Context["error_name"])
-	assert.Equal(t, "file", obsEvent.Context["category"])
+	// Check custom data
+	assert.Equal(t, "1234", collectorEvent.EventData.Custom["pid"])
+	assert.Equal(t, "1", collectorEvent.EventData.Custom["ppid"])
+	assert.Equal(t, "testapp", collectorEvent.EventData.Custom["command"])
+	assert.Equal(t, "/var/log/test.log", collectorEvent.EventData.Custom["path"])
+	assert.Equal(t, "ENOSPC", collectorEvent.EventData.Custom["error_name"])
+	assert.Equal(t, "file", collectorEvent.EventData.Custom["category"])
 }
 
 func TestGetSeverityForError(t *testing.T) {
@@ -94,16 +94,18 @@ func TestGetSeverityForError(t *testing.T) {
 
 	tests := []struct {
 		errorCode int32
-		expected  domain.EventSeverity
+		expected  string
 	}{
-		{-28, domain.SeverityCritical}, // ENOSPC
-		{-12, domain.SeverityCritical}, // ENOMEM
-		{-111, domain.SeverityHigh},    // ECONNREFUSED
-		{-110, domain.SeverityHigh},    // ETIMEDOUT
-		{-5, domain.SeverityHigh},      // EIO
-		{-13, domain.SeverityMedium},   // EACCES
-		{-1, domain.SeverityMedium},    // EPERM
-		{-2, domain.SeverityLow},       // ENOENT (default)
+		{-28, "critical"},  // ENOSPC
+		{-12, "critical"},  // ENOMEM
+		{-122, "critical"}, // EDQUOT
+		{-111, "high"},     // ECONNREFUSED
+		{-110, "high"},     // ETIMEDOUT
+		{-5, "high"},       // EIO
+		{-24, "high"},      // EMFILE
+		{-13, "medium"},    // EACCES
+		{-1, "medium"},     // EPERM
+		{-2, "low"},        // ENOENT (default)
 	}
 
 	for _, tt := range tests {
@@ -225,6 +227,6 @@ func TestCollectorStop(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Channel should be closed
-	_, ok := <-collector.GetEventChannel()
+	_, ok := <-collector.Events()
 	assert.False(t, ok)
 }

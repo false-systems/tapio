@@ -77,7 +77,7 @@ type Collector struct {
 	reader *ringbuf.Reader
 
 	// Event processing
-	eventChan chan *domain.ObservationEvent
+	eventChan chan *domain.CollectorEvent
 	stopOnce  sync.Once
 
 	// OpenTelemetry instrumentation
@@ -193,6 +193,22 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		logger.Warn("Failed to create events dropped counter", zap.Error(err))
 	}
 
+	emfileErrors, err := meter.Int64Counter(
+		"syscall_errors_emfile_total",
+		metric.WithDescription("Total EMFILE errors captured"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create EMFILE counter", zap.Error(err))
+	}
+
+	edquotErrors, err := meter.Int64Counter(
+		"syscall_errors_edquot_total",
+		metric.WithDescription("Total EDQUOT errors captured"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create EDQUOT counter", zap.Error(err))
+	}
+
 	// Check if all required metrics were created
 	if config.RequireAllMetrics {
 		if eventsProcessed == nil || errorsTotal == nil || processingTime == nil {
@@ -206,7 +222,7 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		logger:            logger,
 		ctx:               ctx,
 		cancel:            cancel,
-		eventChan:         make(chan *domain.ObservationEvent, config.EventChannelSize),
+		eventChan:         make(chan *domain.CollectorEvent, config.EventChannelSize),
 		tracer:            tracer,
 		eventsProcessed:   eventsProcessed,
 		errorsTotal:       errorsTotal,
@@ -382,7 +398,7 @@ func (c *Collector) processRawEvent(data []byte) error {
 	}
 
 	// Convert to ObservationEvent
-	obsEvent := c.convertToObservationEvent(&event)
+	collectorEvent := c.convertToCollectorEvent(&event)
 
 	// Update metrics
 	if c.eventsProcessed != nil {
@@ -397,7 +413,7 @@ func (c *Collector) processRawEvent(data []byte) error {
 
 	// Send to event channel
 	select {
-	case c.eventChan <- obsEvent:
+	case c.eventChan <- collectorEvent:
 		span.SetAttributes(
 			attribute.String("syscall", c.getSyscallName(event.SyscallNr)),
 			attribute.String("error", c.getErrorName(event.ErrorCode)),
@@ -433,8 +449,8 @@ func (c *Collector) processRawEvent(data []byte) error {
 	return nil
 }
 
-// convertToObservationEvent converts eBPF event to domain ObservationEvent
-func (c *Collector) convertToObservationEvent(event *SyscallErrorEvent) *domain.ObservationEvent {
+// convertToCollectorEvent converts eBPF event to domain CollectorEvent
+func (c *Collector) convertToCollectorEvent(event *SyscallErrorEvent) *domain.CollectorEvent {
 	timestamp := time.Unix(0, int64(event.TimestampNs))
 
 	// Extract strings from fixed-size arrays
@@ -465,8 +481,32 @@ func (c *Collector) convertToObservationEvent(event *SyscallErrorEvent) *domain.
 		customData["path"] = path
 	}
 
+	// Add network context if present
+	if event.DstIP != 0 || event.SrcIP != 0 {
+		if event.DstIP != 0 {
+			customData["dst_ip"] = fmt.Sprintf("%d.%d.%d.%d",
+				event.DstIP&0xff, (event.DstIP>>8)&0xff,
+				(event.DstIP>>16)&0xff, (event.DstIP>>24)&0xff)
+			customData["dst_port"] = fmt.Sprintf("%d", event.DstPort)
+		}
+		if event.SrcIP != 0 {
+			customData["src_ip"] = fmt.Sprintf("%d.%d.%d.%d",
+				event.SrcIP&0xff, (event.SrcIP>>8)&0xff,
+				(event.SrcIP>>16)&0xff, (event.SrcIP>>24)&0xff)
+			customData["src_port"] = fmt.Sprintf("%d", event.SrcPort)
+		}
+	}
+
 	// Determine severity based on error type
 	severity := c.getSeverityForError(event.ErrorCode)
+
+	// PID for correlation
+	pid := int32(event.PID)
+	
+	// Action and result for the observation
+	action := c.getSyscallName(event.SyscallNr)
+	result := c.getErrorName(event.ErrorCode)
+	errorCount := int32(event.ErrorCount)
 
 	// Create collector event
 	return &domain.CollectorEvent{
@@ -474,34 +514,28 @@ func (c *Collector) convertToObservationEvent(event *SyscallErrorEvent) *domain.
 		Type:      domain.EventTypeKernelSyscall,
 		Timestamp: timestamp,
 		Source:    "syscall-errors",
-		Severity:  severity,
+		Severity:  domain.EventSeverity(severity),
 		EventData: domain.EventDataContainer{
 			Kernel: &domain.KernelData{
 				EventType:    "syscall_error",
-				PID:          int32(event.PID),
+				PID:          pid,
 				PPID:         int32(event.PPID),
+				TID:          int32(event.TID),
 				UID:          int32(event.UID),
 				GID:          int32(event.GID),
 				Command:      comm,
 				CgroupID:     event.CgroupID,
-				Syscall:      c.getSyscallName(event.SyscallNr),
+				Syscall:      action,
 				ReturnCode:   event.ErrorCode,
-				ErrorMessage: c.getErrorName(event.ErrorCode),
-			},
-			SystemCall: &domain.SystemCallData{
-				Number:    int64(event.SyscallNr),
-				Name:      c.getSyscallName(event.SyscallNr),
-				PID:       int32(event.PID),
-				TID:       int32(event.TID),
-				UID:       int32(event.UID),
-				GID:       int32(event.GID),
-				Arguments: []domain.SystemCallArg{},
-				RetValue:  int64(event.ErrorCode),
-				ErrorCode: event.ErrorCode,
+				ErrorMessage: result,
 			},
 			Custom: customData,
 		},
-		Metadata: domain.EventMetadata{},
+		Metadata: domain.EventMetadata{
+			Annotations: map[string]string{
+				"error_count": fmt.Sprintf("%d", errorCount),
+			},
+		},
 	}
 }
 
@@ -520,22 +554,28 @@ func (c *Collector) updateErrorMetrics(ctx context.Context, errorCode int32) {
 		if c.econnrefErrors != nil {
 			c.econnrefErrors.Add(ctx, 1)
 		}
+	case 24: // EMFILE
+		if c.emfileErrors != nil {
+			c.emfileErrors.Add(ctx, 1)
+		}
+	case 122: // EDQUOT
+		if c.edquotErrors != nil {
+			c.edquotErrors.Add(ctx, 1)
+		}
 	}
 }
 
 // getSeverityForError determines severity based on error type
-func (c *Collector) getSeverityForError(errorCode int32) domain.EventSeverity {
+func (c *Collector) getSeverityForError(errorCode int32) string {
 	switch -errorCode {
-	case 28, 12: // ENOSPC, ENOMEM - critical resource exhaustion
-		return domain.EventSeverityCritical
-	case 111, 110: // ECONNREFUSED, ETIMEDOUT - service connectivity issues
-		return domain.EventSeverityHigh
-	case 5: // EIO - I/O errors
-		return domain.EventSeverityHigh
+	case 28, 12, 122: // ENOSPC, ENOMEM, EDQUOT - critical resource exhaustion
+		return "critical"
+	case 111, 110, 5, 24: // ECONNREFUSED, ETIMEDOUT, EIO, EMFILE - service/system issues
+		return "high"
 	case 13, 1: // EACCES, EPERM - permission issues
-		return domain.EventSeverityMedium
+		return "medium"
 	default:
-		return domain.EventSeverityLow
+		return "low"
 	}
 }
 
@@ -795,14 +835,15 @@ func (c *Collector) cleanup() {
 	}
 }
 
-// GetEventChannel returns the event channel
-func (c *Collector) GetEventChannel() <-chan *domain.ObservationEvent {
-	return c.eventChan
+
+// Name returns the collector name (implements collectors.Collector)
+func (c *Collector) Name() string {
+	return c.name
 }
 
-// GetName returns the collector name
-func (c *Collector) GetName() string {
-	return c.name
+// Events returns the events channel (implements collectors.Collector)
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
+	return c.eventChan
 }
 
 // IsHealthy checks if the collector is healthy
@@ -826,35 +867,35 @@ func (c *Collector) GetStats() (*CollectorStats, error) {
 	var stats CollectorStats
 
 	// Read from per-CPU map and aggregate
-	values, err := c.objs.Stats.Lookup(&key)
+	var values []CollectorStats
+	err := c.objs.Stats.Lookup(&key, &values)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup stats: %w", err)
 	}
 
-	// Type assertion with safety check
-	switch v := values.(type) {
-	case []CollectorStats:
-		// Expected type for per-CPU map
-		for _, cpuStat := range v {
-			stats.TotalErrors += cpuStat.TotalErrors
-			stats.ENOSPCCount += cpuStat.ENOSPCCount
-			stats.ENOMEMCount += cpuStat.ENOMEMCount
-			stats.ECONNREFUSEDCount += cpuStat.ECONNREFUSEDCount
-			stats.EIOCount += cpuStat.EIOCount
-			stats.EventsSent += cpuStat.EventsSent
-			stats.EventsDropped += cpuStat.EventsDropped
-		}
-	case CollectorStats:
-		// Single value (non per-CPU map)
-		stats = v
-	default:
-		return nil, fmt.Errorf("unexpected type from Stats map: %T", values)
+	// Aggregate per-CPU values
+	for _, cpuStat := range values {
+		stats.TotalErrors += cpuStat.TotalErrors
+		stats.ENOSPCCount += cpuStat.ENOSPCCount
+		stats.ENOMEMCount += cpuStat.ENOMEMCount
+		stats.ECONNREFUSEDCount += cpuStat.ECONNREFUSEDCount
+		stats.EIOCount += cpuStat.EIOCount
+		stats.EventsSent += cpuStat.EventsSent
+		stats.EventsDropped += cpuStat.EventsDropped
 	}
 
 	return &stats, nil
 }
 
 // bytesToString converts null-terminated byte array to string
+func bytesToString(b []byte) string {
+	n := bytes.IndexByte(b, 0)
+	if n == -1 {
+		return string(b)
+	}
+	return string(b[:n])
+}
+
 // isCategoryEnabled checks if a category is enabled for collection
 func (c *Collector) isCategoryEnabled(category uint8) bool {
 	categoryName := c.getCategoryName(category)
