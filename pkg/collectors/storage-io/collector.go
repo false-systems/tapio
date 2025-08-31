@@ -15,17 +15,13 @@ import (
 // Collector implements eBPF-based storage I/O monitoring using BaseCollector
 // Focuses on VFS layer monitoring to detect storage performance issues
 type Collector struct {
-	*base.BaseCollector // Embed BaseCollector for standard functionality
+	*base.BaseCollector      // Embed for stats/health
+	*base.EventChannelManager // Embed for events
+	*base.LifecycleManager    // Embed for lifecycle
 	
 	// Core configuration
 	config *Config
 	logger *zap.Logger
-
-	// Event processing
-	events chan *domain.CollectorEvent
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
 
 	// Runtime environment detection
 	runtime *RuntimeEnvironment
@@ -133,12 +129,19 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		config.MonitoredK8sPaths = runtime.GetMonitoredPaths()
 	}
 
+	// Create lifecycle manager first as it's needed for context
+	lifecycleManager := base.NewLifecycleManager(context.Background(), logger.Named(name))
+	
+	// Create event channel manager
+	eventManager := base.NewEventChannelManager(config.BufferSize, name, logger.Named(name))
+	
 	c := &Collector{
-		BaseCollector:       baseCollector, // Use BaseCollector
+		BaseCollector:       baseCollector,
+		EventChannelManager: eventManager,
+		LifecycleManager:    lifecycleManager,
 		config:              config,
 		logger:              logger.Named(name),
 		runtime:             runtime,
-		events:              make(chan *domain.CollectorEvent, config.BufferSize),
 		mountCache:          make(map[string]*MountInfo),
 		containerCache:      make(map[uint64]*ContainerInfo),
 		slowIOCache:         make(map[string]*SlowIOEvent),
@@ -175,8 +178,6 @@ func (c *Collector) Start(ctx context.Context) error {
 	ctx, span := c.StartSpan(ctx, "storage-io.collector.start")
 	defer span.End()
 
-	c.ctx, c.cancel = context.WithCancel(ctx)
-
 	// Start eBPF monitoring
 	if err := c.startEBPF(); err != nil {
 		c.RecordErrorWithContext(ctx, err)
@@ -185,8 +186,8 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	// Platform-specific event processing and metrics will be started by startEBPF
 
-	// Start mount discovery goroutine
-	go c.discoverMounts()
+	// Start mount discovery goroutine using lifecycle manager
+	c.LifecycleManager.Start("mount-discovery", c.discoverMounts)
 
 	c.SetHealthy(true)
 	c.logger.Info("Storage I/O collector started successfully")
@@ -198,13 +199,13 @@ func (c *Collector) Start(ctx context.Context) error {
 func (c *Collector) Stop() error {
 	c.logger.Info("Stopping storage I/O collector")
 
-	if c.cancel != nil {
-		c.cancel()
+	// Stop lifecycle manager with 5 second timeout
+	if err := c.LifecycleManager.Stop(5 * time.Second); err != nil {
+		c.logger.Warn("Lifecycle manager stop timeout", zap.Error(err))
 	}
 
-	c.wg.Wait()
 	c.stopEBPF()
-	close(c.events)
+	c.EventChannelManager.Close()
 	c.SetHealthy(false)
 
 	c.logger.Info("Storage I/O collector stopped successfully")
@@ -213,7 +214,7 @@ func (c *Collector) Stop() error {
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	return c.events
+	return c.GetChannel()
 }
 
 // IsHealthy returns health status (delegates to BaseCollector)
@@ -228,10 +229,11 @@ func (c *Collector) discoverMounts() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.StopChannel():
 			return
 		case <-ticker.C:
 			if err := c.updateMountCache(); err != nil {
+				c.RecordError(err)
 				c.logger.Warn("Failed to update mount cache", zap.Error(err))
 			}
 		}

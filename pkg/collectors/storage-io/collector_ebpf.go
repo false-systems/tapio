@@ -54,11 +54,11 @@ func (c *Collector) startEBPF() error {
 	}
 	state.reader = reader
 
-	// Start event processing
-	go c.processEvents()
+	// Start event processing using lifecycle manager
+	c.LifecycleManager.Start("event-processor", c.processEvents)
 
-	// Start metrics collection
-	go c.collectMetrics()
+	// Start metrics collection using lifecycle manager
+	c.LifecycleManager.Start("metrics-collector", c.collectMetrics)
 
 	c.logger.Info("eBPF programs attached",
 		zap.Int("attached_programs", len(state.links)))
@@ -165,10 +165,11 @@ func (c *Collector) cleanup() {
 // processEvents reads and processes events from the ring buffer
 func (c *Collector) processEvents() {
 	state := c.ebpfState.(*ebpfStateImpl)
+	ctx := c.Context()
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.StopChannel():
 			return
 		default:
 			record, err := state.reader.Read()
@@ -176,10 +177,10 @@ func (c *Collector) processEvents() {
 				if errors.Is(err, ringbuf.ErrClosed) {
 					return
 				}
-				if c.ctx.Err() != nil {
+				if c.IsShuttingDown() {
 					return
 				}
-				c.RecordErrorWithContext(c.ctx, err)
+				c.RecordErrorWithContext(ctx, err)
 				c.logger.Error("Failed to read from ring buffer", zap.Error(err))
 				continue
 			}
@@ -192,7 +193,7 @@ func (c *Collector) processEvents() {
 // handleRingBufferEvent processes a single ring buffer event
 func (c *Collector) handleRingBufferEvent(data []byte) {
 	start := time.Now()
-	ctx := c.ctx
+	ctx := c.Context()
 
 	// Parse the event based on type
 	if len(data) < 4 {
@@ -222,14 +223,12 @@ func (c *Collector) handleRingBufferEvent(data []byte) {
 		return
 	}
 
-	// Send event to channel
-	select {
-	case c.events <- event:
+	// Use EventChannelManager to send event
+	if c.SendEvent(event) {
 		c.RecordEventWithContext(ctx)
-	default:
-		// Channel full, drop event
+	} else {
+		// Channel full, event was dropped
 		c.RecordDropWithReason(ctx, "channel_full")
-		c.logger.Warn("Dropped event due to full channel")
 	}
 
 	// Record processing time
@@ -259,7 +258,7 @@ func (c *Collector) parseVFSEvent(data []byte) (*domain.CollectorEvent, error) {
 	if latencyMs > uint64(c.config.SlowIOThresholdMs) {
 		severity = domain.EventSeverityWarning
 		if c.slowIOOperations != nil {
-			c.slowIOOperations.Add(c.ctx, 1)
+			c.slowIOOperations.Add(c.Context(), 1)
 		}
 	}
 
@@ -335,11 +334,15 @@ func (c *Collector) collectMetrics() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.StopChannel():
 			return
 		case <-ticker.C:
 			// Collect any periodic metrics here
-			c.logger.Debug("Collecting storage I/O metrics")
+			c.logger.Debug("Collecting storage I/O metrics",
+				zap.Int64("events_sent", c.EventChannelManager.GetSentCount()),
+				zap.Int64("events_dropped", c.EventChannelManager.GetDroppedCount()),
+				zap.Float64("channel_utilization", c.EventChannelManager.GetChannelUtilization()),
+			)
 		}
 	}
 }
