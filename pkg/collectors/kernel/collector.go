@@ -8,23 +8,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
 // Collector implements simple kernel monitoring via eBPF
 type Collector struct {
-	name    string
+	*base.BaseCollector       // Embed for Statistics() and Health()
+	*base.EventChannelManager // Embed for event channel management
+	*base.LifecycleManager    // Embed for lifecycle management
+
 	logger  *zap.Logger
-	tracer  trace.Tracer
-	events  chan *domain.CollectorEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	healthy bool
 	config  *Config
 	mu      sync.RWMutex
 
@@ -33,13 +29,6 @@ type Collector struct {
 
 	// eBPF components (platform-specific)
 	ebpfState interface{}
-
-	// Essential OTEL Metrics (5 core metrics)
-	eventsProcessed metric.Int64Counter
-	errorsTotal     metric.Int64Counter
-	processingTime  metric.Float64Histogram
-	droppedEvents   metric.Int64Counter
-	bufferUsage     metric.Int64Gauge
 }
 
 // NewCollector creates a new simple kernel collector
@@ -61,64 +50,19 @@ func NewCollector(name string, cfg *Config) (*Collector, error) {
 		logger.Info("Kernel collector running in MOCK MODE", zap.String("name", name))
 	}
 
-	// Initialize minimal OTEL components
-	tracer := otel.Tracer("kernel-collector")
-	meter := otel.Meter("kernel-collector")
-
-	// Only essential metrics
-	eventsProcessed, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_processed_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create events processed counter", zap.Error(err))
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_errors_total", name),
-		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create errors counter", zap.Error(err))
-	}
-
-	processingTime, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_processing_duration_ms", name),
-		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create processing time histogram", zap.Error(err))
-	}
-
-	droppedEvents, err := meter.Int64Counter(
-		fmt.Sprintf("%s_dropped_events_total", name),
-		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create dropped events counter", zap.Error(err))
-	}
-
-	bufferUsage, err := meter.Int64Gauge(
-		fmt.Sprintf("%s_buffer_usage", name),
-		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
-	}
+	// Initialize base components
+	ctx := context.Background()
+	baseCollector := base.NewBaseCollector("kernel", 5*time.Minute)
+	eventManager := base.NewEventChannelManager(cfg.BufferSize, "kernel", logger)
+	lifecycleManager := base.NewLifecycleManager(ctx, logger)
 
 	c := &Collector{
-		name:            name,
-		logger:          logger.Named(name),
-		tracer:          tracer,
-		config:          cfg,
-		mockMode:        mockMode,
-		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
-		healthy:         true, // Start as healthy - will be updated when Start() is called
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		droppedEvents:   droppedEvents,
-		bufferUsage:     bufferUsage,
+		BaseCollector:       baseCollector,
+		EventChannelManager: eventManager,
+		LifecycleManager:    lifecycleManager,
+		logger:              logger.Named(name),
+		config:              cfg,
+		mockMode:            mockMode,
 	}
 
 	c.logger.Info("Kernel collector created",
@@ -146,65 +90,6 @@ func NewCollectorWithConfig(cfg *Config, logger *zap.Logger) (*Collector, error)
 		}
 	}
 
-	// Initialize OTEL components
-	tracer := otel.Tracer("kernel-collector")
-	meter := otel.Meter("kernel-collector")
-
-	// Create metrics with descriptive names
-	eventsProcessed, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_processed_total", cfg.Name),
-		metric.WithDescription(fmt.Sprintf("Total events processed by %s", cfg.Name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create events processed counter", zap.Error(err))
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_errors_total", cfg.Name),
-		metric.WithDescription(fmt.Sprintf("Total errors in %s", cfg.Name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create errors counter", zap.Error(err))
-	}
-
-	processingTime, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_processing_duration_ms", cfg.Name),
-		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", cfg.Name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create processing time histogram", zap.Error(err))
-	}
-
-	droppedEvents, err := meter.Int64Counter(
-		fmt.Sprintf("%s_dropped_events_total", cfg.Name),
-		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", cfg.Name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create dropped events counter", zap.Error(err))
-	}
-
-	bufferUsage, err := meter.Int64Gauge(
-		fmt.Sprintf("%s_buffer_usage", cfg.Name),
-		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", cfg.Name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
-	}
-
-	c := &Collector{
-		name:            cfg.Name,
-		logger:          logger.Named(cfg.Name),
-		tracer:          tracer,
-		config:          cfg,
-		events:          make(chan *domain.CollectorEvent, cfg.BufferSize),
-		healthy:         true, // Start as healthy for backward compatibility
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		droppedEvents:   droppedEvents,
-		bufferUsage:     bufferUsage,
-	}
-
 	c.logger.Info("Kernel collector created with config",
 		zap.String("name", cfg.Name),
 		zap.Int("buffer_size", cfg.BufferSize),
@@ -221,10 +106,10 @@ func (c *Collector) Name() string {
 
 // Start starts the eBPF monitoring
 func (c *Collector) Start(ctx context.Context) error {
-	ctx, span := c.tracer.Start(ctx, "kernel.collector.start")
+	tracer := c.BaseCollector.GetTracer()
+	ctx, span := tracer.Start(ctx, "kernel.collector.start")
 	defer span.End()
 
-	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.logger.Info("Starting kernel collector",
 		zap.Bool("enable_ebpf", c.config.EnableEBPF),
 		zap.Bool("mock_mode", c.mockMode))
@@ -232,23 +117,28 @@ func (c *Collector) Start(ctx context.Context) error {
 	// Check if we're in mock mode
 	if c.mockMode {
 		c.logger.Info("Starting kernel collector in mock mode")
-		go c.generateMockEvents()
-		c.healthy = true
+		c.LifecycleManager.Start("mock-generator", func() {
+			c.generateMockEvents()
+		})
+		c.BaseCollector.SetHealthy(true)
 		return nil
 	}
 
 	// Start eBPF monitoring if enabled
 	if c.config.EnableEBPF {
 		if err := c.startEBPF(); err != nil {
+			c.BaseCollector.RecordError(err)
 			span.SetAttributes(attribute.String("error", "ebpf_start_failed"))
 			return fmt.Errorf("failed to start eBPF: %w", err)
 		}
 
 		// Start event processing
-		go c.processEvents()
+		c.LifecycleManager.Start("event-processor", func() {
+			c.processEvents()
+		})
 	}
 
-	c.healthy = true
+	c.BaseCollector.SetHealthy(true)
 	c.logger.Info("Kernel collector started successfully")
 	span.SetAttributes(attribute.Bool("success", true))
 	return nil
@@ -256,31 +146,19 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Prevent multiple stops
-	if !c.healthy {
-		c.logger.Debug("Collector already stopped")
-		return nil
-	}
-
 	c.logger.Info("Stopping kernel collector")
-
-	if c.cancel != nil {
-		c.cancel()
-		c.cancel = nil
-	}
 
 	// Stop eBPF if running
 	c.stopEBPF()
 
-	// Only close channel once
-	if c.events != nil {
-		close(c.events)
-		c.events = nil
+	// Shutdown lifecycle manager
+	if err := c.LifecycleManager.Stop(5 * time.Second); err != nil {
+		c.logger.Warn("Timeout during shutdown", zap.Error(err))
 	}
-	c.healthy = false
+
+	// Close event channel
+	c.EventChannelManager.Close()
+	c.BaseCollector.SetHealthy(false)
 
 	c.logger.Info("Kernel collector stopped successfully")
 	return nil
@@ -288,16 +166,17 @@ func (c *Collector) Stop() error {
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.events
+	return c.EventChannelManager.GetChannel()
 }
 
-// IsHealthy returns health status
-func (c *Collector) IsHealthy() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.healthy
+// Statistics delegates to base collector
+func (c *Collector) Statistics() *domain.CollectorStats {
+	return c.BaseCollector.Statistics()
+}
+
+// Health delegates to base collector
+func (c *Collector) Health() *domain.HealthStatus {
+	return c.BaseCollector.Health()
 }
 
 // generateMockEvents generates fake kernel events for development/testing
@@ -312,7 +191,7 @@ func (c *Collector) generateMockEvents() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			return
 		case <-ticker.C:
 			// Generate random kernel event
@@ -353,7 +232,7 @@ func (c *Collector) generateMockEvents() {
 				EventID:   fmt.Sprintf("kernel-mock-%d", mockEvent.PID),
 				Type:      domain.EventTypeKernelProcess,
 				Timestamp: time.Now(),
-				Source:    c.name,
+				Source:    c.Name(),
 				Severity:  domain.EventSeverityInfo,
 				EventData: domain.EventDataContainer{
 					Kernel: &domain.KernelData{
@@ -365,7 +244,7 @@ func (c *Collector) generateMockEvents() {
 				},
 				Metadata: domain.EventMetadata{
 					Labels: map[string]string{
-						"collector":  c.name,
+						"collector":  c.Name(),
 						"mock":       "true",
 						"event_type": fmt.Sprintf("%d", mockEvent.EventType),
 						"pid":        fmt.Sprintf("%d", mockEvent.PID),
@@ -374,16 +253,14 @@ func (c *Collector) generateMockEvents() {
 				},
 			}
 
-			// Send event
-			select {
-			case c.events <- collectorEvent:
-				if c.eventsProcessed != nil {
-					c.eventsProcessed.Add(c.ctx, 1)
-				}
-				c.logger.Debug("Generated mock kernel event")
-			case <-c.ctx.Done():
-				return
+			// Send event using EventChannelManager
+			if c.EventChannelManager.SendEvent(collectorEvent) {
+				c.BaseCollector.RecordEvent()
+			} else {
+				c.BaseCollector.RecordDrop()
 			}
+			
+			c.logger.Debug("Generated mock kernel event")
 		}
 	}
 }

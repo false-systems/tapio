@@ -48,6 +48,9 @@ type Config struct {
 	EnableVFSFsync      bool `json:"enable_vfs_fsync" yaml:"enable_vfs_fsync"`
 	EnableVFSIterateDir bool `json:"enable_vfs_iterate_dir" yaml:"enable_vfs_iterate_dir"`
 
+	// Block I/O monitoring
+	EnableBlockIO bool `json:"enable_block_io" yaml:"enable_block_io"`
+
 	// K8s volume type monitoring
 	MonitorPVCs       bool `json:"monitor_pvcs" yaml:"monitor_pvcs"`
 	MonitorConfigMaps bool `json:"monitor_configmaps" yaml:"monitor_configmaps"`
@@ -127,6 +130,9 @@ func NewDefaultConfig() *Config {
 		EnableVFSWrite:      true,
 		EnableVFSFsync:      true,
 		EnableVFSIterateDir: true,
+
+		// Block I/O monitoring
+		EnableBlockIO: true,
 
 		// K8s volume monitoring - enable all for comprehensive monitoring
 		MonitorPVCs:       true,
@@ -224,9 +230,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("retry_delay must be positive")
 	}
 
-	// Validate at least one VFS probe is enabled
-	if !c.EnableVFSRead && !c.EnableVFSWrite && !c.EnableVFSFsync && !c.EnableVFSIterateDir {
-		return fmt.Errorf("at least one VFS probe must be enabled")
+	// Validate at least one probe is enabled
+	if !c.EnableVFSRead && !c.EnableVFSWrite && !c.EnableVFSFsync && !c.EnableVFSIterateDir && !c.EnableBlockIO {
+		return fmt.Errorf("at least one probe (VFS or Block I/O) must be enabled")
 	}
 
 	// Validate at least one K8s volume type is monitored

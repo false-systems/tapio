@@ -1,4 +1,4 @@
-package bpf
+package criebpf
 
 // This file provides support functions for eBPF operations
 // It serves as a placeholder for eBPF-related utilities and helpers
@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-
-	"github.com/cilium/ebpf"
 )
 
 // IsEBPFSupported checks if eBPF is supported on the current system
@@ -43,9 +41,4 @@ func CheckBPFCapabilities() error {
 // GetBPFProgramPath returns the path to eBPF programs
 func GetBPFProgramPath() string {
 	return "../bpf_src"
-}
-
-// LoadCrimonitor loads the eBPF collection spec (exported version)
-func LoadCrimonitor() (*ebpf.CollectionSpec, error) {
-	return loadCrimonitor()
 }

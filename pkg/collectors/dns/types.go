@@ -38,6 +38,7 @@ const (
 	DNSQueryTypeSOA   DNSQueryType = "SOA"
 	DNSQueryTypeTXT   DNSQueryType = "TXT"
 	DNSQueryTypeSRV   DNSQueryType = "SRV"
+	DNSQueryTypeOther DNSQueryType = "OTHER"
 )
 
 // DNSResponseCode represents DNS response codes

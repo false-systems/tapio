@@ -35,9 +35,6 @@ func RegisterCRIeBPFCollector() {
 			criEbpfConfig.EnableMemoryPressure = config.EnableMemoryPressure
 			criEbpfConfig.EnableProcessExit = config.EnableProcessExit
 			criEbpfConfig.EnableProcessFork = config.EnableProcessFork
-			if config.MemoryThreshold > 0 {
-				criEbpfConfig.MemoryThreshold = config.MemoryThreshold
-			}
 		}
 
 		// Create the cri-ebpf collector (will use stub on non-Linux)

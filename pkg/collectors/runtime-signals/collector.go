@@ -6,49 +6,32 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/collectors/config"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
 // Collector implements simple namespace monitoring via eBPF
 type Collector struct {
-	name    string
-	config  *config.NamespaceConfig
-	events  chan *domain.CollectorEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	healthy bool
-	mutex   sync.RWMutex
+	*base.BaseCollector       // Embed for Statistics() and Health()
+	*base.EventChannelManager // Embed for event channel management
+	*base.LifecycleManager    // Embed for lifecycle management
+
+	config *config.NamespaceConfig
+	logger *zap.Logger
 
 	// eBPF components (platform-specific)
 	ebpfState interface{}
 
-	// OTEL instrumentation
-	tracer trace.Tracer
-	meter  metric.Meter
-	logger *zap.Logger
-
-	// 5 Core Metrics (MANDATORY - same for all collectors)
-	eventsProcessed metric.Int64Counter
-	errorsTotal     metric.Int64Counter
-	processingTime  metric.Float64Histogram
-	droppedEvents   metric.Int64Counter
-	bufferUsage     metric.Int64Gauge
-
-	// Namespace-specific metrics (optional)
+	// Additional OTEL metrics (beyond base)
 	ebpfLoadsTotal     metric.Int64Counter
 	ebpfLoadErrors     metric.Int64Counter
 	ebpfAttachTotal    metric.Int64Counter
 	ebpfAttachErrors   metric.Int64Counter
-	collectorHealth    metric.Float64Gauge
 	k8sExtractionTotal metric.Int64Counter
 	k8sExtractionHits  metric.Int64Counter
 	netnsOpsByType     metric.Int64Counter
@@ -56,57 +39,22 @@ type Collector struct {
 
 // NewCollector creates a new simple namespace collector
 func NewCollector(name string) (*Collector, error) {
-	// Initialize OTEL components
-	tracer := otel.Tracer("runtime-signals")
-	meter := otel.Meter("runtime-signals")
-
 	// Initialize logger
 	logger, err := zap.NewProduction()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Initialize all metrics
-	eventsProcessed, err := meter.Int64Counter(
-		"runtime_signals_events_processed_total",
-		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create events_processed counter", zap.Error(err))
-	}
+	// Initialize base components
+	ctx := context.Background()
+	baseCollector := base.NewBaseCollector("runtime_signals", 5*time.Minute)
+	eventManager := base.NewEventChannelManager(1000, "runtime_signals", logger)
+	lifecycleManager := base.NewLifecycleManager(ctx, logger)
 
-	errorsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_errors_total", name),
-		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create errors counter", zap.Error(err))
-	}
+	// Get meter from base for additional metrics
+	meter := baseCollector.GetMeter()
 
-	processingTime, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_processing_duration_ms", name),
-		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create processing time histogram", zap.Error(err))
-	}
-
-	droppedEvents, err := meter.Int64Counter(
-		fmt.Sprintf("%s_dropped_events_total", name),
-		metric.WithDescription(fmt.Sprintf("Total dropped events by %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create dropped events counter", zap.Error(err))
-	}
-
-	bufferUsage, err := meter.Int64Gauge(
-		fmt.Sprintf("%s_buffer_usage", name),
-		metric.WithDescription(fmt.Sprintf("Current buffer usage for %s", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
-	}
-
+	// Initialize namespace-specific metrics
 	ebpfLoadsTotal, err := meter.Int64Counter(
 		fmt.Sprintf("%s_ebpf_loads_total", name),
 		metric.WithDescription(fmt.Sprintf("Total eBPF loads attempted by %s", name)),
@@ -137,14 +85,6 @@ func NewCollector(name string) (*Collector, error) {
 	)
 	if err != nil {
 		logger.Warn("Failed to create ebpf_attach_errors counter", zap.Error(err))
-	}
-
-	collectorHealth, err := meter.Float64Gauge(
-		"runtime_signals_collector_healthy",
-		metric.WithDescription(fmt.Sprintf("Health status of %s collector", name)),
-	)
-	if err != nil {
-		logger.Warn("Failed to create health gauge", zap.Error(err))
 	}
 
 	k8sExtractionTotal, err := meter.Int64Counter(
@@ -181,28 +121,19 @@ func NewCollector(name string) (*Collector, error) {
 	}
 
 	c := &Collector{
-		name:    name,
-		config:  cfg,
-		events:  make(chan *domain.CollectorEvent, cfg.BaseConfig.BufferSize),
-		healthy: true,
-		tracer:  tracer,
-		meter:   meter,
-		logger:  logger.Named(name),
-		// Core metrics
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		droppedEvents:   droppedEvents,
-		bufferUsage:     bufferUsage,
+		BaseCollector:       baseCollector,
+		EventChannelManager: eventManager,
+		LifecycleManager:    lifecycleManager,
+		config:              cfg,
+		logger:              logger.Named(name),
 		// Namespace-specific metrics
-		ebpfLoadsTotal:     ebpfLoadsTotal,
-		ebpfLoadErrors:     ebpfLoadErrors,
-		ebpfAttachTotal:    ebpfAttachTotal,
-		ebpfAttachErrors:   ebpfAttachErrors,
-		collectorHealth:    collectorHealth,
-		k8sExtractionTotal: k8sExtractionTotal,
-		k8sExtractionHits:  k8sExtractionHits,
-		netnsOpsByType:     netnsOpsByType,
+		ebpfLoadsTotal:      ebpfLoadsTotal,
+		ebpfLoadErrors:      ebpfLoadErrors,
+		ebpfAttachTotal:     ebpfAttachTotal,
+		ebpfAttachErrors:    ebpfAttachErrors,
+		k8sExtractionTotal:  k8sExtractionTotal,
+		k8sExtractionHits:   k8sExtractionHits,
+		netnsOpsByType:      netnsOpsByType,
 	}
 
 	c.logger.Info("Runtime signals collector created", zap.String("name", name))
@@ -211,7 +142,7 @@ func NewCollector(name string) (*Collector, error) {
 
 // Name returns collector name
 func (c *Collector) Name() string {
-	return c.name
+	return c.BaseCollector.GetName()
 }
 
 // Start starts the CNI monitoring
@@ -220,40 +151,32 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("context cannot be nil")
 	}
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
 	// Check if already started
-	if c.ctx != nil {
-		return fmt.Errorf("collector already started")
+	if c.LifecycleManager.IsShuttingDown() {
+		return fmt.Errorf("collector is shutting down")
 	}
 
-	ctx, span := c.tracer.Start(ctx, "runtime_signals.collector.start")
+	tracer := c.BaseCollector.GetTracer()
+	ctx, span := tracer.Start(ctx, "runtime_signals.collector.start")
 	defer span.End()
-
-	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Start eBPF monitoring if enabled
 	if c.config.EnableEBPF {
 		if err := c.startEBPF(); err != nil {
-			if c.errorsTotal != nil {
-				c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-					attribute.String("error_type", "ebpf_start_failed"),
-				))
-			}
+			c.BaseCollector.RecordError(err)
 			span.RecordError(err)
-			c.ctx = nil
-			c.cancel = nil
 			return fmt.Errorf("failed to start eBPF: %w", err)
 		}
 
 		// Start event processing
-		go c.readEBPFEvents()
+		c.LifecycleManager.Start("ebpf-reader", func() {
+			c.readEBPFEvents()
+		})
 	}
 
-	c.healthy = true
+	c.BaseCollector.SetHealthy(true)
 	c.logger.Info("Runtime signals collector started",
-		zap.String("name", c.name),
+		zap.String("name", c.Name()),
 		zap.Bool("ebpf_enabled", c.config.EnableEBPF),
 	)
 	return nil
@@ -261,55 +184,50 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
-	// Add tracing for stop operation
-	_, span := c.tracer.Start(context.Background(), "runtime_signals.collector.stop")
+	tracer := c.BaseCollector.GetTracer()
+	_, span := tracer.Start(context.Background(), "runtime_signals.collector.stop")
 	defer span.End()
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.logger.Info("Stopping runtime signals collector")
 
-	// Check if already stopped
-	if c.ctx == nil {
-		return nil // Already stopped, no error
-	}
-
-	if c.cancel != nil {
-		c.cancel()
-		c.cancel = nil
-	}
-
-	// Stop eBPF if running
+	// Stop eBPF
 	c.stopEBPF()
 
-	// Close events channel only once
-	if c.events != nil {
-		close(c.events)
-		c.events = nil
+	// Shutdown lifecycle manager
+	if err := c.LifecycleManager.Stop(5 * time.Second); err != nil {
+		c.logger.Warn("Timeout during shutdown", zap.Error(err))
 	}
 
-	c.ctx = nil
-	c.healthy = false
+	// Close event channel
+	c.EventChannelManager.Close()
+	c.BaseCollector.SetHealthy(false)
+
 	c.logger.Info("Runtime signals collector stopped")
 	return nil
 }
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	return c.events
+	return c.EventChannelManager.GetChannel()
 }
 
 // IsHealthy returns health status
-func (c *Collector) IsHealthy() bool {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-	return c.healthy
+// Statistics delegates to base collector
+func (c *Collector) Statistics() *domain.CollectorStats {
+	return c.BaseCollector.Statistics()
+}
+
+// Health delegates to base collector
+func (c *Collector) Health() *domain.HealthStatus {
+	return c.BaseCollector.Health()
 }
 
 // createEvent creates a domain.CollectorEvent from CNI event data
 func (c *Collector) createEvent(eventType string, data map[string]string) *domain.CollectorEvent {
 	// Generate trace context
 	ctx := context.Background()
-	ctx, span := c.tracer.Start(ctx, "runtime_signals.event.create")
+	tracer := c.BaseCollector.GetTracer()
+	ctx, span := tracer.Start(ctx, "runtime_signals.event.create")
 	defer span.End()
 
 	spanCtx := span.SpanContext()
@@ -374,7 +292,7 @@ func (c *Collector) createEvent(eventType string, data map[string]string) *domai
 		EventID:   eventID,
 		Timestamp: time.Now(),
 		Type:      collectorEventType,
-		Source:    c.name,
+		Source:    c.Name(),
 		Severity:  domain.EventSeverityInfo,
 
 		EventData: domain.EventDataContainer{

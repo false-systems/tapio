@@ -7,35 +7,6 @@ import (
 	"strings"
 )
 
-// extractQueryName extracts the DNS query name from the BPF event data
-func (c *Collector) extractQueryName(queryNameBytes []byte) string {
-	// Find null terminator
-	nameEnd := len(queryNameBytes)
-	for i, b := range queryNameBytes {
-		if b == 0 {
-			nameEnd = i
-			break
-		}
-	}
-
-	if nameEnd == 0 {
-		return ""
-	}
-
-	// Convert bytes to string and clean up
-	queryName := string(queryNameBytes[:nameEnd])
-
-	// Basic validation - DNS names shouldn't have null bytes or control chars
-	if strings.Contains(queryName, "\x00") {
-		return ""
-	}
-
-	// Convert DNS wire format if needed (labels prefixed with length)
-	// This is a simplified version - real DNS parsing is more complex
-	cleaned := c.cleanDNSName(queryName)
-
-	return cleaned
-}
 
 // cleanDNSName cleans up DNS names from wire format to readable format
 func (c *Collector) cleanDNSName(name string) string {

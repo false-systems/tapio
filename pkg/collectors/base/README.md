@@ -5,7 +5,7 @@ Common functionality for all Tapio collectors, reducing code duplication and ens
 ## Components
 
 ### 1. BaseCollector
-Provides `Statistics()` and `Health()` methods for all collectors.
+Provides `Statistics()`, `Health()` methods, and built-in OTEL instrumentation.
 
 ```go
 type MyCollector struct {
@@ -19,10 +19,33 @@ func NewMyCollector() *MyCollector {
     }
 }
 
+// With custom configuration:
+func NewMyCollectorAdvanced() *MyCollector {
+    config := base.BaseCollectorConfig{
+        Name:               "my-collector",
+        HealthCheckTimeout: 5 * time.Minute,
+        ErrorRateThreshold: 0.05, // 5% instead of default 10%
+    }
+    return &MyCollector{
+        BaseCollector: base.NewBaseCollectorWithConfig(config),
+    }
+}
+
 // In your event processing:
-collector.RecordEvent()     // Track successful events
-collector.RecordError(err)  // Track errors
-collector.RecordDrop()      // Track dropped events
+collector.RecordEvent()                    // Track successful events
+collector.RecordEventWithContext(ctx)     // With trace context
+collector.RecordError(err)                // Track errors
+collector.RecordErrorWithContext(ctx, err) // With trace context + span error
+collector.RecordDrop()                    // Track dropped events
+collector.RecordDropWithReason(ctx, "buffer_full") // With reason
+
+// Additional OTEL metrics:
+collector.RecordProcessingDuration(ctx, duration)
+collector.RecordEventSize(ctx, sizeBytes)
+
+// Trace instrumentation:
+ctx, span := collector.StartSpan(ctx, "process-event")
+defer span.End()
 ```
 
 ### 2. EventChannelManager
@@ -135,10 +158,19 @@ func (c *Collector) Events() <-chan *domain.CollectorEvent {
 
 ## Metrics Provided
 
-Every collector using BaseCollector automatically provides:
+Every collector using BaseCollector automatically provides OpenTelemetry metrics:
 
+### Standard Metrics
+- `{collector}_events_processed_total` - Total events successfully processed
+- `{collector}_events_dropped_total` - Events dropped due to channel overflow (with reason labels)
+- `{collector}_errors_total` - Total errors encountered (with error_type labels)
+- `{collector}_processing_duration_seconds` - Event processing time histogram
+- `{collector}_event_size_bytes` - Event size distribution histogram
+- `{collector}_health_status` - Health status gauge (0=unhealthy, 1=degraded, 2=healthy)
+
+### Legacy Statistics (for backward compatibility)
 - `events_processed` - Total events successfully processed
-- `error_count` - Total errors encountered
+- `error_count` - Total errors encountered  
 - `events_dropped` - Events dropped due to channel overflow
 - `last_event_time` - Timestamp of last processed event
 - `uptime` - How long the collector has been running
@@ -148,8 +180,60 @@ Every collector using BaseCollector automatically provides:
 BaseCollector provides automatic health monitoring:
 
 - **Healthy**: Operating normally
-- **Degraded**: No events for > timeout, or error rate > 10%
+- **Degraded**: No events for > timeout, or error rate > threshold (default 10%, configurable)
 - **Unhealthy**: Explicitly marked unhealthy or critical errors
+
+Health status is automatically exported as an OTEL gauge metric with reasons for degraded states.
+
+## Distributed Tracing
+
+BaseCollector provides built-in tracing support:
+
+```go
+// Start a span for event processing
+ctx, span := collector.StartSpan(ctx, "process-kafka-event")
+defer span.End()
+
+// Record errors automatically in spans
+collector.RecordErrorWithContext(ctx, err) // Error recorded in span + metrics
+
+// Custom instrumentation
+tracer := collector.GetTracer()
+ctx, customSpan := tracer.Start(ctx, "custom-operation")
+defer customSpan.End()
+
+// All OTEL metrics are automatically correlated with trace context
+collector.RecordEventWithContext(ctx) // Metrics linked to current span
+```
+
+## Custom Metrics
+
+Extend with collector-specific metrics:
+
+```go
+type MyCollector struct {
+    *base.BaseCollector
+    
+    // Custom metrics using the same meter
+    customCounter metric.Int64Counter
+}
+
+func NewMyCollector() (*MyCollector, error) {
+    bc := base.NewBaseCollector("my-collector", 5*time.Minute)
+    
+    // Use the base collector's meter for consistency
+    meter := bc.GetMeter()
+    customCounter, err := meter.Int64Counter(
+        "my_collector_custom_events_total",
+        metric.WithDescription("Custom events processed"),
+    )
+    
+    return &MyCollector{
+        BaseCollector: bc,
+        customCounter: customCounter,
+    }, err
+}
+```
 
 ## Thread Safety
 

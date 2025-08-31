@@ -6,46 +6,35 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
-// Collector implements lean memory leak detection
+// Collector implements lean memory leak detection using BaseCollector
 type Collector struct {
-	name    string
+	*base.BaseCollector // Embed BaseCollector for standard functionality
+	
 	config  *Config
 	events  chan *domain.CollectorEvent
 	ctx     context.Context
 	cancel  context.CancelFunc
-	healthy bool
 	mutex   sync.RWMutex
 
 	// eBPF components (Linux-only)
 	ebpfState interface{}
 
-	// OTEL instrumentation - MANDATORY pattern from CLAUDE.md
-	tracer trace.Tracer
-	meter  metric.Meter
 	logger *zap.Logger
 
-	// Core Metrics (5 mandatory for all collectors)
-	eventsProcessed metric.Int64Counter
-	errorsTotal     metric.Int64Counter
-	processingTime  metric.Float64Histogram
-	droppedEvents   metric.Int64Counter
-	bufferUsage     metric.Int64Gauge
-
-	// Memory-specific metrics
+	// Memory-specific metrics (custom metrics beyond BaseCollector)
 	allocationsTracked   metric.Int64Counter
 	deallocationsTracked metric.Int64Counter
 	rssGrowthDetected    metric.Int64Counter
 	unfreedMemoryBytes   metric.Int64Gauge
 	largestAllocation    metric.Int64Gauge
-	filteredEvents       metric.Int64Counter // Enhancement #6: Track filtered events
+	filteredEvents       metric.Int64Counter
 
 	// Pre-processing state (lean filtering)
 	recentStacks map[uint64]time.Time // Simple dedup
@@ -55,10 +44,6 @@ type Collector struct {
 
 // NewCollector creates a new memory leak hunter
 func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
-	// OTEL initialization - MANDATORY pattern
-	tracer := otel.Tracer("memory-leak-hunter")
-	meter := otel.Meter("memory-leak-hunter")
-
 	// Initialize logger if not provided
 	if logger == nil {
 		var err error
@@ -68,48 +53,18 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		}
 	}
 
-	// Enhancement #12: Fail if mandatory metrics cannot be created
-	eventsProcessed, err := meter.Int64Counter(
-		"memory_leak_hunter_events_processed_total",
-		metric.WithDescription("Total memory events processed"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create events_processed counter: %w", err)
+	// Create BaseCollector with 5-minute health check timeout
+	baseConfig := base.BaseCollectorConfig{
+		Name:               name,
+		HealthCheckTimeout: 5 * time.Minute,
+		ErrorRateThreshold: 0.05, // 5% error rate threshold for memory collector (stricter than default)
 	}
+	baseCollector := base.NewBaseCollectorWithConfig(baseConfig)
 
-	errorsTotal, err := meter.Int64Counter(
-		"memory_leak_hunter_errors_total",
-		metric.WithDescription("Total errors in memory leak hunter"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create errors counter: %w", err)
-	}
+	// Get the meter from BaseCollector for consistency
+	meter := baseCollector.GetMeter()
 
-	processingTime, err := meter.Float64Histogram(
-		"memory_leak_hunter_processing_duration_ms",
-		metric.WithDescription("Processing duration for memory events in milliseconds"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create processing time histogram: %w", err)
-	}
-
-	droppedEvents, err := meter.Int64Counter(
-		"memory_leak_hunter_dropped_events_total",
-		metric.WithDescription("Total dropped memory events"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dropped events counter: %w", err)
-	}
-
-	bufferUsage, err := meter.Int64Gauge(
-		"memory_leak_hunter_buffer_usage",
-		metric.WithDescription("Current buffer usage for memory events"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
-	}
-
-	// Memory-specific metrics
+	// Create memory-specific metrics using the same meter
 	allocationsTracked, err := meter.Int64Counter(
 		"memory_leak_hunter_allocations_tracked_total",
 		metric.WithDescription("Total memory allocations tracked"),
@@ -150,7 +105,6 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		logger.Warn("Failed to create largest allocation gauge", zap.Error(err))
 	}
 
-	// Enhancement #6: Add metric for filtered events
 	filteredEvents, err := meter.Int64Counter(
 		"memory_leak_hunter_filtered_events_total",
 		metric.WithDescription("Total memory events filtered"),
@@ -164,18 +118,10 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 	cfg.Name = name
 
 	c := &Collector{
-		name:                 name,
+		BaseCollector:        baseCollector, // Use BaseCollector
 		config:               cfg,
 		events:               make(chan *domain.CollectorEvent, cfg.BufferSize),
-		healthy:              true,
-		tracer:               tracer,
-		meter:                meter,
 		logger:               logger.Named(name),
-		eventsProcessed:      eventsProcessed,
-		errorsTotal:          errorsTotal,
-		processingTime:       processingTime,
-		droppedEvents:        droppedEvents,
-		bufferUsage:          bufferUsage,
 		allocationsTracked:   allocationsTracked,
 		deallocationsTracked: deallocationsTracked,
 		rssGrowthDetected:    rssGrowthDetected,
@@ -208,7 +154,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("collector already started")
 	}
 
-	ctx, span := c.tracer.Start(ctx, "memory_leak_hunter.start")
+	ctx, span := c.StartSpan(ctx, "memory_leak_hunter.start")
 	defer span.End()
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
@@ -216,11 +162,7 @@ func (c *Collector) Start(ctx context.Context) error {
 	// Start eBPF monitoring if enabled
 	if c.config.EnableEBPF {
 		if err := c.startEBPF(); err != nil {
-			if c.errorsTotal != nil {
-				c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-					attribute.String("error_type", "ebpf_start_failed"),
-				))
-			}
+			c.RecordErrorWithContext(ctx, err) // Use BaseCollector method
 			span.RecordError(err)
 			c.ctx = nil
 			c.cancel = nil
@@ -237,9 +179,9 @@ func (c *Collector) Start(ctx context.Context) error {
 	// Start cleanup routine for dedup cache
 	go c.cleanupRoutine()
 
-	c.healthy = true
+	c.SetHealthy(true)
 	c.logger.Info("Memory leak hunter started",
-		zap.String("name", c.name),
+		zap.String("name", c.GetName()),
 		zap.Bool("ebpf_enabled", c.config.EnableEBPF),
 		zap.String("mode", string(c.config.Mode)),
 	)
@@ -249,7 +191,7 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
-	_, span := c.tracer.Start(context.Background(), "memory_leak_hunter.stop")
+	_, span := c.StartSpan(context.Background(), "memory_leak_hunter.stop")
 	defer span.End()
 
 	c.mutex.Lock()
@@ -273,7 +215,7 @@ func (c *Collector) Stop() error {
 	}
 
 	c.ctx = nil
-	c.healthy = false
+	c.SetHealthy(false)
 	c.logger.Info("Memory leak hunter stopped")
 	return nil
 }
@@ -283,16 +225,9 @@ func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.events
 }
 
-// IsHealthy returns health status
-func (c *Collector) IsHealthy() bool {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-	return c.healthy
-}
-
-// Name returns collector name
+// Name returns collector name (required by Collector interface)
 func (c *Collector) Name() string {
-	return c.name
+	return c.GetName()
 }
 
 // shouldEmitEvent implements lean pre-processing logic
@@ -350,7 +285,7 @@ func (c *Collector) shouldEmitEvent(event *MemoryEvent) bool {
 // createDomainEvent converts memory event to domain event
 // Enhancement #9: Fixed context propagation - now accepts parent context
 func (c *Collector) createDomainEvent(ctx context.Context, event *MemoryEvent) *domain.CollectorEvent {
-	ctx, span := c.tracer.Start(ctx, "memory_leak_hunter.create_event")
+	ctx, span := c.StartSpan(ctx, "memory_leak_hunter.create_event")
 	defer span.End()
 
 	spanCtx := span.SpanContext()
@@ -398,7 +333,7 @@ func (c *Collector) createDomainEvent(ctx context.Context, event *MemoryEvent) *
 		EventID:   eventID,
 		Timestamp: time.Unix(0, int64(event.Timestamp)),
 		Type:      eventType,
-		Source:    c.name,
+		Source:    c.GetName(),
 		Severity:  c.determineSeverity(event),
 
 		EventData: domain.EventDataContainer{

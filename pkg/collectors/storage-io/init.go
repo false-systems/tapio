@@ -21,7 +21,7 @@ func init() {
 func RegisterStorageIOCollector() {
 	factory := func(name string, config *orchestrator.CollectorConfigData, logger *zap.Logger) (collectors.Collector, error) {
 		// Convert YAML config to storage-io-specific config
-		storageConfig := DefaultConfig()
+		storageConfig := NewDefaultConfig()
 
 		// Apply configuration from YAML
 		if config != nil {

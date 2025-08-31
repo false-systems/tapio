@@ -127,7 +127,7 @@ func TestEventChannelManager(t *testing.T) {
 		
 		event := &domain.CollectorEvent{
 			EventID: "test-1",
-			Type:    domain.EventTypeResourceStarvation,
+			Type:    domain.EventTypeKernelProcess,
 		}
 		
 		sent := ecm.SendEvent(event)
@@ -262,7 +262,7 @@ func BenchmarkEventChannelManager(b *testing.B) {
 	
 	event := &domain.CollectorEvent{
 		EventID: "bench",
-		Type:    domain.EventTypeResourceStarvation,
+		Type:    domain.EventTypeKernelProcess,
 	}
 	
 	b.Run("SendEvent", func(b *testing.B) {

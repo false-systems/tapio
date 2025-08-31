@@ -20,7 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -tags linux -target amd64,arm64 runtimeMonitor ./bpf_src/runtime_monitor.c -- -I../bpf_common
+// eBPF generation is handled by bpf/generate.go
 
 // eBPF components - implements EBPFState interface
 type ebpfState struct {
@@ -41,15 +41,16 @@ func (s *ebpfState) LinkCount() int {
 
 // startEBPF initializes eBPF monitoring with comprehensive OTEL instrumentation
 func (c *Collector) startEBPF() error {
-	ctx, span := c.tracer.Start(context.Background(), "namespace.ebpf.start",
+	tracer := c.BaseCollector.GetTracer()
+	ctx, span := tracer.Start(context.Background(), "namespace.ebpf.start",
 		trace.WithAttributes(
-			attribute.String("collector.name", c.name),
+			attribute.String("collector.name", c.Name()),
 		),
 	)
 	defer span.End()
 
 	c.logger.Info("Starting eBPF monitoring",
-		zap.String("collector.name", c.name),
+		zap.String("collector.name", c.Name()),
 		zap.String("trace.id", span.SpanContext().TraceID().String()),
 	)
 
@@ -57,7 +58,7 @@ func (c *Collector) startEBPF() error {
 	if c.ebpfLoadsTotal != nil {
 		c.ebpfLoadsTotal.Add(ctx, 1,
 			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
+				attribute.String("collector.name", c.Name()),
 			),
 		)
 	}
@@ -67,7 +68,7 @@ func (c *Collector) startEBPF() error {
 		if c.ebpfLoadErrors != nil {
 			c.ebpfLoadErrors.Add(ctx, 1,
 				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
+					attribute.String("collector.name", c.Name()),
 					attribute.String("error.type", "memlock_removal"),
 				),
 			)
@@ -86,7 +87,7 @@ func (c *Collector) startEBPF() error {
 		if c.ebpfLoadErrors != nil {
 			c.ebpfLoadErrors.Add(ctx, 1,
 				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
+					attribute.String("collector.name", c.Name()),
 					attribute.String("error.type", "object_loading"),
 				),
 			)
@@ -109,7 +110,7 @@ func (c *Collector) startEBPF() error {
 	if c.ebpfAttachTotal != nil {
 		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
+				attribute.String("collector.name", c.Name()),
 				attribute.String("tracepoint", "sched_process_exec"),
 			),
 		)
@@ -119,7 +120,7 @@ func (c *Collector) startEBPF() error {
 		if c.ebpfAttachErrors != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
+					attribute.String("collector.name", c.Name()),
 					attribute.String("tracepoint", "sched_process_exec"),
 					attribute.String("error.type", "attach_failure"),
 				),
@@ -139,7 +140,7 @@ func (c *Collector) startEBPF() error {
 	if c.ebpfAttachTotal != nil {
 		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
+				attribute.String("collector.name", c.Name()),
 				attribute.String("tracepoint", "sched_process_exit"),
 			),
 		)
@@ -149,7 +150,7 @@ func (c *Collector) startEBPF() error {
 		if c.ebpfAttachErrors != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
+					attribute.String("collector.name", c.Name()),
 					attribute.String("tracepoint", "sched_process_exit"),
 					attribute.String("error.type", "attach_failure"),
 				),
@@ -169,7 +170,7 @@ func (c *Collector) startEBPF() error {
 	if c.ebpfAttachTotal != nil {
 		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
+				attribute.String("collector.name", c.Name()),
 				attribute.String("tracepoint", "signal_generate"),
 			),
 		)
@@ -179,7 +180,7 @@ func (c *Collector) startEBPF() error {
 		if c.ebpfAttachErrors != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
+					attribute.String("collector.name", c.Name()),
 					attribute.String("tracepoint", "signal_generate"),
 					attribute.String("error.type", "attach_failure"),
 				),
@@ -199,7 +200,7 @@ func (c *Collector) startEBPF() error {
 	if c.ebpfAttachTotal != nil {
 		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
+				attribute.String("collector.name", c.Name()),
 				attribute.String("tracepoint", "signal_deliver"),
 			),
 		)
@@ -209,7 +210,7 @@ func (c *Collector) startEBPF() error {
 		if c.ebpfAttachErrors != nil {
 			c.ebpfAttachErrors.Add(ctx, 1,
 				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
+					attribute.String("collector.name", c.Name()),
 					attribute.String("tracepoint", "signal_deliver"),
 					attribute.String("error.type", "attach_failure"),
 				),
@@ -229,7 +230,7 @@ func (c *Collector) startEBPF() error {
 	if c.ebpfAttachTotal != nil {
 		c.ebpfAttachTotal.Add(ctx, 1,
 			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
+				attribute.String("collector.name", c.Name()),
 				attribute.String("kprobe", "oom_kill_process"),
 			),
 		)
@@ -251,7 +252,7 @@ func (c *Collector) startEBPF() error {
 		if c.ebpfLoadErrors != nil {
 			c.ebpfLoadErrors.Add(ctx, 1,
 				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
+					attribute.String("collector.name", c.Name()),
 					attribute.String("error.type", "ringbuf_creation"),
 				),
 			)
@@ -272,7 +273,7 @@ func (c *Collector) startEBPF() error {
 
 	span.SetAttributes(attribute.Bool("ebpf.started", true))
 	c.logger.Info("eBPF monitoring started successfully",
-		zap.String("collector.name", c.name),
+		zap.String("collector.name", c.Name()),
 		zap.Int("attached_links", len(state.links)),
 		zap.String("trace.id", span.SpanContext().TraceID().String()),
 	)
@@ -303,22 +304,23 @@ func (s *ebpfState) cleanup() {
 
 // readEBPFEvents reads events from eBPF ring buffer with comprehensive OTEL tracing
 func (c *Collector) readEBPFEvents() {
-	ctx, span := c.tracer.Start(context.Background(), "cni.ebpf.read_events",
+	tracer := c.BaseCollector.GetTracer()
+	ctx, span := tracer.Start(context.Background(), "cni.ebpf.read_events",
 		trace.WithAttributes(
-			attribute.String("collector.name", c.name),
+			attribute.String("collector.name", c.Name()),
 		),
 	)
 	defer span.End()
 
 	c.logger.Info("Starting eBPF event reading loop",
-		zap.String("collector.name", c.name),
+		zap.String("collector.name", c.Name()),
 		zap.String("trace.id", span.SpanContext().TraceID().String()),
 	)
 
 	state, ok := c.ebpfState.(*ebpfState)
 	if !ok || state == nil {
 		c.logger.Error("Invalid eBPF state",
-			zap.String("collector.name", c.name),
+			zap.String("collector.name", c.Name()),
 			zap.String("trace.id", span.SpanContext().TraceID().String()),
 		)
 		span.RecordError(fmt.Errorf("invalid eBPF state"))
@@ -327,9 +329,9 @@ func (c *Collector) readEBPFEvents() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			c.logger.Info("eBPF event reading loop stopped due to context cancellation",
-				zap.String("collector.name", c.name),
+				zap.String("collector.name", c.Name()),
 				zap.String("trace.id", span.SpanContext().TraceID().String()),
 			)
 			return
@@ -341,14 +343,14 @@ func (c *Collector) readEBPFEvents() {
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				c.logger.Info("Ring buffer closed, stopping event reading",
-					zap.String("collector.name", c.name),
+					zap.String("collector.name", c.Name()),
 					zap.String("trace.id", span.SpanContext().TraceID().String()),
 				)
 				return
 			}
 			c.logger.Debug("Error reading from ring buffer",
 				zap.Error(err),
-				zap.String("collector.name", c.name),
+				zap.String("collector.name", c.Name()),
 				zap.String("trace.id", span.SpanContext().TraceID().String()),
 			)
 			continue
@@ -359,7 +361,7 @@ func (c *Collector) readEBPFEvents() {
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
 			c.logger.Debug("Failed to parse eBPF event",
 				zap.Error(err),
-				zap.String("collector.name", c.name),
+				zap.String("collector.name", c.Name()),
 				zap.String("trace.id", span.SpanContext().TraceID().String()),
 			)
 			continue
@@ -368,16 +370,8 @@ func (c *Collector) readEBPFEvents() {
 		// Process the runtime event
 		c.processRuntimeEvent(ctx, &event)
 
-		// Record processing latency
-		if c.processingTime != nil {
-			duration := time.Since(start).Seconds() * 1000 // Convert to milliseconds
-			c.processingTime.Record(ctx, duration,
-				metric.WithAttributes(
-					attribute.String("operation", "ebpf_event_processing"),
-					attribute.String("event.type", runtimeEventTypeToString(event.EventType)),
-				),
-			)
-		}
+		// Record processing latency using base collector
+		c.BaseCollector.RecordProcessingDuration(ctx, time.Since(start))
 	}
 }
 
@@ -446,42 +440,27 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 	domainEvent := c.createEvent(runtimeEvt.EventType, eventData)
 
 	// Update buffer usage gauge
-	if c.bufferUsage != nil {
-		c.bufferUsage.Record(ctx, int64(len(c.events)),
-			metric.WithAttributes(
-				attribute.String("collector.name", c.name),
-			),
-		)
-	}
+	// Buffer usage is handled by EventChannelManager
 
 	// Try to send event with metrics tracking
+	// Send event using EventChannelManager
+	if c.EventChannelManager.SendEvent(domainEvent) {
+		c.BaseCollector.RecordEvent()
+	} else {
+		c.BaseCollector.RecordDrop()
+	}
+	
+	// Check if context is done
 	select {
-	case c.events <- domainEvent:
-		if c.eventsProcessed != nil {
-			c.eventsProcessed.Add(ctx, 1,
-				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
-					attribute.String("event.type", runtimeEvt.EventType),
-				),
-			)
-		}
-	case <-c.ctx.Done():
+	case <-c.LifecycleManager.Context().Done():
 		c.logger.Info("Context cancelled during event processing",
-			zap.String("collector.name", c.name),
+			zap.String("collector.name", c.Name()),
 		)
 		return
 	default:
-		// Buffer full, drop event and record metric
-		if c.droppedEvents != nil {
-			c.droppedEvents.Add(ctx, 1,
-				metric.WithAttributes(
-					attribute.String("collector.name", c.name),
-					attribute.String("reason", "buffer_full"),
-				),
-			)
-		}
+		// This is now handled by the SendEvent return value above
 		c.logger.Warn("Dropped event due to full buffer",
-			zap.String("collector.name", c.name),
+			zap.String("collector.name", c.Name()),
 			zap.String("event.type", runtimeEvt.EventType),
 		)
 	}

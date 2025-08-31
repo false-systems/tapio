@@ -6,6 +6,8 @@ package bpf
 import (
 	"fmt"
 	"os"
+
+	"github.com/cilium/ebpf"
 )
 
 // CheckKernelCompatibility checks if the kernel supports the required features
@@ -89,4 +91,14 @@ func CheckEBPFSupport() bool {
 	// Check for eBPF filesystem
 	_, err := os.Stat("/sys/fs/bpf")
 	return err == nil
+}
+
+// StoragemonitorObjects is a wrapper around the generated storagemonitorObjects
+type StoragemonitorObjects struct {
+	storagemonitorObjects
+}
+
+// LoadStoragemonitorObjects loads the storage monitor eBPF objects
+func LoadStoragemonitorObjects(obj *StoragemonitorObjects, opts *ebpf.CollectionOptions) error {
+	return loadStoragemonitorObjects(&obj.storagemonitorObjects, opts)
 }

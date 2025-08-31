@@ -224,41 +224,31 @@ func (c *LinuxCollector) loadeBPFProgram() error {
 }
 
 func (c *LinuxCollector) attachTracepoints() error {
-	c.logger.Debug("Attaching to kernel tracepoints")
-
-	// Attach to sched_stat_wait (scheduling delays)
-	schedWaitLink, err := link.Tracepoint("sched", "sched_stat_wait", c.bpfObjs.TraceSchedWait, nil)
 	c.logger.Debug("Attaching eBPF tracepoints")
 
 	// Attach sched_stat_wait tracepoint
 	tpWait, err := link.Tracepoint("sched", "sched_stat_wait", c.bpfObjs.TraceSchedWait, nil)
-
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_stat_wait: %w", err)
 	}
 	c.links = append(c.links, tpWait)
 
-	// Attach to sched_stat_runtime (runtime tracking)
-	runtimeLink, err := link.Tracepoint("sched", "sched_stat_runtime", c.bpfObjs.TraceThrottle, nil)
-
-	// Attach sched_stat_runtime tracepoint
-
+	// Attach sched_stat_runtime tracepoint  
+	tpRuntime, err := link.Tracepoint("sched", "sched_stat_runtime", c.bpfObjs.TraceThrottle, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_stat_runtime: %w", err)
 	}
 	c.links = append(c.links, tpRuntime)
 
-	// Attach to sched_migrate_task (CPU migrations)
-	migrateLink, err := link.Tracepoint("sched", "sched_migrate_task", c.bpfObjs.TraceMigrate, nil)
-
+	// Attach sched_migrate_task tracepoint
+	tpMigrate, err := link.Tracepoint("sched", "sched_migrate_task", c.bpfObjs.TraceMigrate, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_migrate_task: %w", err)
 	}
 	c.links = append(c.links, tpMigrate)
 
-	// Attach to sched_switch (context switches)
-	switchLink, err := link.Tracepoint("sched", "sched_switch", c.bpfObjs.TraceSchedSwitch, nil)
-
+	// Attach sched_switch tracepoint
+	tpSwitch, err := link.Tracepoint("sched", "sched_switch", c.bpfObjs.TraceSchedSwitch, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_switch: %w", err)
 	}
@@ -483,7 +473,7 @@ func (c *LinuxCollector) handleError(err error) {
 		c.logger.Error("Circuit breaker activated",
 			zap.Int("error_count", c.errorCount),
 			zap.Error(err))
-		c.isHealthy.Store(false)
+		c.SetHealthy(false)
 	}
 }
 
@@ -499,7 +489,7 @@ func (c *LinuxCollector) resetErrorCount() {
 	c.lastError = nil
 	c.circuitBreakerOn = false
 	c.recoveryAttempts = 0
-	c.isHealthy.Store(true)
+	c.SetHealthy(true)
 }
 
 func (c *LinuxCollector) isCircuitBreakerOpen() bool {
@@ -535,7 +525,7 @@ func (c *LinuxCollector) tryRecovery(ctx context.Context) bool {
 	c.errorCount = 0
 	c.circuitBreakerOn = false
 	c.recoveryAttempts = 0
-	c.isHealthy.Store(true)
+	c.SetHealthy(true)
 	return true
 }
 

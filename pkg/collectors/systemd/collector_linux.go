@@ -20,7 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -tags linux -target amd64,arm64 systemdmonitor ./bpf/systemd_monitor.c -- -I../bpf_common
+// eBPF generation is handled by bpf/generate.go
 
 // ebpfState holds Linux-specific eBPF components
 type ebpfSystemdState struct {

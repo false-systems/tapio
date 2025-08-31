@@ -5,29 +5,16 @@ package bpf
 
 import (
 	"fmt"
-
-	"github.com/cilium/ebpf"
 )
 
-// LoadNetworkMonitor loads the network monitoring eBPF programs
-func LoadNetworkMonitor() (*ebpf.CollectionSpec, error) {
-	spec, err := LoadNetworkmonitor()
-	if err != nil {
-		return nil, fmt.Errorf("loading network monitor BPF spec: %w", err)
-	}
-	return spec, nil
-}
+// NetworkmonitorObjects is an exported alias for the generated type
+type NetworkmonitorObjects = networkmonitorObjects
 
-// GetNetworkMonitorSpecs returns the eBPF collection spec for the network monitor
-func GetNetworkMonitorSpecs() (*ebpf.CollectionSpec, *ebpf.CollectionSpec, error) {
-	// Load base network monitor
-	baseSpec, err := LoadNetworkmonitor()
-	if err != nil {
-		return nil, nil, fmt.Errorf("loading base network monitor: %w", err)
+// LoadNetworkMonitor loads the network monitoring eBPF collection
+func LoadNetworkMonitor() (interface{}, error) {
+	var objs networkmonitorObjects
+	if err := loadNetworkmonitorObjects(&objs, nil); err != nil {
+		return nil, fmt.Errorf("loading network monitor BPF objects: %w", err)
 	}
-
-	// For now, return the same spec twice (intelligence spec would be loaded separately)
-	// Load network_monitor_intelligence.c when intelligence features are enabled
-	// This will be activated based on configuration
-	return baseSpec, baseSpec, nil
+	return &objs, nil
 }

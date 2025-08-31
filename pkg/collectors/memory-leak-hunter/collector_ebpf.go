@@ -19,7 +19,7 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -tags linux -target amd64,arm64 memoryMonitor ./bpf_src/memory_monitor.c -- -I../bpf_common
+// eBPF generation is handled by bpf/generate.go
 
 // ebpfState holds eBPF components
 type ebpfState struct {
@@ -170,11 +170,7 @@ func (c *Collector) readEBPFEvents() {
 				return
 			}
 			c.logger.Warn("Error reading from ring buffer", zap.Error(err))
-			if c.errorsTotal != nil {
-				c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
-					attribute.String("error_type", "ringbuf_read"),
-				))
-			}
+			c.RecordErrorWithContext(c.ctx, err)
 			continue
 		}
 
@@ -193,10 +189,8 @@ func (c *Collector) readEBPFEvents() {
 func (c *Collector) processRawEvent(data []byte) {
 	start := time.Now()
 	defer func() {
-		duration := time.Since(start).Seconds() * 1000
-		if c.processingTime != nil {
-			c.processingTime.Record(c.ctx, duration)
-		}
+		duration := time.Since(start)
+		c.RecordProcessingDuration(c.ctx, duration)
 	}()
 
 	// Parse the memory event
@@ -262,24 +256,14 @@ func (c *Collector) processRawEvent(data []byte) {
 	// Send event
 	select {
 	case c.events <- domainEvent:
-		if c.eventsProcessed != nil {
-			c.eventsProcessed.Add(c.ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", event.EventType.String()),
-			))
-		}
-		if c.bufferUsage != nil {
-			c.bufferUsage.Record(c.ctx, int64(len(c.events)))
-		}
+		c.RecordEventWithContext(c.ctx)
+		c.RecordEventSize(c.ctx, int64(len(c.events))) // Use buffer usage as event size metric
 	default:
 		// Enhancement #5: Log warning when events are dropped
 		c.logger.Warn("Dropping event due to full channel",
 			zap.Int("buffer_size", len(c.events)),
 			zap.String("event_type", event.EventType.String()))
-		if c.droppedEvents != nil {
-			c.droppedEvents.Add(c.ctx, 1, metric.WithAttributes(
-				attribute.String("reason", "buffer_full"),
-			))
-		}
+		c.RecordDropWithReason(c.ctx, "buffer_full")
 	}
 }
 
@@ -380,17 +364,9 @@ func (c *Collector) scanUnfreedAllocations() {
 						domainEvent := c.createDomainEvent(c.ctx, &event)
 						select {
 						case c.events <- domainEvent:
-							if c.eventsProcessed != nil {
-								c.eventsProcessed.Add(c.ctx, 1, metric.WithAttributes(
-									attribute.String("event_type", event.EventType.String()),
-								))
-							}
+							c.RecordEventWithContext(c.ctx)
 						default:
-							if c.droppedEvents != nil {
-								c.droppedEvents.Add(c.ctx, 1, metric.WithAttributes(
-									attribute.String("reason", "buffer_full"),
-								))
-							}
+							c.RecordDropWithReason(c.ctx, "buffer_full")
 						}
 					}
 				}
