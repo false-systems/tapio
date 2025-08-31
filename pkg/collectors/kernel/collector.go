@@ -1,5 +1,3 @@
-//go:build linux
-
 package kernel
 
 import (
@@ -34,7 +32,7 @@ type Collector struct {
 	mockMode bool
 
 	// eBPF components (platform-specific)
-	ebpfState *ebpfComponents
+	ebpfState interface{}
 
 	// Essential OTEL Metrics (5 core metrics)
 	eventsProcessed metric.Int64Counter
@@ -307,12 +305,6 @@ func (c *Collector) generateMockEvents() {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	syscalls := []string{
-		"open", "read", "write", "close", "mmap", "munmap",
-		"socket", "connect", "accept", "sendto", "recvfrom",
-		"fork", "execve", "exit", "kill", "ptrace",
-	}
-
 	processes := []string{
 		"nginx", "redis", "postgres", "kubelet", "containerd",
 		"dockerd", "systemd", "sshd", "etcd", "kube-apiserver",
@@ -331,43 +323,53 @@ func (c *Collector) generateMockEvents() {
 				Timestamp: uint64(time.Now().UnixNano()),
 				PID:       uint32(1000 + rand.Intn(10000)),
 				TID:       uint32(1000 + rand.Intn(10000)),
-				UID:       uint32(rand.Intn(1000)),
-				GID:       uint32(rand.Intn(1000)),
+				EventType: uint32(1 + rand.Intn(4)), // Random event type 1-4
+				CgroupID:  uint64(rand.Intn(1000)),
 			}
 
 			// Set process name
 			comm := processes[rand.Intn(len(processes))]
 			copy(mockEvent.Comm[:], comm)
 
+			// Generate pod UID for some events
+			if rand.Intn(3) == 0 {
+				podUID := fmt.Sprintf("pod-%d", rand.Intn(1000))
+				copy(mockEvent.PodUID[:], podUID)
+			}
+
 			switch eventType {
-			case 0: // Syscall event
-				mockEvent.EventType = 1                    // KERNEL_EVENT_SYSCALL
-				mockEvent.Syscall = uint32(rand.Intn(400)) // Random syscall number
-				mockEvent.Retval = int64(rand.Intn(2) - 1) // -1 or 0
+			case 0: // ConfigMap access
+				mockEvent.EventType = uint32(EventTypeConfigMapAccess)
 
-			case 1: // Process event
-				mockEvent.EventType = 2 // KERNEL_EVENT_PROCESS
-				mockEvent.PPID = uint32(1 + rand.Intn(1000))
+			case 1: // Secret access
+				mockEvent.EventType = uint32(EventTypeSecretAccess)
 
-			case 2: // Security event
-				mockEvent.EventType = 3                // KERNEL_EVENT_SECURITY
-				mockEvent.Retval = int64(rand.Intn(3)) // Security violation type
+			case 2: // Failed config access
+				mockEvent.EventType = uint32(EventTypeConfigAccessFailed)
 			}
 
 			// Convert to CollectorEvent
 			collectorEvent := &domain.CollectorEvent{
-				Type:      domain.EventTypeKernel,
+				EventID:   fmt.Sprintf("kernel-mock-%d", mockEvent.PID),
+				Type:      domain.EventTypeKernelProcess,
 				Timestamp: time.Now(),
 				Source:    c.name,
-				Priority:  domain.PriorityNormal,
-				Data:      mockEvent,
+				Severity:  domain.EventSeverityInfo,
+				EventData: domain.EventDataContainer{
+					Kernel: &domain.KernelData{
+						EventType: fmt.Sprintf("mock_event_%d", mockEvent.EventType),
+						PID:       int32(mockEvent.PID),
+						Command:   comm,
+						CgroupID:  mockEvent.CgroupID,
+					},
+				},
 				Metadata: domain.EventMetadata{
-					Component: c.name,
-					Host:      "mock-host",
-					Attributes: map[string]string{
+					Labels: map[string]string{
+						"collector":  c.name,
 						"mock":       "true",
 						"event_type": fmt.Sprintf("%d", mockEvent.EventType),
 						"pid":        fmt.Sprintf("%d", mockEvent.PID),
+						"command":    comm,
 					},
 				},
 			}

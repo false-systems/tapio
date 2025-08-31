@@ -1,5 +1,3 @@
-//go:build linux
-
 package kernel
 
 // Config holds simple kernel collector configuration

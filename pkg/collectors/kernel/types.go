@@ -1,5 +1,3 @@
-//go:build linux
-
 package kernel
 
 // Event type constants - must match C definitions
