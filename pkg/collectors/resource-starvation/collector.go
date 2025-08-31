@@ -264,6 +264,8 @@ func (c *Collector) convertToCollectorEvent(event *StarvationEvent) *domain.Coll
 				Command:      c.bytesToString(event.VictimComm[:]),
 				CgroupID:     event.VictimCgroupID,
 				ErrorMessage: c.getPatternDescription(pattern),
+			// Using Custom field to store resource starvation data
+
 			},
 		},
 
@@ -289,6 +291,16 @@ func (c *Collector) convertToCollectorEvent(event *StarvationEvent) *domain.Coll
 	}
 }
 
+// Define resource starvation event types as domain constants
+const (
+	EventTypeSchedulingDelay    domain.CollectorEventType = "resource.scheduling_delay"
+	EventTypeCFSThrottle        domain.CollectorEventType = "resource.cfs_throttle"
+	EventTypePriorityInversion  domain.CollectorEventType = "resource.priority_inversion"
+	EventTypeCoreMigration      domain.CollectorEventType = "resource.core_migration"
+	EventTypeNoisyNeighbor      domain.CollectorEventType = "resource.noisy_neighbor"
+	EventTypeResourceStarvation domain.CollectorEventType = "resource.starvation"
+)
+
 func (c *Collector) mapEventType(et EventType) domain.CollectorEventType {
 	// Map to generic kernel event types
 	switch et {
@@ -304,6 +316,7 @@ func (c *Collector) mapEventType(et EventType) domain.CollectorEventType {
 		return domain.EventTypeKernelCgroup // Noisy neighbor affects cgroups
 	default:
 		return domain.EventTypeKernelProcess // Default to process event
+
 	}
 }
 

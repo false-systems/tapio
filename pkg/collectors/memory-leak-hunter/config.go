@@ -41,6 +41,9 @@ type Config struct {
 	// RSS growth detection
 	RSSGrowthThreshold int64         `json:"rss_growth_threshold"` // Report if RSS grows by this much (pages)
 	RSSCheckInterval   time.Duration `json:"rss_check_interval"`   // How often to check RSS
+
+	// Enhancement #3: Configurable libc path for portability
+	LibCPath string `json:"libc_path"` // Path to libc.so for uprobe attachment
 }
 
 // Validate validates the configuration
@@ -100,5 +103,8 @@ func DefaultConfig() *Config {
 		// Targeted mode (disabled by default)
 		TargetPID:      0,
 		TargetDuration: 5 * time.Minute,
+
+		// Enhancement #3: Default libc path (Ubuntu/Debian)
+		LibCPath: "/lib/x86_64-linux-gnu/libc.so.6",
 	}
 }

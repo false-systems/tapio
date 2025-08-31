@@ -45,6 +45,7 @@ type Collector struct {
 	rssGrowthDetected    metric.Int64Counter
 	unfreedMemoryBytes   metric.Int64Gauge
 	largestAllocation    metric.Int64Gauge
+	filteredEvents       metric.Int64Counter // Enhancement #6: Track filtered events
 
 	// Pre-processing state (lean filtering)
 	recentStacks map[uint64]time.Time // Simple dedup
@@ -67,13 +68,13 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		}
 	}
 
-	// Create metrics following CLAUDE.md naming standards
+	// Enhancement #12: Fail if mandatory metrics cannot be created
 	eventsProcessed, err := meter.Int64Counter(
 		"memory_leak_hunter_events_processed_total",
 		metric.WithDescription("Total memory events processed"),
 	)
 	if err != nil {
-		logger.Warn("Failed to create events_processed counter", zap.Error(err))
+		return nil, fmt.Errorf("failed to create events_processed counter: %w", err)
 	}
 
 	errorsTotal, err := meter.Int64Counter(
@@ -81,7 +82,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		metric.WithDescription("Total errors in memory leak hunter"),
 	)
 	if err != nil {
-		logger.Warn("Failed to create errors counter", zap.Error(err))
+		return nil, fmt.Errorf("failed to create errors counter: %w", err)
 	}
 
 	processingTime, err := meter.Float64Histogram(
@@ -89,7 +90,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		metric.WithDescription("Processing duration for memory events in milliseconds"),
 	)
 	if err != nil {
-		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+		return nil, fmt.Errorf("failed to create processing time histogram: %w", err)
 	}
 
 	droppedEvents, err := meter.Int64Counter(
@@ -97,7 +98,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		metric.WithDescription("Total dropped memory events"),
 	)
 	if err != nil {
-		logger.Warn("Failed to create dropped events counter", zap.Error(err))
+		return nil, fmt.Errorf("failed to create dropped events counter: %w", err)
 	}
 
 	bufferUsage, err := meter.Int64Gauge(
@@ -149,6 +150,15 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		logger.Warn("Failed to create largest allocation gauge", zap.Error(err))
 	}
 
+	// Enhancement #6: Add metric for filtered events
+	filteredEvents, err := meter.Int64Counter(
+		"memory_leak_hunter_filtered_events_total",
+		metric.WithDescription("Total memory events filtered"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create filtered events counter", zap.Error(err))
+	}
+
 	// Default config
 	cfg := DefaultConfig()
 	cfg.Name = name
@@ -171,6 +181,7 @@ func NewCollector(name string, logger *zap.Logger) (*Collector, error) {
 		rssGrowthDetected:    rssGrowthDetected,
 		unfreedMemoryBytes:   unfreedMemoryBytes,
 		largestAllocation:    largestAllocation,
+		filteredEvents:       filteredEvents,
 		recentStacks:         make(map[uint64]time.Time),
 		lastCleanup:          time.Now(),
 	}
@@ -218,6 +229,9 @@ func (c *Collector) Start(ctx context.Context) error {
 
 		// Start event processing
 		go c.readEBPFEvents()
+
+		// Enhancement #1: Start unfreed allocations scanner
+		go c.scanUnfreedAllocations()
 	}
 
 	// Start cleanup routine for dedup cache
@@ -287,34 +301,55 @@ func (c *Collector) shouldEmitEvent(event *MemoryEvent) bool {
 	if event.EventType == EventTypeUnfreed {
 		age := time.Since(time.Unix(0, int64(event.Timestamp)))
 		if age < c.config.MinUnfreedAge {
+			if c.filteredEvents != nil {
+				c.filteredEvents.Add(c.ctx, 1, metric.WithAttributes(
+					attribute.String("event_type", event.EventType.String()),
+					attribute.String("reason", "age_too_young"),
+				))
+			}
 			return false
 		}
 	}
 
 	// Size filtering
 	if event.Size < uint64(c.config.MinAllocationSize) {
+		if c.filteredEvents != nil {
+			c.filteredEvents.Add(c.ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", event.EventType.String()),
+				attribute.String("reason", "size_too_small"),
+			))
+		}
 		return false
 	}
 
-	// Simple stack deduplication
+	// Enhancement #8: Improved stack deduplication with composite key
 	if event.CallerIP != 0 {
 		c.stackMutex.Lock()
 		defer c.stackMutex.Unlock()
 
-		if lastSeen, exists := c.recentStacks[event.CallerIP]; exists {
+		// Use composite key combining CallerIP, PID, and Address for better deduplication
+		stackKey := uint64(event.CallerIP) ^ uint64(event.PID)<<32 ^ event.Address
+
+		if lastSeen, exists := c.recentStacks[stackKey]; exists {
 			if time.Since(lastSeen) < c.config.StackDedupWindow {
+				if c.filteredEvents != nil {
+					c.filteredEvents.Add(c.ctx, 1, metric.WithAttributes(
+						attribute.String("event_type", event.EventType.String()),
+						attribute.String("reason", "stack_deduplicated"),
+					))
+				}
 				return false // Already reported this stack recently
 			}
 		}
-		c.recentStacks[event.CallerIP] = time.Now()
+		c.recentStacks[stackKey] = time.Now()
 	}
 
 	return true
 }
 
 // createDomainEvent converts memory event to domain event
-func (c *Collector) createDomainEvent(event *MemoryEvent) *domain.CollectorEvent {
-	ctx := context.Background()
+// Enhancement #9: Fixed context propagation - now accepts parent context
+func (c *Collector) createDomainEvent(ctx context.Context, event *MemoryEvent) *domain.CollectorEvent {
 	ctx, span := c.tracer.Start(ctx, "memory_leak_hunter.create_event")
 	defer span.End()
 
@@ -329,7 +364,8 @@ func (c *Collector) createDomainEvent(event *MemoryEvent) *domain.CollectorEvent
 	case EventTypeRSSGrowth:
 		eventType = domain.EventTypeMemoryPressure
 	case EventTypeUnfreed:
-		eventType = domain.EventTypeContainerOOM // Potential OOM situation
+		// Enhancement #7: Use more accurate event type for unfreed allocations
+		eventType = domain.EventTypeMemoryPressure // More accurate than OOM
 	default:
 		eventType = domain.EventTypeKernelProcess
 	}
@@ -363,7 +399,7 @@ func (c *Collector) createDomainEvent(event *MemoryEvent) *domain.CollectorEvent
 		Timestamp: time.Unix(0, int64(event.Timestamp)),
 		Type:      eventType,
 		Source:    c.name,
-		Severity:  domain.EventSeverityInfo,
+		Severity:  c.determineSeverity(event),
 
 		EventData: domain.EventDataContainer{
 			Process: processData,
@@ -409,4 +445,37 @@ func (c *Collector) cleanupRoutine() {
 			c.stackMutex.Unlock()
 		}
 	}
+}
+
+// scanUnfreedAllocations is platform-specific - implemented in collector_ebpf.go for Linux
+
+// determineSeverity determines event severity based on event characteristics
+func (c *Collector) determineSeverity(event *MemoryEvent) domain.EventSeverity {
+	// Enhancement #7: Dynamic severity based on event characteristics
+	switch event.EventType {
+	case EventTypeUnfreed:
+		if event.Size > uint64(1024*1024*10) { // >10MB
+			return domain.EventSeverityError
+		}
+		return domain.EventSeverityWarning
+	case EventTypeRSSGrowth:
+		if event.RSSGrowth > 1024 { // >4MB growth
+			return domain.EventSeverityWarning
+		}
+		return domain.EventSeverityInfo
+	default:
+		return domain.EventSeverityInfo
+	}
+}
+
+// UpdateBufferSize dynamically updates the buffer size (Enhancement #5)
+func (c *Collector) UpdateBufferSize(size int) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.ctx != nil {
+		return fmt.Errorf("cannot update buffer size while running")
+	}
+	c.config.BufferSize = size
+	c.events = make(chan *domain.CollectorEvent, size)
+	return nil
 }

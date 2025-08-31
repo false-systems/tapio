@@ -10,9 +10,12 @@ import (
 )
 
 // init registers the resource starvation collector factory with the collector registry
+// Disabled until orchestrator API is available
+/*
 func init() {
 	RegisterResourceStarvationCollector()
 }
+*/
 
 // RegisterResourceStarvationCollector registers the resource starvation collector factory with the orchestrator
 func RegisterResourceStarvationCollector() {
@@ -56,9 +59,11 @@ func RegisterResourceStarvationCollector() {
 	}
 
 	// Register the factory with the orchestrator
+
 	// TODO: Uncomment when orchestrator.RegisterCollectorFactory is implemented
 	// orchestrator.RegisterCollectorFactory("resource-starvation", factory)
 	_ = factory // Suppress unused variable warning
+
 }
 
 // CreateResourceStarvationCollector creates a new resource starvation collector with the given configuration
