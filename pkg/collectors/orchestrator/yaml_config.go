@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
+	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/config"
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
 
@@ -238,4 +241,27 @@ func (c *YAMLConfig) IsCollectorEnabled(name string) bool {
 		return cfg.Enabled
 	}
 	return false
+}
+
+// CollectorFactory is a function that creates a collector
+type CollectorFactory func(name string, config *CollectorConfigData, logger *zap.Logger) (collectors.Collector, error)
+
+var (
+	collectorFactories = make(map[string]CollectorFactory)
+	factoryMutex       sync.RWMutex
+)
+
+// RegisterCollectorFactory registers a collector factory
+func RegisterCollectorFactory(collectorType string, factory CollectorFactory) {
+	factoryMutex.Lock()
+	defer factoryMutex.Unlock()
+	collectorFactories[collectorType] = factory
+}
+
+// GetCollectorFactory returns a registered collector factory
+func GetCollectorFactory(collectorType string) (CollectorFactory, bool) {
+	factoryMutex.RLock()
+	defer factoryMutex.RUnlock()
+	factory, exists := collectorFactories[collectorType]
+	return factory, exists
 }
