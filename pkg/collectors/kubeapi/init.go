@@ -25,14 +25,12 @@ func RegisterKubeAPICollector() {
 		}
 
 		// Map KubeAPI specific settings
-		kubeConfig.WatchNamespaces = true
 		kubeConfig.WatchDeployments = true
 		kubeConfig.WatchServices = true
 		kubeConfig.WatchPods = true
-		kubeConfig.WatchEvents = true
 
 		// Create collector
-		collector, err := NewCollector(kubeConfig, logger)
+		collector, err := New(logger, kubeConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create KubeAPI collector %s: %w", name, err)
 		}
