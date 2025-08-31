@@ -291,10 +291,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		zap.Int("watchers", len(c.informers)),
 		zap.Strings("namespaces", c.config.WatchNamespaces))
 
-	// For backward compatibility with existing k8s_watcher.go
-	if err := c.startK8sWatch(); err != nil {
-		c.logger.Warn("Legacy k8s watcher failed to start", zap.Error(err))
-	}
+	// Legacy k8s_watcher.go functionality has been consolidated into setupWatchers
 
 	return nil
 }
@@ -305,8 +302,7 @@ func (c *Collector) Stop() error {
 		c.cancel()
 	}
 
-	// Stop legacy watcher
-	c.stopK8sWatch()
+	// All watchers are now stopped via lifecycle manager
 
 	close(c.events)
 	return nil
@@ -463,6 +459,40 @@ func (c *Collector) setupWatchers() error {
 	)
 	configMapInformer.AddEventHandler(c.resourceEventHandler("ConfigMap"))
 	c.informers = append(c.informers, configMapInformer)
+
+	// 8. Namespaces (important for multi-tenant context)
+	namespaceInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return c.clientset.CoreV1().Namespaces().List(c.ctx, listOptions)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return c.clientset.CoreV1().Namespaces().Watch(c.ctx, listOptions)
+			},
+		},
+		&corev1.Namespace{},
+		c.config.ResyncPeriod,
+		cache.Indexers{},
+	)
+	namespaceInformer.AddEventHandler(c.resourceEventHandler("Namespace"))
+	c.informers = append(c.informers, namespaceInformer)
+
+	// 9. Nodes (for infrastructure context)
+	nodeInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return c.clientset.CoreV1().Nodes().List(c.ctx, listOptions)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return c.clientset.CoreV1().Nodes().Watch(c.ctx, listOptions)
+			},
+		},
+		&corev1.Node{},
+		c.config.ResyncPeriod,
+		cache.Indexers{},
+	)
+	nodeInformer.AddEventHandler(c.resourceEventHandler("Node"))
+	c.informers = append(c.informers, nodeInformer)
 
 	// Optional watchers based on config
 	if c.config.TrackRBAC {
@@ -784,6 +814,25 @@ func (c *Collector) extractRelationships(event *ResourceEvent, obj interface{}) 
 				Relation: "applies-to",
 			})
 		}
+
+	case *corev1.Namespace:
+		// Namespaces contain all namespaced resources
+		event.Message = fmt.Sprintf("Namespace %s", event.EventType)
+		// Could track resource quotas, limits, etc if needed
+
+	case *corev1.Node:
+		// Nodes host pods
+		// Track node capacity and conditions
+		if v.Status.Capacity != nil {
+			cpu := v.Status.Capacity.Cpu().String()
+			memory := v.Status.Capacity.Memory().String()
+			event.Message = fmt.Sprintf("Node capacity: CPU=%s, Memory=%s", cpu, memory)
+		}
+		// Nodes have relationships with all pods scheduled on them
+		event.RelatedObjects = append(event.RelatedObjects, ObjectReference{
+			Kind:     "Pod",
+			Relation: "hosts",
+		})
 	}
 }
 
@@ -792,16 +841,20 @@ func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string)
 	// Generate event ID
 	eventID := fmt.Sprintf("k8s-%s-%s-%s", event.Kind, event.EventType, string(event.UID))
 
-	// Map event type to domain event type
+	// Map resource kind to specific domain event type
 	var eventType domain.CollectorEventType
-	switch event.EventType {
-	case "ADDED":
-		eventType = domain.EventTypeK8sEvent
-	case "MODIFIED":
-		eventType = domain.EventTypeK8sEvent
-	case "DELETED":
+	switch event.Kind {
+	case "Pod":
+		eventType = domain.EventTypeK8sPod
+	case "Service":
+		eventType = domain.EventTypeK8sService
+	case "Deployment":
+		eventType = domain.EventTypeK8sDeployment
+	case "Event":
 		eventType = domain.EventTypeK8sEvent
 	default:
+		// For other resources (ReplicaSet, ConfigMap, Node, etc.)
+		// use the generic K8s event type
 		eventType = domain.EventTypeK8sEvent
 	}
 
@@ -818,20 +871,28 @@ func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string)
 		Namespace: event.Namespace,
 	}
 
-	// Build metadata
+	// Build metadata - use Pod fields only for Pod resources
 	metadata := domain.EventMetadata{
-		TraceID:      traceID,
-		SpanID:       spanID,
-		PodName:      event.Name,
-		PodNamespace: event.Namespace,
-		PodUID:       string(event.UID),
+		TraceID: traceID,
+		SpanID:  spanID,
 		Attributes: map[string]string{
 			"collector":        "kubeapi",
 			"event_type":       event.EventType,
 			"api_version":      event.APIVersion,
 			"k8s_kind":         event.Kind,
 			"resource_version": event.ResourceVersion,
+			"resource_name":    event.Name,
 		},
+	}
+	
+	// Set Pod-specific metadata only for Pod resources
+	if event.Kind == "Pod" {
+		metadata.PodName = event.Name
+		metadata.PodNamespace = event.Namespace
+		metadata.PodUID = string(event.UID)
+	} else if event.Namespace != "" {
+		// For other namespaced resources, track namespace
+		metadata.Attributes["namespace"] = event.Namespace
 	}
 
 	// Add labels to attributes
