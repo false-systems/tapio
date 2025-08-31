@@ -1,3 +1,12 @@
+// DEPRECATED: This file contains legacy K8s watching functionality that has been
+// consolidated into the main collector.go setupWatchers() method.
+// Kept for reference only - will be removed in future versions.
+//
+// All functionality from this file has been integrated into collector.go:
+// - Namespaces and Nodes watching added to setupWatchers()
+// - Dynamic informers replaced with typed informers
+// - Event handling unified through handleResourceEvent()
+
 package kubeapi
 
 import (
