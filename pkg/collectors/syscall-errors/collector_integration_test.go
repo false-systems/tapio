@@ -58,7 +58,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 eventLoop:
 	for {
 		select {
-		case event := <-collector.GetEventChannel():
+		case event := <-collector.Events():
 			if event != nil {
 				events = append(events, event)
 				if len(events) >= 5 {
@@ -142,7 +142,7 @@ func TestIntegrationSpecificErrors(t *testing.T) {
 
 	for {
 		select {
-		case event := <-collector.GetEventChannel():
+		case event := <-collector.Events():
 			if event != nil {
 				if errorName, ok := event.Context["error_name"]; ok {
 					capturedErrors = append(capturedErrors, errorName)
@@ -193,7 +193,7 @@ func TestIntegrationCategoryFiltering(t *testing.T) {
 
 	for {
 		select {
-		case event := <-collector.GetEventChannel():
+		case event := <-collector.Events():
 			if event != nil {
 				if category, ok := event.Context["category"]; ok {
 					switch category {
@@ -257,7 +257,7 @@ func TestIntegrationHighLoad(t *testing.T) {
 
 	for {
 		select {
-		case event := <-collector.GetEventChannel():
+		case event := <-collector.Events():
 			if event != nil {
 				eventCount++
 			}
@@ -451,7 +451,7 @@ func TestIntegrationPerProcessTracking(t *testing.T) {
 
 	for {
 		select {
-		case event := <-collector.GetEventChannel():
+		case event := <-collector.Events():
 			if event != nil {
 				if pid, ok := event.Context["pid"]; ok && pid == myPID {
 					myEvents++

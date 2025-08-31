@@ -1,5 +1,3 @@
-//go:build linux
-
 package systemd
 
 import "fmt"
@@ -20,6 +18,12 @@ type Config struct {
 
 	// Service patterns to monitor (empty = all)
 	ServicePatterns []string
+
+	// Monitor service state changes
+	MonitorServiceStates bool
+
+	// Monitor cgroup events
+	MonitorCgroups bool
 }
 
 // Validate validates the configuration
@@ -45,6 +49,8 @@ func DefaultConfig() Config {
 		BufferSize:      10000,
 		EnableEBPF:      true,
 		EnableJournal:   true,
-		ServicePatterns: []string{}, // Monitor all services
+		ServicePatterns:      []string{}, // Monitor all services
+		MonitorServiceStates: true,
+		MonitorCgroups:       true,
 	}
 }

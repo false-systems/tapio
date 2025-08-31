@@ -57,7 +57,7 @@ func TestProcessRawEvent(t *testing.T) {
 
 	// Check if event was sent to channel
 	select {
-	case obsEvent := <-collector.GetEventChannel():
+	case obsEvent := <-collector.Events():
 		assert.NotNil(t, obsEvent)
 		assert.Equal(t, domain.EventTypeSyscallError, obsEvent.Type)
 		assert.Equal(t, "12345", obsEvent.Context["pid"])
@@ -101,7 +101,7 @@ func TestProcessRawEventFiltering(t *testing.T) {
 
 	// Event should be filtered out
 	select {
-	case <-collector.GetEventChannel():
+	case <-collector.Events():
 		t.Error("Event should have been filtered")
 	case <-time.After(50 * time.Millisecond):
 		// Expected - no event
@@ -153,19 +153,11 @@ func TestHelperMethods(t *testing.T) {
 	// Test IsHealthy
 	assert.True(t, collector.IsHealthy())
 
-	// Test GetEventChannel
-	ch := collector.GetEventChannel()
+	// Test Events
+	ch := collector.Events()
 	assert.NotNil(t, ch)
 }
 
-// bytesToString converts null-terminated byte array to string
-func bytesToString(data []byte) string {
-	n := bytes.IndexByte(data, 0)
-	if n == -1 {
-		n = len(data)
-	}
-	return string(data[:n])
-}
 
 // TestBytesToString tests the bytesToString helper function
 func TestBytesToString(t *testing.T) {

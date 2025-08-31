@@ -212,28 +212,10 @@ func (c *LinuxCollector) loadeBPFProgram() error {
 	}
 
 	objs := &bpf.StarvationmonitorObjects{}
-	
-	// Try loading with default options first
 	if err := spec.LoadAndAssign(objs, nil); err != nil {
-		c.logger.Warn("Failed to load eBPF with default options, trying with relaxed verifier",
-			zap.Error(err))
-		
-		// Try with relaxed verifier settings for older kernels
-		opts := &ebpf.CollectionOptions{
-			Programs: ebpf.ProgramOptions{
-				LogLevel: ebpf.LogLevelInstruction,
-				LogSize:  64 * 1024 * 1024, // 64MB log buffer
-			},
-		}
-		
-		if err := spec.LoadAndAssign(objs, opts); err != nil {
-			// Log verifier output if available
-			if c.config.EnableVerifierLogs {
-				c.logger.Error("eBPF verifier output available in debug logs")
-			}
-			return fmt.Errorf("failed to load starvation monitor objects: %w", err)
-		}
-		c.logger.Info("eBPF program loaded with relaxed verifier settings")
+		return fmt.Errorf("failed to load starvation monitor objects: %w", err)
+	
+
 	}
 
 	c.bpfObjs = objs
@@ -242,31 +224,41 @@ func (c *LinuxCollector) loadeBPFProgram() error {
 }
 
 func (c *LinuxCollector) attachTracepoints() error {
+	c.logger.Debug("Attaching to kernel tracepoints")
+
+	// Attach to sched_stat_wait (scheduling delays)
+	schedWaitLink, err := link.Tracepoint("sched", "sched_stat_wait", c.bpfObjs.TraceSchedWait, nil)
 	c.logger.Debug("Attaching eBPF tracepoints")
 
 	// Attach sched_stat_wait tracepoint
 	tpWait, err := link.Tracepoint("sched", "sched_stat_wait", c.bpfObjs.TraceSchedWait, nil)
+
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_stat_wait: %w", err)
 	}
 	c.links = append(c.links, tpWait)
 
+	// Attach to sched_stat_runtime (runtime tracking)
+	runtimeLink, err := link.Tracepoint("sched", "sched_stat_runtime", c.bpfObjs.TraceThrottle, nil)
+
 	// Attach sched_stat_runtime tracepoint
-	tpRuntime, err := link.Tracepoint("sched", "sched_stat_runtime", c.bpfObjs.TraceThrottle, nil)
+
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_stat_runtime: %w", err)
 	}
 	c.links = append(c.links, tpRuntime)
 
-	// Attach sched_migrate_task tracepoint
-	tpMigrate, err := link.Tracepoint("sched", "sched_migrate_task", c.bpfObjs.TraceMigrate, nil)
+	// Attach to sched_migrate_task (CPU migrations)
+	migrateLink, err := link.Tracepoint("sched", "sched_migrate_task", c.bpfObjs.TraceMigrate, nil)
+
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_migrate_task: %w", err)
 	}
 	c.links = append(c.links, tpMigrate)
 
-	// Attach sched_switch tracepoint
-	tpSwitch, err := link.Tracepoint("sched", "sched_switch", c.bpfObjs.TraceSchedSwitch, nil)
+	// Attach to sched_switch (context switches)
+	switchLink, err := link.Tracepoint("sched", "sched_switch", c.bpfObjs.TraceSchedSwitch, nil)
+
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_switch: %w", err)
 	}

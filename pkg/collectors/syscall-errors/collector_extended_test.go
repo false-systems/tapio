@@ -108,7 +108,7 @@ func TestMultipleStops(t *testing.T) {
 
 	// Channel should be closed
 	select {
-	case _, ok := <-collector.GetEventChannel():
+	case _, ok := <-collector.Events():
 		assert.False(t, ok, "Channel should be closed")
 	default:
 		t.Error("Channel should not block")
@@ -151,7 +151,7 @@ func TestChannelCreation(t *testing.T) {
 			require.NoError(t, err)
 			defer collector.Stop()
 
-			ch := collector.GetEventChannel()
+			ch := collector.Events()
 			assert.NotNil(t, ch)
 		})
 	}
@@ -171,7 +171,7 @@ func TestBasicInterface(t *testing.T) {
 	assert.True(t, collector.IsHealthy())
 
 	// Test GetEventChannel
-	ch := collector.GetEventChannel()
+	ch := collector.Events()
 	assert.NotNil(t, ch)
 
 	// Channel should be readable/non-blocking initially
@@ -346,7 +346,7 @@ func BenchmarkChannelOperations(b *testing.B) {
 	require.NoError(b, err)
 	defer collector.Stop()
 
-	ch := collector.GetEventChannel()
+	ch := collector.Events()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

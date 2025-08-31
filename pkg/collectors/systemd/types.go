@@ -1,5 +1,3 @@
-//go:build linux
-
 package systemd
 
 // CollectorStats tracks collector metrics

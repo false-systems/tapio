@@ -1,6 +1,3 @@
-//go:build linux
-// +build linux
-
 package systemd
 
 import (
@@ -146,15 +143,12 @@ func (c *Collector) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.logger.Info("Starting systemd collector", zap.Bool("enable_ebpf", c.config.EnableEBPF))
 
-	// Start eBPF monitoring if enabled
+	// Start platform-specific monitoring if enabled
 	if c.config.EnableEBPF {
-		if err := c.startEBPF(); err != nil {
-			span.SetAttributes(attribute.String("error", "ebpf_start_failed"))
-			return fmt.Errorf("failed to start eBPF: %w", err)
+		if err := c.startMonitoring(); err != nil {
+			span.SetAttributes(attribute.String("error", "monitoring_start_failed"))
+			return fmt.Errorf("failed to start monitoring: %w", err)
 		}
-
-		// Start event processing
-		go c.processEvents()
 	}
 
 	c.healthy = true
@@ -178,8 +172,8 @@ func (c *Collector) Stop() error {
 		c.cancel()
 	}
 
-	// Stop eBPF if running
-	c.stopEBPF()
+	// Stop platform-specific monitoring if running
+	c.stopMonitoring()
 
 	close(c.events)
 	c.healthy = false
