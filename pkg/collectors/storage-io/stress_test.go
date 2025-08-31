@@ -196,11 +196,11 @@ func TestConcurrentRawEventProcessing(t *testing.T) {
 
 				err := collector.processRawStorageEvent(rawEventData)
 				if err != nil {
-					if contains(err.Error(), "parse") {
+					if stringContains(err.Error(), "parse") {
 						atomic.AddInt64(&parseErrors, 1)
-					} else if contains(err.Error(), "invalid") {
+					} else if stringContains(err.Error(), "invalid") {
 						atomic.AddInt64(&validationErrors, 1)
-					} else if contains(err.Error(), "convert") {
+					} else if stringContains(err.Error(), "convert") {
 						atomic.AddInt64(&conversionErrors, 1)
 					}
 				} else {
@@ -469,7 +469,7 @@ func generateRandomRawEventData(r *rand.Rand, workerID, eventID int) []byte {
 	return data
 }
 
-func contains(s, substr string) bool {
+func stringContains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || (len(s) > len(substr) &&
 		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
 			(len(s) > 2*len(substr) && s[len(s)/2-len(substr)/2:len(s)/2-len(substr)/2+len(substr)] == substr))))
