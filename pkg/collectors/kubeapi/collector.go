@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -44,6 +45,9 @@ type Collector struct {
 
 	// Informers
 	informers []cache.SharedIndexInformer
+	
+	// Relationship cache for performance
+	relationshipCache *RelationshipCache
 
 	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
@@ -135,20 +139,21 @@ func New(logger *zap.Logger, config Config) (*Collector, error) {
 	}
 
 	return &Collector{
-		logger:          logger,
-		config:          config,
-		clientset:       clientset,
-		traceManager:    NewTraceManager(),
-		events:          make(chan *domain.CollectorEvent, config.BufferSize),
-		informers:       make([]cache.SharedIndexInformer, 0),
-		tracer:          tracer,
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		droppedEvents:   droppedEvents,
-		bufferUsage:     bufferUsage,
-		watcherCount:    watcherCount,
-		cacheSyncs:      cacheSyncs,
+		logger:            logger,
+		config:            config,
+		clientset:         clientset,
+		traceManager:      NewTraceManager(),
+		relationshipCache: NewRelationshipCache(10*time.Minute, 1000), // Cache for 10min, max 1000 entries
+		events:            make(chan *domain.CollectorEvent, config.BufferSize),
+		informers:         make([]cache.SharedIndexInformer, 0),
+		tracer:            tracer,
+		eventsProcessed:   eventsProcessed,
+		errorsTotal:       errorsTotal,
+		processingTime:    processingTime,
+		droppedEvents:     droppedEvents,
+		bufferUsage:       bufferUsage,
+		watcherCount:      watcherCount,
+		cacheSyncs:        cacheSyncs,
 	}, nil
 }
 
@@ -199,19 +204,20 @@ func NewCollector(name string) (*Collector, error) {
 
 	// For tests, create a minimal collector without K8s connection
 	return &Collector{
-		logger:          logger,
-		config:          config,
-		traceManager:    NewTraceManager(),
-		events:          make(chan *domain.CollectorEvent, config.BufferSize),
-		informers:       make([]cache.SharedIndexInformer, 0),
-		tracer:          tracer,
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		droppedEvents:   droppedEvents,
-		bufferUsage:     bufferUsage,
-		watcherCount:    watcherCount,
-		cacheSyncs:      cacheSyncs,
+		logger:            logger,
+		config:            config,
+		traceManager:      NewTraceManager(),
+		relationshipCache: NewRelationshipCache(10*time.Minute, 1000),
+		events:            make(chan *domain.CollectorEvent, config.BufferSize),
+		informers:         make([]cache.SharedIndexInformer, 0),
+		tracer:            tracer,
+		eventsProcessed:   eventsProcessed,
+		errorsTotal:       errorsTotal,
+		processingTime:    processingTime,
+		droppedEvents:     droppedEvents,
+		bufferUsage:       bufferUsage,
+		watcherCount:      watcherCount,
+		cacheSyncs:        cacheSyncs,
 	}, nil
 }
 
@@ -303,6 +309,16 @@ func (c *Collector) Stop() error {
 	}
 
 	// All watchers are now stopped via lifecycle manager
+	
+	// Stop trace manager cleanup goroutine
+	if c.traceManager != nil {
+		c.traceManager.Stop()
+	}
+	
+	// Stop relationship cache cleanup goroutine
+	if c.relationshipCache != nil {
+		c.relationshipCache.Stop()
+	}
 
 	close(c.events)
 	return nil
@@ -581,6 +597,17 @@ func (c *Collector) handleResourceEvent(eventType, kind string, obj, oldObj inte
 		span.SetAttributes(attribute.String("skipped", "ignored_namespace"))
 		return
 	}
+	
+	// Clean up trace for deleted objects
+	if eventType == "DELETED" {
+		c.traceManager.RemoveTrace(kind, meta.GetNamespace(), meta.GetName())
+		// Also invalidate relationship cache for deleted object
+		c.relationshipCache.Invalidate(string(meta.GetUID()))
+		c.relationshipCache.InvalidateByTarget(string(meta.GetUID()))
+	} else if eventType == "MODIFIED" {
+		// Invalidate cache for modified objects to recompute relationships
+		c.relationshipCache.Invalidate(string(meta.GetUID()))
+	}
 
 	// Set span attributes
 	span.SetAttributes(
@@ -684,32 +711,73 @@ func (c *Collector) handleResourceEvent(eventType, kind string, obj, oldObj inte
 func (c *Collector) extractRelationships(event *ResourceEvent, obj interface{}) {
 	switch v := obj.(type) {
 	case *corev1.Pod:
-		// Volume relationships
-		for _, volume := range v.Spec.Volumes {
-			if volume.ConfigMap != nil {
+		// Try to get cached pod volumes first
+		if cachedVolumes, found := c.relationshipCache.GetPodVolumes(string(event.UID)); found {
+			for _, vol := range cachedVolumes {
 				event.RelatedObjects = append(event.RelatedObjects, ObjectReference{
-					Kind:      "ConfigMap",
-					Name:      volume.ConfigMap.Name,
-					Namespace: v.Namespace,
-					Relation:  "mounts",
+					Kind:      vol.Kind,
+					Name:      vol.Name,
+					Namespace: vol.Namespace,
+					UID:       types.UID(vol.UID),
+					Relation:  vol.Relation,
 				})
 			}
-			if volume.Secret != nil {
-				event.RelatedObjects = append(event.RelatedObjects, ObjectReference{
-					Kind:      "Secret",
-					Name:      volume.Secret.SecretName,
-					Namespace: v.Namespace,
-					Relation:  "mounts",
-				})
+		} else {
+			// Compute and cache volume relationships
+			var volumeRefs []ObjectRef
+			for _, volume := range v.Spec.Volumes {
+				if volume.ConfigMap != nil {
+					ref := ObjectRef{
+						Kind:      "ConfigMap",
+						Name:      volume.ConfigMap.Name,
+						Namespace: v.Namespace,
+						UID:       "", // We don't have UID from volume spec
+						Relation:  "mounts",
+					}
+					volumeRefs = append(volumeRefs, ref)
+					event.RelatedObjects = append(event.RelatedObjects, ObjectReference{
+						Kind:      ref.Kind,
+						Name:      ref.Name,
+						Namespace: ref.Namespace,
+						Relation:  ref.Relation,
+					})
+				}
+				if volume.Secret != nil {
+					ref := ObjectRef{
+						Kind:      "Secret",
+						Name:      volume.Secret.SecretName,
+						Namespace: v.Namespace,
+						UID:       "",
+						Relation:  "mounts",
+					}
+					volumeRefs = append(volumeRefs, ref)
+					event.RelatedObjects = append(event.RelatedObjects, ObjectReference{
+						Kind:      ref.Kind,
+						Name:      ref.Name,
+						Namespace: ref.Namespace,
+						Relation:  ref.Relation,
+					})
+				}
+				if volume.PersistentVolumeClaim != nil {
+					ref := ObjectRef{
+						Kind:      "PersistentVolumeClaim",
+						Name:      volume.PersistentVolumeClaim.ClaimName,
+						Namespace: v.Namespace,
+						UID:       "",
+						Relation:  "mounts",
+					}
+					volumeRefs = append(volumeRefs, ref)
+					event.RelatedObjects = append(event.RelatedObjects, ObjectReference{
+						Kind:      ref.Kind,
+						Name:      ref.Name,
+						Namespace: ref.Namespace,
+						Relation:  ref.Relation,
+					})
+				}
 			}
-			if volume.PersistentVolumeClaim != nil {
-				event.RelatedObjects = append(event.RelatedObjects, ObjectReference{
-					Kind:      "PersistentVolumeClaim",
-					Name:      volume.PersistentVolumeClaim.ClaimName,
-					Namespace: v.Namespace,
-					Relation:  "mounts",
-				})
-			}
+			
+			// Cache the computed relationships
+			c.relationshipCache.SetPodVolumes(string(event.UID), volumeRefs)
 		}
 
 		// ServiceAccount relationship
