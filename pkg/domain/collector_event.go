@@ -84,6 +84,10 @@ const (
 	EventTypeKubeletContainerTerminated CollectorEventType = "kubelet.container.terminated"
 	EventTypeKubeletCrashLoop           CollectorEventType = "kubelet.container.crash_loop"
 	EventTypeKubeletPodNotReady         CollectorEventType = "kubelet.pod.not_ready"
+	
+	// Service Map Events
+	EventTypeServiceMap         CollectorEventType = "service_map.topology"
+	EventTypeNetworkConnection  CollectorEventType = "network.connection"
 )
 
 // CollectorEvent represents a fully contextualized event from any collector
@@ -991,6 +995,41 @@ type OTELMetricData struct {
 	ServiceName  string `json:"service_name,omitempty"`
 	K8sPodName   string `json:"k8s_pod_name,omitempty"`
 	K8sNamespace string `json:"k8s_namespace,omitempty"`
+}
+
+// ServiceMapData represents service topology data
+type ServiceMapData struct {
+	Services    map[string]ServiceInfo    `json:"services"`
+	Connections map[string]ConnectionInfo `json:"connections"`
+	ClusterName string                    `json:"cluster_name,omitempty"`
+	LastUpdated time.Time                 `json:"last_updated"`
+}
+
+// ServiceInfo represents a service in the map
+type ServiceInfo struct {
+	Name         string            `json:"name"`
+	Namespace    string            `json:"namespace"`
+	Type         string            `json:"type"` // api, database, cache, queue, proxy
+	Version      string            `json:"version,omitempty"`
+	Health       string            `json:"health"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Dependencies []string          `json:"dependencies,omitempty"`
+	Dependents   []string          `json:"dependents,omitempty"`
+	RequestRate  float64           `json:"request_rate,omitempty"`
+	ErrorRate    float64           `json:"error_rate,omitempty"`
+	Endpoints    int               `json:"endpoints_count"`
+}
+
+// ConnectionInfo represents a connection between services
+type ConnectionInfo struct {
+	Source      string  `json:"source"`
+	Target      string  `json:"target"`
+	Protocol    string  `json:"protocol"`
+	Count       int     `json:"count"`
+	BytesSent   uint64  `json:"bytes_sent,omitempty"`
+	BytesRecv   uint64  `json:"bytes_recv,omitempty"`
+	ErrorRate   float64 `json:"error_rate,omitempty"`
+	AvgLatency  float64 `json:"avg_latency_ms,omitempty"`
 }
 
 // KubeletData holds kubelet-specific event data
