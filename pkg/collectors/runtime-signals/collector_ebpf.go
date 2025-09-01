@@ -387,13 +387,50 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 		Command:   nullTerminatedString(event.Comm[:]),
 	}
 
-	// Handle different event types
+	// Initialize event data for enrichment
+	eventData := map[string]string{
+		"event_type": runtimeEvt.EventType,
+		"pid":        fmt.Sprintf("%d", runtimeEvt.PID),
+		"tgid":       fmt.Sprintf("%d", runtimeEvt.TGID),
+		"ppid":       fmt.Sprintf("%d", runtimeEvt.PPID),
+		"command":    runtimeEvt.Command,
+	}
+
+	// Handle different event types with signal tracking
 	switch event.EventType {
 	case EventTypeProcessExec:
 		runtimeEvt.UID = event.ExecInfo.UID
 		runtimeEvt.GID = event.ExecInfo.GID
+		
 	case EventTypeProcessExit:
 		runtimeEvt.ExitInfo = DecodeExitCode(event.ExitCode)
+		
+		// Death intelligence: correlate with recent signals
+		if c.signalTracker != nil {
+			deathCause := c.signalTracker.CorrelateProcessDeath(event.PID, int(event.ExitCode), runtimeEvt.ExitInfo)
+			
+			// Record death correlation metrics
+			if c.deathsCorrelated != nil {
+				c.deathsCorrelated.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.Name()),
+						attribute.String("death_reason", string(deathCause.Reason)),
+						attribute.Bool("oom_kill", deathCause.OOMKill),
+					),
+				)
+			}
+			
+			// Enrich event data with death intelligence
+			eventData["death_reason"] = string(deathCause.Reason)
+			if deathCause.KillerPID > 0 {
+				eventData["killer_pid"] = fmt.Sprintf("%d", deathCause.KillerPID)
+				eventData["killer_comm"] = deathCause.KillerComm
+			}
+			if deathCause.OOMKill {
+				eventData["oom_kill"] = "true"
+			}
+		}
+		
 	case EventTypeSignalGenerate, EventTypeSignalDeliver:
 		runtimeEvt.SignalInfo = &SignalInfo{
 			Number:      int(event.Signal),
@@ -402,6 +439,31 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 			IsFatal:     IsSignalFatal(int(event.Signal)),
 		}
 		runtimeEvt.SenderPID = event.SenderPID
+		
+		// Track signal for correlation with future process deaths
+		if c.signalTracker != nil && event.EventType == EventTypeSignalGenerate {
+			trackedSignal := &TrackedSignal{
+				Timestamp:  time.Now(),
+				Signal:     int(event.Signal),
+				SignalName: GetSignalName(int(event.Signal)),
+				SenderPID:  event.SenderPID,
+				SenderComm: nullTerminatedString(event.ParentComm[:]),
+				IsFatal:    IsSignalFatal(int(event.Signal)),
+			}
+			c.signalTracker.TrackSignal(event.PID, trackedSignal)
+			
+			// Record signal metrics
+			if c.signalsByType != nil {
+				c.signalsByType.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("collector.name", c.Name()),
+						attribute.String("signal_name", trackedSignal.SignalName),
+						attribute.Bool("is_fatal", trackedSignal.IsFatal),
+					),
+				)
+			}
+		}
+		
 	case EventTypeOOMKill:
 		runtimeEvt.IsOOMKill = true
 		runtimeEvt.SignalInfo = &SignalInfo{
@@ -411,17 +473,14 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 			IsFatal:     true,
 		}
 		runtimeEvt.SenderPID = event.SenderPID
+		
+		// Track OOM kill for correlation
+		if c.signalTracker != nil {
+			c.signalTracker.TrackOOMKill(event.PID, event.SenderPID)
+		}
 	}
 
-	// Create domain event
-	eventData := map[string]string{
-		"event_type": runtimeEvt.EventType,
-		"pid":        fmt.Sprintf("%d", runtimeEvt.PID),
-		"tgid":       fmt.Sprintf("%d", runtimeEvt.TGID),
-		"ppid":       fmt.Sprintf("%d", runtimeEvt.PPID),
-		"command":    runtimeEvt.Command,
-	}
-
+	// Add conditional event data
 	if runtimeEvt.ExitInfo != nil {
 		eventData["exit_code"] = fmt.Sprintf("%d", runtimeEvt.ExitInfo.Code)
 		eventData["exit_signal"] = fmt.Sprintf("%d", runtimeEvt.ExitInfo.Signal)
