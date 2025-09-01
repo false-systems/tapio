@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 // BaseCollector provides common statistics and health tracking for all collectors
@@ -25,6 +26,7 @@ type BaseCollector struct {
 	// Statistics tracking (atomic for thread safety)
 	eventsProcessed atomic.Int64
 	eventsDropped   atomic.Int64
+	eventsFiltered  atomic.Int64  // New: tracks filtered events
 	errorCount      atomic.Int64
 	
 	// Atomic values for complex types  
@@ -43,10 +45,20 @@ type BaseCollector struct {
 	// Standard OTEL metrics
 	eventsProcessedCounter metric.Int64Counter
 	eventsDroppedCounter   metric.Int64Counter
+	eventsFilteredCounter  metric.Int64Counter  // New metric
 	errorCounter           metric.Int64Counter
 	processingDuration     metric.Float64Histogram
 	eventSizeHistogram     metric.Int64Histogram
 	healthStatus           metric.Int64Gauge
+
+	// Ring buffer support (optional)
+	ringBuffer    *RingBuffer
+	useRingBuffer bool
+	
+	// Filter support (optional)
+	filterManager *FilterManager
+	useFilters    bool
+	logger        *zap.Logger  // Need logger for filter manager
 }
 
 // BaseCollectorConfig holds configuration for BaseCollector
@@ -54,6 +66,19 @@ type BaseCollectorConfig struct {
 	Name               string
 	HealthCheckTimeout time.Duration
 	ErrorRateThreshold float64 // Default 0.1 (10%)
+	
+	// Ring buffer configuration (optional)
+	EnableRingBuffer bool
+	RingBufferSize   int           // Must be power of 2
+	BatchSize        int           // Events to process at once
+	BatchTimeout     time.Duration // Max time to wait for batch
+	
+	// Filter configuration (optional)
+	EnableFilters    bool
+	FilterConfigPath string // Path to filter config file (YAML)
+	
+	// Logger
+	Logger *zap.Logger
 }
 
 // NewBaseCollector creates a new base collector with the given name
@@ -79,9 +104,57 @@ func NewBaseCollectorWithConfig(config BaseCollectorConfig) *BaseCollector {
 		errorRateThreshold: config.ErrorRateThreshold,
 		tracer:             otel.Tracer(config.Name),
 		meter:              otel.Meter(config.Name),
+		useRingBuffer:      config.EnableRingBuffer,
+		useFilters:         config.EnableFilters,
+		logger:             config.Logger,
 	}
 	bc.isHealthy.Store(true)
 	bc.lastEventTime.Store(time.Now())
+	
+	// Initialize ring buffer if enabled
+	if config.EnableRingBuffer {
+		rbConfig := RingBufferConfig{
+			Size:          config.RingBufferSize,
+			BatchSize:     config.BatchSize,
+			BatchTimeout:  config.BatchTimeout,
+			CollectorName: config.Name,
+			Logger:        config.Logger,
+		}
+		
+		// Set defaults if not specified
+		if rbConfig.Size == 0 {
+			rbConfig.Size = 8192
+		}
+		if rbConfig.BatchSize == 0 {
+			rbConfig.BatchSize = 32
+		}
+		if rbConfig.BatchTimeout == 0 {
+			rbConfig.BatchTimeout = 10 * time.Millisecond
+		}
+		
+		ringBuffer, err := NewRingBuffer(rbConfig)
+		if err == nil {
+			bc.ringBuffer = ringBuffer
+		}
+		// If ring buffer creation fails, fall back to channel-only mode
+	}
+	
+	// Initialize filter manager if enabled
+	if config.EnableFilters {
+		bc.filterManager = NewFilterManager(config.Name, config.Logger)
+		
+		// Start watching config file if provided
+		if config.FilterConfigPath != "" {
+			if err := bc.filterManager.WatchConfigFile(config.FilterConfigPath); err != nil {
+				if config.Logger != nil {
+					config.Logger.Warn("Failed to watch filter config file",
+						zap.String("collector", config.Name),
+						zap.String("path", config.FilterConfigPath),
+						zap.Error(err))
+				}
+			}
+		}
+	}
 	
 	// Initialize OTEL metrics
 	bc.initializeMetrics()
@@ -112,6 +185,16 @@ func (bc *BaseCollector) initializeMetrics() {
 	)
 	if err != nil {
 		bc.eventsDroppedCounter = nil
+	}
+	
+	// Events filtered counter
+	bc.eventsFilteredCounter, err = bc.meter.Int64Counter(
+		fmt.Sprintf("%s_events_filtered_total", bc.name),
+		metric.WithDescription("Total events filtered"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		bc.eventsFilteredCounter = nil
 	}
 	
 	// Error counter
@@ -285,14 +368,37 @@ func (bc *BaseCollector) Statistics() *domain.CollectorStats {
 		lastEventTime = t
 	}
 
+	customMetrics := map[string]string{
+		"events_dropped":  fmt.Sprintf("%d", bc.eventsDropped.Load()),
+		"events_filtered": fmt.Sprintf("%d", bc.eventsFiltered.Load()),
+	}
+	
+	// Add ring buffer stats if enabled
+	if rbStats := bc.GetRingBufferStats(); rbStats != nil {
+		customMetrics["ring_buffer_capacity"] = fmt.Sprintf("%d", rbStats.Capacity)
+		customMetrics["ring_buffer_produced"] = fmt.Sprintf("%d", rbStats.Produced)
+		customMetrics["ring_buffer_consumed"] = fmt.Sprintf("%d", rbStats.Consumed)
+		customMetrics["ring_buffer_dropped"] = fmt.Sprintf("%d", rbStats.Dropped)
+		customMetrics["ring_buffer_utilization"] = fmt.Sprintf("%.2f%%", rbStats.Utilization)
+		customMetrics["ring_buffer_consumers"] = fmt.Sprintf("%d", rbStats.Consumers)
+	}
+	
+	// Add filter stats if enabled
+	if filterStats := bc.GetFilterStatistics(); filterStats != nil {
+		customMetrics["filter_version"] = fmt.Sprintf("%d", filterStats.Version)
+		customMetrics["filter_allow_count"] = fmt.Sprintf("%d", filterStats.AllowFilters)
+		customMetrics["filter_deny_count"] = fmt.Sprintf("%d", filterStats.DenyFilters)
+		customMetrics["filter_events_processed"] = fmt.Sprintf("%d", filterStats.EventsProcessed)
+		customMetrics["filter_events_allowed"] = fmt.Sprintf("%d", filterStats.EventsAllowed)
+		customMetrics["filter_events_denied"] = fmt.Sprintf("%d", filterStats.EventsDenied)
+	}
+
 	return &domain.CollectorStats{
 		EventsProcessed: bc.eventsProcessed.Load(),
 		ErrorCount:      bc.errorCount.Load(),
 		LastEventTime:   lastEventTime,
 		Uptime:          time.Since(bc.startTime),
-		CustomMetrics: map[string]string{
-			"events_dropped": fmt.Sprintf("%d", bc.eventsDropped.Load()),
-		},
+		CustomMetrics:   customMetrics,
 	}
 }
 
@@ -375,4 +481,146 @@ func (bc *BaseCollector) GetErrorCount() int64 {
 // GetDroppedCount returns the total number of dropped events
 func (bc *BaseCollector) GetDroppedCount() int64 {
 	return bc.eventsDropped.Load()
+}
+
+// Ring Buffer Methods
+
+// StartRingBuffer starts the ring buffer processing if enabled
+func (bc *BaseCollector) StartRingBuffer(ctx context.Context) {
+	if bc.ringBuffer != nil {
+		bc.ringBuffer.Start(ctx)
+	}
+}
+
+// StopRingBuffer stops the ring buffer processing
+func (bc *BaseCollector) StopRingBuffer() {
+	if bc.ringBuffer != nil {
+		bc.ringBuffer.Stop()
+	}
+}
+
+// WriteToRingBuffer writes an event to the ring buffer if enabled
+// Falls back to returning false if ring buffer is not enabled
+func (bc *BaseCollector) WriteToRingBuffer(event *domain.CollectorEvent) bool {
+	if bc.ringBuffer != nil {
+		success := bc.ringBuffer.Write(event)
+		if success {
+			bc.RecordEvent()
+		} else {
+			bc.RecordDrop()
+		}
+		return success
+	}
+	return false
+}
+
+// RegisterLocalConsumer adds a local consumer for events
+// Only works if ring buffer is enabled
+func (bc *BaseCollector) RegisterLocalConsumer(consumer LocalConsumer) error {
+	if bc.ringBuffer == nil {
+		return fmt.Errorf("ring buffer not enabled for collector %s", bc.name)
+	}
+	bc.ringBuffer.RegisterLocalConsumer(consumer)
+	return nil
+}
+
+// GetRingBufferStats returns ring buffer statistics if enabled
+func (bc *BaseCollector) GetRingBufferStats() *RingBufferStats {
+	if bc.ringBuffer != nil {
+		stats := bc.ringBuffer.Statistics()
+		return &stats
+	}
+	return nil
+}
+
+// SetRingBufferOutputChannel sets the output channel for the ring buffer
+// This is useful for connecting to the orchestrator
+func (bc *BaseCollector) SetRingBufferOutputChannel(ch chan *domain.CollectorEvent) {
+	if bc.ringBuffer != nil {
+		bc.ringBuffer.outputChan = ch
+	}
+}
+
+// IsRingBufferEnabled returns true if ring buffer is enabled
+func (bc *BaseCollector) IsRingBufferEnabled() bool {
+	return bc.useRingBuffer && bc.ringBuffer != nil
+}
+
+// Filter Methods
+
+// ShouldProcess checks if an event should be processed based on filters
+// Returns true if event passes filters, false if it should be dropped
+func (bc *BaseCollector) ShouldProcess(event *domain.CollectorEvent) bool {
+	if bc.filterManager == nil || !bc.useFilters {
+		return true // No filters, process everything
+	}
+	
+	allowed := bc.filterManager.ShouldAllow(event)
+	if !allowed {
+		bc.eventsFiltered.Add(1)
+		bc.RecordFilteredEvent(event)
+	}
+	return allowed
+}
+
+// RecordFilteredEvent records that an event was filtered
+func (bc *BaseCollector) RecordFilteredEvent(event *domain.CollectorEvent) {
+	if bc.eventsFilteredCounter != nil {
+		ctx := context.Background()
+		bc.eventsFilteredCounter.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("event_type", string(event.Type)),
+				attribute.String("severity", string(event.Severity)),
+			))
+	}
+}
+
+// AddAllowFilter adds a named allow filter at runtime
+func (bc *BaseCollector) AddAllowFilter(name string, filter FilterFunc) {
+	if bc.filterManager == nil {
+		bc.filterManager = NewFilterManager(bc.name, bc.logger)
+		bc.useFilters = true
+	}
+	bc.filterManager.AddAllowFilter(name, filter)
+}
+
+// AddDenyFilter adds a named deny filter at runtime
+func (bc *BaseCollector) AddDenyFilter(name string, filter FilterFunc) {
+	if bc.filterManager == nil {
+		bc.filterManager = NewFilterManager(bc.name, bc.logger)
+		bc.useFilters = true
+	}
+	bc.filterManager.AddDenyFilter(name, filter)
+}
+
+// RemoveFilter removes a filter by name
+func (bc *BaseCollector) RemoveFilter(name string) {
+	if bc.filterManager != nil {
+		bc.filterManager.RemoveFilter(name)
+	}
+}
+
+// GetFilterStatistics returns filter statistics
+func (bc *BaseCollector) GetFilterStatistics() *FilterStatistics {
+	if bc.filterManager != nil {
+		stats := bc.filterManager.GetStatistics()
+		return &stats
+	}
+	return nil
+}
+
+// LoadFiltersFromFile loads filters from a YAML file
+func (bc *BaseCollector) LoadFiltersFromFile(path string) error {
+	if bc.filterManager == nil {
+		bc.filterManager = NewFilterManager(bc.name, bc.logger)
+		bc.useFilters = true
+	}
+	return bc.filterManager.LoadFromFile(path)
+}
+
+// StopFilters stops the filter manager (stops watching config file)
+func (bc *BaseCollector) StopFilters() {
+	if bc.filterManager != nil {
+		bc.filterManager.Stop()
+	}
 }
