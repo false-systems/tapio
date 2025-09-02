@@ -2,7 +2,7 @@ package networkcorrelator
 
 import (
 	"github.com/yairfalse/tapio/pkg/collectors"
-	"github.com/yairfalse/tapio/pkg/orchestrator"
+	"github.com/yairfalse/tapio/pkg/collectors/orchestrator"
 	"go.uber.org/zap"
 )
 

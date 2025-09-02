@@ -21,9 +21,10 @@ func (c *Collector) stopEBPF() {
 // processEvents - No eBPF events on non-Linux platforms
 func (c *Collector) processEvents() {
 	c.logger.Debug("eBPF event processing skipped (Linux-only feature)")
-	
+
 	// Keep the goroutine alive to maintain expected behavior
 	// but don't actually process any eBPF events
-	<-c.ctx.Done()
+	ctx := c.LifecycleManager.Context()
+	<-ctx.Done()
 	c.logger.Debug("Event processing stopped (fallback mode)")
 }
