@@ -404,9 +404,9 @@ func (ce *CorrelationEngine) cleanupOldEvents() {
 
 // EmitCorrelatedEvent converts root cause to domain event
 func (ce *CorrelationEngine) EmitCorrelatedEvent(rootCause *RootCause) *domain.CollectorEvent {
-	severity := domain.SeverityWarning
+	severity := domain.EventSeverityWarning
 	if rootCause.Confidence > 0.9 {
-		severity = domain.SeverityError
+		severity = domain.EventSeverityError
 	}
 
 	// Build network data
@@ -436,20 +436,29 @@ func (ce *CorrelationEngine) EmitCorrelatedEvent(rootCause *RootCause) *domain.C
 		},
 	}
 
-	// Add evidence as annotations
-	annotations := make(map[string]string)
-	annotations["details"] = rootCause.Details
-	annotations["resolution"] = rootCause.Resolution
+	// Add evidence as attributes
+	attributes := make(map[string]string)
+	attributes["details"] = rootCause.Details
+	attributes["resolution"] = rootCause.Resolution
 	for i, evidence := range rootCause.Evidence {
-		annotations[fmt.Sprintf("evidence_%d", i)] = evidence
+		attributes[fmt.Sprintf("evidence_%d", i)] = evidence
 	}
-	metadata.Annotations = annotations
+	metadata.Attributes = attributes
 
 	// Build correlation hints for intelligence layer
-	correlationHints := &domain.CorrelationHints{
-		CorrelationID: fmt.Sprintf("network-failure-%d", time.Now().UnixNano()),
-		EventChain:    []string{rootCause.Pattern},
-		Confidence:    rootCause.Confidence,
+	correlationHints := &domain.CorrelationHints{}
+	if rootCause.L4Event != nil {
+		if rootCause.L4Event.SrcIP != nil {
+			correlationHints.ConnectionID = fmt.Sprintf("%s:%d-%s:%d", 
+				rootCause.L4Event.SrcIP.String(), rootCause.L4Event.SrcPort,
+				rootCause.L4Event.DstIP.String(), rootCause.L4Event.DstPort)
+		}
+	}
+	// Add correlation tags
+	correlationHints.CorrelationTags = map[string]string{
+		"pattern":    rootCause.Pattern,
+		"confidence": fmt.Sprintf("%.2f", rootCause.Confidence),
+		"failure_id": fmt.Sprintf("network-failure-%d", time.Now().UnixNano()),
 	}
 
 	return &domain.CollectorEvent{

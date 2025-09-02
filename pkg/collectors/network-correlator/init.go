@@ -15,21 +15,13 @@ func init() {
 
 		// Apply any custom configuration
 		if config != nil {
-			if bufferSize, ok := config.Config["buffer_size"].(int); ok {
-				correlatorConfig.BufferSize = bufferSize
+			if config.BufferSize > 0 {
+				correlatorConfig.BufferSize = config.BufferSize
 			}
 
-			if interfaces, ok := config.Config["interfaces"].([]string); ok {
-				correlatorConfig.Interfaces = interfaces
-			}
-
-			if enableK8s, ok := config.Config["enable_k8s_metadata"].(bool); ok {
-				correlatorConfig.EnableK8sMetadata = enableK8s
-			}
-
-			if enablePolicy, ok := config.Config["enable_policy_check"].(bool); ok {
-				correlatorConfig.EnablePolicyCheck = enablePolicy
-			}
+			// Network-correlator specific settings from EnableCorrelation field
+			correlatorConfig.EnableK8sMetadata = config.EnableCorrelation
+			correlatorConfig.EnablePolicyCheck = config.EnableCorrelation
 		}
 
 		return NewCollector(name, correlatorConfig, logger)
