@@ -121,23 +121,31 @@ func (c *Collector) Start(ctx context.Context) error {
 		c.logger.Warn("eBPF not available, running in limited mode", zap.Error(err))
 	}
 
-	// Start lifecycle manager
-	c.LifecycleManager.Start(ctx)
-
-	// Start timeout checker
-	c.LifecycleManager.StartGoroutine("timeout-checker", func(ctx context.Context) error {
-		return c.checkTimeouts(ctx)
+	// Start lifecycle manager with cleanup function
+	c.LifecycleManager.Start("network-correlator", func() {
+		c.logger.Info("Network-correlator cleanup")
 	})
 
-	// Start correlation engine
-	c.LifecycleManager.StartGoroutine("correlator", func(ctx context.Context) error {
-		return c.correlator.Run(ctx)
-	})
+	// Start timeout checker goroutine
+	go func() {
+		if err := c.checkTimeouts(ctx); err != nil {
+			c.logger.Error("Timeout checker stopped", zap.Error(err))
+		}
+	}()
 
-	// Start result publisher
-	c.LifecycleManager.StartGoroutine("publisher", func(ctx context.Context) error {
-		return c.publishResults(ctx)
-	})
+	// Start correlation engine goroutine
+	go func() {
+		if err := c.correlator.Run(ctx); err != nil {
+			c.logger.Error("Correlator stopped", zap.Error(err))
+		}
+	}()
+
+	// Start result publisher goroutine
+	go func() {
+		if err := c.publishResults(ctx); err != nil {
+			c.logger.Error("Publisher stopped", zap.Error(err))
+		}
+	}()
 
 	c.BaseCollector.SetHealthy(true)
 	c.logger.Info("Network-correlator started successfully")
@@ -235,10 +243,9 @@ func (c *Collector) publishResults(ctx context.Context) error {
 			event := c.correlator.EmitCorrelatedEvent(rootCause)
 
 			// Publish via EventChannelManager
-			if err := c.EventChannelManager.PublishEvent(event); err != nil {
-				c.BaseCollector.RecordError(err)
-				c.logger.Error("Failed to publish correlated event",
-					zap.Error(err),
+			if !c.EventChannelManager.SendEvent(event) {
+				c.BaseCollector.RecordDrop()
+				c.logger.Warn("Event channel full, dropped correlated event",
 					zap.String("pattern", rootCause.Pattern))
 			} else {
 				c.logger.Info("Published root cause",
@@ -254,8 +261,8 @@ func (c *Collector) publishResults(ctx context.Context) error {
 func (c *Collector) Stop() error {
 	c.logger.Info("Stopping network-correlator")
 
-	// Stop lifecycle manager (all goroutines)
-	c.LifecycleManager.Stop()
+	// Stop lifecycle manager with 30 second timeout
+	c.LifecycleManager.Stop(30 * time.Second)
 
 	// Platform-specific cleanup
 	c.stopPlatformSpecific()
@@ -272,7 +279,7 @@ func (c *Collector) Name() string {
 }
 
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	return c.EventChannelManager.GetEventChannel()
+	return c.EventChannelManager.GetChannel()
 }
 
 func (c *Collector) IsHealthy() bool {
