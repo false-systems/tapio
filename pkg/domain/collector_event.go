@@ -153,6 +153,9 @@ type EventDataContainer struct {
 	OTELSpan   *OTELSpanData   `json:"otel_span,omitempty"`
 	OTELMetric *OTELMetricData `json:"otel_metric,omitempty"`
 
+	// Service Map data
+	ServiceMap *ServiceMapData `json:"service_map,omitempty"`
+
 	// Generic data for custom collectors (string key-value pairs only)
 	Custom map[string]string `json:"custom,omitempty"`
 
@@ -999,14 +1002,14 @@ type OTELMetricData struct {
 
 // ServiceMapData represents service topology data
 type ServiceMapData struct {
-	Services    map[string]ServiceInfo    `json:"services"`
+	Services    map[string]ServiceMapInfo    `json:"services"`
 	Connections map[string]ConnectionInfo `json:"connections"`
 	ClusterName string                    `json:"cluster_name,omitempty"`
 	LastUpdated time.Time                 `json:"last_updated"`
 }
 
-// ServiceInfo represents a service in the map
-type ServiceInfo struct {
+// ServiceMapInfo represents a service in the map
+type ServiceMapInfo struct {
 	Name         string            `json:"name"`
 	Namespace    string            `json:"namespace"`
 	Type         string            `json:"type"` // api, database, cache, queue, proxy

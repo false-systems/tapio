@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/yairfalse/tapio/pkg/collectors/service-map/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -23,7 +24,7 @@ import (
 
 // ebpfState holds eBPF components for Linux
 type ebpfState struct {
-	objs   *servicemonitorObjects
+	objs   *bpf.ServicemonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
 }
@@ -54,8 +55,8 @@ func (c *Collector) startEBPF() error {
 	}
 
 	// Load pre-compiled eBPF objects
-	objs := &servicemonitorObjects{}
-	if err := loadServicemonitorObjects(objs, nil); err != nil {
+	objs := &bpf.ServicemonitorObjects{}
+	if err := bpf.LoadServicemonitorObjects(objs, nil); err != nil {
 		var ve *ebpf.VerifierError
 		if errors.As(err, &ve) {
 			c.logger.Error("eBPF verifier error", zap.String("details", ve.Error()))
