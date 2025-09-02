@@ -449,7 +449,7 @@ func (ce *CorrelationEngine) EmitCorrelatedEvent(rootCause *RootCause) *domain.C
 	correlationHints := &domain.CorrelationHints{}
 	if rootCause.L4Event != nil {
 		if rootCause.L4Event.SrcIP != nil {
-			correlationHints.ConnectionID = fmt.Sprintf("%s:%d-%s:%d", 
+			correlationHints.ConnectionID = fmt.Sprintf("%s:%d-%s:%d",
 				rootCause.L4Event.SrcIP.String(), rootCause.L4Event.SrcPort,
 				rootCause.L4Event.DstIP.String(), rootCause.L4Event.DstPort)
 		}
