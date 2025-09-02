@@ -51,9 +51,11 @@ func (c *Collector) startPlatformSpecific(ctx context.Context) error {
 	}
 
 	// Start reading events
-	c.LifecycleManager.StartGoroutine("event-reader", func(ctx context.Context) error {
-		return c.readEvents(ctx)
-	})
+	go func() {
+		if err := c.readEvents(ctx); err != nil {
+			c.logger.Error("Event reader stopped", zap.Error(err))
+		}
+	}()
 
 	return nil
 }
