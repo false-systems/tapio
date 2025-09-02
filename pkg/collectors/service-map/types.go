@@ -1,7 +1,6 @@
 package servicemap
 
 import (
-	"sync/atomic"
 	"time"
 )
 

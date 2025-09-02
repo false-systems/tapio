@@ -11,6 +11,8 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -169,6 +171,16 @@ func (c *Collector) Stop() error {
 	c.LifecycleManager.Stop(5 * time.Second)
 
 	return nil
+}
+
+// Events returns the events channel - required by Collector interface
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
+	return c.EventChannelManager.GetChannel()
+}
+
+// IsHealthy returns collector health status - required by Collector interface  
+func (c *Collector) IsHealthy() bool {
+	return c.BaseCollector.IsHealthy()
 }
 
 // watchKubernetesServices watches for Kubernetes service changes
@@ -699,7 +711,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 		Source:      c.Name(),
 		Type:        domain.EventTypeServiceMap,
 		Timestamp:   time.Now(),
-		Severity:    domain.SeverityInfo,
+		Severity:    domain.EventSeverityInfo,
 		EventData: domain.EventDataContainer{
 			ServiceMap: domainServiceMap,
 		},
@@ -867,8 +879,8 @@ func (c *Collector) setupDefaultFilters() {
 			if event.EventData.ServiceMap != nil {
 				serviceMap := event.EventData.ServiceMap
 				totalConnections := 0
-				for _, count := range serviceMap.Connections {
-					totalConnections += count
+				for _, conn := range serviceMap.Connections {
+					totalConnections += conn.Count
 				}
 				return totalConnections < c.config.MinConnectionCount
 			}
@@ -914,11 +926,17 @@ func (c *Collector) emitServiceEvent(serviceKey string, service *Service) {
 
 	event := &domain.CollectorEvent{
 		EventID:     fmt.Sprintf("service-discovered-%s-%d", serviceKey, time.Now().UnixNano()),
-		CollectorID: c.Name(),
-		Type:        domain.EventTypeServiceDiscovered,
+		Source:      c.Name(),
+		Type:        domain.EventTypeNetworkConnection, // Using existing type
 		Timestamp:   time.Now(),
-		Severity:    domain.SeverityInfo,
-		Data:        service,
+		Severity:    domain.EventSeverityInfo,
+		EventData:   domain.EventDataContainer{
+			Custom: map[string]string{
+				"service_name": service.Name,
+				"service_namespace": service.Namespace,
+				"service_type": string(service.Type),
+			},
+		},
 	}
 
 	// Record event size

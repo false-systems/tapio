@@ -5,7 +5,6 @@ package servicemap
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -98,10 +97,7 @@ func (c *Collector) startEBPF() error {
 			continue
 		}
 
-		l, err := link.Kprobe(&link.KprobeOptions{
-			Symbol: symbol,
-			Program: prog,
-		})
+		l, err := link.Kprobe(symbol, prog, nil)
 		if err != nil {
 			c.logger.Warn("Failed to attach kprobe", 
 				zap.String("symbol", symbol),
@@ -302,27 +298,29 @@ func (c *Collector) emitConnectionEvent(ctx context.Context, conn *Connection, e
 	// Create domain event for the connection
 	commStr := string(bytes.Trim((*(*[]byte)(unsafe.Pointer(&ebpfEvent.Comm)))[:16], "\x00"))
 	
-	connectionData := map[string]interface{}{
+	connectionData := map[string]string{
 		"source_ip":   intToIP(conn.SourceIP),
 		"dest_ip":     intToIP(conn.DestIP),
-		"source_port": conn.SourcePort,
-		"dest_port":   conn.DestPort,
+		"source_port": fmt.Sprintf("%d", conn.SourcePort),
+		"dest_port":   fmt.Sprintf("%d", conn.DestPort),
 		"protocol":    protocolToString(conn.Protocol),
-		"bytes_sent":  conn.BytesSent,
-		"bytes_recv":  conn.BytesRecv,
-		"pid":         ebpfEvent.PID,
-		"uid":         ebpfEvent.UID,
+		"bytes_sent":  fmt.Sprintf("%d", conn.BytesSent),
+		"bytes_recv":  fmt.Sprintf("%d", conn.BytesRecv),
+		"pid":         fmt.Sprintf("%d", ebpfEvent.PID),
+		"uid":         fmt.Sprintf("%d", ebpfEvent.UID),
 		"process":     commStr,
-		"event_type":  ebpfEvent.EventType,
+		"event_type":  fmt.Sprintf("%d", ebpfEvent.EventType),
 	}
 
 	event := &domain.CollectorEvent{
-		EventID:     fmt.Sprintf("connection-%d", ebpfEvent.Timestamp),
-		CollectorID: c.Name(),
-		Type:        domain.EventTypeNetworkConnection,
-		Timestamp:   time.Unix(0, int64(ebpfEvent.Timestamp)),
-		Severity:    domain.SeverityDebug, // Connections are debug level
-		Data:        connectionData,
+		EventID:   fmt.Sprintf("connection-%d", ebpfEvent.Timestamp),
+		Source:    c.Name(),
+		Type:      domain.EventTypeNetworkConnection,
+		Timestamp: time.Unix(0, int64(ebpfEvent.Timestamp)),
+		Severity:  domain.EventSeverityInfo, // Use EventSeverityInfo instead of SeverityDebug
+		EventData: domain.EventDataContainer{
+			Custom: connectionData,
+		},
 	}
 
 	// Filter the event
