@@ -152,10 +152,10 @@ func (c *Collector) processEvents() {
 	}
 
 	c.logger.Info("Starting systemd event processing")
-	
+
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			c.logger.Info("Stopping event processing due to context cancellation")
 			return
 		default:
@@ -165,20 +165,22 @@ func (c *Collector) processEvents() {
 					c.logger.Info("Perf reader closed, stopping event processing")
 					return
 				}
-				c.recordMetric(c.errorsTotal, 1, attribute.String("error", "read_failed"))
+				c.BaseCollector.RecordError(err)
 				c.logger.Warn("Failed to read event", zap.Error(err))
 				continue
 			}
 
 			if record.LostSamples > 0 {
-				c.recordMetric(c.droppedEvents, int64(record.LostSamples))
+				for i := uint64(0); i < record.LostSamples; i++ {
+					c.BaseCollector.RecordDrop()
+				}
 				c.logger.Warn("Lost eBPF samples", zap.Uint64("lost", record.LostSamples))
 			}
 
 			// Parse the raw event
 			var event SystemdEvent
 			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
-				c.recordMetric(c.errorsTotal, 1, attribute.String("error", "parse_failed"))
+				c.BaseCollector.RecordError(err)
 				c.logger.Warn("Failed to parse event", zap.Error(err))
 				continue
 			}
@@ -193,41 +195,66 @@ func (c *Collector) processEvents() {
 func (c *Collector) handleSystemdEvent(event *SystemdEvent) {
 	startTime := time.Now()
 	defer func() {
-		c.recordMetric(c.processingTime, float64(time.Since(startTime).Milliseconds()))
+		if c.processingTime != nil {
+			c.processingTime.Record(c.LifecycleManager.Context(),
+				float64(time.Since(startTime).Milliseconds()),
+				metric.WithAttributes(attribute.String("event_type", c.getEventTypeName(event.EventType))))
+		}
 	}()
+
+	// Extract service and command names
+	serviceName := string(bytes.TrimRight(event.ServiceName[:], "\x00"))
+	comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
+	cgroupPath := string(bytes.TrimRight(event.CgroupPath[:], "\x00"))
 
 	// Convert to domain event
 	domainEvent := &domain.CollectorEvent{
-		Type:      "systemd",
+		EventID:   fmt.Sprintf("systemd-%d-%d", event.PID, event.Timestamp),
+		Type:      domain.EventTypeSystemd,
 		Timestamp: time.Unix(0, int64(event.Timestamp)),
-		Source:    c.name,
-		Data: map[string]interface{}{
-			"pid":          event.PID,
-			"ppid":         event.PPID,
-			"uid":          event.UID,
-			"gid":          event.GID,
-			"cgroup_id":    event.CgroupID,
-			"event_type":   c.getEventTypeName(event.EventType),
-			"comm":         string(bytes.TrimRight(event.Comm[:], "\x00")),
-			"service_name": string(bytes.TrimRight(event.ServiceName[:], "\x00")),
-			"cgroup_path":  string(bytes.TrimRight(event.CgroupPath[:], "\x00")),
-			"exit_code":    event.ExitCode,
-			"signal":       event.Signal,
+		Source:    c.config.Name,
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Systemd: &domain.SystemdData{
+				ServiceName: serviceName,
+				EventType:   c.getEventTypeName(event.EventType),
+				ExitCode:    int(event.ExitCode),
+				Signal:      int(event.Signal),
+				CgroupPath:  cgroupPath,
+			},
+			Process: &domain.ProcessData{
+				PID:  int32(event.PID),
+				PPID: int32(event.PPID),
+				UID:  int32(event.UID),
+				GID:  int32(event.GID),
+				Comm: comm,
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Tags: []string{
+				fmt.Sprintf("event_type:%s", c.getEventTypeName(event.EventType)),
+				fmt.Sprintf("service:%s", serviceName),
+			},
+			Labels: map[string]string{
+				"collector":    c.config.Name,
+				"service_name": serviceName,
+				"event_type":   c.getEventTypeName(event.EventType),
+				"cgroup_id":    fmt.Sprintf("%d", event.CgroupID),
+			},
 		},
 	}
 
-	// Send event to channel
-	select {
-	case c.events <- domainEvent:
-		c.recordMetric(c.eventsProcessed, 1, attribute.String("type", "systemd"))
-	default:
-		c.recordMetric(c.droppedEvents, 1, attribute.String("reason", "channel_full"))
-		c.logger.Warn("Event channel full, dropping event")
+	// Send event using EventChannelManager
+	if c.EventChannelManager.SendEvent(domainEvent) {
+		c.BaseCollector.RecordEvent()
+	} else {
+		c.BaseCollector.RecordDrop()
 	}
 
 	// Update buffer usage
 	if c.bufferUsage != nil {
-		c.bufferUsage.Record(c.ctx, int64(len(c.events)))
+		utilization := c.EventChannelManager.GetChannelUtilization()
+		c.bufferUsage.Record(c.LifecycleManager.Context(), int64(utilization*100))
 	}
 }
 
@@ -246,27 +273,5 @@ func (c *Collector) getEventTypeName(eventType uint8) string {
 		return "cgroup_detach"
 	default:
 		return fmt.Sprintf("unknown_%d", eventType)
-	}
-}
-
-// recordMetric is a helper to record metrics with error handling
-func (c *Collector) recordMetric(metric interface{}, value interface{}, attrs ...attribute.KeyValue) {
-	if metric == nil {
-		return
-	}
-
-	switch m := metric.(type) {
-	case metric.Int64Counter:
-		if v, ok := value.(int64); ok {
-			m.Add(c.ctx, v, metric.WithAttributes(attrs...))
-		}
-	case metric.Float64Histogram:
-		if v, ok := value.(float64); ok {
-			m.Record(c.ctx, v, metric.WithAttributes(attrs...))
-		}
-	case metric.Int64Gauge:
-		if v, ok := value.(int64); ok {
-			m.Record(c.ctx, v, metric.WithAttributes(attrs...))
-		}
 	}
 }
