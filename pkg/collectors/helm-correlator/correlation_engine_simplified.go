@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// HelmCorrelationEngine focuses on the 80% problems: hooks and stuck releases
-type HelmCorrelationEngine struct {
+// SimplifiedHelmCorrelator focuses on the 80% problems: hooks and stuck releases
+type SimplifiedHelmCorrelator struct {
 	logger *zap.Logger
 	mu     sync.RWMutex
 
@@ -23,9 +23,9 @@ type HelmCorrelationEngine struct {
 	correlationWindow time.Duration
 }
 
-// NewHelmCorrelationEngine creates our MVP correlator
-func NewHelmCorrelationEngine(logger *zap.Logger) *HelmCorrelationEngine {
-	return &HelmCorrelationEngine{
+// NewSimplifiedHelmCorrelator creates our MVP correlator
+func NewSimplifiedHelmCorrelator(logger *zap.Logger) *SimplifiedHelmCorrelator {
+	return &SimplifiedHelmCorrelator{
 		logger:            logger,
 		recentJobs:        make(map[string]*JobStatus),
 		recentPods:        make(map[string]*PodStatus),
@@ -35,7 +35,7 @@ func NewHelmCorrelationEngine(logger *zap.Logger) *HelmCorrelationEngine {
 }
 
 // CorrelateFailure - The ONLY public method that matters
-func (s *HelmCorrelationEngine) CorrelateFailure(helmCmd *HelmOperation) *RootCause {
+func (s *SimplifiedHelmCorrelator) CorrelateFailure(helmCmd *HelmOperation) *RootCause {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -71,7 +71,7 @@ func (s *HelmCorrelationEngine) CorrelateFailure(helmCmd *HelmOperation) *RootCa
 }
 
 // checkHookFailure - THE MOST IMPORTANT PATTERN
-func (s *HelmCorrelationEngine) checkHookFailure(helmCmd *HelmOperation) *RootCause {
+func (s *SimplifiedHelmCorrelator) checkHookFailure(helmCmd *HelmOperation) *RootCause {
 	// Look for hook jobs related to this release
 	hookJob, exists := s.recentJobs[helmCmd.ReleaseName]
 	if !exists || hookJob == nil {
@@ -151,7 +151,7 @@ func (s *HelmCorrelationEngine) checkHookFailure(helmCmd *HelmOperation) *RootCa
 }
 
 // checkStuckRelease - THE SECOND MOST IMPORTANT PATTERN
-func (s *HelmCorrelationEngine) checkStuckRelease(helmCmd *HelmOperation) *RootCause {
+func (s *SimplifiedHelmCorrelator) checkStuckRelease(helmCmd *HelmOperation) *RootCause {
 	release, exists := s.releaseStates[helmCmd.ReleaseName]
 	if !exists || release == nil {
 		return nil
@@ -215,7 +215,7 @@ func getHookType(jobName string) string {
 }
 
 // TrackJob - Called when we see a job related to a helm release
-func (s *HelmCorrelationEngine) TrackJob(releaseName string, job *JobStatus) {
+func (s *SimplifiedHelmCorrelator) TrackJob(releaseName string, job *JobStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	
@@ -226,7 +226,7 @@ func (s *HelmCorrelationEngine) TrackJob(releaseName string, job *JobStatus) {
 }
 
 // TrackPod - Called when we see a pod related to a helm job
-func (s *HelmCorrelationEngine) TrackPod(jobName string, pod *PodStatus) {
+func (s *SimplifiedHelmCorrelator) TrackPod(jobName string, pod *PodStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	
@@ -234,7 +234,7 @@ func (s *HelmCorrelationEngine) TrackPod(jobName string, pod *PodStatus) {
 }
 
 // TrackRelease - Called when we see a helm release state change
-func (s *HelmCorrelationEngine) TrackRelease(release *ReleaseState) {
+func (s *SimplifiedHelmCorrelator) TrackRelease(release *ReleaseState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	
@@ -242,7 +242,7 @@ func (s *HelmCorrelationEngine) TrackRelease(release *ReleaseState) {
 }
 
 // cleanOldEntries - Simple cleanup to prevent memory growth
-func (s *HelmCorrelationEngine) cleanOldEntries() {
+func (s *SimplifiedHelmCorrelator) cleanOldEntries() {
 	cutoff := time.Now().Add(-s.correlationWindow)
 	
 	// Clean old jobs
