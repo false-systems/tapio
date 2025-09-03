@@ -18,23 +18,18 @@ func init() {
 func RegisterOTELCollector() {
 	factory := func(name string, config *orchestrator.CollectorConfigData, logger *zap.Logger) (collectors.Collector, error) {
 		// Convert YAML config to OTEL-specific config
-		otelConfig := &Config{
-			BufferSize: 10000, // Default
-		}
+		otelConfig := DefaultConfig()
+		otelConfig.Name = name
 
 		// Apply configuration from YAML
 		if config != nil {
 			if config.BufferSize > 0 {
 				otelConfig.BufferSize = config.BufferSize
 			}
+			// Map endpoint settings
 			if config.Endpoint != "" {
-				otelConfig.Endpoint = config.Endpoint
-			}
-			if config.Protocol != "" {
-				otelConfig.Protocol = config.Protocol
-			}
-			if config.Headers != nil {
-				otelConfig.Headers = config.Headers
+				// Parse endpoint to determine if it's gRPC or HTTP
+				otelConfig.GRPCEndpoint = config.Endpoint
 			}
 		}
 
