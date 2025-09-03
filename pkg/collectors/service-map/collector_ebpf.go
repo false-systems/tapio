@@ -30,18 +30,25 @@ type ebpfState struct {
 
 // ConnectionEvent represents a connection event from eBPF (matches C struct)
 type ConnectionEvent struct {
-	SrcIP     uint32    `json:"src_ip"`
-	DstIP     uint32    `json:"dst_ip"`
-	SrcPort   uint16    `json:"src_port"`
-	DstPort   uint16    `json:"dst_port"`
-	Protocol  uint8     `json:"protocol"`
-	EventType uint8     `json:"event_type"` // 0=new, 1=close
-	Timestamp uint64    `json:"timestamp"`
-	BytesSent uint64    `json:"bytes_sent"`
-	BytesRecv uint64    `json:"bytes_recv"`
-	PID       uint32    `json:"pid"`
-	UID       uint32    `json:"uid"`
-	Comm      [16]int8  `json:"comm"`
+	SrcIP       uint32    `json:"src_ip"`
+	DstIP       uint32    `json:"dst_ip"`
+	SrcPort     uint16    `json:"src_port"`
+	DstPort     uint16    `json:"dst_port"`
+	Protocol    uint8     `json:"protocol"`
+	EventType   uint8     `json:"event_type"` // 0=connect, 1=accept, 2=close, 3=reset, 4=update
+	Timestamp   uint64    `json:"timestamp"`
+	BytesSent   uint64    `json:"bytes_sent"`
+	BytesRecv   uint64    `json:"bytes_recv"`
+	PID         uint32    `json:"pid"`
+	UID         uint32    `json:"uid"`
+	Comm        [16]int8  `json:"comm"`
+	// TCP metrics from kernel
+	Retransmits uint32    `json:"retransmits"`
+	RTTUS       uint32    `json:"rtt_us"`      // Smoothed RTT in microseconds
+	RTTVarUS    uint32    `json:"rtt_var_us"`  // RTT variance
+	TCPState    uint8     `json:"tcp_state"`   // TCP state
+	Direction   uint8     `json:"direction"`   // 0=unknown, 1=outbound, 2=inbound
+	Resets      uint16    `json:"resets"`      // RST packets
 }
 
 // startEBPF initializes and starts eBPF programs for connection tracking
@@ -205,24 +212,24 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 
 	start := time.Now()
 
-	// Convert to Connection struct
+	// Convert to Connection struct with REAL TCP METRICS
 	conn := &Connection{
 		SourceIP:    event.SrcIP,
 		DestIP:      event.DstIP,
 		SourcePort:  event.SrcPort,
 		DestPort:    event.DstPort,
 		Protocol:    event.Protocol,
-		Direction:   c.detectConnectionDirection(event),
-		State:       c.detectConnectionState(event),
+		Direction:   ConnDirection(event.Direction), // From eBPF now!
+		State:       c.mapTCPState(event.TCPState),   // Real TCP state
 		Timestamp:   time.Unix(0, int64(event.Timestamp)),
 		BytesSent:   event.BytesSent,
 		BytesRecv:   event.BytesRecv,
-		Latency:     0, // TODO: Calculate from connect->accept timing
-		Retransmits: 0, // TODO: Get from TCP info
-		Resets:      0, // TODO: Track RST packets
+		Latency:     uint64(event.RTTUS) * 1000,     // Convert to nanoseconds
+		Retransmits: event.Retransmits,              // REAL retransmits from kernel!
+		Resets:      uint32(event.Resets),           // Real RST count
 	}
 	
-	// Calculate L4 quality score
+	// Calculate L4 quality score with REAL metrics
 	conn.Quality = conn.CalculateQuality()
 
 	// Create connection key
@@ -262,23 +269,41 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 	c.emitConnectionEvent(ctx, conn, event)
 }
 
-// detectConnectionDirection determines who initiated the connection
-func (c *Collector) detectConnectionDirection(event *ConnectionEvent) ConnDirection {
-	// EventType field encodes the kprobe source
-	// 0 = tcp_connect (outbound)
-	// 1 = inet_csk_accept (inbound) 
-	// Higher bits might encode other info
+// mapTCPState maps kernel TCP state to our ConnState
+func (c *Collector) mapTCPState(tcpState uint8) ConnState {
+	// Linux TCP states from tcp_states.h
+	const (
+		TCP_ESTABLISHED = 1
+		TCP_SYN_SENT    = 2
+		TCP_SYN_RECV    = 3
+		TCP_FIN_WAIT1   = 4
+		TCP_FIN_WAIT2   = 5
+		TCP_TIME_WAIT   = 6
+		TCP_CLOSE       = 7
+		TCP_CLOSE_WAIT  = 8
+		TCP_LAST_ACK    = 9
+		TCP_LISTEN      = 10
+		TCP_CLOSING     = 11
+	)
 	
-	eventSource := event.EventType & 0x0F // Lower 4 bits for event source
-	
-	switch eventSource {
-	case 0: // tcp_connect - we initiated
-		return DirectionOutbound
-	case 1: // accept - we received
-		return DirectionInbound
+	switch tcpState {
+	case TCP_ESTABLISHED:
+		return StateEstablished
+	case TCP_SYN_SENT, TCP_SYN_RECV:
+		return StateSynSent
+	case TCP_FIN_WAIT1, TCP_FIN_WAIT2, TCP_CLOSE_WAIT, TCP_LAST_ACK, TCP_CLOSING:
+		return StateFinWait
+	case TCP_CLOSE, TCP_TIME_WAIT:
+		return StateClosed
 	default:
-		return DirectionUnknown
+		return StateUnknown
 	}
+}
+
+// detectConnectionDirection determines who initiated the connection (DEPRECATED - now from eBPF)
+func (c *Collector) detectConnectionDirection(event *ConnectionEvent) ConnDirection {
+	// Now we get this directly from eBPF!
+	return ConnDirection(event.Direction)
 }
 
 // detectConnectionState determines the connection state
