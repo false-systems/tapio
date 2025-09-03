@@ -343,21 +343,34 @@ func (c *Collector) discoverServices(ctx context.Context) {
 			service.Type = ServiceTypeUnknown
 		}
 
-		// Update health based on endpoints
+		// Run outlier detection on endpoints (Envoy-style)
+		c.detectOutliers(service)
+		
+		// Update health based on endpoints (outlier detection may have ejected some)
 		oldHealth := service.Health
 		if len(service.Endpoints) == 0 {
 			service.Health = HealthDown
 		} else {
 			readyCount := 0
+			ejectedCount := 0
 			for _, ep := range service.Endpoints {
-				if ep.Ready {
+				if ep.OutlierStatus != nil && ep.OutlierStatus.CurrentlyEjected {
+					ejectedCount++
+				} else if ep.Ready {
 					readyCount++
 				}
 			}
+			
 			if readyCount == len(service.Endpoints) {
 				service.Health = HealthHealthy
 			} else if readyCount > 0 {
 				service.Health = HealthDegraded
+				if ejectedCount > 0 {
+					c.logger.Debug("Service degraded due to ejected endpoints",
+						zap.String("service", service.Name),
+						zap.Int("ejected", ejectedCount),
+						zap.Int("healthy", readyCount))
+				}
 			} else {
 				service.Health = HealthDown
 			}

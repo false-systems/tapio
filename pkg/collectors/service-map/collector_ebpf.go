@@ -340,6 +340,9 @@ func (c *Collector) updateServiceConnections(conn *Connection, event *Connection
 	for _, srcService := range srcServices {
 		for _, dstService := range dstServices {
 			if srcService != "" && dstService != "" && srcService != dstService {
+				// Track connection quality for outlier detection
+				c.updateEndpointStats(conn, srcService, dstService)
+				
 				// Use connection direction to determine dependency
 				if conn.Direction == DirectionOutbound {
 					// We (srcService) called them (dstService)
@@ -349,6 +352,10 @@ func (c *Collector) updateServiceConnections(conn *Connection, event *Connection
 							dep.LastSeen = time.Now()
 							if dep.Protocol == "" {
 								dep.Protocol = protocolToString(conn.Protocol)
+							}
+							// Track error rate
+							if conn.State == StateReset || conn.Quality < 0.5 {
+								dep.ErrorRate++
 							}
 						}
 					}
@@ -368,6 +375,10 @@ func (c *Collector) updateServiceConnections(conn *Connection, event *Connection
 							if dep.Protocol == "" {
 								dep.Protocol = protocolToString(conn.Protocol)
 							}
+							// Track error rate
+							if conn.State == StateReset || conn.Quality < 0.5 {
+								dep.ErrorRate++
+							}
 						}
 					}
 					if src, ok := c.services[srcService]; ok {
@@ -377,6 +388,45 @@ func (c *Collector) updateServiceConnections(conn *Connection, event *Connection
 						}
 					}
 				}
+			}
+		}
+	}
+}
+
+// updateEndpointStats tracks connection quality for outlier detection
+func (c *Collector) updateEndpointStats(conn *Connection, srcService, dstService string) {
+	// Find destination endpoint
+	if dstSvc, ok := c.services[dstService]; ok {
+		for i := range dstSvc.Endpoints {
+			ep := &dstSvc.Endpoints[i]
+			if ep.IP == intToIP(conn.DestIP) {
+				if ep.OutlierStatus == nil {
+					ep.OutlierStatus = &OutlierStatus{}
+				}
+				
+				// Track connection pool stats
+				if conn.State == StateEstablished {
+					ep.OutlierStatus.ActiveConnections++
+				} else if conn.State == StateSynSent {
+					ep.OutlierStatus.PendingConnections++
+				}
+				
+				// Track errors for outlier detection
+				if conn.State == StateReset {
+					ep.OutlierStatus.ConsecutiveErrors++
+					ep.OutlierStatus.Consecutive5xx++ // Treat RST as 5xx-like error
+				} else if conn.Quality > 0.8 {
+					// Good connection resets error counters
+					ep.OutlierStatus.ConsecutiveErrors = 0
+					ep.OutlierStatus.Consecutive5xx = 0
+				}
+				
+				// Track retransmits as potential issues
+				if conn.Retransmits > 5 {
+					ep.OutlierStatus.RequestRetries++
+				}
+				
+				break
 			}
 		}
 	}
