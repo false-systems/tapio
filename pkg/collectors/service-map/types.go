@@ -54,13 +54,34 @@ const (
 	HealthUnknown  HealthState = "unknown"
 )
 
-// Endpoint represents a service endpoint
+// Endpoint represents a service endpoint with outlier detection
 type Endpoint struct {
 	IP       string `json:"ip"`
 	Port     int32  `json:"port"`
 	PodName  string `json:"pod_name"`
 	NodeName string `json:"node_name"`
 	Ready    bool   `json:"ready"`
+	
+	// Outlier detection (Envoy-inspired)
+	OutlierStatus *OutlierStatus `json:"outlier_status,omitempty"`
+}
+
+// OutlierStatus tracks endpoint health for outlier detection
+type OutlierStatus struct {
+	Consecutive5xx     int       `json:"consecutive_5xx"`
+	ConsecutiveErrors  int       `json:"consecutive_errors"`
+	SuccessRate5m      float64   `json:"success_rate_5m"`
+	SuccessRate1m      float64   `json:"success_rate_1m"`
+	EjectionCount      int       `json:"ejection_count"`
+	CurrentlyEjected   bool      `json:"currently_ejected"`
+	EjectedUntil       time.Time `json:"ejected_until,omitempty"`
+	LastEjectionTime   time.Time `json:"last_ejection_time,omitempty"`
+	
+	// Connection pool stats
+	ActiveConnections  int       `json:"active_connections"`
+	PendingConnections int       `json:"pending_connections"`
+	ConnectionOverflow int       `json:"connection_overflow"`
+	RequestRetries     int       `json:"request_retries"`
 }
 
 // Port represents a service port

@@ -434,6 +434,78 @@ func (c *Collector) addIPServiceMapping(ip string, service string) {
 	c.ipToService[ip] = append(services, service)
 }
 
+// detectOutliers implements Envoy-style outlier detection
+func (c *Collector) detectOutliers(service *Service) {
+	const (
+		consecutive5xxThreshold = 5
+		baseEjectionTime       = 30 * time.Second
+		maxEjectionPercent     = 0.5 // 50% max ejection
+	)
+	
+	ejectedCount := 0
+	totalEndpoints := len(service.Endpoints)
+	maxEjectable := int(float64(totalEndpoints) * maxEjectionPercent)
+	if maxEjectable < 1 && totalEndpoints > 0 {
+		maxEjectable = 1 // Always allow ejecting at least one
+	}
+	
+	now := time.Now()
+	
+	for i := range service.Endpoints {
+		ep := &service.Endpoints[i]
+		
+		// Initialize outlier status if needed
+		if ep.OutlierStatus == nil {
+			ep.OutlierStatus = &OutlierStatus{}
+		}
+		
+		// Check if ejection period expired
+		if ep.OutlierStatus.CurrentlyEjected && now.After(ep.OutlierStatus.EjectedUntil) {
+			ep.OutlierStatus.CurrentlyEjected = false
+			ep.Ready = true
+			c.logger.Info("Endpoint ejection expired, re-adding to pool",
+				zap.String("endpoint", ep.IP),
+				zap.String("service", service.Name))
+		}
+		
+		// Check for consecutive 5xx ejection
+		if ep.OutlierStatus.Consecutive5xx >= consecutive5xxThreshold {
+			if ejectedCount < maxEjectable && !ep.OutlierStatus.CurrentlyEjected {
+				// Eject with exponential backoff
+				ep.OutlierStatus.EjectionCount++
+				ejectionDuration := baseEjectionTime * time.Duration(1<<uint(ep.OutlierStatus.EjectionCount-1))
+				
+				ep.OutlierStatus.CurrentlyEjected = true
+				ep.OutlierStatus.LastEjectionTime = now
+				ep.OutlierStatus.EjectedUntil = now.Add(ejectionDuration)
+				ep.Ready = false
+				ejectedCount++
+				
+				c.logger.Warn("Endpoint ejected due to consecutive errors",
+					zap.String("endpoint", ep.IP),
+					zap.String("service", service.Name),
+					zap.Int("consecutive_5xx", ep.OutlierStatus.Consecutive5xx),
+					zap.Duration("ejection_duration", ejectionDuration))
+			}
+			// Reset counter after ejection
+			ep.OutlierStatus.Consecutive5xx = 0
+		}
+		
+		// Count currently ejected
+		if ep.OutlierStatus.CurrentlyEjected {
+			ejectedCount++
+		}
+	}
+	
+	// Update service health based on ejected endpoints
+	healthyCount := totalEndpoints - ejectedCount
+	if healthyCount == 0 && totalEndpoints > 0 {
+		service.Health = HealthDown
+	} else if ejectedCount > 0 {
+		service.Health = HealthDegraded
+	}
+}
+
 // getServicesForIP returns all services that could be at this IP[:port]
 func (c *Collector) getServicesForIP(ip string, port uint16) []string {
 	// Try exact IP:port match first
