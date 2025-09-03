@@ -200,7 +200,7 @@ func (c *Collector) readEBPFEvents() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			c.logger.Debug("DNS event processing stopped")
 			return
 		default:
@@ -212,17 +212,17 @@ func (c *Collector) readEBPFEvents() {
 				}
 				c.logger.Warn("Failed to read from ring buffer", zap.Error(err))
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(c.ctx, 1,
+					c.errorsTotal.Add(c.LifecycleManager.Context(), 1,
 						metric.WithAttributes(attribute.String("error", "ringbuf_read")))
 				}
 				continue
 			}
 
 			// Process the DNS event
-			if err := c.processBPFEvent(c.ctx, record.RawSample); err != nil {
+			if err := c.processBPFEvent(c.LifecycleManager.Context(), record.RawSample); err != nil {
 				c.logger.Warn("Failed to process DNS event", zap.Error(err))
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(c.ctx, 1,
+					c.errorsTotal.Add(c.LifecycleManager.Context(), 1,
 						metric.WithAttributes(attribute.String("error", "event_processing")))
 				}
 			}
@@ -250,24 +250,14 @@ func (c *Collector) processBPFEvent(ctx context.Context, data []byte) error {
 	}
 
 	// Send event
-	select {
-	case c.events <- collectorEvent:
-		if c.eventsProcessed != nil {
-			c.eventsProcessed.Add(ctx, 1)
-		}
-		c.logger.Debug("Processed DNS event",
-			zap.String("query", collectorEvent.EventData.DNS.QueryName),
-			zap.String("type", collectorEvent.EventData.DNS.QueryType))
-	case <-ctx.Done():
-		return nil
-	default:
-		// Channel is full, drop event
-		if c.droppedEvents != nil {
-			c.droppedEvents.Add(ctx, 1,
-				metric.WithAttributes(attribute.String("reason", "channel_full")))
-		}
-		c.logger.Warn("Dropped DNS event - channel full")
+	if c.EventChannelManager.SendEvent(collectorEvent) {
+		c.BaseCollector.RecordEvent()
+	} else {
+		c.BaseCollector.RecordDrop()
 	}
+	c.logger.Debug("Processed DNS event",
+		zap.String("query", collectorEvent.EventData.DNS.QueryName),
+		zap.String("type", collectorEvent.EventData.DNS.QueryType))
 
 	return nil
 }
@@ -317,7 +307,7 @@ func (c *Collector) convertBPFEventToCollectorEvent(bpfEvent *BPFDNSEvent) (*dom
 		EventID:   fmt.Sprintf("dns-%d-%d", bpfEvent.PID, bpfEvent.Timestamp),
 		Type:      domain.EventTypeDNS,
 		Timestamp: time.Unix(0, int64(bpfEvent.Timestamp)),
-		Source:    c.name,
+		Source:    c.config.Name,
 		Severity:  domain.EventSeverityInfo,
 		EventData: domain.EventDataContainer{
 			DNS: &domain.DNSData{
@@ -345,7 +335,7 @@ func (c *Collector) convertBPFEventToCollectorEvent(bpfEvent *BPFDNSEvent) (*dom
 				fmt.Sprintf("rcode:%d", bpfEvent.Rcode),
 			},
 			Labels: map[string]string{
-				"collector":     c.name,
+				"collector":     c.config.Name,
 				"query_name":    queryName,
 				"query_type":    queryType,
 				"protocol":      protocol,
@@ -372,7 +362,7 @@ func (c *Collector) generateMockEvents() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			return
 		case <-ticker.C:
 			now := time.Now()
@@ -383,7 +373,7 @@ func (c *Collector) generateMockEvents() {
 				EventID:   fmt.Sprintf("dns-mock-%d", now.UnixNano()),
 				Type:      domain.EventTypeDNS,
 				Timestamp: now,
-				Source:    c.name,
+				Source:    c.config.Name,
 				Severity:  domain.EventSeverityInfo,
 				EventData: domain.EventDataContainer{
 					DNS: &domain.DNSData{
@@ -409,7 +399,7 @@ func (c *Collector) generateMockEvents() {
 						"protocol:UDP", "qtype:A", "rcode:0", "mock:true",
 					},
 					Labels: map[string]string{
-						"collector":     c.name,
+						"collector":     c.config.Name,
 						"query_name":    queryName,
 						"query_type":    "A",
 						"protocol":      "UDP",
@@ -419,26 +409,13 @@ func (c *Collector) generateMockEvents() {
 				},
 			}
 
-			select {
-			case c.events <- mockEvent:
-				if c.eventsProcessed != nil {
-					c.eventsProcessed.Add(c.ctx, 1, metric.WithAttributes(
-						attribute.String("query_type", "A"),
-						attribute.String("protocol", "UDP"),
-						attribute.Bool("mock_event", true),
-					))
-				}
-				c.logger.Debug("Mock DNS event generated", zap.String("query", queryName))
-			case <-c.ctx.Done():
-				return
-			default:
-				if c.droppedEvents != nil {
-					c.droppedEvents.Add(c.ctx, 1, metric.WithAttributes(
-						attribute.String("reason", "buffer_full"),
-						attribute.Bool("mock_event", true),
-					))
-				}
+			// Send mock event
+			if c.EventChannelManager.SendEvent(mockEvent) {
+				c.BaseCollector.RecordEvent()
+			} else {
+				c.BaseCollector.RecordDrop()
 			}
+			c.logger.Debug("Mock DNS event generated", zap.String("query", queryName))
 		}
 	}
 }

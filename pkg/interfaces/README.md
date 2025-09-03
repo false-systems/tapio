@@ -100,7 +100,6 @@ defer cli.Stop(ctx)
 - `pkg/server/` → `pkg/interfaces/server/`
 - `pkg/api/` → `pkg/interfaces/server/http/`
 - CLI interface → Use `pkg/interfaces/cli/`
-- `cmd/tapio-server/` → Use `pkg/interfaces/server/`
 
 ### New Implementations:
 - Unified CLI with cobra

@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
+	"go.uber.org/zap"
 )
 
 // startEBPF is a no-op for non-Linux platforms
@@ -51,7 +50,7 @@ func (c *Collector) generateMockEvents() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			return
 		case <-ticker.C:
 			now := time.Now()
@@ -62,7 +61,7 @@ func (c *Collector) generateMockEvents() {
 				EventID:   fmt.Sprintf("dns-mock-%d", now.UnixNano()),
 				Type:      domain.EventTypeDNS,
 				Timestamp: now,
-				Source:    c.name,
+				Source:    c.config.Name,
 				Severity:  domain.EventSeverityInfo,
 				EventData: domain.EventDataContainer{
 					DNS: &domain.DNSData{
@@ -88,7 +87,7 @@ func (c *Collector) generateMockEvents() {
 						"protocol:UDP", "qtype:A", "rcode:0", "mock:true",
 					},
 					Labels: map[string]string{
-						"collector":     c.name,
+						"collector":     c.config.Name,
 						"query_name":    queryName,
 						"query_type":    "A",
 						"protocol":      "UDP",
@@ -99,28 +98,13 @@ func (c *Collector) generateMockEvents() {
 				},
 			}
 
-			// Send mock event to channel
-			select {
-			case c.events <- mockEvent:
-				if c.eventsProcessed != nil {
-					c.eventsProcessed.Add(c.ctx, 1, metric.WithAttributes(
-						attribute.String("query_type", "A"),
-						attribute.String("protocol", "UDP"),
-						attribute.Bool("mock_event", true),
-					))
-				}
-				c.logger.Debug("Mock DNS event generated")
-			case <-c.ctx.Done():
-				return
-			default:
-				// Buffer full, drop event
-				if c.droppedEvents != nil {
-					c.droppedEvents.Add(c.ctx, 1, metric.WithAttributes(
-						attribute.String("reason", "buffer_full"),
-						attribute.Bool("mock_event", true),
-					))
-				}
+			// Send mock event
+			if c.EventChannelManager.SendEvent(mockEvent) {
+				c.BaseCollector.RecordEvent()
+			} else {
+				c.BaseCollector.RecordDrop()
 			}
+			c.logger.Debug("Mock DNS event generated", zap.String("query", queryName))
 		}
 	}
 }
