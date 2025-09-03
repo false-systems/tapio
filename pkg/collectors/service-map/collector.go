@@ -36,7 +36,7 @@ type Collector struct {
 	// Service tracking
 	services    map[string]*Service     // namespace/name -> service
 	connections map[string]*Connection  // src:port->dst:port -> connection
-	ipToService map[string]string       // IP -> service name
+	ipToService map[string][]string     // IP[:port] -> []service names (multiple services can share IP)
 	mu          sync.RWMutex
 
 	// eBPF state (platform-specific)
@@ -93,7 +93,7 @@ func NewCollector(name string, config *Config, logger *zap.Logger) (*Collector, 
 		k8sClient:           k8sClient,
 		services:            make(map[string]*Service),
 		connections:         make(map[string]*Connection),
-		ipToService:         make(map[string]string),
+		ipToService:         make(map[string][]string),
 		pendingChanges:      make(chan ChangeEvent, 1000),
 		lastEmitTime:        time.Now(),
 	}
@@ -324,9 +324,10 @@ func (c *Collector) discoverServices(ctx context.Context) {
 						service.Endpoints = append(service.Endpoints, endpoint)
 						
 						// Map IP to service for connection tracking
-						ipKey := fmt.Sprintf("%s:%d", addr.IP, port.Port)
-						c.ipToService[ipKey] = key
-						c.ipToService[addr.IP] = key // Also map just IP
+						// Multiple services can share the same IP (NodePort, HostNetwork, etc)
+						ipPortKey := fmt.Sprintf("%s:%d", addr.IP, port.Port)
+						c.addIPServiceMapping(ipPortKey, key)
+						c.addIPServiceMapping(addr.IP, key) // Also map just IP for broader matching
 					}
 				}
 			}
@@ -419,6 +420,34 @@ func (c *Collector) detectServiceType(svc *corev1.Service) ServiceType {
 	}
 
 	return ServiceTypeUnknown
+}
+
+// addIPServiceMapping safely adds a service to the IP mapping (handles multiple services per IP)
+func (c *Collector) addIPServiceMapping(ip string, service string) {
+	// Check if service already mapped to this IP
+	services := c.ipToService[ip]
+	for _, s := range services {
+		if s == service {
+			return // Already mapped
+		}
+	}
+	c.ipToService[ip] = append(services, service)
+}
+
+// getServicesForIP returns all services that could be at this IP[:port]
+func (c *Collector) getServicesForIP(ip string, port uint16) []string {
+	// Try exact IP:port match first
+	ipPortKey := fmt.Sprintf("%s:%d", ip, port)
+	if services, exists := c.ipToService[ipPortKey]; exists && len(services) > 0 {
+		return services
+	}
+	
+	// Fall back to just IP
+	if services, exists := c.ipToService[ip]; exists {
+		return services
+	}
+	
+	return nil
 }
 
 // shouldExcludeNamespace checks if namespace should be excluded
@@ -602,54 +631,57 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 
 	// Build connection map
 	for _, conn := range c.connections {
-		srcService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.SourceIP), conn.SourcePort)]
-		if srcService == "" {
-			srcService = c.ipToService[intToIP(conn.SourceIP)]
-		}
+		srcServices := c.getServicesForIP(intToIP(conn.SourceIP), conn.SourcePort)
+		dstServices := c.getServicesForIP(intToIP(conn.DestIP), conn.DestPort)
 
-		dstService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.DestIP), conn.DestPort)]
-		if dstService == "" {
-			dstService = c.ipToService[intToIP(conn.DestIP)]
-		}
+		// Process all service pairs
+		for _, srcService := range srcServices {
+			for _, dstService := range dstServices {
+				if srcService != "" && dstService != "" && srcService != dstService {
+					connKey := fmt.Sprintf("%s->%s", srcService, dstService)
+					serviceMap.Connections[connKey]++
 
-		if srcService != "" && dstService != "" && srcService != dstService {
-			connKey := fmt.Sprintf("%s->%s", srcService, dstService)
-			serviceMap.Connections[connKey]++
+					// Use connection direction to correctly assign dependencies
+					if conn.Direction == DirectionOutbound {
+						// srcService depends on dstService
+						if src, ok := serviceMap.Services[srcService]; ok {
+							if src.Dependencies == nil {
+								src.Dependencies = make(map[string]*Dependency)
+							}
+							if dep, exists := src.Dependencies[dstService]; exists {
+								dep.LastSeen = time.Now()
+								dep.CallRate++
+							} else {
+								src.Dependencies[dstService] = &Dependency{
+									Target:    dstService,
+									CallRate:  1,
+									FirstSeen: time.Now(),
+									LastSeen:  time.Now(),
+									Protocol:  protocolToString(conn.Protocol),
+								}
+							}
+						}
 
-			// Update dependencies
-			if src, ok := serviceMap.Services[srcService]; ok {
-				if src.Dependencies == nil {
-					src.Dependencies = make(map[string]*Dependency)
-				}
-				if dep, exists := src.Dependencies[dstService]; exists {
-					dep.LastSeen = time.Now()
-					dep.CallRate++
-				} else {
-					src.Dependencies[dstService] = &Dependency{
-						Target:    dstService,
-						CallRate:  1,
-						FirstSeen: time.Now(),
-						LastSeen:  time.Now(),
-						Protocol:  protocolToString(conn.Protocol),
+						// dstService has srcService as dependent
+						if dst, ok := serviceMap.Services[dstService]; ok {
+							if dst.Dependents == nil {
+								dst.Dependents = make(map[string]*Dependent)
+							}
+							if dep, exists := dst.Dependents[srcService]; exists {
+								dep.LastSeen = time.Now()
+								dep.CallRate++
+							} else {
+								dst.Dependents[srcService] = &Dependent{
+									Source:    srcService,
+									CallRate:  1,
+									FirstSeen: time.Now(),
+									LastSeen:  time.Now(),
+								}
+							}
+						}
 					}
-				}
-			}
-
-			// Update dependents
-			if dst, ok := serviceMap.Services[dstService]; ok {
-				if dst.Dependents == nil {
-					dst.Dependents = make(map[string]*Dependent)
-				}
-				if dep, exists := dst.Dependents[srcService]; exists {
-					dep.LastSeen = time.Now()
-					dep.CallRate++
-				} else {
-					dst.Dependents[srcService] = &Dependent{
-						Source:    srcService,
-						CallRate:  1,
-						FirstSeen: time.Now(),
-						LastSeen:  time.Now(),
-					}
+					// For inbound connections, dependencies are reversed
+					// but we typically track from the client's perspective
 				}
 			}
 		}

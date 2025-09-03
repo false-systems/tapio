@@ -207,16 +207,23 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 
 	// Convert to Connection struct
 	conn := &Connection{
-		SourceIP:   event.SrcIP,
-		DestIP:     event.DstIP,
-		SourcePort: event.SrcPort,
-		DestPort:   event.DstPort,
-		Protocol:   event.Protocol,
-		Timestamp:  time.Unix(0, int64(event.Timestamp)),
-		BytesSent:  event.BytesSent,
-		BytesRecv:  event.BytesRecv,
-		Latency:    0, // Could be calculated from connect->accept timing
+		SourceIP:    event.SrcIP,
+		DestIP:      event.DstIP,
+		SourcePort:  event.SrcPort,
+		DestPort:    event.DstPort,
+		Protocol:    event.Protocol,
+		Direction:   c.detectConnectionDirection(event),
+		State:       c.detectConnectionState(event),
+		Timestamp:   time.Unix(0, int64(event.Timestamp)),
+		BytesSent:   event.BytesSent,
+		BytesRecv:   event.BytesRecv,
+		Latency:     0, // TODO: Calculate from connect->accept timing
+		Retransmits: 0, // TODO: Get from TCP info
+		Resets:      0, // TODO: Track RST packets
 	}
+	
+	// Calculate L4 quality score
+	conn.Quality = conn.CalculateQuality()
 
 	// Create connection key
 	connKey := fmt.Sprintf("%s:%d->%s:%d", 
@@ -255,39 +262,96 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 	c.emitConnectionEvent(ctx, conn, event)
 }
 
+// detectConnectionDirection determines who initiated the connection
+func (c *Collector) detectConnectionDirection(event *ConnectionEvent) ConnDirection {
+	// EventType field encodes the kprobe source
+	// 0 = tcp_connect (outbound)
+	// 1 = inet_csk_accept (inbound) 
+	// Higher bits might encode other info
+	
+	eventSource := event.EventType & 0x0F // Lower 4 bits for event source
+	
+	switch eventSource {
+	case 0: // tcp_connect - we initiated
+		return DirectionOutbound
+	case 1: // accept - we received
+		return DirectionInbound
+	default:
+		return DirectionUnknown
+	}
+}
+
+// detectConnectionState determines the connection state
+func (c *Collector) detectConnectionState(event *ConnectionEvent) ConnState {
+	// Upper bits of EventType encode state
+	stateCode := (event.EventType >> 4) & 0x0F
+	
+	switch stateCode {
+	case 0:
+		return StateEstablished
+	case 1:
+		return StateSynSent
+	case 2:
+		return StateFinWait
+	case 3:
+		return StateClosed
+	case 4:
+		return StateReset
+	default:
+		return StateUnknown
+	}
+}
+
 // updateServiceConnections updates service connection statistics
 func (c *Collector) updateServiceConnections(conn *Connection, event *ConnectionEvent) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	srcService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.SourceIP), conn.SourcePort)]
-	if srcService == "" {
-		srcService = c.ipToService[intToIP(conn.SourceIP)]
-	}
+	// Get all possible source services
+	srcServices := c.getServicesForIP(intToIP(conn.SourceIP), conn.SourcePort)
+	dstServices := c.getServicesForIP(intToIP(conn.DestIP), conn.DestPort)
 
-	dstService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.DestIP), conn.DestPort)]
-	if dstService == "" {
-		dstService = c.ipToService[intToIP(conn.DestIP)]
-	}
-
-	if srcService != "" && dstService != "" && srcService != dstService {
-		// Update request rate and latency stats for services
-		if src, ok := c.services[srcService]; ok {
-			if dep, exists := src.Dependencies[dstService]; exists {
-				dep.CallRate += 1
-				dep.LastSeen = time.Now()
-				
-				// Update protocol if not set
-				if dep.Protocol == "" {
-					dep.Protocol = protocolToString(conn.Protocol)
+	// Update connections for all service pairs
+	for _, srcService := range srcServices {
+		for _, dstService := range dstServices {
+			if srcService != "" && dstService != "" && srcService != dstService {
+				// Use connection direction to determine dependency
+				if conn.Direction == DirectionOutbound {
+					// We (srcService) called them (dstService)
+					if src, ok := c.services[srcService]; ok {
+						if dep, exists := src.Dependencies[dstService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+							if dep.Protocol == "" {
+								dep.Protocol = protocolToString(conn.Protocol)
+							}
+						}
+					}
+					if dst, ok := c.services[dstService]; ok {
+						if dep, exists := dst.Dependents[srcService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+						}
+					}
+				} else if conn.Direction == DirectionInbound {
+					// They (srcService) called us (dstService) 
+					// Reverse the dependency direction
+					if dst, ok := c.services[dstService]; ok {
+						if dep, exists := dst.Dependencies[srcService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+							if dep.Protocol == "" {
+								dep.Protocol = protocolToString(conn.Protocol)
+							}
+						}
+					}
+					if src, ok := c.services[srcService]; ok {
+						if dep, exists := src.Dependents[dstService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+						}
+					}
 				}
-			}
-		}
-
-		if dst, ok := c.services[dstService]; ok {
-			if dep, exists := dst.Dependents[srcService]; exists {
-				dep.CallRate += 1
-				dep.LastSeen = time.Now()
 			}
 		}
 	}
