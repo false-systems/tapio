@@ -17,8 +17,6 @@ import (
 	_ "github.com/yairfalse/tapio/pkg/collectors/cri"
 	_ "github.com/yairfalse/tapio/pkg/collectors/cri-ebpf"
 	_ "github.com/yairfalse/tapio/pkg/collectors/dns"
-	_ "github.com/yairfalse/tapio/pkg/collectors/etcd-api"
-	_ "github.com/yairfalse/tapio/pkg/collectors/etcd-ebpf"
 	_ "github.com/yairfalse/tapio/pkg/collectors/etcd-metrics"
 	_ "github.com/yairfalse/tapio/pkg/collectors/kernel"
 	_ "github.com/yairfalse/tapio/pkg/collectors/kubeapi"
@@ -26,11 +24,12 @@ import (
 	_ "github.com/yairfalse/tapio/pkg/collectors/memory-leak-hunter"
 	_ "github.com/yairfalse/tapio/pkg/collectors/network"
 	_ "github.com/yairfalse/tapio/pkg/collectors/otel"
+	_ "github.com/yairfalse/tapio/pkg/collectors/resource-starvation"
 	_ "github.com/yairfalse/tapio/pkg/collectors/runtime-signals"
+	_ "github.com/yairfalse/tapio/pkg/collectors/service-map"
 	_ "github.com/yairfalse/tapio/pkg/collectors/storage-io"
 	_ "github.com/yairfalse/tapio/pkg/collectors/syscall-errors"
 	_ "github.com/yairfalse/tapio/pkg/collectors/systemd"
-	_ "github.com/yairfalse/tapio/pkg/collectors/systemd-api"
 )
 
 var (

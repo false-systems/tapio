@@ -53,6 +53,8 @@ const (
 	SIGABRT = 6
 	SIGSEGV = 11
 	SIGBUS  = 7
+	SIGFPE  = 8
+	SIGILL  = 4
 )
 
 // SignalInfo contains decoded signal information
@@ -115,6 +117,10 @@ func GetSignalName(signum int) string {
 		return "SIGSEGV"
 	case SIGBUS:
 		return "SIGBUS"
+	case SIGFPE:
+		return "SIGFPE"
+	case SIGILL:
+		return "SIGILL"
 	default:
 		return "UNKNOWN"
 	}
@@ -137,6 +143,10 @@ func GetSignalDescription(signum int) string {
 		return "Segmentation fault (invalid memory reference)"
 	case SIGBUS:
 		return "Bus error (bad memory access)"
+	case SIGFPE:
+		return "Floating point exception"
+	case SIGILL:
+		return "Illegal instruction"
 	default:
 		return "Unknown signal"
 	}
@@ -145,7 +155,7 @@ func GetSignalDescription(signum int) string {
 // IsSignalFatal returns whether a signal typically causes process termination
 func IsSignalFatal(signum int) bool {
 	switch signum {
-	case SIGKILL, SIGTERM, SIGQUIT, SIGABRT, SIGSEGV, SIGBUS:
+	case SIGKILL, SIGTERM, SIGQUIT, SIGABRT, SIGSEGV, SIGBUS, SIGFPE, SIGILL:
 		return true
 	case SIGINT:
 		return true // Usually fatal unless caught

@@ -7,6 +7,9 @@ import (
 
 // Config holds configuration for kubeapi collector
 type Config struct {
+	// Collector name
+	Name string
+	
 	// What to watch
 	WatchNamespaces  []string // Empty = all namespaces
 	IgnoreNamespaces []string // System namespaces to ignore

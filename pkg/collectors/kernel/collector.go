@@ -20,9 +20,9 @@ type Collector struct {
 	*base.EventChannelManager // Embed for event channel management
 	*base.LifecycleManager    // Embed for lifecycle management
 
-	logger  *zap.Logger
-	config  *Config
-	mu      sync.RWMutex
+	logger *zap.Logger
+	config *Config
+	mu     sync.RWMutex
 
 	// Mock mode for development
 	mockMode bool
@@ -90,6 +90,17 @@ func NewCollectorWithConfig(cfg *Config, logger *zap.Logger) (*Collector, error)
 		}
 	}
 
+	// Create the collector using NewCollector
+	c, err := NewCollector(cfg.Name, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Replace the logger if one was provided
+	if logger != nil {
+		c.logger = logger.Named(cfg.Name)
+	}
+
 	c.logger.Info("Kernel collector created with config",
 		zap.String("name", cfg.Name),
 		zap.Int("buffer_size", cfg.BufferSize),
@@ -101,7 +112,7 @@ func NewCollectorWithConfig(cfg *Config, logger *zap.Logger) (*Collector, error)
 
 // Name returns collector name
 func (c *Collector) Name() string {
-	return c.name
+	return c.config.Name
 }
 
 // Start starts the eBPF monitoring
@@ -259,7 +270,7 @@ func (c *Collector) generateMockEvents() {
 			} else {
 				c.BaseCollector.RecordDrop()
 			}
-			
+
 			c.logger.Debug("Generated mock kernel event")
 		}
 	}

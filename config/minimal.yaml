@@ -1,6 +1,0 @@
-# Minimal Tapio Configuration
-
-collectors:
-  enabled:
-    - kubeapi
-  buffer_size: 500

@@ -9,23 +9,42 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors/base"
-	"github.com/yairfalse/tapio/pkg/collectors/config"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
-// Collector implements simple namespace monitoring via eBPF
+// RuntimeSignalsConfig holds configuration specific to the runtime signals collector
+type RuntimeSignalsConfig struct {
+	Name         string
+	BufferSize   int
+	EnableEBPF   bool
+	
+	// Ring buffer config for high-volume signal processing
+	EnableRingBuffer bool
+	RingBufferSize   int           // Must be power of 2
+	BatchSize        int           // Events to process at once
+	BatchTimeout     time.Duration // Max time to wait for batch
+	
+	// Filter config for noise reduction
+	EnableFilters    bool
+	FilterConfigPath string
+}
+
+// Collector implements runtime signal monitoring via eBPF
 type Collector struct {
 	*base.BaseCollector       // Embed for Statistics() and Health()
 	*base.EventChannelManager // Embed for event channel management
 	*base.LifecycleManager    // Embed for lifecycle management
 
-	config *config.NamespaceConfig
+	config RuntimeSignalsConfig
 	logger *zap.Logger
 
 	// eBPF components (platform-specific)
 	ebpfState interface{}
+
+	// Signal correlation engine
+	signalTracker *SignalTracker
 
 	// Additional OTEL metrics (beyond base)
 	ebpfLoadsTotal     metric.Int64Counter
@@ -34,10 +53,11 @@ type Collector struct {
 	ebpfAttachErrors   metric.Int64Counter
 	k8sExtractionTotal metric.Int64Counter
 	k8sExtractionHits  metric.Int64Counter
-	netnsOpsByType     metric.Int64Counter
+	signalsByType      metric.Int64Counter
+	deathsCorrelated   metric.Int64Counter
 }
 
-// NewCollector creates a new simple namespace collector
+// NewCollector creates a new runtime signals collector
 func NewCollector(name string) (*Collector, error) {
 	// Initialize logger
 	logger, err := zap.NewProduction()
@@ -45,10 +65,36 @@ func NewCollector(name string) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Initialize base components
+	// Default config with ring buffer support
+	cfg := RuntimeSignalsConfig{
+		Name:         name,
+		BufferSize:   10000,
+		EnableEBPF:   true,
+		// Ring buffer config for high-volume signal processing
+		EnableRingBuffer: true,
+		RingBufferSize:   8192,  // Power of 2
+		BatchSize:        32,
+		BatchTimeout:     10 * time.Millisecond,
+		// Filters enabled for noise reduction
+		EnableFilters:    true,
+	}
+
+	// Initialize base components with ring buffer and filter support
 	ctx := context.Background()
-	baseCollector := base.NewBaseCollector("runtime_signals", 5*time.Minute)
-	eventManager := base.NewEventChannelManager(1000, "runtime_signals", logger)
+	baseConfig := base.BaseCollectorConfig{
+		Name:               name,
+		HealthCheckTimeout: 5 * time.Minute,
+		ErrorRateThreshold: 0.1,
+		EnableRingBuffer:   cfg.EnableRingBuffer,
+		RingBufferSize:     cfg.RingBufferSize,
+		BatchSize:          cfg.BatchSize,
+		BatchTimeout:       cfg.BatchTimeout,
+		EnableFilters:      cfg.EnableFilters,
+		FilterConfigPath:   cfg.FilterConfigPath,
+		Logger:             logger.Named("base"),
+	}
+	baseCollector := base.NewBaseCollectorWithConfig(baseConfig)
+	eventManager := base.NewEventChannelManager(cfg.BufferSize, name, logger)
 	lifecycleManager := base.NewLifecycleManager(ctx, logger)
 
 	// Get meter from base for additional metrics
@@ -103,22 +149,24 @@ func NewCollector(name string) (*Collector, error) {
 		logger.Warn("Failed to create k8s_extraction_hits counter", zap.Error(err))
 	}
 
-	netnsOpsByType, err := meter.Int64Counter(
-		"runtime_signals_process_operations_total",
-		metric.WithDescription(fmt.Sprintf("Total network namespace operations by type in %s", name)),
+	signalsByType, err := meter.Int64Counter(
+		"runtime_signals_signals_by_type_total",
+		metric.WithDescription(fmt.Sprintf("Total signals by type observed by %s", name)),
 	)
 	if err != nil {
-		logger.Warn("Failed to create netns_ops counter", zap.Error(err))
+		logger.Warn("Failed to create signals_by_type counter", zap.Error(err))
 	}
 
-	// Default config
-	cfg := &config.NamespaceConfig{
-		BaseConfig: &config.BaseConfig{
-			Name:       name,
-			BufferSize: 10000,
-		},
-		EnableEBPF: true,
+	deathsCorrelated, err := meter.Int64Counter(
+		"runtime_signals_deaths_correlated_total",
+		metric.WithDescription(fmt.Sprintf("Total process deaths correlated with signals by %s", name)),
+	)
+	if err != nil {
+		logger.Warn("Failed to create deaths_correlated counter", zap.Error(err))
 	}
+
+	// Initialize signal correlation engine
+	signalTracker := NewSignalTracker(logger.Named("signal_tracker"))
 
 	c := &Collector{
 		BaseCollector:       baseCollector,
@@ -126,14 +174,16 @@ func NewCollector(name string) (*Collector, error) {
 		LifecycleManager:    lifecycleManager,
 		config:              cfg,
 		logger:              logger.Named(name),
-		// Namespace-specific metrics
+		signalTracker:       signalTracker,
+		// Signal-specific metrics
 		ebpfLoadsTotal:      ebpfLoadsTotal,
 		ebpfLoadErrors:      ebpfLoadErrors,
 		ebpfAttachTotal:     ebpfAttachTotal,
 		ebpfAttachErrors:    ebpfAttachErrors,
 		k8sExtractionTotal:  k8sExtractionTotal,
 		k8sExtractionHits:   k8sExtractionHits,
-		netnsOpsByType:      netnsOpsByType,
+		signalsByType:       signalsByType,
+		deathsCorrelated:    deathsCorrelated,
 	}
 
 	c.logger.Info("Runtime signals collector created", zap.String("name", name))
@@ -172,6 +222,14 @@ func (c *Collector) Start(ctx context.Context) error {
 		c.LifecycleManager.Start("ebpf-reader", func() {
 			c.readEBPFEvents()
 		})
+		
+		// Start signal tracker cleanup
+		c.LifecycleManager.Start("signal-tracker-cleanup", func() {
+			c.signalTracker.CleanupLoop(ctx)
+		})
+		
+		// Setup noise reduction filters
+		c.setupFilters()
 	}
 
 	c.BaseCollector.SetHealthy(true)
@@ -350,6 +408,110 @@ func (c *Collector) createEvent(eventType string, data map[string]string) *domai
 	}
 
 	return collectorEvent
+}
+
+// setupFilters configures noise reduction filters for runtime signals
+func (c *Collector) setupFilters() {
+	if !c.config.EnableFilters {
+		return
+	}
+
+	// Filter 1: Ignore normal process exits (exit code 0)
+	c.BaseCollector.AddAllowFilter("allow_abnormal_exits", func(event *domain.CollectorEvent) bool {
+		if event.Type != domain.EventTypeKernelProcess {
+			return true // Allow non-process events
+		}
+		
+		// Check if this is a normal exit
+		if rawData := event.EventData.RawData; rawData != nil {
+			eventData := make(map[string]string)
+			if err := json.Unmarshal(rawData.Data, &eventData); err == nil {
+				if eventType, ok := eventData["event_type"]; ok && eventType == "process_exit" {
+					if exitCode, ok := eventData["exit_code"]; ok && exitCode == "0" {
+						// Filter out normal exits unless they have death intelligence
+						_, hasDeathReason := eventData["death_reason"]
+						_, hasKiller := eventData["killer_pid"]
+						return hasDeathReason || hasKiller
+					}
+				}
+			}
+		}
+		return true // Allow all other events
+	})
+
+	// Filter 2: Ignore common non-fatal signals (SIGCHLD, SIGWINCH, etc.)
+	c.BaseCollector.AddAllowFilter("allow_significant_signals", func(event *domain.CollectorEvent) bool {
+		if event.Type != domain.EventTypeKernelProcess {
+			return true // Allow non-process events
+		}
+		
+		if rawData := event.EventData.RawData; rawData != nil {
+			eventData := make(map[string]string)
+			if err := json.Unmarshal(rawData.Data, &eventData); err == nil {
+				if eventType, ok := eventData["event_type"]; ok && 
+				   (eventType == "signal_sent" || eventType == "signal_received") {
+					
+					if signalName, ok := eventData["signal_name"]; ok {
+						// Filter out noise signals
+						switch signalName {
+						case "SIGCHLD", "SIGWINCH", "SIGPIPE", "SIGUSR1", "SIGUSR2":
+							return false // Filter out these common signals
+						case "SIGKILL", "SIGTERM", "SIGSEGV", "SIGABRT", "SIGBUS":
+							return true // Always allow fatal signals
+						}
+					}
+				}
+			}
+		}
+		return true // Allow all other events
+	})
+
+	// Filter 3: Focus on containerized processes (optional)
+	c.BaseCollector.AddAllowFilter("focus_on_containers", func(event *domain.CollectorEvent) bool {
+		// If we have K8s context, it's likely a container process - always allow
+		if event.K8sContext != nil {
+			return true
+		}
+		
+		// If we have container data, allow
+		if event.EventData.Container != nil {
+			return true
+		}
+		
+		// For non-container events, allow fatal signals and abnormal exits only
+		if rawData := event.EventData.RawData; rawData != nil {
+			eventData := make(map[string]string)
+			if err := json.Unmarshal(rawData.Data, &eventData); err == nil {
+				// Allow OOM kills
+				if oomKill, ok := eventData["oom_kill"]; ok && oomKill == "true" {
+					return true
+				}
+				
+				// Allow death intelligence events
+				if _, hasDeathReason := eventData["death_reason"]; hasDeathReason {
+					return true
+				}
+				
+				// Allow fatal signals
+				if eventType, ok := eventData["event_type"]; ok && 
+				   (eventType == "signal_sent" || eventType == "signal_received") {
+					if signalName, ok := eventData["signal_name"]; ok {
+						switch signalName {
+						case "SIGKILL", "SIGTERM", "SIGSEGV", "SIGABRT", "SIGBUS":
+							return true
+						}
+					}
+				}
+			}
+		}
+		
+		// For host processes, be more selective
+		return false
+	})
+
+	c.logger.Info("Noise reduction filters enabled",
+		zap.String("collector", c.Name()),
+		zap.Int("filter_count", 3))
 }
 
 // parseK8sUIDFromNetns extracts Kubernetes UID from network namespace path

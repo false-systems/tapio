@@ -15,6 +15,8 @@ If you're a small team running Kubernetes, you've likely experienced this:
 - Setting up Prometheus + Grafana + Loki + Tempo + Jaeger requires a dedicated SRE
 - You're drowning in metrics but still can't answer "why is production slow?"
 - Your dashboards look impressive, but they don't help during incidents
+- You see network spikes but can't tell which pod is responsible
+- OOM kills happen but you find out hours later from angry users
 
 We've been there. After years of building and operating cloud-native systems, we're building what we wished existed: observability that just works, without the complexity.
 
@@ -79,39 +81,62 @@ We've been there. After years of building and operating cloud-native systems, we
 
 ## The Collectors
 
-We gather telemetry from multiple sources to build a complete picture:
+We're building collectors that gather telemetry from multiple sources. Most now use a base architecture for consistency.
+
+### **Working Towards: PID → Container → Pod Correlation**
+
+We're implementing the foundation to connect:
+```
+Network Event (PID 1234) → Which Container? → Which Pod?
+```
+
+The **CRI-eBPF collector** can track PIDs to containers, and we're working on integrating this with other collectors.
 
 ### **Kernel & System Level**
-- **Kernel Collector** (`/pkg/collectors/kernel`) - eBPF-based system call, file operations, and process lifecycle tracking
-- **Storage I/O Collector** (`/pkg/collectors/storage-io`) - VFS-level storage operations, latency, and performance bottlenecks  
-- **Syscall Errors Collector** (`/pkg/collectors/syscall-errors`) - System call error tracking and failure analysis
-- **OOM Collector** (`/pkg/collectors/oom`) - Out-of-memory events and memory pressure detection
+- **Kernel Collector** - eBPF syscalls, file ops, process lifecycle. Base architecture with ring buffers.
+- **Storage I/O Collector** - VFS operations and latency. Migrated to base package for consistent metrics.
+- **Syscall Errors Collector** - System call failures with automatic error rate tracking
+- **Resource Starvation** - CPU throttling and scheduling delays that actually impact performance
+- **Memory Leak Hunter** - Track allocations and find leaks before they cause OOMs
 
-### **Container & Namespace**  
-- **CRI Collector** (`/pkg/collectors/cri`) - Container Runtime Interface for lifecycle and resource monitoring
-- **CRI-eBPF Collector** (`/pkg/collectors/cri-ebpf`) - Deep container runtime visibility using eBPF probes
-- **Namespace Collector** (`/pkg/collectors/namespace-collector`) - Network namespace monitoring and container networking
+### **Container & Runtime**  
+- **CRI Collector** - Container lifecycle via CRI API
+- **CRI-eBPF Collector** - Tracks processes to containers using eBPF
+  - OOM detection
+  - Container start with PID extraction from /proc
+  - Process fork tracking
+  - Memory pressure monitoring
 
 ### **Kubernetes & Orchestration**
-- **Kubelet Collector** (`/pkg/collectors/kubelet`) - Pod phases, conditions, and resource allocation vs usage
-- **KubeAPI Collector** (`/pkg/collectors/kubeapi`) - Kubernetes API server events and cluster state changes
+- **Kubelet Collector** - Pod lifecycle, conditions, actual vs requested resources
+- **KubeAPI Collector** - Cluster state with relationship tracking and trace management
+  - Automatic relationship caching for performance
+  - Resource trace management for debugging
+  - Configurable namespace filtering
 
 ### **Networking**
-- **DNS Collector** (`/pkg/collectors/dns`) - Because DNS is always the problem. Resolution times, failures, and patterns
-- **Network Collector** (`/pkg/collectors/network`) - L3/L4/L7 network intelligence with eBPF-based traffic analysis
+- **DNS Collector** - DNS resolution monitoring and failure tracking
+- **Network Collector** - L3/L4/L7 traffic monitoring with eBPF
+- **Service Map Collector** - Service discovery and dependency mapping
+  - Automatic service detection from K8s resources
+  - Connection tracking between services
+  - Service type identification (database, cache, API, etc.)
 
-### **Service Discovery & Coordination**
-- **etcd-API Collector** (`/pkg/collectors/etcd-api`) - etcd API-level monitoring  
-- **etcd-eBPF Collector** (`/pkg/collectors/etcd-ebpf`) - Deep etcd performance monitoring with eBPF
+### **Runtime Signals**
+- **Runtime Signals Collector** - Go runtime internals, GC pressure, goroutine leaks
 
 ### **System Services**
-- **Systemd Collector** (`/pkg/collectors/systemd`) - eBPF-based systemd service monitoring and journal analysis
-- **Systemd-API Collector** (`/pkg/collectors/systemd-api`) - Systemd D-Bus API monitoring for service lifecycle
+- **Systemd Collector** - Service lifecycle with journal integration
+- **Systemd-API Collector** - D-Bus monitoring for service state changes
 
 ### **Observability**
-- **OTEL Collector** (`/pkg/collectors/otel`) - OpenTelemetry integration for metrics, traces, and logs
+- **OTEL Collector** - OpenTelemetry bridge for existing instrumentation
 
-Each collector implements the same interface and outputs unified events that flow into our correlation engine. No vendor lock-in, no complex configuration - just plug and observe.
+Each collector embeds `BaseCollector` for:
+- Automatic health monitoring (degraded after timeout)
+- Event/error/drop statistics
+- OTEL metrics and tracing
+- Consistent lifecycle management
 
 ## Architecture
 
@@ -127,17 +152,19 @@ Level 4: Interfaces   - APIs and UI (depends on L0-L3)
 
 This isn't architectural astronautics - it's how we prevent the codebase from becoming the spaghetti we're trying to debug.
 
-## What Makes Tapio Different
+## What We're Building
 
-1. **Built for Reality**: We're not trying to monitor Netflix. This is for teams of 3-20 engineers with 50-500 pods.
+1. **For Small Teams**: Designed for teams of 3-20 engineers with moderate-scale deployments
 
-2. **Correlation First**: Instead of 30 dashboards, we focus on connecting the dots. When your API is slow, we tell you it's because DNS to your database is timing out.
+2. **Event Correlation**: Working to connect kernel events to Kubernetes resources so you know which pod caused what
 
-3. **Resource Efficient**: Runs on a single node. Your observability shouldn't cost more than what you're observing.
+3. **Process Tracking**: Building PID to container mapping to eliminate blind spots in monitoring
 
-4. **No Query Languages**: You shouldn't need to learn PromQL, KQL, or GraphQL to understand why production is down.
+4. **Fast Detection**: Using eBPF to detect issues like OOM kills faster than traditional polling
 
-5. **eBPF Native**: Deep visibility without overhead. We see everything from kernel syscalls to Kubernetes API calls.
+5. **Simple Queries**: Aiming to eliminate complex query languages - just ask questions in plain terms
+
+6. **eBPF-Based**: Using eBPF where possible for low-overhead monitoring
 
 ## Our Philosophy
 
@@ -167,18 +194,21 @@ We're not building the next Datadog. We're building what small teams need:
 ## Current State
 
 ### What Works
-- All 18 collectors compile and run ✅
-- eBPF-based kernel, container, and network monitoring ✅
-- Unified event schema across all telemetry sources ✅
-- Basic correlation engine for root cause analysis ✅
-- Type-safe CollectorEvent architecture (zero map[string]interface{}) ✅
-- Direct OpenTelemetry instrumentation (no wrappers) ✅
+- Most collectors compile and run
+- Basic eBPF monitoring for kernel, container, and network events
+- Unified event schema across collectors
+- Type-safe CollectorEvent architecture
+- OpenTelemetry instrumentation
+- BaseCollector architecture for consistency
+- Initial PID to container tracking implementation
 
 ### Being Built
+- Integration between collectors for full correlation
 - Neo4j integration for relationship mapping
 - API layer for queries and insights
-- Advanced correlation algorithms
+- Correlation algorithms
 - Web UI for investigation workflows
+- Production stability and testing
 
 
 ## Getting Started
