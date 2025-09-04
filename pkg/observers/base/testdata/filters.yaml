@@ -1,0 +1,52 @@
+version: "1.0"
+description: "Example filter configuration for testing"
+
+# Deny filters - drop matching events
+deny:
+  - name: "localhost_traffic"
+    type: "network"
+    description: "Filter out localhost traffic"
+    condition:
+      source_ip: ["127.0.0.1", "::1"]
+      dest_ip: ["127.0.0.1", "::1"]
+
+  - name: "healthcheck_endpoints"
+    type: "http"
+    description: "Filter out health check endpoints"
+    condition:
+      paths: ["/health", "/ready", "/metrics", "/healthz", "/readyz"]
+      
+  - name: "noisy_dns"
+    type: "dns"
+    description: "Filter out noisy DNS queries"
+    condition:
+      domains: ["*.local", "*.cluster.local", "metadata.google.internal"]
+      query_types: ["PTR"]  # Reverse DNS lookups
+      
+  - name: "debug_logs"
+    type: "severity"
+    enabled: false  # Can be toggled
+    description: "Filter out debug level events"
+    condition:
+      min_severity: "info"  # Drop everything below INFO
+
+# Allow filters - only process matching events
+allow:
+  - name: "business_hours_critical"
+    type: "time_based"
+    enabled: false  # Disabled by default
+    description: "During business hours, only process critical events"
+    condition:
+      hours: "09:00-17:00"
+      sample_rate: 0.1  # Keep only 10% during these hours
+      
+  - name: "important_syscalls"
+    type: "event_type"
+    enabled: false
+    description: "Only track important syscall events"
+    condition:
+      types: 
+        - "kernel.syscall"
+        - "kernel.network"
+        - "kernel.filesystem"
+      exclude: false  # Include these types (not exclude)
