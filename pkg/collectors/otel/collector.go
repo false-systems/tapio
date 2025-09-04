@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/collectors"
+	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -19,19 +20,13 @@ import (
 
 // Collector implements OTLP receiver - works on ALL platforms
 type Collector struct {
-	name   string
+	*base.BaseCollector       // Provides Statistics() and Health()
+	*base.EventChannelManager // Handles event channels
+	*base.LifecycleManager    // Manages goroutines
+
+	// Core configuration
 	config *Config
 	logger *zap.Logger
-
-	// Lifecycle
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	healthy atomic.Bool
-	mu      sync.RWMutex
-
-	// Event channel
-	events chan *domain.CollectorEvent
 
 	// OTLP servers
 	grpcServer   *grpc.Server
@@ -45,11 +40,10 @@ type Collector struct {
 	// Statistics
 	stats *Stats
 
-	// OpenTelemetry instrumentation
+	// OTEL-specific instrumentation
 	tracer          trace.Tracer
 	spansReceived   metric.Int64Counter
 	metricsReceived metric.Int64Counter
-	errorsTotal     metric.Int64Counter
 	processingTime  metric.Float64Histogram
 }
 
@@ -81,11 +75,23 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Initialize OTEL instrumentation
+	// Initialize base components
+	baseConfig := base.BaseCollectorConfig{
+		Name:               name,
+		HealthCheckTimeout: 30 * time.Second,
+		ErrorRateThreshold: 0.05,
+		Logger:             logger,
+	}
+
+	baseCollector := base.NewBaseCollectorWithConfig(baseConfig)
+	eventManager := base.NewEventChannelManager(config.BufferSize, name, logger)
+	lifecycle := base.NewLifecycleManager(context.Background(), logger)
+
+	// Initialize OTEL-specific instrumentation
 	tracer := otel.Tracer(name)
 	meter := otel.Meter(name)
 
-	// Create metrics
+	// Create OTEL-specific metrics
 	spansReceived, err := meter.Int64Counter(
 		fmt.Sprintf("%s_spans_received_total", name),
 		metric.WithDescription("Total OTEL spans received"),
@@ -102,14 +108,6 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 		logger.Warn("Failed to create metrics counter", zap.Error(err))
 	}
 
-	errorsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_errors_total", name),
-		metric.WithDescription("Total errors in OTEL collector"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create errors counter", zap.Error(err))
-	}
-
 	processingTime, err := meter.Float64Histogram(
 		fmt.Sprintf("%s_processing_duration_ms", name),
 		metric.WithDescription("OTEL event processing duration in milliseconds"),
@@ -119,31 +117,29 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 	}
 
 	return &Collector{
-		name:            name,
-		config:          config,
-		logger:          logger,
-		events:          make(chan *domain.CollectorEvent, config.BufferSize),
-		serviceDeps:     make(map[string]map[string]int64),
-		stats:           &Stats{},
-		tracer:          tracer,
-		spansReceived:   spansReceived,
-		metricsReceived: metricsReceived,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
+		BaseCollector:       baseCollector,
+		EventChannelManager: eventManager,
+		LifecycleManager:    lifecycle,
+		config:              config,
+		logger:              logger.Named(name),
+		serviceDeps:         make(map[string]map[string]int64),
+		stats:               &Stats{},
+		tracer:              tracer,
+		spansReceived:       spansReceived,
+		metricsReceived:     metricsReceived,
+		processingTime:      processingTime,
 	}, nil
 }
 
 // Name returns the collector name
 func (c *Collector) Name() string {
-	return c.name
+	return c.BaseCollector.GetName()
 }
 
 // Start begins OTLP collection
 func (c *Collector) Start(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "otel.collector.start")
 	defer span.End()
-
-	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Start OTLP gRPC server
 	if c.config.GRPCEndpoint != "" {
@@ -157,30 +153,27 @@ func (c *Collector) Start(ctx context.Context) error {
 		c.grpcServer = grpc.NewServer()
 		// OTLP trace service registration will be added when implementing full OTLP protocol
 
-		c.wg.Add(1)
 		go func() {
-			defer c.wg.Done()
 			if err := c.grpcServer.Serve(c.grpcListener); err != nil {
 				c.logger.Error("gRPC server error", zap.Error(err))
+				c.BaseCollector.RecordError(err)
 			}
 		}()
 	}
 
 	// Start service dependency emitter
 	if c.config.EnableDependencies {
-		c.wg.Add(1)
 		go c.emitServiceDependencies()
 	}
 
 	// Start test event processor for validation
-	c.wg.Add(1)
 	go c.processEvents()
 
-	c.healthy.Store(true)
+	c.BaseCollector.SetHealthy(true)
 	c.lastDepsEmit = time.Now()
 
 	c.logger.Info("OTEL collector started",
-		zap.String("name", c.name),
+		zap.String("name", c.config.Name),
 		zap.String("grpc_endpoint", c.config.GRPCEndpoint),
 		zap.String("http_endpoint", c.config.HTTPEndpoint),
 		zap.Bool("dependencies", c.config.EnableDependencies),
@@ -192,48 +185,42 @@ func (c *Collector) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down the collector
 func (c *Collector) Stop() error {
-	c.logger.Info("Stopping OTEL collector", zap.String("name", c.name))
+	c.logger.Info("Stopping OTEL collector", zap.String("name", c.config.Name))
 
-	if c.cancel != nil {
-		c.cancel()
-	}
+	// Stop lifecycle manager with timeout
+	c.LifecycleManager.Stop(30 * time.Second)
 
 	// Stop gRPC server
 	if c.grpcServer != nil {
 		c.grpcServer.GracefulStop()
 	}
 
-	// Wait for goroutines
-	c.wg.Wait()
-
 	// Close event channel
-	close(c.events)
+	c.EventChannelManager.Close()
 
-	c.healthy.Store(false)
+	c.BaseCollector.SetHealthy(false)
 
 	return nil
 }
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	return c.events
+	return c.EventChannelManager.GetChannel()
 }
 
 // IsHealthy returns health status
 func (c *Collector) IsHealthy() bool {
-	return c.healthy.Load()
+	return c.BaseCollector.IsHealthy()
 }
 
 // processEvents test processor for validation
 func (c *Collector) processEvents() {
-	defer c.wg.Done()
-
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			return
 		case <-ticker.C:
 			// Emit test span for validation
@@ -250,7 +237,7 @@ func (c *Collector) emitTestSpan() {
 	event := &domain.CollectorEvent{
 		EventID:   fmt.Sprintf("otel-span-%d", now.UnixNano()),
 		Timestamp: now,
-		Source:    c.name,
+		Source:    c.config.Name,
 		Type:      domain.EventTypeOTELSpan,
 		Severity:  domain.EventSeverityInfo,
 		EventData: domain.EventDataContainer{
@@ -278,27 +265,27 @@ func (c *Collector) emitTestSpan() {
 		},
 	}
 
-	select {
-	case c.events <- event:
+	if c.EventChannelManager.SendEvent(event) {
 		atomic.AddUint64(&c.stats.EventsEmitted, 1)
 		c.stats.LastEventTime = now
-	case <-c.ctx.Done():
-		return
-	default:
+		c.BaseCollector.RecordEvent()
+		if c.spansReceived != nil {
+			c.spansReceived.Add(c.LifecycleManager.Context(), 1)
+		}
+	} else {
 		atomic.AddUint64(&c.stats.SpansDropped, 1)
+		c.BaseCollector.RecordDrop()
 	}
 }
 
 // emitServiceDependencies periodically emits service dependency events
 func (c *Collector) emitServiceDependencies() {
-	defer c.wg.Done()
-
 	ticker := time.NewTicker(c.config.ServiceMapInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			return
 		case <-ticker.C:
 			c.emitDependencyEvents()
@@ -318,7 +305,7 @@ func (c *Collector) emitDependencyEvents() {
 			event := &domain.CollectorEvent{
 				EventID:   fmt.Sprintf("otel-dep-%s-%s-%d", fromService, toService, now.UnixNano()),
 				Timestamp: now,
-				Source:    c.name,
+				Source:    c.config.Name,
 				Type:      domain.EventTypeOTELMetric,
 				Severity:  domain.EventSeverityInfo,
 				EventData: domain.EventDataContainer{
@@ -332,13 +319,13 @@ func (c *Collector) emitDependencyEvents() {
 				},
 			}
 
-			select {
-			case c.events <- event:
-				// Successfully sent
-			case <-c.ctx.Done():
-				return
-			default:
-				// Buffer full, skip
+			if c.EventChannelManager.SendEvent(event) {
+				c.BaseCollector.RecordEvent()
+				if c.metricsReceived != nil {
+					c.metricsReceived.Add(c.LifecycleManager.Context(), 1)
+				}
+			} else {
+				c.BaseCollector.RecordDrop()
 			}
 		}
 	}
