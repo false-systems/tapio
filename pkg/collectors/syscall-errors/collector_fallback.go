@@ -23,7 +23,7 @@ func (c *Collector) stopEBPF() {
 func (c *Collector) readEvents() {
 	c.logger.Debug("eBPF event reading skipped (Linux-only feature)")
 	// Keep goroutine alive but idle
-	<-c.ctx.Done()
+	<-c.LifecycleManager.Context().Done()
 }
 
 // processRawEvent - No-op on non-Linux platforms

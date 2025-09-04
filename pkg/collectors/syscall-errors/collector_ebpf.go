@@ -31,7 +31,7 @@ type ebpfState struct {
 
 // startEBPF initializes and attaches eBPF programs (Linux-specific)
 func (c *Collector) startEBPF() error {
-	ctx, span := c.tracer.Start(c.ctx, "syscall_errors.start_ebpf")
+	ctx, span := c.tracer.Start(c.LifecycleManager.Context(), "syscall_errors.start_ebpf")
 	defer span.End()
 
 	// Remove memory limit for eBPF
@@ -136,7 +136,7 @@ func (c *Collector) readEvents() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.LifecycleManager.Context().Done():
 			c.logger.Info("Stopping syscall error event processing")
 			return
 		default:
@@ -146,7 +146,7 @@ func (c *Collector) readEvents() {
 					return
 				}
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
+					c.errorsTotal.Add(c.LifecycleManager.Context(), 1, metric.WithAttributes(
 						attribute.String("error_type", "ring_buffer_read"),
 					))
 				}
@@ -174,7 +174,7 @@ func (c *Collector) readEvents() {
 			if err := c.processRawEvent(record.RawSample); err != nil {
 				c.logger.Warn("Failed to process event", zap.Error(err))
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(c.ctx, 1, metric.WithAttributes(
+					c.errorsTotal.Add(c.LifecycleManager.Context(), 1, metric.WithAttributes(
 						attribute.String("error_type", "event_processing_failed"),
 					))
 				}
@@ -185,7 +185,7 @@ func (c *Collector) readEvents() {
 
 // processRawEvent processes a single raw eBPF event
 func (c *Collector) processRawEvent(data []byte) error {
-	ctx, span := c.tracer.Start(c.ctx, "syscall_errors.process_event")
+	ctx, span := c.tracer.Start(c.LifecycleManager.Context(), "syscall_errors.process_event")
 	defer span.End()
 
 	start := time.Now()
@@ -236,16 +236,14 @@ func (c *Collector) processRawEvent(data []byte) error {
 	c.updateErrorMetrics(ctx, event.ErrorCode)
 
 	// Send to event channel
-	select {
-	case c.eventChan <- collectorEvent:
+	if c.EventChannelManager.SendEvent(collectorEvent) {
 		span.SetAttributes(
 			attribute.String("syscall", getSyscallName(event.SyscallNr)),
 			attribute.String("error", getErrorName(event.ErrorCode)),
 			attribute.Int("pid", int(event.PID)),
 		)
-	case <-c.ctx.Done():
-		return nil
-	default:
+		c.BaseCollector.RecordEvent()
+	} else {
 		// Channel full, drop event
 		if c.eventsDropped != nil {
 			c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
@@ -258,6 +256,7 @@ func (c *Collector) processRawEvent(data []byte) error {
 				attribute.String("error_type", "channel_full"),
 			))
 		}
+		c.BaseCollector.RecordError(fmt.Errorf("channel full, dropping event"))
 
 		// Log warning with rate limiting
 		now := time.Now()
