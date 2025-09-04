@@ -5,7 +5,6 @@ package servicemap
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -31,18 +30,25 @@ type ebpfState struct {
 
 // ConnectionEvent represents a connection event from eBPF (matches C struct)
 type ConnectionEvent struct {
-	SrcIP     uint32    `json:"src_ip"`
-	DstIP     uint32    `json:"dst_ip"`
-	SrcPort   uint16    `json:"src_port"`
-	DstPort   uint16    `json:"dst_port"`
-	Protocol  uint8     `json:"protocol"`
-	EventType uint8     `json:"event_type"` // 0=new, 1=close
-	Timestamp uint64    `json:"timestamp"`
-	BytesSent uint64    `json:"bytes_sent"`
-	BytesRecv uint64    `json:"bytes_recv"`
-	PID       uint32    `json:"pid"`
-	UID       uint32    `json:"uid"`
-	Comm      [16]int8  `json:"comm"`
+	SrcIP       uint32    `json:"src_ip"`
+	DstIP       uint32    `json:"dst_ip"`
+	SrcPort     uint16    `json:"src_port"`
+	DstPort     uint16    `json:"dst_port"`
+	Protocol    uint8     `json:"protocol"`
+	EventType   uint8     `json:"event_type"` // 0=connect, 1=accept, 2=close, 3=reset, 4=update
+	Timestamp   uint64    `json:"timestamp"`
+	BytesSent   uint64    `json:"bytes_sent"`
+	BytesRecv   uint64    `json:"bytes_recv"`
+	PID         uint32    `json:"pid"`
+	UID         uint32    `json:"uid"`
+	Comm        [16]int8  `json:"comm"`
+	// TCP metrics from kernel
+	Retransmits uint32    `json:"retransmits"`
+	RTTUS       uint32    `json:"rtt_us"`      // Smoothed RTT in microseconds
+	RTTVarUS    uint32    `json:"rtt_var_us"`  // RTT variance
+	TCPState    uint8     `json:"tcp_state"`   // TCP state
+	Direction   uint8     `json:"direction"`   // 0=unknown, 1=outbound, 2=inbound
+	Resets      uint16    `json:"resets"`      // RST packets
 }
 
 // startEBPF initializes and starts eBPF programs for connection tracking
@@ -98,10 +104,7 @@ func (c *Collector) startEBPF() error {
 			continue
 		}
 
-		l, err := link.Kprobe(&link.KprobeOptions{
-			Symbol: symbol,
-			Program: prog,
-		})
+		l, err := link.Kprobe(symbol, prog, nil)
 		if err != nil {
 			c.logger.Warn("Failed to attach kprobe", 
 				zap.String("symbol", symbol),
@@ -209,18 +212,25 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 
 	start := time.Now()
 
-	// Convert to Connection struct
+	// Convert to Connection struct with REAL TCP METRICS
 	conn := &Connection{
-		SourceIP:   event.SrcIP,
-		DestIP:     event.DstIP,
-		SourcePort: event.SrcPort,
-		DestPort:   event.DstPort,
-		Protocol:   event.Protocol,
-		Timestamp:  time.Unix(0, int64(event.Timestamp)),
-		BytesSent:  event.BytesSent,
-		BytesRecv:  event.BytesRecv,
-		Latency:    0, // Could be calculated from connect->accept timing
+		SourceIP:    event.SrcIP,
+		DestIP:      event.DstIP,
+		SourcePort:  event.SrcPort,
+		DestPort:    event.DstPort,
+		Protocol:    event.Protocol,
+		Direction:   ConnDirection(event.Direction), // From eBPF now!
+		State:       c.mapTCPState(event.TCPState),   // Real TCP state
+		Timestamp:   time.Unix(0, int64(event.Timestamp)),
+		BytesSent:   event.BytesSent,
+		BytesRecv:   event.BytesRecv,
+		Latency:     uint64(event.RTTUS) * 1000,     // Convert to nanoseconds
+		Retransmits: event.Retransmits,              // REAL retransmits from kernel!
+		Resets:      uint32(event.Resets),           // Real RST count
 	}
+	
+	// Calculate L4 quality score with REAL metrics
+	conn.Quality = conn.CalculateQuality()
 
 	// Create connection key
 	connKey := fmt.Sprintf("%s:%d->%s:%d", 
@@ -259,39 +269,164 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 	c.emitConnectionEvent(ctx, conn, event)
 }
 
+// mapTCPState maps kernel TCP state to our ConnState
+func (c *Collector) mapTCPState(tcpState uint8) ConnState {
+	// Linux TCP states from tcp_states.h
+	const (
+		TCP_ESTABLISHED = 1
+		TCP_SYN_SENT    = 2
+		TCP_SYN_RECV    = 3
+		TCP_FIN_WAIT1   = 4
+		TCP_FIN_WAIT2   = 5
+		TCP_TIME_WAIT   = 6
+		TCP_CLOSE       = 7
+		TCP_CLOSE_WAIT  = 8
+		TCP_LAST_ACK    = 9
+		TCP_LISTEN      = 10
+		TCP_CLOSING     = 11
+	)
+	
+	switch tcpState {
+	case TCP_ESTABLISHED:
+		return StateEstablished
+	case TCP_SYN_SENT, TCP_SYN_RECV:
+		return StateSynSent
+	case TCP_FIN_WAIT1, TCP_FIN_WAIT2, TCP_CLOSE_WAIT, TCP_LAST_ACK, TCP_CLOSING:
+		return StateFinWait
+	case TCP_CLOSE, TCP_TIME_WAIT:
+		return StateClosed
+	default:
+		return StateUnknown
+	}
+}
+
+// detectConnectionDirection determines who initiated the connection (DEPRECATED - now from eBPF)
+func (c *Collector) detectConnectionDirection(event *ConnectionEvent) ConnDirection {
+	// Now we get this directly from eBPF!
+	return ConnDirection(event.Direction)
+}
+
+// detectConnectionState determines the connection state
+func (c *Collector) detectConnectionState(event *ConnectionEvent) ConnState {
+	// Upper bits of EventType encode state
+	stateCode := (event.EventType >> 4) & 0x0F
+	
+	switch stateCode {
+	case 0:
+		return StateEstablished
+	case 1:
+		return StateSynSent
+	case 2:
+		return StateFinWait
+	case 3:
+		return StateClosed
+	case 4:
+		return StateReset
+	default:
+		return StateUnknown
+	}
+}
+
 // updateServiceConnections updates service connection statistics
 func (c *Collector) updateServiceConnections(conn *Connection, event *ConnectionEvent) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	srcService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.SourceIP), conn.SourcePort)]
-	if srcService == "" {
-		srcService = c.ipToService[intToIP(conn.SourceIP)]
-	}
+	// Get all possible source services
+	srcServices := c.getServicesForIP(intToIP(conn.SourceIP), conn.SourcePort)
+	dstServices := c.getServicesForIP(intToIP(conn.DestIP), conn.DestPort)
 
-	dstService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.DestIP), conn.DestPort)]
-	if dstService == "" {
-		dstService = c.ipToService[intToIP(conn.DestIP)]
-	}
-
-	if srcService != "" && dstService != "" && srcService != dstService {
-		// Update request rate and latency stats for services
-		if src, ok := c.services[srcService]; ok {
-			if dep, exists := src.Dependencies[dstService]; exists {
-				dep.CallRate += 1
-				dep.LastSeen = time.Now()
+	// Update connections for all service pairs
+	for _, srcService := range srcServices {
+		for _, dstService := range dstServices {
+			if srcService != "" && dstService != "" && srcService != dstService {
+				// Track connection quality for outlier detection
+				c.updateEndpointStats(conn, srcService, dstService)
 				
-				// Update protocol if not set
-				if dep.Protocol == "" {
-					dep.Protocol = protocolToString(conn.Protocol)
+				// Use connection direction to determine dependency
+				if conn.Direction == DirectionOutbound {
+					// We (srcService) called them (dstService)
+					if src, ok := c.services[srcService]; ok {
+						if dep, exists := src.Dependencies[dstService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+							if dep.Protocol == "" {
+								dep.Protocol = protocolToString(conn.Protocol)
+							}
+							// Track error rate
+							if conn.State == StateReset || conn.Quality < 0.5 {
+								dep.ErrorRate++
+							}
+						}
+					}
+					if dst, ok := c.services[dstService]; ok {
+						if dep, exists := dst.Dependents[srcService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+						}
+					}
+				} else if conn.Direction == DirectionInbound {
+					// They (srcService) called us (dstService) 
+					// Reverse the dependency direction
+					if dst, ok := c.services[dstService]; ok {
+						if dep, exists := dst.Dependencies[srcService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+							if dep.Protocol == "" {
+								dep.Protocol = protocolToString(conn.Protocol)
+							}
+							// Track error rate
+							if conn.State == StateReset || conn.Quality < 0.5 {
+								dep.ErrorRate++
+							}
+						}
+					}
+					if src, ok := c.services[srcService]; ok {
+						if dep, exists := src.Dependents[dstService]; exists {
+							dep.CallRate += 1
+							dep.LastSeen = time.Now()
+						}
+					}
 				}
 			}
 		}
+	}
+}
 
-		if dst, ok := c.services[dstService]; ok {
-			if dep, exists := dst.Dependents[srcService]; exists {
-				dep.CallRate += 1
-				dep.LastSeen = time.Now()
+// updateEndpointStats tracks connection quality for outlier detection
+func (c *Collector) updateEndpointStats(conn *Connection, srcService, dstService string) {
+	// Find destination endpoint
+	if dstSvc, ok := c.services[dstService]; ok {
+		for i := range dstSvc.Endpoints {
+			ep := &dstSvc.Endpoints[i]
+			if ep.IP == intToIP(conn.DestIP) {
+				if ep.OutlierStatus == nil {
+					ep.OutlierStatus = &OutlierStatus{}
+				}
+				
+				// Track connection pool stats
+				if conn.State == StateEstablished {
+					ep.OutlierStatus.ActiveConnections++
+				} else if conn.State == StateSynSent {
+					ep.OutlierStatus.PendingConnections++
+				}
+				
+				// Track errors for outlier detection
+				if conn.State == StateReset {
+					ep.OutlierStatus.ConsecutiveErrors++
+					ep.OutlierStatus.Consecutive5xx++ // Treat RST as 5xx-like error
+				} else if conn.Quality > 0.8 {
+					// Good connection resets error counters
+					ep.OutlierStatus.ConsecutiveErrors = 0
+					ep.OutlierStatus.Consecutive5xx = 0
+				}
+				
+				// Track retransmits as potential issues
+				if conn.Retransmits > 5 {
+					ep.OutlierStatus.RequestRetries++
+				}
+				
+				break
 			}
 		}
 	}
@@ -302,27 +437,29 @@ func (c *Collector) emitConnectionEvent(ctx context.Context, conn *Connection, e
 	// Create domain event for the connection
 	commStr := string(bytes.Trim((*(*[]byte)(unsafe.Pointer(&ebpfEvent.Comm)))[:16], "\x00"))
 	
-	connectionData := map[string]interface{}{
+	connectionData := map[string]string{
 		"source_ip":   intToIP(conn.SourceIP),
 		"dest_ip":     intToIP(conn.DestIP),
-		"source_port": conn.SourcePort,
-		"dest_port":   conn.DestPort,
+		"source_port": fmt.Sprintf("%d", conn.SourcePort),
+		"dest_port":   fmt.Sprintf("%d", conn.DestPort),
 		"protocol":    protocolToString(conn.Protocol),
-		"bytes_sent":  conn.BytesSent,
-		"bytes_recv":  conn.BytesRecv,
-		"pid":         ebpfEvent.PID,
-		"uid":         ebpfEvent.UID,
+		"bytes_sent":  fmt.Sprintf("%d", conn.BytesSent),
+		"bytes_recv":  fmt.Sprintf("%d", conn.BytesRecv),
+		"pid":         fmt.Sprintf("%d", ebpfEvent.PID),
+		"uid":         fmt.Sprintf("%d", ebpfEvent.UID),
 		"process":     commStr,
-		"event_type":  ebpfEvent.EventType,
+		"event_type":  fmt.Sprintf("%d", ebpfEvent.EventType),
 	}
 
 	event := &domain.CollectorEvent{
-		EventID:     fmt.Sprintf("connection-%d", ebpfEvent.Timestamp),
-		CollectorID: c.Name(),
-		Type:        domain.EventTypeNetworkConnection,
-		Timestamp:   time.Unix(0, int64(ebpfEvent.Timestamp)),
-		Severity:    domain.SeverityDebug, // Connections are debug level
-		Data:        connectionData,
+		EventID:   fmt.Sprintf("connection-%d", ebpfEvent.Timestamp),
+		Source:    c.Name(),
+		Type:      domain.EventTypeNetworkConnection,
+		Timestamp: time.Unix(0, int64(ebpfEvent.Timestamp)),
+		Severity:  domain.EventSeverityInfo, // Use EventSeverityInfo instead of SeverityDebug
+		EventData: domain.EventDataContainer{
+			Custom: connectionData,
+		},
 	}
 
 	// Filter the event

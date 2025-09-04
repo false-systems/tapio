@@ -155,10 +155,6 @@ func (c *Config) Validate() error {
 		c.BufferSize = 10000
 	}
 	
-	if c.UpdateInterval <= 0 {
-		c.UpdateInterval = 30 * time.Second
-	}
-	
 	if c.MaxConnections <= 0 {
 		c.MaxConnections = 100000
 	}

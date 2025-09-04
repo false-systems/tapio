@@ -16,3 +16,4 @@ type CrimonitorPrograms = crimonitorPrograms
 // Export the generated loader functions
 var LoadCrimonitor = loadCrimonitor
 var LoadCrimonitorObjects = loadCrimonitorObjects
+

@@ -11,6 +11,8 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,7 +36,7 @@ type Collector struct {
 	// Service tracking
 	services    map[string]*Service     // namespace/name -> service
 	connections map[string]*Connection  // src:port->dst:port -> connection
-	ipToService map[string]string       // IP -> service name
+	ipToService map[string][]string     // IP[:port] -> []service names (multiple services can share IP)
 	mu          sync.RWMutex
 
 	// eBPF state (platform-specific)
@@ -91,7 +93,7 @@ func NewCollector(name string, config *Config, logger *zap.Logger) (*Collector, 
 		k8sClient:           k8sClient,
 		services:            make(map[string]*Service),
 		connections:         make(map[string]*Connection),
-		ipToService:         make(map[string]string),
+		ipToService:         make(map[string][]string),
 		pendingChanges:      make(chan ChangeEvent, 1000),
 		lastEmitTime:        time.Now(),
 	}
@@ -169,6 +171,16 @@ func (c *Collector) Stop() error {
 	c.LifecycleManager.Stop(5 * time.Second)
 
 	return nil
+}
+
+// Events returns the events channel - required by Collector interface
+func (c *Collector) Events() <-chan *domain.CollectorEvent {
+	return c.EventChannelManager.GetChannel()
+}
+
+// IsHealthy returns collector health status - required by Collector interface  
+func (c *Collector) IsHealthy() bool {
+	return c.BaseCollector.IsHealthy()
 }
 
 // watchKubernetesServices watches for Kubernetes service changes
@@ -312,9 +324,10 @@ func (c *Collector) discoverServices(ctx context.Context) {
 						service.Endpoints = append(service.Endpoints, endpoint)
 						
 						// Map IP to service for connection tracking
-						ipKey := fmt.Sprintf("%s:%d", addr.IP, port.Port)
-						c.ipToService[ipKey] = key
-						c.ipToService[addr.IP] = key // Also map just IP
+						// Multiple services can share the same IP (NodePort, HostNetwork, etc)
+						ipPortKey := fmt.Sprintf("%s:%d", addr.IP, port.Port)
+						c.addIPServiceMapping(ipPortKey, key)
+						c.addIPServiceMapping(addr.IP, key) // Also map just IP for broader matching
 					}
 				}
 			}
@@ -330,21 +343,34 @@ func (c *Collector) discoverServices(ctx context.Context) {
 			service.Type = ServiceTypeUnknown
 		}
 
-		// Update health based on endpoints
+		// Run outlier detection on endpoints (Envoy-style)
+		c.detectOutliers(service)
+		
+		// Update health based on endpoints (outlier detection may have ejected some)
 		oldHealth := service.Health
 		if len(service.Endpoints) == 0 {
 			service.Health = HealthDown
 		} else {
 			readyCount := 0
+			ejectedCount := 0
 			for _, ep := range service.Endpoints {
-				if ep.Ready {
+				if ep.OutlierStatus != nil && ep.OutlierStatus.CurrentlyEjected {
+					ejectedCount++
+				} else if ep.Ready {
 					readyCount++
 				}
 			}
+			
 			if readyCount == len(service.Endpoints) {
 				service.Health = HealthHealthy
 			} else if readyCount > 0 {
 				service.Health = HealthDegraded
+				if ejectedCount > 0 {
+					c.logger.Debug("Service degraded due to ejected endpoints",
+						zap.String("service", service.Name),
+						zap.Int("ejected", ejectedCount),
+						zap.Int("healthy", readyCount))
+				}
 			} else {
 				service.Health = HealthDown
 			}
@@ -407,6 +433,106 @@ func (c *Collector) detectServiceType(svc *corev1.Service) ServiceType {
 	}
 
 	return ServiceTypeUnknown
+}
+
+// addIPServiceMapping safely adds a service to the IP mapping (handles multiple services per IP)
+func (c *Collector) addIPServiceMapping(ip string, service string) {
+	// Check if service already mapped to this IP
+	services := c.ipToService[ip]
+	for _, s := range services {
+		if s == service {
+			return // Already mapped
+		}
+	}
+	c.ipToService[ip] = append(services, service)
+}
+
+// detectOutliers implements Envoy-style outlier detection
+func (c *Collector) detectOutliers(service *Service) {
+	const (
+		consecutive5xxThreshold = 5
+		baseEjectionTime       = 30 * time.Second
+		maxEjectionPercent     = 0.5 // 50% max ejection
+	)
+	
+	ejectedCount := 0
+	totalEndpoints := len(service.Endpoints)
+	maxEjectable := int(float64(totalEndpoints) * maxEjectionPercent)
+	if maxEjectable < 1 && totalEndpoints > 0 {
+		maxEjectable = 1 // Always allow ejecting at least one
+	}
+	
+	now := time.Now()
+	
+	for i := range service.Endpoints {
+		ep := &service.Endpoints[i]
+		
+		// Initialize outlier status if needed
+		if ep.OutlierStatus == nil {
+			ep.OutlierStatus = &OutlierStatus{}
+		}
+		
+		// Check if ejection period expired
+		if ep.OutlierStatus.CurrentlyEjected && now.After(ep.OutlierStatus.EjectedUntil) {
+			ep.OutlierStatus.CurrentlyEjected = false
+			ep.Ready = true
+			c.logger.Info("Endpoint ejection expired, re-adding to pool",
+				zap.String("endpoint", ep.IP),
+				zap.String("service", service.Name))
+		}
+		
+		// Check for consecutive 5xx ejection
+		if ep.OutlierStatus.Consecutive5xx >= consecutive5xxThreshold {
+			if ejectedCount < maxEjectable && !ep.OutlierStatus.CurrentlyEjected {
+				// Eject with exponential backoff
+				ep.OutlierStatus.EjectionCount++
+				ejectionDuration := baseEjectionTime * time.Duration(1<<uint(ep.OutlierStatus.EjectionCount-1))
+				
+				ep.OutlierStatus.CurrentlyEjected = true
+				ep.OutlierStatus.LastEjectionTime = now
+				ep.OutlierStatus.EjectedUntil = now.Add(ejectionDuration)
+				ep.Ready = false
+				ejectedCount++
+				
+				c.logger.Warn("Endpoint ejected due to consecutive errors",
+					zap.String("endpoint", ep.IP),
+					zap.String("service", service.Name),
+					zap.Int("consecutive_5xx", ep.OutlierStatus.Consecutive5xx),
+					zap.Duration("ejection_duration", ejectionDuration))
+			}
+			// Reset counter after ejection
+			ep.OutlierStatus.Consecutive5xx = 0
+		}
+		
+		// Count currently ejected
+		if ep.OutlierStatus.CurrentlyEjected {
+			ejectedCount++
+		}
+	}
+	
+	// Update service health based on ejected endpoints
+	healthyCount := totalEndpoints - ejectedCount
+	if healthyCount == 0 && totalEndpoints > 0 {
+		service.Health = HealthDown
+	} else if ejectedCount > 0 {
+		service.Health = HealthDegraded
+	}
+}
+
+// getServicesForIP returns all services that could be at this IP[:port]
+func (c *Collector) getServicesForIP(ip string, port uint16) []string {
+	// Try exact IP:port match first
+	ipPortKey := fmt.Sprintf("%s:%d", ip, port)
+	if services, exists := c.ipToService[ipPortKey]; exists && len(services) > 0 {
+		return services
+	}
+	
+	// Fall back to just IP
+	if services, exists := c.ipToService[ip]; exists {
+		return services
+	}
+	
+	return nil
 }
 
 // shouldExcludeNamespace checks if namespace should be excluded
@@ -590,54 +716,57 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 
 	// Build connection map
 	for _, conn := range c.connections {
-		srcService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.SourceIP), conn.SourcePort)]
-		if srcService == "" {
-			srcService = c.ipToService[intToIP(conn.SourceIP)]
-		}
+		srcServices := c.getServicesForIP(intToIP(conn.SourceIP), conn.SourcePort)
+		dstServices := c.getServicesForIP(intToIP(conn.DestIP), conn.DestPort)
 
-		dstService := c.ipToService[fmt.Sprintf("%s:%d", intToIP(conn.DestIP), conn.DestPort)]
-		if dstService == "" {
-			dstService = c.ipToService[intToIP(conn.DestIP)]
-		}
+		// Process all service pairs
+		for _, srcService := range srcServices {
+			for _, dstService := range dstServices {
+				if srcService != "" && dstService != "" && srcService != dstService {
+					connKey := fmt.Sprintf("%s->%s", srcService, dstService)
+					serviceMap.Connections[connKey]++
 
-		if srcService != "" && dstService != "" && srcService != dstService {
-			connKey := fmt.Sprintf("%s->%s", srcService, dstService)
-			serviceMap.Connections[connKey]++
+					// Use connection direction to correctly assign dependencies
+					if conn.Direction == DirectionOutbound {
+						// srcService depends on dstService
+						if src, ok := serviceMap.Services[srcService]; ok {
+							if src.Dependencies == nil {
+								src.Dependencies = make(map[string]*Dependency)
+							}
+							if dep, exists := src.Dependencies[dstService]; exists {
+								dep.LastSeen = time.Now()
+								dep.CallRate++
+							} else {
+								src.Dependencies[dstService] = &Dependency{
+									Target:    dstService,
+									CallRate:  1,
+									FirstSeen: time.Now(),
+									LastSeen:  time.Now(),
+									Protocol:  protocolToString(conn.Protocol),
+								}
+							}
+						}
 
-			// Update dependencies
-			if src, ok := serviceMap.Services[srcService]; ok {
-				if src.Dependencies == nil {
-					src.Dependencies = make(map[string]*Dependency)
-				}
-				if dep, exists := src.Dependencies[dstService]; exists {
-					dep.LastSeen = time.Now()
-					dep.CallRate++
-				} else {
-					src.Dependencies[dstService] = &Dependency{
-						Target:    dstService,
-						CallRate:  1,
-						FirstSeen: time.Now(),
-						LastSeen:  time.Now(),
-						Protocol:  protocolToString(conn.Protocol),
+						// dstService has srcService as dependent
+						if dst, ok := serviceMap.Services[dstService]; ok {
+							if dst.Dependents == nil {
+								dst.Dependents = make(map[string]*Dependent)
+							}
+							if dep, exists := dst.Dependents[srcService]; exists {
+								dep.LastSeen = time.Now()
+								dep.CallRate++
+							} else {
+								dst.Dependents[srcService] = &Dependent{
+									Source:    srcService,
+									CallRate:  1,
+									FirstSeen: time.Now(),
+									LastSeen:  time.Now(),
+								}
+							}
+						}
 					}
-				}
-			}
-
-			// Update dependents
-			if dst, ok := serviceMap.Services[dstService]; ok {
-				if dst.Dependents == nil {
-					dst.Dependents = make(map[string]*Dependent)
-				}
-				if dep, exists := dst.Dependents[srcService]; exists {
-					dep.LastSeen = time.Now()
-					dep.CallRate++
-				} else {
-					dst.Dependents[srcService] = &Dependent{
-						Source:    srcService,
-						CallRate:  1,
-						FirstSeen: time.Now(),
-						LastSeen:  time.Now(),
-					}
+					// For inbound connections, dependencies are reversed
+					// but we typically track from the client's perspective
 				}
 			}
 		}
@@ -699,7 +828,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 		Source:      c.Name(),
 		Type:        domain.EventTypeServiceMap,
 		Timestamp:   time.Now(),
-		Severity:    domain.SeverityInfo,
+		Severity:    domain.EventSeverityInfo,
 		EventData: domain.EventDataContainer{
 			ServiceMap: domainServiceMap,
 		},
@@ -867,8 +996,8 @@ func (c *Collector) setupDefaultFilters() {
 			if event.EventData.ServiceMap != nil {
 				serviceMap := event.EventData.ServiceMap
 				totalConnections := 0
-				for _, count := range serviceMap.Connections {
-					totalConnections += count
+				for _, conn := range serviceMap.Connections {
+					totalConnections += conn.Count
 				}
 				return totalConnections < c.config.MinConnectionCount
 			}
@@ -914,11 +1043,17 @@ func (c *Collector) emitServiceEvent(serviceKey string, service *Service) {
 
 	event := &domain.CollectorEvent{
 		EventID:     fmt.Sprintf("service-discovered-%s-%d", serviceKey, time.Now().UnixNano()),
-		CollectorID: c.Name(),
-		Type:        domain.EventTypeServiceDiscovered,
+		Source:      c.Name(),
+		Type:        domain.EventTypeNetworkConnection, // Using existing type
 		Timestamp:   time.Now(),
-		Severity:    domain.SeverityInfo,
-		Data:        service,
+		Severity:    domain.EventSeverityInfo,
+		EventData:   domain.EventDataContainer{
+			Custom: map[string]string{
+				"service_name": service.Name,
+				"service_namespace": service.Namespace,
+				"service_type": string(service.Type),
+			},
+		},
 	}
 
 	// Record event size

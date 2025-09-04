@@ -10,20 +10,27 @@
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_tracing.h>
 
-// Connection event structure
+// Connection event structure - ENHANCED with real TCP metrics
 struct connection_event {
     __u32 src_ip;
     __u32 dst_ip;
     __u16 src_port;
     __u16 dst_port;
     __u8  protocol;
-    __u8  event_type; // 0=new, 1=close
+    __u8  event_type; // 0=connect, 1=accept, 2=close, 3=reset, 4=update
     __u64 timestamp;
     __u64 bytes_sent;
     __u64 bytes_recv;
     __u32 pid;
     __u32 uid;
     char  comm[16];
+    // TCP metrics from tcp_info
+    __u32 retransmits;
+    __u32 rtt_us;        // Smoothed RTT in microseconds
+    __u32 rtt_var_us;    // RTT variance
+    __u8  tcp_state;     // TCP state (established, syn_sent, etc)
+    __u8  direction;     // 0=unknown, 1=outbound, 2=inbound
+    __u16 resets;        // RST packets seen
 };
 
 // Connection state tracking
@@ -89,6 +96,41 @@ static __always_inline int extract_connection_info(struct sock *sk, struct conne
     return -1;
 }
 
+// Helper to extract TCP metrics from tcp_sock
+static __always_inline void extract_tcp_metrics(struct sock *sk, struct connection_event *event) {
+    struct tcp_sock *tp = (struct tcp_sock *)sk;
+    
+    // Get retransmit count
+    __u32 retrans = 0;
+    BPF_CORE_READ_INTO(&retrans, tp, total_retrans);
+    event->retransmits = retrans;
+    
+    // Get RTT (smoothed round trip time)
+    __u32 srtt = 0;
+    BPF_CORE_READ_INTO(&srtt, tp, srtt_us);
+    event->rtt_us = srtt >> 3;  // srtt is stored as 8x actual value
+    
+    // Get RTT variance
+    __u32 rttvar = 0;
+    BPF_CORE_READ_INTO(&rttvar, tp, mdev_us);
+    event->rtt_var_us = rttvar >> 2;  // mdev is stored as 4x actual value
+    
+    // Get TCP state
+    __u8 state = 0;
+    BPF_CORE_READ_INTO(&state, sk, __sk_common.skc_state);
+    event->tcp_state = state;
+    
+    // Get bytes acked (sent successfully)
+    __u64 bytes_acked = 0;
+    BPF_CORE_READ_INTO(&bytes_acked, tp, bytes_acked);
+    event->bytes_sent = bytes_acked;
+    
+    // Get bytes received
+    __u64 bytes_received = 0;
+    BPF_CORE_READ_INTO(&bytes_received, tp, bytes_received);
+    event->bytes_recv = bytes_received;
+}
+
 // Track TCP connection establishment
 SEC("kprobe/tcp_connect")
 int trace_tcp_connect(struct pt_regs *ctx) {
@@ -120,7 +162,7 @@ int trace_tcp_connect(struct pt_regs *ctx) {
     // Store in map
     bpf_map_update_elem(&connections, &key, &state, BPF_ANY);
     
-    // Send event
+    // Send event with TCP metrics
     struct connection_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (event) {
         event->src_ip = key.src_ip;
@@ -128,13 +170,15 @@ int trace_tcp_connect(struct pt_regs *ctx) {
         event->src_port = key.src_port;
         event->dst_port = key.dst_port;
         event->protocol = key.protocol;
-        event->event_type = 0; // New connection
+        event->event_type = 0; // Connect (outbound)
+        event->direction = 1;  // Outbound
         event->timestamp = state.start_time;
-        event->bytes_sent = 0;
-        event->bytes_recv = 0;
         event->pid = pid;
         event->uid = uid;
         bpf_get_current_comm(event->comm, sizeof(event->comm));
+        
+        // Extract TCP metrics
+        extract_tcp_metrics(sk, event);
         
         bpf_ringbuf_submit(event, 0);
     }
