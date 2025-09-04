@@ -3,9 +3,9 @@ package syscallerrors
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/collectors/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -52,18 +52,15 @@ type CollectorStats struct {
 
 // Collector implements the syscall error collector
 type Collector struct {
+	*base.BaseCollector       // Provides Statistics() and Health() methods
+	*base.EventChannelManager // Handles event channel with drop counting
+	*base.LifecycleManager    // Manages goroutines and graceful shutdown
+
 	name   string
 	logger *zap.Logger
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
 
 	// eBPF state (platform-specific)
 	ebpfState interface{}
-
-	// Event processing
-	eventChan chan *domain.CollectorEvent
-	stopOnce  sync.Once
 
 	// OpenTelemetry instrumentation
 	tracer          trace.Tracer
@@ -84,10 +81,6 @@ type Collector struct {
 	lastErrorLogTime  time.Time
 	errorLogInterval  time.Duration
 	consecutiveErrors int
-
-	// Health tracking
-	healthy     bool
-	healthMutex sync.RWMutex
 }
 
 // Config holds collector configuration
@@ -120,8 +113,6 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		config = DefaultConfig()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// Initialize OpenTelemetry
 	tracer := otel.Tracer("syscall-errors-collector")
 	meter := otel.Meter("syscall-errors-collector")
@@ -132,7 +123,6 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		metric.WithDescription("Total syscall error events processed"),
 	)
 	if err != nil && config.RequireAllMetrics {
-		cancel()
 		return nil, fmt.Errorf("failed to create events counter: %w", err)
 	}
 
@@ -141,7 +131,6 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		metric.WithDescription("Total errors in syscall error collector"),
 	)
 	if err != nil && config.RequireAllMetrics {
-		cancel()
 		return nil, fmt.Errorf("failed to create errors counter: %w", err)
 	}
 
@@ -150,7 +139,6 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 		metric.WithDescription("Processing duration for syscall errors in milliseconds"),
 	)
 	if err != nil && config.RequireAllMetrics {
-		cancel()
 		return nil, fmt.Errorf("failed to create processing time histogram: %w", err)
 	}
 
@@ -186,24 +174,23 @@ func NewCollector(logger *zap.Logger, config *Config) (*Collector, error) {
 	)
 
 	c := &Collector{
-		name:              "syscall-errors",
-		logger:            logger,
-		ctx:               ctx,
-		cancel:            cancel,
-		eventChan:         make(chan *domain.CollectorEvent, config.EventChannelSize),
-		tracer:            tracer,
-		eventsProcessed:   eventsProcessed,
-		errorsTotal:       errorsTotal,
-		processingTime:    processingTime,
-		enospcErrors:      enospcErrors,
-		enomemErrors:      enomemErrors,
-		econnrefErrors:    econnrefErrors,
-		emfileErrors:      emfileErrors,
-		edquotErrors:      edquotErrors,
-		eventsDropped:     eventsDropped,
-		config:            config,
-		errorLogInterval:  time.Duration(config.RateLimitMs) * time.Millisecond,
-		healthy:           true,
+		BaseCollector:       base.NewBaseCollector("syscall-errors", 30*time.Second),
+		EventChannelManager: base.NewEventChannelManager(config.EventChannelSize, "syscall-errors", logger),
+		LifecycleManager:    base.NewLifecycleManager(context.Background(), logger),
+		name:                "syscall-errors",
+		logger:              logger,
+		tracer:              tracer,
+		eventsProcessed:     eventsProcessed,
+		errorsTotal:         errorsTotal,
+		processingTime:      processingTime,
+		enospcErrors:        enospcErrors,
+		enomemErrors:        enomemErrors,
+		econnrefErrors:      econnrefErrors,
+		emfileErrors:        emfileErrors,
+		edquotErrors:        edquotErrors,
+		eventsDropped:       eventsDropped,
+		config:              config,
+		errorLogInterval:    time.Duration(config.RateLimitMs) * time.Millisecond,
 	}
 
 	return c, nil
@@ -222,39 +209,32 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start eBPF: %w", err)
 	}
 
-	// Start event processor
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	// Start event processor using LifecycleManager
+	c.LifecycleManager.Start("event-reader", func() {
 		c.readEvents()
-	}()
+	})
 
+	c.BaseCollector.SetHealthy(true)
 	c.logger.Info("Syscall error collector started successfully")
 	return nil
 }
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
-	var err error
-	c.stopOnce.Do(func() {
-		c.logger.Info("Stopping syscall error collector")
+	c.logger.Info("Stopping syscall error collector")
 
-		// Cancel context to stop goroutines
-		c.cancel()
+	// Stop eBPF (platform-specific)
+	c.stopEBPF()
 
-		// Stop eBPF (platform-specific)
-		c.stopEBPF()
+	// Stop goroutines and wait
+	c.LifecycleManager.Stop(5 * time.Second)
 
-		// Wait for goroutines
-		c.wg.Wait()
+	// Close event channel
+	c.EventChannelManager.Close()
 
-		// Close event channel
-		close(c.eventChan)
-
-		c.setHealthy(false)
-		c.logger.Info("Syscall error collector stopped")
-	})
-	return err
+	c.BaseCollector.SetHealthy(false)
+	c.logger.Info("Syscall error collector stopped")
+	return nil
 }
 
 // Name returns the collector name
@@ -264,21 +244,13 @@ func (c *Collector) Name() string {
 
 // Events returns the event channel
 func (c *Collector) Events() <-chan *domain.CollectorEvent {
-	return c.eventChan
+	return c.EventChannelManager.GetChannel()
 }
 
 // IsHealthy returns the health status
 func (c *Collector) IsHealthy() bool {
-	c.healthMutex.RLock()
-	defer c.healthMutex.RUnlock()
-	return c.healthy
-}
-
-// setHealthy sets the health status
-func (c *Collector) setHealthy(healthy bool) {
-	c.healthMutex.Lock()
-	defer c.healthMutex.Unlock()
-	c.healthy = healthy
+	health := c.BaseCollector.Health()
+	return health.Status == domain.HealthHealthy
 }
 
 // GetStats retrieves collector statistics (platform-specific implementation)
@@ -289,7 +261,7 @@ func (c *Collector) GetStats() (*CollectorStats, error) {
 
 // convertToCollectorEvent converts eBPF event to domain event
 func (c *Collector) convertToCollectorEvent(event *SyscallErrorEvent) *domain.CollectorEvent {
-	_, span := c.tracer.Start(c.ctx, "convertToCollectorEvent")
+	_, span := c.tracer.Start(c.LifecycleManager.Context(), "convertToCollectorEvent")
 	defer span.End()
 
 	// Convert basic fields

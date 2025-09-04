@@ -158,7 +158,6 @@ func TestHelperMethods(t *testing.T) {
 	assert.NotNil(t, ch)
 }
 
-
 // TestBytesToString tests the bytesToString helper function
 func TestBytesToString(t *testing.T) {
 	tests := []struct {
