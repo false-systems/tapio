@@ -59,6 +59,12 @@ const (
 	EventTypeStorageIOFsync CollectorEventType = "storage.io.fsync"
 	EventTypeStorageIOSlow  CollectorEventType = "storage.io.slow"
 
+	// Scheduler events
+	EventTypeScheduler          CollectorEventType = "scheduler"
+	EventTypeSchedulerDelay     CollectorEventType = "scheduler.delay"
+	EventTypeSchedulerThrottle  CollectorEventType = "scheduler.throttle"
+	EventTypeSchedulerMigration CollectorEventType = "scheduler.migration"
+
 	// CRI events
 	EventTypeCRIContainer CollectorEventType = "cri.container"
 	EventTypeCRIPod       CollectorEventType = "cri.pod"
@@ -84,10 +90,10 @@ const (
 	EventTypeKubeletContainerTerminated CollectorEventType = "kubelet.container.terminated"
 	EventTypeKubeletCrashLoop           CollectorEventType = "kubelet.container.crash_loop"
 	EventTypeKubeletPodNotReady         CollectorEventType = "kubelet.pod.not_ready"
-	
+
 	// Service Map Events
-	EventTypeServiceMap         CollectorEventType = "service_map.topology"
-	EventTypeNetworkConnection  CollectorEventType = "network.connection"
+	EventTypeServiceMap        CollectorEventType = "service_map.topology"
+	EventTypeNetworkConnection CollectorEventType = "network.connection"
 )
 
 // CollectorEvent represents a fully contextualized event from any collector
@@ -142,6 +148,9 @@ type EventDataContainer struct {
 	ETCD      *ETCDData      `json:"etcd,omitempty"`
 	Volume    *VolumeData    `json:"volume,omitempty"`
 	StorageIO *StorageIOData `json:"storage_io,omitempty"`
+
+	// Scheduler data
+	Scheduler *SchedulerData `json:"scheduler,omitempty"`
 
 	// Container runtime data
 	CRI *CRIData `json:"cri,omitempty"`
@@ -316,19 +325,61 @@ type ProcessData struct {
 
 // NetworkData represents network activity
 type NetworkData struct {
-	Protocol    string        `json:"protocol"`  // tcp, udp, icmp
-	Direction   string        `json:"direction"` // inbound, outbound
-	SourceIP    string        `json:"source_ip"`
-	SourcePort  int32         `json:"source_port"`
-	DestIP      string        `json:"dest_ip"`
-	DestPort    int32         `json:"dest_port"`
-	BytesSent   int64         `json:"bytes_sent"`
-	BytesRecv   int64         `json:"bytes_recv"`
-	PacketsSent int64         `json:"packets_sent"`
-	PacketsRecv int64         `json:"packets_recv"`
+	EventType   string         `json:"event_type"` // connect, accept, send, recv, close
+	Protocol    string         `json:"protocol"`   // TCP, UDP, ICMP
+	Direction   string         `json:"direction"`  // inbound, outbound
+	SrcIP       string         `json:"src_ip"`
+	DstIP       string         `json:"dst_ip"`
+	SrcPort     int32          `json:"src_port"`
+	DstPort     int32          `json:"dst_port"`
+	PayloadSize int64          `json:"payload_size,omitempty"`
+	L7Protocol  string         `json:"l7_protocol,omitempty"` // HTTP, DNS, gRPC, etc
+	L7Data      *NetworkL7Data `json:"l7_data,omitempty"`
+
+	// Legacy fields for compatibility
+	SourceIP    string        `json:"source_ip,omitempty"`
+	SourcePort  int32         `json:"source_port,omitempty"`
+	DestIP      string        `json:"dest_ip,omitempty"`
+	DestPort    int32         `json:"dest_port,omitempty"`
+	BytesSent   int64         `json:"bytes_sent,omitempty"`
+	BytesRecv   int64         `json:"bytes_recv,omitempty"`
+	PacketsSent int64         `json:"packets_sent,omitempty"`
+	PacketsRecv int64         `json:"packets_recv,omitempty"`
 	Latency     time.Duration `json:"latency,omitempty"`
 	TCPFlags    []string      `json:"tcp_flags,omitempty"`
 	Interface   string        `json:"interface,omitempty"`
+}
+
+// NetworkL7Data represents Layer 7 protocol data
+type NetworkL7Data struct {
+	Protocol string           `json:"protocol"` // HTTP, DNS, gRPC
+	HTTPData *HTTPRequestData `json:"http_data,omitempty"`
+	DNSData  *DNSQueryData    `json:"dns_data,omitempty"`
+	GRPCData *GRPCRequestData `json:"grpc_data,omitempty"`
+}
+
+// HTTPRequestData represents HTTP request details
+type HTTPRequestData struct {
+	Method     string            `json:"method"`
+	URL        string            `json:"url"`
+	Path       string            `json:"path"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	StatusCode int               `json:"status_code,omitempty"`
+}
+
+// DNSQueryData represents DNS query details
+type DNSQueryData struct {
+	Query        string   `json:"query"`
+	QueryType    string   `json:"query_type"`
+	Answers      []string `json:"answers,omitempty"`
+	ResponseCode string   `json:"response_code,omitempty"`
+}
+
+// GRPCRequestData represents gRPC request details
+type GRPCRequestData struct {
+	Service    string `json:"service"`
+	Method     string `json:"method"`
+	StatusCode int    `json:"status_code,omitempty"`
 }
 
 // ContainerData represents container runtime events
@@ -544,6 +595,35 @@ type VolumeData struct {
 	ErrorCode  int32         `json:"error_code,omitempty"`
 }
 
+// SchedulerData represents CPU scheduler event data
+type SchedulerData struct {
+	EventType string `json:"event_type"` // scheduling_delay, cfs_throttle, migration, priority_inversion
+	PID       int32  `json:"pid"`
+	TID       int32  `json:"tid"`
+	CPU       int32  `json:"cpu"`
+	Command   string `json:"command"`
+
+	// Scheduling delay metrics
+	DelayMs   float64 `json:"delay_ms,omitempty"`
+	WaitRatio float64 `json:"wait_ratio,omitempty"` // wait_time / run_time
+
+	// CFS throttle metrics
+	ThrottleMs  float64 `json:"throttle_ms,omitempty"`
+	ThrottlePct float64 `json:"throttle_pct,omitempty"`
+
+	// CPU migration info
+	PrevCPU int32 `json:"prev_cpu,omitempty"`
+	NextCPU int32 `json:"next_cpu,omitempty"`
+
+	// Process priority
+	Priority int32 `json:"priority"`
+	Nice     int32 `json:"nice"`
+
+	// Container context
+	CgroupID    uint64 `json:"cgroup_id"`
+	ContainerID string `json:"container_id,omitempty"`
+}
+
 // SystemdData represents systemd event data
 type SystemdData struct {
 	Unit     string `json:"unit"`
@@ -707,6 +787,7 @@ func (edc *EventDataContainer) Validate() error {
 		edc.ETCD == nil &&
 		edc.Volume == nil &&
 		edc.StorageIO == nil &&
+		edc.Scheduler == nil &&
 		edc.CRI == nil &&
 		edc.Systemd == nil &&
 		edc.RawData == nil {
@@ -1002,7 +1083,7 @@ type OTELMetricData struct {
 
 // ServiceMapData represents service topology data
 type ServiceMapData struct {
-	Services    map[string]ServiceMapInfo    `json:"services"`
+	Services    map[string]ServiceMapInfo `json:"services"`
 	Connections map[string]ConnectionInfo `json:"connections"`
 	ClusterName string                    `json:"cluster_name,omitempty"`
 	LastUpdated time.Time                 `json:"last_updated"`
@@ -1025,14 +1106,14 @@ type ServiceMapInfo struct {
 
 // ConnectionInfo represents a connection between services
 type ConnectionInfo struct {
-	Source      string  `json:"source"`
-	Target      string  `json:"target"`
-	Protocol    string  `json:"protocol"`
-	Count       int     `json:"count"`
-	BytesSent   uint64  `json:"bytes_sent,omitempty"`
-	BytesRecv   uint64  `json:"bytes_recv,omitempty"`
-	ErrorRate   float64 `json:"error_rate,omitempty"`
-	AvgLatency  float64 `json:"avg_latency_ms,omitempty"`
+	Source     string  `json:"source"`
+	Target     string  `json:"target"`
+	Protocol   string  `json:"protocol"`
+	Count      int     `json:"count"`
+	BytesSent  uint64  `json:"bytes_sent,omitempty"`
+	BytesRecv  uint64  `json:"bytes_recv,omitempty"`
+	ErrorRate  float64 `json:"error_rate,omitempty"`
+	AvgLatency float64 `json:"avg_latency_ms,omitempty"`
 }
 
 // KubeletData holds kubelet-specific event data
