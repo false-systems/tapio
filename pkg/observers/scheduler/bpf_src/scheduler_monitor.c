@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Resource Starvation Monitor - Reveals the invisible latency
+// Scheduler Monitor - Reveals the invisible latency
 // This program captures CPU scheduling delays, throttling, and noisy neighbors
 
 #include "kernel_defs.h"
@@ -15,7 +15,7 @@
 #define EVENT_NOISY_NEIGHBOR  5
 
 // Default thresholds (in nanoseconds) - configurable via map
-#define DEFAULT_STARVATION_THRESHOLD_NS   100000000  // 100ms
+#define DEFAULT_SCHED_DELAY_THRESHOLD_NS   100000000  // 100ms
 #define DEFAULT_THROTTLE_THRESHOLD_NS     10000000   // 10ms
 #define DEFAULT_MIGRATION_THRESHOLD       10
 
@@ -23,7 +23,7 @@
 #define MAX_TRACKED_PIDS 10000
 #define MAX_STACK_DEPTH   8
 
-struct starvation_event {
+struct scheduler_event {
     __u64 timestamp;
     __u32 event_type;
     __u32 cpu_core;
@@ -78,7 +78,7 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4);
-    __type(key, __u32);  // Key: 0=starvation_ns, 1=throttle_ns, 2=severe_ns, 3=migration_count
+    __type(key, __u32);  // Key: 0=sched_delay_ns, 1=throttle_ns, 2=severe_ns, 3=migration_count
     __type(value, __u64);
 } config_map SEC(".maps");
 
@@ -151,10 +151,10 @@ int trace_sched_wait(struct trace_event_raw_sched_stat_wait *ctx) {
     if (!is_filtered(pid)) return 0;
 
     __u64 delay = ctx->delay;
-    __u64 threshold = get_config(0, DEFAULT_STARVATION_THRESHOLD_NS);
+    __u64 threshold = get_config(0, DEFAULT_SCHED_DELAY_THRESHOLD_NS);
     if (delay < threshold) return 0;
 
-    struct starvation_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+    struct scheduler_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (!e) {
         __u32 key = 0;
         __u64 *count = bpf_map_lookup_elem(&dropped_events, &key);
@@ -228,7 +228,7 @@ int trace_throttle(struct trace_event_raw_sched_stat_runtime *ctx) {
         if (throttled_time > threshold || 
             (throttled_time == 0 && is_likely_throttled(stats->last_seen, runtime))) {
             
-            struct starvation_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+            struct scheduler_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
             if (!e) {
                 __u32 key = 0;
                 __u64 *count = bpf_map_lookup_elem(&dropped_events, &key);
@@ -279,7 +279,7 @@ int trace_migrate(struct trace_event_raw_sched_migrate_task *ctx) {
         stats->migrations++;
         __u64 threshold = get_config(3, DEFAULT_MIGRATION_THRESHOLD);
         if (stats->migrations > threshold) {
-            struct starvation_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+            struct scheduler_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
             if (!e) {
                 __u32 key = 0;
                 __u64 *count = bpf_map_lookup_elem(&dropped_events, &key);
@@ -318,7 +318,7 @@ int trace_sched_switch(struct trace_event_raw_sched_switch *ctx) {
     struct task_stats *prev_stats = bpf_map_lookup_elem(&task_tracking, &prev_pid);
     if (prev_stats && prev_stats->last_seen > 0) {
         __u64 runtime = now - prev_stats->last_seen;
-        __u64 threshold = get_config(0, DEFAULT_STARVATION_THRESHOLD_NS);
+        __u64 threshold = get_config(0, DEFAULT_SCHED_DELAY_THRESHOLD_NS);
         if (runtime > threshold) {
             // Update per-CPU hog if this is longer
             __u32 key = 0;
@@ -334,7 +334,7 @@ int trace_sched_switch(struct trace_event_raw_sched_switch *ctx) {
             }
 
             // Generate noisy neighbor event
-            struct starvation_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+            struct scheduler_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
             if (!e) {
                 __u64 *count = bpf_map_lookup_elem(&dropped_events, &key);
                 if (count) __sync_fetch_and_add(count, 1);
@@ -361,7 +361,7 @@ int trace_sched_switch(struct trace_event_raw_sched_switch *ctx) {
     // Check for priority inversion
     // In sched_switch, we have prev_prio and next_prio directly
     if (ctx->prev_prio < ctx->next_prio) {  // Higher priority task (lower number) being preempted
-        struct starvation_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+        struct scheduler_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
         if (!e) {
             __u32 key = 0;
             __u64 *count = bpf_map_lookup_elem(&dropped_events, &key);
