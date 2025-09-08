@@ -382,7 +382,7 @@ func TestYAMLConfigDefaults(t *testing.T) {
 	t.Run("ApplyDefaults", func(t *testing.T) {
 		config := &YAMLConfig{
 			Orchestrator: OrchestratorYAMLConfig{}, // Empty, should get defaults
-			Observers:   map[string]ObserverYAMLConfig{},
+			Observers:    map[string]ObserverYAMLConfig{},
 		}
 
 		// Apply defaults function (if exists)

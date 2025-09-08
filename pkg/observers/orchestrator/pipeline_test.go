@@ -131,10 +131,11 @@ func TestEventPipeline(t *testing.T) {
 		assert.Error(t, err)
 
 		// Send test event
-		testEvent := domain.RawEvent{
+		testEvent := &domain.CollectorEvent{
 			Timestamp: time.Now(),
 			Source:    "test",
-			Data:      []byte("test data"),
+			Type:      domain.EventTypeKernelNetwork,
+			Severity:  domain.EventSeverityInfo,
 		}
 		observer.SendEvent(testEvent)
 
@@ -260,30 +261,4 @@ func TestEventPipeline(t *testing.T) {
 		err = pipeline.Stop()
 		assert.NoError(t, err)
 	})
-}
-
-func TestEnrichedEvent(t *testing.T) {
-	raw := &domain.RawEvent{
-		Timestamp: time.Now(),
-		Source:    "kubeapi",
-		Data:      []byte(`{"kind":"Pod","name":"test-pod"}`),
-	}
-
-	enriched := &EnrichedEvent{
-		Raw: raw,
-		K8sObject: &K8sObjectInfo{
-			Kind:      "Pod",
-			Name:      "test-pod",
-			Namespace: "default",
-			UID:       "test-uid",
-			Labels:    map[string]string{"app": "test"},
-		},
-	}
-
-	// Test that enriched event preserves raw event data
-	assert.Equal(t, raw.Timestamp, enriched.Raw.Timestamp)
-	assert.Equal(t, "kubeapi", enriched.Raw.Source)
-	assert.NotNil(t, enriched.K8sObject)
-	assert.Equal(t, "Pod", enriched.K8sObject.Kind)
-	assert.Equal(t, "test-pod", enriched.K8sObject.Name)
 }

@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/observers"
 	"github.com/yairfalse/tapio/pkg/config"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/observers"
 	"go.uber.org/zap"
 )
 
@@ -40,8 +40,8 @@ import (
 // while maintaining a clean separation between observers and downstream systems.
 type ObserverOrchestrator struct {
 	observers map[string]observers.Observer
-	publisher  *EnhancedNATSPublisher
-	logger     *zap.Logger
+	publisher *EnhancedNATSPublisher
+	logger    *zap.Logger
 
 	eventsChan chan *domain.CollectorEvent
 	workers    int

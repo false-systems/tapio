@@ -6,16 +6,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/yairfalse/tapio/pkg/observers"
 	"github.com/yairfalse/tapio/pkg/config"
+	"github.com/yairfalse/tapio/pkg/observers"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
 
 // YAMLConfig represents the complete configuration from YAML file
 type YAMLConfig struct {
-	Orchestrator OrchestratorYAMLConfig         `yaml:"orchestrator"`
-	Observers   map[string]ObserverYAMLConfig `yaml:"observers"`
+	Orchestrator OrchestratorYAMLConfig        `yaml:"orchestrator"`
+	Observers    map[string]ObserverYAMLConfig `yaml:"observers"`
 }
 
 // OrchestratorYAMLConfig holds orchestrator-specific configuration

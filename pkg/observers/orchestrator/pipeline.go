@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/observers"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/observers"
 	"go.uber.org/zap"
 )
 
@@ -46,7 +46,7 @@ func New(logger *zap.Logger, config Config) (*ObserverOrchestrator, error) {
 	}
 
 	return &ObserverOrchestrator{
-		observers: make(map[string]observers.Observer),
+		observers:  make(map[string]observers.Observer),
 		publisher:  publisher,
 		logger:     logger,
 		eventsChan: make(chan *domain.CollectorEvent, config.BufferSize),
