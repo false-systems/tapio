@@ -160,7 +160,7 @@ func (c *Collector) processEvents() {
 				}
 				c.logger.Warn("Failed to read from ring buffer", zap.Error(err))
 				if c.errorsTotal != nil {
-					c.errorsTotal.Add(c.ctx, 1, 
+					c.errorsTotal.Add(c.ctx, 1,
 						metric.WithAttributes(attribute.String("error", "ringbuf_read")))
 				}
 				continue
@@ -272,15 +272,15 @@ func (c *Collector) convertKernelEvent(event *KernelEvent) (*domain.CollectorEve
 
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
-				"collector":   c.name,
-				"event_type":  fmt.Sprintf("%d", event.EventType),
-				"pid":         fmt.Sprintf("%d", event.PID),
-				"tid":         fmt.Sprintf("%d", event.TID),
-				"command":     comm,
-				"cgroup_id":   fmt.Sprintf("%d", event.CgroupID),
-				"pod_uid":     podUID,
-				"mount_path":  mountPath,
-				"error_code":  fmt.Sprintf("%d", configInfo.ErrorCode),
+				"collector":  c.name,
+				"event_type": fmt.Sprintf("%d", event.EventType),
+				"pid":        fmt.Sprintf("%d", event.PID),
+				"tid":        fmt.Sprintf("%d", event.TID),
+				"command":    comm,
+				"cgroup_id":  fmt.Sprintf("%d", event.CgroupID),
+				"pod_uid":    podUID,
+				"mount_path": mountPath,
+				"error_code": fmt.Sprintf("%d", configInfo.ErrorCode),
 			},
 		},
 	}, nil

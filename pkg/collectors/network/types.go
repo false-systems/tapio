@@ -52,13 +52,13 @@ type DNSQuery struct {
 }
 
 type DNSResponse struct {
-	ResponseCode string      `json:"response_code"` // NOERROR, NXDOMAIN, SERVFAIL, etc.
-	Queries      []DNSQuery  `json:"queries"`
-	Answers      []DNSAnswer `json:"answers"`
-	Authoritative bool       `json:"authoritative"`
-	Truncated     bool       `json:"truncated"`
-	RecursionDesired bool    `json:"recursion_desired"`
-	RecursionAvailable bool  `json:"recursion_available"`
+	ResponseCode       string      `json:"response_code"` // NOERROR, NXDOMAIN, SERVFAIL, etc.
+	Queries            []DNSQuery  `json:"queries"`
+	Answers            []DNSAnswer `json:"answers"`
+	Authoritative      bool        `json:"authoritative"`
+	Truncated          bool        `json:"truncated"`
+	RecursionDesired   bool        `json:"recursion_desired"`
+	RecursionAvailable bool        `json:"recursion_available"`
 }
 
 type DNSAnswer struct {
@@ -71,15 +71,15 @@ type DNSAnswer struct {
 
 // HTTP state tracking for multi-packet streams
 type HTTPConnectionState struct {
-	ConnectionID    string                 `json:"connection_id"`
-	State          HTTPStreamState        `json:"state"`
-	Request        *HTTPRequest           `json:"request"`
-	Response       *HTTPResponse          `json:"response"`
-	StartTime      time.Time              `json:"start_time"`
-	LastActivity   time.Time              `json:"last_activity"`
-	RequestBuffer  []byte                 `json:"-"` // Raw buffer for incomplete requests
-	ResponseBuffer []byte                 `json:"-"` // Raw buffer for incomplete responses
-	HTTP2StreamID  uint32                 `json:"http2_stream_id,omitempty"`
+	ConnectionID   string          `json:"connection_id"`
+	State          HTTPStreamState `json:"state"`
+	Request        *HTTPRequest    `json:"request"`
+	Response       *HTTPResponse   `json:"response"`
+	StartTime      time.Time       `json:"start_time"`
+	LastActivity   time.Time       `json:"last_activity"`
+	RequestBuffer  []byte          `json:"-"` // Raw buffer for incomplete requests
+	ResponseBuffer []byte          `json:"-"` // Raw buffer for incomplete responses
+	HTTP2StreamID  uint32          `json:"http2_stream_id,omitempty"`
 }
 
 type HTTPStreamState int
@@ -140,4 +140,3 @@ type GRPCMessage struct {
 	Service    string `json:"service,omitempty"`
 	Method     string `json:"method,omitempty"`
 }
-

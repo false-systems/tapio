@@ -22,8 +22,8 @@ type SignalTracker struct {
 	deathCauses map[uint32]*DeathCause
 
 	// Configuration
-	signalWindow   time.Duration // How long to keep signals
-	cleanupPeriod  time.Duration // How often to clean old entries
+	signalWindow  time.Duration // How long to keep signals
+	cleanupPeriod time.Duration // How often to clean old entries
 }
 
 // TrackedSignal represents a signal we're tracking
@@ -38,39 +38,39 @@ type TrackedSignal struct {
 
 // DeathCause represents why a process died
 type DeathCause struct {
-	Timestamp   time.Time
-	PID         uint32
-	ExitCode    int
-	Signal      int
-	SignalName  string
-	KillerPID   uint32
-	KillerComm  string
-	Reason      DeathReason
-	OOMKill     bool
-	CoreDumped  bool
+	Timestamp  time.Time
+	PID        uint32
+	ExitCode   int
+	Signal     int
+	SignalName string
+	KillerPID  uint32
+	KillerComm string
+	Reason     DeathReason
+	OOMKill    bool
+	CoreDumped bool
 }
 
 // DeathReason categorizes why a process died
 type DeathReason string
 
 const (
-	DeathReasonSignal      DeathReason = "signal"
-	DeathReasonOOM         DeathReason = "oom_kill"
-	DeathReasonExit        DeathReason = "normal_exit"
-	DeathReasonCrash       DeathReason = "crash"
-	DeathReasonSegfault    DeathReason = "segmentation_fault"
-	DeathReasonAbort       DeathReason = "abort"
-	DeathReasonUnknown     DeathReason = "unknown"
+	DeathReasonSignal   DeathReason = "signal"
+	DeathReasonOOM      DeathReason = "oom_kill"
+	DeathReasonExit     DeathReason = "normal_exit"
+	DeathReasonCrash    DeathReason = "crash"
+	DeathReasonSegfault DeathReason = "segmentation_fault"
+	DeathReasonAbort    DeathReason = "abort"
+	DeathReasonUnknown  DeathReason = "unknown"
 )
 
 // NewSignalTracker creates a new signal tracker
 func NewSignalTracker(logger *zap.Logger) *SignalTracker {
 	return &SignalTracker{
-		logger:         logger,
-		recentSignals:  make(map[uint32][]*TrackedSignal),
-		deathCauses:    make(map[uint32]*DeathCause),
-		signalWindow:   30 * time.Second, // Track signals for 30 seconds
-		cleanupPeriod:  60 * time.Second, // Clean up every minute
+		logger:        logger,
+		recentSignals: make(map[uint32][]*TrackedSignal),
+		deathCauses:   make(map[uint32]*DeathCause),
+		signalWindow:  30 * time.Second, // Track signals for 30 seconds
+		cleanupPeriod: 60 * time.Second, // Clean up every minute
 	}
 }
 
@@ -125,7 +125,7 @@ func (st *SignalTracker) CorrelateProcessDeath(pid uint32, exitCode int, exitInf
 				death.KillerPID = sig.SenderPID
 				death.KillerComm = sig.SenderComm
 				death.Reason = st.getSignalDeathReason(sig.Signal)
-				
+
 				st.logger.Info("Correlated process death with signal",
 					zap.Uint32("pid", pid),
 					zap.String("signal", sig.SignalName),

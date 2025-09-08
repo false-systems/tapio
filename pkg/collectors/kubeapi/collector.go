@@ -45,7 +45,7 @@ type Collector struct {
 
 	// Informers
 	informers []cache.SharedIndexInformer
-	
+
 	// Relationship cache for performance
 	relationshipCache *RelationshipCache
 
@@ -309,12 +309,12 @@ func (c *Collector) Stop() error {
 	}
 
 	// All watchers are now stopped via lifecycle manager
-	
+
 	// Stop trace manager cleanup goroutine
 	if c.traceManager != nil {
 		c.traceManager.Stop()
 	}
-	
+
 	// Stop relationship cache cleanup goroutine
 	if c.relationshipCache != nil {
 		c.relationshipCache.Stop()
@@ -597,7 +597,7 @@ func (c *Collector) handleResourceEvent(eventType, kind string, obj, oldObj inte
 		span.SetAttributes(attribute.String("skipped", "ignored_namespace"))
 		return
 	}
-	
+
 	// Clean up trace for deleted objects
 	if eventType == "DELETED" {
 		c.traceManager.RemoveTrace(kind, meta.GetNamespace(), meta.GetName())
@@ -775,7 +775,7 @@ func (c *Collector) extractRelationships(event *ResourceEvent, obj interface{}) 
 					})
 				}
 			}
-			
+
 			// Cache the computed relationships
 			c.relationshipCache.SetPodVolumes(string(event.UID), volumeRefs)
 		}
@@ -952,7 +952,7 @@ func (c *Collector) createRawEvent(event *ResourceEvent, traceID, spanID string)
 			"resource_name":    event.Name,
 		},
 	}
-	
+
 	// Set Pod-specific metadata only for Pod resources
 	if event.Kind == "Pod" {
 		metadata.PodName = event.Name

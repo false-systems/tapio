@@ -55,7 +55,7 @@ func (ci *CRIIntegration) handleContainerStart(ctx context.Context, event *domai
 	k8sMeta := &ContainerMetadata{
 		ContainerID: containerID,
 	}
-	
+
 	// Extract K8s context if available
 	if event.K8sContext != nil {
 		k8sMeta.PodUID = event.K8sContext.UID

@@ -23,12 +23,12 @@ func (o *ServicemonitorObjects) Close() error {
 
 // ServicemonitorPrograms contains the eBPF programs (stub for non-Linux)
 type ServicemonitorPrograms struct {
-	TraceTcpConnect      *ebpf.Program
-	TraceTcpAccept       *ebpf.Program
-	TraceTcpSendmsg      *ebpf.Program
-	TraceTcpCleanupRbuf  *ebpf.Program
-	TraceTcpClose        *ebpf.Program
-	TraceUdpSendmsg      *ebpf.Program
+	TraceTcpConnect     *ebpf.Program
+	TraceTcpAccept      *ebpf.Program
+	TraceTcpSendmsg     *ebpf.Program
+	TraceTcpCleanupRbuf *ebpf.Program
+	TraceTcpClose       *ebpf.Program
+	TraceUdpSendmsg     *ebpf.Program
 }
 
 func (p *ServicemonitorPrograms) Close() error {

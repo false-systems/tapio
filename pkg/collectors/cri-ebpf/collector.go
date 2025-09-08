@@ -18,13 +18,13 @@ import (
 // Provides real-time OOM detection and container process tracking
 type Collector struct {
 	*base.BaseCollector // Embed BaseCollector for standard functionality
-	
-	logger  *zap.Logger
-	events  chan *domain.CollectorEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	config  *Config
-	mu      sync.RWMutex
+
+	logger *zap.Logger
+	events chan *domain.CollectorEvent
+	ctx    context.Context
+	cancel context.CancelFunc
+	config *Config
+	mu     sync.RWMutex
 
 	// eBPF components (Linux-only)
 	ebpfState interface{}

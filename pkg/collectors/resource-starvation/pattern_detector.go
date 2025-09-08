@@ -16,13 +16,13 @@ import (
 
 // PatternDetector identifies recurring starvation patterns
 type PatternDetector struct {
-	logger  *zap.Logger
-	mu      sync.RWMutex
-	
+	logger *zap.Logger
+	mu     sync.RWMutex
+
 	// Pattern tracking
-	patterns map[string]*Pattern  // Key: "pid:eventType"
+	patterns map[string]*Pattern // Key: "pid:eventType"
 	windows  map[string]*TimeWindow
-	
+
 	// Metrics
 	patternsDetected metric.Int64Counter
 	patternDuration  metric.Float64Histogram
@@ -30,15 +30,15 @@ type PatternDetector struct {
 
 // Pattern represents a detected starvation pattern
 type Pattern struct {
-	Type           string
-	PID            uint32
-	Count          int
-	FirstSeen      time.Time
-	LastSeen       time.Time
-	AverageWaitMS  float64
-	MaxWaitMS      float64
-	Periodicity    time.Duration // If periodic
-	Confidence     float64
+	Type          string
+	PID           uint32
+	Count         int
+	FirstSeen     time.Time
+	LastSeen      time.Time
+	AverageWaitMS float64
+	MaxWaitMS     float64
+	Periodicity   time.Duration // If periodic
+	Confidence    float64
 }
 
 // TimeWindow tracks events in a sliding window
@@ -57,7 +57,7 @@ func NewPatternDetector(logger *zap.Logger, meter metric.Meter) (*PatternDetecto
 	if err != nil {
 		return nil, err
 	}
-	
+
 	patternDuration, err := meter.Float64Histogram(
 		"starvation_pattern_duration_seconds",
 		metric.WithDescription("Duration of detected patterns"),
@@ -65,7 +65,7 @@ func NewPatternDetector(logger *zap.Logger, meter metric.Meter) (*PatternDetecto
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &PatternDetector{
 		logger:           logger,
 		patterns:         make(map[string]*Pattern),
@@ -79,10 +79,10 @@ func NewPatternDetector(logger *zap.Logger, meter metric.Meter) (*PatternDetecto
 func (d *PatternDetector) AddEvent(ctx context.Context, event *StarvationEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	key := d.getPatternKey(event)
 	waitMS := float64(event.WaitTimeNS) / 1_000_000
-	
+
 	// Update or create window
 	window, exists := d.windows[key]
 	if !exists {
@@ -93,19 +93,19 @@ func (d *PatternDetector) AddEvent(ctx context.Context, event *StarvationEvent) 
 		}
 		d.windows[key] = window
 	}
-	
+
 	// Add event to window
 	now := time.Now()
 	window.Events = append(window.Events, now)
 	window.WaitTimes = append(window.WaitTimes, waitMS)
-	
+
 	// Clean old events
 	d.cleanWindow(window, now)
-	
+
 	// Detect patterns
 	if pattern := d.detectPattern(window, event); pattern != nil {
 		d.patterns[key] = pattern
-		
+
 		// Record metrics
 		if d.patternsDetected != nil {
 			d.patternsDetected.Add(ctx, 1, metric.WithAttributes(
@@ -113,7 +113,7 @@ func (d *PatternDetector) AddEvent(ctx context.Context, event *StarvationEvent) 
 				attribute.Float64("confidence", pattern.Confidence),
 			))
 		}
-		
+
 		// Log significant patterns
 		if pattern.Confidence > 0.8 {
 			d.logger.Info("Detected starvation pattern",
@@ -132,7 +132,7 @@ func (d *PatternDetector) detectPattern(window *TimeWindow, event *StarvationEve
 	if len(window.Events) < 3 {
 		return nil // Need at least 3 events
 	}
-	
+
 	// Calculate statistics
 	var totalWait float64
 	var maxWait float64
@@ -143,13 +143,13 @@ func (d *PatternDetector) detectPattern(window *TimeWindow, event *StarvationEve
 		}
 	}
 	avgWait := totalWait / float64(len(window.WaitTimes))
-	
+
 	// Check for periodicity
 	periodicity, confidence := d.detectPeriodicity(window.Events)
-	
+
 	// Determine pattern type
 	patternType := d.classifyPattern(event, avgWait, periodicity)
-	
+
 	if confidence > 0.5 { // Threshold for pattern detection
 		return &Pattern{
 			Type:          patternType,
@@ -163,7 +163,7 @@ func (d *PatternDetector) detectPattern(window *TimeWindow, event *StarvationEve
 			Confidence:    confidence,
 		}
 	}
-	
+
 	return nil
 }
 
@@ -172,20 +172,20 @@ func (d *PatternDetector) detectPeriodicity(events []time.Time) (time.Duration, 
 	if len(events) < 3 {
 		return 0, 0
 	}
-	
+
 	// Calculate intervals
 	intervals := make([]time.Duration, len(events)-1)
 	for i := 1; i < len(events); i++ {
 		intervals[i-1] = events[i].Sub(events[i-1])
 	}
-	
+
 	// Find median interval
 	var totalInterval time.Duration
 	for _, interval := range intervals {
 		totalInterval += interval
 	}
 	avgInterval := totalInterval / time.Duration(len(intervals))
-	
+
 	// Calculate variance
 	var variance float64
 	for _, interval := range intervals {
@@ -193,18 +193,18 @@ func (d *PatternDetector) detectPeriodicity(events []time.Time) (time.Duration, 
 		variance += diff * diff
 	}
 	variance /= float64(len(intervals))
-	
+
 	// Low variance = high periodicity confidence
 	stdDev := variance // Simplified
 	confidence := 1.0 / (1.0 + stdDev/float64(avgInterval))
-	
+
 	return avgInterval, confidence
 }
 
 // classifyPattern determines the pattern type
 func (d *PatternDetector) classifyPattern(event *StarvationEvent, avgWait float64, periodicity time.Duration) string {
 	eventType := EventType(event.EventType)
-	
+
 	switch {
 	case eventType == EventCFSThrottle && periodicity > 0:
 		return "periodic_throttling"
@@ -226,7 +226,7 @@ func (d *PatternDetector) classifyPattern(event *StarvationEvent, avgWait float6
 // cleanWindow removes old events outside the window
 func (d *PatternDetector) cleanWindow(window *TimeWindow, now time.Time) {
 	cutoff := now.Add(-window.WindowSize)
-	
+
 	// Find first event within window
 	keepFrom := 0
 	for i, eventTime := range window.Events {
@@ -235,7 +235,7 @@ func (d *PatternDetector) cleanWindow(window *TimeWindow, now time.Time) {
 			break
 		}
 	}
-	
+
 	// Keep only recent events
 	if keepFrom > 0 {
 		window.Events = window.Events[keepFrom:]
@@ -252,7 +252,7 @@ func (d *PatternDetector) getPatternKey(event *StarvationEvent) string {
 func (d *PatternDetector) GetPatterns() map[string]*Pattern {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	
+
 	// Return copy to avoid race conditions
 	patterns := make(map[string]*Pattern)
 	for k, v := range d.patterns {
@@ -265,7 +265,7 @@ func (d *PatternDetector) GetPatterns() map[string]*Pattern {
 func (d *PatternDetector) Cleanup() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	now := time.Now()
 	for key, pattern := range d.patterns {
 		if now.Sub(pattern.LastSeen) > 5*time.Minute {

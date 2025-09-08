@@ -46,9 +46,9 @@ func (c *Config) Validate() error {
 // DefaultConfig returns default configuration
 func DefaultConfig() Config {
 	return Config{
-		BufferSize:      10000,
-		EnableEBPF:      true,
-		EnableJournal:   true,
+		BufferSize:           10000,
+		EnableEBPF:           true,
+		EnableJournal:        true,
 		ServicePatterns:      []string{}, // Monitor all services
 		MonitorServiceStates: true,
 		MonitorCgroups:       true,

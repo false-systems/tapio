@@ -19,13 +19,13 @@ type LocalConsumer interface {
 	// ConsumeEvent processes an event locally
 	// Should return quickly to avoid blocking the ring buffer
 	ConsumeEvent(ctx context.Context, event *domain.CollectorEvent) error
-	
+
 	// Priority determines processing order (higher = first)
 	Priority() int
-	
+
 	// Name returns the consumer name for debugging
 	Name() string
-	
+
 	// ShouldConsume allows filtering which events this consumer wants
 	ShouldConsume(event *domain.CollectorEvent) bool
 }
@@ -34,42 +34,42 @@ type LocalConsumer interface {
 // Inspired by Hubble's perf ring buffer pattern but in userspace
 type RingBuffer struct {
 	// Core buffer
-	buffer     []*domain.CollectorEvent
-	capacity   uint64
-	mask       uint64 // capacity - 1 for fast modulo
-	
+	buffer   []*domain.CollectorEvent
+	capacity uint64
+	mask     uint64 // capacity - 1 for fast modulo
+
 	// Position tracking (cache-line aligned)
-	_ [64 - unsafe.Sizeof(uint64(0))]byte
+	_    [64 - unsafe.Sizeof(uint64(0))]byte
 	head atomic.Uint64 // next write position
-	
-	_ [64 - unsafe.Sizeof(uint64(0))]byte  
+
+	_    [64 - unsafe.Sizeof(uint64(0))]byte
 	tail atomic.Uint64 // next read position
-	
+
 	// Statistics
-	_ [64 - unsafe.Sizeof(uint64(0))]byte
+	_        [64 - unsafe.Sizeof(uint64(0))]byte
 	dropped  atomic.Uint64
 	produced atomic.Uint64
 	consumed atomic.Uint64
-	
+
 	// Configuration
 	logger        *zap.Logger
 	collectorName string
-	
+
 	// Local consumers (sorted by priority)
 	consumersLock sync.RWMutex
 	consumers     []LocalConsumer
-	
+
 	// Output channel (optional - for backward compatibility)
 	outputChan chan *domain.CollectorEvent
-	
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	
+
 	// CPU affinity for better cache performance
 	cpuCount int
-	
+
 	// Batch processing
 	batchSize    int
 	batchTimeout time.Duration
@@ -79,17 +79,17 @@ type RingBuffer struct {
 type RingBufferConfig struct {
 	// Size must be power of 2 for performance
 	Size int
-	
+
 	// Optional output channel for backward compatibility
 	OutputChannel chan *domain.CollectorEvent
-	
+
 	// Batch processing settings
 	BatchSize    int           // Default: 32
 	BatchTimeout time.Duration // Default: 10ms
-	
+
 	// CPU affinity
 	EnableCPUAffinity bool
-	
+
 	Logger        *zap.Logger
 	CollectorName string
 }
@@ -114,14 +114,14 @@ func NewRingBuffer(config RingBufferConfig) (*RingBuffer, error) {
 		v++
 		size = v
 	}
-	
+
 	if config.BatchSize == 0 {
 		config.BatchSize = 32
 	}
 	if config.BatchTimeout == 0 {
 		config.BatchTimeout = 10 * time.Millisecond
 	}
-	
+
 	rb := &RingBuffer{
 		buffer:        make([]*domain.CollectorEvent, size),
 		capacity:      size,
@@ -134,14 +134,14 @@ func NewRingBuffer(config RingBufferConfig) (*RingBuffer, error) {
 		batchTimeout:  config.BatchTimeout,
 		cpuCount:      runtime.NumCPU(),
 	}
-	
+
 	return rb, nil
 }
 
 // Start begins processing events
 func (rb *RingBuffer) Start(ctx context.Context) {
 	rb.ctx, rb.cancel = context.WithCancel(ctx)
-	
+
 	// Start processor goroutine
 	rb.wg.Add(1)
 	go rb.processEvents()
@@ -161,11 +161,11 @@ func (rb *RingBuffer) Write(event *domain.CollectorEvent) bool {
 	if event == nil {
 		return false
 	}
-	
+
 	// Get next write position
 	head := rb.head.Add(1) - 1
 	tail := rb.tail.Load()
-	
+
 	// Check if buffer is full (will overwrite)
 	if head-tail >= rb.capacity {
 		rb.dropped.Add(1)
@@ -176,11 +176,11 @@ func (rb *RingBuffer) Write(event *domain.CollectorEvent) bool {
 			)
 		}
 	}
-	
+
 	// Write to buffer (may overwrite old data)
 	rb.buffer[head&rb.mask] = event
 	rb.produced.Add(1)
-	
+
 	return true
 }
 
@@ -188,9 +188,9 @@ func (rb *RingBuffer) Write(event *domain.CollectorEvent) bool {
 func (rb *RingBuffer) RegisterLocalConsumer(consumer LocalConsumer) {
 	rb.consumersLock.Lock()
 	defer rb.consumersLock.Unlock()
-	
+
 	rb.consumers = append(rb.consumers, consumer)
-	
+
 	// Sort by priority (highest first)
 	for i := len(rb.consumers) - 1; i > 0; i-- {
 		if rb.consumers[i].Priority() > rb.consumers[i-1].Priority() {
@@ -199,7 +199,7 @@ func (rb *RingBuffer) RegisterLocalConsumer(consumer LocalConsumer) {
 			break
 		}
 	}
-	
+
 	if rb.logger != nil {
 		rb.logger.Info("Registered local consumer",
 			zap.String("collector", rb.collectorName),
@@ -212,30 +212,30 @@ func (rb *RingBuffer) RegisterLocalConsumer(consumer LocalConsumer) {
 // processEvents is the main processing loop
 func (rb *RingBuffer) processEvents() {
 	defer rb.wg.Done()
-	
+
 	batch := make([]*domain.CollectorEvent, 0, rb.batchSize)
 	ticker := time.NewTicker(rb.batchTimeout)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-rb.ctx.Done():
 			// Process remaining events
 			rb.processBatch(rb.drainBuffer())
 			return
-			
+
 		case <-ticker.C:
 			// Process batch on timeout
 			if len(batch) > 0 {
 				rb.processBatch(batch)
 				batch = batch[:0]
 			}
-		
+
 		default:
 			// Try to read events
 			if event := rb.read(); event != nil {
 				batch = append(batch, event)
-				
+
 				// Process batch when full
 				if len(batch) >= rb.batchSize {
 					rb.processBatch(batch)
@@ -254,29 +254,29 @@ func (rb *RingBuffer) processEvents() {
 func (rb *RingBuffer) read() *domain.CollectorEvent {
 	tail := rb.tail.Load()
 	head := rb.head.Load()
-	
+
 	// Check if buffer is empty
 	if tail >= head {
 		return nil
 	}
-	
+
 	// Read event
 	event := rb.buffer[tail&rb.mask]
-	
+
 	// Only advance tail if we successfully read
 	if event != nil {
 		rb.tail.Add(1)
 		rb.consumed.Add(1)
 		return event
 	}
-	
+
 	return nil
 }
 
 // drainBuffer reads all remaining events
 func (rb *RingBuffer) drainBuffer() []*domain.CollectorEvent {
 	var events []*domain.CollectorEvent
-	
+
 	for {
 		event := rb.read()
 		if event == nil {
@@ -284,7 +284,7 @@ func (rb *RingBuffer) drainBuffer() []*domain.CollectorEvent {
 		}
 		events = append(events, event)
 	}
-	
+
 	return events
 }
 
@@ -293,10 +293,10 @@ func (rb *RingBuffer) processBatch(events []*domain.CollectorEvent) {
 	if len(events) == 0 {
 		return
 	}
-	
+
 	// Process through local consumers first
 	rb.processLocalConsumers(events)
-	
+
 	// Send to output channel if configured
 	if rb.outputChan != nil {
 		for _, event := range events {
@@ -318,11 +318,11 @@ func (rb *RingBuffer) processLocalConsumers(events []*domain.CollectorEvent) {
 	rb.consumersLock.RLock()
 	consumers := rb.consumers
 	rb.consumersLock.RUnlock()
-	
+
 	if len(consumers) == 0 {
 		return
 	}
-	
+
 	// Process each event through consumers
 	for _, event := range events {
 		for _, consumer := range consumers {
@@ -330,12 +330,12 @@ func (rb *RingBuffer) processLocalConsumers(events []*domain.CollectorEvent) {
 			if !consumer.ShouldConsume(event) {
 				continue
 			}
-			
+
 			// Process with timeout to prevent blocking
 			ctx, cancel := context.WithTimeout(rb.ctx, 100*time.Millisecond)
 			err := consumer.ConsumeEvent(ctx, event)
 			cancel()
-			
+
 			if err != nil && rb.logger != nil {
 				rb.logger.Debug("Local consumer error",
 					zap.String("collector", rb.collectorName),
@@ -351,7 +351,7 @@ func (rb *RingBuffer) processLocalConsumers(events []*domain.CollectorEvent) {
 func (rb *RingBuffer) Statistics() RingBufferStats {
 	head := rb.head.Load()
 	tail := rb.tail.Load()
-	
+
 	var utilization float64
 	if head >= tail {
 		used := head - tail
@@ -360,7 +360,7 @@ func (rb *RingBuffer) Statistics() RingBufferStats {
 		}
 		utilization = float64(used) / float64(rb.capacity) * 100
 	}
-	
+
 	return RingBufferStats{
 		Capacity:    rb.capacity,
 		Produced:    rb.produced.Load(),
@@ -385,8 +385,8 @@ type RingBufferStats struct {
 // This can replace EventChannelManager in collectors that want ring buffer benefits
 type EnhancedEventManager struct {
 	*EventChannelManager // Embed for backward compatibility
-	ringBuffer          *RingBuffer
-	useRingBuffer       bool
+	ringBuffer           *RingBuffer
+	useRingBuffer        bool
 }
 
 // NewEnhancedEventManager creates a manager with both channel and ring buffer
@@ -396,20 +396,20 @@ func NewEnhancedEventManager(config RingBufferConfig) (*EnhancedEventManager, er
 	if channelSize == 0 {
 		channelSize = 1000
 	}
-	
+
 	ecm := NewEventChannelManager(channelSize, config.CollectorName, config.Logger)
-	
+
 	// Create ring buffer that feeds into the channel
 	config.OutputChannel = ecm.channel
 	rb, err := NewRingBuffer(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ring buffer: %w", err)
 	}
-	
+
 	return &EnhancedEventManager{
 		EventChannelManager: ecm,
-		ringBuffer:         rb,
-		useRingBuffer:      true,
+		ringBuffer:          rb,
+		useRingBuffer:       true,
 	}, nil
 }
 

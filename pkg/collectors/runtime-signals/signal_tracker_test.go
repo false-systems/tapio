@@ -63,7 +63,7 @@ func TestOOMKillCorrelation(t *testing.T) {
 
 	tracker.TrackOOMKill(victimPID, killerPID)
 
-	// Simulate process exit 
+	// Simulate process exit
 	exitInfo := &ExitInfo{
 		Signal:     SIGKILL,
 		Code:       137,

@@ -15,12 +15,12 @@ type Collector struct {
 	*base.BaseCollector       // Embed for stats/health
 	*base.EventChannelManager // Embed for events
 	*base.LifecycleManager    // Embed for lifecycle
-	
+
 	// Network-specific fields
-	config    *NetworkCollectorConfig
-	logger    *zap.Logger
-	l7Parser  *L7Parser
-	
+	config   *NetworkCollectorConfig
+	logger   *zap.Logger
+	l7Parser *L7Parser
+
 	// eBPF state (platform-specific, interface{} to avoid build constraints here)
 	ebpfState interface{}
 }
@@ -55,29 +55,29 @@ func NewCollector(name string, config *NetworkCollectorConfig, logger *zap.Logge
 func (c *Collector) Start(ctx context.Context) error {
 	// Initialize base collector start time
 	c.BaseCollector.Start()
-	
+
 	// Start eBPF monitoring (platform-specific)
 	if err := c.startEBPF(); err != nil {
 		return fmt.Errorf("failed to start eBPF: %w", err)
 	}
-	
+
 	// Start background tasks
 	c.LifecycleManager.Start("L7-cleanup", c.cleanupL7Parser)
-	
+
 	c.logger.Info("Network collector started", zap.String("name", c.Name()))
 	return nil
 }
 
-// Stop stops the collector  
+// Stop stops the collector
 func (c *Collector) Stop() error {
 	// Stop eBPF monitoring (platform-specific)
 	c.stopEBPF()
-	
+
 	// Use lifecycle manager for graceful shutdown
 	if err := c.LifecycleManager.Stop(5 * time.Second); err != nil {
 		c.logger.Warn("Graceful shutdown timeout, forcing stop", zap.Error(err))
 	}
-	
+
 	c.logger.Info("Network collector stopped")
 	return nil
 }
@@ -93,7 +93,7 @@ func (c *Collector) SendEvent(event *domain.CollectorEvent) {
 		// Event was dropped (EventChannelManager already logged it)
 		c.RecordError(fmt.Errorf("event dropped due to full channel"))
 	} else {
-		// Event sent successfully 
+		// Event sent successfully
 		c.RecordEvent()
 	}
 }
@@ -102,7 +102,7 @@ func (c *Collector) SendEvent(event *domain.CollectorEvent) {
 func (c *Collector) cleanupL7Parser() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.LifecycleManager.Context().Done():
@@ -111,7 +111,7 @@ func (c *Collector) cleanupL7Parser() {
 			if c.l7Parser != nil {
 				staleCount := c.l7Parser.CleanupStaleConnections(5 * time.Minute)
 				if staleCount > 0 {
-					c.logger.Debug("Cleaned up stale L7 connections", 
+					c.logger.Debug("Cleaned up stale L7 connections",
 						zap.Int("count", staleCount))
 				}
 			}

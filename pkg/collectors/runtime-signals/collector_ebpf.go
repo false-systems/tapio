@@ -401,14 +401,14 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 	case EventTypeProcessExec:
 		runtimeEvt.UID = event.ExecInfo.UID
 		runtimeEvt.GID = event.ExecInfo.GID
-		
+
 	case EventTypeProcessExit:
 		runtimeEvt.ExitInfo = DecodeExitCode(event.ExitCode)
-		
+
 		// Death intelligence: correlate with recent signals
 		if c.signalTracker != nil {
 			deathCause := c.signalTracker.CorrelateProcessDeath(event.PID, int(event.ExitCode), runtimeEvt.ExitInfo)
-			
+
 			// Record death correlation metrics
 			if c.deathsCorrelated != nil {
 				c.deathsCorrelated.Add(ctx, 1,
@@ -419,7 +419,7 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 					),
 				)
 			}
-			
+
 			// Enrich event data with death intelligence
 			eventData["death_reason"] = string(deathCause.Reason)
 			if deathCause.KillerPID > 0 {
@@ -430,7 +430,7 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 				eventData["oom_kill"] = "true"
 			}
 		}
-		
+
 	case EventTypeSignalGenerate, EventTypeSignalDeliver:
 		runtimeEvt.SignalInfo = &SignalInfo{
 			Number:      int(event.Signal),
@@ -439,7 +439,7 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 			IsFatal:     IsSignalFatal(int(event.Signal)),
 		}
 		runtimeEvt.SenderPID = event.SenderPID
-		
+
 		// Track signal for correlation with future process deaths
 		if c.signalTracker != nil && event.EventType == EventTypeSignalGenerate {
 			trackedSignal := &TrackedSignal{
@@ -451,7 +451,7 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 				IsFatal:    IsSignalFatal(int(event.Signal)),
 			}
 			c.signalTracker.TrackSignal(event.PID, trackedSignal)
-			
+
 			// Record signal metrics
 			if c.signalsByType != nil {
 				c.signalsByType.Add(ctx, 1,
@@ -463,7 +463,7 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 				)
 			}
 		}
-		
+
 	case EventTypeOOMKill:
 		runtimeEvt.IsOOMKill = true
 		runtimeEvt.SignalInfo = &SignalInfo{
@@ -473,7 +473,7 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 			IsFatal:     true,
 		}
 		runtimeEvt.SenderPID = event.SenderPID
-		
+
 		// Track OOM kill for correlation
 		if c.signalTracker != nil {
 			c.signalTracker.TrackOOMKill(event.PID, event.SenderPID)
@@ -508,7 +508,7 @@ func (c *Collector) processRuntimeEvent(ctx context.Context, event *runtimeEvent
 	} else {
 		c.BaseCollector.RecordDrop()
 	}
-	
+
 	// Check if context is done
 	select {
 	case <-c.LifecycleManager.Context().Done():

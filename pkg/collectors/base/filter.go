@@ -37,25 +37,25 @@ type FilterRule struct {
 
 // FilterManager manages allow and deny filters for a collector
 type FilterManager struct {
-	mu              sync.RWMutex
-	logger          *zap.Logger
-	collectorName   string
-	
+	mu            sync.RWMutex
+	logger        *zap.Logger
+	collectorName string
+
 	// Named filters for easy management
-	allowFilters    map[string]FilterFunc
-	denyFilters     map[string]FilterFunc
-	
+	allowFilters map[string]FilterFunc
+	denyFilters  map[string]FilterFunc
+
 	// Config file path and watcher
 	configPath      string
 	watcher         *fsnotify.Watcher
 	watcherStopChan chan struct{}
-	
+
 	// Statistics
 	filterVersion   atomic.Int64
 	eventsAllowed   atomic.Int64
 	eventsDenied    atomic.Int64
 	eventsProcessed atomic.Int64
-	
+
 	// Filter compilation
 	compiler *FilterCompiler
 }
@@ -64,10 +64,10 @@ type FilterManager struct {
 func NewFilterManager(collectorName string, logger *zap.Logger) *FilterManager {
 	return &FilterManager{
 		collectorName:   collectorName,
-		logger:         logger,
-		allowFilters:   make(map[string]FilterFunc),
-		denyFilters:    make(map[string]FilterFunc),
-		compiler:       NewFilterCompiler(logger),
+		logger:          logger,
+		allowFilters:    make(map[string]FilterFunc),
+		denyFilters:     make(map[string]FilterFunc),
+		compiler:        NewFilterCompiler(logger),
 		watcherStopChan: make(chan struct{}),
 	}
 }
@@ -83,12 +83,12 @@ func (fm *FilterManager) LoadFromFile(configPath string) error {
 		}
 		return fmt.Errorf("failed to read filter config: %w", err)
 	}
-	
+
 	var config FilterConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return fmt.Errorf("failed to parse filter config: %w", err)
 	}
-	
+
 	return fm.ApplyConfig(&config)
 }
 
@@ -96,17 +96,17 @@ func (fm *FilterManager) LoadFromFile(configPath string) error {
 func (fm *FilterManager) ApplyConfig(config *FilterConfig) error {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
-	
+
 	// Clear existing filters
 	fm.allowFilters = make(map[string]FilterFunc)
 	fm.denyFilters = make(map[string]FilterFunc)
-	
+
 	// Compile and add allow filters
 	for _, rule := range config.Allow {
 		if rule.Enabled != nil && !*rule.Enabled {
 			continue // Skip disabled filters
 		}
-		
+
 		filter, err := fm.compiler.CompileRule(&rule)
 		if err != nil {
 			fm.logger.Warn("Failed to compile allow filter",
@@ -114,20 +114,20 @@ func (fm *FilterManager) ApplyConfig(config *FilterConfig) error {
 				zap.Error(err))
 			continue
 		}
-		
+
 		fm.allowFilters[rule.Name] = filter
 		fm.logger.Info("Added allow filter",
 			zap.String("collector", fm.collectorName),
 			zap.String("filter", rule.Name),
 			zap.String("type", rule.Type))
 	}
-	
+
 	// Compile and add deny filters
 	for _, rule := range config.Deny {
 		if rule.Enabled != nil && !*rule.Enabled {
 			continue // Skip disabled filters
 		}
-		
+
 		filter, err := fm.compiler.CompileRule(&rule)
 		if err != nil {
 			fm.logger.Warn("Failed to compile deny filter",
@@ -135,90 +135,90 @@ func (fm *FilterManager) ApplyConfig(config *FilterConfig) error {
 				zap.Error(err))
 			continue
 		}
-		
+
 		fm.denyFilters[rule.Name] = filter
 		fm.logger.Info("Added deny filter",
 			zap.String("collector", fm.collectorName),
 			zap.String("filter", rule.Name),
 			zap.String("type", rule.Type))
 	}
-	
+
 	fm.filterVersion.Add(1)
 	fm.logger.Info("Applied filter configuration",
 		zap.String("collector", fm.collectorName),
 		zap.String("version", config.Version),
 		zap.Int("allow_filters", len(fm.allowFilters)),
 		zap.Int("deny_filters", len(fm.denyFilters)))
-	
+
 	return nil
 }
 
 // WatchConfigFile starts watching the config file for changes
 func (fm *FilterManager) WatchConfigFile(configPath string) error {
 	fm.configPath = configPath
-	
+
 	// Initial load
 	if err := fm.LoadFromFile(configPath); err != nil {
 		fm.logger.Warn("Failed to load initial filter config",
 			zap.String("path", configPath),
 			zap.Error(err))
 	}
-	
+
 	// Create watcher
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("failed to create file watcher: %w", err)
 	}
 	fm.watcher = watcher
-	
+
 	// Watch the directory, not the file (for ConfigMap updates)
 	dir := filepath.Dir(configPath)
 	if err := watcher.Add(dir); err != nil {
 		return fmt.Errorf("failed to watch directory %s: %w", dir, err)
 	}
-	
+
 	// Start watching in background
 	go fm.watchLoop(configPath)
-	
+
 	return nil
 }
 
 // watchLoop watches for config file changes
 func (fm *FilterManager) watchLoop(configPath string) {
 	filename := filepath.Base(configPath)
-	
+
 	for {
 		select {
 		case <-fm.watcherStopChan:
 			return
-			
+
 		case event, ok := <-fm.watcher.Events:
 			if !ok {
 				return
 			}
-			
+
 			// Check if it's our file
 			if filepath.Base(event.Name) != filename {
 				continue
 			}
-			
+
 			// Reload on write or create events
 			if event.Op&fsnotify.Write == fsnotify.Write ||
-			   event.Op&fsnotify.Create == fsnotify.Create {
+				event.Op&fsnotify.Create == fsnotify.Create {
 				fm.logger.Info("Filter config file changed, reloading",
 					zap.String("collector", fm.collectorName),
 					zap.String("file", configPath))
-				
+
 				// Small delay to ensure file write is complete
 				time.Sleep(100 * time.Millisecond)
-				
+
 				if err := fm.LoadFromFile(configPath); err != nil {
 					fm.logger.Error("Failed to reload filter config",
 						zap.String("collector", fm.collectorName),
 						zap.Error(err))
 				}
 			}
-			
+
 		case err, ok := <-fm.watcher.Errors:
 			if !ok {
 				return
@@ -234,10 +234,10 @@ func (fm *FilterManager) watchLoop(configPath string) {
 // Returns true if the event should be processed, false if it should be dropped
 func (fm *FilterManager) ShouldAllow(event *domain.CollectorEvent) bool {
 	fm.eventsProcessed.Add(1)
-	
+
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
-	
+
 	// Check allow filters first (if any exist)
 	if len(fm.allowFilters) > 0 {
 		allowed := false
@@ -252,7 +252,7 @@ func (fm *FilterManager) ShouldAllow(event *domain.CollectorEvent) bool {
 			return false
 		}
 	}
-	
+
 	// Check deny filters
 	for _, filter := range fm.denyFilters {
 		if filter(event) { // Filter returns true to DROP
@@ -260,7 +260,7 @@ func (fm *FilterManager) ShouldAllow(event *domain.CollectorEvent) bool {
 			return false
 		}
 	}
-	
+
 	fm.eventsAllowed.Add(1)
 	return true
 }
@@ -269,10 +269,10 @@ func (fm *FilterManager) ShouldAllow(event *domain.CollectorEvent) bool {
 func (fm *FilterManager) AddAllowFilter(name string, filter FilterFunc) {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
-	
+
 	fm.allowFilters[name] = filter
 	fm.filterVersion.Add(1)
-	
+
 	fm.logger.Info("Added allow filter",
 		zap.String("collector", fm.collectorName),
 		zap.String("filter", name))
@@ -282,10 +282,10 @@ func (fm *FilterManager) AddAllowFilter(name string, filter FilterFunc) {
 func (fm *FilterManager) AddDenyFilter(name string, filter FilterFunc) {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
-	
+
 	fm.denyFilters[name] = filter
 	fm.filterVersion.Add(1)
-	
+
 	fm.logger.Info("Added deny filter",
 		zap.String("collector", fm.collectorName),
 		zap.String("filter", name))
@@ -295,7 +295,7 @@ func (fm *FilterManager) AddDenyFilter(name string, filter FilterFunc) {
 func (fm *FilterManager) RemoveFilter(name string) {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
-	
+
 	deleted := false
 	if _, ok := fm.allowFilters[name]; ok {
 		delete(fm.allowFilters, name)
@@ -305,7 +305,7 @@ func (fm *FilterManager) RemoveFilter(name string) {
 		delete(fm.denyFilters, name)
 		deleted = true
 	}
-	
+
 	if deleted {
 		fm.filterVersion.Add(1)
 		fm.logger.Info("Removed filter",
@@ -318,7 +318,7 @@ func (fm *FilterManager) RemoveFilter(name string) {
 func (fm *FilterManager) GetStatistics() FilterStatistics {
 	fm.mu.RLock()
 	defer fm.mu.RUnlock()
-	
+
 	return FilterStatistics{
 		Version:         fm.filterVersion.Load(),
 		AllowFilters:    len(fm.allowFilters),
@@ -385,7 +385,7 @@ func (fc *FilterCompiler) compileSeverityFilter(rule *FilterRule) (FilterFunc, e
 	if !ok {
 		return nil, fmt.Errorf("severity filter requires min_severity")
 	}
-	
+
 	// Parse severity level
 	var severity domain.EventSeverity
 	switch strings.ToLower(minSeverity) {
@@ -402,7 +402,7 @@ func (fc *FilterCompiler) compileSeverityFilter(rule *FilterRule) (FilterFunc, e
 	default:
 		return nil, fmt.Errorf("unknown severity level: %s", minSeverity)
 	}
-	
+
 	return func(event *domain.CollectorEvent) bool {
 		return event.Severity < severity // Return true to DROP if below threshold
 	}, nil
@@ -414,19 +414,19 @@ func (fc *FilterCompiler) compileEventTypeFilter(rule *FilterRule) (FilterFunc, 
 	if !ok {
 		return nil, fmt.Errorf("event_type filter requires types array")
 	}
-	
+
 	typeMap := make(map[domain.CollectorEventType]bool)
 	for _, t := range types {
 		if typeStr, ok := t.(string); ok {
 			typeMap[domain.CollectorEventType(typeStr)] = true
 		}
 	}
-	
+
 	exclude := false
 	if val, ok := rule.Condition["exclude"].(bool); ok {
 		exclude = val
 	}
-	
+
 	return func(event *domain.CollectorEvent) bool {
 		_, exists := typeMap[event.Type]
 		if exclude {
@@ -443,7 +443,7 @@ func (fc *FilterCompiler) compileNetworkFilter(rule *FilterRule) (FilterFunc, er
 		if !ok {
 			return false // Not a network event, don't filter
 		}
-		
+
 		// Check source IPs
 		if sourceIPs, ok := rule.Condition["source_ip"].([]interface{}); ok {
 			for _, ip := range sourceIPs {
@@ -452,7 +452,7 @@ func (fc *FilterCompiler) compileNetworkFilter(rule *FilterRule) (FilterFunc, er
 				}
 			}
 		}
-		
+
 		// Check destination IPs
 		if destIPs, ok := rule.Condition["dest_ip"].([]interface{}); ok {
 			for _, ip := range destIPs {
@@ -461,7 +461,7 @@ func (fc *FilterCompiler) compileNetworkFilter(rule *FilterRule) (FilterFunc, er
 				}
 			}
 		}
-		
+
 		// Check ports
 		if ports, ok := rule.Condition["ports"].([]interface{}); ok {
 			for _, port := range ports {
@@ -472,7 +472,7 @@ func (fc *FilterCompiler) compileNetworkFilter(rule *FilterRule) (FilterFunc, er
 				}
 			}
 		}
-		
+
 		return false
 	}, nil
 }
@@ -484,7 +484,7 @@ func (fc *FilterCompiler) compileDNSFilter(rule *FilterRule) (FilterFunc, error)
 		if !ok {
 			return false // Not a DNS event, don't filter
 		}
-		
+
 		// Check domains
 		if domains, ok := rule.Condition["domains"].([]interface{}); ok {
 			for _, domain := range domains {
@@ -495,7 +495,7 @@ func (fc *FilterCompiler) compileDNSFilter(rule *FilterRule) (FilterFunc, error)
 				}
 			}
 		}
-		
+
 		// Check query types
 		if types, ok := rule.Condition["query_types"].([]interface{}); ok {
 			for _, qtype := range types {
@@ -504,7 +504,7 @@ func (fc *FilterCompiler) compileDNSFilter(rule *FilterRule) (FilterFunc, error)
 				}
 			}
 		}
-		
+
 		return false
 	}, nil
 }
@@ -516,7 +516,7 @@ func (fc *FilterCompiler) compileHTTPFilter(rule *FilterRule) (FilterFunc, error
 		if httpData == nil {
 			return false // Not an HTTP event, don't filter
 		}
-		
+
 		// Check paths
 		if paths, ok := rule.Condition["paths"].([]interface{}); ok {
 			for _, path := range paths {
@@ -527,7 +527,7 @@ func (fc *FilterCompiler) compileHTTPFilter(rule *FilterRule) (FilterFunc, error
 				}
 			}
 		}
-		
+
 		// Check methods
 		if methods, ok := rule.Condition["methods"].([]interface{}); ok {
 			for _, method := range methods {
@@ -536,7 +536,7 @@ func (fc *FilterCompiler) compileHTTPFilter(rule *FilterRule) (FilterFunc, error
 				}
 			}
 		}
-		
+
 		// Check status codes
 		if codes, ok := rule.Condition["status_codes"].([]interface{}); ok {
 			for _, code := range codes {
@@ -545,7 +545,7 @@ func (fc *FilterCompiler) compileHTTPFilter(rule *FilterRule) (FilterFunc, error
 				}
 			}
 		}
-		
+
 		return false
 	}, nil
 }
@@ -556,17 +556,17 @@ func (fc *FilterCompiler) compileRegexFilter(rule *FilterRule) (FilterFunc, erro
 	if !ok {
 		return nil, fmt.Errorf("regex filter requires field")
 	}
-	
+
 	pattern, ok := rule.Condition["pattern"].(string)
 	if !ok {
 		return nil, fmt.Errorf("regex filter requires pattern")
 	}
-	
+
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
-	
+
 	return func(event *domain.CollectorEvent) bool {
 		// Extract field value based on field name
 		var value string
@@ -583,7 +583,7 @@ func (fc *FilterCompiler) compileRegexFilter(rule *FilterRule) (FilterFunc, erro
 				value = event.Metadata.Attributes[field]
 			}
 		}
-		
+
 		return re.MatchString(value) // DROP if matches
 	}, nil
 }
@@ -594,33 +594,33 @@ func (fc *FilterCompiler) compileTimeBasedFilter(rule *FilterRule) (FilterFunc, 
 	if !ok {
 		return nil, fmt.Errorf("time_based filter requires hours")
 	}
-	
+
 	// Parse hours range (e.g., "09:00-17:00")
 	parts := strings.Split(hoursStr, "-")
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid hours format, expected HH:MM-HH:MM")
 	}
-	
+
 	startTime, err := time.Parse("15:04", parts[0])
 	if err != nil {
 		return nil, fmt.Errorf("invalid start time: %w", err)
 	}
-	
+
 	endTime, err := time.Parse("15:04", parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("invalid end time: %w", err)
 	}
-	
+
 	// Optional sample rate during this time
 	sampleRate := 1.0
 	if rate, ok := rule.Condition["sample_rate"].(float64); ok {
 		sampleRate = rate
 	}
-	
+
 	return func(event *domain.CollectorEvent) bool {
 		now := time.Now()
 		currentTime := time.Date(0, 1, 1, now.Hour(), now.Minute(), 0, 0, time.UTC)
-		
+
 		// Check if current time is within range
 		if currentTime.After(startTime) && currentTime.Before(endTime) {
 			// Apply sampling if configured
@@ -633,7 +633,7 @@ func (fc *FilterCompiler) compileTimeBasedFilter(rule *FilterRule) (FilterFunc, 
 				return float64(hash%100)/100.0 > sampleRate // DROP if above sample rate
 			}
 		}
-		
+
 		return false
 	}, nil
 }

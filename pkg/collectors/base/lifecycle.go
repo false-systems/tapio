@@ -23,7 +23,7 @@ type LifecycleManager struct {
 	stopCh chan struct{}
 	doneCh chan struct{}
 	logger *zap.Logger
-	
+
 	// Track running goroutines
 	runningGoroutines atomic.Int32
 }
@@ -33,9 +33,9 @@ func NewLifecycleManager(ctx context.Context, logger *zap.Logger) *LifecycleMana
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	
+
 	ctx, cancel := context.WithCancel(ctx)
-	
+
 	return &LifecycleManager{
 		ctx:    ctx,
 		cancel: cancel,
@@ -49,16 +49,16 @@ func NewLifecycleManager(ctx context.Context, logger *zap.Logger) *LifecycleMana
 func (lm *LifecycleManager) Start(name string, fn func()) {
 	lm.wg.Add(1)
 	lm.runningGoroutines.Add(1)
-	
+
 	go func() {
 		defer lm.wg.Done()
 		defer lm.runningGoroutines.Add(-1)
-		
+
 		if lm.logger != nil {
 			lm.logger.Debug("Starting goroutine", zap.String("name", name))
 			defer lm.logger.Debug("Goroutine stopped", zap.String("name", name))
 		}
-		
+
 		fn()
 	}()
 }
@@ -70,20 +70,20 @@ func (lm *LifecycleManager) Stop(timeout time.Duration) error {
 			zap.Int32("running_goroutines", lm.runningGoroutines.Load()),
 			zap.Duration("timeout", timeout))
 	}
-	
+
 	// Signal stop
 	close(lm.stopCh)
-	
+
 	// Cancel context
 	lm.cancel()
-	
+
 	// Wait with timeout
 	done := make(chan struct{})
 	go func() {
 		lm.wg.Wait()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		if lm.logger != nil {

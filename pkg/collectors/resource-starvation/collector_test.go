@@ -7,18 +7,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
 
 func TestNewCollector(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := NewDefaultConfig()
-	
+
 	collector, err := NewCollector(config, logger)
 	require.NoError(t, err)
 	require.NotNil(t, collector)
-	
+
 	assert.Equal(t, config.Name, collector.config.Name)
 	assert.NotNil(t, collector.logger)
 	assert.NotNil(t, collector.tracer)
@@ -70,7 +69,7 @@ func TestConfigValidation(t *testing.T) {
 			errorMsg:    "sample_rate must be between 0.0 and 1.0",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
@@ -96,7 +95,7 @@ func TestEventTypeMapping(t *testing.T) {
 		{EventNoisyNeighbor, "Noisy Neighbor"},
 		{EventType(99), "Unknown"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.eventType.String())
@@ -109,12 +108,12 @@ func TestSeverityMapping(t *testing.T) {
 		waitTimeNS uint64
 		expected   string
 	}{
-		{50_000_000, "low"},       // 50ms
-		{150_000_000, "medium"},   // 150ms
-		{600_000_000, "high"},     // 600ms
+		{50_000_000, "low"},         // 50ms
+		{150_000_000, "medium"},     // 150ms
+		{600_000_000, "high"},       // 600ms
 		{2_500_000_000, "critical"}, // 2.5s
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			assert.Equal(t, tt.expected, GetSeverity(tt.waitTimeNS))
@@ -127,20 +126,20 @@ func TestProcessEvent(t *testing.T) {
 	config := NewDefaultConfig()
 	collector, err := NewCollector(config, logger)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
-	
+
 	event := &StarvationEvent{
-		Timestamp:    uint64(time.Now().UnixNano()),
-		EventType:    uint32(EventSchedWait),
-		VictimPID:    1234,
-		VictimTGID:   1234,
-		WaitTimeNS:   150_000_000, // 150ms
-		CPUCore:      0,
-		VictimComm:   [16]byte{'t', 'e', 's', 't'},
+		Timestamp:      uint64(time.Now().UnixNano()),
+		EventType:      uint32(EventSchedWait),
+		VictimPID:      1234,
+		VictimTGID:     1234,
+		WaitTimeNS:     150_000_000, // 150ms
+		CPUCore:        0,
+		VictimComm:     [16]byte{'t', 'e', 's', 't'},
 		VictimCgroupID: 12345,
 	}
-	
+
 	err = collector.ProcessEvent(ctx, event)
 	assert.NoError(t, err)
 }
@@ -149,24 +148,24 @@ func TestPatternDetection(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := NewDefaultConfig()
 	config.EnablePatternDetection = true
-	
+
 	collector, err := NewCollector(config, logger)
 	require.NoError(t, err)
-	
+
 	ctx := context.Background()
-	
+
 	// Simulate periodic throttling
 	event := &StarvationEvent{
-		Timestamp:    uint64(time.Now().UnixNano()),
-		EventType:    uint32(EventCFSThrottle),
-		VictimPID:    1234,
-		WaitTimeNS:   100_000_000, // 100ms
-		ThrottledNS:  100_000_000,
+		Timestamp:   uint64(time.Now().UnixNano()),
+		EventType:   uint32(EventCFSThrottle),
+		VictimPID:   1234,
+		WaitTimeNS:  100_000_000, // 100ms
+		ThrottledNS: 100_000_000,
 	}
-	
+
 	err = collector.ProcessEvent(ctx, event)
 	require.NoError(t, err)
-	
+
 	// Check if pattern was detected
 	pattern := collector.detectStarvationPattern(event)
 	assert.Equal(t, PatternThrottle, pattern)
@@ -185,7 +184,7 @@ func TestSchedulingPolicyString(t *testing.T) {
 		{6, "SCHED_DEADLINE"},
 		{99, "UNKNOWN"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			assert.Equal(t, tt.expected, GetSchedulingPolicy(tt.policy))
@@ -198,7 +197,7 @@ func TestBytesToString(t *testing.T) {
 	config := NewDefaultConfig()
 	collector, err := NewCollector(config, logger)
 	require.NoError(t, err)
-	
+
 	tests := []struct {
 		input    []byte
 		expected string
@@ -208,7 +207,7 @@ func TestBytesToString(t *testing.T) {
 		{[]byte("\x00\x00\x00"), ""},
 		{[]byte("no-null-term"), "no-null-term"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			result := collector.bytesToString(tt.input)
@@ -222,7 +221,7 @@ func TestGetPatternDescription(t *testing.T) {
 	config := NewDefaultConfig()
 	collector, err := NewCollector(config, logger)
 	require.NoError(t, err)
-	
+
 	tests := []struct {
 		pattern  string
 		expected string
@@ -234,7 +233,7 @@ func TestGetPatternDescription(t *testing.T) {
 		{PatternNoisyNeighbor, "Co-located workload consuming excessive CPU"},
 		{"unknown", "Unknown starvation pattern"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
 			result := collector.getPatternDescription(tt.pattern)

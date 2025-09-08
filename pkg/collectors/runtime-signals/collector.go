@@ -16,16 +16,16 @@ import (
 
 // RuntimeSignalsConfig holds configuration specific to the runtime signals collector
 type RuntimeSignalsConfig struct {
-	Name         string
-	BufferSize   int
-	EnableEBPF   bool
-	
+	Name       string
+	BufferSize int
+	EnableEBPF bool
+
 	// Ring buffer config for high-volume signal processing
 	EnableRingBuffer bool
 	RingBufferSize   int           // Must be power of 2
 	BatchSize        int           // Events to process at once
 	BatchTimeout     time.Duration // Max time to wait for batch
-	
+
 	// Filter config for noise reduction
 	EnableFilters    bool
 	FilterConfigPath string
@@ -67,16 +67,16 @@ func NewCollector(name string) (*Collector, error) {
 
 	// Default config with ring buffer support
 	cfg := RuntimeSignalsConfig{
-		Name:         name,
-		BufferSize:   10000,
-		EnableEBPF:   true,
+		Name:       name,
+		BufferSize: 10000,
+		EnableEBPF: true,
 		// Ring buffer config for high-volume signal processing
 		EnableRingBuffer: true,
-		RingBufferSize:   8192,  // Power of 2
+		RingBufferSize:   8192, // Power of 2
 		BatchSize:        32,
 		BatchTimeout:     10 * time.Millisecond,
 		// Filters enabled for noise reduction
-		EnableFilters:    true,
+		EnableFilters: true,
 	}
 
 	// Initialize base components with ring buffer and filter support
@@ -176,14 +176,14 @@ func NewCollector(name string) (*Collector, error) {
 		logger:              logger.Named(name),
 		signalTracker:       signalTracker,
 		// Signal-specific metrics
-		ebpfLoadsTotal:      ebpfLoadsTotal,
-		ebpfLoadErrors:      ebpfLoadErrors,
-		ebpfAttachTotal:     ebpfAttachTotal,
-		ebpfAttachErrors:    ebpfAttachErrors,
-		k8sExtractionTotal:  k8sExtractionTotal,
-		k8sExtractionHits:   k8sExtractionHits,
-		signalsByType:       signalsByType,
-		deathsCorrelated:    deathsCorrelated,
+		ebpfLoadsTotal:     ebpfLoadsTotal,
+		ebpfLoadErrors:     ebpfLoadErrors,
+		ebpfAttachTotal:    ebpfAttachTotal,
+		ebpfAttachErrors:   ebpfAttachErrors,
+		k8sExtractionTotal: k8sExtractionTotal,
+		k8sExtractionHits:  k8sExtractionHits,
+		signalsByType:      signalsByType,
+		deathsCorrelated:   deathsCorrelated,
 	}
 
 	c.logger.Info("Runtime signals collector created", zap.String("name", name))
@@ -222,12 +222,12 @@ func (c *Collector) Start(ctx context.Context) error {
 		c.LifecycleManager.Start("ebpf-reader", func() {
 			c.readEBPFEvents()
 		})
-		
+
 		// Start signal tracker cleanup
 		c.LifecycleManager.Start("signal-tracker-cleanup", func() {
 			c.signalTracker.CleanupLoop(ctx)
 		})
-		
+
 		// Setup noise reduction filters
 		c.setupFilters()
 	}
@@ -421,7 +421,7 @@ func (c *Collector) setupFilters() {
 		if event.Type != domain.EventTypeKernelProcess {
 			return true // Allow non-process events
 		}
-		
+
 		// Check if this is a normal exit
 		if rawData := event.EventData.RawData; rawData != nil {
 			eventData := make(map[string]string)
@@ -444,13 +444,13 @@ func (c *Collector) setupFilters() {
 		if event.Type != domain.EventTypeKernelProcess {
 			return true // Allow non-process events
 		}
-		
+
 		if rawData := event.EventData.RawData; rawData != nil {
 			eventData := make(map[string]string)
 			if err := json.Unmarshal(rawData.Data, &eventData); err == nil {
-				if eventType, ok := eventData["event_type"]; ok && 
-				   (eventType == "signal_sent" || eventType == "signal_received") {
-					
+				if eventType, ok := eventData["event_type"]; ok &&
+					(eventType == "signal_sent" || eventType == "signal_received") {
+
 					if signalName, ok := eventData["signal_name"]; ok {
 						// Filter out noise signals
 						switch signalName {
@@ -472,12 +472,12 @@ func (c *Collector) setupFilters() {
 		if event.K8sContext != nil {
 			return true
 		}
-		
+
 		// If we have container data, allow
 		if event.EventData.Container != nil {
 			return true
 		}
-		
+
 		// For non-container events, allow fatal signals and abnormal exits only
 		if rawData := event.EventData.RawData; rawData != nil {
 			eventData := make(map[string]string)
@@ -486,15 +486,15 @@ func (c *Collector) setupFilters() {
 				if oomKill, ok := eventData["oom_kill"]; ok && oomKill == "true" {
 					return true
 				}
-				
+
 				// Allow death intelligence events
 				if _, hasDeathReason := eventData["death_reason"]; hasDeathReason {
 					return true
 				}
-				
+
 				// Allow fatal signals
-				if eventType, ok := eventData["event_type"]; ok && 
-				   (eventType == "signal_sent" || eventType == "signal_received") {
+				if eventType, ok := eventData["event_type"]; ok &&
+					(eventType == "signal_sent" || eventType == "signal_received") {
 					if signalName, ok := eventData["signal_name"]; ok {
 						switch signalName {
 						case "SIGKILL", "SIGTERM", "SIGSEGV", "SIGABRT", "SIGBUS":
@@ -504,7 +504,7 @@ func (c *Collector) setupFilters() {
 				}
 			}
 		}
-		
+
 		// For host processes, be more selective
 		return false
 	})

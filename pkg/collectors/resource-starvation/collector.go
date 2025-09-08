@@ -264,28 +264,28 @@ func (c *Collector) convertToCollectorEvent(event *StarvationEvent) *domain.Coll
 				Command:      c.bytesToString(event.VictimComm[:]),
 				CgroupID:     event.VictimCgroupID,
 				ErrorMessage: c.getPatternDescription(pattern),
-			// Using Custom field to store resource starvation data
+				// Using Custom field to store resource starvation data
 
 			},
 		},
 
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
-				"collector":             c.config.Name,
-				"event_type":            EventType(event.EventType).String(),
-				"severity":              GetSeverity(event.WaitTimeNS),
-				"cpu_core":              fmt.Sprintf("%d", event.CPUCore),
-				"pattern_type":          pattern,
-				"wait_time_ms":          fmt.Sprintf("%.2f", waitTimeMS),
-				"run_time_ms":           fmt.Sprintf("%.2f", runTimeMS),
-				"throttle_time_ms":      fmt.Sprintf("%.2f", throttleTimeMS),
-				"wait_to_run_ratio":     fmt.Sprintf("%.2f", waitToRunRatio),
-				"culprit_pid":           fmt.Sprintf("%d", event.CulpritPID),
-				"culprit_command":       c.bytesToString(event.CulpritComm[:]),
-				"victim_priority":       fmt.Sprintf("%d", event.VictimPrio),
-				"victim_policy":         GetSchedulingPolicy(event.VictimPolicy),
-				"percent_throttled":     fmt.Sprintf("%.1f", c.calculateThrottlePercentage(event)),
-				"estimated_latency_ms":  fmt.Sprintf("%.2f", estimatedLatencyMS),
+				"collector":            c.config.Name,
+				"event_type":           EventType(event.EventType).String(),
+				"severity":             GetSeverity(event.WaitTimeNS),
+				"cpu_core":             fmt.Sprintf("%d", event.CPUCore),
+				"pattern_type":         pattern,
+				"wait_time_ms":         fmt.Sprintf("%.2f", waitTimeMS),
+				"run_time_ms":          fmt.Sprintf("%.2f", runTimeMS),
+				"throttle_time_ms":     fmt.Sprintf("%.2f", throttleTimeMS),
+				"wait_to_run_ratio":    fmt.Sprintf("%.2f", waitToRunRatio),
+				"culprit_pid":          fmt.Sprintf("%d", event.CulpritPID),
+				"culprit_command":      c.bytesToString(event.CulpritComm[:]),
+				"victim_priority":      fmt.Sprintf("%d", event.VictimPrio),
+				"victim_policy":        GetSchedulingPolicy(event.VictimPolicy),
+				"percent_throttled":    fmt.Sprintf("%.1f", c.calculateThrottlePercentage(event)),
+				"estimated_latency_ms": fmt.Sprintf("%.2f", estimatedLatencyMS),
 			},
 		},
 	}
@@ -369,4 +369,3 @@ func (c *Collector) getPatternDescription(pattern string) string {
 		return "Resource starvation detected"
 	}
 }
-

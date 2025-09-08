@@ -16,12 +16,12 @@ import (
 // Collector implements lean memory leak detection using BaseCollector
 type Collector struct {
 	*base.BaseCollector // Embed BaseCollector for standard functionality
-	
-	config  *Config
-	events  chan *domain.CollectorEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mutex   sync.RWMutex
+
+	config *Config
+	events chan *domain.CollectorEvent
+	ctx    context.Context
+	cancel context.CancelFunc
+	mutex  sync.RWMutex
 
 	// eBPF components (Linux-only)
 	ebpfState interface{}

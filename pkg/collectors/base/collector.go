@@ -26,10 +26,10 @@ type BaseCollector struct {
 	// Statistics tracking (atomic for thread safety)
 	eventsProcessed atomic.Int64
 	eventsDropped   atomic.Int64
-	eventsFiltered  atomic.Int64  // New: tracks filtered events
+	eventsFiltered  atomic.Int64 // New: tracks filtered events
 	errorCount      atomic.Int64
-	
-	// Atomic values for complex types  
+
+	// Atomic values for complex types
 	lastEventTime atomic.Value // stores time.Time
 	lastError     atomic.Value // stores error
 
@@ -45,7 +45,7 @@ type BaseCollector struct {
 	// Standard OTEL metrics
 	eventsProcessedCounter metric.Int64Counter
 	eventsDroppedCounter   metric.Int64Counter
-	eventsFilteredCounter  metric.Int64Counter  // New metric
+	eventsFilteredCounter  metric.Int64Counter // New metric
 	errorCounter           metric.Int64Counter
 	processingDuration     metric.Float64Histogram
 	eventSizeHistogram     metric.Int64Histogram
@@ -54,11 +54,11 @@ type BaseCollector struct {
 	// Ring buffer support (optional)
 	ringBuffer    *RingBuffer
 	useRingBuffer bool
-	
+
 	// Filter support (optional)
 	filterManager *FilterManager
 	useFilters    bool
-	logger        *zap.Logger  // Need logger for filter manager
+	logger        *zap.Logger // Need logger for filter manager
 }
 
 // BaseCollectorConfig holds configuration for BaseCollector
@@ -66,17 +66,17 @@ type BaseCollectorConfig struct {
 	Name               string
 	HealthCheckTimeout time.Duration
 	ErrorRateThreshold float64 // Default 0.1 (10%)
-	
+
 	// Ring buffer configuration (optional)
 	EnableRingBuffer bool
 	RingBufferSize   int           // Must be power of 2
 	BatchSize        int           // Events to process at once
 	BatchTimeout     time.Duration // Max time to wait for batch
-	
+
 	// Filter configuration (optional)
 	EnableFilters    bool
 	FilterConfigPath string // Path to filter config file (YAML)
-	
+
 	// Logger
 	Logger *zap.Logger
 }
@@ -110,7 +110,7 @@ func NewBaseCollectorWithConfig(config BaseCollectorConfig) *BaseCollector {
 	}
 	bc.isHealthy.Store(true)
 	bc.lastEventTime.Store(time.Now())
-	
+
 	// Initialize ring buffer if enabled
 	if config.EnableRingBuffer {
 		rbConfig := RingBufferConfig{
@@ -120,7 +120,7 @@ func NewBaseCollectorWithConfig(config BaseCollectorConfig) *BaseCollector {
 			CollectorName: config.Name,
 			Logger:        config.Logger,
 		}
-		
+
 		// Set defaults if not specified
 		if rbConfig.Size == 0 {
 			rbConfig.Size = 8192
@@ -131,18 +131,18 @@ func NewBaseCollectorWithConfig(config BaseCollectorConfig) *BaseCollector {
 		if rbConfig.BatchTimeout == 0 {
 			rbConfig.BatchTimeout = 10 * time.Millisecond
 		}
-		
+
 		ringBuffer, err := NewRingBuffer(rbConfig)
 		if err == nil {
 			bc.ringBuffer = ringBuffer
 		}
 		// If ring buffer creation fails, fall back to channel-only mode
 	}
-	
+
 	// Initialize filter manager if enabled
 	if config.EnableFilters {
 		bc.filterManager = NewFilterManager(config.Name, config.Logger)
-		
+
 		// Start watching config file if provided
 		if config.FilterConfigPath != "" {
 			if err := bc.filterManager.WatchConfigFile(config.FilterConfigPath); err != nil {
@@ -155,17 +155,17 @@ func NewBaseCollectorWithConfig(config BaseCollectorConfig) *BaseCollector {
 			}
 		}
 	}
-	
+
 	// Initialize OTEL metrics
 	bc.initializeMetrics()
-	
+
 	return bc
 }
 
 // initializeMetrics registers standard OTEL metrics for all collectors
 func (bc *BaseCollector) initializeMetrics() {
 	var err error
-	
+
 	// Events processed counter
 	bc.eventsProcessedCounter, err = bc.meter.Int64Counter(
 		fmt.Sprintf("%s_events_processed_total", bc.name),
@@ -176,7 +176,7 @@ func (bc *BaseCollector) initializeMetrics() {
 		// Log but don't fail - metrics are optional
 		bc.eventsProcessedCounter = nil
 	}
-	
+
 	// Events dropped counter
 	bc.eventsDroppedCounter, err = bc.meter.Int64Counter(
 		fmt.Sprintf("%s_events_dropped_total", bc.name),
@@ -186,7 +186,7 @@ func (bc *BaseCollector) initializeMetrics() {
 	if err != nil {
 		bc.eventsDroppedCounter = nil
 	}
-	
+
 	// Events filtered counter
 	bc.eventsFilteredCounter, err = bc.meter.Int64Counter(
 		fmt.Sprintf("%s_events_filtered_total", bc.name),
@@ -196,7 +196,7 @@ func (bc *BaseCollector) initializeMetrics() {
 	if err != nil {
 		bc.eventsFilteredCounter = nil
 	}
-	
+
 	// Error counter
 	bc.errorCounter, err = bc.meter.Int64Counter(
 		fmt.Sprintf("%s_errors_total", bc.name),
@@ -206,7 +206,7 @@ func (bc *BaseCollector) initializeMetrics() {
 	if err != nil {
 		bc.errorCounter = nil
 	}
-	
+
 	// Processing duration histogram
 	bc.processingDuration, err = bc.meter.Float64Histogram(
 		fmt.Sprintf("%s_processing_duration_seconds", bc.name),
@@ -217,7 +217,7 @@ func (bc *BaseCollector) initializeMetrics() {
 	if err != nil {
 		bc.processingDuration = nil
 	}
-	
+
 	// Event size histogram
 	bc.eventSizeHistogram, err = bc.meter.Int64Histogram(
 		fmt.Sprintf("%s_event_size_bytes", bc.name),
@@ -228,7 +228,7 @@ func (bc *BaseCollector) initializeMetrics() {
 	if err != nil {
 		bc.eventSizeHistogram = nil
 	}
-	
+
 	// Health status gauge (0=unhealthy, 1=degraded, 2=healthy)
 	bc.healthStatus, err = bc.meter.Int64Gauge(
 		fmt.Sprintf("%s_health_status", bc.name),
@@ -244,7 +244,7 @@ func (bc *BaseCollector) initializeMetrics() {
 func (bc *BaseCollector) RecordEvent() {
 	bc.eventsProcessed.Add(1)
 	bc.lastEventTime.Store(time.Now())
-	
+
 	// Update OTEL metric if available
 	if bc.eventsProcessedCounter != nil {
 		bc.eventsProcessedCounter.Add(context.Background(), 1)
@@ -255,7 +255,7 @@ func (bc *BaseCollector) RecordEvent() {
 func (bc *BaseCollector) RecordEventWithContext(ctx context.Context) {
 	bc.eventsProcessed.Add(1)
 	bc.lastEventTime.Store(time.Now())
-	
+
 	// Update OTEL metric with context for trace correlation
 	if bc.eventsProcessedCounter != nil {
 		bc.eventsProcessedCounter.Add(ctx, 1)
@@ -268,7 +268,7 @@ func (bc *BaseCollector) RecordError(err error) {
 	if err != nil {
 		bc.lastError.Store(err)
 	}
-	
+
 	// Update OTEL metric if available
 	if bc.errorCounter != nil {
 		attrs := []attribute.KeyValue{}
@@ -285,12 +285,12 @@ func (bc *BaseCollector) RecordErrorWithContext(ctx context.Context, err error) 
 	if err != nil {
 		bc.lastError.Store(err)
 	}
-	
+
 	// Record error in span if tracing
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
 		span.RecordError(err)
 	}
-	
+
 	// Update OTEL metric with context
 	if bc.errorCounter != nil {
 		attrs := []attribute.KeyValue{}
@@ -304,7 +304,7 @@ func (bc *BaseCollector) RecordErrorWithContext(ctx context.Context, err error) 
 // RecordDrop should be called when an event is dropped
 func (bc *BaseCollector) RecordDrop() {
 	bc.eventsDropped.Add(1)
-	
+
 	// Update OTEL metric if available
 	if bc.eventsDroppedCounter != nil {
 		bc.eventsDroppedCounter.Add(context.Background(), 1)
@@ -314,10 +314,10 @@ func (bc *BaseCollector) RecordDrop() {
 // RecordDropWithReason records a dropped event with a reason
 func (bc *BaseCollector) RecordDropWithReason(ctx context.Context, reason string) {
 	bc.eventsDropped.Add(1)
-	
+
 	// Update OTEL metric with reason
 	if bc.eventsDroppedCounter != nil {
-		bc.eventsDroppedCounter.Add(ctx, 1, 
+		bc.eventsDroppedCounter.Add(ctx, 1,
 			metric.WithAttributes(attribute.String("reason", reason)))
 	}
 }
@@ -372,7 +372,7 @@ func (bc *BaseCollector) Statistics() *domain.CollectorStats {
 		"events_dropped":  fmt.Sprintf("%d", bc.eventsDropped.Load()),
 		"events_filtered": fmt.Sprintf("%d", bc.eventsFiltered.Load()),
 	}
-	
+
 	// Add ring buffer stats if enabled
 	if rbStats := bc.GetRingBufferStats(); rbStats != nil {
 		customMetrics["ring_buffer_capacity"] = fmt.Sprintf("%d", rbStats.Capacity)
@@ -382,7 +382,7 @@ func (bc *BaseCollector) Statistics() *domain.CollectorStats {
 		customMetrics["ring_buffer_utilization"] = fmt.Sprintf("%.2f%%", rbStats.Utilization)
 		customMetrics["ring_buffer_consumers"] = fmt.Sprintf("%d", rbStats.Consumers)
 	}
-	
+
 	// Add filter stats if enabled
 	if filterStats := bc.GetFilterStatistics(); filterStats != nil {
 		customMetrics["filter_version"] = fmt.Sprintf("%d", filterStats.Version)
@@ -445,7 +445,7 @@ func (bc *BaseCollector) Health() *domain.HealthStatus {
 		}
 		return domain.NewHealthStatus(
 			domain.HealthDegraded,
-			fmt.Sprintf("High error rate: %.1f%% (threshold: %.1f%%)", 
+			fmt.Sprintf("High error rate: %.1f%% (threshold: %.1f%%)",
 				errorRate*100, bc.errorRateThreshold*100),
 		)
 	}
@@ -454,7 +454,7 @@ func (bc *BaseCollector) Health() *domain.HealthStatus {
 	if bc.healthStatus != nil {
 		bc.healthStatus.Record(context.Background(), 2) // 2 = healthy
 	}
-	
+
 	return domain.NewHealthyStatus(fmt.Sprintf("%s collector operating normally", bc.name))
 }
 
@@ -554,7 +554,7 @@ func (bc *BaseCollector) ShouldProcess(event *domain.CollectorEvent) bool {
 	if bc.filterManager == nil || !bc.useFilters {
 		return true // No filters, process everything
 	}
-	
+
 	allowed := bc.filterManager.ShouldAllow(event)
 	if !allowed {
 		bc.eventsFiltered.Add(1)

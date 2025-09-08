@@ -10,13 +10,13 @@ import (
 type DashboardExtension struct {
 	// Title for the row containing custom panels
 	RowTitle string
-	
+
 	// Custom panels specific to this collector
 	Panels []Panel
-	
+
 	// Additional variables needed for this collector
 	Variables []Variable
-	
+
 	// Tags to add for dashboard discovery
 	Tags []string
 }
@@ -42,7 +42,7 @@ type Target struct {
 // GridPosition defines panel placement
 type GridPosition struct {
 	H int `json:"h"` // Height
-	W int `json:"w"` // Width  
+	W int `json:"w"` // Width
 	X int `json:"x"` // X position
 	Y int `json:"y"` // Y position
 }
@@ -59,11 +59,11 @@ type Variable struct {
 
 // DashboardMetadata provides information about available dashboards
 type DashboardMetadata struct {
-	CollectorName   string   `json:"collector_name"`
-	BaseDashboard   string   `json:"base_dashboard_uid"`
-	ExtendedDashboard string `json:"extended_dashboard_uid,omitempty"`
-	Description     string   `json:"description"`
-	Tags            []string `json:"tags"`
+	CollectorName     string   `json:"collector_name"`
+	BaseDashboard     string   `json:"base_dashboard_uid"`
+	ExtendedDashboard string   `json:"extended_dashboard_uid,omitempty"`
+	Description       string   `json:"description"`
+	Tags              []string `json:"tags"`
 }
 
 // GetDashboardMetadata returns metadata for dashboard discovery
@@ -92,15 +92,15 @@ func GenerateDashboardConfig(collectorName string, extension *DashboardExtension
 
 	// Generate extended dashboard JSON
 	dashboard := map[string]interface{}{
-		"uid":         fmt.Sprintf("tapio-%s-extended", strings.ReplaceAll(collectorName, "_", "-")),
-		"title":       fmt.Sprintf("Tapio %s Collector - Extended Metrics", formatCollectorName(collectorName)),
-		"description": fmt.Sprintf("Extended metrics and visualizations for %s collector", collectorName),
-		"tags":        append([]string{"tapio", "tapio-extended", collectorName}, extension.Tags...),
-		"style":       "dark",
-		"timezone":    "browser",
-		"editable":    true,
+		"uid":          fmt.Sprintf("tapio-%s-extended", strings.ReplaceAll(collectorName, "_", "-")),
+		"title":        fmt.Sprintf("Tapio %s Collector - Extended Metrics", formatCollectorName(collectorName)),
+		"description":  fmt.Sprintf("Extended metrics and visualizations for %s collector", collectorName),
+		"tags":         append([]string{"tapio", "tapio-extended", collectorName}, extension.Tags...),
+		"style":        "dark",
+		"timezone":     "browser",
+		"editable":     true,
 		"graphTooltip": 1,
-		"panels":      generatePanelJSON(extension.Panels),
+		"panels":       generatePanelJSON(extension.Panels),
 		"templating": map[string]interface{}{
 			"list": generateVariableJSON(extension.Variables),
 		},
@@ -146,7 +146,7 @@ func formatCollectorName(name string) string {
 // generatePanelJSON converts Panel structs to Grafana JSON format
 func generatePanelJSON(panels []Panel) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(panels)+1)
-	
+
 	// Add a row header first
 	result = append(result, map[string]interface{}{
 		"collapsed": false,
@@ -171,18 +171,18 @@ func generatePanelJSON(panels []Panel) []map[string]interface{} {
 			"gridPos":     panel.GridPos,
 			"targets":     panel.Targets,
 		}
-		
+
 		if panel.Options != nil {
 			panelJSON["options"] = panel.Options
 		}
-		
+
 		if panel.FieldConfig != nil {
 			panelJSON["fieldConfig"] = panel.FieldConfig
 		}
-		
+
 		result = append(result, panelJSON)
 	}
-	
+
 	return result
 }
 
@@ -198,7 +198,7 @@ func generateVariableJSON(variables []Variable) []map[string]interface{} {
 			"hide":  0,
 		},
 	}
-	
+
 	// Add custom variables
 	for _, v := range variables {
 		varJSON := map[string]interface{}{
@@ -208,18 +208,18 @@ func generateVariableJSON(variables []Variable) []map[string]interface{} {
 			"description": v.Description,
 			"hide":        0,
 		}
-		
+
 		if v.Query != "" {
 			varJSON["query"] = v.Query
 		}
-		
+
 		if v.Regex != "" {
 			varJSON["regex"] = v.Regex
 		}
-		
+
 		result = append(result, varJSON)
 	}
-	
+
 	return result
 }
 

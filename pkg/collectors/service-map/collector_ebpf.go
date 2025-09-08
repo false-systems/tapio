@@ -10,12 +10,12 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/yairfalse/tapio/pkg/collectors/service-map/bpf"
-	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/yairfalse/tapio/pkg/collectors/service-map/bpf"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
@@ -30,25 +30,25 @@ type ebpfState struct {
 
 // ConnectionEvent represents a connection event from eBPF (matches C struct)
 type ConnectionEvent struct {
-	SrcIP       uint32    `json:"src_ip"`
-	DstIP       uint32    `json:"dst_ip"`
-	SrcPort     uint16    `json:"src_port"`
-	DstPort     uint16    `json:"dst_port"`
-	Protocol    uint8     `json:"protocol"`
-	EventType   uint8     `json:"event_type"` // 0=connect, 1=accept, 2=close, 3=reset, 4=update
-	Timestamp   uint64    `json:"timestamp"`
-	BytesSent   uint64    `json:"bytes_sent"`
-	BytesRecv   uint64    `json:"bytes_recv"`
-	PID         uint32    `json:"pid"`
-	UID         uint32    `json:"uid"`
-	Comm        [16]int8  `json:"comm"`
+	SrcIP     uint32   `json:"src_ip"`
+	DstIP     uint32   `json:"dst_ip"`
+	SrcPort   uint16   `json:"src_port"`
+	DstPort   uint16   `json:"dst_port"`
+	Protocol  uint8    `json:"protocol"`
+	EventType uint8    `json:"event_type"` // 0=connect, 1=accept, 2=close, 3=reset, 4=update
+	Timestamp uint64   `json:"timestamp"`
+	BytesSent uint64   `json:"bytes_sent"`
+	BytesRecv uint64   `json:"bytes_recv"`
+	PID       uint32   `json:"pid"`
+	UID       uint32   `json:"uid"`
+	Comm      [16]int8 `json:"comm"`
 	// TCP metrics from kernel
-	Retransmits uint32    `json:"retransmits"`
-	RTTUS       uint32    `json:"rtt_us"`      // Smoothed RTT in microseconds
-	RTTVarUS    uint32    `json:"rtt_var_us"`  // RTT variance
-	TCPState    uint8     `json:"tcp_state"`   // TCP state
-	Direction   uint8     `json:"direction"`   // 0=unknown, 1=outbound, 2=inbound
-	Resets      uint16    `json:"resets"`      // RST packets
+	Retransmits uint32 `json:"retransmits"`
+	RTTUS       uint32 `json:"rtt_us"`     // Smoothed RTT in microseconds
+	RTTVarUS    uint32 `json:"rtt_var_us"` // RTT variance
+	TCPState    uint8  `json:"tcp_state"`  // TCP state
+	Direction   uint8  `json:"direction"`  // 0=unknown, 1=outbound, 2=inbound
+	Resets      uint16 `json:"resets"`     // RST packets
 }
 
 // startEBPF initializes and starts eBPF programs for connection tracking
@@ -77,12 +77,12 @@ func (c *Collector) startEBPF() error {
 
 	// Attach kprobes for connection tracking
 	probes := map[string]string{
-		"tcp_connect":        "kprobe/tcp_connect",
-		"inet_csk_accept":    "kprobe/inet_csk_accept", 
-		"tcp_sendmsg":        "kprobe/tcp_sendmsg",
-		"tcp_cleanup_rbuf":   "kprobe/tcp_cleanup_rbuf",
-		"tcp_close":          "kprobe/tcp_close",
-		"udp_sendmsg":        "kprobe/udp_sendmsg",
+		"tcp_connect":      "kprobe/tcp_connect",
+		"inet_csk_accept":  "kprobe/inet_csk_accept",
+		"tcp_sendmsg":      "kprobe/tcp_sendmsg",
+		"tcp_cleanup_rbuf": "kprobe/tcp_cleanup_rbuf",
+		"tcp_close":        "kprobe/tcp_close",
+		"udp_sendmsg":      "kprobe/udp_sendmsg",
 	}
 
 	for symbol, progName := range probes {
@@ -106,7 +106,7 @@ func (c *Collector) startEBPF() error {
 
 		l, err := link.Kprobe(symbol, prog, nil)
 		if err != nil {
-			c.logger.Warn("Failed to attach kprobe", 
+			c.logger.Warn("Failed to attach kprobe",
 				zap.String("symbol", symbol),
 				zap.Error(err))
 			// Continue with other probes
@@ -129,7 +129,7 @@ func (c *Collector) startEBPF() error {
 	state.reader = reader
 
 	c.ebpfState = state
-	c.logger.Info("eBPF connection tracking started successfully", 
+	c.logger.Info("eBPF connection tracking started successfully",
 		zap.Int("attached_probes", len(state.links)))
 
 	return nil
@@ -152,11 +152,11 @@ func (c *Collector) closeEBPF(state *ebpfState) {
 	if state.reader != nil {
 		state.reader.Close()
 	}
-	
+
 	for _, l := range state.links {
 		l.Close()
 	}
-	
+
 	if state.objs != nil {
 		state.objs.Close()
 	}
@@ -198,7 +198,7 @@ func (c *Collector) processEBPFEvents(ctx context.Context) {
 		}
 
 		event := (*ConnectionEvent)(unsafe.Pointer(&record.RawSample[0]))
-		
+
 		// Process the connection event
 		c.processConnectionEvent(ctx, event)
 	}
@@ -220,25 +220,25 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 		DestPort:    event.DstPort,
 		Protocol:    event.Protocol,
 		Direction:   ConnDirection(event.Direction), // From eBPF now!
-		State:       c.mapTCPState(event.TCPState),   // Real TCP state
+		State:       c.mapTCPState(event.TCPState),  // Real TCP state
 		Timestamp:   time.Unix(0, int64(event.Timestamp)),
 		BytesSent:   event.BytesSent,
 		BytesRecv:   event.BytesRecv,
-		Latency:     uint64(event.RTTUS) * 1000,     // Convert to nanoseconds
-		Retransmits: event.Retransmits,              // REAL retransmits from kernel!
-		Resets:      uint32(event.Resets),           // Real RST count
+		Latency:     uint64(event.RTTUS) * 1000, // Convert to nanoseconds
+		Retransmits: event.Retransmits,          // REAL retransmits from kernel!
+		Resets:      uint32(event.Resets),       // Real RST count
 	}
-	
+
 	// Calculate L4 quality score with REAL metrics
 	conn.Quality = conn.CalculateQuality()
 
 	// Create connection key
-	connKey := fmt.Sprintf("%s:%d->%s:%d", 
+	connKey := fmt.Sprintf("%s:%d->%s:%d",
 		intToIP(conn.SourceIP), conn.SourcePort,
 		intToIP(conn.DestIP), conn.DestPort)
 
 	c.mu.Lock()
-	
+
 	if event.EventType == 0 { // New connection
 		c.connections[connKey] = conn
 		c.logger.Debug("New connection tracked",
@@ -250,12 +250,12 @@ func (c *Collector) processConnectionEvent(ctx context.Context, event *Connectio
 			// Update final stats
 			existing.BytesSent = conn.BytesSent
 			existing.BytesRecv = conn.BytesRecv
-			
+
 			// Keep connection for a bit longer for service mapping
 			// Actual cleanup happens in cleanupConnections()
 		}
 	}
-	
+
 	c.mu.Unlock()
 
 	// Check if this connection involves known services
@@ -285,7 +285,7 @@ func (c *Collector) mapTCPState(tcpState uint8) ConnState {
 		TCP_LISTEN      = 10
 		TCP_CLOSING     = 11
 	)
-	
+
 	switch tcpState {
 	case TCP_ESTABLISHED:
 		return StateEstablished
@@ -310,7 +310,7 @@ func (c *Collector) detectConnectionDirection(event *ConnectionEvent) ConnDirect
 func (c *Collector) detectConnectionState(event *ConnectionEvent) ConnState {
 	// Upper bits of EventType encode state
 	stateCode := (event.EventType >> 4) & 0x0F
-	
+
 	switch stateCode {
 	case 0:
 		return StateEstablished
@@ -342,7 +342,7 @@ func (c *Collector) updateServiceConnections(conn *Connection, event *Connection
 			if srcService != "" && dstService != "" && srcService != dstService {
 				// Track connection quality for outlier detection
 				c.updateEndpointStats(conn, srcService, dstService)
-				
+
 				// Use connection direction to determine dependency
 				if conn.Direction == DirectionOutbound {
 					// We (srcService) called them (dstService)
@@ -366,7 +366,7 @@ func (c *Collector) updateServiceConnections(conn *Connection, event *Connection
 						}
 					}
 				} else if conn.Direction == DirectionInbound {
-					// They (srcService) called us (dstService) 
+					// They (srcService) called us (dstService)
 					// Reverse the dependency direction
 					if dst, ok := c.services[dstService]; ok {
 						if dep, exists := dst.Dependencies[srcService]; exists {
@@ -403,14 +403,14 @@ func (c *Collector) updateEndpointStats(conn *Connection, srcService, dstService
 				if ep.OutlierStatus == nil {
 					ep.OutlierStatus = &OutlierStatus{}
 				}
-				
+
 				// Track connection pool stats
 				if conn.State == StateEstablished {
 					ep.OutlierStatus.ActiveConnections++
 				} else if conn.State == StateSynSent {
 					ep.OutlierStatus.PendingConnections++
 				}
-				
+
 				// Track errors for outlier detection
 				if conn.State == StateReset {
 					ep.OutlierStatus.ConsecutiveErrors++
@@ -420,12 +420,12 @@ func (c *Collector) updateEndpointStats(conn *Connection, srcService, dstService
 					ep.OutlierStatus.ConsecutiveErrors = 0
 					ep.OutlierStatus.Consecutive5xx = 0
 				}
-				
+
 				// Track retransmits as potential issues
 				if conn.Retransmits > 5 {
 					ep.OutlierStatus.RequestRetries++
 				}
-				
+
 				break
 			}
 		}
@@ -436,7 +436,7 @@ func (c *Collector) updateEndpointStats(conn *Connection, srcService, dstService
 func (c *Collector) emitConnectionEvent(ctx context.Context, conn *Connection, ebpfEvent *ConnectionEvent) {
 	// Create domain event for the connection
 	commStr := string(bytes.Trim((*(*[]byte)(unsafe.Pointer(&ebpfEvent.Comm)))[:16], "\x00"))
-	
+
 	connectionData := map[string]string{
 		"source_ip":   intToIP(conn.SourceIP),
 		"dest_ip":     intToIP(conn.DestIP),

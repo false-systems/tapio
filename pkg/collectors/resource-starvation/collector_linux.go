@@ -56,12 +56,12 @@ type LinuxCollector struct {
 	droppedEvents     metric.Int64Counter
 
 	// Error recovery
-	errorCount        int
-	lastError         error
-	lastErrorTime     time.Time
-	circuitBreakerOn  bool
-	recoveryAttempts  int
-	mu                sync.RWMutex
+	errorCount       int
+	lastError        error
+	lastErrorTime    time.Time
+	circuitBreakerOn bool
+	recoveryAttempts int
+	mu               sync.RWMutex
 }
 
 func NewLinuxCollector(config *Config, logger *zap.Logger) (*LinuxCollector, error) {
@@ -133,7 +133,7 @@ func (c *LinuxCollector) Start(ctx context.Context) error {
 	starvationNS := uint64(c.config.StarvationThresholdMS) * 1_000_000
 	severeNS := uint64(c.config.SevereThresholdMS) * 1_000_000
 	criticalNS := uint64(c.config.CriticalThresholdMS) * 1_000_000
-	
+
 	if err := c.updateThreshold(0, starvationNS); err != nil {
 		c.logger.Warn("Failed to set starvation threshold", zap.Error(err))
 	}
@@ -214,7 +214,6 @@ func (c *LinuxCollector) loadeBPFProgram() error {
 	objs := &bpf.StarvationmonitorObjects{}
 	if err := spec.LoadAndAssign(objs, nil); err != nil {
 		return fmt.Errorf("failed to load starvation monitor objects: %w", err)
-	
 
 	}
 
@@ -233,7 +232,7 @@ func (c *LinuxCollector) attachTracepoints() error {
 	}
 	c.links = append(c.links, tpWait)
 
-	// Attach sched_stat_runtime tracepoint  
+	// Attach sched_stat_runtime tracepoint
 	tpRuntime, err := link.Tracepoint("sched", "sched_stat_runtime", c.bpfObjs.TraceThrottle, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach sched_stat_runtime: %w", err)
@@ -315,7 +314,7 @@ func (c *LinuxCollector) processEvents(ctx context.Context) {
 				continue
 			}
 			backoff = 100 * time.Millisecond // Reset on success
-			c.resetErrorCount() // Reset error count on successful read
+			c.resetErrorCount()              // Reset error count on successful read
 
 			if err := c.handleEvent(ctx, record.RawSample); err != nil {
 				errorCount++

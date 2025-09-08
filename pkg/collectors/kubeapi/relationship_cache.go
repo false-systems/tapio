@@ -9,20 +9,20 @@ import (
 type RelationshipType string
 
 const (
-	RelationshipServicePods  RelationshipType = "service-pods"
-	RelationshipPodVolumes   RelationshipType = "pod-volumes"
-	RelationshipOwnerRefs    RelationshipType = "owner-refs"
-	RelationshipNodePods     RelationshipType = "node-pods"
+	RelationshipServicePods RelationshipType = "service-pods"
+	RelationshipPodVolumes  RelationshipType = "pod-volumes"
+	RelationshipOwnerRefs   RelationshipType = "owner-refs"
+	RelationshipNodePods    RelationshipType = "node-pods"
 )
 
 // CachedRelationship stores a computed relationship with TTL
 type CachedRelationship struct {
-	SourceUID    string           // UID of the source object
+	SourceUID    string // UID of the source object
 	RelationType RelationshipType
-	Targets      []ObjectRef      // Related objects
+	Targets      []ObjectRef // Related objects
 	ComputedAt   time.Time
 	TTL          time.Duration
-	Version      int64            // For invalidation
+	Version      int64 // For invalidation
 }
 
 // ObjectRef represents a reference to a K8s object
@@ -36,14 +36,14 @@ type ObjectRef struct {
 
 // RelationshipCache caches expensive relationship computations
 type RelationshipCache struct {
-	mu           sync.RWMutex
-	cache        map[string]*CachedRelationship // key: "relationshipType:sourceUID"
-	defaultTTL   time.Duration
-	maxSize      int
-	hits         int64
-	misses       int64
-	cleanupStop  chan struct{}
-	cleanupDone  chan struct{}
+	mu          sync.RWMutex
+	cache       map[string]*CachedRelationship // key: "relationshipType:sourceUID"
+	defaultTTL  time.Duration
+	maxSize     int
+	hits        int64
+	misses      int64
+	cleanupStop chan struct{}
+	cleanupDone chan struct{}
 }
 
 // NewRelationshipCache creates a new relationship cache
@@ -55,10 +55,10 @@ func NewRelationshipCache(defaultTTL time.Duration, maxSize int) *RelationshipCa
 		cleanupStop: make(chan struct{}),
 		cleanupDone: make(chan struct{}),
 	}
-	
+
 	// Start cleanup goroutine
 	go rc.cleanupRoutine()
-	
+
 	return rc
 }
 
@@ -66,21 +66,21 @@ func NewRelationshipCache(defaultTTL time.Duration, maxSize int) *RelationshipCa
 func (rc *RelationshipCache) Get(relationType RelationshipType, sourceUID string) (*CachedRelationship, bool) {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
-	
+
 	key := rc.makeKey(relationType, sourceUID)
 	rel, exists := rc.cache[key]
-	
+
 	if !exists {
 		rc.misses++
 		return nil, false
 	}
-	
+
 	// Check if expired
 	if time.Since(rel.ComputedAt) > rel.TTL {
 		rc.misses++
 		return nil, false
 	}
-	
+
 	rc.hits++
 	return rel, true
 }
@@ -89,14 +89,14 @@ func (rc *RelationshipCache) Get(relationType RelationshipType, sourceUID string
 func (rc *RelationshipCache) Set(relationType RelationshipType, sourceUID string, targets []ObjectRef) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	
+
 	key := rc.makeKey(relationType, sourceUID)
-	
+
 	// If cache is full, make room
 	if len(rc.cache) >= rc.maxSize {
 		rc.evictOldest()
 	}
-	
+
 	rc.cache[key] = &CachedRelationship{
 		SourceUID:    sourceUID,
 		RelationType: relationType,
@@ -111,7 +111,7 @@ func (rc *RelationshipCache) Set(relationType RelationshipType, sourceUID string
 func (rc *RelationshipCache) Invalidate(sourceUID string) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	
+
 	// Remove all entries for this source
 	for key, rel := range rc.cache {
 		if rel.SourceUID == sourceUID {
@@ -124,7 +124,7 @@ func (rc *RelationshipCache) Invalidate(sourceUID string) {
 func (rc *RelationshipCache) InvalidateByTarget(targetUID string) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	
+
 	// Remove entries that reference this target
 	for key, rel := range rc.cache {
 		for _, target := range rel.Targets {
@@ -168,19 +168,19 @@ func (rc *RelationshipCache) SetPodVolumes(podUID string, volumes []ObjectRef) {
 func (rc *RelationshipCache) GetStats() map[string]int64 {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
-	
+
 	total := rc.hits + rc.misses
 	hitRate := int64(0)
 	if total > 0 {
 		hitRate = (rc.hits * 100) / total
 	}
-	
+
 	return map[string]int64{
-		"cache_size":    int64(len(rc.cache)),
-		"cache_hits":    rc.hits,
-		"cache_misses":  rc.misses,
-		"hit_rate_pct":  hitRate,
-		"max_size":      int64(rc.maxSize),
+		"cache_size":   int64(len(rc.cache)),
+		"cache_hits":   rc.hits,
+		"cache_misses": rc.misses,
+		"hit_rate_pct": hitRate,
+		"max_size":     int64(rc.maxSize),
 	}
 }
 
@@ -199,14 +199,14 @@ func (rc *RelationshipCache) makeKey(relationType RelationshipType, sourceUID st
 func (rc *RelationshipCache) evictOldest() {
 	var oldestKey string
 	var oldestTime time.Time = time.Now()
-	
+
 	for key, rel := range rc.cache {
 		if rel.ComputedAt.Before(oldestTime) {
 			oldestTime = rel.ComputedAt
 			oldestKey = key
 		}
 	}
-	
+
 	if oldestKey != "" {
 		delete(rc.cache, oldestKey)
 	}
@@ -215,10 +215,10 @@ func (rc *RelationshipCache) evictOldest() {
 // cleanupRoutine periodically removes expired entries
 func (rc *RelationshipCache) cleanupRoutine() {
 	defer close(rc.cleanupDone)
-	
+
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-rc.cleanupStop:
@@ -233,7 +233,7 @@ func (rc *RelationshipCache) cleanupRoutine() {
 func (rc *RelationshipCache) cleanup() {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	
+
 	now := time.Now()
 	for key, rel := range rc.cache {
 		if now.Sub(rel.ComputedAt) > rel.TTL {

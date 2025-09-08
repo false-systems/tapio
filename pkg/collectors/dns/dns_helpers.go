@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-
 // cleanDNSName cleans up DNS names from wire format to readable format
 func (c *Collector) cleanDNSName(name string) string {
 	// If the name looks like wire format (starts with length byte), parse it

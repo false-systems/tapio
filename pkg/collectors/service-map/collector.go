@@ -34,20 +34,20 @@ type Collector struct {
 	k8sClient kubernetes.Interface
 
 	// Service tracking
-	services    map[string]*Service     // namespace/name -> service
-	connections map[string]*Connection  // src:port->dst:port -> connection
-	ipToService map[string][]string     // IP[:port] -> []service names (multiple services can share IP)
+	services    map[string]*Service    // namespace/name -> service
+	connections map[string]*Connection // src:port->dst:port -> connection
+	ipToService map[string][]string    // IP[:port] -> []service names (multiple services can share IP)
 	mu          sync.RWMutex
 
 	// eBPF state (platform-specific)
 	ebpfState interface{}
-	
+
 	// Emission control
-	lastEmitted      *ServiceMap
-	lastEmitTime     time.Time
-	pendingChanges   chan ChangeEvent
-	changeDebouncer  *time.Timer
-	significantChanges int32  // atomic counter
+	lastEmitted        *ServiceMap
+	lastEmitTime       time.Time
+	pendingChanges     chan ChangeEvent
+	changeDebouncer    *time.Timer
+	significantChanges int32 // atomic counter
 
 }
 
@@ -126,7 +126,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		} else {
 			// Start ring buffer for high-performance eBPF event processing
 			c.StartRingBuffer(ctx)
-			
+
 			c.LifecycleManager.Start("ebpf-processor", func() {
 				c.processEBPFEvents(ctx)
 			})
@@ -140,7 +140,6 @@ func (c *Collector) Start(ctx context.Context) error {
 	c.LifecycleManager.Start("emission-controller", func() {
 		c.runEmissionController(ctx)
 	})
-
 
 	// Start connection cleanup
 	c.LifecycleManager.Start("connection-cleanup", func() {
@@ -178,7 +177,7 @@ func (c *Collector) Events() <-chan *domain.CollectorEvent {
 	return c.EventChannelManager.GetChannel()
 }
 
-// IsHealthy returns collector health status - required by Collector interface  
+// IsHealthy returns collector health status - required by Collector interface
 func (c *Collector) IsHealthy() bool {
 	return c.BaseCollector.IsHealthy()
 }
@@ -242,7 +241,7 @@ func (c *Collector) discoverServices(ctx context.Context) {
 		}
 
 		key := fmt.Sprintf("%s/%s", svc.Namespace, svc.Name)
-		
+
 		// Get or create service
 		service, exists := c.services[key]
 		if !exists {
@@ -256,7 +255,7 @@ func (c *Collector) discoverServices(ctx context.Context) {
 				Health:       HealthUnknown,
 			}
 			c.services[key] = service
-			
+
 			// Track new service
 			c.recordChange(ChangeEvent{
 				Type:      ChangeServiceAdded,
@@ -272,7 +271,7 @@ func (c *Collector) discoverServices(ctx context.Context) {
 		if service.Version == "" {
 			service.Version = svc.Labels["app.kubernetes.io/version"]
 		}
-		
+
 		// Track version change
 		if oldVersion != "" && oldVersion != service.Version {
 			c.recordChange(ChangeEvent{
@@ -307,22 +306,22 @@ func (c *Collector) discoverServices(ctx context.Context) {
 				for _, addr := range subset.Addresses {
 					for _, port := range subset.Ports {
 						endpoint := Endpoint{
-							IP:      addr.IP,
-							Port:    port.Port,
-							Ready:   true,
-							PodName: "",
+							IP:       addr.IP,
+							Port:     port.Port,
+							Ready:    true,
+							PodName:  "",
 							NodeName: "",
 						}
-						
+
 						if addr.TargetRef != nil {
 							endpoint.PodName = addr.TargetRef.Name
 						}
 						if addr.NodeName != nil {
 							endpoint.NodeName = *addr.NodeName
 						}
-						
+
 						service.Endpoints = append(service.Endpoints, endpoint)
-						
+
 						// Map IP to service for connection tracking
 						// Multiple services can share the same IP (NodePort, HostNetwork, etc)
 						ipPortKey := fmt.Sprintf("%s:%d", addr.IP, port.Port)
@@ -345,7 +344,7 @@ func (c *Collector) discoverServices(ctx context.Context) {
 
 		// Run outlier detection on endpoints (Envoy-style)
 		c.detectOutliers(service)
-		
+
 		// Update health based on endpoints (outlier detection may have ejected some)
 		oldHealth := service.Health
 		if len(service.Endpoints) == 0 {
@@ -360,7 +359,7 @@ func (c *Collector) discoverServices(ctx context.Context) {
 					readyCount++
 				}
 			}
-			
+
 			if readyCount == len(service.Endpoints) {
 				service.Health = HealthHealthy
 			} else if readyCount > 0 {
@@ -375,7 +374,7 @@ func (c *Collector) discoverServices(ctx context.Context) {
 				service.Health = HealthDown
 			}
 		}
-		
+
 		// Track health change
 		if oldHealth != service.Health {
 			c.recordChange(ChangeEvent{
@@ -386,7 +385,7 @@ func (c *Collector) discoverServices(ctx context.Context) {
 		}
 
 		c.RecordEvent()
-		
+
 		// Emit service discovered event with filtering
 		c.emitServiceEvent(key, service)
 	}
@@ -451,27 +450,27 @@ func (c *Collector) addIPServiceMapping(ip string, service string) {
 func (c *Collector) detectOutliers(service *Service) {
 	const (
 		consecutive5xxThreshold = 5
-		baseEjectionTime       = 30 * time.Second
-		maxEjectionPercent     = 0.5 // 50% max ejection
+		baseEjectionTime        = 30 * time.Second
+		maxEjectionPercent      = 0.5 // 50% max ejection
 	)
-	
+
 	ejectedCount := 0
 	totalEndpoints := len(service.Endpoints)
 	maxEjectable := int(float64(totalEndpoints) * maxEjectionPercent)
 	if maxEjectable < 1 && totalEndpoints > 0 {
 		maxEjectable = 1 // Always allow ejecting at least one
 	}
-	
+
 	now := time.Now()
-	
+
 	for i := range service.Endpoints {
 		ep := &service.Endpoints[i]
-		
+
 		// Initialize outlier status if needed
 		if ep.OutlierStatus == nil {
 			ep.OutlierStatus = &OutlierStatus{}
 		}
-		
+
 		// Check if ejection period expired
 		if ep.OutlierStatus.CurrentlyEjected && now.After(ep.OutlierStatus.EjectedUntil) {
 			ep.OutlierStatus.CurrentlyEjected = false
@@ -480,20 +479,20 @@ func (c *Collector) detectOutliers(service *Service) {
 				zap.String("endpoint", ep.IP),
 				zap.String("service", service.Name))
 		}
-		
+
 		// Check for consecutive 5xx ejection
 		if ep.OutlierStatus.Consecutive5xx >= consecutive5xxThreshold {
 			if ejectedCount < maxEjectable && !ep.OutlierStatus.CurrentlyEjected {
 				// Eject with exponential backoff
 				ep.OutlierStatus.EjectionCount++
 				ejectionDuration := baseEjectionTime * time.Duration(1<<uint(ep.OutlierStatus.EjectionCount-1))
-				
+
 				ep.OutlierStatus.CurrentlyEjected = true
 				ep.OutlierStatus.LastEjectionTime = now
 				ep.OutlierStatus.EjectedUntil = now.Add(ejectionDuration)
 				ep.Ready = false
 				ejectedCount++
-				
+
 				c.logger.Warn("Endpoint ejected due to consecutive errors",
 					zap.String("endpoint", ep.IP),
 					zap.String("service", service.Name),
@@ -503,13 +502,13 @@ func (c *Collector) detectOutliers(service *Service) {
 			// Reset counter after ejection
 			ep.OutlierStatus.Consecutive5xx = 0
 		}
-		
+
 		// Count currently ejected
 		if ep.OutlierStatus.CurrentlyEjected {
 			ejectedCount++
 		}
 	}
-	
+
 	// Update service health based on ejected endpoints
 	healthyCount := totalEndpoints - ejectedCount
 	if healthyCount == 0 && totalEndpoints > 0 {
@@ -526,12 +525,12 @@ func (c *Collector) getServicesForIP(ip string, port uint16) []string {
 	if services, exists := c.ipToService[ipPortKey]; exists && len(services) > 0 {
 		return services
 	}
-	
+
 	// Fall back to just IP
 	if services, exists := c.ipToService[ip]; exists {
 		return services
 	}
-	
+
 	return nil
 }
 
@@ -578,16 +577,16 @@ func (c *Collector) runEmissionController(ctx context.Context) {
 			return
 		case <-c.StopChannel():
 			return
-		
+
 		case change := <-c.pendingChanges:
 			// Handle change events
 			c.handleChange(ctx, change)
-			
+
 		case <-fullSnapshotTicker.C:
 			// Periodic full snapshot
 			c.logger.Debug("Emitting periodic full snapshot")
 			c.emitServiceMapEvent(false)
-			
+
 		case <-c.getDebounceChannel():
 			// Debounced changes ready to emit
 			if atomic.LoadInt32(&c.significantChanges) > 0 {
@@ -604,20 +603,20 @@ func (c *Collector) runEmissionController(ctx context.Context) {
 func (c *Collector) handleChange(ctx context.Context, change ChangeEvent) {
 	// Immediate emission for significant changes
 	shouldEmitNow := false
-	
+
 	switch change.Type {
 	case ChangeServiceAdded, ChangeServiceRemoved:
 		shouldEmitNow = true
 		c.logger.Info("Service change detected",
 			zap.String("type", "service"),
 			zap.String("service", change.Service))
-			
+
 	case ChangeNewDependency, ChangeDependencyRemoved:
 		shouldEmitNow = true
 		c.logger.Info("Dependency change detected",
 			zap.String("source", change.Service),
 			zap.String("target", change.Target))
-			
+
 	case ChangeHealthChanged:
 		// Only immediate if service went down
 		if service, exists := c.services[change.Service]; exists && service.Health == HealthDown {
@@ -625,18 +624,18 @@ func (c *Collector) handleChange(ctx context.Context, change ChangeEvent) {
 			c.logger.Warn("Service health critical",
 				zap.String("service", change.Service))
 		}
-		
+
 	case ChangeVersionChanged:
 		shouldEmitNow = true
 		c.logger.Info("Service version changed",
 			zap.String("service", change.Service))
-			
+
 	case ChangeConnectionUpdate:
 		// Batch these - not urgent
 		atomic.AddInt32(&c.significantChanges, 1)
 		c.resetDebounceTimer()
 	}
-	
+
 	// Check rate limiting
 	if shouldEmitNow && time.Since(c.lastEmitTime) >= c.config.MinEmitInterval {
 		c.emitServiceMapEvent(true)
@@ -694,7 +693,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 		Connections: make(map[string]int),
 		LastUpdated: time.Now(),
 	}
-	
+
 	// Check if we should skip unchanged (unless forced)
 	if !forceEmit && c.config.SkipUnchanged && c.lastEmitted != nil {
 		if c.isServiceMapUnchanged(serviceMap) {
@@ -775,7 +774,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 	// Create event with tracing context
 	ctx, span := c.StartSpan(context.Background(), "emit-service-map")
 	defer span.End()
-	
+
 	// Convert to domain types
 	domainServiceMap := &domain.ServiceMapData{
 		Services:    make(map[string]domain.ServiceMapInfo),
@@ -783,7 +782,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 		ClusterName: serviceMap.ClusterName,
 		LastUpdated: serviceMap.LastUpdated,
 	}
-	
+
 	// Convert services
 	for k, v := range serviceMap.Services {
 		deps := make([]string, 0, len(v.Dependencies))
@@ -794,7 +793,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 		for dep := range v.Dependents {
 			dependents = append(dependents, dep)
 		}
-		
+
 		domainServiceMap.Services[k] = domain.ServiceMapInfo{
 			Name:         v.Name,
 			Namespace:    v.Namespace,
@@ -809,7 +808,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 			Endpoints:    len(v.Endpoints),
 		}
 	}
-	
+
 	// Convert connections
 	for k, count := range serviceMap.Connections {
 		parts := strings.Split(k, "->")
@@ -822,13 +821,13 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 			}
 		}
 	}
-	
+
 	event := &domain.CollectorEvent{
-		EventID:     fmt.Sprintf("service-map-%d", time.Now().UnixNano()),
-		Source:      c.Name(),
-		Type:        domain.EventTypeServiceMap,
-		Timestamp:   time.Now(),
-		Severity:    domain.EventSeverityInfo,
+		EventID:   fmt.Sprintf("service-map-%d", time.Now().UnixNano()),
+		Source:    c.Name(),
+		Type:      domain.EventTypeServiceMap,
+		Timestamp: time.Now(),
+		Severity:  domain.EventSeverityInfo,
 		EventData: domain.EventDataContainer{
 			ServiceMap: domainServiceMap,
 		},
@@ -846,7 +845,7 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 
 	// Record processing time
 	start := time.Now()
-	
+
 	// Send via ring buffer if available, otherwise use channel
 	var sent bool
 	if c.IsRingBufferEnabled() {
@@ -854,9 +853,9 @@ func (c *Collector) emitServiceMapEvent(forceEmit bool) {
 	} else {
 		sent = c.SendEvent(event)
 	}
-	
+
 	c.RecordProcessingDuration(ctx, time.Since(start))
-	
+
 	if !sent {
 		c.RecordDropWithReason(ctx, "channel_full")
 	} else {
@@ -930,7 +929,7 @@ func (c *Collector) isServiceMapUnchanged(newMap *ServiceMap) bool {
 	if c.lastEmitted == nil {
 		return false // First emission
 	}
-	
+
 	// Quick check: different number of services or connections
 	if len(newMap.Services) != len(c.lastEmitted.Services) {
 		return false
@@ -938,14 +937,14 @@ func (c *Collector) isServiceMapUnchanged(newMap *ServiceMap) bool {
 	if len(newMap.Connections) != len(c.lastEmitted.Connections) {
 		return false
 	}
-	
+
 	// Check each service for changes
 	for key, newSvc := range newMap.Services {
 		oldSvc, exists := c.lastEmitted.Services[key]
 		if !exists {
 			return false // New service
 		}
-		
+
 		// Check key properties
 		if oldSvc.Version != newSvc.Version ||
 			oldSvc.Health != newSvc.Health ||
@@ -954,7 +953,7 @@ func (c *Collector) isServiceMapUnchanged(newMap *ServiceMap) bool {
 			return false
 		}
 	}
-	
+
 	// Check connection counts
 	for connKey, newCount := range newMap.Connections {
 		oldCount, exists := c.lastEmitted.Connections[connKey]
@@ -962,7 +961,7 @@ func (c *Collector) isServiceMapUnchanged(newMap *ServiceMap) bool {
 			return false
 		}
 	}
-	
+
 	return true // No changes detected
 }
 
@@ -1033,7 +1032,7 @@ func (c *Collector) setupDefaultFilters() {
 
 // emitServiceEvent emits a single service discovery event
 func (c *Collector) emitServiceEvent(serviceKey string, service *Service) {
-	ctx, span := c.StartSpan(context.Background(), "emit-service-event", 
+	ctx, span := c.StartSpan(context.Background(), "emit-service-event",
 		trace.WithAttributes(
 			attribute.String("service.name", service.Name),
 			attribute.String("service.namespace", service.Namespace),
@@ -1042,16 +1041,16 @@ func (c *Collector) emitServiceEvent(serviceKey string, service *Service) {
 	defer span.End()
 
 	event := &domain.CollectorEvent{
-		EventID:     fmt.Sprintf("service-discovered-%s-%d", serviceKey, time.Now().UnixNano()),
-		Source:      c.Name(),
-		Type:        domain.EventTypeNetworkConnection, // Using existing type
-		Timestamp:   time.Now(),
-		Severity:    domain.EventSeverityInfo,
-		EventData:   domain.EventDataContainer{
+		EventID:   fmt.Sprintf("service-discovered-%s-%d", serviceKey, time.Now().UnixNano()),
+		Source:    c.Name(),
+		Type:      domain.EventTypeNetworkConnection, // Using existing type
+		Timestamp: time.Now(),
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
 			Custom: map[string]string{
-				"service_name": service.Name,
+				"service_name":      service.Name,
 				"service_namespace": service.Namespace,
-				"service_type": string(service.Type),
+				"service_type":      string(service.Type),
 			},
 		},
 	}

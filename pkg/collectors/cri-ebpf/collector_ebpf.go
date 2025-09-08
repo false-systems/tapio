@@ -194,7 +194,7 @@ func (c *Collector) handleRingBufferEvent(data []byte) {
 
 	// Validate event size
 	if len(data) < int(unsafe.Sizeof(BPFContainerExitEvent{})) {
-		c.RecordErrorWithContext(ctx, fmt.Errorf("invalid event size: got %d, expected %d", 
+		c.RecordErrorWithContext(ctx, fmt.Errorf("invalid event size: got %d, expected %d",
 			len(data), unsafe.Sizeof(BPFContainerExitEvent{})))
 		return
 	}
@@ -239,7 +239,7 @@ func (c *Collector) handleRingBufferEvent(data []byte) {
 // convertToCollectorEvent converts BPF event to domain event
 func (c *Collector) convertToCollectorEvent(bpfEvent *BPFContainerExitEvent) (*domain.CollectorEvent, error) {
 	// Simple conversion for now - this would be more comprehensive in production
-	// Convert ContainerID from []int8 to string  
+	// Convert ContainerID from []int8 to string
 	containerID := make([]byte, len(bpfEvent.ContainerID))
 	for i, b := range bpfEvent.ContainerID {
 		containerID[i] = byte(b)

@@ -11,8 +11,8 @@ import (
 
 // TraceEntry stores trace information with timestamp
 type TraceEntry struct {
-	TraceID   string
-	LastSeen  time.Time
+	TraceID  string
+	LastSeen time.Time
 }
 
 // TraceManager handles trace propagation between related K8s objects
@@ -23,7 +23,7 @@ type TraceManager struct {
 	// Propagation rules
 	propagateOwnerRefs bool
 	propagateSelectors bool
-	
+
 	// Cleanup settings
 	maxTraceAge   time.Duration
 	cleanupTicker *time.Ticker
@@ -39,17 +39,17 @@ func NewTraceManager() *TraceManager {
 		maxTraceAge:        30 * time.Minute, // Default: clean up traces older than 30 minutes
 		stopCleanup:        make(chan struct{}),
 	}
-	
+
 	// Start cleanup goroutine
 	tm.startCleanup()
-	
+
 	return tm
 }
 
 // startCleanup starts the background cleanup goroutine
 func (tm *TraceManager) startCleanup() {
 	tm.cleanupTicker = time.NewTicker(5 * time.Minute) // Run cleanup every 5 minutes
-	
+
 	go func() {
 		for {
 			select {
@@ -66,17 +66,17 @@ func (tm *TraceManager) startCleanup() {
 func (tm *TraceManager) cleanupStaleTraces() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	
+
 	now := time.Now()
 	cleaned := 0
-	
+
 	for key, entry := range tm.traces {
 		if now.Sub(entry.LastSeen) > tm.maxTraceAge {
 			delete(tm.traces, key)
 			cleaned++
 		}
 	}
-	
+
 	// Log cleanup stats if needed (would need logger passed in)
 	// tm.logger.Debug("Cleaned stale traces", zap.Int("removed", cleaned), zap.Int("remaining", len(tm.traces)))
 }

@@ -15,10 +15,10 @@ import (
 // Collector implements eBPF-based storage I/O monitoring using BaseCollector
 // Focuses on VFS layer monitoring to detect storage performance issues
 type Collector struct {
-	*base.BaseCollector      // Embed for stats/health
+	*base.BaseCollector       // Embed for stats/health
 	*base.EventChannelManager // Embed for events
 	*base.LifecycleManager    // Embed for lifecycle
-	
+
 	// Core configuration
 	config *Config
 	logger *zap.Logger
@@ -119,7 +119,7 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 	if err != nil {
 		logger.Warn("Failed to detect runtime environment, using defaults", zap.Error(err))
 		runtime = &RuntimeEnvironment{
-			IsKubernetes: false,
+			IsKubernetes:       false,
 			VolumePathPatterns: make(map[string]string),
 		}
 	}
@@ -131,10 +131,10 @@ func NewCollector(name string, config *Config) (*Collector, error) {
 
 	// Create lifecycle manager first as it's needed for context
 	lifecycleManager := base.NewLifecycleManager(context.Background(), logger.Named(name))
-	
+
 	// Create event channel manager
 	eventManager := base.NewEventChannelManager(config.BufferSize, name, logger.Named(name))
-	
+
 	c := &Collector{
 		BaseCollector:       baseCollector,
 		EventChannelManager: eventManager,
@@ -273,10 +273,10 @@ func (c *Collector) GetContainerInfo(cgroupID uint64) *ContainerInfo {
 func (c *Collector) RecordSlowIO(event *SlowIOEvent) {
 	c.slowIOCacheMu.Lock()
 	defer c.slowIOCacheMu.Unlock()
-	
+
 	key := fmt.Sprintf("%s-%d", event.Path, event.PID)
 	c.slowIOCache[key] = event
-	
+
 	// Clean up old entries if cache gets too large
 	if len(c.slowIOCache) > 1000 {
 		// Remove oldest entries

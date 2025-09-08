@@ -11,25 +11,25 @@ type Service struct {
 	Type      ServiceType       `json:"type"`
 	Labels    map[string]string `json:"labels"`
 	Version   string            `json:"version"`
-	
+
 	// Network info
-	Endpoints []Endpoint        `json:"endpoints"`
-	Ports     []Port            `json:"ports"`
-	
+	Endpoints []Endpoint `json:"endpoints"`
+	Ports     []Port     `json:"ports"`
+
 	// Relationships
-	Dependencies map[string]*Dependency `json:"dependencies"`  // Services I call
+	Dependencies map[string]*Dependency `json:"dependencies"` // Services I call
 	Dependents   map[string]*Dependent  `json:"dependents"`   // Services that call me
-	
+
 	// Health & metrics
-	Health       HealthState       `json:"health"`
-	RequestRate  float64           `json:"request_rate"`
-	ErrorRate    float64           `json:"error_rate"`
-	Latency      LatencyStats      `json:"latency"`
-	
+	Health      HealthState  `json:"health"`
+	RequestRate float64      `json:"request_rate"`
+	ErrorRate   float64      `json:"error_rate"`
+	Latency     LatencyStats `json:"latency"`
+
 	// Metadata
-	LastSeen     time.Time         `json:"last_seen"`
-	FirstSeen    time.Time         `json:"first_seen"`
-	IsExternal   bool              `json:"is_external"`
+	LastSeen   time.Time `json:"last_seen"`
+	FirstSeen  time.Time `json:"first_seen"`
+	IsExternal bool      `json:"is_external"`
 }
 
 // ServiceType categorizes services
@@ -61,27 +61,27 @@ type Endpoint struct {
 	PodName  string `json:"pod_name"`
 	NodeName string `json:"node_name"`
 	Ready    bool   `json:"ready"`
-	
+
 	// Outlier detection (Envoy-inspired)
 	OutlierStatus *OutlierStatus `json:"outlier_status,omitempty"`
 }
 
 // OutlierStatus tracks endpoint health for outlier detection
 type OutlierStatus struct {
-	Consecutive5xx     int       `json:"consecutive_5xx"`
-	ConsecutiveErrors  int       `json:"consecutive_errors"`
-	SuccessRate5m      float64   `json:"success_rate_5m"`
-	SuccessRate1m      float64   `json:"success_rate_1m"`
-	EjectionCount      int       `json:"ejection_count"`
-	CurrentlyEjected   bool      `json:"currently_ejected"`
-	EjectedUntil       time.Time `json:"ejected_until,omitempty"`
-	LastEjectionTime   time.Time `json:"last_ejection_time,omitempty"`
-	
+	Consecutive5xx    int       `json:"consecutive_5xx"`
+	ConsecutiveErrors int       `json:"consecutive_errors"`
+	SuccessRate5m     float64   `json:"success_rate_5m"`
+	SuccessRate1m     float64   `json:"success_rate_1m"`
+	EjectionCount     int       `json:"ejection_count"`
+	CurrentlyEjected  bool      `json:"currently_ejected"`
+	EjectedUntil      time.Time `json:"ejected_until,omitempty"`
+	LastEjectionTime  time.Time `json:"last_ejection_time,omitempty"`
+
 	// Connection pool stats
-	ActiveConnections  int       `json:"active_connections"`
-	PendingConnections int       `json:"pending_connections"`
-	ConnectionOverflow int       `json:"connection_overflow"`
-	RequestRetries     int       `json:"request_retries"`
+	ActiveConnections  int `json:"active_connections"`
+	PendingConnections int `json:"pending_connections"`
+	ConnectionOverflow int `json:"connection_overflow"`
+	RequestRetries     int `json:"request_retries"`
 }
 
 // Port represents a service port
@@ -94,14 +94,14 @@ type Port struct {
 
 // Dependency represents a service dependency
 type Dependency struct {
-	Target      string       `json:"target"`
-	CallRate    float64      `json:"call_rate"`
-	ErrorRate   float64      `json:"error_rate"`
-	Latency     LatencyStats `json:"latency"`
-	Protocol    string       `json:"protocol"`
-	Operations  []string     `json:"operations"` // e.g., ["GET /api/users", "POST /api/orders"]
-	FirstSeen   time.Time    `json:"first_seen"`
-	LastSeen    time.Time    `json:"last_seen"`
+	Target     string       `json:"target"`
+	CallRate   float64      `json:"call_rate"`
+	ErrorRate  float64      `json:"error_rate"`
+	Latency    LatencyStats `json:"latency"`
+	Protocol   string       `json:"protocol"`
+	Operations []string     `json:"operations"` // e.g., ["GET /api/users", "POST /api/orders"]
+	FirstSeen  time.Time    `json:"first_seen"`
+	LastSeen   time.Time    `json:"last_seen"`
 }
 
 // Dependent represents a service that depends on this service
@@ -142,7 +142,7 @@ type Connection struct {
 func (c *Connection) CalculateQuality() float64 {
 	// Start with perfect quality
 	quality := 1.0
-	
+
 	// Penalize retransmits (assume ~1000 packets for a typical connection)
 	if c.BytesSent > 0 {
 		packetsEstimate := (c.BytesSent + c.BytesRecv) / 1400 // MTU estimate
@@ -151,12 +151,12 @@ func (c *Connection) CalculateQuality() float64 {
 			quality -= retransmitRate * 0.5 // 50% penalty for retransmit rate
 		}
 	}
-	
+
 	// Penalize resets heavily
 	if c.Resets > 0 {
 		quality -= 0.3 // 30% penalty for any reset
 	}
-	
+
 	// Penalize bad states
 	switch c.State {
 	case StateReset:
@@ -166,13 +166,13 @@ func (c *Connection) CalculateQuality() float64 {
 	case StateSynSent:
 		quality -= 0.2 // Connection not established
 	}
-	
+
 	// Penalize high latency (>100ms is bad)
 	if c.Latency > 100_000_000 { // 100ms in nanoseconds
 		latencyPenalty := float64(c.Latency-100_000_000) / float64(1_000_000_000) // Per second over 100ms
 		quality -= latencyPenalty * 0.2
 	}
-	
+
 	// Ensure quality stays in bounds
 	if quality < 0 {
 		quality = 0
@@ -180,7 +180,7 @@ func (c *Connection) CalculateQuality() float64 {
 	if quality > 1 {
 		quality = 1
 	}
-	
+
 	return quality
 }
 
@@ -207,10 +207,10 @@ const (
 
 // ServiceMap represents the complete service topology
 type ServiceMap struct {
-	Services     map[string]*Service   `json:"services"`
-	Connections  map[string]int        `json:"connections"` // "src->dst" -> count
-	LastUpdated  time.Time             `json:"last_updated"`
-	ClusterName  string                `json:"cluster_name"`
+	Services    map[string]*Service `json:"services"`
+	Connections map[string]int      `json:"connections"` // "src->dst" -> count
+	LastUpdated time.Time           `json:"last_updated"`
+	ClusterName string              `json:"cluster_name"`
 }
 
 // Visualization types for output formats

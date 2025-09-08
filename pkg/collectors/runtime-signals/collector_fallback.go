@@ -4,9 +4,8 @@
 package runtimesignals
 
 import (
-	"context"
 	"fmt"
-	
+
 	"go.uber.org/zap"
 )
 
@@ -29,10 +28,10 @@ func (s *ebpfState) LinkCount() int {
 func (c *Collector) startEBPF() error {
 	c.logger.Warn("Runtime signals collector requires Linux with eBPF support",
 		zap.String("collector", c.Name()))
-	
+
 	// Set ebpfState to indicate no eBPF support
 	c.ebpfState = &ebpfState{}
-	
+
 	// Don't return error - just run without eBPF
 	return nil
 }
@@ -47,7 +46,7 @@ func (c *Collector) readEBPFEvents() {
 	// No-op on non-Linux
 }
 
-// processEBPFEvent is not needed on non-Linux platforms  
+// processEBPFEvent is not needed on non-Linux platforms
 func (c *Collector) processEBPFEvent(data []byte) {
 	// No-op on non-Linux
 }

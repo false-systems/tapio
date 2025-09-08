@@ -10,11 +10,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors/network/bpf"
-	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/yairfalse/tapio/pkg/collectors/network/bpf"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 
@@ -22,9 +22,9 @@ import (
 
 // ebpfState holds eBPF components for Linux
 type ebpfState struct {
-	objs     *bpf.NetworkmonitorObjects
-	links    []link.Link
-	reader   *ringbuf.Reader
+	objs   *bpf.NetworkmonitorObjects
+	links  []link.Link
+	reader *ringbuf.Reader
 }
 
 // NetworkEvent represents a network event from eBPF
@@ -69,10 +69,10 @@ func (c *Collector) startEBPF() error {
 	}
 
 	objs := coll.(*bpf.NetworkmonitorObjects)
-	
+
 	state := &ebpfState{
-		objs:     objs,
-		links:    make([]link.Link, 0),
+		objs:  objs,
+		links: make([]link.Link, 0),
 	}
 
 	// Attach tracepoints for network monitoring
@@ -84,7 +84,7 @@ func (c *Collector) startEBPF() error {
 		} else {
 			state.links = append(state.links, tcpConnectLink)
 		}
-		
+
 		tcpAcceptLink, err := link.Tracepoint("syscalls", "sys_enter_accept4", objs.TraceAccept, nil)
 		if err != nil {
 			c.logger.Warn("Failed to attach TCP accept tracepoint", zap.Error(err))
@@ -124,7 +124,7 @@ func (c *Collector) startEBPF() error {
 	}
 
 	c.ebpfState = state
-	
+
 	// Start event processing using LifecycleManager
 	c.LifecycleManager.Start("eBPF-reader", c.readEBPFEvents)
 	c.LifecycleManager.Start("L7-cleanup", c.cleanupL7Parser)
@@ -169,7 +169,7 @@ func (c *Collector) cleanupEBPF(state *ebpfState) {
 
 // readEBPFEvents reads events from eBPF ring buffer
 func (c *Collector) readEBPFEvents() {
-	
+
 	state, ok := c.ebpfState.(*ebpfState)
 	if !ok || state == nil || state.reader == nil {
 		c.logger.Error("Invalid eBPF state")
@@ -249,7 +249,7 @@ func (c *Collector) processRawNetworkEvent(data []byte) {
 		// Event was dropped (EventChannelManager already logged it)
 		c.RecordError(fmt.Errorf("event dropped due to full channel"))
 	} else {
-		// Event sent successfully 
+		// Event sent successfully
 		c.RecordEvent()
 	}
 }
@@ -282,13 +282,13 @@ func (c *Collector) convertNetworkEventToDomain(event *NetworkEvent) *domain.Col
 
 	// Build network data
 	networkData := &domain.NetworkData{
-		Protocol:   c.getProtocolName(event.Protocol),
-		Direction:  c.getDirectionName(event.Direction),
-		SourceIP:   c.formatIP(event.SourceIP[:]),
-		DestIP:     c.formatIP(event.DestIP[:]),
-		SourcePort: int32(event.SourcePort),
-		DestPort:   int32(event.DestPort),
-		BytesSent:  int64(event.BytesSent),
+		Protocol:      c.getProtocolName(event.Protocol),
+		Direction:     c.getDirectionName(event.Direction),
+		SourceIP:      c.formatIP(event.SourceIP[:]),
+		DestIP:        c.formatIP(event.DestIP[:]),
+		SourcePort:    int32(event.SourcePort),
+		DestPort:      int32(event.DestPort),
+		BytesSent:     int64(event.BytesSent),
 		BytesReceived: int64(event.BytesReceived),
 	}
 
@@ -312,17 +312,17 @@ func (c *Collector) convertNetworkEventToDomain(event *NetworkEvent) *domain.Col
 	}
 
 	// Create connection ID for L7 parsing
-	connectionID := fmt.Sprintf("%s:%d->%s:%d", 
+	connectionID := fmt.Sprintf("%s:%d->%s:%d",
 		networkData.SourceIP, networkData.SourcePort,
 		networkData.DestIP, networkData.DestPort)
 
 	// Enhanced L7 parsing with protocol detection
 	if event.PayloadSize > 0 && event.PayloadSize <= 1500 {
 		payload := event.Payload[:event.PayloadSize]
-		
+
 		// Detect actual L7 protocol from payload
 		detectedProtocol := state.l7Parser.DetectProtocol(payload)
-		
+
 		// Use enhanced parsers for deeper L7 analysis
 		switch detectedProtocol {
 		case "http1", "http2":
@@ -342,7 +342,7 @@ func (c *Collector) convertNetworkEventToDomain(event *NetworkEvent) *domain.Col
 				c.parseDNSPayload(state.l7Parser, payload, event, &eventDataContainer, &severity)
 			}
 		}
-		
+
 		// Add protocol detection metadata
 		if eventDataContainer.Custom == nil {
 			eventDataContainer.Custom = make(map[string]string)
@@ -388,7 +388,7 @@ func (c *Collector) parseHTTPPayload(parser *L7Parser, connectionID string, payl
 				ContentType: httpReq.ContentType,
 				RequestSize: httpReq.BodySize,
 			}
-			
+
 			// Add enhanced metadata
 			if eventData.HTTP.Headers != nil {
 				for key, value := range eventData.HTTP.Headers {
@@ -402,20 +402,20 @@ func (c *Collector) parseHTTPPayload(parser *L7Parser, connectionID string, payl
 			if eventData.HTTP == nil {
 				eventData.HTTP = &domain.HTTPData{}
 			}
-			
+
 			eventData.HTTP.StatusCode = int32(httpResp.StatusCode)
 			eventData.HTTP.Headers = httpResp.Headers // Response headers
 			eventData.HTTP.ContentType = httpResp.ContentType
 			eventData.HTTP.ResponseSize = httpResp.BodySize
 			eventData.HTTP.Duration = httpResp.ResponseTime
-			
+
 			// Determine severity based on status code
 			if httpResp.StatusCode >= 400 && httpResp.StatusCode < 500 {
 				*severity = domain.EventSeverityWarning
 			} else if httpResp.StatusCode >= 500 {
 				*severity = domain.EventSeverityError
 			}
-			
+
 			// Add response metadata
 			if eventData.Custom == nil {
 				eventData.Custom = make(map[string]string)
@@ -433,22 +433,22 @@ func (c *Collector) parseHTTP2Payload(parser *L7Parser, connectionID string, pay
 		c.logger.Debug("Failed to parse HTTP/2 frame", zap.Error(err))
 		return
 	}
-	
+
 	// Create HTTP data structure for HTTP/2
 	if eventData.HTTP == nil {
 		eventData.HTTP = &domain.HTTPData{}
 	}
-	
+
 	// Add HTTP/2 specific metadata
 	if eventData.Custom == nil {
 		eventData.Custom = make(map[string]string)
 	}
-	
+
 	eventData.Custom["http2_frame_type"] = fmt.Sprintf("%d", frame.Type)
 	eventData.Custom["http2_frame_flags"] = fmt.Sprintf("%d", frame.Flags)
 	eventData.Custom["http2_stream_id"] = fmt.Sprintf("%d", frame.StreamID)
 	eventData.Custom["http2_frame_length"] = fmt.Sprintf("%d", frame.Length)
-	
+
 	// Parse different HTTP/2 frame types
 	switch frame.Type {
 	case 0: // DATA frame
@@ -485,36 +485,36 @@ func (c *Collector) parseGRPCPayload(parser *L7Parser, connectionID string, payl
 		c.logger.Debug("Failed to parse gRPC message", zap.Error(err))
 		return
 	}
-	
+
 	// Create GRPC data structure
 	eventData.GRPC = &domain.GRPCData{
 		RequestSize:  int64(message.Length),
 		ResponseSize: int64(message.Length),
 	}
-	
+
 	// Add gRPC metadata
 	if eventData.Custom == nil {
 		eventData.Custom = make(map[string]string)
 	}
-	
+
 	eventData.Custom["grpc_compressed"] = fmt.Sprintf("%v", message.Compressed)
 	eventData.Custom["grpc_message_length"] = fmt.Sprintf("%d", message.Length)
-	
+
 	if message.Service != "" {
 		eventData.GRPC.Service = message.Service
 	}
-	
+
 	if message.Method != "" {
 		eventData.GRPC.Method = message.Method
 	}
-	
+
 	// Detect potential gRPC service and method from connection context
 	// This would require more sophisticated parsing of HTTP/2 headers
 	// For now, we'll set generic values
 	if eventData.GRPC.Service == "" {
 		eventData.GRPC.Service = "unknown"
 	}
-	
+
 	if eventData.GRPC.Method == "" {
 		eventData.GRPC.Method = "unknown"
 	}
@@ -527,27 +527,27 @@ func (c *Collector) parseDNSPayload(parser *L7Parser, payload []byte, event *Net
 		c.logger.Debug("Failed to parse DNS packet", zap.Error(err))
 		return
 	}
-	
+
 	eventData.DNS = &domain.DNSData{}
-	
+
 	if query != nil {
 		eventData.DNS.QueryName = query.Name
 		eventData.DNS.QueryType = query.Type
 	}
-	
+
 	if response != nil {
 		// Map string response code to int for domain compatibility
 		if code, exists := getResponseCodeInt(response.ResponseCode); exists {
 			eventData.DNS.ResponseCode = code
 		}
-		
+
 		// Convert answers to domain format
 		domainAnswers := make([]string, len(response.Answers))
 		for i, answer := range response.Answers {
 			domainAnswers[i] = answer.Data
 		}
 		eventData.DNS.Answers = domainAnswers
-		
+
 		// Add answer details
 		if len(response.Answers) > 0 {
 			eventData.Custom = make(map[string]string)
@@ -558,7 +558,7 @@ func (c *Collector) parseDNSPayload(parser *L7Parser, payload []byte, event *Net
 				eventData.Custom[fmt.Sprintf("dns_answer_%d_ttl", i)] = fmt.Sprintf("%d", answer.TTL)
 			}
 		}
-		
+
 		// Determine severity based on response code
 		switch response.ResponseCode {
 		case "NXDOMAIN", "SERVFAIL", "REFUSED":
@@ -578,21 +578,21 @@ func (c *Collector) parseBasicL7Data(event *NetworkEvent, eventData *domain.Even
 			URL:        c.extractString(event.HTTPPath[:]),
 			StatusCode: int32(event.HTTPStatus),
 		}
-		
+
 		if event.HTTPStatus >= 400 && event.HTTPStatus < 500 {
 			*severity = domain.EventSeverityWarning
 		} else if event.HTTPStatus >= 500 {
 			*severity = domain.EventSeverityError
 		}
 	}
-	
+
 	// Basic DNS parsing from eBPF fields
 	if len(c.extractString(event.DNSName[:])) > 0 {
 		eventData.DNS = &domain.DNSData{
 			QueryName:    c.extractString(event.DNSName[:]),
 			ResponseCode: c.getDNSResponseCodeName(int(event.DNSResponseCode)),
 		}
-		
+
 		if event.DNSResponseCode != 0 {
 			*severity = domain.EventSeverityWarning
 		}

@@ -39,7 +39,7 @@ func ExtractTraceIDFromAnnotations(annotations map[string]string) (string, bool)
 		"otel.trace.id",
 		"opentelemetry.trace.id",
 	}
-	
+
 	for _, key := range traceKeys {
 		if traceID, ok := annotations[key]; ok && traceID != "" {
 			return traceID, true
@@ -49,7 +49,7 @@ func ExtractTraceIDFromAnnotations(annotations map[string]string) (string, bool)
 			return traceID, true
 		}
 	}
-	
+
 	// Check for W3C trace context
 	if traceContext, ok := annotations["traceparent"]; ok {
 		// W3C format: version-trace_id-parent_id-flags
@@ -58,6 +58,6 @@ func ExtractTraceIDFromAnnotations(annotations map[string]string) (string, bool)
 			return parts[1], true
 		}
 	}
-	
+
 	return "", false
 }
