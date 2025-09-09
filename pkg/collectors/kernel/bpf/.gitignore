@@ -1,9 +1,0 @@
-# Ignore C source files during Go build
-*.c
-*.h
-
-# Keep generated Go files
-!*.go
-
-# Keep compiled eBPF objects
-*.o

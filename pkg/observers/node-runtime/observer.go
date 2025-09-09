@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/collectors"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/observers"
 	"github.com/yairfalse/tapio/pkg/observers/base"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
