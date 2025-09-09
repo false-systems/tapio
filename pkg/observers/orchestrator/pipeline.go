@@ -66,6 +66,80 @@ func (p *ObserverOrchestrator) RegisterObserver(name string, observer observers.
 	return nil
 }
 
+// RegisterObserversFromYAML registers observers from YAML configuration
+func (p *ObserverOrchestrator) RegisterObserversFromYAML(config *YAMLConfig, logger *zap.Logger) error {
+	if p.ctx != nil {
+		return fmt.Errorf("cannot register observers after orchestrator started")
+	}
+	if config == nil {
+		return fmt.Errorf("config cannot be nil")
+	}
+	if logger == nil {
+		return fmt.Errorf("logger cannot be nil")
+	}
+
+	var registrationErrors []string
+
+	// Iterate through enabled observers in the config
+	for observerType, observerConfig := range config.Observers {
+		if !observerConfig.Enabled {
+			logger.Debug("Skipping disabled observer", zap.String("observer", observerType))
+			continue
+		}
+
+		// Get the factory for this observer type
+		factory, exists := GetObserverFactory(observerType)
+		if !exists {
+			err := fmt.Sprintf("no factory registered for observer type: %s", observerType)
+			registrationErrors = append(registrationErrors, err)
+			logger.Warn("Observer factory not found", zap.String("observer", observerType))
+			continue
+		}
+
+		// Create observer using the factory
+		observer, err := factory(observerType, &observerConfig.Config, logger.With(zap.String("observer", observerType)))
+		if err != nil {
+			err := fmt.Sprintf("failed to create observer %s: %v", observerType, err)
+			registrationErrors = append(registrationErrors, err)
+			logger.Error("Failed to create observer",
+				zap.String("observer", observerType),
+				zap.Error(fmt.Errorf("%v", err)))
+			continue
+		}
+
+		// Register the observer with the orchestrator
+		if err := p.RegisterObserver(observerType, observer); err != nil {
+			err := fmt.Sprintf("failed to register observer %s: %v", observerType, err)
+			registrationErrors = append(registrationErrors, err)
+			logger.Error("Failed to register observer",
+				zap.String("observer", observerType),
+				zap.Error(fmt.Errorf("%v", err)))
+			continue
+		}
+
+		logger.Info("Successfully registered observer",
+			zap.String("observer", observerType),
+			zap.Int("buffer_size", observerConfig.Config.BufferSize))
+	}
+
+	// Return error if any observers failed to register
+	if len(registrationErrors) > 0 {
+		return fmt.Errorf("failed to register %d observer(s): %v", len(registrationErrors), registrationErrors)
+	}
+
+	// Log summary of registered observers
+	registeredCount := len(p.observers)
+	if registeredCount == 0 {
+		logger.Warn("No observers were registered")
+	} else {
+		logger.Info("Observer registration completed",
+			zap.Int("registered_count", registeredCount),
+			zap.Strings("observer_types", p.getRegisteredObserverTypes()))
+	}
+
+	return nil
+}
+
 // Start begins processing events
 func (p *ObserverOrchestrator) Start(ctx context.Context) error {
 	if p.ctx != nil {
@@ -342,4 +416,13 @@ func (p *ObserverOrchestrator) GetHealthStatus() map[string]ObserverHealthStatus
 	}
 
 	return status
+}
+
+// getRegisteredObserverTypes returns a slice of registered observer type names
+func (p *ObserverOrchestrator) getRegisteredObserverTypes() []string {
+	types := make([]string, 0, len(p.observers))
+	for observerType := range p.observers {
+		types = append(types, observerType)
+	}
+	return types
 }

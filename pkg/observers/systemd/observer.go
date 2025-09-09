@@ -3,6 +3,7 @@ package systemd
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -248,7 +249,7 @@ func (o *Observer) performHealthCheck(ctx context.Context) {
 	}
 
 	// Check for stale data
-	if o.GetStatistics().LastEventTime.Before(time.Now().Add(-5 * time.Minute)) {
+	if o.Statistics().LastEventTime.Before(time.Now().Add(-5 * time.Minute)) {
 		o.logger.Warn("No events received in last 5 minutes")
 	}
 }
@@ -256,7 +257,7 @@ func (o *Observer) performHealthCheck(ctx context.Context) {
 // processSystemdEvent processes a systemd event from eBPF
 func (o *Observer) processSystemdEvent(ctx context.Context, event *SystemdEvent) {
 	if !o.rateLimiter.Allow() {
-		o.IncrementDropped()
+		o.RecordDrop()
 		return
 	}
 
@@ -279,10 +280,9 @@ func (o *Observer) processSystemdEvent(ctx context.Context, event *SystemdEvent)
 	domainEvent := o.createDomainEvent(event, serviceName)
 
 	// Send event
-	if err := o.SendEvent(domainEvent); err != nil {
+	if !o.SendEvent(domainEvent) {
 		o.logger.Error("Failed to send event",
-			zap.String("service", serviceName),
-			zap.Error(err))
+			zap.String("service", serviceName))
 		if o.errorsTotal != nil {
 			o.errorsTotal.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("error_type", "send_failed"),
@@ -291,7 +291,7 @@ func (o *Observer) processSystemdEvent(ctx context.Context, event *SystemdEvent)
 		return
 	}
 
-	o.IncrementProcessed()
+	o.RecordEvent()
 	if o.eventsProcessed != nil {
 		o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("event_type", getEventTypeName(event.EventType)),
@@ -363,32 +363,35 @@ func (o *Observer) updateEventCounters(ctx context.Context, eventType uint8) {
 // createDomainEvent creates a domain event from systemd event
 func (o *Observer) createDomainEvent(event *SystemdEvent, serviceName string) *domain.CollectorEvent {
 	eventType := domain.EventTypeSystemdService
-	severity := domain.SeverityInfo
+	severity := domain.EventSeverityInfo
 
 	// Determine severity based on event type
 	switch event.EventType {
 	case EventTypeServiceFailed:
-		severity = domain.SeverityError
+		severity = domain.EventSeverityError
 	case EventTypeServiceRestart:
-		severity = domain.SeverityWarning
+		severity = domain.EventSeverityWarning
 	}
 
 	return &domain.CollectorEvent{
 		Type:      eventType,
 		Timestamp: time.Unix(0, int64(event.Timestamp)),
-		Source:    o.Name(),
-		EventData: domain.SystemdServiceEvent{
-			ServiceName: serviceName,
-			EventType:   getEventTypeName(event.EventType),
-			PID:         event.PID,
-			UID:         event.UID,
-			GID:         event.GID,
-			ExitCode:    int32(event.ExitCode),
-			Signal:      int32(event.Signal),
-			CgroupID:    event.CgroupID,
-			CgroupPath:  cleanString(string(event.CgroupPath[:])),
-			Severity:    severity,
-			Comm:        cleanString(string(event.Comm[:])),
+		Source:    o.GetName(),
+		Severity:  severity,
+		EventData: domain.EventDataContainer{
+			Systemd: &domain.SystemdData{
+				Unit:     serviceName,
+				Message:  getEventTypeName(event.EventType),
+				Priority: string(severity),
+				MainPID:  int32(event.PID),
+			},
+		},
+		Metadata: domain.EventMetadata{
+			PID:      int32(event.PID),
+			UID:      int32(event.UID),
+			GID:      int32(event.GID),
+			CgroupID: event.CgroupID,
+			Command:  cleanString(string(event.Comm[:])),
 		},
 	}
 }
@@ -424,15 +427,25 @@ func (o *Observer) GetServiceState(serviceName string) (*ServiceState, bool) {
 
 // Statistics returns observer statistics
 func (o *Observer) Statistics() *ObserverStats {
-	baseStats := o.BaseObserver.GetStatistics()
+	baseStats := o.BaseObserver.Statistics()
 
 	o.mu.RLock()
 	serviceCount := len(o.services)
 	o.mu.RUnlock()
 
+	// Get dropped count from custom metrics if available
+	droppedCount := uint64(0)
+	if baseStats.CustomMetrics != nil {
+		if dropped, exists := baseStats.CustomMetrics["events_dropped"]; exists {
+			if count, err := strconv.ParseUint(dropped, 10, 64); err == nil {
+				droppedCount = count
+			}
+		}
+	}
+
 	return &ObserverStats{
-		EventsGenerated:   baseStats.EventsProcessed,
-		EventsDropped:     baseStats.EventsDropped,
+		EventsGenerated:   uint64(baseStats.EventsProcessed),
+		EventsDropped:     droppedCount,
 		LastEventTime:     baseStats.LastEventTime,
 		ServicesMonitored: serviceCount,
 	}

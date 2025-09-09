@@ -19,7 +19,7 @@ import (
 )
 
 type Observer struct {
-	*base.BaseCollector
+	*base.BaseObserver
 	*base.LifecycleManager
 
 	config *Config
@@ -66,7 +66,7 @@ func NewObserver(cfg *Config, logger *zap.Logger) (*Observer, error) {
 	eventChan := make(chan common.ObserverEvent, 1000)
 
 	o := &Observer{
-		BaseCollector:    base.NewBaseCollector("status", 30*time.Second),
+		BaseObserver:     base.NewBaseObserver("status", 30*time.Second),
 		LifecycleManager: base.NewLifecycleManager(ctx, logger),
 		EventChan:        eventChan,
 		config:           cfg,
