@@ -143,7 +143,7 @@ func TestHTTPFailureScenarios(t *testing.T) {
 
 		_, err := client.Get(server.URL)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "timeout")
+		assert.Contains(t, err.Error(), "deadline exceeded")
 	})
 
 	t.Run("RetryStorm", func(t *testing.T) {

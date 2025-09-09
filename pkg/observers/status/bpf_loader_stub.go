@@ -21,5 +21,5 @@ func (o *statusObjects) Close() error {
 }
 
 func loadStatus() (*ebpf.CollectionSpec, error) {
-	return nil, errors.New("eBPF not supported on this platform")
+	return &ebpf.CollectionSpec{}, errors.New("eBPF not supported on this platform")
 }

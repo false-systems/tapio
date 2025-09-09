@@ -18,7 +18,17 @@ type ObserverEvent struct {
 	Type      EventType
 	Timestamp time.Time
 	Service   string
-	Data      map[string]interface{}
+	Data      EventData
+}
+
+// EventData holds event-specific data
+type EventData struct {
+	ErrorCount uint64            `json:"error_count,omitempty"`
+	TotalCount uint64            `json:"total_count,omitempty"`
+	ErrorRate  float64           `json:"error_rate,omitempty"`
+	AvgLatency float64           `json:"avg_latency,omitempty"`
+	ErrorTypes map[uint16]uint64 `json:"error_types,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 // EventType represents the type of observer event

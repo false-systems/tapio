@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
@@ -16,13 +14,12 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 
-	"github.com/yairfalse/tapio/pkg/collectors/base"
+	"github.com/yairfalse/tapio/pkg/observers/base"
 	"github.com/yairfalse/tapio/pkg/observers/common"
 )
 
 type Observer struct {
 	*base.BaseCollector
-	*base.EventChannelManager
 	*base.LifecycleManager
 
 	config *Config
@@ -46,6 +43,7 @@ type Observer struct {
 	mu         sync.RWMutex
 	errorRates map[uint32]float64
 	lastFlush  time.Time
+	EventChan  chan common.ObserverEvent
 }
 
 type Config struct {
@@ -58,20 +56,25 @@ type Config struct {
 }
 
 func NewObserver(cfg *Config, logger *zap.Logger) (*Observer, error) {
+	// Only try to remove memlock on Linux
 	if err := rlimit.RemoveMemlock(); err != nil {
-		return nil, fmt.Errorf("removing memlock: %w", err)
+		// Ignore error on non-Linux platforms
+		logger.Debug("Could not remove memlock", zap.Error(err))
 	}
 
+	ctx := context.Background()
+	eventChan := make(chan common.ObserverEvent, 1000)
+
 	o := &Observer{
-		BaseCollector:       base.NewBaseCollector("status", 30*time.Second),
-		EventChannelManager: base.NewEventChannelManager(1000, "status", logger),
-		LifecycleManager:    base.NewLifecycleManager(),
-		config:              cfg,
-		logger:              logger.Named("status"),
-		hashDecoder:         NewHashDecoder(),
-		aggregator:          NewStatusAggregator(cfg.FlushInterval),
-		errorRates:          make(map[uint32]float64),
-		lastFlush:           time.Now(),
+		BaseCollector:    base.NewBaseCollector("status", 30*time.Second),
+		LifecycleManager: base.NewLifecycleManager(ctx, logger),
+		EventChan:        eventChan,
+		config:           cfg,
+		logger:           logger.Named("status"),
+		hashDecoder:      NewHashDecoder(),
+		aggregator:       NewStatusAggregator(cfg.FlushInterval),
+		errorRates:       make(map[uint32]float64),
+		lastFlush:        time.Now(),
 	}
 
 	if err := o.setupMetrics(); err != nil {
@@ -126,7 +129,6 @@ func (o *Observer) setupMetrics() error {
 		"status.error_rate",
 		metric.WithDescription("L7 error rate by service"),
 		metric.WithUnit("ratio"),
-		metric.WithCallback(o.observeErrorRate),
 	)
 
 	return err
@@ -165,11 +167,11 @@ func (o *Observer) Start(ctx context.Context) error {
 		return fmt.Errorf("attaching probes: %w", err)
 	}
 
-	o.StartGoroutine(func() {
+	o.LifecycleManager.Start("processEvents", func() {
 		o.processEvents(ctx)
 	})
 
-	o.StartGoroutine(func() {
+	o.LifecycleManager.Start("flushAggregates", func() {
 		o.flushAggregates(ctx)
 	})
 
@@ -194,8 +196,8 @@ func (o *Observer) Stop() error {
 		o.objs.Close()
 	}
 
-	o.Shutdown()
-	o.Close()
+	o.LifecycleManager.Stop(30 * time.Second)
+	close(o.EventChan)
 
 	o.logger.Info("Status observer stopped")
 	return nil
@@ -206,7 +208,7 @@ func (o *Observer) processEvents(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-o.StopChannel():
+		case <-o.LifecycleManager.StopChannel():
 			return
 		default:
 			record, err := o.perfReader.Read()
@@ -268,7 +270,7 @@ func (o *Observer) flushAggregates(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-o.StopChannel():
+		case <-o.LifecycleManager.StopChannel():
 			return
 		case <-ticker.C:
 			aggregates := o.aggregator.Flush()
@@ -291,21 +293,26 @@ func (o *Observer) updateErrorRates(aggregates map[uint32]*AggregatedStatus) {
 
 func (o *Observer) publishAggregates(aggregates map[uint32]*AggregatedStatus) {
 	for serviceHash, agg := range aggregates {
+		errorTypes := make(map[uint16]uint64)
+		for k, v := range agg.ErrorTypes {
+			errorTypes[uint16(k)] = v
+		}
+
 		event := common.ObserverEvent{
 			Type:      common.EventTypeStatus,
 			Timestamp: time.Now(),
 			Service:   o.hashDecoder.GetService(serviceHash),
-			Data: map[string]interface{}{
-				"error_count": agg.ErrorCount,
-				"total_count": agg.TotalCount,
-				"error_rate":  float64(agg.ErrorCount) / float64(agg.TotalCount),
-				"avg_latency": agg.AvgLatency(),
-				"error_types": agg.ErrorTypes,
+			Data: common.EventData{
+				ErrorCount: agg.ErrorCount,
+				TotalCount: agg.TotalCount,
+				ErrorRate:  float64(agg.ErrorCount) / float64(agg.TotalCount),
+				AvgLatency: agg.AvgLatency(),
+				ErrorTypes: errorTypes,
 			},
 		}
 
 		select {
-		case o.GetEventChan() <- event:
+		case o.EventChan <- event:
 		default:
 			o.RecordDrop()
 		}
@@ -313,5 +320,5 @@ func (o *Observer) publishAggregates(aggregates map[uint32]*AggregatedStatus) {
 }
 
 func (o *Observer) GetEvents() <-chan common.ObserverEvent {
-	return o.GetEventChan()
+	return o.EventChan
 }
