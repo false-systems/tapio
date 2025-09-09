@@ -27,6 +27,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
       
+      - name: Generate eBPF objects
+        run: |
+          for dir in pkg/observers/*/bpf; do
+            if [ -f "$dir/generate.go" ]; then
+              echo "Generating eBPF for $(basename $(dirname $dir))"
+              (cd "$dir" && go generate)
+            fi
+          done
+      
       - name: Build
         run: go build -v ./...
       
