@@ -28,7 +28,6 @@ import (
 	_ "github.com/yairfalse/tapio/pkg/observers/scheduler"
 	_ "github.com/yairfalse/tapio/pkg/observers/services"
 	_ "github.com/yairfalse/tapio/pkg/observers/status"
-	_ "github.com/yairfalse/tapio/pkg/observers/storage"
 	_ "github.com/yairfalse/tapio/pkg/observers/storage-io"
 	_ "github.com/yairfalse/tapio/pkg/observers/systemd"
 )

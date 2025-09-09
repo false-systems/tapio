@@ -1025,8 +1025,8 @@ func (o *Observer) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condit
 
 // extractTraceContext extracts trace and span IDs from context
 func (o *Observer) extractTraceContext(ctx context.Context) (traceID, spanID string) {
-	traceID = collectors.GenerateTraceID()
-	spanID = collectors.GenerateSpanID()
+	traceID = observers.GenerateTraceID()
+	spanID = observers.GenerateSpanID()
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
 		traceID = span.SpanContext().TraceID().String()
 		spanID = span.SpanContext().SpanID().String()
@@ -1074,7 +1074,7 @@ func (ptm *PodTraceManager) GetOrGenerate(podUID types.UID) string {
 
 	// Generate new trace ID
 	ptm.mu.Lock()
-	traceID := collectors.GenerateTraceID()
+	traceID := observers.GenerateTraceID()
 	ptm.entries[podUID] = &PodTraceEntry{
 		TraceID:   traceID,
 		Timestamp: time.Now(),

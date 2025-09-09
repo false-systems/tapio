@@ -55,7 +55,7 @@ func TestObserverCreation(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, observer)
-				assert.Equal(t, "test-systemd", observer.Name())
+				assert.Equal(t, "test-systemd", observer.GetName())
 			}
 		})
 	}
@@ -206,17 +206,17 @@ func TestEventProcessing(t *testing.T) {
 
 	// Check that event was processed
 	select {
-	case domainEvent := <-observer.Events():
+	case domainEvent := <-observer.GetChannel():
 		assert.NotNil(t, domainEvent)
 		assert.Equal(t, domain.EventTypeSystemdService, domainEvent.Type)
 		assert.Equal(t, "test-events", domainEvent.Source)
 
 		// Check event data
-		eventData, ok := domainEvent.EventData.(domain.SystemdServiceEvent)
+		systemdData, ok := domainEvent.GetSystemdData()
 		require.True(t, ok)
-		assert.Equal(t, "test.service", eventData.ServiceName)
-		assert.Equal(t, "service_start", eventData.EventType)
-		assert.Equal(t, uint32(5678), eventData.PID)
+		assert.Equal(t, "test.service", systemdData.Unit)
+		assert.Equal(t, "service_start", systemdData.Message)
+		assert.Equal(t, int32(5678), systemdData.MainPID)
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timeout waiting for event")
 	}
