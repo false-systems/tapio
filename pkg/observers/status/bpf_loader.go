@@ -76,6 +76,6 @@ func getNativeEndian() binary.ByteOrder {
 	case [2]byte{0xAB, 0xCD}:
 		return binary.BigEndian
 	default:
-		panic("unknown endian")
+		return binary.LittleEndian
 	}
 }
