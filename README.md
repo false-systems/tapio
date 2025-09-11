@@ -2,7 +2,7 @@
 
 > "Experience without theory is blind, but theory without experience is mere intellectual play." — Immanuel Kant
 
-**Observability that understands your systems, not just measures them.**
+**Observability that understands your Kubernetes clusters, not just measures them.**
 
 ## The Idea
 
@@ -53,11 +53,31 @@ That's correlation. That's understanding.
 
 ## What We Actually Built
 
-**15 observers** that watch different aspects of your system:
+**14 observers** organized by domain, each with deep understanding of what they watch:
 
-**Infrastructure**: Kernel syscalls, network L7 protocols, storage I/O, memory allocation, container runtime
-**Application**: HTTP/gRPC status patterns, service dependencies, process signals, health checks  
-**Platform**: Pod scheduling, resource lifecycle, systemd services, network links, OpenTelemetry
+### Network & Communication
+- **Network** - L7 protocol analysis, connection tracking, packet inspection
+- **Status** - HTTP/gRPC error patterns, cascading failures, retry storms
+- **Services** - Service mesh topology, dependency mapping, communication flows
+- **Link** - Network interface monitoring, bandwidth utilization
+
+### Memory & Storage
+- **Memory** - Allocation patterns, leak detection, fragmentation analysis
+- **Storage I/O** - Disk operations, filesystem events, I/O bottlenecks
+
+### Process & Runtime
+- **Kernel** - System calls, process lifecycle, resource usage
+- **Process Signals** - Application lifecycle, signal handling, crash analysis
+- **Node Runtime** - Container runtime integration, Docker/containerd events
+
+### Health & Monitoring
+- **Health** - Liveness/readiness probe analysis, endpoint availability
+- **OTEL** - OpenTelemetry integration, distributed tracing correlation
+
+### Platform & Orchestration
+- **Scheduler** - Pod placement decisions, resource conflicts, node selection
+- **Lifecycle** - Resource creation/deletion patterns, Kubernetes events
+- **Systemd** - Service management, unit dependencies, system state
 
 Each observer understands its domain deeply. The Status Observer doesn't just count HTTP 500s—it detects cascading failure patterns and retry storms. The Memory Observer doesn't just track allocations—it identifies leak patterns and fragmentation issues.
 
@@ -77,6 +97,8 @@ You get:
 
 ## Real Deployment
 
+Tapio is designed specifically for **Kubernetes clusters**. It runs as a DaemonSet with one agent per node.
+
 ```bash
 git clone https://github.com/yairfalse/tapio
 cd tapio
@@ -84,7 +106,7 @@ make build
 kubectl apply -f k8s/
 ```
 
-Tapio runs as a DaemonSet, one agent per node, collecting kernel-level events and correlating them into understanding.
+Each agent collects kernel-level events from its node and correlates them into understanding about your pods, services, and cluster behavior.
 
 ## Current State
 
