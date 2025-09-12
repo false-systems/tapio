@@ -51,7 +51,7 @@ func (o *Observer) startEBPFMonitoring(ctx context.Context) error {
 	var links []link.Link
 
 	// Attach to process exec events
-	execLink, err := link.Tracepoint("sched", "sched_process_exec", objs.TracepointSchedProcessExec)
+	execLink, err := link.Tracepoint("sched", "sched_process_exec", objs.TracepointSchedProcessExec, nil)
 	if err != nil {
 		reader.Close()
 		objs.Close()
@@ -60,7 +60,7 @@ func (o *Observer) startEBPFMonitoring(ctx context.Context) error {
 	links = append(links, execLink)
 
 	// Attach to process exit events
-	exitLink, err := link.Tracepoint("sched", "sched_process_exit", objs.TracepointSchedProcessExit)
+	exitLink, err := link.Tracepoint("sched", "sched_process_exit", objs.TracepointSchedProcessExit, nil)
 	if err != nil {
 		for _, l := range links {
 			l.Close()

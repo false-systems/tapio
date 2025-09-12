@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/observers/kernel/bpf"
 	"go.uber.org/zap"
 )
 
@@ -24,7 +25,7 @@ import (
 
 // ebpfComponents holds Linux-specific eBPF components
 type ebpfComponents struct {
-	objs   *kernelmonitorObjects
+	objs   *bpf.KernelmonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
 }
@@ -39,8 +40,8 @@ func (c *Observer) startEBPF() error {
 	}
 
 	// Load pre-compiled eBPF objects
-	objs := &kernelmonitorObjects{}
-	if err := loadKernelmonitorObjects(objs, nil); err != nil {
+	objs := &bpf.KernelmonitorObjects{}
+	if err := bpf.LoadKernelmonitorObjects(objs, nil); err != nil {
 		var ve *ebpf.VerifierError
 		if errors.As(err, &ve) {
 			c.logger.Error("eBPF verifier error", zap.String("details", ve.Error()))

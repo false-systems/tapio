@@ -190,7 +190,7 @@ func (c *Observer) processEvents() {
 // handleRingBufferEvent processes a single ring buffer event
 func (c *Observer) handleRingBufferEvent(data []byte) {
 	start := time.Now()
-	ctx := c.LifecycleManager.Context()
+	_ = c.LifecycleManager.Context() // Context available if needed
 
 	// Validate event size
 	if len(data) < int(unsafe.Sizeof(BPFContainerExitEvent{})) {
@@ -231,8 +231,7 @@ func (c *Observer) handleRingBufferEvent(data []byte) {
 	}
 
 	// Record processing time using BaseObserver
-	duration := time.Since(start)
-	// Processing duration recorded in BaseObserver
+	_ = time.Since(start) // Duration available for future metrics
 }
 
 // convertToObserverEvent converts BPF event to domain event
@@ -280,18 +279,20 @@ func (c *Observer) convertToObserverEvent(bpfEvent *BPFContainerExitEvent) (*dom
 		},
 		CorrelationHints: &domain.CorrelationHints{
 			ContainerID: containerID,
-			CgroupID:    fmt.Sprintf("%d", bpfEvent.CgroupID),
+			CgroupPath:  fmt.Sprintf("/sys/fs/cgroup/%d", bpfEvent.CgroupID),
 		},
 	}
 
-	// Add container-specific data if available
-	if containerData, ok := event.EventData.(domain.EventDataContainer); ok {
-		containerData.ExitCode = &bpfEvent.ExitCode
-		containerData.OOMKilled = bpfEvent.OOMKilled == 1
-		containerData.MemoryUsage = bpfEvent.MemoryUsage
-		containerData.MemoryLimit = bpfEvent.MemoryLimit
-		event.EventData = containerData
+	// Add container-specific data
+	containerData := domain.EventDataContainer{
+		Container: &domain.ContainerData{
+			ContainerID: containerID,
+			ExitCode:    &bpfEvent.ExitCode,
+			State:       "exited",
+			Action:      "exit",
+		},
 	}
+	event.EventData = containerData
 
 	return event, nil
 }
