@@ -405,8 +405,8 @@ perf.data.old
 # =============================================================================
 # END OF GITIGNORE - KEEP THIS FILE CLEAN AND ORGANIZED
 # =============================================================================
-# Compiled binaries
-observers
+# Compiled binaries (specific to root and cmd directories only)
 /observers
-cmd/observers/observers
+/observers-linux
+/cmd/observers/observers
 *.exe

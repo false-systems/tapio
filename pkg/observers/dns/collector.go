@@ -74,6 +74,7 @@ type Observer struct {
 	bufferUsage        metric.Int64Gauge
 	dnsLatency         metric.Float64Histogram
 	dnsFailures        metric.Int64Counter
+	errorsTotal        metric.Int64Counter
 	circuitBreakerHits metric.Int64Counter
 }
 
@@ -118,6 +119,14 @@ func NewObserver(name string, cfg Config) (*Observer, error) {
 		logger.Warn("Failed to create DNS failures counter", zap.Error(err))
 	}
 
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription("Total observer errors"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors total counter", zap.Error(err))
+	}
+
 	circuitBreakerHits, err := meter.Int64Counter(
 		fmt.Sprintf("%s_circuit_breaker_hits_total", name),
 		metric.WithDescription("Circuit breaker activations"),
@@ -142,6 +151,7 @@ func NewObserver(name string, cfg Config) (*Observer, error) {
 		bufferUsage:         bufferUsage,
 		dnsLatency:          dnsLatency,
 		dnsFailures:         dnsFailures,
+		errorsTotal:         errorsTotal,
 		circuitBreakerHits:  circuitBreakerHits,
 	}
 

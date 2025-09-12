@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	. "github.com/yairfalse/tapio/pkg/observers/memory/bpf"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
@@ -23,7 +24,7 @@ import (
 
 // ebpfState holds eBPF components
 type ebpfState struct {
-	objs   *memoryMonitorObjects
+	objs   *MemorymonitorObjects
 	links  []link.Link
 	reader *ringbuf.Reader
 }
@@ -32,12 +33,12 @@ type ebpfState struct {
 func (o *Observer) startEBPF() error {
 	// Remove memory limit for eBPF
 	if err := rlimit.RemoveMemlock(); err != nil {
-		c.logger.Warn("Failed to remove memlock", zap.Error(err))
+		o.logger.Warn("Failed to remove memlock", zap.Error(err))
 	}
 
 	// Load eBPF objects
-	objs := memoryMonitorObjects{}
-	if err := loadMemoryMonitorObjects(&objs, nil); err != nil {
+	objs := MemorymonitorObjects{}
+	if err := LoadMemorymonitorObjects(&objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
 
@@ -47,39 +48,39 @@ func (o *Observer) startEBPF() error {
 	}
 
 	// Attach uprobes based on mode
-	if c.config.Mode != ModeGrowthDetection {
+	if o.config.Mode != ModeGrowthDetection {
 		// Enhancement #3: Use configurable libc path
 		// Open the libc executable
-		ex, err := link.OpenExecutable(c.config.LibCPath)
+		ex, err := link.OpenExecutable(o.config.LibCPath)
 		if err != nil {
-			c.logger.Warn("Failed to open libc", zap.Error(err))
+			o.logger.Warn("Failed to open libc", zap.Error(err))
 		} else {
 			// Attach mmap uprobe
 			mmapLink, err := ex.Uprobe("mmap", objs.TraceMmapEntry, &link.UprobeOptions{
-				PID: int(c.config.TargetPID), // 0 means all processes
+				PID: int(o.config.TargetPID), // 0 means all processes
 			})
 			if err != nil {
-				c.logger.Warn("Failed to attach mmap uprobe", zap.Error(err))
+				o.logger.Warn("Failed to attach mmap uprobe", zap.Error(err))
 			} else {
 				state.links = append(state.links, mmapLink)
 			}
 
 			// Attach mmap uretprobe
 			mmapRetLink, err := ex.Uretprobe("mmap", objs.TraceMmapReturn, &link.UprobeOptions{
-				PID: int(c.config.TargetPID),
+				PID: int(o.config.TargetPID),
 			})
 			if err != nil {
-				c.logger.Warn("Failed to attach mmap uretprobe", zap.Error(err))
+				o.logger.Warn("Failed to attach mmap uretprobe", zap.Error(err))
 			} else {
 				state.links = append(state.links, mmapRetLink)
 			}
 
 			// Attach munmap uprobe
 			munmapLink, err := ex.Uprobe("munmap", objs.TraceMunmap, &link.UprobeOptions{
-				PID: int(c.config.TargetPID),
+				PID: int(o.config.TargetPID),
 			})
 			if err != nil {
-				c.logger.Warn("Failed to attach munmap uprobe", zap.Error(err))
+				o.logger.Warn("Failed to attach munmap uprobe", zap.Error(err))
 			} else {
 				state.links = append(state.links, munmapLink)
 			}
@@ -89,7 +90,7 @@ func (o *Observer) startEBPF() error {
 	// Attach RSS tracking (always enabled)
 	rssLink, err := link.Tracepoint("mm", "rss_stat", objs.TraceRssChange, nil)
 	if err != nil {
-		c.logger.Warn("Failed to attach RSS tracepoint", zap.Error(err))
+		o.logger.Warn("Failed to attach RSS tracepoint", zap.Error(err))
 	} else {
 		state.links = append(state.links, rssLink)
 	}
@@ -97,21 +98,21 @@ func (o *Observer) startEBPF() error {
 	// Create ring buffer reader
 	reader, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
-		c.cleanupEBPF(state)
+		o.cleanupEBPF(state)
 		return fmt.Errorf("failed to create ring buffer reader: %w", err)
 	}
 	state.reader = reader
 
 	// Enhancement #4: Fail if no probes attached
 	if len(state.links) == 0 {
-		c.cleanupEBPF(state)
+		o.cleanupEBPF(state)
 		return fmt.Errorf("no eBPF probes or tracepoints attached")
 	}
 
-	c.ebpfState = state
-	c.logger.Info("eBPF programs attached",
+	o.ebpfState = state
+	o.logger.Info("eBPF programs attached",
 		zap.Int("links", len(state.links)),
-		zap.String("mode", string(c.config.Mode)),
+		zap.String("mode", string(o.config.Mode)),
 	)
 
 	return nil
@@ -119,8 +120,8 @@ func (o *Observer) startEBPF() error {
 
 // stopEBPF detaches eBPF programs
 func (o *Observer) stopEBPF() {
-	if state, ok := c.ebpfState.(*ebpfState); ok {
-		c.cleanupEBPF(state)
+	if state, ok := o.ebpfState.(*ebpfState); ok {
+		o.cleanupEBPF(state)
 	}
 }
 
@@ -147,18 +148,18 @@ func (o *Observer) cleanupEBPF(state *ebpfState) {
 
 // readEBPFEvents reads events from eBPF ring buffer
 func (o *Observer) readEBPFEvents() {
-	state, ok := c.ebpfState.(*ebpfState)
+	state, ok := o.ebpfState.(*ebpfState)
 	if !ok || state == nil || state.reader == nil {
-		c.logger.Error("Invalid eBPF state")
+		o.logger.Error("Invalid eBPF state")
 		return
 	}
 
-	c.logger.Info("Starting eBPF event reader")
+	o.logger.Info("Starting eBPF event reader")
 
 	for {
 		select {
-		case <-c.ctx.Done():
-			c.logger.Info("Stopping eBPF event reader")
+		case <-o.LifecycleManager.Context().Done():
+			o.logger.Info("Stopping eBPF event reader")
 			return
 		default:
 		}
@@ -166,22 +167,22 @@ func (o *Observer) readEBPFEvents() {
 		record, err := state.reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				c.logger.Info("Ring buffer closed")
+				o.logger.Info("Ring buffer closed")
 				return
 			}
-			c.logger.Warn("Error reading from ring buffer", zap.Error(err))
-			c.RecordErrorWithContext(c.ctx, err)
+			o.logger.Warn("Error reading from ring buffer", zap.Error(err))
+			o.RecordErrorWithContext(o.LifecycleManager.Context(), err)
 			continue
 		}
 
 		// Parse the event
 		if len(record.RawSample) < 4 {
-			c.logger.Warn("Invalid event size", zap.Int("size", len(record.RawSample)))
+			o.logger.Warn("Invalid event size", zap.Int("size", len(record.RawSample)))
 			continue
 		}
 
 		// Process based on reasonable size for our event structure
-		c.processRawEvent(record.RawSample)
+		o.processRawEvent(record.RawSample)
 	}
 }
 
@@ -190,7 +191,7 @@ func (o *Observer) processRawEvent(data []byte) {
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
-		c.RecordProcessingDuration(c.ctx, duration)
+		o.RecordProcessingDuration(o.LifecycleManager.Context(), duration)
 	}()
 
 	// Parse the memory event
@@ -212,33 +213,33 @@ func (o *Observer) processRawEvent(data []byte) {
 	// Update metrics based on event type
 	switch event.EventType {
 	case EventTypeMmap:
-		if c.allocationsTracked != nil {
-			c.allocationsTracked.Add(c.ctx, 1)
+		if o.allocationsTracked != nil {
+			o.allocationsTracked.Add(o.LifecycleManager.Context(), 1)
 		}
 		// Enhancement #13: Add context to metrics
-		if c.largestAllocation != nil && event.Size > 0 {
-			c.largestAllocation.Record(c.ctx, int64(event.Size), metric.WithAttributes(
+		if o.largestAllocation != nil && event.Size > 0 {
+			o.largestAllocation.Record(o.LifecycleManager.Context(), int64(event.Size), metric.WithAttributes(
 				attribute.Int("pid", int(event.PID)),
 				attribute.String("comm", string(bytes.Trim(event.Comm[:], "\x00"))),
 			))
 		}
 	case EventTypeMunmap:
-		if c.deallocationsTracked != nil {
-			c.deallocationsTracked.Add(c.ctx, 1)
+		if o.deallocationsTracked != nil {
+			o.deallocationsTracked.Add(o.LifecycleManager.Context(), 1)
 		}
 	case EventTypeRSSGrowth:
 		// Enhancement #11: Validate RSS changes with userspace data
-		if c.validateRSSGrowth(&event) {
-			if c.rssGrowthDetected != nil {
-				c.rssGrowthDetected.Add(c.ctx, 1)
+		if o.validateRSSGrowth(&event) {
+			if o.rssGrowthDetected != nil {
+				o.rssGrowthDetected.Add(o.LifecycleManager.Context(), 1)
 			}
 		} else {
 			return // Skip invalid RSS growth events
 		}
 	case EventTypeUnfreed:
 		// Enhancement #13: Add context to metrics
-		if c.unfreedMemoryBytes != nil {
-			c.unfreedMemoryBytes.Record(c.ctx, int64(event.Size), metric.WithAttributes(
+		if o.unfreedMemoryBytes != nil {
+			o.unfreedMemoryBytes.Record(o.LifecycleManager.Context(), int64(event.Size), metric.WithAttributes(
 				attribute.Int("pid", int(event.PID)),
 				attribute.String("comm", string(bytes.Trim(event.Comm[:], "\x00"))),
 			))
@@ -246,24 +247,21 @@ func (o *Observer) processRawEvent(data []byte) {
 	}
 
 	// Apply pre-processing filters
-	if !c.shouldEmitEvent(&event) {
+	if !o.shouldEmitEvent(&event) {
 		return
 	}
 
 	// Enhancement #9: Pass context to createDomainEvent
-	domainEvent := c.createDomainEvent(c.ctx, &event)
+	domainEvent := o.createDomainEvent(o.LifecycleManager.Context(), &event)
 
 	// Send event
-	select {
-	case c.events <- domainEvent:
-		c.RecordEventWithContext(c.ctx)
-		c.RecordEventSize(c.ctx, int64(len(c.events))) // Use buffer usage as event size metric
-	default:
+	if o.EventChannelManager.SendEvent(domainEvent) {
+		o.RecordEventWithContext(o.LifecycleManager.Context())
+	} else {
 		// Enhancement #5: Log warning when events are dropped
-		c.logger.Warn("Dropping event due to full channel",
-			zap.Int("buffer_size", len(c.events)),
+		o.logger.Warn("Dropping event due to full channel",
 			zap.String("event_type", event.EventType.String()))
-		c.RecordDropWithReason(c.ctx, "buffer_full")
+		o.RecordDropWithReason(o.LifecycleManager.Context(), "buffer_full")
 	}
 }
 
@@ -286,7 +284,7 @@ func (o *Observer) validateRSSGrowth(event *MemoryEvent) bool {
 	// Allow some tolerance (10%)
 	tolerance := actualRSSBytes / 10
 	if reportedRSSBytes > actualRSSBytes+tolerance {
-		c.logger.Warn("RSS growth inconsistent with /proc",
+		o.logger.Warn("RSS growth inconsistent with /proc",
 			zap.Uint32("pid", event.PID),
 			zap.Uint64("reported_rss", reportedRSSBytes),
 			zap.Uint64("actual_rss", actualRSSBytes))
@@ -298,14 +296,14 @@ func (o *Observer) validateRSSGrowth(event *MemoryEvent) bool {
 
 // Enhancement #10: Configure eBPF map sizes
 func (o *Observer) configureMapSizes(maxAllocations, maxProcesses uint32) error {
-	state, ok := c.ebpfState.(*ebpfState)
+	state, ok := o.ebpfState.(*ebpfState)
 	if !ok || state == nil {
 		return fmt.Errorf("invalid eBPF state")
 	}
 
 	// Note: This would require a config map in the eBPF program
 	// For now, we'll log the intention
-	c.logger.Info("Map size configuration requested",
+	o.logger.Info("Map size configuration requested",
 		zap.Uint32("max_allocations", maxAllocations),
 		zap.Uint32("max_processes", maxProcesses))
 
@@ -314,14 +312,14 @@ func (o *Observer) configureMapSizes(maxAllocations, maxProcesses uint32) error 
 
 // Enhancement #14: Configure sampling rate
 func (o *Observer) configureSamplingRate(rate uint32) error {
-	state, ok := c.ebpfState.(*ebpfState)
+	state, ok := o.ebpfState.(*ebpfState)
 	if !ok || state == nil {
 		return fmt.Errorf("invalid eBPF state")
 	}
 
 	// This would update a config map in the eBPF program
 	// For now, we'll log the configuration
-	c.logger.Info("Sampling rate configuration requested",
+	o.logger.Info("Sampling rate configuration requested",
 		zap.Uint32("rate", rate))
 
 	return nil
@@ -334,10 +332,10 @@ func (o *Observer) scanUnfreedAllocations() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-o.LifecycleManager.Context().Done():
 			return
 		case <-ticker.C:
-			state, ok := c.ebpfState.(*ebpfState)
+			state, ok := o.ebpfState.(*ebpfState)
 			if !ok || state == nil {
 				continue
 			}
@@ -345,7 +343,7 @@ func (o *Observer) scanUnfreedAllocations() {
 			var addr uint64
 			var info AllocationInfo
 			now := uint64(time.Now().UnixNano())
-			threshold := uint64(c.config.MinUnfreedAge.Nanoseconds())
+			threshold := uint64(o.config.MinUnfreedAge.Nanoseconds())
 
 			iter := state.objs.ActiveAllocations.Iterate()
 			for iter.Next(&addr, &info) {
@@ -360,13 +358,12 @@ func (o *Observer) scanUnfreedAllocations() {
 						Comm:      info.Comm,
 						CallerIP:  info.CallerIP,
 					}
-					if c.shouldEmitEvent(&event) {
-						domainEvent := c.createDomainEvent(c.ctx, &event)
-						select {
-						case c.events <- domainEvent:
-							c.RecordEventWithContext(c.ctx)
-						default:
-							c.RecordDropWithReason(c.ctx, "buffer_full")
+					if o.shouldEmitEvent(&event) {
+						domainEvent := o.createDomainEvent(o.LifecycleManager.Context(), &event)
+						if o.EventChannelManager.SendEvent(domainEvent) {
+							o.RecordEventWithContext(o.LifecycleManager.Context())
+						} else {
+							o.RecordDropWithReason(o.LifecycleManager.Context(), "buffer_full")
 						}
 					}
 				}

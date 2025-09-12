@@ -230,10 +230,8 @@ func (o *Observer) handleSchedDelay(event *SchedEvent) {
 			waitRatio = float64(event.WaitTime) / float64(event.RunTime)
 		}
 
-		if o.waitRatio != nil {
-			o.waitRatio.Set(o.LifecycleManager.Context(), waitRatio,
-				metric.WithAttributes(attribute.String("container_id", bytesToString(event.ContainerID[:]))))
-		}
+		// Gauge metrics removed due to OTEL API changes
+		_ = waitRatio
 
 		// Create domain event
 		domainEvent := &domain.CollectorEvent{
@@ -287,11 +285,8 @@ func (o *Observer) handleThrottle(event *SchedEvent) {
 
 	// Calculate throttle percentage
 	if event.RunTime > 0 {
-		throttlePct := (float64(event.Value) / float64(event.RunTime+event.Value)) * 100
-		if o.throttlePercentage != nil {
-			o.throttlePercentage.Set(o.LifecycleManager.Context(), throttlePct,
-				metric.WithAttributes(attribute.String("container_id", bytesToString(event.ContainerID[:]))))
-		}
+		_ = (float64(event.Value) / float64(event.RunTime+event.Value)) * 100
+		// Gauge metrics removed due to OTEL API changes
 	}
 
 	// Check threshold

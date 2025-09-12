@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"time"
 	"unsafe"
@@ -76,7 +75,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		))
 	}
 
-	execLink, err := link.Tracepoint("sched", "sched_process_exec", objs.TraceProcessExec)
+	execLink, err := link.Tracepoint("sched", "sched_process_exec", objs.TraceProcessExec, nil)
 	if err != nil {
 		o.logger.Error("Failed to attach process exec tracepoint", zap.Error(err))
 		if o.ebpfAttachErrors != nil {
@@ -95,7 +94,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		))
 	}
 
-	exitLink, err := link.Tracepoint("sched", "sched_process_exit", objs.TraceProcessExit)
+	exitLink, err := link.Tracepoint("sched", "sched_process_exit", objs.TraceProcessExit, nil)
 	if err != nil {
 		o.logger.Error("Failed to attach process exit tracepoint", zap.Error(err))
 		if o.ebpfAttachErrors != nil {
@@ -115,7 +114,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		))
 	}
 
-	signalGenLink, err := link.Tracepoint("signal", "signal_generate", objs.TraceSignalGenerate)
+	signalGenLink, err := link.Tracepoint("signal", "signal_generate", objs.TraceSignalGenerate, nil)
 	if err != nil {
 		o.logger.Error("Failed to attach signal generate tracepoint", zap.Error(err))
 		if o.ebpfAttachErrors != nil {
@@ -135,7 +134,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		))
 	}
 
-	signalDelLink, err := link.Tracepoint("signal", "signal_deliver", objs.TraceSignalDeliver)
+	signalDelLink, err := link.Tracepoint("signal", "signal_deliver", objs.TraceSignalDeliver, nil)
 	if err != nil {
 		o.logger.Error("Failed to attach signal deliver tracepoint", zap.Error(err))
 		if o.ebpfAttachErrors != nil {
@@ -155,7 +154,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		))
 	}
 
-	oomLink, err := link.Kprobe("oom_kill_process", objs.TraceOomKill)
+	oomLink, err := link.Kprobe("oom_kill_process", objs.TraceOomKill, nil)
 	if err != nil {
 		o.logger.Warn("Failed to attach OOM kill probe", zap.Error(err))
 		if o.ebpfAttachErrors != nil {
@@ -278,7 +277,15 @@ func (o *Observer) processRawEvent(ctx context.Context, data []byte) error {
 
 	// Track the signal if it's a signal event
 	if event.EventType == EventTypeSignalGenerate || event.EventType == EventTypeSignalDeliver {
-		o.signalTracker.TrackSignal(event.PID, event.Signal, event.SenderPID)
+		trackedSignal := &TrackedSignal{
+			Timestamp:  time.Now(),
+			Signal:     int(event.Signal),
+			SignalName: GetSignalName(int(event.Signal)),
+			SenderPID:  event.SenderPID,
+			SenderComm: string(bytes.TrimRight(event.Comm[:], "\x00")),
+			IsFatal:    IsSignalFatal(int(event.Signal)),
+		}
+		o.signalTracker.TrackSignal(event.PID, trackedSignal)
 
 		if o.signalsByType != nil {
 			o.signalsByType.Add(ctx, 1, metric.WithAttributes(
@@ -297,11 +304,13 @@ func (o *Observer) processRawEvent(ctx context.Context, data []byte) error {
 		if o.processExits != nil {
 			o.processExits.Add(ctx, 1)
 		}
-		// Check if this death was correlated with a signal
-		if o.signalTracker.IsDeathCorrelated(event.PID) {
-			if o.deathsCorrelated != nil {
-				o.deathsCorrelated.Add(ctx, 1)
-			}
+		// Correlate this death with any recent signals
+		exitInfo := &ExitInfo{
+			Code: int(event.ExitCode),
+		}
+		deathCause := o.signalTracker.CorrelateProcessDeath(event.PID, int(event.ExitCode), exitInfo)
+		if deathCause != nil && o.deathsCorrelated != nil {
+			o.deathsCorrelated.Add(ctx, 1)
 		}
 	case EventTypeOOMKill:
 		if o.oomKills != nil {
@@ -310,17 +319,17 @@ func (o *Observer) processRawEvent(ctx context.Context, data []byte) error {
 	}
 
 	// Send event
-	if err := o.EventChannelManager.SendEvent(domainEvent); err != nil {
-		o.logger.Warn("Failed to send event", zap.Error(err))
-		o.BaseObserver.RecordError(err)
-		return err
+	if !o.EventChannelManager.SendEvent(domainEvent) {
+		o.logger.Warn("Failed to send event - channel full")
+		o.BaseObserver.RecordDrop()
+		return fmt.Errorf("event channel full")
 	}
 
 	// Update metrics
 	o.BaseObserver.RecordEvent()
 	if o.eventsProcessed != nil {
 		o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("event_type", domainEvent.EventType.String()),
+			attribute.String("event_type", string(domainEvent.Type)),
 		))
 	}
 
@@ -331,7 +340,6 @@ func (o *Observer) processRawEvent(ctx context.Context, data []byte) error {
 func (o *Observer) convertToDomainEvent(ctx context.Context, event *runtimeEvent) *domain.CollectorEvent {
 	// Convert comm to string
 	comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
-	parentComm := string(bytes.TrimRight(event.ParentComm[:], "\x00"))
 
 	// Create runtime signal event
 	runtimeSignalEvent := &RuntimeSignalEvent{
@@ -393,43 +401,27 @@ func (o *Observer) convertToDomainEvent(ctx context.Context, event *runtimeEvent
 		return nil // Unknown event type
 	}
 
-	// Marshal to JSON
-	eventData, err := json.Marshal(runtimeSignalEvent)
-	if err != nil {
-		o.logger.Warn("Failed to marshal event", zap.Error(err))
-		return nil
-	}
-
-	// Extract K8s metadata if available
-	var k8sData *domain.KubernetesData
-	if event.CgroupID != 0 {
-		// Try to extract pod info from cgroup
-		if o.k8sExtractionTotal != nil {
-			o.k8sExtractionTotal.Add(ctx, 1)
-		}
-		// This would require cgroup to pod mapping
-		// For now, we'll leave it empty
-	}
+	// Marshal to JSON (unused for now)
+	_ = runtimeSignalEvent
 
 	// Create process data
 	processData := &domain.ProcessData{
-		PID:         int32(event.PID),
-		PPID:        int32(event.PPID),
-		Command:     comm,
-		CommandLine: comm,
+		PID:     int32(event.PID),
+		PPID:    int32(event.PPID),
+		Command: comm,
 	}
 
 	// Create domain event
 	return &domain.CollectorEvent{
-		EventID:        fmt.Sprintf("runtime-%s-%d-%d", eventTypeStr, event.PID, event.Timestamp),
-		Timestamp:      time.Unix(0, int64(event.Timestamp)),
-		EventType:      collectorEventType,
-		CollectorName:  o.name,
-		ProcessData:    processData,
-		KubernetesData: k8sData,
-		RawData:        eventData,
-		TraceID:        span.SpanContext().TraceID().String(),
-		SpanID:         span.SpanContext().SpanID().String(),
+		EventID:   fmt.Sprintf("runtime-%s-%d-%d", eventTypeStr, event.PID, event.Timestamp),
+		Timestamp: time.Unix(0, int64(event.Timestamp)),
+		Type:      collectorEventType,
+		Source:    o.name,
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Process: processData,
+		},
+		Metadata: domain.EventMetadata{},
 	}
 }
 

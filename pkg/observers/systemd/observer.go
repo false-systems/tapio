@@ -451,6 +451,22 @@ func (o *Observer) Statistics() *ObserverStats {
 	}
 }
 
+// Name returns the observer name
+func (o *Observer) Name() string {
+	return o.BaseObserver.GetName()
+}
+
+// Events returns the event channel
+func (o *Observer) Events() <-chan *domain.CollectorEvent {
+	return o.EventChannelManager.GetChannel()
+}
+
+// IsHealthy returns the health status
+func (o *Observer) IsHealthy() bool {
+	health := o.BaseObserver.Health()
+	return health.Status == domain.HealthHealthy
+}
+
 // Helper functions
 
 func cleanString(s string) string {

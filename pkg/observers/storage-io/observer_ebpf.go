@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
@@ -207,12 +208,12 @@ func (o *Observer) handleIOEvent(event *IOEvent) {
 	// Update metrics
 	if o.vfsOperations != nil {
 		o.vfsOperations.Add(o.LifecycleManager.Context(), 1,
-			attribute.String("operation", getOpTypeName(event.OpType)))
+			metric.WithAttributes(attribute.String("operation", getOpTypeName(event.OpType))))
 	}
 
 	if o.ioLatencyHistogram != nil {
 		o.ioLatencyHistogram.Record(o.LifecycleManager.Context(), latencyMs,
-			attribute.String("operation", getOpTypeName(event.OpType)))
+			metric.WithAttributes(attribute.String("operation", getOpTypeName(event.OpType))))
 	}
 
 	// Check for slow I/O
@@ -280,8 +281,9 @@ func (o *Observer) handleIOEvent(event *IOEvent) {
 func (o *Observer) handleSlowIO(event *IOEvent, path string, latencyMs float64) {
 	if o.slowIOOperations != nil {
 		o.slowIOOperations.Add(o.LifecycleManager.Context(), 1,
-			attribute.String("path", path),
-			attribute.String("operation", getOpTypeName(event.OpType)))
+			metric.WithAttributes(
+				attribute.String("path", path),
+				attribute.String("operation", getOpTypeName(event.OpType))))
 	}
 
 	// Update cache
@@ -308,8 +310,9 @@ func (o *Observer) handleSlowIO(event *IOEvent, path string, latencyMs float64) 
 func (o *Observer) handleBlockingIO(event *IOEvent, path string, latencyMs float64) {
 	if o.blockingIOEvents != nil {
 		o.blockingIOEvents.Add(o.LifecycleManager.Context(), 1,
-			attribute.String("path", path),
-			attribute.String("operation", getOpTypeName(event.OpType)))
+			metric.WithAttributes(
+				attribute.String("path", path),
+				attribute.String("operation", getOpTypeName(event.OpType))))
 	}
 
 	o.logger.Warn("Blocking I/O detected",

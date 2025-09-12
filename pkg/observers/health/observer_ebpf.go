@@ -15,6 +15,7 @@ import (
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
@@ -206,8 +207,10 @@ func (o *Observer) readEvents() {
 			o.BaseObserver.RecordEvent()
 			if o.eventsProcessed != nil {
 				o.eventsProcessed.Add(o.LifecycleManager.Context(), 1,
-					attribute.String("error_code", getErrorName(event.ErrorCode)),
-					attribute.String("category", category))
+					metric.WithAttributes(
+						attribute.String("error_code", getErrorName(event.ErrorCode)),
+						attribute.String("category", category),
+					))
 			}
 		} else {
 			o.BaseObserver.RecordDrop()
