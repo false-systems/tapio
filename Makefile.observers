@@ -1,0 +1,106 @@
+# Makefile for building individual Tapio observers
+# Each observer is built as a separate lean binary
+
+.PHONY: all clean observers-linux observers-darwin
+
+# Build variables
+GOOS ?= linux
+GOARCH ?= amd64
+LDFLAGS := -s -w # Strip debug symbols for smaller binaries
+BUILD_DIR := ./bin/observers
+
+# List of observers to build
+OBSERVERS := dns network memory systemd process-signals
+
+# Default target
+all: observers-linux
+
+# Create build directory
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
+
+# Build all observers for Linux (for Kubernetes deployment)
+observers-linux: $(BUILD_DIR)
+	@echo "Building observers for Linux..."
+	@for observer in $(OBSERVERS); do \
+		echo "  Building $$observer-observer..."; \
+		GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" \
+			-o $(BUILD_DIR)/$$observer-observer-linux \
+			./cmd/observer-$$observer/; \
+	done
+	@echo "Linux observers built successfully!"
+	@ls -lh $(BUILD_DIR)/*-linux
+
+# Build all observers for Darwin (for local testing on Mac)
+observers-darwin: $(BUILD_DIR)
+	@echo "Building observers for Darwin..."
+	@for observer in $(OBSERVERS); do \
+		echo "  Building $$observer-observer..."; \
+		GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" \
+			-o $(BUILD_DIR)/$$observer-observer-darwin \
+			./cmd/observer-$$observer/ 2>/dev/null || \
+		echo "    Skipped $$observer (requires Linux eBPF)"; \
+	done
+	@echo "Darwin observers built (where possible)!"
+	@ls -lh $(BUILD_DIR)/*-darwin 2>/dev/null || true
+
+# Build specific observer
+observer-%: $(BUILD_DIR)
+	@echo "Building $*-observer for $(GOOS)/$(GOARCH)..."
+	@GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" \
+		-o $(BUILD_DIR)/$*-observer-$(GOOS) \
+		./cmd/observer-$*/
+	@ls -lh $(BUILD_DIR)/$*-observer-$(GOOS)
+
+# Build Docker images for each observer
+docker-build:
+	@echo "Building Docker images for observers..."
+	@for observer in $(OBSERVERS); do \
+		echo "  Building tapio/$$observer-observer:latest..."; \
+		docker build -f deployments/docker/Dockerfile.$$observer \
+			--build-arg OBSERVER=$$observer \
+			-t tapio/$$observer-observer:latest .; \
+	done
+
+# Push Docker images
+docker-push:
+	@for observer in $(OBSERVERS); do \
+		echo "  Pushing tapio/$$observer-observer:latest..."; \
+		docker push tapio/$$observer-observer:latest; \
+	done
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning observer binaries..."
+	@rm -rf $(BUILD_DIR)
+
+# Show binary sizes
+sizes: observers-linux
+	@echo "Observer binary sizes:"
+	@for observer in $(OBSERVERS); do \
+		size=$$(ls -lh $(BUILD_DIR)/$$observer-observer-linux | awk '{print $$5}'); \
+		echo "  $$observer-observer: $$size"; \
+	done
+
+# Test build all observers (compile check only)
+test-build:
+	@echo "Test building all observers..."
+	@for observer in $(OBSERVERS); do \
+		echo "  Testing $$observer-observer..."; \
+		go build -o /dev/null ./cmd/observer-$$observer/ || exit 1; \
+	done
+	@echo "All observers compile successfully!"
+
+help:
+	@echo "Tapio Observer Build Targets:"
+	@echo "  make observers-linux  - Build all observers for Linux (default)"
+	@echo "  make observers-darwin - Build all observers for Darwin"
+	@echo "  make observer-dns     - Build only DNS observer"
+	@echo "  make observer-network - Build only network observer"
+	@echo "  make observer-memory  - Build only memory observer"
+	@echo "  make docker-build     - Build Docker images for all observers"
+	@echo "  make sizes           - Show binary sizes"
+	@echo "  make clean           - Remove all built binaries"
+	@echo ""
+	@echo "Environment variables:"
+	@echo "  GOOS=$(GOOS) GOARCH=$(GOARCH)"

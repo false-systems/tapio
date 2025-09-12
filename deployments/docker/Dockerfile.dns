@@ -1,0 +1,42 @@
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache make gcc musl-dev linux-headers
+
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the DNS observer binary
+RUN GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dns-observer ./cmd/observer-dns/
+
+# Runtime stage - minimal image
+FROM alpine:3.18
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates
+
+# Create non-root user (will still need privileged for eBPF)
+RUN addgroup -g 1000 tapio && \
+    adduser -u 1000 -G tapio -D tapio
+
+# Copy binary from builder
+COPY --from=builder /build/dns-observer /dns-observer-linux
+
+# Ensure binary is executable
+RUN chmod +x /dns-observer-linux
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+  CMD ["/dns-observer-linux", "--health-check"]
+
+# Run as non-root (container still needs privileged mode for eBPF)
+USER tapio
+
+ENTRYPOINT ["/dns-observer-linux"]
