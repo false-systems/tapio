@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence"
+	"github.com/yairfalse/tapio/internal/intelligence"
 	"go.uber.org/zap"
 )
 
