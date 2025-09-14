@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/yairfalse/tapio/pkg/domain"
 	neo4jint "github.com/yairfalse/tapio/internal/integrations/neo4j"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"

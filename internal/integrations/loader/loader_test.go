@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/internal/integrations/neo4j"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )

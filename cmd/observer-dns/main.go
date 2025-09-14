@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/yairfalse/tapio/pkg/observers/dns"
+	"github.com/yairfalse/tapio/internal/observers/dns"
 	"go.uber.org/zap"
 )
 

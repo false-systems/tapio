@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/observers/network"
+	"github.com/yairfalse/tapio/internal/observers/network"
 	"go.uber.org/zap"
 )
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/internal/intelligence"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 )
 

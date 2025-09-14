@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/internal/intelligence"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // BehaviorPatternMatch represents a successful pattern match in the behavior engine

@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/observers/memory"
+	"github.com/yairfalse/tapio/internal/observers/memory"
 	"go.uber.org/zap"
 )
 
