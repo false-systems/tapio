@@ -456,3 +456,47 @@ Every line of code represents Tapio's quality. Incomplete code, TODOs, or stubs 
 - **80% coverage minimum** - Test everything
 
 **DELIVER EXCELLENCE OR GET REASSIGNED.**
+
+## 📦 PKG/ REFACTORING DESIGN SESSION (Architecture Compliance)
+
+### Problem
+Current `pkg/` structure violates the 5-Level Dependency Hierarchy by exposing implementation details as public APIs.
+
+### Solution
+Restructure to follow mandatory architecture levels:
+
+```
+Level 0: pkg/domain/       # ZERO dependencies ✅ KEEP
+Level 1: internal/observers/    # Domain ONLY ❌ MOVE FROM pkg/
+Level 2: internal/intelligence/ # Domain + L1 ❌ MOVE FROM pkg/
+Level 3: internal/integrations/ # Domain + L1 + L2 ❌ MOVE FROM pkg/
+Level 4: pkg/interfaces/   # All above ✅ KEEP
+```
+
+### Refactoring Flow
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   Analyze   │───▶│  Restructure │───▶│   Verify    │
+│ Current pkg │    │  Following   │    │ Standards   │
+│ Structure   │    │ Architecture │    │ Compliance  │
+└─────────────┘    └─────────────┘    └─────────────┘
+```
+
+### Implementation Strategy
+1. **Move Level 3 first** (`pkg/integrations/` → `internal/integrations/`)
+2. **Move Level 2** (`pkg/intelligence/` → `internal/intelligence/`)
+3. **Move Level 1** (`pkg/observers/` → `internal/observers/`)
+4. **Keep Level 0 & 4** (`pkg/domain/`, `pkg/interfaces/`)
+
+### Failure Prevention
+- **Breaking imports** → Move in reverse dependency order (Level 3 → 1)
+- **Architecture violations** → Pre-verify each package's dependency level
+- **Test failures** → Run `make verify-full` after each move
+
+### Success Criteria
+- [ ] Only public APIs remain in `pkg/` (domain, interfaces, config)
+- [ ] All implementation details moved to `internal/`
+- [ ] Architecture hierarchy properly enforced
+- [ ] Zero import breaks
+- [ ] All tests passing
+- [ ] `make verify-full` passes
