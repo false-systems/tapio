@@ -11,7 +11,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/yairfalse/tapio/pkg/domain"
-	neo4jint "github.com/yairfalse/tapio/pkg/integrations/neo4j"
+	neo4jint "github.com/yairfalse/tapio/internal/integrations/neo4j"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"

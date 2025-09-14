@@ -35,6 +35,13 @@ type Observer struct {
 	largestAllocation    metric.Int64Gauge
 	filteredEvents       metric.Int64Counter
 
+	// CO-RE metrics (aligned with collector_ebpf_core.go)
+	eventsProcessed metric.Int64Counter
+	eventsDropped   metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	memoryAllocated metric.Int64Counter
+	memoryFreed     metric.Int64Counter
+
 	// Pre-processing state (lean filtering)
 	recentStacks map[uint64]time.Time // Simple dedup
 	stackMutex   sync.RWMutex
@@ -115,6 +122,47 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 		logger.Warn("Failed to create filtered events counter", zap.Error(err))
 	}
 
+	// CO-RE metrics
+	eventsProcessed, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription("Total memory events processed"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events processed counter", zap.Error(err))
+	}
+
+	eventsDropped, err := meter.Int64Counter(
+		fmt.Sprintf("%s_events_dropped_total", name),
+		metric.WithDescription("Total memory events dropped"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create events dropped counter", zap.Error(err))
+	}
+
+	processingTime, err := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_time_seconds", name),
+		metric.WithDescription("Time spent processing memory events"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create processing time histogram", zap.Error(err))
+	}
+
+	memoryAllocated, err := meter.Int64Counter(
+		fmt.Sprintf("%s_memory_allocated_bytes", name),
+		metric.WithDescription("Total memory allocated bytes"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create memory allocated counter", zap.Error(err))
+	}
+
+	memoryFreed, err := meter.Int64Counter(
+		fmt.Sprintf("%s_memory_freed_bytes", name),
+		metric.WithDescription("Total memory freed bytes"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create memory freed counter", zap.Error(err))
+	}
+
 	o := &Observer{
 		BaseObserver:         baseObserver,
 		EventChannelManager:  eventManager,
@@ -127,6 +175,11 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 		unfreedMemoryBytes:   unfreedMemoryBytes,
 		largestAllocation:    largestAllocation,
 		filteredEvents:       filteredEvents,
+		eventsProcessed:      eventsProcessed,
+		eventsDropped:        eventsDropped,
+		processingTime:       processingTime,
+		memoryAllocated:      memoryAllocated,
+		memoryFreed:          memoryFreed,
 		recentStacks:         make(map[uint64]time.Time),
 		lastCleanup:          time.Now(),
 	}

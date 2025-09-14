@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	neo4jint "github.com/yairfalse/tapio/pkg/integrations/neo4j"
+	neo4jint "github.com/yairfalse/tapio/internal/integrations/neo4j"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )

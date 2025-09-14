@@ -11,111 +11,18 @@ import (
 	"os"
 	"time"
 
-	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
-	"github.com/cilium/ebpf/rlimit"
 	. "github.com/yairfalse/tapio/pkg/observers/memory/bpf"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
-// eBPF generation is handled by bpf/generate.go
-
-// ebpfState holds eBPF components
-type ebpfState struct {
-	objs   *MemorymonitorObjects
-	links  []link.Link
-	reader *ringbuf.Reader
-}
-
-// startEBPF initializes and attaches eBPF programs
+// startEBPF initializes and attaches eBPF programs with CO-RE support
 func (o *Observer) startEBPF() error {
-	// Remove memory limit for eBPF
-	if err := rlimit.RemoveMemlock(); err != nil {
-		o.logger.Warn("Failed to remove memlock", zap.Error(err))
-	}
+	o.logger.Info("Starting memory observer with CO-RE eBPF support")
 
-	// Load eBPF objects
-	objs := MemorymonitorObjects{}
-	if err := LoadMemorymonitorObjects(&objs, nil); err != nil {
-		return fmt.Errorf("failed to load eBPF objects: %w", err)
-	}
-
-	state := &ebpfState{
-		objs:  &objs,
-		links: make([]link.Link, 0),
-	}
-
-	// Attach uprobes based on mode
-	if o.config.Mode != ModeGrowthDetection {
-		// Enhancement #3: Use configurable libc path
-		// Open the libc executable
-		ex, err := link.OpenExecutable(o.config.LibCPath)
-		if err != nil {
-			o.logger.Warn("Failed to open libc", zap.Error(err))
-		} else {
-			// Attach mmap uprobe
-			mmapLink, err := ex.Uprobe("mmap", objs.TraceMmapEntry, &link.UprobeOptions{
-				PID: int(o.config.TargetPID), // 0 means all processes
-			})
-			if err != nil {
-				o.logger.Warn("Failed to attach mmap uprobe", zap.Error(err))
-			} else {
-				state.links = append(state.links, mmapLink)
-			}
-
-			// Attach mmap uretprobe
-			mmapRetLink, err := ex.Uretprobe("mmap", objs.TraceMmapReturn, &link.UprobeOptions{
-				PID: int(o.config.TargetPID),
-			})
-			if err != nil {
-				o.logger.Warn("Failed to attach mmap uretprobe", zap.Error(err))
-			} else {
-				state.links = append(state.links, mmapRetLink)
-			}
-
-			// Attach munmap uprobe
-			munmapLink, err := ex.Uprobe("munmap", objs.TraceMunmap, &link.UprobeOptions{
-				PID: int(o.config.TargetPID),
-			})
-			if err != nil {
-				o.logger.Warn("Failed to attach munmap uprobe", zap.Error(err))
-			} else {
-				state.links = append(state.links, munmapLink)
-			}
-		}
-	}
-
-	// Attach RSS tracking (always enabled)
-	rssLink, err := link.Tracepoint("mm", "rss_stat", objs.TraceRssChange, nil)
-	if err != nil {
-		o.logger.Warn("Failed to attach RSS tracepoint", zap.Error(err))
-	} else {
-		state.links = append(state.links, rssLink)
-	}
-
-	// Create ring buffer reader
-	reader, err := ringbuf.NewReader(objs.Events)
-	if err != nil {
-		o.cleanupEBPF(state)
-		return fmt.Errorf("failed to create ring buffer reader: %w", err)
-	}
-	state.reader = reader
-
-	// Enhancement #4: Fail if no probes attached
-	if len(state.links) == 0 {
-		o.cleanupEBPF(state)
-		return fmt.Errorf("no eBPF probes or tracepoints attached")
-	}
-
-	o.ebpfState = state
-	o.logger.Info("eBPF programs attached",
-		zap.Int("links", len(state.links)),
-		zap.String("mode", string(o.config.Mode)),
-	)
-
-	return nil
+	return o.loadCoreMemoryEBPF()
 }
 
 // stopEBPF detaches eBPF programs

@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yairfalse/tapio/pkg/integrations/loader"
+	"github.com/yairfalse/tapio/internal/integrations/loader"
 	"go.uber.org/zap"
 )
 

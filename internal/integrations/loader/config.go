@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/config"
-	"github.com/yairfalse/tapio/pkg/integrations/neo4j"
+	"github.com/yairfalse/tapio/internal/integrations/neo4j"
 )
 
 // Config holds configuration for the Neo4j loader service
