@@ -1,0 +1,13 @@
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates
+
+WORKDIR /
+
+COPY observers /observers
+
+RUN chmod +x /observers
+
+EXPOSE 8080
+
+CMD ["/observers"]

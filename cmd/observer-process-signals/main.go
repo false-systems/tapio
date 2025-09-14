@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	processsignals "github.com/yairfalse/tapio/pkg/observers/process-signals"
+	processsignals "github.com/yairfalse/tapio/internal/observers/process-signals"
 	"go.uber.org/zap"
 )
 
