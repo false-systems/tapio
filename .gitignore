@@ -408,5 +408,7 @@ perf.data.old
 # Compiled binaries (specific to root and cmd directories only)
 /observers
 /observers-linux
+/observers-linux-stripped
+/collectors
 /cmd/observers/observers
 *.exe
