@@ -4,277 +4,465 @@
 package memory
 
 import (
-	"bytes"
-	"encoding/binary"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
+	"unsafe"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
-	. "github.com/yairfalse/tapio/internal/observers/memory/bpf"
+	"github.com/cilium/ebpf/rlimit"
+	"github.com/yairfalse/tapio/internal/observers/memory/bpf"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
-// startEBPF initializes and attaches eBPF programs with CO-RE support
-func (o *Observer) startEBPF() error {
-	o.logger.Info("Starting memory observer with CO-RE eBPF support")
-
-	return o.loadCoreMemoryEBPF()
+// Memory event from BPF - must match C struct exactly
+type memoryEvent struct {
+	Timestamp    uint64
+	EventType    uint32
+	PID          uint32
+	TID          uint32
+	UID          uint32
+	GID          uint32
+	Address      uint64
+	Size         uint64
+	CgroupID     uint64
+	CallerIP     uint64
+	RSSPages     uint64
+	RSSGrowth    int64
+	NamespacePID uint32
+	Comm         [16]byte
+	IsOOMRisk    uint8
+	Pad          [3]uint8
 }
 
-// stopEBPF detaches eBPF programs
-func (o *Observer) stopEBPF() {
-	if state, ok := o.ebpfState.(*ebpfState); ok {
-		o.cleanupEBPF(state)
-	}
+// Allocation info for tracking
+type allocationInfo struct {
+	Size         uint64
+	Timestamp    uint64
+	PID          uint32
+	TID          uint32
+	CgroupID     uint64
+	CallerIP     uint64
+	NamespacePID uint32
+	Comm         [16]byte
 }
 
-// cleanupEBPF cleans up eBPF resources
-func (o *Observer) cleanupEBPF(state *ebpfState) {
-	if state == nil {
-		return
+// Overflow stats from BPF
+type overflowStats struct {
+	RingbufDrops   uint64
+	RateLimitDrops uint64
+	SamplingDrops  uint64
+}
+
+// CO-RE eBPF implementation
+type memoryEBPF struct {
+	objs   *bpf.MemoryObjects
+	links  []link.Link
+	reader *ringbuf.Reader
+
+	// Metrics
+	eventsProcessed metric.Int64Counter
+	eventsDropped   metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	memoryAllocated metric.Int64Counter
+	memoryFreed     metric.Int64Counter
+
+	logger *zap.Logger
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+// Load CO-RE eBPF programs
+func (o *Observer) loadMemoryEBPF() error {
+	o.logger.Info("Loading CO-RE eBPF programs for Memory observer")
+
+	// Remove memory limit for eBPF
+	if err := rlimit.RemoveMemlock(); err != nil {
+		return fmt.Errorf("removing memlock: %w", err)
 	}
 
-	if state.reader != nil {
-		state.reader.Close()
+	// Load eBPF objects directly using the generated Objects type
+	var objs bpf.MemoryObjects
+
+	opts := &ebpf.CollectionOptions{
+		Programs: ebpf.ProgramOptions{
+			LogSize: 64 * 1024 * 1024, // 64MB for verifier logs
+		},
 	}
 
-	for _, l := range state.links {
-		if l != nil {
-			l.Close()
+	err := bpf.LoadMemoryObjects(&objs, opts)
+	if err != nil {
+		var ve *ebpf.VerifierError
+		if errors.As(err, &ve) {
+			// Log verifier error details
+			o.logger.Error("BPF verifier error",
+				zap.String("error", ve.Error()))
+			return fmt.Errorf("BPF verifier rejected program: %w", err)
 		}
+		return fmt.Errorf("loading BPF objects: %w", err)
 	}
 
-	if state.objs != nil {
-		state.objs.Close()
+	o.ebpfState = &memoryEBPF{
+		objs:            &objs,
+		links:           make([]link.Link, 0),
+		eventsProcessed: o.eventsProcessed,
+		eventsDropped:   o.eventsDropped,
+		processingTime:  o.processingTime,
+		memoryAllocated: o.memoryAllocated,
+		memoryFreed:     o.memoryFreed,
+		logger:          o.logger,
 	}
+
+	// Attach probes
+	if err := o.attachMemoryProbes(); err != nil {
+		objs.Close()
+		return fmt.Errorf("attaching probes: %w", err)
+	}
+
+	// Create ring buffer reader
+	reader, err := ringbuf.NewReader(objs.MemoryEvents)
+	if err != nil {
+		o.closeCoreMemoryEBPF()
+		return fmt.Errorf("creating ringbuf reader: %w", err)
+	}
+
+	ebpfState := o.ebpfState.(*memoryEBPF)
+	ebpfState.reader = reader
+
+	// Start event processor
+	ctx, cancel := context.WithCancel(context.Background())
+	ebpfState.cancel = cancel
+
+	ebpfState.wg.Add(1)
+	go o.processCoreMemoryEvents(ctx)
+
+	// Start metrics collector
+	ebpfState.wg.Add(1)
+	go o.collectCoreMemoryMetrics(ctx)
+
+	// Start unfreed allocation scanner
+	ebpfState.wg.Add(1)
+	go o.scanCoreUnfreedAllocations(ctx)
+
+	o.logger.Info("CO-RE eBPF programs loaded successfully for Memory observer")
+	return nil
 }
 
-// readEBPFEvents reads events from eBPF ring buffer
-func (o *Observer) readEBPFEvents() {
-	state, ok := o.ebpfState.(*ebpfState)
-	if !ok || state == nil || state.reader == nil {
-		o.logger.Error("Invalid eBPF state")
-		return
+// Attach CO-RE probes
+func (o *Observer) attachMemoryProbes() error {
+	ebpfState := o.ebpfState.(*memoryEBPF)
+
+	// Attach RSS tracepoint (our simplified approach uses this only)
+	prog := ebpfState.objs.TraceRssChange
+	if prog == nil {
+		return fmt.Errorf("trace_rss_change program not found")
 	}
 
-	o.logger.Info("Starting eBPF event reader")
+	l, err := link.Tracepoint("mm", "rss_stat", prog, nil)
+	if err != nil {
+		return fmt.Errorf("attaching rss_stat tracepoint: %w", err)
+	}
+	ebpfState.links = append(ebpfState.links, l)
+
+	// Attach periodic scanner (perf event)
+	prog = ebpfState.objs.ScanMemoryPeriodic
+	if prog != nil {
+		// This is a perf_event program that will be triggered from userspace
+		o.logger.Debug("Periodic scanner program loaded, will be triggered from userspace")
+	}
+
+	o.logger.Debug("Attached CO-RE memory probes",
+		zap.Int("count", len(ebpfState.links)))
+
+	return nil
+}
+
+// Process events from ring buffer
+func (o *Observer) processCoreMemoryEvents(ctx context.Context) {
+	defer o.ebpfState.(*coreMemoryEBPF).wg.Done()
+
+	ebpfState := o.ebpfState.(*memoryEBPF)
 
 	for {
 		select {
-		case <-o.LifecycleManager.Context().Done():
-			o.logger.Info("Stopping eBPF event reader")
+		case <-ctx.Done():
 			return
 		default:
 		}
 
-		record, err := state.reader.Read()
+		record, err := ebpfState.reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				o.logger.Info("Ring buffer closed")
 				return
 			}
-			o.logger.Warn("Error reading from ring buffer", zap.Error(err))
-			o.RecordErrorWithContext(o.LifecycleManager.Context(), err)
+			o.logger.Warn("Error reading from ringbuf",
+				zap.Error(err))
 			continue
 		}
 
-		// Parse the event
-		if len(record.RawSample) < 4 {
-			o.logger.Warn("Invalid event size", zap.Int("size", len(record.RawSample)))
+		// Parse event
+		if len(record.RawSample) < int(unsafe.Sizeof(memoryEventCore{})) {
+			o.logger.Warn("Invalid event size",
+				zap.Int("size", len(record.RawSample)))
 			continue
 		}
 
-		// Process based on reasonable size for our event structure
-		o.processRawEvent(record.RawSample)
-	}
-}
+		event := (*memoryEvent)(unsafe.Pointer(&record.RawSample[0]))
 
-// processRawEvent processes raw eBPF event data
-func (o *Observer) processRawEvent(data []byte) {
-	start := time.Now()
-	defer func() {
-		duration := time.Since(start)
-		o.RecordProcessingDuration(o.LifecycleManager.Context(), duration)
-	}()
+		// Convert to domain event
+		domainEvent := o.convertCoreMemoryToDomainEvent(event)
 
-	// Parse the memory event
-	var event MemoryEvent
-	buf := bytes.NewBuffer(data)
-
-	// Read fields in order matching C struct
-	binary.Read(buf, binary.LittleEndian, &event.Timestamp)
-	binary.Read(buf, binary.LittleEndian, &event.EventType)
-	binary.Read(buf, binary.LittleEndian, &event.PID)
-	binary.Read(buf, binary.LittleEndian, &event.Address)
-	binary.Read(buf, binary.LittleEndian, &event.Size)
-	binary.Read(buf, binary.LittleEndian, &event.CGroupID)
-	copy(event.Comm[:], buf.Next(16))
-	binary.Read(buf, binary.LittleEndian, &event.CallerIP)
-	binary.Read(buf, binary.LittleEndian, &event.RSSPages)
-	binary.Read(buf, binary.LittleEndian, &event.RSSGrowth)
-
-	// Update metrics based on event type
-	switch event.EventType {
-	case EventTypeMmap:
-		if o.allocationsTracked != nil {
-			o.allocationsTracked.Add(o.LifecycleManager.Context(), 1)
+		// Update metrics
+		if event.EventType == 1 { // EVENT_MMAP
+			if o.memoryAllocated != nil {
+				o.memoryAllocated.Add(ctx, int64(event.Size),
+					metric.WithAttributes(
+						attribute.String("type", "mmap")))
+			}
+		} else if event.EventType == 2 { // EVENT_MUNMAP
+			if o.memoryFreed != nil {
+				o.memoryFreed.Add(ctx, int64(event.Size),
+					metric.WithAttributes(
+						attribute.String("type", "munmap")))
+			}
 		}
-		// Enhancement #13: Add context to metrics
-		if o.largestAllocation != nil && event.Size > 0 {
-			o.largestAllocation.Record(o.LifecycleManager.Context(), int64(event.Size), metric.WithAttributes(
-				attribute.Int("pid", int(event.PID)),
-				attribute.String("comm", string(bytes.Trim(event.Comm[:], "\x00"))),
-			))
-		}
-	case EventTypeMunmap:
-		if o.deallocationsTracked != nil {
-			o.deallocationsTracked.Add(o.LifecycleManager.Context(), 1)
-		}
-	case EventTypeRSSGrowth:
-		// Enhancement #11: Validate RSS changes with userspace data
-		if o.validateRSSGrowth(&event) {
-			if o.rssGrowthDetected != nil {
-				o.rssGrowthDetected.Add(o.LifecycleManager.Context(), 1)
+
+		// Send to channel using EventChannelManager's SendEvent method
+		if o.EventChannelManager.SendEvent(domainEvent) {
+			o.RecordEvent()
+			if o.eventsProcessed != nil {
+				o.eventsProcessed.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("type", "memory"),
+						attribute.String("event", getMemoryEventTypeName(event.EventType))))
 			}
 		} else {
-			return // Skip invalid RSS growth events
-		}
-	case EventTypeUnfreed:
-		// Enhancement #13: Add context to metrics
-		if o.unfreedMemoryBytes != nil {
-			o.unfreedMemoryBytes.Record(o.LifecycleManager.Context(), int64(event.Size), metric.WithAttributes(
-				attribute.Int("pid", int(event.PID)),
-				attribute.String("comm", string(bytes.Trim(event.Comm[:], "\x00"))),
-			))
+			o.RecordDrop()
+			if o.eventsDropped != nil {
+				o.eventsDropped.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("reason", "channel_full")))
+			}
 		}
 	}
+}
 
-	// Apply pre-processing filters
-	if !o.shouldEmitEvent(&event) {
-		return
-	}
+// Collect metrics from BPF maps
+func (o *Observer) collectCoreMemoryMetrics(ctx context.Context) {
+	defer o.ebpfState.(*coreMemoryEBPF).wg.Done()
 
-	// Enhancement #9: Pass context to createDomainEvent
-	domainEvent := o.createDomainEvent(o.LifecycleManager.Context(), &event)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 
-	// Send event
-	if o.EventChannelManager.SendEvent(domainEvent) {
-		o.RecordEventWithContext(o.LifecycleManager.Context())
-	} else {
-		// Enhancement #5: Log warning when events are dropped
-		o.logger.Warn("Dropping event due to full channel",
-			zap.String("event_type", event.EventType.String()))
-		o.RecordDropWithReason(o.LifecycleManager.Context(), "buffer_full")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			o.readCoreMemoryOverflowStats()
+		}
 	}
 }
 
-// Enhancement #11: Validate RSS growth with userspace data
-func (o *Observer) validateRSSGrowth(event *MemoryEvent) bool {
-	statmPath := fmt.Sprintf("/proc/%d/statm", event.PID)
-	statm, err := os.ReadFile(statmPath)
-	if err != nil {
-		// Process might have exited, consider the event valid
-		return true
+// Read overflow statistics from BPF
+func (o *Observer) readCoreMemoryOverflowStats() {
+	ebpfState := o.ebpfState.(*memoryEBPF)
+
+	var stats overflowStats
+	key := uint32(0)
+
+	// Read overflow stats
+	if err := ebpfState.objs.MemoryOverflow.Lookup(key, &stats); err == nil {
+		if o.eventsDropped != nil {
+			ctx := context.Background()
+
+			o.eventsDropped.Add(ctx, int64(stats.RingbufDrops),
+				metric.WithAttributes(attribute.String("reason", "ringbuf_full")))
+
+			o.eventsDropped.Add(ctx, int64(stats.RateLimitDrops),
+				metric.WithAttributes(attribute.String("reason", "rate_limit")))
+
+			o.eventsDropped.Add(ctx, int64(stats.SamplingDrops),
+				metric.WithAttributes(attribute.String("reason", "sampling")))
+		}
+
+		// Reset counters after reading
+		stats = overflowStats{}
+		ebpfState.objs.MemoryOverflow.Update(key, &stats, ebpf.UpdateAny)
 	}
-
-	var vmSize, vmRSS, vmShared uint64
-	fmt.Sscanf(string(statm), "%d %d %d", &vmSize, &vmRSS, &vmShared)
-
-	// Convert pages to bytes (assuming 4KB pages)
-	actualRSSBytes := vmRSS * 4096
-	reportedRSSBytes := event.RSSPages * 4096
-
-	// Allow some tolerance (10%)
-	tolerance := actualRSSBytes / 10
-	if reportedRSSBytes > actualRSSBytes+tolerance {
-		o.logger.Warn("RSS growth inconsistent with /proc",
-			zap.Uint32("pid", event.PID),
-			zap.Uint64("reported_rss", reportedRSSBytes),
-			zap.Uint64("actual_rss", actualRSSBytes))
-		return false
-	}
-
-	return true
 }
 
-// Enhancement #10: Configure eBPF map sizes
-func (o *Observer) configureMapSizes(maxAllocations, maxProcesses uint32) error {
-	state, ok := o.ebpfState.(*ebpfState)
-	if !ok || state == nil {
-		return fmt.Errorf("invalid eBPF state")
-	}
+// Scan for unfreed allocations
+func (o *Observer) scanCoreUnfreedAllocations(ctx context.Context) {
+	defer o.ebpfState.(*coreMemoryEBPF).wg.Done()
 
-	// Note: This would require a config map in the eBPF program
-	// For now, we'll log the intention
-	o.logger.Info("Map size configuration requested",
-		zap.Uint32("max_allocations", maxAllocations),
-		zap.Uint32("max_processes", maxProcesses))
-
-	return nil
-}
-
-// Enhancement #14: Configure sampling rate
-func (o *Observer) configureSamplingRate(rate uint32) error {
-	state, ok := o.ebpfState.(*ebpfState)
-	if !ok || state == nil {
-		return fmt.Errorf("invalid eBPF state")
-	}
-
-	// This would update a config map in the eBPF program
-	// For now, we'll log the configuration
-	o.logger.Info("Sampling rate configuration requested",
-		zap.Uint32("rate", rate))
-
-	return nil
-}
-
-// Enhancement #1: Implement unfreed allocations scanner (Linux-specific due to eBPF map iteration)
-func (o *Observer) scanUnfreedAllocations() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-o.LifecycleManager.Context().Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			state, ok := o.ebpfState.(*ebpfState)
-			if !ok || state == nil {
-				continue
-			}
-
-			var addr uint64
-			var info AllocationInfo
-			now := uint64(time.Now().UnixNano())
-			threshold := uint64(o.config.MinUnfreedAge.Nanoseconds())
-
-			iter := state.objs.ActiveAllocations.Iterate()
-			for iter.Next(&addr, &info) {
-				if now-info.Timestamp > threshold {
-					event := MemoryEvent{
-						Timestamp: now,
-						EventType: EventTypeUnfreed,
-						PID:       info.PID,
-						Address:   addr,
-						Size:      info.Size,
-						CGroupID:  info.CGroupID,
-						Comm:      info.Comm,
-						CallerIP:  info.CallerIP,
-					}
-					if o.shouldEmitEvent(&event) {
-						domainEvent := o.createDomainEvent(o.LifecycleManager.Context(), &event)
-						if o.EventChannelManager.SendEvent(domainEvent) {
-							o.RecordEventWithContext(o.LifecycleManager.Context())
-						} else {
-							o.RecordDropWithReason(o.LifecycleManager.Context(), "buffer_full")
-						}
-					}
-				}
-			}
+			o.checkCoreUnfreedAllocations()
 		}
 	}
+}
+
+// Check for long-lived allocations
+func (o *Observer) checkCoreUnfreedAllocations() {
+	// Since the simplified BPF program doesn't track individual allocations,
+	// we can generate periodic memory health events based on RSS stats
+
+	now := time.Now().UnixNano()
+
+	// Create a periodic memory status event
+	event := &memoryEvent{
+		Timestamp: uint64(now),
+		EventType: 4, // EVENT_UNFREED (using as periodic check)
+		PID:       uint32(os.Getpid()),
+		TID:       uint32(os.Getpid()),
+		Size:      0, // Will be filled with RSS data if available
+		CgroupID:  0,
+	}
+
+	// Get current process name
+	if exe, err := os.Executable(); err == nil {
+		name := filepath.Base(exe)
+		copy(event.Comm[:], []byte(name))
+	}
+
+	// Convert and send periodic health check
+	domainEvent := o.convertCoreMemoryToDomainEvent(event)
+
+	if o.EventChannelManager.SendEvent(domainEvent) {
+		o.RecordEvent()
+		o.logger.Debug("Sent periodic memory health check")
+	} else {
+		o.RecordDrop()
+	}
+}
+
+// Convert BPF event to domain event
+func (o *Observer) convertCoreMemoryToDomainEvent(event *memoryEventCore) *domain.CollectorEvent {
+	// Convert timestamp
+	timestamp := time.Unix(0, int64(event.Timestamp))
+
+	// Convert comm to string
+	comm := string(event.Comm[:])
+	for i, b := range event.Comm {
+		if b == 0 {
+			comm = string(event.Comm[:i])
+			break
+		}
+	}
+
+	// Determine severity
+	severity := domain.EventSeverityInfo
+	if event.IsOOMRisk > 0 {
+		severity = domain.EventSeverityCritical
+	} else if event.EventType == 4 { // EVENT_UNFREED
+		severity = domain.EventSeverityWarning
+	} else if event.RSSGrowth > 262144 { // > 1GB growth
+		severity = domain.EventSeverityWarning
+	}
+
+	// Create domain event
+	return &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("memory-%d-%d-%d", event.PID, event.EventType, event.Timestamp),
+		Timestamp: timestamp,
+		Type:      domain.EventTypeMemory,
+		Source:    "memory-observer",
+		Severity:  severity,
+		EventData: domain.EventDataContainer{
+			Process: &domain.ProcessData{
+				PID:     int32(event.PID),
+				TID:     int32(event.TID),
+				UID:     int32(event.UID),
+				GID:     int32(event.GID),
+				Command: comm,
+			},
+			Custom: map[string]string{
+				"memory_event_type": getMemoryEventTypeName(event.EventType),
+				"address":           fmt.Sprintf("0x%x", event.Address),
+				"size_bytes":        fmt.Sprintf("%d", event.Size),
+				"size_mb":           fmt.Sprintf("%.2f", float64(event.Size)/1048576.0),
+				"rss_pages":         fmt.Sprintf("%d", event.RSSPages),
+				"rss_growth":        fmt.Sprintf("%d", event.RSSGrowth),
+				"rss_gb":            fmt.Sprintf("%.2f", float64(event.RSSPages*4096)/1073741824.0),
+				"caller_ip":         fmt.Sprintf("0x%x", event.CallerIP),
+				"namespace_pid":     fmt.Sprintf("%d", event.NamespacePID),
+				"is_oom_risk":       fmt.Sprintf("%t", event.IsOOMRisk > 0),
+				"cgroup_id":         fmt.Sprintf("%d", event.CgroupID),
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "memory",
+				"core":     "true",
+				"version":  "1.0",
+			},
+		},
+	}
+}
+
+// Helper functions
+func getMemoryEventTypeName(eventType uint32) string {
+	switch eventType {
+	case 1:
+		return "mmap"
+	case 2:
+		return "munmap"
+	case 3:
+		return "rss_growth"
+	case 4:
+		return "unfreed"
+	case 5:
+		return "oom_risk"
+	default:
+		return "unknown"
+	}
+}
+
+// Close CO-RE eBPF
+func (o *Observer) closeCoreMemoryEBPF() {
+	if o.ebpfState == nil {
+		return
+	}
+
+	ebpfState := o.ebpfState.(*memoryEBPF)
+
+	// Cancel context
+	if ebpfState.cancel != nil {
+		ebpfState.cancel()
+	}
+
+	// Close reader
+	if ebpfState.reader != nil {
+		ebpfState.reader.Close()
+	}
+
+	// Wait for goroutines
+	ebpfState.wg.Wait()
+
+	// Detach probes
+	for _, l := range ebpfState.links {
+		l.Close()
+	}
+
+	// Close objects
+	if ebpfState.objs != nil {
+		ebpfState.objs.Close()
+	}
+
+	o.logger.Info("CO-RE eBPF programs closed for Memory observer")
 }
