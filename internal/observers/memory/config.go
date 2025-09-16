@@ -44,6 +44,9 @@ type Config struct {
 
 	// Enhancement #3: Configurable libc path for portability
 	LibCPath string `json:"libc_path"` // Path to libc.so for uprobe attachment
+
+	// Kubernetes enrichment
+	EnableK8sEnrichment bool `json:"enable_k8s_enrichment"` // Enrich with K8s metadata
 }
 
 // Validate validates the configuration
@@ -106,5 +109,8 @@ func DefaultConfig() *Config {
 
 		// Enhancement #3: Default libc path (Ubuntu/Debian)
 		LibCPath: "/lib/x86_64-linux-gnu/libc.so.6",
+
+		// Kubernetes enrichment (enabled by default in K8s environments)
+		EnableK8sEnrichment: true,
 	}
 }

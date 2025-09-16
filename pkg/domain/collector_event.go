@@ -59,6 +59,13 @@ const (
 	EventTypeStorageIOFsync CollectorEventType = "storage.io.fsync"
 	EventTypeStorageIOSlow  CollectorEventType = "storage.io.slow"
 
+	// Memory Events
+	EventTypeMemoryAllocation   CollectorEventType = "memory.allocation"
+	EventTypeMemoryDeallocation CollectorEventType = "memory.deallocation"
+	EventTypeMemoryLeak         CollectorEventType = "memory.leak"
+	EventTypeMemoryRSSGrowth    CollectorEventType = "memory.rss_growth"
+	EventTypeMemoryOOMRisk      CollectorEventType = "memory.oom_risk"
+
 	// Scheduler events
 	EventTypeScheduler          CollectorEventType = "scheduler"
 	EventTypeSchedulerDelay     CollectorEventType = "scheduler.delay"
@@ -148,6 +155,9 @@ type EventDataContainer struct {
 	ETCD      *ETCDData      `json:"etcd,omitempty"`
 	Volume    *VolumeData    `json:"volume,omitempty"`
 	StorageIO *StorageIOData `json:"storage_io,omitempty"`
+
+	// Memory data
+	Memory *MemoryData `json:"memory,omitempty"`
 
 	// Scheduler data
 	Scheduler *SchedulerData `json:"scheduler,omitempty"`
@@ -277,6 +287,37 @@ type StorageIOData struct {
 	BlockTime  time.Duration `json:"block_time,omitempty"` // time blocked
 	IOPS       int           `json:"iops,omitempty"`
 	Throughput int           `json:"throughput_mb_s,omitempty"`
+
+	// Error info
+	ErrorCode    int32  `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// MemoryData represents memory allocation/leak event data
+type MemoryData struct {
+	// Allocation details
+	Operation     string `json:"operation"`      // allocation, deallocation, leak, rss_growth
+	Address       uint64 `json:"address"`        // memory address
+	Size          int64  `json:"size"`           // allocation size in bytes
+	AllocatedSize int64  `json:"allocated_size"` // actual allocated size (may differ from requested)
+
+	// Stack trace information
+	StackTrace    []string `json:"stack_trace,omitempty"`    // function call stack
+	CallerIP      uint64   `json:"caller_ip,omitempty"`      // instruction pointer of caller
+	AllocFunction string   `json:"alloc_function,omitempty"` // malloc, mmap, etc.
+
+	// Leak detection
+	IsLeak        bool          `json:"is_leak"`                  // true for memory leaks
+	AllocationAge time.Duration `json:"allocation_age,omitempty"` // how long allocation has existed
+
+	// RSS information
+	RSSPages  uint64 `json:"rss_pages,omitempty"`  // current RSS in pages
+	RSSBytes  int64  `json:"rss_bytes,omitempty"`  // current RSS in bytes
+	RSSGrowth int64  `json:"rss_growth,omitempty"` // RSS growth since last measurement
+	OOMRisk   bool   `json:"oom_risk,omitempty"`   // at risk of OOM killer
+
+	// Performance metrics
+	FragmentationRatio float64 `json:"fragmentation_ratio,omitempty"` // memory fragmentation
 
 	// Error info
 	ErrorCode    int32  `json:"error_code,omitempty"`
@@ -978,6 +1019,14 @@ func (e *EventDataContainer) GetK8sResourceData() (*K8sResourceData, bool) {
 func (e *EventDataContainer) GetDNSData() (*DNSData, bool) {
 	if e.DNS != nil {
 		return e.DNS, true
+	}
+	return nil, false
+}
+
+// GetMemoryData returns Memory data if present
+func (e *EventDataContainer) GetMemoryData() (*MemoryData, bool) {
+	if e.Memory != nil {
+		return e.Memory, true
 	}
 	return nil, false
 }

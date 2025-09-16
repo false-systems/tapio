@@ -35,12 +35,13 @@ type Observer struct {
 	largestAllocation    metric.Int64Gauge
 	filteredEvents       metric.Int64Counter
 
-	// CO-RE metrics (aligned with collector_ebpf_core.go)
+	// CO-RE metrics (aligned with observer_ebpf.go)
 	eventsProcessed metric.Int64Counter
 	eventsDropped   metric.Int64Counter
 	processingTime  metric.Float64Histogram
 	memoryAllocated metric.Int64Counter
 	memoryFreed     metric.Int64Counter
+	leaksDetected   metric.Int64Counter
 
 	// Pre-processing state (lean filtering)
 	recentStacks map[uint64]time.Time // Simple dedup
@@ -149,7 +150,7 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 
 	memoryAllocated, err := meter.Int64Counter(
 		fmt.Sprintf("%s_memory_allocated_bytes", name),
-		metric.WithDescription("Total memory allocated bytes"),
+		metric.WithDescription("Total memory allocated in bytes"),
 	)
 	if err != nil {
 		logger.Warn("Failed to create memory allocated counter", zap.Error(err))
@@ -157,10 +158,18 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 
 	memoryFreed, err := meter.Int64Counter(
 		fmt.Sprintf("%s_memory_freed_bytes", name),
-		metric.WithDescription("Total memory freed bytes"),
+		metric.WithDescription("Total memory freed in bytes"),
 	)
 	if err != nil {
 		logger.Warn("Failed to create memory freed counter", zap.Error(err))
+	}
+
+	leaksDetected, err := meter.Int64Counter(
+		fmt.Sprintf("%s_leaks_detected_total", name),
+		metric.WithDescription("Total memory leaks detected"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create leaks detected counter", zap.Error(err))
 	}
 
 	o := &Observer{
@@ -180,6 +189,7 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 		processingTime:       processingTime,
 		memoryAllocated:      memoryAllocated,
 		memoryFreed:          memoryFreed,
+		leaksDetected:        leaksDetected,
 		recentStacks:         make(map[uint64]time.Time),
 		lastCleanup:          time.Now(),
 	}
@@ -297,12 +307,12 @@ func (o *Observer) shouldEmitEvent(event *MemoryEvent) bool {
 	}
 
 	// Enhancement #8: Improved stack deduplication with composite key
-	if event.CallerIP != 0 {
+	if event.StackTrace != nil && len(event.StackTrace.Addresses) > 0 {
 		o.stackMutex.Lock()
 		defer o.stackMutex.Unlock()
 
-		// Use composite key combining CallerIP, PID, and Address for better deduplication
-		stackKey := uint64(event.CallerIP) ^ uint64(event.PID)<<32 ^ event.Address
+		// Use composite key combining first stack address, PID, and allocation address for better deduplication
+		stackKey := event.StackTrace.Addresses[0] ^ uint64(event.PID)<<32 ^ event.Address
 
 		if lastSeen, exists := o.recentStacks[stackKey]; exists {
 			if time.Since(lastSeen) < o.config.StackDedupWindow {
@@ -364,9 +374,14 @@ func (o *Observer) createDomainEvent(ctx context.Context, event *MemoryEvent) *d
 		"operation":  event.EventType.String(),
 		"address":    fmt.Sprintf("0x%x", event.Address),
 		"size_bytes": fmt.Sprintf("%d", event.Size),
-		"caller_ip":  fmt.Sprintf("0x%x", event.CallerIP),
 		"rss_pages":  fmt.Sprintf("%d", event.RSSPages),
 		"rss_growth": fmt.Sprintf("%d", event.RSSGrowth),
+	}
+
+	// Add stack trace info if available
+	if event.StackTrace != nil && len(event.StackTrace.Addresses) > 0 {
+		customData["stack_depth"] = fmt.Sprintf("%d", len(event.StackTrace.Addresses))
+		customData["stack_top"] = fmt.Sprintf("0x%x", event.StackTrace.Addresses[0])
 	}
 
 	return &domain.CollectorEvent{
