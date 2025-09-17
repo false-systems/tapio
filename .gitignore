@@ -410,5 +410,10 @@ perf.data.old
 /observers-linux
 /observers-linux-stripped
 /collectors
+/correlation-service
+/tapio-collector
+/tapio-sniffer
+/server-example
 /cmd/observers/observers
+/cmd/transformer/transformer
 *.exe
