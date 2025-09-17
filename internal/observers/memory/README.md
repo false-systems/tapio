@@ -1,327 +1,308 @@
 # Memory Observer
 
-**Status: Production Ready (Linux with eBPF)**
-
-## Overview
-
-The Memory observer detects memory leaks and abnormal memory usage patterns in real-time using eBPF. It tracks allocations, deallocations, and identifies long-lived memory that may indicate leaks, providing crucial insights for memory optimization and stability.
-
-## What This Observer Does
-
-- **Memory Leak Detection**: Identifies allocations that are never freed
-- **RSS Growth Tracking**: Monitors resident set size growth patterns
-- **Large Allocation Detection**: Flags unusually large memory allocations
-- **Memory Pattern Analysis**: Detects abnormal allocation patterns
-- **Stack Trace Capture**: Links allocations to specific code paths
-- **Container Attribution**: Maps memory usage to specific containers
+A production-ready, CO-RE eBPF-based memory leak detector for Kubernetes environments. This observer tracks memory allocations, detects leaks, captures stack traces, and enriches events with Kubernetes metadata.
 
 ## Features
 
-- ✅ Zero-overhead eBPF-based monitoring
-- ✅ Allocation/deallocation tracking via malloc/free hooks
-- ✅ mmap/munmap monitoring for large allocations
-- ✅ RSS (Resident Set Size) growth detection
-- ✅ Smart deduplication to reduce noise
-- ✅ Configurable thresholds and filtering
-- ✅ Stack trace correlation for root cause analysis
-- ✅ Multiple operation modes (conservative, balanced, aggressive)
+### Core Capabilities
+- **CO-RE eBPF**: Compile Once, Run Everywhere - works across kernel versions without recompilation
+- **Memory Allocation Tracking**: Monitors malloc/free and mmap/munmap operations via uprobes
+- **Leak Detection**: Identifies long-lived allocations that may indicate memory leaks
+- **Stack Trace Capture**: Records call stacks for allocation sites to aid in debugging
+- **Kubernetes Enrichment**: Automatically adds pod, namespace, and container metadata
+
+### Performance Optimizations
+- **Configurable Filtering**: Skip small allocations below threshold
+- **Stack Deduplication**: Avoid reporting the same leak multiple times
+- **Rate Limiting**: Prevent event storms from overwhelming the system
+- **Ring Buffer**: Efficient kernel-to-userspace event transfer
 
 ## Architecture
 
 ```
-┌─────────────────┐
-│  Kernel Space   │
-│                 │
-│  ╭────────────╮ │
-│  │ malloc/free│ │ ◄── Allocation tracking
-│  │   uprobe   │ │
-│  ╰────────────╯ │
-│                 │
-│  ╭────────────╮ │
-│  │ mmap/munmap│ │ ◄── Large allocation tracking
-│  │   kprobe   │ │
-│  ╰────────────╯ │
-│                 │
-│  ╭────────────╮ │
-│  │ RSS monitor│ │ ◄── Memory growth detection
-│  │ tracepoint │ │
-│  ╰────────────╯ │
-└─────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│   User Space    │
-│                 │
-│ Leak Detection  │
-│ Pattern Analysis│
-│ Stack Correlation│
-└─────────────────┘
-```
-
-## Events Generated
-
-```go
-domain.EventTypeMemoryPressure  // Memory pressure or potential leak detected
-domain.EventTypeKernelFS        // Memory mapping operations (mmap/munmap)
-domain.EventTypeKernelProcess   // Process memory events
+┌──────────────────────────────────────┐
+│         User Space (Go)              │
+├──────────────────────────────────────┤
+│  Observer                            │
+│  ├── Configuration Management        │
+│  ├── Event Processing Pipeline       │
+│  ├── K8s Enrichment                 │
+│  └── Metrics Collection             │
+├──────────────────────────────────────┤
+│  eBPF Programs (Kernel Space)        │
+│  ├── malloc/free uprobes            │
+│  ├── mmap/munmap uprobes            │
+│  ├── Stack trace capture            │
+│  └── Allocation tracking maps       │
+└──────────────────────────────────────┘
 ```
 
 ## Configuration
 
 ```go
 type Config struct {
-    Name               string        // Observer name
-    BufferSize         int          // Event buffer size (default: 10000)
-    
-    // Detection thresholds
-    MinAllocationSize  int64        // Minimum allocation to track (default: 10KB)
-    MinUnfreedAge      time.Duration // Min age for leak detection (default: 30s)
-    RSSGrowthThreshold int64        // RSS growth threshold (default: 100MB)
-    
+    // Basic settings
+    Name       string `json:"name"`
+    BufferSize int    `json:"buffer_size"`
+    EnableEBPF bool   `json:"enable_ebpf"`
+
     // Operation modes
-    Mode               OperationMode // conservative, balanced, aggressive
-    EnableEBPF         bool         // Enable eBPF monitoring (default: true)
-    
-    // Deduplication
-    StackDedupWindow   time.Duration // Stack dedup window (default: 5s)
-    
-    // Sampling
-    SamplingRate       int          // 1 = all events, 10 = 1 in 10 (default: 1)
-}
+    Mode OperationMode `json:"mode"`
+    // - growth_detection: RSS monitoring only (lowest overhead)
+    // - targeted: Track specific PID
+    // - debugging: Full tracking with stack traces
 
-// Operation modes
-const (
-    ModeConservative = "conservative" // Track only large, old allocations
-    ModeBalanced     = "balanced"     // Standard thresholds
-    ModeAggressive   = "aggressive"   // Track all allocations
-)
-```
+    // Filtering thresholds
+    MinAllocationSize int64         `json:"min_allocation_size"` // Default: 10KB
+    MinUnfreedAge     time.Duration `json:"min_unfreed_age"`     // Default: 30s
+    SamplingRate      int           `json:"sampling_rate"`       // 1 in N allocations
+    MaxEventsPerSec   int           `json:"max_events_per_sec"`  // Rate limiting
 
-## Usage Example
+    // Stack deduplication
+    StackDedupWindow time.Duration `json:"stack_dedup_window"` // Default: 10s
 
-```go
-package main
+    // Targeted mode
+    TargetPID      int32  `json:"target_pid"`       // 0 = all processes
+    TargetCGroupID uint64 `json:"target_cgroup_id"` // Target container
 
-import (
-    "context"
-    "log"
-    
-    "github.com/yairfalse/tapio/pkg/observers/memory"
-)
+    // Library path
+    LibCPath string `json:"libc_path"` // Default: /lib/x86_64-linux-gnu/libc.so.6
 
-func main() {
-    config := memory.DefaultConfig()
-    config.Mode = memory.ModeBalanced
-    config.MinAllocationSize = 1024 * 10  // 10KB minimum
-    config.MinUnfreedAge = 30 * time.Second
-    
-    logger, _ := zap.NewProduction()
-    observer, err := memory.NewObserver("memory", config, logger)
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    ctx := context.Background()
-    if err := observer.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    
-    // Process events
-    for event := range observer.Events() {
-        switch event.Type {
-        case domain.EventTypeMemoryPressure:
-            log.Printf("MEMORY LEAK: Process %s has %d bytes unfreed",
-                event.Metadata.Command,
-                event.EventData.Custom["size_bytes"])
-                
-        case domain.EventTypeKernelFS:
-            log.Printf("Large allocation: %s allocated %d bytes via mmap",
-                event.Metadata.Command,
-                event.EventData.Custom["size_bytes"])
-        }
-    }
+    // K8s enrichment
+    EnableK8sEnrichment bool `json:"enable_k8s_enrichment"`
 }
 ```
 
-## Metrics (OpenTelemetry)
+## Usage
 
-```
-# Allocation tracking
-memory_allocations_tracked_total{process, container_id}
-memory_deallocations_tracked_total{process, container_id}
+### Basic Usage
 
-# Memory state
-memory_unfreed_memory_bytes{process, container_id}
-memory_largest_allocation_bytes{process}
-
-# RSS monitoring
-memory_rss_growth_detected_total{process, severity}
-
-# Event filtering (for tuning)
-memory_filtered_events_total{reason}
-```
-
-## Memory Leak Detection Algorithm
-
-The observer uses a multi-stage approach to detect leaks:
-
-### 1. Allocation Tracking
-- Hooks malloc/free to track heap allocations
-- Monitors mmap/munmap for large allocations
-- Maintains allocation map with timestamps
-
-### 2. Age-Based Detection
-- Allocations older than `MinUnfreedAge` are flagged
-- Adjustable threshold based on application behavior
-
-### 3. RSS Growth Correlation
-- Correlates unfreed memory with RSS growth
-- Validates potential leaks against actual memory usage
-
-### 4. Stack Deduplication
-- Groups similar allocations by call stack
-- Reduces noise from repeated allocations
-- Composite key: CallerIP + PID + Address
-
-## Operation Modes
-
-### Conservative Mode
 ```go
-config.Mode = ModeConservative
-// Only tracks:
-// - Allocations > 100KB
-// - Unfreed for > 5 minutes
-// - RSS growth > 500MB
+import "github.com/yairfalse/tapio/internal/observers/memory"
+
+// Create observer with default config
+config := memory.DefaultConfig()
+observer, err := memory.NewObserver("memory-observer", config, logger)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Start monitoring
+ctx := context.Background()
+if err := observer.Start(ctx); err != nil {
+    log.Fatal(err)
+}
+
+// Process events
+for event := range observer.Events() {
+    log.Printf("Memory event: %+v", event)
+}
+
+// Stop observer
+observer.Stop()
 ```
 
-### Balanced Mode (Default)
+### Production Configuration
+
 ```go
-config.Mode = ModeBalanced
-// Tracks:
-// - Allocations > 10KB
-// - Unfreed for > 30 seconds
-// - RSS growth > 100MB
+config := &memory.Config{
+    Name:       "production-memory-observer",
+    BufferSize: 50000,
+    EnableEBPF: true,
+    
+    // Use growth detection mode for lower overhead
+    Mode: memory.ModeGrowthDetection,
+    
+    // Only track allocations >= 100KB
+    MinAllocationSize: 102400,
+    
+    // Consider unfreed after 1 minute
+    MinUnfreedAge: 1 * time.Minute,
+    
+    // Sample 1 in 100 for medium allocations
+    SamplingRate: 100,
+    
+    // Rate limit to 5000 events/sec
+    MaxEventsPerSec: 5000,
+    
+    // Enable K8s metadata
+    EnableK8sEnrichment: true,
+}
 ```
 
-### Aggressive Mode
+### Debugging Memory Leaks
+
 ```go
-config.Mode = ModeAggressive
-// Tracks:
-// - All allocations > 1KB
-// - Unfreed for > 10 seconds
-// - RSS growth > 10MB
+config := &memory.Config{
+    Name: "leak-hunter",
+    Mode: memory.ModeDebugging,
+    
+    // Track all allocations >= 1KB
+    MinAllocationSize: 1024,
+    
+    // Report leaks after 30 seconds
+    MinUnfreedAge: 30 * time.Second,
+    
+    // No sampling - track everything
+    SamplingRate: 1,
+    
+    // Target specific pod
+    TargetPID: 12345,
+}
 ```
 
-## eBPF Programs
+## Event Types
 
-### 1. Malloc/Free Tracking (uprobes)
-Intercepts libc malloc/free calls to track heap allocations
-
-### 2. Mmap/Munmap Tracking (kprobes)
-Monitors memory mapping system calls for large allocations
-
-### 3. RSS Monitor (tracepoints)
-Tracks resident set size changes to detect memory growth
-
-## Performance Impact
-
-- **Overhead**: < 2% CPU for typical workloads
-- **Memory**: ~20MB baseline + allocation tracking overhead
-- **Latency**: Adds < 500ns to allocation path
-- **Accuracy**: Byte-level precision
-
-## Platform Requirements
-
-### Linux Kernel
-- **Minimum**: 4.18+ (basic eBPF support)
-- **Recommended**: 5.4+ (better uprobe support)
-- **Optimal**: 5.10+ (improved BPF helpers)
-
-### Dependencies
-- libc with symbols (for malloc/free uprobes)
-- BTF support recommended for portability
-
-## Real-World Scenarios
-
-### Scenario 1: Slow Memory Leak
-```
-Problem: Service memory grows 100MB/day
-Detection: Unfreed allocations from specific stack
-Root Cause: Unclosed database connections
-Solution: Add connection pool limits
-Result: Memory usage stabilized
+### Memory Allocation Event
+```go
+type MemoryEvent struct {
+    Timestamp       uint64
+    EventType       EventType
+    PID            uint32
+    TID            uint32
+    Address        uint64
+    Size           uint64
+    StackTrace     *StackTrace
+    IsLeak         bool
+    AllocationAgeNs uint64
+    Kubernetes     *KubernetesMetadata
+}
 ```
 
-### Scenario 2: Large Allocation Spike
-```
-Problem: Sudden OOM kills after deployment
-Detection: 2GB mmap allocation detected
-Root Cause: Loading entire file into memory
-Solution: Switch to streaming processing
-Result: Memory usage reduced by 95%
-```
+### Event Types
+- `EventTypeMalloc`: malloc() allocation
+- `EventTypeFree`: free() deallocation  
+- `EventTypeMmap`: Large allocation via mmap
+- `EventTypeMunmap`: Memory freed via munmap
+- `EventTypeUnfreed`: Long-lived allocation (potential leak)
+- `EventTypeLeakDetected`: Confirmed memory leak
+- `EventTypeRSSGrowth`: RSS increase detected
 
-### Scenario 3: Fragmentation Issues
+## Metrics
+
+The observer exposes the following metrics:
+
+### Memory Metrics
+- `memory_allocations_tracked_total`: Total allocations tracked
+- `memory_deallocations_tracked_total`: Total deallocations tracked
+- `memory_unfreed_memory_bytes`: Current unfreed memory
+- `memory_largest_allocation_bytes`: Largest single allocation
+- `memory_leaks_detected_total`: Total leaks detected
+- `memory_allocated_bytes`: Total bytes allocated
+- `memory_freed_bytes`: Total bytes freed
+
+### Performance Metrics
+- `memory_events_processed_total`: Total events processed
+- `memory_events_dropped_total`: Events dropped due to buffer full
+- `memory_filtered_events_total`: Events filtered by pre-processing
+- `memory_processing_time_seconds`: Event processing time histogram
+
+## Requirements
+
+### Kernel Requirements
+- Linux kernel 4.15+ (for CO-RE support)
+- BTF support enabled
+- eBPF support enabled
+
+### Kubernetes Requirements
+- When running in Kubernetes, requires privileged container for eBPF
+- K8s enrichment requires in-cluster RBAC permissions
+
+### Build Requirements
+- Go 1.21+
+- Clang/LLVM for BPF compilation
+- libbpf headers
+
+## Building
+
+```bash
+# Generate BPF code
+cd internal/observers/memory
+go generate ./bpf
+
+# Build observer
+go build .
+
+# Run tests
+go test ./...
 ```
-Problem: High memory usage despite few allocations
-Detection: Many small unfreed allocations
-Root Cause: String concatenation in hot loop
-Solution: Use string builder pattern
-Result: 50% memory reduction
-```
-
-## Integration with Intelligence Layer
-
-Memory events correlate with other observers to identify:
-
-- **OOM Prediction**: Predict OOM kills before they happen
-- **Performance Impact**: Link memory pressure to latency
-- **Resource Planning**: Identify when to scale or optimize
-- **Cost Analysis**: Calculate memory waste and optimization opportunities
 
 ## Troubleshooting
 
-### Missing Allocations
-1. Check if process uses custom allocator
-2. Verify libc symbols are available
-3. Ensure uprobe attachment succeeded
-4. Review minimum allocation size threshold
+### High Memory Usage
+- Increase `MinAllocationSize` to track fewer allocations
+- Increase `SamplingRate` to sample less frequently
+- Use `ModeGrowthDetection` instead of `ModeDebugging`
 
-### High Event Volume
-1. Increase `MinAllocationSize` threshold
-2. Enable sampling (set `SamplingRate` > 1)
-3. Increase `StackDedupWindow` for more deduplication
-4. Switch to Conservative mode
+### Missing Events
+- Check if buffer is full (see `events_dropped_total` metric)
+- Increase `BufferSize` configuration
+- Reduce `SamplingRate` if tracking too many allocations
 
-### False Positives
-1. Increase `MinUnfreedAge` for long-lived allocations
-2. Add process-specific filtering
-3. Correlate with actual RSS growth
-4. Check for memory pools/caches
+### No Stack Traces
+- Ensure target binary has frame pointers (`-fno-omit-frame-pointer`)
+- Check if stack unwinding is supported for the target language
+- Verify BTF information is available
 
-## Testing
+### K8s Metadata Missing
+- Verify `EnableK8sEnrichment` is true
+- Check RBAC permissions for pod/namespace access
+- Ensure cgroup paths are correctly parsed
 
-```bash
-# Unit tests
-go test ./pkg/observers/memory/...
+## Performance Impact
 
-# Stress test with memory leak
-stress-ng --vm 2 --vm-bytes 1G --vm-method all --verify
+| Mode | CPU Overhead | Memory Overhead | Use Case |
+|------|--------------|-----------------|----------|
+| growth_detection | < 1% | Minimal | Production monitoring |
+| targeted | 1-3% | Low | Debugging specific process |
+| debugging | 3-5% | Moderate | Development/debugging |
 
-# Verify metrics
-curl localhost:9090/metrics | grep memory_
+## Limitations
 
-# Simulate leak
-./test/memory_leak_simulator --leak-rate=10MB/s
+- Requires libc with symbols for uprobe attachment
+- Stack traces limited to 20 frames depth
+- Maximum 10,000 concurrent allocations tracked
+- Does not track kernel memory allocations
+- Requires root/CAP_BPF capability
+
+## Integration with Tapio
+
+The Memory Observer follows Tapio's 5-level architecture:
+
+- **Level 0 (Domain)**: Uses `domain.CollectorEvent` for event representation
+- **Level 1 (Observers)**: Implements the Observer interface
+- **Level 2 (Intelligence)**: Events can be correlated for leak pattern detection
+- **Level 3 (Integrations)**: Supports K8s metadata enrichment
+- **Level 4 (Interfaces)**: Exposes events via gRPC/REST APIs
+
+## Files Structure
+
+```
+memory/
+├── README.md           # This file
+├── observer.go         # Main observer implementation
+├── observer_ebpf.go    # Linux eBPF implementation
+├── observer_fallback.go # Non-Linux fallback
+├── config.go           # Configuration structures
+├── types.go            # Event and data types
+├── k8s_enricher.go     # Kubernetes metadata enrichment
+├── bpf/
+│   ├── generate.go     # BPF code generation
+│   └── memory_*.go     # Generated BPF bindings
+└── bpf_src/
+    └── memory.c        # eBPF C source code
 ```
 
-## Comparison with Traditional Tools
+## Contributing
 
-| Feature | Memory Observer | Valgrind | tcmalloc | jemalloc profiler |
-|---------|----------------|----------|----------|-------------------|
-| Overhead | < 2% | 10-50x slower | ~5% | ~5% |
-| Production Ready | ✅ | ❌ | ✅ | ✅ |
-| Real-time Detection | ✅ | ❌ | ⚠️ | ⚠️ |
-| Container Aware | ✅ | ❌ | ❌ | ❌ |
-| No Restart Required | ✅ | ❌ | ❌ | ❌ |
-| Stack Traces | ✅ | ✅ | ✅ | ✅ |
+When modifying the Memory Observer:
+
+1. **No TODOs or Stubs**: Complete implementations only (per CLAUDE.md)
+2. **Test Coverage**: Maintain >80% test coverage
+3. **Strong Typing**: No `map[string]interface{}` - use typed structs
+4. **Error Handling**: Always wrap errors with context
+5. **BPF Changes**: Regenerate bindings with `go generate ./bpf`
+
+## License
+
+Part of the Tapio Observability Platform.
