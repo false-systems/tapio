@@ -352,6 +352,9 @@ func (o *Observer) convertToDomainEvent(ctx context.Context, event *runtimeEvent
 	// Convert comm to string
 	comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
 
+	// Extract exec info from union data
+	uid, gid := event.GetExecInfo()
+
 	// Create runtime signal event
 	runtimeSignalEvent := &RuntimeSignalEvent{
 		Timestamp: event.Timestamp,
@@ -359,8 +362,8 @@ func (o *Observer) convertToDomainEvent(ctx context.Context, event *runtimeEvent
 		TGID:      event.TGID,
 		PPID:      event.PPID,
 		Command:   comm,
-		UID:       event.ExecInfo.UID,
-		GID:       event.ExecInfo.GID,
+		UID:       uid,
+		GID:       gid,
 	}
 
 	// Set event type and decode based on type
