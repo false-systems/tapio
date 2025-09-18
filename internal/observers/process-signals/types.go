@@ -19,6 +19,46 @@ type runtimeEvent struct {
 	UnionData [24]byte
 }
 
+// GetExecInfo extracts exec info from union data for EVENT_PROCESS_EXEC
+func (e *runtimeEvent) GetExecInfo() (uid, gid uint32) {
+	if e.EventType != EventTypeProcessExec {
+		return 0, 0
+	}
+	// First 8 bytes: uid (4) + gid (4)
+	uid = uint32(e.UnionData[0]) | uint32(e.UnionData[1])<<8 | uint32(e.UnionData[2])<<16 | uint32(e.UnionData[3])<<24
+	gid = uint32(e.UnionData[4]) | uint32(e.UnionData[5])<<8 | uint32(e.UnionData[6])<<16 | uint32(e.UnionData[7])<<24
+	return uid, gid
+}
+
+// GetExitInfo extracts exit info from union data for EVENT_PROCESS_EXIT
+func (e *runtimeEvent) GetExitInfo() (utime, stime, memoryRSS uint64) {
+	if e.EventType != EventTypeProcessExit {
+		return 0, 0, 0
+	}
+	// 24 bytes: utime (8) + stime (8) + memory_rss (8)
+	utime = uint64(e.UnionData[0]) | uint64(e.UnionData[1])<<8 | uint64(e.UnionData[2])<<16 | uint64(e.UnionData[3])<<24 |
+		uint64(e.UnionData[4])<<32 | uint64(e.UnionData[5])<<40 | uint64(e.UnionData[6])<<48 | uint64(e.UnionData[7])<<56
+
+	stime = uint64(e.UnionData[8]) | uint64(e.UnionData[9])<<8 | uint64(e.UnionData[10])<<16 | uint64(e.UnionData[11])<<24 |
+		uint64(e.UnionData[12])<<32 | uint64(e.UnionData[13])<<40 | uint64(e.UnionData[14])<<48 | uint64(e.UnionData[15])<<56
+
+	memoryRSS = uint64(e.UnionData[16]) | uint64(e.UnionData[17])<<8 | uint64(e.UnionData[18])<<16 | uint64(e.UnionData[19])<<24 |
+		uint64(e.UnionData[20])<<32 | uint64(e.UnionData[21])<<40 | uint64(e.UnionData[22])<<48 | uint64(e.UnionData[23])<<56
+
+	return utime, stime, memoryRSS
+}
+
+// GetSignalInfo extracts signal info from union data for signal events
+func (e *runtimeEvent) GetSignalInfo() (targetPID uint32, isFatal bool) {
+	if e.EventType != EventTypeSignalGenerate && e.EventType != EventTypeSignalDeliver {
+		return 0, false
+	}
+	// First 4 bytes: target_pid, 5th byte: is_fatal flag
+	targetPID = uint32(e.UnionData[0]) | uint32(e.UnionData[1])<<8 | uint32(e.UnionData[2])<<16 | uint32(e.UnionData[3])<<24
+	isFatal = e.UnionData[4] != 0
+	return targetPID, isFatal
+}
+
 // CollectorStats tracks collector metrics
 type CollectorStats struct {
 	EventsGenerated  uint64
