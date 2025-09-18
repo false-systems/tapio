@@ -116,35 +116,61 @@ func (p *L7Parser) ParseHTTPRequest(connID string, data []byte) (*HTTPRequest, e
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Get or create connection state
+	conn := p.getOrCreateHTTPConnection(connID, "request")
+	conn.RequestBuffer = append(conn.RequestBuffer, data...)
+	conn.LastActivity = time.Now()
+
+	req, err := p.tryParseHTTPRequest(conn)
+	if err != nil {
+		return nil, err
+	}
+	if req == nil {
+		return nil, nil
+	}
+
+	httpReq := p.extractHTTPRequestDetails(req)
+	conn.Request = httpReq
+	conn.State = "response"
+	p.stats.httpRequestsParsed++
+	conn.RequestBuffer = nil
+
+	return httpReq, nil
+}
+
+// getOrCreateHTTPConnection gets or creates an HTTP connection state
+func (p *L7Parser) getOrCreateHTTPConnection(connID, state string) *HTTPConnectionState {
 	conn, exists := p.httpConnections[connID]
 	if !exists {
 		conn = &HTTPConnectionState{
 			ConnectionID:  connID,
-			State:         "request",
+			State:         state,
 			StartTime:     time.Now(),
 			LastActivity:  time.Now(),
 			RequestBuffer: make([]byte, 0),
 		}
+		if state == "response" {
+			conn.ResponseBuffer = make([]byte, 0)
+		}
 		p.httpConnections[connID] = conn
 	}
+	return conn
+}
 
-	// Append to buffer for multi-packet requests
-	conn.RequestBuffer = append(conn.RequestBuffer, data...)
-	conn.LastActivity = time.Now()
-
-	// Try to parse HTTP request
+// tryParseHTTPRequest attempts to parse an HTTP request from buffer
+func (p *L7Parser) tryParseHTTPRequest(conn *HTTPConnectionState) (*http.Request, error) {
 	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(conn.RequestBuffer)))
 	if err != nil {
-		// Not enough data yet, wait for more packets
-		if len(conn.RequestBuffer) < 8192 { // Max header size
+		if len(conn.RequestBuffer) < 8192 {
 			return nil, nil
 		}
 		p.stats.parseErrors++
 		return nil, err
 	}
+	return req, nil
+}
 
-	// Extract request details
+// extractHTTPRequestDetails extracts details from an HTTP request
+func (p *L7Parser) extractHTTPRequestDetails(req *http.Request) *HTTPRequest {
 	httpReq := &HTTPRequest{
 		Method:      req.Method,
 		URL:         req.URL.String(),
@@ -157,7 +183,6 @@ func (p *L7Parser) ParseHTTPRequest(connID string, data []byte) (*HTTPRequest, e
 		Referer:     req.Referer(),
 	}
 
-	// Copy headers
 	for k, v := range req.Header {
 		if len(v) > 0 {
 			httpReq.Headers[k] = v[0]
@@ -172,14 +197,7 @@ func (p *L7Parser) ParseHTTPRequest(connID string, data []byte) (*HTTPRequest, e
 		httpReq.BodySize = req.ContentLength
 	}
 
-	conn.Request = httpReq
-	conn.State = "response"
-	p.stats.httpRequestsParsed++
-
-	// Clear buffer after successful parse
-	conn.RequestBuffer = nil
-
-	return httpReq, nil
+	return httpReq
 }
 
 // ParseHTTPResponse parses HTTP response from packet data
@@ -187,9 +205,31 @@ func (p *L7Parser) ParseHTTPResponse(connID string, data []byte) (*HTTPResponse,
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	conn := p.getOrCreateHTTPResponseConnection(connID)
+	conn.ResponseBuffer = append(conn.ResponseBuffer, data...)
+	conn.LastActivity = time.Now()
+
+	resp, err := p.tryParseHTTPResponse(conn)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+
+	httpResp := p.extractHTTPResponseDetails(resp, conn)
+	conn.Response = httpResp
+	conn.State = "idle"
+	p.stats.httpResponsesParsed++
+	conn.ResponseBuffer = nil
+
+	return httpResp, nil
+}
+
+// getOrCreateHTTPResponseConnection gets or creates response connection
+func (p *L7Parser) getOrCreateHTTPResponseConnection(connID string) *HTTPConnectionState {
 	conn, exists := p.httpConnections[connID]
 	if !exists {
-		// Response without request, create new state
 		conn = &HTTPConnectionState{
 			ConnectionID:   connID,
 			State:          "response",
@@ -199,12 +239,11 @@ func (p *L7Parser) ParseHTTPResponse(connID string, data []byte) (*HTTPResponse,
 		}
 		p.httpConnections[connID] = conn
 	}
+	return conn
+}
 
-	// Append to buffer
-	conn.ResponseBuffer = append(conn.ResponseBuffer, data...)
-	conn.LastActivity = time.Now()
-
-	// Try to parse HTTP response
+// tryParseHTTPResponse attempts to parse an HTTP response from buffer
+func (p *L7Parser) tryParseHTTPResponse(conn *HTTPConnectionState) (*http.Response, error) {
 	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(conn.ResponseBuffer)), nil)
 	if err != nil {
 		if len(conn.ResponseBuffer) < 8192 {
@@ -213,8 +252,11 @@ func (p *L7Parser) ParseHTTPResponse(connID string, data []byte) (*HTTPResponse,
 		p.stats.parseErrors++
 		return nil, err
 	}
+	return resp, nil
+}
 
-	// Extract response details
+// extractHTTPResponseDetails extracts details from an HTTP response
+func (p *L7Parser) extractHTTPResponseDetails(resp *http.Response, conn *HTTPConnectionState) *HTTPResponse {
 	httpResp := &HTTPResponse{
 		StatusCode:  resp.StatusCode,
 		StatusText:  resp.Status,
@@ -222,7 +264,6 @@ func (p *L7Parser) ParseHTTPResponse(connID string, data []byte) (*HTTPResponse,
 		ContentType: resp.Header.Get("Content-Type"),
 	}
 
-	// Copy headers
 	for k, v := range resp.Header {
 		if len(v) > 0 {
 			httpResp.Headers[k] = v[0]
@@ -234,19 +275,11 @@ func (p *L7Parser) ParseHTTPResponse(connID string, data []byte) (*HTTPResponse,
 		httpResp.BodySize = resp.ContentLength
 	}
 
-	// Calculate response time if we have request
 	if conn.Request != nil {
 		httpResp.ResponseTime = time.Since(conn.StartTime)
 	}
 
-	conn.Response = httpResp
-	conn.State = "idle"
-	p.stats.httpResponsesParsed++
-
-	// Clear buffer after successful parse
-	conn.ResponseBuffer = nil
-
-	return httpResp, nil
+	return httpResp
 }
 
 // ParseDNS parses DNS packets
