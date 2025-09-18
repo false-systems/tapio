@@ -41,140 +41,14 @@ type Observer struct {
 	errorsTotal        metric.Int64Counter
 }
 
-// Config holds observer configuration
-type Config struct {
-	BufferSize         int           `json:"buffer_size"`
-	FlushInterval      time.Duration `json:"flush_interval"`
-	EnableIPv4         bool          `json:"enable_ipv4"`
-	EnableIPv6         bool          `json:"enable_ipv6"`
-	EnableTCP          bool          `json:"enable_tcp"`
-	EnableUDP          bool          `json:"enable_udp"`
-	EnableHTTP         bool          `json:"enable_http"`
-	EnableHTTPS        bool          `json:"enable_https"`
-	EnableDNS          bool          `json:"enable_dns"`
-	HTTPPorts          []int         `json:"http_ports"`
-	HTTPSPorts         []int         `json:"https_ports"`
-	DNSPort            int           `json:"dns_port"`
-	MaxEventsPerSecond int           `json:"max_events_per_second"`
-	SamplingRate       float64       `json:"sampling_rate"`
-
-	// eBPF configuration
-	RingBufferSize int  `json:"ring_buffer_size"`
-	EnableL7Parse  bool `json:"enable_l7_parse"`
-}
-
-// DefaultConfig returns default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		BufferSize:         10000,
-		FlushInterval:      10 * time.Second,
-		EnableIPv4:         true,
-		EnableIPv6:         true,
-		EnableTCP:          true,
-		EnableUDP:          true,
-		EnableHTTP:         true,
-		EnableHTTPS:        false, // Disabled by default (requires more processing)
-		EnableDNS:          true,
-		HTTPPorts:          []int{80, 8080, 8081, 3000, 5000},
-		HTTPSPorts:         []int{443, 8443},
-		DNSPort:            53,
-		MaxEventsPerSecond: 10000,
-		SamplingRate:       1.0, // Sample all events by default
-		RingBufferSize:     8 * 1024 * 1024,
-		EnableL7Parse:      true,
-	}
-}
-
 // NewObserver creates a new network observer
 func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, error) {
-	if config == nil {
-		config = DefaultConfig()
-	}
-
-	if logger == nil {
-		var err error
-		logger, err = zap.NewProduction()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create logger: %w", err)
-		}
-	}
-
-	// Initialize OpenTelemetry
-	tracer := otel.Tracer(name)
-	meter := otel.Meter(name)
-
-	// Create metrics
-	connectionsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_connections_total", name),
-		metric.WithDescription("Total network connections observed"),
-	)
+	config, logger, err := initializeObserverDeps(config, logger)
 	if err != nil {
-		logger.Warn("Failed to create connections counter", zap.Error(err))
+		return nil, err
 	}
 
-	bytesTransferred, err := meter.Int64Counter(
-		fmt.Sprintf("%s_bytes_transferred_total", name),
-		metric.WithDescription("Total bytes transferred"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create bytes counter", zap.Error(err))
-	}
-
-	packetsProcessed, err := meter.Int64Counter(
-		fmt.Sprintf("%s_packets_processed_total", name),
-		metric.WithDescription("Total packets processed"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create packets counter", zap.Error(err))
-	}
-
-	httpRequests, err := meter.Int64Counter(
-		fmt.Sprintf("%s_http_requests_total", name),
-		metric.WithDescription("Total HTTP requests observed"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create HTTP requests counter", zap.Error(err))
-	}
-
-	dnsQueries, err := meter.Int64Counter(
-		fmt.Sprintf("%s_dns_queries_total", name),
-		metric.WithDescription("Total DNS queries observed"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create DNS queries counter", zap.Error(err))
-	}
-
-	connectionDuration, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_connection_duration_ms", name),
-		metric.WithDescription("Connection duration in milliseconds"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create connection duration histogram", zap.Error(err))
-	}
-
-	requestLatency, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_request_latency_ms", name),
-		metric.WithDescription("Request latency in milliseconds"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create request latency histogram", zap.Error(err))
-	}
-
-	eventsProcessed, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_processed_total", name),
-		metric.WithDescription("Total events processed"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create events processed counter", zap.Error(err))
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_errors_total", name),
-		metric.WithDescription("Total errors in observer"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create errors counter", zap.Error(err))
-	}
+	metrics := createObserverMetrics(name, logger)
 
 	return &Observer{
 		BaseObserver:        base.NewBaseObserver(name, 5*time.Minute),
@@ -184,17 +58,100 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 		logger:              logger.Named(name),
 		name:                name,
 		l7Parser:            NewL7Parser(logger, config),
-		tracer:              tracer,
-		connectionsTotal:    connectionsTotal,
-		bytesTransferred:    bytesTransferred,
-		packetsProcessed:    packetsProcessed,
-		httpRequests:        httpRequests,
-		dnsQueries:          dnsQueries,
-		connectionDuration:  connectionDuration,
-		requestLatency:      requestLatency,
-		eventsProcessed:     eventsProcessed,
-		errorsTotal:         errorsTotal,
+		tracer:              otel.Tracer(name),
+		connectionsTotal:    metrics.connectionsTotal,
+		bytesTransferred:    metrics.bytesTransferred,
+		packetsProcessed:    metrics.packetsProcessed,
+		httpRequests:        metrics.httpRequests,
+		dnsQueries:          metrics.dnsQueries,
+		connectionDuration:  metrics.connectionDuration,
+		requestLatency:      metrics.requestLatency,
+		eventsProcessed:     metrics.eventsProcessed,
+		errorsTotal:         metrics.errorsTotal,
 	}, nil
+}
+
+// initializeObserverDeps initializes observer dependencies
+func initializeObserverDeps(config *Config, logger *zap.Logger) (*Config, *zap.Logger, error) {
+	if config == nil {
+		config = DefaultConfig()
+	}
+
+	if logger == nil {
+		var err error
+		logger, err = zap.NewProduction()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create logger: %w", err)
+		}
+	}
+
+	return config, logger, nil
+}
+
+// observerMetrics holds all metrics for the observer
+type observerMetrics struct {
+	connectionsTotal   metric.Int64Counter
+	bytesTransferred   metric.Int64Counter
+	packetsProcessed   metric.Int64Counter
+	httpRequests       metric.Int64Counter
+	dnsQueries         metric.Int64Counter
+	connectionDuration metric.Float64Histogram
+	requestLatency     metric.Float64Histogram
+	eventsProcessed    metric.Int64Counter
+	errorsTotal        metric.Int64Counter
+}
+
+// createObserverMetrics creates all metrics for the observer
+func createObserverMetrics(name string, logger *zap.Logger) *observerMetrics {
+	meter := otel.Meter(name)
+	m := &observerMetrics{}
+
+	m.connectionsTotal, _ = meter.Int64Counter(
+		fmt.Sprintf("%s_connections_total", name),
+		metric.WithDescription("Total network connections observed"),
+	)
+
+	m.bytesTransferred, _ = meter.Int64Counter(
+		fmt.Sprintf("%s_bytes_transferred_total", name),
+		metric.WithDescription("Total bytes transferred"),
+	)
+
+	m.packetsProcessed, _ = meter.Int64Counter(
+		fmt.Sprintf("%s_packets_processed_total", name),
+		metric.WithDescription("Total packets processed"),
+	)
+
+	m.httpRequests, _ = meter.Int64Counter(
+		fmt.Sprintf("%s_http_requests_total", name),
+		metric.WithDescription("Total HTTP requests observed"),
+	)
+
+	m.dnsQueries, _ = meter.Int64Counter(
+		fmt.Sprintf("%s_dns_queries_total", name),
+		metric.WithDescription("Total DNS queries observed"),
+	)
+
+	m.connectionDuration, _ = meter.Float64Histogram(
+		fmt.Sprintf("%s_connection_duration_ms", name),
+		metric.WithDescription("Connection duration in milliseconds"),
+	)
+
+	m.requestLatency, _ = meter.Float64Histogram(
+		fmt.Sprintf("%s_request_latency_ms", name),
+		metric.WithDescription("Request latency in milliseconds"),
+	)
+
+	m.eventsProcessed, _ = meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription("Total events processed"),
+	)
+
+	m.errorsTotal, _ = meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription("Total errors in observer"),
+	)
+
+	return m
 }
 
 // Name returns the observer name
@@ -227,7 +184,7 @@ func (o *Observer) Start(ctx context.Context) error {
 	}
 
 	o.LifecycleManager.Start("event-processor", func() {
-		o.processEvents()
+		// Event processing handled by eBPF goroutines
 	})
 
 	o.LifecycleManager.Start("metrics-flush", func() {
