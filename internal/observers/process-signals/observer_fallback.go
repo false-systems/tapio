@@ -6,6 +6,8 @@ package processsignals
 import (
 	"context"
 	"time"
+
+	"github.com/cilium/ebpf"
 )
 
 // Stub implementation for non-Linux systems
@@ -44,7 +46,8 @@ func (o *Observer) processEvents(ctx context.Context) {
 
 // Stub types for non-Linux builds
 type runtimeMonitorObjects struct{}
+type processSignalsEBPF struct{}
 
-func loadRuntimeMonitorObjects(obj interface{}, opts interface{}) error {
+func loadRuntimeMonitorObjects(obj *runtimeMonitorObjects, opts *ebpf.CollectionOptions) error {
 	return nil
 }

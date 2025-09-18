@@ -15,11 +15,8 @@ type runtimeEvent struct {
 	CgroupID   uint64
 	Comm       [16]byte
 	ParentComm [16]byte
-	// Union fields - we'll read these based on event type
-	ExecInfo struct {
-		UID uint32
-		GID uint32
-	}
+	// Union data - 24 bytes max (3 * uint64), interpreted based on event type
+	UnionData [24]byte
 }
 
 // CollectorStats tracks collector metrics

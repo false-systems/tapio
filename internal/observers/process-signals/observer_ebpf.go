@@ -7,13 +7,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/attribute"
@@ -21,14 +22,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// ebpfObjects contains all eBPF objects loaded from the compiled program
-type ebpfObjects struct {
-	RuntimeEvents       *ebpf.Map
-	TraceProcessExec    link.Link
-	TraceProcessExit    link.Link
-	TraceSignalGenerate link.Link
-	TraceSignalDeliver  link.Link
-	TraceOomKill        link.Link
+// processSignalsEBPF contains all eBPF state for process signals monitoring
+type processSignalsEBPF struct {
+	objs      *runtimeMonitorObjects
+	reader    *ringbuf.Reader
+	links     []link.Link
+	eventsMap *ebpf.Map
+
+	// Metrics
+	eventsProcessed metric.Int64Counter
+	eventsDropped   metric.Int64Counter
 }
 
 // initializeEBPF loads and attaches the eBPF programs
@@ -63,9 +66,13 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
 
-	// Attach tracepoints
-	state := &ebpfObjects{
-		RuntimeEvents: objs.Events,
+	// Create eBPF state
+	state := &processSignalsEBPF{
+		objs:            objs,
+		links:           make([]link.Link, 0),
+		eventsMap:       objs.Events,
+		eventsProcessed: o.eventsProcessed,
+		eventsDropped:   o.droppedEvents,
 	}
 
 	// Attach process exec tracepoint
@@ -85,7 +92,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		}
 		return fmt.Errorf("failed to attach process exec tracepoint: %w", err)
 	}
-	state.TraceProcessExec = execLink
+	state.links = append(state.links, execLink)
 
 	// Attach process exit tracepoint
 	if o.ebpfAttachTotal != nil {
@@ -105,7 +112,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		execLink.Close()
 		return fmt.Errorf("failed to attach process exit tracepoint: %w", err)
 	}
-	state.TraceProcessExit = exitLink
+	state.links = append(state.links, exitLink)
 
 	// Attach signal generation tracepoint
 	if o.ebpfAttachTotal != nil {
@@ -124,7 +131,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		}
 		// Continue without signal tracking - still valuable
 	} else {
-		state.TraceSignalGenerate = signalGenLink
+		state.links = append(state.links, signalGenLink)
 	}
 
 	// Attach signal deliver tracepoint
@@ -144,7 +151,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		}
 		// Continue without signal tracking
 	} else {
-		state.TraceSignalDeliver = signalDelLink
+		state.links = append(state.links, signalDelLink)
 	}
 
 	// Attach OOM kill kprobe
@@ -164,7 +171,7 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 		}
 		// Continue without OOM tracking
 	} else {
-		state.TraceOomKill = oomLink
+		state.links = append(state.links, oomLink)
 	}
 
 	o.ebpfState = state
@@ -180,41 +187,45 @@ func (o *Observer) initializeEBPF(ctx context.Context) error {
 
 // cleanupEBPF cleans up eBPF resources
 func (o *Observer) cleanupEBPF() {
-	if state, ok := o.ebpfState.(*ebpfObjects); ok {
-		if state.TraceProcessExec != nil {
-			state.TraceProcessExec.Close()
+	if o.ebpfState != nil {
+		// Close all links
+		for _, l := range o.ebpfState.links {
+			if l != nil {
+				l.Close()
+			}
 		}
-		if state.TraceProcessExit != nil {
-			state.TraceProcessExit.Close()
+
+		// Close ring buffer reader
+		if o.ebpfState.reader != nil {
+			o.ebpfState.reader.Close()
 		}
-		if state.TraceSignalGenerate != nil {
-			state.TraceSignalGenerate.Close()
+
+		// Close eBPF objects
+		if o.ebpfState.objs != nil {
+			o.ebpfState.objs.Close()
 		}
-		if state.TraceSignalDeliver != nil {
-			state.TraceSignalDeliver.Close()
-		}
-		if state.TraceOomKill != nil {
-			state.TraceOomKill.Close()
-		}
-		if state.RuntimeEvents != nil {
-			state.RuntimeEvents.Close()
-		}
+
+		o.ebpfState = nil
 	}
-	o.ebpfState = nil
 }
 
-// readEBPFEvents reads events from the eBPF perf buffer
+// readEBPFEvents reads events from the eBPF ring buffer
 func (o *Observer) readEBPFEvents(ctx context.Context, eventsMap *ebpf.Map) {
-	// Create perf reader
-	reader, err := perf.NewReader(eventsMap, 4096)
+	// Create ring buffer reader
+	reader, err := ringbuf.NewReader(eventsMap)
 	if err != nil {
-		o.logger.Error("Failed to create perf reader", zap.Error(err))
+		o.logger.Error("Failed to create ring buffer reader", zap.Error(err))
 		o.BaseObserver.RecordError(err)
 		return
 	}
 	defer reader.Close()
 
-	o.logger.Info("Started reading eBPF events")
+	// Store reader in state for cleanup
+	if o.ebpfState != nil {
+		o.ebpfState.reader = reader
+	}
+
+	o.logger.Info("Started reading eBPF events from ring buffer")
 
 	for {
 		select {
@@ -227,10 +238,10 @@ func (o *Observer) readEBPFEvents(ctx context.Context, eventsMap *ebpf.Map) {
 
 		record, err := reader.Read()
 		if err != nil {
-			if err == perf.ErrClosed {
+			if errors.Is(err, ringbuf.ErrClosed) {
 				return
 			}
-			o.logger.Warn("Error reading from perf buffer", zap.Error(err))
+			o.logger.Warn("Error reading from ring buffer", zap.Error(err))
 			o.BaseObserver.RecordError(err)
 			continue
 		}

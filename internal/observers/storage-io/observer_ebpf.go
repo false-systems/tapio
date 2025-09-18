@@ -4,379 +4,528 @@
 package storageio
 
 import (
-	"bytes"
-	"encoding/binary"
+	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/yairfalse/tapio/internal/observers/storage-io/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
-// IOEvent represents an I/O event from eBPF
-type IOEvent struct {
-	TimestampNs uint64
-	PID         uint32
-	TID         uint32
-	CgroupID    uint64
-	OpType      uint32 // 1=read, 2=write, 3=fsync, 4=iterate_dir
-	Major       uint32
-	Minor       uint32
-	Inode       uint64
-	Size        uint64
-	Latency     uint64 // nanoseconds
-	IsBlocking  uint8
-	_pad        [7]uint8
-	Comm        [16]byte
-	Path        [256]byte
-}
-
-// ebpfObjects contains eBPF objects
-type ebpfObjects struct {
-	Programs map[string]*ebpf.Program
-	Maps     map[string]*ebpf.Map
-}
-
-// ebpfStateImpl contains eBPF-specific state
-type ebpfStateImpl struct {
-	objs       *ebpfObjects
+// CO-RE eBPF implementation
+type coreEBPF struct {
+	collection *ebpf.Collection
 	links      []link.Link
-	perfReader *perf.Reader
+	reader     *ringbuf.Reader
+
+	// Metrics
+	eventsProcessed metric.Int64Counter
+	eventsDropped   metric.Int64Counter
+	slowIOCounter   metric.Int64Counter
+	ioErrors        metric.Int64Counter
+
+	logger *zap.Logger
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
-// startEBPF initializes and attaches eBPF programs
+// startEBPF loads and attaches CO-RE eBPF programs
 func (o *Observer) startEBPF() error {
+	o.logger.Info("Loading CO-RE eBPF programs for storage I/O observer")
+
 	// Remove memory limit for eBPF
 	if err := rlimit.RemoveMemlock(); err != nil {
-		return fmt.Errorf("failed to remove memlock: %w", err)
+		return fmt.Errorf("removing memlock: %w", err)
 	}
 
-	// Load embedded eBPF objects
-	objs, err := o.loadEBPFObjects()
+	// Load eBPF spec
+	spec, err := bpf.LoadStorage()
 	if err != nil {
-		return fmt.Errorf("failed to load eBPF objects: %w", err)
+		return fmt.Errorf("loading BPF spec: %w", err)
 	}
 
-	// Create state
-	state := &ebpfStateImpl{
-		objs:  objs,
-		links: make([]link.Link, 0),
+	// Verify BTF is available
+	if spec.Types == nil {
+		return fmt.Errorf("BTF information not available - CO-RE requires BTF-enabled kernel")
 	}
 
-	// Create perf event reader
-	eventsMap, ok := objs.Maps["events"]
-	if !ok {
-		return fmt.Errorf("events map not found")
+	// Load collection with CO-RE options
+	opts := &ebpf.CollectionOptions{
+		Programs: ebpf.ProgramOptions{
+			LogLevel: ebpf.LogLevelInfo,
+			LogSize:  64 * 1024 * 1024, // 64MB for verifier logs
+		},
 	}
 
-	reader, err := perf.NewReader(eventsMap, o.config.RingBufferSize)
+	coll, err := ebpf.NewCollectionWithOptions(spec, opts)
 	if err != nil {
-		return fmt.Errorf("failed to create perf reader: %w", err)
-	}
-	state.perfReader = reader
-
-	// Attach to VFS functions
-	vfsFuncs := []string{
-		"vfs_read",
-		"vfs_write",
-		"vfs_fsync",
-		"iterate_dir",
-	}
-
-	for _, fn := range vfsFuncs {
-		if prog, ok := objs.Programs[fmt.Sprintf("trace_%s", fn)]; ok {
-			l, err := link.AttachTracing(link.TracingOptions{
-				Program: prog,
-			})
-			if err != nil {
-				o.logger.Warn("Failed to attach to VFS function",
-					zap.String("function", fn),
-					zap.Error(err))
-				continue
-			}
-			state.links = append(state.links, l)
+		var ve *ebpf.VerifierError
+		if errors.As(err, &ve) {
+			o.logger.Error("BPF verifier error",
+				zap.String("error", ve.Error()),
+				zap.String("log", ve.Log))
+			return fmt.Errorf("BPF verifier rejected program: %w", err)
 		}
+		return fmt.Errorf("loading BPF collection: %w", err)
 	}
 
-	o.ebpfState = state
+	o.ebpfState = &coreEBPF{
+		collection:      coll,
+		links:           make([]link.Link, 0),
+		eventsProcessed: o.eventsProcessed,
+		eventsDropped:   o.errorsTotal,
+		slowIOCounter:   o.slowIOOperations,
+		ioErrors:        o.errorsTotal,
+		logger:          o.logger,
+	}
 
-	o.logger.Info("eBPF programs attached",
-		zap.Int("programs", len(state.links)))
+	// Configure thresholds
+	if err := o.configureEBPF(); err != nil {
+		coll.Close()
+		return fmt.Errorf("configuring eBPF: %w", err)
+	}
+
+	// Attach kprobes
+	if err := o.attachCoreProbes(); err != nil {
+		coll.Close()
+		return fmt.Errorf("attaching probes: %w", err)
+	}
+
+	// Create ring buffer reader
+	reader, err := ringbuf.NewReader(coll.Maps["storage_events"])
+	if err != nil {
+		o.closeCoreEBPF()
+		return fmt.Errorf("creating ringbuf reader: %w", err)
+	}
+
+	ebpfState := o.ebpfState.(*coreEBPF)
+	ebpfState.reader = reader
+
+	// Start event processor
+	ctx, cancel := context.WithCancel(context.Background())
+	ebpfState.cancel = cancel
+
+	ebpfState.wg.Add(1)
+	go o.processCoreEvents(ctx)
+
+	// Start metrics collector
+	ebpfState.wg.Add(1)
+	go o.collectCoreMetrics(ctx)
+
+	o.logger.Info("CO-RE eBPF programs loaded successfully")
+	return nil
+}
+
+// Configure eBPF maps with thresholds
+func (o *Observer) configureEBPF() error {
+	ebpfState := o.ebpfState.(*coreEBPF)
+
+	// Set slow I/O threshold
+	configMap := ebpfState.collection.Maps["config"]
+	if configMap == nil {
+		return fmt.Errorf("config map not found")
+	}
+
+	// CONFIG_SLOW_THRESHOLD_NS = 0
+	slowThresholdNs := uint64(o.config.SlowIOThresholdMs) * 1_000_000
+	key := uint32(0)
+	if err := configMap.Update(key, slowThresholdNs, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("updating slow threshold: %w", err)
+	}
+
+	// CONFIG_RATE_LIMIT_NS = 1
+	key = uint32(1)
+	if err := configMap.Update(key, o.config.RateLimitNs, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("updating rate limit: %w", err)
+	}
 
 	return nil
 }
 
-// stopEBPF detaches and cleans up eBPF programs
+// Attach CO-RE kprobes
+func (o *Observer) attachCoreProbes() error {
+	ebpfState := o.ebpfState.(*coreEBPF)
+
+	// Define required probes
+	requiredProbes := []struct {
+		progName string
+		funcName string
+		isReturn bool
+	}{
+		{"trace_vfs_read", "vfs_read", false},
+		{"trace_vfs_read_ret", "vfs_read", true},
+		{"trace_vfs_write", "vfs_write", false},
+		{"trace_vfs_write_ret", "vfs_write", true},
+		{"trace_vfs_fsync", "vfs_fsync", false},
+		{"trace_vfs_fsync_ret", "vfs_fsync", true},
+	}
+
+	// Attach required probes
+	for _, probe := range requiredProbes {
+		if err := o.attachProbe(ebpfState, probe.progName, probe.funcName, probe.isReturn, true); err != nil {
+			return err
+		}
+	}
+
+	// Define optional probes (best-effort attachment)
+	optionalProbes := []struct {
+		progName string
+		funcName string
+		isReturn bool
+	}{
+		{"trace_blk_mq_start_request", "blk_mq_start_request", false},
+		{"trace_blk_account_io_done", "blk_account_io_done", false},
+		{"trace_io_submit", "io_submit", false},
+		{"trace_io_submit_ret", "io_submit", true},
+		{"trace_io_getevents", "io_getevents", false},
+		{"trace_io_getevents_ret", "io_getevents", true},
+	}
+
+	// Attach optional probes (don't fail if they're not available)
+	for _, probe := range optionalProbes {
+		_ = o.attachProbe(ebpfState, probe.progName, probe.funcName, probe.isReturn, false)
+	}
+
+	o.logger.Debug("Attached CO-RE kprobes",
+		zap.Int("count", len(ebpfState.links)))
+
+	return nil
+}
+
+// attachProbe is a helper to attach a single probe
+func (o *Observer) attachProbe(ebpfState *coreEBPF, progName, funcName string, isReturn, required bool) error {
+	prog := ebpfState.collection.Programs[progName]
+	if prog == nil {
+		if required {
+			return fmt.Errorf("%s program not found", progName)
+		}
+		o.logger.Debug("Optional program not found", zap.String("program", progName))
+		return nil
+	}
+
+	var l link.Link
+	var err error
+	if isReturn {
+		l, err = link.Kretprobe(funcName, prog, nil)
+	} else {
+		l, err = link.Kprobe(funcName, prog, nil)
+	}
+	if err != nil {
+		if required {
+			probeType := "kprobe"
+			if isReturn {
+				probeType = "kretprobe"
+			}
+			return fmt.Errorf("attaching %s %s: %w", funcName, probeType, err)
+		}
+		o.logger.Warn("Failed to attach optional probe",
+			zap.String("function", funcName),
+			zap.Bool("isReturn", isReturn),
+			zap.Error(err))
+		return nil
+	}
+
+	ebpfState.links = append(ebpfState.links, l)
+	return nil
+}
+
+// Process events from ring buffer
+func (o *Observer) processCoreEvents(ctx context.Context) {
+	defer o.ebpfState.(*coreEBPF).wg.Done()
+
+	ebpfState := o.ebpfState.(*coreEBPF)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		record, err := ebpfState.reader.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				return
+			}
+			o.logger.Warn("Error reading from ringbuf",
+				zap.Error(err))
+			continue
+		}
+
+		// Parse event
+		if len(record.RawSample) < int(unsafe.Sizeof(StorageEvent{})) {
+			o.logger.Warn("Invalid event size",
+				zap.Int("size", len(record.RawSample)))
+			continue
+		}
+
+		event := (*StorageEvent)(unsafe.Pointer(&record.RawSample[0]))
+
+		// Convert to domain event
+		domainEvent := o.convertCoreToDomainEvent(event)
+
+		// Send to channel
+		select {
+		case o.EventChannelManager.GetChannel() <- domainEvent:
+			o.BaseObserver.RecordEvent()
+			if o.eventsProcessed != nil {
+				o.eventsProcessed.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("type", "storage"),
+						attribute.String("operation", event.EventType.String())))
+			}
+
+			// Track slow I/O
+			if event.IsSlow(float64(o.config.SlowIOThresholdMs)) {
+				if o.slowIOOperations != nil {
+					o.slowIOOperations.Add(ctx, 1,
+						metric.WithAttributes(
+							attribute.String("operation", event.EventType.String())))
+				}
+			}
+
+			// Track errors
+			if event.IsError() {
+				if o.errorsTotal != nil {
+					o.errorsTotal.Add(ctx, 1,
+						metric.WithAttributes(
+							attribute.String("operation", event.EventType.String())))
+				}
+			}
+		default:
+			o.BaseObserver.RecordDrop()
+			if ebpfState.eventsDropped != nil {
+				ebpfState.eventsDropped.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("reason", "channel_full")))
+			}
+		}
+	}
+}
+
+// Collect metrics from BPF maps
+func (o *Observer) collectCoreMetrics(ctx context.Context) {
+	defer o.ebpfState.(*coreEBPF).wg.Done()
+
+	ebpfState := o.ebpfState.(*coreEBPF)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			o.readCoreStats()
+		}
+	}
+}
+
+// Read statistics from BPF maps
+func (o *Observer) readCoreStats() {
+	ebpfState := o.ebpfState.(*coreEBPF)
+
+	statsMap := ebpfState.collection.Maps["stats"]
+	if statsMap == nil {
+		return
+	}
+
+	var stats IOStats
+	key := uint32(0)
+
+	// Read per-CPU stats and aggregate
+	if err := statsMap.Lookup(key, &stats); err == nil {
+		o.logger.Debug("Storage I/O stats",
+			zap.Uint64("reads", stats.TotalReads),
+			zap.Uint64("writes", stats.TotalWrites),
+			zap.Uint64("fsyncs", stats.TotalFsyncs),
+			zap.Uint64("slow_ios", stats.SlowIOs),
+			zap.Uint64("errors", stats.Errors),
+			zap.Uint64("dropped", stats.EventsDropped))
+	}
+}
+
+// Convert BPF event to domain event
+func (o *Observer) convertCoreToDomainEvent(event *StorageEvent) *domain.CollectorEvent {
+	timestamp := time.Unix(0, int64(event.Timestamp))
+
+	// Enrich with Kubernetes information
+	o.EnrichEventWithK8sInfo(event)
+
+	// Determine severity
+	severity := o.determineSeverity(event)
+
+	// Build custom fields
+	customFields := o.buildCustomFields(event)
+
+	// Create domain event
+	return &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("storage-%d-%d", event.PID, event.Timestamp),
+		Timestamp: timestamp,
+		Type:      domain.EventTypeStorageIO,
+		Source:    o.name,
+		Severity:  severity,
+		EventData: domain.EventDataContainer{
+			Storage: &domain.StorageData{
+				Operation: event.EventType.String(),
+				Path:      event.GetFullPath(),
+				Size:      int64(event.Size),
+				LatencyMs: event.GetLatencyMs(),
+				ErrorCode: int(event.ErrorCode),
+				Inode:     event.Inode,
+				Offset:    int64(event.Offset),
+			},
+			Process: &domain.ProcessData{
+				PID:      int32(event.PID),
+				TID:      int32(event.TID),
+				UID:      int32(event.UID),
+				GID:      int32(event.GID),
+				Command:  event.GetComm(),
+				CgroupID: event.CgroupID,
+			},
+			Custom: customFields,
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "storage-io",
+				"core":     "true",
+				"version":  "1.0",
+			},
+		},
+	}
+}
+
+// determineSeverity calculates event severity based on latency and errors
+func (o *Observer) determineSeverity(event *StorageEvent) domain.EventSeverity {
+	if event.IsError() {
+		return domain.EventSeverityError
+	}
+	if event.IsSlow(float64(o.config.BlockingIOThresholdMs)) {
+		return domain.EventSeverityWarning
+	}
+	if event.IsSlow(float64(o.config.SlowIOThresholdMs)) {
+		return domain.EventSeverityNotice
+	}
+	return domain.EventSeverityInfo
+}
+
+// buildCustomFields creates custom field map for the event
+func (o *Observer) buildCustomFields(event *StorageEvent) map[string]string {
+	customFields := map[string]string{
+		"flags":       fmt.Sprintf("0x%x", event.Flags),
+		"file_size":   fmt.Sprintf("%d", event.FileSize),
+		"latency_ns":  fmt.Sprintf("%d", event.LatencyNs),
+		"is_slow":     fmt.Sprintf("%v", event.IsSlow(float64(o.config.SlowIOThresholdMs))),
+		"is_blocking": fmt.Sprintf("%v", event.IsSlow(float64(o.config.BlockingIOThresholdMs))),
+	}
+
+	// Add block layer information if available
+	if event.EventType == StorageEventBlockIO {
+		customFields["device_major"] = fmt.Sprintf("%d", event.Major)
+		customFields["device_minor"] = fmt.Sprintf("%d", event.Minor)
+		customFields["sector"] = fmt.Sprintf("%d", event.Sector)
+		customFields["queue_depth"] = fmt.Sprintf("%d", event.QueueDepth)
+		customFields["bio_flags"] = fmt.Sprintf("0x%x", event.BioFlags)
+	}
+
+	// Add async I/O information if available
+	if event.EventType == StorageEventAIOSubmit || event.EventType == StorageEventAIOComplete {
+		customFields["aio_ctx_id"] = fmt.Sprintf("%d", event.AIOCtxID)
+		customFields["aio_nr_events"] = fmt.Sprintf("%d", event.AIONrEvents)
+		customFields["aio_flags"] = fmt.Sprintf("0x%x", event.AIOFlags)
+	}
+
+	// Add K8s enrichment
+	o.addK8sFieldsToCustom(event, customFields)
+
+	return customFields
+}
+
+// addK8sFieldsToCustom adds Kubernetes-related fields to custom fields
+func (o *Observer) addK8sFieldsToCustom(event *StorageEvent, customFields map[string]string) {
+	// Add container information
+	o.containerCacheMu.RLock()
+	if containerInfo, exists := o.containerCache[event.CgroupID]; exists && containerInfo != nil {
+		if containerInfo.PodName != "" {
+			customFields["k8s_pod"] = containerInfo.PodName
+		}
+		if containerInfo.Namespace != "" {
+			customFields["k8s_namespace"] = containerInfo.Namespace
+		}
+		if containerInfo.ContainerID != "" {
+			customFields["container_id"] = containerInfo.ContainerID
+		}
+	}
+	o.containerCacheMu.RUnlock()
+
+	// Add PVC information if available
+	eventPath := event.GetFullPath()
+	o.mountCacheMu.RLock()
+	for mountPath, mountInfo := range o.mountCache {
+		if strings.HasPrefix(eventPath, mountPath) && mountInfo.PVCName != "" {
+			customFields["k8s_pvc"] = mountInfo.PVCName
+			customFields["k8s_storage_class"] = mountInfo.StorageClass
+			customFields["volume_type"] = mountInfo.VolumeType
+			break
+		}
+	}
+	o.mountCacheMu.RUnlock()
+}
+
+// Close CO-RE eBPF
 func (o *Observer) stopEBPF() {
 	if o.ebpfState == nil {
 		return
 	}
 
-	state, ok := o.ebpfState.(*ebpfStateImpl)
-	if !ok {
-		return
+	ebpfState := o.ebpfState.(*coreEBPF)
+
+	// Cancel context
+	if ebpfState.cancel != nil {
+		ebpfState.cancel()
 	}
 
-	// Close perf reader
-	if state.perfReader != nil {
-		state.perfReader.Close()
+	// Close reader
+	if ebpfState.reader != nil {
+		ebpfState.reader.Close()
 	}
 
-	// Detach all programs
-	for _, l := range state.links {
-		if l != nil {
-			l.Close()
-		}
+	// Wait for goroutines
+	ebpfState.wg.Wait()
+
+	// Detach probes
+	for _, l := range ebpfState.links {
+		l.Close()
 	}
 
-	// Close eBPF objects
-	if state.objs != nil {
-		for _, prog := range state.objs.Programs {
-			if prog != nil {
-				prog.Close()
-			}
-		}
-		for _, m := range state.objs.Maps {
-			if m != nil {
-				m.Close()
-			}
-		}
+	// Close collection
+	if ebpfState.collection != nil {
+		ebpfState.collection.Close()
 	}
 
-	o.ebpfState = nil
+	o.logger.Info("CO-RE eBPF programs closed")
 }
 
-// processEventsImpl processes events from eBPF ring buffer
-func (o *Observer) processEventsImpl() {
-	if o.ebpfState == nil {
-		o.logger.Error("No eBPF state available")
-		return
-	}
-
-	state, ok := o.ebpfState.(*ebpfStateImpl)
-	if !ok || state.perfReader == nil {
-		return
-	}
-
-	for {
-		select {
-		case <-o.LifecycleManager.Context().Done():
-			return
-		default:
-		}
-
-		record, err := state.perfReader.Read()
-		if err != nil {
-			if errors.Is(err, perf.ErrClosed) {
-				return
-			}
-			o.logger.Warn("Failed to read from ring buffer", zap.Error(err))
-			continue
-		}
-
-		// Parse the event
-		if len(record.RawSample) < int(unsafe.Sizeof(IOEvent{})) {
-			continue
-		}
-
-		var event IOEvent
-		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
-			o.logger.Error("Failed to decode event", zap.Error(err))
-			continue
-		}
-
-		// Process the event
-		o.handleIOEvent(&event)
+// closeCoreEBPF is a helper for cleanup during initialization
+func (o *Observer) closeCoreEBPF() {
+	if o.ebpfState != nil {
+		o.stopEBPF()
 	}
 }
 
-// handleIOEvent processes a single I/O event
-func (o *Observer) handleIOEvent(event *IOEvent) {
-	// Convert to domain event
-	latencyMs := float64(event.Latency) / 1_000_000.0
-	path := bytesToString(event.Path[:])
-	comm := bytesToString(event.Comm[:])
-
-	// Update metrics
-	if o.vfsOperations != nil {
-		o.vfsOperations.Add(o.LifecycleManager.Context(), 1,
-			metric.WithAttributes(attribute.String("operation", getOpTypeName(event.OpType))))
-	}
-
-	if o.ioLatencyHistogram != nil {
-		o.ioLatencyHistogram.Record(o.LifecycleManager.Context(), latencyMs,
-			metric.WithAttributes(attribute.String("operation", getOpTypeName(event.OpType))))
-	}
-
-	// Check for slow I/O
-	if latencyMs > float64(o.config.SlowIOThresholdMs) {
-		o.handleSlowIO(event, path, latencyMs)
-	}
-
-	// Check for blocking I/O
-	if event.IsBlocking == 1 && latencyMs > float64(o.config.BlockingIOThresholdMs) {
-		o.handleBlockingIO(event, path, latencyMs)
-	}
-
-	// Check if it's a K8s volume operation
-	if o.isK8sVolumePath(path) {
-		if o.k8sVolumeOperations != nil {
-			o.k8sVolumeOperations.Add(o.LifecycleManager.Context(), 1)
-		}
-	}
-
-	// Create domain event for significant I/O issues
-	if latencyMs > float64(o.config.SlowIOThresholdMs) || event.IsBlocking == 1 {
-		domainEvent := &domain.CollectorEvent{
-			EventID:   fmt.Sprintf("storage-io-%d-%d", event.PID, event.TimestampNs),
-			Timestamp: time.Unix(0, int64(event.TimestampNs)),
-			Type:      domain.EventTypeStorageIO,
-			Source:    o.name,
-			Severity:  o.getSeverity(latencyMs, event.IsBlocking == 1),
-			EventData: domain.EventDataContainer{
-				StorageIO: &domain.StorageIOData{
-					Operation: getOpTypeName(event.OpType),
-					Path:      path,
-					Duration:  time.Duration(latencyMs) * time.Millisecond,
-					Size:      int64(event.Size),
-					SlowIO:    latencyMs > float64(o.config.SlowIOThresholdMs),
-					BlockedIO: event.IsBlocking == 1,
-					Device:    fmt.Sprintf("%d:%d", event.Major, event.Minor),
-					Inode:     event.Inode,
-				},
-				Process: &domain.ProcessData{
-					PID:     int32(event.PID),
-					TID:     int32(event.TID),
-					Command: comm,
-				},
-			},
-			Metadata: domain.EventMetadata{
-				Labels: map[string]string{
-					"slow":     fmt.Sprintf("%v", latencyMs > float64(o.config.SlowIOThresholdMs)),
-					"blocking": fmt.Sprintf("%v", event.IsBlocking == 1),
-				},
-			},
-		}
-
-		if o.EventChannelManager.SendEvent(domainEvent) {
-			o.BaseObserver.RecordEvent()
-			if o.eventsProcessed != nil {
-				o.eventsProcessed.Add(o.LifecycleManager.Context(), 1)
-			}
-		} else {
-			o.BaseObserver.RecordDrop()
-		}
-	}
-}
-
-// handleSlowIO handles slow I/O events
-func (o *Observer) handleSlowIO(event *IOEvent, path string, latencyMs float64) {
-	if o.slowIOOperations != nil {
-		o.slowIOOperations.Add(o.LifecycleManager.Context(), 1,
-			metric.WithAttributes(
-				attribute.String("path", path),
-				attribute.String("operation", getOpTypeName(event.OpType))))
-	}
-
-	// Update cache
-	o.slowIOCacheMu.Lock()
-	if entry, ok := o.slowIOCache[path]; ok {
-		entry.Count++
-		entry.LastSeen = time.Now()
-		if time.Duration(latencyMs)*time.Millisecond > entry.Latency {
-			entry.Latency = time.Duration(latencyMs) * time.Millisecond
-		}
-	} else {
-		o.slowIOCache[path] = &SlowIOEvent{
-			Path:      path,
-			Operation: getOpTypeName(event.OpType),
-			Latency:   time.Duration(latencyMs) * time.Millisecond,
-			Count:     1,
-			LastSeen:  time.Now(),
-		}
-	}
-	o.slowIOCacheMu.Unlock()
-}
-
-// handleBlockingIO handles blocking I/O events
-func (o *Observer) handleBlockingIO(event *IOEvent, path string, latencyMs float64) {
-	if o.blockingIOEvents != nil {
-		o.blockingIOEvents.Add(o.LifecycleManager.Context(), 1,
-			metric.WithAttributes(
-				attribute.String("path", path),
-				attribute.String("operation", getOpTypeName(event.OpType))))
-	}
-
-	o.logger.Warn("Blocking I/O detected",
-		zap.String("path", path),
-		zap.String("operation", getOpTypeName(event.OpType)),
-		zap.Float64("latencyMs", latencyMs),
-		zap.Uint32("pid", event.PID))
-}
-
-// isK8sVolumePath checks if a path is a Kubernetes volume path
-func (o *Observer) isK8sVolumePath(path string) bool {
-	for _, monitored := range o.config.MonitoredK8sPaths {
-		if len(path) >= len(monitored) && path[:len(monitored)] == monitored {
-			return true
-		}
-	}
-	return false
-}
-
-// getSeverity determines event severity based on latency and blocking status
-func (o *Observer) getSeverity(latencyMs float64, isBlocking bool) domain.EventSeverity {
-	if isBlocking && latencyMs > 5000 {
-		return domain.EventSeverityCritical
-	}
-	if latencyMs > 1000 || (isBlocking && latencyMs > 1000) {
-		return domain.EventSeverityError
-	}
-	if latencyMs > float64(o.config.SlowIOThresholdMs) {
-		return domain.EventSeverityWarning
-	}
-	return domain.EventSeverityInfo
-}
-
-// loadEBPFObjects loads pre-compiled eBPF objects
-func (o *Observer) loadEBPFObjects() (*ebpfObjects, error) {
-	// This would normally load from embedded bytecode
-	// For now, returning placeholder
-	return &ebpfObjects{
-		Programs: make(map[string]*ebpf.Program),
-		Maps:     make(map[string]*ebpf.Map),
-	}, nil
-}
-
-// Helper functions
-func bytesToString(data []byte) string {
-	for i, b := range data {
-		if b == 0 {
-			return string(data[:i])
-		}
-	}
-	return string(data)
-}
-
-func getOpTypeName(opType uint32) string {
-	switch opType {
-	case 1:
-		return "read"
-	case 2:
-		return "write"
-	case 3:
-		return "fsync"
-	case 4:
-		return "iterate_dir"
-	default:
-		return fmt.Sprintf("unknown_%d", opType)
-	}
+// readEBPFEvents is called by the observer lifecycle - delegates to processCoreEvents
+func (o *Observer) readEBPFEvents() {
+	// This is handled by processCoreEvents goroutine started in startEBPF
+	// Keep this method for compatibility with observer interface
 }
