@@ -108,11 +108,9 @@ func TestObserverStatistics(t *testing.T) {
 	stats := observer.Statistics()
 	assert.NotNil(t, stats)
 
-	// Check it returns domain.CollectorStats
-	observerStats, ok := stats.(*domain.CollectorStats)
-	assert.True(t, ok)
-	assert.Equal(t, int64(0), observerStats.EventsProcessed)
-	assert.Equal(t, int64(0), observerStats.ErrorCount)
+	// Check statistics values
+	assert.Equal(t, int64(0), stats.EventsProcessed)
+	assert.Equal(t, int64(0), stats.ErrorCount)
 }
 
 func TestObserverHealth(t *testing.T) {

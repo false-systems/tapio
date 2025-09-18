@@ -36,6 +36,7 @@ typedef unsigned short umode_t;
 typedef unsigned long size_t;
 typedef long ssize_t;
 typedef __u32 gfp_t;
+typedef __u64 sector_t;
 
 /* Short type aliases commonly used in eBPF programs */
 typedef __u8 u8;
@@ -96,6 +97,7 @@ struct file_operations;
 struct net_device;
 struct siginfo;
 struct k_sigaction;
+struct bio;
 
 /* Namespace structures */
 struct ns_common {
@@ -341,12 +343,41 @@ struct inode {
     unsigned long i_ino;
     dev_t i_rdev;
     loff_t i_size;
+    struct super_block *i_sb;
 } __attribute__((preserve_access_index));
 
 struct dentry {
     struct qstr d_name;
     struct inode *d_inode;
     struct dentry *d_parent;
+} __attribute__((preserve_access_index));
+
+struct super_block {
+    dev_t s_dev;
+    unsigned long s_blocksize;
+    unsigned char s_blocksize_bits;
+    unsigned long s_flags;
+} __attribute__((preserve_access_index));
+
+/* Block layer structures */
+struct gendisk {
+    int major;
+    int first_minor;
+    int minors;
+    char disk_name[32];
+} __attribute__((preserve_access_index));
+
+struct request_queue;
+
+struct request {
+    struct request_queue *q;
+    sector_t __sector;
+    struct bio *bio;
+    struct bio *biotail;
+    struct gendisk *rq_disk;
+    unsigned int __data_len;
+    int tag;
+    __u64 start_time_ns;
 } __attribute__((preserve_access_index));
 
 /* Memory management */

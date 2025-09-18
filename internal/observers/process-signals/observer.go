@@ -59,7 +59,7 @@ type Observer struct {
 	logger *zap.Logger
 
 	// eBPF components (platform-specific)
-	ebpfState interface{}
+	ebpfState *processSignalsEBPF
 
 	// Signal correlation engine
 	signalTracker *SignalTracker
@@ -354,7 +354,7 @@ func (o *Observer) IsHealthy() bool {
 }
 
 // Statistics returns observer statistics
-func (o *Observer) Statistics() interface{} {
+func (o *Observer) Statistics() *domain.CollectorStats {
 	stats := o.BaseObserver.Statistics()
 
 	// Add runtime-specific stats
