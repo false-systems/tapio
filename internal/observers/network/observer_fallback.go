@@ -70,6 +70,8 @@ func (o *Observer) createMockHTTPEvent(eventCount int) *domain.CollectorEvent {
 		EventData: o.createHTTPEventData(eventCount, method, path, host, srcPort),
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
+				"observer":  "network",
+				"version":   "1.0",
 				"protocol":  "TCP",
 				"direction": "outbound",
 				"l7":        "HTTP",
@@ -81,28 +83,13 @@ func (o *Observer) createMockHTTPEvent(eventCount int) *domain.CollectorEvent {
 // createHTTPEventData creates the event data for an HTTP mock event
 func (o *Observer) createHTTPEventData(eventCount int, method, path, host string, srcPort int32) domain.EventDataContainer {
 	return domain.EventDataContainer{
-		Network: &domain.NetworkData{
-			EventType:   "request",
-			Protocol:    "TCP",
-			SrcIP:       fmt.Sprintf("10.0.%d.%d", (eventCount/256)%256, eventCount%256),
-			DstIP:       fmt.Sprintf("10.0.100.%d", (eventCount%50)+1),
-			SrcPort:     srcPort,
-			DstPort:     80,
-			PayloadSize: int64(200 + (eventCount*43)%1000),
-			Direction:   "outbound",
-			L7Protocol:  "HTTP",
-			L7Data: &domain.NetworkL7Data{
-				Protocol: "HTTP",
-				HTTPData: &domain.HTTPRequestData{
-					Method: method,
-					URL:    fmt.Sprintf("http://%s%s", host, path),
-					Path:   path,
-					Headers: map[string]string{
-						"User-Agent": fmt.Sprintf("mock-client/%d.0", (eventCount%3)+1),
-						"Host":       host,
-					},
-				},
-			},
+		HTTP: &domain.HTTPData{
+			Method:       method,
+			URL:          fmt.Sprintf("http://%s%s", host, path),
+			StatusCode:   200,
+			Duration:     time.Duration((10 + eventCount%100)) * time.Millisecond,
+			RequestSize:  int64(100 + (eventCount*13)%500),
+			ResponseSize: int64(200 + (eventCount*43)%1000),
 		},
 		Process: &domain.ProcessData{
 			PID:     int32(1000 + eventCount%1000),
@@ -112,6 +99,10 @@ func (o *Observer) createHTTPEventData(eventCount int, method, path, host string
 		Custom: map[string]string{
 			"mock":     "true",
 			"platform": "non-linux",
+			"src_ip":   fmt.Sprintf("10.0.%d.%d", (eventCount/256)%256, eventCount%256),
+			"dst_ip":   fmt.Sprintf("10.0.100.%d", (eventCount%50)+1),
+			"src_port": fmt.Sprintf("%d", srcPort),
+			"dst_port": "80",
 		},
 	}
 }
@@ -136,6 +127,8 @@ func (o *Observer) createMockDNSEvent(eventCount int) *domain.CollectorEvent {
 		EventData: o.createDNSEventData(eventCount, dnsName, queryType, resolver, dnsSrcPort),
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
+				"observer": "network",
+				"version":  "1.0",
 				"protocol": "UDP",
 				"l7":       "DNS",
 			},
@@ -153,30 +146,16 @@ func (o *Observer) createDNSEventData(eventCount int, dnsName, queryType, resolv
 			ResponseCode: 0,
 			Answers:      []string{answer},
 			Duration:     time.Duration((15 + eventCount%50)) * time.Millisecond,
+			ClientIP:     fmt.Sprintf("10.0.%d.%d", (eventCount/256)%256, eventCount%256),
 			ServerIP:     resolver,
 		},
-		Network: &domain.NetworkData{
-			EventType:   "query",
-			Protocol:    "UDP",
-			SrcIP:       fmt.Sprintf("10.0.%d.%d", (eventCount/256)%256, eventCount%256),
-			DstIP:       resolver,
-			SrcPort:     srcPort,
-			DstPort:     53,
-			PayloadSize: int64(40 + (eventCount*7)%100),
-			Direction:   "outbound",
-			L7Protocol:  "DNS",
-			L7Data: &domain.NetworkL7Data{
-				Protocol: "DNS",
-				DNSData: &domain.DNSQueryData{
-					Query:     dnsName,
-					QueryType: queryType,
-					Answers:   []string{answer},
-				},
-			},
-		},
 		Custom: map[string]string{
-			"mock":     "true",
-			"platform": "non-linux",
+			"mock":      "true",
+			"platform":  "non-linux",
+			"src_port":  fmt.Sprintf("%d", srcPort),
+			"dst_port":  "53",
+			"protocol":  "UDP",
+			"direction": "outbound",
 		},
 	}
 }

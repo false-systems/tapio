@@ -139,13 +139,31 @@ func TestEventSending(t *testing.T) {
 	require.NoError(t, err)
 	defer observer.Stop()
 
-	// Create test event
+	// Create test event with proper validation fields
 	event := &domain.CollectorEvent{
 		EventID:   "test-1",
 		Timestamp: time.Now(),
-		Type:      "network",
+		Type:      domain.EventTypeTCP,
 		Source:    "test",
-		Severity:  "info",
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Network: &domain.NetworkData{
+				EventType:   "connection",
+				Protocol:    "TCP",
+				SrcIP:       "10.0.0.1",
+				DstIP:       "10.0.0.2",
+				SrcPort:     12345,
+				DstPort:     80,
+				PayloadSize: 1024,
+				Direction:   "outbound",
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "test",
+				"version":  "1.0",
+			},
+		},
 	}
 
 	// Send event
