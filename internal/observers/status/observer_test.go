@@ -18,14 +18,15 @@ func TestStatusObserver(t *testing.T) {
 
 	config := &Config{
 		Enabled:         true,
+		BufferSize:      1000,
 		SampleRate:      1.0,
 		MaxEventsPerSec: 1000,
-		MaxMemoryMB:     10,
 		FlushInterval:   100 * time.Millisecond,
-		RedactHeaders:   []string{"Authorization"},
+		EnableL7Parse:   true,
+		Logger:          logger,
 	}
 
-	observer, err := NewObserver(config, logger)
+	observer, err := NewObserver("test-status", config)
 	require.NoError(t, err)
 	assert.NotNil(t, observer)
 
@@ -175,10 +176,12 @@ func TestObserverLifecycle(t *testing.T) {
 	logger := zap.NewNop()
 	config := &Config{
 		Enabled:       true,
+		BufferSize:    1000,
 		FlushInterval: 100 * time.Millisecond,
+		Logger:        logger,
 	}
 
-	observer, err := NewObserver(config, logger)
+	observer, err := NewObserver("test-status", config)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
