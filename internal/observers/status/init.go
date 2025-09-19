@@ -3,8 +3,8 @@ package status
 import (
 	"time"
 
-	"go.uber.org/zap"
 	"github.com/yairfalse/tapio/internal/observers/common"
+	"go.uber.org/zap"
 )
 
 func init() {

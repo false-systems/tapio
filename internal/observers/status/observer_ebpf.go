@@ -433,12 +433,12 @@ func getErrorTypeName(errorType uint16) string {
 
 // Error type constants (must match BPF code)
 const (
-	STATUS_OK               = 0
-	STATUS_ERROR_TIMEOUT    = 1
-	STATUS_ERROR_REFUSED    = 2
-	STATUS_ERROR_RESET      = 3
-	STATUS_ERROR_5XX        = 4
-	STATUS_ERROR_4XX        = 5
-	STATUS_ERROR_SLOW       = 6
-	STATUS_ERROR_PARTIAL    = 7
+	STATUS_OK            = 0
+	STATUS_ERROR_TIMEOUT = 1
+	STATUS_ERROR_REFUSED = 2
+	STATUS_ERROR_RESET   = 3
+	STATUS_ERROR_5XX     = 4
+	STATUS_ERROR_4XX     = 5
+	STATUS_ERROR_SLOW    = 6
+	STATUS_ERROR_PARTIAL = 7
 )
