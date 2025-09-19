@@ -303,6 +303,11 @@ func (o *Observer) Statistics() *domain.CollectorStats {
 	return o.BaseObserver.Statistics()
 }
 
+// Health returns detailed health status
+func (o *Observer) Health() *domain.HealthStatus {
+	return o.BaseObserver.Health()
+}
+
 // IsHealthy returns observer health status
 func (o *Observer) IsHealthy() bool {
 	return o.BaseObserver.IsHealthy()
