@@ -5,6 +5,7 @@ package network
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -474,32 +475,78 @@ func (o *Observer) convertBPFEvent(bpfEvent *BPFNetworkEvent) *NetworkEvent {
 
 // createDomainEvent creates a domain event from network event
 func (o *Observer) createDomainEvent(ctx context.Context, netEvent *NetworkEvent) *domain.CollectorEvent {
+	// Determine event type and populate correct field based on L7 protocol
+	var eventType domain.CollectorEventType
+	eventData := domain.EventDataContainer{
+		Process: &domain.ProcessData{
+			PID:     int32(netEvent.PID),
+			TID:     int32(netEvent.TID),
+			Command: netEvent.Command,
+		},
+	}
+
+	// Separate L7 protocols into their proper fields
+	switch netEvent.L7Protocol {
+	case "HTTP", "HTTPS":
+		eventType = domain.EventTypeHTTP
+		eventData.HTTP = &domain.HTTPData{
+			Method:       "GET", // L7 parsing not yet implemented
+			URL:          fmt.Sprintf("%s://%s:%d/", netEvent.L7Protocol, netEvent.DstIP, netEvent.DstPort),
+			StatusCode:   0, // L7 parsing not yet implemented
+			Duration:     netEvent.Latency,
+			RequestSize:  int64(netEvent.BytesSent),
+			ResponseSize: int64(netEvent.BytesRecv),
+		}
+
+	case "DNS":
+		eventType = domain.EventTypeDNS
+		eventData.DNS = &domain.DNSData{
+			QueryName:    "unknown", // L7 parsing not yet implemented
+			QueryType:    "A",       // L7 parsing not yet implemented
+			ClientIP:     netEvent.SrcIP.String(),
+			ServerIP:     netEvent.DstIP.String(),
+			Duration:     netEvent.Latency,
+			ResponseCode: 0, // L7 parsing not yet implemented
+		}
+
+	case "GRPC":
+		eventType = domain.EventTypeGRPC
+		eventData.GRPC = &domain.GRPCData{
+			Method:       "unknown", // L7 parsing not yet implemented
+			Service:      "unknown", // L7 parsing not yet implemented
+			StatusCode:   0,         // L7 parsing not yet implemented
+			Duration:     netEvent.Latency,
+			RequestSize:  int64(netEvent.BytesSent),
+			ResponseSize: int64(netEvent.BytesRecv),
+		}
+
+	default:
+		// L4 protocols (TCP/UDP) or unknown L7 protocols use Network field
+		eventType = domain.EventTypeTCP
+		eventData.Network = &domain.NetworkData{
+			EventType:   netEvent.EventType,
+			Protocol:    netEvent.Protocol,
+			SrcIP:       netEvent.SrcIP.String(),
+			DstIP:       netEvent.DstIP.String(),
+			SrcPort:     int32(netEvent.SrcPort),
+			DstPort:     int32(netEvent.DstPort),
+			PayloadSize: int64(netEvent.BytesSent + netEvent.BytesRecv),
+			Direction:   netEvent.Direction,
+			L7Protocol:  netEvent.L7Protocol,
+		}
+	}
+
 	return &domain.CollectorEvent{
 		EventID:   netEvent.EventID,
 		Timestamp: netEvent.Timestamp,
-		Type:      "network",
+		Type:      eventType,
 		Source:    o.name,
 		Severity:  "info",
-		EventData: domain.EventDataContainer{
-			Network: &domain.NetworkData{
-				EventType:   netEvent.EventType,
-				Protocol:    netEvent.Protocol,
-				SrcIP:       netEvent.SrcIP.String(),
-				DstIP:       netEvent.DstIP.String(),
-				SrcPort:     int32(netEvent.SrcPort),
-				DstPort:     int32(netEvent.DstPort),
-				PayloadSize: int64(netEvent.BytesSent + netEvent.BytesRecv),
-				Direction:   netEvent.Direction,
-				L7Protocol:  netEvent.L7Protocol,
-			},
-			Process: &domain.ProcessData{
-				PID:     int32(netEvent.PID),
-				TID:     int32(netEvent.TID),
-				Command: netEvent.Command,
-			},
-		},
+		EventData: eventData,
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
+				"observer":  "network",
+				"version":   "1.0",
 				"protocol":  netEvent.Protocol,
 				"direction": netEvent.Direction,
 				"pod_uid":   netEvent.PodUID,

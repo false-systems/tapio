@@ -1,6 +1,7 @@
 package base
 
 import (
+	"os"
 	"sync/atomic"
 
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -14,20 +15,44 @@ type EventChannelManager struct {
 	sentCount     atomic.Int64
 	logger        *zap.Logger
 	collectorName string
+	validator     *EventValidator // Event validation
 }
 
 // NewEventChannelManager creates a new event channel manager
 func NewEventChannelManager(size int, collectorName string, logger *zap.Logger) *EventChannelManager {
+	// Enable strict validation in development
+	strictMode := false
+	if env := os.Getenv("TAPIO_STRICT_VALIDATION"); env == "true" {
+		strictMode = true
+	}
+
 	return &EventChannelManager{
 		channel:       make(chan *domain.CollectorEvent, size),
 		logger:        logger,
 		collectorName: collectorName,
+		validator:     NewEventValidator(collectorName, logger, strictMode),
 	}
 }
 
 // SendEvent attempts to send an event through the channel
 // Returns true if sent successfully, false if dropped
 func (ecm *EventChannelManager) SendEvent(event *domain.CollectorEvent) bool {
+	// Validate event structure before sending
+	if ecm.validator != nil {
+		if err := ecm.validator.ValidateEvent(event); err != nil {
+			// Validation failed - count as dropped
+			ecm.droppedCount.Add(1)
+			if ecm.logger != nil {
+				ecm.logger.Error("Event validation failed, dropping event",
+					zap.String("collector", ecm.collectorName),
+					zap.String("event_id", event.EventID),
+					zap.Error(err),
+				)
+			}
+			return false
+		}
+	}
+
 	select {
 	case ecm.channel <- event:
 		ecm.sentCount.Add(1)

@@ -157,7 +157,7 @@ func (o *Observer) configureEBPF() error {
 func (o *Observer) attachCoreProbes() error {
 	ebpfState := o.ebpfState.(*coreEBPF)
 
-	// Define required probes
+	// Required VFS probes for file operation tracking
 	requiredProbes := []struct {
 		progName string
 		funcName string
@@ -178,8 +178,8 @@ func (o *Observer) attachCoreProbes() error {
 		}
 	}
 
-	// Define optional probes (best-effort attachment)
-	optionalProbes := []struct {
+	// Required block layer and AIO probes (per user requirements)
+	requiredAdvancedProbes := []struct {
 		progName string
 		funcName string
 		isReturn bool
@@ -192,9 +192,13 @@ func (o *Observer) attachCoreProbes() error {
 		{"trace_io_getevents_ret", "io_getevents", true},
 	}
 
-	// Attach optional probes (don't fail if they're not available)
-	for _, probe := range optionalProbes {
-		_ = o.attachProbe(ebpfState, probe.progName, probe.funcName, probe.isReturn, false)
+	// Attach advanced probes (best effort - warn if unavailable)
+	for _, probe := range requiredAdvancedProbes {
+		if err := o.attachProbe(ebpfState, probe.progName, probe.funcName, probe.isReturn, false); err != nil {
+			o.logger.Warn("Advanced probe not available",
+				zap.String("probe", probe.progName),
+				zap.Error(err))
+		}
 	}
 
 	o.logger.Debug("Attached CO-RE kprobes",
@@ -363,6 +367,9 @@ func (o *Observer) convertCoreToDomainEvent(event *StorageEvent) *domain.Collect
 	// Enrich with Kubernetes information
 	o.EnrichEventWithK8sInfo(event)
 
+	// Get K8s enrichment for main StorageIOData fields
+	k8sInfo := o.getK8sEnrichment(event)
+
 	// Determine severity
 	severity := o.determineSeverity(event)
 
@@ -377,14 +384,25 @@ func (o *Observer) convertCoreToDomainEvent(event *StorageEvent) *domain.Collect
 		Source:    o.name,
 		Severity:  severity,
 		EventData: domain.EventDataContainer{
-			Storage: &domain.StorageData{
-				Operation: event.EventType.String(),
-				Path:      event.GetFullPath(),
-				Size:      int64(event.Size),
-				LatencyMs: event.GetLatencyMs(),
-				ErrorCode: int(event.ErrorCode),
-				Inode:     event.Inode,
-				Offset:    int64(event.Offset),
+			StorageIO: &domain.StorageIOData{
+				Operation:    event.EventType.String(),
+				Path:         event.GetFullPath(),
+				Size:         int64(event.Size),
+				Offset:       int64(event.Offset),
+				Duration:     time.Duration(event.LatencyNs),
+				SlowIO:       event.IsSlow(float64(o.config.SlowIOThresholdMs)),
+				BlockedIO:    event.IsSlow(float64(o.config.BlockingIOThresholdMs)),
+				Device:       fmt.Sprintf("%d:%d", event.Major, event.Minor),
+				Inode:        event.Inode,
+				VFSLayer:     o.getVFSLayer(event.EventType),
+				Flags:        event.Flags,
+				Mode:         event.Mode,
+				LatencyMS:    event.GetLatencyMs(),
+				ErrorCode:    int32(event.ErrorCode),
+				K8sPath:      k8sInfo.K8sPath,
+				VolumeType:   k8sInfo.VolumeType,
+				PVCName:      k8sInfo.PVCName,
+				StorageClass: k8sInfo.StorageClass,
 			},
 			Process: &domain.ProcessData{
 				PID:      int32(event.PID),
@@ -403,6 +421,75 @@ func (o *Observer) convertCoreToDomainEvent(event *StorageEvent) *domain.Collect
 				"version":  "1.0",
 			},
 		},
+	}
+}
+
+// K8sEnrichmentData holds Kubernetes enrichment information
+type K8sEnrichmentData struct {
+	K8sPath      string
+	VolumeType   string
+	PVCName      string
+	StorageClass string
+}
+
+// getK8sEnrichment extracts Kubernetes context for the event
+func (o *Observer) getK8sEnrichment(event *StorageEvent) K8sEnrichmentData {
+	k8sInfo := K8sEnrichmentData{}
+	eventPath := event.GetFullPath()
+
+	// Check if this is a Kubernetes-related path
+	for _, k8sPath := range o.config.MonitoredK8sPaths {
+		if strings.HasPrefix(eventPath, k8sPath) {
+			k8sInfo.K8sPath = k8sPath
+			break
+		}
+	}
+
+	// Extract PVC information from mount cache
+	o.mountCacheMu.RLock()
+	for mountPath, mountInfo := range o.mountCache {
+		if strings.HasPrefix(eventPath, mountPath) && mountInfo.PVCName != "" {
+			k8sInfo.PVCName = mountInfo.PVCName
+			k8sInfo.StorageClass = mountInfo.StorageClass
+			k8sInfo.VolumeType = mountInfo.VolumeType
+			break
+		}
+	}
+	o.mountCacheMu.RUnlock()
+
+	// If no specific volume type found, infer from path
+	if k8sInfo.VolumeType == "" && k8sInfo.K8sPath != "" {
+		if strings.Contains(eventPath, "/configmap/") {
+			k8sInfo.VolumeType = "ConfigMap"
+		} else if strings.Contains(eventPath, "/secret/") {
+			k8sInfo.VolumeType = "Secret"
+		} else if strings.Contains(eventPath, "/pvc/") {
+			k8sInfo.VolumeType = "PVC"
+		} else {
+			k8sInfo.VolumeType = "HostPath"
+		}
+	}
+
+	return k8sInfo
+}
+
+// getVFSLayer maps event type to VFS layer name
+func (o *Observer) getVFSLayer(eventType StorageEventType) string {
+	switch eventType {
+	case StorageEventRead:
+		return "vfs_read"
+	case StorageEventWrite:
+		return "vfs_write"
+	case StorageEventFsync:
+		return "vfs_fsync"
+	case StorageEventBlockIO:
+		return "block_layer"
+	case StorageEventAIOSubmit:
+		return "aio_submit"
+	case StorageEventAIOComplete:
+		return "aio_complete"
+	default:
+		return "vfs_" + strings.ToLower(eventType.String())
 	}
 }
 
