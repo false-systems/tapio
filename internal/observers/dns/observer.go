@@ -14,219 +14,231 @@ import (
 	"go.uber.org/zap"
 )
 
-// Config for DNS observer focused on operational monitoring
-type Config struct {
-	Name                  string               `json:"name"`
-	BufferSize            int                  `json:"buffer_size"`
-	EnableEBPF            bool                 `json:"enable_ebpf"`
-	XDPInterfaces         []string             `json:"xdp_interfaces,omitempty"` // Specific interfaces for XDP
-	CircuitBreakerConfig  CircuitBreakerConfig `json:"circuit_breaker_config"`
-	ContainerIDExtraction bool                 `json:"container_id_extraction"` // Enable container ID parsing
-	ParseAnswers          bool                 `json:"parse_answers"`           // Parse DNS answers for resolved IPs
-	Labels                map[string]string    `json:"labels,omitempty"`        // Labels to add to all events
-}
-
-// DefaultConfig returns sensible defaults for operational monitoring
-func DefaultConfig() Config {
-	return Config{
-		Name:                  "dns",
-		BufferSize:            10000,
-		EnableEBPF:            true,
-		XDPInterfaces:         nil, // Auto-detect if nil
-		CircuitBreakerConfig:  DefaultCircuitBreakerConfig(),
-		ContainerIDExtraction: true,
-		ParseAnswers:          true,
-	}
-}
-
-// Observer implements DNS monitoring with cross-platform support
+// Observer implements DNS problem detection (negative observer - only tracks problems)
 type Observer struct {
-	*base.BaseObserver        // Provides Statistics() and Health()
-	*base.EventChannelManager // Handles event channels
-	*base.LifecycleManager    // Manages goroutines
+	*base.BaseObserver        // Embed for stats/health
+	*base.EventChannelManager // Embed for events
+	*base.LifecycleManager    // Embed for lifecycle
 
-	// Core DNS configuration
-	config Config
+	// DNS-specific fields
+	config *Config
 	logger *zap.Logger
+	name   string
 
-	// DNS-specific state
-	stats *DNSStats
-
-	// eBPF components (platform-specific via interface{})
+	// eBPF state (platform-specific)
 	ebpfState interface{}
 
-	// Mock mode
-	mockMode bool
+	// Problem tracking
+	mu             sync.RWMutex
+	recentProblems map[string]*ProblemTracker // Track repeated problems
+	stats          QueryStats                 // Overall statistics
 
-	// Error handling
-	consecutiveErrors int
-	errorLogInterval  time.Time
-
-	// Fault tolerance
-	circuitBreaker *CircuitBreaker
-
-	// Container tracking
-	containerCache map[uint64]string // cgroup_id -> container_id
-	cacheMutex     sync.RWMutex      // Separate mutex for cache
-
-	// DNS-specific OpenTelemetry metrics
-	tracer             trace.Tracer
-	bufferUsage        metric.Int64Gauge
-	dnsLatency         metric.Float64Histogram
-	dnsFailures        metric.Int64Counter
-	errorsTotal        metric.Int64Counter
-	circuitBreakerHits metric.Int64Counter
+	// OpenTelemetry instrumentation
+	tracer           trace.Tracer
+	problemsDetected metric.Int64Counter
+	slowQueries      metric.Int64Counter
+	timeouts         metric.Int64Counter
+	nxdomains        metric.Int64Counter
+	servfails        metric.Int64Counter
+	queryLatency     metric.Float64Histogram
+	eventsProcessed  metric.Int64Counter
+	errorsTotal      metric.Int64Counter
 }
 
-// NewObserver creates a new DNS observer
-func NewObserver(name string, cfg Config) (*Observer, error) {
-	logger, err := zap.NewProduction()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create logger: %w", err)
+// ProblemTracker tracks repeated DNS problems for a specific query
+type ProblemTracker struct {
+	QueryName    string
+	FirstSeen    time.Time
+	LastSeen     time.Time
+	Count        int
+	ProblemTypes map[DNSProblemType]int
+}
+
+// NewObserver creates a new DNS problem observer
+func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, error) {
+	if config == nil {
+		config = DefaultConfig()
+	}
+	if logger == nil {
+		logger = zap.NewNop()
 	}
 
-	// Initialize base components
-	ctx := context.Background()
-	baseObserver := base.NewBaseObserver("dns", 30*time.Second)
-	eventManager := base.NewEventChannelManager(cfg.BufferSize, name, logger)
-	lifecycle := base.NewLifecycleManager(ctx, logger)
+	// Validate config
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
 
-	// Initialize DNS-specific OTEL metrics
-	tracer := otel.Tracer(name)
-	meter := otel.Meter(name)
+	// Initialize OpenTelemetry
+	meter := otel.Meter("tapio.observers.dns")
+	tracer := otel.Tracer("tapio.observers.dns")
 
-	bufferUsage, err := meter.Int64Gauge(
-		fmt.Sprintf("%s_buffer_usage", name),
-		metric.WithDescription("DNS observer buffer usage"),
+	// Create metrics
+	problemsDetected, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_problems_total", name),
+		metric.WithDescription("Total DNS problems detected"),
 	)
-	if err != nil {
-		logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
-	}
-
-	dnsLatency, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_dns_latency_ms", name),
-		metric.WithDescription("DNS query latency"),
+	slowQueries, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_slow_queries_total", name),
+		metric.WithDescription("Total slow DNS queries"),
 	)
-	if err != nil {
-		logger.Warn("Failed to create DNS latency histogram", zap.Error(err))
-	}
-
-	dnsFailures, err := meter.Int64Counter(
-		fmt.Sprintf("%s_dns_failures_total", name),
-		metric.WithDescription("Total DNS query failures"),
+	timeouts, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_timeouts_total", name),
+		metric.WithDescription("Total DNS timeouts"),
 	)
-	if err != nil {
-		logger.Warn("Failed to create DNS failures counter", zap.Error(err))
-	}
-
-	errorsTotal, err := meter.Int64Counter(
+	nxdomains, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_nxdomains_total", name),
+		metric.WithDescription("Total NXDOMAIN responses"),
+	)
+	servfails, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_servfails_total", name),
+		metric.WithDescription("Total SERVFAIL responses"),
+	)
+	queryLatency, _ := meter.Float64Histogram(
+		fmt.Sprintf("%s_query_latency_ms", name),
+		metric.WithDescription("DNS query latency in milliseconds"),
+	)
+	eventsProcessed, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription("Total events processed"),
+	)
+	errorsTotal, _ := meter.Int64Counter(
 		fmt.Sprintf("%s_errors_total", name),
-		metric.WithDescription("Total observer errors"),
+		metric.WithDescription("Total errors in observer"),
 	)
-	if err != nil {
-		logger.Warn("Failed to create errors total counter", zap.Error(err))
-	}
 
-	circuitBreakerHits, err := meter.Int64Counter(
-		fmt.Sprintf("%s_circuit_breaker_hits_total", name),
-		metric.WithDescription("Circuit breaker activations"),
-	)
-	if err != nil {
-		logger.Warn("Failed to create circuit breaker hits counter", zap.Error(err))
-	}
-
-	// Initialize circuit breaker
-	circuitBreaker := NewCircuitBreaker(cfg.CircuitBreakerConfig, logger)
-
-	observer := &Observer{
-		BaseObserver:        baseObserver,
-		EventChannelManager: eventManager,
-		LifecycleManager:    lifecycle,
-		config:              cfg,
+	o := &Observer{
+		BaseObserver:        base.NewBaseObserver(name, 5*time.Minute),
+		EventChannelManager: base.NewEventChannelManager(config.BufferSize, name, logger.Named(name)),
+		LifecycleManager:    base.NewLifecycleManager(context.Background(), logger.Named(name)),
+		config:              config,
 		logger:              logger.Named(name),
-		stats:               &DNSStats{},
-		circuitBreaker:      circuitBreaker,
-		containerCache:      make(map[uint64]string),
+		name:                name,
+		recentProblems:      make(map[string]*ProblemTracker),
 		tracer:              tracer,
-		bufferUsage:         bufferUsage,
-		dnsLatency:          dnsLatency,
-		dnsFailures:         dnsFailures,
+		problemsDetected:    problemsDetected,
+		slowQueries:         slowQueries,
+		timeouts:            timeouts,
+		nxdomains:           nxdomains,
+		servfails:           servfails,
+		queryLatency:        queryLatency,
+		eventsProcessed:     eventsProcessed,
 		errorsTotal:         errorsTotal,
-		circuitBreakerHits:  circuitBreakerHits,
 	}
 
-	observer.logger.Info("DNS observer created",
+	o.logger.Info("DNS problem observer created",
 		zap.String("name", name),
-		zap.Int("buffer_size", cfg.BufferSize),
-		zap.Bool("enable_ebpf", cfg.EnableEBPF),
-	)
+		zap.Int("slow_threshold_ms", config.SlowQueryThresholdMs),
+		zap.Int("timeout_ms", config.TimeoutMs))
 
-	return observer, nil
+	return o, nil
 }
 
-// Start starts the DNS observer
-func (c *Observer) Start(ctx context.Context) error {
-	c.logger.Info("Starting DNS observer")
+// Start begins DNS problem detection
+func (o *Observer) Start(ctx context.Context) error {
+	o.logger.Info("Starting DNS problem observer")
 
-	// Start eBPF monitoring (platform-specific)
-	if c.config.EnableEBPF {
-		if err := c.startEBPF(); err != nil {
-			return fmt.Errorf("failed to start eBPF: %w", err)
-		}
-
-		// Start event processing using lifecycle manager
-		c.LifecycleManager.Start("dns-event-processor", func() {
-			c.logger.Info("DNS event processor cleanup")
-		})
-
-		// Start event processing goroutine
-		go func() {
-			c.readEBPFEvents()
-		}()
-	} else {
-		c.logger.Info("eBPF disabled, DNS observer running in limited mode")
+	// Platform-specific start (eBPF on Linux, fallback otherwise)
+	if err := o.startPlatform(); err != nil {
+		return fmt.Errorf("starting platform: %w", err)
 	}
 
-	c.BaseObserver.SetHealthy(true)
-	c.logger.Info("DNS observer started")
+	// Start problem cleanup goroutine
+	o.LifecycleManager.Start("cleanup", func() {
+		o.cleanupOldProblems(ctx)
+	})
+
+	o.BaseObserver.SetHealthy(true)
+	o.logger.Info("DNS problem observer started successfully")
 	return nil
 }
 
-// Stop stops the DNS observer
-func (c *Observer) Stop() error {
-	c.logger.Info("Stopping DNS observer")
+// Stop stops the observer
+func (o *Observer) Stop() error {
+	o.logger.Info("Stopping DNS problem observer")
 
-	// Stop lifecycle manager with timeout
-	c.LifecycleManager.Stop(30 * time.Second)
+	o.BaseObserver.SetHealthy(false)
 
-	// Stop eBPF (platform-specific)
-	c.stopEBPF()
+	// Stop platform-specific components
+	o.stopPlatform()
 
-	c.BaseObserver.SetHealthy(false)
-	c.logger.Info("DNS observer stopped")
+	// Stop lifecycle
+	if err := o.LifecycleManager.Stop(5 * time.Second); err != nil {
+		o.logger.Error("Error stopping lifecycle", zap.Error(err))
+	}
+
+	// Close event channel
+	o.EventChannelManager.Close()
+
+	o.logger.Info("DNS problem observer stopped")
 	return nil
 }
 
-// Events returns the channel for observer events (required by observers.Observer interface)
-func (c *Observer) Events() <-chan *domain.CollectorEvent {
-	return c.EventChannelManager.GetChannel()
+// Events returns the event channel
+func (o *Observer) Events() <-chan *domain.CollectorEvent {
+	return o.EventChannelManager.GetChannel()
 }
 
-// Name returns the observer name
-func (c *Observer) Name() string {
-	return c.config.Name
+// cleanupOldProblems removes old problem trackers
+func (o *Observer) cleanupOldProblems(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			o.doCleanup()
+		}
+	}
 }
 
-// Statistics delegates to base observer
-func (c *Observer) Statistics() *domain.CollectorStats {
-	return c.BaseObserver.Statistics()
+// doCleanup performs the actual cleanup
+func (o *Observer) doCleanup() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	cutoff := time.Now().Add(-time.Duration(o.config.RepeatWindowSec) * time.Second)
+	for query, tracker := range o.recentProblems {
+		if tracker.LastSeen.Before(cutoff) {
+			delete(o.recentProblems, query)
+		}
+	}
 }
 
-// Health delegates to base observer
-func (c *Observer) Health() *domain.HealthStatus {
-	return c.BaseObserver.Health()
+// trackProblem records a DNS problem for repeat detection
+func (o *Observer) trackProblem(event *DNSEvent) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	queryName := event.GetQueryName()
+	tracker, exists := o.recentProblems[queryName]
+
+	if !exists {
+		tracker = &ProblemTracker{
+			QueryName:    queryName,
+			FirstSeen:    time.Now(),
+			LastSeen:     time.Now(),
+			Count:        1,
+			ProblemTypes: make(map[DNSProblemType]int),
+		}
+		tracker.ProblemTypes[event.ProblemType] = 1
+		o.recentProblems[queryName] = tracker
+		return false // First occurrence
+	}
+
+	// Update existing tracker
+	tracker.LastSeen = time.Now()
+	tracker.Count++
+	tracker.ProblemTypes[event.ProblemType]++
+
+	// Check if this is a repeated problem
+	return tracker.Count >= o.config.RepeatThreshold
 }
 
-// Platform-specific methods implemented in observer_ebpf.go (Linux) and observer_fallback.go (others)
-// These are the methods that each platform must implement - they are defined here as
-// declarations and implemented in the platform-specific files
+// GetStats returns current statistics
+func (o *Observer) GetStats() QueryStats {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.stats
+}
