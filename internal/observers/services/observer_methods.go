@@ -749,8 +749,8 @@ func (o *Observer) createServiceMapEvent(ctx context.Context, serviceMap *Servic
 		},
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
-				"collector_name": o.name,
-				"collector_type": "services",
+				"observer": o.name,
+				"version":  "1.0",
 			},
 		},
 		TraceContext: &domain.TraceContext{

@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
 	"github.com/yairfalse/tapio/internal/observers/common"
 )
 
@@ -13,18 +12,23 @@ func init() {
 	// orchestrator.RegisterObserverFactory("status", Factory)
 }
 
+// Factory creates a new status observer from configuration
 func Factory(cfg interface{}, logger *zap.Logger) (common.Observer, error) {
 	config, ok := cfg.(*Config)
 	if !ok {
+		// Use default config if type assertion fails
 		config = &Config{
 			Enabled:         true,
+			BufferSize:      10000,
 			SampleRate:      0.01,
 			MaxEventsPerSec: 1000,
-			MaxMemoryMB:     100,
-			FlushInterval:   10 * time.Second,
-			RedactHeaders:   []string{"Authorization", "Cookie", "X-API-Key"},
+			FlushInterval:   30 * time.Second,
+			EnableL7Parse:   true,
+			HTTPPorts:       []int{80, 8080, 8000, 3000},
+			GRPCPorts:       []int{50051, 9090},
+			Logger:          logger,
 		}
 	}
 
-	return NewObserver(config, logger)
+	return NewObserver("status", config)
 }

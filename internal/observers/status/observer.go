@@ -6,91 +6,176 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
-	"github.com/cilium/ebpf/rlimit"
+	"github.com/yairfalse/tapio/internal/observers/base"
+	"github.com/yairfalse/tapio/internal/observers/common"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-
-	"github.com/yairfalse/tapio/internal/observers/base"
-	"github.com/yairfalse/tapio/internal/observers/common"
 )
 
+// Observer monitors L7 status codes and error patterns
 type Observer struct {
 	*base.BaseObserver
+	*base.EventChannelManager
 	*base.LifecycleManager
 
+	name   string
 	config *Config
 	logger *zap.Logger
 
-	objs       *statusObjects
-	links      []link.Link
-	perfReader *perf.Reader
+	// eBPF state (platform-specific)
+	ebpfState interface{}
 
+	// Hash decoder for service/endpoint names
 	hashDecoder *HashDecoder
-	aggregator  *StatusAggregator
 
-	metrics struct {
-		httpErrors metric.Int64Counter
-		grpcErrors metric.Int64Counter
-		timeouts   metric.Int64Counter
-		latency    metric.Float64Histogram
-		errorRate  metric.Float64ObservableGauge
-	}
+	// Status aggregator for error patterns
+	aggregator *StatusAggregator
 
+	// OTEL instrumentation
+	tracer          trace.Tracer
+	eventsProcessed metric.Int64Counter
+	eventsDropped   metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	httpErrors      metric.Int64Counter
+	grpcErrors      metric.Int64Counter
+	timeouts        metric.Int64Counter
+	latency         metric.Float64Histogram
+	errorRate       metric.Float64ObservableGauge
+
+	// Error rate tracking
 	mu         sync.RWMutex
 	errorRates map[uint32]float64
-	lastFlush  time.Time
-	EventChan  chan common.ObserverEvent
 }
 
+// Config defines status observer configuration
 type Config struct {
 	Enabled         bool          `yaml:"enabled"`
+	BufferSize      int           `yaml:"buffer_size"`
 	SampleRate      float64       `yaml:"sample_rate"`
 	MaxEventsPerSec int           `yaml:"max_events_per_sec"`
-	MaxMemoryMB     int           `yaml:"max_memory_mb"`
 	FlushInterval   time.Duration `yaml:"flush_interval"`
-	RedactHeaders   []string      `yaml:"redact_headers"`
+	EnableL7Parse   bool          `yaml:"enable_l7_parse"`
+	HTTPPorts       []int         `yaml:"http_ports"`
+	GRPCPorts       []int         `yaml:"grpc_ports"`
+	Logger          *zap.Logger
 }
 
-func NewObserver(cfg *Config, logger *zap.Logger) (*Observer, error) {
-	// Only try to remove memlock on Linux
-	if err := rlimit.RemoveMemlock(); err != nil {
-		// Ignore error on non-Linux platforms
-		logger.Debug("Could not remove memlock", zap.Error(err))
+// DefaultConfig returns default configuration
+func DefaultConfig() *Config {
+	return &Config{
+		Enabled:         true,
+		BufferSize:      10000,
+		SampleRate:      1.0,
+		MaxEventsPerSec: 10000,
+		FlushInterval:   30 * time.Second,
+		EnableL7Parse:   true,
+		HTTPPorts:       []int{80, 8080, 8000, 3000},
+		GRPCPorts:       []int{50051, 9090},
+	}
+}
+
+// Validate validates the configuration
+func (c *Config) Validate() error {
+	if c.BufferSize <= 0 {
+		return fmt.Errorf("buffer_size must be positive")
+	}
+	if c.SampleRate < 0 || c.SampleRate > 1 {
+		return fmt.Errorf("sample_rate must be between 0 and 1")
+	}
+	if c.FlushInterval <= 0 {
+		return fmt.Errorf("flush_interval must be positive")
+	}
+	return nil
+}
+
+// NewObserver creates a new status observer
+func NewObserver(name string, config *Config) (*Observer, error) {
+	if config == nil {
+		config = DefaultConfig()
 	}
 
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Set up logger
+	logger := config.Logger
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	logger = logger.Named("status")
+
+	// Initialize base components
 	ctx := context.Background()
-	eventChan := make(chan common.ObserverEvent, 1000)
 
 	o := &Observer{
-		BaseObserver:     base.NewBaseObserver("status", 30*time.Second),
-		LifecycleManager: base.NewLifecycleManager(ctx, logger),
-		EventChan:        eventChan,
-		config:           cfg,
-		logger:           logger.Named("status"),
-		hashDecoder:      NewHashDecoder(),
-		aggregator:       NewStatusAggregator(cfg.FlushInterval),
-		errorRates:       make(map[uint32]float64),
-		lastFlush:        time.Now(),
+		BaseObserver:        base.NewBaseObserver(name, 30*time.Second),
+		EventChannelManager: base.NewEventChannelManager(config.BufferSize, name, logger),
+		LifecycleManager:    base.NewLifecycleManager(ctx, logger),
+		name:                name,
+		config:              config,
+		logger:              logger,
+		hashDecoder:         NewHashDecoder(),
+		aggregator:          NewStatusAggregator(config.FlushInterval),
+		errorRates:          make(map[uint32]float64),
 	}
 
-	if err := o.setupMetrics(); err != nil {
-		return nil, fmt.Errorf("setting up metrics: %w", err)
+	// Set up OTEL instrumentation
+	if err := o.setupOTEL(); err != nil {
+		return nil, fmt.Errorf("setting up OTEL: %w", err)
 	}
 
+	o.logger.Info("Status observer created", zap.String("name", name))
 	return o, nil
 }
 
-func (o *Observer) setupMetrics() error {
+// setupOTEL sets up OpenTelemetry instrumentation
+func (o *Observer) setupOTEL() error {
+	// Get tracer
+	o.tracer = otel.Tracer("tapio.observers.status")
+
+	// Get meter
 	meter := otel.GetMeterProvider().Meter("tapio.observers.status")
 
 	var err error
 
-	o.metrics.httpErrors, err = meter.Int64Counter(
-		"status.http.errors",
+	// Events processed counter
+	o.eventsProcessed, err = meter.Int64Counter(
+		"status_events_processed_total",
+		metric.WithDescription("Total status events processed"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return err
+	}
+
+	// Events dropped counter
+	o.eventsDropped, err = meter.Int64Counter(
+		"status_events_dropped_total",
+		metric.WithDescription("Total status events dropped"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return err
+	}
+
+	// Processing time histogram
+	o.processingTime, err = meter.Float64Histogram(
+		"status_processing_duration_ms",
+		metric.WithDescription("Status event processing duration"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return err
+	}
+
+	// HTTP errors counter
+	o.httpErrors, err = meter.Int64Counter(
+		"status_http_errors_total",
 		metric.WithDescription("Count of HTTP errors by status code"),
 		metric.WithUnit("1"),
 	)
@@ -98,8 +183,9 @@ func (o *Observer) setupMetrics() error {
 		return err
 	}
 
-	o.metrics.grpcErrors, err = meter.Int64Counter(
-		"status.grpc.errors",
+	// gRPC errors counter
+	o.grpcErrors, err = meter.Int64Counter(
+		"status_grpc_errors_total",
 		metric.WithDescription("Count of gRPC errors by status code"),
 		metric.WithUnit("1"),
 	)
@@ -107,8 +193,9 @@ func (o *Observer) setupMetrics() error {
 		return err
 	}
 
-	o.metrics.timeouts, err = meter.Int64Counter(
-		"status.timeouts",
+	// Timeouts counter
+	o.timeouts, err = meter.Int64Counter(
+		"status_timeouts_total",
 		metric.WithDescription("Count of connection timeouts"),
 		metric.WithUnit("1"),
 	)
@@ -116,8 +203,9 @@ func (o *Observer) setupMetrics() error {
 		return err
 	}
 
-	o.metrics.latency, err = meter.Float64Histogram(
-		"status.latency",
+	// Latency histogram
+	o.latency, err = meter.Float64Histogram(
+		"status_latency_ms",
 		metric.WithDescription("L7 request latency"),
 		metric.WithUnit("ms"),
 	)
@@ -125,161 +213,111 @@ func (o *Observer) setupMetrics() error {
 		return err
 	}
 
-	o.metrics.errorRate, err = meter.Float64ObservableGauge(
-		"status.error_rate",
+	// Error rate gauge
+	o.errorRate, err = meter.Float64ObservableGauge(
+		"status_error_rate",
 		metric.WithDescription("L7 error rate by service"),
 		metric.WithUnit("ratio"),
+		metric.WithFloat64Callback(o.observeErrorRate),
 	)
 
 	return err
 }
 
-func (o *Observer) observeErrorRate(ctx context.Context, observer metric.Observer) error {
+// observeErrorRate callback for error rate metric
+func (o *Observer) observeErrorRate(ctx context.Context, observer metric.Float64Observer) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
 	for serviceHash, rate := range o.errorRates {
 		serviceName := o.hashDecoder.GetService(serviceHash)
 		if serviceName != "" {
-			observer.ObserveFloat64(o.metrics.errorRate, rate,
-				metric.WithAttributes(
-					attribute.String("service", serviceName),
-				),
-			)
+			observer.Observe(rate, metric.WithAttributes(
+				attribute.String("service", serviceName),
+			))
 		}
 	}
 
 	return nil
 }
 
+// Name returns the observer name
 func (o *Observer) Name() string {
-	return "status"
+	return o.name
 }
 
+// Start starts the observer
 func (o *Observer) Start(ctx context.Context) error {
 	o.logger.Info("Starting status observer")
 
-	if err := o.loadBPF(); err != nil {
-		return fmt.Errorf("loading BPF: %w", err)
+	ctx, span := o.tracer.Start(ctx, "status.start")
+	defer span.End()
+
+	// Start eBPF if available (Linux only)
+	if err := o.startEBPF(); err != nil {
+		o.logger.Warn("Failed to start eBPF, running in limited mode", zap.Error(err))
+		// Continue without eBPF - can still provide value through other means
 	}
 
-	if err := o.attachProbes(); err != nil {
-		return fmt.Errorf("attaching probes: %w", err)
-	}
-
-	o.LifecycleManager.Start("processEvents", func() {
-		o.processEvents(ctx)
-	})
-
-	o.LifecycleManager.Start("flushAggregates", func() {
-		o.flushAggregates(ctx)
+	// Start lifecycle manager
+	o.LifecycleManager.Start("pattern-detector", func() {
+		o.detectFailurePatterns(ctx)
 	})
 
 	o.SetHealthy(true)
-	o.logger.Info("Status observer started successfully")
+	o.logger.Info("Status observer started")
 
 	return nil
 }
 
+// Stop stops the observer
 func (o *Observer) Stop() error {
 	o.logger.Info("Stopping status observer")
 
-	if o.perfReader != nil {
-		o.perfReader.Close()
+	// Stop eBPF if running
+	if o.ebpfState != nil {
+		if err := o.stopEBPF(); err != nil {
+			o.logger.Warn("Error stopping eBPF", zap.Error(err))
+		}
 	}
 
-	for _, l := range o.links {
-		l.Close()
-	}
+	// Stop lifecycle manager
+	o.LifecycleManager.Stop(5 * time.Second)
 
-	if o.objs != nil {
-		o.objs.Close()
-	}
+	// Close event channel
+	o.EventChannelManager.Close()
 
-	o.LifecycleManager.Stop(30 * time.Second)
-	close(o.EventChan)
-
+	o.SetHealthy(false)
 	o.logger.Info("Status observer stopped")
+
 	return nil
 }
 
-func (o *Observer) processEvents(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-o.LifecycleManager.StopChannel():
-			return
-		default:
-			record, err := o.perfReader.Read()
-			if err != nil {
-				if err == perf.ErrClosed {
-					return
-				}
-				o.RecordError(err)
-				continue
-			}
-
-			o.RecordEvent()
-			o.handleEvent(record.RawSample)
-		}
-	}
+// Events returns the event channel
+func (o *Observer) Events() <-chan *domain.CollectorEvent {
+	return o.EventChannelManager.GetChannel()
 }
 
-func (o *Observer) handleEvent(data []byte) {
-	event, err := parseStatusEvent(data)
-	if err != nil {
-		o.logger.Warn("Failed to parse event", zap.Error(err))
-		return
-	}
-
-	o.aggregator.Add(event)
-
-	if event.StatusCode >= 500 {
-		o.metrics.httpErrors.Add(context.Background(), 1,
-			metric.WithAttributes(
-				attribute.Int("status_code", int(event.StatusCode)),
-				attribute.String("service", o.hashDecoder.GetService(event.ServiceHash)),
-			),
-		)
-	}
-
-	if event.ErrorType == ErrorTimeout {
-		o.metrics.timeouts.Add(context.Background(), 1,
-			metric.WithAttributes(
-				attribute.String("service", o.hashDecoder.GetService(event.ServiceHash)),
-			),
-		)
-	}
-
-	if event.Latency > 0 {
-		o.metrics.latency.Record(context.Background(), float64(event.Latency)/1e6,
-			metric.WithAttributes(
-				attribute.String("service", o.hashDecoder.GetService(event.ServiceHash)),
-				attribute.String("endpoint", o.hashDecoder.GetEndpoint(event.EndpointHash)),
-			),
-		)
-	}
+// Statistics returns observer statistics
+func (o *Observer) Statistics() *domain.CollectorStats {
+	return o.BaseObserver.Statistics()
 }
 
-func (o *Observer) flushAggregates(ctx context.Context) {
-	ticker := time.NewTicker(o.config.FlushInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-o.LifecycleManager.StopChannel():
-			return
-		case <-ticker.C:
-			aggregates := o.aggregator.Flush()
-			o.updateErrorRates(aggregates)
-			o.publishAggregates(aggregates)
-		}
-	}
+// IsHealthy returns observer health status
+func (o *Observer) IsHealthy() bool {
+	return o.BaseObserver.IsHealthy()
 }
 
+// GetEvents returns the event channel - for common.Observer compatibility
+// Deprecated: Use Events() instead
+func (o *Observer) GetEvents() <-chan common.ObserverEvent {
+	// This would require converting domain.CollectorEvent to common.ObserverEvent
+	// For now, return nil as we're using the new architecture
+	o.logger.Warn("GetEvents() called on modern observer - use Events() instead")
+	return nil
+}
+
+// updateErrorRates updates error rate metrics
 func (o *Observer) updateErrorRates(aggregates map[uint32]*AggregatedStatus) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -291,34 +329,58 @@ func (o *Observer) updateErrorRates(aggregates map[uint32]*AggregatedStatus) {
 	}
 }
 
-func (o *Observer) publishAggregates(aggregates map[uint32]*AggregatedStatus) {
-	for serviceHash, agg := range aggregates {
-		errorTypes := make(map[uint16]uint64)
-		for k, v := range agg.ErrorTypes {
-			errorTypes[uint16(k)] = v
-		}
+// detectFailurePatterns detects known failure patterns
+func (o *Observer) detectFailurePatterns(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
 
-		event := common.ObserverEvent{
-			Type:      common.EventTypeStatus,
-			Timestamp: time.Now(),
-			Service:   o.hashDecoder.GetService(serviceHash),
-			Data: common.EventData{
-				ErrorCount: agg.ErrorCount,
-				TotalCount: agg.TotalCount,
-				ErrorRate:  float64(agg.ErrorCount) / float64(agg.TotalCount),
-				AvgLatency: agg.AvgLatency(),
-				ErrorTypes: errorTypes,
-			},
-		}
+	recentEvents := make([]*StatusEvent, 0, 100)
 
+	for {
 		select {
-		case o.EventChan <- event:
-		default:
-			o.RecordDrop()
+		case <-ctx.Done():
+			return
+		case <-o.LifecycleManager.StopChannel():
+			return
+		case <-ticker.C:
+			// Check for known patterns
+			for _, pattern := range KnownPatterns {
+				if pattern.Detector(recentEvents) {
+					o.logger.Warn("Failure pattern detected",
+						zap.String("pattern", pattern.Name),
+						zap.String("description", pattern.Description),
+						zap.String("severity", pattern.Severity),
+					)
+
+					// Create alert event
+					alertEvent := &domain.CollectorEvent{
+						EventID:   fmt.Sprintf("pattern-%s-%d", pattern.Name, time.Now().Unix()),
+						Timestamp: time.Now(),
+						Type:      domain.EventTypeNetworkConnection, // Using network connection type for alerts
+						Source:    o.name,
+						Severity:  domain.EventSeverityError,
+						Metadata: domain.EventMetadata{
+							Labels: map[string]string{
+								"pattern":     pattern.Name,
+								"description": pattern.Description,
+								"severity":    pattern.Severity,
+							},
+						},
+					}
+
+					o.EventChannelManager.SendEvent(alertEvent)
+				}
+			}
+
+			// Keep only recent events (last 5 minutes)
+			cutoff := time.Now().Add(-5 * time.Minute).UnixNano()
+			filtered := recentEvents[:0]
+			for _, e := range recentEvents {
+				if e.Timestamp > uint64(cutoff) {
+					filtered = append(filtered, e)
+				}
+			}
+			recentEvents = filtered
 		}
 	}
-}
-
-func (o *Observer) GetEvents() <-chan common.ObserverEvent {
-	return o.EventChan
 }
