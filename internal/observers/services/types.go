@@ -1,272 +1,153 @@
 package services
 
 import (
+	"fmt"
 	"time"
 )
 
-// Service represents a discovered service in the cluster
-type Service struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Type      ServiceType       `json:"type"`
-	Labels    map[string]string `json:"labels"`
-	Version   string            `json:"version"`
-
-	// Network info
-	Endpoints []Endpoint `json:"endpoints"`
-	Ports     []Port     `json:"ports"`
-
-	// Relationships
-	Dependencies map[string]*Dependency `json:"dependencies"` // Services I call
-	Dependents   map[string]*Dependent  `json:"dependents"`   // Services that call me
-
-	// Health & metrics
-	Health      HealthState  `json:"health"`
-	RequestRate float64      `json:"request_rate"`
-	ErrorRate   float64      `json:"error_rate"`
-	Latency     LatencyStats `json:"latency"`
-
-	// Metadata
-	LastSeen   time.Time `json:"last_seen"`
-	FirstSeen  time.Time `json:"first_seen"`
-	IsExternal bool      `json:"is_external"`
-}
-
-// ServiceType categorizes services
-type ServiceType string
+// ConnectionEventType represents the type of connection event
+type ConnectionEventType uint8
 
 const (
-	ServiceTypeAPI      ServiceType = "api"
-	ServiceTypeDatabase ServiceType = "database"
-	ServiceTypeCache    ServiceType = "cache"
-	ServiceTypeQueue    ServiceType = "queue"
-	ServiceTypeProxy    ServiceType = "proxy"
-	ServiceTypeUnknown  ServiceType = "unknown"
+	ConnectionConnect ConnectionEventType = 1 // tcp_connect
+	ConnectionAccept  ConnectionEventType = 2 // tcp_accept
+	ConnectionClose   ConnectionEventType = 3 // tcp_close
 )
 
-// HealthState represents service health
-type HealthState string
+// ConnectionEvent represents a raw TCP connection event from eBPF
+type ConnectionEvent struct {
+	// Core event info
+	Timestamp uint64              // Kernel timestamp (nanoseconds)
+	EventType ConnectionEventType // Connect/Accept/Close
+	Direction uint8               // 0=outbound, 1=inbound
 
-const (
-	HealthHealthy  HealthState = "healthy"
-	HealthDegraded HealthState = "degraded"
-	HealthDown     HealthState = "down"
-	HealthUnknown  HealthState = "unknown"
-)
+	// Connection details
+	SrcIP   [16]byte // Source IP (v4 or v6)
+	DstIP   [16]byte // Destination IP (v4 or v6)
+	SrcPort uint16   // Source port
+	DstPort uint16   // Destination port
+	Family  uint16   // AF_INET or AF_INET6
 
-// Endpoint represents a service endpoint with outlier detection
-type Endpoint struct {
-	IP       string `json:"ip"`
-	Port     int32  `json:"port"`
-	PodName  string `json:"pod_name"`
-	NodeName string `json:"node_name"`
-	Ready    bool   `json:"ready"`
+	// Process context
+	PID      uint32   // Process ID
+	TID      uint32   // Thread ID
+	UID      uint32   // User ID
+	GID      uint32   // Group ID
+	CgroupID uint64   // Cgroup ID (for K8s pod mapping)
+	Comm     [16]byte // Process name
 
-	// Outlier detection (Envoy-inspired)
-	OutlierStatus *OutlierStatus `json:"outlier_status,omitempty"`
+	// Network namespace
+	NetNS uint32 // Network namespace inode
 }
 
-// OutlierStatus tracks endpoint health for outlier detection
-type OutlierStatus struct {
-	Consecutive5xx    int       `json:"consecutive_5xx"`
-	ConsecutiveErrors int       `json:"consecutive_errors"`
-	SuccessRate5m     float64   `json:"success_rate_5m"`
-	SuccessRate1m     float64   `json:"success_rate_1m"`
-	EjectionCount     int       `json:"ejection_count"`
-	CurrentlyEjected  bool      `json:"currently_ejected"`
-	EjectedUntil      time.Time `json:"ejected_until,omitempty"`
-	LastEjectionTime  time.Time `json:"last_ejection_time,omitempty"`
-
-	// Connection pool stats
-	ActiveConnections  int `json:"active_connections"`
-	PendingConnections int `json:"pending_connections"`
-	ConnectionOverflow int `json:"connection_overflow"`
-	RequestRetries     int `json:"request_retries"`
+// String returns event type as string
+func (t ConnectionEventType) String() string {
+	switch t {
+	case ConnectionConnect:
+		return "connect"
+	case ConnectionAccept:
+		return "accept"
+	case ConnectionClose:
+		return "close"
+	default:
+		return "unknown"
+	}
 }
 
-// Port represents a service port
-type Port struct {
-	Name       string `json:"name"`
-	Port       int32  `json:"port"`
-	TargetPort int32  `json:"target_port"`
-	Protocol   string `json:"protocol"`
-}
-
-// Dependency represents a service dependency
-type Dependency struct {
-	Target     string       `json:"target"`
-	CallRate   float64      `json:"call_rate"`
-	ErrorRate  float64      `json:"error_rate"`
-	Latency    LatencyStats `json:"latency"`
-	Protocol   string       `json:"protocol"`
-	Operations []string     `json:"operations"` // e.g., ["GET /api/users", "POST /api/orders"]
-	FirstSeen  time.Time    `json:"first_seen"`
-	LastSeen   time.Time    `json:"last_seen"`
-}
-
-// Dependent represents a service that depends on this service
-type Dependent struct {
-	Source    string    `json:"source"`
-	CallRate  float64   `json:"call_rate"`
-	FirstSeen time.Time `json:"first_seen"`
-	LastSeen  time.Time `json:"last_seen"`
-}
-
-// LatencyStats holds latency statistics
-type LatencyStats struct {
-	P50 float64 `json:"p50"`
-	P95 float64 `json:"p95"`
-	P99 float64 `json:"p99"`
-	Max float64 `json:"max"`
-}
-
-// Connection represents a network connection from eBPF
-type Connection struct {
-	SourceIP    uint32        `json:"source_ip"`
-	DestIP      uint32        `json:"dest_ip"`
-	SourcePort  uint16        `json:"source_port"`
-	DestPort    uint16        `json:"dest_port"`
-	Protocol    uint8         `json:"protocol"`
-	Direction   ConnDirection `json:"direction"` // Who initiated the connection
-	State       ConnState     `json:"state"`     // Connection state
-	Timestamp   time.Time     `json:"timestamp"`
-	BytesSent   uint64        `json:"bytes_sent"`
-	BytesRecv   uint64        `json:"bytes_recv"`
-	Latency     uint64        `json:"latency_ns"`
-	Retransmits uint32        `json:"retransmits"` // For quality scoring
-	Resets      uint32        `json:"resets"`      // Connection resets
-	Quality     float64       `json:"quality"`     // 0.0-1.0 quality score
-}
-
-// CalculateQuality computes L4 connection quality score
-func (c *Connection) CalculateQuality() float64 {
-	// Start with perfect quality
-	quality := 1.0
-
-	// Penalize retransmits (assume ~1000 packets for a typical connection)
-	if c.BytesSent > 0 {
-		packetsEstimate := (c.BytesSent + c.BytesRecv) / 1400 // MTU estimate
-		if packetsEstimate > 0 {
-			retransmitRate := float64(c.Retransmits) / float64(packetsEstimate)
-			quality -= retransmitRate * 0.5 // 50% penalty for retransmit rate
+// GetComm extracts the process command from the byte array
+func (e *ConnectionEvent) GetComm() string {
+	for i, b := range e.Comm {
+		if b == 0 {
+			return string(e.Comm[:i])
 		}
 	}
-
-	// Penalize resets heavily
-	if c.Resets > 0 {
-		quality -= 0.3 // 30% penalty for any reset
-	}
-
-	// Penalize bad states
-	switch c.State {
-	case StateReset:
-		quality -= 0.5
-	case StateFinWait:
-		quality -= 0.1 // Minor penalty for half-closed
-	case StateSynSent:
-		quality -= 0.2 // Connection not established
-	}
-
-	// Penalize high latency (>100ms is bad)
-	if c.Latency > 100_000_000 { // 100ms in nanoseconds
-		latencyPenalty := float64(c.Latency-100_000_000) / float64(1_000_000_000) // Per second over 100ms
-		quality -= latencyPenalty * 0.2
-	}
-
-	// Ensure quality stays in bounds
-	if quality < 0 {
-		quality = 0
-	}
-	if quality > 1 {
-		quality = 1
-	}
-
-	return quality
+	return string(e.Comm[:])
 }
 
-// ConnDirection indicates who initiated the connection
-type ConnDirection uint8
+// GetSrcIPString returns source IP as string
+func (e *ConnectionEvent) GetSrcIPString() string {
+	return ipBytesToString(e.SrcIP[:], e.Family)
+}
+
+// GetDstIPString returns destination IP as string
+func (e *ConnectionEvent) GetDstIPString() string {
+	return ipBytesToString(e.DstIP[:], e.Family)
+}
+
+// GetTimestamp returns timestamp as time.Time
+func (e *ConnectionEvent) GetTimestamp() time.Time {
+	return time.Unix(0, int64(e.Timestamp))
+}
+
+// IsInbound returns true if this is an inbound connection
+func (e *ConnectionEvent) IsInbound() bool {
+	return e.Direction == 1
+}
+
+// IsOutbound returns true if this is an outbound connection
+func (e *ConnectionEvent) IsOutbound() bool {
+	return e.Direction == 0
+}
+
+// ConnectionKey uniquely identifies a connection
+type ConnectionKey struct {
+	SrcIP   string
+	DstIP   string
+	SrcPort uint16
+	DstPort uint16
+	PID     uint32
+}
+
+// String returns a string representation of the connection key
+func (k ConnectionKey) String() string {
+	return fmt.Sprintf("%s:%d->%s:%d@%d", k.SrcIP, k.SrcPort, k.DstIP, k.DstPort, k.PID)
+}
+
+// ActiveConnection represents a tracked connection
+type ActiveConnection struct {
+	Key         ConnectionKey
+	StartTime   time.Time
+	LastSeen    time.Time
+	BytesSent   uint64
+	BytesRecv   uint64
+	State       ConnectionState
+	ProcessName string
+	CgroupID    uint64
+	NetNS       uint32
+}
+
+// ConnectionState represents the state of a connection
+type ConnectionState uint8
 
 const (
-	DirectionUnknown  ConnDirection = 0
-	DirectionOutbound ConnDirection = 1 // We called connect()
-	DirectionInbound  ConnDirection = 2 // We called accept()
+	StateActive ConnectionState = 1
+	StateClosed ConnectionState = 2
 )
 
-// ConnState represents TCP connection state
-type ConnState uint8
-
-const (
-	StateUnknown     ConnState = 0
-	StateSynSent     ConnState = 1
-	StateEstablished ConnState = 2
-	StateFinWait     ConnState = 3
-	StateClosed      ConnState = 4
-	StateReset       ConnState = 5
-)
-
-// ServiceMap represents the complete service topology
-type ServiceMap struct {
-	Services    map[string]*Service `json:"services"`
-	Connections map[string]int      `json:"connections"` // "src->dst" -> count
-	LastUpdated time.Time           `json:"last_updated"`
-	ClusterName string              `json:"cluster_name"`
+// ConnectionStats tracks connection statistics
+type ConnectionStats struct {
+	ActiveConnections uint64
+	TotalConnects     uint64
+	TotalAccepts      uint64
+	TotalCloses       uint64
+	LastEventTime     time.Time
 }
 
-// Visualization types for output formats
-
-// GraphNode represents a node in the visualization graph
-type GraphNode struct {
-	ID       string            `json:"id"`
-	Label    string            `json:"label"`
-	Type     string            `json:"type"`
-	Group    string            `json:"group"`
-	Version  string            `json:"version"`
-	Size     int               `json:"size"`
-	Color    string            `json:"color"`
-	Icon     string            `json:"icon"`
-	X        float64           `json:"x,omitempty"`
-	Y        float64           `json:"y,omitempty"`
-	Metadata map[string]string `json:"metadata"`
+// Helper function to convert IP bytes to string
+func ipBytesToString(ip []byte, family uint16) string {
+	if family == 2 { // AF_INET (IPv4)
+		if len(ip) >= 4 {
+			return fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
+		}
+		return "unknown"
+	} else if family == 10 { // AF_INET6 (IPv6)
+		if len(ip) >= 16 {
+			// Format IPv6 properly
+			return fmt.Sprintf("%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+				ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7],
+				ip[8], ip[9], ip[10], ip[11], ip[12], ip[13], ip[14], ip[15])
+		}
+		return "ipv6"
+	}
+	return "unknown"
 }
-
-// GraphEdge represents an edge in the visualization graph
-type GraphEdge struct {
-	ID       string  `json:"id"`
-	Source   string  `json:"source"`
-	Target   string  `json:"target"`
-	Weight   float64 `json:"weight"`
-	Color    string  `json:"color"`
-	Style    string  `json:"style"`
-	Label    string  `json:"label"`
-	Animated bool    `json:"animated"`
-}
-
-// ServiceGraph represents the service topology for visualization
-type ServiceGraph struct {
-	Nodes  []GraphNode `json:"nodes"`
-	Edges  []GraphEdge `json:"edges"`
-	Cypher string      `json:"cypher,omitempty"`
-}
-
-// ChangeEvent represents a change in the service map
-type ChangeEvent struct {
-	Type      ChangeType
-	Service   string
-	Target    string // For dependency changes
-	Timestamp time.Time
-}
-
-// ChangeType represents the type of change
-type ChangeType int
-
-const (
-	ChangeServiceAdded ChangeType = iota
-	ChangeServiceRemoved
-	ChangeServiceModified
-	ChangeNewDependency
-	ChangeDependencyRemoved
-	ChangeHealthChanged
-	ChangeVersionChanged
-	ChangeConnectionUpdate
-)

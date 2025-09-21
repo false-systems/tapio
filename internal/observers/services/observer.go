@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/yairfalse/tapio/internal/observers/base"
@@ -13,305 +12,174 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
-// Observer implements the service map observer using BaseObserver
+// Observer implements service discovery and dependency mapping
 type Observer struct {
-	*base.BaseObserver        // Provides Statistics() and Health()
-	*base.EventChannelManager // Handles event channels
-	*base.LifecycleManager    // Manages goroutines
+	*base.BaseObserver        // Embed for stats/health
+	*base.EventChannelManager // Embed for events
+	*base.LifecycleManager    // Embed for lifecycle
 
-	name   string
+	// Core fields
 	config *Config
 	logger *zap.Logger
+	name   string
 
-	// Kubernetes client
-	k8sClient kubernetes.Interface
+	// Core components
+	connectionsTracker *ConnectionTracker // Raw connection tracking
+	k8sMapper          *K8sEnricher       // K8s context enrichment
 
-	// Service tracking
-	services    map[string]*Service    // namespace/name -> service
-	connections map[string]*Connection // src:port->dst:port -> connection
-	ipToService map[string][]string    // IP[:port] -> []service names
-	mu          sync.RWMutex
+	// State tracking
+	mu    sync.RWMutex
+	stats ServiceStats
 
-	// eBPF state (platform-specific)
-	ebpfState interface{}
-
-	// Emission control
-	lastEmitted        *ServiceMap
-	lastEmitTime       time.Time
-	pendingChanges     chan ChangeEvent
-	changeDebouncer    *time.Timer
-	significantChanges int32 // atomic counter
-
-	// OTEL instrumentation
-	tracer trace.Tracer
-
-	// Core metrics (mandatory)
-	eventsProcessed metric.Int64Counter
-	errorsTotal     metric.Int64Counter
-	processingTime  metric.Float64Histogram
-	droppedEvents   metric.Int64Counter
-	bufferUsage     metric.Float64Gauge
-
-	// Service-specific metrics
-	servicesDiscovered   metric.Int64Counter
-	servicesRemoved      metric.Int64Counter
-	connectionsTracked   metric.Int64Counter
-	dependenciesDetected metric.Int64Counter
-	healthChanges        metric.Int64Counter
-	k8sApiCalls          metric.Int64Counter
-	ebpfEvents           metric.Int64Counter
+	// OpenTelemetry instrumentation
+	tracer             trace.Tracer
+	connectionsTracked metric.Int64Counter
+	servicesDiscovered metric.Int64Counter
+	eventsProcessed    metric.Int64Counter
+	errorsTotal        metric.Int64Counter
 }
 
-// NewObserver creates a new service map observer
-func NewObserver(name string, config *Config) (*Observer, error) {
+// ServiceStats tracks observer statistics
+type ServiceStats struct {
+	ActiveConnections  uint64
+	ServicesDiscovered uint64
+	ServiceFlows       uint64
+	LastEventTime      time.Time
+	K8sMappingEnabled  bool
+}
+
+// NewObserver creates a new services observer
+func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, error) {
 	if config == nil {
 		config = DefaultConfig()
 	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 
+	// Validate config
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	if config.Logger == nil {
-		logger, err := zap.NewProduction()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create logger: %w", err)
-		}
-		config.Logger = logger
-	}
+	// Initialize OpenTelemetry
+	meter := otel.Meter("tapio.observers.services")
+	tracer := otel.Tracer("tapio.observers.services")
 
-	// Initialize OTEL components
-	tracer := otel.Tracer(name)
-	meter := otel.Meter(name)
-
-	// Create core metrics
-	eventsProcessed, err := meter.Int64Counter(
-		fmt.Sprintf("%s_events_processed_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events processed by %s", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create events counter", zap.Error(err))
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		fmt.Sprintf("%s_errors_total", name),
-		metric.WithDescription(fmt.Sprintf("Total errors in %s", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create errors counter", zap.Error(err))
-	}
-
-	processingTime, err := meter.Float64Histogram(
-		fmt.Sprintf("%s_processing_duration_ms", name),
-		metric.WithDescription(fmt.Sprintf("Processing duration for %s in milliseconds", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create processing time histogram", zap.Error(err))
-	}
-
-	droppedEvents, err := meter.Int64Counter(
-		fmt.Sprintf("%s_dropped_events_total", name),
-		metric.WithDescription(fmt.Sprintf("Total events dropped by %s", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create dropped events counter", zap.Error(err))
-	}
-
-	bufferUsage, err := meter.Float64Gauge(
-		fmt.Sprintf("%s_buffer_usage_ratio", name),
-		metric.WithDescription(fmt.Sprintf("Buffer usage ratio for %s", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create buffer usage gauge", zap.Error(err))
-	}
-
-	// Create service-specific metrics
-	servicesDiscovered, err := meter.Int64Counter(
-		fmt.Sprintf("%s_services_discovered_total", name),
-		metric.WithDescription(fmt.Sprintf("Total services discovered by %s", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create services discovered counter", zap.Error(err))
-	}
-
-	servicesRemoved, err := meter.Int64Counter(
-		fmt.Sprintf("%s_services_removed_total", name),
-		metric.WithDescription(fmt.Sprintf("Total services removed by %s", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create services removed counter", zap.Error(err))
-	}
-
-	connectionsTracked, err := meter.Int64Counter(
+	// Create metrics
+	connectionsTracked, _ := meter.Int64Counter(
 		fmt.Sprintf("%s_connections_tracked_total", name),
-		metric.WithDescription(fmt.Sprintf("Total connections tracked by %s", name)),
+		metric.WithDescription("Total TCP connections tracked"),
 	)
-	if err != nil {
-		config.Logger.Warn("Failed to create connections tracked counter", zap.Error(err))
-	}
-
-	dependenciesDetected, err := meter.Int64Counter(
-		fmt.Sprintf("%s_dependencies_detected_total", name),
-		metric.WithDescription(fmt.Sprintf("Total dependencies detected by %s", name)),
+	servicesDiscovered, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_services_discovered_total", name),
+		metric.WithDescription("Total services discovered"),
 	)
-	if err != nil {
-		config.Logger.Warn("Failed to create dependencies detected counter", zap.Error(err))
-	}
-
-	healthChanges, err := meter.Int64Counter(
-		fmt.Sprintf("%s_health_changes_total", name),
-		metric.WithDescription(fmt.Sprintf("Total health changes detected by %s", name)),
+	eventsProcessed, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription("Total events processed"),
 	)
-	if err != nil {
-		config.Logger.Warn("Failed to create health changes counter", zap.Error(err))
-	}
-
-	k8sApiCalls, err := meter.Int64Counter(
-		fmt.Sprintf("%s_k8s_api_calls_total", name),
-		metric.WithDescription(fmt.Sprintf("Total Kubernetes API calls by %s", name)),
+	errorsTotal, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription("Total errors in observer"),
 	)
-	if err != nil {
-		config.Logger.Warn("Failed to create k8s api calls counter", zap.Error(err))
-	}
-
-	ebpfEvents, err := meter.Int64Counter(
-		fmt.Sprintf("%s_ebpf_events_total", name),
-		metric.WithDescription(fmt.Sprintf("Total eBPF events processed by %s", name)),
-	)
-	if err != nil {
-		config.Logger.Warn("Failed to create ebpf events counter", zap.Error(err))
-	}
-
-	// Initialize base components
-	baseConfig := base.BaseObserverConfig{
-		Name:               name,
-		HealthCheckTimeout: 5 * time.Minute,
-		ErrorRateThreshold: 0.05, // 5% error rate threshold
-		Logger:             config.Logger.Named("base"),
-	}
-	baseObserver := base.NewBaseObserverWithConfig(baseConfig)
-
-	eventChannel := base.NewEventChannelManager(config.BufferSize, name, config.Logger)
-	lifecycle := base.NewLifecycleManager(context.Background(), config.Logger)
-
-	// Initialize Kubernetes client if enabled
-	var k8sClient kubernetes.Interface
-	if config.EnableK8sDiscovery {
-		client, err := createK8sClient(config.KubeConfig)
-		if err != nil {
-			config.Logger.Warn("Failed to create Kubernetes client, K8s discovery disabled",
-				zap.Error(err))
-		} else {
-			k8sClient = client
-		}
-	}
 
 	o := &Observer{
-		BaseObserver:        baseObserver,
-		EventChannelManager: eventChannel,
-		LifecycleManager:    lifecycle,
-
-		name:      name,
-		config:    config,
-		logger:    config.Logger.Named(name),
-		k8sClient: k8sClient,
-
-		services:       make(map[string]*Service),
-		connections:    make(map[string]*Connection),
-		ipToService:    make(map[string][]string),
-		pendingChanges: make(chan ChangeEvent, 1000),
-		lastEmitTime:   time.Now(),
-
-		// OTEL
-		tracer:          tracer,
-		eventsProcessed: eventsProcessed,
-		errorsTotal:     errorsTotal,
-		processingTime:  processingTime,
-		droppedEvents:   droppedEvents,
-		bufferUsage:     bufferUsage,
-
-		// Service-specific
-		servicesDiscovered:   servicesDiscovered,
-		servicesRemoved:      servicesRemoved,
-		connectionsTracked:   connectionsTracked,
-		dependenciesDetected: dependenciesDetected,
-		healthChanges:        healthChanges,
-		k8sApiCalls:          k8sApiCalls,
-		ebpfEvents:           ebpfEvents,
+		BaseObserver:        base.NewBaseObserver(name, 5*time.Minute),
+		EventChannelManager: base.NewEventChannelManager(config.BufferSize, name, logger.Named(name)),
+		LifecycleManager:    base.NewLifecycleManager(context.Background(), logger.Named(name)),
+		config:              config,
+		logger:              logger.Named(name),
+		name:                name,
+		stats: ServiceStats{
+			K8sMappingEnabled: config.EnableK8sMapping,
+		},
+		tracer:             tracer,
+		connectionsTracked: connectionsTracked,
+		servicesDiscovered: servicesDiscovered,
+		eventsProcessed:    eventsProcessed,
+		errorsTotal:        errorsTotal,
 	}
 
-	o.logger.Info("Service map observer created", zap.String("name", name))
+	// Initialize connection tracking (always required)
+	o.connectionsTracker = NewConnectionTracker(config, logger)
+
+	// Initialize K8s enrichment if K8s mapping enabled
+	if config.EnableK8sMapping {
+		var err error
+		o.k8sMapper, err = NewK8sEnricher(config, logger, o.connectionsTracker)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create K8s enrichment K8s mapper: %w", err)
+		}
+	}
+
+	o.logger.Info("Services observer created",
+		zap.String("name", name),
+		zap.Bool("k8s_mapping", config.EnableK8sMapping))
+
 	return o, nil
 }
 
-// Name returns observer name
-func (o *Observer) Name() string {
-	return o.name
-}
-
-// Start starts the service map observer
+// Start begins service discovery
 func (o *Observer) Start(ctx context.Context) error {
-	o.logger.Info("Starting service map observer")
+	o.logger.Info("Starting services observer")
 
-	// Mark as healthy
-	o.BaseObserver.SetHealthy(true)
-
-	// Start Kubernetes discovery if enabled
-	if o.k8sClient != nil {
-		o.LifecycleManager.Start("k8s-discovery", func() {
-			o.watchKubernetesServices(ctx)
-		})
+	// Start connection tracking - Connection tracking
+	if err := o.connectionsTracker.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start connection tracking: %w", err)
 	}
 
-	// Start eBPF monitoring if enabled
-	if o.config.EnableEBPF {
-		if err := o.initializeEBPF(ctx); err != nil {
-			o.logger.Warn("Failed to initialize eBPF, connection tracking disabled", zap.Error(err))
+	// Start K8s enrichment - K8s mapping
+	if o.k8sMapper != nil {
+		if err := o.k8sMapper.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start K8s enrichment: %w", err)
 		}
 	}
 
-	// Start change processor
-	o.LifecycleManager.Start("change-processor", func() {
-		o.processChanges(ctx)
+	// Start event processor
+	o.LifecycleManager.Start("event-processor", func() {
+		o.processEvents(ctx)
 	})
 
-	// Start periodic snapshot emission
-	if o.config.FullSnapshotInterval > 0 {
-		o.LifecycleManager.Start("snapshot-emitter", func() {
-			o.emitSnapshots(ctx)
-		})
-	}
+	// Start stats collector
+	o.LifecycleManager.Start("stats-collector", func() {
+		o.collectStats(ctx)
+	})
 
-	o.logger.Info("Service map observer started")
+	o.BaseObserver.SetHealthy(true)
+	o.logger.Info("Services observer started successfully")
 	return nil
 }
 
 // Stop stops the observer
 func (o *Observer) Stop() error {
-	o.logger.Info("Stopping service map observer")
+	o.logger.Info("Stopping services observer")
 
-	// Stop lifecycle manager
-	if err := o.LifecycleManager.Stop(5 * time.Second); err != nil {
-		o.logger.Error("Failed to stop lifecycle manager", zap.Error(err))
+	o.BaseObserver.SetHealthy(false)
+
+	// Stop components in reverse order
+
+	if o.k8sMapper != nil {
+		if err := o.k8sMapper.Stop(); err != nil {
+			o.logger.Error("Error stopping K8s enrichment", zap.Error(err))
+		}
 	}
 
-	// Cleanup eBPF if initialized
-	if o.ebpfState != nil {
-		o.cleanupEBPF()
+	if err := o.connectionsTracker.Stop(); err != nil {
+		o.logger.Error("Error stopping connection tracking", zap.Error(err))
+	}
+
+	// Stop lifecycle
+	if err := o.LifecycleManager.Stop(5 * time.Second); err != nil {
+		o.logger.Error("Error stopping lifecycle", zap.Error(err))
 	}
 
 	// Close event channel
 	o.EventChannelManager.Close()
 
-	// Mark as unhealthy
-	o.BaseObserver.SetHealthy(false)
-
-	o.logger.Info("Service map observer stopped")
+	o.logger.Info("Services observer stopped")
 	return nil
 }
 
@@ -320,81 +188,199 @@ func (o *Observer) Events() <-chan *domain.CollectorEvent {
 	return o.EventChannelManager.GetChannel()
 }
 
-// IsHealthy returns health status
-func (o *Observer) IsHealthy() bool {
-	health := o.BaseObserver.Health()
-	return health.Status == domain.HealthHealthy
-}
-
-// Statistics returns observer statistics
-func (o *Observer) Statistics() interface{} {
-	stats := o.BaseObserver.Statistics()
-
-	// Add service-specific stats
-	if stats.CustomMetrics == nil {
-		stats.CustomMetrics = make(map[string]string)
-	}
-
+// GetStats returns current statistics
+func (o *Observer) GetStats() ServiceStats {
 	o.mu.RLock()
-	stats.CustomMetrics["services_count"] = fmt.Sprintf("%d", len(o.services))
-	stats.CustomMetrics["connections_count"] = fmt.Sprintf("%d", len(o.connections))
-	o.mu.RUnlock()
-
-	stats.CustomMetrics["significant_changes"] = fmt.Sprintf("%d", atomic.LoadInt32(&o.significantChanges))
-	stats.CustomMetrics["ebpf_enabled"] = fmt.Sprintf("%v", o.ebpfState != nil)
-
-	return stats
+	defer o.mu.RUnlock()
+	return o.stats
 }
 
-// Health returns health status
-func (o *Observer) Health() *domain.HealthStatus {
-	health := o.BaseObserver.Health()
-	health.Component = o.name
-
-	// Add error count from statistics
-	stats := o.BaseObserver.Statistics()
-	if stats != nil {
-		health.ErrorCount = stats.ErrorCount
+// GetServiceMap returns the current service dependency map
+func (o *Observer) GetServiceMap() map[string]*ServiceFlow {
+	if o.k8sMapper == nil {
+		return make(map[string]*ServiceFlow)
 	}
-
-	// Check K8s connectivity if enabled
-	if o.config.EnableK8sDiscovery && o.k8sClient == nil {
-		health.Status = domain.HealthDegraded
-		health.Message = "Kubernetes discovery enabled but client not connected"
-	}
-
-	return health
+	return o.k8sMapper.GetServiceFlows()
 }
 
-// createK8sClient creates a Kubernetes client
-func createK8sClient(kubeconfig string) (kubernetes.Interface, error) {
-	var config *rest.Config
-	var err error
-
-	if kubeconfig != "" {
-		// Use the provided kubeconfig
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		// Try in-cluster config first
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			// Fall back to default kubeconfig
-			loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-			configOverrides := &clientcmd.ConfigOverrides{}
-			kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-			config, err = kubeConfig.ClientConfig()
+// processEvents processes events from different levels
+func (o *Observer) processEvents(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// Process based on enabled features
+			if o.k8sMapper != nil {
+				o.processEnrichedEvents(ctx)
+			} else {
+				o.processConnectionEvents(ctx)
+			}
 		}
 	}
+}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes config: %w", err)
+// processConnectionEvents processes raw connection events
+func (o *Observer) processConnectionEvents(ctx context.Context) {
+	select {
+	case event := <-o.connectionsTracker.Events():
+		o.sendConnectionEvent(ctx, event)
+	default:
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// processEnrichedEvents processes K8s-enriched events
+func (o *Observer) processEnrichedEvents(ctx context.Context) {
+	select {
+	case event := <-o.k8sMapper.Events():
+		o.sendEnrichedEvent(ctx, event)
+	default:
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// sendConnectionEvent sends a raw connection event
+func (o *Observer) sendConnectionEvent(ctx context.Context, event *ConnectionEvent) {
+	if event == nil {
+		return
 	}
 
-	// Create the clientset
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	domainEvent := &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("conn-%d-%d", event.PID, event.Timestamp),
+		Timestamp: event.GetTimestamp(),
+		Type:      domain.EventTypeNetworkConnection,
+		Source:    o.name,
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Network: &domain.NetworkData{
+				EventType: event.EventType.String(),
+				Protocol:  "TCP",
+				SrcIP:     event.GetSrcIPString(),
+				DstIP:     event.GetDstIPString(),
+				SrcPort:   int32(event.SrcPort),
+				DstPort:   int32(event.DstPort),
+				Direction: "outbound",
+			},
+			Process: &domain.ProcessData{
+				PID:     int32(event.PID),
+				Command: event.GetComm(),
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer":  o.name,
+				"version":   "1.0.0",
+				"level":     "1",
+				"conn_type": event.EventType.String(),
+			},
+		},
 	}
 
-	return clientset, nil
+	if o.EventChannelManager.SendEvent(domainEvent) {
+		o.BaseObserver.RecordEvent()
+		o.connectionsTracked.Add(ctx, 1)
+	} else {
+		o.BaseObserver.RecordDrop()
+	}
+}
+
+// sendEnrichedEvent sends a K8s-enriched connection event
+func (o *Observer) sendEnrichedEvent(ctx context.Context, event *EnrichedConnection) {
+	if event == nil || event.ServiceFlow == nil {
+		return
+	}
+
+	domainEvent := &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("flow-%s-%d", event.ServiceFlow.SourceService, time.Now().UnixNano()),
+		Timestamp: time.Now(),
+		Type:      domain.EventTypeServiceMap,
+		Source:    o.name,
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Network: &domain.NetworkData{
+				EventType: "service_flow",
+				Protocol:  "TCP",
+				SrcPort:   int32(event.ServiceFlow.Port),
+				DstPort:   int32(event.ServiceFlow.Port),
+				Direction: flowTypeString(event.ServiceFlow.FlowType),
+			},
+			KubernetesResource: &domain.K8sResourceData{
+				Namespace: event.ServiceFlow.SourceNamespace,
+				Name:      event.ServiceFlow.SourceService,
+				Kind:      "Service",
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer":  o.name,
+				"version":   "1.0.0",
+				"level":     "2",
+				"flow_type": flowTypeString(event.ServiceFlow.FlowType),
+				"src_ns":    event.ServiceFlow.SourceNamespace,
+				"dst_ns":    event.ServiceFlow.DestinationNS,
+				"src_svc":   event.ServiceFlow.SourceService,
+				"dst_svc":   event.ServiceFlow.DestinationService,
+			},
+		},
+	}
+
+	if o.EventChannelManager.SendEvent(domainEvent) {
+		o.BaseObserver.RecordEvent()
+		o.servicesDiscovered.Add(ctx, 1)
+	} else {
+		o.BaseObserver.RecordDrop()
+	}
+}
+
+// collectStats periodically collects statistics from all levels
+func (o *Observer) collectStats(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			o.updateStats()
+		}
+	}
+}
+
+// updateStats updates statistics from all levels
+func (o *Observer) updateStats() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	// Get connection tracking stats
+	connectionsStats := o.connectionsTracker.GetStats()
+	o.stats.ActiveConnections = connectionsStats.ActiveConnections
+
+	// Get K8s enrichment stats
+	if o.k8sMapper != nil {
+		serviceFlows := o.k8sMapper.GetServiceFlows()
+		o.stats.ServicesDiscovered = uint64(len(serviceFlows))
+		o.stats.ServiceFlows = uint64(len(serviceFlows))
+	}
+
+	o.stats.LastEventTime = time.Now()
+}
+
+// Helper function to convert flow type to string
+func flowTypeString(ft FlowType) string {
+	switch ft {
+	case FlowIntraNamespace:
+		return "intra-namespace"
+	case FlowInterNamespace:
+		return "inter-namespace"
+	case FlowExternal:
+		return "external"
+	case FlowIngress:
+		return "ingress"
+	case FlowEgress:
+		return "egress"
+	default:
+		return "unknown"
+	}
 }
