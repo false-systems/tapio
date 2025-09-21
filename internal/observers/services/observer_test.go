@@ -10,455 +10,514 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestObserverCreation(t *testing.T) {
+// TestNewObserver tests observer creation
+func TestNewObserver(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      *Config
-		expectError bool
+		name      string
+		config    *Config
+		expectErr bool
 	}{
 		{
-			name:        "Default config",
-			config:      nil,
-			expectError: false,
-		},
-		{
-			name:        "Custom config",
-			config:      DefaultConfig(),
-			expectError: false,
-		},
-		{
-			name: "Invalid config - negative buffer",
+			name: "default config without K8s",
 			config: &Config{
-				BufferSize: -1,
+				BufferSize:          100,
+				ConnectionTableSize: 1000,
+				ConnectionTimeout:   time.Minute,
+				CleanupInterval:     time.Second,
+				EnableK8sMapping:    false, // Disable K8s to avoid client creation
 			},
-			expectError: true,
+			expectErr: false,
+		},
+		{
+			name: "custom config without K8s",
+			config: &Config{
+				BufferSize:          200,
+				ConnectionTableSize: 2000,
+				ConnectionTimeout:   2 * time.Minute,
+				CleanupInterval:     2 * time.Second,
+				EnableK8sMapping:    false,
+			},
+			expectErr: false,
+		},
+		{
+			name: "invalid config - zero buffer",
+			config: &Config{
+				BufferSize:          0,
+				ConnectionTableSize: 1000,
+				ConnectionTimeout:   time.Minute,
+				CleanupInterval:     time.Second,
+			},
+			expectErr: true,
+		},
+		{
+			name: "config with K8s disabled",
+			config: &Config{
+				BufferSize:          100,
+				ConnectionTableSize: 1000,
+				ConnectionTimeout:   time.Minute,
+				CleanupInterval:     time.Second,
+				EnableK8sMapping:    false,
+			},
+			expectErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			observer, err := NewObserver("test-services", tt.config)
-			if tt.expectError {
+			logger := zaptest.NewLogger(t)
+			observer, err := NewObserver("test", tt.config, logger)
+
+			if tt.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, observer)
 			} else {
-				require.NoError(t, err)
-				require.NotNil(t, observer)
-				assert.Equal(t, "test-services", observer.Name())
+				assert.NoError(t, err)
+				assert.NotNil(t, observer)
+				assert.Equal(t, "test", observer.name)
+				assert.NotNil(t, observer.connectionsTracker)
+
+				// Check K8s enricher based on config
+				if tt.config != nil && !tt.config.EnableK8sMapping {
+					assert.Nil(t, observer.k8sMapper)
+				}
 			}
 		})
 	}
 }
 
+// TestObserverLifecycle tests Start and Stop
 func TestObserverLifecycle(t *testing.T) {
-	logger := zaptest.NewLogger(t, zaptest.Level(zap.InfoLevel))
+	logger := zaptest.NewLogger(t)
 	config := &Config{
-		BufferSize:           100,
-		EnableK8sDiscovery:   false, // Disable for unit test
-		EnableEBPF:           false, // Disable for unit test
-		EmitOnChange:         false, // Disable automatic emission
-		FullSnapshotInterval: 0,     // Disable snapshots
-		Logger:               logger,
+		BufferSize:          100,
+		ConnectionTableSize: 1000,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false, // Disable K8s to avoid client creation
 	}
 
-	observer, err := NewObserver("test-lifecycle", config)
+	observer, err := NewObserver("test", config, logger)
 	require.NoError(t, err)
 	require.NotNil(t, observer)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
-	// Start observer
+	// Test Start
 	err = observer.Start(ctx)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	assert.True(t, observer.IsHealthy())
 
-	// Let it run briefly
+	// Give some time for goroutines to start
 	time.Sleep(100 * time.Millisecond)
 
-	// Check statistics
-	stats := observer.Statistics()
-	assert.NotNil(t, stats)
-
-	// Check health
-	health := observer.Health()
-	assert.NotNil(t, health)
-	assert.Equal(t, "test-lifecycle", health.Component)
-	assert.Equal(t, domain.HealthHealthy, health.Status)
-
-	// Stop observer
+	// Test Stop
 	err = observer.Stop()
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	assert.False(t, observer.IsHealthy())
 }
 
-func TestServiceDiscovery(t *testing.T) {
-	logger := zaptest.NewLogger(t, zaptest.Level(zap.InfoLevel))
+// TestObserverEvents tests event channel
+func TestObserverEvents(t *testing.T) {
+	logger := zaptest.NewLogger(t)
 	config := &Config{
-		BufferSize:           100,
-		EnableK8sDiscovery:   true,
-		EnableEBPF:           false,
-		EmitOnChange:         false,
-		FullSnapshotInterval: 0,
-		Logger:               logger,
+		BufferSize:          10,
+		ConnectionTableSize: 100,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false,
 	}
 
-	// Create fake Kubernetes client
-	fakeClient := fake.NewSimpleClientset(
-		&v1.Service{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-service",
-				Namespace: "default",
-				Labels: map[string]string{
-					"app":     "test",
-					"version": "v1",
-				},
-			},
-			Spec: v1.ServiceSpec{
-				ClusterIP: "10.96.0.1", // Add ClusterIP so it's not treated as headless
-				Ports: []v1.ServicePort{
-					{
-						Name:     "http",
-						Port:     80,
-						Protocol: v1.ProtocolTCP,
-					},
-				},
-				Selector: map[string]string{
-					"app": "test",
-				},
-			},
-		},
-		&v1.Endpoints{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-service",
-				Namespace: "default",
-			},
-			Subsets: []v1.EndpointSubset{
-				{
-					Addresses: []v1.EndpointAddress{
-						{
-							IP:       "10.0.0.1",
-							NodeName: strPtr("node1"),
-						},
-						{
-							IP:       "10.0.0.2",
-							NodeName: strPtr("node2"),
-						},
-					},
-					Ports: []v1.EndpointPort{
-						{
-							Name:     "http",
-							Port:     80,
-							Protocol: v1.ProtocolTCP,
-						},
-					},
-				},
-			},
-		},
-	)
-
-	observer, err := NewObserver("test-discovery", config)
+	observer, err := NewObserver("test", config, logger)
 	require.NoError(t, err)
-	observer.k8sClient = fakeClient
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Get event channel
+	eventCh := observer.Events()
+	assert.NotNil(t, eventCh)
 
 	// Start observer
+	ctx := context.Background()
 	err = observer.Start(ctx)
 	require.NoError(t, err)
 
-	// Discover services
-	err = observer.discoverServices(ctx)
-	require.NoError(t, err)
-
-	// Check discovered services
-	observer.mu.RLock()
-	serviceCount := len(observer.services)
-	var serviceNames []string
-	for name := range observer.services {
-		serviceNames = append(serviceNames, name)
+	// Send test event through the channel manager
+	testEvent := &domain.CollectorEvent{
+		EventID:   "test-1",
+		Timestamp: time.Now(),
+		Type:      domain.EventTypeNetworkConnection,
+		Source:    "test",
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Network: &domain.NetworkData{
+				EventType: "connect",
+				Protocol:  "TCP",
+				SrcIP:     "10.0.0.1",
+				DstIP:     "10.0.0.2",
+				SrcPort:   8080,
+				DstPort:   3306,
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "test",
+				"version":  "1.0.0",
+			},
+		},
 	}
-	service, exists := observer.services["default/test-service"]
-	observer.mu.RUnlock()
 
-	t.Logf("Found %d services: %v", serviceCount, serviceNames)
-	assert.Equal(t, 1, serviceCount)
+	sent := observer.EventChannelManager.SendEvent(testEvent)
+	assert.True(t, sent)
 
-	require.True(t, exists)
-	assert.Equal(t, "test-service", service.Name)
-	assert.Equal(t, "default", service.Namespace)
-	assert.Equal(t, "v1", service.Version)
-	assert.Equal(t, 2, len(service.Endpoints))
-	// Port 80 should be detected as proxy, but if auto-detect is disabled or port mappings are different, it might be unknown
-	// Let's accept either proxy or unknown for this test
-	assert.Contains(t, []ServiceType{ServiceTypeProxy, ServiceTypeUnknown}, service.Type)
+	// Receive event
+	select {
+	case event := <-eventCh:
+		assert.Equal(t, "test-1", event.EventID)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for event")
+	}
 
 	// Stop observer
 	err = observer.Stop()
-	require.NoError(t, err)
+	assert.NoError(t, err)
 }
 
-func TestServiceTypeDetection(t *testing.T) {
-	logger := zaptest.NewLogger(t, zaptest.Level(zap.InfoLevel))
-	config := DefaultConfig()
-	config.Logger = logger
-
-	observer, err := NewObserver("test-detection", config)
-	require.NoError(t, err)
-
-	tests := []struct {
-		name     string
-		service  *v1.Service
-		expected ServiceType
-	}{
-		{
-			name: "Database by port",
-			service: &v1.Service{
-				ObjectMeta: metav1.ObjectMeta{Name: "postgres"},
-				Spec: v1.ServiceSpec{
-					Ports: []v1.ServicePort{{Port: 5432}},
-				},
-			},
-			expected: ServiceTypeDatabase,
-		},
-		{
-			name: "Cache by port",
-			service: &v1.Service{
-				ObjectMeta: metav1.ObjectMeta{Name: "redis"},
-				Spec: v1.ServiceSpec{
-					Ports: []v1.ServicePort{{Port: 6379}},
-				},
-			},
-			expected: ServiceTypeCache,
-		},
-		{
-			name: "Queue by port",
-			service: &v1.Service{
-				ObjectMeta: metav1.ObjectMeta{Name: "rabbitmq"},
-				Spec: v1.ServiceSpec{
-					Ports: []v1.ServicePort{{Port: 5672}},
-				},
-			},
-			expected: ServiceTypeQueue,
-		},
-		{
-			name: "Database by label",
-			service: &v1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "custom-db",
-					Labels: map[string]string{
-						"service-type": "database",
-					},
-				},
-				Spec: v1.ServiceSpec{
-					Ports: []v1.ServicePort{{Port: 9999}},
-				},
-			},
-			expected: ServiceTypeDatabase,
-		},
-		{
-			name: "Database by image annotation",
-			service: &v1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "custom-postgres",
-					Annotations: map[string]string{
-						"image": "postgres:14",
-					},
-				},
-				Spec: v1.ServiceSpec{
-					Ports: []v1.ServicePort{{Port: 9999}},
-				},
-			},
-			expected: ServiceTypeDatabase,
-		},
-		{
-			name: "Unknown type",
-			service: &v1.Service{
-				ObjectMeta: metav1.ObjectMeta{Name: "custom-service"},
-				Spec: v1.ServiceSpec{
-					Ports: []v1.ServicePort{{Port: 12345}},
-				},
-			},
-			expected: ServiceTypeUnknown,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			detected := observer.detectServiceType(tt.service)
-			assert.Equal(t, tt.expected, detected)
-		})
-	}
-}
-
-func TestConnectionQuality(t *testing.T) {
-	tests := []struct {
-		name       string
-		connection Connection
-		minQuality float64
-		maxQuality float64
-	}{
-		{
-			name: "Perfect connection",
-			connection: Connection{
-				BytesSent:   1000,
-				BytesRecv:   1000,
-				Latency:     10_000_000, // 10ms
-				Retransmits: 0,
-				Resets:      0,
-				State:       StateEstablished,
-			},
-			minQuality: 0.9,
-			maxQuality: 1.0,
-		},
-		{
-			name: "Connection with retransmits",
-			connection: Connection{
-				BytesSent:   10000,
-				BytesRecv:   10000,
-				Latency:     50_000_000, // 50ms
-				Retransmits: 5,
-				Resets:      0,
-				State:       StateEstablished,
-			},
-			minQuality: 0.5,
-			maxQuality: 0.9,
-		},
-		{
-			name: "Connection with resets",
-			connection: Connection{
-				BytesSent:   1000,
-				BytesRecv:   1000,
-				Latency:     10_000_000,
-				Retransmits: 0,
-				Resets:      1,
-				State:       StateReset,
-			},
-			minQuality: 0.0,
-			maxQuality: 0.3,
-		},
-		{
-			name: "High latency connection",
-			connection: Connection{
-				BytesSent:   1000,
-				BytesRecv:   1000,
-				Latency:     500_000_000, // 500ms
-				Retransmits: 0,
-				Resets:      0,
-				State:       StateEstablished,
-			},
-			minQuality: 0.5,
-			maxQuality: 0.95, // Allow slightly higher quality
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			quality := tt.connection.CalculateQuality()
-			assert.GreaterOrEqual(t, quality, tt.minQuality,
-				"Quality %f should be >= %f", quality, tt.minQuality)
-			assert.LessOrEqual(t, quality, tt.maxQuality,
-				"Quality %f should be <= %f", quality, tt.maxQuality)
-		})
-	}
-}
-
-func TestEventEmission(t *testing.T) {
-	logger := zaptest.NewLogger(t, zaptest.Level(zap.InfoLevel))
+// TestObserverStatistics tests Statistics method
+func TestObserverStatistics(t *testing.T) {
+	logger := zaptest.NewLogger(t)
 	config := &Config{
-		BufferSize:           100,
-		EnableK8sDiscovery:   false,
-		EnableEBPF:           false,
-		EmitOnChange:         true,
-		ChangeDebounce:       100 * time.Millisecond,
-		FullSnapshotInterval: 0,
-		Logger:               logger,
+		BufferSize:          100,
+		ConnectionTableSize: 1000,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false,
 	}
-
-	observer, err := NewObserver("test-emission", config)
+	observer, err := NewObserver("test", config, logger)
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	stats := observer.Statistics()
+	assert.NotNil(t, stats)
+	assert.Equal(t, int64(0), stats.EventsProcessed)
+	assert.Equal(t, int64(0), stats.ErrorCount)
+	assert.False(t, stats.LastEventTime.IsZero())
+}
+
+// TestObserverGetStats tests GetStats method
+func TestObserverGetStats(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{
+		BufferSize:          100,
+		ConnectionTableSize: 1000,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false,
+	}
+	observer, err := NewObserver("test", config, logger)
+	require.NoError(t, err)
+
+	stats := observer.GetStats()
+	assert.Equal(t, uint64(0), stats.ActiveConnections)
+	assert.Equal(t, uint64(0), stats.ServicesDiscovered)
+	assert.Equal(t, uint64(0), stats.ServiceFlows)
+	assert.False(t, stats.K8sMappingEnabled) // We disabled K8s in config
+}
+
+// TestObserverGetServiceMap tests GetServiceMap method
+func TestObserverGetServiceMap(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+
+	// Test without K8s
+	config := &Config{
+		BufferSize:          100,
+		ConnectionTableSize: 1000,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false,
+	}
+
+	observer, err := NewObserver("test", config, logger)
+	require.NoError(t, err)
+
+	serviceMap := observer.GetServiceMap()
+	assert.NotNil(t, serviceMap)
+	assert.Empty(t, serviceMap)
+}
+
+// TestProcessConnectionEvents tests connection event processing
+func TestProcessConnectionEvents(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{
+		BufferSize:          10,
+		ConnectionTableSize: 100,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false,
+	}
+
+	observer, err := NewObserver("test", config, logger)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err = observer.Start(ctx)
-	require.NoError(t, err)
-
-	// Add a service
-	service := &Service{
-		Name:      "test-service",
-		Namespace: "default",
-		Type:      ServiceTypeAPI,
-		Health:    HealthHealthy,
-		FirstSeen: time.Now(),
-		LastSeen:  time.Now(),
-		Endpoints: []Endpoint{
-			{
-				IP:   "10.0.0.1",
-				Port: 8080,
-			},
-		},
+	// Create a test connection event
+	testEvent := &ConnectionEvent{
+		Timestamp: uint64(time.Now().UnixNano()),
+		EventType: ConnectionConnect,
+		PID:       1234,
+		SrcPort:   8080,
+		DstPort:   3306,
 	}
+	copy(testEvent.SrcIP[:], []byte("10.0.0.1"))
+	copy(testEvent.DstIP[:], []byte("10.0.0.2"))
+	copy(testEvent.Comm[:], []byte("test-app"))
 
-	observer.mu.Lock()
-	observer.services["default/test-service"] = service
-	observer.mu.Unlock()
+	// Start event processing in background
+	go observer.processConnectionEvents(ctx)
 
-	// Trigger a change
-	observer.pendingChanges <- ChangeEvent{
-		Type:      ChangeServiceAdded,
-		Service:   "default/test-service",
-		Timestamp: time.Now(),
-	}
+	// Send event to tracker
+	observer.connectionsTracker.eventCh <- testEvent
 
-	// Wait for event
+	// Should receive processed event
 	select {
 	case event := <-observer.Events():
 		assert.NotNil(t, event)
-		assert.Equal(t, domain.EventTypeServiceMap, event.Type)
-		assert.NotNil(t, event.EventData)
-	case <-time.After(2 * time.Second):
-		t.Fatal("Timeout waiting for event")
+		assert.Equal(t, domain.EventTypeNetworkConnection, event.Type)
+		assert.NotNil(t, event.EventData.Network)
+		assert.Equal(t, "TCP", event.EventData.Network.Protocol)
+		assert.Equal(t, int32(8080), event.EventData.Network.SrcPort)
+		assert.Equal(t, int32(3306), event.EventData.Network.DstPort)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for processed event")
 	}
-
-	err = observer.Stop()
-	require.NoError(t, err)
 }
 
-func TestOutlierDetection(t *testing.T) {
-	endpoint := &Endpoint{
-		IP:       "10.0.0.1",
-		Port:     8080,
-		PodName:  "test-pod",
-		NodeName: "node1",
-		Ready:    true,
-		OutlierStatus: &OutlierStatus{
-			Consecutive5xx:    0,
-			ConsecutiveErrors: 0,
-			SuccessRate5m:     1.0,
-			SuccessRate1m:     1.0,
-			EjectionCount:     0,
-			CurrentlyEjected:  false,
+// TestSendConnectionEvent tests sendConnectionEvent
+func TestSendConnectionEvent(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{
+		BufferSize:          100,
+		ConnectionTableSize: 1000,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false,
+	}
+	observer, err := NewObserver("test", config, logger)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Test with nil event
+	observer.sendConnectionEvent(ctx, nil)
+	// Should not panic
+
+	// Test with valid event
+	testEvent := &ConnectionEvent{
+		Timestamp: uint64(time.Now().UnixNano()),
+		EventType: ConnectionConnect,
+		PID:       5678,
+		SrcPort:   9090,
+		DstPort:   443,
+	}
+	copy(testEvent.SrcIP[:], []byte("192.168.1.1"))
+	copy(testEvent.DstIP[:], []byte("192.168.1.2"))
+	copy(testEvent.Comm[:], []byte("curl"))
+
+	observer.sendConnectionEvent(ctx, testEvent)
+
+	// Check if event was sent
+	select {
+	case event := <-observer.Events():
+		assert.NotNil(t, event)
+		assert.Contains(t, event.EventID, "conn-5678")
+		assert.Equal(t, domain.EventTypeNetworkConnection, event.Type)
+		assert.Equal(t, "test", event.Source)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected event not received")
+	}
+}
+
+// TestFlowTypeString tests flowTypeString helper
+func TestFlowTypeString(t *testing.T) {
+	tests := []struct {
+		flowType FlowType
+		expected string
+	}{
+		{FlowIntraNamespace, "intra-namespace"},
+		{FlowInterNamespace, "inter-namespace"},
+		{FlowExternal, "external"},
+		{FlowIngress, "ingress"},
+		{FlowEgress, "egress"},
+		{FlowType(99), "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := flowTypeString(tt.flowType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestConfigValidate tests Config validation
+func TestConfigValidate(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    *Config
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "valid config",
+			config:    DefaultConfig(),
+			expectErr: false,
+		},
+		{
+			name: "invalid connection table size",
+			config: &Config{
+				ConnectionTableSize: 0,
+				ConnectionTimeout:   time.Minute,
+				BufferSize:          100,
+				CleanupInterval:     time.Second,
+			},
+			expectErr: true,
+			errMsg:    "connection_table_size must be positive",
+		},
+		{
+			name: "invalid connection timeout",
+			config: &Config{
+				ConnectionTableSize: 1000,
+				ConnectionTimeout:   0,
+				BufferSize:          100,
+				CleanupInterval:     time.Second,
+			},
+			expectErr: true,
+			errMsg:    "connection_timeout must be positive",
+		},
+		{
+			name: "invalid buffer size",
+			config: &Config{
+				ConnectionTableSize: 1000,
+				ConnectionTimeout:   time.Minute,
+				BufferSize:          0,
+				CleanupInterval:     time.Second,
+			},
+			expectErr: true,
+			errMsg:    "buffer_size must be positive",
+		},
+		{
+			name: "invalid K8s refresh interval",
+			config: &Config{
+				ConnectionTableSize: 1000,
+				ConnectionTimeout:   time.Minute,
+				BufferSize:          100,
+				CleanupInterval:     time.Second,
+				EnableK8sMapping:    true,
+				K8sRefreshInterval:  0,
+				PodMappingTimeout:   time.Second,
+			},
+			expectErr: true,
+			errMsg:    "k8s_refresh_interval must be positive",
 		},
 	}
 
-	// Simulate errors
-	endpoint.OutlierStatus.Consecutive5xx = 5
-	endpoint.OutlierStatus.ConsecutiveErrors = 10
-	endpoint.OutlierStatus.SuccessRate1m = 0.5
-
-	// Should be considered unhealthy
-	assert.True(t, endpoint.OutlierStatus.Consecutive5xx >= 5)
-	assert.True(t, endpoint.OutlierStatus.SuccessRate1m < 0.8)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.expectErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
-// Helper function
-func strPtr(s string) *string {
-	return &s
+// TestConfigGetEnabledLevels tests GetEnabledLevels
+func TestConfigGetEnabledLevels(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *Config
+		expected []int
+	}{
+		{
+			name: "only connection tracking",
+			config: &Config{
+				EnableK8sMapping: false,
+			},
+			expected: []int{1},
+		},
+		{
+			name: "with K8s mapping",
+			config: &Config{
+				EnableK8sMapping: true,
+			},
+			expected: []int{1, 2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			levels := tt.config.GetEnabledLevels()
+			assert.Equal(t, tt.expected, levels)
+		})
+	}
+}
+
+// TestUpdateStats tests updateStats method
+func TestUpdateStats(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	config := &Config{
+		BufferSize:          100,
+		ConnectionTableSize: 1000,
+		ConnectionTimeout:   time.Minute,
+		CleanupInterval:     time.Second,
+		EnableK8sMapping:    false,
+	}
+
+	observer, err := NewObserver("test", config, logger)
+	require.NoError(t, err)
+
+	// Update connection tracker stats
+	observer.connectionsTracker.mu.Lock()
+	observer.connectionsTracker.stats.ActiveConnections = 5
+	observer.connectionsTracker.mu.Unlock()
+
+	// Call updateStats
+	observer.updateStats()
+
+	// Verify stats were updated
+	stats := observer.GetStats()
+	assert.Equal(t, uint64(5), stats.ActiveConnections)
+}
+
+// BenchmarkSendConnectionEvent benchmarks event sending
+func BenchmarkSendConnectionEvent(b *testing.B) {
+	logger := zap.NewNop()
+	observer, err := NewObserver("bench", nil, logger)
+	require.NoError(b, err)
+
+	ctx := context.Background()
+	testEvent := &ConnectionEvent{
+		Timestamp: uint64(time.Now().UnixNano()),
+		EventType: ConnectionConnect,
+		PID:       1234,
+		SrcPort:   8080,
+		DstPort:   3306,
+	}
+
+	// Drain events in background
+	go func() {
+		for range observer.Events() {
+			// Drain
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		observer.sendConnectionEvent(ctx, testEvent)
+	}
 }
