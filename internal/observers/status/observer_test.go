@@ -194,6 +194,13 @@ func TestObserverLifecycle(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
+	// Test health and statistics
+	health := observer.Health()
+	assert.NotNil(t, health)
+
+	stats := observer.Statistics()
+	assert.NotNil(t, stats)
+
 	err = observer.Stop()
 	assert.NoError(t, err)
 }
