@@ -191,6 +191,8 @@ func (o *Observer) convertToDomainEvent(transition *LifecycleTransition) *domain
 		},
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
+				"observer":        "lifecycle",
+				"version":         "1.0.0",
 				"transition_type": string(transition.Type),
 				"pods_affected":   fmt.Sprintf("%d", transition.Resources.DirectCount),
 			},
