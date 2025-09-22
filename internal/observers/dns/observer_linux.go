@@ -111,6 +111,11 @@ func (o *Observer) startPlatform() error {
 		o.processDNSProblems(ctx)
 	})
 
+	// Start timeout checker
+	o.LifecycleManager.Start("timeout-checker", func() {
+		o.checkDNSTimeouts(ctx)
+	})
+
 	o.logger.Info("eBPF DNS problem detection started")
 	return nil
 }
@@ -157,15 +162,27 @@ func (o *Observer) attachProbes() error {
 	}
 	ebpfState.links = append(ebpfState.links, l)
 
-	// Attach to udp_recvmsg for DNS responses
-	prog = ebpfState.collection.Programs["trace_udp_recvmsg"]
+	// Attach to udp_recvmsg entry to save socket info
+	prog = ebpfState.collection.Programs["trace_udp_recvmsg_enter"]
 	if prog == nil {
-		return fmt.Errorf("trace_udp_recvmsg program not found")
+		return fmt.Errorf("trace_udp_recvmsg_enter program not found")
 	}
 
 	l, err = link.Kprobe("udp_recvmsg", prog, nil)
 	if err != nil {
 		return fmt.Errorf("attaching udp_recvmsg kprobe: %w", err)
+	}
+	ebpfState.links = append(ebpfState.links, l)
+
+	// Attach to udp_recvmsg return for DNS responses
+	prog = ebpfState.collection.Programs["trace_udp_recvmsg_ret"]
+	if prog == nil {
+		return fmt.Errorf("trace_udp_recvmsg_ret program not found")
+	}
+
+	l, err = link.Kretprobe("udp_recvmsg", prog, nil)
+	if err != nil {
+		return fmt.Errorf("attaching udp_recvmsg kretprobe: %w", err)
 	}
 	ebpfState.links = append(ebpfState.links, l)
 
@@ -262,6 +279,7 @@ func (o *Observer) convertToDomainEvent(event *DNSEvent, isRepeated bool) *domai
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer":     "dns",
+				"version":      "1.0.0",
 				"problem_type": event.ProblemType.String(),
 				"repeated":     fmt.Sprintf("%v", isRepeated),
 			},
@@ -320,6 +338,82 @@ func (o *Observer) updateMetrics(ctx context.Context, event *DNSEvent) {
 	o.mu.Unlock()
 }
 
+// checkDNSTimeouts scans for queries that never got responses
+func (o *Observer) checkDNSTimeouts(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			o.scanForTimeouts()
+		}
+	}
+}
+
+// scanForTimeouts checks active queries for timeouts
+func (o *Observer) scanForTimeouts() {
+	ebpfState := o.ebpfState.(*dnsEBPF)
+	activeQueries := ebpfState.collection.Maps["active_queries"]
+	if activeQueries == nil {
+		return
+	}
+
+	now := time.Now().UnixNano()
+	timeoutNs := uint64(o.config.TimeoutMs) * 1_000_000
+
+	var key uint64
+	var state DNSEvent // Using our Go struct to read the BPF state
+
+	iter := activeQueries.Iterate()
+	for iter.Next(&key, &state) {
+		// Check if query has timed out
+		elapsed := uint64(now) - state.Timestamp
+		if elapsed > timeoutNs {
+			// Create timeout event
+			event := &domain.CollectorEvent{
+				EventID:   fmt.Sprintf("dns-timeout-%d-%d", key>>32, now),
+				Timestamp: time.Now(),
+				Type:      domain.EventTypeDNS,
+				Source:    o.name,
+				Severity:  domain.EventSeverityError,
+				EventData: domain.EventDataContainer{
+					DNS: &domain.DNSData{
+						QueryName:    state.GetQueryName(),
+						Duration:     time.Duration(elapsed),
+						Error:        true,
+						ErrorMessage: fmt.Sprintf("DNS query timeout after %dms", elapsed/1_000_000),
+					},
+					Process: &domain.ProcessData{
+						PID:     int32(key >> 32),
+						Command: state.GetComm(),
+					},
+				},
+				Metadata: domain.EventMetadata{
+					Labels: map[string]string{
+						"observer":     "dns",
+						"version":      "1.0.0",
+						"problem_type": "timeout",
+					},
+				},
+			}
+
+			// Send timeout event
+			if o.EventChannelManager.SendEvent(event) {
+				o.BaseObserver.RecordEvent()
+				o.mu.Lock()
+				o.stats.Timeouts++
+				o.mu.Unlock()
+			}
+
+			// Clean up timed-out query
+			activeQueries.Delete(key)
+		}
+	}
+}
+
 // stopPlatform stops eBPF programs
 func (o *Observer) stopPlatform() {
 	if o.ebpfState == nil {
@@ -372,14 +466,26 @@ func getQueryTypeName(qtype uint16) string {
 }
 
 func formatIP(ip []byte) string {
-	// Check if IPv4
-	if ip[4] == 0 && ip[5] == 0 && ip[6] == 0 && ip[7] == 0 &&
-		ip[8] == 0 && ip[9] == 0 && ip[10] == 0 && ip[11] == 0 &&
-		ip[12] == 0 && ip[13] == 0 && ip[14] == 0 && ip[15] == 0 {
+	// Check for IPv6 marker
+	if ip[0] == 0xFF && ip[1] == 0xFF {
+		return "IPv6"
+	}
+
+	// Check if IPv4 (only first 4 bytes non-zero)
+	isIPv4 := true
+	for i := 4; i < 16; i++ {
+		if ip[i] != 0 {
+			isIPv4 = false
+			break
+		}
+	}
+
+	if isIPv4 && ip[0] != 0 {
 		return fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
 	}
-	// IPv6 (simplified)
-	return "IPv6"
+
+	// Unknown or empty
+	return ""
 }
 
 func getProblemDescription(event *DNSEvent) string {

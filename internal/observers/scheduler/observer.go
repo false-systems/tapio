@@ -311,8 +311,10 @@ func (o *Observer) runPatternDetection() {
 							},
 							Metadata: domain.EventMetadata{
 								Labels: map[string]string{
-									"pattern": "true",
-									"type":    pattern.Type,
+									"observer": "scheduler",
+									"version":  "1.0.0",
+									"pattern":  "true",
+									"type":     pattern.Type,
 								},
 							},
 						}

@@ -1,15 +1,15 @@
 # DNS Problem Observer
 
-A lean DNS problem detector that tracks DNS failures and performance issues using eBPF.
+A DNS problem detector that tracks DNS failures and performance issues using eBPF with **actual DNS packet parsing**.
 
 ## What It Does
 
 This observer detects DNS problems:
-- **Slow queries** - Queries exceeding latency threshold
-- **Timeouts** - DNS queries with no response
-- **NXDOMAIN** - Domain not found errors
-- **SERVFAIL** - DNS server failures
-- **REFUSED** - Query refused by server
+- ✅ **Slow queries** - Queries exceeding latency threshold with domain names
+- ✅ **Timeouts** - DNS queries with no response (5 second scan)
+- ⚠️ **NXDOMAIN** - Domain not found errors (detection stubbed)
+- ⚠️ **SERVFAIL** - DNS server failures (detection stubbed)
+- ⚠️ **REFUSED** - Query refused by server (detection stubbed)
 
 ## Architecture
 

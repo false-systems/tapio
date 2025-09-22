@@ -276,6 +276,10 @@ func (c *Observer) convertToObserverEvent(bpfEvent *BPFContainerExitEvent) (*dom
 		Metadata: domain.EventMetadata{
 			Priority: domain.PriorityNormal,
 			PID:      int32(bpfEvent.PID),
+			Labels: map[string]string{
+				"observer": "container-runtime",
+				"version":  "1.0.0",
+			},
 		},
 		CorrelationHints: &domain.CorrelationHints{
 			ContainerID: containerID,

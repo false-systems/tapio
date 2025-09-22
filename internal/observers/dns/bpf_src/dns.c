@@ -10,6 +10,8 @@
 #define MAX_DNS_NAME_LEN 253
 #define DNS_PORT 53
 #define TASK_COMM_LEN 16
+#define AF_INET 2
+#define AF_INET6 10
 
 // DNS problem types
 enum dns_problem_type {
@@ -79,6 +81,11 @@ struct dns_query_state {
     __u8 retries;
 };
 
+// DNS packet buffer for parsing
+struct dns_packet_buffer {
+    unsigned char data[512];
+};
+
 // Maps
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -98,6 +105,14 @@ struct {
     __type(key, __u32);
     __type(value, __u64);
 } config SEC(".maps");
+
+// Per-CPU buffer for DNS packet parsing
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct dns_packet_buffer);
+} dns_buffer SEC(".maps");
 
 // Helper to parse DNS query name from packet
 // Currently unused but will be needed for parsing DNS packets
@@ -140,8 +155,9 @@ int trace_udp_sendmsg(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
 
-    // Get socket info
+    // Get socket info and message
     struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+    struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 
     // Check if this is DNS (port 53)
     __u16 dport;
@@ -162,13 +178,88 @@ int trace_udp_sendmsg(struct pt_regs *ctx) {
     state.src_port = sport;
     state.dst_port = dport;
 
-    // Get destination IP
-    __u32 daddr;
-    BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
-    state.server_ip[0] = daddr & 0xFF;
-    state.server_ip[1] = (daddr >> 8) & 0xFF;
-    state.server_ip[2] = (daddr >> 16) & 0xFF;
-    state.server_ip[3] = (daddr >> 24) & 0xFF;
+    // READ THE ACTUAL DNS PACKET
+    // Get the iovec from msghdr
+    struct iovec *msg_iov;
+    size_t iovlen;
+    BPF_CORE_READ_INTO(&msg_iov, msg, msg_iter.iov);
+    BPF_CORE_READ_INTO(&iovlen, msg, msg_iter.nr_segs);
+
+    if (!msg_iov || iovlen == 0) {
+        return 0;
+    }
+
+    // Get per-CPU buffer for DNS packet
+    __u32 zero = 0;
+    struct dns_packet_buffer *pkt_buf = bpf_map_lookup_elem(&dns_buffer, &zero);
+    if (!pkt_buf) {
+        return 0;
+    }
+
+    struct iovec iov;
+    // Get first iovec (contains DNS data)
+    if (bpf_probe_read(&iov, sizeof(iov), &msg_iov[0]) < 0) {
+        return 0;
+    }
+
+    // Read DNS packet from userspace
+    int dns_len = iov.iov_len < 512 ? iov.iov_len : 512;
+    if (bpf_probe_read_user(pkt_buf->data, dns_len, iov.iov_base) < 0) {
+        return 0;
+    }
+
+    // DNS Header is first 12 bytes
+    // Skip header and parse question section
+    int offset = 12;
+
+    // Parse domain name from DNS question
+    int name_len = 0;
+    #pragma unroll
+    for (int i = 0; i < 63 && offset < dns_len; i++) {  // Limit iterations for verifier
+        __u8 label_len = pkt_buf->data[offset];
+        if (label_len == 0) {
+            offset++;
+            break;
+        }
+
+        if (label_len > 63) {  // Compression or invalid
+            break;
+        }
+
+        if (name_len > 0 && name_len < MAX_DNS_NAME_LEN - 1) {
+            state.query_name[name_len++] = '.';
+        }
+
+        offset++;
+        #pragma unroll
+        for (int j = 0; j < 63 && offset < dns_len && name_len < MAX_DNS_NAME_LEN - 1; j++) {
+            if (j >= label_len) break;
+            state.query_name[name_len++] = pkt_buf->data[offset++];
+        }
+    }
+
+    // Get query type (2 bytes after name)
+    if (offset + 2 <= dns_len) {
+        state.query_type = (pkt_buf->data[offset] << 8) | pkt_buf->data[offset + 1];
+    }
+
+    // Get destination IP (supports both IPv4 and IPv6)
+    __u16 family;
+    BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family);
+
+    if (family == AF_INET) {
+        __u32 daddr;
+        BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+        state.server_ip[0] = daddr & 0xFF;
+        state.server_ip[1] = (daddr >> 8) & 0xFF;
+        state.server_ip[2] = (daddr >> 16) & 0xFF;
+        state.server_ip[3] = (daddr >> 24) & 0xFF;
+    } else if (family == AF_INET6) {
+        // IPv6 support - mark as IPv6 but don't try to read address
+        // The skc_v6_daddr field location varies by kernel version
+        state.server_ip[0] = 0xFF;  // Mark as IPv6
+        state.server_ip[1] = 0xFF;
+    }
 
     // Store query state
     __u64 key = ((__u64)pid << 32) | sport;
@@ -184,21 +275,71 @@ int trace_udp_sendmsg(struct pt_regs *ctx) {
     return 0;
 }
 
-// Check DNS response for problems
+// Store socket context and buffer pointer for recvmsg
+struct recvmsg_context {
+    __u16 sport;
+    void *iov_base;  // Buffer where DNS response will be written
+    size_t iov_len;  // Buffer length
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10000);
+    __type(key, __u64);  // PID + TID
+    __type(value, struct recvmsg_context);
+} recvmsg_socks SEC(".maps");
+
+// Hook entry to save socket info and buffer pointer
 SEC("kprobe/udp_recvmsg")
-int trace_udp_recvmsg(struct pt_regs *ctx) {
+int trace_udp_recvmsg_enter(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+    struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
+
+    struct recvmsg_context context = {};
+
+    // Get source port
+    BPF_CORE_READ_INTO(&context.sport, sk, __sk_common.skc_num);
+
+    // Get the buffer where response will be written
+    struct iovec *msg_iov;
+    BPF_CORE_READ_INTO(&msg_iov, msg, msg_iter.iov);
+
+    struct iovec iov;
+    if (bpf_probe_read(&iov, sizeof(iov), &msg_iov[0]) == 0) {
+        context.iov_base = iov.iov_base;
+        context.iov_len = iov.iov_len;
+    }
+
+    // Save context for kretprobe
+    bpf_map_update_elem(&recvmsg_socks, &pid_tgid, &context, BPF_ANY);
+    return 0;
+}
+
+// Check DNS response for problems
+SEC("kretprobe/udp_recvmsg")
+int trace_udp_recvmsg_ret(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
     __u32 tid = pid_tgid;
 
-    // Get socket info
-    struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+    // Get return value (number of bytes received)
+    int ret = PT_REGS_RC(ctx);
+    if (ret < 12) {  // DNS header is minimum 12 bytes
+        return 0;
+    }
 
-    // Check if this is DNS response
-    __u16 sport;
-    BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+    // Get the saved context
+    struct recvmsg_context *context = bpf_map_lookup_elem(&recvmsg_socks, &pid_tgid);
+    if (!context) {
+        return 0;
+    }
+    __u16 sport = context->sport;
+    void *response_buf = context->iov_base;
+    bpf_map_delete_elem(&recvmsg_socks, &pid_tgid);
 
-    // Look up query state
+    // Look up query state using the port
     __u64 key = ((__u64)pid << 32) | sport;
     struct dns_query_state *state = bpf_map_lookup_elem(&active_queries, &key);
     if (!state) {
@@ -209,22 +350,53 @@ int trace_udp_recvmsg(struct pt_regs *ctx) {
     __u64 now = bpf_ktime_get_ns();
     __u64 latency_ns = now - state->start_time;
 
-    // Check thresholds
+    // Get buffer to read DNS response
+    __u32 zero = 0;
+    struct dns_packet_buffer *pkt_buf = bpf_map_lookup_elem(&dns_buffer, &zero);
+    if (!pkt_buf) {
+        return 0;
+    }
+
+    // Determine if this is a problem
+    enum dns_problem_type problem_type = 0;
+    __u8 response_code = 0;
+
+    // READ THE ACTUAL DNS RESPONSE!
+    if (response_buf && ret >= 12) {
+        if (bpf_probe_read_user(pkt_buf->data, ret < 512 ? ret : 512, response_buf) == 0) {
+            // DNS Header structure:
+            // Bytes 0-1: Transaction ID
+            // Bytes 2-3: Flags (QR, Opcode, AA, TC, RD, RA, Z, RCODE)
+            // The RCODE is in the last 4 bits of byte 3
+            response_code = pkt_buf->data[3] & 0x0F;
+
+            // Check for DNS errors based on RCODE
+            if (response_code == DNS_RCODE_NXDOMAIN) {
+                problem_type = DNS_PROBLEM_NXDOMAIN;
+            } else if (response_code == DNS_RCODE_SERVFAIL) {
+                problem_type = DNS_PROBLEM_SERVFAIL;
+            } else if (response_code == DNS_RCODE_REFUSED) {
+                problem_type = DNS_PROBLEM_REFUSED;
+            }
+
+            // Check if truncated (TC flag is bit 9, which is bit 1 of byte 2)
+            if (pkt_buf->data[2] & 0x02) {
+                problem_type = DNS_PROBLEM_TRUNCATED;
+            }
+        }
+    }
+
+    // Check thresholds for slow queries
     __u32 config_key = CONFIG_SLOW_THRESHOLD_NS;
     __u64 *slow_threshold = bpf_map_lookup_elem(&config, &config_key);
     if (!slow_threshold) {
         return 0;
     }
 
-    // Determine if this is a problem
-    enum dns_problem_type problem_type = 0;
-
-    if (latency_ns > *slow_threshold) {
+    // Check for slow query (only if no error detected)
+    if (problem_type == 0 && latency_ns > *slow_threshold) {
         problem_type = DNS_PROBLEM_SLOW;
     }
-
-    // For now, we only detect slow queries
-    // Real implementation would parse DNS response for NXDOMAIN, SERVFAIL, etc.
 
     if (problem_type == 0) {
         // No problem detected, clean up and return
@@ -261,6 +433,7 @@ int trace_udp_recvmsg(struct pt_regs *ctx) {
     event->src_port = state->src_port;
     event->dst_port = state->dst_port;
     event->retries = state->retries;
+    event->response_code = response_code;
 
     // Submit event
     bpf_ringbuf_submit(event, 0);

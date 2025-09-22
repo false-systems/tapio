@@ -256,6 +256,7 @@ func (c *Observer) generateMockEvents() {
 				Metadata: domain.EventMetadata{
 					Labels: map[string]string{
 						"observer":   c.Name(),
+						"version":    "1.0.0",
 						"mock":       "true",
 						"event_type": fmt.Sprintf("%d", mockEvent.EventType),
 						"pid":        fmt.Sprintf("%d", mockEvent.PID),

@@ -361,6 +361,8 @@ func (o *Observer) detectFailurePatterns(ctx context.Context) {
 						Severity:  domain.EventSeverityError,
 						Metadata: domain.EventMetadata{
 							Labels: map[string]string{
+								"observer":    "status",
+								"version":     "1.0.0",
 								"pattern":     pattern.Name,
 								"description": pattern.Description,
 								"severity":    pattern.Severity,

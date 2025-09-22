@@ -262,6 +262,10 @@ func (c *Observer) emitTestSpan() {
 			SpanID:       "test-span-" + fmt.Sprintf("%d", now.UnixNano()),
 			PodName:      "test-pod-123",
 			PodNamespace: "default",
+			Labels: map[string]string{
+				"observer": "otel",
+				"version":  "1.0.0",
+			},
 		},
 	}
 

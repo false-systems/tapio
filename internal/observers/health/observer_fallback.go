@@ -78,6 +78,8 @@ func (o *Observer) generateMockEvents() {
 				},
 				Metadata: domain.EventMetadata{
 					Labels: map[string]string{
+						"observer":    "health",
+						"version":     "1.0.0",
 						"error_count": "1",
 						"category":    "file",
 						"path":        "/mock/path",

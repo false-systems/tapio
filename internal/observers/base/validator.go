@@ -18,6 +18,10 @@ type EventValidator struct {
 
 // NewEventValidator creates a validator for the given observer type
 func NewEventValidator(observerType string, logger *zap.Logger, strictMode bool) *EventValidator {
+	// Use a nop logger if none provided to avoid nil pointer issues
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &EventValidator{
 		observerType: observerType,
 		logger:       logger,
@@ -59,12 +63,14 @@ func (v *EventValidator) ValidateEvent(event *domain.CollectorEvent) error {
 		fullErr := fmt.Errorf("event validation failed for %s:\n%s",
 			v.observerType, strings.Join(errors, "\n"))
 
-		// Log the validation error
-		v.logger.Error("Event validation failed",
-			zap.String("observer", v.observerType),
-			zap.String("event_id", event.EventID),
-			zap.String("event_type", string(event.Type)),
-			zap.Error(fullErr))
+		// Log the validation error if logger is available
+		if v.logger != nil {
+			v.logger.Error("Event validation failed",
+				zap.String("observer", v.observerType),
+				zap.String("event_id", event.EventID),
+				zap.String("event_type", string(event.Type)),
+				zap.Error(fullErr))
+		}
 
 		// In strict mode (dev), panic to catch issues early
 		if v.strictMode {

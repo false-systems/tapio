@@ -290,6 +290,41 @@ struct sock_common {
     unsigned char skc_reuseport:1;
 } __attribute__((preserve_access_index));
 
+/* __sk_buff structure for BPF socket filters */
+struct __sk_buff {
+    __u32 len;
+    __u32 pkt_type;
+    __u32 mark;
+    __u32 queue_mapping;
+    __u32 protocol;
+    __u32 vlan_present;
+    __u32 vlan_tci;
+    __u32 vlan_proto;
+    __u32 priority;
+    __u32 ingress_ifindex;
+    __u32 ifindex;
+    __u32 tc_index;
+    __u32 cb[5];
+    __u32 hash;
+    __u32 tc_classid;
+    __u32 data;
+    __u32 data_end;
+    __u32 napi_id;
+    __u32 family;
+    __u32 remote_ip4;
+    __u32 local_ip4;
+    __u32 remote_ip6[4];
+    __u32 local_ip6[4];
+    __u32 remote_port;
+    __u32 local_port;
+    __u32 data_meta;
+    __u32 flow_keys;
+    __u64 tstamp;
+    __u32 wire_len;
+    __u32 gso_segs;
+    __u32 sk;
+} __attribute__((preserve_access_index));
+
 /* Socket buffer list */
 struct sk_buff_head {
     struct sk_buff *next;
@@ -312,6 +347,15 @@ struct sock {
      */
     struct in6_addr sk_v6_rcv_saddr;  /* IPv6 source address */
     struct in6_addr sk_v6_daddr;      /* IPv6 destination address */
+} __attribute__((preserve_access_index));
+
+/* inet_sock structure for TCP/IP socket details */
+struct inet_sock {
+    struct sock sk;
+    __be32 inet_daddr;
+    __be32 inet_saddr;
+    __be16 inet_dport;
+    __u16 inet_sport;
 } __attribute__((preserve_access_index));
 
 /* Path structures */

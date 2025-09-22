@@ -78,7 +78,8 @@ func (o *Observer) generateMockProblems(ctx context.Context) {
 				},
 				Metadata: domain.EventMetadata{
 					Labels: map[string]string{
-						"observer":     "dns-problems",
+						"observer":     "dns",
+						"version":      "1.0.0",
 						"mode":         "fallback",
 						"problem_type": problem.problemType.String(),
 					},

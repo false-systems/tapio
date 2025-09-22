@@ -401,6 +401,8 @@ func (o *Observer) createDomainEvent(ctx context.Context, event *MemoryEvent) *d
 			Priority: domain.PriorityNormal,
 			Tags:     []string{"memory", "allocation"},
 			Labels: map[string]string{
+				"observer":   "memory",
+				"version":    "1.0.0",
 				"event_type": event.EventType.String(),
 				"size_bytes": fmt.Sprintf("%d", event.Size),
 			},
