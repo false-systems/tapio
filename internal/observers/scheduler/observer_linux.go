@@ -258,6 +258,8 @@ func (o *Observer) handleSchedDelay(event *SchedEvent) {
 			Metadata: domain.EventMetadata{
 				Priority: domain.PriorityNormal,
 				Labels: map[string]string{
+					"observer":   "scheduler",
+					"version":    "1.0.0",
 					"cpu":        fmt.Sprintf("%d", event.CPU),
 					"delay_ms":   fmt.Sprintf("%.2f", delayMs),
 					"wait_ratio": fmt.Sprintf("%.2f", waitRatio),
@@ -312,6 +314,8 @@ func (o *Observer) handleThrottle(event *SchedEvent) {
 			Metadata: domain.EventMetadata{
 				Priority: domain.PriorityHigh,
 				Labels: map[string]string{
+					"observer":    "scheduler",
+					"version":     "1.0.0",
 					"throttle_ms": fmt.Sprintf("%.2f", throttleMs),
 					"cgroup_id":   fmt.Sprintf("%d", event.CgroupID),
 				},
@@ -371,6 +375,8 @@ func (o *Observer) handlePriorityInversion(event *SchedEvent) {
 		Metadata: domain.EventMetadata{
 			Priority: domain.PriorityNormal,
 			Labels: map[string]string{
+				"observer": "scheduler",
+				"version":  "1.0.0",
 				"priority": fmt.Sprintf("%d", event.Priority),
 				"nice":     fmt.Sprintf("%d", event.NiceValue),
 			},

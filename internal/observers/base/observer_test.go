@@ -120,14 +120,52 @@ func TestBaseObserver(t *testing.T) {
 	})
 }
 
+// createTestEvent creates a valid test event with all required fields
+func createTestEvent(id string) *domain.CollectorEvent {
+	return &domain.CollectorEvent{
+		EventID:   id,
+		Timestamp: time.Now(),
+		Type:      domain.EventTypeKernelProcess,
+		Source:    "test",
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Process: &domain.ProcessData{
+				PID:     1234,
+				Command: "test",
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "test",
+				"version":  "1.0.0",
+			},
+		},
+	}
+}
+
 func TestEventChannelManager(t *testing.T) {
 	t.Run("send and receive events", func(t *testing.T) {
 		ecm := NewEventChannelManager(10, "test", nil)
 		defer ecm.Close()
 
 		event := &domain.CollectorEvent{
-			EventID: "test-1",
-			Type:    domain.EventTypeKernelProcess,
+			EventID:   "test-1",
+			Timestamp: time.Now(),
+			Type:      domain.EventTypeKernelProcess,
+			Source:    "test",
+			Severity:  domain.EventSeverityInfo,
+			EventData: domain.EventDataContainer{
+				Process: &domain.ProcessData{
+					PID:     1234,
+					Command: "test",
+				},
+			},
+			Metadata: domain.EventMetadata{
+				Labels: map[string]string{
+					"observer": "test",
+					"version":  "1.0.0",
+				},
+			},
 		}
 
 		sent := ecm.SendEvent(event)
@@ -148,11 +186,11 @@ func TestEventChannelManager(t *testing.T) {
 		defer ecm.Close()
 
 		// Fill channel
-		ecm.SendEvent(&domain.CollectorEvent{EventID: "1"})
-		ecm.SendEvent(&domain.CollectorEvent{EventID: "2"})
+		ecm.SendEvent(createTestEvent("1"))
+		ecm.SendEvent(createTestEvent("2"))
 
 		// This should be dropped
-		sent := ecm.SendEvent(&domain.CollectorEvent{EventID: "3"})
+		sent := ecm.SendEvent(createTestEvent("3"))
 
 		assert.False(t, sent)
 		assert.Equal(t, int64(1), ecm.GetDroppedCount())
@@ -165,7 +203,7 @@ func TestEventChannelManager(t *testing.T) {
 
 		// Add 5 events to channel with capacity 10
 		for i := 0; i < 5; i++ {
-			ecm.SendEvent(&domain.CollectorEvent{EventID: fmt.Sprintf("%d", i)})
+			ecm.SendEvent(createTestEvent(fmt.Sprintf("%d", i)))
 		}
 
 		utilization := ecm.GetChannelUtilization()

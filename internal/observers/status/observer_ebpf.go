@@ -327,6 +327,8 @@ func (o *Observer) convertToDomainEvent(ctx context.Context, event *statusEvent)
 		},
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
+				"observer":      "status",
+				"version":       "1.0.0",
 				"latency_us":    fmt.Sprintf("%d", event.LatencyUS),
 				"status_code":   fmt.Sprintf("%d", event.StatusCode),
 				"error_type":    getErrorTypeName(event.ErrorType),

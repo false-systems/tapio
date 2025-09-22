@@ -311,6 +311,8 @@ func (o *Observer) convertToCollectorEvent(event *HealthEvent) *domain.Collector
 		},
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
+				"observer":    o.name,
+				"version":     "1.0.0",
 				"error_count": fmt.Sprintf("%d", event.ErrorCount),
 				"category":    getCategoryName(event.Category),
 				"path":        path,

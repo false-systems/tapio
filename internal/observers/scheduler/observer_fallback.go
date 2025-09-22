@@ -64,6 +64,8 @@ func (o *Observer) processEvents() {
 				Metadata: domain.EventMetadata{
 					Priority: domain.PriorityNormal,
 					Labels: map[string]string{
+						"observer": "scheduler",
+						"version":  "1.0.0",
 						"cpu":      "0",
 						"delay_ms": "25.5",
 					},

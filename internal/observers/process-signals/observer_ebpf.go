@@ -415,27 +415,86 @@ func (o *Observer) convertToDomainEvent(ctx context.Context, event *runtimeEvent
 		return nil // Unknown event type
 	}
 
-	// Marshal to JSON (unused for now)
-	_ = runtimeSignalEvent
-
-	// Create process data
+	// Create process data with ALL information
 	processData := &domain.ProcessData{
 		PID:     int32(event.PID),
 		PPID:    int32(event.PPID),
 		Command: comm,
+		UID:     int32(uid),
+		GID:     int32(gid),
 	}
 
-	// Create domain event
+	// Add event type to process data
+	if event.EventType == EventTypeProcessExec {
+		processData.TID = int32(event.TGID)
+	}
+
+	// Create custom data for signal/exit specific information
+	customData := make(map[string]string)
+	customData["event_type"] = eventTypeStr
+
+	// Determine severity based on event type
+	severity := domain.EventSeverityInfo
+
+	// Add signal-specific data
+	if runtimeSignalEvent.SignalInfo != nil {
+		customData["signal"] = fmt.Sprintf("%d", runtimeSignalEvent.SignalInfo.Number)
+		customData["signal_name"] = runtimeSignalEvent.SignalInfo.Name
+		customData["signal_description"] = runtimeSignalEvent.SignalInfo.Description
+		customData["signal_fatal"] = fmt.Sprintf("%v", runtimeSignalEvent.SignalInfo.IsFatal)
+		if event.EventType == EventTypeSignalGenerate {
+			customData["sender_pid"] = fmt.Sprintf("%d", event.SenderPID)
+		}
+		if runtimeSignalEvent.SignalInfo.IsFatal {
+			severity = domain.EventSeverityWarning
+		}
+	}
+
+	// Add exit-specific data
+	if runtimeSignalEvent.ExitInfo != nil {
+		customData["exit_code"] = fmt.Sprintf("%d", runtimeSignalEvent.ExitInfo.ExitCode)
+		customData["exit_signal"] = fmt.Sprintf("%d", runtimeSignalEvent.ExitInfo.Signal)
+		customData["exit_coredump"] = fmt.Sprintf("%v", runtimeSignalEvent.ExitInfo.CoreDumped)
+		if runtimeSignalEvent.ExitInfo.ExitCode != 0 {
+			severity = domain.EventSeverityWarning
+		}
+	}
+
+	// Add OOM-specific data
+	if runtimeSignalEvent.IsOOMKill {
+		customData["oom_kill"] = "true"
+		severity = domain.EventSeverityError
+	}
+
+	// Add container context if available
+	if event.CgroupID != 0 {
+		customData["cgroup_id"] = fmt.Sprintf("%d", event.CgroupID)
+		processData.CgroupID = event.CgroupID
+	}
+
+	// Create domain event with complete data
 	return &domain.CollectorEvent{
 		EventID:   fmt.Sprintf("runtime-%s-%d-%d", eventTypeStr, event.PID, event.Timestamp),
 		Timestamp: time.Unix(0, int64(event.Timestamp)),
 		Type:      collectorEventType,
 		Source:    o.name,
-		Severity:  domain.EventSeverityInfo,
+		Severity:  severity,
 		EventData: domain.EventDataContainer{
 			Process: processData,
+			Custom:  customData,
 		},
-		Metadata: domain.EventMetadata{},
+		Metadata: domain.EventMetadata{
+			PID:      event.PID,
+			PPID:     event.PPID,
+			UID:      uid,
+			GID:      gid,
+			CgroupID: event.CgroupID,
+			Command:  comm,
+			Labels: map[string]string{
+				"observer": "process-signals",
+				"version":  "1.0",
+			},
+		},
 	}
 }
 

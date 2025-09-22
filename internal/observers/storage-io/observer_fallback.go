@@ -65,6 +65,8 @@ func (o *Observer) processEventsImpl() {
 				},
 				Metadata: domain.EventMetadata{
 					Labels: map[string]string{
+						"observer": "storage-io",
+						"version":  "1.0.0",
 						"slow":     "true",
 						"blocking": "false",
 						"k8s":      "true",

@@ -392,6 +392,10 @@ func (o *Observer) createDomainEvent(event *SystemdEvent, serviceName string) *d
 			GID:      int32(event.GID),
 			CgroupID: event.CgroupID,
 			Command:  cleanString(string(event.Comm[:])),
+			Labels: map[string]string{
+				"observer": "systemd",
+				"version":  "1.0.0",
+			},
 		},
 	}
 }

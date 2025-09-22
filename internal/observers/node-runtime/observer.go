@@ -433,6 +433,10 @@ func (o *Observer) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1.
 		Metadata: domain.EventMetadata{
 			TraceID: traceID,
 			SpanID:  spanID,
+			Labels: map[string]string{
+				"observer": "node-runtime",
+				"version":  "1.0.0",
+			},
 		},
 	}
 
@@ -480,6 +484,10 @@ func (o *Observer) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alph
 		Metadata: domain.EventMetadata{
 			TraceID: traceID,
 			SpanID:  spanID,
+			Labels: map[string]string{
+				"observer": "node-runtime",
+				"version":  "1.0.0",
+			},
 		},
 	}
 
@@ -548,6 +556,10 @@ func (o *Observer) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.Po
 		Metadata: domain.EventMetadata{
 			TraceID: traceID,
 			SpanID:  spanID,
+			Labels: map[string]string{
+				"observer": "node-runtime",
+				"version":  "1.0.0",
+			},
 		},
 	}
 
@@ -604,6 +616,10 @@ func (o *Observer) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.P
 		Metadata: domain.EventMetadata{
 			TraceID: traceID,
 			SpanID:  spanID,
+			Labels: map[string]string{
+				"observer": "node-runtime",
+				"version":  "1.0.0",
+			},
 		},
 	}
 
@@ -662,6 +678,10 @@ func (o *Observer) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha1
 			Metadata: domain.EventMetadata{
 				TraceID: traceID,
 				SpanID:  spanID,
+				Labels: map[string]string{
+					"observer": "node-runtime",
+					"version":  "1.0.0",
+				},
 			},
 		}
 
@@ -858,6 +878,10 @@ func (o *Observer) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, s
 		Metadata: domain.EventMetadata{
 			TraceID: traceID,
 			SpanID:  spanID,
+			Labels: map[string]string{
+				"observer": "node-runtime",
+				"version":  "1.0.0",
+			},
 		},
 	}
 
@@ -905,6 +929,10 @@ func (o *Observer) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Pod
 		Metadata: domain.EventMetadata{
 			TraceID: traceID,
 			SpanID:  spanID,
+			Labels: map[string]string{
+				"observer": "node-runtime",
+				"version":  "1.0.0",
+			},
 		},
 	}
 
@@ -953,6 +981,10 @@ func (o *Observer) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status *
 			Metadata: domain.EventMetadata{
 				TraceID: traceID,
 				SpanID:  spanID,
+				Labels: map[string]string{
+					"observer": "node-runtime",
+					"version":  "1.0.0",
+				},
 			},
 		}
 
@@ -1001,6 +1033,10 @@ func (o *Observer) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condit
 		Metadata: domain.EventMetadata{
 			TraceID: traceID,
 			SpanID:  spanID,
+			Labels: map[string]string{
+				"observer": "node-runtime",
+				"version":  "1.0.0",
+			},
 		},
 	}
 
