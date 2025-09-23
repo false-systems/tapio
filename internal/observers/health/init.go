@@ -4,13 +4,13 @@ import (
 	"fmt"
 
 	"github.com/yairfalse/tapio/internal/observers"
-	"github.com/yairfalse/tapio/internal/observers/base"
 	"github.com/yairfalse/tapio/internal/observers/orchestrator"
+	"github.com/yairfalse/tapio/internal/observers/registration"
 	"go.uber.org/zap"
 )
 
 func init() {
-	base.RegisterObserver("health", Factory)
+	registration.RegisterObserver("health", Factory)
 }
 
 func Factory(name string, config *orchestrator.ObserverConfigData, logger *zap.Logger) (observers.Observer, error) {
