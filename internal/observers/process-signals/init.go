@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/internal/observers"
-	"github.com/yairfalse/tapio/internal/observers/base"
 	"github.com/yairfalse/tapio/internal/observers/orchestrator"
+	"github.com/yairfalse/tapio/internal/observers/registration"
 	"go.uber.org/zap"
 )
 
 // init registers the process-signals observer factory
 func init() {
-	base.RegisterObserver("process-signals", Factory)
+	registration.RegisterObserver("process-signals", Factory)
 }
 
 // Factory creates a new process-signals observer

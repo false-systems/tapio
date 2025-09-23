@@ -33,8 +33,8 @@ type LocalConsumer interface {
 // RingBuffer provides high-performance event buffering with local consumer support
 // Inspired by Hubble's perf ring buffer pattern but in userspace
 type RingBuffer struct {
-	// Core buffer
-	buffer   []*domain.CollectorEvent
+	// Core buffer - using atomic.Pointer for race-free access
+	buffer   []atomic.Pointer[domain.CollectorEvent]
 	capacity uint64
 	mask     uint64 // capacity - 1 for fast modulo
 
@@ -123,7 +123,7 @@ func NewRingBuffer(config RingBufferConfig) (*RingBuffer, error) {
 	}
 
 	rb := &RingBuffer{
-		buffer:        make([]*domain.CollectorEvent, size),
+		buffer:        make([]atomic.Pointer[domain.CollectorEvent], size),
 		capacity:      size,
 		mask:          size - 1,
 		logger:        config.Logger,
@@ -177,8 +177,8 @@ func (rb *RingBuffer) Write(event *domain.CollectorEvent) bool {
 		}
 	}
 
-	// Write to buffer (may overwrite old data)
-	rb.buffer[head&rb.mask] = event
+	// Write to buffer atomically (may overwrite old data)
+	rb.buffer[head&rb.mask].Store(event)
 	rb.produced.Add(1)
 
 	return true
@@ -260,8 +260,8 @@ func (rb *RingBuffer) read() *domain.CollectorEvent {
 		return nil
 	}
 
-	// Read event
-	event := rb.buffer[tail&rb.mask]
+	// Read event atomically
+	event := rb.buffer[tail&rb.mask].Load()
 
 	// Only advance tail if we successfully read
 	if event != nil {

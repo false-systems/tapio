@@ -32,6 +32,11 @@ func NewEventValidator(observerType string, logger *zap.Logger, strictMode bool)
 // ValidateEvent validates a CollectorEvent follows all Tapio standards
 // Returns error if validation fails, nil if valid
 func (v *EventValidator) ValidateEvent(event *domain.CollectorEvent) error {
+	// Check for nil event first
+	if event == nil {
+		return fmt.Errorf("event is nil")
+	}
+
 	var errors []string
 
 	// 1. Basic required fields

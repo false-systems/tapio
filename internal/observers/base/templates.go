@@ -1,22 +1,10 @@
 package base
 
-import (
-	"github.com/yairfalse/tapio/internal/observers/orchestrator"
-)
-
-// RegisterObserver registers an observer factory with the orchestrator.
-// This eliminates boilerplate in each observer's init.go.
-// Usage in observer's init.go:
-//
-//	func init() {
-//	    base.RegisterObserver("dns", CreateFactory())
-//	}
-func RegisterObserver(name string, factory orchestrator.ObserverFactory) {
-	orchestrator.RegisterObserverFactory(name, factory)
-}
-
 // ObserverInitTemplate provides a template for observer init.go files.
 // Copy this to your observer package and modify:
+//
+// IMPORTANT: This template is for reference only. The actual registration
+// must use internal/observers/registration package to avoid architecture violations.
 const ObserverInitTemplate = `
 package YOURPACKAGE
 
@@ -25,13 +13,14 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/internal/observers"
-	"github.com/yairfalse/tapio/internal/observers/base"
 	"github.com/yairfalse/tapio/internal/observers/orchestrator"
+	"github.com/yairfalse/tapio/internal/observers/registration"
 	"go.uber.org/zap"
 )
 
 func init() {
-	base.RegisterObserver("OBSERVER_NAME", Factory)
+	// Use registration package instead of base.RegisterObserver
+	registration.RegisterObserver("OBSERVER_NAME", Factory)
 }
 
 func Factory(name string, config *orchestrator.ObserverConfigData, logger *zap.Logger) (observers.Observer, error) {
@@ -48,27 +37,37 @@ func Factory(name string, config *orchestrator.ObserverConfigData, logger *zap.L
 		Logger:     logger,
 		// Add your specific fields here
 	}
-	
+
 	observer, err := NewObserver(name, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OBSERVER_NAME observer: %w", err)
 	}
-	
+
 	return observer, nil
 }
 `
 
 // ObserverStructTemplate shows how to structure an observer using base components
 const ObserverStructTemplate = `
+package YOURPACKAGE
+
+import (
+	"context"
+	"time"
+
+	"github.com/yairfalse/tapio/internal/observers/base"
+	"go.uber.org/zap"
+)
+
 type Observer struct {
 	*base.BaseObserver        // Provides Statistics() and Health()
 	*base.EventChannelManager // Handles event channel
 	*base.LifecycleManager    // Manages goroutines
-	
+
 	name   string
 	config *Config
 	logger *zap.Logger
-	
+
 	// Your observer-specific fields here
 }
 
@@ -81,7 +80,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		RingBufferSize:     config.RingBufferSize,
 		Logger:             config.Logger,
 	}
-	
+
 	o := &Observer{
 		BaseObserver:        base.NewBaseObserverWithConfig(baseConfig),
 		EventChannelManager: base.NewEventChannelManager(config.BufferSize, name, config.Logger),
@@ -90,7 +89,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		config:              config,
 		logger:              config.Logger,
 	}
-	
+
 	return o, nil
 }
 `

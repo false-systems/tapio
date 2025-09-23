@@ -133,10 +133,16 @@ func NewBaseObserverWithConfig(config BaseObserverConfig) *BaseObserver {
 		}
 
 		ringBuffer, err := NewRingBuffer(rbConfig)
-		if err == nil {
+		if err != nil {
+			// Log ring buffer creation failure but continue - fall back to channel-only mode
+			if config.Logger != nil {
+				config.Logger.Warn("Failed to create ring buffer, falling back to channel-only mode",
+					zap.String("observer", config.Name),
+					zap.Error(err))
+			}
+		} else {
 			bc.ringBuffer = ringBuffer
 		}
-		// If ring buffer creation fails, fall back to channel-only mode
 	}
 
 	// Initialize filter manager if enabled
@@ -174,6 +180,11 @@ func (bc *BaseObserver) initializeMetrics() {
 	)
 	if err != nil {
 		// Log but don't fail - metrics are optional
+		if bc.logger != nil {
+			bc.logger.Debug("Failed to create events processed counter",
+				zap.String("observer", bc.name),
+				zap.Error(err))
+		}
 		bc.eventsProcessedCounter = nil
 	}
 
@@ -184,6 +195,11 @@ func (bc *BaseObserver) initializeMetrics() {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
+		if bc.logger != nil {
+			bc.logger.Debug("Failed to create events dropped counter",
+				zap.String("observer", bc.name),
+				zap.Error(err))
+		}
 		bc.eventsDroppedCounter = nil
 	}
 
@@ -194,6 +210,11 @@ func (bc *BaseObserver) initializeMetrics() {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
+		if bc.logger != nil {
+			bc.logger.Debug("Failed to create events filtered counter",
+				zap.String("observer", bc.name),
+				zap.Error(err))
+		}
 		bc.eventsFilteredCounter = nil
 	}
 
@@ -204,6 +225,11 @@ func (bc *BaseObserver) initializeMetrics() {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
+		if bc.logger != nil {
+			bc.logger.Debug("Failed to create error counter",
+				zap.String("observer", bc.name),
+				zap.Error(err))
+		}
 		bc.errorCounter = nil
 	}
 
@@ -215,6 +241,11 @@ func (bc *BaseObserver) initializeMetrics() {
 		metric.WithExplicitBucketBoundaries(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0),
 	)
 	if err != nil {
+		if bc.logger != nil {
+			bc.logger.Debug("Failed to create processing duration histogram",
+				zap.String("observer", bc.name),
+				zap.Error(err))
+		}
 		bc.processingDuration = nil
 	}
 
@@ -226,6 +257,11 @@ func (bc *BaseObserver) initializeMetrics() {
 		metric.WithExplicitBucketBoundaries(100, 500, 1000, 5000, 10000, 50000, 100000),
 	)
 	if err != nil {
+		if bc.logger != nil {
+			bc.logger.Debug("Failed to create event size histogram",
+				zap.String("observer", bc.name),
+				zap.Error(err))
+		}
 		bc.eventSizeHistogram = nil
 	}
 
@@ -236,6 +272,11 @@ func (bc *BaseObserver) initializeMetrics() {
 		metric.WithUnit("1"),
 	)
 	if err != nil {
+		if bc.logger != nil {
+			bc.logger.Debug("Failed to create health status gauge",
+				zap.String("observer", bc.name),
+				zap.Error(err))
+		}
 		bc.healthStatus = nil
 	}
 }
