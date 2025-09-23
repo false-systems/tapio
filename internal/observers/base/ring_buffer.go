@@ -443,21 +443,29 @@ func (eem *EnhancedEventManager) Stop() {
 	eem.EventChannelManager.Close()
 }
 
-// BasicStats represents basic channel statistics
-type BasicStats struct {
+// EventManagerStats represents combined event manager statistics
+type EventManagerStats struct {
+	// Basic stats (always present)
 	Sent        int64   `json:"sent"`
 	Dropped     int64   `json:"dropped"`
 	Utilization float64 `json:"utilization"`
+
+	// Ring buffer stats (optional)
+	RingBuffer *RingBufferStats `json:"ring_buffer,omitempty"`
 }
 
-// GetStatistics returns combined statistics
-func (eem *EnhancedEventManager) GetStatistics() interface{} {
-	if eem.ringBuffer != nil {
-		return eem.ringBuffer.Statistics()
-	}
-	return BasicStats{
+// GetStatistics returns combined statistics with proper typing
+func (eem *EnhancedEventManager) GetStatistics() EventManagerStats {
+	stats := EventManagerStats{
 		Sent:        eem.GetSentCount(),
 		Dropped:     eem.GetDroppedCount(),
 		Utilization: eem.GetChannelUtilization(),
 	}
+
+	if eem.ringBuffer != nil {
+		rbStats := eem.ringBuffer.Statistics()
+		stats.RingBuffer = &rbStats
+	}
+
+	return stats
 }
