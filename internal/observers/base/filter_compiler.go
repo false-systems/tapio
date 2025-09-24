@@ -50,22 +50,22 @@ func (fc *FilterCompiler) CompileRule(rule *FilterRule) (FilterFunc, error) {
 // compileSeverityFilter creates a filter for severity levels
 func (fc *FilterCompiler) compileSeverityFilter(rule *FilterRule) (FilterFunc, error) {
 	severityOrder := map[string]int{
-		"DEBUG":    0,
-		"INFO":     1,
-		"WARNING":  2,
-		"ERROR":    3,
-		"CRITICAL": 4,
+		"debug":    0,
+		"info":     1,
+		"warning":  2,
+		"error":    3,
+		"critical": 4,
 	}
 
-	minLevel := rule.Conditions.MinSeverity
-	maxLevel := rule.Conditions.MaxSeverity
+	minLevel := strings.ToLower(rule.Conditions.MinSeverity)
+	maxLevel := strings.ToLower(rule.Conditions.MaxSeverity)
 
 	if minLevel == "" && maxLevel == "" {
 		return nil, fmt.Errorf("severity filter requires min_severity or max_severity")
 	}
 
 	return func(event *domain.CollectorEvent) bool {
-		eventLevel, exists := severityOrder[string(event.Severity)]
+		eventLevel, exists := severityOrder[strings.ToLower(string(event.Severity))]
 		if !exists {
 			return false
 		}
@@ -104,8 +104,9 @@ func (fc *FilterCompiler) compileEventTypeFilter(rule *FilterRule) (FilterFunc, 
 // compileNetworkFilter creates a filter for network events
 func (fc *FilterCompiler) compileNetworkFilter(rule *FilterRule) (FilterFunc, error) {
 	return func(event *domain.CollectorEvent) bool {
-		// Check if it's a network event
-		if string(event.Type) != "network" {
+		// Check if it's a network event (support both "network" and "kernel.network")
+		eventType := string(event.Type)
+		if eventType != "network" && eventType != "kernel.network" {
 			return false
 		}
 
@@ -135,6 +136,20 @@ func (fc *FilterCompiler) compileNetworkFilter(rule *FilterRule) (FilterFunc, er
 			}
 		}
 
+		// Check source IP filter
+		if rule.Conditions.SourceIP != "" {
+			if event.EventData.Network.SrcIP != rule.Conditions.SourceIP {
+				return false
+			}
+		}
+
+		// Check destination IP filter
+		if rule.Conditions.DestIP != "" {
+			if event.EventData.Network.DstIP != rule.Conditions.DestIP {
+				return false
+			}
+		}
+
 		return true
 	}, nil
 }
@@ -152,7 +167,8 @@ func (fc *FilterCompiler) compileDNSFilter(rule *FilterRule) (FilterFunc, error)
 
 	return func(event *domain.CollectorEvent) bool {
 		// Check if it's a DNS event
-		if string(event.Type) != "dns" {
+		eventType := string(event.Type)
+		if eventType != "dns" && eventType != "kernel.dns" && eventType != "network.dns" {
 			return false
 		}
 
@@ -161,14 +177,25 @@ func (fc *FilterCompiler) compileDNSFilter(rule *FilterRule) (FilterFunc, error)
 			return false
 		}
 
-		// Check domain pattern
-		if domainRegex != nil {
-			if event.EventData.DNS.QueryName != "" {
-				return domainRegex.MatchString(event.EventData.DNS.QueryName)
+		// This is a deny filter - if ANY condition matches, return false (deny)
+
+		// Check domain pattern - if it matches, deny
+		if domainRegex != nil && event.EventData.DNS.QueryName != "" {
+			if domainRegex.MatchString(event.EventData.DNS.QueryName) {
+				return false // Domain matches deny pattern
 			}
-			return false
 		}
 
+		// Check query types filter - if it matches, deny
+		if len(rule.Conditions.QueryTypes) > 0 {
+			for _, queryType := range rule.Conditions.QueryTypes {
+				if strings.EqualFold(event.EventData.DNS.QueryType, queryType) {
+					return false // Query type matches deny filter
+				}
+			}
+		}
+
+		// No deny conditions matched, allow the event
 		return true
 	}, nil
 }
@@ -177,7 +204,8 @@ func (fc *FilterCompiler) compileDNSFilter(rule *FilterRule) (FilterFunc, error)
 func (fc *FilterCompiler) compileHTTPFilter(rule *FilterRule) (FilterFunc, error) {
 	return func(event *domain.CollectorEvent) bool {
 		// Check if it's an HTTP event
-		if string(event.Type) != "http" {
+		eventType := string(event.Type)
+		if eventType != "http" && eventType != "kernel.http" && eventType != "network.http" {
 			return false
 		}
 

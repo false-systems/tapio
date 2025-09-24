@@ -40,8 +40,8 @@ func TestFilterManager_NetworkFilter(t *testing.T) {
 		Source:    "test",
 		EventData: domain.EventDataContainer{
 			Network: &domain.NetworkData{
-				SourceIP: "127.0.0.1",
-				DestIP:   "192.168.1.1",
+				SrcIP: "127.0.0.1",
+				DstIP: "192.168.1.1",
 			},
 		},
 	}
@@ -51,7 +51,7 @@ func TestFilterManager_NetworkFilter(t *testing.T) {
 	assert.Equal(t, int64(1), fm.eventsDenied.Load())
 
 	// Non-localhost traffic should pass
-	event.EventData.Network.SourceIP = "192.168.1.1"
+	event.EventData.Network.SrcIP = "192.168.1.1"
 	assert.True(t, fm.ShouldAllow(event))
 }
 
@@ -252,7 +252,7 @@ func TestFilterCompiler_SeverityFilter(t *testing.T) {
 	rule := &FilterRule{
 		Name: "test_severity",
 		Type: "severity",
-		Condition: FilterCondition{
+		Conditions: FilterConditions{
 			MinSeverity: "warning",
 		},
 	}
@@ -260,19 +260,19 @@ func TestFilterCompiler_SeverityFilter(t *testing.T) {
 	filter, err := fc.CompileRule(rule)
 	require.NoError(t, err)
 
-	// Debug event should be filtered
+	// Debug event should be filtered (below minimum severity)
 	debugEvent := &domain.CollectorEvent{
 		EventID:  "test-1",
 		Severity: domain.EventSeverityDebug,
 	}
-	assert.True(t, filter(debugEvent)) // Returns true to DROP
+	assert.False(t, filter(debugEvent)) // Returns false - doesn't meet min severity
 
-	// Warning event should pass
+	// Warning event should pass (meets minimum severity)
 	warningEvent := &domain.CollectorEvent{
 		EventID:  "test-2",
 		Severity: domain.EventSeverityWarning,
 	}
-	assert.False(t, filter(warningEvent)) // Returns false to KEEP
+	assert.True(t, filter(warningEvent)) // Returns true - meets min severity
 }
 
 func BenchmarkFilterManager_ShouldAllow(b *testing.B) {
