@@ -107,12 +107,12 @@ func (fc *FilterCompiler) compileNetworkFilter(rule *FilterRule) (FilterFunc, er
 		// Check if it's a network event (support both "network" and "kernel.network")
 		eventType := string(event.Type)
 		if eventType != "network" && eventType != "kernel.network" {
-			return false
+			return false // Not a network event, don't match this filter
 		}
 
 		// Check if network data exists
 		if event.EventData.Network == nil {
-			return false
+			return false // No network data, don't match
 		}
 
 		// Check source port filter
@@ -169,34 +169,34 @@ func (fc *FilterCompiler) compileDNSFilter(rule *FilterRule) (FilterFunc, error)
 		// Check if it's a DNS event
 		eventType := string(event.Type)
 		if eventType != "dns" && eventType != "kernel.dns" && eventType != "network.dns" {
-			return false
+			return false // Not a DNS event, don't match this filter
 		}
 
 		// Check if DNS data exists
 		if event.EventData.DNS == nil {
-			return false
+			return false // No DNS data, don't match
 		}
 
-		// This is a deny filter - if ANY condition matches, return false (deny)
+		// For deny filters: return true if ANY condition matches (to trigger deny)
 
-		// Check domain pattern - if it matches, deny
+		// Check domain pattern
 		if domainRegex != nil && event.EventData.DNS.QueryName != "" {
 			if domainRegex.MatchString(event.EventData.DNS.QueryName) {
-				return false // Domain matches deny pattern
+				return true // Domain matches, trigger deny
 			}
 		}
 
-		// Check query types filter - if it matches, deny
+		// Check query types filter
 		if len(rule.Conditions.QueryTypes) > 0 {
 			for _, queryType := range rule.Conditions.QueryTypes {
 				if strings.EqualFold(event.EventData.DNS.QueryType, queryType) {
-					return false // Query type matches deny filter
+					return true // Query type matches, trigger deny
 				}
 			}
 		}
 
-		// No deny conditions matched, allow the event
-		return true
+		// No conditions matched, don't trigger this filter
+		return false
 	}, nil
 }
 
