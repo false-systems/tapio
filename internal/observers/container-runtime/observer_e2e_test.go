@@ -121,7 +121,7 @@ func TestObserver_NegativeTests(t *testing.T) {
 				return cfg
 			},
 			wantErr:     true,
-			errContains: "buffer size must be positive",
+			errContains: "buffer_size must be greater than 0",
 		},
 		{
 			name: "Zero buffer size",
@@ -131,7 +131,7 @@ func TestObserver_NegativeTests(t *testing.T) {
 				return cfg
 			},
 			wantErr:     true,
-			errContains: "buffer size must be positive",
+			errContains: "buffer_size must be greater than 0",
 		},
 		{
 			name: "Invalid metrics interval",
@@ -140,8 +140,8 @@ func TestObserver_NegativeTests(t *testing.T) {
 				cfg.MetricsInterval = -1 * time.Second
 				return cfg
 			},
-			wantErr:     false,
-			errContains: "",
+			wantErr:     true,
+			errContains: "metrics_interval must be greater than 0",
 		},
 		{
 			name: "Negative ring buffer size",
@@ -151,7 +151,7 @@ func TestObserver_NegativeTests(t *testing.T) {
 				return cfg
 			},
 			wantErr:     true,
-			errContains: "ring buffer size must be at least 4096 bytes",
+			errContains: "ring_buffer_size must be greater than 0",
 		},
 		{
 			name: "Empty observer name",

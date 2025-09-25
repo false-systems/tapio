@@ -139,4 +139,4 @@ cd /tapio
 go run /tmp/ebpf-test/test_observer.go
 
 echo
-echo "=== Test Complete ===""
+echo "=== Test Complete ==="
