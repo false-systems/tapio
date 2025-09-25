@@ -3,7 +3,6 @@ package status
 import (
 	"time"
 
-	"github.com/yairfalse/tapio/internal/observers/common"
 	"go.uber.org/zap"
 )
 
@@ -13,7 +12,7 @@ func init() {
 }
 
 // Factory creates a new status observer from configuration
-func Factory(cfg interface{}, logger *zap.Logger) (common.Observer, error) {
+func Factory(cfg interface{}, logger *zap.Logger) (*Observer, error) {
 	config, ok := cfg.(*Config)
 	if !ok {
 		// Use default config if type assertion fails
