@@ -23,6 +23,21 @@ type Config struct {
 	EnableSymbolCache    bool          `json:"enable_symbol_cache" yaml:"enable_symbol_cache"`
 }
 
+// BPFContainerExitEvent is a mock struct for non-Linux systems
+// This is only used for tests and benchmarks on macOS/Windows
+type BPFContainerExitEvent struct {
+	Timestamp   uint64   // ns since boot (8 bytes)
+	PID         uint32   // Process ID (4 bytes)
+	TGID        uint32   // Thread Group ID (4 bytes)
+	ExitCode    int32    // Exit code (4 bytes)
+	CgroupID    uint64   // Cgroup ID (8 bytes)
+	MemoryUsage uint64   // Memory usage in bytes (8 bytes)
+	MemoryLimit uint64   // Memory limit in bytes (8 bytes)
+	OOMKilled   uint8    // 1 if OOM killed, 0 otherwise (1 byte)
+	Comm        [16]byte // Process command name (16 bytes)
+	ContainerID [64]byte // Container ID string (64 bytes)
+}
+
 // ContainerMetadata is the Go representation of container metadata (fallback)
 type ContainerMetadata struct {
 	ContainerID string    `json:"container_id"`

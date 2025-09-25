@@ -94,26 +94,26 @@ func (c *Observer) loadEBPFPrograms() error {
 func (c *Observer) attachPrograms() error {
 	state := c.ebpfState.(*ebpfStateImpl)
 
-	// Attach OOM kill tracepoint
+	// Attach OOM kill kprobe (monitors oom_kill_process kernel function)
 	if c.config.EnableOOMKill {
-		oomLink, err := link.Tracepoint("oom", "mark_victim", state.objs.TraceOomKill, nil)
+		oomLink, err := link.Kprobe("oom_kill_process", state.objs.TraceOomKill, nil)
 		if err != nil {
-			return fmt.Errorf("attaching OOM kill tracepoint: %w", err)
+			return fmt.Errorf("attaching OOM kill kprobe: %w", err)
 		}
 		state.links = append(state.links, oomLink)
 	}
 
-	// Attach memory pressure tracepoint
+	// Attach memory pressure kprobe (monitors mem_cgroup_out_of_memory)
 	if c.config.EnableMemoryPressure {
-		memLink, err := link.Tracepoint("vmscan", "mm_vmscan_memcg_reclaim_begin", state.objs.TraceMemcgOom, nil)
+		memLink, err := link.Kprobe("mem_cgroup_out_of_memory", state.objs.TraceMemcgOom, nil)
 		if err != nil {
-			c.logger.Warn("Failed to attach memory pressure tracepoint", zap.Error(err))
+			c.logger.Warn("Failed to attach memory pressure kprobe", zap.Error(err))
 		} else {
 			state.links = append(state.links, memLink)
 		}
 	}
 
-	// Attach process exit tracepoint
+	// Attach process exit tracepoint (this is actually a tracepoint, not kprobe)
 	if c.config.EnableProcessExit {
 		exitLink, err := link.Tracepoint("sched", "sched_process_exit", state.objs.TraceProcessExit, nil)
 		if err != nil {
@@ -122,7 +122,7 @@ func (c *Observer) attachPrograms() error {
 		state.links = append(state.links, exitLink)
 	}
 
-	// Attach process fork tracepoint
+	// Attach process fork tracepoint (this is actually a tracepoint, not kprobe)
 	if c.config.EnableProcessFork {
 		forkLink, err := link.Tracepoint("sched", "sched_process_fork", state.objs.TraceProcessFork, nil)
 		if err != nil {

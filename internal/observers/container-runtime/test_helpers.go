@@ -2,12 +2,8 @@ package containerruntime
 
 import (
 	"errors"
-	"fmt"
 	"regexp"
 	"strings"
-	"time"
-
-	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 var (
@@ -87,48 +83,4 @@ func isHex(s string) bool {
 		}
 	}
 	return true
-}
-
-// BPFContainerExitEvent for testing (simplified version)
-type BPFContainerExitEvent struct {
-	Timestamp   uint64   // ns since boot
-	Pid         uint32   // Process ID
-	Ppid        uint32   // Parent Process ID
-	ExitCode    int32    // Exit code
-	Signal      int32    // Signal that caused exit
-	CgroupId    uint64   // Cgroup ID
-	ContainerId [64]byte // Container ID string
-}
-
-// convertBPFEventToDomain converts a BPF event to domain event
-func convertBPFEventToDomain(bpfEvent *BPFContainerExitEvent) *domain.CollectorEvent {
-	containerID := string(bpfEvent.ContainerId[:])
-	containerID = strings.TrimRight(containerID, "\x00")
-
-	exitCode := int32(bpfEvent.ExitCode)
-
-	return &domain.CollectorEvent{
-		EventID:   fmt.Sprintf("bpf-%d", bpfEvent.Pid),
-		Timestamp: time.Unix(0, int64(bpfEvent.Timestamp)),
-		Type:      domain.EventTypeContainerExit,
-		Source:    "container-runtime",
-		Severity:  domain.EventSeverityInfo,
-		EventData: domain.EventDataContainer{
-			Container: &domain.ContainerData{
-				ContainerID: containerID,
-				ExitCode:    &exitCode,
-			},
-			Process: &domain.ProcessData{
-				PID:  int32(bpfEvent.Pid),
-				PPID: int32(bpfEvent.Ppid),
-			},
-		},
-		Metadata: domain.EventMetadata{
-			Labels: map[string]string{
-				"observer": "container-runtime",
-				"version":  "1.0.0",
-				"source":   "bpf",
-			},
-		},
-	}
 }
