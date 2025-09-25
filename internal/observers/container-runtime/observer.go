@@ -43,6 +43,9 @@ type Observer struct {
 func NewObserver(name string, cfg *Config) (*Observer, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig(name)
+	} else {
+		// Always use the provided name, override config if needed
+		cfg.Name = name
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -166,6 +169,19 @@ func (c *Observer) Stop() error {
 
 	c.logger.Info("Container Runtime observer stopped successfully")
 	return nil
+}
+
+// SendEvent sends an event and records it in statistics
+func (c *Observer) SendEvent(event *domain.CollectorEvent) bool {
+	// Send the event through the channel manager
+	sent := c.EventChannelManager.SendEvent(event)
+
+	// If successfully sent, record it in statistics
+	if sent {
+		c.BaseObserver.RecordEvent()
+	}
+
+	return sent
 }
 
 // Events returns the event channel

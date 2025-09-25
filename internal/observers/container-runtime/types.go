@@ -10,18 +10,19 @@ import (
 
 // BPFContainerExitEvent matches the C struct container_exit_event exactly
 // This struct must be kept in sync with the eBPF C code
+// WARNING: This struct is packed (no padding) to match kernel ABI
 type BPFContainerExitEvent struct {
-	Timestamp   uint64   // ns since boot
-	PID         uint32   // Process ID
-	TGID        uint32   // Thread Group ID
-	ExitCode    int32    // Exit code
-	CgroupID    uint64   // Cgroup ID
-	MemoryUsage uint64   // Memory usage in bytes
-	MemoryLimit uint64   // Memory limit in bytes
-	OOMKilled   uint8    // 1 if OOM killed, 0 otherwise
-	Comm        [16]int8 // Process command name
-	ContainerID [64]int8 // Container ID string
-}
+	Timestamp   uint64   // ns since boot (8 bytes)
+	PID         uint32   // Process ID (4 bytes)
+	TGID        uint32   // Thread Group ID (4 bytes)
+	ExitCode    int32    // Exit code (4 bytes)
+	CgroupID    uint64   // Cgroup ID (8 bytes)
+	MemoryUsage uint64   // Memory usage in bytes (8 bytes)
+	MemoryLimit uint64   // Memory limit in bytes (8 bytes)
+	OOMKilled   uint8    // 1 if OOM killed, 0 otherwise (1 byte)
+	Comm        [16]byte // Process command name (16 bytes)
+	ContainerID [64]byte // Container ID string (64 bytes)
+} // Total: 136 bytes (with alignment padding)
 
 // BPFContainerMetadata matches the C struct container_metadata exactly
 type BPFContainerMetadata struct {
@@ -158,7 +159,12 @@ type ProcessForkEvent struct {
 
 // Validate validates a BPFContainerExitEvent for size consistency
 func ValidateBPFContainerExitEvent() error {
-	expectedSize := 8 + 4 + 4 + 4 + 8 + 8 + 8 + 1 + 16 + 64 // Sum of all field sizes
+	// The actual struct size includes padding after OOMKilled to align Comm
+	// C struct layout (with natural alignment):
+	// Timestamp(8) + PID(4) + TGID(4) + ExitCode(4) + padding(4) +
+	// CgroupID(8) + MemoryUsage(8) + MemoryLimit(8) +
+	// OOMKilled(1) + padding(15) + Comm(16) + ContainerID(64) = 136 bytes
+	expectedSize := 136 // Actual size with padding
 	actualSize := int(unsafe.Sizeof(BPFContainerExitEvent{}))
 
 	if actualSize != expectedSize {
@@ -181,7 +187,7 @@ func ValidateBPFContainerMetadata() error {
 }
 
 // CStringToGo converts a C string (byte array) to Go string
-func CStringToGo(cstr []int8) string {
+func CStringToGo(cstr []byte) string {
 	// Find the null terminator
 	length := 0
 	for i, b := range cstr {

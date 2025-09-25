@@ -12,7 +12,7 @@ import (
 func NewDefaultConfig(name string) *Config {
 	return &Config{
 		Name:                 name,
-		BufferSize:           1000,
+		BufferSize:           10000,
 		EnableOOMKill:        true,
 		EnableMemoryPressure: true,
 		EnableProcessExit:    true,
@@ -30,11 +30,25 @@ func NewDefaultConfig(name string) *Config {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
+	if c.Name == "" {
+		return fmt.Errorf("observer name is required")
+	}
+
 	if c.BufferSize <= 0 {
-		return fmt.Errorf("buffer size must be positive")
+		return fmt.Errorf("buffer_size must be greater than 0")
 	}
-	if c.RingBufferSize < 4096 {
-		return fmt.Errorf("ring buffer size must be at least 4096 bytes")
+
+	if c.RingBufferSize <= 0 {
+		return fmt.Errorf("ring_buffer_size must be greater than 0")
 	}
+
+	if c.MetadataCacheSize <= 0 {
+		return fmt.Errorf("metadata_cache_size must be greater than 0")
+	}
+
+	if c.MetricsInterval <= 0 {
+		return fmt.Errorf("metrics_interval must be greater than 0")
+	}
+
 	return nil
 }
