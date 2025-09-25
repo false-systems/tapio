@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yairfalse/tapio/internal/observers/base"
-	"github.com/yairfalse/tapio/internal/observers/common"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -306,15 +305,6 @@ func (o *Observer) Statistics() *domain.CollectorStats {
 // IsHealthy returns observer health status
 func (o *Observer) IsHealthy() bool {
 	return o.BaseObserver.IsHealthy()
-}
-
-// GetEvents returns the event channel - for common.Observer compatibility
-// Deprecated: Use Events() instead
-func (o *Observer) GetEvents() <-chan common.ObserverEvent {
-	// This would require converting domain.CollectorEvent to common.ObserverEvent
-	// For now, return nil as we're using the new architecture
-	o.logger.Warn("GetEvents() called on modern observer - use Events() instead")
-	return nil
 }
 
 // updateErrorRates updates error rate metrics
