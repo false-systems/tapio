@@ -12,7 +12,7 @@ import (
 func NewDefaultConfig(name string) *Config {
 	return &Config{
 		Name:                 name,
-		BufferSize:           1000,
+		BufferSize:           10000,
 		EnableOOMKill:        true,
 		EnableMemoryPressure: true,
 		EnableProcessExit:    true,

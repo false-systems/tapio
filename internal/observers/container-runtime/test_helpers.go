@@ -2,6 +2,7 @@ package containerruntime
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -107,7 +108,7 @@ func convertBPFEventToDomain(bpfEvent *BPFContainerExitEvent) *domain.CollectorE
 	exitCode := int32(bpfEvent.ExitCode)
 
 	return &domain.CollectorEvent{
-		EventID:   "bpf-" + string(bpfEvent.Pid),
+		EventID:   fmt.Sprintf("bpf-%d", bpfEvent.Pid),
 		Timestamp: time.Unix(0, int64(bpfEvent.Timestamp)),
 		Type:      domain.EventTypeContainerExit,
 		Source:    "container-runtime",
@@ -120,6 +121,13 @@ func convertBPFEventToDomain(bpfEvent *BPFContainerExitEvent) *domain.CollectorE
 			Process: &domain.ProcessData{
 				PID:  int32(bpfEvent.Pid),
 				PPID: int32(bpfEvent.Ppid),
+			},
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "container-runtime",
+				"version":  "1.0.0",
+				"source":   "bpf",
 			},
 		},
 	}

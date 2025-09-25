@@ -2,6 +2,7 @@ package containerruntime
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -25,14 +26,19 @@ func BenchmarkObserver_ProcessEvent(b *testing.B) {
 		EventID:   "bench-1",
 		Timestamp: time.Now(),
 		Type:      domain.EventTypeContainerOOM,
-		Source:    "bench",
+		Source:    "container-runtime-bench",
 		Severity:  domain.EventSeverityError,
 		EventData: domain.EventDataContainer{
 			Container: &domain.ContainerData{
 				ContainerID: "abc123",
-				PodUID:      "pod-123",
-				Namespace:   "default",
-				PodName:     "test-pod",
+				ImageName:   "test:latest",
+				Runtime:     "containerd",
+				State:       "running",
+				Labels: map[string]string{
+					"pod-uid":   "pod-123",
+					"namespace": "default",
+					"pod-name":  "test-pod",
+				},
 			},
 		},
 		Metadata: domain.EventMetadata{
@@ -129,11 +135,18 @@ func TestObserver_StressTest(t *testing.T) {
 		go func(id int) {
 			for i := 0; i < numEvents/numGoroutines; i++ {
 				event := &domain.CollectorEvent{
-					EventID:   "stress-" + string(id) + "-" + string(i),
+					EventID:   fmt.Sprintf("stress-%d-%d", id, i),
 					Timestamp: time.Now(),
 					Type:      domain.EventTypeContainerOOM,
-					Source:    "stress",
+					Source:    "container-runtime-stress",
 					Severity:  domain.EventSeverityError,
+					Metadata: domain.EventMetadata{
+						Labels: map[string]string{
+							"observer": "container-runtime",
+							"version":  "1.0.0",
+							"test":     "stress",
+						},
+					},
 				}
 				observer.SendEvent(event)
 			}

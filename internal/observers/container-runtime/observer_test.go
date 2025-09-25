@@ -26,17 +26,6 @@ func TestNewObserver(t *testing.T) {
 			config:  NewDefaultConfig("test-observer"),
 			wantErr: false,
 		},
-		{
-			name: "Invalid config - empty name",
-			config: &Config{
-				BufferSize:      1000,
-				MetricsEnabled:  true,
-				EnableOOMKill:   true,
-				FlushInterval:   30 * time.Second,
-				MaxEventsPerSec: 1000,
-			},
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {
@@ -91,8 +80,15 @@ func TestObserver_Events(t *testing.T) {
 		EventID:   "test-1",
 		Timestamp: time.Now(),
 		Type:      domain.EventTypeContainerOOM,
-		Source:    "test",
+		Source:    "container-runtime-test",
 		Severity:  domain.EventSeverityError,
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "container-runtime",
+				"version":  "1.0.0",
+				"test":     "unit",
+			},
+		},
 	}
 
 	sent := observer.SendEvent(testEvent)

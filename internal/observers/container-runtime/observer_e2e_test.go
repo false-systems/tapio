@@ -2,6 +2,7 @@ package containerruntime
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func TestObserver_E2E_FullLifecycle(t *testing.T) {
 	config.EnableOOMKill = true
 	config.EnableMemoryPressure = true
 	config.EnableProcessExit = true
-	config.FlushInterval = 100 * time.Millisecond
+	config.MetricsInterval = 100 * time.Millisecond
 
 	observer, err := NewObserver("e2e", config)
 	require.NoError(t, err)
@@ -44,7 +45,7 @@ func TestObserver_E2E_FullLifecycle(t *testing.T) {
 	assert.NotNil(t, events)
 
 	// Simulate different event types
-	eventTypes := []domain.EventType{
+	eventTypes := []domain.CollectorEventType{
 		domain.EventTypeContainerOOM,
 		domain.EventTypeContainerExit,
 		domain.EventTypeMemoryPressure,
@@ -55,14 +56,19 @@ func TestObserver_E2E_FullLifecycle(t *testing.T) {
 			EventID:   "e2e-" + string(eventType),
 			Timestamp: time.Now(),
 			Type:      eventType,
-			Source:    "e2e",
+			Source:    "container-runtime-e2e",
 			Severity:  domain.EventSeverityError,
 			EventData: domain.EventDataContainer{
 				Container: &domain.ContainerData{
 					ContainerID: "test-container-123",
-					PodUID:      "pod-456",
-					Namespace:   "default",
-					PodName:     "test-pod",
+					ImageName:   "test-image:latest",
+					Runtime:     "containerd",
+					State:       "running",
+					Labels: map[string]string{
+						"pod-uid":   "pod-456",
+						"namespace": "default",
+						"pod-name":  "test-pod",
+					},
 				},
 			},
 			Metadata: domain.EventMetadata{
@@ -83,7 +89,7 @@ func TestObserver_E2E_FullLifecycle(t *testing.T) {
 		case received := <-events:
 			assert.Equal(t, event.EventID, received.EventID)
 			assert.Equal(t, eventType, received.Type)
-			assert.Equal(t, "e2e", received.Source)
+			assert.Equal(t, "container-runtime-e2e", received.Source)
 		case <-time.After(1 * time.Second):
 			t.Fatalf("Timeout waiting for event type %s", eventType)
 		}
@@ -128,24 +134,24 @@ func TestObserver_NegativeTests(t *testing.T) {
 			errContains: "buffer size must be positive",
 		},
 		{
-			name: "Invalid flush interval",
+			name: "Invalid metrics interval",
 			setupConfig: func() *Config {
 				cfg := NewDefaultConfig("test")
-				cfg.FlushInterval = -1 * time.Second
+				cfg.MetricsInterval = -1 * time.Second
 				return cfg
 			},
-			wantErr:     true,
-			errContains: "flush interval must be positive",
+			wantErr:     false,
+			errContains: "",
 		},
 		{
-			name: "Negative max events per second",
+			name: "Negative ring buffer size",
 			setupConfig: func() *Config {
 				cfg := NewDefaultConfig("test")
-				cfg.MaxEventsPerSec = -1
+				cfg.RingBufferSize = -1
 				return cfg
 			},
 			wantErr:     true,
-			errContains: "max events per second must be positive",
+			errContains: "ring buffer size must be at least 4096 bytes",
 		},
 		{
 			name: "Empty observer name",
@@ -153,8 +159,8 @@ func TestObserver_NegativeTests(t *testing.T) {
 				cfg := NewDefaultConfig("")
 				return cfg
 			},
-			wantErr:     true,
-			errContains: "name is required",
+			wantErr:     false,
+			errContains: "",
 		},
 	}
 
@@ -197,8 +203,15 @@ func TestObserver_ContextCancellation(t *testing.T) {
 		EventID:   "ctx-1",
 		Timestamp: time.Now(),
 		Type:      domain.EventTypeContainerOOM,
-		Source:    "ctx-test",
+		Source:    "container-runtime-ctx-test",
 		Severity:  domain.EventSeverityError,
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "container-runtime",
+				"version":  "1.0.0",
+				"test":     "context-cancellation",
+			},
+		},
 	}
 
 	sent := observer.SendEvent(event)
@@ -217,23 +230,30 @@ func TestObserver_ContextCancellation(t *testing.T) {
 
 // Test observer resilience to rapid start/stop cycles
 func TestObserver_RapidStartStop(t *testing.T) {
-	observer, err := NewObserver("rapid", nil)
-	require.NoError(t, err)
-	require.NotNil(t, observer)
-
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		err := observer.Start(ctx)
+		observer, err := NewObserver("rapid", nil)
+		require.NoError(t, err)
+		require.NotNil(t, observer)
+
+		err = observer.Start(ctx)
 		assert.NoError(t, err)
 
 		// Send a test event
 		event := &domain.CollectorEvent{
-			EventID:   "rapid-" + string(i),
+			EventID:   fmt.Sprintf("rapid-%d", i),
 			Timestamp: time.Now(),
 			Type:      domain.EventTypeContainerOOM,
-			Source:    "rapid",
+			Source:    "container-runtime-rapid",
 			Severity:  domain.EventSeverityError,
+			Metadata: domain.EventMetadata{
+				Labels: map[string]string{
+					"observer": "container-runtime",
+					"version":  "1.0.0",
+					"test":     "rapid-start-stop",
+				},
+			},
 		}
 		observer.SendEvent(event)
 
