@@ -28,6 +28,9 @@ type Observer struct {
 	// eBPF components (Linux-only)
 	ebpfState interface{}
 
+	// Container runtime client (Linux-only)
+	runtimeClient RuntimeClient
+
 	// Container metadata tracking
 	containerCache map[string]*ContainerMetadata
 	cacheMu        sync.RWMutex
