@@ -242,3 +242,18 @@ func (o *Observer) GetStats() QueryStats {
 	defer o.mu.RUnlock()
 	return o.stats
 }
+
+// Statistics returns observer statistics (implements base.Observer interface)
+func (o *Observer) Statistics() *domain.CollectorStats {
+	return o.BaseObserver.Statistics()
+}
+
+// IsHealthy returns true if the observer is healthy
+func (o *Observer) IsHealthy() bool {
+	return o.BaseObserver.IsHealthy()
+}
+
+// Health returns the health status of the observer
+func (o *Observer) Health() *domain.HealthStatus {
+	return o.BaseObserver.Health()
+}
