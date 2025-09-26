@@ -219,7 +219,7 @@ func TestMapUpdater_UpdateMaps(t *testing.T) {
 		name       string
 		containers []Container
 		wantErr    bool
-		checkMap   func(t *testing.T, updater *MapUpdater)
+		checkMap   func(t *testing.T, updater MapUpdater)
 	}{
 		{
 			name: "Update single container",
@@ -231,7 +231,7 @@ func TestMapUpdater_UpdateMaps(t *testing.T) {
 				},
 			},
 			wantErr: false,
-			checkMap: func(t *testing.T, updater *MapUpdater) {
+			checkMap: func(t *testing.T, updater MapUpdater) {
 				// Verify PID was added to map
 				assert.Contains(t, updater.(*mockMapUpdater).pids, uint32(1234))
 				assert.Contains(t, updater.(*mockMapUpdater).cgroupIDs, uint64(5678))
@@ -245,7 +245,7 @@ func TestMapUpdater_UpdateMaps(t *testing.T) {
 				{ID: "c3", PID: 300, CgroupID: 3000},
 			},
 			wantErr: false,
-			checkMap: func(t *testing.T, updater *MapUpdater) {
+			checkMap: func(t *testing.T, updater MapUpdater) {
 				mock := updater.(*mockMapUpdater)
 				assert.Len(t, mock.pids, 3)
 				assert.Contains(t, mock.pids, uint32(100))
@@ -257,7 +257,7 @@ func TestMapUpdater_UpdateMaps(t *testing.T) {
 			name:       "Empty container list",
 			containers: []Container{},
 			wantErr:    false,
-			checkMap: func(t *testing.T, updater *MapUpdater) {
+			checkMap: func(t *testing.T, updater MapUpdater) {
 				mock := updater.(*mockMapUpdater)
 				assert.Empty(t, mock.pids)
 			},

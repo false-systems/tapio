@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"go.uber.org/zap"
@@ -157,7 +158,7 @@ func (d *DockerClient) WatchEvents(ctx context.Context) (<-chan ContainerEvent, 
 		filters.Arg("event", "oom"),
 	)
 
-	eventOpts := types.EventsOptions{
+	eventOpts := events.ListOptions{
 		Filters: eventFilters,
 	}
 
@@ -210,10 +211,10 @@ func (d *DockerClient) Close() error {
 }
 
 // dockerEventToContainerEvent converts Docker events to our format
-func (d *DockerClient) dockerEventToContainerEvent(ctx context.Context, event types.EventsMessage) *ContainerEvent {
+func (d *DockerClient) dockerEventToContainerEvent(ctx context.Context, event events.Message) *ContainerEvent {
 	var eventType ContainerEventType
 
-	switch event.Action {
+	switch string(event.Action) {
 	case "start":
 		eventType = ContainerEventStart
 	case "stop":
