@@ -70,6 +70,13 @@ func TestReconciler_HandleOrphans(t *testing.T) {
 // THEN: Write minimal code to pass
 // NO STUBS - complete implementation only
 ```
+observers should have 
+  1. observer_unit_test.go - Unit tests for individual methods and components
+  2. observer_e2e_test.go - End-to-end workflow tests simulating complete scenarios
+  3. observer_integration_test.go - Integration tests with real network components
+  4. observer_system_test.go - Linux-specific system tests for eBPF functionality
+  5. observer_performance_test.go - Performance benchmarks and load tests
+  6. observer_negative_test.go - Negative tests for error handling and edge cases
 
 ### 3. Code in Small Chunks
 ```bash

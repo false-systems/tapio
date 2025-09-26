@@ -193,6 +193,9 @@ func NewObserver(logger *zap.Logger, config *Config) (*Observer, error) {
 		errorLogInterval:    time.Duration(config.RateLimitMs) * time.Millisecond,
 	}
 
+	// Start as unhealthy, become healthy only after Start() is called
+	o.BaseObserver.SetHealthy(false)
+
 	return o, nil
 }
 
