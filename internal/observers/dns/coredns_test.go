@@ -17,8 +17,8 @@ func TestDetectCoreDNSProcess(t *testing.T) {
 		{
 			name: "coredns process",
 			process: ProcessInfo{
-				PID:  1234,
-				Name: "coredns",
+				PID:     1234,
+				Name:    "coredns",
 				Cmdline: "/usr/bin/coredns -conf /etc/coredns/Corefile",
 			},
 			isCoreDNS: true,
@@ -26,8 +26,8 @@ func TestDetectCoreDNSProcess(t *testing.T) {
 		{
 			name: "kube-dns process",
 			process: ProcessInfo{
-				PID:  5678,
-				Name: "kube-dns",
+				PID:     5678,
+				Name:    "kube-dns",
 				Cmdline: "/kube-dns",
 			},
 			isCoreDNS: true,
@@ -35,8 +35,8 @@ func TestDetectCoreDNSProcess(t *testing.T) {
 		{
 			name: "systemd-resolved",
 			process: ProcessInfo{
-				PID:  999,
-				Name: "systemd-resolved",
+				PID:     999,
+				Name:    "systemd-resolved",
 				Cmdline: "/lib/systemd/systemd-resolved",
 			},
 			isCoreDNS: false,
@@ -44,8 +44,8 @@ func TestDetectCoreDNSProcess(t *testing.T) {
 		{
 			name: "dnsmasq",
 			process: ProcessInfo{
-				PID:  888,
-				Name: "dnsmasq",
+				PID:     888,
+				Name:    "dnsmasq",
 				Cmdline: "dnsmasq --conf-file=/etc/dnsmasq.conf",
 			},
 			isCoreDNS: false,
@@ -112,10 +112,10 @@ coredns_plugin_enabled{name="forward",server="dns://:53"} 1
 
 func TestDetectK8sServiceQuery(t *testing.T) {
 	tests := []struct {
-		name        string
-		queryName   string
-		expected    K8sServiceInfo
-		isK8sQuery  bool
+		name       string
+		queryName  string
+		expected   K8sServiceInfo
+		isK8sQuery bool
 	}{
 		{
 			name:      "standard service query",
@@ -180,9 +180,9 @@ func TestDetectK8sServiceQuery(t *testing.T) {
 			name:      "kubernetes API service",
 			queryName: "kubernetes.default.svc.cluster.local",
 			expected: K8sServiceInfo{
-				Service:   "kubernetes",
-				Namespace: "default",
-				Type:      "svc",
+				Service:         "kubernetes",
+				Namespace:       "default",
+				Type:            "svc",
 				IsSystemService: true,
 			},
 			isK8sQuery: true,
@@ -298,9 +298,9 @@ func TestCoreDNSForwarding(t *testing.T) {
 		queryName string
 		expected  string
 	}{
-		{"external.com", "8.8.8.8:53"},      // First upstream
-		{"google.com", "8.8.8.8:53"},        // Same if healthy
-		{"cloudflare.com", "8.8.8.8:53"},    // Consistent selection
+		{"external.com", "8.8.8.8:53"},   // First upstream
+		{"google.com", "8.8.8.8:53"},     // Same if healthy
+		{"cloudflare.com", "8.8.8.8:53"}, // Consistent selection
 	}
 
 	for _, tt := range tests {
@@ -442,8 +442,8 @@ func TestCoreDNSZoneTransfer(t *testing.T) {
 
 	// Should detect zone transfer queries
 	tests := []struct {
-		qtype        uint16
-		isTransfer   bool
+		qtype      uint16
+		isTransfer bool
 	}{
 		{DNSTypeAXFR, true},
 		{DNSTypeIXFR, true},
