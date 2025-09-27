@@ -166,8 +166,15 @@ func (rb *RingBuffer) Write(event *domain.CollectorEvent) bool {
 	tail := rb.tail.Load()
 
 	// Check if buffer is full (will overwrite)
-	if head-tail >= rb.capacity {
+	// When head catches up to tail by capacity, we're overwriting
+	if head >= tail+rb.capacity {
+		// We're about to overwrite an unread event
 		rb.dropped.Add(1)
+
+		// Move tail forward to account for the overwritten event
+		// This ensures consumed + dropped = produced
+		rb.tail.CompareAndSwap(tail, tail+1)
+
 		if rb.logger != nil && rb.dropped.Load()%1000 == 0 {
 			rb.logger.Warn("Ring buffer overwriting old events",
 				zap.String("collector", rb.collectorName),
