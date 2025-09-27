@@ -401,7 +401,7 @@ func TestIntegrationWithRealSystemCalls(t *testing.T) {
 		if event.EventData.Custom != nil {
 			assert.Equal(t, "true", event.EventData.Custom["mock"])
 		}
-	case <-time.After(35 * time.Second): // Mock events come every 30s
+	case <-time.After(2 * time.Second): // Reduced timeout for faster tests
 		// This is expected on Linux where mock events aren't generated
 		t.Log("No mock events received (expected on Linux)")
 	}

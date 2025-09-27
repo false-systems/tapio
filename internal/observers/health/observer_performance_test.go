@@ -227,10 +227,10 @@ func TestPerformanceHighEventRate(t *testing.T) {
 	var eventsDropped atomic.Int64
 
 	// Start consumer
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var consumerWg sync.WaitGroup
+	consumerWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer consumerWg.Done()
 		for range observer.Events() {
 			eventsReceived.Add(1)
 		}
@@ -241,10 +241,11 @@ func TestPerformanceHighEventRate(t *testing.T) {
 	eventsPerProducer := 1000                // Reduced from 10000
 	startTime := time.Now()
 
+	var producerWg sync.WaitGroup
 	for i := 0; i < numProducers; i++ {
-		wg.Add(1)
+		producerWg.Add(1)
 		go func(producerID int) {
-			defer wg.Done()
+			defer producerWg.Done()
 			timeout := time.After(10 * time.Second)
 
 			for j := 0; j < eventsPerProducer; j++ {
@@ -273,8 +274,13 @@ func TestPerformanceHighEventRate(t *testing.T) {
 	}
 
 	// Wait for producers to finish
-	wg.Wait()
+	producerWg.Wait()
+
+	// Close channel to signal consumer to stop
 	observer.EventChannelManager.Close()
+
+	// Wait for consumer to finish
+	consumerWg.Wait()
 
 	duration := time.Since(startTime)
 	totalEvents := eventsSent.Load()
