@@ -113,6 +113,17 @@ func NewObserver(logger *zap.Logger, config *Config) (*Observer, error) {
 		config = DefaultConfig()
 	}
 
+	// Validate configuration
+	if config.RingBufferSize < 0 {
+		return nil, fmt.Errorf("ring buffer size must be non-negative, got %d", config.RingBufferSize)
+	}
+	if config.EventChannelSize < 0 {
+		return nil, fmt.Errorf("event channel size must be non-negative, got %d", config.EventChannelSize)
+	}
+	if config.RateLimitMs < 0 {
+		return nil, fmt.Errorf("rate limit must be non-negative, got %d", config.RateLimitMs)
+	}
+
 	// Initialize OpenTelemetry
 	tracer := otel.Tracer("health-observer")
 	meter := otel.Meter("health-observer")

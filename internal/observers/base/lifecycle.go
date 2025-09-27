@@ -26,6 +26,10 @@ type LifecycleManager struct {
 
 	// Track running goroutines
 	runningGoroutines atomic.Int32
+
+	// Ensure Stop can only be called once
+	stopOnce sync.Once
+	stopped  atomic.Bool
 }
 
 // NewLifecycleManager creates a new lifecycle manager
@@ -65,39 +69,50 @@ func (lm *LifecycleManager) Start(name string, fn func()) {
 
 // Stop initiates graceful shutdown
 func (lm *LifecycleManager) Stop(timeout time.Duration) error {
-	if lm.logger != nil {
-		lm.logger.Info("Initiating graceful shutdown",
-			zap.Int32("running_goroutines", lm.runningGoroutines.Load()),
-			zap.Duration("timeout", timeout))
-	}
-
-	// Signal stop
-	close(lm.stopCh)
-
-	// Cancel context
-	lm.cancel()
-
-	// Wait with timeout
-	done := make(chan struct{})
-	go func() {
-		lm.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		if lm.logger != nil {
-			lm.logger.Info("Graceful shutdown completed")
-		}
-		close(lm.doneCh)
+	// Check if already stopped
+	if lm.stopped.Load() {
 		return nil
-	case <-time.After(timeout):
-		if lm.logger != nil {
-			lm.logger.Warn("Shutdown timeout exceeded",
-				zap.Int32("still_running", lm.runningGoroutines.Load()))
-		}
-		return ErrShutdownTimeout
 	}
+
+	var err error
+	lm.stopOnce.Do(func() {
+		lm.stopped.Store(true)
+
+		if lm.logger != nil {
+			lm.logger.Info("Initiating graceful shutdown",
+				zap.Int32("running_goroutines", lm.runningGoroutines.Load()),
+				zap.Duration("timeout", timeout))
+		}
+
+		// Signal stop
+		close(lm.stopCh)
+
+		// Cancel context
+		lm.cancel()
+
+		// Wait with timeout
+		done := make(chan struct{})
+		go func() {
+			lm.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			if lm.logger != nil {
+				lm.logger.Info("Graceful shutdown completed")
+			}
+			close(lm.doneCh)
+		case <-time.After(timeout):
+			if lm.logger != nil {
+				lm.logger.Warn("Shutdown timeout exceeded",
+					zap.Int32("still_running", lm.runningGoroutines.Load()))
+			}
+			err = ErrShutdownTimeout
+		}
+	})
+
+	return err
 }
 
 // Context returns the lifecycle context
@@ -128,4 +143,9 @@ func (lm *LifecycleManager) IsShuttingDown() bool {
 // GetRunningGoroutines returns the number of running goroutines
 func (lm *LifecycleManager) GetRunningGoroutines() int32 {
 	return lm.runningGoroutines.Load()
+}
+
+// IsStopped returns true if Stop has been called
+func (lm *LifecycleManager) IsStopped() bool {
+	return lm.stopped.Load()
 }

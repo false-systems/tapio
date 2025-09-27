@@ -108,9 +108,9 @@ func TestConvertToCollectorEvent(t *testing.T) {
 				UID:         1000,
 				GID:         1000,
 				CgroupID:    999,
-				SyscallNr:   1, // write
+				SyscallNr:   1,   // write
 				ErrorCode:   -28, // ENOSPC
-				Category:    1, // file
+				Category:    1,   // file
 				Comm:        [16]byte{'t', 'e', 's', 't'},
 				Path:        [256]byte{'/', 't', 'm', 'p', '/', 'f', 'i', 'l', 'e'},
 				ErrorCount:  5,
@@ -144,9 +144,9 @@ func TestConvertToCollectorEvent(t *testing.T) {
 				PPID:        1,
 				UID:         0,
 				GID:         0,
-				SyscallNr:   9, // mmap
+				SyscallNr:   9,   // mmap
 				ErrorCode:   -12, // ENOMEM
-				Category:    3, // memory
+				Category:    3,   // memory
 				Comm:        [16]byte{'m', 'e', 'm', 'h', 'o', 'g'},
 				ErrorCount:  1,
 			},
@@ -163,9 +163,9 @@ func TestConvertToCollectorEvent(t *testing.T) {
 				TimestampNs: 5555555555,
 				PID:         3000,
 				PPID:        100,
-				SyscallNr:   42, // connect
+				SyscallNr:   42,   // connect
 				ErrorCode:   -111, // ECONNREFUSED
-				Category:    2, // network
+				Category:    2,    // network
 				Comm:        [16]byte{'c', 'u', 'r', 'l'},
 				SrcIP:       0x0100007f, // 127.0.0.1
 				DstIP:       0x0100007f, // 127.0.0.1
@@ -475,8 +475,8 @@ func TestEventChannel(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	config := &Config{
 		EventChannelSize:  2,
-		RingBufferSize:   1024,
-		RateLimitMs:      10,
+		RingBufferSize:    1024,
+		RateLimitMs:       10,
 		EnabledCategories: map[string]bool{"test": true},
 	}
 
@@ -497,6 +497,7 @@ func TestEventChannel(t *testing.T) {
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer": "health",
+				"version":  "1.0.0",
 				"test":     "true",
 			},
 		},
@@ -510,6 +511,7 @@ func TestEventChannel(t *testing.T) {
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer": "health",
+				"version":  "1.0.0",
 				"test":     "true",
 			},
 		},
@@ -523,6 +525,7 @@ func TestEventChannel(t *testing.T) {
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer": "health",
+				"version":  "1.0.0",
 				"test":     "true",
 			},
 		},

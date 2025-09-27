@@ -16,9 +16,9 @@ import (
 
 // Observer implements DNS problem detection (negative observer - only tracks problems)
 type Observer struct {
-	*base.BaseObserver        // Embed for stats/health
-	*base.EventChannelManager // Embed for events
-	*base.LifecycleManager    // Embed for lifecycle
+	*base.BaseObserver                               // Embed for stats/health
+	*base.EventChannelManager                        // Embed for events
+	lifecycleManager          *base.LifecycleManager // Not embedded to avoid method conflicts
 
 	// DNS-specific fields
 	config *Config
@@ -109,7 +109,7 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 	o := &Observer{
 		BaseObserver:        base.NewBaseObserver(name, 5*time.Minute),
 		EventChannelManager: base.NewEventChannelManager(config.BufferSize, name, logger.Named(name)),
-		LifecycleManager:    base.NewLifecycleManager(context.Background(), logger.Named(name)),
+		lifecycleManager:    base.NewLifecycleManager(context.Background(), logger.Named(name)),
 		config:              config,
 		logger:              logger.Named(name),
 		name:                name,
@@ -124,6 +124,9 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 		eventsProcessed:     eventsProcessed,
 		errorsTotal:         errorsTotal,
 	}
+
+	// Start as unhealthy until explicitly started
+	o.BaseObserver.SetHealthy(false)
 
 	o.logger.Info("DNS problem observer created",
 		zap.String("name", name),
@@ -143,7 +146,7 @@ func (o *Observer) Start(ctx context.Context) error {
 	}
 
 	// Start problem cleanup goroutine
-	o.LifecycleManager.Start("cleanup", func() {
+	o.lifecycleManager.Start("cleanup", func() {
 		o.cleanupOldProblems(ctx)
 	})
 
@@ -162,7 +165,7 @@ func (o *Observer) Stop() error {
 	o.stopPlatform()
 
 	// Stop lifecycle
-	if err := o.LifecycleManager.Stop(5 * time.Second); err != nil {
+	if err := o.lifecycleManager.Stop(5 * time.Second); err != nil {
 		o.logger.Error("Error stopping lifecycle", zap.Error(err))
 	}
 
@@ -211,6 +214,20 @@ func (o *Observer) trackProblem(event *DNSEvent) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
+	// Update statistics
+	switch event.ProblemType {
+	case DNSProblemSlow:
+		o.stats.SlowQueries++
+	case DNSProblemTimeout:
+		o.stats.Timeouts++
+	case DNSProblemNXDOMAIN:
+		o.stats.NXDomains++
+	case DNSProblemSERVFAIL:
+		o.stats.ServerFailures++
+	}
+	o.stats.TotalProblems++
+	o.stats.LastProblemTime = time.Now()
+
 	queryName := event.GetQueryName()
 	tracker, exists := o.recentProblems[queryName]
 
@@ -256,4 +273,139 @@ func (o *Observer) IsHealthy() bool {
 // Health returns the health status of the observer
 func (o *Observer) Health() *domain.HealthStatus {
 	return o.BaseObserver.Health()
+}
+
+// startFallback generates simulated DNS problems for testing
+func (o *Observer) startFallback() error {
+	o.logger.Info("Starting DNS observer in fallback mode (simulated problems)")
+
+	o.lifecycleManager.Start("mock-generator", func() {
+		o.generateMockProblems(context.Background())
+	})
+
+	return nil
+}
+
+// generateMockProblems generates fake DNS problems for testing
+func (o *Observer) generateMockProblems(ctx context.Context) {
+	defer o.logger.Debug("Mock DNS problem generator stopped")
+
+	// Use shorter ticker for faster shutdown in tests
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	problems := []struct {
+		query       string
+		problemType DNSProblemType
+		latencyMs   float64
+	}{
+		{"slow-service.example.com", DNSProblemSlow, 250},
+		{"nonexistent.domain.local", DNSProblemNXDOMAIN, 5},
+		{"timeout.service.cluster.local", DNSProblemTimeout, 5000},
+		{"broken-dns.internal", DNSProblemSERVFAIL, 10},
+	}
+
+	eventCount := 0
+
+	// Use shorter loops to be more responsive to context cancellation
+	checkInterval := time.NewTicker(100 * time.Millisecond)
+	defer checkInterval.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			o.logger.Debug("Mock generator context cancelled")
+			return
+		case <-checkInterval.C:
+			// Check for cancellation frequently
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		case <-ticker.C:
+			// Only generate events if context is still valid
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// Generate a mock problem
+			problem := problems[eventCount%len(problems)]
+			eventCount++
+
+			event := &domain.CollectorEvent{
+				EventID:   fmt.Sprintf("mock-dns-problem-%d", eventCount),
+				Timestamp: time.Now(),
+				Type:      domain.EventTypeDNS,
+				Source:    o.name,
+				Severity:  domain.EventSeverityWarning,
+				EventData: domain.EventDataContainer{
+					DNS: &domain.DNSData{
+						QueryName:    problem.query,
+						QueryType:    "A",
+						Duration:     time.Duration(problem.latencyMs * float64(time.Millisecond)),
+						ResponseCode: getResponseCode(problem.problemType),
+						Error:        true,
+						ErrorMessage: getMockErrorMessage(problem.problemType),
+						ClientIP:     "10.0.1.5",
+						ServerIP:     "10.0.0.53",
+					},
+					Process: &domain.ProcessData{
+						PID:     12345,
+						Command: "mock-app",
+					},
+				},
+				Metadata: domain.EventMetadata{
+					Labels: map[string]string{
+						"observer":     o.name,
+						"version":      "1.0.0",
+						"mode":         "fallback",
+						"problem_type": problem.problemType.String(),
+					},
+				},
+			}
+
+			if o.EventChannelManager.SendEvent(event) {
+				o.BaseObserver.RecordEvent()
+				o.logger.Debug("Sent mock DNS problem event",
+					zap.String("query", problem.query),
+					zap.String("problem", problem.problemType.String()))
+			} else {
+				o.BaseObserver.RecordDrop()
+			}
+		}
+	}
+}
+
+// Helper functions for fallback mode
+func getResponseCode(problemType DNSProblemType) int {
+	switch problemType {
+	case DNSProblemNXDOMAIN:
+		return 3 // NXDOMAIN
+	case DNSProblemSERVFAIL:
+		return 2 // SERVFAIL
+	case DNSProblemRefused:
+		return 5 // REFUSED
+	default:
+		return 0 // NOERROR (but slow/timeout)
+	}
+}
+
+func getMockErrorMessage(problemType DNSProblemType) string {
+	switch problemType {
+	case DNSProblemSlow:
+		return "Query exceeded latency threshold"
+	case DNSProblemTimeout:
+		return "DNS query timed out"
+	case DNSProblemNXDOMAIN:
+		return "Domain does not exist"
+	case DNSProblemSERVFAIL:
+		return "DNS server failure"
+	case DNSProblemRefused:
+		return "Query refused by server"
+	default:
+		return "Unknown DNS problem"
+	}
 }

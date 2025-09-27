@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -148,10 +149,10 @@ func TestIntegrationWithEventPipeline(t *testing.T) {
 		category  uint8
 		severity  domain.EventSeverity
 	}{
-		{-28, 1, domain.EventSeverityCritical},  // ENOSPC
-		{-12, 3, domain.EventSeverityCritical},  // ENOMEM
-		{-111, 2, domain.EventSeverityError},    // ECONNREFUSED
-		{-13, 1, domain.EventSeverityWarning},   // EACCES
+		{-28, 1, domain.EventSeverityCritical}, // ENOSPC
+		{-12, 3, domain.EventSeverityCritical}, // ENOMEM
+		{-111, 2, domain.EventSeverityError},   // ECONNREFUSED
+		{-13, 1, domain.EventSeverityWarning},  // EACCES
 	}
 
 	for _, te := range testEvents {
@@ -219,7 +220,7 @@ func TestIntegrationWithMultipleObservers(t *testing.T) {
 		},
 	}
 
-	observers := make([]interface{
+	observers := make([]interface {
 		Start(context.Context) error
 		Stop() error
 		Events() <-chan *domain.CollectorEvent
@@ -462,6 +463,6 @@ func TestIntegrationEventOrdering(t *testing.T) {
 	// Verify sequence
 	for i, event := range collected {
 		errorCount := event.Metadata.Labels["error_count"]
-		assert.Equal(t, string(rune(i)), errorCount)
+		assert.Equal(t, fmt.Sprintf("%d", i), errorCount)
 	}
 }

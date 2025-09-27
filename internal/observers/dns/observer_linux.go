@@ -14,7 +14,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/yairfalse/tapio/internal/observers/dns/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -23,7 +22,7 @@ import (
 
 // loadDNSSpec loads the generated eBPF specification
 func loadDNSSpec() (*ebpf.CollectionSpec, error) {
-	return bpf.LoadDNS()
+	return nil, fmt.Errorf("eBPF DNS monitoring not yet implemented")
 }
 
 // dnsEBPF contains eBPF-specific state
@@ -107,12 +106,12 @@ func (o *Observer) startPlatform() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	ebpfState.cancel = cancel
 
-	o.LifecycleManager.Start("ebpf-reader", func() {
+	o.lifecycleManager.Start("ebpf-reader", func() {
 		o.processDNSProblems(ctx)
 	})
 
 	// Start timeout checker
-	o.LifecycleManager.Start("timeout-checker", func() {
+	o.lifecycleManager.Start("timeout-checker", func() {
 		o.checkDNSTimeouts(ctx)
 	})
 
