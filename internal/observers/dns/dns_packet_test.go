@@ -1,7 +1,6 @@
 package dns
 
 import (
-	"encoding/binary"
 	"testing"
 	"time"
 
@@ -343,8 +342,8 @@ func TestDetectCoreDNSQuery(t *testing.T) {
 
 			assert.Equal(t, tt.isCoreDNS, result.IsCoreDNS)
 			if tt.isCoreDNS {
-				assert.Equal(t, tt.k8sService, result.K8sService)
-				assert.Equal(t, tt.k8sNamespace, result.K8sNamespace)
+				assert.Equal(t, tt.k8sService, result.Service)
+				assert.Equal(t, tt.k8sNamespace, result.Namespace)
 			}
 		})
 	}
@@ -450,65 +449,4 @@ func TestTCPSessionTracking(t *testing.T) {
 	assert.Equal(t, 0, tracker.GetActiveSessions())
 }
 
-// Helper functions for building test packets
-
-func buildDNSQuery(domain string, qtype uint16, id uint16, isResponse bool) []byte {
-	// Implementation will be in dns_packet.go
-	// This is a stub for testing
-	return nil
-}
-
-func buildTCPDNSQuery(domain string, qtype uint16, id uint16) []byte {
-	query := buildDNSQuery(domain, qtype, id, false)
-	length := uint16(len(query))
-
-	packet := make([]byte, 2+length)
-	binary.BigEndian.PutUint16(packet[0:2], length)
-	copy(packet[2:], query)
-
-	return packet
-}
-
-func buildDNSResponse(domain string, qtype uint16, id uint16, rcode uint8, answers []string) []byte {
-	// Implementation will be in dns_packet.go
-	return nil
-}
-
-func buildDNSQueryWithEDNS0(domain string, qtype uint16, id uint16, bufferSize uint16) []byte {
-	// Implementation will be in dns_packet.go
-	return nil
-}
-
-func buildTruncatedResponse(domain string, qtype uint16, id uint16) []byte {
-	// Implementation will be in dns_packet.go
-	return nil
-}
-
-func buildBadTCPPacket() []byte {
-	// Create packet with mismatched length
-	packet := make([]byte, 100)
-	binary.BigEndian.PutUint16(packet[0:2], 200) // Wrong length
-	return packet
-}
-
-func buildLargeDNSQuery(size int) []byte {
-	// Build a query that requires fragmentation
-	return make([]byte, size)
-}
-
-func fragmentTCPPacket(packet []byte, mtu int) [][]byte {
-	var fragments [][]byte
-	for i := 0; i < len(packet); i += mtu {
-		end := i + mtu
-		if end > len(packet) {
-			end = len(packet)
-		}
-		fragments = append(fragments, packet[i:end])
-	}
-	return fragments
-}
-
-func calculateDNSLength(domain string) uint16 {
-	// Calculate expected DNS packet length for domain
-	return uint16(12 + len(domain) + 5) // Header + domain + type/class
-}
+// Helper functions are now in test_helpers.go

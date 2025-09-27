@@ -104,8 +104,8 @@ func TestE2E_MultipleProblemTypes(t *testing.T) {
 	}{
 		{"slow_query", DNSProblemSlow, "slow.test.com", 200_000_000},
 		{"timeout", DNSProblemTimeout, "timeout.test.com", 5_000_000_000},
-		{"nxdomain", DNSProblemNXDOMAIN, "nonexistent.test.com", 50_000_000},
-		{"servfail", DNSProblemSERVFAIL, "failed.test.com", 100_000_000},
+		{"nxdomain", DNSProblemNXDomain, "nonexistent.test.com", 50_000_000},
+		{"servfail", DNSProblemServfail, "failed.test.com", 100_000_000},
 		{"refused", DNSProblemRefused, "refused.test.com", 30_000_000},
 	}
 

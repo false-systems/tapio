@@ -8,9 +8,10 @@ import (
 type DNSProblemType uint8
 
 const (
+	DNSProblemNone      DNSProblemType = 0 // No problem
 	DNSProblemSlow      DNSProblemType = 1 // Query took too long
-	DNSProblemNXDOMAIN  DNSProblemType = 2 // Domain doesn't exist
-	DNSProblemSERVFAIL  DNSProblemType = 3 // Server failure
+	DNSProblemNXDomain  DNSProblemType = 2 // Domain doesn't exist
+	DNSProblemServfail  DNSProblemType = 3 // Server failure
 	DNSProblemTimeout   DNSProblemType = 4 // No response
 	DNSProblemRefused   DNSProblemType = 5 // Query refused
 	DNSProblemTruncated DNSProblemType = 6 // Response truncated (TCP fallback needed)
@@ -50,9 +51,9 @@ func (p DNSProblemType) String() string {
 	switch p {
 	case DNSProblemSlow:
 		return "slow"
-	case DNSProblemNXDOMAIN:
+	case DNSProblemNXDomain:
 		return "nxdomain"
-	case DNSProblemSERVFAIL:
+	case DNSProblemServfail:
 		return "servfail"
 	case DNSProblemTimeout:
 		return "timeout"

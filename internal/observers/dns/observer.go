@@ -220,9 +220,9 @@ func (o *Observer) trackProblem(event *DNSEvent) bool {
 		o.stats.SlowQueries++
 	case DNSProblemTimeout:
 		o.stats.Timeouts++
-	case DNSProblemNXDOMAIN:
+	case DNSProblemNXDomain:
 		o.stats.NXDomains++
-	case DNSProblemSERVFAIL:
+	case DNSProblemServfail:
 		o.stats.ServerFailures++
 	}
 	o.stats.TotalProblems++
@@ -300,9 +300,9 @@ func (o *Observer) generateMockProblems(ctx context.Context) {
 		latencyMs   float64
 	}{
 		{"slow-service.example.com", DNSProblemSlow, 250},
-		{"nonexistent.domain.local", DNSProblemNXDOMAIN, 5},
+		{"nonexistent.domain.local", DNSProblemNXDomain, 5},
 		{"timeout.service.cluster.local", DNSProblemTimeout, 5000},
-		{"broken-dns.internal", DNSProblemSERVFAIL, 10},
+		{"broken-dns.internal", DNSProblemServfail, 10},
 	}
 
 	eventCount := 0
@@ -382,9 +382,9 @@ func (o *Observer) generateMockProblems(ctx context.Context) {
 // Helper functions for fallback mode
 func getResponseCode(problemType DNSProblemType) int {
 	switch problemType {
-	case DNSProblemNXDOMAIN:
+	case DNSProblemNXDomain:
 		return 3 // NXDOMAIN
-	case DNSProblemSERVFAIL:
+	case DNSProblemServfail:
 		return 2 // SERVFAIL
 	case DNSProblemRefused:
 		return 5 // REFUSED
@@ -399,9 +399,9 @@ func getMockErrorMessage(problemType DNSProblemType) string {
 		return "Query exceeded latency threshold"
 	case DNSProblemTimeout:
 		return "DNS query timed out"
-	case DNSProblemNXDOMAIN:
+	case DNSProblemNXDomain:
 		return "Domain does not exist"
-	case DNSProblemSERVFAIL:
+	case DNSProblemServfail:
 		return "DNS server failure"
 	case DNSProblemRefused:
 		return "Query refused by server"
