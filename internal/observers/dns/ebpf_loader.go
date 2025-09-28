@@ -125,13 +125,8 @@ func (p *DNSeBPFProgram) Attach() error {
 		p.links = append(p.links, udpRecvLink)
 	}
 
-	// Attach poll timeout tracepoint for timeout detection
-	pollLink, err := link.Tracepoint("syscalls", "sys_exit_poll", p.objs.TracePollTimeout, nil)
-	if err != nil {
-		p.logger.Warn("Failed to attach poll tracepoint", zap.Error(err))
-	} else {
-		p.links = append(p.links, pollLink)
-	}
+	// Poll tracepoint removed - not available on all kernels
+	// Timeout detection handled by comparing timestamps in recvmsg
 
 	// Attach cleanup tracepoint
 	cleanupLink, err := link.Tracepoint("syscalls", "sys_enter_nanosleep", p.objs.TraceCleanup, nil)
@@ -141,7 +136,7 @@ func (p *DNSeBPFProgram) Attach() error {
 		p.links = append(p.links, cleanupLink)
 	}
 
-	p.logger.Info("eBPF tracepoints attached",
+	p.logger.Info("eBPF hooks attached",
 		zap.Int("num_hooks", len(p.links)))
 
 	return nil
