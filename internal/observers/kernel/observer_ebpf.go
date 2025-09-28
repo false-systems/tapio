@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -202,13 +201,24 @@ func (c *Observer) processEvents() {
 
 // handleKernelEvent processes a single kernel event from eBPF
 func (c *Observer) handleKernelEvent(data []byte) error {
-	if len(data) < int(unsafe.Sizeof(KernelEvent{})) {
-		return fmt.Errorf("event data too small: got %d bytes", len(data))
+	// Accept both 152 bytes (from eBPF) and 160 bytes (Go struct with padding)
+	minSize := 152 // Actual eBPF event size
+	if len(data) < minSize {
+		return fmt.Errorf("event data too small: got %d bytes, need at least %d", len(data), minSize)
 	}
 
 	// Parse the kernel event
+	// Pad the data to 160 bytes if it's 152 (eBPF size)
+	eventData := data
+	if len(data) == 152 {
+		// Add 8 bytes of padding to match Go struct size
+		padded := make([]byte, 160)
+		copy(padded, data)
+		eventData = padded
+	}
+
 	var event KernelEvent
-	reader := bytes.NewReader(data)
+	reader := bytes.NewReader(eventData)
 	if err := binary.Read(reader, binary.LittleEndian, &event); err != nil {
 		return fmt.Errorf("failed to parse kernel event: %w", err)
 	}

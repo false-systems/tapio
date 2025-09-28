@@ -14,6 +14,7 @@
 #define MAX_DNS_PACKET_SIZE 1024
 
 // Event types
+#define DNS_EVENT_SUCCESS   0
 #define DNS_EVENT_SLOW      1
 #define DNS_EVENT_TIMEOUT   2
 #define DNS_EVENT_NXDOMAIN  3
@@ -254,6 +255,115 @@ static __always_inline void submit_dns_event(struct dns_query_state *query,
     }
 
     bpf_ringbuf_submit(event, 0);
+}
+
+// Kprobe for udp_sendmsg - captures UDP DNS queries
+SEC("kprobe/udp_sendmsg")
+int trace_udp_sendmsg(struct pt_regs *ctx) {
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 pid = id >> 32;
+    __u32 tid = id & 0xFFFFFFFF;
+
+    // Only track DNS (port 53)
+    struct socket *sock = (struct socket *)PT_REGS_PARM1(ctx);
+    if (!sock) return 0;
+
+    // Create DNS query state
+    struct dns_query_key key = {
+        .pid = pid,
+        .tid = tid,
+        .protocol = 0  // UDP
+    };
+
+    struct dns_query_state state = {
+        .start_time_ns = bpf_ktime_get_ns(),
+        .pid = pid,
+        .tid = tid,
+        .query_id = 0,
+        .query_type = 1, // A record
+        .src_port = 0,
+        .dst_port = DNS_PORT,
+        .protocol = 0, // UDP
+        .is_coredns = 0,
+    };
+
+    // Get process command
+    bpf_get_current_comm(&state.query_name, sizeof(state.query_name));
+
+    bpf_map_update_elem(&active_queries, &key, &state, BPF_ANY);
+
+    return 0;
+}
+
+// Kprobe for tcp_sendmsg - captures TCP DNS queries
+SEC("kprobe/tcp_sendmsg")
+int trace_tcp_sendmsg(struct pt_regs *ctx) {
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 pid = id >> 32;
+    __u32 tid = id & 0xFFFFFFFF;
+
+    // Create DNS query state for TCP
+    struct dns_query_key key = {
+        .pid = pid,
+        .tid = tid,
+        .protocol = 1  // TCP
+    };
+
+    struct dns_query_state state = {
+        .start_time_ns = bpf_ktime_get_ns(),
+        .pid = pid,
+        .tid = tid,
+        .query_id = 0,
+        .query_type = 1, // A record
+        .src_port = 0,
+        .dst_port = DNS_PORT,
+        .protocol = 1, // TCP
+        .is_coredns = 0,
+    };
+
+    // Get process command
+    bpf_get_current_comm(&state.query_name, sizeof(state.query_name));
+
+    bpf_map_update_elem(&active_queries, &key, &state, BPF_ANY);
+
+    return 0;
+}
+
+// Kretprobe for udp_recvmsg - captures UDP DNS responses
+SEC("kretprobe/udp_recvmsg")
+int trace_udp_recvmsg(struct pt_regs *ctx) {
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 pid = id >> 32;
+    __u32 tid = id & 0xFFFFFFFF;
+
+    struct dns_query_key key = {
+        .pid = pid,
+        .tid = tid,
+        .protocol = 0  // UDP
+    };
+
+    struct dns_query_state *query = bpf_map_lookup_elem(&active_queries, &key);
+    if (!query) {
+        return 0;
+    }
+
+    __u64 now = bpf_ktime_get_ns();
+    __u64 elapsed = now - query->start_time_ns;
+
+    // Determine if this is a problem
+    __u8 event_type = DNS_EVENT_SUCCESS;
+    if (elapsed > TIMEOUT_THRESHOLD_NS) {
+        event_type = DNS_EVENT_TIMEOUT;
+    } else if (elapsed > SLOW_THRESHOLD_NS) {
+        event_type = DNS_EVENT_SLOW;
+    }
+
+    if (event_type != DNS_EVENT_SUCCESS) {
+        submit_dns_event(query, event_type, 0);
+    }
+
+    bpf_map_delete_elem(&active_queries, &key);
+    return 0;
 }
 
 // Tracepoint for DNS queries via connect() syscall

@@ -255,7 +255,7 @@ func (c *Observer) generateMockEvents() {
 				EventID:   fmt.Sprintf("kernel-mock-%d", mockEvent.PID),
 				Type:      domain.EventTypeKernelSyscall, // Use syscall type for kernel events
 				Timestamp: time.Now(),
-				Source:    c.Name(),
+				Source:    fmt.Sprintf("kernel-%s", c.config.Name), // Prefix with "kernel-" for validator
 				Severity:  domain.EventSeverityInfo,
 				EventData: domain.EventDataContainer{
 					Kernel: &domain.KernelData{
@@ -356,6 +356,10 @@ func (c *Observer) getErrorDescription(errorCode int32) string {
 
 // convertKernelEvent converts kernel event to domain event (simplified for non-Linux)
 func (c *Observer) convertKernelEvent(event *KernelEvent) *domain.CollectorEvent {
+	if event == nil {
+		return nil
+	}
+
 	// Extract command name from Comm field
 	comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
 
