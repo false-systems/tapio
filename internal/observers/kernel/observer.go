@@ -12,7 +12,11 @@ import (
 
 	"github.com/yairfalse/tapio/internal/observers/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -31,6 +35,18 @@ type Observer struct {
 
 	// eBPF components (platform-specific)
 	ebpfState interface{}
+
+	// OpenTelemetry instrumentation
+	tracer          trace.Tracer
+	eventsProcessed metric.Int64Counter
+	eventsDropped   metric.Int64Counter
+	errorsTotal     metric.Int64Counter
+	syscallsTracked metric.Int64Counter
+	configAccesses  metric.Int64Counter
+	secretAccesses  metric.Int64Counter
+	accessFailures  metric.Int64Counter
+	processingTime  metric.Float64Histogram
+	eventSize       metric.Int64Histogram
 }
 
 // NewObserver creates a new simple kernel observer
@@ -62,6 +78,48 @@ func NewObserver(name string, cfg *Config) (*Observer, error) {
 		logger.Info("Kernel observer running in MOCK MODE", zap.String("name", name))
 	}
 
+	// Initialize OpenTelemetry
+	meter := otel.Meter("tapio.observers.kernel")
+	tracer := otel.Tracer("tapio.observers.kernel")
+
+	// Create metrics
+	eventsProcessed, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_events_processed_total", name),
+		metric.WithDescription("Total kernel events processed"),
+	)
+	eventsDropped, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_events_dropped_total", name),
+		metric.WithDescription("Total kernel events dropped"),
+	)
+	errorsTotal, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription("Total errors in kernel observer"),
+	)
+	syscallsTracked, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_syscalls_tracked_total", name),
+		metric.WithDescription("Total syscalls tracked"),
+	)
+	configAccesses, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_config_accesses_total", name),
+		metric.WithDescription("Total ConfigMap accesses tracked"),
+	)
+	secretAccesses, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_secret_accesses_total", name),
+		metric.WithDescription("Total Secret accesses tracked"),
+	)
+	accessFailures, _ := meter.Int64Counter(
+		fmt.Sprintf("%s_access_failures_total", name),
+		metric.WithDescription("Total config/secret access failures"),
+	)
+	processingTime, _ := meter.Float64Histogram(
+		fmt.Sprintf("%s_processing_time_ms", name),
+		metric.WithDescription("Event processing time in milliseconds"),
+	)
+	eventSize, _ := meter.Int64Histogram(
+		fmt.Sprintf("%s_event_size_bytes", name),
+		metric.WithDescription("Size of kernel events in bytes"),
+	)
+
 	// Initialize base components
 	ctx := context.Background()
 	baseObserver := base.NewBaseObserver("kernel", 5*time.Minute)
@@ -75,6 +133,16 @@ func NewObserver(name string, cfg *Config) (*Observer, error) {
 		logger:              logger.Named(name),
 		config:              cfg,
 		mockMode:            mockMode,
+		tracer:              tracer,
+		eventsProcessed:     eventsProcessed,
+		eventsDropped:       eventsDropped,
+		errorsTotal:         errorsTotal,
+		syscallsTracked:     syscallsTracked,
+		configAccesses:      configAccesses,
+		secretAccesses:      secretAccesses,
+		accessFailures:      accessFailures,
+		processingTime:      processingTime,
+		eventSize:           eventSize,
 	}
 
 	c.logger.Info("Kernel observer created",
@@ -129,13 +197,18 @@ func (c *Observer) Name() string {
 
 // Start starts the eBPF monitoring
 func (c *Observer) Start(ctx context.Context) error {
-	tracer := c.BaseObserver.GetTracer()
-	ctx, span := tracer.Start(ctx, "kernel.observer.start")
+	ctx, span := c.tracer.Start(ctx, "kernel.observer.start")
 	defer span.End()
 
 	c.logger.Info("Starting kernel observer",
 		zap.Bool("enable_ebpf", c.config.EnableEBPF),
 		zap.Bool("mock_mode", c.mockMode))
+
+	span.SetAttributes(
+		attribute.Bool("mock_mode", c.mockMode),
+		attribute.Bool("enable_ebpf", c.config.EnableEBPF),
+		attribute.String("observer_name", c.config.Name),
+	)
 
 	// Check if we're in mock mode
 	if c.mockMode {
@@ -144,6 +217,7 @@ func (c *Observer) Start(ctx context.Context) error {
 			c.generateMockEvents()
 		})
 		c.BaseObserver.SetHealthy(true)
+		span.SetStatus(codes.Ok, "Started in mock mode")
 		return nil
 	}
 
@@ -151,7 +225,11 @@ func (c *Observer) Start(ctx context.Context) error {
 	if c.config.EnableEBPF {
 		if err := c.startEBPF(); err != nil {
 			c.BaseObserver.RecordError(err)
-			span.SetAttributes(attribute.String("error", "ebpf_start_failed"))
+			c.errorsTotal.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_type", "ebpf_start_failed"),
+			))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Failed to start eBPF")
 			return fmt.Errorf("failed to start eBPF: %w", err)
 		}
 
@@ -163,12 +241,15 @@ func (c *Observer) Start(ctx context.Context) error {
 
 	c.BaseObserver.SetHealthy(true)
 	c.logger.Info("Kernel observer started successfully")
-	span.SetAttributes(attribute.Bool("success", true))
+	span.SetStatus(codes.Ok, "Started successfully")
 	return nil
 }
 
 // Stop stops the observer
 func (c *Observer) Stop() error {
+	_, span := c.tracer.Start(context.Background(), "kernel.observer.stop")
+	defer span.End()
+
 	c.logger.Info("Stopping kernel observer")
 
 	// First stop the lifecycle manager to signal goroutines to exit
@@ -184,6 +265,7 @@ func (c *Observer) Stop() error {
 	c.BaseObserver.SetHealthy(false)
 
 	c.logger.Info("Kernel observer stopped successfully")
+	span.SetStatus(codes.Ok, "Stopped successfully")
 	return nil
 }
 
@@ -204,6 +286,10 @@ func (c *Observer) Health() *domain.HealthStatus {
 
 // generateMockEvents generates fake kernel events for development/testing
 func (c *Observer) generateMockEvents() {
+	ctx := c.LifecycleManager.Context()
+	_, span := c.tracer.Start(ctx, "kernel.generate_mock_events")
+	defer span.End()
+
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
@@ -280,8 +366,16 @@ func (c *Observer) generateMockEvents() {
 			// Send event using EventChannelManager
 			if c.EventChannelManager.SendEvent(observerEvent) {
 				c.BaseObserver.RecordEvent()
+				c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("event_type", fmt.Sprintf("%d", mockEvent.EventType)),
+					attribute.Bool("mock", true),
+				))
 			} else {
 				c.BaseObserver.RecordDrop()
+				c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("reason", "channel_full"),
+					attribute.Bool("mock", true),
+				))
 			}
 
 			c.logger.Debug("Generated mock kernel event")

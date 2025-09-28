@@ -5,6 +5,7 @@ package kernel
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/yairfalse/tapio/internal/observers/kernel/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
@@ -140,6 +144,10 @@ func (c *Observer) stopEBPF() {
 
 // processEvents reads and processes events from eBPF on Linux
 func (c *Observer) processEvents() {
+	ctx := c.LifecycleManager.Context()
+	_, span := c.tracer.Start(ctx, "kernel.process_events")
+	defer span.End()
+
 	c.mu.RLock()
 	state, ok := c.ebpfState.(*ebpfComponents)
 	c.mu.RUnlock()
@@ -147,6 +155,7 @@ func (c *Observer) processEvents() {
 	if !ok || state == nil {
 		// This can happen during shutdown or if eBPF is not initialized
 		c.logger.Debug("eBPF state not ready for event processing")
+		span.SetStatus(codes.Error, "eBPF state not ready")
 		return
 	}
 
@@ -210,6 +219,13 @@ func (c *Observer) processEvents() {
 
 // handleKernelEvent processes a single kernel event from eBPF
 func (c *Observer) handleKernelEvent(data []byte) error {
+	start := time.Now()
+	ctx := context.Background()
+	_, span := c.tracer.Start(ctx, "kernel.handle_event")
+	defer span.End()
+
+	// Record event size metric
+	c.eventSize.Record(ctx, int64(len(data)))
 	// Accept both 152 bytes (from eBPF) and 160 bytes (Go struct with padding)
 	minSize := 152 // Actual eBPF event size
 	if len(data) < minSize {
@@ -235,18 +251,51 @@ func (c *Observer) handleKernelEvent(data []byte) error {
 	// Convert to domain event - use the existing method from observer.go
 	collectorEvent := c.convertKernelEvent(&event)
 
+	// Update metrics based on event type
+	c.syscallsTracked.Add(ctx, 1)
+	switch event.EventType {
+	case uint32(EventTypeConfigMapAccess):
+		c.configAccesses.Add(ctx, 1)
+	case uint32(EventTypeSecretAccess):
+		c.secretAccesses.Add(ctx, 1)
+	case uint32(EventTypeConfigAccessFailed):
+		c.accessFailures.Add(ctx, 1)
+	}
+
 	// Send event
 	if c.EventChannelManager.SendEvent(collectorEvent) {
 		c.BaseObserver.RecordEvent()
+		c.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("event_type", fmt.Sprintf("%d", event.EventType)),
+			attribute.Uint64("pid", uint64(event.PID)),
+		))
 		c.logger.Debug("Processed kernel event",
 			zap.Uint32("event_type", event.EventType),
 			zap.Uint32("pid", event.PID))
+		span.SetStatus(codes.Ok, "Event processed")
 	} else {
 		c.BaseObserver.RecordDrop()
 		c.BaseObserver.RecordError(fmt.Errorf("dropped kernel event - channel full or validation failed"))
+		c.eventsDropped.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("reason", "channel_full_or_validation_failed"),
+		))
 		c.logger.Error("Dropped kernel event - channel full or validation failed",
 			zap.String("event_id", collectorEvent.EventID))
+		span.RecordError(fmt.Errorf("dropped event"))
+		span.SetStatus(codes.Error, "Event dropped")
 	}
+
+	// Record processing time
+	duration := time.Since(start).Milliseconds()
+	c.processingTime.Record(ctx, float64(duration), metric.WithAttributes(
+		attribute.String("event_type", fmt.Sprintf("%d", event.EventType)),
+	))
+
+	span.SetAttributes(
+		attribute.String("event_id", collectorEvent.EventID),
+		attribute.String("event_type", fmt.Sprintf("%d", event.EventType)),
+		attribute.Int64("processing_time_ms", duration),
+	)
 
 	return nil
 }

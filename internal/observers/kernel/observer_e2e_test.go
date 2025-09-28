@@ -77,19 +77,29 @@ func TestE2EKubernetesConfigWorkflow(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		timeout := time.After(5 * time.Second)
+		timeout := time.After(30 * time.Second) // Extended from 5s to 30s
 		for {
 			select {
 			case event := <-events:
-				t.Logf("Captured E2E event: Type=%s, Source=%s",
-					event.Type, event.Source)
+				t.Logf("[%s] Captured E2E event: Type=%s, Source=%s, EventID=%s",
+					time.Now().Format("15:04:05.000"),
+					event.Type, event.Source, event.EventID)
 
 				if event.EventData.Kernel != nil {
 					capturedEvents = append(capturedEvents, event)
+					t.Logf("[%s] Kernel event details: PID=%d, Command=%s, EventType=%s",
+						time.Now().Format("15:04:05.000"),
+						event.EventData.Kernel.PID,
+						event.EventData.Kernel.Command,
+						event.EventData.Kernel.EventType)
 
 					// Check for error events
 					if event.EventData.Kernel.ReturnCode != 0 {
 						errorEvents = append(errorEvents, event)
+						t.Logf("[%s] ERROR EVENT: ReturnCode=%d, Error=%s",
+							time.Now().Format("15:04:05.000"),
+							event.EventData.Kernel.ReturnCode,
+							event.EventData.Kernel.ErrorMessage)
 					}
 				}
 
@@ -100,45 +110,76 @@ func TestE2EKubernetesConfigWorkflow(t *testing.T) {
 	}()
 
 	// Simulate application workflow
-	t.Log("Simulating Kubernetes config access workflow...")
+	t.Logf("[%s] Starting Kubernetes config access workflow simulation...",
+		time.Now().Format("15:04:05.000"))
 
 	// 1. ConfigMap access (success)
 	configFile := filepath.Join(configMapPath, "application.yaml")
+	t.Logf("[%s] Writing ConfigMap file: %s", time.Now().Format("15:04:05.000"), configFile)
 	err = os.WriteFile(configFile, []byte("app: config"), 0644)
 	require.NoError(t, err)
 
 	// Read config file
+	t.Logf("[%s] Reading ConfigMap file: %s", time.Now().Format("15:04:05.000"), configFile)
 	data, err := os.ReadFile(configFile)
 	require.NoError(t, err)
 	assert.Equal(t, "app: config", string(data))
+	time.Sleep(100 * time.Millisecond) // Give time for event processing
 
 	// 2. Secret access (success)
 	secretFile := filepath.Join(secretPath, "password.txt")
+	t.Logf("[%s] Writing Secret file: %s", time.Now().Format("15:04:05.000"), secretFile)
 	err = os.WriteFile(secretFile, []byte("s3cr3t"), 0600)
 	require.NoError(t, err)
 
 	// Read secret file
+	t.Logf("[%s] Reading Secret file: %s", time.Now().Format("15:04:05.000"), secretFile)
 	data, err = os.ReadFile(secretFile)
 	require.NoError(t, err)
 	assert.Equal(t, "s3cr3t", string(data))
+	time.Sleep(100 * time.Millisecond) // Give time for event processing
 
 	// 3. Failed config access (simulate missing config)
 	nonExistentConfig := filepath.Join(configMapPath, "missing.yaml")
+	t.Logf("[%s] Attempting to read non-existent file: %s", time.Now().Format("15:04:05.000"), nonExistentConfig)
 	_, err = os.ReadFile(nonExistentConfig)
 	assert.Error(t, err) // Should fail
+	t.Logf("[%s] Expected error occurred: %v", time.Now().Format("15:04:05.000"), err)
+	time.Sleep(100 * time.Millisecond) // Give time for event processing
 
 	// 4. Permission denied (simulate secret without permissions)
 	restrictedSecret := filepath.Join(secretPath, "restricted.key")
+	t.Logf("[%s] Writing restricted secret: %s", time.Now().Format("15:04:05.000"), restrictedSecret)
 	err = os.WriteFile(restrictedSecret, []byte("restricted"), 0000)
 	require.NoError(t, err)
 
+	t.Logf("[%s] Attempting to read restricted file: %s", time.Now().Format("15:04:05.000"), restrictedSecret)
 	_, err = os.ReadFile(restrictedSecret)
 	assert.Error(t, err) // Should fail with permission denied
+	t.Logf("[%s] Expected permission error: %v", time.Now().Format("15:04:05.000"), err)
+	time.Sleep(100 * time.Millisecond) // Give time for event processing
+
+	// Add more file operations to generate more events
+	t.Logf("[%s] Generating additional file operations...", time.Now().Format("15:04:05.000"))
+	for i := 0; i < 10; i++ {
+		testFile := filepath.Join(configMapPath, fmt.Sprintf("test-%d.yaml", i))
+		err := os.WriteFile(testFile, []byte(fmt.Sprintf("test: %d", i)), 0644)
+		if err != nil {
+			t.Logf("[%s] Failed to write test file %d: %v", time.Now().Format("15:04:05.000"), i, err)
+		}
+		_, err = os.ReadFile(testFile)
+		if err != nil {
+			t.Logf("[%s] Failed to read test file %d: %v", time.Now().Format("15:04:05.000"), i, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	// Wait for events to be captured
+	t.Logf("[%s] Waiting for event collection to complete...", time.Now().Format("15:04:05.000"))
 	wg.Wait()
 
 	// Verify workflow results
+	t.Logf("[%s] === TEST SUMMARY ===", time.Now().Format("15:04:05.000"))
 	t.Logf("Total events captured: %d", len(capturedEvents))
 	t.Logf("Error events: %d", len(errorEvents))
 
@@ -169,11 +210,27 @@ func TestE2EKubernetesConfigWorkflow(t *testing.T) {
 	// Check observer health
 	health := observer.Health()
 	assert.Equal(t, domain.HealthHealthy, health.Status)
+	t.Logf("[%s] Observer health: %s", time.Now().Format("15:04:05.000"), health.Status)
 
 	// Check statistics
 	stats := observer.Statistics()
-	t.Logf("Observer statistics: Processed=%d, Errors=%d",
-		stats.EventsProcessed, stats.ErrorCount)
+	t.Logf("[%s] Observer statistics:", time.Now().Format("15:04:05.000"))
+	t.Logf("  - Events Processed: %d", stats.EventsProcessed)
+	if droppedStr, ok := stats.CustomMetrics["events_dropped"]; ok {
+		t.Logf("  - Events Dropped: %s", droppedStr)
+	} else {
+		t.Logf("  - Events Dropped: 0")
+	}
+	t.Logf("  - Errors: %d", stats.ErrorCount)
+	t.Logf("  - Uptime: %s", stats.Uptime)
+
+	// Log custom metrics if available
+	if len(stats.CustomMetrics) > 0 {
+		t.Logf("  - Custom Metrics:")
+		for k, v := range stats.CustomMetrics {
+			t.Logf("    %s: %s", k, v)
+		}
+	}
 }
 
 // TestE2EHighVolumeProcessing tests high-volume event processing
@@ -217,14 +274,26 @@ func TestE2EHighVolumeProcessing(t *testing.T) {
 
 	// Event consumer
 	go func() {
-		timeout := time.After(10 * time.Second)
+		timeout := time.After(30 * time.Second) // Extended from 10s to 30s
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case event := <-events:
 				if event != nil {
 					eventCount++
+					if eventCount%100 == 0 {
+						t.Logf("[%s] Processed %d events so far",
+							time.Now().Format("15:04:05.000"), eventCount)
+					}
 				}
+			case <-ticker.C:
+				t.Logf("[%s] Status: %d events captured",
+					time.Now().Format("15:04:05.000"), eventCount)
 			case <-timeout:
+				t.Logf("[%s] Collection timeout reached",
+					time.Now().Format("15:04:05.000"))
 				done <- true
 				return
 			}
@@ -232,12 +301,13 @@ func TestE2EHighVolumeProcessing(t *testing.T) {
 	}()
 
 	// Generate high volume of file operations
-	t.Log("Generating high volume of file operations...")
+	t.Logf("[%s] Starting high volume file operation generation...",
+		time.Now().Format("15:04:05.000"))
 	start := time.Now()
 
 	// Parallel file operations
-	numWorkers := 10
-	numOpsPerWorker := 100
+	numWorkers := 20       // Increased from 10 to 20
+	numOpsPerWorker := 200 // Increased from 100 to 200
 	var wg sync.WaitGroup
 
 	for w := 0; w < numWorkers; w++ {
@@ -264,14 +334,24 @@ func TestE2EHighVolumeProcessing(t *testing.T) {
 
 				// Delete files
 				os.Remove(filename)
+
+				// Log progress for long-running test
+				if i > 0 && i%50 == 0 {
+					t.Logf("[%s] Worker %d: %d/%d operations completed",
+						time.Now().Format("15:04:05.000"), workerID, i, numOpsPerWorker)
+				}
 			}
 		}(w)
 	}
 
 	wg.Wait()
 	elapsed := time.Since(start)
+	t.Logf("[%s] All file operations completed in %v",
+		time.Now().Format("15:04:05.000"), elapsed)
 
 	// Wait for event processing
+	t.Logf("[%s] Waiting for event processing to complete...",
+		time.Now().Format("15:04:05.000"))
 	<-done
 
 	// Calculate statistics
@@ -282,12 +362,15 @@ func TestE2EHighVolumeProcessing(t *testing.T) {
 		}
 	}
 
-	t.Logf("High volume test completed in %v", elapsed)
+	t.Logf("[%s] === HIGH VOLUME TEST SUMMARY ===", time.Now().Format("15:04:05.000"))
+	t.Logf("Test duration: %v", elapsed)
 	t.Logf("Total operations: %d", numWorkers*numOpsPerWorker*4)
 	t.Logf("Events captured: %d", eventCount)
 	t.Logf("Events dropped: %d", dropCount)
-	t.Logf("Observer stats: Processed=%d, Errors=%d",
-		stats.EventsProcessed, stats.ErrorCount)
+	t.Logf("Observer statistics:")
+	t.Logf("  - Processed: %d", stats.EventsProcessed)
+	t.Logf("  - Errors: %d", stats.ErrorCount)
+	t.Logf("  - Uptime: %s", stats.Uptime)
 
 	// Verify observer remained healthy under load
 	health := observer.Health()
@@ -295,8 +378,9 @@ func TestE2EHighVolumeProcessing(t *testing.T) {
 
 	// Check for reasonable event capture (may not capture all due to filtering)
 	if eventCount > 0 {
-		t.Logf("Event capture rate: %.2f%%",
-			float64(eventCount)/float64(numWorkers*numOpsPerWorker*4)*100)
+		captureRate := float64(eventCount) / float64(numWorkers*numOpsPerWorker*4) * 100
+		t.Logf("Event capture rate: %.2f%%", captureRate)
+		t.Logf("Events per second: %.2f", float64(eventCount)/elapsed.Seconds())
 	}
 }
 
@@ -448,9 +532,9 @@ func TestE2EMockModeWorkflow(t *testing.T) {
 	capturedEvents := make([]*domain.CollectorEvent, 0)
 
 	// Collect mock events - mock events are generated every 3 seconds
-	// so we need to wait at least 10 seconds for 3 events
-	timeout := time.After(15 * time.Second)
-	requiredEvents := 2 // Reduced to 2 since generation is every 3 seconds
+	// Extended runtime for better event collection
+	timeout := time.After(30 * time.Second) // Extended from 15s to 30s
+	requiredEvents := 5                     // Increased to collect more events
 
 	for len(capturedEvents) < requiredEvents {
 		select {
