@@ -4,32 +4,24 @@
 package health
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
-// ebpfObjects contains eBPF objects
-type ebpfObjects struct {
-	Programs map[string]*ebpf.Program
-	Maps     map[string]*ebpf.Map
-}
-
-// ebpfStateImpl contains eBPF-specific state
+// ebpfStateImpl contains eBPF-specific state using generated objects
 type ebpfStateImpl struct {
-	objs       *ebpfObjects
+	objs       *healthMonitorObjects
 	links      []link.Link
-	perfReader *perf.Reader
+	ringReader *ringbuf.Reader
 }
 
 // startEBPF initializes and attaches eBPF programs
@@ -39,49 +31,48 @@ func (o *Observer) startEBPF() error {
 		return fmt.Errorf("failed to remove memlock: %w", err)
 	}
 
-	// Load embedded eBPF objects
-	objs, err := o.loadEBPFObjects()
-	if err != nil {
+	// Load pre-compiled eBPF objects using generated bindings
+	objs := &healthMonitorObjects{}
+	if err := loadHealthMonitorObjects(objs, nil); err != nil {
+		var ve *ebpf.VerifierError
+		if errors.As(err, &ve) {
+			o.logger.Error("eBPF verifier error", zap.String("error", ve.Error()))
+		}
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
+	}
+
+	// Configure the health monitoring
+	if err := o.updateEBPFConfig(objs); err != nil {
+		objs.Close()
+		return fmt.Errorf("failed to update config: %w", err)
+	}
+
+	// Create ring buffer reader for health events
+	reader, err := ringbuf.NewReader(objs.HealthEvents)
+	if err != nil {
+		objs.Close()
+		return fmt.Errorf("failed to create ring buffer reader: %w", err)
 	}
 
 	// Create state
 	state := &ebpfStateImpl{
-		objs:  objs,
-		links: make([]link.Link, 0),
+		objs:       objs,
+		links:      make([]link.Link, 0),
+		ringReader: reader,
 	}
 
-	// Create perf event reader for ring buffer
-	eventsMap, ok := objs.Maps["events"]
-	if !ok {
-		return fmt.Errorf("events map not found")
+	// Attach all the syscall tracepoints
+	if err := o.attachTracepoints(state); err != nil {
+		reader.Close()
+		objs.Close()
+		return fmt.Errorf("failed to attach tracepoints: %w", err)
 	}
-
-	reader, err := perf.NewReader(eventsMap, o.config.RingBufferSize)
-	if err != nil {
-		return fmt.Errorf("failed to create perf reader: %w", err)
-	}
-	state.perfReader = reader
-
-	// Attach syscall exit tracepoint
-	exitProg, ok := objs.Programs["trace_syscall_exit"]
-	if !ok {
-		return fmt.Errorf("trace_syscall_exit program not found")
-	}
-
-	exitLink, err := link.Tracepoint("raw_syscalls", "sys_exit", exitProg, nil)
-	if err != nil {
-		return fmt.Errorf("failed to attach sys_exit tracepoint: %w", err)
-	}
-	state.links = append(state.links, exitLink)
 
 	// Store state
 	o.ebpfState = state
 
-	o.logger.Info("eBPF programs attached successfully",
-		zap.Int("programs", len(objs.Programs)),
-		zap.Int("maps", len(objs.Maps)),
-	)
+	o.logger.Info("eBPF health monitor loaded successfully",
+		zap.Int("tracepoints", len(state.links)))
 
 	return nil
 }
@@ -98,36 +89,31 @@ func (o *Observer) stopEBPF() {
 		return
 	}
 
-	// Close perf reader
-	if state.perfReader != nil {
-		state.perfReader.Close()
+	// Close ring buffer reader
+	if state.ringReader != nil {
+		if err := state.ringReader.Close(); err != nil {
+			o.logger.Warn("Failed to close ring buffer reader", zap.Error(err))
+		}
 	}
 
-	// Detach all programs
+	// Detach all tracepoints
 	for _, l := range state.links {
 		if l != nil {
-			l.Close()
+			if err := l.Close(); err != nil {
+				o.logger.Warn("Failed to close link", zap.Error(err))
+			}
 		}
 	}
 
 	// Close eBPF objects
 	if state.objs != nil {
-		for name, prog := range state.objs.Programs {
-			if prog != nil {
-				prog.Close()
-				o.logger.Debug("Closed eBPF program", zap.String("program", name))
-			}
-		}
-		for name, m := range state.objs.Maps {
-			if m != nil {
-				m.Close()
-				o.logger.Debug("Closed eBPF map", zap.String("map", name))
-			}
+		if err := state.objs.Close(); err != nil {
+			o.logger.Warn("Failed to close eBPF objects", zap.Error(err))
 		}
 	}
 
 	o.ebpfState = nil
-	o.logger.Info("eBPF programs detached")
+	o.logger.Info("eBPF health monitor stopped")
 }
 
 // readEvents reads events from the ring buffer
@@ -143,12 +129,12 @@ func (o *Observer) readEvents() {
 		return
 	}
 
-	if state.perfReader == nil {
-		o.logger.Error("No perf reader available")
+	if state.ringReader == nil {
+		o.logger.Error("No ring buffer reader available")
 		return
 	}
 
-	o.logger.Info("Starting event reader loop")
+	o.logger.Info("Starting health event reader loop")
 
 	for {
 		select {
@@ -158,10 +144,10 @@ func (o *Observer) readEvents() {
 		default:
 		}
 
-		record, err := state.perfReader.Read()
+		record, err := state.ringReader.Read()
 		if err != nil {
-			if errors.Is(err, perf.ErrClosed) {
-				o.logger.Info("Perf reader closed")
+			if errors.Is(err, ringbuf.ErrClosed) {
+				o.logger.Info("Ring buffer reader closed")
 				return
 			}
 			// Log error but continue
@@ -176,7 +162,7 @@ func (o *Observer) readEvents() {
 
 		o.consecutiveErrors = 0
 
-		// Parse the event
+		// Parse the raw event from kernel
 		if len(record.RawSample) < int(unsafe.Sizeof(HealthEvent{})) {
 			o.logger.Warn("Received truncated event",
 				zap.Int("size", len(record.RawSample)),
@@ -184,11 +170,9 @@ func (o *Observer) readEvents() {
 			continue
 		}
 
-		var event HealthEvent
-		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
-			o.logger.Error("Failed to decode event", zap.Error(err))
-			continue
-		}
+		// Convert kernel event to Go struct
+		kernelEvent := (*HealthEvent)(unsafe.Pointer(&record.RawSample[0]))
+		event := o.kernelEventToGo(kernelEvent)
 
 		// Filter by category
 		category := getCategoryName(event.Category)
@@ -200,7 +184,7 @@ func (o *Observer) readEvents() {
 		o.updateErrorMetrics(event.ErrorCode)
 
 		// Convert to domain event
-		domainEvent := o.convertToCollectorEvent(&event)
+		domainEvent := o.convertToCollectorEvent(event)
 
 		// Send event
 		if o.EventChannelManager.SendEvent(domainEvent) {
@@ -262,36 +246,100 @@ func (o *Observer) getStatsImpl() (*ObserverStats, error) {
 
 	stats := &ObserverStats{}
 
-	// Get stats from eBPF maps if available
-	if statsMap, ok := state.objs.Maps["error_stats"]; ok {
-		var key uint32
-		var value [8]uint64
-		iter := statsMap.Iterate()
-		for iter.Next(&key, &value) {
-			switch key {
-			case 0: // Total errors
-				stats.TotalErrors = value[0]
-			case 28: // ENOSPC
-				stats.ENOSPCCount = value[0]
-			case 12: // ENOMEM
-				stats.ENOMEMCount = value[0]
-			case 111: // ECONNREFUSED
-				stats.ECONNREFUSEDCount = value[0]
-			case 5: // EIO
-				stats.EIOCount = value[0]
-			}
+	// Count active error tracking entries
+	var key healthMonitorErrorKey
+	var value healthMonitorErrorStats
+	iter := state.objs.ErrorTracking.Iterate()
+	for iter.Next(&key, &value) {
+		stats.TotalErrors += uint64(value.Count)
+
+		// Count specific error types
+		switch key.ErrorCode {
+		case -28: // ENOSPC
+			stats.ENOSPCCount += uint64(value.Count)
+		case -12: // ENOMEM
+			stats.ENOMEMCount += uint64(value.Count)
+		case -111: // ECONNREFUSED
+			stats.ECONNREFUSEDCount += uint64(value.Count)
+		case -5: // EIO
+			stats.EIOCount += uint64(value.Count)
 		}
 	}
 
 	return stats, nil
 }
 
-// loadEBPFObjects loads pre-compiled eBPF objects
-func (o *Observer) loadEBPFObjects() (*ebpfObjects, error) {
-	// This would normally load from embedded bytecode
-	// For now, returning placeholder
-	return &ebpfObjects{
-		Programs: make(map[string]*ebpf.Program),
-		Maps:     make(map[string]*ebpf.Map),
-	}, nil
+// updateEBPFConfig updates the eBPF program configuration
+func (o *Observer) updateEBPFConfig(objs *healthMonitorObjects) error {
+	config := healthMonitorHealthConfig{
+		RateLimitNs:   uint32(o.config.RateLimitMs * 1_000_000), // Convert ms to ns
+		MaxErrorCount: 100,                                      // Max errors before rate limiting
+		EnableFile:    boolToUint8(o.config.EnabledCategories["file"]),
+		EnableNetwork: boolToUint8(o.config.EnabledCategories["network"]),
+		EnableMemory:  boolToUint8(o.config.EnabledCategories["memory"]),
+		EnableProcess: boolToUint8(o.config.EnabledCategories["process"]),
+	}
+
+	key := uint32(0)
+	if err := objs.Config.Put(key, config); err != nil {
+		return fmt.Errorf("failed to update config map: %w", err)
+	}
+
+	return nil
+}
+
+// attachTracepoints attaches all syscall tracepoints
+func (o *Observer) attachTracepoints(state *ebpfStateImpl) error {
+	tracepoints := []struct {
+		name    string
+		group   string
+		program *ebpf.Program
+	}{
+		// Remove sys_exit_open - doesn't exist on this kernel
+		{"sys_exit_openat", "syscalls", state.objs.TraceExitOpenat},
+		{"sys_exit_write", "syscalls", state.objs.TraceExitWrite},
+		{"sys_exit_mmap", "syscalls", state.objs.TraceExitMmap},
+		{"sys_exit_brk", "syscalls", state.objs.TraceExitBrk},
+		{"sys_exit_connect", "syscalls", state.objs.TraceExitConnect},
+		{"sys_exit_bind", "syscalls", state.objs.TraceExitBind},
+		// Remove sys_exit_fork - doesn't exist on this kernel
+		{"sys_exit_clone", "syscalls", state.objs.TraceExitClone},
+	}
+
+	for _, tp := range tracepoints {
+		if tp.program == nil {
+			o.logger.Warn("Program not found, skipping", zap.String("program", tp.name))
+			continue
+		}
+
+		l, err := link.Tracepoint(tp.group, tp.name, tp.program, nil)
+		if err != nil {
+			o.logger.Warn("Failed to attach tracepoint",
+				zap.String("tracepoint", tp.name),
+				zap.Error(err))
+			continue
+		}
+		state.links = append(state.links, l)
+	}
+
+	if len(state.links) == 0 {
+		return fmt.Errorf("no tracepoints attached successfully")
+	}
+
+	return nil
+}
+
+// kernelEventToGo converts kernel health event to Go struct (same as DNS observer pattern)
+func (o *Observer) kernelEventToGo(ke *HealthEvent) *HealthEvent {
+	// For health events, the kernel struct matches Go struct exactly
+	// so we can return it directly
+	return ke
+}
+
+// boolToUint8 converts boolean to uint8 for eBPF config
+func boolToUint8(b bool) uint8 {
+	if b {
+		return 1
+	}
+	return 0
 }
