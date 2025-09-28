@@ -307,8 +307,14 @@ func (ta *TCPAssembler) AddFragment(fragment []byte) (bool, error) {
 	ta.fragments = append(ta.fragments, fragment)
 	ta.received += len(fragment)
 
-	// Simple completion check - in reality would track sequence numbers
-	if len(ta.fragments) > 1 && ta.received >= ta.totalSize {
+	// On first fragment, extract total size from TCP DNS length field
+	if len(ta.fragments) == 1 && len(fragment) >= 2 {
+		// TCP DNS: first 2 bytes are length of DNS message
+		ta.totalSize = int(binary.BigEndian.Uint16(fragment[0:2])) + 2 // +2 for length field itself
+	}
+
+	// Check if we have received all expected data
+	if ta.totalSize > 0 && ta.received >= ta.totalSize {
 		return true, nil
 	}
 	return false, nil

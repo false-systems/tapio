@@ -100,6 +100,9 @@ func (c *Observer) startEBPF() error {
 
 // stopEBPF cleans up eBPF resources on Linux
 func (c *Observer) stopEBPF() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.ebpfState == nil {
 		return
 	}
@@ -112,14 +115,7 @@ func (c *Observer) stopEBPF() {
 
 	c.logger.Debug("Stopping eBPF kernel monitoring")
 
-	// Close reader
-	if state.reader != nil {
-		if err := state.reader.Close(); err != nil {
-			c.logger.Warn("Failed to close ring buffer reader", zap.Error(err))
-		}
-	}
-
-	// Detach links
+	// Detach links first to stop new events
 	for _, l := range state.links {
 		if err := l.Close(); err != nil {
 			c.logger.Warn("Failed to close eBPF link", zap.Error(err))
@@ -131,13 +127,23 @@ func (c *Observer) stopEBPF() {
 		c.logger.Warn("Failed to close eBPF objects", zap.Error(err))
 	}
 
+	// Close reader last after links are detached
+	if state.reader != nil {
+		if err := state.reader.Close(); err != nil {
+			c.logger.Warn("Failed to close ring buffer reader", zap.Error(err))
+		}
+	}
+
 	c.ebpfState = nil
 	c.logger.Info("eBPF kernel monitoring stopped")
 }
 
 // processEvents reads and processes events from eBPF on Linux
 func (c *Observer) processEvents() {
+	c.mu.RLock()
 	state, ok := c.ebpfState.(*ebpfComponents)
+	c.mu.RUnlock()
+
 	if !ok {
 		c.logger.Error("Invalid eBPF state type for event processing")
 		return
@@ -151,10 +157,33 @@ func (c *Observer) processEvents() {
 			c.logger.Debug("Event processing stopped")
 			return
 		default:
+			// Check if state is still valid
+			c.mu.RLock()
+			currentState := c.ebpfState
+			c.mu.RUnlock()
+
+			if currentState == nil {
+				c.logger.Debug("eBPF state cleared, exiting event processing")
+				return
+			}
+
+			// Check if reader is still available before reading
+			if state.reader == nil {
+				c.logger.Debug("Ring buffer reader not available, exiting")
+				return
+			}
+
 			// Read event from ring buffer
 			record, err := state.reader.Read()
 			if err != nil {
 				if err == ringbuf.ErrClosed {
+					c.logger.Debug("Ring buffer closed, exiting event processing")
+					return
+				}
+				// Check for common closure errors
+				if strings.Contains(err.Error(), "file already closed") ||
+					strings.Contains(err.Error(), "closed") {
+					c.logger.Debug("Ring buffer closed during read, exiting")
 					return
 				}
 				c.logger.Warn("Failed to read from ring buffer", zap.Error(err))

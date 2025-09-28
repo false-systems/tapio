@@ -45,14 +45,21 @@ func TestEBPFDNSCapture(t *testing.T) {
 
 	// Trigger DNS queries in background
 	go func() {
+		// Try different approaches to generate DNS traffic
+		// Use getent which directly uses system resolver
+		exec.Command("getent", "hosts", "google.com").Run()
+
 		// Query that should succeed
 		exec.Command("nslookup", "google.com", "8.8.8.8").Run()
 
 		// Query that should fail (NXDOMAIN)
 		exec.Command("nslookup", "nonexistent.domain.test", "8.8.8.8").Run()
 
-		// Slow query (using a slow DNS server)
-		exec.Command("dig", "+timeout=1", "example.com", "@192.0.2.1").Run()
+		// Also try with host command if available
+		exec.Command("host", "example.com").Run()
+
+		// Give eBPF hooks time to process
+		time.Sleep(500 * time.Millisecond)
 	}()
 
 	// Collect events

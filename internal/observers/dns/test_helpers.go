@@ -99,8 +99,8 @@ func buildDNSResponse(domain string, qtype uint16, id uint16, rcode uint8, answe
 }
 
 // buildTCPDNSQuery builds a TCP DNS query with length prefix
-func buildTCPDNSQuery(domain string, qtype uint16, id uint16) []byte {
-	udpPacket := buildDNSQuery(domain, qtype, id, false)
+func buildTCPDNSQuery(domain string, qtype uint16, id uint16, isResponse bool) []byte {
+	udpPacket := buildDNSQuery(domain, qtype, id, isResponse)
 
 	// Add TCP length prefix
 	tcpPacket := make([]byte, 2+len(udpPacket))
@@ -231,4 +231,17 @@ func splitDomain(domain string) []string {
 		domain = domain[:len(domain)-1]
 	}
 	return strings.Split(domain, ".")
+}
+
+// buildTCPDNSResponse builds a TCP DNS response with length prefix
+func buildTCPDNSResponse(domain string, qtype uint16, id uint16, rcode uint8, answers []string) []byte {
+	// Build UDP packet first
+	udpPacket := buildDNSResponse(domain, qtype, id, rcode, answers)
+
+	// Add TCP length prefix (2 bytes)
+	tcpPacket := make([]byte, 2+len(udpPacket))
+	binary.BigEndian.PutUint16(tcpPacket[0:2], uint16(len(udpPacket)))
+	copy(tcpPacket[2:], udpPacket)
+
+	return tcpPacket
 }

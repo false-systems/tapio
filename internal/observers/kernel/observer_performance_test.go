@@ -163,7 +163,11 @@ func BenchmarkConcurrentEventSending(b *testing.B) {
 
 	stats := observer.Statistics()
 	b.ReportMetric(float64(stats.EventsProcessed), "processed")
-	b.ReportMetric(float64(stats.ErrorCount), "errors")
+	var drops int64
+	if droppedStr, ok := stats.CustomMetrics["events_dropped"]; ok {
+		drops, _ = strconv.ParseInt(droppedStr, 10, 64)
+	}
+	b.ReportMetric(float64(drops), "dropped")
 	b.ReportAllocs()
 }
 
@@ -338,7 +342,11 @@ func TestPerformanceUnderLoad(t *testing.T) {
 	t.Logf("Performance test results:")
 	t.Logf("  Duration: %v", testDuration)
 	t.Logf("  Events processed: %d", processed)
-	t.Logf("  Event errors: %d", stats.ErrorCount)
+	var drops int64
+	if droppedStr, ok := stats.CustomMetrics["events_dropped"]; ok {
+		drops, _ = strconv.ParseInt(droppedStr, 10, 64)
+	}
+	t.Logf("  Events dropped: %d", drops)
 	t.Logf("  Throughput: %.2f events/sec", float64(processed)/testDuration.Seconds())
 
 	// Calculate processing time statistics
@@ -441,7 +449,11 @@ func TestPerformanceWithFileOperations(t *testing.T) {
 	t.Logf("  Duration: %v", elapsed)
 	t.Logf("  Ops/sec: %.2f", opsPerSec)
 	t.Logf("  Events captured: %d", stats.EventsProcessed)
-	t.Logf("  Event errors: %d", stats.ErrorCount)
+	var drops int64
+	if droppedStr, ok := stats.CustomMetrics["events_dropped"]; ok {
+		drops, _ = strconv.ParseInt(droppedStr, 10, 64)
+	}
+	t.Logf("  Events dropped: %d", drops)
 	t.Logf("  Capture rate: %.2f%%",
 		float64(stats.EventsProcessed)/float64(numOperations*3)*100)
 

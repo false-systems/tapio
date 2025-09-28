@@ -207,8 +207,9 @@ func (p *DNSeBPFProgram) GetStats() (*DNSStats, error) {
 
 	// Count active queries
 	var key dnsQueryKey
+	var val dnsQueryValue
 	iter := p.objs.ActiveQueries.Iterate()
-	for iter.Next(&key, nil) {
+	for iter.Next(&key, &val) {
 		stats.ActiveQueries++
 	}
 

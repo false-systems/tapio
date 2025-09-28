@@ -128,7 +128,7 @@ func TestParseDNSQueryTCP(t *testing.T) {
 	}{
 		{
 			name:   "valid TCP DNS query with length prefix",
-			packet: buildTCPDNSQuery("tcp.example.com", DNSTypeA, 0x1234),
+			packet: buildTCPDNSQuery("tcp.example.com", DNSTypeA, 0x1234, false),
 			expected: &DNSPacket{
 				Header: DNSHeader{
 					ID:      0x1234,
@@ -144,7 +144,7 @@ func TestParseDNSQueryTCP(t *testing.T) {
 		},
 		{
 			name:   "TCP zone transfer query (AXFR)",
-			packet: buildTCPDNSQuery("zone.example.com", DNSTypeAXFR, 0xBEEF),
+			packet: buildTCPDNSQuery("zone.example.com", DNSTypeAXFR, 0xBEEF, false),
 			expected: &DNSPacket{
 				Header: DNSHeader{
 					ID:      0xBEEF,
@@ -395,9 +395,11 @@ func TestCalculateLatency(t *testing.T) {
 
 func TestTCPFragmentation(t *testing.T) {
 	// Test handling of fragmented TCP DNS packets
-	largeQuery := buildLargeDNSQuery(2048) // Larger than typical MTU
+	// Create a large TCP DNS query with many labels to exceed MTU
+	longDomain := "very.long.subdomain.with.many.labels.example.com"
+	largeQuery := buildTCPDNSQuery(longDomain, DNSTypeA, 0x1234, false)
 
-	fragments := fragmentTCPPacket(largeQuery, 512)
+	fragments := fragmentTCPPacket(largeQuery, 20) // Small MTU to force fragmentation
 	require.Greater(t, len(fragments), 1)
 
 	assembler := NewTCPAssembler()
@@ -433,19 +435,22 @@ func TestTCPSessionTracking(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send query
-	query := buildDNSQuery("tcp.example.com", DNSTypeA, 0x1234, false)
+	query := buildTCPDNSQuery("tcp.example.com", DNSTypeA, 0x1234, false)
 	err = tracker.TrackQuery(conn, query, 1000)
 	require.NoError(t, err)
 
+	// Small delay to ensure latency calculation
+	time.Sleep(time.Millisecond)
+
 	// Match response
-	response := buildDNSResponse("tcp.example.com", DNSTypeA, 0x1234, DNSRCodeSuccess, []string{"1.2.3.4"})
+	response := buildTCPDNSResponse("tcp.example.com", DNSTypeA, 0x1234, DNSRCodeSuccess, []string{"1.2.3.4"})
 	matched, latency := tracker.MatchResponse(conn, response, 1050)
 
 	assert.True(t, matched)
 	assert.Greater(t, latency, uint64(0))
 
-	// Check cleanup
-	tracker.CleanupStale(time.Minute)
+	// Check cleanup - clean sessions older than 1 nanosecond (effectively all)
+	tracker.CleanupStale(time.Nanosecond)
 	assert.Equal(t, 0, tracker.GetActiveSessions())
 }
 

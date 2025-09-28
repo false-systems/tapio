@@ -30,7 +30,7 @@ func TestNegativeInvalidConfiguration(t *testing.T) {
 				BufferSize: -1,
 				EnableEBPF: false,
 			},
-			wantError: false, // Should use default or 0
+			wantError: false, // Should handle gracefully and use 0 or default
 		},
 		{
 			name: "extremely large buffer size",

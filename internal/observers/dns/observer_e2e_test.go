@@ -229,7 +229,7 @@ func TestE2E_RateLimiting(t *testing.T) {
 		eventsGenerated, stats.TotalProblems, elapsed, expectedMax)
 
 	// Stats should reflect rate limiting in action
-	assert.Greater(t, stats.TotalProblems, int64(0))
+	assert.Greater(t, int(stats.TotalProblems), 0)
 }
 
 func TestE2E_RepeatProblemDetection(t *testing.T) {

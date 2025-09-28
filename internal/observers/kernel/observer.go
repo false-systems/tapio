@@ -40,6 +40,16 @@ func NewObserver(name string, cfg *Config) (*Observer, error) {
 		cfg = NewDefaultConfig(name)
 	}
 
+	// Ensure buffer size is valid (non-negative and reasonable)
+	if cfg.BufferSize < 0 {
+		cfg.BufferSize = 0
+	}
+	// Cap buffer size to prevent allocation errors
+	const maxBufferSize = 1000000 // 1 million events max
+	if cfg.BufferSize > maxBufferSize {
+		cfg.BufferSize = maxBufferSize
+	}
+
 	// Create logger
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -161,13 +171,13 @@ func (c *Observer) Start(ctx context.Context) error {
 func (c *Observer) Stop() error {
 	c.logger.Info("Stopping kernel observer")
 
-	// Stop eBPF if running
-	c.stopEBPF()
-
-	// Shutdown lifecycle manager
+	// First stop the lifecycle manager to signal goroutines to exit
 	if err := c.LifecycleManager.Stop(5 * time.Second); err != nil {
 		c.logger.Warn("Timeout during shutdown", zap.Error(err))
 	}
+
+	// Then stop eBPF after goroutines have exited
+	c.stopEBPF()
 
 	// Close event channel
 	c.EventChannelManager.Close()
