@@ -6,22 +6,17 @@ package dns
 import (
 	"bytes"
 	_ "embed"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
-	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"go.uber.org/zap"
 )
-
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -Wall -Werror" dnsMonitor ./bpf/dns_monitor.c
 
 // DNSeBPFProgram manages the eBPF DNS monitoring program
 type DNSeBPFProgram struct {
@@ -87,39 +82,45 @@ func (p *DNSeBPFProgram) Load() error {
 
 // Attach attaches the eBPF programs to their hooks
 func (p *DNSeBPFProgram) Attach() error {
-	// Attach UDP DNS monitoring
-	udpSendLink, err := link.KprobeMulti(&link.KprobeMultiOptions{
-		Symbols: []string{"udp_sendmsg"},
-		Program: p.objs.TraceUdpSendmsg,
-	})
+	// Attach tracepoint for connect() syscall (TCP DNS)
+	connectLink, err := link.Tracepoint("syscalls", "sys_exit_connect", p.objs.TraceConnectExit, nil)
 	if err != nil {
-		return fmt.Errorf("failed to attach UDP send: %w", err)
+		return fmt.Errorf("failed to attach connect tracepoint: %w", err)
 	}
-	p.links = append(p.links, udpSendLink)
+	p.links = append(p.links, connectLink)
 
-	udpRecvLink, err := link.KprobeMulti(&link.KprobeMultiOptions{
-		Symbols: []string{"udp_recvmsg"},
-		Program: p.objs.TraceUdpRecvmsg,
-	})
+	// Attach tracepoint for sendto() syscall (UDP DNS queries)
+	sendtoLink, err := link.Tracepoint("syscalls", "sys_enter_sendto", p.objs.TraceSendtoEnter, nil)
 	if err != nil {
-		return fmt.Errorf("failed to attach UDP recv: %w", err)
+		return fmt.Errorf("failed to attach sendto tracepoint: %w", err)
 	}
-	p.links = append(p.links, udpRecvLink)
+	p.links = append(p.links, sendtoLink)
 
-	// Attach TCP DNS monitoring if enabled
-	if p.enableTCP {
-		tcpLink, err := link.Kprobe("tcp_connect", p.objs.TraceTcpConnect, nil)
-		if err != nil {
-			// TCP is optional, just log warning
-			p.logger.Warn("Failed to attach TCP DNS monitoring", zap.Error(err))
-		} else {
-			p.links = append(p.links, tcpLink)
-		}
+	// Attach tracepoint for recvfrom() syscall (DNS responses)
+	recvfromLink, err := link.Tracepoint("syscalls", "sys_exit_recvfrom", p.objs.TraceRecvfromExit, nil)
+	if err != nil {
+		return fmt.Errorf("failed to attach recvfrom tracepoint: %w", err)
+	}
+	p.links = append(p.links, recvfromLink)
+
+	// Attach poll timeout tracepoint for timeout detection
+	pollLink, err := link.Tracepoint("syscalls", "sys_exit_poll", p.objs.TracePollTimeout, nil)
+	if err != nil {
+		p.logger.Warn("Failed to attach poll tracepoint", zap.Error(err))
+	} else {
+		p.links = append(p.links, pollLink)
 	}
 
-	p.logger.Info("eBPF programs attached",
-		zap.Int("num_hooks", len(p.links)),
-		zap.Bool("tcp_enabled", p.enableTCP))
+	// Attach cleanup tracepoint
+	cleanupLink, err := link.Tracepoint("syscalls", "sys_enter_nanosleep", p.objs.TraceCleanup, nil)
+	if err != nil {
+		p.logger.Warn("Failed to attach cleanup tracepoint", zap.Error(err))
+	} else {
+		p.links = append(p.links, cleanupLink)
+	}
+
+	p.logger.Info("eBPF tracepoints attached",
+		zap.Int("num_hooks", len(p.links)))
 
 	return nil
 }
@@ -247,11 +248,12 @@ func (p *DNSeBPFProgram) Close() error {
 // updateConfig updates the eBPF program configuration
 func (p *DNSeBPFProgram) updateConfig() error {
 	config := dnsConfig{
-		SlowThresholdNs: uint64(p.slowThresholdMs * 1_000_000),
-		TimeoutNs:       uint64(p.timeoutThresholdMs * 1_000_000),
-		CoreDNSPort:     p.coreDNSPort,
-		EnableTCP:       1,
-		EnableK8s:       1,
+		SlowThresholdNs:    uint64(p.slowThresholdMs * 1_000_000),
+		TimeoutThresholdNs: uint64(p.timeoutThresholdMs * 1_000_000),
+		CoreDNSPort:        p.coreDNSPort,
+		EnableTCP:          1,
+		EnableK8s:          1,
+		RateLimitPerSec:    10, // 10 events per second per PID
 	}
 
 	if !p.enableTCP {
@@ -275,82 +277,72 @@ func (p *DNSeBPFProgram) kernelEventToGo(ke *kernelDNSEvent) *DNSEvent {
 		TID:          ke.TID,
 		UID:          ke.UID,
 		GID:          ke.GID,
+		QueryType:    ke.QueryType,
+		SrcPort:      ke.SrcPort,
+		DstPort:      ke.DstPort,
 		ProblemType:  DNSProblemType(ke.ProblemType),
 		ResponseCode: ke.ResponseCode,
-		Retries:      ke.Retries,
+		Retries:      uint8(ke.Retries),
 	}
 
-	// Convert byte arrays to strings
-	event.QueryName = bytesToString(ke.QueryName[:])
-	event.Comm = bytesToString(ke.Comm[:])
-
-	// Parse server IP
-	if ke.ServerIP[0] != 0 {
-		// Simplified - check if IPv4 or IPv6
-		if ke.ServerIP[12] == 0 && ke.ServerIP[13] == 0 &&
-			ke.ServerIP[14] == 0 && ke.ServerIP[15] == 0 {
-			// IPv4
-			event.ServerIP = ke.ServerIP[0:4]
-		} else {
-			// IPv6
-			event.ServerIP = ke.ServerIP[:]
-		}
-	}
+	// Convert byte arrays
+	copy(event.QueryName[:], ke.QueryName[:])
+	copy(event.Comm[:], ke.Comm[:])
+	copy(event.ServerIP[:], ke.ServerIP[:])
 
 	return event
 }
 
 // bytesToString converts null-terminated byte array to string
-func bytesToString(b []byte) [253]byte {
-	var result [253]byte
+func bytesToString(b []byte) string {
 	for i, v := range b {
-		if v == 0 || i >= 253 {
-			break
+		if v == 0 {
+			return string(b[:i])
 		}
-		result[i] = v
 	}
-	return result
+	return string(b)
 }
 
 // Kernel structures (must match C definitions)
 type kernelDNSEvent struct {
-	TimestampNs     uint64
-	LatencyNs       uint64
-	PID             uint32
-	TID             uint32
-	QueryID         uint16
-	QueryType       uint16
-	ProblemType     uint8
-	ResponseCode    uint8
-	QueryName       [253]byte
-	ServerIP        [16]byte
-	Comm            [16]byte
-	Protocol        uint8
-	IsCoreDNS       uint8
-	TCPFlags        uint16
-	K8sService      [128]byte
-	K8sNamespace    [64]byte
-	CorednsCacheHit uint32
-	UID             uint32
-	GID             uint32
-	Retries         uint8
-	_               [3]byte // Padding
+	TimestampNs  uint64
+	LatencyNs    uint64
+	PID          uint32
+	TID          uint32
+	UID          uint32
+	GID          uint32
+	QueryID      uint16
+	QueryType    uint16
+	SrcPort      uint16
+	DstPort      uint16
+	ProblemType  uint8
+	ResponseCode uint8
+	Protocol     uint8
+	IsCoreDNS    uint8
+	QueryName    [253]byte
+	ServerIP     [16]byte
+	Comm         [16]byte
+	K8sService   [64]byte
+	K8sNamespace [32]byte
+	Retries      uint32
+	_            [4]byte // Padding
 }
 
 type dnsQueryKey struct {
 	PID      uint32
+	TID      uint32
 	QueryID  uint16
 	Protocol uint8
 	_        uint8 // Padding
 }
 
 type dnsConfig struct {
-	SlowThresholdNs uint64
-	TimeoutNs       uint64
-	CoreDNSPort     uint16
-	EnableTCP       uint8
-	EnableK8s       uint8
-	_               [4]byte // Padding
+	SlowThresholdNs    uint64
+	TimeoutThresholdNs uint64
+	CoreDNSPort        uint16
+	EnableTCP          uint8
+	EnableK8s          uint8
+	RateLimitPerSec    uint32
 }
 
 // DNSStats holds DNS monitoring statistics
@@ -373,8 +365,8 @@ func CheckKernelSupport() error {
 		return fmt.Errorf("failed to read kernel version: %w", err)
 	}
 
-	version := string(bytes.TrimSpace(data))
-	p.logger.Info("Kernel version", zap.String("version", version))
+	// Version available but we just check, not log
+	_ = string(bytes.TrimSpace(data))
 
 	// Try to remove memlock (requires CAP_SYS_ADMIN)
 	if err := rlimit.RemoveMemlock(); err != nil {

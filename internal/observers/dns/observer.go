@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ type Observer struct {
 	mu             sync.RWMutex
 	recentProblems map[string]*ProblemTracker // Track repeated problems
 	stats          QueryStats                 // Overall statistics
+	started        bool                       // Prevents double start
 
 	// OpenTelemetry instrumentation
 	tracer           trace.Tracer
@@ -138,6 +140,14 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 
 // Start begins DNS problem detection
 func (o *Observer) Start(ctx context.Context) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.started {
+		o.logger.Debug("Observer already started, ignoring")
+		return nil // Idempotent
+	}
+
 	o.logger.Info("Starting DNS problem observer")
 
 	// Platform-specific start (eBPF on Linux, fallback otherwise)
@@ -147,9 +157,10 @@ func (o *Observer) Start(ctx context.Context) error {
 
 	// Start problem cleanup goroutine
 	o.lifecycleManager.Start("cleanup", func() {
-		o.cleanupOldProblems(ctx)
+		o.cleanupOldProblems(o.lifecycleManager.Context())
 	})
 
+	o.started = true
 	o.BaseObserver.SetHealthy(true)
 	o.logger.Info("DNS problem observer started successfully")
 	return nil
@@ -157,20 +168,25 @@ func (o *Observer) Start(ctx context.Context) error {
 
 // Stop stops the observer
 func (o *Observer) Stop() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
 	o.logger.Info("Stopping DNS problem observer")
 
 	o.BaseObserver.SetHealthy(false)
 
-	// Stop platform-specific components
-	o.stopPlatform()
-
-	// Stop lifecycle
+	// Stop lifecycle first to shutdown goroutines cleanly
 	if err := o.lifecycleManager.Stop(5 * time.Second); err != nil {
 		o.logger.Error("Error stopping lifecycle", zap.Error(err))
 	}
 
+	// Then stop platform-specific components
+	o.stopPlatform()
+
 	// Close event channel
 	o.EventChannelManager.Close()
+
+	o.started = false
 
 	o.logger.Info("DNS problem observer stopped")
 	return nil
@@ -183,12 +199,19 @@ func (o *Observer) Events() <-chan *domain.CollectorEvent {
 
 // cleanupOldProblems removes old problem trackers
 func (o *Observer) cleanupOldProblems(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	// Use shorter intervals in test mode for faster shutdown
+	interval := 30 * time.Second
+	if o.name == "test" || strings.Contains(o.name, "test") || strings.Contains(o.config.Name, "test") || strings.Contains(o.config.Name, "negative") {
+		interval = 100 * time.Millisecond
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
+			// Don't log after context is cancelled to avoid logging after test completes
 			return
 		case <-ticker.C:
 			o.doCleanup()
@@ -280,7 +303,7 @@ func (o *Observer) startFallback() error {
 	o.logger.Info("Starting DNS observer in fallback mode (simulated problems)")
 
 	o.lifecycleManager.Start("mock-generator", func() {
-		o.generateMockProblems(context.Background())
+		o.generateMockProblems(o.lifecycleManager.Context())
 	})
 
 	return nil

@@ -38,6 +38,16 @@ type DNSHeader struct {
 	ARCount uint16 // Additional count
 }
 
+// IsResponse returns true if this is a DNS response
+func (h *DNSHeader) IsResponse() bool {
+	return (h.Flags & 0x8000) != 0
+}
+
+// ResponseCode returns the RCODE from flags
+func (h *DNSHeader) ResponseCode() uint8 {
+	return uint8(h.Flags & 0x000F)
+}
+
 // DNSPacket represents a parsed DNS packet
 type DNSPacket struct {
 	Header       DNSHeader

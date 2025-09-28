@@ -184,11 +184,8 @@ func (c *Observer) handleKernelEvent(data []byte) error {
 		return fmt.Errorf("failed to parse kernel event: %w", err)
 	}
 
-	// Convert to domain event
-	collectorEvent, err := c.convertKernelEvent(&event)
-	if err != nil {
-		return fmt.Errorf("failed to convert kernel event: %w", err)
-	}
+	// Convert to domain event - use the existing method from observer.go
+	collectorEvent := c.convertKernelEvent(&event)
 
 	// Send event
 	if c.EventChannelManager.SendEvent(collectorEvent) {
@@ -204,8 +201,8 @@ func (c *Observer) handleKernelEvent(data []byte) error {
 	return nil
 }
 
-// convertKernelEvent converts a KernelEvent to domain.CollectorEvent
-func (c *Observer) convertKernelEvent(event *KernelEvent) (*domain.CollectorEvent, error) {
+// convertKernelEventEBPF converts a KernelEvent to domain.CollectorEvent with extended info from eBPF
+func (c *Observer) convertKernelEventEBPF(event *KernelEvent) (*domain.CollectorEvent, error) {
 	// Extract command string
 	comm := strings.TrimRight(string(event.Comm[:]), "\x00")
 	podUID := strings.TrimRight(string(event.PodUID[:]), "\x00")
@@ -250,7 +247,7 @@ func (c *Observer) convertKernelEvent(event *KernelEvent) (*domain.CollectorEven
 				GID:          0, // Not available in kernel events
 				Command:      comm,
 				CgroupID:     event.CgroupID,
-				ErrorMessage: c.getErrorDescription(configInfo.ErrorCode),
+				ErrorMessage: c.getErrorDescriptionEBPF(configInfo.ErrorCode),
 			},
 		},
 
@@ -291,8 +288,8 @@ func (c *Observer) mapEventSeverity(eventType uint32, errorCode int32) domain.Ev
 	}
 }
 
-// getErrorDescription returns a human-readable error description
-func (c *Observer) getErrorDescription(errorCode int32) string {
+// getErrorDescriptionEBPF returns a human-readable error description from eBPF
+func (c *Observer) getErrorDescriptionEBPF(errorCode int32) string {
 	switch errorCode {
 	case 0:
 		return ""

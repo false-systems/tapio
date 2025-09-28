@@ -87,13 +87,13 @@ func (e *DNSEvent) GetComm() string {
 }
 
 // GetLatencyMs returns latency in milliseconds
-func (e *DNSEvent) GetLatencyMs() float64 {
-	return float64(e.LatencyNs) / 1_000_000.0
+func (e *DNSEvent) GetLatencyMs() int64 {
+	return int64(e.LatencyNs / 1_000_000)
 }
 
 // IsSlow checks if the query was slow based on threshold
 func (e *DNSEvent) IsSlow(thresholdMs float64) bool {
-	return e.GetLatencyMs() > thresholdMs
+	return float64(e.GetLatencyMs()) > thresholdMs
 }
 
 // IsTimeout checks if this was a timeout

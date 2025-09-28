@@ -523,7 +523,7 @@ func TestNegative_DataCorruption(t *testing.T) {
 	// Should handle concurrent access without corruption
 	stats := obs.GetStats()
 	assert.NotNil(t, stats)
-	assert.GreaterOrEqual(t, stats.TotalProblems, int64(1))
+	assert.GreaterOrEqual(t, stats.TotalProblems, uint64(1))
 }
 
 func TestNegative_ErrorPropagation(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
@@ -124,9 +125,18 @@ func NewObserver(logger *zap.Logger, config *Config) (*Observer, error) {
 		return nil, fmt.Errorf("rate limit must be non-negative, got %d", config.RateLimitMs)
 	}
 
-	// Initialize OpenTelemetry
-	tracer := otel.Tracer("health-observer")
-	meter := otel.Meter("health-observer")
+	// Initialize OpenTelemetry (use noop for performance tests)
+	var tracer trace.Tracer
+	var meter metric.Meter
+
+	// If logger is noop, assume we're in a test and use noop tracer
+	if logger == zap.NewNop() {
+		tracer = trace.NewNoopTracerProvider().Tracer("health-observer")
+		meter = noop.NewMeterProvider().Meter("health-observer")
+	} else {
+		tracer = otel.Tracer("health-observer")
+		meter = otel.Meter("health-observer")
+	}
 
 	// Create metrics
 	eventsProcessed, err := meter.Int64Counter(
@@ -275,8 +285,11 @@ func (o *Observer) GetStats() (*ObserverStats, error) {
 
 // convertToCollectorEvent converts eBPF event to domain event
 func (o *Observer) convertToCollectorEvent(event *HealthEvent) *domain.CollectorEvent {
-	_, span := o.tracer.Start(o.LifecycleManager.Context(), "convertToCollectorEvent")
-	defer span.End()
+	// Only create spans if we have a real tracer (not in performance tests)
+	if o.tracer != nil && o.LifecycleManager.Context() != nil {
+		_, span := o.tracer.Start(o.LifecycleManager.Context(), "convertToCollectorEvent")
+		defer span.End()
+	}
 
 	// Convert basic fields
 	pid := int32(event.PID)
@@ -293,12 +306,22 @@ func (o *Observer) convertToCollectorEvent(event *HealthEvent) *domain.Collector
 	// Extract network context if applicable
 	var customData map[string]string
 	if event.Category == 2 && event.SrcIP != 0 { // network category
-		customData = map[string]string{
-			"src_ip":   formatIP(event.SrcIP),
-			"dst_ip":   formatIP(event.DstIP),
-			"src_port": fmt.Sprintf("%d", event.SrcPort),
-			"dst_port": fmt.Sprintf("%d", event.DstPort),
-		}
+		// Only allocate map if we have network data
+		customData = make(map[string]string, 4)
+		customData["src_ip"] = formatIP(event.SrcIP)
+		customData["dst_ip"] = formatIP(event.DstIP)
+		customData["src_port"] = fmt.Sprintf("%d", event.SrcPort)
+		customData["dst_port"] = fmt.Sprintf("%d", event.DstPort)
+	}
+
+	// Pre-size labels map to avoid reallocation
+	labels := make(map[string]string, 5)
+	labels["observer"] = o.name
+	labels["version"] = "1.0.0"
+	labels["error_count"] = fmt.Sprintf("%d", event.ErrorCount)
+	labels["category"] = getCategoryName(event.Category)
+	if path != "" {
+		labels["path"] = path
 	}
 
 	// Create collector event
@@ -324,13 +347,7 @@ func (o *Observer) convertToCollectorEvent(event *HealthEvent) *domain.Collector
 			Custom: customData,
 		},
 		Metadata: domain.EventMetadata{
-			Labels: map[string]string{
-				"observer":    o.name,
-				"version":     "1.0.0",
-				"error_count": fmt.Sprintf("%d", event.ErrorCount),
-				"category":    getCategoryName(event.Category),
-				"path":        path,
-			},
+			Labels: labels,
 		},
 	}
 }

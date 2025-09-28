@@ -2,6 +2,7 @@ package dns
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -155,28 +156,30 @@ func (d *K8sServiceDetector) Detect(queryName string) (K8sServiceInfo, bool) {
 	if strings.HasSuffix(queryName, ".cluster.local") {
 		parts := strings.Split(queryName, ".")
 
+		// Check for SRV records: _http._tcp.service.namespace.svc.cluster.local
+		if len(parts) >= 6 && parts[4] == "svc" && strings.HasPrefix(parts[0], "_") && strings.HasPrefix(parts[1], "_") {
+			info.Port = strings.TrimPrefix(parts[0], "_")
+			info.Protocol = strings.TrimPrefix(parts[1], "_")
+			info.Service = parts[2]
+			info.Namespace = parts[3]
+			info.Type = "svc"
+			return info, true
+		}
+
+		// Check for StatefulSet pods: pod-0.service.namespace.svc.cluster.local
+		if len(parts) >= 6 && parts[3] == "svc" && strings.Contains(parts[0], "-") {
+			info.PodName = parts[0]
+			info.Service = parts[1]
+			info.Namespace = parts[2]
+			info.Type = "svc"
+			return info, true
+		}
+
 		// Standard service: service.namespace.svc.cluster.local
 		if len(parts) >= 5 && parts[2] == "svc" {
 			info.Service = parts[0]
 			info.Namespace = parts[1]
 			info.Type = "svc"
-
-			// Check for port/protocol prefix (_http._tcp.service...)
-			if strings.HasPrefix(parts[0], "_") {
-				subparts := strings.Split(parts[0], ".")
-				if len(subparts) >= 3 {
-					info.Port = strings.TrimPrefix(subparts[0], "_")
-					info.Protocol = strings.TrimPrefix(subparts[1], "_")
-					info.Service = strings.Join(subparts[2:], ".")
-				}
-			}
-
-			// Check for StatefulSet pod (pod-0.service.namespace.svc.cluster.local)
-			if strings.Contains(parts[0], "-") && len(parts) >= 6 {
-				info.PodName = parts[0]
-				info.Service = parts[1]
-				info.Namespace = parts[2]
-			}
 
 			// Check if system service
 			if info.Service == "kubernetes" || info.Namespace == "kube-system" {
@@ -563,9 +566,21 @@ func (zt *CoreDNSZoneTransfer) SetAllowedNetworks(networks []string) {
 
 // IsAllowed checks if an IP is allowed to do zone transfers
 func (zt *CoreDNSZoneTransfer) IsAllowed(ip string) bool {
-	// Simple check - in reality would do CIDR matching
+	if len(zt.allowedNetworks) == 0 {
+		return false
+	}
+
+	clientIP := net.ParseIP(ip)
+	if clientIP == nil {
+		return false
+	}
+
 	for _, network := range zt.allowedNetworks {
-		if strings.HasPrefix(ip, strings.Split(network, "/")[0]) {
+		_, cidr, err := net.ParseCIDR(network)
+		if err != nil {
+			continue
+		}
+		if cidr.Contains(clientIP) {
 			return true
 		}
 	}

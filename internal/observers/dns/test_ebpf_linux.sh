@@ -28,7 +28,13 @@ done
 
 # Build eBPF program
 echo "🔨 Building eBPF program..."
-cd bpf
+
+# Copy source to writable location
+BUILD_DIR="/tmp/dns-ebpf-build"
+mkdir -p $BUILD_DIR
+cp -r bpf/* $BUILD_DIR/
+cd $BUILD_DIR
+
 make clean
 make all
 
@@ -39,10 +45,14 @@ if [ ! -f dns_monitor.o ]; then
 fi
 
 echo "✅ eBPF program built successfully"
+ls -la dns_monitor.o
+
+# Copy the built object back (for reference)
+cp dns_monitor.o /tmp/
 
 # Load and test
 echo "🚀 Loading DNS eBPF monitor..."
-cd ..
+cd /workspace/internal/observers/dns
 
 # Run the DNS observer with eBPF
 go test -v -tags=ebpf -run TestEBPFDNSCapture ./... 2>&1 | tee ebpf_test.log

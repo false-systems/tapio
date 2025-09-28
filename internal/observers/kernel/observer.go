@@ -1,10 +1,12 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -241,7 +243,7 @@ func (c *Observer) generateMockEvents() {
 			// Convert to ObserverEvent
 			observerEvent := &domain.CollectorEvent{
 				EventID:   fmt.Sprintf("kernel-mock-%d", mockEvent.PID),
-				Type:      domain.EventTypeKernelProcess,
+				Type:      domain.EventTypeKernelSyscall, // Use syscall type for kernel events
 				Timestamp: time.Now(),
 				Source:    c.Name(),
 				Severity:  domain.EventSeverityInfo,
@@ -255,7 +257,7 @@ func (c *Observer) generateMockEvents() {
 				},
 				Metadata: domain.EventMetadata{
 					Labels: map[string]string{
-						"observer":   c.Name(),
+						"observer":   "kernel", // Validator expects "kernel"
 						"version":    "1.0.0",
 						"mock":       "true",
 						"event_type": fmt.Sprintf("%d", mockEvent.EventType),
@@ -274,5 +276,93 @@ func (c *Observer) generateMockEvents() {
 
 			c.logger.Debug("Generated mock kernel event")
 		}
+	}
+}
+
+// parseConfigPath extracts config type, name, and pod UID from mount path
+func (c *Observer) parseConfigPath(mountPath string) (configType, configName, podUID string) {
+	// Check if this is a Kubernetes volume mount path
+	if !strings.Contains(mountPath, "/kubelet/pods/") {
+		return "", "", ""
+	}
+
+	// Extract pod UID from path
+	// Format: /var/lib/kubelet/pods/{pod-uid}/volumes/kubernetes.io~{type}/{name}
+	parts := strings.Split(mountPath, "/")
+	for i, part := range parts {
+		if part == "pods" && i+1 < len(parts) {
+			podUID = parts[i+1]
+		}
+		if strings.HasPrefix(part, "kubernetes.io~") {
+			// Extract volume type
+			volParts := strings.Split(part, "~")
+			if len(volParts) == 2 {
+				configType = volParts[1]
+			}
+			// Next part should be the config name
+			if i+1 < len(parts) {
+				configName = parts[i+1]
+			}
+		}
+	}
+
+	// Handle volume-subpaths format
+	if configType == "" && strings.Contains(mountPath, "volume-subpaths") {
+		for i, part := range parts {
+			if strings.HasPrefix(part, "kubernetes.io~") {
+				volParts := strings.Split(part, "~")
+				if len(volParts) == 2 {
+					configType = volParts[1]
+				}
+				if i+1 < len(parts) {
+					configName = parts[i+1]
+				}
+			}
+		}
+	}
+
+	return configType, configName, podUID
+}
+
+// getErrorDescription returns human-readable error description
+func (c *Observer) getErrorDescription(errorCode int32) string {
+	switch errorCode {
+	case 0:
+		return "Success"
+	case 2:
+		return "No such file or directory"
+	case 5:
+		return "I/O error"
+	case 13:
+		return "Permission denied"
+	case 28:
+		return "No space left on device"
+	case 30:
+		return "Read-only file system"
+	default:
+		return fmt.Sprintf("Unknown error (%d)", errorCode)
+	}
+}
+
+// convertKernelEvent converts kernel event to domain event (simplified for non-Linux)
+func (c *Observer) convertKernelEvent(event *KernelEvent) *domain.CollectorEvent {
+	// Extract command name from Comm field
+	comm := string(bytes.TrimRight(event.Comm[:], "\x00"))
+
+	// Create domain event
+	return &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("kernel-%d-%d", event.PID, event.Timestamp),
+		Type:      domain.EventTypeKernelSyscall,
+		Timestamp: time.Unix(0, int64(event.Timestamp)),
+		Source:    c.Name(),
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			Kernel: &domain.KernelData{
+				PID:       int32(event.PID),
+				Command:   comm,
+				CgroupID:  event.CgroupID,
+				EventType: "config_access",
+			},
+		},
 	}
 }

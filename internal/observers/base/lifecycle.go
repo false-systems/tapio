@@ -60,7 +60,12 @@ func (lm *LifecycleManager) Start(name string, fn func()) {
 
 		if lm.logger != nil {
 			lm.logger.Debug("Starting goroutine", zap.String("name", name))
-			defer lm.logger.Debug("Goroutine stopped", zap.String("name", name))
+			defer func() {
+				// Only log if not already stopped to avoid logging after test completion
+				if !lm.stopped.Load() {
+					lm.logger.Debug("Goroutine stopped", zap.String("name", name))
+				}
+			}()
 		}
 
 		fn()

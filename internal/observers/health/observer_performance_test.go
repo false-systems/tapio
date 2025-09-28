@@ -321,6 +321,9 @@ func TestPerformanceMemoryUsage(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&m1)
 
+	// Store events to prevent immediate GC
+	events := make([]*domain.CollectorEvent, 0, 1000)
+
 	// Generate many events
 	numEvents := 100000
 	for i := 0; i < numEvents; i++ {
@@ -334,28 +337,37 @@ func TestPerformanceMemoryUsage(t *testing.T) {
 		domainEvent := observer.convertToCollectorEvent(event)
 		observer.EventChannelManager.SendEvent(domainEvent)
 
-		// Consume events to prevent channel blocking
-		select {
-		case <-observer.Events():
-		default:
+		// Keep some events in memory to measure actual usage
+		if i < 1000 {
+			events = append(events, domainEvent)
+		}
+
+		// Consume most events to prevent channel blocking
+		if i > 1000 {
+			select {
+			case <-observer.Events():
+			default:
+			}
 		}
 	}
 
-	// Get memory after load
-	runtime.GC()
+	// Get memory after load (before GC to see actual usage)
 	var m2 runtime.MemStats
 	runtime.ReadMemStats(&m2)
 
-	memUsed := m2.HeapAlloc - m1.HeapAlloc
+	// Use TotalAlloc which monotonically increases
+	memUsed := m2.TotalAlloc - m1.TotalAlloc
 	memPerEvent := float64(memUsed) / float64(numEvents)
 
 	t.Logf("Memory usage:")
 	t.Logf("  Total events: %d", numEvents)
-	t.Logf("  Memory used: %d bytes", memUsed)
+	t.Logf("  Memory allocated: %d bytes", memUsed)
 	t.Logf("  Memory per event: %.2f bytes", memPerEvent)
+	t.Logf("  Events kept: %d", len(events))
 
 	// Memory per event should be reasonable
-	assert.Less(t, memPerEvent, float64(10000), "Should use <10KB per event")
+	// Each event has metadata, labels, kernel data, etc - expect ~2-3KB per event
+	assert.Less(t, memPerEvent, float64(3000), "Should use <3KB per event on average")
 }
 
 // TestPerformanceCPUUsage tests CPU usage under load
