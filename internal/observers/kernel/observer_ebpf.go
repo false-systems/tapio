@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -143,8 +144,9 @@ func (c *Observer) processEvents() {
 	state, ok := c.ebpfState.(*ebpfComponents)
 	c.mu.RUnlock()
 
-	if !ok {
-		c.logger.Error("Invalid eBPF state type for event processing")
+	if !ok || state == nil {
+		// This can happen during shutdown or if eBPF is not initialized
+		c.logger.Debug("eBPF state not ready for event processing")
 		return
 	}
 
@@ -172,12 +174,16 @@ func (c *Observer) processEvents() {
 				return
 			}
 
-			// Read event from ring buffer
-			record, err := state.reader.Read()
+			// Use ReadTimeout to allow periodic context checks
+			record, err := state.reader.ReadTimeout(100 * time.Millisecond)
 			if err != nil {
 				if err == ringbuf.ErrClosed {
 					c.logger.Debug("Ring buffer closed, exiting event processing")
 					return
+				}
+				// Check for timeout - this is normal and allows us to check context
+				if err == os.ErrDeadlineExceeded {
+					continue // Check context at top of loop
 				}
 				// Check for common closure errors
 				if strings.Contains(err.Error(), "file already closed") ||
@@ -185,7 +191,7 @@ func (c *Observer) processEvents() {
 					c.logger.Debug("Ring buffer closed during read, exiting")
 					return
 				}
-				c.logger.Warn("Failed to read from ring buffer", zap.Error(err))
+				c.logger.Debug("Ring buffer read error", zap.Error(err))
 				c.BaseObserver.RecordError(err)
 				continue
 			}
@@ -194,6 +200,9 @@ func (c *Observer) processEvents() {
 			if err := c.handleKernelEvent(record.RawSample); err != nil {
 				c.logger.Warn("Failed to handle kernel event", zap.Error(err))
 				c.BaseObserver.RecordError(err)
+			} else {
+				// Successfully processed
+				c.logger.Debug("Successfully processed kernel event")
 			}
 		}
 	}
@@ -234,7 +243,9 @@ func (c *Observer) handleKernelEvent(data []byte) error {
 			zap.Uint32("pid", event.PID))
 	} else {
 		c.BaseObserver.RecordDrop()
-		c.logger.Warn("Dropped kernel event - channel full")
+		c.BaseObserver.RecordError(fmt.Errorf("dropped kernel event - channel full or validation failed"))
+		c.logger.Error("Dropped kernel event - channel full or validation failed",
+			zap.String("event_id", collectorEvent.EventID))
 	}
 
 	return nil

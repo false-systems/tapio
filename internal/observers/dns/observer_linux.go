@@ -10,7 +10,9 @@ import (
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -24,10 +26,14 @@ type dnsEBPF struct {
 
 // startPlatform starts eBPF-based DNS problem detection
 func (o *Observer) startPlatform() error {
+	ctx, span := o.tracer.Start(context.Background(), "dns.start_ebpf")
+	defer span.End()
 	if !o.config.EnableEBPF {
 		o.logger.Info("eBPF disabled, using fallback mode")
+		span.SetAttributes(attribute.Bool("ebpf_enabled", false))
 		return o.startFallback()
 	}
+	span.SetAttributes(attribute.Bool("ebpf_enabled", true))
 
 	o.logger.Info("Starting eBPF-based DNS problem detection")
 
@@ -35,15 +41,27 @@ func (o *Observer) startPlatform() error {
 	program := NewDNSeBPFProgram(o.logger)
 
 	// Load eBPF programs
+	_, loadSpan := o.tracer.Start(ctx, "dns.load_ebpf")
 	if err := program.Load(); err != nil {
+		loadSpan.RecordError(err)
+		loadSpan.SetStatus(codes.Error, "Failed to load eBPF")
+		loadSpan.End()
 		return fmt.Errorf("loading eBPF program: %w", err)
 	}
+	loadSpan.SetStatus(codes.Ok, "eBPF loaded")
+	loadSpan.End()
 
 	// Attach tracepoints
+	_, attachSpan := o.tracer.Start(ctx, "dns.attach_ebpf")
 	if err := program.Attach(); err != nil {
+		attachSpan.RecordError(err)
+		attachSpan.SetStatus(codes.Error, "Failed to attach eBPF")
+		attachSpan.End()
 		program.Close()
 		return fmt.Errorf("attaching tracepoints: %w", err)
 	}
+	attachSpan.SetStatus(codes.Ok, "eBPF attached")
+	attachSpan.End()
 
 	// Start reading events
 	events, err := program.ReadEvents()
@@ -82,8 +100,16 @@ func (o *Observer) processDNSProblems(ctx context.Context) {
 				return
 			}
 
+			// Start a span for event processing
+			ctx, span := o.tracer.Start(ctx, "dns.process_event",
+				trace.WithAttributes(
+					attribute.String("problem_type", event.ProblemType.String()),
+					attribute.String("query_name", event.GetQueryName()),
+					attribute.Int64("latency_ms", event.GetLatencyMs())))
+
 			// Check if this is a repeated problem
 			isRepeated := o.trackProblem(event)
+			span.SetAttributes(attribute.Bool("is_repeated", isRepeated))
 
 			// Convert to domain event
 			domainEvent := o.convertToDomainEvent(event, isRepeated)
@@ -92,9 +118,12 @@ func (o *Observer) processDNSProblems(ctx context.Context) {
 			if o.EventChannelManager.SendEvent(domainEvent) {
 				o.BaseObserver.RecordEvent()
 				o.updateMetrics(ctx, event)
+				span.SetStatus(codes.Ok, "Event sent successfully")
 			} else {
 				o.BaseObserver.RecordDrop()
+				span.SetStatus(codes.Error, "Event dropped - channel full")
 			}
+			span.End()
 		}
 	}
 }

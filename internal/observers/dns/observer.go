@@ -10,6 +10,8 @@ import (
 	"github.com/yairfalse/tapio/internal/observers/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -140,6 +142,9 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 
 // Start begins DNS problem detection
 func (o *Observer) Start(ctx context.Context) error {
+	ctx, span := o.tracer.Start(ctx, "dns.observer.start")
+	defer span.End()
+
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -168,6 +173,9 @@ func (o *Observer) Start(ctx context.Context) error {
 
 // Stop stops the observer
 func (o *Observer) Stop() error {
+	_, span := o.tracer.Start(context.Background(), "dns.observer.stop")
+	defer span.End()
+
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -354,9 +362,16 @@ func (o *Observer) generateMockProblems(ctx context.Context) {
 			default:
 			}
 
+			// Start a span for mock event generation
+			_, span := o.tracer.Start(ctx, "dns.generate_mock_event")
+
 			// Generate a mock problem
 			problem := problems[eventCount%len(problems)]
 			eventCount++
+			span.SetAttributes(
+				attribute.String("problem_type", problem.problemType.String()),
+				attribute.String("query_name", problem.query),
+				attribute.Float64("latency_ms", problem.latencyMs))
 
 			event := &domain.CollectorEvent{
 				EventID:   fmt.Sprintf("mock-dns-problem-%d", eventCount),
@@ -395,9 +410,12 @@ func (o *Observer) generateMockProblems(ctx context.Context) {
 				o.logger.Debug("Sent mock DNS problem event",
 					zap.String("query", problem.query),
 					zap.String("problem", problem.problemType.String()))
+				span.SetStatus(codes.Ok, "Mock event sent")
 			} else {
 				o.BaseObserver.RecordDrop()
+				span.SetStatus(codes.Error, "Mock event dropped")
 			}
+			span.End()
 		}
 	}
 }

@@ -381,6 +381,7 @@ func (c *Observer) convertKernelEvent(event *KernelEvent) *domain.CollectorEvent
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer": "kernel",
+				"version":  "1.0.0",
 				"pid":      fmt.Sprintf("%d", event.PID),
 				"command":  comm,
 			},
