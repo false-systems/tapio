@@ -378,5 +378,12 @@ func (c *Observer) convertKernelEvent(event *KernelEvent) *domain.CollectorEvent
 				EventType: "config_access",
 			},
 		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer": "kernel",
+				"pid":      fmt.Sprintf("%d", event.PID),
+				"command":  comm,
+			},
+		},
 	}
 }
