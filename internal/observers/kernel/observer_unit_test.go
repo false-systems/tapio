@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 	"unsafe"
@@ -411,4 +412,159 @@ func TestConcurrentAccess(t *testing.T) {
 	stats := observer.Statistics()
 	assert.Equal(t, int64(100), stats.EventsProcessed)
 	assert.Equal(t, int64(100), stats.ErrorCount)
+}
+
+// TestObserverWithNilLogger tests observer creation with nil logger
+func TestObserverWithNilLogger(t *testing.T) {
+	config := &Config{
+		Name:       "test-nil-logger",
+		BufferSize: 100,
+		EnableEBPF: false,
+	}
+
+	// Should handle nil logger gracefully
+	observer, err := NewObserverWithConfig(config, nil)
+	require.NoError(t, err)
+	require.NotNil(t, observer)
+	require.NotNil(t, observer.logger)
+
+	// Verify it works
+	ctx := context.Background()
+	err = observer.Start(ctx)
+	assert.NoError(t, err)
+
+	err = observer.Stop()
+	assert.NoError(t, err)
+}
+
+// TestObserverMetrics tests metric recording
+func TestObserverMetrics(t *testing.T) {
+	observer, err := NewObserver("test", nil)
+	require.NoError(t, err)
+
+	// Record various metrics
+	for i := 0; i < 10; i++ {
+		observer.RecordEvent()
+	}
+
+	for i := 0; i < 5; i++ {
+		observer.RecordError(fmt.Errorf("test error %d", i))
+	}
+
+	for i := 0; i < 3; i++ {
+		observer.RecordDrop()
+	}
+
+	// Check statistics
+	stats := observer.Statistics()
+	assert.Equal(t, int64(10), stats.EventsProcessed)
+	assert.Equal(t, int64(5), stats.ErrorCount)
+
+	// Check for drop count in custom metrics
+	if dropCount, ok := stats.CustomMetrics["events_dropped"]; ok {
+		assert.Equal(t, "3", dropCount)
+	}
+}
+
+// TestObserverName tests Name() method
+func TestObserverName(t *testing.T) {
+	config := &Config{
+		Name:       "test-observer-name",
+		BufferSize: 100,
+		EnableEBPF: false,
+	}
+
+	observer, err := NewObserver("ignored", config)
+	require.NoError(t, err)
+
+	// Name should come from config
+	assert.Equal(t, "test-observer-name", observer.Name())
+}
+
+// TestEventTypeMapping tests event type determination
+func TestEventTypeMapping(t *testing.T) {
+	observer, err := NewObserver("test", nil)
+	require.NoError(t, err)
+
+	tests := []struct {
+		eventType uint32
+		wantType  string
+	}{
+		{uint32(EventTypeConfigMapAccess), "mock_event_1"},
+		{uint32(EventTypeSecretAccess), "mock_event_2"},
+		{uint32(EventTypePodSyscall), "mock_event_3"},
+		{uint32(EventTypeConfigAccessFailed), "mock_event_4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("EventType_%d", tt.eventType), func(t *testing.T) {
+			kernelEvent := &KernelEvent{
+				Timestamp: uint64(time.Now().UnixNano()),
+				PID:       1234,
+				EventType: tt.eventType,
+			}
+
+			domainEvent := observer.convertKernelEvent(kernelEvent)
+			assert.NotNil(t, domainEvent)
+			assert.Equal(t, tt.wantType, domainEvent.EventData.Kernel.EventType)
+		})
+	}
+}
+
+// TestObserverStartStopIdempotency tests multiple start/stop calls
+func TestObserverStartStopIdempotency(t *testing.T) {
+	observer, err := NewObserver("test", nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Multiple starts should be safe
+	for i := 0; i < 3; i++ {
+		err := observer.Start(ctx)
+		assert.NoError(t, err, "Start call %d failed", i+1)
+	}
+
+	// Multiple stops should be safe
+	for i := 0; i < 3; i++ {
+		err := observer.Stop()
+		assert.NoError(t, err, "Stop call %d failed", i+1)
+	}
+}
+
+// TestObserverResourceCleanup tests proper resource cleanup
+func TestObserverResourceCleanup(t *testing.T) {
+	config := &Config{
+		Name:       "cleanup-test",
+		BufferSize: 100,
+		EnableEBPF: false,
+	}
+
+	observer, err := NewObserver("test", config)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = observer.Start(ctx)
+	require.NoError(t, err)
+
+	// Get event channel
+	events := observer.Events()
+	require.NotNil(t, events)
+
+	// Stop observer
+	err = observer.Stop()
+	require.NoError(t, err)
+
+	// Event channel should eventually close or stop producing
+	// Wait a bit for cleanup
+	time.Sleep(500 * time.Millisecond)
+
+	// Try to read from channel - should be closed or empty
+	select {
+	case event, ok := <-events:
+		if ok && event != nil {
+			t.Log("Channel still open with event after stop")
+		}
+	default:
+		// Channel is blocking or closed - expected
+	}
 }

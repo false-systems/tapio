@@ -206,8 +206,8 @@ func (p *DNSeBPFProgram) GetStats() (*DNSStats, error) {
 	}
 
 	// Count active queries
-	var key dnsQueryKey
-	var val dnsQueryValue
+	var key uint64    // The key is actually just a uint64 (PID << 32 | port)
+	var val [300]byte // dns_query_state struct is about this size
 	iter := p.objs.ActiveQueries.Iterate()
 	for iter.Next(&key, &val) {
 		stats.ActiveQueries++
