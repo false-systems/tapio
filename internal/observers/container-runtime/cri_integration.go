@@ -3,6 +3,7 @@ package containerruntime
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.uber.org/zap"
@@ -48,19 +49,48 @@ func (ci *CRIIntegration) handleContainerStart(ctx context.Context, event *domai
 	container := event.EventData.Container
 	containerID := container.ContainerID
 	if containerID == "" {
-		return fmt.Errorf("container ID is empty")
+		return fmt.Errorf("missing container ID")
 	}
 
-	// Extract K8s metadata from the event
+	// Extract metadata from the event
 	k8sMeta := &ContainerMetadata{
-		ContainerID: containerID,
+		ContainerID:   containerID,
+		ContainerName: "", // Will be extracted from labels or K8s context
+		ImageName:     container.ImageName,
+		Runtime:       container.Runtime,
+		Labels:        container.Labels,
+		Annotations:   container.Annotations,
+		CreatedAt:     time.Now(),
+		LastSeen:      time.Now(),
 	}
 
-	// Extract K8s context if available
+	// Try to extract K8s metadata from labels (common pattern)
+	if container.Labels != nil {
+		if name, ok := container.Labels["io.kubernetes.container.name"]; ok {
+			k8sMeta.ContainerName = name
+		}
+		if podName, ok := container.Labels["io.kubernetes.pod.name"]; ok {
+			k8sMeta.PodName = podName
+		}
+		if podUID, ok := container.Labels["io.kubernetes.pod.uid"]; ok {
+			k8sMeta.PodUID = podUID
+		}
+		if namespace, ok := container.Labels["io.kubernetes.pod.namespace"]; ok {
+			k8sMeta.Namespace = namespace
+		}
+	}
+
+	// Extract K8s context if available (overrides label data)
 	if event.K8sContext != nil {
-		k8sMeta.PodUID = event.K8sContext.UID
-		k8sMeta.PodName = event.K8sContext.Name
-		k8sMeta.Namespace = event.K8sContext.Namespace
+		if event.K8sContext.UID != "" {
+			k8sMeta.PodUID = event.K8sContext.UID
+		}
+		if event.K8sContext.Name != "" {
+			k8sMeta.PodName = event.K8sContext.Name
+		}
+		if event.K8sContext.Namespace != "" {
+			k8sMeta.Namespace = event.K8sContext.Namespace
+		}
 	}
 
 	// Note: ContainerData doesn't include resource limits

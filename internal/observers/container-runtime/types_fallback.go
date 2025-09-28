@@ -40,12 +40,17 @@ type BPFContainerExitEvent struct {
 
 // ContainerMetadata is the Go representation of container metadata (fallback)
 type ContainerMetadata struct {
-	ContainerID string    `json:"container_id"`
-	PodUID      string    `json:"pod_uid,omitempty"`
-	PodName     string    `json:"pod_name,omitempty"`
-	Namespace   string    `json:"namespace,omitempty"`
-	MemoryLimit uint64    `json:"memory_limit"`
-	CgroupID    uint64    `json:"cgroup_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	LastSeen    time.Time `json:"last_seen"`
+	ContainerID   string            `json:"container_id"`
+	ContainerName string            `json:"container_name,omitempty"`
+	ImageName     string            `json:"image_name,omitempty"`
+	PodUID        string            `json:"pod_uid,omitempty"`
+	PodName       string            `json:"pod_name,omitempty"`
+	Namespace     string            `json:"namespace,omitempty"`
+	Runtime       string            `json:"runtime,omitempty"`
+	MemoryLimit   uint64            `json:"memory_limit"`
+	CgroupID      uint64            `json:"cgroup_id"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Annotations   map[string]string `json:"annotations,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	LastSeen      time.Time         `json:"last_seen"`
 }
