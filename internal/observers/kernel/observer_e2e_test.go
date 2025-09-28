@@ -475,7 +475,7 @@ func TestE2EMockModeWorkflow(t *testing.T) {
 	assert.GreaterOrEqual(t, len(capturedEvents), 1, "Should have at least 1 mock event")
 
 	for _, event := range capturedEvents {
-		assert.Equal(t, "e2e-mock", event.Source)
+		assert.Equal(t, "kernel-e2e-mock", event.Source) // Source is prefixed with "kernel-"
 		assert.Equal(t, domain.EventTypeKernelSyscall, event.Type)
 		assert.NotNil(t, event.EventData.Kernel)
 		assert.Contains(t, event.Metadata.Labels, "mock")

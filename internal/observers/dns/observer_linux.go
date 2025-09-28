@@ -142,7 +142,7 @@ func (o *Observer) convertToDomainEvent(event *DNSEvent, isRepeated bool) *domai
 		},
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
-				"observer":     "dns",
+				"observer":     o.name,
 				"version":      "1.0.0",
 				"problem_type": event.ProblemType.String(),
 				"repeated":     fmt.Sprintf("%v", isRepeated),
