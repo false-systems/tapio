@@ -82,26 +82,48 @@ func (p *DNSeBPFProgram) Load() error {
 
 // Attach attaches the eBPF programs to their hooks
 func (p *DNSeBPFProgram) Attach() error {
-	// Attach tracepoint for connect() syscall (TCP DNS)
-	connectLink, err := link.Tracepoint("syscalls", "sys_exit_connect", p.objs.TraceConnectExit, nil)
+	// Attach kprobe for udp_sendmsg (UDP DNS queries)
+	udpSendLink, err := link.Kprobe("udp_sendmsg", p.objs.TraceUdpSendmsg, nil)
 	if err != nil {
-		return fmt.Errorf("failed to attach connect tracepoint: %w", err)
+		// Fallback to tracepoint if kprobe fails
+		p.logger.Warn("Failed to attach udp_sendmsg kprobe, trying tracepoint", zap.Error(err))
+		sendtoLink, err := link.Tracepoint("syscalls", "sys_enter_sendto", p.objs.TraceSendtoEnter, nil)
+		if err != nil {
+			return fmt.Errorf("failed to attach sendto tracepoint: %w", err)
+		}
+		p.links = append(p.links, sendtoLink)
+	} else {
+		p.links = append(p.links, udpSendLink)
 	}
-	p.links = append(p.links, connectLink)
 
-	// Attach tracepoint for sendto() syscall (UDP DNS queries)
-	sendtoLink, err := link.Tracepoint("syscalls", "sys_enter_sendto", p.objs.TraceSendtoEnter, nil)
+	// Attach kprobe for tcp_sendmsg (TCP DNS queries)
+	tcpSendLink, err := link.Kprobe("tcp_sendmsg", p.objs.TraceTcpSendmsg, nil)
 	if err != nil {
-		return fmt.Errorf("failed to attach sendto tracepoint: %w", err)
+		// Fallback to tracepoint if kprobe fails
+		p.logger.Warn("Failed to attach tcp_sendmsg kprobe, trying tracepoint", zap.Error(err))
+		connectLink, err := link.Tracepoint("syscalls", "sys_exit_connect", p.objs.TraceConnectExit, nil)
+		if err != nil {
+			p.logger.Warn("Failed to attach connect tracepoint", zap.Error(err))
+		} else {
+			p.links = append(p.links, connectLink)
+		}
+	} else {
+		p.links = append(p.links, tcpSendLink)
 	}
-	p.links = append(p.links, sendtoLink)
 
-	// Attach tracepoint for recvfrom() syscall (DNS responses)
-	recvfromLink, err := link.Tracepoint("syscalls", "sys_exit_recvfrom", p.objs.TraceRecvfromExit, nil)
+	// Attach kretprobe for udp_recvmsg (UDP DNS responses)
+	udpRecvLink, err := link.Kretprobe("udp_recvmsg", p.objs.TraceUdpRecvmsg, nil)
 	if err != nil {
-		return fmt.Errorf("failed to attach recvfrom tracepoint: %w", err)
+		// Fallback to tracepoint if kretprobe fails
+		p.logger.Warn("Failed to attach udp_recvmsg kretprobe, trying tracepoint", zap.Error(err))
+		recvfromLink, err := link.Tracepoint("syscalls", "sys_exit_recvfrom", p.objs.TraceRecvfromExit, nil)
+		if err != nil {
+			return fmt.Errorf("failed to attach recvfrom tracepoint: %w", err)
+		}
+		p.links = append(p.links, recvfromLink)
+	} else {
+		p.links = append(p.links, udpRecvLink)
 	}
-	p.links = append(p.links, recvfromLink)
 
 	// Attach poll timeout tracepoint for timeout detection
 	pollLink, err := link.Tracepoint("syscalls", "sys_exit_poll", p.objs.TracePollTimeout, nil)
