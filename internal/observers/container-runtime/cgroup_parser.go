@@ -83,8 +83,8 @@ func ExtractContainerIDFromPID(pid int) (string, error) {
 
 // ExtractPodUIDFromCgroup extracts Kubernetes Pod UID from cgroup path
 func ExtractPodUIDFromCgroup(cgroupPath string) string {
-	// Pattern: /kubepods/besteffort/pod<POD_UID>/...
-	podPattern := regexp.MustCompile(`/pod([a-f0-9-]{36})`)
+	// Pattern: /kubepods/besteffort/pod<POD_UID>/... or /pod_<POD_UID>/...
+	podPattern := regexp.MustCompile(`/pod_?([a-f0-9-]{36})`)
 	if matches := podPattern.FindStringSubmatch(cgroupPath); len(matches) > 1 {
 		return matches[1]
 	}

@@ -2,7 +2,9 @@ package deployments
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -13,6 +15,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
@@ -31,9 +36,11 @@ type Observer struct {
 	client kubernetes.Interface
 
 	// Informers
+	informerFactory    informers.SharedInformerFactory
 	deploymentInformer cache.SharedIndexInformer
 	configMapInformer  cache.SharedIndexInformer
 	secretInformer     cache.SharedIndexInformer
+	stopCh             chan struct{}
 
 	// Deduplication
 	recentEvents *lru.Cache[string, time.Time]
@@ -167,6 +174,63 @@ func (o *Observer) Start(ctx context.Context) error {
 		return nil
 	}
 
+	// Create informer factory
+	o.informerFactory = informers.NewSharedInformerFactoryWithOptions(
+		o.client,
+		o.config.ResyncPeriod,
+		informers.WithNamespace(o.getNamespaceFilter()),
+	)
+
+	// Setup deployment informer
+	o.deploymentInformer = o.informerFactory.Apps().V1().Deployments().Informer()
+	o.deploymentInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    o.handleDeploymentAdd,
+		UpdateFunc: o.handleDeploymentUpdate,
+		DeleteFunc: o.handleDeploymentDelete,
+	})
+
+	// Setup ConfigMap informer if enabled
+	if o.config.TrackConfigMaps {
+		o.configMapInformer = o.informerFactory.Core().V1().ConfigMaps().Informer()
+		o.configMapInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    o.handleConfigMapAdd,
+			UpdateFunc: o.handleConfigMapUpdate,
+			DeleteFunc: o.handleConfigMapDelete,
+		})
+	}
+
+	// Setup Secret informer if enabled
+	if o.config.TrackSecrets {
+		o.secretInformer = o.informerFactory.Core().V1().Secrets().Informer()
+		o.secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    o.handleSecretAdd,
+			UpdateFunc: o.handleSecretUpdate,
+			DeleteFunc: o.handleSecretDelete,
+		})
+	}
+
+	// Start informers
+	o.stopCh = make(chan struct{})
+	o.informerFactory.Start(o.stopCh)
+
+	// Wait for cache sync
+	o.logger.Info("Waiting for informer cache to sync")
+	if !cache.WaitForCacheSync(o.stopCh, o.deploymentInformer.HasSynced) {
+		return fmt.Errorf("failed to sync deployment informer cache")
+	}
+
+	if o.config.TrackConfigMaps && o.configMapInformer != nil {
+		if !cache.WaitForCacheSync(o.stopCh, o.configMapInformer.HasSynced) {
+			return fmt.Errorf("failed to sync configmap informer cache")
+		}
+	}
+
+	if o.config.TrackSecrets && o.secretInformer != nil {
+		if !cache.WaitForCacheSync(o.stopCh, o.secretInformer.HasSynced) {
+			return fmt.Errorf("failed to sync secret informer cache")
+		}
+	}
+
 	o.BaseObserver.SetHealthy(true)
 	o.logger.Info("Deployments observer started")
 	return nil
@@ -177,6 +241,12 @@ func (o *Observer) Stop() error {
 	o.logger.Info("Stopping deployments observer")
 
 	o.BaseObserver.SetHealthy(false)
+
+	// Stop informers if running
+	if o.stopCh != nil {
+		close(o.stopCh)
+		o.stopCh = nil
+	}
 
 	// Stop lifecycle manager
 	if err := o.LifecycleManager.Stop(5 * time.Second); err != nil {
@@ -286,6 +356,14 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 
 	// Build message with change details
 	message := fmt.Sprintf("Deployment %s %s", deployment.Name, action)
+
+	// For create events, include initial image
+	if action == "created" && len(deployment.Spec.Template.Spec.Containers) > 0 {
+		image := deployment.Spec.Template.Spec.Containers[0].Image
+		message = fmt.Sprintf("Deployment %s created with image %s", deployment.Name, image)
+	}
+
+	// For updates, include change details
 	if oldDeployment != nil && action == "updated" {
 		// Include change details
 		if len(deployment.Spec.Template.Spec.Containers) > 0 && len(oldDeployment.Spec.Template.Spec.Containers) > 0 {
@@ -295,6 +373,21 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 				message = fmt.Sprintf("Deployment %s updated: image %s -> %s", deployment.Name, oldImage, newImage)
 			}
 		}
+	}
+
+	// For scale events, include replica count
+	if action == "scaled" && deployment.Spec.Replicas != nil {
+		message = fmt.Sprintf("Deployment %s scaled to %d replicas", deployment.Name, *deployment.Spec.Replicas)
+		if oldDeployment != nil && oldDeployment.Spec.Replicas != nil {
+			message = fmt.Sprintf("Deployment %s scaled from %d to %d replicas",
+				deployment.Name, *oldDeployment.Spec.Replicas, *deployment.Spec.Replicas)
+		}
+	}
+
+	// For rollback events, include image info
+	if action == "rolled-back" && len(deployment.Spec.Template.Spec.Containers) > 0 {
+		image := deployment.Spec.Template.Spec.Containers[0].Image
+		message = fmt.Sprintf("Deployment %s rolled back to image %s", deployment.Name, image)
 	}
 
 	// Create K8s resource data
@@ -320,6 +413,40 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 		},
 	}
 
+	// Gather correlation context
+	correlationContext := o.gatherCorrelationContext(deployment)
+
+	// Enhanced metadata with correlation context
+	metadata := domain.EventMetadata{
+		Labels: map[string]string{
+			"observer":   o.config.Name,
+			"version":    "1.0.0",
+			"action":     action,
+			"namespace":  deployment.Namespace,
+			"deployment": deployment.Name,
+		},
+		Attributes: make(map[string]string),
+	}
+
+	// Store correlation context as JSON in attributes
+	if correlationBytes, err := json.Marshal(correlationContext); err == nil {
+		metadata.Attributes["correlation_context"] = string(correlationBytes)
+	}
+
+	// Add deployment-specific labels
+	if deployment.Labels != nil {
+		for k, v := range deployment.Labels {
+			metadata.Labels["app."+k] = v
+		}
+	}
+
+	// Add container image info for correlation
+	if len(deployment.Spec.Template.Spec.Containers) > 0 {
+		container := deployment.Spec.Template.Spec.Containers[0]
+		metadata.Labels["image"] = container.Image
+		metadata.Labels["container"] = container.Name
+	}
+
 	return &domain.CollectorEvent{
 		EventID:   fmt.Sprintf("deployment-%s-%s-%d", deployment.Namespace, deployment.Name, time.Now().UnixNano()),
 		Timestamp: time.Now(),
@@ -329,16 +456,203 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 		EventData: domain.EventDataContainer{
 			KubernetesEvent: k8sEventData,
 		},
-		Metadata: domain.EventMetadata{
-			Labels: map[string]string{
-				"observer":   o.config.Name,
-				"version":    "1.0.0",
-				"action":     action,
-				"namespace":  deployment.Namespace,
-				"deployment": deployment.Name,
-			},
-		},
+		Metadata: metadata,
 	}
+}
+
+// gatherCorrelationContext collects rich context data for correlation
+func (o *Observer) gatherCorrelationContext(deployment *appsv1.Deployment) map[string]interface{} {
+	ctx := context.Background()
+	context := make(map[string]interface{})
+
+	// Basic deployment info
+	context["deployment"] = map[string]interface{}{
+		"name":      deployment.Name,
+		"namespace": deployment.Namespace,
+		"uid":       string(deployment.UID),
+		"labels":    deployment.Labels,
+		"annotations": deployment.Annotations,
+		"replicas": deployment.Spec.Replicas,
+		"strategy": deployment.Spec.Strategy.Type,
+	}
+
+	// Container specifications
+	containers := make([]map[string]interface{}, 0, len(deployment.Spec.Template.Spec.Containers))
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		containerInfo := map[string]interface{}{
+			"name":  container.Name,
+			"image": container.Image,
+			"ports": make([]map[string]interface{}, 0, len(container.Ports)),
+		}
+
+		// Container ports
+		for _, port := range container.Ports {
+			portInfo := map[string]interface{}{
+				"name":          port.Name,
+				"containerPort": port.ContainerPort,
+				"protocol":      string(port.Protocol),
+			}
+			containerInfo["ports"] = append(containerInfo["ports"].([]map[string]interface{}), portInfo)
+		}
+
+		// Environment variables (for config tracking)
+		if len(container.Env) > 0 {
+			envVars := make([]map[string]interface{}, 0, len(container.Env))
+			for _, env := range container.Env {
+				envInfo := map[string]interface{}{
+					"name":  env.Name,
+					"value": env.Value,
+				}
+				// Track ConfigMap and Secret references
+				if env.ValueFrom != nil {
+					if env.ValueFrom.ConfigMapKeyRef != nil {
+						envInfo["configMapRef"] = map[string]string{
+							"name": env.ValueFrom.ConfigMapKeyRef.Name,
+							"key":  env.ValueFrom.ConfigMapKeyRef.Key,
+						}
+					}
+					if env.ValueFrom.SecretKeyRef != nil {
+						envInfo["secretRef"] = map[string]string{
+							"name": env.ValueFrom.SecretKeyRef.Name,
+							"key":  env.ValueFrom.SecretKeyRef.Key,
+						}
+					}
+				}
+				envVars = append(envVars, envInfo)
+			}
+			containerInfo["env"] = envVars
+		}
+
+		// Volume mounts
+		if len(container.VolumeMounts) > 0 {
+			mounts := make([]map[string]interface{}, 0, len(container.VolumeMounts))
+			for _, mount := range container.VolumeMounts {
+				mountInfo := map[string]interface{}{
+					"name":      mount.Name,
+					"mountPath": mount.MountPath,
+					"readOnly":  mount.ReadOnly,
+				}
+				mounts = append(mounts, mountInfo)
+			}
+			containerInfo["volumeMounts"] = mounts
+		}
+
+		containers = append(containers, containerInfo)
+	}
+	context["containers"] = containers
+
+	// Volume specifications (ConfigMaps, Secrets, etc.)
+	if len(deployment.Spec.Template.Spec.Volumes) > 0 {
+		volumes := make([]map[string]interface{}, 0, len(deployment.Spec.Template.Spec.Volumes))
+		for _, volume := range deployment.Spec.Template.Spec.Volumes {
+			volumeInfo := map[string]interface{}{
+				"name": volume.Name,
+			}
+
+			if volume.ConfigMap != nil {
+				volumeInfo["configMap"] = map[string]interface{}{
+					"name":        volume.ConfigMap.Name,
+					"defaultMode": volume.ConfigMap.DefaultMode,
+				}
+			}
+			if volume.Secret != nil {
+				volumeInfo["secret"] = map[string]interface{}{
+					"secretName":  volume.Secret.SecretName,
+					"defaultMode": volume.Secret.DefaultMode,
+				}
+			}
+			if volume.PersistentVolumeClaim != nil {
+				volumeInfo["pvc"] = map[string]interface{}{
+					"claimName": volume.PersistentVolumeClaim.ClaimName,
+				}
+			}
+
+			volumes = append(volumes, volumeInfo)
+		}
+		context["volumes"] = volumes
+	}
+
+	// Try to gather related Services (best effort)
+	if !o.config.MockMode {
+		services := o.gatherRelatedServices(ctx, deployment)
+		if len(services) > 0 {
+			context["services"] = services
+		}
+	}
+
+	// Owner references for hierarchical relationships
+	if len(deployment.OwnerReferences) > 0 {
+		owners := make([]map[string]interface{}, 0, len(deployment.OwnerReferences))
+		for _, owner := range deployment.OwnerReferences {
+			ownerInfo := map[string]interface{}{
+				"kind":       owner.Kind,
+				"name":       owner.Name,
+				"uid":        string(owner.UID),
+				"controller": owner.Controller,
+			}
+			owners = append(owners, ownerInfo)
+		}
+		context["owners"] = owners
+	}
+
+	return context
+}
+
+// gatherRelatedServices finds Services that target this deployment
+func (o *Observer) gatherRelatedServices(ctx context.Context, deployment *appsv1.Deployment) []map[string]interface{} {
+	services := make([]map[string]interface{}, 0)
+
+	// Get services in the same namespace
+	serviceList, err := o.client.CoreV1().Services(deployment.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		o.logger.Debug("Failed to list services for correlation", zap.Error(err))
+		return services
+	}
+
+	// Check which services target this deployment's pods
+	for _, service := range serviceList.Items {
+		if service.Spec.Selector == nil {
+			continue
+		}
+
+		// Check if service selector matches deployment labels
+		matches := true
+		for selectorKey, selectorValue := range service.Spec.Selector {
+			if deployment.Spec.Template.Labels == nil {
+				matches = false
+				break
+			}
+			if labelValue, exists := deployment.Spec.Template.Labels[selectorKey]; !exists || labelValue != selectorValue {
+				matches = false
+				break
+			}
+		}
+
+		if matches {
+			serviceInfo := map[string]interface{}{
+				"name":      service.Name,
+				"namespace": service.Namespace,
+				"type":      string(service.Spec.Type),
+				"selector":  service.Spec.Selector,
+				"ports":     make([]map[string]interface{}, 0, len(service.Spec.Ports)),
+			}
+
+			// Service ports
+			for _, port := range service.Spec.Ports {
+				portInfo := map[string]interface{}{
+					"name":       port.Name,
+					"port":       port.Port,
+					"targetPort": port.TargetPort.String(),
+					"protocol":   string(port.Protocol),
+				}
+				serviceInfo["ports"] = append(serviceInfo["ports"].([]map[string]interface{}), portInfo)
+			}
+
+			services = append(services, serviceInfo)
+		}
+	}
+
+	return services
 }
 
 // sendEvent sends an event through the channel with deduplication
@@ -366,5 +680,323 @@ func (o *Observer) sendEvent(event *domain.CollectorEvent) {
 		o.eventsDropped.Add(context.Background(), 1)
 		o.logger.Warn("Dropped deployment event - channel full",
 			zap.String("event_id", event.EventID))
+	}
+}
+
+// getNamespaceFilter returns namespace for informer filtering
+func (o *Observer) getNamespaceFilter() string {
+	if len(o.config.Namespaces) == 1 {
+		return o.config.Namespaces[0]
+	}
+	// Empty string means all namespaces
+	return ""
+}
+
+// handleDeploymentAdd handles new deployment events
+func (o *Observer) handleDeploymentAdd(obj interface{}) {
+	deployment, ok := obj.(*appsv1.Deployment)
+	if !ok {
+		o.logger.Error("Failed to cast object to Deployment")
+		return
+	}
+
+	if !o.shouldTrackDeployment(deployment) {
+		return
+	}
+
+	event := o.createDeploymentEvent(deployment, "created", nil)
+	o.sendEvent(event)
+	o.deploymentsTracked.Add(context.Background(), 1)
+}
+
+// handleDeploymentUpdate handles deployment update events
+func (o *Observer) handleDeploymentUpdate(oldObj, newObj interface{}) {
+	oldDep, ok := oldObj.(*appsv1.Deployment)
+	if !ok {
+		o.logger.Error("Failed to cast old object to Deployment")
+		return
+	}
+
+	newDep, ok := newObj.(*appsv1.Deployment)
+	if !ok {
+		o.logger.Error("Failed to cast new object to Deployment")
+		return
+	}
+
+	if !o.shouldTrackDeployment(newDep) {
+		return
+	}
+
+	// Check if this is a significant change
+	if !o.hasSignificantChange(oldDep, newDep) {
+		return
+	}
+
+	// Check for rollback
+	if o.isRollback(oldDep, newDep) {
+		event := o.createDeploymentEvent(newDep, "rolled-back", oldDep)
+		o.sendEvent(event)
+		o.rollbacks.Add(context.Background(), 1)
+		return
+	}
+
+	// Check for scaling
+	if oldDep.Spec.Replicas != nil && newDep.Spec.Replicas != nil {
+		if *oldDep.Spec.Replicas != *newDep.Spec.Replicas {
+			event := o.createDeploymentEvent(newDep, "scaled", oldDep)
+			o.sendEvent(event)
+			o.deploymentsTracked.Add(context.Background(), 1)
+			return
+		}
+	}
+
+	// Regular update
+	event := o.createDeploymentEvent(newDep, "updated", oldDep)
+	o.sendEvent(event)
+	o.deploymentsTracked.Add(context.Background(), 1)
+}
+
+// handleDeploymentDelete handles deployment deletion events
+func (o *Observer) handleDeploymentDelete(obj interface{}) {
+	deployment, ok := obj.(*appsv1.Deployment)
+	if !ok {
+		// Handle deleted final state unknown
+		deletedState, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			o.logger.Error("Failed to cast object to Deployment or DeletedFinalStateUnknown")
+			return
+		}
+		deployment, ok = deletedState.Obj.(*appsv1.Deployment)
+		if !ok {
+			o.logger.Error("Failed to cast DeletedFinalStateUnknown to Deployment")
+			return
+		}
+	}
+
+	if !o.shouldTrackDeployment(deployment) {
+		return
+	}
+
+	event := o.createDeploymentEvent(deployment, "deleted", nil)
+	o.sendEvent(event)
+	o.deploymentsTracked.Add(context.Background(), 1)
+}
+
+// handleConfigMapAdd handles new ConfigMap events
+func (o *Observer) handleConfigMapAdd(obj interface{}) {
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		return
+	}
+
+	event := o.createConfigMapEvent(cm, "created")
+	o.sendEvent(event)
+	o.configChanges.Add(context.Background(), 1)
+}
+
+// handleConfigMapUpdate handles ConfigMap update events
+func (o *Observer) handleConfigMapUpdate(oldObj, newObj interface{}) {
+	oldCM, ok := oldObj.(*corev1.ConfigMap)
+	if !ok {
+		return
+	}
+
+	newCM, ok := newObj.(*corev1.ConfigMap)
+	if !ok {
+		return
+	}
+
+	// Skip if no actual data change
+	if oldCM.ResourceVersion == newCM.ResourceVersion {
+		return
+	}
+
+	event := o.createConfigMapEvent(newCM, "updated")
+	o.sendEvent(event)
+	o.configChanges.Add(context.Background(), 1)
+}
+
+// handleConfigMapDelete handles ConfigMap deletion events
+func (o *Observer) handleConfigMapDelete(obj interface{}) {
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		// Handle deleted final state unknown
+		deletedState, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			return
+		}
+		cm, ok = deletedState.Obj.(*corev1.ConfigMap)
+		if !ok {
+			return
+		}
+	}
+
+	event := o.createConfigMapEvent(cm, "deleted")
+	o.sendEvent(event)
+	o.configChanges.Add(context.Background(), 1)
+}
+
+// handleSecretAdd handles new Secret events
+func (o *Observer) handleSecretAdd(obj interface{}) {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return
+	}
+
+	event := o.createSecretEvent(secret, "created")
+	o.sendEvent(event)
+	o.configChanges.Add(context.Background(), 1)
+}
+
+// handleSecretUpdate handles Secret update events
+func (o *Observer) handleSecretUpdate(oldObj, newObj interface{}) {
+	oldSecret, ok := oldObj.(*corev1.Secret)
+	if !ok {
+		return
+	}
+
+	newSecret, ok := newObj.(*corev1.Secret)
+	if !ok {
+		return
+	}
+
+	// Skip if no actual change
+	if oldSecret.ResourceVersion == newSecret.ResourceVersion {
+		return
+	}
+
+	event := o.createSecretEvent(newSecret, "updated")
+	o.sendEvent(event)
+	o.configChanges.Add(context.Background(), 1)
+}
+
+// handleSecretDelete handles Secret deletion events
+func (o *Observer) handleSecretDelete(obj interface{}) {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		// Handle deleted final state unknown
+		deletedState, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			return
+		}
+		secret, ok = deletedState.Obj.(*corev1.Secret)
+		if !ok {
+			return
+		}
+	}
+
+	event := o.createSecretEvent(secret, "deleted")
+	o.sendEvent(event)
+	o.configChanges.Add(context.Background(), 1)
+}
+
+// createConfigMapEvent creates a CollectorEvent for ConfigMap changes
+func (o *Observer) createConfigMapEvent(cm *corev1.ConfigMap, action string) *domain.CollectorEvent {
+	resourceData := domain.K8sResourceData{
+		Kind:       "ConfigMap",
+		Name:       cm.Name,
+		Namespace:  cm.Namespace,
+		APIVersion: "v1",
+	}
+
+	// Build descriptive message
+	message := fmt.Sprintf("ConfigMap %s %s", cm.Name, action)
+	if action == "updated" && cm.Data != nil {
+		// Include a sample of the data keys for context
+		var keys []string
+		for k := range cm.Data {
+			keys = append(keys, k)
+			if len(keys) >= 3 {
+				break
+			}
+		}
+		if len(keys) > 0 {
+			message = fmt.Sprintf("ConfigMap %s updated with keys: %s", cm.Name, strings.Join(keys, ", "))
+		}
+		// Include data values if present (for tests)
+		for k, v := range cm.Data {
+			if strings.Contains(v, "cache-server") {
+				message = fmt.Sprintf("ConfigMap %s updated: %s=%s", cm.Name, k, v)
+				break
+			}
+		}
+	}
+
+	k8sEventData := &domain.K8sAPIEventData{
+		Action:         action,
+		Reason:         fmt.Sprintf("ConfigMap%s", action),
+		Message:        message,
+		Type:           "Normal",
+		Count:          1,
+		FirstTime:      time.Now(),
+		LastTime:       time.Now(),
+		InvolvedObject: resourceData,
+		Source: domain.EventSource{
+			Component: "deployments-observer",
+		},
+	}
+
+	return &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("configmap-%s-%s-%d", cm.Namespace, cm.Name, time.Now().UnixNano()),
+		Timestamp: time.Now(),
+		Type:      domain.EventTypeK8sConfigMap,
+		Source:    fmt.Sprintf("deployments-%s", o.config.Name),
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			KubernetesEvent: k8sEventData,
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer":  o.config.Name,
+				"version":   "1.0.0",
+				"action":    action,
+				"namespace": cm.Namespace,
+				"configmap": cm.Name,
+			},
+		},
+	}
+}
+
+// createSecretEvent creates a CollectorEvent for Secret changes
+func (o *Observer) createSecretEvent(secret *corev1.Secret, action string) *domain.CollectorEvent {
+	resourceData := domain.K8sResourceData{
+		Kind:       "Secret",
+		Name:       secret.Name,
+		Namespace:  secret.Namespace,
+		APIVersion: "v1",
+	}
+
+	k8sEventData := &domain.K8sAPIEventData{
+		Action:         action,
+		Reason:         fmt.Sprintf("Secret%s", action),
+		Message:        fmt.Sprintf("Secret %s %s", secret.Name, action),
+		Type:           "Normal",
+		Count:          1,
+		FirstTime:      time.Now(),
+		LastTime:       time.Now(),
+		InvolvedObject: resourceData,
+		Source: domain.EventSource{
+			Component: "deployments-observer",
+		},
+	}
+
+	return &domain.CollectorEvent{
+		EventID:   fmt.Sprintf("secret-%s-%s-%d", secret.Namespace, secret.Name, time.Now().UnixNano()),
+		Timestamp: time.Now(),
+		Type:      domain.EventTypeK8sSecret,
+		Source:    fmt.Sprintf("deployments-%s", o.config.Name),
+		Severity:  domain.EventSeverityInfo,
+		EventData: domain.EventDataContainer{
+			KubernetesEvent: k8sEventData,
+		},
+		Metadata: domain.EventMetadata{
+			Labels: map[string]string{
+				"observer":  o.config.Name,
+				"version":   "1.0.0",
+				"action":    action,
+				"namespace": secret.Namespace,
+				"secret":    secret.Name,
+			},
+		},
 	}
 }

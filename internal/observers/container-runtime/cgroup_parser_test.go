@@ -174,7 +174,7 @@ func TestIsHexString(t *testing.T) {
 		{"Mixed case hex", "AbCdEf123456", true},
 		{"Invalid chars", "ghijkl123456", false},
 		{"Special chars", "abcd-ef12-3456", false},
-		{"Empty string", "", true}, // Empty string is technically valid hex
+		{"Empty string", "", false}, // Empty string is not valid hex
 	}
 
 	for _, tt := range tests {
