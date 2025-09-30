@@ -460,147 +460,257 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 	}
 }
 
+// CorrelationContext represents rich context data for correlation
+type CorrelationContext struct {
+	Deployment DeploymentContext  `json:"deployment"`
+	Containers []ContainerContext `json:"containers"`
+	Volumes    []VolumeContext    `json:"volumes,omitempty"`
+	Services   []ServiceContext   `json:"services,omitempty"`
+	Owners     []OwnerContext     `json:"owners,omitempty"`
+}
+
+// DeploymentContext contains deployment-specific correlation data
+type DeploymentContext struct {
+	Name        string            `json:"name"`
+	Namespace   string            `json:"namespace"`
+	UID         string            `json:"uid"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+	Replicas    *int32            `json:"replicas,omitempty"`
+	Strategy    string            `json:"strategy"`
+}
+
+// ContainerContext contains container-specific correlation data
+type ContainerContext struct {
+	Name         string               `json:"name"`
+	Image        string               `json:"image"`
+	Ports        []PortContext        `json:"ports,omitempty"`
+	Env          []EnvContext         `json:"env,omitempty"`
+	VolumeMounts []VolumeMountContext `json:"volumeMounts,omitempty"`
+}
+
+// PortContext contains port correlation data
+type PortContext struct {
+	Name          string `json:"name,omitempty"`
+	ContainerPort int32  `json:"containerPort"`
+	Protocol      string `json:"protocol"`
+}
+
+// EnvContext contains environment variable correlation data
+type EnvContext struct {
+	Name         string               `json:"name"`
+	Value        string               `json:"value,omitempty"`
+	ConfigMapRef *ConfigMapRefContext `json:"configMapRef,omitempty"`
+	SecretRef    *SecretRefContext    `json:"secretRef,omitempty"`
+}
+
+// ConfigMapRefContext contains ConfigMap reference data
+type ConfigMapRefContext struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+}
+
+// SecretRefContext contains Secret reference data
+type SecretRefContext struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+}
+
+// VolumeMountContext contains volume mount correlation data
+type VolumeMountContext struct {
+	Name      string `json:"name"`
+	MountPath string `json:"mountPath"`
+	ReadOnly  bool   `json:"readOnly"`
+}
+
+// VolumeContext contains volume correlation data
+type VolumeContext struct {
+	Name      string                  `json:"name"`
+	ConfigMap *ConfigMapVolumeContext `json:"configMap,omitempty"`
+	Secret    *SecretVolumeContext    `json:"secret,omitempty"`
+	PVC       *PVCVolumeContext       `json:"pvc,omitempty"`
+}
+
+// ConfigMapVolumeContext contains ConfigMap volume data
+type ConfigMapVolumeContext struct {
+	Name        string `json:"name"`
+	DefaultMode *int32 `json:"defaultMode,omitempty"`
+}
+
+// SecretVolumeContext contains Secret volume data
+type SecretVolumeContext struct {
+	SecretName  string `json:"secretName"`
+	DefaultMode *int32 `json:"defaultMode,omitempty"`
+}
+
+// PVCVolumeContext contains PVC volume data
+type PVCVolumeContext struct {
+	ClaimName string `json:"claimName"`
+}
+
+// ServiceContext contains service correlation data
+type ServiceContext struct {
+	Name      string               `json:"name"`
+	Namespace string               `json:"namespace"`
+	Type      string               `json:"type"`
+	Selector  map[string]string    `json:"selector,omitempty"`
+	Ports     []ServicePortContext `json:"ports,omitempty"`
+}
+
+// ServicePortContext contains service port data
+type ServicePortContext struct {
+	Name       string `json:"name,omitempty"`
+	Port       int32  `json:"port"`
+	TargetPort string `json:"targetPort,omitempty"`
+	Protocol   string `json:"protocol"`
+}
+
+// OwnerContext contains owner reference data
+type OwnerContext struct {
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	UID        string `json:"uid"`
+	Controller *bool  `json:"controller,omitempty"`
+}
+
 // gatherCorrelationContext collects rich context data for correlation
-func (o *Observer) gatherCorrelationContext(deployment *appsv1.Deployment) map[string]interface{} {
+func (o *Observer) gatherCorrelationContext(deployment *appsv1.Deployment) CorrelationContext {
 	ctx := context.Background()
-	context := make(map[string]interface{})
+	correlationCtx := CorrelationContext{}
 
 	// Basic deployment info
-	context["deployment"] = map[string]interface{}{
-		"name":      deployment.Name,
-		"namespace": deployment.Namespace,
-		"uid":       string(deployment.UID),
-		"labels":    deployment.Labels,
-		"annotations": deployment.Annotations,
-		"replicas": deployment.Spec.Replicas,
-		"strategy": deployment.Spec.Strategy.Type,
+	correlationCtx.Deployment = DeploymentContext{
+		Name:        deployment.Name,
+		Namespace:   deployment.Namespace,
+		UID:         string(deployment.UID),
+		Labels:      deployment.Labels,
+		Annotations: deployment.Annotations,
+		Replicas:    deployment.Spec.Replicas,
+		Strategy:    string(deployment.Spec.Strategy.Type),
 	}
 
 	// Container specifications
-	containers := make([]map[string]interface{}, 0, len(deployment.Spec.Template.Spec.Containers))
+	correlationCtx.Containers = make([]ContainerContext, 0, len(deployment.Spec.Template.Spec.Containers))
 	for _, container := range deployment.Spec.Template.Spec.Containers {
-		containerInfo := map[string]interface{}{
-			"name":  container.Name,
-			"image": container.Image,
-			"ports": make([]map[string]interface{}, 0, len(container.Ports)),
+		containerCtx := ContainerContext{
+			Name:  container.Name,
+			Image: container.Image,
 		}
 
 		// Container ports
-		for _, port := range container.Ports {
-			portInfo := map[string]interface{}{
-				"name":          port.Name,
-				"containerPort": port.ContainerPort,
-				"protocol":      string(port.Protocol),
+		if len(container.Ports) > 0 {
+			containerCtx.Ports = make([]PortContext, 0, len(container.Ports))
+			for _, port := range container.Ports {
+				portCtx := PortContext{
+					Name:          port.Name,
+					ContainerPort: port.ContainerPort,
+					Protocol:      string(port.Protocol),
+				}
+				containerCtx.Ports = append(containerCtx.Ports, portCtx)
 			}
-			containerInfo["ports"] = append(containerInfo["ports"].([]map[string]interface{}), portInfo)
 		}
 
 		// Environment variables (for config tracking)
 		if len(container.Env) > 0 {
-			envVars := make([]map[string]interface{}, 0, len(container.Env))
+			containerCtx.Env = make([]EnvContext, 0, len(container.Env))
 			for _, env := range container.Env {
-				envInfo := map[string]interface{}{
-					"name":  env.Name,
-					"value": env.Value,
+				envCtx := EnvContext{
+					Name:  env.Name,
+					Value: env.Value,
 				}
 				// Track ConfigMap and Secret references
 				if env.ValueFrom != nil {
 					if env.ValueFrom.ConfigMapKeyRef != nil {
-						envInfo["configMapRef"] = map[string]string{
-							"name": env.ValueFrom.ConfigMapKeyRef.Name,
-							"key":  env.ValueFrom.ConfigMapKeyRef.Key,
+						envCtx.ConfigMapRef = &ConfigMapRefContext{
+							Name: env.ValueFrom.ConfigMapKeyRef.Name,
+							Key:  env.ValueFrom.ConfigMapKeyRef.Key,
 						}
 					}
 					if env.ValueFrom.SecretKeyRef != nil {
-						envInfo["secretRef"] = map[string]string{
-							"name": env.ValueFrom.SecretKeyRef.Name,
-							"key":  env.ValueFrom.SecretKeyRef.Key,
+						envCtx.SecretRef = &SecretRefContext{
+							Name: env.ValueFrom.SecretKeyRef.Name,
+							Key:  env.ValueFrom.SecretKeyRef.Key,
 						}
 					}
 				}
-				envVars = append(envVars, envInfo)
+				containerCtx.Env = append(containerCtx.Env, envCtx)
 			}
-			containerInfo["env"] = envVars
 		}
 
 		// Volume mounts
 		if len(container.VolumeMounts) > 0 {
-			mounts := make([]map[string]interface{}, 0, len(container.VolumeMounts))
+			containerCtx.VolumeMounts = make([]VolumeMountContext, 0, len(container.VolumeMounts))
 			for _, mount := range container.VolumeMounts {
-				mountInfo := map[string]interface{}{
-					"name":      mount.Name,
-					"mountPath": mount.MountPath,
-					"readOnly":  mount.ReadOnly,
+				mountCtx := VolumeMountContext{
+					Name:      mount.Name,
+					MountPath: mount.MountPath,
+					ReadOnly:  mount.ReadOnly,
 				}
-				mounts = append(mounts, mountInfo)
+				containerCtx.VolumeMounts = append(containerCtx.VolumeMounts, mountCtx)
 			}
-			containerInfo["volumeMounts"] = mounts
 		}
 
-		containers = append(containers, containerInfo)
+		correlationCtx.Containers = append(correlationCtx.Containers, containerCtx)
 	}
-	context["containers"] = containers
 
 	// Volume specifications (ConfigMaps, Secrets, etc.)
 	if len(deployment.Spec.Template.Spec.Volumes) > 0 {
-		volumes := make([]map[string]interface{}, 0, len(deployment.Spec.Template.Spec.Volumes))
+		correlationCtx.Volumes = make([]VolumeContext, 0, len(deployment.Spec.Template.Spec.Volumes))
 		for _, volume := range deployment.Spec.Template.Spec.Volumes {
-			volumeInfo := map[string]interface{}{
-				"name": volume.Name,
+			volumeCtx := VolumeContext{
+				Name: volume.Name,
 			}
 
 			if volume.ConfigMap != nil {
-				volumeInfo["configMap"] = map[string]interface{}{
-					"name":        volume.ConfigMap.Name,
-					"defaultMode": volume.ConfigMap.DefaultMode,
+				volumeCtx.ConfigMap = &ConfigMapVolumeContext{
+					Name:        volume.ConfigMap.Name,
+					DefaultMode: volume.ConfigMap.DefaultMode,
 				}
 			}
 			if volume.Secret != nil {
-				volumeInfo["secret"] = map[string]interface{}{
-					"secretName":  volume.Secret.SecretName,
-					"defaultMode": volume.Secret.DefaultMode,
+				volumeCtx.Secret = &SecretVolumeContext{
+					SecretName:  volume.Secret.SecretName,
+					DefaultMode: volume.Secret.DefaultMode,
 				}
 			}
 			if volume.PersistentVolumeClaim != nil {
-				volumeInfo["pvc"] = map[string]interface{}{
-					"claimName": volume.PersistentVolumeClaim.ClaimName,
+				volumeCtx.PVC = &PVCVolumeContext{
+					ClaimName: volume.PersistentVolumeClaim.ClaimName,
 				}
 			}
 
-			volumes = append(volumes, volumeInfo)
+			correlationCtx.Volumes = append(correlationCtx.Volumes, volumeCtx)
 		}
-		context["volumes"] = volumes
 	}
 
 	// Try to gather related Services (best effort)
 	if !o.config.MockMode {
 		services := o.gatherRelatedServices(ctx, deployment)
 		if len(services) > 0 {
-			context["services"] = services
+			correlationCtx.Services = services
 		}
 	}
 
 	// Owner references for hierarchical relationships
 	if len(deployment.OwnerReferences) > 0 {
-		owners := make([]map[string]interface{}, 0, len(deployment.OwnerReferences))
+		correlationCtx.Owners = make([]OwnerContext, 0, len(deployment.OwnerReferences))
 		for _, owner := range deployment.OwnerReferences {
-			ownerInfo := map[string]interface{}{
-				"kind":       owner.Kind,
-				"name":       owner.Name,
-				"uid":        string(owner.UID),
-				"controller": owner.Controller,
+			ownerCtx := OwnerContext{
+				Kind:       owner.Kind,
+				Name:       owner.Name,
+				UID:        string(owner.UID),
+				Controller: owner.Controller,
 			}
-			owners = append(owners, ownerInfo)
+			correlationCtx.Owners = append(correlationCtx.Owners, ownerCtx)
 		}
-		context["owners"] = owners
 	}
 
-	return context
+	return correlationCtx
 }
 
 // gatherRelatedServices finds Services that target this deployment
-func (o *Observer) gatherRelatedServices(ctx context.Context, deployment *appsv1.Deployment) []map[string]interface{} {
-	services := make([]map[string]interface{}, 0)
+func (o *Observer) gatherRelatedServices(ctx context.Context, deployment *appsv1.Deployment) []ServiceContext {
+	services := make([]ServiceContext, 0)
 
 	// Get services in the same namespace
 	serviceList, err := o.client.CoreV1().Services(deployment.Namespace).List(ctx, metav1.ListOptions{})
@@ -629,26 +739,28 @@ func (o *Observer) gatherRelatedServices(ctx context.Context, deployment *appsv1
 		}
 
 		if matches {
-			serviceInfo := map[string]interface{}{
-				"name":      service.Name,
-				"namespace": service.Namespace,
-				"type":      string(service.Spec.Type),
-				"selector":  service.Spec.Selector,
-				"ports":     make([]map[string]interface{}, 0, len(service.Spec.Ports)),
+			serviceCtx := ServiceContext{
+				Name:      service.Name,
+				Namespace: service.Namespace,
+				Type:      string(service.Spec.Type),
+				Selector:  service.Spec.Selector,
 			}
 
 			// Service ports
-			for _, port := range service.Spec.Ports {
-				portInfo := map[string]interface{}{
-					"name":       port.Name,
-					"port":       port.Port,
-					"targetPort": port.TargetPort.String(),
-					"protocol":   string(port.Protocol),
+			if len(service.Spec.Ports) > 0 {
+				serviceCtx.Ports = make([]ServicePortContext, 0, len(service.Spec.Ports))
+				for _, port := range service.Spec.Ports {
+					portCtx := ServicePortContext{
+						Name:       port.Name,
+						Port:       port.Port,
+						TargetPort: port.TargetPort.String(),
+						Protocol:   string(port.Protocol),
+					}
+					serviceCtx.Ports = append(serviceCtx.Ports, portCtx)
 				}
-				serviceInfo["ports"] = append(serviceInfo["ports"].([]map[string]interface{}), portInfo)
 			}
 
-			services = append(services, serviceInfo)
+			services = append(services, serviceCtx)
 		}
 	}
 
@@ -732,28 +844,53 @@ func (o *Observer) handleDeploymentUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	// Check for rollback
+	// Detect specific changes for correlation
+	changes := detectChanges(oldDep, newDep)
+
+	// Determine action type
+	action := "updated"
 	if o.isRollback(oldDep, newDep) {
-		event := o.createDeploymentEvent(newDep, "rolled-back", oldDep)
-		o.sendEvent(event)
-		o.rollbacks.Add(context.Background(), 1)
-		return
+		action = "rolled-back"
+	} else if len(changes) == 1 && changes[0].Type == ChangeTypeScale {
+		action = "scaled"
 	}
 
-	// Check for scaling
-	if oldDep.Spec.Replicas != nil && newDep.Spec.Replicas != nil {
-		if *oldDep.Spec.Replicas != *newDep.Spec.Replicas {
-			event := o.createDeploymentEvent(newDep, "scaled", oldDep)
-			o.sendEvent(event)
-			o.deploymentsTracked.Add(context.Background(), 1)
-			return
-		}
+	// Create event
+	event := o.createDeploymentEvent(newDep, action, oldDep)
+
+	// Enrich event with change metadata for correlation
+	if event.Metadata.Labels == nil {
+		event.Metadata.Labels = make(map[string]string)
+	}
+	event.Metadata.Labels["change_type"] = getPrimaryChangeType(changes)
+	event.Metadata.Labels["impact"] = getImpactLevel(changes)
+	event.Metadata.Labels["requires_restart"] = fmt.Sprintf("%t", requiresRestart(changes))
+
+	// Add related event types as label for correlation engine
+	relatedTypes := getRelatedEventTypes(changes)
+	if len(relatedTypes) > 0 {
+		event.Metadata.Labels["related_event_types"] = fmt.Sprintf("%v", relatedTypes)
 	}
 
-	// Regular update
-	event := o.createDeploymentEvent(newDep, "updated", oldDep)
+	// Add correlation hints using typed fields
+	event.CorrelationHints = &domain.CorrelationHints{
+		NodeName: newDep.Spec.Template.Spec.NodeName,
+	}
+
+	// Add pod UID if available from deployment
+	if len(newDep.OwnerReferences) > 0 {
+		event.CorrelationHints.PodUID = string(newDep.OwnerReferences[0].UID)
+	}
+
+	// Send event
 	o.sendEvent(event)
-	o.deploymentsTracked.Add(context.Background(), 1)
+
+	// Update metrics based on action
+	if action == "rolled-back" {
+		o.rollbacks.Add(context.Background(), 1)
+	} else {
+		o.deploymentsTracked.Add(context.Background(), 1)
+	}
 }
 
 // handleDeploymentDelete handles deployment deletion events
