@@ -55,6 +55,12 @@ type BaseObserver struct {
 	filterManager *FilterManager
 	useFilters    bool
 	logger        *zap.Logger // Need logger for filter manager
+
+	// Multi-output support (NEW)
+	outputTargets OutputTargets
+	otelEmitter   *OTELEmitter
+	stdoutEmitter *StdoutEmitter
+	// natsEmitter *NATSEmitter // Future: NATS support
 }
 
 // BaseObserverConfig holds configuration for BaseObserver
@@ -72,6 +78,11 @@ type BaseObserverConfig struct {
 	// Filter configuration (optional)
 	EnableFilters    bool
 	FilterConfigPath string // Path to filter config file (YAML)
+
+	// Multi-output configuration (NEW)
+	OutputTargets OutputTargets
+	OTELConfig    *OTELOutputConfig
+	StdoutConfig  *StdoutEmitterConfig
 
 	// Logger
 	Logger *zap.Logger
@@ -156,6 +167,12 @@ func NewBaseObserverWithConfig(config BaseObserverConfig) *BaseObserver {
 				}
 			}
 		}
+	}
+
+	// Initialize output targets (NEW)
+	bc.outputTargets = config.OutputTargets
+	if bc.outputTargets.HasAnyOutput() {
+		bc.initializeOutputs(config)
 	}
 
 	// Initialize OTEL metrics
