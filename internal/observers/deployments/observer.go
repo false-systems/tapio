@@ -11,6 +11,7 @@ import (
 	"github.com/yairfalse/tapio/internal/observers/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -131,9 +132,22 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
 	}
 
-	// Initialize base components
+	// Initialize base components with multi-output support
 	ctx := context.Background()
-	baseObserver := base.NewBaseObserver(name, 5*time.Minute)
+	baseObserver := base.NewBaseObserverWithConfig(base.BaseObserverConfig{
+		Name:               name,
+		HealthCheckTimeout: 5 * time.Minute,
+		ErrorRateThreshold: 0.1,
+		OutputTargets: base.OutputTargets{
+			OTEL:    config.EnableOTEL,
+			Stdout:  config.EnableStdout,
+			Channel: true, // Always enabled for backward compat
+		},
+		StdoutConfig: &base.StdoutEmitterConfig{
+			Pretty: true, // Pretty print for debugging
+		},
+		Logger: logger,
+	})
 	eventManager := base.NewEventChannelManager(config.BufferSize, name, logger)
 	lifecycleManager := base.NewLifecycleManager(ctx, logger)
 
@@ -251,6 +265,11 @@ func (o *Observer) Stop() error {
 	// Stop lifecycle manager
 	if err := o.LifecycleManager.Stop(5 * time.Second); err != nil {
 		o.logger.Warn("Timeout during shutdown", zap.Error(err))
+	}
+
+	// Close output emitters
+	if err := o.BaseObserver.CloseOutputs(); err != nil {
+		o.logger.Warn("Failed to close output emitters", zap.Error(err))
 	}
 
 	// Close event channel
@@ -767,7 +786,7 @@ func (o *Observer) gatherRelatedServices(ctx context.Context, deployment *appsv1
 	return services
 }
 
-// sendEvent sends an event through the channel with deduplication
+// sendEvent sends an event through all configured outputs with deduplication
 func (o *Observer) sendEvent(event *domain.CollectorEvent) {
 	// Check for duplicate
 	eventKey := fmt.Sprintf("%s-%s", event.Type, event.EventID)
@@ -780,18 +799,72 @@ func (o *Observer) sendEvent(event *domain.CollectorEvent) {
 	// Update last seen
 	o.recentEvents.Add(eventKey, time.Now())
 
-	// Send event
+	ctx := context.Background()
+
+	// Send to channel (backward compatibility with EventChannelManager)
 	if o.EventChannelManager.SendEvent(event) {
 		o.BaseObserver.RecordEvent()
-		o.eventsProcessed.Add(context.Background(), 1)
+		o.eventsProcessed.Add(ctx, 1)
 		o.logger.Debug("Sent deployment event",
 			zap.String("event_id", event.EventID),
 			zap.String("type", string(event.Type)))
 	} else {
 		o.BaseObserver.RecordDrop()
-		o.eventsDropped.Add(context.Background(), 1)
+		o.eventsDropped.Add(ctx, 1)
 		o.logger.Warn("Dropped deployment event - channel full",
 			zap.String("event_id", event.EventID))
+		return // Don't emit to other outputs if channel dropped
+	}
+
+	// Emit to additional outputs (stdout, future: NATS)
+	// Note: We pass nil channel since EventChannelManager handled it above
+	o.BaseObserver.EmitEvent(ctx, event, nil)
+}
+
+// emitDeploymentDomainMetrics emits K8s-specific domain metrics to OTEL
+func (o *Observer) emitDeploymentDomainMetrics(ctx context.Context, deployment *appsv1.Deployment, action string, changes []Change) {
+	// Common attributes for all deployment metrics
+	attrs := []attribute.KeyValue{
+		attribute.String("namespace", deployment.Namespace),
+		attribute.String("deployment", deployment.Name),
+		attribute.String("action", action),
+	}
+
+	// Emit deployment change counter
+	changeType := "update"
+	if action == "rolled-back" {
+		changeType = "rollback"
+	} else if action == "scaled" {
+		changeType = "scale"
+	}
+
+	o.BaseObserver.EmitDomainMetric(ctx, base.DomainMetric{
+		Name:  "deployment_changes_total",
+		Value: 1,
+		Attributes: append(attrs,
+			attribute.String("change_type", changeType),
+		),
+	})
+
+	// Emit replica count gauge
+	if deployment.Spec.Replicas != nil {
+		o.BaseObserver.EmitDomainGauge(ctx, base.DomainGauge{
+			Name:  "deployment_replicas",
+			Value: int64(*deployment.Spec.Replicas),
+			Attributes: append(attrs,
+				attribute.String("status", string(deployment.Status.Conditions[len(deployment.Status.Conditions)-1].Type)),
+			),
+		})
+	}
+
+	// Emit specific change type metrics
+	for _, change := range changes {
+		changeAttrs := append(attrs, attribute.String("field", string(change.Type)))
+		o.BaseObserver.EmitDomainMetric(ctx, base.DomainMetric{
+			Name:       "deployment_field_changes_total",
+			Value:      1,
+			Attributes: changeAttrs,
+		})
 	}
 }
 
@@ -885,12 +958,16 @@ func (o *Observer) handleDeploymentUpdate(oldObj, newObj interface{}) {
 	// Send event
 	o.sendEvent(event)
 
-	// Update metrics based on action
+	// Update meta-metrics (observer performance)
+	ctx := context.Background()
 	if action == "rolled-back" {
-		o.rollbacks.Add(context.Background(), 1)
+		o.rollbacks.Add(ctx, 1)
 	} else {
-		o.deploymentsTracked.Add(context.Background(), 1)
+		o.deploymentsTracked.Add(ctx, 1)
 	}
+
+	// Emit domain metrics (K8s events for Grafana/OTEL)
+	o.emitDeploymentDomainMetrics(ctx, newDep, action, changes)
 }
 
 // handleDeploymentDelete handles deployment deletion events

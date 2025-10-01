@@ -89,6 +89,12 @@ func NewStatusAggregator(flushInterval time.Duration) *StatusAggregator {
 }
 
 func (a *StatusAggregator) Add(event *StatusEvent) {
+	if event == nil {
+		// Note: nil events are silently skipped to avoid performance impact
+		// Consider enabling debug logging if this becomes an issue
+		return
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -146,18 +152,36 @@ type FailurePattern struct {
 	Severity    string
 }
 
+// filterValidEvents returns only non-nil events from the slice
+// This helper reduces code duplication in pattern detectors
+func filterValidEvents(events []*StatusEvent) []*StatusEvent {
+	valid := make([]*StatusEvent, 0, len(events))
+	for _, e := range events {
+		if e != nil {
+			valid = append(valid, e)
+		}
+	}
+	return valid
+}
+
+// countEventsByType counts events matching a specific error type
+// This helper reduces code duplication in pattern detectors
+func countEventsByType(events []*StatusEvent, errorType ErrorType) int {
+	count := 0
+	for _, e := range filterValidEvents(events) {
+		if e.ErrorType == errorType {
+			count++
+		}
+	}
+	return count
+}
+
 var KnownPatterns = []FailurePattern{
 	{
 		Name:        "CascadingTimeout",
 		Description: "Timeouts propagating through services",
 		Detector: func(events []*StatusEvent) bool {
-			timeoutCount := 0
-			for _, e := range events {
-				if e.ErrorType == ErrorTimeout {
-					timeoutCount++
-				}
-			}
-			return timeoutCount > 5
+			return countEventsByType(events, ErrorTimeout) > 5
 		},
 		Severity: "high",
 	},
@@ -165,17 +189,18 @@ var KnownPatterns = []FailurePattern{
 		Name:        "RetryStorm",
 		Description: "Excessive retries causing load amplification",
 		Detector: func(events []*StatusEvent) bool {
-			if len(events) < 10 {
+			validEvents := filterValidEvents(events)
+			if len(validEvents) < 10 {
 				return false
 			}
 
-			var counts = make(map[uint32]int)
-			for _, e := range events {
+			counts := make(map[uint32]int)
+			for _, e := range validEvents {
 				counts[e.ServiceHash]++
 			}
 
 			for _, count := range counts {
-				if count > len(events)/2 {
+				if count > len(validEvents)/2 {
 					return true
 				}
 			}
@@ -187,13 +212,7 @@ var KnownPatterns = []FailurePattern{
 		Name:        "ServiceDown",
 		Description: "Service consistently refusing connections",
 		Detector: func(events []*StatusEvent) bool {
-			refusedCount := 0
-			for _, e := range events {
-				if e.ErrorType == ErrorRefused {
-					refusedCount++
-				}
-			}
-			return refusedCount > 10
+			return countEventsByType(events, ErrorRefused) > 10
 		},
 		Severity: "critical",
 	},
