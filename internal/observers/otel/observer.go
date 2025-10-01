@@ -320,6 +320,7 @@ func (c *Observer) buildEventMetadata(span *domain.OTELSpanData) domain.EventMet
 			"observer":     c.config.Name,
 			"service_name": span.ServiceName,
 			"span_kind":    span.Kind,
+			"version":      "1.0",
 		},
 	}
 }
@@ -361,6 +362,15 @@ func (c *Observer) emitDependencyEvents() {
 						"to_service":   toService,
 						"call_count":   fmt.Sprintf("%d", count),
 						"window":       c.config.ServiceMapInterval.String(),
+					},
+				},
+				Metadata: domain.EventMetadata{
+					Labels: map[string]string{
+						"observer":     c.config.Name,
+						"from_service": fromService,
+						"to_service":   toService,
+						"metric_type":  "service_dependency",
+						"version":      "1.0",
 					},
 				},
 			}
