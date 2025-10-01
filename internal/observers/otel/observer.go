@@ -3,9 +3,7 @@ package otel
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/yairfalse/tapio/internal/observers"
@@ -15,10 +13,9 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
-// Observer implements OTLP receiver - works on ALL platforms
+// Observer transforms OTEL SDK data to Tapio events - works on ALL platforms
 type Observer struct {
 	*base.BaseObserver        // Provides Statistics() and Health()
 	*base.EventChannelManager // Handles event channels
@@ -27,10 +24,6 @@ type Observer struct {
 	// Core configuration
 	config *Config
 	logger *zap.Logger
-
-	// OTLP servers
-	grpcServer   *grpc.Server
-	grpcListener net.Listener
 
 	// Service dependency tracking
 	serviceDeps     map[string]map[string]int64 // service -> service -> count
@@ -141,46 +134,21 @@ func (c *Observer) Name() string {
 	return c.BaseObserver.GetName()
 }
 
-// Start begins OTLP collection
+// Start begins OTEL data processing
 func (c *Observer) Start(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "otel.observer.start")
 	defer span.End()
-
-	// Start OTLP gRPC server
-	if c.config.GRPCEndpoint != "" {
-		var err error
-		c.grpcListener, err = net.Listen("tcp", c.config.GRPCEndpoint)
-		if err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to listen on gRPC endpoint %s: %w", c.config.GRPCEndpoint, err)
-		}
-
-		c.grpcServer = grpc.NewServer()
-		// OTLP trace service registration will be added when implementing full OTLP protocol
-
-		go func() {
-			if err := c.grpcServer.Serve(c.grpcListener); err != nil {
-				c.logger.Error("gRPC server error", zap.Error(err))
-				c.BaseObserver.RecordError(err)
-			}
-		}()
-	}
 
 	// Start service dependency emitter
 	if c.config.EnableDependencies {
 		go c.emitServiceDependencies()
 	}
 
-	// Start test event processor for validation
-	go c.processEvents()
-
 	c.BaseObserver.SetHealthy(true)
 	c.lastDepsEmit = time.Now()
 
 	c.logger.Info("OTEL observer started",
 		zap.String("name", c.config.Name),
-		zap.String("grpc_endpoint", c.config.GRPCEndpoint),
-		zap.String("http_endpoint", c.config.HTTPEndpoint),
 		zap.Bool("dependencies", c.config.EnableDependencies),
 		zap.Float64("sampling_rate", c.config.SamplingRate),
 	)
@@ -194,11 +162,6 @@ func (c *Observer) Stop() error {
 
 	// Stop lifecycle manager with timeout
 	c.LifecycleManager.Stop(30 * time.Second)
-
-	// Stop gRPC server
-	if c.grpcServer != nil {
-		c.grpcServer.GracefulStop()
-	}
 
 	// Close event channel
 	c.EventChannelManager.Close()
@@ -216,75 +179,6 @@ func (c *Observer) Events() <-chan *domain.CollectorEvent {
 // IsHealthy returns health status
 func (c *Observer) IsHealthy() bool {
 	return c.BaseObserver.IsHealthy()
-}
-
-// processEvents test processor for validation
-func (c *Observer) processEvents() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.LifecycleManager.Context().Done():
-			return
-		case <-ticker.C:
-			// Emit test span for validation
-			// Real OTLP processing will replace this when protocol is implemented
-			c.emitTestSpan()
-		}
-	}
-}
-
-// emitTestSpan emits a test span event (temporary for testing)
-func (c *Observer) emitTestSpan() {
-	now := time.Now()
-
-	event := &domain.CollectorEvent{
-		EventID:   fmt.Sprintf("otel-span-%d", now.UnixNano()),
-		Timestamp: now,
-		Source:    c.config.Name,
-		Type:      domain.EventTypeOTELSpan,
-		Severity:  domain.EventSeverityInfo,
-		EventData: domain.EventDataContainer{
-			OTELSpan: &domain.OTELSpanData{
-				TraceID:       "test-trace-" + fmt.Sprintf("%d", now.Unix()),
-				SpanID:        "test-span-" + fmt.Sprintf("%d", now.UnixNano()),
-				Name:          "GET /api/test",
-				ServiceName:   "test-service",
-				Kind:          "SERVER",
-				StartTime:     now.Add(-100 * time.Millisecond),
-				EndTime:       now,
-				DurationNanos: 100000000, // 100ms
-				StatusCode:    "OK",
-				HTTPMethod:    "GET",
-				HTTPURL:       "/api/test",
-				K8sPodName:    "test-pod-123",
-				K8sNamespace:  "default",
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID:      "test-trace-" + fmt.Sprintf("%d", now.Unix()),
-			SpanID:       "test-span-" + fmt.Sprintf("%d", now.UnixNano()),
-			PodName:      "test-pod-123",
-			PodNamespace: "default",
-			Labels: map[string]string{
-				"observer": c.config.Name,
-				"version":  "1.0.0",
-			},
-		},
-	}
-
-	if c.EventChannelManager.SendEvent(event) {
-		atomic.AddUint64(&c.stats.EventsEmitted, 1)
-		c.stats.LastEventTime = now
-		c.BaseObserver.RecordEvent()
-		if c.spansReceived != nil {
-			c.spansReceived.Add(c.LifecycleManager.Context(), 1)
-		}
-	} else {
-		atomic.AddUint64(&c.stats.SpansDropped, 1)
-		c.BaseObserver.RecordDrop()
-	}
 }
 
 // emitServiceDependencies periodically emits service dependency events
