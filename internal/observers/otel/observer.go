@@ -15,7 +15,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// Observer transforms OTEL SDK data to Tapio events - works on ALL platforms
+// Observer transforms OTEL SDK data to Tapio CollectorEvents
+//
+// Architecture:
+//   - Reads spans/metrics/logs from OTEL SDK (in-process)
+//   - Transforms to domain.OTELSpanData / domain.OTELMetricData
+//   - Extracts service dependencies from span relationships
+//   - Emits CollectorEvents to NATS via orchestrator
+//
+// This observer does NOT run gRPC/HTTP servers. Applications instrument
+// themselves with OTEL SDK, and this observer reads the SDK data directly.
+//
+// Platform: ALL (Mac, Linux, Windows) - no eBPF required
 type Observer struct {
 	*base.BaseObserver        // Provides Statistics() and Health()
 	*base.EventChannelManager // Handles event channels

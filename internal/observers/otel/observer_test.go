@@ -54,12 +54,9 @@ func TestObserverLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Start observer
+	// Start observer - no longer starts servers, just initializes
 	err = observer.Start(ctx)
-	if err != nil {
-		// On non-Linux platforms, Start returns an error
-		t.Skipf("Skipping lifecycle test on non-Linux platform: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Check health
 	assert.True(t, observer.IsHealthy())
