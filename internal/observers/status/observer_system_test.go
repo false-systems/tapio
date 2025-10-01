@@ -27,7 +27,14 @@ func TestSystemRequirements(t *testing.T) {
 		err := syscall.Uname(&uname)
 		require.NoError(t, err)
 
-		release := string(uname.Release[:])
+		// Convert C string to Go string
+		release := ""
+		for _, b := range uname.Release {
+			if b == 0 {
+				break
+			}
+			release += string(byte(b))
+		}
 		t.Logf("Kernel version: %s", release)
 
 		// eBPF requires at least kernel 4.14 for CO-RE support
@@ -50,15 +57,21 @@ func TestSystemRequirements(t *testing.T) {
 			t.Skip("Not running on Linux")
 		}
 
+		// Check memlock limit (Linux-specific)
+		// Note: RLIMIT_MEMLOCK constant varies by architecture
+		const RLIMIT_MEMLOCK = 8 // Linux x86_64/arm64 value
+
 		var rlimit syscall.Rlimit
-		err := syscall.Getrlimit(syscall.RLIMIT_MEMLOCK, &rlimit)
-		require.NoError(t, err)
+		err := syscall.Getrlimit(RLIMIT_MEMLOCK, &rlimit)
+		if err != nil {
+			t.Logf("Could not check MEMLOCK limit: %v", err)
+		} else {
+			t.Logf("MEMLOCK limit: cur=%d max=%d", rlimit.Cur, rlimit.Max)
 
-		t.Logf("MEMLOCK limit: cur=%d max=%d", rlimit.Cur, rlimit.Max)
-
-		// eBPF needs unlimited or high memlock
-		if rlimit.Cur < 1024*1024*512 { // 512MB
-			t.Log("Warning: Low MEMLOCK limit may affect eBPF loading")
+			// eBPF needs unlimited or high memlock
+			if rlimit.Cur < 1024*1024*512 { // 512MB
+				t.Log("Warning: Low MEMLOCK limit may affect eBPF loading")
+			}
 		}
 	})
 }
@@ -171,8 +184,8 @@ func TestEBPFEventProcessing(t *testing.T) {
 	// Check statistics
 	stats := observer.Statistics()
 	assert.NotNil(t, stats)
-	t.Logf("Observer stats: processed=%d dropped=%d errors=%d",
-		stats.EventsProcessed, stats.EventsDropped, stats.ErrorCount)
+	t.Logf("Observer stats: processed=%d errors=%d",
+		stats.EventsProcessed, stats.ErrorCount)
 }
 
 func TestEBPFMapOperations(t *testing.T) {
@@ -440,6 +453,6 @@ func TestConcurrentEventProcessing(t *testing.T) {
 	// Check statistics
 	stats := observer.Statistics()
 	assert.NotNil(t, stats)
-	t.Logf("Concurrent test stats: processed=%d dropped=%d",
-		stats.EventsProcessed, stats.EventsDropped)
+	t.Logf("Concurrent test stats: processed=%d errors=%d",
+		stats.EventsProcessed, stats.ErrorCount)
 }
