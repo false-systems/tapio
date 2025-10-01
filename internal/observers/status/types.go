@@ -89,6 +89,10 @@ func NewStatusAggregator(flushInterval time.Duration) *StatusAggregator {
 }
 
 func (a *StatusAggregator) Add(event *StatusEvent) {
+	if event == nil {
+		return
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -153,7 +157,7 @@ var KnownPatterns = []FailurePattern{
 		Detector: func(events []*StatusEvent) bool {
 			timeoutCount := 0
 			for _, e := range events {
-				if e.ErrorType == ErrorTimeout {
+				if e != nil && e.ErrorType == ErrorTimeout {
 					timeoutCount++
 				}
 			}
@@ -171,7 +175,9 @@ var KnownPatterns = []FailurePattern{
 
 			var counts = make(map[uint32]int)
 			for _, e := range events {
-				counts[e.ServiceHash]++
+				if e != nil {
+					counts[e.ServiceHash]++
+				}
 			}
 
 			for _, count := range counts {
@@ -189,7 +195,7 @@ var KnownPatterns = []FailurePattern{
 		Detector: func(events []*StatusEvent) bool {
 			refusedCount := 0
 			for _, e := range events {
-				if e.ErrorType == ErrorRefused {
+				if e != nil && e.ErrorType == ErrorRefused {
 					refusedCount++
 				}
 			}
