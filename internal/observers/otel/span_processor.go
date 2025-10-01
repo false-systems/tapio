@@ -201,7 +201,8 @@ func ExtractServiceDependency(span *domain.OTELSpanData) (string, string, bool) 
 	}
 
 	// For client spans, service calls another service
-	if span.Kind == "CLIENT" || span.Kind == "PRODUCER" {
+	// Note: SpanKind().String() returns lowercase "client", "producer", etc.
+	if span.Kind == "client" || span.Kind == "producer" {
 		fromService := span.ServiceName
 		toService := ""
 
