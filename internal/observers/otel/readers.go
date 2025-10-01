@@ -79,13 +79,7 @@ func (r *BatchSpanReader) Close() error {
 }
 
 // convertSpanToDomain transforms OTEL SDK span to domain.OTELSpanData
-// Full implementation will be in span_processor.go
+// Uses TransformSpan from span_processor.go
 func convertSpanToDomain(span trace.ReadOnlySpan) *domain.OTELSpanData {
-	// Minimal stub for interface testing
-	// Complete transformation logic coming in next commit
-	return &domain.OTELSpanData{
-		TraceID: span.SpanContext().TraceID().String(),
-		SpanID:  span.SpanContext().SpanID().String(),
-		Name:    span.Name(),
-	}
+	return TransformSpan(span)
 }
