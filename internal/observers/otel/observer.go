@@ -36,6 +36,10 @@ type Observer struct {
 	config *Config
 	logger *zap.Logger
 
+	// OTEL SDK readers
+	spanReader   SpanReader
+	metricReader MetricReader
+
 	// Service dependency tracking
 	serviceDeps     map[string]map[string]int64 // service -> service -> count
 	serviceDepsLock sync.RWMutex
@@ -48,6 +52,7 @@ type Observer struct {
 	tracer          trace.Tracer
 	spansReceived   metric.Int64Counter
 	metricsReceived metric.Int64Counter
+	errorsTotal     metric.Int64Counter
 	processingTime  metric.Float64Histogram
 }
 
@@ -125,17 +130,30 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		logger.Warn("Failed to create processing time histogram", zap.Error(err))
 	}
 
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription("Total errors encountered"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	// Create span reader
+	spanReader := NewBatchSpanReader(config.BufferSize)
+
 	return &Observer{
 		BaseObserver:        baseObserver,
 		EventChannelManager: eventManager,
 		LifecycleManager:    lifecycle,
 		config:              config,
 		logger:              logger.Named(name),
+		spanReader:          spanReader,
 		serviceDeps:         make(map[string]map[string]int64),
 		stats:               &Stats{},
 		tracer:              tracer,
 		spansReceived:       spansReceived,
 		metricsReceived:     metricsReceived,
+		errorsTotal:         errorsTotal,
 		processingTime:      processingTime,
 	}, nil
 }
@@ -150,9 +168,12 @@ func (c *Observer) Start(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "otel.observer.start")
 	defer span.End()
 
+	// Start span processing goroutine
+	c.LifecycleManager.Start("processSpans", c.processSpans)
+
 	// Start service dependency emitter
 	if c.config.EnableDependencies {
-		go c.emitServiceDependencies()
+		c.LifecycleManager.Start("emitServiceDependencies", c.emitServiceDependencies)
 	}
 
 	c.BaseObserver.SetHealthy(true)
@@ -190,6 +211,117 @@ func (c *Observer) Events() <-chan *domain.CollectorEvent {
 // IsHealthy returns health status
 func (c *Observer) IsHealthy() bool {
 	return c.BaseObserver.IsHealthy()
+}
+
+// processSpans continuously reads and processes spans from the span reader
+func (c *Observer) processSpans() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.LifecycleManager.Context().Done():
+			return
+		case <-ticker.C:
+			c.processAvailableSpans()
+		}
+	}
+}
+
+// processAvailableSpans reads and processes all available spans
+func (c *Observer) processAvailableSpans() {
+	ctx := c.LifecycleManager.Context()
+	startTime := time.Now()
+
+	// Read spans from reader
+	spans, err := c.spanReader.ReadSpans(ctx)
+	if err != nil {
+		c.logger.Error("Failed to read spans", zap.Error(err))
+		c.BaseObserver.RecordError(err)
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1)
+		}
+		return
+	}
+
+	if len(spans) == 0 {
+		return
+	}
+
+	// Process each span
+	for _, spanData := range spans {
+		if spanData == nil {
+			continue
+		}
+
+		// Apply sampling
+		if !c.ShouldSample(spanData) {
+			continue
+		}
+
+		// Create CollectorEvent
+		event := &domain.CollectorEvent{
+			EventID:   fmt.Sprintf("otel-span-%s", spanData.SpanID),
+			Timestamp: spanData.StartTime,
+			Source:    c.config.Name,
+			Type:      domain.EventTypeOTELSpan,
+			Severity:  c.determineEventSeverity(spanData),
+			EventData: domain.EventDataContainer{
+				OTELSpan: spanData,
+			},
+			Metadata: c.buildEventMetadata(spanData),
+		}
+
+		// Send event
+		if c.EventChannelManager.SendEvent(event) {
+			c.stats.EventsEmitted++
+			c.stats.SpansReceived++
+			c.BaseObserver.RecordEvent()
+
+			if c.spansReceived != nil {
+				c.spansReceived.Add(ctx, 1)
+			}
+		} else {
+			c.stats.SpansDropped++
+			c.BaseObserver.RecordDrop()
+		}
+
+		// Extract service dependency
+		if c.config.EnableDependencies {
+			if from, to, found := ExtractServiceDependency(spanData); found {
+				c.RecordServiceDependency(from, to)
+			}
+		}
+	}
+
+	// Record processing time
+	duration := time.Since(startTime)
+	if c.processingTime != nil {
+		c.processingTime.Record(ctx, float64(duration.Milliseconds()))
+	}
+}
+
+// determineEventSeverity determines severity based on span status
+func (c *Observer) determineEventSeverity(span *domain.OTELSpanData) domain.EventSeverity {
+	if span.StatusCode == "ERROR" {
+		return domain.EventSeverityError
+	}
+	return domain.EventSeverityInfo
+}
+
+// buildEventMetadata constructs metadata from span data
+func (c *Observer) buildEventMetadata(span *domain.OTELSpanData) domain.EventMetadata {
+	return domain.EventMetadata{
+		TraceID:      span.TraceID,
+		SpanID:       span.SpanID,
+		PodName:      span.K8sPodName,
+		PodNamespace: span.K8sNamespace,
+		Labels: map[string]string{
+			"observer":     c.config.Name,
+			"service_name": span.ServiceName,
+			"span_kind":    span.Kind,
+		},
+	}
 }
 
 // emitServiceDependencies periodically emits service dependency events
