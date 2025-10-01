@@ -27,6 +27,10 @@ type Config struct {
 	AnnotationFilter        string        `json:"annotation_filter,omitempty"`
 	IgnoreSystemDeployments bool          `json:"ignore_system_deployments"`
 	DeduplicationWindow     time.Duration `json:"deduplication_window"`
+
+	// Multi-output configuration
+	EnableOTEL   bool `json:"enable_otel,omitempty"`   // Export domain metrics to OTEL
+	EnableStdout bool `json:"enable_stdout,omitempty"` // Print events to stdout for debugging
 }
 
 // DefaultConfig returns sensible defaults for the deployments observer
