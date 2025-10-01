@@ -66,6 +66,11 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		config = DefaultConfig()
 	}
 
+	// Set name in config if not already set
+	if config.Name == "" {
+		config.Name = name
+	}
+
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -263,7 +268,7 @@ func (c *Observer) emitTestSpan() {
 			PodName:      "test-pod-123",
 			PodNamespace: "default",
 			Labels: map[string]string{
-				"observer": "otel",
+				"observer": c.config.Name,
 				"version":  "1.0.0",
 			},
 		},
