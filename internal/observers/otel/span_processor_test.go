@@ -16,33 +16,60 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-// Helper to create a test span using real SDK tracer
-func createTestSpan(t *testing.T, name string, kind oteltrace.SpanKind, attrs []attribute.KeyValue) trace.ReadOnlySpan {
-	t.Helper()
+// testSpanSetup encapsulates span creation infrastructure
+type testSpanSetup struct {
+	recorder *tracetest.SpanRecorder
+	tracer   oteltrace.Tracer
+	ctx      context.Context
+}
 
-	// Create resource with service name
+// newTestSpanSetup creates reusable span creation infrastructure
+func newTestSpanSetup(serviceName string) *testSpanSetup {
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
-		semconv.ServiceName("test-service"),
+		semconv.ServiceName(serviceName),
 	)
 
-	// Create span recorder to capture readonly spans
 	recorder := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(
 		trace.WithResource(res),
 		trace.WithSpanProcessor(recorder),
 	)
 
-	// Create span
-	tracer := tp.Tracer("test")
-	ctx := context.Background()
-	_, span := tracer.Start(ctx, name, oteltrace.WithSpanKind(kind), oteltrace.WithAttributes(attrs...))
+	return &testSpanSetup{
+		recorder: recorder,
+		tracer:   tp.Tracer("test"),
+		ctx:      context.Background(),
+	}
+}
+
+// createSpan creates a single span with the given parameters
+func (s *testSpanSetup) createSpan(name string, kind oteltrace.SpanKind, attrs []attribute.KeyValue) {
+	_, span := s.tracer.Start(s.ctx, name, oteltrace.WithSpanKind(kind), oteltrace.WithAttributes(attrs...))
 	span.End()
+}
 
-	// Get the readonly span from recorder
-	spans := recorder.Ended()
+// createSpanWithStatus creates a span with a specific status
+func (s *testSpanSetup) createSpanWithStatus(name string, kind oteltrace.SpanKind, statusCode codes.Code, statusMsg string) {
+	_, span := s.tracer.Start(s.ctx, name, oteltrace.WithSpanKind(kind))
+	span.SetStatus(statusCode, statusMsg)
+	span.End()
+}
+
+// getSpans returns all recorded spans
+func (s *testSpanSetup) getSpans() []trace.ReadOnlySpan {
+	return s.recorder.Ended()
+}
+
+// Helper to create a single test span (backward compatible)
+func createTestSpan(t *testing.T, name string, kind oteltrace.SpanKind, attrs []attribute.KeyValue) trace.ReadOnlySpan {
+	t.Helper()
+
+	setup := newTestSpanSetup("test-service")
+	setup.createSpan(name, kind, attrs)
+
+	spans := setup.getSpans()
 	require.Len(t, spans, 1)
-
 	return spans[0]
 }
 
@@ -146,28 +173,10 @@ func TestTransformSpan_CustomAttributes(t *testing.T) {
 }
 
 func TestTransformSpan_ErrorStatus(t *testing.T) {
-	// Create resource with service name
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName("test-service"),
-	)
+	setup := newTestSpanSetup("test-service")
+	setup.createSpanWithStatus("error-span", oteltrace.SpanKindServer, codes.Error, "Internal error")
 
-	// Create span recorder to capture readonly spans
-	recorder := tracetest.NewSpanRecorder()
-	tp := trace.NewTracerProvider(
-		trace.WithResource(res),
-		trace.WithSpanProcessor(recorder),
-	)
-
-	// Create span with error
-	tracer := tp.Tracer("test")
-	ctx := context.Background()
-	_, span := tracer.Start(ctx, "error-span", oteltrace.WithSpanKind(oteltrace.SpanKindServer))
-	span.SetStatus(codes.Error, "Internal error")
-	span.End()
-
-	// Get the readonly span
-	spans := recorder.Ended()
+	spans := setup.getSpans()
 	require.Len(t, spans, 1)
 
 	data := TransformSpan(spans[0])
@@ -277,33 +286,14 @@ func TestProcessSpanBatch_Empty(t *testing.T) {
 }
 
 func TestProcessSpanBatch_MultipleSpans(t *testing.T) {
-	// Create resource with service name
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName("test-service"),
-	)
+	setup := newTestSpanSetup("test-service")
 
-	// Create span recorder to capture readonly spans
-	recorder := tracetest.NewSpanRecorder()
-	tp := trace.NewTracerProvider(
-		trace.WithResource(res),
-		trace.WithSpanProcessor(recorder),
-	)
-
-	// Create multiple spans from same tracer
-	tracer := tp.Tracer("test")
-	ctx := context.Background()
-
-	_, span1 := tracer.Start(ctx, "span1", oteltrace.WithSpanKind(oteltrace.SpanKindClient), oteltrace.WithAttributes(
+	setup.createSpan("span1", oteltrace.SpanKindClient, []attribute.KeyValue{
 		attribute.String("rpc.service", "backend.UserService"),
-	))
-	span1.End()
+	})
+	setup.createSpan("span2", oteltrace.SpanKindServer, nil)
 
-	_, span2 := tracer.Start(ctx, "span2", oteltrace.WithSpanKind(oteltrace.SpanKindServer))
-	span2.End()
-
-	// Get the readonly spans
-	readonlySpans := recorder.Ended()
+	readonlySpans := setup.getSpans()
 	require.Len(t, readonlySpans, 2)
 
 	spans, deps := ProcessSpanBatch(readonlySpans)
@@ -318,40 +308,19 @@ func TestProcessSpanBatch_MultipleSpans(t *testing.T) {
 }
 
 func TestProcessSpanBatch_DependencyCounting(t *testing.T) {
-	// Create resource with service name
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName("test-service"),
-	)
+	setup := newTestSpanSetup("test-service")
 
-	// Create span recorder to capture readonly spans
-	recorder := tracetest.NewSpanRecorder()
-	tp := trace.NewTracerProvider(
-		trace.WithResource(res),
-		trace.WithSpanProcessor(recorder),
-	)
-
-	// Create multiple spans from same tracer
-	tracer := tp.Tracer("test")
-	ctx := context.Background()
-
-	_, span1 := tracer.Start(ctx, "span1", oteltrace.WithSpanKind(oteltrace.SpanKindClient), oteltrace.WithAttributes(
+	setup.createSpan("span1", oteltrace.SpanKindClient, []attribute.KeyValue{
 		attribute.String("rpc.service", "backend"),
-	))
-	span1.End()
-
-	_, span2 := tracer.Start(ctx, "span2", oteltrace.WithSpanKind(oteltrace.SpanKindClient), oteltrace.WithAttributes(
+	})
+	setup.createSpan("span2", oteltrace.SpanKindClient, []attribute.KeyValue{
 		attribute.String("rpc.service", "backend"),
-	))
-	span2.End()
-
-	_, span3 := tracer.Start(ctx, "span3", oteltrace.WithSpanKind(oteltrace.SpanKindClient), oteltrace.WithAttributes(
+	})
+	setup.createSpan("span3", oteltrace.SpanKindClient, []attribute.KeyValue{
 		attribute.String("rpc.service", "cache"),
-	))
-	span3.End()
+	})
 
-	// Get the readonly spans
-	readonlySpans := recorder.Ended()
+	readonlySpans := setup.getSpans()
 	require.Len(t, readonlySpans, 3)
 
 	_, deps := ProcessSpanBatch(readonlySpans)

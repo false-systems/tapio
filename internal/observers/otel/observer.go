@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yairfalse/tapio/internal/observers"
@@ -56,14 +57,15 @@ type Observer struct {
 	processingTime  metric.Float64Histogram
 }
 
-// Stats holds observer statistics
+// Stats holds observer statistics with atomic access
 type Stats struct {
-	SpansReceived   uint64
-	MetricsReceived uint64
-	EventsEmitted   uint64
-	SpansDropped    uint64
-	ErrorCount      uint64
+	SpansReceived   atomic.Uint64
+	MetricsReceived atomic.Uint64
+	EventsEmitted   atomic.Uint64
+	SpansDropped    atomic.Uint64
+	ErrorCount      atomic.Uint64
 	LastEventTime   time.Time
+	mu              sync.RWMutex // Protects LastEventTime
 }
 
 // Interface verification
@@ -274,15 +276,15 @@ func (c *Observer) processAvailableSpans() {
 
 		// Send event
 		if c.EventChannelManager.SendEvent(event) {
-			c.stats.EventsEmitted++
-			c.stats.SpansReceived++
+			c.stats.EventsEmitted.Add(1)
+			c.stats.SpansReceived.Add(1)
 			c.BaseObserver.RecordEvent()
 
 			if c.spansReceived != nil {
 				c.spansReceived.Add(ctx, 1)
 			}
 		} else {
-			c.stats.SpansDropped++
+			c.stats.SpansDropped.Add(1)
 			c.BaseObserver.RecordDrop()
 		}
 
