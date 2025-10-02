@@ -166,3 +166,29 @@ func TestDialOptions(t *testing.T) {
 		assert.Empty(t, opts) // No special options for secure
 	})
 }
+
+func TestGRPCExporter_Metrics(t *testing.T) {
+	logger := zap.NewNop()
+
+	config := OTLPConfig{
+		Enabled:  true,
+		Endpoint: "localhost:4317",
+		Timeout:  2 * time.Second,
+		Insecure: true,
+		Headers:  make(map[string]string),
+	}
+
+	exporter, err := NewGRPCExporter(config, logger)
+	require.NoError(t, err)
+
+	t.Run("Initial metrics are zero", func(t *testing.T) {
+		metrics := exporter.Metrics()
+		assert.Equal(t, int64(0), metrics.ExportsTotal)
+		assert.Equal(t, int64(0), metrics.ExportsFailed)
+		assert.Equal(t, int64(0), metrics.SpansExported)
+		assert.True(t, metrics.LastExportTime.IsZero())
+	})
+
+	// Note: We can't test actual export without a running OTLP server
+	// That will be tested in integration tests
+}

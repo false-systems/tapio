@@ -20,6 +20,12 @@ type GRPCExporter struct {
 	config   OTLPConfig
 	logger   *zap.Logger
 	exporter *otlptrace.Exporter
+
+	// Metrics
+	exportsTotal   int64
+	exportsFailed  int64
+	spansExported  int64
+	lastExportTime time.Time
 }
 
 // NewGRPCExporter creates a new OTLP/gRPC exporter
@@ -95,17 +101,27 @@ func (e *GRPCExporter) ExportSpans(ctx context.Context, spans []*domain.OTELSpan
 
 	// Export via OTLP exporter
 	if err := e.exporter.ExportSpans(exportCtx, otlpSpans); err != nil {
+		e.exportsFailed++
 		e.logger.Error("Failed to export spans",
 			zap.Error(err),
 			zap.Int("span_count", len(spans)),
 			zap.String("endpoint", e.config.Endpoint),
+			zap.Int64("total_exports", e.exportsTotal),
+			zap.Int64("failed_exports", e.exportsFailed),
 		)
 		return fmt.Errorf("OTLP export failed: %w", err)
 	}
 
+	// Update metrics on success
+	e.exportsTotal++
+	e.spansExported += int64(len(spans))
+	e.lastExportTime = time.Now()
+
 	e.logger.Debug("Exported spans",
 		zap.Int("span_count", len(spans)),
 		zap.String("endpoint", e.config.Endpoint),
+		zap.Int64("total_exports", e.exportsTotal),
+		zap.Int64("total_spans", e.spansExported),
 	)
 
 	return nil
@@ -136,6 +152,24 @@ func NewExporter(config OTLPConfig, logger *zap.Logger) (OTLPExporter, error) {
 	}
 
 	return NewGRPCExporter(config, logger)
+}
+
+// Metrics returns export metrics
+func (e *GRPCExporter) Metrics() ExporterMetrics {
+	return ExporterMetrics{
+		ExportsTotal:   e.exportsTotal,
+		ExportsFailed:  e.exportsFailed,
+		SpansExported:  e.spansExported,
+		LastExportTime: e.lastExportTime,
+	}
+}
+
+// ExporterMetrics holds OTLP exporter metrics
+type ExporterMetrics struct {
+	ExportsTotal   int64
+	ExportsFailed  int64
+	SpansExported  int64
+	LastExportTime time.Time
 }
 
 // Helper for gRPC dial options (used in tests)
