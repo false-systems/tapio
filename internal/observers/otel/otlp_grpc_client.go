@@ -83,9 +83,27 @@ func (e *GRPCExporter) ExportSpans(ctx context.Context, spans []*domain.OTELSpan
 		exportCtx = metadata.NewOutgoingContext(exportCtx, md)
 	}
 
-	// Note: Span transformation will be implemented in Chunk 4
-	// For now, we just log and return early
-	e.logger.Debug("OTLP export ready (transformation in Chunk 4)",
+	// Transform domain spans to OTLP format
+	otlpSpans, err := TransformSpansToOTLP(spans)
+	if err != nil {
+		e.logger.Error("Failed to transform spans",
+			zap.Error(err),
+			zap.Int("span_count", len(spans)),
+		)
+		return fmt.Errorf("span transformation failed: %w", err)
+	}
+
+	// Export via OTLP exporter
+	if err := e.exporter.ExportSpans(exportCtx, otlpSpans); err != nil {
+		e.logger.Error("Failed to export spans",
+			zap.Error(err),
+			zap.Int("span_count", len(spans)),
+			zap.String("endpoint", e.config.Endpoint),
+		)
+		return fmt.Errorf("OTLP export failed: %w", err)
+	}
+
+	e.logger.Debug("Exported spans",
 		zap.Int("span_count", len(spans)),
 		zap.String("endpoint", e.config.Endpoint),
 	)
