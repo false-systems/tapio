@@ -68,6 +68,19 @@ type Stats struct {
 	mu              sync.RWMutex // Protects LastEventTime
 }
 
+// SetLastEventTime safely sets the LastEventTime field.
+func (s *Stats) SetLastEventTime(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LastEventTime = t
+}
+
+// GetLastEventTime safely gets the LastEventTime field.
+func (s *Stats) GetLastEventTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.LastEventTime
+}
 // Interface verification
 var _ observers.Observer = (*Observer)(nil)
 
