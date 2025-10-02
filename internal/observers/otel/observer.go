@@ -3,7 +3,6 @@ package otel
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,10 +14,20 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
-// Observer implements OTLP receiver - works on ALL platforms
+// Observer transforms OTEL SDK data to Tapio CollectorEvents
+//
+// Architecture:
+//   - Reads spans/metrics/logs from OTEL SDK (in-process)
+//   - Transforms to domain.OTELSpanData / domain.OTELMetricData
+//   - Extracts service dependencies from span relationships
+//   - Emits CollectorEvents to NATS via orchestrator
+//
+// This observer does NOT run gRPC/HTTP servers. Applications instrument
+// themselves with OTEL SDK, and this observer reads the SDK data directly.
+//
+// Platform: ALL (Mac, Linux, Windows) - no eBPF required
 type Observer struct {
 	*base.BaseObserver        // Provides Statistics() and Health()
 	*base.EventChannelManager // Handles event channels
@@ -28,9 +37,9 @@ type Observer struct {
 	config *Config
 	logger *zap.Logger
 
-	// OTLP servers
-	grpcServer   *grpc.Server
-	grpcListener net.Listener
+	// OTEL SDK readers
+	spanReader   SpanReader
+	metricReader MetricReader
 
 	// Service dependency tracking
 	serviceDeps     map[string]map[string]int64 // service -> service -> count
@@ -44,17 +53,33 @@ type Observer struct {
 	tracer          trace.Tracer
 	spansReceived   metric.Int64Counter
 	metricsReceived metric.Int64Counter
+	errorsTotal     metric.Int64Counter
 	processingTime  metric.Float64Histogram
 }
 
-// Stats holds observer statistics
+// Stats holds observer statistics with atomic access
 type Stats struct {
-	SpansReceived   uint64
-	MetricsReceived uint64
-	EventsEmitted   uint64
-	SpansDropped    uint64
-	ErrorCount      uint64
+	SpansReceived   atomic.Uint64
+	MetricsReceived atomic.Uint64
+	EventsEmitted   atomic.Uint64
+	SpansDropped    atomic.Uint64
+	ErrorCount      atomic.Uint64
 	LastEventTime   time.Time
+	mu              sync.RWMutex // Protects LastEventTime
+}
+
+// SetLastEventTime safely sets the LastEventTime field.
+func (s *Stats) SetLastEventTime(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LastEventTime = t
+}
+
+// GetLastEventTime safely gets the LastEventTime field.
+func (s *Stats) GetLastEventTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.LastEventTime
 }
 
 // Interface verification
@@ -64,6 +89,11 @@ var _ observers.Observer = (*Observer)(nil)
 func NewObserver(name string, config *Config) (*Observer, error) {
 	if config == nil {
 		config = DefaultConfig()
+	}
+
+	// Set name in config if not already set
+	if config.Name == "" {
+		config.Name = name
 	}
 
 	if err := config.Validate(); err != nil {
@@ -116,17 +146,30 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		logger.Warn("Failed to create processing time histogram", zap.Error(err))
 	}
 
+	errorsTotal, err := meter.Int64Counter(
+		fmt.Sprintf("%s_errors_total", name),
+		metric.WithDescription("Total errors encountered"),
+	)
+	if err != nil {
+		logger.Warn("Failed to create errors counter", zap.Error(err))
+	}
+
+	// Create span reader
+	spanReader := NewBatchSpanReader(config.BufferSize)
+
 	return &Observer{
 		BaseObserver:        baseObserver,
 		EventChannelManager: eventManager,
 		LifecycleManager:    lifecycle,
 		config:              config,
 		logger:              logger.Named(name),
+		spanReader:          spanReader,
 		serviceDeps:         make(map[string]map[string]int64),
 		stats:               &Stats{},
 		tracer:              tracer,
 		spansReceived:       spansReceived,
 		metricsReceived:     metricsReceived,
+		errorsTotal:         errorsTotal,
 		processingTime:      processingTime,
 	}, nil
 }
@@ -136,46 +179,24 @@ func (c *Observer) Name() string {
 	return c.BaseObserver.GetName()
 }
 
-// Start begins OTLP collection
+// Start begins OTEL data processing
 func (c *Observer) Start(ctx context.Context) error {
 	ctx, span := c.tracer.Start(ctx, "otel.observer.start")
 	defer span.End()
 
-	// Start OTLP gRPC server
-	if c.config.GRPCEndpoint != "" {
-		var err error
-		c.grpcListener, err = net.Listen("tcp", c.config.GRPCEndpoint)
-		if err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to listen on gRPC endpoint %s: %w", c.config.GRPCEndpoint, err)
-		}
-
-		c.grpcServer = grpc.NewServer()
-		// OTLP trace service registration will be added when implementing full OTLP protocol
-
-		go func() {
-			if err := c.grpcServer.Serve(c.grpcListener); err != nil {
-				c.logger.Error("gRPC server error", zap.Error(err))
-				c.BaseObserver.RecordError(err)
-			}
-		}()
-	}
+	// Start span processing goroutine
+	c.LifecycleManager.Start("processSpans", c.processSpans)
 
 	// Start service dependency emitter
 	if c.config.EnableDependencies {
-		go c.emitServiceDependencies()
+		c.LifecycleManager.Start("emitServiceDependencies", c.emitServiceDependencies)
 	}
-
-	// Start test event processor for validation
-	go c.processEvents()
 
 	c.BaseObserver.SetHealthy(true)
 	c.lastDepsEmit = time.Now()
 
 	c.logger.Info("OTEL observer started",
 		zap.String("name", c.config.Name),
-		zap.String("grpc_endpoint", c.config.GRPCEndpoint),
-		zap.String("http_endpoint", c.config.HTTPEndpoint),
 		zap.Bool("dependencies", c.config.EnableDependencies),
 		zap.Float64("sampling_rate", c.config.SamplingRate),
 	)
@@ -189,11 +210,6 @@ func (c *Observer) Stop() error {
 
 	// Stop lifecycle manager with timeout
 	c.LifecycleManager.Stop(30 * time.Second)
-
-	// Stop gRPC server
-	if c.grpcServer != nil {
-		c.grpcServer.GracefulStop()
-	}
 
 	// Close event channel
 	c.EventChannelManager.Close()
@@ -213,9 +229,9 @@ func (c *Observer) IsHealthy() bool {
 	return c.BaseObserver.IsHealthy()
 }
 
-// processEvents test processor for validation
-func (c *Observer) processEvents() {
-	ticker := time.NewTicker(10 * time.Second)
+// processSpans continuously reads and processes spans from the span reader
+func (c *Observer) processSpans() {
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -223,62 +239,115 @@ func (c *Observer) processEvents() {
 		case <-c.LifecycleManager.Context().Done():
 			return
 		case <-ticker.C:
-			// Emit test span for validation
-			// Real OTLP processing will replace this when protocol is implemented
-			c.emitTestSpan()
+			c.processAvailableSpans()
 		}
 	}
 }
 
-// emitTestSpan emits a test span event (temporary for testing)
-func (c *Observer) emitTestSpan() {
-	now := time.Now()
+// processAvailableSpans reads and processes all available spans
+func (c *Observer) processAvailableSpans() {
+	ctx := c.LifecycleManager.Context()
+	startTime := time.Now()
 
-	event := &domain.CollectorEvent{
-		EventID:   fmt.Sprintf("otel-span-%d", now.UnixNano()),
-		Timestamp: now,
-		Source:    c.config.Name,
-		Type:      domain.EventTypeOTELSpan,
-		Severity:  domain.EventSeverityInfo,
-		EventData: domain.EventDataContainer{
-			OTELSpan: &domain.OTELSpanData{
-				TraceID:       "test-trace-" + fmt.Sprintf("%d", now.Unix()),
-				SpanID:        "test-span-" + fmt.Sprintf("%d", now.UnixNano()),
-				Name:          "GET /api/test",
-				ServiceName:   "test-service",
-				Kind:          "SERVER",
-				StartTime:     now.Add(-100 * time.Millisecond),
-				EndTime:       now,
-				DurationNanos: 100000000, // 100ms
-				StatusCode:    "OK",
-				HTTPMethod:    "GET",
-				HTTPURL:       "/api/test",
-				K8sPodName:    "test-pod-123",
-				K8sNamespace:  "default",
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID:      "test-trace-" + fmt.Sprintf("%d", now.Unix()),
-			SpanID:       "test-span-" + fmt.Sprintf("%d", now.UnixNano()),
-			PodName:      "test-pod-123",
-			PodNamespace: "default",
-			Labels: map[string]string{
-				"observer": "otel",
-				"version":  "1.0.0",
-			},
-		},
+	// Read spans from reader
+	spans, err := c.spanReader.ReadSpans(ctx)
+	if err != nil {
+		c.logger.Error("Failed to read spans", zap.Error(err))
+		c.BaseObserver.RecordError(err)
+		if c.errorsTotal != nil {
+			c.errorsTotal.Add(ctx, 1)
+		}
+		return
 	}
 
-	if c.EventChannelManager.SendEvent(event) {
-		atomic.AddUint64(&c.stats.EventsEmitted, 1)
-		c.stats.LastEventTime = now
-		c.BaseObserver.RecordEvent()
-		if c.spansReceived != nil {
-			c.spansReceived.Add(c.LifecycleManager.Context(), 1)
+	if len(spans) == 0 {
+		return
+	}
+
+	// Process each span
+	for _, spanData := range spans {
+		if spanData == nil {
+			continue
 		}
-	} else {
-		atomic.AddUint64(&c.stats.SpansDropped, 1)
-		c.BaseObserver.RecordDrop()
+
+		// Count all received spans (before sampling)
+		atomic.AddUint64(&c.stats.SpansReceived, 1)
+		if c.spansReceived != nil {
+			c.spansReceived.Add(ctx, 1)
+		}
+
+		// Apply sampling
+		if !c.ShouldSample(spanData) {
+			continue
+		}
+
+		// Create CollectorEvent
+		event := &domain.CollectorEvent{
+			EventID:   fmt.Sprintf("otel-span-%s", spanData.SpanID),
+			Timestamp: spanData.StartTime,
+			Source:    c.config.Name,
+			Type:      domain.EventTypeOTELSpan,
+			Severity:  c.determineEventSeverity(spanData),
+			EventData: domain.EventDataContainer{
+				OTELSpan: spanData,
+			},
+			Metadata: c.buildEventMetadata(spanData),
+		}
+
+		// Send event
+		if c.EventChannelManager.SendEvent(event) {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Optionally log the panic here, e.g. using zap
+						// c.logger.Warn("BaseObserver.RecordEvent panicked", zap.Any("recover", r))
+					} else {
+						c.stats.EventsEmitted.Add(1)
+					}
+				}()
+				c.BaseObserver.RecordEvent()
+			}()
+		} else {
+			c.stats.SpansDropped.Add(1)
+			c.BaseObserver.RecordDrop()
+		}
+
+		// Extract service dependency
+		if c.config.EnableDependencies {
+			if from, to, found := ExtractServiceDependency(spanData); found {
+				c.RecordServiceDependency(from, to)
+			}
+		}
+	}
+
+	// Record processing time
+	duration := time.Since(startTime)
+	if c.processingTime != nil {
+		c.processingTime.Record(ctx, float64(duration.Milliseconds()))
+	}
+}
+
+// determineEventSeverity determines severity based on span status
+func (c *Observer) determineEventSeverity(span *domain.OTELSpanData) domain.EventSeverity {
+	if span.StatusCode == "ERROR" {
+		return domain.EventSeverityError
+	}
+	return domain.EventSeverityInfo
+}
+
+// buildEventMetadata constructs metadata from span data
+func (c *Observer) buildEventMetadata(span *domain.OTELSpanData) domain.EventMetadata {
+	return domain.EventMetadata{
+		TraceID:      span.TraceID,
+		SpanID:       span.SpanID,
+		PodName:      span.K8sPodName,
+		PodNamespace: span.K8sNamespace,
+		Labels: map[string]string{
+			"observer":     c.config.Name,
+			"service_name": span.ServiceName,
+			"span_kind":    span.Kind,
+			"version":      "1.0",
+		},
 	}
 }
 
@@ -319,6 +388,15 @@ func (c *Observer) emitDependencyEvents() {
 						"to_service":   toService,
 						"call_count":   fmt.Sprintf("%d", count),
 						"window":       c.config.ServiceMapInterval.String(),
+					},
+				},
+				Metadata: domain.EventMetadata{
+					Labels: map[string]string{
+						"observer":     c.config.Name,
+						"from_service": fromService,
+						"to_service":   toService,
+						"metric_type":  "service_dependency",
+						"version":      "1.0",
 					},
 				},
 			}

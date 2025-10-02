@@ -25,7 +25,6 @@ func TestNewObserver(t *testing.T) {
 			name: "custom config",
 			config: &Config{
 				Name:         "test-otel",
-				GRPCEndpoint: ":5317",
 				BufferSize:   5000,
 				SamplingRate: 0.5,
 			},
@@ -55,12 +54,9 @@ func TestObserverLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Start observer
+	// Start observer - no longer starts servers, just initializes
 	err = observer.Start(ctx)
-	if err != nil {
-		// On non-Linux platforms, Start returns an error
-		t.Skipf("Skipping lifecycle test on non-Linux platform: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Check health
 	assert.True(t, observer.IsHealthy())
@@ -82,19 +78,18 @@ func TestConfig(t *testing.T) {
 		config := DefaultConfig()
 		assert.NotNil(t, config)
 		assert.Equal(t, "otel-observer", config.Name)
-		assert.Equal(t, ":4317", config.GRPCEndpoint)
-		assert.Equal(t, ":4318", config.HTTPEndpoint)
 		assert.Equal(t, 10000, config.BufferSize)
 		assert.Equal(t, 1.0, config.SamplingRate)
 		assert.True(t, config.AlwaysSampleErrors)
 		assert.True(t, config.EnableDependencies)
+		assert.Equal(t, 30*time.Second, config.ServiceMapInterval)
 	})
 
 	t.Run("validate config", func(t *testing.T) {
 		config := &Config{
-			SamplingRate:       -1.0, // Invalid
-			BufferSize:         0,    // Invalid
-			MaxTracesPerSecond: 0,    // Invalid
+			SamplingRate:       -1.0,            // Invalid
+			BufferSize:         0,               // Invalid
+			ServiceMapInterval: 0 * time.Second, // Invalid
 		}
 
 		err := config.Validate()
@@ -103,7 +98,7 @@ func TestConfig(t *testing.T) {
 		// Should fix invalid values
 		assert.Equal(t, 1.0, config.SamplingRate)
 		assert.Equal(t, 10000, config.BufferSize)
-		assert.Equal(t, 1000, config.MaxTracesPerSecond)
+		assert.Equal(t, 30*time.Second, config.ServiceMapInterval)
 	})
 }
 
@@ -184,32 +179,8 @@ func TestServiceDependency(t *testing.T) {
 	}
 }
 
-func TestEventEmission(t *testing.T) {
-	observer, err := NewObserver("test", &Config{
-		BufferSize: 10,
-	})
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	// Start observer (may fail on non-Linux)
-	err = observer.Start(ctx)
-	if err != nil {
-		t.Skipf("Skipping event emission test on non-Linux platform: %v", err)
-	}
-	defer observer.Stop()
-
-	// Wait for test span to be emitted
-	select {
-	case event := <-observer.Events():
-		assert.NotNil(t, event)
-		assert.Equal(t, domain.EventTypeOTELSpan, event.Type)
-		assert.NotNil(t, event.EventData.OTELSpan)
-		assert.Equal(t, "test-service", event.EventData.OTELSpan.ServiceName)
-	case <-time.After(15 * time.Second):
-		t.Fatal("Timeout waiting for test span")
-	}
-}
+// TestEventEmission removed - test span generator deleted
+// Real event emission will be tested when OTEL SDK integration is implemented
 
 func BenchmarkSampling(b *testing.B) {
 	observer, _ := NewObserver("bench", &Config{
