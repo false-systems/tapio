@@ -41,6 +41,9 @@ type Observer struct {
 	spanReader   SpanReader
 	metricReader MetricReader
 
+	// OTLP exporter
+	otlpExporter OTLPExporter
+
 	// Service dependency tracking
 	serviceDeps     map[string]map[string]int64 // service -> service -> count
 	serviceDepsLock sync.RWMutex
@@ -157,6 +160,12 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 	// Create span reader
 	spanReader := NewBatchSpanReader(config.BufferSize)
 
+	// Create OTLP exporter
+	otlpExporter, err := NewExporter(config.OTLP, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+	}
+
 	return &Observer{
 		BaseObserver:        baseObserver,
 		EventChannelManager: eventManager,
@@ -164,6 +173,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		config:              config,
 		logger:              logger.Named(name),
 		spanReader:          spanReader,
+		otlpExporter:        otlpExporter,
 		serviceDeps:         make(map[string]map[string]int64),
 		stats:               &Stats{},
 		tracer:              tracer,
@@ -210,6 +220,15 @@ func (c *Observer) Stop() error {
 
 	// Stop lifecycle manager with timeout
 	c.LifecycleManager.Stop(30 * time.Second)
+
+	// Shutdown OTLP exporter
+	if c.otlpExporter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := c.otlpExporter.Shutdown(ctx); err != nil {
+			c.logger.Error("Failed to shutdown OTLP exporter", zap.Error(err))
+		}
+	}
 
 	// Close event channel
 	c.EventChannelManager.Close()
@@ -308,6 +327,17 @@ func (c *Observer) processAvailableSpans() {
 			if from, to, found := ExtractServiceDependency(spanData); found {
 				c.RecordServiceDependency(from, to)
 			}
+		}
+	}
+
+	// Export to OTLP if enabled
+	if c.config.OTLP.Enabled && len(spans) > 0 {
+		if err := c.otlpExporter.ExportSpans(ctx, spans); err != nil {
+			c.logger.Error("OTLP export failed",
+				zap.Error(err),
+				zap.Int("span_count", len(spans)),
+			)
+			c.BaseObserver.RecordError(err)
 		}
 	}
 
