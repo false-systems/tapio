@@ -271,7 +271,7 @@ func (c *Observer) processAvailableSpans() {
 		}
 
 		// Count all received spans (before sampling)
-		c.stats.SpansReceived.Add(1)
+		atomic.AddUint64(&c.stats.SpansReceived, 1)
 		if c.spansReceived != nil {
 			c.spansReceived.Add(ctx, 1)
 		}
