@@ -330,10 +330,11 @@ func (c *Observer) processAvailableSpans() {
 		}
 	}
 
-	// Export to OTLP if enabled
+	// Export to OTLP if enabled (with retry)
 	if c.config.OTLP.Enabled && len(spans) > 0 {
-		if err := c.otlpExporter.ExportSpans(ctx, spans); err != nil {
-			c.logger.Error("OTLP export failed",
+		retryConfig := DefaultRetryConfig()
+		if err := ExportWithRetry(ctx, c.otlpExporter, spans, retryConfig, c.logger); err != nil {
+			c.logger.Error("OTLP export failed after retries",
 				zap.Error(err),
 				zap.Int("span_count", len(spans)),
 			)
