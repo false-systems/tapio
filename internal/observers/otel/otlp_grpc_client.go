@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -21,11 +22,12 @@ type GRPCExporter struct {
 	logger   *zap.Logger
 	exporter *otlptrace.Exporter
 
-	// Metrics
-	exportsTotal   int64
-	exportsFailed  int64
-	spansExported  int64
-	lastExportTime time.Time
+	// Metrics (atomic access required)
+	exportsTotal  atomic.Int64
+	exportsFailed atomic.Int64
+	spansExported atomic.Int64
+	// lastExportTime is read-only after write, no sync needed
+	lastExportTime atomic.Value // stores time.Time
 }
 
 // NewGRPCExporter creates a new OTLP/gRPC exporter
@@ -101,27 +103,27 @@ func (e *GRPCExporter) ExportSpans(ctx context.Context, spans []*domain.OTELSpan
 
 	// Export via OTLP exporter
 	if err := e.exporter.ExportSpans(exportCtx, otlpSpans); err != nil {
-		e.exportsFailed++
+		e.exportsFailed.Add(1)
 		e.logger.Error("Failed to export spans",
 			zap.Error(err),
 			zap.Int("span_count", len(spans)),
 			zap.String("endpoint", e.config.Endpoint),
-			zap.Int64("total_exports", e.exportsTotal),
-			zap.Int64("failed_exports", e.exportsFailed),
+			zap.Int64("total_exports", e.exportsTotal.Load()),
+			zap.Int64("failed_exports", e.exportsFailed.Load()),
 		)
 		return fmt.Errorf("OTLP export failed: %w", err)
 	}
 
-	// Update metrics on success
-	e.exportsTotal++
-	e.spansExported += int64(len(spans))
-	e.lastExportTime = time.Now()
+	// Update metrics on success (atomic operations)
+	e.exportsTotal.Add(1)
+	e.spansExported.Add(int64(len(spans)))
+	e.lastExportTime.Store(time.Now())
 
 	e.logger.Debug("Exported spans",
 		zap.Int("span_count", len(spans)),
 		zap.String("endpoint", e.config.Endpoint),
-		zap.Int64("total_exports", e.exportsTotal),
-		zap.Int64("total_spans", e.spansExported),
+		zap.Int64("total_exports", e.exportsTotal.Load()),
+		zap.Int64("total_spans", e.spansExported.Load()),
 	)
 
 	return nil
@@ -154,13 +156,18 @@ func NewExporter(config OTLPConfig, logger *zap.Logger) (OTLPExporter, error) {
 	return NewGRPCExporter(config, logger)
 }
 
-// Metrics returns export metrics
+// Metrics returns export metrics (thread-safe snapshot)
 func (e *GRPCExporter) Metrics() ExporterMetrics {
+	lastExport := time.Time{}
+	if v := e.lastExportTime.Load(); v != nil {
+		lastExport = v.(time.Time)
+	}
+
 	return ExporterMetrics{
-		ExportsTotal:   e.exportsTotal,
-		ExportsFailed:  e.exportsFailed,
-		SpansExported:  e.spansExported,
-		LastExportTime: e.lastExportTime,
+		ExportsTotal:   e.exportsTotal.Load(),
+		ExportsFailed:  e.exportsFailed.Load(),
+		SpansExported:  e.spansExported.Load(),
+		LastExportTime: lastExport,
 	}
 }
 

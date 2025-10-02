@@ -35,10 +35,21 @@ func TransformSpansToOTLP(spans []*domain.OTELSpanData) ([]tracesdk.ReadOnlySpan
 
 // createOTLPSpan creates an OTLP SDK span from domain data
 func createOTLPSpan(span *domain.OTELSpanData) tracesdk.ReadOnlySpan {
-	// Parse trace and span IDs
-	traceID, _ := trace.TraceIDFromHex(span.TraceID)
-	spanID, _ := trace.SpanIDFromHex(span.SpanID)
-	parentSpanID, _ := trace.SpanIDFromHex(span.ParentSpanID)
+	// Parse trace and span IDs (use zero IDs if parsing fails)
+	traceID, err := trace.TraceIDFromHex(span.TraceID)
+	if err != nil {
+		traceID = trace.TraceID{} // Zero trace ID on parse failure
+	}
+
+	spanID, err := trace.SpanIDFromHex(span.SpanID)
+	if err != nil {
+		spanID = trace.SpanID{} // Zero span ID on parse failure
+	}
+
+	parentSpanID, err := trace.SpanIDFromHex(span.ParentSpanID)
+	if err != nil {
+		parentSpanID = trace.SpanID{} // Zero parent span ID on parse failure
+	}
 
 	// Build attributes from domain data
 	attrs := buildAttributes(span)
@@ -109,7 +120,7 @@ func buildAttributes(span *domain.OTELSpanData) []attribute.KeyValue {
 
 	// Add database attributes
 	if span.DBSystem != "" {
-		attrs = append(attrs, attribute.String("db.system", span.DBSystem))
+		attrs = append(attrs, semconv.DBSystemKey.String(span.DBSystem))
 	}
 	if span.DBStatement != "" {
 		attrs = append(attrs, semconv.DBStatement(span.DBStatement))
