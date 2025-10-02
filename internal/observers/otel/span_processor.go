@@ -19,7 +19,13 @@ func TransformSpan(span trace.ReadOnlySpan) *domain.OTELSpanData {
 		// Identity
 		TraceID:      spanCtx.TraceID().String(),
 		SpanID:       spanCtx.SpanID().String(),
-		ParentSpanID: span.Parent().SpanID().String(),
+		ParentSpanID: func() string {
+			parentCtx := span.Parent()
+			if parentCtx.IsValid() {
+				return parentCtx.SpanID().String()
+			}
+			return ""
+		}(),
 
 		// Basic info
 		Name:          span.Name(),
