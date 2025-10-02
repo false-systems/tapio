@@ -17,8 +17,8 @@ func TransformSpan(span trace.ReadOnlySpan) *domain.OTELSpanData {
 
 	data := &domain.OTELSpanData{
 		// Identity
-		TraceID:      spanCtx.TraceID().String(),
-		SpanID:       spanCtx.SpanID().String(),
+		TraceID: spanCtx.TraceID().String(),
+		SpanID:  spanCtx.SpanID().String(),
 		ParentSpanID: func() string {
 			parentCtx := span.Parent()
 			if parentCtx.IsValid() {
@@ -139,26 +139,26 @@ func extractK8sAttributes(data *domain.OTELSpanData, attrs map[string]attribute.
 	}
 }
 
+// skipKeys contains semantic convention keys that are extracted to dedicated fields
+var skipKeys = map[string]bool{
+	"http.method":         true,
+	"http.target":         true,
+	"http.status_code":    true,
+	"rpc.method":          true,
+	"rpc.service":         true,
+	"db.system":           true,
+	"db.statement":        true,
+	"k8s.pod.name":        true,
+	"k8s.namespace.name":  true,
+	"k8s.deployment.name": true,
+	"k8s.container.name":  true,
+}
+
 // extractCustomAttributes extracts remaining custom attributes
 func extractCustomAttributes(data *domain.OTELSpanData, attrs map[string]attribute.Value) {
 	// Well-known semantic conventions already extracted
 	// Store remaining custom attributes
 	customAttrs := make(map[string]string)
-
-	// Skip already-extracted semantic conventions
-	skipKeys := map[string]bool{
-		"http.method":         true,
-		"http.target":         true,
-		"http.status_code":    true,
-		"rpc.method":          true,
-		"rpc.service":         true,
-		"db.system":           true,
-		"db.statement":        true,
-		"k8s.pod.name":        true,
-		"k8s.namespace.name":  true,
-		"k8s.deployment.name": true,
-		"k8s.container.name":  true,
-	}
 
 	for key, val := range attrs {
 		if !skipKeys[key] {
