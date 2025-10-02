@@ -81,6 +81,7 @@ func (s *Stats) GetLastEventTime() time.Time {
 	defer s.mu.RUnlock()
 	return s.LastEventTime
 }
+
 // Interface verification
 var _ observers.Observer = (*Observer)(nil)
 
@@ -269,6 +270,12 @@ func (c *Observer) processAvailableSpans() {
 			continue
 		}
 
+		// Count all received spans (before sampling)
+		c.stats.SpansReceived.Add(1)
+		if c.spansReceived != nil {
+			c.spansReceived.Add(ctx, 1)
+		}
+
 		// Apply sampling
 		if !c.ShouldSample(spanData) {
 			continue
@@ -290,12 +297,7 @@ func (c *Observer) processAvailableSpans() {
 		// Send event
 		if c.EventChannelManager.SendEvent(event) {
 			c.stats.EventsEmitted.Add(1)
-			c.stats.SpansReceived.Add(1)
 			c.BaseObserver.RecordEvent()
-
-			if c.spansReceived != nil {
-				c.spansReceived.Add(ctx, 1)
-			}
 		} else {
 			c.stats.SpansDropped.Add(1)
 			c.BaseObserver.RecordDrop()
