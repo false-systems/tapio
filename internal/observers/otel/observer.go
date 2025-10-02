@@ -296,8 +296,17 @@ func (c *Observer) processAvailableSpans() {
 
 		// Send event
 		if c.EventChannelManager.SendEvent(event) {
-			c.stats.EventsEmitted.Add(1)
-			c.BaseObserver.RecordEvent()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Optionally log the panic here, e.g. using zap
+						// c.logger.Warn("BaseObserver.RecordEvent panicked", zap.Any("recover", r))
+					} else {
+						c.stats.EventsEmitted.Add(1)
+					}
+				}()
+				c.BaseObserver.RecordEvent()
+			}()
 		} else {
 			c.stats.SpansDropped.Add(1)
 			c.BaseObserver.RecordDrop()
