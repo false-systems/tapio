@@ -179,13 +179,3 @@ type ExporterMetrics struct {
 	LastExportTime time.Time
 }
 
-// Helper for gRPC dial options (used in tests)
-func dialOptions(config OTLPConfig) []grpc.DialOption {
-	opts := []grpc.DialOption{}
-
-	if config.Insecure {
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
-
-	return opts
-}
