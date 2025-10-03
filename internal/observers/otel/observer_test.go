@@ -83,6 +83,13 @@ func TestConfig(t *testing.T) {
 		assert.True(t, config.AlwaysSampleErrors)
 		assert.True(t, config.EnableDependencies)
 		assert.Equal(t, 30*time.Second, config.ServiceMapInterval)
+
+		// OTLP defaults
+		assert.False(t, config.OTLP.Enabled)
+		assert.Equal(t, "localhost:4317", config.OTLP.Endpoint)
+		assert.Equal(t, 10*time.Second, config.OTLP.Timeout)
+		assert.True(t, config.OTLP.Insecure)
+		assert.NotNil(t, config.OTLP.Headers)
 	})
 
 	t.Run("validate config", func(t *testing.T) {
@@ -99,6 +106,40 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, 1.0, config.SamplingRate)
 		assert.Equal(t, 10000, config.BufferSize)
 		assert.Equal(t, 30*time.Second, config.ServiceMapInterval)
+	})
+
+	t.Run("validate OTLP config", func(t *testing.T) {
+		config := &Config{
+			OTLP: OTLPConfig{
+				Enabled:  true,
+				Endpoint: "",  // Empty - should be set to default
+				Timeout:  0,   // Invalid - should be set to default
+				Headers:  nil, // Nil - should be initialized
+			},
+		}
+
+		err := config.Validate()
+		assert.NoError(t, err)
+
+		// Should fix invalid OTLP values
+		assert.Equal(t, "localhost:4317", config.OTLP.Endpoint)
+		assert.Equal(t, 10*time.Second, config.OTLP.Timeout)
+		assert.NotNil(t, config.OTLP.Headers)
+	})
+
+	t.Run("OTLP disabled no validation", func(t *testing.T) {
+		config := &Config{
+			OTLP: OTLPConfig{
+				Enabled:  false,
+				Endpoint: "", // Should stay empty when disabled
+			},
+		}
+
+		err := config.Validate()
+		assert.NoError(t, err)
+
+		// Should NOT modify disabled OTLP config
+		assert.Equal(t, "", config.OTLP.Endpoint)
 	})
 }
 
