@@ -15,71 +15,112 @@ That's correlation. That's understanding.
 ## Observer Architecture
 
 ```
-                     🏢 Kubernetes Cluster
-    ┌─────────────────────────────────────────────────────────┐
-    │                                                         │
-    │  📦 Pod            📦 Pod            📦 Pod             │
-    │  api-gateway       redis-cache       worker-service     │
-    │                                                         │
-    └─────────────┬───────────────┬───────────────┬───────────┘
-                  │               │               │
-    ┌─────────────▼───────────────▼───────────────▼───────────┐
-    │                 🔍 Observer Layer                       │
-    │  ┌─────────────────────────────────────────────────────┐ │
-    │  │          Specialized Observers                      │ │
-    │  │                                                     │ │
-    │  │  Network ────┬──── Status ────┬──── Memory          │ │
-    │  │      │       │        │       │        │            │ │
-    │  │  Services ───┼──── Health ────┼──── Kernel          │ │
-    │  │      │       │        │       │        │            │ │
-    │  │  Storage ────┴──── Runtime ───┴──── Scheduler       │ │
-    │  │                                                     │ │
-    │  └─────────────────┬───────────────────────────────────┘ │
-    │                    │ Structured Events                   │
-    │                    ▼                                     │
-    │  ┌─────────────────────────────────────────────────────┐ │
-    │  │           🧠 Intelligence Layer                      │ │
-    │  │                                                     │ │
-    │  │   Event         Pattern        Root Cause          │ │
-    │  │   Correlation ─▶ Recognition ─▶ Analysis           │ │
-    │  │                                                     │ │
-    │  └─────────────────┬───────────────────────────────────┘ │
-    └────────────────────┼─────────────────────────────────────┘
-                         │
-                         ▼
-        📊 Understanding: "Memory leak in redis caused 
-            API timeouts leading to user retry storm"
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                         Kubernetes Cluster                                     │
+│                                                                                │
+│    Pod: api-gateway          Pod: redis-cache         Pod: worker-service     │
+│    ├─ nginx:1.21            ├─ redis:7.0              ├─ app:v2.3             │
+│    ├─ 3 replicas            ├─ memory: 2GB limit      ├─ CPU throttled        │
+│    └─ HTTP 500s ↑           └─ RSS growing ↑          └─ OOM killed ↑         │
+│                                                                                │
+└────────────────────────────────┬──────────────────────────────────────────────┘
+                                 │
+                                 │ eBPF hooks at kernel level
+                                 │ K8s API watches at cluster level
+                                 ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                          Observer Layer (17 Observers)                         │
+├───────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  Network & Communication          Memory & Storage        Process & Runtime   │
+│  ┌─────────────────────┐          ┌────────────────┐     ┌─────────────────┐ │
+│  │ Network   │ DNS     │          │ Memory         │     │ Kernel          │ │
+│  │ Status    │ Link    │          │ Storage I/O    │     │ Process Signals │ │
+│  └─────────────────────┘          └────────────────┘     │ Container RT    │ │
+│                                                           └─────────────────┘ │
+│                                                                                │
+│  Kubernetes & Orchestration       System & Platform                           │
+│  ┌─────────────────────┐          ┌────────────────┐                         │
+│  │ Deployments         │          │ Health         │                         │
+│  │ Lifecycle           │          │ Systemd        │                         │
+│  │ Scheduler           │          │ OTEL           │                         │
+│  │ Node Runtime        │          │ Base           │                         │
+│  └─────────────────────┘          └────────────────┘                         │
+│                                                                                │
+│  Each observer produces typed, structured events:                             │
+│  • Network: TCP connections, HTTP requests, DNS queries                       │
+│  • Memory: Allocations, leaks, OOM events                                     │
+│  • Deployments: Image changes, scale events, config updates                   │
+│  • Scheduler: CPU delays, throttling, noisy neighbors                         │
+│                                                                                │
+└────────────────────────────────┬──────────────────────────────────────────────┘
+                                 │
+                                 │ Typed events with correlation hints
+                                 ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                          Intelligence Layer                                    │
+├───────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│   ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐  │
+│   │ Event Correlation│─────▶│ Pattern Detection│─────▶│ Root Cause       │  │
+│   │                  │      │                  │      │ Analysis         │  │
+│   │ • Time windows   │      │ • Cascading fail │      │ • Causal chains  │  │
+│   │ • Process graphs │      │ • Retry storms   │      │ • Blast radius   │  │
+│   │ • Service mesh   │      │ • Memory leaks   │      │ • Impact score   │  │
+│   └──────────────────┘      └──────────────────┘      └──────────────────┘  │
+│                                                                                │
+└────────────────────────────────┬──────────────────────────────────────────────┘
+                                 │
+                                 ▼
+                    ┌────────────────────────────────┐
+                    │       Understanding            │
+                    ├────────────────────────────────┤
+                    │ "Deployment update to redis    │
+                    │  image v7.0 at 14:32:15        │
+                    │  caused memory leak,           │
+                    │  triggering OOM kills,         │
+                    │  leading to connection         │
+                    │  failures in api-gateway,      │
+                    │  resulting in user retry       │
+                    │  storm and 500 errors"         │
+                    │                                │
+                    │ Confidence: 94%                │
+                    │ Recommendation: Rollback       │
+                    └────────────────────────────────┘
 ```
 
 ## What We Actually Built
 
-**14 observers** organized by domain, each with deep understanding of what they watch:
+**17 production-ready observers** organized by domain, each with deep understanding of what they watch:
 
-### Network & Communication
-- **Network** - TCP/UDP connection monitoring, HTTP/DNS traffic analysis, application protocol parsing
-- **Status** - L7 status codes (HTTP/gRPC errors), timeouts, latency tracking via network interception
-- **Services** - Service dependency mapping using Kubernetes API and eBPF network monitoring
-- **Link** - Network failure detection: TCP SYN timeouts, ARP failures, packet retransmissions, connection resets
+### Network & Communication (4 observers)
+- **Network** - L3-L7 protocol monitoring (TCP/UDP/ICMP, HTTP/DNS/gRPC), zero-copy eBPF architecture, connection tracking with Kubernetes enrichment
+- **DNS** - DNS problem detection (slow queries, timeouts, NXDOMAIN), negative observer pattern tracking only failures
+- **Status** - L7 status codes (HTTP/gRPC errors), cascading timeout detection, retry storm identification, protocol-level failure analysis
+- **Link** - Network failure detection: TCP SYN timeouts, ARP failures, packet retransmissions, connection resets (referenced but not yet documented)
 
-### Memory & Storage
-- **Memory** - Memory allocation/deallocation tracking, RSS growth monitoring, intelligent leak detection
-- **Storage I/O** - VFS layer I/O monitoring, slow storage detection, Kubernetes volume issue analysis
+### Memory & Storage (2 observers)
+- **Memory** - CO-RE eBPF memory leak detector, malloc/free tracking, stack trace capture, long-lived allocation detection with K8s enrichment
+- **Storage I/O** - Block device I/O latency tracking, throughput monitoring, queue depth analysis, per-container attribution, I/O pattern detection
 
-### Process & Runtime  
-- **Kernel** - ConfigMap/Secret access tracking, process lifecycle events via eBPF
-- **Process Signals** - Runtime signal monitoring, OOM kill detection, crash loop correlation
-- **Node Runtime** - Kubelet metrics collection (CPU, memory, storage), pod lifecycle events
+### Process & Runtime (3 observers)
+- **Kernel** - Focused ConfigMap/Secret access monitoring, pod correlation infrastructure, security audit trail for configuration access
+- **Process Signals** - Complete signal attribution (WHO killed WHOM and WHY), OOM kill detection, exit code decoding, death intelligence
+- **Container Runtime** - Real-time OOM kill detection (microsecond precision), memory pressure monitoring, process exit tracking via eBPF
 
-### Health & Monitoring
-- **Health** - Syscall error pattern tracking (ENOSPC, ENOMEM, ECONNREFUSED), resource exhaustion detection
-- **OTEL** - OpenTelemetry OTLP protocol receiver, distributed tracing and service dependency mapping
+### Kubernetes & Orchestration (4 observers)
+- **Deployments** - Deployment/ConfigMap/Secret change tracking, impact classification, restart detection, rich correlation context for the intelligence engine
+- **Lifecycle** - Kubernetes resource state transitions (pods, services, nodes), breaking change detection, cascade effects
+- **Scheduler** - CPU scheduling delays, CFS throttling, noisy neighbor detection, core migration tracking, invisible latency identification
+- **Node Runtime** - Node health monitoring, kubelet metrics, resource pressure detection, system services tracking
 
-### Platform & Orchestration
-- **Scheduler** - CPU scheduling delays, CFS throttling, core migrations, noisy neighbor detection
-- **Lifecycle** - Kubernetes resource state transitions, breaking change detection, cascade effects
-- **Systemd** - Service state monitoring, failure tracking, restart pattern analysis
+### System & Platform (4 observers)
+- **Health** - Syscall error pattern tracking (ENOSPC, ENOMEM, ECONNREFUSED), resource exhaustion detection, critical system health indicators
+- **Systemd** - Systemd service state monitoring, failure tracking, restart pattern analysis, cgroup event correlation
+- **OTEL** - OpenTelemetry OTLP receiver (gRPC/HTTP), distributed tracing, service dependency mapping, cross-platform support
+- **Base** - Shared observer infrastructure providing consistent metrics, lifecycle management, and event channels (not standalone)
 
-Each observer understands its domain deeply. The Status Observer doesn't just count HTTP 500s—it detects cascading failure patterns and retry storms. The Memory Observer doesn't just track allocations—it identifies leak patterns and fragmentation issues.
+Each observer understands its domain deeply. The Status Observer doesn't just count HTTP 500s—it detects cascading failure patterns and retry storms. The Memory Observer doesn't just track allocations—it identifies leak patterns with stack traces. The Deployments Observer doesn't just watch changes—it classifies impact and predicts which events will correlate.
 
 ## Why This Matters
 
