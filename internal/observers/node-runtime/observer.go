@@ -434,7 +434,7 @@ func (o *Observer) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1.
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -485,7 +485,7 @@ func (o *Observer) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alph
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -557,7 +557,7 @@ func (o *Observer) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.Po
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -617,7 +617,7 @@ func (o *Observer) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.P
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -679,7 +679,7 @@ func (o *Observer) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha1
 				TraceID: traceID,
 				SpanID:  spanID,
 				Labels: map[string]string{
-					"observer": "node-runtime",
+					"observer": o.name,
 					"version":  "1.0.0",
 				},
 			},
@@ -879,7 +879,7 @@ func (o *Observer) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, s
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -930,7 +930,7 @@ func (o *Observer) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Pod
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -982,7 +982,7 @@ func (o *Observer) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status *
 				TraceID: traceID,
 				SpanID:  spanID,
 				Labels: map[string]string{
-					"observer": "node-runtime",
+					"observer": o.name,
 					"version":  "1.0.0",
 				},
 			},
@@ -1034,7 +1034,7 @@ func (o *Observer) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condit
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
