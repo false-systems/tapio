@@ -46,21 +46,21 @@ func (t *ConnectionTracker) startEBPF() error {
 	links := []link.Link{}
 
 	// TCP connect
-	connectLink, err := link.Tracepoint("tcp", "tcp_connect", objs.TcpConnect)
+	connectLink, err := link.Tracepoint("tcp", "tcp_connect", objs.TcpConnect, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach tcp_connect: %w", err)
 	}
 	links = append(links, connectLink)
 
 	// TCP accept
-	acceptLink, err := link.Tracepoint("tcp", "tcp_accept", objs.TcpAccept)
+	acceptLink, err := link.Tracepoint("tcp", "tcp_accept", objs.TcpAccept, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach tcp_accept: %w", err)
 	}
 	links = append(links, acceptLink)
 
 	// TCP close
-	closeLink, err := link.Tracepoint("tcp", "tcp_close", objs.TcpClose)
+	closeLink, err := link.Tracepoint("tcp", "tcp_close", objs.TcpClose, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach tcp_close: %w", err)
 	}
@@ -94,7 +94,7 @@ func (t *ConnectionTracker) stopEBPF() {
 		return
 	}
 
-	state := t.ebpfState.(*ebpfState)
+	state := t.ebpfState
 
 	// Close perf reader
 	if state.perfReader != nil {
@@ -116,7 +116,7 @@ func (t *ConnectionTracker) stopEBPF() {
 
 // readEBPFEvents reads connection events from eBPF
 func (t *ConnectionTracker) readEBPFEvents() {
-	state := t.ebpfState.(*ebpfState)
+	state := t.ebpfState
 	if state == nil || state.perfReader == nil {
 		return
 	}
