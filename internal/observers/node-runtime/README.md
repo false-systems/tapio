@@ -18,16 +18,28 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 - **Ground Truth**: Kubelet's view vs K8s API (eventual consistency differences)
 - **Multi-Output**: Events to Go channels, OTEL metrics, NATS (future)
 
-## Features
+## Current Coverage (3/10 Kubelet Endpoints)
 
-- ✅ Real-time node condition monitoring
-- ✅ Resource pressure detection
-- ✅ Kubelet performance tracking
-- ✅ Container runtime health checks
-- ✅ Network connectivity monitoring
-- ✅ Disk space and inode tracking
-- ✅ Process and thread monitoring
-- ✅ System load tracking
+| Endpoint | Purpose | Status |
+|----------|---------|--------|
+| `/healthz` | Basic kubelet health check | ✅ **Implemented** |
+| `/stats/summary` | Node & pod resource statistics | ✅ **Implemented** |
+| `/pods` | Pod lifecycle & container states | ✅ **Implemented** |
+| `/metrics/probes` | Liveness/Readiness probe metrics | ⏳ Phase 2 |
+| `/healthz/syncloop` | Critical pod sync health | ⏳ Phase 3 |
+| `/configz` | Kubelet configuration & eviction thresholds | ⏳ Phase 4 |
+| `/metrics/resource` | Actual vs requested resources | ⏳ Phase 5 |
+| `/spec` | Node capacity & allocatable | ⏳ Phase 6 |
+| `/metrics/cadvisor` | Container I/O & network metrics | ⏳ Phase 7 |
+| `/metrics` | Kubelet self-monitoring | ⏳ Phase 8 |
+
+## Roadmap
+
+**Phase 0:** ✅ Infrastructure (RingBuffer, OTEL multi-output)
+**Phase 1:** Refactor collector pattern
+**Phase 2-8:** Add 7 new kubelet endpoints
+**Phase 9:** Complete test suite (80%+ coverage)
+**Phase 10:** Final documentation
 
 ## Architecture
 
