@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// statusEvent from BPF - must match C struct exactly (status_monitor.c:25-39)
+// statusEvent from BPF - must match the C struct `struct status_event` in status_monitor.c exactly
 // C struct is __attribute__((packed)) = 60 bytes, Go struct has padding = 64 bytes
 type statusEvent struct {
 	Timestamp    uint64   // __u64 timestamp
