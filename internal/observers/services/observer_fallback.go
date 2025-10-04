@@ -10,6 +10,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// ebpfState stub for non-Linux platforms (always nil)
+type ebpfState struct{}
+
 // startEBPF starts fallback connection simulation (non-Linux)
 func (t *ConnectionTracker) startEBPF() error {
 	t.logger.Info("Starting services observer in fallback mode (simulated connections)")
