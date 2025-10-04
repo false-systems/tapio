@@ -21,12 +21,7 @@ type StatsCollector struct {
 	httpClient       *http.Client
 	kubeletURL       string
 	tracer           trace.Tracer
-	eventsProcessed  metric.Int64Counter
-	droppedEvents    metric.Int64Counter
 	apiLatency       metric.Float64Histogram
-	eventChan        chan<- *domain.CollectorEvent
-	recordEventFunc  func()
-	recordErrorFunc  func(error)
 	traceContextFunc func(context.Context) (string, string)
 }
 
@@ -35,12 +30,7 @@ func NewStatsCollector(
 	observerName, kubeletURL string,
 	httpClient *http.Client,
 	tracer trace.Tracer,
-	eventsProcessed metric.Int64Counter,
-	droppedEvents metric.Int64Counter,
 	apiLatency metric.Float64Histogram,
-	eventChan chan<- *domain.CollectorEvent,
-	recordEventFunc func(),
-	recordErrorFunc func(error),
 	traceContextFunc func(context.Context) (string, string),
 ) *StatsCollector {
 	return &StatsCollector{
@@ -48,12 +38,7 @@ func NewStatsCollector(
 		httpClient:       httpClient,
 		kubeletURL:       kubeletURL,
 		tracer:           tracer,
-		eventsProcessed:  eventsProcessed,
-		droppedEvents:    droppedEvents,
 		apiLatency:       apiLatency,
-		eventChan:        eventChan,
-		recordEventFunc:  recordEventFunc,
-		recordErrorFunc:  recordErrorFunc,
 		traceContextFunc: traceContextFunc,
 	}
 }
@@ -107,21 +92,19 @@ func (sc *StatsCollector) Collect(ctx context.Context) ([]domain.CollectorEvent,
 		attribute.Int("pod_stats_count", len(summary.Pods)),
 	)
 
-	// Process and emit events
+	// Process and build events (sending handled by observer)
 	events := make([]domain.CollectorEvent, 0, 2+len(summary.Pods))
 
 	// Node CPU event
 	if summary.Node.CPU != nil {
 		event := sc.buildNodeCPUEvent(ctx, &summary)
 		events = append(events, *event)
-		sc.sendEvent(ctx, event, summary.Node.NodeName, "node_runtime_cpu")
 	}
 
 	// Node memory event
 	if summary.Node.Memory != nil {
 		event := sc.buildNodeMemoryEvent(ctx, &summary)
 		events = append(events, *event)
-		sc.sendEvent(ctx, event, summary.Node.NodeName, "node_runtime_memory")
 	}
 
 	// Pod-level events
@@ -206,22 +189,21 @@ func (sc *StatsCollector) processPodStats(ctx context.Context, pod *statsv1alpha
 		if container.CPU != nil && container.CPU.UsageNanoCores != nil {
 			event := sc.buildCPUThrottlingEvent(ctx, pod, &container)
 			events = append(events, *event)
-			sc.sendEvent(ctx, event, pod.PodRef.Namespace, "node_runtime_cpu_throttling")
 		}
 
 		if container.Memory != nil {
 			event := sc.buildMemoryPressureEvent(ctx, pod, &container)
 			if event != nil {
 				events = append(events, *event)
-				sc.sendEvent(ctx, event, pod.PodRef.Namespace, "node_runtime_memory_pressure")
 			}
 		}
 	}
 
 	if pod.EphemeralStorage != nil {
 		event := sc.buildEphemeralStorageEvent(ctx, pod)
-		events = append(events, *event)
-		sc.sendEvent(ctx, event, pod.PodRef.Namespace, "node_runtime_ephemeral_storage")
+		if event != nil {
+			events = append(events, *event)
+		}
 	}
 
 	return events
@@ -348,29 +330,5 @@ func (sc *StatsCollector) buildEphemeralStorageEvent(ctx context.Context, pod *s
 				"version":  "1.0.0",
 			},
 		},
-	}
-}
-
-// sendEvent sends an event to the channel and records metrics
-func (sc *StatsCollector) sendEvent(ctx context.Context, event *domain.CollectorEvent, entityName, eventType string) {
-	select {
-	case sc.eventChan <- event:
-		sc.recordEventFunc()
-		if sc.eventsProcessed != nil {
-			attrs := []attribute.KeyValue{
-				attribute.String("event_type", eventType),
-			}
-			if entityName != "" {
-				attrs = append(attrs, attribute.String("entity", entityName))
-			}
-			sc.eventsProcessed.Add(ctx, 1, metric.WithAttributes(attrs...))
-		}
-	default:
-		sc.recordErrorFunc(fmt.Errorf("channel full"))
-		if sc.droppedEvents != nil {
-			sc.droppedEvents.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", eventType),
-			))
-		}
 	}
 }

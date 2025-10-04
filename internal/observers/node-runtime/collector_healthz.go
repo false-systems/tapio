@@ -15,16 +15,11 @@ import (
 // HealthzCollector monitors kubelet health via /healthz endpoint
 type HealthzCollector struct {
 	*BaseCollector
-	httpClient       *http.Client
-	kubeletURL       string
-	insecure         bool
-	tracer           trace.Tracer
-	eventsProcessed  metric.Int64Counter
-	apiLatency       metric.Float64Histogram
-	eventChan        chan<- *domain.CollectorEvent
-	recordEventFunc  func()
-	recordErrorFunc  func(error)
-	traceContextFunc func(context.Context) (string, string)
+	httpClient *http.Client
+	kubeletURL string
+	insecure   bool
+	tracer     trace.Tracer
+	apiLatency metric.Float64Histogram
 }
 
 // NewHealthzCollector creates a new HealthzCollector
@@ -33,25 +28,15 @@ func NewHealthzCollector(
 	insecure bool,
 	httpClient *http.Client,
 	tracer trace.Tracer,
-	eventsProcessed metric.Int64Counter,
 	apiLatency metric.Float64Histogram,
-	eventChan chan<- *domain.CollectorEvent,
-	recordEventFunc func(),
-	recordErrorFunc func(error),
-	traceContextFunc func(context.Context) (string, string),
 ) *HealthzCollector {
 	return &HealthzCollector{
-		BaseCollector:    NewBaseCollector("healthz", "/healthz", observerName),
-		httpClient:       httpClient,
-		kubeletURL:       kubeletURL,
-		insecure:         insecure,
-		tracer:           tracer,
-		eventsProcessed:  eventsProcessed,
-		apiLatency:       apiLatency,
-		eventChan:        eventChan,
-		recordEventFunc:  recordEventFunc,
-		recordErrorFunc:  recordErrorFunc,
-		traceContextFunc: traceContextFunc,
+		BaseCollector: NewBaseCollector("healthz", "/healthz", observerName),
+		httpClient:    httpClient,
+		kubeletURL:    kubeletURL,
+		insecure:      insecure,
+		tracer:        tracer,
+		apiLatency:    apiLatency,
 	}
 }
 
