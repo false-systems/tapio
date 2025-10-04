@@ -64,11 +64,31 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Initialize BaseObserver with new architecture
+	ctx := context.Background()
+	baseObserver := base.NewBaseObserverWithConfig(base.BaseObserverConfig{
+		Name:               name,
+		HealthCheckTimeout: 5 * time.Minute,
+		ErrorRateThreshold: 0.1,
+		OutputTargets: base.OutputTargets{
+			OTEL:    config.EnableOTEL,
+			Stdout:  config.EnableStdout,
+			Channel: true, // Always enabled for backward compat
+		},
+		StdoutConfig: &base.StdoutEmitterConfig{
+			Pretty: true,
+		},
+		Logger: logger,
+	})
+
+	eventManager := base.NewEventChannelManager(config.BufferSize, name, logger.Named(name))
+	lifecycleManager := base.NewLifecycleManager(ctx, logger.Named(name))
+
 	// Initialize OpenTelemetry
 	meter := otel.Meter("tapio.observers.services")
 	tracer := otel.Tracer("tapio.observers.services")
 
-	// Create metrics
+	// Create metrics (errors will be handled in next branch)
 	connectionsTracked, _ := meter.Int64Counter(
 		fmt.Sprintf("%s_connections_tracked_total", name),
 		metric.WithDescription("Total TCP connections tracked"),
@@ -87,9 +107,9 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 	)
 
 	o := &Observer{
-		BaseObserver:        base.NewBaseObserver(name, 5*time.Minute),
-		EventChannelManager: base.NewEventChannelManager(config.BufferSize, name, logger.Named(name)),
-		LifecycleManager:    base.NewLifecycleManager(context.Background(), logger.Named(name)),
+		BaseObserver:        baseObserver,
+		EventChannelManager: eventManager,
+		LifecycleManager:    lifecycleManager,
 		config:              config,
 		logger:              logger.Named(name),
 		name:                name,
