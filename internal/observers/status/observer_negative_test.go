@@ -493,12 +493,12 @@ func TestInvalidEventData(t *testing.T) {
 
 	// Test with various invalid events
 	invalidEvents := []*StatusEvent{
-		{ServiceHash: 0, EndpointHash: 0, StatusCode: 0},      // All zeros
-		{ServiceHash: ^uint32(0), StatusCode: 999},            // Max values
-		{ErrorType: ErrorType(255)},                           // Invalid error type
-		{Latency: ^uint32(0)},                                 // Max latency
-		{Timestamp: 0},                                         // Zero timestamp
-		{PID: 0},                                              // Zero PID
+		{ServiceHash: 0, EndpointHash: 0, StatusCode: 0}, // All zeros
+		{ServiceHash: ^uint32(0), StatusCode: 999},       // Max values
+		{ErrorType: ErrorType(255)},                      // Invalid error type
+		{Latency: ^uint32(0)},                            // Max latency
+		{Timestamp: 0},                                   // Zero timestamp
+		{PID: 0},                                         // Zero PID
 	}
 
 	// Aggregator should handle all invalid data gracefully

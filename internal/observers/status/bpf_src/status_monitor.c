@@ -238,28 +238,12 @@ int trace_http_response(struct pt_regs *ctx)
     return 0;
 }
 
-// Socket filter for HTTP traffic analysis (alternative approach)
-SEC("socket/http_filter")
-int socket_http_monitor(struct __sk_buff *skb)
-{
-    void *data = (void *)(long)skb->data;
-    void *data_end = (void *)(long)skb->data_end;
-
-    // Basic packet size check
-    if (data + 64 > data_end) return 0;
-
-    // Look for HTTP response pattern in payload
-    char *payload = data;
-    int status_code = parse_http_status(payload, data_end - data);
-
-    if (status_code >= 400) {
-        __u32 service_hash = skb->remote_ip4; // Use destination IP as service hash
-        emit_status_event(service_hash, 0, status_code, 0,
-                         PROTO_HTTP, skb->local_ip4, skb->remote_ip4,
-                         bpf_ntohs(skb->remote_port));
-    }
-
-    return 0;
-}
+// Socket filter for HTTP traffic analysis (DISABLED - verifier issues)
+// SEC("socket/http_filter")
+// int socket_http_monitor(struct __sk_buff *skb)
+// {
+//     // DISABLED: Kernel verifier issues with __sk_buff field access
+//     return 0;
+// }
 
 char _license[] SEC("license") = "GPL";

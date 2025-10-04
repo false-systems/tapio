@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -26,8 +27,12 @@ func BenchmarkShouldTrackDeployment(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	var result bool
 	for i := 0; i < b.N; i++ {
-		_ = observer.shouldTrackDeployment(deployment)
+		result = observer.shouldTrackDeployment(deployment)
+	}
+	if result {
+		// Prevent compiler optimization
 	}
 }
 
@@ -44,8 +49,12 @@ func BenchmarkHasSignificantChange(b *testing.B) {
 	newDep.Spec.Template.Spec.Containers[0].Image = "nginx:1.20"
 
 	b.ResetTimer()
+	var result bool
 	for i := 0; i < b.N; i++ {
-		_ = observer.hasSignificantChange(oldDep, newDep)
+		result = observer.hasSignificantChange(oldDep, newDep)
+	}
+	if result {
+		// Prevent compiler optimization
 	}
 }
 
@@ -61,8 +70,12 @@ func BenchmarkCreateDeploymentEvent(b *testing.B) {
 	oldDeployment := createTestDeployment("test-app", "default")
 
 	b.ResetTimer()
+	var event *domain.CollectorEvent
 	for i := 0; i < b.N; i++ {
-		_ = observer.createDeploymentEvent(deployment, "updated", oldDeployment)
+		event = observer.createDeploymentEvent(deployment, "updated", oldDeployment)
+	}
+	if event != nil {
+		// Prevent compiler optimization
 	}
 }
 

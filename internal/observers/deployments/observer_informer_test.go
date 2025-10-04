@@ -240,7 +240,7 @@ func TestDeploymentFiltering(t *testing.T) {
 // TestInformerReconnection tests that informer handles disconnections
 func TestInformerReconnection(t *testing.T) {
 	config := DefaultConfig()
-	config.MockMode = true // Start with mock mode
+	config.MockMode = true                // Start with mock mode
 	config.ResyncPeriod = 1 * time.Second // Fast resync for testing
 
 	observer, err := NewObserver("test", config)

@@ -19,8 +19,8 @@ type ConnectionTracker struct {
 	connections map[ConnectionKey]*ActiveConnection
 	stats       ConnectionStats
 
-	// eBPF state (platform-specific)
-	ebpfState interface{}
+	// eBPF state (platform-specific, nil on non-Linux)
+	ebpfState *ebpfState
 
 	// Event processing
 	eventCh chan *ConnectionEvent
