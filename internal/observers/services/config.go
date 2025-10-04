@@ -21,6 +21,10 @@ type Config struct {
 	// General observer config
 	Name        string `json:"name"`
 	HealthCheck bool   `json:"health_check"`
+
+	// Output configuration
+	EnableOTEL   bool `json:"enable_otel"`
+	EnableStdout bool `json:"enable_stdout"`
 }
 
 // DefaultConfig returns a default configuration
@@ -40,6 +44,10 @@ func DefaultConfig() *Config {
 		// General defaults
 		Name:        "services",
 		HealthCheck: true,
+
+		// Output defaults
+		EnableOTEL:   true,
+		EnableStdout: false,
 	}
 }
 
