@@ -26,6 +26,17 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+const (
+	// defaultLRUCacheSize is the default size for the event deduplication cache
+	defaultLRUCacheSize = 1000
+
+	// defaultHealthCheckTimeout is the default timeout for health checks
+	defaultHealthCheckTimeout = 5 * time.Minute
+
+	// observerVersion is the version of the deployments observer
+	observerVersion = "1.0.0"
+)
+
 // Observer tracks deployment-related changes in Kubernetes
 type Observer struct {
 	*base.BaseObserver        // Statistics and Health
@@ -150,7 +161,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 	}
 
 	// Create LRU cache for deduplication
-	recentEvents, err := lru.New[string, time.Time](1000)
+	recentEvents, err := lru.New[string, time.Time](defaultLRUCacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
 	}
@@ -159,7 +170,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 	ctx := context.Background()
 	baseObserver := base.NewBaseObserverWithConfig(base.BaseObserverConfig{
 		Name:               name,
-		HealthCheckTimeout: 5 * time.Minute,
+		HealthCheckTimeout: defaultHealthCheckTimeout,
 		ErrorRateThreshold: 0.1,
 		OutputTargets: base.OutputTargets{
 			OTEL:    config.EnableOTEL,
@@ -465,7 +476,7 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 	metadata := domain.EventMetadata{
 		Labels: map[string]string{
 			"observer":   o.config.Name,
-			"version":    "1.0.0",
+			"version":    observerVersion,
 			"action":     action,
 			"namespace":  deployment.Namespace,
 			"deployment": deployment.Name,
@@ -1205,7 +1216,7 @@ func (o *Observer) createConfigMapEvent(cm *corev1.ConfigMap, action string) *do
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer":  o.config.Name,
-				"version":   "1.0.0",
+				"version":   observerVersion,
 				"action":    action,
 				"namespace": cm.Namespace,
 				"configmap": cm.Name,
@@ -1249,7 +1260,7 @@ func (o *Observer) createSecretEvent(secret *corev1.Secret, action string) *doma
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer":  o.config.Name,
-				"version":   "1.0.0",
+				"version":   observerVersion,
 				"action":    action,
 				"namespace": secret.Namespace,
 				"secret":    secret.Name,
