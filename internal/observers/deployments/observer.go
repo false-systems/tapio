@@ -26,6 +26,17 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+const (
+	// defaultLRUCacheSize is the default size for the event deduplication cache
+	defaultLRUCacheSize = 1000
+
+	// defaultHealthCheckTimeout is the default timeout for health checks
+	defaultHealthCheckTimeout = 5 * time.Minute
+
+	// observerVersion is the version of the deployments observer
+	observerVersion = "1.0.0"
+)
+
 // Observer tracks deployment-related changes in Kubernetes
 type Observer struct {
 	*base.BaseObserver        // Statistics and Health
@@ -77,30 +88,53 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 	tracer := otel.Tracer("tapio.observers.deployments")
 
 	// Create metrics
-	deploymentsTracked, _ := meter.Int64Counter(
+	deploymentsTracked, err := meter.Int64Counter(
 		fmt.Sprintf("%s_deployments_tracked_total", name),
 		metric.WithDescription("Total deployment changes tracked"),
 	)
-	configChanges, _ := meter.Int64Counter(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create deployments_tracked metric: %w", err)
+	}
+
+	configChanges, err := meter.Int64Counter(
 		fmt.Sprintf("%s_config_changes_total", name),
 		metric.WithDescription("Total ConfigMap/Secret changes tracked"),
 	)
-	rollbacks, _ := meter.Int64Counter(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create config_changes metric: %w", err)
+	}
+
+	rollbacks, err := meter.Int64Counter(
 		fmt.Sprintf("%s_rollbacks_total", name),
 		metric.WithDescription("Total deployment rollbacks detected"),
 	)
-	eventsProcessed, _ := meter.Int64Counter(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rollbacks metric: %w", err)
+	}
+
+	eventsProcessed, err := meter.Int64Counter(
 		fmt.Sprintf("%s_events_processed_total", name),
 		metric.WithDescription("Total events processed"),
 	)
-	eventsDropped, _ := meter.Int64Counter(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create events_processed metric: %w", err)
+	}
+
+	eventsDropped, err := meter.Int64Counter(
 		fmt.Sprintf("%s_events_dropped_total", name),
 		metric.WithDescription("Total events dropped"),
 	)
-	processingTime, _ := meter.Float64Histogram(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create events_dropped metric: %w", err)
+	}
+
+	processingTime, err := meter.Float64Histogram(
 		fmt.Sprintf("%s_processing_time_ms", name),
 		metric.WithDescription("Event processing time in milliseconds"),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create processing_time metric: %w", err)
+	}
 
 	// Create K8s client
 	var client kubernetes.Interface
@@ -127,7 +161,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 	}
 
 	// Create LRU cache for deduplication
-	recentEvents, err := lru.New[string, time.Time](1000)
+	recentEvents, err := lru.New[string, time.Time](defaultLRUCacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
 	}
@@ -136,7 +170,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 	ctx := context.Background()
 	baseObserver := base.NewBaseObserverWithConfig(base.BaseObserverConfig{
 		Name:               name,
-		HealthCheckTimeout: 5 * time.Minute,
+		HealthCheckTimeout: defaultHealthCheckTimeout,
 		ErrorRateThreshold: 0.1,
 		OutputTargets: base.OutputTargets{
 			OTEL:    config.EnableOTEL,
@@ -360,6 +394,9 @@ func (o *Observer) isRollback(old, new *appsv1.Deployment) bool {
 	if _, exists := new.Annotations["kubectl.kubernetes.io/rollback"]; exists {
 		return true
 	}
+	if _, exists := new.Annotations["deployment.kubernetes.io/rollback"]; exists {
+		return true
+	}
 
 	return false
 }
@@ -396,9 +433,9 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 
 	// For scale events, include replica count
 	if action == "scaled" && deployment.Spec.Replicas != nil {
-		message = fmt.Sprintf("Deployment %s scaled to %d replicas", deployment.Name, *deployment.Spec.Replicas)
+		message = fmt.Sprintf("Deployment %s scaled (replicas: %d)", deployment.Name, *deployment.Spec.Replicas)
 		if oldDeployment != nil && oldDeployment.Spec.Replicas != nil {
-			message = fmt.Sprintf("Deployment %s scaled from %d to %d replicas",
+			message = fmt.Sprintf("Deployment %s scaled from %d to %d",
 				deployment.Name, *oldDeployment.Spec.Replicas, *deployment.Spec.Replicas)
 		}
 	}
@@ -439,7 +476,7 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 	metadata := domain.EventMetadata{
 		Labels: map[string]string{
 			"observer":   o.config.Name,
-			"version":    "1.0.0",
+			"version":    observerVersion,
 			"action":     action,
 			"namespace":  deployment.Namespace,
 			"deployment": deployment.Name,
@@ -848,12 +885,16 @@ func (o *Observer) emitDeploymentDomainMetrics(ctx context.Context, deployment *
 
 	// Emit replica count gauge
 	if deployment.Spec.Replicas != nil {
-		o.BaseObserver.EmitDomainGauge(ctx, base.DomainGauge{
-			Name:  "deployment_replicas",
-			Value: int64(*deployment.Spec.Replicas),
-			Attributes: append(attrs,
+		var statusAttr []attribute.KeyValue
+		if len(deployment.Status.Conditions) > 0 {
+			statusAttr = []attribute.KeyValue{
 				attribute.String("status", string(deployment.Status.Conditions[len(deployment.Status.Conditions)-1].Type)),
-			),
+			}
+		}
+		o.BaseObserver.EmitDomainGauge(ctx, base.DomainGauge{
+			Name:       "deployment_replicas",
+			Value:      int64(*deployment.Spec.Replicas),
+			Attributes: append(attrs, statusAttr...),
 		})
 	}
 
@@ -1020,8 +1061,21 @@ func (o *Observer) handleConfigMapUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
+	// Check for actual data changes
+	dataChanged := false
+	if len(oldCM.Data) != len(newCM.Data) || len(oldCM.BinaryData) != len(newCM.BinaryData) {
+		dataChanged = true
+	} else {
+		for key, oldVal := range oldCM.Data {
+			if newVal, exists := newCM.Data[key]; !exists || oldVal != newVal {
+				dataChanged = true
+				break
+			}
+		}
+	}
+
 	// Skip if no actual data change
-	if oldCM.ResourceVersion == newCM.ResourceVersion {
+	if !dataChanged && oldCM.ResourceVersion == newCM.ResourceVersion {
 		return
 	}
 
@@ -1162,7 +1216,7 @@ func (o *Observer) createConfigMapEvent(cm *corev1.ConfigMap, action string) *do
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer":  o.config.Name,
-				"version":   "1.0.0",
+				"version":   observerVersion,
 				"action":    action,
 				"namespace": cm.Namespace,
 				"configmap": cm.Name,
@@ -1206,7 +1260,7 @@ func (o *Observer) createSecretEvent(secret *corev1.Secret, action string) *doma
 		Metadata: domain.EventMetadata{
 			Labels: map[string]string{
 				"observer":  o.config.Name,
-				"version":   "1.0.0",
+				"version":   observerVersion,
 				"action":    action,
 				"namespace": secret.Namespace,
 				"secret":    secret.Name,
