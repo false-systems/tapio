@@ -163,8 +163,30 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		Timeout: config.RequestTimeout,
 	}
 
+	// Configure advanced BaseObserver with RingBuffer and multi-output
+	baseConfig := base.BaseObserverConfig{
+		Name:               name,
+		HealthCheckTimeout: 30 * time.Second,
+		ErrorRateThreshold: 0.1, // 10% error rate threshold
+
+		// Enable RingBuffer for high-performance event processing
+		EnableRingBuffer: true,
+		RingBufferSize:   8192, // Must be power of 2
+		BatchSize:        32,
+		BatchTimeout:     10 * time.Millisecond,
+
+		// Enable multi-output targets
+		OutputTargets: base.OutputTargets{
+			Channel: true,  // Local Go channel (existing behavior)
+			OTEL:    true,  // Direct OTEL domain metrics emission
+			Stdout:  false, // Disabled in production
+		},
+
+		Logger: config.Logger,
+	}
+
 	return &Observer{
-		BaseObserver:        base.NewBaseObserver(name, 30*time.Second),
+		BaseObserver:        base.NewBaseObserverWithConfig(baseConfig),
 		EventChannelManager: base.NewEventChannelManager(10000, name, config.Logger),
 		LifecycleManager:    base.NewLifecycleManager(context.Background(), config.Logger),
 
