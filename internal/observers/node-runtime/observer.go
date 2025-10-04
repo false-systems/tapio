@@ -363,11 +363,9 @@ func (o *Observer) collectStats() {
 	}
 }
 
-// fetchStats fetches and processes stats from kubelet API
+// fetchStats fetches and processes stats from kubelet API using StatsCollector
 func (o *Observer) fetchStats() error {
-	start := time.Now()
-	ctx, span := o.tracer.Start(o.LifecycleManager.Context(), "node-runtime.fetch_stats")
-	defer span.End()
+	ctx := o.LifecycleManager.Context()
 
 	// Track active poll
 	if o.pollsActive != nil {
@@ -378,6 +376,40 @@ func (o *Observer) fetchStats() error {
 			attribute.String("operation", "fetch_stats"),
 		))
 	}
+
+	// Use StatsCollector to fetch and build events
+	events, err := o.statsCollector.Collect(ctx)
+	if err != nil {
+		o.BaseObserver.RecordError(err)
+		return err
+	}
+
+	// Send all collected events
+	for i := range events {
+		o.sendCollectedEvent(ctx, &events[i])
+	}
+
+	return nil
+}
+
+// sendCollectedEvent sends a collected event and records metrics
+func (o *Observer) sendCollectedEvent(ctx context.Context, event *domain.CollectorEvent) {
+	if o.EventChannelManager.SendEvent(event) {
+		o.BaseObserver.RecordEvent()
+		if o.eventsProcessed != nil {
+			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
+	} else {
+		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
+		if o.droppedEvents != nil {
+			o.droppedEvents.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("event_type", string(event.Type)),
+			))
+		}
+	}
+}
 
 	url := fmt.Sprintf("https://%s/stats/summary", o.config.Address)
 	if o.config.Insecure {
