@@ -435,8 +435,8 @@ func (o *Observer) createDeploymentEvent(deployment *appsv1.Deployment, action s
 	if action == "scaled" && deployment.Spec.Replicas != nil {
 		message = fmt.Sprintf("Deployment %s scaled (replicas: %d)", deployment.Name, *deployment.Spec.Replicas)
 		if oldDeployment != nil && oldDeployment.Spec.Replicas != nil {
-			message = fmt.Sprintf("Deployment %s scaled from %d to %d (replicas: %d)",
-				deployment.Name, *oldDeployment.Spec.Replicas, *deployment.Spec.Replicas, *deployment.Spec.Replicas)
+			message = fmt.Sprintf("Deployment %s scaled from %d to %d",
+				deployment.Name, *oldDeployment.Spec.Replicas, *deployment.Spec.Replicas)
 		}
 	}
 
