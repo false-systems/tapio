@@ -163,8 +163,30 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		Timeout: config.RequestTimeout,
 	}
 
+	// Configure advanced BaseObserver with RingBuffer and multi-output
+	baseConfig := base.BaseObserverConfig{
+		Name:               name,
+		HealthCheckTimeout: 30 * time.Second,
+		ErrorRateThreshold: 0.1, // 10% error rate threshold
+
+		// Enable RingBuffer for high-performance event processing
+		EnableRingBuffer: true,
+		RingBufferSize:   8192, // Must be power of 2
+		BatchSize:        32,
+		BatchTimeout:     10 * time.Millisecond,
+
+		// Enable multi-output targets
+		OutputTargets: base.OutputTargets{
+			Channel: true,  // Local Go channel (existing behavior)
+			OTEL:    true,  // Direct OTEL domain metrics emission
+			Stdout:  false, // Disabled in production
+		},
+
+		Logger: config.Logger,
+	}
+
 	return &Observer{
-		BaseObserver:        base.NewBaseObserver(name, 30*time.Second),
+		BaseObserver:        base.NewBaseObserverWithConfig(baseConfig),
 		EventChannelManager: base.NewEventChannelManager(10000, name, config.Logger),
 		LifecycleManager:    base.NewLifecycleManager(context.Background(), config.Logger),
 
@@ -434,7 +456,7 @@ func (o *Observer) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1.
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -485,7 +507,7 @@ func (o *Observer) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alph
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -557,7 +579,7 @@ func (o *Observer) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.Po
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -617,7 +639,7 @@ func (o *Observer) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.P
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -679,7 +701,7 @@ func (o *Observer) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha1
 				TraceID: traceID,
 				SpanID:  spanID,
 				Labels: map[string]string{
-					"observer": "node-runtime",
+					"observer": o.name,
 					"version":  "1.0.0",
 				},
 			},
@@ -879,7 +901,7 @@ func (o *Observer) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, s
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -930,7 +952,7 @@ func (o *Observer) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Pod
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},
@@ -982,7 +1004,7 @@ func (o *Observer) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status *
 				TraceID: traceID,
 				SpanID:  spanID,
 				Labels: map[string]string{
-					"observer": "node-runtime",
+					"observer": o.name,
 					"version":  "1.0.0",
 				},
 			},
@@ -1034,7 +1056,7 @@ func (o *Observer) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condit
 			TraceID: traceID,
 			SpanID:  spanID,
 			Labels: map[string]string{
-				"observer": "node-runtime",
+				"observer": o.name,
 				"version":  "1.0.0",
 			},
 		},

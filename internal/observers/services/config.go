@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+const (
+	// Default connection tracking values
+	defaultConnectionTableSize = 10000
+	defaultConnectionTimeout   = 5 * time.Minute
+	defaultBufferSize          = 1000
+	defaultCleanupInterval     = 30 * time.Second
+
+	// Default K8s enrichment values
+	defaultK8sRefreshInterval = 30 * time.Second
+	defaultPodMappingTimeout  = 10 * time.Second
+
+	// eBPF configuration
+	perfBufferSize = 4096
+)
+
 // Config holds configuration for the services observer
 type Config struct {
 	// connection tracking: Connection tracking config
@@ -21,25 +36,33 @@ type Config struct {
 	// General observer config
 	Name        string `json:"name"`
 	HealthCheck bool   `json:"health_check"`
+
+	// Output configuration
+	EnableOTEL   bool `json:"enable_otel"`
+	EnableStdout bool `json:"enable_stdout"`
 }
 
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		// connection tracking defaults
-		ConnectionTableSize: 10000,
-		ConnectionTimeout:   5 * time.Minute,
-		BufferSize:          1000,
-		CleanupInterval:     30 * time.Second,
+		ConnectionTableSize: defaultConnectionTableSize,
+		ConnectionTimeout:   defaultConnectionTimeout,
+		BufferSize:          defaultBufferSize,
+		CleanupInterval:     defaultCleanupInterval,
 
 		// K8s enrichment defaults
 		EnableK8sMapping:   true,
-		K8sRefreshInterval: 30 * time.Second,
-		PodMappingTimeout:  10 * time.Second,
+		K8sRefreshInterval: defaultK8sRefreshInterval,
+		PodMappingTimeout:  defaultPodMappingTimeout,
 
 		// General defaults
 		Name:        "services",
 		HealthCheck: true,
+
+		// Output defaults
+		EnableOTEL:   true,
+		EnableStdout: false,
 	}
 }
 
