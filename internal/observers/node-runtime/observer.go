@@ -46,6 +46,11 @@ type Observer struct {
 	logger          *zap.Logger
 	podTraceManager *PodTraceManager
 
+	// Collectors for kubelet endpoints
+	statsCollector   *StatsCollector
+	podsCollector    *PodsCollector
+	healthzCollector *HealthzCollector
+
 	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
 	eventsProcessed metric.Int64Counter
@@ -185,9 +190,48 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		Logger: config.Logger,
 	}
 
+	// Create base observer components
+	baseObs := base.NewBaseObserverWithConfig(baseConfig)
+	eventChanMgr := base.NewEventChannelManager(10000, name, config.Logger)
+
+	// Helper function for extracting trace context
+	extractTrace := func(ctx context.Context) (string, string) {
+		span := trace.SpanFromContext(ctx)
+		if span.SpanContext().IsValid() {
+			return span.SpanContext().TraceID().String(), span.SpanContext().SpanID().String()
+		}
+		return "", ""
+	}
+
+	// Initialize collectors
+	statsCollector := NewStatsCollector(
+		name, config.Address,
+		client,
+		tracer,
+		apiLatency,
+		extractTrace,
+	)
+
+	podsCollector := NewPodsCollector(
+		name, config.Address,
+		config.Insecure,
+		client,
+		tracer,
+		apiLatency,
+		extractTrace,
+	)
+
+	healthzCollector := NewHealthzCollector(
+		name, config.Address,
+		config.Insecure,
+		client,
+		tracer,
+		apiLatency,
+	)
+
 	return &Observer{
-		BaseObserver:        base.NewBaseObserverWithConfig(baseConfig),
-		EventChannelManager: base.NewEventChannelManager(10000, name, config.Logger),
+		BaseObserver:        baseObs,
+		EventChannelManager: eventChanMgr,
 		LifecycleManager:    base.NewLifecycleManager(context.Background(), config.Logger),
 
 		name:            name,
@@ -195,6 +239,11 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		client:          client,
 		logger:          config.Logger,
 		podTraceManager: NewPodTraceManager(),
+
+		// Collectors
+		statsCollector:   statsCollector,
+		podsCollector:    podsCollector,
+		healthzCollector: healthzCollector,
 
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,

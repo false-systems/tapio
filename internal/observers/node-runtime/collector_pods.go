@@ -21,11 +21,7 @@ type PodsCollector struct {
 	kubeletURL       string
 	insecure         bool
 	tracer           trace.Tracer
-	eventsProcessed  metric.Int64Counter
 	apiLatency       metric.Float64Histogram
-	eventChan        chan<- *domain.CollectorEvent
-	recordEventFunc  func()
-	recordErrorFunc  func(error)
 	traceContextFunc func(context.Context) (string, string)
 }
 
@@ -35,11 +31,7 @@ func NewPodsCollector(
 	insecure bool,
 	httpClient *http.Client,
 	tracer trace.Tracer,
-	eventsProcessed metric.Int64Counter,
 	apiLatency metric.Float64Histogram,
-	eventChan chan<- *domain.CollectorEvent,
-	recordEventFunc func(),
-	recordErrorFunc func(error),
 	traceContextFunc func(context.Context) (string, string),
 ) *PodsCollector {
 	return &PodsCollector{
@@ -48,11 +40,7 @@ func NewPodsCollector(
 		kubeletURL:       kubeletURL,
 		insecure:         insecure,
 		tracer:           tracer,
-		eventsProcessed:  eventsProcessed,
 		apiLatency:       apiLatency,
-		eventChan:        eventChan,
-		recordEventFunc:  recordEventFunc,
-		recordErrorFunc:  recordErrorFunc,
 		traceContextFunc: traceContextFunc,
 	}
 }
@@ -123,19 +111,16 @@ func (pc *PodsCollector) processPodStatus(ctx context.Context, pod *v1.Pod) []do
 		if status.State.Waiting != nil {
 			event := pc.buildContainerWaitingEvent(ctx, pod, &status)
 			events = append(events, *event)
-			pc.sendEvent(ctx, event, "container_waiting")
 		}
 
 		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
 			event := pc.buildContainerTerminatedEvent(ctx, pod, &status)
 			events = append(events, *event)
-			pc.sendEvent(ctx, event, "container_terminated")
 		}
 
 		if status.LastTerminationState.Terminated != nil && status.RestartCount > 3 {
 			event := pc.buildCrashLoopEvent(ctx, pod, &status)
 			events = append(events, *event)
-			pc.sendEvent(ctx, event, "crash_loop")
 		}
 	}
 
@@ -143,7 +128,6 @@ func (pc *PodsCollector) processPodStatus(ctx context.Context, pod *v1.Pod) []do
 		if condition.Type == v1.PodReady && condition.Status != v1.ConditionTrue {
 			event := pc.buildPodNotReadyEvent(ctx, pod, &condition)
 			events = append(events, *event)
-			pc.sendEvent(ctx, event, "pod_not_ready")
 		}
 	}
 
@@ -286,20 +270,5 @@ func (pc *PodsCollector) buildPodNotReadyEvent(ctx context.Context, pod *v1.Pod,
 				"version":  "1.0.0",
 			},
 		},
-	}
-}
-
-// sendEvent sends an event to the channel and records metrics
-func (pc *PodsCollector) sendEvent(ctx context.Context, event *domain.CollectorEvent, eventType string) {
-	select {
-	case pc.eventChan <- event:
-		pc.recordEventFunc()
-		if pc.eventsProcessed != nil {
-			pc.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_"+eventType),
-			))
-		}
-	default:
-		pc.recordErrorFunc(fmt.Errorf("channel full"))
 	}
 }
