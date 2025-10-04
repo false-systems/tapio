@@ -222,10 +222,10 @@ func TestStatusAggregatorConcurrency(t *testing.T) {
 
 func TestAggregatedStatusMetrics(t *testing.T) {
 	tests := []struct {
-		name          string
-		status        *AggregatedStatus
-		expectedAvg   float64
-		expectedRate  float64
+		name         string
+		status       *AggregatedStatus
+		expectedAvg  float64
+		expectedRate float64
 	}{
 		{
 			name: "Normal metrics",

@@ -24,21 +24,23 @@ import (
 	"go.uber.org/zap"
 )
 
-// statusEvent from BPF - must match C struct exactly
+// statusEvent from BPF - must match the C struct `struct status_event` in status_monitor.c exactly
+// C struct is __attribute__((packed)) = 60 bytes, Go struct has padding = 64 bytes
 type statusEvent struct {
-	Timestamp    uint64
-	PID          uint32
-	TID          uint32
-	ServiceHash  uint32
-	EndpointHash uint32
-	LatencyUS    uint32
-	StatusCode   uint16
-	ErrorType    uint16
-	Protocol     uint16
-	Port         uint16
-	SrcIP        uint32
-	DstIP        uint32
-	Comm         [16]byte
+	Timestamp    uint64   // __u64 timestamp
+	PID          uint32   // __u32 pid
+	TID          uint32   // __u32 tid
+	ServiceHash  uint32   // __u32 service_hash
+	EndpointHash uint32   // __u32 endpoint_hash
+	LatencyUS    uint32   // __u32 latency_us
+	StatusCode   uint16   // __u16 status_code
+	ErrorType    uint16   // __u16 error_type
+	Protocol     uint16   // __u16 protocol
+	Port         uint16   // __u16 port
+	SrcIP        uint32   // __u32 src_ip
+	DstIP        uint32   // __u32 dst_ip
+	Comm         [16]byte // char comm[16]
+	// No padding fields - Go will add 4 bytes padding to align to 8-byte boundary
 }
 
 // statusEBPF contains all eBPF state
