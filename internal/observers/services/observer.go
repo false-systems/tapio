@@ -88,23 +88,38 @@ func NewObserver(name string, config *Config, logger *zap.Logger) (*Observer, er
 	meter := otel.Meter("tapio.observers.services")
 	tracer := otel.Tracer("tapio.observers.services")
 
-	// Create metrics (errors will be handled in next branch)
-	connectionsTracked, _ := meter.Int64Counter(
+	// Create metrics with proper error handling
+	connectionsTracked, err := meter.Int64Counter(
 		fmt.Sprintf("%s_connections_tracked_total", name),
 		metric.WithDescription("Total TCP connections tracked"),
 	)
-	servicesDiscovered, _ := meter.Int64Counter(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connections_tracked metric: %w", err)
+	}
+
+	servicesDiscovered, err := meter.Int64Counter(
 		fmt.Sprintf("%s_services_discovered_total", name),
 		metric.WithDescription("Total services discovered"),
 	)
-	eventsProcessed, _ := meter.Int64Counter(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create services_discovered metric: %w", err)
+	}
+
+	eventsProcessed, err := meter.Int64Counter(
 		fmt.Sprintf("%s_events_processed_total", name),
 		metric.WithDescription("Total events processed"),
 	)
-	errorsTotal, _ := meter.Int64Counter(
+	if err != nil {
+		return nil, fmt.Errorf("failed to create events_processed metric: %w", err)
+	}
+
+	errorsTotal, err := meter.Int64Counter(
 		fmt.Sprintf("%s_errors_total", name),
 		metric.WithDescription("Total errors in observer"),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create errors_total metric: %w", err)
+	}
 
 	o := &Observer{
 		BaseObserver:        baseObserver,
