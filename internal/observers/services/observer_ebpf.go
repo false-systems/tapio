@@ -67,7 +67,7 @@ func (t *ConnectionTracker) startEBPF() error {
 	links = append(links, closeLink)
 
 	// Create perf event reader
-	perfReader, err := perf.NewReader(objs.Events, 4096)
+	perfReader, err := perf.NewReader(objs.Events, perfBufferSize)
 	if err != nil {
 		return fmt.Errorf("failed to create perf reader: %w", err)
 	}
