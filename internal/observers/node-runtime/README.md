@@ -2,6 +2,7 @@
 
 **Status: In Development** (Phase 0/10 Complete)
 
+> ⚠️ **Important:** This module was previously marked as **Production Ready**. Its status has changed to **In Development**. Please be aware that it may not be stable or suitable for production use at this time.
 ## Overview
 
 The Node Runtime observer provides comprehensive Kubelet API monitoring - delivering ground truth for node and pod health directly from the kubelet, complementary to Kubernetes API server data.
