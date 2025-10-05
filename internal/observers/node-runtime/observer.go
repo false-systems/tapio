@@ -42,10 +42,11 @@ type Observer struct {
 	podTraceManager *PodTraceManager
 
 	// Collectors for kubelet endpoints
-	statsCollector   *StatsCollector
-	podsCollector    *PodsCollector
-	healthzCollector *HealthzCollector
-	probesCollector  *ProbesCollector
+	statsCollector    *StatsCollector
+	podsCollector     *PodsCollector
+	healthzCollector  *HealthzCollector
+	probesCollector   *ProbesCollector
+	syncloopCollector *SyncloopCollector
 
 	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
@@ -234,6 +235,15 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		extractTrace,
 	)
 
+	syncloopCollector := NewSyncloopCollector(
+		name, config.Address,
+		config.Insecure,
+		client,
+		tracer,
+		apiLatency,
+		extractTrace,
+	)
+
 	return &Observer{
 		BaseObserver:        baseObs,
 		EventChannelManager: eventChanMgr,
@@ -246,10 +256,11 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		podTraceManager: NewPodTraceManager(),
 
 		// Collectors
-		statsCollector:   statsCollector,
-		podsCollector:    podsCollector,
-		healthzCollector: healthzCollector,
-		probesCollector:  probesCollector,
+		statsCollector:    statsCollector,
+		podsCollector:     podsCollector,
+		healthzCollector:  healthzCollector,
+		probesCollector:   probesCollector,
+		syncloopCollector: syncloopCollector,
 
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -291,6 +302,10 @@ func (o *Observer) Start(ctx context.Context) error {
 
 	o.LifecycleManager.Start("collect-probes", func() {
 		o.collectProbes()
+	})
+
+	o.LifecycleManager.Start("collect-syncloop", func() {
+		o.collectSyncloop()
 	})
 
 	o.BaseObserver.SetHealthy(true)
@@ -504,6 +519,53 @@ func (o *Observer) fetchProbes() error {
 
 	// Use ProbesCollector to fetch and build events
 	events, err := o.probesCollector.Collect(ctx)
+	if err != nil {
+		o.BaseObserver.RecordError(err)
+		return err
+	}
+
+	// Send all collected events
+	for i := range events {
+		o.sendCollectedEvent(ctx, &events[i])
+	}
+
+	return nil
+}
+
+// collectSyncloop monitors kubelet syncloop health
+func (o *Observer) collectSyncloop() {
+	ticker := time.NewTicker(o.config.MetricsInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-o.LifecycleManager.Context().Done():
+			return
+		case <-ticker.C:
+			if err := o.fetchSyncloop(); err != nil {
+				o.logger.Error("Failed to fetch syncloop health", zap.Error(err))
+				o.BaseObserver.RecordError(err)
+			}
+		}
+	}
+}
+
+// fetchSyncloop fetches syncloop health from kubelet using SyncloopCollector
+func (o *Observer) fetchSyncloop() error {
+	ctx := o.LifecycleManager.Context()
+
+	// Track active poll
+	if o.pollsActive != nil {
+		o.pollsActive.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("operation", "fetch_syncloop"),
+		))
+		defer o.pollsActive.Add(ctx, -1, metric.WithAttributes(
+			attribute.String("operation", "fetch_syncloop"),
+		))
+	}
+
+	// Use SyncloopCollector to fetch and build events
+	events, err := o.syncloopCollector.Collect(ctx)
 	if err != nil {
 		o.BaseObserver.RecordError(err)
 		return err
