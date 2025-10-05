@@ -45,6 +45,7 @@ type Observer struct {
 	statsCollector   *StatsCollector
 	podsCollector    *PodsCollector
 	healthzCollector *HealthzCollector
+	probesCollector  *ProbesCollector
 
 	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
@@ -224,6 +225,15 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		apiLatency,
 	)
 
+	probesCollector := NewProbesCollector(
+		name, config.Address,
+		config.Insecure,
+		client,
+		tracer,
+		apiLatency,
+		extractTrace,
+	)
+
 	return &Observer{
 		BaseObserver:        baseObs,
 		EventChannelManager: eventChanMgr,
@@ -239,6 +249,7 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		statsCollector:   statsCollector,
 		podsCollector:    podsCollector,
 		healthzCollector: healthzCollector,
+		probesCollector:  probesCollector,
 
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -276,6 +287,10 @@ func (o *Observer) Start(ctx context.Context) error {
 
 	o.LifecycleManager.Start("collect-pod-metrics", func() {
 		o.collectPodMetrics()
+	})
+
+	o.LifecycleManager.Start("collect-probes", func() {
+		o.collectProbes()
 	})
 
 	o.BaseObserver.SetHealthy(true)
@@ -442,6 +457,53 @@ func (o *Observer) fetchPodLifecycle() error {
 
 	// Use PodsCollector to fetch and build events
 	events, err := o.podsCollector.Collect(ctx)
+	if err != nil {
+		o.BaseObserver.RecordError(err)
+		return err
+	}
+
+	// Send all collected events
+	for i := range events {
+		o.sendCollectedEvent(ctx, &events[i])
+	}
+
+	return nil
+}
+
+// collectProbes collects probe health metrics
+func (o *Observer) collectProbes() {
+	ticker := time.NewTicker(o.config.MetricsInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-o.LifecycleManager.Context().Done():
+			return
+		case <-ticker.C:
+			if err := o.fetchProbes(); err != nil {
+				o.logger.Error("Failed to fetch probe metrics", zap.Error(err))
+				o.BaseObserver.RecordError(err)
+			}
+		}
+	}
+}
+
+// fetchProbes fetches probe metrics from kubelet using ProbesCollector
+func (o *Observer) fetchProbes() error {
+	ctx := o.LifecycleManager.Context()
+
+	// Track active poll
+	if o.pollsActive != nil {
+		o.pollsActive.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("operation", "fetch_probes"),
+		))
+		defer o.pollsActive.Add(ctx, -1, metric.WithAttributes(
+			attribute.String("operation", "fetch_probes"),
+		))
+	}
+
+	// Use ProbesCollector to fetch and build events
+	events, err := o.probesCollector.Collect(ctx)
 	if err != nil {
 		o.BaseObserver.RecordError(err)
 		return err
