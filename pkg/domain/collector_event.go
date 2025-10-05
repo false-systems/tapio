@@ -97,6 +97,8 @@ const (
 	EventTypeKubeletContainerTerminated CollectorEventType = "kubelet.container.terminated"
 	EventTypeKubeletCrashLoop           CollectorEventType = "kubelet.container.crash_loop"
 	EventTypeKubeletPodNotReady         CollectorEventType = "kubelet.pod.not_ready"
+	EventTypeKubeletProbeFailure        CollectorEventType = "kubelet.probe.failure"
+	EventTypeKubeletProbeSlow           CollectorEventType = "kubelet.probe.slow"
 
 	// Service Map Events
 	EventTypeServiceMap        CollectorEventType = "service_map.topology"
@@ -1172,6 +1174,7 @@ type KubeletData struct {
 	ContainerMetrics *KubeletContainerMetrics `json:"container_metrics,omitempty"`
 	PodLifecycle     *KubeletPodLifecycle     `json:"pod_lifecycle,omitempty"`
 	StorageEvent     *KubeletStorageEvent     `json:"storage_event,omitempty"`
+	ProbeResult      *KubeletProbeResult      `json:"probe_result,omitempty"`
 }
 
 // KubeletNodeMetrics holds node-level metrics from kubelet
@@ -1221,6 +1224,17 @@ type KubeletStorageEvent struct {
 	AvailableBytes uint64    `json:"available_bytes"`
 	UsagePercent   float64   `json:"usage_percent"`
 	Timestamp      time.Time `json:"timestamp"`
+}
+
+// KubeletProbeResult holds probe execution results
+type KubeletProbeResult struct {
+	Namespace   string    `json:"namespace"`
+	Pod         string    `json:"pod"`
+	Container   string    `json:"container"`
+	ProbeType   string    `json:"probe_type"` // "Liveness", "Readiness", "Startup"
+	Result      string    `json:"result"`     // "successful", "failed", "unknown"
+	DurationSec float64   `json:"duration_sec"`
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // GetKubeletData returns kubelet data from the event if present
