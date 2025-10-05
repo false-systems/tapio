@@ -6,6 +6,7 @@ package services
 import (
 	"fmt"
 	"math/rand"
+	"net"
 	"time"
 
 	"go.uber.org/zap"
@@ -91,9 +92,21 @@ func (t *ConnectionTracker) generateMockConnections() {
 					CgroupID:  uint64(client.pid * 100),
 				}
 
-				// Set IPs
-				copy(event.SrcIP[:], []byte(clientIP))
-				copy(event.DstIP[:], []byte(serviceIP))
+				// Set IPs using proper parsing
+				if srcIP := net.ParseIP(clientIP); srcIP != nil {
+					if ip4 := srcIP.To4(); ip4 != nil {
+						copy(event.SrcIP[:], ip4)
+					} else {
+						copy(event.SrcIP[:], srcIP)
+					}
+				}
+				if dstIP := net.ParseIP(serviceIP); dstIP != nil {
+					if ip4 := dstIP.To4(); ip4 != nil {
+						copy(event.DstIP[:], ip4)
+					} else {
+						copy(event.DstIP[:], dstIP)
+					}
+				}
 				copy(event.Comm[:], []byte(client.name))
 
 				// Send event
