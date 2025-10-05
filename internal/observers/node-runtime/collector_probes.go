@@ -183,9 +183,11 @@ func (pc *ProbesCollector) parsePrometheusMetrics(r io.Reader) ([]ProbeMetric, e
 		if strings.Contains(metricName, "duration_seconds") {
 			pm.DurationSec = value
 		} else if strings.Contains(metricName, "total") {
-			// For total, extract result from labels
+			// For total, get result from labels
 			if result, ok := labels["result"]; ok {
 				pm.Result = result
+			} else if value > 0 {
+				pm.Result = "successful"
 			} else {
 				pm.Result = "unknown"
 			}
