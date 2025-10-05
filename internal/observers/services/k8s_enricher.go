@@ -349,7 +349,10 @@ func (m *K8sEnricher) doK8sRefresh() {
 
 // refreshPods updates the pod cache from K8s API
 func (m *K8sEnricher) refreshPods() error {
-	pods, err := m.clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), m.config.PodMappingTimeout)
+	defer cancel()
+
+	pods, err := m.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -391,7 +394,10 @@ func (m *K8sEnricher) refreshPods() error {
 
 // refreshServices updates the service cache from K8s API
 func (m *K8sEnricher) refreshServices() error {
-	services, err := m.clientset.CoreV1().Services("").List(context.Background(), metav1.ListOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), m.config.PodMappingTimeout)
+	defer cancel()
+
+	services, err := m.clientset.CoreV1().Services("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list services: %w", err)
 	}
@@ -456,23 +462,26 @@ func (m *K8sEnricher) refreshServices() error {
 
 // refreshWorkloads updates workload information from K8s API
 func (m *K8sEnricher) refreshWorkloads() error {
+	ctx, cancel := context.WithTimeout(context.Background(), m.config.PodMappingTimeout)
+	defer cancel()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Get Deployments
-	deployments, err := m.clientset.AppsV1().Deployments("").List(context.Background(), metav1.ListOptions{})
+	deployments, err := m.clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list deployments: %w", err)
 	}
 
 	// Get StatefulSets
-	statefulSets, err := m.clientset.AppsV1().StatefulSets("").List(context.Background(), metav1.ListOptions{})
+	statefulSets, err := m.clientset.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list statefulsets: %w", err)
 	}
 
 	// Get DaemonSets
-	daemonSets, err := m.clientset.AppsV1().DaemonSets("").List(context.Background(), metav1.ListOptions{})
+	daemonSets, err := m.clientset.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list daemonsets: %w", err)
 	}

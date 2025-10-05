@@ -1,6 +1,6 @@
 # Node Runtime Observer
 
-**Status: In Development** (Phase 0/10 Complete)
+**Status: In Development** (Phase 2/10 Complete)
 
 > ⚠️ **Important:** This module was previously marked as **Production Ready**. Its status has changed to **In Development**. Please be aware that it may not be stable or suitable for production use at this time.
 ## Overview
@@ -19,14 +19,14 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 - **Ground Truth**: Kubelet's view vs K8s API (eventual consistency differences)
 - **Multi-Output**: Events to Go channels, OTEL metrics, NATS (future)
 
-## Current Coverage (3/10 Kubelet Endpoints)
+## Current Coverage (4/10 Kubelet Endpoints)
 
 | Endpoint | Purpose | Status |
 |----------|---------|--------|
 | `/healthz` | Basic kubelet health check | ✅ **Implemented** |
 | `/stats/summary` | Node & pod resource statistics | ✅ **Implemented** |
 | `/pods` | Pod lifecycle & container states | ✅ **Implemented** |
-| `/metrics/probes` | Liveness/Readiness probe metrics | ⏳ Phase 2 |
+| `/metrics/probes` | Liveness/Readiness probe metrics | ✅ **Implemented** |
 | `/healthz/syncloop` | Critical pod sync health | ⏳ Phase 3 |
 | `/configz` | Kubelet configuration & eviction thresholds | ⏳ Phase 4 |
 | `/metrics/resource` | Actual vs requested resources | ⏳ Phase 5 |
@@ -37,8 +37,9 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 ## Roadmap
 
 **Phase 0:** ✅ Infrastructure (RingBuffer, OTEL multi-output)
-**Phase 1:** Refactor collector pattern
-**Phase 2-8:** Add 7 new kubelet endpoints
+**Phase 1:** ✅ Refactor collector pattern (3 collectors)
+**Phase 2:** ✅ Add /metrics/probes endpoint
+**Phase 3-8:** Add 6 remaining kubelet endpoints
 **Phase 9:** Complete test suite (80%+ coverage)
 **Phase 10:** Final documentation
 
@@ -68,11 +69,22 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 ## Events Generated
 
 ```go
-domain.EventTypeNodeNotReady       // Node transitions to NotReady
-domain.EventTypeNodeMemoryPressure // Memory pressure detected
-domain.EventTypeNodeDiskPressure   // Disk pressure detected
-domain.EventTypeNodePIDPressure    // PID exhaustion risk
-domain.EventTypeNodeNetworkIssue   // Network connectivity problems
+// Kubelet Health & Probes
+domain.EventTypeKubeletProbeFailure        // Liveness/Readiness/Startup probe failures
+domain.EventTypeKubeletProbeSlow           // Slow probe execution (>1 second)
+
+// Container Lifecycle
+domain.EventTypeKubeletContainerWaiting    // Container stuck waiting
+domain.EventTypeKubeletContainerTerminated // Container terminated with error
+domain.EventTypeKubeletCrashLoop           // Container crash loop detected
+domain.EventTypeKubeletPodNotReady         // Pod not ready condition
+
+// Node Status
+domain.EventTypeNodeNotReady               // Node transitions to NotReady
+domain.EventTypeNodeMemoryPressure         // Memory pressure detected
+domain.EventTypeNodeDiskPressure           // Disk pressure detected
+domain.EventTypeNodePIDPressure            // PID exhaustion risk
+domain.EventTypeNodeNetworkIssue           // Network connectivity problems
 ```
 
 ## Configuration

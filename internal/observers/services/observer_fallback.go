@@ -4,11 +4,16 @@
 package services
 
 import (
+	"fmt"
 	"math/rand"
+	"net"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+// ebpfState stub for non-Linux platforms (always nil)
+type ebpfState struct{}
 
 // startEBPF starts fallback connection simulation (non-Linux)
 func (t *ConnectionTracker) startEBPF() error {
@@ -25,6 +30,11 @@ func (t *ConnectionTracker) stopEBPF() {
 	t.logger.Info("Stopping services observer fallback mode")
 }
 
+// generateMockIP generates a random IP in the 10.244.x.x range (K8s pod CIDR)
+func generateMockIP() string {
+	return fmt.Sprintf("10.244.%d.%d", rand.Intn(256), rand.Intn(256))
+}
+
 // generateMockConnections generates simulated connection events for testing
 func (t *ConnectionTracker) generateMockConnections() {
 	ticker := time.NewTicker(5 * time.Second)
@@ -33,26 +43,24 @@ func (t *ConnectionTracker) generateMockConnections() {
 	// Mock service endpoints
 	services := []struct {
 		name string
-		ip   string
 		port uint16
 	}{
-		{"web-frontend", "10.244.1.10", 8080},
-		{"api-backend", "10.244.2.20", 3000},
-		{"postgres-db", "10.244.3.30", 5432},
-		{"redis-cache", "10.244.4.40", 6379},
-		{"kafka-broker", "10.244.5.50", 9092},
+		{"web-frontend", 8080},
+		{"api-backend", 3000},
+		{"postgres-db", 5432},
+		{"redis-cache", 6379},
+		{"kafka-broker", 9092},
 	}
 
 	// Mock client pods
 	clients := []struct {
 		name string
-		ip   string
 		pid  uint32
 	}{
-		{"web-pod-1", "10.244.1.5", 1001},
-		{"web-pod-2", "10.244.1.6", 1002},
-		{"api-pod-1", "10.244.2.5", 2001},
-		{"worker-pod-1", "10.244.6.5", 3001},
+		{"web-pod-1", 1001},
+		{"web-pod-2", 1002},
+		{"api-pod-1", 2001},
+		{"worker-pod-1", 3001},
 	}
 
 	for {
@@ -64,6 +72,10 @@ func (t *ConnectionTracker) generateMockConnections() {
 			for i := 0; i < 3; i++ {
 				client := clients[rand.Intn(len(clients))]
 				service := services[rand.Intn(len(services))]
+
+				// Generate random IPs
+				clientIP := generateMockIP()
+				serviceIP := generateMockIP()
 
 				// Create connection event
 				event := &ConnectionEvent{
@@ -80,9 +92,21 @@ func (t *ConnectionTracker) generateMockConnections() {
 					CgroupID:  uint64(client.pid * 100),
 				}
 
-				// Set IPs
-				copy(event.SrcIP[:], []byte(client.ip))
-				copy(event.DstIP[:], []byte(service.ip))
+				// Set IPs using proper parsing
+				if srcIP := net.ParseIP(clientIP); srcIP != nil {
+					if ip4 := srcIP.To4(); ip4 != nil {
+						copy(event.SrcIP[:], ip4)
+					} else {
+						copy(event.SrcIP[:], srcIP)
+					}
+				}
+				if dstIP := net.ParseIP(serviceIP); dstIP != nil {
+					if ip4 := dstIP.To4(); ip4 != nil {
+						copy(event.DstIP[:], ip4)
+					} else {
+						copy(event.DstIP[:], dstIP)
+					}
+				}
 				copy(event.Comm[:], []byte(client.name))
 
 				// Send event
@@ -98,11 +122,4 @@ func (t *ConnectionTracker) generateMockConnections() {
 			}
 		}
 	}
-}
-
-// ipStringToBytes converts IP string to byte array for mock data
-func ipStringToBytes(ip string) [16]byte {
-	var result [16]byte
-	copy(result[:], []byte(ip))
-	return result
 }

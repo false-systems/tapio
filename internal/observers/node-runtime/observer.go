@@ -5,9 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -17,13 +15,10 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	statsv1alpha1 "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 )
 
 // generateEventID creates a unique event ID for node-runtime events
@@ -45,6 +40,12 @@ type Observer struct {
 	client          *http.Client
 	logger          *zap.Logger
 	podTraceManager *PodTraceManager
+
+	// Collectors for kubelet endpoints
+	statsCollector   *StatsCollector
+	podsCollector    *PodsCollector
+	healthzCollector *HealthzCollector
+	probesCollector  *ProbesCollector
 
 	// OTEL instrumentation - 5 Core Metrics (MANDATORY)
 	tracer          trace.Tracer
@@ -185,9 +186,57 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		Logger: config.Logger,
 	}
 
+	// Create base observer components
+	baseObs := base.NewBaseObserverWithConfig(baseConfig)
+	eventChanMgr := base.NewEventChannelManager(10000, name, config.Logger)
+
+	// Helper function for extracting trace context
+	extractTrace := func(ctx context.Context) (string, string) {
+		span := trace.SpanFromContext(ctx)
+		if span.SpanContext().IsValid() {
+			return span.SpanContext().TraceID().String(), span.SpanContext().SpanID().String()
+		}
+		return "", ""
+	}
+
+	// Initialize collectors
+	statsCollector := NewStatsCollector(
+		name, config.Address,
+		client,
+		tracer,
+		apiLatency,
+		extractTrace,
+	)
+
+	podsCollector := NewPodsCollector(
+		name, config.Address,
+		config.Insecure,
+		client,
+		tracer,
+		apiLatency,
+		extractTrace,
+	)
+
+	healthzCollector := NewHealthzCollector(
+		name, config.Address,
+		config.Insecure,
+		client,
+		tracer,
+		apiLatency,
+	)
+
+	probesCollector := NewProbesCollector(
+		name, config.Address,
+		config.Insecure,
+		client,
+		tracer,
+		apiLatency,
+		extractTrace,
+	)
+
 	return &Observer{
-		BaseObserver:        base.NewBaseObserverWithConfig(baseConfig),
-		EventChannelManager: base.NewEventChannelManager(10000, name, config.Logger),
+		BaseObserver:        baseObs,
+		EventChannelManager: eventChanMgr,
 		LifecycleManager:    base.NewLifecycleManager(context.Background(), config.Logger),
 
 		name:            name,
@@ -195,6 +244,12 @@ func NewObserver(name string, config *Config) (*Observer, error) {
 		client:          client,
 		logger:          config.Logger,
 		podTraceManager: NewPodTraceManager(),
+
+		// Collectors
+		statsCollector:   statsCollector,
+		podsCollector:    podsCollector,
+		healthzCollector: healthzCollector,
+		probesCollector:  probesCollector,
 
 		tracer:          tracer,
 		eventsProcessed: eventsProcessed,
@@ -232,6 +287,10 @@ func (o *Observer) Start(ctx context.Context) error {
 
 	o.LifecycleManager.Start("collect-pod-metrics", func() {
 		o.collectPodMetrics()
+	})
+
+	o.LifecycleManager.Start("collect-probes", func() {
+		o.collectProbes()
 	})
 
 	o.BaseObserver.SetHealthy(true)
@@ -314,11 +373,9 @@ func (o *Observer) collectStats() {
 	}
 }
 
-// fetchStats fetches and processes stats from kubelet API
+// fetchStats fetches and processes stats from kubelet API using StatsCollector
 func (o *Observer) fetchStats() error {
-	start := time.Now()
-	ctx, span := o.tracer.Start(o.LifecycleManager.Context(), "node-runtime.fetch_stats")
-	defer span.End()
+	ctx := o.LifecycleManager.Context()
 
 	// Track active poll
 	if o.pollsActive != nil {
@@ -330,395 +387,36 @@ func (o *Observer) fetchStats() error {
 		))
 	}
 
-	url := fmt.Sprintf("https://%s/stats/summary", o.config.Address)
-	if o.config.Insecure {
-		url = fmt.Sprintf("http://%s/stats/summary", o.config.Address)
-	}
-
-	span.SetAttributes(
-		attribute.String("node-runtime.endpoint", "/stats/summary"),
-		attribute.String("node-runtime.url", url),
-	)
-
-	resp, err := o.client.Get(url)
+	// Use StatsCollector to fetch and build events
+	events, err := o.statsCollector.Collect(ctx)
 	if err != nil {
-		// Record API failure
-		if o.apiFailures != nil {
-			o.apiFailures.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("endpoint", "/stats/summary"),
-				attribute.String("error", "request_failed"),
-			))
-		}
-		if o.errorsTotal != nil {
-			o.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "api_request"),
-			))
-		}
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to fetch stats")
-		return fmt.Errorf("failed to fetch stats: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Record API failure
-		if o.apiFailures != nil {
-			o.apiFailures.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("endpoint", "/stats/summary"),
-				attribute.String("error", "http_status"),
-				attribute.Int("status_code", resp.StatusCode),
-			))
-		}
-		if o.errorsTotal != nil {
-			o.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "api_status"),
-			))
-		}
-
-		body, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			err := fmt.Errorf("stats request failed: %s - failed to read response body: %w", resp.Status, readErr)
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return err
-		}
-		err := fmt.Errorf("stats request failed: %s - %s", resp.Status, string(body))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		o.BaseObserver.RecordError(err)
 		return err
 	}
 
-	var summary statsv1alpha1.Summary
-	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
-		if o.errorsTotal != nil {
-			o.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "decode"),
-			))
-		}
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to decode stats")
-		return fmt.Errorf("failed to decode stats: %w", err)
-	}
-
-	// Record API latency
-	duration := time.Since(start)
-	if o.apiLatency != nil {
-		o.apiLatency.Record(ctx, duration.Seconds()*1000, metric.WithAttributes(
-			attribute.String("endpoint", "/stats/summary"),
-		))
-	}
-
-	span.SetAttributes(
-		attribute.Float64("duration_seconds", duration.Seconds()),
-		attribute.Int("node_stats_count", 1),
-		attribute.Int("pod_stats_count", len(summary.Pods)),
-	)
-
-	// Process node stats
-	if summary.Node.CPU != nil {
-		o.sendNodeCPUEvent(ctx, &summary)
-	}
-
-	if summary.Node.Memory != nil {
-		o.sendNodeMemoryEvent(ctx, &summary)
-	}
-
-	// Process pod stats
-	for _, pod := range summary.Pods {
-		o.processPodStats(ctx, &pod)
+	// Send all collected events
+	for i := range events {
+		o.sendCollectedEvent(ctx, &events[i])
 	}
 
 	return nil
 }
 
-// sendNodeCPUEvent sends node CPU metrics
-func (o *Observer) sendNodeCPUEvent(ctx context.Context, summary *statsv1alpha1.Summary) {
-	traceID, spanID := o.extractTraceContext(ctx)
-
-	event := &domain.CollectorEvent{
-		EventID:   generateEventID("node_cpu", o.name),
-		Timestamp: time.Now(),
-		Source:    o.name,
-		Type:      domain.EventTypeKubeletNodeCPU,
-		Severity:  domain.EventSeverityInfo,
-		EventData: domain.EventDataContainer{
-			Kubelet: &domain.KubeletData{
-				EventType: "node_cpu",
-				NodeMetrics: &domain.KubeletNodeMetrics{
-					NodeName:      summary.Node.NodeName,
-					CPUUsageNano:  *summary.Node.CPU.UsageNanoCores,
-					CPUUsageMilli: *summary.Node.CPU.UsageNanoCores / 1000000,
-					Timestamp:     summary.Node.CPU.Time.Time,
-				},
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID: traceID,
-			SpanID:  spanID,
-			Labels: map[string]string{
-				"observer": o.name,
-				"version":  "1.0.0",
-			},
-		},
-	}
-
+// sendCollectedEvent sends a collected event and records metrics
+func (o *Observer) sendCollectedEvent(ctx context.Context, event *domain.CollectorEvent) {
 	if o.EventChannelManager.SendEvent(event) {
 		o.BaseObserver.RecordEvent()
-		// Record OTEL event metric
 		if o.eventsProcessed != nil {
 			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_cpu"),
-				attribute.String("node_name", summary.Node.NodeName),
+				attribute.String("event_type", string(event.Type)),
 			))
 		}
 	} else {
 		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
 		if o.droppedEvents != nil {
 			o.droppedEvents.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_cpu"),
+				attribute.String("event_type", string(event.Type)),
 			))
-		}
-	}
-}
-
-// sendNodeMemoryEvent sends node memory metrics
-func (o *Observer) sendNodeMemoryEvent(ctx context.Context, summary *statsv1alpha1.Summary) {
-	traceID, spanID := o.extractTraceContext(ctx)
-
-	event := &domain.CollectorEvent{
-		EventID:   generateEventID("node_memory", o.name),
-		Timestamp: time.Now(),
-		Source:    o.name,
-		Type:      domain.EventTypeKubeletNodeMemory,
-		Severity:  domain.EventSeverityInfo,
-		EventData: domain.EventDataContainer{
-			Kubelet: &domain.KubeletData{
-				EventType: "node_memory",
-				NodeMetrics: &domain.KubeletNodeMetrics{
-					NodeName:         summary.Node.NodeName,
-					MemoryUsage:      *summary.Node.Memory.UsageBytes,
-					MemoryAvailable:  *summary.Node.Memory.AvailableBytes,
-					MemoryWorkingSet: *summary.Node.Memory.WorkingSetBytes,
-					Timestamp:        summary.Node.Memory.Time.Time,
-				},
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID: traceID,
-			SpanID:  spanID,
-			Labels: map[string]string{
-				"observer": o.name,
-				"version":  "1.0.0",
-			},
-		},
-	}
-
-	if o.EventChannelManager.SendEvent(event) {
-		o.BaseObserver.RecordEvent()
-		// Record OTEL event metric
-		if o.eventsProcessed != nil {
-			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_memory"),
-				attribute.String("node_name", summary.Node.NodeName),
-			))
-		}
-	} else {
-		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
-		if o.droppedEvents != nil {
-			o.droppedEvents.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_memory"),
-			))
-		}
-	}
-}
-
-// processPodStats processes stats for a single pod
-func (o *Observer) processPodStats(ctx context.Context, pod *statsv1alpha1.PodStats) {
-	// Check for CPU throttling
-	for _, container := range pod.Containers {
-		if container.CPU != nil && container.CPU.UsageNanoCores != nil {
-			o.checkCPUThrottling(ctx, pod, &container)
-		}
-
-		if container.Memory != nil {
-			o.checkMemoryPressure(ctx, pod, &container)
-		}
-	}
-
-	// Check ephemeral storage
-	if pod.EphemeralStorage != nil {
-		o.checkEphemeralStorage(ctx, pod)
-	}
-}
-
-// checkCPUThrottling detects CPU throttling
-func (o *Observer) checkCPUThrottling(ctx context.Context, pod *statsv1alpha1.PodStats, container *statsv1alpha1.ContainerStats) {
-	// Note: Real throttling metrics would come from cAdvisor metrics endpoint
-	// This is a simplified version
-	traceID, spanID := o.extractTraceContext(ctx)
-
-	event := &domain.CollectorEvent{
-		EventID:   generateEventID("cpu_throttling", o.name),
-		Timestamp: time.Now(),
-		Source:    o.name,
-		Type:      domain.EventTypeKubeletCPUThrottling,
-		Severity:  domain.EventSeverityWarning,
-		EventData: domain.EventDataContainer{
-			Kubelet: &domain.KubeletData{
-				EventType: "cpu_throttling",
-				ContainerMetrics: &domain.KubeletContainerMetrics{
-					Namespace:    pod.PodRef.Namespace,
-					Pod:          pod.PodRef.Name,
-					Container:    container.Name,
-					CPUUsageNano: *container.CPU.UsageNanoCores,
-					Timestamp:    container.CPU.Time.Time,
-				},
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID: traceID,
-			SpanID:  spanID,
-			Labels: map[string]string{
-				"observer": o.name,
-				"version":  "1.0.0",
-			},
-		},
-	}
-
-	if o.EventChannelManager.SendEvent(event) {
-		o.BaseObserver.RecordEvent()
-		// Record OTEL event metric
-		if o.eventsProcessed != nil {
-			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_cpu_throttling"),
-				attribute.String("namespace", pod.PodRef.Namespace),
-				attribute.String("pod", pod.PodRef.Name),
-				attribute.String("container", container.Name),
-			))
-		}
-	} else {
-		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
-	}
-}
-
-// checkMemoryPressure detects memory pressure
-func (o *Observer) checkMemoryPressure(ctx context.Context, pod *statsv1alpha1.PodStats, container *statsv1alpha1.ContainerStats) {
-	if container.Memory.WorkingSetBytes == nil || container.Memory.UsageBytes == nil {
-		return
-	}
-
-	traceID, spanID := o.extractTraceContext(ctx)
-
-	containerMetrics := &domain.KubeletContainerMetrics{
-		Namespace:        pod.PodRef.Namespace,
-		Pod:              pod.PodRef.Name,
-		Container:        container.Name,
-		MemoryUsage:      *container.Memory.UsageBytes,
-		MemoryWorkingSet: *container.Memory.WorkingSetBytes,
-		Timestamp:        container.Memory.Time.Time,
-	}
-
-	// Check if RSS is available (indicates memory pressure)
-	if container.Memory.RSSBytes != nil {
-		containerMetrics.MemoryRSS = *container.Memory.RSSBytes
-	}
-
-	event := &domain.CollectorEvent{
-		EventID:   generateEventID("memory_pressure", o.name),
-		Timestamp: time.Now(),
-		Source:    o.name,
-		Type:      domain.EventTypeKubeletMemoryPressure,
-		Severity:  domain.EventSeverityWarning,
-		EventData: domain.EventDataContainer{
-			Kubelet: &domain.KubeletData{
-				EventType:        "memory_pressure",
-				ContainerMetrics: containerMetrics,
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID: traceID,
-			SpanID:  spanID,
-			Labels: map[string]string{
-				"observer": o.name,
-				"version":  "1.0.0",
-			},
-		},
-	}
-
-	if o.EventChannelManager.SendEvent(event) {
-		o.BaseObserver.RecordEvent()
-		// Record OTEL event metric
-		if o.eventsProcessed != nil {
-			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_memory_pressure"),
-				attribute.String("namespace", pod.PodRef.Namespace),
-				attribute.String("pod", pod.PodRef.Name),
-				attribute.String("container", container.Name),
-			))
-		}
-	} else {
-		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
-	}
-}
-
-// checkEphemeralStorage checks ephemeral storage usage
-func (o *Observer) checkEphemeralStorage(ctx context.Context, pod *statsv1alpha1.PodStats) {
-	if pod.EphemeralStorage.UsedBytes == nil || pod.EphemeralStorage.AvailableBytes == nil {
-		return
-	}
-
-	usedBytes := *pod.EphemeralStorage.UsedBytes
-	availableBytes := *pod.EphemeralStorage.AvailableBytes
-	totalBytes := usedBytes + availableBytes
-
-	// Calculate usage percentage
-	usagePercent := float64(usedBytes) / float64(totalBytes) * 100
-
-	// Only send event if usage is significant (>50%)
-	if usagePercent > 50 {
-		traceID, spanID := o.extractTraceContext(ctx)
-
-		event := &domain.CollectorEvent{
-			EventID:   generateEventID("ephemeral_storage", o.name),
-			Timestamp: time.Now(),
-			Source:    o.name,
-			Type:      domain.EventTypeKubeletEphemeralStorage,
-			Severity:  domain.EventSeverityWarning,
-			EventData: domain.EventDataContainer{
-				Kubelet: &domain.KubeletData{
-					EventType: "ephemeral_storage",
-					StorageEvent: &domain.KubeletStorageEvent{
-						Namespace:      pod.PodRef.Namespace,
-						Pod:            pod.PodRef.Name,
-						UsedBytes:      usedBytes,
-						AvailableBytes: availableBytes,
-						UsagePercent:   usagePercent,
-						Timestamp:      pod.EphemeralStorage.Time.Time,
-					},
-				},
-			},
-			Metadata: domain.EventMetadata{
-				TraceID: traceID,
-				SpanID:  spanID,
-				Labels: map[string]string{
-					"observer": o.name,
-					"version":  "1.0.0",
-				},
-			},
-		}
-
-		if o.EventChannelManager.SendEvent(event) {
-			o.BaseObserver.RecordEvent()
-			// Record OTEL event metric
-			if o.eventsProcessed != nil {
-				o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-					attribute.String("event_type", "node_runtime_ephemeral_storage"),
-					attribute.String("namespace", pod.PodRef.Namespace),
-					attribute.String("pod", pod.PodRef.Name),
-				))
-			}
-		} else {
-			o.BaseObserver.RecordError(fmt.Errorf("channel full"))
 		}
 	}
 }
@@ -742,10 +440,10 @@ func (o *Observer) collectPodMetrics() {
 }
 
 // fetchPodLifecycle fetches pod status from kubelet
+
+// fetchPodLifecycle fetches pod status from kubelet using PodsCollector
 func (o *Observer) fetchPodLifecycle() error {
-	start := time.Now()
-	ctx, span := o.tracer.Start(o.LifecycleManager.Context(), "node-runtime.fetch_pod_lifecycle")
-	defer span.End()
+	ctx := o.LifecycleManager.Context()
 
 	// Track active poll
 	if o.pollsActive != nil {
@@ -757,326 +455,66 @@ func (o *Observer) fetchPodLifecycle() error {
 		))
 	}
 
-	url := fmt.Sprintf("https://%s/pods", o.config.Address)
-	if o.config.Insecure {
-		url = fmt.Sprintf("http://%s/pods", o.config.Address)
-	}
-
-	span.SetAttributes(
-		attribute.String("node-runtime.endpoint", "/pods"),
-		attribute.String("node-runtime.url", url),
-	)
-
-	resp, err := o.client.Get(url)
+	// Use PodsCollector to fetch and build events
+	events, err := o.podsCollector.Collect(ctx)
 	if err != nil {
-		// Record API failure
-		if o.apiFailures != nil {
-			o.apiFailures.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("endpoint", "/pods"),
-				attribute.String("error", "request_failed"),
-			))
-		}
-		if o.errorsTotal != nil {
-			o.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "api_request"),
-			))
-		}
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to fetch pods")
-		return fmt.Errorf("failed to fetch pods: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Record API failure
-		if o.apiFailures != nil {
-			o.apiFailures.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("endpoint", "/pods"),
-				attribute.String("error", "http_status"),
-				attribute.Int("status_code", resp.StatusCode),
-			))
-		}
-		if o.errorsTotal != nil {
-			o.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "api_status"),
-			))
-		}
-
-		body, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			err := fmt.Errorf("pods request failed: %s - failed to read response body: %w", resp.Status, readErr)
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return err
-		}
-		err := fmt.Errorf("pods request failed: %s - %s", resp.Status, string(body))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		o.BaseObserver.RecordError(err)
 		return err
 	}
 
-	var podList v1.PodList
-	if err := json.NewDecoder(resp.Body).Decode(&podList); err != nil {
-		if o.errorsTotal != nil {
-			o.errorsTotal.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "decode"),
-			))
-		}
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to decode pods")
-		return fmt.Errorf("failed to decode pods: %w", err)
-	}
-
-	// Record API latency
-	duration := time.Since(start)
-	if o.apiLatency != nil {
-		o.apiLatency.Record(ctx, duration.Seconds()*1000, metric.WithAttributes(
-			attribute.String("endpoint", "/pods"),
-		))
-	}
-
-	span.SetAttributes(
-		attribute.Float64("duration_seconds", duration.Seconds()),
-		attribute.Int("pods_count", len(podList.Items)),
-	)
-
-	// Process pod statuses
-	for _, pod := range podList.Items {
-		o.processPodStatus(ctx, &pod)
+	// Send all collected events
+	for i := range events {
+		o.sendCollectedEvent(ctx, &events[i])
 	}
 
 	return nil
 }
 
-// processPodStatus checks for pod issues
-func (o *Observer) processPodStatus(ctx context.Context, pod *v1.Pod) {
-	// Check container statuses
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.State.Waiting != nil {
-			o.sendContainerWaitingEvent(ctx, pod, &status)
-		}
+// collectProbes collects probe health metrics
+func (o *Observer) collectProbes() {
+	ticker := time.NewTicker(o.config.MetricsInterval)
+	defer ticker.Stop()
 
-		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
-			o.sendContainerTerminatedEvent(ctx, pod, &status)
-		}
-
-		// Check last termination state for crash loops
-		if status.LastTerminationState.Terminated != nil {
-			o.sendCrashLoopEvent(ctx, pod, &status)
-		}
-	}
-
-	// Check pod conditions
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == v1.PodReady && condition.Status != v1.ConditionTrue {
-			o.sendPodNotReadyEvent(ctx, pod, &condition)
-		}
-	}
-}
-
-// sendContainerWaitingEvent sends events for waiting containers
-func (o *Observer) sendContainerWaitingEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
-	traceID, spanID := o.extractTraceContext(ctx)
-
-	event := &domain.CollectorEvent{
-		EventID:   generateEventID("container_waiting", o.name),
-		Timestamp: time.Now(),
-		Source:    o.name,
-		Type:      domain.EventTypeKubeletContainerWaiting,
-		Severity:  domain.EventSeverityWarning,
-		EventData: domain.EventDataContainer{
-			Kubelet: &domain.KubeletData{
-				EventType: "container_waiting",
-				PodLifecycle: &domain.KubeletPodLifecycle{
-					Namespace: pod.Namespace,
-					Pod:       pod.Name,
-					Container: status.Name,
-					Reason:    status.State.Waiting.Reason,
-					Message:   status.State.Waiting.Message,
-					Timestamp: time.Now(),
-				},
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID: traceID,
-			SpanID:  spanID,
-			Labels: map[string]string{
-				"observer": o.name,
-				"version":  "1.0.0",
-			},
-		},
-	}
-
-	if o.EventChannelManager.SendEvent(event) {
-		o.BaseObserver.RecordEvent()
-		// Record OTEL event metric
-		if o.eventsProcessed != nil {
-			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_container_waiting"),
-				attribute.String("namespace", pod.Namespace),
-				attribute.String("pod", pod.Name),
-				attribute.String("container", status.Name),
-				attribute.String("waiting_reason", status.State.Waiting.Reason),
-			))
-		}
-	} else {
-		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
-	}
-}
-
-// sendContainerTerminatedEvent sends events for terminated containers
-func (o *Observer) sendContainerTerminatedEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
-	traceID, spanID := o.extractTraceContext(ctx)
-
-	event := &domain.CollectorEvent{
-		EventID:   generateEventID("container_terminated", o.name),
-		Timestamp: time.Now(),
-		Source:    o.name,
-		Type:      domain.EventTypeKubeletContainerTerminated,
-		Severity:  domain.EventSeverityError,
-		EventData: domain.EventDataContainer{
-			Kubelet: &domain.KubeletData{
-				EventType: "container_terminated",
-				PodLifecycle: &domain.KubeletPodLifecycle{
-					Namespace: pod.Namespace,
-					Pod:       pod.Name,
-					Container: status.Name,
-					ExitCode:  status.State.Terminated.ExitCode,
-					Reason:    status.State.Terminated.Reason,
-					Message:   status.State.Terminated.Message,
-					Timestamp: status.State.Terminated.FinishedAt.Time,
-				},
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID: traceID,
-			SpanID:  spanID,
-			Labels: map[string]string{
-				"observer": o.name,
-				"version":  "1.0.0",
-			},
-		},
-	}
-
-	if o.EventChannelManager.SendEvent(event) {
-		o.BaseObserver.RecordEvent()
-		// Record OTEL event metric
-		if o.eventsProcessed != nil {
-			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_container_terminated"),
-				attribute.String("namespace", pod.Namespace),
-				attribute.String("pod", pod.Name),
-				attribute.String("container", status.Name),
-				attribute.Int("exit_code", int(status.State.Terminated.ExitCode)),
-			))
-		}
-	} else {
-		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
-	}
-}
-
-// sendCrashLoopEvent detects crash loop patterns
-func (o *Observer) sendCrashLoopEvent(ctx context.Context, pod *v1.Pod, status *v1.ContainerStatus) {
-	if status.RestartCount > 3 { // Likely in crash loop
-		traceID, spanID := o.extractTraceContext(ctx)
-
-		event := &domain.CollectorEvent{
-			EventID:   generateEventID("crash_loop", o.name),
-			Timestamp: time.Now(),
-			Source:    o.name,
-			Type:      domain.EventTypeKubeletCrashLoop,
-			Severity:  domain.EventSeverityCritical,
-			EventData: domain.EventDataContainer{
-				Kubelet: &domain.KubeletData{
-					EventType: "crash_loop",
-					PodLifecycle: &domain.KubeletPodLifecycle{
-						Namespace:    pod.Namespace,
-						Pod:          pod.Name,
-						Container:    status.Name,
-						RestartCount: status.RestartCount,
-						LastExitCode: status.LastTerminationState.Terminated.ExitCode,
-						LastReason:   status.LastTerminationState.Terminated.Reason,
-						Timestamp:    time.Now(),
-					},
-				},
-			},
-			Metadata: domain.EventMetadata{
-				TraceID: traceID,
-				SpanID:  spanID,
-				Labels: map[string]string{
-					"observer": o.name,
-					"version":  "1.0.0",
-				},
-			},
-		}
-
-		if o.EventChannelManager.SendEvent(event) {
-			o.BaseObserver.RecordEvent()
-			// Record OTEL event metric
-			if o.eventsProcessed != nil {
-				o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-					attribute.String("event_type", "node_runtime_crash_loop"),
-					attribute.String("namespace", pod.Namespace),
-					attribute.String("pod", pod.Name),
-					attribute.String("container", status.Name),
-					attribute.Int("restart_count", int(status.RestartCount)),
-				))
+	for {
+		select {
+		case <-o.LifecycleManager.Context().Done():
+			return
+		case <-ticker.C:
+			if err := o.fetchProbes(); err != nil {
+				o.logger.Error("Failed to fetch probe metrics", zap.Error(err))
+				o.BaseObserver.RecordError(err)
 			}
-		} else {
-			o.BaseObserver.RecordError(fmt.Errorf("channel full"))
 		}
 	}
 }
 
-// sendPodNotReadyEvent sends events for pods not ready
-func (o *Observer) sendPodNotReadyEvent(ctx context.Context, pod *v1.Pod, condition *v1.PodCondition) {
-	traceID, spanID := o.extractTraceContext(ctx)
+// fetchProbes fetches probe metrics from kubelet using ProbesCollector
+func (o *Observer) fetchProbes() error {
+	ctx := o.LifecycleManager.Context()
 
-	event := &domain.CollectorEvent{
-		EventID:   generateEventID("pod_not_ready", o.name),
-		Timestamp: time.Now(),
-		Source:    o.name,
-		Type:      domain.EventTypeKubeletPodNotReady,
-		Severity:  domain.EventSeverityWarning,
-		EventData: domain.EventDataContainer{
-			Kubelet: &domain.KubeletData{
-				EventType: "pod_not_ready",
-				PodLifecycle: &domain.KubeletPodLifecycle{
-					Namespace: pod.Namespace,
-					Pod:       pod.Name,
-					Condition: string(condition.Type),
-					Status:    string(condition.Status),
-					Reason:    condition.Reason,
-					Message:   condition.Message,
-					Timestamp: condition.LastTransitionTime.Time,
-				},
-			},
-		},
-		Metadata: domain.EventMetadata{
-			TraceID: traceID,
-			SpanID:  spanID,
-			Labels: map[string]string{
-				"observer": o.name,
-				"version":  "1.0.0",
-			},
-		},
+	// Track active poll
+	if o.pollsActive != nil {
+		o.pollsActive.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("operation", "fetch_probes"),
+		))
+		defer o.pollsActive.Add(ctx, -1, metric.WithAttributes(
+			attribute.String("operation", "fetch_probes"),
+		))
 	}
 
-	if o.EventChannelManager.SendEvent(event) {
-		o.BaseObserver.RecordEvent()
-		// Record OTEL event metric
-		if o.eventsProcessed != nil {
-			o.eventsProcessed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("event_type", "node_runtime_pod_not_ready"),
-				attribute.String("namespace", pod.Namespace),
-				attribute.String("pod", pod.Name),
-				attribute.String("condition_type", string(condition.Type)),
-				attribute.String("condition_reason", condition.Reason),
-			))
-		}
-	} else {
-		o.BaseObserver.RecordError(fmt.Errorf("channel full"))
+	// Use ProbesCollector to fetch and build events
+	events, err := o.probesCollector.Collect(ctx)
+	if err != nil {
+		o.BaseObserver.RecordError(err)
+		return err
 	}
+
+	// Send all collected events
+	for i := range events {
+		o.sendCollectedEvent(ctx, &events[i])
+	}
+
+	return nil
 }
 
 // Helper methods
