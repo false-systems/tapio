@@ -23,7 +23,6 @@ type SyncloopCollector struct {
 	tracer           trace.Tracer
 	apiLatency       metric.Float64Histogram
 	traceContextFunc func(context.Context) (string, string)
-	lastUnhealthy    time.Time
 }
 
 // NewSyncloopCollector creates a new SyncloopCollector
