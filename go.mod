@@ -10,7 +10,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/nats-io/nats.go v1.44.0
+	github.com/nats-io/nats.go v1.46.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
