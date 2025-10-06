@@ -6,7 +6,7 @@ toolchain go1.24.5
 
 require (
 	github.com/cilium/ebpf v0.12.3
-	github.com/docker/docker v28.4.0+incompatible
+	github.com/docker/docker v28.5.0+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
