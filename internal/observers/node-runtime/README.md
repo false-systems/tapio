@@ -1,6 +1,6 @@
 # Node Runtime Observer
 
-**Status: In Development** (Phase 2/10 Complete)
+**Status: In Development** (Phase 3/10 Complete)
 
 > ⚠️ **Important:** This module was previously marked as **Production Ready**. Its status has changed to **In Development**. Please be aware that it may not be stable or suitable for production use at this time.
 ## Overview
@@ -19,7 +19,7 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 - **Ground Truth**: Kubelet's view vs K8s API (eventual consistency differences)
 - **Multi-Output**: Events to Go channels, OTEL metrics, NATS (future)
 
-## Current Coverage (4/10 Kubelet Endpoints)
+## Current Coverage (5/10 Kubelet Endpoints)
 
 | Endpoint | Purpose | Status |
 |----------|---------|--------|
@@ -27,7 +27,7 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 | `/stats/summary` | Node & pod resource statistics | ✅ **Implemented** |
 | `/pods` | Pod lifecycle & container states | ✅ **Implemented** |
 | `/metrics/probes` | Liveness/Readiness probe metrics | ✅ **Implemented** |
-| `/healthz/syncloop` | Critical pod sync health | ⏳ Phase 3 |
+| `/healthz/syncloop` | Critical pod sync health | ✅ **Implemented** |
 | `/configz` | Kubelet configuration & eviction thresholds | ⏳ Phase 4 |
 | `/metrics/resource` | Actual vs requested resources | ⏳ Phase 5 |
 | `/spec` | Node capacity & allocatable | ⏳ Phase 6 |
@@ -39,7 +39,8 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 **Phase 0:** ✅ Infrastructure (RingBuffer, OTEL multi-output)
 **Phase 1:** ✅ Refactor collector pattern (3 collectors)
 **Phase 2:** ✅ Add /metrics/probes endpoint
-**Phase 3-8:** Add 6 remaining kubelet endpoints
+**Phase 3:** ✅ Add /healthz/syncloop endpoint
+**Phase 4-8:** Add 5 remaining kubelet endpoints
 **Phase 9:** Complete test suite (80%+ coverage)
 **Phase 10:** Final documentation
 
@@ -72,6 +73,7 @@ The Node Runtime observer provides comprehensive Kubelet API monitoring - delive
 // Kubelet Health & Probes
 domain.EventTypeKubeletProbeFailure        // Liveness/Readiness/Startup probe failures
 domain.EventTypeKubeletProbeSlow           // Slow probe execution (>1 second)
+domain.EventTypeKubeletSyncloopUnhealthy   // Kubelet pod sync loop is unhealthy
 
 // Container Lifecycle
 domain.EventTypeKubeletContainerWaiting    // Container stuck waiting
