@@ -23,7 +23,6 @@ type SyncloopCollector struct {
 	tracer           trace.Tracer
 	apiLatency       metric.Float64Histogram
 	traceContextFunc func(context.Context) (string, string)
-	lastUnhealthy    time.Time
 }
 
 // NewSyncloopCollector creates a new SyncloopCollector
@@ -98,7 +97,6 @@ func (sc *SyncloopCollector) Collect(ctx context.Context) ([]domain.CollectorEve
 	// syncloop is unhealthy if status is not 200
 	if resp.StatusCode != http.StatusOK {
 		sc.SetHealthy(false)
-		sc.lastUnhealthy = time.Now()
 
 		// Generate unhealthy event
 		event := sc.buildSyncloopUnhealthyEvent(ctx, resp.StatusCode, responseText)
@@ -140,7 +138,7 @@ func (sc *SyncloopCollector) buildSyncloopUnhealthyEvent(
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": sc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}

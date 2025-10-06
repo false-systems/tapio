@@ -265,7 +265,7 @@ func (pc *ProbesCollector) buildProbeFailureEvent(ctx context.Context, pm *Probe
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer":   pc.observerName,
-				"version":    "1.0.0",
+				"version":    ObserverVersion,
 				"probe_type": pm.ProbeType,
 			},
 		},
@@ -301,7 +301,7 @@ func (pc *ProbesCollector) buildSlowProbeEvent(ctx context.Context, pm *ProbeMet
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer":   pc.observerName,
-				"version":    "1.0.0",
+				"version":    ObserverVersion,
 				"probe_type": pm.ProbeType,
 			},
 		},
