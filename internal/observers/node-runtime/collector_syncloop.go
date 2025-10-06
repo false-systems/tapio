@@ -96,13 +96,16 @@ func (sc *SyncloopCollector) Collect(ctx context.Context) ([]domain.CollectorEve
 	events := make([]domain.CollectorEvent, 0)
 
 	// syncloop is unhealthy if status is not 200
+	prevHealthy := sc.IsHealthy()
 	if resp.StatusCode != http.StatusOK {
 		sc.SetHealthy(false)
 		sc.lastUnhealthy = time.Now()
 
-		// Generate unhealthy event
-		event := sc.buildSyncloopUnhealthyEvent(ctx, resp.StatusCode, responseText)
-		events = append(events, *event)
+		// Only emit event on transition from healthy to unhealthy
+		if prevHealthy {
+			event := sc.buildSyncloopUnhealthyEvent(ctx, resp.StatusCode, responseText)
+			events = append(events, *event)
+		}
 	} else {
 		sc.SetHealthy(true)
 	}
