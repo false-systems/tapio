@@ -99,6 +99,7 @@ const (
 	EventTypeKubeletPodNotReady         CollectorEventType = "kubelet.pod.not_ready"
 	EventTypeKubeletProbeFailure        CollectorEventType = "kubelet.probe.failure"
 	EventTypeKubeletProbeSlow           CollectorEventType = "kubelet.probe.slow"
+	EventTypeKubeletSyncloopUnhealthy   CollectorEventType = "kubelet.syncloop.unhealthy"
 
 	// Service Map Events
 	EventTypeServiceMap        CollectorEventType = "service_map.topology"
@@ -1175,6 +1176,7 @@ type KubeletData struct {
 	PodLifecycle     *KubeletPodLifecycle     `json:"pod_lifecycle,omitempty"`
 	StorageEvent     *KubeletStorageEvent     `json:"storage_event,omitempty"`
 	ProbeResult      *KubeletProbeResult      `json:"probe_result,omitempty"`
+	SyncloopHealth   *KubeletSyncloopHealth   `json:"syncloop_health,omitempty"`
 }
 
 // KubeletNodeMetrics holds node-level metrics from kubelet
@@ -1235,6 +1237,14 @@ type KubeletProbeResult struct {
 	Result      string    `json:"result"`     // "successful", "failed", "unknown"
 	DurationSec float64   `json:"duration_sec"`
 	Timestamp   time.Time `json:"timestamp"`
+}
+
+// KubeletSyncloopHealth represents kubelet syncloop health check status
+type KubeletSyncloopHealth struct {
+	Healthy    bool      `json:"healthy"`
+	StatusCode int       `json:"status_code"`
+	Message    string    `json:"message"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
 // GetKubeletData returns kubelet data from the event if present
