@@ -162,7 +162,7 @@ func (pc *PodsCollector) buildContainerWaitingEvent(ctx context.Context, pod *v1
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": pc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
@@ -197,7 +197,7 @@ func (pc *PodsCollector) buildContainerTerminatedEvent(ctx context.Context, pod 
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": pc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
@@ -232,7 +232,7 @@ func (pc *PodsCollector) buildCrashLoopEvent(ctx context.Context, pod *v1.Pod, s
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": pc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
@@ -267,7 +267,7 @@ func (pc *PodsCollector) buildPodNotReadyEvent(ctx context.Context, pod *v1.Pod,
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": pc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
