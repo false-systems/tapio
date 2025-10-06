@@ -21,6 +21,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	// ObserverVersion is the version of the node-runtime observer
+	ObserverVersion = "1.0.0"
+)
+
 // generateEventID creates a unique event ID for node-runtime events
 func generateEventID(eventType, source string) string {
 	timestamp := time.Now().UnixNano()
