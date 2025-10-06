@@ -98,7 +98,6 @@ func (sc *SyncloopCollector) Collect(ctx context.Context) ([]domain.CollectorEve
 	prevHealthy := sc.IsHealthy()
 	if resp.StatusCode != http.StatusOK {
 		sc.SetHealthy(false)
-		sc.lastUnhealthy = time.Now()
 
 		// Only emit event on transition from healthy to unhealthy
 		if prevHealthy {
@@ -142,7 +141,7 @@ func (sc *SyncloopCollector) buildSyncloopUnhealthyEvent(
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": sc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}

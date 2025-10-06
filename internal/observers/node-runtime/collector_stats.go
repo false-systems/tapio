@@ -142,7 +142,7 @@ func (sc *StatsCollector) buildNodeCPUEvent(ctx context.Context, summary *statsv
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": sc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
@@ -175,7 +175,7 @@ func (sc *StatsCollector) buildNodeMemoryEvent(ctx context.Context, summary *sta
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": sc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
@@ -236,7 +236,7 @@ func (sc *StatsCollector) buildCPUThrottlingEvent(ctx context.Context, pod *stat
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": sc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
@@ -280,7 +280,7 @@ func (sc *StatsCollector) buildMemoryPressureEvent(ctx context.Context, pod *sta
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": sc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
@@ -327,7 +327,7 @@ func (sc *StatsCollector) buildEphemeralStorageEvent(ctx context.Context, pod *s
 			SpanID:  spanID,
 			Labels: map[string]string{
 				"observer": sc.observerName,
-				"version":  "1.0.0",
+				"version":  ObserverVersion,
 			},
 		},
 	}
