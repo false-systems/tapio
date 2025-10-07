@@ -28,14 +28,14 @@ func NewK8sPod(kv nats.KeyValue) *K8sPod {
 }
 
 // Decode transforms IP address (bytes) to pod name
-// Input: IP address bytes (e.g., from inet_ip decoder output: "10.244.1.5")
+// Input: ctx (context for cancellation), IP address bytes (e.g., from inet_ip decoder output: "10.244.1.5")
 // Output: Pod name (e.g., "nginx-abc123")
-func (k *K8sPod) Decode(in []byte, conf Decoder) ([]byte, error) {
+func (k *K8sPod) Decode(ctx context.Context, in []byte, conf Decoder) ([]byte, error) {
 	ip := string(in)
 
 	// Lookup in NATS KV: pod.ip.<ip> → PodInfo
 	key := fmt.Sprintf("pod.ip.%s", ip)
-	entry, err := k.kv.Get(context.Background(), key)
+	entry, err := k.kv.Get(ctx, key)
 	if err != nil {
 		if err == nats.ErrKeyNotFound {
 			// IP not found in K8s metadata
