@@ -207,10 +207,23 @@ install-tools: ## Install development tools
 	@$(GO) install golang.org/x/tools/cmd/goimports@latest
 	@$(GO) install github.com/cilium/ebpf/cmd/bpf2go@latest
 
-docker-build: ## Build Docker images
-	@echo "${GREEN}Building Docker images...${NC}"
-	@docker build -t tapio-collector:latest -f build/docker/collector/Dockerfile .
-	@docker build -t tapio-api:latest -f build/docker/api/Dockerfile .
+##@ Docker Development
+
+docker-dev-build: ## Build dev container (Ubuntu + eBPF + Go)
+	@echo "${GREEN}Building Tapio dev container...${NC}"
+	@docker build -f docker/Dockerfile.dev -t tapio-dev:latest .
+
+docker-dev: ## Start dev container (Linux environment on Mac)
+	@echo "${GREEN}Starting Tapio dev container...${NC}"
+	@docker run -it --rm -v $(shell pwd):/tapio tapio-dev:latest
+
+docker-test: ## Run tests in dev container
+	@echo "${GREEN}Running tests in dev container...${NC}"
+	@docker run --rm -v $(shell pwd):/tapio tapio-dev:latest go test ./... -race
+
+docker-build-ebpf: ## Build eBPF programs in dev container
+	@echo "${GREEN}Building eBPF in dev container...${NC}"
+	@docker run --rm -v $(shell pwd):/tapio tapio-dev:latest make bpf-generate
 
 ##@ CI/CD
 
