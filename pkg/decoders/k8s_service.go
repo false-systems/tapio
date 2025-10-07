@@ -30,12 +30,12 @@ func NewK8sService(kv nats.KeyValue) *K8sService {
 // Decode transforms IP address (bytes) to service name
 // Input: IP address bytes (e.g., from inet_ip decoder output: "10.96.0.1")
 // Output: Service name (e.g., "kubernetes")
-func (k *K8sService) Decode(in []byte, conf Decoder) ([]byte, error) {
+func (k *K8sService) Decode(ctx context.Context, in []byte, conf Decoder) ([]byte, error) {
 	ip := string(in)
 
 	// Lookup in NATS KV: service.ip.<ip> → ServiceInfo
 	key := fmt.Sprintf("service.ip.%s", ip)
-	entry, err := k.kv.Get(context.Background(), key)
+	entry, err := k.kv.Get(ctx, key)
 	if err != nil {
 		if err == nats.ErrKeyNotFound {
 			// IP not found in K8s metadata
