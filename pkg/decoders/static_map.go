@@ -1,16 +1,12 @@
-package decoder
+package decoders
 
-import (
-	"fmt"
-
-	"github.com/cloudflare/ebpf_exporter/v2/config"
-)
+import "fmt"
 
 // StaticMap is a decoded that maps values according to a static map
 type StaticMap struct{}
 
 // Decode maps values according to a static map
-func (s *StaticMap) Decode(in []byte, conf config.Decoder) ([]byte, error) {
+func (s *StaticMap) Decode(in []byte, conf Decoder) ([]byte, error) {
 	if conf.StaticMap == nil {
 		return []byte("empty mapping"), nil
 	}

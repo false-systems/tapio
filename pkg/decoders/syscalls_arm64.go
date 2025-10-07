@@ -3,7 +3,7 @@
 
 //go:build arm64
 
-package decoder
+package decoders
 
 var syscalls = map[uint64]string{
 	0:   "io_setup",
