@@ -1,17 +1,16 @@
-package decoder
+package decoders
 
 import (
 	"fmt"
 	"strconv"
 
-	"github.com/cloudflare/ebpf_exporter/v2/config"
 )
 
 // Syscall is a decoder that decodes syscall numbers into their names
 type Syscall struct{}
 
 // Decode transforms a syscall number into a syscall name
-func (s *Syscall) Decode(in []byte, _ config.Decoder) ([]byte, error) {
+func (s *Syscall) Decode(in []byte, _ Decoder) ([]byte, error) {
 	number, err := strconv.Atoi(string(in))
 	if err != nil {
 		return nil, err

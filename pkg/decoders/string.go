@@ -1,14 +1,10 @@
-package decoder
-
-import (
-	"github.com/cloudflare/ebpf_exporter/v2/config"
-)
+package decoders
 
 // String is a decoder that decodes strings coming from the kernel
 type String struct{}
 
 // Decode transforms byte slice from the kernel into string
-func (s *String) Decode(in []byte, _ config.Decoder) ([]byte, error) {
+func (s *String) Decode(in []byte, _ Decoder) ([]byte, error) {
 	return in[0:clen(in)], nil
 }
 

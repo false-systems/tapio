@@ -32,10 +32,8 @@ func NewSet(skipCacheSize int) (*Set, error) {
 		decoders: map[string]DecoderFunc{
 			"inet_ip":    &InetIP{},
 			"string":     &String{},
-			"uint":       &UInt{},
 			"static_map": &StaticMap{},
 			"syscall":    &Syscall{},
-			"cgroup":     &CGroup{},
 		},
 		cache: map[string]map[string][]string{},
 	}
@@ -87,7 +85,7 @@ func (s *Set) decode(in []byte, label Label) ([]byte, error) {
 // DecodeLabelsForMetrics transforms eBPF map key bytes into a list of label values
 // according to configuration (different label sets require different names).
 // This decoder method variant does caching and is suitable for metrics.
-func (s *Set) DecodeLabelsForMetrics(in []byte, name string, labels []config.Label) ([]string, error) {
+func (s *Set) DecodeLabelsForMetrics(in []byte, name string, labels []Label) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -124,7 +122,7 @@ func (s *Set) DecodeLabelsForMetrics(in []byte, name string, labels []config.Lab
 // DecodeLabelsForTracing transforms eBPF map key bytes into a list of label values
 // according to configuration (different label sets require different names).
 // This decoder method variant does not do caching and is suitable for tracing.
-func (s *Set) DecodeLabelsForTracing(in []byte, labels []config.Label) ([]string, error) {
+func (s *Set) DecodeLabelsForTracing(in []byte, labels []Label) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -132,7 +130,7 @@ func (s *Set) DecodeLabelsForTracing(in []byte, labels []config.Label) ([]string
 }
 
 // decodeLabels is the inner function of DecodeLabels without any caching
-func (s *Set) decodeLabels(in []byte, labels []config.Label) ([]string, error) {
+func (s *Set) decodeLabels(in []byte, labels []Label) ([]string, error) {
 	values := make([]string, len(labels))
 
 	off := uint(0)
