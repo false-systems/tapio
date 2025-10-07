@@ -35,7 +35,7 @@ func (k *K8sService) Decode(ctx context.Context, in []byte, conf Decoder) ([]byt
 
 	// Lookup in NATS KV: service.ip.<ip> → ServiceInfo
 	key := fmt.Sprintf("service.ip.%s", ip)
-	entry, err := k.kv.Get(ctx, key)
+	entry, err := k.kv.Get(key)
 	if err != nil {
 		if err == nats.ErrKeyNotFound {
 			// IP not found in K8s metadata
