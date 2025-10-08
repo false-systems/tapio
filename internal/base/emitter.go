@@ -139,6 +139,8 @@ func (e *TapioEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) er
 		return fmt.Errorf("context cancelled while emitting event: %w", ctx.Err())
 	default:
 		return fmt.Errorf("event channel full, dropping event %s", event.ID)
+
+
 	}
 }
 
