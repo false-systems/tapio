@@ -276,8 +276,10 @@ Error: invalid eBPF program: verifier rejected
 ```
 **Solution**: Check kernel version and eBPF features:
 ```bash
-uname -r  # Should be 5.8+
-ls /sys/kernel/btf/vmlinux  # Should exist for CO-RE
+# Kernel version should be 5.8+
+uname -r
+# /sys/kernel/btf/vmlinux should exist for CO-RE
+ls /sys/kernel/btf/vmlinux
 ```
 
 ### Ring Buffer Full (Events Dropped)
