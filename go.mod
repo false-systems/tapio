@@ -1,8 +1,6 @@
 module github.com/yairfalse/tapio
 
-go 1.24.0
-
-toolchain go1.24.5
+go 1.23.4
 
 require (
 	github.com/cilium/ebpf v0.19.0
@@ -12,8 +10,8 @@ require (
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/metric v1.38.0
 	go.opentelemetry.io/otel/sdk/metric v1.38.0
-	go.opentelemetry.io/otel/trace v1.38.0
-	golang.org/x/sync v0.17.0
+	golang.org/x/sync v0.10.0
+
 )
 
 require (
