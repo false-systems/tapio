@@ -3,7 +3,6 @@ package decoders
 import (
 	"fmt"
 	"strconv"
-
 )
 
 // Syscall is a decoder that decodes syscall numbers into their names
