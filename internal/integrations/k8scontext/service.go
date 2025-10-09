@@ -65,11 +65,6 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start service watcher: %w", err)
 	}
 
-	defer func() {
-		if err := s.Stop(); err != nil {
-			log.Printf("error stopping service: %v", err)
-		}
-	}()
 
 	<-ctx.Done()
 	return ctx.Err()
