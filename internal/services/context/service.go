@@ -211,12 +211,16 @@ func (s *Service) storeServiceMetadata(svc *corev1.Service) error {
 		return nil // Skip headless services
 	}
 
+	labels := svc.Labels
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	serviceInfo := ServiceInfo{
 		Name:      svc.Name,
 		Namespace: svc.Namespace,
 		ClusterIP: svc.Spec.ClusterIP,
 		Type:      string(svc.Spec.Type),
-		Labels:    svc.Labels,
+		Labels:    labels,
 	}
 
 	data, err := json.Marshal(serviceInfo)
