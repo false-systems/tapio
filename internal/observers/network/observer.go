@@ -3,6 +3,7 @@
 package network
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/yairfalse/tapio/internal/base"
@@ -31,4 +32,12 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		BaseObserver: baseObs,
 		config:       config,
 	}, nil
+}
+
+// loadeBPF loads the eBPF program
+func (n *NetworkObserver) loadeBPF(ctx context.Context) error {
+	// Create empty manager for now - eBPF object loading happens via go:generate
+	manager := &base.EBPFManager{}
+	n.ebpfManager = manager
+	return nil
 }
