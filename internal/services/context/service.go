@@ -109,3 +109,34 @@ func (s *Service) watchPods(ctx context.Context) error {
 
 	return nil
 }
+
+// watchServices watches service events and updates NATS KV
+func (s *Service) watchServices(ctx context.Context) error {
+	watcher, err := s.k8sClient.CoreV1().Services("").Watch(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to watch services: %w", err)
+	}
+	s.svcWatch = watcher
+
+	go func() {
+		for event := range watcher.ResultChan() {
+			svc, ok := event.Object.(*corev1.Service)
+			if !ok {
+				continue
+			}
+
+			switch event.Type {
+			case watch.Added, watch.Modified:
+				if err := s.storeServiceMetadata(svc); err != nil {
+					log.Printf("failed to store service metadata: %v", err)
+				}
+			case watch.Deleted:
+				if err := s.deleteServiceMetadata(svc); err != nil {
+					log.Printf("failed to delete service metadata: %v", err)
+				}
+			}
+		}
+	}()
+
+	return nil
+}
