@@ -89,20 +89,29 @@ func (s *Service) watchPods(ctx context.Context) error {
 	s.podWatch = watcher
 
 	go func() {
-		for event := range watcher.ResultChan() {
-			pod, ok := event.Object.(*corev1.Pod)
-			if !ok {
-				continue
-			}
-
-			switch event.Type {
-			case watch.Added, watch.Modified:
-				if err := s.storePodMetadata(pod); err != nil {
-					log.Printf("failed to store pod metadata: %v", err)
+		resultChan := watcher.ResultChan()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-resultChan:
+				if !ok {
+					return
 				}
-			case watch.Deleted:
-				if err := s.deletePodMetadata(pod); err != nil {
-					log.Printf("failed to delete pod metadata: %v", err)
+				pod, ok := event.Object.(*corev1.Pod)
+				if !ok {
+					continue
+				}
+
+				switch event.Type {
+				case watch.Added, watch.Modified:
+					if err := s.storePodMetadata(pod); err != nil {
+						log.Printf("failed to store pod metadata: %v", err)
+					}
+				case watch.Deleted:
+					if err := s.deletePodMetadata(pod); err != nil {
+						log.Printf("failed to delete pod metadata: %v", err)
+					}
 				}
 			}
 		}
