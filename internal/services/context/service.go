@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 
@@ -137,6 +138,88 @@ func (s *Service) watchServices(ctx context.Context) error {
 			}
 		}
 	}()
+
+	return nil
+}
+
+// storePodMetadata writes pod metadata to NATS KV
+func (s *Service) storePodMetadata(pod *corev1.Pod) error {
+	if pod.Status.PodIP == "" {
+		return nil // Skip pods without IP
+	}
+
+	podInfo := PodInfo{
+		Name:      pod.Name,
+		Namespace: pod.Namespace,
+		PodIP:     pod.Status.PodIP,
+		HostIP:    pod.Status.HostIP,
+		Labels:    pod.Labels,
+	}
+
+	data, err := json.Marshal(podInfo)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pod info: %w", err)
+	}
+
+	key := fmt.Sprintf("pod.ip.%s", pod.Status.PodIP)
+	if _, err := s.kv.Put(key, data); err != nil {
+		return fmt.Errorf("failed to put pod metadata in KV: %w", err)
+	}
+
+	return nil
+}
+
+// deletePodMetadata removes pod metadata from NATS KV
+func (s *Service) deletePodMetadata(pod *corev1.Pod) error {
+	if pod.Status.PodIP == "" {
+		return nil
+	}
+
+	key := fmt.Sprintf("pod.ip.%s", pod.Status.PodIP)
+	if err := s.kv.Delete(key); err != nil {
+		return fmt.Errorf("failed to delete pod metadata from KV: %w", err)
+	}
+
+	return nil
+}
+
+// storeServiceMetadata writes service metadata to NATS KV
+func (s *Service) storeServiceMetadata(svc *corev1.Service) error {
+	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == "None" {
+		return nil // Skip headless services
+	}
+
+	serviceInfo := ServiceInfo{
+		Name:      svc.Name,
+		Namespace: svc.Namespace,
+		ClusterIP: svc.Spec.ClusterIP,
+		Type:      string(svc.Spec.Type),
+		Labels:    svc.Labels,
+	}
+
+	data, err := json.Marshal(serviceInfo)
+	if err != nil {
+		return fmt.Errorf("failed to marshal service info: %w", err)
+	}
+
+	key := fmt.Sprintf("service.ip.%s", svc.Spec.ClusterIP)
+	if _, err := s.kv.Put(key, data); err != nil {
+		return fmt.Errorf("failed to put service metadata in KV: %w", err)
+	}
+
+	return nil
+}
+
+// deleteServiceMetadata removes service metadata from NATS KV
+func (s *Service) deleteServiceMetadata(svc *corev1.Service) error {
+	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == "None" {
+		return nil
+	}
+
+	key := fmt.Sprintf("service.ip.%s", svc.Spec.ClusterIP)
+	if err := s.kv.Delete(key); err != nil {
+		return fmt.Errorf("failed to delete service metadata from KV: %w", err)
+	}
 
 	return nil
 }
