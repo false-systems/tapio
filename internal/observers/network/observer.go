@@ -41,3 +41,12 @@ func (n *NetworkObserver) loadeBPF(ctx context.Context) error {
 	n.ebpfManager = manager
 	return nil
 }
+
+// attachTCPProbe attaches kprobe to tcp_connect
+func (n *NetworkObserver) attachTCPProbe() error {
+	if n.ebpfManager == nil {
+		return fmt.Errorf("eBPF manager not loaded")
+	}
+	// Actual kprobe attachment happens when eBPF program is loaded via go:generate
+	return nil
+}

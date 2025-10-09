@@ -32,4 +32,25 @@ struct {
     __uint(max_entries, 4096 * sizeof(struct network_event));
 } events SEC(".maps");
 
+// TCP connect kprobe - triggers on outgoing TCP connections
+SEC("kprobe/tcp_connect")
+int trace_tcp_connect(struct pt_regs *ctx) {
+	struct network_event *event;
+
+	// Reserve space in ring buffer
+	event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+	if (!event) {
+		return 0;
+	}
+
+	// Get process info
+	event->pid = bpf_get_current_pid_tgid() >> 32;
+	bpf_get_current_comm(&event->comm, sizeof(event->comm));
+	event->protocol = 6; // TCP
+
+	// Submit event to userspace
+	bpf_ringbuf_submit(event, 0);
+	return 0;
+}
+
 char LICENSE[] SEC("license") = "GPL";
