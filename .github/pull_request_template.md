@@ -1,49 +1,130 @@
-## Description
-<!-- Brief description of what this PR does -->
+# PR Title
+<!-- One-line summary: feat(scope): what was done -->
 
-## Type of Change
-<!-- Mark relevant items with an 'x' -->
-- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
-- [ ] ✨ New feature (non-breaking change which adds functionality)
-- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] 📚 Documentation update
-- [ ] 🧹 Code refactoring
-- [ ] 🚀 Performance improvement
-- [ ] ✅ Test addition/update
+## 🎯 Why This Change?
+<!-- The rationale - why did we need this? What problem does it solve? -->
 
-## Checklist
-<!-- Mark completed items with an 'x' -->
-- [ ] My code follows the project's style guidelines
-- [ ] I have run `gofmt -w .` to format my code
-- [ ] I have run `go vet ./...` and addressed any issues
-- [ ] I have run `go test ./...` and all tests pass
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] My commits follow the [Conventional Commits](https://www.conventionalcommits.org/) standard
-- [ ] No stubs or TODOs in production code
-- [ ] Architecture rules followed (5-level hierarchy)
+**Problem:**
 
-## Testing
-<!-- Describe how you tested your changes -->
-- [ ] Unit tests pass (80%+ coverage)
-- [ ] Integration tests pass (if applicable)
-- [ ] Manual testing completed
 
-## Verification Results
+**Solution:**
+
+
+**Impact:**
+
+
+## 🔧 What Changed?
+<!-- High-level summary of what was implemented -->
+
+**Key Components:**
+-
+-
+-
+
+**Architecture Changes:**
+<!-- Any changes to system architecture, dependencies, or interfaces -->
+
+
+## 🏗️ How It Works
+<!-- Technical implementation details -->
+
+**Implementation Details:**
+
+
+**Design Decisions:**
+<!-- Why did you choose this approach over alternatives? -->
+
+
+**Trade-offs:**
+<!-- What did you optimize for? What did you sacrifice? -->
+
+
+## 🔍 What Should Reviewers Check?
+<!-- Guide reviewers on what to focus on -->
+
+**Critical Paths:**
+1.
+2.
+
+**Edge Cases to Verify:**
+-
+-
+
+**Performance Considerations:**
+-
+
+**Security Concerns:**
+-
+
+## ✅ Testing & Verification
+<!-- How did you verify this works? -->
+
+**Test Coverage:**
 ```bash
-# Paste output of:
-$ gofmt -l . | grep -v vendor | wc -l
-# Should be: 0
-
-$ go build ./...
-# Should show no errors
-
-$ go test ./...
-# Should show all tests passing
+# Test results
+$ go test ./... -cover
+# <paste coverage results>
 ```
 
-## Additional Context
-<!-- Add any other context about the PR here -->
+**Manual Testing:**
+<!-- What did you test manually? -->
 
-## Related Issues
-<!-- Link any related issues here using #issue-number -->
+
+**Load/Performance Testing:**
+<!-- If applicable -->
+
+
+## 📊 Metrics & Observability
+<!-- What metrics are exposed? How do we monitor this? -->
+
+**New Metrics:**
+-
+
+**Dashboards/Alerts:**
+
+
+## 🚀 Deployment & Migration
+<!-- What needs to happen when this is deployed? -->
+
+**Breaking Changes:**
+<!-- None, or describe what breaks and how to migrate -->
+
+
+**Configuration Changes:**
+<!-- Any new env vars, config files, or flags? -->
+
+
+**Dependencies:**
+<!-- New dependencies added or version bumps -->
+
+
+## 🔗 Related Work
+<!-- Context and related PRs/issues -->
+
+**Depends On:**
+-
+
+**Blocks:**
+-
+
+**Related:**
+-
+
 Closes #
+
+---
+
+## 📝 Verification Checklist
+<!-- Quick sanity checks - mark with 'x' when done -->
+- [ ] All tests pass (`go test ./...`)
+- [ ] Coverage >= 80% per package
+- [ ] No TODOs, FIXMEs, or stubs
+- [ ] No `map[string]interface{}` (typed structs only)
+- [ ] Architecture hierarchy followed (5-level)
+- [ ] OTEL metrics properly instrumented
+- [ ] Error handling with context wrapping
+- [ ] Resources properly cleaned up (defer, Close())
+- [ ] Race detector clean (`go test -race`)
+- [ ] `make verify-full` passes
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
