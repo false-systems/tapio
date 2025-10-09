@@ -50,3 +50,12 @@ func (n *NetworkObserver) attachTCPProbe() error {
 	// Actual kprobe attachment happens when eBPF program is loaded via go:generate
 	return nil
 }
+
+// attachUDPProbe attaches kprobe to udp_sendmsg
+func (n *NetworkObserver) attachUDPProbe() error {
+	if n.ebpfManager == nil {
+		return fmt.Errorf("eBPF manager not loaded")
+	}
+	// Actual kprobe attachment happens when eBPF program is loaded via go:generate
+	return nil
+}

@@ -53,4 +53,22 @@ int trace_tcp_connect(struct pt_regs *ctx) {
 	return 0;
 }
 
+// UDP sendmsg kprobe
+SEC("kprobe/udp_sendmsg")
+int trace_udp_sendmsg(struct pt_regs *ctx) {
+	struct network_event *event;
+
+	event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+	if (!event) {
+		return 0;
+	}
+
+	event->pid = bpf_get_current_pid_tgid() >> 32;
+	bpf_get_current_comm(&event->comm, sizeof(event->comm));
+	event->protocol = 17; // UDP
+
+	bpf_ringbuf_submit(event, 0);
+	return 0;
+}
+
 char LICENSE[] SEC("license") = "GPL";
