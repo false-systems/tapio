@@ -89,20 +89,28 @@ func (s *Service) watchPods(ctx context.Context) error {
 	s.podWatch = watcher
 
 	go func() {
-		for event := range watcher.ResultChan() {
-			pod, ok := event.Object.(*corev1.Pod)
-			if !ok {
-				continue
-			}
-
-			switch event.Type {
-			case watch.Added, watch.Modified:
-				if err := s.storePodMetadata(pod); err != nil {
-					log.Printf("failed to store pod metadata: %v", err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-watcher.ResultChan():
+				if !ok {
+					return
 				}
-			case watch.Deleted:
-				if err := s.deletePodMetadata(pod); err != nil {
-					log.Printf("failed to delete pod metadata: %v", err)
+				pod, ok := event.Object.(*corev1.Pod)
+				if !ok {
+					continue
+				}
+
+				switch event.Type {
+				case watch.Added, watch.Modified:
+					if err := s.storePodMetadata(pod); err != nil {
+						log.Printf("failed to store pod metadata: %v", err)
+					}
+				case watch.Deleted:
+					if err := s.deletePodMetadata(pod); err != nil {
+						log.Printf("failed to delete pod metadata: %v", err)
+					}
 				}
 			}
 		}
@@ -120,20 +128,28 @@ func (s *Service) watchServices(ctx context.Context) error {
 	s.svcWatch = watcher
 
 	go func() {
-		for event := range watcher.ResultChan() {
-			svc, ok := event.Object.(*corev1.Service)
-			if !ok {
-				continue
-			}
-
-			switch event.Type {
-			case watch.Added, watch.Modified:
-				if err := s.storeServiceMetadata(svc); err != nil {
-					log.Printf("failed to store service metadata: %v", err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-watcher.ResultChan():
+				if !ok {
+					return
 				}
-			case watch.Deleted:
-				if err := s.deleteServiceMetadata(svc); err != nil {
-					log.Printf("failed to delete service metadata: %v", err)
+				svc, ok := event.Object.(*corev1.Service)
+				if !ok {
+					continue
+				}
+
+				switch event.Type {
+				case watch.Added, watch.Modified:
+					if err := s.storeServiceMetadata(svc); err != nil {
+						log.Printf("failed to store service metadata: %v", err)
+					}
+				case watch.Deleted:
+					if err := s.deleteServiceMetadata(svc); err != nil {
+						log.Printf("failed to delete service metadata: %v", err)
+					}
 				}
 			}
 		}
