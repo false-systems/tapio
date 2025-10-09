@@ -1,3 +1,5 @@
+//go:build linux
+
 package network
 
 import (
@@ -14,7 +16,8 @@ type Config struct {
 // NetworkObserver tracks TCP/UDP/DNS network events using eBPF
 type NetworkObserver struct {
 	*base.BaseObserver
-	config Config
+	config      Config
+	ebpfManager *base.EBPFManager
 }
 
 // NewNetworkObserver creates a new network observer
