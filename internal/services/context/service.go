@@ -166,12 +166,16 @@ func (s *Service) storePodMetadata(pod *corev1.Pod) error {
 		return nil // Skip pods without IP
 	}
 
+	labels := pod.Labels
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 	podInfo := PodInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
 		PodIP:     pod.Status.PodIP,
 		HostIP:    pod.Status.HostIP,
-		Labels:    pod.Labels,
+		Labels:    labels,
 	}
 
 	data, err := json.Marshal(podInfo)
