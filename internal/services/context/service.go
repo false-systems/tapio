@@ -3,8 +3,11 @@ package context
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/nats-io/nats.go"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -73,5 +76,36 @@ func (s *Service) Stop() error {
 	if s.svcWatch != nil {
 		s.svcWatch.Stop()
 	}
+	return nil
+}
+
+// watchPods watches pod events and updates NATS KV
+func (s *Service) watchPods(ctx context.Context) error {
+	watcher, err := s.k8sClient.CoreV1().Pods("").Watch(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to watch pods: %w", err)
+	}
+	s.podWatch = watcher
+
+	go func() {
+		for event := range watcher.ResultChan() {
+			pod, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				continue
+			}
+
+			switch event.Type {
+			case watch.Added, watch.Modified:
+				if err := s.storePodMetadata(pod); err != nil {
+					log.Printf("failed to store pod metadata: %v", err)
+				}
+			case watch.Deleted:
+				if err := s.deletePodMetadata(pod); err != nil {
+					log.Printf("failed to delete pod metadata: %v", err)
+				}
+			}
+		}
+	}()
+
 	return nil
 }
