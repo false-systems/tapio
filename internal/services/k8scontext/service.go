@@ -109,6 +109,18 @@ func (s *Service) startInformers() {
 	// Service informer
 	serviceInformer := s.informerFactory.Core().V1().Services().Informer()
 	serviceInformer.AddEventHandler(&serviceEventHandler{service: s})
+
+	// Deployment informer
+	deploymentInformer := s.informerFactory.Apps().V1().Deployments().Informer()
+	deploymentInformer.AddEventHandler(&deploymentEventHandler{service: s})
+
+	// ReplicaSet informer
+	replicaSetInformer := s.informerFactory.Apps().V1().ReplicaSets().Informer()
+	replicaSetInformer.AddEventHandler(&replicaSetEventHandler{service: s})
+
+	// Node informer
+	nodeInformer := s.informerFactory.Core().V1().Nodes().Informer()
+	nodeInformer.AddEventHandler(&nodeEventHandler{service: s})
 }
 
 // Start begins watching K8s resources
@@ -181,4 +193,55 @@ func (h *serviceEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 func (h *serviceEventHandler) OnDelete(obj interface{}) {
 	h.service.handleServiceDelete(obj)
+}
+
+// deploymentEventHandler wraps Service to implement cache.ResourceEventHandler
+type deploymentEventHandler struct {
+	service *Service
+}
+
+func (h *deploymentEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
+	h.service.handleDeploymentAdd(obj)
+}
+
+func (h *deploymentEventHandler) OnUpdate(oldObj, newObj interface{}) {
+	h.service.handleDeploymentUpdate(oldObj, newObj)
+}
+
+func (h *deploymentEventHandler) OnDelete(obj interface{}) {
+	h.service.handleDeploymentDelete(obj)
+}
+
+// replicaSetEventHandler wraps Service to implement cache.ResourceEventHandler
+type replicaSetEventHandler struct {
+	service *Service
+}
+
+func (h *replicaSetEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
+	h.service.handleReplicaSetAdd(obj)
+}
+
+func (h *replicaSetEventHandler) OnUpdate(oldObj, newObj interface{}) {
+	h.service.handleReplicaSetUpdate(oldObj, newObj)
+}
+
+func (h *replicaSetEventHandler) OnDelete(obj interface{}) {
+	h.service.handleReplicaSetDelete(obj)
+}
+
+// nodeEventHandler wraps Service to implement cache.ResourceEventHandler
+type nodeEventHandler struct {
+	service *Service
+}
+
+func (h *nodeEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
+	h.service.handleNodeAdd(obj)
+}
+
+func (h *nodeEventHandler) OnUpdate(oldObj, newObj interface{}) {
+	h.service.handleNodeUpdate(oldObj, newObj)
+}
+
+func (h *nodeEventHandler) OnDelete(obj interface{}) {
+	h.service.handleNodeDelete(obj)
 }
