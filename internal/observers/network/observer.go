@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/yairfalse/tapio/internal/base"
+	"go.opentelemetry.io/otel"
 )
 
 // Config holds network observer configuration
@@ -19,6 +20,7 @@ type NetworkObserver struct {
 	*base.BaseObserver
 	config      Config
 	ebpfManager *base.EBPFManager
+	emitter     base.Emitter
 }
 
 // NewNetworkObserver creates a new network observer
@@ -28,9 +30,14 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
+	// Create emitters from output config
+	tracer := otel.Tracer(name)
+	emitter := base.CreateEmitters(config.Output, tracer)
+
 	return &NetworkObserver{
 		BaseObserver: baseObs,
 		config:       config,
+		emitter:      emitter,
 	}, nil
 }
 
