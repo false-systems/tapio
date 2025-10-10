@@ -76,3 +76,75 @@ func serializeServiceInfo(serviceInfo ServiceInfo) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// storePodMetadata writes pod metadata to NATS KV
+func (s *Service) storePodMetadata(pod *corev1.Pod) error {
+	if shouldSkipPod(pod) {
+		return nil
+	}
+
+	podInfo := toPodInfo(pod)
+	data, err := serializePodInfo(podInfo)
+	if err != nil {
+		return err
+	}
+
+	key := makePodKey(pod.Status.PodIP)
+	_, err = s.kv.Put(key, data)
+	if err != nil {
+		return fmt.Errorf("failed to store pod metadata for %s: %w", key, err)
+	}
+
+	return nil
+}
+
+// deletePodMetadata removes pod metadata from NATS KV
+func (s *Service) deletePodMetadata(pod *corev1.Pod) error {
+	if shouldSkipPod(pod) {
+		return nil
+	}
+
+	key := makePodKey(pod.Status.PodIP)
+	err := s.kv.Delete(key)
+	if err != nil {
+		return fmt.Errorf("failed to delete pod metadata for %s: %w", key, err)
+	}
+
+	return nil
+}
+
+// storeServiceMetadata writes service metadata to NATS KV
+func (s *Service) storeServiceMetadata(svc *corev1.Service) error {
+	if shouldSkipService(svc) {
+		return nil
+	}
+
+	serviceInfo := toServiceInfo(svc)
+	data, err := serializeServiceInfo(serviceInfo)
+	if err != nil {
+		return err
+	}
+
+	key := makeServiceKey(svc.Spec.ClusterIP)
+	_, err = s.kv.Put(key, data)
+	if err != nil {
+		return fmt.Errorf("failed to store service metadata for %s: %w", key, err)
+	}
+
+	return nil
+}
+
+// deleteServiceMetadata removes service metadata from NATS KV
+func (s *Service) deleteServiceMetadata(svc *corev1.Service) error {
+	if shouldSkipService(svc) {
+		return nil
+	}
+
+	key := makeServiceKey(svc.Spec.ClusterIP)
+	err := s.kv.Delete(key)
+	if err != nil {
+		return fmt.Errorf("failed to delete service metadata for %s: %w", key, err)
+	}
+
+	return nil
+}
