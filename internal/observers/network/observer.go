@@ -115,8 +115,8 @@ func (n *NetworkObserver) convertToDomainEvent(ebpf NetworkEventBPF) *domain.Obs
 	// Convert IP addresses
 	srcIP := make(net.IP, 4)
 	dstIP := make(net.IP, 4)
-	binary.LittleEndian.PutUint32(srcIP, ebpf.SrcIP)
-	binary.LittleEndian.PutUint32(dstIP, ebpf.DstIP)
+	binary.BigEndian.PutUint32(srcIP, ebpf.SrcIP)
+	binary.BigEndian.PutUint32(dstIP, ebpf.DstIP)
 
 	// Extract process name
 	processName := strings.TrimRight(string(ebpf.Comm[:]), "\x00")
