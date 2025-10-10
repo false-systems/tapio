@@ -40,11 +40,16 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 	tracer := otel.Tracer(name)
 	emitter := base.CreateEmitters(config.Output, tracer)
 
-	return &NetworkObserver{
+	observer := &NetworkObserver{
 		BaseObserver: baseObs,
 		config:       config,
 		emitter:      emitter,
-	}, nil
+	}
+
+	// Add eBPF event reader as pipeline stage
+	observer.AddStage(observer.readeBPFEvents)
+
+	return observer, nil
 }
 
 // loadeBPF loads the eBPF program
@@ -71,6 +76,31 @@ func (n *NetworkObserver) attachUDPProbe() error {
 	}
 	// Actual kprobe attachment happens when eBPF program is loaded via go:generate
 	return nil
+}
+
+// readeBPFEvents is the pipeline stage that reads from eBPF ring buffer
+func (n *NetworkObserver) readeBPFEvents(ctx context.Context) error {
+	if n.ebpfManager == nil {
+		return fmt.Errorf("eBPF manager not loaded")
+	}
+
+	// TODO: Real eBPF ring buffer reading when go:generate is set up
+	// For now, just run the loop structure without actual events
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			// When eBPF is ready, poll ring buffer here:
+			// 1. Read NetworkEventBPF from ring buffer
+			// 2. Convert: event := n.convertToDomainEvent(ebpfEvent)
+			// 3. Emit: n.emitter.Emit(ctx, event)
+			// 4. Metrics: n.RecordEvent(ctx) or n.RecordError(ctx)
+
+			// For now, sleep to avoid busy loop
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 }
 
 // convertToDomainEvent converts eBPF event to domain event
