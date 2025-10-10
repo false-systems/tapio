@@ -128,6 +128,11 @@ func (s *Service) Start(ctx context.Context) error {
 	// Wait for cache sync
 	s.informerFactory.WaitForCacheSync(s.ctx.Done())
 
+	// Perform initial sync to populate KV with existing resources
+	if err := s.initialSync(s.ctx); err != nil {
+		return fmt.Errorf("initial sync failed: %w", err)
+	}
+
 	return nil
 }
 
