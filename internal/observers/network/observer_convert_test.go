@@ -19,7 +19,7 @@ func TestConvertToDomainEvent_TCP(t *testing.T) {
 	// Simulate eBPF TCP event
 	ebpfEvent := NetworkEventBPF{
 		PID:      1234,
-		SrcIP:    0x0100007f, // 127.0.0.1 in network byte order
+		SrcIP:    0x7f000001, // 127.0.0.1 in network byte order
 		DstIP:    0x08080808, // 8.8.8.8
 		SrcPort:  12345,
 		DstPort:  80,
