@@ -96,14 +96,69 @@ func NewService(config Config) (*Service, error) {
 	}, nil
 }
 
+// startInformers registers event handlers for all K8s resources
+func (s *Service) startInformers() {
+	// Pod informer
+	podInformer := s.informerFactory.Core().V1().Pods().Informer()
+	podInformer.AddEventHandler(&podEventHandler{service: s})
+
+	// Service informer
+	serviceInformer := s.informerFactory.Core().V1().Services().Informer()
+	serviceInformer.AddEventHandler(&serviceEventHandler{service: s})
+}
+
 // Start begins watching K8s resources
 func (s *Service) Start(ctx context.Context) error {
-	// TODO: Implement in next chunk
-	return fmt.Errorf("not implemented yet")
+	// Register event handlers
+	s.startInformers()
+
+	// Start all informers
+	s.informerFactory.Start(ctx.Done())
+
+	// Wait for cache sync
+	s.informerFactory.WaitForCacheSync(ctx.Done())
+
+	return nil
 }
 
 // Stop gracefully stops the service
 func (s *Service) Stop() error {
-	// TODO: Implement in next chunk
-	return fmt.Errorf("not implemented yet")
+	// Informers will stop when context is cancelled
+	// Close event buffer
+	close(s.eventBuffer)
+	return nil
+}
+
+// podEventHandler wraps Service to implement cache.ResourceEventHandler
+type podEventHandler struct {
+	service *Service
+}
+
+func (h *podEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
+	h.service.handlePodAdd(obj)
+}
+
+func (h *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
+	h.service.handlePodUpdate(oldObj, newObj)
+}
+
+func (h *podEventHandler) OnDelete(obj interface{}) {
+	h.service.handlePodDelete(obj)
+}
+
+// serviceEventHandler wraps Service to implement cache.ResourceEventHandler
+type serviceEventHandler struct {
+	service *Service
+}
+
+func (h *serviceEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
+	h.service.handleServiceAdd(obj)
+}
+
+func (h *serviceEventHandler) OnUpdate(oldObj, newObj interface{}) {
+	h.service.handleServiceUpdate(oldObj, newObj)
+}
+
+func (h *serviceEventHandler) OnDelete(obj interface{}) {
+	h.service.handleServiceDelete(obj)
 }
