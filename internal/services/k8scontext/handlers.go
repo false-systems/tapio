@@ -3,6 +3,7 @@ package k8scontext
 import (
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -122,5 +123,106 @@ func (s *Service) handleServiceDelete(obj interface{}) {
 	serviceCopy := service.DeepCopy()
 	s.enqueueEvent(func() error {
 		return s.deleteServiceMetadata(serviceCopy)
+	})
+}
+
+// handleDeploymentAdd is called when a new deployment is created
+func (s *Service) handleDeploymentAdd(obj interface{}) {
+	deployment, ok := obj.(*appsv1.Deployment)
+	if !ok {
+		fmt.Printf("handleDeploymentAdd: unexpected type %T\n", obj)
+		return
+	}
+
+	deploymentCopy := deployment.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.storeDeploymentMetadata(deploymentCopy)
+	})
+}
+
+// handleDeploymentUpdate is called when a deployment is updated
+func (s *Service) handleDeploymentUpdate(oldObj, newObj interface{}) {
+	newDeployment, ok := newObj.(*appsv1.Deployment)
+	if !ok {
+		fmt.Printf("handleDeploymentUpdate: unexpected new type %T\n", newObj)
+		return
+	}
+
+	deploymentCopy := newDeployment.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.storeDeploymentMetadata(deploymentCopy)
+	})
+}
+
+// handleDeploymentDelete is called when a deployment is deleted
+func (s *Service) handleDeploymentDelete(obj interface{}) {
+	deployment, ok := obj.(*appsv1.Deployment)
+	if !ok {
+		fmt.Printf("handleDeploymentDelete: unexpected type %T\n", obj)
+		return
+	}
+
+	deploymentCopy := deployment.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.deleteDeploymentMetadata(deploymentCopy)
+	})
+}
+
+// handleReplicaSetAdd is called when a new replicaset is created
+// We use this to track Pod → Deployment ownership
+func (s *Service) handleReplicaSetAdd(obj interface{}) {
+	// ReplicaSet events are used for ownership tracking
+	// For now, we don't store ReplicaSet metadata directly
+}
+
+// handleReplicaSetUpdate is called when a replicaset is updated
+func (s *Service) handleReplicaSetUpdate(oldObj, newObj interface{}) {
+	// No-op for now
+}
+
+// handleReplicaSetDelete is called when a replicaset is deleted
+func (s *Service) handleReplicaSetDelete(obj interface{}) {
+	// No-op for now
+}
+
+// handleNodeAdd is called when a new node is created
+func (s *Service) handleNodeAdd(obj interface{}) {
+	node, ok := obj.(*corev1.Node)
+	if !ok {
+		fmt.Printf("handleNodeAdd: unexpected type %T\n", obj)
+		return
+	}
+
+	nodeCopy := node.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.storeNodeMetadata(nodeCopy)
+	})
+}
+
+// handleNodeUpdate is called when a node is updated
+func (s *Service) handleNodeUpdate(oldObj, newObj interface{}) {
+	newNode, ok := newObj.(*corev1.Node)
+	if !ok {
+		fmt.Printf("handleNodeUpdate: unexpected new type %T\n", newObj)
+		return
+	}
+
+	nodeCopy := newNode.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.storeNodeMetadata(nodeCopy)
+	})
+}
+
+// handleNodeDelete is called when a node is deleted
+func (s *Service) handleNodeDelete(obj interface{}) {
+	node, ok := obj.(*corev1.Node)
+	if !ok {
+		fmt.Printf("handleNodeDelete: unexpected type %T\n", obj)
+		return
+	}
+
+	nodeCopy := node.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.deleteNodeMetadata(nodeCopy)
 	})
 }

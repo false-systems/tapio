@@ -19,6 +19,16 @@ func (s *Service) initialSync(ctx context.Context) error {
 		return fmt.Errorf("failed to sync services: %w", err)
 	}
 
+	// Sync existing deployments
+	if err := s.syncDeployments(ctx); err != nil {
+		return fmt.Errorf("failed to sync deployments: %w", err)
+	}
+
+	// Sync existing nodes
+	if err := s.syncNodes(ctx); err != nil {
+		return fmt.Errorf("failed to sync nodes: %w", err)
+	}
+
 	return nil
 }
 
@@ -60,6 +70,42 @@ func (s *Service) syncServices(ctx context.Context) error {
 		svcCopy := svc.DeepCopy()
 		s.enqueueEvent(func() error {
 			return s.storeServiceMetadata(svcCopy)
+		})
+	}
+
+	return nil
+}
+
+// syncDeployments syncs all existing deployments from informer cache to NATS KV
+func (s *Service) syncDeployments(ctx context.Context) error {
+	deploymentLister := s.informerFactory.Apps().V1().Deployments().Lister()
+	deployments, err := deploymentLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list deployments: %w", err)
+	}
+
+	for _, deployment := range deployments {
+		deploymentCopy := deployment.DeepCopy()
+		s.enqueueEvent(func() error {
+			return s.storeDeploymentMetadata(deploymentCopy)
+		})
+	}
+
+	return nil
+}
+
+// syncNodes syncs all existing nodes from informer cache to NATS KV
+func (s *Service) syncNodes(ctx context.Context) error {
+	nodeLister := s.informerFactory.Core().V1().Nodes().Lister()
+	nodes, err := nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	for _, node := range nodes {
+		nodeCopy := node.DeepCopy()
+		s.enqueueEvent(func() error {
+			return s.storeNodeMetadata(nodeCopy)
 		})
 	}
 
