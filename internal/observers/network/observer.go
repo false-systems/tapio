@@ -4,9 +4,15 @@ package network
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"net"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 )
 
@@ -65,4 +71,41 @@ func (n *NetworkObserver) attachUDPProbe() error {
 	}
 	// Actual kprobe attachment happens when eBPF program is loaded via go:generate
 	return nil
+}
+
+// convertToDomainEvent converts eBPF event to domain event
+func (n *NetworkObserver) convertToDomainEvent(ebpf NetworkEventBPF) *domain.ObserverEvent {
+	eventType := "tcp_connect"
+	protocol := "TCP"
+	if ebpf.Protocol == ProtocolUDP {
+		eventType = "udp_send"
+		protocol = "UDP"
+	}
+
+	// Convert IP addresses
+	srcIP := make(net.IP, 4)
+	dstIP := make(net.IP, 4)
+	binary.LittleEndian.PutUint32(srcIP, ebpf.SrcIP)
+	binary.LittleEndian.PutUint32(dstIP, ebpf.DstIP)
+
+	// Extract process name
+	processName := strings.TrimRight(string(ebpf.Comm[:]), "\x00")
+
+	return &domain.ObserverEvent{
+		ID:        uuid.New().String(),
+		Type:      eventType,
+		Source:    n.Name(),
+		Timestamp: time.Now(),
+		NetworkData: &domain.NetworkEventData{
+			Protocol: protocol,
+			SrcIP:    srcIP.String(),
+			DstIP:    dstIP.String(),
+			SrcPort:  ebpf.SrcPort,
+			DstPort:  ebpf.DstPort,
+		},
+		ProcessData: &domain.ProcessEventData{
+			PID:         int32(ebpf.PID),
+			ProcessName: processName,
+		},
+	}
 }
