@@ -14,9 +14,11 @@ func (s *Service) handlePodAdd(obj interface{}) {
 		return
 	}
 
-	if err := s.storePodMetadata(pod); err != nil {
-		fmt.Printf("failed to store pod metadata for %s/%s: %v\n", pod.Namespace, pod.Name, err)
-	}
+	// Enqueue async write to NATS KV
+	podCopy := pod.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.storePodMetadata(podCopy)
+	})
 }
 
 // handlePodUpdate is called when a pod is updated
@@ -33,17 +35,21 @@ func (s *Service) handlePodUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	// If IP changed, delete old entry
-	if oldPod.Status.PodIP != "" && oldPod.Status.PodIP != newPod.Status.PodIP {
-		if err := s.deletePodMetadata(oldPod); err != nil {
-			fmt.Printf("failed to delete old pod metadata for %s/%s: %v\n", oldPod.Namespace, oldPod.Name, err)
-		}
-	}
+	oldPodCopy := oldPod.DeepCopy()
+	newPodCopy := newPod.DeepCopy()
 
-	// Store updated metadata
-	if err := s.storePodMetadata(newPod); err != nil {
-		fmt.Printf("failed to store updated pod metadata for %s/%s: %v\n", newPod.Namespace, newPod.Name, err)
-	}
+	// Enqueue async operations
+	s.enqueueEvent(func() error {
+		// If IP changed, delete old entry
+		if oldPodCopy.Status.PodIP != "" && oldPodCopy.Status.PodIP != newPodCopy.Status.PodIP {
+			if err := s.deletePodMetadata(oldPodCopy); err != nil {
+				return fmt.Errorf("failed to delete old pod: %w", err)
+			}
+		}
+
+		// Store updated metadata
+		return s.storePodMetadata(newPodCopy)
+	})
 }
 
 // handlePodDelete is called when a pod is deleted
@@ -54,9 +60,10 @@ func (s *Service) handlePodDelete(obj interface{}) {
 		return
 	}
 
-	if err := s.deletePodMetadata(pod); err != nil {
-		fmt.Printf("failed to delete pod metadata for %s/%s: %v\n", pod.Namespace, pod.Name, err)
-	}
+	podCopy := pod.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.deletePodMetadata(podCopy)
+	})
 }
 
 // handleServiceAdd is called when a new service is created
@@ -67,9 +74,10 @@ func (s *Service) handleServiceAdd(obj interface{}) {
 		return
 	}
 
-	if err := s.storeServiceMetadata(service); err != nil {
-		fmt.Printf("failed to store service metadata for %s/%s: %v\n", service.Namespace, service.Name, err)
-	}
+	serviceCopy := service.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.storeServiceMetadata(serviceCopy)
+	})
 }
 
 // handleServiceUpdate is called when a service is updated
@@ -86,18 +94,21 @@ func (s *Service) handleServiceUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	// If ClusterIP changed, delete old entry
-	if oldService.Spec.ClusterIP != "" && oldService.Spec.ClusterIP != "None" &&
-		oldService.Spec.ClusterIP != newService.Spec.ClusterIP {
-		if err := s.deleteServiceMetadata(oldService); err != nil {
-			fmt.Printf("failed to delete old service metadata for %s/%s: %v\n", oldService.Namespace, oldService.Name, err)
-		}
-	}
+	oldServiceCopy := oldService.DeepCopy()
+	newServiceCopy := newService.DeepCopy()
 
-	// Store updated metadata
-	if err := s.storeServiceMetadata(newService); err != nil {
-		fmt.Printf("failed to store updated service metadata for %s/%s: %v\n", newService.Namespace, newService.Name, err)
-	}
+	s.enqueueEvent(func() error {
+		// If ClusterIP changed, delete old entry
+		if oldServiceCopy.Spec.ClusterIP != "" && oldServiceCopy.Spec.ClusterIP != "None" &&
+			oldServiceCopy.Spec.ClusterIP != newServiceCopy.Spec.ClusterIP {
+			if err := s.deleteServiceMetadata(oldServiceCopy); err != nil {
+				return fmt.Errorf("failed to delete old service: %w", err)
+			}
+		}
+
+		// Store updated metadata
+		return s.storeServiceMetadata(newServiceCopy)
+	})
 }
 
 // handleServiceDelete is called when a service is deleted
@@ -108,7 +119,8 @@ func (s *Service) handleServiceDelete(obj interface{}) {
 		return
 	}
 
-	if err := s.deleteServiceMetadata(service); err != nil {
-		fmt.Printf("failed to delete service metadata for %s/%s: %v\n", service.Namespace, service.Name, err)
-	}
+	serviceCopy := service.DeepCopy()
+	s.enqueueEvent(func() error {
+		return s.deleteServiceMetadata(serviceCopy)
+	})
 }

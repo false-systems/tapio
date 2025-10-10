@@ -63,14 +63,23 @@ func TestInformerIntegration_PodLifecycle(t *testing.T) {
 	service := &Service{
 		kv:              mockKV,
 		informerFactory: factory,
+		eventBuffer:     make(chan func() error, 10),
+		config: Config{
+			MaxRetries:    3,
+			RetryInterval: 10 * time.Millisecond,
+		},
 	}
-
-	// Register handlers
-	service.startInformers()
 
 	// Start informers in background
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+
+	// Start event processing worker
+	go service.processEvents(ctx)
+
+	// Register handlers
+	service.startInformers()
+
 	factory.Start(ctx.Done())
 
 	// Wait for cache sync
@@ -110,14 +119,23 @@ func TestInformerIntegration_ServiceLifecycle(t *testing.T) {
 	service := &Service{
 		kv:              mockKV,
 		informerFactory: factory,
+		eventBuffer:     make(chan func() error, 10),
+		config: Config{
+			MaxRetries:    3,
+			RetryInterval: 10 * time.Millisecond,
+		},
 	}
-
-	// Register handlers
-	service.startInformers()
 
 	// Start informers in background
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+
+	// Start event processing worker
+	go service.processEvents(ctx)
+
+	// Register handlers
+	service.startInformers()
+
 	factory.Start(ctx.Done())
 
 	// Wait for cache sync

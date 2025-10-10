@@ -22,6 +22,10 @@ type Service struct {
 
 	// Event buffer for async NATS KV writes
 	eventBuffer chan func() error
+
+	// Context for worker goroutine
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewService creates a new K8s Context Service
@@ -109,23 +113,34 @@ func (s *Service) startInformers() {
 
 // Start begins watching K8s resources
 func (s *Service) Start(ctx context.Context) error {
+	// Create cancellable context for workers
+	s.ctx, s.cancel = context.WithCancel(ctx)
+
+	// Start event processing worker
+	go s.processEvents(s.ctx)
+
 	// Register event handlers
 	s.startInformers()
 
 	// Start all informers
-	s.informerFactory.Start(ctx.Done())
+	s.informerFactory.Start(s.ctx.Done())
 
 	// Wait for cache sync
-	s.informerFactory.WaitForCacheSync(ctx.Done())
+	s.informerFactory.WaitForCacheSync(s.ctx.Done())
 
 	return nil
 }
 
 // Stop gracefully stops the service
 func (s *Service) Stop() error {
-	// Informers will stop when context is cancelled
-	// Close event buffer
+	// Cancel context to stop informers and workers
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	// Close event buffer (workers will drain remaining events first)
 	close(s.eventBuffer)
+
 	return nil
 }
 
