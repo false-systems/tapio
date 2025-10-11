@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -64,22 +66,63 @@ func NewObserverMetrics(observerName string) (*ObserverMetrics, error) {
 	}, nil
 }
 
-// RecordEvent records a successfully processed event
-func (m *ObserverMetrics) RecordEvent(ctx context.Context, observerName string) {
-	m.EventsProcessed.Add(ctx, 1, metric.WithAttributes())
+// RecordEvent records a successfully processed event with OTEL semantic conventions
+func (m *ObserverMetrics) RecordEvent(ctx context.Context, observerName string, event *domain.ObserverEvent) {
+	if event == nil {
+		return
+	}
+
+	attrs := []attribute.KeyValue{
+		attribute.String("observer.name", observerName),
+		attribute.String("event.type", event.Type),
+		EventDomainAttribute(event.Type),
+	}
+
+	m.EventsProcessed.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
-// RecordDrop records a dropped event
-func (m *ObserverMetrics) RecordDrop(ctx context.Context, observerName string) {
-	m.EventsDropped.Add(ctx, 1, metric.WithAttributes())
+// RecordDrop records a dropped event with OTEL semantic conventions
+func (m *ObserverMetrics) RecordDrop(ctx context.Context, observerName string, eventType string) {
+	attrs := []attribute.KeyValue{
+		attribute.String("observer.name", observerName),
+		attribute.String("event.type", eventType),
+		EventDomainAttribute(eventType),
+	}
+
+	m.EventsDropped.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
-// RecordError records an error
-func (m *ObserverMetrics) RecordError(ctx context.Context, observerName string) {
-	m.ErrorsTotal.Add(ctx, 1, metric.WithAttributes())
+// RecordError records an error with OTEL semantic conventions
+func (m *ObserverMetrics) RecordError(ctx context.Context, observerName string, event *domain.ObserverEvent) {
+	attrs := []attribute.KeyValue{
+		attribute.String("observer.name", observerName),
+	}
+
+	if event != nil {
+		attrs = append(attrs,
+			attribute.String("event.type", event.Type),
+			EventDomainAttribute(event.Type),
+		)
+		if IsErrorEvent(event) {
+			attrs = append(attrs, ErrorTypeAttribute(event.Type))
+		}
+	}
+
+	m.ErrorsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
-// RecordProcessingTime records processing duration in milliseconds
-func (m *ObserverMetrics) RecordProcessingTime(ctx context.Context, observerName string, durationMs float64) {
-	m.ProcessingTime.Record(ctx, durationMs, metric.WithAttributes())
+// RecordProcessingTime records processing duration in milliseconds with OTEL semantic conventions
+func (m *ObserverMetrics) RecordProcessingTime(ctx context.Context, observerName string, event *domain.ObserverEvent, durationMs float64) {
+	attrs := []attribute.KeyValue{
+		attribute.String("observer.name", observerName),
+	}
+
+	if event != nil {
+		attrs = append(attrs,
+			attribute.String("event.type", event.Type),
+			EventDomainAttribute(event.Type),
+		)
+	}
+
+	m.ProcessingTime.Record(ctx, durationMs, metric.WithAttributes(attrs...))
 }
