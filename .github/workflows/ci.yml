@@ -10,41 +10,179 @@ env:
   GO_VERSION: '1.24'
 
 jobs:
-  # Single job that runs everything in parallel steps
-  build-and-test:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go_files: ${{ steps.changes.outputs.go_files }}
+      ebpf_files: ${{ steps.changes.outputs.ebpf_files }}
+      docker_files: ${{ steps.changes.outputs.docker_files }}
+      go_packages: ${{ steps.changes.outputs.go_packages }}
+      has_go: ${{ steps.changes.outputs.has_go }}
+      has_ebpf: ${{ steps.changes.outputs.has_ebpf }}
+      has_docker: ${{ steps.changes.outputs.has_docker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: changes
+        run: |
+          # Get changed files (compare with main for PRs, HEAD~1 for pushes)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="origin/${{ github.base_ref }}"
+          else
+            BASE_REF="HEAD~1"
+          fi
+
+          # Detect Go files
+          GO_FILES=$(git diff --name-only $BASE_REF...HEAD | grep '\.go$' || true)
+          echo "go_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$GO_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Detect eBPF files
+          EBPF_FILES=$(git diff --name-only $BASE_REF...HEAD | grep '\.c$\|\.h$' || true)
+          echo "ebpf_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$EBPF_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Detect Dockerfiles
+          DOCKER_FILES=$(git diff --name-only $BASE_REF...HEAD | grep 'Dockerfile' || true)
+          echo "docker_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$DOCKER_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Extract unique Go packages from changed files
+          GO_PACKAGES=""
+          if [ -n "$GO_FILES" ]; then
+            GO_PACKAGES=$(echo "$GO_FILES" | xargs -I {} dirname {} | sort -u | xargs -I {} echo "./{}/..." | tr '\n' ' ')
+          fi
+          echo "go_packages=$GO_PACKAGES" >> $GITHUB_OUTPUT
+
+          # Set boolean flags
+          [ -n "$GO_FILES" ] && echo "has_go=true" >> $GITHUB_OUTPUT || echo "has_go=false" >> $GITHUB_OUTPUT
+          [ -n "$EBPF_FILES" ] && echo "has_ebpf=true" >> $GITHUB_OUTPUT || echo "has_ebpf=false" >> $GITHUB_OUTPUT
+          [ -n "$DOCKER_FILES" ] && echo "has_docker=true" >> $GITHUB_OUTPUT || echo "has_docker=false" >> $GITHUB_OUTPUT
+
+  verify-go:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: CLAUDE.md Verification
+        run: |
+          chmod +x ./scripts/verify-claude-md.sh
+          ./scripts/verify-claude-md.sh --strict ${{ needs.detect-changes.outputs.go_files }}
+
+      - name: Go Vet
+        run: go vet ${{ needs.detect-changes.outputs.go_packages }}
+
+      - name: Go Lint
+        run: golangci-lint run --timeout=10m ${{ needs.detect-changes.outputs.go_packages }}
+
+  test-go:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Test changed packages
+        run: go test -race -timeout 60s -coverprofile=coverage.out ${{ needs.detect-changes.outputs.go_packages }}
+
+      - name: Coverage Report
+        run: |
+          go tool cover -func=coverage.out
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "⚠️  Coverage is below 80% (${COVERAGE}%) - consider adding more tests"
+          fi
+
+  build-ebpf:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_ebpf == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
       - name: Install eBPF dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
-      
+
       - name: Generate eBPF objects
         run: |
-          for dir in pkg/observers/*/bpf; do
-            if [ -f "$dir/generate.go" ]; then
-              echo "Generating eBPF for $(basename $(dirname $dir))"
-              (cd "$dir" && go generate)
+          # Generate only for observers with changed eBPF files
+          for ebpf_file in ${{ needs.detect-changes.outputs.ebpf_files }}; do
+            OBSERVER_DIR=$(echo $ebpf_file | grep -o 'internal/observers/[^/]*' | head -1)
+            if [ -n "$OBSERVER_DIR" ]; then
+              echo "Generating eBPF for $OBSERVER_DIR"
+              (cd "$OBSERVER_DIR/bpf" && go generate || true)
             fi
           done
-      
-      - name: Build
-        run: go build -v ./...
-      
-      - name: Test
-        run: go test -race -timeout 60s ./...
-      
-      - name: Lint
-        uses: golangci/golangci-lint-action@v6
+
+  build-docker:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker images
+        run: |
+          for dockerfile in ${{ needs.detect-changes.outputs.docker_files }}; do
+            IMAGE_NAME=$(basename $(dirname $dockerfile))
+            echo "Building Docker image: $IMAGE_NAME"
+            docker build -f $dockerfile -t tapio-$IMAGE_NAME:ci .
+          done
+
+      - name: Test Docker images
+        run: |
+          for dockerfile in ${{ needs.detect-changes.outputs.docker_files }}; do
+            IMAGE_NAME=$(basename $(dirname $dockerfile))
+            echo "Testing Docker image: tapio-$IMAGE_NAME:ci"
+            docker run --rm tapio-$IMAGE_NAME:ci go version
+          done
+
+  build:
+    needs: [detect-changes, verify-go]
+    if: needs.detect-changes.outputs.has_go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          version: latest
-          args: --timeout=10m
-          skip-cache: true
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build changed packages
+        run: go build -v ${{ needs.detect-changes.outputs.go_packages }}
