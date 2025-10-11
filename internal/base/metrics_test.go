@@ -14,6 +14,11 @@ import (
 )
 
 func TestNewObserverMetrics(t *testing.T) {
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
+
 	metrics, err := NewObserverMetrics("test-observer")
 	require.NoError(t, err)
 	require.NotNil(t, metrics)
