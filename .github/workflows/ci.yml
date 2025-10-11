@@ -37,15 +37,18 @@ jobs:
 
           # Detect Go files
           GO_FILES=$(git diff --name-only $BASE_REF...HEAD | grep '\.go$' || true)
-          echo "go_files=$GO_FILES" >> $GITHUB_OUTPUT
+          GO_FILES_ONELINE=$(echo "$GO_FILES" | tr '\n' ' ')
+          echo "go_files=$GO_FILES_ONELINE" >> $GITHUB_OUTPUT
 
           # Detect eBPF files
           EBPF_FILES=$(git diff --name-only $BASE_REF...HEAD | grep '\.c$\|\.h$' || true)
-          echo "ebpf_files=$EBPF_FILES" >> $GITHUB_OUTPUT
+          EBPF_FILES_ONELINE=$(echo "$EBPF_FILES" | tr '\n' ' ')
+          echo "ebpf_files=$EBPF_FILES_ONELINE" >> $GITHUB_OUTPUT
 
           # Detect Dockerfiles
           DOCKER_FILES=$(git diff --name-only $BASE_REF...HEAD | grep 'Dockerfile' || true)
-          echo "docker_files=$DOCKER_FILES" >> $GITHUB_OUTPUT
+          DOCKER_FILES_ONELINE=$(echo "$DOCKER_FILES" | tr '\n' ' ')
+          echo "docker_files=$DOCKER_FILES_ONELINE" >> $GITHUB_OUTPUT
 
           # Extract unique Go packages from changed files
           GO_PACKAGES=""
