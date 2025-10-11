@@ -120,7 +120,7 @@ fi
 # ============================================================================
 # CODE QUALITY: Format check
 # ============================================================================
-echo -e "${YELLOW}[6/9] Checking go fmt...${NC}"
+echo -e "${YELLOW}[6/6] Checking go fmt...${NC}"
 
 UNFORMATTED=$(echo "$GO_FILES" | xargs gofmt -l 2>/dev/null || true)
 if [ -n "$UNFORMATTED" ]; then
