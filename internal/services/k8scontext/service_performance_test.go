@@ -258,7 +258,7 @@ func BenchmarkSerialization(b *testing.B) {
 					Labels:    map[string]string{"app": "test"},
 				}
 				for i := 0; i < b.N; i++ {
-					if err := serializeDeploymentInfo(info); err != nil {
+					if _, err := serializeDeploymentInfo(info); err != nil {
 						b.Fatalf("serializeDeploymentInfo failed: %v", err)
 					}
 				}
