@@ -64,7 +64,7 @@ func TestStorePodMetadata_SkipWithoutIP(t *testing.T) {
 	require.NoError(t, err, "Should return no error for skipped pod")
 
 	// Verify nothing was written
-	assert.Equal(t, 0, len(mockKV.data), "Should not write pod without IP")
+	assert.Equal(t, 0, mockKV.len(), "Should not write pod without IP")
 }
 
 // TestDeletePodMetadata_Success verifies pod metadata is deleted from NATS KV
@@ -173,7 +173,7 @@ func TestStoreServiceMetadata_SkipHeadless(t *testing.T) {
 	require.NoError(t, err, "Should return no error for skipped service")
 
 	// Verify nothing was written
-	assert.Equal(t, 0, len(mockKV.data), "Should not write headless service")
+	assert.Equal(t, 0, mockKV.len(), "Should not write headless service")
 }
 
 // TestDeleteServiceMetadata_Success verifies service metadata is deleted from NATS KV

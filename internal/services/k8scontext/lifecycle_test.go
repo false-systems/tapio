@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -108,6 +109,17 @@ func TestInformerIntegration_PodLifecycle(t *testing.T) {
 	entry, err := mockKV.Get("pod.ip.10.244.1.5")
 	require.NoError(t, err, "Pod should be stored via informer handler")
 	assert.NotNil(t, entry)
+
+	// Update the pod
+	pod.Labels["version"] = "v2"
+	_, err = clientset.CoreV1().Pods("default").Update(ctx, pod, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	// Delete the pod
+	err = clientset.CoreV1().Pods("default").Delete(ctx, "test-pod", metav1.DeleteOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
 }
 
 // TestInformerIntegration_ServiceLifecycle verifies end-to-end service flow
@@ -163,4 +175,108 @@ func TestInformerIntegration_ServiceLifecycle(t *testing.T) {
 	entry, err := mockKV.Get("service.ip.10.96.0.1")
 	require.NoError(t, err, "Service should be stored via informer handler")
 	assert.NotNil(t, entry)
+
+	// Update the service
+	svc.Labels = map[string]string{"version": "v2"}
+	_, err = clientset.CoreV1().Services("default").Update(ctx, svc, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	// Delete the service
+	err = clientset.CoreV1().Services("default").Delete(ctx, "kubernetes", metav1.DeleteOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestInformerIntegration_DeploymentLifecycle verifies deployment handler wrappers
+func TestInformerIntegration_DeploymentLifecycle(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	factory := informers.NewSharedInformerFactory(clientset, 0)
+	mockKV := newMockKV()
+
+	service := &Service{
+		kv:              mockKV,
+		informerFactory: factory,
+		eventBuffer:     make(chan func() error, 10),
+		config: Config{
+			MaxRetries:    3,
+			RetryInterval: 10 * time.Millisecond,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go service.processEvents(ctx)
+	service.startInformers()
+	factory.Start(ctx.Done())
+	factory.WaitForCacheSync(ctx.Done())
+
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-deployment",
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+		},
+	}
+
+	_, err := clientset.AppsV1().Deployments("default").Create(ctx, deployment, metav1.CreateOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	deployment.Labels = map[string]string{"version": "v2"}
+	_, err = clientset.AppsV1().Deployments("default").Update(ctx, deployment, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	err = clientset.AppsV1().Deployments("default").Delete(ctx, "test-deployment", metav1.DeleteOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestInformerIntegration_NodeLifecycle verifies node handler wrappers
+func TestInformerIntegration_NodeLifecycle(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	factory := informers.NewSharedInformerFactory(clientset, 0)
+	mockKV := newMockKV()
+
+	service := &Service{
+		kv:              mockKV,
+		informerFactory: factory,
+		eventBuffer:     make(chan func() error, 10),
+		config: Config{
+			MaxRetries:    3,
+			RetryInterval: 10 * time.Millisecond,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go service.processEvents(ctx)
+	service.startInformers()
+	factory.Start(ctx.Done())
+	factory.WaitForCacheSync(ctx.Done())
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+
+	_, err := clientset.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	node.Labels = map[string]string{"version": "v2"}
+	_, err = clientset.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	err = clientset.CoreV1().Nodes().Delete(ctx, "test-node", metav1.DeleteOptions{})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
 }

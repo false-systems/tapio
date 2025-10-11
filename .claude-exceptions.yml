@@ -1,0 +1,27 @@
+# CLAUDE.md Exception Configuration
+#
+# Documents allowed exceptions to CLAUDE.md standards.
+# Each exception MUST have:
+# - file: Specific file path
+# - rule: Which CLAUDE.md rule to exempt
+# - reason: WHY this exception is necessary
+# - approved_by: Who approved
+# - date: When approved
+#
+# IMPORTANT: Exceptions should be RARE. Review regularly.
+
+exceptions:
+  # Kubernetes client-go API requirement
+  - file: "internal/services/k8scontext/handlers.go"
+    rule: "interface{}"
+    reason: "Required by K8s client-go cache.ResourceEventHandler API"
+    approved_by: "yairfalse"
+    date: "2025-10-11"
+    notes: "Type assertions with error handling at function start"
+
+  - file: "internal/services/k8scontext/service.go"
+    rule: "interface{}"
+    reason: "Event handler wrappers implement K8s cache.ResourceEventHandler"
+    approved_by: "yairfalse"
+    date: "2025-10-11"
+    notes: "OnAdd/OnUpdate/OnDelete delegate to typed handlers"
