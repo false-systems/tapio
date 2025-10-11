@@ -710,9 +710,11 @@ func extractEventDomain(eventType string) string {
     case strings.HasPrefix(eventType, "tcp_"), strings.HasPrefix(eventType, "udp_"),
          strings.HasPrefix(eventType, "http_"), strings.HasPrefix(eventType, "dns_"):
         return "network"
-    case strings.HasPrefix(eventType, "oom_"), strings.HasPrefix(eventType, "syscall_"):
+    case strings.HasPrefix(eventType, "oom_"), strings.HasPrefix(eventType, "syscall_"),
+         strings.HasPrefix(eventType, "signal_"):
         return "kernel"
-    case strings.HasPrefix(eventType, "container_"), strings.HasPrefix(eventType, "pod_"):
+    case strings.HasPrefix(eventType, "container_"), strings.HasPrefix(eventType, "pod_"),
+         strings.HasPrefix(eventType, "docker_"):
         return "kubernetes"
     case strings.HasPrefix(eventType, "process_"), strings.HasPrefix(eventType, "exec_"):
         return "process"
