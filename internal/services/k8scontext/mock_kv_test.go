@@ -56,6 +56,12 @@ func (m *mockKV) setFails(fails bool) {
 	m.fails = fails
 }
 
+func (m *mockKV) len() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.data)
+}
+
 // Stub methods to satisfy nats.KeyValue interface
 func (m *mockKV) Create(string, []byte) (uint64, error)                             { return 0, nil }
 func (m *mockKV) Update(string, []byte, uint64) (uint64, error)                     { return 0, nil }

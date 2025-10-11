@@ -7,6 +7,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// NOTE: interface{} parameters required by Kubernetes client-go cache.ResourceEventHandler
+// All handlers perform type assertions with proper error handling (see service.go event handler wrappers)
+
 // handlePodAdd is called when a new pod is created
 func (s *Service) handlePodAdd(obj interface{}) {
 	pod, ok := obj.(*corev1.Pod)
@@ -18,7 +21,10 @@ func (s *Service) handlePodAdd(obj interface{}) {
 	// Enqueue async write to NATS KV
 	podCopy := pod.DeepCopy()
 	s.enqueueEvent(func() error {
-		return s.storePodMetadata(podCopy)
+		if err := s.storePodMetadata(podCopy); err != nil {
+			return err
+		}
+		return s.storeOwnerMetadata(podCopy)
 	})
 }
 
@@ -49,7 +55,10 @@ func (s *Service) handlePodUpdate(oldObj, newObj interface{}) {
 		}
 
 		// Store updated metadata
-		return s.storePodMetadata(newPodCopy)
+		if err := s.storePodMetadata(newPodCopy); err != nil {
+			return err
+		}
+		return s.storeOwnerMetadata(newPodCopy)
 	})
 }
 
@@ -63,7 +72,10 @@ func (s *Service) handlePodDelete(obj interface{}) {
 
 	podCopy := pod.DeepCopy()
 	s.enqueueEvent(func() error {
-		return s.deletePodMetadata(podCopy)
+		if err := s.deletePodMetadata(podCopy); err != nil {
+			return err
+		}
+		return s.deleteOwnerMetadata(podCopy)
 	})
 }
 
@@ -142,6 +154,12 @@ func (s *Service) handleDeploymentAdd(obj interface{}) {
 
 // handleDeploymentUpdate is called when a deployment is updated
 func (s *Service) handleDeploymentUpdate(oldObj, newObj interface{}) {
+	_, ok := oldObj.(*appsv1.Deployment)
+	if !ok {
+		fmt.Printf("handleDeploymentUpdate: unexpected old type %T\n", oldObj)
+		return
+	}
+
 	newDeployment, ok := newObj.(*appsv1.Deployment)
 	if !ok {
 		fmt.Printf("handleDeploymentUpdate: unexpected new type %T\n", newObj)
@@ -201,6 +219,12 @@ func (s *Service) handleNodeAdd(obj interface{}) {
 
 // handleNodeUpdate is called when a node is updated
 func (s *Service) handleNodeUpdate(oldObj, newObj interface{}) {
+	_, ok := oldObj.(*corev1.Node)
+	if !ok {
+		fmt.Printf("handleNodeUpdate: unexpected old type %T\n", oldObj)
+		return
+	}
+
 	newNode, ok := newObj.(*corev1.Node)
 	if !ok {
 		fmt.Printf("handleNodeUpdate: unexpected new type %T\n", newObj)
