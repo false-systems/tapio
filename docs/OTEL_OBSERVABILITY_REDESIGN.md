@@ -388,7 +388,7 @@ func CreateTapioResource(ctx context.Context, config TapioResourceConfig) (*reso
             // Telemetry SDK
             semconv.TelemetrySDKName("opentelemetry"),
             semconv.TelemetrySDKLanguageGo,
-            semconv.TelemetrySDKVersion("1.24.0"),
+            semconv.TelemetrySDKVersion(otel.Version()), // Use actual SDK version
         ),
     )
 }
@@ -968,10 +968,18 @@ func initTelemetry(ctx context.Context, config *Config) (func(), error) {
     }
 
     // 2. Set up trace exporter
-    traceExporter, err := otlptracegrpc.New(ctx,
+    traceExporterOpts := []otlptracegrpc.Option{
         otlptracegrpc.WithEndpoint(config.OTLPEndpoint),
-        otlptracegrpc.WithInsecure(), // TODO: Use TLS in production
-    )
+    }
+
+    // Use TLS unless explicitly disabled
+    if config.OTLPInsecure {
+        traceExporterOpts = append(traceExporterOpts, otlptracegrpc.WithInsecure())
+    } else {
+        traceExporterOpts = append(traceExporterOpts, otlptracegrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, "")))
+    }
+
+    traceExporter, err := otlptracegrpc.New(ctx, traceExporterOpts...)
     if err != nil {
         return nil, fmt.Errorf("failed to create trace exporter: %w", err)
     }
@@ -991,11 +999,18 @@ func initTelemetry(ctx context.Context, config *Config) (func(), error) {
     )
     otel.SetTracerProvider(tp)
 
-    // 4. Set up metric exporter
-    metricExporter, err := otlpmetricgrpc.New(ctx,
+    // 4. Set up metric exporter (same TLS config as traces)
+    metricExporterOpts := []otlpmetricgrpc.Option{
         otlpmetricgrpc.WithEndpoint(config.OTLPEndpoint),
-        otlpmetricgrpc.WithInsecure(),
-    )
+    }
+
+    if config.OTLPInsecure {
+        metricExporterOpts = append(metricExporterOpts, otlpmetricgrpc.WithInsecure())
+    } else {
+        metricExporterOpts = append(metricExporterOpts, otlpmetricgrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, "")))
+    }
+
+    metricExporter, err := otlpmetricgrpc.New(ctx, metricExporterOpts...)
     if err != nil {
         return nil, fmt.Errorf("failed to create metric exporter: %w", err)
     }
@@ -1074,6 +1089,7 @@ type Config struct {
 
     // OTEL configuration
     OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" default:"localhost:4317"`
+    OTLPInsecure bool   `env:"OTEL_EXPORTER_OTLP_INSECURE" default:"false"` // Default to TLS enabled
     ClusterID    string `env:"TAPIO_CLUSTER_ID" default:"default"`
     Namespace    string `env:"TAPIO_NAMESPACE" default:"tapio-system"`
     NodeName     string `env:"TAPIO_NODE_NAME" default:""`
@@ -1085,6 +1101,7 @@ func loadConfig() *Config {
 
     // Load from environment
     config.OTLPEndpoint = getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
+    config.OTLPInsecure = getEnvBool("OTEL_EXPORTER_OTLP_INSECURE", false) // Secure by default
     config.ClusterID = getEnv("TAPIO_CLUSTER_ID", "default")
     config.Namespace = getEnv("TAPIO_NAMESPACE", "tapio-system")
     config.NodeName = getEnv("TAPIO_NODE_NAME", getHostname())
