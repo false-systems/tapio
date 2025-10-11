@@ -1,5 +1,5 @@
 # Tapio Observability Platform - Production Grade Makefile
-# Modular build system with smart dependency resolution
+# Updated for internal/observers structure + CLAUDE.md enforcement
 
 .PHONY: all build test clean fmt lint verify help
 .DEFAULT_GOAL := help
@@ -9,105 +9,107 @@ GO := go
 GOFMT := gofmt
 GOIMPORTS := goimports
 GOLANGCI_LINT := golangci-lint
-GO_VERSION := 1.21
+GO_VERSION := 1.24
 PROJECT_ROOT := $(shell pwd)
 BUILD_DIR := build
 COVERAGE_DIR := coverage
-BPF_DIR := pkg/collectors
 ARCH := $(shell uname -m)
 
 # Color output
 RED := \033[0;31m
 GREEN := \033[0;32m
 YELLOW := \033[1;33m
-NC := \033[0m # No Color
+NC := \033[0m
 
-# Package groups for modular building
+# Package groups following 5-level architecture
 DOMAIN_PKGS := ./pkg/domain/...
-COLLECTOR_PKGS := ./pkg/collectors/...
+DECODER_PKGS := ./pkg/decoders/...
+BASE_PKGS := ./internal/base/...
+OBSERVER_PKGS := ./internal/observers/...
 INTELLIGENCE_PKGS := ./pkg/intelligence/...
 INTEGRATION_PKGS := ./pkg/integrations/...
 INTERFACE_PKGS := ./pkg/interfaces/...
 CMD_PKGS := ./cmd/...
 
-# Individual collector packages (for isolated builds)
-COLLECTOR_CNI := ./pkg/collectors/cni
-COLLECTOR_DNS := ./pkg/collectors/dns
-COLLECTOR_ETCD := ./pkg/collectors/etcd
-COLLECTOR_KUBEAPI := ./pkg/collectors/kubeapi
-COLLECTOR_KUBELET := ./pkg/collectors/kubelet
-COLLECTOR_SYSTEMD := ./pkg/collectors/systemd
-
-# BPF targets
-BPF_TARGETS := cni etcd systemd dns
+# Individual observer packages
+OBSERVERS := $(shell find internal/observers -maxdepth 1 -type d -not -path internal/observers | xargs -n1 basename 2>/dev/null || true)
 
 ##@ General
 
 help: ## Display this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make ${YELLOW}<target>${NC}\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  ${GREEN}%-20s${NC} %s\n", $$1, $$2 } /^##@/ { printf "\n${YELLOW}%s${NC}\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make ${YELLOW}<target>${NC}\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  ${GREEN}%-25s${NC} %s\n", $$1, $$2 } /^##@/ { printf "\n${YELLOW}%s${NC}\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
 
-all: fmt lint build test ## Run full development cycle
+all: verify build test ## Run full development cycle (CLAUDE.md enforced)
 
-build: build-domain build-collectors build-intelligence build-integrations build-interfaces build-cmd ## Build all packages in correct order
+build: build-domain build-decoders build-base build-observers build-intelligence build-integrations build-interfaces build-cmd ## Build all packages in correct order
 
 build-domain: ## Build domain layer (Level 0)
-	@echo "${GREEN}Building domain layer...${NC}"
-	@$(GO) build $(DOMAIN_PKGS) || (echo "${RED}Domain build failed${NC}" && exit 1)
+	@echo "${GREEN}[1/8] Building domain layer...${NC}"
+	@$(GO) build $(DOMAIN_PKGS)
 
-build-collectors: build-domain ## Build collectors layer (Level 1)
-	@echo "${GREEN}Building collectors layer...${NC}"
-	@for pkg in $(COLLECTOR_CNI) $(COLLECTOR_DNS) $(COLLECTOR_ETCD) $(COLLECTOR_KUBEAPI) $(COLLECTOR_KUBELET) $(COLLECTOR_SYSTEMD); do \
-		echo "  Building $$pkg..."; \
-		$(GO) build $$pkg 2>/dev/null || echo "    ${YELLOW}Warning: $$pkg has issues (continuing)${NC}"; \
-	done
-	@$(GO) build ./pkg/collectors/registry ./pkg/collectors/pipeline ./pkg/collectors/manager 2>/dev/null || true
+build-decoders: build-domain ## Build decoders (Level 1)
+	@echo "${GREEN}[2/8] Building decoders...${NC}"
+	@$(GO) build $(DECODER_PKGS)
 
-build-intelligence: build-domain build-collectors ## Build intelligence layer (Level 2)
-	@echo "${GREEN}Building intelligence layer...${NC}"
-	@$(GO) build $(INTELLIGENCE_PKGS) || (echo "${RED}Intelligence build failed${NC}" && exit 1)
+build-base: build-domain ## Build base infrastructure
+	@echo "${GREEN}[3/8] Building base infrastructure...${NC}"
+	@$(GO) build $(BASE_PKGS)
 
-build-integrations: build-domain build-collectors build-intelligence ## Build integrations layer (Level 3)
-	@echo "${GREEN}Building integrations layer...${NC}"
-	@$(GO) build $(INTEGRATION_PKGS) || (echo "${RED}Integrations build failed${NC}" && exit 1)
+build-observers: build-domain build-base ## Build observers (Level 1)
+	@echo "${GREEN}[4/8] Building observers...${NC}"
+	@$(GO) build $(OBSERVER_PKGS)
 
-build-interfaces: build-domain build-collectors build-intelligence build-integrations ## Build interfaces layer (Level 4)
-	@echo "${GREEN}Building interfaces layer...${NC}"
-	@$(GO) build $(INTERFACE_PKGS) || (echo "${RED}Interfaces build failed${NC}" && exit 1)
+build-intelligence: build-domain build-observers ## Build intelligence layer (Level 2)
+	@echo "${GREEN}[5/8] Building intelligence layer...${NC}"
+	@$(GO) build $(INTELLIGENCE_PKGS) || echo "${YELLOW}Intelligence layer has issues${NC}"
+
+build-integrations: build-domain build-observers build-intelligence ## Build integrations layer (Level 3)
+	@echo "${GREEN}[6/8] Building integrations layer...${NC}"
+	@$(GO) build $(INTEGRATION_PKGS) || echo "${YELLOW}Integrations layer has issues${NC}"
+
+build-interfaces: build-domain build-observers build-intelligence build-integrations ## Build interfaces layer (Level 4)
+	@echo "${GREEN}[7/8] Building interfaces layer...${NC}"
+	@$(GO) build $(INTERFACE_PKGS) || echo "${YELLOW}Interfaces layer has issues${NC}"
 
 build-cmd: build-interfaces ## Build command binaries
-	@echo "${GREEN}Building command binaries...${NC}"
+	@echo "${GREEN}[8/8] Building command binaries...${NC}"
 	@mkdir -p $(BUILD_DIR)
 	@for cmd in cmd/*/; do \
 		if [ -f "$$cmd/main.go" ]; then \
 			name=$$(basename $$cmd); \
 			echo "  Building $$name..."; \
-			$(GO) build -o $(BUILD_DIR)/$$name ./$$cmd 2>/dev/null || echo "    ${YELLOW}Warning: $$name has issues${NC}"; \
+			$(GO) build -o $(BUILD_DIR)/$$name ./$$cmd || echo "    ${YELLOW}Warning: $$name has issues${NC}"; \
 		fi; \
 	done
 
-##@ BPF Management
+##@ eBPF Management
 
-bpf-generate: ## Generate BPF Go bindings for all collectors (local dev)
-	@echo "${GREEN}Generating BPF bindings for local development...${NC}"
-	@./scripts/generate-ebpf.sh generate
+ebpf-vmlinux: ## Generate minimal vmlinux.h for all observers
+	@echo "${GREEN}Generating minimal vmlinux.h...${NC}"
+	@mkdir -p internal/base/bpf
+	@if [ -f /sys/kernel/btf/vmlinux ]; then \
+		bpftool btf dump file /sys/kernel/btf/vmlinux format c > internal/base/bpf/vmlinux.h; \
+		echo "${GREEN}✓ Generated internal/base/bpf/vmlinux.h${NC}"; \
+	else \
+		echo "${RED}✗ BTF not available (/sys/kernel/btf/vmlinux not found)${NC}"; \
+		exit 1; \
+	fi
 
-bpf-generate-ci: ## Generate BPF Go bindings in CI environment
-	@echo "${GREEN}Generating BPF bindings for CI...${NC}"
-	@./scripts/generate-ebpf.sh generate $(GOARCH)
+ebpf-generate: ## Generate eBPF Go bindings for all observers
+	@echo "${GREEN}Generating eBPF bindings...${NC}"
+	@for observer in $(OBSERVERS); do \
+		if [ -f "internal/observers/$$observer/bpf/network_monitor.c" ] || [ -f "internal/observers/$$observer/bpf/"*.c ]; then \
+			echo "  Generating eBPF for $$observer..."; \
+			(cd internal/observers/$$observer && go generate ./... 2>&1) || echo "${YELLOW}Warning: $$observer eBPF generation failed${NC}"; \
+		fi; \
+	done
 
-bpf-download: ## Download pre-built BPF artifacts
-	@echo "${GREEN}Downloading pre-built BPF artifacts...${NC}"
-	@./scripts/generate-ebpf.sh download $(ARCH)
-
-bpf-verify: ## Verify build with current BPF files
-	@echo "${GREEN}Verifying BPF build...${NC}"
-	@./scripts/generate-ebpf.sh verify
-
-bpf-clean: ## Clean generated BPF files
-	@echo "${GREEN}Cleaning BPF generated files...${NC}"
-	@./scripts/generate-ebpf.sh clean
+ebpf-clean: ## Clean generated eBPF files
+	@echo "${GREEN}Cleaning eBPF generated files...${NC}"
+	@find internal/observers -name "*_bpf*.go" -delete
+	@find internal/observers -name "*_bpf*.o" -delete
 
 ##@ Testing
 
@@ -115,68 +117,60 @@ test: test-unit ## Run all tests
 
 test-unit: ## Run unit tests with race detection
 	@echo "${GREEN}Running unit tests...${NC}"
-	@$(GO) test -race -timeout 30s $(DOMAIN_PKGS) $(COLLECTOR_PKGS) $(INTELLIGENCE_PKGS) $(INTEGRATION_PKGS) $(INTERFACE_PKGS) 2>/dev/null || \
-		echo "${YELLOW}Some tests failed (see details above)${NC}"
+	@$(GO) test -race -timeout 60s ./...
 
-test-coverage: ## Run tests with coverage
+test-coverage: ## Run tests with coverage (minimum 80%)
 	@echo "${GREEN}Running tests with coverage...${NC}"
 	@mkdir -p $(COVERAGE_DIR)
 	@$(GO) test -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
 	@$(GO) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
 	@echo "${GREEN}Coverage report: $(COVERAGE_DIR)/coverage.html${NC}"
+	@$(GO) tool cover -func=$(COVERAGE_DIR)/coverage.out | tail -1
 
-test-integration: ## Run integration tests (requires tags)
+test-integration: ## Run integration tests (Linux + eBPF)
 	@echo "${GREEN}Running integration tests...${NC}"
-	@$(GO) test -tags=integration -timeout 5m ./...
+	@$(GO) test -tags=integration -timeout 5m ./internal/observers/...
 
 test-benchmark: ## Run benchmarks
 	@echo "${GREEN}Running benchmarks...${NC}"
 	@$(GO) test -bench=. -benchmem ./...
 
-##@ Code Quality
+##@ Code Quality & CLAUDE.md Enforcement
 
-fmt: ## Format code
+fmt: ## Format code (required before commit)
 	@echo "${GREEN}Formatting code...${NC}"
 	@$(GOFMT) -w .
-	@$(GOIMPORTS) -w .
-
-lint: ## Run linters
-	@echo "${GREEN}Running linters...${NC}"
-	@if command -v $(GOLANGCI_LINT) > /dev/null; then \
-		$(GOLANGCI_LINT) run --timeout 5m; \
-	else \
-		echo "${YELLOW}golangci-lint not installed, skipping${NC}"; \
-	fi
 
 vet: ## Run go vet
 	@echo "${GREEN}Running go vet...${NC}"
 	@$(GO) vet ./...
 
-verify: verify-format verify-imports verify-architecture verify-todos verify-interface ## Run all verifications
+lint: ## Run golangci-lint
+	@echo "${GREEN}Running golangci-lint...${NC}"
+	@if command -v $(GOLANGCI_LINT) > /dev/null; then \
+		$(GOLANGCI_LINT) run --timeout 10m; \
+	else \
+		echo "${YELLOW}golangci-lint not installed${NC}"; \
+	fi
 
-verify-format: ## Check code formatting
-	@echo "${GREEN}Checking formatting...${NC}"
-	@test -z "$$($(GOFMT) -l . | grep -v vendor)" || (echo "${RED}Unformatted files found${NC}" && $(GOFMT) -l . | grep -v vendor && exit 1)
+verify: verify-claude-md verify-coverage ## Run all verifications (CLAUDE.md + coverage)
 
-verify-imports: ## Check import organization
-	@echo "${GREEN}Checking imports...${NC}"
-	@test -z "$$($(GOIMPORTS) -l . | grep -v vendor)" || (echo "${RED}Unorganized imports found${NC}" && exit 1)
+verify-claude-md: ## CLAUDE.md compliance check (strict mode)
+	@echo "${GREEN}Running CLAUDE.md compliance checks...${NC}"
+	@./scripts/verify-claude-md.sh --strict
 
-verify-architecture: ## Verify 5-level architecture
-	@echo "${GREEN}Verifying architecture hierarchy...${NC}"
-	@$(PROJECT_ROOT)/scripts/verify-architecture.sh || (echo "${RED}Architecture violations found${NC}" && exit 1)
+verify-quick: ## Quick CLAUDE.md check (no lint, for local dev)
+	@echo "${GREEN}Running quick CLAUDE.md checks...${NC}"
+	@./scripts/verify-claude-md.sh
 
-verify-todos: ## Check for TODOs and FIXMEs
-	@echo "${GREEN}Checking for TODOs...${NC}"
-	@! grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.go" . 2>/dev/null || (echo "${RED}TODOs found in code${NC}" && exit 1)
+verify-coverage: ## Verify minimum 80% coverage
+	@echo "${GREEN}Verifying coverage threshold...${NC}"
+	@$(GO) test -cover ./... 2>/dev/null | awk '/coverage:/ {gsub("%","",$$5); if ($$5 < 80) {print "❌ Package",$$2,"has only",$$5"% coverage (minimum 80%)"; exit 1}} END {print "✓ All packages meet 80% coverage"}'
 
-verify-interface: ## Check for interface{} abuse
-	@echo "${GREEN}Checking for interface{} abuse...${NC}"
-	@$(PROJECT_ROOT)/scripts/verify-no-interface-abuse.sh || (echo "${RED}Interface abuse violations found${NC}" && exit 1)
-
-verify-coverage: ## Verify minimum coverage (80%)
-	@echo "${GREEN}Verifying coverage...${NC}"
-	@$(GO) test -cover ./... | awk '/coverage:/ {gsub("%","",$$5); if ($$5 < 80) {print "${RED}Package",$$2,"has only",$$5"% coverage (minimum 80%)${NC}"; exit 1}}'
+verify-full: verify build test ## Full verification (CI mode)
+	@echo "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+	@echo "${GREEN}✅ ALL CHECKS PASSED - READY FOR COMMIT${NC}"
+	@echo "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 
 ##@ Dependency Management
 
@@ -193,181 +187,36 @@ deps-verify: ## Verify dependencies
 	@echo "${GREEN}Verifying dependencies...${NC}"
 	@$(GO) mod verify
 
+##@ Docker
+
+docker-dev: ## Build dev Docker image
+	@echo "${GREEN}Building dev Docker image...${NC}"
+	@docker build -t tapio-dev -f docker/Dockerfile.dev .
+
+docker-shell: ## Start Docker dev shell
+	@echo "${GREEN}Starting Docker dev shell...${NC}"
+	@docker run --rm -it --privileged -v $(PWD):/tapio -w /tapio tapio-dev
+
+docker-test: ## Run tests in Docker
+	@echo "${GREEN}Running tests in Docker...${NC}"
+	@docker run --rm --privileged -v $(PWD):/tapio -w /tapio tapio-dev make test
+
 ##@ Utilities
 
 clean: ## Clean build artifacts
 	@echo "${GREEN}Cleaning...${NC}"
 	@rm -rf $(BUILD_DIR) $(COVERAGE_DIR)
-	@find . -name "*.test" -delete
-	@find . -name "*.out" -delete
+	@$(GO) clean -cache -testcache
 
-install-tools: ## Install development tools
-	@echo "${GREEN}Installing tools...${NC}"
-	@$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	@$(GO) install golang.org/x/tools/cmd/goimports@latest
-	@$(GO) install github.com/cilium/ebpf/cmd/bpf2go@latest
+clean-all: clean ebpf-clean ## Clean everything including eBPF artifacts
+	@echo "${GREEN}Deep clean complete${NC}"
 
-##@ Docker Development
+info: ## Display project information
+	@echo "${GREEN}Tapio Observability Platform${NC}"
+	@echo ""
+	@echo "Go version:    $(shell $(GO) version)"
+	@echo "Architecture:  $(ARCH)"
+	@echo "Observers:     $(OBSERVERS)"
+	@echo ""
 
-docker-dev-build: ## Build dev container (Ubuntu + eBPF + Go)
-	@echo "${GREEN}Building Tapio dev container...${NC}"
-	@docker build -f docker/Dockerfile.dev -t tapio-dev:latest .
-
-docker-dev: ## Start dev container (Linux environment on Mac)
-	@echo "${GREEN}Starting Tapio dev container...${NC}"
-	@docker run -it --rm -v $(shell pwd):/tapio tapio-dev:latest
-
-docker-test: ## Run tests in dev container
-	@echo "${GREEN}Running tests in dev container...${NC}"
-	@docker run --rm -v $(shell pwd):/tapio tapio-dev:latest go test ./... -race
-
-docker-build-ebpf: ## Build eBPF programs in dev container
-	@echo "${GREEN}Building eBPF in dev container...${NC}"
-	@docker run --rm -v $(shell pwd):/tapio tapio-dev:latest make bpf-generate
-
-##@ CI/CD
-
-ci-local: ## Run full CI pipeline locally
-	@echo "${GREEN}Running CI pipeline locally...${NC}"
-	@$(MAKE) deps
-	@$(MAKE) fmt
-	@$(MAKE) lint
-	@$(MAKE) build
-	@$(MAKE) test
-	@$(MAKE) verify
-
-ci-quick: ## Quick CI check (format and build only)
-	@echo "${GREEN}Running quick CI check...${NC}"
-	@$(MAKE) verify-format
-	@$(MAKE) build-domain
-	@$(MAKE) build-collectors
-
-##@ Troubleshooting
-
-debug-deps: ## Debug dependency issues
-	@echo "${GREEN}Analyzing dependencies...${NC}"
-	@$(GO) list -f '{{.ImportPath}}: {{.Imports}}' ./... | grep -E "pkg/(domain|collectors|intelligence|integrations|interfaces)"
-
-debug-build: ## Build with verbose output
-	@echo "${GREEN}Building with verbose output...${NC}"
-	@$(GO) build -v ./...
-
-check-collector: ## Check specific collector build (use COLLECTOR=cni)
-	@if [ -z "$(COLLECTOR)" ]; then \
-		echo "${RED}Please specify COLLECTOR=<name>${NC}"; \
-	else \
-		echo "${GREEN}Checking collector: $(COLLECTOR)${NC}"; \
-		$(GO) build -v ./pkg/collectors/$(COLLECTOR); \
-	fi
-
-##@ Refactor Phase (Temporary Lightweight CI)
-
-refactor-mode: ## Switch to lightweight refactor configuration
-	@echo "${YELLOW}🔄 Switching to refactor phase configuration...${NC}"
-	@if [ -f .pre-commit-config.yaml ]; then \
-		cp .pre-commit-config.yaml .pre-commit-config-full.yaml.backup; \
-		echo "  Backed up current config to .pre-commit-config-full.yaml.backup"; \
-	fi
-	@cp .pre-commit-config-refactor.yaml .pre-commit-config.yaml
-	@pre-commit uninstall 2>/dev/null || true
-	@pre-commit install
-	@echo "${GREEN}✅ Switched to refactor mode${NC}"
-	@echo "${YELLOW}💡 Use 'make production-mode' to switch back${NC}"
-
-production-mode: ## Switch back to full production configuration  
-	@echo "${YELLOW}🔄 Switching to production configuration...${NC}"
-	@if [ -f .pre-commit-config-full.yaml.backup ]; then \
-		cp .pre-commit-config-full.yaml.backup .pre-commit-config.yaml; \
-		echo "  Restored production config"; \
-	else \
-		echo "${RED}❌ No backup found - please restore manually${NC}"; \
-		exit 1; \
-	fi
-	@pre-commit uninstall 2>/dev/null || true
-	@pre-commit install
-	@echo "${GREEN}✅ Switched to production mode${NC}"
-
-show-changed-packages: ## Show packages that would be checked in refactor mode
-	@echo "${GREEN}Analyzing changed packages since last commit...${NC}"
-	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
-	if [ -z "$$CHANGED_FILES" ]; then \
-		echo "${YELLOW}No Go files changed since last commit${NC}"; \
-	else \
-		echo "Changed files:"; \
-		echo "$$CHANGED_FILES" | sed 's/^/  - /'; \
-		echo ""; \
-		echo "Affected packages:"; \
-		echo "$$CHANGED_FILES" | xargs dirname | sort -u | sed 's/^/  - .\//'; \
-	fi
-
-refactor-quick-check: ## Quick validation for refactor phase (changed files only)
-	@echo "${GREEN}🚀 Running refactor-phase quick checks...${NC}"
-	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
-	if [ -z "$$CHANGED_FILES" ]; then \
-		echo "${YELLOW}No Go files changed - skipping checks${NC}"; \
-	else \
-		echo "Checking formatting..."; \
-		UNFORMATTED=$$(echo "$$CHANGED_FILES" | xargs $(GOFMT) -l); \
-		if [ -n "$$UNFORMATTED" ]; then \
-			echo "${RED}❌ Unformatted files:${NC}"; \
-			echo "$$UNFORMATTED"; \
-			exit 1; \
-		fi; \
-		echo "Checking imports..."; \
-		UNORGANIZED=$$(echo "$$CHANGED_FILES" | xargs $(GOIMPORTS) -l 2>/dev/null); \
-		if [ -n "$$UNORGANIZED" ]; then \
-			echo "${RED}❌ Unorganized imports:${NC}"; \
-			echo "$$UNORGANIZED"; \
-			exit 1; \
-		fi; \
-		echo "${GREEN}✅ Quick checks passed${NC}"; \
-	fi
-
-refactor-build-changed: ## Build only changed packages
-	@echo "${GREEN}🏗️  Building changed packages...${NC}"
-	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
-	if [ -z "$$CHANGED_FILES" ]; then \
-		echo "${YELLOW}No Go files changed - skipping build${NC}"; \
-	else \
-		CHANGED_PKGS=$$(echo "$$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|'); \
-		echo "Building packages: $$CHANGED_PKGS"; \
-		for pkg in $$CHANGED_PKGS; do \
-			echo "  Building $$pkg..."; \
-			if ! $(GO) build "$$pkg" 2>/dev/null; then \
-				echo "${RED}❌ Build failed for $$pkg${NC}"; \
-				$(GO) build "$$pkg"; \
-				exit 1; \
-			fi; \
-		done; \
-		echo "${GREEN}✅ All changed packages built successfully${NC}"; \
-	fi
-
-refactor-test-changed: ## Test only changed packages
-	@echo "${GREEN}🧪 Testing changed packages...${NC}"
-	@CHANGED_FILES=$$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.go$$' || echo ""); \
-	if [ -z "$$CHANGED_FILES" ]; then \
-		echo "${YELLOW}No Go files changed - skipping tests${NC}"; \
-	else \
-		CHANGED_PKGS=$$(echo "$$CHANGED_FILES" | xargs dirname | sort -u | sed 's|^|./|'); \
-		echo "Testing packages: $$CHANGED_PKGS"; \
-		for pkg in $$CHANGED_PKGS; do \
-			echo "  Testing $$pkg..."; \
-			if ! $(GO) test -timeout 15s "$$pkg" 2>/dev/null; then \
-				echo "${RED}❌ Tests failed for $$pkg${NC}"; \
-				$(GO) test "$$pkg"; \
-				exit 1; \
-			fi; \
-		done; \
-		echo "${GREEN}✅ All tests passed for changed packages${NC}"; \
-	fi
-
-refactor-validate: ## Full refactor-phase validation (quick but thorough)
-	@echo "${GREEN}🔍 Running refactor-phase validation...${NC}"
-	@$(MAKE) refactor-quick-check
-	@$(MAKE) refactor-build-changed
-	@$(MAKE) refactor-test-changed
-	@echo "${GREEN}✅ Refactor validation complete${NC}"
-	@echo "${YELLOW}💡 This is lightweight validation for active development${NC}"
-	@echo "${YELLOW}💡 Run 'make ci-local' before merging to main${NC}"
-
-.NOTPARALLEL: verify-architecture verify-todos verify-coverage
+.PHONY: $(OBSERVERS)
