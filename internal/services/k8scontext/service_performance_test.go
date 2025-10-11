@@ -242,7 +242,7 @@ func BenchmarkSerialization(b *testing.B) {
 				}
 				for i := 0; i < b.N; i++ {
 					if _, err := serializePodInfo(info); err != nil {
-						b.Fatal(err)
+						b.Fatalf("serializePodInfo failed: %v", err)
 					}
 				}
 			},
