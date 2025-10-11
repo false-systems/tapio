@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -101,26 +102,26 @@ func (b *BaseObserver) AddStage(stage PipelineStage) {
 }
 
 // RecordEvent increments events processed counter and records metrics
-func (b *BaseObserver) RecordEvent(ctx context.Context) {
+func (b *BaseObserver) RecordEvent(ctx context.Context, event *domain.ObserverEvent) {
 	b.eventsProcessed.Add(1)
-	b.metrics.RecordEvent(ctx, b.name)
+	b.metrics.RecordEvent(ctx, b.name, event)
 }
 
 // RecordDrop increments events dropped counter and records metrics
-func (b *BaseObserver) RecordDrop(ctx context.Context) {
+func (b *BaseObserver) RecordDrop(ctx context.Context, eventType string) {
 	b.eventsDropped.Add(1)
-	b.metrics.RecordDrop(ctx, b.name)
+	b.metrics.RecordDrop(ctx, b.name, eventType)
 }
 
 // RecordError increments error counter and records metrics
-func (b *BaseObserver) RecordError(ctx context.Context) {
+func (b *BaseObserver) RecordError(ctx context.Context, event *domain.ObserverEvent) {
 	b.errorsTotal.Add(1)
-	b.metrics.RecordError(ctx, b.name)
+	b.metrics.RecordError(ctx, b.name, event)
 }
 
 // RecordProcessingTime records event processing duration
-func (b *BaseObserver) RecordProcessingTime(ctx context.Context, durationMs float64) {
-	b.metrics.RecordProcessingTime(ctx, b.name, durationMs)
+func (b *BaseObserver) RecordProcessingTime(ctx context.Context, event *domain.ObserverEvent, durationMs float64) {
+	b.metrics.RecordProcessingTime(ctx, b.name, event, durationMs)
 }
 
 // Stats returns current observer statistics
