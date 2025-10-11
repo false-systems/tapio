@@ -262,27 +262,32 @@ func K8sAttributes(clusterID, namespace, podName, deploymentName string) []attri
     return attrs
 }
 
+// eventDomainPrefixes maps event domains to their event type prefixes
+var eventDomainPrefixes = []struct {
+    domain   string
+    prefixes []string
+}{
+    {"network",   []string{"tcp_", "udp_", "http_", "dns_"}},
+    {"kernel",    []string{"oom_", "syscall_", "signal_"}},
+    {"container", []string{"container_", "docker_"}},
+    {"kubernetes",[]string{"pod_", "deployment_", "service_"}},
+    {"process",   []string{"process_", "exec_"}},
+}
+
 // EventDomainAttribute returns event domain for grouping
 func EventDomainAttribute(eventType string) attribute.KeyValue {
     domain := "unknown"
-
-    // Map event type to domain
-    switch {
-    case strings.HasPrefix(eventType, "tcp_"), strings.HasPrefix(eventType, "udp_"),
-         strings.HasPrefix(eventType, "http_"), strings.HasPrefix(eventType, "dns_"):
-        domain = "network"
-    case strings.HasPrefix(eventType, "oom_"), strings.HasPrefix(eventType, "syscall_"),
-         strings.HasPrefix(eventType, "signal_"):
-        domain = "kernel"
-    case strings.HasPrefix(eventType, "container_"), strings.HasPrefix(eventType, "docker_"):
-        domain = "container"
-    case strings.HasPrefix(eventType, "pod_"), strings.HasPrefix(eventType, "deployment_"),
-         strings.HasPrefix(eventType, "service_"):
-        domain = "kubernetes"
-    case strings.HasPrefix(eventType, "process_"), strings.HasPrefix(eventType, "exec_"):
-        domain = "process"
+    for _, entry := range eventDomainPrefixes {
+        for _, prefix := range entry.prefixes {
+            if strings.HasPrefix(eventType, prefix) {
+                domain = entry.domain
+                break
+            }
+        }
+        if domain != "unknown" {
+            break
+        }
     }
-
     return attribute.String("event.domain", domain)
 }
 
