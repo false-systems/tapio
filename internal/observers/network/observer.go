@@ -29,3 +29,21 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		config:       config,
 	}, nil
 }
+
+// stateToEventType maps TCP state transitions to domain event types
+func stateToEventType(oldState, newState uint8) string {
+	switch newState {
+	case TCP_ESTABLISHED:
+		return "connection_established"
+	case TCP_LISTEN:
+		if oldState == TCP_CLOSE {
+			return "listen_started"
+		}
+	case TCP_CLOSE:
+		if oldState == TCP_LISTEN {
+			return "listen_stopped"
+		}
+		return "connection_closed"
+	}
+	return "tcp_state_change"
+}
