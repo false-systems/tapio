@@ -50,7 +50,7 @@ jobs:
           # Extract unique Go packages from changed files
           GO_PACKAGES=""
           if [ -n "$GO_FILES" ]; then
-            GO_PACKAGES=$(echo "$GO_FILES" | xargs -I {} dirname {} | sort -u | xargs -I {} echo "./{}/...")
+            GO_PACKAGES=$(echo "$GO_FILES" | xargs -I {} dirname {} | sort -u | xargs -I {} echo "./{}/..." | tr '\n' ' ')
           fi
           echo "go_packages=$GO_PACKAGES" >> $GITHUB_OUTPUT
 
