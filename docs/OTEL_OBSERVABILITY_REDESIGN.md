@@ -746,9 +746,9 @@ func isErrorEvent(event *domain.ObserverEvent) bool {
 
 // lookupServiceName maps IP to service name using K8s context
 func lookupServiceName(ip string) string {
-    // TODO: Implement K8s context lookup
-    // For now, return IP (will add in Phase 4)
-    return ip
+    // TODO: Implement K8s context lookup in Phase 4
+    // Temporary: Return constant to avoid cardinality issues until proper implementation
+    return "unknown_service"
 }
 
 // Close is a no-op for OTEL
