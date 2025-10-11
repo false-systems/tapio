@@ -241,7 +241,9 @@ func BenchmarkSerialization(b *testing.B) {
 					Labels:    map[string]string{"app": "test", "version": "v1"},
 				}
 				for i := 0; i < b.N; i++ {
-					serializePodInfo(info)
+					if _, err := serializePodInfo(info); err != nil {
+						b.Fatal(err)
+					}
 				}
 			},
 		},
