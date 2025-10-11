@@ -81,7 +81,7 @@ func TestHandlePodAdd_WithoutIP(t *testing.T) {
 	waitForEvents()
 
 	// Verify nothing was stored
-	assert.Equal(t, 0, len(mockKV.data), "Pod without IP should not be stored")
+	assert.Equal(t, 0, mockKV.len(), "Pod without IP should not be stored")
 }
 
 // TestHandlePodUpdate verifies pod updates refresh metadata
@@ -181,7 +181,7 @@ func TestHandlePodDelete(t *testing.T) {
 
 	// Pre-populate KV
 	service.storePodMetadata(pod)
-	require.Equal(t, 1, len(mockKV.data))
+	require.Equal(t, 1, mockKV.len())
 
 	service.handlePodDelete(pod)
 	waitForEvents()
@@ -189,7 +189,7 @@ func TestHandlePodDelete(t *testing.T) {
 	// Verify pod was deleted
 	_, err := mockKV.Get("pod.ip.10.244.1.5")
 	assert.Error(t, err, "Pod should be deleted from KV")
-	assert.Equal(t, 0, len(mockKV.data))
+	assert.Equal(t, 0, mockKV.len())
 }
 
 // TestHandlePodDelete_WithoutIP verifies deletes without IP are skipped
@@ -212,7 +212,7 @@ func TestHandlePodDelete_WithoutIP(t *testing.T) {
 	waitForEvents()
 
 	// Should not error or panic
-	assert.Equal(t, 0, len(mockKV.data))
+	assert.Equal(t, 0, mockKV.len())
 }
 
 // TestHandleServiceAdd verifies service addition stores metadata in KV
@@ -262,7 +262,7 @@ func TestHandleServiceAdd_Headless(t *testing.T) {
 	waitForEvents()
 
 	// Verify nothing was stored
-	assert.Equal(t, 0, len(mockKV.data), "Headless service should not be stored")
+	assert.Equal(t, 0, mockKV.len(), "Headless service should not be stored")
 }
 
 // TestHandleServiceUpdate verifies service updates refresh metadata
@@ -362,7 +362,7 @@ func TestHandleServiceDelete(t *testing.T) {
 
 	// Pre-populate KV
 	service.storeServiceMetadata(svc)
-	require.Equal(t, 1, len(mockKV.data))
+	require.Equal(t, 1, mockKV.len())
 
 	service.handleServiceDelete(svc)
 	waitForEvents()
@@ -370,7 +370,7 @@ func TestHandleServiceDelete(t *testing.T) {
 	// Verify service was deleted
 	_, err := mockKV.Get("service.ip.10.96.0.1")
 	assert.Error(t, err, "Service should be deleted from KV")
-	assert.Equal(t, 0, len(mockKV.data))
+	assert.Equal(t, 0, mockKV.len())
 }
 
 // TestHandleServiceDelete_Headless verifies headless service deletes are skipped
@@ -393,5 +393,5 @@ func TestHandleServiceDelete_Headless(t *testing.T) {
 	waitForEvents()
 
 	// Should not error or panic
-	assert.Equal(t, 0, len(mockKV.data))
+	assert.Equal(t, 0, mockKV.len())
 }

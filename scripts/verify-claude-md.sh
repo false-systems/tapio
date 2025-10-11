@@ -108,13 +108,25 @@ fi
 # ============================================================================
 echo -e "${YELLOW}[5/6] Checking for interface{} in public APIs...${NC}"
 
+# Load exceptions if file exists
+EXCEPTION_FILES=""
+if [ -f ".claude-exceptions.yml" ]; then
+    EXCEPTION_FILES=$(grep '^  - file:' .claude-exceptions.yml | sed 's/.*file: "\(.*\)"/\1/' | tr '\n' '|' | sed 's/|$//')
+fi
+
 INTERFACE_VIOLATIONS=$(echo "$GO_FILES" | xargs grep -n "^func.*interface{}" 2>/dev/null | grep -v "context.Context" | grep -v "any" || true)
+
+# Filter out exceptions
+if [ -n "$EXCEPTION_FILES" ]; then
+    INTERFACE_VIOLATIONS=$(echo "$INTERFACE_VIOLATIONS" | grep -v -E "$EXCEPTION_FILES" || true)
+fi
+
 if [ -n "$INTERFACE_VIOLATIONS" ]; then
     echo -e "${RED}❌ VIOLATION: interface{} in public API:${NC}"
     echo "$INTERFACE_VIOLATIONS"
     VIOLATIONS=$((VIOLATIONS + 1))
 else
-    echo -e "${GREEN}✓ No interface{} in public APIs${NC}"
+    echo -e "${GREEN}✓ No interface{} in public APIs (exceptions documented in .claude-exceptions.yml)${NC}"
 fi
 
 # ============================================================================

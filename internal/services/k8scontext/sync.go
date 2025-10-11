@@ -33,7 +33,7 @@ func (s *Service) initialSync(ctx context.Context) error {
 }
 
 // syncPods syncs all existing pods from informer cache to NATS KV
-func (s *Service) syncPods(ctx context.Context) error {
+func (s *Service) syncPods(_ context.Context) error {
 	podLister := s.informerFactory.Core().V1().Pods().Lister()
 	pods, err := podLister.List(labels.Everything())
 	if err != nil {
@@ -55,7 +55,7 @@ func (s *Service) syncPods(ctx context.Context) error {
 }
 
 // syncServices syncs all existing services from informer cache to NATS KV
-func (s *Service) syncServices(ctx context.Context) error {
+func (s *Service) syncServices(_ context.Context) error {
 	serviceLister := s.informerFactory.Core().V1().Services().Lister()
 	services, err := serviceLister.List(labels.Everything())
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *Service) syncServices(ctx context.Context) error {
 }
 
 // syncDeployments syncs all existing deployments from informer cache to NATS KV
-func (s *Service) syncDeployments(ctx context.Context) error {
+func (s *Service) syncDeployments(_ context.Context) error {
 	deploymentLister := s.informerFactory.Apps().V1().Deployments().Lister()
 	deployments, err := deploymentLister.List(labels.Everything())
 	if err != nil {
@@ -95,7 +95,7 @@ func (s *Service) syncDeployments(ctx context.Context) error {
 }
 
 // syncNodes syncs all existing nodes from informer cache to NATS KV
-func (s *Service) syncNodes(ctx context.Context) error {
+func (s *Service) syncNodes(_ context.Context) error {
 	nodeLister := s.informerFactory.Core().V1().Nodes().Lister()
 	nodes, err := nodeLister.List(labels.Everything())
 	if err != nil {
