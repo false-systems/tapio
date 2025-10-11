@@ -8,9 +8,9 @@ import (
 	"os"
 
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // OutputConfig defines which output destinations are enabled
@@ -57,56 +57,114 @@ func (e *StdoutEmitter) Close() error {
 	return nil
 }
 
-// OTELEmitter exports events as OpenTelemetry spans
+// OTELEmitter exports events as OpenTelemetry metrics (not fake spans)
+// Events are discrete occurrences - they should be metrics, not point-in-time spans
 type OTELEmitter struct {
-	tracer trace.Tracer
+	meter           metric.Meter
+	eventsCounter   metric.Int64Counter
+	durationHisto   metric.Float64Histogram
+	bytesCounter    metric.Int64Counter
+	statusCodeHisto metric.Int64Histogram
 }
 
-// NewOTELEmitter creates an OTEL emitter
-func NewOTELEmitter(tracer trace.Tracer) *OTELEmitter {
-	return &OTELEmitter{
-		tracer: tracer,
-	}
-}
+// NewOTELEmitter creates an OTEL emitter that emits proper metrics
+func NewOTELEmitter() (*OTELEmitter, error) {
+	meter := otel.Meter("tapio.events")
 
-// Emit creates an OTEL span for the event
-func (e *OTELEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	if e.tracer == nil {
-		return fmt.Errorf("tracer not initialized")
-	}
-
-	_, span := e.tracer.Start(ctx, event.Type,
-		trace.WithTimestamp(event.Timestamp),
-		trace.WithAttributes(
-			attribute.String("event.id", event.ID),
-			attribute.String("event.type", event.Type),
-			attribute.String("event.source", event.Source),
-		),
+	eventsCounter, err := meter.Int64Counter(
+		"tapio_events_total",
+		metric.WithDescription("Total events emitted from observers"),
+		metric.WithUnit("{events}"),
 	)
-	defer span.End()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create events counter: %w", err)
+	}
 
-	// Add network data if present
+	durationHisto, err := meter.Float64Histogram(
+		"tapio_event_duration_ms",
+		metric.WithDescription("Event duration in milliseconds"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create duration histogram: %w", err)
+	}
+
+	bytesCounter, err := meter.Int64Counter(
+		"tapio_event_bytes_total",
+		metric.WithDescription("Total bytes in network events"),
+		metric.WithUnit("By"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bytes counter: %w", err)
+	}
+
+	statusCodeHisto, err := meter.Int64Histogram(
+		"tapio_http_status_codes",
+		metric.WithDescription("HTTP status codes from network events"),
+		metric.WithUnit("{status_code}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create status code histogram: %w", err)
+	}
+
+	return &OTELEmitter{
+		meter:           meter,
+		eventsCounter:   eventsCounter,
+		durationHisto:   durationHisto,
+		bytesCounter:    bytesCounter,
+		statusCodeHisto: statusCodeHisto,
+	}, nil
+}
+
+// Emit emits event as OTEL metrics with semantic conventions
+func (e *OTELEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	if event == nil {
+		return fmt.Errorf("nil event")
+	}
+
+	// Build base attributes using semantic conventions
+	attrs := []attribute.KeyValue{
+		attribute.String("event.id", event.ID),
+		attribute.String("event.source", event.Source),
+		attribute.String("event.type", event.Type),
+		EventDomainAttribute(event.Type),
+	}
+
+	// Add error classification if applicable
+	if IsErrorEvent(event) {
+		attrs = append(attrs, ErrorTypeAttribute(event.Type))
+	}
+
+	// Emit base event counter
+	e.eventsCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+
+	// Add network-specific metrics and attributes
 	if event.NetworkData != nil {
-		span.SetAttributes(
-			attribute.String("network.src_ip", event.NetworkData.SrcIP),
-			attribute.String("network.dst_ip", event.NetworkData.DstIP),
-			attribute.Int("network.src_port", int(event.NetworkData.SrcPort)),
-			attribute.Int("network.dst_port", int(event.NetworkData.DstPort)),
-			attribute.String("network.protocol", event.NetworkData.Protocol),
-		)
+		networkAttrs := append(attrs, NetworkAttributes(event.NetworkData)...)
+
+		// Network duration
+		if event.NetworkData.Duration > 0 {
+			durationMs := float64(event.NetworkData.Duration) / 1_000_000.0
+			e.durationHisto.Record(ctx, durationMs, metric.WithAttributes(networkAttrs...))
+		}
+
+		// Network bytes
+		if event.NetworkData.BytesSent > 0 || event.NetworkData.BytesReceived > 0 {
+			totalBytes := int64(event.NetworkData.BytesSent + event.NetworkData.BytesReceived)
+			e.bytesCounter.Add(ctx, totalBytes, metric.WithAttributes(networkAttrs...))
+		}
+
+		// HTTP status codes
+		if event.NetworkData.HTTPStatusCode > 0 {
+			e.statusCodeHisto.Record(ctx, int64(event.NetworkData.HTTPStatusCode), metric.WithAttributes(networkAttrs...))
+		}
 	}
 
-	// Add process data if present
+	// Add process-specific attributes
 	if event.ProcessData != nil {
-		span.SetAttributes(
-			attribute.Int("process.pid", int(event.ProcessData.PID)),
-			attribute.String("process.name", event.ProcessData.ProcessName),
-			attribute.String("process.command", event.ProcessData.CommandLine),
-		)
+		processAttrs := append(attrs, ProcessAttributes(event.ProcessData)...)
+		e.eventsCounter.Add(ctx, 0, metric.WithAttributes(processAttrs...))
 	}
-
-	// Mark span as successful
-	span.SetStatus(codes.Ok, "event emitted")
 
 	return nil
 }
@@ -200,7 +258,7 @@ func (m *MultiEmitter) Close() error {
 }
 
 // CreateEmitters creates emitters based on output configuration
-func CreateEmitters(config OutputConfig, tracer trace.Tracer) Emitter {
+func CreateEmitters(config OutputConfig) (Emitter, error) {
 	var emitters []Emitter
 
 	if config.Stdout {
@@ -208,7 +266,11 @@ func CreateEmitters(config OutputConfig, tracer trace.Tracer) Emitter {
 	}
 
 	if config.OTEL {
-		emitters = append(emitters, NewOTELEmitter(tracer))
+		otelEmitter, err := NewOTELEmitter()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OTEL emitter: %w", err)
+		}
+		emitters = append(emitters, otelEmitter)
 	}
 
 	if config.Tapio {
@@ -217,12 +279,12 @@ func CreateEmitters(config OutputConfig, tracer trace.Tracer) Emitter {
 
 	if len(emitters) == 0 {
 		// Default to stdout if no outputs configured
-		return NewStdoutEmitter()
+		return NewStdoutEmitter(), nil
 	}
 
 	if len(emitters) == 1 {
-		return emitters[0]
+		return emitters[0], nil
 	}
 
-	return NewMultiEmitter(emitters...)
+	return NewMultiEmitter(emitters...), nil
 }
