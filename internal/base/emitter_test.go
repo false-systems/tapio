@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestNewStdoutEmitter(t *testing.T) {
@@ -54,23 +54,29 @@ func TestStdoutEmitter_Close(t *testing.T) {
 }
 
 func TestNewOTELEmitter(t *testing.T) {
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	tracer := tp.Tracer("test")
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
-	emitter := NewOTELEmitter(tracer)
+	emitter, err := NewOTELEmitter()
+	require.NoError(t, err)
 	require.NotNil(t, emitter)
-	assert.NotNil(t, emitter.tracer)
+	assert.NotNil(t, emitter.meter)
+	assert.NotNil(t, emitter.eventsCounter)
+	assert.NotNil(t, emitter.durationHisto)
+	assert.NotNil(t, emitter.bytesCounter)
+	assert.NotNil(t, emitter.statusCodeHisto)
 }
 
 func TestOTELEmitter_Emit(t *testing.T) {
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(nil)
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
-	tracer := tp.Tracer("test")
-	emitter := NewOTELEmitter(tracer)
+	emitter, err := NewOTELEmitter()
+	require.NoError(t, err)
 
 	event := &domain.ObserverEvent{
 		ID:        "test-456",
@@ -78,71 +84,57 @@ func TestOTELEmitter_Emit(t *testing.T) {
 		Source:    "network-observer",
 		Timestamp: time.Now(),
 		NetworkData: &domain.NetworkEventData{
-			SrcIP:    "10.0.1.5",
-			DstIP:    "10.0.2.10",
-			SrcPort:  45678,
-			DstPort:  443,
-			Protocol: "TCP",
-		},
-		ProcessData: &domain.ProcessEventData{
-			PID:         1234,
-			ProcessName: "curl",
-			CommandLine: "curl https://example.com",
+			SrcIP:         "10.0.1.5",
+			DstIP:         "10.0.2.10",
+			SrcPort:       45678,
+			DstPort:       443,
+			Protocol:      "tcp",
+			Duration:      1500000,
+			BytesSent:     512,
+			BytesReceived: 2048,
 		},
 	}
 
 	ctx := context.Background()
-	err := emitter.Emit(ctx, event)
-
+	err = emitter.Emit(ctx, event)
 	require.NoError(t, err)
 
-	// Verify span was created
-	spans := exporter.GetSpans()
-	require.Len(t, spans, 1)
+	// Collect metrics
+	rm := metricdata.ResourceMetrics{}
+	err = reader.Collect(ctx, &rm)
+	require.NoError(t, err)
 
-	span := spans[0]
-	assert.Equal(t, "tcp_connect", span.Name)
-
-	// Verify attributes exist (simplified check)
-	attrMap := make(map[string]interface{})
-	for _, attr := range span.Attributes {
-		attrMap[string(attr.Key)] = attr.Value.AsInterface()
-	}
-
-	assert.Equal(t, "test-456", attrMap["event.id"])
-	assert.Equal(t, "10.0.1.5", attrMap["network.src_ip"])
-	assert.Equal(t, "10.0.2.10", attrMap["network.dst_ip"])
-	assert.Equal(t, int64(1234), attrMap["process.pid"])
-	assert.Equal(t, "curl", attrMap["process.name"])
+	// Verify events counter was incremented
+	eventsSum := findMetricSum(t, rm, "tapio_events_total")
+	assert.Equal(t, int64(1), eventsSum)
 }
 
-func TestOTELEmitter_Emit_NilTracer(t *testing.T) {
-	emitter := &OTELEmitter{tracer: nil}
+func TestOTELEmitter_Emit_NilEvent(t *testing.T) {
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
-	event := &domain.ObserverEvent{
-		ID:        "test-789",
-		Type:      "test_event",
-		Source:    "test",
-		Timestamp: time.Now(),
-	}
+	emitter, err := NewOTELEmitter()
+	require.NoError(t, err)
 
 	ctx := context.Background()
-	err := emitter.Emit(ctx, event)
+	err = emitter.Emit(ctx, nil)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "tracer not initialized")
+	assert.Contains(t, err.Error(), "nil event")
 }
 
 func TestOTELEmitter_Close(t *testing.T) {
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(nil)
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
-	tracer := tp.Tracer("test")
-	emitter := NewOTELEmitter(tracer)
+	emitter, err := NewOTELEmitter()
+	require.NoError(t, err)
 
-	err := emitter.Close()
+	err = emitter.Close()
 	require.NoError(t, err)
 }
 
@@ -287,10 +279,13 @@ func TestMultiEmitter_Emit(t *testing.T) {
 }
 
 func TestMultiEmitter_Emit_PartialFailure(t *testing.T) {
-	stdout := NewStdoutEmitter()
-	failingEmitter := &OTELEmitter{tracer: nil} // Will fail
+	stdout := &bytes.Buffer{}
+	stdoutEmitter := &StdoutEmitter{writer: stdout}
 
-	multi := NewMultiEmitter(stdout, failingEmitter)
+	// Create failing emitter (nil event will cause error)
+	tapio := NewTapioEmitter(0) // Buffer size 0, will block/fail
+
+	multi := NewMultiEmitter(stdoutEmitter, tapio)
 
 	event := &domain.ObserverEvent{
 		ID:        "partial-fail",
@@ -302,8 +297,12 @@ func TestMultiEmitter_Emit_PartialFailure(t *testing.T) {
 	ctx := context.Background()
 	err := multi.Emit(ctx, event)
 
+	// Should get error from tapio emitter (buffer full)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to emit")
+
+	// But stdout should have received it
+	assert.Contains(t, stdout.String(), "partial-fail")
 }
 
 func TestMultiEmitter_Close(t *testing.T) {
@@ -327,7 +326,8 @@ func TestCreateEmitters_Stdout(t *testing.T) {
 		Tapio:  false,
 	}
 
-	emitter := CreateEmitters(config, nil)
+	emitter, err := CreateEmitters(config)
+	require.NoError(t, err)
 	require.NotNil(t, emitter)
 
 	_, ok := emitter.(*StdoutEmitter)
@@ -335,19 +335,19 @@ func TestCreateEmitters_Stdout(t *testing.T) {
 }
 
 func TestCreateEmitters_OTEL(t *testing.T) {
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(nil)
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
-	tracer := tp.Tracer("test")
 	config := OutputConfig{
 		Stdout: false,
 		OTEL:   true,
 		Tapio:  false,
 	}
 
-	emitter := CreateEmitters(config, tracer)
+	emitter, err := CreateEmitters(config)
+	require.NoError(t, err)
 	require.NotNil(t, emitter)
 
 	_, ok := emitter.(*OTELEmitter)
@@ -361,7 +361,8 @@ func TestCreateEmitters_Tapio(t *testing.T) {
 		Tapio:  true,
 	}
 
-	emitter := CreateEmitters(config, nil)
+	emitter, err := CreateEmitters(config)
+	require.NoError(t, err)
 	require.NotNil(t, emitter)
 
 	_, ok := emitter.(*TapioEmitter)
@@ -369,19 +370,19 @@ func TestCreateEmitters_Tapio(t *testing.T) {
 }
 
 func TestCreateEmitters_Multiple(t *testing.T) {
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(nil)
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
-	tracer := tp.Tracer("test")
 	config := OutputConfig{
 		Stdout: true,
 		OTEL:   true,
 		Tapio:  true,
 	}
 
-	emitter := CreateEmitters(config, tracer)
+	emitter, err := CreateEmitters(config)
+	require.NoError(t, err)
 	require.NotNil(t, emitter)
 
 	multi, ok := emitter.(*MultiEmitter)
@@ -396,10 +397,31 @@ func TestCreateEmitters_Default(t *testing.T) {
 		Tapio:  false,
 	}
 
-	emitter := CreateEmitters(config, nil)
+	emitter, err := CreateEmitters(config)
+	require.NoError(t, err)
 	require.NotNil(t, emitter)
 
 	// Should default to stdout
 	_, ok := emitter.(*StdoutEmitter)
 	assert.True(t, ok, "should default to StdoutEmitter")
+}
+
+// findMetricSum finds the sum value of a metric by name
+func findMetricSum(t *testing.T, rm metricdata.ResourceMetrics, metricName string) int64 {
+	t.Helper()
+
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == metricName {
+				if sum, ok := m.Data.(metricdata.Sum[int64]); ok {
+					if len(sum.DataPoints) > 0 {
+						return sum.DataPoints[0].Value
+					}
+				}
+			}
+		}
+	}
+
+	t.Fatalf("metric %s not found", metricName)
+	return 0
 }

@@ -10,7 +10,12 @@ type ObserverEvent struct {
 	Source    string    `json:"source"` // Observer name
 	Timestamp time.Time `json:"timestamp"`
 
-	// Typed event data - NO map[string]interface{}
+	// OTEL trace context for distributed correlation
+	TraceID    string `json:"trace_id,omitempty"`    // W3C Trace ID (32 hex chars)
+	SpanID     string `json:"span_id,omitempty"`     // W3C Span ID (16 hex chars)
+	TraceFlags byte   `json:"trace_flags,omitempty"` // W3C trace flags (sampled, etc)
+
+	// Typed event data - strongly typed structs only
 	NetworkData   *NetworkEventData   `json:"network_data,omitempty"`
 	KernelData    *KernelEventData    `json:"kernel_data,omitempty"`
 	ContainerData *ContainerEventData `json:"container_data,omitempty"`
