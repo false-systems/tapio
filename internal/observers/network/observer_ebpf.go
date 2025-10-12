@@ -45,6 +45,9 @@ func (n *NetworkObserver) Start(ctx context.Context) error {
 
 // loadAndAttachStage loads eBPF program, attaches to tracepoint, reads ring buffer
 func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan NetworkEventBPF) error {
+	// Close channel when exiting to signal processor stage
+	defer close(eventCh)
+
 	// Load eBPF objects
 	objs := &bpf.NetworkObjects{}
 	if err := bpf.LoadNetworkObjects(objs, nil); err != nil {
@@ -112,7 +115,12 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			log.Printf("[%s] Shutting down event processor", n.Name())
 			return nil
 
-		case evt := <-eventCh:
+		case evt, ok := <-eventCh:
+			if !ok {
+				// Channel closed by loadAndAttachStage - exit gracefully
+				log.Printf("[%s] Event channel closed, processor exiting", n.Name())
+				return nil
+			}
 			startTime := time.Now()
 
 			// Convert event to domain representation
