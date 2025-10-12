@@ -80,3 +80,34 @@ func TestStateToEventType_GenericFallback(t *testing.T) {
 	eventType := stateToEventType(TCP_SYN_SENT, TCP_SYN_RECV)
 	assert.Equal(t, "tcp_state_change", eventType)
 }
+
+// TestConvertIPv4_Localhost verifies localhost conversion
+func TestConvertIPv4_Localhost(t *testing.T) {
+	ipStr := convertIPv4(0x0100007f) // 127.0.0.1
+	assert.Equal(t, "127.0.0.1", ipStr)
+}
+
+// TestConvertIPv4_Standard verifies standard IP
+func TestConvertIPv4_Standard(t *testing.T) {
+	ipStr := convertIPv4(0x6401a8c0) // 192.168.1.100
+	assert.Equal(t, "192.168.1.100", ipStr)
+}
+
+// TestConvertIPv6_Localhost verifies IPv6 localhost
+func TestConvertIPv6_Localhost(t *testing.T) {
+	ipv6 := [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	ipStr := convertIPv6(ipv6)
+	assert.Equal(t, "0:0:0:0:0:0:0:1", ipStr)
+}
+
+// TestExtractComm_NullTerminated verifies process name extraction
+func TestExtractComm_NullTerminated(t *testing.T) {
+	comm := [16]byte{'c', 'u', 'r', 'l', 0}
+	assert.Equal(t, "curl", extractComm(comm))
+}
+
+// TestExtractComm_Full verifies full 16-char names
+func TestExtractComm_Full(t *testing.T) {
+	comm := [16]byte{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p'}
+	assert.Equal(t, "abcdefghijklmnop", extractComm(comm))
+}
