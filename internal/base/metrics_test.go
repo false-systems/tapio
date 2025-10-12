@@ -3,15 +3,22 @@ package base
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestNewObserverMetrics(t *testing.T) {
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
+
 	metrics, err := NewObserverMetrics("test-observer")
 	require.NoError(t, err)
 	require.NotNil(t, metrics)
@@ -32,9 +39,16 @@ func TestObserverMetrics_RecordEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	metrics.RecordEvent(ctx, "test-observer")
-	metrics.RecordEvent(ctx, "test-observer")
-	metrics.RecordEvent(ctx, "test-observer")
+	event := &domain.ObserverEvent{
+		ID:        "test-1",
+		Type:      "tcp_connect",
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
+
+	metrics.RecordEvent(ctx, "test-observer", event)
+	metrics.RecordEvent(ctx, "test-observer", event)
+	metrics.RecordEvent(ctx, "test-observer", event)
 
 	rm := metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, &rm)
@@ -54,8 +68,8 @@ func TestObserverMetrics_RecordDrop(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	metrics.RecordDrop(ctx, "test-observer")
-	metrics.RecordDrop(ctx, "test-observer")
+	metrics.RecordDrop(ctx, "test-observer", "tcp_connect")
+	metrics.RecordDrop(ctx, "test-observer", "tcp_connect")
 
 	rm := metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, &rm)
@@ -75,7 +89,14 @@ func TestObserverMetrics_RecordError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	metrics.RecordError(ctx, "test-observer")
+	event := &domain.ObserverEvent{
+		ID:        "test-1",
+		Type:      "oom_kill",
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
+
+	metrics.RecordError(ctx, "test-observer", event)
 
 	rm := metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, &rm)
@@ -95,8 +116,15 @@ func TestObserverMetrics_RecordProcessingTime(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	metrics.RecordProcessingTime(ctx, "test-observer", 10.5)
-	metrics.RecordProcessingTime(ctx, "test-observer", 20.3)
+	event := &domain.ObserverEvent{
+		ID:        "test-1",
+		Type:      "tcp_connect",
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
+
+	metrics.RecordProcessingTime(ctx, "test-observer", event, 10.5)
+	metrics.RecordProcessingTime(ctx, "test-observer", event, 20.3)
 
 	rm := metricdata.ResourceMetrics{}
 	err = reader.Collect(ctx, &rm)

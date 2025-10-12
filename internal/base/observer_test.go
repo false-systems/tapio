@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
@@ -168,14 +169,20 @@ func TestBaseObserver_RecordEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	event := &domain.ObserverEvent{
+		ID:        "test-1",
+		Type:      "tcp_connect",
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
 
 	assert.Equal(t, int64(0), obs.eventsProcessed.Load())
 
-	obs.RecordEvent(ctx)
+	obs.RecordEvent(ctx, event)
 	assert.Equal(t, int64(1), obs.eventsProcessed.Load())
 
-	obs.RecordEvent(ctx)
-	obs.RecordEvent(ctx)
+	obs.RecordEvent(ctx, event)
+	obs.RecordEvent(ctx, event)
 	assert.Equal(t, int64(3), obs.eventsProcessed.Load())
 }
 
@@ -188,10 +195,10 @@ func TestBaseObserver_RecordDrop(t *testing.T) {
 
 	assert.Equal(t, int64(0), obs.eventsDropped.Load())
 
-	obs.RecordDrop(ctx)
+	obs.RecordDrop(ctx, "tcp_connect")
 	assert.Equal(t, int64(1), obs.eventsDropped.Load())
 
-	obs.RecordDrop(ctx)
+	obs.RecordDrop(ctx, "tcp_connect")
 	assert.Equal(t, int64(2), obs.eventsDropped.Load())
 }
 
@@ -201,14 +208,20 @@ func TestBaseObserver_RecordError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	event := &domain.ObserverEvent{
+		ID:        "test-1",
+		Type:      "oom_kill",
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
 
 	assert.Equal(t, int64(0), obs.errorsTotal.Load())
 
-	obs.RecordError(ctx)
+	obs.RecordError(ctx, event)
 	assert.Equal(t, int64(1), obs.errorsTotal.Load())
 
-	obs.RecordError(ctx)
-	obs.RecordError(ctx)
+	obs.RecordError(ctx, event)
+	obs.RecordError(ctx, event)
 	assert.Equal(t, int64(3), obs.errorsTotal.Load())
 }
 
@@ -218,10 +231,16 @@ func TestBaseObserver_RecordProcessingTime(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	event := &domain.ObserverEvent{
+		ID:        "test-1",
+		Type:      "tcp_connect",
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
 
 	// Should not panic
-	obs.RecordProcessingTime(ctx, 10.5)
-	obs.RecordProcessingTime(ctx, 20.3)
+	obs.RecordProcessingTime(ctx, event, 10.5)
+	obs.RecordProcessingTime(ctx, event, 20.3)
 }
 
 func TestBaseObserver_Stats(t *testing.T) {
@@ -230,13 +249,19 @@ func TestBaseObserver_Stats(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
+	event := &domain.ObserverEvent{
+		ID:        "test-1",
+		Type:      "tcp_connect",
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
 
-	obs.RecordEvent(ctx)
-	obs.RecordEvent(ctx)
-	obs.RecordEvent(ctx)
-	obs.RecordDrop(ctx)
-	obs.RecordError(ctx)
-	obs.RecordError(ctx)
+	obs.RecordEvent(ctx, event)
+	obs.RecordEvent(ctx, event)
+	obs.RecordEvent(ctx, event)
+	obs.RecordDrop(ctx, "tcp_connect")
+	obs.RecordError(ctx, event)
+	obs.RecordError(ctx, event)
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -268,7 +293,7 @@ func TestBaseObserver_Lifecycle(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = obs.Start(ctx)
+		_ = obs.Start(ctx) // Ignore: test goroutine error
 	}()
 
 	// Wait for observer to be running
