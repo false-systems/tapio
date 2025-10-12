@@ -163,7 +163,7 @@ func (e *OTELEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) err
 	// Add process-specific attributes
 	if event.ProcessData != nil {
 		processAttrs := append(attrs, ProcessAttributes(event.ProcessData)...)
-		e.eventsCounter.Add(ctx, 0, metric.WithAttributes(processAttrs...))
+		e.eventsCounter.Add(ctx, 1, metric.WithAttributes(processAttrs...))
 	}
 
 	return nil
