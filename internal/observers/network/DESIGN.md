@@ -163,7 +163,7 @@ const (
 
 ### Domain Event (After Conversion)
 
-Uses existing `domain.ObserverEvent` from `/Users/yair/projects/tapio/pkg/domain/events.go`:
+Uses existing `domain.ObserverEvent` from `domain/events.go`:
 
 **Event types based on TCP state transitions**:
 - `connection_established` - TCP_ESTABLISHED reached
