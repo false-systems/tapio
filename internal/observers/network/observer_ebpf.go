@@ -92,6 +92,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 				if errors.Is(err, ringbuf.ErrClosed) {
 					return nil // Clean shutdown
 				}
+				log.Printf("[%s] Error reading from ring buffer: %v", n.Name(), err)
 				n.RecordError(ctx)
 				continue
 			}
@@ -99,6 +100,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 			// Parse event
 			var evt NetworkEventBPF
 			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
+				log.Printf("[%s] Error parsing event: %v", n.Name(), err)
 				n.RecordError(ctx)
 				continue
 			}
