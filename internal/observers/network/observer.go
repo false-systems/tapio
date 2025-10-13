@@ -8,7 +8,8 @@ import (
 
 // Config holds network observer configuration
 type Config struct {
-	Output base.OutputConfig
+	Output           base.OutputConfig
+	EventChannelSize int // Ring buffer → processor channel size (default: 1000)
 }
 
 // NetworkObserver tracks TCP/UDP/DNS network events using eBPF
