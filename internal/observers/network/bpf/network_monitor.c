@@ -92,6 +92,9 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	evt->family = args->family;
 
 	// Extract ports (already in host byte order from tracepoint)
+	// NOTE: inet_sock_set_state tracepoint provides ports in HOST byte order, NOT network byte order.
+	// Using bpf_ntohs() here would be WRONG and cause port values to be swapped.
+	// Verified against kernel source: net/ipv4/tcp.c, net/ipv6/tcp_ipv6.c
 	evt->src_port = args->sport;
 	evt->dst_port = args->dport;
 
