@@ -509,11 +509,7 @@ for {
 **go:generate with CO-RE**:
 
 ```go
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang-18 \
-//             -cflags "-O2 -g -Wall -Werror -D__TARGET_ARCH_x86_64" \
-//             -target amd64,arm64 \
-//             -type network_event \
-//             network bpf/network_monitor.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go network bpf/network_monitor.c
 
 package network
 
