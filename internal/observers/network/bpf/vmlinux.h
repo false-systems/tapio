@@ -14,6 +14,11 @@ typedef signed short __s16;
 typedef signed int __s32;
 typedef signed long long __s64;
 
+// Network byte order types
+typedef __u16 __be16;
+typedef __u32 __be32;
+typedef __u32 __wsum;
+
 // BPF map types
 enum bpf_map_type {
 	BPF_MAP_TYPE_RINGBUF = 27,
