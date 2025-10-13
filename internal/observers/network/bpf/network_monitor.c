@@ -91,9 +91,9 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	evt->protocol = (__u8)args->protocol;
 	evt->family = args->family;
 
-	// Extract ports (already in host byte order from tracepoint)
-	evt->src_port = args->sport;
-	evt->dst_port = args->dport;
+	// Extract ports (convert from network to host byte order)
+	evt->src_port = bpf_ntohs(args->sport);
+	evt->dst_port = bpf_ntohs(args->dport);
 
 	// Extract IP addresses based on family
 	if (args->family == AF_INET) {
