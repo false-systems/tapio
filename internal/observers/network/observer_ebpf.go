@@ -35,7 +35,11 @@ var tcpStateNames = map[uint8]string{
 // Start implements the Observer interface - sets up pipeline stages
 func (n *NetworkObserver) Start(ctx context.Context) error {
 	// Create event channel for ring buffer → processor communication
-	eventCh := make(chan NetworkEventBPF, 1000)
+	channelSize := n.config.EventChannelSize
+	if channelSize <= 0 {
+		channelSize = 1000 // Default buffer size
+	}
+	eventCh := make(chan NetworkEventBPF, channelSize)
 
 	// Stage 1: Load and attach eBPF program
 	n.AddStage(func(ctx context.Context) error {
@@ -79,40 +83,41 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 
 	log.Printf("[%s] eBPF program loaded and attached", n.Name())
 
-	// Read ring buffer until context cancelled
+	// Monitor context and close ring buffer when cancelled
+	go func() {
+		<-ctx.Done()
+		rb.Close()
+	}()
+
+	// Read ring buffer until closed
 	for {
+		// Read event from ring buffer (blocks until event or Close())
+		record, err := rb.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				log.Printf("[%s] Shutting down eBPF reader", n.Name())
+				return nil // Clean shutdown
+			}
+			log.Printf("[%s] Error reading from ring buffer: %v", n.Name(), err)
+			n.RecordError(ctx)
+			continue
+		}
+
+		// Parse event
+		var evt NetworkEventBPF
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
+			log.Printf("[%s] Error parsing event: %v", n.Name(), err)
+			n.RecordError(ctx)
+			continue
+		}
+
+		// Send to processing stage (non-blocking)
 		select {
-		case <-ctx.Done():
-			log.Printf("[%s] Shutting down eBPF reader", n.Name())
-			return nil
+		case eventCh <- evt:
+			// Event sent
 		default:
-			// Read event from ring buffer
-			record, err := rb.Read()
-			if err != nil {
-				if errors.Is(err, ringbuf.ErrClosed) {
-					return nil // Clean shutdown
-				}
-				log.Printf("[%s] Error reading from ring buffer: %v", n.Name(), err)
-				n.RecordError(ctx)
-				continue
-			}
-
-			// Parse event
-			var evt NetworkEventBPF
-			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
-				log.Printf("[%s] Error parsing event: %v", n.Name(), err)
-				n.RecordError(ctx)
-				continue
-			}
-
-			// Send to processing stage (non-blocking)
-			select {
-			case eventCh <- evt:
-				// Event sent
-			default:
-				// Channel full - drop event
-				n.RecordDrop(ctx)
-			}
+			// Channel full - drop event
+			n.RecordDrop(ctx)
 		}
 	}
 }
