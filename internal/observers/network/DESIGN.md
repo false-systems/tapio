@@ -853,9 +853,31 @@ func (n *NetworkObserver) enrichEvents(ctx context.Context) error {
 - ✅ Emitter integration
 - ✅ Tests (80%+ coverage)
 
-### Phase 2: UDP Support
-- Add UDP tracepoint
-- Test UDP traffic
+### Phase 2: UDP Support ~~SKIPPED - See Rationale Below~~
+
+**Decision: Skip UDP monitoring in network observer**
+
+**Rationale:**
+1. **No stable tracepoint exists**: `inet_sock_set_state` is TCP-only. UDP has no state machine.
+2. **Unstable alternatives**: Only kprobes (`udp_sendmsg`/`udp_recvmsg`) available, which break across kernel versions - violates CO-RE goal.
+3. **Industry precedent**: Groundcover's production eBPF agent (Alaz) explicitly skips UDP:
+   - Quote from alaz/ebpf/c/l7.c: "We should not send l7_events that is not related to a tcp connection, otherwise we will have a lot of events"
+   - Caretta (groundcover): TCP-only using `inet_sock_set_state`
+4. **Signal-to-noise ratio**: UDP is connectionless - generates high event volume with low observability value.
+5. **L7 protocols use TCP**: HTTP, gRPC, databases all use TCP. DNS already handled by dedicated DNS observer.
+6. **Alternative approach**: XDP/TC for UDP would require complete architecture redesign - not worth it for Phase 2.
+
+**What UDP would give us:**
+- Generic UDP send/receive events (application-level)
+- Process attribution (PID, comm)
+- IP addresses + ports
+
+**Why we don't need it:**
+- DNS (UDP port 53): Already covered by existing DNS observer
+- Other UDP traffic (QUIC, VoIP, gaming): Low priority for K8s observability
+- No state transitions to track (connectionless protocol)
+
+**Path forward:** Skip directly to Phase 3 (Enrichment) or Phase 4 (Consolidation with DNS/status/link observers).
 
 ### Phase 3: Enrichment (Agent 1 dependency)
 - K8s pod decoder integration
@@ -1041,10 +1063,12 @@ defer objs.Close()    // Then unload
    - Track drops with `RecordDrop(ctx)` metric
    - **Decision**: Non-blocking drops with observability
 
-6. **UDP Support**: Phase 2 - TCP only first
-   - `inet_sock_set_state` is TCP-only
-   - Would need additional tracepoints for UDP
-   - **Decision**: TCP in Phase 1, UDP in Phase 2
+6. **UDP Support**: ~~Phase 2 SKIPPED~~ - TCP only
+   - `inet_sock_set_state` is TCP-only (no UDP state machine exists)
+   - No stable tracepoint for UDP (only unstable kprobes)
+   - Industry standard: Groundcover's Alaz skips UDP entirely
+   - DNS observer already handles UDP port 53
+   - **Decision**: TCP only. See Phase 2 rationale in Implementation Phases section.
 
 ---
 
