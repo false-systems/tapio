@@ -38,6 +38,11 @@ struct {
 
 // Tracepoint arguments for sock/inet_sock_set_state
 // This is the stable kernel ABI - no BPF_CORE_READ needed!
+//
+// NOTE: This struct layout matches Linux kernel 5.8+
+// Verified against: /sys/kernel/debug/tracing/events/sock/inet_sock_set_state/format
+// If tracepoint fails to attach, check kernel version and tracepoint format.
+// Use: cat /sys/kernel/debug/tracing/events/sock/inet_sock_set_state/format
 struct trace_event_raw_inet_sock_set_state {
 	__u64 unused;       // Common tracepoint header
 	const void *skaddr;
