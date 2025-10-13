@@ -79,15 +79,18 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	if err != nil {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
-	defer rb.Close()
 
 	log.Printf("[%s] eBPF program loaded and attached", n.Name())
 
 	// Monitor context and close ring buffer when cancelled
+	// This unblocks rb.Read() immediately on shutdown
 	go func() {
 		<-ctx.Done()
 		rb.Close()
 	}()
+
+	// Ensure cleanup on exit
+	defer rb.Close()
 
 	// Read ring buffer until closed
 	for {
