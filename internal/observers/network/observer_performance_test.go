@@ -2,6 +2,7 @@ package network
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/internal/base"
@@ -296,7 +297,11 @@ func TestPerformance_MemoryFootprint(t *testing.T) {
 	// Verify memory allocation
 	require.Equal(t, 10000, len(events))
 
-	// Each event is 72 bytes, 10k events = 720KB
-	expectedBytes := 72 * 10000
-	require.Equal(t, expectedBytes, 720000)
+	// Verify actual struct size matches expected 72 bytes (70 packed + 2 Go alignment padding)
+	actualSize := int(unsafe.Sizeof(NetworkEventBPF{}))
+	require.Equal(t, 72, actualSize, "NetworkEventBPF size changed - update C struct!")
+
+	// Calculate total memory footprint
+	totalBytes := actualSize * len(events)
+	require.Equal(t, 720000, totalBytes, "10k events should be 720KB")
 }
