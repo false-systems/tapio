@@ -540,28 +540,18 @@ func (n *NetworkObserver) loadeBPF() error {
     }
     n.ebpfObjs = objs
 
-    // Attach TCP kprobe
-    tcpLink, err := link.Kprobe("tcp_v4_connect", objs.TraceTcpConnect, nil)
+    // Attach tracepoint for socket state changes (captures TCP/UDP events)
+    sockLink, err := link.Tracepoint("sock", "inet_sock_set_state", objs.TraceSockSetState, nil)
     if err != nil {
         objs.Close()
-        return fmt.Errorf("attaching tcp kprobe: %w", err)
+        return fmt.Errorf("attaching sock/inet_sock_set_state tracepoint: %w", err)
     }
-    n.tcpLink = tcpLink
-
-    // Attach UDP kprobe
-    udpLink, err := link.Kprobe("udp_sendmsg", objs.TraceUdpSendmsg, nil)
-    if err != nil {
-        tcpLink.Close()
-        objs.Close()
-        return fmt.Errorf("attaching udp kprobe: %w", err)
-    }
-    n.udpLink = udpLink
+    n.sockLink = sockLink
 
     // Open ring buffer
     rb, err := ringbuf.NewReader(objs.Events)
     if err != nil {
-        udpLink.Close()
-        tcpLink.Close()
+        sockLink.Close()
         objs.Close()
         return fmt.Errorf("opening ring buffer: %w", err)
     }
