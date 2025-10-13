@@ -21,6 +21,17 @@ func setupBenchmark(b *testing.B) {
 	})
 }
 
+// setupTest sets up OTEL for regular tests
+func setupTest(t *testing.T) {
+	t.Helper()
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() {
+		otel.SetMeterProvider(nil)
+	})
+}
+
 // BenchmarkStateToEventType measures state transition mapping performance
 func BenchmarkStateToEventType(b *testing.B) {
 	testCases := []struct {
@@ -236,7 +247,7 @@ func TestPerformance_HighThroughput(t *testing.T) {
 		t.Skip("Skipping high throughput test in short mode")
 	}
 
-	setupBenchmark(&testing.B{})
+	setupTest(t)
 
 	// Simulate processing 100k events
 	eventCount := 100000
@@ -274,7 +285,7 @@ func TestPerformance_MemoryFootprint(t *testing.T) {
 		t.Skip("Skipping memory footprint test in short mode")
 	}
 
-	setupBenchmark(&testing.B{})
+	setupTest(t)
 
 	// Allocate 10k events (simulate ring buffer capacity)
 	events := make([]NetworkEventBPF, 10000)
