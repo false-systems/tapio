@@ -1,8 +1,10 @@
 package network
 
-// NetworkEventBPF field ordering matches the C struct layout exactly (70 bytes of data).
-// Go cannot enforce packed structs; the Go struct size is 72 bytes due to trailing alignment padding.
-// binary.Read handles the padding when reading from binary data.
+// NetworkEventBPF matches the C struct layout from network_monitor.c.
+// The C struct is __attribute__((packed)) with 70 bytes of data.
+// This Go struct has 72 bytes due to 2-byte trailing padding added by Go's alignment rules.
+// When reading binary data from eBPF ring buffer, binary.Read correctly handles the size difference:
+// it reads exactly 70 bytes from the ring buffer and zero-fills the trailing 2 bytes.
 type NetworkEventBPF struct {
 	PID      uint32   // offset 0, size 4
 	SrcIP    uint32   // offset 4, size 4
