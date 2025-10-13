@@ -90,7 +90,6 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	}()
 
 	// Ensure cleanup on exit
-	defer rb.Close()
 
 	// Read ring buffer until closed
 	for {
