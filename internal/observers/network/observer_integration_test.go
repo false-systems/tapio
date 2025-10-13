@@ -265,3 +265,37 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	assert.NotNil(t, observer)
 	assert.Equal(t, "cancel-test", observer.Name())
 }
+
+// TestLinkFailure_SynTimeout tests detection of SYN timeout (connection attempt timeout)
+func TestLinkFailure_SynTimeout(t *testing.T) {
+	setupOTELIntegration(t)
+
+	// SYN timeout: SYN_SENT → CLOSE with no response (simulated)
+	bpfEvent := NetworkEventBPF{
+		PID:      1234,
+		SrcIP:    0x0100007f, // 127.0.0.1
+		DstIP:    0x01010101, // 1.1.1.1 (unreachable)
+		SrcPort:  50000,
+		DstPort:  80,
+		Family:   AF_INET,
+		Protocol: IPPROTO_TCP,
+		OldState: TCP_SYN_SENT,
+		NewState: TCP_CLOSE,
+		Comm:     [16]byte{'c', 'u', 'r', 'l', 0},
+	}
+
+	// Should detect as SYN timeout
+	eventType := stateToEventType(bpfEvent.OldState, bpfEvent.NewState)
+	assert.Equal(t, "connection_syn_timeout", eventType, "SYN_SENT → CLOSE should be detected as timeout")
+
+	// Verify IP conversion
+	srcIP := convertIPv4(bpfEvent.SrcIP)
+	assert.Equal(t, "127.0.0.1", srcIP)
+
+	dstIP := convertIPv4(bpfEvent.DstIP)
+	assert.Equal(t, "1.1.1.1", dstIP)
+
+	// Verify process name
+	comm := extractComm(bpfEvent.Comm)
+	assert.Equal(t, "curl", comm)
+}
