@@ -32,7 +32,7 @@ done
 
 # Default: check all Go files if no args provided
 if [ -z "$FILES_ARG" ]; then
-    GO_FILES=$(find . -name "*.go" -not -path "./vendor/*" -not -path "./.git/*")
+    GO_FILES=$(find . -name "*.go" -not -path "./vendor/*" -not -path "./.git/*" -not -name "*_bpfel.go" -not -name "*_bpfeb.go")
 else
     GO_FILES="$FILES_ARG"
 fi
