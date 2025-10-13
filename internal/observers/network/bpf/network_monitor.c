@@ -6,7 +6,7 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_endian.h>
 
-// Network event structure - MUST match Go NetworkEventBPF exactly (70 bytes)
+// Network event structure - MUST match Go NetworkEventBPF exactly (70 bytes packed, 72 with Go alignment)
 struct network_event {
 	__u32 pid;           // offset 0, size 4
 	__u32 src_ip;        // offset 4, size 4
