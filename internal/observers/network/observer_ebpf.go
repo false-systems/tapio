@@ -17,11 +17,19 @@ import (
 	"github.com/yairfalse/tapio/internal/observers/network/bpf"
 )
 
-// ebpfResources holds eBPF program resources
-type ebpfResources struct {
-	objs *bpf.NetworkObjects
-	link link.Link
-	rb   *ringbuf.Reader
+// tcpStateNames maps TCP state constants to human-readable names
+var tcpStateNames = map[uint8]string{
+	TCP_ESTABLISHED: "ESTABLISHED",
+	TCP_SYN_SENT:    "SYN_SENT",
+	TCP_SYN_RECV:    "SYN_RECV",
+	TCP_FIN_WAIT1:   "FIN_WAIT1",
+	TCP_FIN_WAIT2:   "FIN_WAIT2",
+	TCP_TIME_WAIT:   "TIME_WAIT",
+	TCP_CLOSE:       "CLOSE",
+	TCP_CLOSE_WAIT:  "CLOSE_WAIT",
+	TCP_LAST_ACK:    "LAST_ACK",
+	TCP_LISTEN:      "LISTEN",
+	TCP_CLOSING:     "CLOSING",
 }
 
 // Start implements the Observer interface - sets up pipeline stages
@@ -154,20 +162,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 // tcpStateName returns human-readable TCP state name
 func tcpStateName(state uint8) string {
-	states := map[uint8]string{
-		TCP_ESTABLISHED: "ESTABLISHED",
-		TCP_SYN_SENT:    "SYN_SENT",
-		TCP_SYN_RECV:    "SYN_RECV",
-		TCP_FIN_WAIT1:   "FIN_WAIT1",
-		TCP_FIN_WAIT2:   "FIN_WAIT2",
-		TCP_TIME_WAIT:   "TIME_WAIT",
-		TCP_CLOSE:       "CLOSE",
-		TCP_CLOSE_WAIT:  "CLOSE_WAIT",
-		TCP_LAST_ACK:    "LAST_ACK",
-		TCP_LISTEN:      "LISTEN",
-		TCP_CLOSING:     "CLOSING",
-	}
-	if name, ok := states[state]; ok {
+	if name, ok := tcpStateNames[state]; ok {
 		return name
 	}
 	return fmt.Sprintf("UNKNOWN(%d)", state)
