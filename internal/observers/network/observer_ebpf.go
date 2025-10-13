@@ -57,8 +57,8 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	defer close(eventCh)
 
 	// Load eBPF objects
-	objs := &bpf.NetworkObjects{}
-	if err := bpf.LoadNetworkObjects(objs, nil); err != nil {
+	objs := &bpf.networkObjects{}
+	if err := bpf.loadNetworkObjects(objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
 	defer objs.Close()
