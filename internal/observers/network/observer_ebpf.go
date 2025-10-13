@@ -141,6 +141,13 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			}
 			startTime := time.Now()
 
+			// Validate address family
+			if evt.Family != AF_INET && evt.Family != AF_INET6 {
+				log.Printf("[%s] Invalid address family %d, skipping event", n.Name(), evt.Family)
+				n.RecordError(ctx)
+				continue
+			}
+
 			// Convert event to domain representation
 			eventType := stateToEventType(evt.OldState, evt.NewState)
 
@@ -148,7 +155,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			if evt.Family == AF_INET {
 				srcIP = convertIPv4(evt.SrcIP)
 				dstIP = convertIPv4(evt.DstIP)
-			} else if evt.Family == AF_INET6 {
+			} else { // AF_INET6 (already validated above)
 				srcIP = convertIPv6(evt.SrcIPv6)
 				dstIP = convertIPv6(evt.DstIPv6)
 			}
