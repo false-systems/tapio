@@ -44,6 +44,10 @@ func stateToEventType(oldState, newState uint8) string {
 		if oldState == TCP_LISTEN {
 			return "listen_stopped"
 		}
+		// SYN timeout: SYN_SENT → CLOSE (connection attempt failed)
+		if oldState == TCP_SYN_SENT {
+			return "connection_syn_timeout"
+		}
 		return "connection_closed"
 	}
 	return "tcp_state_change"
