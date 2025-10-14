@@ -18,7 +18,7 @@ func TestNetworkEventBPF_Size(t *testing.T) {
 
 	// Verify the actual data portion is 71 bytes (up to end of Comm)
 	dataSize := unsafe.Offsetof(evt.Comm) + unsafe.Sizeof(evt.Comm)
-	assert.Equal(t, uintptr(70), dataSize, "Actual data size must be 70 bytes")
+	assert.Equal(t, uintptr(71), dataSize, "Actual data size must be 71 bytes")
 }
 
 // TestNetworkEventBPF_FieldOffsets verifies field alignment matches C struct
