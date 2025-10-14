@@ -2,8 +2,11 @@ package network
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/yairfalse/tapio/internal/base"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Config holds network observer configuration
@@ -16,6 +19,14 @@ type Config struct {
 type NetworkObserver struct {
 	*base.BaseObserver
 	config Config
+
+	// Track connections that received RST (for distinguishing refused vs timeout)
+	rstConnections sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: true
+
+	// Network-specific OTEL metrics
+	connectionResets  metric.Int64Counter // connection_resets_total
+	synTimeouts       metric.Int64Counter // syn_timeouts_total
+	connectionRefused metric.Int64Counter // connection_refused_total
 }
 
 // NewNetworkObserver creates a new network observer
@@ -25,14 +36,49 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
+	// Create network-specific OTEL metrics
+	meter := otel.Meter("tapio.observer.network")
+
+	connectionResets, err := meter.Int64Counter(
+		"connection_resets_total",
+		metric.WithDescription("Total number of TCP connection resets (RST) received"),
+		metric.WithUnit("{resets}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection_resets counter: %w", err)
+	}
+
+	synTimeouts, err := meter.Int64Counter(
+		"syn_timeouts_total",
+		metric.WithDescription("Total number of TCP SYN timeouts (no response)"),
+		metric.WithUnit("{timeouts}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create syn_timeouts counter: %w", err)
+	}
+
+	connectionRefused, err := meter.Int64Counter(
+		"connection_refused_total",
+		metric.WithDescription("Total number of TCP connections refused (RST on SYN)"),
+		metric.WithUnit("{refused}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection_refused counter: %w", err)
+	}
+
 	return &NetworkObserver{
-		BaseObserver: baseObs,
-		config:       config,
+		BaseObserver:      baseObs,
+		config:            config,
+		connectionResets:  connectionResets,
+		synTimeouts:       synTimeouts,
+		connectionRefused: connectionRefused,
 	}, nil
 }
 
 // stateToEventType maps TCP state transitions to domain event types
-func stateToEventType(oldState, newState uint8) string {
+// Takes connection key to check if RST was received (to distinguish refused vs timeout)
+// For tests: pass empty string for connKey and nil for observer
+func stateToEventType(oldState, newState uint8, connKey string, observer *NetworkObserver) string {
 	switch newState {
 	case TCP_ESTABLISHED:
 		return "connection_established"
@@ -43,6 +89,16 @@ func stateToEventType(oldState, newState uint8) string {
 	case TCP_CLOSE:
 		if oldState == TCP_LISTEN {
 			return "listen_stopped"
+		}
+		// SYN_SENT → CLOSE: Check if RST was received
+		if oldState == TCP_SYN_SENT {
+			// Check if we received RST for this connection (only if observer provided)
+			if observer != nil && connKey != "" {
+				if _, gotRST := observer.rstConnections.LoadAndDelete(connKey); gotRST {
+					return "connection_refused" // RST received = connection refused
+				}
+			}
+			return "connection_syn_timeout" // No RST or no observer = timeout (default)
 		}
 		return "connection_closed"
 	}
