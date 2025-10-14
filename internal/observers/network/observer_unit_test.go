@@ -53,31 +53,31 @@ func TestNetworkObserver_Name(t *testing.T) {
 
 // TestStateToEventType_Established verifies TCP ESTABLISHED mapping
 func TestStateToEventType_Established(t *testing.T) {
-	eventType := stateToEventType(TCP_SYN_SENT, TCP_ESTABLISHED)
+	eventType := stateToEventType(TCP_SYN_SENT, TCP_ESTABLISHED, "", nil)
 	assert.Equal(t, "connection_established", eventType)
 }
 
 // TestStateToEventType_ListenStarted verifies LISTEN start mapping
 func TestStateToEventType_ListenStarted(t *testing.T) {
-	eventType := stateToEventType(TCP_CLOSE, TCP_LISTEN)
+	eventType := stateToEventType(TCP_CLOSE, TCP_LISTEN, "", nil)
 	assert.Equal(t, "listen_started", eventType)
 }
 
 // TestStateToEventType_ListenStopped verifies LISTEN stop mapping
 func TestStateToEventType_ListenStopped(t *testing.T) {
-	eventType := stateToEventType(TCP_LISTEN, TCP_CLOSE)
+	eventType := stateToEventType(TCP_LISTEN, TCP_CLOSE, "", nil)
 	assert.Equal(t, "listen_stopped", eventType)
 }
 
 // TestStateToEventType_ConnectionClosed verifies connection close mapping
 func TestStateToEventType_ConnectionClosed(t *testing.T) {
-	eventType := stateToEventType(TCP_ESTABLISHED, TCP_CLOSE)
+	eventType := stateToEventType(TCP_ESTABLISHED, TCP_CLOSE, "", nil)
 	assert.Equal(t, "connection_closed", eventType)
 }
 
 // TestStateToEventType_GenericFallback verifies fallback for other transitions
 func TestStateToEventType_GenericFallback(t *testing.T) {
-	eventType := stateToEventType(TCP_SYN_SENT, TCP_SYN_RECV)
+	eventType := stateToEventType(TCP_SYN_SENT, TCP_SYN_RECV, "", nil)
 	assert.Equal(t, "tcp_state_change", eventType)
 }
 

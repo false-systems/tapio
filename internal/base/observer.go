@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -22,6 +23,9 @@ type Observer interface {
 type BaseObserver struct {
 	name      string
 	startTime time.Time
+
+	// Structured logging with OTEL trace context
+	logger zerolog.Logger
 
 	// Statistics (thread-safe atomic counters)
 	eventsProcessed atomic.Int64
@@ -58,6 +62,7 @@ func NewBaseObserverWithTelemetry(name string, telemetryConfig *TelemetryConfig)
 	observer := &BaseObserver{
 		name:      name,
 		startTime: time.Now(),
+		logger:    NewLogger(name),
 		metrics:   metrics,
 		pipeline:  NewPipeline(),
 	}
@@ -87,9 +92,15 @@ func (b *BaseObserver) IsHealthy() bool {
 	return b.running.Load() && !b.stopped.Load()
 }
 
+// Logger returns the observer's logger with optional trace context
+func (b *BaseObserver) Logger(ctx context.Context) zerolog.Logger {
+	return WithTraceContext(ctx, b.logger)
+}
+
 // Start initiates the observer pipeline
 func (b *BaseObserver) Start(ctx context.Context) error {
 	if b.running.Load() {
+		b.logger.Warn().Msg("observer already running")
 		return fmt.Errorf("observer %s already running", b.name)
 	}
 
@@ -97,9 +108,12 @@ func (b *BaseObserver) Start(ctx context.Context) error {
 	b.stopped.Store(false)
 	b.startTime = time.Now()
 
+	b.logger.Info().Msg("observer starting")
+
 	if err := b.pipeline.Run(ctx); err != nil {
 		b.stopped.Store(true)
 		b.running.Store(false)
+		b.logger.Error().Err(err).Msg("pipeline failed")
 		return fmt.Errorf("pipeline failed for observer %s: %w", b.name, err)
 	}
 
@@ -109,8 +123,11 @@ func (b *BaseObserver) Start(ctx context.Context) error {
 // Stop gracefully shuts down the observer
 func (b *BaseObserver) Stop() error {
 	if !b.running.Load() {
+		b.logger.Warn().Msg("observer not running")
 		return fmt.Errorf("observer %s not running", b.name)
 	}
+
+	b.logger.Info().Msg("observer stopping")
 
 	b.stopped.Store(true)
 	b.running.Store(false)
@@ -121,22 +138,18 @@ func (b *BaseObserver) Stop() error {
 		defer cancel()
 
 		if err := b.telemetryShutdown.Shutdown(ctx); err != nil {
+			b.logger.Error().Err(err).Msg("telemetry shutdown failed")
 			return fmt.Errorf("failed to shutdown telemetry for observer %s: %w", b.name, err)
 		}
 	}
 
+	b.logger.Info().Msg("observer stopped")
 	return nil
 }
 
 // AddStage registers a pipeline stage
 func (b *BaseObserver) AddStage(stage PipelineStage) {
 	b.pipeline.Add(stage)
-}
-
-// RecordEvent increments events processed counter and records metrics
-// Deprecated: Use RecordEvent(ctx, event) instead. This version is kept for backward compatibility.
-func (b *BaseObserver) RecordEvent(ctx context.Context) {
-	b.RecordEvent(ctx, nil)
 }
 
 // RecordEvent increments events processed counter and records metrics

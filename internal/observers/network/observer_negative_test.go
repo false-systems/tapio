@@ -57,7 +57,7 @@ func TestNegative_StateToEventType_InvalidStates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := stateToEventType(tt.oldState, tt.newState)
+			result := stateToEventType(tt.oldState, tt.newState, "", nil)
 			assert.Equal(t, tt.want, result)
 		})
 	}
@@ -190,7 +190,7 @@ func TestNegative_NetworkEventBPF_ZeroValues(t *testing.T) {
 	assert.Equal(t, uint8(0), evt.NewState)
 
 	// Process zero-value event
-	eventType := stateToEventType(evt.OldState, evt.NewState)
+	eventType := stateToEventType(evt.OldState, evt.NewState, "", nil)
 	assert.Equal(t, "tcp_state_change", eventType)
 
 	srcIP := convertIPv4(evt.SrcIP)
@@ -294,7 +294,7 @@ func TestNegative_EventConversion_MalformedData(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// These should not panic, just handle gracefully
-			eventType := stateToEventType(tt.bpfEvent.OldState, tt.bpfEvent.NewState)
+			eventType := stateToEventType(tt.bpfEvent.OldState, tt.bpfEvent.NewState, "", nil)
 			assert.NotEmpty(t, eventType)
 
 			srcIP := ""
@@ -325,7 +325,7 @@ func TestNegative_TCPStateTransitions_Invalid(t *testing.T) {
 	for _, tt := range invalidTransitions {
 		t.Run(tt.name, func(t *testing.T) {
 			// Invalid transitions should still return a valid event type
-			eventType := stateToEventType(tt.oldState, tt.newState)
+			eventType := stateToEventType(tt.oldState, tt.newState, "", nil)
 			assert.NotEmpty(t, eventType)
 			// Most will map to generic "tcp_state_change"
 			assert.Contains(t, []string{"tcp_state_change", "connection_established", "listen_started", "listen_stopped", "connection_closed"}, eventType)
@@ -350,10 +350,10 @@ func TestNegative_ConcurrentAccess(t *testing.T) {
 			comm := [16]byte{'t', 'e', 's', 't', byte('0' + n%10), 0}
 
 			// Call all helper functions concurrently
-			_ = stateToEventType(TCP_SYN_SENT, TCP_ESTABLISHED) // Ignore: prevent compiler optimization
-			_ = convertIPv4(ip)                                 // Ignore: prevent compiler optimization
-			_ = convertIPv6(ipv6)                               // Ignore: prevent compiler optimization
-			_ = extractComm(comm)                               // Ignore: prevent compiler optimization
+			_ = stateToEventType(TCP_SYN_SENT, TCP_ESTABLISHED, "", nil) // Ignore: prevent compiler optimization
+			_ = convertIPv4(ip)                                          // Ignore: prevent compiler optimization
+			_ = convertIPv6(ipv6)                                        // Ignore: prevent compiler optimization
+			_ = extractComm(comm)                                        // Ignore: prevent compiler optimization
 		}(i)
 	}
 
@@ -390,10 +390,10 @@ func TestNegative_LargeEventBatch(t *testing.T) {
 		}
 
 		// Process event
-		_ = stateToEventType(evt.OldState, evt.NewState) // Ignore: prevent compiler optimization
-		_ = convertIPv4(evt.SrcIP)                       // Ignore: prevent compiler optimization
-		_ = convertIPv4(evt.DstIP)                       // Ignore: prevent compiler optimization
-		_ = extractComm(evt.Comm)                        // Ignore: prevent compiler optimization
+		_ = stateToEventType(evt.OldState, evt.NewState, "", nil) // Ignore: prevent compiler optimization
+		_ = convertIPv4(evt.SrcIP)                                // Ignore: prevent compiler optimization
+		_ = convertIPv4(evt.DstIP)                                // Ignore: prevent compiler optimization
+		_ = extractComm(evt.Comm)                                 // Ignore: prevent compiler optimization
 
 		processed++
 	}
