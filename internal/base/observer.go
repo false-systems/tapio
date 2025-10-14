@@ -134,15 +134,9 @@ func (b *BaseObserver) AddStage(stage PipelineStage) {
 }
 
 // RecordEvent increments events processed counter and records metrics
-// Deprecated: Use RecordEvent(ctx, event) instead. This version is kept for backward compatibility.
 func (b *BaseObserver) RecordEvent(ctx context.Context) {
-	b.RecordEvent(ctx, nil)
-}
-
-// RecordEvent increments events processed counter and records metrics
-func (b *BaseObserver) RecordEvent(ctx context.Context, event *domain.ObserverEvent) {
 	b.eventsProcessed.Add(1)
-	b.metrics.RecordEvent(ctx, b.name, event)
+	b.metrics.RecordEvent(ctx, b.name, nil)
 }
 
 // RecordDrop increments events dropped counter and records metrics

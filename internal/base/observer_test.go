@@ -169,20 +169,14 @@ func TestBaseObserver_RecordEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	event := &domain.ObserverEvent{
-		ID:        "test-1",
-		Type:      "tcp_connect",
-		Source:    "test-observer",
-		Timestamp: time.Now(),
-	}
 
 	assert.Equal(t, int64(0), obs.eventsProcessed.Load())
 
-	obs.RecordEvent(ctx, event)
+	obs.RecordEvent(ctx)
 	assert.Equal(t, int64(1), obs.eventsProcessed.Load())
 
-	obs.RecordEvent(ctx, event)
-	obs.RecordEvent(ctx, event)
+	obs.RecordEvent(ctx)
+	obs.RecordEvent(ctx)
 	assert.Equal(t, int64(3), obs.eventsProcessed.Load())
 }
 
@@ -256,9 +250,9 @@ func TestBaseObserver_Stats(t *testing.T) {
 		Timestamp: time.Now(),
 	}
 
-	obs.RecordEvent(ctx, event)
-	obs.RecordEvent(ctx, event)
-	obs.RecordEvent(ctx, event)
+	obs.RecordEvent(ctx)
+	obs.RecordEvent(ctx)
+	obs.RecordEvent(ctx)
 	obs.RecordDrop(ctx, "tcp_connect")
 	obs.RecordError(ctx, event)
 	obs.RecordError(ctx, event)

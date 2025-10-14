@@ -259,9 +259,13 @@ func (m *MultiEmitter) Close() error {
 
 // CreateEmitters creates emitters based on output configuration
 // BREAKING CHANGE: The function signature changed from
-//   CreateEmitters(config OutputConfig, tracer trace.Tracer) Emitter
+//
+//	CreateEmitters(config OutputConfig, tracer trace.Tracer) Emitter
+//
 // to
-//   CreateEmitters(config OutputConfig) (Emitter, error)
+//
+//	CreateEmitters(config OutputConfig) (Emitter, error)
+//
 // The tracer parameter was removed and an error return value was added.
 func CreateEmitters(config OutputConfig) (Emitter, error) {
 	var emitters []Emitter

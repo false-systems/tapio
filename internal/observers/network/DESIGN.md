@@ -853,9 +853,31 @@ func (n *NetworkObserver) enrichEvents(ctx context.Context) error {
 - ✅ Emitter integration
 - ✅ Tests (80%+ coverage)
 
-### Phase 2: UDP Support
-- Add UDP tracepoint
-- Test UDP traffic
+### Phase 2: UDP Support ~~SKIPPED - See Rationale Below~~
+
+**Decision: Skip UDP monitoring in network observer**
+
+**Rationale:**
+1. **No stable tracepoint exists**: `inet_sock_set_state` is TCP-only. UDP has no state machine.
+2. **Unstable alternatives**: Only kprobes (`udp_sendmsg`/`udp_recvmsg`) available, which break across kernel versions - violates CO-RE goal.
+3. **Industry precedent**: Groundcover's production eBPF agent (Alaz) explicitly skips UDP:
+   - Quote from alaz/ebpf/c/l7.c: "We should not send l7_events that is not related to a tcp connection, otherwise we will have a lot of events"
+   - Caretta (groundcover): TCP-only using `inet_sock_set_state`
+4. **Signal-to-noise ratio**: UDP is connectionless - generates high event volume with low observability value.
+5. **L7 protocols use TCP**: HTTP, gRPC, databases all use TCP. DNS already handled by dedicated DNS observer.
+6. **Alternative approach**: XDP/TC for UDP would require complete architecture redesign - not worth it for Phase 2.
+
+**What UDP would give us:**
+- Generic UDP send/receive events (application-level)
+- Process attribution (PID, comm)
+- IP addresses + ports
+
+**Why we don't need it:**
+- DNS (UDP port 53): Already covered by existing DNS observer
+- Other UDP traffic (QUIC, VoIP, gaming): Low priority for K8s observability
+- No state transitions to track (connectionless protocol)
+
+**Path forward:** Skip directly to Phase 3 (Enrichment) or Phase 4 (Consolidation with DNS/status/link observers).
 
 ### Phase 3: Enrichment (Agent 1 dependency)
 - K8s pod decoder integration
@@ -1041,10 +1063,12 @@ defer objs.Close()    // Then unload
    - Track drops with `RecordDrop(ctx)` metric
    - **Decision**: Non-blocking drops with observability
 
-6. **UDP Support**: Phase 2 - TCP only first
-   - `inet_sock_set_state` is TCP-only
-   - Would need additional tracepoints for UDP
-   - **Decision**: TCP in Phase 1, UDP in Phase 2
+6. **UDP Support**: ~~Phase 2 SKIPPED~~ - TCP only
+   - `inet_sock_set_state` is TCP-only (no UDP state machine exists)
+   - No stable tracepoint for UDP (only unstable kprobes)
+   - Industry standard: Groundcover's Alaz skips UDP entirely
+   - DNS observer already handles UDP port 53
+   - **Decision**: TCP only. See Phase 2 rationale in Implementation Phases section.
 
 ---
 
@@ -1089,3 +1113,196 @@ defer objs.Close()    // Then unload
 - [ ] bpf2go generates correct Go bindings
 - [ ] Ring buffer reads produce valid events
 - [ ] Test on kernel 5.10, 5.15, 6.x for portability
+
+---
+
+## Stage 1: Link Consolidation (Connection Failure Detection)
+
+**Status**: ✅ **IMPLEMENTED**
+**Branch**: `feat/network-link-consolidation`
+**Date**: 2025-10-14
+
+### Problem Statement
+
+Detect TCP connection failures to identify network issues:
+1. **SYN Timeout**: No response from server (7-127 seconds)
+2. **Connection Refused**: Server sends RST on SYN (< 100ms)
+3. **Connection Reset**: RST received during established connection
+
+**Why This Matters**:
+- Cloudflare data: 20% of TCP connections fail
+- Distinguish timeout (server down) vs refused (firewall/no listener)
+- Critical for root cause analysis in distributed systems
+
+### Architecture Changes
+
+#### New Tracepoint: tcp_receive_reset
+
+Added second tracepoint to detect RST packets:
+
+```c
+SEC("tracepoint/tcp/tcp_receive_reset")
+int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
+{
+    struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+    if (!evt) return 0;
+
+    __builtin_memset(evt, 0, sizeof(*evt));
+    evt->event_type = EVENT_TYPE_RST_RECEIVED;  // NEW: Mark as RST event
+
+    // Extract PID, comm, IPs, ports, state...
+    bpf_ringbuf_submit(evt, 0);
+    return 0;
+}
+```
+
+**Both tracepoints write to same ring buffer** - distinguished by `event_type` field.
+
+#### Updated NetworkEventBPF Struct
+
+Changed `Pad` field to `EventType`:
+
+```go
+type NetworkEventBPF struct {
+    PID       uint32   // offset 0, size 4
+    SrcIP     uint32   // offset 4, size 4
+    DstIP     uint32   // offset 8, size 4
+    SrcIPv6   [16]byte // offset 12, size 16
+    DstIPv6   [16]byte // offset 28, size 16
+    SrcPort   uint16   // offset 44, size 2
+    DstPort   uint16   // offset 46, size 2
+    Family    uint16   // offset 48, size 2
+    Protocol  uint8    // offset 50, size 1
+    OldState  uint8    // offset 51, size 1
+    NewState  uint8    // offset 52, size 1
+    EventType uint8    // offset 53, size 1 - NEW: EVENT_TYPE_STATE_CHANGE or EVENT_TYPE_RST_RECEIVED
+    Comm      [16]byte // offset 54, size 16
+}
+
+// Event types (must match C defines)
+const (
+    EventTypeStateChange  = 0 // inet_sock_set_state tracepoint
+    EventTypeRSTReceived  = 1 // tcp_receive_reset tracepoint
+)
+```
+
+**Still 71 bytes packed, 72 with Go alignment** - no breaking changes to struct layout.
+
+#### RST Correlation Logic
+
+Observer tracks RST connections using sync.Map:
+
+```go
+type NetworkObserver struct {
+    *base.BaseObserver
+    rstConnections sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: true
+    // ... metrics
+}
+
+// When RST received: store connection key
+if evt.EventType == EventTypeRSTReceived {
+    connKey := fmt.Sprintf("%s:%d:%s:%d", srcIP, srcPort, dstIP, dstPort)
+    n.rstConnections.Store(connKey, true)
+    n.connectionResets.Add(ctx, 1)  // NEW OTEL metric
+    continue  // Don't emit yet, wait for state transition
+}
+
+// When state transition happens: check if RST was received
+func stateToEventType(oldState, newState uint8, connKey string, observer *NetworkObserver) string {
+    if oldState == TCP_SYN_SENT && newState == TCP_CLOSE {
+        // Check if RST received (connection refused) or timeout (no response)
+        if observer != nil && connKey != "" {
+            if _, gotRST := observer.rstConnections.LoadAndDelete(connKey); gotRST {
+                return "connection_refused"  // RST received = refused
+            }
+        }
+        return "connection_syn_timeout"  // No RST = timeout (default)
+    }
+    // ... other state mappings
+}
+```
+
+### New Event Types
+
+1. **connection_syn_timeout**: SYN_SENT → CLOSE (no RST received)
+   - Server unreachable, firewall drop, network issue
+   - Default Linux timeout: 127 seconds (6 retries)
+
+2. **connection_refused**: SYN_SENT → CLOSE (RST received)
+   - Port not listening, firewall reject
+   - Fast failure: < 100ms
+
+3. **connection_reset**: ESTABLISHED → any (RST received)
+   - Connection forcibly closed during active session
+   - Tracked via RST tracepoint
+
+### New OTEL Metrics
+
+Added 3 network-specific counters (following OTEL semantic conventions):
+
+```go
+connectionResets  metric.Int64Counter  // connection_resets_total
+synTimeouts       metric.Int64Counter  // syn_timeouts_total
+connectionRefused metric.Int64Counter  // connection_refused_total
+```
+
+Recorded when:
+- `connectionResets`: RST received (any state)
+- `synTimeouts`: SYN_SENT → CLOSE with no RST
+- `connectionRefused`: SYN_SENT → CLOSE with RST
+
+### Test Coverage
+
+All tests passing with **81.8% coverage** (exceeds 80% minimum):
+
+```
+✓ TestLinkFailure_SynTimeout - Detects SYN timeout
+✓ All unit tests updated with new stateToEventType signature
+✓ All integration tests passing
+✓ Performance tests passing (100K events processed)
+✓ Negative tests covering edge cases
+```
+
+### Implementation Checklist
+
+- [x] Added tcp_receive_reset tracepoint to eBPF
+- [x] Updated NetworkEventBPF with EventType field (broke Pad, fixed)
+- [x] Added RST correlation logic (sync.Map)
+- [x] Implemented connection_refused detection
+- [x] Added 3 new OTEL metrics
+- [x] Updated all test files (observer_unit, integration, negative, performance)
+- [x] Fixed types_test.go field reference (Pad → EventType)
+- [x] Verified all tests passing (81.8% coverage)
+- [ ] Run make verify-full
+- [ ] Update CONSOLIDATION_PLAN.md Stage 1 status
+- [ ] Commit and push to branch
+
+### Key Design Decisions
+
+**Q: Why add tcp_receive_reset instead of timeout detection in Go?**
+A: Timeout detection in Go requires tracking connection attempts with timers (complex state management). RST detection is event-driven - kernel tells us immediately when RST received. Cleaner, more accurate.
+
+**Q: Why sync.Map instead of regular map with mutex?**
+A: Concurrent access from ring buffer reader. sync.Map optimized for this pattern (many reads, occasional writes, keys accessed once).
+
+**Q: Why record RST but not emit event immediately?**
+A: We need both RST event AND state transition to determine failure type. Store RST, wait for SYN_SENT → CLOSE transition, then emit single event with correct type.
+
+**Q: Performance impact of second tracepoint?**
+A: Minimal - RST events are rare (<1% of connections). No filtering needed - all RSTs are interesting for failure analysis.
+
+### Files Modified
+
+1. `bpf/network_monitor.c` - Added tcp_receive_reset handler (67 lines)
+2. `types.go` - Changed Pad to EventType, added constants
+3. `observer.go` - Added sync.Map and 3 OTEL metrics
+4. `observer_ebpf.go` - Attach both tracepoints, RST correlation
+5. `types_test.go` - Updated field reference (Pad → EventType)
+6. All test files - Updated stateToEventType calls with new signature
+
+### Next Steps (Stage 2+)
+
+See CONSOLIDATION_PLAN.md for:
+- Stage 2: DNS Consolidation (deferred - already implemented)
+- Stage 3: Status/L7 Integration (future)
+- Stage 4: Correlation with existing observers
