@@ -48,7 +48,7 @@ func BenchmarkStateToEventType(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tc := testCases[i%len(testCases)]
-		_ = stateToEventType(tc.oldState, tc.newState) // Ignore: benchmark needs result to prevent optimization
+		_ = stateToEventType(tc.oldState, tc.newState, "", nil) // Ignore: benchmark needs result to prevent optimization
 	}
 }
 
@@ -136,7 +136,7 @@ func BenchmarkEventProcessingPipeline(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Simulate complete event processing
-		eventType := stateToEventType(evt.OldState, evt.NewState)
+		eventType := stateToEventType(evt.OldState, evt.NewState, "", nil)
 		srcIP := convertIPv4(evt.SrcIP)
 		dstIP := convertIPv4(evt.DstIP)
 		comm := extractComm(evt.Comm)
@@ -187,10 +187,10 @@ func BenchmarkConcurrentEventProcessing(b *testing.B) {
 		i := 0
 		for pb.Next() {
 			evt := events[i%len(events)]
-			_ = stateToEventType(evt.OldState, evt.NewState) // Ignore: benchmark needs result to prevent optimization
-			_ = convertIPv4(evt.SrcIP)                       // Ignore: benchmark needs result to prevent optimization
-			_ = convertIPv4(evt.DstIP)                       // Ignore: benchmark needs result to prevent optimization
-			_ = extractComm(evt.Comm)                        // Ignore: benchmark needs result to prevent optimization
+			_ = stateToEventType(evt.OldState, evt.NewState, "", nil) // Ignore: benchmark needs result to prevent optimization
+			_ = convertIPv4(evt.SrcIP)                                // Ignore: benchmark needs result to prevent optimization
+			_ = convertIPv4(evt.DstIP)                                // Ignore: benchmark needs result to prevent optimization
+			_ = extractComm(evt.Comm)                                 // Ignore: benchmark needs result to prevent optimization
 			i++
 		}
 	})
@@ -268,10 +268,10 @@ func TestPerformance_HighThroughput(t *testing.T) {
 		}
 
 		// Process event
-		_ = stateToEventType(evt.OldState, evt.NewState) // Ignore: benchmark needs result to prevent optimization
-		_ = convertIPv4(evt.SrcIP)                       // Ignore: benchmark needs result to prevent optimization
-		_ = convertIPv4(evt.DstIP)                       // Ignore: benchmark needs result to prevent optimization
-		_ = extractComm(evt.Comm)                        // Ignore: benchmark needs result to prevent optimization
+		_ = stateToEventType(evt.OldState, evt.NewState, "", nil) // Ignore: benchmark needs result to prevent optimization
+		_ = convertIPv4(evt.SrcIP)                                // Ignore: benchmark needs result to prevent optimization
+		_ = convertIPv4(evt.DstIP)                                // Ignore: benchmark needs result to prevent optimization
+		_ = extractComm(evt.Comm)                                 // Ignore: benchmark needs result to prevent optimization
 
 		processed++
 	}

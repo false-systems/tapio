@@ -6,7 +6,11 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_endian.h>
 
-// Network event structure - MUST match Go NetworkEventBPF exactly (70 bytes packed, 72 with Go alignment)
+// Event types for distinguishing tracepoint sources
+#define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
+#define EVENT_TYPE_RST_RECEIVED  1  // tcp_receive_reset
+
+// Network event structure - MUST match Go NetworkEventBPF exactly (71 bytes packed, 72 with Go alignment)
 struct network_event {
 	__u32 pid;           // offset 0, size 4
 	__u32 src_ip;        // offset 4, size 4
@@ -19,7 +23,7 @@ struct network_event {
 	__u8  protocol;      // offset 50, size 1
 	__u8  old_state;     // offset 51, size 1
 	__u8  new_state;     // offset 52, size 1
-	__u8  pad;           // offset 53, size 1
+	__u8  event_type;    // offset 53, size 1 - EVENT_TYPE_STATE_CHANGE or EVENT_TYPE_RST_RECEIVED
 	__u8  comm[16];      // offset 54, size 16
 } __attribute__((packed));
 
@@ -83,6 +87,9 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	// Get process name (comm)
 	bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
 
+	// Mark as state change event
+	evt->event_type = EVENT_TYPE_STATE_CHANGE;
+
 	// Extract TCP state transition
 	evt->old_state = (__u8)args->oldstate;
 	evt->new_state = (__u8)args->newstate;
@@ -115,6 +122,71 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	}
 
 	// Submit event to userspace
+	bpf_ringbuf_submit(evt, 0);
+
+	return 0;
+}
+
+// Tracepoint arguments for tcp/tcp_receive_reset
+// Fires when kernel receives RST packet (connection refused/reset)
+struct trace_event_raw_tcp_receive_reset {
+	__u64 unused;       // Common tracepoint header
+	const void *skaddr;
+	int state;          // TCP state when RST received
+	__u16 sport;
+	__u16 dport;
+	__u16 family;
+	__u8 saddr[4];
+	__u8 daddr[4];
+	__u8 saddr_v6[16];
+	__u8 daddr_v6[16];
+};
+
+SEC("tracepoint/tcp/tcp_receive_reset")
+int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
+{
+	// Reserve ring buffer space
+	struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	if (!evt) {
+		return 0;  // Ring buffer full
+	}
+
+	// Zero-initialize
+	__builtin_memset(evt, 0, sizeof(*evt));
+
+	// Mark as RST received event
+	evt->event_type = EVENT_TYPE_RST_RECEIVED;
+
+	// Extract process info
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	evt->pid = pid_tgid >> 32;
+	bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
+
+	// Store current state in old_state field (state when RST received)
+	evt->old_state = (__u8)args->state;
+	evt->new_state = 0;  // Not applicable for RST
+
+	// Extract protocol and family
+	evt->protocol = IPPROTO_TCP;
+	evt->family = args->family;
+
+	// Extract ports (host byte order)
+	evt->src_port = args->sport;
+	evt->dst_port = args->dport;
+
+	// Extract IP addresses
+	if (args->family == AF_INET) {
+		__builtin_memcpy(&evt->src_ip, args->saddr, 4);
+		__builtin_memcpy(&evt->dst_ip, args->daddr, 4);
+	} else if (args->family == AF_INET6) {
+		#pragma unroll
+		for (int i = 0; i < 16; i++) {
+			evt->src_ipv6[i] = args->saddr_v6[i];
+			evt->dst_ipv6[i] = args->daddr_v6[i];
+		}
+	}
+
+	// Submit event
 	bpf_ringbuf_submit(evt, 0);
 
 	return 0;

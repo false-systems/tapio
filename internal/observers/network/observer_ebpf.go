@@ -67,12 +67,19 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	}
 	defer objs.Close()
 
-	// Attach to tracepoint
-	tp, err := link.Tracepoint("sock", "inet_sock_set_state", objs.TraceInetSockSetState, nil)
+	// Attach to inet_sock_set_state tracepoint (TCP state transitions)
+	tpState, err := link.Tracepoint("sock", "inet_sock_set_state", objs.TraceInetSockSetState, nil)
 	if err != nil {
-		return fmt.Errorf("failed to attach tracepoint: %w", err)
+		return fmt.Errorf("failed to attach inet_sock_set_state tracepoint: %w", err)
 	}
-	defer tp.Close()
+	defer tpState.Close()
+
+	// Attach to tcp_receive_reset tracepoint (RST packets)
+	tpRST, err := link.Tracepoint("tcp", "tcp_receive_reset", objs.TraceTcpReceiveReset, nil)
+	if err != nil {
+		return fmt.Errorf("failed to attach tcp_receive_reset tracepoint: %w", err)
+	}
+	defer tpRST.Close()
 
 	// Open ring buffer reader
 	rb, err := ringbuf.NewReader(objs.Events)
@@ -80,7 +87,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
 
-	log.Printf("[%s] eBPF program loaded and attached", n.Name())
+	log.Printf("[%s] eBPF programs loaded and attached (inet_sock_set_state + tcp_receive_reset)", n.Name())
 
 	// Monitor context and close ring buffer when cancelled
 	// This unblocks rb.Read() immediately on shutdown
@@ -147,9 +154,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 				continue
 			}
 
-			// Convert event to domain representation
-			eventType := stateToEventType(evt.OldState, evt.NewState)
-
+			// Convert IP addresses
 			var srcIP, dstIP string
 			if evt.Family == AF_INET {
 				srcIP = convertIPv4(evt.SrcIP)
@@ -159,7 +164,31 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 				dstIP = convertIPv6(evt.DstIPv6)
 			}
 
+			// Connection key for tracking RST
+			connKey := fmt.Sprintf("%s:%d:%s:%d", srcIP, evt.SrcPort, dstIP, evt.DstPort)
+
+			// Handle different event types
+			if evt.EventType == EventTypeRSTReceived {
+				// RST received - mark this connection as refused
+				n.rstConnections.Store(connKey, true)
+				log.Printf("[%s] RST received for %s (state=%s)", n.Name(), connKey, tcpStateName(evt.OldState))
+
+				// Record RST metric
+				n.connectionResets.Add(ctx, 1)
+				continue // Don't emit event yet, wait for state transition
+			}
+
+			// State change event - convert to domain representation
+			eventType := stateToEventType(evt.OldState, evt.NewState, connKey, n)
 			comm := extractComm(evt.Comm)
+
+			// Record network-specific metrics based on event type
+			switch eventType {
+			case "connection_refused":
+				n.connectionRefused.Add(ctx, 1)
+			case "connection_syn_timeout":
+				n.synTimeouts.Add(ctx, 1)
+			}
 
 			// Output event (if stdout enabled)
 			if n.config.Output.Stdout {
@@ -169,7 +198,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 					tcpStateName(evt.OldState), tcpStateName(evt.NewState))
 			}
 
-			// Record metrics
+			// Record base metrics
 			n.RecordEvent(ctx)
 			n.RecordProcessingTime(ctx, float64(time.Since(startTime).Milliseconds()))
 		}

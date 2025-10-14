@@ -121,7 +121,7 @@ func TestIntegration_EventConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test event type conversion
-			eventType := stateToEventType(tt.bpfEvent.OldState, tt.bpfEvent.NewState)
+			eventType := stateToEventType(tt.bpfEvent.OldState, tt.bpfEvent.NewState, "", nil)
 			assert.Equal(t, tt.wantType, eventType)
 
 			// Test IP conversion
@@ -169,7 +169,7 @@ func TestIntegration_IPv6EventConversion(t *testing.T) {
 	assert.Equal(t, "2607:f8b0:0:0:0:0:0:1", dstIPv6)
 
 	// Verify event type
-	eventType := stateToEventType(bpfEvent.OldState, bpfEvent.NewState)
+	eventType := stateToEventType(bpfEvent.OldState, bpfEvent.NewState, "", nil)
 	assert.Equal(t, "connection_established", eventType)
 
 	// Verify process name
@@ -213,7 +213,7 @@ func TestIntegration_ConcurrentEventProcessing(t *testing.T) {
 			defer func() { done <- true }()
 
 			// Convert event
-			eventType := stateToEventType(e.OldState, e.NewState)
+			eventType := stateToEventType(e.OldState, e.NewState, "", nil)
 			assert.NotEmpty(t, eventType)
 
 			srcIP := convertIPv4(e.SrcIP)
@@ -285,7 +285,7 @@ func TestLinkFailure_SynTimeout(t *testing.T) {
 	}
 
 	// Should detect as SYN timeout
-	eventType := stateToEventType(bpfEvent.OldState, bpfEvent.NewState)
+	eventType := stateToEventType(bpfEvent.OldState, bpfEvent.NewState, "", nil)
 	assert.Equal(t, "connection_syn_timeout", eventType, "SYN_SENT → CLOSE should be detected as timeout")
 
 	// Verify IP conversion
