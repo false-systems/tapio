@@ -8,15 +8,15 @@ import (
 )
 
 // TestNetworkEventBPF_Size verifies struct size matches C definition
-// Note: Go adds 2 bytes alignment padding (72 total), but binary.Read handles this correctly
+// Note: Go adds 1 byte alignment padding (72 total), but binary.Read handles this correctly
 func TestNetworkEventBPF_Size(t *testing.T) {
 	var evt NetworkEventBPF
 	size := unsafe.Sizeof(evt)
-	// Go enforces natural alignment, adding 2 bytes at end
-	// Actual data is 70 bytes, Go struct is 72 bytes with padding
+	// Go enforces natural alignment, adding 1 byte at end
+	// Actual data is 71 bytes (packed), Go struct is 72 bytes with padding
 	assert.Equal(t, uintptr(72), size, "NetworkEventBPF Go struct size (includes alignment padding)")
 
-	// Verify the actual data portion is 70 bytes (up to end of Comm)
+	// Verify the actual data portion is 71 bytes (up to end of Comm)
 	dataSize := unsafe.Offsetof(evt.Comm) + unsafe.Sizeof(evt.Comm)
 	assert.Equal(t, uintptr(70), dataSize, "Actual data size must be 70 bytes")
 }
@@ -37,7 +37,7 @@ func TestNetworkEventBPF_FieldOffsets(t *testing.T) {
 	assert.Equal(t, uintptr(50), unsafe.Offsetof(evt.Protocol), "Protocol offset")
 	assert.Equal(t, uintptr(51), unsafe.Offsetof(evt.OldState), "OldState offset")
 	assert.Equal(t, uintptr(52), unsafe.Offsetof(evt.NewState), "NewState offset")
-	assert.Equal(t, uintptr(53), unsafe.Offsetof(evt.Pad), "Pad offset")
+	assert.Equal(t, uintptr(53), unsafe.Offsetof(evt.EventType), "EventType offset")
 	assert.Equal(t, uintptr(54), unsafe.Offsetof(evt.Comm), "Comm offset")
 }
 

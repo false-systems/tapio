@@ -1,9 +1,6 @@
 # ==========================================
-# Tapio golangci-lint Configuration v2.x
+# Tapio golangci-lint Configuration v1.x
 # ==========================================
-
-# Version is required for golangci-lint v2
-version: "2"
 
 run:
   timeout: 5m
