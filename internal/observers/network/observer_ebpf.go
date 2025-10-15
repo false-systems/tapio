@@ -81,6 +81,13 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	}
 	defer tpRST.Close()
 
+	// Attach to tcp_retransmit_skb tracepoint (packet retransmissions)
+	tpRetx, err := link.Tracepoint("tcp", "tcp_retransmit_skb", objs.TraceTcpRetransmitSkb, nil)
+	if err != nil {
+		return fmt.Errorf("failed to attach tcp_retransmit_skb tracepoint: %w", err)
+	}
+	defer tpRetx.Close()
+
 	// Open ring buffer reader
 	rb, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -178,6 +185,12 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 				continue // Don't emit event yet, wait for state transition
 			}
 
+			if evt.EventType == EventTypeRetransmit {
+				// Retransmit event - process packet loss
+				n.processRetransmitEvent(ctx, evt, connKey, srcIP, dstIP)
+				continue // Don't emit state change event for retransmits
+			}
+
 			// State change event - convert to domain representation
 			eventType := stateToEventType(evt.OldState, evt.NewState, connKey, n)
 			comm := extractComm(evt.Comm)
@@ -211,4 +224,54 @@ func tcpStateName(state uint8) string {
 		return name
 	}
 	return fmt.Sprintf("UNKNOWN(%d)", state)
+}
+
+// processRetransmitEvent handles TCP retransmission events
+func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt NetworkEventBPF, connKey, srcIP, dstIP string) {
+	// Extract retransmit data from reused fields
+	totalRetrans := evt.OldState // total_retrans from eBPF
+	sndCwnd := evt.NewState      // snd_cwnd from eBPF
+	comm := extractComm(evt.Comm)
+
+	// Update retransmit stats for this connection
+	statsInterface, _ := n.retransmitStats.LoadOrStore(connKey, &retransmitStats{})
+	stats := statsInterface.(*retransmitStats)
+	stats.retransmits++
+	stats.totalPackets++ // Approximate: increment on each retransmit
+	stats.lastRetransmit = time.Now()
+
+	// Record retransmit metric
+	n.retransmitsTotal.Add(ctx, 1)
+
+	// Calculate retransmit rate if we have enough data
+	const minPacketsForRate = 100
+	if stats.totalPackets >= minPacketsForRate {
+		retxRate := float64(stats.retransmits) / float64(stats.totalPackets) * 100
+		n.retransmitRate.Record(ctx, retxRate)
+
+		// Detect high retransmit rate (>5% indicates network issues)
+		const highRetransmitThreshold = 5.0
+		if retxRate > highRetransmitThreshold {
+			// Record congestion event
+			n.congestionEvents.Add(ctx, 1)
+
+			// Output warning if stdout enabled
+			if n.config.Output.Stdout {
+				log.Printf("[%s] HIGH RETRANSMIT RATE: %s (%s) %.1f%% (retx=%d, total=%d, cwnd=%d)",
+					n.Name(), connKey, comm, retxRate,
+					stats.retransmits, stats.totalPackets, sndCwnd)
+			}
+		}
+	}
+
+	// Output retransmit event if stdout enabled
+	if n.config.Output.Stdout {
+		log.Printf("[%s] RETRANSMIT: %s (%d) %s:%d -> %s:%d (total_retrans=%d, cwnd=%d)",
+			n.Name(), comm, evt.PID,
+			srcIP, evt.SrcPort, dstIP, evt.DstPort,
+			totalRetrans, sndCwnd)
+	}
+
+	// Record processing time
+	n.RecordEvent(ctx)
 }

@@ -9,6 +9,7 @@
 // Event types for distinguishing tracepoint sources
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
 #define EVENT_TYPE_RST_RECEIVED  1  // tcp_receive_reset
+#define EVENT_TYPE_RETRANSMIT    2  // tcp_retransmit_skb
 
 // Network event structure - MUST match Go NetworkEventBPF exactly (71 bytes packed, 72 with Go alignment)
 struct network_event {
@@ -21,9 +22,9 @@ struct network_event {
 	__u16 dst_port;      // offset 46, size 2
 	__u16 family;        // offset 48, size 2
 	__u8  protocol;      // offset 50, size 1
-	__u8  old_state;     // offset 51, size 1
-	__u8  new_state;     // offset 52, size 1
-	__u8  event_type;    // offset 53, size 1 - EVENT_TYPE_STATE_CHANGE or EVENT_TYPE_RST_RECEIVED
+	__u8  old_state;     // offset 51, size 1 - TCP state OR total_retrans (see event_type)
+	__u8  new_state;     // offset 52, size 1 - TCP state OR snd_cwnd (see event_type)
+	__u8  event_type;    // offset 53, size 1 - EVENT_TYPE_STATE_CHANGE, EVENT_TYPE_RST_RECEIVED, or EVENT_TYPE_RETRANSMIT
 	__u8  comm[16];      // offset 54, size 16
 } __attribute__((packed));
 
@@ -184,6 +185,92 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 			evt->src_ipv6[i] = args->saddr_v6[i];
 			evt->dst_ipv6[i] = args->daddr_v6[i];
 		}
+	}
+
+	// Submit event
+	bpf_ringbuf_submit(evt, 0);
+
+	return 0;
+}
+
+// Tracepoint arguments for tcp/tcp_retransmit_skb
+// This tracepoint fires when TCP retransmits a packet (packet loss detected)
+struct trace_event_raw_tcp_retransmit_skb {
+	__u64 unused;            // Common tracepoint header
+	const void *skbaddr;
+	const void *skaddr;      // struct sock pointer
+	int state;
+	__u16 sport;
+	__u16 dport;
+	__u16 family;
+	__u8 saddr[4];
+	__u8 daddr[4];
+	__u8 saddr_v6[16];
+	__u8 daddr_v6[16];
+};
+
+SEC("tracepoint/tcp/tcp_retransmit_skb")
+int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
+{
+	struct network_event *evt;
+
+	// Reserve ring buffer entry
+	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;  // Buffer full, drop event
+
+	// Zero initialize
+	__builtin_memset(evt, 0, sizeof(*evt));
+
+	// Mark as retransmit event
+	evt->event_type = EVENT_TYPE_RETRANSMIT;
+
+	// Get process context
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	evt->pid = pid_tgid >> 32;
+
+	// Get process name
+	bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
+
+	// Copy network info from tracepoint args
+	evt->src_port = args->sport;
+	evt->dst_port = args->dport;
+	evt->family = args->family;
+	evt->protocol = IPPROTO_TCP;
+
+	// Copy IP addresses based on family
+	if (args->family == AF_INET) {
+		__builtin_memcpy(&evt->src_ip, args->saddr, 4);
+		__builtin_memcpy(&evt->dst_ip, args->daddr, 4);
+	} else if (args->family == AF_INET6) {
+		#pragma unroll
+		for (int i = 0; i < 16; i++) {
+			evt->src_ipv6[i] = args->saddr_v6[i];
+			evt->dst_ipv6[i] = args->daddr_v6[i];
+		}
+	}
+
+	// Extract TCP socket info using BPF_CORE_READ
+	// We need: total_retrans and snd_cwnd from struct tcp_sock
+	const struct sock *sk = args->skaddr;
+	if (sk) {
+		// Read tcp_sock fields (requires BTF)
+		// old_state = total_retrans (clamped to u8)
+		// new_state = snd_cwnd (clamped to u8)
+
+		// SAFETY: tcp_sock contains inet_connection_sock contains inet_sock contains sock
+		// We can safely cast to tcp_sock since this is tcp_retransmit_skb
+		struct tcp_sock *tp = (struct tcp_sock *)sk;
+
+		// Read total retransmits
+		__u8 total_retrans = 0;
+		bpf_core_read(&total_retrans, sizeof(total_retrans), &tp->total_retrans);
+		evt->old_state = total_retrans;  // Reuse old_state field
+
+		// Read congestion window (clamped to u8)
+		__u32 snd_cwnd = 0;
+		bpf_core_read(&snd_cwnd, sizeof(snd_cwnd), &tp->snd_cwnd);
+		evt->new_state = snd_cwnd > 255 ? 255 : (__u8)snd_cwnd;  // Reuse new_state field
 	}
 
 	// Submit event
