@@ -102,7 +102,7 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 
 	congestionEvents, err := meter.Int64Counter(
 		"congestion_events_total",
-		metric.WithDescription("Total number of TCP congestion window reduction events"),
+		metric.WithDescription("High retransmit rate events (>5%)"),
 		metric.WithUnit("{events}"),
 	)
 	if err != nil {
