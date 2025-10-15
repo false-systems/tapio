@@ -8,10 +8,10 @@ const (
 )
 
 // NetworkEventBPF matches the C struct layout from network_monitor.c.
-// The C struct is __attribute__((packed)) with 71 bytes of data.
-// This Go struct has 72 bytes due to 1-byte trailing padding added by Go's alignment rules.
+// The C struct is __attribute__((packed)) with 70 bytes of data.
+// This Go struct has 72 bytes due to 2 bytes of trailing padding added by Go's alignment rules.
 // When reading binary data from eBPF ring buffer, binary.Read correctly handles the size difference:
-// it reads exactly 71 bytes from the ring buffer and zero-fills the trailing byte.
+// it reads exactly 70 bytes from the ring buffer and zero-fills the trailing bytes.
 //
 // Field reuse strategy: OldState and NewState fields are interpreted differently based on EventType:
 // - EventTypeStateChange: OldState/NewState are TCP states (ESTABLISHED, CLOSE, etc.)
