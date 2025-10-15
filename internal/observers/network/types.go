@@ -4,13 +4,19 @@ package network
 const (
 	EventTypeStateChange = 0 // inet_sock_set_state tracepoint
 	EventTypeRSTReceived = 1 // tcp_receive_reset tracepoint
+	EventTypeRetransmit  = 2 // tcp_retransmit_skb tracepoint
 )
 
 // NetworkEventBPF matches the C struct layout from network_monitor.c.
-// The C struct is __attribute__((packed)) with 71 bytes of data.
-// This Go struct has 72 bytes due to 1-byte trailing padding added by Go's alignment rules.
+// The C struct is __attribute__((packed)) with 70 bytes of data.
+// This Go struct has 72 bytes due to 2 bytes of trailing padding added by Go's alignment rules.
 // When reading binary data from eBPF ring buffer, binary.Read correctly handles the size difference:
-// it reads exactly 71 bytes from the ring buffer and zero-fills the trailing byte.
+// it reads exactly 70 bytes from the ring buffer and zero-fills the trailing bytes.
+//
+// Field reuse strategy: OldState and NewState fields are interpreted differently based on EventType:
+// - EventTypeStateChange: OldState/NewState are TCP states (ESTABLISHED, CLOSE, etc.)
+// - EventTypeRSTReceived: OldState is TCP state before RST
+// - EventTypeRetransmit: OldState = total_retrans count, NewState = snd_cwnd (congestion window)
 type NetworkEventBPF struct {
 	PID       uint32   // offset 0, size 4
 	SrcIP     uint32   // offset 4, size 4
@@ -21,9 +27,9 @@ type NetworkEventBPF struct {
 	DstPort   uint16   // offset 46, size 2
 	Family    uint16   // offset 48, size 2
 	Protocol  uint8    // offset 50, size 1
-	OldState  uint8    // offset 51, size 1
-	NewState  uint8    // offset 52, size 1
-	EventType uint8    // offset 53, size 1 - EventTypeStateChange or EventTypeRSTReceived
+	OldState  uint8    // offset 51, size 1 - TCP state OR total_retrans (see EventType)
+	NewState  uint8    // offset 52, size 1 - TCP state OR snd_cwnd (see EventType)
+	EventType uint8    // offset 53, size 1 - EventTypeStateChange, EventTypeRSTReceived, or EventTypeRetransmit
 	Comm      [16]byte // offset 54, size 16
 }
 

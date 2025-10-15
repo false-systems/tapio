@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/yairfalse/tapio/internal/base"
 	"go.opentelemetry.io/otel"
@@ -16,6 +17,13 @@ type Config struct {
 }
 
 // NetworkObserver tracks TCP/UDP/DNS network events using eBPF
+// retransmitStats tracks retransmit statistics per connection
+type retransmitStats struct {
+	totalPackets   uint64
+	retransmits    uint64
+	lastRetransmit time.Time
+}
+
 type NetworkObserver struct {
 	*base.BaseObserver
 	config Config
@@ -23,10 +31,18 @@ type NetworkObserver struct {
 	// Track connections that received RST (for distinguishing refused vs timeout)
 	rstConnections sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: true
 
+	// Track retransmit statistics per connection
+	retransmitStats sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: *retransmitStats
+
 	// Network-specific OTEL metrics
 	connectionResets  metric.Int64Counter // connection_resets_total
 	synTimeouts       metric.Int64Counter // syn_timeouts_total
 	connectionRefused metric.Int64Counter // connection_refused_total
+
+	// Packet loss metrics
+	retransmitsTotal metric.Int64Counter // retransmits_total
+	retransmitRate   metric.Float64Gauge // retransmit_rate_percent
+	congestionEvents metric.Int64Counter // congestion_events_total
 }
 
 // NewNetworkObserver creates a new network observer
@@ -66,12 +82,42 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create connection_refused counter: %w", err)
 	}
 
+	retransmitsTotal, err := meter.Int64Counter(
+		"retransmits_total",
+		metric.WithDescription("Total number of TCP packet retransmissions detected"),
+		metric.WithUnit("{retransmits}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create retransmits_total counter: %w", err)
+	}
+
+	retransmitRate, err := meter.Float64Gauge(
+		"retransmit_rate_percent",
+		metric.WithDescription("TCP retransmission rate as percentage of total packets"),
+		metric.WithUnit("%"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create retransmit_rate gauge: %w", err)
+	}
+
+	congestionEvents, err := meter.Int64Counter(
+		"congestion_events_total",
+		metric.WithDescription("High retransmit rate events (>5%)"),
+		metric.WithUnit("{events}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create congestion_events counter: %w", err)
+	}
+
 	return &NetworkObserver{
 		BaseObserver:      baseObs,
 		config:            config,
 		connectionResets:  connectionResets,
 		synTimeouts:       synTimeouts,
 		connectionRefused: connectionRefused,
+		retransmitsTotal:  retransmitsTotal,
+		retransmitRate:    retransmitRate,
+		congestionEvents:  congestionEvents,
 	}, nil
 }
 
