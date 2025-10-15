@@ -198,7 +198,7 @@ func TestLogger_ErrorLogging(t *testing.T) {
 	testErr := assert.AnError
 	testLogger.Error().
 		Err(testErr).
-		Str("stage", "readeBPF").
+		Str("stage", "readEBPF").
 		Msg("ring buffer read failed")
 
 	var logEntry LogEntry
@@ -207,6 +207,6 @@ func TestLogger_ErrorLogging(t *testing.T) {
 
 	assert.Equal(t, "error", logEntry.Level)
 	assert.Contains(t, logEntry.Error, "assert.AnError")
-	assert.Equal(t, "readeBPF", logEntry.Stage)
+	assert.Equal(t, "readEBPF", logEntry.Stage)
 	assert.Equal(t, "ring buffer read failed", logEntry.Message)
 }
