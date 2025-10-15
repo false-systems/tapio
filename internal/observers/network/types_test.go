@@ -12,8 +12,8 @@ import (
 func TestNetworkEventBPF_Size(t *testing.T) {
 	var evt NetworkEventBPF
 	size := unsafe.Sizeof(evt)
-	// Go enforces natural alignment, adding 2 bytes at end
-	// Actual data is 70 bytes (packed), Go struct is 72 bytes with padding
+	// Go enforces natural alignment, adding 1 byte of padding at end
+	// Actual data is 71 bytes (packed), Go struct is 72 bytes with 1 byte of padding
 	assert.Equal(t, uintptr(72), size, "NetworkEventBPF Go struct size (includes alignment padding)")
 
 	// Verify the actual data portion is 70 bytes (up to end of Comm)
