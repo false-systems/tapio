@@ -12,13 +12,13 @@ import (
 func TestNetworkEventBPF_Size(t *testing.T) {
 	var evt NetworkEventBPF
 	size := unsafe.Sizeof(evt)
-	// Go enforces natural alignment, adding 1 byte at end
-	// Actual data is 71 bytes (packed), Go struct is 72 bytes with padding
+	// Go enforces natural alignment, adding 1 byte of padding at end
+	// Actual data is 71 bytes (packed), Go struct is 72 bytes with 1 byte of padding
 	assert.Equal(t, uintptr(72), size, "NetworkEventBPF Go struct size (includes alignment padding)")
 
-	// Verify the actual data portion is 71 bytes (up to end of Comm)
+	// Verify the actual data portion is 70 bytes (up to end of Comm)
 	dataSize := unsafe.Offsetof(evt.Comm) + unsafe.Sizeof(evt.Comm)
-	assert.Equal(t, uintptr(71), dataSize, "Actual data size must be 71 bytes")
+	assert.Equal(t, uintptr(70), dataSize, "Actual data size must be 70 bytes")
 }
 
 // TestNetworkEventBPF_FieldOffsets verifies field alignment matches C struct

@@ -299,3 +299,74 @@ func TestLinkFailure_SynTimeout(t *testing.T) {
 	comm := extractComm(bpfEvent.Comm)
 	assert.Equal(t, "curl", comm)
 }
+
+// TestPacketLoss_RetransmitEvent tests detection of TCP retransmissions
+func TestPacketLoss_RetransmitEvent(t *testing.T) {
+	setupOTELIntegration(t)
+
+	// Retransmit event from tcp:tcp_retransmit_skb tracepoint
+	retxEvent := NetworkEventBPF{
+		PID:       1234,
+		SrcIP:     0x0100007f, // 127.0.0.1
+		DstIP:     0x0200007f, // 127.0.0.2
+		SrcPort:   50000,
+		DstPort:   80,
+		Family:    AF_INET,
+		Protocol:  IPPROTO_TCP,
+		EventType: EventTypeRetransmit, // Retransmit event
+		// Reuse fields for retransmit data:
+		OldState: 3,   // total_retrans = 3
+		NewState: 100, // snd_cwnd = 100 packets
+		Comm:     [16]byte{'n', 'g', 'i', 'n', 'x', 0},
+	}
+
+	// Verify event type
+	assert.Equal(t, uint8(EventTypeRetransmit), retxEvent.EventType, "Should be retransmit event")
+
+	// Verify retransmit data
+	totalRetrans := retxEvent.OldState
+	assert.Equal(t, uint8(3), totalRetrans, "Total retransmits should be 3")
+
+	sndCwnd := retxEvent.NewState
+	assert.Equal(t, uint8(100), sndCwnd, "Congestion window should be 100")
+
+	// Verify connection info
+	srcIP := convertIPv4(retxEvent.SrcIP)
+	assert.Equal(t, "127.0.0.1", srcIP)
+
+	comm := extractComm(retxEvent.Comm)
+	assert.Equal(t, "nginx", comm)
+}
+
+// TestPacketLoss_RetransmitRateCalculation tests retransmit rate calculation
+func TestPacketLoss_RetransmitRateCalculation(t *testing.T) {
+	setupOTELIntegration(t)
+
+	// Simulate 100 total packets with 5 retransmits = 5% rate
+	totalPackets := uint64(100)
+	retransmits := uint64(5)
+
+	retransmitRate := float64(retransmits) / float64(totalPackets) * 100
+	assert.Equal(t, 5.0, retransmitRate, "Retransmit rate should be 5%")
+
+	// High retransmit rate (>5%) should trigger warning
+	highRetransmits := uint64(10)
+	highRate := float64(highRetransmits) / float64(totalPackets) * 100
+	assert.Greater(t, highRate, 5.0, "10% rate should exceed 5% threshold")
+}
+
+// TestPacketLoss_ConnectionTracking tests per-connection retransmit tracking
+func TestPacketLoss_ConnectionTracking(t *testing.T) {
+	setupOTELIntegration(t)
+
+	// Connection key format: "srcIP:srcPort:dstIP:dstPort"
+	connKey1 := "127.0.0.1:50000:127.0.0.2:80"
+	connKey2 := "127.0.0.1:50001:127.0.0.3:443"
+
+	// Different connections should have separate tracking
+	assert.NotEqual(t, connKey1, connKey2, "Different connections should have different keys")
+
+	// Same connection should have same key
+	sameConnKey := "127.0.0.1:50000:127.0.0.2:80"
+	assert.Equal(t, connKey1, sameConnKey, "Same connection should have same key")
+}

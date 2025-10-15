@@ -111,3 +111,51 @@ func TestExtractComm_Full(t *testing.T) {
 	comm := [16]byte{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p'}
 	assert.Equal(t, "abcdefghijklmnop", extractComm(comm))
 }
+
+// TestRetransmitStatsTracking tests retransmit stats structure
+func TestRetransmitStatsTracking(t *testing.T) {
+	setupOTEL(t)
+
+	config := Config{Output: base.OutputConfig{Stdout: false}}
+	observer, err := NewNetworkObserver("test-retransmit", config)
+	require.NoError(t, err)
+
+	connKey := "127.0.0.1:50000:127.0.0.2:80"
+
+	// Manually store stats to test the data structure
+	stats := &retransmitStats{
+		totalPackets: 100,
+		retransmits:  5,
+	}
+	observer.retransmitStats.Store(connKey, stats)
+
+	// Verify stats were stored
+	statsInterface, ok := observer.retransmitStats.Load(connKey)
+	assert.True(t, ok, "Stats should be stored for connection")
+
+	retrievedStats := statsInterface.(*retransmitStats)
+	assert.Equal(t, uint64(100), retrievedStats.totalPackets, "Should have 100 total packets")
+	assert.Equal(t, uint64(5), retrievedStats.retransmits, "Should have 5 retransmits")
+
+	// Test retransmit rate calculation
+	rate := float64(retrievedStats.retransmits) / float64(retrievedStats.totalPackets) * 100
+	assert.Equal(t, 5.0, rate, "Retransmit rate should be 5%")
+}
+
+// TestHighRetransmitRateCalculation tests high retransmit rate detection logic
+func TestHighRetransmitRateCalculation(t *testing.T) {
+	// Test low rate (below threshold)
+	lowStats := &retransmitStats{totalPackets: 100, retransmits: 3}
+	lowRate := float64(lowStats.retransmits) / float64(lowStats.totalPackets) * 100
+	assert.Less(t, lowRate, 5.0, "3% rate should be below 5% threshold")
+
+	// Test exact threshold
+	thresholdStats := &retransmitStats{totalPackets: 100, retransmits: 5}
+	thresholdRate := float64(thresholdStats.retransmits) / float64(thresholdStats.totalPackets) * 100
+	assert.Equal(t, 5.0, thresholdRate, "5% rate should equal threshold")
+
+	// Test high rate (above threshold)
+	highStats := &retransmitStats{totalPackets: 100, retransmits: 10}
+	highRate := float64(highStats.retransmits) / float64(highStats.totalPackets) * 100
+	assert.Greater(t, highRate, 5.0, "10% rate should exceed threshold")
+}
