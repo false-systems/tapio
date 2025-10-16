@@ -107,59 +107,157 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 		return 0;  // Only track TCP for now
 	}
 
-	// Reserve ring buffer space
-	struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
-	if (!evt) {
-		// Ring buffer full - drop event gracefully
-		return 0;
+	// Get tcp_sock from skaddr to read RTT
+	const struct sock *sk = (const struct sock *)args->skaddr;
+	struct tcp_sock *tp = (struct tcp_sock *)sk;
+
+	// Read smoothed RTT from tcp_sock (srtt_us is in microseconds, divided by 8)
+	__u32 srtt_us = 0;
+	bpf_core_read(&srtt_us, sizeof(srtt_us), &tp->srtt_us);
+	__u32 rtt_us = srtt_us >> 3;
+
+	// Get current time for baseline tracking
+	__u64 now_ns = bpf_ktime_get_ns();
+
+	// Create connection key (IPv4 only for now)
+	struct conn_key key = {0};
+	if (args->family == AF_INET) {
+		__builtin_memcpy(&key.saddr, args->saddr, 4);
+		__builtin_memcpy(&key.daddr, args->daddr, 4);
+		key.sport = args->sport;
+		key.dport = args->dport;
 	}
 
-	// Zero-initialize the event (verifier likes this)
-	__builtin_memset(evt, 0, sizeof(*evt));
+	// RTT tracking for ESTABLISHED connections with valid RTT
+	if (args->newstate == TCP_ESTABLISHED && rtt_us > 0 && args->family == AF_INET) {
+		// Lookup or create baseline entry
+		struct rtt_baseline *baseline = bpf_map_lookup_elem(&baseline_rtt, &key);
 
-	// Extract process info
-	__u64 pid_tgid = bpf_get_current_pid_tgid();
-	evt->pid = pid_tgid >> 32;
+		if (!baseline) {
+			// First measurement - initialize to LEARNING state
+			struct rtt_baseline new_baseline = {
+				.baseline_us = rtt_us,
+				.sample_count = 1,
+				.state = RTT_STATE_LEARNING,
+				.last_update_ns = now_ns,
+				.last_activity_ns = now_ns,
+			};
+			bpf_map_update_elem(&baseline_rtt, &key, &new_baseline, BPF_NOEXIST);
+		} else {
+			// Update last activity timestamp
+			baseline->last_activity_ns = now_ns;
 
-	// Get process name (comm)
-	bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
+			// State machine logic
+			if (baseline->state == RTT_STATE_LEARNING) {
+				// Collect samples to establish baseline
+				baseline->sample_count++;
 
-	// Mark as state change event
-	evt->event_type = EVENT_TYPE_STATE_CHANGE;
+				// Calculate running average
+				baseline->baseline_us = (baseline->baseline_us * (baseline->sample_count - 1) + rtt_us) / baseline->sample_count;
 
-	// Extract TCP state transition
-	evt->old_state = (__u8)args->oldstate;
-	evt->new_state = (__u8)args->newstate;
+				// Transition to STABLE after collecting enough samples
+				if (baseline->sample_count >= LEARNING_SAMPLES) {
+					baseline->state = RTT_STATE_STABLE;
+				}
 
-	// Extract protocol and family
-	evt->protocol = (__u8)args->protocol;
-	evt->family = args->family;
+				bpf_map_update_elem(&baseline_rtt, &key, baseline, BPF_EXIST);
+			} else if (baseline->state == RTT_STATE_STABLE) {
+				// Check for staleness (baseline older than 1 hour)
+				if (now_ns - baseline->last_update_ns > STALE_THRESHOLD_NS) {
+					// Slowly update baseline (90% old + 10% new)
+					baseline->baseline_us = (baseline->baseline_us * 9 + rtt_us) / 10;
+					baseline->last_update_ns = now_ns;
+					bpf_map_update_elem(&baseline_rtt, &key, baseline, BPF_EXIST);
+				}
 
-	// Extract ports (already in host byte order from tracepoint)
-	// NOTE: inet_sock_set_state tracepoint provides ports in HOST byte order, NOT network byte order.
-	// Using bpf_ntohs() here would be WRONG and cause port values to be swapped.
-	// Verified against kernel source: net/ipv4/tcp.c, net/ipv6/tcp_ipv6.c
-	evt->src_port = args->sport;
-	evt->dst_port = args->dport;
+				// Check for RTT spike: >2x baseline OR >500ms absolute
+				if (rtt_us > (baseline->baseline_us * 2) || rtt_us > 500000) {
+					// Emit RTT spike event
+					struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+					if (evt) {
+						__builtin_memset(evt, 0, sizeof(*evt));
 
-	// Extract IP addresses based on family
-	if (args->family == AF_INET) {
-		// IPv4 addresses
-		// Copy 4 bytes from saddr/daddr to our uint32
-		__builtin_memcpy(&evt->src_ip, args->saddr, 4);
-		__builtin_memcpy(&evt->dst_ip, args->daddr, 4);
-	} else if (args->family == AF_INET6) {
-		// IPv6 addresses
-		// Verifier requires explicit bounds check on array access
-		#pragma unroll
-		for (int i = 0; i < 16; i++) {
-			evt->src_ipv6[i] = args->saddr_v6[i];
-			evt->dst_ipv6[i] = args->daddr_v6[i];
+						// Extract process info
+						__u64 pid_tgid = bpf_get_current_pid_tgid();
+						evt->pid = pid_tgid >> 32;
+						bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
+
+						// Mark as RTT spike event
+						evt->event_type = EVENT_TYPE_RTT_SPIKE;
+
+						// Extract connection info
+						evt->protocol = (__u8)args->protocol;
+						evt->family = args->family;
+						evt->src_port = args->sport;
+						evt->dst_port = args->dport;
+						__builtin_memcpy(&evt->src_ip, args->saddr, 4);
+						__builtin_memcpy(&evt->dst_ip, args->daddr, 4);
+
+						// Reuse OldState/NewState for RTT data (convert us to ms, clamp to 255)
+						__u32 baseline_ms = baseline->baseline_us / 1000;
+						__u32 current_ms = rtt_us / 1000;
+						evt->old_state = baseline_ms > 255 ? 255 : baseline_ms;
+						evt->new_state = current_ms > 255 ? 255 : current_ms;
+
+						bpf_ringbuf_submit(evt, 0);
+					}
+				}
+			}
 		}
 	}
 
-	// Submit event to userspace
-	bpf_ringbuf_submit(evt, 0);
+	// Cleanup on TCP_CLOSE
+	if (args->newstate == TCP_CLOSE && args->family == AF_INET) {
+		bpf_map_delete_elem(&baseline_rtt, &key);
+	}
+
+	// Emit regular state change event for important transitions
+	// (connection failures, resets, etc - NOT every ESTABLISHED heartbeat)
+	if (args->oldstate != args->newstate &&
+	    (args->newstate == TCP_CLOSE || args->oldstate == TCP_SYN_SENT ||
+	     args->oldstate == TCP_SYN_RECV || args->newstate == TCP_LISTEN)) {
+
+		struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+		if (!evt) {
+			return 0;
+		}
+
+		__builtin_memset(evt, 0, sizeof(*evt));
+
+		// Extract process info
+		__u64 pid_tgid = bpf_get_current_pid_tgid();
+		evt->pid = pid_tgid >> 32;
+		bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
+
+		// Mark as state change event
+		evt->event_type = EVENT_TYPE_STATE_CHANGE;
+
+		// Extract TCP state transition
+		evt->old_state = (__u8)args->oldstate;
+		evt->new_state = (__u8)args->newstate;
+
+		// Extract protocol and family
+		evt->protocol = (__u8)args->protocol;
+		evt->family = args->family;
+
+		// Extract ports
+		evt->src_port = args->sport;
+		evt->dst_port = args->dport;
+
+		// Extract IP addresses
+		if (args->family == AF_INET) {
+			__builtin_memcpy(&evt->src_ip, args->saddr, 4);
+			__builtin_memcpy(&evt->dst_ip, args->daddr, 4);
+		} else if (args->family == AF_INET6) {
+			#pragma unroll
+			for (int i = 0; i < 16; i++) {
+				evt->src_ipv6[i] = args->saddr_v6[i];
+				evt->dst_ipv6[i] = args->daddr_v6[i];
+			}
+		}
+
+		bpf_ringbuf_submit(evt, 0);
+	}
 
 	return 0;
 }
