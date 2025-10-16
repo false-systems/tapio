@@ -4,7 +4,8 @@ package network
 const (
 	EventTypeStateChange = 0 // inet_sock_set_state tracepoint
 	EventTypeRSTReceived = 1 // tcp_receive_reset tracepoint
-	EventTypeRetransmit  = 2 // tcp_retransmit_skb tracepoint
+	EventTypeRetransmit  = 2 // tcp_retransmit_skb tracepoint (Stage 2)
+	EventTypeRTTSpike    = 3 // RTT spike detection (Stage 3)
 )
 
 // NetworkEventBPF matches the C struct layout from network_monitor.c.
@@ -17,6 +18,7 @@ const (
 // - EventTypeStateChange: OldState/NewState are TCP states (ESTABLISHED, CLOSE, etc.)
 // - EventTypeRSTReceived: OldState is TCP state before RST
 // - EventTypeRetransmit: OldState = total_retrans count, NewState = snd_cwnd (congestion window)
+// - EventTypeRTTSpike: OldState = baseline RTT (ms, u8), NewState = current RTT (ms, u8)
 type NetworkEventBPF struct {
 	PID       uint32   // offset 0, size 4
 	SrcIP     uint32   // offset 4, size 4
