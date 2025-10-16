@@ -10,6 +10,7 @@
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
 #define EVENT_TYPE_RST_RECEIVED  1  // tcp_receive_reset
 #define EVENT_TYPE_RETRANSMIT    2  // tcp_retransmit_skb
+#define EVENT_TYPE_RTT_SPIKE     3  // RTT spike detection (Stage 3)
 
 // Network event structure - MUST match Go NetworkEventBPF exactly (71 bytes packed, 72 with Go alignment)
 struct network_event {

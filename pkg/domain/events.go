@@ -156,6 +156,22 @@ type NetworkEventData struct {
 	Duration      int64  `json:"duration,omitempty"` // nanoseconds
 	BytesSent     uint64 `json:"bytes_sent,omitempty"`
 	BytesReceived uint64 `json:"bytes_received,omitempty"`
+
+	// TCP performance metrics (Stage 2 & 3)
+	RTTBaseline      float64 `json:"rtt_baseline,omitempty"`      // Baseline RTT in ms
+	RTTCurrent       float64 `json:"rtt_current,omitempty"`       // Current RTT in ms
+	RTTDegradation   float64 `json:"rtt_degradation,omitempty"`   // % increase from baseline
+	RetransmitCount  uint32  `json:"retransmit_count,omitempty"`  // Total retransmits
+	RetransmitRate   float64 `json:"retransmit_rate,omitempty"`   // Retransmit percentage
+	CongestionWindow uint32  `json:"congestion_window,omitempty"` // TCP snd_cwnd
+	TCPState         string  `json:"tcp_state,omitempty"`         // ESTABLISHED, CLOSE, etc
+
+	// Severity and context for correlation
+	PerformanceImpact string `json:"performance_impact,omitempty"` // low, medium, high, critical
+	ProcessName       string `json:"process_name,omitempty"`       // Process name from PID
+	ContainerID       string `json:"container_id,omitempty"`       // Container ID from cgroup
+	PodName           string `json:"pod_name,omitempty"`           // K8s pod name
+	Namespace         string `json:"namespace,omitempty"`          // K8s namespace
 }
 
 // KernelEventData - kernel events (syscalls, signals, OOM)
