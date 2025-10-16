@@ -35,6 +35,41 @@ struct {
 	__uint(max_entries, 256 * 1024);  // 256KB ring buffer
 } events SEC(".maps");
 
+// Connection key for baseline tracking
+struct conn_key {
+	__u32 saddr;
+	__u32 daddr;
+	__u16 sport;
+	__u16 dport;
+};
+
+// RTT baseline state
+struct rtt_baseline {
+	__u32 baseline_us;      // Baseline RTT in microseconds
+	__u8  sample_count;     // How many samples collected (0-5)
+	__u8  state;            // NO_BASELINE=0, LEARNING=1, STABLE=2
+	__u64 last_update_ns;   // Last time we updated baseline
+	__u64 last_activity_ns; // Last time we saw traffic
+};
+
+// RTT baseline tracking map
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 10000);  // Track up to 10k connections
+	__type(key, struct conn_key);
+	__type(value, struct rtt_baseline);
+} baseline_rtt SEC(".maps");
+
+// RTT states
+#define RTT_STATE_NO_BASELINE 0
+#define RTT_STATE_LEARNING    1
+#define RTT_STATE_STABLE      2
+
+// Thresholds
+#define LEARNING_SAMPLES 5                     // Collect 5 samples before going STABLE
+#define STALE_THRESHOLD_NS 3600000000000ULL    // 1 hour
+#define IDLE_THRESHOLD_NS  300000000000ULL     // 5 minutes
+
 // TCP protocol number
 #define IPPROTO_TCP 6
 
