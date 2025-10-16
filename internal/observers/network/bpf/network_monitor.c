@@ -52,12 +52,13 @@ struct rtt_baseline {
 	__u64 last_activity_ns; // Last time we saw traffic
 };
 
-// RTT baseline tracking map
+// RTT baseline tracking map (LRU auto-evicts old baselines)
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 10000);  // Track up to 10k connections
 	__type(key, struct conn_key);
 	__type(value, struct rtt_baseline);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);  // Persist across restarts
 } baseline_rtt SEC(".maps");
 
 // RTT states
@@ -206,10 +207,9 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 		}
 	}
 
-	// Cleanup on TCP_CLOSE
-	if (args->newstate == TCP_CLOSE && args->family == AF_INET) {
-		bpf_map_delete_elem(&baseline_rtt, &key);
-	}
+	// NOTE: No manual cleanup needed - LRU_HASH auto-evicts old entries
+	// Old code had: bpf_map_delete_elem(&baseline_rtt, &key) on TCP_CLOSE
+	// LRU handles eviction based on least-recently-used policy
 
 	// Emit regular state change event for important transitions
 	// (connection failures, resets, etc - NOT every ESTABLISHED heartbeat)
