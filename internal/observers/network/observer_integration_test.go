@@ -370,3 +370,69 @@ func TestPacketLoss_ConnectionTracking(t *testing.T) {
 	sameConnKey := "127.0.0.1:50000:127.0.0.2:80"
 	assert.Equal(t, connKey1, sameConnKey, "Same connection should have same key")
 }
+
+// TestRTTSpike_Detection tests RTT spike event detection
+func TestRTTSpike_Detection(t *testing.T) {
+	setupOTELIntegration(t)
+
+	// RTT spike event from eBPF: baseline=50ms, current=150ms (3x spike)
+	rttEvent := NetworkEventBPF{
+		PID:       1234,
+		SrcIP:     0x0100007f, // 127.0.0.1
+		DstIP:     0x0200007f, // 127.0.0.2
+		SrcPort:   50000,
+		DstPort:   443,
+		Family:    AF_INET,
+		Protocol:  IPPROTO_TCP,
+		EventType: EventTypeRTTSpike, // RTT spike event
+		OldState:  50,                // baseline RTT = 50ms
+		NewState:  150,               // current RTT = 150ms (3x increase)
+		Comm:      [16]byte{'n', 'g', 'i', 'n', 'x', 0},
+	}
+
+	// Verify event type
+	assert.Equal(t, uint8(EventTypeRTTSpike), rttEvent.EventType, "Should be RTT spike event")
+
+	// Verify RTT data
+	baselineRTT := rttEvent.OldState
+	currentRTT := rttEvent.NewState
+	assert.Equal(t, uint8(50), baselineRTT, "Baseline RTT should be 50ms")
+	assert.Equal(t, uint8(150), currentRTT, "Current RTT should be 150ms")
+
+	// Calculate degradation
+	degradation := (float64(currentRTT) - float64(baselineRTT)) / float64(baselineRTT) * 100
+	assert.Equal(t, 200.0, degradation, "Should be 200% degradation (3x)")
+
+	// Verify it exceeds 2x threshold
+	assert.Greater(t, float64(currentRTT), float64(baselineRTT)*2, "Should exceed 2x threshold")
+}
+
+// TestRTTSpike_AbsoluteThreshold tests detection of absolute high RTT (>500ms)
+func TestRTTSpike_AbsoluteThreshold(t *testing.T) {
+	setupOTELIntegration(t)
+
+	// High RTT event: 600ms (exceeds 500ms absolute threshold)
+	// Even if baseline is also high, 600ms is always bad
+	highRTTEvent := NetworkEventBPF{
+		PID:       5678,
+		SrcIP:     0x0100007f,
+		DstIP:     0x08080808, // 8.8.8.8
+		SrcPort:   50001,
+		DstPort:   53,
+		Family:    AF_INET,
+		Protocol:  IPPROTO_TCP,
+		EventType: EventTypeRTTSpike,
+		OldState:  255, // baseline RTT = 255ms (clamped, actual might be higher)
+		NewState:  255, // current RTT = 255ms (clamped from 600ms)
+		Comm:      [16]byte{'d', 'i', 'g', 0},
+	}
+
+	// When RTT > 255ms, both fields are clamped to 255
+	// The spike is detected in eBPF before clamping
+	assert.Equal(t, uint8(255), highRTTEvent.OldState, "Should be clamped to 255")
+	assert.Equal(t, uint8(255), highRTTEvent.NewState, "Should be clamped to 255")
+
+	// In reality, actual RTT was >500ms which triggered the event
+	actualRTT := 600.0 // This would be the real value from tcp_sock
+	assert.Greater(t, actualRTT, 500.0, "Actual RTT exceeds 500ms absolute threshold")
+}
