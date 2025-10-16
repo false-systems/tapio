@@ -43,6 +43,11 @@ type NetworkObserver struct {
 	retransmitsTotal metric.Int64Counter // retransmits_total
 	retransmitRate   metric.Float64Gauge // retransmit_rate_percent
 	congestionEvents metric.Int64Counter // congestion_events_total
+
+	// RTT spike metrics (Stage 3)
+	rttSpikesTotal    metric.Int64Counter // rtt_spikes_total
+	rttCurrentMs      metric.Float64Gauge // rtt_current_ms
+	rttDegradationPct metric.Float64Gauge // rtt_degradation_percent
 }
 
 // NewNetworkObserver creates a new network observer
@@ -109,6 +114,34 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create congestion_events counter: %w", err)
 	}
 
+	// RTT spike metrics (Stage 3)
+	rttSpikesTotal, err := meter.Int64Counter(
+		"rtt_spikes_total",
+		metric.WithDescription("Total number of RTT spike events detected"),
+		metric.WithUnit("{spikes}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rtt_spikes counter: %w", err)
+	}
+
+	rttCurrentMs, err := meter.Float64Gauge(
+		"rtt_current_ms",
+		metric.WithDescription("Current RTT in milliseconds when spike detected"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rtt_current gauge: %w", err)
+	}
+
+	rttDegradationPct, err := meter.Float64Gauge(
+		"rtt_degradation_percent",
+		metric.WithDescription("RTT degradation percentage from baseline"),
+		metric.WithUnit("%"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rtt_degradation gauge: %w", err)
+	}
+
 	return &NetworkObserver{
 		BaseObserver:      baseObs,
 		config:            config,
@@ -118,6 +151,9 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		retransmitsTotal:  retransmitsTotal,
 		retransmitRate:    retransmitRate,
 		congestionEvents:  congestionEvents,
+		rttSpikesTotal:    rttSpikesTotal,
+		rttCurrentMs:      rttCurrentMs,
+		rttDegradationPct: rttDegradationPct,
 	}, nil
 }
 

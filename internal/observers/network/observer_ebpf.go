@@ -191,6 +191,12 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 				continue // Don't emit state change event for retransmits
 			}
 
+			if evt.EventType == EventTypeRTTSpike {
+				// RTT spike event - process latency degradation
+				n.processRTTSpikeEvent(ctx, evt, connKey, srcIP, dstIP)
+				continue // Don't emit state change event for RTT spikes
+			}
+
 			// State change event - convert to domain representation
 			eventType := stateToEventType(evt.OldState, evt.NewState, connKey, n)
 			comm := extractComm(evt.Comm)
@@ -270,6 +276,36 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 			n.Name(), comm, evt.PID,
 			srcIP, evt.SrcPort, dstIP, evt.DstPort,
 			totalRetrans, sndCwnd)
+	}
+
+	// Record processing time
+	n.RecordEvent(ctx)
+}
+
+// processRTTSpikeEvent handles RTT spike events from eBPF (Stage 3)
+func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkEventBPF, connKey, srcIP, dstIP string) {
+	// Extract RTT data from reused fields
+	baselineMs := float64(evt.OldState) // Baseline RTT in ms
+	currentMs := float64(evt.NewState)  // Current RTT in ms
+	comm := extractComm(evt.Comm)
+
+	// Calculate degradation percentage
+	degradation := 0.0
+	if baselineMs > 0 {
+		degradation = ((currentMs - baselineMs) / baselineMs) * 100
+	}
+
+	// Record OTEL metrics
+	n.rttSpikesTotal.Add(ctx, 1)
+	n.rttCurrentMs.Record(ctx, currentMs)
+	n.rttDegradationPct.Record(ctx, degradation)
+
+	// Output RTT spike event if stdout enabled
+	if n.config.Output.Stdout {
+		log.Printf("[%s] RTT SPIKE: %s (%d) %s:%d -> %s:%d (baseline=%.0fms, current=%.0fms, +%.0f%%)",
+			n.Name(), comm, evt.PID,
+			srcIP, evt.SrcPort, dstIP, evt.DstPort,
+			baselineMs, currentMs, degradation)
 	}
 
 	// Record processing time
