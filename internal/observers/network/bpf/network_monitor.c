@@ -6,6 +6,9 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_endian.h>
 
+// Shared TCP helpers (Cilium-style layered lib)
+#include "../../../common/bpf/lib/tcp.h"
+
 // Event types for distinguishing tracepoint sources
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
 #define EVENT_TYPE_RST_RECEIVED  1  // tcp_receive_reset
@@ -35,13 +38,7 @@ struct {
 	__uint(max_entries, 256 * 1024);  // 256KB ring buffer
 } events SEC(".maps");
 
-// Connection key for baseline tracking
-struct conn_key {
-	__u32 saddr;
-	__u32 daddr;
-	__u16 sport;
-	__u16 dport;
-};
+// NOTE: conn_key now defined in tcp.h (shared across observers)
 
 // RTT baseline state
 struct rtt_baseline {
@@ -71,12 +68,7 @@ struct {
 #define STALE_THRESHOLD_NS 3600000000000ULL    // 1 hour
 #define IDLE_THRESHOLD_NS  300000000000ULL     // 5 minutes
 
-// TCP protocol number
-#define IPPROTO_TCP 6
-
-// Address families
-#define AF_INET  2
-#define AF_INET6 10
+// NOTE: IPPROTO_TCP, AF_INET, AF_INET6, TCP_* states now in tcp.h (shared)
 
 // Tracepoint arguments for sock/inet_sock_set_state
 // This is the stable kernel ABI - no BPF_CORE_READ needed!
