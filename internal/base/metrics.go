@@ -8,7 +8,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // ObserverMetrics holds OTEL metrics for observer telemetry
@@ -114,7 +113,8 @@ func (m *ObserverMetrics) RecordError(ctx context.Context, observerName string, 
 }
 
 // RecordProcessingTime records processing duration in milliseconds with OTEL semantic conventions
-// Automatically adds exemplars (trace_id, span_id) if trace context is present
+// Exemplars (trace_id, span_id) are attached automatically by the OTel SDK when a valid span
+// is present in ctx and the metric exporter supports exemplars (e.g., Prometheus, OTLP)
 func (m *ObserverMetrics) RecordProcessingTime(ctx context.Context, observerName string, event *domain.ObserverEvent, durationMs float64) {
 	attrs := []attribute.KeyValue{
 		attribute.String("observer.name", observerName),
@@ -127,21 +127,8 @@ func (m *ObserverMetrics) RecordProcessingTime(ctx context.Context, observerName
 		)
 	}
 
-	// Extract trace context for exemplars (links metric → trace)
-	span := trace.SpanFromContext(ctx)
-	spanCtx := span.SpanContext()
-
-	// Build record options
-	opts := []metric.RecordOption{metric.WithAttributes(attrs...)}
-
-	// Add exemplar if we have valid trace context
-	if spanCtx.IsValid() {
-		exemplarAttrs := []attribute.KeyValue{
-			attribute.String("trace_id", spanCtx.TraceID().String()),
-			attribute.String("span_id", spanCtx.SpanID().String()),
-		}
-		opts = append(opts, metric.WithAttributes(exemplarAttrs...))
-	}
-
-	m.ProcessingTime.Record(ctx, durationMs, opts...)
+	// Record with metric attributes only; exemplars are attached automatically by OTel SDK/exporter
+	// when ctx contains a valid span. This avoids cardinality explosion from adding trace_id/span_id
+	// as metric attributes (which would create a new time series per span).
+	m.ProcessingTime.Record(ctx, durationMs, metric.WithAttributes(attrs...))
 }

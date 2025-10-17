@@ -10,8 +10,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TestRecordProcessingTimeWithTraceContext tests that exemplars are added when trace context exists
+// TestRecordProcessingTimeWithTraceContext tests that metrics work with trace context
+// Exemplars are attached automatically by the OTel SDK/exporter, not by this code
 func TestRecordProcessingTimeWithTraceContext(t *testing.T) {
+	// Need to set up MeterProvider before creating metrics
+	otel.SetMeterProvider(otel.GetMeterProvider())
+
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)
 
@@ -25,23 +29,24 @@ func TestRecordProcessingTimeWithTraceContext(t *testing.T) {
 	ctx, span := tracer.Start(context.Background(), "test-operation")
 	defer span.End()
 
-	// Note: NoopTracer creates invalid spans, but that's OK for this test
-	// In production, real TracerProvider creates valid spans
-
-	// Record processing time with trace context (even if invalid, should not panic)
 	event := &domain.ObserverEvent{
 		Type: "test_event",
 	}
 
-	// This should attach exemplar with trace_id and span_id (if valid)
+	// Record processing time - OTel SDK will attach exemplars automatically if:
+	// 1. ctx contains a valid span
+	// 2. The metric exporter supports exemplars (Prometheus, OTLP)
+	// 3. An exemplar filter is configured
 	metrics.RecordProcessingTime(ctx, "test-observer", event, 123.45)
 
-	// Test passes if no panic - exemplar attachment is best-effort
-	assert.True(t, true, "Should record metric with exemplar")
+	// Test passes if no panic - metric recorded successfully with trace context
+	assert.True(t, true, "Should record metric with trace context")
 }
 
 // TestRecordProcessingTimeWithoutTraceContext tests that metrics work without trace context
 func TestRecordProcessingTimeWithoutTraceContext(t *testing.T) {
+	otel.SetMeterProvider(otel.GetMeterProvider())
+
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)
 
@@ -52,14 +57,16 @@ func TestRecordProcessingTimeWithoutTraceContext(t *testing.T) {
 		Type: "test_event",
 	}
 
-	// Should record metric without exemplar (no panic)
+	// Record metric - no exemplar will be attached (no trace context)
 	metrics.RecordProcessingTime(ctx, "test-observer", event, 123.45)
 
-	assert.True(t, true, "Should record metric without exemplar")
+	assert.True(t, true, "Should record metric without trace context")
 }
 
-// TestRecordProcessingTimeWithInvalidSpan tests handling of invalid span context
+// TestRecordProcessingTimeWithInvalidSpan tests that metrics work with invalid span context
 func TestRecordProcessingTimeWithInvalidSpan(t *testing.T) {
+	otel.SetMeterProvider(otel.GetMeterProvider())
+
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)
 
@@ -76,14 +83,16 @@ func TestRecordProcessingTimeWithInvalidSpan(t *testing.T) {
 		Type: "test_event",
 	}
 
-	// Should record metric without exemplar (graceful handling)
+	// Record metric - OTel SDK will not attach exemplar (invalid span)
 	metrics.RecordProcessingTime(ctx, "test-observer", event, 123.45)
 
 	assert.True(t, true, "Should handle invalid span gracefully")
 }
 
-// TestRecordProcessingTimeNilEvent tests exemplars with nil event
+// TestRecordProcessingTimeNilEvent tests metrics with nil event
 func TestRecordProcessingTimeNilEvent(t *testing.T) {
+	otel.SetMeterProvider(otel.GetMeterProvider())
+
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)
 
@@ -91,7 +100,7 @@ func TestRecordProcessingTimeNilEvent(t *testing.T) {
 	ctx, span := tracer.Start(context.Background(), "test-operation")
 	defer span.End()
 
-	// Record with nil event (should still work)
+	// Record with nil event (should still work - just missing event.type attribute)
 	metrics.RecordProcessingTime(ctx, "test-observer", nil, 123.45)
 
 	assert.True(t, true, "Should record metric with nil event")
