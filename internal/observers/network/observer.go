@@ -41,13 +41,13 @@ type NetworkObserver struct {
 
 	// Packet loss metrics
 	retransmitsTotal metric.Int64Counter // retransmits_total
-	retransmitRate   metric.Float64Gauge // retransmit_rate_percent
+	retransmitRate   metric.Float64Gauge // retransmit_rate_ratio (0.0-1.0)
 	congestionEvents metric.Int64Counter // congestion_events_total
 
 	// RTT spike metrics (Stage 3)
 	rttSpikesTotal    metric.Int64Counter // rtt_spikes_total
 	rttCurrentMs      metric.Float64Gauge // rtt_current_ms
-	rttDegradationPct metric.Float64Gauge // rtt_degradation_percent
+	rttDegradationPct metric.Float64Gauge // rtt_degradation_ratio (0.0-1.0)
 }
 
 // NewNetworkObserver creates a new network observer
@@ -97,9 +97,9 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 	}
 
 	retransmitRate, err := meter.Float64Gauge(
-		"retransmit_rate_percent",
-		metric.WithDescription("TCP retransmission rate as percentage of total packets"),
-		metric.WithUnit("%"),
+		"retransmit_rate_ratio",
+		metric.WithDescription("TCP retransmission rate as ratio of total packets (0.0-1.0)"),
+		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create retransmit_rate gauge: %w", err)
@@ -134,9 +134,9 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 	}
 
 	rttDegradationPct, err := meter.Float64Gauge(
-		"rtt_degradation_percent",
-		metric.WithDescription("RTT degradation percentage from baseline"),
-		metric.WithUnit("%"),
+		"rtt_degradation_ratio",
+		metric.WithDescription("RTT degradation ratio from baseline (0.0-1.0, where 1.0 = 100% degradation)"),
+		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rtt_degradation gauge: %w", err)
