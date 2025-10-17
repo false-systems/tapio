@@ -136,6 +136,7 @@ func (b *BaseObserver) Start(ctx context.Context) error {
 		b.stopped.Store(true)
 		b.running.Store(false)
 		b.logger.Error().Err(err).Msg("pipeline failed")
+		cancel()
 		return fmt.Errorf("pipeline failed for observer %s: %w", b.name, err)
 	}
 
