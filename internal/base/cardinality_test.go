@@ -1,20 +1,23 @@
 package base
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 // TestCardinalityLimiter_UnderLimit tests that metrics are recorded when under the limit
 func TestCardinalityLimiter_UnderLimit(t *testing.T) {
-	limiter := NewCardinalityLimiter(100)
+	limiter, err := NewCardinalityLimiter(100)
+	require.NoError(t, err)
 
 	// Add 50 unique label combinations (under limit)
 	for i := 0; i < 50; i++ {
 		attrs := []attribute.KeyValue{
-			attribute.String("connection.id", string(rune(i))),
+			attribute.String("connection.id", strconv.Itoa(i)),
 		}
 		allowed := limiter.ShouldRecord(attrs)
 		assert.True(t, allowed, "Should allow metrics under limit")
@@ -24,33 +27,35 @@ func TestCardinalityLimiter_UnderLimit(t *testing.T) {
 	assert.Equal(t, 50, limiter.Count(), "Should track 50 unique combinations")
 }
 
-// TestCardinalityLimiter_AtLimit tests that metrics are dropped when limit reached
+// TestCardinalityLimiter_AtLimit tests LRU eviction when limit is reached
 func TestCardinalityLimiter_AtLimit(t *testing.T) {
-	limiter := NewCardinalityLimiter(10) // Small limit
+	limiter, err := NewCardinalityLimiter(10) // Small limit
+	require.NoError(t, err)
 
 	// Fill to limit
 	for i := 0; i < 10; i++ {
 		attrs := []attribute.KeyValue{
-			attribute.String("connection.id", string(rune(i))),
+			attribute.String("connection.id", strconv.Itoa(i)),
 		}
 		allowed := limiter.ShouldRecord(attrs)
 		assert.True(t, allowed, "Should allow metrics up to limit")
 	}
 
-	// Exceed limit - should drop
+	// Add new combination - LRU will evict oldest
 	attrs := []attribute.KeyValue{
 		attribute.String("connection.id", "new-value"),
 	}
 	allowed := limiter.ShouldRecord(attrs)
-	assert.False(t, allowed, "Should drop metrics when limit reached")
+	assert.True(t, allowed, "LRU should evict oldest and allow new entry")
 
-	// Count should still be at limit
-	assert.Equal(t, 10, limiter.Count(), "Should not exceed limit")
+	// Count should stay at limit
+	assert.Equal(t, 10, limiter.Count(), "Should maintain limit via LRU eviction")
 }
 
 // TestCardinalityLimiter_SameLabels tests that duplicate labels are allowed
 func TestCardinalityLimiter_SameLabels(t *testing.T) {
-	limiter := NewCardinalityLimiter(100)
+	limiter, err := NewCardinalityLimiter(100)
+	require.NoError(t, err)
 
 	attrs := []attribute.KeyValue{
 		attribute.String("connection.id", "same-value"),
@@ -68,7 +73,8 @@ func TestCardinalityLimiter_SameLabels(t *testing.T) {
 
 // TestCardinalityLimiter_LRUEviction tests that LRU eviction works
 func TestCardinalityLimiter_LRUEviction(t *testing.T) {
-	limiter := NewCardinalityLimiter(3) // Very small limit
+	limiter, err := NewCardinalityLimiter(3) // Very small limit
+	require.NoError(t, err)
 
 	// Add 3 combinations
 	attrs1 := []attribute.KeyValue{attribute.String("id", "1")}
@@ -83,19 +89,20 @@ func TestCardinalityLimiter_LRUEviction(t *testing.T) {
 	// Access attrs1 to make it recently used
 	assert.True(t, limiter.ShouldRecord(attrs1))
 
-	// Add new combination - should evict attrs2 (least recently used)
+	// Add new combination - LRU will evict attrs2 (least recently used)
 	attrs4 := []attribute.KeyValue{attribute.String("id", "4")}
-	assert.False(t, limiter.ShouldRecord(attrs4), "Should drop when limit reached (no LRU eviction yet)")
+	assert.True(t, limiter.ShouldRecord(attrs4), "LRU should evict oldest and accept new entry")
 
-	// In future: LRU should evict oldest, allowing new entries
-	// For now, we just block at limit
+	// Count should stay at 3
+	assert.Equal(t, 3, limiter.Count())
 }
 
 // TestCardinalityLimiter_MultipleAttributes tests hashing multiple attributes
 func TestCardinalityLimiter_MultipleAttributes(t *testing.T) {
-	limiter := NewCardinalityLimiter(100)
+	limiter, err := NewCardinalityLimiter(100)
+	require.NoError(t, err)
 
-	// Same values, different order = different hash
+	// Same values, different order = same hash (attributes are sorted)
 	attrs1 := []attribute.KeyValue{
 		attribute.String("key1", "value1"),
 		attribute.String("key2", "value2"),
@@ -108,14 +115,15 @@ func TestCardinalityLimiter_MultipleAttributes(t *testing.T) {
 	assert.True(t, limiter.ShouldRecord(attrs1))
 	assert.True(t, limiter.ShouldRecord(attrs2))
 
-	// Different order might count as different (implementation detail)
-	// But same exact attributes should be recognized
+	// Same attributes in different order should be recognized as same
 	assert.True(t, limiter.ShouldRecord(attrs1), "Same attributes should be allowed")
+	assert.Equal(t, 1, limiter.Count(), "Different order should hash to same value")
 }
 
 // TestCardinalityLimiter_EmptyAttributes tests handling empty attributes
 func TestCardinalityLimiter_EmptyAttributes(t *testing.T) {
-	limiter := NewCardinalityLimiter(100)
+	limiter, err := NewCardinalityLimiter(100)
+	require.NoError(t, err)
 
 	// Empty attributes should work
 	attrs := []attribute.KeyValue{}
@@ -125,4 +133,19 @@ func TestCardinalityLimiter_EmptyAttributes(t *testing.T) {
 	// Second call with empty attributes
 	assert.True(t, limiter.ShouldRecord(attrs), "Duplicate empty attributes allowed")
 	assert.Equal(t, 1, limiter.Count(), "Still only 1 combination")
+}
+
+// TestCardinalityLimiter_InvalidLimit tests error handling for invalid limits
+func TestCardinalityLimiter_InvalidLimit(t *testing.T) {
+	// Zero limit
+	limiter, err := NewCardinalityLimiter(0)
+	assert.Error(t, err)
+	assert.Nil(t, limiter)
+	assert.Contains(t, err.Error(), "positive")
+
+	// Negative limit
+	limiter, err = NewCardinalityLimiter(-10)
+	assert.Error(t, err)
+	assert.Nil(t, limiter)
+	assert.Contains(t, err.Error(), "positive")
 }
