@@ -49,8 +49,9 @@ type BaseObserver struct {
 	pipeline *Pipeline
 
 	// Lifecycle management
-	running atomic.Bool
-	stopped atomic.Bool
+	running        atomic.Bool
+	stopped        atomic.Bool
+	cancelPipeline context.CancelFunc
 }
 
 // NewBaseObserver creates a new base observer with OTEL instrumentation
@@ -127,10 +128,15 @@ func (b *BaseObserver) Start(ctx context.Context) error {
 
 	b.logger.Info().Msg("observer starting")
 
-	if err := b.pipeline.Run(ctx); err != nil {
+	// Create cancellable context for pipeline
+	pipelineCtx, cancel := context.WithCancel(ctx)
+	b.cancelPipeline = cancel
+
+	if err := b.pipeline.Run(pipelineCtx); err != nil {
 		b.stopped.Store(true)
 		b.running.Store(false)
 		b.logger.Error().Err(err).Msg("pipeline failed")
+		cancel()
 		return fmt.Errorf("pipeline failed for observer %s: %w", b.name, err)
 	}
 
@@ -145,6 +151,11 @@ func (b *BaseObserver) Stop() error {
 	}
 
 	b.logger.Info().Msg("observer stopping")
+
+	// Cancel pipeline context to stop all stages
+	if b.cancelPipeline != nil {
+		b.cancelPipeline()
+	}
 
 	b.stopped.Store(true)
 	b.running.Store(false)
