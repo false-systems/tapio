@@ -169,7 +169,7 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 
 		go func() {
 			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				fmt.Printf("prometheus HTTP server error: %v\n", err)
+				global.Logger().Error("prometheus HTTP server error", "err", err)
 			}
 		}()
 	}
