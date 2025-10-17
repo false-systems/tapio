@@ -45,8 +45,8 @@ type NetworkObserver struct {
 	congestionEvents metric.Int64Counter // congestion_events_total
 
 	// RTT spike metrics (Stage 3)
-	rttSpikesTotal    metric.Int64Counter // rtt_spikes_total
-	rttCurrentMs      metric.Float64Gauge // rtt_current_ms
+	rttSpikesTotal metric.Int64Counter // rtt_spikes_total
+	rttCurrentMs   metric.Float64Gauge // rtt_current_ms
 
 	rttDegradationPct metric.Float64Gauge // rtt_degradation_percent
 
