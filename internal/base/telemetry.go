@@ -91,9 +91,15 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	// 2. Set up trace exporter
+	// 2. Set up trace exporter with retry
 	traceExporterOpts := []otlptracegrpc.Option{
 		otlptracegrpc.WithEndpoint(config.OTLPEndpoint),
+		otlptracegrpc.WithRetry(otlptracegrpc.RetryConfig{
+			Enabled:         true,
+			InitialInterval: 1 * time.Second,
+			MaxInterval:     30 * time.Second,
+			MaxElapsedTime:  5 * time.Minute,
+		}),
 	}
 
 	if config.Insecure {
@@ -125,9 +131,15 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 	// 4. Set up metric readers (OTLP and/or Prometheus)
 	var metricReaders []metric.Reader
 
-	// 4a. OTLP metric exporter (always enabled)
+	// 4a. OTLP metric exporter with retry (always enabled)
 	metricExporterOpts := []otlpmetricgrpc.Option{
 		otlpmetricgrpc.WithEndpoint(config.OTLPEndpoint),
+		otlpmetricgrpc.WithRetry(otlpmetricgrpc.RetryConfig{
+			Enabled:         true,
+			InitialInterval: 1 * time.Second,
+			MaxInterval:     30 * time.Second,
+			MaxElapsedTime:  5 * time.Minute,
+		}),
 	}
 
 	if config.Insecure {
@@ -183,9 +195,15 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 	mp := metric.NewMeterProvider(meterOpts...)
 	otel.SetMeterProvider(mp)
 
-	// 6. Set up log exporter (for full ObserverEvent)
+	// 6. Set up log exporter with retry (for full ObserverEvent)
 	logExporterOpts := []otlploggrpc.Option{
 		otlploggrpc.WithEndpoint(config.OTLPEndpoint),
+		otlploggrpc.WithRetry(otlploggrpc.RetryConfig{
+			Enabled:         true,
+			InitialInterval: 1 * time.Second,
+			MaxInterval:     30 * time.Second,
+			MaxElapsedTime:  5 * time.Minute,
+		}),
 	}
 
 	if config.Insecure {
