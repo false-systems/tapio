@@ -3,6 +3,7 @@ package base
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"sync"
 
@@ -19,16 +20,25 @@ type CardinalityLimiter struct {
 }
 
 // NewCardinalityLimiter creates a cardinality limiter with the specified limit
-func NewCardinalityLimiter(limit int) *CardinalityLimiter {
-	cache, _ := lru.New[string, bool](limit)
+// Returns error if limit is non-positive
+func NewCardinalityLimiter(limit int) (*CardinalityLimiter, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("cardinality limit must be positive, got %d", limit)
+	}
+
+	cache, err := lru.New[string, bool](limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
+	}
+
 	return &CardinalityLimiter{
 		cache: cache,
 		limit: limit,
-	}
+	}, nil
 }
 
 // ShouldRecord returns true if the metric with these attributes should be recorded
-// Returns false if cardinality limit would be exceeded
+// Uses LRU eviction: when cache is full, adding a new combination evicts the least recently used one
 func (cl *CardinalityLimiter) ShouldRecord(attrs []attribute.KeyValue) bool {
 	hash := hashAttributes(attrs)
 
@@ -47,12 +57,7 @@ func (cl *CardinalityLimiter) ShouldRecord(attrs []attribute.KeyValue) bool {
 		return true
 	}
 
-	// Check if adding would exceed limit
-	if cl.cache.Len() >= cl.limit {
-		return false // Limit reached, drop metric
-	}
-
-	// Add to cache
+	// Add to cache; LRU will evict oldest entry if at capacity
 	cl.cache.Add(hash, true)
 	return true
 }
