@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ObserverMetrics holds OTEL metrics for observer telemetry
@@ -113,6 +114,7 @@ func (m *ObserverMetrics) RecordError(ctx context.Context, observerName string, 
 }
 
 // RecordProcessingTime records processing duration in milliseconds with OTEL semantic conventions
+// Automatically adds exemplars (trace_id, span_id) if trace context is present
 func (m *ObserverMetrics) RecordProcessingTime(ctx context.Context, observerName string, event *domain.ObserverEvent, durationMs float64) {
 	attrs := []attribute.KeyValue{
 		attribute.String("observer.name", observerName),
@@ -125,5 +127,21 @@ func (m *ObserverMetrics) RecordProcessingTime(ctx context.Context, observerName
 		)
 	}
 
-	m.ProcessingTime.Record(ctx, durationMs, metric.WithAttributes(attrs...))
+	// Extract trace context for exemplars (links metric → trace)
+	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
+
+	// Build record options
+	opts := []metric.RecordOption{metric.WithAttributes(attrs...)}
+
+	// Add exemplar if we have valid trace context
+	if spanCtx.IsValid() {
+		exemplarAttrs := []attribute.KeyValue{
+			attribute.String("trace_id", spanCtx.TraceID().String()),
+			attribute.String("span_id", spanCtx.SpanID().String()),
+		}
+		opts = append(opts, metric.WithAttributes(exemplarAttrs...))
+	}
+
+	m.ProcessingTime.Record(ctx, durationMs, opts...)
 }
