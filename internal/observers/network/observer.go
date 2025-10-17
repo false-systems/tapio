@@ -159,7 +159,7 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 	ebpfMapSize, err := meter.Int64Gauge(
 		"ebpf_map_size_entries",
 		metric.WithDescription("Number of entries in eBPF maps (baseline_rtt)"),
-		metric.WithUnit("{entries}"),
+		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ebpf_map_size gauge: %w", err)
