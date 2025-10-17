@@ -73,8 +73,16 @@ func LoadTelemetryConfigFromEnv() *TelemetryConfig {
 	return config
 }
 
-// InitTelemetry sets up OpenTelemetry SDK with resource, exporters, and providers
-// observers parameter is optional and used for /ready endpoint health checks
+// InitTelemetry sets up OpenTelemetry SDK with resource, exporters, and providers.
+//
+// When config.PrometheusEnabled is true, it starts an HTTP server on config.PrometheusPort
+// exposing three endpoints:
+//   - /metrics - Prometheus scrape endpoint
+//   - /health  - Always returns 200 OK (liveness probe)
+//   - /ready   - Returns 200 if all observers healthy, 503 otherwise (readiness probe)
+//
+// The observers parameter is optional and used by the /ready endpoint to check health.
+// Pass nil if health checks are not needed (e.g., for self-monitoring).
 func InitTelemetry(ctx context.Context, config *TelemetryConfig, observers []Observer) (*TelemetryShutdown, error) {
 	if config == nil {
 		return nil, fmt.Errorf("telemetry config is nil")
@@ -304,17 +312,24 @@ func getHostname() string {
 
 // healthHandler always returns 200 OK if the HTTP server is running
 func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	if _, err := w.Write([]byte("OK")); err != nil {
+		stdlog.Printf("failed to write health response: %v", err)
+	}
 }
 
 // readyHandler returns 200 if all observers are healthy, 503 otherwise
 func readyHandler(observers []Observer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
 		// If no observers, consider ready (nothing to check)
 		if len(observers) == 0 {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Ready"))
+			if _, err := w.Write([]byte("Ready")); err != nil {
+				stdlog.Printf("failed to write ready response: %v", err)
+			}
 			return
 		}
 
@@ -329,10 +344,14 @@ func readyHandler(observers []Observer) http.HandlerFunc {
 
 		if allHealthy {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Ready"))
+			if _, err := w.Write([]byte("Ready")); err != nil {
+				stdlog.Printf("failed to write ready response: %v", err)
+			}
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("Not Ready"))
+			if _, err := w.Write([]byte("Not Ready")); err != nil {
+				stdlog.Printf("failed to write not ready response: %v", err)
+			}
 		}
 	}
 }

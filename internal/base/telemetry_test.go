@@ -2,6 +2,8 @@ package base
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -10,14 +12,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// waitForEndpoint polls an HTTP endpoint until it responds or timeout is reached
+func waitForEndpoint(url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return fmt.Errorf("endpoint %s not ready within %s", url, timeout)
+}
+
+// getFreePort allocates a free ephemeral port
+func getFreePort(t *testing.T) int {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port
+}
+
 // TestHealthEndpoint_AlwaysReturns200 tests that /health always returns 200 OK
 func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 	// Setup: Start telemetry with Prometheus enabled
+	port := getFreePort(t)
 	config := &TelemetryConfig{
 		OTLPEndpoint:      "localhost:4317",
 		Insecure:          true,
 		PrometheusEnabled: true,
-		PrometheusPort:    19090, // Use different port to avoid conflicts
+		PrometheusPort:    port,
 		ServiceName:       "test-service",
 		Version:           "test",
 		TraceSampleRate:   0.1,
@@ -31,11 +57,12 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 	require.NoError(t, err)
 	defer shutdown.Shutdown(ctx)
 
-	// Wait for HTTP server to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for HTTP server to start (poll with timeout)
+	healthURL := fmt.Sprintf("http://localhost:%d/health", port)
+	require.NoError(t, waitForEndpoint(healthURL, 2*time.Second))
 
 	// Test: GET /health
-	resp, err := http.Get("http://localhost:19090/health")
+	resp, err := http.Get(healthURL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -57,11 +84,12 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 	observers := []Observer{obs1, obs2}
 
 	// Setup: Start telemetry with observers
+	port := getFreePort(t)
 	config := &TelemetryConfig{
 		OTLPEndpoint:      "localhost:4317",
 		Insecure:          true,
 		PrometheusEnabled: true,
-		PrometheusPort:    19091,
+		PrometheusPort:    port,
 		ServiceName:       "test-service",
 		Version:           "test",
 		TraceSampleRate:   0.1,
@@ -75,11 +103,12 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 	require.NoError(t, err)
 	defer shutdown.Shutdown(ctx)
 
-	// Wait for HTTP server to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for HTTP server to start (poll with timeout)
+	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
+	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
 
 	// Test: GET /ready
-	resp, err := http.Get("http://localhost:19091/ready")
+	resp, err := http.Get(readyURL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -101,11 +130,12 @@ func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
 	observers := []Observer{obs1, obs2}
 
 	// Setup: Start telemetry with observers
+	port := getFreePort(t)
 	config := &TelemetryConfig{
 		OTLPEndpoint:      "localhost:4317",
 		Insecure:          true,
 		PrometheusEnabled: true,
-		PrometheusPort:    19092,
+		PrometheusPort:    port,
 		ServiceName:       "test-service",
 		Version:           "test",
 		TraceSampleRate:   0.1,
@@ -119,11 +149,12 @@ func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
 	require.NoError(t, err)
 	defer shutdown.Shutdown(ctx)
 
-	// Wait for HTTP server to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for HTTP server to start (poll with timeout)
+	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
+	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
 
 	// Test: GET /ready
-	resp, err := http.Get("http://localhost:19092/ready")
+	resp, err := http.Get(readyURL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -134,11 +165,12 @@ func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
 // TestReadyEndpoint_NoObservers tests /ready when no observers provided
 func TestReadyEndpoint_NoObservers(t *testing.T) {
 	// Setup: Start telemetry without observers
+	port := getFreePort(t)
 	config := &TelemetryConfig{
 		OTLPEndpoint:      "localhost:4317",
 		Insecure:          true,
 		PrometheusEnabled: true,
-		PrometheusPort:    19093,
+		PrometheusPort:    port,
 		ServiceName:       "test-service",
 		Version:           "test",
 		TraceSampleRate:   0.1,
@@ -152,11 +184,12 @@ func TestReadyEndpoint_NoObservers(t *testing.T) {
 	require.NoError(t, err)
 	defer shutdown.Shutdown(ctx)
 
-	// Wait for HTTP server to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for HTTP server to start (poll with timeout)
+	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
+	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
 
 	// Test: GET /ready
-	resp, err := http.Get("http://localhost:19093/ready")
+	resp, err := http.Get(readyURL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
