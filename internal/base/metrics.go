@@ -68,14 +68,15 @@ func NewObserverMetrics(observerName string) (*ObserverMetrics, error) {
 
 // RecordEvent records a successfully processed event with OTEL semantic conventions
 func (m *ObserverMetrics) RecordEvent(ctx context.Context, observerName string, event *domain.ObserverEvent) {
-	if event == nil {
-		return
-	}
-
 	attrs := []attribute.KeyValue{
 		attribute.String("observer.name", observerName),
-		attribute.String("event.type", event.Type),
-		EventDomainAttribute(event.Type),
+	}
+
+	if event != nil {
+		attrs = append(attrs,
+			attribute.String("event.type", event.Type),
+			EventDomainAttribute(event.Type),
+		)
 	}
 
 	m.EventsProcessed.Add(ctx, 1, metric.WithAttributes(attrs...))

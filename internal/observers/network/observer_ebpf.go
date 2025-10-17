@@ -274,11 +274,11 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 	// Calculate retransmit rate if we have enough data
 	const minPacketsForRate = 100
 	if stats.totalPackets >= minPacketsForRate {
-		retxRate := float64(stats.retransmits) / float64(stats.totalPackets) * 100
+		retxRate := float64(stats.retransmits) / float64(stats.totalPackets)
 		n.retransmitRate.Record(ctx, retxRate)
 
-		// Detect high retransmit rate (>5% indicates network issues)
-		const highRetransmitThreshold = 5.0
+		// Detect high retransmit rate (>0.05 = 5% indicates network issues)
+		const highRetransmitThreshold = 0.05
 		if retxRate > highRetransmitThreshold {
 			// Record congestion event
 			n.congestionEvents.Add(ctx, 1)
@@ -314,7 +314,7 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 	// Calculate degradation percentage
 	degradation := 0.0
 	if baselineMs > 0 {
-		degradation = ((currentMs - baselineMs) / baselineMs) * 100
+		degradation = (currentMs - baselineMs) / baselineMs
 	}
 
 	// Record OTEL metrics
@@ -324,10 +324,10 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 
 	// Output RTT spike event if stdout enabled
 	if n.config.Output.Stdout {
-		log.Printf("[%s] RTT SPIKE: %s (%d) %s:%d -> %s:%d (baseline=%.0fms, current=%.0fms, +%.0f%%)",
+		log.Printf("[%s] RTT SPIKE: %s (%d) %s:%d -> %s:%d (baseline=%.0fms, current=%.0fms, +%.1f%%)",
 			n.Name(), comm, evt.PID,
 			srcIP, evt.SrcPort, dstIP, evt.DstPort,
-			baselineMs, currentMs, degradation)
+			baselineMs, currentMs, degradation*100)
 	}
 
 	// Record processing time

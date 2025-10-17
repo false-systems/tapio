@@ -342,17 +342,17 @@ func TestPacketLoss_RetransmitEvent(t *testing.T) {
 func TestPacketLoss_RetransmitRateCalculation(t *testing.T) {
 	setupOTELIntegration(t)
 
-	// Simulate 100 total packets with 5 retransmits = 5% rate
+	// Simulate 100 total packets with 5 retransmits = 0.05 ratio (5%)
 	totalPackets := uint64(100)
 	retransmits := uint64(5)
 
-	retransmitRate := float64(retransmits) / float64(totalPackets) * 100
-	assert.Equal(t, 5.0, retransmitRate, "Retransmit rate should be 5%")
+	retransmitRate := float64(retransmits) / float64(totalPackets)
+	assert.Equal(t, 0.05, retransmitRate, "Retransmit rate should be 0.05 (5%)")
 
-	// High retransmit rate (>5%) should trigger warning
+	// High retransmit rate (>0.05) should trigger warning
 	highRetransmits := uint64(10)
-	highRate := float64(highRetransmits) / float64(totalPackets) * 100
-	assert.Greater(t, highRate, 5.0, "10% rate should exceed 5% threshold")
+	highRate := float64(highRetransmits) / float64(totalPackets)
+	assert.Greater(t, highRate, 0.05, "0.10 (10%) rate should exceed 0.05 (5%) threshold")
 }
 
 // TestPacketLoss_ConnectionTracking tests per-connection retransmit tracking
