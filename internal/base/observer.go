@@ -2,12 +2,15 @@ package base
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -39,6 +42,9 @@ type BaseObserver struct {
 	// Telemetry shutdown
 	telemetryShutdown *TelemetryShutdown
 
+	// Domain event publisher (NATS in enterprise, NoOp in OSS)
+	eventPublisher domain.EventPublisher
+
 	// Pipeline for observer stages
 	pipeline *Pipeline
 
@@ -54,17 +60,28 @@ func NewBaseObserver(name string) (*BaseObserver, error) {
 
 // NewBaseObserverWithTelemetry creates a base observer with optional telemetry initialization
 func NewBaseObserverWithTelemetry(name string, telemetryConfig *TelemetryConfig) (*BaseObserver, error) {
+	return NewBaseObserverWithConfig(name, telemetryConfig, nil)
+}
+
+// NewBaseObserverWithConfig creates a base observer with telemetry and event publisher
+func NewBaseObserverWithConfig(name string, telemetryConfig *TelemetryConfig, eventPublisher domain.EventPublisher) (*BaseObserver, error) {
 	metrics, err := NewObserverMetrics(name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics for observer %s: %w", name, err)
 	}
 
+	// Default to NoOp publisher if not provided
+	if eventPublisher == nil {
+		eventPublisher = &domain.NoOpPublisher{}
+	}
+
 	observer := &BaseObserver{
-		name:      name,
-		startTime: time.Now(),
-		logger:    NewLogger(name),
-		metrics:   metrics,
-		pipeline:  NewPipeline(),
+		name:           name,
+		startTime:      time.Now(),
+		logger:         NewLogger(name),
+		metrics:        metrics,
+		pipeline:       NewPipeline(),
+		eventPublisher: eventPublisher,
 	}
 
 	// Initialize telemetry if config provided
@@ -173,6 +190,63 @@ func (b *BaseObserver) RecordError(ctx context.Context, event *domain.ObserverEv
 // RecordProcessingTime records event processing duration
 func (b *BaseObserver) RecordProcessingTime(ctx context.Context, event *domain.ObserverEvent, durationMs float64) {
 	b.metrics.RecordProcessingTime(ctx, b.name, event, durationMs)
+}
+
+// PublishEvent publishes a domain event to the configured backend (NATS in enterprise, NoOp in OSS)
+func (b *BaseObserver) PublishEvent(ctx context.Context, subject string, event any) error {
+	return b.eventPublisher.Publish(ctx, subject, event)
+}
+
+// SendObserverEvent sends full ObserverEvent as structured log to OTLP (OSS value!)
+// This gives free users all the raw data - they can query, analyze, build dashboards
+func (b *BaseObserver) SendObserverEvent(ctx context.Context, event *domain.ObserverEvent) {
+	if event == nil {
+		b.logger.Error().Msg("SendObserverEvent called with nil event")
+		return
+	}
+	logger := global.GetLoggerProvider().Logger(b.name)
+
+	// Marshal event to JSON for log body
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		b.logger.Error().Err(err).Msg("failed to marshal observer event")
+		return
+	}
+
+	// Build attributes for filtering/querying
+	var attrs []log.KeyValue
+	attrs = append(attrs, log.String("event.type", event.Type))
+	attrs = append(attrs, log.String("event.source", event.Source))
+	attrs = append(attrs, log.String("event.id", event.ID))
+
+	// Add trace context if present
+	if event.TraceID != "" {
+		attrs = append(attrs, log.String("trace.id", event.TraceID))
+	}
+	if event.SpanID != "" {
+		attrs = append(attrs, log.String("span.id", event.SpanID))
+	}
+
+	// Add type-specific attributes for easy querying
+	if event.NetworkData != nil {
+		if event.NetworkData.Protocol != "" {
+			attrs = append(attrs, log.String("network.protocol", event.NetworkData.Protocol))
+		}
+		if event.NetworkData.PodName != "" {
+			attrs = append(attrs, log.String("k8s.pod.name", event.NetworkData.PodName))
+		}
+		if event.NetworkData.Namespace != "" {
+			attrs = append(attrs, log.String("k8s.namespace", event.NetworkData.Namespace))
+		}
+	}
+
+	// Emit as structured log record
+	var logRecord log.Record
+	logRecord.SetTimestamp(event.Timestamp)
+	logRecord.SetBody(log.StringValue(string(eventJSON)))
+	logRecord.AddAttributes(attrs...)
+
+	logger.Emit(ctx, logRecord)
 }
 
 // Stats returns current observer statistics

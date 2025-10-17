@@ -3,13 +3,19 @@ package base
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"google.golang.org/grpc/credentials"
@@ -21,6 +27,10 @@ type TelemetryConfig struct {
 	OTLPEndpoint string
 	// Use insecure connection (default: false = TLS enabled)
 	Insecure bool
+
+	// Prometheus configuration
+	PrometheusEnabled bool // Enable Prometheus /metrics endpoint
+	PrometheusPort    int  // Port for Prometheus scraping (default: 9090)
 
 	// Kubernetes context
 	ClusterID string
@@ -41,6 +51,8 @@ type TelemetryConfig struct {
 type TelemetryShutdown struct {
 	tracerProvider *trace.TracerProvider
 	meterProvider  *metric.MeterProvider
+	loggerProvider *log.LoggerProvider
+	httpServer     *http.Server
 }
 
 // LoadTelemetryConfigFromEnv loads config from environment variables
@@ -109,7 +121,10 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 	)
 	otel.SetTracerProvider(tp)
 
-	// 4. Set up metric exporter
+	// 4. Set up metric readers (OTLP and/or Prometheus)
+	var metricReaders []metric.Reader
+
+	// 4a. OTLP metric exporter (always enabled)
 	metricExporterOpts := []otlpmetricgrpc.Option{
 		otlpmetricgrpc.WithEndpoint(config.OTLPEndpoint),
 	}
@@ -125,19 +140,72 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 		return nil, fmt.Errorf("failed to create metric exporter: %w", err)
 	}
 
-	// 5. Create meter provider with periodic reader
-	mp := metric.NewMeterProvider(
-		metric.WithResource(res),
-		metric.WithReader(
-			metric.NewPeriodicReader(
-				metricExporter,
-				metric.WithInterval(config.MetricInterval),
-			),
-		),
-	)
+	metricReaders = append(metricReaders, metric.NewPeriodicReader(
+		metricExporter,
+		metric.WithInterval(config.MetricInterval),
+	))
+
+	// 4b. Prometheus exporter (optional)
+	var httpServer *http.Server
+	if config.PrometheusEnabled {
+		promExporter, err := prometheus.New()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create prometheus exporter: %w", err)
+		}
+		metricReaders = append(metricReaders, promExporter)
+
+		// Start HTTP server for Prometheus scraping
+		if config.PrometheusPort == 0 {
+			config.PrometheusPort = 9090
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+
+		httpServer = &http.Server{
+			Addr:    fmt.Sprintf(":%d", config.PrometheusPort),
+			Handler: mux,
+		}
+
+		go func() {
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				global.Logger().Error("prometheus HTTP server error", "err", err)
+			}
+		}()
+	}
+
+	// 5. Create meter provider with all readers
+	meterOpts := []metric.Option{metric.WithResource(res)}
+	for _, reader := range metricReaders {
+		meterOpts = append(meterOpts, metric.WithReader(reader))
+	}
+	mp := metric.NewMeterProvider(meterOpts...)
 	otel.SetMeterProvider(mp)
 
-	// 6. Set up context propagation for distributed tracing
+	// 6. Set up log exporter (for full ObserverEvent)
+	logExporterOpts := []otlploggrpc.Option{
+		otlploggrpc.WithEndpoint(config.OTLPEndpoint),
+	}
+
+	if config.Insecure {
+		logExporterOpts = append(logExporterOpts, otlploggrpc.WithInsecure())
+	} else {
+		logExporterOpts = append(logExporterOpts, otlploggrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, "")))
+	}
+
+	logExporter, err := otlploggrpc.New(ctx, logExporterOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create log exporter: %w", err)
+	}
+
+	// 7. Create logger provider
+	lp := log.NewLoggerProvider(
+		log.WithResource(res),
+		log.WithProcessor(log.NewBatchProcessor(logExporter)),
+	)
+	global.SetLoggerProvider(lp)
+
+	// 8. Set up context propagation for distributed tracing
 	otel.SetTextMapPropagator(
 		propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{},
@@ -148,6 +216,8 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 	return &TelemetryShutdown{
 		tracerProvider: tp,
 		meterProvider:  mp,
+		loggerProvider: lp,
+		httpServer:     httpServer,
 	}, nil
 }
 
@@ -159,9 +229,18 @@ func (ts *TelemetryShutdown) Shutdown(ctx context.Context) error {
 
 	var firstErr error
 
+	// Shutdown HTTP server first (stop accepting new requests)
+	if ts.httpServer != nil {
+		if err := ts.httpServer.Shutdown(ctx); err != nil {
+			firstErr = fmt.Errorf("HTTP server shutdown failed: %w", err)
+		}
+	}
+
 	if ts.tracerProvider != nil {
 		if err := ts.tracerProvider.Shutdown(ctx); err != nil {
-			firstErr = fmt.Errorf("tracer provider shutdown failed: %w", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("tracer provider shutdown failed: %w", err)
+			}
 		}
 	}
 
@@ -169,6 +248,14 @@ func (ts *TelemetryShutdown) Shutdown(ctx context.Context) error {
 		if err := ts.meterProvider.Shutdown(ctx); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("meter provider shutdown failed: %w", err)
+			}
+		}
+	}
+
+	if ts.loggerProvider != nil {
+		if err := ts.loggerProvider.Shutdown(ctx); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("logger provider shutdown failed: %w", err)
 			}
 		}
 	}
