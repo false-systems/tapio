@@ -47,7 +47,12 @@ type NetworkObserver struct {
 	// RTT spike metrics (Stage 3)
 	rttSpikesTotal    metric.Int64Counter // rtt_spikes_total
 	rttCurrentMs      metric.Float64Gauge // rtt_current_ms
-	rttDegradationPct metric.Float64Gauge // rtt_degradation_ratio (0.0-1.0)
+
+	rttDegradationPct metric.Float64Gauge // rtt_degradation_percent
+
+	// eBPF health metrics
+	ringbufferUtilization metric.Float64Gauge // ringbuffer_utilization_percent
+	ebpfMapSize           metric.Int64Gauge   // ebpf_map_size_entries
 }
 
 // NewNetworkObserver creates a new network observer
@@ -142,18 +147,39 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create rtt_degradation gauge: %w", err)
 	}
 
+	// eBPF health metrics
+	ringbufferUtilization, err := meter.Float64Gauge(
+		"ringbuffer_utilization_percent",
+		metric.WithDescription("eBPF ring buffer utilization percentage"),
+		metric.WithUnit("%"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ringbuffer_utilization gauge: %w", err)
+	}
+
+	ebpfMapSize, err := meter.Int64Gauge(
+		"ebpf_map_size_entries",
+		metric.WithDescription("Number of entries in eBPF maps (baseline_rtt)"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ebpf_map_size gauge: %w", err)
+	}
+
 	return &NetworkObserver{
-		BaseObserver:      baseObs,
-		config:            config,
-		connectionResets:  connectionResets,
-		synTimeouts:       synTimeouts,
-		connectionRefused: connectionRefused,
-		retransmitsTotal:  retransmitsTotal,
-		retransmitRate:    retransmitRate,
-		congestionEvents:  congestionEvents,
-		rttSpikesTotal:    rttSpikesTotal,
-		rttCurrentMs:      rttCurrentMs,
-		rttDegradationPct: rttDegradationPct,
+		BaseObserver:          baseObs,
+		config:                config,
+		connectionResets:      connectionResets,
+		synTimeouts:           synTimeouts,
+		connectionRefused:     connectionRefused,
+		retransmitsTotal:      retransmitsTotal,
+		retransmitRate:        retransmitRate,
+		congestionEvents:      congestionEvents,
+		rttSpikesTotal:        rttSpikesTotal,
+		rttCurrentMs:          rttCurrentMs,
+		rttDegradationPct:     rttDegradationPct,
+		ringbufferUtilization: ringbufferUtilization,
+		ebpfMapSize:           ebpfMapSize,
 	}, nil
 }
 
