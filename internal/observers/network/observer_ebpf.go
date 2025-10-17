@@ -140,11 +140,20 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 
 // processEventsStage processes events from channel and outputs them
 func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan NetworkEventBPF) error {
+	// Periodically report ringbuffer utilization
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Printf("[%s] Shutting down event processor", n.Name())
 			return nil
+
+		case <-ticker.C:
+			// Report ringbuffer utilization (% of channel capacity used)
+			utilization := float64(len(eventCh)) / float64(cap(eventCh)) * 100
+			n.ringbufferUtilization.Record(ctx, utilization)
 
 		case evt, ok := <-eventCh:
 			if !ok {
@@ -245,6 +254,14 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 	stats.retransmits++
 	stats.totalPackets++ // Approximate: increment on each retransmit
 	stats.lastRetransmit = time.Now()
+
+	// Track total connections in retransmit tracking (map size approximation)
+	var connCount int64
+	n.retransmitStats.Range(func(_, _ interface{}) bool {
+		connCount++
+		return true
+	})
+	n.ebpfMapSize.Record(ctx, connCount)
 
 	// Record retransmit metric
 	n.retransmitsTotal.Add(ctx, 1)
