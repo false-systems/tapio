@@ -4,7 +4,8 @@
 #define __TAPIO_METRICS_H__
 
 // Shared Per-CPU metrics for all Tapio observers
-// Lock-free atomic counters - aggregate in userspace
+// Lock-free counters - aggregate in userspace
+
 // Based on Cilium's metrics pattern
 
 // Per-CPU metrics map - shared across ALL observers
@@ -42,21 +43,25 @@ struct {
 // Helper Functions
 // ============================================================================
 
+
 // Increment Per-CPU metric (lock-free)
 static __always_inline void metric_inc(__u32 metric_idx)
 {
 	__u64 *value = bpf_map_lookup_elem(&tapio_metrics, &metric_idx);
 	if (value) {
-		__sync_fetch_and_add(value, 1);
+		(*value)++;
 	}
 }
 
-// Add to Per-CPU metric (lock-free)
+// Add to Per-CPU metric (no atomics needed - each CPU has own copy)
+
 static __always_inline void metric_add(__u32 metric_idx, __u64 delta)
 {
 	__u64 *value = bpf_map_lookup_elem(&tapio_metrics, &metric_idx);
 	if (value) {
+		(*value) += delta;
 		__sync_fetch_and_add(value, delta);
+
 	}
 }
 
