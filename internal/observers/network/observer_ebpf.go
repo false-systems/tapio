@@ -152,7 +152,12 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 		case <-ticker.C:
 			// Report ringbuffer utilization (% of channel capacity used)
-			utilization := float64(len(eventCh)) / float64(cap(eventCh)) * 100
+			var utilization float64
+			if cap(eventCh) > 0 {
+				utilization = float64(len(eventCh)) / float64(cap(eventCh)) * 100
+			} else {
+				utilization = 0
+			}
 			n.ringbufferUtilization.Record(ctx, utilization)
 
 		case evt, ok := <-eventCh:
