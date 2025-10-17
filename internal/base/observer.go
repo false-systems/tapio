@@ -200,6 +200,10 @@ func (b *BaseObserver) PublishEvent(ctx context.Context, subject string, event a
 // SendObserverEvent sends full ObserverEvent as structured log to OTLP (OSS value!)
 // This gives free users all the raw data - they can query, analyze, build dashboards
 func (b *BaseObserver) SendObserverEvent(ctx context.Context, event *domain.ObserverEvent) {
+	if event == nil {
+		b.logger.Error().Msg("SendObserverEvent called with nil event")
+		return
+	}
 	logger := global.GetLoggerProvider().Logger(b.name)
 
 	// Marshal event to JSON for log body
