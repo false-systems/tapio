@@ -7,7 +7,7 @@
 #include <bpf/bpf_endian.h>
 
 // Shared TCP helpers (Cilium-style layered lib)
-#include "../../../common/bpf/lib/tcp.h"
+#include "../../common/bpf/lib/tcp.h"
 
 // Event types for distinguishing tracepoint sources
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
