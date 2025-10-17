@@ -6,8 +6,9 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_endian.h>
 
-// Shared TCP helpers (Cilium-style layered lib)
+// Shared helpers (Cilium-style layered lib)
 #include "../../common/bpf/lib/tcp.h"
+#include "../../common/bpf/lib/metrics.h"
 
 // Event types for distinguishing tracepoint sources
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
@@ -316,6 +317,9 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 	// Submit event
 	bpf_ringbuf_submit(evt, 0);
 
+	// Increment Per-CPU metrics (lock-free)
+	metric_inc(METRIC_NETWORK_RST_TOTAL);
+
 	return 0;
 }
 
@@ -401,6 +405,9 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 
 	// Submit event
 	bpf_ringbuf_submit(evt, 0);
+
+	// Increment Per-CPU metrics (lock-free)
+	metric_inc(METRIC_NETWORK_RETRANSMITS_TOTAL);
 
 	return 0;
 }
