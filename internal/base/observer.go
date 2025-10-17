@@ -90,7 +90,8 @@ func NewBaseObserverWithConfig(name string, telemetryConfig *TelemetryConfig, ev
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		shutdown, err := InitTelemetry(ctx, telemetryConfig)
+		// Pass nil for observers - health checks are for external monitoring, not self-monitoring
+		shutdown, err := InitTelemetry(ctx, telemetryConfig, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize telemetry for observer %s: %w", name, err)
 		}

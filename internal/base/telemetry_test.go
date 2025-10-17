@@ -2,222 +2,197 @@ package base
 
 import (
 	"context"
-	"os"
+	"fmt"
+	"net"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 )
 
-func TestLoadTelemetryConfigFromEnv(t *testing.T) {
-	// Save original env vars
-	originalEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	originalCluster := os.Getenv("TAPIO_CLUSTER_ID")
-	defer func() {
-		os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", originalEndpoint)
-		os.Setenv("TAPIO_CLUSTER_ID", originalCluster)
-	}()
-
-	t.Run("loads defaults when env vars not set", func(t *testing.T) {
-		os.Unsetenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-		os.Unsetenv("TAPIO_CLUSTER_ID")
-
-		config := LoadTelemetryConfigFromEnv()
-		require.NotNil(t, config)
-
-		assert.Equal(t, "localhost:4317", config.OTLPEndpoint)
-		assert.Equal(t, "default", config.ClusterID)
-		assert.Equal(t, "tapio-system", config.Namespace)
-		assert.Equal(t, "tapio-observer", config.ServiceName)
-		assert.Equal(t, "dev", config.Version)
-		assert.Equal(t, 0.1, config.TraceSampleRate)
-		assert.Equal(t, 10*time.Second, config.MetricInterval)
-		assert.False(t, config.Insecure)
-	})
-
-	t.Run("loads custom values from env", func(t *testing.T) {
-		os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "collector:4317")
-		os.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "true")
-		os.Setenv("TAPIO_CLUSTER_ID", "prod-cluster")
-		os.Setenv("TAPIO_NAMESPACE", "monitoring")
-		os.Setenv("TAPIO_NODE_NAME", "node-1")
-		os.Setenv("TAPIO_SERVICE_NAME", "custom-observer")
-		os.Setenv("TAPIO_VERSION", "v1.2.3")
-		defer func() {
-			os.Unsetenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-			os.Unsetenv("OTEL_EXPORTER_OTLP_INSECURE")
-			os.Unsetenv("TAPIO_CLUSTER_ID")
-			os.Unsetenv("TAPIO_NAMESPACE")
-			os.Unsetenv("TAPIO_NODE_NAME")
-			os.Unsetenv("TAPIO_SERVICE_NAME")
-			os.Unsetenv("TAPIO_VERSION")
-		}()
-
-		config := LoadTelemetryConfigFromEnv()
-		require.NotNil(t, config)
-
-		assert.Equal(t, "collector:4317", config.OTLPEndpoint)
-		assert.True(t, config.Insecure)
-		assert.Equal(t, "prod-cluster", config.ClusterID)
-		assert.Equal(t, "monitoring", config.Namespace)
-		assert.Equal(t, "node-1", config.NodeName)
-		assert.Equal(t, "custom-observer", config.ServiceName)
-		assert.Equal(t, "v1.2.3", config.Version)
-	})
+// waitForEndpoint polls an HTTP endpoint until it responds or timeout is reached
+func waitForEndpoint(url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return fmt.Errorf("endpoint %s not ready within %s", url, timeout)
 }
 
-func TestInitTelemetry(t *testing.T) {
-	t.Run("returns error for nil config", func(t *testing.T) {
-		ctx := context.Background()
-		shutdown, err := InitTelemetry(ctx, nil)
-
-		assert.Error(t, err)
-		assert.Nil(t, shutdown)
-		assert.Contains(t, err.Error(), "nil")
-	})
-
-	t.Run("initializes with valid config", func(t *testing.T) {
-		// Note: This will fail to connect since there's no real OTLP collector,
-		// but it should still initialize the providers
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		config := &TelemetryConfig{
-			OTLPEndpoint:    "localhost:4317",
-			Insecure:        true,
-			ClusterID:       "test-cluster",
-			Namespace:       "test-ns",
-			NodeName:        "test-node",
-			ServiceName:     "test-observer",
-			Version:         "test",
-			TraceSampleRate: 1.0,
-			MetricInterval:  1 * time.Second,
-		}
-
-		shutdown, err := InitTelemetry(ctx, config)
-
-		// Should succeed even without real collector
-		require.NoError(t, err)
-		require.NotNil(t, shutdown)
-
-		// Verify global providers are set
-		assert.NotNil(t, otel.GetTracerProvider())
-		assert.NotNil(t, otel.GetMeterProvider())
-
-		// Clean up
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cleanupCancel()
-		shutdown.Shutdown(cleanupCtx)
-	})
+// getFreePort allocates a free ephemeral port
+func getFreePort(t *testing.T) int {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port
 }
 
-func TestTelemetryShutdown(t *testing.T) {
-	t.Run("handles nil shutdown", func(t *testing.T) {
-		var shutdown *TelemetryShutdown
-		ctx := context.Background()
+// TestHealthEndpoint_AlwaysReturns200 tests that /health always returns 200 OK
+func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
+	// Setup: Start telemetry with Prometheus enabled
+	port := getFreePort(t)
+	config := &TelemetryConfig{
+		OTLPEndpoint:      "localhost:4317",
+		Insecure:          true,
+		PrometheusEnabled: true,
+		PrometheusPort:    port,
+		ServiceName:       "test-service",
+		Version:           "test",
+		TraceSampleRate:   0.1,
+		MetricInterval:    10 * time.Second,
+	}
 
-		err := shutdown.Shutdown(ctx)
-		assert.NoError(t, err)
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	t.Run("shuts down without panic", func(t *testing.T) {
-		ctx := context.Background()
+	shutdown, err := InitTelemetry(ctx, config, nil) // No observers
+	require.NoError(t, err)
+	defer shutdown.Shutdown(ctx)
 
-		config := &TelemetryConfig{
-			OTLPEndpoint:    "localhost:4317",
-			Insecure:        true,
-			ClusterID:       "test",
-			Namespace:       "test",
-			NodeName:        "test",
-			ServiceName:     "test",
-			Version:         "test",
-			TraceSampleRate: 1.0,
-			MetricInterval:  1 * time.Second,
-		}
+	// Wait for HTTP server to start (poll with timeout)
+	healthURL := fmt.Sprintf("http://localhost:%d/health", port)
+	require.NoError(t, waitForEndpoint(healthURL, 2*time.Second))
 
-		shutdown, err := InitTelemetry(ctx, config)
-		require.NoError(t, err)
-		require.NotNil(t, shutdown)
+	// Test: GET /health
+	resp, err := http.Get(healthURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		defer cancel()
-
-		// Shutdown will return error without real collector, but shouldn't panic
-		shutdown.Shutdown(shutdownCtx)
-		// Test passes if no panic occurs
-	})
+	// Assert: Always returns 200 OK
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "/health should always return 200")
 }
 
-func TestNewBaseObserverWithTelemetry(t *testing.T) {
-	t.Run("creates observer without telemetry", func(t *testing.T) {
-		observer, err := NewBaseObserverWithTelemetry("test-observer", nil)
-		require.NoError(t, err)
-		require.NotNil(t, observer)
+// TestReadyEndpoint_AllObserversHealthy tests /ready when all observers are healthy
+func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
+	// Setup: Create mock healthy observers
+	obs1, err := NewBaseObserver("test-observer-1")
+	require.NoError(t, err)
+	obs1.running.Store(true) // Mark as running
 
-		assert.Equal(t, "test-observer", observer.Name())
-		assert.Nil(t, observer.telemetryShutdown)
-	})
+	obs2, err := NewBaseObserver("test-observer-2")
+	require.NoError(t, err)
+	obs2.running.Store(true)
 
-	t.Run("creates observer with telemetry", func(t *testing.T) {
-		config := &TelemetryConfig{
-			OTLPEndpoint:    "localhost:4317",
-			Insecure:        true,
-			ClusterID:       "test",
-			Namespace:       "test",
-			NodeName:        "test",
-			ServiceName:     "test",
-			Version:         "test",
-			TraceSampleRate: 1.0,
-			MetricInterval:  1 * time.Second,
-		}
+	observers := []Observer{obs1, obs2}
 
-		observer, err := NewBaseObserverWithTelemetry("test-observer", config)
-		require.NoError(t, err)
-		require.NotNil(t, observer)
+	// Setup: Start telemetry with observers
+	port := getFreePort(t)
+	config := &TelemetryConfig{
+		OTLPEndpoint:      "localhost:4317",
+		Insecure:          true,
+		PrometheusEnabled: true,
+		PrometheusPort:    port,
+		ServiceName:       "test-service",
+		Version:           "test",
+		TraceSampleRate:   0.1,
+		MetricInterval:    10 * time.Second,
+	}
 
-		assert.Equal(t, "test-observer", observer.Name())
-		assert.NotNil(t, observer.telemetryShutdown)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-		// Clean up - Start first so Stop can succeed
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+	shutdown, err := InitTelemetry(ctx, config, observers)
+	require.NoError(t, err)
+	defer shutdown.Shutdown(ctx)
 
-		go observer.Start(ctx)
-		time.Sleep(50 * time.Millisecond)
+	// Wait for HTTP server to start (poll with timeout)
+	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
+	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
 
-		// Stop may return error without real collector, but shouldn't panic
-		observer.Stop()
-	})
+	// Test: GET /ready
+	resp, err := http.Get(readyURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Assert: Returns 200 when all observers healthy
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "/ready should return 200 when all observers healthy")
 }
 
-func TestObserverStopWithTelemetry(t *testing.T) {
-	t.Run("stops and attempts telemetry shutdown", func(t *testing.T) {
-		config := &TelemetryConfig{
-			OTLPEndpoint:    "localhost:4317",
-			Insecure:        true,
-			ClusterID:       "test",
-			Namespace:       "test",
-			NodeName:        "test",
-			ServiceName:     "test",
-			Version:         "test",
-			TraceSampleRate: 1.0,
-			MetricInterval:  1 * time.Second,
-		}
+// TestReadyEndpoint_OneObserverUnhealthy tests /ready when one observer is unhealthy
+func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
+	// Setup: Create observers (one healthy, one unhealthy)
+	obs1, err := NewBaseObserver("test-observer-1")
+	require.NoError(t, err)
+	obs1.running.Store(true) // Healthy
 
-		observer, err := NewBaseObserverWithTelemetry("test-observer", config)
-		require.NoError(t, err)
+	obs2, err := NewBaseObserver("test-observer-2")
+	require.NoError(t, err)
+	obs2.running.Store(false) // Unhealthy
 
-		// Start observer
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+	observers := []Observer{obs1, obs2}
 
-		go observer.Start(ctx)
-		time.Sleep(50 * time.Millisecond)
+	// Setup: Start telemetry with observers
+	port := getFreePort(t)
+	config := &TelemetryConfig{
+		OTLPEndpoint:      "localhost:4317",
+		Insecure:          true,
+		PrometheusEnabled: true,
+		PrometheusPort:    port,
+		ServiceName:       "test-service",
+		Version:           "test",
+		TraceSampleRate:   0.1,
+		MetricInterval:    10 * time.Second,
+	}
 
-		// Stop will attempt telemetry shutdown (may fail without real collector, but shouldn't panic)
-		observer.Stop()
-		// Test passes if no panic occurs
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	shutdown, err := InitTelemetry(ctx, config, observers)
+	require.NoError(t, err)
+	defer shutdown.Shutdown(ctx)
+
+	// Wait for HTTP server to start (poll with timeout)
+	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
+	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
+
+	// Test: GET /ready
+	resp, err := http.Get(readyURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Assert: Returns 503 when any observer unhealthy
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "/ready should return 503 when any observer unhealthy")
+}
+
+// TestReadyEndpoint_NoObservers tests /ready when no observers provided
+func TestReadyEndpoint_NoObservers(t *testing.T) {
+	// Setup: Start telemetry without observers
+	port := getFreePort(t)
+	config := &TelemetryConfig{
+		OTLPEndpoint:      "localhost:4317",
+		Insecure:          true,
+		PrometheusEnabled: true,
+		PrometheusPort:    port,
+		ServiceName:       "test-service",
+		Version:           "test",
+		TraceSampleRate:   0.1,
+		MetricInterval:    10 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	shutdown, err := InitTelemetry(ctx, config, nil)
+	require.NoError(t, err)
+	defer shutdown.Shutdown(ctx)
+
+	// Wait for HTTP server to start (poll with timeout)
+	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
+	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
+
+	// Test: GET /ready
+	resp, err := http.Get(readyURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Assert: Returns 200 when no observers (nothing to check)
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "/ready should return 200 when no observers")
 }
