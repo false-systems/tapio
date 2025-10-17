@@ -3,6 +3,7 @@ package base
 import (
 	"context"
 	"fmt"
+	stdlog "log"
 	"net/http"
 	"os"
 	"time"
@@ -169,7 +170,7 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 
 		go func() {
 			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				global.Logger().Error("prometheus HTTP server error", "err", err)
+				stdlog.Printf("prometheus HTTP server error: %v", err)
 			}
 		}()
 	}
