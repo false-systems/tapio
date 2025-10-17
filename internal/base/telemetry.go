@@ -74,7 +74,8 @@ func LoadTelemetryConfigFromEnv() *TelemetryConfig {
 }
 
 // InitTelemetry sets up OpenTelemetry SDK with resource, exporters, and providers
-func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShutdown, error) {
+// observers parameter is optional and used for /ready endpoint health checks
+func InitTelemetry(ctx context.Context, config *TelemetryConfig, observers []Observer) (*TelemetryShutdown, error) {
 	if config == nil {
 		return nil, fmt.Errorf("telemetry config is nil")
 	}
@@ -174,6 +175,8 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShut
 
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
+		mux.HandleFunc("/health", healthHandler)
+		mux.HandleFunc("/ready", readyHandler(observers))
 
 		httpServer = &http.Server{
 			Addr:    fmt.Sprintf(":%d", config.PrometheusPort),
@@ -297,4 +300,39 @@ func getHostname() string {
 		return "unknown"
 	}
 	return hostname
+}
+
+// healthHandler always returns 200 OK if the HTTP server is running
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+// readyHandler returns 200 if all observers are healthy, 503 otherwise
+func readyHandler(observers []Observer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// If no observers, consider ready (nothing to check)
+		if len(observers) == 0 {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Ready"))
+			return
+		}
+
+		// Check if all observers are healthy
+		allHealthy := true
+		for _, obs := range observers {
+			if !obs.IsHealthy() {
+				allHealthy = false
+				break
+			}
+		}
+
+		if allHealthy {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Ready"))
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("Not Ready"))
+		}
+	}
 }
