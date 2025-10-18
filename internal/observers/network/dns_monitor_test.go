@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -183,7 +184,7 @@ func TestDNSMonitor_Lifecycle(t *testing.T) {
 	monitor.Stop()
 
 	// Then: No errors, clean shutdown
-	assert.NotNil(t, monitor.ctx)
+	assert.NotNil(t, monitor.cleanupCtx)
 }
 
 // TestDNSMonitor_ProcessQueryResponse tests query/response matching
@@ -199,26 +200,28 @@ func TestDNSMonitor_ProcessQueryResponse(t *testing.T) {
 	queryTime := time.Now()
 
 	// When: Process query
-	err = monitor.ProcessQuery(queryPacket, "10.0.0.1", "8.8.8.8", queryTime)
+	ctx := context.Background()
+	err = monitor.ProcessQuery(ctx, queryPacket, "10.0.0.1", "8.8.8.8", queryTime)
 	require.NoError(t, err)
 
-	// Then: Query is stored
-	_, found := monitor.pendingQueries.Load(uint16(12345))
+	// Then: Query is stored with composite key
+	key := queryKey{id: 12345, srcIP: "10.0.0.1", dstIP: "8.8.8.8"}
+	_, found := monitor.pendingQueries.Load(key)
 	assert.True(t, found, "Query should be stored in pending queries")
 
-	// Given: DNS response packet
+	// Given: DNS response packet (swapped IPs - response goes back to source)
 	responsePacket := buildDNSResponsePacket(t, 12345, dnsmessage.RCodeSuccess, []string{"93.184.216.34"})
 	responseTime := queryTime.Add(20 * time.Millisecond)
 
-	// When: Process response
-	problem, err := monitor.ProcessResponse(responsePacket, responseTime)
+	// When: Process response (srcIP and dstIP swapped)
+	problem, err := monitor.ProcessResponse(ctx, responsePacket, "8.8.8.8", "10.0.0.1", responseTime)
 	require.NoError(t, err)
 
 	// Then: Response matched and problem detected
 	assert.Equal(t, "dns_success", problem)
 
 	// Then: Query removed from pending
-	_, found = monitor.pendingQueries.Load(uint16(12345))
+	_, found = monitor.pendingQueries.Load(key)
 	assert.False(t, found, "Query should be removed after response")
 }
 
@@ -233,12 +236,65 @@ func TestDNSMonitor_UnmatchedResponse(t *testing.T) {
 	// Given: DNS response packet (no matching query)
 	responsePacket := buildDNSResponsePacket(t, 54321, dnsmessage.RCodeSuccess, []string{"1.2.3.4"})
 
-	// When: Process response
-	problem, err := monitor.ProcessResponse(responsePacket, time.Now())
+	// When: Process response (no matching query for this ID+IPs)
+	ctx := context.Background()
+	problem, err := monitor.ProcessResponse(ctx, responsePacket, "1.1.1.1", "2.2.2.2", time.Now())
 	require.NoError(t, err)
 
 	// Then: Unmatched response detected
 	assert.Equal(t, "dns_unmatched_response", problem)
+}
+
+// TestDNSMonitor_QueryIDCollision tests that same ID from different IPs doesn't collide
+func TestDNSMonitor_QueryIDCollision(t *testing.T) {
+	// Given: DNS monitor
+	monitor, err := NewDNSMonitor()
+	require.NoError(t, err)
+	monitor.Start()
+	defer monitor.Stop()
+
+	// Given: Two queries with SAME ID but different IPs
+	queryPacket1 := buildDNSQueryPacket(t, "example.com", dnsmessage.TypeA, 12345)
+	queryPacket2 := buildDNSQueryPacket(t, "different.com", dnsmessage.TypeA, 12345) // SAME ID!
+
+	queryTime := time.Now()
+	ctx := context.Background()
+
+	// When: Process both queries
+	err = monitor.ProcessQuery(ctx, queryPacket1, "10.0.0.1", "8.8.8.8", queryTime)
+	require.NoError(t, err)
+
+	err = monitor.ProcessQuery(ctx, queryPacket2, "10.0.0.2", "8.8.8.8", queryTime) // Different srcIP
+	require.NoError(t, err)
+
+	// Then: Both queries stored (no collision!)
+	key1 := queryKey{id: 12345, srcIP: "10.0.0.1", dstIP: "8.8.8.8"}
+	key2 := queryKey{id: 12345, srcIP: "10.0.0.2", dstIP: "8.8.8.8"}
+
+	_, found1 := monitor.pendingQueries.Load(key1)
+	_, found2 := monitor.pendingQueries.Load(key2)
+
+	assert.True(t, found1, "First query should be stored")
+	assert.True(t, found2, "Second query should be stored (no collision)")
+
+	// When: Responses arrive
+	responsePacket := buildDNSResponsePacket(t, 12345, dnsmessage.RCodeSuccess, []string{"1.2.3.4"})
+
+	// Response for first query
+	problem1, err := monitor.ProcessResponse(ctx, responsePacket, "8.8.8.8", "10.0.0.1", queryTime.Add(10*time.Millisecond))
+	require.NoError(t, err)
+	assert.Equal(t, "dns_success", problem1)
+
+	// Response for second query
+	problem2, err := monitor.ProcessResponse(ctx, responsePacket, "8.8.8.8", "10.0.0.2", queryTime.Add(15*time.Millisecond))
+	require.NoError(t, err)
+	assert.Equal(t, "dns_success", problem2)
+
+	// Then: Both queries matched correctly
+	_, found1 = monitor.pendingQueries.Load(key1)
+	_, found2 = monitor.pendingQueries.Load(key2)
+	assert.False(t, found1, "First query should be removed")
+	assert.False(t, found2, "Second query should be removed")
 }
 
 // TestDNSMonitor_StaleQueryCleanup tests timeout detection
@@ -252,15 +308,18 @@ func TestDNSMonitor_StaleQueryCleanup(t *testing.T) {
 	// Given: Stale query (older than timeout)
 	staleQuery := &DNSQuery{
 		QueryID:   123,
+		SrcIP:     "10.0.0.1",
+		DstIP:     "8.8.8.8",
 		Timestamp: time.Now().Add(-200 * time.Millisecond),
 	}
-	monitor.pendingQueries.Store(uint16(123), staleQuery)
+	key := queryKey{id: 123, srcIP: "10.0.0.1", dstIP: "8.8.8.8"}
+	monitor.pendingQueries.Store(key, staleQuery)
 
 	// When: Run cleanup
 	monitor.cleanupStaleQueries()
 
 	// Then: Stale query removed
-	_, found := monitor.pendingQueries.Load(uint16(123))
+	_, found := monitor.pendingQueries.Load(key)
 	assert.False(t, found, "Stale query should be removed")
 
 	// Then: Timeout counter incremented

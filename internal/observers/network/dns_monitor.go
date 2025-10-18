@@ -8,14 +8,23 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/net/dns/dnsmessage"
 )
 
+// queryKey uniquely identifies a DNS query to prevent ID collisions
+type queryKey struct {
+	id    uint16
+	srcIP string
+	dstIP string
+}
+
 // DNSMonitor tracks DNS queries and responses
 type DNSMonitor struct {
 	// Query tracking (match responses to queries)
-	pendingQueries sync.Map // key: query_id → value: *DNSQuery
+	// Uses composite key (queryID + srcIP + dstIP) to prevent collisions
+	pendingQueries sync.Map // key: queryKey → value: *DNSQuery
 
 	// Problem counters
 	nxdomainCount  atomic.Int64
@@ -31,7 +40,7 @@ type DNSMonitor struct {
 	// Cleanup
 	cleanupInterval time.Duration
 	queryTimeout    time.Duration
-	ctx             context.Context
+	cleanupCtx      context.Context // Only for cleanup goroutine
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 }
@@ -85,7 +94,7 @@ func NewDNSMonitor() (*DNSMonitor, error) {
 		return nil, fmt.Errorf("failed to create dns_latency_ms histogram: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	cleanupCtx, cancel := context.WithCancel(context.Background())
 
 	return &DNSMonitor{
 		dnsQueriesTotal:     dnsQueriesTotal,
@@ -93,7 +102,7 @@ func NewDNSMonitor() (*DNSMonitor, error) {
 		dnsLatencyHistogram: dnsLatencyHistogram,
 		cleanupInterval:     10 * time.Second,
 		queryTimeout:        5 * time.Second,
-		ctx:                 ctx,
+		cleanupCtx:          cleanupCtx,
 		cancel:              cancel,
 	}, nil
 }
@@ -119,7 +128,7 @@ func (m *DNSMonitor) cleanupLoop() {
 
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-m.cleanupCtx.Done():
 			return
 		case <-ticker.C:
 			m.cleanupStaleQueries()
@@ -131,11 +140,19 @@ func (m *DNSMonitor) cleanupLoop() {
 func (m *DNSMonitor) cleanupStaleQueries() {
 	now := time.Now()
 	m.pendingQueries.Range(func(key, value interface{}) bool {
-		query := value.(*DNSQuery)
+		query, ok := value.(*DNSQuery)
+		if !ok {
+			m.pendingQueries.Delete(key)
+			return true
+		}
 		if now.Sub(query.Timestamp) > m.queryTimeout {
 			m.pendingQueries.Delete(key)
 			m.timeoutCount.Add(1)
-			m.dnsErrorsTotal.Add(m.ctx, 1)
+			// Use background context for cleanup (no trace context available)
+			attrs := []attribute.KeyValue{
+				attribute.String("error.type", "dns_timeout"),
+			}
+			m.dnsErrorsTotal.Add(context.Background(), 1, metric.WithAttributes(attrs...))
 		}
 		return true
 	})
@@ -216,7 +233,7 @@ func parseDNSResponse(packet []byte) (*DNSResponse, error) {
 }
 
 // ProcessQuery processes a DNS query packet
-func (m *DNSMonitor) ProcessQuery(packet []byte, srcIP, dstIP string, timestamp time.Time) error {
+func (m *DNSMonitor) ProcessQuery(ctx context.Context, packet []byte, srcIP, dstIP string, timestamp time.Time) error {
 	query, err := parseDNSQuery(packet)
 	if err != nil {
 		return fmt.Errorf("failed to parse DNS query: %w", err)
@@ -227,60 +244,87 @@ func (m *DNSMonitor) ProcessQuery(packet []byte, srcIP, dstIP string, timestamp 
 	query.DstIP = dstIP
 	query.Timestamp = timestamp
 
-	// Store query for matching with response
-	m.pendingQueries.Store(query.QueryID, query)
-	m.dnsQueriesTotal.Add(m.ctx, 1)
+	// Store query with composite key to prevent ID collisions
+	key := queryKey{
+		id:    query.QueryID,
+		srcIP: srcIP,
+		dstIP: dstIP,
+	}
+	m.pendingQueries.Store(key, query)
+	m.dnsQueriesTotal.Add(ctx, 1)
 
 	return nil
 }
 
 // ProcessResponse processes a DNS response packet and matches it with a query
-func (m *DNSMonitor) ProcessResponse(packet []byte, timestamp time.Time) (string, error) {
+// srcIP/dstIP are swapped from query (response goes back to query source)
+func (m *DNSMonitor) ProcessResponse(ctx context.Context, packet []byte, srcIP, dstIP string, timestamp time.Time) (string, error) {
 	response, err := parseDNSResponse(packet)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse DNS response: %w", err)
 	}
 
-	// Find matching query
-	value, found := m.pendingQueries.LoadAndDelete(response.QueryID)
+	// Find matching query (swap src/dst since response reverses direction)
+	key := queryKey{
+		id:    response.QueryID,
+		srcIP: dstIP, // Response dstIP = Query srcIP
+		dstIP: srcIP, // Response srcIP = Query dstIP
+	}
+	value, found := m.pendingQueries.LoadAndDelete(key)
 	if !found {
+		// Count unmatched responses
+		attrs := []attribute.KeyValue{
+			attribute.String("error.type", "unmatched_response"),
+		}
+		m.dnsErrorsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 		return "dns_unmatched_response", nil
 	}
 
-	query := value.(*DNSQuery)
+	query, ok := value.(*DNSQuery)
+	if !ok {
+		return "", fmt.Errorf("invalid query type in pending queries")
+	}
+
 	response.Latency = timestamp.Sub(query.Timestamp)
 
 	// Record latency metric
-	m.dnsLatencyHistogram.Record(m.ctx, float64(response.Latency.Milliseconds()))
+	m.dnsLatencyHistogram.Record(ctx, float64(response.Latency.Milliseconds()))
 
 	// Detect problems
-	problem := m.detectProblem(query, response)
-
-	// Increment error counter if not success
-	if problem != "dns_success" {
-		m.dnsErrorsTotal.Add(m.ctx, 1)
-	}
+	problem := m.detectProblem(ctx, query, response)
 
 	return problem, nil
 }
 
 // detectProblem detects DNS problems based on query and response
-func (m *DNSMonitor) detectProblem(query *DNSQuery, response *DNSResponse) string {
+func (m *DNSMonitor) detectProblem(ctx context.Context, query *DNSQuery, response *DNSResponse) string {
 	// NXDOMAIN - domain doesn't exist
 	if response.ResponseCode == "NXDOMAIN" {
 		m.nxdomainCount.Add(1)
+		attrs := []attribute.KeyValue{
+			attribute.String("error.type", "dns_nxdomain"),
+		}
+		m.dnsErrorsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 		return "dns_nxdomain"
 	}
 
 	// SERVFAIL - DNS server error
 	if response.ResponseCode == "SERVFAIL" {
 		m.servfailCount.Add(1)
+		attrs := []attribute.KeyValue{
+			attribute.String("error.type", "dns_servfail"),
+		}
+		m.dnsErrorsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 		return "dns_servfail"
 	}
 
 	// Slow query (>100ms)
 	if response.Latency > 100*time.Millisecond {
 		m.slowQueryCount.Add(1)
+		attrs := []attribute.KeyValue{
+			attribute.String("error.type", "dns_slow_query"),
+		}
+		m.dnsErrorsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 		return "dns_slow_query"
 	}
 
