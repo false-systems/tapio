@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,4 +103,32 @@ func TestEBPFManager_WaitForReady_Timeout(t *testing.T) {
 	err := mgr.WaitForReady(100 * time.Millisecond)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timeout waiting for eBPF programs to be ready")
+}
+
+func TestNewEBPFManagerFromCollection_NilCollection(t *testing.T) {
+	mgr := NewEBPFManagerFromCollection(nil)
+	require.NotNil(t, mgr)
+	assert.Nil(t, mgr.collection)
+	assert.NotNil(t, mgr.links)
+}
+
+func TestNewEBPFManagerFromCollection_ValidCollection(t *testing.T) {
+	// Create minimal collection for testing
+	coll := &ebpf.Collection{}
+	mgr := NewEBPFManagerFromCollection(coll)
+
+	require.NotNil(t, mgr)
+	assert.Equal(t, coll, mgr.collection)
+	assert.NotNil(t, mgr.links)
+	assert.Len(t, mgr.links, 0)
+}
+
+func TestEBPFManager_AttachTracepointWithProgram_NilProgram(t *testing.T) {
+	mgr := &EBPFManager{
+		links: make([]link.Link, 0),
+	}
+
+	err := mgr.AttachTracepointWithProgram(nil, "sock", "inet_sock_set_state")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "program cannot be nil")
 }
