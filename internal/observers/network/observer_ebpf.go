@@ -233,7 +233,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// Record base metrics
 			n.RecordEvent(ctx)
-			n.RecordProcessingTime(ctx, nil, float64(time.Since(startTime).Milliseconds()))
+			n.RecordProcessingTime(ctx, "network_event_processing", float64(time.Since(startTime).Milliseconds()))
 		}
 	}
 }
