@@ -135,6 +135,21 @@ enum bpf_map_type {
     BPF_MAP_TYPE_RINGBUF,
 };
 
+// BPF flags
+enum {
+    BPF_NOEXIST = 1,
+    BPF_EXIST = 2,
+    BPF_ANY = 0,
+};
+
+// Pin types
+#define LIBBPF_PIN_NONE         0
+#define LIBBPF_PIN_BY_NAME      1
+
+// Helper macros for map definitions
+#define __uint(name, val) int (*name)[val]
+#define __type(name, val) typeof(val) *name
+
 // Section macro for BPF programs
 #ifndef SEC
 #define SEC(name) __attribute__((section(name), used))
