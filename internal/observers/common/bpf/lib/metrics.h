@@ -54,14 +54,13 @@ static __always_inline void metric_inc(__u32 metric_idx)
 }
 
 // Add to Per-CPU metric (no atomics needed - each CPU has own copy)
-
+// Per-CPU maps allocate separate value for each CPU, so no locking required.
+// Userspace aggregates across all CPUs when reading metrics.
 static __always_inline void metric_add(__u32 metric_idx, __u64 delta)
 {
 	__u64 *value = bpf_map_lookup_elem(&tapio_metrics, &metric_idx);
 	if (value) {
-		(*value) += delta;
-		__sync_fetch_and_add(value, delta);
-
+		(*value) += delta;  // Lock-free - each CPU writes to own copy
 	}
 }
 
