@@ -40,7 +40,6 @@ func parseDNSQuery(packet []byte) (*DNSQuery, error) {
 		QueryID:    header.ID,
 		DomainName: question.Name.String(),
 		QueryType:  normalizeQueryType(question.Type),
-		Timestamp:  time.Now(),
 	}, nil
 }
 
@@ -77,6 +76,20 @@ func parseDNSResponse(packet []byte) (*DNSResponse, error) {
 		if aRecord, ok := answer.Body.(*dnsmessage.AResource); ok {
 			ip := fmt.Sprintf("%d.%d.%d.%d",
 				aRecord.A[0], aRecord.A[1], aRecord.A[2], aRecord.A[3])
+			response.Answers = append(response.Answers, ip)
+		}
+
+		// Extract IPv6 address from AAAA record
+		if aaaaRecord, ok := answer.Body.(*dnsmessage.AAAAResource); ok {
+			ip := fmt.Sprintf("%x:%x:%x:%x:%x:%x:%x:%x",
+				uint16(aaaaRecord.AAAA[0])<<8|uint16(aaaaRecord.AAAA[1]),
+				uint16(aaaaRecord.AAAA[2])<<8|uint16(aaaaRecord.AAAA[3]),
+				uint16(aaaaRecord.AAAA[4])<<8|uint16(aaaaRecord.AAAA[5]),
+				uint16(aaaaRecord.AAAA[6])<<8|uint16(aaaaRecord.AAAA[7]),
+				uint16(aaaaRecord.AAAA[8])<<8|uint16(aaaaRecord.AAAA[9]),
+				uint16(aaaaRecord.AAAA[10])<<8|uint16(aaaaRecord.AAAA[11]),
+				uint16(aaaaRecord.AAAA[12])<<8|uint16(aaaaRecord.AAAA[13]),
+				uint16(aaaaRecord.AAAA[14])<<8|uint16(aaaaRecord.AAAA[15]))
 			response.Answers = append(response.Answers, ip)
 		}
 	}
