@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -295,6 +296,41 @@ func TestDNSMonitor_QueryIDCollision(t *testing.T) {
 	_, found2 = monitor.pendingQueries.Load(key2)
 	assert.False(t, found1, "First query should be removed")
 	assert.False(t, found2, "Second query should be removed")
+}
+
+// TestDNSMonitor_MaxPendingQueries tests DoS protection limit
+func TestDNSMonitor_MaxPendingQueries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping slow test in short mode")
+	}
+
+	// Given: DNS monitor
+	monitor, err := NewDNSMonitor()
+	require.NoError(t, err)
+	monitor.Start()
+	defer monitor.Stop()
+
+	ctx := context.Background()
+
+	// When: Fill up to the limit with queries (use smaller limit for test)
+	testLimit := 100 // Test with smaller limit for speed
+	for i := 0; i < testLimit; i++ {
+		queryPacket := buildDNSQueryPacket(t, "example.com", dnsmessage.TypeA, uint16(i))
+		err := monitor.ProcessQuery(ctx, queryPacket, fmt.Sprintf("10.0.0.%d", i%255), "8.8.8.8", time.Now())
+		require.NoError(t, err)
+	}
+
+	// Manually fill the map close to the limit to test the actual limit check
+	for i := testLimit; i < maxPendingQueries; i++ {
+		key := queryKey{id: uint16(i), srcIP: "1.1.1.1", dstIP: "2.2.2.2"}
+		monitor.pendingQueries.Store(key, &DNSQuery{QueryID: uint16(i)})
+	}
+
+	// Then: Next query should be rejected
+	queryPacket := buildDNSQueryPacket(t, "overflow.com", dnsmessage.TypeA, 65535)
+	err = monitor.ProcessQuery(ctx, queryPacket, "10.0.0.99", "8.8.8.8", time.Now())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too many pending queries")
 }
 
 // TestDNSMonitor_StaleQueryCleanup tests timeout detection
