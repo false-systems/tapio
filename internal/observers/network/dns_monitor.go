@@ -1,17 +1,48 @@
 package network
 
 import (
+	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/net/dns/dnsmessage"
 )
+
+// DNSMonitor tracks DNS queries and responses
+type DNSMonitor struct {
+	// Query tracking (match responses to queries)
+	pendingQueries sync.Map // key: query_id → value: *DNSQuery
+
+	// Problem counters
+	nxdomainCount  atomic.Int64
+	timeoutCount   atomic.Int64
+	slowQueryCount atomic.Int64
+	servfailCount  atomic.Int64
+
+	// OTEL metrics
+	dnsQueriesTotal     metric.Int64Counter
+	dnsErrorsTotal      metric.Int64Counter
+	dnsLatencyHistogram metric.Float64Histogram
+
+	// Cleanup
+	cleanupInterval time.Duration
+	queryTimeout    time.Duration
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+}
 
 // DNSQuery represents a parsed DNS query
 type DNSQuery struct {
 	QueryID    uint16
 	DomainName string
 	QueryType  string
+	SrcIP      string
+	DstIP      string
 	Timestamp  time.Time
 }
 
@@ -21,6 +52,93 @@ type DNSResponse struct {
 	ResponseCode string
 	Answers      []string
 	Latency      time.Duration
+}
+
+// NewDNSMonitor creates a new DNS monitor
+func NewDNSMonitor() (*DNSMonitor, error) {
+	meter := otel.Meter("tapio.observer.network.dns")
+
+	dnsQueriesTotal, err := meter.Int64Counter(
+		"dns_queries_total",
+		metric.WithDescription("Total number of DNS queries observed"),
+		metric.WithUnit("{queries}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dns_queries_total counter: %w", err)
+	}
+
+	dnsErrorsTotal, err := meter.Int64Counter(
+		"dns_errors_total",
+		metric.WithDescription("Total number of DNS errors (NXDOMAIN, SERVFAIL, timeouts)"),
+		metric.WithUnit("{errors}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dns_errors_total counter: %w", err)
+	}
+
+	dnsLatencyHistogram, err := meter.Float64Histogram(
+		"dns_latency_ms",
+		metric.WithDescription("DNS query latency in milliseconds"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dns_latency_ms histogram: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &DNSMonitor{
+		dnsQueriesTotal:     dnsQueriesTotal,
+		dnsErrorsTotal:      dnsErrorsTotal,
+		dnsLatencyHistogram: dnsLatencyHistogram,
+		cleanupInterval:     10 * time.Second,
+		queryTimeout:        5 * time.Second,
+		ctx:                 ctx,
+		cancel:              cancel,
+	}, nil
+}
+
+// Start begins the DNS monitor cleanup goroutine
+func (m *DNSMonitor) Start() {
+	m.wg.Add(1)
+	go m.cleanupLoop()
+}
+
+// Stop stops the DNS monitor and waits for cleanup
+func (m *DNSMonitor) Stop() {
+	m.cancel()
+	m.wg.Wait()
+}
+
+// cleanupLoop periodically removes stale queries
+func (m *DNSMonitor) cleanupLoop() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(m.cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.cleanupStaleQueries()
+		}
+	}
+}
+
+// cleanupStaleQueries removes queries older than queryTimeout
+func (m *DNSMonitor) cleanupStaleQueries() {
+	now := time.Now()
+	m.pendingQueries.Range(func(key, value interface{}) bool {
+		query := value.(*DNSQuery)
+		if now.Sub(query.Timestamp) > m.queryTimeout {
+			m.pendingQueries.Delete(key)
+			m.timeoutCount.Add(1)
+			m.dnsErrorsTotal.Add(m.ctx, 1)
+		}
+		return true
+	})
 }
 
 // parseDNSQuery parses a DNS query packet
@@ -97,24 +215,90 @@ func parseDNSResponse(packet []byte) (*DNSResponse, error) {
 	return response, nil
 }
 
-// detectDNSProblem detects DNS problems based on query and response
-func detectDNSProblem(query *DNSQuery, response *DNSResponse) string {
+// ProcessQuery processes a DNS query packet
+func (m *DNSMonitor) ProcessQuery(packet []byte, srcIP, dstIP string, timestamp time.Time) error {
+	query, err := parseDNSQuery(packet)
+	if err != nil {
+		return fmt.Errorf("failed to parse DNS query: %w", err)
+	}
+
+	// Add source/destination IPs and timestamp
+	query.SrcIP = srcIP
+	query.DstIP = dstIP
+	query.Timestamp = timestamp
+
+	// Store query for matching with response
+	m.pendingQueries.Store(query.QueryID, query)
+	m.dnsQueriesTotal.Add(m.ctx, 1)
+
+	return nil
+}
+
+// ProcessResponse processes a DNS response packet and matches it with a query
+func (m *DNSMonitor) ProcessResponse(packet []byte, timestamp time.Time) (string, error) {
+	response, err := parseDNSResponse(packet)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse DNS response: %w", err)
+	}
+
+	// Find matching query
+	value, found := m.pendingQueries.LoadAndDelete(response.QueryID)
+	if !found {
+		return "dns_unmatched_response", nil
+	}
+
+	query := value.(*DNSQuery)
+	response.Latency = timestamp.Sub(query.Timestamp)
+
+	// Record latency metric
+	m.dnsLatencyHistogram.Record(m.ctx, float64(response.Latency.Milliseconds()))
+
+	// Detect problems
+	problem := m.detectProblem(query, response)
+
+	// Increment error counter if not success
+	if problem != "dns_success" {
+		m.dnsErrorsTotal.Add(m.ctx, 1)
+	}
+
+	return problem, nil
+}
+
+// detectProblem detects DNS problems based on query and response
+func (m *DNSMonitor) detectProblem(query *DNSQuery, response *DNSResponse) string {
 	// NXDOMAIN - domain doesn't exist
 	if response.ResponseCode == "NXDOMAIN" {
+		m.nxdomainCount.Add(1)
 		return "dns_nxdomain"
 	}
 
 	// SERVFAIL - DNS server error
 	if response.ResponseCode == "SERVFAIL" {
+		m.servfailCount.Add(1)
 		return "dns_servfail"
 	}
 
 	// Slow query (>100ms)
 	if response.Latency > 100*time.Millisecond {
+		m.slowQueryCount.Add(1)
 		return "dns_slow_query"
 	}
 
 	// Success
+	return "dns_success"
+}
+
+// detectDNSProblem is a standalone helper for testing (no state mutation)
+func detectDNSProblem(query *DNSQuery, response *DNSResponse) string {
+	if response.ResponseCode == "NXDOMAIN" {
+		return "dns_nxdomain"
+	}
+	if response.ResponseCode == "SERVFAIL" {
+		return "dns_servfail"
+	}
+	if response.Latency > 100*time.Millisecond {
+		return "dns_slow_query"
+	}
 	return "dns_success"
 }
 

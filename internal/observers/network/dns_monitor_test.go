@@ -170,6 +170,103 @@ func TestDetectDNSProblem_Success(t *testing.T) {
 	assert.Equal(t, "dns_success", problem)
 }
 
+// TestDNSMonitor_Lifecycle tests monitor start/stop
+func TestDNSMonitor_Lifecycle(t *testing.T) {
+	// Given: New DNS monitor
+	monitor, err := NewDNSMonitor()
+	require.NoError(t, err)
+	require.NotNil(t, monitor)
+
+	// When: Start and stop monitor
+	monitor.Start()
+	time.Sleep(50 * time.Millisecond) // Let cleanup goroutine start
+	monitor.Stop()
+
+	// Then: No errors, clean shutdown
+	assert.NotNil(t, monitor.ctx)
+}
+
+// TestDNSMonitor_ProcessQueryResponse tests query/response matching
+func TestDNSMonitor_ProcessQueryResponse(t *testing.T) {
+	// Given: DNS monitor
+	monitor, err := NewDNSMonitor()
+	require.NoError(t, err)
+	monitor.Start()
+	defer monitor.Stop()
+
+	// Given: DNS query packet
+	queryPacket := buildDNSQueryPacket(t, "example.com", dnsmessage.TypeA, 12345)
+	queryTime := time.Now()
+
+	// When: Process query
+	err = monitor.ProcessQuery(queryPacket, "10.0.0.1", "8.8.8.8", queryTime)
+	require.NoError(t, err)
+
+	// Then: Query is stored
+	_, found := monitor.pendingQueries.Load(uint16(12345))
+	assert.True(t, found, "Query should be stored in pending queries")
+
+	// Given: DNS response packet
+	responsePacket := buildDNSResponsePacket(t, 12345, dnsmessage.RCodeSuccess, []string{"93.184.216.34"})
+	responseTime := queryTime.Add(20 * time.Millisecond)
+
+	// When: Process response
+	problem, err := monitor.ProcessResponse(responsePacket, responseTime)
+	require.NoError(t, err)
+
+	// Then: Response matched and problem detected
+	assert.Equal(t, "dns_success", problem)
+
+	// Then: Query removed from pending
+	_, found = monitor.pendingQueries.Load(uint16(12345))
+	assert.False(t, found, "Query should be removed after response")
+}
+
+// TestDNSMonitor_UnmatchedResponse tests response without query
+func TestDNSMonitor_UnmatchedResponse(t *testing.T) {
+	// Given: DNS monitor
+	monitor, err := NewDNSMonitor()
+	require.NoError(t, err)
+	monitor.Start()
+	defer monitor.Stop()
+
+	// Given: DNS response packet (no matching query)
+	responsePacket := buildDNSResponsePacket(t, 54321, dnsmessage.RCodeSuccess, []string{"1.2.3.4"})
+
+	// When: Process response
+	problem, err := monitor.ProcessResponse(responsePacket, time.Now())
+	require.NoError(t, err)
+
+	// Then: Unmatched response detected
+	assert.Equal(t, "dns_unmatched_response", problem)
+}
+
+// TestDNSMonitor_StaleQueryCleanup tests timeout detection
+func TestDNSMonitor_StaleQueryCleanup(t *testing.T) {
+	// Given: DNS monitor with short timeout
+	monitor, err := NewDNSMonitor()
+	require.NoError(t, err)
+	monitor.queryTimeout = 100 * time.Millisecond
+	monitor.cleanupInterval = 50 * time.Millisecond
+
+	// Given: Stale query (older than timeout)
+	staleQuery := &DNSQuery{
+		QueryID:   123,
+		Timestamp: time.Now().Add(-200 * time.Millisecond),
+	}
+	monitor.pendingQueries.Store(uint16(123), staleQuery)
+
+	// When: Run cleanup
+	monitor.cleanupStaleQueries()
+
+	// Then: Stale query removed
+	_, found := monitor.pendingQueries.Load(uint16(123))
+	assert.False(t, found, "Stale query should be removed")
+
+	// Then: Timeout counter incremented
+	assert.Equal(t, int64(1), monitor.timeoutCount.Load())
+}
+
 // buildDNSQueryPacket creates a DNS query packet for testing
 func buildDNSQueryPacket(t *testing.T, domain string, qtype dnsmessage.Type, queryID uint16) []byte {
 	t.Helper()
