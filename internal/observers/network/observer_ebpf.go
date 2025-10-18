@@ -123,7 +123,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 		var evt NetworkEventBPF
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
 			log.Printf("[%s] Error parsing event: %v", n.Name(), err)
-			n.RecordError(ctx, nil)
+			n.RecordError(ctx, err)
 			continue
 		}
 
