@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,13 +21,24 @@ type queryKey struct {
 	dstIP string
 }
 
+const (
+	// maxPendingQueries limits the number of tracked queries to prevent DoS
+	maxPendingQueries = 10000
+	// slowQueryThreshold defines the latency threshold for slow query detection
+	slowQueryThreshold = 100 * time.Millisecond
+	// defaultQueryTimeout is the default timeout for DNS queries
+	defaultQueryTimeout = 5 * time.Second
+	// defaultCleanupInterval is the default interval for cleanup goroutine
+	defaultCleanupInterval = 10 * time.Second
+)
+
 // DNSMonitor tracks DNS queries and responses
 type DNSMonitor struct {
 	// Query tracking (match responses to queries)
 	// Uses composite key (queryID + srcIP + dstIP) to prevent collisions
 	pendingQueries sync.Map // key: queryKey → value: *DNSQuery
 
-	// Problem counters
+	// Problem counters (for Stats() API - separate from OTEL metrics)
 	nxdomainCount  atomic.Int64
 	timeoutCount   atomic.Int64
 	slowQueryCount atomic.Int64
@@ -100,8 +112,8 @@ func NewDNSMonitor() (*DNSMonitor, error) {
 		dnsQueriesTotal:     dnsQueriesTotal,
 		dnsErrorsTotal:      dnsErrorsTotal,
 		dnsLatencyHistogram: dnsLatencyHistogram,
-		cleanupInterval:     10 * time.Second,
-		queryTimeout:        5 * time.Second,
+		cleanupInterval:     defaultCleanupInterval,
+		queryTimeout:        defaultQueryTimeout,
 		cleanupCtx:          cleanupCtx,
 		cancel:              cancel,
 	}, nil
@@ -216,16 +228,8 @@ func parseDNSResponse(packet []byte) (*DNSResponse, error) {
 
 		// Extract IPv6 address from AAAA record
 		if aaaaRecord, ok := answer.Body.(*dnsmessage.AAAAResource); ok {
-			ip := fmt.Sprintf("%x:%x:%x:%x:%x:%x:%x:%x",
-				uint16(aaaaRecord.AAAA[0])<<8|uint16(aaaaRecord.AAAA[1]),
-				uint16(aaaaRecord.AAAA[2])<<8|uint16(aaaaRecord.AAAA[3]),
-				uint16(aaaaRecord.AAAA[4])<<8|uint16(aaaaRecord.AAAA[5]),
-				uint16(aaaaRecord.AAAA[6])<<8|uint16(aaaaRecord.AAAA[7]),
-				uint16(aaaaRecord.AAAA[8])<<8|uint16(aaaaRecord.AAAA[9]),
-				uint16(aaaaRecord.AAAA[10])<<8|uint16(aaaaRecord.AAAA[11]),
-				uint16(aaaaRecord.AAAA[12])<<8|uint16(aaaaRecord.AAAA[13]),
-				uint16(aaaaRecord.AAAA[14])<<8|uint16(aaaaRecord.AAAA[15]))
-			response.Answers = append(response.Answers, ip)
+			ip := net.IP(aaaaRecord.AAAA[:])
+			response.Answers = append(response.Answers, ip.String())
 		}
 	}
 
@@ -237,6 +241,21 @@ func (m *DNSMonitor) ProcessQuery(ctx context.Context, packet []byte, srcIP, dst
 	query, err := parseDNSQuery(packet)
 	if err != nil {
 		return fmt.Errorf("failed to parse DNS query: %w", err)
+	}
+
+	// Check pending queries limit to prevent DoS
+	var count int
+	m.pendingQueries.Range(func(_, _ interface{}) bool {
+		count++
+		return count < maxPendingQueries // Stop counting if limit reached
+	})
+
+	if count >= maxPendingQueries {
+		attrs := []attribute.KeyValue{
+			attribute.String("error.type", "query_limit_exceeded"),
+		}
+		m.dnsErrorsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+		return fmt.Errorf("too many pending queries (%d), dropping query", count)
 	}
 
 	// Add source/destination IPs and timestamp
@@ -318,8 +337,8 @@ func (m *DNSMonitor) detectProblem(ctx context.Context, query *DNSQuery, respons
 		return "dns_servfail"
 	}
 
-	// Slow query (>100ms)
-	if response.Latency > 100*time.Millisecond {
+	// Slow query (>100ms threshold)
+	if response.Latency > slowQueryThreshold {
 		m.slowQueryCount.Add(1)
 		attrs := []attribute.KeyValue{
 			attribute.String("error.type", "dns_slow_query"),
@@ -340,7 +359,7 @@ func detectDNSProblem(query *DNSQuery, response *DNSResponse) string {
 	if response.ResponseCode == "SERVFAIL" {
 		return "dns_servfail"
 	}
-	if response.Latency > 100*time.Millisecond {
+	if response.Latency > slowQueryThreshold {
 		return "dns_slow_query"
 	}
 	return "dns_success"
