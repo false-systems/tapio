@@ -375,6 +375,12 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 	// Record OTEL metrics
 	n.RecordEvent(ctx)
 
+	// Validate event has network data
+	if evt.NetworkData == nil {
+		log.Printf("[%s] %s.%s: missing network data", n.Name(), evt.Type, evt.Subtype)
+		return
+	}
+
 	// Output event (if stdout enabled)
 	if n.config.Output.Stdout {
 		log.Printf("[%s] %s.%s: %s:%d -> %s:%d (%s)",
