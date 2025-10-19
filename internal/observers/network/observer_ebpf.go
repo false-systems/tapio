@@ -122,7 +122,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 		var evt NetworkEventBPF
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
 			log.Printf("[%s] Error parsing event: %v", n.Name(), err)
-			n.RecordError(ctx, err)
+			n.RecordError(ctx, nil)
 			continue
 		}
 
@@ -170,7 +170,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			// Validate address family
 			if evt.Family != AF_INET && evt.Family != AF_INET6 {
 				log.Printf("[%s] Invalid address family %d, skipping event", n.Name(), evt.Family)
-				n.RecordError(ctx, fmt.Errorf("invalid address family: %d", evt.Family))
+				n.RecordError(ctx, nil)
 				continue
 			}
 
@@ -232,7 +232,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// Record base metrics
 			n.RecordEvent(ctx)
-			n.RecordProcessingTime(ctx, "network_event_processing", float64(time.Since(startTime).Milliseconds()))
+			n.RecordProcessingTime(ctx, nil, float64(time.Since(startTime).Milliseconds()))
 		}
 	}
 }
