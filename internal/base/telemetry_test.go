@@ -55,7 +55,11 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, nil) // No observers
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	healthURL := fmt.Sprintf("http://localhost:%d/health", port)
@@ -101,7 +105,11 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, observers)
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
@@ -147,7 +155,11 @@ func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, observers)
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
