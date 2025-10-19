@@ -27,4 +27,14 @@ static __always_inline void make_conn_key(struct conn_key *key,
 	key->dport = dport;
 }
 
+// Retransmit statistics per connection (stored in LRU map)
+// Tracks TCP retransmissions, packet counts, and RST flags
+struct retransmit_stats {
+	__u64 total_packets;      // Total packets sent (approximation)
+	__u64 retransmits;        // Number of retransmissions
+	__u64 last_retransmit_ns; // Timestamp of last retransmit
+	__u8  rst_received;       // 1 if RST packet received, 0 otherwise
+	__u8  padding[7];         // Align to 8 bytes
+};
+
 #endif /* __TAPIO_CONN_TRACKING_H__ */

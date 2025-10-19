@@ -50,18 +50,10 @@ static __always_inline const char *tcp_state_name(__u8 state)
 	}
 }
 
-// NOTE: conn_key now defined in conn_tracking.h (shared across observers)
-
-// Retransmit statistics per connection (stored in LRU map)
-struct retransmit_stats {
-	__u64 total_packets;      // Total packets sent (approximation)
-	__u64 retransmits;        // Number of retransmissions
-	__u64 last_retransmit_ns; // Timestamp of last retransmit
-	__u8  rst_received;       // 1 if RST packet received, 0 otherwise
-	__u8  padding[7];         // Align to 8 bytes
-};
-
-// NOTE: make_conn_key() now defined in conn_tracking.h (shared helper)
+// NOTE: Connection tracking structs now defined in conn_tracking.h (shared):
+//   - conn_key: Connection identifier (saddr, daddr, sport, dport)
+//   - retransmit_stats: Retransmit/RST tracking per connection
+//   - make_conn_key(): Helper to create connection keys
 
 // ============================================================================
 // Kernel Socket Structures (Minimal CO-RE Definitions)
