@@ -160,6 +160,7 @@ jobs:
           path: |
             internal/observers/network/bpf/*_bpfel.go
             internal/observers/network/bpf/*_bpfeb.go
+            internal/observers/network/bpf/*.o
           retention-days: 1
 
   build-docker:
