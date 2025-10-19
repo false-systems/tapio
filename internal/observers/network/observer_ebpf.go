@@ -67,7 +67,10 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	}
 	defer objs.Close()
 
-	// Create BaseEBPFManager (without collection since bpf2go doesn't expose it)
+	// Create BaseEBPFManager. We pass nil because bpf2go generates typed structs
+	// (NetworkObjects, NetworkPrograms, NetworkMaps) but doesn't expose the underlying
+	// *ebpf.Collection required by NewEBPFManagerFromCollection. We use the manager
+	// only for tracepoint attachment; individual programs/maps accessed via objs.
 	n.ebpfMgr = base.NewEBPFManagerFromCollection(nil)
 	defer n.ebpfMgr.Close()
 
