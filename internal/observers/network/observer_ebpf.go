@@ -146,6 +146,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 	// Initialize processors (Design Doc 003 - processor pattern)
 	linkProc := NewLinkProcessor()
 	dnsProc := NewDNSProcessor()
+	statusProc := NewStatusProcessor()
 
 	// Periodically report ringbuffer utilization
 	ticker := time.NewTicker(5 * time.Second)
@@ -202,6 +203,11 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			}
 
 			if domainEvent := dnsProc.Process(ctx, evt); domainEvent != nil {
+				n.emitDomainEvent(ctx, domainEvent)
+				continue
+			}
+
+			if domainEvent := statusProc.Process(ctx, evt); domainEvent != nil {
 				n.emitDomainEvent(ctx, domainEvent)
 				continue
 			}
