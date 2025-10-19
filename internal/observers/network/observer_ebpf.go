@@ -67,6 +67,9 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	}
 	defer objs.Close()
 
+	// Store map reference for reading connection stats
+	n.connStatsMap = objs.ConnStats
+
 	// Create BaseEBPFManager. We pass nil because bpf2go generates typed structs
 	// (NetworkObjects, NetworkPrograms, NetworkMaps) but doesn't expose the underlying
 	// *ebpf.Collection required by NewEBPFManagerFromCollection. We use the manager
