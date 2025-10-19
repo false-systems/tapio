@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cilium/ebpf"
 	"github.com/yairfalse/tapio/internal/base"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -31,6 +32,9 @@ type NetworkObserver struct {
 	*base.BaseObserver
 	config  Config
 	ebpfMgr *base.EBPFManager // eBPF lifecycle manager
+
+	// eBPF map references (nil when eBPF not loaded)
+	connStatsMap *ebpf.Map // conn_stats LRU map from eBPF
 
 	// Track connections that received RST (for distinguishing refused vs timeout)
 	rstConnections sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: true
@@ -244,4 +248,63 @@ func extractComm(comm [16]byte) string {
 		}
 	}
 	return string(comm[:])
+}
+
+// ebpfConnKey matches the eBPF conn_key struct (IPv4 only)
+type ebpfConnKey struct {
+	SrcAddr uint32
+	DstAddr uint32
+	SrcPort uint16
+	DstPort uint16
+}
+
+// ebpfRetransmitStats matches the eBPF retransmit_stats struct
+type ebpfRetransmitStats struct {
+	TotalPackets     uint64
+	Retransmits      uint64
+	LastRetransmitNs uint64
+	RSTReceived      uint8
+	Padding          [7]uint8
+}
+
+// ConnectionStatsEntry represents connection statistics from eBPF LRU map
+type ConnectionStatsEntry struct {
+	ConnKey      string
+	TotalPackets uint64
+	Retransmits  uint64
+	RSTReceived  bool
+}
+
+// getConnectionStats reads connection statistics from eBPF LRU map
+// Returns empty slice if eBPF not loaded or on error
+func (n *NetworkObserver) getConnectionStats() []ConnectionStatsEntry {
+	// Return empty if eBPF not loaded
+	if n.connStatsMap == nil {
+		return []ConnectionStatsEntry{}
+	}
+
+	var stats []ConnectionStatsEntry
+	var key ebpfConnKey
+	var value ebpfRetransmitStats
+
+	// Iterate through eBPF map entries
+	iter := n.connStatsMap.Iterate()
+	for iter.Next(&key, &value) {
+		// Convert IP addresses to strings
+		srcIP := convertIPv4(key.SrcAddr)
+		dstIP := convertIPv4(key.DstAddr)
+
+		// Create connection key string
+		connKey := fmt.Sprintf("%s:%d:%s:%d", srcIP, key.SrcPort, dstIP, key.DstPort)
+
+		// Add entry
+		stats = append(stats, ConnectionStatsEntry{
+			ConnKey:      connKey,
+			TotalPackets: value.TotalPackets,
+			Retransmits:  value.Retransmits,
+			RSTReceived:  value.RSTReceived != 0,
+		})
+	}
+
+	return stats
 }
