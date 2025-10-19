@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package network
 
 import (
@@ -26,7 +29,8 @@ type retransmitStats struct {
 
 type NetworkObserver struct {
 	*base.BaseObserver
-	config Config
+	config  Config
+	ebpfMgr *base.EBPFManager // eBPF lifecycle manager
 
 	// Track connections that received RST (for distinguishing refused vs timeout)
 	rstConnections sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: true

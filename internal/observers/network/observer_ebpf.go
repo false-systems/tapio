@@ -12,8 +12,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/network/bpf"
 )
 
@@ -60,61 +60,57 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	// Close channel when exiting to signal processor stage
 	defer close(eventCh)
 
-	// Load eBPF objects
+	// Load eBPF objects (bpf2go-generated)
 	objs := &bpf.NetworkObjects{}
 	if err := bpf.LoadNetworkObjects(objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
 	defer objs.Close()
 
+	// Create BaseEBPFManager (without collection since bpf2go doesn't expose it)
+	n.ebpfMgr = base.NewEBPFManagerFromCollection(nil)
+	defer n.ebpfMgr.Close()
+
 	// Attach to inet_sock_set_state tracepoint (TCP state transitions)
-	tpState, err := link.Tracepoint("sock", "inet_sock_set_state", objs.TraceInetSockSetState, nil)
-	if err != nil {
-		return fmt.Errorf("failed to attach inet_sock_set_state tracepoint: %w", err)
+	if err := n.ebpfMgr.AttachTracepointWithProgram(objs.TraceInetSockSetState, "sock", "inet_sock_set_state"); err != nil {
+		return fmt.Errorf("failed to attach inet_sock_set_state: %w", err)
 	}
-	defer tpState.Close()
 
 	// Attach to tcp_receive_reset tracepoint (RST packets)
-	tpRST, err := link.Tracepoint("tcp", "tcp_receive_reset", objs.TraceTcpReceiveReset, nil)
-	if err != nil {
-		return fmt.Errorf("failed to attach tcp_receive_reset tracepoint: %w", err)
+	if err := n.ebpfMgr.AttachTracepointWithProgram(objs.TraceTcpReceiveReset, "tcp", "tcp_receive_reset"); err != nil {
+		return fmt.Errorf("failed to attach tcp_receive_reset: %w", err)
 	}
-	defer tpRST.Close()
 
 	// Attach to tcp_retransmit_skb tracepoint (packet retransmissions)
-	tpRetx, err := link.Tracepoint("tcp", "tcp_retransmit_skb", objs.TraceTcpRetransmitSkb, nil)
-	if err != nil {
-		return fmt.Errorf("failed to attach tcp_retransmit_skb tracepoint: %w", err)
+	if err := n.ebpfMgr.AttachTracepointWithProgram(objs.TraceTcpRetransmitSkb, "tcp", "tcp_retransmit_skb"); err != nil {
+		return fmt.Errorf("failed to attach tcp_retransmit_skb: %w", err)
 	}
-	defer tpRetx.Close()
 
-	// Open ring buffer reader
-	rb, err := ringbuf.NewReader(objs.Events)
+	log.Printf("[%s] eBPF programs loaded and attached (3 tracepoints)", n.Name())
+
+	// Read ring buffer events (bpf2go-generated objects give us direct map access)
+	// Monitor context and close ring buffer when cancelled
+	go func() {
+		<-ctx.Done()
+		n.ebpfMgr.Close() // Closes all links
+	}()
+
+	// Read ring buffer until closed
+	rb := objs.Events
+	reader, err := ringbuf.NewReader(rb)
 	if err != nil {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
+	defer reader.Close()
 
-	log.Printf("[%s] eBPF programs loaded and attached (inet_sock_set_state + tcp_receive_reset)", n.Name())
-
-	// Monitor context and close ring buffer when cancelled
-	// This unblocks rb.Read() immediately on shutdown
-	go func() {
-		<-ctx.Done()
-		rb.Close()
-	}()
-
-	// Ensure cleanup on exit
-
-	// Read ring buffer until closed
 	for {
-		// Read event from ring buffer (blocks until event or Close())
-		record, err := rb.Read()
+		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				log.Printf("[%s] Shutting down eBPF reader", n.Name())
-				return nil // Clean shutdown
+				log.Printf("[%s] Ring buffer closed, shutting down", n.Name())
+				return nil
 			}
-			log.Printf("[%s] Error reading from ring buffer: %v", n.Name(), err)
+			log.Printf("[%s] Error reading ring buffer: %v", n.Name(), err)
 			n.RecordError(ctx, nil)
 			continue
 		}
