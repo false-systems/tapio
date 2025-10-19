@@ -43,6 +43,15 @@ func LoadEBPF(objectPath string) (*EBPFManager, error) {
 	}, nil
 }
 
+// NewEBPFManagerFromCollection creates an EBPFManager from an existing collection
+// Used for bpf2go-generated code where LoadNetworkObjects() creates the collection
+func NewEBPFManagerFromCollection(coll *ebpf.Collection) *EBPFManager {
+	return &EBPFManager{
+		collection: coll,
+		links:      make([]link.Link, 0),
+	}
+}
+
 // AttachKprobe attaches a program to a kprobe
 func (m *EBPFManager) AttachKprobe(progName, symbol string) error {
 	prog := m.collection.Programs[progName]
@@ -85,6 +94,22 @@ func (m *EBPFManager) AttachTracepoint(progName, group, name string) error {
 	lnk, err := link.Tracepoint(group, name, prog, nil)
 	if err != nil {
 		return fmt.Errorf("failed to attach tracepoint %s:%s to %s: %w", group, name, progName, err)
+	}
+
+	m.links = append(m.links, lnk)
+	return nil
+}
+
+// AttachTracepointWithProgram attaches a program object directly to a tracepoint
+// Used for bpf2go-generated code where programs are exposed as typed fields
+func (m *EBPFManager) AttachTracepointWithProgram(prog *ebpf.Program, group, name string) error {
+	if prog == nil {
+		return fmt.Errorf("program cannot be nil")
+	}
+
+	lnk, err := link.Tracepoint(group, name, prog, nil)
+	if err != nil {
+		return fmt.Errorf("failed to attach tracepoint %s:%s: %w", group, name, err)
 	}
 
 	m.links = append(m.links, lnk)

@@ -30,6 +30,11 @@ typedef __s16 s16;
 typedef __s32 s32;
 typedef __s64 s64;
 
+// Network byte order types
+typedef __u16 __be16;
+typedef __u32 __be32;
+typedef __u32 __wsum;
+
 // Common kernel types
 typedef unsigned int __kernel_size_t;
 typedef int __kernel_ssize_t;
@@ -84,24 +89,8 @@ struct sockaddr {
     char sa_data[14];
 };
 
-// BPF helper function declarations
-static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *) 1;
-static int (*bpf_map_update_elem)(void *map, const void *key, const void *value, __u64 flags) = (void *) 2;
-static int (*bpf_map_delete_elem)(void *map, const void *key) = (void *) 3;
-static int (*bpf_probe_read)(void *dst, __u32 size, const void *unsafe_ptr) = (void *) 4;
-static int (*bpf_probe_read_kernel)(void *dst, __u32 size, const void *unsafe_ptr) = (void *) 113;
-static int (*bpf_probe_read_user)(void *dst, __u32 size, const void *unsafe_ptr) = (void *) 112;
-static __u64 (*bpf_ktime_get_ns)(void) = (void *) 5;
-static int (*bpf_trace_printk)(const char *fmt, __u32 fmt_size, ...) = (void *) 6;
-static __u32 (*bpf_get_prandom_u32)(void) = (void *) 7;
-static __u32 (*bpf_get_smp_processor_id)(void) = (void *) 8;
-static int (*bpf_get_current_comm)(void *buf, __u32 size_of_buf) = (void *) 16;
-static __u64 (*bpf_get_current_pid_tgid)(void) = (void *) 14;
-static __u64 (*bpf_get_current_uid_gid)(void) = (void *) 15;
-static long (*bpf_ringbuf_output)(void *ringbuf, void *data, __u64 size, __u64 flags) = (void *) 130;
-static void *(*bpf_ringbuf_reserve)(void *ringbuf, __u64 size, __u64 flags) = (void *) 131;
-static void (*bpf_ringbuf_submit)(void *data, __u64 flags) = (void *) 132;
-static void (*bpf_ringbuf_discard)(void *data, __u64 flags) = (void *) 133;
+// BPF helper functions are provided by <bpf/bpf_helpers.h>
+// Do NOT define them here - causes conflicts with libbpf headers
 
 // BPF map types
 enum bpf_map_type {
@@ -134,6 +123,27 @@ enum bpf_map_type {
     BPF_MAP_TYPE_STRUCT_OPS,
     BPF_MAP_TYPE_RINGBUF,
 };
+
+// BPF flags (provided by bpf_helpers.h in modern libbpf)
+// Only define if not already defined
+#ifndef BPF_ANY
+enum {
+    BPF_NOEXIST = 1,
+    BPF_EXIST = 2,
+    BPF_ANY = 0,
+};
+#endif
+
+// Pin types are provided by <bpf/bpf_helpers.h>
+// Do NOT define them here - causes conflicts
+
+// Helper macros for map definitions
+#ifndef __uint
+#define __uint(name, val) int (*name)[val]
+#endif
+#ifndef __type
+#define __type(name, val) typeof(val) *name
+#endif
 
 // Section macro for BPF programs
 #ifndef SEC
