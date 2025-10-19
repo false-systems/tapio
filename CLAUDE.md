@@ -7,12 +7,14 @@
 
 ### AUTOMATED REJECTION SYSTEM ACTIVE
 Your code WILL BE AUTOMATICALLY REJECTED if it contains:
+- **Code written before tests** - **INSTANT REJECTION - TDD MANDATORY (RED → GREEN → REFACTOR)**
 - `map[string]interface{}` - **BANNED - USE TYPED STRUCTS ONLY**
 - `interface{}` in public APIs
 - `TODO`, `FIXME`, `XXX`, `HACK` comments
 - Ignored errors (`_ = someFunc()`)
 - Missing tests or <80% coverage
 - Stub functions or incomplete implementations
+- Commits where tests are not GREEN
 
 ```bash
 # Pre-commit hooks WILL BLOCK violations:
@@ -57,45 +59,191 @@ Failure modes:
 - Rate limit → Circuit breaker
 ```
 
-### 2. Write Tests Before Code
+### 2. TDD MANDATORY: RED → GREEN → REFACTOR
+
+**ALL CODE MUST FOLLOW TEST-DRIVEN DEVELOPMENT - ZERO EXCEPTIONS**
+
+#### The Iron Rule: Tests First, Code Second
+
 ```go
-// FIRST: Write the test
+// ❌ INSTANT REJECTION - Writing code before tests
+func NewReconciler() *Reconciler {
+    return &Reconciler{}  // Code written first - REJECTED!
+}
+
+// ✅ MANDATORY - TDD workflow
+// Step 1: RED - Write failing test FIRST
 func TestReconciler_HandleOrphans(t *testing.T) {
-    // Define expected behavior
+    reconciler := NewReconciler()  // ❌ Doesn't exist yet - test FAILS
+    require.NotNil(t, reconciler)
+
     orphan := Resource{ID: "i-123", Tags: map[string]string{}}
-    reconciler := NewReconciler()
     decision := reconciler.HandleOrphan(orphan)
     assert.Equal(t, "notify", decision.Action)
 }
-// THEN: Write minimal code to pass
-// NO STUBS - complete implementation only
-```
-observers should have 
-  1. observer_unit_test.go - Unit tests for individual methods and components
-  2. observer_e2e_test.go - End-to-end workflow tests simulating complete scenarios
-  3. observer_integration_test.go - Integration tests with real network components
-  4. observer_system_test.go - Linux-specific system tests for eBPF functionality
-  5. observer_performance_test.go - Performance benchmarks and load tests
-  6. observer_negative_test.go - Negative tests for error handling and edge cases
+// Verify: go test ./... → FAILS ✅ RED confirmed
 
-### 3. Code in Small Chunks
+// Step 2: GREEN - Write MINIMAL code to pass
+type Reconciler struct {}
+
+func NewReconciler() *Reconciler {
+    return &Reconciler{}
+}
+
+func (r *Reconciler) HandleOrphan(res Resource) Decision {
+    return Decision{Action: "notify"}  // Minimal implementation
+}
+// Verify: go test ./... → PASS ✅ GREEN confirmed
+
+// Step 3: REFACTOR - Improve code quality, add edge cases
+func (r *Reconciler) HandleOrphan(res Resource) Decision {
+    if len(res.Tags) == 0 {
+        return Decision{Action: "notify"}
+    }
+    return Decision{Action: "skip"}
+}
+// Verify: go test ./... → STILL PASS ✅ REFACTOR complete
+```
+
+#### TDD Workflow Checklist (MANDATORY for EVERY feature)
+
+**RED Phase** (Write Failing Tests):
+- [ ] Write test that defines expected behavior
+- [ ] Verify test FAILS (compilation error or test failure)
+- [ ] If test passes without implementation → test is wrong!
+
+**GREEN Phase** (Minimal Implementation):
+- [ ] Write MINIMAL code to make test pass
+- [ ] Verify ALL tests pass
+- [ ] NO gold plating, NO premature optimization
+
+**REFACTOR Phase** (Improve Quality):
+- [ ] Add edge case tests (IPv4/IPv6, nil checks, errors)
+- [ ] Extract helper functions
+- [ ] Improve naming and clarity
+- [ ] Verify tests STILL pass after refactor
+
+**Commit**:
+- [ ] `git add . && git commit -m "feat: ..."` (< 30 lines)
+- [ ] Push only when GREEN
+
+#### Observer Test Structure (MANDATORY)
+
+Every observer MUST have these test files:
+1. `observer_unit_test.go` - Unit tests for individual methods
+2. `observer_e2e_test.go` - End-to-end workflow tests
+3. `observer_integration_test.go` - Integration tests with real components
+4. `observer_system_test.go` - Linux-specific system tests (eBPF)
+5. `observer_performance_test.go` - Performance benchmarks
+6. `observer_negative_test.go` - Error handling and edge cases
+
+#### TDD Examples by Use Case
+
+**Example 1: New Feature**
+```bash
+# RED: Write failing test
+$ vim handler_test.go  # Write TestHandler_ProcessEvent
+$ go test ./...        # FAILS ✅
+
+# GREEN: Minimal implementation
+$ vim handler.go       # Write ProcessEvent() function
+$ go test ./...        # PASS ✅
+
+# REFACTOR: Add edge cases
+$ vim handler_test.go  # Add TestHandler_ProcessEvent_NilInput
+$ vim handler.go       # Add nil check
+$ go test ./...        # PASS ✅
+
+# COMMIT
+$ git commit -m "feat: add event handler with nil check"
+```
+
+**Example 2: Bug Fix**
+```bash
+# RED: Write test that reproduces bug
+$ vim processor_test.go  # TestProcessor_IPv6 (currently fails)
+$ go test ./...          # FAILS ✅ Bug reproduced
+
+# GREEN: Fix the bug
+$ vim processor.go       # Add IPv6 handling
+$ go test ./...          # PASS ✅
+
+# COMMIT
+$ git commit -m "fix: handle IPv6 in processor"
+```
+
+**Example 3: Refactoring**
+```bash
+# GREEN: Ensure all tests pass BEFORE refactor
+$ go test ./...  # PASS ✅
+
+# REFACTOR: Improve code
+$ vim handler.go  # Extract helper function
+$ go test ./...   # PASS ✅
+
+# COMMIT
+$ git commit -m "refactor: extract validation logic"
+```
+
+#### Why TDD is MANDATORY
+
+1. **Prevents bugs** - Tests define correct behavior before code
+2. **Enables refactoring** - Tests catch regressions immediately
+3. **Documents behavior** - Tests show how code should be used
+4. **Forces good design** - Hard-to-test code = bad design
+5. **Builds confidence** - Green tests = ship with confidence
+
+**See Section 4 for detailed TDD workflow examples**
+
+**NO EXCEPTIONS. NO EXCUSES. RED → GREEN → REFACTOR.**
+
+### 3. Code in Small Chunks (Following TDD)
+
+**MANDATORY**: Every commit follows RED → GREEN → REFACTOR
+
 ```bash
 # Work on dedicated branches
 git checkout -b feat/orphan-detection
 
-# Small iterations with verification
-# 1. Write function (max 30 lines) → fmt → vet → lint → commit
-# 2. Add validation → test → fmt → vet → lint → commit
-# 3. Add error handling → test → fmt → vet → lint → commit
+# TDD iterations (RED → GREEN → REFACTOR)
+# Iteration 1: Core functionality
+$ vim handler_test.go    # RED: Write failing test
+$ go test ./...          # FAILS ✅
+$ vim handler.go         # GREEN: Minimal implementation
+$ go test ./...          # PASS ✅
+$ go fmt ./... && go vet ./...
+$ git commit -m "feat: add handler core logic" # ≤30 lines
+
+# Iteration 2: Edge case (nil check)
+$ vim handler_test.go    # RED: Add TestHandler_NilInput
+$ go test ./...          # FAILS ✅
+$ vim handler.go         # GREEN: Add nil check
+$ go test ./...          # PASS ✅
+$ go fmt ./... && go vet ./...
+$ git commit -m "feat: add nil check to handler" # ≤30 lines
+
+# Iteration 3: Refactor
+$ go test ./...          # GREEN: All tests pass ✅
+$ vim handler.go         # REFACTOR: Extract helper function
+$ go test ./...          # PASS ✅
+$ go fmt ./... && go vet ./...
+$ git commit -m "refactor: extract validation logic" # ≤30 lines
 
 # MANDATORY before EVERY commit:
 go fmt ./...
 go vet ./...
 golangci-lint run
+go test ./...  # Must be GREEN before commit!
 
 # Push and PR when feature is complete
 git push origin feat/orphan-detection
 ```
+
+**TDD Commit Pattern**:
+- Each commit = 1 complete RED → GREEN → REFACTOR cycle
+- Commit size: ≤30 lines
+- Commit message: `feat:`, `fix:`, `refactor:`, `test:`
+- All tests GREEN before push
 
 **NO STUBS. NO TODOs. COMPLETE CODE ONLY.**
 
