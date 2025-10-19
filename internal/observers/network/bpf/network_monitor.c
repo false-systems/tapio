@@ -59,6 +59,16 @@ struct {
 	__uint(pinning, LIBBPF_PIN_BY_NAME);  // Persist across restarts
 } baseline_rtt SEC(".maps");
 
+// Connection statistics tracking (LRU auto-evicts old connections)
+// Tracks retransmits, packet counts, RST flags per connection
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 10000);  // Track up to 10k connections
+	__type(key, struct conn_key);
+	__type(value, struct retransmit_stats);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);  // Persist across restarts
+} conn_stats SEC(".maps");
+
 // RTT states
 #define RTT_STATE_NO_BASELINE 0
 #define RTT_STATE_LEARNING    1
