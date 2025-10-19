@@ -7,6 +7,9 @@
 // Reusable across network, dns, http observers
 // Based on Cilium's layered library approach
 
+// Import shared connection tracking library
+#include "conn_tracking.h"
+
 // TCP protocol number
 #define IPPROTO_TCP 6
 #define IPPROTO_UDP 17
@@ -47,13 +50,7 @@ static __always_inline const char *tcp_state_name(__u8 state)
 	}
 }
 
-// Connection key for tracking TCP flows (IPv4 only for now)
-struct conn_key {
-	__u32 saddr;
-	__u32 daddr;
-	__u16 sport;
-	__u16 dport;
-};
+// NOTE: conn_key now defined in conn_tracking.h (shared across observers)
 
 // Retransmit statistics per connection (stored in LRU map)
 struct retransmit_stats {
@@ -64,16 +61,7 @@ struct retransmit_stats {
 	__u8  padding[7];         // Align to 8 bytes
 };
 
-// Helper: Create connection key from tracepoint args
-static __always_inline void make_conn_key(struct conn_key *key,
-					  __u32 saddr, __u32 daddr,
-					  __u16 sport, __u16 dport)
-{
-	key->saddr = saddr;
-	key->daddr = daddr;
-	key->sport = sport;
-	key->dport = dport;
-}
+// NOTE: make_conn_key() now defined in conn_tracking.h (shared helper)
 
 // ============================================================================
 // Kernel Socket Structures (Minimal CO-RE Definitions)
