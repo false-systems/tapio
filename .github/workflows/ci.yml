@@ -66,11 +66,17 @@ jobs:
           [ -n "$DOCKER_FILES" ] && echo "has_docker=true" >> $GITHUB_OUTPUT || echo "has_docker=false" >> $GITHUB_OUTPUT
 
   verify-go:
-    needs: detect-changes
+    needs: [detect-changes, build-ebpf]
     if: needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download eBPF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ebpf-generated
+          path: internal/observers/network/bpf/
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -95,11 +101,17 @@ jobs:
         run: golangci-lint run --timeout=10m ${{ needs.detect-changes.outputs.go_packages }}
 
   test-go:
-    needs: detect-changes
+    needs: [detect-changes, build-ebpf]
     if: needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download eBPF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ebpf-generated
+          path: internal/observers/network/bpf/
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -120,8 +132,6 @@ jobs:
           fi
 
   build-ebpf:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_ebpf == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,16 +147,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
 
-      - name: Generate eBPF objects
+      - name: Generate eBPF code for network observer
         run: |
-          # Generate only for observers with changed eBPF files
-          for ebpf_file in ${{ needs.detect-changes.outputs.ebpf_files }}; do
-            OBSERVER_DIR=$(echo $ebpf_file | grep -o 'internal/observers/[^/]*' | head -1)
-            if [ -n "$OBSERVER_DIR" ]; then
-              echo "Generating eBPF for $OBSERVER_DIR"
-              (cd "$OBSERVER_DIR/bpf" && go generate || true)
-            fi
-          done
+          cd internal/observers/network/bpf
+          go generate
+          ls -la *.go  # Show generated files
+
+      - name: Upload generated eBPF artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ebpf-generated
+          path: |
+            internal/observers/network/bpf/*_bpfel.go
+            internal/observers/network/bpf/*_bpfeb.go
+          retention-days: 1
 
   build-docker:
     needs: detect-changes
@@ -172,11 +186,17 @@ jobs:
           done
 
   build:
-    needs: [detect-changes, verify-go]
+    needs: [detect-changes, build-ebpf, verify-go]
     if: needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download eBPF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ebpf-generated
+          path: internal/observers/network/bpf/
 
       - name: Setup Go
         uses: actions/setup-go@v5
