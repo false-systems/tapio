@@ -8,6 +8,7 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // TestRecordProcessingTimeWithTraceContext tests that metrics work with trace context
@@ -20,9 +21,9 @@ func TestRecordProcessingTimeWithTraceContext(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Set up a noop tracer provider (needed for valid spans in tests)
-	tp := trace.NewNoopTracerProvider()
+	tp := noop.NewTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(trace.NewNoopTracerProvider())
+	defer otel.SetTracerProvider(noop.NewTracerProvider())
 
 	// Create a tracer and start a span (simulates active trace)
 	tracer := tp.Tracer("test-tracer")
