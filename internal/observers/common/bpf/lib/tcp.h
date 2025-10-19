@@ -55,6 +55,15 @@ struct conn_key {
 	__u16 dport;
 };
 
+// Retransmit statistics per connection (stored in LRU map)
+struct retransmit_stats {
+	__u64 total_packets;      // Total packets sent (approximation)
+	__u64 retransmits;        // Number of retransmissions
+	__u64 last_retransmit_ns; // Timestamp of last retransmit
+	__u8  rst_received;       // 1 if RST packet received, 0 otherwise
+	__u8  padding[7];         // Align to 8 bytes
+};
+
 // Helper: Create connection key from tracepoint args
 static __always_inline void make_conn_key(struct conn_key *key,
 					  __u32 saddr, __u32 daddr,
