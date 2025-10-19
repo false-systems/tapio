@@ -192,8 +192,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// Handle different event types
 			if evt.EventType == EventTypeRSTReceived {
-				// RST received - mark this connection as refused
-				n.rstConnections.Store(connKey, true)
+				// RST received - already marked in eBPF LRU map by tcp_receive_reset handler
 				log.Printf("[%s] RST received for %s (state=%s)", n.Name(), connKey, tcpStateName(evt.OldState))
 
 				// Record RST metric
@@ -255,28 +254,41 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 	sndCwnd := evt.NewState      // snd_cwnd from eBPF
 	comm := extractComm(evt.Comm)
 
-	// Update retransmit stats for this connection
-	statsInterface, _ := n.retransmitStats.LoadOrStore(connKey, &retransmitStats{})
-	stats := statsInterface.(*retransmitStats)
-	stats.retransmits++
-	stats.totalPackets++ // Approximate: increment on each retransmit
-	stats.lastRetransmit = time.Now()
+	// Read stats from eBPF LRU map (already updated by tcp_retransmit_skb handler)
+	var key ebpfConnKey
+	var stats ebpfRetransmitStats
+	if n.connStatsMap != nil {
+		key = ebpfConnKey{
+			SrcAddr: ipv4StringToUint32(srcIP),
+			DstAddr: ipv4StringToUint32(dstIP),
+			SrcPort: evt.SrcPort,
+			DstPort: evt.DstPort,
+		}
+		if err := n.connStatsMap.Lookup(&key, &stats); err != nil {
+			// Entry not found in map yet - stats remain zero-initialized
+			// This is expected for new connections, not an error condition
+		}
+	}
 
-	// Track total connections in retransmit tracking (map size approximation)
-	var connCount int64
-	n.retransmitStats.Range(func(_, _ interface{}) bool {
-		connCount++
-		return true
-	})
-	n.ebpfMapSize.Record(ctx, connCount)
+	// Track eBPF map size (number of tracked connections)
+	if n.connStatsMap != nil {
+		var count uint32
+		iter := n.connStatsMap.Iterate()
+		var k ebpfConnKey
+		var v ebpfRetransmitStats
+		for iter.Next(&k, &v) {
+			count++
+		}
+		n.ebpfMapSize.Record(ctx, int64(count))
+	}
 
 	// Record retransmit metric
 	n.retransmitsTotal.Add(ctx, 1)
 
 	// Calculate retransmit rate if we have enough data
 	const minPacketsForRate = 100
-	if stats.totalPackets >= minPacketsForRate {
-		retxRate := float64(stats.retransmits) / float64(stats.totalPackets)
+	if stats.TotalPackets >= minPacketsForRate {
+		retxRate := float64(stats.Retransmits) / float64(stats.TotalPackets)
 		n.retransmitRate.Record(ctx, retxRate)
 
 		// Detect high retransmit rate (>0.05 = 5% indicates network issues)
@@ -288,8 +300,8 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 			// Output warning if stdout enabled
 			if n.config.Output.Stdout {
 				log.Printf("[%s] HIGH RETRANSMIT RATE: %s (%s) %.1f%% (retx=%d, total=%d, cwnd=%d)",
-					n.Name(), connKey, comm, retxRate,
-					stats.retransmits, stats.totalPackets, sndCwnd)
+					n.Name(), connKey, comm, retxRate*100,
+					stats.Retransmits, stats.TotalPackets, sndCwnd)
 			}
 		}
 	}
