@@ -1,6 +1,6 @@
 //go:build ignore
 
-#include "vmlinux.h"
+#include "../../base/bpf/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -107,7 +107,10 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 
 	// Read smoothed RTT from tcp_sock (srtt_us is in microseconds, divided by 8)
 	__u32 srtt_us = 0;
-	bpf_core_read(&srtt_us, sizeof(srtt_us), &tp->srtt_us);
+	if (bpf_core_read(&srtt_us, sizeof(srtt_us), &tp->srtt_us) != 0) {
+		// Failed to read RTT - skip RTT tracking for this connection
+		goto skip_rtt_tracking;
+	}
 	__u32 rtt_us = srtt_us >> 3;
 
 	// Get current time for baseline tracking
@@ -204,6 +207,7 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	// Old code had: bpf_map_delete_elem(&baseline_rtt, &key) on TCP_CLOSE
 	// LRU handles eviction based on least-recently-used policy
 
+skip_rtt_tracking:
 	// Emit regular state change event for important transitions
 	// (connection failures, resets, etc - NOT every ESTABLISHED heartbeat)
 	if (args->oldstate != args->newstate &&
@@ -394,12 +398,20 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 
 		// Read total retransmits
 		__u8 total_retrans = 0;
-		bpf_core_read(&total_retrans, sizeof(total_retrans), &tp->total_retrans);
+		if (bpf_core_read(&total_retrans, sizeof(total_retrans), &tp->total_retrans) != 0) {
+			// Failed to read total_retrans - discard event
+			bpf_ringbuf_discard(evt, 0);
+			return 0;
+		}
 		evt->old_state = total_retrans;  // Reuse old_state field
 
 		// Read congestion window (clamped to u8)
 		__u32 snd_cwnd = 0;
-		bpf_core_read(&snd_cwnd, sizeof(snd_cwnd), &tp->snd_cwnd);
+		if (bpf_core_read(&snd_cwnd, sizeof(snd_cwnd), &tp->snd_cwnd) != 0) {
+			// Failed to read snd_cwnd - discard event
+			bpf_ringbuf_discard(evt, 0);
+			return 0;
+		}
 		evt->new_state = snd_cwnd > 255 ? 255 : (__u8)snd_cwnd;  // Reuse new_state field
 	}
 
