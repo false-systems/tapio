@@ -41,6 +41,23 @@ func TestNewNetworkObserver(t *testing.T) {
 	assert.NotNil(t, observer.BaseObserver)
 }
 
+func TestNetworkObserver_ReadConnectionStats(t *testing.T) {
+	setupOTEL(t)
+
+	config := Config{
+		Output: base.OutputConfig{Stdout: true},
+	}
+	observer, err := NewNetworkObserver("test-network", config)
+	require.NoError(t, err)
+	require.NotNil(t, observer)
+
+	// Test reading connection stats from eBPF LRU map
+	// When map is not loaded (no eBPF running), should return empty/zero stats
+	stats := observer.getConnectionStats()
+	assert.NotNil(t, stats)
+	assert.Equal(t, 0, len(stats), "Should return empty stats when eBPF not running")
+}
+
 func TestNetworkObserver_Name(t *testing.T) {
 	setupOTEL(t)
 
