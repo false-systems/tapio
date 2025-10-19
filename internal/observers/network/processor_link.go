@@ -36,11 +36,21 @@ func (p *LinkProcessor) isSYNTimeout(evt NetworkEventBPF) bool {
 
 // createLinkFailureEvent creates a domain event for link failures
 func (p *LinkProcessor) createLinkFailureEvent(evt NetworkEventBPF, failureType string) *domain.ObserverEvent {
+	// Convert IP addresses (handle both IPv4 and IPv6)
+	var srcIP, dstIP string
+	if evt.Family == AF_INET {
+		srcIP = convertIPv4(evt.SrcIP)
+		dstIP = convertIPv4(evt.DstIP)
+	} else {
+		srcIP = convertIPv6(evt.SrcIPv6)
+		dstIP = convertIPv6(evt.DstIPv6)
+	}
+
 	// Populate existing domain.NetworkEventData fields
 	netData := &domain.NetworkEventData{
 		Protocol: "TCP",
-		SrcIP:    convertIPv4(evt.SrcIP),
-		DstIP:    convertIPv4(evt.DstIP),
+		SrcIP:    srcIP,
+		DstIP:    dstIP,
 		SrcPort:  evt.SrcPort,
 		DstPort:  evt.DstPort,
 		TCPState: tcpStateName(evt.NewState),

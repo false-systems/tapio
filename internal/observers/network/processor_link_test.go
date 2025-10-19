@@ -75,3 +75,30 @@ func TestLinkProcessor_EstablishedToClose(t *testing.T) {
 
 	assert.Nil(t, domainEvt, "Normal close should not trigger link failure")
 }
+
+// TestLinkProcessor_SYNTimeout_IPv6 verifies IPv6 SYN timeout detection
+func TestLinkProcessor_SYNTimeout_IPv6(t *testing.T) {
+	proc := NewLinkProcessor()
+	require.NotNil(t, proc)
+
+	// IPv6 SYN timeout: ::1 (localhost) → 2001:db8::1
+	evt := NetworkEventBPF{
+		OldState: TCP_SYN_SENT,
+		NewState: TCP_CLOSE,
+		SrcIPv6:  [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},             // ::1
+		DstIPv6:  [16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, // 2001:db8::1
+		SrcPort:  12345,
+		DstPort:  80,
+		Family:   AF_INET6,
+	}
+
+	ctx := context.Background()
+	domainEvt := proc.Process(ctx, evt)
+
+	require.NotNil(t, domainEvt)
+	assert.Equal(t, string(domain.EventTypeNetwork), domainEvt.Type)
+	assert.Equal(t, "link_failure", domainEvt.Subtype)
+	assert.NotNil(t, domainEvt.NetworkData)
+	assert.Equal(t, "0:0:0:0:0:0:0:1", domainEvt.NetworkData.SrcIP)
+	assert.Contains(t, domainEvt.NetworkData.DstIP, "2001:db8")
+}
