@@ -194,7 +194,11 @@ func TestReadyEndpoint_NoObservers(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, nil)
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)

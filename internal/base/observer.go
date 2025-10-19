@@ -11,7 +11,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Observer defines the interface all observers must implement
@@ -36,7 +35,6 @@ type BaseObserver struct {
 	errorsTotal     atomic.Int64
 
 	// OTEL instrumentation
-	tracer  trace.Tracer
 	metrics *ObserverMetrics
 
 	// Telemetry shutdown
