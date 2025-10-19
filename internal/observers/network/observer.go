@@ -199,7 +199,11 @@ func stateToEventType(oldState, newState uint8, connKey string, observer *Networ
 				// Parse connKey to create eBPF key
 				var srcIP, dstIP string
 				var srcPort, dstPort uint16
-				fmt.Sscanf(connKey, "%15[^:]:%d:%15[^:]:%d", &srcIP, &srcPort, &dstIP, &dstPort)
+				n, err := fmt.Sscanf(connKey, "%15[^:]:%d:%15[^:]:%d", &srcIP, &srcPort, &dstIP, &dstPort)
+				if err != nil || n != 4 {
+					// Failed to parse connKey, treat as timeout (default behavior)
+					return "connection_syn_timeout"
+				}
 
 				// Convert to eBPF key format
 				key := ebpfConnKey{
