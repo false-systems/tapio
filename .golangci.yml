@@ -9,6 +9,8 @@ run:
   build-tags:
     - ebpf
   modules-download-mode: readonly
+  skip-dirs:
+    - internal/observers/network/bpf  # Generated eBPF code (bpf2go output)
 
 linters:
   enable:
