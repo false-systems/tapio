@@ -24,6 +24,7 @@ func TestLinkProcessor_SYNTimeout(t *testing.T) {
 		DstIP:    0x6401a8c0, // 192.168.1.100
 		SrcPort:  12345,
 		DstPort:  80,
+		Family:   AF_INET,
 	}
 
 	ctx := context.Background()
@@ -50,6 +51,7 @@ func TestLinkProcessor_NotSYNTimeout(t *testing.T) {
 		NewState: TCP_ESTABLISHED,
 		SrcIP:    0x0100007f,
 		DstIP:    0x6401a8c0,
+		Family:   AF_INET,
 	}
 
 	ctx := context.Background()
@@ -68,6 +70,7 @@ func TestLinkProcessor_EstablishedToClose(t *testing.T) {
 		NewState: TCP_CLOSE,
 		SrcIP:    0x0100007f,
 		DstIP:    0x6401a8c0,
+		Family:   AF_INET,
 	}
 
 	ctx := context.Background()
