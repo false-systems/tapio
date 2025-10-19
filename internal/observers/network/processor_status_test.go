@@ -140,3 +140,61 @@ func TestStatusProcessor_IgnoreUDP(t *testing.T) {
 
 	assert.Nil(t, domainEvt, "UDP traffic should be ignored")
 }
+
+// TestStatusProcessor_DetectHTTPConnection_IPv6 verifies IPv6 HTTP connection detection
+func TestStatusProcessor_DetectHTTPConnection_IPv6(t *testing.T) {
+	proc := NewStatusProcessor()
+	require.NotNil(t, proc)
+
+	// IPv6 HTTP connection: ::1 → 2001:db8::1 (port 80)
+	evt := NetworkEventBPF{
+		EventType: EventTypeStateChange,
+		Protocol:  IPPROTO_TCP,
+		OldState:  TCP_SYN_SENT,
+		NewState:  TCP_ESTABLISHED,
+		SrcIPv6:   [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},             // ::1
+		DstIPv6:   [16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, // 2001:db8::1
+		SrcPort:   12345,
+		DstPort:   80,
+		Family:    AF_INET6,
+	}
+
+	ctx := context.Background()
+	domainEvt := proc.Process(ctx, evt)
+
+	require.NotNil(t, domainEvt)
+	assert.Equal(t, string(domain.EventTypeNetwork), domainEvt.Type)
+	assert.Equal(t, "http_connection", domainEvt.Subtype)
+	assert.Equal(t, "HTTP", domainEvt.NetworkData.Protocol)
+	assert.Equal(t, "0:0:0:0:0:0:0:1", domainEvt.NetworkData.SrcIP)
+	assert.Contains(t, domainEvt.NetworkData.DstIP, "2001:db8")
+}
+
+// TestStatusProcessor_DetectHTTPSConnection_IPv6 verifies IPv6 HTTPS connection detection
+func TestStatusProcessor_DetectHTTPSConnection_IPv6(t *testing.T) {
+	proc := NewStatusProcessor()
+	require.NotNil(t, proc)
+
+	// IPv6 HTTPS connection: ::1 → 2001:db8::1 (port 443)
+	evt := NetworkEventBPF{
+		EventType: EventTypeStateChange,
+		Protocol:  IPPROTO_TCP,
+		OldState:  TCP_SYN_SENT,
+		NewState:  TCP_ESTABLISHED,
+		SrcIPv6:   [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},             // ::1
+		DstIPv6:   [16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, // 2001:db8::1
+		SrcPort:   12345,
+		DstPort:   443,
+		Family:    AF_INET6,
+	}
+
+	ctx := context.Background()
+	domainEvt := proc.Process(ctx, evt)
+
+	require.NotNil(t, domainEvt)
+	assert.Equal(t, string(domain.EventTypeNetwork), domainEvt.Type)
+	assert.Equal(t, "https_connection", domainEvt.Subtype)
+	assert.Equal(t, "HTTPS", domainEvt.NetworkData.Protocol)
+	assert.Equal(t, "0:0:0:0:0:0:0:1", domainEvt.NetworkData.SrcIP)
+	assert.Contains(t, domainEvt.NetworkData.DstIP, "2001:db8")
+}

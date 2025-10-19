@@ -110,3 +110,30 @@ func TestDNSProcessor_IgnoreTCP(t *testing.T) {
 
 	assert.Nil(t, domainEvt, "TCP traffic should be ignored (DNS over TCP not implemented yet)")
 }
+
+// TestDNSProcessor_DetectQuery_IPv6 verifies IPv6 DNS query detection
+func TestDNSProcessor_DetectQuery_IPv6(t *testing.T) {
+	proc := NewDNSProcessor()
+	require.NotNil(t, proc)
+
+	// IPv6 DNS query: ::1 → 2001:4860:4860::8888 (Google DNS)
+	evt := NetworkEventBPF{
+		EventType: EventTypeStateChange,
+		Protocol:  IPPROTO_UDP,
+		SrcIPv6:   [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},                         // ::1
+		DstIPv6:   [16]byte{0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0, 0, 0, 0, 0, 0, 0, 0, 0x88, 0x88}, // 2001:4860:4860::8888
+		SrcPort:   12345,
+		DstPort:   53,
+		Family:    AF_INET6,
+	}
+
+	ctx := context.Background()
+	domainEvt := proc.Process(ctx, evt)
+
+	require.NotNil(t, domainEvt)
+	assert.Equal(t, string(domain.EventTypeNetwork), domainEvt.Type)
+	assert.Equal(t, "dns_query", domainEvt.Subtype)
+	assert.Equal(t, "DNS", domainEvt.NetworkData.Protocol)
+	assert.Equal(t, "0:0:0:0:0:0:0:1", domainEvt.NetworkData.SrcIP)
+	assert.Contains(t, domainEvt.NetworkData.DstIP, "2001:4860")
+}
