@@ -145,6 +145,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan NetworkEventBPF) error {
 	// Initialize processors (Design Doc 003 - processor pattern)
 	linkProc := NewLinkProcessor()
+	dnsProc := NewDNSProcessor()
 
 	// Periodically report ringbuffer utilization
 	ticker := time.NewTicker(5 * time.Second)
@@ -194,8 +195,13 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			// Connection key for tracking RST
 			connKey := fmt.Sprintf("%s:%d:%s:%d", srcIP, evt.SrcPort, dstIP, evt.DstPort)
 
-			// Try link processor first (Design Doc 003 - processor pattern)
+			// Try processors in order (Design Doc 003 - processor pattern)
 			if domainEvent := linkProc.Process(ctx, evt); domainEvent != nil {
+				n.emitDomainEvent(ctx, domainEvent)
+				continue
+			}
+
+			if domainEvent := dnsProc.Process(ctx, evt); domainEvent != nil {
 				n.emitDomainEvent(ctx, domainEvent)
 				continue
 			}
