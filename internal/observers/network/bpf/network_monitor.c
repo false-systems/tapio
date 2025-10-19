@@ -328,6 +328,29 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 		}
 	}
 
+	// Update LRU map: Mark connection as RST received (IPv4 only for now)
+	if (args->family == AF_INET) {
+		struct conn_key key = {0};
+		__builtin_memcpy(&key.saddr, args->saddr, 4);
+		__builtin_memcpy(&key.daddr, args->daddr, 4);
+		key.sport = args->sport;
+		key.dport = args->dport;
+
+		// Lookup or create entry
+		struct retransmit_stats *stats = bpf_map_lookup_elem(&conn_stats, &key);
+		if (stats) {
+			stats->rst_received = 1;
+		} else {
+			struct retransmit_stats new_stats = {
+				.total_packets = 0,
+				.retransmits = 0,
+				.last_retransmit_ns = 0,
+				.rst_received = 1,
+			};
+			bpf_map_update_elem(&conn_stats, &key, &new_stats, BPF_NOEXIST);
+		}
+	}
+
 	// Submit event
 	bpf_ringbuf_submit(evt, 0);
 
@@ -391,6 +414,31 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 		for (int i = 0; i < 16; i++) {
 			evt->src_ipv6[i] = args->saddr_v6[i];
 			evt->dst_ipv6[i] = args->daddr_v6[i];
+		}
+	}
+
+	// Update LRU map: Track retransmit statistics (IPv4 only for now)
+	if (args->family == AF_INET) {
+		struct conn_key key = {0};
+		__builtin_memcpy(&key.saddr, args->saddr, 4);
+		__builtin_memcpy(&key.daddr, args->daddr, 4);
+		key.sport = args->sport;
+		key.dport = args->dport;
+
+		// Lookup or create entry
+		struct retransmit_stats *stats = bpf_map_lookup_elem(&conn_stats, &key);
+		if (stats) {
+			stats->retransmits++;
+			stats->total_packets++;
+			stats->last_retransmit_ns = bpf_ktime_get_ns();
+		} else {
+			struct retransmit_stats new_stats = {
+				.total_packets = 1,
+				.retransmits = 1,
+				.last_retransmit_ns = bpf_ktime_get_ns(),
+				.rst_received = 0,
+			};
+			bpf_map_update_elem(&conn_stats, &key, &new_stats, BPF_NOEXIST);
 		}
 	}
 
