@@ -15,6 +15,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/network/bpf"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // tcpStateNames maps TCP state constants to human-readable names
@@ -142,6 +143,9 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 
 // processEventsStage processes events from channel and outputs them
 func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan NetworkEventBPF) error {
+	// Initialize processors (Design Doc 003 - processor pattern)
+	linkProc := NewLinkProcessor()
+
 	// Periodically report ringbuffer utilization
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -189,6 +193,12 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// Connection key for tracking RST
 			connKey := fmt.Sprintf("%s:%d:%s:%d", srcIP, evt.SrcPort, dstIP, evt.DstPort)
+
+			// Try link processor first (Design Doc 003 - processor pattern)
+			if domainEvent := linkProc.Process(ctx, evt); domainEvent != nil {
+				n.emitDomainEvent(ctx, domainEvent)
+				continue
+			}
 
 			// Handle different event types
 			if evt.EventType == EventTypeRSTReceived {
@@ -346,4 +356,19 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 
 	// Record processing time
 	n.RecordEvent(ctx)
+}
+
+// emitDomainEvent outputs domain events from processors
+func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) {
+	// Record OTEL metrics
+	n.RecordEvent(ctx)
+
+	// Output event (if stdout enabled)
+	if n.config.Output.Stdout {
+		log.Printf("[%s] %s.%s: %s:%d -> %s:%d (%s)",
+			n.Name(), evt.Type, evt.Subtype,
+			evt.NetworkData.SrcIP, evt.NetworkData.SrcPort,
+			evt.NetworkData.DstIP, evt.NetworkData.DstPort,
+			evt.NetworkData.TCPState)
+	}
 }
