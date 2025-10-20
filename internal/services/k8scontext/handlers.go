@@ -14,7 +14,10 @@ import (
 func (s *Service) handlePodAdd(obj interface{}) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
-		fmt.Printf("handlePodAdd: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handlePodAdd").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
@@ -32,13 +35,21 @@ func (s *Service) handlePodAdd(obj interface{}) {
 func (s *Service) handlePodUpdate(oldObj, newObj interface{}) {
 	oldPod, ok := oldObj.(*corev1.Pod)
 	if !ok {
-		fmt.Printf("handlePodUpdate: unexpected old type %T\n", oldObj)
+		s.logger.Error().
+			Str("handler", "handlePodUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", oldObj)).
+			Str("object", "old").
+			Msg("type assertion failed")
 		return
 	}
 
 	newPod, ok := newObj.(*corev1.Pod)
 	if !ok {
-		fmt.Printf("handlePodUpdate: unexpected new type %T\n", newObj)
+		s.logger.Error().
+			Str("handler", "handlePodUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", newObj)).
+			Str("object", "new").
+			Msg("type assertion failed")
 		return
 	}
 
@@ -66,7 +77,10 @@ func (s *Service) handlePodUpdate(oldObj, newObj interface{}) {
 func (s *Service) handlePodDelete(obj interface{}) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
-		fmt.Printf("handlePodDelete: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handlePodDelete").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
@@ -83,7 +97,10 @@ func (s *Service) handlePodDelete(obj interface{}) {
 func (s *Service) handleServiceAdd(obj interface{}) {
 	service, ok := obj.(*corev1.Service)
 	if !ok {
-		fmt.Printf("handleServiceAdd: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handleServiceAdd").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
@@ -97,13 +114,21 @@ func (s *Service) handleServiceAdd(obj interface{}) {
 func (s *Service) handleServiceUpdate(oldObj, newObj interface{}) {
 	oldService, ok := oldObj.(*corev1.Service)
 	if !ok {
-		fmt.Printf("handleServiceUpdate: unexpected old type %T\n", oldObj)
+		s.logger.Error().
+			Str("handler", "handleServiceUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", oldObj)).
+			Str("object", "old").
+			Msg("type assertion failed")
 		return
 	}
 
 	newService, ok := newObj.(*corev1.Service)
 	if !ok {
-		fmt.Printf("handleServiceUpdate: unexpected new type %T\n", newObj)
+		s.logger.Error().
+			Str("handler", "handleServiceUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", newObj)).
+			Str("object", "new").
+			Msg("type assertion failed")
 		return
 	}
 
@@ -128,7 +153,10 @@ func (s *Service) handleServiceUpdate(oldObj, newObj interface{}) {
 func (s *Service) handleServiceDelete(obj interface{}) {
 	service, ok := obj.(*corev1.Service)
 	if !ok {
-		fmt.Printf("handleServiceDelete: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handleServiceDelete").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
@@ -142,7 +170,10 @@ func (s *Service) handleServiceDelete(obj interface{}) {
 func (s *Service) handleDeploymentAdd(obj interface{}) {
 	deployment, ok := obj.(*appsv1.Deployment)
 	if !ok {
-		fmt.Printf("handleDeploymentAdd: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handleDeploymentAdd").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
@@ -156,13 +187,21 @@ func (s *Service) handleDeploymentAdd(obj interface{}) {
 func (s *Service) handleDeploymentUpdate(oldObj, newObj interface{}) {
 	_, ok := oldObj.(*appsv1.Deployment)
 	if !ok {
-		fmt.Printf("handleDeploymentUpdate: unexpected old type %T\n", oldObj)
+		s.logger.Error().
+			Str("handler", "handleDeploymentUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", oldObj)).
+			Str("object", "old").
+			Msg("type assertion failed")
 		return
 	}
 
 	newDeployment, ok := newObj.(*appsv1.Deployment)
 	if !ok {
-		fmt.Printf("handleDeploymentUpdate: unexpected new type %T\n", newObj)
+		s.logger.Error().
+			Str("handler", "handleDeploymentUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", newObj)).
+			Str("object", "new").
+			Msg("type assertion failed")
 		return
 	}
 
@@ -176,7 +215,10 @@ func (s *Service) handleDeploymentUpdate(oldObj, newObj interface{}) {
 func (s *Service) handleDeploymentDelete(obj interface{}) {
 	deployment, ok := obj.(*appsv1.Deployment)
 	if !ok {
-		fmt.Printf("handleDeploymentDelete: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handleDeploymentDelete").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
@@ -207,7 +249,10 @@ func (s *Service) handleReplicaSetDelete(obj interface{}) {
 func (s *Service) handleNodeAdd(obj interface{}) {
 	node, ok := obj.(*corev1.Node)
 	if !ok {
-		fmt.Printf("handleNodeAdd: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handleNodeAdd").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
@@ -221,13 +266,21 @@ func (s *Service) handleNodeAdd(obj interface{}) {
 func (s *Service) handleNodeUpdate(oldObj, newObj interface{}) {
 	_, ok := oldObj.(*corev1.Node)
 	if !ok {
-		fmt.Printf("handleNodeUpdate: unexpected old type %T\n", oldObj)
+		s.logger.Error().
+			Str("handler", "handleNodeUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", oldObj)).
+			Str("object", "old").
+			Msg("type assertion failed")
 		return
 	}
 
 	newNode, ok := newObj.(*corev1.Node)
 	if !ok {
-		fmt.Printf("handleNodeUpdate: unexpected new type %T\n", newObj)
+		s.logger.Error().
+			Str("handler", "handleNodeUpdate").
+			Str("unexpected_type", fmt.Sprintf("%T", newObj)).
+			Str("object", "new").
+			Msg("type assertion failed")
 		return
 	}
 
@@ -241,7 +294,10 @@ func (s *Service) handleNodeUpdate(oldObj, newObj interface{}) {
 func (s *Service) handleNodeDelete(obj interface{}) {
 	node, ok := obj.(*corev1.Node)
 	if !ok {
-		fmt.Printf("handleNodeDelete: unexpected type %T\n", obj)
+		s.logger.Error().
+			Str("handler", "handleNodeDelete").
+			Str("unexpected_type", fmt.Sprintf("%T", obj)).
+			Msg("type assertion failed")
 		return
 	}
 
