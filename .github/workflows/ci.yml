@@ -92,7 +92,7 @@ jobs:
       - name: CLAUDE.md Verification
         run: |
           chmod +x ./scripts/verify-claude-md.sh
-          ./scripts/verify-claude-md.sh --strict ${{ needs.detect-changes.outputs.go_files }}
+          ./scripts/verify-claude-md.sh --strict "${{ needs.detect-changes.outputs.go_files }}"
 
       - name: Go Vet
         run: go vet ${{ needs.detect-changes.outputs.go_packages }}
