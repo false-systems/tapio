@@ -42,9 +42,8 @@ func TestE2E_PodLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 3. Verify pod metadata stored
-	podEntry, err := mockKV.Get("pod.ip.10.244.1.10")
+	_, err := mockKV.Get("pod.ip.10.244.1.10")
 	require.NoError(t, err, "Pod should be stored")
-	assert.NotNil(t, podEntry)
 
 	// 4. Verify ownership stored
 	ownerEntry, err := mockKV.Get("ownership.pod-123")
@@ -58,7 +57,7 @@ func TestE2E_PodLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 6. Verify metadata updated
-	podEntry, err = mockKV.Get("pod.ip.10.244.1.10")
+	_, err = mockKV.Get("pod.ip.10.244.1.10")
 	require.NoError(t, err, "Pod should still be stored")
 
 	// 7. Delete pod
@@ -137,9 +136,8 @@ func TestE2E_ServiceLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 3. Verify service metadata stored
-	entry, err := mockKV.Get("service.ip.10.96.0.50")
+	_, err := mockKV.Get("service.ip.10.96.0.50")
 	require.NoError(t, err, "Service should be stored")
-	assert.NotNil(t, entry)
 
 	// 4. Update service (change type to LoadBalancer)
 	updatedSvc := svc.DeepCopy()
@@ -148,7 +146,7 @@ func TestE2E_ServiceLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 5. Verify metadata updated
-	entry, err = mockKV.Get("service.ip.10.96.0.50")
+	_, err = mockKV.Get("service.ip.10.96.0.50")
 	require.NoError(t, err, "Service should still be stored")
 
 	// 6. Delete service
@@ -194,9 +192,8 @@ func TestE2E_DeploymentLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 3. Verify deployment metadata stored
-	entry, err := mockKV.Get("deployment.default.nginx-deployment")
+	_, err := mockKV.Get("deployment.default.nginx-deployment")
 	require.NoError(t, err, "Deployment should be stored")
-	assert.NotNil(t, entry)
 
 	// 4. Scale deployment (update replicas)
 	updatedDeployment := deployment.DeepCopy()
@@ -206,7 +203,7 @@ func TestE2E_DeploymentLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 5. Verify metadata updated
-	entry, err = mockKV.Get("deployment.default.nginx-deployment")
+	_, err = mockKV.Get("deployment.default.nginx-deployment")
 	require.NoError(t, err, "Deployment should still be stored")
 
 	// 6. Update image (rolling update)
@@ -216,7 +213,7 @@ func TestE2E_DeploymentLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 7. Verify metadata updated again
-	entry, err = mockKV.Get("deployment.default.nginx-deployment")
+	_, err = mockKV.Get("deployment.default.nginx-deployment")
 	require.NoError(t, err, "Deployment should still be stored")
 
 	// 8. Delete deployment
@@ -263,7 +260,7 @@ func TestE2E_NodeLifecycle(t *testing.T) {
 	waitForEvents()
 
 	// 5. Verify metadata updated
-	entry, err = mockKV.Get("node.worker-node-1")
+	_, err = mockKV.Get("node.worker-node-1")
 	require.NoError(t, err, "Node should still be stored")
 
 	// 6. Delete node (node decommission)

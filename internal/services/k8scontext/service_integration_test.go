@@ -53,7 +53,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	err = service.Start(ctx)
 	require.NoError(t, err, "Failed to start service")
-	defer service.Stop()
+	defer func() { _ = service.Stop() }()
 
 	// Give service time to initialize
 	time.Sleep(200 * time.Millisecond)
@@ -101,7 +101,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	// Cleanup KV bucket
 	js, _ := nc.JetStream()
-	js.DeleteKeyValue(config.KVBucket)
+	_ = js.DeleteKeyValue(config.KVBucket)
 }
 
 // TestIntegration_InformerSync tests informer cache synchronization

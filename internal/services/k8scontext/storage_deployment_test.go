@@ -158,7 +158,7 @@ func TestDeleteDeploymentMetadata(t *testing.T) {
 	}
 
 	// Pre-populate
-	service.storeDeploymentMetadata(deployment)
+	require.NoError(t, service.storeDeploymentMetadata(deployment))
 	require.Equal(t, 1, mockKV.len())
 
 	err := service.deleteDeploymentMetadata(deployment)
@@ -181,7 +181,7 @@ func TestDeleteNodeMetadata(t *testing.T) {
 	}
 
 	// Pre-populate
-	service.storeNodeMetadata(node)
+	require.NoError(t, service.storeNodeMetadata(node))
 	require.Equal(t, 1, mockKV.len())
 
 	err := service.deleteNodeMetadata(node)
@@ -212,7 +212,7 @@ func TestDeleteOwnerMetadata(t *testing.T) {
 	}
 
 	// Pre-populate
-	service.storeOwnerMetadata(pod)
+	require.NoError(t, service.storeOwnerMetadata(pod))
 	require.Equal(t, 1, mockKV.len())
 
 	err := service.deleteOwnerMetadata(pod)
