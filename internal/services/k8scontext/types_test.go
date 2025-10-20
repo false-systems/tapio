@@ -52,7 +52,7 @@ func TestPodInfo_JSONFieldNames(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify JSON has exact field names expected by decoder
-	var jsonMap map[string]interface{}
+	var jsonMap map[string]interface{} // Exception: json.Unmarshal
 	err = json.Unmarshal(data, &jsonMap)
 	require.NoError(t, err)
 
@@ -112,7 +112,7 @@ func TestServiceInfo_JSONFieldNames(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify JSON has exact field names expected by decoder
-	var jsonMap map[string]interface{}
+	var jsonMap map[string]interface{} // Exception: json.Unmarshal
 	err = json.Unmarshal(data, &jsonMap)
 	require.NoError(t, err)
 
