@@ -7,22 +7,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // TestRecordProcessingTimeWithTraceContext tests that metrics work with trace context
 // Exemplars are attached automatically by the OTel SDK/exporter, not by this code
 func TestRecordProcessingTimeWithTraceContext(t *testing.T) {
-	// Need to set up MeterProvider before creating metrics
-	otel.SetMeterProvider(otel.GetMeterProvider())
+	// Set up MeterProvider before creating metrics
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)
 
 	// Set up a noop tracer provider (needed for valid spans in tests)
-	tp := trace.NewNoopTracerProvider()
+	tp := noop.NewTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(trace.NewNoopTracerProvider())
+	defer otel.SetTracerProvider(noop.NewTracerProvider())
 
 	// Create a tracer and start a span (simulates active trace)
 	tracer := tp.Tracer("test-tracer")
@@ -45,7 +50,10 @@ func TestRecordProcessingTimeWithTraceContext(t *testing.T) {
 
 // TestRecordProcessingTimeWithoutTraceContext tests that metrics work without trace context
 func TestRecordProcessingTimeWithoutTraceContext(t *testing.T) {
-	otel.SetMeterProvider(otel.GetMeterProvider())
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)
@@ -65,7 +73,10 @@ func TestRecordProcessingTimeWithoutTraceContext(t *testing.T) {
 
 // TestRecordProcessingTimeWithInvalidSpan tests that metrics work with invalid span context
 func TestRecordProcessingTimeWithInvalidSpan(t *testing.T) {
-	otel.SetMeterProvider(otel.GetMeterProvider())
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)
@@ -91,7 +102,10 @@ func TestRecordProcessingTimeWithInvalidSpan(t *testing.T) {
 
 // TestRecordProcessingTimeNilEvent tests metrics with nil event
 func TestRecordProcessingTimeNilEvent(t *testing.T) {
-	otel.SetMeterProvider(otel.GetMeterProvider())
+	reader := metric.NewManualReader()
+	provider := metric.NewMeterProvider(metric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	defer otel.SetMeterProvider(nil)
 
 	metrics, err := NewObserverMetrics("test-observer")
 	assert.NoError(t, err)

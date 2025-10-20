@@ -18,7 +18,9 @@ func waitForEndpoint(url string, timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(url)
 		if err == nil {
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return fmt.Errorf("failed to close response body: %w", closeErr)
+			}
 			return nil
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -31,7 +33,9 @@ func getFreePort(t *testing.T) int {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Logf("failed to close listener: %v", err)
+	}
 	return port
 }
 
@@ -55,7 +59,11 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, nil) // No observers
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	healthURL := fmt.Sprintf("http://localhost:%d/health", port)
@@ -64,7 +72,11 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 	// Test: GET /health
 	resp, err := http.Get(healthURL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("failed to close response body: %v", err)
+		}
+	}()
 
 	// Assert: Always returns 200 OK
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "/health should always return 200")
@@ -101,7 +113,11 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, observers)
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
@@ -110,7 +126,11 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 	// Test: GET /ready
 	resp, err := http.Get(readyURL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("failed to close response body: %v", err)
+		}
+	}()
 
 	// Assert: Returns 200 when all observers healthy
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "/ready should return 200 when all observers healthy")
@@ -147,7 +167,11 @@ func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, observers)
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
@@ -156,7 +180,11 @@ func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
 	// Test: GET /ready
 	resp, err := http.Get(readyURL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("failed to close response body: %v", err)
+		}
+	}()
 
 	// Assert: Returns 503 when any observer unhealthy
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "/ready should return 503 when any observer unhealthy")
@@ -182,7 +210,11 @@ func TestReadyEndpoint_NoObservers(t *testing.T) {
 
 	shutdown, err := InitTelemetry(ctx, config, nil)
 	require.NoError(t, err)
-	defer shutdown.Shutdown(ctx)
+	defer func() {
+		if err := shutdown.Shutdown(ctx); err != nil {
+			t.Logf("telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Wait for HTTP server to start (poll with timeout)
 	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
@@ -191,7 +223,11 @@ func TestReadyEndpoint_NoObservers(t *testing.T) {
 	// Test: GET /ready
 	resp, err := http.Get(readyURL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("failed to close response body: %v", err)
+		}
+	}()
 
 	// Assert: Returns 200 when no observers (nothing to check)
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "/ready should return 200 when no observers")

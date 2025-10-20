@@ -2,12 +2,14 @@ package domain
 
 import "time"
 
-// ObserverEvent is emitted by observers (68 subtypes)
+// ObserverEvent is emitted by observers (68 subtypes → migrating to 12 base types)
 // Built on 5 months of learning, implemented with production standards
+// ADR 002: Adding Subtype field to prepare for Ahti migration
 type ObserverEvent struct {
 	ID        string    `json:"id"`
-	Type      string    `json:"type"`   // tcp_connect, oom_kill, dns_query, etc (68 subtypes)
-	Source    string    `json:"source"` // Observer name
+	Type      string    `json:"type"`              // Base type: network, kernel, container, etc (12 base types)
+	Subtype   string    `json:"subtype,omitempty"` // Event subtype: dns_query, link_failure, etc (ADR 002)
+	Source    string    `json:"source"`            // Observer name
 	Timestamp time.Time `json:"timestamp"`
 
 	// OTEL trace context for distributed correlation
@@ -26,7 +28,7 @@ type ObserverEvent struct {
 	RawData []byte `json:"raw_data,omitempty"`
 }
 
-// TapioEvent is enriched event for UKKO (12 base types)
+// TapioEvent is enriched event for Ahti (12 base types)
 type TapioEvent struct {
 	ID        string    `json:"id"`
 	Type      EventType `json:"type"`     // network, kernel, container, etc (12 base types)
@@ -52,7 +54,7 @@ type TapioEvent struct {
 	Labels    map[string]string `json:"labels,omitempty"`
 }
 
-// EventType - 12 base types for UKKO
+// EventType - 12 base types for Ahti
 type EventType string
 
 const (

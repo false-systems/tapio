@@ -39,13 +39,13 @@ func NetworkAttributes(data *domain.NetworkEventData) []attribute.KeyValue {
 
 	// HTTP attributes (L7 protocol)
 	if data.HTTPMethod != "" {
-		attrs = append(attrs, semconv.HTTPMethod(data.HTTPMethod))
+		attrs = append(attrs, attribute.String("http.request.method", data.HTTPMethod))
 	}
 	if data.HTTPPath != "" {
 		attrs = append(attrs, semconv.URLPath(data.HTTPPath))
 	}
 	if data.HTTPStatusCode > 0 {
-		attrs = append(attrs, semconv.HTTPStatusCode(data.HTTPStatusCode))
+		attrs = append(attrs, attribute.Int("http.response.status_code", data.HTTPStatusCode))
 	}
 
 	// Connection metadata

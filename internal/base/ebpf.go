@@ -54,6 +54,9 @@ func NewEBPFManagerFromCollection(coll *ebpf.Collection) *EBPFManager {
 
 // AttachKprobe attaches a program to a kprobe
 func (m *EBPFManager) AttachKprobe(progName, symbol string) error {
+	if m.collection == nil {
+		return fmt.Errorf("program %s not found in collection", progName)
+	}
 	prog := m.collection.Programs[progName]
 	if prog == nil {
 		return fmt.Errorf("program %s not found in collection", progName)
@@ -70,6 +73,9 @@ func (m *EBPFManager) AttachKprobe(progName, symbol string) error {
 
 // AttachKretprobe attaches a program to a kretprobe
 func (m *EBPFManager) AttachKretprobe(progName, symbol string) error {
+	if m.collection == nil {
+		return fmt.Errorf("program %s not found in collection", progName)
+	}
 	prog := m.collection.Programs[progName]
 	if prog == nil {
 		return fmt.Errorf("program %s not found in collection", progName)
@@ -86,6 +92,9 @@ func (m *EBPFManager) AttachKretprobe(progName, symbol string) error {
 
 // AttachTracepoint attaches a program to a tracepoint
 func (m *EBPFManager) AttachTracepoint(progName, group, name string) error {
+	if m.collection == nil {
+		return fmt.Errorf("program %s not found in collection", progName)
+	}
 	prog := m.collection.Programs[progName]
 	if prog == nil {
 		return fmt.Errorf("program %s not found in collection", progName)
@@ -118,6 +127,9 @@ func (m *EBPFManager) AttachTracepointWithProgram(prog *ebpf.Program, group, nam
 
 // OpenRingBuffer opens a ring buffer for reading events
 func (m *EBPFManager) OpenRingBuffer(mapName string) error {
+	if m.collection == nil {
+		return fmt.Errorf("ring buffer map %s not found in collection", mapName)
+	}
 	rb := m.collection.Maps[mapName]
 	if rb == nil {
 		return fmt.Errorf("ring buffer map %s not found in collection", mapName)
@@ -157,6 +169,9 @@ func (m *EBPFManager) ReadEvents(ctx context.Context, handler func([]byte) error
 
 // GetMap returns an eBPF map by name
 func (m *EBPFManager) GetMap(name string) (*ebpf.Map, error) {
+	if m.collection == nil {
+		return nil, fmt.Errorf("map %s not found in collection", name)
+	}
 	mp := m.collection.Maps[name]
 	if mp == nil {
 		return nil, fmt.Errorf("map %s not found in collection", name)

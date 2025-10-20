@@ -196,7 +196,8 @@ func TestTapioEmitter_Emit_ChannelFull(t *testing.T) {
 
 	// Fill the buffer
 	ctx := context.Background()
-	emitter.Emit(ctx, &domain.ObserverEvent{ID: "1"})
+	err := emitter.Emit(ctx, &domain.ObserverEvent{ID: "1"})
+	require.NoError(t, err, "first emit should succeed")
 
 	// Try to emit another (should fail immediately)
 	event := &domain.ObserverEvent{
@@ -206,7 +207,7 @@ func TestTapioEmitter_Emit_ChannelFull(t *testing.T) {
 		Timestamp: time.Now(),
 	}
 
-	err := emitter.Emit(ctx, event)
+	err = emitter.Emit(ctx, event)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "channel full")
 }
@@ -221,7 +222,8 @@ func TestTapioEmitter_Events(t *testing.T) {
 	ctx := context.Background()
 	event := &domain.ObserverEvent{ID: "test"}
 
-	emitter.Emit(ctx, event)
+	err := emitter.Emit(ctx, event)
+	require.NoError(t, err, "emit should succeed")
 
 	received := <-eventChan
 	assert.Equal(t, "test", received.ID)

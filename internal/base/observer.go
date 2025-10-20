@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Observer defines the interface all observers must implement
@@ -36,7 +36,6 @@ type BaseObserver struct {
 	errorsTotal     atomic.Int64
 
 	// OTEL instrumentation
-	tracer  trace.Tracer
 	metrics *ObserverMetrics
 
 	// Telemetry shutdown
@@ -51,6 +50,7 @@ type BaseObserver struct {
 	// Lifecycle management
 	running        atomic.Bool
 	stopped        atomic.Bool
+	mu             sync.Mutex // Protects cancelPipeline
 	cancelPipeline context.CancelFunc
 }
 
@@ -131,7 +131,9 @@ func (b *BaseObserver) Start(ctx context.Context) error {
 
 	// Create cancellable context for pipeline
 	pipelineCtx, cancel := context.WithCancel(ctx)
+	b.mu.Lock()
 	b.cancelPipeline = cancel
+	b.mu.Unlock()
 
 	if err := b.pipeline.Run(pipelineCtx); err != nil {
 		b.stopped.Store(true)
@@ -154,8 +156,12 @@ func (b *BaseObserver) Stop() error {
 	b.logger.Info().Msg("observer stopping")
 
 	// Cancel pipeline context to stop all stages
-	if b.cancelPipeline != nil {
-		b.cancelPipeline()
+	b.mu.Lock()
+	cancel := b.cancelPipeline
+	b.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
 
 	b.stopped.Store(true)

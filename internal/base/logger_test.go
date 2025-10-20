@@ -57,12 +57,18 @@ func TestNewLogger(t *testing.T) {
 func TestNewLogger_ConsoleFormat(t *testing.T) {
 	// Set console format BEFORE creating logger
 	originalFormat := os.Getenv("TAPIO_LOG_FORMAT")
-	os.Setenv("TAPIO_LOG_FORMAT", "console")
+	if err := os.Setenv("TAPIO_LOG_FORMAT", "console"); err != nil {
+		t.Fatalf("failed to set TAPIO_LOG_FORMAT: %v", err)
+	}
 	defer func() {
 		if originalFormat == "" {
-			os.Unsetenv("TAPIO_LOG_FORMAT")
+			if err := os.Unsetenv("TAPIO_LOG_FORMAT"); err != nil {
+				t.Logf("failed to unset TAPIO_LOG_FORMAT: %v", err)
+			}
 		} else {
-			os.Setenv("TAPIO_LOG_FORMAT", originalFormat)
+			if err := os.Setenv("TAPIO_LOG_FORMAT", originalFormat); err != nil {
+				t.Logf("failed to restore TAPIO_LOG_FORMAT: %v", err)
+			}
 		}
 	}()
 
@@ -156,8 +162,14 @@ func TestSetGlobalLogLevel_Environment(t *testing.T) {
 	defer zerolog.SetGlobalLevel(originalLevel)
 
 	// Set via environment
-	os.Setenv("TAPIO_LOG_LEVEL", "debug")
-	defer os.Unsetenv("TAPIO_LOG_LEVEL")
+	if err := os.Setenv("TAPIO_LOG_LEVEL", "debug"); err != nil {
+		t.Fatalf("failed to set TAPIO_LOG_LEVEL: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("TAPIO_LOG_LEVEL"); err != nil {
+			t.Logf("failed to unset TAPIO_LOG_LEVEL: %v", err)
+		}
+	}()
 
 	// Re-run init logic manually
 	SetGlobalLogLevel("debug")

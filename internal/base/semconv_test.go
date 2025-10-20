@@ -46,9 +46,9 @@ func TestNetworkAttributes(t *testing.T) {
 			},
 			expected: []attribute.KeyValue{
 				semconv.NetworkProtocolName("http"),
-				semconv.HTTPMethod("POST"),
+				attribute.String("http.request.method", "POST"),
 				semconv.URLPath("/api/users"),
-				semconv.HTTPStatusCode(201),
+				attribute.Int("http.response.status_code", 201),
 				attribute.Int64("network.io.bytes_sent", 512),
 				attribute.Int64("network.io.bytes_received", 2048),
 			},

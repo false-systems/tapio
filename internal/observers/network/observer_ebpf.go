@@ -15,6 +15,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/network/bpf"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // tcpStateNames maps TCP state constants to human-readable names
@@ -65,11 +66,25 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	if err := bpf.LoadNetworkObjects(objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
-	defer objs.Close()
+	defer func() {
+		if err := objs.Close(); err != nil {
+			log.Printf("[%s] Error closing eBPF objects: %v", n.Name(), err)
+		}
+	}()
 
-	// Create BaseEBPFManager (without collection since bpf2go doesn't expose it)
+	// Store map reference for reading connection stats
+	n.connStatsMap = objs.ConnStats
+
+	// Create BaseEBPFManager. We pass nil because bpf2go generates typed structs
+	// (NetworkObjects, NetworkPrograms, NetworkMaps) but doesn't expose the underlying
+	// *ebpf.Collection required by NewEBPFManagerFromCollection. We use the manager
+	// only for tracepoint attachment; individual programs/maps accessed via objs.
 	n.ebpfMgr = base.NewEBPFManagerFromCollection(nil)
-	defer n.ebpfMgr.Close()
+	defer func() {
+		if err := n.ebpfMgr.Close(); err != nil {
+			log.Printf("[%s] Error closing eBPF manager: %v", n.Name(), err)
+		}
+	}()
 
 	// Attach to inet_sock_set_state tracepoint (TCP state transitions)
 	if err := n.ebpfMgr.AttachTracepointWithProgram(objs.TraceInetSockSetState, "sock", "inet_sock_set_state"); err != nil {
@@ -92,7 +107,9 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	// Monitor context and close ring buffer when cancelled
 	go func() {
 		<-ctx.Done()
-		n.ebpfMgr.Close() // Closes all links
+		if err := n.ebpfMgr.Close(); err != nil {
+			log.Printf("[%s] Error closing eBPF manager in cleanup goroutine: %v", n.Name(), err)
+		}
 	}()
 
 	// Read ring buffer until closed
@@ -101,7 +118,11 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	if err != nil {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Printf("[%s] Error closing ring buffer reader: %v", n.Name(), err)
+		}
+	}()
 
 	for {
 		record, err := reader.Read()
@@ -111,7 +132,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 				return nil
 			}
 			log.Printf("[%s] Error reading ring buffer: %v", n.Name(), err)
-			n.RecordError(ctx, nil)
+			n.RecordError(ctx, nil) // nil event: internal ring buffer error, not a domain event
 			continue
 		}
 
@@ -119,7 +140,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 		var evt NetworkEventBPF
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
 			log.Printf("[%s] Error parsing event: %v", n.Name(), err)
-			n.RecordError(ctx, err)
+			n.RecordError(ctx, nil) // nil event: binary parsing error, no domain event created yet
 			continue
 		}
 
@@ -136,6 +157,11 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 
 // processEventsStage processes events from channel and outputs them
 func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan NetworkEventBPF) error {
+	// Initialize processors (Design Doc 003 - processor pattern)
+	linkProc := NewLinkProcessor()
+	dnsProc := NewDNSProcessor()
+	statusProc := NewStatusProcessor()
+
 	// Periodically report ringbuffer utilization
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -167,7 +193,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			// Validate address family
 			if evt.Family != AF_INET && evt.Family != AF_INET6 {
 				log.Printf("[%s] Invalid address family %d, skipping event", n.Name(), evt.Family)
-				n.RecordError(ctx, fmt.Errorf("invalid address family: %d", evt.Family))
+				n.RecordError(ctx, nil) // nil event: validation error before domain event creation
 				continue
 			}
 
@@ -184,10 +210,25 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			// Connection key for tracking RST
 			connKey := fmt.Sprintf("%s:%d:%s:%d", srcIP, evt.SrcPort, dstIP, evt.DstPort)
 
+			// Try processors in order (Design Doc 003 - processor pattern)
+			if domainEvent := linkProc.Process(ctx, evt); domainEvent != nil {
+				n.emitDomainEvent(ctx, domainEvent)
+				continue
+			}
+
+			if domainEvent := dnsProc.Process(ctx, evt); domainEvent != nil {
+				n.emitDomainEvent(ctx, domainEvent)
+				continue
+			}
+
+			if domainEvent := statusProc.Process(ctx, evt); domainEvent != nil {
+				n.emitDomainEvent(ctx, domainEvent)
+				continue
+			}
+
 			// Handle different event types
 			if evt.EventType == EventTypeRSTReceived {
-				// RST received - mark this connection as refused
-				n.rstConnections.Store(connKey, true)
+				// RST received - already marked in eBPF LRU map by tcp_receive_reset handler
 				log.Printf("[%s] RST received for %s (state=%s)", n.Name(), connKey, tcpStateName(evt.OldState))
 
 				// Record RST metric
@@ -229,7 +270,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// Record base metrics
 			n.RecordEvent(ctx)
-			n.RecordProcessingTime(ctx, "network_event_processing", float64(time.Since(startTime).Milliseconds()))
+			n.RecordProcessingTime(ctx, nil, float64(time.Since(startTime).Milliseconds())) // nil event: state change processing, not a specific domain event
 		}
 	}
 }
@@ -249,28 +290,40 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 	sndCwnd := evt.NewState      // snd_cwnd from eBPF
 	comm := extractComm(evt.Comm)
 
-	// Update retransmit stats for this connection
-	statsInterface, _ := n.retransmitStats.LoadOrStore(connKey, &retransmitStats{})
-	stats := statsInterface.(*retransmitStats)
-	stats.retransmits++
-	stats.totalPackets++ // Approximate: increment on each retransmit
-	stats.lastRetransmit = time.Now()
+	// Read stats from eBPF LRU map (already updated by tcp_retransmit_skb handler)
+	var key ebpfConnKey
+	var stats ebpfRetransmitStats
+	if n.connStatsMap != nil {
+		key = ebpfConnKey{
+			SrcAddr: ipv4StringToUint32(srcIP),
+			DstAddr: ipv4StringToUint32(dstIP),
+			SrcPort: evt.SrcPort,
+			DstPort: evt.DstPort,
+		}
+		// Lookup stats from eBPF map - if entry not found, stats remain zero-initialized
+		// This is expected for new connections and not an error condition
+		_ = n.connStatsMap.Lookup(&key, &stats) // Ignore: missing entries are expected
+	}
 
-	// Track total connections in retransmit tracking (map size approximation)
-	var connCount int64
-	n.retransmitStats.Range(func(_, _ interface{}) bool {
-		connCount++
-		return true
-	})
-	n.ebpfMapSize.Record(ctx, connCount)
+	// Track eBPF map size (number of tracked connections)
+	if n.connStatsMap != nil {
+		var count uint32
+		iter := n.connStatsMap.Iterate()
+		var k ebpfConnKey
+		var v ebpfRetransmitStats
+		for iter.Next(&k, &v) {
+			count++
+		}
+		n.ebpfMapSize.Record(ctx, int64(count))
+	}
 
 	// Record retransmit metric
 	n.retransmitsTotal.Add(ctx, 1)
 
 	// Calculate retransmit rate if we have enough data
 	const minPacketsForRate = 100
-	if stats.totalPackets >= minPacketsForRate {
-		retxRate := float64(stats.retransmits) / float64(stats.totalPackets)
+	if stats.TotalPackets >= minPacketsForRate {
+		retxRate := float64(stats.Retransmits) / float64(stats.TotalPackets)
 		n.retransmitRate.Record(ctx, retxRate)
 
 		// Detect high retransmit rate (>0.05 = 5% indicates network issues)
@@ -282,8 +335,8 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 			// Output warning if stdout enabled
 			if n.config.Output.Stdout {
 				log.Printf("[%s] HIGH RETRANSMIT RATE: %s (%s) %.1f%% (retx=%d, total=%d, cwnd=%d)",
-					n.Name(), connKey, comm, retxRate,
-					stats.retransmits, stats.totalPackets, sndCwnd)
+					n.Name(), connKey, comm, retxRate*100,
+					stats.Retransmits, stats.TotalPackets, sndCwnd)
 			}
 		}
 	}
@@ -328,4 +381,25 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 
 	// Record processing time
 	n.RecordEvent(ctx)
+}
+
+// emitDomainEvent outputs domain events from processors
+func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) {
+	// Record OTEL metrics
+	n.RecordEvent(ctx)
+
+	// Validate event has network data
+	if evt.NetworkData == nil {
+		log.Printf("[%s] %s.%s: missing network data", n.Name(), evt.Type, evt.Subtype)
+		return
+	}
+
+	// Output event (if stdout enabled)
+	if n.config.Output.Stdout {
+		log.Printf("[%s] %s.%s: %s:%d -> %s:%d (%s)",
+			n.Name(), evt.Type, evt.Subtype,
+			evt.NetworkData.SrcIP, evt.NetworkData.SrcPort,
+			evt.NetworkData.DstIP, evt.NetworkData.DstPort,
+			evt.NetworkData.TCPState)
+	}
 }
