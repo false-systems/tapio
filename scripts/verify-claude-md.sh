@@ -172,25 +172,12 @@ else
 fi
 
 # ============================================================================
-# CODE QUALITY: golangci-lint (only in strict mode or CI)
+# CODE QUALITY: golangci-lint
 # ============================================================================
-echo -e "${YELLOW}[8/9] Running golangci-lint...${NC}"
-
-if [ "$STRICT_MODE" -eq 1 ] || [ -n "$CI" ]; then
-    if command -v golangci-lint &> /dev/null; then
-        if echo "$GO_FILES" | xargs -n1 dirname | sort -u | xargs golangci-lint run --timeout=5m 2>/dev/null; then
-            echo -e "${GREEN}✓ golangci-lint passed${NC}"
-        else
-            echo -e "${RED}❌ golangci-lint failed${NC}"
-            VIOLATIONS=$((VIOLATIONS + 1))
-        fi
-    else
-        echo -e "${RED}❌ golangci-lint not installed (required in strict mode)${NC}"
-        VIOLATIONS=$((VIOLATIONS + 1))
-    fi
-else
-    echo -e "${YELLOW}⚠ Skipping golangci-lint (use --strict to enable)${NC}"
-fi
+# Note: golangci-lint is run separately in CI workflow (see .github/workflows/ci.yml)
+# This script focuses on CLAUDE.md-specific rules only
+echo -e "${YELLOW}[8/9] Skipping golangci-lint (handled by CI workflow)...${NC}"
+echo -e "${GREEN}✓ golangci-lint delegated to CI workflow${NC}"
 
 # ============================================================================
 # BUILD CHECK: Verify code compiles

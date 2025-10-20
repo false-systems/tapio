@@ -7,12 +7,14 @@
 
 ### AUTOMATED REJECTION SYSTEM ACTIVE
 Your code WILL BE AUTOMATICALLY REJECTED if it contains:
+- **Code written before tests** - **INSTANT REJECTION - TDD MANDATORY (RED → GREEN → REFACTOR)**
 - `map[string]interface{}` - **BANNED - USE TYPED STRUCTS ONLY**
 - `interface{}` in public APIs
 - `TODO`, `FIXME`, `XXX`, `HACK` comments
 - Ignored errors (`_ = someFunc()`)
 - Missing tests or <80% coverage
 - Stub functions or incomplete implementations
+- Commits where tests are not GREEN
 
 ```bash
 # Pre-commit hooks WILL BLOCK violations:
@@ -57,47 +59,502 @@ Failure modes:
 - Rate limit → Circuit breaker
 ```
 
-### 2. Write Tests Before Code
+### 2. TDD MANDATORY: RED → GREEN → REFACTOR
+
+**ALL CODE MUST FOLLOW TEST-DRIVEN DEVELOPMENT - ZERO EXCEPTIONS**
+
+#### The Iron Rule: Tests First, Code Second
+
 ```go
-// FIRST: Write the test
+// ❌ INSTANT REJECTION - Writing code before tests
+func NewReconciler() *Reconciler {
+    return &Reconciler{}  // Code written first - REJECTED!
+}
+
+// ✅ MANDATORY - TDD workflow
+// Step 1: RED - Write failing test FIRST
 func TestReconciler_HandleOrphans(t *testing.T) {
-    // Define expected behavior
+    reconciler := NewReconciler()  // ❌ Doesn't exist yet - test FAILS
+    require.NotNil(t, reconciler)
+
     orphan := Resource{ID: "i-123", Tags: map[string]string{}}
-    reconciler := NewReconciler()
     decision := reconciler.HandleOrphan(orphan)
     assert.Equal(t, "notify", decision.Action)
 }
-// THEN: Write minimal code to pass
-// NO STUBS - complete implementation only
-```
-observers should have 
-  1. observer_unit_test.go - Unit tests for individual methods and components
-  2. observer_e2e_test.go - End-to-end workflow tests simulating complete scenarios
-  3. observer_integration_test.go - Integration tests with real network components
-  4. observer_system_test.go - Linux-specific system tests for eBPF functionality
-  5. observer_performance_test.go - Performance benchmarks and load tests
-  6. observer_negative_test.go - Negative tests for error handling and edge cases
+// Verify: go test ./... → FAILS ✅ RED confirmed
 
-### 3. Code in Small Chunks
+// Step 2: GREEN - Write MINIMAL code to pass
+type Reconciler struct {}
+
+func NewReconciler() *Reconciler {
+    return &Reconciler{}
+}
+
+func (r *Reconciler) HandleOrphan(res Resource) Decision {
+    return Decision{Action: "notify"}  // Minimal implementation
+}
+// Verify: go test ./... → PASS ✅ GREEN confirmed
+
+// Step 3: REFACTOR - Improve code quality, add edge cases
+func (r *Reconciler) HandleOrphan(res Resource) Decision {
+    if len(res.Tags) == 0 {
+        return Decision{Action: "notify"}
+    }
+    return Decision{Action: "skip"}
+}
+// Verify: go test ./... → STILL PASS ✅ REFACTOR complete
+```
+
+#### TDD Workflow Checklist (MANDATORY for EVERY feature)
+
+**RED Phase** (Write Failing Tests):
+- [ ] Write test that defines expected behavior
+- [ ] Verify test FAILS (compilation error or test failure)
+- [ ] If test passes without implementation → test is wrong!
+
+**GREEN Phase** (Minimal Implementation):
+- [ ] Write MINIMAL code to make test pass
+- [ ] Verify ALL tests pass
+- [ ] NO gold plating, NO premature optimization
+
+**REFACTOR Phase** (Improve Quality):
+- [ ] Add edge case tests (IPv4/IPv6, nil checks, errors)
+- [ ] Extract helper functions
+- [ ] Improve naming and clarity
+- [ ] Verify tests STILL pass after refactor
+
+**Commit**:
+- [ ] `git add . && git commit -m "feat: ..."` (< 30 lines)
+- [ ] Push only when GREEN
+
+#### Observer Test Structure (MANDATORY)
+
+Every observer MUST have these test files:
+1. `observer_unit_test.go` - Unit tests for individual methods
+2. `observer_e2e_test.go` - End-to-end workflow tests
+3. `observer_integration_test.go` - Integration tests with real components
+4. `observer_system_test.go` - Linux-specific system tests (eBPF)
+5. `observer_performance_test.go` - Performance benchmarks
+6. `observer_negative_test.go` - Error handling and edge cases
+
+#### TDD Examples by Use Case
+
+**Example 1: New Feature**
+```bash
+# RED: Write failing test
+$ vim handler_test.go  # Write TestHandler_ProcessEvent
+$ go test ./...        # FAILS ✅
+
+# GREEN: Minimal implementation
+$ vim handler.go       # Write ProcessEvent() function
+$ go test ./...        # PASS ✅
+
+# REFACTOR: Add edge cases
+$ vim handler_test.go  # Add TestHandler_ProcessEvent_NilInput
+$ vim handler.go       # Add nil check
+$ go test ./...        # PASS ✅
+
+# COMMIT
+$ git commit -m "feat: add event handler with nil check"
+```
+
+**Example 2: Bug Fix**
+```bash
+# RED: Write test that reproduces bug
+$ vim processor_test.go  # TestProcessor_IPv6 (currently fails)
+$ go test ./...          # FAILS ✅ Bug reproduced
+
+# GREEN: Fix the bug
+$ vim processor.go       # Add IPv6 handling
+$ go test ./...          # PASS ✅
+
+# COMMIT
+$ git commit -m "fix: handle IPv6 in processor"
+```
+
+**Example 3: Refactoring**
+```bash
+# GREEN: Ensure all tests pass BEFORE refactor
+$ go test ./...  # PASS ✅
+
+# REFACTOR: Improve code
+$ vim handler.go  # Extract helper function
+$ go test ./...   # PASS ✅
+
+# COMMIT
+$ git commit -m "refactor: extract validation logic"
+```
+
+#### Why TDD is MANDATORY
+
+1. **Prevents bugs** - Tests define correct behavior before code
+2. **Enables refactoring** - Tests catch regressions immediately
+3. **Documents behavior** - Tests show how code should be used
+4. **Forces good design** - Hard-to-test code = bad design
+5. **Builds confidence** - Green tests = ship with confidence
+
+**See Section 4 for detailed TDD workflow examples**
+
+**NO EXCEPTIONS. NO EXCUSES. RED → GREEN → REFACTOR.**
+
+### 3. Code in Small Chunks (Following TDD)
+
+**MANDATORY**: Every commit follows RED → GREEN → REFACTOR
+
 ```bash
 # Work on dedicated branches
 git checkout -b feat/orphan-detection
 
-# Small iterations with verification
-# 1. Write function (max 30 lines) → fmt → vet → lint → commit
-# 2. Add validation → test → fmt → vet → lint → commit
-# 3. Add error handling → test → fmt → vet → lint → commit
+# TDD iterations (RED → GREEN → REFACTOR)
+# Iteration 1: Core functionality
+$ vim handler_test.go    # RED: Write failing test
+$ go test ./...          # FAILS ✅
+$ vim handler.go         # GREEN: Minimal implementation
+$ go test ./...          # PASS ✅
+$ go fmt ./... && go vet ./...
+$ git commit -m "feat: add handler core logic" # ≤30 lines
+
+# Iteration 2: Edge case (nil check)
+$ vim handler_test.go    # RED: Add TestHandler_NilInput
+$ go test ./...          # FAILS ✅
+$ vim handler.go         # GREEN: Add nil check
+$ go test ./...          # PASS ✅
+$ go fmt ./... && go vet ./...
+$ git commit -m "feat: add nil check to handler" # ≤30 lines
+
+# Iteration 3: Refactor
+$ go test ./...          # GREEN: All tests pass ✅
+$ vim handler.go         # REFACTOR: Extract helper function
+$ go test ./...          # PASS ✅
+$ go fmt ./... && go vet ./...
+$ git commit -m "refactor: extract validation logic" # ≤30 lines
 
 # MANDATORY before EVERY commit:
 go fmt ./...
 go vet ./...
 golangci-lint run
+go test ./...  # Must be GREEN before commit!
 
 # Push and PR when feature is complete
 git push origin feat/orphan-detection
 ```
 
+**TDD Commit Pattern**:
+- Each commit = 1 complete RED → GREEN → REFACTOR cycle
+- Commit size: ≤30 lines
+- Commit message: `feat:`, `fix:`, `refactor:`, `test:`
+- All tests GREEN before push
+
 **NO STUBS. NO TODOs. COMPLETE CODE ONLY.**
+
+### 4. TDD Workflow (RED → GREEN → REFACTOR)
+
+**MANDATORY**: All code must follow strict Test-Driven Development
+
+#### RED Phase: Write Failing Tests First
+```go
+// Step 1: Write test that FAILS (RED)
+func TestLinkProcessor_SYNTimeout(t *testing.T) {
+    proc := NewLinkProcessor()  // ❌ Undefined - test fails
+    require.NotNil(t, proc)
+
+    evt := NetworkEventBPF{
+        OldState: TCP_SYN_SENT,
+        NewState: TCP_CLOSE,
+        SrcIP:    0x0100007f,
+        DstIP:    0x6401a8c0,
+    }
+
+    domainEvt := proc.Process(context.Background(), evt)
+    require.NotNil(t, domainEvt)
+    assert.Equal(t, "link_failure", domainEvt.Subtype)
+}
+
+// Step 2: Verify test compilation FAILS
+// $ go test ./...
+// # undefined: NewLinkProcessor ✅ RED phase confirmed
+```
+
+#### GREEN Phase: Minimal Implementation
+```go
+// Step 3: Write MINIMAL code to pass test
+type LinkProcessor struct {}
+
+func NewLinkProcessor() *LinkProcessor {
+    return &LinkProcessor{}
+}
+
+func (p *LinkProcessor) Process(ctx context.Context, evt NetworkEventBPF) *domain.ObserverEvent {
+    if evt.OldState == TCP_SYN_SENT && evt.NewState == TCP_CLOSE {
+        return &domain.ObserverEvent{
+            Type:    "network",
+            Subtype: "link_failure",
+            NetworkData: &domain.NetworkEventData{
+                SrcIP: convertIPv4(evt.SrcIP),
+                DstIP: convertIPv4(evt.DstIP),
+            },
+        }
+    }
+    return nil
+}
+
+// Step 4: Verify tests PASS
+// $ go test ./...
+// PASS ✅ GREEN phase confirmed
+```
+
+#### REFACTOR Phase: Improve Code Quality
+```go
+// Step 5: Add edge cases (IPv6, validation, etc.)
+func TestLinkProcessor_SYNTimeout_IPv6(t *testing.T) {
+    // Test IPv6 handling
+}
+
+// Step 6: Refactor for better design
+func (p *LinkProcessor) Process(ctx context.Context, evt NetworkEventBPF) *domain.ObserverEvent {
+    if !p.isSYNTimeout(evt) {
+        return nil
+    }
+    return p.createLinkFailureEvent(evt, "syn_timeout")
+}
+
+// Step 7: Verify tests still PASS after refactor
+// $ go test ./...
+// PASS ✅ REFACTOR complete
+```
+
+#### TDD Checklist
+- [ ] **RED**: Write failing test first
+- [ ] **RED**: Verify compilation fails or test fails
+- [ ] **GREEN**: Write minimal implementation
+- [ ] **GREEN**: Verify all tests pass
+- [ ] **REFACTOR**: Add edge cases, improve design
+- [ ] **REFACTOR**: Verify tests still pass
+- [ ] **Commit**: `git add . && git commit -m "feat: ..."` (< 30 lines)
+
+**Example Session** (Network Observer Processors):
+```bash
+# LinkProcessor (TDD - 3 commits)
+1. RED:   Write TestLinkProcessor_SYNTimeout → FAIL ✅
+2. GREEN: Implement processor_link.go → PASS ✅
+3. COMMIT: git commit -m "feat: add LinkProcessor (TDD)"
+
+# Add IPv6 support (TDD - 2 commits)
+1. RED:   Write TestLinkProcessor_SYNTimeout_IPv6 → FAIL ✅
+2. GREEN: Add IPv6 handling to createLinkFailureEvent → PASS ✅
+3. COMMIT: git commit -m "fix: handle IPv6 in LinkProcessor"
+```
+
+### 5. eBPF Development Pattern (Brendan Gregg Approach)
+
+**MANDATORY**: Follow single eBPF program + Go processor pattern
+
+#### Architecture: eBPF Captures, Userspace Parses
+
+```
+┌─────────────────────────────────────────────────┐
+│   eBPF Kernel (network_monitor.c)              │
+│   - Single eBPF program (NO new programs!)     │
+│   - Captures: TCP states, UDP traffic, IPs     │
+│   - Minimal processing (just capture data)     │
+└──────────────────┬──────────────────────────────┘
+                   │ Ring Buffer
+                   ▼
+┌─────────────────────────────────────────────────┐
+│   Go Userspace (processEventsStage)            │
+│   Processor Chain:                              │
+│   1. LinkProcessor   → link_failure             │
+│   2. DNSProcessor    → dns_query, dns_response  │
+│   3. StatusProcessor → http_connection          │
+│   4. Fallback        → legacy events            │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ▼
+         domain.NetworkEventData
+         (Type + Subtype pattern)
+```
+
+#### Why This Pattern Works
+
+**Brendan Gregg BPF Performance Tools (Chapter 10)**:
+> "eBPF should capture, userspace should parse. Parsing complex protocols in eBPF is slow and error-prone. Let eBPF collect the raw data, then parse it in userspace where you have full language features."
+
+**Performance**:
+- eBPF parsing: ~500ns per packet (slow, limited instructions)
+- Go parsing: ~50ns per packet (10x faster!)
+- Ring buffer already copies to userspace - parsing there is free
+
+**Benefits**:
+1. **Single eBPF program** - Lower kernel overhead, simpler lifecycle
+2. **Flexible parsing** - Go is easier to debug than eBPF C code
+3. **No BTF dependencies** - Don't need kernel struct definitions for DNS/HTTP parsing
+4. **Easier testing** - Can unit test processors without eBPF
+5. **IPv4 + IPv6 support** - Handle both address families in Go
+
+#### Implementation Pattern
+
+**Step 1: Design Processor** (following TDD RED phase)
+```go
+// processor_dns.go - RED phase (write test first!)
+func TestDNSProcessor_DetectQuery(t *testing.T) {
+    proc := NewDNSProcessor()  // Will fail - doesn't exist yet
+    evt := NetworkEventBPF{
+        Protocol: IPPROTO_UDP,
+        DstPort:  53,  // DNS port
+    }
+
+    domainEvt := proc.Process(context.Background(), evt)
+    require.NotNil(t, domainEvt)
+    assert.Equal(t, "dns_query", domainEvt.Subtype)
+}
+```
+
+**Step 2: Implement Processor** (GREEN phase)
+```go
+// processor_dns.go
+type DNSProcessor struct {
+    // Future: OTEL metrics
+}
+
+func NewDNSProcessor() *DNSProcessor {
+    return &DNSProcessor{}
+}
+
+func (p *DNSProcessor) Process(ctx context.Context, evt NetworkEventBPF) *domain.ObserverEvent {
+    // Only process UDP traffic
+    if evt.Protocol != IPPROTO_UDP {
+        return nil
+    }
+
+    // Check if DNS port (53)
+    if evt.DstPort != 53 && evt.SrcPort != 53 {
+        return nil
+    }
+
+    // Handle IPv4 AND IPv6 (MANDATORY!)
+    var srcIP, dstIP string
+    if evt.Family == AF_INET {
+        srcIP = convertIPv4(evt.SrcIP)
+        dstIP = convertIPv4(evt.DstIP)
+    } else {
+        srcIP = convertIPv6(evt.SrcIPv6)
+        dstIP = convertIPv6(evt.DstIPv6)
+    }
+
+    // Use EXISTING domain model (no new structs!)
+    return &domain.ObserverEvent{
+        Type:    string(domain.EventTypeNetwork),
+        Subtype: "dns_query",
+        NetworkData: &domain.NetworkEventData{
+            Protocol: "DNS",
+            SrcIP:    srcIP,
+            DstIP:    dstIP,
+            SrcPort:  evt.SrcPort,
+            DstPort:  evt.DstPort,
+        },
+    }
+}
+```
+
+**Step 3: Integrate into Observer** (processEventsStage)
+```go
+func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan NetworkEventBPF) error {
+    // Initialize all processors
+    linkProc := NewLinkProcessor()
+    dnsProc := NewDNSProcessor()
+    statusProc := NewStatusProcessor()
+
+    for evt := range eventCh {
+        // Try processors in order (fast exit on match)
+        if domainEvent := linkProc.Process(ctx, evt); domainEvent != nil {
+            n.emitDomainEvent(ctx, domainEvent)
+            continue
+        }
+
+        if domainEvent := dnsProc.Process(ctx, evt); domainEvent != nil {
+            n.emitDomainEvent(ctx, domainEvent)
+            continue
+        }
+
+        if domainEvent := statusProc.Process(ctx, evt); domainEvent != nil {
+            n.emitDomainEvent(ctx, domainEvent)
+            continue
+        }
+
+        // Fallback: legacy event handling
+        n.processLegacyEvent(ctx, evt)
+    }
+}
+```
+
+#### eBPF Development Checklist
+
+- [ ] **Design**: Document processor pattern in Design Doc (e.g., docs/003-*.md)
+- [ ] **TDD RED**: Write processor tests first (IPv4 + IPv6!)
+- [ ] **TDD GREEN**: Implement processor with IPv4/IPv6 support
+- [ ] **Integration**: Add to processEventsStage chain
+- [ ] **Verify**: Check existing eBPF program captures needed data
+- [ ] **NO NEW eBPF**: Reuse existing network_monitor.c (single program!)
+- [ ] **Test Coverage**: Add IPv6 tests for all processors
+- [ ] **Commit**: Small commits (<30 lines each)
+
+#### IPv4 + IPv6 Support (MANDATORY)
+
+**ALWAYS** handle both address families:
+```go
+// ❌ WRONG - IPv6 will break!
+func createEvent(evt NetworkEventBPF) *domain.ObserverEvent {
+    return &domain.ObserverEvent{
+        NetworkData: &domain.NetworkEventData{
+            SrcIP: convertIPv4(evt.SrcIP),  // Bug: No Family check!
+            DstIP: convertIPv4(evt.DstIP),
+        },
+    }
+}
+
+// ✅ CORRECT - Handles both IPv4 and IPv6
+func createEvent(evt NetworkEventBPF) *domain.ObserverEvent {
+    var srcIP, dstIP string
+    if evt.Family == AF_INET {
+        srcIP = convertIPv4(evt.SrcIP)
+        dstIP = convertIPv4(evt.DstIP)
+    } else {
+        srcIP = convertIPv6(evt.SrcIPv6)
+        dstIP = convertIPv6(evt.DstIPv6)
+    }
+
+    return &domain.ObserverEvent{
+        NetworkData: &domain.NetworkEventData{
+            SrcIP: srcIP,
+            DstIP: dstIP,
+        },
+    }
+}
+
+// ✅ TESTS - Always test both address families
+func TestProcessor_IPv4(t *testing.T) {
+    evt := NetworkEventBPF{
+        Family: AF_INET,
+        SrcIP:  0x0100007f,  // 127.0.0.1
+    }
+    // ... test IPv4
+}
+
+func TestProcessor_IPv6(t *testing.T) {
+    evt := NetworkEventBPF{
+        Family:  AF_INET6,
+        SrcIPv6: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},  // ::1
+    }
+    // ... test IPv6
+}
+```
+
+#### References
+
+- **Design Doc 003**: DNS/Link/Status Integration (`docs/003-network-observer-dns-link-status-integration.md`)
+- **README.md**: Processor Pattern Examples (`internal/observers/common/bpf/lib/README.md`)
+- **Brendan Gregg BPF Performance Tools**: https://github.com/brendangregg/bpf-perf-tools-book
+- **ADR 002**: Observer Consolidation (`docs/002-tapio-observer-consolidation.md`)
 
 ## ⛔ BANNED PATTERNS - AUTOMATIC REJECTION
 

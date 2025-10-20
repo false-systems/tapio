@@ -5,9 +5,9 @@ package network
 
 import (
 	"fmt"
-	"sync"
-	"time"
+	"net"
 
+	"github.com/cilium/ebpf"
 	"github.com/yairfalse/tapio/internal/base"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -20,23 +20,13 @@ type Config struct {
 }
 
 // NetworkObserver tracks TCP/UDP/DNS network events using eBPF
-// retransmitStats tracks retransmit statistics per connection
-type retransmitStats struct {
-	totalPackets   uint64
-	retransmits    uint64
-	lastRetransmit time.Time
-}
-
 type NetworkObserver struct {
 	*base.BaseObserver
 	config  Config
 	ebpfMgr *base.EBPFManager // eBPF lifecycle manager
 
-	// Track connections that received RST (for distinguishing refused vs timeout)
-	rstConnections sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: true
-
-	// Track retransmit statistics per connection
-	retransmitStats sync.Map // key: "srcIP:srcPort:dstIP:dstPort" → value: *retransmitStats
+	// eBPF map references (nil when eBPF not loaded)
+	connStatsMap *ebpf.Map // conn_stats LRU map from eBPF
 
 	// Network-specific OTEL metrics
 	connectionResets  metric.Int64Counter // connection_resets_total
@@ -204,10 +194,30 @@ func stateToEventType(oldState, newState uint8, connKey string, observer *Networ
 		}
 		// SYN_SENT → CLOSE: Check if RST was received
 		if oldState == TCP_SYN_SENT {
-			// Check if we received RST for this connection (only if observer provided)
-			if observer != nil && connKey != "" {
-				if _, gotRST := observer.rstConnections.LoadAndDelete(connKey); gotRST {
-					return "connection_refused" // RST received = connection refused
+			// Check eBPF LRU map for RST flag (only if observer and map available)
+			if observer != nil && observer.connStatsMap != nil && connKey != "" {
+				// Parse connKey to create eBPF key
+				var srcIP, dstIP string
+				var srcPort, dstPort uint16
+				n, err := fmt.Sscanf(connKey, "%15[^:]:%d:%15[^:]:%d", &srcIP, &srcPort, &dstIP, &dstPort)
+				if err != nil || n != 4 {
+					// Failed to parse connKey, treat as timeout (default behavior)
+					return "connection_syn_timeout"
+				}
+
+				// Convert to eBPF key format
+				key := ebpfConnKey{
+					SrcAddr: ipv4StringToUint32(srcIP),
+					DstAddr: ipv4StringToUint32(dstIP),
+					SrcPort: srcPort,
+					DstPort: dstPort,
+				}
+
+				var stats ebpfRetransmitStats
+				if err := observer.connStatsMap.Lookup(&key, &stats); err == nil {
+					if stats.RSTReceived != 0 {
+						return "connection_refused" // RST received = connection refused
+					}
 				}
 			}
 			return "connection_syn_timeout" // No RST or no observer = timeout (default)
@@ -221,6 +231,20 @@ func stateToEventType(oldState, newState uint8, connKey string, observer *Networ
 func convertIPv4(ip uint32) string {
 	return fmt.Sprintf("%d.%d.%d.%d",
 		byte(ip), byte(ip>>8), byte(ip>>16), byte(ip>>24))
+}
+
+// ipv4StringToUint32 converts IP string to uint32 (little-endian)
+func ipv4StringToUint32(ipStr string) uint32 {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return 0
+	}
+	ip = ip.To4() // Convert to IPv4
+	if ip == nil {
+		return 0
+	}
+	// Convert to little-endian uint32 (match eBPF format)
+	return uint32(ip[0]) | uint32(ip[1])<<8 | uint32(ip[2])<<16 | uint32(ip[3])<<24
 }
 
 // convertIPv6 converts [16]byte IPv6 to string
@@ -244,4 +268,21 @@ func extractComm(comm [16]byte) string {
 		}
 	}
 	return string(comm[:])
+}
+
+// ebpfConnKey matches the eBPF conn_key struct (IPv4 only)
+type ebpfConnKey struct {
+	SrcAddr uint32
+	DstAddr uint32
+	SrcPort uint16
+	DstPort uint16
+}
+
+// ebpfRetransmitStats matches the eBPF retransmit_stats struct
+type ebpfRetransmitStats struct {
+	TotalPackets     uint64
+	Retransmits      uint64
+	LastRetransmitNs uint64
+	RSTReceived      uint8
+	Padding          [7]uint8
 }

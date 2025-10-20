@@ -54,13 +54,19 @@ static __always_inline void metric_inc(__u32 metric_idx)
 }
 
 // Add to Per-CPU metric (no atomics needed - each CPU has own copy)
-// Per-CPU maps allocate separate value for each CPU, so no locking required.
-// Userspace aggregates across all CPUs when reading metrics.
+//
+// Per-CPU maps (BPF_MAP_TYPE_PERCPU_ARRAY) allocate a separate value for EACH CPU.
+// When CPU 0 calls this function, it writes only to CPU 0's copy.
+// When CPU 1 calls this function, it writes only to CPU 1's copy.
+// There is NO sharing between CPUs = NO race conditions = NO atomics needed!
+//
+// Userspace aggregates all per-CPU copies when reading the final metric value.
+// This is the standard eBPF pattern for high-performance lock-free counters.
 static __always_inline void metric_add(__u32 metric_idx, __u64 delta)
 {
 	__u64 *value = bpf_map_lookup_elem(&tapio_metrics, &metric_idx);
 	if (value) {
-		(*value) += delta;  // Lock-free - each CPU writes to own copy
+		(*value) += delta;  // Safe: each CPU has its own isolated copy
 	}
 }
 
