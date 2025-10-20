@@ -66,7 +66,11 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	if err := bpf.LoadNetworkObjects(objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
-	defer objs.Close()
+	defer func() {
+		if err := objs.Close(); err != nil {
+			log.Printf("[%s] Error closing eBPF objects: %v", n.Name(), err)
+		}
+	}()
 
 	// Store map reference for reading connection stats
 	n.connStatsMap = objs.ConnStats
@@ -76,7 +80,11 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	// *ebpf.Collection required by NewEBPFManagerFromCollection. We use the manager
 	// only for tracepoint attachment; individual programs/maps accessed via objs.
 	n.ebpfMgr = base.NewEBPFManagerFromCollection(nil)
-	defer n.ebpfMgr.Close()
+	defer func() {
+		if err := n.ebpfMgr.Close(); err != nil {
+			log.Printf("[%s] Error closing eBPF manager: %v", n.Name(), err)
+		}
+	}()
 
 	// Attach to inet_sock_set_state tracepoint (TCP state transitions)
 	if err := n.ebpfMgr.AttachTracepointWithProgram(objs.TraceInetSockSetState, "sock", "inet_sock_set_state"); err != nil {
@@ -99,7 +107,9 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	// Monitor context and close ring buffer when cancelled
 	go func() {
 		<-ctx.Done()
-		n.ebpfMgr.Close() // Closes all links
+		if err := n.ebpfMgr.Close(); err != nil {
+			log.Printf("[%s] Error closing eBPF manager in cleanup goroutine: %v", n.Name(), err)
+		}
 	}()
 
 	// Read ring buffer until closed
@@ -108,7 +118,11 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	if err != nil {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Printf("[%s] Error closing ring buffer reader: %v", n.Name(), err)
+		}
+	}()
 
 	for {
 		record, err := reader.Read()
@@ -286,10 +300,9 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 			SrcPort: evt.SrcPort,
 			DstPort: evt.DstPort,
 		}
-		if err := n.connStatsMap.Lookup(&key, &stats); err != nil {
-			// Entry not found in map yet - stats remain zero-initialized
-			// This is expected for new connections, not an error condition
-		}
+		// Lookup stats from eBPF map - if entry not found, stats remain zero-initialized
+		// This is expected for new connections and not an error condition
+		_ = n.connStatsMap.Lookup(&key, &stats) // Ignore: missing entries are expected
 	}
 
 	// Track eBPF map size (number of tracked connections)
