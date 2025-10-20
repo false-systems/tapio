@@ -2,6 +2,8 @@
 # Tapio golangci-lint Configuration v1.x/v2.x
 # ==========================================
 
+version: 2
+
 run:
   timeout: 5m
   issues-exit-code: 1
@@ -9,8 +11,6 @@ run:
   build-tags:
     - ebpf
   modules-download-mode: readonly
-  skip-dirs:
-    - internal/observers/network/bpf  # Generated eBPF code (bpf2go output)
 
 linters:
   enable:
@@ -35,3 +35,7 @@ issues:
 
   # Fix found issues (if it's supported by the linter)
   fix: false
+
+  # Exclude generated eBPF code
+  exclude-dirs:
+    - internal/observers/network/bpf
