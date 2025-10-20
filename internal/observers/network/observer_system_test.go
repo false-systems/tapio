@@ -176,17 +176,23 @@ func TestSystem_MockModeEnvironment(t *testing.T) {
 	}()
 
 	// Test mock mode enabled
-	os.Setenv("TAPIO_MOCK_MODE", "true")
+	if err := os.Setenv("TAPIO_MOCK_MODE", "true"); err != nil {
+		t.Fatalf("failed to set TAPIO_MOCK_MODE: %v", err)
+	}
 	mockMode := os.Getenv("TAPIO_MOCK_MODE")
 	assert.Equal(t, "true", mockMode, "Mock mode should be enabled")
 
 	// Test mock mode disabled
-	os.Setenv("TAPIO_MOCK_MODE", "false")
+	if err := os.Setenv("TAPIO_MOCK_MODE", "false"); err != nil {
+		t.Fatalf("failed to set TAPIO_MOCK_MODE: %v", err)
+	}
 	mockMode = os.Getenv("TAPIO_MOCK_MODE")
 	assert.Equal(t, "false", mockMode, "Mock mode should be disabled")
 
 	// Test mock mode unset
-	os.Unsetenv("TAPIO_MOCK_MODE")
+	if err := os.Unsetenv("TAPIO_MOCK_MODE"); err != nil {
+		t.Fatalf("failed to unset TAPIO_MOCK_MODE: %v", err)
+	}
 	mockMode = os.Getenv("TAPIO_MOCK_MODE")
 	assert.Equal(t, "", mockMode, "Mock mode should be unset")
 }
