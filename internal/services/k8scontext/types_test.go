@@ -243,5 +243,5 @@ func TestPodInfo_NilLabels(t *testing.T) {
 	require.NoError(t, err)
 
 	// nil labels should remain nil (or become empty map, both acceptable)
-	assert.True(t, decoded.Labels == nil || len(decoded.Labels) == 0)
+	assert.True(t, len(decoded.Labels) == 0)
 }

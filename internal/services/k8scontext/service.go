@@ -110,26 +110,38 @@ func NewService(config Config) (*Service, error) {
 }
 
 // startInformers registers event handlers for all K8s resources
-func (s *Service) startInformers() {
+func (s *Service) startInformers() error {
 	// Pod informer
 	podInformer := s.informerFactory.Core().V1().Pods().Informer()
-	podInformer.AddEventHandler(&podEventHandler{service: s})
+	if _, err := podInformer.AddEventHandler(&podEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add pod event handler: %w", err)
+	}
 
 	// Service informer
 	serviceInformer := s.informerFactory.Core().V1().Services().Informer()
-	serviceInformer.AddEventHandler(&serviceEventHandler{service: s})
+	if _, err := serviceInformer.AddEventHandler(&serviceEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add service event handler: %w", err)
+	}
 
 	// Deployment informer
 	deploymentInformer := s.informerFactory.Apps().V1().Deployments().Informer()
-	deploymentInformer.AddEventHandler(&deploymentEventHandler{service: s})
+	if _, err := deploymentInformer.AddEventHandler(&deploymentEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add deployment event handler: %w", err)
+	}
 
 	// ReplicaSet informer
 	replicaSetInformer := s.informerFactory.Apps().V1().ReplicaSets().Informer()
-	replicaSetInformer.AddEventHandler(&replicaSetEventHandler{service: s})
+	if _, err := replicaSetInformer.AddEventHandler(&replicaSetEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add replicaset event handler: %w", err)
+	}
 
 	// Node informer
 	nodeInformer := s.informerFactory.Core().V1().Nodes().Informer()
-	nodeInformer.AddEventHandler(&nodeEventHandler{service: s})
+	if _, err := nodeInformer.AddEventHandler(&nodeEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add node event handler: %w", err)
+	}
+
+	return nil
 }
 
 // Start begins watching K8s resources
@@ -145,7 +157,9 @@ func (s *Service) Start(ctx context.Context) error {
 	}()
 
 	// Register event handlers
-	s.startInformers()
+	if err := s.startInformers(); err != nil {
+		return fmt.Errorf("failed to start informers: %w", err)
+	}
 
 	// Start all informers
 	s.informerFactory.Start(s.ctx.Done())

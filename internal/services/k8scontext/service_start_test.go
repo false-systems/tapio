@@ -32,7 +32,7 @@ func TestStart_InitializesContext(t *testing.T) {
 
 	err := service.Start(ctx)
 	require.NoError(t, err)
-	defer service.Stop()
+	defer func() { _ = service.Stop() }()
 
 	// Verify context was created
 	assert.NotNil(t, service.ctx)
@@ -68,7 +68,7 @@ func TestStart_StartsEventWorker(t *testing.T) {
 
 	err := service.Start(ctx)
 	require.NoError(t, err)
-	defer service.Stop()
+	defer func() { _ = service.Stop() }()
 
 	// Enqueue an event and verify it gets processed using channel
 	done := make(chan bool, 1)
@@ -107,7 +107,7 @@ func TestStart_RegistersInformers(t *testing.T) {
 
 	err := service.Start(ctx)
 	require.NoError(t, err)
-	defer service.Stop()
+	defer func() { _ = service.Stop() }()
 
 	// Verify informers are running (informerFactory.Start was called)
 	// We can verify this by checking that cache sync works
@@ -138,7 +138,7 @@ func TestStart_PerformsInitialSync(t *testing.T) {
 
 	err := service.Start(ctx)
 	require.NoError(t, err)
-	defer service.Stop()
+	defer func() { _ = service.Stop() }()
 
 	// Initial sync should complete without error
 	// Integration tests verify actual resource syncing
