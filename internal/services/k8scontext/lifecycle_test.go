@@ -24,7 +24,7 @@ func TestStartInformers_RegistersHandlers(t *testing.T) {
 		informerFactory: factory,
 	}
 
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 
 	// Verify informers were created (we can't easily test handler registration,
 	// but we can verify the informers exist)
@@ -79,7 +79,7 @@ func TestInformerIntegration_PodLifecycle(t *testing.T) {
 	go service.processEvents(ctx)
 
 	// Register handlers
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 
 	factory.Start(ctx.Done())
 
@@ -146,7 +146,7 @@ func TestInformerIntegration_ServiceLifecycle(t *testing.T) {
 	go service.processEvents(ctx)
 
 	// Register handlers
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 
 	factory.Start(ctx.Done())
 
@@ -208,7 +208,7 @@ func TestInformerIntegration_DeploymentLifecycle(t *testing.T) {
 	defer cancel()
 
 	go service.processEvents(ctx)
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(ctx.Done())
 
@@ -257,7 +257,7 @@ func TestInformerIntegration_NodeLifecycle(t *testing.T) {
 	defer cancel()
 
 	go service.processEvents(ctx)
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(ctx.Done())
 
