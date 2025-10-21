@@ -60,9 +60,8 @@ func (p *PrometheusScraper) ScrapeMetrics(ctx context.Context) ([]MetricSample, 
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Silently ignore - response already read
-		}
+		//nolint:errcheck // Response already read, close error not actionable
+		resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
