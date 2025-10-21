@@ -71,12 +71,4 @@ type Config struct {
 
 	// Retry interval for NATS KV writes (default: 1s)
 	RetryInterval time.Duration
-
-	// Scheduler Prometheus metrics URL (optional)
-	// Example: "http://kube-scheduler:10251/metrics"
-	// If empty, scheduler observability is disabled
-	SchedulerMetricsURL string
-
-	// Scheduler metrics scrape interval (default: 30s)
-	SchedulerScrapeInterval time.Duration
 }
