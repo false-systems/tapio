@@ -1,4 +1,4 @@
-package k8scontext
+package scheduler
 
 import (
 	"encoding/json"

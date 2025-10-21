@@ -1,4 +1,4 @@
-package k8scontext
+package scheduler
 
 import (
 	"encoding/json"
@@ -62,14 +62,14 @@ func serializePreemptionInfo(info PreemptionInfo) ([]byte, error) {
 }
 
 // storeSchedulingInfo writes scheduling metadata to NATS KV
-func (s *Service) storeSchedulingInfo(info SchedulingInfo) error {
+func (o *SchedulerObserver) storeSchedulingInfo(info SchedulingInfo) error {
 	data, err := serializeSchedulingInfo(info)
 	if err != nil {
 		return err
 	}
 
 	key := makeSchedulingInfoKey(info.PodUID)
-	if _, err := s.kv.Put(key, data); err != nil {
+	if _, err := o.kv.Put(key, data); err != nil {
 		return fmt.Errorf("failed to store scheduling info for %s: %w", key, err)
 	}
 
@@ -77,9 +77,9 @@ func (s *Service) storeSchedulingInfo(info SchedulingInfo) error {
 }
 
 // deleteSchedulingInfo removes scheduling metadata from NATS KV
-func (s *Service) deleteSchedulingInfo(podUID string) error {
+func (o *SchedulerObserver) deleteSchedulingInfo(podUID string) error {
 	key := makeSchedulingInfoKey(podUID)
-	if err := s.kv.Delete(key); err != nil {
+	if err := o.kv.Delete(key); err != nil {
 		return fmt.Errorf("failed to delete scheduling info for %s: %w", key, err)
 	}
 
@@ -87,14 +87,14 @@ func (s *Service) deleteSchedulingInfo(podUID string) error {
 }
 
 // storePluginMetrics writes plugin metrics to NATS KV
-func (s *Service) storePluginMetrics(metrics PluginMetrics) error {
+func (o *SchedulerObserver) storePluginMetrics(metrics PluginMetrics) error {
 	data, err := serializePluginMetrics(metrics)
 	if err != nil {
 		return err
 	}
 
 	key := makePluginMetricsKey(metrics.PluginName, metrics.ExtensionPoint)
-	if _, err := s.kv.Put(key, data); err != nil {
+	if _, err := o.kv.Put(key, data); err != nil {
 		return fmt.Errorf("failed to store plugin metrics for %s: %w", key, err)
 	}
 
@@ -102,14 +102,14 @@ func (s *Service) storePluginMetrics(metrics PluginMetrics) error {
 }
 
 // storeSchedulerMetrics writes global scheduler metrics to NATS KV
-func (s *Service) storeSchedulerMetrics(metrics SchedulerMetrics) error {
+func (o *SchedulerObserver) storeSchedulerMetrics(metrics SchedulerMetrics) error {
 	data, err := serializeSchedulerMetrics(metrics)
 	if err != nil {
 		return err
 	}
 
 	key := makeSchedulerMetricsKey()
-	if _, err := s.kv.Put(key, data); err != nil {
+	if _, err := o.kv.Put(key, data); err != nil {
 		return fmt.Errorf("failed to store scheduler metrics: %w", err)
 	}
 
@@ -117,14 +117,14 @@ func (s *Service) storeSchedulerMetrics(metrics SchedulerMetrics) error {
 }
 
 // storePreemptionInfo writes preemption event to NATS KV
-func (s *Service) storePreemptionInfo(info PreemptionInfo) error {
+func (o *SchedulerObserver) storePreemptionInfo(info PreemptionInfo) error {
 	data, err := serializePreemptionInfo(info)
 	if err != nil {
 		return err
 	}
 
 	key := makePreemptionInfoKey(info.VictimPodUID)
-	if _, err := s.kv.Put(key, data); err != nil {
+	if _, err := o.kv.Put(key, data); err != nil {
 		return fmt.Errorf("failed to store preemption info for %s: %w", key, err)
 	}
 
@@ -132,9 +132,9 @@ func (s *Service) storePreemptionInfo(info PreemptionInfo) error {
 }
 
 // getSchedulingInfo retrieves scheduling metadata from NATS KV
-func (s *Service) getSchedulingInfo(podUID string) (*SchedulingInfo, error) {
+func (o *SchedulerObserver) getSchedulingInfo(podUID string) (*SchedulingInfo, error) {
 	key := makeSchedulingInfoKey(podUID)
-	entry, err := s.kv.Get(key)
+	entry, err := o.kv.Get(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scheduling info for %s: %w", key, err)
 	}
