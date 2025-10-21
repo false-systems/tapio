@@ -27,6 +27,9 @@ type Service struct {
 	// Event buffer for async NATS KV writes
 	eventBuffer chan func() error
 
+	// Prometheus scraper for scheduler metrics (optional)
+	promScraper *PrometheusScraper
+
 	// Lifecycle management
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -99,6 +102,16 @@ func NewService(config Config) (*Service, error) {
 	// 7. Create logger
 	logger := base.NewLogger("k8scontext")
 
+	// 8. Create Prometheus scraper if enabled
+	var promScraper *PrometheusScraper
+	if config.SchedulerMetricsURL != "" {
+		promConfig := PrometheusConfig{
+			SchedulerMetricsURL: config.SchedulerMetricsURL,
+			ScrapeInterval:      config.SchedulerScrapeInterval,
+		}
+		promScraper = NewPrometheusScraper(promConfig)
+	}
+
 	return &Service{
 		config:          config,
 		k8sClient:       clientset,
@@ -106,6 +119,7 @@ func NewService(config Config) (*Service, error) {
 		logger:          logger,
 		informerFactory: informerFactory,
 		eventBuffer:     eventBuffer,
+		promScraper:     promScraper,
 	}, nil
 }
 
@@ -141,6 +155,12 @@ func (s *Service) startInformers() error {
 		return fmt.Errorf("failed to add node event handler: %w", err)
 	}
 
+	// Events informer (for FailedScheduling events) - TDD: will implement with tests
+	// eventsInformer := s.informerFactory.Core().V1().Events().Informer()
+	// if _, err := eventsInformer.AddEventHandler(&eventEventHandler{service: s}); err != nil {
+	// 	return fmt.Errorf("failed to add events event handler: %w", err)
+	// }
+
 	return nil
 }
 
@@ -155,6 +175,15 @@ func (s *Service) Start(ctx context.Context) error {
 		defer s.workerWG.Done()
 		s.processEvents(s.ctx)
 	}()
+
+	// Start Prometheus scraper worker if enabled - TDD: will implement with tests
+	// if s.promScraper != nil {
+	// 	s.workerWG.Add(1)
+	// 	go func() {
+	// 		defer s.workerWG.Done()
+	// 		s.scrapeSchedulerMetrics(s.ctx)
+	// 	}()
+	// }
 
 	// Register event handlers
 	if err := s.startInformers(); err != nil {
