@@ -81,7 +81,7 @@ func TestDeletePodMetadata_Success(t *testing.T) {
 		Labels:    map[string]string{"app": "test"},
 	}
 	data, _ := json.Marshal(podInfo)
-	mockKV.Put("pod.ip.10.0.1.5", data)
+	_, _ = mockKV.Put("pod.ip.10.0.1.5", data)
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -190,7 +190,7 @@ func TestDeleteServiceMetadata_Success(t *testing.T) {
 		Labels:    map[string]string{"app": "test"},
 	}
 	data, _ := json.Marshal(serviceInfo)
-	mockKV.Put("service.ip.10.96.5.10", data)
+	_, _ = mockKV.Put("service.ip.10.96.5.10", data)
 
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{

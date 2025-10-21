@@ -52,10 +52,6 @@ func (m *mockKV) Delete(key string, opts ...nats.DeleteOpt) error {
 
 func (m *mockKV) Bucket() string { return "mock-bucket" }
 
-func (m *mockKV) setFails(fails bool) {
-	m.fails = fails
-}
-
 func (m *mockKV) len() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

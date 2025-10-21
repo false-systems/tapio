@@ -2,7 +2,6 @@ package k8scontext
 
 import (
 	"context"
-	"fmt"
 	"time"
 )
 
@@ -24,7 +23,9 @@ func (s *Service) enqueueEvent(event func() error) {
 		case s.eventBuffer <- event:
 		default:
 			// Still couldn't add, drop it
-			fmt.Printf("WARNING: event buffer full, dropping event\n")
+			s.logger.Warn().
+				Int("buffer_size", cap(s.eventBuffer)).
+				Msg("event buffer full, dropping event")
 		}
 	}
 }
@@ -71,5 +72,8 @@ func (s *Service) executeWithRetry(ctx context.Context, event func() error) {
 	}
 
 	// Max retries exceeded
-	fmt.Printf("ERROR: event failed after %d retries: %v\n", s.config.MaxRetries, err)
+	s.logger.Error().
+		Int("max_retries", s.config.MaxRetries).
+		Err(err).
+		Msg("event failed after max retries")
 }

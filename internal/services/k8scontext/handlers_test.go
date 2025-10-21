@@ -138,7 +138,7 @@ func TestHandlePodUpdate_IPChange(t *testing.T) {
 	}
 
 	// Pre-populate KV with old IP
-	service.storePodMetadata(oldPod)
+	require.NoError(t, service.storePodMetadata(oldPod))
 
 	newPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -180,7 +180,7 @@ func TestHandlePodDelete(t *testing.T) {
 	}
 
 	// Pre-populate KV
-	service.storePodMetadata(pod)
+	require.NoError(t, service.storePodMetadata(pod))
 	require.Equal(t, 1, mockKV.len())
 
 	service.handlePodDelete(pod)
@@ -319,7 +319,7 @@ func TestHandleServiceUpdate_ClusterIPChange(t *testing.T) {
 	}
 
 	// Pre-populate KV with old ClusterIP
-	service.storeServiceMetadata(oldSvc)
+	require.NoError(t, service.storeServiceMetadata(oldSvc))
 
 	newSvc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -361,7 +361,7 @@ func TestHandleServiceDelete(t *testing.T) {
 	}
 
 	// Pre-populate KV
-	service.storeServiceMetadata(svc)
+	require.NoError(t, service.storeServiceMetadata(svc))
 	require.Equal(t, 1, mockKV.len())
 
 	service.handleServiceDelete(svc)

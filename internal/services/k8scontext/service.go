@@ -3,9 +3,12 @@ package k8scontext
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
+	"github.com/yairfalse/tapio/internal/base"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -16,6 +19,7 @@ type Service struct {
 	config    Config
 	k8sClient *kubernetes.Clientset
 	kv        nats.KeyValue
+	logger    zerolog.Logger
 
 	// Informer factory (shared across all informers)
 	informerFactory informers.SharedInformerFactory
@@ -23,9 +27,10 @@ type Service struct {
 	// Event buffer for async NATS KV writes
 	eventBuffer chan func() error
 
-	// Context for worker goroutine
-	ctx    context.Context
-	cancel context.CancelFunc
+	// Lifecycle management
+	ctx      context.Context
+	cancel   context.CancelFunc
+	workerWG sync.WaitGroup
 }
 
 // NewService creates a new K8s Context Service
@@ -91,36 +96,52 @@ func NewService(config Config) (*Service, error) {
 	// 6. Create event buffer
 	eventBuffer := make(chan func() error, config.EventBufferSize)
 
+	// 7. Create logger
+	logger := base.NewLogger("k8scontext")
+
 	return &Service{
 		config:          config,
 		k8sClient:       clientset,
 		kv:              kv,
+		logger:          logger,
 		informerFactory: informerFactory,
 		eventBuffer:     eventBuffer,
 	}, nil
 }
 
 // startInformers registers event handlers for all K8s resources
-func (s *Service) startInformers() {
+func (s *Service) startInformers() error {
 	// Pod informer
 	podInformer := s.informerFactory.Core().V1().Pods().Informer()
-	podInformer.AddEventHandler(&podEventHandler{service: s})
+	if _, err := podInformer.AddEventHandler(&podEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add pod event handler: %w", err)
+	}
 
 	// Service informer
 	serviceInformer := s.informerFactory.Core().V1().Services().Informer()
-	serviceInformer.AddEventHandler(&serviceEventHandler{service: s})
+	if _, err := serviceInformer.AddEventHandler(&serviceEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add service event handler: %w", err)
+	}
 
 	// Deployment informer
 	deploymentInformer := s.informerFactory.Apps().V1().Deployments().Informer()
-	deploymentInformer.AddEventHandler(&deploymentEventHandler{service: s})
+	if _, err := deploymentInformer.AddEventHandler(&deploymentEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add deployment event handler: %w", err)
+	}
 
 	// ReplicaSet informer
 	replicaSetInformer := s.informerFactory.Apps().V1().ReplicaSets().Informer()
-	replicaSetInformer.AddEventHandler(&replicaSetEventHandler{service: s})
+	if _, err := replicaSetInformer.AddEventHandler(&replicaSetEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add replicaset event handler: %w", err)
+	}
 
 	// Node informer
 	nodeInformer := s.informerFactory.Core().V1().Nodes().Informer()
-	nodeInformer.AddEventHandler(&nodeEventHandler{service: s})
+	if _, err := nodeInformer.AddEventHandler(&nodeEventHandler{service: s}); err != nil {
+		return fmt.Errorf("failed to add node event handler: %w", err)
+	}
+
+	return nil
 }
 
 // Start begins watching K8s resources
@@ -128,11 +149,17 @@ func (s *Service) Start(ctx context.Context) error {
 	// Create cancellable context for workers
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
-	// Start event processing worker
-	go s.processEvents(s.ctx)
+	// Start event processing worker with WaitGroup
+	s.workerWG.Add(1)
+	go func() {
+		defer s.workerWG.Done()
+		s.processEvents(s.ctx)
+	}()
 
 	// Register event handlers
-	s.startInformers()
+	if err := s.startInformers(); err != nil {
+		return fmt.Errorf("failed to start informers: %w", err)
+	}
 
 	// Start all informers
 	s.informerFactory.Start(s.ctx.Done())
@@ -150,14 +177,18 @@ func (s *Service) Start(ctx context.Context) error {
 
 // Stop gracefully stops the service
 func (s *Service) Stop() error {
-	// Cancel context to stop informers and workers
+	// Cancel context to stop informers
 	if s.cancel != nil {
 		s.cancel()
 	}
 
-	// Close event buffer (workers will drain remaining events first)
+	// Close event buffer to signal worker to finish
 	close(s.eventBuffer)
 
+	// Wait for worker to drain remaining events
+	s.workerWG.Wait()
+
+	s.logger.Info().Msg("k8scontext service stopped gracefully")
 	return nil
 }
 
