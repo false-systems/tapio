@@ -141,6 +141,15 @@ func (s *Service) startInformers() error {
 		return fmt.Errorf("failed to add node event handler: %w", err)
 	}
 
+	// Events informer - TDD: Future implementation to watch K8s Events API
+	// Will monitor FailedScheduling events to track pod scheduling failures and correlate
+	// with scheduler metrics. Events will be stored in NATS KV for historical analysis.
+	// Example: Reason="FailedScheduling", Message="0/3 nodes available: insufficient memory"
+	// eventsInformer := s.informerFactory.Core().V1().Events().Informer()
+	// if _, err := eventsInformer.AddEventHandler(&eventEventHandler{service: s}); err != nil {
+	// 	return fmt.Errorf("failed to add events event handler: %w", err)
+	// }
+
 	return nil
 }
 
@@ -155,6 +164,9 @@ func (s *Service) Start(ctx context.Context) error {
 		defer s.workerWG.Done()
 		s.processEvents(s.ctx)
 	}()
+
+	// Note: Scheduler observability is now handled by standalone SchedulerObserver
+	// in internal/observers/scheduler/ using BaseObserver pattern
 
 	// Register event handlers
 	if err := s.startInformers(); err != nil {
