@@ -208,7 +208,7 @@ func TestInformerIntegration_DeploymentLifecycle(t *testing.T) {
 	defer cancel()
 
 	go service.processEvents(ctx)
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(ctx.Done())
 
@@ -257,7 +257,7 @@ func TestInformerIntegration_NodeLifecycle(t *testing.T) {
 	defer cancel()
 
 	go service.processEvents(ctx)
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(ctx.Done())
 

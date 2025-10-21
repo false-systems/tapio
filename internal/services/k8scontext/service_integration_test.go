@@ -141,7 +141,7 @@ func TestIntegration_InformerSync(t *testing.T) {
 	go service.processEvents(ctx)
 
 	// Start informers
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 	factory.Start(ctx.Done())
 
 	// Wait for cache sync
@@ -185,7 +185,7 @@ func TestIntegration_MultipleResourceTypes(t *testing.T) {
 	go service.processEvents(ctx)
 
 	// Start informers
-	service.startInformers()
+	require.NoError(t, service.startInformers())
 	factory.Start(ctx.Done())
 	factory.WaitForCacheSync(ctx.Done())
 
