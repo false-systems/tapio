@@ -50,7 +50,9 @@ scheduler_plugin_execution_duration_seconds{plugin="NodeAffinity",extension_poin
 `
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(metricsData))
+		if _, err := w.Write([]byte(metricsData)); err != nil {
+			panic(err) // Test setup issue
+		}
 	}))
 	defer server.Close()
 
