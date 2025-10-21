@@ -1,4 +1,4 @@
-package k8scontext
+package scheduler
 
 import (
 	"testing"
@@ -112,7 +112,7 @@ func TestSerializePreemptionInfo(t *testing.T) {
 // TestStoreSchedulingInfo verifies storage of scheduling metadata
 func TestStoreSchedulingInfo(t *testing.T) {
 	mockKV := newMockKV()
-	service := &Service{kv: mockKV}
+	observer := &SchedulerObserver{kv: mockKV}
 
 	info := SchedulingInfo{
 		PodUID:        "pod-abc",
@@ -123,7 +123,7 @@ func TestStoreSchedulingInfo(t *testing.T) {
 		LastAttempt:   time.Now().UTC(),
 	}
 
-	err := service.storeSchedulingInfo(info)
+	err := observer.storeSchedulingInfo(info)
 	require.NoError(t, err)
 
 	// Verify stored in KV
@@ -135,7 +135,7 @@ func TestStoreSchedulingInfo(t *testing.T) {
 // TestStorePluginMetrics verifies storage of plugin metrics
 func TestStorePluginMetrics(t *testing.T) {
 	mockKV := newMockKV()
-	service := &Service{kv: mockKV}
+	observer := &SchedulerObserver{kv: mockKV}
 
 	metrics := PluginMetrics{
 		PluginName:     "NodeAffinity",
@@ -145,7 +145,7 @@ func TestStorePluginMetrics(t *testing.T) {
 		Timestamp:      time.Now().UTC(),
 	}
 
-	err := service.storePluginMetrics(metrics)
+	err := observer.storePluginMetrics(metrics)
 	require.NoError(t, err)
 
 	// Verify stored in KV
@@ -157,7 +157,7 @@ func TestStorePluginMetrics(t *testing.T) {
 // TestStoreSchedulerMetrics verifies storage of global scheduler metrics
 func TestStoreSchedulerMetrics(t *testing.T) {
 	mockKV := newMockKV()
-	service := &Service{kv: mockKV}
+	observer := &SchedulerObserver{kv: mockKV}
 
 	metrics := SchedulerMetrics{
 		PendingPods:        42,
@@ -166,7 +166,7 @@ func TestStoreSchedulerMetrics(t *testing.T) {
 		LastUpdated:        time.Now().UTC(),
 	}
 
-	err := service.storeSchedulerMetrics(metrics)
+	err := observer.storeSchedulerMetrics(metrics)
 	require.NoError(t, err)
 
 	// Verify stored in KV
@@ -178,7 +178,7 @@ func TestStoreSchedulerMetrics(t *testing.T) {
 // TestStorePreemptionInfo verifies storage of preemption events
 func TestStorePreemptionInfo(t *testing.T) {
 	mockKV := newMockKV()
-	service := &Service{kv: mockKV}
+	observer := &SchedulerObserver{kv: mockKV}
 
 	info := PreemptionInfo{
 		PreemptorPodUID: "preemptor-xyz",
@@ -190,7 +190,7 @@ func TestStorePreemptionInfo(t *testing.T) {
 		Timestamp:       time.Now().UTC(),
 	}
 
-	err := service.storePreemptionInfo(info)
+	err := observer.storePreemptionInfo(info)
 	require.NoError(t, err)
 
 	// Verify stored in KV
@@ -202,7 +202,7 @@ func TestStorePreemptionInfo(t *testing.T) {
 // TestDeleteSchedulingInfo verifies deletion of scheduling metadata
 func TestDeleteSchedulingInfo(t *testing.T) {
 	mockKV := newMockKV()
-	service := &Service{kv: mockKV}
+	observer := &SchedulerObserver{kv: mockKV}
 
 	// First store the data
 	info := SchedulingInfo{
@@ -210,7 +210,7 @@ func TestDeleteSchedulingInfo(t *testing.T) {
 		PodName:   "test-pod",
 		Namespace: "default",
 	}
-	err := service.storeSchedulingInfo(info)
+	err := observer.storeSchedulingInfo(info)
 	require.NoError(t, err)
 
 	// Verify it exists
@@ -218,7 +218,7 @@ func TestDeleteSchedulingInfo(t *testing.T) {
 	require.NoError(t, err)
 
 	// Delete it
-	err = service.deleteSchedulingInfo("pod-to-delete")
+	err = observer.deleteSchedulingInfo("pod-to-delete")
 	require.NoError(t, err)
 
 	// Verify it's gone
@@ -229,7 +229,7 @@ func TestDeleteSchedulingInfo(t *testing.T) {
 // TestGetSchedulingInfo_Success verifies retrieval of scheduling info
 func TestGetSchedulingInfo_Success(t *testing.T) {
 	mockKV := newMockKV()
-	service := &Service{kv: mockKV}
+	observer := &SchedulerObserver{kv: mockKV}
 
 	// Store scheduling info
 	info := SchedulingInfo{
@@ -240,11 +240,11 @@ func TestGetSchedulingInfo_Success(t *testing.T) {
 		FailureReason: "insufficient memory",
 		LastAttempt:   time.Now().UTC(),
 	}
-	err := service.storeSchedulingInfo(info)
+	err := observer.storeSchedulingInfo(info)
 	require.NoError(t, err)
 
 	// Retrieve it
-	retrieved, err := service.getSchedulingInfo("pod-xyz")
+	retrieved, err := observer.getSchedulingInfo("pod-xyz")
 	require.NoError(t, err)
 	assert.Equal(t, "pod-xyz", retrieved.PodUID)
 	assert.Equal(t, "test-pod", retrieved.PodName)
@@ -254,10 +254,10 @@ func TestGetSchedulingInfo_Success(t *testing.T) {
 // TestGetSchedulingInfo_NotFound verifies error when scheduling info doesn't exist
 func TestGetSchedulingInfo_NotFound(t *testing.T) {
 	mockKV := newMockKV()
-	service := &Service{kv: mockKV}
+	observer := &SchedulerObserver{kv: mockKV}
 
 	// Try to get non-existent scheduling info
-	_, err := service.getSchedulingInfo("nonexistent-pod")
+	_, err := observer.getSchedulingInfo("nonexistent-pod")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get scheduling info")
 }
