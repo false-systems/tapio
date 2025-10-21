@@ -998,7 +998,446 @@ defer span.End()
 
 ---
 
-## 8. Next Steps
+## 8. Grafana Beyla eBPF Patterns (Production Reference)
+
+**Source:** `grafana/beyla` - eBPF-based auto-instrumentation for K8s
+
+Beyla is **exactly** what Tapio observers do: eBPF → OTEL/Prometheus with K8s enrichment. This is our **production reference implementation**.
+
+### 8.1 K8s Metadata Store Pattern
+
+**beyla/vendor/go.opentelemetry.io/obi/pkg/components/kube/store.go**
+
+```go
+// Store aggregates K8s metadata from multiple sources
+type Store struct {
+    access sync.RWMutex
+
+    // K8s informer
+    metadataNotifier meta.Notifier
+
+    // Container tracking (multiple indexes!)
+    containerIDs    maps.Map2[string, uint32, *container.Info]  // By container ID + PID
+    containerByPID  map[uint32]*container.Info                  // By PID only
+    namespaces      maps.Map2[uint32, uint32, *container.Info]  // By PID namespace
+
+    // Pod tracking
+    podsByContainer map[string]*CachedObjMeta  // container ID → Pod
+
+    // IP tracking (CRITICAL!)
+    objectMetaByIP    map[string]*CachedObjMeta  // IP → Pod/Service/Node
+    otelServiceInfoByIP map[string]OTelServiceNamePair
+
+    // Owner hierarchy
+    containersByOwner maps.Map2[string, string, *informer.ContainerInfo]
+
+    // Cache syncing
+    cacheSynced bool
+}
+```
+
+**🔥 KEY INSIGHT: Multi-index strategy**
+
+Beyla indexes K8s metadata by:
+1. **Container ID** (from eBPF cgroup)
+2. **PID** (from eBPF task_struct)
+3. **PID namespace** (for container isolation)
+4. **IP address** (for network events!) ← **CRITICAL FOR TAPIO**
+5. **Owner hierarchy** (Deployment → ReplicaSet → Pod)
+
+### 8.2 Metadata Caching Strategy
+
+```go
+type CachedObjMeta struct {
+    Meta             *informer.ObjectMeta
+    OTELResourceMeta map[attr.Name]string  // ← Pre-computed OTEL attributes!
+}
+
+// cacheResourceMetadata extracts from multiple sources (in order):
+// 1. OTEL_RESOURCE_ATTRIBUTES env var
+// 2. resource.opentelemetry.io/ annotations
+// 3. app.kubernetes.io/ labels
+func (s *Store) cacheResourceMetadata(meta *informer.ObjectMeta) *CachedObjMeta {
+    com := CachedObjMeta{
+        Meta:             meta,
+        OTELResourceMeta: map[attr.Name]string{},
+    }
+
+    // Parse from labels (app.kubernetes.io/name → service.name)
+    for propertyName, labels := range s.resourceLabels {
+        for _, label := range labels {
+            if val := meta.Labels[label]; val != "" {
+                com.OTELResourceMeta[attr.Name(propertyName)] = val
+                break
+            }
+        }
+    }
+
+    // Override from annotations (resource.opentelemetry.io/service.name)
+    for labelName, labelValue := range meta.Annotations {
+        if strings.HasPrefix(labelName, ResourceAttributesPrefix) {
+            propertyName := labelName[len(ResourceAttributesPrefix):]
+            com.OTELResourceMeta[attr.Name(propertyName)] = labelValue
+        }
+    }
+
+    // Override from container env vars (OTEL_SERVICE_NAME)
+    for _, cnt := range meta.GetPod().GetContainers() {
+        if val := cnt.Env[EnvServiceName]; val != "" {
+            com.OTELResourceMeta[serviceNameKey] = val
+        }
+    }
+
+    return &com
+}
+```
+
+**🔥 TAPIO APPLICATION:**
+
+```go
+// pkg/domain/context.go (Level 0)
+type PodContext struct {
+    // Raw K8s metadata
+    ObjectMeta *metav1.ObjectMeta
+
+    // Pre-computed OTEL attributes (Beyla pattern!)
+    OTELAttributes map[string]string  // ← Cache these!
+
+    // Network identifiers
+    PodIP     string
+    HostIP    string
+    NodeName  string
+}
+
+// Compute once, use many times
+func enrichOTELAttributes(pod *v1.Pod) map[string]string {
+    attrs := make(map[string]string)
+
+    // From labels (app.kubernetes.io/name → service.name)
+    if name := pod.Labels["app.kubernetes.io/name"]; name != "" {
+        attrs["service.name"] = name
+    }
+
+    // From annotations (resource.opentelemetry.io/service.name)
+    for k, v := range pod.Annotations {
+        if strings.HasPrefix(k, "resource.opentelemetry.io/") {
+            attrName := strings.TrimPrefix(k, "resource.opentelemetry.io/")
+            attrs[attrName] = v
+        }
+    }
+
+    // From env vars (OTEL_SERVICE_NAME in first container)
+    if len(pod.Spec.Containers) > 0 {
+        for _, env := range pod.Spec.Containers[0].Env {
+            if env.Name == "OTEL_SERVICE_NAME" {
+                attrs["service.name"] = env.Value
+            }
+        }
+    }
+
+    return attrs
+}
+```
+
+### 8.3 MetadataProvider Pattern (Lazy Initialization)
+
+**beyla/vendor/go.opentelemetry.io/obi/pkg/components/kube/informer_provider.go**
+
+```go
+type MetadataProvider struct {
+    mt sync.Mutex
+
+    metadata *Store      // ← Lazy init
+    informer meta.Notifier
+    cfg      *MetadataConfig
+}
+
+// IsKubeEnabled - Auto-detect K8s environment
+func (mp *MetadataProvider) IsKubeEnabled() bool {
+    switch strings.ToLower(string(mp.cfg.Enable)) {
+    case "true":
+        return true
+    case "false":
+        return false
+    case "autodetect":  // ← Smart default!
+        _, err := loadKubeConfig(mp.cfg.KubeConfigPath)
+        if err != nil {
+            klog().Debug("kubeconfig can't be detected. Not in Kubernetes")
+            mp.cfg.Enable = "false"
+            return false
+        }
+        mp.cfg.Enable = "true"
+        return true
+    }
+}
+
+// Get - Lazy initialization pattern
+func (mp *MetadataProvider) Get(ctx context.Context) (*Store, error) {
+    mp.mt.Lock()
+    defer mp.mt.Unlock()
+
+    if mp.metadata != nil {
+        return mp.metadata, nil  // ← Already initialized
+    }
+
+    informer, err := mp.getInformer(ctx)
+    if err != nil {
+        return nil, err
+    }
+
+    mp.metadata = NewStore(informer, mp.cfg.ResourceLabels)
+    return mp.metadata, nil
+}
+```
+
+**🔥 TAPIO APPLICATION:**
+
+```go
+// internal/integrations/context/provider.go (Enterprise)
+type ContextProvider struct {
+    mu    sync.Mutex
+    store *Store  // Lazy init
+    cfg   *Config
+}
+
+func (cp *ContextProvider) IsKubeEnabled() bool {
+    // Auto-detect: try in-cluster config
+    _, err := rest.InClusterConfig()
+    return err == nil
+}
+
+func (cp *ContextProvider) Get(ctx context.Context) (*Store, error) {
+    cp.mu.Lock()
+    defer cp.mu.Unlock()
+
+    if cp.store != nil {
+        return cp.store, nil
+    }
+
+    // Initialize informers + NATS KV
+    cp.store = NewStore(ctx, cp.cfg)
+    return cp.store, nil
+}
+```
+
+### 8.4 Remote Informer Cache Pattern (Performance!)
+
+**beyla/vendor/go.opentelemetry.io/obi/pkg/components/kube/informer_provider.go:298**
+
+```go
+// initRemoteInformerCacheClient connects via gRPC to remote beyla-k8s-cache service
+// to avoid each Beyla instance connecting to Kube API (overload prevention)
+func (mp *MetadataProvider) initRemoteInformerCacheClient(ctx context.Context) *cacheSvcClient {
+    client := &cacheSvcClient{
+        address:      mp.cfg.MetaCacheAddr,  // ← Remote cache address
+        BaseNotifier: meta.NewBaseNotifier(klog()),
+        syncTimeout:  mp.cfg.SyncTimeout,
+    }
+    client.Start(ctx)
+    return client
+}
+```
+
+**🔥 THIS IS EXACTLY WHAT TAPIO CONTEXT SERVICE DOES!**
+
+```
+FREE tier (Beyla standalone):
+┌─────────────────┐
+│ Network Observer│
+│ - Own informer  │ ──> K8s API (watch Pods)
+│ - 300MB         │
+└─────────────────┘
+
+ENTERPRISE tier (Beyla with remote cache):
+┌─────────────────┐     gRPC      ┌──────────────────┐
+│ Network Observer│ ───────────> │ Context Service  │
+│ - Remote client │               │ - 1× informer    │
+│ - 50MB          │               │ - Serves N obs   │
+└─────────────────┘               └──────────────────┘
+                                         │
+                                         ▼
+                                    K8s API (single watch)
+```
+
+**Beyla validates our two-tier approach!**
+
+### 8.5 Prometheus Label Naming Convention
+
+**beyla/pkg/export/prom/prom.go**
+
+```go
+// OTEL uses dot notation: service.name
+// Prometheus uses snake_case: service_name
+const (
+    serviceNameKey      = "service_name"       // Not service.name!
+    serviceNamespaceKey = "service_namespace"
+
+    k8sNamespaceName   = "k8s_namespace_name"
+    k8sPodName         = "k8s_pod_name"
+    k8sDeploymentName  = "k8s_deployment_name"
+    k8sNodeName        = "k8s_node_name"
+    k8sPodUID          = "k8s_pod_uid"
+)
+```
+
+**🔥 CRITICAL: Label name transformation**
+
+```go
+func parseExtraMetadata(labels []string) []attr.Name {
+    attrNames := make([]attr.Name, len(labels))
+    for i, label := range labels {
+        // Convert snake_case → dotted.format
+        attrNames[i] = attr.Name(strings.ReplaceAll(label, "_", "."))
+    }
+    return attrNames
+}
+```
+
+**TAPIO MUST DO THIS:**
+
+```go
+// OTEL attributes (internal)
+const (
+    AttrK8sPodName     = "k8s.pod.name"       // Dot notation
+    AttrK8sNamespace   = "k8s.namespace.name"
+    AttrServiceName    = "service.name"
+)
+
+// Prometheus labels (export)
+const (
+    PromK8sPodName     = "k8s_pod_name"       // Snake case!
+    PromK8sNamespace   = "k8s_namespace_name"
+    PromServiceName    = "service_name"
+)
+
+// Convert for Prometheus export
+func toPromLabel(otelAttr string) string {
+    return strings.ReplaceAll(otelAttr, ".", "_")
+}
+```
+
+### 8.6 K8s Informer Restrictions (Performance)
+
+**beyla/vendor/go.opentelemetry.io/obi/pkg/components/kube/informer_provider.go:277**
+
+```go
+func (mp *MetadataProvider) initLocalInformers(ctx context.Context) (*meta.Informers, error) {
+    opts := []meta.InformerOption{
+        meta.WithResyncPeriod(mp.cfg.ResyncPeriod),  // ← Resync period
+        meta.WaitForCacheSync(),                      // ← Wait before decorating
+        meta.WithCacheSyncTimeout(mp.cfg.SyncTimeout),
+    }
+
+    // Restrict to local node (DaemonSet optimization!)
+    if mp.cfg.RestrictLocalNode {
+        localNode, _ := mp.CurrentNodeName(ctx)
+        opts = append(opts, meta.RestrictNode(localNode))  // ← Only watch local pods!
+    }
+
+    return meta.InitInformers(ctx, opts...)
+}
+```
+
+**🔥 CRITICAL FOR DAEMONSET DEPLOYMENT:**
+
+When deploying as DaemonSet, only watch Pods on the **local node**!
+
+```go
+// TAPIO DaemonSet deployment
+type Config struct {
+    WatchLocalNodeOnly bool `env:"TAPIO_WATCH_LOCAL_NODE"`
+}
+
+func NewPodInformer(cfg Config) cache.SharedIndexInformer {
+    listWatch := &cache.ListWatch{
+        ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+            // DaemonSet: Only list pods on local node
+            if cfg.WatchLocalNodeOnly {
+                opts.FieldSelector = "spec.nodeName=" + os.Getenv("NODE_NAME")
+            }
+            return client.CoreV1().Pods("").List(ctx, opts)
+        },
+        WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
+            if cfg.WatchLocalNodeOnly {
+                opts.FieldSelector = "spec.nodeName=" + os.Getenv("NODE_NAME")
+            }
+            return client.CoreV1().Pods("").Watch(ctx, opts)
+        },
+    }
+
+    return cache.NewSharedIndexInformer(listWatch, &v1.Pod{}, 0, indexers)
+}
+```
+
+### 8.7 Survey Pattern (Process Discovery)
+
+**beyla/pkg/internal/discover/survey_informer.go**
+
+```go
+type surveyor struct {
+    input  <-chan []obiDiscover.Event[ebpf.Instrumentable]
+    output *msg.Queue[exec.ProcessEvent]
+    store  *kube.Store  // ← K8s metadata store
+}
+
+func (m *surveyor) run(_ context.Context) {
+    for events := range m.input {
+        for _, pe := range events {
+            m.fetchMetadata(&pe.Obj)  // ← Enrich with K8s metadata
+
+            if pe.Type == obiDiscover.EventDeleted {
+                m.output.Send(exec.ProcessEvent{Type: exec.ProcessEventTerminated})
+            } else {
+                m.output.Send(exec.ProcessEvent{Type: exec.ProcessEventCreated})
+            }
+        }
+    }
+}
+
+func (m *surveyor) fetchMetadata(i *ebpf.Instrumentable) {
+    // Enrich from executable
+    i.CopyToServiceAttributes()
+
+    // Enrich from K8s (if available)
+    if m.store != nil {
+        if objectMeta, containerName := m.store.PodContainerByPIDNs(i.FileInfo.Ns); objectMeta != nil {
+            transform.AppendKubeMetadata(m.store, &i.FileInfo.Service, objectMeta, containerName)
+        }
+    }
+}
+```
+
+**🔥 TAPIO PATTERN:**
+
+```go
+// internal/observers/network/enrichment.go
+func (o *Observer) enrichEvent(event *BPFEvent) *domain.Event {
+    enriched := &domain.Event{
+        Timestamp: event.Timestamp,
+        Type:      event.Type,
+    }
+
+    // Enrich from eBPF data
+    enriched.Attributes["src.ip"] = event.SrcIP
+    enriched.Attributes["dst.ip"] = event.DstIP
+
+    // Enrich from K8s (if available)
+    if o.store != nil {
+        if pod := o.store.PodByIP(event.SrcIP); pod != nil {
+            enriched.Attributes["k8s.pod.name"] = pod.Name
+            enriched.Attributes["k8s.namespace.name"] = pod.Namespace
+            // Use pre-computed OTEL attributes!
+            for k, v := range pod.OTELAttributes {
+                enriched.Attributes[k] = v
+            }
+        }
+    }
+
+    return enriched
+}
+```
+
+## 9. Next Steps
 
 1. **Design Context Service** (Enterprise)
    - SharedInformer setup with IP indexing
