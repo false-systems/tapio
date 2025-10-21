@@ -27,9 +27,6 @@ type Service struct {
 	// Event buffer for async NATS KV writes
 	eventBuffer chan func() error
 
-	// Prometheus scraper for scheduler metrics (optional)
-	promScraper *PrometheusScraper
-
 	// Lifecycle management
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -102,16 +99,6 @@ func NewService(config Config) (*Service, error) {
 	// 7. Create logger
 	logger := base.NewLogger("k8scontext")
 
-	// 8. Create Prometheus scraper if enabled
-	var promScraper *PrometheusScraper
-	if config.SchedulerMetricsURL != "" {
-		promConfig := PrometheusConfig{
-			SchedulerMetricsURL: config.SchedulerMetricsURL,
-			ScrapeInterval:      config.SchedulerScrapeInterval,
-		}
-		promScraper = NewPrometheusScraper(promConfig)
-	}
-
 	return &Service{
 		config:          config,
 		k8sClient:       clientset,
@@ -119,7 +106,6 @@ func NewService(config Config) (*Service, error) {
 		logger:          logger,
 		informerFactory: informerFactory,
 		eventBuffer:     eventBuffer,
-		promScraper:     promScraper,
 	}, nil
 }
 
