@@ -15,6 +15,11 @@ type PodInfo struct {
 	PodIP     string            `json:"pod_ip"`
 	HostIP    string            `json:"host_ip"`
 	Labels    map[string]string `json:"labels"`
+
+	// Pre-computed OTEL attributes (optional - backward compatible with omitempty)
+	// Computed once on pod add/update using Beyla priority cascade:
+	// env vars → annotations → labels → fallback to pod name
+	OTELAttributes map[string]string `json:"otel_attributes,omitempty"`
 }
 
 // ServiceInfo matches pkg/decoders/k8s_service.go:ServiceInfo EXACTLY

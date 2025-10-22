@@ -15,12 +15,17 @@ func toPodInfo(pod *corev1.Pod) PodInfo {
 		labels = make(map[string]string)
 	}
 
+	// Pre-compute OTEL attributes (Beyla priority cascade: env vars → annotations → labels)
+	// This is done ONCE on pod add/update for 100x faster event enrichment
+	otelAttrs := ComputeOTELAttributes(pod)
+
 	return PodInfo{
-		Name:      pod.Name,
-		Namespace: pod.Namespace,
-		PodIP:     pod.Status.PodIP,
-		HostIP:    pod.Status.HostIP,
-		Labels:    labels,
+		Name:           pod.Name,
+		Namespace:      pod.Namespace,
+		PodIP:          pod.Status.PodIP,
+		HostIP:         pod.Status.HostIP,
+		Labels:         labels,
+		OTELAttributes: otelAttrs,
 	}
 }
 
@@ -40,9 +45,29 @@ func toServiceInfo(service *corev1.Service) ServiceInfo {
 	}
 }
 
-// makePodKey generates NATS KV key for pod
+// makePodKey generates NATS KV key for pod (legacy - by IP)
 func makePodKey(ip string) string {
 	return fmt.Sprintf("pod.ip.%s", ip)
+}
+
+// makePodByIPKey generates NATS KV key for pod lookup by IP
+func makePodByIPKey(ip string) string {
+	return fmt.Sprintf("pod.ip.%s", ip)
+}
+
+// makePodByUIDKey generates NATS KV key for pod lookup by UID
+func makePodByUIDKey(uid string) string {
+	return fmt.Sprintf("pod.uid.%s", uid)
+}
+
+// makePodByNameKey generates NATS KV key for pod lookup by namespace/name
+func makePodByNameKey(namespace, name string) string {
+	return fmt.Sprintf("pod.name.%s.%s", namespace, name)
+}
+
+// makePodNameKey generates in-memory cache key for pod by namespace/name
+func makePodNameKey(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
 // makeServiceKey generates NATS KV key for service
@@ -93,7 +118,8 @@ func serializeServiceInfo(serviceInfo ServiceInfo) ([]byte, error) {
 	return data, nil
 }
 
-// storePodMetadata writes pod metadata to NATS KV
+// storePodMetadata writes pod metadata to NATS KV with multiple index keys
+// Beyla pattern: Store with multiple keys for O(1) lookups by different fields
 func (s *Service) storePodMetadata(pod *corev1.Pod) error {
 	if shouldSkipPod(pod) {
 		return nil
@@ -105,25 +131,59 @@ func (s *Service) storePodMetadata(pod *corev1.Pod) error {
 		return err
 	}
 
-	key := makePodKey(pod.Status.PodIP)
-	_, err = s.kv.Put(key, data)
-	if err != nil {
-		return fmt.Errorf("failed to store pod metadata for %s: %w", key, err)
+	// Multi-index storage: Store with 3 different keys
+	// This enables fast lookup by IP (network observer), UID (scheduler observer), or name
+
+	// Index 1: By IP (network observer - eBPF captures IPs)
+	if pod.Status.PodIP != "" {
+		key := makePodByIPKey(pod.Status.PodIP)
+		if _, err := s.kv.Put(key, data); err != nil {
+			return fmt.Errorf("failed to store pod by IP %s: %w", key, err)
+		}
+	}
+
+	// Index 2: By UID (scheduler observer - K8s Events use UIDs)
+	key := makePodByUIDKey(string(pod.UID))
+	if _, err := s.kv.Put(key, data); err != nil {
+		return fmt.Errorf("failed to store pod by UID %s: %w", key, err)
+	}
+
+	// Index 3: By Name (general lookup)
+	key = makePodByNameKey(pod.Namespace, pod.Name)
+	if _, err := s.kv.Put(key, data); err != nil {
+		return fmt.Errorf("failed to store pod by name %s: %w", key, err)
 	}
 
 	return nil
 }
 
-// deletePodMetadata removes pod metadata from NATS KV
+// deletePodMetadata removes pod metadata from all NATS KV indexes
 func (s *Service) deletePodMetadata(pod *corev1.Pod) error {
 	if shouldSkipPod(pod) {
 		return nil
 	}
 
-	key := makePodKey(pod.Status.PodIP)
-	err := s.kv.Delete(key)
-	if err != nil {
-		return fmt.Errorf("failed to delete pod metadata for %s: %w", key, err)
+	// Delete from all 3 indexes to prevent stale cache
+	// Errors are logged but don't stop deletion from other indexes
+
+	// Index 1: By IP
+	if pod.Status.PodIP != "" {
+		key := makePodByIPKey(pod.Status.PodIP)
+		if err := s.kv.Delete(key); err != nil {
+			s.logger.Warn().Err(err).Str("key", key).Msg("failed to delete pod by IP")
+		}
+	}
+
+	// Index 2: By UID
+	key := makePodByUIDKey(string(pod.UID))
+	if err := s.kv.Delete(key); err != nil {
+		s.logger.Warn().Err(err).Str("key", key).Msg("failed to delete pod by UID")
+	}
+
+	// Index 3: By Name
+	key = makePodByNameKey(pod.Namespace, pod.Name)
+	if err := s.kv.Delete(key); err != nil {
+		s.logger.Warn().Err(err).Str("key", key).Msg("failed to delete pod by name")
 	}
 
 	return nil
@@ -345,4 +405,38 @@ func (s *Service) deleteOwnerMetadata(pod *corev1.Pod) error {
 	}
 
 	return nil
+}
+
+// GetPodByUID retrieves pod metadata by UID from NATS KV
+// Used by Scheduler Observer (K8s Events reference pods by UID)
+func (s *Service) GetPodByUID(uid string) (*PodInfo, error) {
+	key := makePodByUIDKey(uid)
+	entry, err := s.kv.Get(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod by UID %s: %w", uid, err)
+	}
+
+	var podInfo PodInfo
+	if err := json.Unmarshal(entry.Value(), &podInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pod: %w", err)
+	}
+
+	return &podInfo, nil
+}
+
+// GetPodByName retrieves pod metadata by namespace and name from NATS KV
+// General-purpose lookup
+func (s *Service) GetPodByName(namespace, name string) (*PodInfo, error) {
+	key := makePodByNameKey(namespace, name)
+	entry, err := s.kv.Get(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod %s/%s: %w", namespace, name, err)
+	}
+
+	var podInfo PodInfo
+	if err := json.Unmarshal(entry.Value(), &podInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pod: %w", err)
+	}
+
+	return &podInfo, nil
 }

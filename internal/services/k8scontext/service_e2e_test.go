@@ -9,6 +9,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // TestE2E_PodLifecycle verifies complete pod lifecycle from creation to deletion
@@ -284,6 +285,7 @@ func TestE2E_ConcurrentEvents(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "pod-" + string(rune(i+'0')),
 				Namespace: "default",
+				UID:       types.UID("uid-" + string(rune(i+'0'))),
 			},
 			Status: corev1.PodStatus{
 				PodIP: "10.244.1." + string(rune(i+'0')),
@@ -295,15 +297,16 @@ func TestE2E_ConcurrentEvents(t *testing.T) {
 	// Wait for all events to process
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify all 10 pods stored
-	assert.Equal(t, 10, mockKV.len(), "All 10 pods should be stored")
+	// Verify all 10 pods stored (multi-index: 3 keys per pod = 30 keys)
+	assert.Equal(t, 30, mockKV.len(), "All 10 pods should be stored with 3 keys each")
 
-	// Delete all 10 pods concurrently
+	// Delete all 10 pods concurrently (must match UIDs from creation)
 	for i := 0; i < 10; i++ {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "pod-" + string(rune(i+'0')),
 				Namespace: "default",
+				UID:       types.UID("uid-" + string(rune(i+'0'))),
 			},
 			Status: corev1.PodStatus{
 				PodIP: "10.244.1." + string(rune(i+'0')),
@@ -386,7 +389,8 @@ func TestE2E_MixedResourceTypes(t *testing.T) {
 	_, err = mockKV.Get("node.worker-1")
 	assert.NoError(t, err, "Node should be stored")
 
-	assert.Equal(t, 4, mockKV.len(), "Should have 4 resources")
+	// 1 pod (3 keys: IP, UID, Name) + 1 service + 1 deployment + 1 node = 6 keys
+	assert.Equal(t, 6, mockKV.len(), "Should have 6 KV entries (pod has 3 indexes)")
 }
 
 // TestE2E_OwnershipTracking verifies pod ownership tracking through lifecycle
