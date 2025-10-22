@@ -406,3 +406,37 @@ func (s *Service) deleteOwnerMetadata(pod *corev1.Pod) error {
 
 	return nil
 }
+
+// GetPodByUID retrieves pod metadata by UID from NATS KV
+// Used by Scheduler Observer (K8s Events reference pods by UID)
+func (s *Service) GetPodByUID(uid string) (*PodInfo, error) {
+	key := makePodByUIDKey(uid)
+	entry, err := s.kv.Get(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod by UID %s: %w", uid, err)
+	}
+
+	var podInfo PodInfo
+	if err := json.Unmarshal(entry.Value(), &podInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pod: %w", err)
+	}
+
+	return &podInfo, nil
+}
+
+// GetPodByName retrieves pod metadata by namespace and name from NATS KV
+// General-purpose lookup
+func (s *Service) GetPodByName(namespace, name string) (*PodInfo, error) {
+	key := makePodByNameKey(namespace, name)
+	entry, err := s.kv.Get(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod %s/%s: %w", namespace, name, err)
+	}
+
+	var podInfo PodInfo
+	if err := json.Unmarshal(entry.Value(), &podInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pod: %w", err)
+	}
+
+	return &podInfo, nil
+}
