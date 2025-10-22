@@ -19,7 +19,9 @@ Traditional observability tells you *what* happened (metrics, logs, traces). Tap
 
 ---
 
-## Architecture (Current Implementation)
+## Architecture
+
+### Community Edition (FREE - Current Implementation)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -74,12 +76,52 @@ Traditional observability tells you *what* happened (metrics, logs, traces). Tap
                          │
                          ▼
         ┌──────────────────────────────────────────────┐
-        │  Prometheus Metrics (OTLP Export)            │
+        │  Prometheus / OTLP Export                    │
         │  - Observer health metrics                   │
         │  - Event processing rates                    │
-        │  - Context Service performance               │
+        │  - Diagnostic data (JSON/OpenTelemetry)      │
         └──────────────────────────────────────────────┘
 ```
+
+**Community Focus:** Standalone diagnostic observers that export to Prometheus/Grafana/existing stack.
+
+### Enterprise/SaaS Edition (Planned)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  Your Kubernetes Clusters                       │
+│                                                                 │
+│  Cluster 1 (prod-us)     Cluster 2 (prod-eu)                   │
+│  ┌────────────────┐      ┌────────────────┐                    │
+│  │ Tapio Agents   │      │ Tapio Agents   │                    │
+│  │ (observers)    │      │ (observers)    │                    │
+│  └────────┬───────┘      └────────┬───────┘                    │
+└───────────┼──────────────────────┼─────────────────────────────┘
+            │                      │
+            │ OTLP/NATS           │ OTLP/NATS
+            │                      │
+            ▼                      ▼
+        ┌─────────────────────────────────────────────┐
+        │  Tapio SaaS Platform                        │
+        │                                             │
+        │  ┌────────────────────────────────────────┐ │
+        │  │  Ahti Correlation Engine               │ │
+        │  │  - Multi-cluster event correlation     │ │
+        │  │  - Temporal analysis (deployment→OOM)  │ │
+        │  │  - Graph storage (Neo4j-style queries) │ │
+        │  │  - NO AI (deterministic correlation)   │ │
+        │  └────────────────────────────────────────┘ │
+        │                    ▼                        │
+        │  ┌────────────────────────────────────────┐ │
+        │  │  Diagnostic Dashboard                  │ │
+        │  │  - Root cause visualization            │ │
+        │  │  - Cross-cluster insights              │ │
+        │  │  - Incident timeline correlation       │ │
+        │  └────────────────────────────────────────┘ │
+        └─────────────────────────────────────────────┘
+```
+
+**Enterprise Focus:** Centralized multi-cluster correlation, graph-based root cause analysis (deterministic, no AI).
 
 ---
 
@@ -271,7 +313,7 @@ Single `helm install` deploys:
 
 **Community vs Enterprise:**
 - **Community:** FREE, standalone observers, Prometheus export, K8s diagnostics
-- **Enterprise:** Correlation engine (Ahti), AI-powered RCA, multi-cluster, commercial support
+- **Enterprise:** Multi-cluster correlation engine (Ahti), graph-based RCA (deterministic), SaaS platform, commercial support
 
 ---
 
