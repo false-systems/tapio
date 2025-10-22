@@ -118,7 +118,8 @@ func serializeServiceInfo(serviceInfo ServiceInfo) ([]byte, error) {
 	return data, nil
 }
 
-// storePodMetadata writes pod metadata to NATS KV
+// storePodMetadata writes pod metadata to NATS KV with multiple index keys
+// Beyla pattern: Store with multiple keys for O(1) lookups by different fields
 func (s *Service) storePodMetadata(pod *corev1.Pod) error {
 	if shouldSkipPod(pod) {
 		return nil
@@ -130,25 +131,59 @@ func (s *Service) storePodMetadata(pod *corev1.Pod) error {
 		return err
 	}
 
-	key := makePodKey(pod.Status.PodIP)
-	_, err = s.kv.Put(key, data)
-	if err != nil {
-		return fmt.Errorf("failed to store pod metadata for %s: %w", key, err)
+	// Multi-index storage: Store with 3 different keys
+	// This enables fast lookup by IP (network observer), UID (scheduler observer), or name
+
+	// Index 1: By IP (network observer - eBPF captures IPs)
+	if pod.Status.PodIP != "" {
+		key := makePodByIPKey(pod.Status.PodIP)
+		if _, err := s.kv.Put(key, data); err != nil {
+			return fmt.Errorf("failed to store pod by IP %s: %w", key, err)
+		}
+	}
+
+	// Index 2: By UID (scheduler observer - K8s Events use UIDs)
+	key := makePodByUIDKey(string(pod.UID))
+	if _, err := s.kv.Put(key, data); err != nil {
+		return fmt.Errorf("failed to store pod by UID %s: %w", key, err)
+	}
+
+	// Index 3: By Name (general lookup)
+	key = makePodByNameKey(pod.Namespace, pod.Name)
+	if _, err := s.kv.Put(key, data); err != nil {
+		return fmt.Errorf("failed to store pod by name %s: %w", key, err)
 	}
 
 	return nil
 }
 
-// deletePodMetadata removes pod metadata from NATS KV
+// deletePodMetadata removes pod metadata from all NATS KV indexes
 func (s *Service) deletePodMetadata(pod *corev1.Pod) error {
 	if shouldSkipPod(pod) {
 		return nil
 	}
 
-	key := makePodKey(pod.Status.PodIP)
-	err := s.kv.Delete(key)
-	if err != nil {
-		return fmt.Errorf("failed to delete pod metadata for %s: %w", key, err)
+	// Delete from all 3 indexes to prevent stale cache
+	// Errors are logged but don't stop deletion from other indexes
+
+	// Index 1: By IP
+	if pod.Status.PodIP != "" {
+		key := makePodByIPKey(pod.Status.PodIP)
+		if err := s.kv.Delete(key); err != nil {
+			s.logger.Warn().Err(err).Str("key", key).Msg("failed to delete pod by IP")
+		}
+	}
+
+	// Index 2: By UID
+	key := makePodByUIDKey(string(pod.UID))
+	if err := s.kv.Delete(key); err != nil {
+		s.logger.Warn().Err(err).Str("key", key).Msg("failed to delete pod by UID")
+	}
+
+	// Index 3: By Name
+	key = makePodByNameKey(pod.Namespace, pod.Name)
+	if err := s.kv.Delete(key); err != nil {
+		s.logger.Warn().Err(err).Str("key", key).Msg("failed to delete pod by name")
 	}
 
 	return nil
