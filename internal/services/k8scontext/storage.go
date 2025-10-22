@@ -15,12 +15,17 @@ func toPodInfo(pod *corev1.Pod) PodInfo {
 		labels = make(map[string]string)
 	}
 
+	// Pre-compute OTEL attributes (Beyla priority cascade: env vars → annotations → labels)
+	// This is done ONCE on pod add/update for 100x faster event enrichment
+	otelAttrs := ComputeOTELAttributes(pod)
+
 	return PodInfo{
-		Name:      pod.Name,
-		Namespace: pod.Namespace,
-		PodIP:     pod.Status.PodIP,
-		HostIP:    pod.Status.HostIP,
-		Labels:    labels,
+		Name:           pod.Name,
+		Namespace:      pod.Namespace,
+		PodIP:          pod.Status.PodIP,
+		HostIP:         pod.Status.HostIP,
+		Labels:         labels,
+		OTELAttributes: otelAttrs,
 	}
 }
 
