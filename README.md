@@ -271,7 +271,7 @@ Single `helm install` deploys:
 
 **Community vs Enterprise:**
 - **Community:** FREE, standalone observers, Prometheus export, K8s diagnostics
-- **Enterprise:** Correlation engine (UKKO), AI-powered RCA, multi-cluster, commercial support
+- **Enterprise:** Correlation engine (Ahti), AI-powered RCA, multi-cluster, commercial support
 
 ---
 
