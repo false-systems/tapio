@@ -179,9 +179,9 @@ func TestHandlePodDelete(t *testing.T) {
 		},
 	}
 
-	// Pre-populate KV
+	// Pre-populate KV (multi-index: stores 3 keys - IP, UID, Name)
 	require.NoError(t, service.storePodMetadata(pod))
-	require.Equal(t, 1, mockKV.len())
+	require.Equal(t, 3, mockKV.len())
 
 	service.handlePodDelete(pod)
 	waitForEvents()

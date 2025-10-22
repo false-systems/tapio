@@ -265,3 +265,103 @@ func TestSerializeServiceInfo(t *testing.T) {
 	require.NoError(t, err, "Should unmarshal serialized ServiceInfo")
 	assert.Equal(t, serviceInfo, decoded)
 }
+
+// TestMultiIndexKeyGeneration verifies all multi-index key helpers
+func TestMultiIndexKeyGeneration(t *testing.T) {
+	tests := []struct {
+		name     string
+		function func() string
+		expected string
+	}{
+		{
+			name:     "pod by IP key",
+			function: func() string { return makePodByIPKey("10.0.1.42") },
+			expected: "pod.ip.10.0.1.42",
+		},
+		{
+			name:     "pod by UID key",
+			function: func() string { return makePodByUIDKey("abc-123-def-456") },
+			expected: "pod.uid.abc-123-def-456",
+		},
+		{
+			name:     "pod by name key",
+			function: func() string { return makePodByNameKey("default", "my-pod") },
+			expected: "pod.name.default.my-pod",
+		},
+		{
+			name:     "pod by name key with complex namespace",
+			function: func() string { return makePodByNameKey("kube-system", "coredns-abc123") },
+			expected: "pod.name.kube-system.coredns-abc123",
+		},
+		{
+			name:     "pod name cache key",
+			function: func() string { return makePodNameKey("default", "my-pod") },
+			expected: "default/my-pod",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.function()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestToPodInfo_WithOTELAttributes verifies pre-computed OTEL attributes
+func TestToPodInfo_WithOTELAttributes(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "abc-123",
+			Labels: map[string]string{
+				"app": "nginx",
+			},
+			Annotations: map[string]string{
+				"resource.opentelemetry.io/service.name": "my-service",
+			},
+		},
+		Status: corev1.PodStatus{
+			PodIP:  "10.0.1.42",
+			HostIP: "192.168.1.100",
+		},
+	}
+
+	podInfo := toPodInfo(pod)
+
+	// Verify OTEL attributes were pre-computed (Beyla pattern)
+	require.NotNil(t, podInfo.OTELAttributes)
+	assert.Equal(t, "my-service", podInfo.OTELAttributes["service.name"])
+}
+
+// TestToPodInfo_EnvVarPriority verifies Beyla priority cascade
+func TestToPodInfo_EnvVarPriority(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/name": "label-service",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "app",
+					Env: []corev1.EnvVar{
+						{Name: "OTEL_SERVICE_NAME", Value: "env-service"},
+					},
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.0.1.42",
+		},
+	}
+
+	podInfo := toPodInfo(pod)
+
+	// Env var should override label (Beyla priority: env vars > annotations > labels)
+	assert.Equal(t, "env-service", podInfo.OTELAttributes["service.name"])
+}
