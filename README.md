@@ -10,16 +10,30 @@ Not another observability tool - Tapio detects infrastructure patterns and enric
 
 **Tapio recognizes infrastructure patterns and adds the K8s context needed to understand WHY things fail.**
 
-Traditional observability collects events. Tapio detects patterns:
-- 3 pods OOMKilled on the same node in 5 minutes → Node memory pressure
-- Deployment stuck at 2/5 replicas for 10 minutes → Insufficient node capacity
-- DNS resolution failures correlating with service updates → Service endpoint churn
+Traditional observability collects raw events. Tapio's observers detect patterns in real-time:
+
+**Network Observer (eBPF-based - Production):**
+- Detects SYN timeout patterns → Connection refused/unreachable service
+- Classifies HTTP/HTTPS traffic → Port-based protocol recognition
+- Identifies DNS queries/responses → Resolution monitoring
+
+**Deployments Observer (K8s API - Production):**
+- Tracks rollout health → Stuck deployment detection
+- Monitors replica changes → Scaling issue patterns
+
+**Example (works today):**
+```
+Raw eBPF:       TCP SYN_SENT → CLOSE on 10.0.1.42:443
+Network Observer: Recognizes "SYN timeout" pattern
+Context Service:  Enriches with "nginx-abc123 in prod namespace"
+Output:          "nginx-abc123 failed to connect to api-service (SYN timeout)"
+```
 
 **Tapio works WITH your existing stack (Prometheus, Grafana, Tempo) by adding:**
-- K8s infrastructure context (Pod → Deployment → Node relationships)
-- Pattern recognition (not just event collection)
-- Platform-level diagnostics (scheduling, networking, resource pressure)
-- Pre-computed OTEL attributes for enrichment
+- ✅ **Pattern recognition in observers** (SYN timeouts, HTTP classification, DNS detection)
+- ✅ **K8s context enrichment** (Pod → Deployment → Node relationships)
+- ✅ **Pre-computed OTEL attributes** (100x faster than on-demand lookup)
+- ✅ **Multi-index storage** (lookup by IP/UID/Name - O(1) performance)
 
 ---
 
@@ -131,35 +145,38 @@ Traditional observability collects events. Tapio detects patterns:
 
 ## What We've Built (Community Version)
 
-### ✅ Completed: Foundation Layer
+### ✅ Completed: Pattern Recognition Observers
 
-**K8s Context Service** - Shared metadata cache for all observers
+**Network Observer** - eBPF-based pattern detection (Production)
+- **SYN timeout detection:** `SYN_SENT → CLOSE` pattern = unreachable service
+  - Code: `internal/observers/network/processor_link.go:32-34`
+- **HTTP/HTTPS classification:** Port 80/443 + ESTABLISHED state pattern
+  - Code: `internal/observers/network/processor_status.go:37-42`
+- **DNS traffic detection:** UDP port 53 pattern (query vs response)
+  - Code: `internal/observers/network/processor_dns.go:31-32`
+
+**Deployments Observer** - K8s API pattern tracking (Production)
+- Rollout health monitoring (stuck deployments, scaling issues)
+- Replica count patterns (insufficient capacity detection)
+- Full test coverage with E2E, integration, performance tests
+
+### ✅ Completed: Context Enrichment Layer
+
+**K8s Context Service** - Multi-index metadata store
 - **TASK-001:** Pre-computed OTEL attributes (100x faster enrichment)
   - Priority cascade: env vars → annotations → labels
   - Computed once per pod, cached for all events
-  - Follows OpenTelemetry semantic conventions
+  - Reference: `internal/services/k8scontext/enrichment.go`
 
-- **TASK-002:** Multi-index metadata store
+- **TASK-002:** Multi-index storage (Beyla pattern)
   - 3 lookup patterns: by IP (network), by UID (scheduler), by name (general)
-  - O(1) lookups using NATS KV multi-key pattern
-  - Adopted from Grafana Beyla's architecture
+  - O(1) NATS KV lookups with in-memory cache
+  - Reference: `internal/services/k8scontext/storage.go`
 
 **Performance Impact:**
 - Event enrichment: 100µs → 1µs (100x speedup)
 - At 10K events/sec: Saves 1 CPU second per second
-- Multi-index lookups: O(1) for all observer types
-
-### ✅ Completed: Observer Framework
-
-**Deployments Observer** - Production-ready K8s monitoring
-- Tracks deployment lifecycle (create, update, delete, scale)
-- Monitors rollout status and replica health
-- Full test coverage with E2E, integration, performance tests
-
-**Network Observer** - eBPF-based connectivity (In Development)
-- TCP/UDP connection tracking with eBPF programs
-- Network status monitoring with correlation
-- Designed for DaemonSet deployment
+- Pattern detection: Real-time in eBPF/observers (no batch processing)
 
 ### 🔄 In Progress
 
