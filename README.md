@@ -1,21 +1,25 @@
 # Tapio
 
-> **Kubernetes Diagnostics Platform - Community Edition**
+> **Infrastructure Pattern Recognition with K8s Context for Platform Engineers**
 
-eBPF-based observability for Kubernetes that answers "Why won't this work?" instead of "What happened?"
+Not another observability tool - Tapio detects infrastructure patterns and enriches your existing stack with K8s context.
 
 ---
 
 ## What is Tapio?
 
-**Tapio is a diagnostic platform that identifies infrastructure problems before they impact your applications.**
+**Tapio recognizes infrastructure patterns and adds the K8s context needed to understand WHY things fail.**
 
-Traditional observability tells you *what* happened (metrics, logs, traces). Tapio tells you *why* it failed:
-- Why pods can't schedule (node constraints, resource pressure)
-- Why network connections fail (missing services, DNS issues)
-- Why deployments crash (OOMKilled, CrashLoopBackOff)
+Traditional observability collects events. Tapio detects patterns:
+- 3 pods OOMKilled on the same node in 5 minutes → Node memory pressure
+- Deployment stuck at 2/5 replicas for 10 minutes → Insufficient node capacity
+- DNS resolution failures correlating with service updates → Service endpoint churn
 
-**Tapio = Diagnostic-first observability for Kubernetes infrastructure**
+**Tapio works WITH your existing stack (Prometheus, Grafana, Tempo) by adding:**
+- K8s infrastructure context (Pod → Deployment → Node relationships)
+- Pattern recognition (not just event collection)
+- Platform-level diagnostics (scheduling, networking, resource pressure)
+- Pre-computed OTEL attributes for enrichment
 
 ---
 
