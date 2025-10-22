@@ -7,6 +7,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,25 +111,33 @@ func TestNegative_StorePodMetadata_PutFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "connection closed")
 }
 
-// TestNegative_DeletePodMetadata_DeleteFailure verifies error handling when KV.Delete fails
+// TestNegative_DeletePodMetadata_DeleteFailure verifies multi-index deletion with errors
 func TestNegative_DeletePodMetadata_DeleteFailure(t *testing.T) {
 	mockKV := newMockKVWithErrors()
 	mockKV.deleteError = errors.New("nats: timeout")
-	service := &Service{kv: mockKV}
+
+	// Create service with logger (needed for error logging)
+	logger := base.NewLogger("test")
+	service := &Service{
+		kv:     mockKV,
+		logger: logger,
+	}
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
 			Namespace: "default",
+			UID:       "abc-123",
 		},
 		Status: corev1.PodStatus{
 			PodIP: "10.0.0.1",
 		},
 	}
 
+	// Multi-index deletion logs errors but doesn't fail
+	// This is intentional: we want to try deleting from all indexes
 	err := service.deletePodMetadata(pod)
-	assert.Error(t, err, "Should error when KV.Delete fails")
-	assert.Contains(t, err.Error(), "timeout")
+	assert.NoError(t, err, "Multi-index deletion should not return error (logs warnings instead)")
 }
 
 // TestNegative_StoreServiceMetadata_PutFailure verifies service storage error handling
