@@ -45,9 +45,29 @@ func toServiceInfo(service *corev1.Service) ServiceInfo {
 	}
 }
 
-// makePodKey generates NATS KV key for pod
+// makePodKey generates NATS KV key for pod (legacy - by IP)
 func makePodKey(ip string) string {
 	return fmt.Sprintf("pod.ip.%s", ip)
+}
+
+// makePodByIPKey generates NATS KV key for pod lookup by IP
+func makePodByIPKey(ip string) string {
+	return fmt.Sprintf("pod.ip.%s", ip)
+}
+
+// makePodByUIDKey generates NATS KV key for pod lookup by UID
+func makePodByUIDKey(uid string) string {
+	return fmt.Sprintf("pod.uid.%s", uid)
+}
+
+// makePodByNameKey generates NATS KV key for pod lookup by namespace/name
+func makePodByNameKey(namespace, name string) string {
+	return fmt.Sprintf("pod.name.%s.%s", namespace, name)
+}
+
+// makePodNameKey generates in-memory cache key for pod by namespace/name
+func makePodNameKey(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
 // makeServiceKey generates NATS KV key for service
