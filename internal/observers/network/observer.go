@@ -13,10 +13,31 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+// PodInfo matches internal/services/k8scontext/types.go:PodInfo
+// Redefined here to avoid circular import (observers should not import services)
+type PodInfo struct {
+	Name           string            `json:"name"`
+	Namespace      string            `json:"namespace"`
+	PodIP          string            `json:"pod_ip"`
+	HostIP         string            `json:"host_ip"`
+	Labels         map[string]string `json:"labels"`
+	OTELAttributes map[string]string `json:"otel_attributes,omitempty"`
+}
+
+// K8sContextGetter provides K8s pod metadata lookup by IP
+// Implemented by internal/services/k8scontext.Service
+type K8sContextGetter interface {
+	GetPodByIP(ip string) (*PodInfo, error)
+}
+
 // Config holds network observer configuration
 type Config struct {
 	Output           base.OutputConfig
 	EventChannelSize int // Ring buffer → processor channel size (default: 1000)
+
+	// K8s context service (optional - nil in OSS mode)
+	// When provided, enables pod context enrichment with pre-computed OTEL attributes
+	K8sContextService K8sContextGetter
 }
 
 // NetworkObserver tracks TCP/UDP/DNS network events using eBPF

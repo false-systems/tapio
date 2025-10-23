@@ -394,6 +394,14 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 		return
 	}
 
+	// Enrich with K8s context (if service configured)
+	if n.config.K8sContextService != nil {
+		n.enrichWithK8sContext(evt)
+	}
+
+	// Send to OTLP (Community path - structured logs)
+	n.SendObserverEvent(ctx, evt)
+
 	// Output event (if stdout enabled)
 	if n.config.Output.Stdout {
 		log.Printf("[%s] %s.%s: %s:%d -> %s:%d (%s)",
@@ -401,5 +409,41 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 			evt.NetworkData.SrcIP, evt.NetworkData.SrcPort,
 			evt.NetworkData.DstIP, evt.NetworkData.DstPort,
 			evt.NetworkData.TCPState)
+	}
+}
+
+// enrichWithK8sContext lookups pod metadata by IP and populates NetworkEventData fields
+// Also publishes TapioEvent with graph entities to NATS (Enterprise path)
+func (n *NetworkObserver) enrichWithK8sContext(evt *domain.ObserverEvent) {
+	if evt.NetworkData == nil {
+		return
+	}
+
+	// Lookup source pod by IP
+	if evt.NetworkData.SrcIP != "" {
+		podInfo, err := n.config.K8sContextService.GetPodByIP(evt.NetworkData.SrcIP)
+		if err == nil {
+			// Populate K8s fields in NetworkEventData (for OTLP)
+			evt.NetworkData.PodName = podInfo.Name
+			evt.NetworkData.Namespace = podInfo.Namespace
+
+			// Build K8sContext for Enterprise graph enrichment
+			k8sCtx := &domain.K8sContext{
+				PodName:      podInfo.Name,
+				PodNamespace: podInfo.Namespace,
+				PodLabels:    podInfo.Labels,
+				PodIP:        podInfo.PodIP,
+				HostIP:       podInfo.HostIP,
+			}
+
+			// Enrich to TapioEvent with graph entities (Enterprise path)
+			tapioEvent, err := domain.EnrichWithK8sContext(evt, k8sCtx)
+			if err == nil {
+				// Publish to NATS (NoOp in OSS, real NATS in Enterprise)
+				if err := n.PublishEvent(context.Background(), "tapio.events.network", tapioEvent); err != nil {
+					log.Printf("[%s] failed to publish TapioEvent: %v", n.Name(), err)
+				}
+			}
+		}
 	}
 }
