@@ -16,7 +16,7 @@ import (
 // OutputConfig defines which output destinations are enabled
 type OutputConfig struct {
 	OTEL   bool // Export to OpenTelemetry (Grafana, Prometheus, Jaeger)
-	Tapio  bool // Export to Tapio ecosystem (UKKO)
+	Tapio  bool // Export to Tapio ecosystem (Ahti correlation engine)
 	Stdout bool // Debug output to stdout
 }
 
