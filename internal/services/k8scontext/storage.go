@@ -407,6 +407,23 @@ func (s *Service) deleteOwnerMetadata(pod *corev1.Pod) error {
 	return nil
 }
 
+// GetPodByIP retrieves pod metadata by IP from NATS KV
+// Used by Network Observer (eBPF captures IPs, need to lookup pod context)
+func (s *Service) GetPodByIP(ip string) (*PodInfo, error) {
+	key := makePodByIPKey(ip)
+	entry, err := s.kv.Get(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod by IP %s: %w", ip, err)
+	}
+
+	var podInfo PodInfo
+	if err := json.Unmarshal(entry.Value(), &podInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pod: %w", err)
+	}
+
+	return &podInfo, nil
+}
+
 // GetPodByUID retrieves pod metadata by UID from NATS KV
 // Used by Scheduler Observer (K8s Events reference pods by UID)
 func (s *Service) GetPodByUID(uid string) (*PodInfo, error) {
