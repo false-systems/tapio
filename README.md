@@ -37,6 +37,54 @@ Output:          "nginx-abc123 failed to connect to api-service (SYN timeout)"
 
 ---
 
+## Two-Tier Output Model
+
+Tapio observers detect patterns once, but output differently based on edition:
+
+### Community Edition (FREE)
+**Output:** `ObserverEvent` → OTLP structured logs → Grafana/Prometheus
+
+```go
+// What you get for FREE
+{
+  "type": "tcp_rtt_spike",
+  "source": "network-observer",
+  "network_data": {
+    "src_ip": "10.0.1.5",
+    "dst_ip": "10.0.2.10",
+    "rtt_current": 50.3,
+    "rtt_baseline": 10.2,
+    "pod_name": "web-server-abc",
+    "namespace": "production"
+  }
+}
+```
+
+**You get:** All raw event data as structured logs. Query by pod, namespace, event type. Build your own dashboards and alerts.
+
+### Enterprise Edition (PAID)
+**Output:** `TapioEvent` → NATS subject `tapio.events.*` → Ahti correlation engine
+
+```go
+// What enterprise adds: Graph entities for correlation
+{
+  "type": "network",
+  "subtype": "tcp_rtt_spike",
+  "entities": [
+    {"type": "pod", "name": "web-server-abc"},
+    {"type": "service", "name": "api-gateway"}
+  ],
+  "relationships": [
+    {"type": "connects_to", "source": "web-server-abc", "target": "api-gateway"}
+  ],
+  "network_data": { /* same as ObserverEvent */ }
+}
+```
+
+**You get:** Ahti performs graph-based root cause analysis. "Deployment X caused RTT spike on Service Y which failed Service Z."
+
+---
+
 ## Architecture
 
 ### Community Edition (FREE - Current Implementation)
@@ -74,30 +122,45 @@ Output:          "nginx-abc123 failed to connect to api-service (SYN timeout)"
                          │
                          ▼
         ┌──────────────────────────────────────────────┐
-        │  Observers (In Development)                  │
+        │  Observers (Pattern Detection)               │
         │                                              │
         │  ✅ Network Observer (eBPF-based)            │
-        │     - TCP/UDP connection tracking            │
-        │     - DNS resolution monitoring              │
-        │     - Service connectivity validation        │
+        │     - Detects SYN timeouts                   │
+        │     - Classifies HTTP/HTTPS                  │
+        │     - Monitors DNS queries                   │
         │                                              │
         │  ✅ Deployments Observer (K8s API)           │
-        │     - Rollout tracking                       │
-        │     - Replica changes                        │
-        │     - Deployment health                      │
+        │     - Detects stuck rollouts                 │
+        │     - Tracks replica changes                 │
+        │     - Monitors health status                 │
         │                                              │
         │  🔄 Scheduler Observer (Planned)             │
-        │     - Pod scheduling failures                │
-        │     - Resource constraints                   │
+        │     - Detects scheduling failures            │
+        │     - Monitors resource constraints          │
         │     - Uses UID-based lookup (TASK-002)       │
         └──────────────────────────────────────────────┘
                          │
-                         ▼
-        ┌──────────────────────────────────────────────┐
-        │  Prometheus / OTLP Export                    │
-        │  - Observer health metrics                   │
-        │  - Event processing rates                    │
-        │  - Diagnostic data (JSON/OpenTelemetry)      │
+          ┌──────────────┴──────────────┐
+          │                             │
+          ▼                             ▼
+    Community Output           Enterprise Output
+          │                             │
+          ▼                             ▼
+┌─────────────────────┐       ┌─────────────────────┐
+│ ObserverEvent       │       │ TapioEvent          │
+│ → OTLP Logs         │       │ → NATS              │
+│                     │       │   (tapio.events.*)  │
+│ FREE - Raw data     │       │                     │
+│ Build your own      │       │ PAID - Graph data   │
+│ dashboards          │       │ Ahti does RCA       │
+└─────────────────────┘       └─────────────────────┘
+          │                             │
+          ▼                             ▼
+┌─────────────────────┐       ┌─────────────────────┐
+│ Prometheus/Grafana  │       │ Ahti Correlation    │
+│ - Custom queries    │       │ - Root cause graphs │
+│ - Your dashboards   │       │ - Anomaly detection │
+│ - Your alerts       │       │ - Predictions       │
         └──────────────────────────────────────────────┘
 ```
 
@@ -184,6 +247,49 @@ Output:          "nginx-abc123 failed to connect to api-service (SYN timeout)"
 - Will use UID-based lookups (TASK-002 enables this)
 - K8s Events API monitoring for FailedScheduling
 - Resource constraint detection
+
+### ✅ Completed: Two-Tier Output System
+
+**BaseObserver Pipeline** - Dual output architecture (Production)
+- Reference: `internal/base/observer.go`, `internal/base/emitter.go`
+
+**Community Mode (FREE):**
+```go
+// Observer detects pattern
+event := &domain.ObserverEvent{
+    Type: "tcp_rtt_spike",
+    NetworkData: &domain.NetworkEventData{
+        RTTCurrent:  50.3,
+        RTTBaseline: 10.2,
+        PodName:     "web-server-abc",
+    },
+}
+
+// Send to OTLP as structured log (line 218-268)
+observer.SendObserverEvent(ctx, event)
+```
+
+**Enterprise Mode (PAID):**
+```go
+// Same pattern detection, different output
+tapioEvent := &domain.TapioEvent{
+    Type:    "network",
+    Subtype: "tcp_rtt_spike",
+    Entities: []domain.Entity{
+        {Type: "pod", Name: "web-server-abc"},
+        {Type: "service", Name: "api-gateway"},
+    },
+    Relationships: []domain.Relationship{
+        {Type: "connects_to", Source: pod, Target: service},
+    },
+    NetworkData: event.NetworkData, // Same data
+}
+
+// Publish to NATS for Ahti (line 214-216)
+observer.PublishEvent(ctx, "tapio.events.network.rtt_spike", tapioEvent)
+```
+
+**Key Insight:** Observers detect patterns ONCE. Output mode (OTLP vs NATS) is config-driven via `OutputConfig` (emitter.go:17-21).
 
 ---
 
@@ -333,8 +439,20 @@ Single `helm install` deploys:
 - Community feedback integration
 
 **Community vs Enterprise:**
-- **Community:** FREE, standalone observers, Prometheus export, K8s diagnostics
-- **Enterprise:** Multi-cluster correlation engine (Ahti), graph-based RCA (deterministic), SaaS platform, commercial support
+
+| Feature | Community (FREE) | Enterprise (PAID) |
+|---------|------------------|-------------------|
+| **Pattern Detection** | ✅ All observers | ✅ All observers |
+| **K8s Context** | ✅ Pre-computed OTEL attributes | ✅ Pre-computed OTEL attributes |
+| **Output Format** | `ObserverEvent` → OTLP logs | `TapioEvent` → NATS (graph format) |
+| **Data Access** | ✅ All raw event data | ✅ All raw event data |
+| **Storage** | Your Grafana/Prometheus | Your stack + Ahti SaaS |
+| **Analysis** | You build dashboards/alerts | Ahti does graph-based RCA |
+| **Multi-Cluster** | Deploy per cluster | Centralized correlation |
+| **Root Cause** | Manual investigation | Automated graph analysis |
+| **Support** | Community | Commercial SLA |
+
+**Key Difference:** Community gives you the sensors and data (democratize K8s). Enterprise adds the intelligence (Ahti correlation engine).
 
 ---
 
