@@ -332,6 +332,23 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 			// Record congestion event
 			n.congestionEvents.Add(ctx, 1)
 
+			// Create and emit domain event for high retransmit rate
+			n.emitDomainEvent(ctx, &domain.ObserverEvent{
+				Type:    "packet_loss",
+				Subtype: "high_retransmit_rate",
+				NetworkData: &domain.NetworkEventData{
+					Protocol:         "tcp",
+					SrcIP:            srcIP,
+					DstIP:            dstIP,
+					SrcPort:          evt.SrcPort,
+					DstPort:          evt.DstPort,
+					RetransmitCount:  uint32(stats.Retransmits),
+					RetransmitRate:   retxRate * 100, // Convert to percentage
+					CongestionWindow: sndCwnd,
+					ProcessName:      comm,
+				},
+			})
+
 			// Output warning if stdout enabled
 			if n.config.Output.Stdout {
 				log.Printf("[%s] HIGH RETRANSMIT RATE: %s (%s) %.1f%% (retx=%d, total=%d, cwnd=%d)",
@@ -371,6 +388,23 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 	n.rttCurrentMs.Record(ctx, currentMs)
 	n.rttDegradationPct.Record(ctx, degradation)
 
+	// Create and emit domain event
+	n.emitDomainEvent(ctx, &domain.ObserverEvent{
+		Type:    "rtt_spike",
+		Subtype: "latency_degradation",
+		NetworkData: &domain.NetworkEventData{
+			Protocol:       "tcp",
+			SrcIP:          srcIP,
+			DstIP:          dstIP,
+			SrcPort:        evt.SrcPort,
+			DstPort:        evt.DstPort,
+			RTTBaseline:    baselineMs,
+			RTTCurrent:     currentMs,
+			RTTDegradation: degradation * 100,
+			ProcessName:    comm,
+		},
+	})
+
 	// Output RTT spike event if stdout enabled
 	if n.config.Output.Stdout {
 		log.Printf("[%s] RTT SPIKE: %s (%d) %s:%d -> %s:%d (baseline=%.0fms, current=%.0fms, +%.1f%%)",
@@ -378,9 +412,6 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 			srcIP, evt.SrcPort, dstIP, evt.DstPort,
 			baselineMs, currentMs, degradation*100)
 	}
-
-	// Record processing time
-	n.RecordEvent(ctx)
 }
 
 // emitDomainEvent outputs domain events from processors
