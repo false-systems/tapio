@@ -344,7 +344,7 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 					DstPort:          evt.DstPort,
 					RetransmitCount:  uint32(stats.Retransmits),
 					RetransmitRate:   retxRate * 100, // Convert to percentage
-					CongestionWindow: sndCwnd,
+					CongestionWindow: uint32(sndCwnd),
 					ProcessName:      comm,
 				},
 			})
