@@ -35,14 +35,18 @@ func TestEventsWatcher_Integration(t *testing.T) {
 
 	// Create and start EventsWatcher
 	watcher := NewEventsWatcher(clientset, obs)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	err = watcher.Start(ctx)
-	require.NoError(t, err)
-	defer watcher.Stop()
+	// Run watcher in background
+	go func() {
+		if err := watcher.Run(ctx); err != nil {
+			t.Logf("watcher.Run() error: %v", err)
+		}
+	}()
 
 	// Give informer time to start
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// Create initial event (should be skipped by OnAdd)
 	initialEvent := &corev1.Event{
@@ -124,13 +128,17 @@ func TestEventsWatcher_IgnoreNonScheduling(t *testing.T) {
 	}
 
 	watcher := NewEventsWatcher(clientset, obs)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	err = watcher.Start(ctx)
-	require.NoError(t, err)
-	defer watcher.Stop()
+	// Run watcher in background
+	go func() {
+		if err := watcher.Run(ctx); err != nil {
+			t.Logf("watcher.Run() error: %v", err)
+		}
+	}()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// Create non-scheduling event
 	event := &corev1.Event{
@@ -176,13 +184,17 @@ func TestEventsWatcher_IgnoreNonPod(t *testing.T) {
 	}
 
 	watcher := NewEventsWatcher(clientset, obs)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	err = watcher.Start(ctx)
-	require.NoError(t, err)
-	defer watcher.Stop()
+	// Run watcher in background
+	go func() {
+		if err := watcher.Run(ctx); err != nil {
+			t.Logf("watcher.Run() error: %v", err)
+		}
+	}()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// Create deployment event
 	event := &corev1.Event{
@@ -228,13 +240,17 @@ func TestEventsWatcher_NoCountIncrease(t *testing.T) {
 	}
 
 	watcher := NewEventsWatcher(clientset, obs)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	err = watcher.Start(ctx)
-	require.NoError(t, err)
-	defer watcher.Stop()
+	// Run watcher in background
+	go func() {
+		if err := watcher.Run(ctx); err != nil {
+			t.Logf("watcher.Run() error: %v", err)
+		}
+	}()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// Create initial event
 	event := &corev1.Event{

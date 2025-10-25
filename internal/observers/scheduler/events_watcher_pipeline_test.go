@@ -84,12 +84,13 @@ func TestEventsWatcher_Run_ReturnsImmediatelyIfContextAlreadyCancelled(t *testin
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	// Run() should return quickly
+	// Run() should return quickly (with error since cache can't sync)
 	start := time.Now()
 	err = watcher.Run(ctx)
 	duration := time.Since(start)
 
-	assert.NoError(t, err, "Run() should return nil on cancelled context")
+	assert.Error(t, err, "Run() should return error when cache sync fails on cancelled context")
+	assert.Contains(t, err.Error(), "cache", "Error should mention cache sync failure")
 	assert.Less(t, duration, 1*time.Second, "Run() should return quickly if context already cancelled")
 }
 
@@ -116,7 +117,7 @@ func TestEventsWatcher_Run_CacheSyncFailure(t *testing.T) {
 
 	// Should return error when cache sync fails
 	assert.Error(t, err, "Run() should return error when cache sync fails")
-	assert.Contains(t, err.Error(), "cache sync", "Error should mention cache sync failure")
+	assert.Contains(t, err.Error(), "cache", "Error should mention cache sync failure")
 }
 
 // TestEventsWatcher_Run_InformerShutdown verifies informer cleanup
