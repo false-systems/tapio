@@ -37,8 +37,6 @@ jobs:
 
           # Detect Go files
           GO_FILES=$(git diff --name-only $BASE_REF...HEAD | grep '\.go$' || true)
-          echo "DEBUG: BASE_REF=$BASE_REF"
-          echo "DEBUG: GO_FILES=$GO_FILES"
           echo "go_files<<EOF" >> $GITHUB_OUTPUT
           echo "$GO_FILES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -64,10 +62,8 @@ jobs:
 
           # Set boolean flags
           if [ -n "$GO_FILES" ]; then
-            echo "DEBUG: has_go=true"
             echo "has_go=true" >> $GITHUB_OUTPUT
           else
-            echo "DEBUG: has_go=false"
             echo "has_go=false" >> $GITHUB_OUTPUT
           fi
           [ -n "$EBPF_FILES" ] && echo "has_ebpf=true" >> $GITHUB_OUTPUT || echo "has_ebpf=false" >> $GITHUB_OUTPUT
