@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ func TestEventsWatcher_Integration(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Initial event should be skipped (OnAdd)
-	assert.Equal(t, 0, len(mockEmitter.events), "OnAdd events should be skipped")
+	assert.Equal(t, 0, mockEmitter.eventCount(), "OnAdd events should be skipped")
 
 	// Update event (increment count - new scheduling attempt)
 	initialEvent.Count = 2
@@ -83,9 +84,11 @@ func TestEventsWatcher_Integration(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should have emitted one event
-	require.Equal(t, 1, len(mockEmitter.events), "OnUpdate should emit event")
+	require.Equal(t, 1, mockEmitter.eventCount(), "OnUpdate should emit event")
 
-	event := mockEmitter.events[0]
+	events := mockEmitter.getEvents()
+	require.Len(t, events, 1)
+	event := events[0]
 	assert.Equal(t, "scheduler", event.Type)
 	assert.Equal(t, "failed_scheduling", event.Subtype)
 	assert.Equal(t, "scheduler", event.Source)
@@ -156,7 +159,7 @@ func TestEventsWatcher_IgnoreNonScheduling(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should not emit any events
-	assert.Equal(t, 0, len(mockEmitter.events), "Non-scheduling events should be ignored")
+	assert.Equal(t, 0, mockEmitter.eventCount(), "Non-scheduling events should be ignored")
 }
 
 // TestEventsWatcher_IgnoreNonPod verifies non-pod events are ignored
@@ -208,7 +211,7 @@ func TestEventsWatcher_IgnoreNonPod(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should not emit any events
-	assert.Equal(t, 0, len(mockEmitter.events), "Non-pod events should be ignored")
+	assert.Equal(t, 0, mockEmitter.eventCount(), "Non-pod events should be ignored")
 }
 
 // TestEventsWatcher_NoCountIncrease verifies events with no count increase are skipped
@@ -260,17 +263,32 @@ func TestEventsWatcher_NoCountIncrease(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should not emit (count didn't increase)
-	assert.Equal(t, 0, len(mockEmitter.events), "Should skip events without count increase")
+	assert.Equal(t, 0, mockEmitter.eventCount(), "Should skip events without count increase")
 }
 
-// mockEmitter captures emitted events for testing
+// mockEmitter captures emitted events for testing (thread-safe)
 type mockEmitter struct {
+	mu     sync.Mutex
 	events []*domain.ObserverEvent
 }
 
 func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.events = append(m.events, event)
 	return nil
+}
+
+func (m *mockEmitter) getEvents() []*domain.ObserverEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]*domain.ObserverEvent{}, m.events...)
+}
+
+func (m *mockEmitter) eventCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.events)
 }
 
 func (m *mockEmitter) Close() error {
