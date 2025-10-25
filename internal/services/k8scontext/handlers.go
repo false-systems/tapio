@@ -56,7 +56,7 @@ func (s *Service) handlePodUpdate(oldObj, newObj interface{}) {
 	oldPodCopy := oldPod.DeepCopy()
 	newPodCopy := newPod.DeepCopy()
 
-	// Enqueue async operations
+	// Task 1: Store metadata (existing)
 	s.enqueueEvent(func() error {
 		// If IP changed, delete old entry
 		if oldPodCopy.Status.PodIP != "" && oldPodCopy.Status.PodIP != newPodCopy.Status.PodIP {
@@ -71,6 +71,9 @@ func (s *Service) handlePodUpdate(oldObj, newObj interface{}) {
 		}
 		return s.storeOwnerMetadata(newPodCopy)
 	})
+
+	// Task 2: Detect changes and emit events (NEW)
+	s.detectPodChanges(s.ctx, oldPodCopy, newPodCopy)
 }
 
 // handlePodDelete is called when a pod is deleted
@@ -135,6 +138,7 @@ func (s *Service) handleServiceUpdate(oldObj, newObj interface{}) {
 	oldServiceCopy := oldService.DeepCopy()
 	newServiceCopy := newService.DeepCopy()
 
+	// Task 1: Store metadata (existing)
 	s.enqueueEvent(func() error {
 		// If ClusterIP changed, delete old entry
 		if oldServiceCopy.Spec.ClusterIP != "" && oldServiceCopy.Spec.ClusterIP != "None" &&
@@ -147,6 +151,9 @@ func (s *Service) handleServiceUpdate(oldObj, newObj interface{}) {
 		// Store updated metadata
 		return s.storeServiceMetadata(newServiceCopy)
 	})
+
+	// Task 2: Detect changes and emit events (NEW)
+	s.detectServiceChanges(s.ctx, oldServiceCopy, newServiceCopy)
 }
 
 // handleServiceDelete is called when a service is deleted
@@ -185,7 +192,7 @@ func (s *Service) handleDeploymentAdd(obj interface{}) {
 
 // handleDeploymentUpdate is called when a deployment is updated
 func (s *Service) handleDeploymentUpdate(oldObj, newObj interface{}) {
-	_, ok := oldObj.(*appsv1.Deployment)
+	oldDeployment, ok := oldObj.(*appsv1.Deployment)
 	if !ok {
 		s.logger.Error().
 			Str("handler", "handleDeploymentUpdate").
@@ -206,9 +213,15 @@ func (s *Service) handleDeploymentUpdate(oldObj, newObj interface{}) {
 	}
 
 	deploymentCopy := newDeployment.DeepCopy()
+	oldDeploymentCopy := oldDeployment.DeepCopy()
+
+	// Task 1: Store metadata (existing)
 	s.enqueueEvent(func() error {
 		return s.storeDeploymentMetadata(deploymentCopy)
 	})
+
+	// Task 2: Detect changes and emit events (NEW)
+	s.detectDeploymentChanges(s.ctx, oldDeploymentCopy, deploymentCopy)
 }
 
 // handleDeploymentDelete is called when a deployment is deleted
@@ -264,7 +277,7 @@ func (s *Service) handleNodeAdd(obj interface{}) {
 
 // handleNodeUpdate is called when a node is updated
 func (s *Service) handleNodeUpdate(oldObj, newObj interface{}) {
-	_, ok := oldObj.(*corev1.Node)
+	oldNode, ok := oldObj.(*corev1.Node)
 	if !ok {
 		s.logger.Error().
 			Str("handler", "handleNodeUpdate").
@@ -285,9 +298,15 @@ func (s *Service) handleNodeUpdate(oldObj, newObj interface{}) {
 	}
 
 	nodeCopy := newNode.DeepCopy()
+	oldNodeCopy := oldNode.DeepCopy()
+
+	// Task 1: Store metadata (existing)
 	s.enqueueEvent(func() error {
 		return s.storeNodeMetadata(nodeCopy)
 	})
+
+	// Task 2: Detect changes and emit events (NEW)
+	s.detectNodeChanges(s.ctx, oldNodeCopy, nodeCopy)
 }
 
 // handleNodeDelete is called when a node is deleted

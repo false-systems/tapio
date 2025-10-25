@@ -9,12 +9,16 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
 // Service watches K8s API and populates NATS KV with metadata
+// DUAL RESPONSIBILITY:
+// 1. Metadata store - Store K8s resources in NATS KV for lookups
+// 2. Event emission - Emit diagnostic events for K8s resource changes
 type Service struct {
 	config    Config
 	k8sClient *kubernetes.Clientset
@@ -26,6 +30,9 @@ type Service struct {
 
 	// Event buffer for async NATS KV writes
 	eventBuffer chan func() error
+
+	// Event emission (optional - if Output configured)
+	emitter base.Emitter // OTLP emitter for community tier
 
 	// Lifecycle management
 	ctx      context.Context
@@ -99,6 +106,22 @@ func NewService(config Config) (*Service, error) {
 	// 7. Create logger
 	logger := base.NewLogger("k8scontext")
 
+	// 8. Create event emitter (if event emission enabled)
+	var emitter base.Emitter
+	if config.Output.OTEL || config.Output.Tapio || config.Output.Stdout {
+		emitter, err = base.CreateEmitters(base.OutputConfig{
+			OTEL:   config.Output.OTEL,
+			Tapio:  config.Output.Tapio,
+			Stdout: config.Output.Stdout,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create event emitters: %w", err)
+		}
+		logger.Info().Msg("Event emission enabled (OTLP/NATS/stdout)")
+	} else {
+		logger.Info().Msg("Event emission disabled (metadata-only mode)")
+	}
+
 	return &Service{
 		config:          config,
 		k8sClient:       clientset,
@@ -106,6 +129,7 @@ func NewService(config Config) (*Service, error) {
 		logger:          logger,
 		informerFactory: informerFactory,
 		eventBuffer:     eventBuffer,
+		emitter:         emitter,
 	}, nil
 }
 
@@ -200,8 +224,92 @@ func (s *Service) Stop() error {
 	// Wait for worker to drain remaining events
 	s.workerWG.Wait()
 
+	// Close emitter if configured
+	if s.emitter != nil {
+		if err := s.emitter.Close(); err != nil {
+			s.logger.Error().Err(err).Msg("failed to close event emitter")
+		}
+	}
+
 	s.logger.Info().Msg("k8scontext service stopped gracefully")
 	return nil
+}
+
+// emitDomainEvent emits diagnostic events for K8s resource changes
+// Follows same pattern as NetworkObserver.emitDomainEvent()
+func (s *Service) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) {
+	// Skip if event emission not configured
+	if s.emitter == nil {
+		return
+	}
+
+	// Validate event has K8s data
+	if evt.K8sData == nil {
+		s.logger.Warn().
+			Str("event_id", evt.ID).
+			Str("event_type", evt.Type).
+			Msg("missing K8s data in event")
+		return
+	}
+
+	// Set source if not already set
+	if evt.Source == "" {
+		evt.Source = "k8scontext"
+	}
+
+	// Emit to OTLP (Community tier - structured logs)
+	if err := s.emitter.Emit(ctx, evt); err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("event_id", evt.ID).
+			Str("event_type", evt.Type).
+			Msg("failed to emit event")
+		return
+	}
+
+	// Publish to NATS with graph enrichment (Enterprise tier)
+	if s.config.Output.Tapio && s.config.Publisher != nil {
+		s.enrichAndPublish(ctx, evt)
+	}
+
+	// Debug logging if stdout enabled
+	if s.config.Output.Stdout {
+		s.logger.Info().
+			Str("type", evt.Type).
+			Str("subtype", evt.Subtype).
+			Str("resource", evt.K8sData.ResourceKind).
+			Str("name", evt.K8sData.ResourceName).
+			Str("action", evt.K8sData.Action).
+			Msg("K8s event emitted")
+	}
+}
+
+// enrichAndPublish enriches ObserverEvent with graph entities and publishes to NATS
+func (s *Service) enrichAndPublish(ctx context.Context, evt *domain.ObserverEvent) {
+	// Build K8s context for enrichment
+	k8sCtx := &domain.K8sContext{
+		ClusterID:    s.config.ClusterID,
+		PodNamespace: evt.K8sData.ResourceName, // Will be refined based on resource type
+	}
+
+	// Enrich with graph entities
+	tapioEvent, err := domain.EnrichWithK8sContext(evt, k8sCtx)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("event_id", evt.ID).
+			Msg("failed to enrich event with K8s context")
+		return
+	}
+
+	// Publish to NATS JetStream
+	subject := fmt.Sprintf("tapio.events.%s.%s", tapioEvent.Type, tapioEvent.Subtype)
+	if err := s.config.Publisher.Publish(ctx, subject, tapioEvent); err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("subject", subject).
+			Msg("failed to publish to NATS")
+	}
 }
 
 // podEventHandler wraps Service to implement cache.ResourceEventHandler
