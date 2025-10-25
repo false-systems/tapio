@@ -155,7 +155,10 @@ func (w *EventsWatcher) processEvent(event *corev1.Event) {
 			Msg("failed to emit scheduling failure event")
 	}
 
-	w.observer.schedulingErrorsTotal.Add(ctx, 1)
+	// Record metric if available (may be nil in tests)
+	if w.observer.schedulingErrorsTotal != nil {
+		w.observer.schedulingErrorsTotal.Add(ctx, 1)
+	}
 }
 
 // SchedulingFailure parsed from event message
