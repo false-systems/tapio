@@ -75,7 +75,7 @@ jobs:
 
   verify-go:
     needs: [detect-changes, build-ebpf]
-    if: needs.detect-changes.outputs.has_go == 'true'
+    if: always() && needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +111,7 @@ jobs:
 
   test-go:
     needs: [detect-changes, build-ebpf]
-    if: needs.detect-changes.outputs.has_go == 'true'
+    if: always() && needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -205,7 +205,7 @@ jobs:
 
   build:
     needs: [detect-changes, build-ebpf, verify-go]
-    if: needs.detect-changes.outputs.has_go == 'true'
+    if: always() && needs.detect-changes.outputs.has_go == 'true' && needs.verify-go.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
