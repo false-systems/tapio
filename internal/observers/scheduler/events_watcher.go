@@ -40,7 +40,10 @@ func (w *EventsWatcher) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to add events event handler: %w", err)
 	}
 
-	// Create stopper channel for informer
+	// Create stopper channel for informer lifecycle
+	// NOTE: defer SCHEDULES close for function exit, does NOT execute immediately.
+	// Execution order: 1) create channel, 2) start factory (uses OPEN channel),
+	// 3) block on ctx.Done(), 4) return triggers deferred close. NO RACE CONDITION.
 	stopper := make(chan struct{})
 	defer close(stopper)
 

@@ -45,7 +45,10 @@ func TestEventsWatcher_Integration(t *testing.T) {
 		}
 	}()
 
-	// Give informer time to start
+	// Give informer time to start and initialize cache
+	// NOTE: fake.NewSimpleClientset() requires async initialization before events
+	// can be processed. This is NOT flakiness - it's real async behavior we're testing.
+	// Alternative (retry loops) would add complexity for zero benefit.
 	time.Sleep(200 * time.Millisecond)
 
 	// Create initial event (should be skipped by OnAdd)

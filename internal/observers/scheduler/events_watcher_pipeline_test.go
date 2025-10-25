@@ -46,6 +46,9 @@ func TestEventsWatcher_Run_BlocksUntilCancelled(t *testing.T) {
 	}()
 
 	// Give Run() time to start and cache to sync
+	// NOTE: Testing BLOCKING behavior requires waiting for goroutine to start.
+	// We're verifying Run() doesn't return immediately - sleep is the simplest approach.
+	// 300ms accounts for cache sync timeout with fake clientset.
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify Run() hasn't returned yet (still blocking)
