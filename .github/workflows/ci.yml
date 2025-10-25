@@ -37,6 +37,8 @@ jobs:
 
           # Detect Go files
           GO_FILES=$(git diff --name-only $BASE_REF...HEAD | grep '\.go$' || true)
+          echo "DEBUG: BASE_REF=$BASE_REF"
+          echo "DEBUG: GO_FILES=$GO_FILES"
           echo "go_files<<EOF" >> $GITHUB_OUTPUT
           echo "$GO_FILES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
