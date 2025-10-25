@@ -63,7 +63,13 @@ jobs:
           echo "go_packages=$GO_PACKAGES" >> $GITHUB_OUTPUT
 
           # Set boolean flags
-          [ -n "$GO_FILES" ] && echo "has_go=true" >> $GITHUB_OUTPUT || echo "has_go=false" >> $GITHUB_OUTPUT
+          if [ -n "$GO_FILES" ]; then
+            echo "DEBUG: has_go=true"
+            echo "has_go=true" >> $GITHUB_OUTPUT
+          else
+            echo "DEBUG: has_go=false"
+            echo "has_go=false" >> $GITHUB_OUTPUT
+          fi
           [ -n "$EBPF_FILES" ] && echo "has_ebpf=true" >> $GITHUB_OUTPUT || echo "has_ebpf=false" >> $GITHUB_OUTPUT
           [ -n "$DOCKER_FILES" ] && echo "has_docker=true" >> $GITHUB_OUTPUT || echo "has_docker=false" >> $GITHUB_OUTPUT
 
