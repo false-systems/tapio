@@ -18,11 +18,12 @@ type ObserverEvent struct {
 	TraceFlags byte   `json:"trace_flags,omitempty"` // W3C trace flags (sampled, etc)
 
 	// Typed event data - strongly typed structs only
-	NetworkData   *NetworkEventData   `json:"network_data,omitempty"`
-	KernelData    *KernelEventData    `json:"kernel_data,omitempty"`
-	ContainerData *ContainerEventData `json:"container_data,omitempty"`
-	K8sData       *K8sEventData       `json:"k8s_data,omitempty"`
-	ProcessData   *ProcessEventData   `json:"process_data,omitempty"`
+	NetworkData    *NetworkEventData    `json:"network_data,omitempty"`
+	KernelData     *KernelEventData     `json:"kernel_data,omitempty"`
+	ContainerData  *ContainerEventData  `json:"container_data,omitempty"`
+	K8sData        *K8sEventData        `json:"k8s_data,omitempty"`
+	ProcessData    *ProcessEventData    `json:"process_data,omitempty"`
+	SchedulingData *SchedulingEventData `json:"scheduling_data,omitempty"`
 
 	// Raw bytes for debugging
 	RawData []byte `json:"raw_data,omitempty"`
@@ -42,11 +43,12 @@ type TapioEvent struct {
 	Relationships []Relationship `json:"relationships"` // Edges for graph
 
 	// Same typed data as ObserverEvent
-	NetworkData   *NetworkEventData   `json:"network_data,omitempty"`
-	KernelData    *KernelEventData    `json:"kernel_data,omitempty"`
-	ContainerData *ContainerEventData `json:"container_data,omitempty"`
-	K8sData       *K8sEventData       `json:"k8s_data,omitempty"`
-	ProcessData   *ProcessEventData   `json:"process_data,omitempty"`
+	NetworkData    *NetworkEventData    `json:"network_data,omitempty"`
+	KernelData     *KernelEventData     `json:"kernel_data,omitempty"`
+	ContainerData  *ContainerEventData  `json:"container_data,omitempty"`
+	K8sData        *K8sEventData        `json:"k8s_data,omitempty"`
+	ProcessData    *ProcessEventData    `json:"process_data,omitempty"`
+	SchedulingData *SchedulingEventData `json:"scheduling_data,omitempty"`
 
 	// Multi-cluster support
 	ClusterID string            `json:"cluster_id"`
@@ -219,6 +221,16 @@ type K8sEventData struct {
 	NewImage        string `json:"new_image,omitempty"`
 	OldReplicas     int32  `json:"old_replicas,omitempty"`
 	NewReplicas     int32  `json:"new_replicas,omitempty"`
+}
+
+// SchedulingEventData - scheduler events (failures, performance)
+type SchedulingEventData struct {
+	PodUID           string             `json:"pod_uid,omitempty"`
+	Attempts         int32              `json:"attempts,omitempty"`
+	NodesFailed      int                `json:"nodes_failed,omitempty"`
+	NodesTotal       int                `json:"nodes_total,omitempty"`
+	FailureReasons   map[string]int     `json:"failure_reasons,omitempty"` // "Insufficient CPU": 2, "Taints": 3
+	PluginDurationMs map[string]float64 `json:"plugin_duration_ms,omitempty"`
 }
 
 // ProcessEventData - process events

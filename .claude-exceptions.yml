@@ -25,3 +25,10 @@ exceptions:
     approved_by: "yairfalse"
     date: "2025-10-11"
     notes: "OnAdd/OnUpdate/OnDelete delegate to typed handlers"
+
+  - file: "internal/observers/scheduler/events_watcher.go"
+    rule: "interface{}"
+    reason: "Required by K8s client-go cache.ResourceEventHandler API"
+    approved_by: "yairfalse"
+    date: "2025-10-25"
+    notes: "eventsEventHandler OnAdd/OnUpdate/OnDelete methods with type assertions"

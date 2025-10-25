@@ -47,7 +47,11 @@ func TestNATSPublisher_Publish(t *testing.T) {
 	// Create publisher
 	publisher, err := NewNATSPublisher(nc)
 	require.NoError(t, err, "Should create NATS publisher")
-	defer publisher.Close()
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			t.Logf("failed to close publisher: %v", err)
+		}
+	}()
 
 	// Create test event
 	event := &TapioEvent{
@@ -91,7 +95,11 @@ func TestNATSPublisher_PublishWithContext(t *testing.T) {
 
 	publisher, err := NewNATSPublisher(nc)
 	require.NoError(t, err)
-	defer publisher.Close()
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			t.Logf("failed to close publisher: %v", err)
+		}
+	}()
 
 	// Create cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -115,7 +123,11 @@ func TestNATSPublisher_PublishNilEvent(t *testing.T) {
 
 	publisher, err := NewNATSPublisher(nc)
 	require.NoError(t, err)
-	defer publisher.Close()
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			t.Logf("failed to close publisher: %v", err)
+		}
+	}()
 
 	err = publisher.Publish(context.Background(), "tapio.events.test", nil)
 	assert.Error(t, err, "Should error on nil event")
@@ -129,7 +141,11 @@ func TestNATSPublisher_PublishInvalidJSON(t *testing.T) {
 
 	publisher, err := NewNATSPublisher(nc)
 	require.NoError(t, err)
-	defer publisher.Close()
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			t.Logf("failed to close publisher: %v", err)
+		}
+	}()
 
 	// Create event with channel (can't be JSON marshaled)
 	invalidEvent := struct {
@@ -168,7 +184,11 @@ func TestNATSPublisher_MultipleEvents(t *testing.T) {
 
 	publisher, err := NewNATSPublisher(nc)
 	require.NoError(t, err)
-	defer publisher.Close()
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			t.Logf("failed to close publisher: %v", err)
+		}
+	}()
 
 	// Subscribe to all tapio test events
 	js, _ := nc.JetStream()

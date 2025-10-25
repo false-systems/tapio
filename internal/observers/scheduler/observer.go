@@ -7,8 +7,10 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Config holds scheduler observer configuration
@@ -17,20 +19,28 @@ type Config struct {
 	SchedulerMetricsURL string        // e.g., "http://kube-scheduler:10251/metrics"
 	ScrapeInterval      time.Duration // How often to scrape (default: 30s)
 
+	// K8s Events API watcher config
+	K8sClientset kubernetes.Interface // K8s client for Events API
+
 	// NATS KV storage for scheduler metadata
 	NATSConn *nats.Conn // NATS connection for storing metadata
 	KVBucket string     // KV bucket name for metadata storage
+
+	// Event emitter (OTEL, Tapio, or both)
+	Emitter base.Emitter
 
 	// Output configuration
 	Output base.OutputConfig
 }
 
-// SchedulerObserver monitors Kubernetes scheduler using Prometheus metrics
+// SchedulerObserver monitors Kubernetes scheduler using Prometheus + Events API
 type SchedulerObserver struct {
 	*base.BaseObserver
-	config      Config
-	promScraper *PrometheusScraper
-	kv          nats.KeyValue // NATS KV for metadata storage
+	config        Config
+	promScraper   *PrometheusScraper
+	eventsWatcher *EventsWatcher // K8s Events API watcher
+	kv            nats.KeyValue  // NATS KV for metadata storage
+	emitter       base.Emitter   // Event emitter
 
 	// Scheduler-specific OTEL metrics
 	schedulingAttemptsTotal metric.Int64Counter     // scheduling_attempts_total
@@ -123,17 +133,25 @@ func NewSchedulerObserver(name string, config Config) (*SchedulerObserver, error
 		return nil, fmt.Errorf("failed to create plugin_duration_ms histogram: %w", err)
 	}
 
-	return &SchedulerObserver{
+	obs := &SchedulerObserver{
 		BaseObserver:            baseObs,
 		config:                  config,
 		promScraper:             promScraper,
 		kv:                      kv,
+		emitter:                 config.Emitter,
 		schedulingAttemptsTotal: schedulingAttemptsTotal,
 		schedulingErrorsTotal:   schedulingErrorsTotal,
 		pendingPodsGauge:        pendingPodsGauge,
 		preemptionEventsTotal:   preemptionEventsTotal,
 		pluginDurationMs:        pluginDurationMs,
-	}, nil
+	}
+
+	// Create Events API watcher if K8s client provided
+	if config.K8sClientset != nil {
+		obs.eventsWatcher = NewEventsWatcher(config.K8sClientset, obs)
+	}
+
+	return obs, nil
 }
 
 // Start initiates the scheduler observer
@@ -144,6 +162,15 @@ func (o *SchedulerObserver) Start(ctx context.Context) error {
 	}
 
 	logger := o.Logger(ctx)
+
+	// Start Events API watcher if configured
+	if o.eventsWatcher != nil {
+		if err := o.eventsWatcher.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start Events watcher: %w", err)
+		}
+		logger.Info().Msg("Events API watcher started")
+	}
+
 	logger.Info().Msg("Scheduler observer started")
 
 	return nil
@@ -155,6 +182,26 @@ func (o *SchedulerObserver) Stop() error {
 	logger := o.Logger(ctx)
 	logger.Info().Msg("Stopping scheduler observer")
 
+	// Stop Events API watcher
+	if o.eventsWatcher != nil {
+		o.eventsWatcher.Stop()
+	}
+
 	// Stop base observer
 	return o.BaseObserver.Stop()
+}
+
+// emitDomainEvent emits a domain event (exposed for EventsWatcher)
+func (o *SchedulerObserver) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) error {
+	if o.emitter == nil {
+		return nil
+	}
+
+	if evt.Source == "" {
+		evt.Source = "scheduler"
+	}
+
+	o.RecordEvent(ctx)
+
+	return o.emitter.Emit(ctx, evt)
 }

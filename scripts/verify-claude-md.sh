@@ -114,11 +114,11 @@ if [ -f ".claude-exceptions.yml" ]; then
     EXCEPTION_FILES=$(grep '^  - file:' .claude-exceptions.yml | sed 's/.*file: "\(.*\)"/\1/' | tr '\n' '|' | sed 's/|$//')
 fi
 
-INTERFACE_VIOLATIONS=$(echo "$GO_FILES" | xargs grep -n "^func.*interface{}" 2>/dev/null | grep -v "context.Context" | grep -v "any" || true)
+INTERFACE_VIOLATIONS=$(echo "$GO_FILES" | xargs grep -Hn "^func.*interface{}" 2>/dev/null | grep -v "context.Context" | grep -v "any" || true)
 
-# Filter out exceptions
+# Filter out exceptions (normalize paths by removing ./ prefix for matching)
 if [ -n "$EXCEPTION_FILES" ]; then
-    INTERFACE_VIOLATIONS=$(echo "$INTERFACE_VIOLATIONS" | grep -v -E "$EXCEPTION_FILES" || true)
+    INTERFACE_VIOLATIONS=$(echo "$INTERFACE_VIOLATIONS" | sed 's|^\./||' | grep -v -E "$EXCEPTION_FILES" || true)
 fi
 
 if [ -n "$INTERFACE_VIOLATIONS" ]; then
