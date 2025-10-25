@@ -1,11 +1,15 @@
 package k8scontext
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/domain"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -463,4 +467,241 @@ func TestE2E_OwnershipTracking(t *testing.T) {
 	// 7. Verify deployment deleted
 	_, err = mockKV.Get("deployment.production.web-app")
 	assert.Error(t, err, "Deployment should be deleted")
+}
+
+// TestE2E_EventEmission verifies end-to-end event emission workflow
+func TestE2E_EventEmission(t *testing.T) {
+	mockKV := newMockKV()
+
+	// Create mock emitter to capture events
+	mockEmitter := &mockEventEmitter{events: make([]*domain.ObserverEvent, 0)}
+
+	// Create service with event emission enabled
+	service := &Service{
+		kv:          mockKV,
+		logger:      base.NewLogger("test"),
+		emitter:     mockEmitter,
+		eventBuffer: make(chan func() error, 100),
+		config: Config{
+			MaxRetries:    3,
+			RetryInterval: 10 * time.Millisecond,
+			Output: OutputConfig{
+				OTEL:   true,
+				Stdout: false,
+			},
+		},
+	}
+
+	// Start event processing
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	service.ctx = ctx
+	service.workerWG.Add(1)
+	go func() {
+		defer service.workerWG.Done()
+		service.processEvents(ctx)
+	}()
+
+	// Test 1: Deployment image change
+	oldDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nginx-deployment",
+			Namespace: "production",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Image: "nginx:1.19"},
+					},
+				},
+			},
+		},
+	}
+
+	newDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nginx-deployment",
+			Namespace: "production",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Image: "nginx:1.20"},
+					},
+				},
+			},
+		},
+	}
+
+	service.handleDeploymentUpdate(oldDeployment, newDeployment)
+	waitForEvents()
+
+	// Verify image change event emitted
+	require.GreaterOrEqual(t, len(mockEmitter.events), 1, "Should emit at least one event")
+	imageChangeEvent := findEvent(mockEmitter.events, "deployment", "image_changed")
+	require.NotNil(t, imageChangeEvent, "Should emit image_changed event")
+	assert.Equal(t, "k8scontext", imageChangeEvent.Source)
+	assert.Equal(t, "nginx:1.19", imageChangeEvent.K8sData.OldImage)
+	assert.Equal(t, "nginx:1.20", imageChangeEvent.K8sData.NewImage)
+
+	// Test 2: Pod crash loop
+	oldPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-pod",
+			Namespace: "production",
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.244.1.5",
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: "app",
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				},
+			},
+		},
+	}
+
+	newPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-pod",
+			Namespace: "production",
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.244.1.5",
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         "app",
+					RestartCount: 5,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason: "CrashLoopBackOff",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mockEmitter.events = make([]*domain.ObserverEvent, 0) // Reset
+	service.handlePodUpdate(oldPod, newPod)
+	waitForEvents()
+
+	// Verify crash loop event emitted
+	require.GreaterOrEqual(t, len(mockEmitter.events), 1, "Should emit crash loop event")
+	crashEvent := findEvent(mockEmitter.events, "pod", "crash_loop")
+	require.NotNil(t, crashEvent, "Should emit crash_loop event")
+	assert.Equal(t, "CrashLoopBackOff", crashEvent.K8sData.Reason)
+	assert.NotNil(t, crashEvent.ContainerData)
+	assert.Equal(t, "app", crashEvent.ContainerData.ContainerName)
+	assert.Equal(t, int32(5), crashEvent.ContainerData.RestartCount)
+
+	// Test 3: Node not ready
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "worker-1",
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "worker-1",
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodeReady,
+					Status:  corev1.ConditionFalse,
+					Message: "kubelet stopped posting node status",
+				},
+			},
+		},
+	}
+
+	mockEmitter.events = make([]*domain.ObserverEvent, 0) // Reset
+	service.handleNodeUpdate(oldNode, newNode)
+	waitForEvents()
+
+	// Verify node not ready event emitted
+	require.GreaterOrEqual(t, len(mockEmitter.events), 1, "Should emit node event")
+	nodeEvent := findEvent(mockEmitter.events, "node", "not_ready")
+	require.NotNil(t, nodeEvent, "Should emit not_ready event")
+	assert.Equal(t, "worker-1", nodeEvent.K8sData.ResourceName)
+
+	// Test 4: Service type change
+	oldService := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api-service",
+			Namespace: "production",
+		},
+		Spec: corev1.ServiceSpec{
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: "10.0.1.5",
+		},
+	}
+
+	newService := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api-service",
+			Namespace: "production",
+		},
+		Spec: corev1.ServiceSpec{
+			Type:      corev1.ServiceTypeLoadBalancer,
+			ClusterIP: "10.0.1.5",
+		},
+	}
+
+	mockEmitter.events = make([]*domain.ObserverEvent, 0) // Reset
+	service.handleServiceUpdate(oldService, newService)
+	waitForEvents()
+
+	// Verify service type change event emitted
+	require.GreaterOrEqual(t, len(mockEmitter.events), 1, "Should emit service event")
+	serviceEvent := findEvent(mockEmitter.events, "service", "type_changed")
+	require.NotNil(t, serviceEvent, "Should emit type_changed event")
+	assert.Contains(t, serviceEvent.K8sData.Message, "ClusterIP -> LoadBalancer")
+
+	// Cleanup
+	cancel()
+	close(service.eventBuffer)
+	service.workerWG.Wait()
+}
+
+// mockEventEmitter captures emitted events for testing
+type mockEventEmitter struct {
+	events []*domain.ObserverEvent
+	mu     sync.Mutex
+}
+
+func (m *mockEventEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, event)
+	return nil
+}
+
+func (m *mockEventEmitter) Close() error {
+	return nil
+}
+
+// findEvent searches for an event by type and subtype
+func findEvent(events []*domain.ObserverEvent, eventType, subtype string) *domain.ObserverEvent {
+	for _, evt := range events {
+		if evt.Type == eventType && evt.Subtype == subtype {
+			return evt
+		}
+	}
+	return nil
 }

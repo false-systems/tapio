@@ -1,6 +1,7 @@
 package k8scontext
 
 import (
+	"context"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -76,4 +77,21 @@ type Config struct {
 
 	// Retry interval for NATS KV writes (default: 1s)
 	RetryInterval time.Duration
+
+	// Event emission configuration (optional - if provided, emits diagnostic events)
+	Output    OutputConfig   // Which outputs to enable (OTLP, NATS, stdout)
+	Publisher EventPublisher // NATS publisher for enterprise tier (optional)
+	ClusterID string         // Cluster ID for multi-cluster support
+}
+
+// OutputConfig defines which event outputs are enabled
+type OutputConfig struct {
+	OTEL   bool // Emit to OTLP (community tier - Grafana, Prometheus)
+	Tapio  bool // Emit to NATS with graph enrichment (enterprise tier)
+	Stdout bool // Emit to stdout (debugging)
+}
+
+// EventPublisher publishes enriched Tapio events to NATS
+type EventPublisher interface {
+	Publish(ctx context.Context, subject string, event interface{}) error
 }

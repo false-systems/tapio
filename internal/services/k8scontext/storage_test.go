@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -364,4 +365,97 @@ func TestToPodInfo_EnvVarPriority(t *testing.T) {
 
 	// Env var should override label (Beyla priority: env vars > annotations > labels)
 	assert.Equal(t, "env-service", podInfo.OTELAttributes["service.name"])
+}
+
+// TestGetPodByIP verifies pod lookup by IP
+func TestGetPodByIP(t *testing.T) {
+	mockKV := newMockKV()
+	service := &Service{
+		kv:     mockKV,
+		logger: base.NewLogger("test"),
+	}
+
+	// Store a pod first
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "abc-123",
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.0.1.5",
+		},
+	}
+
+	err := service.storePodMetadata(pod)
+	require.NoError(t, err)
+
+	// Lookup by IP
+	podInfo, err := service.GetPodByIP("10.0.1.5")
+	require.NoError(t, err)
+	require.NotNil(t, podInfo)
+	assert.Equal(t, "test-pod", podInfo.Name)
+	assert.Equal(t, "default", podInfo.Namespace)
+	assert.Equal(t, "10.0.1.5", podInfo.PodIP)
+}
+
+// TestGetPodByUID verifies pod lookup by UID
+func TestGetPodByUID(t *testing.T) {
+	mockKV := newMockKV()
+	service := &Service{
+		kv:     mockKV,
+		logger: base.NewLogger("test"),
+	}
+
+	// Store a pod first
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "abc-123",
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.0.1.5",
+		},
+	}
+
+	err := service.storePodMetadata(pod)
+	require.NoError(t, err)
+
+	// Lookup by UID
+	podInfo, err := service.GetPodByUID("abc-123")
+	require.NoError(t, err)
+	require.NotNil(t, podInfo)
+	assert.Equal(t, "test-pod", podInfo.Name)
+}
+
+// TestGetPodByName verifies pod lookup by namespace/name
+func TestGetPodByName(t *testing.T) {
+	mockKV := newMockKV()
+	service := &Service{
+		kv:     mockKV,
+		logger: base.NewLogger("test"),
+	}
+
+	// Store a pod first
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "abc-123",
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.0.1.5",
+		},
+	}
+
+	err := service.storePodMetadata(pod)
+	require.NoError(t, err)
+
+	// Lookup by namespace/name
+	podInfo, err := service.GetPodByName("default", "test-pod")
+	require.NoError(t, err)
+	require.NotNil(t, podInfo)
+	assert.Equal(t, "test-pod", podInfo.Name)
+	assert.Equal(t, "default", podInfo.Namespace)
 }
