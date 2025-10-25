@@ -61,18 +61,23 @@ jobs:
           echo "go_packages=$GO_PACKAGES" >> $GITHUB_OUTPUT
 
           # Set boolean flags
-          [ -n "$GO_FILES" ] && echo "has_go=true" >> $GITHUB_OUTPUT || echo "has_go=false" >> $GITHUB_OUTPUT
+          if [ -n "$GO_FILES" ]; then
+            echo "has_go=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_go=false" >> $GITHUB_OUTPUT
+          fi
           [ -n "$EBPF_FILES" ] && echo "has_ebpf=true" >> $GITHUB_OUTPUT || echo "has_ebpf=false" >> $GITHUB_OUTPUT
           [ -n "$DOCKER_FILES" ] && echo "has_docker=true" >> $GITHUB_OUTPUT || echo "has_docker=false" >> $GITHUB_OUTPUT
 
   verify-go:
     needs: [detect-changes, build-ebpf]
-    if: needs.detect-changes.outputs.has_go == 'true'
+    if: always() && needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Download eBPF artifacts
+        if: always() && needs.build-ebpf.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: ebpf-generated
@@ -102,12 +107,13 @@ jobs:
 
   test-go:
     needs: [detect-changes, build-ebpf]
-    if: needs.detect-changes.outputs.has_go == 'true'
+    if: always() && needs.detect-changes.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Download eBPF artifacts
+        if: always() && needs.build-ebpf.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: ebpf-generated
@@ -133,6 +139,13 @@ jobs:
 
   build-ebpf:
     runs-on: ubuntu-latest
+    needs: detect-changes
+    # Build eBPF if:
+    # 1. eBPF source files changed (.c/.h)
+    # 2. Network observer changed (imports generated code)
+    if: |
+      needs.detect-changes.outputs.has_ebpf == 'true' ||
+      contains(needs.detect-changes.outputs.go_files, 'internal/observers/network/')
     steps:
       - uses: actions/checkout@v4
 
@@ -188,12 +201,13 @@ jobs:
 
   build:
     needs: [detect-changes, build-ebpf, verify-go]
-    if: needs.detect-changes.outputs.has_go == 'true'
+    if: always() && needs.detect-changes.outputs.has_go == 'true' && needs.verify-go.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Download eBPF artifacts
+        if: always() && needs.build-ebpf.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: ebpf-generated

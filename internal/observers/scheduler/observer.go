@@ -156,19 +156,19 @@ func NewSchedulerObserver(name string, config Config) (*SchedulerObserver, error
 
 // Start initiates the scheduler observer
 func (o *SchedulerObserver) Start(ctx context.Context) error {
-	// Start base observer
-	if err := o.BaseObserver.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start base observer: %w", err)
-	}
-
 	logger := o.Logger(ctx)
 
-	// Start Events API watcher if configured
+	// Add Events API watcher to pipeline if configured
 	if o.eventsWatcher != nil {
-		if err := o.eventsWatcher.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start Events watcher: %w", err)
-		}
-		logger.Info().Msg("Events API watcher started")
+		o.AddStage(func(ctx context.Context) error {
+			logger.Info().Msg("Starting Events API watcher")
+			return o.eventsWatcher.Run(ctx)
+		})
+	}
+
+	// Start base observer (runs pipeline via errgroup)
+	if err := o.BaseObserver.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start base observer: %w", err)
 	}
 
 	logger.Info().Msg("Scheduler observer started")
@@ -182,12 +182,7 @@ func (o *SchedulerObserver) Stop() error {
 	logger := o.Logger(ctx)
 	logger.Info().Msg("Stopping scheduler observer")
 
-	// Stop Events API watcher
-	if o.eventsWatcher != nil {
-		o.eventsWatcher.Stop()
-	}
-
-	// Stop base observer
+	// Stop base observer (cancels context, all pipeline stages stop)
 	return o.BaseObserver.Stop()
 }
 

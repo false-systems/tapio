@@ -20,7 +20,6 @@ import (
 type EventsWatcher struct {
 	clientset kubernetes.Interface
 	informer  cache.SharedIndexInformer
-	stopper   chan struct{}
 	observer  *SchedulerObserver
 }
 
@@ -32,8 +31,8 @@ func NewEventsWatcher(clientset kubernetes.Interface, observer *SchedulerObserve
 	}
 }
 
-// Start begins watching K8s Events API
-func (w *EventsWatcher) Start(ctx context.Context) error {
+// Run starts watching K8s Events API and blocks until context is cancelled
+func (w *EventsWatcher) Run(ctx context.Context) error {
 	factory := informers.NewSharedInformerFactory(w.clientset, 0)
 	w.informer = factory.Core().V1().Events().Informer()
 
@@ -41,22 +40,25 @@ func (w *EventsWatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to add events event handler: %w", err)
 	}
 
-	w.stopper = make(chan struct{})
-	factory.Start(w.stopper)
+	// Create stopper channel for informer lifecycle
+	// NOTE: defer SCHEDULES close for function exit, does NOT execute immediately.
+	// Execution order: 1) create channel, 2) start factory (uses OPEN channel),
+	// 3) block on ctx.Done(), 4) return triggers deferred close. NO RACE CONDITION.
+	stopper := make(chan struct{})
+	defer close(stopper)
 
-	if !cache.WaitForCacheSync(w.stopper, w.informer.HasSynced) {
-		close(w.stopper)
+	// Start informer factory
+	factory.Start(stopper)
+
+	// Wait for cache sync with context timeout
+	if !cache.WaitForCacheSync(ctx.Done(), w.informer.HasSynced) {
 		return fmt.Errorf("failed to sync Events cache")
 	}
 
-	return nil
-}
+	// Block until context is cancelled
+	<-ctx.Done()
 
-// Stop stops the watcher
-func (w *EventsWatcher) Stop() {
-	if w.stopper != nil {
-		close(w.stopper)
-	}
+	return nil
 }
 
 // eventsEventHandler implements cache.ResourceEventHandler for K8s Events
