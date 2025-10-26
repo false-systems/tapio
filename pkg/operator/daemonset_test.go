@@ -89,3 +89,55 @@ func TestReconcileDaemonSet_Creates(t *testing.T) {
 	assert.Equal(t, "/sys/fs/bpf", container.VolumeMounts[1].MountPath)
 	assert.Equal(t, corev1.MountPropagationBidirectional, *container.VolumeMounts[1].MountPropagation)
 }
+
+func TestReconcileDaemonSet_Updates(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	existing := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "old"},
+			},
+		},
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+		Spec: tapiov1alpha1.TapioObserverSpec{
+			Image:           "ghcr.io/yairfalse/tapio:v2.0",
+			ImagePullPolicy: corev1.PullAlways,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing, observer).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	err := reconciler.reconcileDaemonSet(context.Background(), observer)
+	require.NoError(t, err)
+
+	var ds appsv1.DaemonSet
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "test-observer",
+		Namespace: "tapio-system",
+	}, &ds)
+
+	require.NoError(t, err)
+	assert.Equal(t, "ghcr.io/yairfalse/tapio:v2.0", ds.Spec.Template.Spec.Containers[0].Image)
+}

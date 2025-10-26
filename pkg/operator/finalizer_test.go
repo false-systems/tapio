@@ -106,3 +106,30 @@ func TestHandleFinalizer_CleansUpOnDeletion(t *testing.T) {
 
 	assert.NotContains(t, observer.Finalizers, "tapio.io/finalizer")
 }
+
+func TestCleanupClusterResources_NotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+	}
+
+	err := reconciler.cleanupClusterResources(context.Background(), observer)
+	require.NoError(t, err)
+}

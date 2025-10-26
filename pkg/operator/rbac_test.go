@@ -132,3 +132,110 @@ func TestReconcileClusterRoleBinding_Creates(t *testing.T) {
 	assert.Equal(t, "ClusterRole", crb.RoleRef.Kind)
 	assert.Equal(t, "tapio-observer-tapio-system-test-observer", crb.RoleRef.Name)
 }
+
+func TestReconcileServiceAccount_ExistingResource(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	existing := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing, observer).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	err := reconciler.reconcileServiceAccount(context.Background(), observer)
+	require.NoError(t, err)
+
+	var sa corev1.ServiceAccount
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "test-observer",
+		Namespace: "tapio-system",
+	}, &sa)
+	require.NoError(t, err)
+}
+
+func TestReconcileClusterRole_ExistingResource(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tapio-observer-tapio-system-test-observer",
+		},
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	err := reconciler.reconcileClusterRole(context.Background(), observer)
+	require.NoError(t, err)
+}
+
+func TestReconcileClusterRoleBinding_ExistingResource(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	existing := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tapio-observer-tapio-system-test-observer",
+		},
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	err := reconciler.reconcileClusterRoleBinding(context.Background(), observer)
+	require.NoError(t, err)
+}

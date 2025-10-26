@@ -67,3 +67,53 @@ func TestReconcileConfigMap_Creates(t *testing.T) {
 	assert.Equal(t, "4096", cm.Data["network_buffer_size"])
 	assert.Equal(t, "10000", cm.Data["network_map_size"])
 }
+
+func TestReconcileConfigMap_Updates(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	existing := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer-config",
+			Namespace: "tapio-system",
+		},
+		Data: map[string]string{
+			"otlp_endpoint": "old-endpoint:4317",
+		},
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+		Spec: tapiov1alpha1.TapioObserverSpec{
+			OTLPEndpoint: "new-endpoint:4317",
+			OTLPInsecure: false,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing, observer).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	err := reconciler.reconcileConfigMap(context.Background(), observer)
+	require.NoError(t, err)
+
+	var cm corev1.ConfigMap
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "test-observer-config",
+		Namespace: "tapio-system",
+	}, &cm)
+
+	require.NoError(t, err)
+	assert.Equal(t, "new-endpoint:4317", cm.Data["otlp_endpoint"])
+}
