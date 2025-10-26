@@ -15,7 +15,7 @@ import (
 const finalizerName = "tapio.io/finalizer"
 
 func (r *TapioObserverReconciler) handleFinalizer(ctx context.Context, observer *tapiov1alpha1.TapioObserver) (bool, error) {
-	if observer.ObjectMeta.DeletionTimestamp.IsZero() {
+	if observer.DeletionTimestamp.IsZero() {
 		if !controllerutil.ContainsFinalizer(observer, finalizerName) {
 			controllerutil.AddFinalizer(observer, finalizerName)
 			if err := r.Update(ctx, observer); err != nil {
