@@ -1,3 +1,5 @@
+// Package v1alpha1 contains API Schema definitions for the tapio v1alpha1 API group.
+// This package defines the TapioObserver CRD for deploying and managing Tapio observers.
 package v1alpha1
 
 import (
@@ -34,7 +36,7 @@ type TapioObserverSpec struct {
 
 	// Container image for Tapio observers
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^[a-z0-9.\-/]+:[a-z0-9.\-]+$`
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.\-/]+:[a-zA-Z0-9.\-]+$`
 	Image string `json:"image"`
 
 	// Image pull policy

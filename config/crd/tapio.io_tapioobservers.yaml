@@ -59,7 +59,7 @@ spec:
             properties:
               image:
                 description: Container image for Tapio observers
-                pattern: ^[a-z0-9.\-/]+:[a-z0-9.\-]+$
+                pattern: ^[a-zA-Z0-9.\-/]+:[a-zA-Z0-9.\-]+$
                 type: string
               imagePullPolicy:
                 default: IfNotPresent
