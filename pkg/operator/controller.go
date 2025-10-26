@@ -23,5 +23,40 @@ func (r *TapioObserverReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	shouldDelete, err := r.handleFinalizer(ctx, &observer)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if shouldDelete {
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.reconcileServiceAccount(ctx, &observer); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileClusterRole(ctx, &observer); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileClusterRoleBinding(ctx, &observer); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileConfigMap(ctx, &observer); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileDaemonSet(ctx, &observer); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// SetupWithManager sets up the controller with the Manager
+func (r *TapioObserverReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&tapiov1alpha1.TapioObserver{}).
+		Complete(r)
 }
