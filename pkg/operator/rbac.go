@@ -68,3 +68,34 @@ func (r *TapioObserverReconciler) reconcileClusterRole(ctx context.Context, obse
 
 	return err
 }
+
+func (r *TapioObserverReconciler) reconcileClusterRoleBinding(ctx context.Context, observer *tapiov1alpha1.TapioObserver) error {
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("tapio-observer-%s", observer.Name),
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      observer.Name,
+				Namespace: observer.Namespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     fmt.Sprintf("tapio-observer-%s", observer.Name),
+		},
+	}
+
+	existing := &rbacv1.ClusterRoleBinding{}
+	err := r.Get(ctx, types.NamespacedName{Name: crb.Name}, existing)
+	if errors.IsNotFound(err) {
+		if err := r.Create(ctx, crb); err != nil {
+			return fmt.Errorf("failed to create ClusterRoleBinding: %w", err)
+		}
+		return nil
+	}
+
+	return err
+}
