@@ -41,7 +41,7 @@ func (r *TapioObserverReconciler) reconcileServiceAccount(ctx context.Context, o
 func (r *TapioObserverReconciler) reconcileClusterRole(ctx context.Context, observer *tapiov1alpha1.TapioObserver) error {
 	cr := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("tapio-observer-%s", observer.Name),
+			Name: fmt.Sprintf("tapio-observer-%s-%s", observer.Namespace, observer.Name),
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -72,7 +72,7 @@ func (r *TapioObserverReconciler) reconcileClusterRole(ctx context.Context, obse
 func (r *TapioObserverReconciler) reconcileClusterRoleBinding(ctx context.Context, observer *tapiov1alpha1.TapioObserver) error {
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("tapio-observer-%s", observer.Name),
+			Name: fmt.Sprintf("tapio-observer-%s-%s", observer.Namespace, observer.Name),
 		},
 		Subjects: []rbacv1.Subject{
 			{
@@ -84,7 +84,7 @@ func (r *TapioObserverReconciler) reconcileClusterRoleBinding(ctx context.Contex
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     fmt.Sprintf("tapio-observer-%s", observer.Name),
+			Name:     fmt.Sprintf("tapio-observer-%s-%s", observer.Namespace, observer.Name),
 		},
 	}
 

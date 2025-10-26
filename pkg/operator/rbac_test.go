@@ -82,11 +82,11 @@ func TestReconcileClusterRole_Creates(t *testing.T) {
 
 	var cr rbacv1.ClusterRole
 	err = fakeClient.Get(context.Background(), types.NamespacedName{
-		Name: "tapio-observer-test-observer",
+		Name: "tapio-observer-tapio-system-test-observer",
 	}, &cr)
 
 	require.NoError(t, err)
-	assert.Equal(t, "tapio-observer-test-observer", cr.Name)
+	assert.Equal(t, "tapio-observer-tapio-system-test-observer", cr.Name)
 	assert.Len(t, cr.Rules, 2)
 	assert.Equal(t, []string{"pods"}, cr.Rules[0].Resources)
 	assert.Equal(t, []string{"events"}, cr.Rules[1].Resources)
@@ -120,15 +120,15 @@ func TestReconcileClusterRoleBinding_Creates(t *testing.T) {
 
 	var crb rbacv1.ClusterRoleBinding
 	err = fakeClient.Get(context.Background(), types.NamespacedName{
-		Name: "tapio-observer-test-observer",
+		Name: "tapio-observer-tapio-system-test-observer",
 	}, &crb)
 
 	require.NoError(t, err)
-	assert.Equal(t, "tapio-observer-test-observer", crb.Name)
+	assert.Equal(t, "tapio-observer-tapio-system-test-observer", crb.Name)
 	assert.Len(t, crb.Subjects, 1)
 	assert.Equal(t, "ServiceAccount", crb.Subjects[0].Kind)
 	assert.Equal(t, "test-observer", crb.Subjects[0].Name)
 	assert.Equal(t, "tapio-system", crb.Subjects[0].Namespace)
 	assert.Equal(t, "ClusterRole", crb.RoleRef.Kind)
-	assert.Equal(t, "tapio-observer-test-observer", crb.RoleRef.Name)
+	assert.Equal(t, "tapio-observer-tapio-system-test-observer", crb.RoleRef.Name)
 }
