@@ -1,0 +1,34 @@
+apiVersion: tapio.io/v1alpha1
+kind: TapioObserver
+metadata:
+  name: cluster-observability
+  namespace: tapio-system
+spec:
+  # Network observer configuration
+  networkObserver:
+    enabled: true
+    interfaceFilter: "eth0,ens*"
+    bufferSize: 4096
+    mapSize: 10000
+
+  # Scheduler observer configuration
+  schedulerObserver:
+    enabled: true
+    eventsAPI: true
+
+  # Container image
+  image: "ghcr.io/yairfalse/tapio:latest"
+  imagePullPolicy: IfNotPresent
+
+  # Resource requirements
+  resources:
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+
+  # OTLP endpoint
+  otlpEndpoint: "otel-collector.observability:4317"
+  otlpInsecure: false
