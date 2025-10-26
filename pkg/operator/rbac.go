@@ -65,8 +65,16 @@ func (r *TapioObserverReconciler) reconcileClusterRole(ctx context.Context, obse
 		}
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("failed to get ClusterRole: %w", err)
+	}
 
-	return err
+	existing.Rules = cr.Rules
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ClusterRole: %w", err)
+	}
+
+	return nil
 }
 
 func (r *TapioObserverReconciler) reconcileClusterRoleBinding(ctx context.Context, observer *tapiov1alpha1.TapioObserver) error {
@@ -96,6 +104,15 @@ func (r *TapioObserverReconciler) reconcileClusterRoleBinding(ctx context.Contex
 		}
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("failed to get ClusterRoleBinding: %w", err)
+	}
 
-	return err
+	existing.Subjects = crb.Subjects
+	existing.RoleRef = crb.RoleRef
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ClusterRoleBinding: %w", err)
+	}
+
+	return nil
 }

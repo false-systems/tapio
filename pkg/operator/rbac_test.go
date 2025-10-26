@@ -187,6 +187,13 @@ func TestReconcileClusterRole_ExistingResource(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "tapio-observer-tapio-system-test-observer",
 		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"old-resource"},
+				Verbs:     []string{"get"},
+			},
+		},
 	}
 
 	observer := &tapiov1alpha1.TapioObserver{
@@ -205,6 +212,15 @@ func TestReconcileClusterRole_ExistingResource(t *testing.T) {
 
 	err := reconciler.reconcileClusterRole(context.Background(), observer)
 	require.NoError(t, err)
+
+	var updated rbacv1.ClusterRole
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name: "tapio-observer-tapio-system-test-observer",
+	}, &updated)
+	require.NoError(t, err)
+	assert.Len(t, updated.Rules, 2)
+	assert.Equal(t, []string{"pods"}, updated.Rules[0].Resources)
+	assert.Equal(t, []string{"events"}, updated.Rules[1].Resources)
 }
 
 func TestReconcileClusterRoleBinding_ExistingResource(t *testing.T) {
@@ -219,6 +235,18 @@ func TestReconcileClusterRoleBinding_ExistingResource(t *testing.T) {
 	existing := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "tapio-observer-tapio-system-test-observer",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "old-account",
+				Namespace: "old-namespace",
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     "old-role",
 		},
 	}
 
@@ -238,4 +266,15 @@ func TestReconcileClusterRoleBinding_ExistingResource(t *testing.T) {
 
 	err := reconciler.reconcileClusterRoleBinding(context.Background(), observer)
 	require.NoError(t, err)
+
+	var updated rbacv1.ClusterRoleBinding
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name: "tapio-observer-tapio-system-test-observer",
+	}, &updated)
+	require.NoError(t, err)
+	assert.Len(t, updated.Subjects, 1)
+	assert.Equal(t, "ServiceAccount", updated.Subjects[0].Kind)
+	assert.Equal(t, "test-observer", updated.Subjects[0].Name)
+	assert.Equal(t, "tapio-system", updated.Subjects[0].Namespace)
+	assert.Equal(t, "tapio-observer-tapio-system-test-observer", updated.RoleRef.Name)
 }
