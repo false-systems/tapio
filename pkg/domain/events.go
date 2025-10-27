@@ -197,13 +197,20 @@ type KernelEventData struct {
 
 // ContainerEventData - container lifecycle events
 type ContainerEventData struct {
-	ContainerID   string `json:"container_id,omitempty"`
-	ContainerName string `json:"container_name,omitempty"`
-	ImageName     string `json:"image_name,omitempty"`
-	ImageTag      string `json:"image_tag,omitempty"`
-	ExitCode      int32  `json:"exit_code,omitempty"`
-	State         string `json:"state,omitempty"` // running, stopped, paused
-	RestartCount  int32  `json:"restart_count,omitempty"`
+	ContainerID   string   `json:"container_id,omitempty"`
+	ContainerName string   `json:"container_name,omitempty"`
+	ImageName     string   `json:"image_name,omitempty"`
+	ImageTag      string   `json:"image_tag,omitempty"`
+	PID           uint32   `json:"pid,omitempty"`
+	ExitCode      int32    `json:"exit_code,omitempty"`
+	Signal        int32    `json:"signal,omitempty"`
+	Category      string   `json:"category,omitempty"` // oom_kill, normal, error
+	Evidence      []string `json:"evidence,omitempty"` // Diagnostic evidence
+	State         string   `json:"state,omitempty"`    // running, stopped, paused
+	RestartCount  int32    `json:"restart_count,omitempty"`
+	MemoryLimit   int64    `json:"memory_limit,omitempty"` // Bytes
+	MemoryUsage   int64    `json:"memory_usage,omitempty"` // Bytes
+	CgroupPath    string   `json:"cgroup_path,omitempty"`  // Full cgroup path
 }
 
 // K8sEventData - Kubernetes API events
