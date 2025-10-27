@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -17,6 +19,8 @@ type Observer struct {
 	oomProcessor  *OOMProcessor
 	exitProcessor *ExitProcessor
 	started       bool
+	collection    *ebpf.Collection
+	ringReader    *RingReader
 }
 
 // NewObserver creates a new container observer
@@ -56,6 +60,34 @@ func (o *Observer) Start(ctx context.Context, bpfPath string) error {
 		return fmt.Errorf("failed to load BPF: %w", err)
 	}
 
+	// Load BPF spec
+	spec, err := loadBPFSpec(bpfPath)
+	if err != nil {
+		return fmt.Errorf("failed to load BPF spec: %w", err)
+	}
+
+	// Create collection from spec
+	collection, err := ebpf.NewCollection(spec)
+	if err != nil {
+		return fmt.Errorf("failed to create BPF collection: %w", err)
+	}
+	o.collection = collection
+
+	// Get events ring buffer map
+	eventsMap, ok := collection.Maps["events"]
+	if !ok {
+		collection.Close()
+		return fmt.Errorf("events ring buffer map not found")
+	}
+
+	// Create ring buffer reader
+	ringBufReader, err := ringbuf.NewReader(eventsMap)
+	if err != nil {
+		collection.Close()
+		return fmt.Errorf("failed to create ring buffer reader: %w", err)
+	}
+
+	o.ringReader = NewRingReader(ringBufReader)
 	o.started = true
 	return nil
 }
@@ -64,6 +96,20 @@ func (o *Observer) Start(ctx context.Context, bpfPath string) error {
 func (o *Observer) Stop() error {
 	if !o.started {
 		return nil
+	}
+
+	// Close ring reader
+	if o.ringReader != nil {
+		if err := o.ringReader.Close(); err != nil {
+			return fmt.Errorf("failed to close ring reader: %w", err)
+		}
+		o.ringReader = nil
+	}
+
+	// Close BPF collection
+	if o.collection != nil {
+		o.collection.Close()
+		o.collection = nil
 	}
 
 	o.started = false
