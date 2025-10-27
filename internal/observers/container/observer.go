@@ -21,6 +21,7 @@ type Observer struct {
 	started       bool
 	collection    *ebpf.Collection
 	ringReader    *RingReader
+	eventChan     chan *domain.ObserverEvent
 }
 
 // NewObserver creates a new container observer
@@ -114,4 +115,52 @@ func (o *Observer) Stop() error {
 
 	o.started = false
 	return nil
+}
+
+// SetEventChannel configures the channel for emitting domain events
+func (o *Observer) SetEventChannel(ch chan *domain.ObserverEvent) {
+	o.eventChan = ch
+}
+
+// Run starts the event reading loop
+func (o *Observer) Run(ctx context.Context) error {
+	if !o.started {
+		return fmt.Errorf("observer not started")
+	}
+
+	if o.ringReader == nil {
+		return fmt.Errorf("ring reader not initialized")
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			// Read event from ring buffer
+			record, err := o.ringReader.Read(ctx)
+			if err != nil {
+				// Context cancelled or ring closed
+				if ctx.Err() != nil {
+					return nil
+				}
+				continue
+			}
+
+			// Process event through processor chain
+			domainEvt := o.Process(ctx, record.Event)
+			if domainEvt == nil {
+				continue
+			}
+
+			// Emit domain event if channel configured
+			if o.eventChan != nil {
+				select {
+				case o.eventChan <- domainEvt:
+				case <-ctx.Done():
+					return nil
+				}
+			}
+		}
+	}
 }
