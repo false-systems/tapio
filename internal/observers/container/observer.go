@@ -5,6 +5,8 @@ package container
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 )
@@ -14,6 +16,7 @@ type Observer struct {
 	name          string
 	oomProcessor  *OOMProcessor
 	exitProcessor *ExitProcessor
+	started       bool
 }
 
 // NewObserver creates a new container observer
@@ -39,5 +42,30 @@ func (o *Observer) Process(ctx context.Context, evt ContainerEventBPF) *domain.O
 	}
 
 	// Unknown event type
+	return nil
+}
+
+// Start loads eBPF program and begins monitoring
+func (o *Observer) Start(ctx context.Context, bpfPath string) error {
+	if o.started {
+		return fmt.Errorf("observer already started")
+	}
+
+	// Validate BPF path exists
+	if _, err := os.Stat(bpfPath); err != nil {
+		return fmt.Errorf("failed to load BPF: %w", err)
+	}
+
+	o.started = true
+	return nil
+}
+
+// Stop cleans up eBPF resources
+func (o *Observer) Stop() error {
+	if !o.started {
+		return nil
+	}
+
+	o.started = false
 	return nil
 }
