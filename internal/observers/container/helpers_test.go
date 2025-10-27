@@ -39,3 +39,37 @@ func TestNullTerminatedString_LongPath(t *testing.T) {
 	result := nullTerminatedString(buf)
 	assert.Equal(t, path, result)
 }
+
+// TestParseContainerID_Containerd verifies containerd cgroup path parsing
+func TestParseContainerID_Containerd(t *testing.T) {
+	path := "/kubepods/burstable/pod-abc/cri-containerd-1234567890abcdef"
+	result := parseContainerID(path)
+	assert.Equal(t, "1234567890abcdef", result)
+}
+
+// TestParseContainerID_Docker verifies docker cgroup path parsing
+func TestParseContainerID_Docker(t *testing.T) {
+	path := "/docker/abcd1234efgh5678"
+	result := parseContainerID(path)
+	assert.Equal(t, "abcd1234efgh5678", result)
+}
+
+// TestParseContainerID_ContainerdPrefix verifies containerd- prefix stripping
+func TestParseContainerID_ContainerdPrefix(t *testing.T) {
+	path := "/containerd-xyz789"
+	result := parseContainerID(path)
+	assert.Equal(t, "xyz789", result)
+}
+
+// TestParseContainerID_NoPrefix verifies raw ID without prefix
+func TestParseContainerID_NoPrefix(t *testing.T) {
+	path := "/kubepods/plain123456"
+	result := parseContainerID(path)
+	assert.Equal(t, "plain123456", result)
+}
+
+// TestParseContainerID_Empty verifies empty path handling
+func TestParseContainerID_Empty(t *testing.T) {
+	result := parseContainerID("")
+	assert.Equal(t, "", result)
+}
