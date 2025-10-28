@@ -1,6 +1,7 @@
 package deployments
 
 import (
+	"context"
 	"testing"
 
 	"k8s.io/client-go/kubernetes/fake"
@@ -137,11 +138,12 @@ func BenchmarkFullEventPipeline(b *testing.B) {
 	old := createDeployment("app", 1, 1)
 	new := createDeployment("app", 5, 5)
 
+	ctx := context.Background()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Simulate full event processing
 		evt := createDomainEvent(old, new)
-		if err := emitter.Emit(nil, evt); err != nil {
+		if err := emitter.Emit(ctx, evt); err != nil {
 			b.Fatal(err)
 		}
 	}
