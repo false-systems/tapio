@@ -155,7 +155,24 @@ func (o *DeploymentsObserver) handleUpdate(oldObj, newObj interface{}) {
 	}
 
 	evt := createDomainEvent(oldDeploy, newDeploy)
-	o.emitEvent(context.Background(), evt)
+
+	// Increment OTEL metrics based on event type
+	ctx := context.Background()
+	o.deploymentUpdates.Add(ctx, 1)
+
+	// Check if replica changed
+	replicaChanged, _, _ := detectReplicaChange(oldDeploy, newDeploy)
+	if replicaChanged {
+		o.replicaChanges.Add(ctx, 1)
+	}
+
+	// Check if condition changed
+	condChanged, _, _ := detectConditionChange(oldDeploy, newDeploy)
+	if condChanged {
+		o.conditionChanges.Add(ctx, 1)
+	}
+
+	o.emitEvent(ctx, evt)
 }
 
 // handleDelete processes deployment deletion
