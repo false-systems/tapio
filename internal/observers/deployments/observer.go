@@ -57,3 +57,30 @@ func detectReplicaChange(oldDeploy, newDeploy *appsv1.Deployment) (bool, int32, 
 	changed := oldReplicas != newReplicas
 	return changed, oldReplicas, newReplicas
 }
+
+// detectConditionChange detects condition status changes (Available, Progressing, etc)
+func detectConditionChange(oldDeploy, newDeploy *appsv1.Deployment) (bool, string, string) {
+	if oldDeploy == nil || newDeploy == nil {
+		return false, "", ""
+	}
+
+	// Check Available condition (most important)
+	oldCond := getCondition(oldDeploy, "Available")
+	newCond := getCondition(newDeploy, "Available")
+
+	if oldCond != newCond {
+		return true, "Available", newCond
+	}
+
+	return false, "", ""
+}
+
+// getCondition extracts condition status from deployment
+func getCondition(deploy *appsv1.Deployment, condType string) string {
+	for _, cond := range deploy.Status.Conditions {
+		if string(cond.Type) == condType {
+			return string(cond.Status)
+		}
+	}
+	return ""
+}

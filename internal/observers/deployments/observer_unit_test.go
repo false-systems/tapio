@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -118,6 +119,54 @@ func createDeployment(name string, replicas, availableReplicas int32) *appsv1.De
 		},
 		Status: appsv1.DeploymentStatus{
 			AvailableReplicas: availableReplicas,
+		},
+	}
+}
+
+// TDD Cycle 4: Deployment condition analysis
+
+func TestDetectConditionChange_BecameAvailable(t *testing.T) {
+	old := createDeploymentWithCondition("app", "Available", "False")
+	new := createDeploymentWithCondition("app", "Available", "True")
+
+	changed, condType, status := detectConditionChange(old, new)
+	assert.True(t, changed)
+	assert.Equal(t, "Available", condType)
+	assert.Equal(t, "True", status)
+}
+
+func TestDetectConditionChange_BecameUnavailable(t *testing.T) {
+	old := createDeploymentWithCondition("app", "Available", "True")
+	new := createDeploymentWithCondition("app", "Available", "False")
+
+	changed, condType, status := detectConditionChange(old, new)
+	assert.True(t, changed)
+	assert.Equal(t, "Available", condType)
+	assert.Equal(t, "False", status)
+}
+
+func TestDetectConditionChange_NoChange(t *testing.T) {
+	old := createDeploymentWithCondition("app", "Available", "True")
+	new := createDeploymentWithCondition("app", "Available", "True")
+
+	changed, _, _ := detectConditionChange(old, new)
+	assert.False(t, changed)
+}
+
+// Helper to create deployment with specific condition
+func createDeploymentWithCondition(name, condType, status string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Status: appsv1.DeploymentStatus{
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:   appsv1.DeploymentConditionType(condType),
+					Status: corev1.ConditionStatus(status),
+				},
+			},
 		},
 	}
 }
