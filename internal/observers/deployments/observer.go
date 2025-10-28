@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/yairfalse/tapio/internal/base"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -28,4 +29,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("clientset is required")
 	}
 	return nil
+}
+
+// detectEventType determines event type based on old/new deployment state
+func detectEventType(oldDeploy, newDeploy *appsv1.Deployment) string {
+	if oldDeploy == nil && newDeploy != nil {
+		return "deployment_created"
+	}
+	if oldDeploy != nil && newDeploy == nil {
+		return "deployment_deleted"
+	}
+	return "deployment_updated"
 }
