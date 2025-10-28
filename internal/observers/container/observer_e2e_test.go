@@ -63,11 +63,22 @@ func TestObserver_RunEmitsEvents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	// Run in goroutine (will exit on timeout)
-	go observer.Run(ctx)
+	// Run in goroutine (will fail without ring reader, but we're testing channel structure)
+	done := make(chan error, 1)
+	go func() {
+		done <- observer.Run(ctx)
+	}()
 
-	// Note: Without real ring buffer, Run will exit immediately
-	// This test verifies the channel structure exists
+	// Wait for Run to exit (will fail quickly without ring reader)
+	select {
+	case err := <-done:
+		// Expected to fail without ring reader
+		require.Error(t, err, "Run should fail without ring reader")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Run did not exit")
+	}
+
+	// Verify the channel structure exists
 	assert.NotNil(t, observer.eventChan, "Event channel should be initialized")
 }
 

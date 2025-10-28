@@ -100,7 +100,9 @@ func (o *Observer) Start(ctx context.Context, bpfPath string) error {
 
 	// Attach tracepoints
 	if err := o.attachTracepoints(); err != nil {
-		o.ringReader.Close()
+		if closeErr := o.ringReader.Close(); closeErr != nil {
+			return fmt.Errorf("failed to attach tracepoints (and close ring reader: %v): %w", closeErr, err)
+		}
 		collection.Close()
 		return fmt.Errorf("failed to attach tracepoints: %w", err)
 	}
