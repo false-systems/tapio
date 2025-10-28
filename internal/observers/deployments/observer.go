@@ -2,8 +2,11 @@ package deployments
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/domain"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -83,4 +86,61 @@ func getCondition(deploy *appsv1.Deployment, condType string) string {
 		}
 	}
 	return ""
+}
+
+// createDomainEvent creates domain event from deployment change
+func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.ObserverEvent {
+	eventType := detectEventType(oldDeploy, newDeploy)
+
+	evt := &domain.ObserverEvent{
+		ID:        uuid.New().String(),
+		Type:      eventType,
+		Source:    "deployments",
+		Timestamp: time.Now(),
+		K8sData:   &domain.K8sEventData{},
+	}
+
+	// Get deployment name and namespace from non-nil deployment
+	deploy := newDeploy
+	if deploy == nil {
+		deploy = oldDeploy
+	}
+
+	evt.K8sData.ResourceKind = "Deployment"
+	evt.K8sData.ResourceName = deploy.Name
+	evt.K8sData.Action = mapEventTypeToAction(eventType)
+
+	// Only check changes for updates (not create/delete)
+	if oldDeploy != nil && newDeploy != nil {
+		// Check for replica changes
+		replicaChanged, oldReplicas, newReplicas := detectReplicaChange(oldDeploy, newDeploy)
+		if replicaChanged {
+			evt.Type = "deployment_scaled"
+			evt.K8sData.ReplicasChanged = true
+			evt.K8sData.OldReplicas = oldReplicas
+			evt.K8sData.NewReplicas = newReplicas
+		}
+
+		// Check for condition changes (higher priority)
+		condChanged, condType, status := detectConditionChange(oldDeploy, newDeploy)
+		if condChanged {
+			evt.Type = "deployment_available"
+			evt.K8sData.Reason = condType
+			evt.K8sData.Message = status
+		}
+	}
+
+	return evt
+}
+
+// mapEventTypeToAction maps event type to K8s action
+func mapEventTypeToAction(eventType string) string {
+	switch eventType {
+	case "deployment_created":
+		return "created"
+	case "deployment_deleted":
+		return "deleted"
+	default:
+		return "updated"
+	}
 }

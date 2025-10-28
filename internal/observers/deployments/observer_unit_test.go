@@ -170,3 +170,41 @@ func createDeploymentWithCondition(name, condType, status string) *appsv1.Deploy
 		},
 	}
 }
+
+// TDD Cycle 5: Domain event creation
+
+func TestCreateDomainEvent_Created(t *testing.T) {
+	deploy := createDeployment("app", 3, 3)
+
+	evt := createDomainEvent(nil, deploy)
+	require.NotNil(t, evt)
+	assert.Equal(t, "deployment_created", evt.Type)
+	assert.Equal(t, "deployments", evt.Source)
+	assert.NotNil(t, evt.K8sData)
+	assert.Equal(t, "Deployment", evt.K8sData.ResourceKind)
+	assert.Equal(t, "app", evt.K8sData.ResourceName)
+	assert.Equal(t, "created", evt.K8sData.Action)
+}
+
+func TestCreateDomainEvent_ScaledUp(t *testing.T) {
+	old := createDeployment("app", 1, 1)
+	new := createDeployment("app", 5, 5)
+
+	evt := createDomainEvent(old, new)
+	require.NotNil(t, evt)
+	assert.Equal(t, "deployment_scaled", evt.Type)
+	assert.True(t, evt.K8sData.ReplicasChanged)
+	assert.Equal(t, int32(1), evt.K8sData.OldReplicas)
+	assert.Equal(t, int32(5), evt.K8sData.NewReplicas)
+}
+
+func TestCreateDomainEvent_BecameAvailable(t *testing.T) {
+	old := createDeploymentWithCondition("app", "Available", "False")
+	new := createDeploymentWithCondition("app", "Available", "True")
+
+	evt := createDomainEvent(old, new)
+	require.NotNil(t, evt)
+	assert.Equal(t, "deployment_available", evt.Type)
+	assert.Contains(t, evt.K8sData.Reason, "Available")
+	assert.Contains(t, evt.K8sData.Message, "True")
+}
