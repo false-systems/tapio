@@ -49,6 +49,7 @@ type DeploymentsObserver struct {
 	deploymentUpdates metric.Int64Counter
 	replicaChanges    metric.Int64Counter
 	conditionChanges  metric.Int64Counter
+	imageUpdates      metric.Int64Counter
 }
 
 // NewDeploymentsObserver creates a new deployments observer
@@ -75,6 +76,7 @@ func NewDeploymentsObserver(name string, config Config) (*DeploymentsObserver, e
 		Counter(&obs.deploymentUpdates, "deployment_updates_total", "Deployment update events").
 		Counter(&obs.replicaChanges, "replica_changes_total", "Replica count changes").
 		Counter(&obs.conditionChanges, "condition_changes_total", "Deployment condition changes").
+		Counter(&obs.imageUpdates, "image_updates_total", "Container image updates").
 		Build()
 
 	if err != nil {
@@ -172,6 +174,12 @@ func (o *DeploymentsObserver) handleUpdate(oldObj, newObj interface{}) {
 		o.conditionChanges.Add(ctx, 1)
 	}
 
+	// Check if image changed
+	imageChanged, _, _ := detectImageChange(oldDeploy, newDeploy)
+	if imageChanged {
+		o.imageUpdates.Add(ctx, 1)
+	}
+
 	o.emitEvent(ctx, evt)
 }
 
@@ -259,6 +267,46 @@ func getCondition(deploy *appsv1.Deployment, condType string) string {
 	return ""
 }
 
+// detectImageChange detects container image changes (supports multi-container)
+func detectImageChange(oldDeploy, newDeploy *appsv1.Deployment) (bool, []string, []string) {
+	if oldDeploy == nil || newDeploy == nil {
+		return false, []string{}, []string{}
+	}
+
+	oldImages := extractImages(oldDeploy)
+	newImages := extractImages(newDeploy)
+
+	changed := !equalImageLists(oldImages, newImages)
+	return changed, oldImages, newImages
+}
+
+// extractImages extracts all container images from deployment
+func extractImages(deploy *appsv1.Deployment) []string {
+	if deploy == nil {
+		return []string{}
+	}
+
+	containers := deploy.Spec.Template.Spec.Containers
+	images := make([]string, 0, len(containers))
+	for _, container := range containers {
+		images = append(images, container.Image)
+	}
+	return images
+}
+
+// equalImageLists compares two image lists
+func equalImageLists(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // createDomainEvent creates domain event from deployment change
 func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.ObserverEvent {
 	eventType := detectEventType(oldDeploy, newDeploy)
@@ -280,6 +328,7 @@ func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.Observer
 
 	evt.K8sData.ResourceKind = "Deployment"
 	evt.K8sData.ResourceName = deploy.Name
+	evt.K8sData.ResourceNamespace = deploy.Namespace
 	evt.K8sData.Action = mapEventTypeToAction(eventType)
 
 	// Only check changes for updates (not create/delete)
@@ -301,6 +350,22 @@ func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.Observer
 			evt.Subtype = "deployment_available" // Update Subtype for NATS routing
 			evt.K8sData.Reason = condType
 			evt.K8sData.Message = status
+		}
+
+		// Check for image changes (highest priority)
+		imageChanged, oldImages, newImages := detectImageChange(oldDeploy, newDeploy)
+		if imageChanged {
+			evt.Type = "deployment_image_updated"
+			evt.Subtype = "deployment_image_updated" // Update Subtype for NATS routing
+			evt.K8sData.ImageChanged = true
+			// For multi-container, find first changed image
+			for i := range oldImages {
+				if i < len(newImages) && oldImages[i] != newImages[i] {
+					evt.K8sData.OldImage = oldImages[i]
+					evt.K8sData.NewImage = newImages[i]
+					break
+				}
+			}
 		}
 	}
 

@@ -1,6 +1,7 @@
 package deployments
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -210,4 +211,164 @@ func TestCreateDomainEvent_BecameAvailable(t *testing.T) {
 	assert.Equal(t, "deployment_available", evt.Subtype, "Subtype must be set for NATS routing")
 	assert.Contains(t, evt.K8sData.Reason, "Available")
 	assert.Contains(t, evt.K8sData.Message, "True")
+}
+
+func TestCreateDomainEvent_ImageUpdated(t *testing.T) {
+	old := createDeploymentWithImage("app", "myapp:v1.0.0")
+	new := createDeploymentWithImage("app", "myapp:v2.0.0")
+
+	evt := createDomainEvent(old, new)
+	require.NotNil(t, evt)
+	assert.Equal(t, "deployment_image_updated", evt.Type)
+	assert.Equal(t, "deployment_image_updated", evt.Subtype, "Subtype must be set for NATS routing")
+	assert.True(t, evt.K8sData.ImageChanged)
+	assert.Equal(t, "myapp:v1.0.0", evt.K8sData.OldImage)
+	assert.Equal(t, "myapp:v2.0.0", evt.K8sData.NewImage)
+}
+
+func TestCreateDomainEvent_Namespace(t *testing.T) {
+	deploy := createDeployment("app", 3, 3)
+	deploy.Namespace = "production"
+
+	evt := createDomainEvent(nil, deploy)
+	require.NotNil(t, evt)
+	assert.Equal(t, "production", evt.K8sData.ResourceNamespace)
+}
+
+func TestCreateDomainEvent_SidecarImageChange(t *testing.T) {
+	// When ONLY sidecar image changes (not main app), verify correct images captured
+	old := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v1.0.0"})
+	new := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v2.0.0"})
+
+	evt := createDomainEvent(old, new)
+	require.NotNil(t, evt)
+	assert.Equal(t, "deployment_image_updated", evt.Type)
+	assert.True(t, evt.K8sData.ImageChanged)
+
+	// CRITICAL: Should capture the CHANGED image (sidecar), not the first image (app)
+	assert.Equal(t, "sidecar:v1.0.0", evt.K8sData.OldImage, "Should capture sidecar old image")
+	assert.Equal(t, "sidecar:v2.0.0", evt.K8sData.NewImage, "Should capture sidecar new image")
+}
+
+func TestCreateDomainEvent_MultipleChangesPriority(t *testing.T) {
+	// When multiple changes happen simultaneously, verify priority:
+	// Image > Condition > Replica
+	old := createDeploymentWithImage("app", "myapp:v1.0.0")
+	old.Spec.Replicas = int32Ptr(1)
+	old.Status.Conditions = []appsv1.DeploymentCondition{
+		{Type: "Available", Status: corev1.ConditionFalse},
+	}
+
+	new := createDeploymentWithImage("app", "myapp:v2.0.0")
+	new.Spec.Replicas = int32Ptr(5) // Replica changed
+	new.Status.Conditions = []appsv1.DeploymentCondition{
+		{Type: "Available", Status: corev1.ConditionTrue}, // Condition changed
+	}
+
+	evt := createDomainEvent(old, new)
+	require.NotNil(t, evt)
+
+	// Image change has highest priority
+	assert.Equal(t, "deployment_image_updated", evt.Type)
+	assert.Equal(t, "deployment_image_updated", evt.Subtype)
+
+	// But all changes should be recorded in K8sData
+	assert.True(t, evt.K8sData.ImageChanged)
+	assert.Equal(t, "myapp:v1.0.0", evt.K8sData.OldImage)
+	assert.Equal(t, "myapp:v2.0.0", evt.K8sData.NewImage)
+	assert.True(t, evt.K8sData.ReplicasChanged)
+	assert.Equal(t, int32(1), evt.K8sData.OldReplicas)
+	assert.Equal(t, int32(5), evt.K8sData.NewReplicas)
+}
+
+// Helper for int32 pointer
+func int32Ptr(i int32) *int32 {
+	return &i
+}
+
+// TDD Cycle 7: Image change detection
+
+func TestDetectImageChange_SingleContainer(t *testing.T) {
+	old := createDeploymentWithImage("app", "myapp:v1.0.0")
+	new := createDeploymentWithImage("app", "myapp:v1.1.0")
+
+	changed, oldImages, newImages := detectImageChange(old, new)
+	assert.True(t, changed)
+	require.Len(t, oldImages, 1)
+	require.Len(t, newImages, 1)
+	assert.Equal(t, "myapp:v1.0.0", oldImages[0])
+	assert.Equal(t, "myapp:v1.1.0", newImages[0])
+}
+
+func TestDetectImageChange_NoChange(t *testing.T) {
+	old := createDeploymentWithImage("app", "myapp:v1.0.0")
+	new := createDeploymentWithImage("app", "myapp:v1.0.0")
+
+	changed, oldImages, newImages := detectImageChange(old, new)
+	assert.False(t, changed)
+	require.Len(t, oldImages, 1)
+	require.Len(t, newImages, 1)
+	assert.Equal(t, "myapp:v1.0.0", oldImages[0])
+	assert.Equal(t, "myapp:v1.0.0", newImages[0])
+}
+
+func TestDetectImageChange_MultiContainer(t *testing.T) {
+	old := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v1.0.0"})
+	new := createDeploymentWithImages("app", []string{"myapp:v1.1.0", "sidecar:v1.0.0"})
+
+	changed, oldImages, newImages := detectImageChange(old, new)
+	assert.True(t, changed, "Should detect change when first container image changes")
+	require.Len(t, oldImages, 2)
+	require.Len(t, newImages, 2)
+	assert.Equal(t, "myapp:v1.0.0", oldImages[0])
+	assert.Equal(t, "myapp:v1.1.0", newImages[0])
+}
+
+func TestDetectImageChange_SidecarUpdated(t *testing.T) {
+	old := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v1.0.0"})
+	new := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v2.0.0"})
+
+	changed, oldImages, newImages := detectImageChange(old, new)
+	assert.True(t, changed, "Should detect change when sidecar image changes")
+	require.Len(t, oldImages, 2)
+	require.Len(t, newImages, 2)
+	assert.Equal(t, "sidecar:v1.0.0", oldImages[1])
+	assert.Equal(t, "sidecar:v2.0.0", newImages[1])
+}
+
+func TestDetectImageChange_NilDeployments(t *testing.T) {
+	changed, oldImages, newImages := detectImageChange(nil, nil)
+	assert.False(t, changed)
+	assert.Empty(t, oldImages)
+	assert.Empty(t, newImages)
+}
+
+// Helper to create deployment with single image
+func createDeploymentWithImage(name, image string) *appsv1.Deployment {
+	return createDeploymentWithImages(name, []string{image})
+}
+
+// Helper to create deployment with multiple images
+func createDeploymentWithImages(name string, images []string) *appsv1.Deployment {
+	containers := make([]corev1.Container, len(images))
+	for i, image := range images {
+		containers[i] = corev1.Container{
+			Name:  fmt.Sprintf("container-%d", i),
+			Image: image,
+		}
+	}
+
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: containers,
+				},
+			},
+		},
+	}
 }

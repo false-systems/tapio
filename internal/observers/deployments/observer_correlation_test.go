@@ -127,6 +127,32 @@ func TestDeploymentsObserver_IncrementsMetricsOnDelete(t *testing.T) {
 	assert.Equal(t, "deployment_deleted", emitter.events[0].event.Type)
 }
 
+func TestDeploymentsObserver_IncrementsImageUpdateMetric(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewDeploymentsObserver("deployments", config)
+	require.NoError(t, err)
+
+	// Simulate image change
+	old := createDeploymentWithImage("app", "myapp:v1.0.0")
+	new := createDeploymentWithImage("app", "myapp:v2.0.0")
+	observer.handleUpdate(old, new)
+
+	// Verify event was processed (image change detected)
+	require.Len(t, emitter.events, 1, "Should emit event for image change")
+	assert.Equal(t, "deployment_image_updated", emitter.events[0].event.Type)
+	assert.True(t, emitter.events[0].event.K8sData.ImageChanged)
+	assert.Equal(t, "myapp:v1.0.0", emitter.events[0].event.K8sData.OldImage)
+	assert.Equal(t, "myapp:v2.0.0", emitter.events[0].event.K8sData.NewImage)
+}
+
 // Helper to capture emitted events for testing
 type capturedEvent struct {
 	ctx   context.Context
