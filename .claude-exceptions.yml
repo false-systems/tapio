@@ -32,3 +32,10 @@ exceptions:
     approved_by: "yairfalse"
     date: "2025-10-25"
     notes: "eventsEventHandler OnAdd/OnUpdate/OnDelete methods with type assertions"
+
+  - file: "internal/observers/deployments/observer.go"
+    rule: "interface{}"
+    reason: "Required by K8s client-go cache.ResourceEventHandler API"
+    approved_by: "yairfalse"
+    date: "2025-10-28"
+    notes: "handleAdd/handleUpdate/handleDelete methods with type assertions"
