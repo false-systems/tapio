@@ -73,3 +73,51 @@ func TestDetectEventType_Deleted(t *testing.T) {
 	eventType := detectEventType(oldDeploy, nil)
 	assert.Equal(t, "deployment_deleted", eventType)
 }
+
+// TDD Cycle 3: Replica change detection
+
+func TestDetectReplicaChange_NoChange(t *testing.T) {
+	old := createDeployment("app", 3, 3)
+	new := createDeployment("app", 3, 3)
+
+	changed, oldCount, newCount := detectReplicaChange(old, new)
+	assert.False(t, changed)
+	assert.Equal(t, int32(3), oldCount)
+	assert.Equal(t, int32(3), newCount)
+}
+
+func TestDetectReplicaChange_ScaledUp(t *testing.T) {
+	old := createDeployment("app", 1, 1)
+	new := createDeployment("app", 5, 5)
+
+	changed, oldCount, newCount := detectReplicaChange(old, new)
+	assert.True(t, changed)
+	assert.Equal(t, int32(1), oldCount)
+	assert.Equal(t, int32(5), newCount)
+}
+
+func TestDetectReplicaChange_ScaledDown(t *testing.T) {
+	old := createDeployment("app", 10, 10)
+	new := createDeployment("app", 2, 2)
+
+	changed, oldCount, newCount := detectReplicaChange(old, new)
+	assert.True(t, changed)
+	assert.Equal(t, int32(10), oldCount)
+	assert.Equal(t, int32(2), newCount)
+}
+
+// Helper to create deployment with replica counts
+func createDeployment(name string, replicas, availableReplicas int32) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+		},
+		Status: appsv1.DeploymentStatus{
+			AvailableReplicas: availableReplicas,
+		},
+	}
+}

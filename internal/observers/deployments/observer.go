@@ -41,3 +41,19 @@ func detectEventType(oldDeploy, newDeploy *appsv1.Deployment) string {
 	}
 	return "deployment_updated"
 }
+
+// detectReplicaChange checks if replica count changed between deployments
+func detectReplicaChange(oldDeploy, newDeploy *appsv1.Deployment) (bool, int32, int32) {
+	oldReplicas := int32(0)
+	if oldDeploy != nil && oldDeploy.Spec.Replicas != nil {
+		oldReplicas = *oldDeploy.Spec.Replicas
+	}
+
+	newReplicas := int32(0)
+	if newDeploy != nil && newDeploy.Spec.Replicas != nil {
+		newReplicas = *newDeploy.Spec.Replicas
+	}
+
+	changed := oldReplicas != newReplicas
+	return changed, oldReplicas, newReplicas
+}
