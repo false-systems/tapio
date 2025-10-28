@@ -9,7 +9,6 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/yairfalse/tapio/internal/base"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -77,125 +76,31 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
-	// Create network-specific OTEL metrics
-	meter := otel.Meter("tapio.observer.network")
-
-	connectionResets, err := meter.Int64Counter(
-		"connection_resets_total",
-		metric.WithDescription("Total number of TCP connection resets (RST) received"),
-		metric.WithUnit("{resets}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create connection_resets counter: %w", err)
+	obs := &NetworkObserver{
+		BaseObserver: baseObs,
+		config:       config,
 	}
 
-	synTimeouts, err := meter.Int64Counter(
-		"syn_timeouts_total",
-		metric.WithDescription("Total number of TCP SYN timeouts (no response)"),
-		metric.WithUnit("{timeouts}"),
-	)
+	// Create network-specific OTEL metrics using fluent API (100 lines → 14 lines!)
+	err = base.NewMetricBuilder(name).
+		Counter(&obs.connectionResets, "connection_resets_total", "TCP connection resets (RST) received").
+		Counter(&obs.synTimeouts, "syn_timeouts_total", "TCP SYN timeouts (no response)").
+		Counter(&obs.connectionRefused, "connection_refused_total", "TCP connections refused (RST on SYN)").
+		Counter(&obs.retransmitsTotal, "retransmits_total", "TCP packet retransmissions detected").
+		Gauge(&obs.retransmitRate, "retransmit_rate_ratio", "TCP retransmission rate ratio (0.0-1.0)").
+		Counter(&obs.congestionEvents, "congestion_events_total", "High retransmit rate events (>5%)").
+		Counter(&obs.rttSpikesTotal, "rtt_spikes_total", "RTT spike events detected").
+		Gauge(&obs.rttCurrentMs, "rtt_current_ms", "Current RTT in milliseconds when spike detected").
+		Gauge(&obs.rttDegradationPct, "rtt_degradation_ratio", "RTT degradation ratio from baseline (0.0-1.0)").
+		Gauge(&obs.ringbufferUtilization, "ringbuffer_utilization_percent", "eBPF ring buffer utilization percentage").
+		Int64Gauge(&obs.ebpfMapSize, "ebpf_map_size_entries", "Number of entries in eBPF maps (baseline_rtt)").
+		Build()
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to create syn_timeouts counter: %w", err)
+		return nil, fmt.Errorf("failed to create metrics: %w", err)
 	}
 
-	connectionRefused, err := meter.Int64Counter(
-		"connection_refused_total",
-		metric.WithDescription("Total number of TCP connections refused (RST on SYN)"),
-		metric.WithUnit("{refused}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create connection_refused counter: %w", err)
-	}
-
-	retransmitsTotal, err := meter.Int64Counter(
-		"retransmits_total",
-		metric.WithDescription("Total number of TCP packet retransmissions detected"),
-		metric.WithUnit("{retransmits}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create retransmits_total counter: %w", err)
-	}
-
-	retransmitRate, err := meter.Float64Gauge(
-		"retransmit_rate_ratio",
-		metric.WithDescription("TCP retransmission rate as ratio of total packets (0.0-1.0)"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create retransmit_rate gauge: %w", err)
-	}
-
-	congestionEvents, err := meter.Int64Counter(
-		"congestion_events_total",
-		metric.WithDescription("High retransmit rate events (>5%)"),
-		metric.WithUnit("{events}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create congestion_events counter: %w", err)
-	}
-
-	// RTT spike metrics (Stage 3)
-	rttSpikesTotal, err := meter.Int64Counter(
-		"rtt_spikes_total",
-		metric.WithDescription("Total number of RTT spike events detected"),
-		metric.WithUnit("{spikes}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rtt_spikes counter: %w", err)
-	}
-
-	rttCurrentMs, err := meter.Float64Gauge(
-		"rtt_current_ms",
-		metric.WithDescription("Current RTT in milliseconds when spike detected"),
-		metric.WithUnit("ms"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rtt_current gauge: %w", err)
-	}
-
-	rttDegradationPct, err := meter.Float64Gauge(
-		"rtt_degradation_ratio",
-		metric.WithDescription("RTT degradation ratio from baseline (0.0-1.0, where 1.0 = 100% degradation)"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rtt_degradation gauge: %w", err)
-	}
-
-	// eBPF health metrics
-	ringbufferUtilization, err := meter.Float64Gauge(
-		"ringbuffer_utilization_percent",
-		metric.WithDescription("eBPF ring buffer utilization percentage"),
-		metric.WithUnit("%"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ringbuffer_utilization gauge: %w", err)
-	}
-
-	ebpfMapSize, err := meter.Int64Gauge(
-		"ebpf_map_size_entries",
-		metric.WithDescription("Number of entries in eBPF maps (baseline_rtt)"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ebpf_map_size gauge: %w", err)
-	}
-
-	return &NetworkObserver{
-		BaseObserver:          baseObs,
-		config:                config,
-		connectionResets:      connectionResets,
-		synTimeouts:           synTimeouts,
-		connectionRefused:     connectionRefused,
-		retransmitsTotal:      retransmitsTotal,
-		retransmitRate:        retransmitRate,
-		congestionEvents:      congestionEvents,
-		rttSpikesTotal:        rttSpikesTotal,
-		rttCurrentMs:          rttCurrentMs,
-		rttDegradationPct:     rttDegradationPct,
-		ringbufferUtilization: ringbufferUtilization,
-		ebpfMapSize:           ebpfMapSize,
-	}, nil
+	return obs, nil
 }
 
 // stateToEventType maps TCP state transitions to domain event types

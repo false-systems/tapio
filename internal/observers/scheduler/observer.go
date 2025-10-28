@@ -8,7 +8,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"k8s.io/client-go/kubernetes"
 )
@@ -85,65 +84,25 @@ func NewSchedulerObserver(name string, config Config) (*SchedulerObserver, error
 		}
 	}
 
-	// Create scheduler-specific OTEL metrics
-	meter := otel.Meter("tapio.observer.scheduler")
-
-	schedulingAttemptsTotal, err := meter.Int64Counter(
-		"scheduling_attempts_total",
-		metric.WithDescription("Total number of pod scheduling attempts"),
-		metric.WithUnit("{attempts}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create scheduling_attempts_total counter: %w", err)
-	}
-
-	schedulingErrorsTotal, err := meter.Int64Counter(
-		"scheduling_errors_total",
-		metric.WithDescription("Total number of pod scheduling errors"),
-		metric.WithUnit("{errors}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create scheduling_errors_total counter: %w", err)
-	}
-
-	pendingPodsGauge, err := meter.Int64Gauge(
-		"pending_pods_current",
-		metric.WithDescription("Current number of pending pods waiting to be scheduled"),
-		metric.WithUnit("{pods}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pending_pods_current gauge: %w", err)
-	}
-
-	preemptionEventsTotal, err := meter.Int64Counter(
-		"preemption_events_total",
-		metric.WithDescription("Total number of pod preemption events"),
-		metric.WithUnit("{events}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create preemption_events_total counter: %w", err)
-	}
-
-	pluginDurationMs, err := meter.Float64Histogram(
-		"plugin_duration_ms",
-		metric.WithDescription("Scheduler plugin execution duration in milliseconds"),
-		metric.WithUnit("ms"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create plugin_duration_ms histogram: %w", err)
-	}
-
 	obs := &SchedulerObserver{
-		BaseObserver:            baseObs,
-		config:                  config,
-		promScraper:             promScraper,
-		kv:                      kv,
-		emitter:                 config.Emitter,
-		schedulingAttemptsTotal: schedulingAttemptsTotal,
-		schedulingErrorsTotal:   schedulingErrorsTotal,
-		pendingPodsGauge:        pendingPodsGauge,
-		preemptionEventsTotal:   preemptionEventsTotal,
-		pluginDurationMs:        pluginDurationMs,
+		BaseObserver: baseObs,
+		config:       config,
+		promScraper:  promScraper,
+		kv:           kv,
+		emitter:      config.Emitter,
+	}
+
+	// Create scheduler-specific OTEL metrics using fluent API (46 lines → 7 lines!)
+	err = base.NewMetricBuilder(name).
+		Counter(&obs.schedulingAttemptsTotal, "scheduling_attempts_total", "Pod scheduling attempts").
+		Counter(&obs.schedulingErrorsTotal, "scheduling_errors_total", "Pod scheduling errors").
+		Int64Gauge(&obs.pendingPodsGauge, "pending_pods_current", "Current number of pending pods waiting to be scheduled").
+		Counter(&obs.preemptionEventsTotal, "preemption_events_total", "Pod preemption events").
+		Histogram(&obs.pluginDurationMs, "plugin_duration_ms", "Scheduler plugin execution duration in milliseconds").
+		Build()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metrics: %w", err)
 	}
 
 	// Create Events API watcher if K8s client provided
