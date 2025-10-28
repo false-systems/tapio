@@ -266,6 +266,7 @@ func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.Observer
 	evt := &domain.ObserverEvent{
 		ID:        uuid.New().String(),
 		Type:      eventType,
+		Subtype:   eventType, // Use Type as Subtype for NATS routing
 		Source:    "deployments",
 		Timestamp: time.Now(),
 		K8sData:   &domain.K8sEventData{},
@@ -287,6 +288,7 @@ func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.Observer
 		replicaChanged, oldReplicas, newReplicas := detectReplicaChange(oldDeploy, newDeploy)
 		if replicaChanged {
 			evt.Type = "deployment_scaled"
+			evt.Subtype = "deployment_scaled" // Update Subtype for NATS routing
 			evt.K8sData.ReplicasChanged = true
 			evt.K8sData.OldReplicas = oldReplicas
 			evt.K8sData.NewReplicas = newReplicas
@@ -296,6 +298,7 @@ func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.Observer
 		condChanged, condType, status := detectConditionChange(oldDeploy, newDeploy)
 		if condChanged {
 			evt.Type = "deployment_available"
+			evt.Subtype = "deployment_available" // Update Subtype for NATS routing
 			evt.K8sData.Reason = condType
 			evt.K8sData.Message = status
 		}

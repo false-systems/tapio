@@ -179,6 +179,7 @@ func TestCreateDomainEvent_Created(t *testing.T) {
 	evt := createDomainEvent(nil, deploy)
 	require.NotNil(t, evt)
 	assert.Equal(t, "deployment_created", evt.Type)
+	assert.Equal(t, "deployment_created", evt.Subtype, "Subtype must be set for NATS routing")
 	assert.Equal(t, "deployments", evt.Source)
 	assert.NotNil(t, evt.K8sData)
 	assert.Equal(t, "Deployment", evt.K8sData.ResourceKind)
@@ -193,6 +194,7 @@ func TestCreateDomainEvent_ScaledUp(t *testing.T) {
 	evt := createDomainEvent(old, new)
 	require.NotNil(t, evt)
 	assert.Equal(t, "deployment_scaled", evt.Type)
+	assert.Equal(t, "deployment_scaled", evt.Subtype, "Subtype must be set for NATS routing")
 	assert.True(t, evt.K8sData.ReplicasChanged)
 	assert.Equal(t, int32(1), evt.K8sData.OldReplicas)
 	assert.Equal(t, int32(5), evt.K8sData.NewReplicas)
@@ -205,6 +207,7 @@ func TestCreateDomainEvent_BecameAvailable(t *testing.T) {
 	evt := createDomainEvent(old, new)
 	require.NotNil(t, evt)
 	assert.Equal(t, "deployment_available", evt.Type)
+	assert.Equal(t, "deployment_available", evt.Subtype, "Subtype must be set for NATS routing")
 	assert.Contains(t, evt.K8sData.Reason, "Available")
 	assert.Contains(t, evt.K8sData.Message, "True")
 }
