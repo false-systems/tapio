@@ -358,13 +358,36 @@ func createDomainEvent(oldDeploy, newDeploy *appsv1.Deployment) *domain.Observer
 			evt.Type = "deployment_image_updated"
 			evt.Subtype = "deployment_image_updated" // Update Subtype for NATS routing
 			evt.K8sData.ImageChanged = true
-			// For multi-container, find first changed image
-			for i := range oldImages {
-				if i < len(newImages) && oldImages[i] != newImages[i] {
-					evt.K8sData.OldImage = oldImages[i]
-					evt.K8sData.NewImage = newImages[i]
+
+			// Find which image changed (handles updates, additions, and removals)
+			found := false
+			maxLen := len(oldImages)
+			if len(newImages) > maxLen {
+				maxLen = len(newImages)
+			}
+
+			for i := 0; i < maxLen; i++ {
+				oldImg := ""
+				if i < len(oldImages) {
+					oldImg = oldImages[i]
+				}
+				newImg := ""
+				if i < len(newImages) {
+					newImg = newImages[i]
+				}
+
+				if oldImg != newImg {
+					evt.K8sData.OldImage = oldImg
+					evt.K8sData.NewImage = newImg
+					found = true
 					break
 				}
+			}
+
+			// Fallback: if somehow no change found, use first images
+			if !found && len(oldImages) > 0 && len(newImages) > 0 {
+				evt.K8sData.OldImage = oldImages[0]
+				evt.K8sData.NewImage = newImages[0]
 			}
 		}
 	}

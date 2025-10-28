@@ -235,6 +235,36 @@ func TestCreateDomainEvent_Namespace(t *testing.T) {
 	assert.Equal(t, "production", evt.K8sData.ResourceNamespace)
 }
 
+func TestCreateDomainEvent_ContainerAdded(t *testing.T) {
+	// When a sidecar is ADDED (not just changed)
+	old := createDeploymentWithImage("app", "myapp:v1.0.0")
+	new := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v1.0.0"})
+
+	evt := createDomainEvent(old, new)
+	require.NotNil(t, evt)
+	assert.Equal(t, "deployment_image_updated", evt.Type)
+	assert.True(t, evt.K8sData.ImageChanged)
+
+	// Should capture the added container
+	assert.Equal(t, "", evt.K8sData.OldImage, "OldImage should be empty (container didn't exist)")
+	assert.Equal(t, "sidecar:v1.0.0", evt.K8sData.NewImage, "NewImage should be the added container")
+}
+
+func TestCreateDomainEvent_ContainerRemoved(t *testing.T) {
+	// When a sidecar is REMOVED
+	old := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v1.0.0"})
+	new := createDeploymentWithImage("app", "myapp:v1.0.0")
+
+	evt := createDomainEvent(old, new)
+	require.NotNil(t, evt)
+	assert.Equal(t, "deployment_image_updated", evt.Type)
+	assert.True(t, evt.K8sData.ImageChanged)
+
+	// Should capture the removed container
+	assert.Equal(t, "sidecar:v1.0.0", evt.K8sData.OldImage, "OldImage should be the removed container")
+	assert.Equal(t, "", evt.K8sData.NewImage, "NewImage should be empty (container no longer exists)")
+}
+
 func TestCreateDomainEvent_SidecarImageChange(t *testing.T) {
 	// When ONLY sidecar image changes (not main app), verify correct images captured
 	old := createDeploymentWithImages("app", []string{"myapp:v1.0.0", "sidecar:v1.0.0"})
