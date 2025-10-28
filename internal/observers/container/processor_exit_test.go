@@ -65,7 +65,7 @@ func TestExitProcessor_ProcessesNormalExit(t *testing.T) {
 	assert.Equal(t, uint32(9999), result.ContainerData.PID)
 	assert.Equal(t, int32(0), result.ContainerData.ExitCode)
 	assert.Equal(t, "normal", result.ContainerData.Category)
-	assert.Contains(t, result.ContainerData.Evidence, "exitCode=0")
+	assert.Contains(t, result.ContainerData.Evidence, "exit_code=0")
 
 	// Verify timestamp (within 1ms tolerance)
 	timeDiff := result.Timestamp.Sub(now)
