@@ -109,7 +109,7 @@ func TestExitProcessor_ProcessesErrorExit(t *testing.T) {
 	assert.Equal(t, int32(1), result.ContainerData.ExitCode)
 	assert.Equal(t, int32(0), result.ContainerData.Signal)
 	assert.Equal(t, "error", result.ContainerData.Category)
-	assert.Contains(t, result.ContainerData.Evidence, "exitCode=1")
+	assert.Contains(t, result.ContainerData.Evidence, "exit_code=1")
 	assert.Equal(t, int64(1024*1024*256), result.ContainerData.MemoryLimit)
 	assert.Equal(t, int64(1024*1024*100), result.ContainerData.MemoryUsage)
 	assert.Equal(t, cgroupPath, result.ContainerData.CgroupPath)

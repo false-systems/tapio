@@ -21,7 +21,8 @@ func TestObserver_RunStopsOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Start observer (will fail without BPF, but Run should still work)
-	observer.started = true // Simulate started state
+	observer.started = true                  // Simulate started state
+	observer.ringReader = NewRingReader(nil) // Mock ring reader (will fail on Read, but structure exists)
 
 	// Run in goroutine
 	done := make(chan error, 1)
