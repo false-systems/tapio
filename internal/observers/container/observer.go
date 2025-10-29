@@ -32,3 +32,31 @@ func detectOOMKill(status *corev1.ContainerStatus) bool {
 
 	return false
 }
+
+// detectCrash returns true if the container crashed (non-zero exit code).
+// Excludes OOMKills (exit code 137) as they are handled separately.
+func detectCrash(status *corev1.ContainerStatus) bool {
+	if status == nil {
+		return false
+	}
+
+	// Check if container is terminated
+	if status.State.Terminated == nil {
+		return false
+	}
+
+	terminated := status.State.Terminated
+
+	// Exit code 0 = success, not a crash
+	if terminated.ExitCode == 0 {
+		return false
+	}
+
+	// Exit code 137 = OOMKill, handled separately
+	if terminated.ExitCode == 137 {
+		return false
+	}
+
+	// Any other non-zero exit code = crash
+	return true
+}
