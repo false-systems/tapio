@@ -1,6 +1,14 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// Emitter sends events to the event bus
+type Emitter interface {
+	Emit(ctx context.Context, event *ObserverEvent) error
+}
 
 // ObserverEvent is emitted by observers (68 subtypes → migrating to 12 base types)
 // Built on 5 months of learning, implemented with production standards

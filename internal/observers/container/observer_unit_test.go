@@ -1,11 +1,15 @@
 package container
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // TDD Cycle 1: Detect OOMKill
@@ -360,4 +364,88 @@ func TestCreateDomainEvent_InitContainer(t *testing.T) {
 	assert.NotNil(t, event)
 	assert.Equal(t, "init", event.ContainerData.ContainerType)
 	assert.Equal(t, "init-migrate", event.ContainerData.ContainerName)
+}
+
+// TDD Cycle 6: Observer struct and constructor
+
+func TestNewContainerObserver_Success(t *testing.T) {
+	// Create observer with valid config
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test-observer", config)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, observer)
+	assert.Equal(t, "test-observer", observer.name)
+	assert.Equal(t, "default", observer.namespace)
+	assert.NotNil(t, observer.informer)
+}
+
+func TestNewContainerObserver_AllNamespaces(t *testing.T) {
+	// Empty namespace = watch all namespaces
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test-observer", config)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, observer)
+	assert.Equal(t, "", observer.namespace)
+}
+
+func TestNewContainerObserver_NilClientset(t *testing.T) {
+	// Nil clientset should return error
+	emitter := &fakeEmitter{}
+
+	config := Config{
+		Clientset: nil,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test-observer", config)
+
+	assert.Error(t, err)
+	assert.Nil(t, observer)
+	assert.Contains(t, err.Error(), "clientset")
+}
+
+func TestNewContainerObserver_NilEmitter(t *testing.T) {
+	// Nil emitter should return error
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   nil,
+	}
+
+	observer, err := NewContainerObserver("test-observer", config)
+
+	assert.Error(t, err)
+	assert.Nil(t, observer)
+	assert.Contains(t, err.Error(), "emitter")
+}
+
+// Fake emitter for testing
+type fakeEmitter struct {
+	events []*domain.ObserverEvent
+}
+
+func (e *fakeEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	e.events = append(e.events, event)
+	return nil
 }

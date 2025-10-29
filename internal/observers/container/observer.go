@@ -1,13 +1,73 @@
 package container
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 )
+
+// Config for container observer
+type Config struct {
+	Clientset kubernetes.Interface
+	Namespace string // "" = all namespaces
+	Emitter   domain.Emitter
+}
+
+// Observer watches containers for runtime failures
+type Observer struct {
+	name      string
+	namespace string
+	clientset kubernetes.Interface
+	informer  cache.SharedIndexInformer
+	emitter   domain.Emitter
+	stopCh    chan struct{}
+}
+
+// NewContainerObserver creates a new container observer
+func NewContainerObserver(name string, cfg Config) (*Observer, error) {
+	// Validate config
+	if cfg.Clientset == nil {
+		return nil, fmt.Errorf("clientset is required")
+	}
+	if cfg.Emitter == nil {
+		return nil, fmt.Errorf("emitter is required")
+	}
+
+	// Create informer factory
+	var informerFactory informers.SharedInformerFactory
+	if cfg.Namespace == "" {
+		// Watch all namespaces
+		informerFactory = informers.NewSharedInformerFactory(cfg.Clientset, 30*time.Second)
+	} else {
+		// Watch specific namespace
+		informerFactory = informers.NewSharedInformerFactoryWithOptions(
+			cfg.Clientset,
+			30*time.Second,
+			informers.WithNamespace(cfg.Namespace),
+		)
+	}
+
+	// Create pod informer
+	informer := informerFactory.Core().V1().Pods().Informer()
+
+	observer := &Observer{
+		name:      name,
+		namespace: cfg.Namespace,
+		clientset: cfg.Clientset,
+		informer:  informer,
+		emitter:   cfg.Emitter,
+		stopCh:    make(chan struct{}),
+	}
+
+	return observer, nil
+}
 
 // detectOOMKill returns true if the container was killed due to out-of-memory.
 // Checks for:
