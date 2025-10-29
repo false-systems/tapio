@@ -1,6 +1,14 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// Emitter sends events to the event bus
+type Emitter interface {
+	Emit(ctx context.Context, event *ObserverEvent) error
+}
 
 // ObserverEvent is emitted by observers (68 subtypes → migrating to 12 base types)
 // Built on 5 months of learning, implemented with production standards
@@ -197,20 +205,36 @@ type KernelEventData struct {
 
 // ContainerEventData - container lifecycle events
 type ContainerEventData struct {
-	ContainerID   string   `json:"container_id,omitempty"`
-	ContainerName string   `json:"container_name,omitempty"`
-	ImageName     string   `json:"image_name,omitempty"`
-	ImageTag      string   `json:"image_tag,omitempty"`
-	PID           uint32   `json:"pid,omitempty"`
-	ExitCode      int32    `json:"exit_code,omitempty"`
-	Signal        int32    `json:"signal,omitempty"`
-	Category      string   `json:"category,omitempty"` // oom_kill, normal, error
-	Evidence      []string `json:"evidence,omitempty"` // Diagnostic evidence
-	State         string   `json:"state,omitempty"`    // running, stopped, paused
-	RestartCount  int32    `json:"restart_count,omitempty"`
-	MemoryLimit   int64    `json:"memory_limit,omitempty"` // Bytes
-	MemoryUsage   int64    `json:"memory_usage,omitempty"` // Bytes
-	CgroupPath    string   `json:"cgroup_path,omitempty"`  // Full cgroup path
+	// Identity
+	ContainerID   string `json:"container_id,omitempty"`
+	ContainerName string `json:"container_name,omitempty"`
+	ContainerType string `json:"container_type,omitempty"` // init, main, ephemeral
+	PodName       string `json:"pod_name,omitempty"`
+	PodNamespace  string `json:"pod_namespace,omitempty"`
+	NodeName      string `json:"node_name,omitempty"`
+
+	// Image
+	Image     string `json:"image,omitempty"`      // Deprecated: Use ImageName and ImageTag instead. Will be removed in v2.0.
+	ImageName string `json:"image_name,omitempty"` // Image name without tag
+	ImageTag  string `json:"image_tag,omitempty"`  // Image tag
+
+	// State (K8s API)
+	State        string `json:"state,omitempty"`         // Waiting, Running, Terminated
+	Reason       string `json:"reason,omitempty"`        // OOMKilled, Error, ErrImagePull, etc
+	Message      string `json:"message,omitempty"`       // Human-readable message
+	RestartCount int32  `json:"restart_count,omitempty"` // Number of restarts
+
+	// Termination details
+	ExitCode int32 `json:"exit_code,omitempty"` // Exit code if terminated
+	Signal   int32 `json:"signal,omitempty"`    // Signal if killed
+
+	// eBPF-specific fields (from container observer eBPF probes)
+	PID         uint32   `json:"pid,omitempty"`          // Process ID from eBPF
+	Category    string   `json:"category,omitempty"`     // oom_kill, normal, error (exit classification)
+	Evidence    []string `json:"evidence,omitempty"`     // Diagnostic evidence from exit classification
+	MemoryLimit int64    `json:"memory_limit,omitempty"` // Memory limit in bytes (from cgroup)
+	MemoryUsage int64    `json:"memory_usage,omitempty"` // Memory usage in bytes (from cgroup)
+	CgroupPath  string   `json:"cgroup_path,omitempty"`  // Full cgroup path
 }
 
 // K8sEventData - Kubernetes API events

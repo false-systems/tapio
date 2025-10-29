@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package container
+package containerruntime
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 // TestObserver_StartLoadsBPFAndCreatesReader verifies full integration
 func TestObserver_StartLoadsBPFAndCreatesReader(t *testing.T) {
-	observer := NewObserver("integration-test")
+	observer := NewRuntimeObserver("integration-test")
 	ctx := context.Background()
 
 	// Try to start with test BPF object
@@ -38,7 +38,7 @@ func TestObserver_StartLoadsBPFAndCreatesReader(t *testing.T) {
 
 // TestObserver_StopClosesRingAndCleansBPF verifies full cleanup
 func TestObserver_StopClosesRingAndCleansBPF(t *testing.T) {
-	observer := NewObserver("cleanup-test")
+	observer := NewRuntimeObserver("cleanup-test")
 
 	// Manually set started state (simulating successful Start)
 	observer.started = true
@@ -52,7 +52,7 @@ func TestObserver_StopClosesRingAndCleansBPF(t *testing.T) {
 
 // TestObserver_IntegrationWithProcessing verifies end-to-end event flow
 func TestObserver_IntegrationWithProcessing(t *testing.T) {
-	observer := NewObserver("e2e-test")
+	observer := NewRuntimeObserver("e2e-test")
 	ctx := context.Background()
 
 	bpfPath := "testdata/container_monitor.o"
@@ -84,7 +84,7 @@ func TestObserver_IntegrationWithProcessing(t *testing.T) {
 
 // TestObserver_StartFailsIfAlreadyStarted verifies idempotency
 func TestObserver_StartFailsIfAlreadyStarted(t *testing.T) {
-	observer := NewObserver("idempotency-test")
+	observer := NewRuntimeObserver("idempotency-test")
 	observer.started = true
 
 	ctx := context.Background()
