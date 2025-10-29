@@ -19,8 +19,8 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// KubernetesObserverConfig for K8s API-based container observer
-type KubernetesObserverConfig struct {
+// APIObserverConfig for K8s API-based container observer
+type APIObserverConfig struct {
 	Clientset kubernetes.Interface
 	Namespace string // "" = all namespaces
 	Emitter   domain.Emitter
@@ -32,7 +32,7 @@ type KubernetesObserverConfig struct {
 // - Container types (init, main, ephemeral)
 // - K8s-specific failure reasons (ImagePullBackOff, etc.)
 // - Cross-node visibility without eBPF deployment
-type KubernetesObserver struct {
+type APIObserver struct {
 	name      string
 	namespace string
 	clientset kubernetes.Interface
@@ -47,7 +47,7 @@ type KubernetesObserver struct {
 }
 
 // NewKubernetesObserver creates a new K8s API-based container observer
-func NewKubernetesObserver(name string, cfg KubernetesObserverConfig) (*KubernetesObserver, error) {
+func NewAPIObserver(name string, cfg APIObserverConfig) (*APIObserver, error) {
 	// Validate config
 	if cfg.Clientset == nil {
 		return nil, fmt.Errorf("clientset is required")
@@ -103,7 +103,7 @@ func NewKubernetesObserver(name string, cfg KubernetesObserverConfig) (*Kubernet
 	// Create pod informer
 	informer := informerFactory.Core().V1().Pods().Informer()
 
-	observer := &KubernetesObserver{
+	observer := &APIObserver{
 		name:      name,
 		namespace: cfg.Namespace,
 		clientset: cfg.Clientset,
@@ -120,7 +120,7 @@ func NewKubernetesObserver(name string, cfg KubernetesObserverConfig) (*Kubernet
 }
 
 // Start starts the Kubernetes observer
-func (o *KubernetesObserver) Start(ctx context.Context) error {
+func (o *APIObserver) Start(ctx context.Context) error {
 	// Register update handler
 	o.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
@@ -148,7 +148,7 @@ func (o *KubernetesObserver) Start(ctx context.Context) error {
 }
 
 // Stop stops the Kubernetes observer
-func (o *KubernetesObserver) Stop() error {
+func (o *APIObserver) Stop() error {
 	if o.stopCh != nil {
 		close(o.stopCh)
 		o.stopCh = nil
@@ -157,12 +157,12 @@ func (o *KubernetesObserver) Stop() error {
 }
 
 // IsHealthy returns true if the observer is ready to run or running
-func (o *KubernetesObserver) IsHealthy() bool {
+func (o *APIObserver) IsHealthy() bool {
 	return o.stopCh != nil
 }
 
 // handleUpdate processes pod update events
-func (o *KubernetesObserver) handleUpdate(oldPod, newPod *corev1.Pod) {
+func (o *APIObserver) handleUpdate(oldPod, newPod *corev1.Pod) {
 	if oldPod == nil || newPod == nil {
 		return
 	}
@@ -181,7 +181,7 @@ func (o *KubernetesObserver) handleUpdate(oldPod, newPod *corev1.Pod) {
 }
 
 // checkContainers compares container statuses and emits events for failures
-func (o *KubernetesObserver) checkContainers(oldPod, newPod *corev1.Pod, oldStatuses, newStatuses []corev1.ContainerStatus) {
+func (o *APIObserver) checkContainers(oldPod, newPod *corev1.Pod, oldStatuses, newStatuses []corev1.ContainerStatus) {
 	// Build map of old statuses for lookup
 	oldStatusMap := make(map[string]*corev1.ContainerStatus)
 	for i := range oldStatuses {

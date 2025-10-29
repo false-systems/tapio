@@ -15,7 +15,7 @@ import (
 
 // TestObserver_RunStopsOnContextCancellation verifies graceful shutdown
 func TestObserver_RunStopsOnContextCancellation(t *testing.T) {
-	observer := NewObserver("shutdown-test")
+	observer := NewRuntimeObserver("shutdown-test")
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -44,7 +44,7 @@ func TestObserver_RunStopsOnContextCancellation(t *testing.T) {
 
 // TestObserver_RunFailsIfNotStarted verifies Run requires Start
 func TestObserver_RunFailsIfNotStarted(t *testing.T) {
-	observer := NewObserver("not-started-test")
+	observer := NewRuntimeObserver("not-started-test")
 	ctx := context.Background()
 
 	err := observer.Run(ctx)
@@ -54,7 +54,7 @@ func TestObserver_RunFailsIfNotStarted(t *testing.T) {
 
 // TestObserver_RunEmitsEvents verifies event processing
 func TestObserver_RunEmitsEvents(t *testing.T) {
-	observer := NewObserver("emit-test")
+	observer := NewRuntimeObserver("emit-test")
 	observer.started = true
 
 	// Create event channel for testing
@@ -84,7 +84,7 @@ func TestObserver_RunEmitsEvents(t *testing.T) {
 
 // TestObserver_SetEventChannel verifies channel configuration
 func TestObserver_SetEventChannel(t *testing.T) {
-	observer := NewObserver("channel-test")
+	observer := NewRuntimeObserver("channel-test")
 
 	ch := make(chan *domain.ObserverEvent, 100)
 	observer.SetEventChannel(ch)
@@ -94,7 +94,7 @@ func TestObserver_SetEventChannel(t *testing.T) {
 
 // TestObserver_RunWithNilRingReader verifies error handling
 func TestObserver_RunWithNilRingReader(t *testing.T) {
-	observer := NewObserver("nil-ring-test")
+	observer := NewRuntimeObserver("nil-ring-test")
 	observer.started = true
 	observer.ringReader = nil
 

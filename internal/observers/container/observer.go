@@ -21,7 +21,7 @@ type tracepointLink struct {
 }
 
 // Observer monitors container lifecycle events
-type Observer struct {
+type RuntimeObserver struct {
 	name          string
 	oomProcessor  *OOMProcessor
 	exitProcessor *ExitProcessor
@@ -32,9 +32,9 @@ type Observer struct {
 	links         []tracepointLink
 }
 
-// NewObserver creates a new container observer
-func NewObserver(name string) *Observer {
-	return &Observer{
+// NewRuntimeObserver creates a new runtime container observer
+func NewRuntimeObserver(name string) *RuntimeObserver {
+	return &RuntimeObserver{
 		name:          name,
 		oomProcessor:  NewOOMProcessor(),
 		exitProcessor: NewExitProcessor(),
@@ -43,7 +43,7 @@ func NewObserver(name string) *Observer {
 
 // Process dispatches eBPF event to appropriate processor
 // Returns domain event if processed, nil if unrecognized
-func (o *Observer) Process(ctx context.Context, evt ContainerEventBPF) *domain.ObserverEvent {
+func (o *RuntimeObserver) Process(ctx context.Context, evt ContainerEventBPF) *domain.ObserverEvent {
 	// Try OOM processor first
 	if result := o.oomProcessor.Process(ctx, evt); result != nil {
 		return result
@@ -59,7 +59,7 @@ func (o *Observer) Process(ctx context.Context, evt ContainerEventBPF) *domain.O
 }
 
 // Start loads eBPF program and begins monitoring
-func (o *Observer) Start(ctx context.Context, bpfPath string) error {
+func (o *RuntimeObserver) Start(ctx context.Context, bpfPath string) error {
 	if o.started {
 		return fmt.Errorf("observer already started")
 	}
@@ -112,7 +112,7 @@ func (o *Observer) Start(ctx context.Context, bpfPath string) error {
 }
 
 // Stop cleans up eBPF resources
-func (o *Observer) Stop() error {
+func (o *RuntimeObserver) Stop() error {
 	if !o.started {
 		return nil
 	}
@@ -141,12 +141,12 @@ func (o *Observer) Stop() error {
 }
 
 // SetEventChannel configures the channel for emitting domain events
-func (o *Observer) SetEventChannel(ch chan *domain.ObserverEvent) {
+func (o *RuntimeObserver) SetEventChannel(ch chan *domain.ObserverEvent) {
 	o.eventChan = ch
 }
 
 // Run starts the event reading loop
-func (o *Observer) Run(ctx context.Context) error {
+func (o *RuntimeObserver) Run(ctx context.Context) error {
 	if !o.started {
 		return fmt.Errorf("observer not started")
 	}
@@ -189,7 +189,7 @@ func (o *Observer) Run(ctx context.Context) error {
 }
 
 // attachTracepoints attaches eBPF programs to kernel tracepoints
-func (o *Observer) attachTracepoints() error {
+func (o *RuntimeObserver) attachTracepoints() error {
 	if o.collection == nil {
 		return fmt.Errorf("collection not initialized")
 	}
@@ -205,7 +205,7 @@ func (o *Observer) attachTracepoints() error {
 }
 
 // detachTracepoints detaches all tracepoint links
-func (o *Observer) detachTracepoints() error {
+func (o *RuntimeObserver) detachTracepoints() error {
 	if o.links == nil {
 		return nil
 	}

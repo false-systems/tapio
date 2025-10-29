@@ -10,7 +10,7 @@ This package contains **two complementary container observers**, each solving di
 ├──────────────────────────────────────────────────────────────┤
 │                                                               │
 │  ┌─────────────────────┐       ┌──────────────────────────┐ │
-│  │   eBPF Observer     │       │  Kubernetes Observer     │ │
+│  │   Runtime Observer     │       │  API Observer     │ │
 │  │  (observer.go)      │       │  (observer_k8s.go)       │ │
 │  │                     │       │                          │ │
 │  │  • Runtime forensics│       │  • Cluster monitoring    │ │
@@ -22,11 +22,11 @@ This package contains **two complementary container observers**, each solving di
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## 1. eBPF Observer (`observer.go`)
+## 1. Runtime Observer (`observer.go`)
 
 **Purpose**: Runtime forensics and kernel-level container monitoring
 
-**Constructor**: `NewObserver(name string) *Observer`
+**Constructor**: `NewRuntimeObserver(name string) *RuntimeObserver`
 
 **Capabilities**:
 - **Kernel-level monitoring** - eBPF tracepoints capture container exits at the source
@@ -47,7 +47,7 @@ This package contains **two complementary container observers**, each solving di
 
 **Example**:
 ```go
-observer := NewObserver("container-forensics")
+observer := NewRuntimeObserver("container-forensics")
 err := observer.Start(ctx, "/path/to/container_monitor.o")
 // Start Run() goroutine to process eBPF events
 go observer.Run(ctx)
@@ -65,11 +65,11 @@ domain.ContainerEventData{
 }
 ```
 
-## 2. Kubernetes Observer (`observer_k8s.go`)
+## 2. API Observer (`observer_k8s.go`)
 
 **Purpose**: Cluster-level container monitoring via K8s API
 
-**Constructor**: `NewKubernetesObserver(name string, cfg KubernetesObserverConfig) (*KubernetesObserver, error)`
+**Constructor**: `NewAPIObserver(name string, cfg APIObserverConfig) (*APIObserver, error)`
 
 **Capabilities**:
 - **K8s API integration** - Uses Informers to watch Pod updates
@@ -91,12 +91,12 @@ domain.ContainerEventData{
 
 **Example**:
 ```go
-cfg := KubernetesObserverConfig{
+cfg := APIObserverConfig{
     Clientset: k8sClient,
     Namespace: "production",  // or "" for all namespaces
     Emitter:   natsEmitter,
 }
-observer, err := NewKubernetesObserver("container-k8s", cfg)
+observer, err := NewAPIObserver("container-k8s", cfg)
 err = observer.Start(ctx)
 // Informer runs in background
 ```
@@ -121,7 +121,7 @@ domain.ContainerEventData{
 
 ## Comparison Matrix
 
-| Feature                   | eBPF Observer      | Kubernetes Observer  |
+| Feature                   | Runtime Observer      | API Observer  |
 |---------------------------|-------------------|---------------------|
 | **Monitoring Level**      | Kernel (eBPF)     | K8s API (Informer)  |
 | **Pod Context**           | ❌ No             | ✅ Yes              |
@@ -136,13 +136,13 @@ domain.ContainerEventData{
 
 ## When to Use Which?
 
-### Use eBPF Observer When:
+### Use Runtime Observer When:
 - Root cause analysis is critical
 - Need forensic details (PID, cgroup, memory)
 - Performance debugging (low latency required)
 - Already running DaemonSets on every node
 
-### Use Kubernetes Observer When:
+### Use API Observer When:
 - Cluster-wide monitoring is needed
 - Image pull failures are important
 - Pod context (namespace, labels) is required
@@ -198,14 +198,14 @@ When running both observers simultaneously, you'll receive **complementary event
 
 Each observer has dedicated test files:
 
-**eBPF Observer Tests**:
+**Runtime Observer Tests**:
 - `observer_e2e_test.go` - End-to-end workflow
 - `observer_integration_test.go` - BPF loading and ring buffer
 - `observer_system_test.go` - Linux-specific system tests
 - `processor_oom_test.go` - OOM detection logic
 - `processor_exit_test.go` - Exit classification logic
 
-**Kubernetes Observer Tests**:
+**API Observer Tests**:
 - `observer_k8s_test.go` - K8s API integration tests
 
 **Shared Tests**:
@@ -216,13 +216,13 @@ Each observer has dedicated test files:
 
 Both observers emit OpenTelemetry metrics:
 
-**eBPF Observer**:
+**Runtime Observer**:
 ```
 tapio.observer.container.events_processed_total{source="ebpf"}
 tapio.observer.container.errors_total{source="ebpf"}
 ```
 
-**Kubernetes Observer**:
+**API Observer**:
 ```
 tapio.observer.container.k8s.events_processed_total
 tapio.observer.container.k8s.errors_total
