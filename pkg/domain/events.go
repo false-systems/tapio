@@ -197,13 +197,28 @@ type KernelEventData struct {
 
 // ContainerEventData - container lifecycle events
 type ContainerEventData struct {
+	// Identity
 	ContainerID   string `json:"container_id,omitempty"`
 	ContainerName string `json:"container_name,omitempty"`
-	ImageName     string `json:"image_name,omitempty"`
-	ImageTag      string `json:"image_tag,omitempty"`
-	ExitCode      int32  `json:"exit_code,omitempty"`
-	State         string `json:"state,omitempty"` // running, stopped, paused
-	RestartCount  int32  `json:"restart_count,omitempty"`
+	ContainerType string `json:"container_type,omitempty"` // init, main, sidecar, ephemeral
+	PodName       string `json:"pod_name,omitempty"`
+	PodNamespace  string `json:"pod_namespace,omitempty"`
+	NodeName      string `json:"node_name,omitempty"`
+
+	// Image
+	Image     string `json:"image,omitempty"`      // Full image (for backward compat, deprecated)
+	ImageName string `json:"image_name,omitempty"` // Image name without tag
+	ImageTag  string `json:"image_tag,omitempty"`  // Image tag
+
+	// State
+	State        string `json:"state,omitempty"`         // Waiting, Running, Terminated
+	Reason       string `json:"reason,omitempty"`        // OOMKilled, Error, ErrImagePull, etc
+	Message      string `json:"message,omitempty"`       // Human-readable message
+	RestartCount int32  `json:"restart_count,omitempty"` // Number of restarts
+
+	// Termination details
+	ExitCode int32 `json:"exit_code,omitempty"` // Exit code if terminated
+	Signal   int32 `json:"signal,omitempty"`    // Signal if killed
 }
 
 // K8sEventData - Kubernetes API events
