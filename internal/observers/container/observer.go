@@ -70,6 +70,48 @@ func NewContainerObserver(name string, cfg Config) (*Observer, error) {
 	return observer, nil
 }
 
+// Start starts the container observer
+func (o *Observer) Start(ctx context.Context) error {
+	// Register update handler
+	o.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldPod, ok := oldObj.(*corev1.Pod)
+			if !ok {
+				return
+			}
+			newPod, ok := newObj.(*corev1.Pod)
+			if !ok {
+				return
+			}
+			o.handleUpdate(oldPod, newPod)
+		},
+	})
+
+	// Start informer (non-blocking)
+	go o.informer.Run(o.stopCh)
+
+	// Wait for cache sync
+	if !cache.WaitForCacheSync(ctx.Done(), o.informer.HasSynced) {
+		return fmt.Errorf("failed to sync informer cache")
+	}
+
+	return nil
+}
+
+// Stop stops the container observer
+func (o *Observer) Stop() error {
+	if o.stopCh != nil {
+		close(o.stopCh)
+		o.stopCh = nil
+	}
+	return nil
+}
+
+// IsHealthy returns true if the observer is ready to run or running
+func (o *Observer) IsHealthy() bool {
+	return o.stopCh != nil
+}
+
 // handleUpdate processes pod update events
 func (o *Observer) handleUpdate(oldPod, newPod *corev1.Pod) {
 	if oldPod == nil || newPod == nil {

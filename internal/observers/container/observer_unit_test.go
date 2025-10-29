@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -576,4 +577,76 @@ func createPodWithContainer(name, namespace, containerName, state, reason string
 		},
 	}
 	return pod
+}
+
+// TDD Cycle 8: Start/Stop lifecycle
+
+func TestStart_Success(t *testing.T) {
+	// Start observer successfully
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test", config)
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err = observer.Start(ctx)
+	assert.NoError(t, err)
+
+	// Stop observer
+	err = observer.Stop()
+	assert.NoError(t, err)
+}
+
+func TestStop_WithoutStart(t *testing.T) {
+	// Calling Stop without Start should not panic
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test", config)
+	assert.NoError(t, err)
+
+	err = observer.Stop()
+	assert.NoError(t, err) // Should be idempotent
+}
+
+func TestIsHealthy(t *testing.T) {
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test", config)
+	assert.NoError(t, err)
+
+	// Before start: healthy (not started yet)
+	assert.True(t, observer.IsHealthy())
+
+	// After start: healthy
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	observer.Start(ctx)
+	assert.True(t, observer.IsHealthy())
+
+	// After stop: not healthy
+	observer.Stop()
+	assert.False(t, observer.IsHealthy())
 }
