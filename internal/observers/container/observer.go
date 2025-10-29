@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -67,6 +68,86 @@ func NewContainerObserver(name string, cfg Config) (*Observer, error) {
 	}
 
 	return observer, nil
+}
+
+// handleUpdate processes pod update events
+func (o *Observer) handleUpdate(oldPod, newPod *corev1.Pod) {
+	if oldPod == nil || newPod == nil {
+		return
+	}
+
+	// Check all container types
+	o.checkContainers(oldPod, newPod, oldPod.Status.InitContainerStatuses, newPod.Status.InitContainerStatuses)
+	o.checkContainers(oldPod, newPod, oldPod.Status.ContainerStatuses, newPod.Status.ContainerStatuses)
+	o.checkContainers(oldPod, newPod, oldPod.Status.EphemeralContainerStatuses, newPod.Status.EphemeralContainerStatuses)
+}
+
+// checkContainers compares container statuses and emits events for failures
+func (o *Observer) checkContainers(oldPod, newPod *corev1.Pod, oldStatuses, newStatuses []corev1.ContainerStatus) {
+	// Build map of old statuses for lookup
+	oldStatusMap := make(map[string]*corev1.ContainerStatus)
+	for i := range oldStatuses {
+		oldStatusMap[oldStatuses[i].Name] = &oldStatuses[i]
+	}
+
+	// Check each new status
+	for i := range newStatuses {
+		newStatus := &newStatuses[i]
+		oldStatus := oldStatusMap[newStatus.Name]
+
+		// Detect failures
+		hasFailure := detectOOMKill(newStatus) || detectCrash(newStatus) || detectImagePullFailure(newStatus)
+		if !hasFailure {
+			continue
+		}
+
+		// Check if state changed (don't re-emit for same failure)
+		if oldStatus != nil && statesEqual(oldStatus, newStatus) {
+			continue
+		}
+
+		// Create and emit event
+		event := createDomainEvent(newPod, newStatus)
+		if event != nil {
+			ctx := context.Background()
+			o.emitter.Emit(ctx, event)
+		}
+	}
+}
+
+// statesEqual checks if two container statuses have the same state
+func statesEqual(old, new *corev1.ContainerStatus) bool {
+	// Compare state types
+	oldState := getStateString(old)
+	newState := getStateString(new)
+	if oldState != newState {
+		return false
+	}
+
+	// Compare reasons (for Waiting and Terminated states)
+	if old.State.Waiting != nil && new.State.Waiting != nil {
+		return old.State.Waiting.Reason == new.State.Waiting.Reason
+	}
+	if old.State.Terminated != nil && new.State.Terminated != nil {
+		return old.State.Terminated.Reason == new.State.Terminated.Reason &&
+			old.State.Terminated.ExitCode == new.State.Terminated.ExitCode
+	}
+
+	return true
+}
+
+// getStateString returns the state as a string
+func getStateString(status *corev1.ContainerStatus) string {
+	if status.State.Waiting != nil {
+		return "Waiting"
+	}
+	if status.State.Running != nil {
+		return "Running"
+	}
+	if status.State.Terminated != nil {
+		return "Terminated"
+	}
+	return ""
 }
 
 // detectOOMKill returns true if the container was killed due to out-of-memory.

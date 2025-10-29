@@ -449,3 +449,131 @@ func (e *fakeEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) err
 	e.events = append(e.events, event)
 	return nil
 }
+
+// TDD Cycle 7: handleUpdate with event emission
+
+func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
+	// Pod updated: container OOMKilled
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test", config)
+	assert.NoError(t, err)
+
+	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
+	newPod := createPodWithContainer("web-7d4b5", "default", "app", "Terminated", "OOMKilled", 137)
+
+	observer.handleUpdate(oldPod, newPod)
+
+	assert.Len(t, emitter.events, 1, "Should emit 1 event")
+	event := emitter.events[0]
+	assert.Equal(t, "container", event.Type)
+	assert.Equal(t, "container_oom_killed", event.Subtype)
+	assert.Equal(t, "app", event.ContainerData.ContainerName)
+}
+
+func TestHandleUpdate_NoChange(t *testing.T) {
+	// Pod updated but container state unchanged
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test", config)
+	assert.NoError(t, err)
+
+	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
+	newPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
+
+	observer.handleUpdate(oldPod, newPod)
+
+	assert.Len(t, emitter.events, 0, "Should not emit event when no change")
+}
+
+func TestHandleUpdate_MultipleContainers(t *testing.T) {
+	// Pod with 2 containers: 1 crashes, 1 OK
+	emitter := &fakeEmitter{}
+	clientset := fake.NewSimpleClientset()
+
+	config := Config{
+		Clientset: clientset,
+		Namespace: "default",
+		Emitter:   emitter,
+	}
+
+	observer, err := NewContainerObserver("test", config)
+	assert.NoError(t, err)
+
+	oldPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "web-7d4b5", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			Containers: []corev1.Container{
+				{Name: "app", Image: "nginx:1.21"},
+				{Name: "sidecar", Image: "envoy:1.0"},
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				*createContainerStatus("app", "Running", "", 0),
+				*createContainerStatus("sidecar", "Running", "", 0),
+			},
+		},
+	}
+
+	newPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "web-7d4b5", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			Containers: []corev1.Container{
+				{Name: "app", Image: "nginx:1.21"},
+				{Name: "sidecar", Image: "envoy:1.0"},
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				*createContainerStatus("app", "Running", "", 0),
+				*createContainerStatus("sidecar", "Terminated", "Error", 1),
+			},
+		},
+	}
+
+	observer.handleUpdate(oldPod, newPod)
+
+	assert.Len(t, emitter.events, 1, "Should emit 1 event for crashed sidecar")
+	event := emitter.events[0]
+	assert.Equal(t, "container_crashed", event.Subtype)
+	assert.Equal(t, "sidecar", event.ContainerData.ContainerName)
+}
+
+// Helper to create pod with single container
+func createPodWithContainer(name, namespace, containerName, state, reason string, exitCode int32) *corev1.Pod {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			Containers: []corev1.Container{
+				{Name: containerName, Image: "app:v1"},
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				*createContainerStatus(containerName, state, reason, exitCode),
+			},
+		},
+	}
+	return pod
+}
