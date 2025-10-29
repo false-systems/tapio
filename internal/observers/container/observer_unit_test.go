@@ -242,3 +242,122 @@ func TestGetContainerType_NotFound(t *testing.T) {
 	containerType := getContainerType(pod, "nonexistent")
 	assert.Equal(t, "", containerType, "Should return empty string for nonexistent container")
 }
+
+// TDD Cycle 5: Create domain events
+
+func TestCreateDomainEvent_OOMKilled(t *testing.T) {
+	// Container OOMKilled
+	status := createContainerStatus("app", "Terminated", "OOMKilled", 137)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "web-7d4b5",
+			Namespace: "production",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			Containers: []corev1.Container{
+				{Name: "app", Image: "nginx:1.21"},
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{*status},
+		},
+	}
+
+	event := createDomainEvent(pod, status)
+
+	assert.NotNil(t, event)
+	assert.Equal(t, "container", event.Type)
+	assert.Equal(t, "container_oom_killed", event.Subtype)
+	assert.Equal(t, "container-observer", event.Source)
+	assert.NotNil(t, event.ContainerData)
+	assert.Equal(t, "app", event.ContainerData.ContainerName)
+	assert.Equal(t, "main", event.ContainerData.ContainerType)
+	assert.Equal(t, "web-7d4b5", event.ContainerData.PodName)
+	assert.Equal(t, "production", event.ContainerData.PodNamespace)
+	assert.Equal(t, "node-1", event.ContainerData.NodeName)
+	assert.Equal(t, "nginx:1.21", event.ContainerData.Image)
+	assert.Equal(t, "Terminated", event.ContainerData.State)
+	assert.Equal(t, "OOMKilled", event.ContainerData.Reason)
+	assert.Equal(t, int32(137), event.ContainerData.ExitCode)
+}
+
+func TestCreateDomainEvent_Crashed(t *testing.T) {
+	// Container crashed with exit code 1
+	status := createContainerStatus("worker", "Terminated", "Error", 1)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "worker-abc123",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-2",
+			Containers: []corev1.Container{
+				{Name: "worker", Image: "worker:v2"},
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{*status},
+		},
+	}
+
+	event := createDomainEvent(pod, status)
+
+	assert.NotNil(t, event)
+	assert.Equal(t, "container_crashed", event.Subtype)
+	assert.Equal(t, int32(1), event.ContainerData.ExitCode)
+	assert.Equal(t, "Error", event.ContainerData.Reason)
+}
+
+func TestCreateDomainEvent_ImagePullFailed(t *testing.T) {
+	// Image pull failure
+	status := createContainerStatus("api", "Waiting", "ErrImagePull", 0)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api-xyz789",
+			Namespace: "production",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-3",
+			Containers: []corev1.Container{
+				{Name: "api", Image: "api:latest"},
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{*status},
+		},
+	}
+
+	event := createDomainEvent(pod, status)
+
+	assert.NotNil(t, event)
+	assert.Equal(t, "container_image_pull_failed", event.Subtype)
+	assert.Equal(t, "Waiting", event.ContainerData.State)
+	assert.Equal(t, "ErrImagePull", event.ContainerData.Reason)
+}
+
+func TestCreateDomainEvent_InitContainer(t *testing.T) {
+	// Init container crashed
+	status := createContainerStatus("init-migrate", "Terminated", "Error", 1)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-def456",
+			Namespace: "production",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			InitContainers: []corev1.Container{
+				{Name: "init-migrate", Image: "migrate:v1"},
+			},
+		},
+		Status: corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{*status},
+		},
+	}
+
+	event := createDomainEvent(pod, status)
+
+	assert.NotNil(t, event)
+	assert.Equal(t, "init", event.ContainerData.ContainerType)
+	assert.Equal(t, "init-migrate", event.ContainerData.ContainerName)
+}

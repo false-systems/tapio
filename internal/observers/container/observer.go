@@ -1,7 +1,12 @@
 package container
 
 import (
+	"time"
+
+	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // detectOOMKill returns true if the container was killed due to out-of-memory.
@@ -115,4 +120,88 @@ func getContainerType(pod *corev1.Pod, containerName string) string {
 
 	// Not found
 	return ""
+}
+
+// createDomainEvent creates an ObserverEvent from pod and container status.
+// Determines event subtype based on failure type (OOMKill, crash, image pull).
+func createDomainEvent(pod *corev1.Pod, status *corev1.ContainerStatus) *domain.ObserverEvent {
+	if pod == nil || status == nil {
+		return nil
+	}
+
+	// Determine subtype based on failure type
+	subtype := "container_unknown"
+	if detectOOMKill(status) {
+		subtype = "container_oom_killed"
+	} else if detectCrash(status) {
+		subtype = "container_crashed"
+	} else if detectImagePullFailure(status) {
+		subtype = "container_image_pull_failed"
+	}
+
+	// Extract container type (init, main, ephemeral)
+	containerType := getContainerType(pod, status.Name)
+
+	// Find container spec to get image
+	var image string
+	for _, c := range pod.Spec.InitContainers {
+		if c.Name == status.Name {
+			image = c.Image
+			break
+		}
+	}
+	if image == "" {
+		for _, c := range pod.Spec.Containers {
+			if c.Name == status.Name {
+				image = c.Image
+				break
+			}
+		}
+	}
+
+	// Extract state and details
+	state := ""
+	reason := ""
+	message := ""
+	exitCode := int32(0)
+	signal := int32(0)
+
+	if status.State.Waiting != nil {
+		state = "Waiting"
+		reason = status.State.Waiting.Reason
+		message = status.State.Waiting.Message
+	} else if status.State.Running != nil {
+		state = "Running"
+	} else if status.State.Terminated != nil {
+		state = "Terminated"
+		reason = status.State.Terminated.Reason
+		message = status.State.Terminated.Message
+		exitCode = status.State.Terminated.ExitCode
+		signal = status.State.Terminated.Signal
+	}
+
+	// Create event
+	event := &domain.ObserverEvent{
+		ID:        uuid.New().String(),
+		Type:      "container",
+		Subtype:   subtype,
+		Source:    "container-observer",
+		Timestamp: time.Now(),
+		ContainerData: &domain.ContainerEventData{
+			ContainerName: status.Name,
+			ContainerType: containerType,
+			PodName:       pod.Name,
+			PodNamespace:  pod.Namespace,
+			NodeName:      pod.Spec.NodeName,
+			Image:         image,
+			State:         state,
+			Reason:        reason,
+			Message:       message,
+			RestartCount:  status.RestartCount,
+			ExitCode:      exitCode,
+			Signal:        signal,
+		},
+	}
+
+	return event
 }
