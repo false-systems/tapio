@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package container
+package containerruntime
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 // TestObserver_StartWithInvalidBPFPath verifies error handling for invalid BPF path
 func TestObserver_StartWithInvalidBPFPath(t *testing.T) {
-	observer := NewObserver("test-observer")
+	observer := NewRuntimeObserver("test-observer")
 	ctx := context.Background()
 
 	// Try to start with non-existent BPF object
@@ -24,7 +24,7 @@ func TestObserver_StartWithInvalidBPFPath(t *testing.T) {
 
 // TestObserver_StopWithoutStart verifies Stop is safe without Start
 func TestObserver_StopWithoutStart(t *testing.T) {
-	observer := NewObserver("test-observer")
+	observer := NewRuntimeObserver("test-observer")
 
 	// Stop without Start should not panic
 	err := observer.Stop()
@@ -33,7 +33,7 @@ func TestObserver_StopWithoutStart(t *testing.T) {
 
 // TestObserver_StopCleansUpResources verifies proper cleanup
 func TestObserver_StopCleansUpResources(t *testing.T) {
-	observer := NewObserver("test-observer")
+	observer := NewRuntimeObserver("test-observer")
 
 	// Manually set cleanup state (simulating started observer)
 	observer.started = true
@@ -46,7 +46,7 @@ func TestObserver_StopCleansUpResources(t *testing.T) {
 
 // TestObserver_StartTwice verifies Start can't be called twice
 func TestObserver_StartTwice(t *testing.T) {
-	observer := NewObserver("test-observer")
+	observer := NewRuntimeObserver("test-observer")
 	observer.started = true // Simulate already started
 
 	ctx := context.Background()
@@ -57,7 +57,7 @@ func TestObserver_StartTwice(t *testing.T) {
 
 // TestObserver_ProcessBeforeStart verifies Process works before Start
 func TestObserver_ProcessBeforeStart(t *testing.T) {
-	observer := NewObserver("test-observer")
+	observer := NewRuntimeObserver("test-observer")
 	ctx := context.Background()
 
 	// Process should work even before Start (processors are initialized in constructor)

@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package container
+package containerruntime
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 // TestObserver_StartAttachesTracepoints verifies tracepoint attachment
 func TestObserver_StartAttachesTracepoints(t *testing.T) {
-	observer := NewObserver("tracepoint-test")
+	observer := NewRuntimeObserver("tracepoint-test")
 	ctx := context.Background()
 
 	bpfPath := "testdata/container_monitor.o"
@@ -37,7 +37,7 @@ func TestObserver_StartAttachesTracepoints(t *testing.T) {
 
 // TestObserver_StopDetachesTracepoints verifies cleanup
 func TestObserver_StopDetachesTracepoints(t *testing.T) {
-	observer := NewObserver("detach-test")
+	observer := NewRuntimeObserver("detach-test")
 
 	// Simulate started with links
 	observer.started = true
@@ -50,7 +50,7 @@ func TestObserver_StopDetachesTracepoints(t *testing.T) {
 
 // TestObserver_StartFailsWithMissingPrograms verifies error handling
 func TestObserver_StartFailsWithMissingPrograms(t *testing.T) {
-	observer := NewObserver("missing-prog-test")
+	observer := NewRuntimeObserver("missing-prog-test")
 	ctx := context.Background()
 
 	// Try with invalid BPF path
@@ -61,7 +61,7 @@ func TestObserver_StartFailsWithMissingPrograms(t *testing.T) {
 
 // TestObserver_AttachTracepoint verifies attachment helper
 func TestObserver_AttachTracepoint(t *testing.T) {
-	observer := NewObserver("attach-helper-test")
+	observer := NewRuntimeObserver("attach-helper-test")
 
 	// Test with nil collection (should handle gracefully)
 	err := observer.attachTracepoints()
@@ -71,7 +71,7 @@ func TestObserver_AttachTracepoint(t *testing.T) {
 
 // TestObserver_DetachTracepoints verifies detachment helper
 func TestObserver_DetachTracepoints(t *testing.T) {
-	observer := NewObserver("detach-helper-test")
+	observer := NewRuntimeObserver("detach-helper-test")
 
 	// Empty links should be safe
 	observer.links = []tracepointLink{}

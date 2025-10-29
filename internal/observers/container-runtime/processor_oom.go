@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package container
+package containerruntime
 
 import (
 	"context"
@@ -10,19 +10,19 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// ExitProcessor handles container exit events from eBPF
-type ExitProcessor struct{}
+// OOMProcessor handles OOM kill events from eBPF
+type OOMProcessor struct{}
 
-// NewExitProcessor creates a new exit event processor
-func NewExitProcessor() *ExitProcessor {
-	return &ExitProcessor{}
+// NewOOMProcessor creates a new OOM event processor
+func NewOOMProcessor() *OOMProcessor {
+	return &OOMProcessor{}
 }
 
-// Process checks if event is container exit and creates domain event
-// Returns nil if event is OOM kill (handled by OOMProcessor)
-func (p *ExitProcessor) Process(ctx context.Context, evt ContainerEventBPF) *domain.ObserverEvent {
-	// Only process exit events (not OOM kills)
-	if evt.Type != EventTypeExit {
+// Process checks if event is OOM kill and creates domain event
+// Returns nil if event is not an OOM kill
+func (p *OOMProcessor) Process(ctx context.Context, evt ContainerEventBPF) *domain.ObserverEvent {
+	// Only process OOM kill events
+	if evt.Type != EventTypeOOMKill {
 		return nil
 	}
 
@@ -30,8 +30,8 @@ func (p *ExitProcessor) Process(ctx context.Context, evt ContainerEventBPF) *dom
 	cgroupPath := nullTerminatedString(evt.CgroupPath[:])
 	containerID := parseContainerID(cgroupPath)
 
-	// Classify exit (not OOM for this processor)
-	classification := ClassifyExit(evt.ExitCode, evt.Signal, false)
+	// Classify exit (always OOM for this processor)
+	classification := ClassifyExit(evt.ExitCode, evt.Signal, true)
 
 	// Create container event data
 	containerData := &domain.ContainerEventData{
@@ -49,7 +49,7 @@ func (p *ExitProcessor) Process(ctx context.Context, evt ContainerEventBPF) *dom
 	// Create domain event
 	return &domain.ObserverEvent{
 		Type:          string(domain.EventTypeContainer),
-		Subtype:       "container_exit",
+		Subtype:       "oom_kill",
 		Timestamp:     time.Unix(0, int64(evt.TimestampNs)),
 		ContainerData: containerData,
 	}
