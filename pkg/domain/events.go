@@ -214,7 +214,7 @@ type ContainerEventData struct {
 	NodeName      string `json:"node_name,omitempty"`
 
 	// Image
-	Image     string `json:"image,omitempty"`      // Full image (for backward compat, deprecated)
+	Image     string `json:"image,omitempty"`      // Deprecated: Use ImageName and ImageTag instead. Will be removed in v2.0.
 	ImageName string `json:"image_name,omitempty"` // Image name without tag
 	ImageTag  string `json:"image_tag,omitempty"`  // Image tag
 
