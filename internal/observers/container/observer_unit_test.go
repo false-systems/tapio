@@ -169,3 +169,76 @@ func TestDetectImagePullFailure_NilStatus(t *testing.T) {
 	imagePullFailed := detectImagePullFailure(nil)
 	assert.False(t, imagePullFailed, "Should handle nil status gracefully")
 }
+
+// TDD Cycle 4: Track init containers
+
+func TestDetectFailures_InitContainer(t *testing.T) {
+	// Init container with OOMKill
+	initStatus := createContainerStatus("init-migrate", "Terminated", "OOMKilled", 137)
+
+	oomKilled := detectOOMKill(initStatus)
+	assert.True(t, oomKilled, "Should detect OOMKill in init container")
+}
+
+func TestDetectFailures_MainContainer(t *testing.T) {
+	// Main container crashed
+	mainStatus := createContainerStatus("app", "Terminated", "Error", 1)
+
+	crashed := detectCrash(mainStatus)
+	assert.True(t, crashed, "Should detect crash in main container")
+}
+
+func TestDetectFailures_SidecarContainer(t *testing.T) {
+	// Sidecar container image pull failure
+	sidecarStatus := createContainerStatus("envoy", "Waiting", "ImagePullBackOff", 0)
+
+	imagePullFailed := detectImagePullFailure(sidecarStatus)
+	assert.True(t, imagePullFailed, "Should detect image pull failure in sidecar")
+}
+
+func TestGetContainerType_InitContainers(t *testing.T) {
+	// Pod with init containers
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{
+				*createContainerStatus("init-1", "Terminated", "Completed", 0),
+				*createContainerStatus("init-2", "Running", "", 0),
+			},
+		},
+	}
+
+	containerType := getContainerType(pod, "init-1")
+	assert.Equal(t, "init", containerType, "Should identify init container")
+
+	containerType = getContainerType(pod, "init-2")
+	assert.Equal(t, "init", containerType, "Should identify second init container")
+}
+
+func TestGetContainerType_MainContainers(t *testing.T) {
+	// Pod with main containers
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				*createContainerStatus("app", "Running", "", 0),
+				*createContainerStatus("sidecar", "Running", "", 0),
+			},
+		},
+	}
+
+	containerType := getContainerType(pod, "app")
+	assert.Equal(t, "main", containerType, "Should identify main container")
+}
+
+func TestGetContainerType_NotFound(t *testing.T) {
+	// Container not found in pod
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				*createContainerStatus("app", "Running", "", 0),
+			},
+		},
+	}
+
+	containerType := getContainerType(pod, "nonexistent")
+	assert.Equal(t, "", containerType, "Should return empty string for nonexistent container")
+}

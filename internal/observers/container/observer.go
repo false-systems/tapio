@@ -84,3 +84,35 @@ func detectImagePullFailure(status *corev1.ContainerStatus) bool {
 
 	return false
 }
+
+// getContainerType returns the type of container ("init", "main", or "")
+// by searching through pod's container status arrays.
+func getContainerType(pod *corev1.Pod, containerName string) string {
+	if pod == nil {
+		return ""
+	}
+
+	// Check init containers
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.Name == containerName {
+			return "init"
+		}
+	}
+
+	// Check main containers
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name == containerName {
+			return "main"
+		}
+	}
+
+	// Check ephemeral containers (future support)
+	for _, status := range pod.Status.EphemeralContainerStatuses {
+		if status.Name == containerName {
+			return "ephemeral"
+		}
+	}
+
+	// Not found
+	return ""
+}
