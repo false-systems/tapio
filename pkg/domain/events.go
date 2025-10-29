@@ -231,11 +231,12 @@ type ContainerEventData struct {
 
 // K8sEventData - Kubernetes API events
 type K8sEventData struct {
-	ResourceKind string `json:"resource_kind,omitempty"` // Deployment, Pod, Service, etc
-	ResourceName string `json:"resource_name,omitempty"`
-	Action       string `json:"action,omitempty"` // created, updated, deleted
-	Reason       string `json:"reason,omitempty"`
-	Message      string `json:"message,omitempty"`
+	ResourceKind      string `json:"resource_kind,omitempty"`      // Deployment, Pod, Service, etc
+	ResourceName      string `json:"resource_name,omitempty"`      // Resource name
+	ResourceNamespace string `json:"resource_namespace,omitempty"` // K8s namespace
+	Action            string `json:"action,omitempty"`             // created, updated, deleted
+	Reason            string `json:"reason,omitempty"`
+	Message           string `json:"message,omitempty"`
 
 	// Deployment specific
 	ImageChanged    bool   `json:"image_changed,omitempty"`

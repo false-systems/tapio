@@ -78,7 +78,7 @@ jobs:
 
       - name: Download eBPF artifacts
         if: always() && needs.build-ebpf.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ebpf-generated
           path: internal/observers/network/bpf/
@@ -114,7 +114,7 @@ jobs:
 
       - name: Download eBPF artifacts
         if: always() && needs.build-ebpf.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ebpf-generated
           path: internal/observers/network/bpf/
@@ -167,7 +167,7 @@ jobs:
           ls -la *.go  # Show generated files
 
       - name: Upload generated eBPF artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ebpf-generated
           path: |
@@ -208,7 +208,7 @@ jobs:
 
       - name: Download eBPF artifacts
         if: always() && needs.build-ebpf.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ebpf-generated
           path: internal/observers/network/bpf/

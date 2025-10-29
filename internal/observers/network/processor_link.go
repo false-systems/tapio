@@ -5,7 +5,9 @@ package network
 
 import (
 	"context"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -57,8 +59,11 @@ func (p *LinkProcessor) createLinkFailureEvent(evt NetworkEventBPF, failureType 
 	}
 
 	return &domain.ObserverEvent{
+		ID:          uuid.New().String(),
 		Type:        string(domain.EventTypeNetwork),
 		Subtype:     "link_failure",
+		Source:      "network",
+		Timestamp:   time.Now(),
 		NetworkData: netData,
 	}
 }
