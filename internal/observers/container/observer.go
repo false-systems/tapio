@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -29,6 +31,11 @@ type Observer struct {
 	informer  cache.SharedIndexInformer
 	emitter   domain.Emitter
 	stopCh    chan struct{}
+
+	// OTEL metrics
+	eventsProcessed  metric.Int64Counter     // events_processed_total
+	errorsTotal      metric.Int64Counter     // errors_total
+	processingTimeMs metric.Float64Histogram // processing_time_ms
 }
 
 // NewContainerObserver creates a new container observer
@@ -39,6 +46,36 @@ func NewContainerObserver(name string, cfg Config) (*Observer, error) {
 	}
 	if cfg.Emitter == nil {
 		return nil, fmt.Errorf("emitter is required")
+	}
+
+	// Create OTEL metrics
+	meter := otel.Meter("tapio.observer.container")
+
+	eventsProcessed, err := meter.Int64Counter(
+		"events_processed_total",
+		metric.WithDescription("Total number of container events processed"),
+		metric.WithUnit("{events}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create events_processed_total counter: %w", err)
+	}
+
+	errorsTotal, err := meter.Int64Counter(
+		"errors_total",
+		metric.WithDescription("Total number of errors while processing container events"),
+		metric.WithUnit("{errors}"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create errors_total counter: %w", err)
+	}
+
+	processingTimeMs, err := meter.Float64Histogram(
+		"processing_time_ms",
+		metric.WithDescription("Container event processing time in milliseconds"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create processing_time_ms histogram: %w", err)
 	}
 
 	// Create informer factory
@@ -65,6 +102,10 @@ func NewContainerObserver(name string, cfg Config) (*Observer, error) {
 		informer:  informer,
 		emitter:   cfg.Emitter,
 		stopCh:    make(chan struct{}),
+
+		eventsProcessed:  eventsProcessed,
+		errorsTotal:      errorsTotal,
+		processingTimeMs: processingTimeMs,
 	}
 
 	return observer, nil
@@ -118,6 +159,13 @@ func (o *Observer) handleUpdate(oldPod, newPod *corev1.Pod) {
 		return
 	}
 
+	// Record processing time
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		o.processingTimeMs.Record(context.Background(), float64(duration.Milliseconds()))
+	}()
+
 	// Check all container types
 	o.checkContainers(oldPod, newPod, oldPod.Status.InitContainerStatuses, newPod.Status.InitContainerStatuses)
 	o.checkContainers(oldPod, newPod, oldPod.Status.ContainerStatuses, newPod.Status.ContainerStatuses)
@@ -152,7 +200,13 @@ func (o *Observer) checkContainers(oldPod, newPod *corev1.Pod, oldStatuses, newS
 		event := createDomainEvent(newPod, newStatus)
 		if event != nil {
 			ctx := context.Background()
-			o.emitter.Emit(ctx, event)
+			if err := o.emitter.Emit(ctx, event); err != nil {
+				// Increment error counter
+				o.errorsTotal.Add(ctx, 1)
+			} else {
+				// Increment success counter
+				o.eventsProcessed.Add(ctx, 1)
+			}
 		}
 	}
 }
