@@ -105,3 +105,28 @@ func TestLinkProcessor_SYNTimeout_IPv6(t *testing.T) {
 	assert.Equal(t, "0:0:0:0:0:0:0:1", domainEvt.NetworkData.SrcIP)
 	assert.Contains(t, domainEvt.NetworkData.DstIP, "2001:db8")
 }
+
+// TestLinkProcessor_SetsRequiredFields verifies ID, Timestamp, Source are set
+// RED PHASE: This test MUST fail before implementation
+func TestLinkProcessor_SetsRequiredFields(t *testing.T) {
+	proc := NewLinkProcessor()
+	require.NotNil(t, proc)
+
+	evt := NetworkEventBPF{
+		OldState: TCP_SYN_SENT,
+		NewState: TCP_CLOSE,
+		SrcIP:    0x0100007f,
+		DstIP:    0x6401a8c0,
+		Family:   AF_INET,
+	}
+
+	ctx := context.Background()
+	domainEvt := proc.Process(ctx, evt)
+
+	require.NotNil(t, domainEvt)
+
+	// RED: These assertions will FAIL until we implement
+	assert.NotEmpty(t, domainEvt.ID, "ID must be set")
+	assert.False(t, domainEvt.Timestamp.IsZero(), "Timestamp must be set")
+	assert.Equal(t, "network", domainEvt.Source, "Source must be 'network'")
+}

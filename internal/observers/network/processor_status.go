@@ -5,7 +5,9 @@ package network
 
 import (
 	"context"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -79,8 +81,11 @@ func (p *StatusProcessor) createHTTPEvent(evt NetworkEventBPF, protocol, subtype
 	}
 
 	return &domain.ObserverEvent{
+		ID:          uuid.New().String(),
 		Type:        string(domain.EventTypeNetwork),
 		Subtype:     subtype,
+		Source:      "network",
+		Timestamp:   time.Now(),
 		NetworkData: netData,
 	}
 }
