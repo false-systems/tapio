@@ -218,7 +218,7 @@ type ContainerEventData struct {
 	ImageName string `json:"image_name,omitempty"` // Image name without tag
 	ImageTag  string `json:"image_tag,omitempty"`  // Image tag
 
-	// State
+	// State (K8s API)
 	State        string `json:"state,omitempty"`         // Waiting, Running, Terminated
 	Reason       string `json:"reason,omitempty"`        // OOMKilled, Error, ErrImagePull, etc
 	Message      string `json:"message,omitempty"`       // Human-readable message
@@ -227,6 +227,14 @@ type ContainerEventData struct {
 	// Termination details
 	ExitCode int32 `json:"exit_code,omitempty"` // Exit code if terminated
 	Signal   int32 `json:"signal,omitempty"`    // Signal if killed
+
+	// eBPF-specific fields (from container observer eBPF probes)
+	PID         uint32   `json:"pid,omitempty"`          // Process ID from eBPF
+	Category    string   `json:"category,omitempty"`     // oom_kill, normal, error (exit classification)
+	Evidence    []string `json:"evidence,omitempty"`     // Diagnostic evidence from exit classification
+	MemoryLimit int64    `json:"memory_limit,omitempty"` // Memory limit in bytes (from cgroup)
+	MemoryUsage int64    `json:"memory_usage,omitempty"` // Memory usage in bytes (from cgroup)
+	CgroupPath  string   `json:"cgroup_path,omitempty"`  // Full cgroup path
 }
 
 // K8sEventData - Kubernetes API events
