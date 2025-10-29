@@ -198,3 +198,32 @@ func TestStatusProcessor_DetectHTTPSConnection_IPv6(t *testing.T) {
 	assert.Equal(t, "0:0:0:0:0:0:0:1", domainEvt.NetworkData.SrcIP)
 	assert.Contains(t, domainEvt.NetworkData.DstIP, "2001:db8")
 }
+
+// TestStatusProcessor_SetsRequiredFields verifies ID, Timestamp, Source are set
+// RED PHASE: This test MUST fail before implementation
+func TestStatusProcessor_SetsRequiredFields(t *testing.T) {
+	proc := NewStatusProcessor()
+	require.NotNil(t, proc)
+
+	evt := NetworkEventBPF{
+		EventType: EventTypeStateChange,
+		Protocol:  IPPROTO_TCP,
+		OldState:  TCP_SYN_SENT,
+		NewState:  TCP_ESTABLISHED,
+		SrcIP:     0x0100007f,
+		DstIP:     0x6401a8c0,
+		SrcPort:   12345,
+		DstPort:   80,
+		Family:    AF_INET,
+	}
+
+	ctx := context.Background()
+	domainEvt := proc.Process(ctx, evt)
+
+	require.NotNil(t, domainEvt)
+
+	// RED: These assertions will FAIL until we implement
+	assert.NotEmpty(t, domainEvt.ID, "ID must be set")
+	assert.False(t, domainEvt.Timestamp.IsZero(), "Timestamp must be set")
+	assert.Equal(t, "network", domainEvt.Source, "Source must be 'network'")
+}
