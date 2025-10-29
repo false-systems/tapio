@@ -124,3 +124,48 @@ func TestDetectCrash_NilStatus(t *testing.T) {
 	crashed := detectCrash(nil)
 	assert.False(t, crashed, "Should handle nil status gracefully")
 }
+
+// TDD Cycle 3: Detect image pull failures
+
+func TestDetectImagePullFailure_ErrImagePull(t *testing.T) {
+	// Container waiting with ErrImagePull reason
+	status := createContainerStatus("app", "Waiting", "ErrImagePull", 0)
+
+	imagePullFailed := detectImagePullFailure(status)
+	assert.True(t, imagePullFailed, "Should detect ErrImagePull")
+}
+
+func TestDetectImagePullFailure_ImagePullBackOff(t *testing.T) {
+	// Container waiting with ImagePullBackOff reason
+	status := createContainerStatus("app", "Waiting", "ImagePullBackOff", 0)
+
+	imagePullFailed := detectImagePullFailure(status)
+	assert.True(t, imagePullFailed, "Should detect ImagePullBackOff")
+}
+
+func TestDetectImagePullFailure_Running(t *testing.T) {
+	// Container is running (image pull succeeded)
+	status := &corev1.ContainerStatus{
+		Name: "app",
+		State: corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{},
+		},
+	}
+
+	imagePullFailed := detectImagePullFailure(status)
+	assert.False(t, imagePullFailed, "Should not detect failure when running")
+}
+
+func TestDetectImagePullFailure_WaitingOtherReason(t *testing.T) {
+	// Container waiting for other reason (not image pull)
+	status := createContainerStatus("app", "Waiting", "ContainerCreating", 0)
+
+	imagePullFailed := detectImagePullFailure(status)
+	assert.False(t, imagePullFailed, "Should not detect failure for other waiting reasons")
+}
+
+func TestDetectImagePullFailure_NilStatus(t *testing.T) {
+	// Defensive: nil status should not panic
+	imagePullFailed := detectImagePullFailure(nil)
+	assert.False(t, imagePullFailed, "Should handle nil status gracefully")
+}

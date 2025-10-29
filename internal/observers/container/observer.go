@@ -60,3 +60,27 @@ func detectCrash(status *corev1.ContainerStatus) bool {
 	// Any other non-zero exit code = crash
 	return true
 }
+
+// detectImagePullFailure returns true if the container failed to pull its image.
+// Checks for:
+// - Reason "ErrImagePull"
+// - Reason "ImagePullBackOff"
+func detectImagePullFailure(status *corev1.ContainerStatus) bool {
+	if status == nil {
+		return false
+	}
+
+	// Image pull failures occur in Waiting state
+	if status.State.Waiting == nil {
+		return false
+	}
+
+	waiting := status.State.Waiting
+
+	// Check for image pull error reasons
+	if waiting.Reason == "ErrImagePull" || waiting.Reason == "ImagePullBackOff" {
+		return true
+	}
+
+	return false
+}
