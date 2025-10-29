@@ -278,7 +278,7 @@ func TestCreateDomainEvent_OOMKilled(t *testing.T) {
 	assert.NotNil(t, event)
 	assert.Equal(t, "container", event.Type)
 	assert.Equal(t, "container_oom_killed", event.Subtype)
-	assert.Equal(t, "container-observer", event.Source)
+	assert.Equal(t, "container-observer-k8s", event.Source)
 	assert.NotNil(t, event.ContainerData)
 	assert.Equal(t, "app", event.ContainerData.ContainerName)
 	assert.Equal(t, "main", event.ContainerData.ContainerType)
@@ -373,18 +373,18 @@ func TestCreateDomainEvent_InitContainer(t *testing.T) {
 
 // TDD Cycle 6: Observer struct and constructor
 
-func TestNewContainerObserver_Success(t *testing.T) {
+func TestNewKubernetesObserver_Success(t *testing.T) {
 	// Create observer with valid config
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test-observer", config)
+	observer, err := NewKubernetesObserver("test-observer", config)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
@@ -393,52 +393,52 @@ func TestNewContainerObserver_Success(t *testing.T) {
 	assert.NotNil(t, observer.informer)
 }
 
-func TestNewContainerObserver_AllNamespaces(t *testing.T) {
+func TestNewKubernetesObserver_AllNamespaces(t *testing.T) {
 	// Empty namespace = watch all namespaces
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test-observer", config)
+	observer, err := NewKubernetesObserver("test-observer", config)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
 	assert.Equal(t, "", observer.namespace)
 }
 
-func TestNewContainerObserver_NilClientset(t *testing.T) {
+func TestNewKubernetesObserver_NilClientset(t *testing.T) {
 	// Nil clientset should return error
 	emitter := &fakeEmitter{}
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: nil,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test-observer", config)
+	observer, err := NewKubernetesObserver("test-observer", config)
 
 	assert.Error(t, err)
 	assert.Nil(t, observer)
 	assert.Contains(t, err.Error(), "clientset")
 }
 
-func TestNewContainerObserver_NilEmitter(t *testing.T) {
+func TestNewKubernetesObserver_NilEmitter(t *testing.T) {
 	// Nil emitter should return error
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   nil,
 	}
 
-	observer, err := NewContainerObserver("test-observer", config)
+	observer, err := NewKubernetesObserver("test-observer", config)
 
 	assert.Error(t, err)
 	assert.Nil(t, observer)
@@ -468,13 +468,13 @@ func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
@@ -494,13 +494,13 @@ func TestHandleUpdate_NoChange(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
@@ -516,13 +516,13 @@ func TestHandleUpdate_MultipleContainers(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	oldPod := &corev1.Pod{
@@ -596,13 +596,13 @@ func TestStart_Success(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -621,13 +621,13 @@ func TestStop_WithoutStart(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	err = observer.Stop()
@@ -638,13 +638,13 @@ func TestIsHealthy(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	// Before start: healthy (not started yet)
@@ -668,13 +668,13 @@ func TestOTELMetrics_Created(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
 
@@ -688,13 +688,13 @@ func TestOTELMetrics_EmitIncrementsCounter(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	// Create pods with OOMKilled container
@@ -717,13 +717,13 @@ func TestOTELMetrics_ErrorIncrementsErrorCounter(t *testing.T) {
 	}
 	clientset := fake.NewSimpleClientset()
 
-	config := Config{
+	config := KubernetesObserverConfig{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
 	}
 
-	observer, err := NewContainerObserver("test", config)
+	observer, err := NewKubernetesObserver("test", config)
 	assert.NoError(t, err)
 
 	// Create pods with crashed container
