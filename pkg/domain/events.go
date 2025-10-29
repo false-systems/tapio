@@ -208,7 +208,7 @@ type ContainerEventData struct {
 	// Identity
 	ContainerID   string `json:"container_id,omitempty"`
 	ContainerName string `json:"container_name,omitempty"`
-	ContainerType string `json:"container_type,omitempty"` // init, main, sidecar, ephemeral
+	ContainerType string `json:"container_type,omitempty"` // init, main, ephemeral
 	PodName       string `json:"pod_name,omitempty"`
 	PodNamespace  string `json:"pod_namespace,omitempty"`
 	NodeName      string `json:"node_name,omitempty"`
