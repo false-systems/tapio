@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -370,6 +371,57 @@ func TestHandleNode_PIDPressure(t *testing.T) {
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "node_pid_pressure", event.Subtype)
 	assert.Equal(t, "PIDPressure", event.NodeData.Condition)
+}
+
+// TDD Cycle 5: Resource tracking (capacity + allocations)
+
+// TestCreateNodeEvent_IncludesResources verifies resource capacity and allocation tracking
+func TestCreateNodeEvent_IncludesResources(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+
+	cfg := Config{
+		Clientset: clientset,
+		Emitter:   emitter,
+	}
+
+	observer, err := NewObserver("test-observer", cfg)
+	require.NoError(t, err)
+
+	// Node with resource capacity
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    *resource.NewMilliQuantity(4000, resource.DecimalSI),        // 4 CPUs
+				corev1.ResourceMemory: *resource.NewQuantity(16*1024*1024*1024, resource.BinarySI), // 16GB
+				corev1.ResourcePods:   *resource.NewQuantity(110, resource.DecimalSI),              // 110 pods
+			},
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    *resource.NewMilliQuantity(3800, resource.DecimalSI),        // 3.8 CPUs
+				corev1.ResourceMemory: *resource.NewQuantity(15*1024*1024*1024, resource.BinarySI), // 15GB
+				corev1.ResourcePods:   *resource.NewQuantity(110, resource.DecimalSI),              // 110 pods
+			},
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	observer.handleNode(ctx, nil, newNode)
+
+	require.Len(t, emitter.events, 1)
+	event := emitter.events[0]
+	require.NotNil(t, event.NodeData)
+
+	// Verify capacity
+	assert.Equal(t, int64(4000), event.NodeData.CPUCapacity)                 // 4000 milliCPU
+	assert.Equal(t, int64(16*1024*1024*1024), event.NodeData.MemoryCapacity) // 16GB
+	assert.Equal(t, int64(110), event.NodeData.PodCapacity)                  // 110 pods
 }
 
 // Mock emitter for testing

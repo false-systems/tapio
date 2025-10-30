@@ -213,6 +213,11 @@ func (o *Observer) createNodeEvent(node *corev1.Node, condition *corev1.NodeCond
 		subtype = "node_network_unavailable"
 	}
 
+	// Extract resource capacity and allocations
+	cpuCapacity := node.Status.Capacity.Cpu().MilliValue()
+	memoryCapacity := node.Status.Capacity.Memory().Value()
+	podCapacity := node.Status.Capacity.Pods().Value()
+
 	return &domain.ObserverEvent{
 		Type:      "node",
 		Subtype:   subtype,
@@ -224,6 +229,10 @@ func (o *Observer) createNodeEvent(node *corev1.Node, condition *corev1.NodeCond
 			Status:    string(condition.Status),
 			Reason:    condition.Reason,
 			Message:   condition.Message,
+			// Resource capacity
+			CPUCapacity:    cpuCapacity,
+			MemoryCapacity: memoryCapacity,
+			PodCapacity:    podCapacity,
 		},
 	}
 }
