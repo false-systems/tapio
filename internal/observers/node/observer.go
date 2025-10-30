@@ -101,13 +101,26 @@ func (o *Observer) Start(ctx context.Context) error {
 	// Register event handlers
 	_, err := o.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			// Handler will be implemented in Cycle 3
+			node, ok := obj.(*corev1.Node)
+			if !ok {
+				return
+			}
+			o.handleNode(ctx, nil, node)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			// Handler will be implemented in Cycle 3
+			oldNode, ok := oldObj.(*corev1.Node)
+			if !ok {
+				return
+			}
+			newNode, ok := newObj.(*corev1.Node)
+			if !ok {
+				return
+			}
+			o.handleNode(ctx, oldNode, newNode)
 		},
 		DeleteFunc: func(obj interface{}) {
-			// Handler will be implemented in Cycle 3
+			// Node deletions are tracked but not emitted as events (design decision)
+			// We only care about health/pressure changes while node exists
 		},
 	})
 	if err != nil {
