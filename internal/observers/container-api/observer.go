@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package containerapi
 
@@ -9,81 +8,59 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
+	"github.com/rs/zerolog"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// APIObserverConfig for K8s API-based container observer
-type APIObserverConfig struct {
+// Config for K8s API-based container observer
+type Config struct {
 	Clientset kubernetes.Interface
 	Namespace string // "" = all namespaces
-	Emitter   domain.Emitter
+	Emitter   base.Emitter
 }
 
-// KubernetesObserver watches containers via Kubernetes API for cluster-level monitoring
+// Validate checks that config is valid
+func (c *Config) Validate() error {
+	if c.Clientset == nil {
+		return fmt.Errorf("clientset is required")
+	}
+	if c.Emitter == nil {
+		return fmt.Errorf("emitter is required")
+	}
+	return nil
+}
+
+// APIObserver watches containers via Kubernetes API for cluster-level monitoring
 // Complements eBPF observer by providing:
 // - Pod context (namespace, labels, annotations)
 // - Container types (init, main, ephemeral)
 // - K8s-specific failure reasons (ImagePullBackOff, etc.)
 // - Cross-node visibility without eBPF deployment
 type APIObserver struct {
-	name      string
-	namespace string
-	clientset kubernetes.Interface
-	informer  cache.SharedIndexInformer
-	emitter   domain.Emitter
-	stopCh    chan struct{}
-
-	// OTEL metrics
-	eventsProcessed  metric.Int64Counter     // events_processed_total
-	errorsTotal      metric.Int64Counter     // errors_total
-	processingTimeMs metric.Float64Histogram // processing_time_ms
+	*base.BaseObserver
+	config   Config
+	informer cache.SharedIndexInformer
+	emitter  base.Emitter
+	stopCh   chan struct{}
 }
 
-// NewKubernetesObserver creates a new K8s API-based container observer
-func NewAPIObserver(name string, cfg APIObserverConfig) (*APIObserver, error) {
+// NewAPIObserver creates a new K8s API-based container observer
+func NewAPIObserver(name string, cfg Config) (*APIObserver, error) {
 	// Validate config
-	if cfg.Clientset == nil {
-		return nil, fmt.Errorf("clientset is required")
-	}
-	if cfg.Emitter == nil {
-		return nil, fmt.Errorf("emitter is required")
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Create OTEL metrics
-	meter := otel.Meter("tapio.observer.container.k8s")
-
-	eventsProcessed, err := meter.Int64Counter(
-		"events_processed_total",
-		metric.WithDescription("Total number of container events processed"),
-		metric.WithUnit("{events}"),
-	)
+	// Create base observer
+	baseObs, err := base.NewBaseObserver(name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create events_processed_total counter: %w", err)
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		"errors_total",
-		metric.WithDescription("Total number of errors while processing container events"),
-		metric.WithUnit("{errors}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create errors_total counter: %w", err)
-	}
-
-	processingTimeMs, err := meter.Float64Histogram(
-		"processing_time_ms",
-		metric.WithDescription("Container event processing time in milliseconds"),
-		metric.WithUnit("ms"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create processing_time_ms histogram: %w", err)
+		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
 	// Create informer factory
@@ -103,36 +80,36 @@ func NewAPIObserver(name string, cfg APIObserverConfig) (*APIObserver, error) {
 	// Create pod informer
 	informer := informerFactory.Core().V1().Pods().Informer()
 
-	observer := &APIObserver{
-		name:      name,
-		namespace: cfg.Namespace,
-		clientset: cfg.Clientset,
-		informer:  informer,
-		emitter:   cfg.Emitter,
-		stopCh:    make(chan struct{}),
-
-		eventsProcessed:  eventsProcessed,
-		errorsTotal:      errorsTotal,
-		processingTimeMs: processingTimeMs,
-	}
-
-	return observer, nil
+	return &APIObserver{
+		BaseObserver: baseObs,
+		config:       cfg,
+		informer:     informer,
+		emitter:      cfg.Emitter,
+		stopCh:       make(chan struct{}),
+	}, nil
 }
 
 // Start starts the Kubernetes observer
 func (o *APIObserver) Start(ctx context.Context) error {
+	logger := o.Logger(ctx)
+	logger.Info().
+		Str("namespace", o.config.Namespace).
+		Msg("Starting container-api observer")
+
 	// Register update handler
 	o.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			oldPod, ok := oldObj.(*corev1.Pod)
 			if !ok {
+				logger.Warn().Msg("Failed to cast oldObj to Pod")
 				return
 			}
 			newPod, ok := newObj.(*corev1.Pod)
 			if !ok {
+				logger.Warn().Msg("Failed to cast newObj to Pod")
 				return
 			}
-			o.handleUpdate(oldPod, newPod)
+			o.handleUpdate(context.Background(), oldPod, newPod)
 		},
 	})
 
@@ -140,20 +117,26 @@ func (o *APIObserver) Start(ctx context.Context) error {
 	go o.informer.Run(o.stopCh)
 
 	// Wait for cache sync
+	logger.Info().Msg("Waiting for informer cache sync")
 	if !cache.WaitForCacheSync(ctx.Done(), o.informer.HasSynced) {
 		return fmt.Errorf("failed to sync informer cache")
 	}
 
-	return nil
+	logger.Info().Msg("Container-api observer started")
+	return o.BaseObserver.Start(ctx)
 }
 
 // Stop stops the Kubernetes observer
 func (o *APIObserver) Stop() error {
+	logger := o.Logger(context.Background())
+	logger.Info().Msg("Stopping container-api observer")
+
 	if o.stopCh != nil {
 		close(o.stopCh)
 		o.stopCh = nil
 	}
-	return nil
+
+	return o.BaseObserver.Stop()
 }
 
 // IsHealthy returns true if the observer is ready to run or running
@@ -162,26 +145,21 @@ func (o *APIObserver) IsHealthy() bool {
 }
 
 // handleUpdate processes pod update events
-func (o *APIObserver) handleUpdate(oldPod, newPod *corev1.Pod) {
+func (o *APIObserver) handleUpdate(ctx context.Context, oldPod, newPod *corev1.Pod) {
 	if oldPod == nil || newPod == nil {
 		return
 	}
 
-	// Record processing time
-	startTime := time.Now()
-	defer func() {
-		duration := time.Since(startTime)
-		o.processingTimeMs.Record(context.Background(), float64(duration.Milliseconds()))
-	}()
+	logger := o.Logger(ctx)
 
 	// Check all container types
-	o.checkContainers(oldPod, newPod, oldPod.Status.InitContainerStatuses, newPod.Status.InitContainerStatuses)
-	o.checkContainers(oldPod, newPod, oldPod.Status.ContainerStatuses, newPod.Status.ContainerStatuses)
-	o.checkContainers(oldPod, newPod, oldPod.Status.EphemeralContainerStatuses, newPod.Status.EphemeralContainerStatuses)
+	o.checkContainers(ctx, logger, oldPod, newPod, oldPod.Status.InitContainerStatuses, newPod.Status.InitContainerStatuses)
+	o.checkContainers(ctx, logger, oldPod, newPod, oldPod.Status.ContainerStatuses, newPod.Status.ContainerStatuses)
+	o.checkContainers(ctx, logger, oldPod, newPod, oldPod.Status.EphemeralContainerStatuses, newPod.Status.EphemeralContainerStatuses)
 }
 
 // checkContainers compares container statuses and emits events for failures
-func (o *APIObserver) checkContainers(oldPod, newPod *corev1.Pod, oldStatuses, newStatuses []corev1.ContainerStatus) {
+func (o *APIObserver) checkContainers(ctx context.Context, logger zerolog.Logger, oldPod, newPod *corev1.Pod, oldStatuses, newStatuses []corev1.ContainerStatus) {
 	// Build map of old statuses for lookup
 	oldStatusMap := make(map[string]*corev1.ContainerStatus)
 	for i := range oldStatuses {
@@ -206,15 +184,26 @@ func (o *APIObserver) checkContainers(oldPod, newPod *corev1.Pod, oldStatuses, n
 
 		// Create and emit event
 		event := createDomainEvent(newPod, newStatus)
-		if event != nil {
-			ctx := context.Background()
-			if err := o.emitter.Emit(ctx, event); err != nil {
-				// Increment error counter
-				o.errorsTotal.Add(ctx, 1)
-			} else {
-				// Increment success counter
-				o.eventsProcessed.Add(ctx, 1)
-			}
+		if event == nil {
+			continue
+		}
+
+		if err := o.emitter.Emit(ctx, event); err != nil {
+			o.RecordError(ctx, event)
+			logger.Error().Err(err).
+				Str("pod", newPod.Name).
+				Str("namespace", newPod.Namespace).
+				Str("container", newStatus.Name).
+				Str("subtype", event.Subtype).
+				Msg("Failed to emit container event")
+		} else {
+			o.RecordEvent(ctx)
+			logger.Debug().
+				Str("pod", newPod.Name).
+				Str("namespace", newPod.Namespace).
+				Str("container", newStatus.Name).
+				Str("subtype", event.Subtype).
+				Msg("Emitted container event")
 		}
 	}
 }
@@ -428,7 +417,7 @@ func createDomainEvent(pod *corev1.Pod, status *corev1.ContainerStatus) *domain.
 	// Create event
 	event := &domain.ObserverEvent{
 		ID:        uuid.New().String(),
-		Type:      "container",
+		Type:      string(domain.EventTypeContainer),
 		Subtype:   subtype,
 		Source:    "container-observer-k8s",
 		Timestamp: time.Now(),
