@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -118,6 +120,129 @@ func TestObserver_StartRegistersHandlers(t *testing.T) {
 	// Note: K8s fake client doesn't actually run informers, so this just
 	// verifies Start() doesn't panic and completes successfully
 	assert.NotNil(t, observer.informer)
+}
+
+// TDD Cycle 3: NodeReady detection
+
+// TestHandleNode_NodeReady verifies NodeReady event emission
+func TestHandleNode_NodeReady(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+
+	cfg := Config{
+		Clientset: clientset,
+		Emitter:   emitter,
+	}
+
+	observer, err := NewObserver("test-observer", cfg)
+	require.NoError(t, err)
+
+	// Create a node that becomes Ready
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodeReady,
+					Status:  corev1.ConditionFalse,
+					Reason:  "KubeletNotReady",
+					Message: "Kubelet is not ready",
+				},
+			},
+		},
+	}
+
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodeReady,
+					Status:  corev1.ConditionTrue,
+					Reason:  "KubeletReady",
+					Message: "Kubelet is ready",
+				},
+			},
+		},
+	}
+
+	// Process node change
+	ctx := context.Background()
+	observer.handleNode(ctx, oldNode, newNode)
+
+	// Verify event was emitted
+	require.Len(t, emitter.events, 1)
+	event := emitter.events[0]
+	assert.Equal(t, "node", event.Type)
+	assert.Equal(t, "node_ready", event.Subtype)
+	require.NotNil(t, event.NodeData)
+	assert.Equal(t, "test-node", event.NodeData.NodeName)
+	assert.Equal(t, "Ready", event.NodeData.Condition)
+	assert.Equal(t, "True", event.NodeData.Status)
+	assert.Equal(t, "KubeletReady", event.NodeData.Reason)
+}
+
+// TestHandleNode_NodeNotReady verifies NodeNotReady event emission
+func TestHandleNode_NodeNotReady(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+
+	cfg := Config{
+		Clientset: clientset,
+		Emitter:   emitter,
+	}
+
+	observer, err := NewObserver("test-observer", cfg)
+	require.NoError(t, err)
+
+	// Create a node that becomes NotReady
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodeReady,
+					Status:  corev1.ConditionFalse,
+					Reason:  "NetworkUnavailable",
+					Message: "Node network is not available",
+				},
+			},
+		},
+	}
+
+	// Process node change
+	ctx := context.Background()
+	observer.handleNode(ctx, oldNode, newNode)
+
+	// Verify event was emitted
+	require.Len(t, emitter.events, 1)
+	event := emitter.events[0]
+	assert.Equal(t, "node", event.Type)
+	assert.Equal(t, "node_not_ready", event.Subtype)
+	require.NotNil(t, event.NodeData)
+	assert.Equal(t, "test-node", event.NodeData.NodeName)
+	assert.Equal(t, "Ready", event.NodeData.Condition)
+	assert.Equal(t, "False", event.NodeData.Status)
 }
 
 // Mock emitter for testing

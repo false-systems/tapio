@@ -32,6 +32,7 @@ type ObserverEvent struct {
 	K8sData        *K8sEventData        `json:"k8s_data,omitempty"`
 	ProcessData    *ProcessEventData    `json:"process_data,omitempty"`
 	SchedulingData *SchedulingEventData `json:"scheduling_data,omitempty"`
+	NodeData       *NodeEventData       `json:"node_data,omitempty"`
 
 	// Raw bytes for debugging
 	RawData []byte `json:"raw_data,omitempty"`
@@ -57,6 +58,7 @@ type TapioEvent struct {
 	K8sData        *K8sEventData        `json:"k8s_data,omitempty"`
 	ProcessData    *ProcessEventData    `json:"process_data,omitempty"`
 	SchedulingData *SchedulingEventData `json:"scheduling_data,omitempty"`
+	NodeData       *NodeEventData       `json:"node_data,omitempty"`
 
 	// Multi-cluster support
 	ClusterID string            `json:"cluster_id"`
@@ -274,4 +276,26 @@ type ProcessEventData struct {
 	UID         int32  `json:"uid,omitempty"`
 	GID         int32  `json:"gid,omitempty"`
 	ExecTime    int64  `json:"exec_time,omitempty"` // nanoseconds
+}
+
+// NodeEventData contains node condition and resource data
+type NodeEventData struct {
+	// Node identification
+	NodeName string `json:"node_name"`
+
+	// Condition details
+	Condition string `json:"condition"`         // Ready, MemoryPressure, DiskPressure, PIDPressure, NetworkUnavailable
+	Status    string `json:"status"`            // True, False, Unknown
+	Reason    string `json:"reason,omitempty"`  // Kubelet-provided reason
+	Message   string `json:"message,omitempty"` // Kubelet-provided message
+
+	// Resource capacity
+	CPUCapacity    int64 `json:"cpu_capacity,omitempty"`    // milliCPU
+	MemoryCapacity int64 `json:"memory_capacity,omitempty"` // bytes
+	PodCapacity    int64 `json:"pod_capacity,omitempty"`    // max pods
+
+	// Resource allocations
+	CPUAllocated    int64 `json:"cpu_allocated,omitempty"`    // milliCPU
+	MemoryAllocated int64 `json:"memory_allocated,omitempty"` // bytes
+	PodsAllocated   int64 `json:"pods_allocated,omitempty"`   // current pods
 }

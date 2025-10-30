@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -136,4 +137,83 @@ func (o *Observer) Stop() error {
 // IsHealthy returns true if the observer is ready to run or running
 func (o *Observer) IsHealthy() bool {
 	return o.stopCh != nil
+}
+
+// handleNode processes node changes and emits events
+func (o *Observer) handleNode(ctx context.Context, oldNode, newNode *corev1.Node) {
+	if newNode == nil {
+		return
+	}
+
+	// Track processing time
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		o.processingTimeMs.Record(ctx, float64(duration.Milliseconds()))
+	}()
+
+	// Check for condition changes
+	for _, condition := range newNode.Status.Conditions {
+		oldCondition := findCondition(oldNode, condition.Type)
+
+		// Detect state changes
+		if conditionChanged(oldCondition, &condition) {
+			event := o.createNodeEvent(newNode, &condition)
+			if event != nil {
+				if err := o.emitter.Emit(ctx, event); err != nil {
+					o.errorsTotal.Add(ctx, 1)
+				} else {
+					o.eventsProcessed.Add(ctx, 1)
+				}
+			}
+		}
+	}
+}
+
+// findCondition finds a condition in old node by type
+func findCondition(node *corev1.Node, condType corev1.NodeConditionType) *corev1.NodeCondition {
+	if node == nil {
+		return nil
+	}
+	for i := range node.Status.Conditions {
+		if node.Status.Conditions[i].Type == condType {
+			return &node.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
+// conditionChanged checks if condition status or reason changed
+func conditionChanged(old, new *corev1.NodeCondition) bool {
+	if old == nil {
+		return true // New condition
+	}
+	return old.Status != new.Status || old.Reason != new.Reason
+}
+
+// createNodeEvent creates domain event from node condition
+func (o *Observer) createNodeEvent(node *corev1.Node, condition *corev1.NodeCondition) *domain.ObserverEvent {
+	// Determine subtype based on condition
+	subtype := "node_condition_change"
+	if condition.Type == corev1.NodeReady {
+		if condition.Status == corev1.ConditionTrue {
+			subtype = "node_ready"
+		} else {
+			subtype = "node_not_ready"
+		}
+	}
+
+	return &domain.ObserverEvent{
+		Type:      "node",
+		Subtype:   subtype,
+		Source:    o.name,
+		Timestamp: time.Now(),
+		NodeData: &domain.NodeEventData{
+			NodeName:  node.Name,
+			Condition: string(condition.Type),
+			Status:    string(condition.Status),
+			Reason:    condition.Reason,
+			Message:   condition.Message,
+		},
+	}
 }
