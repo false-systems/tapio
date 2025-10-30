@@ -9,74 +9,50 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
+	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/domain"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-
-	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Config for node observer
 type Config struct {
 	Clientset kubernetes.Interface
-	Emitter   domain.Emitter
+	Emitter   base.Emitter
+}
+
+// Validate checks config is valid
+func (c *Config) Validate() error {
+	if c.Clientset == nil {
+		return fmt.Errorf("clientset is required")
+	}
+	if c.Emitter == nil {
+		return fmt.Errorf("emitter is required")
+	}
+	return nil
 }
 
 // Observer watches Kubernetes nodes for health and resource changes
 type Observer struct {
-	name      string
-	clientset kubernetes.Interface
-	informer  cache.SharedIndexInformer
-	emitter   domain.Emitter
-	stopCh    chan struct{}
-
-	// OTEL metrics
-	eventsProcessed  metric.Int64Counter
-	errorsTotal      metric.Int64Counter
-	processingTimeMs metric.Float64Histogram
+	*base.BaseObserver
+	config   Config
+	informer cache.SharedIndexInformer
+	emitter  base.Emitter
 }
 
 // NewObserver creates a new node observer
 func NewObserver(name string, cfg Config) (*Observer, error) {
 	// Validate config
-	if cfg.Clientset == nil {
-		return nil, fmt.Errorf("clientset is required")
-	}
-	if cfg.Emitter == nil {
-		return nil, fmt.Errorf("emitter is required")
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Create OTEL metrics
-	meter := otel.Meter("tapio.observer.node")
-
-	eventsProcessed, err := meter.Int64Counter(
-		"events_processed_total",
-		metric.WithDescription("Total number of node events processed"),
-		metric.WithUnit("{events}"),
-	)
+	// Create base observer
+	baseObs, err := base.NewBaseObserver(name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create events_processed_total counter: %w", err)
-	}
-
-	errorsTotal, err := meter.Int64Counter(
-		"errors_total",
-		metric.WithDescription("Total number of errors while processing node events"),
-		metric.WithUnit("{errors}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create errors_total counter: %w", err)
-	}
-
-	processingTimeMs, err := meter.Float64Histogram(
-		"processing_time_ms",
-		metric.WithDescription("Node event processing time in milliseconds"),
-		metric.WithUnit("ms"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create processing_time_ms histogram: %w", err)
+		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
 	// Create informer factory (cluster-wide)
@@ -84,30 +60,20 @@ func NewObserver(name string, cfg Config) (*Observer, error) {
 	informer := informerFactory.Core().V1().Nodes().Informer()
 
 	observer := &Observer{
-		name:             name,
-		clientset:        cfg.Clientset,
-		informer:         informer,
-		emitter:          cfg.Emitter,
-		stopCh:           make(chan struct{}),
-		eventsProcessed:  eventsProcessed,
-		errorsTotal:      errorsTotal,
-		processingTimeMs: processingTimeMs,
+		BaseObserver: baseObs,
+		config:       cfg,
+		informer:     informer,
+		emitter:      cfg.Emitter,
 	}
 
-	return observer, nil
-}
-
-// Start starts the node observer
-func (o *Observer) Start(ctx context.Context) error {
 	// Register event handlers
-	_, err := o.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*corev1.Node)
 			if !ok {
 				return
 			}
-			// Use background context since handlers run async after Start() completes
-			o.handleNode(context.Background(), nil, node)
+			observer.handleNode(context.Background(), nil, node)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			oldNode, ok := oldObj.(*corev1.Node)
@@ -118,41 +84,36 @@ func (o *Observer) Start(ctx context.Context) error {
 			if !ok {
 				return
 			}
-			// Use background context since handlers run async after Start() completes
-			o.handleNode(context.Background(), oldNode, newNode)
+			observer.handleNode(context.Background(), oldNode, newNode)
 		},
 		DeleteFunc: func(obj interface{}) {
 			// Node deletions are tracked but not emitted as events (design decision)
 			// We only care about health/pressure changes while node exists
 		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add event handlers: %w", err)
+	}); err != nil {
+		return nil, fmt.Errorf("failed to register event handlers: %w", err)
 	}
 
-	// Start informer (non-blocking)
-	go o.informer.Run(o.stopCh)
+	return observer, nil
+}
+
+// Start starts the node observer
+func (o *Observer) Start(ctx context.Context) error {
+	logger := o.Logger(ctx)
+
+	// Start informer in background
+	go o.informer.Run(ctx.Done())
 
 	// Wait for cache sync
+	logger.Info().Msg("Waiting for node informer cache sync")
 	if !cache.WaitForCacheSync(ctx.Done(), o.informer.HasSynced) {
 		return fmt.Errorf("failed to sync informer cache")
 	}
 
-	return nil
-}
+	logger.Info().Msg("Node informer cache synced")
 
-// Stop stops the node observer
-func (o *Observer) Stop() error {
-	if o.stopCh != nil {
-		close(o.stopCh)
-		o.stopCh = nil
-	}
-	return nil
-}
-
-// IsHealthy returns true if the observer is ready to run or running
-func (o *Observer) IsHealthy() bool {
-	return o.stopCh != nil
+	// Start base observer (for lifecycle management)
+	return o.BaseObserver.Start(ctx)
 }
 
 // handleNode processes node changes and emits events
@@ -161,12 +122,7 @@ func (o *Observer) handleNode(ctx context.Context, oldNode, newNode *corev1.Node
 		return
 	}
 
-	// Track processing time
-	startTime := time.Now()
-	defer func() {
-		duration := time.Since(startTime)
-		o.processingTimeMs.Record(ctx, float64(duration.Milliseconds()))
-	}()
+	logger := o.Logger(ctx)
 
 	// Check for condition changes
 	for _, condition := range newNode.Status.Conditions {
@@ -177,9 +133,18 @@ func (o *Observer) handleNode(ctx context.Context, oldNode, newNode *corev1.Node
 			event := o.createNodeEvent(newNode, &condition)
 			if event != nil {
 				if err := o.emitter.Emit(ctx, event); err != nil {
-					o.errorsTotal.Add(ctx, 1)
+					o.RecordError(ctx, event)
+					logger.Error().Err(err).
+						Str("node", newNode.Name).
+						Str("condition", string(condition.Type)).
+						Msg("Failed to emit node event")
 				} else {
-					o.eventsProcessed.Add(ctx, 1)
+					o.RecordEvent(ctx)
+					logger.Debug().
+						Str("node", newNode.Name).
+						Str("condition", string(condition.Type)).
+						Str("status", string(condition.Status)).
+						Msg("Emitted node event")
 				}
 			}
 		}
@@ -245,7 +210,7 @@ func (o *Observer) createNodeEvent(node *corev1.Node, condition *corev1.NodeCond
 		ID:        uuid.NewString(),
 		Type:      "node",
 		Subtype:   subtype,
-		Source:    o.name,
+		Source:    o.Name(),
 		Timestamp: time.Now(),
 		NodeData: &domain.NodeEventData{
 			NodeName:  node.Name,

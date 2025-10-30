@@ -32,8 +32,8 @@ func TestNewObserver_Success(t *testing.T) {
 	observer, err := NewObserver("test-observer", cfg)
 	require.NoError(t, err)
 	require.NotNil(t, observer)
-	assert.Equal(t, "test-observer", observer.name)
-	assert.NotNil(t, observer.stopCh)
+	assert.Equal(t, "test-observer", observer.Name())
+	// IsHealthy() is false until Start() is called (BaseObserver behavior)
 }
 
 // TestNewObserver_MissingClientset verifies error when clientset is nil
@@ -81,22 +81,22 @@ func TestObserver_StartStop(t *testing.T) {
 	observer, err := NewObserver("test-observer", cfg)
 	require.NoError(t, err)
 
-	// Observer should be healthy before Start (stopCh initialized)
-	assert.True(t, observer.IsHealthy())
+	// Observer is not healthy until Start() is called
+	assert.False(t, observer.IsHealthy())
 
 	// Start should succeed
 	ctx := context.Background()
 	err = observer.Start(ctx)
 	require.NoError(t, err)
 
-	// Observer should still be healthy after Start
+	// Observer should be healthy after Start
 	assert.True(t, observer.IsHealthy())
 
 	// Stop should succeed
 	err = observer.Stop()
 	require.NoError(t, err)
 
-	// Observer should be unhealthy after Stop (stopCh closed)
+	// Observer should be unhealthy after Stop
 	assert.False(t, observer.IsHealthy())
 }
 
@@ -435,5 +435,9 @@ func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) err
 		return fmt.Errorf("mock emit error")
 	}
 	m.events = append(m.events, event)
+	return nil
+}
+
+func (m *mockEmitter) Close() error {
 	return nil
 }
