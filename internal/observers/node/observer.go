@@ -105,7 +105,8 @@ func (o *Observer) Start(ctx context.Context) error {
 			if !ok {
 				return
 			}
-			o.handleNode(ctx, nil, node)
+			// Use background context since handlers run async after Start() completes
+			o.handleNode(context.Background(), nil, node)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			oldNode, ok := oldObj.(*corev1.Node)
@@ -116,7 +117,8 @@ func (o *Observer) Start(ctx context.Context) error {
 			if !ok {
 				return
 			}
-			o.handleNode(ctx, oldNode, newNode)
+			// Use background context since handlers run async after Start() completes
+			o.handleNode(context.Background(), oldNode, newNode)
 		},
 		DeleteFunc: func(obj interface{}) {
 			// Node deletions are tracked but not emitted as events (design decision)
