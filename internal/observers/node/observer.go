@@ -115,6 +115,11 @@ func (o *Observer) Start(ctx context.Context) error {
 	return o.BaseObserver.Start(ctx)
 }
 
+// Stop stops the node observer
+func (o *Observer) Stop() error {
+	return o.BaseObserver.Stop()
+}
+
 // handleNode processes node changes and emits events
 func (o *Observer) handleNode(ctx context.Context, oldNode, newNode *corev1.Node) {
 	if newNode == nil {

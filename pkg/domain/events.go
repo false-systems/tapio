@@ -284,7 +284,7 @@ type NodeEventData struct {
 	NodeName string `json:"node_name"`
 
 	// Condition details
-	Condition string `json:"condition"`         // Ready, MemoryPressure, DiskPressure, PIDPressure, NetworkUnavailable
+	Condition string `json:"condition"`         // Condition type: Ready, MemoryPressure, DiskPressure, PIDPressure, NetworkUnavailable (status can be True, False, or Unknown)
 	Status    string `json:"status"`            // True, False, Unknown
 	Reason    string `json:"reason,omitempty"`  // Kubelet-provided reason
 	Message   string `json:"message,omitempty"` // Kubelet-provided message
