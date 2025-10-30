@@ -195,12 +195,22 @@ func conditionChanged(old, new *corev1.NodeCondition) bool {
 func (o *Observer) createNodeEvent(node *corev1.Node, condition *corev1.NodeCondition) *domain.ObserverEvent {
 	// Determine subtype based on condition
 	subtype := "node_condition_change"
-	if condition.Type == corev1.NodeReady {
+
+	switch condition.Type {
+	case corev1.NodeReady:
 		if condition.Status == corev1.ConditionTrue {
 			subtype = "node_ready"
 		} else {
 			subtype = "node_not_ready"
 		}
+	case corev1.NodeMemoryPressure:
+		subtype = "node_memory_pressure"
+	case corev1.NodeDiskPressure:
+		subtype = "node_disk_pressure"
+	case corev1.NodePIDPressure:
+		subtype = "node_pid_pressure"
+	case corev1.NodeNetworkUnavailable:
+		subtype = "node_network_unavailable"
 	}
 
 	return &domain.ObserverEvent{

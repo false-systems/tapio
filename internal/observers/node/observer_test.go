@@ -245,6 +245,133 @@ func TestHandleNode_NodeNotReady(t *testing.T) {
 	assert.Equal(t, "False", event.NodeData.Status)
 }
 
+// TDD Cycle 4: Pressure detection (Memory/Disk/PID)
+
+// TestHandleNode_MemoryPressure verifies MemoryPressure event emission
+func TestHandleNode_MemoryPressure(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+
+	cfg := Config{
+		Clientset: clientset,
+		Emitter:   emitter,
+	}
+
+	observer, err := NewObserver("test-observer", cfg)
+	require.NoError(t, err)
+
+	// Node with memory pressure
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionFalse},
+			},
+		},
+	}
+
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodeMemoryPressure,
+					Status:  corev1.ConditionTrue,
+					Reason:  "KubeletHasInsufficientMemory",
+					Message: "kubelet has insufficient memory available",
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	observer.handleNode(ctx, oldNode, newNode)
+
+	require.Len(t, emitter.events, 1)
+	event := emitter.events[0]
+	assert.Equal(t, "node", event.Type)
+	assert.Equal(t, "node_memory_pressure", event.Subtype)
+	require.NotNil(t, event.NodeData)
+	assert.Equal(t, "MemoryPressure", event.NodeData.Condition)
+	assert.Equal(t, "True", event.NodeData.Status)
+}
+
+// TestHandleNode_DiskPressure verifies DiskPressure event emission
+func TestHandleNode_DiskPressure(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+
+	cfg := Config{
+		Clientset: clientset,
+		Emitter:   emitter,
+	}
+
+	observer, err := NewObserver("test-observer", cfg)
+	require.NoError(t, err)
+
+	// Node with disk pressure
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodeDiskPressure,
+					Status:  corev1.ConditionTrue,
+					Reason:  "KubeletHasDiskPressure",
+					Message: "kubelet has disk pressure",
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	observer.handleNode(ctx, nil, newNode)
+
+	require.Len(t, emitter.events, 1)
+	event := emitter.events[0]
+	assert.Equal(t, "node", event.Type)
+	assert.Equal(t, "node_disk_pressure", event.Subtype)
+	assert.Equal(t, "DiskPressure", event.NodeData.Condition)
+}
+
+// TestHandleNode_PIDPressure verifies PIDPressure event emission
+func TestHandleNode_PIDPressure(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+
+	cfg := Config{
+		Clientset: clientset,
+		Emitter:   emitter,
+	}
+
+	observer, err := NewObserver("test-observer", cfg)
+	require.NoError(t, err)
+
+	// Node with PID pressure
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodePIDPressure,
+					Status:  corev1.ConditionTrue,
+					Reason:  "KubeletHasPIDPressure",
+					Message: "kubelet has insufficient PIDs available",
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	observer.handleNode(ctx, nil, newNode)
+
+	require.Len(t, emitter.events, 1)
+	event := emitter.events[0]
+	assert.Equal(t, "node", event.Type)
+	assert.Equal(t, "node_pid_pressure", event.Subtype)
+	assert.Equal(t, "PIDPressure", event.NodeData.Condition)
+}
+
 // Mock emitter for testing
 type mockEmitter struct {
 	events     []*domain.ObserverEvent
