@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	corev1 "k8s.io/api/core/v1"
@@ -26,11 +27,10 @@ type Config struct {
 
 // Observer watches Kubernetes nodes for health and resource changes
 type Observer struct {
-	name      string
-	clientset kubernetes.Interface
-	informer  cache.SharedIndexInformer
-	emitter   domain.Emitter
-	stopCh    chan struct{}
+	name     string
+	informer cache.SharedIndexInformer
+	emitter  domain.Emitter
+	stopCh   chan struct{}
 
 	// OTEL metrics
 	eventsProcessed  metric.Int64Counter
@@ -84,7 +84,6 @@ func NewObserver(name string, cfg Config) (*Observer, error) {
 
 	observer := &Observer{
 		name:             name,
-		clientset:        cfg.Clientset,
 		informer:         informer,
 		emitter:          cfg.Emitter,
 		stopCh:           make(chan struct{}),
@@ -228,12 +227,20 @@ func (o *Observer) createNodeEvent(node *corev1.Node, condition *corev1.NodeCond
 		subtype = "node_network_unavailable"
 	}
 
-	// Extract resource capacity and allocations
-	cpuCapacity := node.Status.Capacity.Cpu().MilliValue()
-	memoryCapacity := node.Status.Capacity.Memory().Value()
-	podCapacity := node.Status.Capacity.Pods().Value()
+	// Extract resource capacity (with nil safety)
+	var cpuCapacity, memoryCapacity, podCapacity int64
+	if cpu := node.Status.Capacity.Cpu(); cpu != nil {
+		cpuCapacity = cpu.MilliValue()
+	}
+	if memory := node.Status.Capacity.Memory(); memory != nil {
+		memoryCapacity = memory.Value()
+	}
+	if pods := node.Status.Capacity.Pods(); pods != nil {
+		podCapacity = pods.Value()
+	}
 
 	return &domain.ObserverEvent{
+		ID:        uuid.NewString(),
 		Type:      "node",
 		Subtype:   subtype,
 		Source:    o.name,
