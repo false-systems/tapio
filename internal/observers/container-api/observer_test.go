@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -658,7 +659,7 @@ func TestIsHealthy(t *testing.T) {
 	// After start: healthy
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	err := observer.Start(ctx)
+	err = observer.Start(ctx)
 	require.NoError(t, err)
 	assert.True(t, observer.IsHealthy())
 
