@@ -658,11 +658,13 @@ func TestIsHealthy(t *testing.T) {
 	// After start: healthy
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	observer.Start(ctx)
+	err := observer.Start(ctx)
+	require.NoError(t, err)
 	assert.True(t, observer.IsHealthy())
 
 	// After stop: not healthy
-	observer.Stop()
+	err = observer.Stop()
+	require.NoError(t, err)
 	assert.False(t, observer.IsHealthy())
 }
 

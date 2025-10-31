@@ -97,7 +97,7 @@ func (o *APIObserver) Start(ctx context.Context) error {
 		Msg("Starting container-api observer")
 
 	// Register update handler
-	o.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := o.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			oldPod, ok := oldObj.(*corev1.Pod)
 			if !ok {
@@ -112,6 +112,9 @@ func (o *APIObserver) Start(ctx context.Context) error {
 			o.handleUpdate(context.Background(), oldPod, newPod)
 		},
 	})
+	if err != nil {
+		return fmt.Errorf("failed to add event handler: %w", err)
+	}
 
 	// Start informer (non-blocking)
 	go o.informer.Run(o.stopCh)
