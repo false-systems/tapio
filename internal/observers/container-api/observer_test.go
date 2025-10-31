@@ -621,7 +621,7 @@ func TestStart_Success(t *testing.T) {
 }
 
 func TestStop_WithoutStart(t *testing.T) {
-	// Calling Stop without Start should not panic
+	// Calling Stop without Start returns error from BaseObserver
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
@@ -635,7 +635,8 @@ func TestStop_WithoutStart(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = observer.Stop()
-	assert.NoError(t, err) // Should be idempotent
+	assert.Error(t, err) // BaseObserver returns error when not running
+	assert.Contains(t, err.Error(), "not running")
 }
 
 func TestIsHealthy(t *testing.T) {
