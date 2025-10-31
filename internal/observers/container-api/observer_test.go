@@ -378,7 +378,7 @@ func TestNewAPIObserver_Success(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -388,8 +388,8 @@ func TestNewAPIObserver_Success(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
-	assert.Equal(t, "test-observer", observer.name)
-	assert.Equal(t, "default", observer.namespace)
+	assert.Equal(t, "test-observer", observer.Name())
+	assert.Equal(t, "default", observer.config.Namespace)
 	assert.NotNil(t, observer.informer)
 }
 
@@ -398,7 +398,7 @@ func TestNewAPIObserver_AllNamespaces(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "",
 		Emitter:   emitter,
@@ -408,14 +408,14 @@ func TestNewAPIObserver_AllNamespaces(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
-	assert.Equal(t, "", observer.namespace)
+	assert.Equal(t, "", observer.config.Namespace)
 }
 
 func TestNewAPIObserver_NilClientset(t *testing.T) {
 	// Nil clientset should return error
 	emitter := &fakeEmitter{}
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: nil,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -432,7 +432,7 @@ func TestNewAPIObserver_NilEmitter(t *testing.T) {
 	// Nil emitter should return error
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   nil,
@@ -461,6 +461,10 @@ func (e *fakeEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) err
 	return nil
 }
 
+func (e *fakeEmitter) Close() error {
+	return nil
+}
+
 // TDD Cycle 7: handleUpdate with event emission
 
 func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
@@ -468,7 +472,7 @@ func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -480,7 +484,7 @@ func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
 	newPod := createPodWithContainer("web-7d4b5", "default", "app", "Terminated", "OOMKilled", 137)
 
-	observer.handleUpdate(oldPod, newPod)
+	observer.handleUpdate(context.Background(), oldPod, newPod)
 
 	assert.Len(t, emitter.events, 1, "Should emit 1 event")
 	event := emitter.events[0]
@@ -494,7 +498,7 @@ func TestHandleUpdate_NoChange(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -506,7 +510,7 @@ func TestHandleUpdate_NoChange(t *testing.T) {
 	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
 	newPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
 
-	observer.handleUpdate(oldPod, newPod)
+	observer.handleUpdate(context.Background(), oldPod, newPod)
 
 	assert.Len(t, emitter.events, 0, "Should not emit event when no change")
 }
@@ -516,7 +520,7 @@ func TestHandleUpdate_MultipleContainers(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -559,7 +563,7 @@ func TestHandleUpdate_MultipleContainers(t *testing.T) {
 		},
 	}
 
-	observer.handleUpdate(oldPod, newPod)
+	observer.handleUpdate(context.Background(), oldPod, newPod)
 
 	assert.Len(t, emitter.events, 1, "Should emit 1 event for crashed sidecar")
 	event := emitter.events[0]
@@ -596,7 +600,7 @@ func TestStart_Success(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -621,7 +625,7 @@ func TestStop_WithoutStart(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -638,7 +642,7 @@ func TestIsHealthy(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -668,7 +672,7 @@ func TestOTELMetrics_Created(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -688,7 +692,7 @@ func TestOTELMetrics_EmitIncrementsCounter(t *testing.T) {
 	emitter := &fakeEmitter{}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -702,7 +706,7 @@ func TestOTELMetrics_EmitIncrementsCounter(t *testing.T) {
 	newPod := createPodWithContainer("test-pod", "default", "app", "Terminated", "OOMKilled", 137)
 
 	// Process update (should emit event and update metrics)
-	observer.handleUpdate(oldPod, newPod)
+	observer.handleUpdate(context.Background(), oldPod, newPod)
 
 	// Verify event was emitted
 	assert.Equal(t, 1, len(emitter.events))
@@ -717,7 +721,7 @@ func TestOTELMetrics_ErrorIncrementsErrorCounter(t *testing.T) {
 	}
 	clientset := fake.NewSimpleClientset()
 
-	config := APIObserverConfig{
+	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
 		Emitter:   emitter,
@@ -731,7 +735,7 @@ func TestOTELMetrics_ErrorIncrementsErrorCounter(t *testing.T) {
 	newPod := createPodWithContainer("test-pod", "default", "app", "Terminated", "Error", 1)
 
 	// Process update (emit will fail, error counter should increment)
-	observer.handleUpdate(oldPod, newPod)
+	observer.handleUpdate(context.Background(), oldPod, newPod)
 
 	// Verify emit was attempted
 	assert.Equal(t, 1, emitter.attemptCount)
