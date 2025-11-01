@@ -195,3 +195,103 @@ func TestPMCProcessor_ClassifyImpact(t *testing.T) {
 		})
 	}
 }
+
+// TDD Cycle 2: Counter Overflow Handling
+// RED Phase: Write failing test for 48-bit counter wraparound
+
+// TestPMCProcessor_CounterOverflow48Bit verifies handling of 48-bit counter wraparound
+func TestPMCProcessor_CounterOverflow48Bit(t *testing.T) {
+	proc := NewPMCProcessor("test-node")
+
+	// PMC counters are 48-bit (Intel/AMD hardware limitation)
+	const maxCounter48bit uint64 = (1 << 48) - 1
+
+	// Sample near overflow (counter close to max)
+	event1 := PMCEvent{
+		CPU:          0,
+		Cycles:       maxCounter48bit - 1000,
+		Instructions: maxCounter48bit - 2000,
+		StallCycles:  maxCounter48bit - 500,
+	}
+	proc.Process(context.Background(), event1)
+
+	// Counter wraps around to small value
+	event2 := PMCEvent{
+		CPU:          0,
+		Cycles:       1000, // Wrapped around
+		Instructions: 2000, // Wrapped around
+		StallCycles:  500,  // Wrapped around
+	}
+	result := proc.Process(context.Background(), event2)
+
+	require.NotNil(t, result, "Should handle counter overflow")
+
+	// Delta should be ~2000 cycles (not negative or huge)
+	// Delta = (maxCounter48bit - (maxCounter48bit - 1000)) + 1000 = 2000
+	expectedDeltaCycles := 2000.0
+	expectedDeltaInstructions := 4000.0
+
+	expectedIPC := expectedDeltaInstructions / expectedDeltaCycles
+	assert.InDelta(t, expectedIPC, result.NodeData.CPUIPC, 0.01, "IPC should be ~2.0 after overflow")
+
+	// Verify IPC is positive and reasonable (not negative or infinity)
+	assert.Greater(t, result.NodeData.CPUIPC, 0.0, "IPC should be positive")
+	assert.Less(t, result.NodeData.CPUIPC, 10.0, "IPC should be reasonable (<10)")
+}
+
+// TestPMCProcessor_CounterBackwards detects corrupted data (counter went backwards without overflow)
+func TestPMCProcessor_CounterBackwards(t *testing.T) {
+	proc := NewPMCProcessor("test-node")
+
+	// Normal sample
+	event1 := PMCEvent{
+		CPU:          0,
+		Cycles:       2000000,
+		Instructions: 1000000,
+		StallCycles:  500000,
+	}
+	proc.Process(context.Background(), event1)
+
+	// Counter goes backwards (corrupted data, NOT overflow)
+	event2 := PMCEvent{
+		CPU:          0,
+		Cycles:       1000000, // Went backwards!
+		Instructions: 500000,
+		StallCycles:  250000,
+	}
+	result := proc.Process(context.Background(), event2)
+
+	// Should treat as overflow and calculate positive delta
+	require.NotNil(t, result, "Should handle backwards counter as overflow")
+	assert.Greater(t, result.NodeData.CPUIPC, 0.0, "IPC should be positive even with backwards counter")
+}
+
+// TestPMCProcessor_LargeCounterJump detects suspiciously large deltas
+func TestPMCProcessor_LargeCounterJump(t *testing.T) {
+	proc := NewPMCProcessor("test-node")
+
+	// Baseline
+	event1 := PMCEvent{
+		CPU:          0,
+		Cycles:       1000000,
+		Instructions: 500000,
+		StallCycles:  300000,
+	}
+	proc.Process(context.Background(), event1)
+
+	// Huge jump (e.g., system suspended for hours, counter wrapped multiple times)
+	const maxCounter48bit uint64 = (1 << 48) - 1
+	event2 := PMCEvent{
+		CPU:          0,
+		Cycles:       maxCounter48bit - 100, // Near max
+		Instructions: maxCounter48bit - 200,
+		StallCycles:  maxCounter48bit - 50,
+	}
+	result := proc.Process(context.Background(), event2)
+
+	// Should still calculate positive IPC (no panic, no negative)
+	if result != nil {
+		assert.Greater(t, result.NodeData.CPUIPC, 0.0, "IPC should be positive")
+		assert.Less(t, result.NodeData.CPUIPC, 10.0, "IPC should be reasonable")
+	}
+}

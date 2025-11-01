@@ -64,9 +64,10 @@ func (p *PMCProcessor) Process(ctx context.Context, event PMCEvent) *domain.Obse
 	}
 
 	// Calculate deltas (PMC counters are cumulative)
-	deltaCycles := event.Cycles - prev.Cycles
-	deltaInstructions := event.Instructions - prev.Instructions
-	deltaStalls := event.StallCycles - prev.StallCycles
+	// Handle 48-bit counter wraparound
+	deltaCycles := calculateDelta(event.Cycles, prev.Cycles)
+	deltaInstructions := calculateDelta(event.Instructions, prev.Instructions)
+	deltaStalls := calculateDelta(event.StallCycles, prev.StallCycles)
 
 	// Avoid division by zero
 	if deltaCycles == 0 {
@@ -147,4 +148,16 @@ func (p *PMCProcessor) determineSubtype(ipc, stallPct float64) string {
 		return "node_memory_bottleneck"
 	}
 	return "node_performance_degradation"
+}
+
+// calculateDelta computes delta between current and previous counter values
+// Handles 48-bit counter wraparound (PMC hardware limitation)
+func calculateDelta(current, previous uint64) uint64 {
+	if current >= previous {
+		return current - previous
+	}
+
+	// Counter wrapped around (48-bit hardware counter)
+	const maxCounter48bit uint64 = (1 << 48) - 1
+	return (maxCounter48bit - previous) + current
 }
