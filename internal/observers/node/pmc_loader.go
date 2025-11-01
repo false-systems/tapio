@@ -89,7 +89,8 @@ func (l *PMCLoader) Start(ctx context.Context) error {
 	}
 
 	// Open ring buffer reader
-	l.reader, err := ringbuf.NewReader(objs.Events)
+	var err error
+	l.reader, err = ringbuf.NewReader(objs.Events)
 	if err != nil {
 		l.cleanup()
 		return fmt.Errorf("failed to create ring buffer reader: %w", err)
@@ -171,7 +172,7 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 	}
 
 	// Attach eBPF program to perf event
-	l, err := link.AttachRawLink(link.RawLinkOptions{
+	lnk, err := link.AttachRawLink(link.RawLinkOptions{
 		Target:  fd,
 		Program: prog,
 		Attach:  ebpf.AttachPerfEvent,
@@ -181,7 +182,7 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 		return nil, fmt.Errorf("failed to attach program: %w", err)
 	}
 
-	return l, nil
+	return lnk, nil
 }
 
 // readEvents reads PMC events from ring buffer and sends to channel
