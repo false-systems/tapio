@@ -55,6 +55,9 @@ func TestPMCProcessor_CalculateIPC(t *testing.T) {
 	// Delta stalls = 800000 - 300000 = 500000
 	// Stall % = 500000 / 1000000 * 100 = 50%
 	assert.Equal(t, 50.0, result.NodeData.MemoryStalls)
+
+	// Impact classification: IPC=0.5 + Stall=50% → medium
+	assert.Equal(t, "medium", result.NodeData.PerformanceImpact)
 }
 
 // TestPMCProcessor_MultiplePerCPU verifies per-CPU tracking
@@ -204,6 +207,8 @@ func TestPMCProcessor_CounterOverflow48Bit(t *testing.T) {
 	proc := NewPMCProcessor("test-node")
 
 	// PMC counters are 48-bit (Intel/AMD hardware limitation)
+	// WHY 48-bit: x86_64 CPUs use 48-bit general-purpose performance counters
+	// Reference: Intel SDM Vol 3B, AMD APM Vol 2 (IA32_PMCx registers)
 	const maxCounter48bit uint64 = (1 << 48) - 1
 
 	// Sample near overflow (counter close to max)
