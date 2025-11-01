@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package containerruntime
 
@@ -10,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/observers/container"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -19,8 +19,8 @@ func TestExitProcessor_RejectsOOMEvents(t *testing.T) {
 	ctx := context.Background()
 
 	// OOM event should be ignored (handled by OOMProcessor)
-	oomEvent := ContainerEventBPF{
-		Type:        EventTypeOOMKill,
+	oomEvent := container.ContainerEventBPF{
+		Type:        container.EventTypeOOMKill,
 		PID:         1234,
 		TimestampNs: uint64(time.Now().UnixNano()),
 	}
@@ -40,8 +40,8 @@ func TestExitProcessor_ProcessesNormalExit(t *testing.T) {
 	copy(cgroupBytes[:], []byte(cgroupPath))
 
 	now := time.Now()
-	exitEvent := ContainerEventBPF{
-		Type:        EventTypeExit,
+	exitEvent := container.ContainerEventBPF{
+		Type:        container.EventTypeExit,
 		PID:         9999,
 		TID:         10000,
 		ExitCode:    0,
@@ -83,8 +83,8 @@ func TestExitProcessor_ProcessesErrorExit(t *testing.T) {
 	copy(cgroupBytes[:], []byte(cgroupPath))
 
 	now := time.Now()
-	exitEvent := ContainerEventBPF{
-		Type:        EventTypeExit,
+	exitEvent := container.ContainerEventBPF{
+		Type:        container.EventTypeExit,
 		PID:         7777,
 		TID:         7778,
 		ExitCode:    1,

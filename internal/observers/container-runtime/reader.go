@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package containerruntime
 
@@ -10,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/yairfalse/tapio/internal/observers/container"
 )
 
 // RingReader wraps cilium/ebpf ring buffer for typed event reading
@@ -19,7 +19,7 @@ type RingReader struct {
 
 // RingRecord represents a record read from ring buffer
 type RingRecord struct {
-	Event ContainerEventBPF
+	Event container.ContainerEventBPF
 	Raw   []byte
 }
 
@@ -53,12 +53,12 @@ func (r *RingReader) Read(ctx context.Context) (*RingRecord, error) {
 }
 
 // ParseRecord parses raw bytes into ContainerEventBPF
-func (r *RingReader) ParseRecord(data []byte) (*ContainerEventBPF, error) {
+func (r *RingReader) ParseRecord(data []byte) (*container.ContainerEventBPF, error) {
 	if len(data) < 304 {
 		return nil, fmt.Errorf("invalid record size: got %d, expected 304", len(data))
 	}
 
-	evt := &ContainerEventBPF{}
+	evt := &container.ContainerEventBPF{}
 	buf := bytes.NewReader(data)
 
 	if err := binary.Read(buf, binary.LittleEndian, evt); err != nil {

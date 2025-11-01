@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package containerruntime
 
@@ -11,6 +10,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/observers/container"
 )
 
 // TestNewRingReader_CreatesReader verifies reader initialization
@@ -48,8 +48,8 @@ func TestRingReader_ParseRecord(t *testing.T) {
 	reader := NewRingReader(nil)
 
 	// Create valid ContainerEventBPF bytes
-	var evt ContainerEventBPF
-	evt.Type = EventTypeOOMKill
+	var evt container.ContainerEventBPF
+	evt.Type = container.EventTypeOOMKill
 	evt.PID = 12345
 	evt.ExitCode = 137
 	evt.Signal = 9
@@ -67,7 +67,7 @@ func TestRingReader_ParseRecord(t *testing.T) {
 	require.NoError(t, err, "Parse should succeed")
 	require.NotNil(t, parsed, "Parsed event should not be nil")
 
-	assert.Equal(t, EventTypeOOMKill, parsed.Type)
+	assert.Equal(t, container.EventTypeOOMKill, parsed.Type)
 	assert.Equal(t, uint32(12345), parsed.PID)
 }
 

@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package containerruntime
 
@@ -7,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/yairfalse/tapio/internal/observers/container"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
@@ -20,18 +20,18 @@ func NewOOMProcessor() *OOMProcessor {
 
 // Process checks if event is OOM kill and creates domain event
 // Returns nil if event is not an OOM kill
-func (p *OOMProcessor) Process(ctx context.Context, evt ContainerEventBPF) *domain.ObserverEvent {
+func (p *OOMProcessor) Process(ctx context.Context, evt container.ContainerEventBPF) *domain.ObserverEvent {
 	// Only process OOM kill events
-	if evt.Type != EventTypeOOMKill {
+	if evt.Type != container.EventTypeOOMKill {
 		return nil
 	}
 
 	// Extract cgroup path from eBPF event
-	cgroupPath := nullTerminatedString(evt.CgroupPath[:])
-	containerID := parseContainerID(cgroupPath)
+	cgroupPath := container.NullTerminatedString(evt.CgroupPath[:])
+	containerID := container.ParseContainerID(cgroupPath)
 
 	// Classify exit (always OOM for this processor)
-	classification := ClassifyExit(evt.ExitCode, evt.Signal, true)
+	classification := container.ClassifyExit(evt.ExitCode, evt.Signal, true)
 
 	// Create container event data
 	containerData := &domain.ContainerEventData{
