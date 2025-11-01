@@ -1,0 +1,150 @@
+//go:build linux
+
+package node
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/yairfalse/tapio/pkg/domain"
+)
+
+// PMCEvent represents a single PMC sample from eBPF
+type PMCEvent struct {
+	CPU          uint32
+	Cycles       uint64
+	Instructions uint64
+	StallCycles  uint64
+	Timestamp    uint64
+}
+
+// PMCSample stores previous sample for delta calculation
+type PMCSample struct {
+	Cycles       uint64
+	Instructions uint64
+	StallCycles  uint64
+	Timestamp    uint64
+}
+
+// PMCProcessor calculates IPC and memory stalls from PMC events
+type PMCProcessor struct {
+	mu         sync.Mutex
+	lastSample map[uint32]*PMCSample
+	nodeName   string
+}
+
+// NewPMCProcessor creates a new PMC processor
+func NewPMCProcessor(nodeName string) *PMCProcessor {
+	return &PMCProcessor{
+		lastSample: make(map[uint32]*PMCSample),
+		nodeName:   nodeName,
+	}
+}
+
+// Process calculates IPC and stall percentage from PMC event
+func (p *PMCProcessor) Process(ctx context.Context, event PMCEvent) *domain.ObserverEvent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	cpu := event.CPU
+
+	// Get previous sample for this CPU
+	prev := p.lastSample[cpu]
+	if prev == nil {
+		// First sample, just store it
+		p.lastSample[cpu] = &PMCSample{
+			Cycles:       event.Cycles,
+			Instructions: event.Instructions,
+			StallCycles:  event.StallCycles,
+			Timestamp:    event.Timestamp,
+		}
+		return nil
+	}
+
+	// Calculate deltas (PMC counters are cumulative)
+	deltaCycles := event.Cycles - prev.Cycles
+	deltaInstructions := event.Instructions - prev.Instructions
+	deltaStalls := event.StallCycles - prev.StallCycles
+
+	// Avoid division by zero
+	if deltaCycles == 0 {
+		return nil
+	}
+
+	// Calculate IPC (Instructions Per Cycle)
+	ipc := float64(deltaInstructions) / float64(deltaCycles)
+
+	// Calculate stall percentage
+	stallPct := float64(deltaStalls) / float64(deltaCycles) * 100.0
+
+	// Update last sample
+	p.lastSample[cpu] = &PMCSample{
+		Cycles:       event.Cycles,
+		Instructions: event.Instructions,
+		StallCycles:  event.StallCycles,
+		Timestamp:    event.Timestamp,
+	}
+
+	// Classify performance impact
+	impact := p.classifyImpact(ipc, stallPct)
+
+	// Only emit event if performance degradation detected
+	if impact == "" {
+		return nil
+	}
+
+	// Determine subtype based on severity
+	subtype := p.determineSubtype(ipc, stallPct)
+
+	return &domain.ObserverEvent{
+		ID:        uuid.NewString(),
+		Type:      "node",
+		Subtype:   subtype,
+		Source:    p.nodeName + "-pmc",
+		Timestamp: time.Now(),
+		NodeData: &domain.NodeEventData{
+			CPUIPC:            ipc,
+			MemoryStalls:      stallPct,
+			PerformanceImpact: impact,
+		},
+	}
+}
+
+// classifyImpact determines performance impact level
+func (p *PMCProcessor) classifyImpact(ipc, stallPct float64) string {
+	// Critical: IPC < 0.2 + Stalls > 70%
+	if ipc < 0.2 && stallPct > 70.0 {
+		return "critical"
+	}
+
+	// High: IPC < 0.3 + Stalls > 50%
+	if ipc < 0.3 && stallPct > 50.0 {
+		return "high"
+	}
+
+	// Medium: IPC < 0.5 + Stalls > 30%
+	if ipc < 0.5 && stallPct > 30.0 {
+		return "medium"
+	}
+
+	// Low: IPC < 0.7 + Stalls > 20%
+	if ipc < 0.7 && stallPct > 20.0 {
+		return "low"
+	}
+
+	// No significant degradation
+	return ""
+}
+
+// determineSubtype maps impact to event subtype
+func (p *PMCProcessor) determineSubtype(ipc, stallPct float64) string {
+	if ipc < 0.2 && stallPct > 70.0 {
+		return "node_critical_memory_bottleneck"
+	}
+	if ipc < 0.3 && stallPct > 50.0 {
+		return "node_memory_bottleneck"
+	}
+	return "node_performance_degradation"
+}
