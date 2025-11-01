@@ -13,20 +13,19 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/yairfalse/tapio/internal/observers/node/bpf"
 	"golang.org/x/sys/unix"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -type pmc_event node_pmc_monitor ./bpf/node_pmc_monitor.c -- -I./bpf
-
 // PMCLoader loads eBPF program and reads PMC events from ring buffer
 type PMCLoader struct {
-	mu         sync.Mutex
-	collection *ebpf.Collection
-	links      []link.Link
-	reader     *ringbuf.Reader
-	eventCh    chan PMCEvent
-	stopCh     chan struct{}
-	started    bool
+	mu      sync.Mutex
+	objs    *bpf.NodePMCObjects
+	links   []link.Link
+	reader  *ringbuf.Reader
+	eventCh chan PMCEvent
+	stopCh  chan struct{}
+	started bool
 }
 
 // NewPMCLoader creates a new PMC loader
@@ -46,23 +45,18 @@ func (l *PMCLoader) Start(ctx context.Context) error {
 		return fmt.Errorf("PMCLoader already started")
 	}
 
-	// Load eBPF collection
-	spec, err := loadNode_pmc_monitor()
-	if err != nil {
-		return fmt.Errorf("failed to load eBPF spec: %w", err)
+	// Load eBPF objects (bpf2go-generated)
+	objs := &bpf.NodePMCObjects{}
+	if err := bpf.LoadNodePMCObjects(objs, nil); err != nil {
+		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
-
-	coll, err := ebpf.NewCollection(spec)
-	if err != nil {
-		return fmt.Errorf("failed to create eBPF collection: %w", err)
-	}
-	l.collection = coll
+	l.objs = objs
 
 	// Get eBPF program
-	prog := coll.Programs["sample_pmc"]
+	prog := objs.SamplePmc
 	if prog == nil {
-		coll.Close()
-		return fmt.Errorf("sample_pmc program not found in collection")
+		l.cleanup()
+		return fmt.Errorf("sample_pmc program not found in objects")
 	}
 
 	// Attach to perf_event for each CPU
@@ -71,7 +65,7 @@ func (l *PMCLoader) Start(ctx context.Context) error {
 
 	for cpu := 0; cpu < numCPU; cpu++ {
 		// Attach to CPU cycles counter
-		cyclesLink, err := l.attachPMCPerfEvent(prog, cpu, unix.PERF_COUNT_HW_CPU_CYCLES, coll.Maps["pmc_cycles"])
+		cyclesLink, err := l.attachPMCPerfEvent(prog, cpu, unix.PERF_COUNT_HW_CPU_CYCLES, objs.PmcCycles)
 		if err != nil {
 			l.cleanup()
 			return fmt.Errorf("failed to attach cycles perf_event for CPU %d: %w", cpu, err)
@@ -79,7 +73,7 @@ func (l *PMCLoader) Start(ctx context.Context) error {
 		l.links = append(l.links, cyclesLink)
 
 		// Attach to instructions counter
-		instrLink, err := l.attachPMCPerfEvent(prog, cpu, unix.PERF_COUNT_HW_INSTRUCTIONS, coll.Maps["pmc_instructions"])
+		instrLink, err := l.attachPMCPerfEvent(prog, cpu, unix.PERF_COUNT_HW_INSTRUCTIONS, objs.PmcInstructions)
 		if err != nil {
 			l.cleanup()
 			return fmt.Errorf("failed to attach instructions perf_event for CPU %d: %w", cpu, err)
@@ -87,7 +81,7 @@ func (l *PMCLoader) Start(ctx context.Context) error {
 		l.links = append(l.links, instrLink)
 
 		// Attach to stalls counter (may fail on some CPUs - not fatal)
-		stallsLink, err := l.attachPMCPerfEvent(prog, cpu, unix.PERF_COUNT_HW_STALLED_CYCLES_FRONTEND, coll.Maps["pmc_stalls"])
+		stallsLink, err := l.attachPMCPerfEvent(prog, cpu, unix.PERF_COUNT_HW_STALLED_CYCLES_FRONTEND, objs.PmcStalls)
 		if err == nil {
 			l.links = append(l.links, stallsLink)
 		}
@@ -95,7 +89,7 @@ func (l *PMCLoader) Start(ctx context.Context) error {
 	}
 
 	// Open ring buffer reader
-	l.reader, err = ringbuf.NewReader(coll.Maps["events"])
+	l.reader, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
 		l.cleanup()
 		return fmt.Errorf("failed to create ring buffer reader: %w", err)
@@ -144,10 +138,10 @@ func (l *PMCLoader) cleanup() {
 	}
 	l.links = nil
 
-	// Close eBPF collection
-	if l.collection != nil {
-		l.collection.Close()
-		l.collection = nil
+	// Close eBPF objects
+	if l.objs != nil {
+		l.objs.Close()
+		l.objs = nil
 	}
 }
 

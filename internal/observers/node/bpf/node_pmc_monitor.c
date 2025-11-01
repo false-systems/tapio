@@ -1,3 +1,5 @@
+//go:build ignore
+
 // SPDX-License-Identifier: GPL-2.0
 // Node PMC Monitor - eBPF program for Performance Monitoring Counters
 // Based on Brendan Gregg's "CPU Utilization is Wrong" research
