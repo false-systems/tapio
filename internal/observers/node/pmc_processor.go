@@ -30,16 +30,18 @@ type PMCSample struct {
 
 // PMCProcessor calculates IPC and memory stalls from PMC events
 type PMCProcessor struct {
-	mu         sync.Mutex
-	lastSample map[uint32]*PMCSample
-	nodeName   string
+	mu          sync.Mutex
+	lastSample  map[uint32]*PMCSample
+	lastEmitted map[uint32]string // Track last emitted impact per CPU
+	nodeName    string
 }
 
 // NewPMCProcessor creates a new PMC processor
 func NewPMCProcessor(nodeName string) *PMCProcessor {
 	return &PMCProcessor{
-		lastSample: make(map[uint32]*PMCSample),
-		nodeName:   nodeName,
+		lastSample:  make(map[uint32]*PMCSample),
+		lastEmitted: make(map[uint32]string),
+		nodeName:    nodeName,
 	}
 }
 
@@ -91,10 +93,26 @@ func (p *PMCProcessor) Process(ctx context.Context, event PMCEvent) *domain.Obse
 	// Classify performance impact
 	impact := p.classifyImpact(ipc, stallPct)
 
-	// Only emit event if performance degradation detected
-	if impact == "" {
-		return nil
+	// Only emit event if impact state changed
+	lastImpact, exists := p.lastEmitted[cpu]
+
+	if exists {
+		// Not first event - only emit if impact changed
+		if lastImpact == impact {
+			return nil // No state change, skip emission
+		}
+	} else {
+		// First event for this CPU
+		if impact == "" {
+			// First event is healthy, skip emission but track state
+			p.lastEmitted[cpu] = impact
+			return nil
+		}
+		// First event shows degradation - emit it!
 	}
+
+	// State changed OR first degraded event - update tracking and emit
+	p.lastEmitted[cpu] = impact
 
 	// Determine subtype based on severity
 	subtype := p.determineSubtype(ipc, stallPct)
@@ -115,23 +133,23 @@ func (p *PMCProcessor) Process(ctx context.Context, event PMCEvent) *domain.Obse
 
 // classifyImpact determines performance impact level
 func (p *PMCProcessor) classifyImpact(ipc, stallPct float64) string {
-	// Critical: IPC < 0.2 + Stalls > 70%
-	if ipc < 0.2 && stallPct > 70.0 {
+	// Critical: IPC <= 0.2 + Stalls > 70%
+	if ipc <= 0.2 && stallPct > 70.0 {
 		return "critical"
 	}
 
-	// High: IPC < 0.3 + Stalls > 50%
-	if ipc < 0.3 && stallPct > 50.0 {
+	// High: IPC <= 0.3 + Stalls > 50%
+	if ipc <= 0.3 && stallPct > 50.0 {
 		return "high"
 	}
 
-	// Medium: IPC < 0.5 + Stalls > 30%
-	if ipc < 0.5 && stallPct > 30.0 {
+	// Medium: IPC <= 0.5 + Stalls > 30%
+	if ipc <= 0.5 && stallPct > 30.0 {
 		return "medium"
 	}
 
-	// Low: IPC < 0.7 + Stalls > 20%
-	if ipc < 0.7 && stallPct > 20.0 {
+	// Low: IPC <= 0.7 + Stalls > 20%
+	if ipc <= 0.7 && stallPct > 20.0 {
 		return "low"
 	}
 
@@ -141,10 +159,10 @@ func (p *PMCProcessor) classifyImpact(ipc, stallPct float64) string {
 
 // determineSubtype maps impact to event subtype
 func (p *PMCProcessor) determineSubtype(ipc, stallPct float64) string {
-	if ipc < 0.2 && stallPct > 70.0 {
+	if ipc <= 0.2 && stallPct > 70.0 {
 		return "node_critical_memory_bottleneck"
 	}
-	if ipc < 0.3 && stallPct > 50.0 {
+	if ipc <= 0.3 && stallPct > 50.0 {
 		return "node_memory_bottleneck"
 	}
 	return "node_performance_degradation"

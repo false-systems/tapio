@@ -4,7 +4,7 @@
 // Node PMC Monitor - eBPF program for Performance Monitoring Counters
 // Based on Brendan Gregg's "CPU Utilization is Wrong" research
 
-#include <linux/bpf.h>
+#include "../../base/bpf/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "node_pmc_monitor.h"
