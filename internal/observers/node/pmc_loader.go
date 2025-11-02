@@ -98,6 +98,9 @@ func (l *PMCLoader) Start(ctx context.Context) error {
 
 	l.started = true
 
+	// Recreate stopCh for this Start/Stop cycle
+	l.stopCh = make(chan struct{})
+
 	// Start reading events from ring buffer
 	go l.readEvents(ctx)
 
@@ -153,8 +156,8 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 		Type:   unix.PERF_TYPE_HARDWARE,
 		Config: pmcType,
 		Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-		Sample: 100000000, // Sample frequency: 10 Hz (every 100ms), see PerfBitFreq
-		Bits:   unix.PerfBitFreq,
+		Sample: 10,               // Sample at 10 Hz (every 100ms)
+		Bits:   unix.PerfBitFreq, // Sample field is frequency in Hz
 	}
 
 	// Open perf_event for specific CPU

@@ -114,8 +114,8 @@ func (p *PMCProcessor) Process(ctx context.Context, event PMCEvent) *domain.Obse
 	// State changed OR first degraded event - update tracking and emit
 	p.lastEmitted[cpu] = impact
 
-	// Determine subtype based on severity
-	subtype := p.determineSubtype(ipc, stallPct)
+	// Determine subtype based on impact severity
+	subtype := p.determineSubtype(impact)
 
 	return &domain.ObserverEvent{
 		ID:        uuid.NewString(),
@@ -157,15 +157,16 @@ func (p *PMCProcessor) classifyImpact(ipc, stallPct float64) string {
 	return ""
 }
 
-// determineSubtype maps impact to event subtype
-func (p *PMCProcessor) determineSubtype(ipc, stallPct float64) string {
-	if ipc <= 0.2 && stallPct > 70.0 {
+// determineSubtype maps impact level to event subtype
+func (p *PMCProcessor) determineSubtype(impact string) string {
+	switch impact {
+	case "critical":
 		return "node_critical_memory_bottleneck"
-	}
-	if ipc <= 0.3 && stallPct > 50.0 {
+	case "high":
 		return "node_memory_bottleneck"
+	default:
+		return "node_performance_degradation"
 	}
-	return "node_performance_degradation"
 }
 
 // calculateDelta computes delta between current and previous counter values
@@ -176,6 +177,7 @@ func calculateDelta(current, previous uint64) uint64 {
 	}
 
 	// Counter wrapped around (48-bit hardware counter)
+	// Example: previous=max, current=1000 → delta = (max - previous + 1) + current = 1001
 	const maxCounter48bit uint64 = (1 << 48) - 1
 	return (maxCounter48bit - previous + 1) + current
 }
