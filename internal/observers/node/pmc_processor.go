@@ -177,5 +177,5 @@ func calculateDelta(current, previous uint64) uint64 {
 
 	// Counter wrapped around (48-bit hardware counter)
 	const maxCounter48bit uint64 = (1 << 48) - 1
-	return (maxCounter48bit - previous) + current
+	return (maxCounter48bit - previous + 1) + current
 }
