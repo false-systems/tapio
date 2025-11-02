@@ -153,7 +153,7 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 		Type:   unix.PERF_TYPE_HARDWARE,
 		Config: pmcType,
 		Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-		Sample: 100000000, // Sample every 100ms (100 million nanoseconds)
+		Sample: 100000000, // Sample frequency: 10 Hz (every 100ms), see PerfBitFreq
 		Bits:   unix.PerfBitFreq,
 	}
 
