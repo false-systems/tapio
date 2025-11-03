@@ -81,7 +81,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: ebpf-generated
-          path: internal/observers/network/bpf/
+          path: .
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -117,7 +117,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: ebpf-generated
-          path: internal/observers/network/bpf/
+          path: .
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -143,9 +143,11 @@ jobs:
     # Build eBPF if:
     # 1. eBPF source files changed (.c/.h)
     # 2. Network observer changed (imports generated code)
+    # 3. Node observer changed (imports generated code)
     if: |
       needs.detect-changes.outputs.has_ebpf == 'true' ||
-      contains(needs.detect-changes.outputs.go_files, 'internal/observers/network/')
+      contains(needs.detect-changes.outputs.go_files, 'internal/observers/network/') ||
+      contains(needs.detect-changes.outputs.go_files, 'internal/observers/node/')
     steps:
       - uses: actions/checkout@v4
 
@@ -166,6 +168,12 @@ jobs:
           go generate
           ls -la *.go  # Show generated files
 
+      - name: Generate eBPF code for node observer
+        run: |
+          cd internal/observers/node/bpf
+          go generate
+          ls -la *.go  # Show generated files
+
       - name: Upload generated eBPF artifacts
         uses: actions/upload-artifact@v5
         with:
@@ -174,6 +182,9 @@ jobs:
             internal/observers/network/bpf/*_bpfel.go
             internal/observers/network/bpf/*_bpfeb.go
             internal/observers/network/bpf/*.o
+            internal/observers/node/bpf/*_bpfel.go
+            internal/observers/node/bpf/*_bpfeb.go
+            internal/observers/node/bpf/*.o
           retention-days: 1
 
   build-docker:
@@ -211,7 +222,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: ebpf-generated
-          path: internal/observers/network/bpf/
+          path: .
 
       - name: Setup Go
         uses: actions/setup-go@v5

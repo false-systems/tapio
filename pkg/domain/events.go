@@ -298,4 +298,9 @@ type NodeEventData struct {
 	CPUAllocated    int64 `json:"cpu_allocated,omitempty"`    // milliCPU
 	MemoryAllocated int64 `json:"memory_allocated,omitempty"` // bytes
 	PodsAllocated   int64 `json:"pods_allocated,omitempty"`   // current pods
+
+	// PMC (Performance Monitoring Counter) metrics - Step 2
+	CPUIPC            float64 `json:"cpu_ipc,omitempty"`            // Instructions Per Cycle (0.0 - 2.0)
+	MemoryStalls      float64 `json:"memory_stalls,omitempty"`      // % of cycles stalled on memory (0-100)
+	PerformanceImpact string  `json:"performance_impact,omitempty"` // low, medium, high, critical
 }
