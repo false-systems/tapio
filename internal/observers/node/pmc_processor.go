@@ -28,7 +28,7 @@ type PMCSample struct {
 	Timestamp    uint64
 }
 
-// PMCProcessor calculates IPC and memory stalls from PMC events
+// PMCProcessor calculates IPC and memory stalls from PMC events.
 type PMCProcessor struct {
 	mu          sync.Mutex
 	lastSample  map[uint32]*PMCSample
