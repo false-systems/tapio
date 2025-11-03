@@ -14,10 +14,10 @@ import (
 //   - NATSEmitter: Publishes to NATS JetStream (Enterprise)
 //   - FileEmitter: Writes to file (Debug/Testing)
 //
-// Design: Best-effort delivery
+// Design: Configurable criticality
 //   - ObserverRuntime can have multiple emitters
-//   - If one emitter fails, others continue
-//   - Failures are logged and metriced, not propagated
+//   - Critical emitters: If they fail, entire event emission fails
+//   - Non-critical emitters: Failures are logged but don't block other emitters
 type Emitter interface {
 	// Emit sends an observer event to the destination.
 	// Returns error if the event could not be sent.
@@ -32,6 +32,16 @@ type Emitter interface {
 	// Name returns the emitter name for logging and metrics.
 	// Should be lowercase (e.g., "otlp", "nats", "file").
 	Name() string
+
+	// IsCritical returns true if this emitter is critical.
+	// Critical emitters: Failure fails the entire event emission.
+	// Non-critical emitters: Failure is logged but doesn't block processing.
+	//
+	// Example:
+	//   - OTLP: critical=true (OSS requires this)
+	//   - NATS: critical=false (Enterprise add-on, can degrade gracefully)
+	//   - File: critical=false (Debug/testing only)
+	IsCritical() bool
 
 	// Close releases any resources held by the emitter.
 	// Called during runtime shutdown.
