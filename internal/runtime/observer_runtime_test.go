@@ -101,7 +101,9 @@ func TestObserverRuntime_Setup(t *testing.T) {
 	defer cancel()
 
 	// Start runtime (should call Setup)
-	go runtime.Run(ctx)
+	go func() {
+		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+	}()
 
 	// Give it time to setup
 	time.Sleep(100 * time.Millisecond)
@@ -147,7 +149,9 @@ func TestObserverRuntime_ProcessEvent(t *testing.T) {
 	defer cancel()
 
 	// Start runtime
-	go runtime.Run(ctx)
+	go func() {
+		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+	}()
 	time.Sleep(100 * time.Millisecond) // Wait for startup
 
 	// Process event
@@ -181,7 +185,9 @@ func TestObserverRuntime_ProcessEvent_NilEvent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	go runtime.Run(ctx)
+	go func() {
+		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// Process event that returns nil
@@ -207,7 +213,9 @@ func TestObserverRuntime_IsHealthy(t *testing.T) {
 	defer cancel()
 
 	// Start runtime
-	go runtime.Run(ctx)
+	go func() {
+		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// After starting - healthy
@@ -242,7 +250,9 @@ func TestObserverRuntime_CriticalEmitterFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	go runtime.Run(ctx)
+	go func() {
+		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// Process event - should fail because critical emitter fails
@@ -275,7 +285,9 @@ func TestObserverRuntime_NonCriticalEmitterFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	go runtime.Run(ctx)
+	go func() {
+		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// Process event - should succeed despite non-critical emitter failure
