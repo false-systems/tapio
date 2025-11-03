@@ -1,0 +1,185 @@
+#!/bin/bash
+# Tapio Pre-Commit Hook - CLAUDE.md Enforcement
+# ZERO TOLERANCE for violations
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}🔍 Running CLAUDE.md compliance checks...${NC}"
+
+# Get list of staged Go files
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+
+if [ -z "$STAGED_GO_FILES" ]; then
+    echo -e "${GREEN}✓ No Go files to check${NC}"
+    exit 0
+fi
+
+VIOLATIONS=0
+
+# ============================================================================
+# VIOLATION 1: Check for map[string]interface{} (BANNED)
+# ============================================================================
+echo -e "${YELLOW}Checking for map[string]interface{} violations...${NC}"
+
+for file in $STAGED_GO_FILES; do
+    if [ -f "$file" ]; then
+        # Check for map[string]interface{} but allow in JSON unmarshaling context
+        if grep -n "map\[string\]interface{}" "$file" | grep -v "json.Unmarshal" | grep -v "// Exception:" > /dev/null; then
+            echo -e "${RED}❌ VIOLATION: map[string]interface{} found in $file${NC}"
+            grep -n "map\[string\]interface{}" "$file" | grep -v "json.Unmarshal"
+            VIOLATIONS=$((VIOLATIONS + 1))
+        fi
+    fi
+done
+
+# ============================================================================
+# VIOLATION 2: Check for TODO/FIXME/XXX/HACK comments (BANNED)
+# ============================================================================
+echo -e "${YELLOW}Checking for TODO/FIXME/XXX/HACK comments...${NC}"
+
+for file in $STAGED_GO_FILES; do
+    if [ -f "$file" ]; then
+        if grep -n -E "//.*\b(TODO|FIXME|XXX|HACK)\b" "$file" > /dev/null; then
+            echo -e "${RED}❌ VIOLATION: TODO/FIXME/XXX/HACK comment found in $file${NC}"
+            grep -n -E "//.*\b(TODO|FIXME|XXX|HACK)\b" "$file"
+            VIOLATIONS=$((VIOLATIONS + 1))
+        fi
+    fi
+done
+
+# ============================================================================
+# VIOLATION 3: Check for ignored errors (_ =)
+# ============================================================================
+echo -e "${YELLOW}Checking for ignored errors...${NC}"
+
+for file in $STAGED_GO_FILES; do
+    if [ -f "$file" ]; then
+        # Allow _ = in tests and specific contexts
+        if grep -n "_ =" "$file" | grep -v "_test.go" | grep -v "// Ignore:" > /dev/null; then
+            echo -e "${RED}❌ VIOLATION: Ignored error (_ =) found in $file${NC}"
+            grep -n "_ =" "$file" | grep -v "_test.go"
+            VIOLATIONS=$((VIOLATIONS + 1))
+        fi
+    fi
+done
+
+# ============================================================================
+# VIOLATION 4: Check for panic/not implemented stubs
+# ============================================================================
+echo -e "${YELLOW}Checking for panic or stub implementations...${NC}"
+
+for file in $STAGED_GO_FILES; do
+    if [ -f "$file" ]; then
+        if grep -n -E "panic\(\"not implemented\"|panic\(\"TODO" "$file" > /dev/null; then
+            echo -e "${RED}❌ VIOLATION: Stub implementation (panic) found in $file${NC}"
+            grep -n -E "panic\(\"not implemented\"|panic\(\"TODO" "$file"
+            VIOLATIONS=$((VIOLATIONS + 1))
+        fi
+    fi
+done
+
+# ============================================================================
+# VIOLATION 5: Check for interface{} in public APIs
+# ============================================================================
+echo -e "${YELLOW}Checking for interface{} in function signatures...${NC}"
+
+# Load exceptions if file exists
+EXCEPTION_FILES=""
+if [ -f ".claude-exceptions.yml" ]; then
+    EXCEPTION_FILES=$(grep '^  - file:' .claude-exceptions.yml | sed 's/.*file: "\(.*\)"/\1/' | tr '\n' '|' | sed 's/|$//')
+fi
+
+for file in $STAGED_GO_FILES; do
+    if [ -f "$file" ]; then
+        # Check if file is in exceptions list
+        if [ -n "$EXCEPTION_FILES" ] && echo "$file" | grep -E "$EXCEPTION_FILES" > /dev/null; then
+            continue
+        fi
+
+        # Check for func with interface{} (excluding any/context)
+        if grep -n "^func.*interface{}" "$file" | grep -v "context.Context" | grep -v "any" > /dev/null; then
+            echo -e "${RED}❌ VIOLATION: interface{} in public API found in $file${NC}"
+            grep -n "^func.*interface{}" "$file" | grep -v "context.Context"
+            VIOLATIONS=$((VIOLATIONS + 1))
+        fi
+    fi
+done
+
+# ============================================================================
+# CODE QUALITY: Go format check
+# ============================================================================
+echo -e "${YELLOW}Checking go fmt...${NC}"
+
+UNFORMATTED=$(gofmt -l $STAGED_GO_FILES)
+if [ -n "$UNFORMATTED" ]; then
+    echo -e "${RED}❌ VIOLATION: The following files are not formatted:${NC}"
+    echo "$UNFORMATTED"
+    echo -e "${YELLOW}Run: go fmt ./...${NC}"
+    VIOLATIONS=$((VIOLATIONS + 1))
+fi
+
+# ============================================================================
+# CODE QUALITY: Go vet check
+# ============================================================================
+echo -e "${YELLOW}Running go vet...${NC}"
+
+# Get unique directories from staged files
+UNIQUE_DIRS=$(for file in $STAGED_GO_FILES; do dirname "$file"; done | sort -u)
+
+for dir in $UNIQUE_DIRS; do
+    if [ -d "$dir" ]; then
+        # Run go vet and capture output + exit code
+        set +e  # Temporarily allow errors
+        VET_OUTPUT=$(go vet "./$dir" 2>&1)
+        VET_EXIT=$?
+        set -e  # Re-enable error checking
+
+        # Skip if build constraints exclude all files (Linux-only code on Mac)
+        if echo "$VET_OUTPUT" | grep -qE "build constraints exclude all Go files"; then
+            echo -e "${GREEN}✓ $dir (Linux-only, skipped on Mac)${NC}"
+            continue
+        fi
+
+        # Skip if no Go files in directory
+        if echo "$VET_OUTPUT" | grep -qE "no Go files"; then
+            continue
+        fi
+
+        # Check if vet actually failed
+        if [ $VET_EXIT -ne 0 ]; then
+            echo -e "${RED}❌ go vet failed for $dir${NC}"
+            echo "$VET_OUTPUT"
+            VIOLATIONS=$((VIOLATIONS + 1))
+        fi
+    fi
+done
+
+# ============================================================================
+# FINAL VERDICT
+# ============================================================================
+
+if [ $VIOLATIONS -gt 0 ]; then
+    echo ""
+    echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}❌ COMMIT REJECTED - $VIOLATIONS CLAUDE.md violations found${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}Fix all violations and try again.${NC}"
+    echo -e "${YELLOW}Read CLAUDE.md for standards.${NC}"
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}✅ All CLAUDE.md compliance checks passed!${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+echo ""
+
+exit 0
