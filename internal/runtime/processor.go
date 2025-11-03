@@ -37,12 +37,14 @@ type EventProcessor interface {
 
 	// Setup is called once before the runtime starts processing events.
 	// Use this for initialization that can't be done in the constructor:
-	//   - Loading configuration files
-	//   - Establishing connections
+	//   - Loading configuration from cfg
+	//   - Establishing connections (K8s informers, context service)
 	//   - Pre-warming caches
+	//   - Starting background goroutines
 	//
+	// Config is passed so processor can access runtime configuration.
 	// If Setup returns an error, the runtime will not start.
-	Setup(ctx context.Context) error
+	Setup(ctx context.Context, cfg Config) error
 
 	// Teardown is called once after the runtime stops processing events.
 	// Use this for cleanup:

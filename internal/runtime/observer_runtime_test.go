@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ func (m *mockProcessor) Name() string {
 	return m.name
 }
 
-func (m *mockProcessor) Setup(ctx context.Context) error {
+func (m *mockProcessor) Setup(ctx context.Context, cfg Config) error {
 	m.setupCalled = true
 	return nil
 }
@@ -45,15 +46,25 @@ func (m *mockProcessor) Process(ctx context.Context, rawEvent []byte) (*domain.O
 // Mock emitter for testing
 type mockEmitter struct {
 	name        string
+	critical    bool
 	emitted     []*domain.ObserverEvent
 	closeCalled bool
+	failNext    bool // For testing error handling
 }
 
 func (m *mockEmitter) Name() string {
 	return m.name
 }
 
+func (m *mockEmitter) IsCritical() bool {
+	return m.critical
+}
+
 func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	if m.failNext {
+		m.failNext = false
+		return fmt.Errorf("mock emit failure")
+	}
 	m.emitted = append(m.emitted, event)
 	return nil
 }
@@ -208,4 +219,69 @@ func TestObserverRuntime_IsHealthy(t *testing.T) {
 
 	// After stopping - not healthy
 	assert.False(t, runtime.IsHealthy())
+}
+
+// RED: Test critical emitter failure
+func TestObserverRuntime_CriticalEmitterFailure(t *testing.T) {
+	processor := &mockProcessor{
+		name: "test",
+		processFunc: func(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
+			return &domain.ObserverEvent{
+				Type:    "network",
+				Subtype: "dns_query",
+			}, nil
+		},
+	}
+
+	criticalEmitter := &mockEmitter{name: "otlp", critical: true, failNext: true}
+	nonCriticalEmitter := &mockEmitter{name: "nats", critical: false}
+
+	runtime, err := NewObserverRuntime(processor, WithEmitters(criticalEmitter, nonCriticalEmitter))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	go runtime.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Process event - should fail because critical emitter fails
+	err = runtime.ProcessEvent(ctx, []byte("test"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "critical emitter otlp failed")
+
+	// Non-critical emitter should NOT have received event (we break on critical failure)
+	assert.Len(t, nonCriticalEmitter.emitted, 0)
+}
+
+// RED: Test non-critical emitter failure
+func TestObserverRuntime_NonCriticalEmitterFailure(t *testing.T) {
+	processor := &mockProcessor{
+		name: "test",
+		processFunc: func(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
+			return &domain.ObserverEvent{
+				Type:    "network",
+				Subtype: "dns_query",
+			}, nil
+		},
+	}
+
+	criticalEmitter := &mockEmitter{name: "otlp", critical: true}
+	nonCriticalEmitter := &mockEmitter{name: "nats", critical: false, failNext: true}
+
+	runtime, err := NewObserverRuntime(processor, WithEmitters(criticalEmitter, nonCriticalEmitter))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	go runtime.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Process event - should succeed despite non-critical emitter failure
+	err = runtime.ProcessEvent(ctx, []byte("test"))
+	assert.NoError(t, err)
+
+	// Critical emitter should have received event
+	assert.Len(t, criticalEmitter.emitted, 1)
 }

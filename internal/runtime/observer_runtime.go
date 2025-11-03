@@ -8,6 +8,7 @@ import (
 
 // ObserverRuntime is the unified infrastructure for all observers.
 type ObserverRuntime struct {
+	config    Config
 	processor EventProcessor
 	emitters  []Emitter
 	mu        sync.RWMutex
@@ -20,7 +21,11 @@ func NewObserverRuntime(processor EventProcessor, opts ...Option) (*ObserverRunt
 		return nil, fmt.Errorf("processor is required")
 	}
 
+	// Start with default config
+	config := DefaultConfig(processor.Name())
+
 	runtime := &ObserverRuntime{
+		config:    config,
 		processor: processor,
 	}
 
@@ -42,8 +47,8 @@ func (r *ObserverRuntime) Run(ctx context.Context) error {
 	r.running = true
 	r.mu.Unlock()
 
-	// Setup
-	if err := r.processor.Setup(ctx); err != nil {
+	// Setup with config
+	if err := r.processor.Setup(ctx, r.config); err != nil {
 		return err
 	}
 
@@ -78,15 +83,21 @@ func (r *ObserverRuntime) ProcessEvent(ctx context.Context, rawEvent []byte) err
 		return nil
 	}
 
-	// Emit to all emitters
+	// Emit to all emitters with criticality handling
+	var criticalErr error
 	for _, emitter := range r.emitters {
 		if err := emitter.Emit(ctx, event); err != nil {
-			// Best-effort - log but continue
-			fmt.Printf("emitter %s failed: %v\n", emitter.Name(), err)
+			if emitter.IsCritical() {
+				// Critical emitter failed - fail entire emission
+				criticalErr = fmt.Errorf("critical emitter %s failed: %w", emitter.Name(), err)
+				break
+			}
+			// Non-critical emitter failed - log but continue
+			fmt.Printf("non-critical emitter %s failed: %v\n", emitter.Name(), err)
 		}
 	}
 
-	return nil
+	return criticalErr
 }
 
 // IsHealthy returns true if runtime is running
