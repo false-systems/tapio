@@ -11,6 +11,12 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
+const (
+	// maxCounter48bit is the maximum value for 48-bit PMC counters
+	// Used for overflow detection and delta calculation
+	maxCounter48bit uint64 = (1 << 48) - 1
+)
+
 // PMCEvent represents a single PMC sample from eBPF
 type PMCEvent struct {
 	CPU          uint32
@@ -178,6 +184,5 @@ func calculateDelta(current, previous uint64) uint64 {
 
 	// Counter wrapped around (48-bit hardware counter)
 	// Example: previous=max, current=1000 → delta = (max - previous + 1) + current = 1001
-	const maxCounter48bit uint64 = (1 << 48) - 1
 	return (maxCounter48bit - previous + 1) + current
 }

@@ -166,11 +166,18 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 		return nil, fmt.Errorf("perf_event_open failed: %w", err)
 	}
 
+	// Ensure FD is closed on error paths
+	var success bool
+	defer func() {
+		if !success {
+			unix.Close(fd)
+		}
+	}()
+
 	// Update perf event array map with file descriptor
 	cpuKey := uint32(cpu)
 	fdValue := uint32(fd)
 	if err := pmcMap.Update(&cpuKey, &fdValue, ebpf.UpdateAny); err != nil {
-		unix.Close(fd)
 		return nil, fmt.Errorf("failed to update PMC map: %w", err)
 	}
 
@@ -181,12 +188,18 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 		Attach:  ebpf.AttachPerfEvent,
 	})
 	if err != nil {
-		unix.Close(fd)
 		return nil, fmt.Errorf("failed to attach program: %w", err)
 	}
 
+	success = true // Prevent defer from closing FD
 	return lnk, nil
 }
+
+const (
+	// pmcEventSize is the size of pmc_event struct in bytes
+	// Must match sizeof(pmc_event) in node_pmc_monitor.h
+	pmcEventSize = 40
+)
 
 // readEvents reads PMC events from ring buffer and sends to channel
 func (l *PMCLoader) readEvents(ctx context.Context) {
@@ -210,7 +223,7 @@ func (l *PMCLoader) readEvents(ctx context.Context) {
 		}
 
 		// Parse PMC event from ring buffer
-		if len(record.RawSample) < 40 { // sizeof(pmc_event) = 40 bytes
+		if len(record.RawSample) < pmcEventSize {
 			continue
 		}
 
