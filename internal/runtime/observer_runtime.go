@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ObserverRuntime is the unified infrastructure for all observers.
@@ -93,7 +95,11 @@ func (r *ObserverRuntime) ProcessEvent(ctx context.Context, rawEvent []byte) err
 				break
 			}
 			// Non-critical emitter failed - log but continue
-			fmt.Printf("non-critical emitter %s failed: %v\n", emitter.Name(), err)
+			log.Warn().
+				Str("emitter", emitter.Name()).
+				Err(err).
+				Str("observer", r.processor.Name()).
+				Msg("non-critical emitter failed")
 		}
 	}
 
