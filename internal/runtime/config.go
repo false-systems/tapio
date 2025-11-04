@@ -200,7 +200,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config.Failure.Retry.InitialDelay must be > 0 for restart policy")
 		}
 		if c.Failure.Retry.Multiplier <= 1.0 {
-			return fmt.Errorf("config.Failure.Retry.Multiplier must be > 1.0 for exponential backoff")
+			return fmt.Errorf("config.Failure.Retry.Multiplier must be > 1.0 for exponential backoff (use FailPolicyIsolate for constant retry)")
 		}
 	}
 

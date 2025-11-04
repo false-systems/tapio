@@ -51,6 +51,9 @@ func (r *ObserverRuntime) Run(ctx context.Context) error {
 
 	// Setup with config
 	if err := r.processor.Setup(ctx, r.config); err != nil {
+		r.mu.Lock()
+		r.running = false
+		r.mu.Unlock()
 		return err
 	}
 

@@ -3,16 +3,18 @@ package runtime
 import (
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // BoundedQueue implements a fixed-size queue with configurable drop policies.
+// Thread-safe for concurrent use. All rng operations are protected by mu.
 type BoundedQueue struct {
 	config BackpressureConfig
 	mu     sync.RWMutex
 	events []*domain.ObserverEvent
-	rng    *rand.Rand
+	rng    *rand.Rand // Protected by mu
 }
 
 // NewBoundedQueue creates a new bounded queue with the given configuration
@@ -20,7 +22,7 @@ func NewBoundedQueue(config BackpressureConfig) *BoundedQueue {
 	return &BoundedQueue{
 		config: config,
 		events: make([]*domain.ObserverEvent, 0, config.QueueSize),
-		rng:    rand.New(rand.NewSource(rand.Int63())),
+		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
