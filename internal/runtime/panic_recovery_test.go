@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -134,9 +135,13 @@ func TestWithPanicRecoveryAndLog_LogsCalled(t *testing.T) {
 
 // RED: Test panic recovery with timeout
 func TestWithPanicRecoveryTimeout_Success(t *testing.T) {
-	fn := func() error {
-		time.Sleep(50 * time.Millisecond)
-		return nil
+	fn := func(ctx context.Context) error {
+		select {
+		case <-time.After(50 * time.Millisecond):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	err := WithPanicRecoveryTimeout("test", fn, 200*time.Millisecond)
@@ -145,9 +150,13 @@ func TestWithPanicRecoveryTimeout_Success(t *testing.T) {
 
 // RED: Test panic recovery timeout triggers
 func TestWithPanicRecoveryTimeout_Triggers(t *testing.T) {
-	fn := func() error {
-		time.Sleep(500 * time.Millisecond)
-		return nil
+	fn := func(ctx context.Context) error {
+		select {
+		case <-time.After(500 * time.Millisecond):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	err := WithPanicRecoveryTimeout("test", fn, 100*time.Millisecond)

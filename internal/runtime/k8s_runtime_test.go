@@ -169,7 +169,7 @@ func TestK8sRuntime_Start(t *testing.T) {
 
 	// Start runtime
 	go func() {
-		_ = runtime.Start(ctx) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx) // Ignore: Test side effects only, not return value
 	}()
 
 	// Give it time to start
@@ -196,7 +196,7 @@ func TestK8sRuntime_WaitForCacheSync(t *testing.T) {
 
 	// Start runtime
 	go func() {
-		_ = runtime.Start(ctx) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx) // Ignore: Test side effects only, not return value
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -219,7 +219,7 @@ func TestK8sRuntime_WaitForCacheSync_Timeout(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = runtime.Start(ctx) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx) // Ignore: Test side effects only, not return value
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -249,7 +249,7 @@ func TestK8sRuntime_Stop(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = runtime.Start(ctx) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx) // Ignore: Test side effects only, not return value
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -272,7 +272,7 @@ func TestK8sRuntime_AddInformer_AfterStart(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = runtime.Start(ctx) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx) // Ignore: Test side effects only, not return value
 	}()
 
 	time.Sleep(50 * time.Millisecond)

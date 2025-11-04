@@ -133,7 +133,7 @@ func TestEBPFRuntime_Start(t *testing.T) {
 
 	// Start should block until context cancelled
 	go func() {
-		_ = runtime.Start(ctx, handler) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx, handler) // Ignore: Test side effects only, not return value
 	}()
 
 	// Give it time to start
@@ -164,7 +164,7 @@ func TestEBPFRuntime_Stop(t *testing.T) {
 
 	// Start runtime
 	go func() {
-		_ = runtime.Start(ctx, handler) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx, handler) // Ignore: Test side effects only, not return value
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -193,7 +193,7 @@ func TestEBPFRuntime_Start_AlreadyRunning(t *testing.T) {
 
 	// Start first time
 	go func() {
-		_ = runtime.Start(ctx1, handler) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx1, handler) // Ignore: Test side effects only, not return value
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -232,7 +232,7 @@ func TestEBPFRuntime_IsHealthy(t *testing.T) {
 
 	// Start runtime
 	go func() {
-		_ = runtime.Start(ctx, handler) // Ignore: Test goroutine, error checked elsewhere
+		_ = runtime.Start(ctx, handler) // Ignore: Test side effects only, not return value
 	}()
 
 	time.Sleep(50 * time.Millisecond)
