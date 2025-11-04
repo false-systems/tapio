@@ -283,3 +283,19 @@ func TestK8sRuntime_AddInformer_AfterStart(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already started")
 }
+
+// REFACTOR: Test WaitForCacheSync before Start fails
+func TestK8sRuntime_WaitForCacheSync_BeforeStart(t *testing.T) {
+	runtime := NewK8sRuntime()
+	informer := newMockInformer()
+
+	err := runtime.AddInformer(informer, cache.ResourceEventHandlerFuncs{})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Try to wait for sync before starting
+	err = runtime.WaitForCacheSync(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not started")
+}

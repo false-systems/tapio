@@ -72,24 +72,21 @@ func (r *K8sRuntime) Start(ctx context.Context) error {
 // WaitForCacheSync waits for all informers to sync
 func (r *K8sRuntime) WaitForCacheSync(ctx context.Context) error {
 	r.mu.RLock()
+	if !r.started {
+		r.mu.RUnlock()
+		return fmt.Errorf("runtime not started")
+	}
 	informers := r.informers
 	r.mu.RUnlock()
 
-	// Build map of informers
-	syncMap := make(map[cache.SharedIndexInformer]bool)
+	// Build slice of HasSynced functions for cache.WaitForCacheSync
+	syncFuncs := make([]cache.InformerSynced, 0, len(informers))
 	for _, inf := range informers {
-		syncMap[inf] = true
+		syncFuncs = append(syncFuncs, inf.HasSynced)
 	}
 
 	// Wait for all to sync
-	if !cache.WaitForCacheSync(ctx.Done(), func() bool {
-		for inf := range syncMap {
-			if !inf.HasSynced() {
-				return false
-			}
-		}
-		return true
-	}) {
+	if !cache.WaitForCacheSync(ctx.Done(), syncFuncs...) {
 		return fmt.Errorf("timeout waiting for cache sync")
 	}
 
