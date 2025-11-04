@@ -43,15 +43,16 @@ func WithPanicRecoveryAndLog(observerName string, fn func() error, logFn func(ob
 }
 
 // WithPanicRecoveryTimeout wraps a function with panic recovery and timeout.
-// Returns timeout error if function doesn't complete in time.
-func WithPanicRecoveryTimeout(observerName string, fn func() error, timeout time.Duration) error {
+// The provided function must accept a context and should respect its cancellation.
+// Returns a timeout error if the function doesn't complete in time.
+func WithPanicRecoveryTimeout(observerName string, fn func(ctx context.Context) error, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- WithPanicRecovery(observerName, fn)
+		errCh <- WithPanicRecovery(observerName, func() error { return fn(ctx) })
 	}()
 
 	select {
