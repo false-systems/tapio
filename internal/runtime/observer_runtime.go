@@ -36,6 +36,11 @@ func NewObserverRuntime(processor EventProcessor, opts ...Option) (*ObserverRunt
 		opt(runtime)
 	}
 
+	// Validate final config
+	if err := runtime.config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
 	return runtime, nil
 }
 
