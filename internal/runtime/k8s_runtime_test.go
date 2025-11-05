@@ -15,7 +15,6 @@ import (
 type mockInformer struct {
 	started      bool
 	stopped      bool
-	synced       bool
 	addHandler   cache.ResourceEventHandler
 	mu           sync.Mutex
 	stopCh       chan struct{}
