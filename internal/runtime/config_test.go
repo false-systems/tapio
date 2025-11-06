@@ -163,8 +163,10 @@ func TestConfig_Validate_ValidCustomConfig(t *testing.T) {
 			},
 		},
 		Backpressure: BackpressureConfig{
-			QueueSize:  5000,
-			DropPolicy: DropNewest,
+			QueueSize:     5000,
+			DropPolicy:    DropNewest,
+			MaxRetries:    5,
+			DrainInterval: 5 * time.Millisecond,
 		},
 		Health: HealthConfig{
 			Enabled:       true,
