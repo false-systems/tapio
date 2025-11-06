@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -131,6 +132,12 @@ func (e *FileEmitter) Close() error {
 // openFile opens the output file for appending.
 // Must be called with e.mu held.
 func (e *FileEmitter) openFile() error {
+	// Create parent directories if they don't exist
+	dir := filepath.Dir(e.filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory: %w", err)
+	}
+
 	file, err := os.OpenFile(e.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err
