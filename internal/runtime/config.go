@@ -75,6 +75,16 @@ type BackpressureConfig struct {
 
 	// DropPolicy defines what to drop when queue is full
 	DropPolicy DropPolicy
+
+	// MaxRetries is the maximum number of retry attempts for critical emitter failures
+	// 0 = no retries (drop immediately on failure)
+	// N = retry up to N times before dropping
+	MaxRetries int
+
+	// DrainInterval is how often to drain the queue and emit events
+	// Lower values = lower latency but more CPU usage
+	// Higher values = higher latency but less CPU usage
+	DrainInterval time.Duration
 }
 
 // DropPolicy defines what to do when queue is full.
@@ -182,6 +192,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config.Backpressure.DropPolicy must be 'oldest', 'newest', or 'random', got %s", c.Backpressure.DropPolicy)
 	}
 
+	if c.Backpressure.DrainInterval <= 0 {
+		return fmt.Errorf("config.Backpressure.DrainInterval must be > 0, got %v", c.Backpressure.DrainInterval)
+	}
+
 	if c.Health.Enabled && c.Health.CheckInterval <= 0 {
 		return fmt.Errorf("config.Health.CheckInterval must be > 0 when health checks enabled")
 	}
@@ -217,8 +231,10 @@ func DefaultConfig(name string) Config {
 			Rules:       []SamplingRule{},
 		},
 		Backpressure: BackpressureConfig{
-			QueueSize:  10000,
-			DropPolicy: DropOldest,
+			QueueSize:     10000,
+			DropPolicy:    DropOldest,
+			MaxRetries:    3,                     // Retry up to 3 times before dropping
+			DrainInterval: 10 * time.Millisecond, // Drain queue every 10ms
 		},
 		Health: HealthConfig{
 			Enabled:       true,

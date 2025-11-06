@@ -174,3 +174,23 @@ func TestSampler_NilEvent(t *testing.T) {
 	sampler := NewSampler(config)
 	assert.False(t, sampler.ShouldSample(nil))
 }
+
+// Test that sampling disabled keeps all events
+func TestSampler_DisabledKeepsAll(t *testing.T) {
+	config := SamplingConfig{
+		Enabled:     false, // Sampling disabled
+		DefaultRate: 0.0,   // Would drop all if enabled
+	}
+
+	sampler := NewSampler(config)
+
+	event := &domain.ObserverEvent{
+		Type:    "network",
+		Subtype: "dns_query",
+	}
+
+	// Should keep all events when disabled
+	for i := 0; i < 100; i++ {
+		assert.True(t, sampler.ShouldSample(event), "Should keep event when sampling disabled")
+	}
+}
