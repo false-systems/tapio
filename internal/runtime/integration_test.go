@@ -101,8 +101,8 @@ func TestIntegration_Runtime_MultipleEmitters(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify both emitters received event
-	assert.Equal(t, 1, len(criticalEmitter.emitted), "Critical emitter should receive event")
-	assert.Equal(t, 1, len(nonCriticalEmitter.emitted), "Non-critical emitter should receive event")
+	assert.Equal(t, 1, criticalEmitter.EmittedCount(), "Critical emitter should receive event")
+	assert.Equal(t, 1, nonCriticalEmitter.EmittedCount(), "Non-critical emitter should receive event")
 }
 
 // Integration Test 4: Critical emitter failure triggers retry
@@ -140,7 +140,7 @@ func TestIntegration_Runtime_CriticalEmitterFailure(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify event was never successfully emitted (emitter keeps failing)
-	assert.Equal(t, 0, len(criticalEmitter.emitted), "Event should not be emitted when critical emitter always fails")
+	assert.Equal(t, 0, criticalEmitter.EmittedCount(), "Event should not be emitted when critical emitter always fails")
 }
 
 // Integration Test 5: Runtime health tracking

@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/pkg/domain"
 )
+
+// eventIDCounter generates unique IDs for test events to prevent race conditions
+var eventIDCounter atomic.Uint64
+
+func generateTestEventID() string {
+	return fmt.Sprintf("test-event-%d", eventIDCounter.Add(1))
+}
 
 // Mock processor for testing
 type mockProcessor struct {
@@ -35,9 +44,15 @@ func (m *mockProcessor) Teardown(ctx context.Context) error {
 
 func (m *mockProcessor) Process(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
 	if m.processFunc != nil {
-		return m.processFunc(ctx, rawEvent)
+		event, err := m.processFunc(ctx, rawEvent)
+		// Ensure all events have unique IDs to prevent race conditions
+		if event != nil && event.ID == "" {
+			event.ID = generateTestEventID()
+		}
+		return event, err
 	}
 	return &domain.ObserverEvent{
+		ID:      generateTestEventID(),
 		Type:    "test",
 		Subtype: "mock",
 	}, nil
@@ -45,6 +60,7 @@ func (m *mockProcessor) Process(ctx context.Context, rawEvent []byte) (*domain.O
 
 // Mock emitter for testing
 type mockEmitter struct {
+	mu           sync.Mutex
 	name         string
 	critical     bool
 	emitted      []*domain.ObserverEvent
@@ -63,6 +79,9 @@ func (m *mockEmitter) IsCritical() bool {
 }
 
 func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.attemptCount++
 	if m.alwaysFail {
 		return fmt.Errorf("mock emit failure")
@@ -76,8 +95,32 @@ func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) err
 }
 
 func (m *mockEmitter) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closeCalled = true
 	return nil
+}
+
+// Helper methods for thread-safe access
+func (m *mockEmitter) EmittedCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.emitted)
+}
+
+func (m *mockEmitter) EmittedEvents() []*domain.ObserverEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Return a copy to prevent races
+	events := make([]*domain.ObserverEvent, len(m.emitted))
+	copy(events, m.emitted)
+	return events
+}
+
+func (m *mockEmitter) AttemptCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.attemptCount
 }
 
 // RED: Test ObserverRuntime creation
@@ -173,9 +216,9 @@ func TestObserverRuntime_ProcessEvent(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify event was emitted
-	assert.Len(t, emitter.emitted, 1)
-	assert.Equal(t, "network", emitter.emitted[0].Type)
-	assert.Equal(t, "dns_query", emitter.emitted[0].Subtype)
+	assert.Equal(t, 1, emitter.EmittedCount())
+	assert.Equal(t, "network", emitter.EmittedEvents()[0].Type)
+	assert.Equal(t, "dns_query", emitter.EmittedEvents()[0].Subtype)
 }
 
 // RED: Test processor can return nil (ignore event)
@@ -208,7 +251,7 @@ func TestObserverRuntime_ProcessEvent_NilEvent(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify no event was emitted
-	assert.Len(t, emitter.emitted, 0)
+	assert.Equal(t, 0, emitter.EmittedCount())
 }
 
 // RED: Test IsHealthy
@@ -278,7 +321,7 @@ func TestObserverRuntime_CriticalEmitterFailure(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Non-critical emitter should NOT receive event (we break on critical failure)
-	assert.Len(t, nonCriticalEmitter.emitted, 0, "Non-critical emitter should not receive event when critical emitter fails")
+	assert.Equal(t, 0, nonCriticalEmitter.EmittedCount(), "Non-critical emitter should not receive event when critical emitter fails")
 }
 
 // RED: Test max retries prevents infinite retry loop
@@ -319,7 +362,7 @@ func TestObserverRuntime_MaxRetries(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Should attempt initial + 3 retries = 4 total
-	assert.LessOrEqual(t, criticalEmitter.attemptCount, 4, "Should not exceed max retries (1 initial + 3 retries)")
+	assert.LessOrEqual(t, criticalEmitter.AttemptCount(), 4, "Should not exceed max retries (1 initial + 3 retries)")
 }
 
 // RED: Test non-critical emitter failure
@@ -359,7 +402,7 @@ func TestObserverRuntime_NonCriticalEmitterFailure(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Critical emitter should have received event
-	assert.Len(t, criticalEmitter.emitted, 1)
+	assert.Equal(t, 1, criticalEmitter.EmittedCount())
 }
 
 func TestObserverRuntime_SamplingDropsEvents(t *testing.T) {
@@ -391,7 +434,7 @@ func TestObserverRuntime_SamplingDropsEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Emitter should NOT receive event (sampled out)
-	assert.Equal(t, 0, len(emitter.emitted), "Event should be sampled out")
+	assert.Equal(t, 0, emitter.EmittedCount(), "Event should be sampled out")
 }
 
 func TestObserverRuntime_SamplingKeepsEvents(t *testing.T) {
@@ -426,5 +469,5 @@ func TestObserverRuntime_SamplingKeepsEvents(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Emitter SHOULD receive event (100% sampling)
-	assert.Equal(t, 1, len(emitter.emitted), "Event should be kept")
+	assert.Equal(t, 1, emitter.EmittedCount(), "Event should be kept")
 }
