@@ -32,6 +32,11 @@ func (s *Sampler) ShouldSample(event *domain.ObserverEvent) bool {
 		return false
 	}
 
+	// If sampling disabled, keep all events
+	if !s.config.Enabled {
+		return true
+	}
+
 	// Find matching rule
 	for _, rule := range s.config.Rules {
 		if rule.Matches(event.Type, event.Subtype) {
