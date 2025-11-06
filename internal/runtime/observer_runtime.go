@@ -7,17 +7,20 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // ObserverRuntime is the unified infrastructure for all observers.
 type ObserverRuntime struct {
-	config    Config
-	processor EventProcessor
-	emitters  []Emitter
-	sampler   *Sampler
-	queue     *BoundedQueue
-	mu        sync.RWMutex
-	running   bool
+	config      Config
+	processor   EventProcessor
+	emitters    []Emitter
+	sampler     *Sampler
+	queue       *BoundedQueue
+	mu          sync.RWMutex
+	running     bool
+	retryMu     sync.Mutex
+	retryCounts map[*domain.ObserverEvent]int
 }
 
 // NewObserverRuntime creates a new runtime with the given processor and options.
@@ -30,8 +33,9 @@ func NewObserverRuntime(processor EventProcessor, opts ...Option) (*ObserverRunt
 	config := DefaultConfig(processor.Name())
 
 	runtime := &ObserverRuntime{
-		config:    config,
-		processor: processor,
+		config:      config,
+		processor:   processor,
+		retryCounts: make(map[*domain.ObserverEvent]int),
 	}
 
 	// Apply options
@@ -177,8 +181,43 @@ func (r *ObserverRuntime) drainQueue(ctx context.Context) {
 				}
 
 				if criticalErr != nil {
-					// Critical emitter failed - re-enqueue for retry
-					r.queue.Enqueue(event)
+					// Check retry count
+					r.retryMu.Lock()
+					retryCount := r.retryCounts[event]
+					r.retryMu.Unlock()
+
+					if retryCount < r.config.Backpressure.MaxRetries {
+						// Increment retry count and re-enqueue
+						r.retryMu.Lock()
+						r.retryCounts[event] = retryCount + 1
+						r.retryMu.Unlock()
+
+						// Re-enqueue for retry
+						if !r.queue.Enqueue(event) {
+							// Queue full - drop event and clean up retry tracking
+							r.retryMu.Lock()
+							delete(r.retryCounts, event)
+							r.retryMu.Unlock()
+							log.Warn().
+								Str("observer", r.processor.Name()).
+								Int("retry_count", retryCount).
+								Msg("dropped event: queue full during retry")
+						}
+					} else {
+						// Max retries exceeded - drop event and clean up
+						r.retryMu.Lock()
+						delete(r.retryCounts, event)
+						r.retryMu.Unlock()
+						log.Error().
+							Str("observer", r.processor.Name()).
+							Int("max_retries", r.config.Backpressure.MaxRetries).
+							Msg("dropped event: max retries exceeded")
+					}
+				} else {
+					// Success - clean up retry tracking
+					r.retryMu.Lock()
+					delete(r.retryCounts, event)
+					r.retryMu.Unlock()
 				}
 			}
 		}

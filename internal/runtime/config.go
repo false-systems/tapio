@@ -75,6 +75,11 @@ type BackpressureConfig struct {
 
 	// DropPolicy defines what to drop when queue is full
 	DropPolicy DropPolicy
+
+	// MaxRetries is the maximum number of retry attempts for critical emitter failures
+	// 0 = no retries (drop immediately on failure)
+	// N = retry up to N times before dropping
+	MaxRetries int
 }
 
 // DropPolicy defines what to do when queue is full.
@@ -219,6 +224,7 @@ func DefaultConfig(name string) Config {
 		Backpressure: BackpressureConfig{
 			QueueSize:  10000,
 			DropPolicy: DropOldest,
+			MaxRetries: 3, // Retry up to 3 times before dropping
 		},
 		Health: HealthConfig{
 			Enabled:       true,

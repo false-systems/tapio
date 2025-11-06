@@ -45,12 +45,13 @@ func (m *mockProcessor) Process(ctx context.Context, rawEvent []byte) (*domain.O
 
 // Mock emitter for testing
 type mockEmitter struct {
-	name        string
-	critical    bool
-	emitted     []*domain.ObserverEvent
-	closeCalled bool
-	failNext    bool // For testing error handling (fails once)
-	alwaysFail  bool // For testing persistent failures
+	name         string
+	critical     bool
+	emitted      []*domain.ObserverEvent
+	closeCalled  bool
+	failNext     bool // For testing error handling (fails once)
+	alwaysFail   bool // For testing persistent failures
+	attemptCount int  // Track number of emit attempts
 }
 
 func (m *mockEmitter) Name() string {
@@ -62,6 +63,7 @@ func (m *mockEmitter) IsCritical() bool {
 }
 
 func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	m.attemptCount++
 	if m.alwaysFail {
 		return fmt.Errorf("mock emit failure")
 	}
@@ -277,6 +279,47 @@ func TestObserverRuntime_CriticalEmitterFailure(t *testing.T) {
 
 	// Non-critical emitter should NOT receive event (we break on critical failure)
 	assert.Len(t, nonCriticalEmitter.emitted, 0, "Non-critical emitter should not receive event when critical emitter fails")
+}
+
+// RED: Test max retries prevents infinite retry loop
+func TestObserverRuntime_MaxRetries(t *testing.T) {
+	processor := &mockProcessor{
+		name: "test",
+		processFunc: func(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
+			return &domain.ObserverEvent{Type: "test", Subtype: "event"}, nil
+		},
+	}
+
+	criticalEmitter := &mockEmitter{
+		name:       "otlp",
+		critical:   true,
+		alwaysFail: true,
+	}
+
+	runtime, err := NewObserverRuntime(processor, func(r *ObserverRuntime) {
+		r.config.Sampling.Enabled = false
+		r.config.Backpressure.MaxRetries = 3 // Max 3 retry attempts
+	}, WithEmitters(criticalEmitter))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runtime.Run(ctx)
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	// Process event
+	err = runtime.ProcessEvent(ctx, []byte("test"))
+	require.NoError(t, err)
+
+	// Wait for retries to exhaust
+	time.Sleep(150 * time.Millisecond)
+
+	// Should attempt initial + 3 retries = 4 total
+	assert.LessOrEqual(t, criticalEmitter.attemptCount, 4, "Should not exceed max retries (1 initial + 3 retries)")
 }
 
 // RED: Test non-critical emitter failure
