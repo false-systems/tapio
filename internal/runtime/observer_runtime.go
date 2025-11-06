@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -13,6 +14,8 @@ type ObserverRuntime struct {
 	config    Config
 	processor EventProcessor
 	emitters  []Emitter
+	sampler   *Sampler
+	queue     *BoundedQueue
 	mu        sync.RWMutex
 	running   bool
 }
@@ -41,6 +44,10 @@ func NewObserverRuntime(processor EventProcessor, opts ...Option) (*ObserverRunt
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Create sampler and queue AFTER options (so they get final config)
+	runtime.sampler = NewSampler(runtime.config.Sampling)
+	runtime.queue = NewBoundedQueue(runtime.config.Backpressure)
+
 	return runtime, nil
 }
 
@@ -61,6 +68,9 @@ func (r *ObserverRuntime) Run(ctx context.Context) error {
 		r.mu.Unlock()
 		return err
 	}
+
+	// Start queue drainer
+	go r.drainQueue(ctx)
 
 	// Wait for cancellation
 	<-ctx.Done()
@@ -93,25 +103,21 @@ func (r *ObserverRuntime) ProcessEvent(ctx context.Context, rawEvent []byte) err
 		return nil
 	}
 
-	// Emit to all emitters with criticality handling
-	var criticalErr error
-	for _, emitter := range r.emitters {
-		if err := emitter.Emit(ctx, event); err != nil {
-			if emitter.IsCritical() {
-				// Critical emitter failed - fail entire emission
-				criticalErr = fmt.Errorf("critical emitter %s failed: %w", emitter.Name(), err)
-				break
-			}
-			// Non-critical emitter failed - log but continue
-			log.Warn().
-				Str("emitter", emitter.Name()).
-				Err(err).
-				Str("observer", r.processor.Name()).
-				Msg("non-critical emitter failed")
+	// Apply sampling if enabled
+	if r.config.Sampling.Enabled {
+		if !r.sampler.ShouldSample(event) {
+			// Event sampled out
+			return nil
 		}
 	}
 
-	return criticalErr
+	// Enqueue event (applies backpressure)
+	if !r.queue.Enqueue(event) {
+		// Queue full - drop event
+		return fmt.Errorf("event dropped: queue full (capacity: %d)", r.queue.Cap())
+	}
+
+	return nil
 }
 
 // IsHealthy returns true if runtime is running
@@ -128,5 +134,53 @@ type Option func(*ObserverRuntime)
 func WithEmitters(emitters ...Emitter) Option {
 	return func(r *ObserverRuntime) {
 		r.emitters = emitters
+	}
+}
+
+// drainQueue continuously drains events from queue and emits to emitters
+func (r *ObserverRuntime) drainQueue(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Drain all available events
+			for {
+				event := r.queue.Dequeue()
+				if event == nil {
+					break // Queue empty
+				}
+
+				// Emit to all emitters with criticality handling
+				var criticalErr error
+				for _, emitter := range r.emitters {
+					if err := emitter.Emit(ctx, event); err != nil {
+						if emitter.IsCritical() {
+							criticalErr = err
+							log.Error().
+								Str("emitter", emitter.Name()).
+								Err(err).
+								Str("observer", r.processor.Name()).
+								Msg("critical emitter failed")
+							break
+						}
+						// Non-critical emitter failed - log but continue
+						log.Warn().
+							Str("emitter", emitter.Name()).
+							Err(err).
+							Str("observer", r.processor.Name()).
+							Msg("non-critical emitter failed")
+					}
+				}
+
+				if criticalErr != nil {
+					// Critical emitter failed - re-enqueue for retry
+					r.queue.Enqueue(event)
+				}
+			}
+		}
 	}
 }

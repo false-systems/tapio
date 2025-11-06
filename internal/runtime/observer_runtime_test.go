@@ -49,7 +49,8 @@ type mockEmitter struct {
 	critical    bool
 	emitted     []*domain.ObserverEvent
 	closeCalled bool
-	failNext    bool // For testing error handling
+	failNext    bool // For testing error handling (fails once)
+	alwaysFail  bool // For testing persistent failures
 }
 
 func (m *mockEmitter) Name() string {
@@ -61,6 +62,9 @@ func (m *mockEmitter) IsCritical() bool {
 }
 
 func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
+	if m.alwaysFail {
+		return fmt.Errorf("mock emit failure")
+	}
 	if m.failNext {
 		m.failNext = false
 		return fmt.Errorf("mock emit failure")
@@ -101,8 +105,9 @@ func TestObserverRuntime_Setup(t *testing.T) {
 	defer cancel()
 
 	// Start runtime (should call Setup)
+	errCh := make(chan error, 1)
 	go func() {
-		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+		errCh <- runtime.Run(ctx)
 	}()
 
 	// Give it time to setup
@@ -142,15 +147,18 @@ func TestObserverRuntime_ProcessEvent(t *testing.T) {
 
 	emitter := &mockEmitter{name: "test-emitter"}
 
-	runtime, err := NewObserverRuntime(processor, WithEmitters(emitter))
+	runtime, err := NewObserverRuntime(processor, func(r *ObserverRuntime) {
+		r.config.Sampling.Enabled = false // Disable sampling for this test
+	}, WithEmitters(emitter))
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	// Start runtime
+	errCh := make(chan error, 1)
 	go func() {
-		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+		errCh <- runtime.Run(ctx)
 	}()
 	time.Sleep(100 * time.Millisecond) // Wait for startup
 
@@ -185,8 +193,9 @@ func TestObserverRuntime_ProcessEvent_NilEvent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
+	errCh := make(chan error, 1)
 	go func() {
-		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+		errCh <- runtime.Run(ctx)
 	}()
 	time.Sleep(100 * time.Millisecond)
 
@@ -213,8 +222,9 @@ func TestObserverRuntime_IsHealthy(t *testing.T) {
 	defer cancel()
 
 	// Start runtime
+	errCh := make(chan error, 1)
 	go func() {
-		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+		errCh <- runtime.Run(ctx)
 	}()
 	time.Sleep(100 * time.Millisecond)
 
@@ -241,27 +251,32 @@ func TestObserverRuntime_CriticalEmitterFailure(t *testing.T) {
 		},
 	}
 
-	criticalEmitter := &mockEmitter{name: "otlp", critical: true, failNext: true}
+	criticalEmitter := &mockEmitter{name: "otlp", critical: true, alwaysFail: true}
 	nonCriticalEmitter := &mockEmitter{name: "nats", critical: false}
 
-	runtime, err := NewObserverRuntime(processor, WithEmitters(criticalEmitter, nonCriticalEmitter))
+	runtime, err := NewObserverRuntime(processor, func(r *ObserverRuntime) {
+		r.config.Sampling.Enabled = false // Disable sampling for this test
+	}, WithEmitters(criticalEmitter, nonCriticalEmitter))
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
+	errCh := make(chan error, 1)
 	go func() {
-		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+		errCh <- runtime.Run(ctx)
 	}()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
-	// Process event - should fail because critical emitter fails
+	// Process event - ProcessEvent should succeed (just enqueues)
 	err = runtime.ProcessEvent(ctx, []byte("test"))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "critical emitter otlp failed")
+	require.NoError(t, err)
 
-	// Non-critical emitter should NOT have received event (we break on critical failure)
-	assert.Len(t, nonCriticalEmitter.emitted, 0)
+	// Wait for drainQueue attempts (will retry but keep failing)
+	time.Sleep(50 * time.Millisecond)
+
+	// Non-critical emitter should NOT receive event (we break on critical failure)
+	assert.Len(t, nonCriticalEmitter.emitted, 0, "Non-critical emitter should not receive event when critical emitter fails")
 }
 
 // RED: Test non-critical emitter failure
@@ -279,14 +294,17 @@ func TestObserverRuntime_NonCriticalEmitterFailure(t *testing.T) {
 	criticalEmitter := &mockEmitter{name: "otlp", critical: true}
 	nonCriticalEmitter := &mockEmitter{name: "nats", critical: false, failNext: true}
 
-	runtime, err := NewObserverRuntime(processor, WithEmitters(criticalEmitter, nonCriticalEmitter))
+	runtime, err := NewObserverRuntime(processor, func(r *ObserverRuntime) {
+		r.config.Sampling.Enabled = false // Disable sampling for this test
+	}, WithEmitters(criticalEmitter, nonCriticalEmitter))
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
+	errCh := make(chan error, 1)
 	go func() {
-		_ = runtime.Run(ctx) // Ignore: Test goroutine, error checked elsewhere
+		errCh <- runtime.Run(ctx)
 	}()
 	time.Sleep(100 * time.Millisecond)
 
@@ -294,6 +312,76 @@ func TestObserverRuntime_NonCriticalEmitterFailure(t *testing.T) {
 	err = runtime.ProcessEvent(ctx, []byte("test"))
 	assert.NoError(t, err)
 
+	// Wait for drainQueue to emit
+	time.Sleep(200 * time.Millisecond)
+
 	// Critical emitter should have received event
 	assert.Len(t, criticalEmitter.emitted, 1)
+}
+
+func TestObserverRuntime_SamplingDropsEvents(t *testing.T) {
+	proc := &mockProcessor{name: "test"}
+	emitter := &mockEmitter{name: "test", critical: true}
+
+	// Create runtime with 0% sampling (drop all)
+	runtime, err := NewObserverRuntime(proc, func(r *ObserverRuntime) {
+		r.config.Sampling.Enabled = true
+		r.config.Sampling.DefaultRate = 0.0 // Drop all
+	}, WithEmitters(emitter))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runtime.Run(ctx)
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// Process event
+	proc.processFunc = func(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
+		return &domain.ObserverEvent{Type: "test", Subtype: "event"}, nil
+	}
+
+	err = runtime.ProcessEvent(ctx, []byte("data"))
+	require.NoError(t, err)
+
+	// Emitter should NOT receive event (sampled out)
+	assert.Equal(t, 0, len(emitter.emitted), "Event should be sampled out")
+}
+
+func TestObserverRuntime_SamplingKeepsEvents(t *testing.T) {
+	proc := &mockProcessor{name: "test"}
+	emitter := &mockEmitter{name: "test", critical: true}
+
+	// Create runtime with 100% sampling (keep all)
+	runtime, err := NewObserverRuntime(proc, func(r *ObserverRuntime) {
+		r.config.Sampling.Enabled = true
+		r.config.Sampling.DefaultRate = 1.0 // Keep all
+	}, WithEmitters(emitter))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runtime.Run(ctx)
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// Process event
+	proc.processFunc = func(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
+		return &domain.ObserverEvent{Type: "test", Subtype: "event"}, nil
+	}
+
+	err = runtime.ProcessEvent(ctx, []byte("data"))
+	require.NoError(t, err)
+
+	// Give it time to emit
+	time.Sleep(50 * time.Millisecond)
+
+	// Emitter SHOULD receive event (100% sampling)
+	assert.Equal(t, 1, len(emitter.emitted), "Event should be kept")
 }
