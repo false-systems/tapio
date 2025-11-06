@@ -182,7 +182,11 @@ func TestFileEmitter_ContextCancellation(t *testing.T) {
 func TestFileEmitter_InvalidPath(t *testing.T) {
 	// Try to write to invalid path (directory that doesn't exist)
 	emitter := NewFileEmitter("/nonexistent/directory/events.log", false)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	event := &domain.ObserverEvent{
 		Type:      "test",

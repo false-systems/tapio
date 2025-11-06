@@ -197,7 +197,11 @@ func TestIntegration_FileEmitter_CriticalFailure(t *testing.T) {
 
 	// Critical emitter with invalid path
 	emitter := NewFileEmitter(invalidPath, true)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	runtime, err := NewObserverRuntime(
 		processor,
@@ -249,7 +253,11 @@ func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 	}
 
 	emitter := NewFileEmitter(filePath, true)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	runtime, err := NewObserverRuntime(
 		processor,
