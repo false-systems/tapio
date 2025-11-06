@@ -114,7 +114,11 @@ func TestProcessor_GenerateEvents(t *testing.T) {
 	config := runtime.DefaultConfig("test")
 	err := proc.Setup(ctx, config)
 	require.NoError(t, err)
-	defer proc.Teardown(context.Background())
+	defer func() {
+		if err := proc.Teardown(context.Background()); err != nil {
+			t.Logf("teardown failed: %v", err)
+		}
+	}()
 
 	// Start generating events
 	eventCh := make(chan []byte, 100)
@@ -153,7 +157,11 @@ func TestProcessor_MultipleEventTypes(t *testing.T) {
 	config := runtime.DefaultConfig("test")
 	err := proc.Setup(ctx, config)
 	require.NoError(t, err)
-	defer proc.Teardown(context.Background())
+	defer func() {
+		if err := proc.Teardown(context.Background()); err != nil {
+			t.Logf("teardown failed: %v", err)
+		}
+	}()
 
 	eventCh := make(chan []byte, 100)
 	go proc.StartGeneration(ctx, eventCh)
@@ -186,7 +194,11 @@ func TestProcessor_StopGeneration(t *testing.T) {
 	config := runtime.DefaultConfig("test")
 	err := proc.Setup(ctx, config)
 	require.NoError(t, err)
-	defer proc.Teardown(context.Background())
+	defer func() {
+		if err := proc.Teardown(context.Background()); err != nil {
+			t.Logf("teardown failed: %v", err)
+		}
+	}()
 
 	eventCh := make(chan []byte, 100)
 	go proc.StartGeneration(ctx, eventCh)
