@@ -34,7 +34,11 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 
 	// Create file emitter (critical so errors fail)
 	fileEmitter := NewFileEmitter(filePath, true)
-	defer fileEmitter.Close()
+	defer func() {
+		if err := fileEmitter.Close(); err != nil {
+			t.Logf("fileEmitter close failed: %v", err)
+		}
+	}()
 
 	// Create runtime with file emitter
 	runtime, err := NewObserverRuntime(
@@ -111,10 +115,18 @@ func TestIntegration_FileEmitter_MultipleEmitters(t *testing.T) {
 
 	// Create two file emitters
 	emitter1 := NewFileEmitter(file1Path, false)
-	defer emitter1.Close()
+	defer func() {
+		if err := emitter1.Close(); err != nil {
+			t.Logf("emitter1 close failed: %v", err)
+		}
+	}()
 
 	emitter2 := NewFileEmitter(file2Path, false)
-	defer emitter2.Close()
+	defer func() {
+		if err := emitter2.Close(); err != nil {
+			t.Logf("emitter2 close failed: %v", err)
+		}
+	}()
 
 	// Create runtime with both emitters
 	runtime, err := NewObserverRuntime(

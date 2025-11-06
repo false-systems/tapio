@@ -36,7 +36,11 @@ func TestFileEmitter_Emit_SingleEvent(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "events.log")
 
 	emitter := NewFileEmitter(filePath, false)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	// Create test event
 	event := &domain.ObserverEvent{
@@ -68,7 +72,11 @@ func TestFileEmitter_Emit_MultipleEvents(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "events.log")
 
 	emitter := NewFileEmitter(filePath, false)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -106,7 +114,11 @@ func TestFileEmitter_Emit_NilEvent(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "events.log")
 
 	emitter := NewFileEmitter(filePath, false)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	err := emitter.Emit(ctx, nil)
@@ -145,7 +157,11 @@ func TestFileEmitter_ContextCancellation(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "events.log")
 
 	emitter := NewFileEmitter(filePath, false)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	// Create cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -184,7 +200,11 @@ func TestFileEmitter_ConcurrentEmits(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "events.log")
 
 	emitter := NewFileEmitter(filePath, false)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("emitter close failed: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	const numGoroutines = 10
