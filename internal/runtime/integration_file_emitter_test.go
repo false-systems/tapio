@@ -231,7 +231,7 @@ func TestIntegration_FileEmitter_CriticalFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	err = runtime.ProcessEvent(ctx, rawEvent)
-	assert.Error(t, err)
+	require.Error(t, err, "Expected error from critical emitter failure")
 	assert.Contains(t, err.Error(), "critical emitter")
 }
 
