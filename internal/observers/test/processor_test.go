@@ -12,6 +12,24 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
+// Test timing constants
+const (
+	// eventCollectionPeriod is how long we collect events in tests
+	eventCollectionPeriod = 1 * time.Second
+
+	// contextBuffer is extra time to ensure context completes
+	contextBuffer = 100 * time.Millisecond
+
+	// eventCollectionTimeout is total time to wait for event collection
+	eventCollectionTimeout = eventCollectionPeriod + contextBuffer // 1100ms
+
+	// halfSecondContext is context timeout for shorter tests
+	halfSecondContext = 500 * time.Millisecond
+
+	// multiTypeTimeout is timeout for multi-type event tests
+	multiTypeTimeout = halfSecondContext + contextBuffer // 600ms
+)
+
 // RED: Test creating test observer processor
 func TestNewProcessor(t *testing.T) {
 	proc := NewProcessor()
@@ -90,7 +108,7 @@ func TestProcessor_GenerateEvents(t *testing.T) {
 		WithEventRate(10), // 10 events/sec
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), eventCollectionPeriod)
 	defer cancel()
 
 	config := runtime.DefaultConfig("test")
@@ -104,7 +122,7 @@ func TestProcessor_GenerateEvents(t *testing.T) {
 
 	// Collect events for 1 second
 	var count int
-	timeout := time.After(1100 * time.Millisecond)
+	timeout := time.After(eventCollectionTimeout)
 	for {
 		select {
 		case <-eventCh:
@@ -129,7 +147,7 @@ func TestProcessor_MultipleEventTypes(t *testing.T) {
 		WithEventRate(20),
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), halfSecondContext)
 	defer cancel()
 
 	config := runtime.DefaultConfig("test")
@@ -142,7 +160,7 @@ func TestProcessor_MultipleEventTypes(t *testing.T) {
 
 	// Collect events
 	eventTypes := make(map[string]int)
-	timeout := time.After(600 * time.Millisecond)
+	timeout := time.After(multiTypeTimeout)
 	for {
 		select {
 		case data := <-eventCh:

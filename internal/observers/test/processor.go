@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/yairfalse/tapio/internal/runtime"
@@ -21,6 +22,7 @@ type EventType struct {
 type Processor struct {
 	eventRate  int         // Events per second
 	eventTypes []EventType // Event types to generate
+	rngMu      sync.Mutex  // Protects rng (thread-safe random access)
 	rng        *rand.Rand
 }
 
@@ -112,7 +114,11 @@ func (p *Processor) StartGeneration(ctx context.Context, eventCh chan<- []byte) 
 
 // generateEvent creates a random event from configured types
 func (p *Processor) generateEvent() *domain.ObserverEvent {
-	eventType := p.eventTypes[p.rng.Intn(len(p.eventTypes))]
+	p.rngMu.Lock()
+	idx := p.rng.Intn(len(p.eventTypes))
+	p.rngMu.Unlock()
+
+	eventType := p.eventTypes[idx]
 
 	return &domain.ObserverEvent{
 		Type:      eventType.Type,
