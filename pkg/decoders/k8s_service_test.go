@@ -68,7 +68,7 @@ func TestK8sService_Decode_NilKV(t *testing.T) {
 	// Will panic with nil KV, but that's expected behavior
 	// In production, KV should never be nil
 	assert.Panics(t, func() {
-		decoder.Decode(context.Background(), input, conf)
+		decoder.Decode(input, conf)
 	})
 }
 
