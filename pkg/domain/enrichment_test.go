@@ -372,3 +372,125 @@ func TestExtractRelationships_NoEntities(t *testing.T) {
 	// Should have no relationships
 	assert.Len(t, relationships, 0)
 }
+
+// RED: Test mapToEventType with additional patterns
+func TestMapToEventType_AdditionalPatterns(t *testing.T) {
+	tests := []struct {
+		eventType    string
+		expectedType EventType
+	}{
+		// Performance patterns
+		{"performance_degradation", EventTypePerformance},
+		{"latency_spike", EventTypePerformance},
+		{"degradation_detected", EventTypePerformance},
+		// Resource patterns
+		{"resource_exhaustion", EventTypeResource},
+		{"memory_pressure", EventTypeResource},
+		// Volume patterns
+		{"volume_mount_failed", EventTypeVolume},
+		{"pvc_pending", EventTypeVolume},
+		// Config patterns
+		{"config_update", EventTypeConfig},
+		{"configmap_changed", EventTypeConfig},
+		{"secret_rotation", EventTypeConfig},
+		// Health patterns
+		{"health_check_failed", EventTypeHealth},
+		// Network patterns (UDP specifically)
+		{"udp_packet_loss", EventTypeNetwork},
+		// Default fallback
+		{"unknown_event", EventTypeNetwork},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.eventType, func(t *testing.T) {
+			result := mapToEventType(tt.eventType)
+			assert.Equal(t, tt.expectedType, result, "Event type %s should map to %s", tt.eventType, tt.expectedType)
+		})
+	}
+}
+
+// RED: Test mapOwnerToEntityType with all owner kinds
+func TestMapOwnerToEntityType(t *testing.T) {
+	tests := []struct {
+		ownerKind    string
+		expectedType EntityType
+	}{
+		{"Deployment", EntityTypeDeployment},
+		{"StatefulSet", EntityTypeStatefulSet},
+		{"DaemonSet", EntityTypeDaemonSet},
+		{"ReplicaSet", EntityTypePod}, // Fallback
+		{"Job", EntityTypePod},        // Fallback
+		{"", EntityTypePod},           // Empty fallback
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ownerKind, func(t *testing.T) {
+			result := mapOwnerToEntityType(tt.ownerKind)
+			assert.Equal(t, tt.expectedType, result, "Owner kind %s should map to %s", tt.ownerKind, tt.expectedType)
+		})
+	}
+}
+
+// RED: Test EnrichWithK8sContext with DaemonSet owner
+func TestEnrichWithK8sContext_DaemonSetOwner(t *testing.T) {
+	observerEvent := &ObserverEvent{
+		ID:        "evt-789",
+		Type:      "tcp_connect",
+		Source:    "network-observer",
+		Timestamp: time.Now(),
+	}
+
+	k8sContext := &K8sContext{
+		ClusterID:    "test-cluster",
+		PodName:      "logging-agent-xyz",
+		PodNamespace: "kube-system",
+		OwnerKind:    "DaemonSet",
+		OwnerName:    "logging-agent",
+		NodeName:     "node-1",
+	}
+
+	tapioEvent, err := EnrichWithK8sContext(observerEvent, k8sContext)
+	require.NoError(t, err)
+
+	// Find DaemonSet entity
+	var daemonSetEntity *Entity
+	for i := range tapioEvent.Entities {
+		if tapioEvent.Entities[i].Type == EntityTypeDaemonSet {
+			daemonSetEntity = &tapioEvent.Entities[i]
+			break
+		}
+	}
+	require.NotNil(t, daemonSetEntity, "Should have DaemonSet entity")
+	assert.Equal(t, "logging-agent", daemonSetEntity.Name)
+	assert.Equal(t, EntityTypeDaemonSet, daemonSetEntity.Type)
+}
+
+// RED: Test EnrichWithK8sContext with no owner kind (fallback)
+func TestEnrichWithK8sContext_NoOwner(t *testing.T) {
+	observerEvent := &ObserverEvent{
+		ID:        "evt-standalone",
+		Type:      "tcp_connect",
+		Source:    "network-observer",
+		Timestamp: time.Now(),
+	}
+
+	k8sContext := &K8sContext{
+		ClusterID:    "test-cluster",
+		PodName:      "standalone-pod",
+		PodNamespace: "default",
+		// No OwnerKind or OwnerName
+		NodeName: "node-1",
+	}
+
+	tapioEvent, err := EnrichWithK8sContext(observerEvent, k8sContext)
+	require.NoError(t, err)
+
+	// Should have pod and node entities, but no owner entity
+	assert.Len(t, tapioEvent.Entities, 2, "Should have pod and node only (no owner)")
+
+	for _, entity := range tapioEvent.Entities {
+		assert.NotEqual(t, EntityTypeDeployment, entity.Type, "Should not have Deployment entity")
+		assert.NotEqual(t, EntityTypeStatefulSet, entity.Type, "Should not have StatefulSet entity")
+		assert.NotEqual(t, EntityTypeDaemonSet, entity.Type, "Should not have DaemonSet entity")
+	}
+}
