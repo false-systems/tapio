@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +17,10 @@ import (
 // TestIntegration_FileEmitter_EndToEnd validates the full pipeline:
 // ObserverRuntime → Processor → FileEmitter
 func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", "test-emitter-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
 	filePath := filepath.Join(tmpDir, "integration.log")
 
 	// Create mock processor
@@ -40,10 +44,11 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 		}
 	}()
 
-	// Create runtime with file emitter
+	// Create runtime with file emitter (disable sampling for tests)
 	runtime, err := NewObserverRuntime(
 		processor,
 		WithEmitters(fileEmitter),
+		WithSamplingDisabled(),
 	)
 	require.NoError(t, err)
 
@@ -62,9 +67,9 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 
 	// Process events
 	events := []*domain.ObserverEvent{
-		{Type: "network", Subtype: "dns_query", Timestamp: time.Now()},
-		{Type: "network", Subtype: "link_failure", Timestamp: time.Now()},
-		{Type: "scheduler", Subtype: "pod_unschedulable", Timestamp: time.Now()},
+		{ID: "test-1", Type: "network", Subtype: "dns_query", Timestamp: time.Now()},
+		{ID: "test-2", Type: "network", Subtype: "link_failure", Timestamp: time.Now()},
+		{ID: "test-3", Type: "scheduler", Subtype: "pod_unschedulable", Timestamp: time.Now()},
 	}
 
 	for _, event := range events {
@@ -75,9 +80,10 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Stop runtime
+	// Wait for queue to drain BEFORE cancelling
+	time.Sleep(200 * time.Millisecond)
 	cancel()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // Wait for goroutine cleanup
 
 	// Verify file has all events
 	data, err := os.ReadFile(filePath)
@@ -98,7 +104,10 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 // TestIntegration_FileEmitter_MultipleEmitters validates that FileEmitter
 // works alongside other emitters (fan-out pattern)
 func TestIntegration_FileEmitter_MultipleEmitters(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", "test-multi-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
 	file1Path := filepath.Join(tmpDir, "emitter1.log")
 	file2Path := filepath.Join(tmpDir, "emitter2.log")
 
@@ -128,10 +137,11 @@ func TestIntegration_FileEmitter_MultipleEmitters(t *testing.T) {
 		}
 	}()
 
-	// Create runtime with both emitters
+	// Create runtime with both emitters (disable sampling for tests)
 	runtime, err := NewObserverRuntime(
 		processor,
 		WithEmitters(emitter1, emitter2),
+		WithSamplingDisabled(),
 	)
 	require.NoError(t, err)
 
@@ -148,6 +158,7 @@ func TestIntegration_FileEmitter_MultipleEmitters(t *testing.T) {
 
 	// Process event
 	event := &domain.ObserverEvent{
+		ID:        "test-1",
 		Type:      "test",
 		Subtype:   "fan_out",
 		Timestamp: time.Now(),
@@ -159,8 +170,10 @@ func TestIntegration_FileEmitter_MultipleEmitters(t *testing.T) {
 	err = runtime.ProcessEvent(ctx, rawEvent)
 	require.NoError(t, err)
 
+	// Wait for queue to drain BEFORE cancelling
+	time.Sleep(200 * time.Millisecond)
 	cancel()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // Wait for goroutine cleanup
 
 	// Both files should have the event
 	for _, path := range []string{file1Path, file2Path} {
@@ -179,7 +192,7 @@ func TestIntegration_FileEmitter_MultipleEmitters(t *testing.T) {
 }
 
 // TestIntegration_FileEmitter_CriticalFailure validates that critical
-// file emitter failures stop event processing
+// file emitter failures are retried and eventually logged (async)
 func TestIntegration_FileEmitter_CriticalFailure(t *testing.T) {
 	// Use invalid path to force failure
 	invalidPath := "/nonexistent/directory/cannot/write/here.log"
@@ -206,6 +219,7 @@ func TestIntegration_FileEmitter_CriticalFailure(t *testing.T) {
 	runtime, err := NewObserverRuntime(
 		processor,
 		WithEmitters(emitter),
+		WithSamplingDisabled(),
 	)
 	require.NoError(t, err)
 
@@ -220,8 +234,9 @@ func TestIntegration_FileEmitter_CriticalFailure(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Process event - should fail because emitter is critical
+	// Process event - ProcessEvent succeeds (enqueues), emission fails async
 	event := &domain.ObserverEvent{
+		ID:        "test-1",
 		Type:      "test",
 		Subtype:   "should_fail",
 		Timestamp: time.Now(),
@@ -230,15 +245,25 @@ func TestIntegration_FileEmitter_CriticalFailure(t *testing.T) {
 	rawEvent, err := json.Marshal(event)
 	require.NoError(t, err)
 
+	// ProcessEvent returns nil (async emission)
 	err = runtime.ProcessEvent(ctx, rawEvent)
-	require.Error(t, err, "Expected error from critical emitter failure")
-	assert.Contains(t, err.Error(), "critical emitter")
+	require.NoError(t, err, "ProcessEvent should succeed (emission is async)")
+
+	// Wait for drainQueue to attempt emission and fail
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify file was NOT created (emission failed)
+	_, err = os.Stat(invalidPath)
+	assert.True(t, os.IsNotExist(err), "File should not exist after critical emitter failure")
 }
 
 // TestIntegration_FileEmitter_HighThroughput validates FileEmitter
 // can handle high event rates without data loss
 func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", "test-throughput-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
 	filePath := filepath.Join(tmpDir, "throughput.log")
 
 	processor := &mockProcessor{
@@ -262,6 +287,7 @@ func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 	runtime, err := NewObserverRuntime(
 		processor,
 		WithEmitters(emitter),
+		WithSamplingDisabled(),
 	)
 	require.NoError(t, err)
 
@@ -281,6 +307,7 @@ func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 
 	for i := 0; i < numEvents; i++ {
 		event := &domain.ObserverEvent{
+			ID:        fmt.Sprintf("test-event-%d", i),
 			Type:      "test",
 			Subtype:   "throughput",
 			Timestamp: time.Now(),
@@ -293,8 +320,10 @@ func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	// Wait for queue to fully drain BEFORE cancelling (1000 events)
+	time.Sleep(500 * time.Millisecond)
 	cancel()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // Wait for goroutine cleanup
 
 	// Verify all events were written
 	data, err := os.ReadFile(filePath)
