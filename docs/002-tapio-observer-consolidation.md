@@ -27,7 +27,7 @@ TAPIO currently has **18 active observers** collecting eBPF and Kubernetes event
 4. **Type system bloat**: 37 data structs with significant overlap
 5. **Complex correlation**: 18 event sources is hard to correlate
 
-**ahti Impact**:
+**Ukko Impact**:
 - 68 event types → 68 BadgerDB key prefixes (inefficient storage)
 - Correlation engine needs to understand relationships between 18 observers
 - Graph model needs vertices/edges from 18 sources
