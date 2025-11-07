@@ -62,13 +62,14 @@ func TestServiceInfo_JSONMarshaling(t *testing.T) {
 func TestK8sService_Decode_NilKV(t *testing.T) {
 	decoder := NewK8sService(nil)
 
+	ctx := context.Background()
 	input := []byte("10.96.0.1")
 	conf := Decoder{}
 
 	// Will panic with nil KV, but that's expected behavior
 	// In production, KV should never be nil
 	assert.Panics(t, func() {
-		decoder.Decode(input, conf)
+		decoder.Decode(ctx, input, conf)
 	})
 }
 
