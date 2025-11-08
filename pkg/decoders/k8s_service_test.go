@@ -66,11 +66,10 @@ func TestK8sService_Decode_NilKV(t *testing.T) {
 	input := []byte("10.96.0.1")
 	conf := Decoder{}
 
-	// Will panic with nil KV, but that's expected behavior
+	// Should return error with nil KV, as KV must be initialized
 	// In production, KV should never be nil
-	assert.Panics(t, func() {
-		_, _ = decoder.Decode(ctx, input, conf) // Ignore: testing panic behavior
-	})
+	_, err := decoder.Decode(context.Background(), input, conf)
+	assert.Error(t, err)
 }
 
 // Integration tests will be added when Context Service is ready
