@@ -31,23 +31,6 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// waitForFileReady polls for a file to exist, preventing flaky tests from
-// fixed sleep durations. Returns error if timeout is exceeded.
-func waitForFileReady(path string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		info, err := os.Stat(path)
-		if err == nil && info.Size() >= 0 {
-			// File exists (size may be zero before first event, but file is created)
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for file %s to be created", path)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // waitForQueueDrain waits for the event queue to drain by polling file size.
 // This is more reliable than fixed sleep durations for integration tests.
 func waitForQueueDrain(path string, expectedLines int, timeout time.Duration) error {
