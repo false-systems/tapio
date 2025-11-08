@@ -57,8 +57,7 @@ func TestCreateTapioResource_DefaultServiceName(t *testing.T) {
 // RED: Test CreateTapioResource with default version from env
 func TestCreateTapioResource_DefaultVersionFromEnv(t *testing.T) {
 	// Set environment variable
-	os.Setenv("TAPIO_VERSION", "2.0.0-env")
-	defer os.Unsetenv("TAPIO_VERSION")
+	t.Setenv("TAPIO_VERSION", "2.0.0-env")
 
 	config := TapioResourceConfig{
 		ServiceName: "test-service",
@@ -83,7 +82,7 @@ func TestCreateTapioResource_DefaultVersionFromEnv(t *testing.T) {
 // RED: Test CreateTapioResource with dev version
 func TestCreateTapioResource_DevVersion(t *testing.T) {
 	// Ensure TAPIO_VERSION is not set
-	os.Unsetenv("TAPIO_VERSION")
+	require.NoError(t, os.Unsetenv("TAPIO_VERSION"))
 
 	config := TapioResourceConfig{
 		ServiceName: "test-service",
@@ -282,8 +281,7 @@ func TestCreateTapioResource_ServiceInstanceID(t *testing.T) {
 // RED: Test CreateTapioResource with version override
 func TestCreateTapioResource_VersionOverride(t *testing.T) {
 	// Set environment variable
-	os.Setenv("TAPIO_VERSION", "env-version")
-	defer os.Unsetenv("TAPIO_VERSION")
+	t.Setenv("TAPIO_VERSION", "env-version")
 
 	// Config version should override env
 	config := TapioResourceConfig{

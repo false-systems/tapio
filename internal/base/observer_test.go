@@ -287,10 +287,8 @@ func TestBaseObserver_Lifecycle(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		if err := obs.Start(ctx); err != nil {
-			// Expected to error when context times out or is canceled - that's OK for this test
-			// Don't fail the test for context errors
-		}
+		// Expected to error when context times out - that's OK for this test
+		_ = obs.Start(ctx) // Ignore: testing context cancellation, error expected
 	}()
 
 	// Wait for observer to be running
