@@ -250,26 +250,3 @@ func TestFileEmitter_ConcurrentEmits(t *testing.T) {
 	expectedEvents := numGoroutines * eventsPerGoroutine
 	assert.Equal(t, expectedEvents, len(lines))
 }
-
-// Helper to split lines (handles both \n and \r\n)
-func splitLines(s string) []string {
-	if s == "" {
-		return []string{}
-	}
-	lines := []string{}
-	current := ""
-	for _, ch := range s {
-		if ch == '\n' {
-			if current != "" {
-				lines = append(lines, current)
-			}
-			current = ""
-		} else if ch != '\r' {
-			current += string(ch)
-		}
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
-}

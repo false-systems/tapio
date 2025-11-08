@@ -85,7 +85,7 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 	}
 
 	// Wait for queue to drain BEFORE cancelling
-	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, waitForQueueDrain(filePath, len(events), 2*time.Second))
 	cancel()
 	time.Sleep(50 * time.Millisecond) // Wait for goroutine cleanup
 
@@ -312,6 +312,7 @@ func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 		}
 	}()
 
+	// Wait for runtime to be ready
 	time.Sleep(100 * time.Millisecond)
 
 	// Process 1000 events as fast as possible
@@ -333,7 +334,7 @@ func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 	}
 
 	// Wait for queue to fully drain BEFORE cancelling (1000 events)
-	time.Sleep(500 * time.Millisecond)
+	require.NoError(t, waitForQueueDrain(filePath, numEvents, 5*time.Second))
 	cancel()
 	time.Sleep(50 * time.Millisecond) // Wait for goroutine cleanup
 

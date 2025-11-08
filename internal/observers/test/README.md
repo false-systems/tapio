@@ -123,7 +123,7 @@ processor := test.NewProcessor(
 obs, err := runtime.NewObserverRuntime(processor,
     runtime.WithEmitters(
         NewOTLPEmitter("localhost:4318"),
-        NewFileEmitter("/tmp/test-events.json"),
+        NewFileEmitter(filepath.Join(os.TempDir(), "test-events.json")),
     ),
 )
 
@@ -215,7 +215,8 @@ func TestObserverRuntime_WithTestObserver(t *testing.T) {
     )
 
     // Create file emitter for verification
-    emitter, err := NewFileEmitter("/tmp/test-events.json")
+    tmpFile := filepath.Join(t.TempDir(), "test-events.json")
+    emitter, err := NewFileEmitter(tmpFile)
     require.NoError(t, err)
 
     // Wire to runtime
@@ -244,7 +245,7 @@ func TestObserverRuntime_WithTestObserver(t *testing.T) {
     <-ctx.Done()
 
     // Verify file has ~10 events
-    data, err := os.ReadFile("/tmp/test-events.json")
+    data, err := os.ReadFile(tmpFile)
     require.NoError(t, err)
 
     lines := bytes.Count(data, []byte("\n"))
