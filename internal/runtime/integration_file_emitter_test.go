@@ -66,8 +66,22 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 		}
 	}()
 
-	// Wait for runtime to be ready
-	time.Sleep(100 * time.Millisecond)
+	// Wait for runtime to be ready by polling for file existence
+	waitForFileReady := func(path string, timeout time.Duration) error {
+		deadline := time.Now().Add(timeout)
+		for {
+			info, err := os.Stat(path)
+			if err == nil && info.Size() >= 0 {
+				// File exists (size may be zero before first event, but runtime is up)
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout waiting for file %s to be created", path)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	require.NoError(t, waitForFileReady(filePath, 2*time.Second))
 
 	// Process events
 	events := []*domain.ObserverEvent{
