@@ -68,7 +68,7 @@ func TestK8sService_Decode_NilKV(t *testing.T) {
 
 	// Should return error with nil KV, as KV must be initialized
 	// In production, KV should never be nil
-	_, err := decoder.Decode(context.Background(), input, conf)
+	_, err := decoder.Decode(ctx, input, conf)
 	assert.Error(t, err)
 }
 
