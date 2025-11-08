@@ -52,6 +52,8 @@ func NewProcessor(opts ...Option) *Processor {
 		},
 		// NOTE: math/rand with a time-based seed is NOT cryptographically secure.
 		// This is acceptable here because randomness is only used for test data generation.
+		// NOTE: math/rand with a time-based seed is NOT cryptographically secure.
+		// This is acceptable here because randomness is only used for test data generation.
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 
