@@ -19,7 +19,11 @@ import (
 func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-emitter-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	filePath := filepath.Join(tmpDir, "integration.log")
 
@@ -106,7 +110,11 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 func TestIntegration_FileEmitter_MultipleEmitters(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-multi-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	file1Path := filepath.Join(tmpDir, "emitter1.log")
 	file2Path := filepath.Join(tmpDir, "emitter2.log")
@@ -262,7 +270,11 @@ func TestIntegration_FileEmitter_CriticalFailure(t *testing.T) {
 func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-throughput-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	filePath := filepath.Join(tmpDir, "throughput.log")
 
