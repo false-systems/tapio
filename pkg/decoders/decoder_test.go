@@ -210,12 +210,12 @@ func TestSet_DecodeLabels_WithPadding(t *testing.T) {
 	assert.Equal(t, []string{"ab", "cd"}, result)
 }
 
-// RED: Test ErrSkipLabelSet handling
-func TestSet_Decode_SkipLabelSet(t *testing.T) {
+// RED: Test static_map returns "unknown:value" for unmapped values
+func TestSet_Decode_StaticMapUnknown(t *testing.T) {
 	set, err := NewSet(100)
 	require.NoError(t, err)
 
-	// Create a static_map decoder that will return ErrSkipLabelSet for unknown
+	// static_map with AllowUnknown=false returns "unknown:value" instead of ErrSkipLabelSet
 	label := Label{
 		Name: "test",
 		Size: 4,
@@ -223,15 +223,14 @@ func TestSet_Decode_SkipLabelSet(t *testing.T) {
 			{
 				Name:         "static_map",
 				StaticMap:    map[string]string{"good": "value"},
-				AllowUnknown: false, // Will skip unknown
+				AllowUnknown: false,
 			},
 		},
 	}
 
-	// Use input that's not in the map and AllowUnknown=false
-	// This should add to skip cache
+	// Input not in map - static_map returns "unknown:value" format
 	result, err := set.decode([]byte("bad\x00"), label)
-	assert.NoError(t, err) // static_map doesn't return ErrSkipLabelSet, just returns "unknown:bad"
+	assert.NoError(t, err)
 	assert.Contains(t, string(result), "unknown")
 }
 
