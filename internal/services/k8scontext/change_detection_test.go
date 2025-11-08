@@ -806,9 +806,10 @@ func TestDetectDeploymentChanges_ImageAndReplicasBothChanged(t *testing.T) {
 	// Find events by subtype
 	var imageEvent, replicaEvent *domain.ObserverEvent
 	for _, evt := range emitter.events {
-		if evt.Subtype == "image_changed" {
+		switch evt.Subtype {
+		case "image_changed":
 			imageEvent = evt
-		} else if evt.Subtype == "scaled" {
+		case "scaled":
 			replicaEvent = evt
 		}
 	}

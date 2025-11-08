@@ -31,6 +31,10 @@ func NewK8sPod(kv nats.KeyValue) *K8sPod {
 // Input: ctx (context for cancellation), IP address bytes (e.g., from inet_ip decoder output: "10.244.1.5")
 // Output: Pod name (e.g., "nginx-abc123")
 func (k *K8sPod) Decode(ctx context.Context, in []byte, conf Decoder) ([]byte, error) {
+	if k.kv == nil {
+		return nil, fmt.Errorf("K8sPod decoder: NATS KV not initialized")
+	}
+
 	ip := string(in)
 
 	// Lookup in NATS KV: pod.ip.<ip> → PodInfo

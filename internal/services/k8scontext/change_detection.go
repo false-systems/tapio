@@ -75,9 +75,10 @@ func (s *Service) detectRolloutStatus(ctx context.Context, old, new *appsv1.Depl
 			// Status changed?
 			if oldCond == nil || oldCond.Status != cond.Status || oldCond.Reason != cond.Reason {
 				subtype := "rollout_progressing"
-				if cond.Reason == "ProgressDeadlineExceeded" {
+				switch cond.Reason {
+				case "ProgressDeadlineExceeded":
 					subtype = "rollout_failed"
-				} else if cond.Reason == "NewReplicaSetAvailable" {
+				case "NewReplicaSetAvailable":
 					subtype = "rollout_complete"
 				}
 

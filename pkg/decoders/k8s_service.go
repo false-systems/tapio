@@ -31,6 +31,10 @@ func NewK8sService(kv nats.KeyValue) *K8sService {
 // Input: IP address bytes (e.g., from inet_ip decoder output: "10.96.0.1")
 // Output: Service name (e.g., "kubernetes")
 func (k *K8sService) Decode(ctx context.Context, in []byte, conf Decoder) ([]byte, error) {
+	if k.kv == nil {
+		return nil, fmt.Errorf("K8sService decoder: NATS KV not initialized")
+	}
+
 	ip := string(in)
 
 	// Lookup in NATS KV: service.ip.<ip> → ServiceInfo

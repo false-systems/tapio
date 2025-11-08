@@ -10,8 +10,7 @@ import (
 
 // TestNewService_Success verifies successful service creation
 func TestNewService_Success(t *testing.T) {
-	// TODO: This test requires real K8s and NATS infrastructure
-	// Will be implemented as integration test
+	// Requires real K8s and NATS infrastructure - implement as integration test
 	t.Skip("Requires K8s and NATS infrastructure - implement as integration test")
 }
 
@@ -96,7 +95,6 @@ func TestNewService_CustomValues(t *testing.T) {
 
 // TestNewService_InvalidK8sConfig verifies error handling for invalid K8s config
 func TestNewService_InvalidK8sConfig(t *testing.T) {
-	// TODO: This test requires mocking K8s client creation
-	// Will be implemented as integration test
+	// Requires K8s client mocking - implement as integration test
 	t.Skip("Requires K8s client mocking - implement as integration test")
 }

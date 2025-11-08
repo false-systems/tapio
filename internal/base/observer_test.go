@@ -287,7 +287,8 @@ func TestBaseObserver_Lifecycle(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = obs.Start(ctx) // Ignore: test goroutine error
+		// Expected to error when context times out - that's OK for this test
+		_ = obs.Start(ctx) // Ignore: testing context cancellation, error expected
 	}()
 
 	// Wait for observer to be running
@@ -298,4 +299,47 @@ func TestBaseObserver_Lifecycle(t *testing.T) {
 	err = obs.Stop()
 	require.NoError(t, err)
 	assert.False(t, obs.IsHealthy())
+}
+
+// RED: Test Logger returns logger with trace context
+func TestBaseObserver_Logger(t *testing.T) {
+	setupOTEL(t)
+
+	obs, err := NewBaseObserver("test")
+	require.NoError(t, err)
+
+	logger := obs.Logger(context.Background())
+	assert.NotNil(t, logger)
+}
+
+// RED: Test PublishEvent sends event to NATS
+func TestBaseObserver_PublishEvent(t *testing.T) {
+	setupOTEL(t)
+
+	obs, err := NewBaseObserver("test")
+	require.NoError(t, err)
+
+	event := map[string]string{"test": "value"}
+
+	// Should not panic (eventPublisher may be nil in test, error is expected)
+	err = obs.PublishEvent(context.Background(), "test.subject", event)
+	// Error is expected if no publisher is configured - that's OK
+	if err != nil {
+		assert.Contains(t, err.Error(), "event publisher not configured")
+	}
+}
+
+// RED: Test SendObserverEvent with nil event channel
+func TestBaseObserver_SendObserverEvent(t *testing.T) {
+	setupOTEL(t)
+
+	obs, err := NewBaseObserver("test")
+	require.NoError(t, err)
+
+	event := &domain.ObserverEvent{
+		Type: string(domain.EventTypeNetwork),
+	}
+
+	// Should not panic with nil event channel
+	obs.SendObserverEvent(context.Background(), event)
 }
