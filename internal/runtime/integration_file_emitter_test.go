@@ -66,22 +66,9 @@ func TestIntegration_FileEmitter_EndToEnd(t *testing.T) {
 		}
 	}()
 
-	// Wait for runtime to be ready by polling for file existence
-	waitForFileReady := func(path string, timeout time.Duration) error {
-		deadline := time.Now().Add(timeout)
-		for {
-			info, err := os.Stat(path)
-			if err == nil && info.Size() >= 0 {
-				// File exists (size may be zero before first event, but runtime is up)
-				return nil
-			}
-			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout waiting for file %s to be created", path)
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	require.NoError(t, waitForFileReady(filePath, 2*time.Second))
+	// Wait for runtime goroutines to start (file is created on first event, not at startup)
+	// CI systems are slower than local machines
+	time.Sleep(200 * time.Millisecond)
 
 	// Process events
 	events := []*domain.ObserverEvent{
@@ -326,8 +313,9 @@ func TestIntegration_FileEmitter_HighThroughput(t *testing.T) {
 		}
 	}()
 
-	// Wait for runtime to be ready
-	time.Sleep(100 * time.Millisecond)
+	// Wait for runtime to be ready and file to be created
+	// CI systems are slower, so give extra time
+	time.Sleep(200 * time.Millisecond)
 
 	// Process 1000 events as fast as possible
 	const numEvents = 1000

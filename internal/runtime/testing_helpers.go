@@ -35,16 +35,23 @@ func splitLines(s string) []string {
 // This is more reliable than fixed sleep durations for integration tests.
 func waitForQueueDrain(path string, expectedLines int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastCount int
 	for {
 		data, err := os.ReadFile(path)
 		if err == nil {
 			lines := splitLines(string(data))
-			if len(lines) >= expectedLines {
+			lastCount = len(lines)
+			if lastCount >= expectedLines {
 				return nil
 			}
+		} else {
+			lastCount = 0
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for %d events (got %d)", expectedLines, len(splitLines(string(data))))
+			if lastCount == 0 {
+				return fmt.Errorf("timeout waiting for file %s to be created", path)
+			}
+			return fmt.Errorf("timeout waiting for %d events (got %d)", expectedLines, lastCount)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
