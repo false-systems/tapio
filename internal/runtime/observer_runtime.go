@@ -140,13 +140,6 @@ func WithEmitters(emitters ...Emitter) Option {
 	}
 }
 
-// WithSamplingDisabled disables event sampling (useful for tests)
-func WithSamplingDisabled() Option {
-	return func(r *ObserverRuntime) {
-		r.config.Sampling.Enabled = false
-	}
-}
-
 // drainQueue continuously drains events from queue and emits to emitters
 func (r *ObserverRuntime) drainQueue(ctx context.Context) {
 	ticker := time.NewTicker(r.config.Backpressure.DrainInterval)
