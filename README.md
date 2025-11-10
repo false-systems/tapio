@@ -42,10 +42,10 @@ Output:          "nginx-abc123 failed to connect to api-service (SYN timeout)"
 Tapio observers detect patterns once, but output differently based on edition:
 
 ### Community Edition (FREE)
-**Output:** `ObserverEvent` → OTLP structured logs → Grafana/Prometheus
+**Flow:** Observers → `ObserverEvent` → NATS KV → OTLP Exporter → Your Stack
 
 ```go
-// What you get for FREE
+// ObserverEvent: Raw diagnostic data
 {
   "type": "tcp_rtt_spike",
   "source": "network-observer",
@@ -60,149 +60,175 @@ Tapio observers detect patterns once, but output differently based on edition:
 }
 ```
 
-**You get:** All raw event data as structured logs. Query by pod, namespace, event type. Build your own dashboards and alerts.
+**What you get:**
+- ✅ All raw event data from all observers
+- ✅ K8s context (pod, namespace, deployment)
+- ✅ OTLP export to Prometheus/Grafana/Loki
+- ✅ Build your own dashboards and alerts
 
-### Enterprise Edition (PAID)
-**Output:** `TapioEvent` → NATS subject `tapio.events.*` → Ahti correlation engine
+**What you DON'T get:**
+- ❌ Graph entities (Pod, Service, Deployment objects)
+- ❌ Relationships (connects_to, manages, etc.)
+- ❌ Multi-cluster correlation
+- ❌ Automated root cause analysis
+
+### Enterprise Edition (with Ahti)
+**Flow:** Observers → `ObserverEvent` → NATS KV → Intelligence Service → `TapioEvent` → Ahti
 
 ```go
-// What enterprise adds: Graph entities for correlation
+// TapioEvent: Enriched with graph entities for correlation
 {
   "type": "network",
   "subtype": "tcp_rtt_spike",
+
+  // Graph entities extracted by Intelligence Service
   "entities": [
-    {"type": "pod", "name": "web-server-abc"},
-    {"type": "service", "name": "api-gateway"}
+    {"type": "pod", "name": "web-server-abc", "namespace": "production"},
+    {"type": "service", "name": "api-gateway", "namespace": "production"}
   ],
+
+  // Relationships for graph correlation
   "relationships": [
     {"type": "connects_to", "source": "web-server-abc", "target": "api-gateway"}
   ],
-  "network_data": { /* same as ObserverEvent */ }
+
+  // Same raw data as ObserverEvent
+  "network_data": {
+    "src_ip": "10.0.1.5",
+    "dst_ip": "10.0.2.10",
+    "rtt_current": 50.3,
+    "rtt_baseline": 10.2
+  }
 }
 ```
 
-**You get:** Ahti performs graph-based root cause analysis. "Deployment X caused RTT spike on Service Y which failed Service Z."
+**What you get (in addition to FREE):**
+- ✅ Intelligence Service enriches events with graph data
+- ✅ Graph entities and relationships
+- ✅ NATS JetStream publishing to Ahti
+- ✅ Ahti correlation engine: "Deployment X caused RTT spike on Service Y which failed Service Z"
+- ✅ Multi-cluster root cause analysis
+- ✅ Time-travel queries (what was the state 3 days ago?)
 
 ---
 
 ## Architecture
 
-### Community Edition (FREE - Current Implementation)
+### Community Edition (FREE)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Kubernetes Cluster                         │
+│                    Kubernetes Cluster                           │
 │                                                                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-│  │   Pod    │  │   Pod    │  │   Pod    │  │   Pod    │       │
-│  │ (nginx)  │  │ (redis)  │  │ (worker) │  │ (api)    │       │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
-└────────────────────────┬─────────────────────────────────────────┘
-                         │ K8s API (Informers)
-                         ▼
-        ┌──────────────────────────────────────────────┐
-        │  K8s Context Service (Deployment)            │
-        │  - Watches K8s API (Pods, Services, etc.)    │
-        │  - Pre-computes OTEL attributes (TASK-001)   │
-        │  - Multi-index storage (TASK-002)            │
-        │  - Stores in NATS KV for fast lookup         │
-        │                                              │
-        │  Storage Pattern (Beyla-inspired):           │
-        │  • pod.ip.10.0.1.42 → PodInfo (Network)      │
-        │  • pod.uid.abc-123  → PodInfo (Scheduler)    │
-        │  • pod.name.ns.name → PodInfo (General)      │
-        └──────────────────────────────────────────────┘
-                         │
-                         ▼
-        ┌──────────────────────────────────────────────┐
-        │  NATS JetStream                              │
-        │  - KV Store (metadata cache)                 │
-        │  - Event bus (future: observer events)       │
-        └──────────────────────────────────────────────┘
-                         │
-                         ▼
-        ┌──────────────────────────────────────────────┐
-        │  Observers (Pattern Detection)               │
-        │                                              │
-        │  ✅ Network Observer (eBPF-based)            │
-        │     - Detects SYN timeouts                   │
-        │     - Classifies HTTP/HTTPS                  │
-        │     - Monitors DNS queries                   │
-        │                                              │
-        │  ✅ Deployments Observer (K8s API)           │
-        │     - Detects stuck rollouts                 │
-        │     - Tracks replica changes                 │
-        │     - Monitors health status                 │
-        │                                              │
-        │  🔄 Scheduler Observer (Planned)             │
-        │     - Detects scheduling failures            │
-        │     - Monitors resource constraints          │
-        │     - Uses UID-based lookup (TASK-002)       │
-        └──────────────────────────────────────────────┘
-                         │
-          ┌──────────────┴──────────────┐
-          │                             │
-          ▼                             ▼
-    Community Output           Enterprise Output
-          │                             │
-          ▼                             ▼
-┌─────────────────────┐       ┌─────────────────────┐
-│ ObserverEvent       │       │ TapioEvent          │
-│ → OTLP Logs         │       │ → NATS              │
-│                     │       │   (tapio.events.*)  │
-│ FREE - Raw data     │       │                     │
-│ Build your own      │       │ PAID - Graph data   │
-│ dashboards          │       │ Ahti does RCA       │
-└─────────────────────┘       └─────────────────────┘
-          │                             │
-          ▼                             ▼
-┌─────────────────────┐       ┌─────────────────────┐
-│ Prometheus/Grafana  │       │ Ahti Correlation    │
-│ - Custom queries    │       │ - Root cause graphs │
-│ - Your dashboards   │       │ - Anomaly detection │
-│ - Your alerts       │       │ - Predictions       │
-        └──────────────────────────────────────────────┘
+│  Level 0: Context Service (Deployment, 1 replica)              │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  - Watches K8s API (Pods, Deployments, Services, etc.)   │  │
+│  │  - Pre-computes OTEL attributes (Beyla pattern)          │  │
+│  │  - Multi-index store: IP/UID/Name → Pod metadata         │  │
+│  │  - gRPC server (port 50051) for enrichment               │  │
+│  │  - NATS KV for metadata cache                            │  │
+│  └────────────────────┬─────────────────────────────────────┘  │
+│                       │ gRPC (K8s context)                      │
+│                       ▼                                         │
+│  Level 1: Observers (Pattern Detection)                        │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Network Observer (DaemonSet - per node)                 │  │
+│  │  • eBPF: SYN timeout, HTTP classification, DNS queries   │  │
+│  │  • Writes ObserverEvent → NATS KV                        │  │
+│  │                                                           │  │
+│  │  Scheduler Observer (Deployment - singleton)             │  │
+│  │  • K8s Events API: FailedScheduling, resource limits     │  │
+│  │  • Writes ObserverEvent → NATS KV                        │  │
+│  │                                                           │  │
+│  │  Runtime Observer (DaemonSet - per node)                 │  │
+│  │  • Container events: OOM kills, crashes, restarts        │  │
+│  │  • Writes ObserverEvent → NATS KV                        │  │
+│  └────────────────────┬─────────────────────────────────────┘  │
+│                       │ ObserverEvent (raw diagnostics)         │
+│                       ▼                                         │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  NATS KV: "observer-events" bucket                       │  │
+│  │  • Shared event store for all observers                  │  │
+│  │  • Intelligence Service reads from here                  │  │
+│  └────────────────────┬─────────────────────────────────────┘  │
+│                       │                                         │
+│                       ▼                                         │
+│  FREE Tier: OTLP Exporter                                      │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  • Reads ObserverEvent from NATS KV                      │  │
+│  │  • Exports as OTLP structured logs                       │  │
+│  │  • No enrichment with graph entities                     │  │
+│  └────────────────────┬─────────────────────────────────────┘  │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │ OTLP
+                        ▼
+        ┌──────────────────────────────────┐
+        │  Your Observability Stack        │
+        │  • Prometheus / Grafana          │
+        │  • Loki / Tempo                  │
+        │  • Build your own dashboards     │
+        └──────────────────────────────────┘
 ```
 
-**Community Focus:** Standalone diagnostic observers that export to Prometheus/Grafana/existing stack.
+**FREE Tier Summary:**
+- ✅ All Observers (pattern detection)
+- ✅ Context Service (K8s metadata)
+- ✅ ObserverEvent (raw diagnostic data)
+- ✅ OTLP export to your stack
+- ❌ No graph entities/relationships
+- ❌ No NATS publishing to Ahti
 
-### Enterprise/SaaS Edition (Planned)
+---
+
+### Enterprise Edition (with Ahti)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                  Your Kubernetes Clusters                       │
+│                    Kubernetes Cluster                           │
 │                                                                 │
-│  Cluster 1 (prod-us)     Cluster 2 (prod-eu)                   │
-│  ┌────────────────┐      ┌────────────────┐                    │
-│  │ Tapio Agents   │      │ Tapio Agents   │                    │
-│  │ (observers)    │      │ (observers)    │                    │
-│  └────────┬───────┘      └────────┬───────┘                    │
-└───────────┼──────────────────────┼─────────────────────────────┘
-            │                      │
-            │ OTLP/NATS           │ OTLP/NATS
-            │                      │
-            ▼                      ▼
+│  Level 0: Context Service (Deployment, 1 replica)              │
+│  └────────────────────┬─────────────────────────────────────┘  │
+│                       │ gRPC                                    │
+│                       ▼                                         │
+│  Level 1: Observers → ObserverEvent → NATS KV                  │
+│  (Same as FREE tier)                                            │
+│                       │                                         │
+│                       ▼                                         │
+│  Level 1.5: Intelligence Service (NEW - Deployment, 1 replica) │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Poll Loop (1 sec):                                      │  │
+│  │  1. Read ObserverEvent from NATS KV                      │  │
+│  │  2. Get K8s context from Context Service (gRPC)          │  │
+│  │  3. Enrich: ObserverEvent → TapioEvent                   │  │
+│  │     • Extract graph entities (Pod, Service, Deployment)  │  │
+│  │     • Extract relationships (connects_to, manages, etc.) │  │
+│  │  4. Publish TapioEvent → NATS JetStream                  │  │
+│  │     Subject: tapio.events.<cluster-id>                   │  │
+│  └────────────────────┬─────────────────────────────────────┘  │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │ TapioEvent (graph data)
+                        │ NATS JetStream
+                        ▼
         ┌─────────────────────────────────────────────┐
-        │  Tapio SaaS Platform                        │
+        │  Ahti Correlation Engine (Multi-Cluster)    │
         │                                             │
-        │  ┌────────────────────────────────────────┐ │
-        │  │  Ahti Correlation Engine               │ │
-        │  │  - Multi-cluster event correlation     │ │
-        │  │  - Temporal analysis (deployment→OOM)  │ │
-        │  │  - Graph storage (Neo4j-style queries) │ │
-        │  │  - NO AI (deterministic correlation)   │ │
-        │  └────────────────────────────────────────┘ │
-        │                    ▼                        │
-        │  ┌────────────────────────────────────────┐ │
-        │  │  Diagnostic Dashboard                  │ │
-        │  │  - Root cause visualization            │ │
-        │  │  - Cross-cluster insights              │ │
-        │  │  - Incident timeline correlation       │ │
-        │  └────────────────────────────────────────┘ │
+        │  • Graph storage (BadgerDB + Arrow)         │
+        │  • Time-travel queries (MVCC)               │
+        │  • Cross-observer correlation               │
+        │  • Root cause analysis                      │
+        │  • Pattern detection across clusters        │
+        │                                             │
+        │  Example: "Deployment X caused RTT spike    │
+        │  on Service Y which failed Service Z"       │
         └─────────────────────────────────────────────┘
 ```
 
-**Enterprise Focus:** Centralized multi-cluster correlation, graph-based root cause analysis (deterministic, no AI).
+**ENTERPRISE Tier Summary:**
+- ✅ Everything in FREE
+- ✅ Intelligence Service (enriches with graph entities)
+- ✅ TapioEvent output (entities + relationships)
+- ✅ NATS publishing to Ahti
+- ✅ Ahti correlation engine (multi-cluster RCA)
 
 ---
 
