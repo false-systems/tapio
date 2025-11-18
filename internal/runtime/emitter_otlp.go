@@ -58,17 +58,17 @@ func NewOTLPEmitter(endpoint string, insecure bool) (*OTLPEmitter, error) {
 		Help: "Total number of OTLP export errors",
 	})
 
-	// Register metrics (log error if already registered - safe for tests)
-	// Registration may fail in tests when creating multiple emitters
-	// This is non-critical - metrics just won't be exported in that case
-	if err := prometheus.Register(logsExported); err != nil {
-		// Already registered - this is expected in tests, non-critical in production
-		// Metrics will continue to work with the existing registered instance
-	}
-	if err := prometheus.Register(exportErrors); err != nil {
-		// Already registered - this is expected in tests, non-critical in production
-		// Metrics will continue to work with the existing registered instance
-	}
+	// Register metrics (recover from panic if already registered - happens in tests)
+	// MustRegister panics on duplicate registration, which is expected in tests.
+	// We recover from the panic since duplicate registration is non-critical.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Metric already registered - safe to continue
+			}
+		}()
+		prometheus.MustRegister(logsExported, exportErrors)
+	}()
 
 	return &OTLPEmitter{
 		endpoint:     endpoint,
